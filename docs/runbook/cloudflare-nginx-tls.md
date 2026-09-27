@@ -1,4 +1,4 @@
-# 域名、Cloudflare 代理与 nginx TLS
+# 域名、Cloudflare 代理与 nginx TLS（已于 2026-09-28 部署）
 
 域名 `astras.vip` 已在 Cloudflare 托管并开启代理（橙色云），A 记录指向测试服 `16.176.196.40`。用户可见的 TLS 由 Cloudflare 边缘提供，Cloudflare 到测试服之间用 **Cloudflare 源站证书**（免费、15 年有效、不用申请 Let's Encrypt、不需要 80 端口验证）。
 
@@ -21,7 +21,7 @@ ssh exchange 'sudo mv /tmp/origin.pem /tmp/origin.key /opt/exchange/infra/nginx/
 
 ## 三、nginx（以 compose 容器运行，与 Go 服务同一网络）
 
-实施计划阶段 1 任务 8 会把下面的配置加进 `deploy/compose/`；要点如下。
+实际文件在 `deploy/compose/nginx/`（compose 服务 `nginx`），下面是要点摘录；上游 `api-gateway:8080` 通过 docker 内置 DNS 按请求解析，网关未部署时返回 502。
 
 ```nginx
 # deploy/compose/nginx/conf.d/astras.vip.conf

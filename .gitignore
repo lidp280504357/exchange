@@ -28,3 +28,7 @@ node_modules/
 # Go workspace / coverage
 go.work.sum
 coverage.out
+
+# TLS private material (server-side only)
+deploy/compose/nginx/ssl/
+*.key
