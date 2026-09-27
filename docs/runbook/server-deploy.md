@@ -32,6 +32,10 @@ bash /opt/exchange/src/deploy/server-update.sh
 
 基础设施凭据在 `/opt/exchange/infra/.env`。应用服务的变量（Turnstile、Resend、Alchemy、JWT 密钥等）阶段 1 起放在 `/opt/exchange/infra/apps.env`（权限 600，不入库），由 `docker-compose.apps.yml` 通过 `env_file` 注入；本地开发用仓库根目录的 `.env`。
 
+服务配置由 `internal/platform/config` 加载：代码默认值 < `.env`（仅本地；进程环境变量 `APP_ENV` 非 local 时不读取）< 进程环境变量。容器里只有 `apps.env` 注入的环境变量生效，镜像构建时不要把 `.env` 拷进去。
+
+编写 `docker-compose.apps.yml` 时，每个应用服务的 `stop_grace_period` 要大于 `SHUTDOWN_TIMEOUT`（默认 10s），建议 15s；否则 Docker 会在优雅退出完成前发 SIGKILL，在途请求与清理会被打断。
+
 ## 本机调试
 
-本机 `go run ./cmd/<service>` 或 `vite dev`，直连测试服的数据库、Redis、Redpanda、ClickHouse（安全组已放行本机 IP）。本机不需要 Docker。
+本机 `task run -- <service>`（等价 `go run ./cmd/<service>`）或 `vite dev`，读取仓库根目录 `.env`，直连测试服的数据库、Redis、Redpanda、ClickHouse（安全组已放行本机 IP）。本机不需要 Docker。Ctrl-C 触发优雅退出，再按一次立即结束。

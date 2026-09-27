@@ -18,6 +18,8 @@ Go 微服务虚拟资产交易所（学习项目）。
 ```bash
 task --list        # 全部任务
 task ci            # 本地跑与 CI 相同的检查（格式、vet、lint、脚本、测试）
+task run -- api-gateway  # 本机运行一个服务（读取根目录 .env，Ctrl-C 优雅退出）
+task build         # 编译全部服务到 bin/
 task deploy        # 测试服拉取最新代码并更新（task deploy -- <commit> 回滚）
 task deploy:status # 测试服容器状态
 ```

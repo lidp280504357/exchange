@@ -18,6 +18,14 @@ tasks:
     cmds:
       - test -z "$(gofumpt -l .)" || { gofumpt -l .; echo '请运行 task fmt'; exit 1; }
 
+  build:
+    desc: 编译全部服务到 bin/
+    cmds: [go build -o bin/ ./cmd/...]
+
+  run:
+    desc: 本机运行一个服务，读取根目录 .env（task run -- api-gateway）
+    cmds: ["go run ./cmd/{{.CLI_ARGS}}"]
+
   vet:
     desc: go vet
     cmds: [go vet ./...]

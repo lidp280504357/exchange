@@ -15,10 +15,11 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
 | [docs/runbook/](docs/runbook/) | Turnstile、Cloudflare+nginx TLS、服务器部署、Grafana Cloud（暂缓） |
 | `环境配置.md` | **只在本地**（已被 git 忽略），含测试服凭据与实测状态 |
 
-## 当前状态（2026-09-29）
+## 当前状态（2026-09-28）
 
 - 阶段 0 完成，除 M0.2 契约初稿；环境、账号、CI、部署链路全部就绪。
-- 代码只有 `go.mod` 与 `internal/platform/captcha`（Turnstile 服务端校验，测试通过）。**下一步从实施计划 §10 任务 2 开始**：Go 服务骨架 → 日志/trace/健康检查 → PostgreSQL/Redis/gRPC → 事件 Envelope 与 Outbox/Inbox → …。
+- 代码：`internal/platform/{captcha,config,logging,app}` 与 `cmd/api-gateway`（服务启动模板、分层配置、优雅退出；§10 任务 2 完成）。**下一步从实施计划 §10 任务 3 开始**：日志脱敏/trace/错误码/健康检查/指标 → PostgreSQL/Redis/gRPC → 事件 Envelope 与 Outbox/Inbox → …。
+- 新服务照 `cmd/api-gateway` 写：`main` 调 `app.Main(name, setup)`；`setup` 里 `a.LoadConfig(&cfg)`（`koanf` 标签 = 小写环境变量名）、`a.Add` 注册组件、`a.Cleanup` 注册资源释放。
 - 契约初稿（OpenAPI、Protobuf）和数据库初始化脚本开始前先给用户过目。
 
 ## 硬性约定
@@ -42,7 +43,7 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
 
 ## Claude Code 会话提示
 
-- Bash 沙箱无网络、不能绑定端口、不能创建 `.git`：git、curl、`go install` 用终端面板（`git --no-pager`，命令里别在 URL 后紧跟 `;`，别用 `!`）；Go 缓存用 `GOCACHE=$TMPDIR/gocache GOLANGCI_LINT_CACHE=$TMPDIR/golangci-cache`；工具在 `~/go/bin`。
+- Bash 沙箱无网络、不能绑定端口、不能创建 `.git`：git、curl、`go install`、`go get`/`go mod tidy`、绑端口的测试和 `task ci` 用终端面板（`git --no-pager`，命令里别在 URL 后紧跟 `;`，别用 `!`；终端 PATH 不含工具目录，先 `export PATH=$HOME/go/bin:$PATH`）；沙箱里跑 go 命令加 `GOCACHE=$TMPDIR/gocache GOLANGCI_LINT_CACHE=$TMPDIR/golangci-cache GOPROXY=off`；工具在 `~/go/bin`。
 - 测试服操作用 MCP `exchange-dev`（`remote_exec`、`remote_put_file`、`compose`、`pg_query`、`redis_cmd`、`ch_query`）。
 - GitHub 远程用 `git@github-ldp:lidp280504357/exchange.git`（本机 ssh 别名）。
 - 可能有并行会话在同一目录，改共享文档前先看 `git status`。
