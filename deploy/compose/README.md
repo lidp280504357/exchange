@@ -25,5 +25,6 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose up -d'
 - Go 服务的 compose 片段（`docker-compose.apps.yml`），与本文件共用 `exchange` 网络。
 - Redpanda 目前是 `dev-container` 单节点、单副本，仅适合测试。
 - Topic 初始化：`deploy/redpanda/topics.sh`（幂等，已于 2026-09-28 在服务器执行，45 个 topic）；上传到 `/opt/exchange/infra/redpanda/topics.sh` 后 `bash` 运行即可。
+- 日常更新：服务器执行 `bash /opt/exchange/src/deploy/server-update.sh`，会把本目录同步到 `/opt/exchange/infra`（不覆盖 `.env`、`ssl/`、生成的 IP 列表）后 `compose up -d --build`。
 
 `.env` 已被 `.gitignore` 忽略，只提交 `.env.example`。
