@@ -1,0 +1,47 @@
+openapi: 3.1.0
+info:
+  title: Exchange shared components
+  version: 0.1.0
+  description: |
+    Components referenced by every service contract (requirements §7.1).
+    Every response carries the trace ID in the X-Trace-Id header; error
+    bodies repeat it as trace_id.
+paths: {}
+components:
+  headers:
+    X-Trace-Id:
+      description: W3C trace ID of the request, shared by logs and events.
+      schema:
+        type: string
+        pattern: '^[0-9a-f]{32}$'
+    X-Request-Id:
+      description: Request ID, echoed from the request or generated.
+      schema:
+        type: string
+  schemas:
+    Error:
+      type: object
+      required: [code, message, trace_id]
+      properties:
+        code:
+          type: string
+          description: Stable machine-readable code (appendix C), used by clients for i18n.
+          examples: [COMMON_INVALID_ARGUMENT]
+        message:
+          type: string
+          description: Human-readable explanation, safe to show.
+        trace_id:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+  responses:
+    Error:
+      description: Error in the unified structure.
+      headers:
+        X-Trace-Id:
+          $ref: '#/components/headers/X-Trace-Id'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

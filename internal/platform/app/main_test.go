@@ -79,7 +79,7 @@ func inheritedEnv() []string {
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
 		switch name {
-		case "APP_ENV", "LOG_LEVEL", "LOG_FORMAT", "SHUTDOWN_TIMEOUT", helperModeEnv:
+		case "APP_ENV", "LOG_LEVEL", "LOG_FORMAT", "SHUTDOWN_TIMEOUT", "OPS_ADDR", helperModeEnv:
 			continue
 		}
 		out = append(out, kv)
@@ -123,7 +123,7 @@ func exitCode(t *testing.T, waitErr error) int {
 	return exitErr.ExitCode()
 }
 
-var serviceEnv = []string{"APP_ENV=test", "LOG_FORMAT=json", "SHUTDOWN_TIMEOUT=5s"}
+var serviceEnv = []string{"APP_ENV=test", "LOG_FORMAT=json", "SHUTDOWN_TIMEOUT=5s", "OPS_ADDR=127.0.0.1:0"}
 
 func TestMainShutsDownCleanlyOnSIGTERM(t *testing.T) {
 	h := startHelper(t, "serve", serviceEnv...)
@@ -173,7 +173,7 @@ func TestMainReportsConfigErrorsOnStderr(t *testing.T) {
 }
 
 func TestMainSecondSignalKillsHungShutdown(t *testing.T) {
-	h := startHelper(t, "hang", "APP_ENV=test", "LOG_FORMAT=json", "SHUTDOWN_TIMEOUT=1m")
+	h := startHelper(t, "hang", "APP_ENV=test", "LOG_FORMAT=json", "SHUTDOWN_TIMEOUT=1m", "OPS_ADDR=127.0.0.1:0")
 	h.waitForLog(t, `"msg":"service started"`)
 	h.signal(t, syscall.SIGTERM)
 	h.waitForLog(t, `"msg":"shutting down"`)

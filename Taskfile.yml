@@ -64,12 +64,12 @@ tasks:
     cmds: ["ssh exchange 'bash /opt/exchange/src/deploy/server-update.sh {{.CLI_ARGS}}'"]
 
   deploy:status:
-    desc: 测试服容器状态
-    cmds: ["ssh exchange 'cd /opt/exchange/infra && sudo docker compose ps'"]
+    desc: 测试服容器状态（基础设施 + 应用）
+    cmds: ["ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml ps'"]
 
   deploy:logs:
-    desc: 测试服容器日志（task deploy:logs -- nginx）
-    cmds: ["ssh exchange 'cd /opt/exchange/infra && sudo docker compose logs --tail=100 {{.CLI_ARGS}}'"]
+    desc: 测试服容器日志（task deploy:logs -- api-gateway）
+    cmds: ["ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml logs --tail=100 {{.CLI_ARGS}}'"]
 
   topics:
     desc: 在测试服幂等核对 Redpanda topic

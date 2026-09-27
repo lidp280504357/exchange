@@ -1,0 +1,41 @@
+# 应用服务，与 docker-compose.yml 合并使用（同一 compose 项目、同一 exchange 网络）：
+#   sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml up -d --build --wait
+# 由 deploy/server-update.sh 执行。镜像在服务器上从源码构建（EXCHANGE_SRC，默认 ../src
+# 即 /opt/exchange/src），所有服务共用一个镜像 exchange-app，按 command 选择二进制。
+# 密钥与基础设施地址来自同目录的 apps.env（权限 600，不入库）。
+# stop_grace_period 必须大于 SHUTDOWN_TIMEOUT（默认 10s），否则优雅退出会被 SIGKILL 打断。
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+x-app: &app
+  image: exchange-app:latest
+  build:
+    context: ${EXCHANGE_SRC:-../src}
+    dockerfile: deploy/docker/Dockerfile
+    args:
+      VERSION: ${APP_VERSION:-unknown}
+  restart: unless-stopped
+  logging: *default-logging
+  env_file:
+    - path: apps.env
+      required: false
+  stop_grace_period: 15s
+  mem_limit: 256m
+  networks: [exchange]
+
+services:
+  api-gateway:
+    <<: *app
+    command: ["/app/api-gateway"]
+    environment:
+      GOMEMLIMIT: 200MiB
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9080/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s

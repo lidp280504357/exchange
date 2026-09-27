@@ -18,9 +18,9 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
 ## 当前状态（2026-09-28）
 
 - 阶段 0 完成，除 M0.2 契约初稿；环境、账号、CI、部署链路全部就绪。
-- 代码：`internal/platform/{captcha,config,logging,app}` 与 `cmd/api-gateway`（服务启动模板、分层配置、优雅退出；§10 任务 2 完成）。**下一步从实施计划 §10 任务 3 开始**：日志脱敏/trace/错误码/健康检查/指标 → PostgreSQL/Redis/gRPC → 事件 Envelope 与 Outbox/Inbox → …。
-- 新服务照 `cmd/api-gateway` 写：`main` 调 `app.Main(name, setup)`；`setup` 里 `a.LoadConfig(&cfg)`（`koanf` 标签 = 小写环境变量名）、`a.Add` 注册组件、`a.Cleanup` 注册资源释放。
-- 契约初稿（OpenAPI、Protobuf）和数据库初始化脚本开始前先给用户过目。
+- §10 任务 2–3 完成：`internal/platform/{config,logging,pii,tracing,apperr,httpx,health,app}` 与 `cmd/api-gateway`（`GET /v1/time`），网关已部署在测试服（`https://astras.vip/v1/time`）。**下一步从实施计划 §10 任务 4 开始**：PostgreSQL/Redis/gRPC → 事件 Envelope 与 Outbox/Inbox → …，用户已授权每完成一个任务即提交、推送并部署，连续做完阶段 1。
+- 新服务照 `cmd/api-gateway` 写：`main` 调 `app.Main(name, setup, app.WithDefaultOpsAddr(":90xx"))`；`setup` 里 `a.LoadConfig(&cfg)`（`koanf` 标签 = 小写环境变量名）、`a.NewRouter()` 建路由、`a.Add` 注册组件、`a.Cleanup` 注册资源释放、`a.Health().Add` 注册就绪检查。端口表见 `docs/runbook/server-deploy.md`。
+- 契约初稿（OpenAPI、Protobuf）和数据库初始化脚本开始前先给用户过目（用户 2026-09-28 说不必等回复，可在进度消息里展示后继续）。
 
 ## 硬性约定
 

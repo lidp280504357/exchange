@@ -21,6 +21,7 @@ node_modules/
 .env
 .env.*
 !.env.example
+apps.env
 
 # macOS AppleDouble files
 ._*

@@ -24,7 +24,13 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+
 	"github.com/lidp280504357/exchange/internal/platform/config"
+	"github.com/lidp280504357/exchange/internal/platform/health"
+	"github.com/lidp280504357/exchange/internal/platform/httpx"
 	"github.com/lidp280504357/exchange/internal/platform/logging"
 )
 
@@ -41,6 +47,12 @@ type Config struct {
 	LogFormat logging.Format `koanf:"log_format"`
 	// ShutdownTimeout bounds the whole graceful shutdown (SHUTDOWN_TIMEOUT).
 	ShutdownTimeout time.Duration `koanf:"shutdown_timeout"`
+	// OpsAddr serves /healthz, /readyz, /metrics and /debug/pprof (OPS_ADDR);
+	// each service has its own default and the port is never published.
+	OpsAddr string `koanf:"ops_addr"`
+	// InstanceID names this process in events and logs (INSTANCE_ID);
+	// defaults to the host name, which is the container ID under Docker.
+	InstanceID string `koanf:"instance_id"`
 }
 
 // Validate reports missing or invalid shared settings.
@@ -52,17 +64,23 @@ func (c *Config) Validate() error {
 	if c.ShutdownTimeout <= 0 {
 		errs = append(errs, fmt.Errorf("SHUTDOWN_TIMEOUT must be positive, got %s", c.ShutdownTimeout))
 	}
+	if c.OpsAddr == "" {
+		errs = append(errs, errors.New("OPS_ADDR is required"))
+	}
 	return errors.Join(errs...)
 }
 
 // App runs one service process.
 type App struct {
-	name       string
-	cfg        Config
-	log        *slog.Logger
-	loader     config.Loader
-	components []component
-	cleanups   []cleanup
+	name        string
+	cfg         Config
+	log         *slog.Logger
+	loader      config.Loader
+	health      *health.Registry
+	metrics     *prometheus.Registry
+	httpMetrics *httpx.HTTPMetrics
+	components  []component
+	cleanups    []cleanup
 }
 
 type component struct {
@@ -79,8 +97,9 @@ type cleanup struct {
 type Option func(*options)
 
 type options struct {
-	loader config.Loader
-	output io.Writer
+	loader  config.Loader
+	output  io.Writer
+	opsAddr string
 }
 
 // WithLoader replaces the settings sources, which default to the .env file
@@ -94,6 +113,11 @@ func WithLogOutput(w io.Writer) Option {
 	return func(o *options) { o.output = w }
 }
 
+// WithDefaultOpsAddr sets the service's default OPS_ADDR.
+func WithDefaultOpsAddr(addr string) Option {
+	return func(o *options) { o.opsAddr = addr }
+}
+
 // New loads the shared settings of the named service and builds its logger.
 func New(name string, opts ...Option) (*App, error) {
 	o := options{
@@ -104,7 +128,13 @@ func New(name string, opts ...Option) (*App, error) {
 		opt(&o)
 	}
 
-	cfg := Config{LogLevel: slog.LevelInfo, ShutdownTimeout: defaultShutdownTimeout}
+	host, _ := os.Hostname()
+	cfg := Config{
+		LogLevel:        slog.LevelInfo,
+		ShutdownTimeout: defaultShutdownTimeout,
+		OpsAddr:         o.opsAddr,
+		InstanceID:      host,
+	}
 	if err := o.loader.Load(&cfg); err != nil {
 		return nil, err
 	}
@@ -114,11 +144,25 @@ func New(name string, opts ...Option) (*App, error) {
 			cfg.LogFormat = logging.FormatText
 		}
 	}
+
+	reg := prometheus.NewRegistry()
+	reg.MustRegister(
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Name:        "exchange_build_info",
+			Help:        "Always 1; labels identify the running build.",
+			ConstLabels: prometheus.Labels{"service": name, "version": version()},
+		}, func() float64 { return 1 }),
+	)
 	return &App{
-		name:   name,
-		cfg:    cfg,
-		log:    logging.New(o.output, cfg.LogFormat, cfg.LogLevel).With("service", name),
-		loader: o.loader,
+		name:        name,
+		cfg:         cfg,
+		log:         logging.New(o.output, cfg.LogFormat, cfg.LogLevel).With("service", name),
+		loader:      o.loader,
+		health:      health.New(),
+		metrics:     reg,
+		httpMetrics: httpx.NewHTTPMetrics(reg),
 	}, nil
 }
 
@@ -134,6 +178,18 @@ func (a *App) Logger() *slog.Logger { return a.log }
 // LoadConfig fills dst with the service's own settings, read from the same
 // sources as the shared ones; see package config.
 func (a *App) LoadConfig(dst any) error { return a.loader.Load(dst) }
+
+// Health returns the readiness registry; add a check per dependency.
+func (a *App) Health() *health.Registry { return a.health }
+
+// Metrics returns the Prometheus registry served on /metrics.
+func (a *App) Metrics() *prometheus.Registry { return a.metrics }
+
+// NewRouter returns an HTTP router with the standard middleware stack that
+// reports to this service's logger and metrics.
+func (a *App) NewRouter() *chi.Mux {
+	return httpx.NewRouter(httpx.RouterOptions{Logger: a.log, Metrics: a.httpMetrics})
+}
 
 // Add registers a component. Components start together in Run and stop in
 // reverse order of registration.
@@ -167,6 +223,7 @@ func (a *App) Run(ctx context.Context) error {
 		names = append(names, c.name)
 		go func() { exits <- exit{name: c.name, err: runGuarded(c.Component)} }()
 	}
+	a.health.SetReady()
 	a.log.Info("service started", "components", names)
 
 	var errs []error
@@ -185,6 +242,7 @@ func (a *App) Run(ctx context.Context) error {
 		errs = append(errs, err)
 	}
 
+	a.health.SetDraining()
 	start := time.Now()
 	errs = append(errs, a.shutdown(ctx, running, exits)...)
 	took := time.Since(start).Round(time.Millisecond).String()

@@ -55,7 +55,7 @@ func (r *recorder) list() []string {
 func newTestApp(t *testing.T, env ...string) (*App, *syncBuffer) {
 	t.Helper()
 	logs := &syncBuffer{}
-	vars := append([]string{"APP_ENV=test", "SHUTDOWN_TIMEOUT=2s"}, env...)
+	vars := append([]string{"APP_ENV=test", "SHUTDOWN_TIMEOUT=2s", "OPS_ADDR=127.0.0.1:0"}, env...)
 	a, err := New("test-svc",
 		WithLoader(config.Loader{Environ: func() []string { return vars }}),
 		WithLogOutput(logs),
@@ -102,6 +102,7 @@ func TestNewRejectsBadSettings(t *testing.T) {
 		"zero timeout":     {[]string{"APP_ENV=test", "SHUTDOWN_TIMEOUT=0s"}, "SHUTDOWN_TIMEOUT must be positive"},
 		"unknown format":   {[]string{"APP_ENV=test", "LOG_FORMAT=xml"}, "unknown log format"},
 		"unknown loglevel": {[]string{"APP_ENV=test", "LOG_LEVEL=loud"}, "log_level"},
+		"missing ops addr": {[]string{"APP_ENV=test"}, "OPS_ADDR is required"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -116,7 +117,7 @@ func TestNewRejectsBadSettings(t *testing.T) {
 func TestNewDefaults(t *testing.T) {
 	a, _ := newTestApp(t)
 	cfg := a.Config()
-	if cfg.Env != config.EnvTest || cfg.LogLevel != slog.LevelInfo || cfg.ShutdownTimeout != 2*time.Second {
+	if cfg.Env != config.EnvTest || cfg.LogLevel != slog.LevelInfo || cfg.ShutdownTimeout != 2*time.Second || cfg.InstanceID == "" {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
 	if a.Name() != "test-svc" {
@@ -136,7 +137,8 @@ func TestNewLogFormatFollowsEnv(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			logs := &syncBuffer{}
-			a, err := New("svc", WithLoader(config.Loader{Environ: func() []string { return tc.env }}), WithLogOutput(logs))
+			a, err := New("svc", WithLoader(config.Loader{Environ: func() []string { return tc.env }}),
+				WithLogOutput(logs), WithDefaultOpsAddr("127.0.0.1:0"))
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}

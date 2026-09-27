@@ -1,0 +1,40 @@
+openapi: 3.1.0
+info:
+  title: Exchange API gateway
+  version: 0.1.0
+  description: Endpoints answered by the gateway itself.
+servers:
+  - url: https://astras.vip
+paths:
+  /v1/time:
+    get:
+      operationId: getServerTime
+      summary: Server time for client clock sync
+      tags: [public]
+      responses:
+        '200':
+          description: Current server time.
+          headers:
+            X-Trace-Id:
+              $ref: './common.yaml#/components/headers/X-Trace-Id'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerTime'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+components:
+  schemas:
+    ServerTime:
+      type: object
+      required: [server_time, epoch_ms]
+      properties:
+        server_time:
+          type: string
+          format: date-time
+          description: RFC 3339, UTC, millisecond precision.
+          examples: ['2026-09-28T12:00:00.123Z']
+        epoch_ms:
+          type: integer
+          format: int64
+          description: Milliseconds since the Unix epoch.
