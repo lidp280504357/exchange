@@ -1,9 +1,17 @@
 name: exchange-infra
 
+# 容器日志轮转，避免 json-file 日志占满 28 GB 磁盘
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -22,6 +30,7 @@ services:
   redis:
     image: redis:7.4-alpine
     restart: unless-stopped
+    logging: *default-logging
     command: >-
       redis-server
       --appendonly yes
@@ -43,6 +52,7 @@ services:
   redpanda:
     image: docker.redpanda.com/redpandadata/redpanda:v24.3.16
     restart: unless-stopped
+    logging: *default-logging
     command:
       - redpanda
       - start
@@ -78,6 +88,7 @@ services:
   clickhouse:
     image: clickhouse/clickhouse-server:25.3
     restart: unless-stopped
+    logging: *default-logging
     environment:
       CLICKHOUSE_DB: ${CLICKHOUSE_DB}
       CLICKHOUSE_USER: ${CLICKHOUSE_USER}

@@ -24,6 +24,6 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose up -d'
 - 反向代理与 TLS：nginx 容器 + Cloudflare 源站证书，域名 astras.vip（docs/runbook/cloudflare-nginx-tls.md）。
 - Go 服务的 compose 片段（`docker-compose.apps.yml`），与本文件共用 `exchange` 网络。
 - Redpanda 目前是 `dev-container` 单节点、单副本，仅适合测试。
-- Topic 初始化脚本需幂等接管服务器上已手工创建的 12 个业务 topic（`_schemas` 是 Schema Registry 内部 topic，不要动）。
+- Topic 初始化：`deploy/redpanda/topics.sh`（幂等，已于 2026-09-28 在服务器执行，45 个 topic）；上传到 `/opt/exchange/infra/redpanda/topics.sh` 后 `bash` 运行即可。
 
 `.env` 已被 `.gitignore` 忽略，只提交 `.env.example`。
