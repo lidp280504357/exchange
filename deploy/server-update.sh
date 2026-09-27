@@ -17,6 +17,7 @@ echo "== 代码版本 $(git rev-parse --short HEAD)：$(git log -1 --pretty=%s)"
 # 1. 基础设施与 nginx 配置以仓库为准同步到 infra 目录；不覆盖服务器上的 .env、证书和生成的 Cloudflare IP 列表
 rsync -a --exclude '.env' --exclude 'ssl/' --exclude '00-cloudflare-real-ip.conf' deploy/compose/ "$INFRA"/
 cp deploy/redpanda/topics.sh "$INFRA/redpanda/topics.sh"
+mkdir -p "$INFRA/backup" && cp deploy/backup/pg-backup.sh "$INFRA/backup/pg-backup.sh"
 
 # 2. Topic 幂等核对
 bash "$INFRA/redpanda/topics.sh" >/dev/null && echo "== topic 核对完成"
