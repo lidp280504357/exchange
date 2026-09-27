@@ -43,6 +43,13 @@ const (
 	clientIPKey
 )
 
+// WithRequestID attaches id to ctx and its log records, as the RequestID
+// middleware does; event consumers use it to keep correlation.
+func WithRequestID(ctx context.Context, id string) context.Context {
+	ctx = context.WithValue(ctx, requestIDKey, id)
+	return logging.WithAttrs(ctx, slog.String("request_id", id))
+}
+
 // RequestIDFrom returns the request ID attached by RequestID.
 func RequestIDFrom(ctx context.Context) string {
 	id, _ := ctx.Value(requestIDKey).(string)
@@ -64,9 +71,7 @@ func RequestID(next http.Handler) http.Handler {
 			id = uuid.Must(uuid.NewV7()).String()
 		}
 		w.Header().Set(HeaderRequestID, id)
-		ctx := context.WithValue(r.Context(), requestIDKey, id)
-		ctx = logging.WithAttrs(ctx, slog.String("request_id", id))
-		next.ServeHTTP(w, r.WithContext(ctx))
+		next.ServeHTTP(w, r.WithContext(WithRequestID(r.Context(), id)))
 	})
 }
 

@@ -42,6 +42,11 @@ tasks:
     desc: 单元测试（带竞态检测）
     cmds: [go test -race -count=1 ./...]
 
+  test:integration:
+    desc: 连同集成测试一起跑：只导出 .env 里的 TEST_*（测试服 exchange_test 库、Redis DB 15），需要联网
+    cmds:
+      - eval "$(grep -E '^TEST_' .env | sed 's/^/export /')" && go test -race -count=1 ./...
+
   test:cover:
     desc: 覆盖率汇总
     cmds:

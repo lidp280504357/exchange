@@ -18,8 +18,10 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
 ## 当前状态（2026-09-28）
 
 - 阶段 0 完成，除 M0.2 契约初稿；环境、账号、CI、部署链路全部就绪。
-- §10 任务 2–3 完成：`internal/platform/{config,logging,pii,tracing,apperr,httpx,health,app}` 与 `cmd/api-gateway`（`GET /v1/time`），网关已部署在测试服（`https://astras.vip/v1/time`）。**下一步从实施计划 §10 任务 4 开始**：PostgreSQL/Redis/gRPC → 事件 Envelope 与 Outbox/Inbox → …，用户已授权每完成一个任务即提交、推送并部署，连续做完阶段 1。
-- 新服务照 `cmd/api-gateway` 写：`main` 调 `app.Main(name, setup, app.WithDefaultOpsAddr(":90xx"))`；`setup` 里 `a.LoadConfig(&cfg)`（`koanf` 标签 = 小写环境变量名）、`a.NewRouter()` 建路由、`a.Add` 注册组件、`a.Cleanup` 注册资源释放、`a.Health().Add` 注册就绪检查。端口表见 `docs/runbook/server-deploy.md`。
+- §10 任务 2–4 完成：`internal/platform/{config,logging,pii,tracing,apperr,httpx,health,app,pg,migrate,redisx,grpcx,bootstrap,testenv}`；`cmd/` 下网关与六个服务骨架已部署在测试服（`https://astras.vip/v1/time`）。**下一步从实施计划 §10 任务 5 开始**（事件 Envelope 与 Outbox/Inbox），用户已授权每完成一个任务即提交、推送并部署，连续做完阶段 1。
+- 加依赖后必须 `go mod tidy`（本机 macOS，Linux 专用依赖只有 tidy 才会写进 go.sum；`task ci` 含 `go mod tidy -diff`）。集成测试：`task test:integration`（读 `.env` 的 `TEST_*`，测试服 `exchange_test` 库、Redis DB 15）。
+- 新服务照 `cmd/auth-service` 写：`main` 调 `app.Main(name, setup, app.WithDefaultOpsAddr(":90xx"))`；`setup` 里 `a.LoadConfig(&cfg)`（`koanf` 标签 = 小写环境变量名，嵌套配置用 `koanf:",squash"`），用 `bootstrap.Postgres/Redis/GRPCServer/HTTPServer` 接基础设施（自动登记就绪检查、指标、清理），`a.NewRouter()` 建路由。端口表见 `docs/runbook/server-deploy.md`。
+- 本机 `/usr/bin/python3` 是 3.9，源码里超长的中文行会误报 "Non-UTF-8 code"；改文档用 Edit 工具，别用内联 Python 长字符串。
 - 契约初稿（OpenAPI、Protobuf）和数据库初始化脚本开始前先给用户过目（用户 2026-09-28 说不必等回复，可在进度消息里展示后继续）。
 
 ## 硬性约定
