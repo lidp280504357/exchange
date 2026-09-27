@@ -164,9 +164,17 @@ func (s *OTPService) resolveTarget(ctx context.Context, scene domain.Scene, ch d
 	case domain.SceneStepUp, domain.SceneWithdrawConfirm:
 		return s.boundIdentity(ctx, req.UserID, ch)
 	case domain.SceneLoginChallenge:
-		// The login challenge is resolved by the login flow (task 11); until
-		// then the identifier must be given.
-		fallthrough
+		if _, err := uuid.Parse(req.LoginChallengeID); err != nil {
+			return domain.Identifier{}, "", domain.ErrLoginChallengeInvalid
+		}
+		lc, err := s.Store.Read().LoginChallenges().Get(ctx, req.LoginChallengeID)
+		if err != nil {
+			return domain.Identifier{}, "", err
+		}
+		if lc == nil || !lc.ConsumedAt.IsZero() || !s.Now().Before(lc.ExpiresAt) || lc.DeviceID != req.DeviceID {
+			return domain.Identifier{}, "", domain.ErrLoginChallengeInvalid
+		}
+		return s.boundIdentity(ctx, lc.UserID, ch)
 	default:
 		id, err := domain.ParseIdentifier(ch, req.Identifier)
 		return id, req.UserID, err

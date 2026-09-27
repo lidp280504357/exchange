@@ -9,14 +9,20 @@ import (
 	"strings"
 	"time"
 
+	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
 	notificationv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/notification/v1"
+	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
 	"github.com/lidp280504357/exchange/internal/auth/adapters/humancheck"
 	"github.com/lidp280504357/exchange/internal/auth/adapters/notifier"
 	"github.com/lidp280504357/exchange/internal/auth/adapters/postgres"
+	"github.com/lidp280504357/exchange/internal/auth/adapters/redisstore"
+	"github.com/lidp280504357/exchange/internal/auth/adapters/users"
 	"github.com/lidp280504357/exchange/internal/auth/application"
 	"github.com/lidp280504357/exchange/internal/auth/domain"
+	"github.com/lidp280504357/exchange/internal/auth/transport/grpcapi"
 	"github.com/lidp280504357/exchange/internal/auth/transport/httpapi"
 	"github.com/lidp280504357/exchange/internal/platform/app"
+	"github.com/lidp280504357/exchange/internal/platform/authtoken"
 	"github.com/lidp280504357/exchange/internal/platform/bootstrap"
 	"github.com/lidp280504357/exchange/internal/platform/captcha"
 	"github.com/lidp280504357/exchange/internal/platform/config"
@@ -48,6 +54,24 @@ type settings struct {
 	// CaptchaBypassToken passes human verification outside production, for
 	// end-to-end tests (CAPTCHA_BYPASS_TOKEN).
 	CaptchaBypassToken string `koanf:"captcha_bypass_token"`
+	// UserAddr is user-service's gRPC address (USER_GRPC_ADDR).
+	UserAddr string `koanf:"user_grpc_addr"`
+	// JWTSigningKey is the base64 32-byte Ed25519 seed of the access
+	// tokens (JWT_SIGNING_KEY), published under JWTKeyID (JWT_KEY_ID).
+	JWTSigningKey string `koanf:"jwt_signing_key"`
+	JWTKeyID      string `koanf:"jwt_key_id"`
+	// Versions of the terms and risk disclosure users accept at
+	// registration (TERMS_VERSION, RISK_DISCLOSURE_VERSION).
+	TermsVersion string `koanf:"terms_version"`
+	RiskVersion  string `koanf:"risk_disclosure_version"`
+	// LoginSilence is how long without a login triggers the OTP challenge
+	// after a correct password (LOGIN_SILENCE, ADR-0009).
+	LoginSilence time.Duration `koanf:"login_silence"`
+	// AllowedOrigins may refresh tokens with the cookie (ALLOWED_ORIGINS).
+	AllowedOrigins []string `koanf:"allowed_origins"`
+	// PasswordHashConcurrency caps parallel Argon2id hashes of 64 MiB each
+	// (PASSWORD_HASH_CONCURRENCY).
+	PasswordHashConcurrency int `koanf:"password_hash_concurrency"`
 }
 
 func (s *settings) Validate() error {
@@ -66,6 +90,13 @@ func setup(ctx context.Context, a *app.App) error {
 		NotificationAddr: "localhost:9183",
 		SMSHourlyLimit:   200,
 		SMSDailyLimit:    1000,
+		UserAddr:         "localhost:9182",
+		TermsVersion:     "2026-09-28",
+		RiskVersion:      "2026-09-28",
+		LoginSilence:     domain.LoginSilence,
+		AllowedOrigins:   []string{"https://astras.vip", "http://localhost:5173"},
+
+		PasswordHashConcurrency: 2,
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -76,6 +107,10 @@ func setup(ctx context.Context, a *app.App) error {
 		return err
 	}
 	human, err := humanCheck(env, cfg)
+	if err != nil {
+		return err
+	}
+	signer, err := tokenSigner(a, cfg.JWTSigningKey, cfg.JWTKeyID)
 	if err != nil {
 		return err
 	}
@@ -100,11 +135,17 @@ func setup(ctx context.Context, a *app.App) error {
 	if err != nil {
 		return err
 	}
+	userConn, err := bootstrap.GRPCClient(a, "user", cfg.UserAddr)
+	if err != nil {
+		return err
+	}
+	store := postgres.NewStore(db, events)
+	a.Add("auth janitor", app.Loop(func(ctx context.Context) error { return purge(ctx, a, store) }))
 
 	tasks := app.NewTasks()
 	a.Add("background tasks", tasks)
 	otp := &application.OTPService{
-		Store:    postgres.NewStore(db, events),
+		Store:    store,
 		Notifier: notifier.New(notificationv1.NewNotificationServiceClient(conn)),
 		Captcha:  human,
 		Limiter:  ratelimit.New(rdb, "auth:rl:"),
@@ -122,12 +163,71 @@ func setup(ctx context.Context, a *app.App) error {
 		},
 	}
 
-	if _, err := bootstrap.GRPCServer(ctx, a, cfg.GRPCAddr); err != nil {
+	accounts := &application.AccountService{
+		Store:       store,
+		Users:       users.New(userv1.NewUserServiceClient(userConn)),
+		Passwords:   domain.NewPasswordHasher(cfg.PasswordHashConcurrency, domain.DefaultPasswordCost),
+		Tokens:      signer,
+		Revocations: redisstore.NewRevocations(rdb),
+		Guard:       redisstore.NewGuard(rdb, "auth:"),
+		Captcha:     human,
+		Config: application.AccountConfig{
+			TermsVersion: cfg.TermsVersion, RiskVersion: cfg.RiskVersion, LoginSilence: cfg.LoginSilence,
+		},
+		Log: a.Logger(),
+		Now: time.Now,
+	}
+
+	gsrv, err := bootstrap.GRPCServer(ctx, a, cfg.GRPCAddr)
+	if err != nil {
 		return err
 	}
+	authv1.RegisterAuthServiceServer(gsrv, grpcapi.NewServer(accounts))
 	r := a.NewRouter()
 	(&httpapi.Handler{OTP: otp}).Routes(r)
+	(&httpapi.Accounts{
+		Svc: accounts, OTP: otp, JWKS: signer.JWKS(), AllowedOrigins: cfg.AllowedOrigins, SecureCookies: env != config.EnvLocal,
+	}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
+}
+
+// purge deletes expired codes, tickets and tokens every hour, a day after
+// they expire.
+func purge(ctx context.Context, a *app.App, store *postgres.Store) error {
+	for {
+		n, err := store.Purge(ctx, time.Now().Add(-24*time.Hour))
+		switch {
+		case err != nil && ctx.Err() == nil:
+			a.Logger().WarnContext(ctx, "purging expired auth records failed", "error", err)
+		case n > 0:
+			a.Logger().InfoContext(ctx, "purged expired auth records", "rows", n)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Hour):
+		}
+	}
+}
+
+// tokenSigner decodes JWT_SIGNING_KEY. Only local development may run
+// without one; tokens then die with the process.
+func tokenSigner(a *app.App, encoded, kid string) (*authtoken.Signer, error) {
+	if encoded == "" {
+		if a.Config().Env != config.EnvLocal {
+			return nil, errors.New("JWT_SIGNING_KEY is required outside local development")
+		}
+		a.Logger().Warn("JWT_SIGNING_KEY is not set; using a random key for this process")
+		return authtoken.NewSigner(domain.RandomBytes(32), "local")
+	}
+	seed, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
+	if err != nil {
+		return nil, errors.New("JWT_SIGNING_KEY must be base64")
+	}
+	if kid == "" {
+		return nil, errors.New("JWT_KEY_ID is required with JWT_SIGNING_KEY")
+	}
+	return authtoken.NewSigner(seed, kid)
 }
 
 // codeHasher decodes OTP_HMAC_KEY. Only local development may run without

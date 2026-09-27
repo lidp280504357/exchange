@@ -5,10 +5,15 @@ package main
 import (
 	"context"
 	"errors"
+	_ "time/tzdata" // validate time zones without the OS database
 
+	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
 	"github.com/lidp280504357/exchange/internal/platform/app"
 	"github.com/lidp280504357/exchange/internal/platform/bootstrap"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
+	"github.com/lidp280504357/exchange/internal/user/adapters/postgres"
+	"github.com/lidp280504357/exchange/internal/user/application"
+	"github.com/lidp280504357/exchange/internal/user/transport/grpcapi"
 	"github.com/lidp280504357/exchange/migrations"
 )
 
@@ -33,11 +38,16 @@ func setup(ctx context.Context, a *app.App) error {
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
 	}
-	if _, err := bootstrap.Postgres(ctx, a, cfg.Postgres, "users", migrations.Users()); err != nil {
+	db, err := bootstrap.Postgres(ctx, a, cfg.Postgres, "users", migrations.Users())
+	if err != nil {
 		return err
 	}
-	if _, err := bootstrap.GRPCServer(ctx, a, cfg.GRPCAddr); err != nil {
+	svc := &application.Service{Users: postgres.NewStore(db)}
+
+	srv, err := bootstrap.GRPCServer(ctx, a, cfg.GRPCAddr)
+	if err != nil {
 		return err
 	}
+	userv1.RegisterUserServiceServer(srv, grpcapi.NewServer(svc))
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, a.NewRouter())
 }

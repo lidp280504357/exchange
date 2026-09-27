@@ -13,6 +13,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/app"
 	"github.com/lidp280504357/exchange/internal/platform/config"
 	"github.com/lidp280504357/exchange/internal/platform/httpx"
+	"github.com/lidp280504357/exchange/internal/platform/testenv"
 	"github.com/lidp280504357/exchange/internal/platform/tracing"
 )
 
@@ -47,7 +48,7 @@ func TestSetupServesAndShutsDown(t *testing.T) {
 	shutdownTracing := tracing.Setup() // app.Main does this in production
 	t.Cleanup(func() { _ = shutdownTracing(context.Background()) })
 	addr := freeAddr(t)
-	vars := []string{"APP_ENV=test", "HTTP_ADDR=" + addr, "OPS_ADDR=127.0.0.1:0"}
+	vars := []string{"APP_ENV=test", "HTTP_ADDR=" + addr, "OPS_ADDR=127.0.0.1:0", "REDIS_URL=" + testenv.RedisURL(t)}
 	a, err := app.New("api-gateway",
 		app.WithLoader(config.Loader{Environ: func() []string { return vars }}),
 		app.WithLogOutput(io.Discard),
@@ -71,6 +72,10 @@ func TestSetupServesAndShutsDown(t *testing.T) {
 	var e httpx.ErrorBody
 	if err := json.Unmarshal(body, &e); err != nil || status != http.StatusNotFound || e.Code != "COMMON_NOT_FOUND" {
 		t.Fatalf("unknown route: %d %s", status, body)
+	}
+	status, _, body = get(t, "http://"+addr+"/v1/auth/sessions")
+	if err := json.Unmarshal(body, &e); err != nil || status != http.StatusUnauthorized || e.Code != "COMMON_UNAUTHORIZED" {
+		t.Fatalf("protected route: %d %s", status, body)
 	}
 
 	cancel()

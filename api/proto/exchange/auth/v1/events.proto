@@ -100,5 +100,6 @@ message IdentityRebound {
 // withdrawals for manual review for 24 hours (§6.4).
 message PasswordChanged {
   string user_id = 1;
-  bool reset = 2;
+  // The password was reset through a code instead of changed while signed in.
+  bool via_reset = 2;
 }

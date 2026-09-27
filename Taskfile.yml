@@ -74,6 +74,12 @@ tasks:
     desc: 部署脚本语法检查
     cmds:
       - bash -n deploy/server-update.sh deploy/redpanda/topics.sh deploy/compose/nginx/update-cloudflare-ips.sh
+      - for f in scripts/e2e/*.sh; do bash -n "$f"; done
+
+  e2e:
+    desc: 对已部署的非生产环境跑端到端检查（默认 https://astras.vip，BASE=... 可改；读 .env 的 CAPTCHA_BYPASS_TOKEN）
+    cmds:
+      - for f in scripts/e2e/*.sh; do bash "$f" || exit 1; done
 
   ci:
     desc: 与 CI 相同的本地检查（不含 vuln）

@@ -48,6 +48,7 @@ services:
       AUTH_SERVICE_URL: http://auth-service:8081
       NOTIFICATION_SERVICE_URL: http://notification-service:8083
     depends_on:
+      redis: {condition: service_healthy}
       auth-service: {condition: service_started}
       notification-service: {condition: service_started}
     healthcheck:
@@ -57,14 +58,19 @@ services:
   auth-service:
     <<: *app
     command: ["/app/auth-service"]
+    # Argon2id 每次计算占 64 MiB，PASSWORD_HASH_CONCURRENCY 默认 2
+    mem_limit: 384m
     environment:
       <<: *base-env
+      GOMEMLIMIT: 320MiB
       NOTIFICATION_GRPC_ADDR: notification-service:9183
+      USER_GRPC_ADDR: user-service:9182
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
       redpanda: {condition: service_healthy}
       notification-service: {condition: service_started}
+      user-service: {condition: service_started}
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9081/readyz"]

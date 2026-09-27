@@ -6,10 +6,21 @@ info:
     Registration, login, OTP, tokens and device sessions (requirements §6).
     Every write accepts a device_id: a random ID the client generates once
     and keeps (localStorage in H5). Error codes are listed in appendix C.
+
+    Tokens: the access token (JWT, 15 minutes) goes in
+    `Authorization: Bearer`. The refresh token (30 days, rotated on every
+    use) is an HttpOnly cookie for browsers; apps send `X-Client-Type: APP`
+    and receive it in the body instead. Sensitive actions need a step-up
+    token from POST /v1/auth/step-up in the `X-Step-Up-Token` header.
 servers:
   - url: https://astras.vip
 tags:
   - name: otp
+  - name: account
+  - name: session
+  - name: security
+security:
+  - {}
 paths:
   /v1/auth/otp/request:
     post:
@@ -21,8 +32,12 @@ paths:
         exists; a code only arrives when the action is possible. SMS is
         available only where the auth.sms feature flag allows it.
         Quotas: one code per target every 60 s, 5 per hour and 10 per day;
-        20 per hour per IP; 10 per hour per device.
+        20 per hour per IP; 10 per hour per device. STEP_UP, BIND_IDENTITY,
+        REBIND_IDENTITY and WITHDRAW_CONFIRM need the access token.
       tags: [otp]
+      security:
+        - {}
+        - bearer: []
       requestBody:
         required: true
         content:
@@ -62,7 +77,438 @@ paths:
                 $ref: '#/components/schemas/OtpTicket'
         default:
           $ref: './common.yaml#/components/responses/Error'
+  /v1/auth/terms:
+    get:
+      operationId: getTerms
+      summary: Document versions registration must accept
+      tags: [account]
+      responses:
+        '200':
+          description: Current versions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [terms_version, risk_disclosure_version]
+                properties:
+                  terms_version:
+                    type: string
+                  risk_disclosure_version:
+                    type: string
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/auth/register/complete:
+    post:
+      operationId: register
+      summary: Create the account behind a REGISTER ticket and sign in
+      description: |
+        Passwords have 10 to 128 characters and must not be common or
+        contain the email or phone number (AUTH_PASSWORD_WEAK). Outdated
+        document versions fail with AUTH_TERMS_OUTDATED, whose details
+        carry the current ones. The region comes from the phone number, or
+        from `country` for email registrations.
+      tags: [account]
+      parameters:
+        - $ref: '#/components/parameters/ClientType'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          $ref: '#/components/responses/Tokens'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/auth/login/password:
+    post:
+      operationId: loginPassword
+      summary: Sign in with a password
+      description: |
+        Failures count per identifier: from the third a captcha_token is
+        required (AUTH_CAPTCHA_REQUIRED), the tenth locks it for 15 minutes
+        (AUTH_ACCOUNT_LOCKED). Unknown accounts fail exactly like wrong
+        passwords. After 7 days without a successful login the response is
+        403 AUTH_LOGIN_CHALLENGE_REQUIRED with details.login_challenge_id
+        and details.channels: request a LOGIN_CHALLENGE code and finish at
+        /v1/auth/login/challenge.
+      tags: [account]
+      parameters:
+        - $ref: '#/components/parameters/ClientType'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordLoginRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/Tokens'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/auth/login/complete:
+    post:
+      operationId: loginOtp
+      summary: Sign in with a LOGIN ticket
+      tags: [account]
+      parameters:
+        - $ref: '#/components/parameters/ClientType'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/Tokens'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/auth/login/challenge:
+    post:
+      operationId: completeLoginChallenge
+      summary: Finish a password login with a LOGIN_CHALLENGE ticket
+      tags: [account]
+      parameters:
+        - $ref: '#/components/parameters/ClientType'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/Tokens'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/auth/password/reset/request:
+    post:
+      operationId: requestPasswordReset
+      summary: Send a PASSWORD_RESET code (otp/request with that scene)
+      tags: [account]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpRequest'
+      responses:
+        '200':
+          description: Challenge created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Challenge'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/auth/password/reset/complete:
+    post:
+      operationId: resetPassword
+      summary: Set a new password with a PASSWORD_RESET ticket
+      description: Ends every session. Withdrawals are held for review for 24 hours afterwards.
+      tags: [account]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [otp_ticket, new_password, device_id]
+              additionalProperties: false
+              properties:
+                otp_ticket:
+                  type: string
+                new_password:
+                  type: string
+                device_id:
+                  $ref: '#/components/schemas/DeviceId'
+      responses:
+        '204':
+          description: Password reset.
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/auth/token/refresh:
+    post:
+      operationId: refreshToken
+      summary: Rotate the refresh token and get a new access token
+      description: |
+        Browsers send the rt cookie and an allowed Origin; apps send
+        X-Client-Type: APP and the token in the body. Presenting a rotated
+        token again revokes the session (AUTH_SESSION_REVOKED), except
+        within 5 seconds of its rotation (two tabs racing), which answers
+        AUTH_TOKEN_EXPIRED: retry with the newer cookie.
+      tags: [session]
+      parameters:
+        - $ref: '#/components/parameters/ClientType'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                refresh_token:
+                  type: string
+                  description: APP clients only.
+                device_id:
+                  $ref: '#/components/schemas/DeviceId'
+      responses:
+        '200':
+          $ref: '#/components/responses/Tokens'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/auth/logout:
+    post:
+      operationId: logout
+      summary: End the current session
+      tags: [session]
+      security:
+        - bearer: []
+      responses:
+        '204':
+          description: Signed out.
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/auth/logout/all:
+    post:
+      operationId: logoutOthers
+      summary: End every other session
+      tags: [session]
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/StepUpToken'
+      responses:
+        '204':
+          description: Other sessions ended.
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/auth/sessions:
+    get:
+      operationId: listSessions
+      summary: List live sessions (devices)
+      tags: [session]
+      security:
+        - bearer: []
+      responses:
+        '200':
+          description: Sessions, most recently seen first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions]
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Session'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/auth/sessions/{session_id}:
+    delete:
+      operationId: revokeSession
+      summary: End one session
+      description: Ending another device's session needs a step-up; ending the current one is a logout.
+      tags: [session]
+      security:
+        - bearer: []
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/StepUpToken'
+      responses:
+        '204':
+          description: Session ended.
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/auth/login-history:
+    get:
+      operationId: listLoginHistory
+      summary: Login history, newest first
+      tags: [session]
+      security:
+        - bearer: []
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        '200':
+          description: One page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LoginEvent'
+                  next_cursor:
+                    type: [string, 'null']
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/auth/step-up:
+    post:
+      operationId: stepUp
+      summary: Trade a STEP_UP ticket for a step-up token
+      description: The token is valid 10 minutes for one sensitive action (§6.5).
+      tags: [security]
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketRequest'
+      responses:
+        '200':
+          description: Step-up token.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [step_up_token, expires_at]
+                properties:
+                  step_up_token:
+                    type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/auth/password/change:
+    post:
+      operationId: changePassword
+      summary: Change the password
+      description: Needs a step-up and the current password; ends every other session.
+      tags: [security]
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/StepUpToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              additionalProperties: false
+              properties:
+                current_password:
+                  type: string
+                new_password:
+                  type: string
+      responses:
+        '204':
+          description: Password changed.
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/auth/identity/bind:
+    post:
+      operationId: bindIdentity
+      summary: Bind a second identity with a BIND_IDENTITY ticket
+      description: One email and one phone per account (AUTH_IDENTITY_KIND_BOUND); needs a step-up.
+      tags: [security]
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/StepUpToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketRequest'
+      responses:
+        '204':
+          description: Identity bound.
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/auth/identity/rebind:
+    post:
+      operationId: rebindIdentity
+      summary: Replace an identity with a REBIND_IDENTITY ticket
+      description: |
+        With both identities bound, the step-up must come from the other
+        identity. A single-identity account cannot rebind alone: the
+        request waits for review (202 PENDING_REVIEW).
+      tags: [security]
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/StepUpToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketRequest'
+      responses:
+        '200':
+          description: Identity replaced.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebindResult'
+        '202':
+          description: Waiting for review.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebindResult'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
 components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ClientType:
+      name: X-Client-Type
+      in: header
+      description: APP receives the refresh token in the body; anything else is WEB (cookie).
+      schema:
+        type: string
+        enum: [WEB, APP]
+    StepUpToken:
+      name: X-Step-Up-Token
+      in: header
+      description: From POST /v1/auth/step-up; missing or used tokens fail with AUTH_STEP_UP_REQUIRED.
+      schema:
+        type: string
+  responses:
+    Tokens:
+      description: Signed in. WEB clients also receive the rt cookie (HttpOnly, Secure, SameSite=Strict, Path=/v1/auth/token/refresh).
+      headers:
+        Set-Cookie:
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Tokens'
   schemas:
     Scene:
       type: string
@@ -136,3 +582,145 @@ components:
         expires_at:
           type: string
           format: date-time
+    Tokens:
+      type: object
+      required: [user_id, session_id, token_type, access_token, expires_in, expires_at, scope, refresh_expires_at]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        session_id:
+          type: string
+          format: uuid
+        token_type:
+          type: string
+          enum: [Bearer]
+        access_token:
+          type: string
+        expires_in:
+          type: integer
+          description: Seconds until the access token expires.
+        expires_at:
+          type: string
+          format: date-time
+        scope:
+          type: string
+          enum: [full, read]
+          description: read for FROZEN accounts, which may only read.
+        refresh_token:
+          type: string
+          description: APP clients only.
+        refresh_expires_at:
+          type: string
+          format: date-time
+    RegisterRequest:
+      type: object
+      required: [otp_ticket, password, terms_version, risk_disclosure_version, device_id]
+      additionalProperties: false
+      properties:
+        otp_ticket:
+          type: string
+        password:
+          type: string
+          minLength: 10
+          maxLength: 128
+        country:
+          type: string
+          description: ISO 3166-1 alpha-2; required for email registrations.
+          examples: [SG]
+        language:
+          type: string
+        timezone:
+          type: string
+          examples: [Asia/Singapore]
+        terms_version:
+          type: string
+        risk_disclosure_version:
+          type: string
+        device_id:
+          $ref: '#/components/schemas/DeviceId'
+    PasswordLoginRequest:
+      type: object
+      required: [identifier, password, device_id]
+      additionalProperties: false
+      properties:
+        identifier:
+          type: string
+          description: Email address or phone number with country code.
+        password:
+          type: string
+        captcha_token:
+          type: string
+          description: Required after three failures.
+        device_id:
+          $ref: '#/components/schemas/DeviceId'
+    TicketRequest:
+      type: object
+      required: [otp_ticket, device_id]
+      additionalProperties: false
+      properties:
+        otp_ticket:
+          type: string
+        login_challenge_id:
+          type: string
+          format: uuid
+          description: For /v1/auth/login/challenge.
+        device_id:
+          $ref: '#/components/schemas/DeviceId'
+    Session:
+      type: object
+      required: [session_id, device_id, client_type, user_agent, ip, created_at, last_seen_at, current]
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        device_id:
+          type: string
+        client_type:
+          type: string
+          enum: [WEB, APP]
+        user_agent:
+          type: string
+        ip:
+          type: string
+          description: Masked.
+        created_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+        current:
+          type: boolean
+    LoginEvent:
+      type: object
+      required: [method, result, identity, device_id, user_agent, ip, new_device, created_at]
+      properties:
+        method:
+          type: string
+          enum: [PASSWORD, OTP, LOGIN_CHALLENGE, REGISTER]
+        result:
+          type: string
+          enum: [SUCCESS, FAILED_PASSWORD, LOCKED, CHALLENGE_REQUIRED]
+        identity:
+          type: string
+          description: Masked email or phone.
+        device_id:
+          type: string
+        user_agent:
+          type: string
+        ip:
+          type: string
+          description: Masked.
+        new_device:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+    RebindResult:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [DONE, PENDING_REVIEW]

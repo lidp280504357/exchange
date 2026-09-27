@@ -76,6 +76,12 @@ func PostgresDSN(t testing.TB) string {
 	return lookup(t, "TEST_POSTGRES_DSN")
 }
 
+// RedisURL returns TEST_REDIS_URL for code that connects by itself.
+func RedisURL(t testing.TB) string {
+	t.Helper()
+	return lookup(t, "TEST_REDIS_URL")
+}
+
 // Redis returns a client and a unique key prefix; keys under the prefix are
 // deleted when the test ends.
 func Redis(t testing.TB) (*redis.Client, string) {

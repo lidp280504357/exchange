@@ -33,6 +33,32 @@ func (s *Store) Tx(ctx context.Context, fn func(ports.Repos) error) error {
 // Read returns repositories on the pool.
 func (s *Store) Read() ports.Repos { return repos{q: s.db, events: s.events} }
 
+// Purge deletes short-lived records that expired before cutoff: OTP
+// challenges and tickets, login challenges, step-up tokens and refresh
+// tokens. Sessions and the login history stay.
+func (s *Store) Purge(ctx context.Context, cutoff time.Time) (int64, error) {
+	var total int64
+	err := s.db.InTx(ctx, func(tx pgx.Tx) error {
+		total = 0
+		for _, q := range []string{
+			`DELETE FROM otp_tickets WHERE expires_at < $1`,
+			`DELETE FROM otp_challenges c WHERE expires_at < $1
+				AND NOT EXISTS (SELECT 1 FROM otp_tickets t WHERE t.challenge_id = c.id)`,
+			`DELETE FROM login_challenges WHERE expires_at < $1`,
+			`DELETE FROM step_up_tokens WHERE expires_at < $1`,
+			`DELETE FROM refresh_tokens WHERE expires_at < $1`,
+		} {
+			tag, err := tx.Exec(ctx, q, cutoff)
+			if err != nil {
+				return fmt.Errorf("purge: %w", err)
+			}
+			total += tag.RowsAffected()
+		}
+		return nil
+	})
+	return total, err
+}
+
 // repos binds the repositories to a querier: the pool or a transaction.
 type repos struct {
 	q      pg.Querier

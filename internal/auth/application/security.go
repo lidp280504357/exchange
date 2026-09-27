@@ -1,0 +1,233 @@
+package application
+
+import (
+	"context"
+	"time"
+
+	"github.com/google/uuid"
+
+	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
+	"github.com/lidp280504357/exchange/internal/auth/domain"
+	"github.com/lidp280504357/exchange/internal/auth/ports"
+	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/lidp280504357/exchange/internal/platform/pii"
+)
+
+// ResetPassword sets a new password with a PASSWORD_RESET ticket and ends
+// every session; withdrawals are held for review for 24 hours after
+// (§6.4), which PasswordChanged{reset} tells the wallet.
+func (s *AccountService) ResetPassword(ctx context.Context, ticket, password string, c Client) error {
+	if err := c.validate(); err != nil {
+		return err
+	}
+	now := s.Now()
+	var revoked []string
+	err := s.Store.Tx(ctx, func(r ports.Repos) error {
+		ch, err := Redeem(ctx, r, ticket, domain.ScenePasswordReset, c.DeviceID, now)
+		if err != nil {
+			return err
+		}
+		if ch.UserID == "" {
+			return domain.ErrTicketInvalid
+		}
+		if err := s.setPassword(ctx, r, ch.UserID, password, now); err != nil {
+			return err
+		}
+		if err := s.revokeAll(ctx, r, ch.UserID, "", domain.RevokePasswordReset, &revoked); err != nil {
+			return err
+		}
+		return r.Emit(ctx, &authv1.PasswordChanged{UserId: ch.UserID, ViaReset: true}, "user", ch.UserID)
+	})
+	s.markRevoked(ctx, revoked)
+	return err
+}
+
+// ChangePassword replaces the password of a signed-in user after a step-up
+// and ends the other sessions.
+func (s *AccountService) ChangePassword(ctx context.Context, userID, sessionID, current, password, stepUp string) error {
+	now := s.Now()
+	var revoked []string
+	err := s.Store.Tx(ctx, func(r ports.Repos) error {
+		if _, err := s.consumeStepUp(ctx, r, userID, stepUp); err != nil {
+			return err
+		}
+		cred, err := r.Credentials().Get(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if cred == nil {
+			return domain.ErrPasswordInvalid
+		}
+		if ok, err := s.Passwords.Verify(cred.PasswordHash, current); err != nil {
+			return err
+		} else if !ok {
+			return domain.ErrPasswordInvalid
+		}
+		if err := s.setPassword(ctx, r, userID, password, now); err != nil {
+			return err
+		}
+		if err := s.revokeAll(ctx, r, userID, sessionID, domain.RevokePasswordChange, &revoked); err != nil {
+			return err
+		}
+		return r.Emit(ctx, &authv1.PasswordChanged{UserId: userID}, "user", userID)
+	})
+	s.markRevoked(ctx, revoked)
+	return err
+}
+
+func (s *AccountService) setPassword(ctx context.Context, r ports.Repos, userID, password string, now time.Time) error {
+	ids, err := r.Identities().ByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	values := make([]string, len(ids))
+	for i, id := range ids {
+		values[i] = id.Value
+	}
+	if err := domain.CheckPassword(password, values...); err != nil {
+		return err
+	}
+	return r.Credentials().SetPassword(ctx, userID, s.Passwords.Hash(password), now)
+}
+
+// StepUp turns a STEP_UP ticket of the caller into a step-up token, valid
+// 10 minutes for one sensitive action (§6.5).
+func (s *AccountService) StepUp(ctx context.Context, userID, sessionID, ticket string, c Client) (string, time.Time, error) {
+	if err := c.validate(); err != nil {
+		return "", time.Time{}, err
+	}
+	now := s.Now()
+	plain, hash := domain.NewToken()
+	expires := now.Add(domain.StepUpTokenTTL)
+	err := s.Store.Tx(ctx, func(r ports.Repos) error {
+		ch, err := Redeem(ctx, r, ticket, domain.SceneStepUp, c.DeviceID, now)
+		if err != nil {
+			return err
+		}
+		if ch.UserID != userID {
+			return domain.ErrTicketInvalid
+		}
+		return r.StepUps().Create(ctx, domain.StepUp{Hash: hash, UserID: userID, SessionID: sessionID, Channel: ch.Channel, ExpiresAt: expires})
+	})
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return plain, expires, nil
+}
+
+// BindIdentity adds a second identity, proven by a BIND_IDENTITY ticket,
+// after a step-up.
+func (s *AccountService) BindIdentity(ctx context.Context, userID, ticket, stepUp string, c Client) error {
+	if err := c.validate(); err != nil {
+		return err
+	}
+	now := s.Now()
+	return s.Store.Tx(ctx, func(r ports.Repos) error {
+		if _, err := s.consumeStepUp(ctx, r, userID, stepUp); err != nil {
+			return err
+		}
+		ch, err := Redeem(ctx, r, ticket, domain.SceneBindIdentity, c.DeviceID, now)
+		if err != nil {
+			return err
+		}
+		if ch.UserID != userID && ch.UserID != "" {
+			return domain.ErrTicketInvalid
+		}
+		kind := ch.Channel.Kind()
+		if err := r.Identities().Create(ctx, domain.Identity{
+			ID: uuid.Must(uuid.NewV7()).String(), UserID: userID, Kind: kind, Value: ch.Target,
+		}, now); err != nil {
+			return err
+		}
+		return r.Emit(ctx, &authv1.IdentityBound{UserId: userID, Channel: string(ch.Channel), IdentityMask: pii.MaskIdentifier(ch.Target)}, "user", userID)
+	})
+}
+
+// RebindResult says whether a rebind took effect or awaits review.
+type RebindResult string
+
+// Rebind outcomes.
+const (
+	RebindDone          RebindResult = "DONE"
+	RebindPendingReview RebindResult = "PENDING_REVIEW"
+)
+
+// RebindIdentity replaces an identity with the one proven by a
+// REBIND_IDENTITY ticket (§6.4). A user with both identities must have
+// stepped up through the other one; a user with a single identity cannot
+// rebind alone, so the request goes to two-person review.
+func (s *AccountService) RebindIdentity(ctx context.Context, userID, ticket, stepUp string, c Client) (RebindResult, error) {
+	if err := c.validate(); err != nil {
+		return "", err
+	}
+	now := s.Now()
+	var result RebindResult
+	err := s.Store.Tx(ctx, func(r ports.Repos) error {
+		su, err := s.consumeStepUp(ctx, r, userID, stepUp)
+		if err != nil {
+			return err
+		}
+		ch, err := Redeem(ctx, r, ticket, domain.SceneRebindIdentity, c.DeviceID, now)
+		if err != nil {
+			return err
+		}
+		if ch.UserID != userID && ch.UserID != "" {
+			return domain.ErrTicketInvalid
+		}
+		ids, err := r.Identities().ByUser(ctx, userID)
+		if err != nil {
+			return err
+		}
+		kind := ch.Channel.Kind()
+		var current *domain.Identity
+		for i := range ids {
+			if ids[i].Kind == kind {
+				current = &ids[i]
+			}
+		}
+		if current == nil {
+			return apperr.Invalid("no identity of this kind to rebind; bind one instead")
+		}
+		if taken, err := r.Identities().Find(ctx, kind, ch.Target); err != nil {
+			return err
+		} else if taken != nil {
+			return domain.ErrIdentityTaken
+		}
+		if len(ids) < 2 {
+			result = RebindPendingReview
+			return r.RebindRequests().Create(ctx, domain.RebindRequest{
+				ID: uuid.Must(uuid.NewV7()).String(), UserID: userID, Kind: kind, NewValue: ch.Target,
+			})
+		}
+		if su.Channel == ch.Channel {
+			return domain.ErrStepUpRequired.WithDetail("reason", "step up with your other identity")
+		}
+		if err := r.Identities().UpdateValue(ctx, current.ID, ch.Target, now); err != nil {
+			return err
+		}
+		result = RebindDone
+		return r.Emit(ctx, &authv1.IdentityRebound{
+			UserId: userID, Channel: string(ch.Channel), OldMask: pii.MaskIdentifier(current.Value), NewMask: pii.MaskIdentifier(ch.Target),
+		}, "user", userID)
+	})
+	return result, err
+}
+
+// Contacts returns a user's verified identities (for notification-service).
+func (s *AccountService) Contacts(ctx context.Context, userID string) ([]domain.Identity, error) {
+	return s.Store.Read().Identities().ByUser(ctx, userID)
+}
+
+// ConsumeStepUp redeems a step-up token for another service's action.
+func (s *AccountService) ConsumeStepUp(ctx context.Context, userID, token string) (string, error) {
+	var sessionID string
+	err := s.Store.Tx(ctx, func(r ports.Repos) error {
+		su, err := s.consumeStepUp(ctx, r, userID, token)
+		if err != nil {
+			return err
+		}
+		sessionID = su.SessionID
+		return nil
+	})
+	return sessionID, err
+}

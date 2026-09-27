@@ -1,0 +1,116 @@
+package gateway
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/lidp280504357/exchange/internal/platform/authtoken"
+	"github.com/lidp280504357/exchange/internal/platform/httpx"
+	"github.com/lidp280504357/exchange/internal/platform/logging"
+)
+
+// Errors of the bearer check (appendix C).
+var (
+	errNoToken      = apperr.Unauthorized("sign in first")
+	errBadToken     = apperr.Unauthorized("invalid access token")
+	errTokenExpired = apperr.New(apperr.KindUnauthenticated, "AUTH_TOKEN_EXPIRED", "the access token has expired; refresh it")
+	errRevoked      = apperr.New(apperr.KindUnauthenticated, "AUTH_SESSION_REVOKED", "the session has ended; sign in again")
+	errReadOnly     = apperr.New(apperr.KindForbidden, "USER_FROZEN", "the account is frozen and may only read")
+)
+
+// Authenticator checks bearer access tokens (requirements §5.1, §5.2).
+type Authenticator struct {
+	Verifier *authtoken.Verifier
+	// Revoked reports whether auth-service ended the session. When it
+	// fails the token is accepted: it expires within 15 minutes anyway.
+	Revoked func(ctx context.Context, sessionID string) (bool, error)
+	Log     *slog.Logger
+	Now     func() time.Time
+}
+
+// Required rejects requests without a valid access token.
+func (a *Authenticator) Required(next http.Handler) http.Handler {
+	return a.handler(next, true)
+}
+
+// Optional authenticates requests that carry a token and passes the rest
+// through anonymously; a token that is present must be valid.
+func (a *Authenticator) Optional(next http.Handler) http.Handler {
+	return a.handler(next, false)
+}
+
+func (a *Authenticator) handler(next http.Handler, required bool) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token, found := bearer(r)
+		if !found {
+			if required {
+				httpx.WriteError(w, r, errNoToken)
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+		id, err := a.authenticate(r.Context(), token)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		// A read-only (frozen) account may still secure itself through the
+		// auth endpoints, but may not act anywhere else.
+		if id.Scope != authtoken.ScopeFull && !safeMethod(r.Method) && !strings.HasPrefix(r.URL.Path, "/v1/auth/") {
+			httpx.WriteError(w, r, errReadOnly)
+			return
+		}
+		ctx := context.WithValue(r.Context(), identityKey{}, id)
+		ctx = logging.WithAttrs(ctx, slog.String("user_id", id.UserID))
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (a *Authenticator) authenticate(ctx context.Context, token string) (Identity, error) {
+	claims, err := a.Verifier.Verify(ctx, token, a.Now())
+	switch {
+	case errors.Is(err, authtoken.ErrExpired):
+		return Identity{}, errTokenExpired
+	case errors.Is(err, authtoken.ErrKeysUnavailable):
+		return Identity{}, apperr.Unavailable(err)
+	case err != nil:
+		return Identity{}, errBadToken
+	}
+	revoked, err := a.Revoked(ctx, claims.SessionID)
+	if err != nil {
+		a.Log.WarnContext(ctx, "revocation check failed; accepting the token", "error", err)
+	}
+	if revoked {
+		return Identity{}, errRevoked
+	}
+	return Identity{UserID: claims.Subject, SessionID: claims.SessionID, Scope: claims.Scope}, nil
+}
+
+// bearer extracts the token of an "Authorization: Bearer" header.
+func bearer(r *http.Request) (string, bool) {
+	h := r.Header.Get("Authorization")
+	if h == "" {
+		return "", false
+	}
+	scheme, token, ok := strings.Cut(h, " ")
+	if !ok || !strings.EqualFold(scheme, "Bearer") {
+		return "", true // present but malformed: fails verification
+	}
+	return strings.TrimSpace(token), true
+}
+
+func safeMethod(m string) bool {
+	return m == http.MethodGet || m == http.MethodHead || m == http.MethodOptions
+}
+
+// IdentityFrom returns the authenticated caller of a request.
+func IdentityFrom(ctx context.Context) (Identity, bool) {
+	id, ok := ctx.Value(identityKey{}).(Identity)
+	return id, ok
+}

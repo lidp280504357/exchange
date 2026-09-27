@@ -718,9 +718,10 @@ func (x *IdentityRebound) GetNewMask() string {
 // PasswordChanged is published after a change or a reset; a reset holds
 // withdrawals for manual review for 24 hours (§6.4).
 type PasswordChanged struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Reset_        bool                   `protobuf:"varint,2,opt,name=reset,proto3" json:"reset,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	UserId string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// The password was reset through a code instead of changed while signed in.
+	ViaReset      bool `protobuf:"varint,2,opt,name=via_reset,json=viaReset,proto3" json:"via_reset,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -762,9 +763,9 @@ func (x *PasswordChanged) GetUserId() string {
 	return ""
 }
 
-func (x *PasswordChanged) GetReset_() bool {
+func (x *PasswordChanged) GetViaReset() bool {
 	if x != nil {
-		return x.Reset_
+		return x.ViaReset
 	}
 	return false
 }
@@ -831,10 +832,10 @@ const file_exchange_auth_v1_events_proto_rawDesc = "" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x18\n" +
 	"\achannel\x18\x02 \x01(\tR\achannel\x12\x19\n" +
 	"\bold_mask\x18\x03 \x01(\tR\aoldMask\x12\x19\n" +
-	"\bnew_mask\x18\x04 \x01(\tR\anewMask\"@\n" +
+	"\bnew_mask\x18\x04 \x01(\tR\anewMask\"G\n" +
 	"\x0fPasswordChanged\x12\x17\n" +
-	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x14\n" +
-	"\x05reset\x18\x02 \x01(\bR\x05resetB\xcb\x01\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1b\n" +
+	"\tvia_reset\x18\x02 \x01(\bR\bviaResetB\xcb\x01\n" +
 	"\x14com.exchange.auth.v1B\vEventsProtoP\x01ZDgithub.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1;authv1\xa2\x02\x03EAX\xaa\x02\x10Exchange.Auth.V1\xca\x02\x10Exchange\\Auth\\V1\xe2\x02\x1cExchange\\Auth\\V1\\GPBMetadata\xea\x02\x12Exchange::Auth::V1b\x06proto3"
 
 var (
