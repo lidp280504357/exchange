@@ -21,6 +21,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/chx"
 	"github.com/lidp280504357/exchange/internal/platform/config"
 	"github.com/lidp280504357/exchange/internal/platform/event"
+	"github.com/lidp280504357/exchange/internal/platform/flags"
 	"github.com/lidp280504357/exchange/internal/platform/grpcx"
 	"github.com/lidp280504357/exchange/internal/platform/idempotency"
 	"github.com/lidp280504357/exchange/internal/platform/inbox"
@@ -29,6 +30,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/outbox"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
 	"github.com/lidp280504357/exchange/internal/platform/redisx"
+	"github.com/lidp280504357/exchange/migrations"
 )
 
 // Retention of the platform tables in every service schema.
@@ -85,6 +87,28 @@ func janitor(ctx context.Context, a *app.App, db *pg.DB) error {
 		case <-time.After(janitorInterval):
 		}
 	}
+}
+
+// Flags opens the shared config schema, applies its migrations and keeps a
+// local copy of the feature flags that refreshes every 5 seconds.
+func Flags(ctx context.Context, a *app.App, cfg pg.Config) (*flags.Client, error) {
+	db, err := pg.Open(ctx, pg.Config{DSN: cfg.DSN, MaxConns: 2}, "config")
+	if err != nil {
+		return nil, err
+	}
+	a.Cleanup("config db", func(context.Context) error {
+		db.Close()
+		return nil
+	})
+	if err := migrate.Up(ctx, db, migrations.Config(), a.Logger()); err != nil {
+		return nil, err
+	}
+	client := flags.NewClient(db, a.Logger(), a.Metrics())
+	if err := client.Refresh(ctx); err != nil {
+		return nil, err
+	}
+	a.Add("flags", app.Loop(client.Run))
+	return client, nil
 }
 
 // Redis opens the client.

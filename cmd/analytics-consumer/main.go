@@ -6,7 +6,6 @@ package main
 import (
 	"context"
 	"errors"
-	"io/fs"
 
 	"github.com/lidp280504357/exchange/internal/analytics"
 	"github.com/lidp280504357/exchange/internal/platform/app"
@@ -42,11 +41,7 @@ func setup(ctx context.Context, a *app.App) error {
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
 	}
-	chMigrations, err := fs.Sub(migrations.ClickHouse, "clickhouse")
-	if err != nil {
-		return err
-	}
-	conn, err := bootstrap.ClickHouse(ctx, a, cfg.ClickHouse, chMigrations)
+	conn, err := bootstrap.ClickHouse(ctx, a, cfg.ClickHouse, migrations.ClickHouse())
 	if err != nil {
 		return err
 	}

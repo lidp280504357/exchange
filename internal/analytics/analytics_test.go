@@ -3,7 +3,6 @@ package analytics_test
 import (
 	"context"
 	"encoding/json"
-	"io/fs"
 	"log/slog"
 	"testing"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
+	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
 	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
 	"github.com/lidp280504357/exchange/internal/analytics"
 	"github.com/lidp280504357/exchange/internal/platform/chx"
@@ -48,10 +48,9 @@ func TestIngestAndReconcile(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	sub, _ := fs.Sub(migrations.ClickHouse, "clickhouse")
 	sqlDB := chx.OpenDB(chCfg)
 	defer sqlDB.Close()
-	if err := migrate.UpClickHouse(ctx, sqlDB, sub, discard); err != nil {
+	if err := migrate.UpClickHouse(ctx, sqlDB, migrations.ClickHouse(), discard); err != nil {
 		t.Fatalf("clickhouse migrations: %v", err)
 	}
 
@@ -116,5 +115,21 @@ func TestIngestAndReconcile(t *testing.T) {
 	}
 	if payload != `{"@type":"type.googleapis.com/google.protobuf.Int32Value","value":1}` {
 		t.Fatalf("payload = %s", payload)
+	}
+
+	// Audit events are also copied into audit_logs, keyed by actor.
+	changed, err := f.New(ctx, &auditv1.ConfigChanged{Target: "flag:account.transfer", Actor: "cli:ops", Reason: "test"}, "actor", "cli:ops")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := in.Store(ctx, []kafka.Delivery{{Topic: event.TopicAudit, Envelope: changed}}); err != nil {
+		t.Fatal(err)
+	}
+	var actor, target string
+	if err := conn.QueryRow(ctx, "SELECT actor_id, target FROM audit_logs FINAL WHERE event_id = ?", changed.GetEventId()).Scan(&actor, &target); err != nil {
+		t.Fatal(err)
+	}
+	if actor != "cli:ops" || target != "flag:account.transfer" {
+		t.Fatalf("audit row = %s %s", actor, target)
 	}
 }

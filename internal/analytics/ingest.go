@@ -16,6 +16,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
 	"github.com/lidp280504357/exchange/internal/platform/event"
 	"github.com/lidp280504357/exchange/internal/platform/kafka"
 )
@@ -58,9 +59,17 @@ func NewIngestor(conn driver.Conn, log *slog.Logger, reg prometheus.Registerer) 
 	return in
 }
 
-// Store inserts a batch. ReplacingMergeTree collapses copies of an event,
-// so storing a batch again after a failure is harmless.
+// Store inserts a batch into events and the typed tables. The tables are
+// ReplacingMergeTree, which collapses copies of an event, so storing a
+// batch again after a failure is harmless.
 func (in *Ingestor) Store(ctx context.Context, batch []kafka.Delivery) error {
+	if err := in.storeEvents(ctx, batch); err != nil {
+		return err
+	}
+	return in.storeAuditLogs(ctx, batch)
+}
+
+func (in *Ingestor) storeEvents(ctx context.Context, batch []kafka.Delivery) error {
 	b, err := in.conn.PrepareBatch(ctx, `INSERT INTO events (event_id, event_type, event_version, topic, partition,
 		offset, aggregate_type, aggregate_id, sequence, producer, correlation_id, causation_id, occurred_at, payload)`)
 	if err != nil {
@@ -92,6 +101,42 @@ func (in *Ingestor) Store(ctx context.Context, batch []kafka.Delivery) error {
 	}
 	for topic, n := range perTopic {
 		in.rows.WithLabelValues(topic).Add(float64(n))
+	}
+	return nil
+}
+
+// storeAuditLogs copies audit events into audit_logs, keyed by actor.
+func (in *Ingestor) storeAuditLogs(ctx context.Context, batch []kafka.Delivery) error {
+	var audit []kafka.Delivery
+	for _, d := range batch {
+		if d.Topic == event.TopicAudit {
+			if _, err := uuid.Parse(d.Envelope.GetEventId()); err == nil {
+				audit = append(audit, d)
+			}
+		}
+	}
+	if len(audit) == 0 {
+		return nil
+	}
+	b, err := in.conn.PrepareBatch(ctx, `INSERT INTO audit_logs (event_id, event_type, actor_id, target, occurred_at, payload)`)
+	if err != nil {
+		return fmt.Errorf("clickhouse: prepare audit batch: %w", err)
+	}
+	for _, d := range audit {
+		env := d.Envelope
+		target := ""
+		var changed auditv1.ConfigChanged
+		if env.GetPayload().MessageIs(&changed) && env.GetPayload().UnmarshalTo(&changed) == nil {
+			target = changed.GetTarget()
+		}
+		if err := b.Append(uuid.MustParse(env.GetEventId()), env.GetEventType(), env.GetAggregateId(), target,
+			env.GetOccurredAt().AsTime(), PayloadJSON(env.GetPayload())); err != nil {
+			_ = b.Abort()
+			return fmt.Errorf("clickhouse: append audit: %w", err)
+		}
+	}
+	if err := b.Send(); err != nil {
+		return fmt.Errorf("clickhouse: send audit batch: %w", err)
 	}
 	return nil
 }

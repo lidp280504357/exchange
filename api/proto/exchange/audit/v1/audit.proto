@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package exchange.audit.v1;
+
+// Audit events go to audit.events, keyed by actor, and are append-only
+// (requirements §5.12, §8.1).
+
+// ConfigChanged records a change to runtime configuration such as a
+// feature flag (ADR-0005).
+message ConfigChanged {
+  // What changed, e.g. "flag:withdraw.enabled".
+  string target = 1;
+  // JSON of the previous value; empty when it did not exist.
+  string old_value = 2;
+  // JSON of the new value.
+  string new_value = 3;
+  // Who made the change: an admin ID, or "cli:<os user>" for exchangectl.
+  string actor = 4;
+  // Why, as entered by the actor.
+  string reason = 5;
+}

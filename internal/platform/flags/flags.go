@@ -1,0 +1,282 @@
+// Package flags evaluates feature flags (ADR-0005, requirements §5.14):
+// every high-risk capability is off unless its flag is enabled and allows
+// the request's region, account status, asset, symbol and user. Flags live
+// in the config schema; services keep a copy refreshed every 5 seconds,
+// and a missing flag is off.
+package flags
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"slices"
+	"sync"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/lidp280504357/exchange/internal/platform/pg"
+)
+
+// Flags known in phase 1; exchangectl only sets known keys.
+const (
+	KeyRegistrationSMS  = "auth.sms"                 // SMS as a registration and login channel
+	KeyTransfer         = "account.transfer"         // spot <-> futures transfers
+	KeyManualAdjustment = "ledger.manual_adjustment" // operator credits of simulated funds
+	KeyWelcomeCredit    = "ledger.welcome_credit"    // demo funds for new users, test only
+	KeyWithdraw         = "wallet.withdraw"          // phase 2
+	KeyDerivatives      = "derivatives.trading"      // phase 3
+	KeyReferenceKline   = "market.reference_kline"   // show reference candles for new pairs
+)
+
+// Known describes the known flags.
+var Known = map[string]string{
+	KeyRegistrationSMS:  "SMS as a registration and login channel (high-risk regions stay email-only)",
+	KeyTransfer:         "Transfers between spot and futures accounts",
+	KeyManualAdjustment: "Operator credits of simulated funds (MANUAL_ADJUSTMENT)",
+	KeyWelcomeCredit:    "Simulated demo funds for newly registered users (test environments only)",
+	KeyWithdraw:         "Withdrawals (phase 2)",
+	KeyDerivatives:      "Perpetual futures trading (phase 3)",
+	KeyReferenceKline:   "Reference candles for pairs without trades yet",
+}
+
+// List allows or denies values of one dimension. An empty Allow allows
+// every value that Deny does not list.
+type List struct {
+	Allow []string `json:"allow,omitempty"`
+	Deny  []string `json:"deny,omitempty"`
+}
+
+func (l *List) constrains() bool { return l != nil && (len(l.Allow) > 0 || len(l.Deny) > 0) }
+
+// permits fails closed: a constrained dimension with an unknown value is
+// not permitted.
+func (l *List) permits(v string) bool {
+	if !l.constrains() {
+		return true
+	}
+	if v == "" || slices.Contains(l.Deny, v) {
+		return false
+	}
+	return len(l.Allow) == 0 || slices.Contains(l.Allow, v)
+}
+
+// Rules restrict where an enabled flag applies.
+type Rules struct {
+	Regions  *List `json:"regions,omitempty"`
+	Statuses *List `json:"statuses,omitempty"`
+	Assets   *List `json:"assets,omitempty"`
+	Symbols  *List `json:"symbols,omitempty"`
+	Users    *List `json:"users,omitempty"`
+}
+
+// Flag is one stored flag.
+type Flag struct {
+	Key         string    `json:"key"`
+	Enabled     bool      `json:"enabled"`
+	Rules       Rules     `json:"rules"`
+	Description string    `json:"description,omitempty"`
+	Version     int64     `json:"version"`
+	UpdatedBy   string    `json:"updated_by"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// Subject is what a check is about; leave unknown dimensions empty.
+type Subject struct {
+	UserID string
+	Region string // ISO 3166-1 alpha-2
+	Status string // ACTIVE, RISK_REVIEW, FROZEN, CLOSED
+	Asset  string
+	Symbol string
+}
+
+// Allows reports whether f is on for s.
+func (f Flag) Allows(s Subject) bool {
+	r := f.Rules
+	return f.Enabled &&
+		r.Regions.permits(s.Region) &&
+		r.Statuses.permits(s.Status) &&
+		r.Assets.permits(s.Asset) &&
+		r.Symbols.permits(s.Symbol) &&
+		r.Users.permits(s.UserID)
+}
+
+// Load reads every flag.
+func Load(ctx context.Context, q pg.Querier) (map[string]Flag, error) {
+	rows, err := q.Query(ctx, `SELECT key, enabled, rules, description, version, updated_by, updated_at FROM flags`)
+	if err != nil {
+		return nil, fmt.Errorf("flags: load: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]Flag{}
+	for rows.Next() {
+		var f Flag
+		var rules []byte
+		if err := rows.Scan(&f.Key, &f.Enabled, &rules, &f.Description, &f.Version, &f.UpdatedBy, &f.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("flags: load: %w", err)
+		}
+		if err := json.Unmarshal(rules, &f.Rules); err != nil {
+			return nil, fmt.Errorf("flags: rules of %s: %w", f.Key, err)
+		}
+		out[f.Key] = f
+	}
+	return out, rows.Err()
+}
+
+// Change is one entry of a flag's history.
+type Change struct {
+	Key       string
+	Old, New  json.RawMessage
+	ChangedBy string
+	Reason    string
+	ChangedAt time.Time
+}
+
+// Set creates or replaces flag f inside tx, bumping its version and
+// recording the change. It returns the previous flag (nil when new) and
+// the stored one.
+func Set(ctx context.Context, tx pgx.Tx, f Flag, actor, reason string) (*Flag, Flag, error) {
+	if actor == "" || reason == "" {
+		return nil, Flag{}, fmt.Errorf("flags: actor and reason are required")
+	}
+	var old *Flag
+	var prev Flag
+	var rules []byte
+	err := tx.QueryRow(ctx, `SELECT key, enabled, rules, description, version, updated_by, updated_at
+		FROM flags WHERE key = $1 FOR UPDATE`, f.Key).
+		Scan(&prev.Key, &prev.Enabled, &rules, &prev.Description, &prev.Version, &prev.UpdatedBy, &prev.UpdatedAt)
+	switch {
+	case err == nil:
+		if err := json.Unmarshal(rules, &prev.Rules); err != nil {
+			return nil, Flag{}, fmt.Errorf("flags: rules of %s: %w", f.Key, err)
+		}
+		old = &prev
+	case !pg.IsNoRows(err):
+		return nil, Flag{}, fmt.Errorf("flags: read %s: %w", f.Key, err)
+	}
+
+	newRules, err := json.Marshal(f.Rules)
+	if err != nil {
+		return nil, Flag{}, fmt.Errorf("flags: %w", err)
+	}
+	var stored Flag
+	err = tx.QueryRow(ctx, `INSERT INTO flags (key, enabled, rules, description, updated_by)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (key) DO UPDATE SET enabled = EXCLUDED.enabled, rules = EXCLUDED.rules,
+			description = EXCLUDED.description, updated_by = EXCLUDED.updated_by,
+			version = flags.version + 1, updated_at = now()
+		RETURNING key, enabled, description, version, updated_by, updated_at`,
+		f.Key, f.Enabled, newRules, f.Description, actor).
+		Scan(&stored.Key, &stored.Enabled, &stored.Description, &stored.Version, &stored.UpdatedBy, &stored.UpdatedAt)
+	if err != nil {
+		return nil, Flag{}, fmt.Errorf("flags: write %s: %w", f.Key, err)
+	}
+	stored.Rules = f.Rules
+
+	var oldJSON []byte
+	if old != nil {
+		oldJSON, _ = json.Marshal(old)
+	}
+	newJSON, _ := json.Marshal(stored)
+	if _, err := tx.Exec(ctx, `INSERT INTO flag_changes (key, old_value, new_value, changed_by, reason)
+		VALUES ($1, $2, $3, $4, $5)`, f.Key, oldJSON, newJSON, actor, reason); err != nil {
+		return nil, Flag{}, fmt.Errorf("flags: record change of %s: %w", f.Key, err)
+	}
+	return old, stored, nil
+}
+
+// History returns the latest changes of key, newest first.
+func History(ctx context.Context, q pg.Querier, key string, limit int) ([]Change, error) {
+	rows, err := q.Query(ctx, `SELECT key, old_value, new_value, changed_by, reason, changed_at
+		FROM flag_changes WHERE key = $1 ORDER BY id DESC LIMIT $2`, key, limit)
+	if err != nil {
+		return nil, fmt.Errorf("flags: history: %w", err)
+	}
+	defer rows.Close()
+	var out []Change
+	for rows.Next() {
+		var c Change
+		if err := rows.Scan(&c.Key, &c.Old, &c.New, &c.ChangedBy, &c.Reason, &c.ChangedAt); err != nil {
+			return nil, fmt.Errorf("flags: history: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// RefreshInterval is how stale a service's copy may be.
+const RefreshInterval = 5 * time.Second
+
+// Client answers flag checks from a local copy that Run refreshes.
+type Client struct {
+	db  *pg.DB
+	log *slog.Logger
+
+	mu    sync.RWMutex
+	flags map[string]Flag
+
+	lastRefresh prometheus.Gauge
+}
+
+// NewClient returns a client reading from db, which is bound to the config
+// schema, and registers its metrics.
+func NewClient(db *pg.DB, log *slog.Logger, reg prometheus.Registerer) *Client {
+	c := &Client{
+		db:  db,
+		log: log,
+		lastRefresh: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "flags_last_refresh_timestamp_seconds",
+			Help: "When the local copy of the feature flags was last refreshed.",
+		}),
+	}
+	reg.MustRegister(c.lastRefresh)
+	return c
+}
+
+// Refresh reloads every flag.
+func (c *Client) Refresh(ctx context.Context) error {
+	all, err := Load(ctx, c.db)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.flags = all
+	c.mu.Unlock()
+	c.lastRefresh.SetToCurrentTime()
+	return nil
+}
+
+// Run refreshes every RefreshInterval until ctx ends; failures keep the
+// last copy.
+func (c *Client) Run(ctx context.Context) error {
+	ticker := time.NewTicker(RefreshInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+		if err := c.Refresh(ctx); err != nil && ctx.Err() == nil {
+			c.log.WarnContext(ctx, "feature flag refresh failed; keeping the last copy", "error", err)
+		}
+	}
+}
+
+// Enabled reports whether key is on for s; unknown or missing flags are off.
+func (c *Client) Enabled(key string, s Subject) bool {
+	c.mu.RLock()
+	f, ok := c.flags[key]
+	c.mu.RUnlock()
+	return ok && f.Allows(s)
+}
+
+// Get returns the local copy of key.
+func (c *Client) Get(key string) (Flag, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	f, ok := c.flags[key]
+	return f, ok
+}
