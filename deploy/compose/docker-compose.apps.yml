@@ -12,6 +12,10 @@ x-logging: &default-logging
     max-size: "20m"
     max-file: "5"
 
+# 服务里写 environment 会覆盖整个映射，所以公共变量用锚点合并
+x-env: &base-env
+  GOMEMLIMIT: 160MiB
+
 x-app: &app
   image: exchange-app:latest
   build:
@@ -24,8 +28,7 @@ x-app: &app
   env_file:
     - path: apps.env
       required: false
-  environment:
-    GOMEMLIMIT: 160MiB
+  environment: *base-env
   stop_grace_period: 15s
   mem_limit: 192m
   networks: [exchange]
@@ -36,13 +39,17 @@ x-health: &health
   retries: 6
   start_period: 20s
 
-x-needs-postgres: &needs-postgres
-  postgres: {condition: service_healthy}
-
 services:
   api-gateway:
     <<: *app
     command: ["/app/api-gateway"]
+    environment:
+      <<: *base-env
+      AUTH_SERVICE_URL: http://auth-service:8081
+      NOTIFICATION_SERVICE_URL: http://notification-service:8083
+    depends_on:
+      auth-service: {condition: service_started}
+      notification-service: {condition: service_started}
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9080/readyz"]
@@ -50,9 +57,14 @@ services:
   auth-service:
     <<: *app
     command: ["/app/auth-service"]
+    environment:
+      <<: *base-env
+      NOTIFICATION_GRPC_ADDR: notification-service:9183
     depends_on:
-      <<: *needs-postgres
+      postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
+      redpanda: {condition: service_healthy}
+      notification-service: {condition: service_started}
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9081/readyz"]
@@ -60,7 +72,8 @@ services:
   user-service:
     <<: *app
     command: ["/app/user-service"]
-    depends_on: *needs-postgres
+    depends_on:
+      postgres: {condition: service_healthy}
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9082/readyz"]
@@ -68,7 +81,9 @@ services:
   notification-service:
     <<: *app
     command: ["/app/notification-service"]
-    depends_on: *needs-postgres
+    depends_on:
+      postgres: {condition: service_healthy}
+      redpanda: {condition: service_healthy}
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9083/readyz"]
@@ -76,7 +91,8 @@ services:
   instrument-service:
     <<: *app
     command: ["/app/instrument-service"]
-    depends_on: *needs-postgres
+    depends_on:
+      postgres: {condition: service_healthy}
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9084/readyz"]
@@ -84,7 +100,8 @@ services:
   ledger-service:
     <<: *app
     command: ["/app/ledger-service"]
-    depends_on: *needs-postgres
+    depends_on:
+      postgres: {condition: service_healthy}
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9085/readyz"]
@@ -93,7 +110,7 @@ services:
     <<: *app
     command: ["/app/risk-service"]
     depends_on:
-      <<: *needs-postgres
+      postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
     healthcheck:
       <<: *health
@@ -103,7 +120,7 @@ services:
     <<: *app
     command: ["/app/analytics-consumer"]
     depends_on:
-      <<: *needs-postgres
+      postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}
       clickhouse: {condition: service_healthy}
     healthcheck:

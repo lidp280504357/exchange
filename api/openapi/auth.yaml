@@ -1,0 +1,138 @@
+openapi: 3.1.0
+info:
+  title: Exchange auth API
+  version: 0.1.0
+  description: |
+    Registration, login, OTP, tokens and device sessions (requirements §6).
+    Every write accepts a device_id: a random ID the client generates once
+    and keeps (localStorage in H5). Error codes are listed in appendix C.
+servers:
+  - url: https://astras.vip
+tags:
+  - name: otp
+paths:
+  /v1/auth/otp/request:
+    post:
+      operationId: requestOtp
+      summary: Send a one-time code
+      description: |
+        Requires a human-verification token (Cloudflare Turnstile). REGISTER,
+        LOGIN and PASSWORD_RESET answer identically whether the account
+        exists; a code only arrives when the action is possible. SMS is
+        available only where the auth.sms feature flag allows it.
+        Quotas: one code per target every 60 s, 5 per hour and 10 per day;
+        20 per hour per IP; 10 per hour per device.
+      tags: [otp]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpRequest'
+      responses:
+        '200':
+          description: Challenge created; the code is on its way.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Challenge'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/auth/otp/verify:
+    post:
+      operationId: verifyOtp
+      summary: Check a one-time code and get a ticket
+      description: |
+        Five wrong codes lock the challenge (AUTH_OTP_ATTEMPTS_EXCEEDED); a
+        code expires after 5 minutes (AUTH_OTP_EXPIRED). The ticket works
+        once, for 5 minutes, on the same device and scene.
+      tags: [otp]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpVerify'
+      responses:
+        '200':
+          description: Code accepted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtpTicket'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+components:
+  schemas:
+    Scene:
+      type: string
+      enum: [REGISTER, LOGIN, LOGIN_CHALLENGE, PASSWORD_RESET, BIND_IDENTITY, REBIND_IDENTITY, STEP_UP, WITHDRAW_CONFIRM]
+    Channel:
+      type: string
+      enum: [EMAIL, SMS]
+    DeviceId:
+      type: string
+      minLength: 8
+      maxLength: 64
+    OtpRequest:
+      type: object
+      required: [scene, channel, captcha_token, device_id]
+      additionalProperties: false
+      properties:
+        scene:
+          $ref: '#/components/schemas/Scene'
+        channel:
+          $ref: '#/components/schemas/Channel'
+        identifier:
+          type: string
+          description: Email address, or phone number with country code (+8613812341234). Omitted for STEP_UP, WITHDRAW_CONFIRM and LOGIN_CHALLENGE.
+        login_challenge_id:
+          type: string
+          format: uuid
+          description: For LOGIN_CHALLENGE.
+        captcha_token:
+          type: string
+        device_id:
+          $ref: '#/components/schemas/DeviceId'
+        language:
+          type: string
+          description: Language of the message; defaults to Accept-Language, then zh-CN.
+          examples: [zh-CN, en]
+    Challenge:
+      type: object
+      required: [challenge_id, expires_at, delivery]
+      properties:
+        challenge_id:
+          type: string
+          format: uuid
+        expires_at:
+          type: string
+          format: date-time
+        delivery:
+          type: string
+          enum: [QUEUED]
+          description: Always QUEUED; codes are sent in the background.
+    OtpVerify:
+      type: object
+      required: [challenge_id, code, device_id]
+      additionalProperties: false
+      properties:
+        challenge_id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          pattern: '^[0-9]{6}$'
+        device_id:
+          $ref: '#/components/schemas/DeviceId'
+    OtpTicket:
+      type: object
+      required: [otp_ticket, scene, expires_at]
+      properties:
+        otp_ticket:
+          type: string
+        scene:
+          $ref: '#/components/schemas/Scene'
+        expires_at:
+          type: string
+          format: date-time
