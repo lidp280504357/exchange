@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "exchange-dev": {
+      "command": "go",
+      "args": ["run", "-C", "tools/devmcp", "."]
+    }
+  }
+}

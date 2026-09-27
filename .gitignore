@@ -1,0 +1,30 @@
+# Local and server secrets
+infra/.env
+环境配置.md
+*.secret
+*.secret.*
+
+# Local development files
+.DS_Store
+.idea/
+.vscode/
+tmp/
+logs/
+
+# Go build output
+bin/
+dist/
+node_modules/
+*.tsbuildinfo
+
+# Environment files anywhere (keep examples)
+.env
+.env.*
+!.env.example
+
+# macOS AppleDouble files
+._*
+
+# Go workspace / coverage
+go.work.sum
+coverage.out
