@@ -7,6 +7,7 @@ package migrate
 
 import (
 	"context"
+	"database/sql"
 	"embed"
 	"errors"
 	"fmt"
@@ -73,6 +74,25 @@ func up(ctx context.Context, db *pg.DB, fsys fs.FS, table string, log *slog.Logg
 	}
 	if err != nil {
 		return fmt.Errorf("migrate %s (%s): %w", db.Schema(), table, err)
+	}
+	return nil
+}
+
+// UpClickHouse applies the ClickHouse migrations in fsys to db's database.
+// ClickHouse has no transactions or advisory locks; only analytics-consumer
+// runs these, as a single instance.
+func UpClickHouse(ctx context.Context, db *sql.DB, fsys fs.FS, log *slog.Logger) error {
+	provider, err := goose.NewProvider(goose.DialectClickHouse, db, fsys, goose.WithDisableGlobalRegistry(true))
+	if err != nil {
+		return fmt.Errorf("migrate clickhouse: %w", err)
+	}
+	results, err := provider.Up(ctx)
+	for _, r := range results {
+		log.Info("migration applied", "store", "clickhouse", "version", r.Source.Version,
+			"file", r.Source.Path, "took_ms", r.Duration.Milliseconds())
+	}
+	if err != nil {
+		return fmt.Errorf("migrate clickhouse: %w", err)
 	}
 	return nil
 }

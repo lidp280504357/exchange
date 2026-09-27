@@ -34,11 +34,24 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 20
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.3
+        env:
+          CLICKHOUSE_USER: exchange
+          CLICKHOUSE_PASSWORD: exchange
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+        ports: ["9000:9000"]
+        options: >-
+          --health-cmd "wget -q --spider http://127.0.0.1:8123/ping"
+          --health-interval 5s --health-timeout 5s --health-retries 30
     env:
       TEST_POSTGRES_DSN: postgres://exchange:exchange@localhost:5432/exchange_test?sslmode=disable
       TEST_REDIS_URL: redis://localhost:6379/15
       TEST_KAFKA_BROKERS: localhost:9092
       TEST_SCHEMA_REGISTRY_URL: http://localhost:8081
+      TEST_CLICKHOUSE_ADDR: localhost:9000
+      TEST_CLICKHOUSE_USER: exchange
+      TEST_CLICKHOUSE_PASSWORD: exchange
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

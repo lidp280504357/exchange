@@ -18,7 +18,7 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
 ## 当前状态（2026-09-28）
 
 - 阶段 0 完成，除 M0.2 契约初稿；环境、账号、CI、部署链路全部就绪。
-- §10 任务 2–5 完成：`internal/platform/{config,logging,pii,tracing,apperr,httpx,health,app,pg,migrate,redisx,grpcx,bootstrap,testenv,event,kafka,outbox,inbox,idempotency}`；`cmd/` 下网关与六个服务骨架已部署在测试服（`https://astras.vip/v1/time`）。**下一步从实施计划 §10 任务 6 开始**（ClickHouse 与 analytics-consumer），用户已授权每完成一个任务即提交、推送并部署，连续做完阶段 1。
+- §10 任务 2–6 完成：`internal/platform/{config,logging,pii,tracing,apperr,httpx,health,app,pg,migrate,redisx,grpcx,bootstrap,testenv,event,kafka,outbox,inbox,idempotency,chx}`、`internal/analytics`；`cmd/` 下网关、六个服务骨架与 analytics-consumer 已部署在测试服（`https://astras.vip/v1/time`）。**下一步从实施计划 §10 任务 7 开始**（功能开关），用户已授权每完成一个任务即提交、推送并部署，连续做完阶段 1。
 - 事件：契约在 `api/proto`，改完 `task proto`（buf，生成到 `api/gen/go` 并提交）；发事件 = `bootstrap.Events` 拿 `event.Factory` → 业务事务里 `outbox.Add`；消费 = `bootstrap.Consumer` + 处理函数里 `inbox.Process` 去重。
 - 加依赖后必须 `go mod tidy`（本机 macOS，Linux 专用依赖只有 tidy 才会写进 go.sum；`task ci` 含 `go mod tidy -diff`）。集成测试：`task test:integration`（读 `.env` 的 `TEST_*`，测试服 `exchange_test` 库、Redis DB 15）。
 - 新服务照 `cmd/auth-service` 写：`main` 调 `app.Main(name, setup, app.WithDefaultOpsAddr(":90xx"))`；`setup` 里 `a.LoadConfig(&cfg)`（`koanf` 标签 = 小写环境变量名，嵌套配置用 `koanf:",squash"`），用 `bootstrap.Postgres/Redis/GRPCServer/HTTPServer` 接基础设施（自动登记就绪检查、指标、清理），`a.NewRouter()` 建路由。端口表见 `docs/runbook/server-deploy.md`。

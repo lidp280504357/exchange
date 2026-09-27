@@ -6,6 +6,7 @@
 //	TEST_REDIS_URL      a Redis database the tests may write keys to
 //	TEST_KAFKA_BROKERS  a broker the tests may create topics on
 //	TEST_SCHEMA_REGISTRY_URL  the Schema Registry of that broker
+//	TEST_CLICKHOUSE_ADDR (+ _USER, _PASSWORD)  a server the tests may create databases on
 //
 // CI provides them with service containers; locally `task test:integration`
 // points them at the test server (database exchange_test, Redis DB 15).
@@ -26,6 +27,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/sr"
 
+	"github.com/lidp280504357/exchange/internal/platform/chx"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
 )
 
@@ -100,6 +102,39 @@ func Redis(t testing.TB) (*redis.Client, string) {
 func KafkaBrokers(t testing.TB) []string {
 	t.Helper()
 	return strings.Split(lookup(t, "TEST_KAFKA_BROKERS"), ",")
+}
+
+// ClickHouse creates a fresh database and returns its settings; the
+// database is dropped when the test ends.
+func ClickHouse(t testing.TB) chx.Config {
+	t.Helper()
+	cfg := chx.Config{
+		Addr:     lookup(t, "TEST_CLICKHOUSE_ADDR"),
+		Database: "default",
+		User:     os.Getenv("TEST_CLICKHOUSE_USER"),
+		Password: os.Getenv("TEST_CLICKHOUSE_PASSWORD"),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	conn, err := chx.Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("testenv: clickhouse: %v", err)
+	}
+	name := Name("t")
+	if err := conn.Exec(ctx, "CREATE DATABASE "+name); err != nil {
+		_ = conn.Close()
+		t.Fatalf("testenv: create database: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := conn.Exec(ctx, "DROP DATABASE IF EXISTS "+name); err != nil {
+			t.Errorf("testenv: drop database %s: %v", name, err)
+		}
+		_ = conn.Close()
+	})
+	cfg.Database = name
+	return cfg
 }
 
 // SchemaRegistryURL returns TEST_SCHEMA_REGISTRY_URL.

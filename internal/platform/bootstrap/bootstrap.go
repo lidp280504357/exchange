@@ -12,11 +12,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 
 	"github.com/lidp280504357/exchange/internal/platform/app"
+	"github.com/lidp280504357/exchange/internal/platform/chx"
 	"github.com/lidp280504357/exchange/internal/platform/config"
 	"github.com/lidp280504357/exchange/internal/platform/event"
 	"github.com/lidp280504357/exchange/internal/platform/grpcx"
@@ -120,29 +122,66 @@ var (
 	consumerMetrics   = map[prometheus.Registerer]*kafka.ConsumerMetrics{}
 )
 
-// Consumer joins group on topics and handles their events with h, with
-// retry and dead-letter topics. Call it once per group.
-func Consumer(ctx context.Context, a *app.App, cfg kafka.Config, group string, topics []string, h kafka.Handler) error {
+// sharedConsumerMetrics returns the consumer metrics of a's registry,
+// registering them on first use.
+func sharedConsumerMetrics(a *app.App) *kafka.ConsumerMetrics {
 	consumerMetricsMu.Lock()
+	defer consumerMetricsMu.Unlock()
 	m, ok := consumerMetrics[a.Metrics()]
 	if !ok {
 		m = kafka.NewConsumerMetrics(a.Metrics())
 		consumerMetrics[a.Metrics()] = m
 	}
-	consumerMetricsMu.Unlock()
+	return m
+}
 
+// Consumer joins group on topics and handles their events with h, with
+// retry and dead-letter topics. Call it once per group.
+func Consumer(ctx context.Context, a *app.App, cfg kafka.Config, group string, topics []string, h kafka.Handler) error {
 	c, err := kafka.NewConsumer(ctx, cfg, kafka.ConsumerOptions{
 		Group:   group,
 		Topics:  topics,
 		Handler: h,
 		Logger:  a.Logger(),
-		Metrics: m,
+		Metrics: sharedConsumerMetrics(a),
 	})
 	if err != nil {
 		return err
 	}
 	a.Add("consumer "+group, c)
 	return nil
+}
+
+// BatchConsumer joins group on topics and hands batches to h.
+func BatchConsumer(ctx context.Context, a *app.App, cfg kafka.Config, group string, topics []string, h kafka.BatchHandler) error {
+	c, err := kafka.NewBatchConsumer(ctx, cfg, kafka.BatchOptions{
+		Group:   group,
+		Topics:  topics,
+		Handler: h,
+		Logger:  a.Logger(),
+		Metrics: sharedConsumerMetrics(a),
+	})
+	if err != nil {
+		return err
+	}
+	a.Add("batch consumer "+group, c)
+	return nil
+}
+
+// ClickHouse connects and applies the ClickHouse migrations in fsys.
+func ClickHouse(ctx context.Context, a *app.App, cfg chx.Config, migrations fs.FS) (driver.Conn, error) {
+	conn, err := chx.Open(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	a.Cleanup("clickhouse", func(context.Context) error { return conn.Close() })
+	db := chx.OpenDB(cfg)
+	defer db.Close()
+	if err := migrate.UpClickHouse(ctx, db, migrations, a.Logger()); err != nil {
+		return nil, err
+	}
+	a.Health().Add("clickhouse", conn.Ping)
+	return conn, nil
 }
 
 // GRPCServer binds the service's gRPC server and adds it as a component.

@@ -29,8 +29,10 @@ func Add(ctx context.Context, q pg.Querier, topic string, envs ...*eventv1.Envel
 		if err != nil {
 			return fmt.Errorf("outbox: marshal %s: %w", env.GetEventType(), err)
 		}
-		batch.Queue(`INSERT INTO outbox (event_id, topic, partition_key, event_type, envelope) VALUES ($1, $2, $3, $4, $5)`,
-			env.GetEventId(), topic, env.GetAggregateId(), env.GetEventType(), body)
+		batch.Queue(`INSERT INTO outbox (event_id, topic, partition_key, event_type, envelope, occurred_at)
+			VALUES ($1, $2, $3, $4, $5, $6)`,
+			env.GetEventId(), topic, env.GetAggregateId(), env.GetEventType(), body,
+			env.GetOccurredAt().AsTime().Truncate(time.Millisecond))
 	}
 	if err := q.SendBatch(ctx, batch).Close(); err != nil {
 		return fmt.Errorf("outbox: insert: %w", err)

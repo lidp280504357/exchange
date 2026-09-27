@@ -146,7 +146,7 @@ func (c *Consumer) Run() error {
 	var wg sync.WaitGroup
 	wg.Go(func() { c.loop(c.main, false) })
 	wg.Go(func() { c.loop(c.retry, true) })
-	wg.Go(c.lagLoop)
+	wg.Go(func() { lagLoop(c.ctx, c.adm, c.opts.Metrics, c.opts.LagInterval, c.opts.Group, c.opts.Group+".retry") })
 	wg.Wait()
 	return nil
 }
@@ -222,7 +222,7 @@ func (c *Consumer) handleRecord(cl *kgo.Client, r *kgo.Record, retrying bool) er
 
 	env, _, err := event.Decode(r.Value)
 	if err != nil {
-		return c.park(cl, r, origin, origin+".dlq", attempt, err, "dlq")
+		return c.park(cl, r, parked{origin: origin, topic: origin + ".dlq", attempt: attempt, cause: err})
 	}
 
 	start := time.Now()
@@ -231,17 +231,34 @@ func (c *Consumer) handleRecord(cl *kgo.Client, r *kgo.Record, retrying bool) er
 		c.opts.Metrics.duration.WithLabelValues(c.opts.Group, origin).Observe(time.Since(start).Seconds())
 	}
 	if err == nil {
-		c.count(origin, "ok")
+		count(c.opts.Metrics, c.opts.Group, origin, "ok")
 		return nil
 	}
 	if attempt < len(c.opts.RetryDelays) {
 		c.opts.Logger.Warn("event handling failed; retrying", "group", c.opts.Group, "event_id", env.GetEventId(),
 			"event_type", env.GetEventType(), "attempt", attempt+1, "error", err)
-		return c.park(cl, r, origin, origin+".retry", attempt+1, err, "retry")
+		return c.park(cl, r, parked{
+			origin: origin, topic: origin + ".retry", attempt: attempt + 1,
+			notBefore: time.Now().Add(c.opts.RetryDelays[attempt]), cause: err,
+		})
 	}
 	c.opts.Logger.Error("event handling failed; sent to dead-letter topic", "group", c.opts.Group,
 		"event_id", env.GetEventId(), "event_type", env.GetEventType(), "error", err)
-	return c.park(cl, r, origin, origin+".dlq", attempt, err, "dlq")
+	return c.park(cl, r, parked{origin: origin, topic: origin + ".dlq", attempt: attempt, cause: err})
+}
+
+// park moves the record to its retry or dead-letter topic.
+func (c *Consumer) park(cl *kgo.Client, r *kgo.Record, p parked) error {
+	p.group = c.opts.Group
+	if err := parkRecord(c.ctx, cl, c.opts.Logger, r, p); err != nil {
+		return err
+	}
+	result := "dlq"
+	if !p.notBefore.IsZero() {
+		result = "retry"
+	}
+	count(c.opts.Metrics, c.opts.Group, p.origin, result)
+	return nil
 }
 
 // handle runs the handler with the event's trace, causation and log
@@ -265,78 +282,6 @@ func (c *Consumer) handle(env *eventv1.Envelope, origin string) (err error) {
 		}
 	}()
 	return c.opts.Handler(ctx, env)
-}
-
-// park copies the record to a retry or dead-letter topic, retrying the
-// write until it succeeds or the consumer stops.
-func (c *Consumer) park(cl *kgo.Client, r *kgo.Record, origin, topic string, attempt int, cause error, result string) error {
-	msg := cause.Error()
-	if len(msg) > 1024 {
-		msg = msg[:1024]
-	}
-	notBefore := time.Now()
-	if result == "retry" {
-		notBefore = notBefore.Add(c.opts.RetryDelays[attempt-1])
-	}
-	out := &kgo.Record{
-		Topic: topic,
-		Key:   r.Key,
-		Value: r.Value,
-		Headers: []kgo.RecordHeader{
-			{Key: HeaderOriginTopic, Value: []byte(origin)},
-			{Key: HeaderGroup, Value: []byte(c.opts.Group)},
-			{Key: HeaderAttempt, Value: []byte(strconv.Itoa(attempt))},
-			{Key: HeaderNotBefore, Value: []byte(strconv.FormatInt(notBefore.UnixMilli(), 10))},
-			{Key: HeaderError, Value: []byte(msg)},
-		},
-	}
-	for backoff := time.Second; ; backoff = min(backoff*2, 30*time.Second) {
-		err := cl.ProduceSync(c.ctx, out).FirstErr()
-		if err == nil {
-			c.count(origin, result)
-			return nil
-		}
-		c.opts.Logger.Warn("kafka park failed", "topic", topic, "error", err)
-		select {
-		case <-c.ctx.Done():
-			return c.ctx.Err()
-		case <-time.After(backoff):
-		}
-	}
-}
-
-func (c *Consumer) count(topic, result string) {
-	if c.opts.Metrics != nil {
-		c.opts.Metrics.records.WithLabelValues(c.opts.Group, topic, result).Inc()
-	}
-}
-
-func (c *Consumer) lagLoop() {
-	if c.opts.Metrics == nil {
-		return
-	}
-	ticker := time.NewTicker(c.opts.LagInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-c.ctx.Done():
-			return
-		case <-ticker.C:
-		}
-		lags, err := c.adm.Lag(c.ctx, c.opts.Group, c.opts.Group+".retry")
-		if err != nil {
-			continue
-		}
-		for _, gl := range lags {
-			for topic, parts := range gl.Lag {
-				for p, l := range parts {
-					if l.Lag >= 0 {
-						c.opts.Metrics.lag.WithLabelValues(gl.Group, topic, strconv.Itoa(int(p))).Set(float64(l.Lag))
-					}
-				}
-			}
-		}
-	}
 }
 
 func header(r *kgo.Record, key string) string {
