@@ -1,0 +1,68 @@
+# https://taskfile.dev  —  本机：task <name>；查看全部：task --list
+version: '3'
+
+env:
+  GOFLAGS: -mod=mod
+
+tasks:
+  default:
+    desc: 列出可用任务
+    cmds: [task --list]
+
+  fmt:
+    desc: 格式化 Go 代码（gofumpt + goimports，由 golangci-lint fmt 驱动）
+    cmds: [golangci-lint fmt ./...]
+
+  fmt:check:
+    desc: 检查格式，不修改
+    cmds:
+      - test -z "$(gofumpt -l .)" || { gofumpt -l .; echo '请运行 task fmt'; exit 1; }
+
+  vet:
+    desc: go vet
+    cmds: [go vet ./...]
+
+  lint:
+    desc: golangci-lint
+    cmds: [golangci-lint run ./...]
+
+  test:
+    desc: 单元测试（带竞态检测）
+    cmds: [go test -race -count=1 ./...]
+
+  test:cover:
+    desc: 覆盖率汇总
+    cmds:
+      - go test -count=1 -coverprofile=coverage.out ./...
+      - go tool cover -func=coverage.out | tail -1
+
+  vuln:
+    desc: govulncheck（需要联网）
+    cmds: [govulncheck ./...]
+
+  scripts:check:
+    desc: 部署脚本语法检查
+    cmds:
+      - bash -n deploy/server-update.sh deploy/redpanda/topics.sh deploy/compose/nginx/update-cloudflare-ips.sh
+
+  ci:
+    desc: 与 CI 相同的本地检查（不含 vuln）
+    deps: [fmt:check, vet, lint, scripts:check]
+    cmds:
+      - task: test
+
+  deploy:
+    desc: 在测试服拉取并更新（可带提交号：task deploy -- <ref>）
+    cmds: ["ssh exchange 'bash /opt/exchange/src/deploy/server-update.sh {{.CLI_ARGS}}'"]
+
+  deploy:status:
+    desc: 测试服容器状态
+    cmds: ["ssh exchange 'cd /opt/exchange/infra && sudo docker compose ps'"]
+
+  deploy:logs:
+    desc: 测试服容器日志（task deploy:logs -- nginx）
+    cmds: ["ssh exchange 'cd /opt/exchange/infra && sudo docker compose logs --tail=100 {{.CLI_ARGS}}'"]
+
+  topics:
+    desc: 在测试服幂等核对 Redpanda topic
+    cmds: ["ssh exchange 'bash /opt/exchange/infra/redpanda/topics.sh'"]

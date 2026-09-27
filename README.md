@@ -10,3 +10,14 @@ Go 微服务虚拟资产交易所（学习项目）。
 - Claude Code 测试服工具：[tools/devmcp](tools/devmcp/README.md)
 
 `环境配置.md` 含测试环境凭据，已被 `.gitignore` 忽略，不入库。
+
+## 常用命令
+
+```bash
+task --list        # 全部任务
+task ci            # 本地跑与 CI 相同的检查（格式、vet、lint、脚本、测试）
+task deploy        # 测试服拉取最新代码并更新（task deploy -- <commit> 回滚）
+task deploy:status # 测试服容器状态
+```
+
+本机只需 Go 1.26+、Node 24+ 和 `~/go/bin` 里的工具（gofumpt、golangci-lint、task 等），不需要 Docker；部署流程见 [docs/runbook/server-deploy.md](docs/runbook/server-deploy.md)。
