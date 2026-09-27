@@ -10,6 +10,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/app"
 	"github.com/lidp280504357/exchange/internal/platform/bootstrap"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
+	"github.com/lidp280504357/exchange/migrations"
 )
 
 type settings struct {
@@ -33,7 +34,7 @@ func setup(ctx context.Context, a *app.App) error {
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
 	}
-	if _, err := bootstrap.Postgres(ctx, a, cfg.Postgres, "notify", nil); err != nil {
+	if _, err := bootstrap.Postgres(ctx, a, cfg.Postgres, "notify", migrations.Notify()); err != nil {
 		return err
 	}
 	if _, err := bootstrap.GRPCServer(ctx, a, cfg.GRPCAddr); err != nil {

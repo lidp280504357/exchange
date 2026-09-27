@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+package exchange.auth.v1;
+
+// Events on auth.events, keyed by user_id (requirements §8.1). Identities,
+// IP addresses and similar personal data appear only masked
+// (a***@x.com, +86138****1234, 203.0.113.*). Codes and tokens never do.
+// Channels are "EMAIL" or "SMS"; scenes are the otp/request scenes of §6.1.
+
+// OtpRequested records a code request, including decoys sent to accounts
+// that do not exist.
+message OtpRequested {
+  string challenge_id = 1;
+  string scene = 2;
+  string channel = 3;
+  string target_mask = 4;
+  // Empty for registration and unknown accounts.
+  string user_id = 5;
+  string device_id = 6;
+  string ip_mask = 7;
+}
+
+// OtpVerified records a correct code.
+message OtpVerified {
+  string challenge_id = 1;
+  string scene = 2;
+  string user_id = 3;
+}
+
+// OtpFailed records a wrong, expired or exhausted code.
+message OtpFailed {
+  string challenge_id = 1;
+  string scene = 2;
+  string user_id = 3;
+  // INVALID, EXPIRED, ATTEMPTS_EXCEEDED
+  string reason = 4;
+  int32 attempts = 5;
+}
+
+// UserRegistered is published once per new account.
+message UserRegistered {
+  string user_id = 1;
+  string channel = 2;
+  string identity_mask = 3;
+  // ISO 3166-1 alpha-2.
+  string region = 4;
+  string language = 5;
+  string device_id = 6;
+  string ip_mask = 7;
+}
+
+// LoginSucceeded is published for every login that issued tokens.
+message LoginSucceeded {
+  string user_id = 1;
+  string session_id = 2;
+  // PASSWORD, OTP, LOGIN_CHALLENGE, REGISTER
+  string method = 3;
+  string device_id = 4;
+  // First login from this device: the user gets a notification.
+  bool new_device = 5;
+  string ip_mask = 6;
+  string user_agent = 7;
+}
+
+// LoginFailed is published for rejected password logins of known accounts.
+message LoginFailed {
+  string user_id = 1;
+  string method = 2;
+  // PASSWORD_INVALID, ACCOUNT_LOCKED, USER_CLOSED
+  string reason = 3;
+  // This failure locked the account (10 failures, 15 minutes).
+  bool locked = 4;
+  string ip_mask = 5;
+}
+
+// SessionRevoked is published when a session ends before it expires.
+message SessionRevoked {
+  string user_id = 1;
+  string session_id = 2;
+  // LOGOUT, LOGOUT_ALL, USER, REPLAY, LIMIT, PASSWORD_RESET, PASSWORD_CHANGE
+  string reason = 3;
+}
+
+// IdentityBound is published when a second identity is added.
+message IdentityBound {
+  string user_id = 1;
+  string channel = 2;
+  string identity_mask = 3;
+}
+
+// IdentityRebound is published when an identity is replaced.
+message IdentityRebound {
+  string user_id = 1;
+  string channel = 2;
+  string old_mask = 3;
+  string new_mask = 4;
+}
+
+// PasswordChanged is published after a change or a reset; a reset holds
+// withdrawals for manual review for 24 hours (§6.4).
+message PasswordChanged {
+  string user_id = 1;
+  bool reset = 2;
+}

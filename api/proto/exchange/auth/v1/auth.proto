@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package exchange.auth.v1;
+
+// AuthService answers other services' questions about identities and
+// sensitive-action proofs. Public REST endpoints are in
+// api/openapi/auth.yaml.
+service AuthService {
+  // GetContacts returns a user's verified identities, so that
+  // notification-service can reach the user.
+  rpc GetContacts(GetContactsRequest) returns (GetContactsResponse);
+  // ConsumeStepUp redeems a step-up token for a sensitive action of the
+  // same user; each token works once.
+  rpc ConsumeStepUp(ConsumeStepUpRequest) returns (ConsumeStepUpResponse);
+}
+
+message GetContactsRequest {
+  string user_id = 1;
+}
+
+message Contact {
+  // EMAIL or SMS.
+  string channel = 1;
+  // Normalized address: lower-case email or E.164 phone number.
+  string value = 2;
+}
+
+message GetContactsResponse {
+  repeated Contact contacts = 1;
+}
+
+message ConsumeStepUpRequest {
+  string user_id = 1;
+  string token = 2;
+}
+
+message ConsumeStepUpResponse {
+  string session_id = 1;
+}

@@ -113,8 +113,11 @@ func TestIngestAndReconcile(t *testing.T) {
 	if err := conn.QueryRow(ctx, "SELECT payload FROM events FINAL WHERE event_id = ?", envs[1].GetEventId()).Scan(&payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload != `{"@type":"type.googleapis.com/google.protobuf.Int32Value","value":1}` {
-		t.Fatalf("payload = %s", payload)
+	// protojson randomizes whitespace, so compare parsed JSON.
+	var fields map[string]any
+	if err := json.Unmarshal([]byte(payload), &fields); err != nil ||
+		fields["@type"] != "type.googleapis.com/google.protobuf.Int32Value" || fields["value"] != float64(1) {
+		t.Fatalf("payload = %s (%v)", payload, err)
 	}
 
 	// Audit events are also copied into audit_logs, keyed by actor.

@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package exchange.notification.v1;
+
+// NotificationService delivers one-time codes. Codes travel only through
+// this synchronous call, never through events or logs (§5.3).
+service NotificationService {
+  // SendOtp hands a code to the channel's providers: the primary is tried
+  // first; retries (1s, 4s, 16s) and fail-over to the backup continue in
+  // the background.
+  rpc SendOtp(SendOtpRequest) returns (SendOtpResponse);
+}
+
+enum DeliveryStatus {
+  DELIVERY_STATUS_UNSPECIFIED = 0;
+  DELIVERY_STATUS_QUEUED = 1;
+  DELIVERY_STATUS_SENT = 2;
+  DELIVERY_STATUS_FAILED_RETRYING = 3;
+  DELIVERY_STATUS_FAILED = 4;
+}
+
+message SendOtpRequest {
+  string challenge_id = 1;
+  // EMAIL or SMS.
+  string channel = 2;
+  // Normalized address.
+  string target = 3;
+  string code = 4;
+  string scene = 5;
+  // zh-CN or en.
+  string language = 6;
+  int32 ttl_seconds = 7;
+  // Known user, if any, for the delivery record.
+  string user_id = 8;
+}
+
+message SendOtpResponse {
+  string delivery_id = 1;
+  DeliveryStatus status = 2;
+}

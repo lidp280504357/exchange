@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package exchange.notification.v1;
+
+// Events on notification.events, keyed by user_id. The gateway pushes
+// NotificationCreated on the private WebSocket channel "notifications".
+
+// NotificationCreated is a new in-app notification.
+message NotificationCreated {
+  string notification_id = 1;
+  string user_id = 2;
+  // NEW_DEVICE_LOGIN, IDENTITY_CHANGED, PASSWORD_CHANGED, SESSION_REVOKED,
+  // ACCOUNT_LOCKED, STATUS_CHANGED ...
+  string type = 3;
+  string title = 4;
+  string body = 5;
+}
+
+// DeliveryFailed records a message that exhausted retries and fail-over
+// (the dead-letter record of §6.2).
+message DeliveryFailed {
+  string delivery_id = 1;
+  string user_id = 2;
+  string channel = 3;
+  string template = 4;
+  // TIMEOUT, REJECTED, INVALID_TARGET, INSUFFICIENT_BALANCE, CIRCUIT_OPEN, UNKNOWN
+  string failure_class = 5;
+}

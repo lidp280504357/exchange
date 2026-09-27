@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package exchange.user.v1;
+
+// Events on user.events, keyed by user_id (requirements §8.1).
+
+// UserStatusChanged records every account status transition (§5.4).
+message UserStatusChanged {
+  string user_id = 1;
+  string from_status = 2;
+  string to_status = 3;
+  string reason_code = 4;
+  string actor = 5;
+}
+
+// ProfileUpdated lists the profile fields that changed.
+message ProfileUpdated {
+  string user_id = 1;
+  repeated string fields = 2;
+}

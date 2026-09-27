@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package exchange.user.v1;
+
+// UserService owns profiles, account status and eligibility
+// (requirements §5.4). Public REST endpoints are in api/openapi/user.yaml.
+service UserService {
+  // CreateUser creates the profile of a newly registered user. It is
+  // idempotent on user_id, so auth-service may retry it.
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+  // GetUser returns a profile, including its account status.
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  // CheckEligibility decides whether a user may use a feature now.
+  rpc CheckEligibility(CheckEligibilityRequest) returns (CheckEligibilityResponse);
+}
+
+message User {
+  string id = 1;
+  // ACTIVE, RISK_REVIEW, FROZEN or CLOSED.
+  string status = 2;
+  // ISO 3166-1 alpha-2.
+  string region = 3;
+  string language = 4;
+  string timezone = 5;
+  int32 kyc_level = 6;
+}
+
+message CreateUserRequest {
+  string user_id = 1;
+  string region = 2;
+  string language = 3;
+  string timezone = 4;
+  // Versions of the documents the user accepted at registration.
+  string terms_version = 5;
+  string risk_disclosure_version = 6;
+}
+
+message CreateUserResponse {
+  User user = 1;
+}
+
+message GetUserRequest {
+  string user_id = 1;
+}
+
+message GetUserResponse {
+  User user = 1;
+}
+
+message CheckEligibilityRequest {
+  string user_id = 1;
+  // SPOT_TRADE, DERIVATIVES_TRADE, DEPOSIT, WITHDRAW or TRANSFER.
+  string feature = 2;
+  // Optional dimensions for feature flags.
+  string asset = 3;
+  string symbol = 4;
+}
+
+message CheckEligibilityResponse {
+  bool allowed = 1;
+  // Why not, e.g. USER_FROZEN, USER_REGION_NOT_ALLOWED, USER_NOT_ELIGIBLE.
+  string reason_code = 2;
+}
