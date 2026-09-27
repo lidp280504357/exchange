@@ -30,6 +30,10 @@ tasks:
     desc: go vet
     cmds: [go vet ./...]
 
+  mod:check:
+    desc: go.mod/go.sum 与代码一致（含只在 Linux 上引入的依赖；需要联网）
+    cmds: [go mod tidy -diff]
+
   lint:
     desc: golangci-lint
     cmds: [golangci-lint run ./...]
@@ -55,7 +59,7 @@ tasks:
 
   ci:
     desc: 与 CI 相同的本地检查（不含 vuln）
-    deps: [fmt:check, vet, lint, scripts:check]
+    deps: [fmt:check, mod:check, vet, lint, scripts:check]
     cmds:
       - task: test
 
