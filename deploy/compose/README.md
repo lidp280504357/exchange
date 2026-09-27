@@ -20,8 +20,8 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose up -d'
 
 ## 待补充（实施计划阶段 0–1）
 
-- 观测栈：Prometheus、Grafana、OpenTelemetry Collector、Loki（或等价）。
-- 反向代理与 TLS：Caddy 自动证书 + 测试域名，供 `https`/`wss` 与 Secure cookie 验证。
+- 可观测性：Go 服务通过 OTLP 直发 Grafana Cloud（docs/runbook/grafana-cloud.md）；以后需要容器日志再加 Grafana Alloy 容器。
+- 反向代理与 TLS：nginx 容器 + Cloudflare 源站证书，域名 astras.vip（docs/runbook/cloudflare-nginx-tls.md）。
 - Go 服务的 compose 片段（`docker-compose.apps.yml`），与本文件共用 `exchange` 网络。
 - Redpanda 目前是 `dev-container` 单节点、单副本，仅适合测试。
 - Topic 初始化脚本需幂等接管服务器上已手工创建的 12 个业务 topic（`_schemas` 是 Schema Registry 内部 topic，不要动）。
