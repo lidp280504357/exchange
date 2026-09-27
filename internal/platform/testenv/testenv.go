@@ -5,6 +5,7 @@
 //	TEST_POSTGRES_DSN   a database the tests may create schemas in
 //	TEST_REDIS_URL      a Redis database the tests may write keys to
 //	TEST_KAFKA_BROKERS  a broker the tests may create topics on
+//	TEST_SCHEMA_REGISTRY_URL  the Schema Registry of that broker
 //
 // CI provides them with service containers; locally `task test:integration`
 // points them at the test server (database exchange_test, Redis DB 15).
@@ -21,6 +22,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
+	"github.com/twmb/franz-go/pkg/kadm"
+	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/pkg/sr"
 
 	"github.com/lidp280504357/exchange/internal/platform/pg"
 )
@@ -96,4 +100,51 @@ func Redis(t testing.TB) (*redis.Client, string) {
 func KafkaBrokers(t testing.TB) []string {
 	t.Helper()
 	return strings.Split(lookup(t, "TEST_KAFKA_BROKERS"), ",")
+}
+
+// SchemaRegistryURL returns TEST_SCHEMA_REGISTRY_URL.
+func SchemaRegistryURL(t testing.TB) string {
+	t.Helper()
+	return lookup(t, "TEST_SCHEMA_REGISTRY_URL")
+}
+
+// KafkaTopic creates a unique topic with its .retry and .dlq companions and
+// deletes them, and their registry subjects, when the test ends.
+func KafkaTopic(t testing.TB) string {
+	t.Helper()
+	brokers := KafkaBrokers(t)
+	registry := SchemaRegistryURL(t)
+	cl, err := kgo.NewClient(kgo.SeedBrokers(brokers...))
+	if err != nil {
+		t.Fatalf("testenv: kafka: %v", err)
+	}
+	adm := kadm.NewClient(cl)
+	name := Name("t") + ".events"
+	topics := []string{name, name + ".retry", name + ".dlq"}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	resp, err := adm.CreateTopics(ctx, 1, 1, nil, topics...)
+	if err == nil {
+		err = resp.Error()
+	}
+	if err != nil {
+		cl.Close()
+		t.Fatalf("testenv: create topics: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if _, err := adm.DeleteTopics(ctx, topics...); err != nil {
+			t.Errorf("testenv: delete topics: %v", err)
+		}
+		cl.Close()
+		if rc, err := sr.NewClient(sr.URLs(registry)); err == nil {
+			for _, topic := range topics {
+				subject := topic + "-value"
+				_, _ = rc.DeleteSubject(ctx, subject, sr.SoftDelete)
+				_, _ = rc.DeleteSubject(ctx, subject, sr.HardDelete)
+			}
+		}
+	})
+	return name
 }

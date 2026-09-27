@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package exchange.event.v1;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+
+// Envelope wraps every event published to Redpanda (requirements §8). The
+// record key is aggregate_id, so events of one aggregate stay in order.
+// On the wire the envelope is framed for Schema Registry: magic byte 0,
+// big-endian schema ID, message index 0, then the protobuf bytes.
+message Envelope {
+  // UUIDv7; consumers deduplicate on it through their inbox table.
+  string event_id = 1;
+  // Domain and message name, e.g. "auth.UserRegistered".
+  string event_type = 2;
+  // Payload schema version, starting at 1.
+  int32 event_version = 3;
+  // When the business fact happened (UTC).
+  google.protobuf.Timestamp occurred_at = 4;
+  // Service and instance that produced the event, "auth-service/3f2a".
+  string producer = 5;
+  // Aggregate kind, e.g. "user", "account", "order".
+  string aggregate_type = 6;
+  // Aggregate ID; the partition key.
+  string aggregate_id = 7;
+  // Per-aggregate monotonically increasing number; required for ledger
+  // and matching events, 0 elsewhere.
+  int64 sequence = 8;
+  // Trace ID of the request that caused the event chain.
+  string correlation_id = 9;
+  // event_id of the event whose handling produced this one, if any.
+  string causation_id = 10;
+  // W3C traceparent, so that consumers continue the trace.
+  string traceparent = 11;
+  // The domain event; its type URL names the message.
+  google.protobuf.Any payload = 12;
+}

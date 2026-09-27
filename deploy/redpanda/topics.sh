@@ -39,6 +39,7 @@ BUSINESS=(
   "market.candle.events 3"
   "risk.events 1"
   "audit.events 1"
+  "notification.events 1"
 )
 
 for entry in "${BUSINESS[@]}"; do

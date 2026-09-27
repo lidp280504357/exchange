@@ -1,0 +1,11 @@
+# buf：Protobuf 契约（gRPC 与事件）的 lint、breaking 检查与代码生成。
+# 生成：task proto（buf generate）；生成的 Go 代码提交在 api/gen/go，服务器构建不需要 buf。
+version: v2
+modules:
+  - path: api/proto
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE

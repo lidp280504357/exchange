@@ -37,12 +37,32 @@ jobs:
     env:
       TEST_POSTGRES_DSN: postgres://exchange:exchange@localhost:5432/exchange_test?sslmode=disable
       TEST_REDIS_URL: redis://localhost:6379/15
+      TEST_KAFKA_BROKERS: localhost:9092
+      TEST_SCHEMA_REGISTRY_URL: http://localhost:8081
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+      # Redpanda 需要启动参数，GitHub services 不支持，改用 docker run
+      - name: start redpanda
+        run: |
+          docker run -d --name redpanda -p 9092:9092 -p 8081:8081 \
+            docker.redpanda.com/redpandadata/redpanda:v24.3.16 redpanda start \
+            --mode dev-container --smp 1 --overprovisioned \
+            --kafka-addr 0.0.0.0:9092 --advertise-kafka-addr localhost:9092 \
+            --schema-registry-addr 0.0.0.0:8081
+          for i in $(seq 60); do docker exec redpanda rpk cluster health 2>/dev/null | grep -q 'Healthy:.*true' && exit 0; sleep 2; done
+          docker logs redpanda; exit 1
+      - name: buf lint and generated code
+        run: |
+          go install github.com/bufbuild/buf/cmd/buf@v1.73.0
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2
+          buf lint
+          buf generate
+          git diff --exit-code -- api/gen || { echo "::error::run 'task proto' and commit api/gen"; exit 1; }
       - name: gofumpt
         run: |
           go install mvdan.cc/gofumpt@latest

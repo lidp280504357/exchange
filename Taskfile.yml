@@ -18,6 +18,19 @@ tasks:
     cmds:
       - test -z "$(gofumpt -l .)" || { gofumpt -l .; echo '请运行 task fmt'; exit 1; }
 
+  proto:
+    desc: Protobuf lint 与代码生成（api/proto -> api/gen/go）
+    cmds:
+      - buf lint
+      - buf generate
+
+  proto:check:
+    desc: 生成代码与契约一致（CI 同样检查）
+    cmds:
+      - buf lint
+      - buf generate
+      - git diff --exit-code -- api/gen
+
   build:
     desc: 编译全部服务到 bin/
     cmds: [go build -o bin/ ./cmd/...]
