@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"unicode"
 	"unicode/utf8"
 
 	"golang.org/x/crypto/argon2"
@@ -49,7 +50,7 @@ func CheckPassword(pw string, identifiers ...string) error {
 		return ErrPasswordWeak.WithDetail("min_length", MinPasswordLength).WithDetail("max_length", MaxPasswordLength)
 	}
 	lower := strings.ToLower(pw)
-	if weakPasswords[lower] || repetitive(lower) || sequential(lower) {
+	if weakPasswords[lower] || weakPasswords[stripSuffix(lower)] || repetitive(lower) || sequential(lower) {
 		return ErrPasswordWeak
 	}
 	for _, id := range identifiers {
@@ -73,19 +74,32 @@ func repetitive(s string) bool {
 	return false
 }
 
-// sequential catches runs such as "0123456789" or "abcdefghijk".
+// stripSuffix drops the digits and symbols people append to a common word
+// to pass a length rule, e.g. "password2026!".
+func stripSuffix(s string) string {
+	return strings.TrimRightFunc(s, func(r rune) bool {
+		return unicode.IsDigit(r) || strings.ContainsRune("!@#$%^&*()_+-=.,?~", r)
+	})
+}
+
+// sequential catches runs such as "0123456789", "123456789012" (digits
+// wrap around) or "abcdefghijk".
 func sequential(s string) bool {
+	step := func(a, b byte, d int) bool {
+		if isDigit(a) && isDigit(b) {
+			return int(b-'0') == (int(a-'0')+d+10)%10
+		}
+		return int(b) == int(a)+d
+	}
 	up, down := true, true
 	for i := 1; i < len(s); i++ {
-		if s[i] != s[i-1]+1 {
-			up = false
-		}
-		if s[i] != s[i-1]-1 {
-			down = false
-		}
+		up = up && step(s[i-1], s[i], 1)
+		down = down && step(s[i-1], s[i], -1)
 	}
 	return up || down
 }
+
+func isDigit(b byte) bool { return b >= '0' && b <= '9' }
 
 // PasswordCost is the Argon2id cost. Production uses the §5.2 cost; tests
 // pass a lower one to stay fast. Verify honors the cost stored in a hash,
