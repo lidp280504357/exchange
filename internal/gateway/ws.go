@@ -31,8 +31,8 @@ const (
 	wsTick            = 5 * time.Second
 )
 
-// Private channels; public market channels arrive with phase 2.
-var privateChannels = []string{"balances", "notifications"}
+// Private channels; the public market channels are in wsmarket.go.
+var privateChannels = []string{"balances", "notifications", "orders", "fills"}
 
 // TokenChecker authenticates access tokens (the Authenticator).
 type TokenChecker interface {
@@ -54,6 +54,11 @@ type Hub struct {
 	users  map[string]*wsUser
 	conns  map[*wsConn]struct{}
 	closed bool
+	// Public market channels: subscribers, depth books and the latest
+	// ticker or candle of each channel.
+	public map[string]map[*wsConn]struct{}
+	depth  map[string]*depthBook
+	latest map[string]wsMarket
 
 	connected prometheus.Gauge
 	pushed    *prometheus.CounterVec
@@ -83,9 +88,10 @@ func NewHub(auth TokenChecker, originPatterns []string, log *slog.Logger, reg pr
 	h := &Hub{
 		auth: auth, origins: originPatterns, log: log, now: time.Now,
 		users: map[string]*wsUser{}, conns: map[*wsConn]struct{}{},
+		public: map[string]map[*wsConn]struct{}{}, depth: map[string]*depthBook{}, latest: map[string]wsMarket{},
 		connected: prometheus.NewGauge(prometheus.GaugeOpts{Name: "ws_connections", Help: "Open WebSocket connections."}),
 		pushed: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "ws_pushed_total", Help: "Private events pushed to connections, by channel.",
+			Name: "ws_pushed_total", Help: "Messages pushed to connections, by channel (public ones by kind: ticker, depth, ...).",
 		}, []string{"channel"}),
 		stop: make(chan struct{}), done: make(chan struct{}),
 	}
@@ -121,15 +127,21 @@ func (h *Hub) Publish(userID, channel string, data any) {
 	}
 }
 
-// Run drops the backlog of users gone for wsKeepIdleUser, until Stop.
+// Run drops the backlog of users gone for wsKeepIdleUser and resends depth
+// snapshots, until Stop.
 func (h *Hub) Run() error {
 	defer close(h.done)
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
+	depth := time.NewTicker(wsDepthResend)
+	defer depth.Stop()
 	for {
 		select {
 		case <-h.stop:
 			return nil
+		case <-depth.C:
+			h.resendDepth()
+			continue
 		case <-t.C:
 		}
 		h.mu.Lock()
@@ -222,6 +234,7 @@ func (h *Hub) forget(c *wsConn) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.conns, c)
+	h.unsubscribePublicLocked(c, nil)
 	if id := c.userID(); id != "" {
 		if u := h.users[id]; u != nil {
 			delete(u.conns, c)
@@ -435,6 +448,7 @@ func (c *wsConn) handle(in wsIn) {
 			delete(c.subs, ch)
 		}
 		c.mu.Unlock()
+		c.hub.unsubscribePublic(c, in.Args)
 		c.enqueue(wsReply{Op: "unsubscribe", OK: true, Args: in.Args})
 	default:
 		c.enqueue(wsReply{Op: in.Op, Code: apperr.CodeInvalidArgument, Message: "unknown op"})
@@ -468,18 +482,23 @@ func (c *wsConn) authenticate(token string) {
 }
 
 func (c *wsConn) subscribe(args []string, lastSeq int64) {
+	var private, public []string
 	c.mu.Lock()
 	for _, ch := range args {
-		if !slices.Contains(privateChannels, ch) {
+		switch {
+		case publicChannel(ch):
+			public = append(public, ch)
+			continue
+		case !slices.Contains(privateChannels, ch):
 			c.mu.Unlock()
 			c.enqueue(wsReply{Op: "subscribe", Code: apperr.CodeInvalidArgument, Message: "unknown or unavailable channel " + ch})
 			return
-		}
-		if !c.authed {
+		case !c.authed:
 			c.mu.Unlock()
 			c.enqueue(wsReply{Op: "subscribe", Code: apperr.CodeUnauthorized, Message: "authenticate before subscribing to " + ch})
 			return
 		}
+		private = append(private, ch)
 	}
 	added := 0
 	for _, ch := range args {
@@ -498,10 +517,13 @@ func (c *wsConn) subscribe(args []string, lastSeq int64) {
 	user := c.id.UserID
 	c.mu.Unlock()
 	c.enqueue(wsReply{Op: "subscribe", OK: true, Args: args})
-	if lastSeq > 0 {
-		pushes, complete := c.hub.missed(user, lastSeq, args)
+	if len(public) > 0 {
+		c.hub.subscribePublic(c, public)
+	}
+	if lastSeq > 0 && len(private) > 0 {
+		pushes, complete := c.hub.missed(user, lastSeq, private)
 		if !complete {
-			c.enqueue(wsReply{Op: "resync", OK: true, Message: "events after last_seq are no longer buffered; reload over REST", Args: args})
+			c.enqueue(wsReply{Op: "resync", OK: true, Message: "events after last_seq are no longer buffered; reload over REST", Args: private})
 			return
 		}
 		for _, p := range pushes {

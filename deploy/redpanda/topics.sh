@@ -60,6 +60,14 @@ done
 # 撮合引擎输入命令，需要可重放，保留 30 天
 ensure "${NS}order.commands" 3 30
 
+# 撮合引擎直接导出的深度快照：派生状态，丢了由下一份补上，只保留 1 小时，没有 retry/dlq
+if grep -qx "${NS}market.depth" <<<"$existing"; then
+  echo "exists : ${NS}market.depth"
+else
+  rpk topic create "${NS}market.depth" -p 3 -r 1 -c "retention.ms=3600000" >/dev/null
+  echo "created: ${NS}market.depth (partitions=3, retention=1h)"
+fi
+
 # 需要重放的 topic 保留 30 天（对已存在的 topic 也生效）
 for t in "${NS}trade.events" "${NS}order.commands"; do
   rpk topic alter-config "$t" --set "retention.ms=$((30 * DAY_MS))" >/dev/null && echo "retention: $t = 30d"

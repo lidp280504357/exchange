@@ -37,6 +37,11 @@ const (
 	TopicTrade        = "trade.events"
 	// TopicOrderCommands is the matching engine's input (§5.7), keyed by symbol.
 	TopicOrderCommands = "order.commands"
+	// TopicMarketDepth carries the engine's depth snapshots (§11.8): derived
+	// state published straight from memory, kept an hour, no retry topics.
+	TopicMarketDepth = "market.depth"
+	// TopicMarketCandle carries candles and tickers from market-data-service.
+	TopicMarketCandle = "market.candle.events"
 )
 
 // Factory stamps envelopes with the producing service and instance.

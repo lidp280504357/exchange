@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/trading/domain"
@@ -45,6 +46,16 @@ func (r memFills) OfUser(_ context.Context, userID, symbol, _ string, limit int)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Seq > out[j].Seq })
 	return out[:min(len(out), limit)], nil
+}
+
+func (r memFills) LastPrice(_ context.Context, symbol string) (decimal.Decimal, error) {
+	var last domain.Fill
+	for _, f := range r.s.fills {
+		if f.Symbol == symbol && f.Seq > last.Seq {
+			last = f
+		}
+	}
+	return last.Price, nil
 }
 
 func (r memOrders) Unreleased(_ context.Context, cutoff time.Time, limit int) ([]domain.Order, error) {

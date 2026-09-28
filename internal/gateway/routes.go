@@ -16,6 +16,7 @@ type Upstreams struct {
 	Instrument   http.Handler
 	Ledger       http.Handler
 	Trading      http.Handler
+	Market       http.Handler
 	// DevInbox is notification-service's mock-provider inbox; nil in
 	// production, where it is never routed.
 	DevInbox http.Handler
@@ -90,6 +91,11 @@ func Mount(r chi.Router, g Guards, up Upstreams) {
 		r.Handle("/v1/market/assets", up.Instrument)
 		r.Handle("/v1/market/pairs", up.Instrument)
 		r.Handle("/v1/market/pairs/*", up.Instrument)
+		// Public market data; the static routes above win over {symbol}.
+		if up.Market != nil {
+			r.Handle("/v1/market/tickers", up.Market)
+			r.Handle("/v1/market/{symbol}/*", up.Market)
+		}
 
 		private := r.With(g.signedIn(true, RuleUser)...)
 		private.Handle("/v1/user/*", up.User)

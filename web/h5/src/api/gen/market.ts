@@ -52,6 +52,100 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/market/tickers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Rolling 24-hour tickers of every listed pair */
+        get: operations["listTickers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/market/{symbol}/ticker": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Rolling 24-hour ticker of a pair */
+        get: operations["getTicker"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/market/{symbol}/depth": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Order book depth, aggregated by price, best first
+         * @description The engine's latest snapshot (at most every 100 ms); empty before the first one.
+         */
+        get: operations["getDepth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/market/{symbol}/trades": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The latest trades of a pair, newest first */
+        get: operations["listTrades"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/market/{symbol}/candles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Candles of a pair, oldest first
+         * @description Built from the platform's trades, aligned to UTC (weeks start on
+         *     Monday). Intervals without trades repeat the previous close with
+         *     zero volume, so the series has no gaps; intervals before the first
+         *     trade are left out. At most `limit` candles, the latest ones.
+         */
+        get: operations["listCandles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -100,6 +194,61 @@ export interface components {
             /** @enum {string} */
             status: "PREPARE" | "TRADING" | "HALT" | "CANCEL_ONLY" | "DELISTED";
         };
+        NullableDecimal: string | null;
+        /**
+         * @description Rolling 24 hours at minute resolution (§11.8). Prices are null while
+         *     unknown: a pair that never traded, or an empty side of the book.
+         */
+        Ticker: {
+            symbol: string;
+            last: components["schemas"]["NullableDecimal"];
+            /** @description The last trade price 24 hours ago. */
+            open: components["schemas"]["NullableDecimal"];
+            high: components["schemas"]["NullableDecimal"];
+            low: components["schemas"]["NullableDecimal"];
+            volume: components["schemas"]["Decimal"];
+            quote_volume: components["schemas"]["Decimal"];
+            /** Format: int64 */
+            trade_count: number;
+            /** @description (last - open) / open as a fraction, e.g. "0.0125" for 1.25%. */
+            change: components["schemas"]["NullableDecimal"];
+            bid: components["schemas"]["NullableDecimal"];
+            ask: components["schemas"]["NullableDecimal"];
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description [price, quantity] */
+        PriceLevel: components["schemas"]["Decimal"][];
+        PublicTrade: {
+            /** Format: uuid */
+            trade_id: string;
+            /**
+             * Format: int64
+             * @description The pair's trades counted from 1 (0 for trades from before numbering).
+             */
+            trade_number: number;
+            price: components["schemas"]["Decimal"];
+            quantity: components["schemas"]["Decimal"];
+            quote_quantity: components["schemas"]["Decimal"];
+            /** @enum {string} */
+            taker_side: "BUY" | "SELL";
+            /** Format: date-time */
+            executed_at: string;
+        };
+        Candle: {
+            /** Format: date-time */
+            open_time: string;
+            open: components["schemas"]["Decimal"];
+            high: components["schemas"]["Decimal"];
+            low: components["schemas"]["Decimal"];
+            close: components["schemas"]["Decimal"];
+            volume: components["schemas"]["Decimal"];
+            quote_volume: components["schemas"]["Decimal"];
+            /** Format: int64 */
+            trade_count: number;
+            /** @description The interval has ended. */
+            closed: boolean;
+        };
         Error: {
             /**
              * @description Stable machine-readable code (appendix C), used by clients for i18n.
@@ -126,7 +275,10 @@ export interface components {
             };
         };
     };
-    parameters: never;
+    parameters: {
+        /** @description A listed pair (case-insensitive). */
+        Symbol: string;
+    };
     requestBodies: never;
     headers: {
         /** @description W3C trace ID of the request, shared by logs and events. */
@@ -200,6 +352,155 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TradingPair"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listTickers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One ticker per listed pair. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        tickers: components["schemas"]["Ticker"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getTicker: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A listed pair (case-insensitive). */
+                symbol: components["parameters"]["Symbol"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ticker. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ticker"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getDepth: {
+        parameters: {
+            query?: {
+                /** @description Levels per side, at most 200. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description A listed pair (case-insensitive). */
+                symbol: components["parameters"]["Symbol"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The depth. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        symbol: string;
+                        /**
+                         * Format: int64
+                         * @description The book's engine sequence at the snapshot; 0 before the first.
+                         */
+                        sequence: number;
+                        bids: components["schemas"]["PriceLevel"][];
+                        asks: components["schemas"]["PriceLevel"][];
+                        /** Format: date-time */
+                        updated_at: string | null;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listTrades: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description A listed pair (case-insensitive). */
+                symbol: components["parameters"]["Symbol"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The trades. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        symbol: string;
+                        trades: components["schemas"]["PublicTrade"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listCandles: {
+        parameters: {
+            query: {
+                interval: "1m" | "3m" | "5m" | "15m" | "30m" | "1h" | "2h" | "4h" | "6h" | "12h" | "1d" | "1w" | "1M";
+                /** @description First candle, the one containing this time (RFC 3339); default limit intervals before to. */
+                from?: string;
+                /** @description Candles opening before this time (RFC 3339); default now. */
+                to?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description A listed pair (case-insensitive). */
+                symbol: components["parameters"]["Symbol"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The candles. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        symbol: string;
+                        interval: string;
+                        candles: components["schemas"]["Candle"][];
+                    };
                 };
             };
             default: components["responses"]["Error"];

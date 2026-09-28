@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
+	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
 	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
 	tradev1 "github.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1"
 	"github.com/lidp280504357/exchange/internal/matching/ports"
@@ -242,5 +243,55 @@ func TestCommandsFromBeforeTheEngineTakeAssetsFromTheSymbol(t *testing.T) {
 	trade := mustPayload(store.outbox[1].Envelope).(*tradev1.TradeExecuted)
 	if trade.GetBaseAsset() != "BTC" || trade.GetQuoteAsset() != "USDT" || trade.GetQuantity() != "0.1" {
 		t.Fatalf("trade: %v", trade)
+	}
+}
+
+type fakePublisher struct{ recs []kafka.Record }
+
+func (p *fakePublisher) Publish(_ context.Context, recs ...kafka.Record) error {
+	p.recs = append(p.recs, recs...)
+	return nil
+}
+
+func TestDepthsOfChangedBooksArePublished(t *testing.T) {
+	store := &memStore{snapshots: map[int32]ports.Snapshot{}}
+	e := newEngine(t, store)
+	e.Depths(DepthLevels, false) // the recovery marked everything changed
+	ctx := context.Background()
+	if err := e.Handle(ctx, deliveries(0,
+		place(t, "s1", "alice", orderv1.Side_SIDE_SELL, "60100", "0.1"),
+		place(t, "s2", "alice", orderv1.Side_SIDE_SELL, "60100", "0.2"),
+		place(t, "b1", "bob", orderv1.Side_SIDE_BUY, "60000", "0.1"))); err != nil {
+		t.Fatal(err)
+	}
+	depths := e.Depths(DepthLevels, false)
+	if len(depths) != 1 || depths[0].Symbol != "BTC-USDT" || len(depths[0].Asks) != 1 || depths[0].Asks[0].Quantity.String() != "0.3" {
+		t.Fatalf("depths: %+v", depths)
+	}
+	if again := e.Depths(DepthLevels, false); len(again) != 0 {
+		t.Fatalf("an unchanged book was exported again: %+v", again)
+	}
+	if all := e.Depths(DepthLevels, true); len(all) != 1 {
+		t.Fatalf("a refresh exports every book: %+v", all)
+	}
+
+	pub := &fakePublisher{}
+	x := NewDepthExporter(e, pub, event.NewFactory("matching-engine", "test"), prometheus.NewRegistry())
+	if err := x.Export(ctx, depths); err != nil {
+		t.Fatal(err)
+	}
+	if len(pub.recs) != 1 || pub.recs[0].Topic != event.TopicMarketDepth || pub.recs[0].Key != "BTC-USDT" {
+		t.Fatalf("records: %+v", pub.recs)
+	}
+	var env eventv1.Envelope
+	if err := proto.Unmarshal(pub.recs[0].Envelope, &env); err != nil {
+		t.Fatal(err)
+	}
+	var snap marketv1.DepthSnapshot
+	if err := env.GetPayload().UnmarshalTo(&snap); err != nil {
+		t.Fatal(err)
+	}
+	if snap.GetSequence() != depths[0].Seq || len(snap.GetBids()) != 1 || snap.GetBids()[0].GetPrice() != "60000" || snap.GetAsks()[0].GetQuantity() != "0.3" {
+		t.Fatalf("snapshot: %v", &snap)
 	}
 }

@@ -51,6 +51,7 @@ services:
       INSTRUMENT_SERVICE_URL: http://instrument-service:8084
       LEDGER_SERVICE_URL: http://ledger-service:8085
       TRADING_SERVICE_URL: http://spot-trading-service:8088
+      MARKET_DATA_SERVICE_URL: http://market-data-service:8090
     depends_on:
       redis: {condition: service_healthy}
       redpanda: {condition: service_healthy}
@@ -60,6 +61,7 @@ services:
       instrument-service: {condition: service_started}
       ledger-service: {condition: service_started}
       spot-trading-service: {condition: service_started}
+      market-data-service: {condition: service_started}
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9080/readyz"]
@@ -165,6 +167,20 @@ services:
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9086/readyz"]
+
+  market-data-service:
+    <<: *app
+    command: ["/app/market-data-service"]
+    environment:
+      <<: *base-env
+      INSTRUMENT_GRPC_ADDR: instrument-service:9184
+    depends_on:
+      postgres: {condition: service_healthy}
+      redpanda: {condition: service_healthy}
+      instrument-service: {condition: service_started}
+    healthcheck:
+      <<: *health
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/readyz"]
 
   # One active engine (it holds a database lease); a second instance would
   # wait as a standby (ADR-0002).

@@ -271,4 +271,15 @@ func TestEngineColumnsFillsAndReleases(t *testing.T) {
 	if err != nil || len(page) != 1 || page[0].TradeID != trade {
 		t.Fatalf("user page 2: %+v %v", page, err)
 	}
+	// The latest trade (by sequence) anchors the price band.
+	later.TradeID, later.Seq, later.Price = uuid.NewString(), 4, d("59000")
+	if err := store.Read().Fills().Insert(ctx, later); err != nil {
+		t.Fatal(err)
+	}
+	if last, err := store.Read().Fills().LastPrice(ctx, "BTC-USDT"); err != nil || !last.Equal(d("60000.01")) {
+		t.Fatalf("last price %s, %v", last, err)
+	}
+	if none, err := store.Read().Fills().LastPrice(ctx, "ETH-USDT"); err != nil || !none.IsZero() {
+		t.Fatalf("a symbol without trades: %s, %v", none, err)
+	}
 }

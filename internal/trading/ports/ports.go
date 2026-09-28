@@ -64,6 +64,9 @@ type FillRepo interface {
 	// OfUser returns a page of the user's fills, newest first; before is
 	// the trade ID of the previous page's last fill.
 	OfUser(ctx context.Context, userID, symbol, before string, limit int) ([]domain.Fill, error)
+	// LastPrice returns the price of the symbol's latest trade, zero when
+	// it has none.
+	LastPrice(ctx context.Context, symbol string) (decimal.Decimal, error)
 }
 
 // ListFilter selects a page of orders.

@@ -141,6 +141,21 @@ func Events(ctx context.Context, a *app.App, db *pg.DB, cfg kafka.Config) (*even
 	return event.NewFactory(a.Name(), a.Config().InstanceID), nil
 }
 
+// Producer connects a Kafka producer for records published straight from
+// memory rather than through the outbox: derived data that may be lost,
+// such as market depth.
+func Producer(ctx context.Context, a *app.App, cfg kafka.Config) (*kafka.Producer, error) {
+	prod, err := kafka.NewProducer(ctx, cfg, a.Name()+"-direct")
+	if err != nil {
+		return nil, err
+	}
+	a.Cleanup("kafka direct producer", func(context.Context) error {
+		prod.Close()
+		return nil
+	})
+	return prod, nil
+}
+
 var (
 	consumerMetricsMu sync.Mutex
 	consumerMetrics   = map[prometheus.Registerer]*kafka.ConsumerMetrics{}

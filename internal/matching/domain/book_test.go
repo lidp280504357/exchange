@@ -330,3 +330,23 @@ func checkBook(t *testing.T, b *Book) {
 		t.Fatalf("index has %d orders, levels %d", len(b.index), count)
 	}
 }
+
+func TestDepthAggregatesLevels(t *testing.T) {
+	b := NewBook("BTC-USDT")
+	b.Place(limit("a", Sell, "60100", "0.1"))
+	b.Place(limit("b", Sell, "60000", "0.1"))
+	b.Place(limit("c", Sell, "60000", "0.2"))
+	b.Place(limit("d", Buy, "59000", "0.3"))
+	b.Place(limit("e", Buy, "60000", "0.05")) // takes 0.05 of b
+	depth := b.Depth(1)
+	if len(depth.Asks) != 1 || !depth.Asks[0].Price.Equal(d("60000")) || !depth.Asks[0].Quantity.Equal(d("0.25")) ||
+		len(depth.Bids) != 1 || !depth.Bids[0].Quantity.Equal(d("0.3")) || depth.Seq != b.Seq || depth.Symbol != "BTC-USDT" {
+		t.Fatalf("depth(1): %+v", depth)
+	}
+	if all := b.Depth(200); len(all.Asks) != 2 || !all.Asks[1].Price.Equal(d("60100")) || len(all.Bids) != 1 {
+		t.Fatalf("depth(200): %+v", all)
+	}
+	if empty := NewBook("X").Depth(200); len(empty.Bids)+len(empty.Asks) != 0 {
+		t.Fatalf("empty book: %+v", empty)
+	}
+}

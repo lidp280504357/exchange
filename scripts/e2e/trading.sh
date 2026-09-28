@@ -4,7 +4,9 @@
 # not stored; an order the balance cannot fund is stored as REJECTED; a
 # client_order_id makes retries safe; cancels complete through the matching
 # engine and give the frozen funds back. The orders rest far from the
-# prices of matching.sh. Needs BTC-USDT in TRADING and ETH-BTC not.
+# prices of matching.sh but inside the price band around its last trade
+# (BTC-USDT's band is 100% in the test data). Needs BTC-USDT in TRADING and
+# ETH-BTC not.
 #
 #   scripts/e2e/trading.sh
 set -euo pipefail
@@ -56,6 +58,8 @@ order '{"symbol":"BTC-USDT","side":"BUY","type":"LIMIT","price":"50000.001","qua
 expect 400 INSTRUMENT_PRECISION "price off the tick"
 order '{"symbol":"BTC-USDT","side":"SELL","type":"LIMIT","price":"50000","quantity":"101"}'
 expect 400 ORDER_QUANTITY_OUT_OF_RANGE "quantity above the maximum"
+order '{"symbol":"BTC-USDT","side":"SELL","type":"LIMIT","price":"200000","quantity":"0.001"}'
+expect 422 ORDER_PRICE_OUT_OF_BAND "more than the band above the last trade"
 order '{"symbol":"BTC-USDT","side":"BUY","type":"LIMIT","price":"100","quantity":"0.001"}'
 expect 422 ORDER_MIN_NOTIONAL "below the minimum notional"
 order '{"symbol":"BTC-USDT","side":"BUY","type":"MARKET","quantity":"0.001"}'
@@ -76,7 +80,7 @@ expect 200 - "the rejected order"
 check '.status == "REJECTED" and .reject_reason == "LEDGER_INSUFFICIENT_BALANCE"' "stored as REJECTED"
 
 echo "== a limit sell"
-order '{"symbol":"BTC-USDT","side":"SELL","type":"LIMIT","price":"150000","quantity":"0.01"}'
+order '{"symbol":"BTC-USDT","side":"SELL","type":"LIMIT","price":"120000","quantity":"0.01"}'
 expect 202 - "limit sell accepted"
 check '.frozen_asset == "BTC" and .frozen_amount == "0.01"' "0.01 BTC frozen"
 SELL=$(jq -r .order_id <<<"$BODY")

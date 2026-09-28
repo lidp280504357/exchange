@@ -1,0 +1,85 @@
+syntax = "proto3";
+
+package exchange.market.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Platform market data (requirements §5.11, §7.3, §11.8), keyed by symbol.
+// Amounts are decimal strings.
+//
+//   market.depth          DepthSnapshot, from the matching engine: the
+//                         aggregated book at most every 100 ms when it
+//                         changed, all books every 10 s. Derived state,
+//                         kept one hour, not ingested into ClickHouse.
+//   market.candle.events  CandleUpdated, CandleClosed, TickerUpdated, from
+//                         market-data-service.
+
+// PriceLevel is the total resting quantity at one price.
+message PriceLevel {
+  string price = 1;
+  string quantity = 2;
+}
+
+// DepthSnapshot is the top of a book, best prices first.
+message DepthSnapshot {
+  string symbol = 1;
+  // The book's event sequence when the snapshot was taken.
+  int64 sequence = 2;
+  repeated PriceLevel bids = 3;
+  repeated PriceLevel asks = 4;
+  google.protobuf.Timestamp taken_at = 5;
+}
+
+// Candle is one interval of a symbol's trades (§11.8). An interval without
+// trades repeats the previous close with zero volume.
+message Candle {
+  string symbol = 1;
+  // 1m 3m 5m 15m 30m 1h 2h 4h 6h 12h 1d 1w 1M, aligned to UTC.
+  string interval = 2;
+  google.protobuf.Timestamp open_time = 3;
+  string open = 4;
+  string high = 5;
+  string low = 6;
+  string close = 7;
+  // Traded base quantity and quote amount.
+  string volume = 8;
+  string quote_volume = 9;
+  int64 trade_count = 10;
+  bool closed = 11;
+}
+
+// CandleUpdated is the open candle, pushed at most every 500 ms while it
+// changes.
+message CandleUpdated {
+  Candle candle = 1;
+}
+
+// CandleClosed is a candle whose interval has ended.
+message CandleClosed {
+  Candle candle = 1;
+}
+
+// Ticker is the rolling 24-hour summary of a symbol (§11.8).
+message Ticker {
+  string symbol = 1;
+  // The latest trade price; kept when no trade happened in the window.
+  string last = 2;
+  // The last trade price 24 hours ago.
+  string open = 3;
+  string high = 4;
+  string low = 5;
+  string volume = 6;
+  string quote_volume = 7;
+  int64 trade_count = 8;
+  // (last - open) / open, as a fraction; empty without an open price.
+  string change = 9;
+  // Best bid and ask; empty when that side is empty.
+  string bid = 10;
+  string ask = 11;
+  google.protobuf.Timestamp updated_at = 12;
+}
+
+// TickerUpdated is pushed at most every 500 ms while the ticker changes.
+message TickerUpdated {
+  Ticker ticker = 1;
+}

@@ -1,11 +1,15 @@
 openapi: 3.1.0
 info:
-  title: Exchange market reference API
-  version: 0.1.0
+  title: Exchange market API
+  version: 0.2.0
   description: |
-    Assets, networks and trading pairs (requirements §5.5), public and
-    cacheable for 10 seconds. Amounts are decimal strings (ADR-0008):
-    clients must not parse them into floating point.
+    Public market endpoints, no sign-in. Reference data (requirements
+    §5.5: assets, networks, trading pairs) is cacheable for 10 seconds;
+    market data (§5.11, §11.8: tickers, depth, trades, candles, built from
+    the platform's own trades) for 1 second. Amounts are decimal strings
+    (ADR-0008): clients must not parse them into floating point. Live
+    updates come over the WebSocket channels ticker:, depth:, trades: and
+    candles: (§7.3).
 servers:
   - url: https://astras.vip
 tags:
@@ -72,7 +76,183 @@ paths:
                 $ref: '#/components/schemas/TradingPair'
         default:
           $ref: './common.yaml#/components/responses/Error'
+  /v1/market/tickers:
+    get:
+      operationId: listTickers
+      summary: Rolling 24-hour tickers of every listed pair
+      tags: [market]
+      responses:
+        '200':
+          description: One ticker per listed pair.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tickers]
+                properties:
+                  tickers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Ticker'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/market/{symbol}/ticker:
+    get:
+      operationId: getTicker
+      summary: Rolling 24-hour ticker of a pair
+      tags: [market]
+      parameters:
+        - $ref: '#/components/parameters/Symbol'
+      responses:
+        '200':
+          description: The ticker.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticker'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/market/{symbol}/depth:
+    get:
+      operationId: getDepth
+      summary: Order book depth, aggregated by price, best first
+      description: The engine's latest snapshot (at most every 100 ms); empty before the first one.
+      tags: [market]
+      parameters:
+        - $ref: '#/components/parameters/Symbol'
+        - name: limit
+          in: query
+          description: Levels per side, at most 200.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+      responses:
+        '200':
+          description: The depth.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [symbol, sequence, bids, asks, updated_at]
+                properties:
+                  symbol:
+                    type: string
+                  sequence:
+                    type: integer
+                    format: int64
+                    description: The book's engine sequence at the snapshot; 0 before the first.
+                  bids:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PriceLevel'
+                  asks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PriceLevel'
+                  updated_at:
+                    type: [string, 'null']
+                    format: date-time
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/market/{symbol}/trades:
+    get:
+      operationId: listTrades
+      summary: The latest trades of a pair, newest first
+      tags: [market]
+      parameters:
+        - $ref: '#/components/parameters/Symbol'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: The trades.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [symbol, trades]
+                properties:
+                  symbol:
+                    type: string
+                  trades:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PublicTrade'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/market/{symbol}/candles:
+    get:
+      operationId: listCandles
+      summary: Candles of a pair, oldest first
+      description: |
+        Built from the platform's trades, aligned to UTC (weeks start on
+        Monday). Intervals without trades repeat the previous close with
+        zero volume, so the series has no gaps; intervals before the first
+        trade are left out. At most `limit` candles, the latest ones.
+      tags: [market]
+      parameters:
+        - $ref: '#/components/parameters/Symbol'
+        - name: interval
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d, 1w, 1M]
+        - name: from
+          in: query
+          description: First candle, the one containing this time (RFC 3339); default limit intervals before to.
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: Candles opening before this time (RFC 3339); default now.
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 500
+      responses:
+        '200':
+          description: The candles.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [symbol, interval, candles]
+                properties:
+                  symbol:
+                    type: string
+                  interval:
+                    type: string
+                  candles:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Candle'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
 components:
+  parameters:
+    Symbol:
+      name: symbol
+      in: path
+      required: true
+      description: A listed pair (case-insensitive).
+      schema:
+        type: string
+        examples: [BTC-USDT]
   schemas:
     Decimal:
       type: string
@@ -159,3 +339,96 @@ components:
         status:
           type: string
           enum: [PREPARE, TRADING, HALT, CANCEL_ONLY, DELISTED]
+    NullableDecimal:
+      type: [string, 'null']
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+    Ticker:
+      type: object
+      description: |
+        Rolling 24 hours at minute resolution (§11.8). Prices are null while
+        unknown: a pair that never traded, or an empty side of the book.
+      required: [symbol, last, open, high, low, volume, quote_volume, trade_count, change, bid, ask, updated_at]
+      properties:
+        symbol:
+          type: string
+        last:
+          $ref: '#/components/schemas/NullableDecimal'
+        open:
+          description: The last trade price 24 hours ago.
+          $ref: '#/components/schemas/NullableDecimal'
+        high:
+          $ref: '#/components/schemas/NullableDecimal'
+        low:
+          $ref: '#/components/schemas/NullableDecimal'
+        volume:
+          $ref: '#/components/schemas/Decimal'
+        quote_volume:
+          $ref: '#/components/schemas/Decimal'
+        trade_count:
+          type: integer
+          format: int64
+        change:
+          description: (last - open) / open as a fraction, e.g. "0.0125" for 1.25%.
+          $ref: '#/components/schemas/NullableDecimal'
+        bid:
+          $ref: '#/components/schemas/NullableDecimal'
+        ask:
+          $ref: '#/components/schemas/NullableDecimal'
+        updated_at:
+          type: string
+          format: date-time
+    PriceLevel:
+      type: array
+      description: '[price, quantity]'
+      items:
+        $ref: '#/components/schemas/Decimal'
+      minItems: 2
+      maxItems: 2
+    PublicTrade:
+      type: object
+      required: [trade_id, trade_number, price, quantity, quote_quantity, taker_side, executed_at]
+      properties:
+        trade_id:
+          type: string
+          format: uuid
+        trade_number:
+          type: integer
+          format: int64
+          description: The pair's trades counted from 1 (0 for trades from before numbering).
+        price:
+          $ref: '#/components/schemas/Decimal'
+        quantity:
+          $ref: '#/components/schemas/Decimal'
+        quote_quantity:
+          $ref: '#/components/schemas/Decimal'
+        taker_side:
+          type: string
+          enum: [BUY, SELL]
+        executed_at:
+          type: string
+          format: date-time
+    Candle:
+      type: object
+      required: [open_time, open, high, low, close, volume, quote_volume, trade_count, closed]
+      properties:
+        open_time:
+          type: string
+          format: date-time
+        open:
+          $ref: '#/components/schemas/Decimal'
+        high:
+          $ref: '#/components/schemas/Decimal'
+        low:
+          $ref: '#/components/schemas/Decimal'
+        close:
+          $ref: '#/components/schemas/Decimal'
+        volume:
+          $ref: '#/components/schemas/Decimal'
+        quote_volume:
+          $ref: '#/components/schemas/Decimal'
+        trade_count:
+          type: integer
+          format: int64
+        closed:
+          type: boolean
+          description: The interval has ended.

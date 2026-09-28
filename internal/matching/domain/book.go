@@ -313,6 +313,36 @@ func (b *Book) orderEvent(kind Kind, o *Order, reason, trade string) Event {
 	}
 }
 
+// Level is the total resting quantity at one price.
+type Level struct {
+	Price    decimal.Decimal
+	Quantity decimal.Decimal
+}
+
+// Depth is the aggregated top of a book, best prices first.
+type Depth struct {
+	Symbol string
+	Seq    int64
+	Bids   []Level
+	Asks   []Level
+}
+
+// Depth aggregates up to limit price levels per side.
+func (b *Book) Depth(limit int) Depth {
+	side := func(levels []*level) []Level {
+		out := make([]Level, 0, min(limit, len(levels)))
+		for _, lvl := range levels[:min(limit, len(levels))] {
+			qty := decimal.Zero
+			for _, o := range lvl.orders {
+				qty = qty.Add(o.Remaining())
+			}
+			out = append(out, Level{Price: lvl.price, Quantity: qty})
+		}
+		return out
+	}
+	return Depth{Symbol: b.Symbol, Seq: b.Seq, Bids: side(b.bids), Asks: side(b.asks)}
+}
+
 // Snapshot is a book's state: its sequence, trade count and resting
 // orders, bids best first, then asks best first, each level oldest first.
 type Snapshot struct {

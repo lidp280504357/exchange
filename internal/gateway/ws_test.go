@@ -11,8 +11,14 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/prometheus/client_golang/prometheus"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
+	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
+	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
+	tradev1 "github.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1"
 	"github.com/lidp280504357/exchange/internal/platform/authtoken"
+	"github.com/lidp280504357/exchange/internal/platform/event"
 )
 
 type wsClient struct {
@@ -92,9 +98,9 @@ func TestWebSocketPrivateChannels(t *testing.T) {
 	if m := c.next(); m["ok"] != true || m["user_id"] != "u-1" {
 		t.Fatalf("auth: %v", m)
 	}
-	c.send(`{"op":"subscribe","args":["depth:BTC-USDT"]}`)
+	c.send(`{"op":"subscribe","args":["candles:BTC-USDT:2d"]}`)
 	if m := c.next(); m["ok"] == true {
-		t.Fatalf("public channels are not available yet: %v", m)
+		t.Fatalf("an unknown interval: %v", m)
 	}
 	c.send(`{"op":"subscribe","args":["balances","notifications"]}`)
 	if m := c.next(); m["ok"] != true {
@@ -143,4 +149,93 @@ func TestWebSocketPrivateChannels(t *testing.T) {
 		t.Fatalf("eleventh connection: %v", m)
 	}
 	_ = extra
+}
+
+func TestWebSocketPublicChannels(t *testing.T) {
+	hub := NewHub(nil, nil, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	go func() { _ = hub.Run() }()
+	t.Cleanup(func() { _ = hub.Stop(context.Background()) })
+	srv := httptest.NewServer(hub)
+	t.Cleanup(srv.Close)
+	url := "ws" + strings.TrimPrefix(srv.URL, "http")
+	events := WSEvents(hub)
+	emit := func(msg proto.Message) {
+		t.Helper()
+		env, err := event.NewFactory("test", "t").New(context.Background(), msg, "symbol", "BTC-USDT")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := events(context.Background(), env); err != nil {
+			t.Fatal(err)
+		}
+	}
+	levels := func(pq ...string) []*marketv1.PriceLevel {
+		var out []*marketv1.PriceLevel
+		for i := 0; i+1 < len(pq); i += 2 {
+			out = append(out, &marketv1.PriceLevel{Price: pq[i], Quantity: pq[i+1]})
+		}
+		return out
+	}
+	emit(&marketv1.TickerUpdated{Ticker: &marketv1.Ticker{Symbol: "BTC-USDT", Last: "70000", Volume: "1.5", UpdatedAt: timestamppb.Now()}})
+
+	// No sign-in needed: the depth snapshot and the latest ticker come first.
+	c := dial(t, url)
+	c.send(`{"op":"subscribe","args":["depth:BTC-USDT","ticker:BTC-USDT","trades:BTC-USDT"]}`)
+	if m := c.next(); m["ok"] != true {
+		t.Fatalf("subscribe: %v", m)
+	}
+	if m := c.next(); m["channel"] != "depth:BTC-USDT" || m["type"] != "snapshot" || m["seq"] != nil {
+		t.Fatalf("empty snapshot: %v", m)
+	}
+	if m := c.next(); m["channel"] != "ticker:BTC-USDT" || m["data"].(map[string]any)["last"] != "70000" || m["data"].(map[string]any)["open"] != nil {
+		t.Fatalf("latest ticker: %v", m)
+	}
+
+	emit(&marketv1.DepthSnapshot{Symbol: "BTC-USDT", Sequence: 5, Bids: levels("69900", "1", "69800", "2"), Asks: levels("70100", "0.5")})
+	m := c.next()
+	if m["type"] != "update" || m["seq"] != float64(1) || m["prev_seq"] != nil {
+		t.Fatalf("first update: %v", m)
+	}
+	// An unchanged snapshot sends nothing; a changed one only the changes,
+	// "0" for a level that went away.
+	emit(&marketv1.DepthSnapshot{Symbol: "BTC-USDT", Sequence: 6, Bids: levels("69900", "1", "69800", "2"), Asks: levels("70100", "0.5")})
+	emit(&marketv1.DepthSnapshot{Symbol: "BTC-USDT", Sequence: 9, Bids: levels("69900", "1.5"), Asks: levels("70100", "0.5")})
+	emit(&marketv1.DepthSnapshot{Symbol: "BTC-USDT", Sequence: 7, Bids: levels("1", "1")}) // older: ignored
+	m = c.next()
+	data, _ := json.Marshal(m["data"])
+	if m["seq"] != float64(2) || m["prev_seq"] != float64(1) || string(data) != `{"asks":[],"bids":[["69900","1.5"],["69800","0"]]}` {
+		t.Fatalf("second update: %v %s", m, data)
+	}
+
+	emit(&tradev1.TradeExecuted{
+		TradeId: "t1", TradeNumber: 7, Symbol: "BTC-USDT", BaseAsset: "BTC", QuoteAsset: "USDT", Price: "70100", Quantity: "0.1",
+		QuoteQuantity: "7010", TakerSide: orderv1.Side_SIDE_BUY, BuyerUserId: "u-1", SellerUserId: "u-2", BuyerFee: "0.0001", SellerFee: "7.01",
+	})
+	if m := c.next(); m["channel"] != "trades:BTC-USDT" || m["data"].(map[string]any)["taker_side"] != "BUY" || m["data"].(map[string]any)["trade_number"] != float64(7) {
+		t.Fatalf("public trade: %v", m)
+	}
+
+	// A late subscriber gets the current book, at the current seq.
+	c2 := dial(t, url)
+	c2.send(`{"op":"subscribe","args":["depth:BTC-USDT"]}`)
+	c2.next()
+	m = c2.next()
+	data, _ = json.Marshal(m["data"])
+	if m["type"] != "snapshot" || m["seq"] != float64(2) || string(data) != `{"asks":[["70100","0.5"]],"bids":[["69900","1.5"]]}` {
+		t.Fatalf("late snapshot: %v %s", m, data)
+	}
+	c2.send(`{"op":"unsubscribe","args":["depth:BTC-USDT"]}`)
+	if m := c2.next(); m["op"] != "unsubscribe" {
+		t.Fatalf("unsubscribe: %v", m)
+	}
+	emit(&marketv1.DepthSnapshot{Symbol: "BTC-USDT", Sequence: 10, Bids: levels("69950", "1")})
+	if m := c.next(); m["seq"] != float64(3) {
+		t.Fatalf("update after the other left: %v", m)
+	}
+	hub.mu.Lock()
+	subs := len(hub.public["depth:BTC-USDT"])
+	hub.mu.Unlock()
+	if subs != 1 {
+		t.Fatalf("%d depth subscribers, want 1", subs)
+	}
 }

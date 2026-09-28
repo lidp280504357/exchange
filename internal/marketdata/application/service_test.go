@@ -1,0 +1,298 @@
+package application
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"slices"
+	"sort"
+	"testing"
+	"time"
+
+	"github.com/shopspring/decimal"
+
+	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
+	"github.com/lidp280504357/exchange/internal/marketdata/domain"
+	"github.com/lidp280504357/exchange/internal/marketdata/ports"
+	"github.com/lidp280504357/exchange/internal/platform/apperr"
+)
+
+type memStore struct {
+	symbols map[string]ports.SymbolState
+	candles map[string]domain.Candle
+	trades  []domain.Trade
+	down    bool
+}
+
+func newMemStore() *memStore {
+	return &memStore{symbols: map[string]ports.SymbolState{}, candles: map[string]domain.Candle{}}
+}
+
+func (s *memStore) Tx(_ context.Context, fn func(ports.Repos) error) error {
+	if s.down {
+		return errors.New("database down")
+	}
+	return fn(memRepos{s})
+}
+
+func (s *memStore) Read() ports.Repos { return memRepos{s} }
+
+type memRepos struct{ s *memStore }
+
+func (r memRepos) Symbols() ports.SymbolRepo { return memSymbols(r) }
+func (r memRepos) Candles() ports.CandleRepo { return memCandles(r) }
+func (r memRepos) Trades() ports.TradeRepo   { return memTrades(r) }
+
+type (
+	memSymbols memRepos
+	memCandles memRepos
+	memTrades  memRepos
+)
+
+func (r memSymbols) All(context.Context) ([]ports.SymbolState, error) {
+	var out []ports.SymbolState
+	for _, st := range r.s.symbols {
+		out = append(out, st)
+	}
+	return out, nil
+}
+
+func (r memSymbols) Save(_ context.Context, st ports.SymbolState) error {
+	r.s.symbols[st.Symbol] = st
+	return nil
+}
+
+func candleKey(c domain.Candle) string {
+	return c.Symbol + "|" + string(c.Interval) + "|" + c.OpenTime.Format(time.RFC3339)
+}
+
+func (r memCandles) Upsert(_ context.Context, list []domain.Candle) error {
+	for _, c := range list {
+		r.s.candles[candleKey(c)] = c
+	}
+	return nil
+}
+
+func (r memCandles) sorted(symbol string, i domain.Interval) []domain.Candle {
+	var out []domain.Candle
+	for _, c := range r.s.candles {
+		if c.Symbol == symbol && c.Interval == i {
+			out = append(out, c)
+		}
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].OpenTime.Before(out[b].OpenTime) })
+	return out
+}
+
+func (r memCandles) Latest(_ context.Context, symbol string) ([]domain.Candle, error) {
+	var out []domain.Candle
+	for _, i := range domain.Intervals {
+		if list := r.sorted(symbol, i); len(list) > 0 {
+			out = append(out, list[len(list)-1])
+		}
+	}
+	return out, nil
+}
+
+func (r memCandles) Range(_ context.Context, symbol string, i domain.Interval, from, to time.Time) ([]domain.Candle, error) {
+	var out []domain.Candle
+	for _, c := range r.sorted(symbol, i) {
+		if !c.OpenTime.Before(from) && c.OpenTime.Before(to) {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+func (r memCandles) Before(_ context.Context, symbol string, i domain.Interval, t time.Time) (*domain.Candle, error) {
+	var last *domain.Candle
+	for _, c := range r.sorted(symbol, i) {
+		if c.OpenTime.Before(t) {
+			last = &c
+		}
+	}
+	return last, nil
+}
+
+func (r memTrades) Insert(_ context.Context, list []domain.Trade) error {
+	r.s.trades = append(r.s.trades, list...)
+	return nil
+}
+
+func (r memTrades) Recent(_ context.Context, symbol string, limit int) ([]domain.Trade, error) {
+	var out []domain.Trade
+	for i := len(r.s.trades) - 1; i >= 0 && len(out) < limit; i-- {
+		if r.s.trades[i].Symbol == symbol {
+			out = append(out, r.s.trades[i])
+		}
+	}
+	return out, nil
+}
+
+func (r memTrades) Purge(context.Context, time.Time) (int64, error) { return 0, nil }
+
+type pairs []string
+
+func (p pairs) Listed(_ context.Context, symbol string) (bool, error) {
+	return slices.Contains(p, symbol), nil
+}
+func (p pairs) Symbols(context.Context) ([]string, error) { return p, nil }
+
+func d(s string) decimal.Decimal { return decimal.RequireFromString(s) }
+
+func at(s string) time.Time {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		panic(err)
+	}
+	return t
+}
+
+func trade(seq uint64, price, qty, when string) domain.Trade {
+	p, q := d(price), d(qty)
+	return domain.Trade{
+		Symbol: "BTC-USDT", Sequence: int64(seq), ID: "t", Number: seq, Price: p, Quantity: q, Quote: p.Mul(q), //nolint:gosec // small test numbers
+		TakerSide: "BUY", At: at(when),
+	}
+}
+
+func newService(t *testing.T, store *memStore, now *time.Time) *Service {
+	t.Helper()
+	s := New(store, pairs{"BTC-USDT", "ETH-USDT"}, slog.New(slog.DiscardHandler))
+	s.now = func() time.Time { return *now }
+	if err := s.Load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func TestTradesBuildCandlesTickerAndTradeList(t *testing.T) {
+	ctx := context.Background()
+	store := newMemStore()
+	now := at("2026-09-30T10:03:30Z")
+	s := newService(t, store, &now)
+	batch := []domain.Trade{
+		trade(3, "70000", "0.1", "2026-09-30T10:01:10Z"),
+		trade(5, "70500", "0.2", "2026-09-30T10:01:50Z"),
+		trade(8, "69800", "0.1", "2026-09-30T10:03:05Z"),
+	}
+	if err := s.OnTrades(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+	// A redelivery changes nothing.
+	if err := s.OnTrades(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.trades) != 3 || store.symbols["BTC-USDT"].Sequence != 8 {
+		t.Fatalf("stored %d trades, sequence %d", len(store.trades), store.symbols["BTC-USDT"].Sequence)
+	}
+	hour := store.candles["BTC-USDT|1h|2026-09-30T10:00:00Z"]
+	if hour.Trades != 3 || !hour.Open.Equal(d("70000")) || !hour.High.Equal(d("70500")) || !hour.Low.Equal(d("69800")) ||
+		!hour.Close.Equal(d("69800")) || !hour.Volume.Equal(d("0.4")) {
+		t.Fatalf("1h candle %+v", hour)
+	}
+
+	candles, err := s.Candles(ctx, "BTC-USDT", "1m", time.Time{}, time.Time{}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 10:00 is before the first trade; 10:02 is flat.
+	if len(candles) != 3 || candles[0].Trades != 2 || candles[1].Trades != 0 || !candles[1].Close.Equal(d("70500")) || candles[2].Trades != 1 {
+		t.Fatalf("1m candles %+v", candles)
+	}
+
+	s.OnDepth(&marketv1.DepthSnapshot{Symbol: "BTC-USDT", Sequence: 9, Bids: []*marketv1.PriceLevel{{Price: "69700", Quantity: "1"}}})
+	tk, err := s.Ticker(ctx, "BTC-USDT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tk.Last.Equal(d("69800")) || !tk.Open.Equal(d("70000")) || tk.Trades != 3 || !tk.Bid.Equal(d("69700")) || !tk.Ask.IsZero() {
+		t.Fatalf("ticker %+v", tk)
+	}
+	list, err := s.Trades(ctx, "BTC-USDT", 2)
+	if err != nil || len(list) != 2 || list[0].Sequence != 8 || list[1].Sequence != 5 {
+		t.Fatalf("trades %+v, %v", list, err)
+	}
+	if _, err := s.Ticker(ctx, "DOGE-USDT"); !apperr.Is(err, apperr.CodeNotFound) {
+		t.Fatalf("an unknown pair: %v", err)
+	}
+	if tickers, err := s.Tickers(ctx); err != nil || len(tickers) != 2 || !tickers[1].Last.IsZero() {
+		t.Fatalf("tickers %+v, %v", tickers, err)
+	}
+	if _, err := s.Candles(ctx, "BTC-USDT", "2d", time.Time{}, time.Time{}, 5); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("a bad interval: %v", err)
+	}
+
+	// After a restart the state comes back from the store.
+	again := newService(t, store, &now)
+	if tk, _ := again.Ticker(ctx, "BTC-USDT"); !tk.Last.Equal(d("69800")) || tk.Trades != 3 {
+		t.Fatalf("reloaded ticker %+v", tk)
+	}
+	if err := again.OnTrades(ctx, batch[1:]); err != nil || len(store.trades) != 3 {
+		t.Fatalf("a reloaded service applied old trades again: %v, %d stored", err, len(store.trades))
+	}
+}
+
+func TestAFailedWriteReloadsBeforeTheRetry(t *testing.T) {
+	ctx := context.Background()
+	store := newMemStore()
+	now := at("2026-09-30T10:03:30Z")
+	s := newService(t, store, &now)
+	store.down = true
+	batch := []domain.Trade{trade(1, "70000", "0.1", "2026-09-30T10:01:10Z")}
+	if err := s.OnTrades(ctx, batch); err == nil {
+		t.Fatal("the write failed")
+	}
+	store.down = false
+	if err := s.OnTrades(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.trades) != 1 || store.symbols["BTC-USDT"].Sequence != 1 {
+		t.Fatalf("the redelivered trade was not stored: %d trades", len(store.trades))
+	}
+}
+
+func kinds(updates []Update) map[string]int {
+	out := map[string]int{}
+	for _, u := range updates {
+		switch m := u.Message.(type) {
+		case *marketv1.CandleUpdated:
+			out["updated:"+m.GetCandle().GetInterval()]++
+		case *marketv1.CandleClosed:
+			out["closed:"+m.GetCandle().GetInterval()]++
+		case *marketv1.TickerUpdated:
+			out["ticker"]++
+		}
+	}
+	return out
+}
+
+func TestUpdatesPushWhatChanged(t *testing.T) {
+	ctx := context.Background()
+	store := newMemStore()
+	now := at("2026-09-30T10:01:30Z")
+	s := newService(t, store, &now)
+	if got := s.Updates(now); len(got) != 0 {
+		t.Fatalf("nothing traded yet: %+v", kinds(got))
+	}
+	if err := s.OnTrades(ctx, []domain.Trade{trade(1, "70000", "0.1", "2026-09-30T10:01:10Z")}); err != nil {
+		t.Fatal(err)
+	}
+	got := kinds(s.Updates(now))
+	if len(got) != len(domain.Intervals)+1 || got["updated:1m"] != 1 || got["updated:1M"] != 1 || got["ticker"] != 1 {
+		t.Fatalf("after a trade: %v", got)
+	}
+	if got := s.Updates(now); len(got) != 0 {
+		t.Fatalf("nothing changed: %+v", kinds(got))
+	}
+	// The minute ends: its candle closes, the next opens flat, once.
+	now = at("2026-09-30T10:02:00Z")
+	got = kinds(s.Updates(now))
+	if got["closed:1m"] != 1 || got["updated:1m"] != 1 || got["closed:3m"] != 0 || len(got) != 2 {
+		t.Fatalf("at the minute: %v", got)
+	}
+	now = at("2026-09-30T10:02:30Z")
+	if got := s.Updates(now); len(got) != 0 {
+		t.Fatalf("the flat candle is pushed once: %+v", kinds(got))
+	}
+}

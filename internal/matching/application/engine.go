@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -36,8 +37,13 @@ type Engine struct {
 	// snapshot before a new one is taken.
 	snapshotEvery int
 
+	// mu guards the books between Handle and the depth export.
+	mu    sync.Mutex
 	parts map[int32]*partition
 	dirty bool
+	// changed holds the symbols whose book changed since the last depth
+	// export.
+	changed map[string]bool
 
 	commands *prometheus.CounterVec
 	trades   prometheus.Counter
@@ -53,6 +59,7 @@ type partition struct {
 func New(store ports.Store, events *event.Factory, log *slog.Logger, reg prometheus.Registerer, snapshotEvery int) *Engine {
 	e := &Engine{
 		store: store, events: events, log: log, now: time.Now, snapshotEvery: snapshotEvery, dirty: true,
+		changed: map[string]bool{},
 		commands: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "matching_commands_total",
 			Help: "Commands applied by the engine, by type (PlaceOrder, CancelOrder).",
@@ -87,6 +94,12 @@ func (st *partition) book(symbol string) *domain.Book {
 // Recover rebuilds the books from the latest snapshots and the commands
 // after them, without publishing anything again.
 func (e *Engine) Recover(ctx context.Context) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.recover(ctx)
+}
+
+func (e *Engine) recover(ctx context.Context) error {
 	e.parts = map[int32]*partition{}
 	snaps, err := e.store.Snapshots(ctx)
 	if err != nil {
@@ -118,6 +131,12 @@ func (e *Engine) Recover(ctx context.Context) error {
 		st.since++
 	}
 	e.dirty = false
+	// The rebuilt books may differ from what was exported last.
+	for _, st := range e.parts {
+		for symbol := range st.books {
+			e.changed[symbol] = true
+		}
+	}
 	e.log.InfoContext(ctx, "matching engine recovered", "snapshots", len(snaps), "replayed", len(wal), "books", e.bookCount())
 	return nil
 }
@@ -135,8 +154,10 @@ func (e *Engine) bookCount() int {
 // saved, the books are rebuilt before the retry, so memory never runs
 // ahead of the log.
 func (e *Engine) Handle(ctx context.Context, batch []kafka.Delivery) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	if e.dirty {
-		if err := e.Recover(ctx); err != nil {
+		if err := e.recover(ctx); err != nil {
 			return err
 		}
 	}
@@ -195,6 +216,9 @@ func (e *Engine) Handle(ctx context.Context, batch []kafka.Delivery) error {
 	}
 	for _, s := range snaps {
 		e.parts[s.Partition].since = 0
+	}
+	for _, w := range wal {
+		e.changed[w.Symbol] = true
 	}
 	for _, o := range out {
 		if o.Topic == TopicTrade {

@@ -26,3 +26,9 @@ scrape_configs:
     static_configs: [{targets: ["risk-service:9086"]}]
   - job_name: analytics-consumer
     static_configs: [{targets: ["analytics-consumer:9087"]}]
+  - job_name: spot-trading-service
+    static_configs: [{targets: ["spot-trading-service:9088"]}]
+  - job_name: matching-engine
+    static_configs: [{targets: ["matching-engine:9089"]}]
+  - job_name: market-data-service
+    static_configs: [{targets: ["market-data-service:9090"]}]

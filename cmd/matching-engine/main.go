@@ -75,6 +75,11 @@ func setup(ctx context.Context, a *app.App) error {
 	}); err != nil {
 		return err
 	}
+	prod, err := bootstrap.Producer(ctx, a, cfg.Kafka)
+	if err != nil {
+		return err
+	}
+	a.Add("depth export", app.Loop(application.NewDepthExporter(engine, prod, events, a.Metrics()).Run))
 	a.Add("wal purge", app.Loop(func(ctx context.Context) error {
 		ticker := time.NewTicker(time.Hour)
 		defer ticker.Stop()

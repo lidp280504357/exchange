@@ -73,14 +73,16 @@ func setup(ctx context.Context, a *app.App) error {
 	if err != nil {
 		return err
 	}
+	store := postgres.NewStore(db, events)
 	svc := &application.Service{
-		Store:       postgres.NewStore(db, events),
+		Store:       store,
 		Ledger:      ledger.New(ledgerv1.NewLedgerServiceClient(ledgerConn)),
 		Instruments: instruments.New(instrumentv1.NewInstrumentServiceClient(instrumentConn), 5*time.Second),
 		Eligibility: users.New(userv1.NewUserServiceClient(userConn)),
-		Prices:      prices.None{},
-		Log:         a.Logger(),
-		Now:         time.Now,
+		// The latest trade anchors price bands and market protection.
+		Prices: prices.NewLastTrade(store.Read().Fills().LastPrice, time.Second),
+		Log:    a.Logger(),
+		Now:    time.Now,
 	}
 	// The engine's updates and fills.
 	if err := bootstrap.Consumer(ctx, a, cfg.Kafka, application.Consumer, []string{event.TopicOrder, event.TopicTrade}, consumer.Handler(svc)); err != nil {

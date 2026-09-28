@@ -66,6 +66,11 @@ type Record struct {
 	Envelope []byte
 }
 
+// Publisher writes records; Producer implements it.
+type Publisher interface {
+	Publish(ctx context.Context, recs ...Record) error
+}
+
 // Producer publishes envelopes synchronously with acks=all and idempotent
 // writes, registering the envelope schema per topic on first use.
 type Producer struct {

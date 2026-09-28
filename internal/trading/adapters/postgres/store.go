@@ -223,6 +223,18 @@ func (r fills) OfUser(ctx context.Context, userID, symbol, before string, limit 
 		ORDER BY executed_at DESC, trade_id DESC LIMIT $4`, userID, symbol, before, limit)
 }
 
+func (r fills) LastPrice(ctx context.Context, symbol string) (decimal.Decimal, error) {
+	var price decimal.Decimal
+	err := r.q.QueryRow(ctx, `SELECT price FROM fills WHERE symbol = $1 ORDER BY sequence DESC LIMIT 1`, symbol).Scan(&price)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return decimal.Zero, nil
+	}
+	if err != nil {
+		return decimal.Zero, fmt.Errorf("last price: %w", err)
+	}
+	return price, nil
+}
+
 func (r fills) query(ctx context.Context, sql string, args ...any) ([]domain.Fill, error) {
 	rows, err := r.q.Query(ctx, sql, args...)
 	if err != nil {
