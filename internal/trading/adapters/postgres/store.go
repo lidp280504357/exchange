@@ -223,16 +223,17 @@ func (r fills) OfUser(ctx context.Context, userID, symbol, before string, limit 
 		ORDER BY executed_at DESC, trade_id DESC LIMIT $4`, userID, symbol, before, limit)
 }
 
-func (r fills) LastPrice(ctx context.Context, symbol string) (decimal.Decimal, error) {
+func (r fills) LastTrade(ctx context.Context, symbol string) (decimal.Decimal, time.Time, error) {
 	var price decimal.Decimal
-	err := r.q.QueryRow(ctx, `SELECT price FROM fills WHERE symbol = $1 ORDER BY sequence DESC LIMIT 1`, symbol).Scan(&price)
+	var at time.Time
+	err := r.q.QueryRow(ctx, `SELECT price, executed_at FROM fills WHERE symbol = $1 ORDER BY sequence DESC LIMIT 1`, symbol).Scan(&price, &at)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return decimal.Zero, nil
+		return decimal.Zero, time.Time{}, nil
 	}
 	if err != nil {
-		return decimal.Zero, fmt.Errorf("last price: %w", err)
+		return decimal.Zero, time.Time{}, fmt.Errorf("last trade: %w", err)
 	}
-	return price, nil
+	return price, at, nil
 }
 
 func (r fills) query(ctx context.Context, sql string, args ...any) ([]domain.Fill, error) {

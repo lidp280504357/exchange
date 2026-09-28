@@ -20,15 +20,24 @@ type None struct{}
 // Anchor returns zero.
 func (None) Anchor(context.Context, string) (decimal.Decimal, error) { return decimal.Zero, nil }
 
-// LastPriceFunc returns the price of a symbol's latest trade, zero for none.
-type LastPriceFunc func(ctx context.Context, symbol string) (decimal.Decimal, error)
+// LastTradeFunc returns the price and time of a symbol's latest trade,
+// zero for none.
+type LastTradeFunc func(ctx context.Context, symbol string) (decimal.Decimal, time.Time, error)
+
+// ReferenceFunc returns a symbol's fresh reference price, zero for none.
+type ReferenceFunc func(ctx context.Context, symbol string) (decimal.Decimal, error)
+
+// RecentTrade is how old the last trade may be and still anchor the band
+// on its own: an older one gives way to a fresh reference price.
+const RecentTrade = 5 * time.Minute
 
 // LastTrade anchors on the symbol's latest trade, which the service records
-// itself from trade.events, and on the reference price for a pair that has
-// not traded yet (§11.2), cached for ttl.
+// itself from trade.events (§11.2). A trade older than RecentTrade, or none,
+// gives way to a fresh reference price; without one the old trade still
+// anchors. Answers are cached for ttl.
 type LastTrade struct {
-	last      LastPriceFunc
-	reference LastPriceFunc
+	last      LastTradeFunc
+	reference ReferenceFunc
 	ttl       time.Duration
 	now       func() time.Time
 
@@ -41,9 +50,9 @@ type cachedPrice struct {
 	at    time.Time
 }
 
-// NewLastTrade caches the answers of last, and of reference (nil: none)
-// when last has no price, for ttl.
-func NewLastTrade(last, reference LastPriceFunc, ttl time.Duration) *LastTrade {
+// NewLastTrade caches the answers of last, and of reference (nil: none),
+// for ttl.
+func NewLastTrade(last LastTradeFunc, reference ReferenceFunc, ttl time.Duration) *LastTrade {
 	return &LastTrade{last: last, reference: reference, ttl: ttl, now: time.Now, cached: map[string]cachedPrice{}}
 }
 
@@ -56,13 +65,13 @@ func (l *LastTrade) Anchor(ctx context.Context, symbol string) (decimal.Decimal,
 	if ok && now.Sub(c.at) < l.ttl {
 		return c.price, nil
 	}
-	price, err := l.last(ctx, symbol)
+	price, at, err := l.last(ctx, symbol)
 	if err != nil {
 		return decimal.Zero, err
 	}
-	if price.IsZero() && l.reference != nil {
-		// Without a reference the order is simply not banded.
-		if ref, err := l.reference(ctx, symbol); err == nil {
+	if (price.IsZero() || now.Sub(at) > RecentTrade) && l.reference != nil {
+		// An unreachable reference leaves the last trade, or no band.
+		if ref, err := l.reference(ctx, symbol); err == nil && ref.IsPositive() {
 			price = ref
 		}
 	}

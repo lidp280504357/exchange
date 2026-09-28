@@ -87,7 +87,7 @@ func setup(ctx context.Context, a *app.App) error {
 		Instruments: instruments.New(instrumentv1.NewInstrumentServiceClient(instrumentConn), 5*time.Second),
 		Eligibility: users.New(userv1.NewUserServiceClient(userConn)),
 		// The latest trade anchors price bands and market protection.
-		Prices: prices.NewLastTrade(store.Read().Fills().LastPrice,
+		Prices: prices.NewLastTrade(store.Read().Fills().LastTrade,
 			prices.ReferenceClient{Base: cfg.MarketURL, Client: &http.Client{Timeout: 2 * time.Second}}.Price, time.Second),
 		FeeFree: cfg.MarketMakerUsers,
 		Log:     a.Logger(),

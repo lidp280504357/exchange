@@ -48,14 +48,14 @@ func (r memFills) OfUser(_ context.Context, userID, symbol, _ string, limit int)
 	return out[:min(len(out), limit)], nil
 }
 
-func (r memFills) LastPrice(_ context.Context, symbol string) (decimal.Decimal, error) {
+func (r memFills) LastTrade(_ context.Context, symbol string) (decimal.Decimal, time.Time, error) {
 	var last domain.Fill
 	for _, f := range r.s.fills {
 		if f.Symbol == symbol && f.Seq > last.Seq {
 			last = f
 		}
 	}
-	return last.Price, nil
+	return last.Price, last.ExecutedAt, nil
 }
 
 func (r memOrders) Unreleased(_ context.Context, cutoff time.Time, limit int) ([]domain.Order, error) {

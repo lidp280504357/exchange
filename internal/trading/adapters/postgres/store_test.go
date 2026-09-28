@@ -276,10 +276,10 @@ func TestEngineColumnsFillsAndReleases(t *testing.T) {
 	if err := store.Read().Fills().Insert(ctx, later); err != nil {
 		t.Fatal(err)
 	}
-	if last, err := store.Read().Fills().LastPrice(ctx, "BTC-USDT"); err != nil || !last.Equal(d("60000.01")) {
-		t.Fatalf("last price %s, %v", last, err)
+	if last, when, err := store.Read().Fills().LastTrade(ctx, "BTC-USDT"); err != nil || !last.Equal(d("60000.01")) || !when.Equal(at.Add(time.Second)) {
+		t.Fatalf("last trade %s at %s, %v", last, when, err)
 	}
-	if none, err := store.Read().Fills().LastPrice(ctx, "ETH-USDT"); err != nil || !none.IsZero() {
+	if none, when, err := store.Read().Fills().LastTrade(ctx, "ETH-USDT"); err != nil || !none.IsZero() || !when.IsZero() {
 		t.Fatalf("a symbol without trades: %s, %v", none, err)
 	}
 }
