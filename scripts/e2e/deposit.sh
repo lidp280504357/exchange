@@ -51,6 +51,7 @@ fi
 echo "== send 0.0012 and 0.0002 ETH on Sepolia (sender $SENDER has $FUNDS ETH)"
 node "$(dirname "$0")/lib/deposit-watch.mjs" "$BASE" "$TOKEN" >"$WORK/ws.log" 2>&1 &
 at_exit "kill $! 2>/dev/null"
+disown # no job-control notice when it is killed at the end
 TX1=$("$WORK/sendeth" -to "$ADDR" -amount 0.0012 -wait)
 TX2=$("$WORK/sendeth" -to "$ADDR" -amount 0.0002 -wait)
 printf 'ok   sent %s and %s\n' "$TX1" "$TX2"
