@@ -113,9 +113,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, from, to time.Time) ([]Resul
 	}
 
 	for _, schema := range r.schemas {
+		// Only the ingested topics: commands (order.commands) share the
+		// outboxes but are not business events and stay out of ClickHouse.
 		q := `SELECT topic, count(*) FROM ` + pgx.Identifier{schema, "outbox"}.Sanitize() + `
-			WHERE published_at IS NOT NULL AND occurred_at >= $1 AND occurred_at < $2 GROUP BY topic`
-		rows, err := r.db.Query(ctx, q, from, to)
+			WHERE published_at IS NOT NULL AND occurred_at >= $1 AND occurred_at < $2 AND topic = ANY($3) GROUP BY topic`
+		rows, err := r.db.Query(ctx, q, from, to, Topics)
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "42P01" { // undefined_table
 			continue // the service has not created its schema yet

@@ -72,6 +72,14 @@ func TestIngestAndReconcile(t *testing.T) {
 	if err := outbox.Add(ctx, db, event.TopicAuth, envs...); err != nil {
 		t.Fatal(err)
 	}
+	// Commands share the outboxes but are not ingested, so not reconciled.
+	command, err := f.New(ctx, wrapperspb.Int32(9), "symbol", "BTC-USDT", event.WithOccurredAt(at))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := outbox.Add(ctx, db, event.TopicOrderCommands, command); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec(ctx, "UPDATE outbox SET published_at = now()"); err != nil {
 		t.Fatal(err)
 	}

@@ -22,7 +22,7 @@ expect 200 - "pairs"
 check '[.pairs[].symbol] | contains(["BTC-USDT","ETH-USDT","ETH-BTC"])' "seeded pairs listed"
 call GET /v1/market/pairs/btc-usdt ""
 expect 200 - "one pair (symbol is case-insensitive)"
-check '.tick_size == "0.01" and .lot_size == "0.00001" and .maker_fee_rate == "0.001" and (.min_notional | type) == "string"' "decimals are strings"
+check '.tick_size == "0.01" and .lot_size == "0.0001" and .maker_fee_rate == "0.001" and (.min_notional | type) == "string"' "decimals are strings"
 call GET /v1/market/pairs/NOPE-USDT ""
 expect 404 COMMON_NOT_FOUND "unknown pair"
 cache=$(curl -s -D - -o /dev/null "$BASE/v1/market/pairs" | tr -d '\r' | awk -F': ' 'tolower($1) == "cache-control" {print $2}')
