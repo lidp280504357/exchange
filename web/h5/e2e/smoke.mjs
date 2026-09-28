@@ -219,23 +219,24 @@ try {
   ok("markets list the seeded pairs");
   await shot(page, "5-markets");
 
-  // Trading: a limit buy far below the market rests, shows in the book and
-  // the open orders, and goes away when canceled. 40000 stays clear of the
-  // prices of scripts/e2e/matching.sh and marketdata.sh.
-  await clickText(page, "td a", "BTC/USDT");
+  // Trading on ETH-BTC (no market maker): a limit buy below the market
+  // rests, shows in the book and the open orders, and goes away when
+  // canceled. 0.03017 stays clear of the prices of scripts/e2e/matching.sh
+  // and marketdata.sh.
+  await clickText(page, "td a", "ETH/BTC");
   await waitText(page, "Order book");
   await page.waitForSelector('[data-testid="chart"] canvas', { timeout: 15000 });
-  await typeInto(page, 'input[name="price"]', "40000");
-  await typeInto(page, 'input[name="quantity"]', "0.001");
-  await waitText(page, "Total: 40 USDT");
-  await clickText(page, "form button", "Buy BTC");
+  await typeInto(page, 'input[name="price"]', "0.03017");
+  await typeInto(page, 'input[name="quantity"]', "0.1");
+  await waitText(page, "Total: 0.003017 BTC");
+  await clickText(page, "form button", "Buy ETH");
   await waitText(page, "Order placed");
-  await page.waitForFunction(() => document.querySelector('[data-testid="bids"]')?.innerText.includes("40,000"), { timeout: 15000 });
+  await page.waitForFunction(() => document.querySelector('[data-testid="bids"]')?.innerText.includes("0.03017"), { timeout: 15000 });
   await page.waitForFunction(() => document.querySelector('[data-testid="orders-open"]')?.innerText.includes("Open"), { timeout: 15000 });
   ok("a limit buy placed through the form rests in the book and the open orders");
   await shot(page, "5b-trade");
   await clickText(page, '[data-testid="orders-open"] button', "Cancel");
-  await page.waitForFunction(() => !document.querySelector('[data-testid="bids"]')?.innerText.includes("40,000"), { timeout: 15000 });
+  await page.waitForFunction(() => !document.querySelector('[data-testid="bids"]')?.innerText.includes("0.03017"), { timeout: 15000 });
   await page.waitForFunction(() => document.querySelector('[data-testid="orders-open"]')?.querySelectorAll("tbody tr").length === 0, { timeout: 15000 });
   ok("canceling it clears the book and the open orders (engine and WebSocket)");
 

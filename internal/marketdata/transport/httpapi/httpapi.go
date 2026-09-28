@@ -20,6 +20,8 @@ import (
 // Handler serves the market data; no sign-in needed.
 type Handler struct {
 	Svc *application.Service
+	// Ref is the reference feed; nil when none is configured.
+	Ref *application.ReferenceFeed
 	Now func() time.Time
 }
 
@@ -30,6 +32,23 @@ func (h *Handler) Routes(r chi.Router) {
 	r.Get("/v1/market/{symbol}/depth", h.depth)
 	r.Get("/v1/market/{symbol}/trades", h.trades)
 	r.Get("/v1/market/{symbol}/candles", h.candles)
+	// Internal: the gateway does not route /internal, so reference data
+	// (Binance, §11.9) never reaches clients; the trading service and the
+	// market maker read it.
+	r.Get("/internal/market/{symbol}/reference", h.reference)
+}
+
+func (h *Handler) reference(w http.ResponseWriter, r *http.Request) {
+	s := symbol(r)
+	out := map[string]any{"symbol": s, "source": nil, "price": nil, "updated_at": nil, "fresh": false}
+	if h.Ref != nil {
+		if ref, fresh := h.Ref.Latest(s); !ref.At.IsZero() {
+			out["source"], out["price"], out["fresh"] = ref.Source, ref.Price.String(), fresh
+			out["updated_at"] = ref.At.UTC().Format(time.RFC3339Nano)
+		}
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 // live lets clients and Cloudflare reuse an answer for a second at most.

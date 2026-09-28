@@ -148,6 +148,8 @@ services:
       LEDGER_GRPC_ADDR: ledger-service:9185
       INSTRUMENT_GRPC_ADDR: instrument-service:9184
       USER_GRPC_ADDR: user-service:9182
+      MARKET_DATA_SERVICE_URL: http://market-data-service:8090
+      # MARKET_MAKER_USER_IDS (zero fees) comes from apps.env.
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}
@@ -174,6 +176,9 @@ services:
     environment:
       <<: *base-env
       INSTRUMENT_GRPC_ADDR: instrument-service:9184
+      # Reference prices while market.reference_feed is on (Binance public
+      # data: test environments only, §11.9).
+      REFERENCE_SYMBOLS: BTC-USDT
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}
@@ -181,6 +186,27 @@ services:
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/readyz"]
+
+  # The platform market maker (§11.10): quotes the symbols below while
+  # market.maker allows them; its account MARKET_MAKER_USER_ID comes from
+  # apps.env.
+  market-maker:
+    <<: *app
+    command: ["/app/market-maker"]
+    environment:
+      <<: *base-env
+      MARKET_MAKER_SYMBOLS: BTC-USDT
+      TRADING_SERVICE_URL: http://spot-trading-service:8088
+      LEDGER_SERVICE_URL: http://ledger-service:8085
+      MARKET_DATA_SERVICE_URL: http://market-data-service:8090
+      INSTRUMENT_SERVICE_URL: http://instrument-service:8084
+    depends_on:
+      postgres: {condition: service_healthy}
+      spot-trading-service: {condition: service_started}
+      market-data-service: {condition: service_started}
+    healthcheck:
+      <<: *health
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9091/readyz"]
 
   # One active engine (it holds a database lease); a second instance would
   # wait as a standby (ADR-0002).

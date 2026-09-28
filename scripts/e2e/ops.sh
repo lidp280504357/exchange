@@ -51,7 +51,8 @@ services=(
   "ledger-service 9085 ledger_reconcile_mismatches ledger_reconcile_runs_total kafka_consumer_lag outbox_pending"
   "spot-trading-service 9088 outbox_pending kafka_consumer_lag"
   "matching-engine 9089 outbox_pending kafka_consumer_lag matching_depth_published_total"
-  "market-data-service 9090 kafka_consumer_lag market_updates_published_total"
+  "market-data-service 9090 kafka_consumer_lag market_updates_published_total market_reference_age_seconds"
+  "market-maker 9091 mm_quoting flags_last_refresh_timestamp_seconds"
   "risk-service 9086 outbox_pending kafka_consumer_lag flags_last_refresh_timestamp_seconds"
   "analytics-consumer 9087 analytics_ingested_rows_total analytics_reconcile_missing kafka_consumer_lag"
 )

@@ -3,6 +3,10 @@ package prices
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -20,12 +24,13 @@ func (None) Anchor(context.Context, string) (decimal.Decimal, error) { return de
 type LastPriceFunc func(ctx context.Context, symbol string) (decimal.Decimal, error)
 
 // LastTrade anchors on the symbol's latest trade, which the service records
-// itself from trade.events, cached for ttl. A pair without trades has no
-// anchor until reference prices arrive (plan §6.3 task 7).
+// itself from trade.events, and on the reference price for a pair that has
+// not traded yet (§11.2), cached for ttl.
 type LastTrade struct {
-	last LastPriceFunc
-	ttl  time.Duration
-	now  func() time.Time
+	last      LastPriceFunc
+	reference LastPriceFunc
+	ttl       time.Duration
+	now       func() time.Time
 
 	mu     sync.Mutex
 	cached map[string]cachedPrice
@@ -36,9 +41,10 @@ type cachedPrice struct {
 	at    time.Time
 }
 
-// NewLastTrade caches last's answers for ttl.
-func NewLastTrade(last LastPriceFunc, ttl time.Duration) *LastTrade {
-	return &LastTrade{last: last, ttl: ttl, now: time.Now, cached: map[string]cachedPrice{}}
+// NewLastTrade caches the answers of last, and of reference (nil: none)
+// when last has no price, for ttl.
+func NewLastTrade(last, reference LastPriceFunc, ttl time.Duration) *LastTrade {
+	return &LastTrade{last: last, reference: reference, ttl: ttl, now: time.Now, cached: map[string]cachedPrice{}}
 }
 
 // Anchor returns the latest trade price of symbol.
@@ -54,8 +60,48 @@ func (l *LastTrade) Anchor(ctx context.Context, symbol string) (decimal.Decimal,
 	if err != nil {
 		return decimal.Zero, err
 	}
+	if price.IsZero() && l.reference != nil {
+		// Without a reference the order is simply not banded.
+		if ref, err := l.reference(ctx, symbol); err == nil {
+			price = ref
+		}
+	}
 	l.mu.Lock()
 	l.cached[symbol] = cachedPrice{price: price, at: now}
 	l.mu.Unlock()
 	return price, nil
+}
+
+// ReferenceClient reads the reference price that market-data-service
+// serves internally; a stale or missing one is zero.
+type ReferenceClient struct {
+	Base   string
+	Client *http.Client
+}
+
+// Price returns the fresh reference price of symbol, or zero.
+func (c ReferenceClient) Price(ctx context.Context, symbol string) (decimal.Decimal, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.Base+"/internal/market/"+url.PathEscape(symbol)+"/reference", nil)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return decimal.Zero, fmt.Errorf("reference price: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return decimal.Zero, fmt.Errorf("reference price: HTTP %d", resp.StatusCode)
+	}
+	var body struct {
+		Price *string `json:"price"`
+		Fresh bool    `json:"fresh"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return decimal.Zero, fmt.Errorf("reference price: %w", err)
+	}
+	if !body.Fresh || body.Price == nil {
+		return decimal.Zero, nil
+	}
+	return decimal.NewFromString(*body.Price)
 }

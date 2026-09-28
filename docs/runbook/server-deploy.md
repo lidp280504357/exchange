@@ -53,6 +53,7 @@ bash /opt/exchange/src/deploy/server-update.sh
 | spot-trading-service | 8088（网关转发 `/v1/orders`） | — | 9088 |
 | matching-engine | — | — | 9089 |
 | market-data-service | 8090（网关转发 `/v1/market/tickers`、`/v1/market/{symbol}/*`） | — | 9090 |
+| market-maker | — | — | 9091 |
 | risk-service | — | 9186 | 9086 |
 | analytics-consumer | — | — | 9087 |
 

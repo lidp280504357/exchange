@@ -30,6 +30,8 @@ const (
 	KeyDerivatives      = "derivatives.trading"      // phase 3
 	KeyReferenceKline   = "market.reference_kline"   // show reference candles for new pairs
 	KeyRiskEnforce      = "risk.enforce"             // carry out the actions of risk rules
+	KeyReferenceFeed    = "market.reference_feed"    // external reference prices (Binance public data, test only)
+	KeyMarketMaker      = "market.maker"             // the platform market maker quotes, per symbol
 )
 
 // Known describes the known flags.
@@ -42,6 +44,8 @@ var Known = map[string]string{
 	KeyDerivatives:      "Perpetual futures trading (phase 3)",
 	KeyReferenceKline:   "Reference candles for pairs without trades yet",
 	KeyRiskEnforce:      "Carry out risk rule actions (accounts scored for review move to RISK_REVIEW); off only records the scores",
+	KeyReferenceFeed:    "External reference prices from Binance public data; test environments only until a data license exists (§11.9)",
+	KeyMarketMaker:      "Quotes of the platform market maker around the reference price; the symbol list limits the pairs (§11.10)",
 }
 
 // List allows or denies values of one dimension. An empty Allow allows

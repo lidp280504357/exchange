@@ -24,6 +24,7 @@ type Repos interface {
 	Symbols() SymbolRepo
 	Candles() CandleRepo
 	Trades() TradeRepo
+	References() ReferenceRepo
 }
 
 // SymbolState is what has been applied of a symbol's trades.
@@ -62,6 +63,30 @@ type TradeRepo interface {
 	Recent(ctx context.Context, symbol string, limit int) ([]domain.Trade, error)
 	// Purge deletes trades executed before t.
 	Purge(ctx context.Context, before time.Time) (int64, error)
+}
+
+// ReferenceRepo keeps the 1m candles of external reference sources
+// (§11.9), apart from the platform's own.
+type ReferenceRepo interface {
+	// Upsert writes candles of source, replacing stored ones.
+	Upsert(ctx context.Context, source string, candles []domain.Candle) error
+	// Latest returns the latest stored candle of symbol from source, or nil.
+	Latest(ctx context.Context, source, symbol string) (*domain.Candle, error)
+	// Purge deletes candles opening before t.
+	Purge(ctx context.Context, before time.Time) (int64, error)
+}
+
+// ReferenceSource is an external market data source (§5.11: several may
+// be configured; phase 2 has Binance public data, test environments only).
+type ReferenceSource interface {
+	// Name identifies the source, e.g. "binance".
+	Name() string
+	// Backfill returns the 1m candles of symbol opening at or after from,
+	// oldest first.
+	Backfill(ctx context.Context, symbol string, from time.Time) ([]domain.Candle, error)
+	// Stream calls on with every live 1m candle update of symbols until
+	// ctx ends or the connection fails.
+	Stream(ctx context.Context, symbols []string, on func(domain.Candle)) error
 }
 
 // Pairs tells which trading pairs exist (instrument-service).

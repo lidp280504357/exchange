@@ -28,6 +28,7 @@
 | [trading.md](trading.md) | 现货下单、冻结、撤单与开放交易对，`/v1/orders` |
 | [matching.md](matching.md) | 撮合引擎：规则、WAL 与快照、恢复、主备租约 |
 | [market-data.md](market-data.md) | 平台行情：K 线、ticker、深度、最近成交，WebSocket 公共频道与 orders/fills 私有频道 |
+| [market-maker.md](market-maker.md) | 参考行情（币安公开数据，仅测试环境）与做市机器人：参数、撤单条件、测试服设置 |
 | [instruments.md](instruments.md) | 资产、网络、交易对、费率，`exchangectl instruments` |
 | [ledger.md](ledger.md) | 账本、划转、对账，`exchangectl ledger` |
 | [grafana-cloud.md](grafana-cloud.md) | Grafana Cloud 接入（暂缓） |

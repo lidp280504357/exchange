@@ -32,3 +32,5 @@ scrape_configs:
     static_configs: [{targets: ["matching-engine:9089"]}]
   - job_name: market-data-service
     static_configs: [{targets: ["market-data-service:9090"]}]
+  - job_name: market-maker
+    static_configs: [{targets: ["market-maker:9091"]}]

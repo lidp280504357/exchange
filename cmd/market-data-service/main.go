@@ -7,9 +7,11 @@ package main
 import (
 	"context"
 	"errors"
+	"net/http"
 	"time"
 
 	instrumentv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/instrument/v1"
+	"github.com/lidp280504357/exchange/internal/marketdata/adapters/binance"
 	"github.com/lidp280504357/exchange/internal/marketdata/adapters/instruments"
 	"github.com/lidp280504357/exchange/internal/marketdata/adapters/postgres"
 	"github.com/lidp280504357/exchange/internal/marketdata/application"
@@ -31,6 +33,13 @@ type settings struct {
 	// InstrumentAddr is instrument-service's gRPC address, for the listed
 	// pairs (INSTRUMENT_GRPC_ADDR).
 	InstrumentAddr string `koanf:"instrument_grpc_addr"`
+	// ReferenceSymbols are the pairs that get reference prices while
+	// market.reference_feed is on (REFERENCE_SYMBOLS, e.g. BTC-USDT);
+	// the source is Binance public data at BINANCE_REST_URL and
+	// BINANCE_STREAM_URL (§11.9: test environments only).
+	ReferenceSymbols []string `koanf:"reference_symbols"`
+	BinanceREST      string   `koanf:"binance_rest_url"`
+	BinanceStream    string   `koanf:"binance_stream_url"`
 }
 
 func (s *settings) Validate() error {
@@ -42,7 +51,10 @@ func main() {
 }
 
 func setup(ctx context.Context, a *app.App) error {
-	cfg := settings{HTTPAddr: ":8090", Postgres: pg.DefaultConfig(), InstrumentAddr: "localhost:9184"}
+	cfg := settings{
+		HTTPAddr: ":8090", Postgres: pg.DefaultConfig(), InstrumentAddr: "localhost:9184",
+		BinanceREST: "https://data-api.binance.vision", BinanceStream: "wss://data-stream.binance.vision",
+	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
 	}
@@ -54,7 +66,8 @@ func setup(ctx context.Context, a *app.App) error {
 	if err != nil {
 		return err
 	}
-	svc := application.New(postgres.NewStore(db), instruments.New(instrumentv1.NewInstrumentServiceClient(instrumentConn), 30*time.Second), a.Logger())
+	store := postgres.NewStore(db)
+	svc := application.New(store, instruments.New(instrumentv1.NewInstrumentServiceClient(instrumentConn), 30*time.Second), a.Logger())
 	if err := svc.Load(ctx); err != nil {
 		return err
 	}
@@ -74,7 +87,17 @@ func setup(ctx context.Context, a *app.App) error {
 	}
 	pusher := application.NewPusher(svc, prod, event.NewFactory(a.Name(), a.Config().InstanceID), a.Metrics())
 	a.Add("market push", app.Loop(pusher.Run))
-	a.Add("trade purge", app.Loop(func(ctx context.Context) error {
+	var feed *application.ReferenceFeed
+	if len(cfg.ReferenceSymbols) > 0 {
+		flagClient, err := bootstrap.Flags(ctx, a, cfg.Postgres)
+		if err != nil {
+			return err
+		}
+		src := binance.New(cfg.BinanceREST, cfg.BinanceStream, &http.Client{Timeout: 15 * time.Second})
+		feed = application.NewReferenceFeed(src, store, flagClient, cfg.ReferenceSymbols, a.Logger(), a.Metrics())
+		a.Add("reference feed", app.Loop(feed.Run))
+	}
+	a.Add("purge", app.Loop(func(ctx context.Context) error {
 		ticker := time.NewTicker(time.Hour)
 		defer ticker.Stop()
 		for {
@@ -88,9 +111,16 @@ func setup(ctx context.Context, a *app.App) error {
 			} else if n > 0 {
 				a.Logger().InfoContext(ctx, "trades purged", "trades", n)
 			}
+			if feed != nil {
+				if n, err := feed.Purge(ctx); err != nil {
+					a.Logger().WarnContext(ctx, "reference purge failed", "error", err)
+				} else if n > 0 {
+					a.Logger().InfoContext(ctx, "reference candles purged", "candles", n)
+				}
+			}
 		}
 	}))
 	r := a.NewRouter()
-	(&httpapi.Handler{Svc: svc, Now: time.Now}).Routes(r)
+	(&httpapi.Handler{Svc: svc, Ref: feed, Now: time.Now}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
 }

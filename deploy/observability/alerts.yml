@@ -97,6 +97,14 @@ groups:
           summary: "no ledger reconciliation completed for 3 hours"
           runbook: docs/runbook/ledger.md
 
+      - alert: MarketReferenceStale
+        expr: max by (job, symbol) (market_reference_age_seconds) > 30
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "the reference price of {{ $labels.symbol }} is {{ $value }} seconds old; the market maker has pulled its quotes"
+          runbook: docs/runbook/market-maker.md
+
       - alert: AnalyticsMissingEvents
         expr: max by (topic) (analytics_reconcile_missing) > 0
         for: 30m

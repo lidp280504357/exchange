@@ -2,6 +2,7 @@ package prices
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -14,7 +15,7 @@ func TestLastTradeIsCachedBriefly(t *testing.T) {
 	l := NewLastTrade(func(context.Context, string) (decimal.Decimal, error) {
 		calls++
 		return price, nil
-	}, time.Second)
+	}, nil, time.Second)
 	now := time.Unix(1_000_000, 0)
 	l.now = func() time.Time { return now }
 	for range 3 {
@@ -32,5 +33,21 @@ func TestLastTradeIsCachedBriefly(t *testing.T) {
 	}
 	if got, _ := (None{}).Anchor(context.Background(), "BTC-USDT"); !got.IsZero() {
 		t.Fatal("None has no anchor")
+	}
+}
+
+func TestAPairWithoutTradesAnchorsOnTheReference(t *testing.T) {
+	none := func(context.Context, string) (decimal.Decimal, error) { return decimal.Zero, nil }
+	ref := func(context.Context, string) (decimal.Decimal, error) { return decimal.RequireFromString("83900"), nil }
+	if got, err := NewLastTrade(none, ref, time.Second).Anchor(context.Background(), "BTC-USDT"); err != nil || got.String() != "83900" {
+		t.Fatalf("anchor %s, %v", got, err)
+	}
+	down := func(context.Context, string) (decimal.Decimal, error) { return decimal.Zero, errors.New("unreachable") }
+	if got, err := NewLastTrade(none, down, time.Second).Anchor(context.Background(), "BTC-USDT"); err != nil || !got.IsZero() {
+		t.Fatalf("an unreachable reference leaves no anchor: %s, %v", got, err)
+	}
+	trade := func(context.Context, string) (decimal.Decimal, error) { return decimal.RequireFromString("84000"), nil }
+	if got, _ := NewLastTrade(trade, ref, time.Second).Anchor(context.Background(), "BTC-USDT"); got.String() != "84000" {
+		t.Fatalf("the last trade wins: %s", got)
 	}
 }

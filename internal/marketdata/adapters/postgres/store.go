@@ -35,6 +35,8 @@ func (r repos) Symbols() ports.SymbolRepo { return symbols(r) }
 func (r repos) Candles() ports.CandleRepo { return candles(r) }
 func (r repos) Trades() ports.TradeRepo   { return trades(r) }
 
+func (r repos) References() ports.ReferenceRepo { return references(r) }
+
 type symbols repos
 
 func (r symbols) All(ctx context.Context) ([]ports.SymbolState, error) {
@@ -174,6 +176,49 @@ func (r trades) Purge(ctx context.Context, before time.Time) (int64, error) {
 	tag, err := r.q.Exec(ctx, `DELETE FROM trades WHERE executed_at < $1`, before)
 	if err != nil {
 		return 0, fmt.Errorf("purge trades: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+type references repos
+
+func (r references) Upsert(ctx context.Context, source string, list []domain.Candle) error {
+	if len(list) == 0 {
+		return nil
+	}
+	batch := &pgx.Batch{}
+	for _, c := range list {
+		batch.Queue(`INSERT INTO reference_candles (source, symbol, open_time, open, high, low, close, volume, quote_volume, trade_count)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			ON CONFLICT (source, symbol, open_time) DO UPDATE SET open = $4, high = $5, low = $6, close = $7, volume = $8,
+				quote_volume = $9, trade_count = $10, updated_at = now()`,
+			source, c.Symbol, c.OpenTime, c.Open, c.High, c.Low, c.Close, c.Volume, c.QuoteVolume, c.Trades)
+	}
+	if err := r.q.SendBatch(ctx, batch).Close(); err != nil {
+		return fmt.Errorf("upsert reference candles: %w", err)
+	}
+	return nil
+}
+
+func (r references) Latest(ctx context.Context, source, symbol string) (*domain.Candle, error) {
+	var c domain.Candle
+	err := r.q.QueryRow(ctx, `SELECT symbol, open_time, open, high, low, close, volume, quote_volume, trade_count
+		FROM reference_candles WHERE source = $1 AND symbol = $2 ORDER BY open_time DESC LIMIT 1`, source, symbol).
+		Scan(&c.Symbol, &c.OpenTime, &c.Open, &c.High, &c.Low, &c.Close, &c.Volume, &c.QuoteVolume, &c.Trades)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("latest reference candle: %w", err)
+	}
+	c.Interval, c.OpenTime = domain.Minute1, c.OpenTime.UTC()
+	return &c, nil
+}
+
+func (r references) Purge(ctx context.Context, before time.Time) (int64, error) {
+	tag, err := r.q.Exec(ctx, `DELETE FROM reference_candles WHERE open_time < $1`, before)
+	if err != nil {
+		return 0, fmt.Errorf("purge reference candles: %w", err)
 	}
 	return tag.RowsAffected(), nil
 }

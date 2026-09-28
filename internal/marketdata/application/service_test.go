@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"slices"
 	"sort"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,14 +20,16 @@ import (
 )
 
 type memStore struct {
-	symbols map[string]ports.SymbolState
-	candles map[string]domain.Candle
-	trades  []domain.Trade
-	down    bool
+	symbols    map[string]ports.SymbolState
+	candles    map[string]domain.Candle
+	trades     []domain.Trade
+	references map[string]domain.Candle
+	mu         sync.Mutex // the reference feed writes from its own goroutine
+	down       bool
 }
 
 func newMemStore() *memStore {
-	return &memStore{symbols: map[string]ports.SymbolState{}, candles: map[string]domain.Candle{}}
+	return &memStore{symbols: map[string]ports.SymbolState{}, candles: map[string]domain.Candle{}, references: map[string]domain.Candle{}}
 }
 
 func (s *memStore) Tx(_ context.Context, fn func(ports.Repos) error) error {
@@ -42,6 +46,33 @@ type memRepos struct{ s *memStore }
 func (r memRepos) Symbols() ports.SymbolRepo { return memSymbols(r) }
 func (r memRepos) Candles() ports.CandleRepo { return memCandles(r) }
 func (r memRepos) Trades() ports.TradeRepo   { return memTrades(r) }
+
+func (r memRepos) References() ports.ReferenceRepo { return memReferences(r) }
+
+type memReferences memRepos
+
+func (r memReferences) Upsert(_ context.Context, source string, list []domain.Candle) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	for _, c := range list {
+		r.s.references[source+"|"+candleKey(c)] = c
+	}
+	return nil
+}
+
+func (r memReferences) Latest(_ context.Context, source, symbol string) (*domain.Candle, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	var last *domain.Candle
+	for k, c := range r.s.references {
+		if strings.HasPrefix(k, source+"|") && c.Symbol == symbol && (last == nil || c.OpenTime.After(last.OpenTime)) {
+			last = &c
+		}
+	}
+	return last, nil
+}
+
+func (r memReferences) Purge(context.Context, time.Time) (int64, error) { return 0, nil }
 
 type (
 	memSymbols memRepos

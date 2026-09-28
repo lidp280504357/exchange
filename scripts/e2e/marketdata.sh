@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Market data end to end (implementation plan §6.3 task 5): the public
-# REST endpoints answer and refuse bad input; then two users trade one lot
-# on BTC-USDT at 70200 while lib/md-check.mjs follows the WebSocket
+# REST endpoints answer and refuse bad input; then two users trade 0.01 ETH
+# on ETH-BTC at 0.0402 while lib/md-check.mjs follows the WebSocket
 # channels (depth, trades, ticker, candles without sign-in; the buyer's
 # orders and fills) and checks REST trades, ticker, candles and depth
-# afterwards. Needs BTC-USDT in TRADING and no other resting order at 70200.
+# afterwards. ETH-BTC has no market maker; needs it in TRADING and no other
+# resting order at 0.0402.
 #
 #   scripts/e2e/marketdata.sh
 set -euo pipefail
@@ -42,12 +43,14 @@ SELLER=(-H "Authorization: Bearer $seller_TOKEN")
 BUYER=(-H "Authorization: Bearer $buyer_TOKEN")
 # shellcheck disable=SC2016 # expanded when the script ends
 at_exit 'call DELETE /v1/orders "" "${SELLER[@]}"; call DELETE /v1/orders "" "${BUYER[@]}"'
-funded() {
+funded() { # funded ASSET AUTH...
+  local asset=$1
+  shift
   call GET /v1/account/balances "" "$@"
-  [[ $(jq -r '[.balances[] | select(.account_type == "SPOT" and .asset == "USDT")][0].available' <<<"$BODY") == "10000" ]]
+  [[ $(jq -r --arg a "$asset" '[.balances[] | select(.account_type == "SPOT" and .asset == $a)][0].available' <<<"$BODY") != "null" ]]
 }
-eventually 40 "welcome funds arrived for the seller" funded "${SELLER[@]}"
-eventually 40 "welcome funds arrived for the buyer" funded "${BUYER[@]}"
+eventually 40 "welcome funds arrived for the seller" funded ETH "${SELLER[@]}"
+eventually 40 "welcome funds arrived for the buyer" funded BTC "${BUYER[@]}"
 
 echo "== WebSocket and REST around one trade"
 node "$(dirname "$0")/lib/md-check.mjs" "$BASE" "$seller_TOKEN" "$buyer_TOKEN"

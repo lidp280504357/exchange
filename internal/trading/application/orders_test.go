@@ -413,3 +413,21 @@ func TestCancelAllAndList(t *testing.T) {
 		t.Fatalf("bad status: %v", err)
 	}
 }
+
+func TestTheMarketMakerPaysNoFees(t *testing.T) {
+	svc, store, _, _ := newService()
+	svc.FeeFree = []string{"mm"}
+	req := buy("c1")
+	req.UserID = "mm"
+	if _, err := svc.Place(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Place(context.Background(), buy("c2")); err != nil {
+		t.Fatal(err)
+	}
+	mm := store.events[1].msg.(*orderv1.PlaceOrder).GetOrder()
+	user := store.events[3].msg.(*orderv1.PlaceOrder).GetOrder()
+	if mm.GetMakerFeeRate() != "0" || mm.GetTakerFeeRate() != "0" || user.GetTakerFeeRate() != "0.001" {
+		t.Fatalf("fees: market maker %s/%s, user %s", mm.GetMakerFeeRate(), mm.GetTakerFeeRate(), user.GetTakerFeeRate())
+	}
+}

@@ -6,9 +6,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 
 	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
@@ -27,8 +29,11 @@ type Service struct {
 	Instruments ports.Instruments
 	Eligibility ports.Eligibility
 	Prices      ports.Prices
-	Log         *slog.Logger
-	Now         func() time.Time
+	// FeeFree are the market maker's accounts: their orders pay no fees
+	// (§11.10).
+	FeeFree []string
+	Log     *slog.Logger
+	Now     func() time.Time
 }
 
 // Place checks, stores and funds a new order (§11.1 steps 3–5): it answers
@@ -52,6 +57,9 @@ func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, 
 	}
 	if !allowed {
 		return domain.Order{}, apperr.New(apperr.KindForbidden, reason, "spot trading is not available to this account now")
+	}
+	if slices.Contains(s.FeeFree, req.UserID) {
+		pair.MakerFeeRate, pair.TakerFeeRate = decimal.Zero, decimal.Zero
 	}
 	anchor, err := s.Prices.Anchor(ctx, pair.Symbol)
 	if err != nil {

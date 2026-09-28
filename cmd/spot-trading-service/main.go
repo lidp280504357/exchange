@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"errors"
+	"net/http"
 	"time"
 
 	instrumentv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/instrument/v1"
@@ -35,6 +36,11 @@ type settings struct {
 	LedgerAddr     string `koanf:"ledger_grpc_addr"`
 	InstrumentAddr string `koanf:"instrument_grpc_addr"`
 	UserAddr       string `koanf:"user_grpc_addr"`
+	// MarketURL is market-data-service, for reference prices
+	// (MARKET_DATA_SERVICE_URL).
+	MarketURL string `koanf:"market_data_service_url"`
+	// MarketMakerUsers trade without fees (MARKET_MAKER_USER_IDS, §11.10).
+	MarketMakerUsers []string `koanf:"market_maker_user_ids"`
 }
 
 func (s *settings) Validate() error {
@@ -49,6 +55,7 @@ func setup(ctx context.Context, a *app.App) error {
 	cfg := settings{
 		HTTPAddr: ":8088", Postgres: pg.DefaultConfig(),
 		LedgerAddr: "localhost:9185", InstrumentAddr: "localhost:9184", UserAddr: "localhost:9182",
+		MarketURL: "http://localhost:8090",
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -80,9 +87,11 @@ func setup(ctx context.Context, a *app.App) error {
 		Instruments: instruments.New(instrumentv1.NewInstrumentServiceClient(instrumentConn), 5*time.Second),
 		Eligibility: users.New(userv1.NewUserServiceClient(userConn)),
 		// The latest trade anchors price bands and market protection.
-		Prices: prices.NewLastTrade(store.Read().Fills().LastPrice, time.Second),
-		Log:    a.Logger(),
-		Now:    time.Now,
+		Prices: prices.NewLastTrade(store.Read().Fills().LastPrice,
+			prices.ReferenceClient{Base: cfg.MarketURL, Client: &http.Client{Timeout: 2 * time.Second}}.Price, time.Second),
+		FeeFree: cfg.MarketMakerUsers,
+		Log:     a.Logger(),
+		Now:     time.Now,
 	}
 	// The engine's updates and fills.
 	if err := bootstrap.Consumer(ctx, a, cfg.Kafka, application.Consumer, []string{event.TopicOrder, event.TopicTrade}, consumer.Handler(svc)); err != nil {
