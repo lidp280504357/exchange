@@ -7,6 +7,7 @@ import type { paths as MarketPaths } from "./gen/market";
 import type { paths as NotificationPaths } from "./gen/notification";
 import type { paths as TradingPaths } from "./gen/trading";
 import type { paths as UserPaths } from "./gen/user";
+import type { paths as WalletPaths } from "./gen/wallet";
 
 // ApiError carries the unified error body (§7.1).
 export class ApiError extends Error {
@@ -123,6 +124,7 @@ export const marketApi = createClient<MarketPaths>(options);
 export const notificationApi = createClient<NotificationPaths>(options);
 export const gatewayApi = createClient<GatewayPaths>(options);
 export const tradingApi = createClient<TradingPaths>(options);
+export const walletApi = createClient<WalletPaths>(options);
 
 // unwrap turns an openapi-fetch result into data or a thrown ApiError.
 // openapi-fetch has already read and parsed the error body into `error`.

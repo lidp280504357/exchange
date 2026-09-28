@@ -10,6 +10,7 @@ import (
 	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
 	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
 	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
+	walletv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1"
 	"github.com/lidp280504357/exchange/internal/notification/application"
 	"github.com/lidp280504357/exchange/internal/notification/domain"
 	"github.com/lidp280504357/exchange/internal/platform/event"
@@ -17,10 +18,10 @@ import (
 )
 
 // Topics are the topics the handler reads.
-var Topics = []string{event.TopicAuth, event.TopicUser}
+var Topics = []string{event.TopicAuth, event.TopicUser, event.TopicWalletDeposit}
 
-// Handler notifies users of security-relevant account events; other
-// events are skipped.
+// Handler notifies users of security-relevant account events and of
+// deposits credited or held; other events are skipped.
 func Handler(notices *application.Notices) kafka.Handler {
 	return func(ctx context.Context, env *eventv1.Envelope) error {
 		msg, err := env.GetPayload().UnmarshalNew()
@@ -71,12 +72,40 @@ func toEvent(msg proto.Message) (application.Event, bool) {
 		return application.Event{UserID: m.GetUserId(), Type: domain.NoticeAccountLocked, Mail: true, Data: map[string]string{
 			"ip": m.GetIpMask(),
 		}}, true
+	case *walletv1.DepositCredited:
+		d := m.GetDeposit()
+		if d.GetUnclaimed() {
+			return depositEvent(d, domain.NoticeDepositUnclaimed, true), true
+		}
+		return depositEvent(d, domain.NoticeDepositCredited, false), true
+	case *walletv1.DepositRejected:
+		return depositEvent(m.GetDeposit(), domain.NoticeDepositUnclaimed, true), true
 	case *userv1.UserStatusChanged:
 		return application.Event{UserID: m.GetUserId(), Type: domain.NoticeStatusChanged, Mail: true, Data: map[string]string{
 			"from": m.GetFromStatus(), "to": m.GetToStatus(),
 		}}, true
 	}
 	return application.Event{}, false
+}
+
+// depositEvent describes a deposit; the amount of an unsupported token is
+// left out, since its decimals are unknown.
+func depositEvent(d *walletv1.Deposit, notice string, mail bool) application.Event {
+	amount := d.GetAmount()
+	if d.GetAsset() == "" {
+		amount = ""
+	}
+	return application.Event{UserID: d.GetUserId(), Type: notice, Mail: mail, Data: map[string]string{
+		"asset": d.GetAsset(), "amount": amount, "network": d.GetNetwork(), "tx": shortHash(d.GetTxHash()), "reason": d.GetReason(),
+	}}
+}
+
+// shortHash keeps the ends of a transaction hash.
+func shortHash(h string) string {
+	if len(h) <= 18 {
+		return h
+	}
+	return h[:10] + "…" + h[len(h)-6:]
 }
 
 func truncate(s string, n int) string {

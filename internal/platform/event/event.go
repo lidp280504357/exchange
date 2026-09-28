@@ -35,6 +35,8 @@ const (
 	TopicNotification = "notification.events"
 	TopicOrder        = "order.events"
 	TopicTrade        = "trade.events"
+	// TopicWalletDeposit carries deposit addresses and deposits, keyed by user.
+	TopicWalletDeposit = "wallet.deposit.events"
 	// TopicOrderCommands is the matching engine's input (§5.7), keyed by symbol.
 	TopicOrderCommands = "order.commands"
 	// TopicMarketDepth carries the engine's depth snapshots (§11.8): derived

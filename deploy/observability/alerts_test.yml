@@ -88,3 +88,19 @@ tests:
             exp_annotations:
               summary: "api-gateway: 9.091% of requests fail with 5xx"
               runbook: docs/runbook/observability.md
+
+  - interval: 1m
+    input_series:
+      - series: 'wallet_scan_lag_blocks{job="wallet-service", network="ETH-SEPOLIA"}'
+        values: '2x5 80x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: WalletScanLagging
+        exp_alerts: []
+      - eval_time: 17m
+        alertname: WalletScanLagging
+        exp_alerts:
+          - exp_labels: {severity: warning, network: ETH-SEPOLIA}
+            exp_annotations:
+              summary: the deposit scanner of ETH-SEPOLIA is 80 blocks behind the chain; deposits are late
+              runbook: docs/runbook/wallet.md

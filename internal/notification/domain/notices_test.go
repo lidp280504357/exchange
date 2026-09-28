@@ -9,10 +9,11 @@ import (
 func TestRenderNotice(t *testing.T) {
 	at := time.Date(2026, 9, 28, 4, 5, 6, 0, time.UTC)
 	sg, _ := time.LoadLocation("Asia/Singapore")
-	for _, typ := range []string{NoticeWelcome, NoticeNewDeviceLogin, NoticeIdentityChanged, NoticePasswordChanged, NoticeAccountLocked, NoticeStatusChanged, NoticeTOTPChanged} {
+	for _, typ := range []string{NoticeWelcome, NoticeNewDeviceLogin, NoticeIdentityChanged, NoticePasswordChanged, NoticeAccountLocked, NoticeStatusChanged, NoticeTOTPChanged, NoticeDepositCredited, NoticeDepositUnclaimed} {
 		for _, lang := range []string{"zh-CN", "en"} {
 			title, body := RenderNotice(NoticeInput{Type: typ, Language: lang, At: at, Location: sg, Data: map[string]string{
 				"ip": "203.0.113.*", "channel": "EMAIL", "new": "a***@example.com", "to": "FROZEN",
+				"asset": "ETH", "amount": "0.002", "network": "ETH-SEPOLIA", "tx": "0xab…cd", "reason": "BELOW_MINIMUM",
 			}})
 			if title == "" || body == "" || strings.Contains(body, "%!") {
 				t.Errorf("%s/%s: %q %q", typ, lang, title, body)
@@ -28,6 +29,22 @@ func TestRenderNotice(t *testing.T) {
 	}})
 	if !strings.Contains(body, "手机号") || !strings.Contains(body, "+65****7654") || !strings.Contains(body, "UTC") {
 		t.Fatalf("rebind body: %s", body)
+	}
+}
+
+func TestDepositNotices(t *testing.T) {
+	at := time.Date(2026, 9, 29, 4, 5, 6, 0, time.UTC)
+	_, body := RenderNotice(NoticeInput{Type: NoticeDepositUnclaimed, Language: "zh-CN", At: at, Data: map[string]string{
+		"network": "ETH-SEPOLIA", "tx": "0xab…cd", "reason": "UNSUPPORTED_TOKEN", "amount": "",
+	}})
+	if !strings.Contains(body, "该代币不受支持") || strings.Contains(body, "  ") {
+		t.Fatalf("unsupported token body: %s", body)
+	}
+	title, body := RenderNotice(NoticeInput{Type: NoticeDepositCredited, Language: "en", At: at, Data: map[string]string{
+		"asset": "ETH", "amount": "0.002", "network": "ETH-SEPOLIA", "tx": "0xab…cd",
+	}})
+	if title != "Deposit credited" || !strings.Contains(body, "0.002 ETH") {
+		t.Fatalf("credited: %q %s", title, body)
 	}
 }
 

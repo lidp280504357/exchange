@@ -4,6 +4,7 @@ import (
 	"context"
 	"io/fs"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -81,6 +82,7 @@ func TestDownMigrations(t *testing.T) {
 	for name, fsys := range map[string]fs.FS{
 		"auth": migrations.Auth(), "users": migrations.Users(), "notify": migrations.Notify(), "config": migrations.Config(),
 		"instrument": migrations.Instrument(), "ledger": migrations.Ledger(), "risk": migrations.Risk(), "trading": migrations.Trading(), "matching": migrations.Matching(), "market": migrations.Market(),
+		"wallet": migrations.Wallet(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			db := apply(t, fsys)
@@ -203,4 +205,31 @@ func TestTradingSchema(t *testing.T) {
 	rejects(t, db, "client order IDs are short tokens", order, uuid.New(), user, "has space", "BUY", "LIMIT", 60000, 0.001, nil)
 	rejects(t, db, "amounts are positive", order, uuid.New(), user, "c7", "BUY", "LIMIT", 60000, -1, nil)
 	rejects(t, db, "known statuses only", `UPDATE orders SET status = 'LIVE'`)
+}
+
+func TestWalletSchema(t *testing.T) {
+	db := apply(t, migrations.Wallet())
+	user := uuid.New()
+	addr := `INSERT INTO deposit_addresses (user_id, network, derivation_index, address, created_at) VALUES ($1, 'ETH-SEPOLIA', $2, $3, now())`
+	accepts(t, db, addr, user, 0, "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed")
+	rejects(t, db, "one address per user and network", addr, user, 1, "0x0000000000000000000000000000000000000001")
+	rejects(t, db, "an index is used once", addr, uuid.New(), 0, "0x0000000000000000000000000000000000000002")
+	rejects(t, db, "an address belongs to one user", addr, uuid.New(), 2, "0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed")
+	rejects(t, db, "addresses are 0x hex", addr, uuid.New(), 3, "5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed")
+
+	dep := `INSERT INTO deposits (id, user_id, asset, network, address, tx_hash, log_index, block_number, block_hash, amount,
+		raw_amount, required_confirmations, unclaimed, reason, status, journal_id, detected_at)
+		VALUES ($1, $2, $3, 'ETH-SEPOLIA', '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed', $4, $5, 100, '0xb', 0.002, 2000000000000000,
+		12, $6, $7, $8, $9, now())`
+	tx := "0x" + strings.Repeat("ab", 32)
+	accepts(t, db, dep, uuid.New(), user, "ETH", tx, -1, false, nil, "DETECTED", nil)
+	rejects(t, db, "a transfer is one deposit", dep, uuid.New(), user, "ETH", tx, -1, false, nil, "DETECTED", nil)
+	accepts(t, db, dep, uuid.New(), user, "ETH", tx, 3, false, nil, "DETECTED", nil)
+	rejects(t, db, "lower-case transaction hashes", dep, uuid.New(), user, "ETH", strings.ToUpper(tx), 5, false, nil, "DETECTED", nil)
+	rejects(t, db, "only unsupported tokens lack an asset", dep, uuid.New(), user, nil, tx, 6, false, nil, "DETECTED", nil)
+	accepts(t, db, dep, uuid.New(), user, nil, tx, 7, false, "UNSUPPORTED_TOKEN", "REJECTED", nil)
+	rejects(t, db, "unclaimed deposits say why", dep, uuid.New(), user, "ETH", tx, 8, true, nil, "CONFIRMED", nil)
+	rejects(t, db, "credited deposits have a journal", dep, uuid.New(), user, "ETH", tx, 9, false, nil, "CREDITED", nil)
+	rejects(t, db, "unclaimed deposits end REJECTED", dep, uuid.New(), user, "ETH", tx, 10, true, "BELOW_MINIMUM", "CREDITED", uuid.New())
+	rejects(t, db, "known statuses only", dep, uuid.New(), user, "ETH", tx, 11, false, nil, "LOST", nil)
 }

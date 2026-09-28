@@ -30,6 +30,8 @@ var (
 	matching embed.FS
 	//go:embed market/*.sql
 	market embed.FS
+	//go:embed wallet/*.sql
+	wallet embed.FS
 )
 
 // ClickHouse holds the analytics tables applied by analytics-consumer.
@@ -64,6 +66,9 @@ func Matching() fs.FS { return sub(matching, "matching") }
 
 // Market holds market-data-service's schema.
 func Market() fs.FS { return sub(market, "market") }
+
+// Wallet holds wallet-service's schema.
+func Wallet() fs.FS { return sub(wallet, "wallet") }
 
 func sub(fsys embed.FS, dir string) fs.FS {
 	s, err := fs.Sub(fsys, dir)

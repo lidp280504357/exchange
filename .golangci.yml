@@ -48,9 +48,13 @@ linters:
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/signer
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/user
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         auth:
           files: ["**/internal/auth/**"]
@@ -73,9 +77,13 @@ linters:
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/signer
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/user
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         gateway:
           files: ["**/internal/gateway/**"]
@@ -98,9 +106,13 @@ linters:
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/signer
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/user
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         instrument:
           files: ["**/internal/instrument/**"]
@@ -123,9 +135,13 @@ linters:
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/signer
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/user
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         ledger:
           files: ["**/internal/ledger/**"]
@@ -148,9 +164,13 @@ linters:
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/signer
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/user
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         marketdata:
           files: ["**/internal/marketdata/**"]
@@ -173,9 +193,13 @@ linters:
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/signer
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/user
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         marketmaker:
           files: ["**/internal/marketmaker/**"]
@@ -198,9 +222,13 @@ linters:
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/signer
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/user
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         matching:
           files: ["**/internal/matching/**"]
@@ -223,9 +251,13 @@ linters:
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/signer
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/user
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         notification:
           files: ["**/internal/notification/**"]
@@ -248,9 +280,13 @@ linters:
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/signer
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/user
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         risk:
           files: ["**/internal/risk/**"]
@@ -273,9 +309,42 @@ linters:
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/notification
               desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/signer
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/user
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/wallet
+              desc: services talk over gRPC and events only (ADR-0006)
+        signer:
+          files: ["**/internal/signer/**"]
+          deny:
+            - pkg: github.com/lidp280504357/exchange/internal/analytics
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/auth
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/gateway
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/instrument
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/ledger
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/marketdata
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/marketmaker
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/matching
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/notification
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/risk
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/trading
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/user
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         trading:
           files: ["**/internal/trading/**"]
@@ -300,7 +369,11 @@ linters:
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/signer
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/user
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         user:
           files: ["**/internal/user/**"]
@@ -325,7 +398,40 @@ linters:
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/signer
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/trading
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/wallet
+              desc: services talk over gRPC and events only (ADR-0006)
+        wallet:
+          files: ["**/internal/wallet/**"]
+          deny:
+            - pkg: github.com/lidp280504357/exchange/internal/analytics
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/auth
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/gateway
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/instrument
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/ledger
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/marketdata
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/marketmaker
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/matching
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/notification
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/risk
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/signer
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/trading
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/user
               desc: services talk over gRPC and events only (ADR-0006)
   exclusions:
     generated: lax

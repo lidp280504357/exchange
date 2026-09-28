@@ -1,0 +1,173 @@
+openapi: 3.1.0
+info:
+  title: Exchange wallet API
+  version: 0.1.0
+  description: |
+    Deposits (requirements §5.10, §11.5). Each user gets one deposit
+    address per network, derived from the platform's deposit key; the
+    scanner follows the chain, and a deposit is credited to the spot
+    account once it has the network's confirmations. Deposits below the
+    network's minimum, or to a closed account, are not credited to the
+    user but held for manual handling (UNCLAIMED_DEPOSIT); transfers of
+    tokens the platform does not list are recorded as REJECTED and not
+    booked. Changes are pushed on the private WebSocket channel
+    "deposits". Every endpoint needs the access token. Amounts are
+    decimal strings (ADR-0008).
+servers:
+  - url: https://astras.vip
+security:
+  - bearer: []
+tags:
+  - name: deposits
+paths:
+  /v1/wallet/deposit-address:
+    get:
+      operationId: getDepositAddress
+      summary: The caller's deposit address for an asset on a network
+      description: |
+        Assigns the next derived address on first use; the same address
+        serves every asset of the network. Fails with
+        WALLET_NETWORK_UNKNOWN for a network the asset does not have,
+        WALLET_NETWORK_DISABLED while the asset or the network takes no
+        deposits, WALLET_UNAVAILABLE before the deposit key is configured,
+        and the USER_ eligibility codes.
+      tags: [deposits]
+      parameters:
+        - name: asset
+          in: query
+          required: true
+          schema:
+            type: string
+            examples: [ETH]
+        - name: network
+          in: query
+          required: true
+          schema:
+            type: string
+            examples: [ETH-SEPOLIA]
+      responses:
+        '200':
+          description: The address.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepositAddress'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/wallet/deposits:
+    get:
+      operationId: listDeposits
+      summary: The caller's deposits, newest first
+      tags: [deposits]
+      parameters:
+        - name: cursor
+          in: query
+          description: next_cursor of the previous page.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: One page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Deposit'
+                  next_cursor:
+                    type: [string, 'null']
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    DepositAddress:
+      type: object
+      required: [asset, network, address, contract, min_deposit, confirmations]
+      properties:
+        asset:
+          type: string
+        network:
+          type: string
+        address:
+          type: string
+          description: EIP-55 checksummed.
+          examples: ['0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed']
+        contract:
+          type: [string, 'null']
+          description: The token contract; null for the chain's coin.
+        min_deposit:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        confirmations:
+          type: integer
+          description: Confirmations before the deposit is credited.
+    Deposit:
+      type: object
+      required: [id, asset, network, address, contract, tx_hash, log_index, block_number, amount, raw_amount, confirmations,
+        required_confirmations, status, unclaimed, reason, detected_at, confirmed_at, credited_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        asset:
+          type: [string, 'null']
+          description: Null for a token the platform does not list.
+        network:
+          type: string
+        address:
+          type: string
+        contract:
+          type: [string, 'null']
+        tx_hash:
+          type: string
+        log_index:
+          type: integer
+          description: The token transfer's log index; -1 for the chain's coin.
+        block_number:
+          type: integer
+          format: int64
+        amount:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        raw_amount:
+          type: string
+          description: The transferred integer in the chain's smallest unit.
+        confirmations:
+          type: integer
+        required_confirmations:
+          type: integer
+        status:
+          type: string
+          enum: [DETECTED, CONFIRMING, CONFIRMED, CREDITED, ORPHANED, REJECTED]
+          description: |
+            ORPHANED: a chain reorganization dropped the transaction before
+            it was credited. REJECTED: not credited to the account (reason
+            says why).
+        unclaimed:
+          type: boolean
+          description: Held in UNCLAIMED_DEPOSIT instead of the account.
+        reason:
+          type: [string, 'null']
+          enum: [BELOW_MINIMUM, ACCOUNT_CLOSED, NOT_ELIGIBLE, UNSUPPORTED_TOKEN, null]
+        detected_at:
+          type: string
+          format: date-time
+        confirmed_at:
+          type: [string, 'null']
+          format: date-time
+        credited_at:
+          type: [string, 'null']
+          format: date-time

@@ -7,6 +7,7 @@ import (
 
 	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
 	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
+	walletv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1"
 	"github.com/lidp280504357/exchange/internal/notification/domain"
 )
 
@@ -29,6 +30,10 @@ func TestToEvent(t *testing.T) {
 		{&authv1.TotpEnabled{UserId: "u"}, domain.NoticeTOTPChanged, true},
 		{&authv1.TotpDisabled{UserId: "u"}, domain.NoticeTOTPChanged, true},
 		{&userv1.ProfileUpdated{UserId: "u"}, "", false},
+		{&walletv1.DepositCredited{Deposit: &walletv1.Deposit{UserId: "u", Asset: "ETH"}}, domain.NoticeDepositCredited, false},
+		{&walletv1.DepositCredited{Deposit: &walletv1.Deposit{UserId: "u", Unclaimed: true}}, domain.NoticeDepositUnclaimed, true},
+		{&walletv1.DepositRejected{Deposit: &walletv1.Deposit{UserId: "u"}}, domain.NoticeDepositUnclaimed, true},
+		{&walletv1.DepositDetected{Deposit: &walletv1.Deposit{UserId: "u"}}, "", false},
 		{&authv1.OtpRequested{}, "", false},
 	} {
 		e, ok := toEvent(tc.msg)

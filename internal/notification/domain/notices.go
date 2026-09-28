@@ -15,6 +15,10 @@ const (
 	NoticeAccountLocked   = "ACCOUNT_LOCKED"
 	NoticeStatusChanged   = "STATUS_CHANGED"
 	NoticeTOTPChanged     = "TOTP_CHANGED"
+	// Deposits (§11.5): credited to the account, or held for manual
+	// handling (below the minimum, unsupported token, closed account).
+	NoticeDepositCredited  = "DEPOSIT_CREDITED"
+	NoticeDepositUnclaimed = "DEPOSIT_UNCLAIMED"
 )
 
 // Notice is an in-app notification.
@@ -45,6 +49,13 @@ var statusNames = map[string][2]string{
 	"RISK_REVIEW": {"风控审核中", "under review"},
 	"FROZEN":      {"已冻结", "frozen"},
 	"CLOSED":      {"已注销", "closed"},
+}
+
+var depositReasons = map[string][2]string{
+	"BELOW_MINIMUM":     {"金额低于该网络的最小充值额", "the amount is below the network's minimum deposit"},
+	"UNSUPPORTED_TOKEN": {"该代币不受支持", "the token is not supported"},
+	"ACCOUNT_CLOSED":    {"账户已注销", "the account is closed"},
+	"NOT_ELIGIBLE":      {"账户当前不能充值", "the account cannot take deposits now"},
 }
 
 var channelNames = map[string][2]string{
@@ -134,6 +145,22 @@ func RenderNotice(in NoticeInput) (title, body string) {
 				"If this was not you, contact support now.", when)
 		}
 		return "已解绑身份验证器", fmt.Sprintf("您的账户已于 %s 解绑身份验证器。如非本人操作，请立即联系客服。", when)
+	case NoticeDepositCredited:
+		if en {
+			return "Deposit credited", fmt.Sprintf("%s %s from %s (transaction %s) was credited to your spot account at %s.",
+				d["amount"], d["asset"], d["network"], d["tx"], when)
+		}
+		return "充值已到账", fmt.Sprintf("您的 %s %s 充值（%s，交易 %s）已于 %s 存入现货账户。", d["amount"], d["asset"], d["network"], d["tx"], when)
+	case NoticeDepositUnclaimed:
+		why := pick(depositReasons, d["reason"], en)
+		amount := strings.TrimSpace(d["amount"] + " " + d["asset"])
+		if en {
+			return "Deposit not credited", fmt.Sprintf("A deposit of %s on %s (transaction %s) was not credited to your account because %s. "+
+				"It is held for manual review; recovery is not guaranteed and may carry a fee. Contact support with the transaction hash.",
+				amount, d["network"], d["tx"], why)
+		}
+		return "充值未入账", fmt.Sprintf("您在 %s 上的一笔充值 %s（交易 %s）未能存入账户，原因：%s。资金已转入待处理，需人工审核；平台不承诺找回，找回可能收取手续费，请凭交易哈希联系客服。",
+			d["network"], amount, d["tx"], why)
 	case NoticeStatusChanged:
 		to := pick(statusNames, d["to"], en)
 		if en {

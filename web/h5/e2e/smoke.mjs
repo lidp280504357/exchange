@@ -214,6 +214,14 @@ try {
   ok("a balance change made elsewhere appears live (WebSocket push)");
   await shot(page, "4-futures-live");
 
+  // Deposits: the page assigns this user's Sepolia address.
+  await clickText(page, "a button", "Deposit");
+  await page.waitForFunction(() => /^0x[0-9a-fA-F]{40}$/.test(document.querySelector('[data-testid="deposit-address"]')?.innerText ?? ""), { timeout: 15000 });
+  await waitText(page, "After 12 block confirmations");
+  await waitText(page, "Deposit history");
+  ok("the deposit page shows the user's ETH-SEPOLIA address and the deposit rules");
+  await shot(page, "4b-deposit");
+
   await clickText(page, "nav a", "Markets");
   await waitText(page, "BTC/USDT");
   ok("markets list the seeded pairs");

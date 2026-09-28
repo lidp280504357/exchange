@@ -28,6 +28,8 @@
 | `notify_deliveries_failed_total` | channel | 同上 | 所有服务商都失败的投递 |
 | `ledger_reconcile_mismatches` | check | ledger-service | 最近一次对账各检查项的不一致数，>0 即事故 |
 | `ledger_reconcile_runs_total` | — | 同上 | 完成的对账次数（启动 1 分钟后首次，之后每小时） |
+| `wallet_scan_block`、`wallet_scan_lag_blocks`、`wallet_scan_last_success_timestamp_seconds` | network | wallet-service | 充值扫描的最高块、落后链头的块数、最近一轮完成时间（[wallet.md](wallet.md)） |
+| `wallet_deposits_detected_total`、`wallet_deposits_orphaned_total`、`wallet_deposits_held` | network（detected 另有 status） | 同上 | 发现的充值、链重组丢弃的充值、因资产关闭充值而挂起的已确认充值 |
 | `analytics_ingested_rows_total`、`analytics_rejected_rows_total` | topic | analytics-consumer | 写入 ClickHouse 的行 |
 | `analytics_reconcile_missing`、`analytics_reconcile_last_success_timestamp_seconds` | topic | 同上 | 最近 24 小时 outbox 已发而 ClickHouse 缺的事件数（负数表示有 outbox 不在 `RECONCILE_SCHEMAS` 里）、最近一次核对成功 |
 
@@ -53,6 +55,9 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | OutboxPublishFailing | critical | 5 分钟内持续发送失败 | Redpanda 是否宕机（恢复后自动补发） |
 | LedgerReconciliationMismatch | critical | 对账不一致 > 0 | [ledger.md](ledger.md)，冻结相关账户，按分录排查 |
 | LedgerReconciliationStopped | warning | 3 小时无完成的对账 | ledger-service 日志 |
+| WalletScanLagging | warning | 充值扫描落后链头 50 块以上持续 10 分钟 | [wallet.md](wallet.md)：节点可用性、租约、数据库 |
+| WalletScanStalled | warning | 10 分钟没有完成一轮扫描 | 同上；wallet-service 日志里的 `deposit scan failed` |
+| WalletDepositsHeld | warning | 已确认充值因资产关闭充值挂起超过 1 小时 | 重新开放充值后自动入账，或按 wallet.md 人工处置 |
 | AnalyticsMissingEvents | warning | ClickHouse 缺事件持续 30 分钟 | analytics-consumer 与 ClickHouse 状态（恢复后自动补齐） |
 | AnalyticsReconciliationStale | warning | 2 小时未成功核对 | 同上 |
 | FeatureFlagsStale | warning | 开关 5 分钟未刷新 | PostgreSQL 连接；刷新失败时保持最后值 |

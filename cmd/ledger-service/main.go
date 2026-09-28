@@ -99,7 +99,7 @@ func setup(ctx context.Context, a *app.App) error {
 		Now:            time.Now,
 		WelcomeCredits: credits,
 	}
-	if err := bootstrap.Consumer(ctx, a, cfg.Kafka, consumer.Group, []string{event.TopicAuth}, consumer.Handler(svc)); err != nil {
+	if err := bootstrap.Consumer(ctx, a, cfg.Kafka, consumer.Group, consumer.Topics, consumer.Handler(svc)); err != nil {
 		return err
 	}
 	settlement := consumer.NewSettlement(svc, a.Logger(), a.Metrics())

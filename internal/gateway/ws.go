@@ -32,7 +32,7 @@ const (
 )
 
 // Private channels; the public market channels are in wsmarket.go.
-var privateChannels = []string{"balances", "notifications", "orders", "fills"}
+var privateChannels = []string{"balances", "notifications", "orders", "fills", "deposits"}
 
 // TokenChecker authenticates access tokens (the Authenticator).
 type TokenChecker interface {

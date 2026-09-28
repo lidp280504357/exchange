@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package exchange.wallet.v1;
+
+// Events on wallet.deposit.events, keyed by user_id (requirements §8.1,
+// §11.5). Amounts are decimal strings in the asset's unit.
+
+// Deposit is an incoming transfer to a user's deposit address.
+message Deposit {
+  string deposit_id = 1;
+  string user_id = 2;
+  // Empty for a token no asset is configured for.
+  string asset = 3;
+  // e.g. ETH-SEPOLIA
+  string network = 4;
+  string address = 5;
+  string tx_hash = 6;
+  // The log's index for a token transfer; -1 for the chain's native coin.
+  int64 log_index = 7;
+  uint64 block_number = 8;
+  // Cut to the asset's decimals; what the ledger books.
+  string amount = 9;
+  uint32 confirmations = 10;
+  uint32 required_confirmations = 11;
+  // Booked to UNCLAIMED_DEPOSIT for manual handling instead of the user
+  // (§11.5), for reason.
+  bool unclaimed = 12;
+  // Why the deposit is unclaimed or rejected: BELOW_MINIMUM,
+  // ACCOUNT_CLOSED, NOT_ELIGIBLE or UNSUPPORTED_TOKEN.
+  string reason = 13;
+  // Token contract; empty for the chain's coin.
+  string contract = 14;
+  // The transferred amount in the chain's smallest unit.
+  string raw_amount = 15;
+  // DETECTED, CONFIRMING, CONFIRMED, CREDITED, ORPHANED or REJECTED.
+  string status = 16;
+}
+
+// DepositAddressAssigned: a user got a deposit address on a network.
+message DepositAddressAssigned {
+  string user_id = 1;
+  string network = 2;
+  string address = 3;
+  // Address index under the deposit account (m/44'/60'/0'/0/index).
+  uint32 derivation_index = 4;
+}
+
+// DepositDetected: the transfer is on chain, not yet confirmed.
+message DepositDetected {
+  Deposit deposit = 1;
+}
+
+// DepositConfirmed: enough confirmations; the ledger books it
+// (DEPOSIT_CREDIT, key deposit:<deposit_id>) to the user's SPOT account,
+// or to UNCLAIMED_DEPOSIT when unclaimed.
+message DepositConfirmed {
+  Deposit deposit = 1;
+}
+
+// DepositCredited: the ledger booked it; status CREDITED, or REJECTED
+// when it went to UNCLAIMED_DEPOSIT.
+message DepositCredited {
+  Deposit deposit = 1;
+  string journal_id = 2;
+}
+
+// DepositOrphaned: a reorganization dropped the transfer before it was
+// credited; it returns to DETECTED if it shows up again.
+message DepositOrphaned {
+  Deposit deposit = 1;
+}
+
+// DepositRejected: a transfer that cannot be booked, such as a token no
+// asset is configured for (reason UNSUPPORTED_TOKEN). It waits for manual
+// handling (§11.5).
+message DepositRejected {
+  Deposit deposit = 1;
+}

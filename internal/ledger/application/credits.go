@@ -104,3 +104,14 @@ func (s *Service) Adjust(ctx context.Context, idemKey, userID, asset string, amo
 }
 
 func pgUnique(err error) (string, bool) { return pg.UniqueViolation(err) }
+
+// CreditDeposit books a confirmed deposit (§11.5) once per deposit: the
+// journal key deposit:<id> turns a redelivery into a replay.
+func (s *Service) CreditDeposit(ctx context.Context, eventID string, d domain.Deposit) (Result, error) {
+	p, err := domain.DepositPosting(d)
+	if err != nil {
+		return Result{}, err
+	}
+	p.SourceEventID = eventID
+	return s.Post(ctx, p)
+}

@@ -30,7 +30,7 @@ type settings struct {
 	HTTPAddr string `koanf:"http_addr"`
 	// Upstream REST addresses (AUTH_SERVICE_URL, USER_SERVICE_URL,
 	// NOTIFICATION_SERVICE_URL, INSTRUMENT_SERVICE_URL, LEDGER_SERVICE_URL,
-	// TRADING_SERVICE_URL, MARKET_DATA_SERVICE_URL).
+	// TRADING_SERVICE_URL, MARKET_DATA_SERVICE_URL, WALLET_SERVICE_URL).
 	AuthURL         string `koanf:"auth_service_url"`
 	UserURL         string `koanf:"user_service_url"`
 	NotificationURL string `koanf:"notification_service_url"`
@@ -38,6 +38,7 @@ type settings struct {
 	LedgerURL       string `koanf:"ledger_service_url"`
 	TradingURL      string `koanf:"trading_service_url"`
 	MarketURL       string `koanf:"market_data_service_url"`
+	WalletURL       string `koanf:"wallet_service_url"`
 	// Redis holds the session revocation marks auth-service sets, the rate
 	// limit counters and the idempotency cache.
 	Redis redisx.Config `koanf:",squash"`
@@ -66,6 +67,7 @@ func setup(ctx context.Context, a *app.App) error {
 		LedgerURL:       "http://localhost:8085",
 		TradingURL:      "http://localhost:8088",
 		MarketURL:       "http://localhost:8090",
+		WalletURL:       "http://localhost:8092",
 		WSOrigins:       []string{"astras.vip", "localhost:5173"},
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
@@ -99,6 +101,10 @@ func setup(ctx context.Context, a *app.App) error {
 	if err != nil {
 		return err
 	}
+	walletURL, err := upstream(cfg.WalletURL)
+	if err != nil {
+		return err
+	}
 	rdb, err := bootstrap.Redis(ctx, a, cfg.Redis)
 	if err != nil {
 		return err
@@ -123,7 +129,7 @@ func setup(ctx context.Context, a *app.App) error {
 	up := gateway.Upstreams{
 		Auth: gateway.NewProxy(authURL), User: gateway.NewProxy(userURL), Notification: notification,
 		Instrument: gateway.NewProxy(instrumentURL), Ledger: gateway.NewProxy(ledgerURL), Trading: gateway.NewProxy(tradingURL),
-		Market: gateway.NewProxy(marketURL),
+		Market: gateway.NewProxy(marketURL), Wallet: gateway.NewProxy(walletURL),
 	}
 	if a.Config().Env != config.EnvProd {
 		// Dev inbox of the mock providers (codes sent by SMS or to test mail

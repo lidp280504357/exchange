@@ -5,18 +5,22 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
 	ledgerv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1"
 	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
 	notificationv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/notification/v1"
 	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
 	tradev1 "github.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1"
+	walletv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1"
 )
 
 // WSTopics are the topics the hub follows from their end (requirements
 // §7.3: every gateway instance reads every partition).
 var WSTopics = []string{
 	"ledger.events", "notification.events", "order.events", "trade.events", "market.depth", "market.candle.events",
+	"wallet.deposit.events",
 }
 
 type balanceData struct {
@@ -69,6 +73,21 @@ type fillData struct {
 	ExecutedAt    string `json:"executed_at"`
 }
 
+// depositData is a deposit change on "deposits"; clients reload the
+// deposit list for the details.
+type depositData struct {
+	DepositID             string  `json:"deposit_id"`
+	Asset                 *string `json:"asset"`
+	Network               string  `json:"network"`
+	TxHash                string  `json:"tx_hash"`
+	Amount                string  `json:"amount"`
+	Status                string  `json:"status"`
+	Confirmations         uint32  `json:"confirmations"`
+	RequiredConfirmations uint32  `json:"required_confirmations"`
+	Unclaimed             bool    `json:"unclaimed"`
+	Reason                *string `json:"reason"`
+}
+
 // tradeData is a public trade on "trades:{symbol}".
 type tradeData struct {
 	TradeID       string `json:"trade_id"`
@@ -118,7 +137,8 @@ func sideName(s orderv1.Side) string { return strings.TrimPrefix(s.String(), "SI
 
 // WSEvents turns events into pushes: balance changes on "balances", new
 // notifications on "notifications", order changes on "orders", fills on
-// "fills", and the public trades, depth, candles and tickers.
+// "fills", deposit changes on "deposits", and the public trades, depth,
+// candles and tickers.
 func WSEvents(h *Hub) func(context.Context, *eventv1.Envelope) error {
 	return func(_ context.Context, env *eventv1.Envelope) error {
 		var (
@@ -137,6 +157,14 @@ func WSEvents(h *Hub) func(context.Context, *eventv1.Envelope) error {
 			ticker    marketv1.TickerUpdated
 		)
 		p := env.GetPayload()
+		if d, ok := depositOf(p); ok {
+			h.Publish(d.GetUserId(), "deposits", depositData{
+				DepositID: d.GetDepositId(), Asset: optional(d.GetAsset()), Network: d.GetNetwork(), TxHash: d.GetTxHash(),
+				Amount: d.GetAmount(), Status: d.GetStatus(), Confirmations: d.GetConfirmations(),
+				RequiredConfirmations: d.GetRequiredConfirmations(), Unclaimed: d.GetUnclaimed(), Reason: optional(d.GetReason()),
+			})
+			return nil
+		}
 		switch {
 		case p.MessageIs(&balance):
 			if err := p.UnmarshalTo(&balance); err != nil {
@@ -237,6 +265,29 @@ func WSEvents(h *Hub) func(context.Context, *eventv1.Envelope) error {
 		}
 		return nil
 	}
+}
+
+// depositOf returns the deposit a wallet event carries.
+func depositOf(p interface {
+	MessageIs(proto.Message) bool
+	UnmarshalTo(proto.Message) error
+},
+) (*walletv1.Deposit, bool) {
+	for _, m := range []interface {
+		proto.Message
+		GetDeposit() *walletv1.Deposit
+	}{
+		&walletv1.DepositDetected{}, &walletv1.DepositConfirmed{}, &walletv1.DepositCredited{},
+		&walletv1.DepositOrphaned{}, &walletv1.DepositRejected{},
+	} {
+		if p.MessageIs(m) {
+			if err := p.UnmarshalTo(m); err != nil {
+				return nil, false
+			}
+			return m.GetDeposit(), true
+		}
+	}
+	return nil, false
 }
 
 // onTrade pushes a trade to both sides' "fills" and to "trades:{symbol}".

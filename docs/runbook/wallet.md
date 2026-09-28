@@ -1,0 +1,101 @@
+# 钱包：充值（wallet-service 与 signer）
+
+实施计划 §6.3 任务 9，需求 §5.10、§11.5，ADR-0001（余额只经账本）、ADR-0003（私钥只在 signer）。提现、白名单、签名服务与归集在任务 10。
+
+## 组成
+
+```
+signer init（一次性，服务器上）── keystore.json（助记词，scrypt + AES-256-GCM）
+        │ 打印充值账户 xpub（m/44'/60'/0'）
+        ▼
+apps.env WALLET_XPUB ──> wallet-service ──分配地址 m/44'/60'/0'/0/i（公钥派生，不碰私钥）
+                           │ 扫描器（Alchemy Sepolia JSON-RPC，每 30 秒，数据库租约保证单实例）
+                           ▼
+              wallet.deposit.events：DepositAddressAssigned / Detected / Confirmed / Credited / Orphaned / Rejected
+                           │ DepositConfirmed
+                           ▼
+              ledger-service：DEPOSIT_CREDIT（键 deposit:<id>）DEPOSIT_PENDING → 用户 SPOT 或 UNCLAIMED_DEPOSIT
+                           │ ledger.events EntryPosted
+                           ▼
+              wallet-service 标记 CREDITED / REJECTED 并发 DepositCredited ──> notification-service（站内信、未入账加邮件）
+                                                                         └─> api-gateway（私有频道 deposits；余额走 balances）
+```
+
+- 服务：wallet-service，HTTP 8092（网关转发 `/v1/wallet/*`），运维 9092，schema `wallet`。
+- 接口：`GET /v1/wallet/deposit-address?asset=ETH&network=ETH-SEPOLIA`（首次请求分配下一个派生地址，同一网络的所有资产共用一个地址）、`GET /v1/wallet/deposits`（新到旧，`cursor`/`limit`），契约 `api/openapi/wallet.yaml`。H5 充值页 `/deposit`（资产页"充值"按钮进入）。
+- 测试服目前只开放 ETH（Sepolia，12 个确认，最小充值 0.001 ETH），见 `deploy/instruments/test.json`。
+
+## 密钥与 keystore
+
+- 助记词（BIP-39，24 词）只在 signer 的 keystore 里，文件用口令经 scrypt（N=2^18）派生的密钥做 AES-256-GCM 加密，权限 0600。业务服务只拿 xpub，`evm.NewDeriver` 拒绝 xprv。
+- 派生路径：充值账户 `m/44'/60'/0'`，用户地址 `m/44'/60'/0'/0/i`（`deposit_addresses.derivation_index`，按网络递增、永不复用）；热钱包是账户 1（任务 10）。
+- 测试服位置：`/opt/exchange/infra/signer/`（目录 700，属主为镜像里的 app 用户 uid 10001），`keystore.json` + `signer.env`（`SIGNER_PASSPHRASE`，600，随机生成，从不打印）。
+
+首次创建（已在测试服做过，重复执行会因文件已存在而失败）：
+
+```bash
+ssh exchange 'cd /opt/exchange/infra && sudo install -d -m 700 -o 10001 -g 10001 signer \
+  && printf "SIGNER_PASSPHRASE=%s\n" "$(openssl rand -base64 32)" | sudo tee signer/signer.env >/dev/null \
+  && sudo chmod 600 signer/signer.env && sudo chown 10001:10001 signer/signer.env \
+  && sudo docker run --rm --env-file signer/signer.env -v "$PWD/signer:/keystore" exchange-app:latest /app/signer init --keystore /keystore/keystore.json'
+```
+
+打印出的 xpub 追加到 `apps.env` 的 `WALLET_XPUB=`（先备份 apps.env），然后 `sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml up -d wallet-service`。再次查看 xpub：同一 docker run 把 `init` 换成 `xpub`。
+
+备份：keystore 文件与口令分开保存；两者任一丢失，充值地址里的资金就无法再动用（测试网无真实价值，但流程按生产要求执行）。更换 keystore 会改变全部充值地址，已分配给用户的旧地址仍会被扫描，但资金只能用旧 keystore 归集。
+
+## 扫描与状态机
+
+- 游标：`scan_cursors` 记已扫描的最高块；首次启动从当前高度开始（`WALLET_SCAN_START` 可指定起点），不回扫历史。
+- 每轮：读链头，最多扫 20 块；每块取完整交易，找发往本平台地址、金额 > 0 的交易并查回执确认成功（合约内部转账看不到）；再用一次 `eth_getLogs`（ERC-20 `Transfer`，接收方为本平台地址，任意合约）覆盖这些块。Alchemy 免费档 `eth_getLogs` 一次最多 10 块、地址按 500 个一组分批。
+- 父哈希校验：新块的 `parentHash` 必须等于已存的上一块哈希（`scanned_blocks` 保留最近 128 块）。不一致就回退 `确认数 + 6` 块（Sepolia 为 18 块）重扫，回退范围内仍待确认的充值记为 ORPHANED；重扫时交易再次出现则回到 DETECTED（重新计确认数），已入账的充值只跟随新区块号。
+- 同一笔转账 `(network, tx_hash, log_index)` 只有一条记录（原生币 `log_index = -1`）。
+- 确认数只按已校验过父哈希的块计算（不按链头），满 `confirmations` 进入 CONFIRMED；之后请求入账：资产与网络都开放充值时发 `DepositConfirmed`，否则挂起（`wallet_deposits_held`），重新开放后自动继续。
+- 分流（§11.5、§5.4）：低于最小充值额 → 标记 `BELOW_MINIMUM`，记入 `UNCLAIMED_DEPOSIT`；账户已注销（eligibility `DEPOSIT` 返回 `USER_CLOSED`）→ `ACCOUNT_CLOSED`，同样记入 `UNCLAIMED_DEPOSIT`；未上架代币 → REJECTED（`UNSUPPORTED_TOKEN`），不入账本（账本只接受已配置资产），通知用户，人工评估找回；精度截断后为 0 的零头同样 REJECTED。冻结账户照常入账（§5.4：入账但不可动）。
+- 入账：账本 `DEPOSIT_CREDIT` 的幂等键 `deposit:<id>`，重复投递只会重放；钱包看到 `EntryPosted` 后把充值置为 CREDITED（或 REJECTED）并发 `DepositCredited`。
+
+## 调用量估算（Alchemy 免费档）
+
+每轮约 `eth_blockNumber`（10 CU）+ 每块 `eth_getBlockByNumber`（16 CU）+ 一次 `eth_getLogs`（75 CU，没有地址时不调用），命中充值时每笔加一次回执（15 CU）。30 秒一轮、每轮约 2.5 块时约 36 万 CU/天、1100 万 CU/月。本机开发栈默认不扫链（`scripts/dev.sh` 去掉了端点，`DEV_SCAN=1` 才保留），避免两个扫描器翻倍用量。
+
+## 配置
+
+| 变量 | 说明 |
+|---|---|
+| `WALLET_XPUB` | 充值账户 xpub（apps.env）；不设则不分配地址（`WALLET_UNAVAILABLE`） |
+| `ALCHEMY_SEPOLIA_HTTPS_URL`、`ETH_CHAIN_ID` | 节点地址（含 API key，日志与错误里从不出现）与链 ID；启动扫描前核对 `eth_chainId`，不符则每分钟报错重试、不扫描 |
+| `WALLET_NETWORK` | 扫描的网络，默认 `ETH-SEPOLIA` |
+| `WALLET_SCAN_INTERVAL`、`WALLET_SCAN_START` | 扫描间隔（默认 30s）、首次起点（默认 0 = 当前高度） |
+
+## 指标与告警
+
+- `wallet_scan_block`、`wallet_scan_lag_blocks`、`wallet_scan_last_success_timestamp_seconds`、`wallet_deposits_held`、`wallet_deposits_detected_total{status}`、`wallet_deposits_orphaned_total`（标签 `network`）。
+- 告警（`deploy/observability/alerts.yml`）：`WalletScanLagging`（落后 50 块以上持续 10 分钟）、`WalletScanStalled`（10 分钟没有完成一轮：节点、租约或数据库）、`WalletDepositsHeld`（有已确认充值因资产关闭充值挂起超过 1 小时）。
+
+## 常用操作
+
+```bash
+# 扫描进度与待处理充值（MCP pg_query 或服务器 psql，schema wallet）
+SELECT network, block, updated_at FROM wallet.scan_cursors;
+SELECT id, user_id, asset, amount, status, confirmations, reason, tx_hash FROM wallet.deposits
+ WHERE status NOT IN ('CREDITED') ORDER BY id DESC LIMIT 20;
+# 未入账资金（账本侧）
+SELECT asset, available FROM ledger.accounts WHERE account_type = 'UNCLAIMED_DEPOSIT';
+```
+
+- 重扫一段区块（例如漏扫怀疑）：停 wallet-service，`UPDATE wallet.scan_cursors SET block = <起点-1>` 并删掉 `wallet.scanned_blocks` 中更高的块，再启动。已记录的充值不会重复（唯一键），ORPHANED 的会复活。
+- 未入账资金的处置（找回或并入平台）要等管理后台（任务 11）的审批流程；在此之前只记录，不手工调账。
+- 切换节点：改 apps.env 的 URL 后重启 wallet-service；扫描从游标继续。
+
+## 端到端
+
+`scripts/e2e/deposit.sh`（`task e2e` 的一部分，约 5 分钟）：新用户取地址 → 端到端发送方转 0.0012 ETH 与 0.0002 ETH → 前者 12 个确认后 CREDITED、余额与流水可见、有到账通知，后者 `BELOW_MINIMUM` 记为 REJECTED → WebSocket `deposits`/`balances` 都有推送。
+
+- 发送方地址 `0xF94cC1F88410AA374bc1d7A288D09F6Af366a965`，私钥在本地 `.env` 的 `E2E_SEPOLIA_SENDER_KEY`（只有测试币）。查余额：`go run ./scripts/e2e/sendeth -balance`；低于 0.003 ETH 时脚本跳过链上部分，只测地址分配。补充测试币：Google Cloud Web3 或 Alchemy 的 Sepolia 水龙头转到上面的地址。
+- 每次消耗约 0.0014 ETH 加 gas；这些币留在各测试用户的充值地址里，任务 10 的归集可以把它们收回热钱包。
+
+## 已知局限
+
+- 只扫一个 EVM 网络；合约内部转账（internal transaction）的原生币到账看不到，需要人工补录（任务 11）。
+- ERC-20 需要在 instrument 配置合约地址才会入账（decimals 从合约读取并缓存）；未配置的代币只记录不入账。
+- 充值风控评分（§11.5 的"风控拦截"）尚未接入，账户状态由 eligibility 把关。

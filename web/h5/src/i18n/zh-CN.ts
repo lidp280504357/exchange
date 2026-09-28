@@ -1,6 +1,6 @@
 export const zhCN = {
   app: { name: "Exchange", tagline: "学习用虚拟资产交易所（测试环境，资金为模拟）" },
-  nav: { assets: "资产", markets: "市场", transfer: "划转", notifications: "通知", security: "安全", profile: "设置", logout: "退出" },
+  nav: { assets: "资产", markets: "市场", deposit: "充值", transfer: "划转", notifications: "通知", security: "安全", profile: "设置", logout: "退出" },
   common: {
     submit: "提交", next: "下一步", back: "返回", cancel: "取消", confirm: "确认", loading: "加载中…", retry: "重试",
     email: "邮箱", password: "密码", code: "验证码", sendCode: "发送验证码", resend: "重新发送", device: "设备", time: "时间",
@@ -34,6 +34,14 @@ export const zhCN = {
     swap: "交换方向", status: { COMPLETED: "已完成", FAILED: "失败" },
   },
   ledger: { title: "资金流水", type: "类型" },
+  deposit: {
+    title: "充值", assetNetwork: "币种与网络", address: "充值地址", copied: "已复制", min: "最小充值额", arrival: "到账",
+    confirmations: "{{n}} 个区块确认后到账", history: "充值记录", noneOpen: "暂无开放充值的币种",
+    warning: "只向此地址转入 {{asset}}（{{network}}）。其他币种、其他网络或低于最小充值额的转账不会自动到账，需人工处理且不保证找回。",
+    testnet: "测试环境：这是 Sepolia 测试网地址，请勿转入主网资产。", progress: "确认 {{n}}/{{total}}", unknownToken: "不支持的代币",
+    status: { DETECTED: "已发现", CONFIRMING: "确认中", CONFIRMED: "入账中", CREDITED: "已到账", ORPHANED: "已失效", REJECTED: "未入账" },
+    reason: { BELOW_MINIMUM: "低于最小充值额", UNSUPPORTED_TOKEN: "不支持的代币", ACCOUNT_CLOSED: "账户已注销", NOT_ELIGIBLE: "账户当前不能充值" },
+  },
   codes: {
     SPOT: "现货", FUTURES: "合约", AVAILABLE: "可用", FROZEN: "冻结",
     MANUAL_ADJUSTMENT: "调账（模拟资金）", ACCOUNT_TRANSFER: "账户划转", ORDER_FREEZE: "下单冻结", ORDER_UNFREEZE: "订单解冻",
@@ -76,6 +84,7 @@ export const zhCN = {
     ORDER_MIN_NOTIONAL: "金额低于最小下单额", ORDER_PRICE_OUT_OF_BAND: "价格偏离最新成交价太多", ORDER_TOO_MANY_OPEN: "挂单数量已达上限",
     ORDER_ALREADY_FILLED: "订单已全部成交", ORDER_WOULD_TAKE: "只做挂单的订单会立即成交，已拒绝", ORDER_NO_LIQUIDITY: "盘口没有可成交的订单",
     ORDER_SELF_TRADE: "会与自己的订单成交，已拒绝", COMMON_CONFLICT: "订单已结束", COMMON_NOT_FOUND: "找不到",
+    WALLET_NETWORK_DISABLED: "该币种在此网络暂停充值", WALLET_NETWORK_UNKNOWN: "不支持该网络", WALLET_UNAVAILABLE: "充值地址暂不可用，请稍后再试",
     format: "请输入正确的数字", zero: "数量必须大于 0", precision: "最多 {{n}} 位小数", unknown: "出错了（{{code}}）",
   },
 };

@@ -4,7 +4,7 @@ type Shape<T> = { [K in keyof T]: T[K] extends string ? string : Shape<T[K]> };
 
 export const en: Shape<typeof zhCN> = {
   app: { name: "Exchange", tagline: "A learning exchange (test environment, simulated funds)" },
-  nav: { assets: "Assets", markets: "Markets", transfer: "Transfer", notifications: "Notices", security: "Security", profile: "Settings", logout: "Sign out" },
+  nav: { assets: "Assets", markets: "Markets", deposit: "Deposit", transfer: "Transfer", notifications: "Notices", security: "Security", profile: "Settings", logout: "Sign out" },
   common: {
     submit: "Submit", next: "Next", back: "Back", cancel: "Cancel", confirm: "Confirm", loading: "Loading…", retry: "Retry",
     email: "Email", password: "Password", code: "Code", sendCode: "Send code", resend: "Resend", device: "Device", time: "Time",
@@ -38,6 +38,14 @@ export const en: Shape<typeof zhCN> = {
     swap: "Swap", status: { COMPLETED: "Completed", FAILED: "Failed" },
   },
   ledger: { title: "Fund flow", type: "Type" },
+  deposit: {
+    title: "Deposit", assetNetwork: "Asset and network", address: "Deposit address", copied: "Copied", min: "Minimum deposit", arrival: "Arrival",
+    confirmations: "After {{n}} block confirmations", history: "Deposit history", noneOpen: "No asset takes deposits now",
+    warning: "Send only {{asset}} on {{network}} to this address. Other assets, other networks and amounts below the minimum are not credited automatically; they need manual handling and recovery is not guaranteed.",
+    testnet: "Test environment: this is a Sepolia testnet address. Never send mainnet assets.", progress: "{{n}}/{{total}} confirmations", unknownToken: "Unsupported token",
+    status: { DETECTED: "Detected", CONFIRMING: "Confirming", CONFIRMED: "Crediting", CREDITED: "Credited", ORPHANED: "Dropped", REJECTED: "Not credited" },
+    reason: { BELOW_MINIMUM: "Below the minimum", UNSUPPORTED_TOKEN: "Unsupported token", ACCOUNT_CLOSED: "Account closed", NOT_ELIGIBLE: "Account cannot take deposits now" },
+  },
   codes: {
     SPOT: "Spot", FUTURES: "Futures", AVAILABLE: "Available", FROZEN: "Frozen",
     MANUAL_ADJUSTMENT: "Adjustment (simulated funds)", ACCOUNT_TRANSFER: "Transfer", ORDER_FREEZE: "Order hold", ORDER_UNFREEZE: "Order release",
@@ -80,6 +88,7 @@ export const en: Shape<typeof zhCN> = {
     ORDER_MIN_NOTIONAL: "Below the minimum order value", ORDER_PRICE_OUT_OF_BAND: "The price is too far from the last trade", ORDER_TOO_MANY_OPEN: "Too many open orders",
     ORDER_ALREADY_FILLED: "The order is already filled", ORDER_WOULD_TAKE: "A post-only order would have filled at once", ORDER_NO_LIQUIDITY: "Nothing to fill against",
     ORDER_SELF_TRADE: "It would fill against your own order", COMMON_CONFLICT: "The order has ended", COMMON_NOT_FOUND: "Not found",
+    WALLET_NETWORK_DISABLED: "Deposits of this asset on this network are paused", WALLET_NETWORK_UNKNOWN: "Unsupported network", WALLET_UNAVAILABLE: "Deposit addresses are not available yet, try later",
     format: "Enter a valid number", zero: "The amount must be above 0", precision: "At most {{n}} decimals", unknown: "Something went wrong ({{code}})",
   },
 };

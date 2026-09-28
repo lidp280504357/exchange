@@ -17,6 +17,7 @@ import (
 	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
 	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
 	tradev1 "github.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1"
+	walletv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1"
 	"github.com/lidp280504357/exchange/internal/platform/authtoken"
 	"github.com/lidp280504357/exchange/internal/platform/event"
 )
@@ -119,6 +120,22 @@ func TestWebSocketPrivateChannels(t *testing.T) {
 	c.send(`{"op":"ping"}`)
 	if m := c.next(); m["op"] != "pong" {
 		t.Fatalf("ping: %v", m)
+	}
+	c.send(`{"op":"subscribe","args":["deposits"]}`)
+	if m := c.next(); m["ok"] != true {
+		t.Fatalf("subscribe deposits: %v", m)
+	}
+	env, err := event.NewFactory("test", "t").New(context.Background(), &walletv1.DepositConfirmed{Deposit: &walletv1.Deposit{
+		DepositId: "d1", UserId: "u-1", Asset: "ETH", Amount: "0.002", Status: "CONFIRMED", Confirmations: 12, RequiredConfirmations: 12,
+	}}, "user", "u-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WSEvents(hub)(context.Background(), env); err != nil {
+		t.Fatal(err)
+	}
+	if m := c.next(); m["channel"] != "deposits" || m["data"].(map[string]any)["status"] != "CONFIRMED" || m["data"].(map[string]any)["reason"] != nil {
+		t.Fatalf("deposit push: %v", m)
 	}
 
 	// A reconnecting client asks for what it missed.

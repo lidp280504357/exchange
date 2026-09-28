@@ -105,6 +105,29 @@ groups:
           summary: "the reference price of {{ $labels.symbol }} is {{ $value }} seconds old; the market maker has pulled its quotes"
           runbook: docs/runbook/market-maker.md
 
+      - alert: WalletScanLagging
+        expr: max by (network) (wallet_scan_lag_blocks) > 50
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "the deposit scanner of {{ $labels.network }} is {{ $value }} blocks behind the chain; deposits are late"
+          runbook: docs/runbook/wallet.md
+
+      - alert: WalletScanStalled
+        expr: time() - max by (network) (wallet_scan_last_success_timestamp_seconds) > 600
+        labels: {severity: warning}
+        annotations:
+          summary: "no deposit scan of {{ $labels.network }} completed for 10 minutes (RPC endpoint, lease or database)"
+          runbook: docs/runbook/wallet.md
+
+      - alert: WalletDepositsHeld
+        expr: max by (network) (wallet_deposits_held) > 0
+        for: 1h
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value }} confirmed deposits on {{ $labels.network }} wait because their asset takes no deposits"
+          runbook: docs/runbook/wallet.md
+
       - alert: AnalyticsMissingEvents
         expr: max by (topic) (analytics_reconcile_missing) > 0
         for: 30m

@@ -6,6 +6,7 @@ import { Layout } from "./components/Layout";
 import { NotificationsPage, SecurityPage, SettingsPage } from "./pages/account";
 import { AssetsPage } from "./pages/assets";
 import { ChallengePage, LoginPage, RegisterPage, ResetPage } from "./pages/auth";
+import { DepositPage } from "./pages/deposit";
 import { MarketsPage } from "./pages/markets";
 import { TradePage } from "./pages/trade";
 import { TransferPage } from "./pages/transfer";
@@ -52,6 +53,7 @@ export function App() {
         <Route path="/markets" element={<MarketsPage />} />
         <Route path="/trade/:symbol" element={<TradePage />} />
         <Route path="/transfer" element={<TransferPage />} />
+        <Route path="/deposit" element={<DepositPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/security" element={<SecurityPage />} />
         <Route path="/settings" element={<SettingsPage />} />

@@ -52,6 +52,7 @@ services:
       LEDGER_SERVICE_URL: http://ledger-service:8085
       TRADING_SERVICE_URL: http://spot-trading-service:8088
       MARKET_DATA_SERVICE_URL: http://market-data-service:8090
+      WALLET_SERVICE_URL: http://wallet-service:8092
     depends_on:
       redis: {condition: service_healthy}
       redpanda: {condition: service_healthy}
@@ -62,6 +63,7 @@ services:
       ledger-service: {condition: service_started}
       spot-trading-service: {condition: service_started}
       market-data-service: {condition: service_started}
+      wallet-service: {condition: service_started}
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9080/readyz"]
@@ -186,6 +188,26 @@ services:
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/readyz"]
+
+  # Deposit addresses and the deposit scanner (§5.10, §11.5): WALLET_XPUB
+  # (the deposit account's xpub from `signer xpub`), ALCHEMY_SEPOLIA_HTTPS_URL
+  # and ETH_CHAIN_ID come from apps.env. It holds no private key (ADR-0003).
+  wallet-service:
+    <<: *app
+    command: ["/app/wallet-service"]
+    environment:
+      <<: *base-env
+      INSTRUMENT_GRPC_ADDR: instrument-service:9184
+      USER_GRPC_ADDR: user-service:9182
+      WALLET_NETWORK: ETH-SEPOLIA
+    depends_on:
+      postgres: {condition: service_healthy}
+      redpanda: {condition: service_healthy}
+      instrument-service: {condition: service_started}
+      user-service: {condition: service_started}
+    healthcheck:
+      <<: *health
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9092/readyz"]
 
   # The platform market maker (§11.10): quotes the symbols below while
   # market.maker allows them; its account MARKET_MAKER_USER_ID comes from

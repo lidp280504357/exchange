@@ -21,7 +21,7 @@ DEV_DB=exchange_dev
 NS=dev.
 DEV_DIR=.dev
 # Readiness is reported in this order.
-SERVICES=(notification-service user-service auth-service instrument-service ledger-service spot-trading-service matching-engine market-data-service market-maker risk-service analytics-consumer api-gateway)
+SERVICES=(notification-service user-service auth-service instrument-service ledger-service spot-trading-service matching-engine market-data-service market-maker wallet-service risk-service analytics-consumer api-gateway)
 # Flags that are on in the test environment (docs/runbook/ledger.md,
 # otp.md), turned on when the namespace is created.
 DEV_FLAGS=(ledger.welcome_credit account.transfer ledger.manual_adjustment auth.sms)
@@ -42,6 +42,10 @@ else
   export REDIS_URL="$REDIS_URL/1"
 fi
 export CLICKHOUSE_DB=$DEV_DB KAFKA_NAMESPACE=$NS APP_ENV=local
+# The local wallet-service assigns addresses but does not scan Sepolia (the
+# deployed one does; two scanners would double the provider quota).
+# DEV_SCAN=1 keeps the endpoint.
+[[ ${DEV_SCAN:-} == 1 ]] || unset ALCHEMY_SEPOLIA_HTTPS_URL
 
 if [[ ${1:-} == ctl ]]; then
   shift
@@ -104,6 +108,7 @@ ops_port() {
     matching-engine) echo 9089 ;;
     market-data-service) echo 9090 ;;
     market-maker) echo 9091 ;;
+    wallet-service) echo 9092 ;;
     risk-service) echo 9086 ;;
     analytics-consumer) echo 9087 ;;
   esac
