@@ -146,7 +146,10 @@ async function clickText(page, selector, label) {
   for (let i = 0; i < 40; i++) {
     for (const h of await page.$$(selector)) {
       const [text, disabled] = await h.evaluate((el) => [el.innerText.trim(), el.disabled === true]);
-      if (text === label && !disabled && (await h.isVisible())) return h.click();
+      if (text === label && !disabled && (await h.isVisible())) {
+        await h.evaluate((el) => el.scrollIntoView({ block: "center" })); // clear of the fixed navigation
+        return h.click();
+      }
     }
     await sleep(250);
   }
@@ -154,6 +157,9 @@ async function clickText(page, selector, label) {
 }
 async function typeInto(page, selector, value) {
   await page.waitForSelector(selector, { visible: true });
+  // Centered, so the fixed bottom navigation of the phone layout cannot
+  // take the click.
+  await page.$eval(selector, (el) => el.scrollIntoView({ block: "center" }));
   await page.click(selector, { clickCount: 3 });
   await page.keyboard.press("Backspace");
   await page.type(selector, value);
@@ -212,6 +218,26 @@ try {
   await waitText(page, "BTC/USDT");
   ok("markets list the seeded pairs");
   await shot(page, "5-markets");
+
+  // Trading: a limit buy far below the market rests, shows in the book and
+  // the open orders, and goes away when canceled. 40000 stays clear of the
+  // prices of scripts/e2e/matching.sh and marketdata.sh.
+  await clickText(page, "td a", "BTC/USDT");
+  await waitText(page, "Order book");
+  await page.waitForSelector('[data-testid="chart"] canvas', { timeout: 15000 });
+  await typeInto(page, 'input[name="price"]', "40000");
+  await typeInto(page, 'input[name="quantity"]', "0.001");
+  await waitText(page, "Total: 40 USDT");
+  await clickText(page, "form button", "Buy BTC");
+  await waitText(page, "Order placed");
+  await page.waitForFunction(() => document.querySelector('[data-testid="bids"]')?.innerText.includes("40,000"), { timeout: 15000 });
+  await page.waitForFunction(() => document.querySelector('[data-testid="orders-open"]')?.innerText.includes("Open"), { timeout: 15000 });
+  ok("a limit buy placed through the form rests in the book and the open orders");
+  await shot(page, "5b-trade");
+  await clickText(page, '[data-testid="orders-open"] button', "Cancel");
+  await page.waitForFunction(() => !document.querySelector('[data-testid="bids"]')?.innerText.includes("40,000"), { timeout: 15000 });
+  await page.waitForFunction(() => document.querySelector('[data-testid="orders-open"]')?.querySelectorAll("tbody tr").length === 0, { timeout: 15000 });
+  ok("canceling it clears the book and the open orders (engine and WebSocket)");
 
   await clickText(page, "nav a", "Notices");
   await waitText(page, "Welcome to Exchange");

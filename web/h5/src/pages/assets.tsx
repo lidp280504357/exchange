@@ -94,36 +94,3 @@ function LedgerCard() {
     </Card>
   );
 }
-
-export function MarketsPage() {
-  const { t } = useTranslation();
-  const pairs = useQuery({ queryKey: ["pairs"], queryFn: () => unwrap(marketApi.GET("/v1/market/pairs")) });
-  const tone = (s: string) => (s === "TRADING" ? "green" : s === "HALT" || s === "CANCEL_ONLY" ? "red" : "yellow");
-  return (
-    <Card title={t("markets.title")}>
-      <ErrorText text={pairs.error ? errorText(pairs.error) : ""} />
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[520px] text-sm">
-          <thead className="text-left text-xs text-gray-500">
-            <tr>
-              <th className="py-1">{t("markets.pair")}</th><th>{t("markets.status")}</th><th className="text-right">{t("markets.tick")}</th>
-              <th className="text-right">{t("markets.lot")}</th><th className="text-right">{t("markets.minNotional")}</th><th className="text-right">{t("markets.fees")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(pairs.data?.pairs ?? []).map((p) => (
-              <tr key={p.symbol} className="border-t border-white/5">
-                <td className="py-2 font-medium">{p.base_asset}<span className="text-gray-500">/{p.quote_asset}</span></td>
-                <td><Badge tone={tone(p.status)}>{codeText(p.status)}</Badge></td>
-                <td className="text-right font-mono">{p.tick_size}</td>
-                <td className="text-right font-mono">{p.lot_size}</td>
-                <td className="text-right font-mono">{p.min_notional} {p.quote_asset}</td>
-                <td className="text-right font-mono">{p.maker_fee_rate} / {p.taker_fee_rate}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Card>
-  );
-}

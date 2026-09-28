@@ -24,7 +24,12 @@ call() {
   if [[ -n "$data" ]]; then
     args+=(-H 'Content-Type: application/json' -d "$data")
   fi
-  STATUS=$(curl "${args[@]}" "$@")
+  # A network failure (not an HTTP error) is reported, not silent: outside
+  # a condition set -e then stops the script; inside eventually it retries.
+  STATUS=$(curl "${args[@]}" "$@") || {
+    printf 'curl %s %s failed (exit %s)\n' "$method" "$path" "$?" >&2
+    return 1
+  }
   BODY=$(cat "$WORK/body")
 }
 

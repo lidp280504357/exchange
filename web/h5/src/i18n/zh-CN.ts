@@ -17,7 +17,18 @@ export const zhCN = {
     title: "资产", spot: "现货账户", futures: "合约账户", asset: "资产", available: "可用", frozen: "冻结", total: "总额",
     empty: "暂无余额。测试环境注册即送模拟资金。", live: "实时",
   },
-  markets: { title: "交易对", pair: "交易对", status: "状态", tick: "价格精度", lot: "数量精度", minNotional: "最小下单额", fees: "挂单/吃单费率" },
+  markets: {
+    title: "交易对", pair: "交易对", status: "状态", tick: "价格精度", lot: "数量精度", minNotional: "最小下单额", fees: "挂单/吃单费率",
+    last: "最新价", change: "24h 涨跌", high: "24h 最高", low: "24h 最低", volume: "24h 成交量", trade: "交易", rules: "交易规则",
+  },
+  trade: {
+    chart: "K 线", book: "盘口", trades: "最新成交", price: "价格", quantity: "数量", amount: "成交额", time: "时间",
+    buy: "买入", sell: "卖出", limit: "限价", market: "市价", total: "金额", available: "可用", spend: "花费", tif: "有效方式",
+    placeBuy: "买入 {{base}}", placeSell: "卖出 {{base}}", placed: "已下单", marketHint: "按盘口最优价立即成交，剩余部分撤销",
+    openOrders: "当前委托", history: "历史委托", fills: "成交记录", cancel: "撤单", cancelAll: "全部撤单", canceling: "撤单中",
+    side: "方向", type: "类型", filled: "已成交", status: "状态", fee: "手续费", role: "角色", noAnchor: "暂无成交",
+    notTrading: "该交易对当前不可下单", attribution: "图表由 TradingView 提供",
+  },
   transfer: {
     title: "资金划转", from: "从", to: "到", amount: "数量", max: "全部", done: "划转成功", history: "划转记录",
     swap: "交换方向", status: { COMPLETED: "已完成", FAILED: "失败" },
@@ -32,6 +43,9 @@ export const zhCN = {
     SUCCESS: "成功", FAILED_PASSWORD: "密码错误", LOCKED: "已锁定", CHALLENGE_REQUIRED: "需要验证",
     WEB: "网页", APP: "应用", ACTIVE: "正常", RISK_REVIEW: "审核中", FROZEN_ACCOUNT: "已冻结", CLOSED: "已注销",
     PREPARE: "即将上线", TRADING: "交易中", HALT: "暂停", CANCEL_ONLY: "仅可撤单", DELISTED: "已下线",
+    NEW: "已提交", OPEN: "挂单中", PARTIALLY_FILLED: "部分成交", FILLED: "全部成交", CANCELED: "已撤销", REJECTED: "已拒绝", EXPIRED: "已过期",
+    BUY: "买入", SELL: "卖出", LIMIT: "限价", MARKET: "市价", GTC: "一直有效", IOC: "立即成交剩余撤销", FOK: "全部成交或撤销", POST_ONLY: "只做挂单",
+    MAKER: "挂单", TAKER: "吃单", USER: "用户撤单", SELF_TRADE: "自成交保护", NO_LIQUIDITY: "盘口不足",
   },
   notices: { title: "通知", markAll: "全部已读", unread: "{{n}} 条未读" },
   security: {
@@ -51,6 +65,10 @@ export const zhCN = {
     USER_RISK_REVIEW: "账户风控审核中，暂不可用", USER_NOT_ELIGIBLE: "该功能暂未开放", USER_REGION_NOT_ALLOWED: "所在地区暂不支持该功能",
     LEDGER_INSUFFICIENT_BALANCE: "可用余额不足", LEDGER_AMOUNT_PRECISION: "数量的小数位超出资产精度", COMMON_RATE_LIMITED: "请求太频繁，请稍后再试",
     COMMON_IDEMPOTENCY_CONFLICT: "重复提交，请刷新后重试", COMMON_INVALID_ARGUMENT: "输入有误", COMMON_UNAVAILABLE: "服务暂时不可用，请稍后重试",
+    INSTRUMENT_NOT_TRADING: "该交易对当前不可下单", INSTRUMENT_PRECISION: "价格或数量不符合交易对精度", ORDER_QUANTITY_OUT_OF_RANGE: "数量超出允许范围",
+    ORDER_MIN_NOTIONAL: "金额低于最小下单额", ORDER_PRICE_OUT_OF_BAND: "价格偏离最新成交价太多", ORDER_TOO_MANY_OPEN: "挂单数量已达上限",
+    ORDER_ALREADY_FILLED: "订单已全部成交", ORDER_WOULD_TAKE: "只做挂单的订单会立即成交，已拒绝", ORDER_NO_LIQUIDITY: "盘口没有可成交的订单",
+    ORDER_SELF_TRADE: "会与自己的订单成交，已拒绝", COMMON_CONFLICT: "订单已结束", COMMON_NOT_FOUND: "找不到",
     format: "请输入正确的数字", zero: "数量必须大于 0", precision: "最多 {{n}} 位小数", unknown: "出错了（{{code}}）",
   },
 };

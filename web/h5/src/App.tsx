@@ -4,8 +4,10 @@ import { Navigate, Route, Routes } from "react-router";
 import { refresh } from "./api/client";
 import { Layout } from "./components/Layout";
 import { NotificationsPage, SecurityPage, SettingsPage } from "./pages/account";
-import { AssetsPage, MarketsPage } from "./pages/assets";
+import { AssetsPage } from "./pages/assets";
 import { ChallengePage, LoginPage, RegisterPage, ResetPage } from "./pages/auth";
+import { MarketsPage } from "./pages/markets";
+import { TradePage } from "./pages/trade";
 import { TransferPage } from "./pages/transfer";
 import { mayHaveSession, useSession } from "./store/session";
 
@@ -48,6 +50,7 @@ export function App() {
       <Route element={<RequireSession><Layout /></RequireSession>}>
         <Route index element={<AssetsPage />} />
         <Route path="/markets" element={<MarketsPage />} />
+        <Route path="/trade/:symbol" element={<TradePage />} />
         <Route path="/transfer" element={<TransferPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/security" element={<SecurityPage />} />

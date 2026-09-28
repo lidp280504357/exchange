@@ -21,7 +21,18 @@ export const en: Shape<typeof zhCN> = {
     title: "Assets", spot: "Spot", futures: "Futures", asset: "Asset", available: "Available", frozen: "Frozen", total: "Total",
     empty: "No balances yet. New test accounts get simulated funds.", live: "Live",
   },
-  markets: { title: "Markets", pair: "Pair", status: "Status", tick: "Tick", lot: "Lot", minNotional: "Min notional", fees: "Maker / taker" },
+  markets: {
+    title: "Markets", pair: "Pair", status: "Status", tick: "Tick", lot: "Lot", minNotional: "Min notional", fees: "Maker / taker",
+    last: "Last", change: "24h change", high: "24h high", low: "24h low", volume: "24h volume", trade: "Trade", rules: "Rules",
+  },
+  trade: {
+    chart: "Chart", book: "Order book", trades: "Trades", price: "Price", quantity: "Quantity", amount: "Amount", time: "Time",
+    buy: "Buy", sell: "Sell", limit: "Limit", market: "Market", total: "Total", available: "Available", spend: "Spend", tif: "Time in force",
+    placeBuy: "Buy {{base}}", placeSell: "Sell {{base}}", placed: "Order placed", marketHint: "Fills at the best prices now; the rest is canceled",
+    openOrders: "Open orders", history: "Order history", fills: "Fills", cancel: "Cancel", cancelAll: "Cancel all", canceling: "Canceling",
+    side: "Side", type: "Type", filled: "Filled", status: "Status", fee: "Fee", role: "Role", noAnchor: "No trades yet",
+    notTrading: "This pair does not take orders now", attribution: "Charts by TradingView",
+  },
   transfer: {
     title: "Transfer", from: "From", to: "To", amount: "Amount", max: "Max", done: "Transferred", history: "History",
     swap: "Swap", status: { COMPLETED: "Completed", FAILED: "Failed" },
@@ -36,6 +47,9 @@ export const en: Shape<typeof zhCN> = {
     SUCCESS: "Success", FAILED_PASSWORD: "Wrong password", LOCKED: "Locked", CHALLENGE_REQUIRED: "Check required",
     WEB: "Web", APP: "App", ACTIVE: "Active", RISK_REVIEW: "Under review", FROZEN_ACCOUNT: "Frozen", CLOSED: "Closed",
     PREPARE: "Coming soon", TRADING: "Trading", HALT: "Halted", CANCEL_ONLY: "Cancel only", DELISTED: "Delisted",
+    NEW: "Submitted", OPEN: "Open", PARTIALLY_FILLED: "Partly filled", FILLED: "Filled", CANCELED: "Canceled", REJECTED: "Rejected", EXPIRED: "Expired",
+    BUY: "Buy", SELL: "Sell", LIMIT: "Limit", MARKET: "Market", GTC: "Good till canceled", IOC: "Immediate or cancel", FOK: "Fill or kill", POST_ONLY: "Post only",
+    MAKER: "Maker", TAKER: "Taker", USER: "Canceled by you", SELF_TRADE: "Self-trade prevention", NO_LIQUIDITY: "Not enough liquidity",
   },
   notices: { title: "Notifications", markAll: "Mark all read", unread: "{{n}} unread" },
   security: {
@@ -55,6 +69,10 @@ export const en: Shape<typeof zhCN> = {
     USER_RISK_REVIEW: "The account is under review", USER_NOT_ELIGIBLE: "Not available yet", USER_REGION_NOT_ALLOWED: "Not available in your region",
     LEDGER_INSUFFICIENT_BALANCE: "Insufficient available balance", LEDGER_AMOUNT_PRECISION: "Too many decimals for this asset", COMMON_RATE_LIMITED: "Too many requests, slow down",
     COMMON_IDEMPOTENCY_CONFLICT: "Duplicate submission, reload and retry", COMMON_INVALID_ARGUMENT: "Invalid input", COMMON_UNAVAILABLE: "Temporarily unavailable, try again",
+    INSTRUMENT_NOT_TRADING: "This pair does not take orders now", INSTRUMENT_PRECISION: "Price or quantity does not fit the pair's steps", ORDER_QUANTITY_OUT_OF_RANGE: "Quantity out of range",
+    ORDER_MIN_NOTIONAL: "Below the minimum order value", ORDER_PRICE_OUT_OF_BAND: "The price is too far from the last trade", ORDER_TOO_MANY_OPEN: "Too many open orders",
+    ORDER_ALREADY_FILLED: "The order is already filled", ORDER_WOULD_TAKE: "A post-only order would have filled at once", ORDER_NO_LIQUIDITY: "Nothing to fill against",
+    ORDER_SELF_TRADE: "It would fill against your own order", COMMON_CONFLICT: "The order has ended", COMMON_NOT_FOUND: "Not found",
     format: "Enter a valid number", zero: "The amount must be above 0", precision: "At most {{n}} decimals", unknown: "Something went wrong ({{code}})",
   },
 };

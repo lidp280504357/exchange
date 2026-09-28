@@ -13,7 +13,7 @@ function useLiveEvents() {
   const qc = useQueryClient();
   const token = useSession((s) => s.session?.accessToken);
   const signedIn = Boolean(token);
-  const [socket] = useState(() => new PrivateSocket(["balances", "notifications"]));
+  const [socket] = useState(() => new PrivateSocket(["balances", "notifications", "orders", "fills"]));
   const [flash, setFlash] = useState("");
 
   useEffect(() => {
@@ -22,6 +22,11 @@ function useLiveEvents() {
       if (p.channel === "balances") {
         void qc.invalidateQueries({ queryKey: ["balances"] });
         void qc.invalidateQueries({ queryKey: ["ledger"] });
+      } else if (p.channel === "orders") {
+        void qc.invalidateQueries({ queryKey: ["orders"] });
+      } else if (p.channel === "fills") {
+        void qc.invalidateQueries({ queryKey: ["fills"] });
+        void qc.invalidateQueries({ queryKey: ["orders"] });
       } else if (p.channel === "notifications") {
         void qc.invalidateQueries({ queryKey: ["notifications"] });
         setFlash(p.data.title ?? "");
