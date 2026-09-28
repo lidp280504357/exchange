@@ -45,11 +45,11 @@ main() {
       --file - --reason "deploy $APP_VERSION" < deploy/instruments/test.json | tail -1 | sed 's/^/== 参考数据：/'
   fi
   # 5. H5 前端：在 node 容器里构建（glibc 镜像，打包器与 Tailwind 的原生模块都有对应二进制；pnpm 缓存放命名卷），
-  #    构建成功才替换 nginx 的静态目录；Turnstile 站点密钥是公开值
+  #    构建成功才替换 nginx 的静态目录；Turnstile 站点密钥是公开值。挂整个仓库：API 文档页要读 api/openapi
   if [ -f web/h5/package.json ]; then
     local site_key
     site_key="$(sudo grep -E '^TURNSTILE_SITE_KEY=' "$INFRA/apps.env" | cut -d= -f2- | tr -d '"' || true)"
-    sudo docker run --rm -e CI=true -e TURNSTILE_SITE_KEY="$site_key" -v "$SRC/web/h5:/app" -v exchange-pnpm-store:/pnpm-store -w /app \
+    sudo docker run --rm -e CI=true -e TURNSTILE_SITE_KEY="$site_key" -v "$SRC:/src" -v exchange-pnpm-store:/pnpm-store -w /src/web/h5 \
       node:24-slim sh -c 'npm install -g pnpm@11 --silent >/dev/null && pnpm config set store-dir /pnpm-store >/dev/null \
         && pnpm install --frozen-lockfile --silent && { pnpm build >/tmp/build.log 2>&1 || { cat /tmp/build.log; exit 1; }; }'
     sudo mkdir -p "$INFRA/nginx/html"
