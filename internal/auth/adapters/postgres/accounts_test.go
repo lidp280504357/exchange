@@ -207,3 +207,44 @@ func TestChallengesStepUpsDevicesHistory(t *testing.T) {
 		t.Fatalf("step-ups left: %d %v", left, err)
 	}
 }
+
+func TestTOTPBindings(t *testing.T) {
+	store, _ := setup(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	user := uuid.NewString()
+	r := store.Read()
+	if got, err := r.TOTP().Get(ctx, user); err != nil || got != nil {
+		t.Fatalf("none yet: %+v %v", got, err)
+	}
+	pending := ports.SealedTOTP{UserID: user, Sealed: []byte{1, 2, 3}, Status: domain.TOTPPending, CreatedAt: now}
+	if err := r.TOTP().Put(ctx, pending); err != nil {
+		t.Fatal(err)
+	}
+	active := pending
+	active.Status, active.LastStep, active.ActivatedAt = domain.TOTPActive, 59666666, now.Add(time.Minute)
+	err := store.Tx(ctx, func(tx ports.Repos) error {
+		if got, err := tx.TOTP().GetForUpdate(ctx, user); err != nil || got == nil || got.Status != domain.TOTPPending || !got.ActivatedAt.IsZero() {
+			t.Fatalf("pending: %+v %v", got, err)
+		}
+		return tx.TOTP().Put(ctx, active)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.TOTP().Get(ctx, user)
+	if err != nil || got.Status != domain.TOTPActive || got.LastStep != 59666666 || !got.ActivatedAt.Equal(active.ActivatedAt) || string(got.Sealed) != "\x01\x02\x03" {
+		t.Fatalf("active: %+v %v", got, err)
+	}
+	// Step-ups may now be proven by TOTP.
+	su := domain.StepUp{Hash: []byte("totp-su"), UserID: user, SessionID: uuid.NewString(), Channel: domain.ChannelTOTP, ExpiresAt: now.Add(time.Minute)}
+	if err := r.StepUps().Create(ctx, su); err != nil {
+		t.Fatalf("a TOTP step-up: %v", err)
+	}
+	if err := r.TOTP().Delete(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := r.TOTP().Get(ctx, user); got != nil {
+		t.Fatal("deleted")
+	}
+}

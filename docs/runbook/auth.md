@@ -1,6 +1,6 @@
 # 登录、令牌与会话运维
 
-需求 §5.2、§6；ADR-0009。实现见 `internal/auth`（注册、登录、会话、step-up、换绑）、`internal/platform/authtoken`（JWT）与 `internal/gateway`（鉴权中间件）。接口契约 `api/openapi/auth.yaml`。
+需求 §5.2、§6；ADR-0009。实现见 `internal/auth`（注册、登录、会话、step-up、换绑、身份验证器）、`internal/platform/authtoken`（JWT）与 `internal/gateway`（鉴权中间件）。接口契约 `api/openapi/auth.yaml`。
 
 ## 令牌
 
@@ -44,6 +44,7 @@ redis-cli SET auth:revoked:<session_id> 1 EX 900
 |---|---|
 | `JWT_SIGNING_KEY` | 32 字节 Ed25519 种子，base64；`openssl rand -base64 32` |
 | `JWT_KEY_ID` | 公钥标识，建议用生成日期，如 `k20260928` |
+| `TOTP_SECRET_KEY` | 32 字节，base64，加密身份验证器密钥（AES-256-GCM，按用户 ID 绑定）；不设则无法绑定 TOTP。**不能随意轮换**：换掉后已绑定的 TOTP 全部打不开（用户需重新绑定） |
 
 测试服两者已在 `/opt/exchange/infra/apps.env` 生成。本地 `.env` 可留空，进程内随机生成，重启后所有访问令牌失效（刷新令牌仍然有效，客户端刷新即可）。
 
@@ -52,6 +53,18 @@ redis-cli SET auth:revoked:<session_id> 1 EX 900
 ```bash
 ssh exchange 'cd /opt/exchange/infra && sudo sed -i "/^JWT_SIGNING_KEY=/d;/^JWT_KEY_ID=/d" apps.env && { echo "JWT_SIGNING_KEY=$(openssl rand -base64 32)"; echo "JWT_KEY_ID=k$(date +%Y%m%d%H%M)"; } | sudo tee -a apps.env >/dev/null'
 ```
+
+## 身份验证器（TOTP）
+
+需求 §6.5：step-up 的顺序是 TOTP（已绑定时）> 另一身份的验证码 > 本次登录身份的验证码。
+
+- 绑定：`POST /v1/auth/totp/setup`（需 step-up）返回 base32 密钥与 `otpauth://` 链接，此时为 PENDING；`POST /v1/auth/totp/confirm` 用应用生成的 6 位验证码确认后 ACTIVE，发 `auth.TotpEnabled`（用户收到安全通知与邮件）。重复 setup 会替换待确认的密钥；已绑定时返回 `AUTH_TOTP_ENABLED`。
+- 使用：已绑定后 `POST /v1/auth/step-up` 只接受 `totp_code`，邮件或短信验证码票据返回 403 `AUTH_TOTP_REQUIRED`。算法 RFC 6238（HMAC-SHA1、30 秒、6 位），允许前后各一个时间步的误差；每个时间步只能用一次（`last_step`），重放返回 `AUTH_TOTP_INVALID`。
+- 解绑：`DELETE /v1/auth/totp`，需要用 TOTP 完成的 step-up，发 `auth.TotpDisabled`。
+- 存储：`auth.totp_credentials`，密钥用 `TOTP_SECRET_KEY` 加密后存放。
+- 丢失身份验证器：目前没有恢复码，由管理后台（任务 11）人工核验后解绑。
+
+端到端检查：`scripts/e2e/totp.sh`。
 
 ## 条款版本
 

@@ -770,6 +770,96 @@ func (x *PasswordChanged) GetViaReset() bool {
 	return false
 }
 
+// TotpEnabled is published when an authenticator app is bound (§6.5).
+type TotpEnabled struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TotpEnabled) Reset() {
+	*x = TotpEnabled{}
+	mi := &file_exchange_auth_v1_events_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TotpEnabled) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TotpEnabled) ProtoMessage() {}
+
+func (x *TotpEnabled) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_auth_v1_events_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TotpEnabled.ProtoReflect.Descriptor instead.
+func (*TotpEnabled) Descriptor() ([]byte, []int) {
+	return file_exchange_auth_v1_events_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *TotpEnabled) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+// TotpDisabled is published when the authenticator app is removed.
+type TotpDisabled struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TotpDisabled) Reset() {
+	*x = TotpDisabled{}
+	mi := &file_exchange_auth_v1_events_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TotpDisabled) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TotpDisabled) ProtoMessage() {}
+
+func (x *TotpDisabled) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_auth_v1_events_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TotpDisabled.ProtoReflect.Descriptor instead.
+func (*TotpDisabled) Descriptor() ([]byte, []int) {
+	return file_exchange_auth_v1_events_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *TotpDisabled) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
 var File_exchange_auth_v1_events_proto protoreflect.FileDescriptor
 
 const file_exchange_auth_v1_events_proto_rawDesc = "" +
@@ -835,7 +925,11 @@ const file_exchange_auth_v1_events_proto_rawDesc = "" +
 	"\bnew_mask\x18\x04 \x01(\tR\anewMask\"G\n" +
 	"\x0fPasswordChanged\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1b\n" +
-	"\tvia_reset\x18\x02 \x01(\bR\bviaResetB\xcb\x01\n" +
+	"\tvia_reset\x18\x02 \x01(\bR\bviaReset\"&\n" +
+	"\vTotpEnabled\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\"'\n" +
+	"\fTotpDisabled\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userIdB\xcb\x01\n" +
 	"\x14com.exchange.auth.v1B\vEventsProtoP\x01ZDgithub.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1;authv1\xa2\x02\x03EAX\xaa\x02\x10Exchange.Auth.V1\xca\x02\x10Exchange\\Auth\\V1\xe2\x02\x1cExchange\\Auth\\V1\\GPBMetadata\xea\x02\x12Exchange::Auth::V1b\x06proto3"
 
 var (
@@ -850,7 +944,7 @@ func file_exchange_auth_v1_events_proto_rawDescGZIP() []byte {
 	return file_exchange_auth_v1_events_proto_rawDescData
 }
 
-var file_exchange_auth_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_exchange_auth_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_exchange_auth_v1_events_proto_goTypes = []any{
 	(*OtpRequested)(nil),    // 0: exchange.auth.v1.OtpRequested
 	(*OtpVerified)(nil),     // 1: exchange.auth.v1.OtpVerified
@@ -862,6 +956,8 @@ var file_exchange_auth_v1_events_proto_goTypes = []any{
 	(*IdentityBound)(nil),   // 7: exchange.auth.v1.IdentityBound
 	(*IdentityRebound)(nil), // 8: exchange.auth.v1.IdentityRebound
 	(*PasswordChanged)(nil), // 9: exchange.auth.v1.PasswordChanged
+	(*TotpEnabled)(nil),     // 10: exchange.auth.v1.TotpEnabled
+	(*TotpDisabled)(nil),    // 11: exchange.auth.v1.TotpDisabled
 }
 var file_exchange_auth_v1_events_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
@@ -882,7 +978,7 @@ func file_exchange_auth_v1_events_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_auth_v1_events_proto_rawDesc), len(file_exchange_auth_v1_events_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

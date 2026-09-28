@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/pg"
 	"github.com/lidp280504357/exchange/internal/platform/ratelimit"
 	"github.com/lidp280504357/exchange/internal/platform/redisx"
+	"github.com/lidp280504357/exchange/internal/platform/secretbox"
 	"github.com/lidp280504357/exchange/migrations"
 )
 
@@ -63,6 +65,9 @@ type settings struct {
 	// tokens (JWT_SIGNING_KEY), published under JWTKeyID (JWT_KEY_ID).
 	JWTSigningKey string `koanf:"jwt_signing_key"`
 	JWTKeyID      string `koanf:"jwt_key_id"`
+	// TOTPSecretKey seals authenticator app secrets: base64, 32 bytes
+	// (TOTP_SECRET_KEY). Without it authenticator apps are unavailable.
+	TOTPSecretKey string `koanf:"totp_secret_key"`
 	// Versions of the terms and risk disclosure users accept at
 	// registration (TERMS_VERSION, RISK_DISCLOSURE_VERSION).
 	TermsVersion string `koanf:"terms_version"`
@@ -181,6 +186,15 @@ func setup(ctx context.Context, a *app.App) error {
 		},
 		Log: a.Logger(),
 		Now: time.Now,
+	}
+	if cfg.TOTPSecretKey != "" {
+		box, err := secretbox.New(cfg.TOTPSecretKey)
+		if err != nil {
+			return fmt.Errorf("TOTP_SECRET_KEY: %w", err)
+		}
+		accounts.TOTP = box
+	} else {
+		a.Logger().Warn("authenticator apps unavailable: TOTP_SECRET_KEY is not set")
 	}
 
 	if err := bootstrap.Consumer(ctx, a, cfg.Kafka, application.Consumer, []string{event.TopicUser}, consumer.Handler(accounts)); err != nil {

@@ -100,6 +100,13 @@ func (s *AccountService) StepUp(ctx context.Context, userID, sessionID, ticket s
 	plain, hash := domain.NewToken()
 	expires := now.Add(domain.StepUpTokenTTL)
 	err := s.Store.Tx(ctx, func(r ports.Repos) error {
+		// With an authenticator app bound, a code by mail or SMS is not
+		// enough (§6.5: TOTP first).
+		if t, _, err := s.activeTOTP(ctx, r, userID); err != nil {
+			return err
+		} else if t != nil {
+			return domain.ErrTOTPRequired
+		}
 		ch, err := Redeem(ctx, r, ticket, domain.SceneStepUp, c.DeviceID, now)
 		if err != nil {
 			return err

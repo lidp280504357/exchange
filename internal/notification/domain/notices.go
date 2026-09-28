@@ -14,6 +14,7 @@ const (
 	NoticePasswordChanged = "PASSWORD_CHANGED"
 	NoticeAccountLocked   = "ACCOUNT_LOCKED"
 	NoticeStatusChanged   = "STATUS_CHANGED"
+	NoticeTOTPChanged     = "TOTP_CHANGED"
 )
 
 // Notice is an in-app notification.
@@ -120,6 +121,19 @@ func RenderNotice(in NoticeInput) (title, body string) {
 		}
 		return "登录已临时锁定", fmt.Sprintf("密码错误次数过多（最近一次来自 IP %s），自 %s 起 15 分钟内无法用密码登录。如非本人操作，建议修改密码。",
 			d["ip"], when)
+	case NoticeTOTPChanged:
+		if d["enabled"] == "true" {
+			if en {
+				return "Authenticator app bound", fmt.Sprintf("An authenticator app was bound to your account at %s; "+
+					"security checks now use its codes. If this was not you, contact support now.", when)
+			}
+			return "已绑定身份验证器", fmt.Sprintf("您的账户已于 %s 绑定身份验证器，之后的安全验证将使用它生成的验证码。如非本人操作，请立即联系客服。", when)
+		}
+		if en {
+			return "Authenticator app removed", fmt.Sprintf("The authenticator app was removed from your account at %s. "+
+				"If this was not you, contact support now.", when)
+		}
+		return "已解绑身份验证器", fmt.Sprintf("您的账户已于 %s 解绑身份验证器。如非本人操作，请立即联系客服。", when)
 	case NoticeStatusChanged:
 		to := pick(statusNames, d["to"], en)
 		if en {

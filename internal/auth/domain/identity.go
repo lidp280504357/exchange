@@ -19,6 +19,9 @@ type Channel string
 const (
 	ChannelEmail Channel = "EMAIL"
 	ChannelSMS   Channel = "SMS"
+	// ChannelTOTP proves a step-up with an authenticator app; it is not an
+	// identity.
+	ChannelTOTP Channel = "TOTP"
 )
 
 // Kind returns the identity kind stored for the channel.

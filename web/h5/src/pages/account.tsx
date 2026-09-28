@@ -2,7 +2,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { authApi, notificationApi, unwrap, userApi } from "../api/client";
-import { StepUp } from "../components/StepUp";
+import { StepUp, useTotpStatus } from "../components/StepUp";
 import { Badge, Button, Card, ErrorText, Field, Notice, Time } from "../components/ui";
 import { codeText, errorText, setLanguage } from "../i18n";
 import { useSession } from "../store/session";
@@ -46,6 +46,96 @@ export function NotificationsPage() {
   );
 }
 
+// TotpCard binds or removes the authenticator app (§6.5). Binding needs a
+// step-up, shows the secret (and an otpauth link for phones), and takes
+// effect with a first code; removing needs a step-up with the app itself.
+function TotpCard() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const totp = useTotpStatus();
+  const [stepUp, setStepUp] = useState<null | "bind" | "remove">(null);
+  const [setup, setSetup] = useState<null | { secret: string; otpauth_uri: string }>(null);
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [done, setDone] = useState("");
+
+  async function withToken(token: string) {
+    const action = stepUp;
+    setStepUp(null);
+    setError("");
+    const header = { "X-Step-Up-Token": token };
+    try {
+      if (action === "bind") {
+        setSetup(await unwrap(authApi.POST("/v1/auth/totp/setup", { params: { header } })));
+      } else if (action === "remove") {
+        await unwrap(authApi.DELETE("/v1/auth/totp", { params: { header } }));
+        setDone(t("security.totpRemoved"));
+        void qc.invalidateQueries({ queryKey: ["totp"] });
+      }
+    } catch (e) {
+      setError(errorText(e));
+    }
+  }
+
+  async function confirm() {
+    setError("");
+    try {
+      await unwrap(authApi.POST("/v1/auth/totp/confirm", { body: { code } }));
+      setSetup(null);
+      setCode("");
+      setDone(t("security.totpBound"));
+      void qc.invalidateQueries({ queryKey: ["totp"] });
+    } catch (e) {
+      setError(errorText(e));
+    }
+  }
+
+  const enabled = totp.data?.enabled === true;
+  return (
+    <Card
+      title={<>{t("security.totp")} {enabled && <Badge tone="green">{t("security.totpOn")}</Badge>}</>}
+      actions={
+        !setup && (enabled ? (
+          <Button variant="danger" onClick={() => { setDone(""); setStepUp("remove"); }}>{t("security.totpRemove")}</Button>
+        ) : (
+          <Button onClick={() => { setDone(""); setStepUp("bind"); }}>{t("security.totpBind")}</Button>
+        ))
+      }
+    >
+      <p className="text-sm text-gray-400">{t("security.totpHint")}</p>
+      {setup && (
+        <form
+          className="mt-3 space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void confirm();
+          }}
+        >
+          <p className="text-sm">{t("security.totpScan")}</p>
+          <div className="break-all rounded-lg bg-black/40 p-3 font-mono text-sm" data-testid="totp-secret">{setup.secret}</div>
+          <a className="text-sm text-[#f0b90b] hover:underline" href={setup.otpauth_uri}>{t("security.totpOpenApp")}</a>
+          <Field
+            label={t("security.totpCode")}
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            name="totp_confirm"
+            maxLength={6}
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+          />
+          <div className="flex gap-2">
+            <Button type="submit" disabled={code.length !== 6}>{t("common.confirm")}</Button>
+            <Button type="button" variant="ghost" onClick={() => setSetup(null)}>{t("common.cancel")}</Button>
+          </div>
+        </form>
+      )}
+      <ErrorText text={error} />
+      <Notice text={done} />
+      {stepUp && <StepUp onToken={(tok) => void withToken(tok)} onCancel={() => setStepUp(null)} />}
+    </Card>
+  );
+}
+
 export function SecurityPage() {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -76,6 +166,7 @@ export function SecurityPage() {
 
   return (
     <div className="space-y-4">
+      <TotpCard />
       <Card
         title={t("security.sessions")}
         actions={<Button variant="danger" onClick={() => { setPending({ kind: "others" }); setStepUpOpen(true); }}>{t("security.revokeOthers")}</Button>}

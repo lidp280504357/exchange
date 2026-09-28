@@ -368,8 +368,12 @@ paths:
   /v1/auth/step-up:
     post:
       operationId: stepUp
-      summary: Trade a STEP_UP ticket for a step-up token
-      description: The token is valid 10 minutes for one sensitive action (§6.5).
+      summary: Trade a STEP_UP ticket, or an authenticator code, for a step-up token
+      description: |
+        The token is valid 10 minutes for one sensitive action (§6.5). Send
+        `otp_ticket` (a STEP_UP code by mail or SMS) or `totp_code`; once an
+        authenticator app is bound only `totp_code` is accepted
+        (AUTH_TOTP_REQUIRED). A code works once.
       tags: [security]
       security:
         - bearer: []
@@ -378,7 +382,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TicketRequest'
+              $ref: '#/components/schemas/StepUpRequest'
       responses:
         '200':
           description: Step-up token.
@@ -393,6 +397,97 @@ paths:
                   expires_at:
                     type: string
                     format: date-time
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/auth/totp:
+    get:
+      operationId: totpStatus
+      summary: Whether an authenticator app is bound
+      tags: [security]
+      security:
+        - bearer: []
+      responses:
+        '200':
+          description: The binding state.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled, pending]
+                properties:
+                  enabled:
+                    type: boolean
+                  pending:
+                    type: boolean
+                    description: Set up but not confirmed with a code yet.
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+    delete:
+      operationId: totpDisable
+      summary: Remove the authenticator app
+      description: Needs a step-up proven with the app itself (AUTH_TOTP_REQUIRED otherwise).
+      tags: [security]
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/StepUpToken'
+      responses:
+        '204':
+          description: Removed; the user gets a security notice.
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/auth/totp/setup:
+    post:
+      operationId: totpSetup
+      summary: Start binding an authenticator app
+      description: |
+        Needs a step-up. Returns the secret (base32) to type in and the
+        otpauth URI for a QR code; nothing is bound until POST
+        /v1/auth/totp/confirm gets a code. Setting up again replaces a
+        pending secret; with an app bound it fails with AUTH_TOTP_ENABLED.
+      tags: [security]
+      security:
+        - bearer: []
+      parameters:
+        - $ref: '#/components/parameters/StepUpToken'
+      responses:
+        '200':
+          description: The secret to add to the app.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [secret, otpauth_uri]
+                properties:
+                  secret:
+                    type: string
+                    examples: [JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP]
+                  otpauth_uri:
+                    type: string
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/auth/totp/confirm:
+    post:
+      operationId: totpConfirm
+      summary: Bind the authenticator app with a first code
+      tags: [security]
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              additionalProperties: false
+              properties:
+                code:
+                  type: string
+                  pattern: '^[0-9]{6}$'
+      responses:
+        '204':
+          description: Bound; step-ups now need the app and the user gets a security notice.
         default:
           $ref: './common.yaml#/components/responses/Error'
   /v1/auth/password/change:
@@ -665,6 +760,20 @@ components:
           type: string
           format: uuid
           description: For /v1/auth/login/challenge.
+        device_id:
+          $ref: '#/components/schemas/DeviceId'
+    StepUpRequest:
+      type: object
+      required: [device_id]
+      additionalProperties: false
+      properties:
+        otp_ticket:
+          type: string
+          description: From a STEP_UP code; not accepted once an authenticator app is bound.
+        totp_code:
+          type: string
+          pattern: '^[0-9]{6}$'
+          description: The authenticator app's current code.
         device_id:
           $ref: '#/components/schemas/DeviceId'
     Session:

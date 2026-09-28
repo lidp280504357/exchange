@@ -58,6 +58,10 @@ func (h *Accounts) Routes(r chi.Router) {
 		r.Post("/v1/auth/password/change", h.changePassword)
 		r.Post("/v1/auth/identity/bind", h.bind)
 		r.Post("/v1/auth/identity/rebind", h.rebind)
+		r.Get("/v1/auth/totp", h.totpStatus)
+		r.Post("/v1/auth/totp/setup", h.totpSetup)
+		r.Post("/v1/auth/totp/confirm", h.totpConfirm)
+		r.Delete("/v1/auth/totp", h.totpDisable)
 	})
 	r.Get("/internal/jwks", func(w http.ResponseWriter, _ *http.Request) { httpx.WriteJSON(w, http.StatusOK, h.JWKS) })
 }
@@ -396,12 +400,26 @@ func (h *Accounts) history(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
+type stepUpBody struct {
+	ticketBody
+	// TOTPCode proves the step-up with an authenticator app instead of an
+	// OTP ticket; once one is bound it is the only way (§6.5).
+	TOTPCode string `json:"totp_code"`
+}
+
 func (h *Accounts) stepUp(w http.ResponseWriter, r *http.Request) {
-	body, ok := decode[ticketBody](w, r)
+	body, ok := decode[stepUpBody](w, r)
 	if !ok {
 		return
 	}
-	token, exp, err := h.Svc.StepUp(r.Context(), httpx.UserID(r), httpx.SessionID(r), body.OTPTicket, client(r, body.DeviceID))
+	var token string
+	var exp time.Time
+	var err error
+	if body.TOTPCode != "" {
+		token, exp, err = h.Svc.StepUpTOTP(r.Context(), httpx.UserID(r), httpx.SessionID(r), body.TOTPCode)
+	} else {
+		token, exp, err = h.Svc.StepUp(r.Context(), httpx.UserID(r), httpx.SessionID(r), body.OTPTicket, client(r, body.DeviceID))
+	}
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -455,4 +473,47 @@ func (h *Accounts) rebind(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusAccepted
 	}
 	httpx.WriteJSON(w, status, map[string]string{"status": string(res)})
+}
+
+func (h *Accounts) totpStatus(w http.ResponseWriter, r *http.Request) {
+	st, err := h.Svc.TOTPStatus(r.Context(), httpx.UserID(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"enabled": st.Enabled, "pending": st.Pending})
+}
+
+func (h *Accounts) totpSetup(w http.ResponseWriter, r *http.Request) {
+	secret, uri, err := h.Svc.SetupTOTP(r.Context(), httpx.UserID(r), r.Header.Get(headerStepUp))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"secret": secret, "otpauth_uri": uri})
+}
+
+type totpCodeBody struct {
+	Code string `json:"code"`
+}
+
+func (h *Accounts) totpConfirm(w http.ResponseWriter, r *http.Request) {
+	body, ok := decode[totpCodeBody](w, r)
+	if !ok {
+		return
+	}
+	if err := h.Svc.ConfirmTOTP(r.Context(), httpx.UserID(r), body.Code); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Accounts) totpDisable(w http.ResponseWriter, r *http.Request) {
+	if err := h.Svc.DisableTOTP(r.Context(), httpx.UserID(r), r.Header.Get(headerStepUp)); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

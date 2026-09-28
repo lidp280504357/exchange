@@ -37,6 +37,7 @@ type Repos interface {
 	Devices() DeviceRepo
 	History() HistoryRepo
 	RebindRequests() RebindRepo
+	TOTP() TOTPRepo
 	// Emit queues an auth.events event, keyed by aggregateID.
 	Emit(ctx context.Context, msg proto.Message, aggregateType, aggregateID string) error
 }
@@ -111,6 +112,27 @@ type StepUpRepo interface {
 	Create(ctx context.Context, s domain.StepUp) error
 	// Consume redeems a live token of userID; nil when there is none.
 	Consume(ctx context.Context, hash []byte, userID string, now time.Time) (*domain.StepUp, error)
+}
+
+// SealedTOTP is an authenticator binding as stored: the secret sealed.
+type SealedTOTP struct {
+	UserID      string
+	Sealed      []byte
+	Status      string
+	LastStep    int64
+	CreatedAt   time.Time
+	ActivatedAt time.Time
+}
+
+// TOTPRepo stores authenticator bindings, one per user.
+type TOTPRepo interface {
+	// Get returns the user's binding, or nil.
+	Get(ctx context.Context, userID string) (*SealedTOTP, error)
+	// GetForUpdate is Get with the row locked for the transaction.
+	GetForUpdate(ctx context.Context, userID string) (*SealedTOTP, error)
+	// Put inserts or replaces the user's binding.
+	Put(ctx context.Context, t SealedTOTP) error
+	Delete(ctx context.Context, userID string) error
 }
 
 // DeviceRepo remembers the devices a user logged in from.

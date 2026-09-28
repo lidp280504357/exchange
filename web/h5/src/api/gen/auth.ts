@@ -309,10 +309,74 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Trade a STEP_UP ticket for a step-up token
-         * @description The token is valid 10 minutes for one sensitive action (§6.5).
+         * Trade a STEP_UP ticket, or an authenticator code, for a step-up token
+         * @description The token is valid 10 minutes for one sensitive action (§6.5). Send
+         *     `otp_ticket` (a STEP_UP code by mail or SMS) or `totp_code`; once an
+         *     authenticator app is bound only `totp_code` is accepted
+         *     (AUTH_TOTP_REQUIRED). A code works once.
          */
         post: operations["stepUp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/totp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether an authenticator app is bound */
+        get: operations["totpStatus"];
+        put?: never;
+        post?: never;
+        /**
+         * Remove the authenticator app
+         * @description Needs a step-up proven with the app itself (AUTH_TOTP_REQUIRED otherwise).
+         */
+        delete: operations["totpDisable"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/totp/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start binding an authenticator app
+         * @description Needs a step-up. Returns the secret (base32) to type in and the
+         *     otpauth URI for a QR code; nothing is bound until POST
+         *     /v1/auth/totp/confirm gets a code. Setting up again replaces a
+         *     pending secret; with an app bound it fails with AUTH_TOTP_ENABLED.
+         */
+        post: operations["totpSetup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/totp/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bind the authenticator app with a first code */
+        post: operations["totpConfirm"];
         delete?: never;
         options?: never;
         head?: never;
@@ -484,6 +548,13 @@ export interface components {
              * @description For /v1/auth/login/challenge.
              */
             login_challenge_id?: string;
+            device_id: components["schemas"]["DeviceId"];
+        };
+        StepUpRequest: {
+            /** @description From a STEP_UP code; not accepted once an authenticator app is bound. */
+            otp_ticket?: string;
+            /** @description The authenticator app's current code. */
+            totp_code?: string;
             device_id: components["schemas"]["DeviceId"];
         };
         Session: {
@@ -925,7 +996,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TicketRequest"];
+                "application/json": components["schemas"]["StepUpRequest"];
             };
         };
         responses: {
@@ -941,6 +1012,106 @@ export interface operations {
                         expires_at: string;
                     };
                 };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    totpStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The binding state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        enabled: boolean;
+                        /** @description Set up but not confirmed with a code yet. */
+                        pending: boolean;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    totpDisable: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description From POST /v1/auth/step-up; missing or used tokens fail with AUTH_STEP_UP_REQUIRED. */
+                "X-Step-Up-Token"?: components["parameters"]["StepUpToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed; the user gets a security notice. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    totpSetup: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description From POST /v1/auth/step-up; missing or used tokens fail with AUTH_STEP_UP_REQUIRED. */
+                "X-Step-Up-Token"?: components["parameters"]["StepUpToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The secret to add to the app. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @example JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP */
+                        secret: string;
+                        otpauth_uri: string;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    totpConfirm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    code: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Bound; step-ups now need the app and the user gets a security notice. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             default: components["responses"]["Error"];
         };

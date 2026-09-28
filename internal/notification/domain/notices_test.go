@@ -9,7 +9,7 @@ import (
 func TestRenderNotice(t *testing.T) {
 	at := time.Date(2026, 9, 28, 4, 5, 6, 0, time.UTC)
 	sg, _ := time.LoadLocation("Asia/Singapore")
-	for _, typ := range []string{NoticeWelcome, NoticeNewDeviceLogin, NoticeIdentityChanged, NoticePasswordChanged, NoticeAccountLocked, NoticeStatusChanged} {
+	for _, typ := range []string{NoticeWelcome, NoticeNewDeviceLogin, NoticeIdentityChanged, NoticePasswordChanged, NoticeAccountLocked, NoticeStatusChanged, NoticeTOTPChanged} {
 		for _, lang := range []string{"zh-CN", "en"} {
 			title, body := RenderNotice(NoticeInput{Type: typ, Language: lang, At: at, Location: sg, Data: map[string]string{
 				"ip": "203.0.113.*", "channel": "EMAIL", "new": "a***@example.com", "to": "FROZEN",

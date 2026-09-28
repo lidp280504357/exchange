@@ -60,6 +60,10 @@ func toEvent(msg proto.Message) (application.Event, bool) {
 		return application.Event{UserID: m.GetUserId(), Type: domain.NoticePasswordChanged, Mail: true, Data: map[string]string{
 			"via_reset": strconv.FormatBool(m.GetViaReset()),
 		}}, true
+	case *authv1.TotpEnabled:
+		return application.Event{UserID: m.GetUserId(), Type: domain.NoticeTOTPChanged, Mail: true, Data: map[string]string{"enabled": "true"}}, true
+	case *authv1.TotpDisabled:
+		return application.Event{UserID: m.GetUserId(), Type: domain.NoticeTOTPChanged, Mail: true, Data: map[string]string{"enabled": "false"}}, true
 	case *authv1.LoginFailed:
 		if !m.GetLocked() {
 			return application.Event{}, false

@@ -103,3 +103,13 @@ message PasswordChanged {
   // The password was reset through a code instead of changed while signed in.
   bool via_reset = 2;
 }
+
+// TotpEnabled is published when an authenticator app is bound (§6.5).
+message TotpEnabled {
+  string user_id = 1;
+}
+
+// TotpDisabled is published when the authenticator app is removed.
+message TotpDisabled {
+  string user_id = 1;
+}

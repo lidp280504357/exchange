@@ -26,6 +26,8 @@ func TestToEvent(t *testing.T) {
 		{&authv1.LoginFailed{UserId: "u", Locked: true}, domain.NoticeAccountLocked, true},
 		{&authv1.LoginFailed{UserId: "u", Locked: false}, "", false},
 		{&userv1.UserStatusChanged{UserId: "u", ToStatus: "FROZEN"}, domain.NoticeStatusChanged, true},
+		{&authv1.TotpEnabled{UserId: "u"}, domain.NoticeTOTPChanged, true},
+		{&authv1.TotpDisabled{UserId: "u"}, domain.NoticeTOTPChanged, true},
 		{&userv1.ProfileUpdated{UserId: "u"}, "", false},
 		{&authv1.OtpRequested{}, "", false},
 	} {

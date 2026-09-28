@@ -14,6 +14,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/authtoken"
 	"github.com/lidp280504357/exchange/internal/platform/pii"
+	"github.com/lidp280504357/exchange/internal/platform/secretbox"
 )
 
 // AccountConfig holds the configurable rules.
@@ -35,9 +36,11 @@ type AccountService struct {
 	Revocations ports.Revocations
 	Guard       ports.LoginGuard
 	Captcha     ports.Captcha
-	Config      AccountConfig
-	Log         *slog.Logger
-	Now         func() time.Time
+	// TOTP seals authenticator secrets; nil leaves TOTP unavailable.
+	TOTP   *secretbox.Box
+	Config AccountConfig
+	Log    *slog.Logger
+	Now    func() time.Time
 }
 
 // Client describes the device a request comes from.

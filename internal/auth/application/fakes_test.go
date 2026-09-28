@@ -39,6 +39,7 @@ type memState struct {
 	devices     map[string]bool
 	history     []domain.LoginEvent
 	rebinds     []domain.RebindRequest
+	totps       map[string]ports.SealedTOTP
 	inbox       map[string]bool
 }
 
@@ -53,6 +54,7 @@ func newMemStore() *memStore {
 		credentials: map[string]domain.Credential{}, sessions: map[string]domain.Session{},
 		refresh: map[string]domain.RefreshToken{}, loginChalls: map[string]domain.LoginChallenge{},
 		stepUps: map[string]domain.StepUp{}, devices: map[string]bool{}, inbox: map[string]bool{},
+		totps: map[string]ports.SealedTOTP{},
 	}}
 }
 
@@ -75,6 +77,7 @@ func (m *memState) clone() memState {
 		refresh: maps.Clone(m.refresh), loginChalls: maps.Clone(m.loginChalls),
 		stepUps: maps.Clone(m.stepUps), devices: maps.Clone(m.devices),
 		history: slices.Clone(m.history), rebinds: slices.Clone(m.rebinds), inbox: maps.Clone(m.inbox),
+		totps: maps.Clone(m.totps),
 	}
 }
 
@@ -117,6 +120,31 @@ func (r memRepos) StepUps() ports.StepUpRepo                 { return memStepUps
 func (r memRepos) Devices() ports.DeviceRepo                 { return memDevices(r) }
 func (r memRepos) History() ports.HistoryRepo                { return memHistory(r) }
 func (r memRepos) RebindRequests() ports.RebindRepo          { return memRebinds(r) }
+func (r memRepos) TOTP() ports.TOTPRepo                      { return memTOTPs(r) }
+
+type memTOTPs memRepos
+
+func (r memTOTPs) Get(_ context.Context, userID string) (*ports.SealedTOTP, error) {
+	t, ok := r.s.totps[userID]
+	if !ok {
+		return nil, nil
+	}
+	return &t, nil
+}
+
+func (r memTOTPs) GetForUpdate(ctx context.Context, userID string) (*ports.SealedTOTP, error) {
+	return r.Get(ctx, userID)
+}
+
+func (r memTOTPs) Put(_ context.Context, t ports.SealedTOTP) error {
+	r.s.totps[t.UserID] = t
+	return nil
+}
+
+func (r memTOTPs) Delete(_ context.Context, userID string) error {
+	delete(r.s.totps, userID)
+	return nil
+}
 
 func (r memRepos) Emit(_ context.Context, msg proto.Message, _, _ string) error {
 	r.s.events = append(r.s.events, msg)
