@@ -37,6 +37,13 @@ const (
 // NativeLog marks a transfer of the chain's own coin (no token log).
 const NativeLog = -1
 
+// Deposit kinds: from the chain, or another user's withdrawal to this
+// deposit address, completed in the ledger (§11.6).
+const (
+	KindChain    = "CHAIN"
+	KindInternal = "INTERNAL"
+)
+
 // Errors (appendix C).
 var (
 	ErrDepositsDisabled = apperr.New(apperr.KindUnprocessable, "WALLET_NETWORK_DISABLED", "deposits of this asset on this network are closed")
@@ -56,6 +63,7 @@ type Address struct {
 // Deposit is an incoming transfer to a deposit address.
 type Deposit struct {
 	ID          string
+	Kind        string // KindChain unless set
 	UserID      string
 	Asset       string // empty for an unsupported token
 	Network     string
@@ -167,4 +175,8 @@ type Network struct {
 	Confirmations uint32
 	MinDeposit    decimal.Decimal
 	Enabled       bool // the asset and the network both take deposits
+	// Withdrawals: both switches on, the minimum and the fixed fee.
+	WithdrawEnabled bool
+	MinWithdraw     decimal.Decimal
+	WithdrawFee     decimal.Decimal
 }

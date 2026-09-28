@@ -3,6 +3,9 @@ package grpcapi
 
 import (
 	"context"
+	"time"
+
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
 	"github.com/lidp280504357/exchange/internal/auth/application"
@@ -44,9 +47,19 @@ func (s *Server) ConsumeStepUp(ctx context.Context, req *authv1.ConsumeStepUpReq
 	if req.GetUserId() == "" {
 		return nil, apperr.Invalid("user_id is required")
 	}
-	sid, err := s.accounts.ConsumeStepUp(ctx, req.GetUserId(), req.GetToken())
+	su, sec, err := s.accounts.ConsumeStepUp(ctx, req.GetUserId(), req.GetToken())
 	if err != nil {
 		return nil, err
 	}
-	return &authv1.ConsumeStepUpResponse{SessionId: sid}, nil
+	stamp := func(t time.Time) *timestamppb.Timestamp {
+		if t.IsZero() {
+			return nil
+		}
+		return timestamppb.New(t)
+	}
+	return &authv1.ConsumeStepUpResponse{SessionId: su.SessionID, Channel: string(su.Channel), Security: &authv1.SecurityContext{
+		Identities: int32(sec.Identities), TotpEnabled: sec.TOTPEnabled, DeviceId: sec.DeviceID, //nolint:gosec // a handful
+		DeviceFirstSeenAt: stamp(sec.DeviceFirstSeenAt), IdentityChangedAt: stamp(sec.IdentityChangedAt),
+		PasswordChangedAt: stamp(sec.PasswordChangedAt),
+	}}, nil
 }

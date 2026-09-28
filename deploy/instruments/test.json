@@ -15,12 +15,12 @@
     },
     {
       "asset_code": "ETH", "name": "Ether", "decimals": 18,
-      "deposit_enabled": true, "withdraw_enabled": false, "trading_enabled": true, "risk_restricted": false,
+      "deposit_enabled": true, "withdraw_enabled": true, "trading_enabled": true, "risk_restricted": false,
       "networks": [
         {
           "network": "ETH-SEPOLIA", "chain": "11155111", "contract_address": "", "confirmations": 12,
-          "min_deposit": "0.001", "min_withdraw": "0.01", "withdraw_fee": "0.001", "memo_required": false,
-          "deposit_enabled": true, "withdraw_enabled": false
+          "min_deposit": "0.001", "min_withdraw": "0.001", "withdraw_fee": "0.0002", "memo_required": false,
+          "deposit_enabled": true, "withdraw_enabled": true
         }
       ]
     }

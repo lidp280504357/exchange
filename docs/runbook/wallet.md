@@ -72,6 +72,29 @@ ssh exchange sudo docker exec exchange-infra-wallet-service-1 /app/exchangectl w
 - **链上对账（不变量 4）**：链上持有 = 热钱包 + 所有充值地址的余额；账本预期 = `−(DEPOSIT_PENDING + WITHDRAWAL_PENDING)`；已付未记账的 gas 解释差额的一部分；`缺口 = 预期 − 持有 − 未记账 gas`，大于 0 即平台钱包少钱（告警 WalletChainShortfall，critical）。小于 0 是正常的盈余：已发现未入账的充值、已广播未挖出的提现、尚未 `fund` 的平台转账、合约内部转入等。测试环境的模拟资金来自 `ADJUSTMENT`，不影响这一核对。结果写 `wallet.chain_checks`，指标 `wallet_chain_balance`、`wallet_chain_expected`、`wallet_chain_shortfall`。
 - **热钱包余额**：`wallet_hot_wallet_balance`；低于 0.005 ETH（WalletHotWalletLow）时提现会停在 APPROVED，需要归集或注资；高于 1 ETH（WalletHotWalletHigh）应人工转冷。
 
+## 提现
+
+状态机（§11.6）：`REQUESTED → PENDING_REVIEW / APPROVED → SIGNING → BROADCAST → CONFIRMING → CONFIRMED`；分支 `REJECTED`、`CANCELED`（签名前用户撤销）、`FAILED`；站内地址 `APPROVED → CONFIRMED`（账本 `INTERNAL_TRANSFER`，不签名不广播）。风控评分在申请时同步完成，没有单独的 `RISK_SCORING` 停留态。
+
+- **地址簿**：`POST /v1/wallet/withdraw-addresses`（需 step-up）；新地址冷却期后才能用（`WALLET_WHITELIST_COOLDOWN`，生产 24 小时，测试服 1 分钟）；不能添加自己的充值地址。
+- **申请** `POST /v1/wallet/withdrawals`（需 step-up，已绑定身份验证器时只能用 TOTP 证明）：eligibility `WITHDRAW`（开关 `wallet.withdraw`，默认关，测试服已开）→ 资产与网络开放提现、只支持链上原生币 → 地址格式 → 精度与最小提现额 → 地址在地址簿且过了冷却期 → 当日价格折算 USDT（当天第一次取价后固定，存 `price_snapshots`；来源 market-data 的 `ASSET-USDT` 参考价，没有新鲜参考价时用 `WALLET_FALLBACK_PRICES`）→ 日/月限额（双身份 + TOTP：2,000 / 20,000 USDT，否则 20%）→ 风控规则 → 冻结金额 + 手续费（`WITHDRAW_FREEZE`，键 `withdraw:<id>`）。账本拒绝冻结时记为 REJECTED 并返回账本错误码；账本不可达时停在 REQUESTED，处理器一分钟后用同一个键补完。
+- **风控规则**（`internal/wallet/domain/withdrawal.go`）：新账户（< 72 小时）、新设备（该会话设备首次登录 < 24 小时）、近期安全变更（换绑或改/重置密码 < 24 小时）、新地址（加入地址簿 < 72 小时）、大额（> 1,000 USDT）、当日累计超过日限额一半，任一命中即 PENDING_REVIEW 需一人批准；> 20,000 USDT 需两人。安全上下文由 auth-service 在兑换 step-up 时一并返回（`ConsumeStepUp` 的 `security`）。
+- **审批**（管理后台前用 `exchangectl`，每次审批/拒绝写 `audit.events`）：
+
+  ```bash
+  ssh exchange sudo docker exec exchange-infra-wallet-service-1 /app/exchangectl wallet withdrawals             # 待审核
+  ssh exchange sudo docker exec exchange-infra-wallet-service-1 /app/exchangectl wallet withdrawals --status ALL
+  ssh exchange sudo docker exec exchange-infra-wallet-service-1 /app/exchangectl wallet approve <id> --reviewer alice --reason "..."
+  ssh exchange sudo docker exec exchange-infra-wallet-service-1 /app/exchangectl wallet reject <id> --reviewer alice --reason "..."
+  ```
+
+  同一审核人不能重复批准；被拒绝、撤销或上链前失败的提现由处理器解冻（`WITHDRAW_UNFREEZE`，键 `withdraw-release:<id>`）。
+- **发送**（处理器，按创建顺序逐笔）：链上手续费上限（`WALLET_MAX_FEE_GWEI`，默认 100）以内、热钱包够付金额 + gas 时才发送，否则停在 APPROVED（`wallet_withdrawals_waiting`、告警 WalletWithdrawalsWaiting），并且挡住后面的提现，保证 nonce 连续。nonce 取"库里记录的下一个"与"节点 pending 计数"的较大者，签名成功后才占用，签名失败不会留下空洞。状态先置 SIGNING（此后不可撤销）→ 签名服务签名 → 先落库（`withdrawal_attempts`）再广播 → 账本 `WITHDRAW_SETTLE`（§11.6：广播成功即扣减；键 `withdraw-settle:<id>`，失败会重试）。
+- **确认与替换**：任一尝试的回执出现即开始计确认数，满网络确认数（Sepolia 12）为 CONFIRMED，实际 gas 记入 `chain_fees` 由账本记 `GAS_SUPPLY → WITHDRAWAL_PENDING`。10 分钟（`WALLET_REPLACE_AFTER`）未上链则用同一 nonce、费用提高 25%（或市场价，取高者，不超过上限）签发替换交易，所有尝试的 tx_hash 都保留；节点丢失的交易一分钟后重发。签名服务拒签（如超过它的每日限额）或链上执行失败的提现置为 FAILED 并告警，需人工处理（上链前失败的会自动解冻）。
+- **站内地址**：收款地址是平台其他用户的充值地址时手续费为 0；批准后账本记 `INTERNAL_TRANSFER`（付款方冻结 → 收款方可用），提现直接 CONFIRMED，收款方生成一条 `kind = INTERNAL` 的充值记录（`tx_hash` 为 `internal:<提现 ID>`），双方都有通知。
+- **通知与推送**：申请、完成、拒绝、失败发站内信加邮件，撤销只发站内信；私有频道 `withdrawals` 推送每次状态变化。
+- **端到端**：`scripts/e2e/withdraw.sh`（约 6–7 分钟）：绑定身份验证器、加两个地址、冷却期内被拒、向端到端发送方提现 0.0011 ETH（人工批准后签名、广播、12 个确认，链上余额恰好增加 0.0011）、向另一个新用户的充值地址提现 0.02 ETH（站内划转）、第三笔审核中撤销。热钱包的钱来自归集（脚本开头排一次 `wallet sweep`）和 GAS_SUPPLY 注资。
+
 ## 扫描与状态机
 
 - 游标：`scan_cursors` 记已扫描的最高块；首次启动从当前高度开始（`WALLET_SCAN_START` 可指定起点），不回扫历史。
@@ -125,5 +148,7 @@ SELECT asset, available FROM ledger.accounts WHERE account_type = 'UNCLAIMED_DEP
 ## 已知局限
 
 - 只扫一个 EVM 网络；合约内部转账（internal transaction）的原生币到账看不到，需要人工补录（任务 11）。
-- ERC-20 需要在 instrument 配置合约地址才会入账（decimals 从合约读取并缓存）；未配置的代币只记录不入账。
+- ERC-20 需要在 instrument 配置合约地址才会入账（decimals 从合约读取并缓存）；未配置的代币只记录不入账。代币提现、代币归集与 gas 补给尚未实现（签名服务不签带 calldata 的交易），测试服没有配置代币。
 - 充值风控评分（§11.5 的"风控拦截"）尚未接入，账户状态由 eligibility 把关。
+- 提现审批暂用 `exchangectl`（审核人名字由命令行给出），RBAC 与双人审批界面在管理后台（任务 11）。
+- 测试环境用户的模拟资金（`ADJUSTMENT`）也能提现到链上，热钱包里的真实测试币会因此减少；不变量 4 的核对不受影响（预期与持有同步减少）。

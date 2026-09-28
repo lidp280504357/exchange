@@ -1,0 +1,325 @@
+package domain
+
+import (
+	"fmt"
+	"math/big"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/shopspring/decimal"
+
+	"github.com/lidp280504357/exchange/internal/platform/apperr"
+)
+
+// Withdrawal statuses (§11.6, appendix B).
+const (
+	WithdrawalRequested  = "REQUESTED"
+	WithdrawalReview     = "PENDING_REVIEW"
+	WithdrawalApproved   = "APPROVED"
+	WithdrawalSigning    = "SIGNING"
+	WithdrawalBroadcast  = "BROADCAST"
+	WithdrawalConfirming = "CONFIRMING"
+	WithdrawalConfirmed  = "CONFIRMED"
+	WithdrawalInternal   = "INTERNAL_TRANSFER"
+	WithdrawalRejected   = "REJECTED"
+	WithdrawalCanceled   = "CANCELED"
+	WithdrawalFailed     = "FAILED"
+)
+
+// Risk reasons that send a withdrawal to review (§11.6).
+const (
+	RiskNewAccount     = "NEW_ACCOUNT"
+	RiskNewDevice      = "NEW_DEVICE"
+	RiskSecurityChange = "SECURITY_CHANGE"
+	RiskNewAddress     = "NEW_ADDRESS"
+	RiskLargeAmount    = "LARGE_AMOUNT"
+	RiskDailyShare     = "DAILY_SHARE"
+)
+
+// Errors (appendix C).
+var (
+	ErrNotWhitelisted = apperr.New(apperr.KindUnprocessable, "WALLET_ADDRESS_NOT_WHITELISTED", "add the address to your withdrawal addresses first")
+	ErrCooldown       = apperr.New(apperr.KindUnprocessable, "WALLET_ADDRESS_COOLDOWN", "a new withdrawal address can be used after its cooling-off period")
+	ErrLimitExceeded  = apperr.New(apperr.KindUnprocessable, "WALLET_LIMIT_EXCEEDED", "the withdrawal exceeds your limit")
+	ErrBelowMinimum   = apperr.New(apperr.KindUnprocessable, "WALLET_BELOW_MINIMUM", "the amount is below the minimum withdrawal")
+	ErrInvalidAddress = apperr.New(apperr.KindInvalid, "WALLET_INVALID_ADDRESS", "not a valid address for this network")
+	ErrNotCancelable  = apperr.New(apperr.KindConflict, "WALLET_WITHDRAWAL_NOT_CANCELABLE", "the withdrawal is already being sent")
+	ErrOwnAddress     = apperr.New(apperr.KindUnprocessable, "WALLET_OWN_ADDRESS", "this is your own deposit address")
+	ErrWithdrawClosed = apperr.New(apperr.KindUnprocessable, "WALLET_NETWORK_DISABLED", "withdrawals of this asset on this network are closed")
+)
+
+// Withdrawal is a request to send an asset out.
+type Withdrawal struct {
+	ID      string
+	UserID  string
+	Asset   string
+	Network string
+	Address string
+	Amount  decimal.Decimal
+	Fee     decimal.Decimal
+	// InternalUserID owns the destination when it is a platform deposit
+	// address: the withdrawal completes in the ledger.
+	InternalUserID    string
+	Status            string
+	RiskScore         int
+	RiskReasons       []string
+	ApprovalsRequired int
+	Approvals         []string
+	RejectReason      string
+	// ValueUSDT is the amount's worth at the day's price, for the limits.
+	ValueUSDT     decimal.Decimal
+	Nonce         int64 // -1 until one is assigned
+	TxHash        string
+	BlockNumber   uint64
+	Confirmations uint32
+	Required      uint32
+	// Journals of the ledger: the freeze, the settlement (or internal
+	// transfer) and the release of a refused one.
+	FreezeJournal   string
+	SettleJournal   string
+	UnfreezeJournal string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	ApprovedAt      time.Time
+	BroadcastAt     time.Time
+	ConfirmedAt     time.Time
+}
+
+// Frozen is what the request froze: the amount and the fee.
+func (w *Withdrawal) Frozen() decimal.Decimal { return w.Amount.Add(w.Fee) }
+
+func (w *Withdrawal) set(status string, now time.Time) {
+	w.Status, w.UpdatedAt = status, now
+}
+
+// Scored records the risk assessment: approved at once without reasons,
+// otherwise waiting for review.
+func (w *Withdrawal) Scored(r RiskResult, now time.Time) {
+	w.RiskScore, w.RiskReasons, w.ApprovalsRequired = r.Score, r.Reasons, r.Approvals
+	if r.Approvals == 0 {
+		w.set(WithdrawalApproved, now)
+		w.ApprovedAt = now
+		return
+	}
+	w.set(WithdrawalReview, now)
+}
+
+// Approve adds a reviewer's approval; it reports whether the withdrawal
+// is now approved. Every approval must come from another reviewer.
+func (w *Withdrawal) Approve(reviewer string, now time.Time) (bool, error) {
+	reviewer = strings.TrimSpace(reviewer)
+	switch {
+	case w.Status != WithdrawalReview:
+		return false, apperr.New(apperr.KindConflict, apperr.CodeConflict, fmt.Sprintf("the withdrawal is %s, not waiting for review", w.Status))
+	case reviewer == "":
+		return false, apperr.Invalid("the reviewer is required")
+	case slices.Contains(w.Approvals, reviewer):
+		return false, apperr.New(apperr.KindConflict, apperr.CodeConflict, "each approval must come from another reviewer")
+	}
+	w.Approvals = append(w.Approvals, reviewer)
+	w.UpdatedAt = now
+	if len(w.Approvals) < w.ApprovalsRequired {
+		return false, nil
+	}
+	w.set(WithdrawalApproved, now)
+	w.ApprovedAt = now
+	return true, nil
+}
+
+// Reject refuses a withdrawal that is not being sent yet.
+func (w *Withdrawal) Reject(reason string, now time.Time) error {
+	if !w.Cancelable() {
+		return ErrNotCancelable
+	}
+	w.RejectReason = reason
+	w.set(WithdrawalRejected, now)
+	return nil
+}
+
+// Cancelable reports whether the withdrawal can still be withdrawn: until
+// it enters SIGNING (§11.6).
+func (w *Withdrawal) Cancelable() bool {
+	return w.Status == WithdrawalRequested || w.Status == WithdrawalReview || w.Status == WithdrawalApproved
+}
+
+// Cancel withdraws the request on the user's behalf.
+func (w *Withdrawal) Cancel(now time.Time) error {
+	if !w.Cancelable() {
+		return ErrNotCancelable
+	}
+	w.set(WithdrawalCanceled, now)
+	return nil
+}
+
+// NeedsRelease reports whether a refused withdrawal, or one that failed
+// before anything was broadcast, still has frozen funds to release.
+func (w *Withdrawal) NeedsRelease() bool {
+	refused := w.Status == WithdrawalRejected || w.Status == WithdrawalCanceled || (w.Status == WithdrawalFailed && w.TxHash == "")
+	return refused && w.FreezeJournal != "" && w.UnfreezeJournal == ""
+}
+
+// Broadcasted records the first broadcast of nonce with tx.
+func (w *Withdrawal) Broadcasted(nonce uint64, tx string, now time.Time) {
+	w.Nonce, w.TxHash, w.BroadcastAt = int64(nonce), tx, now //nolint:gosec // nonces fit
+	w.set(WithdrawalBroadcast, now)
+}
+
+// Mined records the block of the mined attempt tx and the confirmations
+// seen at head; it reports whether the withdrawal is now CONFIRMED.
+func (w *Withdrawal) Mined(tx string, block, head uint64, now time.Time) bool {
+	if w.Status != WithdrawalBroadcast && w.Status != WithdrawalConfirming {
+		return false
+	}
+	w.TxHash, w.BlockNumber = tx, block
+	conf := uint64(0)
+	if head >= block {
+		conf = head - block + 1
+	}
+	w.Confirmations = uint32(min(conf, uint64(w.Required))) //nolint:gosec // at most Required
+	if conf < uint64(w.Required) {
+		w.set(WithdrawalConfirming, now)
+		return false
+	}
+	w.set(WithdrawalConfirmed, now)
+	w.ConfirmedAt = now
+	return true
+}
+
+// Attempt is one signed transaction of a withdrawal; replacements share
+// its nonce with a higher fee.
+type Attempt struct {
+	TxHash       string
+	WithdrawalID string
+	Nonce        uint64
+	MaxFee       *big.Int
+	MaxTip       *big.Int
+	Raw          string
+	CreatedAt    time.Time
+}
+
+// WithdrawAddress is an entry of a user's withdrawal address book.
+type WithdrawAddress struct {
+	ID        string
+	UserID    string
+	Network   string
+	Address   string
+	Label     string
+	CreatedAt time.Time
+	// UsableAt ends the cooling-off period (§5.10: 24 hours).
+	UsableAt time.Time
+}
+
+// RiskInput is what the withdrawal risk rules weigh (§11.6).
+type RiskInput struct {
+	Now               time.Time
+	AccountCreated    time.Time
+	DeviceFirstSeen   time.Time // zero when unknown: treated as new
+	IdentityChanged   time.Time
+	PasswordChanged   time.Time
+	AddressAdded      time.Time
+	ValueUSDT         decimal.Decimal
+	DailyUSDT         decimal.Decimal // today's withdrawals including this one
+	DailyLimit        decimal.Decimal
+	LargeUSDT         decimal.Decimal // review above this (1000)
+	DoubleReviewUSDT  decimal.Decimal // two reviewers above this (20000)
+	NewAccountPeriod  time.Duration   // 72h
+	NewDevicePeriod   time.Duration   // 24h
+	SecurityPeriod    time.Duration   // 24h
+	NewAddressPeriod  time.Duration   // 72h
+	ReviewDailyShare  decimal.Decimal // review past this share of the daily limit (0.5)
+	InternalRecipient bool
+}
+
+// RiskResult is the assessment: a score, the reasons, and how many
+// reviewers must approve.
+type RiskResult struct {
+	Score     int
+	Reasons   []string
+	Approvals int
+}
+
+// DefaultRisk fills in the thresholds of §11.6.
+func DefaultRisk(in RiskInput) RiskInput {
+	d := decimal.NewFromInt
+	if in.LargeUSDT.IsZero() {
+		in.LargeUSDT = d(1000)
+	}
+	if in.DoubleReviewUSDT.IsZero() {
+		in.DoubleReviewUSDT = d(20000)
+	}
+	if in.ReviewDailyShare.IsZero() {
+		in.ReviewDailyShare = decimal.RequireFromString("0.5")
+	}
+	for _, p := range []*time.Duration{&in.NewAccountPeriod, &in.NewAddressPeriod} {
+		if *p == 0 {
+			*p = 72 * time.Hour
+		}
+	}
+	for _, p := range []*time.Duration{&in.NewDevicePeriod, &in.SecurityPeriod} {
+		if *p == 0 {
+			*p = 24 * time.Hour
+		}
+	}
+	return in
+}
+
+// Assess applies the risk rules: each reason adds to the score and sends
+// the withdrawal to one reviewer; a very large one needs two.
+func Assess(in RiskInput) RiskResult {
+	in = DefaultRisk(in)
+	var r RiskResult
+	hit := func(reason string, score int) {
+		r.Reasons = append(r.Reasons, reason)
+		r.Score += score
+	}
+	recent := func(t time.Time, within time.Duration) bool { return t.IsZero() || in.Now.Sub(t) < within }
+	if recent(in.AccountCreated, in.NewAccountPeriod) {
+		hit(RiskNewAccount, 40)
+	}
+	if recent(in.DeviceFirstSeen, in.NewDevicePeriod) {
+		hit(RiskNewDevice, 30)
+	}
+	latest := in.IdentityChanged
+	if in.PasswordChanged.After(latest) {
+		latest = in.PasswordChanged
+	}
+	if !latest.IsZero() && in.Now.Sub(latest) < in.SecurityPeriod {
+		hit(RiskSecurityChange, 30)
+	}
+	if recent(in.AddressAdded, in.NewAddressPeriod) {
+		hit(RiskNewAddress, 20)
+	}
+	if in.ValueUSDT.GreaterThan(in.LargeUSDT) {
+		hit(RiskLargeAmount, 30)
+	}
+	if in.DailyLimit.IsPositive() && in.DailyUSDT.GreaterThan(in.DailyLimit.Mul(in.ReviewDailyShare)) {
+		hit(RiskDailyShare, 20)
+	}
+	r.Score = min(r.Score, 100)
+	switch {
+	case in.ValueUSDT.GreaterThan(in.DoubleReviewUSDT):
+		r.Approvals = 2
+	case len(r.Reasons) > 0:
+		r.Approvals = 1
+	}
+	return r
+}
+
+// Limits are a user's withdrawal limits in USDT (§11.6, no KYC).
+type Limits struct {
+	Daily   decimal.Decimal
+	Monthly decimal.Decimal
+}
+
+// LimitsFor returns the limits of a user: both identities and an
+// authenticator app get the full 2,000 a day and 20,000 a month, anyone
+// else 20% of that.
+func LimitsFor(identities int, totp bool) Limits {
+	full := Limits{Daily: decimal.NewFromInt(2000), Monthly: decimal.NewFromInt(20000)}
+	if identities >= 2 && totp {
+		return full
+	}
+	share := decimal.RequireFromString("0.2")
+	return Limits{Daily: full.Daily.Mul(share), Monthly: full.Monthly.Mul(share)}
+}

@@ -4,6 +4,8 @@ package grpcapi
 import (
 	"context"
 
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
 	"github.com/lidp280504357/exchange/internal/user/application"
 	"github.com/lidp280504357/exchange/internal/user/domain"
@@ -22,7 +24,7 @@ func toProto(u domain.User) *userv1.User {
 	return &userv1.User{
 		Id: u.ID, Status: u.Status, Region: u.Region, Language: u.Language, Timezone: u.Timezone,
 		KycLevel:         int32(u.KYCLevel), //nolint:gosec // small level number
-		AntiPhishingCode: u.AntiPhishingCode,
+		AntiPhishingCode: u.AntiPhishingCode, CreatedAt: timestamppb.New(u.CreatedAt),
 	}
 }
 

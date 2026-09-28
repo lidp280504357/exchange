@@ -19,6 +19,12 @@ const (
 	// handling (below the minimum, unsupported token, closed account).
 	NoticeDepositCredited  = "DEPOSIT_CREDITED"
 	NoticeDepositUnclaimed = "DEPOSIT_UNCLAIMED"
+	// Withdrawals (§11.6): requested, completed, rejected, canceled, failed.
+	NoticeWithdrawalRequested = "WITHDRAWAL_REQUESTED"
+	NoticeWithdrawalCompleted = "WITHDRAWAL_COMPLETED"
+	NoticeWithdrawalRejected  = "WITHDRAWAL_REJECTED"
+	NoticeWithdrawalCanceled  = "WITHDRAWAL_CANCELED"
+	NoticeWithdrawalFailed    = "WITHDRAWAL_FAILED"
 )
 
 // Notice is an in-app notification.
@@ -161,6 +167,42 @@ func RenderNotice(in NoticeInput) (title, body string) {
 		}
 		return "充值未入账", fmt.Sprintf("您在 %s 上的一笔充值 %s（交易 %s）未能存入账户，原因：%s。资金已转入待处理，需人工审核；平台不承诺找回，找回可能收取手续费，请凭交易哈希联系客服。",
 			d["network"], amount, d["tx"], why)
+	case NoticeWithdrawalRequested:
+		if en {
+			return "Withdrawal requested", fmt.Sprintf("A withdrawal of %s %s to %s (%s) was requested at %s; the amount and the fee %s are frozen. "+
+				"If this was not you, cancel it on the withdrawal page and change your password now.", d["amount"], d["asset"], d["address"], d["network"], when, d["fee"])
+		}
+		return "提现申请已提交", fmt.Sprintf("您于 %s 申请提现 %s %s 到 %s（%s），金额与手续费 %s 已冻结。如非本人操作，请立即在提现页撤销并修改密码。",
+			when, d["amount"], d["asset"], d["address"], d["network"], d["fee"])
+	case NoticeWithdrawalCompleted:
+		if en {
+			if d["internal"] == "true" {
+				return "Withdrawal completed", fmt.Sprintf("Your withdrawal of %s %s to %s was completed inside the platform at %s.", d["amount"], d["asset"], d["address"], when)
+			}
+			return "Withdrawal completed", fmt.Sprintf("Your withdrawal of %s %s to %s (%s) was confirmed on chain at %s (transaction %s).",
+				d["amount"], d["asset"], d["address"], d["network"], when, d["tx"])
+		}
+		if d["internal"] == "true" {
+			return "提现已完成", fmt.Sprintf("您的 %s %s 提现（到 %s）已于 %s 在平台内完成划转。", d["amount"], d["asset"], d["address"], when)
+		}
+		return "提现已完成", fmt.Sprintf("您的 %s %s 提现（到 %s，%s）已于 %s 在链上确认，交易 %s。", d["amount"], d["asset"], d["address"], d["network"], when, d["tx"])
+	case NoticeWithdrawalRejected:
+		if en {
+			return "Withdrawal rejected", fmt.Sprintf("Your withdrawal of %s %s to %s was rejected at %s (%s); the frozen funds are released.",
+				d["amount"], d["asset"], d["address"], when, d["reason"])
+		}
+		return "提现未通过", fmt.Sprintf("您的 %s %s 提现（到 %s）已于 %s 被拒绝（%s），冻结资金已退回。", d["amount"], d["asset"], d["address"], when, d["reason"])
+	case NoticeWithdrawalCanceled:
+		if en {
+			return "Withdrawal canceled", fmt.Sprintf("Your withdrawal of %s %s was canceled at %s; the frozen funds are released.", d["amount"], d["asset"], when)
+		}
+		return "提现已撤销", fmt.Sprintf("您的 %s %s 提现已于 %s 撤销，冻结资金已退回。", d["amount"], d["asset"], when)
+	case NoticeWithdrawalFailed:
+		if en {
+			return "Withdrawal failed", fmt.Sprintf("Your withdrawal of %s %s to %s failed at %s; support will handle it. Reference %s.",
+				d["amount"], d["asset"], d["address"], when, d["id"])
+		}
+		return "提现失败", fmt.Sprintf("您的 %s %s 提现（到 %s）于 %s 失败，客服会跟进处理，编号 %s。", d["amount"], d["asset"], d["address"], when, d["id"])
 	case NoticeStatusChanged:
 		to := pick(statusNames, d["to"], en)
 		if en {

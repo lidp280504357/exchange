@@ -4,7 +4,7 @@ type Shape<T> = { [K in keyof T]: T[K] extends string ? string : Shape<T[K]> };
 
 export const en: Shape<typeof zhCN> = {
   app: { name: "Exchange", tagline: "A learning exchange (test environment, simulated funds)" },
-  nav: { assets: "Assets", markets: "Markets", deposit: "Deposit", transfer: "Transfer", notifications: "Notices", security: "Security", profile: "Settings", logout: "Sign out" },
+  nav: { assets: "Assets", markets: "Markets", deposit: "Deposit", withdraw: "Withdraw", transfer: "Transfer", notifications: "Notices", security: "Security", profile: "Settings", logout: "Sign out" },
   common: {
     submit: "Submit", next: "Next", back: "Back", cancel: "Cancel", confirm: "Confirm", loading: "Loading…", retry: "Retry",
     email: "Email", password: "Password", code: "Code", sendCode: "Send code", resend: "Resend", device: "Device", time: "Time",
@@ -46,6 +46,14 @@ export const en: Shape<typeof zhCN> = {
     status: { DETECTED: "Detected", CONFIRMING: "Confirming", CONFIRMED: "Crediting", CREDITED: "Credited", ORPHANED: "Dropped", REJECTED: "Not credited" },
     reason: { BELOW_MINIMUM: "Below the minimum", UNSUPPORTED_TOKEN: "Unsupported token", ACCOUNT_CLOSED: "Account closed", NOT_ELIGIBLE: "Account cannot take deposits now" },
   },
+  withdraw: {
+    title: "Withdraw", noneOpen: "No asset can be withdrawn now", address: "Address", pickAddress: "Pick from the address book", coolingOff: "cooling off",
+    amount: "Amount", rules: "Minimum {{min}}, fee {{fee}} {{asset}}, available {{available}}", total: "{{total}} {{asset}} in total, fee included",
+    submit: "Withdraw", requested: "Withdrawal requested", book: "Address book", usable: "Usable", usableAt: "Usable after {{at}}",
+    remove: "Remove", newAddress: "New address (0x...)", label: "Label (optional)", addAddress: "Add address", addressAdded: "Address added; usable after its cooling-off period",
+    coolingOffHint: "For safety, a new address can be used only after a cooling-off period (24 hours in production).", history: "Withdrawal history", feeShort: "fee {{fee}}",
+    internal: "Internal transfer", review: "Under review", cancel: "Cancel",
+  },
   codes: {
     SPOT: "Spot", FUTURES: "Futures", AVAILABLE: "Available", FROZEN: "Frozen",
     MANUAL_ADJUSTMENT: "Adjustment (simulated funds)", ACCOUNT_TRANSFER: "Transfer", ORDER_FREEZE: "Order hold", ORDER_UNFREEZE: "Order release",
@@ -58,6 +66,8 @@ export const en: Shape<typeof zhCN> = {
     NEW: "Submitted", OPEN: "Open", PARTIALLY_FILLED: "Partly filled", FILLED: "Filled", CANCELED: "Canceled", REJECTED: "Rejected", EXPIRED: "Expired",
     BUY: "Buy", SELL: "Sell", LIMIT: "Limit", MARKET: "Market", GTC: "Good till canceled", IOC: "Immediate or cancel", FOK: "Fill or kill", POST_ONLY: "Post only",
     MAKER: "Maker", TAKER: "Taker", USER: "Canceled by you", SELF_TRADE: "Self-trade prevention", NO_LIQUIDITY: "Not enough liquidity",
+    REQUESTED: "Processing", PENDING_REVIEW: "Under review", APPROVED: "Approved", SIGNING: "Signing", BROADCAST: "Broadcast", CONFIRMING: "Confirming",
+    CONFIRMED: "Completed", FAILED: "Failed", LEDGER_INSUFFICIENT_BALANCE: "Insufficient balance",
   },
   notices: { title: "Notifications", markAll: "Mark all read", unread: "{{n}} unread" },
   security: {
@@ -88,7 +98,10 @@ export const en: Shape<typeof zhCN> = {
     ORDER_MIN_NOTIONAL: "Below the minimum order value", ORDER_PRICE_OUT_OF_BAND: "The price is too far from the last trade", ORDER_TOO_MANY_OPEN: "Too many open orders",
     ORDER_ALREADY_FILLED: "The order is already filled", ORDER_WOULD_TAKE: "A post-only order would have filled at once", ORDER_NO_LIQUIDITY: "Nothing to fill against",
     ORDER_SELF_TRADE: "It would fill against your own order", COMMON_CONFLICT: "The order has ended", COMMON_NOT_FOUND: "Not found",
-    WALLET_NETWORK_DISABLED: "Deposits of this asset on this network are paused", WALLET_NETWORK_UNKNOWN: "Unsupported network", WALLET_UNAVAILABLE: "Deposit addresses are not available yet, try later",
+    WALLET_NETWORK_DISABLED: "This asset is paused on this network", WALLET_NETWORK_UNKNOWN: "Unsupported network", WALLET_UNAVAILABLE: "Deposit addresses are not available yet, try later",
+    WALLET_INVALID_ADDRESS: "Not a valid address", WALLET_ADDRESS_NOT_WHITELISTED: "Add the address to your address book first", WALLET_ADDRESS_COOLDOWN: "The new address is still cooling off",
+    WALLET_BELOW_MINIMUM: "Below the minimum withdrawal", WALLET_LIMIT_EXCEEDED: "Over your withdrawal limit", WALLET_OWN_ADDRESS: "That is your own deposit address",
+    WALLET_AMOUNT_PRECISION: "Too many decimals for this asset", WALLET_WITHDRAWAL_NOT_CANCELABLE: "The withdrawal is already being sent",
     format: "Enter a valid number", zero: "The amount must be above 0", precision: "At most {{n}} decimals", unknown: "Something went wrong ({{code}})",
   },
 };

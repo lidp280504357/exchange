@@ -88,6 +88,47 @@ func walletWith(ctx context.Context, db *pg.DB, args []string, out io.Writer) er
 			return err
 		}
 		return printChecks(ctx, store, *network, out)
+	case "withdrawals":
+		status := fs.String("status", domain.WithdrawalReview, "one status, or ALL")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		statuses := []string{*status}
+		if *status == "ALL" {
+			statuses = []string{
+				domain.WithdrawalRequested, domain.WithdrawalReview, domain.WithdrawalApproved, domain.WithdrawalSigning,
+				domain.WithdrawalBroadcast, domain.WithdrawalConfirming, domain.WithdrawalConfirmed, domain.WithdrawalRejected,
+				domain.WithdrawalCanceled, domain.WithdrawalFailed,
+			}
+		}
+		list, err := store.Read().Withdrawals().ByStatus(ctx, *network, statuses...)
+		if err != nil {
+			return err
+		}
+		w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "ID\tUSER\tAMOUNT\tTO\tSTATUS\tRISK\tAPPROVALS\tTX")
+		for _, x := range list {
+			fmt.Fprintf(w, "%s\t%s\t%s %s\t%s\t%s\t%d %v\t%d/%d %v\t%s\n", x.ID, x.UserID, x.Amount, x.Asset, x.Address, x.Status,
+				x.RiskScore, x.RiskReasons, len(x.Approvals), x.ApprovalsRequired, x.Approvals, x.TxHash)
+		}
+		return w.Flush()
+	case "approve", "reject":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: wallet %s <withdrawal_id> --reviewer NAME --reason TEXT", args[0])
+		}
+		reviewer := fs.String("reviewer", "", "who decides (each approval needs another reviewer)")
+		reason := fs.String("reason", "", "why")
+		if err := fs.Parse(args[2:]); err != nil {
+			return err
+		}
+		wd, err := application.ReviewWithdrawal(ctx, store, application.Review{
+			ID: args[1], Reviewer: *reviewer, Reason: *reason, Approve: args[0] == "approve",
+		}, time.Now())
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s: %s (%d/%d approvals)\n", wd.ID, wd.Status, len(wd.Approvals), wd.ApprovalsRequired)
+		return nil
 	case "commands":
 		limit := fs.Int("limit", 20, "how many")
 		if err := fs.Parse(args[1:]); err != nil {

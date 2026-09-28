@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package exchange.user.v1;
 
+import "google/protobuf/timestamp.proto";
+
 // UserService owns profiles, account status and eligibility
 // (requirements §5.4). Public REST endpoints are in api/openapi/user.yaml.
 service UserService {
@@ -26,6 +28,8 @@ message User {
   // Shown in every mail we send so phishing mails stand out; empty until
   // the user sets one.
   string anti_phishing_code = 7;
+  // When the account was created.
+  google.protobuf.Timestamp created_at = 8;
 }
 
 message CreateUserRequest {

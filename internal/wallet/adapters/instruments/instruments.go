@@ -45,14 +45,21 @@ func (c *Client) all(ctx context.Context) ([]domain.Network, error) {
 	nets = nets[:0:0]
 	for _, a := range resp.GetAssets() {
 		for _, n := range a.GetNetworks() {
-			minDeposit, err := decimal.NewFromString(n.GetMinDeposit())
-			if err != nil {
-				return nil, fmt.Errorf("network %s/%s: bad min_deposit %q: %w", a.GetAssetCode(), n.GetNetwork(), n.GetMinDeposit(), err)
+			var amounts [3]decimal.Decimal
+			for i, f := range []struct{ name, value string }{
+				{"min_deposit", n.GetMinDeposit()}, {"min_withdraw", n.GetMinWithdraw()}, {"withdraw_fee", n.GetWithdrawFee()},
+			} {
+				v, err := decimal.NewFromString(f.value)
+				if err != nil {
+					return nil, fmt.Errorf("network %s/%s: bad %s %q: %w", a.GetAssetCode(), n.GetNetwork(), f.name, f.value, err)
+				}
+				amounts[i] = v
 			}
 			nets = append(nets, domain.Network{
 				Asset: a.GetAssetCode(), Network: n.GetNetwork(), Chain: n.GetChain(), Contract: strings.ToLower(n.GetContractAddress()),
-				Decimals: a.GetDecimals(), Confirmations: uint32(max(n.GetConfirmations(), 0)), MinDeposit: minDeposit,
-				Enabled: a.GetDepositEnabled() && n.GetDepositEnabled(),
+				Decimals: a.GetDecimals(), Confirmations: uint32(max(n.GetConfirmations(), 0)), //nolint:gosec // non-negative
+				MinDeposit: amounts[0], Enabled: a.GetDepositEnabled() && n.GetDepositEnabled(),
+				WithdrawEnabled: a.GetWithdrawEnabled() && n.GetWithdrawEnabled(), MinWithdraw: amounts[1], WithdrawFee: amounts[2],
 			})
 		}
 	}

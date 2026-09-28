@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package exchange.wallet.v1;
+
+// Events on wallet.withdrawal.events, keyed by user_id (requirements
+// §8.1, §11.6). Amounts are decimal strings in the asset's unit.
+
+// Withdrawal is a user's request to send an asset out.
+message Withdrawal {
+  string withdrawal_id = 1;
+  string user_id = 2;
+  string asset = 3;
+  string network = 4;
+  string address = 5;
+  // Sent to the address.
+  string amount = 6;
+  // Kept by the platform; zero for internal transfers.
+  string fee = 7;
+  // REQUESTED, PENDING_REVIEW, APPROVED, SIGNING, BROADCAST, CONFIRMING,
+  // CONFIRMED, INTERNAL_TRANSFER, REJECTED, CANCELED or FAILED.
+  string status = 8;
+  // Set when the address is another user's deposit address: the
+  // withdrawal completes in the ledger (INTERNAL_TRANSFER).
+  bool internal = 9;
+  string tx_hash = 10;
+  uint32 confirmations = 11;
+  uint32 required_confirmations = 12;
+  // Why it needs review (NEW_ACCOUNT, NEW_DEVICE, SECURITY_CHANGE,
+  // NEW_ADDRESS, LARGE_AMOUNT, DAILY_SHARE) or was rejected.
+  repeated string risk_reasons = 13;
+  string reject_reason = 14;
+}
+
+// WithdrawalRequested: the amount and fee are frozen.
+message WithdrawalRequested {
+  Withdrawal withdrawal = 1;
+}
+
+// WithdrawalRiskScored: the risk rules ran; approvals_required reviewers
+// must approve (0: approved at once).
+message WithdrawalRiskScored {
+  Withdrawal withdrawal = 1;
+  int32 score = 2;
+  int32 approvals_required = 3;
+}
+
+// WithdrawalApproved: ready to be signed (or transferred internally).
+message WithdrawalApproved {
+  Withdrawal withdrawal = 1;
+  repeated string approved_by = 2;
+}
+
+// WithdrawalRejected: refused by a reviewer or a check; the funds are
+// released.
+message WithdrawalRejected {
+  Withdrawal withdrawal = 1;
+}
+
+// WithdrawalCanceled: the user withdrew the request before signing; the
+// funds are released.
+message WithdrawalCanceled {
+  Withdrawal withdrawal = 1;
+}
+
+// WithdrawalBroadcast: signed and sent; the ledger settled it
+// (WITHDRAW_SETTLE). A replacement with a higher fee is broadcast again
+// with its new hash.
+message WithdrawalBroadcast {
+  Withdrawal withdrawal = 1;
+  uint64 nonce = 2;
+}
+
+// WithdrawalConfirmed: on chain with the network's confirmations, or done
+// in the ledger for an internal transfer.
+message WithdrawalConfirmed {
+  Withdrawal withdrawal = 1;
+}
+
+// WithdrawalFailed: the transaction failed on chain; it needs manual
+// handling.
+message WithdrawalFailed {
+  Withdrawal withdrawal = 1;
+}

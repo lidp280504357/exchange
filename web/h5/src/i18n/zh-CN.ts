@@ -1,6 +1,6 @@
 export const zhCN = {
   app: { name: "Exchange", tagline: "学习用虚拟资产交易所（测试环境，资金为模拟）" },
-  nav: { assets: "资产", markets: "市场", deposit: "充值", transfer: "划转", notifications: "通知", security: "安全", profile: "设置", logout: "退出" },
+  nav: { assets: "资产", markets: "市场", deposit: "充值", withdraw: "提现", transfer: "划转", notifications: "通知", security: "安全", profile: "设置", logout: "退出" },
   common: {
     submit: "提交", next: "下一步", back: "返回", cancel: "取消", confirm: "确认", loading: "加载中…", retry: "重试",
     email: "邮箱", password: "密码", code: "验证码", sendCode: "发送验证码", resend: "重新发送", device: "设备", time: "时间",
@@ -42,6 +42,14 @@ export const zhCN = {
     status: { DETECTED: "已发现", CONFIRMING: "确认中", CONFIRMED: "入账中", CREDITED: "已到账", ORPHANED: "已失效", REJECTED: "未入账" },
     reason: { BELOW_MINIMUM: "低于最小充值额", UNSUPPORTED_TOKEN: "不支持的代币", ACCOUNT_CLOSED: "账户已注销", NOT_ELIGIBLE: "账户当前不能充值" },
   },
+  withdraw: {
+    title: "提现", noneOpen: "暂无开放提现的币种", address: "提现地址", pickAddress: "从地址簿选择", coolingOff: "冷却中",
+    amount: "数量", rules: "最小 {{min}}，手续费 {{fee}} {{asset}}，可用 {{available}}", total: "共扣除 {{total}} {{asset}}（含手续费）",
+    submit: "提交提现", requested: "提现申请已提交", book: "提现地址簿", usable: "可用", usableAt: "{{at}} 后可用",
+    remove: "删除", newAddress: "新地址（0x 开头）", label: "备注（可选）", addAddress: "添加地址", addressAdded: "地址已添加，冷却期结束后可用",
+    coolingOffHint: "为了安全，新地址添加后需要等待冷却期（生产环境 24 小时）才能提现。", history: "提现记录", feeShort: "手续费 {{fee}}",
+    internal: "站内划转", review: "人工审核中", cancel: "撤销",
+  },
   codes: {
     SPOT: "现货", FUTURES: "合约", AVAILABLE: "可用", FROZEN: "冻结",
     MANUAL_ADJUSTMENT: "调账（模拟资金）", ACCOUNT_TRANSFER: "账户划转", ORDER_FREEZE: "下单冻结", ORDER_UNFREEZE: "订单解冻",
@@ -54,6 +62,8 @@ export const zhCN = {
     NEW: "已提交", OPEN: "挂单中", PARTIALLY_FILLED: "部分成交", FILLED: "全部成交", CANCELED: "已撤销", REJECTED: "已拒绝", EXPIRED: "已过期",
     BUY: "买入", SELL: "卖出", LIMIT: "限价", MARKET: "市价", GTC: "一直有效", IOC: "立即成交剩余撤销", FOK: "全部成交或撤销", POST_ONLY: "只做挂单",
     MAKER: "挂单", TAKER: "吃单", USER: "用户撤单", SELF_TRADE: "自成交保护", NO_LIQUIDITY: "盘口不足",
+    REQUESTED: "处理中", PENDING_REVIEW: "待审核", APPROVED: "已批准", SIGNING: "签名中", BROADCAST: "已广播", CONFIRMING: "确认中",
+    CONFIRMED: "已完成", FAILED: "失败", LEDGER_INSUFFICIENT_BALANCE: "可用余额不足",
   },
   notices: { title: "通知", markAll: "全部已读", unread: "{{n}} 条未读" },
   security: {
@@ -84,7 +94,10 @@ export const zhCN = {
     ORDER_MIN_NOTIONAL: "金额低于最小下单额", ORDER_PRICE_OUT_OF_BAND: "价格偏离最新成交价太多", ORDER_TOO_MANY_OPEN: "挂单数量已达上限",
     ORDER_ALREADY_FILLED: "订单已全部成交", ORDER_WOULD_TAKE: "只做挂单的订单会立即成交，已拒绝", ORDER_NO_LIQUIDITY: "盘口没有可成交的订单",
     ORDER_SELF_TRADE: "会与自己的订单成交，已拒绝", COMMON_CONFLICT: "订单已结束", COMMON_NOT_FOUND: "找不到",
-    WALLET_NETWORK_DISABLED: "该币种在此网络暂停充值", WALLET_NETWORK_UNKNOWN: "不支持该网络", WALLET_UNAVAILABLE: "充值地址暂不可用，请稍后再试",
+    WALLET_NETWORK_DISABLED: "该币种在此网络暂停充提", WALLET_NETWORK_UNKNOWN: "不支持该网络", WALLET_UNAVAILABLE: "充值地址暂不可用，请稍后再试",
+    WALLET_INVALID_ADDRESS: "地址格式不正确", WALLET_ADDRESS_NOT_WHITELISTED: "请先把该地址加入提现地址簿", WALLET_ADDRESS_COOLDOWN: "新地址还在冷却期，稍后再试",
+    WALLET_BELOW_MINIMUM: "低于最小提现数量", WALLET_LIMIT_EXCEEDED: "超出提现限额", WALLET_OWN_ADDRESS: "这是你自己的充值地址",
+    WALLET_AMOUNT_PRECISION: "数量的小数位超出资产精度", WALLET_WITHDRAWAL_NOT_CANCELABLE: "提现已在发送，无法撤销",
     format: "请输入正确的数字", zero: "数量必须大于 0", precision: "最多 {{n}} 位小数", unknown: "出错了（{{code}}）",
   },
 };

@@ -4,6 +4,7 @@ package ports
 import (
 	"context"
 	"math/big"
+	"time"
 
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
@@ -29,8 +30,18 @@ type Repos interface {
 	ChainFees() ChainFeeRepo
 	Fundings() FundingRepo
 	Checks() CheckRepo
+	WithdrawAddresses() WithdrawAddressRepo
+	Withdrawals() WithdrawalRepo
+	Attempts() AttemptRepo
+	Nonces() NonceRepo
+	Prices() PriceRepo
 	// Emit queues a wallet.deposit.events event keyed by the user.
 	Emit(ctx context.Context, msg proto.Message, userID string) error
+	// EmitWithdrawal queues a wallet.withdrawal.events event keyed by the
+	// user.
+	EmitWithdrawal(ctx context.Context, msg proto.Message, userID string) error
+	// Audit queues an operator action on audit.events.
+	Audit(ctx context.Context, msg proto.Message, actor string) error
 }
 
 // AddressRepo stores deposit addresses, one per user and network.
@@ -44,6 +55,68 @@ type AddressRepo interface {
 	Owners(ctx context.Context, network string) (map[string]string, error)
 	// List returns the addresses of network by index.
 	List(ctx context.Context, network string) ([]domain.Address, error)
+}
+
+// WithdrawAddressRepo stores users' withdrawal address books.
+type WithdrawAddressRepo interface {
+	Insert(ctx context.Context, a domain.WithdrawAddress) error
+	// List returns a user's active entries, newest first.
+	List(ctx context.Context, userID string) ([]domain.WithdrawAddress, error)
+	// Find returns the user's active entry of an address on network, or
+	// nil.
+	Find(ctx context.Context, userID, network, address string) (*domain.WithdrawAddress, error)
+	// Delete removes a user's entry and reports whether there was one.
+	Delete(ctx context.Context, userID, id string, now time.Time) (bool, error)
+}
+
+// WithdrawalRepo stores withdrawals.
+type WithdrawalRepo interface {
+	Insert(ctx context.Context, w domain.Withdrawal) error
+	Update(ctx context.Context, w domain.Withdrawal) error
+	// Get returns a withdrawal, or nil.
+	Get(ctx context.Context, id string) (*domain.Withdrawal, error)
+	// GetForUpdate is Get with the row locked.
+	GetForUpdate(ctx context.Context, id string) (*domain.Withdrawal, error)
+	// ByUser returns up to limit of a user's withdrawals older than before
+	// ("": newest), newest first.
+	ByUser(ctx context.Context, userID, before string, limit int) ([]domain.Withdrawal, error)
+	// ByStatus lists the network's withdrawals in the statuses, oldest
+	// first.
+	ByStatus(ctx context.Context, network string, statuses ...string) ([]domain.Withdrawal, error)
+	// Unreleased lists the refused withdrawals whose funds are not released.
+	Unreleased(ctx context.Context, network string) ([]domain.Withdrawal, error)
+	// Unsettled lists the broadcast withdrawals the ledger has not settled.
+	Unsettled(ctx context.Context, network string) ([]domain.Withdrawal, error)
+	// ValueSince sums the USDT worth of a user's withdrawals created since
+	// t, refused ones left out.
+	ValueSince(ctx context.Context, userID string, t time.Time) (decimal.Decimal, error)
+}
+
+// AttemptRepo stores the signed transactions of withdrawals.
+type AttemptRepo interface {
+	Insert(ctx context.Context, a domain.Attempt) error
+	// Of lists a withdrawal's attempts, newest first.
+	Of(ctx context.Context, withdrawalID string) ([]domain.Attempt, error)
+}
+
+// NonceRepo tracks the next nonce of the hot wallet. A nonce is taken
+// only once its transaction is signed, so a failed signature leaves no
+// gap that would hold up every later transaction.
+type NonceRepo interface {
+	// Peek returns the next nonce recorded for address, 0 when none.
+	Peek(ctx context.Context, address string) (uint64, error)
+	// Advance records that nonces below next are taken.
+	Advance(ctx context.Context, address string, next uint64) error
+}
+
+// PriceRepo keeps the day's USDT prices for the limits (§11.6: a snapshot
+// at 00:00 UTC).
+type PriceRepo interface {
+	// Get returns the price of asset on day, or nil.
+	Get(ctx context.Context, day time.Time, asset string) (*decimal.Decimal, error)
+	// Put records the day's price unless one is there; it returns the
+	// price that holds.
+	Put(ctx context.Context, day time.Time, asset string, price decimal.Decimal, source string) (decimal.Decimal, error)
 }
 
 // CommandRepo queues operator commands.
@@ -217,8 +290,46 @@ type Signer interface {
 	Sign(ctx context.Context, r SignRequest) (Signed, error)
 }
 
+// StepUp is a redeemed step-up with the user's security context.
+type StepUp struct {
+	Channel         string
+	DeviceID        string
+	DeviceFirstSeen time.Time
+	Identities      int
+	TOTPEnabled     bool
+	IdentityChanged time.Time
+	PasswordChanged time.Time
+}
+
+// StepUps redeems step-up tokens (auth-service).
+type StepUps interface {
+	Consume(ctx context.Context, userID, token string) (StepUp, error)
+}
+
+// Profiles reads accounts (user-service).
+type Profiles interface {
+	// Created returns when the account was created.
+	Created(ctx context.Context, userID string) (time.Time, error)
+}
+
+// Prices quotes assets in USDT (market-data-service's reference prices).
+type Prices interface {
+	// USDT returns asset's price in USDT and its source.
+	USDT(ctx context.Context, asset string) (decimal.Decimal, string, error)
+}
+
 // Ledger books the wallet's journals (ledger-service).
 type Ledger interface {
+	// Freeze and Unfreeze move a withdrawal's amount and fee between the
+	// user's available and frozen SPOT balance (WITHDRAW_FREEZE,
+	// WITHDRAW_UNFREEZE).
+	Freeze(ctx context.Context, key, userID, asset string, amount decimal.Decimal, reference string) (journalID string, err error)
+	Unfreeze(ctx context.Context, key, userID, asset string, amount decimal.Decimal, reference string) (journalID string, err error)
+	// Settle books a broadcast withdrawal (WITHDRAW_SETTLE).
+	Settle(ctx context.Context, key, userID, asset string, amount, fee decimal.Decimal, reference string) (journalID string, err error)
+	// TransferInternal completes a withdrawal to another user
+	// (INTERNAL_TRANSFER).
+	TransferInternal(ctx context.Context, key, fromUser, toUser, asset string, amount decimal.Decimal, reference string) (journalID string, err error)
 	// BookChainFee books gas the platform paid; key makes it once.
 	BookChainFee(ctx context.Context, key, asset string, amount decimal.Decimal, reference string) (journalID string, err error)
 	// Fund books a platform funding to a system account.

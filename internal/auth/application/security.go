@@ -225,16 +225,23 @@ func (s *AccountService) Contacts(ctx context.Context, userID string) ([]domain.
 	return s.Store.Read().Identities().ByUser(ctx, userID)
 }
 
-// ConsumeStepUp redeems a step-up token for another service's action.
-func (s *AccountService) ConsumeStepUp(ctx context.Context, userID, token string) (string, error) {
-	var sessionID string
+// ConsumeStepUp redeems a step-up token for another service's action and
+// returns it with the user's security context.
+func (s *AccountService) ConsumeStepUp(ctx context.Context, userID, token string) (domain.StepUp, domain.SecurityContext, error) {
+	var (
+		su  *domain.StepUp
+		sec domain.SecurityContext
+	)
 	err := s.Store.Tx(ctx, func(r ports.Repos) error {
-		su, err := s.consumeStepUp(ctx, r, userID, token)
-		if err != nil {
+		var err error
+		if su, err = s.consumeStepUp(ctx, r, userID, token); err != nil {
 			return err
 		}
-		sessionID = su.SessionID
-		return nil
+		sec, err = r.Security().Context(ctx, userID, su.SessionID)
+		return err
 	})
-	return sessionID, err
+	if err != nil {
+		return domain.StepUp{}, domain.SecurityContext{}, err
+	}
+	return *su, sec, nil
 }

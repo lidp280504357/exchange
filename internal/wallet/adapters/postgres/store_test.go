@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"log/slog"
+	"math/big"
 	"strconv"
 	"strings"
 	"testing"
@@ -237,5 +238,110 @@ func TestOperations(t *testing.T) {
 	checks, err := read.Checks().Latest(ctx, net)
 	if err != nil || len(checks) != 1 || checks[0].Shortfall.String() != "-0.1" {
 		t.Fatalf("checks %v %v", checks, err)
+	}
+}
+
+func TestWithdrawalStorage(t *testing.T) {
+	store, ctx := newStore(t), context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	user := uuid.NewString()
+	payee := "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359"
+	entry := domain.WithdrawAddress{
+		ID: uuid.NewString(), UserID: user, Network: net, Address: payee, Label: "cold", CreatedAt: now,
+		UsableAt: now.Add(time.Hour),
+	}
+	read := store.Read()
+	if err := read.WithdrawAddresses().Insert(ctx, entry); err != nil {
+		t.Fatal(err)
+	}
+	dup := entry
+	dup.ID = uuid.NewString()
+	if err := read.WithdrawAddresses().Insert(ctx, dup); err == nil {
+		t.Fatal("an address is in a book once")
+	}
+	if got, err := read.WithdrawAddresses().Find(ctx, user, net, strings.ToLower(payee)); err != nil || got == nil || got.Label != "cold" {
+		t.Fatalf("find %+v %v", got, err)
+	}
+
+	w := domain.Withdrawal{
+		ID: uuid.Must(uuid.NewV7()).String(), UserID: user, Asset: "ETH", Network: net, Address: payee,
+		Amount: decimal.RequireFromString("0.0011"), Fee: decimal.RequireFromString("0.0002"), Status: domain.WithdrawalRequested,
+		RiskScore: 60, RiskReasons: []string{domain.RiskNewAccount, domain.RiskNewAddress}, ApprovalsRequired: 1,
+		ValueUSDT: decimal.RequireFromString("3.3"), Nonce: -1, Required: 12, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.Tx(ctx, func(r ports.Repos) error { return r.Withdrawals().Insert(ctx, w) }); err != nil {
+		t.Fatal(err)
+	}
+	w.FreezeJournal = uuid.NewString()
+	w.Scored(domain.RiskResult{Score: 60, Reasons: w.RiskReasons, Approvals: 1}, now)
+	if _, err := w.Approve("ops-1", now); err != nil {
+		t.Fatal(err)
+	}
+	w.Broadcasted(7, "0x"+strings.Repeat("c", 64), now)
+	if err := store.Tx(ctx, func(r ports.Repos) error {
+		if err := r.Attempts().Insert(ctx, domain.Attempt{
+			TxHash: w.TxHash, WithdrawalID: w.ID, Nonce: 7, MaxFee: big.NewInt(3e9),
+			MaxTip: big.NewInt(1e9), Raw: "0x02", CreatedAt: now,
+		}); err != nil {
+			return err
+		}
+		return r.Withdrawals().Update(ctx, w)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := read.Withdrawals().Get(ctx, w.ID)
+	if err != nil || got.Status != domain.WithdrawalBroadcast || got.Nonce != 7 || len(got.Approvals) != 1 || got.RiskReasons[1] != domain.RiskNewAddress ||
+		!got.Fee.Equal(w.Fee) || got.FreezeJournal != w.FreezeJournal {
+		t.Fatalf("round trip %+v %v", got, err)
+	}
+	if list, err := read.Withdrawals().Unsettled(ctx, net); err != nil || len(list) != 1 {
+		t.Fatalf("unsettled %v %v", list, err)
+	}
+	if list, err := read.Withdrawals().ByStatus(ctx, net, domain.WithdrawalBroadcast, domain.WithdrawalConfirming); err != nil || len(list) != 1 {
+		t.Fatalf("by status %v %v", list, err)
+	}
+	if atts, err := read.Attempts().Of(ctx, w.ID); err != nil || len(atts) != 1 || atts[0].MaxFee.Int64() != 3e9 {
+		t.Fatalf("attempts %v %v", atts, err)
+	}
+	if v, err := read.Withdrawals().ValueSince(ctx, user, now.Add(-time.Hour)); err != nil || v.String() != "3.3" {
+		t.Fatalf("value %s %v", v, err)
+	}
+
+	hot := "0x00000000000000000000000000000000000000Aa"
+	if n, err := read.Nonces().Peek(ctx, hot); err != nil || n != 0 {
+		t.Fatalf("no nonce yet %d %v", n, err)
+	}
+	if err := read.Nonces().Advance(ctx, hot, 8); err != nil {
+		t.Fatal(err)
+	}
+	if err := read.Nonces().Advance(ctx, hot, 5); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := read.Nonces().Peek(ctx, strings.ToLower(hot)); n != 8 {
+		t.Fatalf("nonces never go back: %d", n)
+	}
+
+	day := now.Truncate(24 * time.Hour)
+	if p, err := read.Prices().Put(ctx, day, "ETH", decimal.NewFromInt(3000), "test"); err != nil || p.String() != "3000" {
+		t.Fatalf("put %s %v", p, err)
+	}
+	if p, _ := read.Prices().Put(ctx, day, "ETH", decimal.NewFromInt(4000), "test"); p.String() != "3000" {
+		t.Fatalf("the day's first price holds: %s", p)
+	}
+	if p, err := read.Prices().Get(ctx, day, "ETH"); err != nil || p == nil || p.String() != "3000" {
+		t.Fatalf("get %v %v", p, err)
+	}
+
+	internal := domain.Deposit{
+		ID: uuid.NewString(), Kind: domain.KindInternal, UserID: uuid.NewString(), Asset: "ETH", Network: net,
+		Address: "0x0000000000000000000000000000000000000002", TxHash: "internal:" + w.ID, LogIndex: domain.NativeLog,
+		Amount: decimal.RequireFromString("0.02"), RawAmount: decimal.RequireFromString("20000000000000000"), Status: domain.StatusCredited,
+		JournalID: uuid.NewString(), DetectedAt: now, CreditedAt: now,
+	}
+	if err := read.Deposits().Insert(ctx, internal); err != nil {
+		t.Fatalf("an internal deposit has no block: %v", err)
+	}
+	if got, err := read.Deposits().Find(ctx, net, "internal:"+w.ID, domain.NativeLog); err != nil || got == nil || got.Kind != domain.KindInternal {
+		t.Fatalf("internal deposit %+v %v", got, err)
 	}
 }

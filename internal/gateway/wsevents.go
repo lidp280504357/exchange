@@ -20,7 +20,7 @@ import (
 // §7.3: every gateway instance reads every partition).
 var WSTopics = []string{
 	"ledger.events", "notification.events", "order.events", "trade.events", "market.depth", "market.candle.events",
-	"wallet.deposit.events",
+	"wallet.deposit.events", "wallet.withdrawal.events",
 }
 
 type balanceData struct {
@@ -86,6 +86,17 @@ type depositData struct {
 	RequiredConfirmations uint32  `json:"required_confirmations"`
 	Unclaimed             bool    `json:"unclaimed"`
 	Reason                *string `json:"reason"`
+}
+
+// withdrawalData is a withdrawal change on "withdrawals".
+type withdrawalData struct {
+	WithdrawalID          string  `json:"withdrawal_id"`
+	Asset                 string  `json:"asset"`
+	Amount                string  `json:"amount"`
+	Status                string  `json:"status"`
+	TxHash                *string `json:"tx_hash"`
+	Confirmations         uint32  `json:"confirmations"`
+	RequiredConfirmations uint32  `json:"required_confirmations"`
 }
 
 // tradeData is a public trade on "trades:{symbol}".
@@ -157,6 +168,13 @@ func WSEvents(h *Hub) func(context.Context, *eventv1.Envelope) error {
 			ticker    marketv1.TickerUpdated
 		)
 		p := env.GetPayload()
+		if wd, ok := withdrawalOf(p); ok {
+			h.Publish(wd.GetUserId(), "withdrawals", withdrawalData{
+				WithdrawalID: wd.GetWithdrawalId(), Asset: wd.GetAsset(), Amount: wd.GetAmount(), Status: wd.GetStatus(),
+				TxHash: optional(wd.GetTxHash()), Confirmations: wd.GetConfirmations(), RequiredConfirmations: wd.GetRequiredConfirmations(),
+			})
+			return nil
+		}
 		if d, ok := depositOf(p); ok {
 			h.Publish(d.GetUserId(), "deposits", depositData{
 				DepositID: d.GetDepositId(), Asset: optional(d.GetAsset()), Network: d.GetNetwork(), TxHash: d.GetTxHash(),
@@ -285,6 +303,30 @@ func depositOf(p interface {
 				return nil, false
 			}
 			return m.GetDeposit(), true
+		}
+	}
+	return nil, false
+}
+
+// withdrawalOf returns the withdrawal a wallet event carries.
+func withdrawalOf(p interface {
+	MessageIs(proto.Message) bool
+	UnmarshalTo(proto.Message) error
+},
+) (*walletv1.Withdrawal, bool) {
+	for _, m := range []interface {
+		proto.Message
+		GetWithdrawal() *walletv1.Withdrawal
+	}{
+		&walletv1.WithdrawalRequested{}, &walletv1.WithdrawalRiskScored{}, &walletv1.WithdrawalApproved{},
+		&walletv1.WithdrawalRejected{}, &walletv1.WithdrawalCanceled{}, &walletv1.WithdrawalBroadcast{},
+		&walletv1.WithdrawalConfirmed{}, &walletv1.WithdrawalFailed{},
+	} {
+		if p.MessageIs(m) {
+			if err := p.UnmarshalTo(m); err != nil {
+				return nil, false
+			}
+			return m.GetWithdrawal(), true
 		}
 	}
 	return nil, false

@@ -73,8 +73,9 @@ func TestAuthenticatorApps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session, err := a.acc.ConsumeStepUp(ctx, tok.UserID, su); err != nil || session != tok.SessionID {
-		t.Fatalf("consume: %q %v", session, err)
+	step, sec, err := a.acc.ConsumeStepUp(ctx, tok.UserID, su)
+	if err != nil || step.SessionID != tok.SessionID || step.Channel != domain.ChannelTOTP || !sec.TOTPEnabled || sec.Identities != 1 {
+		t.Fatalf("consume: %+v %+v %v", step, sec, err)
 	}
 	_, _, err = a.acc.SetupTOTP(ctx, tok.UserID, a.totpStepUp(t, tok, secret))
 	wantCode(t, err, "AUTH_TOTP_ENABLED")

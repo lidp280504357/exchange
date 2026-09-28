@@ -50,7 +50,10 @@ type Deposit struct {
 	// The transferred amount in the chain's smallest unit.
 	RawAmount string `protobuf:"bytes,15,opt,name=raw_amount,json=rawAmount,proto3" json:"raw_amount,omitempty"`
 	// DETECTED, CONFIRMING, CONFIRMED, CREDITED, ORPHANED or REJECTED.
-	Status        string `protobuf:"bytes,16,opt,name=status,proto3" json:"status,omitempty"`
+	Status string `protobuf:"bytes,16,opt,name=status,proto3" json:"status,omitempty"`
+	// CHAIN, or INTERNAL for another user's withdrawal to this address,
+	// completed in the ledger.
+	Kind          string `protobuf:"bytes,17,opt,name=kind,proto3" json:"kind,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -193,6 +196,13 @@ func (x *Deposit) GetRawAmount() string {
 func (x *Deposit) GetStatus() string {
 	if x != nil {
 		return x.Status
+	}
+	return ""
+}
+
+func (x *Deposit) GetKind() string {
+	if x != nil {
+		return x.Kind
 	}
 	return ""
 }
@@ -510,7 +520,7 @@ var File_exchange_wallet_v1_events_proto protoreflect.FileDescriptor
 
 const file_exchange_wallet_v1_events_proto_rawDesc = "" +
 	"\n" +
-	"\x1fexchange/wallet/v1/events.proto\x12\x12exchange.wallet.v1\"\xe2\x03\n" +
+	"\x1fexchange/wallet/v1/events.proto\x12\x12exchange.wallet.v1\"\xf6\x03\n" +
 	"\aDeposit\x12\x1d\n" +
 	"\n" +
 	"deposit_id\x18\x01 \x01(\tR\tdepositId\x12\x17\n" +
@@ -530,7 +540,8 @@ const file_exchange_wallet_v1_events_proto_rawDesc = "" +
 	"\bcontract\x18\x0e \x01(\tR\bcontract\x12\x1d\n" +
 	"\n" +
 	"raw_amount\x18\x0f \x01(\tR\trawAmount\x12\x16\n" +
-	"\x06status\x18\x10 \x01(\tR\x06status\"\x90\x01\n" +
+	"\x06status\x18\x10 \x01(\tR\x06status\x12\x12\n" +
+	"\x04kind\x18\x11 \x01(\tR\x04kind\"\x90\x01\n" +
 	"\x16DepositAddressAssigned\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x18\n" +
 	"\anetwork\x18\x02 \x01(\tR\anetwork\x12\x18\n" +

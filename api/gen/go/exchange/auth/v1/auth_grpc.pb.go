@@ -35,7 +35,8 @@ type AuthServiceClient interface {
 	// notification-service can reach the user.
 	GetContacts(ctx context.Context, in *GetContactsRequest, opts ...grpc.CallOption) (*GetContactsResponse, error)
 	// ConsumeStepUp redeems a step-up token for a sensitive action of the
-	// same user; each token works once.
+	// same user; each token works once. The answer carries the user's
+	// security context for the action's risk rules (§11.6).
 	ConsumeStepUp(ctx context.Context, in *ConsumeStepUpRequest, opts ...grpc.CallOption) (*ConsumeStepUpResponse, error)
 }
 
@@ -79,7 +80,8 @@ type AuthServiceServer interface {
 	// notification-service can reach the user.
 	GetContacts(context.Context, *GetContactsRequest) (*GetContactsResponse, error)
 	// ConsumeStepUp redeems a step-up token for a sensitive action of the
-	// same user; each token works once.
+	// same user; each token works once. The answer carries the user's
+	// security context for the action's risk rules (§11.6).
 	ConsumeStepUp(context.Context, *ConsumeStepUpRequest) (*ConsumeStepUpResponse, error)
 	mustEmbedUnimplementedAuthServiceServer()
 }

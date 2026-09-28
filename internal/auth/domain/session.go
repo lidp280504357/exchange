@@ -137,3 +137,15 @@ type RebindRequest struct {
 	Kind     string
 	NewValue string
 }
+
+// SecurityContext is what the risk rules of sensitive actions weigh
+// (§11.6): identities, authenticator, how new the device is and recent
+// identity or password changes.
+type SecurityContext struct {
+	Identities        int
+	TOTPEnabled       bool
+	DeviceID          string
+	DeviceFirstSeenAt time.Time
+	IdentityChangedAt time.Time
+	PasswordChangedAt time.Time
+}

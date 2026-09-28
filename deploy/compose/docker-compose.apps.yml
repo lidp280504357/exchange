@@ -180,7 +180,7 @@ services:
       INSTRUMENT_GRPC_ADDR: instrument-service:9184
       # Reference prices while market.reference_feed is on (Binance public
       # data: test environments only, §11.9).
-      REFERENCE_SYMBOLS: BTC-USDT
+      REFERENCE_SYMBOLS: BTC-USDT,ETH-USDT
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}
@@ -202,13 +202,21 @@ services:
       USER_GRPC_ADDR: user-service:9182
       LEDGER_GRPC_ADDR: ledger-service:9185
       SIGNER_GRPC_ADDR: signer:9193
+      AUTH_GRPC_ADDR: auth-service:9181
+      MARKET_DATA_SERVICE_URL: http://market-data-service:8090
       WALLET_NETWORK: ETH-SEPOLIA
+      # Test environment: new withdrawal addresses cool off for a minute
+      # (production: 24 hours); the price of the limits falls back to this
+      # without a fresh reference.
+      WALLET_WHITELIST_COOLDOWN: 1m
+      WALLET_FALLBACK_PRICES: ETH:3000
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}
       instrument-service: {condition: service_started}
       user-service: {condition: service_started}
       ledger-service: {condition: service_started}
+      auth-service: {condition: service_started}
       signer: {condition: service_started}
     healthcheck:
       <<: *health

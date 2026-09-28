@@ -49,6 +49,11 @@ type Processor struct {
 	// balance.
 	CheckEvery   time.Duration
 	BalanceEvery time.Duration
+	// MaxFee caps the fee per gas of withdrawals: above it they wait in
+	// APPROVED (§5.10). ReplaceAfter is how long an unmined withdrawal
+	// waits before a replacement with a higher fee.
+	MaxFee       *big.Int
+	ReplaceAfter time.Duration
 
 	hot         string
 	lastCheck   time.Time
@@ -60,6 +65,7 @@ type Processor struct {
 	hotGauge       *prometheus.GaugeVec
 	unbookedGauge  prometheus.Gauge
 	openSweeps     prometheus.Gauge
+	waiting        prometheus.Gauge
 }
 
 // NewProcessor registers the processor's metrics with reg.
@@ -78,7 +84,16 @@ func NewProcessor(p Processor, reg prometheus.Registerer) *Processor {
 	p.openSweeps = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "wallet_sweeps_open", Help: "Broadcast sweeps waiting for their receipt.", ConstLabels: labels,
 	})
-	reg.MustRegister(p.chainGauge, p.ledgerGauge, p.shortfallGauge, p.hotGauge, p.unbookedGauge, p.openSweeps)
+	p.waiting = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "wallet_withdrawals_waiting", Help: "Approved withdrawals waiting for the hot wallet or for fees within the cap.", ConstLabels: labels,
+	})
+	reg.MustRegister(p.chainGauge, p.ledgerGauge, p.shortfallGauge, p.hotGauge, p.unbookedGauge, p.openSweeps, p.waiting)
+	if p.MaxFee == nil {
+		p.MaxFee = new(big.Int).Mul(big.NewInt(100), big.NewInt(1_000_000_000)) // 100 gwei
+	}
+	if p.ReplaceAfter <= 0 {
+		p.ReplaceAfter = 10 * time.Minute
+	}
 	if p.CheckEvery <= 0 {
 		p.CheckEvery = time.Hour
 	}
@@ -101,7 +116,7 @@ func (p *Processor) Round(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	errs := []error{p.commands(ctx, native), p.trackSweeps(ctx, native), p.bookFees(ctx)}
+	errs := []error{p.commands(ctx, native), p.withdrawals(ctx, native), p.trackSweeps(ctx, native), p.bookFees(ctx)}
 	now := p.Now()
 	if now.Sub(p.lastCheck) >= p.CheckEvery {
 		if _, err := p.check(ctx, native); err != nil {

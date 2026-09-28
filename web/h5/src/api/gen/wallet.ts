@@ -43,6 +43,97 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/wallet/withdraw-addresses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's withdrawal address book */
+        get: operations["listWithdrawAddresses"];
+        put?: never;
+        /**
+         * Add an address to the book
+         * @description Needs a step-up. The address can be used from usable_at on. An
+         *     address already in the book is returned as it is. Fails with
+         *     WALLET_INVALID_ADDRESS, WALLET_NETWORK_UNKNOWN, WALLET_OWN_ADDRESS
+         *     (the caller's own deposit address) or AUTH_STEP_UP_REQUIRED.
+         */
+        post: operations["addWithdrawAddress"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/wallet/withdraw-addresses/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove an address from the book */
+        delete: operations["deleteWithdrawAddress"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/wallet/withdrawals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's withdrawals, newest first */
+        get: operations["listWithdrawals"];
+        put?: never;
+        /**
+         * Request a withdrawal
+         * @description Needs a step-up. Fails with WALLET_NETWORK_DISABLED,
+         *     WALLET_INVALID_ADDRESS, WALLET_ADDRESS_NOT_WHITELISTED,
+         *     WALLET_ADDRESS_COOLDOWN (details.usable_at), WALLET_BELOW_MINIMUM,
+         *     WALLET_AMOUNT_PRECISION, WALLET_LIMIT_EXCEEDED (details: the limits
+         *     and what was used), WALLET_OWN_ADDRESS, AUTH_STEP_UP_REQUIRED and the
+         *     USER_ eligibility codes (withdrawals need wallet.withdraw). When the
+         *     ledger refuses the freeze (LEDGER_INSUFFICIENT_BALANCE) the
+         *     withdrawal is stored as REJECTED and the error's details carry
+         *     withdrawal_id.
+         */
+        post: operations["requestWithdrawal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/wallet/withdrawals/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One of the caller's withdrawals */
+        get: operations["getWithdrawal"];
+        put?: never;
+        post?: never;
+        /**
+         * Cancel a withdrawal that is not signed yet
+         * @description Releases the frozen funds. Fails with WALLET_WITHDRAWAL_NOT_CANCELABLE once it is being sent.
+         */
+        delete: operations["cancelWithdrawal"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -64,6 +155,11 @@ export interface components {
         Deposit: {
             /** Format: uuid */
             id: string;
+            /**
+             * @description INTERNAL for another user's withdrawal to this address, completed in the ledger (tx_hash is then internal:<withdrawal id>).
+             * @enum {string}
+             */
+            kind: "CHAIN" | "INTERNAL";
             /** @description Null for a token the platform does not list. */
             asset: string | null;
             network: string;
@@ -97,6 +193,48 @@ export interface components {
             /** Format: date-time */
             credited_at: string | null;
         };
+        WithdrawAddress: {
+            /** Format: uuid */
+            id: string;
+            network: string;
+            /** @description EIP-55 checksummed. */
+            address: string;
+            label: string;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description The end of the cooling-off period.
+             */
+            usable_at: string;
+        };
+        Withdrawal: {
+            /** Format: uuid */
+            id: string;
+            asset: string;
+            network: string;
+            address: string;
+            amount: components["schemas"]["Decimal"];
+            fee: components["schemas"]["Decimal"];
+            /** @description The address is another user's deposit address; the withdrawal completes inside the ledger. */
+            internal: boolean;
+            /** @enum {string} */
+            status: "REQUESTED" | "PENDING_REVIEW" | "APPROVED" | "SIGNING" | "BROADCAST" | "CONFIRMING" | "CONFIRMED" | "INTERNAL_TRANSFER" | "REJECTED" | "CANCELED" | "FAILED";
+            risk_reasons: ("NEW_ACCOUNT" | "NEW_DEVICE" | "SECURITY_CHANGE" | "NEW_ADDRESS" | "LARGE_AMOUNT" | "DAILY_SHARE")[];
+            approvals_required: number;
+            reject_reason: string | null;
+            tx_hash: string | null;
+            confirmations: number;
+            required_confirmations: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            approved_at: string | null;
+            /** Format: date-time */
+            broadcast_at: string | null;
+            /** Format: date-time */
+            confirmed_at: string | null;
+        };
         Error: {
             /**
              * @description Stable machine-readable code (appendix C), used by clients for i18n.
@@ -125,7 +263,11 @@ export interface components {
             };
         };
     };
-    parameters: never;
+    parameters: {
+        /** @description A step-up token from POST /v1/auth/step-up; each works once. */
+        StepUp: string;
+        WithdrawalID: string;
+    };
     requestBodies: never;
     headers: {
         /** @description W3C trace ID of the request, shared by logs and events. */
@@ -182,6 +324,192 @@ export interface operations {
                         items: components["schemas"]["Deposit"][];
                         next_cursor: string | null;
                     };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listWithdrawAddresses: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The entries, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["WithdrawAddress"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    addWithdrawAddress: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description A step-up token from POST /v1/auth/step-up; each works once. */
+                "X-Step-Up-Token": components["parameters"]["StepUp"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example ETH-SEPOLIA */
+                    network: string;
+                    address: string;
+                    label?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The entry. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WithdrawAddress"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteWithdrawAddress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listWithdrawals: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["Withdrawal"][];
+                        next_cursor: string | null;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    requestWithdrawal: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description A step-up token from POST /v1/auth/step-up; each works once. */
+                "X-Step-Up-Token": components["parameters"]["StepUp"];
+                "Idempotency-Key"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example ETH */
+                    asset: string;
+                    /** @example ETH-SEPOLIA */
+                    network: string;
+                    address: string;
+                    amount: components["schemas"]["Decimal"];
+                };
+            };
+        };
+        responses: {
+            /** @description Frozen and scored; APPROVED or PENDING_REVIEW. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Withdrawal"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getWithdrawal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WithdrawalID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The withdrawal. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Withdrawal"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    cancelWithdrawal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["WithdrawalID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The withdrawal, CANCELED. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Withdrawal"];
                 };
             };
             default: components["responses"]["Error"];

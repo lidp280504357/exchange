@@ -323,7 +323,7 @@ func TestSessionsLogoutAndStepUp(t *testing.T) {
 
 	// A step-up token belongs to its user and works once.
 	su := a.stepUp(t, tok, "EMAIL")
-	_, err = a.acc.ConsumeStepUp(ctx, "someone-else", su)
+	_, _, err = a.acc.ConsumeStepUp(ctx, "someone-else", su)
 	wantCode(t, err, "AUTH_STEP_UP_REQUIRED")
 	if err := a.acc.RevokeSession(ctx, tok.UserID, tok.SessionID, other.Tokens.SessionID, su); err != nil {
 		t.Fatalf("revoke other: %v", err)

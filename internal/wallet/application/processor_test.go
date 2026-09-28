@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
 
+	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/wallet/domain"
 	"github.com/lidp280504357/exchange/internal/wallet/ports"
 )
@@ -188,6 +189,63 @@ func (s *fakeSigner) Sign(_ context.Context, r ports.SignRequest) (ports.Signed,
 type fakeLedger struct {
 	system map[string]decimal.Decimal
 	booked []string
+	// balances[user] is the available/frozen of the user's asset.
+	available map[string]decimal.Decimal
+	frozen    map[string]decimal.Decimal
+	journals  map[string]string // key -> journal
+	down      bool
+}
+
+func (l *fakeLedger) once(key string, fn func() error) (string, error) {
+	if l.down {
+		return "", errors.New("ledger unreachable")
+	}
+	if l.journals == nil {
+		l.journals = map[string]string{}
+	}
+	if j, ok := l.journals[key]; ok {
+		return j, nil
+	}
+	if err := fn(); err != nil {
+		return "", err
+	}
+	l.journals[key] = "j-" + key
+	return l.journals[key], nil
+}
+
+func (l *fakeLedger) Freeze(_ context.Context, key, user, _ string, amount decimal.Decimal, _ string) (string, error) {
+	return l.once(key, func() error {
+		if l.available[user].LessThan(amount) {
+			return apperr.New(apperr.KindUnprocessable, "LEDGER_INSUFFICIENT_BALANCE", "insufficient balance")
+		}
+		l.available[user] = l.available[user].Sub(amount)
+		l.frozen[user] = l.frozen[user].Add(amount)
+		return nil
+	})
+}
+
+func (l *fakeLedger) Unfreeze(_ context.Context, key, user, _ string, amount decimal.Decimal, _ string) (string, error) {
+	return l.once(key, func() error {
+		l.frozen[user] = l.frozen[user].Sub(amount)
+		l.available[user] = l.available[user].Add(amount)
+		return nil
+	})
+}
+
+func (l *fakeLedger) Settle(_ context.Context, key, user, _ string, amount, fee decimal.Decimal, _ string) (string, error) {
+	return l.once("settle:"+key, func() error {
+		l.frozen[user] = l.frozen[user].Sub(amount.Add(fee))
+		l.system[accountWithdrawalPending] = l.system[accountWithdrawalPending].Add(amount)
+		return nil
+	})
+}
+
+func (l *fakeLedger) TransferInternal(_ context.Context, key, from, to, _ string, amount decimal.Decimal, _ string) (string, error) {
+	return l.once("internal:"+key, func() error {
+		l.frozen[from] = l.frozen[from].Sub(amount)
+		l.available[to] = l.available[to].Add(amount)
+		return nil
+	})
 }
 
 func (l *fakeLedger) BookChainFee(_ context.Context, key, _ string, amount decimal.Decimal, _ string) (string, error) {

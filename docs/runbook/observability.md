@@ -30,6 +30,8 @@
 | `ledger_reconcile_runs_total` | — | 同上 | 完成的对账次数（启动 1 分钟后首次，之后每小时） |
 | `wallet_scan_block`、`wallet_scan_lag_blocks`、`wallet_scan_last_success_timestamp_seconds` | network | wallet-service | 充值扫描的最高块、落后链头的块数、最近一轮完成时间（[wallet.md](wallet.md)） |
 | `wallet_deposits_detected_total`、`wallet_deposits_orphaned_total`、`wallet_deposits_held` | network（detected 另有 status） | 同上 | 发现的充值、链重组丢弃的充值、因资产关闭充值而挂起的已确认充值 |
+| `wallet_chain_balance`、`wallet_chain_expected`、`wallet_chain_shortfall`、`wallet_hot_wallet_balance` | network, asset | 同上 | 链上对账（不变量 4）：持有、账本预期、缺口（> 0 即少钱）；热钱包余额 |
+| `wallet_chain_fees_unbooked`、`wallet_sweeps_open`、`wallet_withdrawals_waiting` | network | 同上 | 未记账的 gas（GAS_SUPPLY 不足）、等待回执的归集、因热钱包不足或费用超上限而等待的提现 |
 | `analytics_ingested_rows_total`、`analytics_rejected_rows_total` | topic | analytics-consumer | 写入 ClickHouse 的行 |
 | `analytics_reconcile_missing`、`analytics_reconcile_last_success_timestamp_seconds` | topic | 同上 | 最近 24 小时 outbox 已发而 ClickHouse 缺的事件数（负数表示有 outbox 不在 `RECONCILE_SCHEMAS` 里）、最近一次核对成功 |
 
@@ -58,6 +60,10 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | WalletScanLagging | warning | 充值扫描落后链头 50 块以上持续 10 分钟 | [wallet.md](wallet.md)：节点可用性、租约、数据库 |
 | WalletScanStalled | warning | 10 分钟没有完成一轮扫描 | 同上；wallet-service 日志里的 `deposit scan failed` |
 | WalletDepositsHeld | warning | 已确认充值因资产关闭充值挂起超过 1 小时 | 重新开放充值后自动入账，或按 wallet.md 人工处置 |
+| WalletChainShortfall | critical | 平台钱包链上持有少于账本预期持续 15 分钟 | [wallet.md](wallet.md) 链上对账；冻结相关提现，逐笔核对 |
+| WalletHotWalletLow / High | warning | 热钱包 < 0.005 ETH 持续 15 分钟 / > 1 ETH 持续 1 小时 | 归集或注资 / 人工转冷 |
+| WalletChainFeesUnbooked | warning | 链上 gas 1 小时未能记账 | `exchangectl wallet fund` 给 GAS_SUPPLY 注资 |
+| WalletWithdrawalsWaiting | warning | 已批准的提现等待超过 30 分钟 | 热钱包余额、链上费用是否超过上限 |
 | AnalyticsMissingEvents | warning | ClickHouse 缺事件持续 30 分钟 | analytics-consumer 与 ClickHouse 状态（恢复后自动补齐） |
 | AnalyticsReconciliationStale | warning | 2 小时未成功核对 | 同上 |
 | FeatureFlagsStale | warning | 开关 5 分钟未刷新 | PostgreSQL 连接；刷新失败时保持最后值 |

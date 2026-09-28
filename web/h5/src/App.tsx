@@ -10,6 +10,7 @@ import { DepositPage } from "./pages/deposit";
 import { MarketsPage } from "./pages/markets";
 import { TradePage } from "./pages/trade";
 import { TransferPage } from "./pages/transfer";
+import { WithdrawPage } from "./pages/withdraw";
 import { mayHaveSession, useSession } from "./store/session";
 
 function RequireSession({ children }: { children: React.ReactNode }) {
@@ -54,6 +55,7 @@ export function App() {
         <Route path="/trade/:symbol" element={<TradePage />} />
         <Route path="/transfer" element={<TransferPage />} />
         <Route path="/deposit" element={<DepositPage />} />
+        <Route path="/withdraw" element={<WithdrawPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/security" element={<SecurityPage />} />
         <Route path="/settings" element={<SettingsPage />} />

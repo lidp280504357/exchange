@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/lidp280504357/exchange/internal/auth/domain"
 	"github.com/lidp280504357/exchange/internal/auth/ports"
 )
 
@@ -61,4 +62,38 @@ func (r totps) Delete(ctx context.Context, userID string) error {
 		return fmt.Errorf("delete totp: %w", err)
 	}
 	return nil
+}
+
+func (r repos) Security() ports.SecurityRepo { return security(r) }
+
+type security repos
+
+// Context reads the user's identities, authenticator, credential and the
+// session's device in one query.
+func (r security) Context(ctx context.Context, userID, sessionID string) (domain.SecurityContext, error) {
+	var c domain.SecurityContext
+	var device *string
+	var firstSeen, identityChanged, passwordChanged *time.Time
+	err := r.q.QueryRow(ctx, `SELECT
+			(SELECT count(*) FROM identities WHERE user_id = $1),
+			coalesce((SELECT status = 'ACTIVE' FROM totp_credentials WHERE user_id = $1), false),
+			(SELECT max(verified_at) FROM identities WHERE user_id = $1),
+			(SELECT password_changed_at FROM credentials WHERE user_id = $1),
+			s.device_id, d.first_seen_at
+		FROM (SELECT 1) one
+		LEFT JOIN sessions s ON s.id = $2 AND s.user_id = $1
+		LEFT JOIN known_devices d ON d.user_id = s.user_id AND d.device_id = s.device_id`, userID, sessionID).
+		Scan(&c.Identities, &c.TOTPEnabled, &identityChanged, &passwordChanged, &device, &firstSeen)
+	if err != nil {
+		return domain.SecurityContext{}, fmt.Errorf("read security context: %w", err)
+	}
+	if device != nil {
+		c.DeviceID = *device
+	}
+	for dst, src := range map[*time.Time]*time.Time{&c.DeviceFirstSeenAt: firstSeen, &c.IdentityChangedAt: identityChanged, &c.PasswordChangedAt: passwordChanged} {
+		if src != nil {
+			*dst = *src
+		}
+	}
+	return c, nil
 }

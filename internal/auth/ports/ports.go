@@ -38,6 +38,7 @@ type Repos interface {
 	History() HistoryRepo
 	RebindRequests() RebindRepo
 	TOTP() TOTPRepo
+	Security() SecurityRepo
 	// Emit queues an auth.events event, keyed by aggregateID.
 	Emit(ctx context.Context, msg proto.Message, aggregateType, aggregateID string) error
 }
@@ -133,6 +134,12 @@ type TOTPRepo interface {
 	// Put inserts or replaces the user's binding.
 	Put(ctx context.Context, t SealedTOTP) error
 	Delete(ctx context.Context, userID string) error
+}
+
+// SecurityRepo reads a user's security context.
+type SecurityRepo interface {
+	// Context returns the context of a user and one of their sessions.
+	Context(ctx context.Context, userID, sessionID string) (domain.SecurityContext, error)
 }
 
 // DeviceRepo remembers the devices a user logged in from.

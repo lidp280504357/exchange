@@ -18,7 +18,7 @@ import (
 )
 
 // Topics are the topics the handler reads.
-var Topics = []string{event.TopicAuth, event.TopicUser, event.TopicWalletDeposit}
+var Topics = []string{event.TopicAuth, event.TopicUser, event.TopicWalletDeposit, event.TopicWalletWithdrawal}
 
 // Handler notifies users of security-relevant account events and of
 // deposits credited or held; other events are skipped.
@@ -80,6 +80,16 @@ func toEvent(msg proto.Message) (application.Event, bool) {
 		return depositEvent(d, domain.NoticeDepositCredited, false), true
 	case *walletv1.DepositRejected:
 		return depositEvent(m.GetDeposit(), domain.NoticeDepositUnclaimed, true), true
+	case *walletv1.WithdrawalRequested:
+		return withdrawalEvent(m.GetWithdrawal(), domain.NoticeWithdrawalRequested, true), true
+	case *walletv1.WithdrawalConfirmed:
+		return withdrawalEvent(m.GetWithdrawal(), domain.NoticeWithdrawalCompleted, true), true
+	case *walletv1.WithdrawalRejected:
+		return withdrawalEvent(m.GetWithdrawal(), domain.NoticeWithdrawalRejected, true), true
+	case *walletv1.WithdrawalCanceled:
+		return withdrawalEvent(m.GetWithdrawal(), domain.NoticeWithdrawalCanceled, false), true
+	case *walletv1.WithdrawalFailed:
+		return withdrawalEvent(m.GetWithdrawal(), domain.NoticeWithdrawalFailed, true), true
 	case *userv1.UserStatusChanged:
 		return application.Event{UserID: m.GetUserId(), Type: domain.NoticeStatusChanged, Mail: true, Data: map[string]string{
 			"from": m.GetFromStatus(), "to": m.GetToStatus(),
@@ -97,6 +107,15 @@ func depositEvent(d *walletv1.Deposit, notice string, mail bool) application.Eve
 	}
 	return application.Event{UserID: d.GetUserId(), Type: notice, Mail: mail, Data: map[string]string{
 		"asset": d.GetAsset(), "amount": amount, "network": d.GetNetwork(), "tx": shortHash(d.GetTxHash()), "reason": d.GetReason(),
+	}}
+}
+
+// withdrawalEvent describes a withdrawal; the address is shortened.
+func withdrawalEvent(w *walletv1.Withdrawal, notice string, mail bool) application.Event {
+	return application.Event{UserID: w.GetUserId(), Type: notice, Mail: mail, Data: map[string]string{
+		"id": w.GetWithdrawalId(), "asset": w.GetAsset(), "amount": w.GetAmount(), "fee": w.GetFee(), "network": w.GetNetwork(),
+		"address": shortHash(w.GetAddress()), "tx": shortHash(w.GetTxHash()), "reason": w.GetRejectReason(),
+		"internal": strconv.FormatBool(w.GetInternal()),
 	}}
 }
 

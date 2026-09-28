@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package exchange.auth.v1;
 
+import "google/protobuf/timestamp.proto";
+
 // AuthService answers other services' questions about identities and
 // sensitive-action proofs. Public REST endpoints are in
 // api/openapi/auth.yaml.
@@ -10,7 +12,8 @@ service AuthService {
   // notification-service can reach the user.
   rpc GetContacts(GetContactsRequest) returns (GetContactsResponse);
   // ConsumeStepUp redeems a step-up token for a sensitive action of the
-  // same user; each token works once.
+  // same user; each token works once. The answer carries the user's
+  // security context for the action's risk rules (§11.6).
   rpc ConsumeStepUp(ConsumeStepUpRequest) returns (ConsumeStepUpResponse);
 }
 
@@ -36,4 +39,22 @@ message ConsumeStepUpRequest {
 
 message ConsumeStepUpResponse {
   string session_id = 1;
+  // How the step-up was proven: EMAIL, SMS or TOTP.
+  string channel = 2;
+  SecurityContext security = 3;
+}
+
+// SecurityContext is what the risk rules of sensitive actions weigh.
+message SecurityContext {
+  // Verified identities (email, phone).
+  int32 identities = 1;
+  bool totp_enabled = 2;
+  // The device of the step-up's session and when the user first signed in
+  // from it.
+  string device_id = 3;
+  google.protobuf.Timestamp device_first_seen_at = 4;
+  // The latest identity binding or rebinding.
+  google.protobuf.Timestamp identity_changed_at = 5;
+  // The latest password change or reset.
+  google.protobuf.Timestamp password_changed_at = 6;
 }

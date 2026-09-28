@@ -34,6 +34,10 @@ func TestToEvent(t *testing.T) {
 		{&walletv1.DepositCredited{Deposit: &walletv1.Deposit{UserId: "u", Unclaimed: true}}, domain.NoticeDepositUnclaimed, true},
 		{&walletv1.DepositRejected{Deposit: &walletv1.Deposit{UserId: "u"}}, domain.NoticeDepositUnclaimed, true},
 		{&walletv1.DepositDetected{Deposit: &walletv1.Deposit{UserId: "u"}}, "", false},
+		{&walletv1.WithdrawalRequested{Withdrawal: &walletv1.Withdrawal{UserId: "u"}}, domain.NoticeWithdrawalRequested, true},
+		{&walletv1.WithdrawalConfirmed{Withdrawal: &walletv1.Withdrawal{UserId: "u"}}, domain.NoticeWithdrawalCompleted, true},
+		{&walletv1.WithdrawalCanceled{Withdrawal: &walletv1.Withdrawal{UserId: "u"}}, domain.NoticeWithdrawalCanceled, false},
+		{&walletv1.WithdrawalBroadcast{Withdrawal: &walletv1.Withdrawal{UserId: "u"}}, "", false},
 		{&authv1.OtpRequested{}, "", false},
 	} {
 		e, ok := toEvent(tc.msg)

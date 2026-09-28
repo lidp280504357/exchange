@@ -9,6 +9,7 @@ package authv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -216,8 +217,11 @@ func (x *ConsumeStepUpRequest) GetToken() string {
 }
 
 type ConsumeStepUpResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	// How the step-up was proven: EMAIL, SMS or TOTP.
+	Channel       string           `protobuf:"bytes,2,opt,name=channel,proto3" json:"channel,omitempty"`
+	Security      *SecurityContext `protobuf:"bytes,3,opt,name=security,proto3" json:"security,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -259,11 +263,115 @@ func (x *ConsumeStepUpResponse) GetSessionId() string {
 	return ""
 }
 
+func (x *ConsumeStepUpResponse) GetChannel() string {
+	if x != nil {
+		return x.Channel
+	}
+	return ""
+}
+
+func (x *ConsumeStepUpResponse) GetSecurity() *SecurityContext {
+	if x != nil {
+		return x.Security
+	}
+	return nil
+}
+
+// SecurityContext is what the risk rules of sensitive actions weigh.
+type SecurityContext struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Verified identities (email, phone).
+	Identities  int32 `protobuf:"varint,1,opt,name=identities,proto3" json:"identities,omitempty"`
+	TotpEnabled bool  `protobuf:"varint,2,opt,name=totp_enabled,json=totpEnabled,proto3" json:"totp_enabled,omitempty"`
+	// The device of the step-up's session and when the user first signed in
+	// from it.
+	DeviceId          string                 `protobuf:"bytes,3,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	DeviceFirstSeenAt *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=device_first_seen_at,json=deviceFirstSeenAt,proto3" json:"device_first_seen_at,omitempty"`
+	// The latest identity binding or rebinding.
+	IdentityChangedAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=identity_changed_at,json=identityChangedAt,proto3" json:"identity_changed_at,omitempty"`
+	// The latest password change or reset.
+	PasswordChangedAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=password_changed_at,json=passwordChangedAt,proto3" json:"password_changed_at,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *SecurityContext) Reset() {
+	*x = SecurityContext{}
+	mi := &file_exchange_auth_v1_auth_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SecurityContext) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SecurityContext) ProtoMessage() {}
+
+func (x *SecurityContext) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_auth_v1_auth_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SecurityContext.ProtoReflect.Descriptor instead.
+func (*SecurityContext) Descriptor() ([]byte, []int) {
+	return file_exchange_auth_v1_auth_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SecurityContext) GetIdentities() int32 {
+	if x != nil {
+		return x.Identities
+	}
+	return 0
+}
+
+func (x *SecurityContext) GetTotpEnabled() bool {
+	if x != nil {
+		return x.TotpEnabled
+	}
+	return false
+}
+
+func (x *SecurityContext) GetDeviceId() string {
+	if x != nil {
+		return x.DeviceId
+	}
+	return ""
+}
+
+func (x *SecurityContext) GetDeviceFirstSeenAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.DeviceFirstSeenAt
+	}
+	return nil
+}
+
+func (x *SecurityContext) GetIdentityChangedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.IdentityChangedAt
+	}
+	return nil
+}
+
+func (x *SecurityContext) GetPasswordChangedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.PasswordChangedAt
+	}
+	return nil
+}
+
 var File_exchange_auth_v1_auth_proto protoreflect.FileDescriptor
 
 const file_exchange_auth_v1_auth_proto_rawDesc = "" +
 	"\n" +
-	"\x1bexchange/auth/v1/auth.proto\x12\x10exchange.auth.v1\"-\n" +
+	"\x1bexchange/auth/v1/auth.proto\x12\x10exchange.auth.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"-\n" +
 	"\x12GetContactsRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\"9\n" +
 	"\aContact\x12\x18\n" +
@@ -273,10 +381,21 @@ const file_exchange_auth_v1_auth_proto_rawDesc = "" +
 	"\bcontacts\x18\x01 \x03(\v2\x19.exchange.auth.v1.ContactR\bcontacts\"E\n" +
 	"\x14ConsumeStepUpRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x14\n" +
-	"\x05token\x18\x02 \x01(\tR\x05token\"6\n" +
+	"\x05token\x18\x02 \x01(\tR\x05token\"\x8f\x01\n" +
 	"\x15ConsumeStepUpResponse\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId2\xcb\x01\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x18\n" +
+	"\achannel\x18\x02 \x01(\tR\achannel\x12=\n" +
+	"\bsecurity\x18\x03 \x01(\v2!.exchange.auth.v1.SecurityContextR\bsecurity\"\xd6\x02\n" +
+	"\x0fSecurityContext\x12\x1e\n" +
+	"\n" +
+	"identities\x18\x01 \x01(\x05R\n" +
+	"identities\x12!\n" +
+	"\ftotp_enabled\x18\x02 \x01(\bR\vtotpEnabled\x12\x1b\n" +
+	"\tdevice_id\x18\x03 \x01(\tR\bdeviceId\x12K\n" +
+	"\x14device_first_seen_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x11deviceFirstSeenAt\x12J\n" +
+	"\x13identity_changed_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\x11identityChangedAt\x12J\n" +
+	"\x13password_changed_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\x11passwordChangedAt2\xcb\x01\n" +
 	"\vAuthService\x12Z\n" +
 	"\vGetContacts\x12$.exchange.auth.v1.GetContactsRequest\x1a%.exchange.auth.v1.GetContactsResponse\x12`\n" +
 	"\rConsumeStepUp\x12&.exchange.auth.v1.ConsumeStepUpRequest\x1a'.exchange.auth.v1.ConsumeStepUpResponseB\xc9\x01\n" +
@@ -294,25 +413,31 @@ func file_exchange_auth_v1_auth_proto_rawDescGZIP() []byte {
 	return file_exchange_auth_v1_auth_proto_rawDescData
 }
 
-var file_exchange_auth_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_exchange_auth_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_exchange_auth_v1_auth_proto_goTypes = []any{
 	(*GetContactsRequest)(nil),    // 0: exchange.auth.v1.GetContactsRequest
 	(*Contact)(nil),               // 1: exchange.auth.v1.Contact
 	(*GetContactsResponse)(nil),   // 2: exchange.auth.v1.GetContactsResponse
 	(*ConsumeStepUpRequest)(nil),  // 3: exchange.auth.v1.ConsumeStepUpRequest
 	(*ConsumeStepUpResponse)(nil), // 4: exchange.auth.v1.ConsumeStepUpResponse
+	(*SecurityContext)(nil),       // 5: exchange.auth.v1.SecurityContext
+	(*timestamppb.Timestamp)(nil), // 6: google.protobuf.Timestamp
 }
 var file_exchange_auth_v1_auth_proto_depIdxs = []int32{
 	1, // 0: exchange.auth.v1.GetContactsResponse.contacts:type_name -> exchange.auth.v1.Contact
-	0, // 1: exchange.auth.v1.AuthService.GetContacts:input_type -> exchange.auth.v1.GetContactsRequest
-	3, // 2: exchange.auth.v1.AuthService.ConsumeStepUp:input_type -> exchange.auth.v1.ConsumeStepUpRequest
-	2, // 3: exchange.auth.v1.AuthService.GetContacts:output_type -> exchange.auth.v1.GetContactsResponse
-	4, // 4: exchange.auth.v1.AuthService.ConsumeStepUp:output_type -> exchange.auth.v1.ConsumeStepUpResponse
-	3, // [3:5] is the sub-list for method output_type
-	1, // [1:3] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	5, // 1: exchange.auth.v1.ConsumeStepUpResponse.security:type_name -> exchange.auth.v1.SecurityContext
+	6, // 2: exchange.auth.v1.SecurityContext.device_first_seen_at:type_name -> google.protobuf.Timestamp
+	6, // 3: exchange.auth.v1.SecurityContext.identity_changed_at:type_name -> google.protobuf.Timestamp
+	6, // 4: exchange.auth.v1.SecurityContext.password_changed_at:type_name -> google.protobuf.Timestamp
+	0, // 5: exchange.auth.v1.AuthService.GetContacts:input_type -> exchange.auth.v1.GetContactsRequest
+	3, // 6: exchange.auth.v1.AuthService.ConsumeStepUp:input_type -> exchange.auth.v1.ConsumeStepUpRequest
+	2, // 7: exchange.auth.v1.AuthService.GetContacts:output_type -> exchange.auth.v1.GetContactsResponse
+	4, // 8: exchange.auth.v1.AuthService.ConsumeStepUp:output_type -> exchange.auth.v1.ConsumeStepUpResponse
+	7, // [7:9] is the sub-list for method output_type
+	5, // [5:7] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_exchange_auth_v1_auth_proto_init() }
@@ -326,7 +451,7 @@ func file_exchange_auth_v1_auth_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_auth_v1_auth_proto_rawDesc), len(file_exchange_auth_v1_auth_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

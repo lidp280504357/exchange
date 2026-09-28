@@ -9,6 +9,7 @@ package userv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -34,8 +35,10 @@ type User struct {
 	// Shown in every mail we send so phishing mails stand out; empty until
 	// the user sets one.
 	AntiPhishingCode string `protobuf:"bytes,7,opt,name=anti_phishing_code,json=antiPhishingCode,proto3" json:"anti_phishing_code,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// When the account was created.
+	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *User) Reset() {
@@ -115,6 +118,13 @@ func (x *User) GetAntiPhishingCode() string {
 		return x.AntiPhishingCode
 	}
 	return ""
+}
+
+func (x *User) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
 }
 
 type CreateUserRequest struct {
@@ -462,7 +472,7 @@ var File_exchange_user_v1_user_proto protoreflect.FileDescriptor
 
 const file_exchange_user_v1_user_proto_rawDesc = "" +
 	"\n" +
-	"\x1bexchange/user/v1/user.proto\x12\x10exchange.user.v1\"\xc9\x01\n" +
+	"\x1bexchange/user/v1/user.proto\x12\x10exchange.user.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x84\x02\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x16\n" +
@@ -470,7 +480,9 @@ const file_exchange_user_v1_user_proto_rawDesc = "" +
 	"\blanguage\x18\x04 \x01(\tR\blanguage\x12\x1a\n" +
 	"\btimezone\x18\x05 \x01(\tR\btimezone\x12\x1b\n" +
 	"\tkyc_level\x18\x06 \x01(\x05R\bkycLevel\x12,\n" +
-	"\x12anti_phishing_code\x18\a \x01(\tR\x10antiPhishingCode\"\xd9\x01\n" +
+	"\x12anti_phishing_code\x18\a \x01(\tR\x10antiPhishingCode\x129\n" +
+	"\n" +
+	"created_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"\xd9\x01\n" +
 	"\x11CreateUserRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x16\n" +
 	"\x06region\x18\x02 \x01(\tR\x06region\x12\x1a\n" +
@@ -521,21 +533,23 @@ var file_exchange_user_v1_user_proto_goTypes = []any{
 	(*GetUserResponse)(nil),          // 4: exchange.user.v1.GetUserResponse
 	(*CheckEligibilityRequest)(nil),  // 5: exchange.user.v1.CheckEligibilityRequest
 	(*CheckEligibilityResponse)(nil), // 6: exchange.user.v1.CheckEligibilityResponse
+	(*timestamppb.Timestamp)(nil),    // 7: google.protobuf.Timestamp
 }
 var file_exchange_user_v1_user_proto_depIdxs = []int32{
-	0, // 0: exchange.user.v1.CreateUserResponse.user:type_name -> exchange.user.v1.User
-	0, // 1: exchange.user.v1.GetUserResponse.user:type_name -> exchange.user.v1.User
-	1, // 2: exchange.user.v1.UserService.CreateUser:input_type -> exchange.user.v1.CreateUserRequest
-	3, // 3: exchange.user.v1.UserService.GetUser:input_type -> exchange.user.v1.GetUserRequest
-	5, // 4: exchange.user.v1.UserService.CheckEligibility:input_type -> exchange.user.v1.CheckEligibilityRequest
-	2, // 5: exchange.user.v1.UserService.CreateUser:output_type -> exchange.user.v1.CreateUserResponse
-	4, // 6: exchange.user.v1.UserService.GetUser:output_type -> exchange.user.v1.GetUserResponse
-	6, // 7: exchange.user.v1.UserService.CheckEligibility:output_type -> exchange.user.v1.CheckEligibilityResponse
-	5, // [5:8] is the sub-list for method output_type
-	2, // [2:5] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	7, // 0: exchange.user.v1.User.created_at:type_name -> google.protobuf.Timestamp
+	0, // 1: exchange.user.v1.CreateUserResponse.user:type_name -> exchange.user.v1.User
+	0, // 2: exchange.user.v1.GetUserResponse.user:type_name -> exchange.user.v1.User
+	1, // 3: exchange.user.v1.UserService.CreateUser:input_type -> exchange.user.v1.CreateUserRequest
+	3, // 4: exchange.user.v1.UserService.GetUser:input_type -> exchange.user.v1.GetUserRequest
+	5, // 5: exchange.user.v1.UserService.CheckEligibility:input_type -> exchange.user.v1.CheckEligibilityRequest
+	2, // 6: exchange.user.v1.UserService.CreateUser:output_type -> exchange.user.v1.CreateUserResponse
+	4, // 7: exchange.user.v1.UserService.GetUser:output_type -> exchange.user.v1.GetUserResponse
+	6, // 8: exchange.user.v1.UserService.CheckEligibility:output_type -> exchange.user.v1.CheckEligibilityResponse
+	6, // [6:9] is the sub-list for method output_type
+	3, // [3:6] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_exchange_user_v1_user_proto_init() }

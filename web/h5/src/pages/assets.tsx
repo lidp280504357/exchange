@@ -27,6 +27,7 @@ export function AssetsPage() {
           <div className="flex items-center gap-2">
             <Badge tone="green">{t("assets.live")}</Badge>
             <Link to="/deposit"><Button variant="ghost">{t("nav.deposit")}</Button></Link>
+            <Link to="/withdraw"><Button variant="ghost">{t("nav.withdraw")}</Button></Link>
             <Link to="/transfer"><Button variant="ghost">{t("nav.transfer")}</Button></Link>
           </div>
         }

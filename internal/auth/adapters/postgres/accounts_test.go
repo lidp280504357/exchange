@@ -248,3 +248,33 @@ func TestTOTPBindings(t *testing.T) {
 		t.Fatal("deleted")
 	}
 }
+
+func TestSecurityContext(t *testing.T) {
+	store, db := setup(t)
+	ctx := context.Background()
+	user, session := uuid.New(), uuid.New()
+	for _, sql := range []string{
+		`INSERT INTO identities (id, user_id, kind, value, verified_at) VALUES (gen_random_uuid(), $1, 'EMAIL', 'sec@example.com', '2026-09-20T00:00:00Z')`,
+		`INSERT INTO identities (id, user_id, kind, value, verified_at) VALUES (gen_random_uuid(), $1, 'PHONE', '+6590000000', '2026-09-25T00:00:00Z')`,
+		`INSERT INTO credentials (user_id, password_hash, password_changed_at) VALUES ($1, 'x', '2026-09-26T00:00:00Z')`,
+		`INSERT INTO known_devices (user_id, device_id, first_seen_at) VALUES ($1, 'dev-1', '2026-09-27T00:00:00Z')`,
+	} {
+		if _, err := db.Exec(ctx, sql, user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO sessions (id, user_id, device_id, client_type) VALUES ($1, $2, 'dev-1', 'WEB')`, session, user); err != nil {
+		t.Fatal(err)
+	}
+	c, err := store.Read().Security().Context(ctx, user.String(), session.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Identities != 2 || c.TOTPEnabled || c.DeviceID != "dev-1" || c.DeviceFirstSeenAt.Day() != 27 ||
+		c.IdentityChangedAt.Day() != 25 || c.PasswordChangedAt.Day() != 26 {
+		t.Fatalf("context %+v", c)
+	}
+	if c, err := store.Read().Security().Context(ctx, user.String(), uuid.NewString()); err != nil || c.DeviceID != "" || c.Identities != 2 {
+		t.Fatalf("an unknown session has no device: %+v %v", c, err)
+	}
+}

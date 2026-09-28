@@ -28,8 +28,10 @@ type Service struct {
 	Eligibility ports.Eligibility
 	// Deriver is nil until WALLET_XPUB is configured.
 	Deriver ports.Deriver
-	Log     *slog.Logger
-	Now     func() time.Time
+	// W serves withdrawals.
+	W   Withdrawals
+	Log *slog.Logger
+	Now func() time.Time
 }
 
 // DepositAddress returns the user's deposit address for an asset on a
@@ -130,12 +132,19 @@ func (s *Service) OnCredited(ctx context.Context, depositID, journalID string) e
 	})
 }
 
+func depositKind(k string) string {
+	if k == "" {
+		return domain.KindChain
+	}
+	return k
+}
+
 // ToProto renders a deposit for events.
 func ToProto(d domain.Deposit) *walletv1.Deposit {
 	return &walletv1.Deposit{
 		DepositId: d.ID, UserId: d.UserID, Asset: d.Asset, Network: d.Network, Address: d.Address, TxHash: d.TxHash,
 		LogIndex: d.LogIndex, BlockNumber: d.BlockNumber, Amount: d.Amount.String(), Confirmations: d.Confirmations,
 		RequiredConfirmations: d.Required, Unclaimed: d.Unclaimed, Reason: d.Reason, Contract: d.Contract,
-		RawAmount: d.RawAmount.String(), Status: d.Status,
+		RawAmount: d.RawAmount.String(), Status: d.Status, Kind: depositKind(d.Kind),
 	}
 }

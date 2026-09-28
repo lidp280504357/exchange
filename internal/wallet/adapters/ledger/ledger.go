@@ -54,3 +54,49 @@ func (c *Client) SystemBalances(ctx context.Context, asset string) (map[string]d
 	}
 	return out, nil
 }
+
+// Freeze moves a withdrawal's amount and fee to frozen (WITHDRAW_FREEZE).
+func (c *Client) Freeze(ctx context.Context, key, userID, asset string, amount decimal.Decimal, reference string) (string, error) {
+	resp, err := c.c.Freeze(ctx, &ledgerv1.FreezeRequest{
+		IdempotencyKey: key, UserId: userID, AccountType: "SPOT", Asset: asset, Amount: amount.String(),
+		EntryType: "WITHDRAW_FREEZE", Reference: reference,
+	})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetPosting().GetJournalId(), nil
+}
+
+// Unfreeze releases a refused withdrawal's funds (WITHDRAW_UNFREEZE).
+func (c *Client) Unfreeze(ctx context.Context, key, userID, asset string, amount decimal.Decimal, reference string) (string, error) {
+	resp, err := c.c.Unfreeze(ctx, &ledgerv1.UnfreezeRequest{
+		IdempotencyKey: key, UserId: userID, AccountType: "SPOT", Asset: asset, Amount: amount.String(),
+		EntryType: "WITHDRAW_UNFREEZE", Reference: reference,
+	})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetPosting().GetJournalId(), nil
+}
+
+// Settle books a broadcast withdrawal (WITHDRAW_SETTLE).
+func (c *Client) Settle(ctx context.Context, key, userID, asset string, amount, fee decimal.Decimal, reference string) (string, error) {
+	resp, err := c.c.SettleWithdrawal(ctx, &ledgerv1.SettleWithdrawalRequest{
+		IdempotencyKey: key, UserId: userID, Asset: asset, Amount: amount.String(), Fee: fee.String(), Reference: reference,
+	})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetPosting().GetJournalId(), nil
+}
+
+// TransferInternal completes a withdrawal to another user (INTERNAL_TRANSFER).
+func (c *Client) TransferInternal(ctx context.Context, key, fromUser, toUser, asset string, amount decimal.Decimal, reference string) (string, error) {
+	resp, err := c.c.TransferInternal(ctx, &ledgerv1.TransferInternalRequest{
+		IdempotencyKey: key, FromUserId: fromUser, ToUserId: toUser, Asset: asset, Amount: amount.String(), Reference: reference,
+	})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetPosting().GetJournalId(), nil
+}

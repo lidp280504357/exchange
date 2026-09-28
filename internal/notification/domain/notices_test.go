@@ -9,11 +9,15 @@ import (
 func TestRenderNotice(t *testing.T) {
 	at := time.Date(2026, 9, 28, 4, 5, 6, 0, time.UTC)
 	sg, _ := time.LoadLocation("Asia/Singapore")
-	for _, typ := range []string{NoticeWelcome, NoticeNewDeviceLogin, NoticeIdentityChanged, NoticePasswordChanged, NoticeAccountLocked, NoticeStatusChanged, NoticeTOTPChanged, NoticeDepositCredited, NoticeDepositUnclaimed} {
+	for _, typ := range []string{
+		NoticeWelcome, NoticeNewDeviceLogin, NoticeIdentityChanged, NoticePasswordChanged, NoticeAccountLocked, NoticeStatusChanged, NoticeTOTPChanged, NoticeDepositCredited, NoticeDepositUnclaimed,
+		NoticeWithdrawalRequested, NoticeWithdrawalCompleted, NoticeWithdrawalRejected, NoticeWithdrawalCanceled, NoticeWithdrawalFailed,
+	} {
 		for _, lang := range []string{"zh-CN", "en"} {
 			title, body := RenderNotice(NoticeInput{Type: typ, Language: lang, At: at, Location: sg, Data: map[string]string{
 				"ip": "203.0.113.*", "channel": "EMAIL", "new": "a***@example.com", "to": "FROZEN",
 				"asset": "ETH", "amount": "0.002", "network": "ETH-SEPOLIA", "tx": "0xab…cd", "reason": "BELOW_MINIMUM",
+				"address": "0xfB69…d359", "fee": "0.0002", "id": "w1",
 			}})
 			if title == "" || body == "" || strings.Contains(body, "%!") {
 				t.Errorf("%s/%s: %q %q", typ, lang, title, body)

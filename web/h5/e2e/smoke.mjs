@@ -222,6 +222,14 @@ try {
   ok("the deposit page shows the user's ETH-SEPOLIA address and the deposit rules");
   await shot(page, "4b-deposit");
 
+  await clickText(page, "nav a", "Assets");
+  await clickText(page, "a button", "Withdraw");
+  await waitText(page, "Address book");
+  await waitText(page, "Withdrawal history");
+  await waitText(page, "Minimum 0.001, fee 0.0002 ETH");
+  ok("the withdraw page shows the rules, the address book and the history");
+  await shot(page, "4c-withdraw");
+
   await clickText(page, "nav a", "Markets");
   await waitText(page, "BTC/USDT");
   ok("markets list the seeded pairs");

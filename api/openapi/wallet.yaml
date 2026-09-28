@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
   title: Exchange wallet API
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    Deposits (requirements §5.10, §11.5). Each user gets one deposit
+    Deposits and withdrawals (requirements §5.10, §11.5, §11.6). Each user gets one deposit
     address per network, derived from the platform's deposit key; the
     scanner follows the chain, and a deposit is credited to the spot
     account once it has the network's confirmations. Deposits below the
@@ -11,14 +11,30 @@ info:
     user but held for manual handling (UNCLAIMED_DEPOSIT); transfers of
     tokens the platform does not list are recorded as REJECTED and not
     booked. Changes are pushed on the private WebSocket channel
-    "deposits". Every endpoint needs the access token. Amounts are
-    decimal strings (ADR-0008).
+    "deposits".
+
+    Withdrawals go to addresses of the caller's address book, usable after
+    a cooling-off period (24 hours; shorter in the test environment).
+    Adding an address and requesting a withdrawal each take a step-up
+    (X-Step-Up-Token from POST /v1/auth/step-up; with an authenticator app
+    bound, proven by it). A request is checked (eligibility, minimum,
+    daily and monthly limits in USDT), scored by the risk rules and its
+    amount plus fee frozen; it is then APPROVED, or PENDING_REVIEW when a
+    rule asks for a person (new account, new device, recent security
+    change, new address, large amount, a large share of the daily limit).
+    Approved withdrawals are signed and broadcast, settled in the ledger
+    at broadcast, and CONFIRMED after the network's confirmations; one to
+    another user's deposit address completes inside the ledger with no
+    fee. Until it is signed the caller can cancel it. Changes are pushed
+    on the private channel "withdrawals". Every endpoint needs the access
+    token. Amounts are decimal strings (ADR-0008).
 servers:
   - url: https://astras.vip
 security:
   - bearer: []
 tags:
   - name: deposits
+  - name: withdrawals
 paths:
   /v1/wallet/deposit-address:
     get:
@@ -88,7 +104,210 @@ paths:
                     type: [string, 'null']
         default:
           $ref: './common.yaml#/components/responses/Error'
+  /v1/wallet/withdraw-addresses:
+    get:
+      operationId: listWithdrawAddresses
+      summary: The caller's withdrawal address book
+      tags: [withdrawals]
+      responses:
+        '200':
+          description: The entries, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WithdrawAddress'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+    post:
+      operationId: addWithdrawAddress
+      summary: Add an address to the book
+      description: |
+        Needs a step-up. The address can be used from usable_at on. An
+        address already in the book is returned as it is. Fails with
+        WALLET_INVALID_ADDRESS, WALLET_NETWORK_UNKNOWN, WALLET_OWN_ADDRESS
+        (the caller's own deposit address) or AUTH_STEP_UP_REQUIRED.
+      tags: [withdrawals]
+      parameters:
+        - $ref: '#/components/parameters/StepUp'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [network, address]
+              additionalProperties: false
+              properties:
+                network:
+                  type: string
+                  examples: [ETH-SEPOLIA]
+                address:
+                  type: string
+                label:
+                  type: string
+                  maxLength: 50
+      responses:
+        '201':
+          description: The entry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WithdrawAddress'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/wallet/withdraw-addresses/{id}:
+    delete:
+      operationId: deleteWithdrawAddress
+      summary: Remove an address from the book
+      tags: [withdrawals]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Removed.
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/wallet/withdrawals:
+    post:
+      operationId: requestWithdrawal
+      summary: Request a withdrawal
+      description: |
+        Needs a step-up. Fails with WALLET_NETWORK_DISABLED,
+        WALLET_INVALID_ADDRESS, WALLET_ADDRESS_NOT_WHITELISTED,
+        WALLET_ADDRESS_COOLDOWN (details.usable_at), WALLET_BELOW_MINIMUM,
+        WALLET_AMOUNT_PRECISION, WALLET_LIMIT_EXCEEDED (details: the limits
+        and what was used), WALLET_OWN_ADDRESS, AUTH_STEP_UP_REQUIRED and the
+        USER_ eligibility codes (withdrawals need wallet.withdraw). When the
+        ledger refuses the freeze (LEDGER_INSUFFICIENT_BALANCE) the
+        withdrawal is stored as REJECTED and the error's details carry
+        withdrawal_id.
+      tags: [withdrawals]
+      parameters:
+        - $ref: '#/components/parameters/StepUp'
+        - name: Idempotency-Key
+          in: header
+          schema:
+            type: string
+            maxLength: 100
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [asset, network, address, amount]
+              additionalProperties: false
+              properties:
+                asset:
+                  type: string
+                  examples: [ETH]
+                network:
+                  type: string
+                  examples: [ETH-SEPOLIA]
+                address:
+                  type: string
+                amount:
+                  $ref: './market.yaml#/components/schemas/Decimal'
+      responses:
+        '201':
+          description: Frozen and scored; APPROVED or PENDING_REVIEW.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Withdrawal'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+    get:
+      operationId: listWithdrawals
+      summary: The caller's withdrawals, newest first
+      tags: [withdrawals]
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: One page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Withdrawal'
+                  next_cursor:
+                    type: [string, 'null']
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/wallet/withdrawals/{id}:
+    get:
+      operationId: getWithdrawal
+      summary: One of the caller's withdrawals
+      tags: [withdrawals]
+      parameters:
+        - $ref: '#/components/parameters/WithdrawalID'
+      responses:
+        '200':
+          description: The withdrawal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Withdrawal'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+    delete:
+      operationId: cancelWithdrawal
+      summary: Cancel a withdrawal that is not signed yet
+      description: Releases the frozen funds. Fails with WALLET_WITHDRAWAL_NOT_CANCELABLE once it is being sent.
+      tags: [withdrawals]
+      parameters:
+        - $ref: '#/components/parameters/WithdrawalID'
+      responses:
+        '200':
+          description: The withdrawal, CANCELED.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Withdrawal'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
 components:
+  parameters:
+    StepUp:
+      name: X-Step-Up-Token
+      in: header
+      required: true
+      description: A step-up token from POST /v1/auth/step-up; each works once.
+      schema:
+        type: string
+    WithdrawalID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   securitySchemes:
     bearer:
       type: http
@@ -117,12 +336,16 @@ components:
           description: Confirmations before the deposit is credited.
     Deposit:
       type: object
-      required: [id, asset, network, address, contract, tx_hash, log_index, block_number, amount, raw_amount, confirmations,
+      required: [id, kind, asset, network, address, contract, tx_hash, log_index, block_number, amount, raw_amount, confirmations,
         required_confirmations, status, unclaimed, reason, detected_at, confirmed_at, credited_at]
       properties:
         id:
           type: string
           format: uuid
+        kind:
+          type: string
+          enum: [CHAIN, INTERNAL]
+          description: INTERNAL for another user's withdrawal to this address, completed in the ledger (tx_hash is then internal:<withdrawal id>).
         asset:
           type: [string, 'null']
           description: Null for a token the platform does not list.
@@ -169,5 +392,78 @@ components:
           type: [string, 'null']
           format: date-time
         credited_at:
+          type: [string, 'null']
+          format: date-time
+    WithdrawAddress:
+      type: object
+      required: [id, network, address, label, created_at, usable_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        network:
+          type: string
+        address:
+          type: string
+          description: EIP-55 checksummed.
+        label:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        usable_at:
+          type: string
+          format: date-time
+          description: The end of the cooling-off period.
+    Withdrawal:
+      type: object
+      required: [id, asset, network, address, amount, fee, internal, status, risk_reasons, approvals_required, reject_reason, tx_hash,
+        confirmations, required_confirmations, created_at, approved_at, broadcast_at, confirmed_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        asset:
+          type: string
+        network:
+          type: string
+        address:
+          type: string
+        amount:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        fee:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        internal:
+          type: boolean
+          description: The address is another user's deposit address; the withdrawal completes inside the ledger.
+        status:
+          type: string
+          enum: [REQUESTED, PENDING_REVIEW, APPROVED, SIGNING, BROADCAST, CONFIRMING, CONFIRMED, INTERNAL_TRANSFER, REJECTED, CANCELED,
+            FAILED]
+        risk_reasons:
+          type: array
+          items:
+            type: string
+            enum: [NEW_ACCOUNT, NEW_DEVICE, SECURITY_CHANGE, NEW_ADDRESS, LARGE_AMOUNT, DAILY_SHARE]
+        approvals_required:
+          type: integer
+        reject_reason:
+          type: [string, 'null']
+        tx_hash:
+          type: [string, 'null']
+        confirmations:
+          type: integer
+        required_confirmations:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        approved_at:
+          type: [string, 'null']
+          format: date-time
+        broadcast_at:
+          type: [string, 'null']
+          format: date-time
+        confirmed_at:
           type: [string, 'null']
           format: date-time

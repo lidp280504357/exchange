@@ -110,7 +110,7 @@ type deposits repos
 
 const depositColumns = `id, user_id, asset, network, address, contract, tx_hash, log_index, block_number, block_hash, amount,
 	raw_amount, confirmations, required_confirmations, unclaimed, reason, status, journal_id, credit_requested_at, detected_at,
-	confirmed_at, credited_at`
+	confirmed_at, credited_at, kind`
 
 func scanDeposit(row pgx.Row) (domain.Deposit, error) {
 	var d domain.Deposit
@@ -120,7 +120,7 @@ func scanDeposit(row pgx.Row) (domain.Deposit, error) {
 	var requested, confirmed, credited *time.Time
 	err := row.Scan(&d.ID, &d.UserID, &asset, &d.Network, &d.Address, &contract, &d.TxHash, &d.LogIndex, &block, &d.BlockHash,
 		&d.Amount, &d.RawAmount, &conf, &required, &d.Unclaimed, &reason, &d.Status, &journal, &requested, &d.DetectedAt,
-		&confirmed, &credited)
+		&confirmed, &credited, &d.Kind)
 	if err != nil {
 		return domain.Deposit{}, err
 	}
@@ -128,6 +128,13 @@ func scanDeposit(row pgx.Row) (domain.Deposit, error) {
 	d.BlockNumber, d.Confirmations, d.Required = uint64(block), uint32(conf), uint32(required) //nolint:gosec // non-negative columns
 	d.CreditRequested, d.ConfirmedAt, d.CreditedAt = at(requested), at(confirmed), at(credited)
 	return d, nil
+}
+
+func kind(k string) string {
+	if k == "" {
+		return domain.KindChain
+	}
+	return k
 }
 
 func str(p *string) string {
@@ -160,10 +167,10 @@ func stamp(t time.Time) *time.Time {
 
 func (r deposits) Insert(ctx context.Context, d domain.Deposit) error {
 	_, err := r.q.Exec(ctx, `INSERT INTO deposits (`+depositColumns+`)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
 		d.ID, d.UserID, text(d.Asset), d.Network, d.Address, text(d.Contract), d.TxHash, d.LogIndex, int64(d.BlockNumber), //nolint:gosec // block heights fit
 		d.BlockHash, d.Amount, d.RawAmount, int64(d.Confirmations), int64(d.Required), d.Unclaimed, text(d.Reason), d.Status,
-		text(d.JournalID), stamp(d.CreditRequested), d.DetectedAt, stamp(d.ConfirmedAt), stamp(d.CreditedAt))
+		text(d.JournalID), stamp(d.CreditRequested), d.DetectedAt, stamp(d.ConfirmedAt), stamp(d.CreditedAt), kind(d.Kind))
 	if err != nil {
 		return fmt.Errorf("insert deposit: %w", err)
 	}

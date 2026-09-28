@@ -121,6 +121,21 @@ func (r memRepos) Devices() ports.DeviceRepo                 { return memDevices
 func (r memRepos) History() ports.HistoryRepo                { return memHistory(r) }
 func (r memRepos) RebindRequests() ports.RebindRepo          { return memRebinds(r) }
 func (r memRepos) TOTP() ports.TOTPRepo                      { return memTOTPs(r) }
+func (r memRepos) Security() ports.SecurityRepo              { return memSecurity(r) }
+
+type memSecurity memRepos
+
+func (r memSecurity) Context(_ context.Context, userID, sessionID string) (domain.SecurityContext, error) {
+	c := domain.SecurityContext{DeviceID: r.s.sessions[sessionID].DeviceID}
+	for _, id := range r.s.identities {
+		if id.UserID == userID {
+			c.Identities++
+		}
+	}
+	t, ok := r.s.totps[userID]
+	c.TOTPEnabled = ok && t.Status == domain.TOTPActive
+	return c, nil
+}
 
 type memTOTPs memRepos
 

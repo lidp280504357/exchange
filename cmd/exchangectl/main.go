@@ -18,6 +18,7 @@
 //	exchangectl ledger trades [--failed] [--limit N]
 //	exchangectl ledger retry-trades [--limit N]
 //	exchangectl wallet sweep [--min 0.001] | fund --tx HASH [--account GAS_SUPPLY] | reconcile | checks | commands
+//	exchangectl wallet withdrawals [--status PENDING_REVIEW|ALL] | approve|reject <id> --reviewer NAME --reason TEXT
 //	exchangectl dlq list auth.events
 //	exchangectl dlq replay auth.events --all [--group notification-service] | --offset 0:12
 //
@@ -73,6 +74,10 @@ commands:
                               book the platform's transfer into the hot wallet to a system account
   wallet reconcile            check the wallets against the ledger now (invariant 4); wallet checks shows the latest
   wallet commands [--limit N] queued wallet operations and their results
+  wallet withdrawals [--status S|ALL]
+                              withdrawals in a status (default PENDING_REVIEW)
+  wallet approve|reject <withdrawal_id> --reviewer NAME --reason TEXT
+                              decide on a withdrawal waiting for review (audited; approvals need distinct reviewers)
   dlq list <topic>            dead letters of a business topic (e.g. auth.events)
   dlq replay <topic> --all [--group G] | --offset P:O ...
                               republish dead letters as first attempts of the group that parked them
