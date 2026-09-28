@@ -62,8 +62,15 @@ func TestCreateOpenAndDerive(t *testing.T) {
 			t.Fatalf("index %d: public %s, private %s", i, got, want)
 		}
 	}
-	if _, addr, err := ks.Key(DepositAccount, 7); err != nil || addr != func() string { a, _ := d.Address(7); return a }() {
+	key, addr, err := ks.Key(DepositAccount, 7)
+	if want, _ := d.Address(7); err != nil || addr != want {
 		t.Fatalf("Key agrees with the public derivation: %s %v", addr, err)
+	}
+	if key.Curve != crypto.S256() {
+		t.Fatal("keys must be on go-ethereum's curve value, or the pure-Go signer refuses them")
+	}
+	if _, err := crypto.Sign(crypto.Keccak256([]byte("x")), key); err != nil {
+		t.Fatalf("sign: %v", err)
 	}
 	if hot, _ := ks.AccountXPub(HotAccount); hot == xpub {
 		t.Fatal("the hot wallet is another account")

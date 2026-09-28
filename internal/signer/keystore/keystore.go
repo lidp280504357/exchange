@@ -193,6 +193,11 @@ func (k *Keystore) Key(account, index uint32) (*ecdsa.PrivateKey, string, error)
 	if err != nil {
 		return nil, "", err
 	}
-	key := priv.ToECDSA()
+	// go-ethereum signs only keys on its own curve value; btcec's differs
+	// (the pure-Go build, CGO_ENABLED=0, checks it).
+	key, err := crypto.ToECDSA(priv.Serialize())
+	if err != nil {
+		return nil, "", err
+	}
 	return key, crypto.PubkeyToAddress(key.PublicKey).Hex(), nil
 }
