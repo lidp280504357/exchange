@@ -8,67 +8,11 @@
 #   scripts/e2e/auth.sh            # or BASE=http://localhost:8080 scripts/e2e/auth.sh
 set -euo pipefail
 
-BASE="${BASE:-https://astras.vip}"
-BYPASS="${CAPTCHA_BYPASS_TOKEN:-$(grep '^CAPTCHA_BYPASS_TOKEN=' .env | cut -d= -f2- | tr -d '"')}"
-RUN="$(date +%s)"
+# shellcheck source=lib/common.sh
+source "$(dirname "$0")/lib/common.sh"
 EMAIL="e2e-$RUN@example.com"
 DEVICE="e2e-device-$RUN"
 PASSWORD="e2e password $RUN"
-WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
-
-STATUS="" BODY=""
-
-# call METHOD PATH JSON [curl args...] sets STATUS and BODY.
-call() {
-  local method=$1 path=$2 data=$3
-  shift 3
-  local args=(-s -o "$WORK/body" -w '%{http_code}' -X "$method" "$BASE$path")
-  if [[ -n "$data" ]]; then
-    args+=(-H 'Content-Type: application/json' -d "$data")
-  fi
-  STATUS=$(curl "${args[@]}" "$@")
-  BODY=$(cat "$WORK/body")
-}
-
-# expect STATUS CODE WHAT: checks the last call; CODE is "-" for success.
-expect() {
-  local code
-  code=$(jq -r '.code // "-"' <<<"$BODY" 2>/dev/null || true)
-  code=${code:--}
-  if [[ "$STATUS" != "$1" || "$code" != "$2" ]]; then
-    printf 'FAIL %s: got %s %s, want %s %s\n%s\n' "$3" "$STATUS" "$code" "$1" "$2" "$BODY" >&2
-    exit 1
-  fi
-  printf 'ok   %s\n' "$3"
-}
-
-# otp SCENE [TOKEN] requests a code for EMAIL and returns a ticket.
-otp() {
-  local scene=$1 token=${2:-} before inbox code
-  local auth=()
-  [[ -n "$token" ]] && auth=(-H "Authorization: Bearer $token")
-  local target
-  target=$(jq -rn --arg e "$EMAIL" '$e|@uri')
-  before=$(curl -s "$BASE/v1/dev/messages?target=$target" | jq '.messages | length')
-  call POST /v1/auth/otp/request "{\"scene\":\"$scene\",\"channel\":\"EMAIL\",\"identifier\":\"$EMAIL\",\"captcha_token\":\"$BYPASS\",\"device_id\":\"$DEVICE\"}" ${auth[@]+"${auth[@]}"}
-  expect 200 - "otp/request $scene"
-  local challenge
-  challenge=$(jq -r .challenge_id <<<"$BODY")
-  for _ in $(seq 20); do
-    inbox=$(curl -s "$BASE/v1/dev/messages?target=$target")
-    if (( $(jq '.messages | length' <<<"$inbox") > before )); then
-      break
-    fi
-    sleep 0.5
-  done
-  code=$(jq -r '.messages[0].subject' <<<"$inbox" | grep -oE '[0-9]{6}')
-  call POST /v1/auth/otp/verify "{\"challenge_id\":\"$challenge\",\"code\":\"$code\",\"device_id\":\"$DEVICE\"}"
-  expect 200 - "otp/verify $scene"
-  TICKET=$(jq -r .otp_ticket <<<"$BODY")
-}
-
-APP=(-H 'X-Client-Type: APP')
 FIRST_CODE_AT=$(date +%s)
 
 echo "== register $EMAIL (APP client)"
@@ -76,7 +20,7 @@ call GET /v1/auth/terms ""
 expect 200 - "terms"
 TERMS=$(jq -r .terms_version <<<"$BODY")
 RISK=$(jq -r .risk_disclosure_version <<<"$BODY")
-otp REGISTER
+otp REGISTER "$EMAIL" "$DEVICE"
 call POST /v1/auth/register/complete "{\"otp_ticket\":\"$TICKET\",\"password\":\"123456789012\",\"country\":\"SG\",\"terms_version\":\"$TERMS\",\"risk_disclosure_version\":\"$RISK\",\"device_id\":\"$DEVICE\"}" "${APP[@]}"
 expect 400 AUTH_PASSWORD_WEAK "weak password rejected"
 call POST /v1/auth/register/complete "{\"otp_ticket\":\"$TICKET\",\"password\":\"$PASSWORD\",\"country\":\"SG\",\"terms_version\":\"$TERMS\",\"risk_disclosure_version\":\"$RISK\",\"device_id\":\"$DEVICE\"}" "${APP[@]}"
@@ -130,7 +74,7 @@ wait=$(( FIRST_CODE_AT + 62 - $(date +%s) ))
 (( wait > 0 )) && sleep "$wait"
 call DELETE "/v1/auth/sessions/$WEB_SESSION" "" -H "Authorization: Bearer $ACCESS"
 expect 403 AUTH_STEP_UP_REQUIRED "revoking another device needs a step-up"
-otp STEP_UP "$ACCESS"
+otp STEP_UP "$EMAIL" "$DEVICE" "$ACCESS"
 call POST /v1/auth/step-up "{\"otp_ticket\":\"$TICKET\",\"device_id\":\"$DEVICE\"}" -H "Authorization: Bearer $ACCESS"
 expect 200 - "step-up"
 STEP_UP=$(jq -r .step_up_token <<<"$BODY")

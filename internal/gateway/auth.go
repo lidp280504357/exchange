@@ -23,14 +23,18 @@ var (
 	errReadOnly     = apperr.New(apperr.KindForbidden, "USER_FROZEN", "the account is frozen and may only read")
 )
 
+// SessionState reports whether auth-service ended a session, and the Unix
+// millisecond up to which the user's tokens are stale (0: none).
+type SessionState func(ctx context.Context, sessionID, userID string) (revoked bool, staleUpToMS int64, err error)
+
 // Authenticator checks bearer access tokens (requirements §5.1, §5.2).
 type Authenticator struct {
 	Verifier *authtoken.Verifier
-	// Revoked reports whether auth-service ended the session. When it
-	// fails the token is accepted: it expires within 15 minutes anyway.
-	Revoked func(ctx context.Context, sessionID string) (bool, error)
-	Log     *slog.Logger
-	Now     func() time.Time
+	// State is checked on every request. When it fails the token is
+	// accepted: it expires within 15 minutes anyway.
+	State SessionState
+	Log   *slog.Logger
+	Now   func() time.Time
 }
 
 // Required rejects requests without a valid access token.
@@ -82,12 +86,17 @@ func (a *Authenticator) authenticate(ctx context.Context, token string) (Identit
 	case err != nil:
 		return Identity{}, errBadToken
 	}
-	revoked, err := a.Revoked(ctx, claims.SessionID)
+	revoked, staleUpTo, err := a.State(ctx, claims.SessionID, claims.Subject)
 	if err != nil {
-		a.Log.WarnContext(ctx, "revocation check failed; accepting the token", "error", err)
+		a.Log.WarnContext(ctx, "session state check failed; accepting the token", "error", err)
 	}
-	if revoked {
+	switch {
+	case revoked:
 		return Identity{}, errRevoked
+	case staleUpTo > 0 && claims.IssuedAtMillis() <= staleUpTo:
+		// The account status changed after the token was issued: a
+		// refresh brings the current scope.
+		return Identity{}, errTokenExpired
 	}
 	return Identity{UserID: claims.Subject, SessionID: claims.SessionID, Scope: claims.Scope}, nil
 }

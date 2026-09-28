@@ -27,12 +27,15 @@ type User struct {
 	// ACTIVE, RISK_REVIEW, FROZEN or CLOSED.
 	Status string `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
 	// ISO 3166-1 alpha-2.
-	Region        string `protobuf:"bytes,3,opt,name=region,proto3" json:"region,omitempty"`
-	Language      string `protobuf:"bytes,4,opt,name=language,proto3" json:"language,omitempty"`
-	Timezone      string `protobuf:"bytes,5,opt,name=timezone,proto3" json:"timezone,omitempty"`
-	KycLevel      int32  `protobuf:"varint,6,opt,name=kyc_level,json=kycLevel,proto3" json:"kyc_level,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Region   string `protobuf:"bytes,3,opt,name=region,proto3" json:"region,omitempty"`
+	Language string `protobuf:"bytes,4,opt,name=language,proto3" json:"language,omitempty"`
+	Timezone string `protobuf:"bytes,5,opt,name=timezone,proto3" json:"timezone,omitempty"`
+	KycLevel int32  `protobuf:"varint,6,opt,name=kyc_level,json=kycLevel,proto3" json:"kyc_level,omitempty"`
+	// Shown in every mail we send so phishing mails stand out; empty until
+	// the user sets one.
+	AntiPhishingCode string `protobuf:"bytes,7,opt,name=anti_phishing_code,json=antiPhishingCode,proto3" json:"anti_phishing_code,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *User) Reset() {
@@ -105,6 +108,13 @@ func (x *User) GetKycLevel() int32 {
 		return x.KycLevel
 	}
 	return 0
+}
+
+func (x *User) GetAntiPhishingCode() string {
+	if x != nil {
+		return x.AntiPhishingCode
+	}
+	return ""
 }
 
 type CreateUserRequest struct {
@@ -397,7 +407,8 @@ func (x *CheckEligibilityRequest) GetSymbol() string {
 type CheckEligibilityResponse struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Allowed bool                   `protobuf:"varint,1,opt,name=allowed,proto3" json:"allowed,omitempty"`
-	// Why not, e.g. USER_FROZEN, USER_REGION_NOT_ALLOWED, USER_NOT_ELIGIBLE.
+	// Why not: USER_RISK_REVIEW, USER_FROZEN, USER_CLOSED,
+	// USER_REGION_NOT_ALLOWED or USER_NOT_ELIGIBLE (feature switched off).
 	ReasonCode    string `protobuf:"bytes,2,opt,name=reason_code,json=reasonCode,proto3" json:"reason_code,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -451,14 +462,15 @@ var File_exchange_user_v1_user_proto protoreflect.FileDescriptor
 
 const file_exchange_user_v1_user_proto_rawDesc = "" +
 	"\n" +
-	"\x1bexchange/user/v1/user.proto\x12\x10exchange.user.v1\"\x9b\x01\n" +
+	"\x1bexchange/user/v1/user.proto\x12\x10exchange.user.v1\"\xc9\x01\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x16\n" +
 	"\x06region\x18\x03 \x01(\tR\x06region\x12\x1a\n" +
 	"\blanguage\x18\x04 \x01(\tR\blanguage\x12\x1a\n" +
 	"\btimezone\x18\x05 \x01(\tR\btimezone\x12\x1b\n" +
-	"\tkyc_level\x18\x06 \x01(\x05R\bkycLevel\"\xd9\x01\n" +
+	"\tkyc_level\x18\x06 \x01(\x05R\bkycLevel\x12,\n" +
+	"\x12anti_phishing_code\x18\a \x01(\tR\x10antiPhishingCode\"\xd9\x01\n" +
 	"\x11CreateUserRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x16\n" +
 	"\x06region\x18\x02 \x01(\tR\x06region\x12\x1a\n" +

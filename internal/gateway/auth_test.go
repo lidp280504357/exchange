@@ -18,6 +18,7 @@ import (
 type authFixture struct {
 	signer  *authtoken.Signer
 	revoked map[string]bool
+	stale   map[string]int64 // Unix milliseconds
 	now     time.Time
 	router  http.Handler
 	seen    *Identity
@@ -31,14 +32,14 @@ func newAuthFixture(t *testing.T) *authFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &authFixture{signer: signer, revoked: map[string]bool{}, now: time.Now()}
+	f := &authFixture{signer: signer, revoked: map[string]bool{}, stale: map[string]int64{}, now: time.Now()}
 	authn := &Authenticator{
 		Verifier: authtoken.NewVerifier(func(context.Context) (authtoken.JWKS, error) { return signer.JWKS(), nil }),
-		Revoked: func(_ context.Context, sid string) (bool, error) {
+		State: func(_ context.Context, sid, uid string) (bool, int64, error) {
 			if sid == "redis-down" {
-				return false, errors.New("redis down")
+				return false, 0, errors.New("redis down")
 			}
-			return f.revoked[sid], nil
+			return f.revoked[sid], f.stale[uid], nil
 		},
 		Log: slog.New(slog.DiscardHandler),
 		Now: func() time.Time { return f.now },
@@ -52,7 +53,7 @@ func newAuthFixture(t *testing.T) *authFixture {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	r := httpx.NewRouter(httpx.RouterOptions{Logger: slog.New(slog.DiscardHandler)})
-	Mount(r, authn, Upstreams{Auth: upstream})
+	Mount(r, authn, Upstreams{Auth: upstream, User: upstream, Notification: upstream})
 	r.With(authn.Required).Post("/v1/orders", upstream.ServeHTTP)
 	f.router = r
 	return f
@@ -136,9 +137,11 @@ func TestPublicAndOptionalRoutes(t *testing.T) {
 	if status, _ := f.call(http.MethodPost, "/v1/auth/otp/request", "Bearer "+f.token(t, "s-9", authtoken.ScopeFull)); status != 204 || f.seen == nil {
 		t.Fatalf("signed-in otp/request: %d", status)
 	}
-	// Unknown auth paths are not public.
-	if status, _ := f.call(http.MethodPost, "/v1/auth/something-new", ""); status != 401 {
-		t.Fatalf("unlisted path: %d", status)
+	// Unknown auth paths and the other services need a token.
+	for _, p := range []string{"/v1/auth/something-new", "/v1/user/profile", "/v1/notifications", "/v1/notifications/read"} {
+		if status, _ := f.call(http.MethodPost, p, ""); status != 401 {
+			t.Errorf("%s: %d", p, status)
+		}
 	}
 }
 
@@ -153,5 +156,19 @@ func TestReadOnlyScope(t *testing.T) {
 	}
 	if status, _ := f.call(http.MethodGet, "/v1/auth/sessions", read); status != 204 {
 		t.Fatalf("frozen read: %d", status)
+	}
+}
+
+func TestStaleTokensAreSentToRefresh(t *testing.T) {
+	f := newAuthFixture(t)
+	old := "Bearer " + f.token(t, "s-1", authtoken.ScopeFull)
+	f.stale["u-1"] = f.now.UnixMilli() // the account status changed now
+	if status, code := f.call(http.MethodGet, "/v1/auth/sessions", old); status != 401 || code != "AUTH_TOKEN_EXPIRED" {
+		t.Fatalf("stale token: %d %s", status, code)
+	}
+	f.now = f.now.Add(time.Millisecond)
+	fresh := "Bearer " + f.token(t, "s-1", authtoken.ScopeRead)
+	if status, _ := f.call(http.MethodGet, "/v1/auth/sessions", fresh); status != 204 {
+		t.Fatalf("refreshed token: %d", status)
 	}
 }

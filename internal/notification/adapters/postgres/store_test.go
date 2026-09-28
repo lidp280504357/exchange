@@ -93,3 +93,47 @@ func TestMockInbox(t *testing.T) {
 		t.Fatalf("purge: %d %v", n, err)
 	}
 }
+
+func TestNotices(t *testing.T) {
+	db := setup(t)
+	store := postgres.NewStore(db, event.NewFactory("notification-service", "test"))
+	ctx := context.Background()
+	user := uuid.NewString()
+	var ids, events []string
+	for i, typ := range []string{domain.NoticeWelcome, domain.NoticeNewDeviceLogin, domain.NoticePasswordChanged} {
+		n := domain.Notice{
+			ID: uuid.Must(uuid.NewV7()).String(), UserID: user, Type: typ, Title: "t", Body: "b",
+			Data: map[string]string{"i": string(rune('0' + i))}, CreatedAt: time.Now(),
+		}
+		ids, events = append(ids, n.ID), append(events, uuid.NewString())
+		if created, err := store.CreateNotice(ctx, "notification-service", events[i], n); err != nil || !created {
+			t.Fatalf("create: %v %v", created, err)
+		}
+	}
+	dup := domain.Notice{ID: uuid.Must(uuid.NewV7()).String(), UserID: user, Type: domain.NoticeWelcome, CreatedAt: time.Now()}
+	if created, err := store.CreateNotice(ctx, "notification-service", events[0], dup); err != nil || created {
+		t.Fatalf("redelivery: %v %v", created, err)
+	}
+
+	page, err := store.ListNotices(ctx, user, "", 2)
+	if err != nil || len(page) != 2 || page[0].ID != ids[2] || page[1].Data["i"] != "1" {
+		t.Fatalf("page 1: %+v %v", page, err)
+	}
+	rest, err := store.ListNotices(ctx, user, page[1].ID, 10)
+	if err != nil || len(rest) != 1 || rest[0].ID != ids[0] {
+		t.Fatalf("page 2: %+v %v", rest, err)
+	}
+	if n, err := store.MarkRead(ctx, user, []string{ids[0]}); err != nil || n != 1 {
+		t.Fatalf("mark one: %d %v", n, err)
+	}
+	if n, _ := store.UnreadCount(ctx, user); n != 2 {
+		t.Fatalf("unread: %d", n)
+	}
+	if n, err := store.MarkRead(ctx, user, nil); err != nil || n != 2 {
+		t.Fatalf("mark all: %d %v", n, err)
+	}
+	var queued int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE event_type = 'notification.NotificationCreated'`).Scan(&queued); err != nil || queued != 3 {
+		t.Fatalf("NotificationCreated queued: %d %v", queued, err)
+	}
+}

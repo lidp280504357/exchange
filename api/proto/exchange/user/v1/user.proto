@@ -23,6 +23,9 @@ message User {
   string language = 4;
   string timezone = 5;
   int32 kyc_level = 6;
+  // Shown in every mail we send so phishing mails stand out; empty until
+  // the user sets one.
+  string anti_phishing_code = 7;
 }
 
 message CreateUserRequest {
@@ -58,6 +61,7 @@ message CheckEligibilityRequest {
 
 message CheckEligibilityResponse {
   bool allowed = 1;
-  // Why not, e.g. USER_FROZEN, USER_REGION_NOT_ALLOWED, USER_NOT_ELIGIBLE.
+  // Why not: USER_RISK_REVIEW, USER_FROZEN, USER_CLOSED,
+  // USER_REGION_NOT_ALLOWED or USER_NOT_ELIGIBLE (feature switched off).
   string reason_code = 2;
 }

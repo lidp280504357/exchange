@@ -3,6 +3,7 @@ package redisstore
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -50,5 +51,27 @@ func TestGuard(t *testing.T) {
 	}
 	if n, _, _ := g.Failures(ctx, "k"); n != 0 {
 		t.Fatalf("after clear: %d", n)
+	}
+}
+
+func TestMarkStaleKeepsTheLatest(t *testing.T) {
+	rdb, _ := testenv.Redis(t)
+	ctx := context.Background()
+	user := uuid.NewString()
+	t.Cleanup(func() { rdb.Del(context.Background(), authtoken.StaleKey(user)) })
+	r := NewRevocations(rdb)
+	later := time.Now()
+	if err := r.MarkStale(ctx, user, later); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.MarkStale(ctx, user, later.Add(-time.Minute)); err != nil { // a redelivered older change
+		t.Fatal(err)
+	}
+	got, err := rdb.Get(ctx, authtoken.StaleKey(user)).Int64()
+	if err != nil || got != later.UnixMilli() {
+		t.Fatalf("mark: %d %v, want %d", got, err, later.UnixMilli())
+	}
+	if ttl, _ := rdb.TTL(ctx, authtoken.StaleKey(user)).Result(); ttl <= 0 || ttl > authtoken.AccessTTL {
+		t.Fatalf("ttl: %v", ttl)
 	}
 }

@@ -46,10 +46,12 @@ services:
     environment:
       <<: *base-env
       AUTH_SERVICE_URL: http://auth-service:8081
+      USER_SERVICE_URL: http://user-service:8082
       NOTIFICATION_SERVICE_URL: http://notification-service:8083
     depends_on:
       redis: {condition: service_healthy}
       auth-service: {condition: service_started}
+      user-service: {condition: service_started}
       notification-service: {condition: service_started}
     healthcheck:
       <<: *health
@@ -78,8 +80,13 @@ services:
   user-service:
     <<: *app
     command: ["/app/user-service"]
+    environment:
+      <<: *base-env
+      # auth-service 与 user-service 互相调用，gRPC 连接按需建立，不写 depends_on 以免成环
+      AUTH_GRPC_ADDR: auth-service:9181
     depends_on:
       postgres: {condition: service_healthy}
+      redpanda: {condition: service_healthy}
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9082/readyz"]
@@ -87,6 +94,10 @@ services:
   notification-service:
     <<: *app
     command: ["/app/notification-service"]
+    environment:
+      <<: *base-env
+      USER_GRPC_ADDR: user-service:9182
+      AUTH_GRPC_ADDR: auth-service:9181
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}

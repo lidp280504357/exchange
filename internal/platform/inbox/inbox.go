@@ -19,9 +19,15 @@ import (
 // false. An error from fn rolls everything back, so the event can be
 // retried.
 func Process(ctx context.Context, db *pg.DB, consumer string, env *eventv1.Envelope, fn func(ctx context.Context, tx pgx.Tx) error) (processed bool, err error) {
+	return ProcessID(ctx, db, consumer, env.GetEventId(), fn)
+}
+
+// ProcessID is Process for callers that only carry the event ID, such as
+// an application layer that does not see envelopes.
+func ProcessID(ctx context.Context, db *pg.DB, consumer, eventID string, fn func(ctx context.Context, tx pgx.Tx) error) (processed bool, err error) {
 	err = db.InTx(ctx, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `INSERT INTO inbox (consumer, event_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-			consumer, env.GetEventId())
+			consumer, eventID)
 		if err != nil {
 			return fmt.Errorf("inbox: record: %w", err)
 		}

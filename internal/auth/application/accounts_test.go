@@ -480,3 +480,33 @@ func TestBindAndRebind(t *testing.T) {
 	err = a.acc.BindIdentity(ctx, tok.UserID, ticket, su, web(device))
 	wantCode(t, err, "AUTH_STEP_UP_REQUIRED")
 }
+
+func TestUserStatusChanges(t *testing.T) {
+	a := newAccountFixture(t)
+	tok := a.register(t, "judy@example.com")
+	at := a.now.Add(-time.Second)
+
+	if err := a.acc.OnUserStatusChanged(ctx, "ev-1", tok.UserID, domain.StatusFrozen, at); err != nil {
+		t.Fatal(err)
+	}
+	if !a.revs.stale[tok.UserID].Equal(at.Add(StaleMargin)) || a.revs.has(tok.SessionID) {
+		t.Fatalf("freezing marks tokens stale without ending sessions: %v", a.revs.stale)
+	}
+	if err := a.acc.OnUserStatusChanged(ctx, "ev-2", tok.UserID, domain.StatusClosed, at); err != nil {
+		t.Fatal(err)
+	}
+	if !a.revs.has(tok.SessionID) {
+		t.Fatal("closing ends every session")
+	}
+	ev := eventsOf[*authv1.SessionRevoked](a.store)
+	if len(ev) != 1 || ev[0].GetReason() != domain.RevokeClosed {
+		t.Fatalf("SessionRevoked: %v", ev)
+	}
+	// A redelivery changes nothing.
+	if err := a.acc.OnUserStatusChanged(ctx, "ev-2", tok.UserID, domain.StatusClosed, at); err != nil {
+		t.Fatal(err)
+	}
+	if len(eventsOf[*authv1.SessionRevoked](a.store)) != 1 {
+		t.Fatal("redelivery revoked again")
+	}
+}

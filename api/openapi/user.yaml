@@ -1,0 +1,145 @@
+openapi: 3.1.0
+info:
+  title: Exchange user API
+  version: 0.1.0
+  description: |
+    Profile, account status and eligibility (requirements §5.4). Every
+    endpoint needs the access token. Error codes are listed in appendix C.
+servers:
+  - url: https://astras.vip
+security:
+  - bearer: []
+tags:
+  - name: user
+paths:
+  /v1/user/profile:
+    get:
+      operationId: getProfile
+      summary: The caller's profile and account status
+      tags: [user]
+      responses:
+        '200':
+          description: Profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+    patch:
+      operationId: updateProfile
+      summary: Change language, time zone or anti-phishing code
+      description: |
+        Omitted fields stay. Changing the anti-phishing code (an empty
+        string clears it) needs a step-up token; FROZEN accounts may not
+        change anything (USER_FROZEN).
+      tags: [user]
+      parameters:
+        - name: X-Step-Up-Token
+          in: header
+          description: Required when anti_phishing_code is present.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                language:
+                  type: string
+                  examples: [en, zh-CN]
+                timezone:
+                  type: string
+                  examples: [Asia/Singapore]
+                anti_phishing_code:
+                  type: string
+                  pattern: '^([A-Za-z0-9]{4,20})?$'
+      responses:
+        '200':
+          description: Updated profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/user/eligibility:
+    get:
+      operationId: getEligibility
+      summary: Whether the caller may use a feature now
+      description: |
+        Decided by the account status (§5.4 matrix), then the feature's
+        switch with its region rules. Refusals carry USER_RISK_REVIEW,
+        USER_FROZEN, USER_CLOSED, USER_REGION_NOT_ALLOWED or
+        USER_NOT_ELIGIBLE (feature switched off).
+      tags: [user]
+      parameters:
+        - name: feature
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [SPOT_TRADE, DERIVATIVES_TRADE, DEPOSIT, WITHDRAW, TRANSFER]
+        - name: asset
+          in: query
+          schema:
+            type: string
+        - name: symbol
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Decision.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [feature, allowed]
+                properties:
+                  feature:
+                    type: string
+                  allowed:
+                    type: boolean
+                  reason_code:
+                    type: string
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Profile:
+      type: object
+      required: [user_id, status, region, language, timezone, anti_phishing_code, kyc_level, version, created_at]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [ACTIVE, RISK_REVIEW, FROZEN, CLOSED]
+        region:
+          type: string
+          description: ISO 3166-1 alpha-2.
+        language:
+          type: string
+        timezone:
+          type: string
+        anti_phishing_code:
+          type: string
+          description: Empty until set; shown in every mail.
+        kyc_level:
+          type: integer
+        version:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time

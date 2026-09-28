@@ -16,7 +16,6 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
 	"github.com/lidp280504357/exchange/internal/platform/event"
 	"github.com/lidp280504357/exchange/internal/platform/kafka"
 )
@@ -125,9 +124,10 @@ func (in *Ingestor) storeAuditLogs(ctx context.Context, batch []kafka.Delivery) 
 	for _, d := range audit {
 		env := d.Envelope
 		target := ""
-		var changed auditv1.ConfigChanged
-		if env.GetPayload().MessageIs(&changed) && env.GetPayload().UnmarshalTo(&changed) == nil {
-			target = changed.GetTarget()
+		if m, err := env.GetPayload().UnmarshalNew(); err == nil {
+			if t, ok := m.(interface{ GetTarget() string }); ok {
+				target = t.GetTarget()
+			}
 		}
 		if err := b.Append(uuid.MustParse(env.GetEventId()), env.GetEventType(), env.GetAggregateId(), target,
 			env.GetOccurredAt().AsTime(), PayloadJSON(env.GetPayload())); err != nil {

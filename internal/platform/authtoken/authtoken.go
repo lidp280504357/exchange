@@ -41,11 +41,31 @@ const (
 // keeps working until it expires.
 func RevokedKey(sessionID string) string { return "auth:revoked:" + sessionID }
 
+// StaleKey is the Redis key holding, in Unix milliseconds, the moment up
+// to which a user's tokens carry an outdated scope (after an account
+// status change); the gateway sends such tokens back for a refresh. It
+// lives for AccessTTL, after which every older token has expired anyway.
+func StaleKey(userID string) string { return "auth:stale:" + userID }
+
 // Claims of an access token.
 type Claims struct {
 	jwt.RegisteredClaims
 	SessionID string `json:"sid"`
 	Scope     string `json:"scope"`
+	// IssuedAtMS is iat in milliseconds, so a status change and a refresh
+	// within the same second can be told apart.
+	IssuedAtMS int64 `json:"iat_ms"`
+}
+
+// IssuedAtMillis returns when the token was issued, in Unix milliseconds.
+func (c Claims) IssuedAtMillis() int64 {
+	if c.IssuedAtMS > 0 {
+		return c.IssuedAtMS
+	}
+	if c.IssuedAt != nil {
+		return c.IssuedAt.UnixMilli()
+	}
+	return 0
 }
 
 // Verification errors.
@@ -86,8 +106,9 @@ func (s *Signer) Issue(userID, sessionID, scope string, now time.Time) (string, 
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(exp),
 		},
-		SessionID: sessionID,
-		Scope:     scope,
+		SessionID:  sessionID,
+		Scope:      scope,
+		IssuedAtMS: now.UnixMilli(),
 	})
 	t.Header["kid"] = s.kid
 	signed, err := t.SignedString(s.key)

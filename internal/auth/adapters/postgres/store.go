@@ -12,6 +12,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/auth/domain"
 	"github.com/lidp280504357/exchange/internal/auth/ports"
 	"github.com/lidp280504357/exchange/internal/platform/event"
+	"github.com/lidp280504357/exchange/internal/platform/inbox"
 	"github.com/lidp280504357/exchange/internal/platform/outbox"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
 )
@@ -32,6 +33,13 @@ func (s *Store) Tx(ctx context.Context, fn func(ports.Repos) error) error {
 
 // Read returns repositories on the pool.
 func (s *Store) Read() ports.Repos { return repos{q: s.db, events: s.events} }
+
+// Once runs fn in a transaction that also records the event in the inbox.
+func (s *Store) Once(ctx context.Context, consumer, eventID string, fn func(ports.Repos) error) (bool, error) {
+	return inbox.ProcessID(ctx, s.db, consumer, eventID, func(_ context.Context, tx pgx.Tx) error {
+		return fn(repos{q: tx, events: s.events})
+	})
+}
 
 // Purge deletes short-lived records that expired before cutoff: OTP
 // challenges and tickets, login challenges, step-up tokens and refresh

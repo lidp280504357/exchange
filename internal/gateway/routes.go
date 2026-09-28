@@ -8,7 +8,9 @@ import (
 
 // Upstreams are the proxies to the services behind the gateway.
 type Upstreams struct {
-	Auth http.Handler
+	Auth         http.Handler
+	User         http.Handler
+	Notification http.Handler
 	// DevInbox is notification-service's mock-provider inbox; nil in
 	// production, where it is never routed.
 	DevInbox http.Handler
@@ -40,6 +42,9 @@ func Mount(r chi.Router, authn *Authenticator, up Upstreams) {
 		r.With(authn.Optional).Handle("/otp/request", up.Auth)
 		r.With(authn.Required).Handle("/*", up.Auth)
 	})
+	r.With(authn.Required).Handle("/v1/user/*", up.User)
+	r.With(authn.Required).Handle("/v1/notifications", up.Notification)
+	r.With(authn.Required).Handle("/v1/notifications/*", up.Notification)
 	if up.DevInbox != nil {
 		r.Handle("/v1/dev/*", up.DevInbox)
 	}

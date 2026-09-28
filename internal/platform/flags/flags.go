@@ -93,14 +93,28 @@ type Subject struct {
 }
 
 // Allows reports whether f is on for s.
-func (f Flag) Allows(s Subject) bool {
+func (f Flag) Allows(s Subject) bool { return f.Denial(s) == "" }
+
+// Denial names what rejects s: "disabled", or the dimension whose rule
+// fails ("region", "status", "asset", "symbol", "user"); "" when f allows
+// s. Eligibility uses it to tell a region block from a switched-off feature.
+func (f Flag) Denial(s Subject) string {
 	r := f.Rules
-	return f.Enabled &&
-		r.Regions.permits(s.Region) &&
-		r.Statuses.permits(s.Status) &&
-		r.Assets.permits(s.Asset) &&
-		r.Symbols.permits(s.Symbol) &&
-		r.Users.permits(s.UserID)
+	switch {
+	case !f.Enabled:
+		return "disabled"
+	case !r.Regions.permits(s.Region):
+		return "region"
+	case !r.Statuses.permits(s.Status):
+		return "status"
+	case !r.Assets.permits(s.Asset):
+		return "asset"
+	case !r.Symbols.permits(s.Symbol):
+		return "symbol"
+	case !r.Users.permits(s.UserID):
+		return "user"
+	}
+	return ""
 }
 
 // Load reads every flag.

@@ -19,6 +19,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/auth/adapters/users"
 	"github.com/lidp280504357/exchange/internal/auth/application"
 	"github.com/lidp280504357/exchange/internal/auth/domain"
+	"github.com/lidp280504357/exchange/internal/auth/transport/consumer"
 	"github.com/lidp280504357/exchange/internal/auth/transport/grpcapi"
 	"github.com/lidp280504357/exchange/internal/auth/transport/httpapi"
 	"github.com/lidp280504357/exchange/internal/platform/app"
@@ -26,6 +27,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/bootstrap"
 	"github.com/lidp280504357/exchange/internal/platform/captcha"
 	"github.com/lidp280504357/exchange/internal/platform/config"
+	"github.com/lidp280504357/exchange/internal/platform/event"
 	"github.com/lidp280504357/exchange/internal/platform/kafka"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
 	"github.com/lidp280504357/exchange/internal/platform/ratelimit"
@@ -176,6 +178,10 @@ func setup(ctx context.Context, a *app.App) error {
 		},
 		Log: a.Logger(),
 		Now: time.Now,
+	}
+
+	if err := bootstrap.Consumer(ctx, a, cfg.Kafka, application.Consumer, []string{event.TopicUser}, consumer.Handler(accounts)); err != nil {
+		return err
 	}
 
 	gsrv, err := bootstrap.GRPCServer(ctx, a, cfg.GRPCAddr)

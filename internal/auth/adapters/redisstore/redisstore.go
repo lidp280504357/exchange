@@ -32,6 +32,25 @@ func (r *Revocations) Revoke(ctx context.Context, sessionIDs ...string) error {
 	return nil
 }
 
+// markStale keeps the latest time only, so a redelivered older change
+// cannot shorten the window.
+var markStale = redis.NewScript(`
+local cur = tonumber(redis.call('GET', KEYS[1]) or '0')
+if tonumber(ARGV[1]) > cur then
+  redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+end
+return 0`)
+
+// MarkStale records that the user's tokens issued up to upTo carry an
+// outdated scope.
+func (r *Revocations) MarkStale(ctx context.Context, userID string, upTo time.Time) error {
+	err := markStale.Run(ctx, r.rdb, []string{authtoken.StaleKey(userID)}, upTo.UnixMilli(), int(authtoken.AccessTTL.Seconds())).Err()
+	if err != nil {
+		return fmt.Errorf("mark stale tokens: %w", err)
+	}
+	return nil
+}
+
 // Guard implements ports.LoginGuard with a counter per identifier whose
 // window restarts at every failure.
 type Guard struct {

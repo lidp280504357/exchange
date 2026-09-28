@@ -1,0 +1,121 @@
+openapi: 3.1.0
+info:
+  title: Exchange notification API
+  version: 0.1.0
+  description: |
+    The in-app inbox (requirements §5.3). Security notices (new-device
+    sign-in, contact and password changes, sign-in lock, account status)
+    are also mailed, with the anti-phishing code when the user set one.
+    New notices are pushed on the private WebSocket channel
+    "notifications" (§7.3).
+servers:
+  - url: https://astras.vip
+security:
+  - bearer: []
+tags:
+  - name: notification
+paths:
+  /v1/notifications:
+    get:
+      operationId: listNotifications
+      summary: The caller's notifications, newest first
+      tags: [notification]
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: One page and the unread count.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor, unread_count]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Notification'
+                  next_cursor:
+                    type: [string, 'null']
+                  unread_count:
+                    type: integer
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/notifications/read:
+    post:
+      operationId: markNotificationsRead
+      summary: Mark notifications read
+      tags: [notification]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              description: Either ids (at most 100) or all=true.
+              properties:
+                ids:
+                  type: array
+                  maxItems: 100
+                  items:
+                    type: string
+                    format: uuid
+                all:
+                  type: boolean
+      responses:
+        '200':
+          description: How many changed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [updated]
+                properties:
+                  updated:
+                    type: integer
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Notification:
+      type: object
+      required: [id, type, title, body, data, read, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [WELCOME, NEW_DEVICE_LOGIN, IDENTITY_CHANGED, PASSWORD_CHANGED, ACCOUNT_LOCKED, STATUS_CHANGED]
+        title:
+          type: string
+        body:
+          type: string
+          description: Rendered in the user's language and time zone.
+        data:
+          type: object
+          additionalProperties:
+            type: string
+          description: Masked specifics, e.g. ip, channel, to.
+        read:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time

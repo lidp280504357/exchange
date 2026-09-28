@@ -39,6 +39,7 @@ type memState struct {
 	devices     map[string]bool
 	history     []domain.LoginEvent
 	rebinds     []domain.RebindRequest
+	inbox       map[string]bool
 }
 
 type ticketRow struct {
@@ -51,7 +52,7 @@ func newMemStore() *memStore {
 		challenges: map[string]domain.Challenge{}, tickets: map[string]ticketRow{},
 		credentials: map[string]domain.Credential{}, sessions: map[string]domain.Session{},
 		refresh: map[string]domain.RefreshToken{}, loginChalls: map[string]domain.LoginChallenge{},
-		stepUps: map[string]domain.StepUp{}, devices: map[string]bool{},
+		stepUps: map[string]domain.StepUp{}, devices: map[string]bool{}, inbox: map[string]bool{},
 	}}
 }
 
@@ -73,11 +74,25 @@ func (m *memState) clone() memState {
 		credentials: maps.Clone(m.credentials), sessions: maps.Clone(m.sessions),
 		refresh: maps.Clone(m.refresh), loginChalls: maps.Clone(m.loginChalls),
 		stepUps: maps.Clone(m.stepUps), devices: maps.Clone(m.devices),
-		history: slices.Clone(m.history), rebinds: slices.Clone(m.rebinds),
+		history: slices.Clone(m.history), rebinds: slices.Clone(m.rebinds), inbox: maps.Clone(m.inbox),
 	}
 }
 
 func (s *memStore) Read() ports.Repos { return memRepos{s} }
+
+func (s *memStore) Once(ctx context.Context, consumer, eventID string, fn func(ports.Repos) error) (bool, error) {
+	ran := false
+	err := s.Tx(ctx, func(r ports.Repos) error {
+		key := consumer + "/" + eventID
+		if s.inbox[key] {
+			return nil
+		}
+		s.inbox[key] = true
+		ran = true
+		return fn(r)
+	})
+	return ran, err
+}
 
 // eventsOf returns the emitted events of type T.
 func eventsOf[T proto.Message](s *memStore) []T {
@@ -503,14 +518,25 @@ func (fakeTokens) Issue(userID, sessionID, scope string, now time.Time) (string,
 
 // fakeRevocations records the sessions marked for the gateway.
 type fakeRevocations struct {
-	mu  sync.Mutex
-	ids []string
+	mu    sync.Mutex
+	ids   []string
+	stale map[string]time.Time
 }
 
 func (f *fakeRevocations) Revoke(_ context.Context, ids ...string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ids = append(f.ids, ids...)
+	return nil
+}
+
+func (f *fakeRevocations) MarkStale(_ context.Context, userID string, at time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.stale == nil {
+		f.stale = map[string]time.Time{}
+	}
+	f.stale[userID] = at
 	return nil
 }
 

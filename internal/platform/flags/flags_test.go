@@ -135,3 +135,24 @@ func TestClientRefreshes(t *testing.T) {
 		t.Fatalf("Get = %+v %v", f, ok)
 	}
 }
+
+func TestDenialNamesTheRule(t *testing.T) {
+	f := flags.Flag{Enabled: true, Rules: flags.Rules{Regions: &flags.List{Deny: []string{"US"}}, Statuses: &flags.List{Allow: []string{"ACTIVE"}}}}
+	for _, tc := range []struct {
+		s    flags.Subject
+		want string
+	}{
+		{flags.Subject{Region: "SG", Status: "ACTIVE"}, ""},
+		{flags.Subject{Region: "US", Status: "ACTIVE"}, "region"},
+		{flags.Subject{Region: "SG", Status: "FROZEN"}, "status"},
+		{flags.Subject{Status: "ACTIVE"}, "region"}, // a constrained dimension without a value fails closed
+	} {
+		if got := f.Denial(tc.s); got != tc.want {
+			t.Errorf("Denial(%+v) = %q, want %q", tc.s, got, tc.want)
+		}
+	}
+	f.Enabled = false
+	if got := f.Denial(flags.Subject{Region: "SG", Status: "ACTIVE"}); got != "disabled" {
+		t.Fatalf("disabled flag: %q", got)
+	}
+}

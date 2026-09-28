@@ -20,6 +20,9 @@ type Store interface {
 	Tx(ctx context.Context, fn func(Repos) error) error
 	// Read returns repositories outside any transaction.
 	Read() Repos
+	// Once runs fn in a transaction unless consumer already handled the
+	// event, and reports whether it ran (the inbox, requirements §8.2).
+	Once(ctx context.Context, consumer, eventID string, fn func(Repos) error) (bool, error)
 }
 
 // Repos groups the repositories of one transaction.
@@ -186,9 +189,12 @@ type Users interface {
 }
 
 // Revocations tells the gateway that a session ended, so its access tokens
-// stop working before they expire.
+// stop working before they expire, or that a user's tokens carry an
+// outdated scope and must be refreshed.
 type Revocations interface {
 	Revoke(ctx context.Context, sessionIDs ...string) error
+	// MarkStale makes the user's tokens issued up to upTo stale.
+	MarkStale(ctx context.Context, userID string, upTo time.Time) error
 }
 
 // LoginGuard counts password failures per identifier, known or not, so

@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"time"
 
 	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
 	"github.com/lidp280504357/exchange/internal/auth/domain"
@@ -222,4 +223,32 @@ func (s *AccountService) consumeStepUp(ctx context.Context, r ports.Repos, userI
 		return nil, domain.ErrStepUpRequired
 	}
 	return su, nil
+}
+
+// Consumer names auth-service's inbox entries.
+const Consumer = "auth-service"
+
+// StaleMargin extends the stale window past the status change: a refresh
+// that read the old status just before user-service committed must not
+// keep the old scope.
+const StaleMargin = time.Second
+
+// OnUserStatusChanged reacts to user-service's status changes: a closed
+// account loses every session; any change makes the user's access tokens
+// issued up to the change stale, so the next request refreshes them into
+// the new scope (read-only for FROZEN). at is when the change happened,
+// which keeps redeliveries harmless.
+func (s *AccountService) OnUserStatusChanged(ctx context.Context, eventID, userID, to string, at time.Time) error {
+	if err := s.Revocations.MarkStale(ctx, userID, at.Add(StaleMargin)); err != nil {
+		return err // retried by the consumer
+	}
+	if to != domain.StatusClosed {
+		return nil
+	}
+	var revoked []string
+	_, err := s.Store.Once(ctx, Consumer, eventID, func(r ports.Repos) error {
+		return s.revokeAll(ctx, r, userID, "", domain.RevokeClosed, &revoked)
+	})
+	s.markRevoked(ctx, revoked)
+	return err
 }

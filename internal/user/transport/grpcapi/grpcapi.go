@@ -21,7 +21,8 @@ func NewServer(svc *application.Service) *Server { return &Server{svc: svc} }
 func toProto(u domain.User) *userv1.User {
 	return &userv1.User{
 		Id: u.ID, Status: u.Status, Region: u.Region, Language: u.Language, Timezone: u.Timezone,
-		KycLevel: int32(u.KYCLevel), //nolint:gosec // small level number
+		KycLevel:         int32(u.KYCLevel), //nolint:gosec // small level number
+		AntiPhishingCode: u.AntiPhishingCode,
 	}
 }
 
@@ -44,4 +45,13 @@ func (s *Server) GetUser(ctx context.Context, req *userv1.GetUserRequest) (*user
 		return nil, err
 	}
 	return &userv1.GetUserResponse{User: toProto(u)}, nil
+}
+
+// CheckEligibility decides whether a user may use a feature now.
+func (s *Server) CheckEligibility(ctx context.Context, req *userv1.CheckEligibilityRequest) (*userv1.CheckEligibilityResponse, error) {
+	allowed, reason, err := s.svc.CheckEligibility(ctx, req.GetUserId(), req.GetFeature(), req.GetAsset(), req.GetSymbol())
+	if err != nil {
+		return nil, err
+	}
+	return &userv1.CheckEligibilityResponse{Allowed: allowed, ReasonCode: reason}, nil
 }

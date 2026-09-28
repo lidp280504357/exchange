@@ -5,15 +5,20 @@ package main
 import (
 	"context"
 	"errors"
+	"time"
 	_ "time/tzdata" // validate time zones without the OS database
 
+	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
 	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
 	"github.com/lidp280504357/exchange/internal/platform/app"
 	"github.com/lidp280504357/exchange/internal/platform/bootstrap"
+	"github.com/lidp280504357/exchange/internal/platform/kafka"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
+	"github.com/lidp280504357/exchange/internal/user/adapters/authclient"
 	"github.com/lidp280504357/exchange/internal/user/adapters/postgres"
 	"github.com/lidp280504357/exchange/internal/user/application"
 	"github.com/lidp280504357/exchange/internal/user/transport/grpcapi"
+	"github.com/lidp280504357/exchange/internal/user/transport/httpapi"
 	"github.com/lidp280504357/exchange/migrations"
 )
 
@@ -21,12 +26,15 @@ type settings struct {
 	// HTTPAddr is the internal REST address the gateway calls (HTTP_ADDR).
 	HTTPAddr string `koanf:"http_addr"`
 	// GRPCAddr serves synchronous calls from other services (GRPC_ADDR).
-	GRPCAddr string    `koanf:"grpc_addr"`
-	Postgres pg.Config `koanf:",squash"`
+	GRPCAddr string       `koanf:"grpc_addr"`
+	Postgres pg.Config    `koanf:",squash"`
+	Kafka    kafka.Config `koanf:",squash"`
+	// AuthAddr is auth-service's gRPC address, for step-up tokens (AUTH_GRPC_ADDR).
+	AuthAddr string `koanf:"auth_grpc_addr"`
 }
 
 func (s *settings) Validate() error {
-	return errors.Join(s.Postgres.Validate())
+	return errors.Join(s.Postgres.Validate(), s.Kafka.Validate())
 }
 
 func main() {
@@ -34,7 +42,7 @@ func main() {
 }
 
 func setup(ctx context.Context, a *app.App) error {
-	cfg := settings{HTTPAddr: ":8082", GRPCAddr: ":9182", Postgres: pg.DefaultConfig()}
+	cfg := settings{HTTPAddr: ":8082", GRPCAddr: ":9182", Postgres: pg.DefaultConfig(), AuthAddr: "localhost:9181"}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
 	}
@@ -42,12 +50,31 @@ func setup(ctx context.Context, a *app.App) error {
 	if err != nil {
 		return err
 	}
-	svc := &application.Service{Users: postgres.NewStore(db)}
+	events, err := bootstrap.Events(ctx, a, db, cfg.Kafka)
+	if err != nil {
+		return err
+	}
+	flagClient, err := bootstrap.Flags(ctx, a, cfg.Postgres)
+	if err != nil {
+		return err
+	}
+	authConn, err := bootstrap.GRPCClient(a, "auth", cfg.AuthAddr)
+	if err != nil {
+		return err
+	}
+	svc := &application.Service{
+		Store:   postgres.NewStore(db, events),
+		Flags:   flagClient,
+		StepUps: authclient.New(authv1.NewAuthServiceClient(authConn)),
+		Now:     time.Now,
+	}
 
 	srv, err := bootstrap.GRPCServer(ctx, a, cfg.GRPCAddr)
 	if err != nil {
 		return err
 	}
 	userv1.RegisterUserServiceServer(srv, grpcapi.NewServer(svc))
-	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, a.NewRouter())
+	r := a.NewRouter()
+	(&httpapi.Handler{Svc: svc}).Routes(r)
+	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
 }

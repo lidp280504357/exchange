@@ -7,16 +7,48 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/lidp280504357/exchange/internal/platform/event"
+	"github.com/lidp280504357/exchange/internal/platform/outbox"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
 	"github.com/lidp280504357/exchange/internal/user/domain"
+	"github.com/lidp280504357/exchange/internal/user/ports"
 )
 
-// Store implements ports.Users.
-type Store struct{ db *pg.DB }
+// Store implements ports.Store.
+type Store struct {
+	db     *pg.DB
+	events *event.Factory
+}
 
-// NewStore returns the store.
-func NewStore(db *pg.DB) *Store { return &Store{db: db} }
+// NewStore returns a store whose events are built by events.
+func NewStore(db *pg.DB, events *event.Factory) *Store { return &Store{db: db, events: events} }
+
+// Tx runs fn in a transaction.
+func (s *Store) Tx(ctx context.Context, fn func(ports.Repos) error) error {
+	return s.db.InTx(ctx, func(tx pgx.Tx) error { return fn(repos{q: tx, events: s.events}) })
+}
+
+// Read returns repositories on the pool.
+func (s *Store) Read() ports.Repos { return repos{q: s.db, events: s.events} }
+
+type repos struct {
+	q      pg.Querier
+	events *event.Factory
+}
+
+func (r repos) Users() ports.UserRepo { return users(r) }
+
+func (r repos) Emit(ctx context.Context, topic string, msg proto.Message, aggregateType, aggregateID string) error {
+	env, err := r.events.New(ctx, msg, aggregateType, aggregateID)
+	if err != nil {
+		return err
+	}
+	return outbox.Add(ctx, r.q, topic, env)
+}
+
+type users repos
 
 const userColumns = `id, status, region, language, timezone, anti_phishing_code, kyc_level, version, created_at, updated_at`
 
@@ -28,36 +60,26 @@ func scanUser(row pgx.Row) (domain.User, error) {
 	return u, err
 }
 
-// Create inserts the profile and consents idempotently.
-func (s *Store) Create(ctx context.Context, u domain.User, consents []domain.Consent) (domain.User, error) {
-	var out domain.User
-	err := s.db.InTx(ctx, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `INSERT INTO users (id, status, region, language, timezone) VALUES ($1, $2, $3, $4, $5)
-			ON CONFLICT (id) DO NOTHING`, u.ID, u.Status, u.Region, u.Language, u.Timezone); err != nil {
-			return fmt.Errorf("insert user: %w", err)
+func (r users) Create(ctx context.Context, u domain.User, consents []domain.Consent) (bool, error) {
+	tag, err := r.q.Exec(ctx, `INSERT INTO users (id, status, region, language, timezone) VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (id) DO NOTHING`, u.ID, u.Status, u.Region, u.Language, u.Timezone)
+	if err != nil {
+		return false, fmt.Errorf("insert user: %w", err)
+	}
+	for _, c := range consents {
+		if _, err := r.q.Exec(ctx, `INSERT INTO consents (user_id, document, version) VALUES ($1, $2, $3)
+			ON CONFLICT DO NOTHING`, u.ID, c.Document, c.Version); err != nil {
+			return false, fmt.Errorf("insert consent: %w", err)
 		}
-		for _, c := range consents {
-			if _, err := tx.Exec(ctx, `INSERT INTO consents (user_id, document, version) VALUES ($1, $2, $3)
-				ON CONFLICT DO NOTHING`, u.ID, c.Document, c.Version); err != nil {
-				return fmt.Errorf("insert consent: %w", err)
-			}
-		}
-		var err error
-		out, err = scanUser(tx.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id = $1`, u.ID))
-		if err != nil {
-			return fmt.Errorf("read user: %w", err)
-		}
-		return nil
-	})
-	return out, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
-// Get reads a profile.
-func (s *Store) Get(ctx context.Context, id string) (domain.User, error) {
+func (r users) get(ctx context.Context, id, suffix string) (domain.User, error) {
 	if _, err := uuid.Parse(id); err != nil {
 		return domain.User{}, domain.ErrUserNotFound
 	}
-	u, err := scanUser(s.db.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id = $1`, id))
+	u, err := scanUser(r.q.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id = $1`+suffix, id))
 	if pg.IsNoRows(err) {
 		return domain.User{}, domain.ErrUserNotFound
 	}
@@ -65,4 +87,47 @@ func (s *Store) Get(ctx context.Context, id string) (domain.User, error) {
 		return domain.User{}, fmt.Errorf("get user: %w", err)
 	}
 	return u, nil
+}
+
+func (r users) Get(ctx context.Context, id string) (domain.User, error) { return r.get(ctx, id, "") }
+
+func (r users) GetForUpdate(ctx context.Context, id string) (domain.User, error) {
+	return r.get(ctx, id, " FOR UPDATE")
+}
+
+func (r users) Update(ctx context.Context, u domain.User) (domain.User, error) {
+	out, err := scanUser(r.q.QueryRow(ctx, `UPDATE users SET status = $2, language = $3, timezone = $4, anti_phishing_code = $5,
+		version = version + 1, updated_at = now() WHERE id = $1 RETURNING `+userColumns,
+		u.ID, u.Status, u.Language, u.Timezone, u.AntiPhishingCode))
+	if err != nil {
+		return domain.User{}, fmt.Errorf("update user: %w", err)
+	}
+	return out, nil
+}
+
+func (r users) AddStatusChange(ctx context.Context, c domain.StatusChange) error {
+	_, err := r.q.Exec(ctx, `INSERT INTO user_status_changes (user_id, from_status, to_status, reason_code, actor, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)`, c.UserID, c.From, c.To, c.Reason, c.Actor, c.At)
+	if err != nil {
+		return fmt.Errorf("record status change: %w", err)
+	}
+	return nil
+}
+
+func (r users) StatusHistory(ctx context.Context, userID string, limit int) ([]domain.StatusChange, error) {
+	rows, err := r.q.Query(ctx, `SELECT from_status, to_status, reason_code, actor, created_at FROM user_status_changes
+		WHERE user_id = $1 ORDER BY id DESC LIMIT $2`, userID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("status history: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.StatusChange
+	for rows.Next() {
+		c := domain.StatusChange{UserID: userID}
+		if err := rows.Scan(&c.From, &c.To, &c.Reason, &c.Actor, &c.At); err != nil {
+			return nil, fmt.Errorf("status history: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }

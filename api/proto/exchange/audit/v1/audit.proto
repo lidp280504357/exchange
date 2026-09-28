@@ -19,3 +19,18 @@ message ConfigChanged {
   // Why, as entered by the actor.
   string reason = 5;
 }
+
+// AdminActionPerformed records an operator (or system) action on a
+// business object, e.g. an account status change (§5.4).
+message AdminActionPerformed {
+  // What was acted on, e.g. "user:<id>".
+  string target = 1;
+  // The action, e.g. "user.status_changed".
+  string action = 2;
+  // An admin ID, "cli:<os user>" for exchangectl, or "system:<service>".
+  string actor = 3;
+  // Reason code or text given by the actor.
+  string reason = 4;
+  // JSON with the specifics, e.g. {"from":"ACTIVE","to":"FROZEN"}.
+  string details = 5;
+}

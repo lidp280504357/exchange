@@ -104,6 +104,89 @@ func (x *ConfigChanged) GetReason() string {
 	return ""
 }
 
+// AdminActionPerformed records an operator (or system) action on a
+// business object, e.g. an account status change (§5.4).
+type AdminActionPerformed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// What was acted on, e.g. "user:<id>".
+	Target string `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
+	// The action, e.g. "user.status_changed".
+	Action string `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`
+	// An admin ID, "cli:<os user>" for exchangectl, or "system:<service>".
+	Actor string `protobuf:"bytes,3,opt,name=actor,proto3" json:"actor,omitempty"`
+	// Reason code or text given by the actor.
+	Reason string `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
+	// JSON with the specifics, e.g. {"from":"ACTIVE","to":"FROZEN"}.
+	Details       string `protobuf:"bytes,5,opt,name=details,proto3" json:"details,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminActionPerformed) Reset() {
+	*x = AdminActionPerformed{}
+	mi := &file_exchange_audit_v1_audit_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminActionPerformed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminActionPerformed) ProtoMessage() {}
+
+func (x *AdminActionPerformed) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_audit_v1_audit_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminActionPerformed.ProtoReflect.Descriptor instead.
+func (*AdminActionPerformed) Descriptor() ([]byte, []int) {
+	return file_exchange_audit_v1_audit_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *AdminActionPerformed) GetTarget() string {
+	if x != nil {
+		return x.Target
+	}
+	return ""
+}
+
+func (x *AdminActionPerformed) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *AdminActionPerformed) GetActor() string {
+	if x != nil {
+		return x.Actor
+	}
+	return ""
+}
+
+func (x *AdminActionPerformed) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *AdminActionPerformed) GetDetails() string {
+	if x != nil {
+		return x.Details
+	}
+	return ""
+}
+
 var File_exchange_audit_v1_audit_proto protoreflect.FileDescriptor
 
 const file_exchange_audit_v1_audit_proto_rawDesc = "" +
@@ -114,7 +197,13 @@ const file_exchange_audit_v1_audit_proto_rawDesc = "" +
 	"\told_value\x18\x02 \x01(\tR\boldValue\x12\x1b\n" +
 	"\tnew_value\x18\x03 \x01(\tR\bnewValue\x12\x14\n" +
 	"\x05actor\x18\x04 \x01(\tR\x05actor\x12\x16\n" +
-	"\x06reason\x18\x05 \x01(\tR\x06reasonB\xd1\x01\n" +
+	"\x06reason\x18\x05 \x01(\tR\x06reason\"\x8e\x01\n" +
+	"\x14AdminActionPerformed\x12\x16\n" +
+	"\x06target\x18\x01 \x01(\tR\x06target\x12\x16\n" +
+	"\x06action\x18\x02 \x01(\tR\x06action\x12\x14\n" +
+	"\x05actor\x18\x03 \x01(\tR\x05actor\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\x12\x18\n" +
+	"\adetails\x18\x05 \x01(\tR\adetailsB\xd1\x01\n" +
 	"\x15com.exchange.audit.v1B\n" +
 	"AuditProtoP\x01ZFgithub.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1;auditv1\xa2\x02\x03EAX\xaa\x02\x11Exchange.Audit.V1\xca\x02\x11Exchange\\Audit\\V1\xe2\x02\x1dExchange\\Audit\\V1\\GPBMetadata\xea\x02\x13Exchange::Audit::V1b\x06proto3"
 
@@ -130,9 +219,10 @@ func file_exchange_audit_v1_audit_proto_rawDescGZIP() []byte {
 	return file_exchange_audit_v1_audit_proto_rawDescData
 }
 
-var file_exchange_audit_v1_audit_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_exchange_audit_v1_audit_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_exchange_audit_v1_audit_proto_goTypes = []any{
-	(*ConfigChanged)(nil), // 0: exchange.audit.v1.ConfigChanged
+	(*ConfigChanged)(nil),        // 0: exchange.audit.v1.ConfigChanged
+	(*AdminActionPerformed)(nil), // 1: exchange.audit.v1.AdminActionPerformed
 }
 var file_exchange_audit_v1_audit_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
@@ -153,7 +243,7 @@ func file_exchange_audit_v1_audit_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_audit_v1_audit_proto_rawDesc), len(file_exchange_audit_v1_audit_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   1,
+			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

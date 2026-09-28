@@ -7,6 +7,8 @@
 //	exchangectl flags show <key>
 //	exchangectl flags history <key>
 //	exchangectl flags set <key> [--on|--off] [--allow-regions CN,US] ... --reason "..."
+//	exchangectl users show <user_id>
+//	exchangectl users status <user_id> --to FROZEN --reason SUSPICIOUS_LOGIN [--note "..."]
 //
 // On the test server: sudo docker exec exchange-infra-user-service-1 /app/exchangectl flags list
 package main
@@ -38,6 +40,9 @@ commands:
   flags show <key>            one flag as JSON
   flags history <key>         recent changes of a flag
   flags set <key> [options]   change a flag (run "exchangectl flags set -h")
+  users show <user_id>        profile and status history
+  users status <user_id> --to STATUS --reason CODE [--note TEXT]
+                              change an account status (ACTIVE, RISK_REVIEW, FROZEN, CLOSED)
 `
 
 func main() {
@@ -68,14 +73,16 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	if err := cfg.Postgres.Validate(); err != nil {
 		return err
 	}
-	db, err := pg.Open(ctx, pg.Config{DSN: cfg.Postgres.DSN, MaxConns: 2}, "config")
-	if err != nil {
-		return err
-	}
-	defer db.Close()
 	switch args[0] {
 	case "flags":
+		db, err := pg.Open(ctx, pg.Config{DSN: cfg.Postgres.DSN, MaxConns: 2}, "config")
+		if err != nil {
+			return err
+		}
+		defer db.Close()
 		return flagsCmd(ctx, cfg, db, args[1:], out)
+	case "users":
+		return usersCmd(ctx, cfg, args[1:], out)
 	default:
 		fmt.Fprint(out, usage)
 		return fmt.Errorf("unknown command %q", args[0])

@@ -8,12 +8,16 @@ import (
 	"errors"
 	"time"
 
+	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
 	notificationv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/notification/v1"
+	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
 	"github.com/lidp280504357/exchange/internal/notification/adapters/mock"
 	"github.com/lidp280504357/exchange/internal/notification/adapters/postgres"
+	"github.com/lidp280504357/exchange/internal/notification/adapters/recipients"
 	"github.com/lidp280504357/exchange/internal/notification/adapters/resend"
 	"github.com/lidp280504357/exchange/internal/notification/application"
 	"github.com/lidp280504357/exchange/internal/notification/ports"
+	"github.com/lidp280504357/exchange/internal/notification/transport/consumer"
 	"github.com/lidp280504357/exchange/internal/notification/transport/grpcapi"
 	"github.com/lidp280504357/exchange/internal/notification/transport/httpapi"
 	"github.com/lidp280504357/exchange/internal/platform/app"
@@ -35,6 +39,10 @@ type settings struct {
 	// MockEmailDomains receive mail through the mock provider, so tests
 	// never reach a real mailbox (MOCK_EMAIL_DOMAINS).
 	MockEmailDomains []string `koanf:"mock_email_domains"`
+	// gRPC addresses of the services that know the recipients
+	// (USER_GRPC_ADDR, AUTH_GRPC_ADDR).
+	UserAddr string `koanf:"user_grpc_addr"`
+	AuthAddr string `koanf:"auth_grpc_addr"`
 }
 
 func (s *settings) Validate() error {
@@ -52,6 +60,8 @@ func setup(ctx context.Context, a *app.App) error {
 		Postgres:         pg.DefaultConfig(),
 		Resend:           resend.Config{From: "Exchange <noreply@astras.vip>"},
 		MockEmailDomains: []string{"example.com", "example.org", "example.net"},
+		UserAddr:         "localhost:9182",
+		AuthAddr:         "localhost:9181",
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -80,8 +90,28 @@ func setup(ctx context.Context, a *app.App) error {
 	if !prod {
 		routes.Email = append(routes.Email, mockProvider)
 	}
-	dispatcher := application.NewDispatcher(routes, postgres.NewStore(db, events), a.Logger(), a.Metrics())
+	store := postgres.NewStore(db, events)
+	dispatcher := application.NewDispatcher(routes, store, a.Logger(), a.Metrics())
 	a.Add("dispatcher", dispatcher)
+
+	userConn, err := bootstrap.GRPCClient(a, "user", cfg.UserAddr)
+	if err != nil {
+		return err
+	}
+	authConn, err := bootstrap.GRPCClient(a, "auth", cfg.AuthAddr)
+	if err != nil {
+		return err
+	}
+	notices := &application.Notices{
+		Store:      store,
+		Recipients: recipients.New(userv1.NewUserServiceClient(userConn), authv1.NewAuthServiceClient(authConn)),
+		Dispatcher: dispatcher,
+		Log:        a.Logger(),
+		Now:        time.Now,
+	}
+	if err := bootstrap.Consumer(ctx, a, cfg.Kafka, application.Consumer, consumer.Topics, consumer.Handler(notices)); err != nil {
+		return err
+	}
 
 	gsrv, err := bootstrap.GRPCServer(ctx, a, cfg.GRPCAddr)
 	if err != nil {
@@ -90,6 +120,7 @@ func setup(ctx context.Context, a *app.App) error {
 	notificationv1.RegisterNotificationServiceServer(gsrv, grpcapi.NewServer(dispatcher))
 
 	r := a.NewRouter()
+	(&httpapi.Notices{Svc: notices}).Routes(r)
 	if !prod {
 		r.Get("/v1/dev/messages", httpapi.DevInbox(mockProvider))
 		a.Add("mock inbox purge", app.Loop(func(ctx context.Context) error {
