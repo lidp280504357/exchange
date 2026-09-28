@@ -80,6 +80,7 @@ func TestNotifySchema(t *testing.T) {
 func TestDownMigrations(t *testing.T) {
 	for name, fsys := range map[string]fs.FS{
 		"auth": migrations.Auth(), "users": migrations.Users(), "notify": migrations.Notify(), "config": migrations.Config(),
+		"instrument": migrations.Instrument(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			db := apply(t, fsys)
@@ -100,4 +101,23 @@ func TestDownMigrations(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestInstrumentSchema(t *testing.T) {
+	db := apply(t, migrations.Instrument())
+	accepts(t, db, `INSERT INTO fee_schedules (tier, maker_fee_rate, taker_fee_rate) VALUES ('default', 0.001, 0.001)`)
+	rejects(t, db, "fee rates stay below 10%", `INSERT INTO fee_schedules (tier, maker_fee_rate, taker_fee_rate) VALUES ('greedy', 0.5, 0.001)`)
+	asset := `INSERT INTO assets (asset_code, name, decimals) VALUES ($1, $1, $2)`
+	accepts(t, db, asset, "BTC", 8)
+	accepts(t, db, asset, "USDT", 6)
+	rejects(t, db, "lower-case codes", asset, "btc", 8)
+	rejects(t, db, "at most 18 decimals", asset, "WEI", 19)
+	pair := `INSERT INTO trading_pairs (symbol, base_asset, quote_asset, tick_size, lot_size, min_quantity, max_quantity,
+		min_notional, price_band, fee_tier) VALUES ($1, $2, $3, 0.01, 0.00001, 0.00001, 100, 5, 0.1, 'default')`
+	accepts(t, db, pair, "BTC-USDT", "BTC", "USDT")
+	rejects(t, db, "symbol names its assets", pair, "XBT-USDT", "BTC", "USDT")
+	rejects(t, db, "unknown asset", pair, "ETH-USDT", "ETH", "USDT")
+	rejects(t, db, "unknown status", `UPDATE trading_pairs SET status = 'LIVE'`)
+	rejects(t, db, "networks need an asset", `INSERT INTO networks (asset_code, network, chain, confirmations, min_deposit,
+		min_withdraw, withdraw_fee) VALUES ('ETH', 'ETH-SEPOLIA', '11155111', 12, 0, 0, 0)`)
 }

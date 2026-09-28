@@ -1,26 +1,34 @@
-// Command instrument-service owns assets, networks and trading pairs
-// (requirements §5.5).
+// Command instrument-service owns assets, networks, trading pairs and fee
+// schedules (requirements §5.5).
 package main
 
 import (
 	"context"
 	"errors"
 
+	instrumentv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/instrument/v1"
+	"github.com/lidp280504357/exchange/internal/instrument/adapters/postgres"
+	"github.com/lidp280504357/exchange/internal/instrument/application"
+	"github.com/lidp280504357/exchange/internal/instrument/transport/grpcapi"
+	"github.com/lidp280504357/exchange/internal/instrument/transport/httpapi"
 	"github.com/lidp280504357/exchange/internal/platform/app"
 	"github.com/lidp280504357/exchange/internal/platform/bootstrap"
+	"github.com/lidp280504357/exchange/internal/platform/kafka"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
+	"github.com/lidp280504357/exchange/migrations"
 )
 
 type settings struct {
 	// HTTPAddr is the internal REST address the gateway calls (HTTP_ADDR).
 	HTTPAddr string `koanf:"http_addr"`
 	// GRPCAddr serves synchronous calls from other services (GRPC_ADDR).
-	GRPCAddr string    `koanf:"grpc_addr"`
-	Postgres pg.Config `koanf:",squash"`
+	GRPCAddr string       `koanf:"grpc_addr"`
+	Postgres pg.Config    `koanf:",squash"`
+	Kafka    kafka.Config `koanf:",squash"`
 }
 
 func (s *settings) Validate() error {
-	return errors.Join(s.Postgres.Validate())
+	return errors.Join(s.Postgres.Validate(), s.Kafka.Validate())
 }
 
 func main() {
@@ -32,11 +40,23 @@ func setup(ctx context.Context, a *app.App) error {
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
 	}
-	if _, err := bootstrap.Postgres(ctx, a, cfg.Postgres, "instrument", nil); err != nil {
+	db, err := bootstrap.Postgres(ctx, a, cfg.Postgres, "instrument", migrations.Instrument())
+	if err != nil {
 		return err
 	}
-	if _, err := bootstrap.GRPCServer(ctx, a, cfg.GRPCAddr); err != nil {
+	// Publishes the events exchangectl queues in the instrument outbox.
+	events, err := bootstrap.Events(ctx, a, db, cfg.Kafka)
+	if err != nil {
 		return err
 	}
-	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, a.NewRouter())
+	svc := &application.Service{Store: postgres.NewStore(db, events)}
+
+	srv, err := bootstrap.GRPCServer(ctx, a, cfg.GRPCAddr)
+	if err != nil {
+		return err
+	}
+	instrumentv1.RegisterInstrumentServiceServer(srv, grpcapi.NewServer(svc))
+	r := a.NewRouter()
+	(&httpapi.Handler{Svc: svc}).Routes(r)
+	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
 }

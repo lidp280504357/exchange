@@ -9,6 +9,9 @@
 //	exchangectl flags set <key> [--on|--off] [--allow-regions CN,US] ... --reason "..."
 //	exchangectl users show <user_id>
 //	exchangectl users status <user_id> --to FROZEN --reason SUSPICIOUS_LOGIN [--note "..."]
+//	exchangectl instruments list
+//	exchangectl instruments apply --file deploy/instruments/test.json --reason "..."
+//	exchangectl instruments pair-status BTC-USDT --to TRADING --reason "..."
 //
 // On the test server: sudo docker exec exchange-infra-user-service-1 /app/exchangectl flags list
 package main
@@ -43,6 +46,11 @@ commands:
   users show <user_id>        profile and status history
   users status <user_id> --to STATUS --reason CODE [--note TEXT]
                               change an account status (ACTIVE, RISK_REVIEW, FROZEN, CLOSED)
+  instruments list            assets, networks and trading pairs
+  instruments apply --file F --reason TEXT
+                              make the reference data match a JSON file ("-" for stdin); idempotent
+  instruments pair-status <symbol> --to STATUS --reason TEXT
+                              move a pair: PREPARE -> TRADING <-> HALT -> CANCEL_ONLY -> DELISTED
 `
 
 func main() {
@@ -83,6 +91,8 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return flagsCmd(ctx, cfg, db, args[1:], out)
 	case "users":
 		return usersCmd(ctx, cfg, args[1:], out)
+	case "instruments":
+		return instrumentsCmd(ctx, cfg, args[1:], os.Stdin, out)
 	default:
 		fmt.Fprint(out, usage)
 		return fmt.Errorf("unknown command %q", args[0])

@@ -1,0 +1,45 @@
+{
+  "fee_schedules": [
+    {"tier": "default", "maker_fee_rate": "0.001", "taker_fee_rate": "0.001"}
+  ],
+  "assets": [
+    {
+      "asset_code": "USDT", "name": "Tether USD", "decimals": 6,
+      "deposit_enabled": false, "withdraw_enabled": false, "trading_enabled": true, "risk_restricted": false,
+      "networks": []
+    },
+    {
+      "asset_code": "BTC", "name": "Bitcoin", "decimals": 8,
+      "deposit_enabled": false, "withdraw_enabled": false, "trading_enabled": true, "risk_restricted": false,
+      "networks": []
+    },
+    {
+      "asset_code": "ETH", "name": "Ether", "decimals": 18,
+      "deposit_enabled": false, "withdraw_enabled": false, "trading_enabled": true, "risk_restricted": false,
+      "networks": [
+        {
+          "network": "ETH-SEPOLIA", "chain": "11155111", "contract_address": "", "confirmations": 12,
+          "min_deposit": "0.001", "min_withdraw": "0.01", "withdraw_fee": "0.001", "memo_required": false,
+          "deposit_enabled": false, "withdraw_enabled": false
+        }
+      ]
+    }
+  ],
+  "pairs": [
+    {
+      "symbol": "BTC-USDT", "base_asset": "BTC", "quote_asset": "USDT",
+      "tick_size": "0.01", "lot_size": "0.00001", "min_quantity": "0.00001", "max_quantity": "100",
+      "min_notional": "5", "price_band": "0.1", "fee_tier": "default", "status": "PREPARE"
+    },
+    {
+      "symbol": "ETH-USDT", "base_asset": "ETH", "quote_asset": "USDT",
+      "tick_size": "0.01", "lot_size": "0.0001", "min_quantity": "0.0001", "max_quantity": "1000",
+      "min_notional": "5", "price_band": "0.1", "fee_tier": "default", "status": "PREPARE"
+    },
+    {
+      "symbol": "ETH-BTC", "base_asset": "ETH", "quote_asset": "BTC",
+      "tick_size": "0.00001", "lot_size": "0.0001", "min_quantity": "0.0001", "max_quantity": "1000",
+      "min_notional": "0.0001", "price_band": "0.1", "fee_tier": "default", "status": "PREPARE"
+    }
+  ]
+}

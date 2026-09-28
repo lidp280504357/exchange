@@ -1,0 +1,110 @@
+syntax = "proto3";
+
+package exchange.instrument.v1;
+
+// InstrumentService serves the reference data other services rely on:
+// assets with their networks, trading pairs and fee schedules
+// (requirements §5.5). Decimal values are strings (ADR-0008). Public REST
+// endpoints are in api/openapi/market.yaml; changes go through exchangectl
+// until the admin console arrives.
+service InstrumentService {
+  rpc GetAsset(GetAssetRequest) returns (GetAssetResponse);
+  rpc ListAssets(ListAssetsRequest) returns (ListAssetsResponse);
+  rpc GetTradingPair(GetTradingPairRequest) returns (GetTradingPairResponse);
+  rpc ListTradingPairs(ListTradingPairsRequest) returns (ListTradingPairsResponse);
+}
+
+message Asset {
+  // Upper-case code, e.g. BTC, USDT.
+  string asset_code = 1;
+  string name = 2;
+  // Smallest unit is 10^-decimals; amounts with more digits are rejected.
+  int32 decimals = 3;
+  bool deposit_enabled = 4;
+  bool withdraw_enabled = 5;
+  bool trading_enabled = 6;
+  // Risk switch: blocks new exposure to the asset while set.
+  bool risk_restricted = 7;
+  repeated Network networks = 8;
+  int64 version = 9;
+}
+
+// Network is an asset on one chain.
+message Network {
+  string asset_code = 1;
+  // e.g. ETH-SEPOLIA.
+  string network = 2;
+  // Chain identifier, e.g. the EVM chain ID "11155111".
+  string chain = 3;
+  // Token contract; empty for the chain's native coin.
+  string contract_address = 4;
+  int32 confirmations = 5;
+  string min_deposit = 6;
+  string min_withdraw = 7;
+  // Fixed fee deducted from each withdrawal.
+  string withdraw_fee = 8;
+  bool memo_required = 9;
+  bool deposit_enabled = 10;
+  bool withdraw_enabled = 11;
+  int64 version = 12;
+}
+
+message TradingPair {
+  // BASE-QUOTE, e.g. BTC-USDT.
+  string symbol = 1;
+  string base_asset = 2;
+  string quote_asset = 3;
+  // Price step.
+  string tick_size = 4;
+  // Quantity step.
+  string lot_size = 5;
+  string min_quantity = 6;
+  string max_quantity = 7;
+  // Minimum price x quantity, in the quote asset.
+  string min_notional = 8;
+  // Largest allowed deviation of a limit price from the last trade, as a
+  // fraction: "0.1" is 10%.
+  string price_band = 9;
+  string fee_tier = 10;
+  // Rates of fee_tier, filled in for convenience.
+  string maker_fee_rate = 11;
+  string taker_fee_rate = 12;
+  // PREPARE, TRADING, HALT, CANCEL_ONLY or DELISTED.
+  string status = 13;
+  int64 version = 14;
+}
+
+message FeeSchedule {
+  string tier = 1;
+  string maker_fee_rate = 2;
+  string taker_fee_rate = 3;
+  int64 version = 4;
+}
+
+message GetAssetRequest {
+  string asset_code = 1;
+}
+
+message GetAssetResponse {
+  Asset asset = 1;
+}
+
+message ListAssetsRequest {}
+
+message ListAssetsResponse {
+  repeated Asset assets = 1;
+}
+
+message GetTradingPairRequest {
+  string symbol = 1;
+}
+
+message GetTradingPairResponse {
+  TradingPair pair = 1;
+}
+
+message ListTradingPairsRequest {}
+
+message ListTradingPairsResponse {
+  repeated TradingPair pairs = 1;
+}

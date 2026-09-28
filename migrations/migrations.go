@@ -18,6 +18,8 @@ var (
 	users embed.FS
 	//go:embed notify/*.sql
 	notify embed.FS
+	//go:embed instrument/*.sql
+	instrument embed.FS
 )
 
 // ClickHouse holds the analytics tables applied by analytics-consumer.
@@ -34,6 +36,9 @@ func Users() fs.FS { return sub(users, "users") }
 
 // Notify holds notification-service's schema.
 func Notify() fs.FS { return sub(notify, "notify") }
+
+// Instrument holds instrument-service's schema.
+func Instrument() fs.FS { return sub(instrument, "instrument") }
 
 func sub(fsys embed.FS, dir string) fs.FS {
 	s, err := fs.Sub(fsys, dir)

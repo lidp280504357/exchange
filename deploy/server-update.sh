@@ -34,6 +34,12 @@ main() {
     sudo docker compose "${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180
   fi
   sudo docker image prune -f >/dev/null
+
+  # 4. 参考数据（资产、网络、交易对、费率）以仓库文件为准幂等同步；已存在交易对的状态不受影响
+  if [ -f "$INFRA/docker-compose.apps.yml" ] && [ -f deploy/instruments/test.json ]; then
+    sudo docker compose "${COMPOSE[@]}" exec -T instrument-service /app/exchangectl instruments apply \
+      --file - --reason "deploy $APP_VERSION" < deploy/instruments/test.json | tail -1 | sed 's/^/== 参考数据：/'
+  fi
   echo "== 服务状态"
   sudo docker compose "${COMPOSE[@]}" ps --format 'table {{.Service}}\t{{.Status}}'
 }

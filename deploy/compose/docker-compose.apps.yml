@@ -48,11 +48,13 @@ services:
       AUTH_SERVICE_URL: http://auth-service:8081
       USER_SERVICE_URL: http://user-service:8082
       NOTIFICATION_SERVICE_URL: http://notification-service:8083
+      INSTRUMENT_SERVICE_URL: http://instrument-service:8084
     depends_on:
       redis: {condition: service_healthy}
       auth-service: {condition: service_started}
       user-service: {condition: service_started}
       notification-service: {condition: service_started}
+      instrument-service: {condition: service_started}
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9080/readyz"]
@@ -110,6 +112,7 @@ services:
     command: ["/app/instrument-service"]
     depends_on:
       postgres: {condition: service_healthy}
+      redpanda: {condition: service_healthy}
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9084/readyz"]

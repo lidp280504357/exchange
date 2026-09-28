@@ -27,10 +27,11 @@ type settings struct {
 	// HTTPAddr is the public listen address (HTTP_ADDR).
 	HTTPAddr string `koanf:"http_addr"`
 	// Upstream REST addresses (AUTH_SERVICE_URL, USER_SERVICE_URL,
-	// NOTIFICATION_SERVICE_URL).
+	// NOTIFICATION_SERVICE_URL, INSTRUMENT_SERVICE_URL).
 	AuthURL         string `koanf:"auth_service_url"`
 	UserURL         string `koanf:"user_service_url"`
 	NotificationURL string `koanf:"notification_service_url"`
+	InstrumentURL   string `koanf:"instrument_service_url"`
 	// Redis holds the session revocation marks auth-service sets.
 	Redis redisx.Config `koanf:",squash"`
 }
@@ -49,6 +50,7 @@ func setup(ctx context.Context, a *app.App) error {
 		AuthURL:         "http://localhost:8081",
 		UserURL:         "http://localhost:8082",
 		NotificationURL: "http://localhost:8083",
+		InstrumentURL:   "http://localhost:8084",
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -62,6 +64,10 @@ func setup(ctx context.Context, a *app.App) error {
 		return err
 	}
 	notificationURL, err := upstream(cfg.NotificationURL)
+	if err != nil {
+		return err
+	}
+	instrumentURL, err := upstream(cfg.InstrumentURL)
 	if err != nil {
 		return err
 	}
@@ -86,7 +92,10 @@ func setup(ctx context.Context, a *app.App) error {
 		Now: time.Now,
 	}
 	notification := gateway.NewProxy(notificationURL)
-	up := gateway.Upstreams{Auth: gateway.NewProxy(authURL), User: gateway.NewProxy(userURL), Notification: notification}
+	up := gateway.Upstreams{
+		Auth: gateway.NewProxy(authURL), User: gateway.NewProxy(userURL), Notification: notification,
+		Instrument: gateway.NewProxy(instrumentURL),
+	}
 	if a.Config().Env != config.EnvProd {
 		// Dev inbox of the mock providers (codes sent by SMS or to test mail
 		// domains); never routed in production.

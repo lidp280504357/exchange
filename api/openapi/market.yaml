@@ -1,0 +1,161 @@
+openapi: 3.1.0
+info:
+  title: Exchange market reference API
+  version: 0.1.0
+  description: |
+    Assets, networks and trading pairs (requirements §5.5), public and
+    cacheable for 10 seconds. Amounts are decimal strings (ADR-0008):
+    clients must not parse them into floating point.
+servers:
+  - url: https://astras.vip
+tags:
+  - name: market
+paths:
+  /v1/market/assets:
+    get:
+      operationId: listAssets
+      summary: Assets with their networks
+      tags: [market]
+      responses:
+        '200':
+          description: Every asset.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [assets]
+                properties:
+                  assets:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Asset'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/market/pairs:
+    get:
+      operationId: listPairs
+      summary: Trading pairs (delisted ones excluded)
+      tags: [market]
+      responses:
+        '200':
+          description: Every listed pair.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pairs]
+                properties:
+                  pairs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TradingPair'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/market/pairs/{symbol}:
+    get:
+      operationId: getPair
+      summary: One trading pair, delisted ones included
+      tags: [market]
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          schema:
+            type: string
+            examples: [BTC-USDT]
+      responses:
+        '200':
+          description: The pair.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TradingPair'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+components:
+  schemas:
+    Decimal:
+      type: string
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+      examples: ['0.00001']
+    Network:
+      type: object
+      required: [network, chain, contract_address, confirmations, min_deposit, min_withdraw, withdraw_fee, memo_required, deposit_enabled, withdraw_enabled]
+      properties:
+        network:
+          type: string
+          examples: [ETH-SEPOLIA]
+        chain:
+          type: string
+          description: Chain identifier, e.g. the EVM chain ID.
+        contract_address:
+          type: string
+          description: Empty for the chain's native coin.
+        confirmations:
+          type: integer
+        min_deposit:
+          $ref: '#/components/schemas/Decimal'
+        min_withdraw:
+          $ref: '#/components/schemas/Decimal'
+        withdraw_fee:
+          $ref: '#/components/schemas/Decimal'
+        memo_required:
+          type: boolean
+        deposit_enabled:
+          type: boolean
+        withdraw_enabled:
+          type: boolean
+    Asset:
+      type: object
+      required: [asset_code, name, decimals, deposit_enabled, withdraw_enabled, trading_enabled, networks]
+      properties:
+        asset_code:
+          type: string
+          examples: [BTC]
+        name:
+          type: string
+        decimals:
+          type: integer
+          minimum: 0
+          maximum: 18
+          description: Amounts of the asset have at most this many decimal places.
+        deposit_enabled:
+          type: boolean
+        withdraw_enabled:
+          type: boolean
+        trading_enabled:
+          type: boolean
+        networks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Network'
+    TradingPair:
+      type: object
+      required: [symbol, base_asset, quote_asset, tick_size, lot_size, min_quantity, max_quantity, min_notional, price_band, maker_fee_rate, taker_fee_rate, status]
+      properties:
+        symbol:
+          type: string
+          examples: [BTC-USDT]
+        base_asset:
+          type: string
+        quote_asset:
+          type: string
+        tick_size:
+          $ref: '#/components/schemas/Decimal'
+        lot_size:
+          $ref: '#/components/schemas/Decimal'
+        min_quantity:
+          $ref: '#/components/schemas/Decimal'
+        max_quantity:
+          $ref: '#/components/schemas/Decimal'
+        min_notional:
+          $ref: '#/components/schemas/Decimal'
+        price_band:
+          $ref: '#/components/schemas/Decimal'
+        maker_fee_rate:
+          $ref: '#/components/schemas/Decimal'
+        taker_fee_rate:
+          $ref: '#/components/schemas/Decimal'
+        status:
+          type: string
+          enum: [PREPARE, TRADING, HALT, CANCEL_ONLY, DELISTED]

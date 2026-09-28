@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"time"
 
+	pgxdecimal "github.com/jackc/pgx-shopspring-decimal"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -70,6 +71,11 @@ func Open(ctx context.Context, cfg Config, schema string) (*DB, error) {
 	}
 	pcfg.ConnConfig.RuntimeParams["search_path"] = schema
 	pcfg.ConnConfig.RuntimeParams["application_name"] = schema
+	// NUMERIC scans into and binds from shopspring/decimal (ADR-0008).
+	pcfg.AfterConnect = func(_ context.Context, conn *pgx.Conn) error {
+		pgxdecimal.Register(conn.TypeMap())
+		return nil
+	}
 	pool, err := pgxpool.NewWithConfig(ctx, pcfg)
 	if err != nil {
 		return nil, fmt.Errorf("pg: %w", err)

@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package exchange.instrument.v1;
+
+import "exchange/instrument/v1/instrument.proto";
+
+// Events on instrument.events, keyed by asset code or symbol (requirements
+// §8.1). Every change carries the new version and who made it; consumers
+// keep the highest version they have seen.
+
+message AssetUpserted {
+  Asset asset = 1;
+  string actor = 2;
+  string reason = 3;
+}
+
+message NetworkUpserted {
+  Network network = 1;
+  string actor = 2;
+  string reason = 3;
+}
+
+message TradingPairUpserted {
+  TradingPair pair = 1;
+  string actor = 2;
+  string reason = 3;
+}
+
+// TradingPairStatusChanged follows appendix B: PREPARE -> TRADING <-> HALT;
+// TRADING/HALT -> CANCEL_ONLY -> DELISTED.
+message TradingPairStatusChanged {
+  string symbol = 1;
+  string from_status = 2;
+  string to_status = 3;
+  string reason = 4;
+  string actor = 5;
+  int64 version = 6;
+}
+
+message FeeScheduleChanged {
+  FeeSchedule schedule = 1;
+  string actor = 2;
+  string reason = 3;
+}

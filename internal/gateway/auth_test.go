@@ -53,7 +53,7 @@ func newAuthFixture(t *testing.T) *authFixture {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	r := httpx.NewRouter(httpx.RouterOptions{Logger: slog.New(slog.DiscardHandler)})
-	Mount(r, authn, Upstreams{Auth: upstream, User: upstream, Notification: upstream})
+	Mount(r, authn, Upstreams{Auth: upstream, User: upstream, Notification: upstream, Instrument: upstream})
 	r.With(authn.Required).Post("/v1/orders", upstream.ServeHTTP)
 	f.router = r
 	return f
@@ -136,6 +136,9 @@ func TestPublicAndOptionalRoutes(t *testing.T) {
 	}
 	if status, _ := f.call(http.MethodPost, "/v1/auth/otp/request", "Bearer "+f.token(t, "s-9", authtoken.ScopeFull)); status != 204 || f.seen == nil {
 		t.Fatalf("signed-in otp/request: %d", status)
+	}
+	if status, _ := f.call(http.MethodGet, "/v1/market/pairs/BTC-USDT", ""); status != 204 {
+		t.Fatalf("market data is public: %d", status)
 	}
 	// Unknown auth paths and the other services need a token.
 	for _, p := range []string{"/v1/auth/something-new", "/v1/user/profile", "/v1/notifications", "/v1/notifications/read"} {
