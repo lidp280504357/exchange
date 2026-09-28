@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package exchange.account.v1;
+
+// Events on account.events, keyed by user_id (requirements §8.1). A
+// transfer between a user's SPOT and FUTURES accounts settles in one
+// ledger transaction, so it ends COMPLETED or FAILED at once.
+
+message AccountTransferCompleted {
+  string transfer_id = 1;
+  string user_id = 2;
+  string asset = 3;
+  string amount = 4;
+  string from_account_type = 5;
+  string to_account_type = 6;
+  string journal_id = 7;
+}
+
+message AccountTransferFailed {
+  string transfer_id = 1;
+  string user_id = 2;
+  string asset = 3;
+  string amount = 4;
+  string from_account_type = 5;
+  string to_account_type = 6;
+  // Error code, e.g. LEDGER_INSUFFICIENT_BALANCE.
+  string reason = 7;
+}

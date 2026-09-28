@@ -12,6 +12,9 @@
 //	exchangectl instruments list
 //	exchangectl instruments apply --file deploy/instruments/test.json --reason "..."
 //	exchangectl instruments pair-status BTC-USDT --to TRADING --reason "..."
+//	exchangectl ledger adjust --user <user_id> --asset USDT --amount 100 --reason "..." [--key K]
+//	exchangectl ledger balances <user_id>
+//	exchangectl ledger reconcile
 //
 // On the test server: sudo docker exec exchange-infra-user-service-1 /app/exchangectl flags list
 package main
@@ -51,6 +54,11 @@ commands:
                               make the reference data match a JSON file ("-" for stdin); idempotent
   instruments pair-status <symbol> --to STATUS --reason TEXT
                               move a pair: PREPARE -> TRADING <-> HALT -> CANCEL_ONLY -> DELISTED
+  ledger adjust --user U --asset A --amount X --reason TEXT [--key K]
+                              credit (or debit) a user's SPOT account against ADJUSTMENT
+                              (needs ledger.manual_adjustment; audited)
+  ledger balances <user_id>   a user's accounts
+  ledger reconcile            check the ledger invariants now
 `
 
 func main() {
@@ -93,6 +101,8 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return usersCmd(ctx, cfg, args[1:], out)
 	case "instruments":
 		return instrumentsCmd(ctx, cfg, args[1:], os.Stdin, out)
+	case "ledger":
+		return ledgerCmd(ctx, cfg, args[1:], out)
 	default:
 		fmt.Fprint(out, usage)
 		return fmt.Errorf("unknown command %q", args[0])

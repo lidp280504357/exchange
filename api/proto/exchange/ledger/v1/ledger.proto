@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package exchange.ledger.v1;
+
+// LedgerService is the only way balances change (ADR-0001). Every write
+// takes an idempotency key: repeating a call with the same key and the
+// same content returns the first result, and the same key with other
+// content fails with COMMON_IDEMPOTENCY_CONFLICT. Amounts are decimal
+// strings (ADR-0008); insufficient funds fail with
+// LEDGER_INSUFFICIENT_BALANCE.
+service LedgerService {
+  // Freeze moves an amount from available to frozen (ORDER_FREEZE,
+  // WITHDRAW_FREEZE).
+  rpc Freeze(FreezeRequest) returns (FreezeResponse);
+  // Unfreeze moves an amount from frozen back to available (ORDER_UNFREEZE,
+  // WITHDRAW_UNFREEZE).
+  rpc Unfreeze(UnfreezeRequest) returns (UnfreezeResponse);
+  // Transfer moves available funds between a user's SPOT and FUTURES
+  // accounts (ACCOUNT_TRANSFER).
+  rpc Transfer(TransferRequest) returns (TransferResponse);
+  // GetBalances returns a user's balances.
+  rpc GetBalances(GetBalancesRequest) returns (GetBalancesResponse);
+}
+
+message FreezeRequest {
+  string idempotency_key = 1;
+  string user_id = 2;
+  // SPOT or FUTURES.
+  string account_type = 3;
+  string asset = 4;
+  string amount = 5;
+  // ORDER_FREEZE or WITHDRAW_FREEZE.
+  string entry_type = 6;
+  // What the freeze is for, e.g. an order ID.
+  string reference = 7;
+}
+
+message UnfreezeRequest {
+  string idempotency_key = 1;
+  string user_id = 2;
+  string account_type = 3;
+  string asset = 4;
+  string amount = 5;
+  // ORDER_UNFREEZE or WITHDRAW_UNFREEZE.
+  string entry_type = 6;
+  string reference = 7;
+}
+
+message TransferRequest {
+  string idempotency_key = 1;
+  string user_id = 2;
+  string asset = 3;
+  string amount = 4;
+  string from_account_type = 5;
+  string to_account_type = 6;
+}
+
+// Posting is the result of a write.
+message Posting {
+  string journal_id = 1;
+  // True when the key had been used before and this is the first result.
+  bool replayed = 2;
+}
+
+message FreezeResponse {
+  Posting posting = 1;
+}
+
+message UnfreezeResponse {
+  Posting posting = 1;
+}
+
+message TransferResponse {
+  Posting posting = 1;
+  string transfer_id = 2;
+}
+
+message Balance {
+  string account_type = 1;
+  string asset = 2;
+  string available = 3;
+  string frozen = 4;
+}
+
+message GetBalancesRequest {
+  string user_id = 1;
+  // Empty for every account type.
+  string account_type = 2;
+}
+
+message GetBalancesResponse {
+  repeated Balance balances = 1;
+}

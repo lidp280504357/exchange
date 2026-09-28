@@ -12,6 +12,7 @@ type Upstreams struct {
 	User         http.Handler
 	Notification http.Handler
 	Instrument   http.Handler
+	Ledger       http.Handler
 	// DevInbox is notification-service's mock-provider inbox; nil in
 	// production, where it is never routed.
 	DevInbox http.Handler
@@ -48,6 +49,7 @@ func Mount(r chi.Router, authn *Authenticator, up Upstreams) {
 	r.Handle("/v1/market/pairs", up.Instrument)
 	r.Handle("/v1/market/pairs/*", up.Instrument)
 	r.With(authn.Required).Handle("/v1/user/*", up.User)
+	r.With(authn.Required).Handle("/v1/account/*", up.Ledger)
 	r.With(authn.Required).Handle("/v1/notifications", up.Notification)
 	r.With(authn.Required).Handle("/v1/notifications/*", up.Notification)
 	if up.DevInbox != nil {

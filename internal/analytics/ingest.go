@@ -13,9 +13,11 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	ledgerv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1"
 	"github.com/lidp280504357/exchange/internal/platform/event"
 	"github.com/lidp280504357/exchange/internal/platform/kafka"
 )
@@ -65,7 +67,60 @@ func (in *Ingestor) Store(ctx context.Context, batch []kafka.Delivery) error {
 	if err := in.storeEvents(ctx, batch); err != nil {
 		return err
 	}
-	return in.storeAuditLogs(ctx, batch)
+	if err := in.storeAuditLogs(ctx, batch); err != nil {
+		return err
+	}
+	return in.storeLedgerEntries(ctx, batch)
+}
+
+// storeLedgerEntries copies the lines of ledger.EntryPosted into
+// ledger_entries.
+func (in *Ingestor) storeLedgerEntries(ctx context.Context, batch []kafka.Delivery) error {
+	var b driver.Batch
+	for _, d := range batch {
+		var posted ledgerv1.EntryPosted
+		if d.Topic != event.TopicLedger || !d.Envelope.GetPayload().MessageIs(&posted) {
+			continue
+		}
+		if err := d.Envelope.GetPayload().UnmarshalTo(&posted); err != nil {
+			in.rejected.Inc()
+			continue
+		}
+		journal, err := uuid.Parse(posted.GetJournalId())
+		if err != nil {
+			in.rejected.Inc()
+			continue
+		}
+		if b == nil {
+			if b, err = in.conn.PrepareBatch(ctx, `INSERT INTO ledger_entries (journal_id, seq, line_no, entry_type, account_id,
+				owner_type, owner_id, account_type, asset, amount, balance_kind, available_after, frozen_after, posted_at)`); err != nil {
+				return fmt.Errorf("clickhouse: prepare ledger batch: %w", err)
+			}
+		}
+		at := d.Envelope.GetOccurredAt().AsTime()
+		for i, l := range posted.GetLines() {
+			account, err := uuid.Parse(l.GetAccountId())
+			amount, err2 := decimal.NewFromString(l.GetAmount())
+			available, err3 := decimal.NewFromString(l.GetAvailableAfter())
+			frozen, err4 := decimal.NewFromString(l.GetFrozenAfter())
+			if err != nil || err2 != nil || err3 != nil || err4 != nil {
+				in.rejected.Inc()
+				continue
+			}
+			if err := b.Append(journal, posted.GetSeq(), uint16(i+1), posted.GetEntryType(), account, l.GetOwnerType(), //nolint:gosec // journals have few lines
+				l.GetOwnerId(), l.GetAccountType(), l.GetAsset(), amount, l.GetBalanceKind(), available, frozen, at); err != nil {
+				_ = b.Abort()
+				return fmt.Errorf("clickhouse: append ledger line: %w", err)
+			}
+		}
+	}
+	if b == nil {
+		return nil
+	}
+	if err := b.Send(); err != nil {
+		return fmt.Errorf("clickhouse: send ledger batch: %w", err)
+	}
+	return nil
 }
 
 func (in *Ingestor) storeEvents(ctx context.Context, batch []kafka.Delivery) error {

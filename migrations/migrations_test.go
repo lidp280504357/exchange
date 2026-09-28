@@ -80,7 +80,7 @@ func TestNotifySchema(t *testing.T) {
 func TestDownMigrations(t *testing.T) {
 	for name, fsys := range map[string]fs.FS{
 		"auth": migrations.Auth(), "users": migrations.Users(), "notify": migrations.Notify(), "config": migrations.Config(),
-		"instrument": migrations.Instrument(),
+		"instrument": migrations.Instrument(), "ledger": migrations.Ledger(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			db := apply(t, fsys)
@@ -120,4 +120,52 @@ func TestInstrumentSchema(t *testing.T) {
 	rejects(t, db, "unknown status", `UPDATE trading_pairs SET status = 'LIVE'`)
 	rejects(t, db, "networks need an asset", `INSERT INTO networks (asset_code, network, chain, confirmations, min_deposit,
 		min_withdraw, withdraw_fee) VALUES ('ETH', 'ETH-SEPOLIA', '11155111', 12, 0, 0, 0)`)
+}
+
+func TestLedgerSchema(t *testing.T) {
+	db := apply(t, migrations.Ledger())
+	ctx := context.Background()
+	user, adj, journal := uuid.New(), uuid.New(), uuid.New()
+	accounts := `INSERT INTO accounts (id, owner_type, owner_id, account_type, asset, available) VALUES ($1, $2, $3, $4, 'USDT', $5)`
+	accepts(t, db, accounts, user, "USER", uuid.NewString(), "SPOT", 0)
+	accepts(t, db, accounts, adj, "SYSTEM", "SYSTEM", "ADJUSTMENT", -5)
+	rejects(t, db, "user accounts never go negative", accounts, uuid.New(), "USER", uuid.NewString(), "SPOT", -1)
+	rejects(t, db, "system accounts are not SPOT", accounts, uuid.New(), "SYSTEM", "SYSTEM", "SPOT", 0)
+	rejects(t, db, "users own SPOT or FUTURES only", accounts, uuid.New(), "USER", uuid.NewString(), "FEE_REVENUE", 0)
+
+	// A balanced journal commits; an unbalanced one fails at commit.
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sql := range []string{
+		`INSERT INTO journals (id, idem_key, request_hash, entry_type) VALUES ('` + journal.String() + `', 'k1', '\x00', 'MANUAL_ADJUSTMENT')`,
+		`INSERT INTO journal_lines (journal_id, account_id, asset, amount, balance_kind, available_after, frozen_after, account_version)
+			VALUES ('` + journal.String() + `', '` + user.String() + `', 'USDT', 5, 'AVAILABLE', 5, 0, 1)`,
+		`INSERT INTO journal_lines (journal_id, account_id, asset, amount, balance_kind, available_after, frozen_after, account_version)
+			VALUES ('` + journal.String() + `', '` + adj.String() + `', 'USDT', -5, 'AVAILABLE', -5, 0, 1)`,
+	} {
+		if _, err := tx.Exec(ctx, sql); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("balanced journal: %v", err)
+	}
+	tx, err = db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := uuid.New()
+	_, _ = tx.Exec(ctx, `INSERT INTO journals (id, idem_key, request_hash, entry_type) VALUES ($1, 'k2', '\x00', 'MANUAL_ADJUSTMENT')`, other)
+	_, _ = tx.Exec(ctx, `INSERT INTO journal_lines (journal_id, account_id, asset, amount, balance_kind, available_after, frozen_after, account_version)
+		VALUES ($1, $2, 'USDT', 5, 'AVAILABLE', 10, 0, 2)`, other, user)
+	if err := tx.Commit(ctx); err == nil {
+		t.Fatal("an unbalanced journal must not commit")
+	}
+
+	rejects(t, db, "journals are append-only", `UPDATE journals SET memo = 'x'`)
+	rejects(t, db, "lines are append-only", `DELETE FROM journal_lines`)
+	rejects(t, db, "no truncation", `TRUNCATE journal_lines`)
+	rejects(t, db, "idempotency keys are unique", `INSERT INTO journals (id, idem_key, request_hash, entry_type) VALUES ($1, 'k1', '\x00', 'TRADE_FEE')`, uuid.New())
 }

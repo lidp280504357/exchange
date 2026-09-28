@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package exchange.ledger.v1;
+
+// Events on ledger.events (requirements §8.1).
+
+// EntryLine is one leg of a journal with the balances it left behind.
+message EntryLine {
+  string account_id = 1;
+  // USER or SYSTEM.
+  string owner_type = 2;
+  // The user ID, or SYSTEM.
+  string owner_id = 3;
+  string account_type = 4;
+  string asset = 5;
+  string amount = 6;
+  // AVAILABLE or FROZEN.
+  string balance_kind = 7;
+  string available_after = 8;
+  string frozen_after = 9;
+}
+
+// EntryPosted is a journal, keyed by journal_id; the lines of each asset
+// sum to zero. ClickHouse ledger_entries is built from it.
+message EntryPosted {
+  string journal_id = 1;
+  // Ledger-wide posting order.
+  int64 seq = 2;
+  string entry_type = 3;
+  string idempotency_key = 4;
+  repeated EntryLine lines = 5;
+  string memo = 6;
+}
+
+// BalanceChanged is published for every user account a journal touched,
+// keyed by account_id; the gateway pushes it on the private WebSocket
+// channel "balances".
+message BalanceChanged {
+  string account_id = 1;
+  string user_id = 2;
+  string account_type = 3;
+  string asset = 4;
+  string available = 5;
+  string frozen = 6;
+  string journal_id = 7;
+  string entry_type = 8;
+}

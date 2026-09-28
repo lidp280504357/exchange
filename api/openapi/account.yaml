@@ -1,0 +1,231 @@
+openapi: 3.1.0
+info:
+  title: Exchange account API
+  version: 0.1.0
+  description: |
+    Balances, spot <-> futures transfers and the fund flow, all read from
+    the double-entry ledger (requirements §5.9, §11.4). Every endpoint
+    needs the access token. Amounts are decimal strings (ADR-0008).
+servers:
+  - url: https://astras.vip
+security:
+  - bearer: []
+tags:
+  - name: account
+paths:
+  /v1/account/balances:
+    get:
+      operationId: listBalances
+      summary: The caller's balances
+      tags: [account]
+      parameters:
+        - name: account_type
+          in: query
+          schema:
+            type: string
+            enum: [SPOT, FUTURES]
+      responses:
+        '200':
+          description: One entry per account that has ever held funds.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [balances]
+                properties:
+                  balances:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Balance'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/account/transfers:
+    post:
+      operationId: createTransfer
+      summary: Move funds between the SPOT and FUTURES accounts
+      description: |
+        Settles at once in one ledger transaction. Needs the account.transfer
+        feature and an eligible account (USER_NOT_ELIGIBLE, USER_FROZEN,
+        USER_RISK_REVIEW). Retrying with the same Idempotency-Key returns
+        the same transfer, or the same error for a transfer that failed
+        (LEDGER_INSUFFICIENT_BALANCE, whose details carry transfer_id); the
+        same key with another body fails with COMMON_IDEMPOTENCY_CONFLICT.
+      tags: [account]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            maxLength: 100
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [asset, amount, from_account_type, to_account_type]
+              additionalProperties: false
+              properties:
+                asset:
+                  type: string
+                amount:
+                  $ref: './market.yaml#/components/schemas/Decimal'
+                from_account_type:
+                  type: string
+                  enum: [SPOT, FUTURES]
+                to_account_type:
+                  type: string
+                  enum: [SPOT, FUTURES]
+      responses:
+        '201':
+          description: Completed transfer.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transfer'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+    get:
+      operationId: listTransfers
+      summary: The caller's transfers, newest first
+      tags: [account]
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Transfer'
+                  next_cursor:
+                    type: [string, 'null']
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/account/ledger:
+    get:
+      operationId: listLedgerEntries
+      summary: The caller's fund flow, newest first
+      tags: [account]
+      parameters:
+        - name: asset
+          in: query
+          schema:
+            type: string
+        - name: type
+          in: query
+          description: Entry type, e.g. ACCOUNT_TRANSFER.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of ledger lines.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LedgerEntry'
+                  next_cursor:
+                    type: [string, 'null']
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+  schemas:
+    Balance:
+      type: object
+      required: [account_type, asset, available, frozen, total]
+      properties:
+        account_type:
+          type: string
+          enum: [SPOT, FUTURES]
+        asset:
+          type: string
+        available:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        frozen:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        total:
+          $ref: './market.yaml#/components/schemas/Decimal'
+    Transfer:
+      type: object
+      required: [transfer_id, asset, amount, from_account_type, to_account_type, status, created_at]
+      properties:
+        transfer_id:
+          type: string
+          format: uuid
+        asset:
+          type: string
+        amount:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        from_account_type:
+          type: string
+        to_account_type:
+          type: string
+        status:
+          type: string
+          enum: [COMPLETED, FAILED]
+        failure_reason:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    LedgerEntry:
+      type: object
+      required: [id, journal_id, entry_type, account_type, asset, amount, balance_kind, available_after, frozen_after, posted_at]
+      properties:
+        id:
+          type: string
+        journal_id:
+          type: string
+          format: uuid
+        entry_type:
+          type: string
+        account_type:
+          type: string
+        asset:
+          type: string
+        amount:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        balance_kind:
+          type: string
+          enum: [AVAILABLE, FROZEN]
+        available_after:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        frozen_after:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        posted_at:
+          type: string
+          format: date-time
