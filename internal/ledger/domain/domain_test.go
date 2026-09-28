@@ -116,7 +116,7 @@ func TestBuilders(t *testing.T) {
 // each asset still sums to zero and that no restricted account is negative
 // (§11.4 invariants 1 and 3).
 func TestRandomPostingsKeepInvariants(t *testing.T) {
-	rng := rand.New(rand.NewPCG(1, 2))
+	rng := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // a seeded walk keeps the property test reproducible
 	users := []string{alice, "0199b000-0000-7000-8000-000000000002", "0199b000-0000-7000-8000-000000000003"}
 	accounts := map[AccountKey]*Account{}
 	get := func(k AccountKey) *Account {

@@ -63,14 +63,15 @@ func setup(t *testing.T) (*application.Service, *postgres.Store, *pg.DB) {
 
 func d(s string) decimal.Decimal { return decimal.RequireFromString(s) }
 
-func balance(t *testing.T, svc *application.Service, user, accountType, asset string) (decimal.Decimal, decimal.Decimal) {
+// usdt returns a user's USDT balances in one account type.
+func usdt(t *testing.T, svc *application.Service, user, accountType string) (decimal.Decimal, decimal.Decimal) {
 	t.Helper()
 	list, err := svc.Balances(context.Background(), user, accountType)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, a := range list {
-		if a.Key.Asset == asset {
+		if a.Key.Asset == "USDT" {
 			return a.Available, a.Frozen
 		}
 	}
@@ -98,7 +99,7 @@ func TestPostingsAreIdempotent(t *testing.T) {
 	if err := svc.OnUserRegistered(ctx, registered, user, "SG"); err != nil { // redelivered
 		t.Fatal(err)
 	}
-	if av, _ := balance(t, svc, user, domain.AccountSpot, "USDT"); !av.Equal(d("10000")) {
+	if av, _ := usdt(t, svc, user, domain.AccountSpot); !av.Equal(d("10000")) {
 		t.Fatalf("welcome credit once: %s", av)
 	}
 
@@ -114,7 +115,7 @@ func TestPostingsAreIdempotent(t *testing.T) {
 	if !apperr.Is(err, apperr.CodeIdempotencyConflict) {
 		t.Fatalf("same key, other amount: %v", err)
 	}
-	if av, fr := balance(t, svc, user, domain.AccountSpot, "USDT"); !av.Equal(d("9900")) || !fr.Equal(d("100")) {
+	if av, fr := usdt(t, svc, user, domain.AccountSpot); !av.Equal(d("9900")) || !fr.Equal(d("100")) {
 		t.Fatalf("after freeze: %s/%s", av, fr)
 	}
 
@@ -129,7 +130,7 @@ func TestPostingsAreIdempotent(t *testing.T) {
 	if _, err := svc.Unfreeze(ctx, "order-1-cancel", domain.EntryOrderUnfreeze, user, domain.AccountSpot, "USDT", d("100"), "cancel"); err != nil {
 		t.Fatal(err)
 	}
-	if av, fr := balance(t, svc, user, domain.AccountSpot, "USDT"); !av.Equal(d("10000")) || !fr.IsZero() {
+	if av, fr := usdt(t, svc, user, domain.AccountSpot); !av.Equal(d("10000")) || !fr.IsZero() {
 		t.Fatalf("after unfreeze: %s/%s", av, fr)
 	}
 
@@ -177,7 +178,7 @@ func TestTransfers(t *testing.T) {
 	if _, err := svc.Transfer(ctx, in); !apperr.Is(err, apperr.CodeIdempotencyConflict) {
 		t.Fatalf("same key, other body: %v", err)
 	}
-	if av, _ := balance(t, svc, user, domain.AccountFutures, "USDT"); !av.Equal(d("2500")) {
+	if av, _ := usdt(t, svc, user, domain.AccountFutures); !av.Equal(d("2500")) {
 		t.Fatalf("futures: %s", av)
 	}
 
@@ -202,12 +203,16 @@ func TestTransfers(t *testing.T) {
 	}
 
 	blocked := setupWith(t, svc, eligibility{reason: "USER_FROZEN"})
-	if _, err := blocked.Transfer(ctx, application.TransferInput{UserID: user, IdemKey: "t-3", Asset: "USDT", Amount: d("1"),
-		From: domain.AccountFutures, To: domain.AccountSpot}); !apperr.Is(err, "USER_FROZEN") {
+	if _, err := blocked.Transfer(ctx, application.TransferInput{
+		UserID: user, IdemKey: "t-3", Asset: "USDT", Amount: d("1"),
+		From: domain.AccountFutures, To: domain.AccountSpot,
+	}); !apperr.Is(err, "USER_FROZEN") {
 		t.Fatalf("frozen: %v", err)
 	}
-	if _, err := svc.Transfer(ctx, application.TransferInput{UserID: user, IdemKey: "t-4", Asset: "DOGE", Amount: d("1"),
-		From: domain.AccountFutures, To: domain.AccountSpot}); !apperr.Is(err, apperr.CodeNotFound) {
+	if _, err := svc.Transfer(ctx, application.TransferInput{
+		UserID: user, IdemKey: "t-4", Asset: "DOGE", Amount: d("1"),
+		From: domain.AccountFutures, To: domain.AccountSpot,
+	}); !apperr.Is(err, apperr.CodeNotFound) {
 		t.Fatalf("unknown asset: %v", err)
 	}
 }
@@ -248,7 +253,7 @@ func TestConcurrentFreezes(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	av, fr := balance(t, svc, user, domain.AccountSpot, "USDT")
+	av, fr := usdt(t, svc, user, domain.AccountSpot)
 	if ok != 25 || refused != 5 || !av.IsZero() || !fr.Equal(d("10000")) {
 		t.Fatalf("ok %d refused %d, balances %s/%s", ok, refused, av, fr)
 	}
