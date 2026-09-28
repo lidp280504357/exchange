@@ -95,13 +95,38 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
 
+  web:
+    name: web (H5 types, tests, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/h5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/h5/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: API types match the OpenAPI contracts
+        run: pnpm api:types && git diff --exit-code -- src/api/gen
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
   deploy-config:
     name: deploy config (shell, compose, nginx)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: shell syntax
-        run: bash -n deploy/server-update.sh deploy/redpanda/topics.sh deploy/compose/nginx/update-cloudflare-ips.sh
+        run: |
+          bash -n deploy/server-update.sh deploy/redpanda/topics.sh deploy/compose/nginx/update-cloudflare-ips.sh
+          for f in scripts/e2e/*.sh scripts/e2e/lib/*.sh; do bash -n "$f"; done
       - name: compose config
         run: |
           docker compose -f deploy/compose/docker-compose.yml --env-file deploy/compose/.env.example config --quiet
@@ -116,6 +141,5 @@ jobs:
           docker run --rm \
             -v "$PWD/deploy/compose/nginx/conf.d:/etc/nginx/conf.d:ro" \
             -v "$PWD/deploy/compose/nginx/snippets:/etc/nginx/snippets:ro" \
-            -v "$PWD/deploy/compose/nginx/html:/usr/share/nginx/html:ro" \
             -v "$tmp:/etc/nginx/ssl:ro" \
             nginx:1.29-alpine nginx -t

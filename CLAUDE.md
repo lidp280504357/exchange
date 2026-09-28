@@ -12,13 +12,13 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
 | [文档评审与待决策-2026-09-27.md](文档评审与待决策-2026-09-27.md) | §8 是用户逐项确认的 27 项决策结论，§9 外部账号 |
 | [准备工作清单.md](准备工作清单.md) | 环境与准备状态、后续账号 |
 | [docs/adr/](docs/adr/README.md) | 9 条架构决策记录，改决策要新增 ADR |
-| [docs/runbook/](docs/runbook/) | Turnstile、Cloudflare+nginx TLS、服务器部署、Grafana Cloud（暂缓） |
+| [docs/runbook/](docs/runbook/) | 各部分运维手册：otp、auth、accounts、instruments、ledger、gateway、h5、feature-flags；服务器部署、Cloudflare+nginx TLS、Turnstile、Grafana Cloud（暂缓） |
 | `环境配置.md` | **只在本地**（已被 git 忽略），含测试服凭据与实测状态 |
 
 ## 当前状态（2026-09-28）
 
 - 阶段 0 完成，除 M0.2 契约初稿；环境、账号、CI、部署链路全部就绪。
-- §10 任务 2–8 完成：`internal/platform/{config,logging,pii,tracing,apperr,httpx,health,app,pg,migrate,redisx,grpcx,bootstrap,testenv,event,kafka,outbox,inbox,idempotency,chx,flags}`、`internal/analytics`；`cmd/` 下网关、六个服务骨架、analytics-consumer 与运维 CLI `exchangectl` 已部署在测试服（`https://astras.vip/v1/time`）。任务 9 的 auth/users/notify 迁移与契约、任务 10 的 OTP（`internal/auth`、`internal/notification`、网关 `/v1/auth/*` 代理，见 `docs/runbook/otp.md`）、任务 11 的注册/登录/令牌/会话/step-up/换绑（`internal/auth`、`internal/user`、`internal/platform/authtoken`、网关鉴权 `internal/gateway/auth.go` 与路由表 `routes.go`，见 `docs/runbook/auth.md`）、任务 12 的账户状态/eligibility/用户通知（`internal/user`、`internal/notification` 的站内信与安全邮件、`exchangectl users`，见 `docs/runbook/accounts.md`）、任务 13 的 instrument-service（资产/网络/交易对/费率、`exchangectl instruments apply` 幂等同步 `deploy/instruments/test.json`，见 `docs/runbook/instruments.md`）、任务 14 的账本（`internal/ledger`，余额只能经 `Post` 写分录，见 `docs/runbook/ledger.md`）、任务 15 的网关限流/幂等键/WebSocket（见 `docs/runbook/gateway.md`）已完成。**下一步从实施计划 §10 任务 16 开始**（H5 前端与 TypeScript 类型），用户已授权每完成一个任务即提交、推送并部署，连续做完阶段 1。每个任务后跑 `task e2e`（`scripts/e2e/*.sh`，对 https://astras.vip）。
+- §10 任务 2–8 完成：`internal/platform/{config,logging,pii,tracing,apperr,httpx,health,app,pg,migrate,redisx,grpcx,bootstrap,testenv,event,kafka,outbox,inbox,idempotency,chx,flags}`、`internal/analytics`；`cmd/` 下网关、六个服务骨架、analytics-consumer 与运维 CLI `exchangectl` 已部署在测试服（`https://astras.vip/v1/time`）。任务 9 的 auth/users/notify 迁移与契约、任务 10 的 OTP（`internal/auth`、`internal/notification`、网关 `/v1/auth/*` 代理，见 `docs/runbook/otp.md`）、任务 11 的注册/登录/令牌/会话/step-up/换绑（`internal/auth`、`internal/user`、`internal/platform/authtoken`、网关鉴权 `internal/gateway/auth.go` 与路由表 `routes.go`，见 `docs/runbook/auth.md`）、任务 12 的账户状态/eligibility/用户通知（`internal/user`、`internal/notification` 的站内信与安全邮件、`exchangectl users`，见 `docs/runbook/accounts.md`）、任务 13 的 instrument-service（资产/网络/交易对/费率、`exchangectl instruments apply` 幂等同步 `deploy/instruments/test.json`，见 `docs/runbook/instruments.md`）、任务 14 的账本（`internal/ledger`，余额只能经 `Post` 写分录，见 `docs/runbook/ledger.md`）、任务 15 的网关限流/幂等键/WebSocket（见 `docs/runbook/gateway.md`）、任务 16 的 H5（`web/h5`，见 `docs/runbook/h5.md`）已完成。**下一步从实施计划 §10 任务 17 开始**（测试补齐与故障注入），用户已授权每完成一个任务即提交、推送并部署，连续做完阶段 1。每个任务后跑 `task e2e`（`scripts/e2e/*.sh`，对 https://astras.vip）。
 - 服务隔离：`.golangci.yml` 的 depguard 规则禁止 `internal/<服务>` 互相 import，新服务要在那里补一组规则。消费事件用 `bootstrap.Consumer` + 应用层经 inbox 去重（auth 的 `Store.Once`、notification 的 `inbox.ProcessID`）。
 - 鉴权：网关验 JWT 后把身份写进 `X-User-Id`/`X-Session-Id`/`X-Auth-Scope` 头转发（客户端同名头会被剥掉），服务端用 `httpx.UserID(r)`/`httpx.SessionID(r)` 读取；新的公开接口要加进 `internal/gateway/routes.go`，否则默认必须登录。敏感操作读 `X-Step-Up-Token`，跨服务用 auth-service gRPC `ConsumeStepUp` 兑换。
 - 功能开关：`bootstrap.Flags` 拿 `*flags.Client`，`Enabled(key, flags.Subject{...})`；改开关用 `exchangectl flags set`（见 `docs/runbook/feature-flags.md`）。
@@ -42,10 +42,11 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
 
 ## 开发与部署
 
-- 本机不装 Docker。本机 `go run` / `vite dev` 直连测试服基础设施，地址与凭据在本地 `.env`。
-- 推送 GitHub 后在测试服更新：`task deploy`（等价 `ssh exchange 'bash /opt/exchange/src/deploy/server-update.sh'`），带提交号回滚。
-- 入口 `https://astras.vip`：Cloudflare → nginx 容器 → `api-gateway:8080`（尚未存在，`/v1/*` 返回 502）。
-- 应用容器编排文件 `deploy/compose/docker-compose.apps.yml` 尚未创建，服务器 `apps.env` 已备好供 `env_file` 注入。
+- 本机不装 Docker。本机 `task run -- <服务>` / `task web:dev` 直连测试服基础设施，地址与凭据在本地 `.env`。
+- 推送 GitHub 后在测试服更新：`task deploy`（等价 `ssh exchange 'bash /opt/exchange/src/deploy/server-update.sh'`），带提交号回滚；脚本同时同步参考数据、热加载 nginx、构建并发布 H5。
+- 入口 `https://astras.vip`：Cloudflare → nginx 容器 → `/v1/*` 到 `api-gateway:8080`，其余为 H5 静态文件。
+- 应用容器编排在 `deploy/compose/docker-compose.apps.yml`，密钥由服务器 `apps.env` 经 `env_file` 注入。
+- 前端：`web/h5`（pnpm 11、Node 24），`task web:check` 在 `task ci` 里；改 OpenAPI 后 `task web:types` 并提交生成文件。Claude Code 预览用 `.claude/launch.json` 的 `h5`（端口必须是 5173，刷新 Cookie 与 WebSocket 的来源白名单写的就是它）。
 
 ## Claude Code 会话提示
 

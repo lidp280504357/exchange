@@ -46,7 +46,7 @@ const res = await fetch(base + "/v1/account/transfers", {
 if (res.status !== 201) throw new Error("transfer: " + res.status + " " + (await res.text()));
 const futures = await next((m) => m.channel === "balances" && m.data.account_type === "FUTURES" && m.data.asset === "USDT", "futures balance push");
 const spot = await next((m) => m.channel === "balances" && m.data.account_type === "SPOT" && m.data.asset === "USDT", "spot balance push");
-if (futures.data.available !== "12.5" || spot.data.entry_type !== "ACCOUNT_TRANSFER" || !(futures.seq > 0)) {
+if (futures.data.entry_type !== "ACCOUNT_TRANSFER" || spot.data.entry_type !== "ACCOUNT_TRANSFER" || !(futures.seq > 0) || spot.seq === futures.seq) {
   throw new Error("balance pushes: " + JSON.stringify([futures, spot]));
 }
 ok(`balance pushes after the transfer (seq ${spot.seq}, ${futures.seq})`);

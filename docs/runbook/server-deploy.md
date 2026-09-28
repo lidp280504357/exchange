@@ -17,7 +17,7 @@ bash /opt/exchange/src/deploy/server-update.sh          # 更新到 origin/main
 bash /opt/exchange/src/deploy/server-update.sh 305e2a7  # 回滚/切换到指定提交
 ```
 
-脚本做四件事：拉代码并重置到目标版本；把 `deploy/compose/` 同步到 `/opt/exchange/infra`（不碰 `.env`、证书、Cloudflare IP 列表）；幂等核对 Redpanda topic；`docker compose up -d --build` 构建并更新容器，最后清理悬空镜像。
+脚本依次：拉代码并重置到目标版本；把 `deploy/compose/` 同步到 `/opt/exchange/infra`（不碰 `.env`、`apps.env`、证书、Cloudflare IP 列表、`nginx/html/`）；幂等核对 Redpanda topic；`docker compose up -d --build` 构建并更新容器、清理悬空镜像；校验并热加载 nginx 配置；按 `deploy/instruments/test.json` 幂等同步参考数据（[instruments.md](instruments.md)）；在 node 容器里构建 H5 并发布到 nginx 静态目录（[h5.md](h5.md)）。
 
 ## 首次克隆（部署密钥加到 GitHub 之后）
 
@@ -63,4 +63,4 @@ ssh exchange 'sudo docker exec exchange-infra-api-gateway-1 wget -qO- http://127
 
 ## 本机调试
 
-本机 `task run -- <service>`（等价 `go run ./cmd/<service>`）或 `vite dev`，读取仓库根目录 `.env`，直连测试服的数据库、Redis、Redpanda、ClickHouse（安全组已放行本机 IP）。本机不需要 Docker。Ctrl-C 触发优雅退出，再按一次立即结束。
+本机 `task run -- <service>`（等价 `go run ./cmd/<service>`）或 `task web:dev`（H5，代理到测试服），读取仓库根目录 `.env`，直连测试服的数据库、Redis、Redpanda、ClickHouse（安全组已放行本机 IP）。本机不需要 Docker。Ctrl-C 触发优雅退出，再按一次立即结束。

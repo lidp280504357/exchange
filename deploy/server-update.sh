@@ -18,7 +18,7 @@ main() {
   echo "== 代码版本 $APP_VERSION：$(git log -1 --pretty=%s)"
 
   # 1. 基础设施与 nginx 配置以仓库为准同步到 infra 目录；不覆盖服务器上的 .env、证书和生成的 Cloudflare IP 列表
-  rsync -a --exclude '.env' --exclude 'apps.env' --exclude 'ssl/' --exclude '00-cloudflare-real-ip.conf' deploy/compose/ "$INFRA"/
+  rsync -a --exclude '.env' --exclude 'apps.env' --exclude 'ssl/' --exclude '00-cloudflare-real-ip.conf' --exclude 'nginx/html/' deploy/compose/ "$INFRA"/
   cp deploy/redpanda/topics.sh "$INFRA/redpanda/topics.sh"
   mkdir -p "$INFRA/backup" && cp deploy/backup/pg-backup.sh "$INFRA/backup/pg-backup.sh"
 
@@ -34,11 +34,25 @@ main() {
     sudo docker compose "${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180
   fi
   sudo docker image prune -f >/dev/null
+  # nginx 配置是挂载进容器的文件，内容变了 compose 不会重启它：校验后热加载（校验失败则部署失败，旧配置继续服务）
+  sudo docker compose "${COMPOSE[@]}" exec -T nginx sh -c 'nginx -t -q && nginx -s reload' && echo "== nginx 配置已重新加载"
 
   # 4. 参考数据（资产、网络、交易对、费率）以仓库文件为准幂等同步；已存在交易对的状态不受影响
   if [ -f "$INFRA/docker-compose.apps.yml" ] && [ -f deploy/instruments/test.json ]; then
     sudo docker compose "${COMPOSE[@]}" exec -T instrument-service /app/exchangectl instruments apply \
       --file - --reason "deploy $APP_VERSION" < deploy/instruments/test.json | tail -1 | sed 's/^/== 参考数据：/'
+  fi
+  # 5. H5 前端：在 node 容器里构建（glibc 镜像，打包器与 Tailwind 的原生模块都有对应二进制；pnpm 缓存放命名卷），
+  #    构建成功才替换 nginx 的静态目录；Turnstile 站点密钥是公开值
+  if [ -f web/h5/package.json ]; then
+    local site_key
+    site_key="$(sudo grep -E '^TURNSTILE_SITE_KEY=' "$INFRA/apps.env" | cut -d= -f2- | tr -d '"' || true)"
+    sudo docker run --rm -e CI=true -e TURNSTILE_SITE_KEY="$site_key" -v "$SRC/web/h5:/app" -v exchange-pnpm-store:/pnpm-store -w /app \
+      node:24-slim sh -c 'npm install -g pnpm@11 --silent >/dev/null && pnpm config set store-dir /pnpm-store >/dev/null \
+        && pnpm install --frozen-lockfile --silent && { pnpm build >/tmp/build.log 2>&1 || { cat /tmp/build.log; exit 1; }; }'
+    sudo mkdir -p "$INFRA/nginx/html"
+    sudo rsync -a --delete web/h5/dist/ "$INFRA/nginx/html/"
+    echo "== H5 已构建：$(ls web/h5/dist/assets | wc -l) 个资源文件"
   fi
   echo "== 服务状态"
   sudo docker compose "${COMPOSE[@]}" ps --format 'table {{.Service}}\t{{.Status}}'

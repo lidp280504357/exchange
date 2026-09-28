@@ -74,16 +74,40 @@ tasks:
     desc: 部署脚本语法检查
     cmds:
       - bash -n deploy/server-update.sh deploy/redpanda/topics.sh deploy/compose/nginx/update-cloudflare-ips.sh
-      - for f in scripts/e2e/*.sh; do bash -n "$f"; done
+      - for f in scripts/e2e/*.sh scripts/e2e/lib/*.sh; do bash -n "$f"; done
 
   e2e:
     desc: 对已部署的非生产环境跑端到端检查（默认 https://astras.vip，BASE=... 可改；读 .env 的 CAPTCHA_BYPASS_TOKEN）
     cmds:
       - for f in scripts/e2e/*.sh; do bash "$f" || exit 1; done
 
+  web:dev:
+    desc: 本机启动 H5（Vite，/v1 与 WebSocket 代理到测试服，http://localhost:5173）
+    dir: web/h5
+    cmds: [pnpm install --prefer-offline, pnpm dev]
+
+  web:build:
+    desc: 构建 H5 到 web/h5/dist
+    dir: web/h5
+    cmds: [pnpm install --frozen-lockfile --prefer-offline, pnpm build]
+
+  web:types:
+    desc: 由 api/openapi 重新生成 H5 的 TypeScript 类型
+    dir: web/h5
+    cmds: [pnpm api:types]
+
+  web:check:
+    desc: H5 类型与契约一致、类型检查、单元测试
+    dir: web/h5
+    cmds:
+      - pnpm install --frozen-lockfile --prefer-offline --silent
+      - pnpm api:types >/dev/null && git diff --exit-code -- src/api/gen
+      - pnpm typecheck
+      - pnpm test
+
   ci:
     desc: 与 CI 相同的本地检查（不含 vuln）
-    deps: [fmt:check, mod:check, vet, lint, scripts:check]
+    deps: [fmt:check, mod:check, vet, lint, scripts:check, web:check]
     cmds:
       - task: test
 
