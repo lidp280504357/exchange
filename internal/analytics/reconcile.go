@@ -2,6 +2,7 @@ package analytics
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/lidp280504357/exchange/internal/platform/pg"
@@ -114,6 +116,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, from, to time.Time) ([]Resul
 		q := `SELECT topic, count(*) FROM ` + pgx.Identifier{schema, "outbox"}.Sanitize() + `
 			WHERE published_at IS NOT NULL AND occurred_at >= $1 AND occurred_at < $2 GROUP BY topic`
 		rows, err := r.db.Query(ctx, q, from, to)
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "42P01" { // undefined_table
+			continue // the service has not created its schema yet
+		}
 		if err != nil {
 			return nil, fmt.Errorf("reconcile %s: %w", schema, err)
 		}

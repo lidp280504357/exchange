@@ -80,7 +80,7 @@ func TestNotifySchema(t *testing.T) {
 func TestDownMigrations(t *testing.T) {
 	for name, fsys := range map[string]fs.FS{
 		"auth": migrations.Auth(), "users": migrations.Users(), "notify": migrations.Notify(), "config": migrations.Config(),
-		"instrument": migrations.Instrument(), "ledger": migrations.Ledger(), "risk": migrations.Risk(),
+		"instrument": migrations.Instrument(), "ledger": migrations.Ledger(), "risk": migrations.Risk(), "trading": migrations.Trading(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			db := apply(t, fsys)
@@ -184,4 +184,23 @@ func TestRiskSchema(t *testing.T) {
 	rejects(t, db, "one assessment per source event", assessment, uuid.New(), user, event, 60, "REVIEW")
 	rejects(t, db, "scores stay within 0..100", assessment, uuid.New(), user, uuid.New(), 101, "REVIEW")
 	rejects(t, db, "known actions only", assessment, uuid.New(), user, uuid.New(), 10, "BAN")
+}
+
+func TestTradingSchema(t *testing.T) {
+	db := apply(t, migrations.Trading())
+	user := uuid.New()
+	order := `INSERT INTO orders (id, user_id, client_order_id, symbol, side, type, time_in_force, stp, price, quantity, quote_amount,
+		status, frozen_asset, frozen_amount, freeze_state, maker_fee_rate, taker_fee_rate, base_decimals, quote_decimals, created_at, updated_at)
+		VALUES ($1, $2, $3, 'BTC-USDT', $4, $5, 'GTC', 'CANCEL_NEWEST', $6, $7, $8, 'NEW', 'USDT', 60, 'PENDING', 0.001, 0.001, 8, 6, now(), now())`
+	accepts(t, db, order, uuid.New(), user, "c1", "BUY", "LIMIT", 60000, 0.001, nil)
+	rejects(t, db, "client_order_id is unique per user", order, uuid.New(), user, "c1", "BUY", "LIMIT", 60000, 0.001, nil)
+	accepts(t, db, order, uuid.New(), uuid.New(), "c1", "BUY", "LIMIT", 60000, 0.001, nil)
+	accepts(t, db, order, uuid.New(), user, "c2", "BUY", "MARKET", nil, nil, 100)
+	accepts(t, db, order, uuid.New(), user, "c3", "SELL", "MARKET", nil, 0.5, nil)
+	rejects(t, db, "a limit order needs a price", order, uuid.New(), user, "c4", "BUY", "LIMIT", nil, 0.001, nil)
+	rejects(t, db, "a market buy spends a quote amount", order, uuid.New(), user, "c5", "BUY", "MARKET", nil, 0.5, nil)
+	rejects(t, db, "a market sell sells a quantity", order, uuid.New(), user, "c6", "SELL", "MARKET", nil, nil, 100)
+	rejects(t, db, "client order IDs are short tokens", order, uuid.New(), user, "has space", "BUY", "LIMIT", 60000, 0.001, nil)
+	rejects(t, db, "amounts are positive", order, uuid.New(), user, "c7", "BUY", "LIMIT", 60000, -1, nil)
+	rejects(t, db, "known statuses only", `UPDATE orders SET status = 'LIVE'`)
 }

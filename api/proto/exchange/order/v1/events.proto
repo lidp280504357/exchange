@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package exchange.order.v1;
+
+import "exchange/order/v1/order.proto";
+
+// Events on order.events, keyed by symbol (requirements §8.1). The trading
+// service publishes OrderAccepted and OrderRejected (without a sequence);
+// the matching engine publishes the others with its sequence.
+
+// OrderAccepted: the order passed the checks and its funds are frozen.
+message OrderAccepted {
+  Order order = 1;
+  string frozen_asset = 2;
+  string frozen_amount = 3;
+}
+
+// OrderRejected: the order could not be funded, so it never reaches the
+// engine.
+message OrderRejected {
+  string order_id = 1;
+  string client_order_id = 2;
+  string user_id = 3;
+  string symbol = 4;
+  // An appendix C code, e.g. LEDGER_INSUFFICIENT_BALANCE.
+  string reason_code = 5;
+}

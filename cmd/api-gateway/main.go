@@ -29,12 +29,14 @@ type settings struct {
 	// HTTPAddr is the public listen address (HTTP_ADDR).
 	HTTPAddr string `koanf:"http_addr"`
 	// Upstream REST addresses (AUTH_SERVICE_URL, USER_SERVICE_URL,
-	// NOTIFICATION_SERVICE_URL, INSTRUMENT_SERVICE_URL, LEDGER_SERVICE_URL).
+	// NOTIFICATION_SERVICE_URL, INSTRUMENT_SERVICE_URL, LEDGER_SERVICE_URL,
+	// TRADING_SERVICE_URL).
 	AuthURL         string `koanf:"auth_service_url"`
 	UserURL         string `koanf:"user_service_url"`
 	NotificationURL string `koanf:"notification_service_url"`
 	InstrumentURL   string `koanf:"instrument_service_url"`
 	LedgerURL       string `koanf:"ledger_service_url"`
+	TradingURL      string `koanf:"trading_service_url"`
 	// Redis holds the session revocation marks auth-service sets, the rate
 	// limit counters and the idempotency cache.
 	Redis redisx.Config `koanf:",squash"`
@@ -61,6 +63,7 @@ func setup(ctx context.Context, a *app.App) error {
 		NotificationURL: "http://localhost:8083",
 		InstrumentURL:   "http://localhost:8084",
 		LedgerURL:       "http://localhost:8085",
+		TradingURL:      "http://localhost:8088",
 		WSOrigins:       []string{"astras.vip", "localhost:5173"},
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
@@ -83,6 +86,10 @@ func setup(ctx context.Context, a *app.App) error {
 		return err
 	}
 	ledgerURL, err := upstream(cfg.LedgerURL)
+	if err != nil {
+		return err
+	}
+	tradingURL, err := upstream(cfg.TradingURL)
 	if err != nil {
 		return err
 	}
@@ -109,7 +116,7 @@ func setup(ctx context.Context, a *app.App) error {
 	notification := gateway.NewProxy(notificationURL)
 	up := gateway.Upstreams{
 		Auth: gateway.NewProxy(authURL), User: gateway.NewProxy(userURL), Notification: notification,
-		Instrument: gateway.NewProxy(instrumentURL), Ledger: gateway.NewProxy(ledgerURL),
+		Instrument: gateway.NewProxy(instrumentURL), Ledger: gateway.NewProxy(ledgerURL), Trading: gateway.NewProxy(tradingURL),
 	}
 	if a.Config().Env != config.EnvProd {
 		// Dev inbox of the mock providers (codes sent by SMS or to test mail

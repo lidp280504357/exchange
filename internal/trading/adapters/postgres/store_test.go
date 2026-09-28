@@ -1,0 +1,210 @@
+package postgres_test
+
+import (
+	"context"
+	"log/slog"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
+
+	"github.com/lidp280504357/exchange/internal/platform/event"
+	"github.com/lidp280504357/exchange/internal/platform/migrate"
+	"github.com/lidp280504357/exchange/internal/platform/pg"
+	"github.com/lidp280504357/exchange/internal/platform/testenv"
+	"github.com/lidp280504357/exchange/internal/trading/adapters/postgres"
+	"github.com/lidp280504357/exchange/internal/trading/adapters/prices"
+	"github.com/lidp280504357/exchange/internal/trading/application"
+	"github.com/lidp280504357/exchange/internal/trading/domain"
+	"github.com/lidp280504357/exchange/internal/trading/ports"
+	"github.com/lidp280504357/exchange/migrations"
+)
+
+func setup(t *testing.T) (*postgres.Store, *pg.DB) {
+	t.Helper()
+	db := testenv.Postgres(t)
+	ctx := context.Background()
+	log := slog.New(slog.DiscardHandler)
+	if err := migrate.UpPlatform(ctx, db, log); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate.Up(ctx, db, migrations.Trading(), log); err != nil {
+		t.Fatal(err)
+	}
+	return postgres.NewStore(db, event.NewFactory("spot-trading-service", "test")), db
+}
+
+func d(s string) decimal.Decimal { return decimal.RequireFromString(s) }
+
+var pair = domain.Pair{
+	Symbol: "BTC-USDT", Base: "BTC", Quote: "USDT", TickSize: d("0.01"), LotSize: d("0.00001"),
+	MinQuantity: d("0.00001"), MaxQuantity: d("100"), MinNotional: d("5"), PriceBand: d("0.1"),
+	MakerFeeRate: d("0.001"), TakerFeeRate: d("0.002"), Status: domain.PairTrading, BaseDecimals: 8, QuoteDecimals: 6, Tradable: true,
+}
+
+func order(t *testing.T, user string, req domain.Request, at time.Time) domain.Order {
+	t.Helper()
+	req.UserID = user
+	if req.Symbol == "" {
+		req.Symbol = pair.Symbol
+	}
+	o, err := domain.NewOrder(uuid.Must(uuid.NewV7()).String(), req, pair, d("60000"), at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return o
+}
+
+func limitBuy() domain.Request {
+	return domain.Request{Side: domain.SideBuy, Type: domain.TypeLimit, Price: d("60000.01"), Quantity: d("0.00013")}
+}
+
+func TestOrdersRoundTrip(t *testing.T) {
+	store, _ := setup(t)
+	ctx := context.Background()
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	o := order(t, uuid.NewString(), limitBuy(), at)
+	market := order(t, o.UserID, domain.Request{Side: domain.SideBuy, Type: domain.TypeMarket, QuoteAmount: d("100")}, at)
+	for _, x := range []domain.Order{o, market} {
+		if err := store.Read().Orders().Insert(ctx, x); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := store.Read().Orders().Get(ctx, o.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Price.Equal(d("60000.01")) || !got.Quantity.Equal(d("0.00013")) || !got.QuoteAmount.IsZero() ||
+		!got.FrozenAmount.Equal(d("7.800002")) || got.FreezeState != domain.FreezePending || got.TimeInForce != domain.GTC ||
+		!got.TakerFeeRate.Equal(d("0.002")) || got.QuoteDecimals != 6 || !got.CreatedAt.Equal(at) || got.ClientOrderID != o.ID {
+		t.Fatalf("round trip: %+v", got)
+	}
+	m, _ := store.Read().Orders().Get(ctx, market.ID)
+	if !m.QuoteAmount.Equal(d("100")) || !m.Price.IsZero() || !m.ProtectionPrice.Equal(d("66000")) {
+		t.Fatalf("market order: %+v", m)
+	}
+	if byClient, err := store.Read().Orders().ByClientID(ctx, o.UserID, o.ClientOrderID); err != nil || byClient.ID != o.ID {
+		t.Fatalf("by client id: %v %v", byClient.ID, err)
+	}
+	got.Status, got.RejectReason, got.FreezeState, got.CancelRequested, got.Sequence =
+		domain.StatusRejected, "LEDGER_INSUFFICIENT_BALANCE", domain.FreezeNone, true, 7
+	if err := store.Tx(ctx, func(r ports.Repos) error { return r.Orders().Update(ctx, got) }); err != nil {
+		t.Fatal(err)
+	}
+	again, _ := store.Read().Orders().Get(ctx, o.ID)
+	if again.Status != domain.StatusRejected || again.RejectReason != "LEDGER_INSUFFICIENT_BALANCE" || !again.CancelRequested || again.Sequence != 7 {
+		t.Fatalf("update: %+v", again)
+	}
+	if _, err := store.Read().Orders().Get(ctx, uuid.NewString()); err != domain.ErrOrderNotFound { //nolint:errorlint // sentinel returned as is
+		t.Fatalf("missing order: %v", err)
+	}
+}
+
+func TestActiveOrdersAndPages(t *testing.T) {
+	store, _ := setup(t)
+	ctx := context.Background()
+	user, at := uuid.NewString(), time.Now().Add(-time.Minute)
+	var ids []string
+	for i, status := range []domain.Status{domain.StatusNew, domain.StatusOpen, domain.StatusFilled, domain.StatusPartiallyFilled} {
+		o := order(t, user, limitBuy(), at.Add(time.Duration(i)*time.Second))
+		o.Status = status
+		if status != domain.StatusNew {
+			o.FreezeState = domain.FreezeDone
+		}
+		if err := store.Read().Orders().Insert(ctx, o); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, o.ID)
+	}
+	other := order(t, user, domain.Request{Symbol: "BTC-USDT", Side: domain.SideSell, Type: domain.TypeLimit, Price: d("61000"), Quantity: d("0.001")}, at)
+	other.Symbol = "ETH-USDT"
+	other.FreezeState = domain.FreezeDone
+	if err := store.Read().Orders().Insert(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	onSymbol, total, err := store.Read().Orders().CountActive(ctx, user, "BTC-USDT")
+	if err != nil || onSymbol != 3 || total != 4 {
+		t.Fatalf("counts: %d %d %v", onSymbol, total, err)
+	}
+	var active []domain.Order
+	err = store.Tx(ctx, func(r ports.Repos) error {
+		if err := r.Orders().LockUser(ctx, user); err != nil {
+			return err
+		}
+		var err error
+		active, err = r.Orders().Active(ctx, user, "BTC-USDT")
+		return err
+	})
+	if err != nil || len(active) != 3 || active[0].ID != ids[0] {
+		t.Fatalf("active: %d %v", len(active), err)
+	}
+	page, err := store.Read().Orders().List(ctx, user, ports.ListFilter{Symbol: "BTC-USDT", Statuses: domain.ActiveStatuses, Limit: 2})
+	if err != nil || len(page) != 2 || page[0].ID != ids[3] || page[1].ID != ids[1] {
+		t.Fatalf("page 1: %v", err)
+	}
+	page, err = store.Read().Orders().List(ctx, user, ports.ListFilter{Symbol: "BTC-USDT", Statuses: domain.ActiveStatuses, Before: page[1].ID, Limit: 2})
+	if err != nil || len(page) != 1 || page[0].ID != ids[0] {
+		t.Fatalf("page 2: %v", err)
+	}
+	all, _ := store.Read().Orders().List(ctx, user, ports.ListFilter{Limit: 10})
+	if len(all) != 5 {
+		t.Fatalf("all orders: %d", len(all))
+	}
+	pending, err := store.Read().Orders().PendingFreeze(ctx, time.Now(), 10)
+	if err != nil || len(pending) != 1 || pending[0].ID != ids[0] {
+		t.Fatalf("pending freeze: %d %v", len(pending), err)
+	}
+}
+
+type freezeOK struct{}
+
+func (freezeOK) Freeze(context.Context, string, string, string, decimal.Decimal, string) error {
+	return nil
+}
+
+type onePair struct{}
+
+func (onePair) Pair(context.Context, string) (domain.Pair, error) { return pair, nil }
+
+type eligible struct{}
+
+func (eligible) Check(context.Context, string, string, string) (bool, string, error) {
+	return true, "", nil
+}
+
+func TestPlacedOrdersQueueTheirEventsAndCommand(t *testing.T) {
+	store, db := setup(t)
+	ctx := context.Background()
+	svc := &application.Service{
+		Store: store, Ledger: freezeOK{}, Instruments: onePair{}, Eligibility: eligible{}, Prices: prices.None{},
+		Log: slog.New(slog.DiscardHandler), Now: time.Now,
+	}
+	o, err := svc.Place(ctx, domain.Request{
+		UserID: uuid.NewString(), Symbol: "BTC-USDT", Side: domain.SideSell,
+		Type: domain.TypeLimit, Price: d("61000"), Quantity: d("0.001"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query(ctx, `SELECT topic, partition_key, event_type FROM outbox ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var topic, key, typ string
+		if err := rows.Scan(&topic, &key, &typ); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, topic+" "+key+" "+typ)
+	}
+	want := []string{"order.events BTC-USDT order.OrderAccepted", "order.commands BTC-USDT order.PlaceOrder"}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("outbox %v, want %v", got, want)
+	}
+	if stored, _ := store.Read().Orders().Get(ctx, o.ID); stored.FreezeState != domain.FreezeDone {
+		t.Fatalf("stored: %+v", stored)
+	}
+}

@@ -1,0 +1,254 @@
+openapi: 3.1.0
+info:
+  title: Exchange spot trading API
+  version: 0.1.0
+  description: |
+    Spot orders (requirements §5.6, §11.1, §11.2). An order is checked
+    (pair status, precision, quantity range, minimum notional, price band,
+    open order limits, eligibility), its funds are frozen in the ledger,
+    and it is handed to the matching engine; the answer is 202 with the
+    order as it stands (NEW). Status changes arrive asynchronously. Every
+    endpoint needs the access token. Amounts are decimal strings (ADR-0008).
+servers:
+  - url: https://astras.vip
+security:
+  - bearer: []
+tags:
+  - name: orders
+paths:
+  /v1/orders:
+    post:
+      operationId: createOrder
+      summary: Place a spot order
+      description: |
+        Limit orders need price and quantity; market buys spend
+        quote_amount, market sells sell quantity. A buy freezes quote
+        (price x quantity rounded up to the quote asset, or quote_amount),
+        a sell freezes base. Checks fail with INSTRUMENT_NOT_TRADING,
+        INSTRUMENT_PRECISION, ORDER_QUANTITY_OUT_OF_RANGE,
+        ORDER_MIN_NOTIONAL, ORDER_PRICE_OUT_OF_BAND, ORDER_TOO_MANY_OPEN or
+        the USER_ eligibility codes, and nothing is stored. When the ledger
+        refuses the freeze (LEDGER_INSUFFICIENT_BALANCE) the order is stored
+        as REJECTED and the error's details carry order_id. A
+        client_order_id repeated with the same order returns that order; with
+        another order it fails with COMMON_IDEMPOTENCY_CONFLICT.
+      tags: [orders]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema:
+            type: string
+            maxLength: 100
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [symbol, side, type]
+              additionalProperties: false
+              properties:
+                symbol:
+                  type: string
+                  examples: [BTC-USDT]
+                side:
+                  type: string
+                  enum: [BUY, SELL]
+                type:
+                  type: string
+                  enum: [LIMIT, MARKET]
+                time_in_force:
+                  type: string
+                  enum: [GTC, IOC, FOK, POST_ONLY]
+                  description: Defaults to GTC for limit orders and IOC for market orders; market orders take IOC or FOK.
+                price:
+                  $ref: './market.yaml#/components/schemas/Decimal'
+                quantity:
+                  $ref: './market.yaml#/components/schemas/Decimal'
+                quote_amount:
+                  $ref: './market.yaml#/components/schemas/Decimal'
+                client_order_id:
+                  type: string
+                  pattern: '^[A-Za-z0-9_-]{1,36}$'
+                self_trade_prevention:
+                  type: string
+                  enum: [CANCEL_NEWEST, CANCEL_OLDEST, CANCEL_BOTH]
+                  description: Defaults to CANCEL_NEWEST.
+      responses:
+        '202':
+          description: Accepted; the order is funded and on its way to the engine.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+    get:
+      operationId: listOrders
+      summary: The caller's orders, newest first
+      tags: [orders]
+      parameters:
+        - name: symbol
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: One status, or ACTIVE for NEW, OPEN and PARTIALLY_FILLED.
+          schema:
+            type: string
+            enum: [ACTIVE, NEW, OPEN, PARTIALLY_FILLED, FILLED, CANCELED, REJECTED, EXPIRED]
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Order'
+                  next_cursor:
+                    type: [string, 'null']
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+    delete:
+      operationId: cancelOrders
+      summary: Cancel the caller's active orders
+      description: Asks the engine to cancel every active order, of one pair when symbol is given; the orders change as the engine answers.
+      tags: [orders]
+      parameters:
+        - name: symbol
+          in: query
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Cancel requests sent.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requested]
+                properties:
+                  requested:
+                    type: integer
+                    description: How many orders were asked to cancel.
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/orders/{order_id}:
+    parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getOrder
+      summary: One of the caller's orders
+      tags: [orders]
+      responses:
+        '200':
+          description: The order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+    delete:
+      operationId: cancelOrder
+      summary: Cancel one order
+      description: |
+        Asks the engine to cancel the order; it becomes CANCELED when the
+        engine confirms (the frozen rest is then released). A filled order
+        fails with ORDER_ALREADY_FILLED, another finished one with
+        COMMON_CONFLICT. Canceling again is harmless.
+      tags: [orders]
+      responses:
+        '202':
+          description: Cancel requested.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+  schemas:
+    Order:
+      type: object
+      required: [order_id, client_order_id, symbol, side, type, time_in_force, self_trade_prevention, status,
+        filled_quantity, filled_quote, frozen_asset, frozen_amount, cancel_requested, created_at, updated_at]
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        client_order_id:
+          type: string
+        symbol:
+          type: string
+        side:
+          type: string
+          enum: [BUY, SELL]
+        type:
+          type: string
+          enum: [LIMIT, MARKET]
+        time_in_force:
+          type: string
+          enum: [GTC, IOC, FOK, POST_ONLY]
+        self_trade_prevention:
+          type: string
+          enum: [CANCEL_NEWEST, CANCEL_OLDEST, CANCEL_BOTH]
+        price:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        quantity:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        quote_amount:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        status:
+          type: string
+          enum: [NEW, OPEN, PARTIALLY_FILLED, FILLED, CANCELED, REJECTED, EXPIRED]
+        reject_reason:
+          type: string
+          description: Appendix C code of a REJECTED order.
+        filled_quantity:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        filled_quote:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        frozen_asset:
+          type: string
+        frozen_amount:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        cancel_requested:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time

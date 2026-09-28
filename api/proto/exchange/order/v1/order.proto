@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package exchange.order.v1;
+
+// Spot orders as the trading service accepts them and the matching engine
+// receives them (requirements §5.6, §5.7, §11.1, §11.2). Amounts are
+// decimal strings.
+
+enum Side {
+  SIDE_UNSPECIFIED = 0;
+  SIDE_BUY = 1;
+  SIDE_SELL = 2;
+}
+
+enum OrderType {
+  ORDER_TYPE_UNSPECIFIED = 0;
+  ORDER_TYPE_LIMIT = 1;
+  // Buys spend quote_amount; sells sell quantity.
+  ORDER_TYPE_MARKET = 2;
+}
+
+enum TimeInForce {
+  TIME_IN_FORCE_UNSPECIFIED = 0;
+  // Rests until filled or canceled.
+  TIME_IN_FORCE_GTC = 1;
+  // Fills what it can at once, the rest is canceled.
+  TIME_IN_FORCE_IOC = 2;
+  // Fills completely at once or not at all.
+  TIME_IN_FORCE_FOK = 3;
+  // Rejected (ORDER_WOULD_TAKE) if it would fill at once.
+  TIME_IN_FORCE_POST_ONLY = 4;
+}
+
+// SelfTradePrevention decides what happens when an order would fill
+// against an order of the same user.
+enum SelfTradePrevention {
+  SELF_TRADE_PREVENTION_UNSPECIFIED = 0;
+  // The incoming order is canceled.
+  SELF_TRADE_PREVENTION_CANCEL_NEWEST = 1;
+  // The resting order is canceled and matching continues.
+  SELF_TRADE_PREVENTION_CANCEL_OLDEST = 2;
+  // Both are canceled.
+  SELF_TRADE_PREVENTION_CANCEL_BOTH = 3;
+}
+
+// Order is an accepted order. It carries everything matching needs, so
+// replaying order.commands rebuilds the same book.
+message Order {
+  string order_id = 1;
+  string client_order_id = 2;
+  string user_id = 3;
+  string symbol = 4;
+  Side side = 5;
+  OrderType type = 6;
+  TimeInForce time_in_force = 7;
+  // Limit price (LIMIT).
+  string price = 8;
+  // Base amount (LIMIT, MARKET sells).
+  string quantity = 9;
+  // Quote amount to spend (MARKET buys).
+  string quote_amount = 10;
+  SelfTradePrevention self_trade_prevention = 11;
+  // Fee rates of the pair when the order was accepted.
+  string maker_fee_rate = 12;
+  string taker_fee_rate = 13;
+  // Decimals of the base and quote assets, for fee rounding (§11.3).
+  int32 base_decimals = 14;
+  int32 quote_decimals = 15;
+  // Price protection of MARKET orders (§11.2): buys do not fill above it,
+  // sells not below. Empty when there was no price to anchor it to.
+  string protection_price = 16;
+}

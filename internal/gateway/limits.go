@@ -20,6 +20,8 @@ var (
 	RuleIPAuth   = ratelimit.Rule{Name: "ip_auth", Limit: 60, Window: time.Minute}
 	RuleUser     = ratelimit.Rule{Name: "user", Limit: 600, Window: time.Minute}
 	RuleTransfer = ratelimit.Rule{Name: "user_transfer", Limit: 60, Window: time.Minute}
+	// RuleOrder counts every order request (placing, canceling, reading).
+	RuleOrder = ratelimit.Rule{Name: "user_order", Limit: 1200, Window: time.Minute}
 )
 
 // Limiter is the rate limiter (ratelimit.Limiter).

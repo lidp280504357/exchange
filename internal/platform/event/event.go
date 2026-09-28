@@ -33,6 +33,9 @@ const (
 	TopicRisk         = "risk.events"
 	TopicAudit        = "audit.events"
 	TopicNotification = "notification.events"
+	TopicOrder        = "order.events"
+	// TopicOrderCommands is the matching engine's input (§5.7), keyed by symbol.
+	TopicOrderCommands = "order.commands"
 )
 
 // Factory stamps envelopes with the producing service and instance.

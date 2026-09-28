@@ -24,6 +24,8 @@ var (
 	ledger embed.FS
 	//go:embed risk/*.sql
 	risk embed.FS
+	//go:embed trading/*.sql
+	trading embed.FS
 )
 
 // ClickHouse holds the analytics tables applied by analytics-consumer.
@@ -49,6 +51,9 @@ func Ledger() fs.FS { return sub(ledger, "ledger") }
 
 // Risk holds risk-service's schema.
 func Risk() fs.FS { return sub(risk, "risk") }
+
+// Trading holds spot-trading-service's schema.
+func Trading() fs.FS { return sub(trading, "trading") }
 
 func sub(fsys embed.FS, dir string) fs.FS {
 	s, err := fs.Sub(fsys, dir)

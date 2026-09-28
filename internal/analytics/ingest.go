@@ -22,7 +22,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/kafka"
 )
 
-// Topics are the business topics ingested in phase 1.
+// Topics are the business topics ingested.
 var Topics = []string{
 	event.TopicAuth,
 	event.TopicUser,
@@ -32,6 +32,7 @@ var Topics = []string{
 	event.TopicRisk,
 	event.TopicAudit,
 	event.TopicNotification,
+	event.TopicOrder,
 }
 
 // Ingestor writes event batches into the events table.

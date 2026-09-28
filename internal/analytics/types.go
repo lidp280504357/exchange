@@ -9,6 +9,7 @@ import (
 	_ "github.com/lidp280504357/exchange/api/gen/go/exchange/instrument/v1"   // registers instrument event types
 	_ "github.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1"       // registers ledger event types
 	_ "github.com/lidp280504357/exchange/api/gen/go/exchange/notification/v1" // registers notification event types
+	_ "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"        // registers order event types
 	_ "github.com/lidp280504357/exchange/api/gen/go/exchange/risk/v1"         // registers risk event types
 	_ "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"         // registers user event types
 )
