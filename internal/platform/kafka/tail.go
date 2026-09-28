@@ -29,7 +29,7 @@ func NewTail(ctx context.Context, cfg Config, name string, topics []string, h Ha
 	client, err := kgo.NewClient(
 		kgo.SeedBrokers(cfg.Brokers...),
 		kgo.ClientID(name),
-		kgo.ConsumeTopics(topics...),
+		kgo.ConsumeTopics(cfg.topics(topics...)...),
 		kgo.ConsumeResetOffset(kgo.NewOffset().AtEnd()),
 	)
 	if err != nil {

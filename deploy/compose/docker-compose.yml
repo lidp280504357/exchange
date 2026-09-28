@@ -100,6 +100,8 @@ services:
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - clickhouse_logs:/var/log/clickhouse-server
+      # Sized for the shared test server: fewer system logs, capped memory.
+      - ./clickhouse/config.d/small-server.xml:/etc/clickhouse-server/config.d/small-server.xml:ro
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"]
       interval: 10s

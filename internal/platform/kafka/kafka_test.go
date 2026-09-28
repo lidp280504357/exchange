@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -59,12 +60,15 @@ func publish(t *testing.T, prod *kafka.Producer, topic string, values ...string)
 	return envs
 }
 
-func runConsumer(t *testing.T, cfg kafka.Config, topic string, h kafka.Handler) {
+// runConsumer consumes topic with h until the test ends and returns the
+// consumer group.
+func runConsumer(t *testing.T, cfg kafka.Config, topic string, h kafka.Handler) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	group := testenv.Name("g")
 	c, err := kafka.NewConsumer(ctx, cfg, kafka.ConsumerOptions{
-		Group:       testenv.Name("g"),
+		Group:       group,
 		Topics:      []string{topic},
 		Handler:     h,
 		Logger:      discard,
@@ -80,6 +84,7 @@ func runConsumer(t *testing.T, cfg kafka.Config, topic string, h kafka.Handler) 
 		defer cancel()
 		_ = c.Stop(ctx)
 	})
+	return group
 }
 
 func waitFor(t *testing.T, what string, cond func() bool) {
@@ -254,5 +259,99 @@ func TestDeadLettersCanBeReplayed(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 	if n := handled.Load(); n != 1 {
 		t.Fatalf("handled %d times after one replay", n)
+	}
+}
+
+func TestNamespaceKeepsTopicsAndGroupsApart(t *testing.T) {
+	cfg := kafka.Config{Brokers: testenv.KafkaBrokers(t), SchemaRegistryURL: testenv.SchemaRegistryURL(t)}
+	cfg.Namespace = testenv.Name("ns") + "."
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	topic := testenv.KafkaTopicIn(t, cfg.Namespace)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	prod, err := kafka.NewProducer(ctx, cfg, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer prod.Close()
+	envs := publish(t, prod, topic, "namespaced")
+
+	// The record lands on the prefixed topic.
+	raw, err := kgo.NewClient(kgo.SeedBrokers(cfg.Brokers...), kgo.ConsumeTopics(cfg.Namespace+topic),
+		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	var placed int
+	waitFor(t, "the record on the prefixed topic", func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		placed += raw.PollFetches(ctx).NumRecords()
+		return placed == 1
+	})
+
+	var failing atomic.Bool
+	failing.Store(true)
+	var handled atomic.Int32
+	group := runConsumer(t, cfg, topic, func(context.Context, *eventv1.Envelope) error {
+		if failing.Load() {
+			return errors.New("downstream down")
+		}
+		handled.Add(1)
+		return nil
+	})
+
+	// The dead-letter tools speak logical names.
+	var parked []kafka.DLQRecord
+	waitFor(t, "the dead letter", func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		recs, err := kafka.ReadDLQ(ctx, cfg, topic)
+		if err != nil {
+			t.Logf("ReadDLQ: %v", err)
+			return false
+		}
+		parked = recs
+		return len(recs) == 1
+	})
+	if d := parked[0]; d.EventID != envs[0].GetEventId() || d.Origin != topic || d.Group != group {
+		t.Fatalf("dead letter %+v, want origin %s and group %s", d, topic, group)
+	}
+	failing.Store(false)
+	rctx, rcancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer rcancel()
+	if n, err := kafka.ReplayDLQ(rctx, cfg, parked); err != nil || n != 1 {
+		t.Fatalf("ReplayDLQ: %d %v", n, err)
+	}
+	waitFor(t, "the replayed event", func() bool { return handled.Load() == 1 })
+
+	// Progress is committed under the prefixed group only.
+	adm := kadm.NewClient(raw)
+	waitFor(t, "the prefixed group's offset", func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		offs, err := adm.FetchOffsets(ctx, cfg.Namespace+group)
+		if err != nil {
+			return false
+		}
+		o, ok := offs.Lookup(cfg.Namespace+topic, 0)
+		return ok && o.At == 1
+	})
+	fctx, fcancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer fcancel()
+	if offs, err := adm.FetchOffsets(fctx, group); err != nil || len(offs) != 0 {
+		t.Fatalf("the bare group has offsets %v (%v)", offs, err)
+	}
+}
+
+func TestNamespaceMustEndInADot(t *testing.T) {
+	for ns, ok := range map[string]bool{"": true, "dev.": true, "pr-12.": true, "dev": false, "Dev.": false, "a.b.": false} {
+		cfg := kafka.Config{Brokers: []string{"b:9092"}, SchemaRegistryURL: "http://sr", Namespace: ns}
+		if err := cfg.Validate(); (err == nil) != ok {
+			t.Errorf("namespace %q: %v", ns, err)
+		}
 	}
 }

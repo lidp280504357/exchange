@@ -5,6 +5,7 @@ infra/.env
 *.secret.*
 
 # Local development files
+.dev/
 .DS_Store
 .idea/
 .vscode/

@@ -1,0 +1,154 @@
+# Prometheus alerting rules for the metrics the services export on their
+# ops ports (requirements §12.2; docs/runbook/observability.md). Nothing
+# scrapes them yet: Grafana Cloud is deferred. prometheus.yml next to this
+# file names one scrape job per service, so "job" identifies the service.
+# Checked in CI with promtool (syntax and alerts_test.yml).
+groups:
+  - name: availability
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.job }} does not answer on its ops port"
+          runbook: docs/runbook/server-deploy.md
+
+      - alert: HighHTTPErrorRate
+        expr: |
+          sum by (job) (rate(http_server_requests_total{status=~"5.."}[5m]))
+            / sum by (job) (rate(http_server_requests_total[5m])) > 0.02
+          and sum by (job) (rate(http_server_requests_total[5m])) > 0.1
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.job }}: {{ $value | humanizePercentage }} of requests fail with 5xx"
+          runbook: docs/runbook/observability.md
+
+      - alert: HighHTTPLatency
+        expr: |
+          histogram_quantile(0.99, sum by (job, le) (rate(http_server_request_duration_seconds_bucket[5m]))) > 1
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.job }}: p99 latency {{ $value | humanizeDuration }}"
+
+      - alert: GRPCServerErrors
+        expr: |
+          sum by (job, method) (rate(grpc_server_handled_total{code=~"Unknown|Internal|Unavailable|DeadlineExceeded|DataLoss"}[5m])) > 0.05
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.job }} {{ $labels.method }} returns server errors"
+
+  - name: events
+    rules:
+      - alert: EventsDeadLettered
+        expr: sum by (job, group, topic) (increase(kafka_consumer_records_total{result="dlq"}[15m])) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.group }} parked events of {{ $labels.topic }} in the dead-letter topic"
+          runbook: docs/runbook/events.md
+
+      - alert: ConsumerLagHigh
+        expr: max by (job, group, topic) (kafka_consumer_lag) > 1000
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.group }} is {{ $value }} records behind on {{ $labels.topic }}"
+          runbook: docs/runbook/events.md
+
+      - alert: OutboxBacklog
+        expr: max by (job) (outbox_pending) > 100
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.job }}: {{ $value }} events wait in the outbox"
+          runbook: docs/runbook/events.md
+
+      - alert: OutboxPublishFailing
+        expr: sum by (job) (rate(outbox_publish_failures_total[5m])) > 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.job }} cannot publish its outbox (Redpanda down?)"
+          runbook: docs/runbook/events.md
+
+  - name: consistency
+    rules:
+      - alert: LedgerReconciliationMismatch
+        expr: sum by (job, check) (ledger_reconcile_mismatches) > 0
+        labels: {severity: critical}
+        annotations:
+          summary: "ledger reconciliation check {{ $labels.check }} found {{ $value }} mismatches"
+          runbook: docs/runbook/ledger.md
+
+      - alert: LedgerReconciliationStopped
+        expr: increase(ledger_reconcile_runs_total[3h]) == 0
+        labels: {severity: warning}
+        annotations:
+          summary: "no ledger reconciliation completed for 3 hours"
+          runbook: docs/runbook/ledger.md
+
+      - alert: AnalyticsMissingEvents
+        expr: max by (topic) (analytics_reconcile_missing) > 0
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value }} events of {{ $labels.topic }} are in the outbox but not in ClickHouse"
+
+      - alert: AnalyticsReconciliationStale
+        expr: time() - analytics_reconcile_last_success_timestamp_seconds > 7200
+        labels: {severity: warning}
+        annotations:
+          summary: "the ClickHouse reconciliation has not succeeded for 2 hours"
+
+      - alert: FeatureFlagsStale
+        expr: time() - flags_last_refresh_timestamp_seconds > 300
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.job }} has not refreshed its feature flags for 5 minutes"
+          runbook: docs/runbook/feature-flags.md
+
+  - name: identity-and-notifications
+    rules:
+      - alert: SMSVolumeNearLimit
+        # 75% of SMS_HOURLY_LIMIT (200): sending pauses at the limit.
+        expr: sum(increase(auth_otp_requests_total{channel="SMS", outcome="queued"}[1h])) > 150
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value }} SMS codes in the last hour"
+          runbook: docs/runbook/otp.md
+
+      - alert: OTPCaptchaRejections
+        expr: sum(increase(auth_otp_requests_total{outcome="captcha_rejected"}[10m])) > 50
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value }} OTP requests failed human verification in 10 minutes (abuse?)"
+          runbook: docs/runbook/otp.md
+
+      - alert: OTPVerificationFailures
+        expr: |
+          sum(rate(auth_otp_verifications_total{outcome!="verified"}[15m]))
+            / sum(rate(auth_otp_verifications_total[15m])) > 0.5
+          and sum(increase(auth_otp_verifications_total[15m])) > 20
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "most OTP checks fail ({{ $value | humanizePercentage }}): guessing, or codes not arriving"
+          runbook: docs/runbook/otp.md
+
+      - alert: NotificationProviderCircuitOpen
+        expr: max by (provider) (notify_provider_circuit_open) == 1
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "notification provider {{ $labels.provider }} is switched off after repeated failures"
+          runbook: docs/runbook/otp.md
+
+      - alert: NotificationsFailed
+        expr: sum by (channel) (increase(notify_deliveries_failed_total[15m])) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value }} {{ $labels.channel }} notifications failed on every provider"
+          runbook: docs/runbook/otp.md

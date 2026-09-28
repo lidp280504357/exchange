@@ -34,6 +34,8 @@ main() {
     sudo docker compose "${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180
   fi
   sudo docker image prune -f >/dev/null
+  # 构建缓存每次部署都在长（2026-09-28 已近 9 GB，磁盘 82%）：保留 3 GB，够 Go 模块与编译缓存和最近的层
+  sudo docker builder prune -f --keep-storage 3gb >/dev/null
   # nginx 配置是挂载进容器的文件，内容变了 compose 不会重启它：校验后热加载（校验失败则部署失败，旧配置继续服务）
   sudo docker compose "${COMPOSE[@]}" exec -T nginx sh -c 'nginx -t -q && nginx -s reload' && echo "== nginx 配置已重新加载"
 

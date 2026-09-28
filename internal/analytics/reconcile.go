@@ -86,8 +86,13 @@ func (r *Reconciler) report(ctx context.Context, results []Result) {
 	r.missing.Reset()
 	for _, res := range results {
 		r.missing.WithLabelValues(res.Topic).Set(float64(res.Missing()))
-		if res.Missing() > 0 {
+		switch {
+		case res.Missing() > 0:
 			r.log.WarnContext(ctx, "events missing from clickhouse", "topic", res.Topic,
+				"published", res.Postgres, "ingested", res.ClickHouse)
+		case res.Missing() < 0:
+			// Something publishes from an outbox the reconciliation does not read.
+			r.log.WarnContext(ctx, "clickhouse has events from an outbox not in RECONCILE_SCHEMAS", "topic", res.Topic,
 				"published", res.Postgres, "ingested", res.ClickHouse)
 		}
 	}

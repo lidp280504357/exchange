@@ -6,19 +6,20 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
 
 | 文件 | 用途 |
 |---|---|
-| [docs/交接总结-2026-09-29.md](docs/交接总结-2026-09-29.md) | 上一轮会话的完整交接：现状、已完成、下一步、风险 |
+| [docs/阶段1验收报告.md](docs/阶段1验收报告.md) | 阶段 1 全景：交付内容、12 条验收标准的证据、测试与故障注入结果、资源评估、已知限制与阶段 2 依赖 |
+| [docs/交接总结-2026-09-29.md](docs/交接总结-2026-09-29.md) | 阶段 1 编码开始前的交接：环境、账号、决策与风险 |
 | [实施计划.md](实施计划.md) | 阶段计划；§10 是阶段 1 任务清单；§13 是真实进度（只记录已合入且可运行的内容） |
 | [需求文档-v0.2.md](需求文档-v0.2.md) | 需求；§7 API 约定、§8 事件、§11 核心规则与公式、附录 B 状态机、附录 C 错误码 |
 | [文档评审与待决策-2026-09-27.md](文档评审与待决策-2026-09-27.md) | §8 是用户逐项确认的 27 项决策结论，§9 外部账号 |
 | [准备工作清单.md](准备工作清单.md) | 环境与准备状态、后续账号 |
 | [docs/adr/](docs/adr/README.md) | 9 条架构决策记录，改决策要新增 ADR |
-| [docs/runbook/](docs/runbook/) | 各部分运维手册：otp、auth、accounts、instruments、ledger、gateway、events（死信重放）、h5、feature-flags、testing（测试与故障注入）；服务器部署、Cloudflare+nginx TLS、Turnstile、Grafana Cloud（暂缓） |
+| [docs/runbook/](docs/runbook/README.md) | 运维手册（README 是索引）：local-dev（本机开发栈）、observability（指标、告警、日志、trace、回滚）、testing、events、各服务手册、服务器部署、Cloudflare+nginx TLS、Turnstile |
 | `环境配置.md` | **只在本地**（已被 git 忽略），含测试服凭据与实测状态 |
 
 ## 当前状态（2026-09-28）
 
 - 阶段 0 完成，除 M0.2 契约初稿；环境、账号、CI、部署链路全部就绪。
-- §10 任务 2–8 完成：`internal/platform/{config,logging,pii,tracing,apperr,httpx,health,app,pg,migrate,redisx,grpcx,bootstrap,testenv,event,kafka,outbox,inbox,idempotency,chx,flags}`、`internal/analytics`；`cmd/` 下网关、六个服务骨架、analytics-consumer 与运维 CLI `exchangectl` 已部署在测试服（`https://astras.vip/v1/time`）。任务 9 的 auth/users/notify 迁移与契约、任务 10 的 OTP（`internal/auth`、`internal/notification`、网关 `/v1/auth/*` 代理，见 `docs/runbook/otp.md`）、任务 11 的注册/登录/令牌/会话/step-up/换绑（`internal/auth`、`internal/user`、`internal/platform/authtoken`、网关鉴权 `internal/gateway/auth.go` 与路由表 `routes.go`，见 `docs/runbook/auth.md`）、任务 12 的账户状态/eligibility/用户通知（`internal/user`、`internal/notification` 的站内信与安全邮件、`exchangectl users`，见 `docs/runbook/accounts.md`）、任务 13 的 instrument-service（资产/网络/交易对/费率、`exchangectl instruments apply` 幂等同步 `deploy/instruments/test.json`，见 `docs/runbook/instruments.md`）、任务 14 的账本（`internal/ledger`，余额只能经 `Post` 写分录，见 `docs/runbook/ledger.md`）、任务 15 的网关限流/幂等键/WebSocket（见 `docs/runbook/gateway.md`）、任务 16 的 H5（`web/h5`，见 `docs/runbook/h5.md`）、任务 17 的测试补齐与故障注入（`scripts/e2e`、`scripts/fault`、`exchangectl dlq`，见 `docs/runbook/testing.md`、`events.md`）已完成。**下一步从实施计划 §10 任务 18 开始**（本地启动脚本、API 文档、运行手册、阶段验收报告），用户已授权每完成一个任务即提交、推送并部署，连续做完阶段 1。每个任务后跑 `task e2e`（`scripts/e2e/*.sh`，对 https://astras.vip）。
+- §10 任务 2–8 完成：`internal/platform/{config,logging,pii,tracing,apperr,httpx,health,app,pg,migrate,redisx,grpcx,bootstrap,testenv,event,kafka,outbox,inbox,idempotency,chx,flags}`、`internal/analytics`；`cmd/` 下网关、六个服务骨架、analytics-consumer 与运维 CLI `exchangectl` 已部署在测试服（`https://astras.vip/v1/time`）。任务 9 的 auth/users/notify 迁移与契约、任务 10 的 OTP（`internal/auth`、`internal/notification`、网关 `/v1/auth/*` 代理，见 `docs/runbook/otp.md`）、任务 11 的注册/登录/令牌/会话/step-up/换绑（`internal/auth`、`internal/user`、`internal/platform/authtoken`、网关鉴权 `internal/gateway/auth.go` 与路由表 `routes.go`，见 `docs/runbook/auth.md`）、任务 12 的账户状态/eligibility/用户通知（`internal/user`、`internal/notification` 的站内信与安全邮件、`exchangectl users`，见 `docs/runbook/accounts.md`）、任务 13 的 instrument-service（资产/网络/交易对/费率、`exchangectl instruments apply` 幂等同步 `deploy/instruments/test.json`，见 `docs/runbook/instruments.md`）、任务 14 的账本（`internal/ledger`，余额只能经 `Post` 写分录，见 `docs/runbook/ledger.md`）、任务 15 的网关限流/幂等键/WebSocket（见 `docs/runbook/gateway.md`）、任务 16 的 H5（`web/h5`，见 `docs/runbook/h5.md`）、任务 17 的测试补齐与故障注入（`scripts/e2e`、`scripts/fault`、`exchangectl dlq`，见 `docs/runbook/testing.md`、`events.md`）、任务 18 的本机开发栈、API 参考页、告警规则与验收报告（`scripts/dev.sh`、`https://astras.vip/docs/`、`deploy/observability`、`scripts/trace.sh`、`docs/阶段1验收报告.md`）已完成，**阶段 1 完成**。下一步是阶段 2（实施计划 §6），先补验收报告 §7 的遗留（风控基础规则与 `risk.events`）；用户的"做完一个任务即提交、推送、部署，不必等回复"授权覆盖到阶段 1 结束，开始阶段 2 前先和用户确认范围。每次改动后跑 `task e2e`（`scripts/e2e/*.sh`，对 https://astras.vip），动到基础设施行为时再跑 `task fault`。
 - 服务隔离：`.golangci.yml` 的 depguard 规则禁止 `internal/<服务>` 互相 import，新服务要在那里补一组规则。消费事件用 `bootstrap.Consumer` + 应用层经 inbox 去重（auth 的 `Store.Once`、notification 的 `inbox.ProcessID`）。
 - 鉴权：网关验 JWT 后把身份写进 `X-User-Id`/`X-Session-Id`/`X-Auth-Scope` 头转发（客户端同名头会被剥掉），服务端用 `httpx.UserID(r)`/`httpx.SessionID(r)` 读取；新的公开接口要加进 `internal/gateway/routes.go`，否则默认必须登录。敏感操作读 `X-Step-Up-Token`，跨服务用 auth-service gRPC `ConsumeStepUp` 兑换。
 - 功能开关：`bootstrap.Flags` 拿 `*flags.Client`，`Enabled(key, flags.Subject{...})`；改开关用 `exchangectl flags set`（见 `docs/runbook/feature-flags.md`）。
@@ -42,7 +43,7 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
 
 ## 开发与部署
 
-- 本机不装 Docker。本机 `task run -- <服务>` / `task web:dev` 直连测试服基础设施，地址与凭据在本地 `.env`。
+- 本机不装 Docker。本机开发栈 `task dev`（全部服务）/ `task run -- <服务>` 在本机运行服务，连测试服基础设施里单独的 dev 命名空间（库 `exchange_dev`、Redis DB 1、Kafka 前缀 `dev.`，见 `docs/runbook/local-dev.md`），不碰测试环境数据；地址与凭据在本地 `.env`。`task web:dev` 的 H5 默认代理到测试服，`API_ORIGIN=http://localhost:8080` 改连本机网关。
 - 推送 GitHub 后在测试服更新：`task deploy`（等价 `ssh exchange 'bash /opt/exchange/src/deploy/server-update.sh'`），带提交号回滚；脚本同时同步参考数据、热加载 nginx、构建并发布 H5。
 - 入口 `https://astras.vip`：Cloudflare → nginx 容器 → `/v1/*` 到 `api-gateway:8080`，其余为 H5 静态文件。
 - 应用容器编排在 `deploy/compose/docker-compose.apps.yml`，密钥由服务器 `apps.env` 经 `env_file` 注入。
@@ -54,3 +55,6 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
 - 测试服操作用 MCP `exchange-dev`（`remote_exec`、`remote_put_file`、`compose`、`pg_query`、`redis_cmd`、`ch_query`）。
 - GitHub 远程用 `git@github-ldp:lidp280504357/exchange.git`（本机 ssh 别名）。
 - 可能有并行会话在同一目录，改共享文档前先看 `git status`。
+- 终端面板的命令只能是 ASCII，也不能有以 `#` 开头的词。批量替换别用 `perl -pi -e 's|…|…|'` 且模式里含 `\|`：它会变成空分支，把替换文本插到文件开头；含 `|` 的替换用 Edit 工具。
+- 运行中的 bash 脚本（如 `task dev`）别改：bash 按偏移逐段读脚本，改了会读到错位内容；先停掉再改。
+- 本机到测试服往返约 380 ms：连测试服的集成测试与本机栈都慢，等待时给足超时（`kafka.ReadDLQ` 这类每次新建客户端的操作用 20 秒以上）。

@@ -23,6 +23,12 @@ if [[ "$BASE" != http://localhost* ]]; then
   cache=$(curl -s -D - -o /dev/null "$BASE$asset" | header cache-control)
   [[ "$cache" == *immutable* ]] || { echo "FAIL $asset cache-control: $cache" >&2; exit 1; }
   echo "ok   index.html revalidates, hashed assets are immutable"
+  # The API reference is built with the site, not by the dev server.
+  grep -q '<redoc spec-url="/docs/openapi.json"' <<<"$(curl -s "$BASE/docs/")" || { echo "FAIL /docs/ is not the API reference" >&2; exit 1; }
+  spec=$(curl -s "$BASE/docs/openapi.json")
+  jq -e '.paths["/v1/account/transfers"].post and .paths["/v1/auth/otp/request"].post and ([."x-tagGroups"[].name] | length) >= 6' <<<"$spec" >/dev/null ||
+    { echo "FAIL /docs/openapi.json is not the merged contract" >&2; exit 1; }
+  echo "ok   API reference at /docs/ ($(jq '.paths | length' <<<"$spec") paths merged from api/openapi)"
 fi
 manifest=$(curl -s "$BASE/manifest.webmanifest")
 jq -e '.icons | map(.sizes) | index("192x192") and index("512x512")' <<<"$manifest" >/dev/null || { echo "FAIL manifest: $manifest" >&2; exit 1; }

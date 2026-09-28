@@ -96,6 +96,10 @@ func NewConsumer(ctx context.Context, cfg Config, opts ConsumerOptions) (*Consum
 	if opts.LagInterval == 0 {
 		opts.LagInterval = 30 * time.Second
 	}
+	// From here on topics and groups carry the namespace; the handler only
+	// sees envelopes.
+	opts.Group = cfg.Namespace + opts.Group
+	opts.Topics = cfg.topics(opts.Topics...)
 	retryTopics := make([]string, len(opts.Topics))
 	for i, t := range opts.Topics {
 		retryTopics[i] = t + ".retry"

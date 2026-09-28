@@ -17,7 +17,7 @@ bash /opt/exchange/src/deploy/server-update.sh          # 更新到 origin/main
 bash /opt/exchange/src/deploy/server-update.sh 305e2a7  # 回滚/切换到指定提交
 ```
 
-脚本依次：拉代码并重置到目标版本；把 `deploy/compose/` 同步到 `/opt/exchange/infra`（不碰 `.env`、`apps.env`、证书、Cloudflare IP 列表、`nginx/html/`）；幂等核对 Redpanda topic；`docker compose up -d --build` 构建并更新容器、清理悬空镜像；校验并热加载 nginx 配置；按 `deploy/instruments/test.json` 幂等同步参考数据（[instruments.md](instruments.md)）；在 node 容器里构建 H5 并发布到 nginx 静态目录（[h5.md](h5.md)）。
+脚本依次：拉代码并重置到目标版本；把 `deploy/compose/` 同步到 `/opt/exchange/infra`（不碰 `.env`、`apps.env`、证书、Cloudflare IP 列表、`nginx/html/`）；幂等核对 Redpanda topic；`docker compose up -d --build` 构建并更新容器、清理悬空镜像并把构建缓存压到 3 GB；校验并热加载 nginx 配置；按 `deploy/instruments/test.json` 幂等同步参考数据（[instruments.md](instruments.md)）；在 node 容器里构建 H5 并发布到 nginx 静态目录（[h5.md](h5.md)）。
 
 ## 首次克隆（部署密钥加到 GitHub 之后）
 
@@ -61,6 +61,14 @@ curl -s https://astras.vip/v1/time         # 网关经 Cloudflare 与 nginx 可�
 ssh exchange 'sudo docker exec exchange-infra-api-gateway-1 wget -qO- http://127.0.0.1:9080/readyz'
 ```
 
+## 小机器调优（2026-09-28 资源评估）
+
+测试服是 2 vCPU / 3.8 GiB 的突发型实例，基础设施与应用共用。评估与数据见 [阶段 1 验收报告](../阶段1验收报告.md) §6：
+
+- ClickHouse：`deploy/compose/clickhouse/config.d/small-server.xml` 去掉诊断用的系统日志表（trace_log、metric_log 等，保留 query_log、part_log），服务日志 warning 级、100 MB × 3，内存上限为物理内存 30%。改了这个文件，部署时 compose 会重建 ClickHouse 容器（约半分钟，analytics-consumer 自动重试）。
+- Redpanda：`topics.sh` 把 `segment_fallocation_step` 设为 4 MiB（默认 32 MiB，每个分区的活动段都会预分配）。
+- 构建缓存：每次部署后压到 3 GB。
+
 ## 本机调试
 
-本机 `task run -- <service>`（等价 `go run ./cmd/<service>`）或 `task web:dev`（H5，代理到测试服），读取仓库根目录 `.env`，直连测试服的数据库、Redis、Redpanda、ClickHouse（安全组已放行本机 IP）。本机不需要 Docker。Ctrl-C 触发优雅退出，再按一次立即结束。
+本机开发栈 `task dev`、单个服务 `task run -- <service>`：服务在本机运行，连测试服基础设施里单独的 dev 命名空间（库 `exchange_dev`、Redis DB 1、Kafka 前缀 `dev.`），不碰测试环境的数据，见 [local-dev.md](local-dev.md)。`task web:dev` 的 H5 默认代理到测试服，`API_ORIGIN=http://localhost:8080` 改连本机网关。安全组已放行本机 IP，本机不需要 Docker。Ctrl-C 触发优雅退出。

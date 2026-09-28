@@ -270,6 +270,18 @@ try {
   await waitText(signup, "10,000", 30000);
   ok("sign-up through the form (code, password, terms) lands on the assets with the welcome funds");
   await shot(signup, "10-signup");
+
+  // The API reference is built with the site (not by the dev server). Redoc
+  // only runs when its pinned hash matches, so rendering proves both.
+  if (!APP.startsWith("http://localhost")) {
+    const docs = await preparePage({ mobile: false });
+    await docs.goto(APP + "/docs/", { waitUntil: "networkidle0" });
+    await waitText(docs, "Idempotency", 30000);
+    await waitText(docs, "Move funds between the SPOT and FUTURES accounts");
+    await waitText(docs, "Send a one-time code");
+    ok("the API reference at /docs/ renders every service's operations");
+    await shot(docs, "11-docs");
+  }
 } finally {
   await browser.close();
 }

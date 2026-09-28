@@ -40,8 +40,8 @@ tasks:
     cmds: [go build -o bin/ ./cmd/...]
 
   run:
-    desc: 本机运行一个服务，读取根目录 .env（task run -- api-gateway）
-    cmds: ["go run ./cmd/{{.CLI_ARGS}}"]
+    desc: 本机前台运行一个服务（dev 命名空间，见 docs/runbook/local-dev.md；task run -- auth-service）
+    cmds: ["bash scripts/dev.sh run {{.CLI_ARGS}}"]
 
   vet:
     desc: go vet
@@ -78,7 +78,12 @@ tasks:
     desc: 部署脚本语法检查
     cmds:
       - bash -n deploy/server-update.sh deploy/redpanda/topics.sh deploy/compose/nginx/update-cloudflare-ips.sh
-      - for f in scripts/e2e/*.sh scripts/e2e/lib/*.sh scripts/fault/*.sh; do bash -n "$f"; done
+      - for f in scripts/*.sh scripts/e2e/*.sh scripts/e2e/lib/*.sh scripts/fault/*.sh; do bash -n "$f"; done
+
+  dev:
+    desc: 本机启动全部服务（直连测试服基础设施的 dev 命名空间：库 exchange_dev、Redis DB 1、Kafka 前缀 dev.；网关 http://localhost:8080；Ctrl-C 停止）
+    cmds:
+      - bash scripts/dev.sh
 
   e2e:
     desc: 对已部署的非生产环境跑端到端检查（默认 https://astras.vip，BASE=... 可改；读 .env 的 CAPTCHA_BYPASS_TOKEN；约 8 分钟）

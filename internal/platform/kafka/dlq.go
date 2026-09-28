@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kadm"
@@ -22,7 +23,7 @@ type DLQRecord struct {
 	Partition int32
 	Offset    int64
 	// Origin is the business topic and Group the consumer group that gave
-	// up on the record.
+	// up on the record, both without the namespace.
 	Origin    string
 	Group     string
 	Attempt   int
@@ -36,7 +37,7 @@ type DLQRecord struct {
 // ReadDLQ returns the records of topic's dead-letter topic ("<topic>.dlq")
 // that exist when it is called, oldest first per partition.
 func ReadDLQ(ctx context.Context, cfg Config, topic string) ([]DLQRecord, error) {
-	dlq := topic + ".dlq"
+	dlq := cfg.Namespace + topic + ".dlq"
 	cl, err := kgo.NewClient(kgo.SeedBrokers(cfg.Brokers...), kgo.ConsumeTopics(dlq),
 		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()))
 	if err != nil {
@@ -78,7 +79,7 @@ func ReadDLQ(ctx context.Context, cfg Config, topic string) ([]DLQRecord, error)
 			if _, want := next[r.Partition]; !want || r.Offset >= end[r.Partition] {
 				return
 			}
-			out = append(out, dlqRecord(r))
+			out = append(out, dlqRecord(r, cfg.Namespace))
 			next[r.Partition] = r.Offset + 1
 			if next[r.Partition] >= end[r.Partition] {
 				delete(next, r.Partition)
@@ -88,9 +89,10 @@ func ReadDLQ(ctx context.Context, cfg Config, topic string) ([]DLQRecord, error)
 	return out, nil
 }
 
-func dlqRecord(r *kgo.Record) DLQRecord {
+func dlqRecord(r *kgo.Record, ns string) DLQRecord {
 	d := DLQRecord{
-		Partition: r.Partition, Offset: r.Offset, Origin: header(r, HeaderOriginTopic), Group: header(r, HeaderGroup),
+		Partition: r.Partition, Offset: r.Offset,
+		Origin: strings.TrimPrefix(header(r, HeaderOriginTopic), ns), Group: strings.TrimPrefix(header(r, HeaderGroup), ns),
 		Error: header(r, HeaderError), ParkedAt: r.Timestamp, record: r,
 	}
 	d.Attempt, _ = strconv.Atoi(header(r, HeaderAttempt))
@@ -120,13 +122,14 @@ func ReplayDLQ(ctx context.Context, cfg Config, recs []DLQRecord) (int, error) {
 		if d.Origin == "" || d.Group == "" {
 			return n, fmt.Errorf("dlq replay: %d:%d lacks its origin or group", d.Partition, d.Offset)
 		}
+		ns := cfg.Namespace
 		out := &kgo.Record{
-			Topic: d.Origin + ".retry",
+			Topic: ns + d.Origin + ".retry",
 			Key:   d.record.Key,
 			Value: d.record.Value,
 			Headers: []kgo.RecordHeader{
-				{Key: HeaderOriginTopic, Value: []byte(d.Origin)},
-				{Key: HeaderGroup, Value: []byte(d.Group)},
+				{Key: HeaderOriginTopic, Value: []byte(ns + d.Origin)},
+				{Key: HeaderGroup, Value: []byte(ns + d.Group)},
 				{Key: HeaderAttempt, Value: []byte("0")},
 				{Key: HeaderNotBefore, Value: []byte(strconv.FormatInt(time.Now().UnixMilli(), 10))},
 				{Key: HeaderReplayedFrom, Value: []byte(fmt.Sprintf("%d:%d", d.Partition, d.Offset))},

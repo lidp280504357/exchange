@@ -153,6 +153,13 @@ func SchemaRegistryURL(t testing.TB) string {
 // deletes them, and their registry subjects, when the test ends.
 func KafkaTopic(t testing.TB) string {
 	t.Helper()
+	return KafkaTopicIn(t, "")
+}
+
+// KafkaTopicIn is KafkaTopic under a kafka.Config namespace: the topics are
+// created with the prefix and the logical name is returned.
+func KafkaTopicIn(t testing.TB, namespace string) string {
+	t.Helper()
 	brokers := KafkaBrokers(t)
 	registry := SchemaRegistryURL(t)
 	cl, err := kgo.NewClient(kgo.SeedBrokers(brokers...))
@@ -161,7 +168,8 @@ func KafkaTopic(t testing.TB) string {
 	}
 	adm := kadm.NewClient(cl)
 	name := Name("t") + ".events"
-	topics := []string{name, name + ".retry", name + ".dlq"}
+	base := namespace + name
+	topics := []string{base, base + ".retry", base + ".dlq"}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	resp, err := adm.CreateTopics(ctx, 1, 1, nil, topics...)

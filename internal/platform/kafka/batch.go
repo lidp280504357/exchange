@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kadm"
@@ -17,7 +18,7 @@ import (
 
 // Delivery is one decoded record handed to a batch handler.
 type Delivery struct {
-	Topic     string
+	Topic     string // logical, without the namespace
 	Partition int32
 	Offset    int64
 	Envelope  *eventv1.Envelope
@@ -49,6 +50,7 @@ type BatchOptions struct {
 // dead-letter topic; a failing sink is retried, never skipped.
 type BatchConsumer struct {
 	opts BatchOptions
+	ns   string
 	cl   *kgo.Client
 	adm  *kadm.Client
 
@@ -68,6 +70,8 @@ func NewBatchConsumer(ctx context.Context, cfg Config, opts BatchOptions) (*Batc
 	if opts.LagInterval <= 0 {
 		opts.LagInterval = 30 * time.Second
 	}
+	opts.Group = cfg.Namespace + opts.Group
+	opts.Topics = cfg.topics(opts.Topics...)
 	cl, err := kgo.NewClient(
 		kgo.SeedBrokers(cfg.Brokers...),
 		kgo.ClientID(opts.Group),
@@ -86,7 +90,7 @@ func NewBatchConsumer(ctx context.Context, cfg Config, opts BatchOptions) (*Batc
 		return nil, fmt.Errorf("kafka batch consumer %s: ping: %w", opts.Group, err)
 	}
 	cctx, cancel := context.WithCancel(context.Background())
-	return &BatchConsumer{opts: opts, cl: cl, adm: kadm.NewClient(cl), ctx: cctx, cancel: cancel, done: make(chan struct{})}, nil
+	return &BatchConsumer{opts: opts, ns: cfg.Namespace, cl: cl, adm: kadm.NewClient(cl), ctx: cctx, cancel: cancel, done: make(chan struct{})}, nil
 }
 
 // Run consumes until Stop.
@@ -145,7 +149,7 @@ func (c *BatchConsumer) cycle() {
 				}
 				count(c.opts.Metrics, c.opts.Group, r.Topic, "dlq")
 			} else {
-				batch = append(batch, Delivery{Topic: r.Topic, Partition: r.Partition, Offset: r.Offset, Envelope: env})
+				batch = append(batch, Delivery{Topic: strings.TrimPrefix(r.Topic, c.ns), Partition: r.Partition, Offset: r.Offset, Envelope: env})
 			}
 			recs = append(recs, r)
 		})
@@ -165,7 +169,7 @@ func (c *BatchConsumer) cycle() {
 		c.opts.Logger.Warn("kafka commit failed; records will be redelivered", "group", c.opts.Group, "error", err)
 	}
 	for _, d := range batch {
-		count(c.opts.Metrics, c.opts.Group, d.Topic, "ok")
+		count(c.opts.Metrics, c.opts.Group, c.ns+d.Topic, "ok")
 	}
 }
 

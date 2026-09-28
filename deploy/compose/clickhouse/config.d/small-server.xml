@@ -1,0 +1,27 @@
+<!--
+  The test server has 2 vCPU and 4 GiB shared with PostgreSQL, Redpanda and
+  the apps, and ClickHouse's own diagnostics were its heaviest load: trace_log
+  grew by a gigabyte a day, merges of the thousand-column metric_log ran out
+  of memory in a loop (CPU pinned, a 900 MB error log) and the server log was
+  at trace level. Keep query_log and part_log for debugging, drop the other
+  system logs, and cap memory so the rest of the machine keeps its share.
+-->
+<clickhouse>
+    <logger>
+        <level>warning</level>
+        <size>100M</size>
+        <count>3</count>
+    </logger>
+    <max_server_memory_usage_to_ram_ratio>0.3</max_server_memory_usage_to_ram_ratio>
+
+    <trace_log remove="1"/>
+    <text_log remove="1"/>
+    <metric_log remove="1"/>
+    <asynchronous_metric_log remove="1"/>
+    <latency_log remove="1"/>
+    <query_metric_log remove="1"/>
+    <processors_profile_log remove="1"/>
+    <query_thread_log remove="1"/>
+    <query_views_log remove="1"/>
+    <error_log remove="1"/>
+</clickhouse>

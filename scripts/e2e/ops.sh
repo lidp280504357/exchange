@@ -66,5 +66,11 @@ dlq=$(compose "exec -T notification-service sh -c 'wget -qO- http://127.0.0.1:90
 mismatches=$(compose "exec -T ledger-service sh -c 'wget -qO- http://127.0.0.1:9085/metrics'" | awk '/^ledger_reconcile_mismatches/ {s += $2} END {print s + 0}')
 [[ "$mismatches" == 0 ]] || { echo "FAIL the last ledger reconciliation found $mismatches mismatches" >&2; exit 1; }
 echo "ok   the last ledger reconciliation found no mismatch"
+# Acceptance criterion 8: ClickHouse holds exactly what the outboxes published.
+metrics=$(compose "exec -T analytics-consumer sh -c 'wget -qO- http://127.0.0.1:9087/metrics'")
+grep -q '^analytics_reconcile_missing{topic="auth.events"}' <<<"$metrics" || { echo "FAIL no ClickHouse reconciliation has run" >&2; exit 1; }
+off=$(awk '/^analytics_reconcile_missing/ && $2 != 0' <<<"$metrics")
+[[ -z "$off" ]] || { echo "FAIL ClickHouse and the outboxes disagree (published minus ingested): $off" >&2; exit 1; }
+echo "ok   ClickHouse holds exactly the events the outboxes published in the last day"
 
 echo "all observability checks passed"
