@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package exchange.trade.v1;
+
+import "exchange/order/v1/order.proto";
+
+// Events on trade.events, keyed by symbol (requirements §8.1): the
+// settlement input (§11.1 step 7). Amounts are decimal strings.
+
+// TradeExecuted is one fill between a resting (maker) and an incoming
+// (taker) order, at the maker's price.
+message TradeExecuted {
+  string trade_id = 1;
+  string symbol = 2;
+  string base_asset = 3;
+  string quote_asset = 4;
+  int64 sequence = 5;
+  string price = 6;
+  string quantity = 7;
+  // price x quantity, exact in the quote asset (pairs are configured so).
+  string quote_quantity = 8;
+  exchange.order.v1.Side taker_side = 9;
+  string buyer_order_id = 10;
+  string buyer_user_id = 11;
+  string seller_order_id = 12;
+  string seller_user_id = 13;
+  // True when the buyer is the maker.
+  bool buyer_is_maker = 14;
+  // Fees (§11.3): the buyer pays in base, the seller in quote, each at
+  // the rate of their role, rounded up to the asset's decimals.
+  string buyer_fee = 15;
+  string seller_fee = 16;
+  // What the buyer's order froze per unit: its limit price, empty for a
+  // market buy; settlement releases the difference to price at once.
+  string buyer_limit_price = 17;
+}

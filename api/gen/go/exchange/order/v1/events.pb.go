@@ -82,8 +82,9 @@ func (x *OrderAccepted) GetFrozenAmount() string {
 	return ""
 }
 
-// OrderRejected: the order could not be funded, so it never reaches the
-// engine.
+// OrderRejected: the trading service could not fund the order (sequence
+// 0), or the engine refused it before any fill (ORDER_WOULD_TAKE,
+// ORDER_NO_LIQUIDITY, ORDER_SELF_TRADE).
 type OrderRejected struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	OrderId       string                 `protobuf:"bytes,1,opt,name=order_id,json=orderId,proto3" json:"order_id,omitempty"`
@@ -92,6 +93,7 @@ type OrderRejected struct {
 	Symbol        string                 `protobuf:"bytes,4,opt,name=symbol,proto3" json:"symbol,omitempty"`
 	// An appendix C code, e.g. LEDGER_INSUFFICIENT_BALANCE.
 	ReasonCode    string `protobuf:"bytes,5,opt,name=reason_code,json=reasonCode,proto3" json:"reason_code,omitempty"`
+	Sequence      int64  `protobuf:"varint,6,opt,name=sequence,proto3" json:"sequence,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -161,6 +163,366 @@ func (x *OrderRejected) GetReasonCode() string {
 	return ""
 }
 
+func (x *OrderRejected) GetSequence() int64 {
+	if x != nil {
+		return x.Sequence
+	}
+	return 0
+}
+
+// OrderOpened: a limit order rests on the book without having filled.
+type OrderOpened struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrderId       string                 `protobuf:"bytes,1,opt,name=order_id,json=orderId,proto3" json:"order_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Symbol        string                 `protobuf:"bytes,3,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	Sequence      int64                  `protobuf:"varint,4,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OrderOpened) Reset() {
+	*x = OrderOpened{}
+	mi := &file_exchange_order_v1_events_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OrderOpened) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OrderOpened) ProtoMessage() {}
+
+func (x *OrderOpened) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_order_v1_events_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OrderOpened.ProtoReflect.Descriptor instead.
+func (*OrderOpened) Descriptor() ([]byte, []int) {
+	return file_exchange_order_v1_events_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *OrderOpened) GetOrderId() string {
+	if x != nil {
+		return x.OrderId
+	}
+	return ""
+}
+
+func (x *OrderOpened) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *OrderOpened) GetSymbol() string {
+	if x != nil {
+		return x.Symbol
+	}
+	return ""
+}
+
+func (x *OrderOpened) GetSequence() int64 {
+	if x != nil {
+		return x.Sequence
+	}
+	return 0
+}
+
+// OrderPartiallyFilled: a trade filled part of the order; it rests (GTC)
+// or its rest is canceled next.
+type OrderPartiallyFilled struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	OrderId  string                 `protobuf:"bytes,1,opt,name=order_id,json=orderId,proto3" json:"order_id,omitempty"`
+	UserId   string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Symbol   string                 `protobuf:"bytes,3,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	Sequence int64                  `protobuf:"varint,4,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	TradeId  string                 `protobuf:"bytes,5,opt,name=trade_id,json=tradeId,proto3" json:"trade_id,omitempty"`
+	// Totals so far: base filled and quote exchanged.
+	FilledQuantity string `protobuf:"bytes,6,opt,name=filled_quantity,json=filledQuantity,proto3" json:"filled_quantity,omitempty"`
+	FilledQuote    string `protobuf:"bytes,7,opt,name=filled_quote,json=filledQuote,proto3" json:"filled_quote,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *OrderPartiallyFilled) Reset() {
+	*x = OrderPartiallyFilled{}
+	mi := &file_exchange_order_v1_events_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OrderPartiallyFilled) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OrderPartiallyFilled) ProtoMessage() {}
+
+func (x *OrderPartiallyFilled) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_order_v1_events_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OrderPartiallyFilled.ProtoReflect.Descriptor instead.
+func (*OrderPartiallyFilled) Descriptor() ([]byte, []int) {
+	return file_exchange_order_v1_events_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *OrderPartiallyFilled) GetOrderId() string {
+	if x != nil {
+		return x.OrderId
+	}
+	return ""
+}
+
+func (x *OrderPartiallyFilled) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *OrderPartiallyFilled) GetSymbol() string {
+	if x != nil {
+		return x.Symbol
+	}
+	return ""
+}
+
+func (x *OrderPartiallyFilled) GetSequence() int64 {
+	if x != nil {
+		return x.Sequence
+	}
+	return 0
+}
+
+func (x *OrderPartiallyFilled) GetTradeId() string {
+	if x != nil {
+		return x.TradeId
+	}
+	return ""
+}
+
+func (x *OrderPartiallyFilled) GetFilledQuantity() string {
+	if x != nil {
+		return x.FilledQuantity
+	}
+	return ""
+}
+
+func (x *OrderPartiallyFilled) GetFilledQuote() string {
+	if x != nil {
+		return x.FilledQuote
+	}
+	return ""
+}
+
+// OrderFilled: the order is complete (a market buy also when its rest is
+// too little for another lot).
+type OrderFilled struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	OrderId        string                 `protobuf:"bytes,1,opt,name=order_id,json=orderId,proto3" json:"order_id,omitempty"`
+	UserId         string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Symbol         string                 `protobuf:"bytes,3,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	Sequence       int64                  `protobuf:"varint,4,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	TradeId        string                 `protobuf:"bytes,5,opt,name=trade_id,json=tradeId,proto3" json:"trade_id,omitempty"`
+	FilledQuantity string                 `protobuf:"bytes,6,opt,name=filled_quantity,json=filledQuantity,proto3" json:"filled_quantity,omitempty"`
+	FilledQuote    string                 `protobuf:"bytes,7,opt,name=filled_quote,json=filledQuote,proto3" json:"filled_quote,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *OrderFilled) Reset() {
+	*x = OrderFilled{}
+	mi := &file_exchange_order_v1_events_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OrderFilled) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OrderFilled) ProtoMessage() {}
+
+func (x *OrderFilled) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_order_v1_events_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OrderFilled.ProtoReflect.Descriptor instead.
+func (*OrderFilled) Descriptor() ([]byte, []int) {
+	return file_exchange_order_v1_events_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *OrderFilled) GetOrderId() string {
+	if x != nil {
+		return x.OrderId
+	}
+	return ""
+}
+
+func (x *OrderFilled) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *OrderFilled) GetSymbol() string {
+	if x != nil {
+		return x.Symbol
+	}
+	return ""
+}
+
+func (x *OrderFilled) GetSequence() int64 {
+	if x != nil {
+		return x.Sequence
+	}
+	return 0
+}
+
+func (x *OrderFilled) GetTradeId() string {
+	if x != nil {
+		return x.TradeId
+	}
+	return ""
+}
+
+func (x *OrderFilled) GetFilledQuantity() string {
+	if x != nil {
+		return x.FilledQuantity
+	}
+	return ""
+}
+
+func (x *OrderFilled) GetFilledQuote() string {
+	if x != nil {
+		return x.FilledQuote
+	}
+	return ""
+}
+
+// OrderCanceled: the order's unfilled rest is canceled.
+type OrderCanceled struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	OrderId        string                 `protobuf:"bytes,1,opt,name=order_id,json=orderId,proto3" json:"order_id,omitempty"`
+	UserId         string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Symbol         string                 `protobuf:"bytes,3,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	Sequence       int64                  `protobuf:"varint,4,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	FilledQuantity string                 `protobuf:"bytes,5,opt,name=filled_quantity,json=filledQuantity,proto3" json:"filled_quantity,omitempty"`
+	FilledQuote    string                 `protobuf:"bytes,6,opt,name=filled_quote,json=filledQuote,proto3" json:"filled_quote,omitempty"`
+	// USER, IOC, FOK, SELF_TRADE, NO_LIQUIDITY (a market order ran out of
+	// book or protection) or DELISTED.
+	Reason        string `protobuf:"bytes,7,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OrderCanceled) Reset() {
+	*x = OrderCanceled{}
+	mi := &file_exchange_order_v1_events_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OrderCanceled) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OrderCanceled) ProtoMessage() {}
+
+func (x *OrderCanceled) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_order_v1_events_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OrderCanceled.ProtoReflect.Descriptor instead.
+func (*OrderCanceled) Descriptor() ([]byte, []int) {
+	return file_exchange_order_v1_events_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *OrderCanceled) GetOrderId() string {
+	if x != nil {
+		return x.OrderId
+	}
+	return ""
+}
+
+func (x *OrderCanceled) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *OrderCanceled) GetSymbol() string {
+	if x != nil {
+		return x.Symbol
+	}
+	return ""
+}
+
+func (x *OrderCanceled) GetSequence() int64 {
+	if x != nil {
+		return x.Sequence
+	}
+	return 0
+}
+
+func (x *OrderCanceled) GetFilledQuantity() string {
+	if x != nil {
+		return x.FilledQuantity
+	}
+	return ""
+}
+
+func (x *OrderCanceled) GetFilledQuote() string {
+	if x != nil {
+		return x.FilledQuote
+	}
+	return ""
+}
+
+func (x *OrderCanceled) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 var File_exchange_order_v1_events_proto protoreflect.FileDescriptor
 
 const file_exchange_order_v1_events_proto_rawDesc = "" +
@@ -169,14 +531,44 @@ const file_exchange_order_v1_events_proto_rawDesc = "" +
 	"\rOrderAccepted\x12.\n" +
 	"\x05order\x18\x01 \x01(\v2\x18.exchange.order.v1.OrderR\x05order\x12!\n" +
 	"\ffrozen_asset\x18\x02 \x01(\tR\vfrozenAsset\x12#\n" +
-	"\rfrozen_amount\x18\x03 \x01(\tR\ffrozenAmount\"\xa4\x01\n" +
+	"\rfrozen_amount\x18\x03 \x01(\tR\ffrozenAmount\"\xc0\x01\n" +
 	"\rOrderRejected\x12\x19\n" +
 	"\border_id\x18\x01 \x01(\tR\aorderId\x12&\n" +
 	"\x0fclient_order_id\x18\x02 \x01(\tR\rclientOrderId\x12\x17\n" +
 	"\auser_id\x18\x03 \x01(\tR\x06userId\x12\x16\n" +
 	"\x06symbol\x18\x04 \x01(\tR\x06symbol\x12\x1f\n" +
 	"\vreason_code\x18\x05 \x01(\tR\n" +
-	"reasonCodeB\xd2\x01\n" +
+	"reasonCode\x12\x1a\n" +
+	"\bsequence\x18\x06 \x01(\x03R\bsequence\"u\n" +
+	"\vOrderOpened\x12\x19\n" +
+	"\border_id\x18\x01 \x01(\tR\aorderId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
+	"\x06symbol\x18\x03 \x01(\tR\x06symbol\x12\x1a\n" +
+	"\bsequence\x18\x04 \x01(\x03R\bsequence\"\xe5\x01\n" +
+	"\x14OrderPartiallyFilled\x12\x19\n" +
+	"\border_id\x18\x01 \x01(\tR\aorderId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
+	"\x06symbol\x18\x03 \x01(\tR\x06symbol\x12\x1a\n" +
+	"\bsequence\x18\x04 \x01(\x03R\bsequence\x12\x19\n" +
+	"\btrade_id\x18\x05 \x01(\tR\atradeId\x12'\n" +
+	"\x0ffilled_quantity\x18\x06 \x01(\tR\x0efilledQuantity\x12!\n" +
+	"\ffilled_quote\x18\a \x01(\tR\vfilledQuote\"\xdc\x01\n" +
+	"\vOrderFilled\x12\x19\n" +
+	"\border_id\x18\x01 \x01(\tR\aorderId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
+	"\x06symbol\x18\x03 \x01(\tR\x06symbol\x12\x1a\n" +
+	"\bsequence\x18\x04 \x01(\x03R\bsequence\x12\x19\n" +
+	"\btrade_id\x18\x05 \x01(\tR\atradeId\x12'\n" +
+	"\x0ffilled_quantity\x18\x06 \x01(\tR\x0efilledQuantity\x12!\n" +
+	"\ffilled_quote\x18\a \x01(\tR\vfilledQuote\"\xdb\x01\n" +
+	"\rOrderCanceled\x12\x19\n" +
+	"\border_id\x18\x01 \x01(\tR\aorderId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
+	"\x06symbol\x18\x03 \x01(\tR\x06symbol\x12\x1a\n" +
+	"\bsequence\x18\x04 \x01(\x03R\bsequence\x12'\n" +
+	"\x0ffilled_quantity\x18\x05 \x01(\tR\x0efilledQuantity\x12!\n" +
+	"\ffilled_quote\x18\x06 \x01(\tR\vfilledQuote\x12\x16\n" +
+	"\x06reason\x18\a \x01(\tR\x06reasonB\xd2\x01\n" +
 	"\x15com.exchange.order.v1B\vEventsProtoP\x01ZFgithub.com/lidp280504357/exchange/api/gen/go/exchange/order/v1;orderv1\xa2\x02\x03EOX\xaa\x02\x11Exchange.Order.V1\xca\x02\x11Exchange\\Order\\V1\xe2\x02\x1dExchange\\Order\\V1\\GPBMetadata\xea\x02\x13Exchange::Order::V1b\x06proto3"
 
 var (
@@ -191,14 +583,18 @@ func file_exchange_order_v1_events_proto_rawDescGZIP() []byte {
 	return file_exchange_order_v1_events_proto_rawDescData
 }
 
-var file_exchange_order_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_exchange_order_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_exchange_order_v1_events_proto_goTypes = []any{
-	(*OrderAccepted)(nil), // 0: exchange.order.v1.OrderAccepted
-	(*OrderRejected)(nil), // 1: exchange.order.v1.OrderRejected
-	(*Order)(nil),         // 2: exchange.order.v1.Order
+	(*OrderAccepted)(nil),        // 0: exchange.order.v1.OrderAccepted
+	(*OrderRejected)(nil),        // 1: exchange.order.v1.OrderRejected
+	(*OrderOpened)(nil),          // 2: exchange.order.v1.OrderOpened
+	(*OrderPartiallyFilled)(nil), // 3: exchange.order.v1.OrderPartiallyFilled
+	(*OrderFilled)(nil),          // 4: exchange.order.v1.OrderFilled
+	(*OrderCanceled)(nil),        // 5: exchange.order.v1.OrderCanceled
+	(*Order)(nil),                // 6: exchange.order.v1.Order
 }
 var file_exchange_order_v1_events_proto_depIdxs = []int32{
-	2, // 0: exchange.order.v1.OrderAccepted.order:type_name -> exchange.order.v1.Order
+	6, // 0: exchange.order.v1.OrderAccepted.order:type_name -> exchange.order.v1.Order
 	1, // [1:1] is the sub-list for method output_type
 	1, // [1:1] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
@@ -218,7 +614,7 @@ func file_exchange_order_v1_events_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_order_v1_events_proto_rawDesc), len(file_exchange_order_v1_events_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

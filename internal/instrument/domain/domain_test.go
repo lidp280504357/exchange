@@ -17,8 +17,8 @@ var (
 
 func pair() TradingPair {
 	return TradingPair{
-		Symbol: "BTC-USDT", BaseAsset: "BTC", QuoteAsset: "USDT", TickSize: d("0.01"), LotSize: d("0.00001"),
-		MinQuantity: d("0.00001"), MaxQuantity: d("100"), MinNotional: d("5"), PriceBand: d("0.1"), FeeTier: "default",
+		Symbol: "BTC-USDT", BaseAsset: "BTC", QuoteAsset: "USDT", TickSize: d("0.01"), LotSize: d("0.0001"),
+		MinQuantity: d("0.0001"), MaxQuantity: d("100"), MinNotional: d("5"), PriceBand: d("0.1"), FeeTier: "default",
 		Status: StatusPrepare,
 	}
 }
@@ -42,8 +42,9 @@ func TestPairValidation(t *testing.T) {
 		"tick finer than quote": func(p *TradingPair) { p.TickSize = d("0.0000001") },
 		"lot finer than base":   func(p *TradingPair) { p.LotSize = d("0.000000001") },
 		"zero tick":             func(p *TradingPair) { p.TickSize = decimal.Zero },
-		"min qty off the lot":   func(p *TradingPair) { p.MinQuantity = d("0.000015") },
-		"max below min":         func(p *TradingPair) { p.MaxQuantity = d("0.00001") },
+		"min qty off the lot":   func(p *TradingPair) { p.MinQuantity = d("0.00015") },
+		"max below min":         func(p *TradingPair) { p.MaxQuantity = d("0.0001") },
+		"inexact order values":  func(p *TradingPair) { p.LotSize, p.MinQuantity = d("0.00001"), d("0.00001") },
 		"negative min notional": func(p *TradingPair) { p.MinNotional = d("-1") },
 		"band above 100%":       func(p *TradingPair) { p.PriceBand = d("1.5") },
 		"unknown status":        func(p *TradingPair) { p.Status = "LIVE" },

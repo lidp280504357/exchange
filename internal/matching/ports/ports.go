@@ -1,0 +1,50 @@
+// Package ports declares what the matching engine needs from storage.
+package ports
+
+import (
+	"context"
+	"time"
+
+	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
+	"github.com/lidp280504357/exchange/internal/matching/domain"
+)
+
+// Store keeps the engine's write-ahead log, its snapshots and its outbox.
+type Store interface {
+	// Snapshots returns the latest snapshot of each partition.
+	Snapshots(ctx context.Context) ([]Snapshot, error)
+	// WAL returns, in order, the commands of each partition after the
+	// given offset (partitions not listed from their start).
+	WAL(ctx context.Context, after map[int32]int64) ([]WALEntry, error)
+	// Save writes one batch in a transaction: the commands, the events
+	// they produced, and new snapshots.
+	Save(ctx context.Context, wal []WALEntry, events []Output, snapshots []Snapshot) error
+	// PurgeWAL deletes commands applied before cutoff that a snapshot
+	// already covers.
+	PurgeWAL(ctx context.Context, cutoff time.Time) (int64, error)
+}
+
+// WALEntry is one applied command.
+type WALEntry struct {
+	Partition int32
+	Offset    int64
+	Symbol    string
+	// Command is the envelope as consumed from order.commands.
+	Command   []byte
+	AppliedAt time.Time
+}
+
+// Snapshot is the state of every book of a partition after the command
+// at Offset.
+type Snapshot struct {
+	Partition int32
+	Offset    int64
+	Books     []domain.Snapshot
+	TakenAt   time.Time
+}
+
+// Output is an event to publish through the outbox.
+type Output struct {
+	Topic    string
+	Envelope *eventv1.Envelope
+}

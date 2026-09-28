@@ -51,6 +51,7 @@ bash /opt/exchange/src/deploy/server-update.sh
 | instrument-service | 8084 | 9184 | 9084 |
 | ledger-service | 8085 | 9185 | 9085 |
 | spot-trading-service | 8088（网关转发 `/v1/orders`） | — | 9088 |
+| matching-engine | — | — | 9089 |
 | risk-service | — | 9186 | 9086 |
 | analytics-consumer | — | — | 9087 |
 

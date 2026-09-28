@@ -9,7 +9,7 @@
 | 费率档 `fee_schedules` | tier、maker/taker 费率 | 费率 ≥ 0 且 < 10%；默认档 `default` 为 0.1% / 0.1% |
 | 资产 `assets` | 代码、名称、`decimals`、可充/可提/可交易、风险开关 | 代码 2–10 位大写字母数字；`decimals` 0–18，**设置后不可改** |
 | 网络 `networks` | 资产 × 链、合约地址、确认数、最小充/提、提现手续费、Memo | 金额精度不超过资产 `decimals` |
-| 交易对 `trading_pairs` | tick/lot、最小/最大数量、最小名义金额、价格保护带、费率档、状态 | tick 精度 ≤ 报价资产，lot 精度 ≤ 基础资产；最小/最大数量是 lot 的整数倍；保护带 (0, 1] |
+| 交易对 `trading_pairs` | tick/lot、最小/最大数量、最小名义金额、价格保护带、费率档、状态 | tick 精度 ≤ 报价资产，lot 精度 ≤ 基础资产；tick × lot 的精度 ≤ 报价资产（成交额、冻结额因此总是精确值，2026-09-28 起 BTC-USDT 的 lot 改为 0.0001、ETH-BTC 改为 0.001）；最小/最大数量是 lot 的整数倍；保护带 (0, 1] |
 
 金额一律 `NUMERIC(38,18)` 与十进制字符串（ADR-0008）；超精度直接拒绝，不做舍入。每次变更版本号加一，并在 `config_history` 追加一行（值、操作者、原因），同事务经 outbox 发 `instrument.events`（`AssetUpserted`、`NetworkUpserted`、`TradingPairUpserted`、`TradingPairStatusChanged`、`FeeScheduleChanged`）。变更立即生效；预定生效时间留到管理后台（阶段 2）。
 

@@ -29,6 +29,7 @@ type emitted struct {
 type memStore struct {
 	mu     sync.Mutex
 	orders map[string]domain.Order
+	fills  map[string]domain.Fill // by trade and order
 	events []emitted
 }
 
@@ -48,6 +49,8 @@ func (s *memStore) Read() ports.Repos { return memRepos{s} }
 type memRepos struct{ s *memStore }
 
 func (r memRepos) Orders() ports.OrderRepo { return memOrders(r) }
+
+func (r memRepos) Fills() ports.FillRepo { return memFills(r) }
 
 func (r memRepos) Emit(_ context.Context, topic string, msg proto.Message, _, _ string) error {
 	r.s.events = append(r.s.events, emitted{topic, msg})
@@ -140,10 +143,21 @@ func (r memOrders) PendingFreeze(_ context.Context, cutoff time.Time, limit int)
 	return out[:min(len(out), limit)], nil
 }
 
-// fakeLedger answers freezes with err (nil freezes) and records the keys.
+// fakeLedger answers freezes with err (nil freezes), unfreezes with
+// unfreezeErr, and records the calls.
 type fakeLedger struct {
-	err   error
-	calls []string
+	err         error
+	unfreezeErr error
+	calls       []string
+	releases    []string
+}
+
+func (l *fakeLedger) Unfreeze(_ context.Context, key, _, asset string, amount decimal.Decimal, _ string) error {
+	if l.unfreezeErr != nil {
+		return l.unfreezeErr
+	}
+	l.releases = append(l.releases, key+" "+amount.String()+" "+asset)
+	return nil
 }
 
 func (l *fakeLedger) Freeze(_ context.Context, key, _, asset string, amount decimal.Decimal, _ string) error {

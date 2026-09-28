@@ -11,5 +11,6 @@ import (
 	_ "github.com/lidp280504357/exchange/api/gen/go/exchange/notification/v1" // registers notification event types
 	_ "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"        // registers order event types
 	_ "github.com/lidp280504357/exchange/api/gen/go/exchange/risk/v1"         // registers risk event types
+	_ "github.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1"        // registers trade event types
 	_ "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"         // registers user event types
 )

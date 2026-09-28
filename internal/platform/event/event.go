@@ -34,6 +34,7 @@ const (
 	TopicAudit        = "audit.events"
 	TopicNotification = "notification.events"
 	TopicOrder        = "order.events"
+	TopicTrade        = "trade.events"
 	// TopicOrderCommands is the matching engine's input (§5.7), keyed by symbol.
 	TopicOrderCommands = "order.commands"
 )

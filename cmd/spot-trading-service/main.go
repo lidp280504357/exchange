@@ -12,6 +12,7 @@ import (
 	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
 	"github.com/lidp280504357/exchange/internal/platform/app"
 	"github.com/lidp280504357/exchange/internal/platform/bootstrap"
+	"github.com/lidp280504357/exchange/internal/platform/event"
 	"github.com/lidp280504357/exchange/internal/platform/kafka"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
 	"github.com/lidp280504357/exchange/internal/trading/adapters/instruments"
@@ -20,6 +21,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/trading/adapters/prices"
 	"github.com/lidp280504357/exchange/internal/trading/adapters/users"
 	"github.com/lidp280504357/exchange/internal/trading/application"
+	"github.com/lidp280504357/exchange/internal/trading/transport/consumer"
 	"github.com/lidp280504357/exchange/internal/trading/transport/httpapi"
 	"github.com/lidp280504357/exchange/migrations"
 )
@@ -80,14 +82,19 @@ func setup(ctx context.Context, a *app.App) error {
 		Log:         a.Logger(),
 		Now:         time.Now,
 	}
-	a.Add("freeze recovery", app.Loop(recoverLoop(a, svc)))
+	// The engine's updates and fills.
+	if err := bootstrap.Consumer(ctx, a, cfg.Kafka, application.Consumer, []string{event.TopicOrder, event.TopicTrade}, consumer.Handler(svc)); err != nil {
+		return err
+	}
+	a.Add("recovery", app.Loop(recoverLoop(a, svc)))
 	r := a.NewRouter()
 	(&httpapi.Handler{Svc: svc}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
 }
 
-// recoverLoop finishes orders whose freeze outcome was not recorded (a
-// crash or a ledger outage mid-order) every few seconds.
+// recoverLoop finishes, every few seconds, orders whose freeze outcome
+// was not recorded and finished orders whose unused funds were not
+// released (a crash or a ledger outage midway).
 func recoverLoop(a *app.App, svc *application.Service) func(context.Context) error {
 	return func(ctx context.Context) error {
 		ticker := time.NewTicker(5 * time.Second)
@@ -98,11 +105,15 @@ func recoverLoop(a *app.App, svc *application.Service) func(context.Context) err
 				return nil
 			case <-ticker.C:
 			}
-			n, err := svc.Recover(ctx)
-			if err != nil {
+			if n, err := svc.Recover(ctx); err != nil {
 				a.Logger().WarnContext(ctx, "order freeze recovery failed", "error", err)
 			} else if n > 0 {
 				a.Logger().InfoContext(ctx, "orders recovered", "orders", n)
+			}
+			if n, err := svc.RecoverReleases(ctx); err != nil {
+				a.Logger().WarnContext(ctx, "order release recovery failed", "error", err)
+			} else if n > 0 {
+				a.Logger().InfoContext(ctx, "order releases recovered", "orders", n)
 			}
 		}
 	}

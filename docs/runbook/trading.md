@@ -1,6 +1,6 @@
 # 现货订单运维
 
-需求 §5.6、§11.1、§11.2；实现见 `internal/trading`（spot-trading-service，端口 HTTP 8088、运维 9088），契约 `api/openapi/trading.yaml`（`/v1/orders`）与 `api/proto/exchange/order/v1`。撮合引擎是 §6.3 任务 3，在它上线前订单停在 NEW，撤单只记"已请求"。
+需求 §5.6、§11.1、§11.2；实现见 `internal/trading`（spot-trading-service，端口 HTTP 8088、运维 9088），契约 `api/openapi/trading.yaml`（`/v1/orders`、`/v1/fills`）与 `api/proto/exchange/order/v1`。撮合见 [matching.md](matching.md)。
 
 ## 下单链路
 
@@ -23,7 +23,7 @@
 
 同一 `client_order_id` 的重复请求：内容相同返回原订单（原订单被拒则返回同样的错误），内容不同返回 409 `COMMON_IDEMPOTENCY_CONFLICT`。不传则用订单 ID。
 
-价格带与市价保护价的锚点是最新成交价（任务 3、5）或参考价（任务 7）。目前还没有锚点：限价单不检查价格带，市价单不带保护价，市价卖单也不检查最小名义金额（这些交给引擎：空订单簿的市价单会被拒）。
+价格带与市价保护价的锚点是最新成交价（行情，任务 5）或参考价（任务 7）。接入之前没有锚点：限价单不检查价格带，市价单不带保护价，市价卖单也不检查最小名义金额（这些交给引擎：空订单簿的市价单会被拒）。
 
 ## 撤单
 
@@ -32,7 +32,20 @@
   - 重复撤单不会重复发命令。
   - 冻结还没记录的订单，在补完冻结时，CancelOrder 紧跟 PlaceOrder 发出。
 - `DELETE /v1/orders?symbol=`：对该用户（某交易对）的全部活跃订单逐个请求撤单，返回请求数。
-- 订单最终变为 CANCELED 并解冻剩余部分，以引擎的 `order.events` 为准（任务 3）。
+- 订单最终变为 CANCELED（`cancel_reason` USER）并解冻剩余部分，以引擎的 `order.events` 为准。
+
+## 引擎事件与解冻
+
+交易服务消费 `order.events`（跳过自己发的 OrderAccepted 和无 sequence 的 OrderRejected）与 `trade.events`，消费组为 `spot-trading-service`：
+
+- 订单更新只在事件 sequence 大于订单记录的 sequence 时生效，重投与乱序都无害。更新的内容包括状态、累计成交数量与金额、撤销原因（USER、IOC、FOK、SELF_TRADE、NO_LIQUIDITY）或引擎拒单码（`ORDER_WOULD_TAKE`、`ORDER_NO_LIQUIDITY`、`ORDER_SELF_TRADE`）。
+- 订单进入终态（FILLED、CANCELED、REJECTED）后，解冻"冻结额 − 成交消耗"，调账本 `Unfreeze`（`ORDER_UNFREEZE`，幂等键 `release:<订单ID>`），完成后标记 `released`。成交消耗的计算：
+  - 卖单：成交数量；
+  - 市价买单：成交金额；
+  - 限价买单：限价 × 成交数量（成交价低于限价的差额由结算当场释放，任务 4）。
+- 账本不可达时，事件重试；恢复任务每 5 秒补解冻 10 秒以前完成、还没解冻的订单。
+- 成交记录：每笔成交为买卖双方各写一条 `fills`，按成交与订单去重。`GET /v1/orders/{id}/fills` 按 sequence 列出，`GET /v1/fills?symbol=` 按时间倒序分页。
+- 结算（任务 4）之前，成交消耗的资金留在冻结里；结算上线后由它转给对手方。
 
 ## 开放交易对
 

@@ -166,6 +166,22 @@ services:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9086/readyz"]
 
+  # One active engine (it holds a database lease); a second instance would
+  # wait as a standby (ADR-0002).
+  matching-engine:
+    <<: *app
+    command: ["/app/matching-engine"]
+    mem_limit: 256m
+    environment:
+      <<: *base-env
+      GOMEMLIMIT: 200MiB
+    depends_on:
+      postgres: {condition: service_healthy}
+      redpanda: {condition: service_healthy}
+    healthcheck:
+      <<: *health
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9089/readyz"]
+
   analytics-consumer:
     <<: *app
     command: ["/app/analytics-consumer"]

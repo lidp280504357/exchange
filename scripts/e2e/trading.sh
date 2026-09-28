@@ -2,8 +2,9 @@
 # Spot orders end to end (implementation plan §6.3 task 2): a funded order
 # is accepted (202, NEW) with its funds frozen; bad orders are refused and
 # not stored; an order the balance cannot fund is stored as REJECTED; a
-# client_order_id makes retries safe; cancels are requested (the matching
-# engine completes them). Needs BTC-USDT in TRADING and ETH-BTC not.
+# client_order_id makes retries safe; cancels complete through the matching
+# engine and give the frozen funds back. The orders rest far from the
+# prices of matching.sh. Needs BTC-USDT in TRADING and ETH-BTC not.
 #
 #   scripts/e2e/trading.sh
 set -euo pipefail
@@ -21,6 +22,8 @@ DEVICE="e2e-trade-$RUN"
 echo "== register $EMAIL"
 register "$EMAIL" "$DEVICE" "e2e trade $RUN"
 AUTH=(-H "Authorization: Bearer $(jq -r .access_token <<<"$BODY")")
+# shellcheck disable=SC2016 # expanded when the script ends
+at_exit 'call DELETE /v1/orders "" "${AUTH[@]}"'
 
 # balance ASSET prints "available frozen" of the SPOT account.
 balance() {
@@ -72,12 +75,16 @@ call GET "/v1/orders/$REJECTED" "" "${AUTH[@]}"
 expect 200 - "the rejected order"
 check '.status == "REJECTED" and .reject_reason == "LEDGER_INSUFFICIENT_BALANCE"' "stored as REJECTED"
 
-echo "== a market sell"
-order '{"symbol":"BTC-USDT","side":"SELL","type":"MARKET","quantity":"0.01"}'
-expect 202 - "market sell accepted"
-check '.frozen_asset == "BTC" and .frozen_amount == "0.01" and .time_in_force == "IOC"' "0.01 BTC frozen, IOC"
+echo "== a limit sell"
+order '{"symbol":"BTC-USDT","side":"SELL","type":"LIMIT","price":"150000","quantity":"0.01"}'
+expect 202 - "limit sell accepted"
+check '.frozen_asset == "BTC" and .frozen_amount == "0.01"' "0.01 BTC frozen"
+SELL=$(jq -r .order_id <<<"$BODY")
 [[ $(balance BTC) == "0.09 0.01" ]] || { echo "FAIL BTC balance after the sell: $(balance BTC)" >&2; exit 1; }
 echo "ok   the balance shows 0.09 BTC available, 0.01 frozen"
+status_is() { call GET "/v1/orders/$1" "" "${AUTH[@]}"; [[ $(jq -r .status <<<"$BODY") == "$2" ]]; }
+both() { status_is "$ORDER" "$1" && status_is "$SELL" "$1"; }
+eventually 40 "the engine opens both orders" both OPEN
 
 echo "== lists"
 call GET "/v1/orders?status=ACTIVE" "" "${AUTH[@]}"
@@ -98,5 +105,9 @@ expect 202 - "cancel the rest"
 check '.requested == 1' "one more order asked to cancel"
 call DELETE "/v1/orders/$REJECTED" "" "${AUTH[@]}"
 expect 409 COMMON_CONFLICT "a rejected order cannot be canceled"
+eventually 40 "the engine cancels both" both CANCELED
+check '.cancel_reason == "USER" and .filled_quantity == "0"' "canceled by the user, nothing filled"
+refunded() { [[ $(balance USDT) == "10000 0" && $(balance BTC) == "0.1 0" ]]; }
+eventually 40 "the frozen funds came back" refunded
 
 echo "all trading checks passed"

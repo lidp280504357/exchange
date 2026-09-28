@@ -69,4 +69,9 @@ message Order {
   // Price protection of MARKET orders (§11.2): buys do not fill above it,
   // sells not below. Empty when there was no price to anchor it to.
   string protection_price = 16;
+  // Steps of the pair; a market buy fills whole lots.
+  string tick_size = 17;
+  string lot_size = 18;
+  string base_asset = 19;
+  string quote_asset = 20;
 }

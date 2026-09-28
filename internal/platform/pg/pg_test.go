@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -133,5 +134,42 @@ func TestRegisterMetrics(t *testing.T) {
 		if !names[want] {
 			t.Fatalf("metric %s missing: %v", want, names)
 		}
+	}
+}
+
+func TestLeasesAdmitOneHolderAtATime(t *testing.T) {
+	db := testenv.Postgres(t)
+	ctx := context.Background()
+	name := testenv.Name("lease")
+	first, err := pg.AcquireLease(ctx, db, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A held connection would keep the pool from closing after a failure.
+	t.Cleanup(func() { _ = first.Release(ctx) })
+	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if _, err := pg.AcquireLease(waitCtx, db, name); err == nil {
+		t.Fatal("a second holder got the lease")
+	}
+	if err := first.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	second, err := pg.AcquireLease(ctx, db, name)
+	if err != nil {
+		t.Fatalf("after release: %v", err)
+	}
+	t.Cleanup(func() { _ = second.Release(ctx) })
+	// The interval stays well above the round trip to the test database.
+	holdCtx, stop := context.WithTimeout(ctx, 2500*time.Millisecond)
+	defer stop()
+	if err := second.Hold(holdCtx, time.Second); err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+	if err := second.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Release(ctx); err != nil {
+		t.Fatalf("second release: %v", err)
 	}
 }

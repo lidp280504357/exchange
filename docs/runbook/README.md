@@ -26,6 +26,7 @@
 | [accounts.md](accounts.md) | 账户状态、资格、用户通知，`exchangectl users` |
 | [risk.md](risk.md) | 风控规则、评估记录与自动审核（`risk.enforce`），`exchangectl risk` |
 | [trading.md](trading.md) | 现货下单、冻结、撤单与开放交易对，`/v1/orders` |
+| [matching.md](matching.md) | 撮合引擎：规则、WAL 与快照、恢复、主备租约 |
 | [instruments.md](instruments.md) | 资产、网络、交易对、费率，`exchangectl instruments` |
 | [ledger.md](ledger.md) | 账本、划转、对账，`exchangectl ledger` |
 | [grafana-cloud.md](grafana-cloud.md) | Grafana Cloud 接入（暂缓） |

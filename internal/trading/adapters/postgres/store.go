@@ -54,18 +54,19 @@ type orders repos
 
 const columns = `id, user_id, client_order_id, symbol, side, type, time_in_force, stp, price, quantity, quote_amount,
 	status, reject_reason, filled_quantity, filled_quote, frozen_asset, frozen_amount, freeze_state, maker_fee_rate,
-	taker_fee_rate, base_decimals, quote_decimals, protection_price, cancel_requested, sequence, created_at, updated_at`
+	taker_fee_rate, base_decimals, quote_decimals, protection_price, cancel_requested, sequence, created_at, updated_at,
+	tick_size, lot_size, base_asset, quote_asset, cancel_reason, released`
 
 var activeStatuses = []string{string(domain.StatusNew), string(domain.StatusOpen), string(domain.StatusPartiallyFilled)}
 
 func scan(row pgx.Row) (domain.Order, error) {
 	var o domain.Order
-	var price, qty, quote, protection decimal.NullDecimal
-	var reject *string
+	var price, qty, quote, protection, tick, lot decimal.NullDecimal
+	var reject, base, quoteAsset, cancel *string
 	err := row.Scan(&o.ID, &o.UserID, &o.ClientOrderID, &o.Symbol, &o.Side, &o.Type, &o.TimeInForce, &o.STP,
 		&price, &qty, &quote, &o.Status, &reject, &o.FilledQuantity, &o.FilledQuote, &o.FrozenAsset, &o.FrozenAmount,
 		&o.FreezeState, &o.MakerFeeRate, &o.TakerFeeRate, &o.BaseDecimals, &o.QuoteDecimals, &protection,
-		&o.CancelRequested, &o.Sequence, &o.CreatedAt, &o.UpdatedAt)
+		&o.CancelRequested, &o.Sequence, &o.CreatedAt, &o.UpdatedAt, &tick, &lot, &base, &quoteAsset, &cancel, &o.Released)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Order{}, domain.ErrOrderNotFound
 	}
@@ -73,10 +74,16 @@ func scan(row pgx.Row) (domain.Order, error) {
 		return domain.Order{}, fmt.Errorf("scan order: %w", err)
 	}
 	o.Price, o.Quantity, o.QuoteAmount, o.ProtectionPrice = price.Decimal, qty.Decimal, quote.Decimal, protection.Decimal
-	if reject != nil {
-		o.RejectReason = *reject
-	}
+	o.TickSize, o.LotSize = tick.Decimal, lot.Decimal
+	o.RejectReason, o.BaseAsset, o.QuoteAsset, o.CancelReason = str(reject), str(base), str(quoteAsset), str(cancel)
 	return o, nil
+}
+
+func str(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 // null stores zero amounts as NULL.
@@ -100,11 +107,13 @@ func (r orders) LockUser(ctx context.Context, userID string) error {
 
 func (r orders) Insert(ctx context.Context, o domain.Order) error {
 	_, err := r.q.Exec(ctx, `INSERT INTO orders (`+columns+`)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27,
+			$28, $29, $30, $31, $32, $33)`,
 		o.ID, o.UserID, o.ClientOrderID, o.Symbol, o.Side, o.Type, o.TimeInForce, o.STP, null(o.Price), null(o.Quantity),
 		null(o.QuoteAmount), o.Status, text(o.RejectReason), o.FilledQuantity, o.FilledQuote, o.FrozenAsset, o.FrozenAmount,
 		o.FreezeState, o.MakerFeeRate, o.TakerFeeRate, o.BaseDecimals, o.QuoteDecimals, null(o.ProtectionPrice),
-		o.CancelRequested, o.Sequence, o.CreatedAt, o.UpdatedAt)
+		o.CancelRequested, o.Sequence, o.CreatedAt, o.UpdatedAt, null(o.TickSize), null(o.LotSize), text(o.BaseAsset),
+		text(o.QuoteAsset), text(o.CancelReason), o.Released)
 	if err != nil {
 		return fmt.Errorf("insert order: %w", err)
 	}
@@ -126,9 +135,10 @@ func (r orders) ByClientID(ctx context.Context, userID, clientOrderID string) (d
 
 func (r orders) Update(ctx context.Context, o domain.Order) error {
 	_, err := r.q.Exec(ctx, `UPDATE orders SET status = $2, reject_reason = $3, filled_quantity = $4, filled_quote = $5,
-		freeze_state = $6, cancel_requested = $7, sequence = $8, updated_at = $9 WHERE id = $1`,
+		freeze_state = $6, cancel_requested = $7, sequence = $8, updated_at = $9, cancel_reason = $10, released = $11
+		WHERE id = $1`,
 		o.ID, o.Status, text(o.RejectReason), o.FilledQuantity, o.FilledQuote, o.FreezeState, o.CancelRequested,
-		o.Sequence, o.UpdatedAt)
+		o.Sequence, o.UpdatedAt, text(o.CancelReason), o.Released)
 	if err != nil {
 		return fmt.Errorf("update order: %w", err)
 	}
@@ -178,6 +188,55 @@ func (r orders) query(ctx context.Context, sql string, args ...any) ([]domain.Or
 			return nil, err
 		}
 		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
+func (r orders) Unreleased(ctx context.Context, cutoff time.Time, limit int) ([]domain.Order, error) {
+	return r.query(ctx, `SELECT `+columns+` FROM orders WHERE released = false AND freeze_state = 'FROZEN'
+		AND status IN ('FILLED', 'CANCELED', 'REJECTED', 'EXPIRED') AND updated_at < $1 ORDER BY updated_at LIMIT $2`, cutoff, limit)
+}
+
+func (r repos) Fills() ports.FillRepo { return fills(r) }
+
+type fills repos
+
+const fillColumns = `trade_id, order_id, user_id, symbol, side, maker, price, quantity, quote_quantity, fee_asset, fee, sequence, executed_at`
+
+func (r fills) Insert(ctx context.Context, f domain.Fill) error {
+	_, err := r.q.Exec(ctx, `INSERT INTO fills (`+fillColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		ON CONFLICT DO NOTHING`, f.TradeID, f.OrderID, f.UserID, f.Symbol, f.Side, f.Maker, f.Price, f.Quantity, f.Quote,
+		f.FeeAsset, f.Fee, f.Seq, f.ExecutedAt)
+	if err != nil {
+		return fmt.Errorf("insert fill: %w", err)
+	}
+	return nil
+}
+
+func (r fills) OfOrder(ctx context.Context, orderID string) ([]domain.Fill, error) {
+	return r.query(ctx, `SELECT `+fillColumns+` FROM fills WHERE order_id = $1 ORDER BY sequence`, orderID)
+}
+
+func (r fills) OfUser(ctx context.Context, userID, symbol, before string, limit int) ([]domain.Fill, error) {
+	return r.query(ctx, `SELECT `+fillColumns+` FROM fills f WHERE user_id = $1 AND ($2 = '' OR symbol = $2)
+		AND ($3 = '' OR (executed_at, trade_id) < (SELECT executed_at, trade_id FROM fills WHERE user_id = $1 AND trade_id = $3::uuid LIMIT 1))
+		ORDER BY executed_at DESC, trade_id DESC LIMIT $4`, userID, symbol, before, limit)
+}
+
+func (r fills) query(ctx context.Context, sql string, args ...any) ([]domain.Fill, error) {
+	rows, err := r.q.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query fills: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.Fill
+	for rows.Next() {
+		var f domain.Fill
+		if err := rows.Scan(&f.TradeID, &f.OrderID, &f.UserID, &f.Symbol, &f.Side, &f.Maker, &f.Price, &f.Quantity, &f.Quote,
+			&f.FeeAsset, &f.Fee, &f.Seq, &f.ExecutedAt); err != nil {
+			return nil, fmt.Errorf("scan fill: %w", err)
+		}
+		out = append(out, f)
 	}
 	return out, rows.Err()
 }

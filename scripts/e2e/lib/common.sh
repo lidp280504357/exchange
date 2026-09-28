@@ -7,8 +7,13 @@ BASE="${BASE:-https://astras.vip}"
 BYPASS="${CAPTCHA_BYPASS_TOKEN:-$(grep '^CAPTCHA_BYPASS_TOKEN=' .env | cut -d= -f2- | tr -d '"')}"
 RUN="$(date +%s)"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+AT_EXIT=()
+trap 'for c in ${AT_EXIT[@]+"${AT_EXIT[@]}"}; do eval "$c" || true; done; rm -rf "$WORK"' EXIT
 STATUS="" BODY="" TICKET=""
+
+# at_exit COMMAND runs the COMMAND string when the script ends, also after
+# a failed check: scripts use it to leave nothing in the shared order book.
+at_exit() { AT_EXIT+=("$1"); }
 APP=(-H 'X-Client-Type: APP')
 
 # call METHOD PATH JSON [curl args...] sets STATUS and BODY.

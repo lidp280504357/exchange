@@ -263,8 +263,13 @@ type Order struct {
 	// Price protection of MARKET orders (§11.2): buys do not fill above it,
 	// sells not below. Empty when there was no price to anchor it to.
 	ProtectionPrice string `protobuf:"bytes,16,opt,name=protection_price,json=protectionPrice,proto3" json:"protection_price,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Steps of the pair; a market buy fills whole lots.
+	TickSize      string `protobuf:"bytes,17,opt,name=tick_size,json=tickSize,proto3" json:"tick_size,omitempty"`
+	LotSize       string `protobuf:"bytes,18,opt,name=lot_size,json=lotSize,proto3" json:"lot_size,omitempty"`
+	BaseAsset     string `protobuf:"bytes,19,opt,name=base_asset,json=baseAsset,proto3" json:"base_asset,omitempty"`
+	QuoteAsset    string `protobuf:"bytes,20,opt,name=quote_asset,json=quoteAsset,proto3" json:"quote_asset,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Order) Reset() {
@@ -409,11 +414,39 @@ func (x *Order) GetProtectionPrice() string {
 	return ""
 }
 
+func (x *Order) GetTickSize() string {
+	if x != nil {
+		return x.TickSize
+	}
+	return ""
+}
+
+func (x *Order) GetLotSize() string {
+	if x != nil {
+		return x.LotSize
+	}
+	return ""
+}
+
+func (x *Order) GetBaseAsset() string {
+	if x != nil {
+		return x.BaseAsset
+	}
+	return ""
+}
+
+func (x *Order) GetQuoteAsset() string {
+	if x != nil {
+		return x.QuoteAsset
+	}
+	return ""
+}
+
 var File_exchange_order_v1_order_proto protoreflect.FileDescriptor
 
 const file_exchange_order_v1_order_proto_rawDesc = "" +
 	"\n" +
-	"\x1dexchange/order/v1/order.proto\x12\x11exchange.order.v1\"\x92\x05\n" +
+	"\x1dexchange/order/v1/order.proto\x12\x11exchange.order.v1\"\x8a\x06\n" +
 	"\x05Order\x12\x19\n" +
 	"\border_id\x18\x01 \x01(\tR\aorderId\x12&\n" +
 	"\x0fclient_order_id\x18\x02 \x01(\tR\rclientOrderId\x12\x17\n" +
@@ -431,7 +464,13 @@ const file_exchange_order_v1_order_proto_rawDesc = "" +
 	"\x0etaker_fee_rate\x18\r \x01(\tR\ftakerFeeRate\x12#\n" +
 	"\rbase_decimals\x18\x0e \x01(\x05R\fbaseDecimals\x12%\n" +
 	"\x0equote_decimals\x18\x0f \x01(\x05R\rquoteDecimals\x12)\n" +
-	"\x10protection_price\x18\x10 \x01(\tR\x0fprotectionPrice*9\n" +
+	"\x10protection_price\x18\x10 \x01(\tR\x0fprotectionPrice\x12\x1b\n" +
+	"\ttick_size\x18\x11 \x01(\tR\btickSize\x12\x19\n" +
+	"\blot_size\x18\x12 \x01(\tR\alotSize\x12\x1d\n" +
+	"\n" +
+	"base_asset\x18\x13 \x01(\tR\tbaseAsset\x12\x1f\n" +
+	"\vquote_asset\x18\x14 \x01(\tR\n" +
+	"quoteAsset*9\n" +
 	"\x04Side\x12\x14\n" +
 	"\x10SIDE_UNSPECIFIED\x10\x00\x12\f\n" +
 	"\bSIDE_BUY\x10\x01\x12\r\n" +

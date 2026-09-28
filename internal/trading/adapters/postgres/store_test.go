@@ -163,6 +163,10 @@ func (freezeOK) Freeze(context.Context, string, string, string, decimal.Decimal,
 	return nil
 }
 
+func (freezeOK) Unfreeze(context.Context, string, string, string, decimal.Decimal, string) error {
+	return nil
+}
+
 type onePair struct{}
 
 func (onePair) Pair(context.Context, string) (domain.Pair, error) { return pair, nil }
@@ -206,5 +210,65 @@ func TestPlacedOrdersQueueTheirEventsAndCommand(t *testing.T) {
 	}
 	if stored, _ := store.Read().Orders().Get(ctx, o.ID); stored.FreezeState != domain.FreezeDone {
 		t.Fatalf("stored: %+v", stored)
+	}
+}
+
+func TestEngineColumnsFillsAndReleases(t *testing.T) {
+	store, _ := setup(t)
+	ctx := context.Background()
+	user, at := uuid.NewString(), time.Now().Add(-time.Minute).UTC().Truncate(time.Microsecond)
+	o := order(t, user, limitBuy(), at)
+	o.FreezeState = domain.FreezeDone
+	if err := store.Read().Orders().Insert(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := store.Read().Orders().Get(ctx, o.ID)
+	if !got.TickSize.Equal(d("0.01")) || !got.LotSize.Equal(d("0.00001")) || got.BaseAsset != "BTC" || got.QuoteAsset != "USDT" || got.Released {
+		t.Fatalf("steps and assets: %+v", got)
+	}
+	if !got.Apply(domain.Update{OrderID: o.ID, Seq: 3, Status: domain.StatusCanceled, Filled: d("0.00005"), FilledQuote: d("3.0000005"), Reason: "IOC"}, at) {
+		t.Fatal("apply")
+	}
+	if err := store.Read().Orders().Update(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	unreleased, err := store.Read().Orders().Unreleased(ctx, time.Now(), 10)
+	if err != nil || len(unreleased) != 1 || unreleased[0].CancelReason != "IOC" || !unreleased[0].FilledQuote.Equal(d("3.0000005")) {
+		t.Fatalf("unreleased: %+v %v", unreleased, err)
+	}
+	got.Released = true
+	if err := store.Read().Orders().Update(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	if unreleased, _ := store.Read().Orders().Unreleased(ctx, time.Now(), 10); len(unreleased) != 0 {
+		t.Fatal("a released order is done")
+	}
+
+	trade := uuid.NewString()
+	fill := domain.Fill{
+		TradeID: trade, OrderID: o.ID, UserID: user, Symbol: "BTC-USDT", Side: domain.SideBuy, Maker: true,
+		Price: d("60000.01"), Quantity: d("0.00005"), Quote: d("3.0000005"), FeeAsset: "BTC", Fee: d("0.00000005"), Seq: 2, ExecutedAt: at,
+	}
+	for range 2 {
+		if err := store.Read().Fills().Insert(ctx, fill); err != nil {
+			t.Fatal(err)
+		}
+	}
+	later := fill
+	later.TradeID, later.Seq, later.ExecutedAt = uuid.NewString(), 5, at.Add(time.Second)
+	if err := store.Read().Fills().Insert(ctx, later); err != nil {
+		t.Fatal(err)
+	}
+	ofOrder, err := store.Read().Fills().OfOrder(ctx, o.ID)
+	if err != nil || len(ofOrder) != 2 || ofOrder[0].TradeID != trade || !ofOrder[0].Maker || !ofOrder[0].Fee.Equal(d("0.00000005")) {
+		t.Fatalf("fills of the order: %+v %v", ofOrder, err)
+	}
+	page, err := store.Read().Fills().OfUser(ctx, user, "BTC-USDT", "", 1)
+	if err != nil || len(page) != 1 || page[0].TradeID != later.TradeID {
+		t.Fatalf("user page 1: %+v %v", page, err)
+	}
+	page, err = store.Read().Fills().OfUser(ctx, user, "", page[0].TradeID, 5)
+	if err != nil || len(page) != 1 || page[0].TradeID != trade {
+		t.Fatalf("user page 2: %+v %v", page, err)
 	}
 }

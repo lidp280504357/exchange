@@ -44,8 +44,8 @@ func config() application.Config {
 			{Asset: domain.Asset{Code: "BTC", Name: "Bitcoin", Decimals: 8, TradingEnabled: true}},
 		},
 		Pairs: []domain.TradingPair{{
-			Symbol: "BTC-USDT", BaseAsset: "BTC", QuoteAsset: "USDT", TickSize: d("0.01"), LotSize: d("0.00001"),
-			MinQuantity: d("0.00001"), MaxQuantity: d("100"), MinNotional: d("5"), PriceBand: d("0.1"), FeeTier: "default",
+			Symbol: "BTC-USDT", BaseAsset: "BTC", QuoteAsset: "USDT", TickSize: d("0.01"), LotSize: d("0.0001"),
+			MinQuantity: d("0.0001"), MaxQuantity: d("100"), MinNotional: d("5"), PriceBand: d("0.1"), FeeTier: "default",
 		}},
 	}
 }

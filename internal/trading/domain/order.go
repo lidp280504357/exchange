@@ -125,11 +125,89 @@ type Order struct {
 	BaseDecimals    int32
 	QuoteDecimals   int32
 	ProtectionPrice decimal.Decimal // MARKET; zero when there was no anchor
+	// Steps and assets of the pair, handed to the engine.
+	TickSize        decimal.Decimal
+	LotSize         decimal.Decimal
+	BaseAsset       string
+	QuoteAsset      string
 	CancelRequested bool
+	// CancelReason says why the engine canceled the order (USER, IOC, FOK,
+	// SELF_TRADE, NO_LIQUIDITY).
+	CancelReason string
+	// Released is set once what the finished order no longer needs is
+	// unfrozen.
+	Released bool
 	// Sequence is the engine sequence of the last event applied.
 	Sequence  int64
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// Unused is what a finished order still has frozen: what it froze minus
+// what its fills consumed (§11.1 step 8). A sell consumes the base it
+// sold, a market buy the quote it spent, and a limit buy its limit price
+// per unit filled (settlement releases the difference to the trade price
+// at once).
+func (o Order) Unused() decimal.Decimal {
+	consumed := o.FilledQuantity
+	switch {
+	case o.Side == SideSell:
+	case o.Type == TypeMarket:
+		consumed = o.FilledQuote
+	default:
+		consumed = o.Price.Mul(o.FilledQuantity)
+	}
+	return decimal.Max(o.FrozenAmount.Sub(consumed), decimal.Zero)
+}
+
+// Terminal reports whether the order is finished.
+func (s Status) Terminal() bool { return s.Valid() && !s.Active() }
+
+// Update is a change of an order the engine reports.
+type Update struct {
+	OrderID     string
+	Seq         int64
+	Status      Status
+	Filled      decimal.Decimal
+	FilledQuote decimal.Decimal
+	// Reason is the cancel reason, or the reject code of a REJECTED order.
+	Reason string
+}
+
+// Apply records an engine update; updates older than the last one
+// applied, or that the state machine forbids, change nothing.
+func (o *Order) Apply(u Update, now time.Time) bool {
+	if u.Seq <= o.Sequence || (o.Status != u.Status && !CanTransition(o.Status, u.Status)) {
+		return false
+	}
+	o.Status, o.Sequence, o.UpdatedAt = u.Status, u.Seq, now
+	if u.Status != StatusRejected {
+		o.FilledQuantity, o.FilledQuote = u.Filled, u.FilledQuote
+	}
+	switch u.Status {
+	case StatusCanceled:
+		o.CancelReason = u.Reason
+	case StatusRejected:
+		o.RejectReason = u.Reason
+	}
+	return true
+}
+
+// Fill is one side of a trade, as the order's owner sees it.
+type Fill struct {
+	TradeID    string
+	OrderID    string
+	UserID     string
+	Symbol     string
+	Side       Side
+	Maker      bool
+	Price      decimal.Decimal
+	Quantity   decimal.Decimal
+	Quote      decimal.Decimal
+	FeeAsset   string
+	Fee        decimal.Decimal
+	Seq        int64
+	ExecutedAt time.Time
 }
 
 // SameAs reports whether a request repeating the order's client_order_id

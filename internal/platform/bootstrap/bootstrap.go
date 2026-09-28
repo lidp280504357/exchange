@@ -189,17 +189,18 @@ func Tail(ctx context.Context, a *app.App, cfg kafka.Config, topics []string, h 
 
 // BatchConsumer joins group on topics and hands batches to h.
 func BatchConsumer(ctx context.Context, a *app.App, cfg kafka.Config, group string, topics []string, h kafka.BatchHandler) error {
-	c, err := kafka.NewBatchConsumer(ctx, cfg, kafka.BatchOptions{
-		Group:   group,
-		Topics:  topics,
-		Handler: h,
-		Logger:  a.Logger(),
-		Metrics: sharedConsumerMetrics(a),
-	})
+	return BatchConsumerWith(ctx, a, cfg, kafka.BatchOptions{Group: group, Topics: topics, Handler: h})
+}
+
+// BatchConsumerWith is BatchConsumer with the batch size and wait of opts;
+// the logger and metrics are the app's.
+func BatchConsumerWith(ctx context.Context, a *app.App, cfg kafka.Config, opts kafka.BatchOptions) error {
+	opts.Logger, opts.Metrics = a.Logger(), sharedConsumerMetrics(a)
+	c, err := kafka.NewBatchConsumer(ctx, cfg, opts)
 	if err != nil {
 		return err
 	}
-	a.Add("batch consumer "+group, c)
+	a.Add("batch consumer "+opts.Group, c)
 	return nil
 }
 

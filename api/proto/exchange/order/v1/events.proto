@@ -15,8 +15,9 @@ message OrderAccepted {
   string frozen_amount = 3;
 }
 
-// OrderRejected: the order could not be funded, so it never reaches the
-// engine.
+// OrderRejected: the trading service could not fund the order (sequence
+// 0), or the engine refused it before any fill (ORDER_WOULD_TAKE,
+// ORDER_NO_LIQUIDITY, ORDER_SELF_TRADE).
 message OrderRejected {
   string order_id = 1;
   string client_order_id = 2;
@@ -24,4 +25,54 @@ message OrderRejected {
   string symbol = 4;
   // An appendix C code, e.g. LEDGER_INSUFFICIENT_BALANCE.
   string reason_code = 5;
+  int64 sequence = 6;
+}
+
+// The engine's events carry its sequence, which orders them per symbol,
+// and the order's fill state after the event.
+
+// OrderOpened: a limit order rests on the book without having filled.
+message OrderOpened {
+  string order_id = 1;
+  string user_id = 2;
+  string symbol = 3;
+  int64 sequence = 4;
+}
+
+// OrderPartiallyFilled: a trade filled part of the order; it rests (GTC)
+// or its rest is canceled next.
+message OrderPartiallyFilled {
+  string order_id = 1;
+  string user_id = 2;
+  string symbol = 3;
+  int64 sequence = 4;
+  string trade_id = 5;
+  // Totals so far: base filled and quote exchanged.
+  string filled_quantity = 6;
+  string filled_quote = 7;
+}
+
+// OrderFilled: the order is complete (a market buy also when its rest is
+// too little for another lot).
+message OrderFilled {
+  string order_id = 1;
+  string user_id = 2;
+  string symbol = 3;
+  int64 sequence = 4;
+  string trade_id = 5;
+  string filled_quantity = 6;
+  string filled_quote = 7;
+}
+
+// OrderCanceled: the order's unfilled rest is canceled.
+message OrderCanceled {
+  string order_id = 1;
+  string user_id = 2;
+  string symbol = 3;
+  int64 sequence = 4;
+  string filled_quantity = 5;
+  string filled_quote = 6;
+  // USER, IOC, FOK, SELF_TRADE, NO_LIQUIDITY (a market order ran out of
+  // book or protection) or DELISTED.
+  string reason = 7;
 }

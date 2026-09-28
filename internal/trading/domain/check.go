@@ -83,6 +83,7 @@ func NewOrder(id string, req Request, pair Pair, anchor decimal.Decimal, now tim
 		FilledQuantity: decimal.Zero, FilledQuote: decimal.Zero,
 		MakerFeeRate: pair.MakerFeeRate, TakerFeeRate: pair.TakerFeeRate,
 		BaseDecimals: pair.BaseDecimals, QuoteDecimals: pair.QuoteDecimals,
+		TickSize: pair.TickSize, LotSize: pair.LotSize, BaseAsset: pair.Base, QuoteAsset: pair.Quote,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if o.ClientOrderID == "" {

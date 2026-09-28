@@ -81,6 +81,11 @@ func (p TradingPair) Validate(base, quote Asset) error {
 		return apperr.Invalid(fmt.Sprintf("pair %s: tick_size must be positive with at most %d decimals", p.Symbol, quote.Decimals))
 	case !p.LotSize.IsPositive() || !FitsScale(p.LotSize, base.Decimals):
 		return apperr.Invalid(fmt.Sprintf("pair %s: lot_size must be positive with at most %d decimals", p.Symbol, base.Decimals))
+	case !FitsScale(p.TickSize.Mul(p.LotSize), quote.Decimals):
+		// Then every price x quantity is exact in the quote asset: freezes,
+		// trade values and what is left to release need no rounding.
+		return apperr.Invalid(fmt.Sprintf("pair %s: tick_size x lot_size (%s) must have at most %d decimals",
+			p.Symbol, p.TickSize.Mul(p.LotSize), quote.Decimals))
 	case !IsMultipleOf(p.MinQuantity, p.LotSize) || !p.MinQuantity.IsPositive():
 		return apperr.Invalid(fmt.Sprintf("pair %s: min_quantity must be a positive multiple of lot_size", p.Symbol))
 	case !IsMultipleOf(p.MaxQuantity, p.LotSize) || !p.MaxQuantity.GreaterThan(p.MinQuantity):

@@ -80,7 +80,7 @@ func TestNotifySchema(t *testing.T) {
 func TestDownMigrations(t *testing.T) {
 	for name, fsys := range map[string]fs.FS{
 		"auth": migrations.Auth(), "users": migrations.Users(), "notify": migrations.Notify(), "config": migrations.Config(),
-		"instrument": migrations.Instrument(), "ledger": migrations.Ledger(), "risk": migrations.Risk(), "trading": migrations.Trading(),
+		"instrument": migrations.Instrument(), "ledger": migrations.Ledger(), "risk": migrations.Risk(), "trading": migrations.Trading(), "matching": migrations.Matching(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			db := apply(t, fsys)

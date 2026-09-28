@@ -26,6 +26,8 @@ var (
 	risk embed.FS
 	//go:embed trading/*.sql
 	trading embed.FS
+	//go:embed matching/*.sql
+	matching embed.FS
 )
 
 // ClickHouse holds the analytics tables applied by analytics-consumer.
@@ -54,6 +56,9 @@ func Risk() fs.FS { return sub(risk, "risk") }
 
 // Trading holds spot-trading-service's schema.
 func Trading() fs.FS { return sub(trading, "trading") }
+
+// Matching holds matching-engine's schema.
+func Matching() fs.FS { return sub(matching, "matching") }
 
 func sub(fsys embed.FS, dir string) fs.FS {
 	s, err := fs.Sub(fsys, dir)

@@ -22,6 +22,7 @@ type Store interface {
 // Repos groups the repositories of one transaction.
 type Repos interface {
 	Orders() OrderRepo
+	Fills() FillRepo
 	// Emit queues an event (or a command) on topic, keyed by aggregateID.
 	Emit(ctx context.Context, topic string, msg proto.Message, aggregateType, aggregateID string) error
 }
@@ -50,6 +51,19 @@ type OrderRepo interface {
 	// PendingFreeze returns orders created before cutoff whose freeze was
 	// not recorded.
 	PendingFreeze(ctx context.Context, cutoff time.Time, limit int) ([]domain.Order, error)
+	// Unreleased returns funded orders that finished before cutoff and
+	// whose unused funds are not released yet.
+	Unreleased(ctx context.Context, cutoff time.Time, limit int) ([]domain.Order, error)
+}
+
+// FillRepo stores each side of the trades.
+type FillRepo interface {
+	// Insert stores a fill once; a repeated one is ignored.
+	Insert(ctx context.Context, f domain.Fill) error
+	OfOrder(ctx context.Context, orderID string) ([]domain.Fill, error)
+	// OfUser returns a page of the user's fills, newest first; before is
+	// the trade ID of the previous page's last fill.
+	OfUser(ctx context.Context, userID, symbol, before string, limit int) ([]domain.Fill, error)
 }
 
 // ListFilter selects a page of orders.
@@ -66,6 +80,9 @@ type Ledger interface {
 	// Freeze locks amount of asset in the user's SPOT account for an order;
 	// a repeated key returns the first result.
 	Freeze(ctx context.Context, key, userID, asset string, amount decimal.Decimal, orderID string) error
+	// Unfreeze releases what a finished order no longer needs; a repeated
+	// key returns the first result.
+	Unfreeze(ctx context.Context, key, userID, asset string, amount decimal.Decimal, orderID string) error
 }
 
 // Instruments reads trading pairs (instrument-service gRPC).

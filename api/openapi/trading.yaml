@@ -180,6 +180,62 @@ paths:
                 $ref: '#/components/schemas/Order'
         default:
           $ref: './common.yaml#/components/responses/Error'
+  /v1/orders/{order_id}/fills:
+    get:
+      operationId: listOrderFills
+      summary: The fills of one of the caller's orders, oldest first
+      tags: [orders]
+      parameters:
+        - name: order_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The order's fills.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [fills]
+                properties:
+                  fills:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Fill'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/fills:
+    get:
+      operationId: listFills
+      summary: The caller's fills, newest first
+      tags: [orders]
+      parameters:
+        - name: symbol
+          in: query
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Fill'
+                  next_cursor:
+                    type: [string, 'null']
+        default:
+          $ref: './common.yaml#/components/responses/Error'
 components:
   securitySchemes:
     bearer:
@@ -235,7 +291,11 @@ components:
           enum: [NEW, OPEN, PARTIALLY_FILLED, FILLED, CANCELED, REJECTED, EXPIRED]
         reject_reason:
           type: string
-          description: Appendix C code of a REJECTED order.
+          description: Appendix C code of a REJECTED order (LEDGER_INSUFFICIENT_BALANCE, ORDER_WOULD_TAKE, ORDER_NO_LIQUIDITY, ORDER_SELF_TRADE).
+        cancel_reason:
+          type: string
+          description: Why a CANCELED order's rest was canceled.
+          enum: [USER, IOC, FOK, SELF_TRADE, NO_LIQUIDITY]
         filled_quantity:
           $ref: './market.yaml#/components/schemas/Decimal'
         filled_quote:
@@ -250,5 +310,37 @@ components:
           type: string
           format: date-time
         updated_at:
+          type: string
+          format: date-time
+    Fill:
+      type: object
+      required: [trade_id, order_id, symbol, side, role, price, quantity, quote_quantity, fee_asset, fee, executed_at]
+      properties:
+        trade_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        symbol:
+          type: string
+        side:
+          type: string
+          enum: [BUY, SELL]
+        role:
+          type: string
+          enum: [MAKER, TAKER]
+        price:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        quantity:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        quote_quantity:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        fee_asset:
+          type: string
+          description: A buyer pays in the base asset, a seller in the quote asset.
+        fee:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        executed_at:
           type: string
           format: date-time

@@ -23,3 +23,12 @@ func (c *Client) Freeze(ctx context.Context, key, userID, asset string, amount d
 	})
 	return err
 }
+
+// Unfreeze releases an order's unused funds (ORDER_UNFREEZE).
+func (c *Client) Unfreeze(ctx context.Context, key, userID, asset string, amount decimal.Decimal, orderID string) error {
+	_, err := c.c.Unfreeze(ctx, &ledgerv1.UnfreezeRequest{
+		IdempotencyKey: key, UserId: userID, AccountType: "SPOT", Asset: asset, Amount: amount.String(),
+		EntryType: "ORDER_UNFREEZE", Reference: orderID,
+	})
+	return err
+}

@@ -101,6 +101,7 @@ func Mount(r chi.Router, g Guards, up Upstreams) {
 			orders := r.With(g.signedIn(true, RuleUser, RuleOrder)...)
 			orders.Handle("/v1/orders", up.Trading)
 			orders.Handle("/v1/orders/*", up.Trading)
+			orders.Handle("/v1/fills", up.Trading)
 		}
 		if up.DevInbox != nil {
 			r.Handle("/v1/dev/*", up.DevInbox)
