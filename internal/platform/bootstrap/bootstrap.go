@@ -176,6 +176,17 @@ func Consumer(ctx context.Context, a *app.App, cfg kafka.Config, group string, t
 	return nil
 }
 
+// Tail follows topics from their end without a consumer group and hands
+// every record to h (fan-out to live connections).
+func Tail(ctx context.Context, a *app.App, cfg kafka.Config, topics []string, h kafka.Handler) error {
+	t, err := kafka.NewTail(ctx, cfg, a.Name()+"-tail", topics, h, a.Logger())
+	if err != nil {
+		return err
+	}
+	a.Add("kafka tail", t)
+	return nil
+}
+
 // BatchConsumer joins group on topics and hands batches to h.
 func BatchConsumer(ctx context.Context, a *app.App, cfg kafka.Config, group string, topics []string, h kafka.BatchHandler) error {
 	c, err := kafka.NewBatchConsumer(ctx, cfg, kafka.BatchOptions{

@@ -53,7 +53,7 @@ func newAuthFixture(t *testing.T) *authFixture {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	r := httpx.NewRouter(httpx.RouterOptions{Logger: slog.New(slog.DiscardHandler)})
-	Mount(r, authn, Upstreams{Auth: upstream, User: upstream, Notification: upstream, Instrument: upstream, Ledger: upstream})
+	Mount(r, Guards{Authn: authn}, Upstreams{Auth: upstream, User: upstream, Notification: upstream, Instrument: upstream, Ledger: upstream})
 	r.With(authn.Required).Post("/v1/orders", upstream.ServeHTTP)
 	f.router = r
 	return f
@@ -173,5 +173,15 @@ func TestStaleTokensAreSentToRefresh(t *testing.T) {
 	fresh := "Bearer " + f.token(t, "s-1", authtoken.ScopeRead)
 	if status, _ := f.call(http.MethodGet, "/v1/auth/sessions", fresh); status != 204 {
 		t.Fatalf("refreshed token: %d", status)
+	}
+}
+
+func TestTransferRoutesKeepOtherMethods(t *testing.T) {
+	f := newAuthFixture(t)
+	tok := "Bearer " + f.token(t, "s-1", authtoken.ScopeFull)
+	for _, m := range []string{http.MethodGet, http.MethodPost} {
+		if status, code := f.call(m, "/v1/account/transfers", tok); status != 204 {
+			t.Errorf("%s /v1/account/transfers: %d %s", m, status, code)
+		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,7 +49,10 @@ func TestSetupServesAndShutsDown(t *testing.T) {
 	shutdownTracing := tracing.Setup() // app.Main does this in production
 	t.Cleanup(func() { _ = shutdownTracing(context.Background()) })
 	addr := freeAddr(t)
-	vars := []string{"APP_ENV=test", "HTTP_ADDR=" + addr, "OPS_ADDR=127.0.0.1:0", "REDIS_URL=" + testenv.RedisURL(t)}
+	vars := []string{
+		"APP_ENV=test", "HTTP_ADDR=" + addr, "OPS_ADDR=127.0.0.1:0", "REDIS_URL=" + testenv.RedisURL(t),
+		"KAFKA_BROKERS=" + strings.Join(testenv.KafkaBrokers(t), ","), "SCHEMA_REGISTRY_URL=" + testenv.SchemaRegistryURL(t),
+	}
 	a, err := app.New("api-gateway",
 		app.WithLoader(config.Loader{Environ: func() []string { return vars }}),
 		app.WithLogOutput(io.Discard),

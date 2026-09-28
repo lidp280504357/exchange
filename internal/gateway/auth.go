@@ -59,7 +59,7 @@ func (a *Authenticator) handler(next http.Handler, required bool) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		id, err := a.authenticate(r.Context(), token)
+		id, _, err := a.Authenticate(r.Context(), token)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -76,15 +76,29 @@ func (a *Authenticator) handler(next http.Handler, required bool) http.Handler {
 	})
 }
 
-func (a *Authenticator) authenticate(ctx context.Context, token string) (Identity, error) {
+// Authenticate checks an access token and returns its identity and
+// expiry.
+func (a *Authenticator) Authenticate(ctx context.Context, token string) (Identity, time.Time, error) {
+	id, claims, err := a.authenticate(ctx, token)
+	if err != nil {
+		return Identity{}, time.Time{}, err
+	}
+	var exp time.Time
+	if claims.ExpiresAt != nil {
+		exp = claims.ExpiresAt.Time
+	}
+	return id, exp, nil
+}
+
+func (a *Authenticator) authenticate(ctx context.Context, token string) (Identity, authtoken.Claims, error) {
 	claims, err := a.Verifier.Verify(ctx, token, a.Now())
 	switch {
 	case errors.Is(err, authtoken.ErrExpired):
-		return Identity{}, errTokenExpired
+		return Identity{}, claims, errTokenExpired
 	case errors.Is(err, authtoken.ErrKeysUnavailable):
-		return Identity{}, apperr.Unavailable(err)
+		return Identity{}, claims, apperr.Unavailable(err)
 	case err != nil:
-		return Identity{}, errBadToken
+		return Identity{}, claims, errBadToken
 	}
 	revoked, staleUpTo, err := a.State(ctx, claims.SessionID, claims.Subject)
 	if err != nil {
@@ -92,13 +106,13 @@ func (a *Authenticator) authenticate(ctx context.Context, token string) (Identit
 	}
 	switch {
 	case revoked:
-		return Identity{}, errRevoked
+		return Identity{}, claims, errRevoked
 	case staleUpTo > 0 && claims.IssuedAtMillis() <= staleUpTo:
 		// The account status changed after the token was issued: a
 		// refresh brings the current scope.
-		return Identity{}, errTokenExpired
+		return Identity{}, claims, errTokenExpired
 	}
-	return Identity{UserID: claims.Subject, SessionID: claims.SessionID, Scope: claims.Scope}, nil
+	return Identity{UserID: claims.Subject, SessionID: claims.SessionID, Scope: claims.Scope}, claims, nil
 }
 
 // bearer extracts the token of an "Authorization: Bearer" header.

@@ -20,6 +20,8 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/bootstrap"
 	"github.com/lidp280504357/exchange/internal/platform/config"
 	"github.com/lidp280504357/exchange/internal/platform/httpx"
+	"github.com/lidp280504357/exchange/internal/platform/kafka"
+	"github.com/lidp280504357/exchange/internal/platform/ratelimit"
 	"github.com/lidp280504357/exchange/internal/platform/redisx"
 )
 
@@ -33,12 +35,18 @@ type settings struct {
 	NotificationURL string `koanf:"notification_service_url"`
 	InstrumentURL   string `koanf:"instrument_service_url"`
 	LedgerURL       string `koanf:"ledger_service_url"`
-	// Redis holds the session revocation marks auth-service sets.
+	// Redis holds the session revocation marks auth-service sets, the rate
+	// limit counters and the idempotency cache.
 	Redis redisx.Config `koanf:",squash"`
+	// Kafka carries the private events pushed over WebSocket.
+	Kafka kafka.Config `koanf:",squash"`
+	// WSOrigins are the browser origins (host patterns) allowed to open
+	// /v1/ws (WS_ORIGINS).
+	WSOrigins []string `koanf:"ws_origins"`
 }
 
 func (s *settings) Validate() error {
-	return errors.Join(s.Redis.Validate())
+	return errors.Join(s.Redis.Validate(), s.Kafka.Validate())
 }
 
 func main() {
@@ -53,6 +61,7 @@ func setup(ctx context.Context, a *app.App) error {
 		NotificationURL: "http://localhost:8083",
 		InstrumentURL:   "http://localhost:8084",
 		LedgerURL:       "http://localhost:8085",
+		WSOrigins:       []string{"astras.vip", "localhost:5173"},
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -108,9 +117,21 @@ func setup(ctx context.Context, a *app.App) error {
 		up.DevInbox = notification
 	}
 
+	hub := gateway.NewHub(authn, cfg.WSOrigins, a.Logger(), a.Metrics())
+	a.Add("websocket hub", hub)
+	if err := bootstrap.Tail(ctx, a, cfg.Kafka, gateway.WSTopics, gateway.WSEvents(hub)); err != nil {
+		return err
+	}
+	guards := gateway.Guards{
+		Authn:       authn,
+		Limits:      &gateway.Limits{Limiter: ratelimit.New(rdb, "gw:rl:"), Log: a.Logger()},
+		Idempotency: &gateway.Idempotency{Redis: rdb, Log: a.Logger()},
+		WS:          hub,
+	}
+
 	r := a.NewRouter()
 	r.Get("/v1/time", serverTime(time.Now))
-	gateway.Mount(r, authn, up)
+	gateway.Mount(r, guards, up)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
 }
 

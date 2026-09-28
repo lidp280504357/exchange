@@ -52,6 +52,7 @@ services:
       LEDGER_SERVICE_URL: http://ledger-service:8085
     depends_on:
       redis: {condition: service_healthy}
+      redpanda: {condition: service_healthy}
       auth-service: {condition: service_started}
       user-service: {condition: service_started}
       notification-service: {condition: service_started}

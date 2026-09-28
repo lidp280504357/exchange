@@ -16,7 +16,8 @@ func TestAllowCountsUntilTheLimit(t *testing.T) {
 	rule := ratelimit.Rule{Name: "per_target", Limit: 3, Window: time.Minute}
 
 	for i := range 3 {
-		if r, err := l.Allow(ctx, ratelimit.Check{Rule: rule, Key: "a@x.com"}); err != nil || !r.Allowed {
+		r, err := l.Allow(ctx, ratelimit.Check{Rule: rule, Key: "a@x.com"})
+		if err != nil || !r.Allowed || r.Remaining != 2-i || r.Rule.Name != "per_target" {
 			t.Fatalf("hit %d: %+v %v", i+1, r, err)
 		}
 	}
@@ -37,8 +38,8 @@ func TestAllowConsumesNothingWhenOneRuleIsExhausted(t *testing.T) {
 	hourly := ratelimit.Rule{Name: "hourly", Limit: 5, Window: time.Hour}
 	checks := []ratelimit.Check{{Rule: hourly, Key: "t"}, {Rule: resend, Key: "t"}}
 
-	if r, _ := l.Allow(ctx, checks...); !r.Allowed {
-		t.Fatal("first request must pass")
+	if r, _ := l.Allow(ctx, checks...); !r.Allowed || r.Rule.Name != "resend" || r.Remaining != 0 {
+		t.Fatalf("first request must pass, reporting the tightest rule: %+v", r)
 	}
 	for range 3 {
 		if r, _ := l.Allow(ctx, checks...); r.Allowed || r.Rule.Name != "resend" {

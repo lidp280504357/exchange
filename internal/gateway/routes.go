@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/lidp280504357/exchange/internal/platform/ratelimit"
 )
 
 // Upstreams are the proxies to the services behind the gateway.
@@ -16,6 +18,15 @@ type Upstreams struct {
 	// DevInbox is notification-service's mock-provider inbox; nil in
 	// production, where it is never routed.
 	DevInbox http.Handler
+}
+
+// Guards are the gateway's cross-cutting checks; nil Limits, Idempotency
+// or WS leave that part out (tests).
+type Guards struct {
+	Authn       *Authenticator
+	Limits      *Limits
+	Idempotency *Idempotency
+	WS          http.Handler
 }
 
 // publicAuthPaths are the auth flows that produce tokens; they take no
@@ -32,27 +43,61 @@ var publicAuthPaths = []string{
 	"/token/refresh",
 }
 
-// Mount routes the /v1 API through authentication to the services. Every
-// path not listed as public or optional requires a valid access token.
-func Mount(r chi.Router, authn *Authenticator, up Upstreams) {
-	r.Route("/v1/auth", func(r chi.Router) {
-		for _, p := range publicAuthPaths {
-			r.Handle(p, up.Auth)
-		}
-		// Anonymous for registration and login codes, signed in for
-		// step-up and identity binding.
-		r.With(authn.Optional).Handle("/otp/request", up.Auth)
-		r.With(authn.Required).Handle("/*", up.Auth)
-	})
-	// Public reference data.
-	r.Handle("/v1/market/assets", up.Instrument)
-	r.Handle("/v1/market/pairs", up.Instrument)
-	r.Handle("/v1/market/pairs/*", up.Instrument)
-	r.With(authn.Required).Handle("/v1/user/*", up.User)
-	r.With(authn.Required).Handle("/v1/account/*", up.Ledger)
-	r.With(authn.Required).Handle("/v1/notifications", up.Notification)
-	r.With(authn.Required).Handle("/v1/notifications/*", up.Notification)
-	if up.DevInbox != nil {
-		r.Handle("/v1/dev/*", up.DevInbox)
+type middleware = func(http.Handler) http.Handler
+
+func (g Guards) byIP(rules ...ratelimit.Rule) []middleware {
+	if g.Limits == nil {
+		return nil
 	}
+	return []middleware{g.Limits.ByIP(rules...)}
+}
+
+func (g Guards) signedIn(required bool, rules ...ratelimit.Rule) []middleware {
+	m := []middleware{g.Authn.Optional}
+	if required {
+		m[0] = g.Authn.Required
+	}
+	if g.Limits != nil {
+		m = append(m, g.Limits.ByUser(rules...))
+	}
+	if g.Idempotency != nil {
+		m = append(m, g.Idempotency.Middleware)
+	}
+	return m
+}
+
+// Mount routes the /v1 API: every request counts against its IP; token
+// flows are public with a tighter IP quota; everything else needs a
+// valid access token and counts against the user, and signed-in writes
+// honor Idempotency-Key. Paths not listed below require a token.
+func Mount(r chi.Router, g Guards, up Upstreams) {
+	r.Group(func(r chi.Router) {
+		r.Use(g.byIP(RuleIP)...)
+		if g.WS != nil {
+			r.Get("/v1/ws", g.WS.ServeHTTP) // authenticates inside the protocol
+		}
+		r.Route("/v1/auth", func(r chi.Router) {
+			for _, p := range publicAuthPaths {
+				r.With(g.byIP(RuleIPAuth)...).Handle(p, up.Auth)
+			}
+			// Anonymous for registration and login codes, signed in for
+			// step-up and identity binding.
+			r.With(append(g.byIP(RuleIPAuth), g.signedIn(false, RuleUser)...)...).Handle("/otp/request", up.Auth)
+			r.With(g.signedIn(true, RuleUser)...).Handle("/*", up.Auth)
+		})
+		// Public reference data.
+		r.Handle("/v1/market/assets", up.Instrument)
+		r.Handle("/v1/market/pairs", up.Instrument)
+		r.Handle("/v1/market/pairs/*", up.Instrument)
+
+		private := r.With(g.signedIn(true, RuleUser)...)
+		private.Handle("/v1/user/*", up.User)
+		r.With(g.signedIn(true, RuleUser, RuleTransfer)...).Post("/v1/account/transfers", up.Ledger.ServeHTTP)
+		private.Handle("/v1/account/*", up.Ledger)
+		private.Handle("/v1/notifications", up.Notification)
+		private.Handle("/v1/notifications/*", up.Notification)
+		if up.DevInbox != nil {
+			r.Handle("/v1/dev/*", up.DevInbox)
+		}
+	})
 }

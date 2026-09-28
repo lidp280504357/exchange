@@ -30,8 +30,12 @@ type Check struct {
 // Result reports the outcome of Allow.
 type Result struct {
 	Allowed bool
-	// Rule is the exhausted rule when Allowed is false.
+	// Rule is the exhausted rule when Allowed is false, and otherwise the
+	// rule with the fewest hits left.
 	Rule Rule
+	// Remaining is what Rule has left after this hit (0 when refused), for
+	// X-RateLimit-Remaining.
+	Remaining int
 	// RetryAfter is when the exhausted window closes.
 	RetryAfter time.Duration
 }
@@ -47,9 +51,9 @@ func New(rdb redis.Cmdable, prefix string) *Limiter {
 	return &Limiter{rdb: rdb, prefix: prefix}
 }
 
-// allowScript returns {0, 0} after incrementing every counter, or
-// {i, ttl_ms} for the first exhausted check i (1-based) without touching
-// any counter.
+// allowScript returns {0, 0, j, left} after incrementing every counter,
+// where check j has the fewest hits left, or {i, ttl_ms} for the first
+// exhausted check i (1-based) without touching any counter.
 var allowScript = redis.NewScript(`
 for i, key in ipairs(KEYS) do
   local n = tonumber(redis.call('GET', key) or '0')
@@ -57,12 +61,18 @@ for i, key in ipairs(KEYS) do
     return {i, redis.call('PTTL', key)}
   end
 end
+local tightest, least = 1, -1
 for i, key in ipairs(KEYS) do
-  if redis.call('INCR', key) == 1 then
+  local n = redis.call('INCR', key)
+  if n == 1 then
     redis.call('PEXPIRE', key, ARGV[2*i])
   end
+  local left = tonumber(ARGV[2*i-1]) - n
+  if least < 0 or left < least then
+    tightest, least = i, left
+  end
 end
-return {0, 0}
+return {0, 0, tightest, least}
 `)
 
 // Allow consumes one hit of every check, or none if any is exhausted.
@@ -81,7 +91,11 @@ func (l *Limiter) Allow(ctx context.Context, checks ...Check) (Result, error) {
 		return Result{}, fmt.Errorf("ratelimit: %w", err)
 	}
 	if res[0] == 0 {
-		return Result{Allowed: true}, nil
+		out := Result{Allowed: true}
+		if len(res) == 4 && res[2] >= 1 && int(res[2]) <= len(checks) {
+			out.Rule, out.Remaining = checks[res[2]-1].Rule, int(res[3])
+		}
+		return out, nil
 	}
 	c := checks[res[0]-1]
 	retry := time.Duration(res[1]) * time.Millisecond
