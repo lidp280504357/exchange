@@ -32,6 +32,8 @@ var (
 	market embed.FS
 	//go:embed wallet/*.sql
 	wallet embed.FS
+	//go:embed signer/*.sql
+	signer embed.FS
 )
 
 // ClickHouse holds the analytics tables applied by analytics-consumer.
@@ -69,6 +71,9 @@ func Market() fs.FS { return sub(market, "market") }
 
 // Wallet holds wallet-service's schema.
 func Wallet() fs.FS { return sub(wallet, "wallet") }
+
+// Signer holds the signer's audit schema.
+func Signer() fs.FS { return sub(signer, "signer") }
 
 func sub(fsys embed.FS, dir string) fs.FS {
 	s, err := fs.Sub(fsys, dir)

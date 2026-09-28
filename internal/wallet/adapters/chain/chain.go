@@ -4,6 +4,7 @@ package chain
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"slices"
@@ -127,4 +128,72 @@ func (a *Chain) Decimals(ctx context.Context, contract string) (int32, error) {
 	a.decimals[contract] = d
 	a.mu.Unlock()
 	return d, nil
+}
+
+var _ ports.Transactor = (*Chain)(nil)
+
+// Balance returns an address's coin balance.
+func (a *Chain) Balance(ctx context.Context, address string) (*big.Int, error) {
+	return a.c.Balance(ctx, address)
+}
+
+// PendingNonce returns an address's next nonce, pending transactions
+// included.
+func (a *Chain) PendingNonce(ctx context.Context, address string) (uint64, error) {
+	return a.c.PendingNonce(ctx, address)
+}
+
+// Fees returns the latest base fee and a suggested tip.
+func (a *Chain) Fees(ctx context.Context) (*big.Int, *big.Int, error) { return a.c.Fees(ctx) }
+
+// SendRaw broadcasts a signed transaction; one the node already has
+// counts as sent.
+func (a *Chain) SendRaw(ctx context.Context, raw string) error {
+	_, err := a.c.SendRaw(ctx, raw)
+	var rpcErr *evm.RPCError
+	if errors.As(err, &rpcErr) && strings.Contains(strings.ToLower(rpcErr.Message), "already known") {
+		return nil
+	}
+	return err
+}
+
+// Receipt returns a mined transaction's receipt, nil while pending.
+func (a *Chain) Receipt(ctx context.Context, hash string) (*ports.Receipt, error) {
+	r, err := a.c.Receipt(ctx, hash)
+	if errors.Is(err, evm.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	price := new(big.Int)
+	if r.EffectiveGasPrice != nil {
+		price = r.EffectiveGasPrice.ToInt()
+	}
+	return &ports.Receipt{
+		Succeeded: r.Succeeded(), BlockNumber: uint64(r.BlockNumber), BlockHash: strings.ToLower(r.BlockHash),
+		GasUsed: uint64(r.GasUsed), EffectiveGasPrice: price,
+	}, nil
+}
+
+// Transaction returns a transaction, nil when the node does not know it.
+func (a *Chain) Transaction(ctx context.Context, hash string) (*ports.Tx, error) {
+	t, err := a.c.TransactionByHash(ctx, hash)
+	if errors.Is(err, evm.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := &ports.Tx{From: strings.ToLower(t.From), Value: new(big.Int)}
+	if t.To != nil {
+		out.To = strings.ToLower(*t.To)
+	}
+	if t.Value != nil {
+		out.Value = t.Value.ToInt()
+	}
+	if t.BlockNumber != nil {
+		out.BlockNumber = uint64(*t.BlockNumber)
+	}
+	return out, nil
 }

@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package exchange.signer.v1;
+
+// SignerService is the only holder of the platform wallet's private keys
+// (requirements §5.10, ADR-0003). It signs EVM transactions for
+// wallet-service after its own checks: a withdrawal comes from the hot
+// wallet, carries its approval and stays within the signer's per
+// transaction and daily limits; a sweep can only pay the hot wallet.
+// Every request and its result are kept in the signer's audit table.
+// Amounts are integers in the chain's smallest unit (wei), as decimal
+// strings.
+service SignerService {
+  // GetHotWallet returns the hot wallet's address (m/44'/60'/1'/0/0).
+  rpc GetHotWallet(GetHotWalletRequest) returns (GetHotWalletResponse);
+  // SignTransaction signs an EIP-1559 transaction. The same request_id
+  // with the same content returns the first signature; with other content
+  // it fails with COMMON_IDEMPOTENCY_CONFLICT.
+  rpc SignTransaction(SignTransactionRequest) returns (SignTransactionResponse);
+}
+
+message GetHotWalletRequest {}
+
+message GetHotWalletResponse {
+  string address = 1;
+}
+
+enum Purpose {
+  PURPOSE_UNSPECIFIED = 0;
+  // From the hot wallet to a user's withdrawal address.
+  PURPOSE_WITHDRAWAL = 1;
+  // From a deposit address to the hot wallet.
+  PURPOSE_SWEEP = 2;
+}
+
+message SignTransactionRequest {
+  string request_id = 1;
+  Purpose purpose = 2;
+  // The withdrawal or sweep the transaction belongs to. Replacements (same
+  // nonce, higher fee) of a withdrawal share it and must keep the
+  // recipient and the value.
+  string reference = 3;
+  // Withdrawals: who approved it (the risk engine or reviewers).
+  string approved_by = 4;
+  uint64 chain_id = 5;
+  // Sweeps: the deposit address index (m/44'/60'/0'/0/index).
+  uint32 address_index = 6;
+  uint64 nonce = 7;
+  string to = 8;
+  string value = 9;
+  bytes data = 10;
+  uint64 gas_limit = 11;
+  string max_fee_per_gas = 12;
+  string max_priority_fee_per_gas = 13;
+}
+
+message SignTransactionResponse {
+  // 0x-prefixed binary encoding, ready for eth_sendRawTransaction.
+  string raw_transaction = 1;
+  string tx_hash = 2;
+  string from = 3;
+}

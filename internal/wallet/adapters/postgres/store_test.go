@@ -163,3 +163,79 @@ func TestDepositsAndBlocks(t *testing.T) {
 		t.Fatalf("kept %q", h)
 	}
 }
+
+func TestOperations(t *testing.T) {
+	store, ctx := newStore(t), context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	tx := "0x" + strings.Repeat("ab", 32)
+	cmd := domain.Command{
+		ID: uuid.NewString(), Network: net, Kind: domain.CommandSweep, Args: map[string]string{"min": "0.001"},
+		Status: domain.CommandPending, RequestedBy: "cli:ops", CreatedAt: now,
+	}
+	sweep := domain.Sweep{
+		ID: uuid.NewString(), Network: net, Address: "0x0000000000000000000000000000000000000001", Index: 0, Asset: "ETH",
+		Amount: decimal.RequireFromString("0.0012"), Nonce: 0, TxHash: tx, Raw: "0x02", Status: domain.SweepBroadcast, CommandID: cmd.ID,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	err := store.Tx(ctx, func(r ports.Repos) error {
+		if err := r.Commands().Insert(ctx, cmd); err != nil {
+			return err
+		}
+		if err := r.Sweeps().Insert(ctx, sweep); err != nil {
+			return err
+		}
+		fee := domain.ChainFee{TxHash: tx, Network: net, Asset: "ETH", Amount: decimal.RequireFromString("0.000042"), Purpose: domain.FeeSweep, Reference: sweep.ID}
+		if err := r.ChainFees().Insert(ctx, fee); err != nil {
+			return err
+		}
+		if err := r.ChainFees().Insert(ctx, fee); err != nil { // once per transaction
+			return err
+		}
+		return r.Checks().Insert(ctx, domain.NewChainCheck(net, "ETH", decimal.RequireFromString("1"), decimal.RequireFromString("0.9"),
+			decimal.Zero, 3, now))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := store.Read()
+	if pending, err := read.Commands().Pending(ctx, net); err != nil || len(pending) != 1 || pending[0].Args["min"] != "0.001" {
+		t.Fatalf("pending commands %v %v", pending, err)
+	}
+	cmd.Status, cmd.Result, cmd.DoneAt = domain.CommandDone, "1 addresses swept", now
+	if err := store.Tx(ctx, func(r ports.Repos) error { return r.Commands().Update(ctx, cmd) }); err != nil {
+		t.Fatal(err)
+	}
+	if pending, _ := read.Commands().Pending(ctx, net); len(pending) != 0 {
+		t.Fatal("a done command is not pending")
+	}
+	if open, err := read.Sweeps().Open(ctx, net); err != nil || len(open) != 1 || open[0].CommandID != cmd.ID || !open[0].Amount.Equal(sweep.Amount) {
+		t.Fatalf("open sweeps %v %v", open, err)
+	}
+	fees, err := read.ChainFees().Unbooked(ctx, net)
+	if err != nil || len(fees) != 1 || fees[0].Amount.String() != "0.000042" {
+		t.Fatalf("unbooked fees %v %v", fees, err)
+	}
+	if err := read.ChainFees().MarkBooked(ctx, tx, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	if fees, _ := read.ChainFees().Unbooked(ctx, net); len(fees) != 0 {
+		t.Fatal("booked fees are not listed")
+	}
+	f := domain.Funding{
+		TxHash: tx, Network: net, Asset: "ETH", AccountType: "GAS_SUPPLY", Amount: decimal.RequireFromString("0.005"),
+		JournalID: uuid.NewString(), CreatedAt: now,
+	}
+	if err := read.Fundings().Insert(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := read.Fundings().Get(ctx, tx); err != nil || got == nil || got.AccountType != "GAS_SUPPLY" {
+		t.Fatalf("funding %+v %v", got, err)
+	}
+	if err := read.Fundings().Insert(ctx, f); err == nil {
+		t.Fatal("a transaction funds once")
+	}
+	checks, err := read.Checks().Latest(ctx, net)
+	if err != nil || len(checks) != 1 || checks[0].Shortfall.String() != "-0.1" {
+		t.Fatalf("checks %v %v", checks, err)
+	}
+}

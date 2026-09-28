@@ -652,6 +652,589 @@ func (x *GetBalancesResponse) GetBalances() []*Balance {
 	return nil
 }
 
+type SettleWithdrawalRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	IdempotencyKey string                 `protobuf:"bytes,1,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	UserId         string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Asset          string                 `protobuf:"bytes,3,opt,name=asset,proto3" json:"asset,omitempty"`
+	// Sent on chain.
+	Amount string `protobuf:"bytes,4,opt,name=amount,proto3" json:"amount,omitempty"`
+	// Kept by the platform; may be zero.
+	Fee string `protobuf:"bytes,5,opt,name=fee,proto3" json:"fee,omitempty"`
+	// The withdrawal ID.
+	Reference     string `protobuf:"bytes,6,opt,name=reference,proto3" json:"reference,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SettleWithdrawalRequest) Reset() {
+	*x = SettleWithdrawalRequest{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SettleWithdrawalRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SettleWithdrawalRequest) ProtoMessage() {}
+
+func (x *SettleWithdrawalRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SettleWithdrawalRequest.ProtoReflect.Descriptor instead.
+func (*SettleWithdrawalRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *SettleWithdrawalRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *SettleWithdrawalRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *SettleWithdrawalRequest) GetAsset() string {
+	if x != nil {
+		return x.Asset
+	}
+	return ""
+}
+
+func (x *SettleWithdrawalRequest) GetAmount() string {
+	if x != nil {
+		return x.Amount
+	}
+	return ""
+}
+
+func (x *SettleWithdrawalRequest) GetFee() string {
+	if x != nil {
+		return x.Fee
+	}
+	return ""
+}
+
+func (x *SettleWithdrawalRequest) GetReference() string {
+	if x != nil {
+		return x.Reference
+	}
+	return ""
+}
+
+type SettleWithdrawalResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Posting       *Posting               `protobuf:"bytes,1,opt,name=posting,proto3" json:"posting,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SettleWithdrawalResponse) Reset() {
+	*x = SettleWithdrawalResponse{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SettleWithdrawalResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SettleWithdrawalResponse) ProtoMessage() {}
+
+func (x *SettleWithdrawalResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SettleWithdrawalResponse.ProtoReflect.Descriptor instead.
+func (*SettleWithdrawalResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *SettleWithdrawalResponse) GetPosting() *Posting {
+	if x != nil {
+		return x.Posting
+	}
+	return nil
+}
+
+type TransferInternalRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	IdempotencyKey string                 `protobuf:"bytes,1,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	FromUserId     string                 `protobuf:"bytes,2,opt,name=from_user_id,json=fromUserId,proto3" json:"from_user_id,omitempty"`
+	ToUserId       string                 `protobuf:"bytes,3,opt,name=to_user_id,json=toUserId,proto3" json:"to_user_id,omitempty"`
+	Asset          string                 `protobuf:"bytes,4,opt,name=asset,proto3" json:"asset,omitempty"`
+	Amount         string                 `protobuf:"bytes,5,opt,name=amount,proto3" json:"amount,omitempty"`
+	// The withdrawal ID.
+	Reference     string `protobuf:"bytes,6,opt,name=reference,proto3" json:"reference,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TransferInternalRequest) Reset() {
+	*x = TransferInternalRequest{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransferInternalRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransferInternalRequest) ProtoMessage() {}
+
+func (x *TransferInternalRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransferInternalRequest.ProtoReflect.Descriptor instead.
+func (*TransferInternalRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *TransferInternalRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *TransferInternalRequest) GetFromUserId() string {
+	if x != nil {
+		return x.FromUserId
+	}
+	return ""
+}
+
+func (x *TransferInternalRequest) GetToUserId() string {
+	if x != nil {
+		return x.ToUserId
+	}
+	return ""
+}
+
+func (x *TransferInternalRequest) GetAsset() string {
+	if x != nil {
+		return x.Asset
+	}
+	return ""
+}
+
+func (x *TransferInternalRequest) GetAmount() string {
+	if x != nil {
+		return x.Amount
+	}
+	return ""
+}
+
+func (x *TransferInternalRequest) GetReference() string {
+	if x != nil {
+		return x.Reference
+	}
+	return ""
+}
+
+type TransferInternalResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Posting       *Posting               `protobuf:"bytes,1,opt,name=posting,proto3" json:"posting,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TransferInternalResponse) Reset() {
+	*x = TransferInternalResponse{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransferInternalResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransferInternalResponse) ProtoMessage() {}
+
+func (x *TransferInternalResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransferInternalResponse.ProtoReflect.Descriptor instead.
+func (*TransferInternalResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *TransferInternalResponse) GetPosting() *Posting {
+	if x != nil {
+		return x.Posting
+	}
+	return nil
+}
+
+type BookChainFeeRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	IdempotencyKey string                 `protobuf:"bytes,1,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	Asset          string                 `protobuf:"bytes,2,opt,name=asset,proto3" json:"asset,omitempty"`
+	Amount         string                 `protobuf:"bytes,3,opt,name=amount,proto3" json:"amount,omitempty"`
+	// The transaction hash.
+	Reference     string `protobuf:"bytes,4,opt,name=reference,proto3" json:"reference,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BookChainFeeRequest) Reset() {
+	*x = BookChainFeeRequest{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BookChainFeeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BookChainFeeRequest) ProtoMessage() {}
+
+func (x *BookChainFeeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BookChainFeeRequest.ProtoReflect.Descriptor instead.
+func (*BookChainFeeRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *BookChainFeeRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *BookChainFeeRequest) GetAsset() string {
+	if x != nil {
+		return x.Asset
+	}
+	return ""
+}
+
+func (x *BookChainFeeRequest) GetAmount() string {
+	if x != nil {
+		return x.Amount
+	}
+	return ""
+}
+
+func (x *BookChainFeeRequest) GetReference() string {
+	if x != nil {
+		return x.Reference
+	}
+	return ""
+}
+
+type BookChainFeeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Posting       *Posting               `protobuf:"bytes,1,opt,name=posting,proto3" json:"posting,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BookChainFeeResponse) Reset() {
+	*x = BookChainFeeResponse{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BookChainFeeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BookChainFeeResponse) ProtoMessage() {}
+
+func (x *BookChainFeeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BookChainFeeResponse.ProtoReflect.Descriptor instead.
+func (*BookChainFeeResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *BookChainFeeResponse) GetPosting() *Posting {
+	if x != nil {
+		return x.Posting
+	}
+	return nil
+}
+
+type FundSystemAccountRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	IdempotencyKey string                 `protobuf:"bytes,1,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	// GAS_SUPPLY, INSURANCE_FUND or MARKET_MAKER.
+	AccountType string `protobuf:"bytes,2,opt,name=account_type,json=accountType,proto3" json:"account_type,omitempty"`
+	Asset       string `protobuf:"bytes,3,opt,name=asset,proto3" json:"asset,omitempty"`
+	Amount      string `protobuf:"bytes,4,opt,name=amount,proto3" json:"amount,omitempty"`
+	// The funding transaction hash.
+	Reference     string `protobuf:"bytes,5,opt,name=reference,proto3" json:"reference,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FundSystemAccountRequest) Reset() {
+	*x = FundSystemAccountRequest{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FundSystemAccountRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FundSystemAccountRequest) ProtoMessage() {}
+
+func (x *FundSystemAccountRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FundSystemAccountRequest.ProtoReflect.Descriptor instead.
+func (*FundSystemAccountRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *FundSystemAccountRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *FundSystemAccountRequest) GetAccountType() string {
+	if x != nil {
+		return x.AccountType
+	}
+	return ""
+}
+
+func (x *FundSystemAccountRequest) GetAsset() string {
+	if x != nil {
+		return x.Asset
+	}
+	return ""
+}
+
+func (x *FundSystemAccountRequest) GetAmount() string {
+	if x != nil {
+		return x.Amount
+	}
+	return ""
+}
+
+func (x *FundSystemAccountRequest) GetReference() string {
+	if x != nil {
+		return x.Reference
+	}
+	return ""
+}
+
+type FundSystemAccountResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Posting       *Posting               `protobuf:"bytes,1,opt,name=posting,proto3" json:"posting,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FundSystemAccountResponse) Reset() {
+	*x = FundSystemAccountResponse{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FundSystemAccountResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FundSystemAccountResponse) ProtoMessage() {}
+
+func (x *FundSystemAccountResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FundSystemAccountResponse.ProtoReflect.Descriptor instead.
+func (*FundSystemAccountResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *FundSystemAccountResponse) GetPosting() *Posting {
+	if x != nil {
+		return x.Posting
+	}
+	return nil
+}
+
+type GetSystemBalancesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Asset         string                 `protobuf:"bytes,1,opt,name=asset,proto3" json:"asset,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetSystemBalancesRequest) Reset() {
+	*x = GetSystemBalancesRequest{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetSystemBalancesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetSystemBalancesRequest) ProtoMessage() {}
+
+func (x *GetSystemBalancesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetSystemBalancesRequest.ProtoReflect.Descriptor instead.
+func (*GetSystemBalancesRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *GetSystemBalancesRequest) GetAsset() string {
+	if x != nil {
+		return x.Asset
+	}
+	return ""
+}
+
+type GetSystemBalancesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Balances      []*Balance             `protobuf:"bytes,1,rep,name=balances,proto3" json:"balances,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetSystemBalancesResponse) Reset() {
+	*x = GetSystemBalancesResponse{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetSystemBalancesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetSystemBalancesResponse) ProtoMessage() {}
+
+func (x *GetSystemBalancesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetSystemBalancesResponse.ProtoReflect.Descriptor instead.
+func (*GetSystemBalancesResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *GetSystemBalancesResponse) GetBalances() []*Balance {
+	if x != nil {
+		return x.Balances
+	}
+	return nil
+}
+
 var File_exchange_ledger_v1_ledger_proto protoreflect.FileDescriptor
 
 const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
@@ -703,12 +1286,56 @@ const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12!\n" +
 	"\faccount_type\x18\x02 \x01(\tR\vaccountType\"N\n" +
 	"\x13GetBalancesResponse\x127\n" +
-	"\bbalances\x18\x01 \x03(\v2\x1b.exchange.ledger.v1.BalanceR\bbalances2\xee\x02\n" +
+	"\bbalances\x18\x01 \x03(\v2\x1b.exchange.ledger.v1.BalanceR\bbalances\"\xb9\x01\n" +
+	"\x17SettleWithdrawalRequest\x12'\n" +
+	"\x0fidempotency_key\x18\x01 \x01(\tR\x0eidempotencyKey\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
+	"\x05asset\x18\x03 \x01(\tR\x05asset\x12\x16\n" +
+	"\x06amount\x18\x04 \x01(\tR\x06amount\x12\x10\n" +
+	"\x03fee\x18\x05 \x01(\tR\x03fee\x12\x1c\n" +
+	"\treference\x18\x06 \x01(\tR\treference\"Q\n" +
+	"\x18SettleWithdrawalResponse\x125\n" +
+	"\aposting\x18\x01 \x01(\v2\x1b.exchange.ledger.v1.PostingR\aposting\"\xce\x01\n" +
+	"\x17TransferInternalRequest\x12'\n" +
+	"\x0fidempotency_key\x18\x01 \x01(\tR\x0eidempotencyKey\x12 \n" +
+	"\ffrom_user_id\x18\x02 \x01(\tR\n" +
+	"fromUserId\x12\x1c\n" +
+	"\n" +
+	"to_user_id\x18\x03 \x01(\tR\btoUserId\x12\x14\n" +
+	"\x05asset\x18\x04 \x01(\tR\x05asset\x12\x16\n" +
+	"\x06amount\x18\x05 \x01(\tR\x06amount\x12\x1c\n" +
+	"\treference\x18\x06 \x01(\tR\treference\"Q\n" +
+	"\x18TransferInternalResponse\x125\n" +
+	"\aposting\x18\x01 \x01(\v2\x1b.exchange.ledger.v1.PostingR\aposting\"\x8a\x01\n" +
+	"\x13BookChainFeeRequest\x12'\n" +
+	"\x0fidempotency_key\x18\x01 \x01(\tR\x0eidempotencyKey\x12\x14\n" +
+	"\x05asset\x18\x02 \x01(\tR\x05asset\x12\x16\n" +
+	"\x06amount\x18\x03 \x01(\tR\x06amount\x12\x1c\n" +
+	"\treference\x18\x04 \x01(\tR\treference\"M\n" +
+	"\x14BookChainFeeResponse\x125\n" +
+	"\aposting\x18\x01 \x01(\v2\x1b.exchange.ledger.v1.PostingR\aposting\"\xb2\x01\n" +
+	"\x18FundSystemAccountRequest\x12'\n" +
+	"\x0fidempotency_key\x18\x01 \x01(\tR\x0eidempotencyKey\x12!\n" +
+	"\faccount_type\x18\x02 \x01(\tR\vaccountType\x12\x14\n" +
+	"\x05asset\x18\x03 \x01(\tR\x05asset\x12\x16\n" +
+	"\x06amount\x18\x04 \x01(\tR\x06amount\x12\x1c\n" +
+	"\treference\x18\x05 \x01(\tR\treference\"R\n" +
+	"\x19FundSystemAccountResponse\x125\n" +
+	"\aposting\x18\x01 \x01(\v2\x1b.exchange.ledger.v1.PostingR\aposting\"0\n" +
+	"\x18GetSystemBalancesRequest\x12\x14\n" +
+	"\x05asset\x18\x01 \x01(\tR\x05asset\"T\n" +
+	"\x19GetSystemBalancesResponse\x127\n" +
+	"\bbalances\x18\x01 \x03(\v2\x1b.exchange.ledger.v1.BalanceR\bbalances2\x93\a\n" +
 	"\rLedgerService\x12O\n" +
 	"\x06Freeze\x12!.exchange.ledger.v1.FreezeRequest\x1a\".exchange.ledger.v1.FreezeResponse\x12U\n" +
 	"\bUnfreeze\x12#.exchange.ledger.v1.UnfreezeRequest\x1a$.exchange.ledger.v1.UnfreezeResponse\x12U\n" +
 	"\bTransfer\x12#.exchange.ledger.v1.TransferRequest\x1a$.exchange.ledger.v1.TransferResponse\x12^\n" +
-	"\vGetBalances\x12&.exchange.ledger.v1.GetBalancesRequest\x1a'.exchange.ledger.v1.GetBalancesResponseB\xd9\x01\n" +
+	"\vGetBalances\x12&.exchange.ledger.v1.GetBalancesRequest\x1a'.exchange.ledger.v1.GetBalancesResponse\x12m\n" +
+	"\x10SettleWithdrawal\x12+.exchange.ledger.v1.SettleWithdrawalRequest\x1a,.exchange.ledger.v1.SettleWithdrawalResponse\x12m\n" +
+	"\x10TransferInternal\x12+.exchange.ledger.v1.TransferInternalRequest\x1a,.exchange.ledger.v1.TransferInternalResponse\x12a\n" +
+	"\fBookChainFee\x12'.exchange.ledger.v1.BookChainFeeRequest\x1a(.exchange.ledger.v1.BookChainFeeResponse\x12p\n" +
+	"\x11FundSystemAccount\x12,.exchange.ledger.v1.FundSystemAccountRequest\x1a-.exchange.ledger.v1.FundSystemAccountResponse\x12p\n" +
+	"\x11GetSystemBalances\x12,.exchange.ledger.v1.GetSystemBalancesRequest\x1a-.exchange.ledger.v1.GetSystemBalancesResponseB\xd9\x01\n" +
 	"\x16com.exchange.ledger.v1B\vLedgerProtoP\x01ZHgithub.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1;ledgerv1\xa2\x02\x03ELX\xaa\x02\x12Exchange.Ledger.V1\xca\x02\x12Exchange\\Ledger\\V1\xe2\x02\x1eExchange\\Ledger\\V1\\GPBMetadata\xea\x02\x14Exchange::Ledger::V1b\x06proto3"
 
 var (
@@ -723,37 +1350,62 @@ func file_exchange_ledger_v1_ledger_proto_rawDescGZIP() []byte {
 	return file_exchange_ledger_v1_ledger_proto_rawDescData
 }
 
-var file_exchange_ledger_v1_ledger_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_exchange_ledger_v1_ledger_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_exchange_ledger_v1_ledger_proto_goTypes = []any{
-	(*FreezeRequest)(nil),       // 0: exchange.ledger.v1.FreezeRequest
-	(*UnfreezeRequest)(nil),     // 1: exchange.ledger.v1.UnfreezeRequest
-	(*TransferRequest)(nil),     // 2: exchange.ledger.v1.TransferRequest
-	(*Posting)(nil),             // 3: exchange.ledger.v1.Posting
-	(*FreezeResponse)(nil),      // 4: exchange.ledger.v1.FreezeResponse
-	(*UnfreezeResponse)(nil),    // 5: exchange.ledger.v1.UnfreezeResponse
-	(*TransferResponse)(nil),    // 6: exchange.ledger.v1.TransferResponse
-	(*Balance)(nil),             // 7: exchange.ledger.v1.Balance
-	(*GetBalancesRequest)(nil),  // 8: exchange.ledger.v1.GetBalancesRequest
-	(*GetBalancesResponse)(nil), // 9: exchange.ledger.v1.GetBalancesResponse
+	(*FreezeRequest)(nil),             // 0: exchange.ledger.v1.FreezeRequest
+	(*UnfreezeRequest)(nil),           // 1: exchange.ledger.v1.UnfreezeRequest
+	(*TransferRequest)(nil),           // 2: exchange.ledger.v1.TransferRequest
+	(*Posting)(nil),                   // 3: exchange.ledger.v1.Posting
+	(*FreezeResponse)(nil),            // 4: exchange.ledger.v1.FreezeResponse
+	(*UnfreezeResponse)(nil),          // 5: exchange.ledger.v1.UnfreezeResponse
+	(*TransferResponse)(nil),          // 6: exchange.ledger.v1.TransferResponse
+	(*Balance)(nil),                   // 7: exchange.ledger.v1.Balance
+	(*GetBalancesRequest)(nil),        // 8: exchange.ledger.v1.GetBalancesRequest
+	(*GetBalancesResponse)(nil),       // 9: exchange.ledger.v1.GetBalancesResponse
+	(*SettleWithdrawalRequest)(nil),   // 10: exchange.ledger.v1.SettleWithdrawalRequest
+	(*SettleWithdrawalResponse)(nil),  // 11: exchange.ledger.v1.SettleWithdrawalResponse
+	(*TransferInternalRequest)(nil),   // 12: exchange.ledger.v1.TransferInternalRequest
+	(*TransferInternalResponse)(nil),  // 13: exchange.ledger.v1.TransferInternalResponse
+	(*BookChainFeeRequest)(nil),       // 14: exchange.ledger.v1.BookChainFeeRequest
+	(*BookChainFeeResponse)(nil),      // 15: exchange.ledger.v1.BookChainFeeResponse
+	(*FundSystemAccountRequest)(nil),  // 16: exchange.ledger.v1.FundSystemAccountRequest
+	(*FundSystemAccountResponse)(nil), // 17: exchange.ledger.v1.FundSystemAccountResponse
+	(*GetSystemBalancesRequest)(nil),  // 18: exchange.ledger.v1.GetSystemBalancesRequest
+	(*GetSystemBalancesResponse)(nil), // 19: exchange.ledger.v1.GetSystemBalancesResponse
 }
 var file_exchange_ledger_v1_ledger_proto_depIdxs = []int32{
-	3, // 0: exchange.ledger.v1.FreezeResponse.posting:type_name -> exchange.ledger.v1.Posting
-	3, // 1: exchange.ledger.v1.UnfreezeResponse.posting:type_name -> exchange.ledger.v1.Posting
-	3, // 2: exchange.ledger.v1.TransferResponse.posting:type_name -> exchange.ledger.v1.Posting
-	7, // 3: exchange.ledger.v1.GetBalancesResponse.balances:type_name -> exchange.ledger.v1.Balance
-	0, // 4: exchange.ledger.v1.LedgerService.Freeze:input_type -> exchange.ledger.v1.FreezeRequest
-	1, // 5: exchange.ledger.v1.LedgerService.Unfreeze:input_type -> exchange.ledger.v1.UnfreezeRequest
-	2, // 6: exchange.ledger.v1.LedgerService.Transfer:input_type -> exchange.ledger.v1.TransferRequest
-	8, // 7: exchange.ledger.v1.LedgerService.GetBalances:input_type -> exchange.ledger.v1.GetBalancesRequest
-	4, // 8: exchange.ledger.v1.LedgerService.Freeze:output_type -> exchange.ledger.v1.FreezeResponse
-	5, // 9: exchange.ledger.v1.LedgerService.Unfreeze:output_type -> exchange.ledger.v1.UnfreezeResponse
-	6, // 10: exchange.ledger.v1.LedgerService.Transfer:output_type -> exchange.ledger.v1.TransferResponse
-	9, // 11: exchange.ledger.v1.LedgerService.GetBalances:output_type -> exchange.ledger.v1.GetBalancesResponse
-	8, // [8:12] is the sub-list for method output_type
-	4, // [4:8] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	3,  // 0: exchange.ledger.v1.FreezeResponse.posting:type_name -> exchange.ledger.v1.Posting
+	3,  // 1: exchange.ledger.v1.UnfreezeResponse.posting:type_name -> exchange.ledger.v1.Posting
+	3,  // 2: exchange.ledger.v1.TransferResponse.posting:type_name -> exchange.ledger.v1.Posting
+	7,  // 3: exchange.ledger.v1.GetBalancesResponse.balances:type_name -> exchange.ledger.v1.Balance
+	3,  // 4: exchange.ledger.v1.SettleWithdrawalResponse.posting:type_name -> exchange.ledger.v1.Posting
+	3,  // 5: exchange.ledger.v1.TransferInternalResponse.posting:type_name -> exchange.ledger.v1.Posting
+	3,  // 6: exchange.ledger.v1.BookChainFeeResponse.posting:type_name -> exchange.ledger.v1.Posting
+	3,  // 7: exchange.ledger.v1.FundSystemAccountResponse.posting:type_name -> exchange.ledger.v1.Posting
+	7,  // 8: exchange.ledger.v1.GetSystemBalancesResponse.balances:type_name -> exchange.ledger.v1.Balance
+	0,  // 9: exchange.ledger.v1.LedgerService.Freeze:input_type -> exchange.ledger.v1.FreezeRequest
+	1,  // 10: exchange.ledger.v1.LedgerService.Unfreeze:input_type -> exchange.ledger.v1.UnfreezeRequest
+	2,  // 11: exchange.ledger.v1.LedgerService.Transfer:input_type -> exchange.ledger.v1.TransferRequest
+	8,  // 12: exchange.ledger.v1.LedgerService.GetBalances:input_type -> exchange.ledger.v1.GetBalancesRequest
+	10, // 13: exchange.ledger.v1.LedgerService.SettleWithdrawal:input_type -> exchange.ledger.v1.SettleWithdrawalRequest
+	12, // 14: exchange.ledger.v1.LedgerService.TransferInternal:input_type -> exchange.ledger.v1.TransferInternalRequest
+	14, // 15: exchange.ledger.v1.LedgerService.BookChainFee:input_type -> exchange.ledger.v1.BookChainFeeRequest
+	16, // 16: exchange.ledger.v1.LedgerService.FundSystemAccount:input_type -> exchange.ledger.v1.FundSystemAccountRequest
+	18, // 17: exchange.ledger.v1.LedgerService.GetSystemBalances:input_type -> exchange.ledger.v1.GetSystemBalancesRequest
+	4,  // 18: exchange.ledger.v1.LedgerService.Freeze:output_type -> exchange.ledger.v1.FreezeResponse
+	5,  // 19: exchange.ledger.v1.LedgerService.Unfreeze:output_type -> exchange.ledger.v1.UnfreezeResponse
+	6,  // 20: exchange.ledger.v1.LedgerService.Transfer:output_type -> exchange.ledger.v1.TransferResponse
+	9,  // 21: exchange.ledger.v1.LedgerService.GetBalances:output_type -> exchange.ledger.v1.GetBalancesResponse
+	11, // 22: exchange.ledger.v1.LedgerService.SettleWithdrawal:output_type -> exchange.ledger.v1.SettleWithdrawalResponse
+	13, // 23: exchange.ledger.v1.LedgerService.TransferInternal:output_type -> exchange.ledger.v1.TransferInternalResponse
+	15, // 24: exchange.ledger.v1.LedgerService.BookChainFee:output_type -> exchange.ledger.v1.BookChainFeeResponse
+	17, // 25: exchange.ledger.v1.LedgerService.FundSystemAccount:output_type -> exchange.ledger.v1.FundSystemAccountResponse
+	19, // 26: exchange.ledger.v1.LedgerService.GetSystemBalances:output_type -> exchange.ledger.v1.GetSystemBalancesResponse
+	18, // [18:27] is the sub-list for method output_type
+	9,  // [9:18] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_exchange_ledger_v1_ledger_proto_init() }
@@ -767,7 +1419,7 @@ func file_exchange_ledger_v1_ledger_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_ledger_v1_ledger_proto_rawDesc), len(file_exchange_ledger_v1_ledger_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

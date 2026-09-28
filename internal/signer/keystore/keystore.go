@@ -8,6 +8,7 @@ package keystore
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/tyler-smith/go-bip39"
 	"golang.org/x/crypto/scrypt"
 )
@@ -167,4 +169,30 @@ func (k *Keystore) AccountXPub(account uint32) (string, error) {
 		return "", err
 	}
 	return pub.String(), nil
+}
+
+// Key returns the private key of m/44'/60'/account'/0/index with its
+// checksummed address.
+func (k *Keystore) Key(account, index uint32) (*ecdsa.PrivateKey, string, error) {
+	if index >= hdkeychain.HardenedKeyStart {
+		return nil, "", errors.New("keystore: index out of range")
+	}
+	acct, err := k.Account(account)
+	if err != nil {
+		return nil, "", err
+	}
+	external, err := acct.Derive(0)
+	if err != nil {
+		return nil, "", err
+	}
+	child, err := external.Derive(index)
+	if err != nil {
+		return nil, "", err
+	}
+	priv, err := child.ECPrivKey()
+	if err != nil {
+		return nil, "", err
+	}
+	key := priv.ToECDSA()
+	return key, crypto.PubkeyToAddress(key.PublicKey).Hex(), nil
 }

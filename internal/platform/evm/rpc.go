@@ -299,3 +299,56 @@ func AddressFromTopic(topic string) (string, bool) {
 	}
 	return "0x" + t[24:], true
 }
+
+// PendingNonce returns the next nonce of an address, counting its pending
+// transactions.
+func (c *Client) PendingNonce(ctx context.Context, address string) (uint64, error) {
+	var n hexutil.Uint64
+	err := c.Call(ctx, &n, "eth_getTransactionCount", address, "pending")
+	return uint64(n), err
+}
+
+// Fees returns the latest block's base fee and the node's suggested
+// priority fee (EIP-1559).
+func (c *Client) Fees(ctx context.Context) (baseFee, tip *big.Int, err error) {
+	var head struct {
+		BaseFee *hexutil.Big `json:"baseFeePerGas"`
+	}
+	if err := c.Call(ctx, &head, "eth_getBlockByNumber", "latest", false); err != nil {
+		return nil, nil, err
+	}
+	if head.BaseFee == nil {
+		return nil, nil, errors.New("evm: the latest block has no base fee")
+	}
+	var t hexutil.Big
+	if err := c.Call(ctx, &t, "eth_maxPriorityFeePerGas"); err != nil {
+		return nil, nil, err
+	}
+	return head.BaseFee.ToInt(), t.ToInt(), nil
+}
+
+// SendRaw broadcasts a signed transaction and returns its hash.
+func (c *Client) SendRaw(ctx context.Context, raw string) (string, error) {
+	var hash string
+	err := c.Call(ctx, &hash, "eth_sendRawTransaction", raw)
+	return hash, err
+}
+
+// Transaction is a transaction looked up by hash.
+type Transaction struct {
+	Hash        string          `json:"hash"`
+	From        string          `json:"from"`
+	To          *string         `json:"to"`
+	Value       *hexutil.Big    `json:"value"`
+	BlockNumber *hexutil.Uint64 `json:"blockNumber"` // nil while pending
+}
+
+// TransactionByHash returns a transaction; ErrNotFound when the node does
+// not know it.
+func (c *Client) TransactionByHash(ctx context.Context, hash string) (*Transaction, error) {
+	var t Transaction
+	if err := c.Call(ctx, &t, "eth_getTransactionByHash", hash); err != nil {
+		return nil, err
+	}
+	return &t, nil
+}

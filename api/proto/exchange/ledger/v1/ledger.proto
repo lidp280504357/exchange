@@ -20,6 +20,23 @@ service LedgerService {
   rpc Transfer(TransferRequest) returns (TransferResponse);
   // GetBalances returns a user's balances.
   rpc GetBalances(GetBalancesRequest) returns (GetBalancesResponse);
+  // SettleWithdrawal books a broadcast withdrawal (WITHDRAW_SETTLE): the
+  // frozen amount and fee leave the user's SPOT account, the amount to
+  // WITHDRAWAL_PENDING (an on-chain outflow), the fee to FEE_REVENUE.
+  rpc SettleWithdrawal(SettleWithdrawalRequest) returns (SettleWithdrawalResponse);
+  // TransferInternal completes a withdrawal to another user's deposit
+  // address inside the ledger (INTERNAL_TRANSFER): the payer's frozen
+  // amount becomes the payee's available SPOT balance.
+  rpc TransferInternal(TransferInternalRequest) returns (TransferInternalResponse);
+  // BookChainFee books gas the platform paid on chain (WITHDRAW_SETTLE
+  // from GAS_SUPPLY to WITHDRAWAL_PENDING).
+  rpc BookChainFee(BookChainFeeRequest) returns (BookChainFeeResponse);
+  // FundSystemAccount books a platform transfer into its own hot wallet
+  // as a deposit to a system account (DEPOSIT_CREDIT from
+  // DEPOSIT_PENDING), such as GAS_SUPPLY.
+  rpc FundSystemAccount(FundSystemAccountRequest) returns (FundSystemAccountResponse);
+  // GetSystemBalances returns the platform's system accounts in an asset.
+  rpc GetSystemBalances(GetSystemBalancesRequest) returns (GetSystemBalancesResponse);
 }
 
 message FreezeRequest {
@@ -89,5 +106,69 @@ message GetBalancesRequest {
 }
 
 message GetBalancesResponse {
+  repeated Balance balances = 1;
+}
+
+message SettleWithdrawalRequest {
+  string idempotency_key = 1;
+  string user_id = 2;
+  string asset = 3;
+  // Sent on chain.
+  string amount = 4;
+  // Kept by the platform; may be zero.
+  string fee = 5;
+  // The withdrawal ID.
+  string reference = 6;
+}
+
+message SettleWithdrawalResponse {
+  Posting posting = 1;
+}
+
+message TransferInternalRequest {
+  string idempotency_key = 1;
+  string from_user_id = 2;
+  string to_user_id = 3;
+  string asset = 4;
+  string amount = 5;
+  // The withdrawal ID.
+  string reference = 6;
+}
+
+message TransferInternalResponse {
+  Posting posting = 1;
+}
+
+message BookChainFeeRequest {
+  string idempotency_key = 1;
+  string asset = 2;
+  string amount = 3;
+  // The transaction hash.
+  string reference = 4;
+}
+
+message BookChainFeeResponse {
+  Posting posting = 1;
+}
+
+message FundSystemAccountRequest {
+  string idempotency_key = 1;
+  // GAS_SUPPLY, INSURANCE_FUND or MARKET_MAKER.
+  string account_type = 2;
+  string asset = 3;
+  string amount = 4;
+  // The funding transaction hash.
+  string reference = 5;
+}
+
+message FundSystemAccountResponse {
+  Posting posting = 1;
+}
+
+message GetSystemBalancesRequest {
+  string asset = 1;
+}
+
+message GetSystemBalancesResponse {
   repeated Balance balances = 1;
 }

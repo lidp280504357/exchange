@@ -85,20 +85,6 @@ func NewScanner(s Scanner, reg prometheus.Registerer) *Scanner {
 	return &s
 }
 
-// Run scans every interval until ctx ends.
-func (s *Scanner) Run(ctx context.Context, interval time.Duration) error {
-	for {
-		if err := s.Round(ctx); err != nil && ctx.Err() == nil {
-			s.Log.WarnContext(ctx, "deposit scan failed", "network", s.Network, "error", err)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(interval):
-		}
-	}
-}
-
 // Round scans the blocks since the cursor (at most Batch), counts the
 // confirmations of pending deposits and sends confirmed ones to the
 // ledger.

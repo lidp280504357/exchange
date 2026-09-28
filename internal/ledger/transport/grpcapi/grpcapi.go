@@ -88,3 +88,82 @@ func (s *Server) GetBalances(ctx context.Context, req *ledgerv1.GetBalancesReque
 	}
 	return resp, nil
 }
+
+func amounts(ss ...string) ([]decimal.Decimal, error) {
+	out := make([]decimal.Decimal, len(ss))
+	for i, s := range ss {
+		d, err := amount(s)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = d
+	}
+	return out, nil
+}
+
+// SettleWithdrawal books a broadcast withdrawal.
+func (s *Server) SettleWithdrawal(ctx context.Context, req *ledgerv1.SettleWithdrawalRequest) (*ledgerv1.SettleWithdrawalResponse, error) {
+	a, err := amounts(req.GetAmount(), req.GetFee())
+	if err != nil {
+		return nil, err
+	}
+	res, err := s.svc.SettleWithdrawal(ctx, req.GetIdempotencyKey(), req.GetUserId(), req.GetAsset(), a[0], a[1], req.GetReference())
+	if err != nil {
+		return nil, err
+	}
+	return &ledgerv1.SettleWithdrawalResponse{Posting: posting(res)}, nil
+}
+
+// TransferInternal completes a withdrawal to another user in the ledger.
+func (s *Server) TransferInternal(ctx context.Context, req *ledgerv1.TransferInternalRequest) (*ledgerv1.TransferInternalResponse, error) {
+	a, err := amount(req.GetAmount())
+	if err != nil {
+		return nil, err
+	}
+	res, err := s.svc.TransferInternal(ctx, req.GetIdempotencyKey(), req.GetFromUserId(), req.GetToUserId(), req.GetAsset(), a, req.GetReference())
+	if err != nil {
+		return nil, err
+	}
+	return &ledgerv1.TransferInternalResponse{Posting: posting(res)}, nil
+}
+
+// BookChainFee books gas the platform paid.
+func (s *Server) BookChainFee(ctx context.Context, req *ledgerv1.BookChainFeeRequest) (*ledgerv1.BookChainFeeResponse, error) {
+	a, err := amount(req.GetAmount())
+	if err != nil {
+		return nil, err
+	}
+	res, err := s.svc.BookChainFee(ctx, req.GetIdempotencyKey(), req.GetAsset(), a, req.GetReference())
+	if err != nil {
+		return nil, err
+	}
+	return &ledgerv1.BookChainFeeResponse{Posting: posting(res)}, nil
+}
+
+// FundSystemAccount books a platform funding transfer.
+func (s *Server) FundSystemAccount(ctx context.Context, req *ledgerv1.FundSystemAccountRequest) (*ledgerv1.FundSystemAccountResponse, error) {
+	a, err := amount(req.GetAmount())
+	if err != nil {
+		return nil, err
+	}
+	res, err := s.svc.FundSystemAccount(ctx, req.GetIdempotencyKey(), req.GetAccountType(), req.GetAsset(), a, req.GetReference())
+	if err != nil {
+		return nil, err
+	}
+	return &ledgerv1.FundSystemAccountResponse{Posting: posting(res)}, nil
+}
+
+// GetSystemBalances lists the system accounts of an asset.
+func (s *Server) GetSystemBalances(ctx context.Context, req *ledgerv1.GetSystemBalancesRequest) (*ledgerv1.GetSystemBalancesResponse, error) {
+	list, err := s.svc.SystemBalances(ctx, req.GetAsset())
+	if err != nil {
+		return nil, err
+	}
+	resp := &ledgerv1.GetSystemBalancesResponse{}
+	for _, a := range list {
+		resp.Balances = append(resp.Balances, &ledgerv1.Balance{
+			AccountType: a.Key.Type, Asset: a.Key.Asset, Available: a.Available.String(), Frozen: a.Frozen.String(),
+		})
+	}
+	return resp, nil
+}

@@ -17,6 +17,7 @@
 //	exchangectl ledger reconcile
 //	exchangectl ledger trades [--failed] [--limit N]
 //	exchangectl ledger retry-trades [--limit N]
+//	exchangectl wallet sweep [--min 0.001] | fund --tx HASH [--account GAS_SUPPLY] | reconcile | checks | commands
 //	exchangectl dlq list auth.events
 //	exchangectl dlq replay auth.events --all [--group notification-service] | --offset 0:12
 //
@@ -67,6 +68,11 @@ commands:
                               settled trades, newest first (--failed: the ones parked by a refusal)
   ledger retry-trades [--limit N]
                               settle the FAILED trades again once their cause is fixed
+  wallet sweep [--min X]      sweep deposit addresses holding at least X (default the minimum deposit) to the hot wallet
+  wallet fund --tx HASH [--account GAS_SUPPLY]
+                              book the platform's transfer into the hot wallet to a system account
+  wallet reconcile            check the wallets against the ledger now (invariant 4); wallet checks shows the latest
+  wallet commands [--limit N] queued wallet operations and their results
   dlq list <topic>            dead letters of a business topic (e.g. auth.events)
   dlq replay <topic> --all [--group G] | --offset P:O ...
                               republish dead letters as first attempts of the group that parked them
@@ -121,6 +127,8 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return dlqCmd(ctx, cfg, args[1:], out)
 	case "risk":
 		return riskCmd(ctx, cfg, args[1:], out)
+	case "wallet":
+		return walletCmd(ctx, cfg, args[1:], out)
 	default:
 		fmt.Fprint(out, usage)
 		return fmt.Errorf("unknown command %q", args[0])

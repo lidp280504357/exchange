@@ -189,9 +189,10 @@ services:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/readyz"]
 
-  # Deposit addresses and the deposit scanner (§5.10, §11.5): WALLET_XPUB
-  # (the deposit account's xpub from `signer xpub`), ALCHEMY_SEPOLIA_HTTPS_URL
-  # and ETH_CHAIN_ID come from apps.env. It holds no private key (ADR-0003).
+  # Deposit addresses, the deposit scanner and the wallet operations (§5.10,
+  # §11.5): WALLET_XPUB (the deposit account's xpub from `signer xpub`),
+  # ALCHEMY_SEPOLIA_HTTPS_URL and ETH_CHAIN_ID come from apps.env. It holds
+  # no private key (ADR-0003): transactions are signed by the signer.
   wallet-service:
     <<: *app
     command: ["/app/wallet-service"]
@@ -199,15 +200,44 @@ services:
       <<: *base-env
       INSTRUMENT_GRPC_ADDR: instrument-service:9184
       USER_GRPC_ADDR: user-service:9182
+      LEDGER_GRPC_ADDR: ledger-service:9185
+      SIGNER_GRPC_ADDR: signer:9193
       WALLET_NETWORK: ETH-SEPOLIA
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}
       instrument-service: {condition: service_started}
       user-service: {condition: service_started}
+      ledger-service: {condition: service_started}
+      signer: {condition: service_started}
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9092/readyz"]
+
+  # The signer (ADR-0003), the only holder of the wallet keys. The keystore
+  # and SIGNER_PASSPHRASE live in /opt/exchange/infra/signer (700, owner
+  # uid 10001, see docs/runbook/wallet.md), never in apps.env; opening the
+  # keystore takes 256 MiB for scrypt once at start.
+  signer:
+    <<: *app
+    command: ["/app/signer", "serve"]
+    mem_limit: 384m
+    env_file:
+      - path: apps.env
+        required: false
+      - path: signer/signer.env
+        required: true
+    volumes:
+      - ./signer:/keystore:ro
+    environment:
+      <<: *base-env
+      GOMEMLIMIT: 330MiB
+      SIGNER_KEYSTORE: /keystore/keystore.json
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      <<: *health
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9093/readyz"]
 
   # The platform market maker (§11.10): quotes the symbols below while
   # market.maker allows them; its account MARKET_MAKER_USER_ID comes from

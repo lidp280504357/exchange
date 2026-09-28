@@ -12,6 +12,8 @@ import (
 	"time"
 
 	instrumentv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/instrument/v1"
+	ledgerv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1"
+	signerv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/signer/v1"
 	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
 	"github.com/lidp280504357/exchange/internal/platform/app"
 	"github.com/lidp280504357/exchange/internal/platform/bootstrap"
@@ -21,7 +23,9 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/pg"
 	"github.com/lidp280504357/exchange/internal/wallet/adapters/chain"
 	"github.com/lidp280504357/exchange/internal/wallet/adapters/instruments"
+	"github.com/lidp280504357/exchange/internal/wallet/adapters/ledger"
 	"github.com/lidp280504357/exchange/internal/wallet/adapters/postgres"
+	"github.com/lidp280504357/exchange/internal/wallet/adapters/signer"
 	"github.com/lidp280504357/exchange/internal/wallet/adapters/users"
 	"github.com/lidp280504357/exchange/internal/wallet/application"
 	"github.com/lidp280504357/exchange/internal/wallet/transport/consumer"
@@ -34,10 +38,15 @@ type settings struct {
 	HTTPAddr string       `koanf:"http_addr"`
 	Postgres pg.Config    `koanf:",squash"`
 	Kafka    kafka.Config `koanf:",squash"`
-	// gRPC addresses of instrument-service (networks) and user-service
-	// (eligibility): INSTRUMENT_GRPC_ADDR, USER_GRPC_ADDR.
+	// gRPC addresses of instrument-service (networks), user-service
+	// (eligibility), ledger-service (chain fees, fundings, system
+	// balances) and the signer: INSTRUMENT_GRPC_ADDR, USER_GRPC_ADDR,
+	// LEDGER_GRPC_ADDR, SIGNER_GRPC_ADDR. Without a signer there are no
+	// sweeps and no chain checks.
 	InstrumentAddr string `koanf:"instrument_grpc_addr"`
 	UserAddr       string `koanf:"user_grpc_addr"`
+	LedgerAddr     string `koanf:"ledger_grpc_addr"`
+	SignerAddr     string `koanf:"signer_grpc_addr"`
 	// XPub is the deposit account's extended public key, printed by
 	// `signer xpub` (WALLET_XPUB); without it no addresses are assigned.
 	XPub string `koanf:"wallet_xpub"`
@@ -74,7 +83,7 @@ func main() {
 func setup(ctx context.Context, a *app.App) error {
 	cfg := settings{
 		HTTPAddr: ":8092", Postgres: pg.DefaultConfig(), InstrumentAddr: "localhost:9184", UserAddr: "localhost:9182",
-		Network: "ETH-SEPOLIA", ScanInterval: 30 * time.Second,
+		LedgerAddr: "localhost:9185", Network: "ETH-SEPOLIA", ScanInterval: 30 * time.Second,
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -116,12 +125,32 @@ func setup(ctx context.Context, a *app.App) error {
 		if err != nil {
 			return err
 		}
+		node := chain.New(client)
 		scanner := application.NewScanner(application.Scanner{
-			Store: store, Chain: chain.New(client), Networks: networks, Eligibility: eligibility, Log: a.Logger(), Now: time.Now,
+			Store: store, Chain: node, Networks: networks, Eligibility: eligibility, Log: a.Logger(), Now: time.Now,
 			Network: cfg.Network, Start: cfg.ScanStart,
 		}, a.Metrics())
-		a.Add("deposit scanner", app.Loop(func(ctx context.Context) error {
-			return scan(ctx, a, db, client, scanner, cfg)
+		steps := []step{{"deposit scan", scanner.Round}}
+		if cfg.SignerAddr != "" {
+			signerConn, err := bootstrap.GRPCClient(a, "signer", cfg.SignerAddr)
+			if err != nil {
+				return err
+			}
+			ledgerConn, err := bootstrap.GRPCClient(a, "ledger", cfg.LedgerAddr)
+			if err != nil {
+				return err
+			}
+			processor := application.NewProcessor(application.Processor{
+				Store: store, Chain: node, Signer: signer.New(signerv1.NewSignerServiceClient(signerConn)),
+				Ledger: ledger.New(ledgerv1.NewLedgerServiceClient(ledgerConn)), Networks: networks, Log: a.Logger(), Now: time.Now,
+				Network: cfg.Network, ChainID: cfg.ChainID,
+			}, a.Metrics())
+			steps = append(steps, step{"wallet operations", processor.Round})
+		} else {
+			a.Logger().Warn("SIGNER_GRPC_ADDR is not set: no sweeps and no chain checks")
+		}
+		a.Add("chain processor", app.Loop(func(ctx context.Context) error {
+			return scan(ctx, a, db, client, steps, cfg)
 		}))
 	} else {
 		a.Logger().Warn("no RPC endpoint: deposits are not scanned")
@@ -131,9 +160,16 @@ func setup(ctx context.Context, a *app.App) error {
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
 }
 
-// scan runs the scanner on the one instance holding the network's lease,
-// after checking that the endpoint serves the configured chain.
-func scan(ctx context.Context, a *app.App, db *pg.DB, client *evm.Client, scanner *application.Scanner, cfg settings) error {
+// step is a part of a processing round.
+type step struct {
+	name string
+	run  func(context.Context) error
+}
+
+// scan runs the network's rounds (deposit scan, then operations) on the
+// one instance holding the network's lease, after checking that the
+// endpoint serves the configured chain.
+func scan(ctx context.Context, a *app.App, db *pg.DB, client *evm.Client, steps []step, cfg settings) error {
 	for {
 		id, err := client.ChainID(ctx)
 		if err == nil && id == cfg.ChainID {
@@ -160,7 +196,7 @@ func scan(ctx context.Context, a *app.App, db *pg.DB, client *evm.Client, scanne
 		defer close(held)
 		cancel(lease.Hold(scanCtx, 5*time.Second))
 	}()
-	err = scanner.Run(scanCtx, cfg.ScanInterval)
+	err = rounds(scanCtx, a, steps, cfg.ScanInterval)
 	cause := context.Cause(scanCtx)
 	cancel(nil)
 	<-held
@@ -171,4 +207,21 @@ func scan(ctx context.Context, a *app.App, db *pg.DB, client *evm.Client, scanne
 		return cause // the lease was lost: stop, another instance may scan
 	}
 	return err
+}
+
+// rounds runs the steps every interval until ctx ends; a failing step is
+// logged and retried in the next round.
+func rounds(ctx context.Context, a *app.App, steps []step, interval time.Duration) error {
+	for {
+		for _, s := range steps {
+			if err := s.run(ctx); err != nil && ctx.Err() == nil {
+				a.Logger().WarnContext(ctx, s.name+" failed", "error", err)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(interval):
+		}
+	}
 }

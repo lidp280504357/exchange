@@ -36,3 +36,5 @@ scrape_configs:
     static_configs: [{targets: ["market-maker:9091"]}]
   - job_name: wallet-service
     static_configs: [{targets: ["wallet-service:9092"]}]
+  - job_name: signer
+    static_configs: [{targets: ["signer:9093"]}]

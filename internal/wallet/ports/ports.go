@@ -5,6 +5,7 @@ import (
 	"context"
 	"math/big"
 
+	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lidp280504357/exchange/internal/wallet/domain"
@@ -23,6 +24,11 @@ type Repos interface {
 	Addresses() AddressRepo
 	Deposits() DepositRepo
 	Blocks() BlockRepo
+	Commands() CommandRepo
+	Sweeps() SweepRepo
+	ChainFees() ChainFeeRepo
+	Fundings() FundingRepo
+	Checks() CheckRepo
 	// Emit queues a wallet.deposit.events event keyed by the user.
 	Emit(ctx context.Context, msg proto.Message, userID string) error
 }
@@ -36,6 +42,48 @@ type AddressRepo interface {
 	Insert(ctx context.Context, a domain.Address) error
 	// Owners maps the lower-case addresses of network to their users.
 	Owners(ctx context.Context, network string) (map[string]string, error)
+	// List returns the addresses of network by index.
+	List(ctx context.Context, network string) ([]domain.Address, error)
+}
+
+// CommandRepo queues operator commands.
+type CommandRepo interface {
+	Insert(ctx context.Context, c domain.Command) error
+	// Pending lists the network's pending commands, oldest first.
+	Pending(ctx context.Context, network string) ([]domain.Command, error)
+	Update(ctx context.Context, c domain.Command) error
+	// Recent returns the latest commands, newest first.
+	Recent(ctx context.Context, limit int) ([]domain.Command, error)
+}
+
+// SweepRepo stores sweeps.
+type SweepRepo interface {
+	Insert(ctx context.Context, s domain.Sweep) error
+	Update(ctx context.Context, s domain.Sweep) error
+	// Open lists the network's sweeps still waiting for their receipt.
+	Open(ctx context.Context, network string) ([]domain.Sweep, error)
+}
+
+// ChainFeeRepo stores the gas of mined platform transactions.
+type ChainFeeRepo interface {
+	// Insert records a fee once per transaction.
+	Insert(ctx context.Context, f domain.ChainFee) error
+	// Unbooked lists the network's fees the ledger has not booked yet.
+	Unbooked(ctx context.Context, network string) ([]domain.ChainFee, error)
+	MarkBooked(ctx context.Context, txHash, journalID string) error
+}
+
+// FundingRepo stores platform fundings, one per transaction.
+type FundingRepo interface {
+	Get(ctx context.Context, txHash string) (*domain.Funding, error)
+	Insert(ctx context.Context, f domain.Funding) error
+}
+
+// CheckRepo keeps the chain checks.
+type CheckRepo interface {
+	Insert(ctx context.Context, c domain.ChainCheck) error
+	// Latest returns the latest check of each asset of network.
+	Latest(ctx context.Context, network string) ([]domain.ChainCheck, error)
 }
 
 // DepositRepo stores deposits; (network, tx hash, log index) is unique.
@@ -104,6 +152,80 @@ type Chain interface {
 	TokenTransfers(ctx context.Context, from, to uint64, watched []string) ([]Transfer, error)
 	// Decimals returns a token's decimals, or the coin's for "".
 	Decimals(ctx context.Context, contract string) (int32, error)
+}
+
+// Receipt is the outcome of a mined transaction.
+type Receipt struct {
+	Succeeded         bool
+	BlockNumber       uint64
+	BlockHash         string
+	GasUsed           uint64
+	EffectiveGasPrice *big.Int
+}
+
+// Tx is a transaction looked up by hash; BlockNumber is 0 while pending.
+type Tx struct {
+	From        string
+	To          string
+	Value       *big.Int
+	BlockNumber uint64
+}
+
+// Transactor sends the platform's transactions and reads accounts.
+type Transactor interface {
+	Head(ctx context.Context) (uint64, error)
+	Balance(ctx context.Context, address string) (*big.Int, error)
+	PendingNonce(ctx context.Context, address string) (uint64, error)
+	// Fees returns the latest base fee and a suggested priority fee.
+	Fees(ctx context.Context) (baseFee, tip *big.Int, err error)
+	// SendRaw broadcasts a signed transaction.
+	SendRaw(ctx context.Context, raw string) error
+	// Receipt returns a mined transaction's receipt, nil while pending or
+	// unknown.
+	Receipt(ctx context.Context, txHash string) (*Receipt, error)
+	// Transaction returns a transaction, nil when the node does not know
+	// it.
+	Transaction(ctx context.Context, txHash string) (*Tx, error)
+}
+
+// SignRequest is a transaction for the signer.
+type SignRequest struct {
+	ID         string
+	Purpose    string // WITHDRAWAL or SWEEP
+	Reference  string
+	ApprovedBy string
+	ChainID    uint64
+	Index      uint32
+	Nonce      uint64
+	To         string
+	Value      *big.Int
+	GasLimit   uint64
+	MaxFee     *big.Int
+	MaxTip     *big.Int
+}
+
+// Signed is a signed transaction.
+type Signed struct {
+	Raw    string
+	TxHash string
+	From   string
+}
+
+// Signer signs the platform's transactions (the signer service).
+type Signer interface {
+	HotWallet(ctx context.Context) (string, error)
+	Sign(ctx context.Context, r SignRequest) (Signed, error)
+}
+
+// Ledger books the wallet's journals (ledger-service).
+type Ledger interface {
+	// BookChainFee books gas the platform paid; key makes it once.
+	BookChainFee(ctx context.Context, key, asset string, amount decimal.Decimal, reference string) (journalID string, err error)
+	// Fund books a platform funding to a system account.
+	Fund(ctx context.Context, key, accountType, asset string, amount decimal.Decimal, reference string) (journalID string, err error)
+	// SystemBalances returns the available balance of each system account
+	// in asset.
+	SystemBalances(ctx context.Context, asset string) (map[string]decimal.Decimal, error)
 }
 
 // Networks reads deposit networks (instrument-service).

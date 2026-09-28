@@ -26,10 +26,18 @@ type memStore struct {
 	hashes    map[uint64]string
 	cursor    uint64
 	events    []proto.Message
+	commands  []domain.Command
+	sweeps    map[string]domain.Sweep
+	fees      map[string]domain.ChainFee
+	fundings  map[string]domain.Funding
+	checks    []domain.ChainCheck
 }
 
 func newMemStore() *memStore {
-	return &memStore{addresses: map[string]domain.Address{}, deposits: map[string]domain.Deposit{}, hashes: map[uint64]string{}}
+	return &memStore{
+		addresses: map[string]domain.Address{}, deposits: map[string]domain.Deposit{}, hashes: map[uint64]string{},
+		sweeps: map[string]domain.Sweep{}, fees: map[string]domain.ChainFee{}, fundings: map[string]domain.Funding{},
+	}
 }
 
 func (m *memStore) Tx(_ context.Context, fn func(ports.Repos) error) error { return fn(m) }

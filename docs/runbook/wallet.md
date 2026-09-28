@@ -1,6 +1,6 @@
-# 钱包：充值（wallet-service 与 signer）
+# 钱包：充值、签名、归集与对账（wallet-service 与 signer）
 
-实施计划 §6.3 任务 9，需求 §5.10、§11.5，ADR-0001（余额只经账本）、ADR-0003（私钥只在 signer）。提现、白名单、签名服务与归集在任务 10。
+实施计划 §6.3 任务 9–10，需求 §5.10、§11.4–§11.6，ADR-0001（余额只经账本）、ADR-0003（私钥只在 signer）。
 
 ## 组成
 
@@ -43,6 +43,34 @@ ssh exchange 'cd /opt/exchange/infra && sudo install -d -m 700 -o 10001 -g 10001
 打印出的 xpub 追加到 `apps.env` 的 `WALLET_XPUB=`（先备份 apps.env），然后 `sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml up -d wallet-service`。再次查看 xpub：同一 docker run 把 `init` 换成 `xpub`。
 
 备份：keystore 文件与口令分开保存；两者任一丢失，充值地址里的资金就无法再动用（测试网无真实价值，但流程按生产要求执行）。更换 keystore 会改变全部充值地址，已分配给用户的旧地址仍会被扫描，但资金只能用旧 keystore 归集。
+
+## 签名服务（signer serve）
+
+- 容器 `signer`（gRPC 9193，只给 wallet-service；运维 9093），启动时用 `signer.env` 的口令打开 keystore（scrypt 一次约 256 MiB，容器内存上限 384 MiB），口令用完即丢；schema `signer` 记审计。
+- 只签两类 EIP-1559 交易，规则在签名服务自己这边（`internal/signer/domain/policy.go`），不依赖 wallet-service 的判断：
+  - 提现（`WITHDRAWAL`）：从热钱包（`m/44'/60'/1'/0/0`）付出，必须带提现单 ID 与审批人，不能付给热钱包自己；单笔不超过 `SIGNER_MAX_WITHDRAWAL`（默认 1 ETH），24 小时内按提现单去重累计不超过 `SIGNER_DAILY_WITHDRAWAL`（默认 5 ETH）。同一提现单的所有签名必须同一 nonce、同一收款地址与金额，替换交易只能提高费用，因此一笔提现不可能被签出两笔不同的支付。
+  - 归集（`SWEEP`）：从充值地址 `m/44'/60'/0'/0/i` 付出，收款方只能是热钱包。
+  - 通用：链 ID 必须是 `ETH_CHAIN_ID`，每 gas 费用不超过 `SIGNER_MAX_FEE_GWEI`（默认 200），gas 上限 `SIGNER_MAX_GAS`（默认 100000），暂不签带 calldata 的交易（代币转账随代币提现/归集再开）。
+- 幂等：同一 `request_id` 同样内容返回第一次的签名，不同内容 `COMMON_IDEMPOTENCY_CONFLICT`。所有签名写 `signer.signatures`，所有拒绝写 `signer.refusals`，两表只能追加（触发器禁止改删与 TRUNCATE）。
+- 测试环境的已知差距：gRPC 在内部网络上没有 mTLS，靠签名服务自身规则兜底；生产环境需独立主机/网络与双向 TLS（或 KMS/HSM）。
+
+## 归集、注资与链上对账
+
+wallet-service 中持有扫描租约的实例在每轮扫描后执行"操作"：运维用 `exchangectl` 排队的命令（归集、注资、对账）、跟踪已广播归集的回执、把链上 gas 记账、每小时一次链上对账、每 5 分钟读一次热钱包余额。命令记在 `wallet.commands`，`exchangectl wallet commands` 查看结果。
+
+```bash
+# 测试服上（任一带 exchangectl 的容器，读的是 wallet schema）
+ssh exchange sudo docker exec exchange-infra-wallet-service-1 /app/exchangectl wallet sweep            # 余额不低于最小充值额的充值地址全部归集
+ssh exchange sudo docker exec exchange-infra-wallet-service-1 /app/exchangectl wallet sweep --min 0.01
+ssh exchange sudo docker exec exchange-infra-wallet-service-1 /app/exchangectl wallet fund --tx 0x...  # 把平台转入热钱包的一笔记到 GAS_SUPPLY
+ssh exchange sudo docker exec exchange-infra-wallet-service-1 /app/exchangectl wallet reconcile        # 立即对账；wallet checks 看最近结果
+ssh exchange sudo docker exec exchange-infra-wallet-service-1 /app/exchangectl wallet commands
+```
+
+- **归集**：对每个余额 ≥ 阈值且没有进行中归集的充值地址，按"2 × 基础费 + 小费"的费用上限预留 21000 gas，余额减去预留全部转到热钱包；签名后先落库（`wallet.sweeps`）再广播，节点丢失的交易一分钟后重发。实际 gas 与预留的差额作为零头留在充值地址。归集不产生账本分录（都是平台钱包），但 gas 是真实的链上流出，挖出后记入 `wallet.chain_fees`，再由账本记 `GAS_SUPPLY → WITHDRAWAL_PENDING`（分录类型 `WITHDRAW_SETTLE`，键 `chain-fee:<tx>`）。
+- **注资 GAS_SUPPLY**：`GAS_SUPPLY` 不能为负，没钱时 gas 暂不入账（`wallet_chain_fees_unbooked`、告警 WalletChainFeesUnbooked）。平台从外部地址向热钱包转一笔 ETH，确认数达到网络要求后执行 `wallet fund --tx`：核对交易付给热钱包、成功、不是来自充值地址（归集不是注资），记 `DEPOSIT_CREDIT`（`DEPOSIT_PENDING → GAS_SUPPLY`，键 `fund:<tx>`），同一笔只记一次；确认数不够时命令保持 PENDING，后续轮次自动完成。
+- **链上对账（不变量 4）**：链上持有 = 热钱包 + 所有充值地址的余额；账本预期 = `−(DEPOSIT_PENDING + WITHDRAWAL_PENDING)`；已付未记账的 gas 解释差额的一部分；`缺口 = 预期 − 持有 − 未记账 gas`，大于 0 即平台钱包少钱（告警 WalletChainShortfall，critical）。小于 0 是正常的盈余：已发现未入账的充值、已广播未挖出的提现、尚未 `fund` 的平台转账、合约内部转入等。测试环境的模拟资金来自 `ADJUSTMENT`，不影响这一核对。结果写 `wallet.chain_checks`，指标 `wallet_chain_balance`、`wallet_chain_expected`、`wallet_chain_shortfall`。
+- **热钱包余额**：`wallet_hot_wallet_balance`；低于 0.005 ETH（WalletHotWalletLow）时提现会停在 APPROVED，需要归集或注资；高于 1 ETH（WalletHotWalletHigh）应人工转冷。
 
 ## 扫描与状态机
 

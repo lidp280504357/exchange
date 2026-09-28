@@ -128,6 +128,38 @@ groups:
           summary: "{{ $value }} confirmed deposits on {{ $labels.network }} wait because their asset takes no deposits"
           runbook: docs/runbook/wallet.md
 
+      - alert: WalletChainShortfall
+        expr: max by (network, asset) (wallet_chain_shortfall) > 0
+        for: 15m
+        labels: {severity: critical}
+        annotations:
+          summary: "the {{ $labels.network }} wallets hold {{ $value }} {{ $labels.asset }} less than the ledger expects (invariant 4)"
+          runbook: docs/runbook/wallet.md
+
+      - alert: WalletHotWalletLow
+        expr: min by (network, asset) (wallet_hot_wallet_balance) < 0.005
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "the {{ $labels.network }} hot wallet holds only {{ $value }} {{ $labels.asset }}; sweep deposits or fund it"
+          runbook: docs/runbook/wallet.md
+
+      - alert: WalletHotWalletHigh
+        expr: max by (network, asset) (wallet_hot_wallet_balance) > 1
+        for: 1h
+        labels: {severity: warning}
+        annotations:
+          summary: "the {{ $labels.network }} hot wallet holds {{ $value }} {{ $labels.asset }}; move the surplus to cold storage"
+          runbook: docs/runbook/wallet.md
+
+      - alert: WalletChainFeesUnbooked
+        expr: max by (network) (wallet_chain_fees_unbooked) > 0
+        for: 1h
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value }} of gas paid on {{ $labels.network }} waits for GAS_SUPPLY funds (exchangectl wallet fund)"
+          runbook: docs/runbook/wallet.md
+
       - alert: AnalyticsMissingEvents
         expr: max by (topic) (analytics_reconcile_missing) > 0
         for: 30m

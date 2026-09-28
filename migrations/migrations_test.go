@@ -82,7 +82,7 @@ func TestDownMigrations(t *testing.T) {
 	for name, fsys := range map[string]fs.FS{
 		"auth": migrations.Auth(), "users": migrations.Users(), "notify": migrations.Notify(), "config": migrations.Config(),
 		"instrument": migrations.Instrument(), "ledger": migrations.Ledger(), "risk": migrations.Risk(), "trading": migrations.Trading(), "matching": migrations.Matching(), "market": migrations.Market(),
-		"wallet": migrations.Wallet(),
+		"wallet": migrations.Wallet(), "signer": migrations.Signer(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			db := apply(t, fsys)
@@ -232,4 +232,18 @@ func TestWalletSchema(t *testing.T) {
 	rejects(t, db, "credited deposits have a journal", dep, uuid.New(), user, "ETH", tx, 9, false, nil, "CREDITED", nil)
 	rejects(t, db, "unclaimed deposits end REJECTED", dep, uuid.New(), user, "ETH", tx, 10, true, "BELOW_MINIMUM", "CREDITED", uuid.New())
 	rejects(t, db, "known statuses only", dep, uuid.New(), user, "ETH", tx, 11, false, nil, "LOST", nil)
+}
+
+func TestSignerSchema(t *testing.T) {
+	db := apply(t, migrations.Signer())
+	ins := `INSERT INTO signatures (request_id, request_hash, purpose, reference, chain_id, from_address, to_address, value, nonce,
+		gas_limit, max_fee, max_tip, tx_hash, raw_tx) VALUES ($1, '\x00', $2, 'w1', 11155111, '0xa', '0xb', 1, 0, 21000, 1, 1, '0xc', '0xd')`
+	accepts(t, db, ins, "r1", "WITHDRAWAL")
+	rejects(t, db, "a request ID signs once", ins, "r1", "WITHDRAWAL")
+	rejects(t, db, "known purposes only", ins, "r2", "GIFT")
+	rejects(t, db, "signatures are append-only", `UPDATE signatures SET to_address = '0xe'`)
+	rejects(t, db, "no deletes", `DELETE FROM signatures`)
+	rejects(t, db, "no truncation", `TRUNCATE signatures`)
+	accepts(t, db, `INSERT INTO refusals (request_id, purpose, reference, reason, request) VALUES ('r3', 'SWEEP', 's1', 'why', '{}')`)
+	rejects(t, db, "refusals are append-only", `DELETE FROM refusals`)
 }

@@ -53,7 +53,8 @@ services=(
   "matching-engine 9089 outbox_pending kafka_consumer_lag matching_depth_published_total"
   "market-data-service 9090 kafka_consumer_lag market_updates_published_total market_reference_age_seconds"
   "market-maker 9091 mm_quoting flags_last_refresh_timestamp_seconds"
-  "wallet-service 9092 outbox_pending kafka_consumer_lag wallet_scan_lag_blocks wallet_scan_block"
+  "wallet-service 9092 outbox_pending kafka_consumer_lag wallet_scan_lag_blocks wallet_scan_block wallet_sweeps_open wallet_chain_fees_unbooked"
+  "signer 9093 grpc_server_handled_total"
   "risk-service 9086 outbox_pending kafka_consumer_lag flags_last_refresh_timestamp_seconds"
   "analytics-consumer 9087 analytics_ingested_rows_total analytics_reconcile_missing kafka_consumer_lag"
 )

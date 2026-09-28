@@ -19,10 +19,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	LedgerService_Freeze_FullMethodName      = "/exchange.ledger.v1.LedgerService/Freeze"
-	LedgerService_Unfreeze_FullMethodName    = "/exchange.ledger.v1.LedgerService/Unfreeze"
-	LedgerService_Transfer_FullMethodName    = "/exchange.ledger.v1.LedgerService/Transfer"
-	LedgerService_GetBalances_FullMethodName = "/exchange.ledger.v1.LedgerService/GetBalances"
+	LedgerService_Freeze_FullMethodName            = "/exchange.ledger.v1.LedgerService/Freeze"
+	LedgerService_Unfreeze_FullMethodName          = "/exchange.ledger.v1.LedgerService/Unfreeze"
+	LedgerService_Transfer_FullMethodName          = "/exchange.ledger.v1.LedgerService/Transfer"
+	LedgerService_GetBalances_FullMethodName       = "/exchange.ledger.v1.LedgerService/GetBalances"
+	LedgerService_SettleWithdrawal_FullMethodName  = "/exchange.ledger.v1.LedgerService/SettleWithdrawal"
+	LedgerService_TransferInternal_FullMethodName  = "/exchange.ledger.v1.LedgerService/TransferInternal"
+	LedgerService_BookChainFee_FullMethodName      = "/exchange.ledger.v1.LedgerService/BookChainFee"
+	LedgerService_FundSystemAccount_FullMethodName = "/exchange.ledger.v1.LedgerService/FundSystemAccount"
+	LedgerService_GetSystemBalances_FullMethodName = "/exchange.ledger.v1.LedgerService/GetSystemBalances"
 )
 
 // LedgerServiceClient is the client API for LedgerService service.
@@ -47,6 +52,23 @@ type LedgerServiceClient interface {
 	Transfer(ctx context.Context, in *TransferRequest, opts ...grpc.CallOption) (*TransferResponse, error)
 	// GetBalances returns a user's balances.
 	GetBalances(ctx context.Context, in *GetBalancesRequest, opts ...grpc.CallOption) (*GetBalancesResponse, error)
+	// SettleWithdrawal books a broadcast withdrawal (WITHDRAW_SETTLE): the
+	// frozen amount and fee leave the user's SPOT account, the amount to
+	// WITHDRAWAL_PENDING (an on-chain outflow), the fee to FEE_REVENUE.
+	SettleWithdrawal(ctx context.Context, in *SettleWithdrawalRequest, opts ...grpc.CallOption) (*SettleWithdrawalResponse, error)
+	// TransferInternal completes a withdrawal to another user's deposit
+	// address inside the ledger (INTERNAL_TRANSFER): the payer's frozen
+	// amount becomes the payee's available SPOT balance.
+	TransferInternal(ctx context.Context, in *TransferInternalRequest, opts ...grpc.CallOption) (*TransferInternalResponse, error)
+	// BookChainFee books gas the platform paid on chain (WITHDRAW_SETTLE
+	// from GAS_SUPPLY to WITHDRAWAL_PENDING).
+	BookChainFee(ctx context.Context, in *BookChainFeeRequest, opts ...grpc.CallOption) (*BookChainFeeResponse, error)
+	// FundSystemAccount books a platform transfer into its own hot wallet
+	// as a deposit to a system account (DEPOSIT_CREDIT from
+	// DEPOSIT_PENDING), such as GAS_SUPPLY.
+	FundSystemAccount(ctx context.Context, in *FundSystemAccountRequest, opts ...grpc.CallOption) (*FundSystemAccountResponse, error)
+	// GetSystemBalances returns the platform's system accounts in an asset.
+	GetSystemBalances(ctx context.Context, in *GetSystemBalancesRequest, opts ...grpc.CallOption) (*GetSystemBalancesResponse, error)
 }
 
 type ledgerServiceClient struct {
@@ -97,6 +119,56 @@ func (c *ledgerServiceClient) GetBalances(ctx context.Context, in *GetBalancesRe
 	return out, nil
 }
 
+func (c *ledgerServiceClient) SettleWithdrawal(ctx context.Context, in *SettleWithdrawalRequest, opts ...grpc.CallOption) (*SettleWithdrawalResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SettleWithdrawalResponse)
+	err := c.cc.Invoke(ctx, LedgerService_SettleWithdrawal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ledgerServiceClient) TransferInternal(ctx context.Context, in *TransferInternalRequest, opts ...grpc.CallOption) (*TransferInternalResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TransferInternalResponse)
+	err := c.cc.Invoke(ctx, LedgerService_TransferInternal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ledgerServiceClient) BookChainFee(ctx context.Context, in *BookChainFeeRequest, opts ...grpc.CallOption) (*BookChainFeeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BookChainFeeResponse)
+	err := c.cc.Invoke(ctx, LedgerService_BookChainFee_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ledgerServiceClient) FundSystemAccount(ctx context.Context, in *FundSystemAccountRequest, opts ...grpc.CallOption) (*FundSystemAccountResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FundSystemAccountResponse)
+	err := c.cc.Invoke(ctx, LedgerService_FundSystemAccount_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ledgerServiceClient) GetSystemBalances(ctx context.Context, in *GetSystemBalancesRequest, opts ...grpc.CallOption) (*GetSystemBalancesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSystemBalancesResponse)
+	err := c.cc.Invoke(ctx, LedgerService_GetSystemBalances_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LedgerServiceServer is the server API for LedgerService service.
 // All implementations must embed UnimplementedLedgerServiceServer
 // for forward compatibility.
@@ -119,6 +191,23 @@ type LedgerServiceServer interface {
 	Transfer(context.Context, *TransferRequest) (*TransferResponse, error)
 	// GetBalances returns a user's balances.
 	GetBalances(context.Context, *GetBalancesRequest) (*GetBalancesResponse, error)
+	// SettleWithdrawal books a broadcast withdrawal (WITHDRAW_SETTLE): the
+	// frozen amount and fee leave the user's SPOT account, the amount to
+	// WITHDRAWAL_PENDING (an on-chain outflow), the fee to FEE_REVENUE.
+	SettleWithdrawal(context.Context, *SettleWithdrawalRequest) (*SettleWithdrawalResponse, error)
+	// TransferInternal completes a withdrawal to another user's deposit
+	// address inside the ledger (INTERNAL_TRANSFER): the payer's frozen
+	// amount becomes the payee's available SPOT balance.
+	TransferInternal(context.Context, *TransferInternalRequest) (*TransferInternalResponse, error)
+	// BookChainFee books gas the platform paid on chain (WITHDRAW_SETTLE
+	// from GAS_SUPPLY to WITHDRAWAL_PENDING).
+	BookChainFee(context.Context, *BookChainFeeRequest) (*BookChainFeeResponse, error)
+	// FundSystemAccount books a platform transfer into its own hot wallet
+	// as a deposit to a system account (DEPOSIT_CREDIT from
+	// DEPOSIT_PENDING), such as GAS_SUPPLY.
+	FundSystemAccount(context.Context, *FundSystemAccountRequest) (*FundSystemAccountResponse, error)
+	// GetSystemBalances returns the platform's system accounts in an asset.
+	GetSystemBalances(context.Context, *GetSystemBalancesRequest) (*GetSystemBalancesResponse, error)
 	mustEmbedUnimplementedLedgerServiceServer()
 }
 
@@ -140,6 +229,21 @@ func (UnimplementedLedgerServiceServer) Transfer(context.Context, *TransferReque
 }
 func (UnimplementedLedgerServiceServer) GetBalances(context.Context, *GetBalancesRequest) (*GetBalancesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetBalances not implemented")
+}
+func (UnimplementedLedgerServiceServer) SettleWithdrawal(context.Context, *SettleWithdrawalRequest) (*SettleWithdrawalResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SettleWithdrawal not implemented")
+}
+func (UnimplementedLedgerServiceServer) TransferInternal(context.Context, *TransferInternalRequest) (*TransferInternalResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method TransferInternal not implemented")
+}
+func (UnimplementedLedgerServiceServer) BookChainFee(context.Context, *BookChainFeeRequest) (*BookChainFeeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method BookChainFee not implemented")
+}
+func (UnimplementedLedgerServiceServer) FundSystemAccount(context.Context, *FundSystemAccountRequest) (*FundSystemAccountResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method FundSystemAccount not implemented")
+}
+func (UnimplementedLedgerServiceServer) GetSystemBalances(context.Context, *GetSystemBalancesRequest) (*GetSystemBalancesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetSystemBalances not implemented")
 }
 func (UnimplementedLedgerServiceServer) mustEmbedUnimplementedLedgerServiceServer() {}
 func (UnimplementedLedgerServiceServer) testEmbeddedByValue()                       {}
@@ -234,6 +338,96 @@ func _LedgerService_GetBalances_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LedgerService_SettleWithdrawal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SettleWithdrawalRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LedgerServiceServer).SettleWithdrawal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LedgerService_SettleWithdrawal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LedgerServiceServer).SettleWithdrawal(ctx, req.(*SettleWithdrawalRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _LedgerService_TransferInternal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TransferInternalRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LedgerServiceServer).TransferInternal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LedgerService_TransferInternal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LedgerServiceServer).TransferInternal(ctx, req.(*TransferInternalRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _LedgerService_BookChainFee_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BookChainFeeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LedgerServiceServer).BookChainFee(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LedgerService_BookChainFee_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LedgerServiceServer).BookChainFee(ctx, req.(*BookChainFeeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _LedgerService_FundSystemAccount_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FundSystemAccountRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LedgerServiceServer).FundSystemAccount(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LedgerService_FundSystemAccount_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LedgerServiceServer).FundSystemAccount(ctx, req.(*FundSystemAccountRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _LedgerService_GetSystemBalances_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSystemBalancesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LedgerServiceServer).GetSystemBalances(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LedgerService_GetSystemBalances_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LedgerServiceServer).GetSystemBalances(ctx, req.(*GetSystemBalancesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LedgerService_ServiceDesc is the grpc.ServiceDesc for LedgerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -256,6 +450,26 @@ var LedgerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetBalances",
 			Handler:    _LedgerService_GetBalances_Handler,
+		},
+		{
+			MethodName: "SettleWithdrawal",
+			Handler:    _LedgerService_SettleWithdrawal_Handler,
+		},
+		{
+			MethodName: "TransferInternal",
+			Handler:    _LedgerService_TransferInternal_Handler,
+		},
+		{
+			MethodName: "BookChainFee",
+			Handler:    _LedgerService_BookChainFee_Handler,
+		},
+		{
+			MethodName: "FundSystemAccount",
+			Handler:    _LedgerService_FundSystemAccount_Handler,
+		},
+		{
+			MethodName: "GetSystemBalances",
+			Handler:    _LedgerService_GetSystemBalances_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

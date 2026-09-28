@@ -104,3 +104,19 @@ tests:
             exp_annotations:
               summary: the deposit scanner of ETH-SEPOLIA is 80 blocks behind the chain; deposits are late
               runbook: docs/runbook/wallet.md
+
+  - interval: 1m
+    input_series:
+      - series: 'wallet_chain_shortfall{job="wallet-service", network="ETH-SEPOLIA", asset="ETH"}'
+        values: '-0.01x10 0.002x20'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: WalletChainShortfall
+        exp_alerts: []
+      - eval_time: 27m
+        alertname: WalletChainShortfall
+        exp_alerts:
+          - exp_labels: {severity: critical, network: ETH-SEPOLIA, asset: ETH}
+            exp_annotations:
+              summary: the ETH-SEPOLIA wallets hold 0.002 ETH less than the ledger expects (invariant 4)
+              runbook: docs/runbook/wallet.md

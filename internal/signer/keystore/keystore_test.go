@@ -62,6 +62,9 @@ func TestCreateOpenAndDerive(t *testing.T) {
 			t.Fatalf("index %d: public %s, private %s", i, got, want)
 		}
 	}
+	if _, addr, err := ks.Key(DepositAccount, 7); err != nil || addr != func() string { a, _ := d.Address(7); return a }() {
+		t.Fatalf("Key agrees with the public derivation: %s %v", addr, err)
+	}
 	if hot, _ := ks.AccountXPub(HotAccount); hot == xpub {
 		t.Fatal("the hot wallet is another account")
 	}

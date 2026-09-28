@@ -55,6 +55,7 @@ bash /opt/exchange/src/deploy/server-update.sh
 | market-data-service | 8090（网关转发 `/v1/market/tickers`、`/v1/market/{symbol}/*`） | — | 9090 |
 | market-maker | — | — | 9091 |
 | wallet-service | 8092（网关转发 `/v1/wallet/*`） | — | 9092 |
+| signer | — | 9193（只给 wallet-service） | 9093 |
 | risk-service | — | 9186 | 9086 |
 | analytics-consumer | — | — | 9087 |
 
