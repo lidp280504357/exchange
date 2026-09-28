@@ -97,14 +97,14 @@ wait_resend() {
 
 # register EMAIL DEVICE PASSWORD signs a new APP user up and sets BODY to
 # the token response.
-register() {
-  local email=$1 device=$2 password=$3 terms risk
+register() { # register EMAIL DEVICE PASSWORD [COUNTRY, default SG]
+  local email=$1 device=$2 password=$3 country=${4:-SG} terms risk
   call GET /v1/auth/terms ""
   expect 200 - "terms"
   terms=$(jq -r .terms_version <<<"$BODY")
   risk=$(jq -r .risk_disclosure_version <<<"$BODY")
   otp REGISTER "$email" "$device"
-  call POST /v1/auth/register/complete "{\"otp_ticket\":\"$TICKET\",\"password\":\"$password\",\"country\":\"SG\",\"terms_version\":\"$terms\",\"risk_disclosure_version\":\"$risk\",\"device_id\":\"$device\"}" "${APP[@]}"
+  call POST /v1/auth/register/complete "{\"otp_ticket\":\"$TICKET\",\"password\":\"$password\",\"country\":\"$country\",\"terms_version\":\"$terms\",\"risk_disclosure_version\":\"$risk\",\"device_id\":\"$device\"}" "${APP[@]}"
   expect 201 - "register"
 }
 

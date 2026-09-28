@@ -12,11 +12,13 @@ import (
 	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
 	"github.com/lidp280504357/exchange/internal/platform/app"
 	"github.com/lidp280504357/exchange/internal/platform/bootstrap"
+	"github.com/lidp280504357/exchange/internal/platform/event"
 	"github.com/lidp280504357/exchange/internal/platform/kafka"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
 	"github.com/lidp280504357/exchange/internal/user/adapters/authclient"
 	"github.com/lidp280504357/exchange/internal/user/adapters/postgres"
 	"github.com/lidp280504357/exchange/internal/user/application"
+	"github.com/lidp280504357/exchange/internal/user/transport/consumer"
 	"github.com/lidp280504357/exchange/internal/user/transport/grpcapi"
 	"github.com/lidp280504357/exchange/internal/user/transport/httpapi"
 	"github.com/lidp280504357/exchange/migrations"
@@ -67,6 +69,10 @@ func setup(ctx context.Context, a *app.App) error {
 		Flags:   flagClient,
 		StepUps: authclient.New(authv1.NewAuthServiceClient(authConn)),
 		Now:     time.Now,
+	}
+	// Reviews that risk rules enforce (risk.enforce).
+	if err := bootstrap.Consumer(ctx, a, cfg.Kafka, application.Consumer, []string{event.TopicRisk}, consumer.Handler(svc)); err != nil {
+		return err
 	}
 
 	srv, err := bootstrap.GRPCServer(ctx, a, cfg.GRPCAddr)

@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package exchange.risk.v1;
+
+// Events on risk.events, keyed by user_id (requirements §5.13, §8.1).
+
+// Action is what the rules ask for; the most severe hit wins.
+enum Action {
+  ACTION_UNSPECIFIED = 0;
+  // Recorded only.
+  ACTION_NONE = 1;
+  // Extra verification before the next sensitive operation.
+  ACTION_STEP_UP = 2;
+  // The account moves to RISK_REVIEW until a person decides.
+  ACTION_REVIEW = 3;
+  // The operation is refused (synchronous checks such as withdrawals).
+  ACTION_REJECT = 4;
+}
+
+// RuleHit is one rule that matched.
+message RuleHit {
+  string rule = 1;
+  int32 score = 2;
+  // What matched, e.g. "3 registrations from this device within 24h".
+  string detail = 3;
+}
+
+// RiskScored is published for every assessment with at least one hit.
+message RiskScored {
+  string user_id = 1;
+  string assessment_id = 2;
+  // The event that was assessed.
+  string source_event_id = 3;
+  string source_event_type = 4;
+  // Sum of the hits' scores, at most 100.
+  int32 score = 5;
+  Action action = 6;
+  repeated RuleHit hits = 7;
+  // True when the action was carried out (flag risk.enforce).
+  bool enforced = 8;
+}
+
+// RiskActionTaken asks the owning services to carry out an enforced
+// action: user-service moves the account to RISK_REVIEW on ACTION_REVIEW.
+message RiskActionTaken {
+  string user_id = 1;
+  string assessment_id = 2;
+  Action action = 3;
+  repeated string rules = 4;
+}

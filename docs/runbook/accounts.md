@@ -6,6 +6,8 @@
 
 状态机（附录 B）：`ACTIVE ↔ RISK_REVIEW`；`ACTIVE/RISK_REVIEW → FROZEN`；`FROZEN → ACTIVE`；`ACTIVE → CLOSED`。其他变更返回 409 `USER_STATUS_TRANSITION_INVALID`。
 
+除运维手工变更外，风控规则在 `risk.enforce` 打开时会把 ACTIVE 账户置为 `RISK_REVIEW`（原因码 `RISK_RULE`，操作者 `risk-service`，见 [risk.md](risk.md)）。
+
 阶段 1 用运维 CLI 改状态（阶段 2 由管理后台接管）：
 
 ```bash

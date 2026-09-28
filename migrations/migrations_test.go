@@ -80,7 +80,7 @@ func TestNotifySchema(t *testing.T) {
 func TestDownMigrations(t *testing.T) {
 	for name, fsys := range map[string]fs.FS{
 		"auth": migrations.Auth(), "users": migrations.Users(), "notify": migrations.Notify(), "config": migrations.Config(),
-		"instrument": migrations.Instrument(), "ledger": migrations.Ledger(),
+		"instrument": migrations.Instrument(), "ledger": migrations.Ledger(), "risk": migrations.Risk(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			db := apply(t, fsys)
@@ -168,4 +168,20 @@ func TestLedgerSchema(t *testing.T) {
 	rejects(t, db, "lines are append-only", `DELETE FROM journal_lines`)
 	rejects(t, db, "no truncation", `TRUNCATE journal_lines`)
 	rejects(t, db, "idempotency keys are unique", `INSERT INTO journals (id, idem_key, request_hash, entry_type) VALUES ($1, 'k1', '\x00', 'TRADE_FEE')`, uuid.New())
+}
+
+func TestRiskSchema(t *testing.T) {
+	db := apply(t, migrations.Risk())
+	user, event := uuid.New(), uuid.New()
+	accepts(t, db, `INSERT INTO user_devices (user_id, device_id, first_seen_at) VALUES ($1, 'd1', now())`, user)
+	rejects(t, db, "a device has an ID", `INSERT INTO user_devices (user_id, device_id, first_seen_at) VALUES ($1, '', now())`, user)
+	velocity := `INSERT INTO velocity_events (rule, key, event_id, at) VALUES ('r', 'd1', $1, now())`
+	accepts(t, db, velocity, event)
+	rejects(t, db, "an event counts once per rule and key", velocity, event)
+	assessment := `INSERT INTO assessments (id, user_id, source_event_id, source_event_type, score, action, hits, enforced, created_at)
+		VALUES ($1, $2, $3, 'auth.UserRegistered', $4, $5, '[]', false, now())`
+	accepts(t, db, assessment, uuid.New(), user, event, 60, "REVIEW")
+	rejects(t, db, "one assessment per source event", assessment, uuid.New(), user, event, 60, "REVIEW")
+	rejects(t, db, "scores stay within 0..100", assessment, uuid.New(), user, uuid.New(), 101, "REVIEW")
+	rejects(t, db, "known actions only", assessment, uuid.New(), user, uuid.New(), 10, "BAN")
 }

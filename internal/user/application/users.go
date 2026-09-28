@@ -4,6 +4,8 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"time"
 
 	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
@@ -114,25 +116,59 @@ func (s *Service) ChangeStatus(ctx context.Context, userID, to, reason, actor, n
 		if err := domain.CheckTransition(u.Status, c.To); err != nil {
 			return err
 		}
-		c.From, c.At = u.Status, s.Now()
-		u.Status = c.To
-		if _, err := r.Users().Update(ctx, u); err != nil {
-			return err
-		}
-		if err := r.Users().AddStatusChange(ctx, c); err != nil {
-			return err
-		}
-		if err := r.Emit(ctx, event.TopicUser, &userv1.UserStatusChanged{
-			UserId: userID, FromStatus: c.From, ToStatus: c.To, ReasonCode: c.Reason, Actor: c.Actor,
-		}, "user", userID); err != nil {
-			return err
-		}
-		details, _ := json.Marshal(map[string]string{"from": c.From, "to": c.To, "note": c.Note})
-		return r.Emit(ctx, event.TopicAudit, &auditv1.AdminActionPerformed{
-			Target: "user:" + userID, Action: "user.status_changed", Actor: c.Actor, Reason: c.Reason, Details: string(details),
-		}, "actor", c.Actor)
+		return s.applyStatus(ctx, r, u, &c)
 	})
 	return c, err
+}
+
+// Consumer names user-service in inboxes and consumer groups.
+const Consumer = "user-service"
+
+// ReasonRiskRule is the reason code of reviews that risk rules start.
+const ReasonRiskRule = "RISK_RULE"
+
+// OnRiskAction carries out a review that risk-service enforces (§5.13):
+// an ACTIVE account moves to RISK_REVIEW; accounts in any other status
+// keep it. Each event is handled once, so a redelivery cannot reopen a
+// review an operator has closed.
+func (s *Service) OnRiskAction(ctx context.Context, eventID, userID string, rules []string) error {
+	_, err := s.Store.Once(ctx, Consumer, eventID, func(r ports.Repos) error {
+		u, err := r.Users().GetForUpdate(ctx, userID)
+		if errors.Is(err, domain.ErrUserNotFound) {
+			return nil
+		}
+		if err != nil || u.Status != domain.StatusActive {
+			return err
+		}
+		c := domain.StatusChange{
+			UserID: userID, To: domain.StatusRiskReview, Reason: ReasonRiskRule, Actor: "risk-service",
+			Note: "rules: " + strings.Join(rules, ", "),
+		}
+		return s.applyStatus(ctx, r, u, &c)
+	})
+	return err
+}
+
+// applyStatus stores a checked transition of u, with its history row, a
+// UserStatusChanged event and an audit event.
+func (s *Service) applyStatus(ctx context.Context, r ports.Repos, u domain.User, c *domain.StatusChange) error {
+	c.From, c.At = u.Status, s.Now()
+	u.Status = c.To
+	if _, err := r.Users().Update(ctx, u); err != nil {
+		return err
+	}
+	if err := r.Users().AddStatusChange(ctx, *c); err != nil {
+		return err
+	}
+	if err := r.Emit(ctx, event.TopicUser, &userv1.UserStatusChanged{
+		UserId: u.ID, FromStatus: c.From, ToStatus: c.To, ReasonCode: c.Reason, Actor: c.Actor,
+	}, "user", u.ID); err != nil {
+		return err
+	}
+	details, _ := json.Marshal(map[string]string{"from": c.From, "to": c.To, "note": c.Note})
+	return r.Emit(ctx, event.TopicAudit, &auditv1.AdminActionPerformed{
+		Target: "user:" + u.ID, Action: "user.status_changed", Actor: c.Actor, Reason: c.Reason, Details: string(details),
+	}, "actor", c.Actor)
 }
 
 // StatusHistory lists the recent status changes of a user.

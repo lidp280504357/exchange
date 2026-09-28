@@ -64,6 +64,9 @@ commands:
   dlq list <topic>            dead letters of a business topic (e.g. auth.events)
   dlq replay <topic> --all [--group G] | --offset P:O ...
                               republish dead letters as first attempts of the group that parked them
+  risk assessments [--user U] [--limit N]
+                              the newest risk assessments (rule hits, score, action)
+  risk rules                  the built-in risk rules as JSON (a starting point for RISK_RULES_FILE)
 `
 
 func main() {
@@ -110,6 +113,8 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return ledgerCmd(ctx, cfg, args[1:], out)
 	case "dlq":
 		return dlqCmd(ctx, cfg, args[1:], out)
+	case "risk":
+		return riskCmd(ctx, cfg, args[1:], out)
 	default:
 		fmt.Fprint(out, usage)
 		return fmt.Errorf("unknown command %q", args[0])

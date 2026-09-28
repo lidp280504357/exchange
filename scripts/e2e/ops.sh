@@ -45,11 +45,11 @@ echo "== health and metrics of every service"
 services=(
   "api-gateway 9080 http_server_requests_total http_server_request_duration_seconds ws_connections"
   "auth-service 9081 http_server_requests_total auth_otp_requests_total auth_otp_verifications_total kafka_consumer_lag outbox_pending grpc_server_handled_total"
-  "user-service 9082 grpc_server_handled_total outbox_pending"
+  "user-service 9082 grpc_server_handled_total outbox_pending kafka_consumer_lag"
   "notification-service 9083 notify_sends_total notify_provider_circuit_open kafka_consumer_records_total kafka_consumer_lag outbox_pending"
   "instrument-service 9084 http_server_requests_total grpc_server_handled_total outbox_pending"
   "ledger-service 9085 ledger_reconcile_mismatches ledger_reconcile_runs_total kafka_consumer_lag outbox_pending"
-  "risk-service 9086 exchange_build_info"
+  "risk-service 9086 outbox_pending kafka_consumer_lag flags_last_refresh_timestamp_seconds"
   "analytics-consumer 9087 analytics_ingested_rows_total analytics_reconcile_missing kafka_consumer_lag"
 )
 for entry in "${services[@]}"; do

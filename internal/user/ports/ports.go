@@ -14,6 +14,9 @@ import (
 type Store interface {
 	// Tx runs fn in one transaction with the events it emits.
 	Tx(ctx context.Context, fn func(Repos) error) error
+	// Once is Tx unless consumer already handled the event; it reports
+	// whether fn ran.
+	Once(ctx context.Context, consumer, eventID string, fn func(Repos) error) (bool, error)
 	// Read returns repositories outside any transaction.
 	Read() Repos
 }

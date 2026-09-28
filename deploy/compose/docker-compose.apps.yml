@@ -141,7 +141,7 @@ services:
     command: ["/app/risk-service"]
     depends_on:
       postgres: {condition: service_healthy}
-      redis: {condition: service_healthy}
+      redpanda: {condition: service_healthy}
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9086/readyz"]

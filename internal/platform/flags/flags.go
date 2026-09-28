@@ -20,7 +20,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/pg"
 )
 
-// Flags known in phase 1; exchangectl only sets known keys.
+// Known flag keys; exchangectl only sets known keys.
 const (
 	KeyRegistrationSMS  = "auth.sms"                 // SMS as a registration and login channel
 	KeyTransfer         = "account.transfer"         // spot <-> futures transfers
@@ -29,6 +29,7 @@ const (
 	KeyWithdraw         = "wallet.withdraw"          // phase 2
 	KeyDerivatives      = "derivatives.trading"      // phase 3
 	KeyReferenceKline   = "market.reference_kline"   // show reference candles for new pairs
+	KeyRiskEnforce      = "risk.enforce"             // carry out the actions of risk rules
 )
 
 // Known describes the known flags.
@@ -40,6 +41,7 @@ var Known = map[string]string{
 	KeyWithdraw:         "Withdrawals (phase 2)",
 	KeyDerivatives:      "Perpetual futures trading (phase 3)",
 	KeyReferenceKline:   "Reference candles for pairs without trades yet",
+	KeyRiskEnforce:      "Carry out risk rule actions (accounts scored for review move to RISK_REVIEW); off only records the scores",
 }
 
 // List allows or denies values of one dimension. An empty Allow allows

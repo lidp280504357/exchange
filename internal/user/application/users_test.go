@@ -25,6 +25,7 @@ type memStore struct {
 	users   map[string]domain.User
 	changes []domain.StatusChange
 	events  []proto.Message
+	handled map[string]bool // inbox: consumer/event ID
 }
 
 func (s *memStore) Tx(_ context.Context, fn func(ports.Repos) error) error {
@@ -36,6 +37,24 @@ func (s *memStore) Tx(_ context.Context, fn func(ports.Repos) error) error {
 		return err
 	}
 	return nil
+}
+
+func (s *memStore) Once(ctx context.Context, consumer, eventID string, fn func(ports.Repos) error) (bool, error) {
+	key, ran := consumer+"/"+eventID, false
+	err := s.Tx(ctx, func(r ports.Repos) error {
+		if s.handled[key] {
+			return nil
+		}
+		if err := fn(r); err != nil {
+			return err
+		}
+		if s.handled == nil {
+			s.handled = map[string]bool{}
+		}
+		s.handled[key], ran = true, true
+		return nil
+	})
+	return ran, err
 }
 
 func (s *memStore) Read() ports.Repos { return memRepos{s} }
@@ -209,5 +228,53 @@ func TestUpdateProfile(t *testing.T) {
 	}
 	if u, err = svc.UpdateProfile(ctx, id, domain.ProfilePatch{Language: &lang}, ""); err != nil || len(eventsOf[*userv1.ProfileUpdated](store)) != 2 {
 		t.Fatalf("no-op patch must not emit: %v", err)
+	}
+}
+
+func TestRiskReviewsMoveActiveAccountsOnce(t *testing.T) {
+	svc, store, _ := newService()
+	ctx := context.Background()
+	id := uuid.NewString()
+	if _, err := svc.Create(ctx, CreateInput{UserID: id, Region: "AQ", TermsVersion: "v1", RiskVersion: "v1"}); err != nil {
+		t.Fatal(err)
+	}
+	event := uuid.NewString()
+	if err := svc.OnRiskAction(ctx, event, id, []string{"registration_burst_device"}); err != nil {
+		t.Fatal(err)
+	}
+	u, _ := svc.Get(ctx, id)
+	changed := eventsOf[*userv1.UserStatusChanged](store)
+	if u.Status != domain.StatusRiskReview || len(changed) != 1 || changed[0].GetReasonCode() != ReasonRiskRule ||
+		changed[0].GetActor() != "risk-service" {
+		t.Fatalf("review: %s %v", u.Status, changed)
+	}
+	history, _ := svc.StatusHistory(ctx, id)
+	if len(history) != 1 || history[0].Note != "rules: registration_burst_device" {
+		t.Fatalf("history: %+v", history)
+	}
+
+	// An operator clears the review; the same event redelivered must not reopen it.
+	if _, err := svc.ChangeStatus(ctx, id, domain.StatusActive, "REVIEW_CLEARED", "cli:ops", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.OnRiskAction(ctx, event, id, []string{"registration_burst_device"}); err != nil {
+		t.Fatal(err)
+	}
+	if u, _ := svc.Get(ctx, id); u.Status != domain.StatusActive {
+		t.Fatalf("redelivery reopened the review: %s", u.Status)
+	}
+
+	// Frozen accounts stay frozen; unknown users are skipped.
+	if _, err := svc.ChangeStatus(ctx, id, domain.StatusFrozen, "SUSPICIOUS_LOGIN", "cli:ops", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.OnRiskAction(ctx, uuid.NewString(), id, []string{"r"}); err != nil {
+		t.Fatal(err)
+	}
+	if u, _ := svc.Get(ctx, id); u.Status != domain.StatusFrozen {
+		t.Fatalf("frozen account moved to %s", u.Status)
+	}
+	if err := svc.OnRiskAction(ctx, uuid.NewString(), uuid.NewString(), []string{"r"}); err != nil {
+		t.Fatalf("unknown user: %v", err)
 	}
 }

@@ -1,0 +1,39 @@
+[
+  {
+    "id": "registration_burst_device",
+    "event": "auth.UserRegistered",
+    "kind": "velocity",
+    "key": "device",
+    "window": "24h",
+    "threshold": 3,
+    "score": 60,
+    "action": "REVIEW"
+  },
+  {
+    "id": "registration_burst_network",
+    "event": "auth.UserRegistered",
+    "kind": "velocity",
+    "key": "network",
+    "window": "1h",
+    "threshold": 30,
+    "score": 40,
+    "action": "STEP_UP"
+  },
+  {
+    "id": "new_device_login",
+    "event": "auth.LoginSucceeded",
+    "kind": "new_device",
+    "score": 20,
+    "action": "NONE"
+  },
+  {
+    "id": "login_failures",
+    "event": "auth.LoginFailed",
+    "kind": "velocity",
+    "key": "user",
+    "window": "15m",
+    "threshold": 5,
+    "score": 40,
+    "action": "STEP_UP"
+  }
+]

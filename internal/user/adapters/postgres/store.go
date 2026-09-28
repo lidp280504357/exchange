@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lidp280504357/exchange/internal/platform/event"
+	"github.com/lidp280504357/exchange/internal/platform/inbox"
 	"github.com/lidp280504357/exchange/internal/platform/outbox"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
 	"github.com/lidp280504357/exchange/internal/user/domain"
@@ -28,6 +29,13 @@ func NewStore(db *pg.DB, events *event.Factory) *Store { return &Store{db: db, e
 // Tx runs fn in a transaction.
 func (s *Store) Tx(ctx context.Context, fn func(ports.Repos) error) error {
 	return s.db.InTx(ctx, func(tx pgx.Tx) error { return fn(repos{q: tx, events: s.events}) })
+}
+
+// Once runs fn in a transaction that records the event for consumer.
+func (s *Store) Once(ctx context.Context, consumer, eventID string, fn func(ports.Repos) error) (bool, error) {
+	return inbox.ProcessID(ctx, s.db, consumer, eventID, func(_ context.Context, tx pgx.Tx) error {
+		return fn(repos{q: tx, events: s.events})
+	})
 }
 
 // Read returns repositories on the pool.
