@@ -135,18 +135,26 @@ func fromRow(symbol string, row []any) (domain.Candle, error) {
 	}, nil
 }
 
+// klineEvent is a combined-stream kline message. Binance uses keys that
+// differ only in case (t/T, l/L, v/V, q/Q) and encoding/json matches keys
+// case-insensitively, so every one of them has its own field: an exact
+// match wins, and the number in "L" no longer lands in the price "l".
 type klineEvent struct {
 	Data struct {
 		K struct {
-			Symbol string `json:"s"`
-			Open   int64  `json:"t"`
-			O      string `json:"o"`
-			H      string `json:"h"`
-			L      string `json:"l"`
-			C      string `json:"c"`
-			V      string `json:"v"`
-			Q      string `json:"q"`
-			N      int64  `json:"n"`
+			Symbol    string `json:"s"`
+			Open      int64  `json:"t"`
+			Close     int64  `json:"T"`
+			O         string `json:"o"`
+			H         string `json:"h"`
+			L         string `json:"l"`
+			C         string `json:"c"`
+			V         string `json:"v"`
+			Q         string `json:"q"`
+			N         int64  `json:"n"`
+			LastTrade int64  `json:"L"`
+			TakerBase string `json:"V"`
+			TakerQuot string `json:"Q"`
 		} `json:"k"`
 	} `json:"data"`
 }

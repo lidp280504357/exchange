@@ -63,7 +63,8 @@ func TestStreamReadsKlines(t *testing.T) {
 		}
 		defer func() { _ = conn.CloseNow() }()
 		for _, msg := range []string{
-			`{"stream":"btcusdt@kline_1m","data":{"e":"kline","s":"BTCUSDT","k":{"t":1790617140000,"s":"BTCUSDT","o":"83942.95","c":"83931.73","h":"83942.95","l":"83923.18","v":"2.957","n":771,"x":false,"q":"248203.8"}}}`,
+			// A message as Binance sends it, with keys that differ only in case.
+			`{"stream":"btcusdt@kline_1m","data":{"e":"kline","E":1790617150042,"s":"BTCUSDT","k":{"t":1790617140000,"T":1790617199999,"s":"BTCUSDT","i":"1m","f":6719969009,"L":6719969026,"o":"83942.95000000","c":"83931.73000000","h":"83942.95000000","l":"83923.18000000","v":"2.95700000","n":771,"x":false,"q":"248203.83491790","V":"0.71560000","Q":"60063.21030660","B":"0"}}}`,
 			`{"result":null,"id":1}`,
 			`{"stream":"ethusdt@kline_1m","data":{"e":"kline","s":"ETHUSDT","k":{"t":1790617140000,"s":"ETHUSDT","o":"bad","c":"1","h":"1","l":"1","v":"1","n":1,"q":"1"}}}`,
 		} {

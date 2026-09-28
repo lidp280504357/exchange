@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -114,7 +115,8 @@ func (c *Client) Open(ctx context.Context, symbol string) ([]ports.Order, error)
 func (c *Client) Place(ctx context.Context, symbol string, q domain.Quote) error {
 	body := map[string]string{
 		"symbol": symbol, "side": q.Side, "type": "LIMIT", "time_in_force": "GTC",
-		"price": q.Price.String(), "quantity": q.Quantity.String(), "client_order_id": "mm-" + uuid.NewString(),
+		// client_order_id takes at most 36 characters.
+		"price": q.Price.String(), "quantity": q.Quantity.String(), "client_order_id": "mm" + strings.ReplaceAll(uuid.NewString(), "-", ""),
 	}
 	err := c.do(ctx, http.MethodPost, c.Trading+"/v1/orders", body, nil)
 	if e := (*Error)(nil); errors.As(err, &e) && e.Code == "LEDGER_INSUFFICIENT_BALANCE" {
