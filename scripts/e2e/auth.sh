@@ -13,7 +13,6 @@ source "$(dirname "$0")/lib/common.sh"
 EMAIL="e2e-$RUN@example.com"
 DEVICE="e2e-device-$RUN"
 PASSWORD="e2e password $RUN"
-FIRST_CODE_AT=$(date +%s)
 
 echo "== register $EMAIL (APP client)"
 call GET /v1/auth/terms ""
@@ -70,8 +69,7 @@ call POST /v1/auth/token/refresh "" -b "$WORK/jar" -c "$WORK/jar" -H "Origin: ht
 expect 200 - "refresh with the cookie"
 
 echo "== step-up (waits for the 60 s resend window)"
-wait=$(( FIRST_CODE_AT + 62 - $(date +%s) ))
-(( wait > 0 )) && sleep "$wait"
+wait_resend "$EMAIL"
 call DELETE "/v1/auth/sessions/$WEB_SESSION" "" -H "Authorization: Bearer $ACCESS"
 expect 403 AUTH_STEP_UP_REQUIRED "revoking another device needs a step-up"
 otp STEP_UP "$EMAIL" "$DEVICE" "$ACCESS"
