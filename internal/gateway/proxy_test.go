@@ -20,6 +20,9 @@ func TestProxyForwardsContextAndStripsIdentity(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got, path = r.Header.Clone(), r.URL.Path
 		w.Header().Set("Set-Cookie", "rt=abc; HttpOnly")
+		// Services set these too, with the same values.
+		w.Header().Set(httpx.HeaderTraceID, "0123456789abcdef0123456789abcdef")
+		w.Header().Set(httpx.HeaderRequestID, "req-1")
 		w.WriteHeader(http.StatusTeapot)
 	}))
 	defer upstream.Close()
@@ -43,6 +46,9 @@ func TestProxyForwardsContextAndStripsIdentity(t *testing.T) {
 
 	if resp.StatusCode != http.StatusTeapot || resp.Header.Get("Set-Cookie") == "" {
 		t.Fatalf("response must pass through: %d %v", resp.StatusCode, resp.Header)
+	}
+	if n, m := len(resp.Header.Values(httpx.HeaderTraceID)), len(resp.Header.Values(httpx.HeaderRequestID)); n != 1 || m != 1 {
+		t.Fatalf("trace and request IDs must appear once, got %d and %d: %v", n, m, resp.Header)
 	}
 	if path != "/v1/auth/otp/request" {
 		t.Fatalf("path = %s", path)

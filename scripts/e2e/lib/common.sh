@@ -48,27 +48,51 @@ inbox_count() {
   curl -s "$BASE/v1/dev/messages?target=$(jq -rn --arg e "$1" '$e|@uri')&limit=50" | jq '.messages | length'
 }
 
-# otp SCENE EMAIL DEVICE [ACCESS_TOKEN] requests a code, reads it from the
-# dev inbox and sets TICKET.
-otp() {
-  local scene=$1 email=$2 device=$3 token=${4:-} before inbox code challenge
+# otp SCENE EMAIL DEVICE [ACCESS_TOKEN] requests a code by email, reads it
+# from the dev inbox and sets TICKET.
+otp() { otp_via EMAIL "$@"; }
+
+# otp_via CHANNEL SCENE TARGET DEVICE [ACCESS_TOKEN] does the same over
+# EMAIL or SMS. TARGET is where the code arrives (for STEP_UP the bound
+# address of the channel; the request itself names no identifier then).
+# SMS through the mock provider needs the auth.sms flag.
+otp_via() {
+  local channel=$1 scene=$2 target=$3 device=$4 token=${5:-} before inbox code challenge
   local auth=()
   [[ -n "$token" ]] && auth=(-H "Authorization: Bearer $token")
-  before=$(inbox_count "$email")
-  call POST /v1/auth/otp/request "{\"scene\":\"$scene\",\"channel\":\"EMAIL\",\"identifier\":\"$email\",\"captcha_token\":\"$BYPASS\",\"device_id\":\"$device\"}" ${auth[@]+"${auth[@]}"}
-  expect 200 - "otp/request $scene"
+  before=$(inbox_count "$target")
+  call POST /v1/auth/otp/request "{\"scene\":\"$scene\",\"channel\":\"$channel\",\"identifier\":\"$target\",\"captcha_token\":\"$BYPASS\",\"device_id\":\"$device\"}" ${auth[@]+"${auth[@]}"}
+  expect 200 - "otp/request $scene by $channel"
   challenge=$(jq -r .challenge_id <<<"$BODY")
   for _ in $(seq 20); do
-    inbox=$(curl -s "$BASE/v1/dev/messages?target=$(jq -rn --arg e "$email" '$e|@uri')&limit=50")
+    inbox=$(curl -s "$BASE/v1/dev/messages?target=$(jq -rn --arg e "$target" '$e|@uri')&limit=50")
     if (( $(jq '.messages | length' <<<"$inbox") > before )); then
       break
     fi
     sleep 0.5
   done
-  code=$(jq -r '.messages[0].subject' <<<"$inbox" | grep -oE '[0-9]{6}')
+  # Mails carry the code in the subject; SMS have only a body.
+  code=$(jq -r '.messages[0] | .subject + " " + .body' <<<"$inbox" | grep -oE '[0-9]{6}' | head -1)
   call POST /v1/auth/otp/verify "{\"challenge_id\":\"$challenge\",\"code\":\"$code\",\"device_id\":\"$device\"}"
   expect 200 - "otp/verify $scene"
   TICKET=$(jq -r .otp_ticket <<<"$BODY")
+  date +%s >"$(code_stamp "$target")"
+}
+
+# code_stamp TARGET is the file holding when TARGET last got a code (bash
+# 3.2 on macOS has no associative arrays).
+code_stamp() { printf '%s/code-%s' "$WORK" "$(tr -c 'A-Za-z0-9' '_' <<<"$1")"; }
+
+# wait_resend TARGET waits out the 60-second resend window of TARGET after
+# its last code (§5.3).
+wait_resend() {
+  local stamp last now
+  stamp=$(code_stamp "$1")
+  last=$(cat "$stamp" 2>/dev/null || echo 0)
+  now=$(date +%s)
+  if (( last + 62 > now )); then
+    sleep $(( last + 62 - now ))
+  fi
 }
 
 # register EMAIL DEVICE PASSWORD signs a new APP user up and sets BODY to

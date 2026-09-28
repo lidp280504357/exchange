@@ -15,6 +15,8 @@
 //	exchangectl ledger adjust --user <user_id> --asset USDT --amount 100 --reason "..." [--key K]
 //	exchangectl ledger balances <user_id>
 //	exchangectl ledger reconcile
+//	exchangectl dlq list auth.events
+//	exchangectl dlq replay auth.events --all [--group notification-service] | --offset 0:12
 //
 // On the test server: sudo docker exec exchange-infra-user-service-1 /app/exchangectl flags list
 package main
@@ -59,6 +61,9 @@ commands:
                               (needs ledger.manual_adjustment; audited)
   ledger balances <user_id>   a user's accounts
   ledger reconcile            check the ledger invariants now
+  dlq list <topic>            dead letters of a business topic (e.g. auth.events)
+  dlq replay <topic> --all [--group G] | --offset P:O ...
+                              republish dead letters as first attempts of the group that parked them
 `
 
 func main() {
@@ -103,6 +108,8 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return instrumentsCmd(ctx, cfg, args[1:], os.Stdin, out)
 	case "ledger":
 		return ledgerCmd(ctx, cfg, args[1:], out)
+	case "dlq":
+		return dlqCmd(ctx, cfg, args[1:], out)
 	default:
 		fmt.Fprint(out, usage)
 		return fmt.Errorf("unknown command %q", args[0])

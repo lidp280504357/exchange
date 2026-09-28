@@ -28,3 +28,12 @@ func TestBypassAndProvider(t *testing.T) {
 		t.Fatal("an empty bypass must not match an empty token")
 	}
 }
+
+func TestIsBypass(t *testing.T) {
+	if !New(nil, "e2e-bypass").IsBypass("e2e-bypass") || New(nil, "e2e-bypass").IsBypass("other") {
+		t.Fatal("IsBypass must match the configured token only")
+	}
+	if New(nil, "").IsBypass("") {
+		t.Fatal("without a bypass token nothing is a bypass")
+	}
+}

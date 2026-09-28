@@ -114,7 +114,8 @@ func setup(ctx context.Context, a *app.App) error {
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
 }
 
-// reconcileLoop checks the ledger's invariants every interval. Any
+// reconcileLoop checks the ledger's invariants soon after start and then
+// every interval. Any
 // mismatch is a P1 incident (§5.9): it is logged as an error and exported
 // as ledger_reconcile_mismatches for alerting.
 func reconcileLoop(a *app.App, store *postgres.Store, interval time.Duration) func(context.Context) error {
@@ -125,12 +126,16 @@ func reconcileLoop(a *app.App, store *postgres.Store, interval time.Duration) fu
 	runs := prometheus.NewCounter(prometheus.CounterOpts{Name: "ledger_reconcile_runs_total", Help: "Completed ledger reconciliations."})
 	a.Metrics().MustRegister(gauge, runs)
 	return func(ctx context.Context) error {
+		// The first check runs a minute after start, so a deploy is checked
+		// (and the gauge exported) without waiting a whole interval.
+		wait := min(time.Minute, interval)
 		for {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(interval):
+			case <-time.After(wait):
 			}
+			wait = interval
 			results, err := store.Reconcile(ctx, time.Now)
 			if err != nil {
 				if ctx.Err() == nil {

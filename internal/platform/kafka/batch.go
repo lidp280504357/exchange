@@ -241,7 +241,8 @@ func count(m *ConsumerMetrics, group, topic, result string) {
 	}
 }
 
-// lagLoop refreshes the lag gauge of groups until ctx ends.
+// lagLoop refreshes the lag gauge of groups, at once and then every
+// interval, until ctx ends.
 func lagLoop(ctx context.Context, adm *kadm.Client, m *ConsumerMetrics, interval time.Duration, groups ...string) {
 	if m == nil {
 		return
@@ -249,23 +250,21 @@ func lagLoop(ctx context.Context, adm *kadm.Client, m *ConsumerMetrics, interval
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
+		if lags, err := adm.Lag(ctx, groups...); err == nil {
+			for _, gl := range lags {
+				for topic, parts := range gl.Lag {
+					for p, l := range parts {
+						if l.Lag >= 0 {
+							m.lag.WithLabelValues(gl.Group, topic, strconv.Itoa(int(p))).Set(float64(l.Lag))
+						}
+					}
+				}
+			}
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-		}
-		lags, err := adm.Lag(ctx, groups...)
-		if err != nil {
-			continue
-		}
-		for _, gl := range lags {
-			for topic, parts := range gl.Lag {
-				for p, l := range parts {
-					if l.Lag >= 0 {
-						m.lag.WithLabelValues(gl.Group, topic, strconv.Itoa(int(p))).Set(float64(l.Lag))
-					}
-				}
-			}
 		}
 	}
 }

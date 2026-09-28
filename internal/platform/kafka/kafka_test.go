@@ -191,3 +191,68 @@ func TestExhaustedAndPoisonEventsGoToTheDeadLetterTopic(t *testing.T) {
 		}
 	}
 }
+
+func TestDeadLettersCanBeReplayed(t *testing.T) {
+	cfg, topic, prod := setup(t)
+	envs := publish(t, prod, topic, "replay-me")
+	raw, err := kgo.NewClient(kgo.SeedBrokers(cfg.Brokers...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if err := raw.ProduceSync(context.Background(), &kgo.Record{Topic: topic, Key: []byte("p"), Value: []byte("not an envelope")}).FirstErr(); err != nil {
+		t.Fatal(err)
+	}
+
+	var failing atomic.Bool
+	failing.Store(true)
+	var handled atomic.Int32
+	runConsumer(t, cfg, topic, func(context.Context, *eventv1.Envelope) error {
+		if failing.Load() {
+			return errors.New("downstream down")
+		}
+		handled.Add(1)
+		return nil
+	})
+
+	var parked []kafka.DLQRecord
+	waitFor(t, "two dead letters", func() bool {
+		// Each read opens a client; the test broker may be far away.
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		recs, err := kafka.ReadDLQ(ctx, cfg, topic)
+		if err != nil {
+			t.Logf("ReadDLQ: %v", err)
+			return false
+		}
+		parked = recs
+		return len(recs) == 2
+	})
+	var event, poison kafka.DLQRecord
+	for _, r := range parked {
+		if r.EventID != "" {
+			event = r
+		} else {
+			poison = r
+		}
+	}
+	if event.EventID != envs[0].GetEventId() || event.Origin != topic || event.Group == "" || event.Attempt != 4 ||
+		event.EventType == "" || event.Error == "" || event.ParkedAt.IsZero() {
+		t.Fatalf("dead letter: %+v", event)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := kafka.ReplayDLQ(ctx, cfg, []kafka.DLQRecord{poison}); err == nil {
+		t.Fatal("an undecodable record must not be replayed")
+	}
+	failing.Store(false)
+	if n, err := kafka.ReplayDLQ(ctx, cfg, []kafka.DLQRecord{event}); err != nil || n != 1 {
+		t.Fatalf("ReplayDLQ: %d %v", n, err)
+	}
+	waitFor(t, "the replayed event", func() bool { return handled.Load() == 1 })
+	time.Sleep(500 * time.Millisecond)
+	if n := handled.Load(); n != 1 {
+		t.Fatalf("handled %d times after one replay", n)
+	}
+}

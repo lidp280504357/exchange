@@ -24,6 +24,10 @@ tasks:
       - buf lint
       - buf generate
 
+  proto:breaking:
+    desc: 契约没有破坏性变更（与 main 分支比较；CI 对比上一个提交）
+    cmds: ["buf breaking --against '.git#branch=main'"]
+
   proto:check:
     desc: 生成代码与契约一致（CI 同样检查）
     cmds:
@@ -74,12 +78,17 @@ tasks:
     desc: 部署脚本语法检查
     cmds:
       - bash -n deploy/server-update.sh deploy/redpanda/topics.sh deploy/compose/nginx/update-cloudflare-ips.sh
-      - for f in scripts/e2e/*.sh scripts/e2e/lib/*.sh; do bash -n "$f"; done
+      - for f in scripts/e2e/*.sh scripts/e2e/lib/*.sh scripts/fault/*.sh; do bash -n "$f"; done
 
   e2e:
-    desc: 对已部署的非生产环境跑端到端检查（默认 https://astras.vip，BASE=... 可改；读 .env 的 CAPTCHA_BYPASS_TOKEN）
+    desc: 对已部署的非生产环境跑端到端检查（默认 https://astras.vip，BASE=... 可改；读 .env 的 CAPTCHA_BYPASS_TOKEN；约 8 分钟）
     cmds:
       - for f in scripts/e2e/*.sh; do bash "$f" || exit 1; done
+
+  fault:
+    desc: 对测试环境做故障注入（Redpanda、ClickHouse、Redis 停机与 PostgreSQL 重启），每项会中断服务约半分钟，结束时恢复
+    cmds:
+      - for f in scripts/fault/*.sh; do echo "### $f"; bash "$f" || exit 1; done
 
   web:dev:
     desc: 本机启动 H5（Vite，/v1 与 WebSocket 代理到测试服，http://localhost:5173）

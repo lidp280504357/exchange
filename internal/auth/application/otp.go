@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -44,6 +45,13 @@ type OTPService struct {
 	Hasher   domain.CodeHasher
 	SMS      SMSBudget
 	Log      *slog.Logger
+	// Metrics counts requests and verifications; nil counts nothing.
+	Metrics ports.OTPMetrics
+	// Tester reports the captcha token of trusted test clients (the
+	// non-production bypass token). Their requests skip the per-IP quota,
+	// so end-to-end suites can run repeatedly from one machine; the
+	// per-target, per-device and SMS budget quotas still apply.
+	Tester func(captchaToken string) bool
 	// Now and Dispatch are replaced in tests.
 	Now      func() time.Time
 	Dispatch func(func(context.Context))
@@ -74,43 +82,79 @@ type ChallengeView struct {
 
 // Request creates a challenge and sends its code. Unknown accounts (and
 // known ones asking to register) get a decoy challenge that no code
-// verifies, so the response is the same either way (§5.2, §6.1).
+// verifies, so the response is the same either way (§5.2, §6.1). Every
+// request is counted by outcome for the operators.
 func (s *OTPService) Request(ctx context.Context, req RequestOTP) (ChallengeView, error) {
+	view, decoy, err := s.requestChallenge(ctx, req)
+	if s.Metrics != nil {
+		scene, channel := "invalid", "invalid"
+		if sc, perr := domain.ParseScene(req.Scene); perr == nil {
+			scene = string(sc)
+		}
+		if ch, perr := domain.ParseChannel(req.Channel); perr == nil {
+			channel = string(ch)
+		}
+		s.Metrics.Requested(scene, channel, requestOutcome(decoy, err))
+	}
+	return view, err
+}
+
+// requestOutcome is the metric label of a request's result.
+func requestOutcome(decoy bool, err error) string {
+	switch {
+	case err == nil && decoy:
+		return "decoy"
+	case err == nil:
+		return "queued"
+	case apperr.Is(err, "AUTH_CAPTCHA_REQUIRED"), apperr.Is(err, "AUTH_CAPTCHA_FAILED"):
+		return "captcha_rejected"
+	case apperr.Is(err, "AUTH_OTP_RESEND_TOO_SOON"), apperr.Is(err, apperr.CodeRateLimited):
+		return "rate_limited"
+	case apperr.Is(err, "AUTH_CHANNEL_UNAVAILABLE"):
+		return "channel_unavailable"
+	case apperr.Is(err, apperr.CodeUnavailable), apperr.Is(err, apperr.CodeInternal):
+		return "error"
+	default:
+		return "invalid"
+	}
+}
+
+func (s *OTPService) requestChallenge(ctx context.Context, req RequestOTP) (ChallengeView, bool, error) {
 	scene, err := domain.ParseScene(req.Scene)
 	if err != nil {
-		return ChallengeView{}, err
+		return ChallengeView{}, false, err
 	}
 	ch, err := domain.ParseChannel(req.Channel)
 	if err != nil {
-		return ChallengeView{}, err
+		return ChallengeView{}, false, err
 	}
 	if !domain.ValidDeviceID(req.DeviceID) {
-		return ChallengeView{}, domain.ErrDeviceRequired
+		return ChallengeView{}, false, domain.ErrDeviceRequired
 	}
 	if scene.Authenticated() && req.UserID == "" {
-		return ChallengeView{}, apperr.Unauthorized("sign in first")
+		return ChallengeView{}, false, apperr.Unauthorized("sign in first")
 	}
 	if req.CaptchaToken == "" {
-		return ChallengeView{}, domain.ErrCaptchaRequired
+		return ChallengeView{}, false, domain.ErrCaptchaRequired
 	}
 	if err := s.Captcha.Verify(ctx, req.CaptchaToken, req.IP); err != nil {
-		return ChallengeView{}, domain.ErrCaptchaFailed
+		return ChallengeView{}, false, domain.ErrCaptchaFailed
 	}
 
 	target, userID, err := s.resolveTarget(ctx, scene, ch, req)
 	if err != nil {
-		return ChallengeView{}, err
+		return ChallengeView{}, false, err
 	}
 	if ch == domain.ChannelSMS && !s.Flags.Enabled(flags.KeyRegistrationSMS, flags.Subject{Region: target.Region, UserID: userID}) {
-		return ChallengeView{}, domain.ErrChannelUnavailable
+		return ChallengeView{}, false, domain.ErrChannelUnavailable
 	}
 	if err := s.checkQuotas(ctx, ch, target.Value, req); err != nil {
-		return ChallengeView{}, err
+		return ChallengeView{}, false, err
 	}
 
 	decoy, err := s.isDecoy(ctx, scene, target, &userID)
 	if err != nil {
-		return ChallengeView{}, err
+		return ChallengeView{}, false, err
 	}
 	now := s.Now()
 	c := &domain.Challenge{
@@ -140,7 +184,7 @@ func (s *OTPService) Request(ctx context.Context, req RequestOTP) (ChallengeView
 		}, "user", aggregateKey(userID, c.ID))
 	})
 	if err != nil {
-		return ChallengeView{}, err
+		return ChallengeView{}, false, err
 	}
 	if !decoy {
 		delivery := ports.OTPDelivery{
@@ -153,7 +197,7 @@ func (s *OTPService) Request(ctx context.Context, req RequestOTP) (ChallengeView
 			}
 		})
 	}
-	return ChallengeView{ChallengeID: c.ID, ExpiresAt: c.ExpiresAt, Delivery: "QUEUED"}, nil
+	return ChallengeView{ChallengeID: c.ID, ExpiresAt: c.ExpiresAt, Delivery: "QUEUED"}, decoy, nil
 }
 
 // resolveTarget finds where the code goes: the given identifier, or for a
@@ -230,7 +274,7 @@ func (s *OTPService) checkQuotas(ctx context.Context, ch domain.Channel, target 
 		{Rule: RuleTargetDaily, Key: key},
 		{Rule: RuleDeviceHourly, Key: hashKey(req.DeviceID)},
 	}
-	if req.IP != "" {
+	if req.IP != "" && (s.Tester == nil || !s.Tester(req.CaptchaToken)) {
 		checks = append(checks, ratelimit.Check{Rule: RuleIPHourly, Key: hashKey(req.IP)})
 	}
 	if ch == domain.ChannelSMS {
@@ -271,9 +315,30 @@ type TicketView struct {
 	ExpiresAt time.Time
 }
 
-// Verify checks a code. The attempt counts even when the code is wrong,
-// so the transaction commits before the error is returned.
+// Verify checks a code, counting the outcome for the operators.
 func (s *OTPService) Verify(ctx context.Context, req VerifyOTP) (TicketView, error) {
+	view, err := s.verify(ctx, req)
+	if s.Metrics != nil {
+		s.Metrics.Verified(verifyOutcome(err))
+	}
+	return view, err
+}
+
+// verifyOutcome is the metric label of a verification's result.
+func verifyOutcome(err error) string {
+	switch {
+	case err == nil:
+		return "verified"
+	case apperr.Is(err, "AUTH_OTP_INVALID"), apperr.Is(err, "AUTH_OTP_EXPIRED"), apperr.Is(err, "AUTH_OTP_ATTEMPTS_EXCEEDED"):
+		return strings.ToLower(failureReason(err))
+	default:
+		return "error"
+	}
+}
+
+// verify checks a code. The attempt counts even when the code is wrong,
+// so the transaction commits before the error is returned.
+func (s *OTPService) verify(ctx context.Context, req VerifyOTP) (TicketView, error) {
 	if _, err := uuid.Parse(req.ChallengeID); err != nil {
 		return TicketView{}, domain.ErrOTPInvalid
 	}

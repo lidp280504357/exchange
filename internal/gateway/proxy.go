@@ -55,6 +55,14 @@ func NewProxy(target *url.URL) http.Handler {
 				pr.Out.Header.Set(httpx.HeaderScope, id.Scope)
 			}
 		},
+		// The gateway has already set the request and trace IDs of the
+		// response (the service saw the same ones); without this the client
+		// would get each header twice.
+		ModifyResponse: func(resp *http.Response) error {
+			resp.Header.Del(httpx.HeaderRequestID)
+			resp.Header.Del(httpx.HeaderTraceID)
+			return nil
+		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			if errors.Is(err, http.ErrAbortHandler) {
 				return

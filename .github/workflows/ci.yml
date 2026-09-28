@@ -54,6 +54,8 @@ jobs:
       TEST_CLICKHOUSE_PASSWORD: exchange
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # buf breaking compares with the previous commit
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -76,6 +78,15 @@ jobs:
           buf lint
           buf generate
           git diff --exit-code -- api/gen || { echo "::error::run 'task proto' and commit api/gen"; exit 1; }
+      - name: buf breaking
+        # Pull requests are compared with their base, pushes with the previous commit.
+        run: |
+          against=".git#ref=HEAD~1"
+          if [ -n "${{ github.base_ref }}" ]; then
+            git fetch --depth=1 origin "${{ github.base_ref }}"
+            against=".git#ref=FETCH_HEAD"
+          fi
+          buf breaking --against "$against"
       - name: gofumpt
         run: |
           go install mvdan.cc/gofumpt@latest
@@ -126,7 +137,7 @@ jobs:
       - name: shell syntax
         run: |
           bash -n deploy/server-update.sh deploy/redpanda/topics.sh deploy/compose/nginx/update-cloudflare-ips.sh
-          for f in scripts/e2e/*.sh scripts/e2e/lib/*.sh; do bash -n "$f"; done
+          for f in scripts/e2e/*.sh scripts/e2e/lib/*.sh scripts/fault/*.sh; do bash -n "$f"; done
       - name: compose config
         run: |
           docker compose -f deploy/compose/docker-compose.yml --env-file deploy/compose/.env.example config --quiet

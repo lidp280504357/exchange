@@ -13,6 +13,7 @@ import (
 	notificationv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/notification/v1"
 	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
 	"github.com/lidp280504357/exchange/internal/auth/adapters/humancheck"
+	"github.com/lidp280504357/exchange/internal/auth/adapters/metrics"
 	"github.com/lidp280504357/exchange/internal/auth/adapters/notifier"
 	"github.com/lidp280504357/exchange/internal/auth/adapters/postgres"
 	"github.com/lidp280504357/exchange/internal/auth/adapters/redisstore"
@@ -155,6 +156,8 @@ func setup(ctx context.Context, a *app.App) error {
 		Hasher:   hasher,
 		SMS:      application.SMSBudget{Hourly: cfg.SMSHourlyLimit, Daily: cfg.SMSDailyLimit},
 		Log:      a.Logger(),
+		Metrics:  metrics.NewOTP(a.Metrics()),
+		Tester:   human.IsBypass,
 		Now:      time.Now,
 		Dispatch: func(fn func(context.Context)) {
 			tasks.Go(func(ctx context.Context) {

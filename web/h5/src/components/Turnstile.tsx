@@ -14,6 +14,11 @@ type TurnstileAPI = {
 declare global {
   interface Window {
     turnstile?: TurnstileAPI;
+    // End-to-end tests (web/h5/e2e) put the environment's captcha bypass
+    // token here instead of solving the widget. The server accepts that
+    // token only outside production, so this adds nothing a client could
+    // not already send to the API.
+    __E2E_CAPTCHA_TOKEN__?: string;
   }
 }
 
@@ -34,7 +39,12 @@ function load(): Promise<TurnstileAPI> {
 
 export function Turnstile({ onToken, generation = 0 }: { onToken: (token: string) => void; generation?: number }) {
   const box = useRef<HTMLDivElement>(null);
+  const testToken = window.__E2E_CAPTCHA_TOKEN__;
   useEffect(() => {
+    if (testToken) {
+      onToken(testToken);
+      return;
+    }
     if (!SITE_KEY || !box.current) return;
     let id: string | undefined;
     let cancelled = false;
@@ -57,6 +67,7 @@ export function Turnstile({ onToken, generation = 0 }: { onToken: (token: string
     // Only a new generation re-renders the widget; onToken changes identity
     // on every render of the parent.
   }, [generation]);
+  if (testToken) return null;
   if (!SITE_KEY) return <p className="text-xs text-yellow-300">TURNSTILE_SITE_KEY is not set for this build.</p>;
   return <div ref={box} className="min-h-[65px]" />;
 }

@@ -158,6 +158,17 @@ type Limiter interface {
 	Allow(ctx context.Context, checks ...ratelimit.Check) (ratelimit.Result, error)
 }
 
+// OTPMetrics counts OTP traffic for the operators (§12.2: OTP 发送量).
+type OTPMetrics interface {
+	// Requested counts an otp/request by parsed scene and channel and its
+	// outcome: queued, decoy, captcha_rejected, rate_limited,
+	// channel_unavailable, invalid or error.
+	Requested(scene, channel, outcome string)
+	// Verified counts an otp/verify outcome: verified, invalid, expired,
+	// attempts_exceeded or error.
+	Verified(outcome string)
+}
+
 // Flags answers feature-flag checks.
 type Flags interface {
 	Enabled(key string, s flags.Subject) bool

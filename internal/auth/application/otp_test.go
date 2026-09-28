@@ -3,7 +3,9 @@ package application
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -266,3 +268,74 @@ func TestAuthenticatedScenes(t *testing.T) {
 		t.Fatal("no phone is bound, so an SMS step-up must fail")
 	}
 }
+
+type fakeOTPMetrics struct {
+	requests, verifications []string
+}
+
+func (m *fakeOTPMetrics) Requested(scene, channel, outcome string) {
+	m.requests = append(m.requests, scene+"/"+channel+"/"+outcome)
+}
+
+func (m *fakeOTPMetrics) Verified(outcome string) { m.verifications = append(m.verifications, outcome) }
+
+func TestOTPMetrics(t *testing.T) {
+	f := newFixture(t)
+	m := &fakeOTPMetrics{}
+	f.svc.Metrics = m
+
+	view, err := f.request(t, "REGISTER", "EMAIL", "counted@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.request(t, "REGISTER", "EMAIL", "counted@example.com")  // too soon
+	_, _ = f.request(t, "LOGIN", "EMAIL", "nobody-here@example.com") // decoy
+	_, _ = f.request(t, "HACK", "PIGEON", "x@example.com")
+	_, _ = f.svc.Request(context.Background(), RequestOTP{
+		Scene: "LOGIN", Channel: "EMAIL", Identifier: "known@example.com", CaptchaToken: "bot", DeviceID: device,
+	})
+	sent, _ := f.notifier.last()
+	_, _ = f.verify(view.ChallengeID, "000000")
+	_, _ = f.verify(view.ChallengeID, sent.Code)
+
+	want := []string{
+		"REGISTER/EMAIL/queued", "REGISTER/EMAIL/rate_limited", "LOGIN/EMAIL/decoy",
+		"invalid/invalid/invalid", "LOGIN/EMAIL/captcha_rejected",
+	}
+	if strings.Join(m.requests, " ") != strings.Join(want, " ") {
+		t.Fatalf("requests: %v", m.requests)
+	}
+	if strings.Join(m.verifications, " ") != "invalid verified" {
+		t.Fatalf("verifications: %v", m.verifications)
+	}
+}
+
+func TestTestersSkipOnlyTheIPQuota(t *testing.T) {
+	f := newFixture(t)
+	f.svc.Tester = func(token string) bool { return token == "tester" }
+	send := func(i int, token string) error {
+		_, err := f.svc.Request(context.Background(), RequestOTP{
+			Scene: "REGISTER", Channel: "EMAIL", Identifier: fmt.Sprintf("ip-%d-%s@example.com", i, token),
+			CaptchaToken: token, DeviceID: fmt.Sprintf("device-%04d-%s", i, token), IP: "198.51.100.7",
+		})
+		return err
+	}
+	f.svc.Captcha = acceptAll{}
+	for i := range RuleIPHourly.Limit + 5 {
+		if err := send(i, "tester"); err != nil {
+			t.Fatalf("tester request %d: %v", i, err)
+		}
+	}
+	for i := range RuleIPHourly.Limit {
+		if err := send(i, "human"); err != nil {
+			t.Fatalf("human request %d: %v", i, err)
+		}
+	}
+	if err := send(RuleIPHourly.Limit, "human"); !apperr.Is(err, apperr.CodeRateLimited) {
+		t.Fatalf("the %dth request of an IP: %v", RuleIPHourly.Limit+1, err)
+	}
+}
+
+type acceptAll struct{}
+
+func (acceptAll) Verify(context.Context, string, string) error { return nil }

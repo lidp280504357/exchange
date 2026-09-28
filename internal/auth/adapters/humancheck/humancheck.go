@@ -26,9 +26,14 @@ func New(provider captcha.Verifier, bypass string) *Verifier {
 // ErrNotConfigured means no captcha provider is set up.
 var ErrNotConfigured = errors.New("human verification is not configured")
 
+// IsBypass reports whether token is the configured test bypass token.
+func (v *Verifier) IsBypass(token string) bool {
+	return v.bypass != "" && subtle.ConstantTimeCompare([]byte(token), []byte(v.bypass)) == 1
+}
+
 // Verify implements ports.Captcha.
 func (v *Verifier) Verify(ctx context.Context, token, remoteIP string) error {
-	if v.bypass != "" && subtle.ConstantTimeCompare([]byte(token), []byte(v.bypass)) == 1 {
+	if v.IsBypass(token) {
 		return nil
 	}
 	if v.provider == nil {
