@@ -7,11 +7,20 @@ import (
 	"time"
 )
 
-// Check names of the reconciliation (§5.9, §11.4 invariants 1 and 2).
+// Check names of the reconciliation (§5.9, §11.4 invariants 1, 2 and 5).
 const (
 	CheckJournalBalanced      = "JOURNAL_BALANCED"
 	CheckAccountMatchesLines  = "ACCOUNT_MATCHES_LINES"
 	CheckSnapshotMatchesAccnt = "SNAPSHOT_MATCHES_ACCOUNT"
+	// Every recorded trade is settled (none parked as FAILED).
+	CheckTradesSettled = "TRADES_SETTLED"
+	// Per symbol, the recorded trades are numbered 1..n without gaps or
+	// repeats (trades from before numbering count first, as 0).
+	CheckTradesNumbered = "TRADES_NUMBERED"
+	// Invariant 5: per asset, the TRADE_SETTLE credits equal the traded
+	// amounts of the engine's trades, and the fees charged equal theirs.
+	CheckTradeSettleMatches = "TRADE_SETTLE_MATCHES_TRADES"
+	CheckTradeFeeMatches    = "TRADE_FEE_MATCHES_TRADES"
 )
 
 // Mismatch is one finding of a check.
@@ -45,6 +54,35 @@ var checks = []struct {
 			SELECT available_after, frozen_after, account_version FROM journal_lines
 			WHERE account_id = a.id ORDER BY account_version DESC LIMIT 1) l ON true
 		WHERE a.available <> l.available_after OR a.frozen <> l.frozen_after OR a.version <> l.account_version LIMIT 100`},
+	{CheckTradesSettled, `SELECT trade_id::text, error_code || ': ' || error FROM trades WHERE status = 'FAILED'
+		ORDER BY recorded_at LIMIT 100`},
+	{CheckTradesNumbered, `SELECT symbol, format('%s trades recorded, numbered up to %s', count(*), max(trade_number))
+		FROM trades GROUP BY symbol HAVING max(trade_number) > 0 AND count(*) <> max(trade_number) LIMIT 100`},
+	{CheckTradeSettleMatches, `WITH expected AS (
+			SELECT asset, sum(amount) AS amount FROM (
+				SELECT base_asset AS asset, quantity AS amount FROM trades WHERE status = 'SETTLED'
+				UNION ALL
+				SELECT quote_asset, quote_quantity FROM trades WHERE status = 'SETTLED') t
+			GROUP BY asset),
+		booked AS (
+			SELECT l.asset, sum(l.amount) AS amount FROM journal_lines l JOIN journals j ON j.id = l.journal_id
+			WHERE j.entry_type = 'TRADE_SETTLE' AND l.amount > 0 GROUP BY l.asset)
+		SELECT COALESCE(e.asset, b.asset), format('trades %s, TRADE_SETTLE %s', COALESCE(e.amount, 0), COALESCE(b.amount, 0))
+		FROM expected e FULL JOIN booked b ON b.asset = e.asset
+		WHERE COALESCE(e.amount, 0) <> COALESCE(b.amount, 0) LIMIT 100`},
+	{CheckTradeFeeMatches, `WITH expected AS (
+			SELECT asset, sum(amount) AS amount FROM (
+				SELECT base_asset AS asset, buyer_fee AS amount FROM trades WHERE status = 'SETTLED'
+				UNION ALL
+				SELECT quote_asset, seller_fee FROM trades WHERE status = 'SETTLED') t
+			GROUP BY asset),
+		booked AS (
+			SELECT l.asset, sum(l.amount) AS amount FROM journal_lines l JOIN journals j ON j.id = l.journal_id
+			JOIN accounts a ON a.id = l.account_id
+			WHERE j.entry_type = 'TRADE_FEE' AND a.account_type = 'FEE_REVENUE' GROUP BY l.asset)
+		SELECT COALESCE(e.asset, b.asset), format('trades %s, TRADE_FEE %s', COALESCE(e.amount, 0), COALESCE(b.amount, 0))
+		FROM expected e FULL JOIN booked b ON b.asset = e.asset
+		WHERE COALESCE(e.amount, 0) <> COALESCE(b.amount, 0) LIMIT 100`},
 }
 
 // Reconcile runs every check over the whole ledger and records each result

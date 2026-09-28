@@ -12,9 +12,22 @@ infra/.env
 tmp/
 logs/
 
-# Go build output
+# Go build output (a bare "go build ./cmd/<name>" drops the binary in the
+# repository root)
 bin/
 dist/
+/api-gateway
+/analytics-consumer
+/auth-service
+/exchangectl
+/instrument-service
+/ledger-service
+/matching-engine
+/notification-service
+/risk-service
+/spot-trading-service
+/user-service
+/devmcp
 node_modules/
 *.tsbuildinfo
 

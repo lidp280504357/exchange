@@ -174,6 +174,10 @@ func TestMetricsAndStop(t *testing.T) {
 	if !seen["OK /test.Svc/Echo"] || !seen["FailedPrecondition /test.Svc/Coded"] {
 		t.Fatalf("metrics = %v", seen)
 	}
+	// Methods never called are exported at zero from the start.
+	if !seen["OK /test.Svc/Panic"] || !seen["OK /grpc.health.v1.Health/Check"] {
+		t.Fatalf("uncalled methods missing: %v", seen)
+	}
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()

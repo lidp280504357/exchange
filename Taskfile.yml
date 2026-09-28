@@ -86,7 +86,7 @@ tasks:
       - bash scripts/dev.sh
 
   e2e:
-    desc: 对已部署的非生产环境跑端到端检查（默认 https://astras.vip，BASE=... 可改；读 .env 的 CAPTCHA_BYPASS_TOKEN；约 12 分钟）
+    desc: 对已部署的非生产环境跑端到端检查（默认 https://astras.vip，BASE=... 可改；读 .env 的 CAPTCHA_BYPASS_TOKEN；约 15 分钟）
     cmds:
       - for f in scripts/e2e/*.sh; do bash "$f" || exit 1; done
 

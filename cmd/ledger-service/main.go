@@ -102,6 +102,13 @@ func setup(ctx context.Context, a *app.App) error {
 	if err := bootstrap.Consumer(ctx, a, cfg.Kafka, consumer.Group, []string{event.TopicAuth}, consumer.Handler(svc)); err != nil {
 		return err
 	}
+	settlement := consumer.NewSettlement(svc, a.Logger(), a.Metrics())
+	if err := bootstrap.BatchConsumerWith(ctx, a, cfg.Kafka, kafka.BatchOptions{
+		Group: consumer.SettlementGroup, Topics: []string{event.TopicTrade}, Handler: settlement.Handle,
+		MaxBatch: 500, MaxWait: 20 * time.Millisecond,
+	}); err != nil {
+		return err
+	}
 	a.Add("reconciliation", app.Loop(reconcileLoop(a, store, cfg.ReconcileInterval)))
 
 	srv, err := bootstrap.GRPCServer(ctx, a, cfg.GRPCAddr)

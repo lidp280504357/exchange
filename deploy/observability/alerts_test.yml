@@ -26,6 +26,22 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'ledger_trades_failed_total{job="ledger-service"}'
+        values: '0 0 0 1 1'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: TradeSettlementRefused
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: TradeSettlementRefused
+        exp_alerts:
+          - exp_labels: {severity: critical, job: ledger-service}
+            exp_annotations:
+              summary: the ledger refused 1 trades in 15 minutes; they wait as FAILED (exchangectl ledger trades --failed)
+              runbook: docs/runbook/ledger.md
+
+  - interval: 1m
+    input_series:
       - series: 'kafka_consumer_records_total{job="ledger-service", group="ledger-service", topic="user.events", result="dlq"}'
         values: '0 0 0 1 1'
       - series: 'kafka_consumer_records_total{job="ledger-service", group="ledger-service", topic="user.events", result="ok"}'

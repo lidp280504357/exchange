@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Matching end to end (implementation plan §6.3 task 3): two users trade on
-# BTC-USDT through the matching engine. A resting sell fills against a
-# buy at its price; an IOC buy takes the rest and cancels its own rest; a
-# post-only order that would take and a self-trade are rejected; a market
-# buy runs out of book; a market sell takes the best bid; a user cancels;
-# unused funds come back when an order finishes. Fills carry role and fee.
-# Settlement (moving the traded funds) is task 4, so traded amounts stay
-# frozen here. The prices assume no other resting orders between 60000 and
-# 71000 (the e2e scripts cancel theirs on exit). Needs BTC-USDT in TRADING.
+# Matching and settlement end to end (implementation plan §6.3 tasks 3 and
+# 4): two users trade on BTC-USDT through the matching engine. A resting
+# sell fills against a buy at its price; an IOC buy takes the rest and
+# cancels its own rest; a post-only order that would take and a self-trade
+# are rejected; a market buy runs out of book; a market sell takes the best
+# bid; a limit buy above the ask pays the ask; a user cancels. Fills carry
+# role and fee; the ledger settles every trade (TRADE_SETTLE, TRADE_FEE,
+# the saved difference unfrozen) and unused funds come back when an order
+# finishes, so the final balances check every step. The prices assume no
+# other resting orders between 60000 and 71000 (the e2e scripts cancel
+# theirs on exit). Needs BTC-USDT in TRADING.
 #
 #   scripts/e2e/matching.sh
 set -euo pipefail
@@ -75,8 +77,8 @@ BUY2=$ORDER
 eventually 40 "the IOC rest is canceled" status_is "$BUY2" CANCELED "${BUYER[@]}"
 check '.filled_quantity == "0.006" and .cancel_reason == "IOC"' "0.006 filled, the rest canceled (IOC)"
 eventually 40 "the sell is filled" status_is "$SELL" FILLED "${SELLER[@]}"
-released() { [[ $(balance USDT "${BUYER[@]}") == "9300 700" ]]; }
-eventually 40 "the IOC's unused 280 USDT came back (700 traded, awaiting settlement)" released
+released() { [[ $(balance USDT "${BUYER[@]}") == "9300 0" ]]; }
+eventually 40 "700 USDT paid, the IOC's unused 280 came back" released
 
 echo "== rejections"
 place '{"symbol":"BTC-USDT","side":"SELL","type":"LIMIT","price":"70100","quantity":"0.001"}' "${SELLER[@]}"
@@ -108,6 +110,15 @@ check '.time_in_force == "IOC" and .filled_quote == "60"' "IOC, 0.001 BTC for 60
 call GET "/v1/orders/$MKTS/fills" "" "${SELLER[@]}"
 check '(.fills | length == 1) and (.fills[0] | .price == "60000" and .role == "TAKER" and .fee_asset == "USDT" and .fee == "0.06")' "the seller's fill: taker at the bid, 0.1% in USDT"
 
+echo "== a limit buy above the ask pays the ask"
+place '{"symbol":"BTC-USDT","side":"SELL","type":"LIMIT","price":"70500","quantity":"0.001"}' "${SELLER[@]}"
+ASK2=$ORDER
+eventually 40 "an ask rests at 70500" status_is "$ASK2" OPEN "${SELLER[@]}"
+place '{"symbol":"BTC-USDT","side":"BUY","type":"LIMIT","price":"71000","quantity":"0.001"}' "${BUYER[@]}"
+IMP=$ORDER
+eventually 40 "the buy fills at the ask" status_is "$IMP" FILLED "${BUYER[@]}"
+check '.frozen_amount == "71" and .filled_quote == "70.5"' "71 USDT frozen, 70.5 paid (settlement returns 0.5)"
+
 echo "== cancels"
 place '{"symbol":"BTC-USDT","side":"SELL","type":"LIMIT","price":"71000","quantity":"0.002"}' "${SELLER[@]}"
 LATE=$ORDER
@@ -117,16 +128,21 @@ expect 202 - "cancel it"
 eventually 40 "it is canceled" status_is "$LATE" CANCELED "${SELLER[@]}"
 check '.cancel_reason == "USER"' "canceled by the user"
 call GET "/v1/fills?symbol=BTC-USDT" "" "${BUYER[@]}"
-check '.items | length == 4' "the buyer has four fills"
+check '.items | length == 5' "the buyer has five fills"
 
-echo "== unused funds are free, traded funds wait for settlement"
-# Buyer: 280 + 420 (limit buys) + 70.1 (market buy) + 60 (the bid) traded.
-# Seller: 0.01 + 0.001 + 0.001 BTC traded; the rejected buy and the
-# canceled ask gave everything back.
-balances() {
-  [[ $(balance USDT "${BUYER[@]}") == "9169.9 830.1" && $(balance BTC "${SELLER[@]}") == "0.088 0.012" &&
-    $(balance USDT "${SELLER[@]}") == "10000 0" ]]
+echo "== settlement"
+# The buyer paid 280 + 420 + 70.1 + 60 + 70.5 USDT for 0.013 BTC less 0.1%
+# fees; the seller got the USDT less 0.1% and gave the BTC. The IOC rest,
+# the rejected orders, the market buy's rest, the canceled ask and the 0.5
+# the last buy saved all came back, so nothing stays frozen.
+settled() {
+  [[ $(balance USDT "${BUYER[@]}") == "9099.4 0" && $(balance BTC "${BUYER[@]}") == "0.112987 0" &&
+    $(balance USDT "${SELLER[@]}") == "10899.6994 0" && $(balance BTC "${SELLER[@]}") == "0.087 0" ]]
 }
-eventually 40 "buyer 830.1 USDT and seller 0.012 BTC frozen, the rest available" balances
+eventually 40 "both sides settled, nothing left frozen" settled
+call GET "/v1/account/ledger?type=TRADE_SETTLE&limit=50" "" "${BUYER[@]}"
+check '.items | length == 10' "five TRADE_SETTLE journals, each on the buyer's USDT and BTC"
+call GET "/v1/account/ledger?type=TRADE_FEE&asset=BTC" "" "${BUYER[@]}"
+check '[.items[].amount] | sort == ["-0.000001", "-0.000001", "-0.000001", "-0.000004", "-0.000006"]' "the buyer's fees, in BTC"
 
 echo "all matching checks passed"

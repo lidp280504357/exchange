@@ -83,6 +83,13 @@ groups:
           summary: "ledger reconciliation check {{ $labels.check }} found {{ $value }} mismatches"
           runbook: docs/runbook/ledger.md
 
+      - alert: TradeSettlementRefused
+        expr: sum by (job) (increase(ledger_trades_failed_total[15m])) > 0
+        labels: {severity: critical}
+        annotations:
+          summary: "the ledger refused {{ $value }} trades in 15 minutes; they wait as FAILED (exchangectl ledger trades --failed)"
+          runbook: docs/runbook/ledger.md
+
       - alert: LedgerReconciliationStopped
         expr: increase(ledger_reconcile_runs_total[3h]) == 0
         labels: {severity: warning}

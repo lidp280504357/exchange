@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	instrumentapp "github.com/lidp280504357/exchange/internal/instrument/application"
 	"github.com/lidp280504357/exchange/internal/ledger/adapters/postgres"
 	"github.com/lidp280504357/exchange/internal/ledger/application"
+	"github.com/lidp280504357/exchange/internal/ledger/domain"
 	"github.com/lidp280504357/exchange/internal/platform/event"
 	"github.com/lidp280504357/exchange/internal/platform/flags"
 	"github.com/lidp280504357/exchange/internal/platform/migrate"
@@ -100,6 +102,10 @@ func ledgerWith(ctx context.Context, dbs ledgerDBs, args []string, out io.Writer
 		return ledgerBalances(ctx, svc, args[1], out)
 	case "reconcile":
 		return ledgerReconcile(ctx, store, out)
+	case "trades":
+		return ledgerTrades(ctx, svc, args[1:], out)
+	case "retry-trades":
+		return ledgerRetryTrades(ctx, svc, args[1:], out)
 	default:
 		return fmt.Errorf("unknown ledger command %q", args[0])
 	}
@@ -158,7 +164,7 @@ func ledgerReconcile(ctx context.Context, store *postgres.Store, out io.Writer) 
 	}
 	broken := 0
 	for _, r := range results {
-		fmt.Fprintf(out, "%-26s %d mismatches\n", r.Check, len(r.Mismatches))
+		fmt.Fprintf(out, "%-28s %d mismatches\n", r.Check, len(r.Mismatches))
 		for _, m := range r.Mismatches {
 			fmt.Fprintf(out, "  %s: %s\n", m.Key, m.Detail)
 		}
@@ -166,6 +172,49 @@ func ledgerReconcile(ctx context.Context, store *postgres.Store, out io.Writer) 
 	}
 	if broken > 0 {
 		return fmt.Errorf("%d ledger mismatches", broken)
+	}
+	return nil
+}
+
+func ledgerTrades(ctx context.Context, svc *application.Service, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("ledger trades", flag.ContinueOnError)
+	fs.SetOutput(out)
+	failed := fs.Bool("failed", false, "only the trades parked as FAILED")
+	limit := fs.Int("limit", 20, "how many, newest first")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	status := ""
+	if *failed {
+		status = domain.TradeFailed
+	}
+	list, err := svc.Trades(ctx, status, *limit)
+	if err != nil {
+		return err
+	}
+	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "TRADE\tSYMBOL\tNO\tPRICE\tQUANTITY\tSTATUS\tATTEMPTS\tERROR")
+	for _, t := range list {
+		fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\t%d\t%s\n", t.ID, t.Symbol, t.Number, t.Price, t.Quantity, t.Status, t.Attempts,
+			strings.TrimSpace(t.ErrorCode+" "+t.Error))
+	}
+	return w.Flush()
+}
+
+func ledgerRetryTrades(ctx context.Context, svc *application.Service, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("ledger retry-trades", flag.ContinueOnError)
+	fs.SetOutput(out)
+	limit := fs.Int("limit", 100, "how many FAILED trades, oldest first")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	res, err := svc.RetryFailed(ctx, *limit)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "settled %d, still failed %d\n", res.Settled, res.Failed)
+	for _, t := range res.Refused {
+		fmt.Fprintf(out, "  %s: %s %s\n", t.ID, t.ErrorCode, t.Error)
 	}
 	return nil
 }

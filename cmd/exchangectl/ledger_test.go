@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -48,7 +49,14 @@ func TestLedgerAdjust(t *testing.T) {
 	if out, err = run("balances", user); err != nil || !strings.Contains(out, "100.5") {
 		t.Fatalf("balances: %v\n%s", err, out)
 	}
-	if out, err = run("reconcile"); err != nil || !strings.Contains(out, "ACCOUNT_MATCHES_LINES      0 mismatches") {
+	if out, err = run("reconcile"); err != nil || !regexp.MustCompile(`ACCOUNT_MATCHES_LINES\s+0 mismatches`).MatchString(out) ||
+		!regexp.MustCompile(`TRADE_SETTLE_MATCHES_TRADES\s+0 mismatches`).MatchString(out) {
 		t.Fatalf("reconcile: %v\n%s", err, out)
+	}
+	if out, err = run("trades", "--failed"); err != nil || strings.TrimSpace(out) != "TRADE  SYMBOL  NO  PRICE  QUANTITY  STATUS  ATTEMPTS  ERROR" {
+		t.Fatalf("trades: %v\n%q", err, out)
+	}
+	if out, err = run("retry-trades"); err != nil || out != "settled 0, still failed 0\n" {
+		t.Fatalf("retry-trades: %v\n%s", err, out)
 	}
 }

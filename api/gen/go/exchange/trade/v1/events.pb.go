@@ -49,8 +49,12 @@ type TradeExecuted struct {
 	// What the buyer's order froze per unit: its limit price, empty for a
 	// market buy; settlement releases the difference to price at once.
 	BuyerLimitPrice string `protobuf:"bytes,17,opt,name=buyer_limit_price,json=buyerLimitPrice,proto3" json:"buyer_limit_price,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// The symbol's trades counted from 1, so consumers can tell a missing
+	// trade (settlement reconciliation, public trade IDs). Trades from
+	// before this field carry 0.
+	TradeNumber   uint64 `protobuf:"varint,18,opt,name=trade_number,json=tradeNumber,proto3" json:"trade_number,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TradeExecuted) Reset() {
@@ -202,11 +206,18 @@ func (x *TradeExecuted) GetBuyerLimitPrice() string {
 	return ""
 }
 
+func (x *TradeExecuted) GetTradeNumber() uint64 {
+	if x != nil {
+		return x.TradeNumber
+	}
+	return 0
+}
+
 var File_exchange_trade_v1_events_proto protoreflect.FileDescriptor
 
 const file_exchange_trade_v1_events_proto_rawDesc = "" +
 	"\n" +
-	"\x1eexchange/trade/v1/events.proto\x12\x11exchange.trade.v1\x1a\x1dexchange/order/v1/order.proto\"\xd5\x04\n" +
+	"\x1eexchange/trade/v1/events.proto\x12\x11exchange.trade.v1\x1a\x1dexchange/order/v1/order.proto\"\xf8\x04\n" +
 	"\rTradeExecuted\x12\x19\n" +
 	"\btrade_id\x18\x01 \x01(\tR\atradeId\x12\x16\n" +
 	"\x06symbol\x18\x02 \x01(\tR\x06symbol\x12\x1d\n" +
@@ -229,7 +240,8 @@ const file_exchange_trade_v1_events_proto_rawDesc = "" +
 	"\tbuyer_fee\x18\x0f \x01(\tR\bbuyerFee\x12\x1d\n" +
 	"\n" +
 	"seller_fee\x18\x10 \x01(\tR\tsellerFee\x12*\n" +
-	"\x11buyer_limit_price\x18\x11 \x01(\tR\x0fbuyerLimitPriceB\xd2\x01\n" +
+	"\x11buyer_limit_price\x18\x11 \x01(\tR\x0fbuyerLimitPrice\x12!\n" +
+	"\ftrade_number\x18\x12 \x01(\x04R\vtradeNumberB\xd2\x01\n" +
 	"\x15com.exchange.trade.v1B\vEventsProtoP\x01ZFgithub.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1;tradev1\xa2\x02\x03ETX\xaa\x02\x11Exchange.Trade.V1\xca\x02\x11Exchange\\Trade\\V1\xe2\x02\x1dExchange\\Trade\\V1\\GPBMetadata\xea\x02\x13Exchange::Trade::V1b\x06proto3"
 
 var (

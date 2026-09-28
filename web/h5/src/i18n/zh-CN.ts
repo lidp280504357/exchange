@@ -25,7 +25,7 @@ export const zhCN = {
   ledger: { title: "资金流水", type: "类型" },
   codes: {
     SPOT: "现货", FUTURES: "合约", AVAILABLE: "可用", FROZEN: "冻结",
-    MANUAL_ADJUSTMENT: "调账（模拟资金）", ACCOUNT_TRANSFER: "账户划转", ORDER_FREEZE: "下单冻结", ORDER_UNFREEZE: "撤单解冻",
+    MANUAL_ADJUSTMENT: "调账（模拟资金）", ACCOUNT_TRANSFER: "账户划转", ORDER_FREEZE: "下单冻结", ORDER_UNFREEZE: "订单解冻",
     TRADE_SETTLE: "成交", TRADE_FEE: "手续费", DEPOSIT_CREDIT: "充值入账", WITHDRAW_FREEZE: "提现冻结", WITHDRAW_SETTLE: "提现",
     WITHDRAW_UNFREEZE: "提现解冻", INTERNAL_TRANSFER: "站内转账",
     PASSWORD: "密码", OTP: "验证码", LOGIN_CHALLENGE: "登录验证", REGISTER: "注册",

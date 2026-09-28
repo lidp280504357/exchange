@@ -41,6 +41,7 @@ type repos struct {
 func (r repos) Accounts() ports.AccountRepo   { return accounts(r) }
 func (r repos) Journals() ports.JournalRepo   { return journals(r) }
 func (r repos) Transfers() ports.TransferRepo { return transfers(r) }
+func (r repos) Trades() ports.TradeRepo       { return trades(r) }
 
 func (r repos) Emit(ctx context.Context, topic string, msg proto.Message, aggregateType, aggregateID string) error {
 	env, err := r.events.New(ctx, msg, aggregateType, aggregateID)

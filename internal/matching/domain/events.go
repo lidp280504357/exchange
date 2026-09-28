@@ -54,7 +54,10 @@ type Event struct {
 
 // Trade is one fill at the maker's price.
 type Trade struct {
-	ID           string
+	ID string
+	// Number counts the symbol's trades from 1: a gap downstream means a
+	// missing trade.
+	Number       uint64
 	Symbol       string
 	BaseAsset    string
 	QuoteAsset   string

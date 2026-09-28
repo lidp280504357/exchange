@@ -67,9 +67,10 @@ type ServerOptions struct {
 // so generated RegisterXxxServer functions accept it.
 type Server struct {
 	*grpc.Server
-	ln     net.Listener
-	log    *slog.Logger
-	health *grpchealth.Server
+	ln      net.Listener
+	log     *slog.Logger
+	health  *grpchealth.Server
+	metrics *Metrics
 }
 
 // NewServer binds addr and returns a server with the standard interceptors
@@ -86,7 +87,7 @@ func NewServer(ctx context.Context, addr string, opts ServerOptions) (*Server, e
 	if opts.Reflection {
 		reflection.Register(srv)
 	}
-	return &Server{Server: srv, ln: ln, log: opts.Logger, health: h}, nil
+	return &Server{Server: srv, ln: ln, log: opts.Logger, health: h, metrics: opts.Metrics}, nil
 }
 
 // Addr returns the address the server listens on.
@@ -94,11 +95,27 @@ func (s *Server) Addr() net.Addr { return s.ln.Addr() }
 
 // Run serves until Stop.
 func (s *Server) Run() error {
+	s.initMetrics()
 	s.log.Info("grpc server listening", "addr", s.ln.Addr().String())
 	if err := s.Serve(s.ln); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 		return fmt.Errorf("grpc: %w", err)
 	}
 	return nil
+}
+
+// initMetrics exports every registered method at zero, so dashboards and
+// checks see the series before the first call.
+func (s *Server) initMetrics() {
+	if s.metrics == nil {
+		return
+	}
+	for service, info := range s.GetServiceInfo() {
+		for _, m := range info.Methods {
+			method := "/" + service + "/" + m.Name
+			s.metrics.handled.WithLabelValues(method, codes.OK.String())
+			s.metrics.duration.WithLabelValues(method)
+		}
+	}
 }
 
 // Stop reports NOT_SERVING, lets in-flight calls finish, and closes the

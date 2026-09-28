@@ -7,9 +7,9 @@
 - 输入只有 `order.commands`（按交易对分区）：交易服务在冻结成功后发 PlaceOrder，撤单时发 CancelOrder。每条命令自带撮合所需的参数（费率、资产精度、lot、市价保护价），引擎不查任何服务。
 - 输出经本 schema 的 outbox 发布：
   - `order.events`：OrderOpened、OrderPartiallyFilled、OrderFilled、OrderCanceled（原因 USER、IOC、FOK、SELF_TRADE、NO_LIQUIDITY）、OrderRejected（`ORDER_WOULD_TAKE`、`ORDER_NO_LIQUIDITY`、`ORDER_SELF_TRADE`）。
-  - `trade.events`：TradeExecuted。成交 ID 由交易对与 sequence 派生，重放得到同样的 ID。
+  - `trade.events`：TradeExecuted。成交 ID 由交易对与 sequence 派生，重放得到同样的 ID；`trade_number` 是交易对内从 1 开始的成交编号（订单簿状态的一部分，随快照保存），下游据此发现漏掉的成交（账本对账 `TRADES_NUMBERED`，任务 5 的公开成交 ID）。编号字段上线前发出的成交为 0。
 - 每个事件带交易对内递增的 `sequence`，排序只看它，不看墙上时钟。
-- 引擎不持有余额（ADR-0002）。结算（任务 4）消费成交；交易服务消费订单事件更新订单，在终态解冻剩余（见 [trading.md](trading.md)）。
+- 引擎不持有余额（ADR-0002）。账本消费成交做结算（见 [ledger.md](ledger.md#成交结算)）；交易服务消费订单事件更新订单，在终态解冻剩余（见 [trading.md](trading.md)）。
 
 ## 撮合规则
 

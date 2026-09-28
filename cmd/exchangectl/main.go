@@ -15,6 +15,8 @@
 //	exchangectl ledger adjust --user <user_id> --asset USDT --amount 100 --reason "..." [--key K]
 //	exchangectl ledger balances <user_id>
 //	exchangectl ledger reconcile
+//	exchangectl ledger trades [--failed] [--limit N]
+//	exchangectl ledger retry-trades [--limit N]
 //	exchangectl dlq list auth.events
 //	exchangectl dlq replay auth.events --all [--group notification-service] | --offset 0:12
 //
@@ -61,6 +63,10 @@ commands:
                               (needs ledger.manual_adjustment; audited)
   ledger balances <user_id>   a user's accounts
   ledger reconcile            check the ledger invariants now
+  ledger trades [--failed] [--limit N]
+                              settled trades, newest first (--failed: the ones parked by a refusal)
+  ledger retry-trades [--limit N]
+                              settle the FAILED trades again once their cause is fixed
   dlq list <topic>            dead letters of a business topic (e.g. auth.events)
   dlq replay <topic> --all [--group G] | --offset P:O ...
                               republish dead letters as first attempts of the group that parked them

@@ -99,6 +99,7 @@ func (e *Engine) output(ctx context.Context, ev domain.Event) (ports.Output, err
 			Price: t.Price.String(), Quantity: t.Quantity.String(), QuoteQuantity: t.Quote.String(), TakerSide: side,
 			BuyerOrderId: t.BuyOrderID, BuyerUserId: t.BuyUserID, SellerOrderId: t.SellOrderID, SellerUserId: t.SellUserID,
 			BuyerIsMaker: t.BuyerIsMaker, BuyerFee: t.BuyerFee.String(), SellerFee: t.SellerFee.String(),
+			TradeNumber: t.Number,
 		}
 		if !t.BuyerLimit.IsZero() {
 			m.BuyerLimitPrice = t.BuyerLimit.String()

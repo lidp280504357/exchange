@@ -17,10 +17,12 @@ type level struct {
 type Book struct {
 	Symbol string
 	// Seq is the sequence of the last event emitted.
-	Seq   int64
-	bids  []*level // best (highest) first
-	asks  []*level // best (lowest) first
-	index map[string]*Order
+	Seq int64
+	// Trades counts the trades so far; each trade carries its number.
+	Trades uint64
+	bids   []*level // best (highest) first
+	asks   []*level // best (lowest) first
+	index  map[string]*Order
 }
 
 // NewBook returns an empty book.
@@ -223,8 +225,9 @@ func (b *Book) fill(taker, maker *Order, price, qty decimal.Decimal) []Event {
 		o.Filled, o.FilledQuote = o.Filled.Add(qty), o.FilledQuote.Add(quote)
 	}
 	seq := b.next()
+	b.Trades++
 	t := &Trade{
-		ID: tradeID(b.Symbol, seq), Symbol: b.Symbol, BaseAsset: taker.BaseAsset, QuoteAsset: taker.QuoteAsset, Seq: seq,
+		ID: tradeID(b.Symbol, seq), Number: b.Trades, Symbol: b.Symbol, BaseAsset: taker.BaseAsset, QuoteAsset: taker.QuoteAsset, Seq: seq,
 		Price: price, Quantity: qty, Quote: quote, TakerSide: taker.Side,
 		BuyOrderID: buyer.ID, BuyUserID: buyer.UserID, SellOrderID: seller.ID, SellUserID: seller.UserID,
 		BuyerIsMaker: buyer == maker,
@@ -310,17 +313,18 @@ func (b *Book) orderEvent(kind Kind, o *Order, reason, trade string) Event {
 	}
 }
 
-// Snapshot is a book's state: its sequence and resting orders, bids best
-// first, then asks best first, each level oldest first.
+// Snapshot is a book's state: its sequence, trade count and resting
+// orders, bids best first, then asks best first, each level oldest first.
 type Snapshot struct {
 	Symbol string  `json:"symbol"`
 	Seq    int64   `json:"seq"`
+	Trades uint64  `json:"trades"`
 	Orders []Order `json:"orders"`
 }
 
 // Snapshot returns the book's state.
 func (b *Book) Snapshot() Snapshot {
-	s := Snapshot{Symbol: b.Symbol, Seq: b.Seq}
+	s := Snapshot{Symbol: b.Symbol, Seq: b.Seq, Trades: b.Trades}
 	for _, side := range [][]*level{b.bids, b.asks} {
 		for _, lvl := range side {
 			for _, o := range lvl.orders {
@@ -334,7 +338,7 @@ func (b *Book) Snapshot() Snapshot {
 // Restore rebuilds a book from a snapshot.
 func Restore(s Snapshot) *Book {
 	b := NewBook(s.Symbol)
-	b.Seq = s.Seq
+	b.Seq, b.Trades = s.Seq, s.Trades
 	for i := range s.Orders {
 		o := s.Orders[i]
 		b.rest(&o)

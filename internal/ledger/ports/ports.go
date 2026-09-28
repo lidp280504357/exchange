@@ -23,6 +23,7 @@ type Repos interface {
 	Accounts() AccountRepo
 	Journals() JournalRepo
 	Transfers() TransferRepo
+	Trades() TradeRepo
 	// Emit queues an event on topic, keyed by aggregateID.
 	Emit(ctx context.Context, topic string, msg proto.Message, aggregateType, aggregateID string) error
 }
@@ -57,6 +58,20 @@ type TransferRepo interface {
 	Insert(ctx context.Context, t domain.Transfer) error
 	// List returns up to limit transfers older than beforeID ("": newest).
 	List(ctx context.Context, userID, beforeID string, limit int) ([]domain.Transfer, error)
+}
+
+// TradeRepo records the engine trades the ledger settled or parked.
+type TradeRepo interface {
+	// Statuses returns the status of each known trade among ids.
+	Statuses(ctx context.Context, ids []string) (map[string]string, error)
+	// Insert records a trade seen for the first time.
+	Insert(ctx context.Context, t domain.Trade) error
+	// Update stores the status, error, attempts and settlement time of a
+	// recorded trade.
+	Update(ctx context.Context, t domain.Trade) error
+	// List returns up to limit trades, newest first, optionally of one
+	// status.
+	List(ctx context.Context, status string, limit int) ([]domain.Trade, error)
 }
 
 // Assets tells the precision of an asset (instrument-service); unknown

@@ -176,6 +176,12 @@ func TestFeesAndTrades(t *testing.T) {
 	if tr.ID != tradeID("BTC-USDT", tr.Seq) || tr.ID == tradeID("BTC-USDT", tr.Seq+1) {
 		t.Fatal("trade IDs derive from symbol and sequence")
 	}
+	// Trades are numbered per symbol, also across a snapshot.
+	b = Restore(b.Snapshot())
+	b.Place(limit("m2", Sell, "60000", "0.0001"))
+	if evs := b.Place(limit("t2", Buy, "60000", "0.0001")); tr.Number != 1 || evs[0].Trade.Number != 2 {
+		t.Fatalf("trade numbers %d, %d", tr.Number, evs[0].Trade.Number)
+	}
 }
 
 func TestCancel(t *testing.T) {
@@ -270,7 +276,11 @@ func TestReplaysAreDeterministic(t *testing.T) {
 			var all []string
 			for _, c := range part {
 				for _, e := range c(from) {
-					all = append(all, fmt.Sprintf("%d %s", e.Seq, summary([]Event{e})))
+					line := fmt.Sprintf("%d %s", e.Seq, summary([]Event{e}))
+					if e.Trade != nil {
+						line += fmt.Sprintf(" #%d", e.Trade.Number)
+					}
+					all = append(all, line)
 				}
 				checkBook(t, from)
 			}

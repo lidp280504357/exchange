@@ -33,4 +33,8 @@ message TradeExecuted {
   // What the buyer's order froze per unit: its limit price, empty for a
   // market buy; settlement releases the difference to price at once.
   string buyer_limit_price = 17;
+  // The symbol's trades counted from 1, so consumers can tell a missing
+  // trade (settlement reconciliation, public trade IDs). Trades from
+  // before this field carry 0.
+  uint64 trade_number = 18;
 }
