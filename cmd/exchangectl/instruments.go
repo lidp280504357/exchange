@@ -49,6 +49,8 @@ func instrumentsWith(ctx context.Context, db *pg.DB, args []string, in io.Reader
 		return instrumentsApply(ctx, svc, args[1:], in, out)
 	case "pair-status":
 		return instrumentsPairStatus(ctx, svc, args[1:], out)
+	case "contract-status":
+		return instrumentsContractStatus(ctx, svc, args[1:], out)
 	default:
 		return fmt.Errorf("unknown instruments command %q", args[0])
 	}
@@ -85,13 +87,27 @@ func instrumentsList(ctx context.Context, svc *application.Service, out io.Write
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n", p.Symbol, p.Status, p.TickSize, p.LotSize, p.MinNotional,
 			p.MakerFeeRate, p.TakerFeeRate, p.Version)
 	}
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	contracts, err := svc.Contracts(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(out)
+	w = tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "CONTRACT\tSTATUS\tINDEX\tTICK\tLOT\tMAX_LEVERAGE\tTIERS\tFUNDING_H\tMAKER\tTAKER\tVERSION")
+	for _, c := range contracts {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%s\t%s\t%d\n", c.Symbol, c.Status, c.IndexSymbol, c.TickSize, c.LotSize,
+			c.MaxLeverage(), len(c.RiskTiers), c.FundingIntervalHours, c.MakerFeeRate, c.TakerFeeRate, c.Version)
+	}
 	return w.Flush()
 }
 
 func instrumentsApply(ctx context.Context, svc *application.Service, args []string, in io.Reader, out io.Writer) error {
 	fs := flag.NewFlagSet("instruments apply", flag.ContinueOnError)
 	fs.SetOutput(out)
-	file := fs.String("file", "", `JSON file with fee_schedules, assets and pairs ("-" reads stdin)`)
+	file := fs.String("file", "", `JSON file with fee_schedules, assets, pairs and contracts ("-" reads stdin)`)
 	reason := fs.String("reason", "", "why (required, goes to the history)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -144,6 +160,31 @@ func instrumentsPairStatus(ctx context.Context, svc *application.Service, args [
 		return errors.New("--to and --reason are required")
 	}
 	from, err := svc.SetPairStatus(ctx, symbol, *to, actor(), *reason)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "%s: %s -> %s\n", symbol, from, *to)
+	return nil
+}
+
+func instrumentsContractStatus(ctx context.Context, svc *application.Service, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("instruments contract-status", flag.ContinueOnError)
+	fs.SetOutput(out)
+	to := fs.String("to", "", "TRADING, HALT, CANCEL_ONLY or DELISTED")
+	reason := fs.String("reason", "", "why (required)")
+	if len(args) == 0 {
+		fs.Usage()
+		return errors.New("contract-status needs a symbol first")
+	}
+	symbol := args[0]
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if *to == "" || *reason == "" {
+		fs.Usage()
+		return errors.New("--to and --reason are required")
+	}
+	from, err := svc.SetContractStatus(ctx, symbol, *to, actor(), *reason)
 	if err != nil {
 		return err
 	}

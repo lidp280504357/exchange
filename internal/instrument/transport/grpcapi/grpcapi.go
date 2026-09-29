@@ -69,3 +69,34 @@ func (s *Server) SetPairStatus(ctx context.Context, req *instrumentv1.SetPairSta
 	}
 	return &instrumentv1.SetPairStatusResponse{FromStatus: from}, nil
 }
+
+// GetContract returns a perpetual contract with its fee rates.
+func (s *Server) GetContract(ctx context.Context, req *instrumentv1.GetContractRequest) (*instrumentv1.GetContractResponse, error) {
+	c, err := s.svc.Contract(ctx, req.GetSymbol())
+	if err != nil {
+		return nil, err
+	}
+	return &instrumentv1.GetContractResponse{Contract: application.ToProtoContract(c)}, nil
+}
+
+// ListContracts returns every contract.
+func (s *Server) ListContracts(ctx context.Context, _ *instrumentv1.ListContractsRequest) (*instrumentv1.ListContractsResponse, error) {
+	list, err := s.svc.Contracts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := &instrumentv1.ListContractsResponse{}
+	for _, c := range list {
+		resp.Contracts = append(resp.Contracts, application.ToProtoContract(c))
+	}
+	return resp, nil
+}
+
+// SetContractStatus moves a contract to another status for an operator.
+func (s *Server) SetContractStatus(ctx context.Context, req *instrumentv1.SetContractStatusRequest) (*instrumentv1.SetContractStatusResponse, error) {
+	from, err := s.svc.SetContractStatus(ctx, req.GetSymbol(), req.GetToStatus(), req.GetActor(), req.GetReason())
+	if err != nil {
+		return nil, err
+	}
+	return &instrumentv1.SetContractStatusResponse{FromStatus: from}, nil
+}

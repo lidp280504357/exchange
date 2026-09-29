@@ -19,11 +19,14 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	InstrumentService_GetAsset_FullMethodName         = "/exchange.instrument.v1.InstrumentService/GetAsset"
-	InstrumentService_ListAssets_FullMethodName       = "/exchange.instrument.v1.InstrumentService/ListAssets"
-	InstrumentService_GetTradingPair_FullMethodName   = "/exchange.instrument.v1.InstrumentService/GetTradingPair"
-	InstrumentService_ListTradingPairs_FullMethodName = "/exchange.instrument.v1.InstrumentService/ListTradingPairs"
-	InstrumentService_SetPairStatus_FullMethodName    = "/exchange.instrument.v1.InstrumentService/SetPairStatus"
+	InstrumentService_GetAsset_FullMethodName          = "/exchange.instrument.v1.InstrumentService/GetAsset"
+	InstrumentService_ListAssets_FullMethodName        = "/exchange.instrument.v1.InstrumentService/ListAssets"
+	InstrumentService_GetTradingPair_FullMethodName    = "/exchange.instrument.v1.InstrumentService/GetTradingPair"
+	InstrumentService_ListTradingPairs_FullMethodName  = "/exchange.instrument.v1.InstrumentService/ListTradingPairs"
+	InstrumentService_SetPairStatus_FullMethodName     = "/exchange.instrument.v1.InstrumentService/SetPairStatus"
+	InstrumentService_GetContract_FullMethodName       = "/exchange.instrument.v1.InstrumentService/GetContract"
+	InstrumentService_ListContracts_FullMethodName     = "/exchange.instrument.v1.InstrumentService/ListContracts"
+	InstrumentService_SetContractStatus_FullMethodName = "/exchange.instrument.v1.InstrumentService/SetContractStatus"
 )
 
 // InstrumentServiceClient is the client API for InstrumentService service.
@@ -43,6 +46,11 @@ type InstrumentServiceClient interface {
 	// SetPairStatus moves a pair (PREPARE -> TRADING <-> HALT ->
 	// CANCEL_ONLY -> DELISTED) for an operator; the change is versioned.
 	SetPairStatus(ctx context.Context, in *SetPairStatusRequest, opts ...grpc.CallOption) (*SetPairStatusResponse, error)
+	GetContract(ctx context.Context, in *GetContractRequest, opts ...grpc.CallOption) (*GetContractResponse, error)
+	ListContracts(ctx context.Context, in *ListContractsRequest, opts ...grpc.CallOption) (*ListContractsResponse, error)
+	// SetContractStatus moves a perpetual contract along the same machine as
+	// a pair; the change is versioned.
+	SetContractStatus(ctx context.Context, in *SetContractStatusRequest, opts ...grpc.CallOption) (*SetContractStatusResponse, error)
 }
 
 type instrumentServiceClient struct {
@@ -103,6 +111,36 @@ func (c *instrumentServiceClient) SetPairStatus(ctx context.Context, in *SetPair
 	return out, nil
 }
 
+func (c *instrumentServiceClient) GetContract(ctx context.Context, in *GetContractRequest, opts ...grpc.CallOption) (*GetContractResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetContractResponse)
+	err := c.cc.Invoke(ctx, InstrumentService_GetContract_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *instrumentServiceClient) ListContracts(ctx context.Context, in *ListContractsRequest, opts ...grpc.CallOption) (*ListContractsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListContractsResponse)
+	err := c.cc.Invoke(ctx, InstrumentService_ListContracts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *instrumentServiceClient) SetContractStatus(ctx context.Context, in *SetContractStatusRequest, opts ...grpc.CallOption) (*SetContractStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetContractStatusResponse)
+	err := c.cc.Invoke(ctx, InstrumentService_SetContractStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // InstrumentServiceServer is the server API for InstrumentService service.
 // All implementations must embed UnimplementedInstrumentServiceServer
 // for forward compatibility.
@@ -120,6 +158,11 @@ type InstrumentServiceServer interface {
 	// SetPairStatus moves a pair (PREPARE -> TRADING <-> HALT ->
 	// CANCEL_ONLY -> DELISTED) for an operator; the change is versioned.
 	SetPairStatus(context.Context, *SetPairStatusRequest) (*SetPairStatusResponse, error)
+	GetContract(context.Context, *GetContractRequest) (*GetContractResponse, error)
+	ListContracts(context.Context, *ListContractsRequest) (*ListContractsResponse, error)
+	// SetContractStatus moves a perpetual contract along the same machine as
+	// a pair; the change is versioned.
+	SetContractStatus(context.Context, *SetContractStatusRequest) (*SetContractStatusResponse, error)
 	mustEmbedUnimplementedInstrumentServiceServer()
 }
 
@@ -144,6 +187,15 @@ func (UnimplementedInstrumentServiceServer) ListTradingPairs(context.Context, *L
 }
 func (UnimplementedInstrumentServiceServer) SetPairStatus(context.Context, *SetPairStatusRequest) (*SetPairStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetPairStatus not implemented")
+}
+func (UnimplementedInstrumentServiceServer) GetContract(context.Context, *GetContractRequest) (*GetContractResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetContract not implemented")
+}
+func (UnimplementedInstrumentServiceServer) ListContracts(context.Context, *ListContractsRequest) (*ListContractsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListContracts not implemented")
+}
+func (UnimplementedInstrumentServiceServer) SetContractStatus(context.Context, *SetContractStatusRequest) (*SetContractStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetContractStatus not implemented")
 }
 func (UnimplementedInstrumentServiceServer) mustEmbedUnimplementedInstrumentServiceServer() {}
 func (UnimplementedInstrumentServiceServer) testEmbeddedByValue()                           {}
@@ -256,6 +308,60 @@ func _InstrumentService_SetPairStatus_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _InstrumentService_GetContract_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetContractRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InstrumentServiceServer).GetContract(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InstrumentService_GetContract_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InstrumentServiceServer).GetContract(ctx, req.(*GetContractRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InstrumentService_ListContracts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListContractsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InstrumentServiceServer).ListContracts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InstrumentService_ListContracts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InstrumentServiceServer).ListContracts(ctx, req.(*ListContractsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InstrumentService_SetContractStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetContractStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InstrumentServiceServer).SetContractStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InstrumentService_SetContractStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InstrumentServiceServer).SetContractStatus(ctx, req.(*SetContractStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // InstrumentService_ServiceDesc is the grpc.ServiceDesc for InstrumentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -282,6 +388,18 @@ var InstrumentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetPairStatus",
 			Handler:    _InstrumentService_SetPairStatus_Handler,
+		},
+		{
+			MethodName: "GetContract",
+			Handler:    _InstrumentService_GetContract_Handler,
+		},
+		{
+			MethodName: "ListContracts",
+			Handler:    _InstrumentService_ListContracts_Handler,
+		},
+		{
+			MethodName: "SetContractStatus",
+			Handler:    _InstrumentService_SetContractStatus_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

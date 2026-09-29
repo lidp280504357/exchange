@@ -43,6 +43,8 @@ func (r repos) Assets() ports.AssetRepo     { return assets(r) }
 func (r repos) Networks() ports.NetworkRepo { return networks(r) }
 func (r repos) Pairs() ports.PairRepo       { return pairs(r) }
 
+func (r repos) Contracts() ports.ContractRepo { return contracts(r) }
+
 func (r repos) Record(ctx context.Context, entity, key string, version int64, value any, actor, reason string) error {
 	b, err := json.Marshal(value)
 	if err != nil {
@@ -215,4 +217,57 @@ func (r pairs) Save(ctx context.Context, p domain.TradingPair) (domain.TradingPa
 		version = trading_pairs.version + 1, updated_at = now()
 		RETURNING `+pairColumns, p.Symbol, p.BaseAsset, p.QuoteAsset, p.TickSize, p.LotSize, p.MinQuantity, p.MaxQuantity,
 		p.MinNotional, p.PriceBand, p.FeeTier, p.Status))
+}
+
+type contracts repos
+
+const contractColumns = `symbol, type, base_asset, quote_asset, index_symbol, tick_size, lot_size, min_quantity, max_quantity,
+	min_notional, price_band, risk_tiers, funding_interval_hours, interest_rate, funding_cap, impact_notional, fee_tier, status, version`
+
+func scanContract(row pgx.Row) (domain.Contract, error) {
+	var c domain.Contract
+	var tiers []byte
+	err := row.Scan(&c.Symbol, &c.Type, &c.BaseAsset, &c.QuoteAsset, &c.IndexSymbol, &c.TickSize, &c.LotSize, &c.MinQuantity,
+		&c.MaxQuantity, &c.MinNotional, &c.PriceBand, &tiers, &c.FundingIntervalHours, &c.InterestRate, &c.FundingCap,
+		&c.ImpactNotional, &c.FeeTier, &c.Status, &c.Version)
+	if err != nil {
+		return c, err
+	}
+	if err := json.Unmarshal(tiers, &c.RiskTiers); err != nil {
+		return c, fmt.Errorf("contract %s: risk tiers: %w", c.Symbol, err)
+	}
+	return c, nil
+}
+
+func (r contracts) Get(ctx context.Context, symbol string) (*domain.Contract, error) {
+	return one(r.q.QueryRow(ctx, `SELECT `+contractColumns+` FROM contracts WHERE symbol = $1`, symbol), scanContract)
+}
+
+func (r contracts) GetForUpdate(ctx context.Context, symbol string) (*domain.Contract, error) {
+	return one(r.q.QueryRow(ctx, `SELECT `+contractColumns+` FROM contracts WHERE symbol = $1 FOR UPDATE`, symbol), scanContract)
+}
+
+func (r contracts) List(ctx context.Context) ([]domain.Contract, error) {
+	rows, err := r.q.Query(ctx, `SELECT `+contractColumns+` FROM contracts ORDER BY symbol`)
+	return all(rows, err, scanContract)
+}
+
+func (r contracts) Save(ctx context.Context, c domain.Contract) (domain.Contract, error) {
+	tiers, err := json.Marshal(c.RiskTiers)
+	if err != nil {
+		return domain.Contract{}, err
+	}
+	return scanContract(r.q.QueryRow(ctx, `INSERT INTO contracts (symbol, type, base_asset, quote_asset, index_symbol, tick_size,
+		lot_size, min_quantity, max_quantity, min_notional, price_band, risk_tiers, funding_interval_hours, interest_rate,
+		funding_cap, impact_notional, fee_tier, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+		ON CONFLICT (symbol) DO UPDATE SET index_symbol = EXCLUDED.index_symbol, tick_size = EXCLUDED.tick_size,
+		lot_size = EXCLUDED.lot_size, min_quantity = EXCLUDED.min_quantity, max_quantity = EXCLUDED.max_quantity,
+		min_notional = EXCLUDED.min_notional, price_band = EXCLUDED.price_band, risk_tiers = EXCLUDED.risk_tiers,
+		funding_interval_hours = EXCLUDED.funding_interval_hours, interest_rate = EXCLUDED.interest_rate,
+		funding_cap = EXCLUDED.funding_cap, impact_notional = EXCLUDED.impact_notional, fee_tier = EXCLUDED.fee_tier,
+		status = EXCLUDED.status, version = contracts.version + 1, updated_at = now()
+		RETURNING `+contractColumns, c.Symbol, c.Type, c.BaseAsset, c.QuoteAsset, c.IndexSymbol, c.TickSize, c.LotSize,
+		c.MinQuantity, c.MaxQuantity, c.MinNotional, c.PriceBand, tiers, c.FundingIntervalHours, c.InterestRate, c.FundingCap,
+		c.ImpactNotional, c.FeeTier, c.Status))
 }

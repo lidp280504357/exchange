@@ -1,6 +1,7 @@
 {
   "fee_schedules": [
-    {"tier": "default", "maker_fee_rate": "0.001", "taker_fee_rate": "0.001"}
+    {"tier": "default", "maker_fee_rate": "0.001", "taker_fee_rate": "0.001"},
+    {"tier": "perp", "maker_fee_rate": "0.0002", "taker_fee_rate": "0.0005"}
   ],
   "assets": [
     {
@@ -40,6 +41,32 @@
       "symbol": "ETH-BTC", "base_asset": "ETH", "quote_asset": "BTC",
       "tick_size": "0.00001", "lot_size": "0.001", "min_quantity": "0.001", "max_quantity": "1000",
       "min_notional": "0.0001", "price_band": "1", "fee_tier": "default", "status": "PREPARE"
+    }
+  ],
+  "contracts": [
+    {
+      "symbol": "BTC-USDT-PERP", "type": "PERPETUAL", "base_asset": "BTC", "quote_asset": "USDT", "index_symbol": "BTC-USDT",
+      "tick_size": "0.1", "lot_size": "0.001", "min_quantity": "0.001", "max_quantity": "100", "min_notional": "5",
+      "price_band": "0.05", "funding_interval_hours": 8, "interest_rate": "0.0001", "funding_cap": "0.0075",
+      "impact_notional": "10000", "fee_tier": "perp", "status": "PREPARE",
+      "risk_tiers": [
+        {"max_notional": "50000", "max_leverage": 50, "mmr": "0.004"},
+        {"max_notional": "250000", "max_leverage": 20, "mmr": "0.01"},
+        {"max_notional": "1000000", "max_leverage": 10, "mmr": "0.025"},
+        {"max_notional": "5000000", "max_leverage": 5, "mmr": "0.05"}
+      ]
+    },
+    {
+      "symbol": "ETH-USDT-PERP", "type": "PERPETUAL", "base_asset": "ETH", "quote_asset": "USDT", "index_symbol": "ETH-USDT",
+      "tick_size": "0.01", "lot_size": "0.01", "min_quantity": "0.01", "max_quantity": "1000", "min_notional": "5",
+      "price_band": "0.05", "funding_interval_hours": 8, "interest_rate": "0.0001", "funding_cap": "0.0075",
+      "impact_notional": "10000", "fee_tier": "perp", "status": "PREPARE",
+      "risk_tiers": [
+        {"max_notional": "25000", "max_leverage": 50, "mmr": "0.005"},
+        {"max_notional": "100000", "max_leverage": 20, "mmr": "0.01"},
+        {"max_notional": "500000", "max_leverage": 10, "mmr": "0.025"},
+        {"max_notional": "2000000", "max_leverage": 5, "mmr": "0.05"}
+      ]
     }
   ]
 }

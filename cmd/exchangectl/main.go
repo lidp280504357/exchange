@@ -13,6 +13,7 @@
 //	exchangectl instruments list
 //	exchangectl instruments apply --file deploy/instruments/test.json --reason "..."
 //	exchangectl instruments pair-status BTC-USDT --to TRADING --reason "..."
+//	exchangectl instruments contract-status BTC-USDT-PERP --to TRADING --reason "..."
 //	exchangectl ledger adjust --user <user_id> --asset USDT --amount 100 --reason "..." [--key K]
 //	exchangectl ledger balances <user_id>
 //	exchangectl ledger reconcile
@@ -65,6 +66,8 @@ commands:
                               make the reference data match a JSON file ("-" for stdin); idempotent
   instruments pair-status <symbol> --to STATUS --reason TEXT
                               move a pair: PREPARE -> TRADING <-> HALT -> CANCEL_ONLY -> DELISTED
+  instruments contract-status <symbol> --to STATUS --reason TEXT
+                              move a perpetual contract along the same statuses
   ledger adjust --user U --asset A --amount X --reason TEXT [--key K]
                               credit (or debit) a user's SPOT account against ADJUSTMENT
                               (needs ledger.manual_adjustment; audited)

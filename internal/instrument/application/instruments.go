@@ -30,6 +30,7 @@ type Config struct {
 	FeeSchedules []domain.FeeSchedule `json:"fee_schedules"`
 	Assets       []AssetConfig        `json:"assets"`
 	Pairs        []domain.TradingPair `json:"pairs"`
+	Contracts    []domain.Contract    `json:"contracts"`
 }
 
 // ApplyResult lists what an apply did, as "ENTITY key vN".
@@ -63,6 +64,11 @@ func (s *Service) Apply(ctx context.Context, cfg Config, actor, reason string) (
 		}
 		for _, p := range cfg.Pairs {
 			if err := s.applyPair(ctx, r, p, actor, reason, &res); err != nil {
+				return err
+			}
+		}
+		for _, c := range cfg.Contracts {
+			if err := s.applyContract(ctx, r, c, actor, reason, &res); err != nil {
 				return err
 			}
 		}

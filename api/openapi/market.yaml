@@ -76,6 +76,52 @@ paths:
                 $ref: '#/components/schemas/TradingPair'
         default:
           $ref: './common.yaml#/components/responses/Error'
+  /v1/market/contracts:
+    get:
+      operationId: listContracts
+      summary: USDT perpetual contracts (delisted ones excluded)
+      description: |
+        Linear perpetuals settled in USDT (requirements §5.8, §11.7):
+        quantities in the base asset; price, margin, fees and PnL in USDT.
+        A position's leverage and maintenance margin rate come from the
+        risk tier its notional falls in.
+      tags: [market]
+      responses:
+        '200':
+          description: Every listed contract.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [contracts]
+                properties:
+                  contracts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Contract'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/market/contracts/{symbol}:
+    get:
+      operationId: getContract
+      summary: One perpetual contract, delisted ones included
+      tags: [market]
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          schema:
+            type: string
+            examples: [BTC-USDT-PERP]
+      responses:
+        '200':
+          description: The contract.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
   /v1/market/tickers:
     get:
       operationId: listTickers
@@ -309,6 +355,73 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Network'
+    RiskTier:
+      type: object
+      required: [max_notional, max_leverage, mmr]
+      properties:
+        max_notional:
+          type: string
+          description: Largest position notional (USDT) of the tier.
+        max_leverage:
+          type: integer
+        mmr:
+          type: string
+          description: Maintenance margin rate, liquidation fee included.
+    Contract:
+      type: object
+      required: [symbol, type, base_asset, quote_asset, index_symbol, tick_size, lot_size, min_quantity, max_quantity, min_notional,
+        price_band, max_leverage, risk_tiers, funding_interval_hours, interest_rate, funding_cap, impact_notional, maker_fee_rate,
+        taker_fee_rate, status]
+      properties:
+        symbol:
+          type: string
+          examples: [BTC-USDT-PERP]
+        type:
+          type: string
+          enum: [PERPETUAL]
+        base_asset:
+          type: string
+        quote_asset:
+          type: string
+        index_symbol:
+          type: string
+          description: The spot market whose reference prices make the index.
+        tick_size:
+          type: string
+        lot_size:
+          type: string
+        min_quantity:
+          type: string
+        max_quantity:
+          type: string
+        min_notional:
+          type: string
+        price_band:
+          type: string
+          description: Largest deviation of a limit price from the mark price, as a fraction.
+        max_leverage:
+          type: integer
+        risk_tiers:
+          type: array
+          items:
+            $ref: '#/components/schemas/RiskTier'
+        funding_interval_hours:
+          type: integer
+          enum: [1, 4, 8]
+        interest_rate:
+          type: string
+          description: Per funding interval.
+        funding_cap:
+          type: string
+        impact_notional:
+          type: string
+        maker_fee_rate:
+          type: string
+        taker_fee_rate:
+          type: string
+        status:
+          type: string
+          enum: [PREPARE, TRADING, HALT, CANCEL_ONLY, DELISTED]
     TradingPair:
       type: object
       required: [symbol, base_asset, quote_asset, tick_size, lot_size, min_quantity, max_quantity, min_notional, price_band, maker_fee_rate, taker_fee_rate, status]

@@ -52,6 +52,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/market/contracts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * USDT perpetual contracts (delisted ones excluded)
+         * @description Linear perpetuals settled in USDT (requirements §5.8, §11.7):
+         *     quantities in the base asset; price, margin, fees and PnL in USDT.
+         *     A position's leverage and maintenance margin rate come from the
+         *     risk tier its notional falls in.
+         */
+        get: operations["listContracts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/market/contracts/{symbol}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One perpetual contract, delisted ones included */
+        get: operations["getContract"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/market/tickers": {
         parameters: {
             query?: never;
@@ -177,6 +217,42 @@ export interface components {
             withdraw_enabled: boolean;
             trading_enabled: boolean;
             networks: components["schemas"]["Network"][];
+        };
+        RiskTier: {
+            /** @description Largest position notional (USDT) of the tier. */
+            max_notional: string;
+            max_leverage: number;
+            /** @description Maintenance margin rate, liquidation fee included. */
+            mmr: string;
+        };
+        Contract: {
+            /** @example BTC-USDT-PERP */
+            symbol: string;
+            /** @enum {string} */
+            type: "PERPETUAL";
+            base_asset: string;
+            quote_asset: string;
+            /** @description The spot market whose reference prices make the index. */
+            index_symbol: string;
+            tick_size: string;
+            lot_size: string;
+            min_quantity: string;
+            max_quantity: string;
+            min_notional: string;
+            /** @description Largest deviation of a limit price from the mark price, as a fraction. */
+            price_band: string;
+            max_leverage: number;
+            risk_tiers: components["schemas"]["RiskTier"][];
+            /** @enum {integer} */
+            funding_interval_hours: 1 | 4 | 8;
+            /** @description Per funding interval. */
+            interest_rate: string;
+            funding_cap: string;
+            impact_notional: string;
+            maker_fee_rate: string;
+            taker_fee_rate: string;
+            /** @enum {string} */
+            status: "PREPARE" | "TRADING" | "HALT" | "CANCEL_ONLY" | "DELISTED";
         };
         TradingPair: {
             /** @example BTC-USDT */
@@ -352,6 +428,52 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TradingPair"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listContracts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every listed contract. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        contracts: components["schemas"]["Contract"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getContract: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                symbol: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The contract. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Contract"];
                 };
             };
             default: components["responses"]["Error"];

@@ -15,6 +15,11 @@ service InstrumentService {
   // SetPairStatus moves a pair (PREPARE -> TRADING <-> HALT ->
   // CANCEL_ONLY -> DELISTED) for an operator; the change is versioned.
   rpc SetPairStatus(SetPairStatusRequest) returns (SetPairStatusResponse);
+  rpc GetContract(GetContractRequest) returns (GetContractResponse);
+  rpc ListContracts(ListContractsRequest) returns (ListContractsResponse);
+  // SetContractStatus moves a perpetual contract along the same machine as
+  // a pair; the change is versioned.
+  rpc SetContractStatus(SetContractStatusRequest) returns (SetContractStatusResponse);
 }
 
 message Asset {
@@ -77,6 +82,49 @@ message TradingPair {
   int64 version = 14;
 }
 
+// RiskTier is one step of a contract's risk limit ladder (requirements
+// §11.7): positions up to max_notional may use leverage up to
+// max_leverage and need maintenance margin at mmr (liquidation fee
+// included).
+message RiskTier {
+  string max_notional = 1;
+  int32 max_leverage = 2;
+  string mmr = 3;
+}
+
+// Contract is a linear perpetual future settled in its quote asset,
+// e.g. BTC-USDT-PERP (requirements §5.8). Quantities are in the base
+// asset; prices, margin, fees and PnL in the quote asset.
+message Contract {
+  string symbol = 1;
+  // PERPETUAL.
+  string type = 2;
+  string base_asset = 3;
+  string quote_asset = 4;
+  // The spot market whose reference prices make the index, e.g. BTC-USDT.
+  string index_symbol = 5;
+  string tick_size = 6;
+  string lot_size = 7;
+  string min_quantity = 8;
+  string max_quantity = 9;
+  string min_notional = 10;
+  // Largest allowed deviation of a limit price from the mark price.
+  string price_band = 11;
+  repeated RiskTier risk_tiers = 12;
+  int32 funding_interval_hours = 13;
+  // Interest rate per funding interval; funding_cap bounds the rate.
+  string interest_rate = 14;
+  string funding_cap = 15;
+  // Notional the premium index prices on each side of the book.
+  string impact_notional = 16;
+  string fee_tier = 17;
+  string maker_fee_rate = 18;
+  string taker_fee_rate = 19;
+  // PREPARE, TRADING, HALT, CANCEL_ONLY or DELISTED.
+  string status = 20;
+  int64 version = 21;
+}
+
 message FeeSchedule {
   string tier = 1;
   string maker_fee_rate = 2;
@@ -120,5 +168,30 @@ message SetPairStatusRequest {
 }
 
 message SetPairStatusResponse {
+  string from_status = 1;
+}
+
+message GetContractRequest {
+  string symbol = 1;
+}
+
+message GetContractResponse {
+  Contract contract = 1;
+}
+
+message ListContractsRequest {}
+
+message ListContractsResponse {
+  repeated Contract contracts = 1;
+}
+
+message SetContractStatusRequest {
+  string symbol = 1;
+  string to_status = 2;
+  string reason = 3;
+  string actor = 4;
+}
+
+message SetContractStatusResponse {
   string from_status = 1;
 }

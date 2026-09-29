@@ -287,6 +287,152 @@ func (x *TradingPairStatusChanged) GetVersion() int64 {
 	return 0
 }
 
+type ContractUpserted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Contract      *Contract              `protobuf:"bytes,1,opt,name=contract,proto3" json:"contract,omitempty"`
+	Actor         string                 `protobuf:"bytes,2,opt,name=actor,proto3" json:"actor,omitempty"`
+	Reason        string                 `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ContractUpserted) Reset() {
+	*x = ContractUpserted{}
+	mi := &file_exchange_instrument_v1_events_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ContractUpserted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ContractUpserted) ProtoMessage() {}
+
+func (x *ContractUpserted) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_instrument_v1_events_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ContractUpserted.ProtoReflect.Descriptor instead.
+func (*ContractUpserted) Descriptor() ([]byte, []int) {
+	return file_exchange_instrument_v1_events_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ContractUpserted) GetContract() *Contract {
+	if x != nil {
+		return x.Contract
+	}
+	return nil
+}
+
+func (x *ContractUpserted) GetActor() string {
+	if x != nil {
+		return x.Actor
+	}
+	return ""
+}
+
+func (x *ContractUpserted) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+// ContractStatusChanged follows the pair machine: PREPARE -> TRADING <->
+// HALT; TRADING/HALT -> CANCEL_ONLY -> DELISTED.
+type ContractStatusChanged struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Symbol        string                 `protobuf:"bytes,1,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	FromStatus    string                 `protobuf:"bytes,2,opt,name=from_status,json=fromStatus,proto3" json:"from_status,omitempty"`
+	ToStatus      string                 `protobuf:"bytes,3,opt,name=to_status,json=toStatus,proto3" json:"to_status,omitempty"`
+	Reason        string                 `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
+	Actor         string                 `protobuf:"bytes,5,opt,name=actor,proto3" json:"actor,omitempty"`
+	Version       int64                  `protobuf:"varint,6,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ContractStatusChanged) Reset() {
+	*x = ContractStatusChanged{}
+	mi := &file_exchange_instrument_v1_events_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ContractStatusChanged) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ContractStatusChanged) ProtoMessage() {}
+
+func (x *ContractStatusChanged) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_instrument_v1_events_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ContractStatusChanged.ProtoReflect.Descriptor instead.
+func (*ContractStatusChanged) Descriptor() ([]byte, []int) {
+	return file_exchange_instrument_v1_events_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ContractStatusChanged) GetSymbol() string {
+	if x != nil {
+		return x.Symbol
+	}
+	return ""
+}
+
+func (x *ContractStatusChanged) GetFromStatus() string {
+	if x != nil {
+		return x.FromStatus
+	}
+	return ""
+}
+
+func (x *ContractStatusChanged) GetToStatus() string {
+	if x != nil {
+		return x.ToStatus
+	}
+	return ""
+}
+
+func (x *ContractStatusChanged) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *ContractStatusChanged) GetActor() string {
+	if x != nil {
+		return x.Actor
+	}
+	return ""
+}
+
+func (x *ContractStatusChanged) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
 type FeeScheduleChanged struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Schedule      *FeeSchedule           `protobuf:"bytes,1,opt,name=schedule,proto3" json:"schedule,omitempty"`
@@ -298,7 +444,7 @@ type FeeScheduleChanged struct {
 
 func (x *FeeScheduleChanged) Reset() {
 	*x = FeeScheduleChanged{}
-	mi := &file_exchange_instrument_v1_events_proto_msgTypes[4]
+	mi := &file_exchange_instrument_v1_events_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -310,7 +456,7 @@ func (x *FeeScheduleChanged) String() string {
 func (*FeeScheduleChanged) ProtoMessage() {}
 
 func (x *FeeScheduleChanged) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_events_proto_msgTypes[4]
+	mi := &file_exchange_instrument_v1_events_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -323,7 +469,7 @@ func (x *FeeScheduleChanged) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeeScheduleChanged.ProtoReflect.Descriptor instead.
 func (*FeeScheduleChanged) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_events_proto_rawDescGZIP(), []int{4}
+	return file_exchange_instrument_v1_events_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *FeeScheduleChanged) GetSchedule() *FeeSchedule {
@@ -371,6 +517,18 @@ const file_exchange_instrument_v1_events_proto_rawDesc = "" +
 	"\tto_status\x18\x03 \x01(\tR\btoStatus\x12\x16\n" +
 	"\x06reason\x18\x04 \x01(\tR\x06reason\x12\x14\n" +
 	"\x05actor\x18\x05 \x01(\tR\x05actor\x12\x18\n" +
+	"\aversion\x18\x06 \x01(\x03R\aversion\"~\n" +
+	"\x10ContractUpserted\x12<\n" +
+	"\bcontract\x18\x01 \x01(\v2 .exchange.instrument.v1.ContractR\bcontract\x12\x14\n" +
+	"\x05actor\x18\x02 \x01(\tR\x05actor\x12\x16\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\"\xb5\x01\n" +
+	"\x15ContractStatusChanged\x12\x16\n" +
+	"\x06symbol\x18\x01 \x01(\tR\x06symbol\x12\x1f\n" +
+	"\vfrom_status\x18\x02 \x01(\tR\n" +
+	"fromStatus\x12\x1b\n" +
+	"\tto_status\x18\x03 \x01(\tR\btoStatus\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\x12\x14\n" +
+	"\x05actor\x18\x05 \x01(\tR\x05actor\x12\x18\n" +
 	"\aversion\x18\x06 \x01(\x03R\aversion\"\x83\x01\n" +
 	"\x12FeeScheduleChanged\x12?\n" +
 	"\bschedule\x18\x01 \x01(\v2#.exchange.instrument.v1.FeeScheduleR\bschedule\x12\x14\n" +
@@ -390,28 +548,32 @@ func file_exchange_instrument_v1_events_proto_rawDescGZIP() []byte {
 	return file_exchange_instrument_v1_events_proto_rawDescData
 }
 
-var file_exchange_instrument_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_exchange_instrument_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_exchange_instrument_v1_events_proto_goTypes = []any{
 	(*AssetUpserted)(nil),            // 0: exchange.instrument.v1.AssetUpserted
 	(*NetworkUpserted)(nil),          // 1: exchange.instrument.v1.NetworkUpserted
 	(*TradingPairUpserted)(nil),      // 2: exchange.instrument.v1.TradingPairUpserted
 	(*TradingPairStatusChanged)(nil), // 3: exchange.instrument.v1.TradingPairStatusChanged
-	(*FeeScheduleChanged)(nil),       // 4: exchange.instrument.v1.FeeScheduleChanged
-	(*Asset)(nil),                    // 5: exchange.instrument.v1.Asset
-	(*Network)(nil),                  // 6: exchange.instrument.v1.Network
-	(*TradingPair)(nil),              // 7: exchange.instrument.v1.TradingPair
-	(*FeeSchedule)(nil),              // 8: exchange.instrument.v1.FeeSchedule
+	(*ContractUpserted)(nil),         // 4: exchange.instrument.v1.ContractUpserted
+	(*ContractStatusChanged)(nil),    // 5: exchange.instrument.v1.ContractStatusChanged
+	(*FeeScheduleChanged)(nil),       // 6: exchange.instrument.v1.FeeScheduleChanged
+	(*Asset)(nil),                    // 7: exchange.instrument.v1.Asset
+	(*Network)(nil),                  // 8: exchange.instrument.v1.Network
+	(*TradingPair)(nil),              // 9: exchange.instrument.v1.TradingPair
+	(*Contract)(nil),                 // 10: exchange.instrument.v1.Contract
+	(*FeeSchedule)(nil),              // 11: exchange.instrument.v1.FeeSchedule
 }
 var file_exchange_instrument_v1_events_proto_depIdxs = []int32{
-	5, // 0: exchange.instrument.v1.AssetUpserted.asset:type_name -> exchange.instrument.v1.Asset
-	6, // 1: exchange.instrument.v1.NetworkUpserted.network:type_name -> exchange.instrument.v1.Network
-	7, // 2: exchange.instrument.v1.TradingPairUpserted.pair:type_name -> exchange.instrument.v1.TradingPair
-	8, // 3: exchange.instrument.v1.FeeScheduleChanged.schedule:type_name -> exchange.instrument.v1.FeeSchedule
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	7,  // 0: exchange.instrument.v1.AssetUpserted.asset:type_name -> exchange.instrument.v1.Asset
+	8,  // 1: exchange.instrument.v1.NetworkUpserted.network:type_name -> exchange.instrument.v1.Network
+	9,  // 2: exchange.instrument.v1.TradingPairUpserted.pair:type_name -> exchange.instrument.v1.TradingPair
+	10, // 3: exchange.instrument.v1.ContractUpserted.contract:type_name -> exchange.instrument.v1.Contract
+	11, // 4: exchange.instrument.v1.FeeScheduleChanged.schedule:type_name -> exchange.instrument.v1.FeeSchedule
+	5,  // [5:5] is the sub-list for method output_type
+	5,  // [5:5] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_exchange_instrument_v1_events_proto_init() }
@@ -426,7 +588,7 @@ func file_exchange_instrument_v1_events_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_instrument_v1_events_proto_rawDesc), len(file_exchange_instrument_v1_events_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

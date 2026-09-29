@@ -37,6 +37,23 @@ message TradingPairStatusChanged {
   int64 version = 6;
 }
 
+message ContractUpserted {
+  Contract contract = 1;
+  string actor = 2;
+  string reason = 3;
+}
+
+// ContractStatusChanged follows the pair machine: PREPARE -> TRADING <->
+// HALT; TRADING/HALT -> CANCEL_ONLY -> DELISTED.
+message ContractStatusChanged {
+  string symbol = 1;
+  string from_status = 2;
+  string to_status = 3;
+  string reason = 4;
+  string actor = 5;
+  int64 version = 6;
+}
+
 message FeeScheduleChanged {
   FeeSchedule schedule = 1;
   string actor = 2;

@@ -13,7 +13,8 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/httpx"
 )
 
-// Handler serves assets and trading pairs; no sign-in needed.
+// Handler serves assets, trading pairs and perpetual contracts; no sign-in
+// needed.
 type Handler struct {
 	Svc *application.Service
 }
@@ -23,6 +24,8 @@ func (h *Handler) Routes(r chi.Router) {
 	r.Get("/v1/market/assets", h.assets)
 	r.Get("/v1/market/pairs", h.pairs)
 	r.Get("/v1/market/pairs/{symbol}", h.pair)
+	r.Get("/v1/market/contracts", h.contracts)
+	r.Get("/v1/market/contracts/{symbol}", h.contract)
 }
 
 type networkJSON struct {
@@ -125,4 +128,75 @@ func (h *Handler) pair(w http.ResponseWriter, r *http.Request) {
 	}
 	cacheable(w)
 	httpx.WriteJSON(w, http.StatusOK, toPairJSON(p))
+}
+
+type riskTierJSON struct {
+	MaxNotional string `json:"max_notional"`
+	MaxLeverage int32  `json:"max_leverage"`
+	MMR         string `json:"mmr"`
+}
+
+type contractJSON struct {
+	Symbol               string         `json:"symbol"`
+	Type                 string         `json:"type"`
+	BaseAsset            string         `json:"base_asset"`
+	QuoteAsset           string         `json:"quote_asset"`
+	IndexSymbol          string         `json:"index_symbol"`
+	TickSize             string         `json:"tick_size"`
+	LotSize              string         `json:"lot_size"`
+	MinQuantity          string         `json:"min_quantity"`
+	MaxQuantity          string         `json:"max_quantity"`
+	MinNotional          string         `json:"min_notional"`
+	PriceBand            string         `json:"price_band"`
+	MaxLeverage          int32          `json:"max_leverage"`
+	RiskTiers            []riskTierJSON `json:"risk_tiers"`
+	FundingIntervalHours int32          `json:"funding_interval_hours"`
+	InterestRate         string         `json:"interest_rate"`
+	FundingCap           string         `json:"funding_cap"`
+	ImpactNotional       string         `json:"impact_notional"`
+	MakerFeeRate         string         `json:"maker_fee_rate"`
+	TakerFeeRate         string         `json:"taker_fee_rate"`
+	Status               string         `json:"status"`
+}
+
+func toContractJSON(c application.ContractView) contractJSON {
+	tiers := make([]riskTierJSON, 0, len(c.RiskTiers))
+	for _, t := range c.RiskTiers {
+		tiers = append(tiers, riskTierJSON{MaxNotional: t.MaxNotional.String(), MaxLeverage: t.MaxLeverage, MMR: t.MMR.String()})
+	}
+	return contractJSON{
+		Symbol: c.Symbol, Type: c.Type, BaseAsset: c.BaseAsset, QuoteAsset: c.QuoteAsset, IndexSymbol: c.IndexSymbol,
+		TickSize: c.TickSize.String(), LotSize: c.LotSize.String(), MinQuantity: c.MinQuantity.String(),
+		MaxQuantity: c.MaxQuantity.String(), MinNotional: c.MinNotional.String(), PriceBand: c.PriceBand.String(),
+		MaxLeverage: c.MaxLeverage(), RiskTiers: tiers, FundingIntervalHours: c.FundingIntervalHours,
+		InterestRate: c.InterestRate.String(), FundingCap: c.FundingCap.String(), ImpactNotional: c.ImpactNotional.String(),
+		MakerFeeRate: c.MakerFeeRate.String(), TakerFeeRate: c.TakerFeeRate.String(), Status: c.Status,
+	}
+}
+
+// contracts lists every contract but the delisted ones.
+func (h *Handler) contracts(w http.ResponseWriter, r *http.Request) {
+	list, err := h.Svc.Contracts(r.Context())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out := make([]contractJSON, 0, len(list))
+	for _, c := range list {
+		if c.Status != domain.StatusDelisted {
+			out = append(out, toContractJSON(c))
+		}
+	}
+	cacheable(w)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"contracts": out})
+}
+
+func (h *Handler) contract(w http.ResponseWriter, r *http.Request) {
+	c, err := h.Svc.Contract(r.Context(), strings.ToUpper(chi.URLParam(r, "symbol")))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	cacheable(w)
+	httpx.WriteJSON(w, http.StatusOK, toContractJSON(c))
 }

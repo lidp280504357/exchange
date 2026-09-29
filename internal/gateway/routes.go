@@ -92,6 +92,8 @@ func Mount(r chi.Router, g Guards, up Upstreams) {
 		r.Handle("/v1/market/assets", up.Instrument)
 		r.Handle("/v1/market/pairs", up.Instrument)
 		r.Handle("/v1/market/pairs/*", up.Instrument)
+		r.Handle("/v1/market/contracts", up.Instrument)
+		r.Handle("/v1/market/contracts/*", up.Instrument)
 		// Public market data; the static routes above win over {symbol}.
 		if up.Market != nil {
 			r.Handle("/v1/market/tickers", up.Market)

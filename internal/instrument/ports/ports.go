@@ -25,6 +25,7 @@ type Repos interface {
 	Assets() AssetRepo
 	Networks() NetworkRepo
 	Pairs() PairRepo
+	Contracts() ContractRepo
 	// Record appends a version to the configuration history.
 	Record(ctx context.Context, entity, key string, version int64, value any, actor, reason string) error
 	// Emit queues an instrument.events event keyed by aggregateID.
@@ -59,4 +60,13 @@ type PairRepo interface {
 	GetForUpdate(ctx context.Context, symbol string) (*domain.TradingPair, error)
 	List(ctx context.Context) ([]domain.TradingPair, error)
 	Save(ctx context.Context, p domain.TradingPair) (domain.TradingPair, error)
+}
+
+// ContractRepo stores perpetual contracts.
+type ContractRepo interface {
+	Get(ctx context.Context, symbol string) (*domain.Contract, error)
+	// GetForUpdate is Get with a row lock.
+	GetForUpdate(ctx context.Context, symbol string) (*domain.Contract, error)
+	List(ctx context.Context) ([]domain.Contract, error)
+	Save(ctx context.Context, c domain.Contract) (domain.Contract, error)
 }
