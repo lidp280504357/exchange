@@ -31,6 +31,10 @@ type Source struct {
 	// gap spaces REST requests: Binance allows 6000 request weight a
 	// minute per IP; a klines call weighs 2.
 	gap time.Duration
+	// idle ends a stream that sent nothing for this long: kline_1m updates
+	// arrive every two seconds, and a connection the network silently
+	// dropped would otherwise block until TCP keepalive gives up.
+	idle time.Duration
 
 	mu   sync.Mutex
 	last time.Time
@@ -39,7 +43,10 @@ type Source struct {
 // New returns a source on the REST and stream base URLs, e.g.
 // https://data-api.binance.vision and wss://data-stream.binance.vision.
 func New(rest, stream string, client *http.Client) *Source {
-	return &Source{rest: strings.TrimRight(rest, "/"), stream: strings.TrimRight(stream, "/"), client: client, gap: 200 * time.Millisecond}
+	return &Source{
+		rest: strings.TrimRight(rest, "/"), stream: strings.TrimRight(stream, "/"), client: client, gap: 200 * time.Millisecond,
+		idle: 30 * time.Second,
+	}
 }
 
 // Name is the source's name.
@@ -161,7 +168,7 @@ type klineEvent struct {
 
 // Stream follows the combined kline_1m streams of symbols. Binance pings
 // every few minutes (answered by the library) and closes connections after
-// 24 hours; the caller reconnects.
+// 24 hours; a stream silent for idle ends too. The caller reconnects.
 func (s *Source) Stream(ctx context.Context, symbols []string, on func(domain.Candle)) error {
 	names := make([]string, len(symbols))
 	local := make(map[string]string, len(symbols))
@@ -179,8 +186,13 @@ func (s *Source) Stream(ctx context.Context, symbols []string, on func(domain.Ca
 	defer func() { _ = conn.CloseNow() }()
 	conn.SetReadLimit(1 << 16)
 	for {
-		_, data, err := conn.Read(ctx)
+		read, cancel := context.WithTimeout(ctx, s.idle)
+		_, data, err := conn.Read(read)
+		cancel()
 		if err != nil {
+			if ctx.Err() == nil && errors.Is(read.Err(), context.DeadlineExceeded) {
+				return fmt.Errorf("binance stream: nothing received for %s", s.idle)
+			}
 			return fmt.Errorf("binance stream: %w", err)
 		}
 		var ev klineEvent

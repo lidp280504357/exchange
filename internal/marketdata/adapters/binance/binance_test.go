@@ -84,3 +84,25 @@ func TestStreamReadsKlines(t *testing.T) {
 		t.Fatalf("candles %+v", got)
 	}
 }
+
+func TestStreamEndsWhenSilent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		<-r.Context().Done() // connected, but nothing arrives
+	}))
+	defer srv.Close()
+	s := New("", "ws"+strings.TrimPrefix(srv.URL, "http"), srv.Client())
+	s.idle = 200 * time.Millisecond
+	start := time.Now()
+	err := s.Stream(context.Background(), []string{"BTC-USDT"}, func(domain.Candle) {})
+	if err == nil || !strings.Contains(err.Error(), "nothing received") {
+		t.Fatalf("got %v", err)
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Fatalf("a silent stream took %s to end", took)
+	}
+}
