@@ -47,6 +47,10 @@ type settings struct {
 	// WSOrigins are the browser origins (host patterns) allowed to open
 	// /v1/ws (WS_ORIGINS).
 	WSOrigins []string `koanf:"ws_origins"`
+	// CORSOrigins may call the API from another origin, without cookies
+	// (CORS_ORIGINS, exact origins such as tauri://localhost): the desktop
+	// app. Empty allows none.
+	CORSOrigins []string `koanf:"cors_origins"`
 }
 
 func (s *settings) Validate() error {
@@ -150,6 +154,7 @@ func setup(ctx context.Context, a *app.App) error {
 	}
 
 	r := a.NewRouter()
+	r.Use(gateway.CORS(cfg.CORSOrigins))
 	r.Get("/v1/time", serverTime(time.Now))
 	gateway.Mount(r, guards, up)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)

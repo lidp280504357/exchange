@@ -10,6 +10,7 @@
 | [server-deploy.md](server-deploy.md) | 测试服部署与回滚、端口表、应用环境变量 |
 | [testing.md](testing.md) | 测试层级、端到端（`task e2e`）与故障注入（`task fault`） |
 | [h5.md](h5.md) | H5 前端：开发、构建、发布、浏览器冒烟测试 |
+| [desktop.md](desktop.md) | PC 桌面端（Tauri 2 封装 H5）：跨域与刷新令牌存系统安全存储、构建方式、已知限制 |
 | [cloudflare-nginx-tls.md](cloudflare-nginx-tls.md) | 域名、Cloudflare 代理、nginx 与源站证书 |
 | [turnstile.md](turnstile.md) | Cloudflare Turnstile 人机验证 |
 
