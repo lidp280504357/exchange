@@ -99,7 +99,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Rolling 24-hour tickers of every listed pair */
+        /** Rolling 24-hour tickers of every listed pair and contract */
         get: operations["listTickers"];
         put?: never;
         post?: never;
@@ -155,6 +155,56 @@ export interface paths {
         };
         /** The latest trades of a pair, newest first */
         get: operations["listTrades"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/market/{symbol}/mark-price": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A contract's mark and index prices and funding estimate
+         * @description Computed every second (requirements §11.7): the index is the
+         *     weighted median of reference spot prices; the mark price is the
+         *     index moved by the 30-second EMA of the book's mid price relative
+         *     to it, at most 1% either way; the funding rate is the running
+         *     estimate of the period ending next_funding_time. Prices stay at the
+         *     last computation while none is possible; after 10 seconds without
+         *     one the contract is degraded (reduce-only trading).
+         */
+        get: operations["getMarkPrice"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/market/{symbol}/funding-rates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A contract's settled funding rates, newest first
+         * @description One per funding period (00:00, 08:00, 16:00 UTC for an 8-hour
+         *     interval): clamp(premium + clamp(interest - premium, +-0.05%),
+         *     +-cap), premium being the period's average premium index. Positions
+         *     at funding_time pay notional x rate at mark_price: longs pay shorts
+         *     when the rate is positive.
+         */
+        get: operations["listFundingRates"];
         put?: never;
         post?: never;
         delete?: never;
@@ -293,6 +343,43 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        MarkPrice: {
+            symbol: string;
+            /** @description The spot market the index follows, e.g. BTC-USDT. */
+            index_symbol: string;
+            /** @description Null before the first computation. */
+            mark_price: components["schemas"]["NullableDecimal"];
+            index_price: components["schemas"]["NullableDecimal"];
+            /** @description The running period's estimate, e.g. "0.0001" for 0.01%. */
+            funding_rate: components["schemas"]["Decimal"];
+            interest_rate: components["schemas"]["Decimal"];
+            /** Format: date-time */
+            next_funding_time: string;
+            /** @description No mark price for 10 seconds; trading is reduce-only until an operator lifts it. */
+            degraded: boolean;
+            /**
+             * Format: date-time
+             * @description When the prices were computed.
+             */
+            updated_at: string | null;
+        };
+        FundingRate: {
+            /** Format: date-time */
+            funding_time: string;
+            funding_rate: components["schemas"]["Decimal"];
+            mark_price: components["schemas"]["Decimal"];
+            index_price: components["schemas"]["Decimal"];
+            /** @description The period's average premium index. */
+            premium: components["schemas"]["Decimal"];
+            interest_rate: components["schemas"]["Decimal"];
+            /**
+             * Format: int64
+             * @description Premium index samples in the period (one a second).
+             */
+            samples: number;
+            /** Format: date-time */
+            settled_at: string;
+        };
         /** @description [price, quantity] */
         PriceLevel: components["schemas"]["Decimal"][];
         PublicTrade: {
@@ -352,7 +439,7 @@ export interface components {
         };
     };
     parameters: {
-        /** @description A listed pair (case-insensitive). */
+        /** @description A listed pair or contract (case-insensitive). */
         Symbol: string;
     };
     requestBodies: never;
@@ -488,7 +575,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description One ticker per listed pair. */
+            /** @description One ticker per listed pair and contract. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -507,7 +594,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description A listed pair (case-insensitive). */
+                /** @description A listed pair or contract (case-insensitive). */
                 symbol: components["parameters"]["Symbol"];
             };
             cookie?: never;
@@ -534,7 +621,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                /** @description A listed pair (case-insensitive). */
+                /** @description A listed pair or contract (case-insensitive). */
                 symbol: components["parameters"]["Symbol"];
             };
             cookie?: never;
@@ -571,7 +658,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                /** @description A listed pair (case-insensitive). */
+                /** @description A listed pair or contract (case-insensitive). */
                 symbol: components["parameters"]["Symbol"];
             };
             cookie?: never;
@@ -593,6 +680,63 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getMarkPrice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A listed pair or contract (case-insensitive). */
+                symbol: components["parameters"]["Symbol"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The prices. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarkPrice"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listFundingRates: {
+        parameters: {
+            query?: {
+                /** @description Funding times at or after this (RFC 3339). */
+                from?: string;
+                /** @description Funding times before this (RFC 3339). */
+                to?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description A listed pair or contract (case-insensitive). */
+                symbol: components["parameters"]["Symbol"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rates. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        symbol: string;
+                        funding_rates: components["schemas"]["FundingRate"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     listCandles: {
         parameters: {
             query: {
@@ -605,7 +749,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                /** @description A listed pair (case-insensitive). */
+                /** @description A listed pair or contract (case-insensitive). */
                 symbol: components["parameters"]["Symbol"];
             };
             cookie?: never;

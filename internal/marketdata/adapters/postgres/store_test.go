@@ -92,3 +92,62 @@ func TestCandlesTradesAndSymbols(t *testing.T) {
 		t.Fatalf("purge: %d, %v", n, err)
 	}
 }
+
+func TestFundingPeriods(t *testing.T) {
+	db := testenv.Postgres(t)
+	ctx := context.Background()
+	if err := migrate.Up(ctx, db, migrations.Market(), slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatal(err)
+	}
+	r := postgres.NewStore(db).Read().Funding()
+	t8 := time.Date(2026, 9, 30, 8, 0, 0, 0, time.UTC)
+	t16 := t8.Add(8 * time.Hour)
+	period := ports.FundingPeriod{Symbol: "BTC-USDT-PERP", FundingTime: t8, PremiumSum: d("0.012"), Samples: 20}
+	for _, p := range []ports.FundingPeriod{
+		period,
+		{Symbol: "BTC-USDT-PERP", FundingTime: t8, PremiumSum: d("0.03"), Samples: 60}, // replaces the first
+		{Symbol: "BTC-USDT-PERP", FundingTime: t16, PremiumSum: d("0"), Samples: 1},
+	} {
+		if err := r.Save(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	open, err := r.Unsettled(ctx)
+	if err != nil || len(open) != 2 || !open[0].FundingTime.Equal(t8) || open[0].Samples != 60 || open[0].Settled {
+		t.Fatalf("unsettled %+v, %v", open, err)
+	}
+	settle := open[0]
+	settle.Rate, settle.Premium, settle.InterestRate = d("0.0001"), d("0.0005"), d("0.0001")
+	settle.MarkPrice, settle.IndexPrice = d("60010.5"), d("60000")
+	if ok, err := r.Settle(ctx, settle); err != nil || !ok {
+		t.Fatalf("settle: %v, %v", ok, err)
+	}
+	if ok, err := r.Settle(ctx, settle); err != nil || ok {
+		t.Fatalf("settled twice: %v, %v", ok, err)
+	}
+	// Late samples do not reopen a settled period.
+	if err := r.Save(ctx, ports.FundingPeriod{Symbol: "BTC-USDT-PERP", FundingTime: t8, PremiumSum: d("1"), Samples: 99}); err != nil {
+		t.Fatal(err)
+	}
+	done, err := r.Settled(ctx, "BTC-USDT-PERP", time.Time{}, t16.Add(time.Hour), 10)
+	if err != nil || len(done) != 1 {
+		t.Fatalf("settled %+v, %v", done, err)
+	}
+	if p := done[0]; !p.Settled || p.Samples != 60 || !p.Rate.Equal(d("0.0001")) || !p.MarkPrice.Equal(d("60010.5")) || p.SettledAt.IsZero() {
+		t.Fatalf("settled period %+v", p)
+	}
+	if none, err := r.Settled(ctx, "BTC-USDT-PERP", t8.Add(time.Second), t16.Add(time.Hour), 10); err != nil || len(none) != 0 {
+		t.Fatalf("from after the period: %+v, %v", none, err)
+	}
+	// A period that never saved samples settles in one step.
+	fresh := ports.FundingPeriod{
+		Symbol: "ETH-USDT-PERP", FundingTime: t8, Rate: d("0.0001"), Premium: d("0"), InterestRate: d("0.0001"),
+		MarkPrice: d("2500"), IndexPrice: d("2500"),
+	}
+	if ok, err := r.Settle(ctx, fresh); err != nil || !ok {
+		t.Fatalf("settle without samples: %v, %v", ok, err)
+	}
+	if open, err := r.Unsettled(ctx); err != nil || len(open) != 1 || !open[0].FundingTime.Equal(t16) {
+		t.Fatalf("still unsettled %+v, %v", open, err)
+	}
+}

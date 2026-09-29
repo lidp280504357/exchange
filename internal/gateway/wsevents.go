@@ -20,7 +20,7 @@ import (
 // §7.3: every gateway instance reads every partition).
 var WSTopics = []string{
 	"ledger.events", "notification.events", "order.events", "trade.events", "market.depth", "market.candle.events",
-	"wallet.deposit.events", "wallet.withdrawal.events",
+	"wallet.deposit.events", "wallet.withdrawal.events", "derivatives.trade.events", "derivatives.market.depth",
 }
 
 type balanceData struct {
@@ -137,6 +137,27 @@ type tickerData struct {
 	UpdatedAt   string  `json:"updated_at"`
 }
 
+// markData is a contract's prices on "mark-price:{symbol}", every second.
+type markData struct {
+	Symbol          string `json:"symbol"`
+	MarkPrice       string `json:"mark_price"`
+	IndexPrice      string `json:"index_price"`
+	FundingRate     string `json:"funding_rate"`
+	NextFundingTime string `json:"next_funding_time"`
+	UpdatedAt       string `json:"updated_at"`
+}
+
+// fundingData is on "funding:{symbol}": the running estimate (type
+// "estimate") when it changes, and the rate a period settled at (type
+// "settled", with the mark price) when it ends.
+type fundingData struct {
+	Symbol       string  `json:"symbol"`
+	FundingRate  string  `json:"funding_rate"`
+	InterestRate string  `json:"interest_rate"`
+	FundingTime  string  `json:"funding_time"`
+	MarkPrice    *string `json:"mark_price"`
+}
+
 func optional(s string) *string {
 	if s == "" {
 		return nil
@@ -166,6 +187,8 @@ func WSEvents(h *Hub) func(context.Context, *eventv1.Envelope) error {
 			candleUp  marketv1.CandleUpdated
 			candleEnd marketv1.CandleClosed
 			ticker    marketv1.TickerUpdated
+			mark      marketv1.MarkPriceUpdated
+			funding   marketv1.FundingRateUpdated
 		)
 		p := env.GetPayload()
 		if wd, ok := withdrawalOf(p); ok {
@@ -280,6 +303,28 @@ func WSEvents(h *Hub) func(context.Context, *eventv1.Envelope) error {
 				Change: optional(t.GetChange()), Bid: optional(t.GetBid()), Ask: optional(t.GetAsk()),
 				UpdatedAt: t.GetUpdatedAt().AsTime().UTC().Format(time.RFC3339Nano),
 			}}, true)
+		case p.MessageIs(&mark):
+			if err := p.UnmarshalTo(&mark); err != nil {
+				return err
+			}
+			h.OnMarket(wsMarket{Channel: "mark-price:" + mark.GetSymbol(), Data: markData{
+				Symbol: mark.GetSymbol(), MarkPrice: mark.GetMarkPrice(), IndexPrice: mark.GetIndexPrice(),
+				FundingRate: mark.GetFundingRate(), NextFundingTime: mark.GetNextFundingTime().AsTime().UTC().Format(time.RFC3339),
+				UpdatedAt: mark.GetComputedAt().AsTime().UTC().Format(time.RFC3339Nano),
+			}}, true)
+		case p.MessageIs(&funding):
+			if err := p.UnmarshalTo(&funding); err != nil {
+				return err
+			}
+			kind := "estimate"
+			if funding.GetFinal() {
+				kind = "settled"
+			}
+			// New subscribers start from the running estimate.
+			h.OnMarket(wsMarket{Channel: "funding:" + funding.GetSymbol(), Type: kind, Data: fundingData{
+				Symbol: funding.GetSymbol(), FundingRate: funding.GetFundingRate(), InterestRate: funding.GetInterestRate(),
+				FundingTime: funding.GetFundingTime().AsTime().UTC().Format(time.RFC3339), MarkPrice: optional(funding.GetMarkPrice()),
+			}}, !funding.GetFinal())
 		}
 		return nil
 	}
@@ -333,23 +378,27 @@ func withdrawalOf(p interface {
 }
 
 // onTrade pushes a trade to both sides' "fills" and to "trades:{symbol}".
+// A contract's fills come from derivatives-service, with the fees and
+// profit the engine does not know: only the public trade goes out here.
 func onTrade(h *Hub, t *tradev1.TradeExecuted, at time.Time) {
 	executed := at.UTC().Format(time.RFC3339Nano)
-	role := func(maker bool) string {
-		if maker {
-			return "MAKER"
+	if !contractRE.MatchString(t.GetSymbol()) {
+		role := func(maker bool) string {
+			if maker {
+				return "MAKER"
+			}
+			return "TAKER"
 		}
-		return "TAKER"
+		fill := fillData{
+			TradeID: t.GetTradeId(), Symbol: t.GetSymbol(), Price: t.GetPrice(), Quantity: t.GetQuantity(),
+			QuoteQuantity: t.GetQuoteQuantity(), ExecutedAt: executed,
+		}
+		buy, sell := fill, fill
+		buy.OrderID, buy.Side, buy.Role, buy.FeeAsset, buy.Fee = t.GetBuyerOrderId(), "BUY", role(t.GetBuyerIsMaker()), t.GetBaseAsset(), t.GetBuyerFee()
+		sell.OrderID, sell.Side, sell.Role, sell.FeeAsset, sell.Fee = t.GetSellerOrderId(), "SELL", role(!t.GetBuyerIsMaker()), t.GetQuoteAsset(), t.GetSellerFee()
+		h.Publish(t.GetBuyerUserId(), "fills", buy)
+		h.Publish(t.GetSellerUserId(), "fills", sell)
 	}
-	fill := fillData{
-		TradeID: t.GetTradeId(), Symbol: t.GetSymbol(), Price: t.GetPrice(), Quantity: t.GetQuantity(),
-		QuoteQuantity: t.GetQuoteQuantity(), ExecutedAt: executed,
-	}
-	buy, sell := fill, fill
-	buy.OrderID, buy.Side, buy.Role, buy.FeeAsset, buy.Fee = t.GetBuyerOrderId(), "BUY", role(t.GetBuyerIsMaker()), t.GetBaseAsset(), t.GetBuyerFee()
-	sell.OrderID, sell.Side, sell.Role, sell.FeeAsset, sell.Fee = t.GetSellerOrderId(), "SELL", role(!t.GetBuyerIsMaker()), t.GetQuoteAsset(), t.GetSellerFee()
-	h.Publish(t.GetBuyerUserId(), "fills", buy)
-	h.Publish(t.GetSellerUserId(), "fills", sell)
 	ch := "trades:" + t.GetSymbol()
 	h.OnMarket(wsMarket{Channel: ch, Data: tradeData{
 		TradeID: t.GetTradeId(), TradeNumber: t.GetTradeNumber(), Price: t.GetPrice(), Quantity: t.GetQuantity(),

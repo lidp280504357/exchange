@@ -256,3 +256,77 @@ func TestWebSocketPublicChannels(t *testing.T) {
 		t.Fatalf("%d depth subscribers, want 1", subs)
 	}
 }
+
+func TestWebSocketContractChannels(t *testing.T) {
+	hub := NewHub(nil, nil, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	go func() { _ = hub.Run() }()
+	t.Cleanup(func() { _ = hub.Stop(context.Background()) })
+	srv := httptest.NewServer(hub)
+	t.Cleanup(srv.Close)
+	events := WSEvents(hub)
+	emit := func(msg proto.Message) {
+		t.Helper()
+		env, err := event.NewFactory("test", "t").New(context.Background(), msg, "symbol", "BTC-USDT-PERP")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := events(context.Background(), env); err != nil {
+			t.Fatal(err)
+		}
+	}
+	next8 := timestamppb.New(time.Date(2026, 9, 30, 8, 0, 0, 0, time.UTC))
+	emit(&marketv1.FundingRateUpdated{Symbol: "BTC-USDT-PERP", FundingRate: "0.0001", InterestRate: "0.0001", FundingTime: next8})
+
+	c := dial(t, "ws"+strings.TrimPrefix(srv.URL, "http"))
+	c.send(`{"op":"subscribe","args":["mark-price:BTC-USDT"]}`)
+	if m := c.next(); m["ok"] == true {
+		t.Fatalf("a pair has no mark price: %v", m)
+	}
+	c.send(`{"op":"subscribe","args":["mark-price:BTC-USDT-PERP","funding:BTC-USDT-PERP","trades:BTC-USDT-PERP"]}`)
+	if m := c.next(); m["ok"] != true {
+		t.Fatalf("subscribe: %v", m)
+	}
+	// The running estimate comes first.
+	if m := c.next(); m["channel"] != "funding:BTC-USDT-PERP" || m["type"] != "estimate" ||
+		m["data"].(map[string]any)["funding_time"] != "2026-09-30T08:00:00Z" || m["data"].(map[string]any)["mark_price"] != nil {
+		t.Fatalf("latest estimate: %v", m)
+	}
+	emit(&marketv1.MarkPriceUpdated{
+		Symbol: "BTC-USDT-PERP", MarkPrice: "60012.5", IndexPrice: "60000", Basis: "0.0002", FundingRate: "0.0001",
+		NextFundingTime: next8, ComputedAt: timestamppb.Now(),
+	})
+	if m := c.next(); m["channel"] != "mark-price:BTC-USDT-PERP" || m["data"].(map[string]any)["mark_price"] != "60012.5" ||
+		m["data"].(map[string]any)["next_funding_time"] != "2026-09-30T08:00:00Z" {
+		t.Fatalf("mark price: %v", m)
+	}
+	emit(&marketv1.FundingRateUpdated{
+		Symbol: "BTC-USDT-PERP", FundingRate: "0.00012", InterestRate: "0.0001", FundingTime: next8, Final: true,
+		MarkPrice: "60010", IndexPrice: "60000",
+	})
+	if m := c.next(); m["type"] != "settled" || m["data"].(map[string]any)["mark_price"] != "60010" {
+		t.Fatalf("settled rate: %v", m)
+	}
+	// A contract's trade is public only: its fills come from
+	// derivatives-service.
+	c.send(`{"op":"subscribe","args":["fills"]}`)
+	emit(&tradev1.TradeExecuted{
+		TradeId: "t9", TradeNumber: 3, Symbol: "BTC-USDT-PERP", Price: "60010", Quantity: "0.5", QuoteQuantity: "30005",
+		TakerSide: orderv1.Side_SIDE_SELL, BuyerUserId: "u-1", SellerUserId: "u-2", BuyerFee: "0", SellerFee: "0",
+	})
+	for {
+		m := c.next()
+		if m["op"] == "subscribe" {
+			continue // fills needs a sign-in
+		}
+		if m["channel"] != "trades:BTC-USDT-PERP" || m["data"].(map[string]any)["taker_side"] != "SELL" {
+			t.Fatalf("contract trade: %v", m)
+		}
+		break
+	}
+	hub.mu.Lock()
+	kept := hub.latest["funding:BTC-USDT-PERP"].Type
+	hub.mu.Unlock()
+	if kept != "estimate" {
+		t.Fatalf("new subscribers would start from %q", kept)
+	}
+}

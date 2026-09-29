@@ -25,6 +25,7 @@ type Repos interface {
 	Candles() CandleRepo
 	Trades() TradeRepo
 	References() ReferenceRepo
+	Funding() FundingRepo
 }
 
 // SymbolState is what has been applied of a symbol's trades.
@@ -89,10 +90,62 @@ type ReferenceSource interface {
 	Stream(ctx context.Context, symbols []string, on func(domain.Candle)) error
 }
 
-// Pairs tells which trading pairs exist (instrument-service).
-type Pairs interface {
-	// Listed reports whether symbol is a listed pair (not delisted).
+// Instruments tells which trading pairs and contracts exist
+// (instrument-service).
+type Instruments interface {
+	// Listed reports whether symbol is a listed pair or contract (not
+	// delisted).
 	Listed(ctx context.Context, symbol string) (bool, error)
-	// Symbols lists the listed pairs.
+	// Symbols lists the listed pairs and contracts.
 	Symbols(ctx context.Context) ([]string, error)
+	// Contracts lists the perpetual contracts that are not delisted.
+	Contracts(ctx context.Context) ([]Contract, error)
+}
+
+// Contract is what the mark price and funding need of a perpetual
+// contract (requirements §11.7).
+type Contract struct {
+	Symbol string
+	// IndexSymbol is the spot symbol of the index, e.g. BTC-USDT.
+	IndexSymbol          string
+	Status               string
+	FundingIntervalHours int32
+	// InterestRate per funding period; FundingCap bounds the rate.
+	InterestRate decimal.Decimal
+	FundingCap   decimal.Decimal
+	// ImpactNotional is the quote amount the impact prices trade.
+	ImpactNotional decimal.Decimal
+}
+
+// FundingPeriod is a contract's premium index samples over one funding
+// period and, once the period has ended, its settled rate.
+type FundingPeriod struct {
+	Symbol string
+	// FundingTime is the end of the period, when it settles.
+	FundingTime time.Time
+	PremiumSum  decimal.Decimal
+	Samples     int64
+	// Set when settled.
+	Settled      bool
+	Rate         decimal.Decimal
+	Premium      decimal.Decimal
+	InterestRate decimal.Decimal
+	MarkPrice    decimal.Decimal
+	IndexPrice   decimal.Decimal
+	SettledAt    time.Time
+}
+
+// FundingRepo stores the funding periods.
+type FundingRepo interface {
+	// Save writes a running period's samples; a settled period is left
+	// alone.
+	Save(ctx context.Context, p FundingPeriod) error
+	// Unsettled returns the periods not settled yet, oldest first.
+	Unsettled(ctx context.Context) ([]FundingPeriod, error)
+	// Settle records a period's rate and final samples; false when it was
+	// settled already.
+	Settle(ctx context.Context, p FundingPeriod) (bool, error)
+	// Settled returns up to limit settled periods of symbol with funding
+	// times in [from, to), newest first.
+	Settled(ctx context.Context, symbol string, from, to time.Time, limit int) ([]FundingPeriod, error)
 }

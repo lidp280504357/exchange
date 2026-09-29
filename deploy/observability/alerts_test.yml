@@ -120,3 +120,19 @@ tests:
             exp_annotations:
               summary: the ETH-SEPOLIA wallets hold 0.002 ETH less than the ledger expects (invariant 4)
               runbook: docs/runbook/wallet.md
+
+  - interval: 1m
+    input_series:
+      - series: 'market_contract_degraded{job="market-data-service", symbol="BTC-USDT-PERP"}'
+        values: '0 0 1 1'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: ContractDegraded
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: ContractDegraded
+        exp_alerts:
+          - exp_labels: {severity: critical, job: market-data-service, symbol: BTC-USDT-PERP}
+            exp_annotations:
+              summary: "BTC-USDT-PERP has had no mark price for 10 seconds (index sources missing): contract trading is reduce-only"
+              runbook: docs/runbook/market-data.md

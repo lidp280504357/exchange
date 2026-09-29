@@ -9,6 +9,7 @@ package riskv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -317,11 +318,148 @@ func (x *RiskActionTaken) GetRules() []string {
 	return nil
 }
 
+// SystemDegraded reports that data derivatives trading depends on failed
+// (requirements §5.8, §11.7): the contract goes REDUCE_ONLY until a person
+// lifts it. market-data-service reports a contract whose mark price could
+// not be computed for 10 seconds.
+type SystemDegraded struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// INDEX_SOURCES: fewer index sources than required.
+	Reason string `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"`
+	// The contract, e.g. BTC-USDT-PERP.
+	Symbol string `protobuf:"bytes,2,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	Detail string `protobuf:"bytes,3,opt,name=detail,proto3" json:"detail,omitempty"`
+	// The last mark price computed; unset if none since the service started.
+	LastMarkAt    *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=last_mark_at,json=lastMarkAt,proto3" json:"last_mark_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SystemDegraded) Reset() {
+	*x = SystemDegraded{}
+	mi := &file_exchange_risk_v1_events_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SystemDegraded) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SystemDegraded) ProtoMessage() {}
+
+func (x *SystemDegraded) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_risk_v1_events_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SystemDegraded.ProtoReflect.Descriptor instead.
+func (*SystemDegraded) Descriptor() ([]byte, []int) {
+	return file_exchange_risk_v1_events_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *SystemDegraded) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *SystemDegraded) GetSymbol() string {
+	if x != nil {
+		return x.Symbol
+	}
+	return ""
+}
+
+func (x *SystemDegraded) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+func (x *SystemDegraded) GetLastMarkAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastMarkAt
+	}
+	return nil
+}
+
+// SystemRecovered reports that a degraded contract's data is back. It is
+// informational: lifting REDUCE_ONLY stays a person's decision (§11.7).
+type SystemRecovered struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Reason        string                 `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"`
+	Symbol        string                 `protobuf:"bytes,2,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	DegradedAt    *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=degraded_at,json=degradedAt,proto3" json:"degraded_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SystemRecovered) Reset() {
+	*x = SystemRecovered{}
+	mi := &file_exchange_risk_v1_events_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SystemRecovered) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SystemRecovered) ProtoMessage() {}
+
+func (x *SystemRecovered) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_risk_v1_events_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SystemRecovered.ProtoReflect.Descriptor instead.
+func (*SystemRecovered) Descriptor() ([]byte, []int) {
+	return file_exchange_risk_v1_events_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *SystemRecovered) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *SystemRecovered) GetSymbol() string {
+	if x != nil {
+		return x.Symbol
+	}
+	return ""
+}
+
+func (x *SystemRecovered) GetDegradedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.DegradedAt
+	}
+	return nil
+}
+
 var File_exchange_risk_v1_events_proto protoreflect.FileDescriptor
 
 const file_exchange_risk_v1_events_proto_rawDesc = "" +
 	"\n" +
-	"\x1dexchange/risk/v1/events.proto\x12\x10exchange.risk.v1\"K\n" +
+	"\x1dexchange/risk/v1/events.proto\x12\x10exchange.risk.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"K\n" +
 	"\aRuleHit\x12\x12\n" +
 	"\x04rule\x18\x01 \x01(\tR\x04rule\x12\x14\n" +
 	"\x05score\x18\x02 \x01(\x05R\x05score\x12\x16\n" +
@@ -340,7 +478,18 @@ const file_exchange_risk_v1_events_proto_rawDesc = "" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12#\n" +
 	"\rassessment_id\x18\x02 \x01(\tR\fassessmentId\x120\n" +
 	"\x06action\x18\x03 \x01(\x0e2\x18.exchange.risk.v1.ActionR\x06action\x12\x14\n" +
-	"\x05rules\x18\x04 \x03(\tR\x05rules*k\n" +
+	"\x05rules\x18\x04 \x03(\tR\x05rules\"\x96\x01\n" +
+	"\x0eSystemDegraded\x12\x16\n" +
+	"\x06reason\x18\x01 \x01(\tR\x06reason\x12\x16\n" +
+	"\x06symbol\x18\x02 \x01(\tR\x06symbol\x12\x16\n" +
+	"\x06detail\x18\x03 \x01(\tR\x06detail\x12<\n" +
+	"\flast_mark_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"lastMarkAt\"~\n" +
+	"\x0fSystemRecovered\x12\x16\n" +
+	"\x06reason\x18\x01 \x01(\tR\x06reason\x12\x16\n" +
+	"\x06symbol\x18\x02 \x01(\tR\x06symbol\x12;\n" +
+	"\vdegraded_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"degradedAt*k\n" +
 	"\x06Action\x12\x16\n" +
 	"\x12ACTION_UNSPECIFIED\x10\x00\x12\x0f\n" +
 	"\vACTION_NONE\x10\x01\x12\x12\n" +
@@ -362,22 +511,27 @@ func file_exchange_risk_v1_events_proto_rawDescGZIP() []byte {
 }
 
 var file_exchange_risk_v1_events_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_exchange_risk_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_exchange_risk_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_exchange_risk_v1_events_proto_goTypes = []any{
-	(Action)(0),             // 0: exchange.risk.v1.Action
-	(*RuleHit)(nil),         // 1: exchange.risk.v1.RuleHit
-	(*RiskScored)(nil),      // 2: exchange.risk.v1.RiskScored
-	(*RiskActionTaken)(nil), // 3: exchange.risk.v1.RiskActionTaken
+	(Action)(0),                   // 0: exchange.risk.v1.Action
+	(*RuleHit)(nil),               // 1: exchange.risk.v1.RuleHit
+	(*RiskScored)(nil),            // 2: exchange.risk.v1.RiskScored
+	(*RiskActionTaken)(nil),       // 3: exchange.risk.v1.RiskActionTaken
+	(*SystemDegraded)(nil),        // 4: exchange.risk.v1.SystemDegraded
+	(*SystemRecovered)(nil),       // 5: exchange.risk.v1.SystemRecovered
+	(*timestamppb.Timestamp)(nil), // 6: google.protobuf.Timestamp
 }
 var file_exchange_risk_v1_events_proto_depIdxs = []int32{
 	0, // 0: exchange.risk.v1.RiskScored.action:type_name -> exchange.risk.v1.Action
 	1, // 1: exchange.risk.v1.RiskScored.hits:type_name -> exchange.risk.v1.RuleHit
 	0, // 2: exchange.risk.v1.RiskActionTaken.action:type_name -> exchange.risk.v1.Action
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	6, // 3: exchange.risk.v1.SystemDegraded.last_mark_at:type_name -> google.protobuf.Timestamp
+	6, // 4: exchange.risk.v1.SystemRecovered.degraded_at:type_name -> google.protobuf.Timestamp
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_exchange_risk_v1_events_proto_init() }
@@ -391,7 +545,7 @@ func file_exchange_risk_v1_events_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_risk_v1_events_proto_rawDesc), len(file_exchange_risk_v1_events_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   3,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

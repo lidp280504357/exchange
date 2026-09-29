@@ -9,6 +9,9 @@ matching-engine ──market.depth（每 100 ms 变化的订单簿前 200 档，
                                                                                 └─> api-gateway（depth: 频道）
 trade.events ──> market-data-service ──market.candle.events（CandleUpdated/Closed、TickerUpdated，每 500 ms）──> api-gateway（candles:、ticker: 频道）
 trade.events ──> api-gateway（trades: 频道、fills 私有频道）；order.events ──> api-gateway（orders 私有频道）
+derivatives-engine ──derivatives.market.depth / derivatives.trade.events──> 同上（合约的深度、K 线、ticker、成交；合约的 fills 由 derivatives-service 推）
+参考行情（币安）──> market-data-service ──每秒：MarkPriceUpdated、IndexPriceUpdated、FundingRateUpdated──> api-gateway（mark-price:、funding: 频道）
+                                       └─标记价 10 秒算不出──> risk.events（SystemDegraded）
 ```
 
 - `market.depth` 是派生状态：引擎从内存直接发，不走 outbox，丢一份由下一份补上；只保留 1 小时，没有 retry/dlq，不进 ClickHouse。市场服务和网关都从主题末尾读（`kafka.Tail`，不提交位移），启动后最多 10 秒拿到全部订单簿。
@@ -36,7 +39,7 @@ REST（经网关，无需登录，`Cache-Control: public, max-age=1`）：
 
 WebSocket `wss://astras.vip/v1/ws`：
 
-- 公共频道无需 `auth`：`ticker:{symbol}`、`depth:{symbol}`、`trades:{symbol}`、`candles:{symbol}:{interval}`。消息 `{"channel": ..., "type": ..., "data": ...}`；订阅 ticker、K 线时先收到最近一条。
+- 公共频道无需 `auth`：`ticker:{symbol}`、`depth:{symbol}`、`trades:{symbol}`、`candles:{symbol}:{interval}`（交易对与合约），合约另有 `mark-price:{symbol}`、`funding:{symbol}`（见下节）。消息 `{"channel": ..., "type": ..., "data": ...}`；订阅 ticker、K 线时先收到最近一条。
 - 深度：订阅后先收 `{"type":"snapshot","seq":n,"data":{"bids":[...],"asks":[...]}}`，之后是 `{"type":"update","seq":n+1,"prev_seq":n,"data":{变化的档位}}`，数量 `"0"` 表示该档消失。`seq` 是本网关实例的计数，`prev_seq` 对不上就重新订阅；每 30 秒重发一次快照。
 - 私有频道（需 `auth`，带每用户 `seq`，可用 `last_seq` 补发）新增 `orders`（订单状态变化：NEW、OPEN、PARTIALLY_FILLED、FILLED、CANCELED、REJECTED 及成交累计）与 `fills`（每笔成交的一方：角色、价格、数量、手续费）。
 
@@ -50,10 +53,50 @@ ssh exchange 'curl -s localhost:9090/metrics' | grep -E '^market_|kafka_consumer
 - 日志：`market state loaded`（启动加载的交易对数）、`market update push failed`、`depth export failed`（下一次会补上）。
 - 数据：`SELECT * FROM market.symbols;`（每个交易对已应用到的 sequence 与最新价）、`SELECT interval, count(*) FROM market.candles GROUP BY 1;`。
 
+## 合约：指数价、标记价与资金费率
+
+需求 §11.7，实施计划 §7.3 任务 3；实现见 `internal/marketdata/domain/perpetual.go`（公式）与 `application/marks.go`（每秒一轮）。
+
+- 合约（如 `BTC-USDT-PERP`）的 K 线、ticker、最近成交与深度和交易对一样，来自合约分片 derivatives-engine 的 `derivatives.trade.events` 与 `derivatives.market.depth`（见 [matching.md](matching.md#分片现货与合约)），同在上面的接口里，`/v1/market/tickers` 也包含合约。
+- 每秒对每个未下线的合约：
+  - **指数价**：`index_symbol`（如 `BTC-USDT`）各价源的最新现货价（参考行情，5 秒内的才算）按权重取中位数（两边权重正好各半时取两价平均），剔除偏离中位数超过 3% 的源后再取一次，8 位小数。可用源少于 `INDEX_MIN_SOURCES`（默认 2）时本轮没有指数价。平台自己的现货成交不算独立价源。价源权重 `INDEX_SOURCE_WEIGHTS`（如 `binance=1`，未列出为 1，0 表示停用）。**测试服只有币安一个源，配置为 1**；上线前按 §11.9 接入至少 3 个有授权的源。
+  - **标记价**：`index × (1 + basis)`，`basis` 是合约盘口中间价相对指数的偏离 `(mid − index) / index` 的 30 秒 EMA（每秒一个样本，α = 2/31，保留 12 位小数），盘口缺一边时样本为 0；`basis` 限制在 ±1% 以内，8 位小数。服务启动时 EMA 从 0 开始（标记价等于指数价）。
+  - **溢价指数样本**：按合约的冲击名义金额（`impact_notional`，测试服 10000 USDT）在盘口两边算平均成交价（冲击买价、冲击卖价），`premium = (max(0, 冲击买价 − index) − max(0, index − 冲击卖价)) / index`；深度不够冲击名义金额的一边记 0。
+  - **预估资金费率**：本周期样本平均值 `P`，`rate = clamp(P + clamp(interest − P, ±0.05%), ±funding_cap)`，8 位小数；正值多头付空头。
+- 资金费周期按合约的 `funding_interval_hours`（8 小时即 00:00、08:00、16:00 UTC）。样本累计在 `market.funding_periods` 里（每分钟保存一次，重启最多丢一分钟的样本）；周期结束后的第一次有标记价的计算把该周期**结算**：写入费率、平均溢价、利率、当时的标记价与指数价（`settled_at`），并发 `FundingRateUpdated{final=true}`。服务停机跨过结算点时，恢复后的第一轮补结算，用恢复时的标记价；整个周期都不在线则该周期没有记录，不收资金费。derivatives-service 按已结算的记录收付资金费（任务 6）。
+- **降级**：一个合约连续 10 秒算不出标记价（价源不足），发 `risk.events` 的 `SystemDegraded{reason=INDEX_SOURCES}`（键为合约代码），合约交易进入只减仓，需人工解除（任务 7）；标记价恢复后发 `SystemRecovered`（仅通知）。不足 10 秒的断档（参考源重连）不降级，期间标记价停在最后一次的值。关掉开关 `market.reference_feed` 会让全部合约降级。
+- 只能跑一个实例：周期样本在内存里累计，两个实例会重复采样。
+
+接口与推送：
+
+| 路径 / 频道 | 内容 |
+|---|---|
+| `GET /v1/market/{symbol}/mark-price` | 标记价、指数价（最后一次计算的值，从未算出时为 null）、预估资金费率、利率、下次结算时间、`degraded`、`updated_at` |
+| `GET /v1/market/{symbol}/funding-rates?from=&to=&limit=` | 已结算的资金费率（新的在前，最多 1000 条）：结算时间、费率、标记价、指数价、平均溢价、利率、样本数 |
+| `GET /internal/market/{symbol}/mark`（不经网关） | 以上加 `basis`、本周期平均溢价与样本数、各价源的价格、权重与是否采用（审计用；价源名称不对客户端公开，§11.9） |
+| `mark-price:{symbol}` | 每秒一次：`mark_price`、`index_price`、`funding_rate`（预估）、`next_funding_time` |
+| `funding:{symbol}` | `type=estimate`：预估费率变化时推送（不变时每 10 秒重推一次），新订阅者先收到最近一条；`type=settled`：周期结算时推一次，带结算标记价 |
+
+Kafka：`market.candle.events` 上的 `MarkPriceUpdated`、`FundingRateUpdated`（键为合约）与 `IndexPriceUpdated`（键为指数的现货代码，带各价源）；都不进 ClickHouse，结算记录以 `market.funding_periods` 为准。
+
+```bash
+curl -s https://astras.vip/v1/market/BTC-USDT-PERP/mark-price | jq
+ssh exchange 'sudo docker exec exchange-market-data-service-1 wget -qO- localhost:8090/internal/market/BTC-USDT-PERP/mark' | jq
+```
+
+```sql
+-- 进行中的周期与最近的结算（PostgreSQL，schema market）
+SELECT symbol, funding_time, samples, premium_sum / nullif(samples, 0) AS avg_premium FROM market.funding_periods WHERE settled_at IS NULL;
+SELECT symbol, funding_time, funding_rate, mark_price, samples FROM market.funding_periods WHERE settled_at IS NOT NULL ORDER BY funding_time DESC LIMIT 10;
+```
+
+指标：`market_mark_age_seconds{symbol}`（-1 表示从未算出）、`market_index_sources{symbol}`（最近一次指数价用到的源数）、`market_contract_degraded{symbol}`、`market_funding_settled_total`；告警 `ContractDegraded`、`ContractIndexSourceMissing`。
+
 ## 故障与处理
 
 | 情况 | 表现 | 处理 |
 |---|---|---|
+| 合约降级（`ContractDegraded`） | `mark-price` 的 `degraded` 为 true，`updated_at` 停住；`market_index_sources` 为 0 | 查参考行情（`market_reference_age_seconds`、开关 `market.reference_feed`、`reference feed failed` 日志，见 [market-maker.md](market-maker.md)）；恢复后确认标记价正常，再按合约服务手册人工解除只减仓 |
 | 市场服务重启 | 深度最多 10 秒为空；K 线、ticker 从库恢复 | 自动 |
 | PostgreSQL 不可用 | 成交批次写库失败，消费者退避重试，积压上升 | 恢复后自动重载并继续；成交量不会重复累加 |
 | 引擎重启或切换 | 深度更新暂停，恢复后继续（sequence 不回退） | 自动；客户端 `prev_seq` 不连续时重新订阅 |

@@ -24,12 +24,16 @@ type memStore struct {
 	candles    map[string]domain.Candle
 	trades     []domain.Trade
 	references map[string]domain.Candle
+	funding    map[string]ports.FundingPeriod
 	mu         sync.Mutex // the reference feed writes from its own goroutine
 	down       bool
 }
 
 func newMemStore() *memStore {
-	return &memStore{symbols: map[string]ports.SymbolState{}, candles: map[string]domain.Candle{}, references: map[string]domain.Candle{}}
+	return &memStore{
+		symbols: map[string]ports.SymbolState{}, candles: map[string]domain.Candle{}, references: map[string]domain.Candle{},
+		funding: map[string]ports.FundingPeriod{},
+	}
 }
 
 func (s *memStore) Tx(_ context.Context, fn func(ports.Repos) error) error {
@@ -48,6 +52,63 @@ func (r memRepos) Candles() ports.CandleRepo { return memCandles(r) }
 func (r memRepos) Trades() ports.TradeRepo   { return memTrades(r) }
 
 func (r memRepos) References() ports.ReferenceRepo { return memReferences(r) }
+
+func (r memRepos) Funding() ports.FundingRepo { return memFunding(r) }
+
+type memFunding memRepos
+
+func fundingKey(symbol string, t time.Time) string {
+	return symbol + "|" + t.UTC().Format(time.RFC3339)
+}
+
+func (r memFunding) Save(_ context.Context, p ports.FundingPeriod) error {
+	if r.s.down {
+		return errors.New("database down")
+	}
+	if old, ok := r.s.funding[fundingKey(p.Symbol, p.FundingTime)]; ok && old.Settled {
+		return nil
+	}
+	r.s.funding[fundingKey(p.Symbol, p.FundingTime)] = p
+	return nil
+}
+
+func (r memFunding) sorted(keep func(ports.FundingPeriod) bool) []ports.FundingPeriod {
+	var out []ports.FundingPeriod
+	for _, p := range r.s.funding {
+		if keep(p) {
+			out = append(out, p)
+		}
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].FundingTime.Before(out[b].FundingTime) })
+	return out
+}
+
+func (r memFunding) Unsettled(context.Context) ([]ports.FundingPeriod, error) {
+	if r.s.down {
+		return nil, errors.New("database down")
+	}
+	return r.sorted(func(p ports.FundingPeriod) bool { return !p.Settled }), nil
+}
+
+func (r memFunding) Settle(_ context.Context, p ports.FundingPeriod) (bool, error) {
+	if r.s.down {
+		return false, errors.New("database down")
+	}
+	if old, ok := r.s.funding[fundingKey(p.Symbol, p.FundingTime)]; ok && old.Settled {
+		return false, nil
+	}
+	p.Settled, p.SettledAt = true, time.Now()
+	r.s.funding[fundingKey(p.Symbol, p.FundingTime)] = p
+	return true, nil
+}
+
+func (r memFunding) Settled(_ context.Context, symbol string, from, to time.Time, limit int) ([]ports.FundingPeriod, error) {
+	out := r.sorted(func(p ports.FundingPeriod) bool {
+		return p.Settled && p.Symbol == symbol && !p.FundingTime.Before(from) && p.FundingTime.Before(to)
+	})
+	slices.Reverse(out)
+	return out[:min(limit, len(out))], nil
+}
 
 type memReferences memRepos
 
@@ -168,6 +229,8 @@ func (p pairs) Listed(_ context.Context, symbol string) (bool, error) {
 	return slices.Contains(p, symbol), nil
 }
 func (p pairs) Symbols(context.Context) ([]string, error) { return p, nil }
+
+func (p pairs) Contracts(context.Context) ([]ports.Contract, error) { return nil, nil }
 
 func d(s string) decimal.Decimal { return decimal.RequireFromString(s) }
 

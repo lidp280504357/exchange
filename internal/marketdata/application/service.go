@@ -30,14 +30,15 @@ const (
 	TradeKeepDays = 7
 )
 
-// ErrUnknownSymbol is returned for a symbol that is not a listed pair.
-var ErrUnknownSymbol = apperr.NotFound("no such trading pair")
+// ErrUnknownSymbol is returned for a symbol that is not a listed pair or
+// contract.
+var ErrUnknownSymbol = apperr.NotFound("no such trading pair or contract")
 
 // Service holds the market state of every symbol in memory, backed by the
 // store; it is safe for concurrent use.
 type Service struct {
 	store ports.Store
-	pairs ports.Pairs
+	pairs ports.Instruments
 	log   *slog.Logger
 	now   func() time.Time
 
@@ -77,7 +78,7 @@ func newSymbolState() *symbolState {
 }
 
 // New returns a service; call Load before use.
-func New(store ports.Store, pairs ports.Pairs, log *slog.Logger) *Service {
+func New(store ports.Store, pairs ports.Instruments, log *slog.Logger) *Service {
 	return &Service{store: store, pairs: pairs, log: log, now: time.Now, symbols: map[string]*symbolState{}, dirty: true}
 }
 
@@ -262,7 +263,7 @@ func (s *Service) Ticker(ctx context.Context, symbol string) (domain.Ticker, err
 	return s.ticker(symbol, s.now()), nil
 }
 
-// Tickers returns the tickers of every listed pair.
+// Tickers returns the tickers of every listed pair and contract.
 func (s *Service) Tickers(ctx context.Context) ([]domain.Ticker, error) {
 	symbols, err := s.pairs.Symbols(ctx)
 	if err != nil {
@@ -400,4 +401,31 @@ func previous(i domain.Interval, start time.Time) time.Time {
 		return start.AddDate(0, 0, -7)
 	}
 	return i.Start(start.Add(-time.Nanosecond))
+}
+
+// Book returns the levels of the symbol's latest depth, best first; none
+// before the engine's first snapshot.
+func (s *Service) Book(symbol string) (bids, asks []domain.Level) {
+	s.mu.Lock()
+	var d *marketv1.DepthSnapshot
+	if st, ok := s.symbols[symbol]; ok {
+		d = st.depth // snapshots are replaced, never changed
+	}
+	s.mu.Unlock()
+	if d == nil {
+		return nil, nil
+	}
+	return bookLevels(d.GetBids()), bookLevels(d.GetAsks())
+}
+
+func bookLevels(in []*marketv1.PriceLevel) []domain.Level {
+	out := make([]domain.Level, 0, len(in))
+	for _, l := range in {
+		p, err1 := decimal.NewFromString(l.GetPrice())
+		q, err2 := decimal.NewFromString(l.GetQuantity())
+		if err1 == nil && err2 == nil {
+			out = append(out, domain.Level{Price: p, Quantity: q})
+		}
+	}
+	return out
 }

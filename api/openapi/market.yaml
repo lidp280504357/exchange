@@ -9,7 +9,9 @@ info:
     the platform's own trades) for 1 second. Amounts are decimal strings
     (ADR-0008): clients must not parse them into floating point. Live
     updates come over the WebSocket channels ticker:, depth:, trades: and
-    candles: (§7.3).
+    candles:, and for perpetual contracts mark-price: and funding: (§7.3).
+    Contracts (BTC-USDT-PERP) have tickers, depth, trades and candles
+    like pairs, built from their own book.
 servers:
   - url: https://astras.vip
 tags:
@@ -125,11 +127,11 @@ paths:
   /v1/market/tickers:
     get:
       operationId: listTickers
-      summary: Rolling 24-hour tickers of every listed pair
+      summary: Rolling 24-hour tickers of every listed pair and contract
       tags: [market]
       responses:
         '200':
-          description: One ticker per listed pair.
+          description: One ticker per listed pair and contract.
           content:
             application/json:
               schema:
@@ -233,6 +235,79 @@ paths:
                       $ref: '#/components/schemas/PublicTrade'
         default:
           $ref: './common.yaml#/components/responses/Error'
+  /v1/market/{symbol}/mark-price:
+    get:
+      operationId: getMarkPrice
+      summary: A contract's mark and index prices and funding estimate
+      description: |
+        Computed every second (requirements §11.7): the index is the
+        weighted median of reference spot prices; the mark price is the
+        index moved by the 30-second EMA of the book's mid price relative
+        to it, at most 1% either way; the funding rate is the running
+        estimate of the period ending next_funding_time. Prices stay at the
+        last computation while none is possible; after 10 seconds without
+        one the contract is degraded (reduce-only trading).
+      tags: [market]
+      parameters:
+        - $ref: '#/components/parameters/Symbol'
+      responses:
+        '200':
+          description: The prices.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarkPrice'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/market/{symbol}/funding-rates:
+    get:
+      operationId: listFundingRates
+      summary: A contract's settled funding rates, newest first
+      description: |
+        One per funding period (00:00, 08:00, 16:00 UTC for an 8-hour
+        interval): clamp(premium + clamp(interest - premium, +-0.05%),
+        +-cap), premium being the period's average premium index. Positions
+        at funding_time pay notional x rate at mark_price: longs pay shorts
+        when the rate is positive.
+      tags: [market]
+      parameters:
+        - $ref: '#/components/parameters/Symbol'
+        - name: from
+          in: query
+          description: Funding times at or after this (RFC 3339).
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: Funding times before this (RFC 3339).
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+      responses:
+        '200':
+          description: The rates.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [symbol, funding_rates]
+                properties:
+                  symbol:
+                    type: string
+                  funding_rates:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FundingRate'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
   /v1/market/{symbol}/candles:
     get:
       operationId: listCandles
@@ -295,7 +370,7 @@ components:
       name: symbol
       in: path
       required: true
-      description: A listed pair (case-insensitive).
+      description: A listed pair or contract (case-insensitive).
       schema:
         type: string
         examples: [BTC-USDT]
@@ -488,6 +563,60 @@ components:
         ask:
           $ref: '#/components/schemas/NullableDecimal'
         updated_at:
+          type: string
+          format: date-time
+    MarkPrice:
+      type: object
+      required: [symbol, index_symbol, mark_price, index_price, funding_rate, interest_rate, next_funding_time, degraded, updated_at]
+      properties:
+        symbol:
+          type: string
+        index_symbol:
+          type: string
+          description: The spot market the index follows, e.g. BTC-USDT.
+        mark_price:
+          description: Null before the first computation.
+          $ref: '#/components/schemas/NullableDecimal'
+        index_price:
+          $ref: '#/components/schemas/NullableDecimal'
+        funding_rate:
+          description: The running period's estimate, e.g. "0.0001" for 0.01%.
+          $ref: '#/components/schemas/Decimal'
+        interest_rate:
+          $ref: '#/components/schemas/Decimal'
+        next_funding_time:
+          type: string
+          format: date-time
+        degraded:
+          type: boolean
+          description: No mark price for 10 seconds; trading is reduce-only until an operator lifts it.
+        updated_at:
+          type: [string, 'null']
+          format: date-time
+          description: When the prices were computed.
+    FundingRate:
+      type: object
+      required: [funding_time, funding_rate, mark_price, index_price, premium, interest_rate, samples, settled_at]
+      properties:
+        funding_time:
+          type: string
+          format: date-time
+        funding_rate:
+          $ref: '#/components/schemas/Decimal'
+        mark_price:
+          $ref: '#/components/schemas/Decimal'
+        index_price:
+          $ref: '#/components/schemas/Decimal'
+        premium:
+          description: The period's average premium index.
+          $ref: '#/components/schemas/Decimal'
+        interest_rate:
+          $ref: '#/components/schemas/Decimal'
+        samples:
+          type: integer
+          format: int64
+          description: Premium index samples in the period (one a second).
+        settled_at:
           type: string
           format: date-time
     PriceLevel:

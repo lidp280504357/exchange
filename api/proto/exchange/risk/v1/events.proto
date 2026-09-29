@@ -2,7 +2,10 @@ syntax = "proto3";
 
 package exchange.risk.v1;
 
-// Events on risk.events, keyed by user_id (requirements §5.13, §8.1).
+import "google/protobuf/timestamp.proto";
+
+// Events on risk.events, keyed by user_id (requirements §5.13, §8.1);
+// SystemDegraded and SystemRecovered are keyed by the affected symbol.
 
 // Action is what the rules ask for; the most severe hit wins.
 enum Action {
@@ -47,4 +50,26 @@ message RiskActionTaken {
   string assessment_id = 2;
   Action action = 3;
   repeated string rules = 4;
+}
+
+// SystemDegraded reports that data derivatives trading depends on failed
+// (requirements §5.8, §11.7): the contract goes REDUCE_ONLY until a person
+// lifts it. market-data-service reports a contract whose mark price could
+// not be computed for 10 seconds.
+message SystemDegraded {
+  // INDEX_SOURCES: fewer index sources than required.
+  string reason = 1;
+  // The contract, e.g. BTC-USDT-PERP.
+  string symbol = 2;
+  string detail = 3;
+  // The last mark price computed; unset if none since the service started.
+  google.protobuf.Timestamp last_mark_at = 4;
+}
+
+// SystemRecovered reports that a degraded contract's data is back. It is
+// informational: lifting REDUCE_ONLY stays a person's decision (§11.7).
+message SystemRecovered {
+  string reason = 1;
+  string symbol = 2;
+  google.protobuf.Timestamp degraded_at = 3;
 }

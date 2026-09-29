@@ -11,8 +11,13 @@ import "google/protobuf/timestamp.proto";
 //                         aggregated book at most every 100 ms when it
 //                         changed, all books every 10 s. Derived state,
 //                         kept one hour, not ingested into ClickHouse.
-//   market.candle.events  CandleUpdated, CandleClosed, TickerUpdated, from
+//   market.candle.events  CandleUpdated, CandleClosed, TickerUpdated, and for
+//                         perpetual contracts MarkPriceUpdated,
+//                         IndexPriceUpdated, FundingRateUpdated, from
 //                         market-data-service.
+//
+// The derivatives engine publishes the contracts' depth on
+// derivatives.market.depth, in the same DepthSnapshot.
 
 // PriceLevel is the total resting quantity at one price.
 message PriceLevel {
@@ -82,4 +87,62 @@ message Ticker {
 // TickerUpdated is pushed at most every 500 ms while the ticker changes.
 message TickerUpdated {
   Ticker ticker = 1;
+}
+
+// Perpetual contract prices (§11.7), from market-data-service every second
+// on market.candle.events. Prices have 8 decimals; rates are fractions per
+// funding period, e.g. "0.0001" for 0.01%.
+
+// MarkPriceUpdated is a contract's mark and index prices with its funding
+// estimate, keyed by the contract (BTC-USDT-PERP).
+message MarkPriceUpdated {
+  string symbol = 1;
+  // index x (1 + basis), the basis bounded to +-1%.
+  string mark_price = 2;
+  string index_price = 3;
+  // The 30-second EMA of (mid - index) / index of the contract's book,
+  // before the bound.
+  string basis = 4;
+  // The estimated rate of the period ending next_funding_time.
+  string funding_rate = 5;
+  google.protobuf.Timestamp next_funding_time = 6;
+  google.protobuf.Timestamp computed_at = 7;
+}
+
+// IndexComponent is one source of an index price.
+message IndexComponent {
+  string source = 1;
+  string price = 2;
+  int32 weight = 3;
+  // False for a source more than 3% away from the median of all.
+  bool included = 4;
+}
+
+// IndexPriceUpdated is the weighted median of the sources' spot prices,
+// keyed by the index's spot symbol (BTC-USDT).
+message IndexPriceUpdated {
+  string symbol = 1;
+  string price = 2;
+  repeated IndexComponent components = 3;
+  google.protobuf.Timestamp computed_at = 4;
+}
+
+// FundingRateUpdated is a contract's funding rate, keyed by the contract:
+// the running estimate while its period lasts (final false), then the
+// settled rate once the period has ended (final true, once per period).
+message FundingRateUpdated {
+  string symbol = 1;
+  string funding_rate = 2;
+  // The period's average premium index and the interest rate in the rate.
+  string premium = 3;
+  string interest_rate = 4;
+  // Premium index samples taken in the period (one a second).
+  int64 samples = 5;
+  // The end of the period, when it settles (00:00, 08:00, 16:00 UTC for
+  // an 8-hour interval).
+  google.protobuf.Timestamp funding_time = 6;
+  bool final = 7;
+  // The mark and index prices the period settled at; set when final.
+  string mark_price = 8;
+  string index_price = 9;
 }

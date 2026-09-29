@@ -203,3 +203,13 @@ func (f *ReferenceFeed) backfill(ctx context.Context, symbol string) error {
 func (f *ReferenceFeed) Purge(ctx context.Context) (int64, error) {
 	return f.store.Read().References().Purge(ctx, f.now().Add(-referenceKeep))
 }
+
+// Prices returns the symbol's fresh reference price as an index source
+// (application.IndexSources); none while it is stale.
+func (f *ReferenceFeed) Prices(symbol string) []domain.SourcePrice {
+	r, fresh := f.Latest(symbol)
+	if !fresh {
+		return nil
+	}
+	return []domain.SourcePrice{{Source: r.Source, Price: r.Price}}
+}

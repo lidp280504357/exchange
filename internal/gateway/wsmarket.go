@@ -10,11 +10,14 @@ import (
 )
 
 // Public market channels (requirements §7.3): ticker:{symbol},
-// depth:{symbol}, trades:{symbol} and candles:{symbol}:{interval}. They
-// need no sign-in and carry no per-user sequence; depth has its own.
+// depth:{symbol}, trades:{symbol} and candles:{symbol}:{interval} of pairs
+// and contracts, and mark-price:{symbol} and funding:{symbol} of
+// contracts. They need no sign-in and carry no per-user sequence; depth
+// has its own.
 var (
-	symbolRE  = regexp.MustCompile(`^[A-Z0-9]{2,10}-[A-Z0-9]{2,10}$`)
-	intervals = []string{"1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w", "1M"}
+	symbolRE   = regexp.MustCompile(`^[A-Z0-9]{2,10}-[A-Z0-9]{2,10}(-PERP)?$`)
+	contractRE = regexp.MustCompile(`^[A-Z0-9]{2,10}-[A-Z0-9]{2,10}-PERP$`)
+	intervals  = []string{"1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w", "1M"}
 )
 
 // wsDepthResend is how often subscribers get a fresh depth snapshot.
@@ -26,6 +29,8 @@ func publicChannel(ch string) bool {
 	switch {
 	case len(parts) == 2 && (parts[0] == "ticker" || parts[0] == "depth" || parts[0] == "trades"):
 		return symbolRE.MatchString(parts[1])
+	case len(parts) == 2 && (parts[0] == "mark-price" || parts[0] == "funding"):
+		return contractRE.MatchString(parts[1])
 	case len(parts) == 3 && parts[0] == "candles":
 		return symbolRE.MatchString(parts[1]) && slices.Contains(intervals, parts[2])
 	}

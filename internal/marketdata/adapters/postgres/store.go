@@ -222,3 +222,68 @@ func (r references) Purge(ctx context.Context, before time.Time) (int64, error) 
 	}
 	return tag.RowsAffected(), nil
 }
+
+type funding repos
+
+func (r repos) Funding() ports.FundingRepo { return funding(r) }
+
+func (r funding) Save(ctx context.Context, p ports.FundingPeriod) error {
+	_, err := r.q.Exec(ctx, `INSERT INTO funding_periods (symbol, funding_time, premium_sum, samples) VALUES ($1, $2, $3, $4)
+		ON CONFLICT (symbol, funding_time) DO UPDATE SET premium_sum = $3, samples = $4, updated_at = now()
+		WHERE funding_periods.settled_at IS NULL`,
+		p.Symbol, p.FundingTime, p.PremiumSum, p.Samples)
+	if err != nil {
+		return fmt.Errorf("save funding period: %w", err)
+	}
+	return nil
+}
+
+const fundingColumns = `symbol, funding_time, premium_sum, samples, settled_at IS NOT NULL, coalesce(funding_rate, 0),
+	coalesce(premium, 0), coalesce(interest_rate, 0), coalesce(mark_price, 0), coalesce(index_price, 0),
+	coalesce(settled_at, 'epoch')`
+
+func (r funding) query(ctx context.Context, sql string, args ...any) ([]ports.FundingPeriod, error) {
+	rows, err := r.q.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("load funding periods: %w", err)
+	}
+	defer rows.Close()
+	var out []ports.FundingPeriod
+	for rows.Next() {
+		var p ports.FundingPeriod
+		if err := rows.Scan(&p.Symbol, &p.FundingTime, &p.PremiumSum, &p.Samples, &p.Settled, &p.Rate, &p.Premium,
+			&p.InterestRate, &p.MarkPrice, &p.IndexPrice, &p.SettledAt); err != nil {
+			return nil, fmt.Errorf("load funding periods: %w", err)
+		}
+		p.FundingTime, p.SettledAt = p.FundingTime.UTC(), p.SettledAt.UTC()
+		if !p.Settled {
+			p.SettledAt = time.Time{}
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (r funding) Unsettled(ctx context.Context) ([]ports.FundingPeriod, error) {
+	return r.query(ctx, `SELECT `+fundingColumns+` FROM funding_periods WHERE settled_at IS NULL ORDER BY funding_time, symbol`)
+}
+
+func (r funding) Settle(ctx context.Context, p ports.FundingPeriod) (bool, error) {
+	tag, err := r.q.Exec(ctx, `INSERT INTO funding_periods (symbol, funding_time, premium_sum, samples, funding_rate, premium,
+			interest_rate, mark_price, index_price, settled_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+		ON CONFLICT (symbol, funding_time) DO UPDATE SET premium_sum = $3, samples = $4, funding_rate = $5, premium = $6,
+			interest_rate = $7, mark_price = $8, index_price = $9, settled_at = now(), updated_at = now()
+		WHERE funding_periods.settled_at IS NULL`,
+		p.Symbol, p.FundingTime, p.PremiumSum, p.Samples, p.Rate, p.Premium, p.InterestRate, p.MarkPrice, p.IndexPrice)
+	if err != nil {
+		return false, fmt.Errorf("settle funding period: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func (r funding) Settled(ctx context.Context, symbol string, from, to time.Time, limit int) ([]ports.FundingPeriod, error) {
+	return r.query(ctx, `SELECT `+fundingColumns+` FROM funding_periods
+		WHERE symbol = $1 AND settled_at IS NOT NULL AND funding_time >= $2 AND funding_time < $3
+		ORDER BY funding_time DESC LIMIT $4`, symbol, from, to, limit)
+}
