@@ -11,11 +11,20 @@ AT_EXIT=()
 # AT_END runs after the at_exit commands (lib/remote.sh closes its ssh
 # connection there, which those commands may still need).
 AT_END=""
-trap 'for c in ${AT_EXIT[@]+"${AT_EXIT[@]}"}; do eval "$c" || true; done; [[ -z $AT_END ]] || eval "$AT_END" || true; rm -rf "$WORK"' EXIT
+run_at_exit() {
+  local i
+  for ((i = ${#AT_EXIT[@]} - 1; i >= 0; i--)); do
+    eval "${AT_EXIT[$i]}" || true
+  done
+  [[ -z $AT_END ]] || eval "$AT_END" || true
+  rm -rf "$WORK"
+}
+trap run_at_exit EXIT
 STATUS="" BODY="" TICKET=""
 
 # at_exit COMMAND runs the COMMAND string when the script ends, also after
 # a failed check: scripts use it to leave nothing in the shared order book.
+# Like defer, the last one registered runs first.
 at_exit() { AT_EXIT+=("$1"); }
 APP=(-H 'X-Client-Type: APP')
 

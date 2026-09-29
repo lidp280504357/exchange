@@ -14,11 +14,17 @@ export function Card({ title, children, actions }: { title?: ReactNode; children
   );
 }
 
-export function Button({ variant = "primary", className = "", ...rest }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "ghost" | "danger" }) {
+export function Button({
+  variant = "primary",
+  className = "",
+  ...rest
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "ghost" | "danger" | "inverse" }) {
   const styles = {
     primary: "bg-slate-800 text-white hover:bg-slate-700",
     ghost: "border border-slate-300 text-slate-700 hover:bg-slate-50",
     danger: "bg-red-600 text-white hover:bg-red-500",
+    // on the dark header
+    inverse: "border border-slate-500 text-slate-100 hover:bg-slate-700",
   }[variant];
   return (
     <button

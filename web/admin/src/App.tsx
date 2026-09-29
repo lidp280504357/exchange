@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { NavLink, Navigate, Route, Routes } from "react-router";
 import { api, describe, type Admin, type Permission } from "./api/client";
 import { AuditPage } from "./pages/Audit";
@@ -65,13 +65,10 @@ export function App() {
 }
 
 function Header({ admin }: { admin: Admin }) {
-  const qc = useQueryClient();
+  // A full reload drops everything the console loaded.
   const logout = useMutation({
     mutationFn: () => api.POST("/admin/v1/logout"),
-    onSettled: () => {
-      qc.clear();
-      qc.setQueryData(["me"], null);
-    },
+    onSettled: () => window.location.replace("/admin/login"),
   });
   return (
     <header className="bg-slate-800 text-white">
@@ -81,7 +78,7 @@ function Header({ admin }: { admin: Admin }) {
           <span data-testid="whoami">
             {admin.name}（{admin.email}，{roleNames[admin.role]}）
           </span>
-          <Button variant="ghost" className="border-slate-500 text-slate-100 hover:bg-slate-700" onClick={() => logout.mutate()}>
+          <Button variant="inverse" disabled={logout.isPending} onClick={() => logout.mutate()}>
             退出
           </Button>
         </div>

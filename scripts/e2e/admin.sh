@@ -20,9 +20,10 @@ source "$(dirname "$0")/lib/remote.sh"
 
 CSRF=(-H 'X-Admin-CSRF: 1')
 totp() { node "$(dirname "$0")/lib/totp.mjs" "$1" "${2:-0}"; }
-# A base32 secret of 160 bits and a password, both random.
-secret() { LC_ALL=C tr -dc 'A-Z2-7' </dev/urandom | head -c 32; }
-password() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24; }
+# A base32 secret of 160 bits and a password, both random (tr ends on
+# SIGPIPE when head has enough, which pipefail would count as a failure).
+secret() { LC_ALL=C tr -dc 'A-Z2-7' </dev/urandom | head -c 32 || true; }
+password() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24 || true; }
 
 echo "== the console is served at /admin/"
 call GET /admin/ "" -D "$WORK/headers"
@@ -66,14 +67,20 @@ for role in "${ROLES[@]}"; do
   echo "ok   $role $email"
 done
 
-# login ROLE [CODE] signs in with the role's cookie jar and sets CODE_ROLE.
+# login ROLE signs in, keeping the session in the role's cookie jar, and
+# sets CODE_ROLE; login ROLE CODE tries a given code with a throwaway jar
+# (curl -c rewrites the jar with what it saw, which would drop the session).
 login() {
-  local role=$1 email pw sec code
+  local role=$1 email pw sec code jar
   email=$(eval "echo \$EMAIL_$role") pw=$(eval "echo \$PW_$role") sec=$(eval "echo \$SECRET_$role")
-  code=${2:-$(totp "$sec")}
-  eval "CODE_$role=\$code"
+  if [[ -n ${2:-} ]]; then
+    code=$2 jar="$WORK/other.jar"
+  else
+    code=$(totp "$sec") jar="$WORK/$role.jar"
+    eval "CODE_$role=\$code"
+  fi
   call POST /admin/v1/login "$(jq -nc --arg e "$email" --arg p "$pw" --arg c "$code" '{email: $e, password: $p, totp_code: $c}')" \
-    "${CSRF[@]}" -c "$WORK/$role.jar" -D "$WORK/$role.headers"
+    "${CSRF[@]}" -c "$jar" -D "$WORK/$role.headers"
 }
 as() { # as ROLE METHOD PATH JSON: a call with the role's session
   local role=$1
@@ -120,6 +127,7 @@ DEVICE="e2e-admin-user-$RUN"
 echo "== an account to act on: $EMAIL"
 register "$EMAIL" "$DEVICE" "e2e admin user $RUN"
 USER_ID=$(jq -r .user_id <<<"$BODY")
+REFRESH=$(jq -r .refresh_token <<<"$BODY")
 UAUTH=(-H "Authorization: Bearer $(jq -r .access_token <<<"$BODY")")
 # shellcheck disable=SC2016 # expanded when the script ends
 at_exit 'call DELETE /v1/orders "" "${UAUTH[@]}"'
@@ -133,12 +141,28 @@ echo "== freeze and unfreeze"
 as OPERATOR POST "/admin/v1/users/$USER_ID/status" '{"to":"FROZEN","reason":"SUSPICIOUS_LOGIN","note":"scripts/e2e/admin.sh"}'
 expect 200 - "OPERATOR freezes the account"
 check '.from == "ACTIVE" and .to == "FROZEN"' "ACTIVE → FROZEN"
+# A status change sends the user's tokens to refresh (docs/runbook/accounts.md).
+stale_token() {
+  call GET /v1/user/profile "" "${UAUTH[@]}"
+  [[ $STATUS == 401 && $(jq -r .code <<<"$BODY") == AUTH_TOKEN_EXPIRED ]]
+}
+refresh_user() { # refresh_user SCOPE
+  eventually 30 "the user's token is sent to refresh" stale_token
+  sleep 1 # tokens issued within a second of the change are stale too
+  call POST /v1/auth/token/refresh "{\"refresh_token\":\"$REFRESH\",\"device_id\":\"$DEVICE\"}" "${APP[@]}"
+  expect 200 - "refresh"
+  check ".scope == \"$1\"" "a $1 token"
+  REFRESH=$(jq -r .refresh_token <<<"$BODY")
+  UAUTH=(-H "Authorization: Bearer $(jq -r .access_token <<<"$BODY")")
+}
+refresh_user read
 call GET /v1/user/profile "" "${UAUTH[@]}"
 check '.status == "FROZEN"' "the user sees FROZEN"
 as OPERATOR POST "/admin/v1/users/$USER_ID/status" '{"to":"CLOSED","reason":"USER_REQUEST"}'
 expect 409 USER_STATUS_TRANSITION_INVALID "FROZEN cannot close directly"
 as OPERATOR POST "/admin/v1/users/$USER_ID/status" '{"to":"ACTIVE","reason":"REVIEW_CLEARED"}'
 expect 200 - "and unfreezes it"
+refresh_user full
 call GET /v1/user/profile "" "${UAUTH[@]}"
 check '.status == "ACTIVE"' "ACTIVE again"
 
@@ -197,6 +221,8 @@ as FINANCE POST /admin/v1/ledger/adjustments "{\"user_id\":\"$USER_ID\",\"asset\
 expect 201 - "FINANCE requests +1.5 USDT"
 check '.status == "PENDING" and .payload.asset == "USDT" and .payload.amount == "1.5"' "PENDING"
 APPROVAL=$(jq -r .id <<<"$BODY")
+# If a check fails before a decision, the request does not stay pending.
+at_exit "as ADMIN POST /admin/v1/approvals/$APPROVAL/decide '{\"approve\":false,\"reason\":\"e2e cleanup\"}'"
 as FINANCE POST "/admin/v1/approvals/$APPROVAL/decide" '{"approve":true,"reason":"my own"}'
 expect 403 ADMIN_SELF_APPROVAL "not by the requester"
 as OPERATOR POST "/admin/v1/approvals/$APPROVAL/decide" '{"approve":true,"reason":"e2e"}'
