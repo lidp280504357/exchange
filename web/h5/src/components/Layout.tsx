@@ -6,7 +6,6 @@ import { authApi } from "../api/client";
 import { setLanguage } from "../i18n";
 import { PrivateSocket } from "../lib/ws";
 import { useSession } from "../store/session";
-import { refreshTokens } from "../lib/native";
 
 // useLiveEvents keeps the WebSocket open while signed in and refreshes the
 // affected queries on each push (§7.3).
@@ -76,7 +75,6 @@ export function Layout() {
 
   async function logout() {
     await authApi.POST("/v1/auth/logout").catch(() => undefined);
-    await refreshTokens.clear(); // the desktop app's stored token
     setSession(null);
     navigate("/login");
   }

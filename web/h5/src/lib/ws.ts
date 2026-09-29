@@ -1,6 +1,5 @@
 import { refresh } from "../api/client";
 import { useSession } from "../store/session";
-import { wsURL } from "./native";
 
 // Push is a private event (§7.3).
 export type Push = { channel: string; seq: number; data: Record<string, string> };
@@ -45,7 +44,8 @@ export class PrivateSocket {
   private connect() {
     const token = useSession.getState().session?.accessToken;
     if (!token || this.stopped) return;
-    const ws = new WebSocket(wsURL());
+    const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/v1/ws`;
+    const ws = new WebSocket(url);
     this.ws = ws;
     ws.onopen = () => {
       this.retry = 0;

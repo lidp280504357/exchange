@@ -1,5 +1,4 @@
 import { compare } from "./decimal";
-import { wsURL } from "./native";
 
 // Public market channels (§7.3): ticker:, depth:, trades: and candles:,
 // over one WebSocket that needs no sign-in.
@@ -52,7 +51,8 @@ export class MarketSocket {
   }
 
   private connect() {
-    const ws = new WebSocket(wsURL());
+    const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/v1/ws`;
+    const ws = new WebSocket(url);
     this.ws = ws;
     ws.onopen = () => {
       this.retry = 0;

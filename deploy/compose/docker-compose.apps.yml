@@ -50,11 +50,6 @@ services:
     environment:
       <<: *base-env
       GOMEMLIMIT: 440MiB
-      # The desktop app's WebView origins (tauri://localhost; Windows:
-      # http(s)://tauri.localhost) call the API with bearer tokens, no
-      # cookies (docs/runbook/desktop.md).
-      CORS_ORIGINS: tauri://localhost,http://tauri.localhost,https://tauri.localhost
-      WS_ORIGINS: astras.vip,localhost:5173,localhost,tauri.localhost
       AUTH_SERVICE_URL: http://auth-service:8081
       USER_SERVICE_URL: http://user-service:8082
       NOTIFICATION_SERVICE_URL: http://notification-service:8083

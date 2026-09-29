@@ -1,6 +1,4 @@
 import createClient from "openapi-fetch";
-import { deviceId } from "../lib/device";
-import { apiOrigin, native, refreshTokens } from "../lib/native";
 import { useSession, type Session } from "../store/session";
 import type { paths as AccountPaths } from "./gen/account";
 import type { paths as AuthPaths } from "./gen/auth";
@@ -63,32 +61,8 @@ export function sessionFrom(t: TokenResponse): Session {
   };
 }
 
-// The API is same-origin in a browser; the desktop app calls it across
-// origins (lib/native.ts).
-const baseUrl = apiOrigin;
-
-// refreshRequest asks for new tokens: browsers send the HttpOnly cookie,
-// the desktop app the stored token in the body as an APP client.
-async function refreshRequest(): Promise<Response | null> {
-  if (!native) return fetch(`${baseUrl}/v1/auth/token/refresh`, { method: "POST", credentials: "include" });
-  const token = await refreshTokens.get();
-  if (!token) return null;
-  return fetch(`${baseUrl}/v1/auth/token/refresh`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Client-Type": "APP" },
-    body: JSON.stringify({ refresh_token: token, device_id: deviceId() }),
-  });
-}
-
-// keepRefreshToken stores the refresh token an APP answer carries.
-async function keepRefreshToken(res: Response): Promise<void> {
-  try {
-    const t = ((await res.clone().json()) as { refresh_token?: unknown }).refresh_token;
-    if (typeof t === "string" && t !== "") await refreshTokens.set(t);
-  } catch {
-    // not a token answer
-  }
-}
+// The API is same-origin; unit tests run without a location.
+const baseUrl = globalThis.location?.origin ?? "http://localhost";
 
 let refreshing: Promise<Session | null> | null = null;
 
@@ -102,11 +76,8 @@ export function refresh(): Promise<Session | null> {
     refreshing = (async () => {
       const before = useSession.getState().session;
       for (let attempt = 0; attempt < 2; attempt++) {
-        const res = await refreshRequest();
-        if (!res) break; // the desktop app holds no refresh token
-        if (res.status === 401 && native) await refreshTokens.clear(); // it is no longer valid
+        const res = await fetch(`${baseUrl}/v1/auth/token/refresh`, { method: "POST", credentials: "include" });
         if (res.ok) {
-          if (native) await keepRefreshToken(res);
           const s = sessionFrom((await res.json()) as TokenResponse);
           useSession.getState().set(s);
           return s;
@@ -128,32 +99,23 @@ export function refresh(): Promise<Session | null> {
 // status changed, which the gateway reports the same way), refreshes and
 // retries the request once.
 async function authFetch(input: Request): Promise<Response> {
-  // The desktop app signs in as an APP client and keeps the refresh token
-  // the answers carry.
-  const signIn = native && new URL(input.url).pathname.startsWith("/v1/auth/");
-  if (signIn) input.headers.set("X-Client-Type", "APP");
   const retry = input.clone();
-  const send = async (req: Request, token?: string) => {
+  const send = (req: Request, token?: string) => {
     if (token) req.headers.set("Authorization", `Bearer ${token}`);
-    const res = await fetch(req);
-    if (signIn && res.ok) await keepRefreshToken(res);
-    return res;
+    return fetch(req);
   };
   const res = await send(input, useSession.getState().session?.accessToken);
   if (res.status !== 401) return res;
   const err = await toApiError(res);
   if (err.code !== "AUTH_TOKEN_EXPIRED") {
-    if (err.code === "AUTH_SESSION_REVOKED") {
-      useSession.getState().set(null);
-      await refreshTokens.clear();
-    }
+    if (err.code === "AUTH_SESSION_REVOKED") useSession.getState().set(null);
     return res;
   }
   const s = await refresh();
   return s ? send(retry, s.accessToken) : res;
 }
 
-const options = { baseUrl, credentials: native ? ("omit" as const) : ("include" as const), fetch: authFetch };
+const options = { baseUrl, credentials: "include" as const, fetch: authFetch };
 
 export const authApi = createClient<AuthPaths>(options);
 export const userApi = createClient<UserPaths>(options);

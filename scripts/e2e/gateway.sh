@@ -17,26 +17,6 @@ headers=$(curl -s -D - -o /dev/null "$BASE/v1/market/pairs" | tr -d '\r')
 grep -qi '^x-ratelimit-limit: 1200' <<<"$headers" && grep -qi '^x-ratelimit-remaining: [0-9]' <<<"$headers" || { echo "FAIL headers: $headers" >&2; exit 1; }
 echo "ok   X-RateLimit-* on public requests"
 
-echo "== cross-origin calls of the desktop app"
-# Its WebView's origin is tauri://localhost (http://tauri.localhost on
-# Windows); it sends bearer tokens, so no credentials are allowed.
-preflight=$(curl -s -D - -o /dev/null -X OPTIONS "$BASE/v1/auth/login/password" -H 'Origin: tauri://localhost' \
-  -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type, x-client-type' | tr -d '\r')
-grep -q '^HTTP/[0-9.]* 204' <<<"$preflight" && grep -qi '^access-control-allow-origin: tauri://localhost' <<<"$preflight" &&
-  grep -qi '^access-control-allow-headers:.*X-Client-Type' <<<"$preflight" && ! grep -qi '^access-control-allow-credentials' <<<"$preflight" ||
-  { echo "FAIL preflight from tauri://localhost: $preflight" >&2; exit 1; }
-echo "ok   a preflight from tauri://localhost is allowed, without credentials"
-simple=$(curl -s -D - -o /dev/null "$BASE/v1/market/pairs" -H 'Origin: http://tauri.localhost' | tr -d '\r')
-grep -qi '^access-control-allow-origin: http://tauri.localhost' <<<"$simple" || { echo "FAIL request from http://tauri.localhost: $simple" >&2; exit 1; }
-echo "ok   so is a request from http://tauri.localhost (Windows)"
-other=$(curl -s -D - -o /dev/null -X OPTIONS "$BASE/v1/auth/login/password" -H 'Origin: https://evil.example' \
-  -H 'Access-Control-Request-Method: POST' | tr -d '\r')
-if grep -qi '^access-control-allow-origin' <<<"$other"; then
-  echo "FAIL another origin was allowed: $other" >&2
-  exit 1
-fi
-echo "ok   other origins get no CORS headers"
-
 echo "== register $EMAIL"
 register "$EMAIL" "$DEVICE" "$PASSWORD"
 ACCESS=$(jq -r .access_token <<<"$BODY")
