@@ -89,6 +89,28 @@ wait_healthy() {
   done
 }
 
+# metric SERVICE PORT NAME [FILTER] prints the value of the first sample
+# of metric NAME on the service's ops port whose labels contain FILTER.
+metric() {
+  local out
+  out=$(compose "exec -T $1 wget -qO- http://127.0.0.1:$2/metrics") || return 1
+  awk -v name="$3" -v filter="${4:-}" '($1 == name || index($1, name "{") == 1) && index($1, filter) { print $2; exit }' <<<"$out"
+}
+
+# block_egress SERVICE drops the container's traffic to the internet
+# (everything outside the compose network) at the host's DOCKER-USER
+# chain, as if the outside went silent; unblock_egress SERVICE lifts it.
+block_egress() {
+  local ip
+  ip=$(remote "sudo docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' exchange-infra-$1-1")
+  [[ $ip =~ ^[0-9.]+$ ]] || { echo "FAIL no IP address for $1" >&2; return 1; }
+  remote "sudo iptables -I DOCKER-USER -s $ip ! -d 172.16.0.0/12 -m comment --comment exchange-fault-$1 -j DROP"
+}
+unblock_egress() {
+  # shellcheck disable=SC2016 # expanded on the server
+  remote 'sudo iptables -S DOCKER-USER | grep -- "exchange-fault-'"$1"'" | sed "s/^-A/-D/" | while read -r rule; do eval sudo iptables "$rule"; done'
+}
+
 # dlq_total prints how many records sit in the dead-letter topics of the
 # phase 1 business topics.
 dlq_total() {
