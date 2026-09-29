@@ -165,6 +165,17 @@ func TestConsole(t *testing.T) {
 	if status, body := boss.do(http.MethodPost, "/admin/v1/approvals/"+id+"/decide", map[string]any{"approve": false, "reason": "again"}, true); status != http.StatusConflict || errCode(body) != "ADMIN_APPROVAL_DECIDED" {
 		t.Fatalf("second decision: %d %v", status, body)
 	}
+	// An insurance fund contribution is a request of its own kind.
+	status, body = fin.do(http.MethodPost, "/admin/v1/derivatives/insurance-fund/contributions",
+		map[string]string{"amount": "1000", "reason": "after the drill"}, true)
+	if status != http.StatusCreated || body["kind"] != domain.KindInsuranceFund || body["status"] != domain.ApprovalPending {
+		t.Fatalf("insurance contribution: %d %v", status, body)
+	}
+	fund, _ := body["id"].(string)
+	status, body = boss.do(http.MethodPost, "/admin/v1/approvals/"+fund+"/decide", map[string]any{"approve": true, "reason": "checked"}, true)
+	if status != http.StatusOK || body["status"] != domain.ApprovalExecuted || len(led.keys) != 2 || led.keys[1] != "approval:"+fund {
+		t.Fatalf("insurance approval: %d %v (ledger %v)", status, body, led.keys)
+	}
 	if status, _ := boss.do(http.MethodPost, "/admin/v1/logout", nil, true); status != http.StatusNoContent {
 		t.Fatalf("logout: %d", status)
 	}
@@ -182,9 +193,9 @@ func TestConsole(t *testing.T) {
 	if err := db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE topic = 'audit.events'`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	// created ×2, login ×2, login_failed, requested, approved, logout, disabled
-	if n != 9 {
-		t.Fatalf("%d audit events in the outbox, want 9", n)
+	// created ×2, login ×2, login_failed, requested ×2, approved ×2, logout, disabled
+	if n != 11 {
+		t.Fatalf("%d audit events in the outbox, want 11", n)
 	}
 	var admins string
 	if err := db.QueryRow(ctx, `SELECT string_agg(email || ':' || status || ':' || failed_attempts, ',' ORDER BY email) FROM admins`).Scan(&admins); err != nil {
