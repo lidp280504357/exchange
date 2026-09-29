@@ -350,3 +350,28 @@ func TestDepthAggregatesLevels(t *testing.T) {
 		t.Fatalf("empty book: %+v", empty)
 	}
 }
+
+// BenchmarkBook measures the book alone (§6.3 task 12: a pair needs 5,000
+// commands a second): a resting book of 200 levels a side, into which
+// each iteration places a crossing order, a resting one and a cancel.
+func BenchmarkBook(b *testing.B) {
+	b.ReportAllocs()
+	book := NewBook("BTC-USDT")
+	for i := range 200 {
+		book.Place(limit("maker", Buy, fmt.Sprintf("%d", 59_000-i), "1"))
+		book.Place(limit("maker", Sell, fmt.Sprintf("%d", 61_000+i), "1"))
+	}
+	rng := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // deterministic benchmark input
+	b.ResetTimer()
+	for i := 0; b.Loop(); i++ {
+		side, cross := Buy, "61000"
+		if i%2 == 1 {
+			side, cross = Sell, "59000"
+		}
+		book.Place(limit("taker", side, cross, "0.01"))
+		rest := limit("taker2", side, fmt.Sprintf("%d", 59_500+rng.IntN(1_000)), "0.01")
+		book.Place(rest)
+		book.Cancel(rest.ID, "taker2")
+	}
+	b.ReportMetric(float64(3*b.N)/b.Elapsed().Seconds(), "commands/s")
+}
