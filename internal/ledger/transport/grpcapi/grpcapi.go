@@ -3,11 +3,13 @@ package grpcapi
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/shopspring/decimal"
 
 	ledgerv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1"
 	"github.com/lidp280504357/exchange/internal/ledger/application"
+	"github.com/lidp280504357/exchange/internal/ledger/domain"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 )
 
@@ -179,4 +181,52 @@ func (s *Server) Adjust(ctx context.Context, req *ledgerv1.AdjustRequest) (*ledg
 		return nil, err
 	}
 	return &ledgerv1.AdjustResponse{Posting: posting(res)}, nil
+}
+
+// SettleFutures books a settlement step of a user's contract trading.
+func (s *Server) SettleFutures(ctx context.Context, req *ledgerv1.SettleFuturesRequest) (*ledgerv1.SettleFuturesResponse, error) {
+	r := domain.FuturesRequest{
+		IdemKey: req.GetIdempotencyKey(), UserID: req.GetUserId(), Asset: req.GetAsset(), Reference: req.GetReference(),
+	}
+	for i, m := range req.GetMoves() {
+		a, err := amount(m.GetAmount())
+		if err != nil {
+			return nil, apperr.Invalid(fmt.Sprintf("move %d: amount must be a decimal string", i+1))
+		}
+		move := domain.FuturesMove{
+			Type: m.GetType(), Amount: a, Kind: m.GetBalanceKind(), Partial: m.GetPartial(), EntryType: m.GetEntryType(),
+		}
+		if m.GetLimit() != "" {
+			l, err := amount(m.GetLimit())
+			if err != nil {
+				return nil, apperr.Invalid(fmt.Sprintf("move %d: limit must be a decimal string", i+1))
+			}
+			move.Limit = &l
+		}
+		r.Moves = append(r.Moves, move)
+	}
+	res, err := s.svc.SettleFutures(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	out := &ledgerv1.SettleFuturesResponse{Replayed: res.Replayed}
+	for _, o := range res.Outcomes {
+		out.Outcomes = append(out.Outcomes, &ledgerv1.FuturesOutcome{
+			JournalId: o.JournalID, UserAmount: o.User.String(), InsuranceAmount: o.Insurance.String(), WaivedAmount: o.Waived.String(),
+		})
+	}
+	return out, nil
+}
+
+// FundInsurance adds simulated funds to the insurance fund.
+func (s *Server) FundInsurance(ctx context.Context, req *ledgerv1.FundInsuranceRequest) (*ledgerv1.FundInsuranceResponse, error) {
+	a, err := amount(req.GetAmount())
+	if err != nil {
+		return nil, err
+	}
+	res, err := s.svc.FundInsurance(ctx, req.GetIdempotencyKey(), req.GetAsset(), a, req.GetActor(), req.GetReason())
+	if err != nil {
+		return nil, err
+	}
+	return &ledgerv1.FundInsuranceResponse{Posting: posting(res)}, nil
 }

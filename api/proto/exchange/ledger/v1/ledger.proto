@@ -42,6 +42,20 @@ service LedgerService {
   // calls it once two people approved (§5.12). Needs
   // ledger.manual_adjustment.
   rpc Adjust(AdjustRequest) returns (AdjustResponse);
+  // SettleFutures books one settlement step of a user's perpetual contract
+  // trading on the FUTURES account (requirements §11.7): the moves in
+  // order, one journal each, in one transaction. Moves that charge the
+  // user (FEE, LOSS, FUNDING_PAY) take at most the balance and the limit:
+  // the insurance fund pays the rest of a LOSS or FUNDING_PAY, the rest of
+  // a FEE is waived, so a trade the engine executed always settles unless
+  // the insurance fund is short too. Repeating a key returns the first
+  // outcomes.
+  rpc SettleFutures(SettleFuturesRequest) returns (SettleFuturesResponse);
+  // FundInsurance adds simulated funds to INSURANCE_FUND against
+  // ADJUSTMENT (INSURANCE_CONTRIBUTION) with an audit event; needs
+  // ledger.manual_adjustment. Real funds come on chain
+  // (FundSystemAccount).
+  rpc FundInsurance(FundInsuranceRequest) returns (FundInsuranceResponse);
 }
 
 message FreezeRequest {
@@ -188,5 +202,68 @@ message AdjustRequest {
 }
 
 message AdjustResponse {
+  Posting posting = 1;
+}
+
+// FuturesMove is one step of a futures settlement. Amounts are positive.
+message FuturesMove {
+  // UNFREEZE: the user's frozen to available (reservations, released
+  //   margin). FREEZE: available to frozen (margin added).
+  // FEE: the user to FEE_REVENUE.
+  // PROFIT: PNL_CLEARING to the user. LOSS: the user to PNL_CLEARING.
+  // FUNDING_PAY: the user to FUNDING_CLEARING. FUNDING_RECEIVE: back.
+  // INSURANCE: the user to INSURANCE_FUND (what a liquidation leaves).
+  string type = 1;
+  string amount = 2;
+  // AVAILABLE (default) or FROZEN: the user's balance the move takes from
+  // or gives to.
+  string balance_kind = 3;
+  // FEE, LOSS, FUNDING_PAY: the most the user pays, e.g. an isolated
+  // position's margin; empty for no bound but the balance.
+  string limit = 4;
+  // FREEZE: freeze what the available balance allows.
+  bool partial = 5;
+  // PROFIT, LOSS: LIQUIDATION_SETTLE or ADL_SETTLE instead of REALIZED_PNL.
+  string entry_type = 6;
+}
+
+message SettleFuturesRequest {
+  // The journals are keyed futures:<key>:<move index>.
+  string idempotency_key = 1;
+  string user_id = 2;
+  // The settlement asset, USDT.
+  string asset = 3;
+  // What is settled, e.g. "BTC-USDT-PERP trade <id>"; the journals' memo.
+  string reference = 4;
+  repeated FuturesMove moves = 5;
+}
+
+// FuturesOutcome is what one move did.
+message FuturesOutcome {
+  // Empty when nothing moved.
+  string journal_id = 1;
+  // What the user's balance received (positive) or gave (negative).
+  string user_amount = 2;
+  // What the insurance fund paid of a LOSS or FUNDING_PAY.
+  string insurance_amount = 3;
+  // What was not charged of a FEE or not frozen of a FREEZE.
+  string waived_amount = 4;
+}
+
+message SettleFuturesResponse {
+  // One per move, in order.
+  repeated FuturesOutcome outcomes = 1;
+  bool replayed = 2;
+}
+
+message FundInsuranceRequest {
+  string idempotency_key = 1;
+  string asset = 2;
+  string amount = 3;
+  string reason = 4;
+  string actor = 5;
+}
+
+message FundInsuranceResponse {
   Posting posting = 1;
 }

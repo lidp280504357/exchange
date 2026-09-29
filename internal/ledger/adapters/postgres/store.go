@@ -3,6 +3,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -239,4 +240,39 @@ func (r transfers) List(ctx context.Context, userID, beforeID string, limit int)
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+type futures repos
+
+func (r repos) Futures() ports.FuturesRepo { return futures(r) }
+
+func (r futures) ByKey(ctx context.Context, key string) (*domain.FuturesSettlement, error) {
+	var s domain.FuturesSettlement
+	var user uuid.UUID
+	var outcomes []byte
+	err := r.q.QueryRow(ctx, `SELECT idem_key, user_id, request_hash, reference, outcomes, created_at FROM futures_settlements
+		WHERE idem_key = $1`, key).Scan(&s.IdemKey, &user, &s.RequestHash, &s.Reference, &outcomes, &s.CreatedAt)
+	if pg.IsNoRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load futures settlement: %w", err)
+	}
+	if err := json.Unmarshal(outcomes, &s.Outcomes); err != nil {
+		return nil, fmt.Errorf("futures settlement %s: %w", key, err)
+	}
+	s.UserID = user.String()
+	return &s, nil
+}
+
+func (r futures) Insert(ctx context.Context, s domain.FuturesSettlement) error {
+	outcomes, err := json.Marshal(s.Outcomes)
+	if err != nil {
+		return err
+	}
+	if _, err := r.q.Exec(ctx, `INSERT INTO futures_settlements (idem_key, user_id, request_hash, reference, outcomes, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)`, s.IdemKey, s.UserID, s.RequestHash, s.Reference, outcomes, s.CreatedAt); err != nil {
+		return fmt.Errorf("insert futures settlement: %w", err)
+	}
+	return nil
 }

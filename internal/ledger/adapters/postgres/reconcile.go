@@ -7,7 +7,9 @@ import (
 	"time"
 )
 
-// Check names of the reconciliation (§5.9, §11.4 invariants 1, 2 and 5).
+// Check names of the reconciliation (§5.9, §11.4 invariants 1, 2 and 5;
+// invariant 6 of the contracts needs the positions and is
+// derivatives-service's).
 const (
 	CheckJournalBalanced      = "JOURNAL_BALANCED"
 	CheckAccountMatchesLines  = "ACCOUNT_MATCHES_LINES"
@@ -21,6 +23,12 @@ const (
 	// amounts of the engine's trades, and the fees charged equal theirs.
 	CheckTradeSettleMatches = "TRADE_SETTLE_MATCHES_TRADES"
 	CheckTradeFeeMatches    = "TRADE_FEE_MATCHES_TRADES"
+	// Per funding settlement (contract and funding time), payers paid at
+	// least what receivers got: FUNDING_CLEARING keeps only the rounding.
+	// derivatives-service keys the requests funding:<symbol>:<time>:...
+	CheckFundingBatches = "FUNDING_BATCHES_BALANCED"
+	// PNL_CLEARING moves only with realized profit and loss.
+	CheckPnLClearingEntries = "PNL_CLEARING_ONLY_PNL"
 )
 
 // Mismatch is one finding of a check.
@@ -83,6 +91,17 @@ var checks = []struct {
 		SELECT COALESCE(e.asset, b.asset), format('trades %s, TRADE_FEE %s', COALESCE(e.amount, 0), COALESCE(b.amount, 0))
 		FROM expected e FULL JOIN booked b ON b.asset = e.asset
 		WHERE COALESCE(e.amount, 0) <> COALESCE(b.amount, 0) LIMIT 100`},
+	{CheckFundingBatches, `SELECT batch, format('FUNDING_CLEARING net %s', net) FROM (
+			SELECT split_part(j.idem_key, ':', 3) || ' ' || split_part(j.idem_key, ':', 4) || ' ' || l.asset AS batch,
+				sum(l.amount) AS net
+			FROM journals j JOIN journal_lines l ON l.journal_id = j.id JOIN accounts a ON a.id = l.account_id
+			WHERE j.entry_type = 'FUNDING_PAYMENT' AND a.account_type = 'FUNDING_CLEARING' AND j.idem_key LIKE 'futures:funding:%'
+			GROUP BY 1) b
+		WHERE net < 0 LIMIT 100`},
+	{CheckPnLClearingEntries, `SELECT j.id::text, 'PNL_CLEARING in a ' || j.entry_type || ' journal'
+		FROM accounts a JOIN journal_lines l ON l.account_id = a.id JOIN journals j ON j.id = l.journal_id
+		WHERE a.account_type = 'PNL_CLEARING' AND j.entry_type NOT IN ('REALIZED_PNL', 'LIQUIDATION_SETTLE', 'ADL_SETTLE')
+		LIMIT 100`},
 }
 
 // Reconcile runs every check over the whole ledger and records each result

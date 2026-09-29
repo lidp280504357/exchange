@@ -19,6 +19,8 @@
 //	exchangectl ledger reconcile
 //	exchangectl ledger trades [--failed] [--limit N]
 //	exchangectl ledger retry-trades [--limit N]
+//	exchangectl ledger system [ASSET]
+//	exchangectl ledger insurance-fund --amount 100000 --reason "..." [--asset USDT] [--key K]
 //	exchangectl wallet sweep [--min 0.001] | fund --tx HASH [--account GAS_SUPPLY] | reconcile | checks | commands
 //	exchangectl wallet withdrawals [--status PENDING_REVIEW|ALL] | approve|reject <id> --reviewer NAME --reason TEXT
 //	exchangectl admin create --email E --name N --role ADMIN [--secrets-stdin] | list | disable <email> --reason TEXT
@@ -77,6 +79,10 @@ commands:
                               settled trades, newest first (--failed: the ones parked by a refusal)
   ledger retry-trades [--limit N]
                               settle the FAILED trades again once their cause is fixed
+  ledger system [ASSET]       the system accounts in ASSET (default USDT): insurance fund, PnL clearing, ...
+  ledger insurance-fund --amount X --reason TEXT [--asset USDT] [--key K]
+                              add simulated funds to INSURANCE_FUND against ADJUSTMENT
+                              (needs ledger.manual_adjustment; audited)
   wallet sweep [--min X]      sweep deposit addresses holding at least X (default the minimum deposit) to the hot wallet
   wallet fund --tx HASH [--account GAS_SUPPLY]
                               book the platform's transfer into the hot wallet to a system account

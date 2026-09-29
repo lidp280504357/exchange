@@ -106,6 +106,14 @@ func ledgerWith(ctx context.Context, dbs ledgerDBs, args []string, out io.Writer
 		return ledgerTrades(ctx, svc, args[1:], out)
 	case "retry-trades":
 		return ledgerRetryTrades(ctx, svc, args[1:], out)
+	case "system":
+		asset := "USDT"
+		if len(args) > 1 {
+			asset = strings.ToUpper(args[1])
+		}
+		return ledgerSystem(ctx, svc, asset, out)
+	case "insurance-fund":
+		return ledgerInsuranceFund(ctx, svc, args[1:], out)
 	default:
 		return fmt.Errorf("unknown ledger command %q", args[0])
 	}
@@ -216,5 +224,48 @@ func ledgerRetryTrades(ctx context.Context, svc *application.Service, args []str
 	for _, t := range res.Refused {
 		fmt.Fprintf(out, "  %s: %s %s\n", t.ID, t.ErrorCode, t.Error)
 	}
+	return nil
+}
+
+func ledgerSystem(ctx context.Context, svc *application.Service, asset string, out io.Writer) error {
+	list, err := svc.SystemBalances(ctx, asset)
+	if err != nil {
+		return err
+	}
+	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "ACCOUNT\tASSET\tAVAILABLE\tFROZEN")
+	for _, a := range list {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", a.Key.Type, a.Key.Asset, a.Available, a.Frozen)
+	}
+	return w.Flush()
+}
+
+// ledgerInsuranceFund seeds the insurance fund with simulated funds.
+func ledgerInsuranceFund(ctx context.Context, svc *application.Service, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("ledger insurance-fund", flag.ContinueOnError)
+	fs.SetOutput(out)
+	asset := fs.String("asset", "USDT", "asset code")
+	amount := fs.String("amount", "", "decimal amount to add")
+	reason := fs.String("reason", "", "why (required, goes to the audit log)")
+	key := fs.String("key", "", "idempotency key; repeat it to retry safely (default: a new one)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *amount == "" || *reason == "" {
+		fs.Usage()
+		return errors.New("--amount and --reason are required")
+	}
+	d, err := decimal.NewFromString(*amount)
+	if err != nil {
+		return fmt.Errorf("amount: %w", err)
+	}
+	if *key == "" {
+		*key = uuid.NewString()
+	}
+	res, err := svc.FundInsurance(ctx, *key, strings.ToUpper(*asset), d, actor(), *reason)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "journal %s (key %s, replayed %v)\n", res.JournalID, *key, res.Replayed)
 	return nil
 }

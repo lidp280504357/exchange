@@ -23,7 +23,7 @@ const (
 )
 
 // Account types (§11.4). Users hold SPOT and FUTURES; the rest are system
-// accounts, one per asset.
+// accounts, one per asset (PNL_CLEARING is in futures.go).
 const (
 	AccountSpot              = "SPOT"
 	AccountFutures           = "FUTURES"
@@ -72,7 +72,7 @@ var entryTypes = []string{
 
 var systemAccounts = []string{
 	AccountFeeRevenue, AccountInsuranceFund, AccountDepositPending, AccountWithdrawalPending, AccountUnclaimedDeposit,
-	AccountFundingClearing, AccountMarketMaker, AccountGasSupply, AccountAdjustment,
+	AccountFundingClearing, AccountMarketMaker, AccountGasSupply, AccountAdjustment, AccountPnLClearing,
 }
 
 // Errors (appendix C).
@@ -114,9 +114,9 @@ func (k AccountKey) Validate() error {
 }
 
 // MayGoNegative reports whether the account is a counterparty allowed below
-// zero (invariant 3).
+// zero (invariant 3): DEPOSIT_PENDING, ADJUSTMENT and PNL_CLEARING.
 func (k AccountKey) MayGoNegative() bool {
-	return k.Type == AccountDepositPending || k.Type == AccountAdjustment
+	return k.Type == AccountDepositPending || k.Type == AccountAdjustment || k.Type == AccountPnLClearing
 }
 
 func (k AccountKey) String() string {

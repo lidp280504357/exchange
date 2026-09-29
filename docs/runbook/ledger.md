@@ -4,9 +4,9 @@
 
 ## 模型
 
-- 账户 `ledger.accounts`：（所有者类型, 所有者, 账户类型, 资产）唯一。用户只有 `SPOT`、`FUTURES`；系统账户 `FEE_REVENUE`、`INSURANCE_FUND`、`DEPOSIT_PENDING`、`WITHDRAWAL_PENDING`、`UNCLAIMED_DEPOSIT`、`FUNDING_CLEARING`、`MARKET_MAKER`、`GAS_SUPPLY`、`ADJUSTMENT` 各资产一个。首次记账时自动建户。
+- 账户 `ledger.accounts`：（所有者类型, 所有者, 账户类型, 资产）唯一。用户只有 `SPOT`、`FUTURES`；系统账户 `FEE_REVENUE`、`INSURANCE_FUND`、`DEPOSIT_PENDING`、`WITHDRAWAL_PENDING`、`UNCLAIMED_DEPOSIT`、`FUNDING_CLEARING`、`MARKET_MAKER`、`GAS_SUPPLY`、`ADJUSTMENT`、`PNL_CLEARING`（合约已实现盈亏的对手方，阶段 3）各资产一个。首次记账时自动建户。
 - 分录 `journals` + `journal_lines`：**只追加**（触发器禁止 UPDATE/DELETE/TRUNCATE）；一条 journal 内同一资产的 line 之和为 0（提交时由约束触发器检查）；每条 line 带写入后的 `available_after`/`frozen_after` 与账户版本号。
-- 余额非负（不变量 3）由表约束兜底：只有 `DEPOSIT_PENDING` 与 `ADJUSTMENT` 可为负。
+- 余额非负（不变量 3）由表约束兜底：只有 `DEPOSIT_PENDING`、`ADJUSTMENT` 与 `PNL_CLEARING` 可为负。
 - 幂等：每条 journal 有唯一 `idem_key` 与内容摘要；同键同内容返回第一次的结果（`replayed`），同键不同内容返回 409 `COMMON_IDEMPOTENCY_CONFLICT`。gRPC 调用方的键按用户隔离（`u:<user>:<key>`）。
 - 并发：一次记账按固定顺序锁住涉及的账户（`SELECT ... FOR UPDATE`），先在内存算完全部余额再写库，余额不足时什么都不写（`LEDGER_INSUFFICIENT_BALANCE`，422）。超精度金额直接拒绝（`LEDGER_AMOUNT_PRECISION`，400），精度来自 instrument-service。
 - 每条 journal 发 `ledger.EntryPosted`（含全部 line，ClickHouse `ledger_entries` 由它投影），每个受影响的用户账户发 `ledger.BalanceChanged`（WebSocket `balances` 频道用）。
@@ -58,6 +58,32 @@ ssh exchange sudo docker exec exchange-infra-ledger-service-1 /app/exchangectl l
 
 首次部署时消费组从头读 `trade.events`，任务 3 以来留在冻结里的成交资金一次结清。
 
+## 合约结算
+
+需求 §11.7，实施计划 §7.3 任务 4。合约不走上面的成交消费：仓位在 derivatives-service，它把每一步（一笔成交的一方、一次资金费、一次强平或 ADL、追加保证金）换算成对用户 `FUTURES` 账户（USDT）的一组**动作**，调 gRPC `SettleFutures`；账本在一个事务里按顺序记账，每个动作一条 journal（键 `futures:<请求键>:<序号>`），并把结果写进 `ledger.futures_settlements`：同键同内容返回第一次的结果（`replayed`），同键不同内容 409。
+
+| 动作 | 分录 | 用户一方 | 对手 |
+|---|---|---|---|
+| `UNFREEZE` | `ORDER_UNFREEZE` | 冻结 → 可用（订单预留、平仓释放的仓位保证金） | — |
+| `FREEZE` | `ORDER_FREEZE` | 可用 → 冻结（追加保证金）；`partial` 时冻结可用余额允许的部分 | — |
+| `FEE` | `TRADE_FEE` | 付手续费 | `FEE_REVENUE` |
+| `PROFIT` | `REALIZED_PNL`（强平、ADL 为 `LIQUIDATION_SETTLE`、`ADL_SETTLE`） | 收已实现盈利 | `PNL_CLEARING` 付出 |
+| `LOSS` | 同上 | 付已实现亏损 | `PNL_CLEARING` 收入；用户付不足的部分由 `INSURANCE_FUND` 付 |
+| `FUNDING_PAY` / `FUNDING_RECEIVE` | `FUNDING_PAYMENT` | 付 / 收资金费 | `FUNDING_CLEARING`；付不足的部分由 `INSURANCE_FUND` 付 |
+| `INSURANCE` | `INSURANCE_CONTRIBUTION` | 强平后剩下的保证金 | `INSURANCE_FUND` |
+
+- 每个动作可选用户的可用或冻结余额（逐仓的保证金在冻结里）。
+- 向用户收钱的动作（`FEE`、`LOSS`、`FUNDING_PAY`）最多收到余额和 `limit`（例如逐仓仓位的保证金）为止：亏损与资金费的缺口由保险基金补，手续费的缺口免收。所以引擎已经成交的交易总能结算；只有保险基金也不够时整个请求被拒（`LEDGER_INSUFFICIENT_BALANCE`），什么都不记，由合约服务停住等人工处理。
+- 精确动作（`UNFREEZE`、`FREEZE`、`INSURANCE`）余额不够就拒绝：说明合约服务的保证金账和账本不一致，是 P1。
+- `FUTURES` 冻结 = 挂单的初始保证金与手续费预留 + 所有仓位的保证金；未实现盈亏不入账。
+- `PNL_CLEARING` 可为负。仓位按入场成本记账时，每个合约恒有 `PNL_CLEARING + Σ多头成本 − Σ空头成本 = 0`（不变量 6），需要仓位数据，由 derivatives-service 对账。
+- 保险基金：测试环境用模拟资金注资（`ADJUSTMENT` → `INSURANCE_FUND`，`INSURANCE_CONTRIBUTION`，需开关 `ledger.manual_adjustment`，同事务写审计事件）；真实资金走链上 `FundSystemAccount`。
+
+```bash
+ssh exchange sudo docker exec exchange-infra-ledger-service-1 /app/exchangectl ledger insurance-fund --amount 1000000 --reason "测试环境保险基金" --key insurance-seed-1
+ssh exchange sudo docker exec exchange-infra-ledger-service-1 /app/exchangectl ledger system USDT
+```
+
 ## 对账
 
 ledger-service 每 `RECONCILE_INTERVAL`（默认 1 小时，启动 1 分钟后先跑一次）检查，结果写 `ledger.reconciliation_runs`，指标 `ledger_reconcile_mismatches{check}`：
@@ -71,6 +97,8 @@ ledger-service 每 `RECONCILE_INTERVAL`（默认 1 小时，启动 1 分钟后�
 | `TRADES_NUMBERED` | 每个交易对的成交编号（引擎按交易对从 1 计数）连续、不重复：有缺口说明漏了成交。编号字段出现前的成交记为 0，先计入 |
 | `TRADE_SETTLE_MATCHES_TRADES` | 不变量 5：按资产，`TRADE_SETTLE` 的入账合计 = 成交数量（base）与成交额（quote）的合计 |
 | `TRADE_FEE_MATCHES_TRADES` | 按资产，`TRADE_FEE` 进 `FEE_REVENUE` 的合计 = 成交事件里的手续费合计 |
+| `FUNDING_BATCHES_BALANCED` | 每次资金费结算（合约 + 结算时间，按请求键 `funding:<合约>:<时间>:...` 归组）付出的不少于收到的：`FUNDING_CLEARING` 只留舍入零头 |
+| `PNL_CLEARING_ONLY_PNL` | `PNL_CLEARING` 只出现在 `REALIZED_PNL`、`LIQUIDATION_SETTLE`、`ADL_SETTLE` 分录里 |
 
 任何非零都是 P1：错误日志 `ledger invariant broken`。提现在阶段 2 上线后按资产自动暂停。手工立即对账：
 

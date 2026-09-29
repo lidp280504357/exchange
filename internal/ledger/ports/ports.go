@@ -24,6 +24,7 @@ type Repos interface {
 	Journals() JournalRepo
 	Transfers() TransferRepo
 	Trades() TradeRepo
+	Futures() FuturesRepo
 	// Emit queues an event on topic, keyed by aggregateID.
 	Emit(ctx context.Context, topic string, msg proto.Message, aggregateType, aggregateID string) error
 }
@@ -72,6 +73,13 @@ type TradeRepo interface {
 	// List returns up to limit trades, newest first, optionally of one
 	// status.
 	List(ctx context.Context, status string, limit int) ([]domain.Trade, error)
+}
+
+// FuturesRepo stores the settlement requests of derivatives-service.
+type FuturesRepo interface {
+	// ByKey returns the request booked under key, or nil.
+	ByKey(ctx context.Context, key string) (*domain.FuturesSettlement, error)
+	Insert(ctx context.Context, s domain.FuturesSettlement) error
 }
 
 // Assets tells the precision of an asset (instrument-service); unknown

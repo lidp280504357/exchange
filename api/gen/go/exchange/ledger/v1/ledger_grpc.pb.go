@@ -29,6 +29,8 @@ const (
 	LedgerService_FundSystemAccount_FullMethodName = "/exchange.ledger.v1.LedgerService/FundSystemAccount"
 	LedgerService_GetSystemBalances_FullMethodName = "/exchange.ledger.v1.LedgerService/GetSystemBalances"
 	LedgerService_Adjust_FullMethodName            = "/exchange.ledger.v1.LedgerService/Adjust"
+	LedgerService_SettleFutures_FullMethodName     = "/exchange.ledger.v1.LedgerService/SettleFutures"
+	LedgerService_FundInsurance_FullMethodName     = "/exchange.ledger.v1.LedgerService/FundInsurance"
 )
 
 // LedgerServiceClient is the client API for LedgerService service.
@@ -75,6 +77,20 @@ type LedgerServiceClient interface {
 	// calls it once two people approved (§5.12). Needs
 	// ledger.manual_adjustment.
 	Adjust(ctx context.Context, in *AdjustRequest, opts ...grpc.CallOption) (*AdjustResponse, error)
+	// SettleFutures books one settlement step of a user's perpetual contract
+	// trading on the FUTURES account (requirements §11.7): the moves in
+	// order, one journal each, in one transaction. Moves that charge the
+	// user (FEE, LOSS, FUNDING_PAY) take at most the balance and the limit:
+	// the insurance fund pays the rest of a LOSS or FUNDING_PAY, the rest of
+	// a FEE is waived, so a trade the engine executed always settles unless
+	// the insurance fund is short too. Repeating a key returns the first
+	// outcomes.
+	SettleFutures(ctx context.Context, in *SettleFuturesRequest, opts ...grpc.CallOption) (*SettleFuturesResponse, error)
+	// FundInsurance adds simulated funds to INSURANCE_FUND against
+	// ADJUSTMENT (INSURANCE_CONTRIBUTION) with an audit event; needs
+	// ledger.manual_adjustment. Real funds come on chain
+	// (FundSystemAccount).
+	FundInsurance(ctx context.Context, in *FundInsuranceRequest, opts ...grpc.CallOption) (*FundInsuranceResponse, error)
 }
 
 type ledgerServiceClient struct {
@@ -185,6 +201,26 @@ func (c *ledgerServiceClient) Adjust(ctx context.Context, in *AdjustRequest, opt
 	return out, nil
 }
 
+func (c *ledgerServiceClient) SettleFutures(ctx context.Context, in *SettleFuturesRequest, opts ...grpc.CallOption) (*SettleFuturesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SettleFuturesResponse)
+	err := c.cc.Invoke(ctx, LedgerService_SettleFutures_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ledgerServiceClient) FundInsurance(ctx context.Context, in *FundInsuranceRequest, opts ...grpc.CallOption) (*FundInsuranceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FundInsuranceResponse)
+	err := c.cc.Invoke(ctx, LedgerService_FundInsurance_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LedgerServiceServer is the server API for LedgerService service.
 // All implementations must embed UnimplementedLedgerServiceServer
 // for forward compatibility.
@@ -229,6 +265,20 @@ type LedgerServiceServer interface {
 	// calls it once two people approved (§5.12). Needs
 	// ledger.manual_adjustment.
 	Adjust(context.Context, *AdjustRequest) (*AdjustResponse, error)
+	// SettleFutures books one settlement step of a user's perpetual contract
+	// trading on the FUTURES account (requirements §11.7): the moves in
+	// order, one journal each, in one transaction. Moves that charge the
+	// user (FEE, LOSS, FUNDING_PAY) take at most the balance and the limit:
+	// the insurance fund pays the rest of a LOSS or FUNDING_PAY, the rest of
+	// a FEE is waived, so a trade the engine executed always settles unless
+	// the insurance fund is short too. Repeating a key returns the first
+	// outcomes.
+	SettleFutures(context.Context, *SettleFuturesRequest) (*SettleFuturesResponse, error)
+	// FundInsurance adds simulated funds to INSURANCE_FUND against
+	// ADJUSTMENT (INSURANCE_CONTRIBUTION) with an audit event; needs
+	// ledger.manual_adjustment. Real funds come on chain
+	// (FundSystemAccount).
+	FundInsurance(context.Context, *FundInsuranceRequest) (*FundInsuranceResponse, error)
 	mustEmbedUnimplementedLedgerServiceServer()
 }
 
@@ -268,6 +318,12 @@ func (UnimplementedLedgerServiceServer) GetSystemBalances(context.Context, *GetS
 }
 func (UnimplementedLedgerServiceServer) Adjust(context.Context, *AdjustRequest) (*AdjustResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Adjust not implemented")
+}
+func (UnimplementedLedgerServiceServer) SettleFutures(context.Context, *SettleFuturesRequest) (*SettleFuturesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SettleFutures not implemented")
+}
+func (UnimplementedLedgerServiceServer) FundInsurance(context.Context, *FundInsuranceRequest) (*FundInsuranceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method FundInsurance not implemented")
 }
 func (UnimplementedLedgerServiceServer) mustEmbedUnimplementedLedgerServiceServer() {}
 func (UnimplementedLedgerServiceServer) testEmbeddedByValue()                       {}
@@ -470,6 +526,42 @@ func _LedgerService_Adjust_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LedgerService_SettleFutures_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SettleFuturesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LedgerServiceServer).SettleFutures(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LedgerService_SettleFutures_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LedgerServiceServer).SettleFutures(ctx, req.(*SettleFuturesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _LedgerService_FundInsurance_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FundInsuranceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LedgerServiceServer).FundInsurance(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LedgerService_FundInsurance_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LedgerServiceServer).FundInsurance(ctx, req.(*FundInsuranceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LedgerService_ServiceDesc is the grpc.ServiceDesc for LedgerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -516,6 +608,14 @@ var LedgerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Adjust",
 			Handler:    _LedgerService_Adjust_Handler,
+		},
+		{
+			MethodName: "SettleFutures",
+			Handler:    _LedgerService_SettleFutures_Handler,
+		},
+		{
+			MethodName: "FundInsurance",
+			Handler:    _LedgerService_FundInsurance_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
