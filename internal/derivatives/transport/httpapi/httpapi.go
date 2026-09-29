@@ -49,6 +49,9 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Delete("/v1/derivatives/orders/{id}", h.cancel)
 		r.Get("/v1/derivatives/fills", h.fills)
 		r.Get("/v1/derivatives/funding", h.funding)
+		r.Post("/v1/derivatives/conditional-orders", h.createConditional)
+		r.Get("/v1/derivatives/conditional-orders", h.conditionals)
+		r.Delete("/v1/derivatives/conditional-orders/{id}", h.cancelConditional)
 	})
 }
 
@@ -428,4 +431,92 @@ func (h *Handler) funding(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "next_cursor": text(next)})
+}
+
+type conditionalJSON struct {
+	ConditionalID string  `json:"conditional_id"`
+	Symbol        string  `json:"symbol"`
+	PositionSide  string  `json:"position_side"`
+	Side          string  `json:"side"`
+	Kind          string  `json:"kind"`
+	TriggerPrice  string  `json:"trigger_price"`
+	TriggerBy     string  `json:"trigger_by"`
+	OrderType     string  `json:"order_type"`
+	Price         *string `json:"price"`
+	Quantity      *string `json:"quantity"`
+	Status        string  `json:"status"`
+	Reason        *string `json:"reason"`
+	OrderID       *string `json:"order_id"`
+	CreatedAt     string  `json:"created_at"`
+	UpdatedAt     string  `json:"updated_at"`
+}
+
+func toConditionalJSON(c domain.Conditional) conditionalJSON {
+	return conditionalJSON{
+		ConditionalID: c.ID, Symbol: c.Symbol, PositionSide: string(c.PositionSide), Side: string(c.Side), Kind: c.Kind,
+		TriggerPrice: c.TriggerPrice.String(), TriggerBy: c.TriggerBy, OrderType: string(c.OrderType), Price: optional(c.Price),
+		Quantity: optional(c.Qty), Status: c.Status, Reason: text(c.Reason), OrderID: text(c.OrderID),
+		CreatedAt: stamp(c.CreatedAt), UpdatedAt: stamp(c.UpdatedAt),
+	}
+}
+
+func (h *Handler) createConditional(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Symbol       string `json:"symbol"`
+		PositionSide string `json:"position_side"`
+		Kind         string `json:"kind"`
+		TriggerPrice string `json:"trigger_price"`
+		TriggerBy    string `json:"trigger_by"`
+		OrderType    string `json:"order_type"`
+		Price        string `json:"price"`
+		Quantity     string `json:"quantity"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	req := domain.ConditionalRequest{
+		UserID: httpx.UserID(r), Symbol: strings.ToUpper(body.Symbol), PositionSide: domain.PositionSide(body.PositionSide),
+		Kind: body.Kind, TriggerBy: body.TriggerBy, OrderType: domain.Type(body.OrderType),
+	}
+	var err error
+	if req.TriggerPrice, err = decimalField("trigger_price", body.TriggerPrice, true); err == nil {
+		if req.Price, err = decimalField("price", body.Price, false); err == nil {
+			req.Qty, err = decimalField("quantity", body.Quantity, false)
+		}
+	}
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	c, err := h.Svc.CreateConditional(r.Context(), req)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusCreated, toConditionalJSON(c))
+}
+
+func (h *Handler) conditionals(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	list, next, err := h.Svc.Conditionals(r.Context(), httpx.UserID(r), strings.ToUpper(q.Get("symbol")), q.Get("status"), q.Get("cursor"), limit)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out := make([]conditionalJSON, 0, len(list))
+	for _, c := range list {
+		out = append(out, toConditionalJSON(c))
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "next_cursor": text(next)})
+}
+
+func (h *Handler) cancelConditional(w http.ResponseWriter, r *http.Request) {
+	c, err := h.Svc.CancelConditional(r.Context(), httpx.UserID(r), chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, toConditionalJSON(c))
 }

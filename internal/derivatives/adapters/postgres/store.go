@@ -375,6 +375,18 @@ func (r fills) OfUser(ctx context.Context, userID, symbol, before string, limit 
 	return out, rows.Err()
 }
 
+func (r fills) LastPrice(ctx context.Context, symbol string) (decimal.Decimal, error) {
+	var p decimal.Decimal
+	err := r.q.QueryRow(ctx, `SELECT price FROM fills WHERE symbol = $1 AND NOT liquidation ORDER BY executed_at DESC LIMIT 1`, symbol).Scan(&p)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return decimal.Zero, nil
+	}
+	if err != nil {
+		return decimal.Zero, fmt.Errorf("last fill price: %w", err)
+	}
+	return p, nil
+}
+
 type pending repos
 
 func (r pending) Insert(ctx context.Context, p ports.PendingSettlement) error {
@@ -651,4 +663,90 @@ func (r cross) SetWarnedAt(ctx context.Context, userID string, at time.Time) err
 		return fmt.Errorf("save cross account: %w", err)
 	}
 	return nil
+}
+
+type conditionals repos
+
+func (r repos) Conditionals() ports.ConditionalRepo { return conditionals(r) }
+
+const conditionalColumns = `conditional_id, user_id, symbol, position_side, side, kind, trigger_price, trigger_by, order_type,
+	coalesce(price, 0), coalesce(quantity, 0), status, reason, coalesce(order_id::text, ''), created_at, updated_at`
+
+func scanConditional(row pgx.Row) (domain.Conditional, error) {
+	var c domain.Conditional
+	err := row.Scan(&c.ID, &c.UserID, &c.Symbol, &c.PositionSide, &c.Side, &c.Kind, &c.TriggerPrice, &c.TriggerBy, &c.OrderType,
+		&c.Price, &c.Qty, &c.Status, &c.Reason, &c.OrderID, &c.CreatedAt, &c.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Conditional{}, domain.ErrOrderNotFound
+	}
+	if err != nil {
+		return domain.Conditional{}, fmt.Errorf("scan conditional order: %w", err)
+	}
+	return c, nil
+}
+
+func nullDecimal(d decimal.Decimal) decimal.NullDecimal {
+	return decimal.NullDecimal{Decimal: d, Valid: !d.IsZero()}
+}
+
+func (r conditionals) Insert(ctx context.Context, c domain.Conditional) error {
+	if _, err := r.q.Exec(ctx, `INSERT INTO conditional_orders (conditional_id, user_id, symbol, position_side, side, kind,
+		trigger_price, trigger_by, order_type, price, quantity, status, reason, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+		c.ID, c.UserID, c.Symbol, c.PositionSide, c.Side, c.Kind, c.TriggerPrice, c.TriggerBy, c.OrderType, nullDecimal(c.Price),
+		nullDecimal(c.Qty), c.Status, c.Reason, c.CreatedAt, c.UpdatedAt); err != nil {
+		return fmt.Errorf("insert conditional order: %w", err)
+	}
+	return nil
+}
+
+func (r conditionals) Get(ctx context.Context, id string) (domain.Conditional, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return domain.Conditional{}, domain.ErrOrderNotFound
+	}
+	return scanConditional(r.q.QueryRow(ctx, `SELECT `+conditionalColumns+` FROM conditional_orders WHERE conditional_id = $1`, id))
+}
+
+func (r conditionals) Update(ctx context.Context, c domain.Conditional) error {
+	var order any
+	if c.OrderID != "" {
+		order = c.OrderID
+	}
+	if _, err := r.q.Exec(ctx, `UPDATE conditional_orders SET status = $2, reason = $3, order_id = $4, updated_at = $5
+		WHERE conditional_id = $1`, c.ID, c.Status, c.Reason, order, c.UpdatedAt); err != nil {
+		return fmt.Errorf("update conditional order: %w", err)
+	}
+	return nil
+}
+
+func (r conditionals) query(ctx context.Context, sql string, args ...any) ([]domain.Conditional, error) {
+	rows, err := r.q.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("load conditional orders: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.Conditional
+	for rows.Next() {
+		c, err := scanConditional(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (r conditionals) Active(ctx context.Context, symbol string) ([]domain.Conditional, error) {
+	return r.query(ctx, `SELECT `+conditionalColumns+` FROM conditional_orders WHERE status = 'ACTIVE' AND ($1 = '' OR symbol = $1)
+		ORDER BY conditional_id`, symbol)
+}
+
+func (r conditionals) OfUser(ctx context.Context, userID, symbol, status, before string, limit int) ([]domain.Conditional, error) {
+	var cursor any // NULL: the first page
+	if before != "" {
+		cursor = before
+	}
+	return r.query(ctx, `SELECT `+conditionalColumns+` FROM conditional_orders WHERE user_id = $1 AND ($2 = '' OR symbol = $2)
+		AND ($3 = '' OR status = $3) AND ($4::uuid IS NULL OR conditional_id < $4::uuid)
+		ORDER BY conditional_id DESC LIMIT $5`, userID, symbol, status, cursor, limit)
 }

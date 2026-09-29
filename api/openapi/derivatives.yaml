@@ -342,6 +342,114 @@ paths:
                     type: [string, 'null']
         default:
           $ref: './common.yaml#/components/responses/Error'
+  /v1/derivatives/conditional-orders:
+    post:
+      operationId: createConditionalOrder
+      summary: Place a take-profit or stop-loss on an open position
+      description: |
+        Waits until the trigger price is reached by the mark price
+        (trigger_by MARK, the default) or the last trade price (LAST), then
+        places an order that only closes the position: a market order
+        (protected IOC, the default) or a limit order at price, for
+        quantity or, without it, the whole position left. A long's
+        take-profit triggers at or above the trigger, its stop-loss at or
+        below; a short's the other way round. A trigger the price already
+        reached fails with DERIV_TRIGGER_IMMEDIATE; without a position,
+        DERIV_NO_POSITION. At most 20 active per contract.
+      tags: [derivatives]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [symbol, kind, trigger_price]
+              additionalProperties: false
+              properties:
+                symbol:
+                  type: string
+                position_side:
+                  type: string
+                  enum: [BOTH, LONG, SHORT]
+                  description: BOTH (the default) in one-way mode.
+                kind:
+                  type: string
+                  enum: [TAKE_PROFIT, STOP_LOSS]
+                trigger_price:
+                  $ref: './market.yaml#/components/schemas/Decimal'
+                trigger_by:
+                  type: string
+                  enum: [MARK, LAST]
+                order_type:
+                  type: string
+                  enum: [MARKET, LIMIT]
+                price:
+                  $ref: './market.yaml#/components/schemas/Decimal'
+                quantity:
+                  $ref: './market.yaml#/components/schemas/Decimal'
+      responses:
+        '201':
+          description: Waiting for its trigger.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConditionalOrder'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+    get:
+      operationId: listConditionalOrders
+      summary: The caller's take-profit and stop-loss orders, newest first
+      tags: [derivatives]
+      parameters:
+        - name: symbol
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [ACTIVE, TRIGGERED, CANCELED, FAILED]
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ConditionalOrder'
+                  next_cursor:
+                    type: [string, 'null']
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/derivatives/conditional-orders/{conditional_id}:
+    delete:
+      operationId: cancelConditionalOrder
+      summary: Cancel an active take-profit or stop-loss
+      tags: [derivatives]
+      parameters:
+        - name: conditional_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Canceled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConditionalOrder'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
   /v1/derivatives/funding:
     get:
       operationId: listFundingPayments
@@ -555,6 +663,54 @@ components:
           type: [string, 'null']
         reject_reason:
           type: [string, 'null']
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ConditionalOrder:
+      type: object
+      required: [conditional_id, symbol, position_side, side, kind, trigger_price, trigger_by, order_type, price, quantity,
+        status, reason, order_id, created_at, updated_at]
+      properties:
+        conditional_id:
+          type: string
+          format: uuid
+        symbol:
+          type: string
+        position_side:
+          type: string
+          enum: [BOTH, LONG, SHORT]
+        side:
+          type: string
+          enum: [BUY, SELL]
+          description: The side of the order it places.
+        kind:
+          type: string
+          enum: [TAKE_PROFIT, STOP_LOSS]
+        trigger_price:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        trigger_by:
+          type: string
+          enum: [MARK, LAST]
+        order_type:
+          type: string
+          enum: [MARKET, LIMIT]
+        price:
+          $ref: './market.yaml#/components/schemas/NullableDecimal'
+        quantity:
+          description: Null closes the whole position.
+          $ref: './market.yaml#/components/schemas/NullableDecimal'
+        status:
+          type: string
+          enum: [ACTIVE, TRIGGERED, CANCELED, FAILED]
+        reason:
+          type: [string, 'null']
+          description: USER or NO_POSITION when canceled, the refusal's code when FAILED.
+        order_id:
+          type: [string, 'null']
+          description: The order it placed when TRIGGERED.
         created_at:
           type: string
           format: date-time

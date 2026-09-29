@@ -63,6 +63,14 @@ SELECT symbol, funding_time, status, funding_rate, mark_price, positions FROM de
 SELECT count(*) FILTER (WHERE settled_at IS NULL) AS waiting, sum(amount) AS net FROM derivatives.funding_payments WHERE funding_time = '...';
 ```
 
+## 止盈止损
+
+实施计划 §7.3 任务 8。`POST /v1/derivatives/conditional-orders` 对一个未平仓位挂止盈（`TAKE_PROFIT`）或止损（`STOP_LOSS`）条件单（`derivatives.conditional_orders`），每个合约最多 20 个活动的：
+
+- 触发价格：标记价（`trigger_by=MARK`，默认，需新鲜）或最新成交价（`LAST`，服务重启后先取最近一笔合约成交）。多头的止盈在价格 ≥ 触发价时触发、止损在 ≤ 时触发；空头相反。下单时价格已经越过触发价会被拒（`DERIV_TRIGGER_IMMEDIATE`）。
+- 触发后（每秒检查一次）按条件单下一张只平仓的订单：市价（受保护的 IOC，默认）或给定价格的限价单；数量为条件单的数量，不填则平掉剩余全部，且不超过当时仓位。订单 `kind` 为 `TAKE_PROFIT`/`STOP_LOSS`，`client_order_id` 是条件单 ID，所以崩溃后重试不会重复下单。
+- 状态：`ACTIVE` → `TRIGGERED`（带所下订单 ID），或 `FAILED`（下单被拒，`reason` 是错误码，例如仓位正在强平），或 `CANCELED`（用户撤销 `USER`，或触发时仓位已平或已反向 `NO_POSITION`）。
+
 ## 强平与 ADL
 
 实施计划 §7.3 任务 7。监控循环每秒按新鲜标记价检查一次（`Monitor`）：
@@ -120,8 +128,10 @@ REST（经网关 `/v1/derivatives/*`，需登录）：
 | `POST /v1/derivatives/positions/{symbol}/margin` | 逐仓追加 / 减少保证金 |
 | `POST/GET/DELETE /v1/derivatives/orders`、`GET/DELETE /v1/derivatives/orders/{id}` | 下单、订单列表、撤单 |
 | `GET /v1/derivatives/fills?symbol=` | 成交（角色、平仓数量、手续费、已实现盈亏、是否强平、是否已记账） |
+| `GET /v1/derivatives/funding?symbol=` | 资金费收付记录 |
+| `POST/GET /v1/derivatives/conditional-orders`、`DELETE /v1/derivatives/conditional-orders/{id}` | 止盈止损条件单 |
 
-WebSocket 私有频道：`orders`（合约订单与现货订单同一频道，按 `symbol` 区分）、`fills`（合约成交带 `position_side`、`closed_quantity`、`realized_pnl`，手续费资产 USDT）、`positions`（`event` 为 OPEN、INCREASE、REDUCE、CLOSE、FLIP、MARGIN、FUNDING、LEVERAGE）。
+WebSocket 私有频道：`orders`（合约订单与现货订单同一频道，按 `symbol` 区分）、`fills`（合约成交带 `position_side`、`closed_quantity`、`realized_pnl`，手续费资产 USDT）、`positions`（`event` 为 OPEN、INCREASE、REDUCE、CLOSE、FLIP、MARGIN、FUNDING、LEVERAGE）、`risk`（`event` 为 WARNING、STARTED、LIQUIDATED、ADL）。
 
 ## 测试服设置
 

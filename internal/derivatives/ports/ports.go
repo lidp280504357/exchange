@@ -34,6 +34,7 @@ type Repos interface {
 	Runs() RunRepo
 	Funding() FundingRepo
 	Cross() CrossRepo
+	Conditionals() ConditionalRepo
 	// Emit queues an event (or an engine command) on topic, keyed by
 	// aggregateID.
 	Emit(ctx context.Context, topic string, msg proto.Message, aggregateType, aggregateID string) error
@@ -133,6 +134,19 @@ type FundingRates interface {
 	Rate(ctx context.Context, symbol string, at time.Time) (rate, mark decimal.Decimal, found bool, err error)
 }
 
+// ConditionalRepo stores take-profit and stop-loss orders.
+type ConditionalRepo interface {
+	Insert(ctx context.Context, c domain.Conditional) error
+	// Get returns the conditional order, or domain.ErrOrderNotFound.
+	Get(ctx context.Context, id string) (domain.Conditional, error)
+	Update(ctx context.Context, c domain.Conditional) error
+	// Active returns the active conditional orders of symbol ("" for all).
+	Active(ctx context.Context, symbol string) ([]domain.Conditional, error)
+	// OfUser returns a page of the user's conditional orders, newest first,
+	// of one status when status is set.
+	OfUser(ctx context.Context, userID, symbol, status, before string, limit int) ([]domain.Conditional, error)
+}
+
 // CrossRepo stores the warnings of cross accounts.
 type CrossRepo interface {
 	// WarnedAt returns when the user's cross account was warned, zero when
@@ -156,6 +170,9 @@ type FillRepo interface {
 	// OfUser returns a page of the user's fills, newest first; before is
 	// "<trade id>:<side>" of the previous page's last fill.
 	OfUser(ctx context.Context, userID, symbol, before string, limit int) ([]domain.Fill, error)
+	// LastPrice returns the price of the contract's latest fill, zero when
+	// there is none.
+	LastPrice(ctx context.Context, symbol string) (decimal.Decimal, error)
 }
 
 // PendingSettlement is a ledger settlement the ledger refused.

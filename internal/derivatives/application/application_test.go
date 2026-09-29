@@ -776,3 +776,71 @@ func TestACrossAccountIsLiquidatedTogether(t *testing.T) {
 	}
 	r.reconcile(t)
 }
+
+func TestTakeProfitAndStopLoss(t *testing.T) {
+	r := setup(t)
+	ctx := context.Background()
+	alice, bob := uuid.NewString(), uuid.NewString()
+	r.fund(alice, "10000")
+	r.fund(bob, "10000")
+	long := r.place(t, alice, domain.Buy, "60000", "0.2", false)
+	short := r.place(t, bob, domain.Sell, "60000", "0.2", false)
+	r.trade(t, long, short, "60000")
+
+	tp, err := r.svc.CreateConditional(ctx, domain.ConditionalRequest{
+		UserID: alice, Symbol: perp.Symbol, Kind: domain.TakeProfit, TriggerPrice: d("61000"), Qty: d("0.1"),
+	})
+	if err != nil || tp.Side != domain.Sell || tp.Status != domain.ConditionalActive {
+		t.Fatalf("take-profit %+v %v", tp, err)
+	}
+	sl, err := r.svc.CreateConditional(ctx, domain.ConditionalRequest{
+		UserID: alice, Symbol: perp.Symbol, Kind: domain.StopLoss, TriggerPrice: d("59000"), TriggerBy: domain.TriggerLast,
+		OrderType: domain.Limit, Price: d("58900"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.svc.CreateConditional(ctx, domain.ConditionalRequest{
+		UserID: alice, Symbol: perp.Symbol, Kind: domain.StopLoss, TriggerPrice: d("60500"),
+	}); apperr.From(err).Code != "DERIV_TRIGGER_IMMEDIATE" {
+		t.Fatalf("a stop above the mark: %v", err)
+	}
+
+	// The mark reaches 61000: the take-profit places a reduce-only market
+	// sell of 0.1; the stop-loss follows the last price, still 60000.
+	r.book.Set(perp.Symbol, d("61000"), time.Now())
+	if n, err := r.svc.Trigger(ctx); err != nil || n != 1 {
+		t.Fatalf("trigger: %d %v", n, err)
+	}
+	list, _, err := r.svc.Conditionals(ctx, alice, perp.Symbol, "", "", 10)
+	if err != nil || len(list) != 2 {
+		t.Fatalf("conditionals %+v %v", list, err)
+	}
+	var placed string
+	for _, c := range list {
+		if c.ID == tp.ID {
+			if c.Status != domain.ConditionalTriggered || c.OrderID == "" {
+				t.Fatalf("the take-profit after the trigger %+v", c)
+			}
+			placed = c.OrderID
+		}
+	}
+	o, err := r.svc.Get(ctx, alice, placed)
+	if err != nil || o.Kind != domain.KindTakeProfit || !o.ReduceOnly || o.Type != domain.Market || !o.Qty.Equal(d("0.1")) || o.ClientOrderID != tp.ID {
+		t.Fatalf("its order %+v %v", o, err)
+	}
+	if n, err := r.svc.Trigger(ctx); err != nil || n != 0 {
+		t.Fatalf("triggered twice: %d %v", n, err)
+	}
+
+	// The stop-loss is canceled by hand; a canceled one cannot be again.
+	if c, err := r.svc.CancelConditional(ctx, alice, sl.ID); err != nil || c.Status != domain.ConditionalCanceled {
+		t.Fatalf("cancel %+v %v", c, err)
+	}
+	if _, err := r.svc.CancelConditional(ctx, alice, sl.ID); apperr.From(err).Code != "COMMON_CONFLICT" {
+		t.Fatalf("cancel twice: %v", err)
+	}
+	if _, err := r.svc.CancelConditional(ctx, bob, tp.ID); apperr.From(err).Code != "COMMON_NOT_FOUND" {
+		t.Fatalf("someone else's: %v", err)
+	}
+}

@@ -36,6 +36,7 @@ type memState struct {
 	rounds    map[string]domain.FundingRound
 	payments  map[string]domain.FundingPayment
 	warned    map[string]time.Time
+	conds     map[string]domain.Conditional
 	events    []proto.Message
 	runs      int
 }
@@ -45,6 +46,7 @@ func newMemStore() *memStore {
 		settings: map[string]domain.Settings{}, orders: map[string]domain.Order{}, positions: map[string]domain.Position{},
 		fills: map[string]domain.Fill{}, pending: map[string]ports.PendingSettlement{}, contracts: map[string]ports.ContractState{},
 		rounds: map[string]domain.FundingRound{}, payments: map[string]domain.FundingPayment{}, warned: map[string]time.Time{},
+		conds: map[string]domain.Conditional{},
 	}}
 }
 
@@ -54,7 +56,7 @@ func (s *memStore) Tx(_ context.Context, fn func(ports.Repos) error) error {
 	tx := memState{
 		settings: maps.Clone(s.st.settings), orders: maps.Clone(s.st.orders), positions: maps.Clone(s.st.positions),
 		fills: maps.Clone(s.st.fills), pending: maps.Clone(s.st.pending), contracts: maps.Clone(s.st.contracts),
-		rounds: maps.Clone(s.st.rounds), payments: maps.Clone(s.st.payments), warned: maps.Clone(s.st.warned),
+		rounds: maps.Clone(s.st.rounds), payments: maps.Clone(s.st.payments), warned: maps.Clone(s.st.warned), conds: maps.Clone(s.st.conds),
 		events: slices.Clone(s.st.events), runs: s.st.runs,
 	}
 	if err := fn(memRepos{st: &tx}); err != nil {
@@ -78,6 +80,7 @@ func (r memRepos) Contracts() ports.ContractStateRepo     { return memContracts(
 func (r memRepos) Runs() ports.RunRepo                    { return memRuns(r) }
 func (r memRepos) Funding() ports.FundingRepo             { return memFunding(r) }
 func (r memRepos) Cross() ports.CrossRepo                 { return memCross(r) }
+func (r memRepos) Conditionals() ports.ConditionalRepo    { return memConds(r) }
 
 func (r memRepos) Emit(_ context.Context, _ string, msg proto.Message, _, _ string) error {
 	r.st.events = append(r.st.events, msg)
@@ -293,6 +296,16 @@ func (r memFills) OfUser(_ context.Context, userID, symbol, before string, limit
 	return out[:min(limit, len(out))], nil
 }
 
+func (r memFills) LastPrice(_ context.Context, symbol string) (decimal.Decimal, error) {
+	var last domain.Fill
+	for _, f := range r.st.fills {
+		if f.Symbol == symbol && f.ExecutedAt.After(last.ExecutedAt) {
+			last = f
+		}
+	}
+	return last.Price, nil
+}
+
 func (r memPending) Insert(_ context.Context, p ports.PendingSettlement) error {
 	if _, ok := r.st.pending[p.IdemKey]; !ok {
 		p.Attempts, p.CreatedAt = 1, time.Now()
@@ -444,4 +457,46 @@ func (r memCross) WarnedAt(_ context.Context, userID string) (time.Time, error) 
 func (r memCross) SetWarnedAt(_ context.Context, userID string, at time.Time) error {
 	r.st.warned[userID] = at
 	return nil
+}
+
+type memConds memRepos
+
+func (r memConds) Insert(_ context.Context, c domain.Conditional) error {
+	r.st.conds[c.ID] = c
+	return nil
+}
+
+func (r memConds) Get(_ context.Context, id string) (domain.Conditional, error) {
+	c, ok := r.st.conds[id]
+	if !ok {
+		return domain.Conditional{}, domain.ErrOrderNotFound
+	}
+	return c, nil
+}
+
+func (r memConds) Update(_ context.Context, c domain.Conditional) error {
+	r.st.conds[c.ID] = c
+	return nil
+}
+
+func (r memConds) Active(_ context.Context, symbol string) ([]domain.Conditional, error) {
+	var out []domain.Conditional
+	for _, c := range r.st.conds {
+		if c.Status == domain.ConditionalActive && (symbol == "" || c.Symbol == symbol) {
+			out = append(out, c)
+		}
+	}
+	slices.SortFunc(out, func(a, b domain.Conditional) int { return strings.Compare(a.ID, b.ID) })
+	return out, nil
+}
+
+func (r memConds) OfUser(_ context.Context, userID, symbol, status, _ string, limit int) ([]domain.Conditional, error) {
+	var out []domain.Conditional
+	for _, c := range r.st.conds {
+		if c.UserID == userID && (symbol == "" || c.Symbol == symbol) && (status == "" || c.Status == status) {
+			out = append(out, c)
+		}
+	}
+	slices.SortFunc(out, func(a, b domain.Conditional) int { return strings.Compare(b.ID, a.ID) })
+	return out[:min(limit, len(out))], nil
 }

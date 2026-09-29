@@ -119,6 +119,8 @@ func Mount(r chi.Router, g Guards, up Upstreams) {
 		if up.Derivatives != nil {
 			r.With(g.signedIn(true, RuleUser, RuleOrder)...).Handle("/v1/derivatives/orders", up.Derivatives)
 			r.With(g.signedIn(true, RuleUser, RuleOrder)...).Handle("/v1/derivatives/orders/*", up.Derivatives)
+			r.With(g.signedIn(true, RuleUser, RuleOrder)...).Handle("/v1/derivatives/conditional-orders", up.Derivatives)
+			r.With(g.signedIn(true, RuleUser, RuleOrder)...).Handle("/v1/derivatives/conditional-orders/*", up.Derivatives)
 			private.Handle("/v1/derivatives/*", up.Derivatives)
 		}
 		if up.DevInbox != nil {

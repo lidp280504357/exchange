@@ -46,6 +46,7 @@ type Service struct {
 	// fills serializes the engine's fills with the reconciliation, which
 	// must not see a fill half booked.
 	fills sync.Mutex
+	last  lastPrices
 }
 
 // Metrics of contract trading.

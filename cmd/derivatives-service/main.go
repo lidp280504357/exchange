@@ -137,6 +137,9 @@ func setup(ctx context.Context, a *app.App) error {
 			if err := svc.Monitor(ctx); err != nil && ctx.Err() == nil {
 				a.Logger().WarnContext(ctx, "margin monitor failed", "error", err)
 			}
+			if _, err := svc.Trigger(ctx); err != nil && ctx.Err() == nil {
+				a.Logger().WarnContext(ctx, "conditional orders check failed", "error", err)
+			}
 		}
 	}))
 	rc := &application.Reconciler{Svc: svc, Asset: cfg.SettlementAsset}

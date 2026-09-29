@@ -60,3 +60,36 @@ func TestTheADLQueue(t *testing.T) {
 		t.Fatalf("queue %v", order)
 	}
 }
+
+func TestConditionalOrders(t *testing.T) {
+	long := Position{Side: SideBoth, Qty: d("0.5"), EntryCost: d("30000")}
+	now := time.Now()
+	tp, err := NewConditional("c1", ConditionalRequest{UserID: "u1", Kind: TakeProfit, TriggerPrice: d("62000")}, btcPerp, long, d("60000"), now)
+	if err != nil || tp.Side != Sell || tp.TriggerBy != TriggerMark || tp.OrderType != Market {
+		t.Fatalf("take-profit %+v %v", tp, err)
+	}
+	if tp.Triggered(d("61999.9")) || !tp.Triggered(d("62000")) {
+		t.Fatal("a long's take-profit triggers at or above")
+	}
+	sl, err := NewConditional("c2", ConditionalRequest{UserID: "u1", Kind: StopLoss, TriggerPrice: d("58000"), Qty: d("0.2")}, btcPerp, long, d("60000"), now)
+	if err != nil || sl.Triggered(d("58000.1")) || !sl.Triggered(d("58000")) {
+		t.Fatalf("stop-loss %+v %v", sl, err)
+	}
+	if r := sl.OrderRequest(long); !r.Qty.Equal(d("0.2")) || !r.ReduceOnly || r.Side != Sell || r.Type != Market {
+		t.Fatalf("its order %+v", r)
+	}
+	if _, err := NewConditional("c3", ConditionalRequest{UserID: "u1", Kind: StopLoss, TriggerPrice: d("61000")}, btcPerp, long, d("60000"), now); code(err) != "DERIV_TRIGGER_IMMEDIATE" {
+		t.Fatalf("a stop above the price: %v", err)
+	}
+	short := Position{Side: SideShort, Qty: d("-0.5")}
+	stp, err := NewConditional("c4", ConditionalRequest{UserID: "u1", Kind: TakeProfit, TriggerPrice: d("58000"), OrderType: Limit, Price: d("58010")}, btcPerp, short, d("60000"), now)
+	if err != nil || stp.Side != Buy || stp.Triggered(d("58000.1")) || !stp.Triggered(d("57999")) {
+		t.Fatalf("a short's take-profit %+v %v", stp, err)
+	}
+	if r := stp.OrderRequest(Position{Side: SideShort, Qty: d("-0.3")}); !r.Qty.Equal(d("0.3")) || r.ReduceOnly || !r.Price.Equal(d("58010")) {
+		t.Fatalf("closes what is left %+v", r)
+	}
+	if _, err := NewConditional("c5", ConditionalRequest{UserID: "u1", Kind: TakeProfit, TriggerPrice: d("62000")}, btcPerp, Position{}, d("60000"), now); code(err) != "DERIV_NO_POSITION" {
+		t.Fatalf("no position: %v", err)
+	}
+}

@@ -113,7 +113,11 @@ func (s *Service) OnTrade(ctx context.Context, t Trade) error {
 	if err := s.applyFill(ctx, c, t, domain.Buy, t.BuyerOrderID, t.BuyerUserID, t.BuyerIsMaker); err != nil {
 		return err
 	}
-	return s.applyFill(ctx, c, t, domain.Sell, t.SellerOrderID, t.SellerUserID, !t.BuyerIsMaker)
+	if err := s.applyFill(ctx, c, t, domain.Sell, t.SellerOrderID, t.SellerUserID, !t.BuyerIsMaker); err != nil {
+		return err
+	}
+	s.last.set(t.Symbol, t.Price)
+	return nil
 }
 
 // applyFill works out one side of a trade (domain.PlanFill) from the

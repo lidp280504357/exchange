@@ -169,6 +169,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/derivatives/conditional-orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's take-profit and stop-loss orders, newest first */
+        get: operations["listConditionalOrders"];
+        put?: never;
+        /**
+         * Place a take-profit or stop-loss on an open position
+         * @description Waits until the trigger price is reached by the mark price
+         *     (trigger_by MARK, the default) or the last trade price (LAST), then
+         *     places an order that only closes the position: a market order
+         *     (protected IOC, the default) or a limit order at price, for
+         *     quantity or, without it, the whole position left. A long's
+         *     take-profit triggers at or above the trigger, its stop-loss at or
+         *     below; a short's the other way round. A trigger the price already
+         *     reached fails with DERIV_TRIGGER_IMMEDIATE; without a position,
+         *     DERIV_NO_POSITION. At most 20 active per contract.
+         */
+        post: operations["createConditionalOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/derivatives/conditional-orders/{conditional_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Cancel an active take-profit or stop-loss */
+        delete: operations["cancelConditionalOrder"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/derivatives/funding": {
         parameters: {
             query?: never;
@@ -286,6 +332,38 @@ export interface components {
             reserved: components["schemas"]["Decimal"];
             cancel_reason: string | null;
             reject_reason: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ConditionalOrder: {
+            /** Format: uuid */
+            conditional_id: string;
+            symbol: string;
+            /** @enum {string} */
+            position_side: "BOTH" | "LONG" | "SHORT";
+            /**
+             * @description The side of the order it places.
+             * @enum {string}
+             */
+            side: "BUY" | "SELL";
+            /** @enum {string} */
+            kind: "TAKE_PROFIT" | "STOP_LOSS";
+            trigger_price: components["schemas"]["Decimal"];
+            /** @enum {string} */
+            trigger_by: "MARK" | "LAST";
+            /** @enum {string} */
+            order_type: "MARKET" | "LIMIT";
+            price: components["schemas"]["NullableDecimal"];
+            /** @description Null closes the whole position. */
+            quantity: components["schemas"]["NullableDecimal"];
+            /** @enum {string} */
+            status: "ACTIVE" | "TRIGGERED" | "CANCELED" | "FAILED";
+            /** @description USER or NO_POSITION when canceled, the refusal's code when FAILED. */
+            reason: string | null;
+            /** @description The order it placed when TRIGGERED. */
+            order_id: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -681,6 +759,99 @@ export interface operations {
                         items: components["schemas"]["ContractFill"][];
                         next_cursor: string | null;
                     };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listConditionalOrders: {
+        parameters: {
+            query?: {
+                symbol?: string;
+                status?: "ACTIVE" | "TRIGGERED" | "CANCELED" | "FAILED";
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ConditionalOrder"][];
+                        next_cursor: string | null;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createConditionalOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    symbol: string;
+                    /**
+                     * @description BOTH (the default) in one-way mode.
+                     * @enum {string}
+                     */
+                    position_side?: "BOTH" | "LONG" | "SHORT";
+                    /** @enum {string} */
+                    kind: "TAKE_PROFIT" | "STOP_LOSS";
+                    trigger_price: components["schemas"]["Decimal"];
+                    /** @enum {string} */
+                    trigger_by?: "MARK" | "LAST";
+                    /** @enum {string} */
+                    order_type?: "MARKET" | "LIMIT";
+                    price?: components["schemas"]["Decimal"];
+                    quantity?: components["schemas"]["Decimal"];
+                };
+            };
+        };
+        responses: {
+            /** @description Waiting for its trigger. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConditionalOrder"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    cancelConditionalOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conditional_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Canceled. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConditionalOrder"];
                 };
             };
             default: components["responses"]["Error"];

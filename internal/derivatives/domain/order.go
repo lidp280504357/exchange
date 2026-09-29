@@ -197,6 +197,9 @@ type Request struct {
 	Price         decimal.Decimal
 	Qty           decimal.Decimal
 	ReduceOnly    bool
+	// Kind is set for the orders a take-profit or stop-loss places; the
+	// user's own are USER.
+	Kind Kind
 }
 
 // Defaults fills in the time in force (GTC, IOC for market orders).
@@ -260,6 +263,9 @@ func NewOrder(id string, req Request, c Contract, s Settings, mark decimal.Decim
 	}
 	if o.ClientOrderID == "" {
 		o.ClientOrderID = id
+	}
+	if req.Kind != "" {
+		o.Kind = req.Kind
 	}
 	switch {
 	case !clientOrderID.MatchString(o.ClientOrderID):
