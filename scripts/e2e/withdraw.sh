@@ -147,7 +147,8 @@ check '[.balances[] | select(.account_type == "SPOT" and .asset == "ETH")][0].av
 call GET /v1/wallet/deposits "" -H "Authorization: Bearer $PAYEE_TOKEN"
 check ".items[0] | .kind == \"INTERNAL\" and .status == \"CREDITED\" and .tx_hash == \"internal:$INTERNAL_ID\"" "the payee's internal deposit"
 read -r _ AFTER < <("$WORK/sendeth" -balance)
-[[ $(jq -n "($AFTER - $BEFORE) * 1e18 | round == 1100000000000000") == true ]] ||
+# Floats: exact to far below a wei's worth of the check.
+[[ $(jq -n "($AFTER - $BEFORE - 0.0011) | fabs < 1e-12") == true ]] ||
   { echo "FAIL the sender's balance went from $BEFORE to $AFTER, not up by 0.0011" >&2; exit 1; }
 echo "ok   the sender received 0.0011 ETH on chain ($BEFORE -> $AFTER)"
 

@@ -24,7 +24,7 @@ export function AssetsPage() {
       <Card
         title={t("assets.title")}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Badge tone="green">{t("assets.live")}</Badge>
             <Link to="/deposit"><Button variant="ghost">{t("nav.deposit")}</Button></Link>
             <Link to="/withdraw"><Button variant="ghost">{t("nav.withdraw")}</Button></Link>
