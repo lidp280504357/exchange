@@ -467,16 +467,15 @@ func (m *Marks) recovered(ctx context.Context, st *contractMarks) {
 	m.log.InfoContext(ctx, "contract prices recovered", "symbol", st.spec.Symbol)
 }
 
+// publishRisk queues a risk event on the outbox: a degradation puts the
+// contract under reduce-only, so the report must not be lost with the
+// process.
 func (m *Marks) publishRisk(ctx context.Context, symbol string, msg proto.Message) error {
 	env, err := m.events.New(ctx, msg, "symbol", symbol)
 	if err != nil {
 		return err
 	}
-	raw, err := proto.Marshal(env)
-	if err != nil {
-		return err
-	}
-	return m.pub.Publish(ctx, kafka.Record{Topic: event.TopicRisk, Key: symbol, EventType: env.GetEventType(), Envelope: raw})
+	return m.store.Read().Emit(ctx, event.TopicRisk, env)
 }
 
 func indexProto(symbol string, price decimal.Decimal, comps []domain.IndexComponent, at time.Time) *marketv1.IndexPriceUpdated {

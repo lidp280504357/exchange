@@ -180,11 +180,43 @@ func (l *ledger) PnLClearing(context.Context, string) (decimal.Decimal, error) {
 	return l.pnlClearing, nil
 }
 
+// testMarks are the rig's mark prices. On PostgreSQL over the network a
+// step takes seconds, so a price would go stale while a test runs: here a
+// mark keeps the age it had when the test set it (a price set now stays
+// fresh, one set a minute ago stays stale).
+type testMarks struct {
+	mu    sync.Mutex
+	marks map[string]testMark
+}
+
+type testMark struct {
+	price decimal.Decimal
+	age   time.Duration
+}
+
+func newTestMarks() *testMarks { return &testMarks{marks: map[string]testMark{}} }
+
+func (m *testMarks) Set(symbol string, price decimal.Decimal, at time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.marks[symbol] = testMark{price: price, age: time.Since(at)}
+}
+
+func (m *testMarks) Mark(symbol string) (ports.Mark, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	mk, ok := m.marks[symbol]
+	if !ok {
+		return ports.Mark{}, false
+	}
+	return ports.Mark{Price: mk.price, At: time.Now().Add(-mk.age)}, mk.age <= marks.MaxAge
+}
+
 type rig struct {
 	svc    *application.Service
 	store  ports.Store
 	ledger *ledger
-	book   *marks.Book
+	book   *testMarks
 	rates  rates
 	seq    int64
 }
@@ -195,7 +227,7 @@ func setup(t *testing.T) *rig {
 	t.Helper()
 	ctx := context.Background()
 	log := slog.New(slog.DiscardHandler)
-	r := &rig{ledger: newLedger(), book: marks.New(), rates: rates{}}
+	r := &rig{ledger: newLedger(), book: newTestMarks(), rates: rates{}}
 	if os.Getenv("TEST_POSTGRES_DSN") == "" {
 		r.store = newMemStore()
 	} else {
@@ -530,7 +562,7 @@ func TestTheMarkPriceGatesOrders(t *testing.T) {
 	ctx := context.Background()
 	alice := uuid.NewString()
 	r.fund(alice, "10000")
-	r.book = marks.New()
+	r.book = newTestMarks()
 	r.svc.Marks = r.book
 	r.book.Set(perp.Symbol, d("60000"), time.Now().Add(-time.Minute))
 	if _, err := r.svc.Place(ctx, domain.Request{

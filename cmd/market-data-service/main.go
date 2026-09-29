@@ -122,7 +122,12 @@ func setup(ctx context.Context, a *app.App) error {
 	if err != nil {
 		return err
 	}
-	events := event.NewFactory(a.Name(), a.Config().InstanceID)
+	// Business events (risk.events' degradations) go through the outbox;
+	// derived market data (depth, candles, mark prices) straight out.
+	events, err := bootstrap.Events(ctx, a, db, cfg.Kafka)
+	if err != nil {
+		return err
+	}
 	pusher := application.NewPusher(svc, prod, events, a.Metrics())
 	a.Add("market push", app.Loop(pusher.Run))
 	var (

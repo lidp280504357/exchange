@@ -8,6 +8,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
+	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
 	"github.com/lidp280504357/exchange/internal/marketdata/domain"
 )
 
@@ -26,6 +27,10 @@ type Repos interface {
 	Trades() TradeRepo
 	References() ReferenceRepo
 	Funding() FundingRepo
+	// Emit queues an event on the outbox (business events that must not
+	// be lost, such as risk.events' SystemDegraded; derived market data
+	// goes out directly).
+	Emit(ctx context.Context, topic string, env *eventv1.Envelope) error
 }
 
 // SymbolState is what has been applied of a symbol's trades.

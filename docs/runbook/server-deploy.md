@@ -4,10 +4,30 @@
 
 ## 服务器上已就绪
 
-- git 2.53、Go 1.26.4（`/usr/local/go`，`/etc/profile.d/go.sh` 已加 PATH，重新登录生效）
-- 只读部署密钥 `~/.ssh/exchange_deploy_ed25519`，`~/.ssh/config` 已为 `github.com` 指定该密钥；公钥需加到仓库 Deploy keys
+2026-09-30 起是新服务器：AWS 4 vCPU / 7.8 GiB（非突发型），Ubuntu 26.04，48 GB 磁盘，公网 IP `3.107.113.199`（`ssh exchange`）；旧的 t2.medium（`16.176.196.40`）2026-09-29 晚整机无响应后弃用，数据没有迁移。
+
+- git 2.53、Go 1.26.4（`/usr/local/go`，`/etc/profile.d/go.sh` 已加 PATH，重新登录生效）、2 GB swap（swappiness 10）
+- 部署密钥 `~/.ssh/exchange_deploy_ed25519`，`~/.ssh/config` 已为 `github.com` 指定该密钥（目前按账号级 SSH key 添加；改成仓库只读 Deploy key 更安全）
 - 源码目录 `/opt/exchange/src`（仓库克隆位置），基础设施目录 `/opt/exchange/infra`
-- Docker 29 + Compose 2.40，应用镜像用多阶段 Dockerfile 在服务器上构建，不需要本机 Docker
+- Docker 29.8 + Compose v5.5（Docker 官方 apt 源），应用镜像用多阶段 Dockerfile 在服务器上构建，不需要本机 Docker
+- cron：`backup/pg-backup.sh` 每日 03:30 UTC，`nginx/update-cloudflare-ips.sh` 每周一 04:17
+
+## 从零部署一台新服务器（2026-09-30 实际步骤）
+
+1. 系统：装 Docker 官方源的 `docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin`、Go、swap；建 `/opt/exchange/{src,infra,backups/postgres}`（属主 ubuntu）。
+2. 部署密钥：`ssh-keygen -t ed25519 -f ~/.ssh/exchange_deploy_ed25519`，`~/.ssh/config` 为 github.com 指定它，公钥交给用户加到 GitHub；`ssh -T git@github.com` 通过后 `git clone` 到 `/opt/exchange/src`。
+3. 密钥文件（在本机生成、`remote_put_file` 上传，不打印）：`infra/.env`（`PUBLIC_IP` 与 PostgreSQL、Redis、ClickHouse 的随机密码）、`infra/apps.env`（600；Turnstile、Resend、Alchemy 沿用本机 `.env`，`OTP_HMAC_KEY`、`JWT_SIGNING_KEY`、`TOTP_SECRET_KEY` 新生成，`CAPTCHA_BYPASS_TOKEN` 与本机 `.env` 相同，端到端脚本要用）、`admin/admin.env`（目录 700 属主 root）、`signer/signer.env`（目录 700 属主 uid 10001；Ubuntu 26.04 的 `install -o 10001` 不认数字 uid，用 `chown`）、`nginx/ssl/origin.{pem,key}`（Cloudflare 源站证书，本机 `deploy/compose/nginx/ssl/` 有一份）。本机 `.env` 的连接串与 `TEST_*` 同步改成新地址与新密码。
+4. 基础设施：把 `deploy/compose/` 同步到 `infra/`，`docker compose up -d --wait postgres redis redpanda clickhouse`；`bash redpanda/topics.sh`；`CREATE DATABASE exchange_test`（集成测试用）；`bash nginx/update-cloudflare-ips.sh`；装 cron。
+5. 先 `docker compose -f docker-compose.yml -f docker-compose.apps.yml build` 出镜像，再初始化 keystore（[wallet.md](wallet.md)），把打印的 xpub 写进 `apps.env` 的 `WALLET_XPUB`——signer 没有 keystore 起不来，`server-update.sh` 的 `--wait` 会一直等。
+6. `bash /opt/exchange/src/deploy/server-update.sh`（后台跑、看日志，全量构建约 10 分钟）。
+7. 部署后的一次性设置：
+   - 功能开关：`ledger.welcome_credit`、`account.transfer`、`ledger.manual_adjustment`、`auth.sms`、`market.reference_feed`、`wallet.withdraw`、`derivatives.trading` 打开，`risk.enforce --allow-regions AQ`，`market.maker --allow-symbols BTC-USDT,BTC-USDT-PERP`（[feature-flags.md](feature-flags.md)）。
+   - 交易对：参考数据文件新建的交易对是 `PREPARE`，`exchangectl instruments pair-status BTC-USDT --to TRADING`，ETH-BTC 同样（端到端在它上面成交）；ETH-USDT 保持 PREPARE。
+   - 合约：参考行情打开前算不出标记价，合约 10 秒后自动进入只减仓（`INDEX_SOURCES`）；打开参考行情、确认标记价有了之后 `exchangectl derivatives resume <合约>` 解除。
+   - 做市账户：注册一个 `@example.com` 用户，`exchangectl ledger adjust` 注入 1 BTC 与 100000 USDT，`apps.env` 加 `MARKET_MAKER_USER_ID`、`MARKET_MAKER_USER_IDS` 后重建 spot-trading-service、derivatives-service、market-maker，再转 20000 USDT 到它的合约账户（[market-maker.md](market-maker.md)）。
+   - 保险基金：`exchangectl ledger insurance-fund --amount 1000000 --key insurance-seed-1`。
+   - 热钱包：用端到端发送方转一些 Sepolia ETH 到 signer 日志里的 `hot_wallet` 地址，`exchangectl wallet fund --tx <hash>` 记到 GAS_SUPPLY。
+8. 验证：`https://astras.vip/v1/time`、全部容器 healthy、`task test:integration`、`task e2e`。
 
 ## 日常更新
 

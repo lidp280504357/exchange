@@ -219,22 +219,26 @@ func TestAContractWithoutAnIndexDegradesAfterTenSeconds(t *testing.T) {
 	r.pub.take(t)
 	delete(r.sources, "BTC-USDT")
 	r.run(9)
-	for _, m := range r.pub.take(t) {
-		if _, ok := m.(*riskv1.SystemDegraded); ok {
-			t.Fatal("degraded within 10 seconds")
-		}
+	if len(r.store.takeOutbox(t)) != 0 {
+		t.Fatal("degraded within 10 seconds")
 	}
-	r.pub.fail = true // the report is retried
+	r.store.emitFails = true // the report is retried
 	r.run(1)
-	r.pub.fail = false
+	r.store.emitFails = false
 	r.run(1)
 	degraded := 0
-	for _, m := range r.pub.take(t) {
+	// Risk events go through the outbox, derived market data directly.
+	for _, m := range r.store.takeOutbox(t) {
 		if e, ok := m.(*riskv1.SystemDegraded); ok {
 			degraded++
 			if e.GetReason() != ReasonIndexSources || e.GetSymbol() != perp.Symbol || e.GetLastMarkAt() == nil {
 				t.Fatalf("degraded %v", e)
 			}
+		}
+	}
+	for _, m := range r.pub.take(t) {
+		if _, ok := m.(*riskv1.SystemDegraded); ok {
+			t.Fatal("a risk event published directly")
 		}
 		if _, ok := m.(*marketv1.MarkPriceUpdated); ok {
 			t.Fatal("a mark price without an index")
@@ -244,7 +248,7 @@ func TestAContractWithoutAnIndexDegradesAfterTenSeconds(t *testing.T) {
 		t.Fatalf("%d reports; latest %+v", degraded, p)
 	}
 	r.run(30)
-	for _, m := range r.pub.take(t) {
+	for _, m := range r.store.takeOutbox(t) {
 		if _, ok := m.(*riskv1.SystemDegraded); ok {
 			t.Fatal("reported twice")
 		}
@@ -252,7 +256,7 @@ func TestAContractWithoutAnIndexDegradesAfterTenSeconds(t *testing.T) {
 	r.sources["BTC-USDT"] = []domain.SourcePrice{{Source: "binance", Price: d("61000")}}
 	r.run(1)
 	recovered := false
-	for _, m := range r.pub.take(t) {
+	for _, m := range r.store.takeOutbox(t) {
 		if _, ok := m.(*riskv1.SystemRecovered); ok {
 			recovered = true
 		}

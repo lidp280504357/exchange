@@ -10,8 +10,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
 	"github.com/lidp280504357/exchange/internal/marketdata/domain"
 	"github.com/lidp280504357/exchange/internal/marketdata/ports"
+	"github.com/lidp280504357/exchange/internal/platform/outbox"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
 )
 
@@ -30,6 +32,10 @@ func (s *Store) Tx(ctx context.Context, fn func(ports.Repos) error) error {
 func (s *Store) Read() ports.Repos { return repos{q: s.db} }
 
 type repos struct{ q pg.Querier }
+
+func (r repos) Emit(ctx context.Context, topic string, env *eventv1.Envelope) error {
+	return outbox.Add(ctx, r.q, topic, env)
+}
 
 func (r repos) Symbols() ports.SymbolRepo { return symbols(r) }
 func (r repos) Candles() ports.CandleRepo { return candles(r) }

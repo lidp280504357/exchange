@@ -96,7 +96,7 @@ ledger-service 每 `RECONCILE_INTERVAL`（默认 1 小时，启动 1 分钟后�
 | `TRADES_SETTLED` | 没有停在 `FAILED` 的成交 |
 | `TRADES_NUMBERED` | 每个交易对的成交编号（引擎按交易对从 1 计数）连续、不重复：有缺口说明漏了成交。编号字段出现前的成交记为 0，先计入 |
 | `TRADE_SETTLE_MATCHES_TRADES` | 不变量 5：按资产，`TRADE_SETTLE` 的入账合计 = 成交数量（base）与成交额（quote）的合计 |
-| `TRADE_FEE_MATCHES_TRADES` | 按资产，`TRADE_FEE` 进 `FEE_REVENUE` 的合计 = 成交事件里的手续费合计 |
+| `TRADE_FEE_MATCHES_TRADES` | 按资产，现货 `TRADE_FEE` 进 `FEE_REVENUE` 的合计 = 成交事件里的手续费合计（合约手续费同为 `TRADE_FEE`，幂等键 `futures:` 开头，不计入；2026-09-30 修正，之前任何一笔合约手续费都会让这项误报） |
 | `FUNDING_BATCHES_BALANCED` | 每次资金费结算（合约 + 结算时间，按请求键 `funding:<合约>:<时间>:...` 归组）付出的不少于收到的：`FUNDING_CLEARING` 只留舍入零头 |
 | `PNL_CLEARING_ONLY_PNL` | `PNL_CLEARING` 只出现在 `REALIZED_PNL`、`LIQUIDATION_SETTLE`、`ADL_SETTLE` 分录里 |
 

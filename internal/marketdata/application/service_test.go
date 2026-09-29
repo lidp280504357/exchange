@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
+	"google.golang.org/protobuf/proto"
 
+	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
 	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
 	"github.com/lidp280504357/exchange/internal/marketdata/domain"
 	"github.com/lidp280504357/exchange/internal/marketdata/ports"
@@ -27,6 +29,9 @@ type memStore struct {
 	funding    map[string]ports.FundingPeriod
 	mu         sync.Mutex // the reference feed writes from its own goroutine
 	down       bool
+	// outbox holds the emitted events; emitFails makes Emit fail.
+	outbox    []*eventv1.Envelope
+	emitFails bool
 }
 
 func newMemStore() *memStore {
@@ -54,6 +59,33 @@ func (r memRepos) Trades() ports.TradeRepo   { return memTrades(r) }
 func (r memRepos) References() ports.ReferenceRepo { return memReferences(r) }
 
 func (r memRepos) Funding() ports.FundingRepo { return memFunding(r) }
+
+func (r memRepos) Emit(_ context.Context, _ string, env *eventv1.Envelope) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	if r.s.emitFails || r.s.down {
+		return errors.New("database down")
+	}
+	r.s.outbox = append(r.s.outbox, env)
+	return nil
+}
+
+// takeOutbox returns the payloads emitted since the last call.
+func (s *memStore) takeOutbox(t *testing.T) []proto.Message {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []proto.Message
+	for _, env := range s.outbox {
+		m, err := env.GetPayload().UnmarshalNew()
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, m)
+	}
+	s.outbox = nil
+	return out
+}
 
 type memFunding memRepos
 

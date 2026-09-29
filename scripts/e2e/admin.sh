@@ -251,7 +251,7 @@ check '.status == "REJECTED"' "REJECTED, nothing booked"
 echo "== perpetual contracts"
 as AUDITOR GET /admin/v1/derivatives/contracts ""
 expect 200 - "contracts"
-check '[.contracts[].symbol] | contains(["BTC-USDT-PERP","ETH-USDT-PERP"]) and all(.contracts[]; (.open_interest | test("^[0-9.]+$")) and (.reduce_only | type) == "boolean")' "each with its reduce-only state and open interest"
+check '([.contracts[].symbol] | contains(["BTC-USDT-PERP","ETH-USDT-PERP"])) and all(.contracts[]; (.open_interest | test("^[0-9.]+$")) and (.reduce_only | type) == "boolean")' "each with its reduce-only state and open interest"
 as FINANCE POST /admin/v1/derivatives/contracts/BTC-USDT-PERP/lift-reduce-only '{"reason":"e2e"}'
 expect 403 ADMIN_FORBIDDEN "FINANCE cannot lift reduce-only"
 as OPERATOR POST /admin/v1/derivatives/contracts/BTC-USDT-PERP/lift-reduce-only '{"reason":"e2e check"}'
