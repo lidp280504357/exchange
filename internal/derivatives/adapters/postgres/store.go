@@ -1,0 +1,491 @@
+// Package postgres stores derivatives-service's state in the derivatives
+// schema.
+package postgres
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/lidp280504357/exchange/internal/derivatives/domain"
+	"github.com/lidp280504357/exchange/internal/derivatives/ports"
+	"github.com/lidp280504357/exchange/internal/platform/event"
+	"github.com/lidp280504357/exchange/internal/platform/outbox"
+	"github.com/lidp280504357/exchange/internal/platform/pg"
+)
+
+// Store implements ports.Store.
+type Store struct {
+	db     *pg.DB
+	events *event.Factory
+}
+
+// NewStore returns a store whose events are built by events.
+func NewStore(db *pg.DB, events *event.Factory) *Store { return &Store{db: db, events: events} }
+
+// Tx runs fn in a transaction.
+func (s *Store) Tx(ctx context.Context, fn func(ports.Repos) error) error {
+	return s.db.InTx(ctx, func(tx pgx.Tx) error { return fn(repos{q: tx, events: s.events}) })
+}
+
+// Read returns repositories on the pool.
+func (s *Store) Read() ports.Repos { return repos{q: s.db, events: s.events} }
+
+type repos struct {
+	q      pg.Querier
+	events *event.Factory
+}
+
+func (r repos) Settings() ports.SettingsRepo       { return settings(r) }
+func (r repos) Orders() ports.OrderRepo            { return orders(r) }
+func (r repos) Positions() ports.PositionRepo      { return positions(r) }
+func (r repos) Fills() ports.FillRepo              { return fills(r) }
+func (r repos) Pending() ports.PendingRepo         { return pending(r) }
+func (r repos) Contracts() ports.ContractStateRepo { return contracts(r) }
+func (r repos) Runs() ports.RunRepo                { return runs(r) }
+
+func (r repos) LockUser(ctx context.Context, userID string) error {
+	if _, err := r.q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('derivatives:' || $1, 0))`, userID); err != nil {
+		return fmt.Errorf("lock user: %w", err)
+	}
+	return nil
+}
+
+func (r repos) Emit(ctx context.Context, topic string, msg proto.Message, aggregateType, aggregateID string) error {
+	env, err := r.events.New(ctx, msg, aggregateType, aggregateID)
+	if err != nil {
+		return err
+	}
+	return outbox.Add(ctx, r.q, topic, env)
+}
+
+type settings repos
+
+func (r settings) Get(ctx context.Context, userID, symbol string) (*domain.Settings, error) {
+	var s domain.Settings
+	err := r.q.QueryRow(ctx, `SELECT user_id, symbol, position_mode, margin_mode, leverage, updated_at FROM settings
+		WHERE user_id = $1 AND symbol = $2`, userID, symbol).Scan(&s.UserID, &s.Symbol, &s.PositionMode, &s.MarginMode, &s.Leverage, &s.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load settings: %w", err)
+	}
+	return &s, nil
+}
+
+func (r settings) Save(ctx context.Context, s domain.Settings) error {
+	if _, err := r.q.Exec(ctx, `INSERT INTO settings (user_id, symbol, position_mode, margin_mode, leverage, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (user_id, symbol) DO UPDATE SET position_mode = $3, margin_mode = $4,
+		leverage = $5, updated_at = $6`, s.UserID, s.Symbol, s.PositionMode, s.MarginMode, s.Leverage, s.UpdatedAt); err != nil {
+		return fmt.Errorf("save settings: %w", err)
+	}
+	return nil
+}
+
+type orders repos
+
+const orderColumns = `order_id, client_order_id, user_id, symbol, side, position_side, type, time_in_force, price, quantity,
+	reduce_only, kind, leverage, margin_mode, maker_fee_rate, taker_fee_rate, lot_size, margin_per_lot, fee_per_lot,
+	consumed_quantity, released, status, freeze_state, cancel_requested, cancel_reason, reject_reason, filled_quantity,
+	filled_quote, fee, realized_pnl, sequence, created_at, updated_at`
+
+var activeStatuses = []string{string(domain.StatusNew), string(domain.StatusOpen), string(domain.StatusPartiallyFilled)}
+
+func scanOrder(row pgx.Row) (domain.Order, error) {
+	var o domain.Order
+	err := row.Scan(&o.ID, &o.ClientOrderID, &o.UserID, &o.Symbol, &o.Side, &o.PositionSide, &o.Type, &o.TimeInForce, &o.Price,
+		&o.Qty, &o.ReduceOnly, &o.Kind, &o.Leverage, &o.MarginMode, &o.MakerFee, &o.TakerFee, &o.LotSize, &o.MarginPerLot,
+		&o.FeePerLot, &o.Consumed, &o.Released, &o.Status, &o.FreezeState, &o.CancelRequested, &o.CancelReason,
+		&o.RejectReason, &o.Filled, &o.FilledQuote, &o.Fee, &o.RealizedPnL, &o.Sequence, &o.CreatedAt, &o.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Order{}, domain.ErrOrderNotFound
+	}
+	if err != nil {
+		return domain.Order{}, fmt.Errorf("scan order: %w", err)
+	}
+	return o, nil
+}
+
+func (r orders) Insert(ctx context.Context, o domain.Order) error {
+	_, err := r.q.Exec(ctx, `INSERT INTO orders (`+orderColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+		$13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)`,
+		o.ID, o.ClientOrderID, o.UserID, o.Symbol, o.Side, o.PositionSide, o.Type, o.TimeInForce, o.Price, o.Qty, o.ReduceOnly,
+		o.Kind, o.Leverage, o.MarginMode, o.MakerFee, o.TakerFee, o.LotSize, o.MarginPerLot, o.FeePerLot, o.Consumed, o.Released,
+		o.Status, o.FreezeState, o.CancelRequested, o.CancelReason, o.RejectReason, o.Filled, o.FilledQuote, o.Fee,
+		o.RealizedPnL, o.Sequence, o.CreatedAt, o.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("insert order: %w", err)
+	}
+	return nil
+}
+
+func (r orders) Get(ctx context.Context, id string) (domain.Order, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return domain.Order{}, domain.ErrOrderNotFound
+	}
+	return scanOrder(r.q.QueryRow(ctx, `SELECT `+orderColumns+` FROM orders WHERE order_id = $1`, id))
+}
+
+func (r orders) GetForUpdate(ctx context.Context, id string) (domain.Order, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return domain.Order{}, domain.ErrOrderNotFound
+	}
+	return scanOrder(r.q.QueryRow(ctx, `SELECT `+orderColumns+` FROM orders WHERE order_id = $1 FOR UPDATE`, id))
+}
+
+func (r orders) ByClientID(ctx context.Context, userID, clientOrderID string) (domain.Order, error) {
+	return scanOrder(r.q.QueryRow(ctx, `SELECT `+orderColumns+` FROM orders WHERE user_id = $1 AND client_order_id = $2`,
+		userID, clientOrderID))
+}
+
+func (r orders) Update(ctx context.Context, o domain.Order) error {
+	_, err := r.q.Exec(ctx, `UPDATE orders SET consumed_quantity = $2, released = $3, status = $4, freeze_state = $5,
+		cancel_requested = $6, cancel_reason = $7, reject_reason = $8, filled_quantity = $9, filled_quote = $10, fee = $11,
+		realized_pnl = $12, sequence = $13, updated_at = $14 WHERE order_id = $1`,
+		o.ID, o.Consumed, o.Released, o.Status, o.FreezeState, o.CancelRequested, o.CancelReason, o.RejectReason, o.Filled,
+		o.FilledQuote, o.Fee, o.RealizedPnL, o.Sequence, o.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("update order: %w", err)
+	}
+	return nil
+}
+
+func (r orders) Active(ctx context.Context, userID, symbol string) ([]domain.Order, error) {
+	return r.query(ctx, `SELECT `+orderColumns+` FROM orders WHERE user_id = $1 AND ($2 = '' OR symbol = $2)
+		AND status = ANY($3) ORDER BY order_id`, userID, symbol, activeStatuses)
+}
+
+func (r orders) CountActive(ctx context.Context, userID, symbol string) (int, int, error) {
+	var onSymbol, total int
+	err := r.q.QueryRow(ctx, `SELECT count(*) FILTER (WHERE symbol = $2), count(*) FROM orders
+		WHERE user_id = $1 AND status = ANY($3)`, userID, symbol, activeStatuses).Scan(&onSymbol, &total)
+	if err != nil {
+		return 0, 0, fmt.Errorf("count active orders: %w", err)
+	}
+	return onSymbol, total, nil
+}
+
+func (r orders) Unreleased(ctx context.Context, userID string) ([]domain.Order, error) {
+	return r.query(ctx, `SELECT `+orderColumns+` FROM orders WHERE user_id = $1
+		AND (NOT released OR consumed_quantity < filled_quantity)
+		AND freeze_state = 'FROZEN' AND (margin_per_lot > 0 OR fee_per_lot > 0) ORDER BY order_id`, userID)
+}
+
+func (r orders) List(ctx context.Context, userID string, f ports.ListFilter) ([]domain.Order, error) {
+	statuses := make([]string, len(f.Statuses))
+	for i, s := range f.Statuses {
+		statuses[i] = string(s)
+	}
+	return r.query(ctx, `SELECT `+orderColumns+` FROM orders WHERE user_id = $1 AND ($2 = '' OR symbol = $2)
+		AND (cardinality($3::text[]) = 0 OR status = ANY($3)) AND ($4 = '' OR order_id < $4::uuid)
+		ORDER BY order_id DESC LIMIT $5`, userID, f.Symbol, statuses, f.Before, f.Limit)
+}
+
+func (r orders) PendingFreeze(ctx context.Context, cutoff time.Time, limit int) ([]domain.Order, error) {
+	return r.query(ctx, `SELECT `+orderColumns+` FROM orders WHERE freeze_state = 'PENDING' AND created_at < $1
+		ORDER BY created_at LIMIT $2`, cutoff, limit)
+}
+
+func (r orders) ToRelease(ctx context.Context, cutoff time.Time, limit int) ([]domain.Order, error) {
+	return r.query(ctx, `SELECT `+orderColumns+` FROM orders WHERE NOT released AND freeze_state = 'FROZEN'
+		AND status IN ('FILLED', 'CANCELED', 'REJECTED', 'EXPIRED') AND updated_at < $1 ORDER BY updated_at LIMIT $2`, cutoff, limit)
+}
+
+func (r orders) query(ctx context.Context, sql string, args ...any) ([]domain.Order, error) {
+	rows, err := r.q.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query orders: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.Order
+	for rows.Next() {
+		o, err := scanOrder(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
+type positions repos
+
+const positionColumns = `position_id, user_id, symbol, position_side, quantity, entry_cost, margin, margin_mode, leverage,
+	realized_pnl, funding, fees, version, opened_at, updated_at`
+
+func scanPosition(row pgx.Row) (domain.Position, error) {
+	var p domain.Position
+	var opened *time.Time
+	if err := row.Scan(&p.ID, &p.UserID, &p.Symbol, &p.Side, &p.Qty, &p.EntryCost, &p.Margin, &p.MarginMode, &p.Leverage,
+		&p.RealizedPnL, &p.Funding, &p.Fees, &p.Version, &opened, &p.UpdatedAt); err != nil {
+		return domain.Position{}, fmt.Errorf("scan position: %w", err)
+	}
+	if opened != nil {
+		p.OpenedAt = *opened
+	}
+	return p, nil
+}
+
+func (r positions) query(ctx context.Context, sql string, args ...any) ([]domain.Position, error) {
+	rows, err := r.q.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query positions: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.Position
+	for rows.Next() {
+		p, err := scanPosition(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (r positions) OfUser(ctx context.Context, userID, symbol string) ([]domain.Position, error) {
+	return r.query(ctx, `SELECT `+positionColumns+` FROM positions WHERE user_id = $1 AND ($2 = '' OR symbol = $2)
+		ORDER BY symbol, position_side`, userID, symbol)
+}
+
+func (r positions) Open(ctx context.Context, symbol string) ([]domain.Position, error) {
+	return r.query(ctx, `SELECT `+positionColumns+` FROM positions WHERE quantity <> 0 AND ($1 = '' OR symbol = $1)
+		ORDER BY symbol, user_id, position_side`, symbol)
+}
+
+func (r positions) Totals(ctx context.Context) (map[string]ports.Totals, error) {
+	rows, err := r.q.Query(ctx, `SELECT symbol, sum(quantity), sum(CASE WHEN quantity > 0 THEN entry_cost ELSE -entry_cost END)
+		FROM positions GROUP BY symbol`)
+	if err != nil {
+		return nil, fmt.Errorf("position totals: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]ports.Totals{}
+	for rows.Next() {
+		var symbol string
+		var t ports.Totals
+		if err := rows.Scan(&symbol, &t.NetQty, &t.NetCost); err != nil {
+			return nil, fmt.Errorf("position totals: %w", err)
+		}
+		out[symbol] = t
+	}
+	return out, rows.Err()
+}
+
+func (r positions) Save(ctx context.Context, p domain.Position) (domain.Position, error) {
+	if p.ID == "" {
+		p.ID = uuid.Must(uuid.NewV7()).String()
+	}
+	var opened *time.Time
+	if !p.OpenedAt.IsZero() {
+		opened = &p.OpenedAt
+	}
+	row := r.q.QueryRow(ctx, `INSERT INTO positions (`+positionColumns+`)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, $13, $14)
+		ON CONFLICT (user_id, symbol, position_side) DO UPDATE SET quantity = $5, entry_cost = $6, margin = $7, margin_mode = $8,
+			leverage = $9, realized_pnl = $10, funding = $11, fees = $12, version = positions.version + 1, opened_at = $13,
+			updated_at = $14
+		RETURNING `+positionColumns,
+		p.ID, p.UserID, p.Symbol, p.Side, p.Qty, p.EntryCost, p.Margin, p.MarginMode, p.Leverage, p.RealizedPnL, p.Funding, p.Fees,
+		opened, p.UpdatedAt)
+	return scanPosition(row)
+}
+
+type fills repos
+
+const fillColumns = `trade_id, side, order_id, user_id, symbol, position_side, maker, price, quantity, closed_quantity, fee,
+	fee_waived, realized_pnl, insurance, liquidation, sequence, executed_at, settled`
+
+func (r fills) Has(ctx context.Context, tradeID string, side domain.Side) (bool, error) {
+	var ok bool
+	err := r.q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM fills WHERE trade_id = $1 AND side = $2)`, tradeID, side).Scan(&ok)
+	if err != nil {
+		return false, fmt.Errorf("look up fill: %w", err)
+	}
+	return ok, nil
+}
+
+func (r fills) Insert(ctx context.Context, f domain.Fill) error {
+	_, err := r.q.Exec(ctx, `INSERT INTO fills (`+fillColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+		$13, $14, $15, $16, $17, $18)`, f.TradeID, f.Side, f.OrderID, f.UserID, f.Symbol, f.PositionSide, f.Maker, f.Price, f.Qty,
+		f.ClosedQty, f.Fee, f.FeeWaived, f.RealizedPnL, f.Insurance, f.Liquidation, f.Seq, f.ExecutedAt, f.Settled)
+	if err != nil {
+		return fmt.Errorf("insert fill: %w", err)
+	}
+	return nil
+}
+
+func (r fills) SetSettled(ctx context.Context, tradeID string, side domain.Side) error {
+	if _, err := r.q.Exec(ctx, `UPDATE fills SET settled = true WHERE trade_id = $1 AND side = $2`, tradeID, side); err != nil {
+		return fmt.Errorf("mark fill settled: %w", err)
+	}
+	return nil
+}
+
+func (r fills) OfUser(ctx context.Context, userID, symbol, before string, limit int) ([]domain.Fill, error) {
+	var beforeTrade, beforeSide string
+	if before != "" {
+		t, s, ok := strings.Cut(before, ":")
+		if _, err := uuid.Parse(t); !ok || err != nil {
+			return nil, fmt.Errorf("bad fill cursor %q", before)
+		}
+		beforeTrade, beforeSide = t, s
+	}
+	rows, err := r.q.Query(ctx, `SELECT `+fillColumns+` FROM fills WHERE user_id = $1 AND ($2 = '' OR symbol = $2)
+		AND ($3 = '' OR (executed_at, trade_id, side) < (SELECT executed_at, trade_id, side FROM fills
+			WHERE trade_id = $3::uuid AND side = $4))
+		ORDER BY executed_at DESC, trade_id DESC, side DESC LIMIT $5`, userID, symbol, beforeTrade, beforeSide, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query fills: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.Fill
+	for rows.Next() {
+		var f domain.Fill
+		if err := rows.Scan(&f.TradeID, &f.Side, &f.OrderID, &f.UserID, &f.Symbol, &f.PositionSide, &f.Maker, &f.Price, &f.Qty,
+			&f.ClosedQty, &f.Fee, &f.FeeWaived, &f.RealizedPnL, &f.Insurance, &f.Liquidation, &f.Seq, &f.ExecutedAt, &f.Settled); err != nil {
+			return nil, fmt.Errorf("scan fill: %w", err)
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+type pending repos
+
+func (r pending) Insert(ctx context.Context, p ports.PendingSettlement) error {
+	req, err := json.Marshal(p.Request)
+	if err != nil {
+		return err
+	}
+	var position, trade, side any
+	if p.PositionID != "" {
+		position = p.PositionID
+	}
+	if p.TradeID != "" {
+		trade, side = p.TradeID, string(p.Side)
+	}
+	if _, err := r.q.Exec(ctx, `INSERT INTO pending_settlements (idem_key, user_id, request, position_id, freeze_move, trade_id,
+		side, last_error) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (idem_key) DO NOTHING`,
+		p.IdemKey, p.UserID, req, position, p.FreezeMove, trade, side, p.LastError); err != nil {
+		return fmt.Errorf("park settlement: %w", err)
+	}
+	return nil
+}
+
+func (r pending) Due(ctx context.Context, limit int) ([]ports.PendingSettlement, error) {
+	rows, err := r.q.Query(ctx, `SELECT idem_key, user_id, request, coalesce(position_id::text, ''), freeze_move,
+		coalesce(trade_id::text, ''), coalesce(side, ''), attempts, last_error, created_at
+		FROM pending_settlements ORDER BY created_at LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("load pending settlements: %w", err)
+	}
+	defer rows.Close()
+	var out []ports.PendingSettlement
+	for rows.Next() {
+		var p ports.PendingSettlement
+		var req []byte
+		if err := rows.Scan(&p.IdemKey, &p.UserID, &req, &p.PositionID, &p.FreezeMove, &p.TradeID, &p.Side, &p.Attempts,
+			&p.LastError, &p.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan pending settlement: %w", err)
+		}
+		if err := json.Unmarshal(req, &p.Request); err != nil {
+			return nil, fmt.Errorf("pending settlement %s: %w", p.IdemKey, err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (r pending) Failed(ctx context.Context, key, reason string) error {
+	if _, err := r.q.Exec(ctx, `UPDATE pending_settlements SET attempts = attempts + 1, last_error = $2, updated_at = now()
+		WHERE idem_key = $1`, key, reason); err != nil {
+		return fmt.Errorf("update pending settlement: %w", err)
+	}
+	return nil
+}
+
+func (r pending) Delete(ctx context.Context, key string) error {
+	if _, err := r.q.Exec(ctx, `DELETE FROM pending_settlements WHERE idem_key = $1`, key); err != nil {
+		return fmt.Errorf("delete pending settlement: %w", err)
+	}
+	return nil
+}
+
+func (r pending) Count(ctx context.Context) (int, error) {
+	var n int
+	if err := r.q.QueryRow(ctx, `SELECT count(*) FROM pending_settlements`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count pending settlements: %w", err)
+	}
+	return n, nil
+}
+
+type contracts repos
+
+func (r contracts) Get(ctx context.Context, symbol string) (*ports.ContractState, error) {
+	var s ports.ContractState
+	err := r.q.QueryRow(ctx, `SELECT symbol, reduce_only, reason, since, lifted_by FROM contract_states WHERE symbol = $1`, symbol).
+		Scan(&s.Symbol, &s.ReduceOnly, &s.Reason, &s.Since, &s.LiftedBy)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load contract state: %w", err)
+	}
+	return &s, nil
+}
+
+func (r contracts) Degrade(ctx context.Context, symbol, reason string, at time.Time) (bool, error) {
+	tag, err := r.q.Exec(ctx, `INSERT INTO contract_states (symbol, reduce_only, reason, since) VALUES ($1, true, $2, $3)
+		ON CONFLICT (symbol) DO UPDATE SET reduce_only = true, reason = $2, since = $3, lifted_by = '', lifted_at = NULL,
+			updated_at = now()
+		WHERE NOT contract_states.reduce_only`, symbol, reason, at)
+	if err != nil {
+		return false, fmt.Errorf("degrade contract: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func (r contracts) Lift(ctx context.Context, symbol, by string, at time.Time) (bool, error) {
+	tag, err := r.q.Exec(ctx, `UPDATE contract_states SET reduce_only = false, lifted_by = $2, lifted_at = $3, updated_at = now()
+		WHERE symbol = $1 AND reduce_only`, symbol, by, at)
+	if err != nil {
+		return false, fmt.Errorf("lift reduce-only: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func (r contracts) All(ctx context.Context) ([]ports.ContractState, error) {
+	rows, err := r.q.Query(ctx, `SELECT symbol, reduce_only, reason, since, lifted_by FROM contract_states ORDER BY symbol`)
+	if err != nil {
+		return nil, fmt.Errorf("load contract states: %w", err)
+	}
+	defer rows.Close()
+	var out []ports.ContractState
+	for rows.Next() {
+		var s ports.ContractState
+		if err := rows.Scan(&s.Symbol, &s.ReduceOnly, &s.Reason, &s.Since, &s.LiftedBy); err != nil {
+			return nil, fmt.Errorf("scan contract state: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+type runs repos
+
+func (r runs) Record(ctx context.Context, started time.Time, check string, mismatches int, details []byte) error {
+	if _, err := r.q.Exec(ctx, `INSERT INTO reconciliation_runs (started_at, check_name, mismatches, details) VALUES ($1, $2, $3, $4)`,
+		started, check, mismatches, details); err != nil {
+		return fmt.Errorf("record reconciliation: %w", err)
+	}
+	return nil
+}

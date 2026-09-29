@@ -26,8 +26,9 @@
 | [accounts.md](accounts.md) | 账户状态、资格、用户通知，`exchangectl users` |
 | [risk.md](risk.md) | 风控规则、评估记录与自动审核（`risk.enforce`），`exchangectl risk` |
 | [trading.md](trading.md) | 现货下单、冻结、撤单与开放交易对，`/v1/orders` |
-| [matching.md](matching.md) | 撮合引擎：规则、WAL 与快照、恢复、主备租约 |
-| [market-data.md](market-data.md) | 平台行情：K 线、ticker、深度、最近成交，WebSocket 公共频道与 orders/fills 私有频道 |
+| [matching.md](matching.md) | 撮合引擎：规则、WAL 与快照、恢复、主备租约；现货与合约两个分片 |
+| [derivatives.md](derivatives.md) | USDT 永续合约：设置、下单与保证金预留、成交结算、仓位、转出保护、只减仓、对账（不变量 6），`exchangectl derivatives` |
+| [market-data.md](market-data.md) | 平台行情：K 线、ticker、深度、最近成交，合约的指数价、标记价与资金费率，WebSocket 公共频道与 orders/fills 私有频道 |
 | [market-maker.md](market-maker.md) | 参考行情（币安公开数据，仅测试环境）与做市机器人：参数、撤单条件、测试服设置 |
 | [instruments.md](instruments.md) | 资产、网络、交易对、费率，`exchangectl instruments` |
 | [ledger.md](ledger.md) | 账本、划转、对账，`exchangectl ledger` |

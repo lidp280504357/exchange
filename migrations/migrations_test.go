@@ -83,6 +83,7 @@ func TestDownMigrations(t *testing.T) {
 		"auth": migrations.Auth(), "users": migrations.Users(), "notify": migrations.Notify(), "config": migrations.Config(),
 		"instrument": migrations.Instrument(), "ledger": migrations.Ledger(), "risk": migrations.Risk(), "trading": migrations.Trading(), "matching": migrations.Matching(), "market": migrations.Market(),
 		"wallet": migrations.Wallet(), "signer": migrations.Signer(), "admin": migrations.Admin(),
+		"derivatives": migrations.Derivatives(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			db := apply(t, fsys)

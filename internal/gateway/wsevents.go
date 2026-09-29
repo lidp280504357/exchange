@@ -7,6 +7,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	derivativesv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/derivatives/v1"
 	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
 	ledgerv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1"
 	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
@@ -21,6 +22,7 @@ import (
 var WSTopics = []string{
 	"ledger.events", "notification.events", "order.events", "trade.events", "market.depth", "market.candle.events",
 	"wallet.deposit.events", "wallet.withdrawal.events", "derivatives.trade.events", "derivatives.market.depth",
+	"derivatives.order.events", "derivatives.position.events",
 }
 
 type balanceData struct {
@@ -58,19 +60,53 @@ type orderData struct {
 	Sequence       int64  `json:"sequence,omitempty"`
 }
 
-// fillData is one side of a trade on "fills".
+// fillData is one side of a trade on "fills". A contract's fill has no
+// quote quantity but its position side, the part that closed a position
+// and the realized profit; its fee is in the settlement asset.
 type fillData struct {
-	TradeID       string `json:"trade_id"`
-	OrderID       string `json:"order_id"`
-	Symbol        string `json:"symbol"`
-	Side          string `json:"side"`
-	Role          string `json:"role"`
-	Price         string `json:"price"`
-	Quantity      string `json:"quantity"`
-	QuoteQuantity string `json:"quote_quantity"`
-	FeeAsset      string `json:"fee_asset"`
-	Fee           string `json:"fee"`
-	ExecutedAt    string `json:"executed_at"`
+	TradeID        string `json:"trade_id"`
+	OrderID        string `json:"order_id"`
+	Symbol         string `json:"symbol"`
+	Side           string `json:"side"`
+	Role           string `json:"role"`
+	Price          string `json:"price"`
+	Quantity       string `json:"quantity"`
+	QuoteQuantity  string `json:"quote_quantity,omitempty"`
+	FeeAsset       string `json:"fee_asset"`
+	Fee            string `json:"fee"`
+	ExecutedAt     string `json:"executed_at"`
+	PositionSide   string `json:"position_side,omitempty"`
+	ClosedQuantity string `json:"closed_quantity,omitempty"`
+	RealizedPnL    string `json:"realized_pnl,omitempty"`
+	Liquidation    bool   `json:"liquidation,omitempty"`
+}
+
+// positionData is a contract position change on "positions": event is
+// OPEN, INCREASE, REDUCE, CLOSE, FLIP, MARGIN, FUNDING or LEVERAGE.
+type positionData struct {
+	Event        string `json:"event"`
+	PositionID   string `json:"position_id,omitempty"`
+	Symbol       string `json:"symbol"`
+	PositionSide string `json:"position_side,omitempty"`
+	Quantity     string `json:"quantity,omitempty"`
+	EntryPrice   string `json:"entry_price,omitempty"`
+	Margin       string `json:"margin,omitempty"`
+	MarginMode   string `json:"margin_mode,omitempty"`
+	Leverage     int32  `json:"leverage"`
+	RealizedPnL  string `json:"realized_pnl,omitempty"`
+	Funding      string `json:"funding,omitempty"`
+	TradeID      string `json:"trade_id,omitempty"`
+	// Amount is the margin added (MARGIN) or the funding received (FUNDING,
+	// negative when paid).
+	Amount string `json:"amount,omitempty"`
+}
+
+func positionOf(p *derivativesv1.Position, ev string) positionData {
+	return positionData{
+		Event: ev, PositionID: p.GetPositionId(), Symbol: p.GetSymbol(), PositionSide: p.GetPositionSide(), Quantity: p.GetQuantity(),
+		EntryPrice: p.GetEntryPrice(), Margin: p.GetMargin(), MarginMode: p.GetMarginMode(), Leverage: p.GetLeverage(),
+		RealizedPnL: p.GetRealizedPnl(), Funding: p.GetFunding(),
+	}
 }
 
 // depositData is a deposit change on "deposits"; clients reload the
@@ -191,6 +227,9 @@ func WSEvents(h *Hub) func(context.Context, *eventv1.Envelope) error {
 			funding   marketv1.FundingRateUpdated
 		)
 		p := env.GetPayload()
+		if ok, err := derivativesOf(h, p); ok {
+			return err
+		}
 		if wd, ok := withdrawalOf(p); ok {
 			h.Publish(wd.GetUserId(), "withdrawals", withdrawalData{
 				WithdrawalID: wd.GetWithdrawalId(), Asset: wd.GetAsset(), Amount: wd.GetAmount(), Status: wd.GetStatus(),
@@ -351,6 +390,83 @@ func depositOf(p interface {
 		}
 	}
 	return nil, false
+}
+
+// derivativesOf pushes a derivatives-service event: position changes on
+// "positions", settled fills on "fills". It reports whether p was one.
+func derivativesOf(h *Hub, p interface {
+	MessageIs(proto.Message) bool
+	UnmarshalTo(proto.Message) error
+},
+) (bool, error) {
+	var (
+		opened   derivativesv1.PositionOpened
+		changed  derivativesv1.PositionChanged
+		closed   derivativesv1.PositionClosed
+		margin   derivativesv1.MarginAdjusted
+		leverage derivativesv1.LeverageChanged
+		funding  derivativesv1.FundingPaid
+		fill     derivativesv1.FillSettled
+	)
+	switch {
+	case p.MessageIs(&opened):
+		if err := p.UnmarshalTo(&opened); err != nil {
+			return true, err
+		}
+		d := positionOf(opened.GetPosition(), "OPEN")
+		d.TradeID = opened.GetTradeId()
+		h.Publish(opened.GetPosition().GetUserId(), "positions", d)
+	case p.MessageIs(&changed):
+		if err := p.UnmarshalTo(&changed); err != nil {
+			return true, err
+		}
+		d := positionOf(changed.GetPosition(), changed.GetReason())
+		d.TradeID = changed.GetTradeId()
+		h.Publish(changed.GetPosition().GetUserId(), "positions", d)
+	case p.MessageIs(&closed):
+		if err := p.UnmarshalTo(&closed); err != nil {
+			return true, err
+		}
+		d := positionOf(closed.GetPosition(), "CLOSE")
+		d.TradeID = closed.GetTradeId()
+		h.Publish(closed.GetPosition().GetUserId(), "positions", d)
+	case p.MessageIs(&margin):
+		if err := p.UnmarshalTo(&margin); err != nil {
+			return true, err
+		}
+		d := positionOf(margin.GetPosition(), "MARGIN")
+		d.Amount = margin.GetAmount()
+		h.Publish(margin.GetPosition().GetUserId(), "positions", d)
+	case p.MessageIs(&funding):
+		if err := p.UnmarshalTo(&funding); err != nil {
+			return true, err
+		}
+		d := positionOf(funding.GetPosition(), "FUNDING")
+		d.Amount = funding.GetAmount()
+		h.Publish(funding.GetPosition().GetUserId(), "positions", d)
+	case p.MessageIs(&leverage):
+		if err := p.UnmarshalTo(&leverage); err != nil {
+			return true, err
+		}
+		h.Publish(leverage.GetUserId(), "positions", positionData{Event: "LEVERAGE", Symbol: leverage.GetSymbol(), Leverage: leverage.GetLeverage()})
+	case p.MessageIs(&fill):
+		if err := p.UnmarshalTo(&fill); err != nil {
+			return true, err
+		}
+		role := "TAKER"
+		if fill.GetMaker() {
+			role = "MAKER"
+		}
+		h.Publish(fill.GetUserId(), "fills", fillData{
+			TradeID: fill.GetTradeId(), OrderID: fill.GetOrderId(), Symbol: fill.GetSymbol(), Side: fill.GetSide(), Role: role,
+			Price: fill.GetPrice(), Quantity: fill.GetQuantity(), FeeAsset: "USDT", Fee: fill.GetFee(),
+			ExecutedAt: fill.GetExecutedAt().AsTime().UTC().Format(time.RFC3339Nano), PositionSide: fill.GetPositionSide(),
+			ClosedQuantity: fill.GetClosedQuantity(), RealizedPnL: fill.GetRealizedPnl(), Liquidation: fill.GetLiquidation(),
+		})
+	default:
+		return false, nil
+	}
+	return true, nil
 }
 
 // withdrawalOf returns the withdrawal a wallet event carries.

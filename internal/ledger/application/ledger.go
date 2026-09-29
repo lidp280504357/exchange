@@ -27,8 +27,11 @@ type Service struct {
 	Assets      ports.Assets
 	Eligibility ports.Eligibility
 	Flags       ports.Flags
-	Log         *slog.Logger
-	Now         func() time.Time
+	// Futures tells the cross positions' unrealized result for transfers
+	// out of FUTURES (derivatives-service); nil skips the check.
+	Futures ports.Futures
+	Log     *slog.Logger
+	Now     func() time.Time
 	// WelcomeCredits are the simulated funds of phase 1 (ledger.welcome_credit).
 	WelcomeCredits []Credit
 }

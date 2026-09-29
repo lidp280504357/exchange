@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package exchange.derivatives.v1;
+
+// DerivativesService answers other services about users' perpetual
+// contract trading (requirements §5.8).
+service DerivativesService {
+  // GetUnrealizedPnL returns the unrealized profit and loss of a user's
+  // cross positions at the current mark prices (§11.7). The ledger asks
+  // before moving funds out of FUTURES: at most min(available,
+  // available + unrealized) may leave, so a loss the wallet covers stays.
+  // Fails UNAVAILABLE while a cross position has no fresh mark price.
+  rpc GetUnrealizedPnL(GetUnrealizedPnLRequest) returns (GetUnrealizedPnLResponse);
+}
+
+message GetUnrealizedPnLRequest {
+  string user_id = 1;
+  // The settlement asset, USDT.
+  string asset = 2;
+}
+
+message GetUnrealizedPnLResponse {
+  // Signed decimal string; "0" without cross positions.
+  string cross_unrealized_pnl = 1;
+}

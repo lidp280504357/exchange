@@ -32,6 +32,8 @@ dist/
 /market-maker
 /signer
 /admin-service
+/derivatives-service
+/loadgen
 /devmcp
 node_modules/
 *.tsbuildinfo

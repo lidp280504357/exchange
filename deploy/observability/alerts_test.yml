@@ -136,3 +136,19 @@ tests:
             exp_annotations:
               summary: "BTC-USDT-PERP has had no mark price for 10 seconds (index sources missing): contract trading is reduce-only"
               runbook: docs/runbook/market-data.md
+
+  - interval: 1m
+    input_series:
+      - series: 'derivatives_reconcile_mismatches{job="derivatives-service", check="PNL_CLEARING_MATCHES_POSITIONS"}'
+        values: '0 1 1'
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: DerivativesReconciliationMismatch
+        exp_alerts: []
+      - eval_time: 1m
+        alertname: DerivativesReconciliationMismatch
+        exp_alerts:
+          - exp_labels: {severity: critical, job: derivatives-service, check: PNL_CLEARING_MATCHES_POSITIONS}
+            exp_annotations:
+              summary: derivatives reconciliation check PNL_CLEARING_MATCHES_POSITIONS found 1 mismatches
+              runbook: docs/runbook/derivatives.md

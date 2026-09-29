@@ -4,6 +4,7 @@ package ports
 import (
 	"context"
 
+	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lidp280504357/exchange/internal/ledger/domain"
@@ -91,6 +92,13 @@ type Assets interface {
 // Eligibility asks user-service whether a user may use a feature now.
 type Eligibility interface {
 	Check(ctx context.Context, userID, feature string) (allowed bool, reason string, err error)
+}
+
+// Futures is derivatives-service: the unrealized profit and loss of a
+// user's cross positions, which transfers out of FUTURES must leave
+// covered.
+type Futures interface {
+	CrossUnrealizedPnL(ctx context.Context, userID, asset string) (decimal.Decimal, error)
 }
 
 // Flags answers feature-flag checks.

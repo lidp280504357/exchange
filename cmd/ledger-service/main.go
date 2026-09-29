@@ -9,9 +9,11 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	derivativesv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/derivatives/v1"
 	instrumentv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/instrument/v1"
 	ledgerv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1"
 	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
+	"github.com/lidp280504357/exchange/internal/ledger/adapters/derivatives"
 	"github.com/lidp280504357/exchange/internal/ledger/adapters/instruments"
 	"github.com/lidp280504357/exchange/internal/ledger/adapters/postgres"
 	"github.com/lidp280504357/exchange/internal/ledger/adapters/users"
@@ -38,6 +40,10 @@ type settings struct {
 	// user-service (eligibility): INSTRUMENT_GRPC_ADDR, USER_GRPC_ADDR.
 	InstrumentAddr string `koanf:"instrument_grpc_addr"`
 	UserAddr       string `koanf:"user_grpc_addr"`
+	// DerivativesAddr is derivatives-service, which transfers out of
+	// FUTURES consult for the cross positions' unrealized result
+	// (DERIVATIVES_GRPC_ADDR); empty skips the check.
+	DerivativesAddr string `koanf:"derivatives_grpc_addr"`
 	// WelcomeFunds are the simulated funds new users get while
 	// ledger.welcome_credit is on (WELCOME_FUNDS, "USDT:10000,BTC:0.1").
 	WelcomeFunds string `koanf:"welcome_funds"`
@@ -98,6 +104,13 @@ func setup(ctx context.Context, a *app.App) error {
 		Log:            a.Logger(),
 		Now:            time.Now,
 		WelcomeCredits: credits,
+	}
+	if cfg.DerivativesAddr != "" {
+		conn, err := bootstrap.GRPCClient(a, "derivatives", cfg.DerivativesAddr)
+		if err != nil {
+			return err
+		}
+		svc.Futures = derivatives.New(derivativesv1.NewDerivativesServiceClient(conn))
 	}
 	if err := bootstrap.Consumer(ctx, a, cfg.Kafka, consumer.Group, consumer.Topics, consumer.Handler(svc)); err != nil {
 		return err

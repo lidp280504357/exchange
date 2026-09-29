@@ -21,10 +21,10 @@ DEV_DB=exchange_dev
 NS=dev.
 DEV_DIR=.dev
 # Readiness is reported in this order.
-SERVICES=(notification-service user-service auth-service instrument-service ledger-service spot-trading-service matching-engine market-data-service market-maker wallet-service risk-service analytics-consumer admin-service api-gateway)
+SERVICES=(notification-service user-service auth-service instrument-service ledger-service spot-trading-service matching-engine derivatives-engine market-data-service derivatives-service market-maker wallet-service risk-service analytics-consumer admin-service api-gateway)
 # Flags that are on in the test environment (docs/runbook/ledger.md,
 # otp.md), turned on when the namespace is created.
-DEV_FLAGS=(ledger.welcome_credit account.transfer ledger.manual_adjustment auth.sms)
+DEV_FLAGS=(ledger.welcome_credit account.transfer ledger.manual_adjustment auth.sms derivatives.trading)
 
 [[ -f .env ]] || { echo "dev: .env is missing (copy .env.example and fill it in)" >&2; exit 1; }
 set -a
@@ -42,6 +42,9 @@ else
   export REDIS_URL="$REDIS_URL/1"
 fi
 export CLICKHOUSE_DB=$DEV_DB KAFKA_NAMESPACE=$NS APP_ENV=local
+# The contracts' index has one reference source here, as on the test server;
+# transfers out of FUTURES ask the local derivatives-service.
+export INDEX_MIN_SOURCES=${INDEX_MIN_SOURCES:-1} DERIVATIVES_GRPC_ADDR=${DERIVATIVES_GRPC_ADDR:-localhost:9195}
 # The local wallet-service assigns addresses but does not scan Sepolia (the
 # deployed one does; two scanners would double the provider quota).
 # DEV_SCAN=1 keeps the endpoint.
@@ -106,6 +109,8 @@ ops_port() {
     ledger-service) echo 9085 ;;
     spot-trading-service) echo 9088 ;;
     matching-engine) echo 9089 ;;
+    derivatives-engine) echo 9096 ;;
+    derivatives-service) echo 9095 ;;
     market-data-service) echo 9090 ;;
     market-maker) echo 9091 ;;
     wallet-service) echo 9092 ;;
@@ -126,8 +131,11 @@ prepare
 
 echo "== build"
 mkdir -p "$DEV_DIR/bin" "$DEV_DIR/logs"
-pkgs=(./cmd/exchangectl)
-for svc in "${started[@]}"; do pkgs+=("./cmd/$svc"); done
+pkgs=(./cmd/exchangectl ./cmd/matching-engine)
+for svc in "${started[@]}"; do
+  # derivatives-engine is matching-engine's contract shard, not a command.
+  [[ $svc == derivatives-engine || $svc == matching-engine ]] || pkgs+=("./cmd/$svc")
+done
 go build -o "$DEV_DIR/bin/" "${pkgs[@]}"
 
 if ((fresh)); then default_flags "$DEV_DIR/bin/exchangectl"; fi
@@ -160,7 +168,11 @@ echo "== start"
 # trip to the test server is slow from here, which makes starting in
 # sequence take minutes.
 for svc in "${started[@]}"; do
-  "$DEV_DIR/bin/$svc" >"$DEV_DIR/logs/$svc.log" 2>&1 &
+  if [[ $svc == derivatives-engine ]]; then
+    MATCHING_SHARD=derivatives "$DEV_DIR/bin/matching-engine" >"$DEV_DIR/logs/$svc.log" 2>&1 &
+  else
+    "$DEV_DIR/bin/$svc" >"$DEV_DIR/logs/$svc.log" 2>&1 &
+  fi
   pids+=($!)
 done
 for i in "${!started[@]}"; do

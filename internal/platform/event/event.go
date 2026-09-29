@@ -53,6 +53,10 @@ const (
 	TopicDerivOrder         = "derivatives.order.events"
 	TopicDerivTrade         = "derivatives.trade.events"
 	TopicDerivMarketDepth   = "derivatives.market.depth"
+	// Positions, fills, margin and funding of derivatives-service, and its
+	// liquidations, keyed by user.
+	TopicDerivPosition    = "derivatives.position.events"
+	TopicDerivLiquidation = "derivatives.liquidation.events"
 )
 
 // Factory stamps envelopes with the producing service and instance.

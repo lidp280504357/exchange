@@ -90,6 +90,20 @@ groups:
           summary: "the ledger refused {{ $value }} trades in 15 minutes; they wait as FAILED (exchangectl ledger trades --failed)"
           runbook: docs/runbook/ledger.md
 
+      - alert: DerivativesReconciliationMismatch
+        expr: sum by (job, check) (derivatives_reconcile_mismatches) > 0
+        labels: {severity: critical}
+        annotations:
+          summary: "derivatives reconciliation check {{ $labels.check }} found {{ $value }} mismatches"
+          runbook: docs/runbook/derivatives.md
+
+      - alert: DerivativesSettlementParked
+        expr: sum by (job) (increase(derivatives_settlements_parked_total[15m])) > 0
+        labels: {severity: critical}
+        annotations:
+          summary: "the ledger refused {{ $value }} contract settlements in 15 minutes (insurance fund short?); they wait in pending_settlements"
+          runbook: docs/runbook/derivatives.md
+
       - alert: LedgerReconciliationStopped
         expr: increase(ledger_reconcile_runs_total[3h]) == 0
         labels: {severity: warning}

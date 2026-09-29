@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+package exchange.derivatives.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Events of derivatives-service (requirements §8.1), keyed by user_id.
+// Amounts are decimal strings in the settlement asset (USDT); quantities
+// in the base asset.
+//
+//   derivatives.position.events  PositionOpened, PositionChanged,
+//                                PositionClosed, MarginAdjusted,
+//                                LeverageChanged, FundingPaid, FillSettled
+//
+// Order acceptance and rejection go on derivatives.order.events with the
+// engine's order events, as exchange.order.v1 messages.
+
+// Position is a snapshot of a position after a change.
+message Position {
+  string position_id = 1;
+  string user_id = 2;
+  string symbol = 3;
+  // BOTH in one-way mode; LONG or SHORT in hedge mode.
+  string position_side = 4;
+  // Signed: positive long, negative short, 0 when flat.
+  string quantity = 5;
+  // entry_cost / |quantity|; empty when flat.
+  string entry_price = 6;
+  // The open quantity at its entry prices; closing takes its share.
+  string entry_cost = 7;
+  // Frozen for the position in the FUTURES account.
+  string margin = 8;
+  // CROSS or ISOLATED.
+  string margin_mode = 9;
+  int32 leverage = 10;
+  // Since the position opened.
+  string realized_pnl = 11;
+  // Funding received (positive) or paid.
+  string funding = 12;
+  int64 version = 13;
+}
+
+// PositionOpened: a fill opened a position that was flat.
+message PositionOpened {
+  Position position = 1;
+  string trade_id = 2;
+}
+
+// PositionChanged: a fill added to or reduced a position, or turned it
+// around (reason INCREASE, REDUCE or FLIP).
+message PositionChanged {
+  Position position = 1;
+  string trade_id = 2;
+  string reason = 3;
+}
+
+// PositionClosed: a fill closed the position.
+message PositionClosed {
+  Position position = 1;
+  string trade_id = 2;
+}
+
+// MarginAdjusted: margin added to (positive) or taken from an isolated
+// position, or re-sized with the leverage of a cross one.
+message MarginAdjusted {
+  Position position = 1;
+  string amount = 2;
+}
+
+// LeverageChanged: the user's leverage on a contract.
+message LeverageChanged {
+  string user_id = 1;
+  string symbol = 2;
+  int32 leverage = 3;
+}
+
+// FundingPaid: a position paid (negative amount) or received funding at
+// a settlement (§11.7).
+message FundingPaid {
+  Position position = 1;
+  google.protobuf.Timestamp funding_time = 2;
+  string funding_rate = 3;
+  string mark_price = 4;
+  string amount = 5;
+}
+
+// FillSettled is one side of a contract trade as its owner sees it, once
+// settled.
+message FillSettled {
+  string trade_id = 1;
+  string order_id = 2;
+  string user_id = 3;
+  string symbol = 4;
+  // BUY or SELL.
+  string side = 5;
+  string position_side = 6;
+  bool maker = 7;
+  string price = 8;
+  string quantity = 9;
+  // Of the quantity, what closed a position.
+  string closed_quantity = 10;
+  string fee = 11;
+  string realized_pnl = 12;
+  bool liquidation = 13;
+  google.protobuf.Timestamp executed_at = 14;
+}

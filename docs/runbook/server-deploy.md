@@ -53,6 +53,7 @@ bash /opt/exchange/src/deploy/server-update.sh
 | spot-trading-service | 8088（网关转发 `/v1/orders`） | — | 9088 |
 | matching-engine | — | — | 9089 |
 | derivatives-engine（合约撮合分片，同一二进制 `MATCHING_SHARD=derivatives`） | — | — | 9096 |
+| derivatives-service | 8095（网关转发 `/v1/derivatives/*`） | 9195（只给 ledger-service） | 9095 |
 | market-data-service | 8090（网关转发 `/v1/market/tickers`、`/v1/market/{symbol}/*`） | — | 9090 |
 | market-maker | — | — | 9091 |
 | wallet-service | 8092（网关转发 `/v1/wallet/*`） | — | 9092 |

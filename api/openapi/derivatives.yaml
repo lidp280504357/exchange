@@ -1,0 +1,568 @@
+openapi: 3.1.0
+info:
+  title: Exchange perpetual contracts API
+  version: 0.1.0
+  description: |
+    USDT perpetual contracts (requirements §5.8, §11.7): settings per
+    contract, orders, positions and margin. Margin, fees and profit are in
+    the FUTURES account (USDT; fund it with POST /v1/account/transfers).
+    Opening orders need the derivatives.trading switch and an eligible
+    account, stay within the risk limit of their leverage and reserve
+    initial margin plus the taker fee (price x quantity / leverage and
+    price x quantity x taker rate, rounded up per lot); orders that only
+    close reserve nothing. Market orders go to the engine as IOC or FOK
+    limit orders at the mark price +- the price band. Status changes
+    arrive asynchronously (WebSocket orders, fills and positions). Every
+    endpoint needs the access token. Amounts are decimal strings
+    (ADR-0008).
+servers:
+  - url: https://astras.vip
+security:
+  - bearer: []
+tags:
+  - name: derivatives
+paths:
+  /v1/derivatives/account:
+    get:
+      operationId: getDerivativesAccount
+      summary: The caller's FUTURES account at the mark prices
+      tags: [derivatives]
+      responses:
+        '200':
+          description: The account.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FuturesAccount'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/derivatives/settings/{symbol}:
+    parameters:
+      - $ref: '#/components/parameters/ContractSymbol'
+    get:
+      operationId: getDerivativesSettings
+      summary: The caller's settings on a contract
+      description: One-way, cross and 20x (or the contract's most) until changed.
+      tags: [derivatives]
+      responses:
+        '200':
+          description: The settings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContractSettings'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+    put:
+      operationId: updateDerivativesSettings
+      summary: Change the caller's settings on a contract
+      description: |
+        The position mode and the margin mode change only without positions
+        or active orders on the contract (DERIV_SETTINGS_LOCKED). A new
+        leverage is checked against the open positions: each must fit in
+        the risk limit of the new leverage (DERIV_RISK_LIMIT_EXCEEDED); a
+        cross position's margin becomes its entry cost / leverage, frozen or
+        freed (DERIV_INSUFFICIENT_MARGIN when more cannot be frozen); an
+        isolated position's margin must still cover that.
+      tags: [derivatives]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                position_mode:
+                  type: string
+                  enum: [ONE_WAY, HEDGE]
+                margin_mode:
+                  type: string
+                  enum: [CROSS, ISOLATED]
+                leverage:
+                  type: integer
+                  minimum: 1
+                  maximum: 125
+      responses:
+        '200':
+          description: The settings now.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContractSettings'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/derivatives/positions:
+    get:
+      operationId: listPositions
+      summary: The caller's open positions
+      tags: [derivatives]
+      parameters:
+        - name: symbol
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The positions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [positions]
+                properties:
+                  positions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ContractPosition'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/derivatives/positions/{symbol}/margin:
+    parameters:
+      - $ref: '#/components/parameters/ContractSymbol'
+    post:
+      operationId: adjustMargin
+      summary: Add margin to an isolated position, or take some away
+      description: |
+        A positive amount freezes more of the available balance for the
+        position; a negative one frees margin as long as what stays covers
+        the initial margin at the entry price, and with the unrealized
+        result the initial margin at the mark price
+        (DERIV_MARGIN_REDUCE_TOO_LARGE).
+      tags: [derivatives]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              additionalProperties: false
+              properties:
+                position_side:
+                  type: string
+                  enum: [BOTH, LONG, SHORT]
+                  description: BOTH (the default) in one-way mode.
+                amount:
+                  $ref: './market.yaml#/components/schemas/Decimal'
+      responses:
+        '200':
+          description: The position now.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContractPosition'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/derivatives/orders:
+    post:
+      operationId: createDerivativesOrder
+      summary: Place a contract order
+      description: |
+        One-way mode takes position_side BOTH (the default) and may send
+        reduce_only; hedge mode takes LONG or SHORT, where BUY LONG and SELL
+        SHORT open and SELL LONG and BUY SHORT close. Checks fail with
+        INSTRUMENT_NOT_TRADING, INSTRUMENT_PRECISION,
+        ORDER_QUANTITY_OUT_OF_RANGE, ORDER_MIN_NOTIONAL,
+        ORDER_PRICE_OUT_OF_BAND (a limit price further from the mark than
+        the band), DERIV_MARK_PRICE_UNAVAILABLE, DERIV_REDUCE_ONLY_MODE (the
+        contract is degraded), DERIV_REDUCE_ONLY_REJECTED (more than the
+        position left to close), DERIV_RISK_LIMIT_EXCEEDED,
+        DERIV_INSUFFICIENT_MARGIN (the available balance less the cross
+        positions' unrealized loss), ORDER_TOO_MANY_OPEN or the USER_
+        eligibility codes. A client_order_id repeated with the same order
+        returns that order.
+      tags: [derivatives]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema:
+            type: string
+            maxLength: 100
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [symbol, side, type, quantity]
+              additionalProperties: false
+              properties:
+                symbol:
+                  type: string
+                  examples: [BTC-USDT-PERP]
+                side:
+                  type: string
+                  enum: [BUY, SELL]
+                position_side:
+                  type: string
+                  enum: [BOTH, LONG, SHORT]
+                type:
+                  type: string
+                  enum: [LIMIT, MARKET]
+                time_in_force:
+                  type: string
+                  enum: [GTC, IOC, FOK, POST_ONLY]
+                  description: Defaults to GTC for limit orders and IOC for market orders; market orders take IOC or FOK.
+                price:
+                  $ref: './market.yaml#/components/schemas/Decimal'
+                quantity:
+                  $ref: './market.yaml#/components/schemas/Decimal'
+                reduce_only:
+                  type: boolean
+                client_order_id:
+                  type: string
+                  pattern: '^[A-Za-z0-9_-]{1,36}$'
+      responses:
+        '202':
+          description: Accepted; the order's margin is reserved and it is on its way to the engine.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContractOrder'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+    get:
+      operationId: listDerivativesOrders
+      summary: The caller's contract orders, newest first
+      tags: [derivatives]
+      parameters:
+        - name: symbol
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: One status, or ACTIVE for NEW, OPEN and PARTIALLY_FILLED.
+          schema:
+            type: string
+            enum: [ACTIVE, NEW, OPEN, PARTIALLY_FILLED, FILLED, CANCELED, REJECTED, EXPIRED]
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ContractOrder'
+                  next_cursor:
+                    type: [string, 'null']
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+    delete:
+      operationId: cancelDerivativesOrders
+      summary: Cancel the caller's active contract orders
+      tags: [derivatives]
+      parameters:
+        - name: symbol
+          in: query
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Cancel requests sent.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requested]
+                properties:
+                  requested:
+                    type: integer
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/derivatives/orders/{order_id}:
+    parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getDerivativesOrder
+      summary: One of the caller's contract orders
+      tags: [derivatives]
+      responses:
+        '200':
+          description: The order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContractOrder'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+    delete:
+      operationId: cancelDerivativesOrder
+      summary: Cancel one contract order
+      description: A filled order fails with ORDER_ALREADY_FILLED, another finished one with COMMON_CONFLICT.
+      tags: [derivatives]
+      responses:
+        '202':
+          description: Cancel requested.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContractOrder'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/derivatives/fills:
+    get:
+      operationId: listDerivativesFills
+      summary: The caller's contract fills, newest first
+      tags: [derivatives]
+      parameters:
+        - name: symbol
+          in: query
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ContractFill'
+                  next_cursor:
+                    type: [string, 'null']
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ContractSymbol:
+      name: symbol
+      in: path
+      required: true
+      description: A contract, e.g. BTC-USDT-PERP (case-insensitive).
+      schema:
+        type: string
+    Cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+  schemas:
+    FuturesAccount:
+      type: object
+      required: [asset, wallet_balance, available, frozen, order_margin, position_margin, unrealized_pnl,
+        cross_unrealized_pnl, margin_balance, transferable]
+      properties:
+        asset:
+          type: string
+          examples: [USDT]
+        wallet_balance:
+          description: available + frozen.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        available:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        frozen:
+          description: order_margin + position_margin.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        order_margin:
+          description: What open orders reserve (initial margin and taker fee).
+          $ref: './market.yaml#/components/schemas/Decimal'
+        position_margin:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        unrealized_pnl:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        cross_unrealized_pnl:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        margin_balance:
+          description: wallet_balance + unrealized_pnl.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        transferable:
+          description: What may move to SPOT now, min(available, available + cross_unrealized_pnl).
+          $ref: './market.yaml#/components/schemas/Decimal'
+    ContractSettings:
+      type: object
+      required: [symbol, position_mode, margin_mode, leverage, updated_at]
+      properties:
+        symbol:
+          type: string
+        position_mode:
+          type: string
+          enum: [ONE_WAY, HEDGE]
+        margin_mode:
+          type: string
+          enum: [CROSS, ISOLATED]
+        leverage:
+          type: integer
+        updated_at:
+          type: [string, 'null']
+          format: date-time
+          description: Null for the defaults.
+    ContractPosition:
+      type: object
+      required: [position_id, symbol, position_side, quantity, entry_price, mark_price, notional, unrealized_pnl, margin,
+        margin_mode, leverage, maintenance_margin, liquidation_price, realized_pnl, funding, updated_at]
+      properties:
+        position_id:
+          type: string
+          format: uuid
+        symbol:
+          type: string
+        position_side:
+          type: string
+          enum: [BOTH, LONG, SHORT]
+        quantity:
+          description: 'Signed: positive long, negative short.'
+          $ref: './market.yaml#/components/schemas/Decimal'
+        entry_price:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        mark_price:
+          description: Null before the contract's first mark price; so are the figures at it.
+          $ref: './market.yaml#/components/schemas/NullableDecimal'
+        notional:
+          $ref: './market.yaml#/components/schemas/NullableDecimal'
+        unrealized_pnl:
+          $ref: './market.yaml#/components/schemas/NullableDecimal'
+        margin:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        margin_mode:
+          type: string
+          enum: [CROSS, ISOLATED]
+        leverage:
+          type: integer
+        maintenance_margin:
+          $ref: './market.yaml#/components/schemas/NullableDecimal'
+        liquidation_price:
+          description: The estimate of an isolated position; null for cross positions.
+          $ref: './market.yaml#/components/schemas/NullableDecimal'
+        realized_pnl:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        funding:
+          description: Funding received (positive) or paid.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        updated_at:
+          type: string
+          format: date-time
+    ContractOrder:
+      type: object
+      required: [order_id, client_order_id, symbol, side, position_side, type, time_in_force, price, quantity, reduce_only,
+        leverage, margin_mode, status, filled_quantity, average_price, fee, realized_pnl, reserved, cancel_reason,
+        reject_reason, created_at, updated_at]
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        client_order_id:
+          type: string
+        symbol:
+          type: string
+        side:
+          type: string
+          enum: [BUY, SELL]
+        position_side:
+          type: string
+          enum: [BOTH, LONG, SHORT]
+        type:
+          type: string
+          enum: [LIMIT, MARKET]
+        time_in_force:
+          type: string
+          enum: [GTC, IOC, FOK, POST_ONLY]
+        price:
+          description: The limit price, or a market order's protection price.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        quantity:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        reduce_only:
+          type: boolean
+        leverage:
+          type: integer
+        margin_mode:
+          type: string
+          enum: [CROSS, ISOLATED]
+        status:
+          type: string
+          enum: [NEW, OPEN, PARTIALLY_FILLED, FILLED, CANCELED, REJECTED, EXPIRED]
+        filled_quantity:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        average_price:
+          $ref: './market.yaml#/components/schemas/NullableDecimal'
+        fee:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        realized_pnl:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        reserved:
+          description: Margin and fee the order still has frozen.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        cancel_reason:
+          type: [string, 'null']
+        reject_reason:
+          type: [string, 'null']
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ContractFill:
+      type: object
+      required: [trade_id, order_id, symbol, side, position_side, role, price, quantity, closed_quantity, fee, realized_pnl,
+        liquidation, settled, executed_at]
+      properties:
+        trade_id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        symbol:
+          type: string
+        side:
+          type: string
+          enum: [BUY, SELL]
+        position_side:
+          type: string
+          enum: [BOTH, LONG, SHORT]
+        role:
+          type: string
+          enum: [MAKER, TAKER]
+        price:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        quantity:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        closed_quantity:
+          description: Of the quantity, what closed a position.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        fee:
+          description: In the settlement asset (USDT).
+          $ref: './market.yaml#/components/schemas/Decimal'
+        realized_pnl:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        liquidation:
+          type: boolean
+        settled:
+          type: boolean
+          description: False while the ledger has not booked it (see the runbook).
+        executed_at:
+          type: string
+          format: date-time

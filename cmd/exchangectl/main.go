@@ -104,6 +104,9 @@ commands:
   risk assessments [--user U] [--limit N]
                               the newest risk assessments (rule hits, score, action)
   risk rules                  the built-in risk rules as JSON (a starting point for RISK_RULES_FILE)
+  derivatives states          the contracts under reduce-only (a degradation) and who lifted it
+  derivatives resume <symbol> lift a contract's reduce-only once its prices are back
+  derivatives reconcile       check invariant 6 now: long = short per contract, PNL_CLEARING + long cost − short cost = 0
 `
 
 func main() {
@@ -156,6 +159,8 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return walletCmd(ctx, cfg, args[1:], out)
 	case "admin":
 		return adminCmd(ctx, cfg, args[1:], os.Stdin, out)
+	case "derivatives":
+		return derivativesCmd(ctx, cfg, args[1:], out)
 	default:
 		fmt.Fprint(out, usage)
 		return fmt.Errorf("unknown command %q", args[0])

@@ -36,6 +36,8 @@ var (
 	signer embed.FS
 	//go:embed admin/*.sql
 	admin embed.FS
+	//go:embed derivatives/*.sql
+	derivatives embed.FS
 )
 
 // ClickHouse holds the analytics tables applied by analytics-consumer.
@@ -79,6 +81,9 @@ func Signer() fs.FS { return sub(signer, "signer") }
 
 // Admin holds admin-service's schema.
 func Admin() fs.FS { return sub(admin, "admin") }
+
+// Derivatives holds derivatives-service's schema.
+func Derivatives() fs.FS { return sub(derivatives, "derivatives") }
 
 func sub(fsys embed.FS, dir string) fs.FS {
 	s, err := fs.Sub(fsys, dir)

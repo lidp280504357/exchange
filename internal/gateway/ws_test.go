@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	derivativesv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/derivatives/v1"
 	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
 	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
 	tradev1 "github.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1"
@@ -136,6 +137,36 @@ func TestWebSocketPrivateChannels(t *testing.T) {
 	}
 	if m := c.next(); m["channel"] != "deposits" || m["data"].(map[string]any)["status"] != "CONFIRMED" || m["data"].(map[string]any)["reason"] != nil {
 		t.Fatalf("deposit push: %v", m)
+	}
+
+	// Contract positions and fills.
+	c.send(`{"op":"subscribe","args":["positions","fills"]}`)
+	if m := c.next(); m["ok"] != true {
+		t.Fatalf("subscribe positions: %v", m)
+	}
+	for _, msg := range []proto.Message{
+		&derivativesv1.PositionOpened{TradeId: "t1", Position: &derivativesv1.Position{
+			PositionId: "p1", UserId: "u-1", Symbol: "BTC-USDT-PERP", PositionSide: "BOTH", Quantity: "0.1", EntryPrice: "60000",
+			Margin: "600", MarginMode: "CROSS", Leverage: 10,
+		}},
+		&derivativesv1.FillSettled{
+			TradeId: "t1", OrderId: "o1", UserId: "u-1", Symbol: "BTC-USDT-PERP", Side: "BUY", PositionSide: "BOTH", Price: "60000",
+			Quantity: "0.1", ClosedQuantity: "0", Fee: "3", RealizedPnl: "0", ExecutedAt: timestamppb.Now(),
+		},
+	} {
+		env, err := event.NewFactory("test", "t").New(context.Background(), msg, "user", "u-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := WSEvents(hub)(context.Background(), env); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if m := c.next(); m["channel"] != "positions" || m["data"].(map[string]any)["event"] != "OPEN" || m["data"].(map[string]any)["leverage"] != float64(10) {
+		t.Fatalf("position push: %v", m)
+	}
+	if m := c.next(); m["channel"] != "fills" || m["data"].(map[string]any)["fee_asset"] != "USDT" || m["data"].(map[string]any)["quote_quantity"] != nil {
+		t.Fatalf("contract fill push: %v", m)
 	}
 
 	// A reconnecting client asks for what it missed.

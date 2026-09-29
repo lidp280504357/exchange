@@ -58,6 +58,7 @@ services:
       TRADING_SERVICE_URL: http://spot-trading-service:8088
       MARKET_DATA_SERVICE_URL: http://market-data-service:8090
       WALLET_SERVICE_URL: http://wallet-service:8092
+      DERIVATIVES_SERVICE_URL: http://derivatives-service:8095
     depends_on:
       redis: {condition: service_healthy}
       redpanda: {condition: service_healthy}
@@ -69,6 +70,7 @@ services:
       spot-trading-service: {condition: service_started}
       market-data-service: {condition: service_started}
       wallet-service: {condition: service_started}
+      derivatives-service: {condition: service_started}
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9080/readyz"]
@@ -138,6 +140,8 @@ services:
       <<: *base-env
       INSTRUMENT_GRPC_ADDR: instrument-service:9184
       USER_GRPC_ADDR: user-service:9182
+      # Transfers out of FUTURES leave the cross positions' losses covered.
+      DERIVATIVES_GRPC_ADDR: derivatives-service:9195
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}
@@ -166,6 +170,27 @@ services:
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9088/readyz"]
+
+  # Perpetual contracts (implementation plan §7.3 task 5): orders, positions
+  # and margin; the contract engine is derivatives-engine.
+  derivatives-service:
+    <<: *app
+    command: ["/app/derivatives-service"]
+    environment:
+      <<: *base-env
+      LEDGER_GRPC_ADDR: ledger-service:9185
+      INSTRUMENT_GRPC_ADDR: instrument-service:9184
+      USER_GRPC_ADDR: user-service:9182
+      # MARKET_MAKER_USER_IDS (zero fees) comes from apps.env.
+    depends_on:
+      postgres: {condition: service_healthy}
+      redpanda: {condition: service_healthy}
+      ledger-service: {condition: service_started}
+      instrument-service: {condition: service_started}
+      user-service: {condition: service_started}
+    healthcheck:
+      <<: *health
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9095/readyz"]
 
   risk-service:
     <<: *app

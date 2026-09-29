@@ -60,6 +60,16 @@ func (s *Service) Transfer(ctx context.Context, in TransferInput) (domain.Transf
 		return domain.Transfer{}, apperr.New(apperr.KindForbidden, reason, "transfers are not available to this account now")
 	}
 
+	// What leaves FUTURES must not leave a cross position's unrealized loss
+	// uncovered: at most min(available, available + that result).
+	unrealized := decimal.Zero
+	guarded := in.From == domain.AccountFutures && s.Futures != nil
+	if guarded {
+		if unrealized, err = s.Futures.CrossUnrealizedPnL(ctx, in.UserID, in.Asset); err != nil {
+			return domain.Transfer{}, err
+		}
+	}
+
 	t := domain.Transfer{
 		ID: uuid.Must(uuid.NewV7()).String(), UserID: in.UserID, IdemKey: in.IdemKey, RequestHash: in.hash(),
 		Asset: in.Asset, Amount: in.Amount, From: in.From, To: in.To, CreatedAt: s.Now(),
@@ -67,7 +77,14 @@ func (s *Service) Transfer(ctx context.Context, in TransferInput) (domain.Transf
 	p.IdemKey = "transfer:" + t.ID
 	var outcome error
 	err = s.Store.Tx(ctx, func(r ports.Repos) error {
-		res, err := s.post(ctx, r, p)
+		var res Result
+		var err error
+		if guarded {
+			err = s.checkTransferable(ctx, r, p, in, unrealized)
+		}
+		if err == nil {
+			res, err = s.post(ctx, r, p)
+		}
 		switch {
 		case apperr.Is(err, "LEDGER_INSUFFICIENT_BALANCE"):
 			t.Status, t.FailureReason, outcome = domain.TransferFailed, "LEDGER_INSUFFICIENT_BALANCE", err
@@ -149,4 +166,25 @@ func (s *Service) Transfers(ctx context.Context, userID, before string, limit in
 		next = list[limit-1].ID
 	}
 	return list, next, nil
+}
+
+// checkTransferable refuses a transfer out of FUTURES beyond
+// min(available, available + the cross positions' unrealized result),
+// under the lock of the account.
+func (s *Service) checkTransferable(ctx context.Context, r ports.Repos, p domain.Posting, in TransferInput, unrealized decimal.Decimal) error {
+	accounts, err := r.Accounts().Lock(ctx, p.Accounts())
+	if err != nil {
+		return err
+	}
+	for _, a := range accounts {
+		if a.Key != domain.UserAccount(in.UserID, domain.AccountFutures, in.Asset) {
+			continue
+		}
+		limit := decimal.Max(decimal.Min(a.Available, a.Available.Add(unrealized)), decimal.Zero)
+		if in.Amount.GreaterThan(limit) {
+			return domain.ErrInsufficientBalance.WithDetail("asset", in.Asset).WithDetail("account_type", domain.AccountFutures).
+				WithDetail("transferable", limit.String())
+		}
+	}
+	return nil
 }
