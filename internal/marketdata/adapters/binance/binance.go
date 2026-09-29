@@ -37,6 +37,9 @@ type Source struct {
 	// dropped would otherwise block until TCP keepalive gives up.
 	idle time.Duration
 
+	// turn lets one caller at a time wait for its turn; last is when the
+	// latest request went out.
+	turn chan struct{}
 	mu   sync.Mutex
 	last time.Time
 }
@@ -46,6 +49,7 @@ type Source struct {
 func New(rest, stream string, client *http.Client) *Source {
 	return &Source{
 		rest: strings.TrimRight(rest, "/"), stream: strings.TrimRight(stream, "/"), client: client, gap: 200 * time.Millisecond,
+		turn: make(chan struct{}, 1),
 		idle: 30 * time.Second,
 	}
 }
@@ -56,22 +60,32 @@ func (s *Source) Name() string { return "binance" }
 // remote turns BTC-USDT into BTCUSDT.
 func remote(symbol string) string { return strings.ReplaceAll(symbol, "-", "") }
 
-// wait keeps REST requests at least gap apart.
+// wait keeps REST requests at least gap apart. Callers queue for the
+// turn; one that gives up (its context ends) leaves the queue without
+// taking a slot, so abandoned chart requests do not delay the rest.
 func (s *Source) wait(ctx context.Context) error {
-	s.mu.Lock()
-	next := s.last.Add(s.gap)
-	now := time.Now()
-	if next.Before(now) {
-		next = now
-	}
-	s.last = next
-	s.mu.Unlock()
 	select {
+	case s.turn <- struct{}{}:
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-time.After(time.Until(next)):
-		return nil
 	}
+	defer func() { <-s.turn }()
+	s.mu.Lock()
+	next := s.last.Add(s.gap)
+	s.mu.Unlock()
+	if d := time.Until(next); d > 0 {
+		t := time.NewTimer(d)
+		defer t.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.C:
+		}
+	}
+	s.mu.Lock()
+	s.last = time.Now()
+	s.mu.Unlock()
+	return nil
 }
 
 // Backfill pages through /api/v3/klines from from to now.

@@ -131,3 +131,27 @@ func TestKlinesOfAnyInterval(t *testing.T) {
 		t.Fatalf("klines %+v", list)
 	}
 }
+
+func TestAnAbandonedRequestFreesItsTurn(t *testing.T) {
+	s := New("http://unused", "", http.DefaultClient)
+	s.gap = 200 * time.Millisecond
+	if err := s.wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	first := time.Now()
+	// Five callers give up while waiting for their turn.
+	for range 5 {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		if err := s.wait(ctx); err == nil {
+			t.Fatal("a caller whose context ended got a turn")
+		}
+		cancel()
+	}
+	// The next one waits only for the rest of the gap after the first.
+	if err := s.wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(first); took < 190*time.Millisecond || took > 600*time.Millisecond {
+		t.Fatalf("the next request went out %s after the first, want about the gap", took)
+	}
+}

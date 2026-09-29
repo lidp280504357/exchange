@@ -26,6 +26,7 @@ export function WithdrawalsPage({ admin }: { admin: Admin }) {
       <ErrorText text={list.isError ? describe(list.error) : undefined} />
       <Table
         head={["申请时间", "用户", "金额", "地址", "折合 USDT", "风控", "审批", status === "PENDING_REVIEW" && reviewer ? "处理" : "状态"]}
+        keys={(list.data ?? []).map((w) => w.id)}
         rows={(list.data ?? []).map((w) => [
           time(w.created_at),
           <Mono key="u">{w.user_id}</Mono>,

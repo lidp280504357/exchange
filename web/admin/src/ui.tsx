@@ -80,8 +80,11 @@ export function Badge({ children, tone = "gray" }: { children: ReactNode; tone?:
   return <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${tones[tone]}`}>{children}</span>;
 }
 
-// Table renders rows under a header; cells are plain nodes.
-export function Table({ head, rows, empty = "没有记录" }: { head: string[]; rows: ReactNode[][]; empty?: string }) {
+// Table renders rows under a header; cells are plain nodes. Rows whose
+// cells keep state (a reason typed next to an approve button) need keys:
+// the record's ID, so a refresh that drops a row above does not hand the
+// state, and the button, to the next record.
+export function Table({ head, rows, keys, empty = "没有记录" }: { head: string[]; rows: ReactNode[][]; keys?: string[]; empty?: string }) {
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full text-left text-sm">
@@ -103,7 +106,7 @@ export function Table({ head, rows, empty = "没有记录" }: { head: string[]; 
             </tr>
           ) : (
             rows.map((r, i) => (
-              <tr key={i} className="border-b border-slate-100 align-top">
+              <tr key={keys?.[i] ?? i} className="border-b border-slate-100 align-top">
                 {r.map((c, j) => (
                   <td key={j} className="px-2 py-2">
                     {c}

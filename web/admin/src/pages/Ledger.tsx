@@ -27,6 +27,7 @@ export function LedgerPage({ admin }: { admin: Admin }) {
         <ErrorText text={list.isError ? describe(list.error) : undefined} />
         <Table
           head={["申请时间", "类型", "对象", "金额", "理由", "发起人", "状态", "结果", can(admin, "ledger.adjust.approve") ? "审批" : "处理时间"]}
+          keys={(list.data ?? []).map((a) => a.id)}
           rows={(list.data ?? []).map((a) => [
             time(a.created_at),
             a.kind === "INSURANCE_FUND" ? "保险基金注资" : "手动调账",

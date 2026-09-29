@@ -36,6 +36,7 @@ function Contracts({ admin }: { admin: Admin }) {
       <ErrorText text={list.isError ? describe(list.error) : undefined} />
       <Table
         head={["合约", "状态", "只减仓", "标记价格", "持仓量", "持仓数", ...(lift || edit ? ["操作"] : [])]}
+        keys={(list.data ?? []).map((c) => c.symbol)}
         rows={(list.data ?? []).map((c) => [
           <span key="s" className="font-medium">
             {c.symbol}

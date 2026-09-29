@@ -28,6 +28,7 @@ export function InstrumentsPage({ admin }: { admin: Admin }) {
       <Card title="交易对（单交易对紧急开关）">
         <Table
           head={["交易对", "状态", "最小下单量", "价格步长", "数量步长", "费率 maker/taker", editable ? "改状态" : "版本"]}
+          keys={(list.data?.pairs ?? []).map((p) => p.symbol ?? "")}
           rows={(list.data?.pairs ?? []).map((p) => [
             <span key="s" className="font-medium">
               {p.symbol}

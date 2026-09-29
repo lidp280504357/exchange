@@ -15,6 +15,7 @@ export function FlagsPage({ admin }: { admin: Admin }) {
       <ErrorText text={list.isError ? describe(list.error) : undefined} />
       <Table
         head={["开关", "状态", "说明", "规则", "最近修改", editable ? "切换" : "版本"]}
+        keys={(list.data ?? []).map((f) => f.key)}
         rows={(list.data ?? []).map((f) => [
           <Mono key="k">{f.key}</Mono>,
           f.enabled ? <Badge tone="green">开</Badge> : <Badge>关</Badge>,
