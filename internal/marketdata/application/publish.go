@@ -102,9 +102,14 @@ type Pusher struct {
 	svc    *Service
 	pub    kafka.Publisher
 	events *event.Factory
+	ref    *ReferenceCandles
 	pushed prometheus.Counter
 	failed prometheus.Counter
 }
+
+// UseReference swaps the candles of symbols in reference mode for their
+// reference K-lines (before Run starts).
+func (p *Pusher) UseReference(rc *ReferenceCandles) { p.ref = rc }
 
 // NewPusher registers the push metrics with reg.
 func NewPusher(svc *Service, pub kafka.Publisher, events *event.Factory, reg prometheus.Registerer) *Pusher {
@@ -130,7 +135,11 @@ func (p *Pusher) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case now := <-tick.C:
-			if err := p.Push(ctx, p.svc.Updates(now)); err != nil && ctx.Err() == nil {
+			updates := p.svc.Updates(now)
+			if p.ref != nil {
+				updates = p.ref.Push(ctx, updates)
+			}
+			if err := p.Push(ctx, updates); err != nil && ctx.Err() == nil {
 				p.failed.Inc()
 				p.svc.log.WarnContext(ctx, "market update push failed", "error", err)
 			}

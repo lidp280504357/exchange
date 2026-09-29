@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/shopspring/decimal"
 
 	"github.com/lidp280504357/exchange/internal/marketdata/domain"
 )
@@ -104,5 +106,28 @@ func TestStreamEndsWhenSilent(t *testing.T) {
 	}
 	if took := time.Since(start); took > 5*time.Second {
 		t.Fatalf("a silent stream took %s to end", took)
+	}
+}
+
+func TestKlinesOfAnyInterval(t *testing.T) {
+	var got url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.Query()
+		_, _ = w.Write([]byte(`[[1790640000000,"60000","60500","59900","60400","12.5",1790654399999,"753000.1",1234,"0","0","0"]]`))
+	}))
+	defer srv.Close()
+	s := New(srv.URL, "", srv.Client())
+	s.gap = 0
+	to := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	list, err := s.Klines(context.Background(), "BTC-USDT", domain.Hour4, to, 300)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Get("symbol") != "BTCUSDT" || got.Get("interval") != "4h" || got.Get("limit") != "300" || got.Get("endTime") != "1790683200000" {
+		t.Fatalf("query %v", got)
+	}
+	if len(list) != 1 || list[0].Interval != domain.Hour4 || list[0].Symbol != "BTC-USDT" || !list[0].Close.Equal(decimal.RequireFromString("60400")) ||
+		list[0].Trades != 1234 {
+		t.Fatalf("klines %+v", list)
 	}
 }

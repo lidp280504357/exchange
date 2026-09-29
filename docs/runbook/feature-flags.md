@@ -12,7 +12,7 @@
 | `ledger.welcome_credit` | 新注册用户自动获得模拟演示资金，仅测试环境 | 1 |
 | `wallet.withdraw` | 提现 | 2 |
 | `derivatives.trading` | 永续合约交易 | 3 |
-| `market.reference_kline` | 无成交的新交易对临时展示参考 K 线 | 2 |
+| `market.reference_kline` | 图表显示参考行情（币安）的 K 线而不是平台的（按交易对；合约用指数交易对；测试服打开，ETH-BTC 除外，见 [market-data.md](market-data.md#参考-k-线marketreference_kline测试环境)） | 2 |
 | `risk.enforce` | 执行风控规则的动作（评分为 REVIEW 的 ACTIVE 账户置为 `RISK_REVIEW`）；关闭时只记分。测试服只对地区 `AQ` 打开（[risk.md](risk.md)） | 2 |
 
 ## 规则维度

@@ -25,7 +25,9 @@ type Handler struct {
 	// Ref is the reference feed; nil when none is configured.
 	Ref   *application.ReferenceFeed
 	Marks *application.Marks
-	Now   func() time.Time
+	// RefKlines serves the charts in reference mode; nil without a feed.
+	RefKlines *application.ReferenceCandles
+	Now       func() time.Time
 }
 
 // Routes mounts the endpoints on r.
@@ -220,7 +222,12 @@ func (h *Handler) candles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s, interval := symbol(r), r.URL.Query().Get("interval")
-	list, err := h.Svc.Candles(r.Context(), s, interval, from, to, limit(r))
+	var list []domain.Candle
+	if ref, ok := h.referenceKlines(r, s); ok {
+		list, err = h.RefKlines.Candles(r.Context(), s, ref, interval, from, to, limit(r))
+	} else {
+		list, err = h.Svc.Candles(r.Context(), s, interval, from, to, limit(r))
+	}
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -236,6 +243,15 @@ func (h *Handler) candles(w http.ResponseWriter, r *http.Request) {
 	}
 	live(w)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"symbol": s, "interval": interval, "candles": out})
+}
+
+// referenceKlines reports whether the symbol's chart shows reference
+// candles (market.reference_kline) and of which reference symbol.
+func (h *Handler) referenceKlines(r *http.Request, symbol string) (string, bool) {
+	if h.RefKlines == nil {
+		return "", false
+	}
+	return h.RefKlines.Serves(r.Context(), symbol)
 }
 
 // ErrUnknownContract is returned for a symbol that is not a contract.

@@ -92,6 +92,16 @@ SELECT symbol, funding_time, funding_rate, mark_price, samples FROM market.fundi
 
 指标：`market_mark_age_seconds{symbol}`（-1 表示从未算出）、`market_index_sources{symbol}`（最近一次指数价用到的源数）、`market_contract_degraded{symbol}`、`market_funding_settled_total`；告警 `ContractDegraded`、`ContractIndexSourceMissing`。
 
+## 参考 K 线（`market.reference_kline`，测试环境）
+
+用户决定（2026-09-30）：测试环境成交太少，平台自己的 K 线几乎不动，图表一律显示币安的 K 线。开关 `market.reference_kline` 按交易对生效（还需要 `market.reference_feed` 开着）：
+
+- 哪些交易对：参考行情跟踪的交易对（`REFERENCE_SYMBOLS`，测试服 BTC-USDT、ETH-USDT）用自己的参考数据，合约用它的指数交易对（BTC-USDT-PERP → BTC-USDT）。没有参考数据的交易对（ETH-BTC）照常显示平台 K 线。
+- 历史：`GET /v1/market/{symbol}/candles` 改为向币安取同周期的 K 线（`/api/v3/klines`，周期名与对齐方式和平台一致），同样的请求 5 秒内走缓存，已结束的历史页缓存 1 分钟；取不到时返回 `COMMON_UNAVAILABLE`。
+- 实时：参考行情收到的每条 1 分钟推送，在服务里累加成各周期的当前 K 线（开高低收、成交量、笔数），随每 500 毫秒一次的推送发到 `market.candle.events`，前端的 `candles:{symbol}:{interval}` 频道和平台 K 线一样收到；服务启动后第一次遇到进行到一半的周期，先向币安取这一根的当前值再累加。这些交易对不再推送平台自己的 K 线；ticker、成交记录、深度仍是平台的数据。
+- 测试服设置：`exchangectl flags set market.reference_kline --on --deny-symbols ETH-BTC --reason "..."`。ETH-BTC 要保留平台 K 线，因为端到端 `marketdata.sh` 在它上面成交后检查平台 K 线。
+- 数据授权：参考数据给客户端看同样受 §11.9 限制，只在测试环境用；上线前关掉开关，或换成有授权的数据源。
+
 ## 故障与处理
 
 | 情况 | 表现 | 处理 |

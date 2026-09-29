@@ -22,6 +22,11 @@ expect 200 - "a ticker (symbols are case-insensitive)"
 check '.symbol == "BTC-USDT" and (.volume | type) == "string"' "amounts are strings"
 call GET /v1/market/DOGE-USDT/ticker ""
 expect 404 COMMON_NOT_FOUND "a pair that does not exist"
+# The test environment shows the reference source's K-lines for BTC-USDT
+# (market.reference_kline): a day of hourly candles that traded.
+call GET "/v1/market/BTC-USDT/candles?interval=1h&limit=24" ""
+expect 200 - "BTC-USDT hourly candles"
+check '(.candles | length) == 24 and all(.candles[]; (.volume | tonumber) > 0)' "reference K-lines: 24 hours, each with volume"
 call GET "/v1/market/BTC-USDT/candles?interval=2d" ""
 expect 400 COMMON_INVALID_ARGUMENT "an unknown interval"
 call GET "/v1/market/BTC-USDT/candles?interval=1m&from=yesterday" ""

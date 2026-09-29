@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -52,8 +53,9 @@ type ReferenceFeed struct {
 	// recheck is how often the flag is looked at.
 	recheck time.Duration
 
-	mu     sync.Mutex
-	latest map[string]Reference
+	mu        sync.Mutex
+	latest    map[string]Reference
+	observers []func(domain.Candle)
 
 	updates *prometheus.CounterVec
 	errors  prometheus.Counter
@@ -113,6 +115,23 @@ func (f *ReferenceFeed) set(c domain.Candle, at time.Time) {
 	f.mu.Unlock()
 }
 
+// Observe has fn called with every live 1m candle update, on the feed's
+// goroutine (reference K-lines follow the stream this way).
+func (f *ReferenceFeed) Observe(fn func(domain.Candle)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.observers = append(f.observers, fn)
+}
+
+func (f *ReferenceFeed) notify(c domain.Candle) {
+	f.mu.Lock()
+	observers := slices.Clone(f.observers)
+	f.mu.Unlock()
+	for _, fn := range observers {
+		fn(c)
+	}
+}
+
 // Run feeds until ctx ends (an app.Loop body).
 func (f *ReferenceFeed) Run(ctx context.Context) error {
 	backoff := time.Second
@@ -169,6 +188,7 @@ func (f *ReferenceFeed) session(ctx context.Context) error {
 	return f.src.Stream(ctx, f.symbols, func(c domain.Candle) {
 		f.set(c, f.now())
 		f.updates.WithLabelValues(c.Symbol).Inc()
+		f.notify(c)
 		if err := f.store.Read().References().Upsert(ctx, f.src.Name(), []domain.Candle{c}); err != nil && ctx.Err() == nil {
 			f.log.WarnContext(ctx, "reference candle not stored", "symbol", c.Symbol, "error", err)
 		}

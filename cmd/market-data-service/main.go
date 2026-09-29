@@ -131,8 +131,9 @@ func setup(ctx context.Context, a *app.App) error {
 	pusher := application.NewPusher(svc, prod, events, a.Metrics())
 	a.Add("market push", app.Loop(pusher.Run))
 	var (
-		feed    *application.ReferenceFeed
-		sources application.IndexSources
+		feed      *application.ReferenceFeed
+		sources   application.IndexSources
+		refKlines *application.ReferenceCandles
 	)
 	if len(cfg.ReferenceSymbols) > 0 {
 		flagClient, err := bootstrap.Flags(ctx, a, cfg.Postgres)
@@ -143,6 +144,10 @@ func setup(ctx context.Context, a *app.App) error {
 		feed = application.NewReferenceFeed(src, store, flagClient, cfg.ReferenceSymbols, a.Logger(), a.Metrics())
 		sources = feed
 		a.Add("reference feed", app.Loop(feed.Run))
+		// Reference K-lines (market.reference_kline, test environments).
+		refKlines = application.NewReferenceCandles(src, flagClient, listed, cfg.ReferenceSymbols, a.Logger())
+		feed.Observe(refKlines.Observe)
+		pusher.UseReference(refKlines)
 	}
 	sourceWeights, _ := weights(cfg.IndexSourceWeights) // validated
 	marks := application.NewMarks(svc, listed, sources, store, pusher, prod, events,
@@ -172,6 +177,6 @@ func setup(ctx context.Context, a *app.App) error {
 		}
 	}))
 	r := a.NewRouter()
-	(&httpapi.Handler{Svc: svc, Ref: feed, Marks: marks, Now: time.Now}).Routes(r)
+	(&httpapi.Handler{Svc: svc, Ref: feed, Marks: marks, RefKlines: refKlines, Now: time.Now}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
 }

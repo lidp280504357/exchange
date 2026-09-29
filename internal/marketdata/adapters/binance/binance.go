@@ -1,6 +1,7 @@
-// Package binance reads 1m candles from Binance's public market data
+// Package binance reads candles from Binance's public market data
 // (data-api.binance.vision over REST, data-stream.binance.vision over
-// WebSocket) as a reference source. Binance's terms forbid using the data
+// WebSocket) as a reference source: 1m candles for reference prices, any
+// interval for reference K-lines. Binance's terms forbid using the data
 // for a trading service without a license (requirements §11.9): test
 // environments only, behind the market.reference_feed flag.
 package binance
@@ -77,48 +78,70 @@ func (s *Source) wait(ctx context.Context) error {
 func (s *Source) Backfill(ctx context.Context, symbol string, from time.Time) ([]domain.Candle, error) {
 	var out []domain.Candle
 	for start := from; start.Before(time.Now()); {
-		if err := s.wait(ctx); err != nil {
-			return nil, err
-		}
 		q := url.Values{"symbol": {remote(symbol)}, "interval": {"1m"}, "startTime": {strconv.FormatInt(start.UnixMilli(), 10)}, "limit": {"1000"}}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.rest+"/api/v3/klines?"+q.Encode(), nil)
+		page, err := s.klines(ctx, symbol, domain.Minute1, q)
 		if err != nil {
 			return nil, err
 		}
-		resp, err := s.client.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("binance klines: %w", err)
-		}
-		var rows [][]any
-		err = json.NewDecoder(resp.Body).Decode(&rows)
-		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("binance klines: HTTP %d", resp.StatusCode)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("binance klines: %w", err)
-		}
-		if len(rows) == 0 {
+		if len(page) == 0 {
 			break
 		}
-		for _, row := range rows {
-			c, err := fromRow(symbol, row)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, c)
-		}
+		out = append(out, page...)
 		start = out[len(out)-1].OpenTime.Add(time.Minute)
-		if len(rows) < 1000 {
+		if len(page) < 1000 {
 			break
 		}
 	}
 	return out, nil
 }
 
+// Klines returns the latest limit (at most 1000) candles of an interval,
+// oldest first, up to the one containing to (now when zero); the open
+// candle is the last. Binance names its intervals as the platform does
+// and aligns them the same way (UTC days, weeks from Monday).
+func (s *Source) Klines(ctx context.Context, symbol string, interval domain.Interval, to time.Time, limit int) ([]domain.Candle, error) {
+	q := url.Values{"symbol": {remote(symbol)}, "interval": {string(interval)}, "limit": {strconv.Itoa(max(1, min(limit, 1000)))}}
+	if !to.IsZero() {
+		q.Set("endTime", strconv.FormatInt(to.UnixMilli(), 10))
+	}
+	return s.klines(ctx, symbol, interval, q)
+}
+
+func (s *Source) klines(ctx context.Context, symbol string, interval domain.Interval, q url.Values) ([]domain.Candle, error) {
+	if err := s.wait(ctx); err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.rest+"/api/v3/klines?"+q.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("binance klines: %w", err)
+	}
+	var rows [][]any
+	err = json.NewDecoder(resp.Body).Decode(&rows)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("binance klines: HTTP %d", resp.StatusCode)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("binance klines: %w", err)
+	}
+	out := make([]domain.Candle, 0, len(rows))
+	for _, row := range rows {
+		c, err := fromRow(symbol, interval, row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
 // fromRow reads [openTime, open, high, low, close, volume, closeTime,
 // quoteVolume, trades, ...].
-func fromRow(symbol string, row []any) (domain.Candle, error) {
+func fromRow(symbol string, interval domain.Interval, row []any) (domain.Candle, error) {
 	if len(row) < 9 {
 		return domain.Candle{}, errors.New("binance klines: short row")
 	}
@@ -137,7 +160,7 @@ func fromRow(symbol string, row []any) (domain.Candle, error) {
 		nums[i] = d
 	}
 	return domain.Candle{
-		Symbol: symbol, Interval: domain.Minute1, OpenTime: time.UnixMilli(int64(openMS)).UTC(),
+		Symbol: symbol, Interval: interval, OpenTime: time.UnixMilli(int64(openMS)).UTC(),
 		Open: nums[0], High: nums[1], Low: nums[2], Close: nums[3], Volume: nums[4], QuoteVolume: nums[5], Trades: int64(trades),
 	}, nil
 }

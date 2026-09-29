@@ -95,6 +95,14 @@ type ReferenceSource interface {
 	Stream(ctx context.Context, symbols []string, on func(domain.Candle)) error
 }
 
+// ReferenceHistory returns a reference source's candles of any interval,
+// for reference K-lines (market.reference_kline).
+type ReferenceHistory interface {
+	// Klines returns the latest limit candles of symbol at interval up to
+	// the one containing to (now when zero), oldest first.
+	Klines(ctx context.Context, symbol string, interval domain.Interval, to time.Time, limit int) ([]domain.Candle, error)
+}
+
 // Instruments tells which trading pairs and contracts exist
 // (instrument-service).
 type Instruments interface {
