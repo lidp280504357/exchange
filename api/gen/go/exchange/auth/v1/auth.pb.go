@@ -367,6 +367,94 @@ func (x *SecurityContext) GetPasswordChangedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+type FindUserRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Identifier    string                 `protobuf:"bytes,1,opt,name=identifier,proto3" json:"identifier,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FindUserRequest) Reset() {
+	*x = FindUserRequest{}
+	mi := &file_exchange_auth_v1_auth_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FindUserRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FindUserRequest) ProtoMessage() {}
+
+func (x *FindUserRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_auth_v1_auth_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FindUserRequest.ProtoReflect.Descriptor instead.
+func (*FindUserRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_auth_v1_auth_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *FindUserRequest) GetIdentifier() string {
+	if x != nil {
+		return x.Identifier
+	}
+	return ""
+}
+
+type FindUserResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FindUserResponse) Reset() {
+	*x = FindUserResponse{}
+	mi := &file_exchange_auth_v1_auth_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FindUserResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FindUserResponse) ProtoMessage() {}
+
+func (x *FindUserResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_auth_v1_auth_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FindUserResponse.ProtoReflect.Descriptor instead.
+func (*FindUserResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_auth_v1_auth_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *FindUserResponse) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
 var File_exchange_auth_v1_auth_proto protoreflect.FileDescriptor
 
 const file_exchange_auth_v1_auth_proto_rawDesc = "" +
@@ -395,10 +483,17 @@ const file_exchange_auth_v1_auth_proto_rawDesc = "" +
 	"\tdevice_id\x18\x03 \x01(\tR\bdeviceId\x12K\n" +
 	"\x14device_first_seen_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x11deviceFirstSeenAt\x12J\n" +
 	"\x13identity_changed_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\x11identityChangedAt\x12J\n" +
-	"\x13password_changed_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\x11passwordChangedAt2\xcb\x01\n" +
+	"\x13password_changed_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\x11passwordChangedAt\"1\n" +
+	"\x0fFindUserRequest\x12\x1e\n" +
+	"\n" +
+	"identifier\x18\x01 \x01(\tR\n" +
+	"identifier\"+\n" +
+	"\x10FindUserResponse\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId2\x9e\x02\n" +
 	"\vAuthService\x12Z\n" +
 	"\vGetContacts\x12$.exchange.auth.v1.GetContactsRequest\x1a%.exchange.auth.v1.GetContactsResponse\x12`\n" +
-	"\rConsumeStepUp\x12&.exchange.auth.v1.ConsumeStepUpRequest\x1a'.exchange.auth.v1.ConsumeStepUpResponseB\xc9\x01\n" +
+	"\rConsumeStepUp\x12&.exchange.auth.v1.ConsumeStepUpRequest\x1a'.exchange.auth.v1.ConsumeStepUpResponse\x12Q\n" +
+	"\bFindUser\x12!.exchange.auth.v1.FindUserRequest\x1a\".exchange.auth.v1.FindUserResponseB\xc9\x01\n" +
 	"\x14com.exchange.auth.v1B\tAuthProtoP\x01ZDgithub.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1;authv1\xa2\x02\x03EAX\xaa\x02\x10Exchange.Auth.V1\xca\x02\x10Exchange\\Auth\\V1\xe2\x02\x1cExchange\\Auth\\V1\\GPBMetadata\xea\x02\x12Exchange::Auth::V1b\x06proto3"
 
 var (
@@ -413,7 +508,7 @@ func file_exchange_auth_v1_auth_proto_rawDescGZIP() []byte {
 	return file_exchange_auth_v1_auth_proto_rawDescData
 }
 
-var file_exchange_auth_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_exchange_auth_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_exchange_auth_v1_auth_proto_goTypes = []any{
 	(*GetContactsRequest)(nil),    // 0: exchange.auth.v1.GetContactsRequest
 	(*Contact)(nil),               // 1: exchange.auth.v1.Contact
@@ -421,20 +516,24 @@ var file_exchange_auth_v1_auth_proto_goTypes = []any{
 	(*ConsumeStepUpRequest)(nil),  // 3: exchange.auth.v1.ConsumeStepUpRequest
 	(*ConsumeStepUpResponse)(nil), // 4: exchange.auth.v1.ConsumeStepUpResponse
 	(*SecurityContext)(nil),       // 5: exchange.auth.v1.SecurityContext
-	(*timestamppb.Timestamp)(nil), // 6: google.protobuf.Timestamp
+	(*FindUserRequest)(nil),       // 6: exchange.auth.v1.FindUserRequest
+	(*FindUserResponse)(nil),      // 7: exchange.auth.v1.FindUserResponse
+	(*timestamppb.Timestamp)(nil), // 8: google.protobuf.Timestamp
 }
 var file_exchange_auth_v1_auth_proto_depIdxs = []int32{
 	1, // 0: exchange.auth.v1.GetContactsResponse.contacts:type_name -> exchange.auth.v1.Contact
 	5, // 1: exchange.auth.v1.ConsumeStepUpResponse.security:type_name -> exchange.auth.v1.SecurityContext
-	6, // 2: exchange.auth.v1.SecurityContext.device_first_seen_at:type_name -> google.protobuf.Timestamp
-	6, // 3: exchange.auth.v1.SecurityContext.identity_changed_at:type_name -> google.protobuf.Timestamp
-	6, // 4: exchange.auth.v1.SecurityContext.password_changed_at:type_name -> google.protobuf.Timestamp
+	8, // 2: exchange.auth.v1.SecurityContext.device_first_seen_at:type_name -> google.protobuf.Timestamp
+	8, // 3: exchange.auth.v1.SecurityContext.identity_changed_at:type_name -> google.protobuf.Timestamp
+	8, // 4: exchange.auth.v1.SecurityContext.password_changed_at:type_name -> google.protobuf.Timestamp
 	0, // 5: exchange.auth.v1.AuthService.GetContacts:input_type -> exchange.auth.v1.GetContactsRequest
 	3, // 6: exchange.auth.v1.AuthService.ConsumeStepUp:input_type -> exchange.auth.v1.ConsumeStepUpRequest
-	2, // 7: exchange.auth.v1.AuthService.GetContacts:output_type -> exchange.auth.v1.GetContactsResponse
-	4, // 8: exchange.auth.v1.AuthService.ConsumeStepUp:output_type -> exchange.auth.v1.ConsumeStepUpResponse
-	7, // [7:9] is the sub-list for method output_type
-	5, // [5:7] is the sub-list for method input_type
+	6, // 7: exchange.auth.v1.AuthService.FindUser:input_type -> exchange.auth.v1.FindUserRequest
+	2, // 8: exchange.auth.v1.AuthService.GetContacts:output_type -> exchange.auth.v1.GetContactsResponse
+	4, // 9: exchange.auth.v1.AuthService.ConsumeStepUp:output_type -> exchange.auth.v1.ConsumeStepUpResponse
+	7, // 10: exchange.auth.v1.AuthService.FindUser:output_type -> exchange.auth.v1.FindUserResponse
+	8, // [8:11] is the sub-list for method output_type
+	5, // [5:8] is the sub-list for method input_type
 	5, // [5:5] is the sub-list for extension type_name
 	5, // [5:5] is the sub-list for extension extendee
 	0, // [0:5] is the sub-list for field type_name
@@ -451,7 +550,7 @@ func file_exchange_auth_v1_auth_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_auth_v1_auth_proto_rawDesc), len(file_exchange_auth_v1_auth_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

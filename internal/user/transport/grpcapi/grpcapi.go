@@ -57,3 +57,12 @@ func (s *Server) CheckEligibility(ctx context.Context, req *userv1.CheckEligibil
 	}
 	return &userv1.CheckEligibilityResponse{Allowed: allowed, ReasonCode: reason}, nil
 }
+
+// ChangeStatus moves an account to another status for an operator.
+func (s *Server) ChangeStatus(ctx context.Context, req *userv1.ChangeStatusRequest) (*userv1.ChangeStatusResponse, error) {
+	c, err := s.svc.ChangeStatus(ctx, req.GetUserId(), req.GetToStatus(), req.GetReasonCode(), req.GetActor(), req.GetNote())
+	if err != nil {
+		return nil, err
+	}
+	return &userv1.ChangeStatusResponse{FromStatus: c.From, ToStatus: c.To}, nil
+}

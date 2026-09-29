@@ -1,6 +1,6 @@
 # 运行手册索引
 
-测试环境入口 `https://astras.vip`（H5）、`https://astras.vip/docs/`（API 参考）；服务器操作见 [server-deploy.md](server-deploy.md)。凭据只在本地 `.env` 与服务器 `/opt/exchange/infra/{.env,apps.env}`。
+测试环境入口 `https://astras.vip`（H5）、`https://astras.vip/docs/`（API 参考）、`https://astras.vip/admin/`（管理后台）；服务器操作见 [server-deploy.md](server-deploy.md)。凭据只在本地 `.env` 与服务器 `/opt/exchange/infra/{.env,apps.env}`。
 
 ## 开发、部署与测试
 
@@ -31,6 +31,8 @@
 | [market-maker.md](market-maker.md) | 参考行情（币安公开数据，仅测试环境）与做市机器人：参数、撤单条件、测试服设置 |
 | [instruments.md](instruments.md) | 资产、网络、交易对、费率，`exchangectl instruments` |
 | [ledger.md](ledger.md) | 账本、划转、对账，`exchangectl ledger` |
+| [wallet.md](wallet.md) | 充值、signer 与 keystore、归集、提现审批与签名、链上对账，`exchangectl wallet` |
+| [admin.md](admin.md) | 管理后台（`/admin/`）：管理员与 TOTP、角色、提现审批、用户处置、交易对与开关、双人调账、审计查询，`exchangectl admin` |
 | [grafana-cloud.md](grafana-cloud.md) | Grafana Cloud 接入（暂缓） |
 
 ## API 文档

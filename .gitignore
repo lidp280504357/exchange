@@ -27,6 +27,11 @@ dist/
 /risk-service
 /spot-trading-service
 /user-service
+/wallet-service
+/market-data-service
+/market-maker
+/signer
+/admin-service
 /devmcp
 node_modules/
 *.tsbuildinfo
@@ -36,6 +41,8 @@ node_modules/
 .env.*
 !.env.example
 apps.env
+signer.env
+admin.env
 
 # macOS AppleDouble files
 ._*

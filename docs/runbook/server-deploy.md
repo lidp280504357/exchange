@@ -17,7 +17,7 @@ bash /opt/exchange/src/deploy/server-update.sh          # 更新到 origin/main
 bash /opt/exchange/src/deploy/server-update.sh 305e2a7  # 回滚/切换到指定提交
 ```
 
-脚本依次：拉代码并重置到目标版本；把 `deploy/compose/` 同步到 `/opt/exchange/infra`（不碰 `.env`、`apps.env`、证书、Cloudflare IP 列表、`nginx/html/`）；幂等核对 Redpanda topic；`docker compose up -d --build` 构建并更新容器、清理悬空镜像并把构建缓存压到 3 GB；校验并热加载 nginx 配置；按 `deploy/instruments/test.json` 幂等同步参考数据（[instruments.md](instruments.md)）；在 node 容器里构建 H5 并发布到 nginx 静态目录（[h5.md](h5.md)）。
+脚本依次：拉代码并重置到目标版本；把 `deploy/compose/` 同步到 `/opt/exchange/infra`（不碰 `.env`、`apps.env`、证书、Cloudflare IP 列表、`nginx/html/`、`nginx/admin/`；`signer/`、`admin/` 两个密钥目录不在仓库里，也不受影响）；幂等核对 Redpanda topic；`docker compose up -d --build` 构建并更新容器、清理悬空镜像并把构建缓存压到 3 GB；校验并热加载 nginx 配置；按 `deploy/instruments/test.json` 幂等同步参考数据（[instruments.md](instruments.md)）；在 node 容器里构建 H5 并发布到 nginx 静态目录（[h5.md](h5.md)）；同样构建管理后台 `web/admin` 并发布到 `nginx/admin`（[admin.md](admin.md)）。
 
 ## 首次克隆（部署密钥加到 GitHub 之后）
 
@@ -30,7 +30,7 @@ bash /opt/exchange/src/deploy/server-update.sh
 
 ## 应用环境变量
 
-基础设施凭据在 `/opt/exchange/infra/.env`。应用服务的变量（Turnstile、Resend、Alchemy、JWT 密钥等）阶段 1 起放在 `/opt/exchange/infra/apps.env`（权限 600，不入库），由 `docker-compose.apps.yml` 通过 `env_file` 注入；本地开发用仓库根目录的 `.env`。
+基础设施凭据在 `/opt/exchange/infra/.env`。应用服务的变量（Turnstile、Resend、Alchemy、JWT 密钥等）阶段 1 起放在 `/opt/exchange/infra/apps.env`（权限 600，不入库），由 `docker-compose.apps.yml` 通过 `env_file` 注入；本地开发用仓库根目录的 `.env`。只给单个服务的密钥各有目录：signer 的 `signer/signer.env`（keystore 口令，[wallet.md](wallet.md)）、admin-service 的 `admin/admin.env`（`ADMIN_SECRET_KEY`，[admin.md](admin.md)），都是 `required: true`，缺失时部署失败。
 
 服务配置由 `internal/platform/config` 加载：代码默认值 < `.env`（仅本地；进程环境变量 `APP_ENV` 非 local 时不读取）< 进程环境变量。容器里只有 `apps.env` 注入的环境变量生效，镜像构建时不要把 `.env` 拷进去。
 
@@ -58,6 +58,7 @@ bash /opt/exchange/src/deploy/server-update.sh
 | signer | — | 9193（只给 wallet-service） | 9093 |
 | risk-service | — | 9186 | 9086 |
 | analytics-consumer | — | — | 9087 |
+| admin-service | 8093（nginx 转发 `/admin/v1/`，不经网关） | — | 9094 |
 
 compose 健康检查请求运维端口的 `/readyz`：启动完成且依赖可用才返回 200，收到 SIGTERM 后立即变为 503（draining）。部署验证：
 

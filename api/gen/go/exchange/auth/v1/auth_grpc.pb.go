@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	AuthService_GetContacts_FullMethodName   = "/exchange.auth.v1.AuthService/GetContacts"
 	AuthService_ConsumeStepUp_FullMethodName = "/exchange.auth.v1.AuthService/ConsumeStepUp"
+	AuthService_FindUser_FullMethodName      = "/exchange.auth.v1.AuthService/FindUser"
 )
 
 // AuthServiceClient is the client API for AuthService service.
@@ -38,6 +39,9 @@ type AuthServiceClient interface {
 	// same user; each token works once. The answer carries the user's
 	// security context for the action's risk rules (§11.6).
 	ConsumeStepUp(ctx context.Context, in *ConsumeStepUpRequest, opts ...grpc.CallOption) (*ConsumeStepUpResponse, error)
+	// FindUser returns the user an email address or phone number (E.164)
+	// belongs to, for the admin console; unknown ones fail with NOT_FOUND.
+	FindUser(ctx context.Context, in *FindUserRequest, opts ...grpc.CallOption) (*FindUserResponse, error)
 }
 
 type authServiceClient struct {
@@ -68,6 +72,16 @@ func (c *authServiceClient) ConsumeStepUp(ctx context.Context, in *ConsumeStepUp
 	return out, nil
 }
 
+func (c *authServiceClient) FindUser(ctx context.Context, in *FindUserRequest, opts ...grpc.CallOption) (*FindUserResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FindUserResponse)
+	err := c.cc.Invoke(ctx, AuthService_FindUser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AuthServiceServer is the server API for AuthService service.
 // All implementations must embed UnimplementedAuthServiceServer
 // for forward compatibility.
@@ -83,6 +97,9 @@ type AuthServiceServer interface {
 	// same user; each token works once. The answer carries the user's
 	// security context for the action's risk rules (§11.6).
 	ConsumeStepUp(context.Context, *ConsumeStepUpRequest) (*ConsumeStepUpResponse, error)
+	// FindUser returns the user an email address or phone number (E.164)
+	// belongs to, for the admin console; unknown ones fail with NOT_FOUND.
+	FindUser(context.Context, *FindUserRequest) (*FindUserResponse, error)
 	mustEmbedUnimplementedAuthServiceServer()
 }
 
@@ -98,6 +115,9 @@ func (UnimplementedAuthServiceServer) GetContacts(context.Context, *GetContactsR
 }
 func (UnimplementedAuthServiceServer) ConsumeStepUp(context.Context, *ConsumeStepUpRequest) (*ConsumeStepUpResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ConsumeStepUp not implemented")
+}
+func (UnimplementedAuthServiceServer) FindUser(context.Context, *FindUserRequest) (*FindUserResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method FindUser not implemented")
 }
 func (UnimplementedAuthServiceServer) mustEmbedUnimplementedAuthServiceServer() {}
 func (UnimplementedAuthServiceServer) testEmbeddedByValue()                     {}
@@ -156,6 +176,24 @@ func _AuthService_ConsumeStepUp_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AuthService_FindUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FindUserRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).FindUser(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_FindUser_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).FindUser(ctx, req.(*FindUserRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AuthService_ServiceDesc is the grpc.ServiceDesc for AuthService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -170,6 +208,10 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ConsumeStepUp",
 			Handler:    _AuthService_ConsumeStepUp_Handler,
+		},
+		{
+			MethodName: "FindUser",
+			Handler:    _AuthService_FindUser_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

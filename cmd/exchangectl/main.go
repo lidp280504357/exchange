@@ -1,5 +1,6 @@
-// Command exchangectl is the operator CLI of phase 1, until the admin
-// console arrives in phase 2. It reads the same settings as the services
+// Command exchangectl is the operator CLI; the admin console (web/admin,
+// admin-service) covers the daily work since phase 2, this stays for
+// scripts and what the console lacks. It reads the same settings as the services
 // (the .env file locally, the environment inside a container) and records
 // an audit event for every change.
 //
@@ -19,6 +20,7 @@
 //	exchangectl ledger retry-trades [--limit N]
 //	exchangectl wallet sweep [--min 0.001] | fund --tx HASH [--account GAS_SUPPLY] | reconcile | checks | commands
 //	exchangectl wallet withdrawals [--status PENDING_REVIEW|ALL] | approve|reject <id> --reviewer NAME --reason TEXT
+//	exchangectl admin create --email E --name N --role ADMIN [--secrets-stdin] | list | disable <email> --reason TEXT
 //	exchangectl dlq list auth.events
 //	exchangectl dlq replay auth.events --all [--group notification-service] | --offset 0:12
 //
@@ -43,6 +45,9 @@ import (
 type settings struct {
 	Postgres pg.Config    `koanf:",squash"`
 	Kafka    kafka.Config `koanf:",squash"`
+	// AdminSecretKey seals administrators' authenticator secrets
+	// (admin create only).
+	AdminSecretKey string `koanf:"admin_secret_key"`
 }
 
 const usage = `usage: exchangectl <command> ...
@@ -78,6 +83,12 @@ commands:
                               withdrawals in a status (default PENDING_REVIEW)
   wallet approve|reject <withdrawal_id> --reviewer NAME --reason TEXT
                               decide on a withdrawal waiting for review (audited; approvals need distinct reviewers)
+  admin create --email E --name N --role R [--secrets-stdin]
+                              add an admin console account (roles ADMIN, OPERATOR, FINANCE, AUDITOR);
+                              run in the admin-service container, which has ADMIN_SECRET_KEY
+  admin list                  admin console accounts
+  admin disable <email> --reason TEXT
+                              disable an account and close its sessions
   dlq list <topic>            dead letters of a business topic (e.g. auth.events)
   dlq replay <topic> --all [--group G] | --offset P:O ...
                               republish dead letters as first attempts of the group that parked them
@@ -134,6 +145,8 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return riskCmd(ctx, cfg, args[1:], out)
 	case "wallet":
 		return walletCmd(ctx, cfg, args[1:], out)
+	case "admin":
+		return adminCmd(ctx, cfg, args[1:], os.Stdin, out)
 	default:
 		fmt.Fprint(out, usage)
 		return fmt.Errorf("unknown command %q", args[0])

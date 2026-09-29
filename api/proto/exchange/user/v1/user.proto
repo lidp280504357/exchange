@@ -14,6 +14,9 @@ service UserService {
   rpc GetUser(GetUserRequest) returns (GetUserResponse);
   // CheckEligibility decides whether a user may use a feature now.
   rpc CheckEligibility(CheckEligibilityRequest) returns (CheckEligibilityResponse);
+  // ChangeStatus moves an account to another status for an operator, with
+  // a reason code and an audit event.
+  rpc ChangeStatus(ChangeStatusRequest) returns (ChangeStatusResponse);
 }
 
 message User {
@@ -68,4 +71,20 @@ message CheckEligibilityResponse {
   // Why not: USER_RISK_REVIEW, USER_FROZEN, USER_CLOSED,
   // USER_REGION_NOT_ALLOWED or USER_NOT_ELIGIBLE (feature switched off).
   string reason_code = 2;
+}
+
+
+message ChangeStatusRequest {
+  string user_id = 1;
+  // ACTIVE, RISK_REVIEW, FROZEN or CLOSED.
+  string to_status = 2;
+  // An upper-case code such as SUSPICIOUS_LOGIN.
+  string reason_code = 3;
+  string actor = 4;
+  string note = 5;
+}
+
+message ChangeStatusResponse {
+  string from_status = 1;
+  string to_status = 2;
 }

@@ -22,7 +22,8 @@ type settings struct {
 	Postgres   pg.Config    `koanf:",squash"`
 	// ReconcileSchemas lists the schemas whose outboxes are compared with
 	// ClickHouse (RECONCILE_SCHEMAS, comma-separated): the services', and
-	// config, where exchangectl queues the audit events of flag changes.
+	// config, where exchangectl and the admin console queue the audit
+	// events of flag changes.
 	ReconcileSchemas []string `koanf:"reconcile_schemas"`
 }
 
@@ -37,7 +38,7 @@ func main() {
 func setup(ctx context.Context, a *app.App) error {
 	cfg := settings{
 		Postgres:         pg.DefaultConfig(),
-		ReconcileSchemas: []string{"auth", "users", "notify", "instrument", "ledger", "risk", "trading", "matching", "wallet", "config"},
+		ReconcileSchemas: []string{"auth", "users", "notify", "instrument", "ledger", "risk", "trading", "matching", "wallet", "admin", "config"},
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err

@@ -12,6 +12,9 @@ service InstrumentService {
   rpc ListAssets(ListAssetsRequest) returns (ListAssetsResponse);
   rpc GetTradingPair(GetTradingPairRequest) returns (GetTradingPairResponse);
   rpc ListTradingPairs(ListTradingPairsRequest) returns (ListTradingPairsResponse);
+  // SetPairStatus moves a pair (PREPARE -> TRADING <-> HALT ->
+  // CANCEL_ONLY -> DELISTED) for an operator; the change is versioned.
+  rpc SetPairStatus(SetPairStatusRequest) returns (SetPairStatusResponse);
 }
 
 message Asset {
@@ -107,4 +110,15 @@ message ListTradingPairsRequest {}
 
 message ListTradingPairsResponse {
   repeated TradingPair pairs = 1;
+}
+
+message SetPairStatusRequest {
+  string symbol = 1;
+  string to_status = 2;
+  string reason = 3;
+  string actor = 4;
+}
+
+message SetPairStatusResponse {
+  string from_status = 1;
 }

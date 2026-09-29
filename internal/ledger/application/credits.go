@@ -115,3 +115,15 @@ func (s *Service) CreditDeposit(ctx context.Context, eventID string, d domain.De
 	p.SourceEventID = eventID
 	return s.Post(ctx, p)
 }
+
+// AdjustApproved is Adjust for the admin console, called once two people
+// approved the adjustment (§5.12); it needs ledger.manual_adjustment on.
+func (s *Service) AdjustApproved(ctx context.Context, idemKey, userID, asset string, amount decimal.Decimal, actor, reason string) (Result, error) {
+	if !s.Flags.Enabled(flags.KeyManualAdjustment, flags.Subject{UserID: userID}) {
+		return Result{}, apperr.New(apperr.KindForbidden, "LEDGER_ADJUSTMENT_DISABLED", "manual adjustments are switched off (ledger.manual_adjustment)")
+	}
+	if strings.TrimSpace(idemKey) == "" {
+		return Result{}, apperr.Invalid("an idempotency key is required")
+	}
+	return s.Adjust(ctx, idemKey, userID, asset, amount, actor, reason)
+}

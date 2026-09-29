@@ -1,6 +1,6 @@
 # 功能开关运维（ADR-0005）
 
-高风险能力默认关闭，由 PostgreSQL `config.flags` 表控制；服务每 5 秒刷新本地副本，缺失的开关按关闭处理。阶段 2 管理后台上线前，用命令行工具 `exchangectl` 修改。每次修改在同一事务里写 `config.flag_changes` 历史，并经 `config.outbox` 发布 `audit.ConfigChanged` 到 `audit.events`（进入 ClickHouse `audit_logs`）。
+高风险能力默认关闭，由 PostgreSQL `config.flags` 表控制；服务每 5 秒刷新本地副本，缺失的开关按关闭处理。管理后台 `/admin/` 的"功能开关"页可切换启用状态（OPERATOR/ADMIN，见 [admin.md](admin.md)）；规则（地区、账户状态、白名单等）用命令行工具 `exchangectl` 修改。每次修改在同一事务里写 `config.flag_changes` 历史，并经 `config.outbox` 发布 `audit.ConfigChanged` 到 `audit.events`（进入 ClickHouse `audit_logs`）。
 
 ## 已知开关
 

@@ -15,6 +15,9 @@ service AuthService {
   // same user; each token works once. The answer carries the user's
   // security context for the action's risk rules (§11.6).
   rpc ConsumeStepUp(ConsumeStepUpRequest) returns (ConsumeStepUpResponse);
+  // FindUser returns the user an email address or phone number (E.164)
+  // belongs to, for the admin console; unknown ones fail with NOT_FOUND.
+  rpc FindUser(FindUserRequest) returns (FindUserResponse);
 }
 
 message GetContactsRequest {
@@ -57,4 +60,12 @@ message SecurityContext {
   google.protobuf.Timestamp identity_changed_at = 5;
   // The latest password change or reset.
   google.protobuf.Timestamp password_changed_at = 6;
+}
+
+message FindUserRequest {
+  string identifier = 1;
+}
+
+message FindUserResponse {
+  string user_id = 1;
 }

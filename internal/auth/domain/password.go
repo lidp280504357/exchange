@@ -1,19 +1,13 @@
 package domain
 
 import (
-	"crypto/subtle"
 	_ "embed" // for the weak-password list
-	"encoding/base64"
-	"errors"
-	"fmt"
 	"strings"
-	"sync"
 	"unicode"
 	"unicode/utf8"
 
-	"golang.org/x/crypto/argon2"
-
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/lidp280504357/exchange/internal/platform/password"
 )
 
 // Password policy (requirements §5.2): 10 to 128 characters, no
@@ -101,81 +95,17 @@ func sequential(s string) bool {
 
 func isDigit(b byte) bool { return b >= '0' && b <= '9' }
 
-// PasswordCost is the Argon2id cost. Production uses the §5.2 cost; tests
-// pass a lower one to stay fast. Verify honors the cost stored in a hash,
-// so raising it later needs no migration.
-type PasswordCost struct {
-	MemoryKiB  uint32
-	Iterations uint32
-}
+// PasswordCost is the Argon2id cost; hashing lives in
+// internal/platform/password, shared with the admin console's logins.
+type PasswordCost = password.Cost
+
+// PasswordHasher hashes passwords with Argon2id.
+type PasswordHasher = password.Hasher
 
 // DefaultPasswordCost is §5.2: 64 MiB, 3 passes (1 lane).
-var DefaultPasswordCost = PasswordCost{MemoryKiB: 64 * 1024, Iterations: 3}
-
-const (
-	argonThreads = 1
-	argonKeyLen  = 32
-	argonSaltLen = 16
-)
-
-// PasswordHasher hashes with Argon2id. Each hash takes MemoryKiB, so the
-// number of concurrent hashes is capped to keep the process within its
-// memory limit.
-type PasswordHasher struct {
-	slots chan struct{}
-	cost  PasswordCost
-	dummy func() string
-}
+var DefaultPasswordCost = password.DefaultCost
 
 // NewPasswordHasher allows concurrency hashes at a time.
 func NewPasswordHasher(concurrency int, cost PasswordCost) *PasswordHasher {
-	h := &PasswordHasher{slots: make(chan struct{}, max(concurrency, 1)), cost: cost}
-	// The dummy hash lets a login for an unknown account spend the same
-	// time as a real one; it is computed on first use.
-	h.dummy = sync.OnceValue(func() string { return h.Hash("dummy password for timing") })
-	return h
-}
-
-// Hash returns a PHC string: $argon2id$v=19$m=65536,t=3,p=1$salt$hash.
-func (h *PasswordHasher) Hash(pw string) string {
-	h.slots <- struct{}{}
-	defer func() { <-h.slots }()
-	salt := RandomBytes(argonSaltLen)
-	key := argon2.IDKey([]byte(pw), salt, h.cost.Iterations, h.cost.MemoryKiB, argonThreads, argonKeyLen)
-	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s", argon2.Version, h.cost.MemoryKiB, h.cost.Iterations, argonThreads,
-		base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(key))
-}
-
-// Verify checks pw against a PHC string produced by Hash, honoring the
-// parameters stored in it.
-func (h *PasswordHasher) Verify(encoded, pw string) (bool, error) {
-	parts := strings.Split(encoded, "$")
-	if len(parts) != 6 || parts[1] != "argon2id" {
-		return false, errors.New("unsupported password hash")
-	}
-	var memory, iterations uint32
-	var threads uint8
-	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &memory, &iterations, &threads); err != nil {
-		return false, fmt.Errorf("password hash parameters: %w", err)
-	}
-	if memory == 0 || memory > 1<<20 || iterations == 0 || iterations > 16 || threads == 0 {
-		return false, errors.New("password hash parameters out of range")
-	}
-	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
-	if err != nil {
-		return false, fmt.Errorf("password hash salt: %w", err)
-	}
-	want, err := base64.RawStdEncoding.DecodeString(parts[5])
-	if err != nil || len(want) != argonKeyLen {
-		return false, errors.New("password hash is malformed")
-	}
-	h.slots <- struct{}{}
-	defer func() { <-h.slots }()
-	got := argon2.IDKey([]byte(pw), salt, iterations, memory, threads, argonKeyLen)
-	return subtle.ConstantTimeCompare(got, want) == 1, nil
-}
-
-// VerifyDummy burns one hash to equalize timing.
-func (h *PasswordHasher) VerifyDummy(pw string) {
-	_, _ = h.Verify(h.dummy(), pw)
+	return password.NewHasher(concurrency, cost)
 }

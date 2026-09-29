@@ -60,3 +60,12 @@ func (s *Server) ListTradingPairs(ctx context.Context, _ *instrumentv1.ListTradi
 	}
 	return resp, nil
 }
+
+// SetPairStatus moves a trading pair to another status for an operator.
+func (s *Server) SetPairStatus(ctx context.Context, req *instrumentv1.SetPairStatusRequest) (*instrumentv1.SetPairStatusResponse, error) {
+	from, err := s.svc.SetPairStatus(ctx, req.GetSymbol(), req.GetToStatus(), req.GetActor(), req.GetReason())
+	if err != nil {
+		return nil, err
+	}
+	return &instrumentv1.SetPairStatusResponse{FromStatus: from}, nil
+}

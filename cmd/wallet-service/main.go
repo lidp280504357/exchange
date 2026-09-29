@@ -205,7 +205,7 @@ func setup(ctx context.Context, a *app.App) error {
 		a.Logger().Warn("no RPC endpoint: deposits are not scanned")
 	}
 	r := a.NewRouter()
-	(&httpapi.Handler{Svc: svc}).Routes(r)
+	(&httpapi.Handler{Svc: svc, Network: cfg.Network}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
 }
 

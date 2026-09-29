@@ -247,6 +247,45 @@ services:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9093/readyz"]
 
+  # The admin console's API (§5.12), reached through nginx at /admin/v1 and
+  # never through the gateway; the console itself is static files
+  # (web/admin) served by nginx at /admin/. ADMIN_SECRET_KEY seals the
+  # administrators' authenticator secrets and lives in admin/admin.env
+  # (600, see docs/runbook/admin.md), not in apps.env. Administrators are
+  # created with exchangectl in this container. One Argon2id hash (64 MiB)
+  # at a time.
+  admin-service:
+    <<: *app
+    command: ["/app/admin-service"]
+    mem_limit: 320m
+    env_file:
+      - path: apps.env
+        required: false
+      - path: admin/admin.env
+        required: true
+    environment:
+      <<: *base-env
+      GOMEMLIMIT: 240MiB
+      PASSWORD_HASH_CONCURRENCY: "1"
+      AUTH_GRPC_ADDR: auth-service:9181
+      USER_GRPC_ADDR: user-service:9182
+      INSTRUMENT_GRPC_ADDR: instrument-service:9184
+      LEDGER_GRPC_ADDR: ledger-service:9185
+      WALLET_SERVICE_URL: http://wallet-service:8092
+      TRADING_SERVICE_URL: http://spot-trading-service:8088
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      redpanda: {condition: service_healthy}
+      clickhouse: {condition: service_healthy}
+      auth-service: {condition: service_started}
+      user-service: {condition: service_started}
+      instrument-service: {condition: service_started}
+      ledger-service: {condition: service_started}
+    healthcheck:
+      <<: *health
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9094/readyz"]
+
   # The platform market maker (§11.10): quotes the symbols below while
   # market.maker allows them; its account MARKET_MAKER_USER_ID comes from
   # apps.env.

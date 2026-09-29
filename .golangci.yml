@@ -27,9 +27,42 @@ linters:
     # ADR-0006：internal/<服务> 之间禁止互相 import；新服务加入时在这里补一组规则
     depguard:
       rules:
+        admin:
+          files: ["**/internal/admin/**"]
+          deny:
+            - pkg: github.com/lidp280504357/exchange/internal/analytics
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/auth
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/gateway
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/instrument
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/ledger
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/marketdata
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/marketmaker
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/matching
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/notification
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/risk
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/signer
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/trading
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/user
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/lidp280504357/exchange/internal/wallet
+              desc: services talk over gRPC and events only (ADR-0006)
         analytics:
           files: ["**/internal/analytics/**"]
           deny:
+            - pkg: github.com/lidp280504357/exchange/internal/admin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/auth
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/gateway
@@ -59,6 +92,8 @@ linters:
         auth:
           files: ["**/internal/auth/**"]
           deny:
+            - pkg: github.com/lidp280504357/exchange/internal/admin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/gateway
@@ -88,6 +123,8 @@ linters:
         gateway:
           files: ["**/internal/gateway/**"]
           deny:
+            - pkg: github.com/lidp280504357/exchange/internal/admin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/auth
@@ -117,6 +154,8 @@ linters:
         instrument:
           files: ["**/internal/instrument/**"]
           deny:
+            - pkg: github.com/lidp280504357/exchange/internal/admin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/auth
@@ -146,6 +185,8 @@ linters:
         ledger:
           files: ["**/internal/ledger/**"]
           deny:
+            - pkg: github.com/lidp280504357/exchange/internal/admin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/auth
@@ -175,6 +216,8 @@ linters:
         marketdata:
           files: ["**/internal/marketdata/**"]
           deny:
+            - pkg: github.com/lidp280504357/exchange/internal/admin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/auth
@@ -204,6 +247,8 @@ linters:
         marketmaker:
           files: ["**/internal/marketmaker/**"]
           deny:
+            - pkg: github.com/lidp280504357/exchange/internal/admin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/auth
@@ -233,6 +278,8 @@ linters:
         matching:
           files: ["**/internal/matching/**"]
           deny:
+            - pkg: github.com/lidp280504357/exchange/internal/admin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/auth
@@ -262,6 +309,8 @@ linters:
         notification:
           files: ["**/internal/notification/**"]
           deny:
+            - pkg: github.com/lidp280504357/exchange/internal/admin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/auth
@@ -291,6 +340,8 @@ linters:
         risk:
           files: ["**/internal/risk/**"]
           deny:
+            - pkg: github.com/lidp280504357/exchange/internal/admin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/auth
@@ -320,6 +371,8 @@ linters:
         signer:
           files: ["**/internal/signer/**"]
           deny:
+            - pkg: github.com/lidp280504357/exchange/internal/admin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/auth
@@ -349,6 +402,8 @@ linters:
         trading:
           files: ["**/internal/trading/**"]
           deny:
+            - pkg: github.com/lidp280504357/exchange/internal/admin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/auth
@@ -378,6 +433,8 @@ linters:
         user:
           files: ["**/internal/user/**"]
           deny:
+            - pkg: github.com/lidp280504357/exchange/internal/admin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/auth
@@ -407,6 +464,8 @@ linters:
         wallet:
           files: ["**/internal/wallet/**"]
           deny:
+            - pkg: github.com/lidp280504357/exchange/internal/admin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/lidp280504357/exchange/internal/auth

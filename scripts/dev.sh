@@ -21,7 +21,7 @@ DEV_DB=exchange_dev
 NS=dev.
 DEV_DIR=.dev
 # Readiness is reported in this order.
-SERVICES=(notification-service user-service auth-service instrument-service ledger-service spot-trading-service matching-engine market-data-service market-maker wallet-service risk-service analytics-consumer api-gateway)
+SERVICES=(notification-service user-service auth-service instrument-service ledger-service spot-trading-service matching-engine market-data-service market-maker wallet-service risk-service analytics-consumer admin-service api-gateway)
 # Flags that are on in the test environment (docs/runbook/ledger.md,
 # otp.md), turned on when the namespace is created.
 DEV_FLAGS=(ledger.welcome_credit account.transfer ledger.manual_adjustment auth.sms)
@@ -111,6 +111,7 @@ ops_port() {
     wallet-service) echo 9092 ;;
     risk-service) echo 9086 ;;
     analytics-consumer) echo 9087 ;;
+    admin-service) echo 9094 ;;
   esac
 }
 

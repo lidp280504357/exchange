@@ -22,6 +22,7 @@ const (
 	UserService_CreateUser_FullMethodName       = "/exchange.user.v1.UserService/CreateUser"
 	UserService_GetUser_FullMethodName          = "/exchange.user.v1.UserService/GetUser"
 	UserService_CheckEligibility_FullMethodName = "/exchange.user.v1.UserService/CheckEligibility"
+	UserService_ChangeStatus_FullMethodName     = "/exchange.user.v1.UserService/ChangeStatus"
 )
 
 // UserServiceClient is the client API for UserService service.
@@ -38,6 +39,9 @@ type UserServiceClient interface {
 	GetUser(ctx context.Context, in *GetUserRequest, opts ...grpc.CallOption) (*GetUserResponse, error)
 	// CheckEligibility decides whether a user may use a feature now.
 	CheckEligibility(ctx context.Context, in *CheckEligibilityRequest, opts ...grpc.CallOption) (*CheckEligibilityResponse, error)
+	// ChangeStatus moves an account to another status for an operator, with
+	// a reason code and an audit event.
+	ChangeStatus(ctx context.Context, in *ChangeStatusRequest, opts ...grpc.CallOption) (*ChangeStatusResponse, error)
 }
 
 type userServiceClient struct {
@@ -78,6 +82,16 @@ func (c *userServiceClient) CheckEligibility(ctx context.Context, in *CheckEligi
 	return out, nil
 }
 
+func (c *userServiceClient) ChangeStatus(ctx context.Context, in *ChangeStatusRequest, opts ...grpc.CallOption) (*ChangeStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ChangeStatusResponse)
+	err := c.cc.Invoke(ctx, UserService_ChangeStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // UserServiceServer is the server API for UserService service.
 // All implementations must embed UnimplementedUserServiceServer
 // for forward compatibility.
@@ -92,6 +106,9 @@ type UserServiceServer interface {
 	GetUser(context.Context, *GetUserRequest) (*GetUserResponse, error)
 	// CheckEligibility decides whether a user may use a feature now.
 	CheckEligibility(context.Context, *CheckEligibilityRequest) (*CheckEligibilityResponse, error)
+	// ChangeStatus moves an account to another status for an operator, with
+	// a reason code and an audit event.
+	ChangeStatus(context.Context, *ChangeStatusRequest) (*ChangeStatusResponse, error)
 	mustEmbedUnimplementedUserServiceServer()
 }
 
@@ -110,6 +127,9 @@ func (UnimplementedUserServiceServer) GetUser(context.Context, *GetUserRequest) 
 }
 func (UnimplementedUserServiceServer) CheckEligibility(context.Context, *CheckEligibilityRequest) (*CheckEligibilityResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CheckEligibility not implemented")
+}
+func (UnimplementedUserServiceServer) ChangeStatus(context.Context, *ChangeStatusRequest) (*ChangeStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ChangeStatus not implemented")
 }
 func (UnimplementedUserServiceServer) mustEmbedUnimplementedUserServiceServer() {}
 func (UnimplementedUserServiceServer) testEmbeddedByValue()                     {}
@@ -186,6 +206,24 @@ func _UserService_CheckEligibility_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _UserService_ChangeStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ChangeStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).ChangeStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_ChangeStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).ChangeStatus(ctx, req.(*ChangeStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // UserService_ServiceDesc is the grpc.ServiceDesc for UserService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -204,6 +242,10 @@ var UserService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CheckEligibility",
 			Handler:    _UserService_CheckEligibility_Handler,
+		},
+		{
+			MethodName: "ChangeStatus",
+			Handler:    _UserService_ChangeStatus_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

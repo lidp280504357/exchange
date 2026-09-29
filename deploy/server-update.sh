@@ -18,7 +18,8 @@ main() {
   echo "== 代码版本 $APP_VERSION：$(git log -1 --pretty=%s)"
 
   # 1. 基础设施与 nginx 配置以仓库为准同步到 infra 目录；不覆盖服务器上的 .env、证书和生成的 Cloudflare IP 列表
-  rsync -a --exclude '.env' --exclude 'apps.env' --exclude 'ssl/' --exclude '00-cloudflare-real-ip.conf' --exclude 'nginx/html/' deploy/compose/ "$INFRA"/
+  rsync -a --exclude '.env' --exclude 'apps.env' --exclude 'ssl/' --exclude '00-cloudflare-real-ip.conf' --exclude 'nginx/html/' \
+    --exclude 'nginx/admin/' deploy/compose/ "$INFRA"/
   cp deploy/redpanda/topics.sh "$INFRA/redpanda/topics.sh"
   mkdir -p "$INFRA/backup" && cp deploy/backup/pg-backup.sh "$INFRA/backup/pg-backup.sh"
 
@@ -55,6 +56,15 @@ main() {
     sudo mkdir -p "$INFRA/nginx/html"
     sudo rsync -a --delete web/h5/dist/ "$INFRA/nginx/html/"
     echo "== H5 已构建：$(ls web/h5/dist/assets | wc -l) 个资源文件"
+  fi
+  # 6. 管理后台前端（web/admin，nginx 在 /admin/ 提供），构建方式同 H5
+  if [ -f web/admin/package.json ]; then
+    sudo docker run --rm -e CI=true -v "$SRC:/src" -v exchange-pnpm-store:/pnpm-store -w /src/web/admin \
+      node:24-slim sh -c 'npm install -g pnpm@11 --silent >/dev/null && pnpm config set store-dir /pnpm-store >/dev/null \
+        && pnpm install --frozen-lockfile --silent && { pnpm build >/tmp/build.log 2>&1 || { cat /tmp/build.log; exit 1; }; }'
+    sudo mkdir -p "$INFRA/nginx/admin"
+    sudo rsync -a --delete web/admin/dist/ "$INFRA/nginx/admin/"
+    echo "== 管理后台已构建：$(ls web/admin/dist/assets | wc -l) 个资源文件"
   fi
   echo "== 服务状态"
   sudo docker compose "${COMPOSE[@]}" ps --format 'table {{.Service}}\t{{.Status}}'

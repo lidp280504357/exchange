@@ -1,0 +1,353 @@
+// Package backends connects the admin console to the services it acts on:
+// gRPC to auth-, user-, ledger- and instrument-service, internal REST to
+// wallet- and spot-trading-service (never routed by the gateway), the
+// shared config schema for feature flags, and ClickHouse for the audit
+// trail.
+package backends
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"slices"
+	"strings"
+
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
+	"google.golang.org/protobuf/encoding/protojson"
+
+	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
+	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
+	instrumentv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/instrument/v1"
+	ledgerv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1"
+	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
+	"github.com/lidp280504357/exchange/internal/admin/ports"
+	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/lidp280504357/exchange/internal/platform/event"
+	"github.com/lidp280504357/exchange/internal/platform/flags"
+	"github.com/lidp280504357/exchange/internal/platform/outbox"
+	"github.com/lidp280504357/exchange/internal/platform/pg"
+)
+
+// Users implements ports.Users.
+type Users struct {
+	Auth   authv1.AuthServiceClient
+	User   userv1.UserServiceClient
+	Ledger ledgerv1.LedgerServiceClient
+}
+
+// Find returns the user of an email address or phone number.
+func (u Users) Find(ctx context.Context, identifier string) (string, error) {
+	resp, err := u.Auth.FindUser(ctx, &authv1.FindUserRequest{Identifier: identifier})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetUserId(), nil
+}
+
+// Get returns an account.
+func (u Users) Get(ctx context.Context, userID string) (ports.User, error) {
+	resp, err := u.User.GetUser(ctx, &userv1.GetUserRequest{UserId: userID})
+	if err != nil {
+		return ports.User{}, err
+	}
+	p := resp.GetUser()
+	out := ports.User{ID: p.GetId(), Status: p.GetStatus(), Region: p.GetRegion(), Language: p.GetLanguage(), KYCLevel: p.GetKycLevel()}
+	if t := p.GetCreatedAt(); t != nil {
+		out.CreatedAt = t.AsTime()
+	}
+	return out, nil
+}
+
+// Balances returns a user's balances.
+func (u Users) Balances(ctx context.Context, userID string) ([]ports.Balance, error) {
+	resp, err := u.Ledger.GetBalances(ctx, &ledgerv1.GetBalancesRequest{UserId: userID})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ports.Balance, 0, len(resp.GetBalances()))
+	for _, b := range resp.GetBalances() {
+		out = append(out, ports.Balance{AccountType: b.GetAccountType(), Asset: b.GetAsset(), Available: b.GetAvailable(), Frozen: b.GetFrozen()})
+	}
+	return out, nil
+}
+
+// ChangeStatus moves an account to another status.
+func (u Users) ChangeStatus(ctx context.Context, userID, to, reason, actor, note string) (string, error) {
+	resp, err := u.User.ChangeStatus(ctx, &userv1.ChangeStatusRequest{UserId: userID, ToStatus: to, ReasonCode: reason, Actor: actor, Note: note})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetFromStatus(), nil
+}
+
+// Ledger implements ports.Ledger.
+type Ledger struct{ C ledgerv1.LedgerServiceClient }
+
+// Adjust books an approved manual adjustment.
+func (l Ledger) Adjust(ctx context.Context, key, userID, asset string, amount decimal.Decimal, actor, reason string) (string, error) {
+	resp, err := l.C.Adjust(ctx, &ledgerv1.AdjustRequest{
+		IdempotencyKey: key, UserId: userID, Asset: asset, Amount: amount.String(), Reason: reason, Actor: actor,
+	})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetPosting().GetJournalId(), nil
+}
+
+// Instruments implements ports.Instruments.
+type Instruments struct {
+	C instrumentv1.InstrumentServiceClient
+}
+
+var protoJSON = protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: true}
+
+// List returns the assets and pairs as JSON.
+func (i Instruments) List(ctx context.Context) (json.RawMessage, error) {
+	assets, err := i.C.ListAssets(ctx, &instrumentv1.ListAssetsRequest{})
+	if err != nil {
+		return nil, err
+	}
+	pairs, err := i.C.ListTradingPairs(ctx, &instrumentv1.ListTradingPairsRequest{})
+	if err != nil {
+		return nil, err
+	}
+	a, err := protoJSON.Marshal(assets)
+	if err != nil {
+		return nil, err
+	}
+	p, err := protoJSON.Marshal(pairs)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(`{"assets":` + string(field(a, "assets")) + `,"pairs":` + string(field(p, "pairs")) + `}`), nil
+}
+
+// field extracts one array field of a JSON object ([] when missing).
+func field(obj []byte, name string) json.RawMessage {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(obj, &m) != nil || m[name] == nil {
+		return json.RawMessage("[]")
+	}
+	return m[name]
+}
+
+// SetPairStatus moves a trading pair to another status.
+func (i Instruments) SetPairStatus(ctx context.Context, symbol, to, reason, actor string) (string, error) {
+	resp, err := i.C.SetPairStatus(ctx, &instrumentv1.SetPairStatusRequest{Symbol: strings.ToUpper(symbol), ToStatus: to, Reason: reason, Actor: actor})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetFromStatus(), nil
+}
+
+// REST calls internal HTTP APIs.
+type REST struct {
+	Client *http.Client
+}
+
+// restError turns an error answer of a service into its apperr.
+func restError(resp *http.Response, body []byte) error {
+	var e struct {
+		Code    string         `json:"code"`
+		Message string         `json:"message"`
+		Details map[string]any `json:"details"`
+	}
+	kind := apperr.KindInternal
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		kind = apperr.KindNotFound
+	case resp.StatusCode == http.StatusConflict:
+		kind = apperr.KindConflict
+	case resp.StatusCode == http.StatusForbidden:
+		kind = apperr.KindForbidden
+	case resp.StatusCode == http.StatusBadRequest:
+		kind = apperr.KindInvalid
+	case resp.StatusCode == http.StatusUnprocessableEntity:
+		kind = apperr.KindUnprocessable
+	case resp.StatusCode >= 500:
+		kind = apperr.KindUnavailable
+	}
+	if json.Unmarshal(body, &e) != nil || e.Code == "" {
+		return apperr.New(kind, apperr.CodeUnavailable, fmt.Sprintf("the service answered HTTP %d", resp.StatusCode))
+	}
+	err := apperr.New(kind, e.Code, e.Message)
+	for k, v := range e.Details {
+		err = err.WithDetail(k, v)
+	}
+	return err
+}
+
+func (r REST) do(ctx context.Context, method, url string, body any, header map[string]string) (json.RawMessage, error) {
+	var payload io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		payload = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, payload)
+	if err != nil {
+		return nil, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	for k, v := range header {
+		req.Header.Set(k, v)
+	}
+	resp, err := r.Client.Do(req)
+	if err != nil {
+		return nil, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "service unreachable")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 300 {
+		return nil, restError(resp, raw)
+	}
+	return raw, nil
+}
+
+// Wallet implements ports.Withdrawals over wallet-service's internal API.
+type Wallet struct {
+	REST
+	Base string
+}
+
+// List returns the withdrawals in a status.
+func (w Wallet) List(ctx context.Context, status string) (json.RawMessage, error) {
+	return w.do(ctx, http.MethodGet, w.Base+"/internal/wallet/withdrawals?status="+url.QueryEscape(status), nil, nil)
+}
+
+// Review approves or rejects a withdrawal.
+func (w Wallet) Review(ctx context.Context, id string, approve bool, reviewer, reason string) (json.RawMessage, error) {
+	return w.do(ctx, http.MethodPost, w.Base+"/internal/wallet/withdrawals/"+url.PathEscape(id)+"/review",
+		map[string]any{"approve": approve, "reviewer": reviewer, "reason": reason}, nil)
+}
+
+// Trading implements ports.Orders over spot-trading-service's API with the
+// identity header the gateway would set.
+type Trading struct {
+	REST
+	Base string
+}
+
+// CancelAll asks the engine to cancel every open order of a user.
+func (t Trading) CancelAll(ctx context.Context, userID string) error {
+	_, err := t.do(ctx, http.MethodDelete, t.Base+"/v1/orders", nil, map[string]string{"X-User-Id": userID})
+	return err
+}
+
+// Flags implements ports.Flags on the shared config schema; a switch is
+// written with its ConfigChanged audit event in one transaction, published
+// by the config schema's outbox relay.
+type Flags struct {
+	DB     *pg.DB
+	Events *event.Factory
+}
+
+func toPort(f flags.Flag) ports.Flag {
+	rules, _ := json.Marshal(f.Rules)
+	out := ports.Flag{Key: f.Key, Enabled: f.Enabled, Description: f.Description, Rules: rules, Version: f.Version, UpdatedBy: f.UpdatedBy}
+	if !f.UpdatedAt.IsZero() {
+		out.UpdatedAt = &f.UpdatedAt
+	}
+	return out
+}
+
+// List returns every flag by key.
+func (f Flags) List(ctx context.Context) ([]ports.Flag, error) {
+	all, err := flags.Load(ctx, f.DB)
+	if err != nil {
+		return nil, err
+	}
+	// Known flags never set are off (requirements §5.14).
+	for key, desc := range flags.Known {
+		if _, ok := all[key]; !ok {
+			all[key] = flags.Flag{Key: key, Description: desc}
+		}
+	}
+	out := make([]ports.Flag, 0, len(all))
+	for _, fl := range all {
+		out = append(out, toPort(fl))
+	}
+	slices.SortFunc(out, func(a, b ports.Flag) int { return strings.Compare(a.Key, b.Key) })
+	return out, nil
+}
+
+// Switch turns a known flag on or off, keeping its rules; a flag never
+// set is created without rules.
+func (f Flags) Switch(ctx context.Context, key string, enabled bool, actor, reason string) (ports.Flag, error) {
+	all, err := flags.Load(ctx, f.DB)
+	if err != nil {
+		return ports.Flag{}, err
+	}
+	cur, ok := all[key]
+	if !ok {
+		desc, known := flags.Known[key]
+		if !known {
+			return ports.Flag{}, apperr.NotFound("no such flag")
+		}
+		cur = flags.Flag{Key: key, Description: desc}
+	}
+	cur.Enabled = enabled
+	var stored flags.Flag
+	err = f.DB.InTx(ctx, func(tx pgx.Tx) error {
+		old, s, err := flags.Set(ctx, tx, cur, actor, reason)
+		if err != nil {
+			return err
+		}
+		stored = s
+		oldJSON, _ := json.Marshal(old)
+		newJSON, _ := json.Marshal(s)
+		env, err := f.Events.New(ctx, &auditv1.ConfigChanged{
+			Target: "flag:" + key, OldValue: string(oldJSON), NewValue: string(newJSON), Actor: actor, Reason: reason,
+		}, "actor", actor)
+		if err != nil {
+			return err
+		}
+		return outbox.Add(ctx, tx, event.TopicAudit, env)
+	})
+	if err != nil {
+		return ports.Flag{}, err
+	}
+	return toPort(stored), nil
+}
+
+// Audit implements ports.AuditLog on ClickHouse audit_logs.
+type Audit struct{ Conn driver.Conn }
+
+// Search returns the newest entries of an actor and/or a target.
+func (a Audit) Search(ctx context.Context, actor, target string, limit int) ([]ports.AuditEntry, error) {
+	rows, err := a.Conn.Query(ctx, `SELECT toString(event_id), event_type, actor_id, target, occurred_at, payload FROM audit_logs FINAL
+		WHERE (? = '' OR actor_id = ?) AND (? = '' OR target = ?) ORDER BY occurred_at DESC LIMIT ?`,
+		actor, actor, target, target, limit)
+	if err != nil {
+		return nil, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "the audit trail is unavailable")
+	}
+	defer func() { _ = rows.Close() }()
+	out := []ports.AuditEntry{}
+	for rows.Next() {
+		var e ports.AuditEntry
+		var payload string
+		if err := rows.Scan(&e.EventID, &e.EventType, &e.Actor, &e.Target, &e.OccurredAt, &payload); err != nil {
+			return nil, err
+		}
+		if json.Valid([]byte(payload)) {
+			e.Payload = json.RawMessage(payload)
+		} else {
+			e.Payload, _ = json.Marshal(payload)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}

@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -244,4 +245,24 @@ func (s *AccountService) ConsumeStepUp(ctx context.Context, userID, token string
 		return domain.StepUp{}, domain.SecurityContext{}, err
 	}
 	return *su, sec, nil
+}
+
+// FindUser returns the user an email address or phone number belongs to.
+func (s *AccountService) FindUser(ctx context.Context, identifier string) (string, error) {
+	ch := domain.ChannelEmail
+	if strings.HasPrefix(strings.TrimSpace(identifier), "+") {
+		ch = domain.ChannelSMS
+	}
+	id, err := domain.ParseIdentifier(ch, identifier)
+	if err != nil {
+		return "", err
+	}
+	found, err := s.Store.Read().Identities().Find(ctx, ch.Kind(), id.Value)
+	if err != nil {
+		return "", err
+	}
+	if found == nil {
+		return "", apperr.NotFound("no user has this email address or phone number")
+	}
+	return found.UserID, nil
 }

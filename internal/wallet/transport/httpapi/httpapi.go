@@ -17,10 +17,13 @@ import (
 	"github.com/lidp280504357/exchange/internal/wallet/domain"
 )
 
-// Handler serves deposits; every route needs the identity the gateway
-// attaches.
+// Handler serves deposits and withdrawals; every /v1 route needs the
+// identity the gateway attaches. /internal routes serve the admin console
+// on the internal network (the gateway does not route them).
 type Handler struct {
 	Svc *application.Service
+	// Network is the network the internal review lists cover.
+	Network string
 }
 
 // Routes mounts the endpoints on r.
@@ -45,6 +48,61 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Get("/v1/wallet/withdrawals/{id}", h.getWithdrawal)
 		r.Delete("/v1/wallet/withdrawals/{id}", h.cancelWithdrawal)
 	})
+	r.Get("/internal/wallet/withdrawals", h.adminWithdrawals)
+	r.Post("/internal/wallet/withdrawals/{id}/review", h.adminReview)
+}
+
+// AdminWithdrawalJSON is a withdrawal as reviewers see it.
+type AdminWithdrawalJSON struct {
+	WithdrawalJSON
+	UserID    string   `json:"user_id"`
+	RiskScore int      `json:"risk_score"`
+	ValueUSDT string   `json:"value_usdt"`
+	Approvals []string `json:"approvals"`
+}
+
+func (h *Handler) adminWithdrawals(w http.ResponseWriter, r *http.Request) {
+	status := r.URL.Query().Get("status")
+	if status == "" {
+		status = domain.WithdrawalReview
+	}
+	list, err := h.Svc.Store.Read().Withdrawals().ByStatus(r.Context(), h.Network, status)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out := make([]AdminWithdrawalJSON, 0, len(list))
+	for _, wd := range list {
+		approvals := wd.Approvals
+		if approvals == nil {
+			approvals = []string{}
+		}
+		out = append(out, AdminWithdrawalJSON{
+			WithdrawalJSON: WithdrawalJSONOf(wd), UserID: wd.UserID, RiskScore: wd.RiskScore, ValueUSDT: wd.ValueUSDT.String(),
+			Approvals: approvals,
+		})
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+}
+
+func (h *Handler) adminReview(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Approve  bool   `json:"approve"`
+		Reviewer string `json:"reviewer"`
+		Reason   string `json:"reason"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	wd, err := application.ReviewWithdrawal(r.Context(), h.Svc.Store, application.Review{
+		ID: chi.URLParam(r, "id"), Reviewer: body.Reviewer, Reason: body.Reason, Approve: body.Approve,
+	}, h.Svc.Now())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, WithdrawalJSONOf(wd))
 }
 
 type addressJSON struct {

@@ -468,6 +468,136 @@ func (x *CheckEligibilityResponse) GetReasonCode() string {
 	return ""
 }
 
+type ChangeStatusRequest struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	UserId string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// ACTIVE, RISK_REVIEW, FROZEN or CLOSED.
+	ToStatus string `protobuf:"bytes,2,opt,name=to_status,json=toStatus,proto3" json:"to_status,omitempty"`
+	// An upper-case code such as SUSPICIOUS_LOGIN.
+	ReasonCode    string `protobuf:"bytes,3,opt,name=reason_code,json=reasonCode,proto3" json:"reason_code,omitempty"`
+	Actor         string `protobuf:"bytes,4,opt,name=actor,proto3" json:"actor,omitempty"`
+	Note          string `protobuf:"bytes,5,opt,name=note,proto3" json:"note,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ChangeStatusRequest) Reset() {
+	*x = ChangeStatusRequest{}
+	mi := &file_exchange_user_v1_user_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChangeStatusRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChangeStatusRequest) ProtoMessage() {}
+
+func (x *ChangeStatusRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_user_v1_user_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChangeStatusRequest.ProtoReflect.Descriptor instead.
+func (*ChangeStatusRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ChangeStatusRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ChangeStatusRequest) GetToStatus() string {
+	if x != nil {
+		return x.ToStatus
+	}
+	return ""
+}
+
+func (x *ChangeStatusRequest) GetReasonCode() string {
+	if x != nil {
+		return x.ReasonCode
+	}
+	return ""
+}
+
+func (x *ChangeStatusRequest) GetActor() string {
+	if x != nil {
+		return x.Actor
+	}
+	return ""
+}
+
+func (x *ChangeStatusRequest) GetNote() string {
+	if x != nil {
+		return x.Note
+	}
+	return ""
+}
+
+type ChangeStatusResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	FromStatus    string                 `protobuf:"bytes,1,opt,name=from_status,json=fromStatus,proto3" json:"from_status,omitempty"`
+	ToStatus      string                 `protobuf:"bytes,2,opt,name=to_status,json=toStatus,proto3" json:"to_status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ChangeStatusResponse) Reset() {
+	*x = ChangeStatusResponse{}
+	mi := &file_exchange_user_v1_user_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChangeStatusResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChangeStatusResponse) ProtoMessage() {}
+
+func (x *ChangeStatusResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_user_v1_user_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChangeStatusResponse.ProtoReflect.Descriptor instead.
+func (*ChangeStatusResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ChangeStatusResponse) GetFromStatus() string {
+	if x != nil {
+		return x.FromStatus
+	}
+	return ""
+}
+
+func (x *ChangeStatusResponse) GetToStatus() string {
+	if x != nil {
+		return x.ToStatus
+	}
+	return ""
+}
+
 var File_exchange_user_v1_user_proto protoreflect.FileDescriptor
 
 const file_exchange_user_v1_user_proto_rawDesc = "" +
@@ -504,12 +634,24 @@ const file_exchange_user_v1_user_proto_rawDesc = "" +
 	"\x18CheckEligibilityResponse\x12\x18\n" +
 	"\aallowed\x18\x01 \x01(\bR\aallowed\x12\x1f\n" +
 	"\vreason_code\x18\x02 \x01(\tR\n" +
-	"reasonCode2\xa1\x02\n" +
+	"reasonCode\"\x96\x01\n" +
+	"\x13ChangeStatusRequest\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1b\n" +
+	"\tto_status\x18\x02 \x01(\tR\btoStatus\x12\x1f\n" +
+	"\vreason_code\x18\x03 \x01(\tR\n" +
+	"reasonCode\x12\x14\n" +
+	"\x05actor\x18\x04 \x01(\tR\x05actor\x12\x12\n" +
+	"\x04note\x18\x05 \x01(\tR\x04note\"T\n" +
+	"\x14ChangeStatusResponse\x12\x1f\n" +
+	"\vfrom_status\x18\x01 \x01(\tR\n" +
+	"fromStatus\x12\x1b\n" +
+	"\tto_status\x18\x02 \x01(\tR\btoStatus2\x80\x03\n" +
 	"\vUserService\x12W\n" +
 	"\n" +
 	"CreateUser\x12#.exchange.user.v1.CreateUserRequest\x1a$.exchange.user.v1.CreateUserResponse\x12N\n" +
 	"\aGetUser\x12 .exchange.user.v1.GetUserRequest\x1a!.exchange.user.v1.GetUserResponse\x12i\n" +
-	"\x10CheckEligibility\x12).exchange.user.v1.CheckEligibilityRequest\x1a*.exchange.user.v1.CheckEligibilityResponseB\xc9\x01\n" +
+	"\x10CheckEligibility\x12).exchange.user.v1.CheckEligibilityRequest\x1a*.exchange.user.v1.CheckEligibilityResponse\x12]\n" +
+	"\fChangeStatus\x12%.exchange.user.v1.ChangeStatusRequest\x1a&.exchange.user.v1.ChangeStatusResponseB\xc9\x01\n" +
 	"\x14com.exchange.user.v1B\tUserProtoP\x01ZDgithub.com/lidp280504357/exchange/api/gen/go/exchange/user/v1;userv1\xa2\x02\x03EUX\xaa\x02\x10Exchange.User.V1\xca\x02\x10Exchange\\User\\V1\xe2\x02\x1cExchange\\User\\V1\\GPBMetadata\xea\x02\x12Exchange::User::V1b\x06proto3"
 
 var (
@@ -524,7 +666,7 @@ func file_exchange_user_v1_user_proto_rawDescGZIP() []byte {
 	return file_exchange_user_v1_user_proto_rawDescData
 }
 
-var file_exchange_user_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_exchange_user_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_exchange_user_v1_user_proto_goTypes = []any{
 	(*User)(nil),                     // 0: exchange.user.v1.User
 	(*CreateUserRequest)(nil),        // 1: exchange.user.v1.CreateUserRequest
@@ -533,20 +675,24 @@ var file_exchange_user_v1_user_proto_goTypes = []any{
 	(*GetUserResponse)(nil),          // 4: exchange.user.v1.GetUserResponse
 	(*CheckEligibilityRequest)(nil),  // 5: exchange.user.v1.CheckEligibilityRequest
 	(*CheckEligibilityResponse)(nil), // 6: exchange.user.v1.CheckEligibilityResponse
-	(*timestamppb.Timestamp)(nil),    // 7: google.protobuf.Timestamp
+	(*ChangeStatusRequest)(nil),      // 7: exchange.user.v1.ChangeStatusRequest
+	(*ChangeStatusResponse)(nil),     // 8: exchange.user.v1.ChangeStatusResponse
+	(*timestamppb.Timestamp)(nil),    // 9: google.protobuf.Timestamp
 }
 var file_exchange_user_v1_user_proto_depIdxs = []int32{
-	7, // 0: exchange.user.v1.User.created_at:type_name -> google.protobuf.Timestamp
+	9, // 0: exchange.user.v1.User.created_at:type_name -> google.protobuf.Timestamp
 	0, // 1: exchange.user.v1.CreateUserResponse.user:type_name -> exchange.user.v1.User
 	0, // 2: exchange.user.v1.GetUserResponse.user:type_name -> exchange.user.v1.User
 	1, // 3: exchange.user.v1.UserService.CreateUser:input_type -> exchange.user.v1.CreateUserRequest
 	3, // 4: exchange.user.v1.UserService.GetUser:input_type -> exchange.user.v1.GetUserRequest
 	5, // 5: exchange.user.v1.UserService.CheckEligibility:input_type -> exchange.user.v1.CheckEligibilityRequest
-	2, // 6: exchange.user.v1.UserService.CreateUser:output_type -> exchange.user.v1.CreateUserResponse
-	4, // 7: exchange.user.v1.UserService.GetUser:output_type -> exchange.user.v1.GetUserResponse
-	6, // 8: exchange.user.v1.UserService.CheckEligibility:output_type -> exchange.user.v1.CheckEligibilityResponse
-	6, // [6:9] is the sub-list for method output_type
-	3, // [3:6] is the sub-list for method input_type
+	7, // 6: exchange.user.v1.UserService.ChangeStatus:input_type -> exchange.user.v1.ChangeStatusRequest
+	2, // 7: exchange.user.v1.UserService.CreateUser:output_type -> exchange.user.v1.CreateUserResponse
+	4, // 8: exchange.user.v1.UserService.GetUser:output_type -> exchange.user.v1.GetUserResponse
+	6, // 9: exchange.user.v1.UserService.CheckEligibility:output_type -> exchange.user.v1.CheckEligibilityResponse
+	8, // 10: exchange.user.v1.UserService.ChangeStatus:output_type -> exchange.user.v1.ChangeStatusResponse
+	7, // [7:11] is the sub-list for method output_type
+	3, // [3:7] is the sub-list for method input_type
 	3, // [3:3] is the sub-list for extension type_name
 	3, // [3:3] is the sub-list for extension extendee
 	0, // [0:3] is the sub-list for field type_name
@@ -563,7 +709,7 @@ func file_exchange_user_v1_user_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_user_v1_user_proto_rawDesc), len(file_exchange_user_v1_user_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

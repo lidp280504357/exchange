@@ -4,12 +4,17 @@
 # detached from our stdio (a master born inside $(...) would keep the
 # substitution open until it exits), and closed when the script ends.
 
-# cleanup_remote closes the shared connection and removes the work
-# directory; scripts that set their own EXIT trap must call it.
-cleanup_remote() {
+# close_remote closes the shared connection.
+close_remote() {
   if [[ -n "${SSH_CTL:-}" ]]; then
     ssh -o ControlPath="$SSH_CTL" -O exit exchange >/dev/null 2>&1 || true
   fi
+}
+
+# cleanup_remote closes the shared connection and removes the work
+# directory; scripts that set their own EXIT trap must call it.
+cleanup_remote() {
+  close_remote
   rm -rf "$WORK"
 }
 
@@ -20,7 +25,13 @@ if [[ -z "${REMOTE:-}" ]]; then
   # ControlMaster=no: use the master when it is up, else connect directly.
   REMOTE="ssh -o ControlPath=$SSH_CTL -o ControlMaster=no -o ConnectTimeout=20 exchange"
 fi
-trap cleanup_remote EXIT
+# After common.sh the connection closes once the at_exit commands ran
+# (replacing its EXIT trap would skip them).
+if declare -F at_exit >/dev/null; then
+  AT_END=close_remote
+else
+  trap cleanup_remote EXIT
+fi
 REMOTE_INFRA="${REMOTE_INFRA:-/opt/exchange/infra}"
 COMPOSE_FILES="-f docker-compose.yml -f docker-compose.apps.yml"
 

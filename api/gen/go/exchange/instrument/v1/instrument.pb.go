@@ -829,6 +829,118 @@ func (x *ListTradingPairsResponse) GetPairs() []*TradingPair {
 	return nil
 }
 
+type SetPairStatusRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Symbol        string                 `protobuf:"bytes,1,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	ToStatus      string                 `protobuf:"bytes,2,opt,name=to_status,json=toStatus,proto3" json:"to_status,omitempty"`
+	Reason        string                 `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	Actor         string                 `protobuf:"bytes,4,opt,name=actor,proto3" json:"actor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetPairStatusRequest) Reset() {
+	*x = SetPairStatusRequest{}
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetPairStatusRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetPairStatusRequest) ProtoMessage() {}
+
+func (x *SetPairStatusRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetPairStatusRequest.ProtoReflect.Descriptor instead.
+func (*SetPairStatusRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *SetPairStatusRequest) GetSymbol() string {
+	if x != nil {
+		return x.Symbol
+	}
+	return ""
+}
+
+func (x *SetPairStatusRequest) GetToStatus() string {
+	if x != nil {
+		return x.ToStatus
+	}
+	return ""
+}
+
+func (x *SetPairStatusRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *SetPairStatusRequest) GetActor() string {
+	if x != nil {
+		return x.Actor
+	}
+	return ""
+}
+
+type SetPairStatusResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	FromStatus    string                 `protobuf:"bytes,1,opt,name=from_status,json=fromStatus,proto3" json:"from_status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetPairStatusResponse) Reset() {
+	*x = SetPairStatusResponse{}
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetPairStatusResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetPairStatusResponse) ProtoMessage() {}
+
+func (x *SetPairStatusResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetPairStatusResponse.ProtoReflect.Descriptor instead.
+func (*SetPairStatusResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *SetPairStatusResponse) GetFromStatus() string {
+	if x != nil {
+		return x.FromStatus
+	}
+	return ""
+}
+
 var File_exchange_instrument_v1_instrument_proto protoreflect.FileDescriptor
 
 const file_exchange_instrument_v1_instrument_proto_rawDesc = "" +
@@ -899,13 +1011,22 @@ const file_exchange_instrument_v1_instrument_proto_rawDesc = "" +
 	"\x04pair\x18\x01 \x01(\v2#.exchange.instrument.v1.TradingPairR\x04pair\"\x19\n" +
 	"\x17ListTradingPairsRequest\"U\n" +
 	"\x18ListTradingPairsResponse\x129\n" +
-	"\x05pairs\x18\x01 \x03(\v2#.exchange.instrument.v1.TradingPairR\x05pairs2\xbf\x03\n" +
+	"\x05pairs\x18\x01 \x03(\v2#.exchange.instrument.v1.TradingPairR\x05pairs\"y\n" +
+	"\x14SetPairStatusRequest\x12\x16\n" +
+	"\x06symbol\x18\x01 \x01(\tR\x06symbol\x12\x1b\n" +
+	"\tto_status\x18\x02 \x01(\tR\btoStatus\x12\x16\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\x12\x14\n" +
+	"\x05actor\x18\x04 \x01(\tR\x05actor\"8\n" +
+	"\x15SetPairStatusResponse\x12\x1f\n" +
+	"\vfrom_status\x18\x01 \x01(\tR\n" +
+	"fromStatus2\xad\x04\n" +
 	"\x11InstrumentService\x12]\n" +
 	"\bGetAsset\x12'.exchange.instrument.v1.GetAssetRequest\x1a(.exchange.instrument.v1.GetAssetResponse\x12c\n" +
 	"\n" +
 	"ListAssets\x12).exchange.instrument.v1.ListAssetsRequest\x1a*.exchange.instrument.v1.ListAssetsResponse\x12o\n" +
 	"\x0eGetTradingPair\x12-.exchange.instrument.v1.GetTradingPairRequest\x1a..exchange.instrument.v1.GetTradingPairResponse\x12u\n" +
-	"\x10ListTradingPairs\x12/.exchange.instrument.v1.ListTradingPairsRequest\x1a0.exchange.instrument.v1.ListTradingPairsResponseB\xf9\x01\n" +
+	"\x10ListTradingPairs\x12/.exchange.instrument.v1.ListTradingPairsRequest\x1a0.exchange.instrument.v1.ListTradingPairsResponse\x12l\n" +
+	"\rSetPairStatus\x12,.exchange.instrument.v1.SetPairStatusRequest\x1a-.exchange.instrument.v1.SetPairStatusResponseB\xf9\x01\n" +
 	"\x1acom.exchange.instrument.v1B\x0fInstrumentProtoP\x01ZPgithub.com/lidp280504357/exchange/api/gen/go/exchange/instrument/v1;instrumentv1\xa2\x02\x03EIX\xaa\x02\x16Exchange.Instrument.V1\xca\x02\x16Exchange\\Instrument\\V1\xe2\x02\"Exchange\\Instrument\\V1\\GPBMetadata\xea\x02\x18Exchange::Instrument::V1b\x06proto3"
 
 var (
@@ -920,7 +1041,7 @@ func file_exchange_instrument_v1_instrument_proto_rawDescGZIP() []byte {
 	return file_exchange_instrument_v1_instrument_proto_rawDescData
 }
 
-var file_exchange_instrument_v1_instrument_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_exchange_instrument_v1_instrument_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_exchange_instrument_v1_instrument_proto_goTypes = []any{
 	(*Asset)(nil),                    // 0: exchange.instrument.v1.Asset
 	(*Network)(nil),                  // 1: exchange.instrument.v1.Network
@@ -934,6 +1055,8 @@ var file_exchange_instrument_v1_instrument_proto_goTypes = []any{
 	(*GetTradingPairResponse)(nil),   // 9: exchange.instrument.v1.GetTradingPairResponse
 	(*ListTradingPairsRequest)(nil),  // 10: exchange.instrument.v1.ListTradingPairsRequest
 	(*ListTradingPairsResponse)(nil), // 11: exchange.instrument.v1.ListTradingPairsResponse
+	(*SetPairStatusRequest)(nil),     // 12: exchange.instrument.v1.SetPairStatusRequest
+	(*SetPairStatusResponse)(nil),    // 13: exchange.instrument.v1.SetPairStatusResponse
 }
 var file_exchange_instrument_v1_instrument_proto_depIdxs = []int32{
 	1,  // 0: exchange.instrument.v1.Asset.networks:type_name -> exchange.instrument.v1.Network
@@ -945,12 +1068,14 @@ var file_exchange_instrument_v1_instrument_proto_depIdxs = []int32{
 	6,  // 6: exchange.instrument.v1.InstrumentService.ListAssets:input_type -> exchange.instrument.v1.ListAssetsRequest
 	8,  // 7: exchange.instrument.v1.InstrumentService.GetTradingPair:input_type -> exchange.instrument.v1.GetTradingPairRequest
 	10, // 8: exchange.instrument.v1.InstrumentService.ListTradingPairs:input_type -> exchange.instrument.v1.ListTradingPairsRequest
-	5,  // 9: exchange.instrument.v1.InstrumentService.GetAsset:output_type -> exchange.instrument.v1.GetAssetResponse
-	7,  // 10: exchange.instrument.v1.InstrumentService.ListAssets:output_type -> exchange.instrument.v1.ListAssetsResponse
-	9,  // 11: exchange.instrument.v1.InstrumentService.GetTradingPair:output_type -> exchange.instrument.v1.GetTradingPairResponse
-	11, // 12: exchange.instrument.v1.InstrumentService.ListTradingPairs:output_type -> exchange.instrument.v1.ListTradingPairsResponse
-	9,  // [9:13] is the sub-list for method output_type
-	5,  // [5:9] is the sub-list for method input_type
+	12, // 9: exchange.instrument.v1.InstrumentService.SetPairStatus:input_type -> exchange.instrument.v1.SetPairStatusRequest
+	5,  // 10: exchange.instrument.v1.InstrumentService.GetAsset:output_type -> exchange.instrument.v1.GetAssetResponse
+	7,  // 11: exchange.instrument.v1.InstrumentService.ListAssets:output_type -> exchange.instrument.v1.ListAssetsResponse
+	9,  // 12: exchange.instrument.v1.InstrumentService.GetTradingPair:output_type -> exchange.instrument.v1.GetTradingPairResponse
+	11, // 13: exchange.instrument.v1.InstrumentService.ListTradingPairs:output_type -> exchange.instrument.v1.ListTradingPairsResponse
+	13, // 14: exchange.instrument.v1.InstrumentService.SetPairStatus:output_type -> exchange.instrument.v1.SetPairStatusResponse
+	10, // [10:15] is the sub-list for method output_type
+	5,  // [5:10] is the sub-list for method input_type
 	5,  // [5:5] is the sub-list for extension type_name
 	5,  // [5:5] is the sub-list for extension extendee
 	0,  // [0:5] is the sub-list for field type_name
@@ -967,7 +1092,7 @@ func file_exchange_instrument_v1_instrument_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_instrument_v1_instrument_proto_rawDesc), len(file_exchange_instrument_v1_instrument_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -28,6 +28,7 @@ const (
 	LedgerService_BookChainFee_FullMethodName      = "/exchange.ledger.v1.LedgerService/BookChainFee"
 	LedgerService_FundSystemAccount_FullMethodName = "/exchange.ledger.v1.LedgerService/FundSystemAccount"
 	LedgerService_GetSystemBalances_FullMethodName = "/exchange.ledger.v1.LedgerService/GetSystemBalances"
+	LedgerService_Adjust_FullMethodName            = "/exchange.ledger.v1.LedgerService/Adjust"
 )
 
 // LedgerServiceClient is the client API for LedgerService service.
@@ -69,6 +70,11 @@ type LedgerServiceClient interface {
 	FundSystemAccount(ctx context.Context, in *FundSystemAccountRequest, opts ...grpc.CallOption) (*FundSystemAccountResponse, error)
 	// GetSystemBalances returns the platform's system accounts in an asset.
 	GetSystemBalances(ctx context.Context, in *GetSystemBalancesRequest, opts ...grpc.CallOption) (*GetSystemBalancesResponse, error)
+	// Adjust credits (or, negative, debits) a user's SPOT account against
+	// ADJUSTMENT (MANUAL_ADJUSTMENT) with an audit event; the admin console
+	// calls it once two people approved (§5.12). Needs
+	// ledger.manual_adjustment.
+	Adjust(ctx context.Context, in *AdjustRequest, opts ...grpc.CallOption) (*AdjustResponse, error)
 }
 
 type ledgerServiceClient struct {
@@ -169,6 +175,16 @@ func (c *ledgerServiceClient) GetSystemBalances(ctx context.Context, in *GetSyst
 	return out, nil
 }
 
+func (c *ledgerServiceClient) Adjust(ctx context.Context, in *AdjustRequest, opts ...grpc.CallOption) (*AdjustResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdjustResponse)
+	err := c.cc.Invoke(ctx, LedgerService_Adjust_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LedgerServiceServer is the server API for LedgerService service.
 // All implementations must embed UnimplementedLedgerServiceServer
 // for forward compatibility.
@@ -208,6 +224,11 @@ type LedgerServiceServer interface {
 	FundSystemAccount(context.Context, *FundSystemAccountRequest) (*FundSystemAccountResponse, error)
 	// GetSystemBalances returns the platform's system accounts in an asset.
 	GetSystemBalances(context.Context, *GetSystemBalancesRequest) (*GetSystemBalancesResponse, error)
+	// Adjust credits (or, negative, debits) a user's SPOT account against
+	// ADJUSTMENT (MANUAL_ADJUSTMENT) with an audit event; the admin console
+	// calls it once two people approved (§5.12). Needs
+	// ledger.manual_adjustment.
+	Adjust(context.Context, *AdjustRequest) (*AdjustResponse, error)
 	mustEmbedUnimplementedLedgerServiceServer()
 }
 
@@ -244,6 +265,9 @@ func (UnimplementedLedgerServiceServer) FundSystemAccount(context.Context, *Fund
 }
 func (UnimplementedLedgerServiceServer) GetSystemBalances(context.Context, *GetSystemBalancesRequest) (*GetSystemBalancesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetSystemBalances not implemented")
+}
+func (UnimplementedLedgerServiceServer) Adjust(context.Context, *AdjustRequest) (*AdjustResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Adjust not implemented")
 }
 func (UnimplementedLedgerServiceServer) mustEmbedUnimplementedLedgerServiceServer() {}
 func (UnimplementedLedgerServiceServer) testEmbeddedByValue()                       {}
@@ -428,6 +452,24 @@ func _LedgerService_GetSystemBalances_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LedgerService_Adjust_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdjustRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LedgerServiceServer).Adjust(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LedgerService_Adjust_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LedgerServiceServer).Adjust(ctx, req.(*AdjustRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LedgerService_ServiceDesc is the grpc.ServiceDesc for LedgerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -470,6 +512,10 @@ var LedgerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetSystemBalances",
 			Handler:    _LedgerService_GetSystemBalances_Handler,
+		},
+		{
+			MethodName: "Adjust",
+			Handler:    _LedgerService_Adjust_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

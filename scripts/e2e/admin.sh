@@ -1,0 +1,245 @@
+#!/usr/bin/env bash
+# The admin console end to end (implementation plan §6.3 task 11): nginx
+# serves the console at /admin/ and its API at /admin/v1 (admin-service,
+# never the gateway). Four administrators are created for the run with
+# exchangectl in the admin-service container (random passwords and
+# authenticator secrets passed on stdin, never printed) and disabled at
+# the end. It checks sign-in (password + TOTP, one use per code, the
+# cookie's attributes, the CSRF header), roles, freezing and unfreezing
+# an account, cancelling its orders, a pair's status round trip, a flag
+# round trip, a two-person ledger adjustment, the withdrawal list, the
+# audit trail and sign-out.
+#
+#   scripts/e2e/admin.sh
+set -euo pipefail
+
+# shellcheck source=lib/common.sh
+source "$(dirname "$0")/lib/common.sh"
+# shellcheck source=lib/remote.sh
+source "$(dirname "$0")/lib/remote.sh"
+
+CSRF=(-H 'X-Admin-CSRF: 1')
+totp() { node "$(dirname "$0")/lib/totp.mjs" "$1" "${2:-0}"; }
+# A base32 secret of 160 bits and a password, both random.
+secret() { LC_ALL=C tr -dc 'A-Z2-7' </dev/urandom | head -c 32; }
+password() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24; }
+
+echo "== the console is served at /admin/"
+call GET /admin/ "" -D "$WORK/headers"
+[[ $STATUS == 200 ]] && grep -q '管理后台' <<<"$BODY" || { echo "FAIL GET /admin/: $STATUS" >&2; exit 1; }
+grep -qi '^x-frame-options: DENY' "$WORK/headers" && grep -qi "^content-security-policy: default-src 'self'" "$WORK/headers" &&
+  grep -qi '^x-robots-tag: noindex' "$WORK/headers" || { echo "FAIL the console's security headers:" >&2; cat "$WORK/headers" >&2; exit 1; }
+echo "ok   the console page, with X-Frame-Options, CSP and noindex"
+ASSET=$(grep -oE '/admin/assets/index-[A-Za-z0-9_-]+\.js' <<<"$BODY" | head -1)
+call GET "$ASSET" "" -D "$WORK/headers"
+[[ $STATUS == 200 ]] && grep -qi '^cache-control: public, max-age=31536000, immutable' "$WORK/headers" ||
+  { echo "FAIL $ASSET: $STATUS" >&2; exit 1; }
+echo "ok   its hashed assets are cached for good"
+call GET /admin/withdrawals ""
+[[ $STATUS == 200 ]] && grep -q '管理后台' <<<"$BODY" || { echo "FAIL the SPA fallback: $STATUS" >&2; exit 1; }
+echo "ok   deep links fall back to the console page"
+
+echo "== the API wants a session and the CSRF header"
+call GET /admin/v1/me ""
+expect 401 ADMIN_UNAUTHORIZED "no session"
+call POST /admin/v1/login '{"email":"nobody@example.com","password":"x","totp_code":"000000"}'
+expect 403 ADMIN_CSRF "a write without X-Admin-CSRF"
+call POST /admin/v1/login '{"email":"nobody@example.com","password":"a wrong password","totp_code":"000000"}' "${CSRF[@]}"
+expect 401 ADMIN_LOGIN_FAILED "an unknown administrator"
+call GET /v1/admin/v1/me ""
+[[ $STATUS == 404 ]] || { echo "FAIL the gateway answers for the console: $STATUS" >&2; exit 1; }
+echo "ok   the user gateway does not route the console"
+
+echo "== four administrators for this run"
+ROLES=(ADMIN OPERATOR FINANCE AUDITOR)
+for role in "${ROLES[@]}"; do
+  lower=$(tr '[:upper:]' '[:lower:]' <<<"$role")
+  email="e2e-$lower-$RUN@example.com"
+  pw=$(password)
+  sec=$(secret)
+  out=$(remote "sudo docker compose $COMPOSE_FILES exec -T admin-service /app/exchangectl admin create --email $email --name 'e2e $lower' --role $role --secrets-stdin" \
+    "$(printf '%s\n%s\n' "$pw" "$sec")")
+  grep -q "^created .* $email ($role)" <<<"$out" || { echo "FAIL admin create $role: $out" >&2; exit 1; }
+  eval "EMAIL_$role=\$email PW_$role=\$pw SECRET_$role=\$sec"
+  # shellcheck disable=SC2016 # expanded when the script ends
+  at_exit "remote \"sudo docker compose \$COMPOSE_FILES exec -T admin-service /app/exchangectl admin disable $email --reason 'e2e run over'\" >/dev/null"
+  echo "ok   $role $email"
+done
+
+# login ROLE [CODE] signs in with the role's cookie jar and sets CODE_ROLE.
+login() {
+  local role=$1 email pw sec code
+  email=$(eval "echo \$EMAIL_$role") pw=$(eval "echo \$PW_$role") sec=$(eval "echo \$SECRET_$role")
+  code=${2:-$(totp "$sec")}
+  eval "CODE_$role=\$code"
+  call POST /admin/v1/login "$(jq -nc --arg e "$email" --arg p "$pw" --arg c "$code" '{email: $e, password: $p, totp_code: $c}')" \
+    "${CSRF[@]}" -c "$WORK/$role.jar" -D "$WORK/$role.headers"
+}
+as() { # as ROLE METHOD PATH JSON: a call with the role's session
+  local role=$1
+  shift
+  call "$1" "$2" "$3" -b "$WORK/$role.jar" "${CSRF[@]}"
+}
+
+echo "== sign-in"
+login ADMIN
+expect 200 - "ADMIN signs in with password and code"
+check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 12" "with every permission"
+cookie=$(grep -i '^set-cookie: admin_session=' "$WORK/ADMIN.headers")
+for attr in 'Path=/admin/' 'HttpOnly' 'Secure' 'SameSite=Strict'; do
+  grep -qi "$attr" <<<"$cookie" || { echo "FAIL the session cookie lacks $attr: $cookie" >&2; exit 1; }
+done
+echo "ok   the cookie is HttpOnly, Secure, SameSite=Strict, Path=/admin/"
+login ADMIN "$CODE_ADMIN"
+expect 401 ADMIN_LOGIN_FAILED "the same code does not sign in twice"
+for role in OPERATOR FINANCE AUDITOR; do
+  login "$role"
+  expect 200 - "$role signs in"
+done
+as AUDITOR GET /admin/v1/me ""
+expect 200 - "me"
+check '.role == "AUDITOR" and (.permissions | index("flags.write")) == null and (.permissions | index("audit.read")) != null' "AUDITOR only reads"
+
+echo "== roles"
+as AUDITOR PUT /admin/v1/flags/market.reference_kline '{"enabled":true,"reason":"e2e"}'
+expect 403 ADMIN_FORBIDDEN "AUDITOR cannot switch a flag"
+as OPERATOR POST /admin/v1/ledger/adjustments '{"user_id":"01929c3e-7f3a-7d7e-8a1b-2c3d4e5f6a7b","asset":"USDT","amount":"1","reason":"e2e"}'
+expect 403 ADMIN_FORBIDDEN "OPERATOR cannot request an adjustment"
+as FINANCE POST /admin/v1/users/01929c3e-7f3a-7d7e-8a1b-2c3d4e5f6a7b/cancel-orders '{"reason":"e2e"}'
+expect 403 ADMIN_FORBIDDEN "FINANCE cannot cancel orders"
+as FINANCE GET "/admin/v1/withdrawals?status=CONFIRMED" ""
+expect 200 - "FINANCE lists withdrawals"
+check '.items | type == "array"' "the list is an array"
+call GET /admin/v1/me "" -b "$WORK/AUDITOR.jar"
+expect 200 - "reads need no CSRF header"
+call PUT /admin/v1/flags/market.reference_kline '{"enabled":true,"reason":"e2e"}' -b "$WORK/OPERATOR.jar"
+expect 403 ADMIN_CSRF "writes do, even with a session"
+
+EMAIL="e2e-admin-user-$RUN@example.com"
+DEVICE="e2e-admin-user-$RUN"
+echo "== an account to act on: $EMAIL"
+register "$EMAIL" "$DEVICE" "e2e admin user $RUN"
+USER_ID=$(jq -r .user_id <<<"$BODY")
+UAUTH=(-H "Authorization: Bearer $(jq -r .access_token <<<"$BODY")")
+# shellcheck disable=SC2016 # expanded when the script ends
+at_exit 'call DELETE /v1/orders "" "${UAUTH[@]}"'
+as OPERATOR GET "/admin/v1/users/lookup?q=$(jq -rn --arg e "$EMAIL" '$e|@uri')" ""
+expect 200 - "OPERATOR finds the account by email"
+check ".user.id == \"$USER_ID\" and .user.status == \"ACTIVE\"" "the account"
+as OPERATOR GET "/admin/v1/users/lookup?q=$USER_ID" ""
+expect 200 - "and by ID"
+
+echo "== freeze and unfreeze"
+as OPERATOR POST "/admin/v1/users/$USER_ID/status" '{"to":"FROZEN","reason":"SUSPICIOUS_LOGIN","note":"scripts/e2e/admin.sh"}'
+expect 200 - "OPERATOR freezes the account"
+check '.from == "ACTIVE" and .to == "FROZEN"' "ACTIVE → FROZEN"
+call GET /v1/user/profile "" "${UAUTH[@]}"
+check '.status == "FROZEN"' "the user sees FROZEN"
+as OPERATOR POST "/admin/v1/users/$USER_ID/status" '{"to":"CLOSED","reason":"USER_REQUEST"}'
+expect 409 USER_STATUS_TRANSITION_INVALID "FROZEN cannot close directly"
+as OPERATOR POST "/admin/v1/users/$USER_ID/status" '{"to":"ACTIVE","reason":"REVIEW_CLEARED"}'
+expect 200 - "and unfreezes it"
+call GET /v1/user/profile "" "${UAUTH[@]}"
+check '.status == "ACTIVE"' "ACTIVE again"
+
+echo "== a pair's status (ETH-BTC)"
+as OPERATOR POST /admin/v1/instruments/pairs/ETH-BTC/status '{"to":"HALT","reason":"e2e halt"}'
+expect 200 - "OPERATOR halts ETH-BTC"
+check '.from == "TRADING" and .to == "HALT"' "TRADING → HALT"
+# shellcheck disable=SC2016 # a safety net: the pair trades again whatever happens
+at_exit 'as OPERATOR POST /admin/v1/instruments/pairs/ETH-BTC/status "{\"to\":\"TRADING\",\"reason\":\"e2e cleanup\"}"'
+as OPERATOR POST /admin/v1/instruments/pairs/ETH-BTC/status '{"to":"PREPARE","reason":"e2e"}'
+expect 409 INSTRUMENT_STATUS_TRANSITION_INVALID "HALT cannot go back to PREPARE"
+as OPERATOR POST /admin/v1/instruments/pairs/ETH-BTC/status '{"to":"TRADING","reason":"e2e resume"}'
+expect 200 - "and resumes it"
+as AUDITOR GET /admin/v1/instruments ""
+expect 200 - "instruments"
+check '(.pairs[] | select(.symbol == "ETH-BTC") | .status) == "TRADING" and (.assets | map(.asset_code) | index("ETH")) != null' "ETH-BTC trades again; assets are listed"
+
+echo "== cancel every order of the account"
+balance() {
+  call GET /v1/account/balances "" "${UAUTH[@]}"
+  jq -r --arg a "$1" '.balances[] | select(.asset == $a and .account_type == "SPOT") | "\(.available) \(.frozen)"' <<<"$BODY"
+}
+funded() { [[ $(balance BTC) == "0.1 0" ]]; }
+eventually 40 "welcome funds arrived" funded
+call POST /v1/orders '{"symbol":"ETH-BTC","side":"BUY","type":"LIMIT","price":"0.03","quantity":"0.1"}' "${UAUTH[@]}" -H "Idempotency-Key: e2e-admin-$RUN"
+expect 202 - "the user rests a buy"
+ORDER=$(jq -r .order_id <<<"$BODY")
+as OPERATOR POST "/admin/v1/users/$USER_ID/cancel-orders" '{"reason":"e2e cancel all"}'
+expect 202 - "OPERATOR cancels all its orders"
+canceled() {
+  call GET "/v1/orders/$ORDER" "" "${UAUTH[@]}"
+  [[ $(jq -r .status <<<"$BODY") == CANCELED ]]
+}
+eventually 40 "the order is CANCELED" canceled
+eventually 20 "its funds are released" funded
+
+echo "== a flag round trip (market.reference_kline)"
+as OPERATOR GET /admin/v1/flags ""
+expect 200 - "flags"
+check '(.items | map(.key) | index("wallet.withdraw")) != null and (.items | map(.key) | index("derivatives.trading")) != null' "every known flag is listed"
+BEFORE=$(jq -r '.items[] | select(.key == "market.reference_kline") | .enabled' <<<"$BODY")
+FLIP=$([[ $BEFORE == true ]] && echo false || echo true)
+as OPERATOR PUT /admin/v1/flags/market.reference_kline "{\"enabled\":$FLIP,\"reason\":\"e2e flip\"}"
+expect 200 - "OPERATOR switches it to $FLIP"
+check ".enabled == $FLIP and .updated_by == \"$EMAIL_OPERATOR\"" "the change names the administrator"
+as OPERATOR PUT /admin/v1/flags/market.reference_kline "{\"enabled\":$BEFORE,\"reason\":\"e2e restore\"}"
+expect 200 - "and back to $BEFORE"
+as OPERATOR PUT /admin/v1/flags/no.such.flag '{"enabled":true,"reason":"e2e"}'
+expect 404 COMMON_NOT_FOUND "an unknown flag"
+
+echo "== a two-person ledger adjustment"
+call GET /v1/account/balances "" "${UAUTH[@]}"
+USDT_BEFORE=$(jq -r '.balances[] | select(.asset == "USDT" and .account_type == "SPOT") | .available' <<<"$BODY")
+USDT_BEFORE=${USDT_BEFORE:-0}
+as FINANCE POST /admin/v1/ledger/adjustments "{\"user_id\":\"$USER_ID\",\"asset\":\"usdt\",\"amount\":\"1.5\",\"reason\":\"e2e goodwill\"}"
+expect 201 - "FINANCE requests +1.5 USDT"
+check '.status == "PENDING" and .payload.asset == "USDT" and .payload.amount == "1.5"' "PENDING"
+APPROVAL=$(jq -r .id <<<"$BODY")
+as FINANCE POST "/admin/v1/approvals/$APPROVAL/decide" '{"approve":true,"reason":"my own"}'
+expect 403 ADMIN_SELF_APPROVAL "not by the requester"
+as OPERATOR POST "/admin/v1/approvals/$APPROVAL/decide" '{"approve":true,"reason":"e2e"}'
+expect 403 ADMIN_FORBIDDEN "not by an OPERATOR"
+as ADMIN GET "/admin/v1/approvals?status=PENDING" ""
+check ".items | map(.id) | index(\"$APPROVAL\") != null" "ADMIN sees it pending"
+as ADMIN POST "/admin/v1/approvals/$APPROVAL/decide" '{"approve":true,"reason":"checked by e2e"}'
+expect 200 - "ADMIN approves"
+check '.status == "EXECUTED" and (.result | startswith("journal ")) and .decided_by != null' "EXECUTED with the journal"
+as ADMIN POST "/admin/v1/approvals/$APPROVAL/decide" '{"approve":false,"reason":"again"}'
+expect 409 ADMIN_APPROVAL_DECIDED "decided once"
+credited() {
+  call GET /v1/account/balances "" "${UAUTH[@]}"
+  jq -e --arg b "$USDT_BEFORE" '.balances[] | select(.asset == "USDT" and .account_type == "SPOT") | (.available | tonumber) == (($b | tonumber) + 1.5)' <<<"$BODY" >/dev/null
+}
+eventually 20 "the user has 1.5 USDT more" credited
+as FINANCE POST /admin/v1/ledger/adjustments "{\"user_id\":\"$USER_ID\",\"asset\":\"USDT\",\"amount\":\"-1.5\",\"reason\":\"e2e reversal\"}"
+expect 201 - "FINANCE requests the reversal"
+REVERSAL=$(jq -r .id <<<"$BODY")
+as ADMIN POST "/admin/v1/approvals/$REVERSAL/decide" '{"approve":false,"reason":"e2e keeps it"}'
+expect 200 - "ADMIN rejects it"
+check '.status == "REJECTED"' "REJECTED, nothing booked"
+
+echo "== the audit trail"
+audited() { # audited ROLE QUERY JQ
+  as "$1" GET "/admin/v1/audit-logs?$2" ""
+  [[ $STATUS == 200 ]] && jq -e "$3" <<<"$BODY" >/dev/null
+}
+q_admin="actor=$(jq -rn --arg e "$EMAIL_ADMIN" '$e|@uri')"
+eventually 60 "the ADMIN's sign-in and approval are in the trail" audited AUDITOR "$q_admin" \
+  '[.items[].payload.action] | (index("admin.login") != null and index("admin.ledger.adjustment_approved") != null)'
+eventually 60 "the freeze is audited on the account, by the OPERATOR" audited AUDITOR "target=user:$USER_ID" \
+  "[.items[] | select(.actor == \"$EMAIL_OPERATOR\")] | length >= 3"
+eventually 60 "the flag switches are audited" audited AUDITOR "target=flag:market.reference_kline" \
+  "[.items[] | select(.actor == \"$EMAIL_OPERATOR\")] | length >= 2"
+
+echo "== sign-out"
+as AUDITOR POST /admin/v1/logout ""
+[[ $STATUS == 204 ]] || { echo "FAIL logout: $STATUS" >&2; exit 1; }
+echo "ok   AUDITOR signs out"
+as AUDITOR GET /admin/v1/me ""
+expect 401 ADMIN_UNAUTHORIZED "the session is gone"
+remote "sudo docker compose $COMPOSE_FILES exec -T admin-service /app/exchangectl admin disable $EMAIL_OPERATOR --reason 'e2e disable check'" >/dev/null
+as OPERATOR GET /admin/v1/me ""
+expect 401 ADMIN_UNAUTHORIZED "disabling an administrator ends their sessions"
+echo "all admin console checks passed"

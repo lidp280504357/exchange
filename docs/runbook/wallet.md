@@ -79,7 +79,7 @@ ssh exchange sudo docker exec exchange-infra-wallet-service-1 /app/exchangectl w
 - **地址簿**：`POST /v1/wallet/withdraw-addresses`（需 step-up）；新地址冷却期后才能用（`WALLET_WHITELIST_COOLDOWN`，生产 24 小时，测试服 1 分钟）；不能添加自己的充值地址。
 - **申请** `POST /v1/wallet/withdrawals`（需 step-up，已绑定身份验证器时只能用 TOTP 证明）：eligibility `WITHDRAW`（开关 `wallet.withdraw`，默认关，测试服已开）→ 资产与网络开放提现、只支持链上原生币 → 地址格式 → 精度与最小提现额 → 地址在地址簿且过了冷却期 → 当日价格折算 USDT（当天第一次取价后固定，存 `price_snapshots`；来源 market-data 的 `ASSET-USDT` 参考价，没有新鲜参考价时用 `WALLET_FALLBACK_PRICES`）→ 日/月限额（双身份 + TOTP：2,000 / 20,000 USDT，否则 20%）→ 风控规则 → 冻结金额 + 手续费（`WITHDRAW_FREEZE`，键 `withdraw:<id>`）。账本拒绝冻结时记为 REJECTED 并返回账本错误码；账本不可达时停在 REQUESTED，处理器一分钟后用同一个键补完。
 - **风控规则**（`internal/wallet/domain/withdrawal.go`）：新账户（< 72 小时）、新设备（该会话设备首次登录 < 24 小时）、近期安全变更（换绑或改/重置密码 < 24 小时）、新地址（加入地址簿 < 72 小时）、大额（> 1,000 USDT）、当日累计超过日限额一半，任一命中即 PENDING_REVIEW 需一人批准；> 20,000 USDT 需两人。安全上下文由 auth-service 在兑换 step-up 时一并返回（`ConsumeStepUp` 的 `security`）。
-- **审批**（管理后台前用 `exchangectl`，每次审批/拒绝写 `audit.events`）：
+- **审批**：管理后台 `/admin/` 的"提现审批"（FINANCE/ADMIN 角色，审批人为管理员邮箱，见 [admin.md](admin.md)），或 `exchangectl`；每次审批/拒绝写 `audit.events`：
 
   ```bash
   ssh exchange sudo docker exec exchange-infra-wallet-service-1 /app/exchangectl wallet withdrawals             # 待审核
@@ -135,7 +135,7 @@ SELECT asset, available FROM ledger.accounts WHERE account_type = 'UNCLAIMED_DEP
 ```
 
 - 重扫一段区块（例如漏扫怀疑）：停 wallet-service，`UPDATE wallet.scan_cursors SET block = <起点-1>` 并删掉 `wallet.scanned_blocks` 中更高的块，再启动。已记录的充值不会重复（唯一键），ORPHANED 的会复活。
-- 未入账资金的处置（找回或并入平台）要等管理后台（任务 11）的审批流程；在此之前只记录，不手工调账。
+- 未入账资金的处置（找回或并入平台）：管理后台的双人调账目前只动用户现货账户与 `ADJUSTMENT`，`UNCLAIMED_DEPOSIT` 的转出尚未做；在此之前只记录，不手工调账。
 - 切换节点：改 apps.env 的 URL 后重启 wallet-service；扫描从游标继续。
 
 ## 端到端
@@ -150,5 +150,5 @@ SELECT asset, available FROM ledger.accounts WHERE account_type = 'UNCLAIMED_DEP
 - 只扫一个 EVM 网络；合约内部转账（internal transaction）的原生币到账看不到，需要人工补录（任务 11）。
 - ERC-20 需要在 instrument 配置合约地址才会入账（decimals 从合约读取并缓存）；未配置的代币只记录不入账。代币提现、代币归集与 gas 补给尚未实现（签名服务不签带 calldata 的交易），测试服没有配置代币。
 - 充值风控评分（§11.5 的"风控拦截"）尚未接入，账户状态由 eligibility 把关。
-- 提现审批暂用 `exchangectl`（审核人名字由命令行给出），RBAC 与双人审批界面在管理后台（任务 11）。
+- 提现审批在管理后台（按角色，审批人即管理员）；`exchangectl wallet approve` 的审核人名字由命令行给出，只适合脚本与应急。
 - 测试环境用户的模拟资金（`ADJUSTMENT`）也能提现到链上，热钱包里的真实测试币会因此减少；不变量 4 的核对不受影响（预期与持有同步减少）。

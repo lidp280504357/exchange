@@ -82,7 +82,7 @@ func TestDownMigrations(t *testing.T) {
 	for name, fsys := range map[string]fs.FS{
 		"auth": migrations.Auth(), "users": migrations.Users(), "notify": migrations.Notify(), "config": migrations.Config(),
 		"instrument": migrations.Instrument(), "ledger": migrations.Ledger(), "risk": migrations.Risk(), "trading": migrations.Trading(), "matching": migrations.Matching(), "market": migrations.Market(),
-		"wallet": migrations.Wallet(), "signer": migrations.Signer(),
+		"wallet": migrations.Wallet(), "signer": migrations.Signer(), "admin": migrations.Admin(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			db := apply(t, fsys)
@@ -246,4 +246,19 @@ func TestSignerSchema(t *testing.T) {
 	rejects(t, db, "no truncation", `TRUNCATE signatures`)
 	accepts(t, db, `INSERT INTO refusals (request_id, purpose, reference, reason, request) VALUES ('r3', 'SWEEP', 's1', 'why', '{}')`)
 	rejects(t, db, "refusals are append-only", `DELETE FROM refusals`)
+}
+
+func TestAdminSchema(t *testing.T) {
+	db := apply(t, migrations.Admin())
+	a, b := uuid.New(), uuid.New()
+	ins := `INSERT INTO admins (id, email, name, role, password_hash, totp_sealed, created_at) VALUES ($1, $2, 'x', $3, 'h', '\x00', now())`
+	accepts(t, db, ins, a, "ann@example.com", "ADMIN")
+	accepts(t, db, ins, b, "bob@example.com", "FINANCE")
+	rejects(t, db, "emails are unique regardless of case", ins, uuid.New(), "Ann@Example.com", "AUDITOR")
+	rejects(t, db, "known roles only", ins, uuid.New(), "eve@example.com", "ROOT")
+	ap := `INSERT INTO approvals (id, kind, payload, reason, status, requested_by, decided_by, created_at) VALUES ($1, 'LEDGER_ADJUSTMENT', '{}', 'r', $2, $3, $4, now())`
+	accepts(t, db, ap, uuid.New(), "PENDING", a, nil)
+	accepts(t, db, ap, uuid.New(), "EXECUTED", a, b)
+	rejects(t, db, "no self-approval", ap, uuid.New(), "EXECUTED", a, a)
+	rejects(t, db, "a decided request names who decided", ap, uuid.New(), "REJECTED", a, nil)
 }

@@ -37,6 +37,11 @@ service LedgerService {
   rpc FundSystemAccount(FundSystemAccountRequest) returns (FundSystemAccountResponse);
   // GetSystemBalances returns the platform's system accounts in an asset.
   rpc GetSystemBalances(GetSystemBalancesRequest) returns (GetSystemBalancesResponse);
+  // Adjust credits (or, negative, debits) a user's SPOT account against
+  // ADJUSTMENT (MANUAL_ADJUSTMENT) with an audit event; the admin console
+  // calls it once two people approved (§5.12). Needs
+  // ledger.manual_adjustment.
+  rpc Adjust(AdjustRequest) returns (AdjustResponse);
 }
 
 message FreezeRequest {
@@ -171,4 +176,17 @@ message GetSystemBalancesRequest {
 
 message GetSystemBalancesResponse {
   repeated Balance balances = 1;
+}
+
+message AdjustRequest {
+  string idempotency_key = 1;
+  string user_id = 2;
+  string asset = 3;
+  string amount = 4;
+  string reason = 5;
+  string actor = 6;
+}
+
+message AdjustResponse {
+  Posting posting = 1;
 }

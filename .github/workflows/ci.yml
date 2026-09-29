@@ -129,6 +129,29 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
+  web-admin:
+    name: web (admin console types, tests, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/admin/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: API types match the admin contract
+        run: pnpm api:types && git diff --exit-code -- src/api/gen
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
   deploy-config:
     name: deploy config (shell, compose, nginx)
     runs-on: ubuntu-latest
@@ -140,6 +163,9 @@ jobs:
           for f in scripts/*.sh scripts/e2e/*.sh scripts/e2e/lib/*.sh scripts/fault/*.sh; do bash -n "$f"; done
       - name: compose config
         run: |
+          # The server-only env files of the signer and the admin console (never in the repository).
+          mkdir -p deploy/compose/signer deploy/compose/admin
+          touch deploy/compose/signer/signer.env deploy/compose/admin/admin.env
           docker compose -f deploy/compose/docker-compose.yml --env-file deploy/compose/.env.example config --quiet
           docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.apps.yml \
             --env-file deploy/compose/.env.example config --quiet

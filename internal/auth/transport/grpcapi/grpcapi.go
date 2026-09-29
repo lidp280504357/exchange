@@ -63,3 +63,12 @@ func (s *Server) ConsumeStepUp(ctx context.Context, req *authv1.ConsumeStepUpReq
 		PasswordChangedAt: stamp(sec.PasswordChangedAt),
 	}}, nil
 }
+
+// FindUser looks a user up by email address or phone number.
+func (s *Server) FindUser(ctx context.Context, req *authv1.FindUserRequest) (*authv1.FindUserResponse, error) {
+	id, err := s.accounts.FindUser(ctx, req.GetIdentifier())
+	if err != nil {
+		return nil, err
+	}
+	return &authv1.FindUserResponse{UserId: id}, nil
+}

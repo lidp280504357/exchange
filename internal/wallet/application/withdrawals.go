@@ -408,6 +408,9 @@ type Review struct {
 // admin console, from exchangectl) with an audit event. Rejected funds
 // are released by the processor.
 func ReviewWithdrawal(ctx context.Context, store ports.Store, rv Review, now time.Time) (domain.Withdrawal, error) {
+	if _, err := uuid.Parse(rv.ID); err != nil {
+		return domain.Withdrawal{}, apperr.NotFound("no such withdrawal")
+	}
 	if len(strings.TrimSpace(rv.Reason)) < 3 {
 		return domain.Withdrawal{}, apperr.Invalid("a reason is required")
 	}

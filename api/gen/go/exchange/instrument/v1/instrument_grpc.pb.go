@@ -23,6 +23,7 @@ const (
 	InstrumentService_ListAssets_FullMethodName       = "/exchange.instrument.v1.InstrumentService/ListAssets"
 	InstrumentService_GetTradingPair_FullMethodName   = "/exchange.instrument.v1.InstrumentService/GetTradingPair"
 	InstrumentService_ListTradingPairs_FullMethodName = "/exchange.instrument.v1.InstrumentService/ListTradingPairs"
+	InstrumentService_SetPairStatus_FullMethodName    = "/exchange.instrument.v1.InstrumentService/SetPairStatus"
 )
 
 // InstrumentServiceClient is the client API for InstrumentService service.
@@ -39,6 +40,9 @@ type InstrumentServiceClient interface {
 	ListAssets(ctx context.Context, in *ListAssetsRequest, opts ...grpc.CallOption) (*ListAssetsResponse, error)
 	GetTradingPair(ctx context.Context, in *GetTradingPairRequest, opts ...grpc.CallOption) (*GetTradingPairResponse, error)
 	ListTradingPairs(ctx context.Context, in *ListTradingPairsRequest, opts ...grpc.CallOption) (*ListTradingPairsResponse, error)
+	// SetPairStatus moves a pair (PREPARE -> TRADING <-> HALT ->
+	// CANCEL_ONLY -> DELISTED) for an operator; the change is versioned.
+	SetPairStatus(ctx context.Context, in *SetPairStatusRequest, opts ...grpc.CallOption) (*SetPairStatusResponse, error)
 }
 
 type instrumentServiceClient struct {
@@ -89,6 +93,16 @@ func (c *instrumentServiceClient) ListTradingPairs(ctx context.Context, in *List
 	return out, nil
 }
 
+func (c *instrumentServiceClient) SetPairStatus(ctx context.Context, in *SetPairStatusRequest, opts ...grpc.CallOption) (*SetPairStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetPairStatusResponse)
+	err := c.cc.Invoke(ctx, InstrumentService_SetPairStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // InstrumentServiceServer is the server API for InstrumentService service.
 // All implementations must embed UnimplementedInstrumentServiceServer
 // for forward compatibility.
@@ -103,6 +117,9 @@ type InstrumentServiceServer interface {
 	ListAssets(context.Context, *ListAssetsRequest) (*ListAssetsResponse, error)
 	GetTradingPair(context.Context, *GetTradingPairRequest) (*GetTradingPairResponse, error)
 	ListTradingPairs(context.Context, *ListTradingPairsRequest) (*ListTradingPairsResponse, error)
+	// SetPairStatus moves a pair (PREPARE -> TRADING <-> HALT ->
+	// CANCEL_ONLY -> DELISTED) for an operator; the change is versioned.
+	SetPairStatus(context.Context, *SetPairStatusRequest) (*SetPairStatusResponse, error)
 	mustEmbedUnimplementedInstrumentServiceServer()
 }
 
@@ -124,6 +141,9 @@ func (UnimplementedInstrumentServiceServer) GetTradingPair(context.Context, *Get
 }
 func (UnimplementedInstrumentServiceServer) ListTradingPairs(context.Context, *ListTradingPairsRequest) (*ListTradingPairsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListTradingPairs not implemented")
+}
+func (UnimplementedInstrumentServiceServer) SetPairStatus(context.Context, *SetPairStatusRequest) (*SetPairStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetPairStatus not implemented")
 }
 func (UnimplementedInstrumentServiceServer) mustEmbedUnimplementedInstrumentServiceServer() {}
 func (UnimplementedInstrumentServiceServer) testEmbeddedByValue()                           {}
@@ -218,6 +238,24 @@ func _InstrumentService_ListTradingPairs_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _InstrumentService_SetPairStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetPairStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InstrumentServiceServer).SetPairStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InstrumentService_SetPairStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InstrumentServiceServer).SetPairStatus(ctx, req.(*SetPairStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // InstrumentService_ServiceDesc is the grpc.ServiceDesc for InstrumentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -240,6 +278,10 @@ var InstrumentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListTradingPairs",
 			Handler:    _InstrumentService_ListTradingPairs_Handler,
+		},
+		{
+			MethodName: "SetPairStatus",
+			Handler:    _InstrumentService_SetPairStatus_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -8,7 +8,10 @@ BYPASS="${CAPTCHA_BYPASS_TOKEN:-$(grep '^CAPTCHA_BYPASS_TOKEN=' .env | cut -d= -
 RUN="$(date +%s)"
 WORK="$(mktemp -d)"
 AT_EXIT=()
-trap 'for c in ${AT_EXIT[@]+"${AT_EXIT[@]}"}; do eval "$c" || true; done; rm -rf "$WORK"' EXIT
+# AT_END runs after the at_exit commands (lib/remote.sh closes its ssh
+# connection there, which those commands may still need).
+AT_END=""
+trap 'for c in ${AT_EXIT[@]+"${AT_EXIT[@]}"}; do eval "$c" || true; done; [[ -z $AT_END ]] || eval "$AT_END" || true; rm -rf "$WORK"' EXIT
 STATUS="" BODY="" TICKET=""
 
 # at_exit COMMAND runs the COMMAND string when the script ends, also after

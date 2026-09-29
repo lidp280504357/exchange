@@ -38,3 +38,5 @@ scrape_configs:
     static_configs: [{targets: ["wallet-service:9092"]}]
   - job_name: signer
     static_configs: [{targets: ["signer:9093"]}]
+  - job_name: admin-service
+    static_configs: [{targets: ["admin-service:9094"]}]

@@ -167,3 +167,16 @@ func (s *Server) GetSystemBalances(ctx context.Context, req *ledgerv1.GetSystemB
 	}
 	return resp, nil
 }
+
+// Adjust credits or debits a user's SPOT account against ADJUSTMENT.
+func (s *Server) Adjust(ctx context.Context, req *ledgerv1.AdjustRequest) (*ledgerv1.AdjustResponse, error) {
+	a, err := amount(req.GetAmount())
+	if err != nil {
+		return nil, err
+	}
+	res, err := s.svc.AdjustApproved(ctx, req.GetIdempotencyKey(), req.GetUserId(), req.GetAsset(), a, req.GetActor(), req.GetReason())
+	if err != nil {
+		return nil, err
+	}
+	return &ledgerv1.AdjustResponse{Posting: posting(res)}, nil
+}

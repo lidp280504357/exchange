@@ -1,0 +1,868 @@
+openapi: 3.1.0
+info:
+  title: Exchange admin console API
+  version: 0.1.0
+  description: |
+    The admin console's API (requirements §5.12), served by admin-service
+    under /admin/v1 behind nginx; the user gateway never routes here, and
+    this contract stays out of the public API reference.
+
+    Administrators are created with `exchangectl admin create` (no
+    sign-up). Signing in takes the password and a code of the
+    authenticator app bound at creation; each code works once, and five
+    failures lock the account for 15 minutes. The session is an HttpOnly,
+    Secure, SameSite=Strict cookie `admin_session` scoped to /admin/; it
+    ends after 8 hours, or after an hour without a request. Every request
+    other than GET must carry the header `X-Admin-CSRF: 1`.
+
+    Roles grant permissions: ADMIN (everything), OPERATOR (accounts,
+    orders, trading pairs, feature flags), FINANCE (withdrawal reviews,
+    ledger adjustments), AUDITOR (read-only). Everyone may read. A call
+    outside the role fails with ADMIN_FORBIDDEN. Every change is audited
+    (audit.events → ClickHouse audit_logs) with the administrator's email
+    as the actor; changes also carry a reason of at least 3 characters.
+    Manual ledger adjustments take two administrators: one requests, a
+    different one approves, and the ledger books it idempotently.
+servers:
+  - url: https://astras.vip
+security:
+  - session: []
+tags:
+  - name: session
+  - name: users
+  - name: withdrawals
+  - name: instruments
+  - name: flags
+  - name: ledger
+  - name: audit
+paths:
+  /admin/v1/login:
+    post:
+      operationId: login
+      summary: Sign in with password and authenticator code
+      description: |
+        Sets the session cookie. Fails with ADMIN_LOGIN_FAILED for a wrong
+        email, password or code (or a code used before), ADMIN_LOCKED
+        after five failures in a row (15 minutes), and COMMON_RATE_LIMITED
+        beyond 10 attempts a minute from one IP.
+      tags: [session]
+      security:
+        - csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, totp_code]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                totp_code:
+                  type: string
+                  pattern: '^[0-9]{6}$'
+      responses:
+        '200':
+          description: Signed in.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: admin_session=...; Path=/admin/; HttpOnly; Secure; SameSite=Strict
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [admin, expires_at]
+                properties:
+                  admin:
+                    $ref: '#/components/schemas/Admin'
+                  expires_at:
+                    type: string
+                    format: date-time
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/logout:
+    post:
+      operationId: logout
+      summary: End the session
+      tags: [session]
+      security:
+        - session: []
+          csrf: []
+      responses:
+        '204':
+          description: Signed out; the cookie is cleared.
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/me:
+    get:
+      operationId: me
+      summary: The signed-in administrator and their permissions
+      tags: [session]
+      responses:
+        '200':
+          description: The administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Admin'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/users/lookup:
+    get:
+      operationId: lookupUser
+      summary: Find an account by user ID, email address or phone number
+      description: Phone numbers in E.164 with the leading "+". Needs users.read.
+      tags: [users]
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            examples: [alice@example.com]
+      responses:
+        '200':
+          description: The account and its balances.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserView'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/status:
+    post:
+      operationId: changeUserStatus
+      summary: Move an account to another status (freeze, unfreeze, review, close)
+      description: |
+        user-service applies its state machine (appendix B) and records the
+        change with the administrator as the actor. Needs users.status.
+      tags: [users]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, reason]
+              properties:
+                to:
+                  type: string
+                  enum: [ACTIVE, RISK_REVIEW, FROZEN, CLOSED]
+                reason:
+                  type: string
+                  description: Reason code of user-service, e.g. SUSPICIOUS_LOGIN, USER_REQUEST.
+                note:
+                  type: string
+      responses:
+        '200':
+          description: The change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transition'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/cancel-orders:
+    post:
+      operationId: cancelUserOrders
+      summary: Cancel every open order of an account
+      description: Needs orders.cancel. The cancellations complete asynchronously in the matching engine.
+      tags: [users]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Reason'
+      responses:
+        '202':
+          description: Cancellations requested.
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/withdrawals:
+    get:
+      operationId: listWithdrawals
+      summary: Withdrawals in a status, oldest first
+      description: Needs withdrawals.read.
+      tags: [withdrawals]
+      parameters:
+        - name: status
+          in: query
+          description: A withdrawal status (appendix B), e.g. APPROVED, BROADCAST, CONFIRMED, REJECTED, FAILED.
+          schema:
+            type: string
+            default: PENDING_REVIEW
+      responses:
+        '200':
+          description: The withdrawals.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Withdrawal'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/withdrawals/{id}/review:
+    post:
+      operationId: reviewWithdrawal
+      summary: Approve or reject a withdrawal in review
+      description: |
+        The administrator's email is the reviewer; a withdrawal above
+        20,000 USDT needs two distinct reviewers. Rejecting releases the
+        frozen amount. Needs withdrawals.review.
+      tags: [withdrawals]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve, reason]
+              properties:
+                approve:
+                  type: boolean
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: The withdrawal after the review.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Withdrawal'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/instruments:
+    get:
+      operationId: listInstruments
+      summary: Assets (with networks) and trading pairs
+      description: |
+        As instrument-service returns them (protobuf JSON with field names;
+        int64 as strings). Assets and networks change through the
+        versioned reference-data file (exchangectl instruments apply, run
+        by every deploy). Needs instruments.read.
+      tags: [instruments]
+      responses:
+        '200':
+          description: The reference data.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [assets, pairs]
+                properties:
+                  assets:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Asset'
+                  pairs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Pair'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/instruments/pairs/{symbol}/status:
+    post:
+      operationId: setPairStatus
+      summary: Move a trading pair to another status (the per-pair emergency switch)
+      description: |
+        PREPARE → TRADING ⇄ HALT; TRADING or HALT → CANCEL_ONLY →
+        DELISTED (CANCEL_ONLY is the way out: it cannot return to
+        trading). Fails with INSTRUMENT_STATUS_TRANSITION_INVALID
+        otherwise. Needs instruments.write.
+      tags: [instruments]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          schema:
+            type: string
+            examples: [BTC-USDT]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, reason]
+              properties:
+                to:
+                  type: string
+                  enum: [PREPARE, TRADING, HALT, CANCEL_ONLY, DELISTED]
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: The change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transition'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/flags:
+    get:
+      operationId: listFlags
+      summary: Feature flags (requirements §5.14)
+      description: Every flag the platform knows; one never set is off, with version 0. Needs flags.read.
+      tags: [flags]
+      responses:
+        '200':
+          description: The flags.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Flag'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/flags/{key}:
+    put:
+      operationId: switchFlag
+      summary: Turn a flag on or off
+      description: |
+        Keeps the flag's rules (regions, statuses, allow lists); services
+        pick the change up within 5 seconds. Fails with COMMON_NOT_FOUND
+        for a key the platform does not define. Needs flags.write.
+      tags: [flags]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            examples: [wallet.withdraw]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled, reason]
+              properties:
+                enabled:
+                  type: boolean
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: The flag after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Flag'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/ledger/adjustments:
+    post:
+      operationId: requestAdjustment
+      summary: Request a manual adjustment of a user's spot balance
+      description: |
+        Creates a PENDING request for another administrator with
+        ledger.adjust.approve. A positive amount credits the user's SPOT
+        account against the ADJUSTMENT system account, a negative one
+        debits it. Needs ledger.adjust.request.
+      tags: [ledger]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, asset, amount, reason]
+              properties:
+                user_id:
+                  type: string
+                  format: uuid
+                asset:
+                  type: string
+                  examples: [USDT]
+                amount:
+                  $ref: '#/components/schemas/Decimal'
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '201':
+          description: The request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/approvals:
+    get:
+      operationId: listApprovals
+      summary: Two-person requests, newest first (at most 100)
+      description: Needs ledger.adjust.request or audit.read.
+      tags: [ledger]
+      parameters:
+        - name: status
+          in: query
+          description: Empty for all.
+          schema:
+            type: string
+            enum: [PENDING, EXECUTED, REJECTED, FAILED]
+      responses:
+        '200':
+          description: The requests.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Approval'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/approvals/{id}/decide:
+    post:
+      operationId: decideApproval
+      summary: Approve (and book) or reject another administrator's request
+      description: |
+        Fails with ADMIN_SELF_APPROVAL for one's own request and
+        ADMIN_APPROVAL_DECIDED once decided. Approving books the
+        adjustment with the idempotency key approval:<id>: EXECUTED with
+        the journal, or FAILED when the ledger refuses (for instance
+        LEDGER_ADJUSTMENT_DISABLED while the flag ledger.manual_adjustment
+        is off). When the ledger cannot be reached the request stays
+        PENDING and can be approved again. Needs ledger.adjust.approve.
+      tags: [ledger]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve, reason]
+              properties:
+                approve:
+                  type: boolean
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: The decided request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/audit-logs:
+    get:
+      operationId: searchAuditLogs
+      summary: The audit trail, newest first
+      description: |
+        From ClickHouse audit_logs, which lags the change by a few seconds.
+        Needs audit.read.
+      tags: [audit]
+      parameters:
+        - name: actor
+          in: query
+          description: Exact actor, e.g. an administrator's email or cli:ubuntu.
+          schema:
+            type: string
+        - name: target
+          in: query
+          description: Exact target, e.g. user:<id>, pair:BTC-USDT, flag:wallet.withdraw.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        '200':
+          description: The entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditEntry'
+        default:
+          $ref: '#/components/responses/Error'
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: admin_session
+    csrf:
+      type: apiKey
+      in: header
+      name: X-Admin-CSRF
+      description: The value "1" on every request other than GET; a cross-site form cannot set it.
+  parameters:
+    UserID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    Error:
+      $ref: '../openapi/common.yaml#/components/responses/Error'
+  schemas:
+    Decimal:
+      type: string
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+      examples: ['12.5']
+    Reason:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 3
+    Transition:
+      type: object
+      required: [from, to]
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+    Admin:
+      type: object
+      required: [id, email, name, role, permissions]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+          enum: [ADMIN, OPERATOR, FINANCE, AUDITOR]
+        permissions:
+          type: array
+          items:
+            type: string
+            enum: [users.read, users.status, orders.cancel, instruments.read, instruments.write, flags.read, flags.write,
+              withdrawals.read, withdrawals.review, ledger.adjust.request, ledger.adjust.approve, audit.read]
+    UserView:
+      type: object
+      required: [user, balances]
+      properties:
+        user:
+          type: object
+          required: [id, status, region, language, kyc_level, created_at]
+          properties:
+            id:
+              type: string
+              format: uuid
+            status:
+              type: string
+              enum: [ACTIVE, RISK_REVIEW, FROZEN, CLOSED]
+            region:
+              type: string
+            language:
+              type: string
+            kyc_level:
+              type: integer
+            created_at:
+              type: string
+              format: date-time
+        balances:
+          type: array
+          items:
+            type: object
+            required: [account_type, asset, available, frozen]
+            properties:
+              account_type:
+                type: string
+                examples: [SPOT]
+              asset:
+                type: string
+              available:
+                $ref: '#/components/schemas/Decimal'
+              frozen:
+                $ref: '#/components/schemas/Decimal'
+    Withdrawal:
+      type: object
+      required: [id, asset, network, address, amount, fee, internal, status, risk_reasons, approvals_required, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+          description: In lists only.
+        asset:
+          type: string
+        network:
+          type: string
+        address:
+          type: string
+        amount:
+          $ref: '#/components/schemas/Decimal'
+        fee:
+          $ref: '#/components/schemas/Decimal'
+        internal:
+          type: boolean
+        status:
+          type: string
+        risk_score:
+          type: integer
+          description: In lists only.
+        risk_reasons:
+          type: array
+          items:
+            type: string
+            examples: [NEW_ACCOUNT, NEW_DEVICE, SECURITY_CHANGE, NEW_ADDRESS, LARGE_AMOUNT, DAILY_SHARE]
+        value_usdt:
+          $ref: '#/components/schemas/Decimal'
+        approvals_required:
+          type: integer
+        approvals:
+          type: array
+          description: Reviewers so far (in lists only).
+          items:
+            type: string
+        reject_reason:
+          type: [string, 'null']
+        tx_hash:
+          type: [string, 'null']
+        confirmations:
+          type: integer
+        required_confirmations:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        approved_at:
+          type: [string, 'null']
+        broadcast_at:
+          type: [string, 'null']
+        confirmed_at:
+          type: [string, 'null']
+    Network:
+      type: object
+      properties:
+        asset_code:
+          type: string
+        network:
+          type: string
+        chain:
+          type: string
+        contract_address:
+          type: string
+        confirmations:
+          type: integer
+        min_deposit:
+          $ref: '#/components/schemas/Decimal'
+        min_withdraw:
+          $ref: '#/components/schemas/Decimal'
+        withdraw_fee:
+          $ref: '#/components/schemas/Decimal'
+        memo_required:
+          type: boolean
+        deposit_enabled:
+          type: boolean
+        withdraw_enabled:
+          type: boolean
+        version:
+          type: string
+    Asset:
+      type: object
+      properties:
+        asset_code:
+          type: string
+        name:
+          type: string
+        decimals:
+          type: integer
+        deposit_enabled:
+          type: boolean
+        withdraw_enabled:
+          type: boolean
+        trading_enabled:
+          type: boolean
+        risk_restricted:
+          type: boolean
+        networks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Network'
+        version:
+          type: string
+    Pair:
+      type: object
+      properties:
+        symbol:
+          type: string
+        base_asset:
+          type: string
+        quote_asset:
+          type: string
+        tick_size:
+          $ref: '#/components/schemas/Decimal'
+        lot_size:
+          $ref: '#/components/schemas/Decimal'
+        min_quantity:
+          $ref: '#/components/schemas/Decimal'
+        max_quantity:
+          $ref: '#/components/schemas/Decimal'
+        min_notional:
+          $ref: '#/components/schemas/Decimal'
+        price_band:
+          $ref: '#/components/schemas/Decimal'
+        fee_tier:
+          type: string
+        maker_fee_rate:
+          $ref: '#/components/schemas/Decimal'
+        taker_fee_rate:
+          $ref: '#/components/schemas/Decimal'
+        status:
+          type: string
+          enum: [PREPARE, TRADING, HALT, CANCEL_ONLY, DELISTED]
+        version:
+          type: string
+    Flag:
+      type: object
+      required: [key, enabled, description, version, updated_by, updated_at]
+      properties:
+        key:
+          type: string
+        enabled:
+          type: boolean
+        description:
+          type: string
+        rules:
+          description: Targeting rules (regions, statuses, allow lists), kept as they are by a switch.
+        version:
+          type: integer
+        updated_by:
+          type: string
+        updated_at:
+          type: [string, 'null']
+          format: date-time
+          description: Null for a known flag never set (off).
+    Approval:
+      type: object
+      required: [id, kind, payload, reason, status, requested_by, decided_by, result, created_at, decided_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [LEDGER_ADJUSTMENT]
+        payload:
+          type: object
+          description: For LEDGER_ADJUSTMENT user_id, asset and amount.
+          additionalProperties:
+            type: string
+        reason:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, EXECUTED, REJECTED, FAILED]
+        requested_by:
+          type: string
+          format: uuid
+          description: The requesting administrator's ID.
+        decided_by:
+          type: [string, 'null']
+        result:
+          type: string
+          description: The journal once executed, the ledger's refusal, or the rejection reason.
+        created_at:
+          type: string
+          format: date-time
+        decided_at:
+          type: [string, 'null']
+    AuditEntry:
+      type: object
+      required: [event_id, event_type, actor, target, occurred_at, payload]
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+          examples: [audit.v1.AdminActionPerformed]
+        actor:
+          type: string
+        target:
+          type: string
+        occurred_at:
+          type: string
+          format: date-time
+        payload:
+          description: The event as JSON.

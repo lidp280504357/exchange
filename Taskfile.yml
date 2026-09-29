@@ -62,7 +62,8 @@ tasks:
   test:integration:
     desc: 连同集成测试一起跑：只导出 .env 里的 TEST_*（测试服 exchange_test 库、Redis DB 15），需要联网
     cmds:
-      - eval "$(grep -E '^TEST_' .env | sed 's/^/export /')" && go test -race -count=1 ./...
+      # Migration tests round-trip every schema to the remote server: more than go test's default 10 minutes.
+      - eval "$(grep -E '^TEST_' .env | sed 's/^/export /')" && go test -race -count=1 -timeout 30m ./...
 
   test:cover:
     desc: 覆盖率汇总
@@ -119,9 +120,28 @@ tasks:
       - pnpm typecheck
       - pnpm test
 
+  admin:dev:
+    desc: 本机启动管理后台（Vite，/admin/v1 代理到测试服，http://localhost:5180/admin/）
+    dir: web/admin
+    cmds: [pnpm install --prefer-offline, pnpm dev]
+
+  admin:types:
+    desc: 由 api/admin/admin.yaml 重新生成管理后台的 TypeScript 类型
+    dir: web/admin
+    cmds: [pnpm api:types]
+
+  admin:check:
+    desc: 管理后台类型与契约一致、类型检查、单元测试
+    dir: web/admin
+    cmds:
+      - pnpm install --frozen-lockfile --prefer-offline --silent
+      - pnpm api:types >/dev/null && git diff --exit-code -- src/api/gen
+      - pnpm typecheck
+      - pnpm test
+
   ci:
     desc: 与 CI 相同的本地检查（不含 vuln）
-    deps: [fmt:check, mod:check, vet, lint, scripts:check, web:check]
+    deps: [fmt:check, mod:check, vet, lint, scripts:check, web:check, admin:check]
     cmds:
       - task: test
 
