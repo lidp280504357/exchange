@@ -76,4 +76,8 @@ eventually 10 "reduce-only is lifted" lifted
 call GET "/v1/market/$SYMBOL/mark-price" ""
 bid
 expect 202 - "an opening bid is accepted again"
+# The outage degraded every contract on the same index source: lift the rest.
+for other in $(derivatives states | awk 'NR > 1 && $2 == "true" {print $1}'); do
+  derivatives resume "$other" | sed 's/^/     /'
+done
 echo "contract degradation survived"
