@@ -45,10 +45,14 @@ const (
 // Kind tells the user's orders from the liquidation engine's.
 type Kind string
 
-// Kinds.
+// Kinds: the user's, the liquidation engine's, the synthetic orders of
+// an auto-deleveraging, and the orders a take-profit or stop-loss placed.
 const (
 	KindUser        Kind = "USER"
 	KindLiquidation Kind = "LIQUIDATION"
+	KindADL         Kind = "ADL"
+	KindTakeProfit  Kind = "TAKE_PROFIT"
+	KindStopLoss    Kind = "STOP_LOSS"
 )
 
 // Status of an order (appendix B, as spot).

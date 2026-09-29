@@ -82,6 +82,9 @@ func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, 
 		if err != nil {
 			return err
 		}
+		if byside(held)[o.PositionSide].Liquidating {
+			return domain.ErrLiquidating
+		}
 		active, err := r.Orders().Active(ctx, o.UserID, o.Symbol)
 		if err != nil {
 			return err

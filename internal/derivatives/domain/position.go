@@ -87,9 +87,16 @@ type Position struct {
 	RealizedPnL decimal.Decimal
 	Funding     decimal.Decimal
 	Fees        decimal.Decimal
-	Version     int64
-	OpenedAt    time.Time
-	UpdatedAt   time.Time
+	// Liquidating is set once the liquidation engine took the position
+	// over, until it is closed; LiquidationAttempts counts its orders.
+	Liquidating         bool
+	LiquidationAttempts int
+	LiquidationAt       time.Time
+	// WarnedAt is set while the margin is close to the maintenance margin.
+	WarnedAt  time.Time
+	Version   int64
+	OpenedAt  time.Time
+	UpdatedAt time.Time
 }
 
 // Flat reports whether the position is closed.

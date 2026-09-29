@@ -225,19 +225,33 @@ func (r orders) query(ctx context.Context, sql string, args ...any) ([]domain.Or
 type positions repos
 
 const positionColumns = `position_id, user_id, symbol, position_side, quantity, entry_cost, margin, margin_mode, leverage,
-	realized_pnl, funding, fees, version, opened_at, updated_at`
+	realized_pnl, funding, fees, version, opened_at, updated_at, liquidating, liquidation_attempts, liquidation_at, warned_at`
 
 func scanPosition(row pgx.Row) (domain.Position, error) {
 	var p domain.Position
-	var opened *time.Time
+	var opened, liquidated, warned *time.Time
 	if err := row.Scan(&p.ID, &p.UserID, &p.Symbol, &p.Side, &p.Qty, &p.EntryCost, &p.Margin, &p.MarginMode, &p.Leverage,
-		&p.RealizedPnL, &p.Funding, &p.Fees, &p.Version, &opened, &p.UpdatedAt); err != nil {
+		&p.RealizedPnL, &p.Funding, &p.Fees, &p.Version, &opened, &p.UpdatedAt, &p.Liquidating, &p.LiquidationAttempts,
+		&liquidated, &warned); err != nil {
 		return domain.Position{}, fmt.Errorf("scan position: %w", err)
 	}
-	if opened != nil {
-		p.OpenedAt = *opened
+	for _, t := range []struct {
+		dst *time.Time
+		src *time.Time
+	}{{&p.OpenedAt, opened}, {&p.LiquidationAt, liquidated}, {&p.WarnedAt, warned}} {
+		if t.src != nil {
+			*t.dst = *t.src
+		}
 	}
 	return p, nil
+}
+
+// nullTime stores a zero time as NULL.
+func nullTime(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }
 
 func (r positions) query(ctx context.Context, sql string, args ...any) ([]domain.Position, error) {
@@ -290,18 +304,14 @@ func (r positions) Save(ctx context.Context, p domain.Position) (domain.Position
 	if p.ID == "" {
 		p.ID = uuid.Must(uuid.NewV7()).String()
 	}
-	var opened *time.Time
-	if !p.OpenedAt.IsZero() {
-		opened = &p.OpenedAt
-	}
 	row := r.q.QueryRow(ctx, `INSERT INTO positions (`+positionColumns+`)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, $13, $14)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, $13, $14, $15, $16, $17, $18)
 		ON CONFLICT (user_id, symbol, position_side) DO UPDATE SET quantity = $5, entry_cost = $6, margin = $7, margin_mode = $8,
 			leverage = $9, realized_pnl = $10, funding = $11, fees = $12, version = positions.version + 1, opened_at = $13,
-			updated_at = $14
+			updated_at = $14, liquidating = $15, liquidation_attempts = $16, liquidation_at = $17, warned_at = $18
 		RETURNING `+positionColumns,
 		p.ID, p.UserID, p.Symbol, p.Side, p.Qty, p.EntryCost, p.Margin, p.MarginMode, p.Leverage, p.RealizedPnL, p.Funding, p.Fees,
-		opened, p.UpdatedAt)
+		nullTime(p.OpenedAt), p.UpdatedAt, p.Liquidating, p.LiquidationAttempts, nullTime(p.LiquidationAt), nullTime(p.WarnedAt))
 	return scanPosition(row)
 }
 
@@ -617,4 +627,28 @@ func (r funding) OfUser(ctx context.Context, userID, symbol, before string, limi
 		WHERE p.user_id = $1 AND ($2 = '' OR p.symbol = $2) AND p.settled_at IS NOT NULL
 			AND ($3::uuid IS NULL OR (p.funding_time, p.position_id) < ($4::timestamptz, $3::uuid))
 		ORDER BY p.funding_time DESC, p.position_id DESC LIMIT $5`, userID, symbol, beforeID, beforeTime, limit)
+}
+
+type cross repos
+
+func (r repos) Cross() ports.CrossRepo { return cross(r) }
+
+func (r cross) WarnedAt(ctx context.Context, userID string) (time.Time, error) {
+	var at *time.Time
+	err := r.q.QueryRow(ctx, `SELECT warned_at FROM cross_accounts WHERE user_id = $1`, userID).Scan(&at)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && at == nil) {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("load cross account: %w", err)
+	}
+	return *at, nil
+}
+
+func (r cross) SetWarnedAt(ctx context.Context, userID string, at time.Time) error {
+	if _, err := r.q.Exec(ctx, `INSERT INTO cross_accounts (user_id, warned_at) VALUES ($1, $2)
+		ON CONFLICT (user_id) DO UPDATE SET warned_at = $2, updated_at = now()`, userID, nullTime(at)); err != nil {
+		return fmt.Errorf("save cross account: %w", err)
+	}
+	return nil
 }

@@ -144,9 +144,11 @@ func (s *Service) applyFill(ctx context.Context, c domain.Contract, t Trade, sid
 		if err != nil {
 			return err
 		}
-		plan, err := domain.PlanFill(c, o, byside(held), domain.FillInput{
+		positions := byside(held)
+		liquidated := positions[o.PositionSide].Liquidating
+		plan, err := domain.PlanFill(c, o, positions, domain.FillInput{
 			TradeID: t.ID, Price: t.Price, Qty: t.Qty, Maker: maker, Seq: t.Seq, ExecutedAt: t.At,
-			Liquidation: o.Kind == domain.KindLiquidation,
+			Liquidation: o.Kind == domain.KindLiquidation, ADL: o.Kind == domain.KindADL,
 		})
 		if err != nil {
 			return err
@@ -184,6 +186,11 @@ func (s *Service) applyFill(ctx context.Context, c domain.Contract, t Trade, sid
 		}
 		if err := r.Emit(ctx, event.TopicDerivPosition, fillProto(plan.Fill), "user", userID); err != nil {
 			return err
+		}
+		if msg := liquidationEvent(o, plan.Fill, liquidated); msg != nil {
+			if err := r.Emit(ctx, event.TopicDerivLiquidation, msg, "user", userID); err != nil {
+				return err
+			}
 		}
 		if parked != nil {
 			move, target := plan.FreezeMove()

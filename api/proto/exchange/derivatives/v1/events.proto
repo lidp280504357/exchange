@@ -8,9 +8,11 @@ import "google/protobuf/timestamp.proto";
 // Amounts are decimal strings in the settlement asset (USDT); quantities
 // in the base asset.
 //
-//   derivatives.position.events  PositionOpened, PositionChanged,
-//                                PositionClosed, MarginAdjusted,
-//                                LeverageChanged, FundingPaid, FillSettled
+//   derivatives.position.events     PositionOpened, PositionChanged,
+//                                   PositionClosed, MarginAdjusted,
+//                                   LeverageChanged, FundingPaid, FillSettled
+//   derivatives.liquidation.events  LiquidationWarning, LiquidationStarted,
+//                                   LiquidationFilled, AdlExecuted
 //
 // Order acceptance and rejection go on derivatives.order.events with the
 // engine's order events, as exchange.order.v1 messages.
@@ -103,4 +105,58 @@ message FillSettled {
   string realized_pnl = 12;
   bool liquidation = 13;
   google.protobuf.Timestamp executed_at = 14;
+}
+
+// Liquidations (§11.7) on derivatives.liquidation.events, keyed by user_id.
+
+// LiquidationWarning: a position's (isolated) or the cross positions'
+// margin balance is at most 1.2 times the maintenance margin.
+message LiquidationWarning {
+  string user_id = 1;
+  // The contract of an isolated position; empty for the cross account.
+  string symbol = 2;
+  string position_side = 3;
+  bool cross = 4;
+  string margin_balance = 5;
+  string maintenance_margin = 6;
+  google.protobuf.Timestamp at = 7;
+}
+
+// LiquidationStarted: the liquidation engine took a position over (its
+// orders are canceled, it closes it from now on).
+message LiquidationStarted {
+  Position position = 1;
+  bool cross = 2;
+  string mark_price = 3;
+  // The price the isolated position's margin runs out at.
+  string bankruptcy_price = 4;
+  string margin_balance = 5;
+  string maintenance_margin = 6;
+}
+
+// LiquidationFilled: a liquidation order (or an auto-deleveraging) closed
+// part of a taken-over position.
+message LiquidationFilled {
+  string user_id = 1;
+  string symbol = 2;
+  string position_side = 3;
+  string trade_id = 4;
+  string price = 5;
+  string quantity = 6;
+  string realized_pnl = 7;
+  // What the insurance fund paid of the loss.
+  string insurance_paid = 8;
+  bool adl = 9;
+}
+
+// AdlExecuted: an auto-deleveraging closed part of a counterparty's
+// position at the liquidated position's price.
+message AdlExecuted {
+  string user_id = 1;
+  string symbol = 2;
+  string position_side = 3;
+  string trade_id = 4;
+  string price = 5;
+  string quantity = 6;
+  string realized_pnl = 7;
 }

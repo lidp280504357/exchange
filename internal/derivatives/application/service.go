@@ -39,6 +39,9 @@ type Service struct {
 	Log     *slog.Logger
 	Now     func() time.Time
 	Metrics *Metrics
+	// Started is when the service started: missing mark prices count as
+	// stale only some time after it.
+	Started time.Time
 
 	// fills serializes the engine's fills with the reconciliation, which
 	// must not see a fill half booked.
@@ -51,6 +54,8 @@ type Metrics struct {
 	Parked        prometheus.Counter
 	Reconciled    *prometheus.GaugeVec
 	LastReconcile prometheus.Gauge
+	// Liquidations counts the steps: warning, takeover, order, adl.
+	Liquidations *prometheus.CounterVec
 }
 
 // NewMetrics registers the metrics with reg.
@@ -68,8 +73,14 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		LastReconcile: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "derivatives_reconcile_last_success_timestamp_seconds", Help: "When the last reconciliation completed.",
 		}),
+		Liquidations: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "derivatives_liquidation_steps_total", Help: "Liquidation steps: warning, takeover, order, adl.",
+		}, []string{"step"}),
 	}
-	reg.MustRegister(m.Fills, m.Parked, m.Reconciled, m.LastReconcile)
+	for _, step := range []string{"warning", "takeover", "order", "adl"} {
+		m.Liquidations.WithLabelValues(step)
+	}
+	reg.MustRegister(m.Fills, m.Parked, m.Reconciled, m.LastReconcile, m.Liquidations)
 	return m
 }
 

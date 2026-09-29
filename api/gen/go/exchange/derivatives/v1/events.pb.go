@@ -684,6 +684,393 @@ func (x *FillSettled) GetExecutedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+// LiquidationWarning: a position's (isolated) or the cross positions'
+// margin balance is at most 1.2 times the maintenance margin.
+type LiquidationWarning struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	UserId string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// The contract of an isolated position; empty for the cross account.
+	Symbol            string                 `protobuf:"bytes,2,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	PositionSide      string                 `protobuf:"bytes,3,opt,name=position_side,json=positionSide,proto3" json:"position_side,omitempty"`
+	Cross             bool                   `protobuf:"varint,4,opt,name=cross,proto3" json:"cross,omitempty"`
+	MarginBalance     string                 `protobuf:"bytes,5,opt,name=margin_balance,json=marginBalance,proto3" json:"margin_balance,omitempty"`
+	MaintenanceMargin string                 `protobuf:"bytes,6,opt,name=maintenance_margin,json=maintenanceMargin,proto3" json:"maintenance_margin,omitempty"`
+	At                *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=at,proto3" json:"at,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *LiquidationWarning) Reset() {
+	*x = LiquidationWarning{}
+	mi := &file_exchange_derivatives_v1_events_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LiquidationWarning) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LiquidationWarning) ProtoMessage() {}
+
+func (x *LiquidationWarning) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_derivatives_v1_events_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LiquidationWarning.ProtoReflect.Descriptor instead.
+func (*LiquidationWarning) Descriptor() ([]byte, []int) {
+	return file_exchange_derivatives_v1_events_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *LiquidationWarning) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *LiquidationWarning) GetSymbol() string {
+	if x != nil {
+		return x.Symbol
+	}
+	return ""
+}
+
+func (x *LiquidationWarning) GetPositionSide() string {
+	if x != nil {
+		return x.PositionSide
+	}
+	return ""
+}
+
+func (x *LiquidationWarning) GetCross() bool {
+	if x != nil {
+		return x.Cross
+	}
+	return false
+}
+
+func (x *LiquidationWarning) GetMarginBalance() string {
+	if x != nil {
+		return x.MarginBalance
+	}
+	return ""
+}
+
+func (x *LiquidationWarning) GetMaintenanceMargin() string {
+	if x != nil {
+		return x.MaintenanceMargin
+	}
+	return ""
+}
+
+func (x *LiquidationWarning) GetAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.At
+	}
+	return nil
+}
+
+// LiquidationStarted: the liquidation engine took a position over (its
+// orders are canceled, it closes it from now on).
+type LiquidationStarted struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Position  *Position              `protobuf:"bytes,1,opt,name=position,proto3" json:"position,omitempty"`
+	Cross     bool                   `protobuf:"varint,2,opt,name=cross,proto3" json:"cross,omitempty"`
+	MarkPrice string                 `protobuf:"bytes,3,opt,name=mark_price,json=markPrice,proto3" json:"mark_price,omitempty"`
+	// The price the isolated position's margin runs out at.
+	BankruptcyPrice   string `protobuf:"bytes,4,opt,name=bankruptcy_price,json=bankruptcyPrice,proto3" json:"bankruptcy_price,omitempty"`
+	MarginBalance     string `protobuf:"bytes,5,opt,name=margin_balance,json=marginBalance,proto3" json:"margin_balance,omitempty"`
+	MaintenanceMargin string `protobuf:"bytes,6,opt,name=maintenance_margin,json=maintenanceMargin,proto3" json:"maintenance_margin,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *LiquidationStarted) Reset() {
+	*x = LiquidationStarted{}
+	mi := &file_exchange_derivatives_v1_events_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LiquidationStarted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LiquidationStarted) ProtoMessage() {}
+
+func (x *LiquidationStarted) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_derivatives_v1_events_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LiquidationStarted.ProtoReflect.Descriptor instead.
+func (*LiquidationStarted) Descriptor() ([]byte, []int) {
+	return file_exchange_derivatives_v1_events_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *LiquidationStarted) GetPosition() *Position {
+	if x != nil {
+		return x.Position
+	}
+	return nil
+}
+
+func (x *LiquidationStarted) GetCross() bool {
+	if x != nil {
+		return x.Cross
+	}
+	return false
+}
+
+func (x *LiquidationStarted) GetMarkPrice() string {
+	if x != nil {
+		return x.MarkPrice
+	}
+	return ""
+}
+
+func (x *LiquidationStarted) GetBankruptcyPrice() string {
+	if x != nil {
+		return x.BankruptcyPrice
+	}
+	return ""
+}
+
+func (x *LiquidationStarted) GetMarginBalance() string {
+	if x != nil {
+		return x.MarginBalance
+	}
+	return ""
+}
+
+func (x *LiquidationStarted) GetMaintenanceMargin() string {
+	if x != nil {
+		return x.MaintenanceMargin
+	}
+	return ""
+}
+
+// LiquidationFilled: a liquidation order (or an auto-deleveraging) closed
+// part of a taken-over position.
+type LiquidationFilled struct {
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	UserId       string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Symbol       string                 `protobuf:"bytes,2,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	PositionSide string                 `protobuf:"bytes,3,opt,name=position_side,json=positionSide,proto3" json:"position_side,omitempty"`
+	TradeId      string                 `protobuf:"bytes,4,opt,name=trade_id,json=tradeId,proto3" json:"trade_id,omitempty"`
+	Price        string                 `protobuf:"bytes,5,opt,name=price,proto3" json:"price,omitempty"`
+	Quantity     string                 `protobuf:"bytes,6,opt,name=quantity,proto3" json:"quantity,omitempty"`
+	RealizedPnl  string                 `protobuf:"bytes,7,opt,name=realized_pnl,json=realizedPnl,proto3" json:"realized_pnl,omitempty"`
+	// What the insurance fund paid of the loss.
+	InsurancePaid string `protobuf:"bytes,8,opt,name=insurance_paid,json=insurancePaid,proto3" json:"insurance_paid,omitempty"`
+	Adl           bool   `protobuf:"varint,9,opt,name=adl,proto3" json:"adl,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LiquidationFilled) Reset() {
+	*x = LiquidationFilled{}
+	mi := &file_exchange_derivatives_v1_events_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LiquidationFilled) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LiquidationFilled) ProtoMessage() {}
+
+func (x *LiquidationFilled) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_derivatives_v1_events_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LiquidationFilled.ProtoReflect.Descriptor instead.
+func (*LiquidationFilled) Descriptor() ([]byte, []int) {
+	return file_exchange_derivatives_v1_events_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *LiquidationFilled) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *LiquidationFilled) GetSymbol() string {
+	if x != nil {
+		return x.Symbol
+	}
+	return ""
+}
+
+func (x *LiquidationFilled) GetPositionSide() string {
+	if x != nil {
+		return x.PositionSide
+	}
+	return ""
+}
+
+func (x *LiquidationFilled) GetTradeId() string {
+	if x != nil {
+		return x.TradeId
+	}
+	return ""
+}
+
+func (x *LiquidationFilled) GetPrice() string {
+	if x != nil {
+		return x.Price
+	}
+	return ""
+}
+
+func (x *LiquidationFilled) GetQuantity() string {
+	if x != nil {
+		return x.Quantity
+	}
+	return ""
+}
+
+func (x *LiquidationFilled) GetRealizedPnl() string {
+	if x != nil {
+		return x.RealizedPnl
+	}
+	return ""
+}
+
+func (x *LiquidationFilled) GetInsurancePaid() string {
+	if x != nil {
+		return x.InsurancePaid
+	}
+	return ""
+}
+
+func (x *LiquidationFilled) GetAdl() bool {
+	if x != nil {
+		return x.Adl
+	}
+	return false
+}
+
+// AdlExecuted: an auto-deleveraging closed part of a counterparty's
+// position at the liquidated position's price.
+type AdlExecuted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Symbol        string                 `protobuf:"bytes,2,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	PositionSide  string                 `protobuf:"bytes,3,opt,name=position_side,json=positionSide,proto3" json:"position_side,omitempty"`
+	TradeId       string                 `protobuf:"bytes,4,opt,name=trade_id,json=tradeId,proto3" json:"trade_id,omitempty"`
+	Price         string                 `protobuf:"bytes,5,opt,name=price,proto3" json:"price,omitempty"`
+	Quantity      string                 `protobuf:"bytes,6,opt,name=quantity,proto3" json:"quantity,omitempty"`
+	RealizedPnl   string                 `protobuf:"bytes,7,opt,name=realized_pnl,json=realizedPnl,proto3" json:"realized_pnl,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdlExecuted) Reset() {
+	*x = AdlExecuted{}
+	mi := &file_exchange_derivatives_v1_events_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdlExecuted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdlExecuted) ProtoMessage() {}
+
+func (x *AdlExecuted) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_derivatives_v1_events_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdlExecuted.ProtoReflect.Descriptor instead.
+func (*AdlExecuted) Descriptor() ([]byte, []int) {
+	return file_exchange_derivatives_v1_events_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *AdlExecuted) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *AdlExecuted) GetSymbol() string {
+	if x != nil {
+		return x.Symbol
+	}
+	return ""
+}
+
+func (x *AdlExecuted) GetPositionSide() string {
+	if x != nil {
+		return x.PositionSide
+	}
+	return ""
+}
+
+func (x *AdlExecuted) GetTradeId() string {
+	if x != nil {
+		return x.TradeId
+	}
+	return ""
+}
+
+func (x *AdlExecuted) GetPrice() string {
+	if x != nil {
+		return x.Price
+	}
+	return ""
+}
+
+func (x *AdlExecuted) GetQuantity() string {
+	if x != nil {
+		return x.Quantity
+	}
+	return ""
+}
+
+func (x *AdlExecuted) GetRealizedPnl() string {
+	if x != nil {
+		return x.RealizedPnl
+	}
+	return ""
+}
+
 var File_exchange_derivatives_v1_events_proto protoreflect.FileDescriptor
 
 const file_exchange_derivatives_v1_events_proto_rawDesc = "" +
@@ -748,7 +1135,41 @@ const file_exchange_derivatives_v1_events_proto_rawDesc = "" +
 	"\frealized_pnl\x18\f \x01(\tR\vrealizedPnl\x12 \n" +
 	"\vliquidation\x18\r \x01(\bR\vliquidation\x12;\n" +
 	"\vexecuted_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"executedAtB\xfc\x01\n" +
+	"executedAt\"\x82\x02\n" +
+	"\x12LiquidationWarning\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x16\n" +
+	"\x06symbol\x18\x02 \x01(\tR\x06symbol\x12#\n" +
+	"\rposition_side\x18\x03 \x01(\tR\fpositionSide\x12\x14\n" +
+	"\x05cross\x18\x04 \x01(\bR\x05cross\x12%\n" +
+	"\x0emargin_balance\x18\x05 \x01(\tR\rmarginBalance\x12-\n" +
+	"\x12maintenance_margin\x18\x06 \x01(\tR\x11maintenanceMargin\x12*\n" +
+	"\x02at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\x02at\"\x89\x02\n" +
+	"\x12LiquidationStarted\x12=\n" +
+	"\bposition\x18\x01 \x01(\v2!.exchange.derivatives.v1.PositionR\bposition\x12\x14\n" +
+	"\x05cross\x18\x02 \x01(\bR\x05cross\x12\x1d\n" +
+	"\n" +
+	"mark_price\x18\x03 \x01(\tR\tmarkPrice\x12)\n" +
+	"\x10bankruptcy_price\x18\x04 \x01(\tR\x0fbankruptcyPrice\x12%\n" +
+	"\x0emargin_balance\x18\x05 \x01(\tR\rmarginBalance\x12-\n" +
+	"\x12maintenance_margin\x18\x06 \x01(\tR\x11maintenanceMargin\"\x92\x02\n" +
+	"\x11LiquidationFilled\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x16\n" +
+	"\x06symbol\x18\x02 \x01(\tR\x06symbol\x12#\n" +
+	"\rposition_side\x18\x03 \x01(\tR\fpositionSide\x12\x19\n" +
+	"\btrade_id\x18\x04 \x01(\tR\atradeId\x12\x14\n" +
+	"\x05price\x18\x05 \x01(\tR\x05price\x12\x1a\n" +
+	"\bquantity\x18\x06 \x01(\tR\bquantity\x12!\n" +
+	"\frealized_pnl\x18\a \x01(\tR\vrealizedPnl\x12%\n" +
+	"\x0einsurance_paid\x18\b \x01(\tR\rinsurancePaid\x12\x10\n" +
+	"\x03adl\x18\t \x01(\bR\x03adl\"\xd3\x01\n" +
+	"\vAdlExecuted\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x16\n" +
+	"\x06symbol\x18\x02 \x01(\tR\x06symbol\x12#\n" +
+	"\rposition_side\x18\x03 \x01(\tR\fpositionSide\x12\x19\n" +
+	"\btrade_id\x18\x04 \x01(\tR\atradeId\x12\x14\n" +
+	"\x05price\x18\x05 \x01(\tR\x05price\x12\x1a\n" +
+	"\bquantity\x18\x06 \x01(\tR\bquantity\x12!\n" +
+	"\frealized_pnl\x18\a \x01(\tR\vrealizedPnlB\xfc\x01\n" +
 	"\x1bcom.exchange.derivatives.v1B\vEventsProtoP\x01ZRgithub.com/lidp280504357/exchange/api/gen/go/exchange/derivatives/v1;derivativesv1\xa2\x02\x03EDX\xaa\x02\x17Exchange.Derivatives.V1\xca\x02\x17Exchange\\Derivatives\\V1\xe2\x02#Exchange\\Derivatives\\V1\\GPBMetadata\xea\x02\x19Exchange::Derivatives::V1b\x06proto3"
 
 var (
@@ -763,7 +1184,7 @@ func file_exchange_derivatives_v1_events_proto_rawDescGZIP() []byte {
 	return file_exchange_derivatives_v1_events_proto_rawDescData
 }
 
-var file_exchange_derivatives_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_exchange_derivatives_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_exchange_derivatives_v1_events_proto_goTypes = []any{
 	(*Position)(nil),              // 0: exchange.derivatives.v1.Position
 	(*PositionOpened)(nil),        // 1: exchange.derivatives.v1.PositionOpened
@@ -773,21 +1194,27 @@ var file_exchange_derivatives_v1_events_proto_goTypes = []any{
 	(*LeverageChanged)(nil),       // 5: exchange.derivatives.v1.LeverageChanged
 	(*FundingPaid)(nil),           // 6: exchange.derivatives.v1.FundingPaid
 	(*FillSettled)(nil),           // 7: exchange.derivatives.v1.FillSettled
-	(*timestamppb.Timestamp)(nil), // 8: google.protobuf.Timestamp
+	(*LiquidationWarning)(nil),    // 8: exchange.derivatives.v1.LiquidationWarning
+	(*LiquidationStarted)(nil),    // 9: exchange.derivatives.v1.LiquidationStarted
+	(*LiquidationFilled)(nil),     // 10: exchange.derivatives.v1.LiquidationFilled
+	(*AdlExecuted)(nil),           // 11: exchange.derivatives.v1.AdlExecuted
+	(*timestamppb.Timestamp)(nil), // 12: google.protobuf.Timestamp
 }
 var file_exchange_derivatives_v1_events_proto_depIdxs = []int32{
-	0, // 0: exchange.derivatives.v1.PositionOpened.position:type_name -> exchange.derivatives.v1.Position
-	0, // 1: exchange.derivatives.v1.PositionChanged.position:type_name -> exchange.derivatives.v1.Position
-	0, // 2: exchange.derivatives.v1.PositionClosed.position:type_name -> exchange.derivatives.v1.Position
-	0, // 3: exchange.derivatives.v1.MarginAdjusted.position:type_name -> exchange.derivatives.v1.Position
-	0, // 4: exchange.derivatives.v1.FundingPaid.position:type_name -> exchange.derivatives.v1.Position
-	8, // 5: exchange.derivatives.v1.FundingPaid.funding_time:type_name -> google.protobuf.Timestamp
-	8, // 6: exchange.derivatives.v1.FillSettled.executed_at:type_name -> google.protobuf.Timestamp
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	0,  // 0: exchange.derivatives.v1.PositionOpened.position:type_name -> exchange.derivatives.v1.Position
+	0,  // 1: exchange.derivatives.v1.PositionChanged.position:type_name -> exchange.derivatives.v1.Position
+	0,  // 2: exchange.derivatives.v1.PositionClosed.position:type_name -> exchange.derivatives.v1.Position
+	0,  // 3: exchange.derivatives.v1.MarginAdjusted.position:type_name -> exchange.derivatives.v1.Position
+	0,  // 4: exchange.derivatives.v1.FundingPaid.position:type_name -> exchange.derivatives.v1.Position
+	12, // 5: exchange.derivatives.v1.FundingPaid.funding_time:type_name -> google.protobuf.Timestamp
+	12, // 6: exchange.derivatives.v1.FillSettled.executed_at:type_name -> google.protobuf.Timestamp
+	12, // 7: exchange.derivatives.v1.LiquidationWarning.at:type_name -> google.protobuf.Timestamp
+	0,  // 8: exchange.derivatives.v1.LiquidationStarted.position:type_name -> exchange.derivatives.v1.Position
+	9,  // [9:9] is the sub-list for method output_type
+	9,  // [9:9] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_exchange_derivatives_v1_events_proto_init() }
@@ -801,7 +1228,7 @@ func file_exchange_derivatives_v1_events_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_derivatives_v1_events_proto_rawDesc), len(file_exchange_derivatives_v1_events_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

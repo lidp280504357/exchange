@@ -33,6 +33,7 @@ type Repos interface {
 	Contracts() ContractStateRepo
 	Runs() RunRepo
 	Funding() FundingRepo
+	Cross() CrossRepo
 	// Emit queues an event (or an engine command) on topic, keyed by
 	// aggregateID.
 	Emit(ctx context.Context, topic string, msg proto.Message, aggregateType, aggregateID string) error
@@ -130,6 +131,14 @@ type FundingRates interface {
 	// Rate returns the rate and mark price a contract's period ending at
 	// settled at; found is false while it is not settled.
 	Rate(ctx context.Context, symbol string, at time.Time) (rate, mark decimal.Decimal, found bool, err error)
+}
+
+// CrossRepo stores the warnings of cross accounts.
+type CrossRepo interface {
+	// WarnedAt returns when the user's cross account was warned, zero when
+	// it is not.
+	WarnedAt(ctx context.Context, userID string) (time.Time, error)
+	SetWarnedAt(ctx context.Context, userID string, at time.Time) error
 }
 
 // RunRepo records the reconciliation runs.

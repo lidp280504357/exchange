@@ -106,6 +106,7 @@ func setup(ctx context.Context, a *app.App) error {
 		Log:         a.Logger(),
 		Now:         time.Now,
 		Metrics:     application.NewMetrics(a.Metrics()),
+		Started:     time.Now(),
 	}
 	// The contract engine's order updates and trades, one at a time in
 	// order: a failure retries, never skips.
@@ -124,6 +125,20 @@ func setup(ctx context.Context, a *app.App) error {
 	}
 	a.Add("recovery", app.Loop(recoverLoop(a, svc)))
 	a.Add("funding", app.Loop(fundingLoop(a, svc)))
+	a.Add("liquidation", app.Loop(func(ctx context.Context) error {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-ticker.C:
+			}
+			if err := svc.Monitor(ctx); err != nil && ctx.Err() == nil {
+				a.Logger().WarnContext(ctx, "margin monitor failed", "error", err)
+			}
+		}
+	}))
 	rc := &application.Reconciler{Svc: svc, Asset: cfg.SettlementAsset}
 	a.Add("reconcile", app.Loop(reconcileLoop(a, rc, cfg.ReconcileInterval)))
 

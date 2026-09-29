@@ -63,9 +63,33 @@ SELECT symbol, funding_time, status, funding_rate, mark_price, positions FROM de
 SELECT count(*) FILTER (WHERE settled_at IS NULL) AS waiting, sum(amount) AS net FROM derivatives.funding_payments WHERE funding_time = '...';
 ```
 
+## 强平与 ADL
+
+实施计划 §7.3 任务 7。监控循环每秒按新鲜标记价检查一次（`Monitor`）：
+
+- **计量**：逐仓仓位单独算，保证金余额 = 仓位保证金 + 未实现盈亏；全仓按用户合并算，权益 = 可用余额 + 全仓仓位保证金 + 全仓订单预留 + 全仓未实现盈亏（要向账本查余额；某个全仓合约没有新鲜标记价时本轮不算这个用户）。维持保证金 = 名义价值 × 该档维持保证金率（强平手续费已并入）。
+- **预警**：保证金余额 ≤ 1.2 × 维持保证金时发 `LiquidationWarning`（WebSocket `risk` 频道 `event=WARNING`），同一段只发一次，回到 1.3 倍以上才重置（逐仓记在仓位的 `warned_at`，全仓记在 `derivatives.cross_accounts`）。
+- **接管**：保证金余额 ≤ 维持保证金时，撤掉相关挂单（逐仓：该仓位的挂单；全仓：该用户所有全仓挂单），仓位标为 `liquidating`，发 `LiquidationStarted`（`risk` 频道 `event=STARTED`）。此后用户不能再对该仓位下单、调保证金或杠杆（`DERIV_POSITION_LIQUIDATING`）。
+- **强平单**：每秒检查，没有进行中的强平单就下一张 IOC 限价单（`kind=LIQUIDATION`，平掉剩余数量）：逐仓以破产价、全仓以标记价为基准，向不利方向偏 0.5%（`domain.Slippage`），取到 tick。成交按强平结算：逐仓亏损最多到保证金、剩余保证金进保险基金（`INSURANCE_CONTRIBUTION`）、缺口由保险基金补，分录类型 `LIQUIDATION_SETTLE`；全仓亏损从可用余额付，不够的由保险基金补。每次成交发 `LiquidationFilled`（`event=LIQUIDATED`）。
+- **ADL**：强平单下了 3 次（`MaxLiquidationAttempts`）仍没平完，剩余部分对对手方执行自动减仓：同合约反方向、未在强平中的其他用户仓位按"盈利率（未实现盈亏 / 入场成本）× 有效杠杆（名义价值 / 保证金余额）"从高到低排队，按破产价（逐仓）或标记价（全仓）在订单簿之外成交，无手续费，分录类型 `ADL_SETTLE`。被减仓的一方收到 `AdlExecuted`（`event=ADL`）。
+- 仓位平完后 `liquidating`、预警标记自动清除。
+
+指标：`derivatives_liquidation_steps_total{step}`（warning、takeover、order、adl）。日志：`position taken over for liquidation`、`position auto-deleveraged`。
+
+```sql
+SELECT user_id, symbol, position_side, quantity, margin, liquidating, liquidation_attempts, liquidation_at, warned_at
+FROM derivatives.positions WHERE liquidating OR warned_at IS NOT NULL;
+SELECT order_id, user_id, side, price, quantity, status, filled_quantity FROM derivatives.orders WHERE kind IN ('LIQUIDATION', 'ADL') ORDER BY order_id DESC LIMIT 20;
+```
+
 ## 只减仓（降级）
 
-market-data-service 连续 10 秒算不出某合约的标记价时发 `risk.events` 的 `SystemDegraded`，合约服务（消费组 `derivatives-service-risk`）把该合约置为只减仓（`derivatives.contract_states`），只收平仓单。标记价恢复后也**不会**自动解除，需人工确认：
+两种情况会把合约置为只减仓（`derivatives.contract_states`），只收平仓单：
+
+- market-data-service 连续 10 秒算不出该合约的标记价（价源不足），发 `risk.events` 的 `SystemDegraded`，合约服务的消费组 `derivatives-service-risk` 收到后置位；
+- 合约服务自己发现：有未平仓位的合约，标记价已超过 10 秒没更新（服务启动 30 秒后才判断），原因 `MARK_PRICE_STALE`。
+
+"风控服务不可用"这一条暂不适用：合约服务不依赖 risk-service 做同步检查。标记价恢复后也**不会**自动解除，需人工确认：
 
 ```bash
 ssh exchange sudo docker exec exchange-infra-derivatives-service-1 /app/exchangectl derivatives states

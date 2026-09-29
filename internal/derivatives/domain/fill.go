@@ -63,6 +63,8 @@ type FillInput struct {
 	// Liquidation books the fill as a liquidation: an isolated position's
 	// margin left after the loss and fee goes to the insurance fund.
 	Liquidation bool
+	// ADL books it as an auto-deleveraging (ADL_SETTLE).
+	ADL bool
 }
 
 // Fill is one side of a trade as its owner sees it.
@@ -206,7 +208,10 @@ func PlanFill(c Contract, o Order, held map[PositionSide]Position, in FillInput)
 			pnl = cost.Sub(proceeds)
 		}
 		entry := EntryRealizedPnL
-		if in.Liquidation {
+		switch {
+		case in.ADL:
+			entry = EntryADLSettle
+		case in.Liquidation:
 			entry = EntryLiquidationSettle
 		}
 		feeHere := decimal.Zero
@@ -259,6 +264,9 @@ func PlanFill(c Contract, o Order, held map[PositionSide]Position, in FillInput)
 		}
 		pos.EntryCost, pos.Margin = pos.EntryCost.Sub(cost), pos.Margin.Sub(margin)
 		pos.RealizedPnL = pos.RealizedPnL.Add(pnl)
+		if pos.Qty.IsZero() { // closed: the liquidation and warning are over
+			pos.Liquidating, pos.LiquidationAttempts, pos.LiquidationAt, pos.WarnedAt = false, 0, time.Time{}, time.Time{}
+		}
 		changed[reduces] = pos
 		plan.Fill.RealizedPnL = pnl
 	} else if release.IsPositive() {

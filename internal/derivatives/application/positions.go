@@ -106,6 +106,9 @@ func (s *Service) UpdateSettings(ctx context.Context, userID, symbol string, ch 
 		open := len(active) > 0
 		for _, p := range positions {
 			open = open || !p.Flat()
+			if p.Liquidating {
+				return domain.ErrLiquidating
+			}
 		}
 		modeChange := (ch.PositionMode != nil && *ch.PositionMode != set.PositionMode) ||
 			(ch.MarginMode != nil && *ch.MarginMode != set.MarginMode)
@@ -219,6 +222,9 @@ func (s *Service) AdjustMargin(ctx context.Context, userID, symbol string, side 
 		pos, ok := byside(held)[side]
 		if !ok {
 			return domain.ErrNoPosition
+		}
+		if pos.Liquidating {
+			return domain.ErrLiquidating
 		}
 		next, err := domain.AdjustMargin(c, pos, amount, mark)
 		if err != nil {

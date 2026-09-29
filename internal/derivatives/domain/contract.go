@@ -97,7 +97,9 @@ var (
 		"a reduce-only order must not exceed the position it reduces")
 	ErrSettingsLocked = apperr.New(apperr.KindConflict, "DERIV_SETTINGS_LOCKED",
 		"close the contract's positions and cancel its orders first")
-	ErrNoPosition     = apperr.New(apperr.KindUnprocessable, "DERIV_NO_POSITION", "there is no such position")
+	ErrNoPosition  = apperr.New(apperr.KindUnprocessable, "DERIV_NO_POSITION", "there is no such position")
+	ErrLiquidating = apperr.New(apperr.KindConflict, "DERIV_POSITION_LIQUIDATING",
+		"the position is being liquidated")
 	ErrMarginTooLarge = apperr.New(apperr.KindUnprocessable, "DERIV_MARGIN_REDUCE_TOO_LARGE",
 		"the position would keep less than its initial margin")
 )

@@ -22,7 +22,7 @@ import (
 var WSTopics = []string{
 	"ledger.events", "notification.events", "order.events", "trade.events", "market.depth", "market.candle.events",
 	"wallet.deposit.events", "wallet.withdrawal.events", "derivatives.trade.events", "derivatives.market.depth",
-	"derivatives.order.events", "derivatives.position.events",
+	"derivatives.order.events", "derivatives.position.events", "derivatives.liquidation.events",
 }
 
 type balanceData struct {
@@ -99,6 +99,23 @@ type positionData struct {
 	// Amount is the margin added (MARGIN) or the funding received (FUNDING,
 	// negative when paid).
 	Amount string `json:"amount,omitempty"`
+}
+
+// riskData is a liquidation step on "risk": event is WARNING, STARTED,
+// LIQUIDATED (a liquidation order or deleveraging closed some of it) or
+// ADL (a position of the user was deleveraged against a liquidation).
+type riskData struct {
+	Event             string `json:"event"`
+	Symbol            string `json:"symbol,omitempty"`
+	PositionSide      string `json:"position_side,omitempty"`
+	Cross             bool   `json:"cross,omitempty"`
+	MarginBalance     string `json:"margin_balance,omitempty"`
+	MaintenanceMargin string `json:"maintenance_margin,omitempty"`
+	MarkPrice         string `json:"mark_price,omitempty"`
+	TradeID           string `json:"trade_id,omitempty"`
+	Price             string `json:"price,omitempty"`
+	Quantity          string `json:"quantity,omitempty"`
+	RealizedPnL       string `json:"realized_pnl,omitempty"`
 }
 
 func positionOf(p *derivativesv1.Position, ev string) positionData {
@@ -407,8 +424,46 @@ func derivativesOf(h *Hub, p interface {
 		leverage derivativesv1.LeverageChanged
 		funding  derivativesv1.FundingPaid
 		fill     derivativesv1.FillSettled
+		warning  derivativesv1.LiquidationWarning
+		started  derivativesv1.LiquidationStarted
+		liquid   derivativesv1.LiquidationFilled
+		adl      derivativesv1.AdlExecuted
 	)
 	switch {
+	case p.MessageIs(&warning):
+		if err := p.UnmarshalTo(&warning); err != nil {
+			return true, err
+		}
+		h.Publish(warning.GetUserId(), "risk", riskData{
+			Event: "WARNING", Symbol: warning.GetSymbol(), PositionSide: warning.GetPositionSide(), Cross: warning.GetCross(),
+			MarginBalance: warning.GetMarginBalance(), MaintenanceMargin: warning.GetMaintenanceMargin(),
+		})
+	case p.MessageIs(&started):
+		if err := p.UnmarshalTo(&started); err != nil {
+			return true, err
+		}
+		pos := started.GetPosition()
+		h.Publish(pos.GetUserId(), "risk", riskData{
+			Event: "STARTED", Symbol: pos.GetSymbol(), PositionSide: pos.GetPositionSide(), Cross: started.GetCross(),
+			MarginBalance: started.GetMarginBalance(), MaintenanceMargin: started.GetMaintenanceMargin(), MarkPrice: started.GetMarkPrice(),
+			Quantity: pos.GetQuantity(),
+		})
+	case p.MessageIs(&liquid):
+		if err := p.UnmarshalTo(&liquid); err != nil {
+			return true, err
+		}
+		h.Publish(liquid.GetUserId(), "risk", riskData{
+			Event: "LIQUIDATED", Symbol: liquid.GetSymbol(), PositionSide: liquid.GetPositionSide(), TradeID: liquid.GetTradeId(),
+			Price: liquid.GetPrice(), Quantity: liquid.GetQuantity(), RealizedPnL: liquid.GetRealizedPnl(),
+		})
+	case p.MessageIs(&adl):
+		if err := p.UnmarshalTo(&adl); err != nil {
+			return true, err
+		}
+		h.Publish(adl.GetUserId(), "risk", riskData{
+			Event: "ADL", Symbol: adl.GetSymbol(), PositionSide: adl.GetPositionSide(), TradeID: adl.GetTradeId(), Price: adl.GetPrice(),
+			Quantity: adl.GetQuantity(), RealizedPnL: adl.GetRealizedPnl(),
+		})
 	case p.MessageIs(&opened):
 		if err := p.UnmarshalTo(&opened); err != nil {
 			return true, err

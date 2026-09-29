@@ -608,3 +608,171 @@ func TestFundingSettlesAtTheSettlementMark(t *testing.T) {
 	r.svc.Now = time.Now
 	r.reconcile(t)
 }
+
+// liquidationSetup opens Bob's isolated 50x long of 0.5 against Alice's
+// cross short, both at 60000: Bob's margin is 600, his bankruptcy price
+// 58800; at the first tier (mmr 0.004) he is warned at or below about
+// 59083 and liquidated at or below about 59036.
+func liquidationSetup(t *testing.T) (r *rig, alice, bob string) {
+	t.Helper()
+	r = setup(t)
+	ctx := context.Background()
+	alice, bob = uuid.NewString(), uuid.NewString()
+	r.fund(alice, "10000")
+	r.fund(bob, "1000")
+	fifty, isolated := int32(50), domain.Isolated
+	if _, err := r.svc.UpdateSettings(ctx, bob, perp.Symbol, application.SettingsChange{MarginMode: &isolated, Leverage: &fifty}); err != nil {
+		t.Fatal(err)
+	}
+	long := r.place(t, bob, domain.Buy, "60000", "0.5", false)
+	short := r.place(t, alice, domain.Sell, "60000", "0.5", false)
+	r.trade(t, long, short, "60000")
+	if p := r.position(t, bob); !p.Margin.Equal(d("600")) {
+		t.Fatalf("bob %+v", p)
+	}
+	return r, alice, bob
+}
+
+func (r *rig) monitor(t *testing.T, mark string) {
+	t.Helper()
+	r.book.Set(perp.Symbol, d(mark), time.Now())
+	if err := r.svc.Monitor(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// liquidationOrder returns the user's active liquidation order.
+func (r *rig) liquidationOrder(t *testing.T, user string) (domain.Order, bool) {
+	t.Helper()
+	list, _, err := r.svc.List(context.Background(), user, perp.Symbol, "ACTIVE", "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range list {
+		if o.Kind == domain.KindLiquidation {
+			return o, true
+		}
+	}
+	return domain.Order{}, false
+}
+
+func TestALiquidationOrderClosesTheIsolatedLong(t *testing.T) {
+	r, alice, bob := liquidationSetup(t)
+	ctx := context.Background()
+	r.monitor(t, "59050")
+	if p := r.position(t, bob); p.WarnedAt.IsZero() || p.Liquidating {
+		t.Fatalf("warned: %+v", p)
+	}
+	r.monitor(t, "59000")
+	if p := r.position(t, bob); !p.Liquidating {
+		t.Fatalf("taken over: %+v", p)
+	}
+	if _, err := r.svc.Place(ctx, domain.Request{
+		UserID: bob, Symbol: perp.Symbol, Side: domain.Sell, Type: domain.Limit, Price: d("59000"), Qty: d("0.5"), ReduceOnly: true,
+	}); apperr.From(err).Code != "DERIV_POSITION_LIQUIDATING" {
+		t.Fatalf("bob's own close: %v", err)
+	}
+	r.monitor(t, "59000")
+	liq, ok := r.liquidationOrder(t, bob)
+	if !ok || liq.Side != domain.Sell || !liq.Price.Equal(d("58506")) || liq.TimeInForce != domain.IOC {
+		t.Fatalf("liquidation order %+v %v", liq, ok)
+	}
+	r.monitor(t, "59000") // waits for it
+	if p := r.position(t, bob); p.LiquidationAttempts != 1 {
+		t.Fatalf("attempts %d", p.LiquidationAttempts)
+	}
+	// Alice's reduce-only bid at 58600 takes it: Bob loses 700 on 600 of
+	// margin; the insurance fund pays 100 and the fee is waived.
+	bid := r.place(t, alice, domain.Buy, "58600", "0.5", true)
+	r.trade(t, bid, liq, "58600")
+	if p := r.position(t, bob); !p.Flat() || p.Liquidating {
+		t.Fatalf("bob after the liquidation %+v", p)
+	}
+	fills, _, err := r.svc.Fills(ctx, bob, "", "", 10)
+	if err != nil || !fills[0].Liquidation || !fills[0].Insurance.Equal(d("100")) || !fills[0].Fee.IsZero() {
+		t.Fatalf("bob's liquidation fill %+v %v", fills[0], err)
+	}
+	// Bob keeps what was not his margin: 1000 − 600 − the 6 maker fee.
+	if !r.ledger.insurance.Equal(d("999900")) || !r.ledger.frozen[bob].IsZero() || !r.ledger.available[bob].Equal(d("394")) {
+		t.Fatalf("insurance %s, bob %s/%s", r.ledger.insurance, r.ledger.available[bob], r.ledger.frozen[bob])
+	}
+	r.reconcile(t)
+}
+
+func TestAnUnfillableLiquidationIsDeleveraged(t *testing.T) {
+	r, alice, bob := liquidationSetup(t)
+	ctx := context.Background()
+	r.monitor(t, "59000") // taken over
+	for i := range domain.MaxLiquidationAttempts {
+		r.monitor(t, "59000")
+		liq, ok := r.liquidationOrder(t, bob)
+		if !ok {
+			t.Fatalf("attempt %d: no liquidation order", i+1)
+		}
+		r.seq++
+		if err := r.svc.OnUpdate(ctx, domain.Update{
+			OrderID: liq.ID, Seq: r.seq, Status: domain.StatusCanceled, Filled: decimal.Zero,
+			FilledQuote: decimal.Zero, Reason: "IOC",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Nothing filled three times: Alice's short, the only counterparty, is
+	// closed against Bob's long at his bankruptcy price 58800.
+	r.monitor(t, "59000")
+	if p := r.position(t, bob); !p.Flat() {
+		t.Fatalf("bob %+v", p)
+	}
+	if p := r.position(t, alice); !p.Flat() {
+		t.Fatalf("alice %+v", p)
+	}
+	theirs, _, err := r.svc.Fills(ctx, alice, "", "", 10)
+	if err != nil || !theirs[0].RealizedPnL.Equal(d("600")) || !theirs[0].Fee.IsZero() {
+		t.Fatalf("alice's deleveraged fill %+v %v", theirs[0], err)
+	}
+	fills, _, err := r.svc.Fills(ctx, bob, "", "", 10)
+	if err != nil || !fills[0].RealizedPnL.Equal(d("-600")) || !fills[0].Insurance.IsZero() || !fills[0].Price.Equal(d("58800")) {
+		t.Fatalf("bob's deleveraged fill %+v %v", fills[0], err)
+	}
+	r.reconcile(t)
+}
+
+func TestACrossAccountIsLiquidatedTogether(t *testing.T) {
+	r := setup(t)
+	ctx := context.Background()
+	alice, bob := uuid.NewString(), uuid.NewString()
+	r.fund(alice, "700")
+	r.fund(bob, "10000")
+	fifty := int32(50)
+	if _, err := r.svc.UpdateSettings(ctx, alice, perp.Symbol, application.SettingsChange{Leverage: &fifty}); err != nil {
+		t.Fatal(err)
+	}
+	long := r.place(t, bob, domain.Buy, "60000", "0.5", false)
+	short := r.place(t, alice, domain.Sell, "60000", "0.5", false)
+	r.trade(t, long, short, "60000")
+	// Alice's cross equity: 85 available + 600 margin, less her loss;
+	// maintenance 0.4% of the notional.
+	r.monitor(t, "61100")
+	if at, err := r.store.Read().Cross().WarnedAt(ctx, alice); err != nil || at.IsZero() {
+		t.Fatalf("cross warning %v %v", at, err)
+	}
+	r.monitor(t, "61200")
+	if p := r.position(t, alice); !p.Liquidating {
+		t.Fatalf("taken over %+v", p)
+	}
+	r.monitor(t, "61200")
+	liq, ok := r.liquidationOrder(t, alice)
+	if !ok || liq.Side != domain.Buy || !liq.Price.Equal(d("61506")) {
+		t.Fatalf("liquidation order %+v %v", liq, ok)
+	}
+	ask := r.place(t, bob, domain.Sell, "61300", "0.5", true)
+	r.trade(t, ask, liq, "61300")
+	if p := r.position(t, alice); !p.Flat() {
+		t.Fatalf("alice %+v", p)
+	}
+	// 685 − the 650 loss − the 15.325 fee.
+	if !r.ledger.available[alice].Equal(d("19.675")) || !r.ledger.frozen[alice].IsZero() {
+		t.Fatalf("alice %s/%s", r.ledger.available[alice], r.ledger.frozen[alice])
+	}
+	r.reconcile(t)
+}
