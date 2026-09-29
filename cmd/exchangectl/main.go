@@ -106,6 +106,9 @@ commands:
   risk rules                  the built-in risk rules as JSON (a starting point for RISK_RULES_FILE)
   derivatives states          the contracts under reduce-only (a degradation) and who lifted it
   derivatives resume <symbol> lift a contract's reduce-only once its prices are back
+  derivatives funding [--symbol S] [--limit N]
+                              the newest funding rounds: rate, mark, positions, paid, received, insurance;
+                              fails on a round stuck without its rate or receivers paid more than was collected
   derivatives reconcile       check invariant 6 now: long = short per contract, PNL_CLEARING + long cost − short cost = 0
 `
 

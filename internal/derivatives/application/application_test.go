@@ -844,3 +844,52 @@ func TestTakeProfitAndStopLoss(t *testing.T) {
 		t.Fatalf("someone else's: %v", err)
 	}
 }
+
+func TestTheAdminOverviewAndRiskList(t *testing.T) {
+	r, alice, bob := liquidationSetup(t)
+	ctx := context.Background()
+	view := func() application.ContractOverview {
+		t.Helper()
+		list, err := r.svc.Overview(ctx)
+		if err != nil || len(list) != 1 {
+			t.Fatalf("overview %+v %v", list, err)
+		}
+		return list[0]
+	}
+	if v := view(); !v.OpenInterest.Equal(d("0.5")) || v.Positions != 2 || v.State.ReduceOnly || !v.MarkFresh ||
+		!v.Mark.Price.Equal(d("60000")) || v.Contract.Status != domain.StatusTrading {
+		t.Fatalf("overview %+v", v)
+	}
+	// At 60000 nobody is close: Bob's isolated 50x long needs 120 of
+	// maintenance on 600 of margin.
+	if list, err := r.svc.RiskPositions(ctx); err != nil || len(list) != 0 {
+		t.Fatalf("risk list %+v %v", list, err)
+	}
+	r.monitor(t, "59050") // warned
+	list, err := r.svc.RiskPositions(ctx)
+	if err != nil || len(list) != 1 || list[0].UserID != bob || list[0].WarnedAt.IsZero() || list[0].Liquidating ||
+		!list[0].MaintenanceMargin.Equal(d("118.1")) {
+		t.Fatalf("risk list %+v %v", list, err)
+	}
+	r.monitor(t, "59000") // taken over
+	if list, err = r.svc.RiskPositions(ctx); err != nil || len(list) != 1 || !list[0].Liquidating {
+		t.Fatalf("risk list %+v %v", list, err)
+	}
+	_ = alice
+
+	if err := r.svc.OnDegraded(ctx, perp.Symbol, "MARK_PRICE_STALE"); err != nil {
+		t.Fatal(err)
+	}
+	if v := view(); !v.State.ReduceOnly || v.State.Reason != "MARK_PRICE_STALE" || v.State.Since.IsZero() {
+		t.Fatalf("degraded %+v", v.State)
+	}
+	if ok, err := r.svc.LiftReduceOnly(ctx, perp.Symbol, "ops@example.com"); err != nil || !ok {
+		t.Fatalf("lift %v %v", ok, err)
+	}
+	if v := view(); v.State.ReduceOnly || v.State.LiftedBy != "ops@example.com" {
+		t.Fatalf("lifted %+v", v.State)
+	}
+	if ok, err := r.svc.LiftReduceOnly(ctx, perp.Symbol, "ops@example.com"); err != nil || ok {
+		t.Fatalf("a second lift %v %v", ok, err)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -64,11 +65,79 @@ func derivativesCmd(ctx context.Context, cfg settings, args []string, out io.Wri
 		}
 		fmt.Fprintf(out, "%s: reduce-only lifted\n", symbol)
 		return nil
+	case "funding":
+		return derivativesFunding(ctx, db, args[1:], out)
 	case "reconcile":
 		return derivativesReconcile(ctx, cfg, db, out)
 	default:
 		return fmt.Errorf("unknown derivatives command %q", args[0])
 	}
+}
+
+// derivativesFunding lists the newest funding rounds with what their
+// positions paid and received; it fails when a round waits for its rate
+// past the two hours after which it is skipped, or when the receivers got
+// more than the payers and the insurance fund paid.
+func derivativesFunding(ctx context.Context, db *pg.DB, args []string, out io.Writer) error {
+	symbol, limit := "", 12
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--symbol" && i+1 < len(args):
+			i++
+			symbol = strings.ToUpper(args[i])
+		case args[i] == "--limit" && i+1 < len(args):
+			i++
+			n, err := strconv.Atoi(args[i])
+			if err != nil || n <= 0 {
+				return errors.New("--limit needs a positive number")
+			}
+			limit = n
+		default:
+			return fmt.Errorf("unknown derivatives funding argument %q", args[i])
+		}
+	}
+	rows, err := db.Query(ctx, `SELECT r.symbol, r.funding_time, r.status, coalesce(r.funding_rate::text, ''),
+			coalesce(r.mark_price::text, ''), r.positions, coalesce(sum(p.amount) FILTER (WHERE p.amount < 0), 0),
+			coalesce(sum(p.amount) FILTER (WHERE p.amount > 0), 0), coalesce(sum(p.insurance), 0),
+			count(p.settled_at)
+		FROM funding_rounds r LEFT JOIN funding_payments p USING (symbol, funding_time)
+		WHERE $1 = '' OR r.symbol = $1
+		GROUP BY r.symbol, r.funding_time ORDER BY r.funding_time DESC, r.symbol LIMIT $2`, symbol, limit)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "SYMBOL\tFUNDING_TIME\tSTATUS\tRATE\tMARK\tPOSITIONS\tSETTLED\tPAID\tRECEIVED\tINSURANCE")
+	var problems []string
+	for rows.Next() {
+		var sym, status, rate, mark string
+		var at time.Time
+		var positions, settled int
+		var paid, received, insurance decimal.Decimal
+		if err := rows.Scan(&sym, &at, &status, &rate, &mark, &positions, &paid, &received, &insurance, &settled); err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\n", sym, at.UTC().Format(time.RFC3339), status, rate, mark, positions,
+			settled, paid.Neg(), received, insurance)
+		if status == "SNAPSHOT" && time.Since(at) > 2*time.Hour+10*time.Minute {
+			problems = append(problems, fmt.Sprintf("%s %s still waits for its rate", sym, at.UTC().Format(time.RFC3339)))
+		}
+		if received.GreaterThan(paid.Neg().Add(insurance)) {
+			problems = append(problems, fmt.Sprintf("%s %s: received %s > paid %s + insurance %s", sym, at.UTC().Format(time.RFC3339),
+				received, paid.Neg(), insurance))
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	if len(problems) > 0 {
+		return errors.New(strings.Join(problems, "; "))
+	}
+	return nil
 }
 
 // derivativesReconcile checks invariant 6 from both schemas: per contract

@@ -9,7 +9,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
+	derivativesv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/derivatives/v1"
 	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
 	tradev1 "github.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1"
 	walletv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1"
@@ -94,6 +96,32 @@ func TestReadModels(t *testing.T) {
 			add(event.TopicWalletWithdrawal, &walletv1.WithdrawalRiskScored{Withdrawal: w, Score: 100, ApprovalsRequired: 1}, at)
 		}
 	}
+	// Contracts: a trade, the seller's settled fill and position, a
+	// funding payment and a liquidation step.
+	position := uuid.NewString()
+	snapshot := &derivativesv1.Position{
+		PositionId: position, UserId: seller, Symbol: "BTC-USDT-PERP", PositionSide: "BOTH", Quantity: "-0.5", EntryPrice: "60000",
+		EntryCost: "30000", Margin: "600", MarginMode: "ISOLATED", Leverage: 50, Version: 2,
+	}
+	add(event.TopicDerivTrade, &tradev1.TradeExecuted{
+		TradeId: uuid.NewString(), Symbol: "BTC-USDT-PERP", BaseAsset: "BTC", QuoteAsset: "USDT", Sequence: 1, Price: "60000",
+		Quantity: "0.5", QuoteQuantity: "30000", BuyerOrderId: uuid.NewString(), BuyerUserId: buyer, SellerOrderId: uuid.NewString(),
+		SellerUserId: seller, TradeNumber: 1,
+	}, at)
+	add(event.TopicDerivPosition, &derivativesv1.FillSettled{
+		TradeId: uuid.NewString(), OrderId: uuid.NewString(), UserId: seller, Symbol: "BTC-USDT-PERP", Side: "SELL", PositionSide: "BOTH",
+		Price: "60000", Quantity: "0.5", Fee: "15", RealizedPnl: "0", ExecutedAt: timestamppb.New(at),
+	}, at)
+	add(event.TopicDerivPosition, &derivativesv1.PositionOpened{Position: snapshot}, at)
+	later := proto.Clone(snapshot).(*derivativesv1.Position)
+	later.Funding, later.Version = "-3", 3
+	add(event.TopicDerivPosition, &derivativesv1.FundingPaid{
+		Position: later, FundingTime: timestamppb.New(at.Truncate(time.Hour)), FundingRate: "0.0001", MarkPrice: "60000", Amount: "-3",
+	}, at.Add(time.Minute))
+	add(event.TopicDerivLiquidation, &derivativesv1.LiquidationFilled{
+		UserId: seller, Symbol: "BTC-USDT-PERP", PositionSide: "BOTH", TradeId: uuid.NewString(), Price: "61300", Quantity: "0.5",
+		RealizedPnl: "-650", InsurancePaid: "50",
+	}, at.Add(2*time.Minute))
 	// A redelivered copy of the whole batch collapses.
 	if err := in.Store(ctx, append(batch, batch...)); err != nil {
 		t.Fatalf("Store: %v", err)
@@ -103,7 +131,7 @@ func TestReadModels(t *testing.T) {
 		t.Helper()
 		var trades uint64
 		var volume decimal.Decimal
-		if err := conn.QueryRow(ctx, `SELECT count(), sum(quantity) FROM trades FINAL`).Scan(&trades, &volume); err != nil {
+		if err := conn.QueryRow(ctx, `SELECT count(), sum(quantity) FROM trades FINAL WHERE symbol = 'ETH-BTC'`).Scan(&trades, &volume); err != nil {
 			t.Fatal(err)
 		}
 		if trades != 3 || !volume.Equal(decimal.NewFromInt(3)) {
@@ -163,11 +191,35 @@ func TestReadModels(t *testing.T) {
 			status != "PENDING_REVIEW" {
 			t.Fatalf("%s: withdrawal %s (%v)", what, status, err)
 		}
+		var perpTrades, fills, liquidations uint64
+		var notional, funding, insurance decimal.Decimal
+		if err := conn.QueryRow(ctx, `SELECT
+				(SELECT count() FROM trades FINAL WHERE symbol = 'BTC-USDT-PERP'),
+				(SELECT count() FROM derivatives_fills FINAL), (SELECT sum(notional) FROM derivatives_fills FINAL),
+				(SELECT sum(amount) FROM derivatives_funding FINAL),
+				(SELECT count() FROM derivatives_liquidations FINAL), (SELECT sum(insurance_paid) FROM derivatives_liquidations FINAL)`).
+			Scan(&perpTrades, &fills, &notional, &funding, &liquidations, &insurance); err != nil {
+			t.Fatal(err)
+		}
+		if perpTrades != 1 || fills != 1 || !notional.Equal(decimal.NewFromInt(30000)) || !funding.Equal(decimal.NewFromInt(-3)) ||
+			liquidations != 1 || !insurance.Equal(decimal.NewFromInt(50)) {
+			t.Fatalf("%s: contracts %d trades, %d fills of %s, funding %s, %d liquidations with %s insurance", what, perpTrades, fills,
+				notional, funding, liquidations, insurance)
+		}
+		var funded decimal.Decimal
+		var version uint64
+		if err := conn.QueryRow(ctx, `SELECT funding, version FROM derivatives_positions FINAL WHERE position_id = ?`, position).
+			Scan(&funded, &version); err != nil || version != 3 || !funded.Equal(decimal.NewFromInt(-3)) {
+			t.Fatalf("%s: position version %d funding %s (%v)", what, version, funded, err)
+		}
 	}
 	check("live")
 
 	// The backfill rebuilds the read models from events, once.
-	for _, table := range []string{"trades", "orders", "order_updates", "wallet_deposits", "wallet_withdrawals", "candles_1m"} {
+	for _, table := range []string{
+		"trades", "orders", "order_updates", "wallet_deposits", "wallet_withdrawals", "candles_1m", "derivatives_positions",
+		"derivatives_fills", "derivatives_funding", "derivatives_liquidations",
+	} {
 		if err := conn.Exec(ctx, "TRUNCATE TABLE "+table); err != nil {
 			t.Fatal(err)
 		}

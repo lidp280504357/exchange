@@ -2,6 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { NavLink, Navigate, Route, Routes } from "react-router";
 import { api, describe, type Admin, type Permission } from "./api/client";
 import { AuditPage } from "./pages/Audit";
+import { DerivativesPage } from "./pages/Derivatives";
 import { FlagsPage } from "./pages/Flags";
 import { InstrumentsPage } from "./pages/Instruments";
 import { LedgerPage } from "./pages/Ledger";
@@ -16,8 +17,9 @@ const sections: { path: string; label: string; perm: Permission; page: (props: {
   { path: "withdrawals", label: "提现审批", perm: "withdrawals.read", page: WithdrawalsPage },
   { path: "users", label: "用户", perm: "users.read", page: UsersPage },
   { path: "instruments", label: "资产与交易对", perm: "instruments.read", page: InstrumentsPage },
+  { path: "derivatives", label: "合约", perm: "derivatives.read", page: DerivativesPage },
   { path: "flags", label: "功能开关", perm: "flags.read", page: FlagsPage },
-  { path: "ledger", label: "调账审批", perm: "audit.read", page: LedgerPage },
+  { path: "ledger", label: "双人审批", perm: "audit.read", page: LedgerPage },
   { path: "reports", label: "报表", perm: "reports.read", page: ReportsPage },
   { path: "audit", label: "审计日志", perm: "audit.read", page: AuditPage },
 ];

@@ -151,7 +151,9 @@ func setup(ctx context.Context, a *app.App) error {
 	}
 	derivativesv1.RegisterDerivativesServiceServer(srv, grpcapi.NewServer(svc))
 	r := a.NewRouter()
-	(&httpapi.Handler{Svc: svc, Asset: cfg.SettlementAsset}).Routes(r)
+	h := &httpapi.Handler{Svc: svc, Asset: cfg.SettlementAsset}
+	h.Routes(r)
+	h.InternalRoutes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
 }
 

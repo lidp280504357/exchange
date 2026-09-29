@@ -10,6 +10,9 @@ export type Pair = components["schemas"]["Pair"];
 export type Flag = components["schemas"]["Flag"];
 export type Approval = components["schemas"]["Approval"];
 export type AuditEntry = components["schemas"]["AuditEntry"];
+export type Contract = components["schemas"]["Contract"];
+export type ContractState = components["schemas"]["ContractState"];
+export type RiskPosition = components["schemas"]["RiskPosition"];
 
 // ApiError carries the unified error body (requirements §7.1).
 export class ApiError extends Error {
@@ -63,6 +66,7 @@ const messages: Record<string, string> = {
   USER_STATUS_TRANSITION_INVALID: "账户当前状态不能直接改成这个状态",
   INSTRUMENT_STATUS_TRANSITION_INVALID: "交易对当前状态不能直接改成这个状态",
   LEDGER_ADJUSTMENT_DISABLED: "手动调账开关（ledger.manual_adjustment）未开启",
+  INSTRUMENT_NOT_FOUND: "没有这个交易对或合约",
 };
 
 // describe turns an error into a sentence for the operator.

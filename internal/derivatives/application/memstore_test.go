@@ -230,8 +230,12 @@ func (r memPositions) Totals(context.Context) (map[string]ports.Totals, error) {
 	for _, p := range r.st.positions {
 		t := out[p.Symbol]
 		t.NetQty = t.NetQty.Add(p.Qty)
+		if !p.Qty.IsZero() {
+			t.Positions++
+		}
 		if p.Qty.IsPositive() {
 			t.NetCost = t.NetCost.Add(p.EntryCost)
+			t.LongQty = t.LongQty.Add(p.Qty)
 		} else {
 			t.NetCost = t.NetCost.Sub(p.EntryCost)
 		}

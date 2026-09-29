@@ -104,6 +104,9 @@ type PositionRepo interface {
 type Totals struct {
 	NetQty  decimal.Decimal
 	NetCost decimal.Decimal
+	// LongQty is the open interest; Positions counts the open positions.
+	LongQty   decimal.Decimal
+	Positions int
 }
 
 // FundingRepo stores the funding rounds and payments.

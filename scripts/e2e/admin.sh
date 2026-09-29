@@ -8,7 +8,9 @@
 # cookie's attributes, the CSRF header), roles, freezing and unfreezing
 # an account, cancelling its orders, a pair's status round trip, a flag
 # round trip, a two-person ledger adjustment, the withdrawal list, the
-# audit trail and sign-out.
+# perpetual contracts (states, reduce-only, a status round trip, the
+# liquidation monitor, a two-person insurance fund contribution), the
+# reports, the audit trail and sign-out.
 #
 #   scripts/e2e/admin.sh
 set -euo pipefail
@@ -91,7 +93,7 @@ as() { # as ROLE METHOD PATH JSON: a call with the role's session
 echo "== sign-in"
 login ADMIN
 expect 200 - "ADMIN signs in with password and code"
-check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 13" "with every permission"
+check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 15" "with every permission"
 cookie=$(grep -i '^set-cookie: admin_session=' "$WORK/ADMIN.headers")
 for attr in 'Path=/admin/' 'HttpOnly' 'Secure' 'SameSite=Strict'; do
   grep -qi "$attr" <<<"$cookie" || { echo "FAIL the session cookie lacks $attr: $cookie" >&2; exit 1; }
@@ -246,6 +248,58 @@ as ADMIN POST "/admin/v1/approvals/$REVERSAL/decide" '{"approve":false,"reason":
 expect 200 - "ADMIN rejects it"
 check '.status == "REJECTED"' "REJECTED, nothing booked"
 
+echo "== perpetual contracts"
+as AUDITOR GET /admin/v1/derivatives/contracts ""
+expect 200 - "contracts"
+check '[.contracts[].symbol] | contains(["BTC-USDT-PERP","ETH-USDT-PERP"]) and all(.contracts[]; (.open_interest | test("^[0-9.]+$")) and (.reduce_only | type) == "boolean")' "each with its reduce-only state and open interest"
+as FINANCE POST /admin/v1/derivatives/contracts/BTC-USDT-PERP/lift-reduce-only '{"reason":"e2e"}'
+expect 403 ADMIN_FORBIDDEN "FINANCE cannot lift reduce-only"
+as OPERATOR POST /admin/v1/derivatives/contracts/BTC-USDT-PERP/lift-reduce-only '{"reason":"e2e check"}'
+expect 200 - "OPERATOR may lift it"
+check '.symbol == "BTC-USDT-PERP" and (.lifted | type) == "boolean"' "lifted says whether it was on"
+as OPERATOR POST /admin/v1/derivatives/contracts/ETH-USDT-PERP/status '{"to":"HALT","reason":"e2e halt"}'
+expect 200 - "OPERATOR halts ETH-USDT-PERP"
+check '.from == "TRADING" and .to == "HALT"' "TRADING → HALT"
+# shellcheck disable=SC2016 # a safety net: the contract trades again whatever happens
+at_exit 'as OPERATOR POST /admin/v1/derivatives/contracts/ETH-USDT-PERP/status "{\"to\":\"TRADING\",\"reason\":\"e2e cleanup\"}"'
+as OPERATOR POST /admin/v1/derivatives/contracts/ETH-USDT-PERP/status '{"to":"TRADING","reason":"e2e resume"}'
+expect 200 - "and resumes it"
+as AUDITOR GET /admin/v1/instruments ""
+check '(.contracts[] | select(.symbol == "ETH-USDT-PERP") | .status) == "TRADING"' "the instruments list the contracts"
+as AUDITOR GET /admin/v1/derivatives/risk ""
+expect 200 - "positions near liquidation"
+check '.positions | type == "array"' "a list"
+as AUDITOR GET "/admin/v1/derivatives/liquidations?days=30" ""
+expect 200 - "liquidation steps"
+check '.items | type == "array"' "a list"
+as AUDITOR GET "/admin/v1/derivatives/liquidations?kind=SIDEWAYS" ""
+expect 400 COMMON_INVALID_ARGUMENT "an unknown kind"
+
+echo "== a two-person insurance fund contribution"
+as AUDITOR GET /admin/v1/derivatives/insurance-fund ""
+expect 200 - "the insurance fund"
+check '.asset == "USDT" and (.balance | test("^[0-9.]+$"))' "its USDT balance"
+FUND_BEFORE=$(jq -r .balance <<<"$BODY")
+as OPERATOR POST /admin/v1/derivatives/insurance-fund/contributions '{"amount":"1","reason":"e2e"}'
+expect 403 ADMIN_FORBIDDEN "OPERATOR cannot request one"
+as FINANCE POST /admin/v1/derivatives/insurance-fund/contributions '{"amount":"-1","reason":"e2e"}'
+expect 400 COMMON_INVALID_ARGUMENT "a contribution is positive"
+as FINANCE POST /admin/v1/derivatives/insurance-fund/contributions '{"amount":"1","reason":"e2e contribution"}'
+expect 201 - "FINANCE requests 1 USDT"
+check '.kind == "INSURANCE_FUND" and .payload.asset == "USDT" and .payload.amount == "1" and .status == "PENDING"' "PENDING"
+CONTRIBUTION=$(jq -r .id <<<"$BODY")
+at_exit "as ADMIN POST /admin/v1/approvals/$CONTRIBUTION/decide '{\"approve\":false,\"reason\":\"e2e cleanup\"}'"
+as FINANCE POST "/admin/v1/approvals/$CONTRIBUTION/decide" '{"approve":true,"reason":"my own"}'
+expect 403 ADMIN_SELF_APPROVAL "not by the requester"
+as ADMIN POST "/admin/v1/approvals/$CONTRIBUTION/decide" '{"approve":true,"reason":"checked by e2e"}'
+expect 200 - "ADMIN approves"
+check '.status == "EXECUTED" and (.result | startswith("journal "))' "EXECUTED with the journal"
+fund_grew() {
+  as AUDITOR GET /admin/v1/derivatives/insurance-fund ""
+  jq -e --arg b "$FUND_BEFORE" '(.balance | tonumber) == (($b | tonumber) + 1)' <<<"$BODY" >/dev/null
+}
+eventually 20 "the fund holds 1 USDT more" fund_grew
+
 echo "== reports from the ClickHouse read models"
 as AUDITOR GET "/admin/v1/reports/trading?days=30" ""
 expect 200 - "trading report"
@@ -258,6 +312,12 @@ expect 200 - "daily ETH-BTC candles"
 check '.items | type == "array" and length <= 5' "at most the limit"
 as AUDITOR GET "/admin/v1/reports/candles?symbol=ETH-BTC&interval=2h" ""
 expect 400 COMMON_INVALID_ARGUMENT "an interval the report does not offer"
+as AUDITOR GET "/admin/v1/reports/derivatives?days=30" ""
+expect 200 - "contract report"
+check '.items | type == "array" and all(.[]; (.notional | test("^[0-9.]+$")) and (.liquidations >= 0))' "per contract and day"
+as AUDITOR GET /admin/v1/reports/open-interest ""
+expect 200 - "open interest"
+check '.items | type == "array" and all(.[]; .long == .short)' "long equals short per contract"
 
 echo "== the audit trail"
 audited() { # audited ROLE QUERY JQ
@@ -266,7 +326,7 @@ audited() { # audited ROLE QUERY JQ
 }
 q_admin="actor=$(jq -rn --arg e "$EMAIL_ADMIN" '$e|@uri')"
 eventually 60 "the ADMIN's sign-in and approval are in the trail" audited AUDITOR "$q_admin" \
-  '[.items[].payload.action] | (index("admin.login") != null and index("admin.ledger.adjustment_approved") != null)'
+  '[.items[].payload.action] | (index("admin.login") != null and index("admin.ledger.adjustment_approved") != null and index("admin.derivatives.insurance_approved") != null)'
 eventually 60 "the freeze is audited on the account, by the OPERATOR" audited AUDITOR "target=user:$USER_ID" \
   "[.items[] | select(.actor == \"$EMAIL_OPERATOR\")] | length >= 3"
 eventually 60 "the flag switches are audited" audited AUDITOR "target=flag:market.reference_kline" \

@@ -40,14 +40,20 @@ const (
 	PermAdjustApprove   = "ledger.adjust.approve"
 	PermAuditRead       = "audit.read"
 	PermReportsRead     = "reports.read"
+	// Perpetual contracts: the contracts' state, the insurance fund and
+	// the positions near liquidation; lifting a contract's reduce-only.
+	PermDerivativesRead = "derivatives.read"
+	PermDerivativesEdit = "derivatives.write"
 )
 
-var reads = []string{PermUsersRead, PermInstrumentsRead, PermFlagsRead, PermWithdrawalsRead, PermAuditRead, PermReportsRead}
+var reads = []string{
+	PermUsersRead, PermInstrumentsRead, PermFlagsRead, PermWithdrawalsRead, PermAuditRead, PermReportsRead, PermDerivativesRead,
+}
 
 var roles = map[string][]string{
 	RoleAdmin: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit,
-		PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove),
-	RoleOperator: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit),
+		PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermDerivativesEdit),
+	RoleOperator: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit, PermDerivativesEdit),
 	RoleFinance:  append(slices.Clone(reads), PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove),
 	RoleAuditor:  slices.Clone(reads),
 }
@@ -171,6 +177,9 @@ func (s *Session) Live(now time.Time) bool {
 // Approval kinds and statuses.
 const (
 	KindLedgerAdjustment = "LEDGER_ADJUSTMENT"
+	// KindInsuranceFund adds simulated funds to the contracts' insurance
+	// fund (ledger FundInsurance).
+	KindInsuranceFund = "INSURANCE_FUND"
 
 	ApprovalPending  = "PENDING"
 	ApprovalExecuted = "EXECUTED"
@@ -179,7 +188,8 @@ const (
 )
 
 // Approval is a request a second administrator must approve (§5.12:
-// manual ledger adjustments need two people).
+// manual ledger adjustments and insurance fund contributions need two
+// people).
 type Approval struct {
 	ID          string
 	Kind        string

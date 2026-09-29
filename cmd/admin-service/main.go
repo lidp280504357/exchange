@@ -1,8 +1,9 @@
 // Command admin-service runs the admin console's API under /admin/v1
 // (requirements §5.12): administrators sign in with a password and an
 // authenticator code, act within their roles on accounts, orders,
-// withdrawals, instruments and feature flags, approve each other's ledger
-// adjustments and read the audit trail. nginx routes /admin/ to it and
+// withdrawals, instruments, perpetual contracts and feature flags, approve
+// each other's ledger adjustments and insurance fund contributions and
+// read the audit trail and the reports. nginx routes /admin/ to it and
 // to the console's static files (web/admin); the user gateway never does.
 package main
 
@@ -48,13 +49,14 @@ type settings struct {
 	ClickHouse chx.Config    `koanf:",squash"`
 	// gRPC addresses: AUTH_GRPC_ADDR, USER_GRPC_ADDR, LEDGER_GRPC_ADDR,
 	// INSTRUMENT_GRPC_ADDR; internal REST: WALLET_SERVICE_URL,
-	// TRADING_SERVICE_URL.
+	// TRADING_SERVICE_URL, DERIVATIVES_SERVICE_URL.
 	AuthAddr       string `koanf:"auth_grpc_addr"`
 	UserAddr       string `koanf:"user_grpc_addr"`
 	LedgerAddr     string `koanf:"ledger_grpc_addr"`
 	InstrumentAddr string `koanf:"instrument_grpc_addr"`
 	WalletURL      string `koanf:"wallet_service_url"`
 	TradingURL     string `koanf:"trading_service_url"`
+	DerivativesURL string `koanf:"derivatives_service_url"`
 	// SecretKey seals the administrators' authenticator secrets
 	// (ADMIN_SECRET_KEY, base64 of 32 bytes; in apps.env only).
 	SecretKey string `koanf:"admin_secret_key"`
@@ -79,7 +81,7 @@ func setup(ctx context.Context, a *app.App) error {
 	cfg := settings{
 		HTTPAddr: ":8093", Postgres: pg.DefaultConfig(), AuthAddr: "localhost:9181", UserAddr: "localhost:9182",
 		LedgerAddr: "localhost:9185", InstrumentAddr: "localhost:9184", WalletURL: "http://localhost:8092",
-		TradingURL: "http://localhost:8088", PasswordHashConcurrency: 2,
+		TradingURL: "http://localhost:8088", DerivativesURL: "http://localhost:8095", PasswordHashConcurrency: 2,
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -128,15 +130,16 @@ func setup(ctx context.Context, a *app.App) error {
 			Auth: authv1.NewAuthServiceClient(clients["auth"]), User: userv1.NewUserServiceClient(clients["user"]),
 			Ledger: ledgerClient,
 		},
-		Orders:   backends.Trading{REST: rest, Base: cfg.TradingURL},
-		Wallet:   backends.Wallet{REST: rest, Base: cfg.WalletURL},
-		Catalog:  backends.Instruments{C: instrumentv1.NewInstrumentServiceClient(clients["instrument"])},
-		Flags:    backends.Flags{DB: configDB, Events: event.NewFactory(a.Name(), a.Config().InstanceID)},
-		Ledger:   backends.Ledger{C: ledgerClient},
-		AuditLog: backends.Audit{Conn: ch},
-		Reports:  backends.Reports{Conn: ch},
-		Log:      a.Logger(),
-		Now:      time.Now,
+		Orders:      backends.Trading{REST: rest, Base: cfg.TradingURL},
+		Wallet:      backends.Wallet{REST: rest, Base: cfg.WalletURL},
+		Catalog:     backends.Instruments{C: instrumentv1.NewInstrumentServiceClient(clients["instrument"])},
+		Derivatives: backends.Derivatives{REST: rest, Base: cfg.DerivativesURL},
+		Flags:       backends.Flags{DB: configDB, Events: event.NewFactory(a.Name(), a.Config().InstanceID)},
+		Ledger:      backends.Ledger{C: ledgerClient},
+		AuditLog:    backends.Audit{Conn: ch},
+		Reports:     backends.Reports{Conn: ch},
+		Log:         a.Logger(),
+		Now:         time.Now,
 	}
 	r := a.NewRouter()
 	(&httpapi.Handler{Svc: svc, Limiter: ratelimit.New(rdb, "admin:rl:"), Secure: a.Config().Env != config.EnvLocal}).Routes(r)

@@ -5,7 +5,7 @@ import { can } from "../session";
 import { Badge, Button, Card, ErrorText, Field, Notice, Select, Table } from "../ui";
 
 // Appendix B: PREPARE → TRADING ⇄ HALT; TRADING or HALT → CANCEL_ONLY → DELISTED.
-const next: Record<string, string[]> = {
+export const nextStatus: Record<string, string[]> = {
   PREPARE: ["TRADING"],
   TRADING: ["HALT", "CANCEL_ONLY"],
   HALT: ["TRADING", "CANCEL_ONLY"],
@@ -13,7 +13,7 @@ const next: Record<string, string[]> = {
   DELISTED: [],
 };
 
-const tone = { TRADING: "green", HALT: "yellow", CANCEL_ONLY: "red", DELISTED: "gray", PREPARE: "gray" } as const;
+export const statusTone = { TRADING: "green", HALT: "yellow", CANCEL_ONLY: "red", DELISTED: "gray", PREPARE: "gray" } as const;
 
 function on(v?: boolean) {
   return v ? <Badge tone="green">开</Badge> : <Badge tone="red">关</Badge>;
@@ -32,7 +32,7 @@ export function InstrumentsPage({ admin }: { admin: Admin }) {
             <span key="s" className="font-medium">
               {p.symbol}
             </span>,
-            <Badge key="st" tone={tone[p.status ?? "PREPARE"]}>
+            <Badge key="st" tone={statusTone[p.status ?? "PREPARE"]}>
               {p.status}
             </Badge>,
             p.min_quantity,
@@ -40,6 +40,26 @@ export function InstrumentsPage({ admin }: { admin: Admin }) {
             p.lot_size,
             `${p.maker_fee_rate} / ${p.taker_fee_rate}`,
             editable ? <PairStatus key="e" pair={p} /> : `v${p.version}`,
+          ])}
+        />
+      </Card>
+      <Card title="永续合约（参数）">
+        <p className="mb-2 text-xs text-slate-500">合约参数同样来自参考数据文件；合约状态、只减仓与保险基金在「合约」页处理。</p>
+        <Table
+          head={["合约", "状态", "指数", "最小下单量", "价格步长", "最高杠杆", "资金费（间隔、利率、上限）", "费率 maker/taker"]}
+          rows={(list.data?.contracts ?? []).map((c) => [
+            <span key="s" className="font-medium">
+              {c.symbol}
+            </span>,
+            <Badge key="st" tone={statusTone[c.status ?? "PREPARE"]}>
+              {c.status}
+            </Badge>,
+            c.index_symbol,
+            c.min_quantity,
+            c.tick_size,
+            `${c.risk_tiers?.[0]?.max_leverage ?? "—"}x`,
+            `${c.funding_interval_hours}h · ${c.interest_rate} · ±${c.funding_cap}`,
+            `${c.maker_fee_rate} / ${c.taker_fee_rate}`,
           ])}
         />
       </Card>
@@ -73,7 +93,7 @@ export function InstrumentsPage({ admin }: { admin: Admin }) {
 
 function PairStatus({ pair }: { pair: Pair }) {
   const qc = useQueryClient();
-  const options = next[pair.status ?? ""] ?? [];
+  const options = nextStatus[pair.status ?? ""] ?? [];
   const [to, setTo] = useState(options[0] ?? "");
   const [reason, setReason] = useState("");
   const change = useMutation({

@@ -307,6 +307,7 @@ services:
       LEDGER_GRPC_ADDR: ledger-service:9185
       WALLET_SERVICE_URL: http://wallet-service:8092
       TRADING_SERVICE_URL: http://spot-trading-service:8088
+      DERIVATIVES_SERVICE_URL: http://derivatives-service:8095
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}

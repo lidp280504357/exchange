@@ -97,12 +97,14 @@ SELECT order_id, user_id, side, price, quantity, status, filled_quantity FROM de
 - market-data-service 连续 10 秒算不出该合约的标记价（价源不足），发 `risk.events` 的 `SystemDegraded`，合约服务的消费组 `derivatives-service-risk` 收到后置位；
 - 合约服务自己发现：有未平仓位的合约，标记价已超过 10 秒没更新（服务启动 30 秒后才判断），原因 `MARK_PRICE_STALE`。
 
-"风控服务不可用"这一条暂不适用：合约服务不依赖 risk-service 做同步检查。标记价恢复后也**不会**自动解除，需人工确认：
+"风控服务不可用"这一条暂不适用：合约服务不依赖 risk-service 做同步检查。标记价恢复后也**不会**自动解除，需人工确认：管理后台「合约」页（权限 `derivatives.write`，标记价未恢复时按钮不可用，动作有审计事件 `admin.derivatives.reduce_only_lifted`），或命令行：
 
 ```bash
 ssh exchange sudo docker exec exchange-infra-derivatives-service-1 /app/exchangectl derivatives states
 ssh exchange sudo docker exec exchange-infra-derivatives-service-1 /app/exchangectl derivatives resume BTC-USDT-PERP
 ```
+
+故障注入 `scripts/fault/contract-degrade.sh` 演练整个过程：切断 market-data-service 的外网 → 标记价报 `degraded` → 合约只减仓、开仓单被拒 → 恢复外网后仍只减仓（开仓单报 `DERIV_REDUCE_ONLY_MODE`）→ `resume` 后恢复。
 
 ## 对账（不变量 6）
 
@@ -131,6 +133,14 @@ REST（经网关 `/v1/derivatives/*`，需登录）：
 | `GET /v1/derivatives/funding?symbol=` | 资金费收付记录 |
 | `POST/GET /v1/derivatives/conditional-orders`、`DELETE /v1/derivatives/conditional-orders/{id}` | 止盈止损条件单 |
 
+内部 REST（只给 admin-service，网关不转发 `/internal`）：
+
+| 路径 | 内容 |
+|---|---|
+| `GET /internal/derivatives/contracts` | 每个合约的状态、只减仓（原因、开始时间、上次谁解除）、标记价与是否新鲜、持仓量（多头总量）与持仓数 |
+| `POST /internal/derivatives/contracts/{symbol}/lift-reduce-only` | `{"actor": ...}` 解除只减仓，返回 `lifted` 表示原来是否只减仓 |
+| `GET /internal/derivatives/risk` | 被接管、已预警或保证金率（维持保证金 ÷（保证金 + 未实现盈亏））≥ 0.5 的仓位，风险高的在前；全仓仓位在这里按单个仓位计算 |
+
 WebSocket 私有频道：`orders`（合约订单与现货订单同一频道，按 `symbol` 区分）、`fills`（合约成交带 `position_side`、`closed_quantity`、`realized_pnl`，手续费资产 USDT）、`positions`（`event` 为 OPEN、INCREASE、REDUCE、CLOSE、FLIP、MARGIN、FUNDING、LEVERAGE）、`risk`（`event` 为 WARNING、STARTED、LIQUIDATED、ADL）。
 
 ## 测试服设置
@@ -138,7 +148,9 @@ WebSocket 私有频道：`orders`（合约订单与现货订单同一频道，�
 - 开关 `derivatives.trading` 默认关闭（ADR-0005），测试服打开：`exchangectl flags set derivatives.trading --on --reason "测试环境开放合约"`。
 - 合约在 `deploy/instruments/test.json` 里以 `TRADING` 创建（状态只在创建时取文件里的值，之后用 `exchangectl instruments contract-status` 改）。
 - 保险基金用模拟资金注资：`exchangectl ledger insurance-fund --amount 1000000 --reason "测试环境保险基金" --key insurance-seed-1`（ledger-service 容器里执行，需 `ledger.manual_adjustment`）。
-- 端到端：`scripts/e2e/contracts.sh`（规格、标记价、资金费率）、`scripts/e2e/derivatives.sh`（两个用户在 ETH-USDT-PERP 上开仓、平仓、转回，最后跑对账）。
+- 端到端：`scripts/e2e/contracts.sh`（规格、标记价、资金费率）、`scripts/e2e/derivatives.sh`（两个用户在 ETH-USDT-PERP 上开仓、平仓、转回，最后跑对账）、`scripts/e2e/funding.sh`（资金费，见下）、`scripts/e2e/admin.sh` 的合约部分（合约状态、只减仓、状态往返、强平监控、双人审批的保险基金注资）；故障注入 `scripts/fault/contract-degrade.sh`（降级与人工解除）。
+- 资金费端到端靠一对**常驻对冲仓位**：`funding.sh` 第一次运行时注册两个用户，各转 100 USDT 到合约账户，在 BTC-USDT-PERP 上对敲 0.001 张后保持不平，邮箱与随机密码记在本机 `~/.cache/exchange-e2e/`（`E2E_STATE_DIR` 可改，不进仓库）；之后每次运行登录这两个用户（超过 7 天未登录时从开发收件箱取登录挑战验证码），逐个检查开仓以来每个资金费时间点：双方都有记录、费率等于 market-data-service 结算的费率、付款方付 0.001 × 结算标记价 × |费率| 向上取整、收款方向下取整。仓位没了（被平或被减仓）就重新开一对。强平本身依赖真实价格波动，端到端无法稳定触发，由应用层测试覆盖（`internal/derivatives/application` 的强平、ADL、全仓强平用例，设置 `TEST_POSTGRES_DSN` 时在真实库上跑）。
+- 资金费轮次：`exchangectl derivatives funding [--symbol S] [--limit N]` 列出最近的轮次（费率、标记价、仓位数、已结算数、付出、收到、保险基金垫付）；有轮次等费率超过 2 小时 10 分钟仍未跳过、或收到的多于付出加保险基金时以非零退出（`funding.sh` 每次都跑）。
 
 ## 查看
 
@@ -153,11 +165,24 @@ SELECT check_name, mismatches, details FROM derivatives.reconciliation_runs ORDE
 - 指标：`derivatives_fills_total`、`derivatives_settlements_parked_total`、`derivatives_reconcile_mismatches{check}`、`derivatives_reconcile_last_success_timestamp_seconds`、`kafka_consumer_lag{group="derivatives-service"}`、`outbox_pending{schema="derivatives"}`。
 - 日志：`contract settlement refused by the ledger; parked`、`contract under reduce-only`、`derivatives invariant broken`、`recovery failed`。
 
+## 管理后台与读模型
+
+- 管理后台「合约」页（[admin.md](admin.md#功能)）：合约状态与只减仓（解除需 `derivatives.write`，改状态需 `instruments.write`）、保险基金余额与 `PNL_CLEARING`、发起保险基金注资（双人审批，批准后账本 `FundInsurance` 以幂等键 `approval:<id>` 记 `INSURANCE_CONTRIBUTION`，需开关 `ledger.manual_adjustment`）、强平监控（每 5 秒刷新）、强平记录。报表页有合约日报与当前持仓量。
+- ClickHouse 读模型（`migrations/clickhouse/00005_derivatives_read_models.sql`，analytics-consumer 投影，见 [analytics.md](analytics.md)）：`derivatives_positions`（每个仓位的最新快照，按 `version` 取最新）、`derivatives_fills`（已记账的成交，每笔两边各一行，带名义价值）、`derivatives_funding`（每个仓位每次资金费）、`derivatives_liquidations`（WARNING、STARTED、FILLED、ADL 各步骤）。合约的订单与成交并入现货的 `orders`、`order_updates`、`trades`（按 `symbol` 区分），所以交易报表与 K 线也覆盖合约。
+
+```sql
+-- ClickHouse
+SELECT symbol, sumIf(quantity, quantity > 0) AS long_qty, countIf(quantity != 0) AS positions FROM derivatives_positions FINAL GROUP BY symbol;
+SELECT toDate(funding_time) AS day, symbol, sum(amount) FROM derivatives_funding FINAL GROUP BY day, symbol ORDER BY day DESC;
+SELECT kind, user_id, symbol, quantity, realized_pnl, insurance_paid, occurred_at FROM derivatives_liquidations FINAL ORDER BY occurred_at DESC LIMIT 20;
+```
+
 ## 故障与处理
 
 | 情况 | 表现 | 处理 |
 |---|---|---|
 | 账本不可用 | 下单停在 PENDING、成交批次重试、积压上升 | 恢复后自动继续；冻结与结算都按键幂等 |
-| 标记价中断 | 下单报 `DERIV_MARK_PRICE_UNAVAILABLE`；10 秒后合约只减仓 | 查 market-data-service 与参考行情；恢复后 `exchangectl derivatives resume` |
-| 保险基金不足 | 结算停放、对账两项非零 | 注资后自动重试 |
+| 标记价中断 | 下单报 `DERIV_MARK_PRICE_UNAVAILABLE`；10 秒后合约只减仓 | 查 market-data-service 与参考行情；恢复后在管理后台解除或 `exchangectl derivatives resume` |
+| 保险基金不足 | 结算停放、对账两项非零 | 管理后台发起注资（双人审批）或 `exchangectl ledger insurance-fund`，之后自动重试 |
+| 资金费轮次卡住 | `exchangectl derivatives funding` 非零退出 | 查 market-data-service 是否结算了该周期的费率（`/v1/market/{symbol}/funding-rates`）；2 小时后自动跳过 |
 | 对账不平但无停放 | 说明计划或账本有缺陷 | P1：停开关 `derivatives.trading`，按 `reconciliation_runs.details` 与成交记录排查 |

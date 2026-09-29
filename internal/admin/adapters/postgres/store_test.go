@@ -16,6 +16,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/admin/adapters/postgres"
 	"github.com/lidp280504357/exchange/internal/admin/application"
 	"github.com/lidp280504357/exchange/internal/admin/domain"
+	"github.com/lidp280504357/exchange/internal/admin/ports"
 	"github.com/lidp280504357/exchange/internal/admin/transport/httpapi"
 	"github.com/lidp280504357/exchange/internal/platform/event"
 	"github.com/lidp280504357/exchange/internal/platform/httpx"
@@ -33,6 +34,13 @@ func (l *ledger) Adjust(_ context.Context, key, _, _ string, _ decimal.Decimal, 
 	l.keys = append(l.keys, key)
 	return "j1", nil
 }
+
+func (l *ledger) FundInsurance(_ context.Context, key, _ string, _ decimal.Decimal, _, _ string) (string, error) {
+	l.keys = append(l.keys, key)
+	return "j2", nil
+}
+
+func (l *ledger) SystemBalances(context.Context, string) ([]ports.Balance, error) { return nil, nil }
 
 type client struct {
 	t      *testing.T

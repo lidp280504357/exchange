@@ -72,6 +72,15 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/reports/trading", h.tradingReport)
 			r.Get("/reports/wallet", h.walletReport)
 			r.Get("/reports/candles", h.candleReport)
+			r.Get("/reports/derivatives", h.derivativesReport)
+			r.Get("/reports/open-interest", h.openInterest)
+			r.Get("/derivatives/contracts", h.derivativesContracts)
+			r.Post("/derivatives/contracts/{symbol}/status", h.contractStatus)
+			r.Post("/derivatives/contracts/{symbol}/lift-reduce-only", h.liftReduceOnly)
+			r.Get("/derivatives/risk", h.derivativesRisk)
+			r.Get("/derivatives/liquidations", h.liquidations)
+			r.Get("/derivatives/insurance-fund", h.insuranceFund)
+			r.Post("/derivatives/insurance-fund/contributions", h.requestInsuranceFunding)
 		})
 	})
 }
@@ -442,4 +451,116 @@ func (h *Handler) candleReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": list})
+}
+
+func (h *Handler) derivativesReport(w http.ResponseWriter, r *http.Request) {
+	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+	list, err := h.Svc.DerivativesReport(r.Context(), principal(r), days)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": list})
+}
+
+func (h *Handler) openInterest(w http.ResponseWriter, r *http.Request) {
+	list, err := h.Svc.OpenInterest(r.Context(), principal(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": list})
+}
+
+func (h *Handler) derivativesContracts(w http.ResponseWriter, r *http.Request) {
+	raw, err := h.Svc.DerivativesContracts(r.Context(), principal(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeRaw(w, raw)
+}
+
+func (h *Handler) contractStatus(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		To     string `json:"to"`
+		Reason string `json:"reason"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	from, err := h.Svc.SetContractStatus(r.Context(), principal(r), chi.URLParam(r, "symbol"), strings.ToUpper(body.To), body.Reason)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]string{"from": from, "to": strings.ToUpper(body.To)})
+}
+
+func (h *Handler) liftReduceOnly(w http.ResponseWriter, r *http.Request) {
+	var body reasonBody
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	raw, err := h.Svc.LiftReduceOnly(r.Context(), principal(r), chi.URLParam(r, "symbol"), body.Reason)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeRaw(w, raw)
+}
+
+func (h *Handler) derivativesRisk(w http.ResponseWriter, r *http.Request) {
+	raw, err := h.Svc.DerivativesRisk(r.Context(), principal(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeRaw(w, raw)
+}
+
+func (h *Handler) liquidations(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	days, _ := strconv.Atoi(q.Get("days"))
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	list, err := h.Svc.Liquidations(r.Context(), principal(r), days, q.Get("kind"), limit)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": list})
+}
+
+func (h *Handler) insuranceFund(w http.ResponseWriter, r *http.Request) {
+	fund, err := h.Svc.InsuranceFund(r.Context(), principal(r), r.URL.Query().Get("asset"))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, fund)
+}
+
+func (h *Handler) requestInsuranceFunding(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Asset  string `json:"asset"`
+		Amount string `json:"amount"`
+		Reason string `json:"reason"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	amount, err := decimal.NewFromString(body.Amount)
+	if err != nil {
+		httpx.WriteError(w, r, apperr.Invalid("amount must be a decimal string"))
+		return
+	}
+	a, err := h.Svc.RequestInsuranceFunding(r.Context(), principal(r), body.Asset, amount, body.Reason)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusCreated, approvalJSON(a))
 }

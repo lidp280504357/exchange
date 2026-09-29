@@ -16,6 +16,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	derivativesv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/derivatives/v1"
 	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
 	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
 	tradev1 "github.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1"
@@ -27,10 +28,15 @@ import (
 // Read models of trading and the wallet (implementation plan §6.3 task
 // 12; tables in migrations/clickhouse/00004_read_models.sql): typed rows
 // projected from order.events, trade.events and wallet.*.events, and
-// one-minute candles recomputed from trades.
+// one-minute candles recomputed from trades. Contract orders and trades
+// join them; positions, fills, funding and liquidations of contracts
+// have tables of their own (§7.3 task 10, 00005_derivatives_read_models.sql).
 
 // ReadModelTopics feed the read models.
-var ReadModelTopics = []string{event.TopicOrder, event.TopicTrade, event.TopicWalletDeposit, event.TopicWalletWithdrawal}
+var ReadModelTopics = []string{
+	event.TopicOrder, event.TopicTrade, event.TopicWalletDeposit, event.TopicWalletWithdrawal,
+	event.TopicDerivOrder, event.TopicDerivTrade, event.TopicDerivPosition, event.TopicDerivLiquidation,
+}
 
 const (
 	insertTrades = `INSERT INTO trades (trade_id, symbol, base_asset, quote_asset, trade_number, sequence, price, quantity,
@@ -44,6 +50,15 @@ const (
 		block_number, amount, status, unclaimed, reason, confirmations, required_confirmations, journal_id, updated_at, version)`
 	insertWithdrawals = `INSERT INTO wallet_withdrawals (withdrawal_id, user_id, asset, network, address, amount, fee, status,
 		internal, tx_hash, confirmations, required_confirmations, risk_reasons, reject_reason, updated_at, version)`
+	insertPositions = `INSERT INTO derivatives_positions (position_id, user_id, symbol, position_side, quantity, entry_price,
+		entry_cost, margin, margin_mode, leverage, realized_pnl, funding, updated_at, version)`
+	insertDerivFills = `INSERT INTO derivatives_fills (trade_id, order_id, user_id, symbol, side, position_side, maker, price,
+		quantity, notional, closed_quantity, fee, realized_pnl, liquidation, executed_at)`
+	insertFunding = `INSERT INTO derivatives_funding (position_id, user_id, symbol, position_side, margin_mode, funding_time,
+		funding_rate, mark_price, amount, settled_at)`
+	insertLiquidations = `INSERT INTO derivatives_liquidations (event_id, kind, user_id, symbol, position_side, cross_margin, adl,
+		trade_id, price, quantity, realized_pnl, insurance_paid, mark_price, bankruptcy_price, margin_balance, maintenance_margin,
+		occurred_at)`
 	// refreshCandles rewrites the one-minute candles of a symbol between
 	// two minutes from all its trades there.
 	refreshCandles = `INSERT INTO candles_1m (symbol, open_time, open, high, low, close, volume, quote_volume, trades, updated_at)
@@ -124,6 +139,7 @@ type span struct{ from, to time.Time }
 // readModels holds the rows of one batch.
 type readModels struct {
 	trades, orders, updates, deposits, withdrawals [][]any
+	positions, fills, funding, liquidations        [][]any
 	touched                                        map[string]span
 }
 
@@ -131,7 +147,8 @@ type readModels struct {
 // skipped. Events the read models do not use are ignored.
 func (m *readModels) add(d kafka.Delivery) error {
 	switch d.Topic {
-	case event.TopicTrade, event.TopicOrder, event.TopicWalletDeposit, event.TopicWalletWithdrawal:
+	case event.TopicTrade, event.TopicOrder, event.TopicWalletDeposit, event.TopicWalletWithdrawal, event.TopicDerivOrder,
+		event.TopicDerivTrade, event.TopicDerivPosition, event.TopicDerivLiquidation:
 	default:
 		return nil
 	}
@@ -141,6 +158,9 @@ func (m *readModels) add(d kafka.Delivery) error {
 		return fmt.Errorf("%w: payload: %w", errMalformed, err)
 	}
 	at := env.GetOccurredAt().AsTime()
+	if d.Topic == event.TopicDerivPosition || d.Topic == event.TopicDerivLiquidation {
+		return m.addDerivatives(msg, env.GetEventId(), at)
+	}
 	switch e := msg.(type) {
 	case *tradev1.TradeExecuted:
 		return m.addTrade(e, at)
@@ -305,6 +325,149 @@ func (m *readModels) addWithdrawal(w *walletv1.Withdrawal, at time.Time) error {
 	return nil
 }
 
+// positionEvent is an event that carries a position snapshot.
+type positionEvent interface {
+	GetPosition() *derivativesv1.Position
+}
+
+// addDerivatives projects a position or liquidation event of
+// derivatives-service: the position snapshot it carries, and the fill,
+// funding payment or liquidation step.
+func (m *readModels) addDerivatives(msg proto.Message, eventID string, at time.Time) error {
+	if e, ok := msg.(positionEvent); ok && e.GetPosition() != nil {
+		if err := m.addPosition(e.GetPosition(), at); err != nil {
+			return err
+		}
+	}
+	switch e := msg.(type) {
+	case *derivativesv1.FillSettled:
+		return m.addDerivFill(e)
+	case *derivativesv1.FundingPaid:
+		return m.addFunding(e, at)
+	case *derivativesv1.LiquidationWarning:
+		return m.addLiquidation(liquidationStep{
+			kind: "WARNING", userID: e.GetUserId(), symbol: e.GetSymbol(), positionSide: e.GetPositionSide(), cross: e.GetCross(),
+			marginBalance: e.GetMarginBalance(), maintenanceMargin: e.GetMaintenanceMargin(),
+		}, eventID, at)
+	case *derivativesv1.LiquidationStarted:
+		p := e.GetPosition()
+		return m.addLiquidation(liquidationStep{
+			kind: "STARTED", userID: p.GetUserId(), symbol: p.GetSymbol(), positionSide: p.GetPositionSide(), cross: e.GetCross(),
+			quantity: p.GetQuantity(), markPrice: e.GetMarkPrice(), bankruptcyPrice: e.GetBankruptcyPrice(),
+			marginBalance: e.GetMarginBalance(), maintenanceMargin: e.GetMaintenanceMargin(),
+		}, eventID, at)
+	case *derivativesv1.LiquidationFilled:
+		return m.addLiquidation(liquidationStep{
+			kind: "FILLED", userID: e.GetUserId(), symbol: e.GetSymbol(), positionSide: e.GetPositionSide(), adl: e.GetAdl(),
+			tradeID: e.GetTradeId(), price: e.GetPrice(), quantity: e.GetQuantity(), realizedPnL: e.GetRealizedPnl(),
+			insurancePaid: e.GetInsurancePaid(),
+		}, eventID, at)
+	case *derivativesv1.AdlExecuted:
+		return m.addLiquidation(liquidationStep{
+			kind: "ADL", userID: e.GetUserId(), symbol: e.GetSymbol(), positionSide: e.GetPositionSide(), adl: true,
+			tradeID: e.GetTradeId(), price: e.GetPrice(), quantity: e.GetQuantity(), realizedPnL: e.GetRealizedPnl(),
+		}, eventID, at)
+	}
+	return nil
+}
+
+func (m *readModels) addPosition(p *derivativesv1.Position, at time.Time) error {
+	positionID, err := id(p.GetPositionId())
+	userID, err2 := id(p.GetUserId())
+	qty, err3 := amount(p.GetQuantity())
+	entryPrice, err4 := optional(p.GetEntryPrice())
+	entryCost, err5 := amount(p.GetEntryCost())
+	margin, err6 := amount(p.GetMargin())
+	pnl, err7 := amount(p.GetRealizedPnl())
+	funding, err8 := amount(p.GetFunding())
+	if err := errors.Join(err, err2, err3, err4, err5, err6, err7, err8); err != nil {
+		return err
+	}
+	if p.GetVersion() < 0 {
+		return fmt.Errorf("%w: position version %d", errMalformed, p.GetVersion())
+	}
+	m.positions = append(m.positions, []any{
+		positionID, userID, p.GetSymbol(), p.GetPositionSide(), qty, entryPrice, entryCost, margin, p.GetMarginMode(), p.GetLeverage(),
+		pnl, funding, at, uint64(p.GetVersion()), //nolint:gosec // checked non-negative above
+	})
+	return nil
+}
+
+func (m *readModels) addDerivFill(f *derivativesv1.FillSettled) error {
+	var errs []error
+	check := func(err error) { errs = append(errs, err) }
+	tradeID, err := id(f.GetTradeId())
+	check(err)
+	orderID, err := id(f.GetOrderId())
+	check(err)
+	userID, err := id(f.GetUserId())
+	check(err)
+	price, err := amount(f.GetPrice())
+	check(err)
+	qty, err := amount(f.GetQuantity())
+	check(err)
+	closed, err := amount(f.GetClosedQuantity())
+	check(err)
+	fee, err := amount(f.GetFee())
+	check(err)
+	pnl, err := amount(f.GetRealizedPnl())
+	check(err)
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
+	m.fills = append(m.fills, []any{
+		tradeID, orderID, userID, f.GetSymbol(), f.GetSide(), f.GetPositionSide(), f.GetMaker(), price, qty, price.Mul(qty), closed, fee,
+		pnl, f.GetLiquidation(), f.GetExecutedAt().AsTime(),
+	})
+	return nil
+}
+
+func (m *readModels) addFunding(e *derivativesv1.FundingPaid, at time.Time) error {
+	p := e.GetPosition()
+	positionID, err := id(p.GetPositionId())
+	userID, err2 := id(p.GetUserId())
+	rate, err3 := amount(e.GetFundingRate())
+	mark, err4 := amount(e.GetMarkPrice())
+	amt, err5 := amount(e.GetAmount())
+	if err := errors.Join(err, err2, err3, err4, err5); err != nil {
+		return err
+	}
+	m.funding = append(m.funding, []any{
+		positionID, userID, p.GetSymbol(), p.GetPositionSide(), p.GetMarginMode(), e.GetFundingTime().AsTime(), rate, mark, amt, at,
+	})
+	return nil
+}
+
+// liquidationStep is a row of derivatives_liquidations; empty amounts are
+// 0.
+type liquidationStep struct {
+	kind, userID, symbol, positionSide, tradeID                  string
+	cross, adl                                                   bool
+	price, quantity, realizedPnL, insurancePaid                  string
+	markPrice, bankruptcyPrice, marginBalance, maintenanceMargin string
+}
+
+func (m *readModels) addLiquidation(l liquidationStep, eventID string, at time.Time) error {
+	eid, err := id(eventID)
+	userID, err2 := id(l.userID)
+	errs := []error{err, err2}
+	amounts := make([]any, 0, 8)
+	for _, s := range []string{
+		l.price, l.quantity, l.realizedPnL, l.insurancePaid, l.markPrice, l.bankruptcyPrice, l.marginBalance,
+		l.maintenanceMargin,
+	} {
+		v, err := amount(s)
+		errs = append(errs, err)
+		amounts = append(amounts, v)
+	}
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
+	row := []any{eid, l.kind, userID, l.symbol, l.positionSide, l.cross, l.adl, l.tradeID}
+	m.liquidations = append(m.liquidations, append(append(row, amounts...), at))
+	return nil
+}
+
 // storeReadModels writes a batch's rows, then recomputes the candles of the
 // minutes its trades fell in.
 func (in *Ingestor) storeReadModels(ctx context.Context, batch []kafka.Delivery) error {
@@ -324,6 +487,10 @@ func (in *Ingestor) storeReadModels(ctx context.Context, batch []kafka.Delivery)
 		{insertOrderUpdates, m.updates},
 		{insertDeposits, m.deposits},
 		{insertWithdrawals, m.withdrawals},
+		{insertPositions, m.positions},
+		{insertDerivFills, m.fills},
+		{insertFunding, m.funding},
+		{insertLiquidations, m.liquidations},
 	} {
 		if err := in.insert(ctx, t.insert, t.rows); err != nil {
 			return err
@@ -360,8 +527,9 @@ func (in *Ingestor) insert(ctx context.Context, insert string, rows [][]any) err
 }
 
 // backfillName marks the backfill of the read models in
-// read_model_backfills; a new read model needs a new name.
-const backfillName = "read-models-v1"
+// read_model_backfills; a new read model needs a new name (v2: the
+// contract read models).
+const backfillName = "read-models-v2"
 
 // BackfillReadModels projects the events stored before the read models
 // existed, page by page in event order, once (recorded in

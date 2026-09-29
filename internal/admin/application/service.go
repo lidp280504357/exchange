@@ -1,7 +1,8 @@
 // Package application runs the admin console (requirements §5.12):
 // sign-in with a password and an authenticator code, role checks on every
-// action, two-person approval of ledger adjustments, and an audit event
-// for every change the acting service does not audit itself.
+// action, two-person approval of ledger adjustments and insurance fund
+// contributions, and an audit event for every change the acting service
+// does not audit itself.
 package application
 
 import (
@@ -9,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,19 +28,21 @@ import (
 
 // Service is the admin console.
 type Service struct {
-	Store    ports.Store
-	Hasher   *password.Hasher
-	Box      *secretbox.Box
-	Users    ports.Users
-	Orders   ports.Orders
-	Wallet   ports.Withdrawals
-	Catalog  ports.Instruments
-	Flags    ports.Flags
-	Ledger   ports.Ledger
-	AuditLog ports.AuditLog
-	Reports  ports.Reports
-	Log      *slog.Logger
-	Now      func() time.Time
+	Store   ports.Store
+	Hasher  *password.Hasher
+	Box     *secretbox.Box
+	Users   ports.Users
+	Orders  ports.Orders
+	Wallet  ports.Withdrawals
+	Catalog ports.Instruments
+	// Derivatives is derivatives-service (perpetual contracts).
+	Derivatives ports.Derivatives
+	Flags       ports.Flags
+	Ledger      ports.Ledger
+	AuditLog    ports.AuditLog
+	Reports     ports.Reports
+	Log         *slog.Logger
+	Now         func() time.Time
 }
 
 // Principal is the administrator behind a request.
@@ -365,6 +369,13 @@ func (s *Service) Approvals(ctx context.Context, p Principal, status string) ([]
 	return s.Store.Read().Approvals().List(ctx, status, 100)
 }
 
+// approvalActions names the audit actions of approving and rejecting each
+// kind of request.
+var approvalActions = map[string][2]string{
+	domain.KindLedgerAdjustment: {"admin.ledger.adjustment_approved", "admin.ledger.adjustment_rejected"},
+	domain.KindInsuranceFund:    {"admin.derivatives.insurance_approved", "admin.derivatives.insurance_rejected"},
+}
+
 // DecideApproval approves (and carries out) or rejects another
 // administrator's request. The request stays locked while the ledger
 // books it, so a second decision waits and then finds it decided.
@@ -392,11 +403,15 @@ func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, ap
 		}
 		a = *cur
 		a.DecidedBy, a.DecidedAt = p.Admin.ID, s.Now()
-		action := "admin.ledger.adjustment_rejected"
+		actions, ok := approvalActions[a.Kind]
+		if !ok {
+			return fmt.Errorf("approval %s: unknown kind %q", a.ID, a.Kind)
+		}
+		action := actions[1]
 		if !approve {
 			a.Status, a.Result = domain.ApprovalRejected, strings.TrimSpace(reason)
 		} else {
-			action = "admin.ledger.adjustment_approved"
+			action = actions[0]
 			if err := s.execute(ctx, &a, p, reason); err != nil {
 				return err
 			}
@@ -415,16 +430,23 @@ func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, ap
 	return a, nil
 }
 
-// execute books an approved adjustment. An error means the outcome is
-// unknown: the request stays pending and the idempotency key makes a
-// second approval safe. A refusal marks the request FAILED.
+// execute books an approved adjustment or insurance fund contribution. An
+// error means the outcome is unknown: the request stays pending and the
+// idempotency key makes a second approval safe. A refusal marks the
+// request FAILED.
 func (s *Service) execute(ctx context.Context, a *domain.Approval, p Principal, reason string) error {
 	amount, err := decimal.NewFromString(a.Payload["amount"])
 	if err != nil {
 		return err
 	}
-	journal, err := s.Ledger.Adjust(ctx, "approval:"+a.ID, a.Payload["user_id"], a.Payload["asset"], amount, p.Admin.Email,
-		a.Reason+" (approved: "+strings.TrimSpace(reason)+")")
+	key, note := "approval:"+a.ID, a.Reason+" (approved: "+strings.TrimSpace(reason)+")"
+	var journal string
+	switch a.Kind {
+	case domain.KindInsuranceFund:
+		journal, err = s.Ledger.FundInsurance(ctx, key, a.Payload["asset"], amount, p.Admin.Email, note)
+	default:
+		journal, err = s.Ledger.Adjust(ctx, key, a.Payload["user_id"], a.Payload["asset"], amount, p.Admin.Email, note)
+	}
 	if err != nil {
 		var e *apperr.Error
 		if !errors.As(err, &e) || e.Kind == apperr.KindUnavailable || e.Kind == apperr.KindInternal {
@@ -435,6 +457,151 @@ func (s *Service) execute(ctx context.Context, a *domain.Approval, p Principal, 
 	}
 	a.Status, a.Result = domain.ApprovalExecuted, "journal "+journal
 	return nil
+}
+
+// DerivativesContracts returns each perpetual contract's status,
+// reduce-only state, mark price and open interest.
+func (s *Service) DerivativesContracts(ctx context.Context, p Principal) ([]byte, error) {
+	if err := p.require(domain.PermDerivativesRead); err != nil {
+		return nil, err
+	}
+	return s.Derivatives.Contracts(ctx)
+}
+
+// SetContractStatus moves a perpetual contract to another status;
+// instrument-service records the change.
+func (s *Service) SetContractStatus(ctx context.Context, p Principal, symbol, to, reason string) (string, error) {
+	if err := p.require(domain.PermInstrumentsEdit); err != nil {
+		return "", err
+	}
+	if err := needReason(reason); err != nil {
+		return "", err
+	}
+	from, err := s.Catalog.SetContractStatus(ctx, symbol, to, reason, p.Admin.Email)
+	if err != nil {
+		return "", err
+	}
+	return from, s.audit(ctx, p, "contract:"+strings.ToUpper(symbol), "admin.instruments.contract_status", reason,
+		fmt.Sprintf(`{"from":%q,"to":%q}`, from, to))
+}
+
+// LiftReduceOnly ends a contract's reduce-only (requirements §11.7: the
+// system degrades on its own, a person decides the market is sound again).
+func (s *Service) LiftReduceOnly(ctx context.Context, p Principal, symbol, reason string) ([]byte, error) {
+	if err := p.require(domain.PermDerivativesEdit); err != nil {
+		return nil, err
+	}
+	if err := needReason(reason); err != nil {
+		return nil, err
+	}
+	raw, err := s.Derivatives.LiftReduceOnly(ctx, symbol, p.Admin.Email)
+	if err != nil {
+		return nil, err
+	}
+	return raw, s.audit(ctx, p, "contract:"+strings.ToUpper(symbol), "admin.derivatives.reduce_only_lifted", reason, string(raw))
+}
+
+// DerivativesRisk returns the positions warned, taken over by the
+// liquidation engine or close to it.
+func (s *Service) DerivativesRisk(ctx context.Context, p Principal) ([]byte, error) {
+	if err := p.require(domain.PermDerivativesRead); err != nil {
+		return nil, err
+	}
+	return s.Derivatives.Risk(ctx)
+}
+
+// System accounts of perpetual contracts in the ledger.
+const (
+	accountInsuranceFund = "INSURANCE_FUND"
+	accountPnLClearing   = "PNL_CLEARING"
+)
+
+// InsuranceFund is the insurance fund's balance in an asset, with the
+// PnL clearing account's (the open positions' unsettled results; it may
+// be negative).
+type InsuranceFund struct {
+	Asset       string `json:"asset"`
+	Balance     string `json:"balance"`
+	PnLClearing string `json:"pnl_clearing"`
+}
+
+func assetOrUSDT(asset string) string {
+	if asset = strings.ToUpper(strings.TrimSpace(asset)); asset == "" {
+		return "USDT"
+	}
+	return asset
+}
+
+// InsuranceFund returns the insurance fund of an asset (default USDT).
+func (s *Service) InsuranceFund(ctx context.Context, p Principal, asset string) (InsuranceFund, error) {
+	if err := p.require(domain.PermDerivativesRead); err != nil {
+		return InsuranceFund{}, err
+	}
+	asset = assetOrUSDT(asset)
+	list, err := s.Ledger.SystemBalances(ctx, asset)
+	if err != nil {
+		return InsuranceFund{}, err
+	}
+	out := InsuranceFund{Asset: asset, Balance: "0", PnLClearing: "0"}
+	for _, b := range list {
+		switch b.AccountType {
+		case accountInsuranceFund:
+			out.Balance = b.Available
+		case accountPnLClearing:
+			out.PnLClearing = b.Available
+		}
+	}
+	return out, nil
+}
+
+// RequestInsuranceFunding records a contribution of simulated funds to the
+// insurance fund for a second administrator to approve.
+func (s *Service) RequestInsuranceFunding(ctx context.Context, p Principal, asset string, amount decimal.Decimal, reason string) (domain.Approval, error) {
+	if err := p.require(domain.PermAdjustRequest); err != nil {
+		return domain.Approval{}, err
+	}
+	if err := needReason(reason); err != nil {
+		return domain.Approval{}, err
+	}
+	if !amount.IsPositive() {
+		return domain.Approval{}, apperr.Invalid("the amount must be positive")
+	}
+	asset = assetOrUSDT(asset)
+	a := domain.Approval{
+		ID: uuid.Must(uuid.NewV7()).String(), Kind: domain.KindInsuranceFund, Reason: strings.TrimSpace(reason),
+		Payload: map[string]string{"asset": asset, "amount": amount.String()},
+		Status:  domain.ApprovalPending, RequestedBy: p.Admin.ID, CreatedAt: s.Now(),
+	}
+	err := s.Store.Tx(ctx, func(r ports.Repos) error {
+		if err := r.Approvals().Insert(ctx, a); err != nil {
+			return err
+		}
+		return r.Audit(ctx, &auditv1.AdminActionPerformed{
+			Target: "insurance:" + asset, Action: "admin.derivatives.insurance_requested", Actor: p.Admin.Email, Reason: a.Reason,
+			Details: fmt.Sprintf(`{"approval_id":%q,"amount":%q}`, a.ID, a.Payload["amount"]),
+		}, p.Admin.Email)
+	})
+	return a, err
+}
+
+// Liquidation step kinds of the read model.
+var liquidationKinds = []string{"", "WARNING", "STARTED", "FILLED", "ADL"}
+
+// Liquidations returns the newest liquidation steps of the last days
+// (default 7, at most 90), of one kind (WARNING, STARTED, FILLED, ADL)
+// or all; at most limit (default 100, at most 500).
+func (s *Service) Liquidations(ctx context.Context, p Principal, days int, kind string, limit int) ([]ports.LiquidationStep, error) {
+	if err := p.require(domain.PermDerivativesRead); err != nil {
+		return nil, err
+	}
+	kind = strings.ToUpper(strings.TrimSpace(kind))
+	if !slices.Contains(liquidationKinds, kind) {
+		return nil, apperr.Invalid("kind must be WARNING, STARTED, FILLED or ADL")
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	return s.Reports.Liquidations(ctx, reportDays(days), kind, limit)
 }
 
 // AuditLogs searches the audit trail.
@@ -473,6 +640,24 @@ func (s *Service) WalletReport(ctx context.Context, p Principal, days int) ([]po
 		return nil, err
 	}
 	return s.Reports.Wallet(ctx, reportDays(days))
+}
+
+// DerivativesReport returns each contract's fills, fees, results,
+// funding and liquidations per day for the last days.
+func (s *Service) DerivativesReport(ctx context.Context, p Principal, days int) ([]ports.DerivativesDay, error) {
+	if err := p.require(domain.PermReportsRead); err != nil {
+		return nil, err
+	}
+	return s.Reports.Derivatives(ctx, reportDays(days))
+}
+
+// OpenInterest returns each contract's open positions from the read
+// model.
+func (s *Service) OpenInterest(ctx context.Context, p Principal) ([]ports.OpenInterest, error) {
+	if err := p.require(domain.PermReportsRead); err != nil {
+		return nil, err
+	}
+	return s.Reports.OpenInterest(ctx)
 }
 
 // CandleReport returns the newest candles of a symbol (default 48, at most

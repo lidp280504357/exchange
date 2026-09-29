@@ -1,8 +1,8 @@
 // Package backends connects the admin console to the services it acts on:
 // gRPC to auth-, user-, ledger- and instrument-service, internal REST to
-// wallet- and spot-trading-service (never routed by the gateway), the
-// shared config schema for feature flags, and ClickHouse for the audit
-// trail.
+// wallet-, spot-trading- and derivatives-service (never routed by the
+// gateway), the shared config schema for feature flags, and ClickHouse
+// for the audit trail and the read models.
 package backends
 
 import (
@@ -101,6 +101,30 @@ func (l Ledger) Adjust(ctx context.Context, key, userID, asset string, amount de
 	return resp.GetPosting().GetJournalId(), nil
 }
 
+// FundInsurance books an approved contribution to the insurance fund.
+func (l Ledger) FundInsurance(ctx context.Context, key, asset string, amount decimal.Decimal, actor, reason string) (string, error) {
+	resp, err := l.C.FundInsurance(ctx, &ledgerv1.FundInsuranceRequest{
+		IdempotencyKey: key, Asset: asset, Amount: amount.String(), Reason: reason, Actor: actor,
+	})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetPosting().GetJournalId(), nil
+}
+
+// SystemBalances returns the platform's system accounts in an asset.
+func (l Ledger) SystemBalances(ctx context.Context, asset string) ([]ports.Balance, error) {
+	resp, err := l.C.GetSystemBalances(ctx, &ledgerv1.GetSystemBalancesRequest{Asset: asset})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ports.Balance, 0, len(resp.GetBalances()))
+	for _, b := range resp.GetBalances() {
+		out = append(out, ports.Balance{AccountType: b.GetAccountType(), Asset: b.GetAsset(), Available: b.GetAvailable(), Frozen: b.GetFrozen()})
+	}
+	return out, nil
+}
+
 // Instruments implements ports.Instruments.
 type Instruments struct {
 	C instrumentv1.InstrumentServiceClient
@@ -108,13 +132,17 @@ type Instruments struct {
 
 var protoJSON = protojson.MarshalOptions{UseProtoNames: true, EmitUnpopulated: true}
 
-// List returns the assets and pairs as JSON.
+// List returns the assets, pairs and contracts as JSON.
 func (i Instruments) List(ctx context.Context) (json.RawMessage, error) {
 	assets, err := i.C.ListAssets(ctx, &instrumentv1.ListAssetsRequest{})
 	if err != nil {
 		return nil, err
 	}
 	pairs, err := i.C.ListTradingPairs(ctx, &instrumentv1.ListTradingPairsRequest{})
+	if err != nil {
+		return nil, err
+	}
+	contracts, err := i.C.ListContracts(ctx, &instrumentv1.ListContractsRequest{})
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +154,12 @@ func (i Instruments) List(ctx context.Context) (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return json.RawMessage(`{"assets":` + string(field(a, "assets")) + `,"pairs":` + string(field(p, "pairs")) + `}`), nil
+	c, err := protoJSON.Marshal(contracts)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(`{"assets":` + string(field(a, "assets")) + `,"pairs":` + string(field(p, "pairs")) +
+		`,"contracts":` + string(field(c, "contracts")) + `}`), nil
 }
 
 // field extracts one array field of a JSON object ([] when missing).
@@ -141,6 +174,17 @@ func field(obj []byte, name string) json.RawMessage {
 // SetPairStatus moves a trading pair to another status.
 func (i Instruments) SetPairStatus(ctx context.Context, symbol, to, reason, actor string) (string, error) {
 	resp, err := i.C.SetPairStatus(ctx, &instrumentv1.SetPairStatusRequest{Symbol: strings.ToUpper(symbol), ToStatus: to, Reason: reason, Actor: actor})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetFromStatus(), nil
+}
+
+// SetContractStatus moves a perpetual contract to another status.
+func (i Instruments) SetContractStatus(ctx context.Context, symbol, to, reason, actor string) (string, error) {
+	resp, err := i.C.SetContractStatus(ctx, &instrumentv1.SetContractStatusRequest{
+		Symbol: strings.ToUpper(symbol), ToStatus: to, Reason: reason, Actor: actor,
+	})
 	if err != nil {
 		return "", err
 	}
@@ -246,6 +290,30 @@ type Trading struct {
 func (t Trading) CancelAll(ctx context.Context, userID string) error {
 	_, err := t.do(ctx, http.MethodDelete, t.Base+"/v1/orders", nil, map[string]string{"X-User-Id": userID})
 	return err
+}
+
+// Derivatives implements ports.Derivatives over derivatives-service's
+// internal API.
+type Derivatives struct {
+	REST
+	Base string
+}
+
+// Contracts returns each contract's status, reduce-only state, mark price
+// and open interest.
+func (d Derivatives) Contracts(ctx context.Context) (json.RawMessage, error) {
+	return d.do(ctx, http.MethodGet, d.Base+"/internal/derivatives/contracts", nil, nil)
+}
+
+// LiftReduceOnly ends a contract's reduce-only.
+func (d Derivatives) LiftReduceOnly(ctx context.Context, symbol, actor string) (json.RawMessage, error) {
+	return d.do(ctx, http.MethodPost, d.Base+"/internal/derivatives/contracts/"+url.PathEscape(strings.ToUpper(symbol))+"/lift-reduce-only",
+		map[string]string{"actor": actor}, nil)
+}
+
+// Risk returns the positions warned, taken over or close to it.
+func (d Derivatives) Risk(ctx context.Context) (json.RawMessage, error) {
+	return d.do(ctx, http.MethodGet, d.Base+"/internal/derivatives/risk", nil, nil)
 }
 
 // Flags implements ports.Flags on the shared config schema; a switch is
@@ -383,6 +451,32 @@ const walletReport = `SELECT day, asset, deposits, deposit_amount, withdrawals, 
 	) AS w USING (day, asset)
 	ORDER BY day DESC, asset`
 
+// derivativesReport sums each contract's day: its fills (volume and
+// notional once per trade, from the buying side), the funding its
+// positions paid and received at the day's settlements, and its
+// liquidations.
+const derivativesReport = `SELECT day, symbol, fills, volume, notional, fees, realized_pnl, funding_paid, funding_received,
+		liquidations, adl, insurance_paid FROM
+	(
+		SELECT toDate(executed_at) AS day, symbol, count() AS fills, sumIf(quantity, side = 'BUY') AS volume,
+			sumIf(notional, side = 'BUY') AS notional, sum(fee) AS fees, sum(realized_pnl) AS realized_pnl
+		FROM derivatives_fills FINAL WHERE executed_at >= toDateTime64(today() - ?, 3, 'UTC') GROUP BY day, symbol
+	) AS f
+	FULL OUTER JOIN
+	(
+		SELECT toDate(funding_time) AS day, symbol, -sumIf(amount, amount < 0) AS funding_paid,
+			sumIf(amount, amount > 0) AS funding_received
+		FROM derivatives_funding FINAL WHERE funding_time >= toDateTime(today() - ?, 'UTC') GROUP BY day, symbol
+	) AS u USING (day, symbol)
+	FULL OUTER JOIN
+	(
+		SELECT toDate(occurred_at) AS day, symbol, countIf(kind = 'STARTED') AS liquidations, countIf(kind = 'ADL') AS adl,
+			sumIf(insurance_paid, kind = 'FILLED') AS insurance_paid
+		FROM derivatives_liquidations FINAL WHERE symbol != '' AND occurred_at >= toDateTime64(today() - ?, 3, 'UTC')
+		GROUP BY day, symbol
+	) AS l USING (day, symbol)
+	ORDER BY day DESC, symbol`
+
 func unavailable(err error) error {
 	return apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "the read models are unavailable")
 }
@@ -455,6 +549,89 @@ func (r Reports) Candles(ctx context.Context, symbol string, seconds uint32, lim
 		}
 		c.Open, c.High, c.Low, c.Close, c.Volume, c.QuoteVolume = o.String(), h.String(), l.String(), cl.String(), v.String(), qv.String()
 		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, unavailable(err)
+	}
+	return out, nil
+}
+
+// Derivatives returns each contract's trading, funding and liquidations
+// per day for the last days.
+func (r Reports) Derivatives(ctx context.Context, days int) ([]ports.DerivativesDay, error) {
+	rows, err := r.Conn.Query(ctx, derivativesReport, days-1, days-1, days-1)
+	if err != nil {
+		return nil, unavailable(err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := []ports.DerivativesDay{}
+	for rows.Next() {
+		var d ports.DerivativesDay
+		var day time.Time
+		var volume, notional, fees, pnl, paid, received, insurance decimal.Decimal
+		if err := rows.Scan(&day, &d.Symbol, &d.Fills, &volume, &notional, &fees, &pnl, &paid, &received, &d.Liquidations, &d.ADL,
+			&insurance); err != nil {
+			return nil, unavailable(err)
+		}
+		d.Day, d.Volume, d.Notional, d.Fees, d.RealizedPnL = day.Format(time.DateOnly), volume.String(), notional.String(), fees.String(),
+			pnl.String()
+		d.FundingPaid, d.FundingReceived, d.InsurancePaid = paid.String(), received.String(), insurance.String()
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, unavailable(err)
+	}
+	return out, nil
+}
+
+// OpenInterest returns each contract's open long and short quantity and
+// positions from the latest position snapshots.
+func (r Reports) OpenInterest(ctx context.Context) ([]ports.OpenInterest, error) {
+	rows, err := r.Conn.Query(ctx, `SELECT symbol, sumIf(quantity, quantity > 0) AS long_qty, -sumIf(quantity, quantity < 0) AS short_qty,
+		countIf(quantity != 0) AS open_positions
+		FROM derivatives_positions FINAL GROUP BY symbol HAVING open_positions > 0 ORDER BY symbol`)
+	if err != nil {
+		return nil, unavailable(err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := []ports.OpenInterest{}
+	for rows.Next() {
+		var o ports.OpenInterest
+		var long, short decimal.Decimal
+		if err := rows.Scan(&o.Symbol, &long, &short, &o.Positions); err != nil {
+			return nil, unavailable(err)
+		}
+		o.Long, o.Short = long.String(), short.String()
+		out = append(out, o)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, unavailable(err)
+	}
+	return out, nil
+}
+
+// Liquidations returns the newest liquidation steps of the last days.
+func (r Reports) Liquidations(ctx context.Context, days int, kind string, limit int) ([]ports.LiquidationStep, error) {
+	rows, err := r.Conn.Query(ctx, `SELECT toString(event_id), kind, toString(user_id), symbol, position_side, cross_margin, adl, trade_id,
+		price, quantity, realized_pnl, insurance_paid, mark_price, bankruptcy_price, margin_balance, maintenance_margin, occurred_at
+		FROM derivatives_liquidations FINAL
+		WHERE occurred_at >= toDateTime64(today() - ?, 3, 'UTC') AND (? = '' OR kind = ?)
+		ORDER BY occurred_at DESC, event_id LIMIT ?`, days-1, kind, kind, limit)
+	if err != nil {
+		return nil, unavailable(err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := []ports.LiquidationStep{}
+	for rows.Next() {
+		var l ports.LiquidationStep
+		var v [8]decimal.Decimal
+		if err := rows.Scan(&l.EventID, &l.Kind, &l.UserID, &l.Symbol, &l.PositionSide, &l.Cross, &l.ADL, &l.TradeID, &v[0], &v[1], &v[2],
+			&v[3], &v[4], &v[5], &v[6], &v[7], &l.OccurredAt); err != nil {
+			return nil, unavailable(err)
+		}
+		l.Price, l.Quantity, l.RealizedPnL, l.InsurancePaid = v[0].String(), v[1].String(), v[2].String(), v[3].String()
+		l.MarkPrice, l.BankruptcyPrice, l.MarginBalance, l.MaintenanceMargin = v[4].String(), v[5].String(), v[6].String(), v[7].String()
+		out = append(out, l)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, unavailable(err)

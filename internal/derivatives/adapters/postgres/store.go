@@ -282,7 +282,8 @@ func (r positions) Open(ctx context.Context, symbol string) ([]domain.Position, 
 }
 
 func (r positions) Totals(ctx context.Context) (map[string]ports.Totals, error) {
-	rows, err := r.q.Query(ctx, `SELECT symbol, sum(quantity), sum(CASE WHEN quantity > 0 THEN entry_cost ELSE -entry_cost END)
+	rows, err := r.q.Query(ctx, `SELECT symbol, sum(quantity), sum(CASE WHEN quantity > 0 THEN entry_cost ELSE -entry_cost END),
+		coalesce(sum(quantity) FILTER (WHERE quantity > 0), 0), count(*) FILTER (WHERE quantity <> 0)
 		FROM positions GROUP BY symbol`)
 	if err != nil {
 		return nil, fmt.Errorf("position totals: %w", err)
@@ -292,7 +293,7 @@ func (r positions) Totals(ctx context.Context) (map[string]ports.Totals, error) 
 	for rows.Next() {
 		var symbol string
 		var t ports.Totals
-		if err := rows.Scan(&symbol, &t.NetQty, &t.NetCost); err != nil {
+		if err := rows.Scan(&symbol, &t.NetQty, &t.NetCost, &t.LongQty, &t.Positions); err != nil {
 			return nil, fmt.Errorf("position totals: %w", err)
 		}
 		out[symbol] = t

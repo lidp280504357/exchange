@@ -8,8 +8,10 @@
 浏览器 https://astras.vip/admin/ ──nginx──> 静态文件（web/admin 构建产物，/opt/exchange/infra/nginx/admin）
                           /admin/v1/* ──nginx──> admin-service:8093（不经用户网关）
 admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）、user-service（改账户状态）、
-                        ledger-service（余额、手动调账）、instrument-service（资产与交易对、改交易对状态）
-              ──内部 REST──> wallet-service（提现列表与审批）、spot-trading-service（撤销用户全部挂单）
+                        ledger-service（余额、手动调账、保险基金注资与系统账户余额）、
+                        instrument-service（资产、交易对与合约，改交易对与合约状态）
+              ──内部 REST──> wallet-service（提现列表与审批）、spot-trading-service（撤销用户全部挂单）、
+                             derivatives-service（合约状态与只减仓、强平监控）
               ──config schema──> 功能开关（与 exchangectl flags 同一张表，变更与审计事件同一事务）
               ──ClickHouse audit_logs──> 审计查询
               ──admin schema──> 管理员、会话、双人审批申请；自己的 outbox 发 audit.events
@@ -32,9 +34,9 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 | 角色 | 权限 |
 |---|---|
 | ADMIN | 全部 |
-| OPERATOR | 读 + 改账户状态、撤销用户挂单、改交易对状态、切换功能开关 |
-| FINANCE | 读 + 提现审批、发起与审批手动调账 |
-| AUDITOR | 只读（用户、资产与交易对、功能开关、提现、审计日志、报表） |
+| OPERATOR | 读 + 改账户状态、撤销用户挂单、改交易对与合约状态、解除合约只减仓（`derivatives.write`）、切换功能开关 |
+| FINANCE | 读 + 提现审批、发起与审批手动调账和保险基金注资 |
+| AUDITOR | 只读（用户、资产与交易对、合约（`derivatives.read`）、功能开关、提现、审计日志、报表） |
 
 越权返回 403 `ADMIN_FORBIDDEN`。前端按 `/admin/v1/me` 返回的权限列表显示菜单与按钮，但以服务端检查为准。
 
@@ -44,9 +46,10 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 - **用户**：按用户 ID、邮箱或手机号（`+` 开头的 E.164）查找，显示状态与余额；改账户状态（状态机见附录 B，原因为大写代码，例如 `SUSPICIOUS_LOGIN`、`REVIEW_CLEARED`）；强制撤销全部挂单（撮合引擎异步完成）。
 - **资产与交易对**：列出资产、网络与交易对；交易对状态是单交易对紧急开关（`TRADING ⇄ HALT`，`CANCEL_ONLY` 之后只能下线，不可恢复交易）。资产与网络参数（精度、充提开关、手续费等）仍以 `deploy/instruments/test.json` 为准，每次部署幂等同步，后台只读——否则下次部署会把后台改动覆盖回去。
 - **功能开关**：列出全部已知开关（从未设置的显示为关闭、版本 0），切换启用状态并写理由；地区、账户状态、白名单等规则保持不变（改规则用 `exchangectl flags set`）。服务 5 秒内生效。
-- **调账审批（双人）**：FINANCE/ADMIN 发起给用户现货账户加（正数）或扣（负数）某资产，另一位有审批权限的管理员批准后，由 ledger-service 以幂等键 `approval:<id>` 记 `MANUAL_ADJUSTMENT` 分录（对手方 `ADJUSTMENT` 系统账户）。自己不能批准自己的申请；账本拒绝（例如开关 `ledger.manual_adjustment` 关闭）则申请变为 `FAILED`；账本无响应则保持 `PENDING`，可再次批准（幂等键保证不重复记账）。审批期间申请行加锁，两人同时处理时后到者得到 `ADMIN_APPROVAL_DECIDED`。
-- **报表**（任务 12，所有角色可读）：来自 ClickHouse 读模型（[analytics.md](analytics.md)），按交易对与 UTC 日的成交笔数、成交量、成交额、受理与被拒订单；按资产与日的入账充值（不含未认领）与完成提现（金额、手续费）；任意交易对 1m/5m/15m/1h/4h/1d K 线。数据比服务晚几秒。
-- **审计日志**：按操作者（管理员邮箱、`cli:<用户名>`）或对象（`user:<id>`、`pair:<symbol>`、`flag:<key>`、`approval:<id>`、`admin:<id>`）查询 ClickHouse `audit_logs`，写入后几秒可查。后台的每个动作都有审计事件：登录/登录失败/退出、账户状态（user-service 记，操作者为管理员邮箱）、撤单、交易对状态、开关（含前后值）、调账申请/批准/驳回、提现审批（wallet-service 记）。
+- **合约**（阶段 3 任务 10，见 [derivatives.md](derivatives.md#管理后台与读模型)）：每个永续合约的状态、只减仓（原因与时间）、标记价是否新鲜、持仓量；解除只减仓（标记价恢复后才可操作，审计 `admin.derivatives.reduce_only_lifted`）；改合约状态（与交易对同一状态机，instrument-service 记录，审计 `admin.instruments.contract_status`，合约服务约一分钟内按新状态处理）；保险基金余额与 `PNL_CLEARING`；发起保险基金注资（双人审批，类型 `INSURANCE_FUND`）；强平监控（被接管、已预警、保证金率 ≥ 0.5 的仓位，每 5 秒刷新）；强平记录（读模型，可按 WARNING/STARTED/FILLED/ADL 过滤）。
+- **双人审批**（原「调账审批」）：FINANCE/ADMIN 发起给用户现货账户加（正数）或扣（负数）某资产，另一位有审批权限的管理员批准后，由 ledger-service 以幂等键 `approval:<id>` 记 `MANUAL_ADJUSTMENT` 分录（对手方 `ADJUSTMENT` 系统账户）。自己不能批准自己的申请；账本拒绝（例如开关 `ledger.manual_adjustment` 关闭）则申请变为 `FAILED`；账本无响应则保持 `PENDING`，可再次批准（幂等键保证不重复记账）。审批期间申请行加锁，两人同时处理时后到者得到 `ADMIN_APPROVAL_DECIDED`。保险基金注资申请（`INSURANCE_FUND`，金额为正）走同一流程，批准后账本 `FundInsurance` 以同样的幂等键记 `INSURANCE_CONTRIBUTION`（对手方 `ADJUSTMENT`），审计 `admin.derivatives.insurance_requested/approved/rejected`。
+- **报表**（任务 12，所有角色可读）：来自 ClickHouse 读模型（[analytics.md](analytics.md)），按交易对与 UTC 日的成交笔数、成交量、成交额、受理与被拒订单（含合约）；按资产与日的入账充值（不含未认领）与完成提现（金额、手续费）；任意交易对 1m/5m/15m/1h/4h/1d K 线；按合约与日的成交（双边笔数、成交量与成交额按买方算一次、手续费、已实现盈亏）、资金费付出与收到、强平数、ADL 数、保险基金垫付；当前各合约持仓量（多头、空头、持仓数）。数据比服务晚几秒。
+- **审计日志**：按操作者（管理员邮箱、`cli:<用户名>`）或对象（`user:<id>`、`pair:<symbol>`、`contract:<symbol>`、`insurance:<asset>`、`flag:<key>`、`approval:<id>`、`admin:<id>`）查询 ClickHouse `audit_logs`，写入后几秒可查。后台的每个动作都有审计事件：登录/登录失败/退出、账户状态（user-service 记，操作者为管理员邮箱）、撤单、交易对状态、开关（含前后值）、调账申请/批准/驳回、提现审批（wallet-service 记）。
 
 ## 运维
 
@@ -70,7 +73,8 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 - 锁定：等 15 分钟自动解锁；忘记密码或丢失 TOTP：停用后用新邮箱重建（没有重置入口，避免成为绕过 TOTP 的后门）。
 - IP 白名单（可选）：在服务器建 `/opt/exchange/infra/nginx/snippets/admin-access.local.conf`，内容如 `allow 203.0.113.7; deny all;`，`task deploy` 或 `nginx -s reload` 后对 `/admin/` 全部生效（真实客户端 IP 由 Cloudflare real-ip 配置还原）。部署同步不会覆盖或删除这个文件。
 - 指标：运维端口 9094（`outbox_pending`、`http_server_*`）；Prometheus 任务 `admin-service`。
-- 端到端：`bash scripts/e2e/admin.sh`（每次创建 4 个随机管理员、结束时停用；覆盖页面与安全头、登录与 Cookie、角色、冻结/解冻、交易对状态往返、撤单、开关往返、双人调账、审计查询、退出与停用）。
+- 端到端：`bash scripts/e2e/admin.sh`（每次创建 4 个随机管理员、结束时停用；覆盖页面与安全头、登录与 Cookie、角色、冻结/解冻、交易对状态往返、撤单、开关往返、双人调账、合约（状态、只减仓、合约状态往返、强平监控与记录、双人保险基金注资 1 USDT）、报表、审计查询、退出与停用）。
+- admin-service 连 derivatives-service 的内部地址：`DERIVATIVES_SERVICE_URL`（compose 里是 `http://derivatives-service:8095`）。
 
 ## 常见错误码
 

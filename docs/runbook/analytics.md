@@ -10,14 +10,18 @@
 | `event_ingest_log` | 主题/分区/位点，保留 30 天 | `events` 的物化视图 |
 | `audit_logs` | 审计事件，按操作者与时间 | `audit.events` |
 | `ledger_entries` | 每条分录行（资产、账户、金额、写后余额） | `ledger.EntryPosted` |
-| `trades` | 每笔成交：价格、数量、成交额、主动方、双方订单与用户、手续费（买方付 base、卖方付 quote） | `trade.TradeExecuted` |
-| `orders` | 订单受理时的属性（方向、类型、TIF、价格、数量、冻结） | `order.OrderAccepted` |
-| `order_updates` | 订单每次变化：NEW / OPEN / PARTIALLY_FILLED / FILLED / CANCELED / REJECTED、累计成交、撤单原因或拒绝码、引擎 sequence | `order.events` 全部六种事件 |
+| `trades` | 每笔成交：价格、数量、成交额、主动方、双方订单与用户、手续费（买方付 base、卖方付 quote；合约为 0，合约手续费在 `derivatives_fills`） | `trade.TradeExecuted`（`trade.events` 与 `derivatives.trade.events`） |
+| `orders` | 订单受理时的属性（方向、类型、TIF、价格、数量、冻结） | `order.OrderAccepted`（现货与合约） |
+| `order_updates` | 订单每次变化：NEW / OPEN / PARTIALLY_FILLED / FILLED / CANCELED / REJECTED、累计成交、撤单原因或拒绝码、引擎 sequence | `order.events` 与 `derivatives.order.events` 全部六种事件 |
 | `orders_current`（视图） | 每个订单的最新状态 + 受理属性（资金检查就被拒的订单没有受理属性） | `order_updates` ⋈ `orders` |
 | `wallet_deposits` | 每笔充值的最新快照（状态、确认数、是否未认领、入账 journal） | `wallet.deposit.events`（地址分配事件除外） |
 | `wallet_withdrawals` | 每笔提现的最新快照（状态、手续费、交易哈希、风控原因） | `wallet.withdrawal.events` |
 | `candles_1m` | 一分钟 K 线（开高低收、成交量、成交额、笔数） | 每批带成交的分钟由 `trades FINAL` 重新计算，最新一次计算生效 |
 | `candles(symbol, seconds)`（参数化视图） | 任意周期 K 线，按 epoch（UTC）对齐 | `candles_1m` |
+| `derivatives_positions` | 每个合约仓位的最新快照（数量带符号、开仓均价与成本、保证金、模式、杠杆、已实现盈亏、资金费），`version` 取最大；平仓后再开沿用同一 `position_id` | 带 `Position` 的仓位与强平事件（`derivatives.position.events`、`derivatives.liquidation.events`） |
+| `derivatives_fills` | 合约成交记账后的每一边（方向、仓位方向、maker、价格、数量、名义价值、平仓数量、手续费、已实现盈亏、是否强平） | `derivatives.FillSettled` |
+| `derivatives_funding` | 每个仓位每次资金费（费率、结算标记价、金额：正为收到、负为付出） | `derivatives.FundingPaid` |
+| `derivatives_liquidations` | 强平步骤：WARNING、STARTED、FILLED（`adl` 表示是否由自动减仓成交）、ADL（被减仓的对手方），带价格、数量、已实现盈亏、保险基金垫付、标记/破产价、保证金余额与维持保证金 | `derivatives.liquidation.events` |
 | `read_model_backfills` | 已完成的回填 | analytics-consumer |
 
 - 充值与提现快照的 `version` = 事件毫秒时间 × 16 + 状态进度，同一毫秒的两个事件（提现申请与风控评分在同一事务里）按状态先后取后者。
@@ -27,12 +31,14 @@
 
 ## 回填
 
-读模型在事件之后才出现（任务 12），analytics-consumer 启动后在后台把 `events` 里已有的订单、成交、钱包事件按主题、按时间分页（每页 5,000）投影一遍，完成后在 `read_model_backfills` 记 `read-models-v1`，以后不再执行；失败每分钟重试。与实时消费同时写同一行没有问题（ReplacingMergeTree 折叠，K 线以最新计算为准）。需要重算：
+读模型在事件之后才出现（任务 12），analytics-consumer 启动后在后台把 `events` 里已有的订单、成交、钱包事件按主题、按时间分页（每页 5,000）投影一遍，完成后在 `read_model_backfills` 记回填名，以后不再执行；失败每分钟重试。与实时消费同时写同一行没有问题（ReplacingMergeTree 折叠，K 线以最新计算为准）。阶段 3 加了合约读模型，回填名改为 `read-models-v2`：升级后第一次启动会把全部读模型主题（现货与合约）重新投影一遍，已有的行折叠掉。需要重算：
 
 ```sql
 TRUNCATE TABLE trades; TRUNCATE TABLE orders; TRUNCATE TABLE order_updates;
 TRUNCATE TABLE wallet_deposits; TRUNCATE TABLE wallet_withdrawals; TRUNCATE TABLE candles_1m;
-DELETE FROM read_model_backfills WHERE name = 'read-models-v1';
+TRUNCATE TABLE derivatives_positions; TRUNCATE TABLE derivatives_fills; TRUNCATE TABLE derivatives_funding;
+TRUNCATE TABLE derivatives_liquidations;
+DELETE FROM read_model_backfills WHERE name = 'read-models-v2';
 ```
 
 然后重启 analytics-consumer（`ch_query` 或 `clickhouse-client` 执行上面的语句）。新增读模型时换一个回填名。
@@ -55,7 +61,7 @@ SELECT withdrawal_id, status, amount, updated_at FROM wallet_withdrawals FINAL
 WHERE status NOT IN ('CONFIRMED', 'REJECTED', 'CANCELED', 'FAILED');
 ```
 
-管理后台"报表"页（`/admin/v1/reports/{trading,wallet,candles}`，见 [admin.md](admin.md)）用的就是这些表：按交易对与 UTC 日的成交笔数/量/额与受理/被拒订单、按资产与日的入账充值与完成提现、任意交易对的 K 线。
+管理后台"报表"页（`/admin/v1/reports/{trading,wallet,candles,derivatives,open-interest}`，见 [admin.md](admin.md)）用的就是这些表：按交易对与 UTC 日的成交笔数/量/额与受理/被拒订单、按资产与日的入账充值与完成提现、任意交易对的 K 线、按合约与日的成交/手续费/盈亏/资金费/强平、当前持仓量；「合约」页的强平记录读 `derivatives_liquidations`。
 
 ## 核对
 

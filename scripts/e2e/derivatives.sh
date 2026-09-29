@@ -112,6 +112,7 @@ expect 200 - "funding history (none unless a funding time passed while holding)"
 check '(.items | type) == "array"' "a list"
 
 echo "== back to SPOT"
+call GET /v1/derivatives/account "" "${SELLER[@]}"
 AVAILABLE=$(jq -r .available <<<"$BODY")
 call POST /v1/account/transfers "{\"asset\":\"USDT\",\"amount\":\"$AVAILABLE\",\"from_account_type\":\"FUTURES\",\"to_account_type\":\"SPOT\"}" \
   "${SELLER[@]}" -H "Idempotency-Key: perp-out-$RUN"

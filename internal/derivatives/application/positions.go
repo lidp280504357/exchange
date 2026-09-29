@@ -3,6 +3,8 @@ package application
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/shopspring/decimal"
 
@@ -317,7 +319,92 @@ func (s *Service) LiftReduceOnly(ctx context.Context, symbol, by string) (bool, 
 	return changed, err
 }
 
-// ContractStates lists the contracts' reduce-only states.
-func (s *Service) ContractStates(ctx context.Context) ([]ports.ContractState, error) {
-	return s.Store.Read().Contracts().All(ctx)
+// ContractOverview is a contract as the admin console watches it.
+type ContractOverview struct {
+	Contract domain.Contract
+	// State is the reduce-only state; zero for a contract never degraded.
+	State ports.ContractState
+	// Mark is the latest mark price (zero before the first); MarkFresh
+	// whether it is recent enough to trade on.
+	Mark      ports.Mark
+	MarkFresh bool
+	// OpenInterest is the long quantity (equal to the short one);
+	// Positions counts the open positions.
+	OpenInterest decimal.Decimal
+	Positions    int
+}
+
+// Overview returns every contract with its reduce-only state, mark price
+// and open interest.
+func (s *Service) Overview(ctx context.Context) ([]ContractOverview, error) {
+	list, err := s.Instruments.Contracts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	r := s.Store.Read()
+	states, err := r.Contracts().All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	totals, err := r.Positions().Totals(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byState := map[string]ports.ContractState{}
+	for _, st := range states {
+		byState[st.Symbol] = st
+	}
+	out := make([]ContractOverview, 0, len(list))
+	for _, c := range list {
+		v := ContractOverview{Contract: c, State: byState[c.Symbol], OpenInterest: totals[c.Symbol].LongQty, Positions: totals[c.Symbol].Positions}
+		v.Mark, v.MarkFresh = s.Marks.Mark(c.Symbol)
+		out = append(out, v)
+	}
+	slices.SortFunc(out, func(a, b ContractOverview) int { return strings.Compare(a.Contract.Symbol, b.Contract.Symbol) })
+	return out, nil
+}
+
+// RiskPositions lists the open positions under watch: taken over by the
+// liquidation engine, warned, or with a margin ratio (maintenance margin
+// / margin balance) of at least half, riskiest first. Cross positions are
+// measured on their own here.
+func (s *Service) RiskPositions(ctx context.Context) ([]PositionView, error) {
+	open, err := s.Store.Read().Positions().Open(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	type scored struct {
+		v     PositionView
+		ratio decimal.Decimal
+	}
+	var list []scored
+	half := decimal.RequireFromString("0.5")
+	for _, p := range open {
+		c, err := s.Instruments.Contract(ctx, p.Symbol)
+		if err != nil {
+			return nil, err
+		}
+		v := PositionView{Position: p}
+		ratio := decimal.Zero
+		if m, _ := s.Marks.Mark(p.Symbol); m.Price.IsPositive() {
+			v.Mark, v.UnrealizedPnL, v.MaintenanceMargin = m.Price, p.UnrealizedPnL(m.Price), p.MaintenanceMargin(c, m.Price)
+			if balance := p.Margin.Add(v.UnrealizedPnL); balance.IsPositive() {
+				ratio = v.MaintenanceMargin.DivRound(balance, 8)
+			} else {
+				ratio = decimal.NewFromInt(1)
+			}
+		}
+		if p.MarginMode == domain.Isolated {
+			v.LiquidationPrice = p.LiquidationPrice(c)
+		}
+		if p.Liquidating || !p.WarnedAt.IsZero() || ratio.GreaterThanOrEqual(half) {
+			list = append(list, scored{v: v, ratio: ratio})
+		}
+	}
+	slices.SortFunc(list, func(a, b scored) int { return b.ratio.Cmp(a.ratio) })
+	out := make([]PositionView, len(list))
+	for i, x := range list {
+		out[i] = x.v
+	}
+	return out, nil
 }

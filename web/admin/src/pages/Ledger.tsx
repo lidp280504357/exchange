@@ -17,7 +17,7 @@ export function LedgerPage({ admin }: { admin: Admin }) {
     <>
       {can(admin, "ledger.adjust.request") && <RequestForm />}
       <Card
-        title="调账申请（双人审批）"
+        title="调账与保险基金注资申请（双人审批）"
         actions={
           <div className="w-40">
             <Select label="状态" options={statuses} value={status} onChange={(e) => setStatus(e.target.value as (typeof statuses)[number])} />
@@ -26,10 +26,11 @@ export function LedgerPage({ admin }: { admin: Admin }) {
       >
         <ErrorText text={list.isError ? describe(list.error) : undefined} />
         <Table
-          head={["申请时间", "用户", "金额", "理由", "发起人", "状态", "结果", can(admin, "ledger.adjust.approve") ? "审批" : "处理时间"]}
+          head={["申请时间", "类型", "对象", "金额", "理由", "发起人", "状态", "结果", can(admin, "ledger.adjust.approve") ? "审批" : "处理时间"]}
           rows={(list.data ?? []).map((a) => [
             time(a.created_at),
-            <Mono key="u">{a.payload.user_id}</Mono>,
+            a.kind === "INSURANCE_FUND" ? "保险基金注资" : "手动调账",
+            a.kind === "INSURANCE_FUND" ? "保险基金" : <Mono key="u">{a.payload.user_id}</Mono>,
             <span key="m" className="whitespace-nowrap">
               {a.payload.amount} {a.payload.asset}
             </span>,

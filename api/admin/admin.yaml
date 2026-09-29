@@ -16,14 +16,16 @@ info:
     other than GET must carry the header `X-Admin-CSRF: 1`.
 
     Roles grant permissions: ADMIN (everything), OPERATOR (accounts,
-    orders, trading pairs, feature flags), FINANCE (withdrawal reviews,
-    ledger adjustments), AUDITOR (read-only). Everyone may read, including
-    the reports from the ClickHouse read models. A call
+    orders, trading pairs and contracts, lifting a contract's reduce-only,
+    feature flags), FINANCE (withdrawal reviews, ledger adjustments,
+    insurance fund contributions), AUDITOR (read-only). Everyone may read,
+    including the reports from the ClickHouse read models. A call
     outside the role fails with ADMIN_FORBIDDEN. Every change is audited
     (audit.events → ClickHouse audit_logs) with the administrator's email
     as the actor; changes also carry a reason of at least 3 characters.
-    Manual ledger adjustments take two administrators: one requests, a
-    different one approves, and the ledger books it idempotently.
+    Manual ledger adjustments and insurance fund contributions take two
+    administrators: one requests, a different one approves, and the ledger
+    books it idempotently.
 servers:
   - url: https://astras.vip
 security:
@@ -37,6 +39,7 @@ tags:
   - name: ledger
   - name: audit
   - name: reports
+  - name: derivatives
 paths:
   /admin/v1/login:
     post:
@@ -268,7 +271,7 @@ paths:
   /admin/v1/instruments:
     get:
       operationId: listInstruments
-      summary: Assets (with networks) and trading pairs
+      summary: Assets (with networks), trading pairs and perpetual contracts
       description: |
         As instrument-service returns them (protobuf JSON with field names;
         int64 as strings). Assets and networks change through the
@@ -282,7 +285,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [assets, pairs]
+                required: [assets, pairs, contracts]
                 properties:
                   assets:
                     type: array
@@ -292,6 +295,10 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Pair'
+                  contracts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Contract'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/instruments/pairs/{symbol}/status:
@@ -646,6 +653,279 @@ paths:
                       $ref: '#/components/schemas/Candle'
         default:
           $ref: '#/components/responses/Error'
+  /admin/v1/reports/derivatives:
+    get:
+      operationId: derivativesReport
+      summary: Each perpetual contract's trading, funding and liquidations per day (UTC)
+      description: |
+        From the ClickHouse contract read models (derivatives_fills,
+        derivatives_funding, derivatives_liquidations): settled fills and
+        their fees and results, the funding the positions paid and
+        received at the day's settlements, the positions taken over, the
+        auto-deleveraged counterparties and what the insurance fund paid.
+        Needs reports.read.
+      tags: [reports, derivatives]
+      parameters:
+        - $ref: '#/components/parameters/Days'
+      responses:
+        '200':
+          description: The days.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DerivativesDay'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/reports/open-interest:
+    get:
+      operationId: openInterestReport
+      summary: Each contract's open positions from the positions read model
+      description: |
+        The latest position snapshots (derivatives_positions); a few
+        seconds behind derivatives-service. Needs reports.read.
+      tags: [reports, derivatives]
+      responses:
+        '200':
+          description: The contracts with open positions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OpenInterest'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/derivatives/contracts:
+    get:
+      operationId: listContractStates
+      summary: Each perpetual contract's status, reduce-only state, mark price and open interest
+      description: |
+        Live from derivatives-service. A contract goes reduce-only by
+        itself when its index or mark price fails (requirements §11.7:
+        risk.events SystemDegraded); only a person lifts it. Needs
+        derivatives.read.
+      tags: [derivatives]
+      responses:
+        '200':
+          description: The contracts.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [contracts]
+                properties:
+                  contracts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ContractState'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/derivatives/contracts/{symbol}/status:
+    post:
+      operationId: setContractStatus
+      summary: Move a perpetual contract to another status
+      description: |
+        The same transitions as trading pairs (PREPARE → TRADING ⇄ HALT;
+        TRADING or HALT → CANCEL_ONLY → DELISTED); instrument-service
+        records the change. Needs instruments.write.
+      tags: [derivatives, instruments]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/Contract'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, reason]
+              properties:
+                to:
+                  type: string
+                  enum: [PREPARE, TRADING, HALT, CANCEL_ONLY, DELISTED]
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: The change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transition'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/derivatives/contracts/{symbol}/lift-reduce-only:
+    post:
+      operationId: liftReduceOnly
+      summary: End a contract's reduce-only once its prices are sound again
+      description: |
+        lifted is false when the contract was not reduce-only. Check the
+        mark price first: a contract whose mark is still stale degrades
+        again within seconds. Needs derivatives.write.
+      tags: [derivatives]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/Contract'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: The outcome.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [symbol, lifted]
+                properties:
+                  symbol:
+                    type: string
+                  lifted:
+                    type: boolean
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/derivatives/risk:
+    get:
+      operationId: listRiskPositions
+      summary: Positions warned, taken over by the liquidation engine or close to it
+      description: |
+        Live from derivatives-service: positions taken over, warned
+        (margin balance at most 1.2 × maintenance margin) or with a margin
+        ratio of at least 0.5, riskiest first. Cross positions are
+        measured on their own here. Needs derivatives.read.
+      tags: [derivatives]
+      responses:
+        '200':
+          description: The positions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [positions]
+                properties:
+                  positions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RiskPosition'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/derivatives/liquidations:
+    get:
+      operationId: listLiquidations
+      summary: Liquidation steps, newest first
+      description: From the ClickHouse read model derivatives_liquidations. Needs derivatives.read.
+      tags: [derivatives]
+      parameters:
+        - $ref: '#/components/parameters/Days'
+        - name: kind
+          in: query
+          description: Empty for all.
+          schema:
+            type: string
+            enum: [WARNING, STARTED, FILLED, ADL]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        '200':
+          description: The steps.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LiquidationStep'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/derivatives/insurance-fund:
+    get:
+      operationId: getInsuranceFund
+      summary: The insurance fund's balance
+      description: |
+        The ledger's INSURANCE_FUND system account, with PNL_CLEARING (the
+        open positions' unsettled results, which may be negative). Needs
+        derivatives.read.
+      tags: [derivatives]
+      parameters:
+        - name: asset
+          in: query
+          schema:
+            type: string
+            default: USDT
+      responses:
+        '200':
+          description: The balances.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsuranceFund'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/derivatives/insurance-fund/contributions:
+    post:
+      operationId: requestInsuranceFunding
+      summary: Request a contribution of simulated funds to the insurance fund
+      description: |
+        Creates a PENDING INSURANCE_FUND request for another administrator
+        with ledger.adjust.approve; approving books it (ledger
+        FundInsurance, INSURANCE_CONTRIBUTION from ADJUSTMENT), which needs
+        the flag ledger.manual_adjustment. Needs ledger.adjust.request.
+      tags: [derivatives, ledger]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, reason]
+              properties:
+                asset:
+                  type: string
+                  default: USDT
+                amount:
+                  description: Positive.
+                  $ref: '#/components/schemas/Decimal'
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '201':
+          description: The request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+        default:
+          $ref: '#/components/responses/Error'
 components:
   securitySchemes:
     session:
@@ -674,6 +954,13 @@ components:
       schema:
         type: string
         format: uuid
+    Contract:
+      name: symbol
+      in: path
+      required: true
+      schema:
+        type: string
+        examples: [BTC-USDT-PERP]
   responses:
     Error:
       $ref: '../openapi/common.yaml#/components/responses/Error'
@@ -716,7 +1003,8 @@ components:
           items:
             type: string
             enum: [users.read, users.status, orders.cancel, instruments.read, instruments.write, flags.read, flags.write,
-              withdrawals.read, withdrawals.review, ledger.adjust.request, ledger.adjust.approve, audit.read, reports.read]
+              withdrawals.read, withdrawals.review, ledger.adjust.request, ledger.adjust.approve, audit.read, reports.read,
+              derivatives.read, derivatives.write]
     UserView:
       type: object
       required: [user, balances]
@@ -925,10 +1213,10 @@ components:
           format: uuid
         kind:
           type: string
-          enum: [LEDGER_ADJUSTMENT]
+          enum: [LEDGER_ADJUSTMENT, INSURANCE_FUND]
         payload:
           type: object
-          description: For LEDGER_ADJUSTMENT user_id, asset and amount.
+          description: For LEDGER_ADJUSTMENT user_id, asset and amount; for INSURANCE_FUND asset and amount.
           additionalProperties:
             type: string
         reason:
@@ -1029,4 +1317,259 @@ components:
         quote_volume:
           $ref: '#/components/schemas/Decimal'
         trades:
+          type: integer
+    NullableDecimal:
+      type: [string, 'null']
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+    Contract:
+      type: object
+      properties:
+        symbol:
+          type: string
+        type:
+          type: string
+          enum: [PERPETUAL]
+        base_asset:
+          type: string
+        quote_asset:
+          type: string
+        index_symbol:
+          type: string
+        tick_size:
+          $ref: '#/components/schemas/Decimal'
+        lot_size:
+          $ref: '#/components/schemas/Decimal'
+        min_quantity:
+          $ref: '#/components/schemas/Decimal'
+        max_quantity:
+          $ref: '#/components/schemas/Decimal'
+        min_notional:
+          $ref: '#/components/schemas/Decimal'
+        price_band:
+          $ref: '#/components/schemas/Decimal'
+        risk_tiers:
+          type: array
+          items:
+            type: object
+            properties:
+              max_notional:
+                $ref: '#/components/schemas/Decimal'
+              max_leverage:
+                type: integer
+              mmr:
+                $ref: '#/components/schemas/Decimal'
+        funding_interval_hours:
+          type: integer
+        interest_rate:
+          $ref: '#/components/schemas/Decimal'
+        funding_cap:
+          $ref: '#/components/schemas/Decimal'
+        impact_notional:
+          $ref: '#/components/schemas/Decimal'
+        fee_tier:
+          type: string
+        maker_fee_rate:
+          $ref: '#/components/schemas/Decimal'
+        taker_fee_rate:
+          $ref: '#/components/schemas/Decimal'
+        status:
+          type: string
+          enum: [PREPARE, TRADING, HALT, CANCEL_ONLY, DELISTED]
+        version:
+          type: string
+    ContractState:
+      type: object
+      required: [symbol, status, reduce_only, reduce_only_reason, reduce_only_since, lifted_by, mark_price, mark_at, mark_fresh,
+        open_interest, positions]
+      properties:
+        symbol:
+          type: string
+        status:
+          type: string
+          enum: [PREPARE, TRADING, HALT, CANCEL_ONLY, DELISTED]
+        reduce_only:
+          type: boolean
+        reduce_only_reason:
+          type: string
+          description: Why it last went reduce-only, e.g. MARK_PRICE_STALE or INDEX_SOURCES.
+        reduce_only_since:
+          type: [string, 'null']
+          format: date-time
+        lifted_by:
+          type: string
+          description: Who lifted the last reduce-only.
+        mark_price:
+          $ref: '#/components/schemas/NullableDecimal'
+        mark_at:
+          type: [string, 'null']
+          format: date-time
+        mark_fresh:
+          type: boolean
+          description: Whether the mark price is recent enough to trade on.
+        open_interest:
+          description: The long quantity (equal to the short one).
+          $ref: '#/components/schemas/Decimal'
+        positions:
+          type: integer
+    RiskPosition:
+      type: object
+      required: [position_id, user_id, symbol, position_side, quantity, entry_price, mark_price, notional, unrealized_pnl, margin,
+        margin_mode, leverage, maintenance_margin, liquidation_price, realized_pnl, funding, updated_at, liquidating,
+        liquidation_attempts, warned_at, margin_ratio]
+      properties:
+        position_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        symbol:
+          type: string
+        position_side:
+          type: string
+          enum: [BOTH, LONG, SHORT]
+        quantity:
+          description: 'Signed: positive long, negative short.'
+          $ref: '#/components/schemas/Decimal'
+        entry_price:
+          $ref: '#/components/schemas/Decimal'
+        mark_price:
+          $ref: '#/components/schemas/NullableDecimal'
+        notional:
+          $ref: '#/components/schemas/NullableDecimal'
+        unrealized_pnl:
+          $ref: '#/components/schemas/NullableDecimal'
+        margin:
+          $ref: '#/components/schemas/Decimal'
+        margin_mode:
+          type: string
+          enum: [CROSS, ISOLATED]
+        leverage:
+          type: integer
+        maintenance_margin:
+          $ref: '#/components/schemas/NullableDecimal'
+        liquidation_price:
+          $ref: '#/components/schemas/NullableDecimal'
+        realized_pnl:
+          $ref: '#/components/schemas/Decimal'
+        funding:
+          $ref: '#/components/schemas/Decimal'
+        updated_at:
+          type: string
+          format: date-time
+        liquidating:
+          type: boolean
+          description: Taken over by the liquidation engine.
+        liquidation_attempts:
+          type: integer
+        warned_at:
+          type: [string, 'null']
+          format: date-time
+        margin_ratio:
+          description: Maintenance margin / (margin + unrealized result); null without a mark price or once the margin is gone.
+          $ref: '#/components/schemas/NullableDecimal'
+    LiquidationStep:
+      type: object
+      required: [event_id, kind, user_id, symbol, position_side, cross, adl, trade_id, price, quantity, realized_pnl,
+        insurance_paid, mark_price, bankruptcy_price, margin_balance, maintenance_margin, occurred_at]
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [WARNING, STARTED, FILLED, ADL]
+          description: |
+            WARNING: margin balance at most 1.2 × maintenance; STARTED:
+            taken over; FILLED: a liquidation order (or, adl, an
+            auto-deleveraging) closed part of it; ADL: a counterparty's
+            position closed by auto-deleveraging.
+        user_id:
+          type: string
+          format: uuid
+        symbol:
+          type: string
+          description: Empty for a warning of a cross account.
+        position_side:
+          type: string
+        cross:
+          type: boolean
+        adl:
+          type: boolean
+        trade_id:
+          type: string
+        price:
+          $ref: '#/components/schemas/Decimal'
+        quantity:
+          $ref: '#/components/schemas/Decimal'
+        realized_pnl:
+          $ref: '#/components/schemas/Decimal'
+        insurance_paid:
+          $ref: '#/components/schemas/Decimal'
+        mark_price:
+          $ref: '#/components/schemas/Decimal'
+        bankruptcy_price:
+          $ref: '#/components/schemas/Decimal'
+        margin_balance:
+          $ref: '#/components/schemas/Decimal'
+        maintenance_margin:
+          $ref: '#/components/schemas/Decimal'
+        occurred_at:
+          type: string
+          format: date-time
+    InsuranceFund:
+      type: object
+      required: [asset, balance, pnl_clearing]
+      properties:
+        asset:
+          type: string
+        balance:
+          $ref: '#/components/schemas/Decimal'
+        pnl_clearing:
+          $ref: '#/components/schemas/Decimal'
+    DerivativesDay:
+      type: object
+      required: [day, symbol, fills, volume, notional, fees, realized_pnl, funding_paid, funding_received, liquidations, adl,
+        insurance_paid]
+      properties:
+        day:
+          type: string
+          format: date
+        symbol:
+          type: string
+        fills:
+          type: integer
+          description: Settled sides of trades (two per trade).
+        volume:
+          description: Quantity traded (once per trade).
+          $ref: '#/components/schemas/Decimal'
+        notional:
+          $ref: '#/components/schemas/Decimal'
+        fees:
+          $ref: '#/components/schemas/Decimal'
+        realized_pnl:
+          $ref: '#/components/schemas/Decimal'
+        funding_paid:
+          $ref: '#/components/schemas/Decimal'
+        funding_received:
+          $ref: '#/components/schemas/Decimal'
+        liquidations:
+          type: integer
+          description: Positions taken over.
+        adl:
+          type: integer
+          description: Counterparty positions auto-deleveraged.
+        insurance_paid:
+          $ref: '#/components/schemas/Decimal'
+    OpenInterest:
+      type: object
+      required: [symbol, long, short, positions]
+      properties:
+        symbol:
+          type: string
+        long:
+          $ref: '#/components/schemas/Decimal'
+        short:
+          $ref: '#/components/schemas/Decimal'
+        positions:
           type: integer

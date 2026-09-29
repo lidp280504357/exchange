@@ -169,7 +169,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Assets (with networks) and trading pairs
+         * Assets (with networks), trading pairs and perpetual contracts
          * @description As instrument-service returns them (protobuf JSON with field names;
          *     int64 as strings). Assets and networks change through the
          *     versioned reference-data file (exchangectl instruments apply, run
@@ -402,6 +402,207 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/reports/derivatives": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Each perpetual contract's trading, funding and liquidations per day (UTC)
+         * @description From the ClickHouse contract read models (derivatives_fills,
+         *     derivatives_funding, derivatives_liquidations): settled fills and
+         *     their fees and results, the funding the positions paid and
+         *     received at the day's settlements, the positions taken over, the
+         *     auto-deleveraged counterparties and what the insurance fund paid.
+         *     Needs reports.read.
+         */
+        get: operations["derivativesReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/reports/open-interest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Each contract's open positions from the positions read model
+         * @description The latest position snapshots (derivatives_positions); a few
+         *     seconds behind derivatives-service. Needs reports.read.
+         */
+        get: operations["openInterestReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/derivatives/contracts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Each perpetual contract's status, reduce-only state, mark price and open interest
+         * @description Live from derivatives-service. A contract goes reduce-only by
+         *     itself when its index or mark price fails (requirements §11.7:
+         *     risk.events SystemDegraded); only a person lifts it. Needs
+         *     derivatives.read.
+         */
+        get: operations["listContractStates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/derivatives/contracts/{symbol}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Move a perpetual contract to another status
+         * @description The same transitions as trading pairs (PREPARE → TRADING ⇄ HALT;
+         *     TRADING or HALT → CANCEL_ONLY → DELISTED); instrument-service
+         *     records the change. Needs instruments.write.
+         */
+        post: operations["setContractStatus"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/derivatives/contracts/{symbol}/lift-reduce-only": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End a contract's reduce-only once its prices are sound again
+         * @description lifted is false when the contract was not reduce-only. Check the
+         *     mark price first: a contract whose mark is still stale degrades
+         *     again within seconds. Needs derivatives.write.
+         */
+        post: operations["liftReduceOnly"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/derivatives/risk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Positions warned, taken over by the liquidation engine or close to it
+         * @description Live from derivatives-service: positions taken over, warned
+         *     (margin balance at most 1.2 × maintenance margin) or with a margin
+         *     ratio of at least 0.5, riskiest first. Cross positions are
+         *     measured on their own here. Needs derivatives.read.
+         */
+        get: operations["listRiskPositions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/derivatives/liquidations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Liquidation steps, newest first
+         * @description From the ClickHouse read model derivatives_liquidations. Needs derivatives.read.
+         */
+        get: operations["listLiquidations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/derivatives/insurance-fund": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The insurance fund's balance
+         * @description The ledger's INSURANCE_FUND system account, with PNL_CLEARING (the
+         *     open positions' unsettled results, which may be negative). Needs
+         *     derivatives.read.
+         */
+        get: operations["getInsuranceFund"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/derivatives/insurance-fund/contributions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request a contribution of simulated funds to the insurance fund
+         * @description Creates a PENDING INSURANCE_FUND request for another administrator
+         *     with ledger.adjust.approve; approving books it (ledger
+         *     FundInsurance, INSURANCE_CONTRIBUTION from ADJUSTMENT), which needs
+         *     the flag ledger.manual_adjustment. Needs ledger.adjust.request.
+         */
+        post: operations["requestInsuranceFunding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -422,7 +623,7 @@ export interface components {
             name: string;
             /** @enum {string} */
             role: "ADMIN" | "OPERATOR" | "FINANCE" | "AUDITOR";
-            permissions: ("users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read")[];
+            permissions: ("users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write")[];
         };
         UserView: {
             user: {
@@ -536,8 +737,8 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            kind: "LEDGER_ADJUSTMENT";
-            /** @description For LEDGER_ADJUSTMENT user_id, asset and amount. */
+            kind: "LEDGER_ADJUSTMENT" | "INSURANCE_FUND";
+            /** @description For LEDGER_ADJUSTMENT user_id, asset and amount; for INSURANCE_FUND asset and amount. */
             payload: {
                 [key: string]: string;
             };
@@ -601,6 +802,148 @@ export interface components {
             quote_volume: components["schemas"]["Decimal"];
             trades: number;
         };
+        NullableDecimal: string | null;
+        Contract: {
+            symbol?: string;
+            /** @enum {string} */
+            type?: "PERPETUAL";
+            base_asset?: string;
+            quote_asset?: string;
+            index_symbol?: string;
+            tick_size?: components["schemas"]["Decimal"];
+            lot_size?: components["schemas"]["Decimal"];
+            min_quantity?: components["schemas"]["Decimal"];
+            max_quantity?: components["schemas"]["Decimal"];
+            min_notional?: components["schemas"]["Decimal"];
+            price_band?: components["schemas"]["Decimal"];
+            risk_tiers?: {
+                max_notional?: components["schemas"]["Decimal"];
+                max_leverage?: number;
+                mmr?: components["schemas"]["Decimal"];
+            }[];
+            funding_interval_hours?: number;
+            interest_rate?: components["schemas"]["Decimal"];
+            funding_cap?: components["schemas"]["Decimal"];
+            impact_notional?: components["schemas"]["Decimal"];
+            fee_tier?: string;
+            maker_fee_rate?: components["schemas"]["Decimal"];
+            taker_fee_rate?: components["schemas"]["Decimal"];
+            /** @enum {string} */
+            status?: "PREPARE" | "TRADING" | "HALT" | "CANCEL_ONLY" | "DELISTED";
+            version?: string;
+        };
+        ContractState: {
+            symbol: string;
+            /** @enum {string} */
+            status: "PREPARE" | "TRADING" | "HALT" | "CANCEL_ONLY" | "DELISTED";
+            reduce_only: boolean;
+            /** @description Why it last went reduce-only, e.g. MARK_PRICE_STALE or INDEX_SOURCES. */
+            reduce_only_reason: string;
+            /** Format: date-time */
+            reduce_only_since: string | null;
+            /** @description Who lifted the last reduce-only. */
+            lifted_by: string;
+            mark_price: components["schemas"]["NullableDecimal"];
+            /** Format: date-time */
+            mark_at: string | null;
+            /** @description Whether the mark price is recent enough to trade on. */
+            mark_fresh: boolean;
+            /** @description The long quantity (equal to the short one). */
+            open_interest: components["schemas"]["Decimal"];
+            positions: number;
+        };
+        RiskPosition: {
+            /** Format: uuid */
+            position_id: string;
+            /** Format: uuid */
+            user_id: string;
+            symbol: string;
+            /** @enum {string} */
+            position_side: "BOTH" | "LONG" | "SHORT";
+            /** @description Signed: positive long, negative short. */
+            quantity: components["schemas"]["Decimal"];
+            entry_price: components["schemas"]["Decimal"];
+            mark_price: components["schemas"]["NullableDecimal"];
+            notional: components["schemas"]["NullableDecimal"];
+            unrealized_pnl: components["schemas"]["NullableDecimal"];
+            margin: components["schemas"]["Decimal"];
+            /** @enum {string} */
+            margin_mode: "CROSS" | "ISOLATED";
+            leverage: number;
+            maintenance_margin: components["schemas"]["NullableDecimal"];
+            liquidation_price: components["schemas"]["NullableDecimal"];
+            realized_pnl: components["schemas"]["Decimal"];
+            funding: components["schemas"]["Decimal"];
+            /** Format: date-time */
+            updated_at: string;
+            /** @description Taken over by the liquidation engine. */
+            liquidating: boolean;
+            liquidation_attempts: number;
+            /** Format: date-time */
+            warned_at: string | null;
+            /** @description Maintenance margin / (margin + unrealized result); null without a mark price or once the margin is gone. */
+            margin_ratio: components["schemas"]["NullableDecimal"];
+        };
+        LiquidationStep: {
+            /** Format: uuid */
+            event_id: string;
+            /**
+             * @description WARNING: margin balance at most 1.2 × maintenance; STARTED:
+             *     taken over; FILLED: a liquidation order (or, adl, an
+             *     auto-deleveraging) closed part of it; ADL: a counterparty's
+             *     position closed by auto-deleveraging.
+             * @enum {string}
+             */
+            kind: "WARNING" | "STARTED" | "FILLED" | "ADL";
+            /** Format: uuid */
+            user_id: string;
+            /** @description Empty for a warning of a cross account. */
+            symbol: string;
+            position_side: string;
+            cross: boolean;
+            adl: boolean;
+            trade_id: string;
+            price: components["schemas"]["Decimal"];
+            quantity: components["schemas"]["Decimal"];
+            realized_pnl: components["schemas"]["Decimal"];
+            insurance_paid: components["schemas"]["Decimal"];
+            mark_price: components["schemas"]["Decimal"];
+            bankruptcy_price: components["schemas"]["Decimal"];
+            margin_balance: components["schemas"]["Decimal"];
+            maintenance_margin: components["schemas"]["Decimal"];
+            /** Format: date-time */
+            occurred_at: string;
+        };
+        InsuranceFund: {
+            asset: string;
+            balance: components["schemas"]["Decimal"];
+            pnl_clearing: components["schemas"]["Decimal"];
+        };
+        DerivativesDay: {
+            /** Format: date */
+            day: string;
+            symbol: string;
+            /** @description Settled sides of trades (two per trade). */
+            fills: number;
+            /** @description Quantity traded (once per trade). */
+            volume: components["schemas"]["Decimal"];
+            notional: components["schemas"]["Decimal"];
+            fees: components["schemas"]["Decimal"];
+            realized_pnl: components["schemas"]["Decimal"];
+            funding_paid: components["schemas"]["Decimal"];
+            funding_received: components["schemas"]["Decimal"];
+            /** @description Positions taken over. */
+            liquidations: number;
+            /** @description Counterparty positions auto-deleveraged. */
+            adl: number;
+            insurance_paid: components["schemas"]["Decimal"];
+        };
+        OpenInterest: {
+            symbol: string;
+            long: components["schemas"]["Decimal"];
+            short: components["schemas"]["Decimal"];
+            positions: number;
+        };
         Error: {
             /**
              * @description Stable machine-readable code (appendix C), used by clients for i18n.
@@ -631,6 +974,7 @@ export interface components {
         /** @description Days back, today included. */
         Days: number;
         UserID: string;
+        Contract: string;
     };
     requestBodies: never;
     headers: {
@@ -872,6 +1216,7 @@ export interface operations {
                     "application/json": {
                         assets: components["schemas"]["Asset"][];
                         pairs: components["schemas"]["Pair"][];
+                        contracts: components["schemas"]["Contract"][];
                     };
                 };
             };
@@ -1153,6 +1498,245 @@ export interface operations {
                     "application/json": {
                         items: components["schemas"]["Candle"][];
                     };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    derivativesReport: {
+        parameters: {
+            query?: {
+                /** @description Days back, today included. */
+                days?: components["parameters"]["Days"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The days. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["DerivativesDay"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    openInterestReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The contracts with open positions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["OpenInterest"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listContractStates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The contracts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        contracts: components["schemas"]["ContractState"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setContractStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                symbol: components["parameters"]["Contract"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    to: "PREPARE" | "TRADING" | "HALT" | "CANCEL_ONLY" | "DELISTED";
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Transition"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    liftReduceOnly: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                symbol: components["parameters"]["Contract"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description The outcome. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        symbol: string;
+                        lifted: boolean;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listRiskPositions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The positions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        positions: components["schemas"]["RiskPosition"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listLiquidations: {
+        parameters: {
+            query?: {
+                /** @description Days back, today included. */
+                days?: components["parameters"]["Days"];
+                /** @description Empty for all. */
+                kind?: "WARNING" | "STARTED" | "FILLED" | "ADL";
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The steps. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["LiquidationStep"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getInsuranceFund: {
+        parameters: {
+            query?: {
+                asset?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The balances. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsuranceFund"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    requestInsuranceFunding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @default USDT */
+                    asset?: string;
+                    /** @description Positive. */
+                    amount: components["schemas"]["Decimal"];
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The request. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Approval"];
                 };
             };
             default: components["responses"]["Error"];

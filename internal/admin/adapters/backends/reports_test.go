@@ -42,6 +42,23 @@ func TestReports(t *testing.T) {
 			(generateUUIDv4(), 'ETH', 0.0011, 0.0002, 'CONFIRMED', now64(3), 1)`,
 		`INSERT INTO candles_1m (symbol, open_time, open, high, low, close, volume, quote_volume, trades, updated_at) VALUES
 			('ETH-BTC', toStartOfMinute(now()), 0.03, 0.032, 0.03, 0.032, 3, 0.094, 2, now64(3))`,
+		`INSERT INTO derivatives_fills (trade_id, order_id, user_id, symbol, side, price, quantity, notional, fee, realized_pnl,
+			executed_at) VALUES
+			('0192a000-0000-7000-8000-000000000001', generateUUIDv4(), generateUUIDv4(), 'BTC-USDT-PERP', 'BUY', 60000, 0.5, 30000, 6, 0, now64(3)),
+			('0192a000-0000-7000-8000-000000000001', generateUUIDv4(), generateUUIDv4(), 'BTC-USDT-PERP', 'SELL', 60000, 0.5, 30000, 15, -20, now64(3))`,
+		`INSERT INTO derivatives_funding (position_id, user_id, symbol, funding_time, amount, settled_at) VALUES
+			(generateUUIDv4(), generateUUIDv4(), 'BTC-USDT-PERP', toStartOfHour(now()), -3, now64(3)),
+			(generateUUIDv4(), generateUUIDv4(), 'BTC-USDT-PERP', toStartOfHour(now()), 2.5, now64(3))`,
+		`INSERT INTO derivatives_liquidations (event_id, kind, user_id, symbol, insurance_paid, occurred_at) VALUES
+			(generateUUIDv4(), 'STARTED', generateUUIDv4(), 'BTC-USDT-PERP', 0, now64(3)),
+			(generateUUIDv4(), 'FILLED', generateUUIDv4(), 'BTC-USDT-PERP', 100, now64(3)),
+			(generateUUIDv4(), 'ADL', generateUUIDv4(), 'BTC-USDT-PERP', 0, now64(3)),
+			(generateUUIDv4(), 'WARNING', generateUUIDv4(), '', 0, now64(3))`,
+		`INSERT INTO derivatives_positions (position_id, user_id, symbol, quantity, updated_at, version) VALUES
+			('0192a000-0000-7000-8000-0000000000a1', generateUUIDv4(), 'BTC-USDT-PERP', 0.5, now64(3), 1),
+			('0192a000-0000-7000-8000-0000000000a1', generateUUIDv4(), 'BTC-USDT-PERP', 0.7, now64(3), 2),
+			(generateUUIDv4(), generateUUIDv4(), 'BTC-USDT-PERP', -0.7, now64(3), 3),
+			(generateUUIDv4(), generateUUIDv4(), 'ETH-USDT-PERP', 0, now64(3), 3)`,
 	} {
 		if err := conn.Exec(ctx, q); err != nil {
 			t.Fatal(err)
@@ -76,6 +93,33 @@ func TestReports(t *testing.T) {
 	if len(wallet) != 1 || wallet[0].Deposits != 1 || wallet[0].DepositAmount != "0.0012" || wallet[0].Withdrawals != 1 ||
 		wallet[0].WithdrawalAmount != "0.0011" || wallet[0].WithdrawalFees != "0.0002" {
 		t.Fatalf("wallet report %+v", wallet)
+	}
+	perps, err := r.Derivatives(ctx, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(perps) != 1 || perps[0].Day != today || perps[0].Fills != 2 || perps[0].Volume != "0.5" || perps[0].Notional != "30000" ||
+		perps[0].Fees != "21" || perps[0].RealizedPnL != "-20" || perps[0].FundingPaid != "3" || perps[0].FundingReceived != "2.5" ||
+		perps[0].Liquidations != 1 || perps[0].ADL != 1 || perps[0].InsurancePaid != "100" {
+		t.Fatalf("derivatives report %+v", perps)
+	}
+	oi, err := r.OpenInterest(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(oi) != 1 || oi[0].Symbol != "BTC-USDT-PERP" || oi[0].Long != "0.7" || oi[0].Short != "0.7" || oi[0].Positions != 2 {
+		t.Fatalf("open interest %+v", oi)
+	}
+	steps, err := r.Liquidations(ctx, 7, "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 4 {
+		t.Fatalf("liquidations %+v", steps)
+	}
+	filled, err := r.Liquidations(ctx, 7, "FILLED", 10)
+	if err != nil || len(filled) != 1 || filled[0].InsurancePaid != "100" {
+		t.Fatalf("filled %+v %v", filled, err)
 	}
 	candles, err := r.Candles(ctx, "ETH-BTC", 3600, 10)
 	if err != nil {

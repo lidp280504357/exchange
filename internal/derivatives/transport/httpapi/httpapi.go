@@ -520,3 +520,101 @@ func (h *Handler) cancelConditional(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.WriteJSON(w, http.StatusOK, toConditionalJSON(c))
 }
+
+// InternalRoutes serves the admin console (the gateway does not route
+// /internal): the contracts with their reduce-only state, mark price and
+// open interest; lifting reduce-only; the positions close to or in
+// liquidation.
+func (h *Handler) InternalRoutes(r chi.Router) {
+	r.Get("/internal/derivatives/contracts", h.overview)
+	r.Post("/internal/derivatives/contracts/{symbol}/lift-reduce-only", h.liftReduceOnly)
+	r.Get("/internal/derivatives/risk", h.risk)
+}
+
+func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
+	list, err := h.Svc.Overview(r.Context())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	type contractJSON struct {
+		Symbol           string  `json:"symbol"`
+		Status           string  `json:"status"`
+		ReduceOnly       bool    `json:"reduce_only"`
+		ReduceOnlyReason string  `json:"reduce_only_reason"`
+		ReduceOnlySince  *string `json:"reduce_only_since"`
+		LiftedBy         string  `json:"lifted_by"`
+		MarkPrice        *string `json:"mark_price"`
+		MarkAt           *string `json:"mark_at"`
+		MarkFresh        bool    `json:"mark_fresh"`
+		OpenInterest     string  `json:"open_interest"`
+		Positions        int     `json:"positions"`
+	}
+	out := make([]contractJSON, 0, len(list))
+	for _, v := range list {
+		c := contractJSON{
+			Symbol: v.Contract.Symbol, Status: v.Contract.Status, ReduceOnly: v.State.ReduceOnly, ReduceOnlyReason: v.State.Reason,
+			LiftedBy: v.State.LiftedBy, MarkFresh: v.MarkFresh, OpenInterest: v.OpenInterest.String(), Positions: v.Positions,
+		}
+		if !v.State.Since.IsZero() {
+			at := stamp(v.State.Since)
+			c.ReduceOnlySince = &at
+		}
+		if v.Mark.Price.IsPositive() {
+			price, at := v.Mark.Price.String(), stamp(v.Mark.At)
+			c.MarkPrice, c.MarkAt = &price, &at
+		}
+		out = append(out, c)
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"contracts": out})
+}
+
+func (h *Handler) liftReduceOnly(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Actor string `json:"actor"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if strings.TrimSpace(body.Actor) == "" {
+		httpx.WriteError(w, r, apperr.Invalid("actor is required"))
+		return
+	}
+	lifted, err := h.Svc.LiftReduceOnly(r.Context(), symbol(r), body.Actor)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"symbol": symbol(r), "lifted": lifted})
+}
+
+func (h *Handler) risk(w http.ResponseWriter, r *http.Request) {
+	list, err := h.Svc.RiskPositions(r.Context())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	type riskJSON struct {
+		positionJSON
+		UserID              string  `json:"user_id"`
+		Liquidating         bool    `json:"liquidating"`
+		LiquidationAttempts int     `json:"liquidation_attempts"`
+		WarnedAt            *string `json:"warned_at"`
+		MarginRatio         *string `json:"margin_ratio"`
+	}
+	out := make([]riskJSON, 0, len(list))
+	for _, v := range list {
+		row := riskJSON{positionJSON: toPositionJSON(v), UserID: v.UserID, Liquidating: v.Liquidating, LiquidationAttempts: v.LiquidationAttempts}
+		if !v.WarnedAt.IsZero() {
+			at := stamp(v.WarnedAt)
+			row.WarnedAt = &at
+		}
+		if balance := v.Margin.Add(v.UnrealizedPnL); balance.IsPositive() && v.MaintenanceMargin.IsPositive() {
+			ratio := v.MaintenanceMargin.DivRound(balance, 4).String()
+			row.MarginRatio = &ratio
+		}
+		out = append(out, row)
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"positions": out})
+}

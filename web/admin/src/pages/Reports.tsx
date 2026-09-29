@@ -33,6 +33,7 @@ export function ReportsPage(_: { admin: Admin }) {
           rows={(trading.data ?? []).map((d) => [d.day, d.symbol, d.trades, d.volume, d.quote_volume, d.orders, d.rejected])}
         />
       </Card>
+      <Derivatives days={days} />
       <Card title="充值与提现（按资产、UTC 日）">
         <ErrorText text={wallet.isError ? describe(wallet.error) : undefined} />
         <Table
@@ -42,6 +43,43 @@ export function ReportsPage(_: { admin: Admin }) {
       </Card>
       <Candles />
     </>
+  );
+}
+
+function Derivatives({ days }: { days: string }) {
+  const report = useQuery({
+    queryKey: ["reports", "derivatives", days],
+    queryFn: async () => data(await api.GET("/admin/v1/reports/derivatives", { params: { query: { days: Number(days) } } })).items,
+  });
+  const oi = useQuery({
+    queryKey: ["reports", "open-interest"],
+    queryFn: async () => data(await api.GET("/admin/v1/reports/open-interest")).items,
+  });
+  return (
+    <Card title="永续合约（按合约、UTC 日）">
+      <p className="mb-2 text-xs text-slate-500">成交量与成交额每笔成交只算一次（取买方）；资金费按结算时间归日；强平数为被接管的仓位。</p>
+      <ErrorText text={report.isError ? describe(report.error) : undefined} />
+      <Table
+        head={["日期", "合约", "成交笔数（双边）", "成交量", "成交额", "手续费", "已实现盈亏", "资金费付出", "资金费收到", "强平", "ADL", "保险基金垫付"]}
+        rows={(report.data ?? []).map((d) => [
+          d.day,
+          d.symbol,
+          d.fills,
+          d.volume,
+          d.notional,
+          d.fees,
+          d.realized_pnl,
+          d.funding_paid,
+          d.funding_received,
+          d.liquidations,
+          d.adl,
+          d.insurance_paid,
+        ])}
+      />
+      <h3 className="mt-4 mb-2 text-sm font-medium">当前持仓量（持仓读模型）</h3>
+      <ErrorText text={oi.isError ? describe(oi.error) : undefined} />
+      <Table head={["合约", "多头", "空头", "持仓数"]} rows={(oi.data ?? []).map((o) => [o.symbol, o.long, o.short, o.positions])} empty="没有未平仓位" />
+    </Card>
   );
 }
 

@@ -3,6 +3,7 @@ package analytics
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	derivativesv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/derivatives/v1"
 	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
 	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
 	tradev1 "github.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1"
@@ -122,6 +124,79 @@ func TestProjectWallet(t *testing.T) {
 	}
 	if r := m.withdrawals[0][12].([]string); r == nil || len(r) != 0 {
 		t.Fatalf("empty risk reasons must be an empty array, got %#v", r)
+	}
+}
+
+func TestProjectDerivatives(t *testing.T) {
+	at := time.Date(2026, 9, 29, 8, 0, 3, 0, time.UTC)
+	user, other, position := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	snapshot := &derivativesv1.Position{
+		PositionId: position, UserId: user, Symbol: "BTC-USDT-PERP", PositionSide: "BOTH", Quantity: "-0.5", EntryPrice: "60000",
+		EntryCost: "30000", Margin: "600", MarginMode: "ISOLATED", Leverage: 50, RealizedPnl: "0", Funding: "-1.5", Version: 4,
+	}
+	var m readModels
+	for _, d := range []kafka.Delivery{
+		// A contract trade joins the spot trades.
+		delivery(t, event.TopicDerivTrade, &tradev1.TradeExecuted{
+			TradeId: uuid.NewString(), Symbol: "BTC-USDT-PERP", Sequence: 3, Price: "60000", Quantity: "0.5", QuoteQuantity: "30000",
+			BuyerOrderId: uuid.NewString(), BuyerUserId: other, SellerOrderId: uuid.NewString(), SellerUserId: user,
+		}, at),
+		delivery(t, event.TopicDerivPosition, &derivativesv1.FillSettled{
+			TradeId: uuid.NewString(), OrderId: uuid.NewString(), UserId: user, Symbol: "BTC-USDT-PERP", Side: "SELL", PositionSide: "BOTH",
+			Price: "60000", Quantity: "0.5", Fee: "15", RealizedPnl: "0", ExecutedAt: timestamppb.New(at),
+		}, at),
+		delivery(t, event.TopicDerivPosition, &derivativesv1.FundingPaid{
+			Position: snapshot, FundingTime: timestamppb.New(at.Truncate(time.Hour)), FundingRate: "0.0001", MarkPrice: "60010", Amount: "-1.5",
+		}, at),
+		delivery(t, event.TopicDerivLiquidation, &derivativesv1.LiquidationWarning{
+			UserId: other, Cross: true, MarginBalance: "140", MaintenanceMargin: "120", At: timestamppb.New(at),
+		}, at),
+		delivery(t, event.TopicDerivLiquidation, &derivativesv1.LiquidationStarted{
+			Position: snapshot, MarkPrice: "61200", BankruptcyPrice: "61200", MarginBalance: "0", MaintenanceMargin: "122.4",
+		}, at),
+		delivery(t, event.TopicDerivLiquidation, &derivativesv1.LiquidationFilled{
+			UserId: user, Symbol: "BTC-USDT-PERP", PositionSide: "BOTH", TradeId: uuid.NewString(), Price: "61300", Quantity: "0.5",
+			RealizedPnl: "-650", InsurancePaid: "50",
+		}, at),
+		delivery(t, event.TopicDerivLiquidation, &derivativesv1.AdlExecuted{
+			UserId: other, Symbol: "BTC-USDT-PERP", PositionSide: "BOTH", TradeId: uuid.NewString(), Price: "61200", Quantity: "0.1",
+			RealizedPnl: "120",
+		}, at),
+		// Not a read model event.
+		delivery(t, event.TopicDerivPosition, &derivativesv1.LeverageChanged{UserId: user, Symbol: "BTC-USDT-PERP", Leverage: 20}, at),
+	} {
+		if err := m.add(d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(m.trades) != 1 || len(m.fills) != 1 || len(m.funding) != 1 || len(m.positions) != 2 || len(m.liquidations) != 4 {
+		t.Fatalf("%d trades, %d fills, %d funding, %d positions, %d liquidations", len(m.trades), len(m.fills), len(m.funding),
+			len(m.positions), len(m.liquidations))
+	}
+	if f := m.fills[0]; !f[9].(decimal.Decimal).Equal(decimal.NewFromInt(30000)) || !f[11].(decimal.Decimal).Equal(decimal.NewFromInt(15)) {
+		t.Fatalf("fill row %v", f)
+	}
+	if p := m.positions[0]; p[13] != uint64(4) || !p[5].(*decimal.Decimal).Equal(decimal.NewFromInt(60000)) || p[9] != int32(50) {
+		t.Fatalf("position row %v", p)
+	}
+	if f := m.funding[0]; !f[8].(decimal.Decimal).Equal(decimal.RequireFromString("-1.5")) || !f[5].(time.Time).Equal(at.Truncate(time.Hour)) {
+		t.Fatalf("funding row %v", f)
+	}
+	kinds := []string{}
+	for _, l := range m.liquidations {
+		kinds = append(kinds, l[1].(string))
+	}
+	if fmt.Sprint(kinds) != "[WARNING STARTED FILLED ADL]" {
+		t.Fatalf("liquidation kinds %v", kinds)
+	}
+	if w := m.liquidations[0]; w[3] != "" || w[5] != true || !w[14].(decimal.Decimal).Equal(decimal.NewFromInt(140)) {
+		t.Fatalf("warning row %v", w)
+	}
+	if f := m.liquidations[2]; !f[11].(decimal.Decimal).Equal(decimal.NewFromInt(50)) || f[6] != false {
+		t.Fatalf("filled row %v", f)
+	}
+	if a := m.liquidations[3]; a[6] != true || !a[10].(decimal.Decimal).Equal(decimal.NewFromInt(120)) {
+		t.Fatalf("adl row %v", a)
 	}
 }
 

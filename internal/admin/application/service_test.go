@@ -179,6 +179,37 @@ func (l *fakeLedger) Adjust(_ context.Context, key, userID, asset string, amount
 	return "journal-1", nil
 }
 
+func (l *fakeLedger) FundInsurance(_ context.Context, key, asset string, amount decimal.Decimal, actor, _ string) (string, error) {
+	l.calls = append(l.calls, adjustment{key: key, asset: asset, actor: actor, amount: amount})
+	if l.err != nil {
+		return "", l.err
+	}
+	return "journal-2", nil
+}
+
+func (l *fakeLedger) SystemBalances(_ context.Context, asset string) ([]ports.Balance, error) {
+	return []ports.Balance{
+		{AccountType: "FEE_REVENUE", Asset: asset, Available: "7", Frozen: "0"},
+		{AccountType: "INSURANCE_FUND", Asset: asset, Available: "1000000", Frozen: "0"},
+		{AccountType: "PNL_CLEARING", Asset: asset, Available: "-12.5", Frozen: "0"},
+	}, nil
+}
+
+type fakeDerivatives struct{ lifted []string }
+
+func (d *fakeDerivatives) Contracts(context.Context) (json.RawMessage, error) {
+	return json.RawMessage(`{"contracts":[]}`), nil
+}
+
+func (d *fakeDerivatives) LiftReduceOnly(_ context.Context, symbol, actor string) (json.RawMessage, error) {
+	d.lifted = append(d.lifted, symbol+" by "+actor)
+	return json.RawMessage(`{"symbol":"` + symbol + `","lifted":true}`), nil
+}
+
+func (d *fakeDerivatives) Risk(context.Context) (json.RawMessage, error) {
+	return json.RawMessage(`{"positions":[]}`), nil
+}
+
 type fakeFlags struct{ switched []string }
 
 func (f *fakeFlags) List(context.Context) ([]ports.Flag, error) {
@@ -209,13 +240,14 @@ func (w *fakeWallet) Review(_ context.Context, _ string, _ bool, reviewer, _ str
 }
 
 type harness struct {
-	svc    *Service
-	store  *memStore
-	ledger *fakeLedger
-	flags  *fakeFlags
-	orders *fakeOrders
-	wallet *fakeWallet
-	now    time.Time
+	svc         *Service
+	store       *memStore
+	ledger      *fakeLedger
+	flags       *fakeFlags
+	orders      *fakeOrders
+	wallet      *fakeWallet
+	derivatives *fakeDerivatives
+	now         time.Time
 	// secrets by email, for signing in.
 	secrets map[string][]byte
 }
@@ -230,11 +262,11 @@ func newHarness(t *testing.T) *harness {
 	}
 	h := &harness{
 		store: newMemStore(), ledger: &fakeLedger{}, flags: &fakeFlags{}, orders: &fakeOrders{}, wallet: &fakeWallet{},
-		now: time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC), secrets: map[string][]byte{},
+		derivatives: &fakeDerivatives{}, now: time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC), secrets: map[string][]byte{},
 	}
 	h.svc = &Service{
 		Store: h.store, Hasher: password.NewHasher(1, testCost), Box: box, Orders: h.orders, Wallet: h.wallet, Flags: h.flags,
-		Ledger: h.ledger, Log: slog.New(slog.DiscardHandler), Now: func() time.Time { return h.now },
+		Ledger: h.ledger, Derivatives: h.derivatives, Log: slog.New(slog.DiscardHandler), Now: func() time.Time { return h.now },
 	}
 	return h
 }
@@ -461,5 +493,76 @@ func TestAdjustmentsNeedASecondAdministrator(t *testing.T) {
 	rejected, err := h.svc.DecideApproval(ctx, boss, c.ID, false, "wrong amount")
 	if err != nil || rejected.Status != domain.ApprovalRejected || len(h.ledger.calls) != 3 {
 		t.Fatalf("rejected: %+v, %v (%d ledger calls)", rejected, err, len(h.ledger.calls))
+	}
+}
+
+func TestInsuranceFundContributionsNeedASecondAdministrator(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.admin(t, "fin@example.com", domain.RoleFinance)
+	h.admin(t, "boss@example.com", domain.RoleAdmin)
+	h.admin(t, "ops@example.com", domain.RoleOperator)
+	fin, boss, ops := h.login(t, "fin@example.com"), h.login(t, "boss@example.com"), h.login(t, "ops@example.com")
+	fund, err := h.svc.InsuranceFund(ctx, ops, "")
+	if err != nil || fund.Asset != "USDT" || fund.Balance != "1000000" || fund.PnLClearing != "-12.5" {
+		t.Fatalf("fund %+v %v", fund, err)
+	}
+	if _, err := h.svc.RequestInsuranceFunding(ctx, ops, "USDT", decimal.NewFromInt(100), "top up"); code(err) != "ADMIN_FORBIDDEN" {
+		t.Fatalf("an operator requested: %v", err)
+	}
+	if _, err := h.svc.RequestInsuranceFunding(ctx, fin, "USDT", decimal.NewFromInt(-5), "take out"); code(err) != apperr.CodeInvalidArgument {
+		t.Fatalf("a negative contribution: %v", err)
+	}
+	a, err := h.svc.RequestInsuranceFunding(ctx, fin, "usdt", decimal.NewFromInt(50000), "after the drill")
+	if err != nil || a.Kind != domain.KindInsuranceFund || a.Payload["asset"] != "USDT" || a.Payload["amount"] != "50000" {
+		t.Fatalf("request %+v %v", a, err)
+	}
+	if _, err := h.svc.DecideApproval(ctx, fin, a.ID, true, "my own"); code(err) != "ADMIN_SELF_APPROVAL" {
+		t.Fatalf("self approval: %v", err)
+	}
+	done, err := h.svc.DecideApproval(ctx, boss, a.ID, true, "checked")
+	if err != nil || done.Status != domain.ApprovalExecuted || done.Result != "journal journal-2" {
+		t.Fatalf("decided %+v %v", done, err)
+	}
+	if len(h.ledger.calls) != 1 || h.ledger.calls[0].key != "approval:"+a.ID || h.ledger.calls[0].asset != "USDT" ||
+		!h.ledger.calls[0].amount.Equal(decimal.NewFromInt(50000)) || h.ledger.calls[0].actor != "boss@example.com" {
+		t.Fatalf("ledger calls %+v", h.ledger.calls)
+	}
+	if a := h.actions(); !slices.Contains(a, "admin.derivatives.insurance_requested") || !slices.Contains(a, "admin.derivatives.insurance_approved") {
+		t.Fatalf("audit %v", a)
+	}
+}
+
+// actions lists the audited actions in order.
+func (h *harness) actions() []string {
+	var out []string
+	for _, e := range h.store.audits {
+		out = append(out, e.GetAction())
+	}
+	return out
+}
+
+func TestLiftingReduceOnly(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.admin(t, "ops@example.com", domain.RoleOperator)
+	h.admin(t, "fin@example.com", domain.RoleFinance)
+	ops, fin := h.login(t, "ops@example.com"), h.login(t, "fin@example.com")
+	if _, err := h.svc.LiftReduceOnly(ctx, fin, "BTC-USDT-PERP", "index is back"); code(err) != "ADMIN_FORBIDDEN" {
+		t.Fatalf("finance lifted: %v", err)
+	}
+	if _, err := h.svc.LiftReduceOnly(ctx, ops, "BTC-USDT-PERP", ""); code(err) != apperr.CodeInvalidArgument {
+		t.Fatalf("no reason: %v", err)
+	}
+	raw, err := h.svc.LiftReduceOnly(ctx, ops, "btc-usdt-perp", "index is back")
+	if err != nil || !bytes.Contains(raw, []byte(`"lifted":true`)) || len(h.derivatives.lifted) != 1 ||
+		h.derivatives.lifted[0] != "btc-usdt-perp by ops@example.com" {
+		t.Fatalf("lift %s %v %v", raw, err, h.derivatives.lifted)
+	}
+	if !slices.Contains(h.actions(), "admin.derivatives.reduce_only_lifted") {
+		t.Fatalf("audit %v", h.actions())
+	}
+	if _, err := h.svc.Liquidations(ctx, fin, 7, "sideways", 10); code(err) != apperr.CodeInvalidArgument {
+		t.Fatalf("unknown kind: %v", err)
 	}
 }

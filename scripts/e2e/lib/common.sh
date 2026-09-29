@@ -93,13 +93,24 @@ otp() { otp_via EMAIL "$@"; }
 # address of the channel; the request itself names no identifier then).
 # SMS through the mock provider needs the auth.sms flag.
 otp_via() {
-  local channel=$1 scene=$2 target=$3 device=$4 token=${5:-} before inbox code challenge
+  local channel=$1 scene=$2 target=$3 device=$4 token=${5:-} before code challenge
   local auth=()
   [[ -n "$token" ]] && auth=(-H "Authorization: Bearer $token")
   before=$(inbox_count "$target")
   call POST /v1/auth/otp/request "{\"scene\":\"$scene\",\"channel\":\"$channel\",\"identifier\":\"$target\",\"captcha_token\":\"$BYPASS\",\"device_id\":\"$device\"}" ${auth[@]+"${auth[@]}"}
   expect 200 - "otp/request $scene by $channel"
   challenge=$(jq -r .challenge_id <<<"$BODY")
+  code=$(await_code "$target" "$before")
+  call POST /v1/auth/otp/verify "{\"challenge_id\":\"$challenge\",\"code\":\"$code\",\"device_id\":\"$device\"}"
+  expect 200 - "otp/verify $scene"
+  TICKET=$(jq -r .otp_ticket <<<"$BODY")
+  date +%s >"$(code_stamp "$target")"
+}
+
+# await_code TARGET BEFORE waits for the dev inbox of TARGET to hold more
+# than BEFORE messages and prints the code of the newest.
+await_code() {
+  local target=$1 before=$2 inbox
   for _ in $(seq 20); do
     inbox=$(curl -s "$BASE/v1/dev/messages?target=$(jq -rn --arg e "$target" '$e|@uri')&limit=50")
     if (( $(jq '.messages | length' <<<"$inbox") > before )); then
@@ -108,11 +119,7 @@ otp_via() {
     sleep 0.5
   done
   # Mails carry the code in the subject; SMS have only a body.
-  code=$(jq -r '.messages[0] | .subject + " " + .body' <<<"$inbox" | grep -oE '[0-9]{6}' | head -1)
-  call POST /v1/auth/otp/verify "{\"challenge_id\":\"$challenge\",\"code\":\"$code\",\"device_id\":\"$device\"}"
-  expect 200 - "otp/verify $scene"
-  TICKET=$(jq -r .otp_ticket <<<"$BODY")
-  date +%s >"$(code_stamp "$target")"
+  jq -r '.messages[0] | .subject + " " + .body' <<<"$inbox" | grep -oE '[0-9]{6}' | head -1
 }
 
 # code_stamp TARGET is the file holding when TARGET last got a code (bash
