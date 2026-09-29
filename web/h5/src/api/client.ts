@@ -2,6 +2,7 @@ import createClient from "openapi-fetch";
 import { useSession, type Session } from "../store/session";
 import type { paths as AccountPaths } from "./gen/account";
 import type { paths as AuthPaths } from "./gen/auth";
+import type { paths as DerivativesPaths } from "./gen/derivatives";
 import type { paths as GatewayPaths } from "./gen/gateway";
 import type { paths as MarketPaths } from "./gen/market";
 import type { paths as NotificationPaths } from "./gen/notification";
@@ -125,6 +126,7 @@ export const notificationApi = createClient<NotificationPaths>(options);
 export const gatewayApi = createClient<GatewayPaths>(options);
 export const tradingApi = createClient<TradingPaths>(options);
 export const walletApi = createClient<WalletPaths>(options);
+export const derivativesApi = createClient<DerivativesPaths>(options);
 
 // unwrap turns an openapi-fetch result into data or a thrown ApiError.
 // openapi-fetch has already read and parsed the error body into `error`.

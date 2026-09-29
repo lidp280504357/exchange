@@ -30,7 +30,7 @@ export function TradePage() {
       <TickerBar pair={pair} />
       <div className="grid gap-3 lg:grid-cols-[1fr_300px]">
         <CandleChart symbol={pair.symbol} />
-        <OrderBook pair={pair} onPick={(price) => setPicked({ price, at: Date.now() })} />
+        <OrderBook symbol={pair.symbol} base={pair.base_asset} quote={pair.quote_asset} onPick={(price) => setPicked({ price, at: Date.now() })} />
       </div>
       <div className="grid gap-3 lg:grid-cols-[1fr_300px]">
         <OrderForm pair={pair} picked={picked} />
@@ -92,7 +92,7 @@ function toVolume(c: Candle) {
   return { time: (Date.parse(c.open_time) / 1000) as UTCTimestamp, value: Number(c.volume), color: up ? "rgba(14,203,129,0.4)" : "rgba(246,70,93,0.4)" };
 }
 
-function CandleChart({ symbol }: { symbol: string }) {
+export function CandleChart({ symbol }: { symbol: string }) {
   const { t } = useTranslation();
   const [interval, setChartInterval] = useState<(typeof chartIntervals)[number]>("15m");
   const box = useRef<HTMLDivElement>(null);
@@ -149,12 +149,14 @@ function CandleChart({ symbol }: { symbol: string }) {
   );
 }
 
-function OrderBook({ pair, onPick }: { pair: Pair; onPick: (price: string) => void }) {
+// OrderBook shows the top of a pair's or contract's book; a click on a
+// level picks its price.
+export function OrderBook({ symbol, base, quote, onPick }: { symbol: string; base: string; quote: string; onPick: (price: string) => void }) {
   const { t } = useTranslation();
   const [book, setBook] = useState<Book | null>(null);
   useEffect(() => {
     setBook(null);
-    const ch = `depth:${pair.symbol}`;
+    const ch = `depth:${symbol}`;
     let current: Book | null = null;
     return marketSocket.subscribe(ch, (m) => {
       const next = applyDepth(current, m);
@@ -167,7 +169,7 @@ function OrderBook({ pair, onPick }: { pair: Pair; onPick: (price: string) => vo
       current = next;
       setBook(next);
     });
-  }, [pair.symbol]);
+  }, [symbol]);
   const asks = (book?.asks ?? []).slice(0, 10).reverse();
   const bids = (book?.bids ?? []).slice(0, 10);
   const row = (l: [string, string], tone: string) => (
@@ -179,8 +181,8 @@ function OrderBook({ pair, onPick }: { pair: Pair; onPick: (price: string) => vo
   return (
     <Card title={t("trade.book")}>
       <div className="flex justify-between px-1 text-xs text-gray-500">
-        <span>{t("trade.price")} ({pair.quote_asset})</span>
-        <span>{t("trade.quantity")} ({pair.base_asset})</span>
+        <span>{t("trade.price")} ({quote})</span>
+        <span>{t("trade.quantity")} ({base})</span>
       </div>
       <div data-testid="asks">{asks.map((l) => row(l, "text-red-400"))}</div>
       <div className="my-1 border-t border-white/10" />
@@ -190,7 +192,7 @@ function OrderBook({ pair, onPick }: { pair: Pair; onPick: (price: string) => vo
   );
 }
 
-function RecentTrades({ symbol }: { symbol: string }) {
+export function RecentTrades({ symbol }: { symbol: string }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const trades = useQuery({

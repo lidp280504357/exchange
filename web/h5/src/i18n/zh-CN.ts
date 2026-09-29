@@ -29,6 +29,21 @@ export const zhCN = {
     side: "方向", type: "类型", filled: "已成交", status: "状态", fee: "手续费", role: "角色", noAnchor: "暂无成交",
     notTrading: "该交易对当前不可下单", attribution: "图表由 TradingView 提供",
   },
+  futures: {
+    title: "永续合约", contract: "合约", perpetual: "永续", mark: "标记价", index: "指数价", funding: "资金费率", countdown: "结算倒计时",
+    maxLeverage: "最高杠杆", reduceOnly: "只减仓", account: "合约账户", walletBalance: "钱包余额", marginBalance: "保证金余额",
+    unrealized: "未实现盈亏", realized: "已实现盈亏", positionMargin: "仓位保证金", orderMargin: "委托占用", leverage: "杠杆",
+    setLeverage: "调整杠杆", openLong: "开多", openShort: "开空", closeLong: "平多", closeShort: "平空", buyLong: "买入/做多",
+    sellShort: "卖出/做空", reduceOnlyOrder: "只减仓", marketHint: "以标记价 ± 价格带为限立即成交，剩余部分撤销", cost: "预计占用",
+    positions: "当前持仓", noPositions: "暂无持仓", entryPrice: "开仓均价", liquidationPrice: "预估强平价", margin: "保证金",
+    maintenance: "维持保证金", tpsl: "止盈止损", adjustMargin: "调整保证金", marketClose: "市价全平", byMark: "标记价触发",
+    byLast: "最新价触发", triggerPrice: "触发价", wholePosition: "全部仓位", addMargin: "追加", reduceMargin: "减少",
+    fundingHistory: "资金费", liquidation: "强平", crossAccount: "全仓账户",
+    risk: {
+      WARNING: "{{what}} 保证金接近维持保证金，请注意风险", STARTED: "{{what}} 已触发强平，仓位由系统接管",
+      LIQUIDATED: "{{what}} 强平成交", ADL: "{{what}} 被自动减仓",
+    },
+  },
   transfer: {
     title: "资金划转", from: "从", to: "到", amount: "数量", max: "全部", done: "划转成功", history: "划转记录",
     swap: "交换方向", status: { COMPLETED: "已完成", FAILED: "失败" },
@@ -64,6 +79,9 @@ export const zhCN = {
     MAKER: "挂单", TAKER: "吃单", USER: "用户撤单", SELF_TRADE: "自成交保护", NO_LIQUIDITY: "盘口不足",
     REQUESTED: "处理中", PENDING_REVIEW: "待审核", APPROVED: "已批准", SIGNING: "签名中", BROADCAST: "已广播", CONFIRMING: "确认中",
     CONFIRMED: "已完成", FAILED: "失败", LEDGER_INSUFFICIENT_BALANCE: "可用余额不足",
+    REALIZED_PNL: "已实现盈亏", FUNDING_PAYMENT: "资金费", LIQUIDATION_SETTLE: "强平结算", ADL_SETTLE: "自动减仓",
+    INSURANCE_CONTRIBUTION: "保险基金", ONE_WAY: "单向持仓", HEDGE: "双向持仓", CROSS: "全仓", ISOLATED: "逐仓",
+    LONG: "多", SHORT: "空", BOTH: "单向", TAKE_PROFIT: "止盈", STOP_LOSS: "止损", TRIGGERED: "已触发",
   },
   notices: { title: "通知", markAll: "全部已读", unread: "{{n}} 条未读" },
   security: {
@@ -98,6 +116,11 @@ export const zhCN = {
     WALLET_INVALID_ADDRESS: "地址格式不正确", WALLET_ADDRESS_NOT_WHITELISTED: "请先把该地址加入提现地址簿", WALLET_ADDRESS_COOLDOWN: "新地址还在冷却期，稍后再试",
     WALLET_BELOW_MINIMUM: "低于最小提现数量", WALLET_LIMIT_EXCEEDED: "超出提现限额", WALLET_OWN_ADDRESS: "这是你自己的充值地址",
     WALLET_AMOUNT_PRECISION: "数量的小数位超出资产精度", WALLET_WITHDRAWAL_NOT_CANCELABLE: "提现已在发送，无法撤销",
+    DERIV_DISABLED: "合约交易暂未开放", DERIV_INSUFFICIENT_MARGIN: "保证金不足", DERIV_REDUCE_ONLY_MODE: "合约处于只减仓状态，只能平仓",
+    DERIV_MARK_PRICE_UNAVAILABLE: "暂无标记价，请稍后再试", DERIV_LEVERAGE_EXCEEDED: "杠杆超出合约允许范围",
+    DERIV_RISK_LIMIT_EXCEEDED: "仓位超出该杠杆的风险限额，请降低杠杆或数量", DERIV_REDUCE_ONLY_REJECTED: "平仓数量超过可平仓位",
+    DERIV_SETTINGS_LOCKED: "请先平掉该合约的仓位并撤销挂单", DERIV_NO_POSITION: "没有对应的仓位",
+    DERIV_MARGIN_REDUCE_TOO_LARGE: "减少后保证金不足", DERIV_POSITION_LIQUIDATING: "仓位正在强平", DERIV_TRIGGER_IMMEDIATE: "触发价已被越过，请直接下单",
     format: "请输入正确的数字", zero: "数量必须大于 0", precision: "最多 {{n}} 位小数", unknown: "出错了（{{code}}）",
   },
 };

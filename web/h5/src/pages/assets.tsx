@@ -2,13 +2,17 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
-import { accountApi, marketApi, unwrap } from "../api/client";
+import { accountApi, derivativesApi, marketApi, unwrap } from "../api/client";
 import { Badge, Button, Card, ErrorText, Time } from "../components/ui";
 import { codeText, errorText } from "../i18n";
 import { format } from "../lib/decimal";
 
 export function useBalances() {
   return useQuery({ queryKey: ["balances"], queryFn: () => unwrap(accountApi.GET("/v1/account/balances")) });
+}
+
+export function useFuturesAccount(enabled = true) {
+  return useQuery({ queryKey: ["futures-account"], queryFn: () => unwrap(derivativesApi.GET("/v1/derivatives/account")), enabled });
 }
 
 export function AssetsPage() {
@@ -18,6 +22,7 @@ export function AssetsPage() {
   const assets = useQuery({ queryKey: ["assets"], queryFn: () => unwrap(marketApi.GET("/v1/market/assets")) });
   const rows = (balances.data?.balances ?? []).filter((b) => b.account_type === tab);
   const names = new Map((assets.data?.assets ?? []).map((a) => [a.asset_code, a.name]));
+  const futures = useFuturesAccount(tab === "FUTURES");
 
   return (
     <div className="space-y-4">
@@ -40,6 +45,13 @@ export function AssetsPage() {
           ))}
         </div>
         <ErrorText text={balances.error ? errorText(balances.error) : ""} />
+        {tab === "FUTURES" && futures.data && (
+          <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-sm" data-testid="futures-summary">
+            <span className="text-gray-400">{t("futures.marginBalance")} <span className="font-mono text-gray-200">{format(futures.data.margin_balance)} {futures.data.asset}</span></span>
+            <span className="text-gray-400">{t("futures.unrealized")} <span className={`font-mono ${futures.data.unrealized_pnl.startsWith("-") ? "text-red-400" : "text-gray-200"}`}>{format(futures.data.unrealized_pnl)}</span></span>
+            <Link to="/markets" className="text-[#f0b90b] hover:underline">{t("futures.title")}</Link>
+          </div>
+        )}
         {rows.length === 0 && !balances.isLoading ? (
           <p className="text-sm text-gray-500">{t("assets.empty")}</p>
         ) : (

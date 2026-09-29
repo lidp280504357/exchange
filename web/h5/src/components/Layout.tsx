@@ -3,9 +3,15 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink, Outlet, useNavigate } from "react-router";
 import { authApi } from "../api/client";
-import { setLanguage } from "../i18n";
+import i18n, { codeText, setLanguage } from "../i18n";
 import { PrivateSocket } from "../lib/ws";
 import { useSession } from "../store/session";
+
+// riskText announces a liquidation step of the user's contract positions.
+function riskText(d: Record<string, string>): string {
+  const what = d.symbol ? `${d.symbol}${d.position_side && d.position_side !== "BOTH" ? ` ${codeText(d.position_side)}` : ""}` : i18n.t("futures.crossAccount");
+  return i18n.t(`futures.risk.${d.event}`, { what, defaultValue: d.event });
+}
 
 // useLiveEvents keeps the WebSocket open while signed in and refreshes the
 // affected queries on each push (§7.3).
@@ -13,7 +19,9 @@ function useLiveEvents() {
   const qc = useQueryClient();
   const token = useSession((s) => s.session?.accessToken);
   const signedIn = Boolean(token);
-  const [socket] = useState(() => new PrivateSocket(["balances", "notifications", "orders", "fills", "deposits", "withdrawals"]));
+  const [socket] = useState(
+    () => new PrivateSocket(["balances", "notifications", "orders", "fills", "deposits", "withdrawals", "positions", "risk"]),
+  );
   const [flash, setFlash] = useState("");
 
   useEffect(() => {
@@ -22,11 +30,21 @@ function useLiveEvents() {
       if (p.channel === "balances") {
         void qc.invalidateQueries({ queryKey: ["balances"] });
         void qc.invalidateQueries({ queryKey: ["ledger"] });
+        void qc.invalidateQueries({ queryKey: ["futures-account"] });
       } else if (p.channel === "orders") {
         void qc.invalidateQueries({ queryKey: ["orders"] });
+        void qc.invalidateQueries({ queryKey: ["conditionals"] });
       } else if (p.channel === "fills") {
         void qc.invalidateQueries({ queryKey: ["fills"] });
         void qc.invalidateQueries({ queryKey: ["orders"] });
+      } else if (p.channel === "positions") {
+        void qc.invalidateQueries({ queryKey: ["positions"] });
+        void qc.invalidateQueries({ queryKey: ["futures-account"] });
+        if (p.data.event === "FUNDING") void qc.invalidateQueries({ queryKey: ["funding"] });
+        if (p.data.event === "LEVERAGE") void qc.invalidateQueries({ queryKey: ["settings"] });
+      } else if (p.channel === "risk") {
+        void qc.invalidateQueries({ queryKey: ["positions"] });
+        setFlash(riskText(p.data));
       } else if (p.channel === "deposits") {
         void qc.invalidateQueries({ queryKey: ["deposits"] });
       } else if (p.channel === "withdrawals") {
