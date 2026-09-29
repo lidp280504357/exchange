@@ -32,6 +32,7 @@ type Repos interface {
 	Pending() PendingRepo
 	Contracts() ContractStateRepo
 	Runs() RunRepo
+	Funding() FundingRepo
 	// Emit queues an event (or an engine command) on topic, keyed by
 	// aggregateID.
 	Emit(ctx context.Context, topic string, msg proto.Message, aggregateType, aggregateID string) error
@@ -101,6 +102,34 @@ type PositionRepo interface {
 type Totals struct {
 	NetQty  decimal.Decimal
 	NetCost decimal.Decimal
+}
+
+// FundingRepo stores the funding rounds and payments.
+type FundingRepo interface {
+	// Round returns the round, or nil.
+	Round(ctx context.Context, symbol string, at time.Time) (*domain.FundingRound, error)
+	// Snapshot stores a round with the positions held at its time.
+	Snapshot(ctx context.Context, r domain.FundingRound, payments []domain.FundingPayment) error
+	// Waiting returns the rounds waiting for their rate, oldest first.
+	Waiting(ctx context.Context) ([]domain.FundingRound, error)
+	// SetRate records a round's rate and mark price.
+	SetRate(ctx context.Context, symbol string, at time.Time, rate, mark decimal.Decimal) error
+	// Unsettled returns a round's payments not settled yet.
+	Unsettled(ctx context.Context, symbol string, at time.Time) ([]domain.FundingPayment, error)
+	// Settle records a settled payment.
+	Settle(ctx context.Context, p domain.FundingPayment) error
+	// Finish sets a round SETTLED or SKIPPED.
+	Finish(ctx context.Context, symbol string, at time.Time, status string) error
+	// OfUser returns a page of the user's settled payments, newest first;
+	// before is "<unix time>:<position id>" of the previous page's last.
+	OfUser(ctx context.Context, userID, symbol, before string, limit int) ([]domain.FundingPayment, error)
+}
+
+// FundingRates reads the settled funding rates (market-data-service).
+type FundingRates interface {
+	// Rate returns the rate and mark price a contract's period ending at
+	// settled at; found is false while it is not settled.
+	Rate(ctx context.Context, symbol string, at time.Time) (rate, mark decimal.Decimal, found bool, err error)
 }
 
 // RunRepo records the reconciliation runs.

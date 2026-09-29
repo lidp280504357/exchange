@@ -181,6 +181,7 @@ services:
       LEDGER_GRPC_ADDR: ledger-service:9185
       INSTRUMENT_GRPC_ADDR: instrument-service:9184
       USER_GRPC_ADDR: user-service:9182
+      MARKET_DATA_SERVICE_URL: http://market-data-service:8090
       # MARKET_MAKER_USER_IDS (zero fees) comes from apps.env.
     depends_on:
       postgres: {condition: service_healthy}

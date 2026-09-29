@@ -33,6 +33,7 @@ type Service struct {
 	Instruments ports.Instruments
 	Eligibility ports.Eligibility
 	Marks       ports.Marks
+	Rates       ports.FundingRates
 	// FeeFree are the market maker's accounts (§11.10).
 	FeeFree []string
 	Log     *slog.Logger

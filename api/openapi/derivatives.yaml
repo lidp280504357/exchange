@@ -342,6 +342,43 @@ paths:
                     type: [string, 'null']
         default:
           $ref: './common.yaml#/components/responses/Error'
+  /v1/derivatives/funding:
+    get:
+      operationId: listFundingPayments
+      summary: The caller's funding payments, newest first
+      description: |
+        At each funding time (00:00, 08:00, 16:00 UTC for an 8-hour
+        interval) every position held pays or receives |quantity| x mark
+        price x |rate| at the period's settled rate and mark price
+        (GET /v1/market/{symbol}/funding-rates): longs pay shorts when the
+        rate is positive. A payer rounds up, a receiver down. An isolated
+        position still open pays out of its margin and receives into it;
+        otherwise the available balance.
+      tags: [derivatives]
+      parameters:
+        - name: symbol
+          in: query
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FundingPayment'
+                  next_cursor:
+                    type: [string, 'null']
+        default:
+          $ref: './common.yaml#/components/responses/Error'
 components:
   securitySchemes:
     bearer:
@@ -524,6 +561,28 @@ components:
         updated_at:
           type: string
           format: date-time
+    FundingPayment:
+      type: object
+      required: [symbol, funding_time, position_side, quantity, funding_rate, mark_price, amount]
+      properties:
+        symbol:
+          type: string
+        funding_time:
+          type: string
+          format: date-time
+        position_side:
+          type: string
+          enum: [BOTH, LONG, SHORT]
+        quantity:
+          description: The signed quantity held at the funding time.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        funding_rate:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        mark_price:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        amount:
+          description: Received (positive) or paid.
+          $ref: './market.yaml#/components/schemas/Decimal'
     ContractFill:
       type: object
       required: [trade_id, order_id, symbol, side, position_side, role, price, quantity, closed_quantity, fee, realized_pnl,

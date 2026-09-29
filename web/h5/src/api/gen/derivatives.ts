@@ -169,6 +169,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/derivatives/funding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller's funding payments, newest first
+         * @description At each funding time (00:00, 08:00, 16:00 UTC for an 8-hour
+         *     interval) every position held pays or receives |quantity| x mark
+         *     price x |rate| at the period's settled rate and mark price
+         *     (GET /v1/market/{symbol}/funding-rates): longs pay shorts when the
+         *     rate is positive. A payer rounds up, a receiver down. An isolated
+         *     position still open pays out of its margin and receives into it;
+         *     otherwise the available balance.
+         */
+        get: operations["listFundingPayments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -264,6 +290,19 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        FundingPayment: {
+            symbol: string;
+            /** Format: date-time */
+            funding_time: string;
+            /** @enum {string} */
+            position_side: "BOTH" | "LONG" | "SHORT";
+            /** @description The signed quantity held at the funding time. */
+            quantity: components["schemas"]["Decimal"];
+            funding_rate: components["schemas"]["Decimal"];
+            mark_price: components["schemas"]["Decimal"];
+            /** @description Received (positive) or paid. */
+            amount: components["schemas"]["Decimal"];
         };
         ContractFill: {
             /** Format: uuid */
@@ -640,6 +679,34 @@ export interface operations {
                 content: {
                     "application/json": {
                         items: components["schemas"]["ContractFill"][];
+                        next_cursor: string | null;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listFundingPayments: {
+        parameters: {
+            query?: {
+                symbol?: string;
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["FundingPayment"][];
                         next_cursor: string | null;
                     };
                 };

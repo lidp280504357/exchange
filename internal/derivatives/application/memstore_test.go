@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lidp280504357/exchange/internal/derivatives/domain"
@@ -31,6 +33,8 @@ type memState struct {
 	fills     map[string]domain.Fill
 	pending   map[string]ports.PendingSettlement
 	contracts map[string]ports.ContractState
+	rounds    map[string]domain.FundingRound
+	payments  map[string]domain.FundingPayment
 	events    []proto.Message
 	runs      int
 }
@@ -39,6 +43,7 @@ func newMemStore() *memStore {
 	return &memStore{st: memState{
 		settings: map[string]domain.Settings{}, orders: map[string]domain.Order{}, positions: map[string]domain.Position{},
 		fills: map[string]domain.Fill{}, pending: map[string]ports.PendingSettlement{}, contracts: map[string]ports.ContractState{},
+		rounds: map[string]domain.FundingRound{}, payments: map[string]domain.FundingPayment{},
 	}}
 }
 
@@ -48,7 +53,7 @@ func (s *memStore) Tx(_ context.Context, fn func(ports.Repos) error) error {
 	tx := memState{
 		settings: maps.Clone(s.st.settings), orders: maps.Clone(s.st.orders), positions: maps.Clone(s.st.positions),
 		fills: maps.Clone(s.st.fills), pending: maps.Clone(s.st.pending), contracts: maps.Clone(s.st.contracts),
-		events: slices.Clone(s.st.events), runs: s.st.runs,
+		rounds: maps.Clone(s.st.rounds), payments: maps.Clone(s.st.payments), events: slices.Clone(s.st.events), runs: s.st.runs,
 	}
 	if err := fn(memRepos{st: &tx}); err != nil {
 		return err
@@ -69,6 +74,7 @@ func (r memRepos) Fills() ports.FillRepo                  { return memFills(r) }
 func (r memRepos) Pending() ports.PendingRepo             { return memPending(r) }
 func (r memRepos) Contracts() ports.ContractStateRepo     { return memContracts(r) }
 func (r memRepos) Runs() ports.RunRepo                    { return memRuns(r) }
+func (r memRepos) Funding() ports.FundingRepo             { return memFunding(r) }
 
 func (r memRepos) Emit(_ context.Context, _ string, msg proto.Message, _, _ string) error {
 	r.st.events = append(r.st.events, msg)
@@ -348,4 +354,80 @@ func (r memContracts) All(context.Context) ([]ports.ContractState, error) {
 func (r memRuns) Record(context.Context, time.Time, string, int, []byte) error {
 	r.st.runs++
 	return nil
+}
+
+type memFunding memRepos
+
+func roundKey(symbol string, at time.Time) string { return fmt.Sprintf("%s|%d", symbol, at.Unix()) }
+
+func (r memFunding) Round(_ context.Context, symbol string, at time.Time) (*domain.FundingRound, error) {
+	fr, ok := r.st.rounds[roundKey(symbol, at)]
+	if !ok {
+		return nil, nil
+	}
+	return &fr, nil
+}
+
+func (r memFunding) Snapshot(_ context.Context, fr domain.FundingRound, payments []domain.FundingPayment) error {
+	fr.Status = domain.FundingSnapshot
+	r.st.rounds[roundKey(fr.Symbol, fr.FundingTime)] = fr
+	for _, p := range payments {
+		r.st.payments[roundKey(p.Symbol, p.FundingTime)+"|"+p.PositionID] = p
+	}
+	return nil
+}
+
+func (r memFunding) Waiting(context.Context) ([]domain.FundingRound, error) {
+	var out []domain.FundingRound
+	for _, fr := range r.st.rounds {
+		if fr.Status == domain.FundingSnapshot {
+			out = append(out, fr)
+		}
+	}
+	slices.SortFunc(out, func(a, b domain.FundingRound) int { return a.FundingTime.Compare(b.FundingTime) })
+	return out, nil
+}
+
+func (r memFunding) SetRate(_ context.Context, symbol string, at time.Time, rate, mark decimal.Decimal) error {
+	fr := r.st.rounds[roundKey(symbol, at)]
+	fr.Rate, fr.Mark = rate, mark
+	r.st.rounds[roundKey(symbol, at)] = fr
+	return nil
+}
+
+func (r memFunding) Unsettled(_ context.Context, symbol string, at time.Time) ([]domain.FundingPayment, error) {
+	var out []domain.FundingPayment
+	for _, p := range r.st.payments {
+		if p.Symbol == symbol && p.FundingTime.Equal(at) && !p.Settled {
+			out = append(out, p)
+		}
+	}
+	slices.SortFunc(out, func(a, b domain.FundingPayment) int { return strings.Compare(a.PositionID, b.PositionID) })
+	return out, nil
+}
+
+func (r memFunding) Settle(_ context.Context, p domain.FundingPayment) error {
+	p.Settled, p.SettledAt = true, time.Now()
+	r.st.payments[roundKey(p.Symbol, p.FundingTime)+"|"+p.PositionID] = p
+	return nil
+}
+
+func (r memFunding) Finish(_ context.Context, symbol string, at time.Time, status string) error {
+	fr := r.st.rounds[roundKey(symbol, at)]
+	fr.Status = status
+	r.st.rounds[roundKey(symbol, at)] = fr
+	return nil
+}
+
+func (r memFunding) OfUser(_ context.Context, userID, symbol, _ string, limit int) ([]domain.FundingPayment, error) {
+	var out []domain.FundingPayment
+	for _, p := range r.st.payments {
+		if p.UserID == userID && (symbol == "" || p.Symbol == symbol) && p.Settled {
+			fr := r.st.rounds[roundKey(p.Symbol, p.FundingTime)]
+			p.Rate, p.Mark = fr.Rate, fr.Mark
+			out = append(out, p)
+		}
+	}
+	slices.SortFunc(out, func(a, b domain.FundingPayment) int { return b.FundingTime.Compare(a.FundingTime) })
+	return out[:min(limit, len(out))], nil
 }

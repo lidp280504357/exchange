@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"errors"
+	"net/http"
 	"time"
 
 	derivativesv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/derivatives/v1"
@@ -18,6 +19,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/derivatives/adapters/ledger"
 	"github.com/lidp280504357/exchange/internal/derivatives/adapters/marks"
 	"github.com/lidp280504357/exchange/internal/derivatives/adapters/postgres"
+	"github.com/lidp280504357/exchange/internal/derivatives/adapters/rates"
 	"github.com/lidp280504357/exchange/internal/derivatives/adapters/users"
 	"github.com/lidp280504357/exchange/internal/derivatives/application"
 	"github.com/lidp280504357/exchange/internal/derivatives/transport/consumer"
@@ -42,6 +44,9 @@ type settings struct {
 	LedgerAddr     string `koanf:"ledger_grpc_addr"`
 	InstrumentAddr string `koanf:"instrument_grpc_addr"`
 	UserAddr       string `koanf:"user_grpc_addr"`
+	// MarketURL is market-data-service, for the settled funding rates
+	// (MARKET_DATA_SERVICE_URL).
+	MarketURL string `koanf:"market_data_service_url"`
 	// MarketMakerUsers trade without fees (MARKET_MAKER_USER_IDS, §11.10).
 	MarketMakerUsers []string `koanf:"market_maker_user_ids"`
 	// SettlementAsset is the contracts' margin asset (SETTLEMENT_ASSET).
@@ -63,7 +68,7 @@ func setup(ctx context.Context, a *app.App) error {
 	cfg := settings{
 		HTTPAddr: ":8095", GRPCAddr: ":9195", Postgres: pg.DefaultConfig(),
 		LedgerAddr: "localhost:9185", InstrumentAddr: "localhost:9184", UserAddr: "localhost:9182",
-		SettlementAsset: "USDT", ReconcileInterval: time.Hour,
+		MarketURL: "http://localhost:8090", SettlementAsset: "USDT", ReconcileInterval: time.Hour,
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -96,6 +101,7 @@ func setup(ctx context.Context, a *app.App) error {
 		Instruments: instruments.New(instrumentv1.NewInstrumentServiceClient(instrumentConn), 5*time.Second),
 		Eligibility: users.New(userv1.NewUserServiceClient(userConn)),
 		Marks:       book,
+		Rates:       rates.Client{Base: cfg.MarketURL, Client: &http.Client{Timeout: 5 * time.Second}},
 		FeeFree:     cfg.MarketMakerUsers,
 		Log:         a.Logger(),
 		Now:         time.Now,
@@ -117,6 +123,7 @@ func setup(ctx context.Context, a *app.App) error {
 		return err
 	}
 	a.Add("recovery", app.Loop(recoverLoop(a, svc)))
+	a.Add("funding", app.Loop(fundingLoop(a, svc)))
 	rc := &application.Reconciler{Svc: svc, Asset: cfg.SettlementAsset}
 	a.Add("reconcile", app.Loop(reconcileLoop(a, rc, cfg.ReconcileInterval)))
 
@@ -151,6 +158,32 @@ func recoverLoop(a *app.App, svc *application.Service) func(context.Context) err
 				} else if n > 0 {
 					a.Logger().InfoContext(ctx, "recovered", "step", name, "count", n)
 				}
+			}
+		}
+	}
+}
+
+// fundingLoop takes the positions at each funding time and settles the
+// rounds whose rate has come (plan §7.3 task 6), every few seconds.
+func fundingLoop(a *app.App, svc *application.Service) func(context.Context) error {
+	return func(ctx context.Context) error {
+		ticker := time.NewTicker(3 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-ticker.C:
+			}
+			if n, err := svc.SnapshotFunding(ctx); err != nil {
+				a.Logger().WarnContext(ctx, "funding snapshot failed", "error", err)
+			} else if n > 0 {
+				a.Logger().InfoContext(ctx, "funding positions taken", "contracts", n)
+			}
+			if n, err := svc.SettleFunding(ctx); err != nil {
+				a.Logger().WarnContext(ctx, "funding settlement failed", "error", err)
+			} else if n > 0 {
+				a.Logger().InfoContext(ctx, "funding settled", "rounds", n)
 			}
 		}
 	}

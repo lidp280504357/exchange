@@ -48,6 +48,21 @@
 - 逐仓追加 / 减少保证金 `POST /v1/derivatives/positions/{symbol}/margin`（`amount` 正为追加、负为减少）：减少后保证金要不低于入场成本 / 杠杆，加上未实现盈亏后也不低于"标记价名义价值 / 杠杆"（`DERIV_MARGIN_REDUCE_TOO_LARGE`）。
 - 转出 `FUTURES → SPOT`：ledger-service 先经 gRPC 向合约服务要全仓未实现盈亏（`GetUnrealizedPnL`，某个全仓持仓没有新鲜标记价时返回不可用，转出失败 503），最多转出 `min(可用余额, 可用余额 + 全仓未实现盈亏)`，未实现盈利不能转出，被未实现亏损占用的部分也不能转出。`GET /v1/derivatives/account` 的 `transferable` 即此值。
 
+## 资金费
+
+实施计划 §7.3 任务 6。费率与结算标记价由 market-data-service 算出并在周期结束后结算（见 [market-data.md](market-data.md#合约指数价标记价与资金费率)），合约服务每 3 秒检查一次：
+
+1. **快照**：每个合约的最近一个结算时点（8 小时周期即 00:00、08:00、16:00 UTC）还没有记录时，持成交处理锁记下此刻全部未平仓位（`derivatives.funding_rounds` 与 `funding_payments`），即"结算时刻的持仓"，通常在结算时点后几秒内完成。服务整段停机跨过结算点时，恢复后只给最近一个结算点拍快照（按恢复时的持仓），错过的更早的结算点不收。
+2. **结算**：从 market-data-service 取该周期已结算的费率与标记价（`GET /v1/market/{symbol}/funding-rates`）；取不到就下一轮再试，超过 2 小时仍没有（行情服务整个周期没有样本）则该轮记为 SKIPPED、不收。取到后逐仓收付：金额 = |数量| × 标记价 × |费率|，费率为正多付空、为负空付多；付方向上取整、收方向下取整，零头留在 `FUNDING_CLEARING`。**先处理全部付方再处理收方**，清算科目不会为负（账本对账 `FUNDING_BATCHES_BALANCED` 核对每一轮）。
+3. 每笔是一次账本 `SettleFutures`（键 `funding:<合约>:<结算时间戳>:<仓位ID>`，`FUNDING_PAY`/`FUNDING_RECEIVE`）：仍在持有的逐仓仓位从自己的保证金里付（最多付到保证金为止）、收到的计入保证金；全仓或结算前已平掉的仓位用可用余额；付不起的部分由保险基金补。随后更新仓位的资金费累计（逐仓还有保证金），发 `FundingPaid`（WebSocket `positions` 频道 `event=FUNDING`）。中途失败的轮次下次从没结的那笔继续。
+
+记录：`GET /v1/derivatives/funding?symbol=&cursor=&limit=`（结算时间、持仓方向与数量、费率、标记价、金额）。
+
+```sql
+SELECT symbol, funding_time, status, funding_rate, mark_price, positions FROM derivatives.funding_rounds ORDER BY funding_time DESC LIMIT 6;
+SELECT count(*) FILTER (WHERE settled_at IS NULL) AS waiting, sum(amount) AS net FROM derivatives.funding_payments WHERE funding_time = '...';
+```
+
 ## 只减仓（降级）
 
 market-data-service 连续 10 秒算不出某合约的标记价时发 `risk.events` 的 `SystemDegraded`，合约服务（消费组 `derivatives-service-risk`）把该合约置为只减仓（`derivatives.contract_states`），只收平仓单。标记价恢复后也**不会**自动解除，需人工确认：

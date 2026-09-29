@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lidp280504357/exchange/internal/derivatives/domain"
@@ -184,9 +186,13 @@ func (r orders) List(ctx context.Context, userID string, f ports.ListFilter) ([]
 	for i, s := range f.Statuses {
 		statuses[i] = string(s)
 	}
+	var before any // NULL: the first page
+	if f.Before != "" {
+		before = f.Before
+	}
 	return r.query(ctx, `SELECT `+orderColumns+` FROM orders WHERE user_id = $1 AND ($2 = '' OR symbol = $2)
-		AND (cardinality($3::text[]) = 0 OR status = ANY($3)) AND ($4 = '' OR order_id < $4::uuid)
-		ORDER BY order_id DESC LIMIT $5`, userID, f.Symbol, statuses, f.Before, f.Limit)
+		AND (cardinality($3::text[]) = 0 OR status = ANY($3)) AND ($4::uuid IS NULL OR order_id < $4::uuid)
+		ORDER BY order_id DESC LIMIT $5`, userID, f.Symbol, statuses, before, f.Limit)
 }
 
 func (r orders) PendingFreeze(ctx context.Context, cutoff time.Time, limit int) ([]domain.Order, error) {
@@ -331,7 +337,7 @@ func (r fills) SetSettled(ctx context.Context, tradeID string, side domain.Side)
 }
 
 func (r fills) OfUser(ctx context.Context, userID, symbol, before string, limit int) ([]domain.Fill, error) {
-	var beforeTrade, beforeSide string
+	var beforeTrade, beforeSide any // NULL: the first page
 	if before != "" {
 		t, s, ok := strings.Cut(before, ":")
 		if _, err := uuid.Parse(t); !ok || err != nil {
@@ -340,8 +346,8 @@ func (r fills) OfUser(ctx context.Context, userID, symbol, before string, limit 
 		beforeTrade, beforeSide = t, s
 	}
 	rows, err := r.q.Query(ctx, `SELECT `+fillColumns+` FROM fills WHERE user_id = $1 AND ($2 = '' OR symbol = $2)
-		AND ($3 = '' OR (executed_at, trade_id, side) < (SELECT executed_at, trade_id, side FROM fills
-			WHERE trade_id = $3::uuid AND side = $4))
+		AND ($3::uuid IS NULL OR (executed_at, trade_id, side) < (SELECT executed_at, trade_id, side FROM fills
+			WHERE trade_id = $3::uuid AND side = $4::text))
 		ORDER BY executed_at DESC, trade_id DESC, side DESC LIMIT $5`, userID, symbol, beforeTrade, beforeSide, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query fills: %w", err)
@@ -488,4 +494,127 @@ func (r runs) Record(ctx context.Context, started time.Time, check string, misma
 		return fmt.Errorf("record reconciliation: %w", err)
 	}
 	return nil
+}
+
+type funding repos
+
+func (r repos) Funding() ports.FundingRepo { return funding(r) }
+
+func (r funding) Round(ctx context.Context, symbol string, at time.Time) (*domain.FundingRound, error) {
+	var fr domain.FundingRound
+	var rate, mark decimal.NullDecimal
+	err := r.q.QueryRow(ctx, `SELECT symbol, funding_time, status, funding_rate, mark_price, positions FROM funding_rounds
+		WHERE symbol = $1 AND funding_time = $2`, symbol, at).Scan(&fr.Symbol, &fr.FundingTime, &fr.Status, &rate, &mark, &fr.Positions)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load funding round: %w", err)
+	}
+	fr.Rate, fr.Mark, fr.FundingTime = rate.Decimal, mark.Decimal, fr.FundingTime.UTC()
+	return &fr, nil
+}
+
+func (r funding) Snapshot(ctx context.Context, fr domain.FundingRound, payments []domain.FundingPayment) error {
+	if _, err := r.q.Exec(ctx, `INSERT INTO funding_rounds (symbol, funding_time, status, positions) VALUES ($1, $2, $3, $4)`,
+		fr.Symbol, fr.FundingTime, domain.FundingSnapshot, len(payments)); err != nil {
+		return fmt.Errorf("insert funding round: %w", err)
+	}
+	batch := &pgx.Batch{}
+	for _, p := range payments {
+		batch.Queue(`INSERT INTO funding_payments (symbol, funding_time, position_id, user_id, position_side, quantity, margin_mode)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)`, p.Symbol, p.FundingTime, p.PositionID, p.UserID, p.Side, p.Qty, p.MarginMode)
+	}
+	if err := r.q.SendBatch(ctx, batch).Close(); err != nil {
+		return fmt.Errorf("insert funding payments: %w", err)
+	}
+	return nil
+}
+
+func (r funding) Waiting(ctx context.Context) ([]domain.FundingRound, error) {
+	rows, err := r.q.Query(ctx, `SELECT symbol, funding_time, status, funding_rate, mark_price, positions FROM funding_rounds
+		WHERE status = 'SNAPSHOT' ORDER BY funding_time, symbol`)
+	if err != nil {
+		return nil, fmt.Errorf("load funding rounds: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.FundingRound
+	for rows.Next() {
+		var fr domain.FundingRound
+		var rate, mark decimal.NullDecimal
+		if err := rows.Scan(&fr.Symbol, &fr.FundingTime, &fr.Status, &rate, &mark, &fr.Positions); err != nil {
+			return nil, fmt.Errorf("scan funding round: %w", err)
+		}
+		fr.Rate, fr.Mark, fr.FundingTime = rate.Decimal, mark.Decimal, fr.FundingTime.UTC()
+		out = append(out, fr)
+	}
+	return out, rows.Err()
+}
+
+func (r funding) SetRate(ctx context.Context, symbol string, at time.Time, rate, mark decimal.Decimal) error {
+	if _, err := r.q.Exec(ctx, `UPDATE funding_rounds SET funding_rate = $3, mark_price = $4 WHERE symbol = $1 AND funding_time = $2`,
+		symbol, at, rate, mark); err != nil {
+		return fmt.Errorf("set funding rate: %w", err)
+	}
+	return nil
+}
+
+const paymentColumns = `p.symbol, p.funding_time, p.position_id, p.user_id, p.position_side, p.quantity, p.margin_mode,
+	coalesce(p.amount, 0), coalesce(p.insurance, 0), p.settled_at IS NOT NULL, coalesce(p.settled_at, 'epoch'),
+	coalesce(r.funding_rate, 0), coalesce(r.mark_price, 0)`
+
+func (r funding) payments(ctx context.Context, sql string, args ...any) ([]domain.FundingPayment, error) {
+	rows, err := r.q.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("load funding payments: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.FundingPayment
+	for rows.Next() {
+		var p domain.FundingPayment
+		if err := rows.Scan(&p.Symbol, &p.FundingTime, &p.PositionID, &p.UserID, &p.Side, &p.Qty, &p.MarginMode, &p.Amount,
+			&p.Insurance, &p.Settled, &p.SettledAt, &p.Rate, &p.Mark); err != nil {
+			return nil, fmt.Errorf("scan funding payment: %w", err)
+		}
+		p.FundingTime = p.FundingTime.UTC()
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (r funding) Unsettled(ctx context.Context, symbol string, at time.Time) ([]domain.FundingPayment, error) {
+	return r.payments(ctx, `SELECT `+paymentColumns+` FROM funding_payments p JOIN funding_rounds r USING (symbol, funding_time)
+		WHERE p.symbol = $1 AND p.funding_time = $2 AND p.settled_at IS NULL ORDER BY p.position_id`, symbol, at)
+}
+
+func (r funding) Settle(ctx context.Context, p domain.FundingPayment) error {
+	if _, err := r.q.Exec(ctx, `UPDATE funding_payments SET amount = $4, insurance = $5, settled_at = now()
+		WHERE symbol = $1 AND funding_time = $2 AND position_id = $3`, p.Symbol, p.FundingTime, p.PositionID, p.Amount, p.Insurance); err != nil {
+		return fmt.Errorf("settle funding payment: %w", err)
+	}
+	return nil
+}
+
+func (r funding) Finish(ctx context.Context, symbol string, at time.Time, status string) error {
+	if _, err := r.q.Exec(ctx, `UPDATE funding_rounds SET status = $3, settled_at = now() WHERE symbol = $1 AND funding_time = $2`,
+		symbol, at, status); err != nil {
+		return fmt.Errorf("finish funding round: %w", err)
+	}
+	return nil
+}
+
+func (r funding) OfUser(ctx context.Context, userID, symbol, before string, limit int) ([]domain.FundingPayment, error) {
+	var beforeTime, beforeID any // NULL: the first page
+	if before != "" {
+		secs, id, ok := strings.Cut(before, ":")
+		n, err := strconv.ParseInt(secs, 10, 64)
+		if _, perr := uuid.Parse(id); !ok || err != nil || perr != nil {
+			return nil, fmt.Errorf("bad funding cursor %q", before)
+		}
+		beforeTime, beforeID = time.Unix(n, 0).UTC(), id
+	}
+	return r.payments(ctx, `SELECT `+paymentColumns+` FROM funding_payments p JOIN funding_rounds r USING (symbol, funding_time)
+		WHERE p.user_id = $1 AND ($2 = '' OR p.symbol = $2) AND p.settled_at IS NOT NULL
+			AND ($3::uuid IS NULL OR (p.funding_time, p.position_id) < ($4::timestamptz, $3::uuid))
+		ORDER BY p.funding_time DESC, p.position_id DESC LIMIT $5`, userID, symbol, beforeID, beforeTime, limit)
 }

@@ -48,6 +48,7 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Get("/v1/derivatives/orders/{id}", h.get)
 		r.Delete("/v1/derivatives/orders/{id}", h.cancel)
 		r.Get("/v1/derivatives/fills", h.fills)
+		r.Get("/v1/derivatives/funding", h.funding)
 	})
 }
 
@@ -396,6 +397,34 @@ func (h *Handler) fills(w http.ResponseWriter, r *http.Request) {
 			TradeID: f.TradeID, OrderID: f.OrderID, Symbol: f.Symbol, Side: string(f.Side), PositionSide: string(f.PositionSide),
 			Role: role, Price: f.Price.String(), Quantity: f.Qty.String(), ClosedQuantity: f.ClosedQty.String(), Fee: f.Fee.String(),
 			RealizedPnL: f.RealizedPnL.String(), Liquidation: f.Liquidation, Settled: f.Settled, ExecutedAt: stamp(f.ExecutedAt),
+		})
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "next_cursor": text(next)})
+}
+
+type fundingJSON struct {
+	Symbol       string `json:"symbol"`
+	FundingTime  string `json:"funding_time"`
+	PositionSide string `json:"position_side"`
+	Quantity     string `json:"quantity"`
+	FundingRate  string `json:"funding_rate"`
+	MarkPrice    string `json:"mark_price"`
+	Amount       string `json:"amount"`
+}
+
+func (h *Handler) funding(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	list, next, err := h.Svc.FundingPayments(r.Context(), httpx.UserID(r), strings.ToUpper(q.Get("symbol")), q.Get("cursor"), limit)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out := make([]fundingJSON, 0, len(list))
+	for _, p := range list {
+		out = append(out, fundingJSON{
+			Symbol: p.Symbol, FundingTime: p.FundingTime.UTC().Format(time.RFC3339), PositionSide: string(p.Side), Quantity: p.Qty.String(),
+			FundingRate: p.Rate.String(), MarkPrice: p.Mark.String(), Amount: p.Amount.String(),
 		})
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "next_cursor": text(next)})

@@ -107,6 +107,10 @@ eventually 20 "the buyer's FUTURES holds nothing frozen" settled "${BUYER[@]}"
 check '(.wallet_balance | tonumber) < 500.01 and (.wallet_balance | tonumber) > 499.9 and .transferable == .available' "500 + 0.01 less the fees; all of it transferable"
 eventually 20 "the seller's FUTURES holds nothing frozen" settled "${SELLER[@]}"
 
+call GET "/v1/derivatives/funding?symbol=$SYMBOL" "" "${BUYER[@]}"
+expect 200 - "funding history (none unless a funding time passed while holding)"
+check '(.items | type) == "array"' "a list"
+
 echo "== back to SPOT"
 AVAILABLE=$(jq -r .available <<<"$BODY")
 call POST /v1/account/transfers "{\"asset\":\"USDT\",\"amount\":\"$AVAILABLE\",\"from_account_type\":\"FUTURES\",\"to_account_type\":\"SPOT\"}" \

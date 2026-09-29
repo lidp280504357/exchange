@@ -50,6 +50,14 @@ func (instruments) Contracts(context.Context) ([]domain.Contract, error) {
 	return []domain.Contract{perp}, nil
 }
 
+// rates is market-data-service's settled funding rates.
+type rates map[string][2]decimal.Decimal
+
+func (r rates) Rate(_ context.Context, symbol string, at time.Time) (decimal.Decimal, decimal.Decimal, bool, error) {
+	v, ok := r[fmt.Sprintf("%s|%d", symbol, at.Unix())]
+	return v[0], v[1], ok, nil
+}
+
 type eligible struct{}
 
 func (eligible) Check(context.Context, string, string, string) (bool, string, error) {
@@ -63,7 +71,7 @@ type ledger struct {
 	mu                  sync.Mutex
 	available, frozen   map[string]decimal.Decimal
 	pnlClearing, feeRev decimal.Decimal
-	insurance           decimal.Decimal
+	insurance, funding  decimal.Decimal
 	done                map[string][]domain.Outcome
 }
 
@@ -108,7 +116,7 @@ func (l *ledger) Settle(_ context.Context, r ports.SettleRequest) ([]domain.Outc
 	if out, ok := l.done[r.IdemKey]; ok {
 		return out, nil
 	}
-	avail, frozen, pnl, fee, ins := l.available[r.UserID], l.frozen[r.UserID], l.pnlClearing, l.feeRev, l.insurance
+	avail, frozen, pnl, fee, ins, fund := l.available[r.UserID], l.frozen[r.UserID], l.pnlClearing, l.feeRev, l.insurance, l.funding
 	out := make([]domain.Outcome, len(r.Moves))
 	for i, m := range r.Moves {
 		out[i] = domain.Outcome{User: decimal.Zero, Insurance: decimal.Zero, Waived: decimal.Zero}
@@ -141,14 +149,21 @@ func (l *ledger) Settle(_ context.Context, r ports.SettleRequest) ([]domain.Outc
 			ins = ins.Sub(out[i].Insurance)
 		case domain.MoveInsurance:
 			*bal, ins = bal.Sub(m.Amount), ins.Add(m.Amount)
+		case domain.MoveFundingPay:
+			*bal, fund = bal.Sub(take), fund.Add(m.Amount)
+			out[i].User, out[i].Insurance = take.Neg(), m.Amount.Sub(take)
+			ins = ins.Sub(out[i].Insurance)
+		case domain.MoveFundingReceive:
+			*bal, fund = bal.Add(m.Amount), fund.Sub(m.Amount)
+			out[i].User = m.Amount
 		default:
 			return nil, fmt.Errorf("move %s", m.Type)
 		}
-		if avail.IsNegative() || frozen.IsNegative() || ins.IsNegative() {
+		if avail.IsNegative() || frozen.IsNegative() || ins.IsNegative() || fund.IsNegative() {
 			return nil, apperr.New(apperr.KindUnprocessable, "LEDGER_INSUFFICIENT_BALANCE", "insufficient balance")
 		}
 	}
-	l.available[r.UserID], l.frozen[r.UserID], l.pnlClearing, l.feeRev, l.insurance = avail, frozen, pnl, fee, ins
+	l.available[r.UserID], l.frozen[r.UserID], l.pnlClearing, l.feeRev, l.insurance, l.funding = avail, frozen, pnl, fee, ins, fund
 	l.done[r.IdemKey] = out
 	return out, nil
 }
@@ -170,6 +185,7 @@ type rig struct {
 	store  ports.Store
 	ledger *ledger
 	book   *marks.Book
+	rates  rates
 	seq    int64
 }
 
@@ -179,7 +195,7 @@ func setup(t *testing.T) *rig {
 	t.Helper()
 	ctx := context.Background()
 	log := slog.New(slog.DiscardHandler)
-	r := &rig{ledger: newLedger(), book: marks.New()}
+	r := &rig{ledger: newLedger(), book: marks.New(), rates: rates{}}
 	if os.Getenv("TEST_POSTGRES_DSN") == "" {
 		r.store = newMemStore()
 	} else {
@@ -194,7 +210,7 @@ func setup(t *testing.T) *rig {
 	}
 	r.book.Set(perp.Symbol, d("60000"), time.Now())
 	r.svc = &application.Service{
-		Store: r.store, Ledger: r.ledger, Instruments: instruments{}, Eligibility: eligible{}, Marks: r.book,
+		Store: r.store, Ledger: r.ledger, Instruments: instruments{}, Eligibility: eligible{}, Marks: r.book, Rates: r.rates,
 		Log: log, Now: time.Now, Metrics: application.NewMetrics(prometheus.NewRegistry()),
 	}
 	return r
@@ -538,4 +554,57 @@ func TestTheMarkPriceGatesOrders(t *testing.T) {
 	if err != nil || !o.Price.Equal(d("63000")) || o.TimeInForce != domain.IOC {
 		t.Fatalf("a market buy %+v %v", o, err)
 	}
+}
+
+func TestFundingSettlesAtTheSettlementMark(t *testing.T) {
+	r := setup(t)
+	ctx := context.Background()
+	alice, bob := uuid.NewString(), uuid.NewString()
+	r.fund(alice, "10000")
+	r.fund(bob, "10000")
+	twenty, isolated := int32(20), domain.Isolated
+	if _, err := r.svc.UpdateSettings(ctx, bob, perp.Symbol, application.SettingsChange{MarginMode: &isolated, Leverage: &twenty}); err != nil {
+		t.Fatal(err)
+	}
+	long := r.place(t, alice, domain.Buy, "60000", "0.1", false)
+	short := r.place(t, bob, domain.Sell, "60000", "0.1", false)
+	r.trade(t, long, short, "60000")
+
+	// 08:00:03: the positions of the 08:00 funding are taken; the rate
+	// comes a little later.
+	eight := time.Date(2026, 9, 30, 8, 0, 0, 0, time.UTC)
+	r.svc.Now = func() time.Time { return eight.Add(3 * time.Second) }
+	if n, err := r.svc.SnapshotFunding(ctx); err != nil || n != 1 {
+		t.Fatalf("snapshot: %d %v", n, err)
+	}
+	if n, err := r.svc.SnapshotFunding(ctx); err != nil || n != 0 {
+		t.Fatalf("a second snapshot: %d %v", n, err)
+	}
+	if n, err := r.svc.SettleFunding(ctx); err != nil || n != 0 {
+		t.Fatalf("before the rate: %d %v", n, err)
+	}
+	r.rates[fmt.Sprintf("%s|%d", perp.Symbol, eight.Unix())] = [2]decimal.Decimal{d("0.0001"), d("60010")}
+	if n, err := r.svc.SettleFunding(ctx); err != nil || n != 1 {
+		t.Fatalf("settle: %d %v", n, err)
+	}
+	// 0.1 x 60010 x 0.0001 = 0.6001: the long pays it from available, the
+	// isolated short receives it into its margin.
+	if p := r.position(t, alice); !p.Funding.Equal(d("-0.6001")) {
+		t.Fatalf("alice %+v", p)
+	}
+	if p := r.position(t, bob); !p.Funding.Equal(d("0.6001")) || !p.Margin.Equal(d("300.6001")) {
+		t.Fatalf("bob %+v", p)
+	}
+	if !r.ledger.funding.IsZero() {
+		t.Fatalf("FUNDING_CLEARING %s", r.ledger.funding)
+	}
+	list, _, err := r.svc.FundingPayments(ctx, alice, "", "", 10)
+	if err != nil || len(list) != 1 || !list[0].Amount.Equal(d("-0.6001")) || !list[0].Rate.Equal(d("0.0001")) || !list[0].Mark.Equal(d("60010")) {
+		t.Fatalf("alice's funding %+v %v", list, err)
+	}
+	if n, err := r.svc.SettleFunding(ctx); err != nil || n != 0 {
+		t.Fatalf("settled twice: %d %v", n, err)
+	}
+	r.svc.Now = time.Now
+	r.reconcile(t)
 }

@@ -445,3 +445,29 @@ func checkBooks(t *testing.T, step int, l *ledger, positions map[string]map[Posi
 		t.Fatalf("step %d: invariant 6: long %s short %s, PNL_CLEARING + long cost − short cost = %s", step, long, short, cost)
 	}
 }
+
+func TestFundingAmounts(t *testing.T) {
+	for _, c := range []struct{ qty, mark, rate, want string }{
+		{"0.3", "60000.12345678", "0.0001", "-1.800004"}, // a long pays, rounded up
+		{"-0.3", "60000.12345678", "0.0001", "1.800003"}, // a short receives, rounded down
+		{"0.3", "60000", "-0.0002", "3.6"},               // a negative rate: longs receive
+		{"-0.3", "60000", "-0.0002", "-3.6"},
+		{"0.3", "60000", "0", "0"},
+	} {
+		if got := FundingAmount(d(c.qty), d(c.mark), d(c.rate), 6); got.String() != c.want {
+			t.Errorf("%+v: %s", c, got)
+		}
+	}
+	isolated := Position{Qty: d("0.1"), Margin: d("50"), MarginMode: Isolated}
+	pay := FundingMove(isolated, d("-2"))
+	if pay.Type != MoveFundingPay || !pay.Frozen || !pay.Limit.Equal(d("50")) {
+		t.Fatalf("an isolated payer %+v", pay)
+	}
+	if p := ApplyFunding(isolated, pay, d("-2")); !p.Margin.Equal(d("48")) || !p.Funding.Equal(d("-2")) {
+		t.Fatalf("after paying %+v", p)
+	}
+	closed := Position{MarginMode: Isolated}
+	if m := FundingMove(closed, d("1.5")); m.Type != MoveFundingReceive || m.Frozen {
+		t.Fatalf("a closed position receives to available: %+v", m)
+	}
+}
