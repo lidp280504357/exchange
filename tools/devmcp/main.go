@@ -350,7 +350,7 @@ func main() {
 		os.Exit(res.ExitCode)
 	}
 
-	const where = "测试服务器（本地 ssh exchange，公网 16.176.196.40，ubuntu 用户，免密 sudo，基础设施在 /opt/exchange/infra 用 docker compose 运行）"
+	const where = "测试服务器（本地 ssh exchange，公网 IP 以环境配置.md 为准，ubuntu 用户，免密 sudo，基础设施在 /opt/exchange/infra 用 docker compose 运行）"
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "exchange-dev", Version: "0.1.0"}, nil)
 	mcp.AddTool(server, &mcp.Tool{

@@ -1,6 +1,6 @@
 # 域名、Cloudflare 代理与 nginx TLS（已于 2026-09-28 部署）
 
-域名 `astras.vip` 已在 Cloudflare 托管并开启代理（橙色云），A 记录指向测试服 `16.176.196.40`。用户可见的 TLS 由 Cloudflare 边缘提供，Cloudflare 到测试服之间用 **Cloudflare 源站证书**（免费、15 年有效、不用申请 Let's Encrypt、不需要 80 端口验证）。
+域名 `astras.vip` 已在 Cloudflare 托管并开启代理（橙色云），A 记录指向测试服 `3.107.113.199`。用户可见的 TLS 由 Cloudflare 边缘提供，Cloudflare 到测试服之间用 **Cloudflare 源站证书**（免费、15 年有效、不用申请 Let's Encrypt、不需要 80 端口验证）。
 
 ## 一、Cloudflare 侧设置
 
