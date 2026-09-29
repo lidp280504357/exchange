@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/lidp280504357/exchange/internal/analytics"
 	"github.com/lidp280504357/exchange/internal/platform/app"
@@ -56,6 +57,22 @@ func setup(ctx context.Context, a *app.App) error {
 	if err := bootstrap.BatchConsumer(ctx, a, cfg.Kafka, "analytics-consumer", analytics.Topics, ingestor.Store); err != nil {
 		return err
 	}
+	// Events stored before the read models existed are projected once.
+	a.Add("read model backfill", app.Loop(func(ctx context.Context) error {
+		for {
+			err := ingestor.BackfillReadModels(ctx, 5000)
+			if err == nil {
+				<-ctx.Done()
+				return ctx.Err()
+			}
+			a.Logger().WarnContext(ctx, "read model backfill failed; retrying in a minute", "error", err)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Minute):
+			}
+		}
+	}))
 	reconciler := analytics.NewReconciler(db, conn, cfg.ReconcileSchemas, a.Logger(), a.Metrics())
 	a.Add("reconciler", app.Loop(reconciler.Run))
 	return nil

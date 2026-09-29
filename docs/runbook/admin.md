@@ -34,7 +34,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 | ADMIN | 全部 |
 | OPERATOR | 读 + 改账户状态、撤销用户挂单、改交易对状态、切换功能开关 |
 | FINANCE | 读 + 提现审批、发起与审批手动调账 |
-| AUDITOR | 只读（用户、资产与交易对、功能开关、提现、审计日志） |
+| AUDITOR | 只读（用户、资产与交易对、功能开关、提现、审计日志、报表） |
 
 越权返回 403 `ADMIN_FORBIDDEN`。前端按 `/admin/v1/me` 返回的权限列表显示菜单与按钮，但以服务端检查为准。
 
@@ -45,6 +45,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 - **资产与交易对**：列出资产、网络与交易对；交易对状态是单交易对紧急开关（`TRADING ⇄ HALT`，`CANCEL_ONLY` 之后只能下线，不可恢复交易）。资产与网络参数（精度、充提开关、手续费等）仍以 `deploy/instruments/test.json` 为准，每次部署幂等同步，后台只读——否则下次部署会把后台改动覆盖回去。
 - **功能开关**：列出全部已知开关（从未设置的显示为关闭、版本 0），切换启用状态并写理由；地区、账户状态、白名单等规则保持不变（改规则用 `exchangectl flags set`）。服务 5 秒内生效。
 - **调账审批（双人）**：FINANCE/ADMIN 发起给用户现货账户加（正数）或扣（负数）某资产，另一位有审批权限的管理员批准后，由 ledger-service 以幂等键 `approval:<id>` 记 `MANUAL_ADJUSTMENT` 分录（对手方 `ADJUSTMENT` 系统账户）。自己不能批准自己的申请；账本拒绝（例如开关 `ledger.manual_adjustment` 关闭）则申请变为 `FAILED`；账本无响应则保持 `PENDING`，可再次批准（幂等键保证不重复记账）。审批期间申请行加锁，两人同时处理时后到者得到 `ADMIN_APPROVAL_DECIDED`。
+- **报表**（任务 12，所有角色可读）：来自 ClickHouse 读模型（[analytics.md](analytics.md)），按交易对与 UTC 日的成交笔数、成交量、成交额、受理与被拒订单；按资产与日的入账充值（不含未认领）与完成提现（金额、手续费）；任意交易对 1m/5m/15m/1h/4h/1d K 线。数据比服务晚几秒。
 - **审计日志**：按操作者（管理员邮箱、`cli:<用户名>`）或对象（`user:<id>`、`pair:<symbol>`、`flag:<key>`、`approval:<id>`、`admin:<id>`）查询 ClickHouse `audit_logs`，写入后几秒可查。后台的每个动作都有审计事件：登录/登录失败/退出、账户状态（user-service 记，操作者为管理员邮箱）、撤单、交易对状态、开关（含前后值）、调账申请/批准/驳回、提现审批（wallet-service 记）。
 
 ## 运维

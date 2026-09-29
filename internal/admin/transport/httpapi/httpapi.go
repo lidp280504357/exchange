@@ -69,6 +69,9 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/approvals", h.approvals)
 			r.Post("/approvals/{id}/decide", h.decide)
 			r.Get("/audit-logs", h.auditLogs)
+			r.Get("/reports/trading", h.tradingReport)
+			r.Get("/reports/wallet", h.walletReport)
+			r.Get("/reports/candles", h.candleReport)
 		})
 	})
 }
@@ -399,6 +402,41 @@ func (h *Handler) auditLogs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	list, err := h.Svc.AuditLogs(r.Context(), principal(r), q.Get("actor"), q.Get("target"), limit)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": list})
+}
+
+func (h *Handler) tradingReport(w http.ResponseWriter, r *http.Request) {
+	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+	list, err := h.Svc.TradingReport(r.Context(), principal(r), days)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": list})
+}
+
+func (h *Handler) walletReport(w http.ResponseWriter, r *http.Request) {
+	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+	list, err := h.Svc.WalletReport(r.Context(), principal(r), days)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": list})
+}
+
+func (h *Handler) candleReport(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	interval := q.Get("interval")
+	if interval == "" {
+		interval = "1h"
+	}
+	list, err := h.Svc.CandleReport(r.Context(), principal(r), q.Get("symbol"), interval, limit)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

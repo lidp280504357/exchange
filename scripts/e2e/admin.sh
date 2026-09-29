@@ -91,7 +91,7 @@ as() { # as ROLE METHOD PATH JSON: a call with the role's session
 echo "== sign-in"
 login ADMIN
 expect 200 - "ADMIN signs in with password and code"
-check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 12" "with every permission"
+check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 13" "with every permission"
 cookie=$(grep -i '^set-cookie: admin_session=' "$WORK/ADMIN.headers")
 for attr in 'Path=/admin/' 'HttpOnly' 'Secure' 'SameSite=Strict'; do
   grep -qi "$attr" <<<"$cookie" || { echo "FAIL the session cookie lacks $attr: $cookie" >&2; exit 1; }
@@ -245,6 +245,19 @@ REVERSAL=$(jq -r .id <<<"$BODY")
 as ADMIN POST "/admin/v1/approvals/$REVERSAL/decide" '{"approve":false,"reason":"e2e keeps it"}'
 expect 200 - "ADMIN rejects it"
 check '.status == "REJECTED"' "REJECTED, nothing booked"
+
+echo "== reports from the ClickHouse read models"
+as AUDITOR GET "/admin/v1/reports/trading?days=30" ""
+expect 200 - "trading report"
+check '.items | type == "array" and all(.[]; (.volume | test("^[0-9.]+$")) and (.trades >= 0))' "per symbol and day, amounts as decimal strings"
+as AUDITOR GET "/admin/v1/reports/wallet?days=30" ""
+expect 200 - "wallet report"
+check '.items | type == "array"' "per asset and day"
+as AUDITOR GET "/admin/v1/reports/candles?symbol=ETH-BTC&interval=1d&limit=5" ""
+expect 200 - "daily ETH-BTC candles"
+check '.items | type == "array" and length <= 5' "at most the limit"
+as AUDITOR GET "/admin/v1/reports/candles?symbol=ETH-BTC&interval=2h" ""
+expect 400 COMMON_INVALID_ARGUMENT "an interval the report does not offer"
 
 echo "== the audit trail"
 audited() { # audited ROLE QUERY JQ

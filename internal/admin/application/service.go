@@ -36,6 +36,7 @@ type Service struct {
 	Flags    ports.Flags
 	Ledger   ports.Ledger
 	AuditLog ports.AuditLog
+	Reports  ports.Reports
 	Log      *slog.Logger
 	Now      func() time.Time
 }
@@ -445,6 +446,52 @@ func (s *Service) AuditLogs(ctx context.Context, p Principal, actor, target stri
 		limit = 100
 	}
 	return s.AuditLog.Search(ctx, actor, target, limit)
+}
+
+// Intervals of the candle report, in seconds.
+var intervals = map[string]uint32{"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400, "1d": 86400}
+
+func reportDays(days int) int {
+	if days <= 0 {
+		return 7
+	}
+	return min(days, 90)
+}
+
+// TradingReport returns trades and orders per symbol and day for the last
+// days (default 7, at most 90), from the ClickHouse read models.
+func (s *Service) TradingReport(ctx context.Context, p Principal, days int) ([]ports.TradingDay, error) {
+	if err := p.require(domain.PermReportsRead); err != nil {
+		return nil, err
+	}
+	return s.Reports.Trading(ctx, reportDays(days))
+}
+
+// WalletReport returns deposits and withdrawals per asset and day.
+func (s *Service) WalletReport(ctx context.Context, p Principal, days int) ([]ports.WalletDay, error) {
+	if err := p.require(domain.PermReportsRead); err != nil {
+		return nil, err
+	}
+	return s.Reports.Wallet(ctx, reportDays(days))
+}
+
+// CandleReport returns the newest candles of a symbol (default 48, at most
+// 500) at an interval of 1m, 5m, 15m, 1h, 4h or 1d.
+func (s *Service) CandleReport(ctx context.Context, p Principal, symbol, interval string, limit int) ([]ports.Candle, error) {
+	if err := p.require(domain.PermReportsRead); err != nil {
+		return nil, err
+	}
+	seconds, ok := intervals[interval]
+	if !ok {
+		return nil, apperr.Invalid("interval must be 1m, 5m, 15m, 1h, 4h or 1d")
+	}
+	if symbol = strings.ToUpper(strings.TrimSpace(symbol)); symbol == "" {
+		return nil, apperr.Invalid("symbol is required")
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 48
+	}
+	return s.Reports.Candles(ctx, symbol, seconds, limit)
 }
 
 // NewAdmin creates an administrator (exchangectl admin create) with a

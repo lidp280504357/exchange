@@ -60,6 +60,13 @@ ch() {
   remote 'sudo docker compose exec -T clickhouse clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --database "$CLICKHOUSE_DB"' "$1"
 }
 
+# pg SQL prints the result of a PostgreSQL query in the exchange database
+# (unaligned, no header); the query travels on stdin.
+pg() {
+  # shellcheck disable=SC2016 # expanded on the server
+  remote 'sudo docker compose exec -T postgres psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA' "$1"
+}
+
 # logs SINCE prints the logs of every container since SINCE (e.g. 10m).
 logs() {
   remote "sudo docker compose $COMPOSE_FILES logs --no-color --since $1 2>&1"

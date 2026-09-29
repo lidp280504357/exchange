@@ -39,9 +39,10 @@ const (
 	PermAdjustRequest   = "ledger.adjust.request"
 	PermAdjustApprove   = "ledger.adjust.approve"
 	PermAuditRead       = "audit.read"
+	PermReportsRead     = "reports.read"
 )
 
-var reads = []string{PermUsersRead, PermInstrumentsRead, PermFlagsRead, PermWithdrawalsRead, PermAuditRead}
+var reads = []string{PermUsersRead, PermInstrumentsRead, PermFlagsRead, PermWithdrawalsRead, PermAuditRead, PermReportsRead}
 
 var roles = map[string][]string{
 	RoleAdmin: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit,

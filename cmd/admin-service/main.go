@@ -134,6 +134,7 @@ func setup(ctx context.Context, a *app.App) error {
 		Flags:    backends.Flags{DB: configDB, Events: event.NewFactory(a.Name(), a.Config().InstanceID)},
 		Ledger:   backends.Ledger{C: ledgerClient},
 		AuditLog: backends.Audit{Conn: ch},
+		Reports:  backends.Reports{Conn: ch},
 		Log:      a.Logger(),
 		Now:      time.Now,
 	}

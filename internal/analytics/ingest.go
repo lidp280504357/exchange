@@ -74,7 +74,10 @@ func (in *Ingestor) Store(ctx context.Context, batch []kafka.Delivery) error {
 	if err := in.storeAuditLogs(ctx, batch); err != nil {
 		return err
 	}
-	return in.storeLedgerEntries(ctx, batch)
+	if err := in.storeLedgerEntries(ctx, batch); err != nil {
+		return err
+	}
+	return in.storeReadModels(ctx, batch)
 }
 
 // storeLedgerEntries copies the lines of ledger.EntryPosted into

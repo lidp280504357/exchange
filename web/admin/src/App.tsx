@@ -6,6 +6,7 @@ import { FlagsPage } from "./pages/Flags";
 import { InstrumentsPage } from "./pages/Instruments";
 import { LedgerPage } from "./pages/Ledger";
 import { LoginPage } from "./pages/Login";
+import { ReportsPage } from "./pages/Reports";
 import { UsersPage } from "./pages/Users";
 import { WithdrawalsPage } from "./pages/Withdrawals";
 import { can, roleNames, useMe } from "./session";
@@ -17,6 +18,7 @@ const sections: { path: string; label: string; perm: Permission; page: (props: {
   { path: "instruments", label: "资产与交易对", perm: "instruments.read", page: InstrumentsPage },
   { path: "flags", label: "功能开关", perm: "flags.read", page: FlagsPage },
   { path: "ledger", label: "调账审批", perm: "audit.read", page: LedgerPage },
+  { path: "reports", label: "报表", perm: "reports.read", page: ReportsPage },
   { path: "audit", label: "审计日志", perm: "audit.read", page: AuditPage },
 ];
 

@@ -339,6 +339,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/reports/trading": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Trades and orders per symbol and day (UTC), newest first
+         * @description From the ClickHouse read models (trades, order_updates), which lag
+         *     the services by a few seconds. Needs reports.read.
+         */
+        get: operations["tradingReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/reports/wallet": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Credited deposits and confirmed withdrawals per asset and day (UTC)
+         * @description Deposits booked to users (not the unclaimed ones) by the day they
+         *     were credited; withdrawals by the day they were confirmed. Needs
+         *     reports.read.
+         */
+        get: operations["walletReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/reports/candles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Candles of a symbol from the trades read model, newest first
+         * @description Intervals are aligned to the epoch in UTC. Needs reports.read.
+         */
+        get: operations["candleReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -359,7 +422,7 @@ export interface components {
             name: string;
             /** @enum {string} */
             role: "ADMIN" | "OPERATOR" | "FINANCE" | "AUDITOR";
-            permissions: ("users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read")[];
+            permissions: ("users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read")[];
         };
         UserView: {
             user: {
@@ -505,6 +568,39 @@ export interface components {
             /** @description The event as JSON. */
             payload: unknown;
         };
+        TradingDay: {
+            /** Format: date */
+            day: string;
+            symbol: string;
+            trades: number;
+            volume: components["schemas"]["Decimal"];
+            quote_volume: components["schemas"]["Decimal"];
+            /** @description Orders accepted. */
+            orders: number;
+            /** @description Orders rejected (by the funds check or the engine). */
+            rejected: number;
+        };
+        WalletDay: {
+            /** Format: date */
+            day: string;
+            asset: string;
+            deposits: number;
+            deposit_amount: components["schemas"]["Decimal"];
+            withdrawals: number;
+            withdrawal_amount: components["schemas"]["Decimal"];
+            withdrawal_fees: components["schemas"]["Decimal"];
+        };
+        Candle: {
+            /** Format: date-time */
+            open_time: string;
+            open: components["schemas"]["Decimal"];
+            high: components["schemas"]["Decimal"];
+            low: components["schemas"]["Decimal"];
+            close: components["schemas"]["Decimal"];
+            volume: components["schemas"]["Decimal"];
+            quote_volume: components["schemas"]["Decimal"];
+            trades: number;
+        };
         Error: {
             /**
              * @description Stable machine-readable code (appendix C), used by clients for i18n.
@@ -532,6 +628,8 @@ export interface components {
         };
     };
     parameters: {
+        /** @description Days back, today included. */
+        Days: number;
         UserID: string;
     };
     requestBodies: never;
@@ -975,6 +1073,85 @@ export interface operations {
                 content: {
                     "application/json": {
                         items: components["schemas"]["AuditEntry"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    tradingReport: {
+        parameters: {
+            query?: {
+                /** @description Days back, today included. */
+                days?: components["parameters"]["Days"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The days. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["TradingDay"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    walletReport: {
+        parameters: {
+            query?: {
+                /** @description Days back, today included. */
+                days?: components["parameters"]["Days"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The days. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["WalletDay"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    candleReport: {
+        parameters: {
+            query: {
+                symbol: string;
+                interval?: "1m" | "5m" | "15m" | "1h" | "4h" | "1d";
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The candles. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["Candle"][];
                     };
                 };
             };

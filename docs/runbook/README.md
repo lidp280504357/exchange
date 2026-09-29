@@ -32,6 +32,7 @@
 | [instruments.md](instruments.md) | 资产、网络、交易对、费率，`exchangectl instruments` |
 | [ledger.md](ledger.md) | 账本、划转、对账，`exchangectl ledger` |
 | [wallet.md](wallet.md) | 充值、signer 与 keystore、归集、提现审批与签名、链上对账，`exchangectl wallet` |
+| [analytics.md](analytics.md) | ClickHouse：事件、审计、分录与订单/成交/钱包/K 线读模型，回填、常用查询与核对 |
 | [admin.md](admin.md) | 管理后台（`/admin/`）：管理员与 TOTP、角色、提现审批、用户处置、交易对与开关、双人调账、审计查询，`exchangectl admin` |
 | [grafana-cloud.md](grafana-cloud.md) | Grafana Cloud 接入（暂缓） |
 

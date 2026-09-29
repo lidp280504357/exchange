@@ -13,4 +13,5 @@ import (
 	_ "github.com/lidp280504357/exchange/api/gen/go/exchange/risk/v1"         // registers risk event types
 	_ "github.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1"        // registers trade event types
 	_ "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"         // registers user event types
+	_ "github.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1"       // registers wallet event types
 )

@@ -80,4 +80,38 @@ off=$(awk '/^analytics_reconcile_missing/ && $2 != 0' <<<"$metrics")
 [[ -z "$off" ]] || { echo "FAIL ClickHouse and the outboxes disagree (published minus ingested): $off" >&2; exit 1; }
 echo "ok   ClickHouse holds exactly the events the outboxes published in the last day"
 
+echo "== read models"
+# Trades and order changes are one row per event (a minute old, so ingested).
+counts=$(ch "SELECT
+  (SELECT count() FROM trades FINAL WHERE executed_at < now() - INTERVAL 1 MINUTE),
+  (SELECT uniqExact(event_id) FROM events WHERE topic = 'trade.events' AND occurred_at < now() - INTERVAL 1 MINUTE),
+  (SELECT count() FROM order_updates FINAL WHERE occurred_at < now() - INTERVAL 1 MINUTE),
+  (SELECT uniqExact(event_id) FROM events WHERE topic = 'order.events' AND occurred_at < now() - INTERVAL 1 MINUTE)")
+read -r trades trade_events updates order_events <<<"$counts"
+[[ $trades == "$trade_events" && $updates == "$order_events" ]] ||
+  { echo "FAIL read models: $trades trades for $trade_events trade events, $updates order changes for $order_events order events" >&2; exit 1; }
+echo "ok   $trades trades and $updates order changes, one per event"
+# The wallet read models agree with wallet-service's tables on every
+# status the events report (confirmation progress is not an event).
+wallet_statuses() {
+  local pg_deposits pg_withdrawals ch_deposits ch_withdrawals
+  pg_deposits=$(pg "SELECT coalesce(string_agg(s || '=' || n, ',' ORDER BY s), '') FROM (SELECT CASE status WHEN 'CONFIRMING' THEN 'DETECTED' ELSE status END AS s, count(*) AS n FROM wallet.deposits GROUP BY 1) x")
+  pg_withdrawals=$(pg "SELECT coalesce(string_agg(s || '=' || n, ',' ORDER BY s), '') FROM (SELECT CASE status WHEN 'SIGNING' THEN 'APPROVED' WHEN 'CONFIRMING' THEN 'BROADCAST' ELSE status END AS s, count(*) AS n FROM wallet.withdrawals GROUP BY 1) x")
+  ch_deposits=$(ch "SELECT arrayStringConcat(arraySort(groupArray(concat(status, '=', toString(n)))), ',') FROM (SELECT status, count() AS n FROM wallet_deposits FINAL GROUP BY status)")
+  ch_withdrawals=$(ch "SELECT arrayStringConcat(arraySort(groupArray(concat(status, '=', toString(n)))), ',') FROM (SELECT status, count() AS n FROM wallet_withdrawals FINAL GROUP BY status)")
+  WALLET_STATUSES="deposits $pg_deposits / $ch_deposits, withdrawals $pg_withdrawals / $ch_withdrawals"
+  [[ $pg_deposits == "$ch_deposits" && $pg_withdrawals == "$ch_withdrawals" ]]
+}
+for _ in $(seq 10); do
+  wallet_statuses && break
+  sleep 3
+done
+wallet_statuses || { echo "FAIL wallet read models (PostgreSQL / ClickHouse): $WALLET_STATUSES" >&2; exit 1; }
+echo "ok   wallet read models match wallet-service: $WALLET_STATUSES"
+candles=$(ch "SELECT (SELECT sum(trades) FROM candles_1m FINAL WHERE open_time < toStartOfMinute(now()) - INTERVAL 1 MINUTE),
+  (SELECT count() FROM trades FINAL WHERE executed_at < toStartOfMinute(now()) - INTERVAL 1 MINUTE)")
+read -r in_candles in_trades <<<"$candles"
+[[ $in_candles == "$in_trades" ]] || { echo "FAIL one-minute candles count $in_candles trades, the trades table $in_trades" >&2; exit 1; }
+echo "ok   one-minute candles cover all $in_trades trades"
+
 echo "all observability checks passed"

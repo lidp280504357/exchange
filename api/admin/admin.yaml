@@ -17,7 +17,8 @@ info:
 
     Roles grant permissions: ADMIN (everything), OPERATOR (accounts,
     orders, trading pairs, feature flags), FINANCE (withdrawal reviews,
-    ledger adjustments), AUDITOR (read-only). Everyone may read. A call
+    ledger adjustments), AUDITOR (read-only). Everyone may read, including
+    the reports from the ClickHouse read models. A call
     outside the role fails with ADMIN_FORBIDDEN. Every change is audited
     (audit.events → ClickHouse audit_logs) with the administrator's email
     as the actor; changes also carry a reason of at least 3 characters.
@@ -35,6 +36,7 @@ tags:
   - name: flags
   - name: ledger
   - name: audit
+  - name: reports
 paths:
   /admin/v1/login:
     post:
@@ -552,6 +554,98 @@ paths:
                       $ref: '#/components/schemas/AuditEntry'
         default:
           $ref: '#/components/responses/Error'
+  /admin/v1/reports/trading:
+    get:
+      operationId: tradingReport
+      summary: Trades and orders per symbol and day (UTC), newest first
+      description: |
+        From the ClickHouse read models (trades, order_updates), which lag
+        the services by a few seconds. Needs reports.read.
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/Days'
+      responses:
+        '200':
+          description: The days.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TradingDay'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/reports/wallet:
+    get:
+      operationId: walletReport
+      summary: Credited deposits and confirmed withdrawals per asset and day (UTC)
+      description: |
+        Deposits booked to users (not the unclaimed ones) by the day they
+        were credited; withdrawals by the day they were confirmed. Needs
+        reports.read.
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/Days'
+      responses:
+        '200':
+          description: The days.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WalletDay'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/reports/candles:
+    get:
+      operationId: candleReport
+      summary: Candles of a symbol from the trades read model, newest first
+      description: Intervals are aligned to the epoch in UTC. Needs reports.read.
+      tags: [reports]
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+            examples: [BTC-USDT]
+        - name: interval
+          in: query
+          schema:
+            type: string
+            enum: [1m, 5m, 15m, 1h, 4h, 1d]
+            default: 1h
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 48
+      responses:
+        '200':
+          description: The candles.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Candle'
+        default:
+          $ref: '#/components/responses/Error'
 components:
   securitySchemes:
     session:
@@ -564,6 +658,15 @@ components:
       name: X-Admin-CSRF
       description: The value "1" on every request other than GET; a cross-site form cannot set it.
   parameters:
+    Days:
+      name: days
+      in: query
+      description: Days back, today included.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 90
+        default: 7
     UserID:
       name: id
       in: path
@@ -613,7 +716,7 @@ components:
           items:
             type: string
             enum: [users.read, users.status, orders.cancel, instruments.read, instruments.write, flags.read, flags.write,
-              withdrawals.read, withdrawals.review, ledger.adjust.request, ledger.adjust.approve, audit.read]
+              withdrawals.read, withdrawals.review, ledger.adjust.request, ledger.adjust.approve, audit.read, reports.read]
     UserView:
       type: object
       required: [user, balances]
@@ -866,3 +969,64 @@ components:
           format: date-time
         payload:
           description: The event as JSON.
+    TradingDay:
+      type: object
+      required: [day, symbol, trades, volume, quote_volume, orders, rejected]
+      properties:
+        day:
+          type: string
+          format: date
+        symbol:
+          type: string
+        trades:
+          type: integer
+        volume:
+          $ref: '#/components/schemas/Decimal'
+        quote_volume:
+          $ref: '#/components/schemas/Decimal'
+        orders:
+          type: integer
+          description: Orders accepted.
+        rejected:
+          type: integer
+          description: Orders rejected (by the funds check or the engine).
+    WalletDay:
+      type: object
+      required: [day, asset, deposits, deposit_amount, withdrawals, withdrawal_amount, withdrawal_fees]
+      properties:
+        day:
+          type: string
+          format: date
+        asset:
+          type: string
+        deposits:
+          type: integer
+        deposit_amount:
+          $ref: '#/components/schemas/Decimal'
+        withdrawals:
+          type: integer
+        withdrawal_amount:
+          $ref: '#/components/schemas/Decimal'
+        withdrawal_fees:
+          $ref: '#/components/schemas/Decimal'
+    Candle:
+      type: object
+      required: [open_time, open, high, low, close, volume, quote_volume, trades]
+      properties:
+        open_time:
+          type: string
+          format: date-time
+        open:
+          $ref: '#/components/schemas/Decimal'
+        high:
+          $ref: '#/components/schemas/Decimal'
+        low:
+          $ref: '#/components/schemas/Decimal'
+        close:
+          $ref: '#/components/schemas/Decimal'
+        volume:
+          $ref: '#/components/schemas/Decimal'
+        quote_volume:
+          $ref: '#/components/schemas/Decimal'
+        trades:
+          type: integer

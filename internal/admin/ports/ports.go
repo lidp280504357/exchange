@@ -147,3 +147,47 @@ type AuditEntry struct {
 type AuditLog interface {
 	Search(ctx context.Context, actor, target string, limit int) ([]AuditEntry, error)
 }
+
+// TradingDay is one symbol's trading on one day (UTC); amounts are
+// decimal strings.
+type TradingDay struct {
+	Day         string `json:"day"`
+	Symbol      string `json:"symbol"`
+	Trades      uint64 `json:"trades"`
+	Volume      string `json:"volume"`
+	QuoteVolume string `json:"quote_volume"`
+	Orders      uint64 `json:"orders"`
+	Rejected    uint64 `json:"rejected"`
+}
+
+// WalletDay is one asset's credited deposits and confirmed withdrawals on
+// one day (UTC).
+type WalletDay struct {
+	Day              string `json:"day"`
+	Asset            string `json:"asset"`
+	Deposits         uint64 `json:"deposits"`
+	DepositAmount    string `json:"deposit_amount"`
+	Withdrawals      uint64 `json:"withdrawals"`
+	WithdrawalAmount string `json:"withdrawal_amount"`
+	WithdrawalFees   string `json:"withdrawal_fees"`
+}
+
+// Candle is a candle of the trades read model.
+type Candle struct {
+	OpenTime    time.Time `json:"open_time"`
+	Open        string    `json:"open"`
+	High        string    `json:"high"`
+	Low         string    `json:"low"`
+	Close       string    `json:"close"`
+	Volume      string    `json:"volume"`
+	QuoteVolume string    `json:"quote_volume"`
+	Trades      uint64    `json:"trades"`
+}
+
+// Reports reads the ClickHouse read models (trades, orders, wallet,
+// candles).
+type Reports interface {
+	Trading(ctx context.Context, days int) ([]TradingDay, error)
+	Wallet(ctx context.Context, days int) ([]WalletDay, error)
+	Candles(ctx context.Context, symbol string, seconds uint32, limit int) ([]Candle, error)
+}

@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/jackc/pgx/v5"
@@ -350,4 +351,113 @@ func (a Audit) Search(ctx context.Context, actor, target string, limit int) ([]p
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// Reports implements ports.Reports on the ClickHouse read models
+// (migrations/clickhouse/00004_read_models.sql).
+type Reports struct{ Conn driver.Conn }
+
+const tradingReport = `SELECT day, symbol, trades, volume, quote_volume, orders, rejected FROM
+	(
+		SELECT toDate(executed_at) AS day, symbol, count() AS trades, sum(quantity) AS volume, sum(quote_quantity) AS quote_volume
+		FROM trades FINAL WHERE executed_at >= toDateTime64(today() - ?, 3, 'UTC') GROUP BY day, symbol
+	) AS t
+	FULL OUTER JOIN
+	(
+		SELECT toDate(occurred_at) AS day, symbol, countIf(status = 'NEW') AS orders, countIf(status = 'REJECTED') AS rejected
+		FROM order_updates FINAL WHERE occurred_at >= toDateTime64(today() - ?, 3, 'UTC') GROUP BY day, symbol
+	) AS o USING (day, symbol)
+	ORDER BY day DESC, symbol`
+
+const walletReport = `SELECT day, asset, deposits, deposit_amount, withdrawals, withdrawal_amount, withdrawal_fees FROM
+	(
+		SELECT toDate(updated_at) AS day, asset, count() AS deposits, sum(amount) AS deposit_amount
+		FROM wallet_deposits FINAL WHERE status = 'CREDITED' AND NOT unclaimed AND updated_at >= toDateTime64(today() - ?, 3, 'UTC')
+		GROUP BY day, asset
+	) AS d
+	FULL OUTER JOIN
+	(
+		SELECT toDate(updated_at) AS day, asset, count() AS withdrawals, sum(amount) AS withdrawal_amount, sum(fee) AS withdrawal_fees
+		FROM wallet_withdrawals FINAL WHERE status = 'CONFIRMED' AND updated_at >= toDateTime64(today() - ?, 3, 'UTC')
+		GROUP BY day, asset
+	) AS w USING (day, asset)
+	ORDER BY day DESC, asset`
+
+func unavailable(err error) error {
+	return apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "the read models are unavailable")
+}
+
+// Trading returns trades and orders per symbol and day for the last days
+// (today included).
+func (r Reports) Trading(ctx context.Context, days int) ([]ports.TradingDay, error) {
+	rows, err := r.Conn.Query(ctx, tradingReport, days-1, days-1)
+	if err != nil {
+		return nil, unavailable(err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := []ports.TradingDay{}
+	for rows.Next() {
+		var d ports.TradingDay
+		var day time.Time
+		var volume, quote decimal.Decimal
+		if err := rows.Scan(&day, &d.Symbol, &d.Trades, &volume, &quote, &d.Orders, &d.Rejected); err != nil {
+			return nil, unavailable(err)
+		}
+		d.Day, d.Volume, d.QuoteVolume = day.Format(time.DateOnly), volume.String(), quote.String()
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, unavailable(err)
+	}
+	return out, nil
+}
+
+// Wallet returns credited deposits and confirmed withdrawals per asset and
+// day for the last days.
+func (r Reports) Wallet(ctx context.Context, days int) ([]ports.WalletDay, error) {
+	rows, err := r.Conn.Query(ctx, walletReport, days-1, days-1)
+	if err != nil {
+		return nil, unavailable(err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := []ports.WalletDay{}
+	for rows.Next() {
+		var d ports.WalletDay
+		var day time.Time
+		var deposited, withdrawn, fees decimal.Decimal
+		if err := rows.Scan(&day, &d.Asset, &d.Deposits, &deposited, &d.Withdrawals, &withdrawn, &fees); err != nil {
+			return nil, unavailable(err)
+		}
+		d.Day, d.DepositAmount, d.WithdrawalAmount, d.WithdrawalFees = day.Format(time.DateOnly), deposited.String(), withdrawn.String(),
+			fees.String()
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, unavailable(err)
+	}
+	return out, nil
+}
+
+// Candles returns the newest candles of an interval, newest first.
+func (r Reports) Candles(ctx context.Context, symbol string, seconds uint32, limit int) ([]ports.Candle, error) {
+	rows, err := r.Conn.Query(ctx, `SELECT open_time, open, high, low, close, volume, quote_volume, trades
+		FROM candles(symbol = ?, seconds = ?) ORDER BY open_time DESC LIMIT ?`, symbol, seconds, limit)
+	if err != nil {
+		return nil, unavailable(err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := []ports.Candle{}
+	for rows.Next() {
+		var c ports.Candle
+		var o, h, l, cl, v, qv decimal.Decimal
+		if err := rows.Scan(&c.OpenTime, &o, &h, &l, &cl, &v, &qv, &c.Trades); err != nil {
+			return nil, unavailable(err)
+		}
+		c.Open, c.High, c.Low, c.Close, c.Volume, c.QuoteVolume = o.String(), h.String(), l.String(), cl.String(), v.String(), qv.String()
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, unavailable(err)
+	}
+	return out, nil
 }
