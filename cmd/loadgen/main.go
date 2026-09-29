@@ -315,14 +315,15 @@ func orders(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("orders", flag.ExitOnError)
 	usersFile := fs.String("users", "/lg/users.json", "users from loadgen users")
 	trading := fs.String("trading", "http://spot-trading-service:8088", "spot-trading-service base URL")
-	engine := fs.String("engine", "http://matching-engine:9089/metrics", "matching engine metrics")
+	engine := fs.String("engine", "http://matching-engine:9089/metrics", "matching engine metrics (empty: do not watch the engine)")
 	symbol := fs.String("symbol", "ETH-BTC", "pair")
 	price := fs.String("price", "0.025", "price of every order (buys and sells cross there)")
 	quantity := fs.String("quantity", "0.01", "quantity of every order")
 	rate := fs.Int("rate", 200, "orders per second")
 	duration := fs.Duration("duration", 60*time.Second, "how long to send")
 	workers := fs.Int("workers", 512, "requests in flight at most")
-	drain := fs.Duration("drain", 5*time.Minute, "how long to wait for the engine to catch up")
+	drain := fs.Duration("drain", 5*time.Minute, "how long to wait for the engine to catch up (0: do not wait)")
+	cancelAll := fs.Bool("cancel", true, "cancel the users' orders on the pair at the end")
 	_ = fs.Parse(args)
 
 	b, err := os.ReadFile(*usersFile)
@@ -337,9 +338,11 @@ func orders(ctx context.Context, args []string) error {
 		return errors.New("need at least two users")
 	}
 	metrics := []string{"matching_commands_total", "matching_trades_total"}
-	before, err := scrape(ctx, *engine, metrics...)
-	if err != nil {
-		return fmt.Errorf("engine metrics: %w", err)
+	before := map[string]float64{}
+	if *engine != "" {
+		if before, err = scrape(ctx, *engine, metrics...); err != nil {
+			return fmt.Errorf("engine metrics: %w", err)
+		}
 	}
 
 	type result struct {
@@ -418,9 +421,9 @@ loop:
 
 	accepted := len(lat)
 	target := before["matching_commands_total"] + float64(accepted)
-	var after map[string]float64
+	after := before
 	drained := false
-	for waitUntil := time.Now().Add(*drain); time.Now().Before(waitUntil); time.Sleep(time.Second) {
+	for waitUntil := time.Now().Add(*drain); *engine != "" && time.Now().Before(waitUntil); time.Sleep(time.Second) {
 		if after, err = scrape(ctx, *engine, metrics...); err != nil {
 			return err
 		}
@@ -446,7 +449,10 @@ loop:
 	commands := after["matching_commands_total"] - before["matching_commands_total"]
 	trades := after["matching_trades_total"] - before["matching_trades_total"]
 	state := "drained"
-	if !drained {
+	switch {
+	case *drain == 0 || *engine == "":
+		state = "not waited for"
+	case !drained:
 		state = "NOT drained within " + drain.String()
 	}
 	fmt.Printf("matching engine: %.0f commands, %.0f trades in %s (%.0f commands/s), %s\n", commands, trades,
@@ -454,10 +460,13 @@ loop:
 
 	// Leave nothing on the book.
 	for _, u := range us {
+		if !*cancelAll {
+			break
+		}
 		_, _, _ = call(context.WithoutCancel(ctx), http.MethodDelete, *trading+"/v1/orders?symbol="+url.QueryEscape(*symbol),
 			map[string]string{"X-User-Id": u.ID}, nil, nil)
 	}
-	if !drained {
+	if !drained && *drain > 0 && *engine != "" {
 		return errors.New("the engine did not catch up")
 	}
 	return nil
@@ -470,6 +479,8 @@ func ws(ctx context.Context, args []string) error {
 	ramp := fs.Int("ramp", 200, "new connections per second")
 	hold := fs.Duration("duration", 60*time.Second, "how long to hold them once all are open")
 	channels := fs.String("channels", "ticker:BTC-USDT,depth:BTC-USDT,trades:BTC-USDT", "public channels to subscribe to")
+	var extra headerList
+	fs.Var(&extra, "header", `extra request header "Name: value" (repeatable), e.g. "X-Forwarded-Proto: https" through nginx`)
 	_ = fs.Parse(args)
 	sub, err := json.Marshal(map[string]any{"op": "subscribe", "args": strings.Split(*channels, ",")})
 	if err != nil {
@@ -494,9 +505,12 @@ func ws(ctx context.Context, args []string) error {
 		wg.Go(func() {
 			t := time.Now()
 			dctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			c, resp, err := websocket.Dial(dctx, *target, &websocket.DialOptions{
-				HTTPHeader: http.Header{"X-Forwarded-For": {clientIP(i)}},
-			})
+			h := http.Header{"X-Forwarded-For": {clientIP(i)}}
+			for _, kv := range extra {
+				k, v, _ := strings.Cut(kv, ":")
+				h.Set(strings.TrimSpace(k), strings.TrimSpace(v))
+			}
+			c, resp, err := websocket.Dial(dctx, *target, &websocket.DialOptions{HTTPHeader: h})
 			cancel()
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
@@ -563,6 +577,12 @@ func ws(ctx context.Context, args []string) error {
 	}
 	return nil
 }
+
+// headerList collects repeated --header flags.
+type headerList []string
+
+func (h *headerList) String() string     { return strings.Join(*h, ", ") }
+func (h *headerList) Set(v string) error { *h = append(*h, v); return nil }
 
 func shortError(err error) string {
 	s := err.Error()

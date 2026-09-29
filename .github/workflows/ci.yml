@@ -181,6 +181,7 @@ jobs:
           tmp=$(mktemp -d)
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=astras.vip -keyout "$tmp/origin.key" -out "$tmp/origin.pem" >/dev/null 2>&1
           docker run --rm \
+            -v "$PWD/deploy/compose/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
             -v "$PWD/deploy/compose/nginx/conf.d:/etc/nginx/conf.d:ro" \
             -v "$PWD/deploy/compose/nginx/snippets:/etc/nginx/snippets:ro" \
             -v "$tmp:/etc/nginx/ssl:ro" \

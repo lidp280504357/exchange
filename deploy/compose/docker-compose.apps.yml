@@ -40,11 +40,16 @@ x-health: &health
   start_period: 20s
 
 services:
+  # A WebSocket connection costs the gateway about 60 KiB (load test,
+  # docs/runbook/testing.md): 512 MiB holds the 5,000 of the phase 2 target
+  # with room for the rest of its work.
   api-gateway:
     <<: *app
     command: ["/app/api-gateway"]
+    mem_limit: 512m
     environment:
       <<: *base-env
+      GOMEMLIMIT: 440MiB
       AUTH_SERVICE_URL: http://auth-service:8081
       USER_SERVICE_URL: http://user-service:8082
       NOTIFICATION_SERVICE_URL: http://notification-service:8083
