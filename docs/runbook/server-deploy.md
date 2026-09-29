@@ -92,7 +92,7 @@ ssh exchange 'sudo docker exec exchange-infra-api-gateway-1 wget -qO- http://127
 
 ## 小机器调优（2026-09-28 资源评估）
 
-测试服是 2 vCPU / 3.8 GiB 的突发型实例，基础设施与应用共用。评估与数据见 [阶段 1 验收报告](../阶段1验收报告.md) §6：
+以下调优是在旧测试服（t2.medium，2 vCPU / 3.8 GiB 突发型）上做的；2026-09-30 起的 c5a.xlarge（4 vCPU / 7.8 GiB）沿用了这些设置，可以按需放宽（例如 ClickHouse 的内存上限）。评估与数据见 [阶段 1 验收报告](../阶段1验收报告.md) §6：
 
 - ClickHouse：`deploy/compose/clickhouse/config.d/small-server.xml` 去掉诊断用的系统日志表（trace_log、metric_log 等，保留 query_log、part_log），服务日志 warning 级、100 MB × 3，内存上限为物理内存 30%。改了这个文件，部署时 compose 会重建 ClickHouse 容器（约半分钟，analytics-consumer 自动重试）。
 - Redpanda：`topics.sh` 把 `segment_fallocation_step` 设为 4 MiB（默认 32 MiB，每个分区的活动段都会预分配）。
