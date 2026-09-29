@@ -1,19 +1,23 @@
-// Command matching-engine matches spot orders (requirements §5.7,
-// ADR-0002): it consumes order.commands, keeps one book per symbol in
-// memory, and publishes order.events and trade.events. Only the holder of
-// the engine lease runs; another instance waits as a standby.
+// Command matching-engine matches orders (requirements §5.7, ADR-0002):
+// it consumes order commands, keeps one book per symbol in memory, and
+// publishes order and trade events and depth. Only the holder of the
+// engine lease runs; another instance waits as a standby. MATCHING_SHARD
+// picks the shard: spot (order.commands, schema matching) or derivatives,
+// the perpetual contracts (derivatives.order.commands, schema
+// deriv_matching; implementation plan §7.3 task 2), which runs as
+// derivatives-engine.
 package main
 
 import (
 	"context"
 	"errors"
+	"os"
 	"time"
 
 	"github.com/lidp280504357/exchange/internal/matching/adapters/postgres"
 	"github.com/lidp280504357/exchange/internal/matching/application"
 	"github.com/lidp280504357/exchange/internal/platform/app"
 	"github.com/lidp280504357/exchange/internal/platform/bootstrap"
-	"github.com/lidp280504357/exchange/internal/platform/event"
 	"github.com/lidp280504357/exchange/internal/platform/kafka"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
 	"github.com/lidp280504357/exchange/migrations"
@@ -28,6 +32,25 @@ type settings struct {
 	// WALRetention keeps applied commands this long after a snapshot covers
 	// them (MATCHING_WAL_RETENTION).
 	WALRetention time.Duration `koanf:"matching_wal_retention"`
+	// Shard is spot or derivatives (MATCHING_SHARD).
+	Shard string `koanf:"matching_shard"`
+}
+
+// shard is what sets one engine apart from another.
+type shard struct {
+	name   string // the service's name
+	topics application.Topics
+	schema string
+	lease  string
+	group  string
+}
+
+var shards = map[string]shard{
+	"spot": {name: "matching-engine", topics: application.SpotTopics, schema: "matching", lease: "matching-engine", group: application.Group},
+	"derivatives": {
+		name: "derivatives-engine", topics: application.DerivativesTopics, schema: "deriv_matching", lease: "derivatives-engine",
+		group: "derivatives-engine",
+	},
 }
 
 func (s *settings) Validate() error {
@@ -35,24 +58,34 @@ func (s *settings) Validate() error {
 	if s.SnapshotEvery < 1 {
 		errs = append(errs, errors.New("MATCHING_SNAPSHOT_EVERY must be at least 1"))
 	}
+	if _, ok := shards[s.Shard]; !ok {
+		errs = append(errs, errors.New("MATCHING_SHARD must be spot or derivatives"))
+	}
 	return errors.Join(append(errs, s.Postgres.Validate(), s.Kafka.Validate())...)
 }
 
 func main() {
-	app.Main("matching-engine", setup, app.WithDefaultOpsAddr(":9089"))
+	// The name is needed before the settings are read: logs, metrics and
+	// event producers carry it.
+	name, ops := "matching-engine", ":9089"
+	if os.Getenv("MATCHING_SHARD") == "derivatives" {
+		name, ops = shards["derivatives"].name, ":9096"
+	}
+	app.Main(name, setup, app.WithDefaultOpsAddr(ops))
 }
 
 func setup(ctx context.Context, a *app.App) error {
-	cfg := settings{Postgres: pg.DefaultConfig(), SnapshotEvery: 1000, WALRetention: 24 * time.Hour}
+	cfg := settings{Postgres: pg.DefaultConfig(), SnapshotEvery: 1000, WALRetention: 24 * time.Hour, Shard: "spot"}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
 	}
-	db, err := bootstrap.Postgres(ctx, a, cfg.Postgres, "matching", migrations.Matching())
+	sh := shards[cfg.Shard]
+	db, err := bootstrap.Postgres(ctx, a, cfg.Postgres, sh.schema, migrations.Matching())
 	if err != nil {
 		return err
 	}
-	a.Logger().Info("waiting for the engine lease")
-	lease, err := pg.AcquireLease(ctx, db, "matching-engine")
+	a.Logger().Info("waiting for the engine lease", "shard", cfg.Shard)
+	lease, err := pg.AcquireLease(ctx, db, sh.lease)
 	if err != nil {
 		return err
 	}
@@ -66,11 +99,12 @@ func setup(ctx context.Context, a *app.App) error {
 	}
 	store := postgres.NewStore(db)
 	engine := application.New(store, events, a.Logger(), a.Metrics(), cfg.SnapshotEvery)
+	engine.Topics = sh.topics
 	if err := engine.Recover(ctx); err != nil {
 		return err
 	}
 	if err := bootstrap.BatchConsumerWith(ctx, a, cfg.Kafka, kafka.BatchOptions{
-		Group: application.Group, Topics: []string{event.TopicOrderCommands}, Handler: engine.Handle,
+		Group: sh.group, Topics: []string{sh.topics.Commands}, Handler: engine.Handle,
 		MaxBatch: 500, MaxWait: 20 * time.Millisecond,
 	}); err != nil {
 		return err

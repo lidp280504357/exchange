@@ -15,10 +15,24 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/event"
 )
 
-// Topics the engine publishes to.
-const (
-	TopicOrder = event.TopicOrder
-	TopicTrade = event.TopicTrade
+// Topics names what an engine shard consumes and publishes.
+type Topics struct {
+	Commands string // input, e.g. order.commands
+	Orders   string // order events
+	Trades   string // trade events
+	Depth    string // depth snapshots
+}
+
+// SpotTopics are the spot shard's topics; DerivativesTopics the perpetual
+// contracts' (implementation plan §7.3 task 2).
+var (
+	SpotTopics = Topics{
+		Commands: event.TopicOrderCommands, Orders: event.TopicOrder, Trades: event.TopicTrade, Depth: event.TopicMarketDepth,
+	}
+	DerivativesTopics = Topics{
+		Commands: event.TopicDerivOrderCommands, Orders: event.TopicDerivOrder, Trades: event.TopicDerivTrade,
+		Depth: event.TopicDerivMarketDepth,
+	}
 )
 
 var (
@@ -83,13 +97,13 @@ func fromProto(p *orderv1.Order) (domain.Order, error) {
 
 // output turns an engine event into the envelope to publish.
 func (e *Engine) output(ctx context.Context, ev domain.Event) (ports.Output, error) {
-	topic := TopicOrder
+	topic := e.Topics.Orders
 	var msg proto.Message
 	filled, quote := ev.Filled.String(), ev.FilledQuote.String()
 	switch ev.Kind {
 	case domain.KindTrade:
 		t := ev.Trade
-		topic = TopicTrade
+		topic = e.Topics.Trades
 		side := orderv1.Side_SIDE_BUY
 		if t.TakerSide == domain.Sell {
 			side = orderv1.Side_SIDE_SELL

@@ -111,7 +111,7 @@ func (x *DepthExporter) Export(ctx context.Context, depths []domain.Depth) error
 		if err != nil {
 			return fmt.Errorf("depth %s: %w", d.Symbol, err)
 		}
-		recs = append(recs, kafka.Record{Topic: event.TopicMarketDepth, Key: d.Symbol, EventType: env.GetEventType(), Envelope: raw})
+		recs = append(recs, kafka.Record{Topic: x.engine.Topics.Depth, Key: d.Symbol, EventType: env.GetEventType(), Envelope: raw})
 	}
 	if err := x.pub.Publish(ctx, recs...); err != nil {
 		return err

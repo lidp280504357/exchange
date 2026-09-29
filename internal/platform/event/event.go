@@ -46,6 +46,13 @@ const (
 	TopicMarketDepth = "market.depth"
 	// TopicMarketCandle carries candles and tickers from market-data-service.
 	TopicMarketCandle = "market.candle.events"
+	// The perpetual contracts' matching shard (implementation plan §7.3
+	// task 2): the same engine with its own commands, order and trade
+	// events and depth, keyed by symbol.
+	TopicDerivOrderCommands = "derivatives.order.commands"
+	TopicDerivOrder         = "derivatives.order.events"
+	TopicDerivTrade         = "derivatives.trade.events"
+	TopicDerivMarketDepth   = "derivatives.market.depth"
 )
 
 // Factory stamps envelopes with the producing service and instance.

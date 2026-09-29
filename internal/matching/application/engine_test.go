@@ -172,7 +172,7 @@ func TestRecoveryRebuildsTheBooksWithoutPublishingAgain(t *testing.T) {
 	}
 	trades := 0
 	for _, o := range store.outbox[published:] {
-		if o.Topic == TopicTrade {
+		if o.Topic == SpotTopics.Trades {
 			trades++
 		}
 	}
@@ -293,5 +293,25 @@ func TestDepthsOfChangedBooksArePublished(t *testing.T) {
 	}
 	if snap.GetSequence() != depths[0].Seq || len(snap.GetBids()) != 1 || snap.GetBids()[0].GetPrice() != "60000" || snap.GetAsks()[0].GetQuantity() != "0.3" {
 		t.Fatalf("snapshot: %v", &snap)
+	}
+}
+
+// The contracts' shard is the same engine publishing to its own topics.
+func TestTheDerivativesShardPublishesToItsTopics(t *testing.T) {
+	store := &memStore{snapshots: map[int32]ports.Snapshot{}}
+	e := newEngine(t, store)
+	e.Topics = DerivativesTopics
+	batch := deliveries(0,
+		place(t, "s1", "alice", orderv1.Side_SIDE_SELL, "60000", "0.1"),
+		place(t, "b1", "bob", orderv1.Side_SIDE_BUY, "60000", "0.1"))
+	if err := e.Handle(context.Background(), batch); err != nil {
+		t.Fatal(err)
+	}
+	topics := map[string]int{}
+	for _, o := range store.outbox {
+		topics[o.Topic]++
+	}
+	if topics[event.TopicDerivOrder] != 3 || topics[event.TopicDerivTrade] != 1 || len(topics) != 2 {
+		t.Fatalf("topics %v", topics)
 	}
 }

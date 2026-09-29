@@ -11,6 +11,19 @@
 - 每个事件带交易对内递增的 `sequence`，排序只看它，不看墙上时钟。
 - 引擎不持有余额（ADR-0002）。账本消费成交做结算（见 [ledger.md](ledger.md#成交结算)）；交易服务消费订单事件更新订单，在终态解冻剩余（见 [trading.md](trading.md)）。
 
+## 分片：现货与合约
+
+同一个二进制按 `MATCHING_SHARD` 跑两个独立实例（实施计划 §7.3 任务 2），订单簿、WAL、租约、消费组互不相干：
+
+| 分片 | 容器 | 运维端口 | schema | 租约 | 消费组 | 输入 | 输出 |
+|---|---|---|---|---|---|---|---|
+| `spot`（默认） | matching-engine | 9089 | `matching` | `matching-engine` | `matching-engine` | `order.commands` | `order.events`、`trade.events`、`market.depth` |
+| `derivatives` | derivatives-engine | 9096 | `deriv_matching` | `derivatives-engine` | `derivatives-engine` | `derivatives.order.commands` | `derivatives.order.events`、`derivatives.trade.events`、`derivatives.market.depth` |
+
+- 合约分片的撮合规则与现货完全相同，只是"交易对"换成合约代码（如 `BTC-USDT-PERP`），命令由 derivatives-service 发出。引擎的费率字段合约下发 0：合约手续费以 USDT 计，由 derivatives-service 按成交算（引擎仍然不碰余额与持仓）。
+- 两个分片的指标名相同，按抓取任务（`job="derivatives-engine"`）或 `outbox_pending{schema="deriv_matching"}` 区分。
+- 现货的查询与处理方法对合约分片同样适用，把 schema 换成 `deriv_matching`。
+
 ## 撮合规则
 
 - 价格优先、时间优先，按挂单方（maker）价格成交。

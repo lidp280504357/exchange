@@ -24,11 +24,15 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/kafka"
 )
 
-// Group is the engine's consumer group on order.commands.
+// Group is the spot engine's consumer group on order.commands; the
+// contracts' shard uses its own (MATCHING_GROUP).
 const Group = "matching-engine"
 
 // Engine applies commands to the books of the partitions it consumes.
 type Engine struct {
+	// Topics of the shard; New sets SpotTopics.
+	Topics Topics
+
 	store  ports.Store
 	events *event.Factory
 	log    *slog.Logger
@@ -58,7 +62,7 @@ type partition struct {
 // New returns an engine; call Recover before Handle.
 func New(store ports.Store, events *event.Factory, log *slog.Logger, reg prometheus.Registerer, snapshotEvery int) *Engine {
 	e := &Engine{
-		store: store, events: events, log: log, now: time.Now, snapshotEvery: snapshotEvery, dirty: true,
+		Topics: SpotTopics, store: store, events: events, log: log, now: time.Now, snapshotEvery: snapshotEvery, dirty: true,
 		changed: map[string]bool{},
 		commands: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "matching_commands_total",
@@ -221,7 +225,7 @@ func (e *Engine) Handle(ctx context.Context, batch []kafka.Delivery) error {
 		e.changed[w.Symbol] = true
 	}
 	for _, o := range out {
-		if o.Topic == TopicTrade {
+		if o.Topic == e.Topics.Trades {
 			e.trades.Inc()
 		}
 	}

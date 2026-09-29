@@ -328,6 +328,24 @@ services:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9089/readyz"]
 
+  # The perpetual contracts' matching shard (implementation plan §7.3 task
+  # 2): the same engine on derivatives.order.commands, schema
+  # deriv_matching, its own lease and consumer group.
+  derivatives-engine:
+    <<: *app
+    command: ["/app/matching-engine"]
+    mem_limit: 256m
+    environment:
+      <<: *base-env
+      GOMEMLIMIT: 200MiB
+      MATCHING_SHARD: derivatives
+    depends_on:
+      postgres: {condition: service_healthy}
+      redpanda: {condition: service_healthy}
+    healthcheck:
+      <<: *health
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9096/readyz"]
+
   analytics-consumer:
     <<: *app
     command: ["/app/analytics-consumer"]
