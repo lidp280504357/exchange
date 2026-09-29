@@ -147,6 +147,7 @@ WebSocket 私有频道：`orders`（合约订单与现货订单同一频道，�
 
 - 开关 `derivatives.trading` 默认关闭（ADR-0005），测试服打开：`exchangectl flags set derivatives.trading --on --reason "测试环境开放合约"`。
 - 合约在 `deploy/instruments/test.json` 里以 `TRADING` 创建（状态只在创建时取文件里的值，之后用 `exchangectl instruments contract-status` 改）。
+- 做市：market-maker 以标记价为中心给 BTC-USDT-PERP 双边报价（`MARKET_MAKER_CONTRACTS`，做市账户的合约账户要先有 USDT、开关 `market.maker` 要允许该合约，见 [market-maker.md](market-maker.md#合约做市)）；ETH-USDT-PERP 没有做市，端到端的对敲在它上面进行。
 - 保险基金用模拟资金注资：`exchangectl ledger insurance-fund --amount 1000000 --reason "测试环境保险基金" --key insurance-seed-1`（ledger-service 容器里执行，需 `ledger.manual_adjustment`）。
 - 端到端：`scripts/e2e/contracts.sh`（规格、标记价、资金费率）、`scripts/e2e/derivatives.sh`（两个用户在 ETH-USDT-PERP 上开仓、平仓、转回，最后跑对账）、`scripts/e2e/funding.sh`（资金费，见下）、`scripts/e2e/admin.sh` 的合约部分（合约状态、只减仓、状态往返、强平监控、双人审批的保险基金注资）；故障注入 `scripts/fault/contract-degrade.sh`（降级与人工解除）。
 - 资金费端到端靠一对**常驻对冲仓位**：`funding.sh` 第一次运行时注册两个用户，各转 100 USDT 到合约账户，在 BTC-USDT-PERP 上对敲 0.001 张后保持不平，邮箱与随机密码记在本机 `~/.cache/exchange-e2e/`（`E2E_STATE_DIR` 可改，不进仓库）；之后每次运行登录这两个用户（超过 7 天未登录时从开发收件箱取登录挑战验证码），逐个检查开仓以来每个资金费时间点：双方都有记录、费率等于 market-data-service 结算的费率、付款方付 0.001 × 结算标记价 × |费率| 向上取整、收款方向下取整。仓位没了（被平或被减仓）就重新开一对。强平本身依赖真实价格波动，端到端无法稳定触发，由应用层测试覆盖（`internal/derivatives/application` 的强平、ADL、全仓强平用例，设置 `TEST_POSTGRES_DSN` 时在真实库上跑）。

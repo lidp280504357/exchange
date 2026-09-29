@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Perpetual contracts end to end (implementation plan §7.3): the contract
-# specifications (task 1) and the index price, mark price and funding
-# (task 3) over REST and WebSocket. The mark price needs the reference
-# feed (flag market.reference_feed, on in the test environment).
+# specifications (task 1), the index price, mark price and funding (task
+# 3) over REST and WebSocket, and the market maker's quotes on
+# BTC-USDT-PERP (requirements §11.10). The mark price needs the reference
+# feed (flag market.reference_feed, on in the test environment); the
+# quotes need market.maker to allow BTC-USDT-PERP and USDT in the market
+# maker's FUTURES account.
 #
 #   scripts/e2e/contracts.sh
 set -euo pipefail
@@ -40,6 +43,14 @@ call GET /v1/market/BTC-USDT-PERP/ticker ""
 expect 200 - "contracts have tickers"
 call GET /v1/market/tickers ""
 check '[.tickers[].symbol] | index("BTC-USDT-PERP") != null' "the tickers include the contracts"
+
+echo "== the market maker quotes BTC-USDT-PERP (docs/runbook/market-maker.md)"
+quoted() {
+  call GET "/v1/market/BTC-USDT-PERP/depth?limit=5" "" && [[ $STATUS == 200 ]] &&
+    jq -e '(.bids | length) > 0 and (.asks | length) > 0' <<<"$BODY"
+}
+eventually 30 "bids and asks on the contract's book" quoted
+check '((.asks[0][0] | tonumber) - (.bids[0][0] | tonumber)) / (.bids[0][0] | tonumber) | . > 0 and . < 0.01' "a spread under 1% around the mark"
 
 echo "== WebSocket"
 node - "$BASE" <<'EOF'

@@ -1,7 +1,7 @@
 // Package domain holds the platform market maker's quoting rules
-// (requirements §11.10): levels on both sides around the reference price,
-// sized per level, one side stopped when the inventory leans too far or
-// reaches its ceiling.
+// (requirements §11.10): levels on both sides around the reference price
+// (a perpetual contract's mark price), sized per level, one side stopped
+// when the inventory leans too far or reaches its ceiling.
 package domain
 
 import (
@@ -30,6 +30,8 @@ type Params struct {
 	// Quantity is each order's size in the base asset.
 	Quantity decimal.Decimal `json:"quantity"`
 	// MaxBase is the inventory ceiling: holding this much base, no bids.
+	// For a contract it bounds the position both ways: at +MaxBase no
+	// bids, at −MaxBase no asks.
 	MaxBase decimal.Decimal `json:"max_base"`
 	// MaxSkew is the largest share of the inventory's value one asset may
 	// have: above it the side that adds more of it stops.
@@ -47,6 +49,15 @@ func Defaults(symbol string) Params {
 		Quantity: decimal.RequireFromString("0.002"), MaxBase: decimal.RequireFromString("5"),
 		MaxSkew: decimal.RequireFromString("0.8"), Requote: decimal.RequireFromString("0.0005"),
 	}
+}
+
+// ContractDefaults are Defaults with a position ceiling of 0.5 (in the
+// base asset) either way: the market maker does not hedge, and at 20x a
+// larger position would take most of a modest margin float.
+func ContractDefaults(symbol string) Params {
+	p := Defaults(symbol)
+	p.MaxBase = decimal.RequireFromString("0.5")
+	return p
 }
 
 // Validate checks the parameters.
@@ -107,6 +118,28 @@ func Plan(p Params, pair Pair, ref, base, quote decimal.Decimal) []Quote {
 	if base.GreaterThanOrEqual(p.MaxBase) {
 		bids = false
 	}
+	return levels(p, pair, ref, qty, bids, asks)
+}
+
+// PlanContract returns the quotes of a perpetual contract for its mark
+// price and the market maker's net position (positive long): the same
+// levels as Plan, bids stopped at a long of MaxBase, asks at a short of
+// MaxBase. Margin, not inventory, limits the rest; the contract service
+// refuses what the margin does not cover.
+func PlanContract(p Params, pair Pair, mark, position decimal.Decimal) []Quote {
+	if !mark.IsPositive() {
+		return nil
+	}
+	qty := p.Quantity.Div(pair.LotSize).Floor().Mul(pair.LotSize)
+	if !qty.IsPositive() {
+		return nil
+	}
+	return levels(p, pair, mark, qty, position.LessThan(p.MaxBase), position.GreaterThan(p.MaxBase.Neg()))
+}
+
+// levels lays out the quotes of the sides that trade: bids best first,
+// then asks best first.
+func levels(p Params, pair Pair, ref, qty decimal.Decimal, bids, asks bool) []Quote {
 	one, half := decimal.NewFromInt(1), p.Spread.Div(decimal.NewFromInt(2))
 	var out []Quote
 	for _, side := range []string{Buy, Sell} {

@@ -89,3 +89,38 @@ func TestMovedAndValidate(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanContractLimitsThePositionBothWays(t *testing.T) {
+	p := Defaults("BTC-USDT-PERP")
+	p.Levels, p.MaxBase = 2, d("0.01")
+	perp := Pair{TickSize: d("0.1"), LotSize: d("0.001")}
+	got := keys(PlanContract(p, perp, d("60000"), d("0")))
+	want := []string{"BUY@59940 0.002", "BUY@59880 0.002", "SELL@60060 0.002", "SELL@60120 0.002"}
+	if len(got) != len(want) {
+		t.Fatalf("plan %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("plan %v, want %v", got, want)
+		}
+	}
+	count := func(qs []Quote, side string) int {
+		n := 0
+		for _, q := range qs {
+			if q.Side == side {
+				n++
+			}
+		}
+		return n
+	}
+	// Long 0.01: asks only; short 0.01: bids only.
+	if long := PlanContract(p, perp, d("60000"), d("0.01")); count(long, Buy) != 0 || count(long, Sell) != 2 {
+		t.Fatalf("long: %v", keys(long))
+	}
+	if short := PlanContract(p, perp, d("60000"), d("-0.01")); count(short, Buy) != 2 || count(short, Sell) != 0 {
+		t.Fatalf("short: %v", keys(short))
+	}
+	if none := PlanContract(p, Pair{TickSize: d("0.01"), LotSize: d("0.01")}, d("2400"), d("0")); len(none) != 0 {
+		t.Fatalf("a quantity under the lot size quotes nothing: %v", keys(none))
+	}
+}

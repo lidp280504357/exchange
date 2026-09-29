@@ -1,7 +1,8 @@
 // Package api reaches the platform's services over their internal REST
 // addresses, as the market maker's own account: the same order and ledger
 // paths as any user (§11.10), the user identity in X-User-Id as the
-// gateway would pass it.
+// gateway would pass it. Client quotes spot pairs, Contracts perpetual
+// contracts.
 package api
 
 import (
@@ -196,22 +197,10 @@ func (c *Client) Pair(ctx context.Context, symbol string) (ports.PairInfo, error
 	if ok && time.Since(hit.at) < 10*time.Second {
 		return hit.pair, nil
 	}
-	var p struct {
-		Status     string `json:"status"`
-		BaseAsset  string `json:"base_asset"`
-		QuoteAsset string `json:"quote_asset"`
-		TickSize   string `json:"tick_size"`
-		LotSize    string `json:"lot_size"`
+	info, err := c.instrument(ctx, "/v1/market/pairs/"+url.PathEscape(symbol))
+	if err != nil {
+		return ports.PairInfo{}, fmt.Errorf("pair %s: %w", symbol, err)
 	}
-	if err := c.do(ctx, http.MethodGet, c.Instrument+"/v1/market/pairs/"+url.PathEscape(symbol), nil, &p); err != nil {
-		return ports.PairInfo{}, fmt.Errorf("pair: %w", err)
-	}
-	tick, err1 := decimal.NewFromString(p.TickSize)
-	lot, err2 := decimal.NewFromString(p.LotSize)
-	if err1 != nil || err2 != nil {
-		return ports.PairInfo{}, fmt.Errorf("pair %s: bad steps", symbol)
-	}
-	info := ports.PairInfo{Status: p.Status, Base: p.BaseAsset, Quote: p.QuoteAsset, TickSize: tick, LotSize: lot}
 	c.mu.Lock()
 	if c.pairs == nil {
 		c.pairs = map[string]cachedPair{}
@@ -219,4 +208,25 @@ func (c *Client) Pair(ctx context.Context, symbol string) (ports.PairInfo, error
 	c.pairs[symbol] = cachedPair{pair: info, at: time.Now()}
 	c.mu.Unlock()
 	return info, nil
+}
+
+// instrument reads a trading pair or a contract (the same fields) from
+// instrument-service's public API.
+func (c *Client) instrument(ctx context.Context, path string) (ports.PairInfo, error) {
+	var p struct {
+		Status     string `json:"status"`
+		BaseAsset  string `json:"base_asset"`
+		QuoteAsset string `json:"quote_asset"`
+		TickSize   string `json:"tick_size"`
+		LotSize    string `json:"lot_size"`
+	}
+	if err := c.do(ctx, http.MethodGet, c.Instrument+path, nil, &p); err != nil {
+		return ports.PairInfo{}, err
+	}
+	tick, err1 := decimal.NewFromString(p.TickSize)
+	lot, err2 := decimal.NewFromString(p.LotSize)
+	if err1 != nil || err2 != nil || !tick.IsPositive() || !lot.IsPositive() {
+		return ports.PairInfo{}, errors.New("bad tick or lot size")
+	}
+	return ports.PairInfo{Status: p.Status, Base: p.BaseAsset, Quote: p.QuoteAsset, TickSize: tick, LotSize: lot}, nil
 }

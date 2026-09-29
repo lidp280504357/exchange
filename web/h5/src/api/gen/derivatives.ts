@@ -330,6 +330,8 @@ export interface components {
             realized_pnl: components["schemas"]["Decimal"];
             /** @description Margin and fee the order still has frozen. */
             reserved: components["schemas"]["Decimal"];
+            /** @description A cancel was asked for and the engine has not confirmed it yet. */
+            cancel_requested: boolean;
             cancel_reason: string | null;
             reject_reason: string | null;
             /** Format: date-time */

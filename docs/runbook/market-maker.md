@@ -20,7 +20,27 @@
   - 可用余额不够的档先不挂，撤掉的单子解冻后下一轮补上。
   - 可以用 `MARKET_MAKER_PARAMS_FILE`（`domain.Params` 的 JSON 数组）按交易对覆盖。
 - 撤掉全部报价的情况：开关 `market.maker` 对该交易对关闭、交易对不是 TRADING、参考价超过 5 秒没更新、进程退出。
-- 指标：`mm_quoting{symbol}`（1 在报价）、`mm_orders_placed_total{symbol,side}`、`mm_orders_canceled_total`、`mm_errors_total`、`mm_inventory{asset}`。日志：`market maker quoting`、`market maker pulled its quotes`（带原因）。
+- 指标：`mm_quoting{symbol}`（1 在报价）、`mm_orders_placed_total{symbol,side}`、`mm_orders_canceled_total`、`mm_errors_total`、`mm_inventory{asset}`、`mm_position{symbol}`（合约净仓位）。日志：`market maker quoting`、`market maker pulled its quotes`（带原因）。
+
+## 合约做市
+
+需求 §11.10 最后一条："合约交易对的流动性由同一机器人以标记价为中心报价"。同一个 market-maker 进程、同一个做市账户：
+
+- 按 `MARKET_MAKER_CONTRACTS`（测试服为 BTC-USDT-PERP）逐个合约报价，价格中心是 market-data-service 的标记价（`/v1/market/{symbol}/mark-price`，未降级且 5 秒内更新才算新鲜），档位与点差规则同现货；下单走 derivatives-service 的 `/v1/derivatives/orders`（`X-User-Id` 为做市账户，GTC 限价单），derivatives-service 按 `MARKET_MAKER_USER_IDS` 免手续费。
+- 库存按做市账户在该合约的净仓位算：多头到上限不挂买单、空头到上限不挂卖单；合约默认上限 0.5（基础资产，`domain.ContractDefaults`），其余参数同 §11.10 默认，可以用 `MARKET_MAKER_PARAMS_FILE` 覆盖。做市不对冲，仓位靠用户成交自然变化；保证金用做市账户合约账户里的 USDT（默认 20 倍全仓），保证金不够、超出风险限额或价格偏出价格带的档位本轮跳过、下轮再试。
+- 撤掉该合约全部报价的情况：开关 `market.maker` 不允许该合约、合约不是 TRADING、标记价不新鲜、合约只减仓或 `derivatives.trading` 关闭（下单被拒 `DERIV_REDUCE_ONLY_MODE`、`DERIV_MARK_PRICE_UNAVAILABLE`、`DERIV_DISABLED` 等，之后每轮试一次，恢复后重新报价）、进程退出。
+- "无足够流动性的合约不得开放开仓"由运维保证：只在做市报价的合约上开放交易（合约状态与开关）；代码不强制，端到端脚本 `derivatives.sh` 就在没有做市的 ETH-USDT-PERP 上由两个用户对敲。
+
+测试服一次性设置（在上面现货设置之后）：
+
+```bash
+# 1. 从做市账户的现货转 20000 USDT 到合约账户（在做市容器里以做市账户调用账本内网接口）
+ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T market-maker sh -c '"'"'wget -q -O - --header "X-User-Id: $MARKET_MAKER_USER_ID" --header "Content-Type: application/json" --header "Idempotency-Key: mm-futures-1" --post-data "{\"asset\":\"USDT\",\"amount\":\"20000\",\"from_account_type\":\"SPOT\",\"to_account_type\":\"FUTURES\"}" http://ledger-service:8085/v1/account/transfers'"'"''
+# 2. 开关允许合约（保留原来的 BTC-USDT）
+exchangectl flags set market.maker --on --allow-symbols BTC-USDT,BTC-USDT-PERP --reason "quote BTC-USDT and BTC-USDT-PERP"
+```
+
+之后 `mm_quoting{symbol="BTC-USDT-PERP"}` 为 1，H5 合约交易页的盘口有双边报价。
 
 ## 测试服设置（一次性）
 

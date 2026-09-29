@@ -330,14 +330,17 @@ services:
     environment:
       <<: *base-env
       MARKET_MAKER_SYMBOLS: BTC-USDT
+      MARKET_MAKER_CONTRACTS: BTC-USDT-PERP
       TRADING_SERVICE_URL: http://spot-trading-service:8088
       LEDGER_SERVICE_URL: http://ledger-service:8085
       MARKET_DATA_SERVICE_URL: http://market-data-service:8090
       INSTRUMENT_SERVICE_URL: http://instrument-service:8084
+      DERIVATIVES_SERVICE_URL: http://derivatives-service:8095
     depends_on:
       postgres: {condition: service_healthy}
       spot-trading-service: {condition: service_started}
       market-data-service: {condition: service_started}
+      derivatives-service: {condition: service_started}
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9091/readyz"]

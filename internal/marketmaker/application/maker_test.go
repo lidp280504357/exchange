@@ -22,6 +22,8 @@ type book struct {
 	next      int
 	placed    int
 	cancelAll int
+	// paused makes Place answer ports.ErrPaused.
+	paused bool
 }
 
 func (b *book) Open(context.Context, string) ([]ports.Order, error) {
@@ -34,6 +36,9 @@ func (b *book) Open(context.Context, string) ([]ports.Order, error) {
 }
 
 func (b *book) Place(_ context.Context, _ string, q domain.Quote) error {
+	if b.paused {
+		return ports.ErrPaused
+	}
 	b.next++
 	b.placed++
 	id := fmt.Sprintf("o%03d", b.next)
@@ -71,10 +76,25 @@ func (p *pairs) Pair(context.Context, string) (ports.PairInfo, error) {
 	return ports.PairInfo{Status: p.status, Base: "BTC", Quote: "USDT", TickSize: d("0.01"), LotSize: d("0.0001")}, nil
 }
 
+type contracts struct{ status string }
+
+func (c *contracts) Pair(context.Context, string) (ports.PairInfo, error) {
+	return ports.PairInfo{Status: c.status, Base: "BTC", Quote: "USDT", TickSize: d("0.1"), LotSize: d("0.001")}, nil
+}
+
+type position struct{ net decimal.Decimal }
+
+func (p *position) Net(context.Context, string) (decimal.Decimal, error) { return p.net, nil }
+
 type switchFlag struct{ on bool }
 
 func (f *switchFlag) Enabled(key string, s flags.Subject) bool {
-	return f.on && key == flags.KeyMarketMaker && s.Symbol == "BTC-USDT"
+	return f.on && key == flags.KeyMarketMaker && (s.Symbol == "BTC-USDT" || s.Symbol == "BTC-USDT-PERP")
+}
+
+func spotOnly(p domain.Params, b *book, w wallet, ref *reference, pr *pairs, fl *switchFlag) *Maker {
+	return New([]domain.Params{p}, Spot{Orders: b, Balances: w, Refs: ref, Pairs: pr}, nil, Contracts{}, fl,
+		slog.New(slog.DiscardHandler), prometheus.NewRegistry())
 }
 
 func TestMakerKeepsThePairQuoted(t *testing.T) {
@@ -85,7 +105,7 @@ func TestMakerKeepsThePairQuoted(t *testing.T) {
 	fl := &switchFlag{}
 	w := wallet{"BTC": {Available: d("1")}, "USDT": {Available: d("80000")}}
 	p := domain.Defaults("BTC-USDT")
-	m := New([]domain.Params{p}, b, w, ref, pr, fl, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	m := spotOnly(p, b, w, ref, pr, fl)
 
 	step := func() {
 		t.Helper()
@@ -153,12 +173,80 @@ func TestMakerQuotesOnlyWhatItCanFund(t *testing.T) {
 	// 100 USDT buys one 0.002 BTC level at 40000; no BTC to sell.
 	w := wallet{"BTC": {}, "USDT": {Available: d("100")}}
 	p := domain.Defaults("BTC-USDT")
-	m := New([]domain.Params{p}, b, w, &reference{price: d("40000"), fresh: true}, &pairs{status: "TRADING"}, &switchFlag{on: true},
-		slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	m := spotOnly(p, b, w, &reference{price: d("40000"), fresh: true}, &pairs{status: "TRADING"}, &switchFlag{on: true})
 	if err := m.Step(context.Background(), p); err != nil {
 		t.Fatal(err)
 	}
 	if len(b.orders) != 1 {
 		t.Fatalf("%d orders, want the one level the funds cover", len(b.orders))
+	}
+}
+
+func TestMakerQuotesAContractAroundItsMarkPrice(t *testing.T) {
+	ctx := context.Background()
+	b := &book{orders: map[string]ports.Order{}}
+	mark := &reference{price: d("60000"), fresh: true}
+	spec := &contracts{status: "TRADING"}
+	pos := &position{}
+	p := domain.Defaults("BTC-USDT-PERP")
+	p.MaxBase = d("0.01")
+	m := New(nil, Spot{}, []domain.Params{p}, Contracts{Orders: b, Positions: pos, Marks: mark, Specs: spec}, &switchFlag{on: true},
+		slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	step := func() {
+		t.Helper()
+		if err := m.StepContract(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	step()
+	if len(b.orders) != 10 {
+		t.Fatalf("flat: %d quotes, want 5 a side", len(b.orders))
+	}
+	for _, o := range b.orders {
+		if o.Side == domain.Buy && o.Price.GreaterThanOrEqual(d("60000")) || o.Side == domain.Sell && o.Price.LessThanOrEqual(d("60000")) {
+			t.Fatalf("a quote on the wrong side of the mark: %+v", o)
+		}
+	}
+	// Long at the ceiling: a requote keeps only the asks.
+	pos.net = d("0.01")
+	mark.price = d("60100")
+	step()
+	for _, o := range b.orders {
+		if o.Side == domain.Buy {
+			t.Fatalf("bids at the long ceiling: %+v", o)
+		}
+	}
+	if len(b.orders) != 5 {
+		t.Fatalf("long: %d quotes", len(b.orders))
+	}
+	// Under reduce-only the contract service refuses opening orders: every
+	// quote comes off, without an error, until it takes them again.
+	pos.net = decimal.Zero
+	mark.price = d("60200")
+	b.paused = true
+	step()
+	if len(b.orders) != 0 || b.cancelAll != 1 {
+		t.Fatalf("paused: %d quotes, %d pulls", len(b.orders), b.cancelAll)
+	}
+	step()
+	if b.cancelAll != 1 {
+		t.Fatal("pulled again for the same reason")
+	}
+	b.paused = false
+	step()
+	if len(b.orders) != 10 {
+		t.Fatalf("resumed: %d quotes", len(b.orders))
+	}
+	// A stale mark or a halted contract pulls the quotes too.
+	mark.fresh = false
+	step()
+	if len(b.orders) != 0 || b.cancelAll != 2 {
+		t.Fatalf("stale mark: %d quotes, %d pulls", len(b.orders), b.cancelAll)
+	}
+	mark.fresh = true
+	spec.status = "HALT"
+	step()
+	if b.cancelAll != 3 {
+		t.Fatalf("halted: %d pulls", b.cancelAll)
 	}
 }

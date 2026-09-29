@@ -258,10 +258,13 @@ type orderJSON struct {
 	Fee            string  `json:"fee"`
 	RealizedPnL    string  `json:"realized_pnl"`
 	Reserved       string  `json:"reserved"`
-	CancelReason   *string `json:"cancel_reason"`
-	RejectReason   *string `json:"reject_reason"`
-	CreatedAt      string  `json:"created_at"`
-	UpdatedAt      string  `json:"updated_at"`
+	// CancelRequested is set once a cancel is asked for and the engine has
+	// not confirmed it yet.
+	CancelRequested bool    `json:"cancel_requested"`
+	CancelReason    *string `json:"cancel_reason"`
+	RejectReason    *string `json:"reject_reason"`
+	CreatedAt       string  `json:"created_at"`
+	UpdatedAt       string  `json:"updated_at"`
 }
 
 func text(s string) *string {
@@ -277,7 +280,8 @@ func toOrderJSON(o domain.Order) orderJSON {
 		Type: string(o.Type), TimeInForce: string(o.TimeInForce), Price: o.Price.String(), Quantity: o.Qty.String(),
 		ReduceOnly: o.ReduceOnly, Leverage: o.Leverage, MarginMode: string(o.MarginMode), Status: string(o.Status),
 		FilledQuantity: o.Filled.String(), Fee: o.Fee.String(), RealizedPnL: o.RealizedPnL.String(), Reserved: o.Unreleased().String(),
-		CancelReason: text(o.CancelReason), RejectReason: text(o.RejectReason), CreatedAt: stamp(o.CreatedAt), UpdatedAt: stamp(o.UpdatedAt),
+		CancelRequested: o.CancelRequested, CancelReason: text(o.CancelReason), RejectReason: text(o.RejectReason), CreatedAt: stamp(o.CreatedAt),
+		UpdatedAt: stamp(o.UpdatedAt),
 	}
 	if o.Filled.IsPositive() {
 		avg := o.FilledQuote.DivRound(o.Filled, 8).String()

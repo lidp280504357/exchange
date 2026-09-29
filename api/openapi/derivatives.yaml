@@ -611,8 +611,8 @@ components:
     ContractOrder:
       type: object
       required: [order_id, client_order_id, symbol, side, position_side, type, time_in_force, price, quantity, reduce_only,
-        leverage, margin_mode, status, filled_quantity, average_price, fee, realized_pnl, reserved, cancel_reason,
-        reject_reason, created_at, updated_at]
+        leverage, margin_mode, status, filled_quantity, average_price, fee, realized_pnl, reserved, cancel_requested,
+        cancel_reason, reject_reason, created_at, updated_at]
       properties:
         order_id:
           type: string
@@ -659,6 +659,9 @@ components:
         reserved:
           description: Margin and fee the order still has frozen.
           $ref: './market.yaml#/components/schemas/Decimal'
+        cancel_requested:
+          type: boolean
+          description: A cancel was asked for and the engine has not confirmed it yet.
         cancel_reason:
           type: [string, 'null']
         reject_reason:
