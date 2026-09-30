@@ -51,6 +51,7 @@ export * from "./data/TimeText";
 export * from "./data/CountUp";
 export * from "./data/Marquee";
 export * from "./data/DepthBars";
+export * from "./data/QrCode";
 
 // Trading.
 export * from "./trading/orderMath";
@@ -75,3 +76,4 @@ export * from "./charts/numbers";
 
 // Forms.
 export * from "./form/Form";
+export * from "./auth/Turnstile";

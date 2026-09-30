@@ -43,7 +43,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            type: "WELCOME" | "NEW_DEVICE_LOGIN" | "IDENTITY_CHANGED" | "PASSWORD_CHANGED" | "ACCOUNT_LOCKED" | "STATUS_CHANGED";
+            type: "WELCOME" | "NEW_DEVICE_LOGIN" | "IDENTITY_CHANGED" | "PASSWORD_CHANGED" | "ACCOUNT_LOCKED" | "STATUS_CHANGED" | "TOTP_CHANGED" | "DEPOSIT_CREDITED" | "DEPOSIT_UNCLAIMED" | "WITHDRAWAL_REQUESTED" | "WITHDRAWAL_COMPLETED" | "WITHDRAWAL_REJECTED" | "WITHDRAWAL_CANCELED" | "WITHDRAWAL_FAILED";
             title: string;
             /** @description Rendered in the user's language and time zone. */
             body: string;

@@ -124,3 +124,6 @@ export function Dialog({
     </RDialog.Root>
   );
 }
+
+/** The Radix Dialog parts, for a modal with its own layout (the ⌘K search palette). */
+export { Dialog as DialogPrimitive } from "radix-ui";

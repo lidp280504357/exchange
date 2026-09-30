@@ -226,3 +226,8 @@ export function setServerError<T extends FieldValues>(
   else form.setError("root.server", { type: "server", message: m.message });
   return m;
 }
+
+// The apps write their schemas and watch fields with the same zod and
+// react-hook-form the design system uses (one copy of each, no extra deps).
+export { z } from "zod";
+export { Controller, useFieldArray, useWatch, type UseFormReturn } from "react-hook-form";

@@ -1,10 +1,14 @@
-import { DEFAULT_CONTRACT, DEFAULT_SYMBOL, routes, selectSignedIn, setLocale, signOut, useSession, useSettings } from "@exchange/core";
+import {
+  DEFAULT_CONTRACT, DEFAULT_SYMBOL, isContract, routes, selectSignedIn, setLocale, signOut, useContracts, useSession, useSettings, useTerminalPrefs,
+} from "@exchange/core";
+import { useUnreadNotifications } from "@exchange/core/user/notifications";
 import { Button, cn } from "@exchange/ui";
-import { Bell, ChevronDown, Globe, Search, UserRound } from "lucide-react";
+import { Bell, ChevronDown, Globe, UserRound } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, NavLink } from "react-router";
 import { Logo } from "./Logo";
+import { SearchPalette } from "./SearchPalette";
 
 /**
  * TopNav: the 56 px bar fixed on every page (design §6.1) — markets, spot,
@@ -14,6 +18,10 @@ import { Logo } from "./Logo";
 export function TopNav() {
   const { t } = useTranslation();
   const signedIn = useSession(selectSignedIn);
+  const recent = useTerminalPrefs((s) => s.recent);
+  const recentSpot = recent.filter((s) => !isContract(s)).slice(0, 5);
+  const recentFutures = recent.filter(isContract);
+  const contracts = useContracts();
   return (
     <header className="sticky top-0 z-[var(--z-sticky)] h-14 border-b border-line-1 bg-bg-0/95 backdrop-blur">
       <div className="mx-auto flex h-full max-w-[1920px] items-center gap-6 px-6">
@@ -22,14 +30,22 @@ export function TopNav() {
         </Link>
         <nav className="flex h-full items-center gap-1 text-base">
           <Item to={routes.markets}>{t("nav.markets")}</Item>
-          <Menu label={t("nav.spot")} to={routes.trade(DEFAULT_SYMBOL)}>
-            <MenuLink to={routes.trade("BTC-USDT")}>BTC/USDT</MenuLink>
-            <MenuLink to={routes.trade("ETH-USDT")}>ETH/USDT</MenuLink>
+          <Menu label={t("nav.spot")} to={routes.trade(recentSpot[0] ?? DEFAULT_SYMBOL)}>
+            <p className="px-4 pb-1 pt-2 text-xs text-fg-3">{t("nav.recent")}</p>
+            {(recentSpot.length > 0 ? recentSpot : [DEFAULT_SYMBOL]).map((s) => (
+              <MenuLink key={s} to={routes.trade(s)}>
+                {s.replace("-", "/")}
+              </MenuLink>
+            ))}
             <MenuLink to={routes.markets}>{t("nav.markets")} →</MenuLink>
           </Menu>
-          <Menu label={t("nav.futures")} to={routes.futures(DEFAULT_CONTRACT)}>
-            <MenuLink to={routes.futures("BTC-USDT-PERP")}>BTCUSDT {t("market.futures")}</MenuLink>
-            <MenuLink to={routes.futures("ETH-USDT-PERP")}>ETHUSDT {t("market.futures")}</MenuLink>
+          <Menu label={t("nav.futures")} to={routes.futures(recentFutures[0] ?? DEFAULT_CONTRACT)}>
+            {(contracts.data?.contracts ?? []).map((c) => (
+              <MenuLink key={c.symbol} to={routes.futures(c.symbol)}>
+                {c.base_asset}
+                {c.quote_asset} {t("pc.perpetual")}
+              </MenuLink>
+            ))}
           </Menu>
           {signedIn && (
             <Menu label={t("nav.assets")} to={routes.assets}>
@@ -43,19 +59,10 @@ export function TopNav() {
           <Item to={routes.announcements}>{t("nav.announcements")}</Item>
         </nav>
         <div className="ml-auto flex items-center gap-2">
-          <button
-            type="button"
-            className="flex h-9 w-56 items-center gap-2 rounded-2 bg-bg-2 px-3 text-sm text-fg-3 transition-colors hover:text-fg-2"
-          >
-            <Search size={16} />
-            <span className="flex-1 text-left">{t("nav.search")}</span>
-            <kbd className="rounded-1 border border-line-2 px-1.5 text-xs">⌘K</kbd>
-          </button>
+          <SearchPalette />
           {signedIn ? (
             <>
-              <IconLink to={routes.notifications} label={t("nav.notifications")}>
-                <Bell size={18} />
-              </IconLink>
+              <NotificationBell />
               <Menu label={<UserRound size={18} />} to={routes.security} align="right">
                 <MenuLink to={routes.security}>{t("nav.security")}</MenuLink>
                 <MenuLink to={routes.sessions}>{t("nav.sessions")}</MenuLink>
@@ -129,10 +136,22 @@ function MenuLink({ to, children }: { to: string; children: ReactNode }) {
   );
 }
 
-function IconLink({ to, label, children }: { to: string; label: string; children: ReactNode }) {
+// The bell shows the unread count; notification pushes refresh it.
+function NotificationBell() {
+  const { t } = useTranslation();
+  const unread = useUnreadNotifications();
   return (
-    <Link to={to} aria-label={label} className="grid size-9 place-items-center rounded-2 text-fg-2 transition-colors hover:bg-bg-2 hover:text-fg-1">
-      {children}
+    <Link
+      to={routes.notifications}
+      aria-label={unread > 0 ? `${t("nav.notifications")} (${unread})` : t("nav.notifications")}
+      className="relative grid size-9 place-items-center rounded-2 text-fg-2 transition-colors hover:bg-bg-2 hover:text-fg-1"
+    >
+      <Bell size={18} />
+      {unread > 0 && (
+        <span className="absolute right-1 top-1 grid h-4 min-w-4 animate-pop-in place-items-center rounded-full bg-danger px-1 text-[10px] font-semibold leading-none text-white">
+          {unread > 99 ? "99+" : unread}
+        </span>
+      )}
     </Link>
   );
 }

@@ -5,31 +5,29 @@ import { Navigate, Route, Routes } from "react-router";
 import { AppShell } from "./layout/AppShell";
 import { AuthShell } from "./layout/AuthShell";
 import { PageSkeleton } from "./layout/PageSkeleton";
+import { TerminalShell } from "./layout/TerminalShell";
+import { accountRoutes } from "./pages/account/routes";
+import { assetRoutes } from "./pages/assets/routes";
+import { authRoutes } from "./pages/auth/routes";
+import { contentRoutes } from "./pages/content/routes";
+import { marketRoutes } from "./pages/markets/routes";
+import { tradeRoutes } from "./pages/trade/routes";
+import { RequireAuth, type PageRoute } from "./routing";
 
 // Every page is its own chunk (design §4.4): the first screen carries no
-// chart library, and moving between pages keeps the WebSocket open.
-const Home = lazy(() => import("./pages/Home"));
-const Soon = lazy(() => import("./pages/Soon"));
+// chart library, and moving between pages keeps the WebSocket open. The
+// areas list their pages in pages/<area>/routes.tsx.
 const NotFound = lazy(() => import("./pages/NotFound"));
+// The toaster (and the animation library it uses) loads after the first
+// screen; a toast raised before it arrives waits in the store.
+const Toaster = lazy(() => import("@exchange/ui/components/Toast").then((m) => ({ default: m.Toaster })));
 
-/** The pages still to come in B2 show where they will be and link the previous site. */
-const soon: { path: string; title: string; legacy: string }[] = [
-  { path: routes.markets, title: "nav.markets", legacy: "/markets" },
-  { path: routes.trade(), title: "nav.spot", legacy: "/trade/:symbol" },
-  { path: routes.futures(), title: "nav.futures", legacy: "/futures/:symbol" },
-  { path: routes.coin(), title: "nav.markets", legacy: "/markets" },
-  { path: routes.assets, title: "nav.overview", legacy: "/" },
-  { path: routes.deposit, title: "nav.deposit", legacy: "/deposit" },
-  { path: routes.withdraw, title: "nav.withdraw", legacy: "/withdraw" },
-  { path: routes.transfer, title: "nav.transfer", legacy: "/transfer" },
-  { path: routes.history, title: "nav.history", legacy: "/" },
-  { path: routes.security, title: "nav.security", legacy: "/account" },
-  { path: routes.settings, title: "nav.settings", legacy: "/profile" },
-  { path: routes.sessions, title: "nav.sessions", legacy: "/account" },
-  { path: routes.notifications, title: "nav.notifications", legacy: "/notifications" },
-  { path: routes.announcements, title: "nav.announcements", legacy: "/" },
-  { path: routes.help, title: "nav.help", legacy: "/" },
-];
+const shellRoutes = [...marketRoutes, ...assetRoutes, ...accountRoutes, ...contentRoutes];
+
+function route(r: PageRoute) {
+  const element = r.auth ? <RequireAuth>{r.element}</RequireAuth> : r.element;
+  return r.path === routes.home ? <Route key="index" index element={element} /> : <Route key={r.path} path={r.path} element={element} />;
+}
 
 export function App({ queryClient }: { queryClient: QueryClient }) {
   usePrivateSync(queryClient);
@@ -37,20 +35,17 @@ export function App({ queryClient }: { queryClient: QueryClient }) {
     <Suspense fallback={<PageSkeleton />}>
       <Routes>
         <Route element={<AppShell />}>
-          <Route index element={<Home />} />
+          {shellRoutes.map(route)}
           <Route path="/trade" element={<Navigate to={routes.trade(DEFAULT_SYMBOL)} replace />} />
           <Route path="/futures" element={<Navigate to={routes.futures(DEFAULT_CONTRACT)} replace />} />
-          {soon.map((p) => (
-            <Route key={p.path} path={p.path} element={<Soon title={p.title} legacy={p.legacy} />} />
-          ))}
           <Route path="*" element={<NotFound />} />
         </Route>
-        <Route element={<AuthShell />}>
-          <Route path={routes.login} element={<Soon title="nav.login" legacy="/login" bare />} />
-          <Route path={routes.register} element={<Soon title="nav.register" legacy="/register" bare />} />
-          <Route path={routes.reset} element={<Soon title="nav.login" legacy="/reset" bare />} />
-        </Route>
+        <Route element={<TerminalShell />}>{tradeRoutes.map(route)}</Route>
+        <Route element={<AuthShell />}>{authRoutes.map(route)}</Route>
       </Routes>
+      <Suspense fallback={null}>
+        <Toaster />
+      </Suspense>
     </Suspense>
   );
 }

@@ -44,6 +44,18 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+/**
+ * registerMessages adds a page's own strings when its chunk loads (both
+ * languages, merged deeply into the shared ones), so the first screen does
+ * not carry every page's text.
+ */
+export function registerMessages(messages: { "zh-CN"?: Record<string, unknown>; en?: Record<string, unknown> }): void {
+  for (const lng of ["zh-CN", "en"] as const) {
+    const m = messages[lng];
+    if (m) i18n.addResourceBundle(lng, "translation", m, true, true);
+  }
+}
+
 /** setLocale switches the language and remembers it. */
 export function setLocale(locale: Locale): void {
   useSettings.getState().set({ locale });

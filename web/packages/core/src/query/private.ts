@@ -75,6 +75,40 @@ export function applyFill(page: FillsPage | undefined, p: FillData, symbol: stri
   return { ...page, items: [p as unknown as FillsPage["items"][number], ...page.items] };
 }
 
+/** isContract tells a perpetual contract (BTC-USDT-PERP) from a spot pair. */
+export function isContract(symbol: string | undefined): boolean {
+  return Boolean(symbol?.endsWith("-PERP"));
+}
+
+type Infinite<T> = { pages: T[]; pageParams: unknown[] };
+
+function isInfinite<T>(d: unknown): d is Infinite<T> {
+  return typeof d === "object" && d !== null && Array.isArray((d as Infinite<T>).pages);
+}
+
+/**
+ * applyOrderData applies an order push to a cached query of either shape:
+ * one page, or the pages of an infinite list (updated where the order is,
+ * a new order joins the first page).
+ */
+export function applyOrderData(data: unknown, p: OrderData, filter: string, symbol: string): unknown {
+  if (!isInfinite<OrdersPage>(data)) return applyOrder(data as OrdersPage | undefined, p, filter, symbol);
+  if (data.pages.length === 0) return data;
+  const at = Math.max(0, data.pages.findIndex((pg) => pg.items.some((o) => o.order_id === p.order_id)));
+  const pages = [...data.pages];
+  pages[at] = applyOrder(pages[at], p, filter, symbol)!;
+  return { ...data, pages };
+}
+
+/** applyFillData prepends a fill push to a cached page or to the first page of an infinite list. */
+export function applyFillData(data: unknown, p: FillData, symbol: string): unknown {
+  if (!isInfinite<FillsPage>(data)) return applyFill(data as FillsPage | undefined, p, symbol);
+  if (data.pages.length === 0 || data.pages.some((pg) => pg.items.some((f) => f.trade_id === p.trade_id && f.order_id === p.order_id))) return data;
+  const pages = [...data.pages];
+  pages[0] = applyFill(pages[0], p, symbol)!;
+  return { ...data, pages };
+}
+
 /** Debounced invalidation: many pushes, one refetch per key. */
 class Invalidator {
   private pending = new Map<string, QueryKey>();
@@ -111,16 +145,19 @@ export function bindPrivate(ws: WsClient, qc: QueryClient): () => void {
     }),
     ws.subscribe("orders", (m) => {
       const p = (m as PrivatePush<OrderData>).data;
-      for (const [key, page] of qc.getQueriesData<OrdersPage>({ queryKey: qk.allOrders })) {
+      // Contract orders live under the derivatives queries, which reload.
+      if (isContract(p.symbol)) return later.add(qk.derivatives);
+      for (const [key, data] of qc.getQueriesData({ queryKey: qk.allOrders })) {
         const [, symbol = "", filter = ""] = key as [string, string, string];
-        qc.setQueryData(key, applyOrder(page, p, filter, symbol));
+        qc.setQueryData(key, applyOrderData(data, p, filter, symbol));
       }
     }),
     ws.subscribe("fills", (m) => {
       const p = (m as PrivatePush<FillData>).data;
-      for (const [key, page] of qc.getQueriesData<FillsPage>({ queryKey: qk.allFills })) {
+      if (isContract(p.symbol)) return later.add(qk.derivatives);
+      for (const [key, data] of qc.getQueriesData({ queryKey: qk.allFills })) {
         const [, symbol = ""] = key as [string, string];
-        qc.setQueryData(key, applyFill(page, p, symbol));
+        qc.setQueryData(key, applyFillData(data, p, symbol));
       }
     }),
     ws.subscribe("notifications", () => later.add(qk.notifications)),

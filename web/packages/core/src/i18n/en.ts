@@ -51,6 +51,7 @@ export const en = {
     REALIZED_PNL: "Realized PnL", FUNDING_PAYMENT: "Funding", LIQUIDATION_SETTLE: "Liquidation", ADL_SETTLE: "Auto-deleveraging",
     INSURANCE_CONTRIBUTION: "Insurance fund", ONE_WAY: "One-way", HEDGE: "Hedge", CROSS: "Cross", ISOLATED: "Isolated",
     LONG: "Long", SHORT: "Short", BOTH: "One-way", TAKE_PROFIT: "Take profit", STOP_LOSS: "Stop loss", TRIGGERED: "Triggered",
+    DETECTED: "Detected", CREDITED: "Credited", ORPHANED: "Reorganized", COMPLETED: "Completed", CHAIN: "On chain", INTERNAL: "Internal",
   },
   errors: {
     AUTH_PASSWORD_INVALID: "Wrong account or password", AUTH_PASSWORD_WEAK: "Too weak: 10+ characters, not common, no runs or repeats, no email in it",
@@ -58,7 +59,8 @@ export const en = {
     AUTH_OTP_INVALID: "Wrong code", AUTH_OTP_EXPIRED: "The code expired, request a new one", AUTH_OTP_ATTEMPTS_EXCEEDED: "Too many wrong codes, request a new one",
     AUTH_OTP_RESEND_TOO_SOON: "Please wait before requesting another code", AUTH_TICKET_INVALID: "The verification expired, request a new code",
     AUTH_CHANNEL_UNAVAILABLE: "SMS is unavailable, use email", AUTH_TERMS_OUTDATED: "The terms changed: reload and accept them again",
-    AUTH_IDENTITY_TAKEN: "That email or phone is taken", AUTH_STEP_UP_REQUIRED: "Complete the security check first", AUTH_SESSION_REVOKED: "Signed out, please sign in again",
+    AUTH_IDENTITY_TAKEN: "That email or phone is taken", AUTH_IDENTITY_KIND_BOUND: "One of that kind is bound already: change it instead",
+    NOTIFY_PROVIDER_UNAVAILABLE: "Codes cannot be sent right now, please try again later", AUTH_STEP_UP_REQUIRED: "Complete the security check first", AUTH_SESSION_REVOKED: "Signed out, please sign in again",
     AUTH_LOGIN_CHALLENGE_INVALID: "The sign-in check expired, sign in again", USER_CLOSED: "The account is closed", USER_FROZEN: "The account is frozen and read-only",
     USER_RISK_REVIEW: "The account is under review", USER_NOT_ELIGIBLE: "Not available yet", USER_REGION_NOT_ALLOWED: "Not available in your region",
     LEDGER_INSUFFICIENT_BALANCE: "Insufficient available balance", LEDGER_AMOUNT_PRECISION: "Too many decimals for this asset", COMMON_RATE_LIMITED: "Too many requests, slow down",

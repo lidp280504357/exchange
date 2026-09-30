@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 
 // A shared clock per period: every "3 minutes ago" on a page follows one
 // interval instead of one timer per instance, and the interval stops when
@@ -42,11 +42,14 @@ export function clockNow(period: number): number {
   return clockOf(period).now;
 }
 
-/** useNow re-renders the caller once per `period` (default 30 s). */
+/**
+ * useNow re-renders the caller once per `period` (default 30 s). The
+ * subscribe function is stable per period: a new one each render would
+ * resubscribe every time, and a clock that restarts on subscribe changes
+ * its snapshot, which re-renders again, without end.
+ */
 export function useNow(period = 30_000): number {
-  return useSyncExternalStore(
-    (fn) => subscribeClock(period, fn),
-    () => clockNow(period),
-    () => clockNow(period),
-  );
+  const subscribe = useCallback((fn: () => void) => subscribeClock(period, fn), [period]);
+  const snapshot = useCallback(() => clockNow(period), [period]);
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }

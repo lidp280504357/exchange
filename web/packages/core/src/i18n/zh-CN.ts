@@ -48,6 +48,7 @@ export const zhCN = {
     REALIZED_PNL: "已实现盈亏", FUNDING_PAYMENT: "资金费", LIQUIDATION_SETTLE: "强平结算", ADL_SETTLE: "自动减仓",
     INSURANCE_CONTRIBUTION: "保险基金", ONE_WAY: "单向持仓", HEDGE: "双向持仓", CROSS: "全仓", ISOLATED: "逐仓",
     LONG: "多", SHORT: "空", BOTH: "单向", TAKE_PROFIT: "止盈", STOP_LOSS: "止损", TRIGGERED: "已触发",
+    DETECTED: "已检测", CREDITED: "已到账", ORPHANED: "已回滚", COMPLETED: "成功", CHAIN: "链上", INTERNAL: "站内",
   },
   errors: {
     AUTH_PASSWORD_INVALID: "账户或密码不正确", AUTH_PASSWORD_WEAK: "密码太弱：至少 10 位，避免常见密码、连续或重复字符，不要包含邮箱",
@@ -55,7 +56,8 @@ export const zhCN = {
     AUTH_OTP_INVALID: "验证码不正确", AUTH_OTP_EXPIRED: "验证码已过期，请重新获取", AUTH_OTP_ATTEMPTS_EXCEEDED: "错误次数过多，请重新获取验证码",
     AUTH_OTP_RESEND_TOO_SOON: "发送太频繁，请稍后再试", AUTH_TICKET_INVALID: "验证已失效，请重新获取验证码",
     AUTH_CHANNEL_UNAVAILABLE: "短信暂不可用，请用邮箱", AUTH_TERMS_OUTDATED: "条款已更新，请刷新页面后重新同意",
-    AUTH_IDENTITY_TAKEN: "该邮箱或手机号已被使用", AUTH_STEP_UP_REQUIRED: "需要先完成安全验证", AUTH_SESSION_REVOKED: "登录已失效，请重新登录",
+    AUTH_IDENTITY_TAKEN: "该邮箱或手机号已被使用", AUTH_IDENTITY_KIND_BOUND: "已绑定同类身份，请使用换绑",
+    NOTIFY_PROVIDER_UNAVAILABLE: "验证码发送服务暂时不可用，请稍后再试", AUTH_STEP_UP_REQUIRED: "需要先完成安全验证", AUTH_SESSION_REVOKED: "登录已失效，请重新登录",
     AUTH_LOGIN_CHALLENGE_INVALID: "登录验证已失效，请重新登录", USER_CLOSED: "账户已注销", USER_FROZEN: "账户已冻结，只能查看",
     USER_RISK_REVIEW: "账户风控审核中，暂不可用", USER_NOT_ELIGIBLE: "该功能暂未开放", USER_REGION_NOT_ALLOWED: "所在地区暂不支持该功能",
     LEDGER_INSUFFICIENT_BALANCE: "可用余额不足", LEDGER_AMOUNT_PRECISION: "数量的小数位超出资产精度", COMMON_RATE_LIMITED: "请求太频繁，请稍后再试",

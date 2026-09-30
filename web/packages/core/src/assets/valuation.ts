@@ -1,0 +1,147 @@
+import * as dec from "../format/decimal";
+
+// Valuation of balances in USDT (design §6.2 assets overview), at
+// reference prices: USDT counts 1; any other asset goes through its
+// <ASSET>-USDT pair's last price, or through BTC (<ASSET>-BTC ×
+// BTC-USDT). An asset without a price is valued at 0 and listed, so the
+// page can say so. Everything is exact decimal arithmetic; only the
+// shares of the distribution ring become floats, for drawing.
+
+export const VALUATION_QUOTE = "USDT";
+export const VALUATION_BRIDGE = "BTC";
+/** Rows valued below this (USDT) are "small" for the hide-small switch. */
+export const SMALL_VALUE = "1";
+
+export type TickerLike = { last: string | null };
+export type Tickers = ReadonlyMap<string, TickerLike>;
+
+function lastPrice(tickers: Tickers, symbol: string): string | null {
+  const v = tickers.get(symbol)?.last;
+  return v && dec.isDecimal(v) && dec.sign(v) > 0 ? v : null;
+}
+
+/** referencePrice is an asset's price in USDT, or null when no pair prices it. */
+export function referencePrice(asset: string, tickers: Tickers): string | null {
+  if (asset === VALUATION_QUOTE) return "1";
+  const direct = lastPrice(tickers, `${asset}-${VALUATION_QUOTE}`);
+  if (direct) return direct;
+  if (asset === VALUATION_BRIDGE) return null;
+  const cross = lastPrice(tickers, `${asset}-${VALUATION_BRIDGE}`);
+  const bridge = lastPrice(tickers, `${VALUATION_BRIDGE}-${VALUATION_QUOTE}`);
+  return cross && bridge ? dec.mul(cross, bridge) : null;
+}
+
+export type BalanceLike = { account_type: string; asset: string; available: string; frozen: string; total: string };
+
+export type AccountView = "ALL" | "SPOT" | "FUTURES";
+
+export type AssetRow = {
+  asset: string;
+  available: string;
+  frozen: string;
+  total: string;
+  /** The USDT price used; null when none. */
+  price: string | null;
+  /** total × price; null without a price (counted as 0). */
+  value: string | null;
+};
+
+export type Portfolio = {
+  /** Every account, in USDT. */
+  total: string;
+  spot: string;
+  futures: string;
+  /** Assets holding funds that have no price (valued at 0). */
+  unpriced: string[];
+  rows: Record<AccountView, AssetRow[]>;
+};
+
+function row(asset: string, available: string, frozen: string, price: string | null): AssetRow {
+  const total = dec.add(available, frozen);
+  return { asset, available, frozen, total, price, value: price === null ? null : dec.mul(total, price) };
+}
+
+/** byValue sorts rows by value (priced first), then by amount and code. */
+function byValue(a: AssetRow, b: AssetRow): number {
+  if (a.value !== null && b.value !== null) {
+    const c = dec.cmp(b.value, a.value);
+    if (c !== 0) return c;
+  } else if (a.value !== b.value) {
+    return a.value === null ? 1 : -1;
+  }
+  const t = dec.cmp(b.total, a.total);
+  return t !== 0 ? t : a.asset < b.asset ? -1 : a.asset > b.asset ? 1 : 0;
+}
+
+/**
+ * valuePortfolio values every balance at its reference price: the rows of
+ * each account (and of both merged per asset), the account subtotals and
+ * the total, and the assets that could not be priced.
+ */
+export function valuePortfolio(balances: readonly BalanceLike[], priceOf: (asset: string) => string | null): Portfolio {
+  const prices = new Map<string, string | null>();
+  const price = (asset: string) => {
+    if (!prices.has(asset)) prices.set(asset, priceOf(asset));
+    return prices.get(asset) ?? null;
+  };
+  const spot: AssetRow[] = [];
+  const futures: AssetRow[] = [];
+  const merged = new Map<string, { available: string; frozen: string }>();
+  for (const b of balances) {
+    const r = row(b.asset, b.available, b.frozen, price(b.asset));
+    if (b.account_type === "FUTURES") futures.push(r);
+    else spot.push(r);
+    const m = merged.get(b.asset) ?? { available: "0", frozen: "0" };
+    merged.set(b.asset, { available: dec.add(m.available, b.available), frozen: dec.add(m.frozen, b.frozen) });
+  }
+  const all = [...merged].map(([asset, m]) => row(asset, m.available, m.frozen, price(asset)));
+  const sum = (rows: AssetRow[]) => rows.reduce((s, r) => (r.value === null ? s : dec.add(s, r.value)), "0");
+  const spotTotal = sum(spot);
+  const futuresTotal = sum(futures);
+  return {
+    total: dec.add(spotTotal, futuresTotal),
+    spot: spotTotal,
+    futures: futuresTotal,
+    unpriced: all.filter((r) => r.value === null && dec.sign(r.total) > 0).map((r) => r.asset),
+    rows: { ALL: all.sort(byValue), SPOT: spot.sort(byValue), FUTURES: futures.sort(byValue) },
+  };
+}
+
+/**
+ * isSmall reports whether a row hides under "hide small balances": an
+ * empty balance, or one valued below the threshold. An unpriced balance
+ * is never small (its worth is unknown).
+ */
+export function isSmall(r: Pick<AssetRow, "total" | "value">, threshold: string = SMALL_VALUE): boolean {
+  if (dec.sign(r.total) <= 0) return true;
+  return r.value !== null && dec.lt(r.value, threshold);
+}
+
+/** convertValue expresses a USDT value in another asset of the given price, cut down to decimals. */
+export function convertValue(value: string, price: string | null, decimals: number): string | null {
+  if (!price || dec.sign(price) <= 0) return null;
+  return dec.div(value, price, decimals, "down");
+}
+
+export type Slice = {
+  /** The asset, or null for the rest ("others"). */
+  asset: string | null;
+  value: string;
+  /** The share of the total, a fraction with 4 decimals ("0.1234"). */
+  share: string;
+};
+
+/**
+ * distribution keeps the `top` most valuable assets and folds the rest into
+ * one "others" slice; unpriced and empty rows take no part. The shares are
+ * rounded half-up to 4 decimals (they are drawn, not charged).
+ */
+export function distribution(rows: readonly AssetRow[], top = 5): Slice[] {
+  const priced = rows.filter((r): r is AssetRow & { value: string } => r.value !== null && dec.sign(r.value) > 0).sort(byValue);
+  const total = priced.reduce((s, r) => dec.add(s, r.value), "0");
+  if (dec.sign(total) <= 0) return [];
+  const share = (v: string) => dec.div(v, total, 4, "half");
+  const head: Slice[] = priced.slice(0, top).map((r) => ({ asset: r.asset, value: r.value, share: share(r.value) }));
+  const rest = priced.slice(top).reduce((s, r) => dec.add(s, r.value), "0");
+  return dec.sign(rest) > 0 ? [...head, { asset: null, value: rest, share: share(rest) }] : head;
+}

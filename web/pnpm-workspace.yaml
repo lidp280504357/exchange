@@ -1,10 +1,11 @@
 # The front end (ADR-0012): the PC site, the mobile site and the admin
 # console share a data layer (packages/core) and a design system
 # (packages/ui). h5 and admin are the phase 1-3 apps, kept until the new
-# sites replace them.
+# sites replace them; e2e holds the browser smoke tests of the deployed sites.
 packages:
   - apps/*
   - packages/*
+  - e2e
   - h5
   - admin
 # Install scripts stay off: esbuild's only checks its binary, which comes

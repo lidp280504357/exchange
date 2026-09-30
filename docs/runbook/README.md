@@ -10,6 +10,7 @@
 | [server-deploy.md](server-deploy.md) | 测试服部署与回滚、端口表、应用环境变量 |
 | [testing.md](testing.md) | 测试层级、端到端（`task e2e`）与故障注入（`task fault`） |
 | [web.md](web.md) | 前端：PC 站、手机站、管理后台与共享包（数据层、设计系统），开发、构建、部署、设备分流、性能检查 |
+| [ui-checklist.md](ui-checklist.md) | 前端人工检查清单（每批前端验收前逐项勾选） |
 | [h5.md](h5.md) | 旧 H5（阶段 1–3，过渡期挂在 `/h5/`）：页面结构与浏览器冒烟测试 |
 | [cloudflare-nginx-tls.md](cloudflare-nginx-tls.md) | 域名、Cloudflare 代理、nginx 与源站证书 |
 | [turnstile.md](turnstile.md) | Cloudflare Turnstile 人机验证 |

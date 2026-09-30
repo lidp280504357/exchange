@@ -418,3 +418,6 @@ function DataRowImpl<T>({ row, index, selected, active, extraClass, clickable, o
 }
 
 const DataRow = memo(DataRowImpl) as typeof DataRowImpl;
+
+// The apps define columns with the same TanStack Table (one copy, no extra deps).
+export { createColumnHelper, type ColumnDef, type Row, type RowSelectionState, type SortingState } from "@tanstack/react-table";

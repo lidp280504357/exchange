@@ -3,8 +3,9 @@
 # site's page and SPA fallback, cache headers, the device routing between
 # astras.vip and m.astras.vip (site_pref overrides it), the admin console's
 # security headers, the API reference, the design system catalogue and the
-# PWA manifest; then the browser smoke test of the previous H5 at /h5/
-# (web/h5/e2e/smoke.mjs, headless Chrome; skipped when no Chrome is found).
+# PWA manifest; then the browser smoke tests in headless Chrome (skipped
+# when no Chrome is found): the PC site (web/e2e/pc-smoke.mjs) and the
+# previous H5 at /h5/ (web/h5/e2e/smoke.mjs).
 #
 #   scripts/e2e/web.sh
 set -euo pipefail
@@ -74,6 +75,9 @@ jq -e '.paths["/v1/market/summary"].get and .paths["/v1/user/favorites"].put and
 ok "API reference at /docs/ ($(jq '.paths | length' <<<"$spec") paths)"
 curl -s "$BASE/storybook/index.json" | jq -e '.entries | length > 20' >/dev/null || fail "/storybook/ has no stories"
 ok "design system catalogue at /storybook/ ($(curl -s "$BASE/storybook/index.json" | jq '.entries | length') stories)"
+
+echo "== PC site in the browser"
+CAPTCHA_BYPASS_TOKEN="$BYPASS" APP="$BASE" node "$(dirname "$0")/../../web/e2e/pc-smoke.mjs"
 
 echo "== previous H5 at /h5/"
 grep -q '<div id="root">' <<<"$(curl -s "$BASE/h5/transfer")" || fail "/h5/ SPA fallback"

@@ -35,6 +35,22 @@
 
 应用之间不互相 import；取数、推送、格式化、校验、i18n 与组件都放共享包。
 
+## PC 站页面（B2）
+
+| 区域 | 路径 | 代码 | 共享逻辑（`packages/core/src`） |
+|---|---|---|---|
+| 首页、行情、币种 | `/`、`/markets`、`/coin/:symbol` | `pages/markets` | `markets/`：行情列表排序筛选、自选（本机与账户同步）、迷你走势图 |
+| 交易终端 | `/trade/:symbol`、`/futures/:symbol` | `pages/trade`（全高 `TerminalShell`，无页脚） | `trading/`：交易对、订单与成交、K 线分页、合约（仓位、保证金、止盈止损、资金费）、终端偏好 |
+| 资产 | `/assets`、`/assets/{deposit,withdraw,transfer,history}` | `pages/assets` | `assets/`（估值、流水、划转）、`wallet/`（网络、地址格式、提现计算、充提时间线） |
+| 账户 | `/account/{security,sessions,settings}`、`/notifications` | `pages/account` | `user/`（资料、会话、安全、通知）、`auth/`（登录流程、密码规则、注册） |
+| 认证 | `/login`、`/register`、`/reset` | `pages/auth`（居中卡片 `AuthShell`） | `auth/` |
+| 公告、帮助 | `/announcements`、`/help` | `pages/content` | `content/`：Markdown（`packages/core/content/*.md`，中英两份）与安全的渲染器 |
+
+- 路由：每个区域在 `pages/<区域>/routes.tsx` 登记页面，`App.tsx` 按外壳（`AppShell`、`TerminalShell`、`AuthShell`）挂载；需要登录的页面 `auth: true`，未登录跳 `/login?next=`。
+- 文案：外壳的在 `src/i18n.ts`，各区域的在 `src/i18n/<区域>.ts`（命名空间 `pcTrade`、`pcAssets` 等）。`routing.tsx` 的 `lazyPage` 与页面 chunk 并行加载该区域文案并注册，首屏不带全部页面的文字。
+- 敏感操作：`features/auth/StepUp.tsx` 的 `useStepUp()`（身份验证器或邮箱/短信验证码换 step-up 令牌），`OtpStep` 是"人机验证 → 发送验证码 → 6 位码"的共用步骤。
+- 快捷键：`⌘K`/`Ctrl+K` 全站搜索；终端里 `/` 打开交易对搜索，`B`/`S` 切买卖。
+
 ## 本机开发
 
 ```bash
@@ -105,4 +121,6 @@ nginx（`deploy/compose/nginx/conf.d/astras.vip.conf` 与 `snippets/site-{pc,m,a
   - 手机站 manifest；
   - 后台安全头与未登录的 API；
   - `/docs/` 与 `/storybook/`；
+  - PC 站浏览器冒烟测试 `web/e2e/pc-smoke.mjs`（workspace 包 `@exchange/e2e`，headless Chrome，中文界面）：表单注册（人机验证用环境的旁路令牌，验证码读开发收件箱）→ 资产页欢迎资金 → 退出再登录（错误密码就地提示、`?next=` 回跳）→ 行情搜索 → 现货终端挂限价单并撤单 → 划转到合约并在资金流水出现 → 充值地址 → 合约终端 → 通知、设备、帮助 → 语言切换 → 退出；页面脚本错误即失败，所有 API 响应按 OpenAPI 契约校验。本机对开发服务器跑：`APP=http://localhost:5173 node web/e2e/pc-smoke.mjs`（`SHOTS=目录` 保存截图）；
   - 最后用旧 H5 跑浏览器冒烟测试 `web/h5/e2e/smoke.mjs`（`APP=https://astras.vip/h5`）。
+- 人工检查清单：[ui-checklist.md](ui-checklist.md)。

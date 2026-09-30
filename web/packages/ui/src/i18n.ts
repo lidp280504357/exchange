@@ -5,6 +5,7 @@
 export const uiMessages = {
   "zh-CN": {
     ui: {
+      captcha: { noKey: "此构建没有配置人机验证站点密钥（TURNSTILE_SITE_KEY）" },
       clear: "清除",
       max: "最大",
       searchCoin: "搜索币种",
@@ -116,6 +117,7 @@ export const uiMessages = {
   },
   en: {
     ui: {
+      captcha: { noKey: "This build has no human-check site key (TURNSTILE_SITE_KEY)" },
       clear: "Clear",
       max: "Max",
       searchCoin: "Search coins",

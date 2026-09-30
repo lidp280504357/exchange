@@ -1,4 +1,4 @@
-import { createContext, createElement, useContext, useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from "react";
 import type { WsClient, WsStatus } from "../ws/client";
 import type { MarketPush, PrivatePush, TickerData, TradeData } from "../ws/types";
 import type { BookView } from "./orderbook";
@@ -29,8 +29,9 @@ export const useMarket = () => useLive().market;
 /** useWsStatus follows the connection (for the offline banner). */
 export function useWsStatus(): WsStatus {
   const ws = useWs();
+  const subscribe = useCallback((fn: () => void) => ws.onStatus(fn), [ws]);
   return useSyncExternalStore(
-    (fn) => ws.onStatus(fn),
+    subscribe,
     () => ws.status,
     () => "idle" as WsStatus,
   );
@@ -54,8 +55,9 @@ export function useChannel<T = unknown>(channel: string | null, handler: (msg: M
 /** useSyncing reports whether a depth channel waits for its snapshot. */
 export function useSyncing(channel: string): boolean {
   const ws = useWs();
+  const subscribe = useCallback((fn: () => void) => ws.onSync((ch) => ch === channel && fn()), [ws, channel]);
   return useSyncExternalStore(
-    (fn) => ws.onSync((ch) => ch === channel && fn()),
+    subscribe,
     () => ws.isSyncing(channel),
     () => false,
   );
@@ -70,8 +72,9 @@ export function useOrderBook(symbol: string, depth: number, step = ""): BookView
   const market = useMarket();
   useEffect(() => market.followDepth(symbol), [market, symbol]);
   const key = `depth:${symbol}`;
+  const subscribe = useCallback((fn: () => void) => market.subscribe(key, fn), [market, key]);
   const version = useSyncExternalStore(
-    (fn) => market.subscribe(key, fn),
+    subscribe,
     () => market.version(key),
     () => 0,
   );
@@ -84,8 +87,9 @@ export function useOrderBook(symbol: string, depth: number, step = ""): BookView
 export function useTrades(symbol: string): TradeData[] {
   const market = useMarket();
   useEffect(() => market.followTrades(symbol), [market, symbol]);
+  const subscribe = useCallback((fn: () => void) => market.subscribe(`trades:${symbol}`, fn), [market, symbol]);
   return useSyncExternalStore(
-    (fn) => market.subscribe(`trades:${symbol}`, fn),
+    subscribe,
     () => market.recentTrades(symbol),
     () => market.recentTrades(symbol),
   );
@@ -95,8 +99,9 @@ export function useTrades(symbol: string): TradeData[] {
 export function useTicker(symbol: string): TickerData | undefined {
   const market = useMarket();
   useEffect(() => market.followTicker(symbol), [market, symbol]);
+  const subscribe = useCallback((fn: () => void) => market.subscribe(`ticker:${symbol}`, fn), [market, symbol]);
   return useSyncExternalStore(
-    (fn) => market.subscribe(`ticker:${symbol}`, fn),
+    subscribe,
     () => market.ticker(symbol),
     () => undefined,
   );
@@ -106,8 +111,9 @@ export function useTicker(symbol: string): TickerData | undefined {
 export function useTickers(): ReadonlyMap<string, TickerData> {
   const market = useMarket();
   useEffect(() => market.followTickers(), [market]);
+  const subscribe = useCallback((fn: () => void) => market.subscribe("tickers", fn), [market]);
   return useSyncExternalStore(
-    (fn) => market.subscribe("tickers", fn),
+    subscribe,
     () => market.allTickers(),
     () => market.allTickers(),
   );
