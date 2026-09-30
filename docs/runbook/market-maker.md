@@ -1,60 +1,66 @@
-# 参考行情与做市运维
+# HOUSE 虚拟流动性运维
 
-需求 §5.11、§11.9、§11.10；实现见 `internal/marketdata`（参考行情，`adapters/binance`、`application/reference.go`）与 `internal/marketmaker`（market-maker，运维端口 9091）。
+设计稿 §8（ADR-0013、ADR-0014、ADR-0015）；实现见 `internal/marketmaker`（market-maker 服务，运维端口 9091）、`internal/matching/domain/reference.go`（引擎里的参考簿）与 `internal/ledger`（`HOUSE_TRADE_SETTLE`）。参考行情本身（币安的 ticker、K 线与盘口）见 [market-data.md](market-data.md)。
 
-## 参考行情
+阶段 2 的"做市机器人"（需求 §11.10，逐档挂真实订单）已随 ADR-0015 退役：market-maker 不再下单，只把参考市场的盘口作为 **参考簿** 发给撮合引擎，由引擎在撮合时让 HOUSE 当对手方。
 
-- 来源：币安公开行情（`data-api.binance.vision` 的 REST 与 `data-stream.binance.vision` 的 WebSocket）。**币安条款禁止未经授权把它用于交易服务**：只能在测试环境用，上线前按 §11.9 换成有授权的数据源并记 ADR；代码里来源是接口（`ports.ReferenceSource`），可以加源。
-- market-data-service 跟随交易对表里设了 `reference_symbol` 的交易对（测试服 BTC-USDT、ETH-USDT，见 [market-data.md](market-data.md#参考行情跟随哪些交易对adr-0010)），功能开关 `market.reference_feed` 打开时运行：每次连接先订阅 `kline_1m` 与 `ticker` 流，同时用 REST 补齐最新一根以来的 1m K 线（最多一天，请求间隔 200 毫秒，429 时按 `Retry-After` 暂停）；参考价取最新的 ticker 或 K 线收盘价；断线按 1 秒起、最长 1 分钟退避重连；K 线按（来源, 交易对, 开盘时间）去重写入 `market.reference_candles`，保留 7 天。开关关掉时连接断开，内存里的参考价作废。
-- 参考价只在内网：`GET /internal/market/{symbol}/reference`（`{symbol, source, price, updated_at, fresh}`，5 秒内的算新鲜）。网关不转发 `/internal`，客户端看不到来源与参考价（§11.9：来源的商标与文案要法务确认后才能出现在客户端）。
-- 用途：交易服务在交易对 5 分钟内没有成交时用它作价格带与市价保护价的锚点（这样长时间无成交后的旧成交价不会把做市报价挡在价格带外）；做市机器人围绕它报价。
-- 指标：`market_reference_age_seconds{symbol}`（没有参考价时 -1）、`market_reference_updates_total`、`market_reference_errors_total`；告警 `MarketReferenceStale`（超过 30 秒没更新）。
+## 它做什么
 
-## 做市机器人
+- market-maker 从 `market.depth`、`derivatives.market.depth` 的末尾读公共盘口（只认标了 `reference` 的消息，也就是 market-data-service 转发的币安盘口；平台自己的盘口表示该交易对不显示参考市场，HOUSE 在那里不提供流动性）。
+- 每 250 毫秒一轮，对每个现货交易对与合约算出 HOUSE 愿意成交的档位与剩余额度，发 `ReferenceBookUpdate` 到 `order.references`（合约 `derivatives.order.references`）；内容没变时 2 秒发一次心跳。
+  - 档位：参考盘口最好的 20 档，价格放到本交易对的价格步长上（买价向下取、卖价向上取，HOUSE 永远不比参考市场给得多），落在同一格的合并，每档最多值 20,000 USDT，数量取整到数量步长。
+  - 现货额度（ADR-0013）：
+    - 可充提资产（`HOUSE_BACKED_ASSETS`，默认 USDT、BTC、ETH）要有库存才能卖，且保留 1,000 USDT 的价值不动（`HOUSE_SAFETY`）；买入花的 USDT 同样保留 1,000；
+    - 内部资产（其余 47 个币）没有库存也能卖（HOUSE 在 `MARKET_MAKER` 科目上记负数，ADR-0013）；
+    - 单个交易对的净头寸（多或空）最多值 100,000 USDT（`HOUSE_SYMBOL_CAP`），全部现货头寸合计最多 1,000,000 USDT（`HOUSE_TOTAL_CAP`）。
+  - 合约额度：HOUSE 在该合约的净仓位多空各最多值 100,000 USDT（`HOUSE_CONTRACT_CAP`）。HOUSE 在合约上是一个普通用户账户（`HOUSE_USER_ID`），仓位与保证金在它的 FUTURES 账户里，**自己永不被强平**（用户穿仓后的自动减仓里，HOUSE 与其他盈利仓位一样可以是对手方，ADR-0015）。
+- 发空簿（撤走 HOUSE 的流动性）的情况：开关 `market.house_liquidity` 不允许该交易对、`market.reference_feed` 关闭、参考盘口 3 秒没有消息或漏了增量（等下一个快照）、HOUSE 的余额与仓位 10 秒没读到。引擎自己也会丢弃比订单早 5 秒以上的参考簿（`RefMaxAge`，时间都在命令里，重放结果一致）。
+- 库存每秒从账本 gRPC（`MARKET_MAKER` 各资产的可用余额）与 derivatives-service 内网接口（HOUSE 账户的仓位）读一次；交易对与合约规格每 30 秒从 instrument-service 读一次。
 
-- 做市账户是一个普通用户，走和其他用户一样的下单接口与账本（§11.10），只是交易服务把 `MARKET_MAKER_USER_IDS` 里的账户手续费设为 0。它直接调各服务的内网 REST（`X-User-Id` 为做市账户，与网关转发时一样）。
-- 按 `MARKET_MAKER_SYMBOLS`（测试服为 BTC-USDT）逐对报价，每 500 毫秒一轮，参数默认按 §11.10：
-  - 点差 0.2%（买一、卖一各离参考价 0.1%），每侧 5 档，档距 0.1%，每档 0.002 BTC；
-  - 参考价变动不到 0.05% 不改价，只补被成交掉的档；
-  - 库存上限 5 BTC（到了就不挂买单），单边偏斜上限 80%（BTC 市值占比超过 80% 不挂买单，低于 20% 不挂卖单）；
-  - 可用余额不够的档先不挂，撤掉的单子解冻后下一轮补上。
-  - 可以用 `MARKET_MAKER_PARAMS_FILE`（`domain.Params` 的 JSON 数组）按交易对覆盖。
-- 撤掉全部报价的情况：开关 `market.maker` 对该交易对关闭、交易对不是 TRADING、参考价超过 5 秒没更新、进程退出。
-- 指标：`mm_quoting{symbol}`（1 在报价）、`mm_orders_placed_total{symbol,side}`、`mm_orders_canceled_total`、`mm_errors_total`、`mm_inventory{asset}`、`mm_position{symbol}`（合约净仓位）。日志：`market maker quoting`、`market maker pulled its quotes`（带原因）。
+## 引擎怎么用参考簿
 
-## 合约做市
+详见 [matching.md](matching.md#house-的参考簿adr-0015)。要点：
 
-需求 §11.10 最后一条："合约交易对的流动性由同一机器人以标记价为中心报价"。同一个 market-maker 进程、同一个做市账户：
+- 交易服务下单时决定订单是否 `house_only`：交易对跟随参考市场、`market.house_liquidity` 打开、`market.internal_matching` 关闭时为真，此时订单**只和 HOUSE 成交**（用户之间不互相成交），用户挂的限价单在参考价穿过时按其限价成交（HOUSE 当吃单方）。
+- `market.internal_matching` 打开时用户订单先与其他用户的挂单成交（同价时用户挂单优先），再与 HOUSE 成交。测试服保持关闭。
+- 现货成交里 HOUSE 一侧记在系统科目 `MARKET_MAKER`（分录 `HOUSE_TRADE_SETTLE`，HOUSE 不付手续费），用户一侧照常 `TRADE_SETTLE`/`TRADE_FEE`；合约成交里 HOUSE 一侧是 `HOUSE_USER_ID` 的普通合约结算。
 
-- 按 `MARKET_MAKER_CONTRACTS`（测试服为 BTC-USDT-PERP）逐个合约报价，价格中心是 market-data-service 的标记价（`/v1/market/{symbol}/mark-price`，未降级且 5 秒内更新才算新鲜），档位与点差规则同现货；下单走 derivatives-service 的 `/v1/derivatives/orders`（`X-User-Id` 为做市账户，GTC 限价单），derivatives-service 按 `MARKET_MAKER_USER_IDS` 免手续费。
-- 库存按做市账户在该合约的净仓位算：多头到上限不挂买单、空头到上限不挂卖单；合约默认上限 0.5（基础资产，`domain.ContractDefaults`），其余参数同 §11.10 默认，可以用 `MARKET_MAKER_PARAMS_FILE` 覆盖。做市不对冲，仓位靠用户成交自然变化；保证金用做市账户合约账户里的 USDT（默认 20 倍全仓），保证金不够、超出风险限额或价格偏出价格带的档位本轮跳过、下轮再试。
-- 撤掉该合约全部报价的情况：开关 `market.maker` 不允许该合约、合约不是 TRADING、标记价不新鲜、合约只减仓或 `derivatives.trading` 关闭（下单被拒 `DERIV_REDUCE_ONLY_MODE`、`DERIV_MARK_PRICE_UNAVAILABLE`、`DERIV_DISABLED` 等，之后每轮试一次，恢复后重新报价）、进程退出。
-- "无足够流动性的合约不得开放开仓"由运维保证：只在做市报价的合约上开放交易（合约状态与开关）；代码不强制，端到端脚本 `derivatives.sh` 就在没有做市的 ETH-USDT-PERP 上由两个用户对敲。
+## 指标与告警
 
-测试服一次性设置（在上面现货设置之后）：
+| 指标 | 含义 |
+|---|---|
+| `market_house_active{symbol}` | 1 表示 HOUSE 在该交易对/合约上提供流动性，0 表示发了空簿 |
+| `market_house_inventory{asset,backed}` | `MARKET_MAKER` 各资产可用余额（内部资产卖出后为负） |
+| `market_house_exposure_usdt{symbol}` | 该交易对基础资产或合约仓位的 USDT 价值（空头为负） |
+| `market_house_room{symbol,side}` | 最近一次发出的可买、可卖数量（基础资产） |
+| `market_house_updates_total{kind}` | 发出的参考簿（`levels`/`empty`） |
+| `market_house_publish_failures_total` | 发布失败的轮次（下一轮重发） |
 
-```bash
-# 1. 从做市账户的现货转 20000 USDT 到合约账户（在做市容器里以做市账户调用账本内网接口）
-ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T market-maker sh -c '"'"'wget -q -O - --header "X-User-Id: $MARKET_MAKER_USER_ID" --header "Content-Type: application/json" --header "Idempotency-Key: mm-futures-1" --post-data "{\"asset\":\"USDT\",\"amount\":\"20000\",\"from_account_type\":\"SPOT\",\"to_account_type\":\"FUTURES\"}" http://ledger-service:8085/v1/account/transfers'"'"''
-# 2. 开关允许合约（保留原来的 BTC-USDT）
-exchangectl flags set market.maker --on --allow-symbols BTC-USDT,BTC-USDT-PERP --reason "quote BTC-USDT and BTC-USDT-PERP"
-```
+告警（`deploy/observability/alerts.yml`）：`HouseInventoryNegative`（可充提资产库存为负，critical）、`HouseRoomExhausted`（某方向额度 10 分钟为 0：补库存或调上限）、`HousePublishFailing`、`ReferenceBookStale`（参考盘口不同步或 30 秒没变，见 [market-data.md](market-data.md)）。
 
-之后 `mm_quoting{symbol="BTC-USDT-PERP"}` 为 1，H5 合约交易页的盘口有双边报价。
+日志：`house liquidity not published`、`house liquidity: HOUSE's holdings not read`、`house liquidity idle: set HOUSE_USER_ID`（没配 HOUSE 账户时服务空转）。
+
+## 配置
+
+`deploy/compose/docker-compose.apps.yml` 的 market-maker 段：`LEDGER_GRPC_ADDR`、`INSTRUMENT_SERVICE_URL`、`DERIVATIVES_SERVICE_URL`；上限用 `HOUSE_LEVEL_CAP`、`HOUSE_SYMBOL_CAP`、`HOUSE_TOTAL_CAP`、`HOUSE_CONTRACT_CAP`、`HOUSE_SAFETY`（USDT，默认 20000、100000、1000000、100000、1000）与 `HOUSE_BACKED_ASSETS` 覆盖。`HOUSE_USER_ID` 在服务器 `apps.env`（market-maker 与 derivatives-service 都读；测试服沿用原做市账户的用户 ID）。
 
 ## 测试服设置（一次性）
 
 ```bash
-# 1. 注册做市账户（与端到端脚本同样的注册流程），记下 user_id
-# 2. 注入模拟资金（需要 ledger.manual_adjustment）
-exchangectl ledger adjust --user <mm_user_id> --asset BTC --amount 1 --reason "market maker inventory"
-exchangectl ledger adjust --user <mm_user_id> --asset USDT --amount 100000 --reason "market maker inventory"
-# 3. 服务器 /opt/exchange/infra/apps.env 加上（不是密钥，但随环境而定）
-#    MARKET_MAKER_USER_ID=<mm_user_id>
-#    MARKET_MAKER_USER_IDS=<mm_user_id>
-# 4. 打开开关
-exchangectl flags set market.reference_feed --on --reason "test environment reference prices"
-exchangectl flags set market.maker --on --allow-symbols BTC-USDT --reason "quote BTC-USDT"
+# 1. apps.env 加 HOUSE_USER_ID（沿用原做市账户），部署后生效
+# 2. HOUSE 的现货库存：500,000 USDT 与约 20,000 USDT 的 BTC、ETH（需要 ledger.manual_adjustment，幂等）
+scripts/ops/house.sh seed
+# 3. 开关：公共盘口显示币安、HOUSE 提供流动性（50 个 USDT 交易对与 BTC-USDT-PERP；ETH-USDT-PERP 留给端到端脚本里的用户对敲）
+exchangectl flags set market.reference_depth --on --reason "Binance books on the top 50 (ADR-0010)"
+exchangectl flags set market.house_liquidity --on --allow-symbols <50 个 USDT 交易对>,BTC-USDT-PERP --reason "HOUSE liquidity (ADR-0015)"
+# 4. 开放交易：把 test.json 里仍是 PREPARE 的 USDT 交易对改为 TRADING
+scripts/ops/house.sh open
 ```
 
-端到端脚本改在没有做市的 ETH-BTC 上成交（BTC-USDT 的做市报价会吃掉固定价格的单子），ETH-BTC 在测试数据里的价格带为 100%；ETH-USDT 保持 PREPARE，用作"未开放交易对"的检查。
+`scripts/ops/house.sh show` 看 HOUSE 的 `MARKET_MAKER` 余额。HOUSE 合约账户用原做市账户 FUTURES 里的约 2 万 USDT；亏损超过它时账本会拒绝结算并挂起（`DerivativesSettlementParked` 告警），要从该账户的现货划转补足。
+
+## 验证与故障
+
+- `scripts/e2e/house.sh`：50 个 USDT 交易对在交易、盘口是币安的（1000SHIB 按 1000 个计价）、新用户市价买卖 SOL-USDT 立即按盘口价与 HOUSE 成交、低于盘口的限价单挂着直到撤单、BTC-USDT-PERP 市价开仓与只减仓平仓、之后账本与合约对账通过。
+- `scripts/fault/reference-outage.sh`：切断 market-data-service 的外网，几秒内 HOUSE 撤走流动性、公共盘口退回平台自己的（空）；恢复后重新显示币安盘口、HOUSE 重新提供流动性。
+- 要临时停掉 HOUSE：`exchangectl flags set market.house_liquidity --off --reason "..."`（或把某个交易对从 allow 列表去掉），下一轮就发空簿；用户挂着的单子留在簿上，等开关恢复后按参考价成交。

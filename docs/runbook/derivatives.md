@@ -22,6 +22,7 @@
 - **平仓单**（`reduce_only`，或双向模式的 SELL LONG / BUY SHORT）不预留任何东西、不查资格与最小名义价值，但数量不能超过该仓位还没被其他平仓单占用的部分（`DERIV_REDUCE_ONLY_REJECTED`）。
 - 市价单：以"标记价 ± 价格带"（买单向下、卖单向上取到 tick）为价格的 IOC（默认）或 FOK 限价单交给引擎，预留也按这个价格算。
 - 发给引擎的命令（`derivatives.order.commands`）手续费率为 0：合约手续费由合约服务按 USDT 计。订单受理与拒绝（`OrderAccepted`/`OrderRejected`）和引擎的订单事件一起在 `derivatives.order.events` 上。
+- HOUSE 流动性（阶段 4 B4，ADR-0015）：`market.house_liquidity` 对该合约打开且 `market.internal_matching` 关闭时，命令带 `house_only`，订单只和 HOUSE 的参考簿（币安 U 本位合约的盘口）成交，见 [market-maker.md](market-maker.md)。测试服对 BTC-USDT-PERP 打开，ETH-USDT-PERP 保持用户之间成交。
 
 撤单：`DELETE /v1/derivatives/orders/{id}`、`DELETE /v1/derivatives/orders?symbol=`，由引擎确认。订单结束（成交完、撤销、拒绝）时，没成交那部分的预留（按手数）解冻，键 `release:<订单ID>`；这与成交先到还是后到无关，因为每笔成交只动用自己那几手的预留。
 
@@ -39,6 +40,8 @@
 | 平仓单超出仓位 | 平仓单下单后仓位变小了（被强平等），超出部分开出反向仓位，保证金按"成交额 / 杠杆"从可用余额冻结，能冻多少冻多少 | 同左 |
 
 单向模式一笔成交可以先平后开（反手）；双向模式的平仓单超出部分开在另一侧。
+
+**HOUSE 一侧**：成交带 `house_side` 时，HOUSE 那一方按一张虚拟订单结算（`domain.HouseOrder`：单向持仓、全仓、合约最高杠杆、零手续费，没有预留），仓位与保证金记在 `HOUSE_USER_ID` 的 FUTURES 账户，和普通用户一样收付资金费。强平检查跳过 HOUSE 的仓位（永不被强平）；自动减仓时 HOUSE 与其他盈利仓位一样可以是对手方。HOUSE 的 FUTURES 可用余额不够付保证金或亏损时，这一方的结算按上面的"账本拒绝"挂起，需从 HOUSE 账户的现货划转补足。
 
 **账本拒绝**（保险基金也不够补缺口，或数据不一致）：这一方照样按计划更新仓位和成交（成交 `settled=false`），结算请求存入 `pending_settlements`，恢复循环每 5 秒重试，直到账本记账成功（部分冻结的实际金额届时补进仓位保证金）。指标 `derivatives_settlements_parked_total`，告警 `DerivativesSettlementParked`，对账 `NO_PENDING_SETTLEMENTS` 非零。处理：补足保险基金（`exchangectl ledger insurance-fund`），等待自动重试。
 
@@ -147,10 +150,10 @@ WebSocket 私有频道：`orders`（合约订单与现货订单同一频道，�
 
 - 开关 `derivatives.trading` 默认关闭（ADR-0005），测试服打开：`exchangectl flags set derivatives.trading --on --reason "测试环境开放合约"`。
 - 合约在 `deploy/instruments/test.json` 里以 `TRADING` 创建（状态只在创建时取文件里的值，之后用 `exchangectl instruments contract-status` 改）。
-- 做市：market-maker 以标记价为中心给 BTC-USDT-PERP 双边报价（`MARKET_MAKER_CONTRACTS`，做市账户的合约账户要先有 USDT、开关 `market.maker` 要允许该合约，见 [market-maker.md](market-maker.md#合约做市)）；ETH-USDT-PERP 没有做市，端到端的对敲在它上面进行。
+- 流动性：BTC-USDT-PERP 由 HOUSE 按币安合约盘口提供（`HOUSE_USER_ID` 沿用原做市账户，其合约账户有约 2 万 USDT；开关 `market.house_liquidity` 允许该合约，见 [market-maker.md](market-maker.md)）；ETH-USDT-PERP 没有 HOUSE，端到端的对敲在它上面进行。阶段 3 的挂单做市（`MARKET_MAKER_CONTRACTS`、开关 `market.maker`）已随 ADR-0015 退役。
 - 保险基金用模拟资金注资：`exchangectl ledger insurance-fund --amount 1000000 --reason "测试环境保险基金" --key insurance-seed-1`（ledger-service 容器里执行，需 `ledger.manual_adjustment`）。
 - 端到端：`scripts/e2e/contracts.sh`（规格、标记价、资金费率）、`scripts/e2e/derivatives.sh`（两个用户在 ETH-USDT-PERP 上开仓、平仓、转回，最后跑对账）、`scripts/e2e/funding.sh`（资金费，见下）、`scripts/e2e/admin.sh` 的合约部分（合约状态、只减仓、状态往返、强平监控、双人审批的保险基金注资）；故障注入 `scripts/fault/contract-degrade.sh`（降级与人工解除）。
-- 资金费端到端靠一对**常驻对冲仓位**：`funding.sh` 第一次运行时注册两个用户，各转 100 USDT 到合约账户，在 BTC-USDT-PERP 上对敲 0.001 张后保持不平，邮箱与随机密码记在本机 `~/.cache/exchange-e2e/`（`E2E_STATE_DIR` 可改，不进仓库）；之后每次运行登录这两个用户（超过 7 天未登录时从开发收件箱取登录挑战验证码），逐个检查开仓以来每个资金费时间点：双方都有记录、费率等于 market-data-service 结算的费率、付款方付 0.001 × 结算标记价 × |费率| 向上取整、收款方向下取整。仓位没了（被平或被减仓）就重新开一对。强平本身依赖真实价格波动，端到端无法稳定触发，由应用层测试覆盖（`internal/derivatives/application` 的强平、ADL、全仓强平用例，设置 `TEST_POSTGRES_DSN` 时在真实库上跑）。
+- 资金费端到端靠一对**常驻对冲仓位**：`funding.sh` 第一次运行时注册两个用户，各转 100 USDT 到合约账户，在 ETH-USDT-PERP 上对敲 0.01 张后保持不平（B4 之前开的那一对在 BTC-USDT-PERP 上 0.001 张，状态文件没有合约名时按它处理），邮箱与随机密码记在本机 `~/.cache/exchange-e2e/`（`E2E_STATE_DIR` 可改，不进仓库）；之后每次运行登录这两个用户（超过 7 天未登录时从开发收件箱取登录挑战验证码），逐个检查开仓以来每个资金费时间点：双方都有记录、费率等于 market-data-service 结算的费率、付款方付 仓位数量 × 结算标记价 × |费率| 向上取整、收款方向下取整。仓位没了（被平或被减仓）就重新开一对。强平本身依赖真实价格波动，端到端无法稳定触发，由应用层测试覆盖（`internal/derivatives/application` 的强平、ADL、全仓强平用例，设置 `TEST_POSTGRES_DSN` 时在真实库上跑）。
 - 资金费轮次：`exchangectl derivatives funding [--symbol S] [--limit N]` 列出最近的轮次（费率、标记价、仓位数、已结算数、付出、收到、保险基金垫付）；有轮次等费率超过 2 小时 10 分钟仍未跳过、或收到的多于付出加保险基金时以非零退出（`funding.sh` 每次都跑）。
 
 ## 查看

@@ -6,7 +6,7 @@
 
 - 账户 `ledger.accounts`：（所有者类型, 所有者, 账户类型, 资产）唯一。用户只有 `SPOT`、`FUTURES`；系统账户 `FEE_REVENUE`、`INSURANCE_FUND`、`DEPOSIT_PENDING`、`WITHDRAWAL_PENDING`、`UNCLAIMED_DEPOSIT`、`FUNDING_CLEARING`、`MARKET_MAKER`、`GAS_SUPPLY`、`ADJUSTMENT`、`PNL_CLEARING`（合约已实现盈亏的对手方，阶段 3）各资产一个。首次记账时自动建户。
 - 分录 `journals` + `journal_lines`：**只追加**（触发器禁止 UPDATE/DELETE/TRUNCATE）；一条 journal 内同一资产的 line 之和为 0（提交时由约束触发器检查）；每条 line 带写入后的 `available_after`/`frozen_after` 与账户版本号。
-- 余额非负（不变量 3）由表约束兜底：只有 `DEPOSIT_PENDING`、`ADJUSTMENT` 与 `PNL_CLEARING` 可为负。
+- 余额非负（不变量 3）由表约束兜底：只有 `DEPOSIT_PENDING`、`ADJUSTMENT`、`PNL_CLEARING` 与 `MARKET_MAKER`（HOUSE 卖出内部资产，ADR-0013，阶段 4 B4）可为负。
 - 幂等：每条 journal 有唯一 `idem_key` 与内容摘要；同键同内容返回第一次的结果（`replayed`），同键不同内容返回 409 `COMMON_IDEMPOTENCY_CONFLICT`。gRPC 调用方的键按用户隔离（`u:<user>:<key>`）。
 - 并发：一次记账按固定顺序锁住涉及的账户（`SELECT ... FOR UPDATE`），先在内存算完全部余额再写库，余额不足时什么都不写（`LEDGER_INSUFFICIENT_BALANCE`，422）。超精度金额直接拒绝（`LEDGER_AMOUNT_PRECISION`，400），精度来自 instrument-service。
 - 每条 journal 发 `ledger.EntryPosted`（含全部 line，ClickHouse `ledger_entries` 由它投影），每个受影响的用户账户发 `ledger.BalanceChanged`（WebSocket `balances` 频道用）。
@@ -58,6 +58,23 @@ ssh exchange sudo docker exec exchange-infra-ledger-service-1 /app/exchangectl l
 
 首次部署时消费组从头读 `trade.events`，任务 3 以来留在冻结里的成交资金一次结清。
 
+## HOUSE 的现货成交（ADR-0013）
+
+阶段 4 B4：用户与 HOUSE 的虚拟流动性成交（见 [market-maker.md](market-maker.md)）时，成交事件带 `house_side`（HOUSE 买或卖）。
+
+- 结算分录是 `HOUSE_TRADE_SETTLE`（键同样是 `trade:<成交ID>`）：用户一方与 `TRADE_SETTLE` 完全相同（从冻结付出、收进可用），HOUSE 一方记在系统科目 `MARKET_MAKER` 各资产的**可用**余额上，没有订单、冻结与手续费。用户的手续费与限价差额照常记 `TRADE_FEE`、`ORDER_UNFREEZE`。
+- `MARKET_MAKER` 可以为负：内部资产（除 USDT、BTC、ETH 外的 47 个币）没有真实库存，HOUSE 卖出后记负数；可充提资产只在事故时为负（HOUSE 的额度保留了 1,000 USDT 的余量），告警 `HouseInventoryNegative`。
+- 校验：HOUSE 买入时买方手续费与限价必须为 0，卖出时卖方手续费为 0；`ledger.trades.house_side` 记下 HOUSE 的方向。
+- 对账：不变量 5 的 `TRADE_SETTLE_MATCHES_TRADES` 把 `HOUSE_TRADE_SETTLE` 一起算。
+- HOUSE 的库存（模拟资金）从 `ADJUSTMENT` 调入 `MARKET_MAKER`（`MANUAL_ADJUSTMENT`，需要 `ledger.manual_adjustment`，同事务写审计事件 `house:MARKET_MAKER`）：
+
+```bash
+ssh exchange sudo docker exec exchange-infra-ledger-service-1 /app/exchangectl ledger adjust --house --asset USDT --amount 500000 --reason "HOUSE inventory" --key seed-house-USDT-v1
+ssh exchange sudo docker exec exchange-infra-ledger-service-1 /app/exchangectl ledger system USDT   # MARKET_MAKER 在列
+```
+
+`scripts/ops/house.sh seed` 会一次调好测试服的三种资产。
+
 ## 合约结算
 
 需求 §11.7，实施计划 §7.3 任务 4。合约不走上面的成交消费：仓位在 derivatives-service，它把每一步（一笔成交的一方、一次资金费、一次强平或 ADL、追加保证金）换算成对用户 `FUTURES` 账户（USDT）的一组**动作**，调 gRPC `SettleFutures`；账本在一个事务里按顺序记账，每个动作一条 journal（键 `futures:<请求键>:<序号>`），并把结果写进 `ledger.futures_settlements`：同键同内容返回第一次的结果（`replayed`），同键不同内容 409。
@@ -95,7 +112,7 @@ ledger-service 每 `RECONCILE_INTERVAL`（默认 1 小时，启动 1 分钟后�
 | `SNAPSHOT_MATCHES_ACCOUNT` | 账户余额与版本等于最后一条 line 的快照 |
 | `TRADES_SETTLED` | 没有停在 `FAILED` 的成交 |
 | `TRADES_NUMBERED` | 每个交易对的成交编号（引擎按交易对从 1 计数）连续、不重复：有缺口说明漏了成交。编号字段出现前的成交记为 0，先计入 |
-| `TRADE_SETTLE_MATCHES_TRADES` | 不变量 5：按资产，`TRADE_SETTLE` 的入账合计 = 成交数量（base）与成交额（quote）的合计 |
+| `TRADE_SETTLE_MATCHES_TRADES` | 不变量 5：按资产，`TRADE_SETTLE` 与 `HOUSE_TRADE_SETTLE` 的入账合计 = 成交数量（base）与成交额（quote）的合计 |
 | `TRADE_FEE_MATCHES_TRADES` | 按资产，现货 `TRADE_FEE` 进 `FEE_REVENUE` 的合计 = 成交事件里的手续费合计（合约手续费同为 `TRADE_FEE`，幂等键 `futures:` 开头，不计入；2026-09-30 修正，之前任何一笔合约手续费都会让这项误报） |
 | `FUNDING_BATCHES_BALANCED` | 每次资金费结算（合约 + 结算时间，按请求键 `funding:<合约>:<时间>:...` 归组）付出的不少于收到的：`FUNDING_CLEARING` 只留舍入零头 |
 | `PNL_CLEARING_ONLY_PNL` | `PNL_CLEARING` 只出现在 `REALIZED_PNL`、`LIQUIDATION_SETTLE`、`ADL_SETTLE` 分录里 |

@@ -5,16 +5,20 @@
 ## 数据流
 
 ```text
-matching-engine ──market.depth（每 100 ms 变化的订单簿前 200 档，每 10 s 全量）──┬─> market-data-service（REST 深度、ticker 买一卖一）
-                                                                                └─> api-gateway（depth: 频道）
+matching-engine ──market.depth.internal（每 100 ms 变化的订单簿前 200 档，每 10 s 全量）──> market-data-service
+币安盘口与成交（depth@100ms、aggTrade）──────────────────────────────────────────────> market-data-service
+market-data-service ──market.depth（公共盘口：快照 + 增量，1 秒心跳）──┬─> api-gateway（depth: 频道）
+                    ──market.trades（公共成交）─────────────────────┤  └─> market-maker（HOUSE 的参考簿，见 market-maker.md）
+                                                                   └─> api-gateway（trades: 频道）
 trade.events ──> market-data-service ──market.candle.events（CandleUpdated/Closed、TickerUpdated，每 500 ms）──> api-gateway（candles:、ticker: 频道）
-trade.events ──> api-gateway（trades: 频道、fills 私有频道）；order.events ──> api-gateway（orders 私有频道）
-derivatives-engine ──derivatives.market.depth / derivatives.trade.events──> 同上（合约的深度、K 线、ticker、成交；合约的 fills 由 derivatives-service 推）
+trade.events ──> api-gateway（fills 私有频道）；order.events ──> api-gateway（orders 私有频道）
+derivatives-engine ──derivatives.market.depth.internal / derivatives.trade.events──> 同上（合约的公共盘口在 derivatives.market.depth；合约的 fills 由 derivatives-service 推）
 参考行情（币安）──> market-data-service ──每秒：MarkPriceUpdated、IndexPriceUpdated、FundingRateUpdated──> api-gateway（mark-price:、funding: 频道）
                                        └─标记价 10 秒算不出──> risk.events（SystemDegraded）
 ```
 
-- `market.depth` 是派生状态：引擎从内存直接发，不走 outbox，丢一份由下一份补上；只保留 1 小时，没有 retry/dlq，不进 ClickHouse。市场服务和网关都从主题末尾读（`kafka.Tail`，不提交位移），启动后最多 10 秒拿到全部订单簿。
+- 公共盘口与成交由 market-data-service 统一发布（ADR-0015）：显示参考市场的交易对发币安的盘口与成交（见下文「参考盘口与成交」），其余交易对转发引擎自己的深度（`*.depth.internal`）与平台成交。
+- 深度与成交主题都是派生状态：从内存直接发，不走 outbox，丢一份由下一份补上；只保留 1 小时，没有 retry/dlq，不进 ClickHouse。市场服务、网关与 market-maker 都从主题末尾读（`kafka.Tail`，不提交位移），启动后最多 10 秒拿到全部订单簿。
 - `market.candle.events` 同样由市场服务直接发布，也不进 ClickHouse。
 - 市场服务的消费组 `market-data` 读 `trade.events`：按交易对的 sequence 幂等（已应用的跳过），一批成交在一个事务里写 K 线、最近成交和进度；写库失败则内存状态作废，重新从库加载后重投。库里的数据都能从 `trade.events` 重建。
 
@@ -23,7 +27,7 @@ derivatives-engine ──derivatives.market.depth / derivatives.trade.events─�
 - K 线周期 `1m 3m 5m 15m 30m 1h 2h 4h 6h 12h 1d 1w 1M`，UTC 对齐，周从周一开始。只存有成交的区间；查询时无成交区间用上一根收盘价补平（成交量 0），第一笔成交之前的区间不返回。
 - 当前 K 线变化时每 500 ms 推 `CandleUpdated`；区间结束时推一次 `CandleClosed`，新区间在有成交前推一根平盘 K 线。
 - 24 小时 ticker 按分钟计算：窗口是当前分钟加前 1439 分钟；`open` 是窗口前最后一笔成交价（之前没有成交时取窗口内第一笔），`change = (last − open) / open`（小数，8 位）；窗口内没有成交时 `last` 沿用上一笔、成交量 0；从未成交的交易对价格为 null。
-- 最新成交价同时是下单价格带与市价保护价的锚点：交易服务从自己的 `fills` 取（缓存 1 秒），没有成交时用参考价。参考行情（币安公开数据，仅测试环境）与做市见 [market-maker.md](market-maker.md)；端到端脚本在没有做市的 ETH-BTC 上成交。
+- 最新成交价同时是下单价格带与市价保护价的锚点：交易服务从自己的 `fills` 取（缓存 1 秒），没有成交时用参考价。参考行情（币安公开数据，仅测试环境）见下文，HOUSE 虚拟流动性见 [market-maker.md](market-maker.md)；端到端脚本 `marketdata.sh` 在不跟随参考市场的 ETH-BTC 上成交。
 
 ## 接口
 
@@ -34,15 +38,15 @@ REST（经网关，无需登录，`Cache-Control: public, max-age=1`）：
 | `GET /v1/market/tickers` | 所有上架交易对的 ticker（带 `rank`，基础资产的市值排名） |
 | `GET /v1/market/summary?limit=` | 首页概览：TRADING 状态、以 USDT 计价、有价格的交易对的涨幅榜、跌幅榜、成交额榜（各 `limit` 条，默认 5，最多 20） |
 | `GET /v1/market/{symbol}/ticker` | 一个交易对的 ticker；未上架或已下线 404 |
-| `GET /v1/market/{symbol}/depth?limit=` | 深度 `[价格, 数量]`，最多 200 档，带引擎 sequence |
-| `GET /v1/market/{symbol}/trades?limit=` | 最近成交（最多 100 条，新的在前），带交易对内编号 `trade_number` |
+| `GET /v1/market/{symbol}/depth?limit=` | 深度 `[价格, 数量]`，最多 200 档，带公共盘口的 sequence；显示参考市场时是币安的盘口 |
+| `GET /v1/market/{symbol}/trades?limit=` | 最近成交（最多 100 条，新的在前），带交易对内编号 `trade_number`；显示参考市场时是币安的成交 |
 | `GET /v1/market/{symbol}/candles?interval=&from=&to=&limit=` | K 线（最多 1000 根，时间 RFC 3339）；返回 `to` 之前开盘的最近 `limit` 根。向前翻页：把已拿到的最早一根的 `open_time` 作为 `to`，正好再拿 `limit` 根、不重叠 |
 
 WebSocket `wss://astras.vip/v1/ws`：
 
 - 公共频道无需 `auth`：`ticker:{symbol}`、`depth:{symbol}`、`trades:{symbol}`、`candles:{symbol}:{interval}`（交易对与合约），合约另有 `mark-price:{symbol}`、`funding:{symbol}`（见下节）。消息 `{"channel": ..., "type": ..., "data": ...}`；订阅 ticker、K 线时先收到最近一条。
 - `tickers`：一个订阅拿到全部交易对与合约的 ticker（行情列表、首页、跑马灯用，只占 50 个订阅名额中的 1 个）。订阅后先收 `{"channel":"tickers","type":"snapshot","data":[...全部 ticker，按代码排序]}`，之后网关每秒把这一秒内变化过的交易对合成一条 `{"type":"update","data":[...]}` 发出（每个交易对只带最新一条）；没有变化就不发。
-- 深度：订阅后先收 `{"type":"snapshot","seq":n,"data":{"bids":[...],"asks":[...]}}`，之后是 `{"type":"update","seq":n+1,"prev_seq":n,"data":{变化的档位}}`，数量 `"0"` 表示该档消失。`seq` 是本网关实例的计数，`prev_seq` 对不上就重新订阅；每 30 秒重发一次快照。
+- 深度：订阅后先收 `{"type":"snapshot","seq":n,"data":{"bids":[...],"asks":[...]}}`，之后是 `{"type":"update","seq":n+1,"prev_seq":n,"data":{变化的档位}}`，数量 `"0"` 表示该档消失。`seq` 是本网关实例的计数，`prev_seq` 对不上就重新订阅；每 30 秒重发一次快照。网关按 `market.depth` 消息的 `prev_sequence` 应用增量，接不上的增量丢掉、等下一个快照（最多 10 秒）。
 - 私有频道（需 `auth`，带每用户 `seq`，可用 `last_seq` 补发）新增 `orders`（订单状态变化：NEW、OPEN、PARTIALLY_FILLED、FILLED、CANCELED、REJECTED 及成交累计）与 `fills`（每笔成交的一方：角色、价格、数量、手续费）。
 
 ## 查看
@@ -51,7 +55,7 @@ WebSocket `wss://astras.vip/v1/ws`：
 ssh exchange 'curl -s localhost:9090/metrics' | grep -E '^market_|kafka_consumer_lag'   # 或经容器 wget
 ```
 
-- 指标：`market_updates_published_total`、`market_update_publish_failures_total`、`matching_depth_published_total`、`matching_depth_publish_failures_total`、`kafka_consumer_lag{group="market-data"}`、`ws_pushed_total{channel}`（公共频道按类型计：ticker、depth、trades、candles）。
+- 指标：`market_updates_published_total`、`market_update_publish_failures_total`、`market_public_messages_total{kind,source}`（公共盘口与成交消息，`source` 为 `reference` 或 `platform`）、`matching_depth_published_total`、`matching_depth_publish_failures_total`、`kafka_consumer_lag{group="market-data"}`、`ws_pushed_total{channel}`（公共频道按类型计：ticker、depth、trades、candles）；参考盘口的指标见下文。
 - 日志：`market state loaded`（启动加载的交易对数）、`market update push failed`、`depth export failed`（下一次会补上）。
 - 数据：`SELECT * FROM market.symbols;`（每个交易对已应用到的 sequence 与最新价）、`SELECT interval, count(*) FROM market.candles GROUP BY 1;`。
 
@@ -114,17 +118,29 @@ SELECT symbol, funding_time, funding_rate, mark_price, samples FROM market.fundi
 
 用户决定（2026-09-30）：测试环境成交太少，平台自己的 K 线几乎不动，图表一律显示币安的 K 线。开关 `market.reference_kline` 按交易对生效（还需要 `market.reference_feed` 开着）：
 
-- 哪些交易对：跟随币安的交易对（有 `reference_symbol` 的，测试服 BTC-USDT、ETH-USDT）用自己的参考数据，合约用它的指数交易对（BTC-USDT-PERP → BTC-USDT）。没有参考数据的交易对（ETH-BTC）照常显示平台 K 线。
+- 哪些交易对：跟随币安的交易对（有 `reference_symbol` 的，测试服是 50 个 USDT 交易对）用自己的参考数据，合约用它的指数交易对（BTC-USDT-PERP → BTC-USDT）。没有参考数据的交易对（ETH-BTC）照常显示平台 K 线。
 - 历史：`GET /v1/market/{symbol}/candles` 改为向币安取同周期的 K 线（`/api/v3/klines`，周期名与对齐方式和平台一致），同样的请求 5 秒内走缓存，已结束的历史页缓存 1 分钟；取不到时返回 `COMMON_UNAVAILABLE`。
-- 实时：参考行情收到的每条 1 分钟推送，在服务里累加成各周期的当前 K 线（开高低收、成交量、笔数），随每 500 毫秒一次的推送发到 `market.candle.events`，前端的 `candles:{symbol}:{interval}` 频道和平台 K 线一样收到；服务启动后第一次遇到进行到一半的周期，先向币安取这一根的当前值再累加。这些交易对不再推送平台自己的 K 线；ticker 见上一节，成交记录、深度仍是平台的数据（阶段 4 B4 接入币安深度与成交）。
+- 实时：参考行情收到的每条 1 分钟推送，在服务里累加成各周期的当前 K 线（开高低收、成交量、笔数），随每 500 毫秒一次的推送发到 `market.candle.events`，前端的 `candles:{symbol}:{interval}` 频道和平台 K 线一样收到；服务启动后第一次遇到进行到一半的周期，先向币安取这一根的当前值再累加。这些交易对不再推送平台自己的 K 线；ticker 见上一节，盘口与成交见下一节。
 - 测试服设置：`exchangectl flags set market.reference_kline --on --deny-symbols ETH-BTC --reason "..."`，`market.reference_ticker`、`market.halt_on_feed_loss` 同样打开。ETH-BTC 没有 `reference_symbol`，本来就显示平台数据；端到端 `marketdata.sh` 在它上面成交后检查平台 K 线与 ticker。
 - 数据授权：参考数据给客户端看同样受 §11.9 限制，只在测试环境用；上线前关掉开关，或换成有授权的数据源。
+
+## 参考盘口与成交（`market.reference_depth`，阶段 4 B4）
+
+开关按交易对生效（还需要 `market.reference_feed` 开着；测试服对全部跟随的交易对打开，见 `scripts/ops/house.sh flags`）。打开时该交易对的公共盘口（REST 深度、`depth:` 频道）与公共成交（REST trades、`trades:` 频道）都是币安的；HOUSE 按同一份盘口提供流动性（[market-maker.md](market-maker.md)），所以用户看到的就是能成交的价格。
+
+- 本地盘口（`internal/marketdata/domain/localbook.go`，币安"如何正确在本地维护一个订单簿"的做法）：每个组合连接最多 25 个交易对（`<symbol>@depth@100ms` 与 `@aggTrade`），先缓存增量，再逐个用 REST 取快照（现货 `/api/v3/depth?limit=1000`，合约 `/fapi/v1/depth`），丢掉快照之前的增量；现货按 `U`/`u`、合约按 `pu` 检查连续性，断了就重新取快照（`market_reference_book_resyncs_total`）。1000 倍计价的币价格乘、数量除以倍数。
+- 可用的条件：已同步，且它的连接 5 秒内收到过消息（按连接算，冷门币盘口不变也不会被当成断流）。不可用时该交易对退回平台自己的盘口与成交（转发引擎的 `market.depth.internal`），恢复后重新发快照。
+- 发布：每 100 毫秒一轮，变化的交易对发 `DepthUpdate`（与上次发出的前 200 档比较的差异，带 `prev_sequence`），每 10 秒与刚开始显示时发 `DepthSnapshot`，没有变化时每秒一条空的 `DepthUpdate` 作心跳（`taken_at` 是连接最后收到消息的时间）。公共 sequence 按交易对递增，起点是服务启动时刻（微秒），重启后不会回退；不显示参考市场的交易对每次转发引擎快照也占一个 sequence。成交按批发 `TradesPrinted`（`market.trades`）；REST 的最近成交在启动时先从币安取一次。
+- 合约的盘口与成交用币安 U 本位合约的同名符号（`fapi`/`fstream`），标记价的盘口中间价也用它。
+- 指标：`market_reference_book_age_seconds{symbol}`（距上次变化的秒数，未同步为 -1）、`market_reference_book_resyncs_total`、`market_reference_book_stream_failures_total`；告警 `ReferenceBookStale`（不同步或 30 秒没变，持续 2 分钟）。
+- 日志：`reference book stream failed`（带交易对数，按 1 秒起、最长 1 分钟退避重连）、`reference book snapshot not loaded`、`reference books: followed symbols changed`。
 
 ## 故障与处理
 
 | 情况 | 表现 | 处理 |
 |---|---|---|
 | 币安行情中断（`MarketFeedHalted`） | `/internal/market/feed` 为 `DOWN`，跟随的交易对被置 HALT；ticker 的 `updated_at` 停住 | 查 `reference feed failed` 日志与出网；恢复后 30 秒自动放开；要提前放开就关掉 `market.halt_on_feed_loss` |
+| 币安盘口断流（`ReferenceBookStale`） | 5 秒后该交易对的公共盘口退回平台自己的，HOUSE 发空簿、不再成交（`market_house_active` 为 0） | 自动重连并重新取快照；`scripts/fault/reference-outage.sh` 演练 |
 | 合约降级（`ContractDegraded`） | `mark-price` 的 `degraded` 为 true，`updated_at` 停住；`market_index_sources` 为 0 | 查参考行情（`market_reference_age_seconds`、开关 `market.reference_feed`、`reference feed failed` 日志，见 [market-maker.md](market-maker.md)）；恢复后确认标记价正常，再按合约服务手册人工解除只减仓 |
 | 市场服务重启 | 深度最多 10 秒为空；K 线、ticker 从库恢复 | 自动 |
 | PostgreSQL 不可用 | 成交批次写库失败，消费者退避重试，积压上升 | 恢复后自动重载并继续；成交量不会重复累加 |

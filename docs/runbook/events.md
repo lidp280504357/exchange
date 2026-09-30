@@ -10,6 +10,8 @@
 4. 处理失败：记录转到 `<topic>.retry`，按 1s/5s/30s/5m 重试 4 次，仍失败转到 `<topic>.dlq`；无法解码的记录直接进 `.dlq`。记录头带 `x-origin-topic`、`x-group`（放弃它的消费组）、`x-attempt`、`x-not-before`、`x-error`。
 5. 指标：`kafka_consumer_records_total{group,topic,result=ok|retry|dlq|skipped}`、`kafka_consumer_handle_seconds`、`kafka_consumer_lag`（每 30 秒）。
 
+派生状态的主题不走 outbox、没有 `.retry`/`.dlq`，只保留 1 小时，丢一条由下一条补上：`order.references`、`derivatives.order.references`（HOUSE 的参考簿，market-maker 直接发；分区数必须与 `order.commands` 相同）、`market.depth`、`derivatives.market.depth`、`market.trades`（公共盘口与成交，market-data-service 发）、`market.depth.internal`、`derivatives.market.depth.internal`（引擎自己的深度）。见 ADR-0015 与 [market-data.md](market-data.md)。
+
 Redpanda 停机时 API 照常工作，事件留在各服务的 outbox；恢复后自动重连并补发，消费组从已提交位点继续（`scripts/fault/redpanda-outage.sh` 验证）。
 
 ## 死信查看与重放

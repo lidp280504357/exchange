@@ -17,7 +17,8 @@
    - 限价买单：价格 × 数量，向上取整到计价资产精度。
    - 市价买单：`quote_amount`。
    - 卖单：数量（基础资产）。
-5. 冻结成功：同一事务把冻结状态记为 FROZEN，并经 outbox 发 `order.events: OrderAccepted` 与 `order.commands: PlaceOrder`，两者都按交易对分区。PlaceOrder 带着引擎需要的全部参数（费率、资产精度、市价单保护价），重放命令就能重建订单簿。返回 202 和订单（NEW）。
+5. 冻结成功：同一事务把冻结状态记为 FROZEN，并经 outbox 发 `order.events: OrderAccepted` 与 `order.commands: PlaceOrder`，两者都按交易对分区。PlaceOrder 带着引擎需要的全部参数（费率、资产精度、市价单保护价、`house_only`），重放命令就能重建订单簿。返回 202 和订单（NEW）。
+   - `house_only`（阶段 4 B4，ADR-0015）：交易对跟随参考市场、`market.house_liquidity` 对它打开且 `market.internal_matching` 关闭时为真，订单只和 HOUSE 的虚拟流动性成交（见 [market-maker.md](market-maker.md)）。与 HOUSE 成交时用户照常付手续费（HOUSE 不付），结算见 [ledger.md](ledger.md#house-的现货成交adr-0013)。
 6. 账本明确拒绝（余额不足、精度等）：订单存为 REJECTED（`reject_reason` 为错误码），发 `OrderRejected`，返回该错误并在 `details.order_id` 带上订单 ID。
 7. 账本不可达：冻结结果未知，订单保持 PENDING，照样返回 202。恢复任务每 5 秒处理 10 秒以前的 PENDING 订单：用同一幂等键重试冻结，账本已经冻结过的不会冻结第二次，然后按第 5 或第 6 步处理。
 
