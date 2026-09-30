@@ -1,13 +1,26 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { routePreload } from "../../scripts/route-preload.mjs";
 
 // The mobile site (m.astras.vip). In development /v1 and the WebSocket go to
 // the test server (the gateway's origin lists include localhost:5174).
 const api = process.env.API_ORIGIN ?? "https://astras.vip";
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    // The landing pages' chunks start with index.html (design §4.4).
+    routePreload([
+      ["^/$", ["src/pages/home/Home.tsx", "src/i18n/markets.ts", "src/i18n/content.ts"]],
+      ["^/markets/?$", ["src/pages/home/Markets.tsx", "src/i18n/markets.ts"]],
+      ["^/coin/", ["src/pages/home/Coin.tsx", "src/i18n/markets.ts"]],
+      ["^/trade/", ["src/pages/trade/SpotTerminal.tsx", "src/i18n/trade.ts"]],
+      ["^/futures/", ["src/pages/trade/FuturesTerminal.tsx", "src/i18n/trade.ts"]],
+      ["^/assets/?$", ["src/pages/assets/Overview.tsx", "src/i18n/assets.ts"]],
+    ]),
+  ],
   envDir: "../../..",
   envPrefix: ["VITE_", "TURNSTILE_SITE_KEY"],
   server: {
