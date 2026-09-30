@@ -32,7 +32,8 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
   - 已完成：
     - B1 后端接口：`tickers` 频道、币安 ticker、`/v1/market/summary`、自选、网络与地址校验、后台游标分页与新视图；提交 `e72a905`、`2ad58c3`、`1fc2a1d`。
     - B0 前端地基：`web/` pnpm workspace（`apps/{pc,m,admin}`、`packages/{core,ui}`）、Storybook `https://astras.vip/storybook/`、nginx 三个 server 块；提交 `dc3b9f1`，见 `docs/runbook/web.md`、ADR-0012。
-  - 下一步：B2（PC 站，设计 §6 全部页面），之后 B3 → B4 → B5 → B6 → B7。
+    - B2 PC 站：设计 §6 全部页面；共享逻辑在 `packages/core/src/{trading,markets,assets,wallet,user,auth,content}`（按子路径导入，如 `@exchange/core/markets/index`）；浏览器冒烟测试 `web/e2e/pc-smoke.mjs`（`scripts/e2e/web.sh` 运行）；提交 `d66b1cc`、`c827dea`、`57160ec`、`12f3e48`。用户站的构建产物在 `/static/`（`/assets/*` 是资产页面路由）。
+  - 下一步：B3（手机站，设计 §7 全部页面），之后 B4 → B5 → B6 → B7。
 - 服务隔离：`.golangci.yml` 的 depguard 规则禁止 `internal/<服务>` 互相 import，新服务要在那里补一组规则。消费事件用 `bootstrap.Consumer` + 应用层经 inbox 去重（auth 的 `Store.Once`、notification 的 `inbox.ProcessID`）。
 - 鉴权：网关验 JWT 后把身份写进 `X-User-Id`/`X-Session-Id`/`X-Auth-Scope` 头转发（客户端同名头会被剥掉），服务端用 `httpx.UserID(r)`/`httpx.SessionID(r)` 读取；新的公开接口要加进 `internal/gateway/routes.go`，否则默认必须登录。敏感操作读 `X-Step-Up-Token`，跨服务用 auth-service gRPC `ConsumeStepUp` 兑换。
 - 功能开关：`bootstrap.Flags` 拿 `*flags.Client`，`Enabled(key, flags.Subject{...})`；改开关用 `exchangectl flags set`（见 `docs/runbook/feature-flags.md`）。
