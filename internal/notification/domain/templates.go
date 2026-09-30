@@ -6,7 +6,7 @@ import (
 )
 
 // Brand appears in every message; SMS carry no links (§6.3).
-const Brand = "Exchange"
+const Brand = "Astras"
 
 var sceneNames = map[string][2]string{ // zh-CN, en
 	"REGISTER":         {"注册", "sign-up"},

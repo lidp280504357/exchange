@@ -38,7 +38,7 @@ func TestAuthenticatorApps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(uri, "otpauth://totp/Exchange:t%2A%2A%2A@example.com?") || !strings.Contains(uri, "secret="+secretB32) {
+	if !strings.HasPrefix(uri, "otpauth://totp/Astras:t%2A%2A%2A@example.com?") || !strings.Contains(uri, "secret="+secretB32) {
 		t.Fatalf("uri %s", uri)
 	}
 	secret, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(secretB32)

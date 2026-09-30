@@ -17,7 +17,7 @@ import (
 // the step-up order and makes a taken-over mailbox or SIM not enough.
 
 // TOTPIssuer names the exchange in authenticator apps.
-const TOTPIssuer = "Exchange"
+const TOTPIssuer = "Astras"
 
 // ErrTOTPUnavailable means TOTP_SECRET_KEY is not configured.
 var ErrTOTPUnavailable = apperr.New(apperr.KindUnavailable, "AUTH_TOTP_UNAVAILABLE", "authenticator apps are not available")

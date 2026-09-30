@@ -138,7 +138,7 @@ func TestNotify(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if sms.count() != 1 || sms.sent[0].Text != "【Exchange】密码已重置" || !strings.Contains(store.notices[1].Body, "04:00:00 UTC") {
+	if sms.count() != 1 || sms.sent[0].Text != "【Astras】密码已重置" || !strings.Contains(store.notices[1].Body, "04:00:00 UTC") {
 		t.Fatalf("sms: %+v, body %q", sms.sent, store.notices[1].Body)
 	}
 

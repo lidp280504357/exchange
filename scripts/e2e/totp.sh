@@ -33,7 +33,7 @@ STEP_UP=$(jq -r .step_up_token <<<"$BODY")
 call POST /v1/auth/totp/setup "" "${AUTH[@]}" -H "X-Step-Up-Token: $STEP_UP"
 expect 200 - "setup"
 SECRET=$(jq -r .secret <<<"$BODY")
-check '(.otpauth_uri | startswith("otpauth://totp/Exchange:")) and (.secret | test("^[A-Z2-7]{32}$"))' "a base32 secret and an otpauth URI"
+check '(.otpauth_uri | startswith("otpauth://totp/Astras:")) and (.secret | test("^[A-Z2-7]{32}$"))' "a base32 secret and an otpauth URI"
 call POST /v1/auth/totp/confirm '{"code":"000000"}' "${AUTH[@]}"
 expect 422 AUTH_TOTP_INVALID "a wrong code does not bind it"
 call POST /v1/auth/totp/confirm "{\"code\":\"$(code)\"}" "${AUTH[@]}"
