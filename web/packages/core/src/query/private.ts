@@ -109,6 +109,19 @@ export function applyFillData(data: unknown, p: FillData, symbol: string): unkno
   return { ...data, pages };
 }
 
+/**
+ * applyOrderToCaches puts an order the caller just placed or cancelled
+ * (the REST answer) into every cached list of orders, as its push would:
+ * the push may arrive before the page's private subscription is up (a
+ * fresh page load) and be missed.
+ */
+export function applyOrderToCaches(qc: QueryClient, order: OrderData): void {
+  for (const [key, data] of qc.getQueriesData({ queryKey: qk.allOrders })) {
+    const [, symbol = "", filter = ""] = key as [string, string, string];
+    qc.setQueryData(key, applyOrderData(data, order, filter, symbol));
+  }
+}
+
 /** Debounced invalidation: many pushes, one refetch per key. */
 class Invalidator {
   private pending = new Map<string, QueryKey>();

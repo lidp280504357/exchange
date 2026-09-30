@@ -170,6 +170,7 @@ try {
 
   // 2. Sign out from the account menu, sign back in with the password.
   await go("/");
+  await page.waitForSelector('header a[href="/account/security"]', { visible: true });
   await page.hover('header a[href="/account/security"]');
   await clickButton("退出登录");
   await waitText("注册", 10000);
@@ -258,6 +259,7 @@ try {
 
   // 10. Sign out.
   await go("/");
+  await page.waitForSelector('header a[href="/account/security"]', { visible: true });
   await page.hover('header a[href="/account/security"]');
   await clickButton("退出登录");
   await waitText("注册", 10000);

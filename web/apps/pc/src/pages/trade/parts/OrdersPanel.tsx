@@ -1,10 +1,11 @@
 import {
-  ApiError, assetDecimals, cancelAllOrders, cancelOrder, dec, enumLabel, errorText, formatAmount, formatPrice, isActive, routes, selectSignedIn, useAssets,
+  ApiError, applyOrderToCaches, assetDecimals, cancelAllOrders, cancelOrder, dec, enumLabel, errorText, formatAmount, formatPrice, isActive, routes, selectSignedIn, useAssets,
   useFills, useOpenOrders, useOrderHistory, usePairs, useSession, type Fill, type Order, type Pair,
 } from "@exchange/core";
 import {
   Button, Checkbox, DataTable, Dialog, EmptyState, Progress, Tabs, TabsPanel, TimeText, toast, cn, type ColumnDef,
 } from "@exchange/ui";
+import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
@@ -135,11 +136,12 @@ export function OrdersPanel({
 
 function OpenOrders({ pairs, query, height }: { pairs: PairMap; query: ReturnType<typeof useOpenOrders>; height: number }) {
   const { t } = useTranslation();
+  const qc = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
   const cancel = async (o: Order) => {
     setBusy(o.order_id);
     try {
-      await cancelOrder(o.order_id);
+      applyOrderToCaches(qc, await cancelOrder(o.order_id));
     } catch (e) {
       toast.error(errorText(e));
     } finally {

@@ -1,9 +1,9 @@
 import {
-  accountApi, ApiError, assetDecimals, errorText, formatAmount, formatPrice, newIdempotencyKey, placeOrder, qk, routes, selectSignedIn, tradable,
+  accountApi, ApiError, applyOrderToCaches, assetDecimals, errorText, formatAmount, formatPrice, newIdempotencyKey, placeOrder, qk, routes, selectSignedIn, tradable,
   unwrap, useAssets, useSession, useSettings, useTicker, dec, type NewOrder, type Pair,
 } from "@exchange/core";
 import { Checkbox, Dialog, KeyValue, OrderForm, toast, type OrderFormValues, type OrderSide, type OrderType, type PairRules } from "@exchange/ui";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router";
@@ -45,6 +45,7 @@ export type SpotOrderPanelProps = {
  */
 export function SpotOrderPanel({ pair, side, onSideChange, fill, onPlaced, className }: SpotOrderPanelProps) {
   const { t } = useTranslation();
+  const qc = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
   const signedIn = useSession(selectSignedIn);
@@ -76,6 +77,10 @@ export function SpotOrderPanel({ pair, side, onSideChange, fill, onPlaced, class
     setSubmitting(true);
     try {
       const placed = await placeOrder(order, newIdempotencyKey());
+      // The pushes normally bring the order and the frozen balance; right
+      // after a page load they may precede the private subscription.
+      applyOrderToCaches(qc, placed);
+      void qc.invalidateQueries({ queryKey: qk.balances });
       setResetKey((k) => k + 1);
       if (placed.status === "REJECTED") {
         toast.error(t("pcTrade.rejected"), { description: placed.reject_reason ? errorText(new ApiError(0, placed.reject_reason, "")) : undefined });
