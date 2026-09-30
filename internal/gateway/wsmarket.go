@@ -11,20 +11,31 @@ import (
 
 // Public market channels (requirements §7.3): ticker:{symbol},
 // depth:{symbol}, trades:{symbol} and candles:{symbol}:{interval} of pairs
-// and contracts, and mark-price:{symbol} and funding:{symbol} of
-// contracts. They need no sign-in and carry no per-user sequence; depth
-// has its own.
+// and contracts, mark-price:{symbol} and funding:{symbol} of contracts,
+// and tickers, every symbol's ticker in one subscription (a snapshot, then
+// the tickers that changed, once a second). They need no sign-in and carry
+// no per-user sequence; depth has its own.
 var (
 	symbolRE   = regexp.MustCompile(`^[A-Z0-9]{2,10}-[A-Z0-9]{2,10}(-PERP)?$`)
 	contractRE = regexp.MustCompile(`^[A-Z0-9]{2,10}-[A-Z0-9]{2,10}-PERP$`)
 	intervals  = []string{"1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w", "1M"}
 )
 
-// wsDepthResend is how often subscribers get a fresh depth snapshot.
-const wsDepthResend = 30 * time.Second
+// wsDepthResend is how often subscribers get a fresh depth snapshot;
+// wsTickersEvery how often "tickers" sends what changed.
+const (
+	wsDepthResend  = 30 * time.Second
+	wsTickersEvery = time.Second
+)
+
+// tickersChannel carries every symbol's ticker.
+const tickersChannel = "tickers"
 
 // publicChannel reports whether ch names a public market channel.
 func publicChannel(ch string) bool {
+	if ch == tickersChannel {
+		return true
+	}
 	parts := strings.Split(ch, ":")
 	switch {
 	case len(parts) == 2 && (parts[0] == "ticker" || parts[0] == "depth" || parts[0] == "trades"):
@@ -152,6 +163,45 @@ func (h *Hub) OnMarket(msg wsMarket, keep bool) {
 	h.broadcastLocked(msg.Channel, msg)
 }
 
+// OnTicker sends a symbol's ticker on ticker:{symbol} and queues it for
+// the next "tickers" update.
+func (h *Hub) OnTicker(t tickerData) {
+	ch := "ticker:" + t.Symbol
+	msg := wsMarket{Channel: ch, Data: t}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.latest[ch] = msg
+	h.tickers[t.Symbol] = t
+	h.tickersDirty[t.Symbol] = true
+	h.broadcastLocked(ch, msg)
+}
+
+// tickersLocked returns the tickers of symbols (all when nil), sorted.
+func (h *Hub) tickersLocked(symbols map[string]bool) []tickerData {
+	out := make([]tickerData, 0, len(h.tickers))
+	for s, t := range h.tickers {
+		if symbols == nil || symbols[s] {
+			out = append(out, t)
+		}
+	}
+	slices.SortFunc(out, func(a, b tickerData) int { return strings.Compare(a.Symbol, b.Symbol) })
+	return out
+}
+
+// flushTickers sends "tickers" subscribers the tickers that changed since
+// the last flush.
+func (h *Hub) flushTickers() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.tickersDirty) == 0 {
+		return
+	}
+	if len(h.public[tickersChannel]) > 0 {
+		h.broadcastLocked(tickersChannel, wsMarket{Channel: tickersChannel, Type: "update", Data: h.tickersLocked(h.tickersDirty)})
+	}
+	clear(h.tickersDirty)
+}
+
 // broadcastLocked queues msg for the channel's subscribers; h.mu is held,
 // so messages keep their order against subscription snapshots.
 func (h *Hub) broadcastLocked(ch string, msg wsMarket) {
@@ -177,6 +227,8 @@ func (h *Hub) subscribePublic(c *wsConn, channels []string) {
 		switch {
 		case strings.HasPrefix(ch, "depth:"):
 			c.enqueue(h.depthSnapshotLocked(ch))
+		case ch == tickersChannel:
+			c.enqueue(wsMarket{Channel: ch, Type: "snapshot", Data: h.tickersLocked(nil)})
 		default:
 			if msg, ok := h.latest[ch]; ok {
 				c.enqueue(msg)

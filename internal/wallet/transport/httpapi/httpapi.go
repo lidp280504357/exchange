@@ -15,6 +15,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/httpx"
 	"github.com/lidp280504357/exchange/internal/wallet/application"
 	"github.com/lidp280504357/exchange/internal/wallet/domain"
+	"github.com/lidp280504357/exchange/internal/wallet/ports"
 )
 
 // Handler serves deposits and withdrawals; every /v1 route needs the
@@ -38,6 +39,8 @@ func (h *Handler) Routes(r chi.Router) {
 				next.ServeHTTP(w, r)
 			})
 		})
+		r.Get("/v1/wallet/networks", h.networks)
+		r.Post("/v1/wallet/withdraw-addresses/validate", h.validateAddress)
 		r.Get("/v1/wallet/deposit-address", h.address)
 		r.Get("/v1/wallet/deposits", h.deposits)
 		r.Get("/v1/wallet/withdraw-addresses", h.listAddresses)
@@ -61,15 +64,40 @@ type AdminWithdrawalJSON struct {
 	Approvals []string `json:"approvals"`
 }
 
+// adminWithdrawals pages through the network's withdrawals for the admin
+// console: status (default PENDING_REVIEW; ALL for every status), user_id,
+// asset, cursor (the previous page's next_cursor), limit (at most 200,
+// default 50) and order (asc, the default for the review queue, or desc).
 func (h *Handler) adminWithdrawals(w http.ResponseWriter, r *http.Request) {
-	status := r.URL.Query().Get("status")
-	if status == "" {
+	q := r.URL.Query()
+	status := strings.ToUpper(q.Get("status"))
+	switch status {
+	case "":
 		status = domain.WithdrawalReview
+	case "ALL":
+		status = ""
 	}
-	list, err := h.Svc.Store.Read().Withdrawals().ByStatus(r.Context(), h.Network, status)
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	order := strings.ToLower(q.Get("order"))
+	if order == "" && status == domain.WithdrawalReview {
+		order = "asc"
+	}
+	f := ports.WithdrawalFilter{
+		Status: status, UserID: q.Get("user_id"), Asset: strings.ToUpper(q.Get("asset")), After: q.Get("cursor"),
+		Oldest: order == "asc", Limit: limit + 1,
+	}
+	list, err := h.Svc.Store.Read().Withdrawals().Page(r.Context(), h.Network, f)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
+	}
+	var next *string
+	if len(list) > limit {
+		list = list[:limit]
+		next = &list[limit-1].ID
 	}
 	out := make([]AdminWithdrawalJSON, 0, len(list))
 	for _, wd := range list {
@@ -82,7 +110,7 @@ func (h *Handler) adminWithdrawals(w http.ResponseWriter, r *http.Request) {
 			Approvals: approvals,
 		})
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "next_cursor": next})
 }
 
 func (h *Handler) adminReview(w http.ResponseWriter, r *http.Request) {
@@ -103,6 +131,87 @@ func (h *Handler) adminReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, WithdrawalJSONOf(wd))
+}
+
+// NetworkJSON is a network as the deposit and withdrawal pages show it.
+type NetworkJSON struct {
+	Asset              string  `json:"asset"`
+	Network            string  `json:"network"`
+	DisplayName        string  `json:"display_name"`
+	Chain              string  `json:"chain"`
+	AddressFormat      string  `json:"address_format"`
+	Contract           *string `json:"contract"`
+	Confirmations      uint32  `json:"confirmations"`
+	ETAMinutes         int32   `json:"eta_minutes"`
+	MinDeposit         string  `json:"min_deposit"`
+	MinWithdraw        string  `json:"min_withdraw"`
+	WithdrawFee        string  `json:"withdraw_fee"`
+	MemoRequired       bool    `json:"memo_required"`
+	DepositEnabled     bool    `json:"deposit_enabled"`
+	WithdrawEnabled    bool    `json:"withdraw_enabled"`
+	ExplorerTxURL      *string `json:"explorer_tx_url"`
+	ExplorerAddressURL *string `json:"explorer_address_url"`
+}
+
+// NetworkJSONOf renders a network.
+func NetworkJSONOf(n domain.Network) NetworkJSON {
+	name, format := n.DisplayName, n.AddressFormat
+	if name == "" {
+		name = n.Network
+	}
+	if format == "" {
+		format = domain.FormatEVM
+	}
+	return NetworkJSON{
+		Asset: n.Asset, Network: n.Network, DisplayName: name, Chain: n.Chain, AddressFormat: format, Contract: optional(n.Contract),
+		Confirmations: max(n.Confirmations, 1), ETAMinutes: n.ETAMinutes, MinDeposit: n.MinDeposit.String(),
+		MinWithdraw: n.MinWithdraw.String(), WithdrawFee: n.WithdrawFee.String(), MemoRequired: n.MemoRequired,
+		DepositEnabled: n.Enabled, WithdrawEnabled: n.WithdrawEnabled, ExplorerTxURL: optional(n.ExplorerTxURL),
+		ExplorerAddressURL: optional(n.ExplorerAddressURL),
+	}
+}
+
+func (h *Handler) networks(w http.ResponseWriter, r *http.Request) {
+	list, err := h.Svc.NetworksOf(r.Context(), r.URL.Query().Get("asset"))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out := make([]NetworkJSON, 0, len(list))
+	for _, n := range list {
+		out = append(out, NetworkJSONOf(n))
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"networks": out})
+}
+
+func (h *Handler) validateAddress(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Asset   string `json:"asset"`
+		Network string `json:"network"`
+		Address string `json:"address"`
+		Memo    string `json:"memo"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if body.Network == "" || body.Address == "" {
+		httpx.WriteError(w, r, apperr.Invalid("network and address are required"))
+		return
+	}
+	v, err := h.Svc.ValidateAddress(r.Context(), httpx.UserID(r), body.Asset, body.Network, body.Address, body.Memo)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	format := v.Network.AddressFormat
+	if format == "" {
+		format = domain.FormatEVM
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"valid": v.Valid, "network": v.Network.Network, "address_format": format, "normalized": optional(v.Normalized),
+		"reason": optional(v.Reason), "internal": v.Internal,
+	})
 }
 
 type addressJSON struct {

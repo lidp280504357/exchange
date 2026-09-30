@@ -3,12 +3,15 @@ package grpcapi
 
 import (
 	"context"
+	"slices"
+	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
 	"github.com/lidp280504357/exchange/internal/user/application"
 	"github.com/lidp280504357/exchange/internal/user/domain"
+	"github.com/lidp280504357/exchange/internal/user/ports"
 )
 
 // Server implements userv1.UserServiceServer.
@@ -65,4 +68,46 @@ func (s *Server) ChangeStatus(ctx context.Context, req *userv1.ChangeStatusReque
 		return nil, err
 	}
 	return &userv1.ChangeStatusResponse{FromStatus: c.From, ToStatus: c.To}, nil
+}
+
+// ListUsers pages through accounts newest first.
+func (s *Server) ListUsers(ctx context.Context, req *userv1.ListUsersRequest) (*userv1.ListUsersResponse, error) {
+	f := ports.UserFilter{Status: req.GetStatus(), Region: req.GetRegion(), Limit: int(req.GetLimit())}
+	if req.GetCreatedFrom() != nil {
+		f.CreatedFrom = req.GetCreatedFrom().AsTime()
+	}
+	if req.GetCreatedBefore() != nil {
+		f.CreatedBefore = req.GetCreatedBefore().AsTime()
+	}
+	page, err := s.svc.ListUsers(ctx, f, req.GetCursor())
+	if err != nil {
+		return nil, err
+	}
+	resp := &userv1.ListUsersResponse{NextCursor: page.Next}
+	for _, u := range page.Users {
+		resp.Users = append(resp.Users, toProto(u))
+	}
+	return resp, nil
+}
+
+// UserStats counts accounts.
+func (s *Server) UserStats(ctx context.Context, req *userv1.UserStatsRequest) (*userv1.UserStatsResponse, error) {
+	var since time.Time
+	if req.GetSince() != nil {
+		since = req.GetSince().AsTime()
+	}
+	st, err := s.svc.UserStats(ctx, since, int(req.GetDays()))
+	if err != nil {
+		return nil, err
+	}
+	resp := &userv1.UserStatsResponse{Total: st.Total, CreatedSince: st.CreatedSince}
+	days := make([]string, 0, len(st.Days))
+	for d := range st.Days {
+		days = append(days, d)
+	}
+	slices.Sort(days)
+	for _, d := range days {
+		resp.Days = append(resp.Days, &userv1.DayCount{Day: d, Count: st.Days[d]})
+	}
+	return resp, nil
 }

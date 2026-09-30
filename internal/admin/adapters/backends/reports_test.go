@@ -110,14 +110,22 @@ func TestReports(t *testing.T) {
 	if len(oi) != 1 || oi[0].Symbol != "BTC-USDT-PERP" || oi[0].Long != "0.7" || oi[0].Short != "0.7" || oi[0].Positions != 2 {
 		t.Fatalf("open interest %+v", oi)
 	}
-	steps, err := r.Liquidations(ctx, 7, "", 10)
+	steps, next, err := r.Liquidations(ctx, 7, "", "", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(steps) != 4 {
-		t.Fatalf("liquidations %+v", steps)
+	if len(steps) != 4 || next != "" {
+		t.Fatalf("liquidations %+v %q", steps, next)
 	}
-	filled, err := r.Liquidations(ctx, 7, "FILLED", 10)
+	firstTwo, next, err := r.Liquidations(ctx, 7, "", "", 2)
+	if err != nil || len(firstTwo) != 2 || next == "" {
+		t.Fatalf("first page %+v %q %v", firstTwo, next, err)
+	}
+	rest, last, err := r.Liquidations(ctx, 7, "", next, 2)
+	if err != nil || len(rest) != 2 || last != "" || rest[0].EventID == firstTwo[1].EventID {
+		t.Fatalf("second page %+v %q %v", rest, last, err)
+	}
+	filled, _, err := r.Liquidations(ctx, 7, "FILLED", "", 10)
 	if err != nil || len(filled) != 1 || filled[0].InsurancePaid != "100" {
 		t.Fatalf("filled %+v %v", filled, err)
 	}

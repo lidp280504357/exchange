@@ -35,6 +35,25 @@ call GET "/v1/market/BTC-USDT/depth?limit=5" ""
 expect 200 - "depth"
 check '(.bids | length) <= 5 and (.asks | length) <= 5' "at most the asked levels"
 
+echo "== reference market data (ADR-0010)"
+call GET /v1/market/pairs ""
+expect 200 - "pairs"
+check '(.pairs[] | select(.symbol == "BTC-USDT")) | .reference_symbol == "BTCUSDT" and .reference_multiplier == "1" and .base_name == "Bitcoin" and .rank == 1 and .price_decimals == 2 and .qty_decimals == 4' "BTC-USDT follows BTCUSDT, with its listing data"
+check '(.pairs[] | select(.symbol == "ETH-BTC")) | .reference_symbol == null' "ETH-BTC follows nothing"
+# market.reference_ticker: Binance's 24-hour ticker, updated every second.
+call GET /v1/market/BTC-USDT/ticker ""
+expect 200 - "BTC-USDT ticker"
+check '.rank == 1 and .trade_count > 10000 and ((now - (.updated_at | sub("\\.[0-9]+"; "") | fromdateiso8601)) < 60)' "the reference market's: a busy day, fresh"
+call GET /v1/market/summary ""
+expect 200 - "market summary"
+check '(.gainers | length) >= 1 and (.gainers | length) <= 5 and (.turnover | map(.symbol) | index("BTC-USDT")) != null' "movers and turnover of the trading USDT pairs"
+call GET "/v1/market/BTC-USDT/candles?interval=1h&limit=5" ""
+FIRST_OPEN=$(jq -r '.candles[0].open_time' <<<"$BODY")
+call GET "/v1/market/BTC-USDT/candles?interval=1h&limit=5&to=$FIRST_OPEN" ""
+expect 200 - "the page before"
+check "(.candles | length) == 5 and .candles[4].open_time < \"$FIRST_OPEN\"" "five older candles, none repeated"
+node "$(dirname "$0")/lib/tickers-check.mjs" "$BASE"
+
 signup() { # signup NAME: registers a user, sets NAME_TOKEN
   register "e2e-md-$1-$RUN@example.com" "e2e-md-$1-$RUN" "e2e md $RUN"
   eval "${1}_TOKEN=$(jq -r .access_token <<<"$BODY")"

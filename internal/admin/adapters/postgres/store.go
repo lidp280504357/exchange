@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lidp280504357/exchange/internal/admin/domain"
 	"github.com/lidp280504357/exchange/internal/admin/ports"
+	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/event"
 	"github.com/lidp280504357/exchange/internal/platform/outbox"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
@@ -245,9 +247,19 @@ func (r approvals) GetForUpdate(ctx context.Context, id string) (*domain.Approva
 	return &a, nil
 }
 
-func (r approvals) List(ctx context.Context, status string, limit int) ([]domain.Approval, error) {
-	rows, err := r.q.Query(ctx, `SELECT `+approvalColumns+` FROM approvals WHERE $1 = '' OR status = $1 ORDER BY created_at DESC LIMIT $2`,
-		status, limit)
+func (r approvals) List(ctx context.Context, status string, afterTime time.Time, afterID string, limit int) ([]domain.Approval, error) {
+	var after *time.Time
+	var afterUUID *uuid.UUID
+	if afterID != "" {
+		id, err := uuid.Parse(afterID)
+		if err != nil {
+			return nil, apperr.Invalid("bad cursor")
+		}
+		after, afterUUID = &afterTime, &id
+	}
+	rows, err := r.q.Query(ctx, `SELECT `+approvalColumns+` FROM approvals WHERE ($1 = '' OR status = $1)
+		AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3::uuid)) ORDER BY created_at DESC, id DESC LIMIT $4`,
+		status, after, afterUUID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list approvals: %w", err)
 	}

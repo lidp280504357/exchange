@@ -43,6 +43,41 @@ func (r repos) Trades() ports.TradeRepo   { return trades(r) }
 
 func (r repos) References() ports.ReferenceRepo { return references(r) }
 
+func (r repos) Halts() ports.HaltRepo { return halts(r) }
+
+type halts repos
+
+func (r halts) List(ctx context.Context) ([]ports.Halt, error) {
+	rows, err := r.q.Query(ctx, `SELECT symbol, halted_at FROM feed_halts ORDER BY symbol`)
+	if err != nil {
+		return nil, fmt.Errorf("list halts: %w", err)
+	}
+	defer rows.Close()
+	var out []ports.Halt
+	for rows.Next() {
+		var h ports.Halt
+		if err := rows.Scan(&h.Symbol, &h.HaltedAt); err != nil {
+			return nil, fmt.Errorf("list halts: %w", err)
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}
+
+func (r halts) Add(ctx context.Context, symbol string, at time.Time) error {
+	if _, err := r.q.Exec(ctx, `INSERT INTO feed_halts (symbol, halted_at) VALUES ($1, $2) ON CONFLICT (symbol) DO NOTHING`, symbol, at); err != nil {
+		return fmt.Errorf("add halt: %w", err)
+	}
+	return nil
+}
+
+func (r halts) Remove(ctx context.Context, symbol string) error {
+	if _, err := r.q.Exec(ctx, `DELETE FROM feed_halts WHERE symbol = $1`, symbol); err != nil {
+		return fmt.Errorf("remove halt: %w", err)
+	}
+	return nil
+}
+
 type symbols repos
 
 func (r symbols) All(ctx context.Context) ([]ports.SymbolState, error) {

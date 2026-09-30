@@ -12,6 +12,7 @@ import (
 	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/event"
+	"github.com/lidp280504357/exchange/internal/platform/pagecursor"
 	"github.com/lidp280504357/exchange/internal/user/domain"
 	"github.com/lidp280504357/exchange/internal/user/ports"
 )
@@ -188,4 +189,74 @@ func (s *Service) CheckEligibility(ctx context.Context, userID, feature, asset, 
 	}
 	allowed, reason := domain.Eligibility(u, feature, asset, symbol, s.Flags.Get)
 	return allowed, reason, nil
+}
+
+// Favorites returns the user's favorite markets and when they were last
+// set (zero when never).
+func (s *Service) Favorites(ctx context.Context, userID string) ([]string, time.Time, error) {
+	if _, err := s.Store.Read().Users().Get(ctx, userID); err != nil {
+		return nil, time.Time{}, err
+	}
+	return s.Store.Read().Favorites().Get(ctx, userID)
+}
+
+// SetFavorites replaces the user's favorite markets (checked by
+// domain.Favorites) and returns the stored list.
+func (s *Service) SetFavorites(ctx context.Context, userID string, symbols []string) ([]string, time.Time, error) {
+	list, err := domain.Favorites(symbols)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	var at time.Time
+	err = s.Store.Tx(ctx, func(r ports.Repos) error {
+		if _, err := r.Users().Get(ctx, userID); err != nil {
+			return err
+		}
+		at, err = r.Favorites().Set(ctx, userID, list)
+		return err
+	})
+	return list, at, err
+}
+
+// UserPage is a page of accounts and the cursor of the next ("" on the
+// last).
+type UserPage struct {
+	Users []domain.User
+	Next  string
+}
+
+// ListUsers pages through accounts newest first for the admin console.
+func (s *Service) ListUsers(ctx context.Context, f ports.UserFilter, cursor string) (UserPage, error) {
+	if f.Status != "" && !domain.ValidStatus(f.Status) {
+		return UserPage{}, apperr.Invalid("unknown status " + f.Status)
+	}
+	f.Region = strings.ToUpper(strings.TrimSpace(f.Region))
+	if f.Limit <= 0 || f.Limit > 200 {
+		f.Limit = 50
+	}
+	at, id, err := pagecursor.Decode(cursor)
+	if err != nil {
+		return UserPage{}, apperr.Invalid("bad cursor")
+	}
+	f.AfterTime, f.AfterID = at, id
+	want := f.Limit
+	f.Limit++
+	list, err := s.Store.Read().Users().List(ctx, f)
+	if err != nil {
+		return UserPage{}, err
+	}
+	page := UserPage{Users: list}
+	if len(list) > want {
+		page.Users = list[:want]
+		last := page.Users[want-1]
+		page.Next = pagecursor.Encode(last.CreatedAt, last.ID)
+	}
+	return page, nil
+}
+
+// UserStats counts accounts for the admin console's overview: all of
+// them, those created at or after since, and per UTC day for the last
+// days (0 to 90).
+func (s *Service) UserStats(ctx context.Context, since time.Time, days int) (ports.UserStats, error) {
+	return s.Store.Read().Users().Stats(ctx, since, max(0, min(days, 90)))
 }

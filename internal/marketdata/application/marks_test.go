@@ -25,6 +25,11 @@ type contractList []ports.Contract
 func (c contractList) Listed(context.Context, string) (bool, error)        { return true, nil }
 func (c contractList) Symbols(context.Context) ([]string, error)           { return nil, nil }
 func (c contractList) Contracts(context.Context) ([]ports.Contract, error) { return c, nil }
+func (c contractList) Pairs(context.Context) ([]ports.Pair, error)         { return nil, nil }
+func (c contractList) Ranks(context.Context) (map[string]int32, error)     { return nil, nil }
+func (c contractList) SetPairStatus(context.Context, string, string, string) (string, error) {
+	return "", ErrUnknownSymbol
+}
 
 type fakeSources map[string][]domain.SourcePrice
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -21,11 +22,12 @@ import (
 )
 
 type memStore struct {
-	mu      sync.Mutex
-	users   map[string]domain.User
-	changes []domain.StatusChange
-	events  []proto.Message
-	handled map[string]bool // inbox: consumer/event ID
+	mu        sync.Mutex
+	users     map[string]domain.User
+	changes   []domain.StatusChange
+	events    []proto.Message
+	handled   map[string]bool // inbox: consumer/event ID
+	favorites map[string][]string
 }
 
 func (s *memStore) Tx(_ context.Context, fn func(ports.Repos) error) error {
@@ -62,6 +64,26 @@ func (s *memStore) Read() ports.Repos { return memRepos{s} }
 type memRepos struct{ s *memStore }
 
 func (r memRepos) Users() ports.UserRepo { return memUsers(r) }
+
+func (r memRepos) Favorites() ports.FavoriteRepo { return memFavorites(r) }
+
+type memFavorites memRepos
+
+func (r memFavorites) Get(_ context.Context, userID string) ([]string, time.Time, error) {
+	list, ok := r.s.favorites[userID]
+	if !ok {
+		return []string{}, time.Time{}, nil
+	}
+	return list, time.Unix(1, 0), nil
+}
+
+func (r memFavorites) Set(_ context.Context, userID string, symbols []string) (time.Time, error) {
+	if r.s.favorites == nil {
+		r.s.favorites = map[string][]string{}
+	}
+	r.s.favorites[userID] = symbols
+	return time.Unix(1, 0), nil
+}
 
 func (r memRepos) Emit(_ context.Context, _ string, msg proto.Message, _, _ string) error {
 	r.s.events = append(r.s.events, msg)
@@ -100,6 +122,33 @@ func (r memUsers) Update(_ context.Context, u domain.User) (domain.User, error) 
 func (r memUsers) AddStatusChange(_ context.Context, c domain.StatusChange) error {
 	r.s.changes = append(r.s.changes, c)
 	return nil
+}
+
+func (r memUsers) List(_ context.Context, f ports.UserFilter) ([]domain.User, error) {
+	var out []domain.User
+	for _, u := range r.s.users {
+		if (f.Status == "" || u.Status == f.Status) && (f.AfterID == "" || u.CreatedAt.Before(f.AfterTime) ||
+			(u.CreatedAt.Equal(f.AfterTime) && u.ID < f.AfterID)) {
+			out = append(out, u)
+		}
+	}
+	slices.SortFunc(out, func(a, b domain.User) int {
+		if c := b.CreatedAt.Compare(a.CreatedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(b.ID, a.ID)
+	})
+	return out[:min(f.Limit, len(out))], nil
+}
+
+func (r memUsers) Stats(_ context.Context, since time.Time, _ int) (ports.UserStats, error) {
+	st := ports.UserStats{Total: int64(len(r.s.users)), Days: map[string]int64{}}
+	for _, u := range r.s.users {
+		if !u.CreatedAt.Before(since) {
+			st.CreatedSince++
+		}
+	}
+	return st, nil
 }
 
 func (r memUsers) StatusHistory(_ context.Context, userID string, _ int) ([]domain.StatusChange, error) {
@@ -276,5 +325,59 @@ func TestRiskReviewsMoveActiveAccountsOnce(t *testing.T) {
 	}
 	if err := svc.OnRiskAction(ctx, uuid.NewString(), uuid.NewString(), []string{"r"}); err != nil {
 		t.Fatalf("unknown user: %v", err)
+	}
+}
+
+func TestFavoritesAreCheckedAndStored(t *testing.T) {
+	svc, _, _ := newService()
+	ctx := context.Background()
+	id := uuid.NewString()
+	if _, err := svc.Create(ctx, CreateInput{UserID: id, Region: "SG", TermsVersion: "v1", RiskVersion: "v1"}); err != nil {
+		t.Fatal(err)
+	}
+	if list, at, err := svc.Favorites(ctx, id); err != nil || len(list) != 0 || !at.IsZero() {
+		t.Fatalf("before: %v %v %v", list, at, err)
+	}
+	list, _, err := svc.SetFavorites(ctx, id, []string{"eth-usdt", "BTC-USDT", "ETH-USDT"})
+	if err != nil || !slices.Equal(list, []string{"ETH-USDT", "BTC-USDT"}) {
+		t.Fatalf("set: %v %v", list, err)
+	}
+	if got, at, _ := svc.Favorites(ctx, id); !slices.Equal(got, list) || at.IsZero() {
+		t.Fatalf("stored %v at %v", got, at)
+	}
+	if _, _, err := svc.SetFavorites(ctx, id, []string{"not a symbol"}); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("bad symbol: %v", err)
+	}
+	if _, _, err := svc.SetFavorites(ctx, uuid.NewString(), nil); !errors.Is(err, domain.ErrUserNotFound) {
+		t.Fatalf("unknown user: %v", err)
+	}
+}
+
+func TestListUsersPages(t *testing.T) {
+	svc, store, _ := newService()
+	ctx := context.Background()
+	base := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	for i := range 5 {
+		id := uuid.NewString()
+		store.users[id] = domain.User{ID: id, Status: domain.StatusActive, Region: "SG", CreatedAt: base.Add(time.Duration(i) * time.Hour)}
+	}
+	first, err := svc.ListUsers(ctx, ports.UserFilter{Limit: 2}, "")
+	if err != nil || len(first.Users) != 2 || first.Next == "" || !first.Users[0].CreatedAt.Equal(base.Add(4*time.Hour)) {
+		t.Fatalf("first page %+v %v", first, err)
+	}
+	second, _ := svc.ListUsers(ctx, ports.UserFilter{Limit: 2}, first.Next)
+	third, _ := svc.ListUsers(ctx, ports.UserFilter{Limit: 2}, second.Next)
+	if len(second.Users) != 2 || len(third.Users) != 1 || third.Next != "" || !third.Users[0].CreatedAt.Equal(base) {
+		t.Fatalf("pages %+v %+v", second, third)
+	}
+	if _, err := svc.ListUsers(ctx, ports.UserFilter{Status: "GONE"}, ""); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("bad status: %v", err)
+	}
+	if _, err := svc.ListUsers(ctx, ports.UserFilter{}, "not-a-cursor"); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("bad cursor: %v", err)
+	}
+	st, err := svc.UserStats(ctx, base.Add(3*time.Hour), 7)
+	if err != nil || st.Total != 5 || st.CreatedSince != 2 {
+		t.Fatalf("stats %+v %v", st, err)
 	}
 }

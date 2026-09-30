@@ -56,7 +56,7 @@ nginx 的 `location /v1/ws` 已转发 Upgrade（读超时 300 秒，靠服务端
 ```
 
 - 私有频道 `balances`（来自 `ledger.BalanceChanged`）、`notifications`（来自 `notification.NotificationCreated`）、`orders`（`order.events` 与合约的 `derivatives.order.events`）、`fills`（现货来自 `trade.events`，买卖双方各一条；合约来自 derivatives-service 的 `FillSettled`，带已实现盈亏）、`deposits`（`wallet.deposit.events` 的充值状态变化，见 [wallet.md](wallet.md)）、`positions`（`derivatives.position.events` 的仓位、保证金、杠杆与资金费变化，见 [derivatives.md](derivatives.md)）。合约路由 `/v1/derivatives/*` 需登录，其中下单与撤单按下单限流。
-- 公共行情频道无需登录：`ticker:{symbol}`、`depth:{symbol}`（快照 + 带 `seq`/`prev_seq` 的增量，每 30 秒重发快照）、`trades:{symbol}`、`candles:{symbol}:{interval}`，见 [market-data.md](market-data.md)。网关各实例从末尾读 `market.depth`、`market.candle.events`、`trade.events`、`order.events`，在本地维护深度与最近一条 ticker/K 线。
+- 公共行情频道无需登录：`ticker:{symbol}`、`tickers`（全部交易对的 ticker：先快照，之后每秒合并发一次变化的，只占一个订阅名额）、`depth:{symbol}`（快照 + 带 `seq`/`prev_seq` 的增量，每 30 秒重发快照）、`trades:{symbol}`、`candles:{symbol}:{interval}`，见 [market-data.md](market-data.md)。网关各实例从末尾读 `market.depth`、`market.candle.events`、`trade.events`、`order.events`，在本地维护深度与最近一条 ticker/K 线。
 - 事件带每用户单调 `seq`；重连时带 `last_seq` 补发缓冲内（每用户最近 1000 条）的缺失事件，缓冲不够时回 `{"op":"resync"}`，客户端改走 REST 全量拉取。
 - 服务端每 15 秒 ping，约 35 秒没有 pong 就断开；单连接最多 50 个订阅，单用户最多 10 条连接（超出回 `COMMON_RATE_LIMITED` 并断开）；允许的浏览器来源 `WS_ORIGINS`（默认 `astras.vip,localhost:5173`），没有 Origin 的客户端（App、脚本）不受限。
 - 访问令牌过期时推 `{"op":"error","code":"AUTH_TOKEN_EXPIRED"}`，60 秒内重新 `auth` 可继续，否则以 4001 关闭。

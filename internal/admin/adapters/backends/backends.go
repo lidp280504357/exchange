@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
 	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
@@ -32,6 +34,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/event"
 	"github.com/lidp280504357/exchange/internal/platform/flags"
 	"github.com/lidp280504357/exchange/internal/platform/outbox"
+	"github.com/lidp280504357/exchange/internal/platform/pagecursor"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
 )
 
@@ -85,6 +88,43 @@ func (u Users) ChangeStatus(ctx context.Context, userID, to, reason, actor, note
 		return "", err
 	}
 	return resp.GetFromStatus(), nil
+}
+
+// List pages through accounts newest first.
+func (u Users) List(ctx context.Context, q ports.UserQuery) ([]ports.User, string, error) {
+	req := &userv1.ListUsersRequest{Status: q.Status, Region: q.Region, Cursor: q.Cursor, Limit: int32(min(q.Limit, 200))} //nolint:gosec // bounded
+	if !q.CreatedFrom.IsZero() {
+		req.CreatedFrom = timestamppb.New(q.CreatedFrom)
+	}
+	if !q.CreatedBefore.IsZero() {
+		req.CreatedBefore = timestamppb.New(q.CreatedBefore)
+	}
+	resp, err := u.User.ListUsers(ctx, req)
+	if err != nil {
+		return nil, "", err
+	}
+	out := make([]ports.User, 0, len(resp.GetUsers()))
+	for _, p := range resp.GetUsers() {
+		v := ports.User{ID: p.GetId(), Status: p.GetStatus(), Region: p.GetRegion(), Language: p.GetLanguage(), KYCLevel: p.GetKycLevel()}
+		if t := p.GetCreatedAt(); t != nil {
+			v.CreatedAt = t.AsTime()
+		}
+		out = append(out, v)
+	}
+	return out, resp.GetNextCursor(), nil
+}
+
+// Stats counts accounts.
+func (u Users) Stats(ctx context.Context, since time.Time, days int) (ports.UserStats, error) {
+	resp, err := u.User.UserStats(ctx, &userv1.UserStatsRequest{Since: timestamppb.New(since), Days: int32(min(days, 90))}) //nolint:gosec // bounded
+	if err != nil {
+		return ports.UserStats{}, err
+	}
+	out := ports.UserStats{Total: resp.GetTotal(), CreatedSince: resp.GetCreatedSince(), Days: map[string]int64{}}
+	for _, d := range resp.GetDays() {
+		out.Days[d.GetDay()] = d.GetCount()
+	}
+	return out, nil
 }
 
 // Ledger implements ports.Ledger.
@@ -268,9 +308,37 @@ type Wallet struct {
 	Base string
 }
 
-// List returns the withdrawals in a status.
-func (w Wallet) List(ctx context.Context, status string) (json.RawMessage, error) {
-	return w.do(ctx, http.MethodGet, w.Base+"/internal/wallet/withdrawals?status="+url.QueryEscape(status), nil, nil)
+// List returns a page of withdrawals.
+func (w Wallet) List(ctx context.Context, q ports.WithdrawalQuery) (json.RawMessage, error) {
+	v := url.Values{}
+	for k, x := range map[string]string{"status": q.Status, "user_id": q.UserID, "asset": q.Asset, "cursor": q.Cursor, "order": q.Order} {
+		if x != "" {
+			v.Set(k, x)
+		}
+	}
+	if q.Limit > 0 {
+		v.Set("limit", strconv.Itoa(q.Limit))
+	}
+	return w.do(ctx, http.MethodGet, w.Base+"/internal/wallet/withdrawals?"+v.Encode(), nil, nil)
+}
+
+// Market implements ports.Market over market-data-service's internal API.
+type Market struct {
+	REST
+	Base string
+}
+
+// Feed returns the reference feed's state.
+func (m Market) Feed(ctx context.Context) (ports.FeedStatus, error) {
+	raw, err := m.do(ctx, http.MethodGet, m.Base+"/internal/market/feed", nil, nil)
+	if err != nil {
+		return ports.FeedStatus{}, err
+	}
+	var out ports.FeedStatus
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return ports.FeedStatus{}, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "market-data answered badly")
+	}
+	return out, nil
 }
 
 // Review approves or rejects a withdrawal.
@@ -395,13 +463,54 @@ func (f Flags) Switch(ctx context.Context, key string, enabled bool, actor, reas
 // Audit implements ports.AuditLog on ClickHouse audit_logs.
 type Audit struct{ Conn driver.Conn }
 
-// Search returns the newest entries of an actor and/or a target.
-func (a Audit) Search(ctx context.Context, actor, target string, limit int) ([]ports.AuditEntry, error) {
-	rows, err := a.Conn.Query(ctx, `SELECT toString(event_id), event_type, actor_id, target, occurred_at, payload FROM audit_logs FINAL
-		WHERE (? = '' OR actor_id = ?) AND (? = '' OR target = ?) ORDER BY occurred_at DESC LIMIT ?`,
-		actor, actor, target, target, limit)
+// page is a decoded cursor: the last item's time and ID.
+type page struct {
+	on    bool
+	at    time.Time
+	id    string
+	limit int
+}
+
+func pageOf(cursor string, limit int) (page, error) {
+	at, id, err := pagecursor.Decode(cursor)
 	if err != nil {
-		return nil, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "the audit trail is unavailable")
+		return page{}, apperr.Invalid("bad cursor")
+	}
+	return page{on: cursor != "", at: at, id: id, limit: limit}, nil
+}
+
+// next is the cursor after the n-th item when the query found more
+// (limit+1 rows asked for).
+func (p page) next(found int, at func(i int) (time.Time, string)) string {
+	if found <= p.limit {
+		return ""
+	}
+	t, id := at(p.limit - 1)
+	return pagecursor.Encode(t, id)
+}
+
+// timeRange bounds a ClickHouse time column; zero ends are open.
+func timeRange(from, to time.Time) (time.Time, time.Time) {
+	if to.IsZero() {
+		to = time.Date(2200, 1, 1, 0, 0, 0, 0, time.UTC)
+	}
+	return from.UTC(), to.UTC()
+}
+
+// Search returns a page of audit entries, newest first.
+func (a Audit) Search(ctx context.Context, q ports.AuditQuery) ([]ports.AuditEntry, string, error) {
+	pc, err := pageOf(q.Cursor, q.Limit)
+	if err != nil {
+		return nil, "", err
+	}
+	from, to := timeRange(q.From, q.To)
+	rows, err := a.Conn.Query(ctx, `SELECT toString(event_id), event_type, actor_id, target, occurred_at, payload FROM audit_logs FINAL
+		WHERE (? = '' OR actor_id = ?) AND (? = '' OR target = ?) AND (? = '' OR event_type = ?)
+		AND occurred_at >= ? AND occurred_at < ? AND (NOT ? OR (occurred_at, toString(event_id)) < (?, ?))
+		ORDER BY occurred_at DESC, toString(event_id) DESC LIMIT ?`,
+		q.Actor, q.Actor, q.Target, q.Target, q.EventType, q.EventType, from, to, pc.on, pc.at, pc.id, pc.limit+1)
+	if err != nil {
+		return nil, "", apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "the audit trail is unavailable")
 	}
 	defer func() { _ = rows.Close() }()
 	out := []ports.AuditEntry{}
@@ -409,7 +518,7 @@ func (a Audit) Search(ctx context.Context, actor, target string, limit int) ([]p
 		var e ports.AuditEntry
 		var payload string
 		if err := rows.Scan(&e.EventID, &e.EventType, &e.Actor, &e.Target, &e.OccurredAt, &payload); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		if json.Valid([]byte(payload)) {
 			e.Payload = json.RawMessage(payload)
@@ -418,7 +527,11 @@ func (a Audit) Search(ctx context.Context, actor, target string, limit int) ([]p
 		}
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, "", err
+	}
+	next := pc.next(len(out), func(i int) (time.Time, string) { return out[i].OccurredAt, out[i].EventID })
+	return out[:min(len(out), pc.limit)], next, nil
 }
 
 // Reports implements ports.Reports on the ClickHouse read models
@@ -610,15 +723,21 @@ func (r Reports) OpenInterest(ctx context.Context) ([]ports.OpenInterest, error)
 	return out, nil
 }
 
-// Liquidations returns the newest liquidation steps of the last days.
-func (r Reports) Liquidations(ctx context.Context, days int, kind string, limit int) ([]ports.LiquidationStep, error) {
+// Liquidations returns a page of the liquidation steps of the last days,
+// newest first.
+func (r Reports) Liquidations(ctx context.Context, days int, kind, cursor string, limit int) ([]ports.LiquidationStep, string, error) {
+	pc, err := pageOf(cursor, limit)
+	if err != nil {
+		return nil, "", err
+	}
 	rows, err := r.Conn.Query(ctx, `SELECT toString(event_id), kind, toString(user_id), symbol, position_side, cross_margin, adl, trade_id,
 		price, quantity, realized_pnl, insurance_paid, mark_price, bankruptcy_price, margin_balance, maintenance_margin, occurred_at
 		FROM derivatives_liquidations FINAL
 		WHERE occurred_at >= toDateTime64(today() - ?, 3, 'UTC') AND (? = '' OR kind = ?)
-		ORDER BY occurred_at DESC, event_id LIMIT ?`, days-1, kind, kind, limit)
+		AND (NOT ? OR (occurred_at, toString(event_id)) < (?, ?))
+		ORDER BY occurred_at DESC, toString(event_id) DESC LIMIT ?`, days-1, kind, kind, pc.on, pc.at, pc.id, pc.limit+1)
 	if err != nil {
-		return nil, unavailable(err)
+		return nil, "", unavailable(err)
 	}
 	defer func() { _ = rows.Close() }()
 	out := []ports.LiquidationStep{}
@@ -627,14 +746,15 @@ func (r Reports) Liquidations(ctx context.Context, days int, kind string, limit 
 		var v [8]decimal.Decimal
 		if err := rows.Scan(&l.EventID, &l.Kind, &l.UserID, &l.Symbol, &l.PositionSide, &l.Cross, &l.ADL, &l.TradeID, &v[0], &v[1], &v[2],
 			&v[3], &v[4], &v[5], &v[6], &v[7], &l.OccurredAt); err != nil {
-			return nil, unavailable(err)
+			return nil, "", unavailable(err)
 		}
 		l.Price, l.Quantity, l.RealizedPnL, l.InsurancePaid = v[0].String(), v[1].String(), v[2].String(), v[3].String()
 		l.MarkPrice, l.BankruptcyPrice, l.MarginBalance, l.MaintenanceMargin = v[4].String(), v[5].String(), v[6].String(), v[7].String()
 		out = append(out, l)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, unavailable(err)
+		return nil, "", unavailable(err)
 	}
-	return out, nil
+	next := pc.next(len(out), func(i int) (time.Time, string) { return out[i].OccurredAt, out[i].EventID })
+	return out[:min(len(out), pc.limit)], next, nil
 }

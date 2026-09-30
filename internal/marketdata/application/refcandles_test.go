@@ -21,7 +21,8 @@ type history struct {
 	calls  map[domain.Interval]int
 }
 
-func (h *history) Klines(_ context.Context, symbol string, i domain.Interval, _ time.Time, limit int) ([]domain.Candle, error) {
+func (h *history) Klines(_ context.Context, ref ports.Reference, i domain.Interval, _ time.Time, limit int) ([]domain.Candle, error) {
+	symbol := ref.Symbol
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.calls == nil {
@@ -45,14 +46,95 @@ func (h *history) count(i domain.Interval) int {
 	return h.calls[i]
 }
 
+// listing is instrument-service's view: the pairs with their reference
+// markets and the contracts; SetPairStatus moves a pair and records it.
 type listing struct {
-	pairs     []string
+	mu        *sync.Mutex
+	pairs     []ports.Pair
 	contracts []ports.Contract
+	moves     *[]string
 }
 
-func (l listing) Listed(context.Context, string) (bool, error)        { return true, nil }
-func (l listing) Symbols(context.Context) ([]string, error)           { return l.pairs, nil }
+func newListing(pairs []ports.Pair, contracts []ports.Contract) listing {
+	return listing{mu: &sync.Mutex{}, pairs: pairs, contracts: contracts, moves: &[]string{}}
+}
+
+func (l listing) Listed(context.Context, string) (bool, error) { return true, nil }
+
+func (l listing) Symbols(context.Context) ([]string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []string
+	for _, p := range l.pairs {
+		out = append(out, p.Symbol)
+	}
+	for _, c := range l.contracts {
+		out = append(out, c.Symbol)
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
 func (l listing) Contracts(context.Context) ([]ports.Contract, error) { return l.contracts, nil }
+
+func (l listing) Pairs(context.Context) ([]ports.Pair, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.pairs), nil
+}
+
+func (l listing) Ranks(context.Context) (map[string]int32, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := map[string]int32{}
+	for _, p := range l.pairs {
+		out[p.Symbol] = p.Rank
+	}
+	return out, nil
+}
+
+func (l listing) SetPairStatus(_ context.Context, symbol, to, _ string) (string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i, p := range l.pairs {
+		if p.Symbol == symbol {
+			from := p.Status
+			l.pairs[i].Status = to
+			*l.moves = append(*l.moves, symbol+" "+from+"->"+to)
+			return from, nil
+		}
+	}
+	return "", ErrUnknownSymbol
+}
+
+func (l listing) setStatus(symbol, status string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i := range l.pairs {
+		if l.pairs[i].Symbol == symbol {
+			l.pairs[i].Status = status
+		}
+	}
+}
+
+func (l listing) moved() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(*l.moves)
+}
+
+func ref(symbol, remote string) ports.Reference {
+	return ports.Reference{Symbol: symbol, Remote: remote, Multiplier: d("1")}
+}
+
+// testListing has BTC-USDT following BTCUSDT, ETH-BTC following nothing,
+// and the BTC-USDT-PERP contract on BTC-USDT.
+func testListing() listing {
+	return newListing([]ports.Pair{
+		{Symbol: "BTC-USDT", Base: "BTC", Quote: "USDT", Status: "TRADING", Rank: 1, Reference: ref("BTC-USDT", "BTCUSDT")},
+		{Symbol: "ETH-BTC", Base: "ETH", Quote: "BTC", Status: "TRADING", Rank: 2},
+	}, []ports.Contract{{Symbol: "BTC-USDT-PERP", IndexSymbol: "BTC-USDT"}})
+}
 
 // klineFlags has the reference feed on and reference K-lines on except for
 // the denied symbols.
@@ -76,10 +158,9 @@ func minute(t, o, h, l, c, v string) domain.Candle {
 }
 
 func newReferenceRig(h *history) *ReferenceCandles {
-	return NewReferenceCandles(h, klineFlags{deny: []string{"ETH-BTC"}}, listing{
-		pairs:     []string{"BTC-USDT", "ETH-BTC"},
-		contracts: []ports.Contract{{Symbol: "BTC-USDT-PERP", IndexSymbol: "BTC-USDT"}},
-	}, []string{"BTC-USDT"}, slog.New(slog.DiscardHandler))
+	refs := NewReferenceMap(testListing(), slog.New(slog.DiscardHandler))
+	refs.Get(context.Background()) // the pushes and requests keep it read
+	return NewReferenceCandles(h, klineFlags{deny: []string{"ETH-BTC"}}, refs, slog.New(slog.DiscardHandler))
 }
 
 func TestReferenceCandlesAggregateTheLiveMinutes(t *testing.T) {
@@ -173,8 +254,8 @@ func TestReferenceCandlesReplaceThePlatformsInThePush(t *testing.T) {
 	if out := rc.Push(context.Background(), nil); len(out) != 0 {
 		t.Fatalf("pushed again %d updates", len(out))
 	}
-	if ref, ok := rc.Serves(context.Background(), "BTC-USDT-PERP"); !ok || ref != "BTC-USDT" {
-		t.Fatalf("serves %q %v", ref, ok)
+	if ref, ok := rc.Serves(context.Background(), "BTC-USDT-PERP"); !ok || ref.Symbol != "BTC-USDT" || ref.Remote != "BTCUSDT" {
+		t.Fatalf("serves %+v %v", ref, ok)
 	}
 	if _, ok := rc.Serves(context.Background(), "ETH-BTC"); ok {
 		t.Fatal("ETH-BTC has no followed reference")
@@ -192,21 +273,21 @@ func TestReferenceCandlesServeTheSourcesHistory(t *testing.T) {
 	rc := newReferenceRig(h)
 	rc.now = func() time.Time { return at("2026-09-30T10:00:30Z") }
 	rc.Observe(minute("2026-09-30T10:00:00Z", "100", "101", "99", "100.7", "1"))
-	list, err := rc.Candles(context.Background(), "BTC-USDT-PERP", "BTC-USDT", "1m", time.Time{}, time.Time{}, 3)
+	list, err := rc.Candles(context.Background(), "BTC-USDT-PERP", ref("BTC-USDT", "BTCUSDT"), "1m", time.Time{}, time.Time{}, 3)
 	if err != nil || len(list) != 3 || list[0].Symbol != "BTC-USDT-PERP" || !list[2].Close.Equal(d("100.7")) || !list[1].Close.Equal(d("99")) {
 		t.Fatalf("candles %+v %v", list, err)
 	}
-	if _, err := rc.Candles(context.Background(), "BTC-USDT", "BTC-USDT", "1m", time.Time{}, time.Time{}, 3); err != nil {
+	if _, err := rc.Candles(context.Background(), "BTC-USDT", ref("BTC-USDT", "BTCUSDT"), "1m", time.Time{}, time.Time{}, 3); err != nil {
 		t.Fatal(err)
 	}
 	rc.wg.Wait()
 	if n := h.count(domain.Minute1); n != 1 {
 		t.Fatalf("a second request within the cache time: %d calls", n)
 	}
-	if list, _ := rc.Candles(context.Background(), "BTC-USDT", "BTC-USDT", "1m", at("2026-09-30T09:59:10Z"), time.Time{}, 3); len(list) != 2 {
+	if list, _ := rc.Candles(context.Background(), "BTC-USDT", ref("BTC-USDT", "BTCUSDT"), "1m", at("2026-09-30T09:59:10Z"), time.Time{}, 3); len(list) != 2 {
 		t.Fatalf("from 09:59: %d candles", len(list))
 	}
-	if _, err := rc.Candles(context.Background(), "BTC-USDT", "BTC-USDT", "2d", time.Time{}, time.Time{}, 3); err == nil {
+	if _, err := rc.Candles(context.Background(), "BTC-USDT", ref("BTC-USDT", "BTCUSDT"), "2d", time.Time{}, time.Time{}, 3); err == nil {
 		t.Fatal("an unknown interval")
 	}
 }

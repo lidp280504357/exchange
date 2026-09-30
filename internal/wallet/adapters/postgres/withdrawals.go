@@ -7,10 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/event"
 	"github.com/lidp280504357/exchange/internal/platform/outbox"
 	"github.com/lidp280504357/exchange/internal/wallet/domain"
@@ -217,6 +219,30 @@ func (r withdrawals) ByUser(ctx context.Context, userID, before string, limit in
 func (r withdrawals) ByStatus(ctx context.Context, network string, statuses ...string) ([]domain.Withdrawal, error) {
 	return r.list(ctx, `SELECT `+withdrawalColumns+` FROM withdrawals WHERE network = $1 AND status = ANY($2) ORDER BY id`,
 		network, statuses)
+}
+
+func (r withdrawals) Page(ctx context.Context, network string, f ports.WithdrawalFilter) ([]domain.Withdrawal, error) {
+	var user, after *uuid.UUID
+	for _, v := range []struct {
+		dst **uuid.UUID
+		src string
+	}{{&user, f.UserID}, {&after, f.After}} {
+		if v.src == "" {
+			continue
+		}
+		id, err := uuid.Parse(v.src)
+		if err != nil {
+			return nil, apperr.Invalid("not an ID: " + v.src)
+		}
+		*v.dst = &id
+	}
+	order, cmp := "DESC", "<"
+	if f.Oldest {
+		order, cmp = "ASC", ">"
+	}
+	return r.list(ctx, `SELECT `+withdrawalColumns+` FROM withdrawals WHERE network = $1 AND ($2 = '' OR status = $2)
+		AND ($3::uuid IS NULL OR user_id = $3) AND ($4 = '' OR asset = $4) AND ($5::uuid IS NULL OR id `+cmp+` $5)
+		ORDER BY id `+order+` LIMIT $6`, network, f.Status, user, f.Asset, after, f.Limit)
 }
 
 func (r withdrawals) Unreleased(ctx context.Context, network string) ([]domain.Withdrawal, error) {

@@ -5,13 +5,17 @@ info:
   description: |
     Public market endpoints, no sign-in. Reference data (requirements
     §5.5: assets, networks, trading pairs) is cacheable for 10 seconds;
-    market data (§5.11, §11.8: tickers, depth, trades, candles, built from
-    the platform's own trades) for 1 second. Amounts are decimal strings
-    (ADR-0008): clients must not parse them into floating point. Live
-    updates come over the WebSocket channels ticker:, depth:, trades: and
-    candles:, and for perpetual contracts mark-price: and funding: (§7.3).
-    Contracts (BTC-USDT-PERP) have tickers, depth, trades and candles
-    like pairs, built from their own book.
+    market data (§5.11, §11.8: tickers, depth, trades, candles) for 1
+    second. A pair with a reference market (reference_symbol) shows that
+    market's candles and tickers while the flags market.reference_kline
+    and market.reference_ticker are on for it (ADR-0010); otherwise the
+    data is built from the platform's own trades and book. Amounts are
+    decimal strings (ADR-0008): clients must not parse them into floating
+    point. Live updates come over the WebSocket channels tickers,
+    ticker:, depth:, trades: and candles:, and for perpetual contracts
+    mark-price: and funding: (§7.3). Contracts (BTC-USDT-PERP) have
+    tickers, depth, trades and candles like pairs; their charts and
+    tickers follow their index pair's reference market.
 servers:
   - url: https://astras.vip
 tags:
@@ -142,6 +146,51 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Ticker'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/market/summary:
+    get:
+      operationId: getMarketSummary
+      summary: Top movers and most traded USDT pairs
+      description: |
+        The home page overview, from the tickers of the USDT pairs that are
+        trading and have a price: gainers by 24-hour change (highest
+        first), losers (lowest first) and turnover by quote volume
+        (highest first).
+      tags: [market]
+      parameters:
+        - name: limit
+          in: query
+          description: Tickers per list.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 5
+      responses:
+        '200':
+          description: The overview.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [gainers, losers, turnover, updated_at]
+                properties:
+                  gainers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Ticker'
+                  losers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Ticker'
+                  turnover:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Ticker'
+                  updated_at:
+                    type: string
+                    format: date-time
         default:
           $ref: './common.yaml#/components/responses/Error'
   /v1/market/{symbol}/ticker:
@@ -313,10 +362,13 @@ paths:
       operationId: listCandles
       summary: Candles of a pair, oldest first
       description: |
-        Built from the platform's trades, aligned to UTC (weeks start on
-        Monday). Intervals without trades repeat the previous close with
-        zero volume, so the series has no gaps; intervals before the first
-        trade are left out. At most `limit` candles, the latest ones.
+        Aligned to UTC (weeks start on Monday). A pair in reference mode
+        (market.reference_kline) shows its reference market's candles; the
+        platform's own are built from its trades: intervals without trades
+        repeat the previous close with zero volume, so the series has no
+        gaps, and intervals before the first trade are left out. At most
+        `limit` candles, the latest ones opening before `to`. To page back
+        through history, pass the oldest open_time received as `to`.
       tags: [market]
       parameters:
         - $ref: '#/components/parameters/Symbol'
@@ -334,7 +386,7 @@ paths:
             format: date-time
         - name: to
           in: query
-          description: Candles opening before this time (RFC 3339); default now.
+          description: Candles opening before this time (RFC 3339); default now, which includes the open candle.
           schema:
             type: string
             format: date-time
@@ -381,19 +433,37 @@ components:
       examples: ['0.00001']
     Network:
       type: object
-      required: [network, chain, contract_address, confirmations, min_deposit, min_withdraw, withdraw_fee, memo_required, deposit_enabled, withdraw_enabled]
+      required: [network, display_name, chain, address_format, contract_address, confirmations, eta_minutes, min_deposit, min_withdraw,
+        withdraw_fee, memo_required, deposit_enabled, withdraw_enabled, explorer_tx_url, explorer_address_url]
       properties:
         network:
           type: string
           examples: [ETH-SEPOLIA]
+        display_name:
+          type: string
+          description: The name users see, e.g. TRC20, BEP20, ERC20, Bitcoin; the network code when none is set.
         chain:
           type: string
           description: Chain identifier, e.g. the EVM chain ID.
+        address_format:
+          type: string
+          enum: [EVM, TRON, BTC]
+          description: How addresses are written and checked.
         contract_address:
           type: string
           description: Empty for the chain's native coin.
         confirmations:
           type: integer
+        eta_minutes:
+          type: integer
+          description: Usual minutes from the transfer to the credit; 0 when unknown.
+        explorer_tx_url:
+          type: [string, 'null']
+          description: Block explorer link of a transaction, with a {tx} placeholder.
+          examples: ['https://sepolia.etherscan.io/tx/{tx}']
+        explorer_address_url:
+          type: [string, 'null']
+          description: Block explorer link of an address, with an {address} placeholder.
         min_deposit:
           $ref: '#/components/schemas/Decimal'
         min_withdraw:
@@ -408,13 +478,21 @@ components:
           type: boolean
     Asset:
       type: object
-      required: [asset_code, name, decimals, deposit_enabled, withdraw_enabled, trading_enabled, networks]
+      required: [asset_code, name, decimals, rank, categories, deposit_enabled, withdraw_enabled, trading_enabled, networks]
       properties:
         asset_code:
           type: string
           examples: [BTC]
         name:
           type: string
+        rank:
+          type: [integer, 'null']
+          description: Market-cap rank at listing; null when unranked.
+        categories:
+          type: array
+          description: Sector tags, e.g. layer-1, defi, meme.
+          items:
+            type: string
         decimals:
           type: integer
           minimum: 0
@@ -499,7 +577,9 @@ components:
           enum: [PREPARE, TRADING, HALT, CANCEL_ONLY, DELISTED]
     TradingPair:
       type: object
-      required: [symbol, base_asset, quote_asset, tick_size, lot_size, min_quantity, max_quantity, min_notional, price_band, maker_fee_rate, taker_fee_rate, status]
+      required: [symbol, base_asset, quote_asset, base_name, rank, categories, tick_size, lot_size, price_decimals, qty_decimals,
+        min_quantity, max_quantity, min_notional, price_band, maker_fee_rate, taker_fee_rate, status, reference_symbol,
+        reference_multiplier, listed_at]
       properties:
         symbol:
           type: string
@@ -508,10 +588,27 @@ components:
           type: string
         quote_asset:
           type: string
+        base_name:
+          type: string
+          description: The base asset's name, e.g. Bitcoin.
+        rank:
+          type: [integer, 'null']
+          description: The base asset's market-cap rank at listing; null when unranked.
+        categories:
+          type: array
+          description: The base asset's sector tags.
+          items:
+            type: string
         tick_size:
           $ref: '#/components/schemas/Decimal'
         lot_size:
           $ref: '#/components/schemas/Decimal'
+        price_decimals:
+          type: integer
+          description: Decimal places of tick_size, for display.
+        qty_decimals:
+          type: integer
+          description: Decimal places of lot_size, for display.
         min_quantity:
           $ref: '#/components/schemas/Decimal'
         max_quantity:
@@ -527,18 +624,36 @@ components:
         status:
           type: string
           enum: [PREPARE, TRADING, HALT, CANCEL_ONLY, DELISTED]
+        reference_symbol:
+          type: [string, 'null']
+          description: |
+            The reference market the pair's market data follows (ADR-0010),
+            e.g. BTCUSDT; null when the pair shows its own trades and book.
+        reference_multiplier:
+          description: Platform price = reference price x multiplier (1000 for a 1000PEPE pair); quantities divide by it.
+          $ref: '#/components/schemas/Decimal'
+        listed_at:
+          type: string
+          format: date-time
     NullableDecimal:
       type: [string, 'null']
       pattern: '^-?[0-9]+(\.[0-9]+)?$'
     Ticker:
       type: object
       description: |
-        Rolling 24 hours at minute resolution (§11.8). Prices are null while
-        unknown: a pair that never traded, or an empty side of the book.
-      required: [symbol, last, open, high, low, volume, quote_volume, trade_count, change, bid, ask, updated_at]
+        Rolling 24 hours (§11.8): the reference market's while
+        market.reference_ticker is on for the symbol (ADR-0010), else the
+        platform's at minute resolution. Prices are null while unknown: a
+        pair that never traded, or an empty side of the book. A reference
+        ticker keeps its updated_at when the feed stalls: clients show a
+        warning once it is 30 seconds old.
+      required: [symbol, rank, last, open, high, low, volume, quote_volume, trade_count, change, bid, ask, updated_at]
       properties:
         symbol:
           type: string
+        rank:
+          type: [integer, 'null']
+          description: The base asset's market-cap rank; null when unranked.
         last:
           $ref: '#/components/schemas/NullableDecimal'
         open:
@@ -565,6 +680,7 @@ components:
         updated_at:
           type: string
           format: date-time
+          description: When the reference source computed the ticker, or now for the platform's.
     MarkPrice:
       type: object
       required: [symbol, index_symbol, mark_price, index_price, funding_rate, interest_rate, next_funding_time, degraded, updated_at]

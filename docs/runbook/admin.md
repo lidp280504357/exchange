@@ -42,6 +42,26 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 
 ## 功能
 
+- **分页**（阶段 4 B1）：所有列表接口统一用不透明游标分页，返回 `{items, next_cursor}`。`next_cursor` 原样作为下一页的 `cursor` 传回，最后一页为 null；`limit` 为 1–200，默认 50。审计日志与强平记录的 `limit` 最多 500，默认 100。按接口：
+  - 提现 `/admin/v1/withdrawals`：可按 `status`（`ALL` 为全部）、`user_id`、`asset` 过滤。审核队列 `PENDING_REVIEW` 默认从旧到新，其余状态从新到旧，`order=asc|desc` 可改。
+  - 双人审批 `/admin/v1/approvals`。
+  - 审计日志：可按 `actor`、`target`、`event_type`、`from`、`to` 过滤。
+  - 强平记录。
+- **列表与概览**（阶段 4 B1，新后台页面在 B5 接入）：
+  - `GET /admin/v1/users`：账户，新到旧，可按状态、地区、注册时间过滤，数据来自 user-service 的 `ListUsers`。
+  - `GET /admin/v1/orders`：现货订单的最新状态，读模型 `orders_current`，可按用户、交易对、状态、方向、时间过滤。
+  - `GET /admin/v1/trades`：现货成交，`user_id` 匹配买卖任一方。
+  - `GET /admin/v1/deposits`：充值的最新状态，按检测先后，新到旧。
+  - `GET /admin/v1/dashboard?days=7`：概览，内容为：
+    - 账户总数与 24 小时新增；
+    - 24 小时成交笔数、活跃交易用户、按报价资产的成交额；
+    - 待确认充值与待审核提现；
+    - 24 小时风控事件；
+    - 行情连接状态与因断流暂停的交易对（market-data 的 `/internal/market/feed`）；
+    - 按日的新增用户、成交笔数与 USDT 成交额。
+
+    哪一部分读不到就留空，并记在 `partial` 里。
+  - 订单、成交、充值与概览的交易部分来自 ClickHouse，比服务晚几秒。
 - **提现审批**：按状态列出提现（默认 `PENDING_REVIEW`），显示风控分与命中规则；批准/拒绝需理由，审批人为管理员邮箱（超过 20,000 USDT 需两位不同审批人，规则在 wallet-service）。`exchangectl wallet approve|reject` 仍可用。
 - **用户**：按用户 ID、邮箱或手机号（`+` 开头的 E.164）查找，显示状态与余额；改账户状态（状态机见附录 B，原因为大写代码，例如 `SUSPICIOUS_LOGIN`、`REVIEW_CLEARED`）；强制撤销全部挂单（撮合引擎异步完成）。
 - **资产与交易对**：列出资产、网络与交易对；交易对状态是单交易对紧急开关（`TRADING ⇄ HALT`，`CANCEL_ONLY` 之后只能下线，不可恢复交易）。资产与网络参数（精度、充提开关、手续费等）仍以 `deploy/instruments/test.json` 为准，每次部署幂等同步，后台只读——否则下次部署会把后台改动覆盖回去。

@@ -23,6 +23,8 @@ const (
 	UserService_GetUser_FullMethodName          = "/exchange.user.v1.UserService/GetUser"
 	UserService_CheckEligibility_FullMethodName = "/exchange.user.v1.UserService/CheckEligibility"
 	UserService_ChangeStatus_FullMethodName     = "/exchange.user.v1.UserService/ChangeStatus"
+	UserService_ListUsers_FullMethodName        = "/exchange.user.v1.UserService/ListUsers"
+	UserService_UserStats_FullMethodName        = "/exchange.user.v1.UserService/UserStats"
 )
 
 // UserServiceClient is the client API for UserService service.
@@ -42,6 +44,10 @@ type UserServiceClient interface {
 	// ChangeStatus moves an account to another status for an operator, with
 	// a reason code and an audit event.
 	ChangeStatus(ctx context.Context, in *ChangeStatusRequest, opts ...grpc.CallOption) (*ChangeStatusResponse, error)
+	// ListUsers pages through accounts for the admin console, newest first.
+	ListUsers(ctx context.Context, in *ListUsersRequest, opts ...grpc.CallOption) (*ListUsersResponse, error)
+	// UserStats counts accounts for the admin console's overview.
+	UserStats(ctx context.Context, in *UserStatsRequest, opts ...grpc.CallOption) (*UserStatsResponse, error)
 }
 
 type userServiceClient struct {
@@ -92,6 +98,26 @@ func (c *userServiceClient) ChangeStatus(ctx context.Context, in *ChangeStatusRe
 	return out, nil
 }
 
+func (c *userServiceClient) ListUsers(ctx context.Context, in *ListUsersRequest, opts ...grpc.CallOption) (*ListUsersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListUsersResponse)
+	err := c.cc.Invoke(ctx, UserService_ListUsers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userServiceClient) UserStats(ctx context.Context, in *UserStatsRequest, opts ...grpc.CallOption) (*UserStatsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UserStatsResponse)
+	err := c.cc.Invoke(ctx, UserService_UserStats_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // UserServiceServer is the server API for UserService service.
 // All implementations must embed UnimplementedUserServiceServer
 // for forward compatibility.
@@ -109,6 +135,10 @@ type UserServiceServer interface {
 	// ChangeStatus moves an account to another status for an operator, with
 	// a reason code and an audit event.
 	ChangeStatus(context.Context, *ChangeStatusRequest) (*ChangeStatusResponse, error)
+	// ListUsers pages through accounts for the admin console, newest first.
+	ListUsers(context.Context, *ListUsersRequest) (*ListUsersResponse, error)
+	// UserStats counts accounts for the admin console's overview.
+	UserStats(context.Context, *UserStatsRequest) (*UserStatsResponse, error)
 	mustEmbedUnimplementedUserServiceServer()
 }
 
@@ -130,6 +160,12 @@ func (UnimplementedUserServiceServer) CheckEligibility(context.Context, *CheckEl
 }
 func (UnimplementedUserServiceServer) ChangeStatus(context.Context, *ChangeStatusRequest) (*ChangeStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ChangeStatus not implemented")
+}
+func (UnimplementedUserServiceServer) ListUsers(context.Context, *ListUsersRequest) (*ListUsersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListUsers not implemented")
+}
+func (UnimplementedUserServiceServer) UserStats(context.Context, *UserStatsRequest) (*UserStatsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UserStats not implemented")
 }
 func (UnimplementedUserServiceServer) mustEmbedUnimplementedUserServiceServer() {}
 func (UnimplementedUserServiceServer) testEmbeddedByValue()                     {}
@@ -224,6 +260,42 @@ func _UserService_ChangeStatus_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _UserService_ListUsers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListUsersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).ListUsers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_ListUsers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).ListUsers(ctx, req.(*ListUsersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _UserService_UserStats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UserStatsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServiceServer).UserStats(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserService_UserStats_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServiceServer).UserStats(ctx, req.(*UserStatsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // UserService_ServiceDesc is the grpc.ServiceDesc for UserService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -246,6 +318,14 @@ var UserService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ChangeStatus",
 			Handler:    _UserService_ChangeStatus_Handler,
+		},
+		{
+			MethodName: "ListUsers",
+			Handler:    _UserService_ListUsers_Handler,
+		},
+		{
+			MethodName: "UserStats",
+			Handler:    _UserService_UserStats_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

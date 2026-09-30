@@ -71,7 +71,7 @@ func setup(ctx context.Context, a *app.App) error {
 		MarketURL:       "http://localhost:8090",
 		WalletURL:       "http://localhost:8092",
 		DerivativesURL:  "http://localhost:8095",
-		WSOrigins:       []string{"astras.vip", "localhost:5173"},
+		WSOrigins:       []string{"astras.vip", "m.astras.vip", "localhost:5173", "localhost:5174"},
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err

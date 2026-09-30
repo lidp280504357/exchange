@@ -5,7 +5,7 @@
 ## 参考行情
 
 - 来源：币安公开行情（`data-api.binance.vision` 的 REST 与 `data-stream.binance.vision` 的 WebSocket）。**币安条款禁止未经授权把它用于交易服务**：只能在测试环境用，上线前按 §11.9 换成有授权的数据源并记 ADR；代码里来源是接口（`ports.ReferenceSource`），可以加源。
-- market-data-service 跟踪 `REFERENCE_SYMBOLS`（测试服为 BTC-USDT）的 1m K 线，功能开关 `market.reference_feed` 打开时运行：每次连接先用 REST 补齐最新一根以来的 K 线（最多一天，请求间隔 200 毫秒），再订阅 `kline_1m` 流；断线按 1 秒起、最长 1 分钟退避重连；K 线按（来源, 交易对, 开盘时间）去重写入 `market.reference_candles`，保留 7 天。开关关掉时连接断开，内存里的参考价作废。
+- market-data-service 跟随交易对表里设了 `reference_symbol` 的交易对（测试服 BTC-USDT、ETH-USDT，见 [market-data.md](market-data.md#参考行情跟随哪些交易对adr-0010)），功能开关 `market.reference_feed` 打开时运行：每次连接先订阅 `kline_1m` 与 `ticker` 流，同时用 REST 补齐最新一根以来的 1m K 线（最多一天，请求间隔 200 毫秒，429 时按 `Retry-After` 暂停）；参考价取最新的 ticker 或 K 线收盘价；断线按 1 秒起、最长 1 分钟退避重连；K 线按（来源, 交易对, 开盘时间）去重写入 `market.reference_candles`，保留 7 天。开关关掉时连接断开，内存里的参考价作废。
 - 参考价只在内网：`GET /internal/market/{symbol}/reference`（`{symbol, source, price, updated_at, fresh}`，5 秒内的算新鲜）。网关不转发 `/internal`，客户端看不到来源与参考价（§11.9：来源的商标与文案要法务确认后才能出现在客户端）。
 - 用途：交易服务在交易对 5 分钟内没有成交时用它作价格带与市价保护价的锚点（这样长时间无成交后的旧成交价不会把做市报价挡在价格带外）；做市机器人围绕它报价。
 - 指标：`market_reference_age_seconds{symbol}`（没有参考价时 -1）、`market_reference_updates_total`、`market_reference_errors_total`；告警 `MarketReferenceStale`（超过 30 秒没更新）。

@@ -15,6 +15,7 @@ import (
 	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
 	"github.com/lidp280504357/exchange/internal/marketdata/application"
 	"github.com/lidp280504357/exchange/internal/marketdata/domain"
+	"github.com/lidp280504357/exchange/internal/marketdata/ports"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/httpx"
 )
@@ -22,8 +23,13 @@ import (
 // Handler serves the market data; no sign-in needed.
 type Handler struct {
 	Svc *application.Service
-	// Ref is the reference feed; nil when none is configured.
+	// Tickers picks each symbol's ticker, the reference market's or the
+	// platform's (ADR-0010).
+	Tickers *application.Tickers
+	// Ref is the reference feed and Guard watches it; nil when none is
+	// configured.
 	Ref   *application.ReferenceFeed
+	Guard *application.FeedGuard
 	Marks *application.Marks
 	// RefKlines serves the charts in reference mode; nil without a feed.
 	RefKlines *application.ReferenceCandles
@@ -33,6 +39,7 @@ type Handler struct {
 // Routes mounts the endpoints on r.
 func (h *Handler) Routes(r chi.Router) {
 	r.Get("/v1/market/tickers", h.tickers)
+	r.Get("/v1/market/summary", h.summary)
 	r.Get("/v1/market/{symbol}/ticker", h.ticker)
 	r.Get("/v1/market/{symbol}/depth", h.depth)
 	r.Get("/v1/market/{symbol}/trades", h.trades)
@@ -44,6 +51,32 @@ func (h *Handler) Routes(r chi.Router) {
 	// market maker read it, and the index components for audits.
 	r.Get("/internal/market/{symbol}/reference", h.reference)
 	r.Get("/internal/market/{symbol}/mark", h.markInternal)
+	r.Get("/internal/market/feed", h.feed)
+}
+
+type haltJSON struct {
+	Symbol   string `json:"symbol"`
+	HaltedAt string `json:"halted_at"`
+}
+
+// feed reports the reference feed's state and the pairs halted for it,
+// for the admin console.
+func (h *Handler) feed(w http.ResponseWriter, r *http.Request) {
+	out := map[string]any{"state": application.FeedOff, "received_at": nil, "followed": []string{}, "halted": []haltJSON{}}
+	if h.Guard != nil {
+		st, err := h.Guard.Status(r.Context())
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		halted := make([]haltJSON, 0, len(st.Halted))
+		for _, x := range st.Halted {
+			halted = append(halted, haltJSON{Symbol: x.Symbol, HaltedAt: x.HaltedAt.UTC().Format(time.RFC3339)})
+		}
+		out = map[string]any{"state": st.State, "received_at": stamp(st.Received), "followed": st.Followed, "halted": halted}
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) reference(w http.ResponseWriter, r *http.Request) {
@@ -72,6 +105,7 @@ func limit(r *http.Request) int {
 // tickerJSON: prices are null while unknown (a pair that never traded).
 type tickerJSON struct {
 	Symbol      string  `json:"symbol"`
+	Rank        *int32  `json:"rank"`
 	Last        *string `json:"last"`
 	Open        *string `json:"open"`
 	High        *string `json:"high"`
@@ -92,38 +126,85 @@ func optional(s string) *string {
 	return &s
 }
 
-func (h *Handler) tickerJSON(t domain.Ticker) tickerJSON {
-	p := application.TickerProto(t, h.Now())
-	return tickerJSON{
+// tickerJSON renders a ticker: a reference ticker is as of when the
+// source computed it, the platform's as of now.
+func (h *Handler) tickerJSON(t domain.Ticker, ranks map[string]int32) tickerJSON {
+	at := t.At
+	if at.IsZero() {
+		at = h.Now()
+	}
+	p := application.TickerProto(t, at)
+	out := tickerJSON{
 		Symbol: p.GetSymbol(), Last: optional(p.GetLast()), Open: optional(p.GetOpen()), High: optional(p.GetHigh()),
 		Low: optional(p.GetLow()), Volume: p.GetVolume(), QuoteVolume: p.GetQuoteVolume(), TradeCount: p.GetTradeCount(),
 		Change: optional(p.GetChange()), Bid: optional(p.GetBid()), Ask: optional(p.GetAsk()),
 		UpdatedAt: p.GetUpdatedAt().AsTime().UTC().Format(time.RFC3339Nano),
 	}
+	if r := ranks[t.Symbol]; r > 0 {
+		out.Rank = &r
+	}
+	return out
+}
+
+// ranks returns the symbols' ranks; none when the listing is unavailable
+// (a ticker is still worth serving).
+func (h *Handler) ranks(r *http.Request) map[string]int32 {
+	ranks, err := h.Tickers.Ranks(r.Context())
+	if err != nil {
+		return nil
+	}
+	return ranks
 }
 
 func (h *Handler) tickers(w http.ResponseWriter, r *http.Request) {
-	list, err := h.Svc.Tickers(r.Context())
+	list, err := h.Tickers.All(r.Context())
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
+	ranks := h.ranks(r)
 	out := make([]tickerJSON, 0, len(list))
 	for _, t := range list {
-		out = append(out, h.tickerJSON(t))
+		out = append(out, h.tickerJSON(t, ranks))
 	}
 	live(w)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"tickers": out})
 }
 
 func (h *Handler) ticker(w http.ResponseWriter, r *http.Request) {
-	t, err := h.Svc.Ticker(r.Context(), symbol(r))
+	t, err := h.Tickers.Ticker(r.Context(), symbol(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
 	live(w)
-	httpx.WriteJSON(w, http.StatusOK, h.tickerJSON(t))
+	httpx.WriteJSON(w, http.StatusOK, h.tickerJSON(t, h.ranks(r)))
+}
+
+// summary serves the home page's market overview.
+func (h *Handler) summary(w http.ResponseWriter, r *http.Request) {
+	n := limit(r)
+	if n <= 0 || n > 20 {
+		n = 5
+	}
+	s, err := h.Tickers.Summary(r.Context(), n)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	ranks := h.ranks(r)
+	render := func(list []domain.Ticker) []tickerJSON {
+		out := make([]tickerJSON, 0, len(list))
+		for _, t := range list {
+			out = append(out, h.tickerJSON(t, ranks))
+		}
+		return out
+	}
+	live(w)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"gainers": render(s.Gainers), "losers": render(s.Losers), "turnover": render(s.Turnover),
+		"updated_at": h.Now().UTC().Format(time.RFC3339Nano),
+	})
 }
 
 // levels renders price levels as [price, quantity] pairs.
@@ -246,10 +327,10 @@ func (h *Handler) candles(w http.ResponseWriter, r *http.Request) {
 }
 
 // referenceKlines reports whether the symbol's chart shows reference
-// candles (market.reference_kline) and of which reference symbol.
-func (h *Handler) referenceKlines(r *http.Request, symbol string) (string, bool) {
+// candles (market.reference_kline) and of which reference market.
+func (h *Handler) referenceKlines(r *http.Request, symbol string) (ports.Reference, bool) {
 	if h.RefKlines == nil {
-		return "", false
+		return ports.Reference{}, false
 	}
 	return h.RefKlines.Serves(r.Context(), symbol)
 }

@@ -5,35 +5,38 @@
   ],
   "assets": [
     {
-      "asset_code": "USDT", "name": "Tether USD", "decimals": 6,
+      "asset_code": "USDT", "name": "Tether USD", "decimals": 6, "rank": 3, "categories": ["stablecoin"],
       "deposit_enabled": false, "withdraw_enabled": false, "trading_enabled": true, "risk_restricted": false,
       "networks": []
     },
     {
-      "asset_code": "BTC", "name": "Bitcoin", "decimals": 8,
+      "asset_code": "BTC", "name": "Bitcoin", "decimals": 8, "rank": 1, "categories": ["layer-1", "pow"],
       "deposit_enabled": false, "withdraw_enabled": false, "trading_enabled": true, "risk_restricted": false,
       "networks": []
     },
     {
-      "asset_code": "ETH", "name": "Ether", "decimals": 18,
+      "asset_code": "ETH", "name": "Ethereum", "decimals": 18, "rank": 2, "categories": ["layer-1", "smart-contracts"],
       "deposit_enabled": true, "withdraw_enabled": true, "trading_enabled": true, "risk_restricted": false,
       "networks": [
         {
           "network": "ETH-SEPOLIA", "chain": "11155111", "contract_address": "", "confirmations": 12,
           "min_deposit": "0.001", "min_withdraw": "0.001", "withdraw_fee": "0.0002", "memo_required": false,
-          "deposit_enabled": true, "withdraw_enabled": true
+          "deposit_enabled": true, "withdraw_enabled": true,
+          "display_name": "Sepolia", "address_format": "EVM", "eta_minutes": 3,
+          "explorer_tx_url": "https://sepolia.etherscan.io/tx/{tx}",
+          "explorer_address_url": "https://sepolia.etherscan.io/address/{address}"
         }
       ]
     }
   ],
   "pairs": [
     {
-      "symbol": "BTC-USDT", "base_asset": "BTC", "quote_asset": "USDT",
+      "symbol": "BTC-USDT", "base_asset": "BTC", "quote_asset": "USDT", "reference_symbol": "BTCUSDT",
       "tick_size": "0.01", "lot_size": "0.0001", "min_quantity": "0.0001", "max_quantity": "100",
       "min_notional": "5", "price_band": "0.1", "fee_tier": "default", "status": "PREPARE"
     },
     {
-      "symbol": "ETH-USDT", "base_asset": "ETH", "quote_asset": "USDT",
+      "symbol": "ETH-USDT", "base_asset": "ETH", "quote_asset": "USDT", "reference_symbol": "ETHUSDT",
       "tick_size": "0.01", "lot_size": "0.0001", "min_quantity": "0.0001", "max_quantity": "1000",
       "min_notional": "5", "price_band": "0.1", "fee_tier": "default", "status": "PREPARE"
     },

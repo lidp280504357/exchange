@@ -27,6 +27,7 @@ type Repos interface {
 	Trades() TradeRepo
 	References() ReferenceRepo
 	Funding() FundingRepo
+	Halts() HaltRepo
 	// Emit queues an event on the outbox (business events that must not
 	// be lost, such as risk.events' SystemDegraded; derived market data
 	// goes out directly).
@@ -82,25 +83,78 @@ type ReferenceRepo interface {
 	Purge(ctx context.Context, before time.Time) (int64, error)
 }
 
+// Reference is a pair's reference market (ADR-0010): the source's symbol
+// and how its prices convert to the pair's.
+type Reference struct {
+	// Symbol is the platform pair, e.g. 1000PEPE-USDT.
+	Symbol string
+	// Remote is the source's symbol, e.g. PEPEUSDT.
+	Remote string
+	// Multiplier is a power of ten: platform prices are the source's times
+	// it, platform quantities the source's divided by it (ADR-0014).
+	Multiplier decimal.Decimal
+}
+
+// StreamHandlers take a reference stream's updates, already in the
+// platform's symbols and units.
+type StreamHandlers struct {
+	// Candle gets every 1m candle update.
+	Candle func(domain.Candle)
+	// Ticker gets every rolling 24-hour ticker update.
+	Ticker func(domain.Ticker)
+}
+
+// Halt is a pair market-data-service halted when the reference feed was
+// lost.
+type Halt struct {
+	Symbol   string
+	HaltedAt time.Time
+}
+
+// HaltRepo remembers the pairs halted on feed loss.
+type HaltRepo interface {
+	List(ctx context.Context) ([]Halt, error)
+	// Add records a halt; one recorded already is kept.
+	Add(ctx context.Context, symbol string, at time.Time) error
+	Remove(ctx context.Context, symbol string) error
+}
+
 // ReferenceSource is an external market data source (§5.11: several may
-// be configured; phase 2 has Binance public data, test environments only).
+// be configured; Binance public data, test environments only until a
+// license exists, ADR-0004 and ADR-0010). Everything it returns is in the
+// platform's symbols and units.
 type ReferenceSource interface {
 	// Name identifies the source, e.g. "binance".
 	Name() string
-	// Backfill returns the 1m candles of symbol opening at or after from,
-	// oldest first.
-	Backfill(ctx context.Context, symbol string, from time.Time) ([]domain.Candle, error)
-	// Stream calls on with every live 1m candle update of symbols until
-	// ctx ends or the connection fails.
-	Stream(ctx context.Context, symbols []string, on func(domain.Candle)) error
+	// Backfill returns the 1m candles of ref opening in [from, to), oldest
+	// first.
+	Backfill(ctx context.Context, ref Reference, from, to time.Time) ([]domain.Candle, error)
+	// Tickers returns the current rolling 24-hour tickers of refs.
+	Tickers(ctx context.Context, refs []Reference) ([]domain.Ticker, error)
+	// Stream passes every live 1m candle and ticker update of refs to on
+	// until ctx ends or the connection fails.
+	Stream(ctx context.Context, refs []Reference, on StreamHandlers) error
 }
 
 // ReferenceHistory returns a reference source's candles of any interval,
 // for reference K-lines (market.reference_kline).
 type ReferenceHistory interface {
-	// Klines returns the latest limit candles of symbol at interval up to
-	// the one containing to (now when zero), oldest first.
-	Klines(ctx context.Context, symbol string, interval domain.Interval, to time.Time, limit int) ([]domain.Candle, error)
+	// Klines returns the latest limit candles of ref at interval opening
+	// before to (up to now when zero), oldest first.
+	Klines(ctx context.Context, ref Reference, interval domain.Interval, to time.Time, limit int) ([]domain.Candle, error)
+}
+
+// Pair is what market data needs of a spot trading pair.
+type Pair struct {
+	Symbol string
+	Base   string
+	Quote  string
+	Status string
+	// Rank is the base asset's market-cap rank, 0 when unranked.
+	Rank int32
+	// Reference is the market the pair's data follows; Remote is empty
+	// when it follows none.
+	Reference Reference
 }
 
 // Instruments tells which trading pairs and contracts exist
@@ -113,6 +167,15 @@ type Instruments interface {
 	Symbols(ctx context.Context) ([]string, error)
 	// Contracts lists the perpetual contracts that are not delisted.
 	Contracts(ctx context.Context) ([]Contract, error)
+	// Pairs lists the spot pairs that are not delisted.
+	Pairs(ctx context.Context) ([]Pair, error)
+	// Ranks returns the base asset's rank of every listed pair and
+	// contract (0: unranked).
+	Ranks(ctx context.Context) (map[string]int32, error)
+	// SetPairStatus moves a pair along its status machine for
+	// market-data-service itself (a halt on reference feed loss) and
+	// returns the previous status.
+	SetPairStatus(ctx context.Context, symbol, to, reason string) (string, error)
 }
 
 // Contract is what the mark price and funding need of a perpetual

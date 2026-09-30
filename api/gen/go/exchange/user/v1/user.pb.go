@@ -598,6 +598,318 @@ func (x *ChangeStatusResponse) GetToStatus() string {
 	return ""
 }
 
+type ListUsersRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Only accounts in this status (ACTIVE, RISK_REVIEW, FROZEN, CLOSED);
+	// empty for all.
+	Status string `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	// Only accounts of this region (ISO 3166-1 alpha-2); empty for all.
+	Region string `protobuf:"bytes,2,opt,name=region,proto3" json:"region,omitempty"`
+	// Accounts created from this time on (unset: no bound) and before
+	// created_before (unset: no bound).
+	CreatedFrom   *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=created_from,json=createdFrom,proto3" json:"created_from,omitempty"`
+	CreatedBefore *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=created_before,json=createdBefore,proto3" json:"created_before,omitempty"`
+	// The previous page's next_cursor; empty for the newest.
+	Cursor string `protobuf:"bytes,5,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	// At most this many (1 to 200; default 50).
+	Limit         int32 `protobuf:"varint,6,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListUsersRequest) Reset() {
+	*x = ListUsersRequest{}
+	mi := &file_exchange_user_v1_user_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListUsersRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListUsersRequest) ProtoMessage() {}
+
+func (x *ListUsersRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_user_v1_user_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListUsersRequest.ProtoReflect.Descriptor instead.
+func (*ListUsersRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *ListUsersRequest) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *ListUsersRequest) GetRegion() string {
+	if x != nil {
+		return x.Region
+	}
+	return ""
+}
+
+func (x *ListUsersRequest) GetCreatedFrom() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedFrom
+	}
+	return nil
+}
+
+func (x *ListUsersRequest) GetCreatedBefore() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedBefore
+	}
+	return nil
+}
+
+func (x *ListUsersRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+func (x *ListUsersRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type ListUsersResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Users []*User                `protobuf:"bytes,1,rep,name=users,proto3" json:"users,omitempty"`
+	// Empty on the last page.
+	NextCursor    string `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListUsersResponse) Reset() {
+	*x = ListUsersResponse{}
+	mi := &file_exchange_user_v1_user_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListUsersResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListUsersResponse) ProtoMessage() {}
+
+func (x *ListUsersResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_user_v1_user_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListUsersResponse.ProtoReflect.Descriptor instead.
+func (*ListUsersResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ListUsersResponse) GetUsers() []*User {
+	if x != nil {
+		return x.Users
+	}
+	return nil
+}
+
+func (x *ListUsersResponse) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
+type UserStatsRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Accounts created from this time on are also counted apart.
+	Since *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=since,proto3" json:"since,omitempty"`
+	// New accounts per UTC day for the last days (today included; 0 to 90).
+	Days          int32 `protobuf:"varint,2,opt,name=days,proto3" json:"days,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UserStatsRequest) Reset() {
+	*x = UserStatsRequest{}
+	mi := &file_exchange_user_v1_user_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UserStatsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UserStatsRequest) ProtoMessage() {}
+
+func (x *UserStatsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_user_v1_user_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UserStatsRequest.ProtoReflect.Descriptor instead.
+func (*UserStatsRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *UserStatsRequest) GetSince() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Since
+	}
+	return nil
+}
+
+func (x *UserStatsRequest) GetDays() int32 {
+	if x != nil {
+		return x.Days
+	}
+	return 0
+}
+
+type UserStatsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Total         int64                  `protobuf:"varint,1,opt,name=total,proto3" json:"total,omitempty"`
+	CreatedSince  int64                  `protobuf:"varint,2,opt,name=created_since,json=createdSince,proto3" json:"created_since,omitempty"`
+	Days          []*DayCount            `protobuf:"bytes,3,rep,name=days,proto3" json:"days,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UserStatsResponse) Reset() {
+	*x = UserStatsResponse{}
+	mi := &file_exchange_user_v1_user_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UserStatsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UserStatsResponse) ProtoMessage() {}
+
+func (x *UserStatsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_user_v1_user_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UserStatsResponse.ProtoReflect.Descriptor instead.
+func (*UserStatsResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *UserStatsResponse) GetTotal() int64 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+func (x *UserStatsResponse) GetCreatedSince() int64 {
+	if x != nil {
+		return x.CreatedSince
+	}
+	return 0
+}
+
+func (x *UserStatsResponse) GetDays() []*DayCount {
+	if x != nil {
+		return x.Days
+	}
+	return nil
+}
+
+// DayCount is a number of accounts created on one UTC day.
+type DayCount struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// YYYY-MM-DD.
+	Day           string `protobuf:"bytes,1,opt,name=day,proto3" json:"day,omitempty"`
+	Count         int64  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DayCount) Reset() {
+	*x = DayCount{}
+	mi := &file_exchange_user_v1_user_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DayCount) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DayCount) ProtoMessage() {}
+
+func (x *DayCount) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_user_v1_user_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DayCount.ProtoReflect.Descriptor instead.
+func (*DayCount) Descriptor() ([]byte, []int) {
+	return file_exchange_user_v1_user_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *DayCount) GetDay() string {
+	if x != nil {
+		return x.Day
+	}
+	return ""
+}
+
+func (x *DayCount) GetCount() int64 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
 var File_exchange_user_v1_user_proto protoreflect.FileDescriptor
 
 const file_exchange_user_v1_user_proto_rawDesc = "" +
@@ -645,13 +957,36 @@ const file_exchange_user_v1_user_proto_rawDesc = "" +
 	"\x14ChangeStatusResponse\x12\x1f\n" +
 	"\vfrom_status\x18\x01 \x01(\tR\n" +
 	"fromStatus\x12\x1b\n" +
-	"\tto_status\x18\x02 \x01(\tR\btoStatus2\x80\x03\n" +
+	"\tto_status\x18\x02 \x01(\tR\btoStatus\"\xf2\x01\n" +
+	"\x10ListUsersRequest\x12\x16\n" +
+	"\x06status\x18\x01 \x01(\tR\x06status\x12\x16\n" +
+	"\x06region\x18\x02 \x01(\tR\x06region\x12=\n" +
+	"\fcreated_from\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\vcreatedFrom\x12A\n" +
+	"\x0ecreated_before\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\rcreatedBefore\x12\x16\n" +
+	"\x06cursor\x18\x05 \x01(\tR\x06cursor\x12\x14\n" +
+	"\x05limit\x18\x06 \x01(\x05R\x05limit\"b\n" +
+	"\x11ListUsersResponse\x12,\n" +
+	"\x05users\x18\x01 \x03(\v2\x16.exchange.user.v1.UserR\x05users\x12\x1f\n" +
+	"\vnext_cursor\x18\x02 \x01(\tR\n" +
+	"nextCursor\"X\n" +
+	"\x10UserStatsRequest\x120\n" +
+	"\x05since\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x05since\x12\x12\n" +
+	"\x04days\x18\x02 \x01(\x05R\x04days\"~\n" +
+	"\x11UserStatsResponse\x12\x14\n" +
+	"\x05total\x18\x01 \x01(\x03R\x05total\x12#\n" +
+	"\rcreated_since\x18\x02 \x01(\x03R\fcreatedSince\x12.\n" +
+	"\x04days\x18\x03 \x03(\v2\x1a.exchange.user.v1.DayCountR\x04days\"2\n" +
+	"\bDayCount\x12\x10\n" +
+	"\x03day\x18\x01 \x01(\tR\x03day\x12\x14\n" +
+	"\x05count\x18\x02 \x01(\x03R\x05count2\xac\x04\n" +
 	"\vUserService\x12W\n" +
 	"\n" +
 	"CreateUser\x12#.exchange.user.v1.CreateUserRequest\x1a$.exchange.user.v1.CreateUserResponse\x12N\n" +
 	"\aGetUser\x12 .exchange.user.v1.GetUserRequest\x1a!.exchange.user.v1.GetUserResponse\x12i\n" +
 	"\x10CheckEligibility\x12).exchange.user.v1.CheckEligibilityRequest\x1a*.exchange.user.v1.CheckEligibilityResponse\x12]\n" +
-	"\fChangeStatus\x12%.exchange.user.v1.ChangeStatusRequest\x1a&.exchange.user.v1.ChangeStatusResponseB\xc9\x01\n" +
+	"\fChangeStatus\x12%.exchange.user.v1.ChangeStatusRequest\x1a&.exchange.user.v1.ChangeStatusResponse\x12T\n" +
+	"\tListUsers\x12\".exchange.user.v1.ListUsersRequest\x1a#.exchange.user.v1.ListUsersResponse\x12T\n" +
+	"\tUserStats\x12\".exchange.user.v1.UserStatsRequest\x1a#.exchange.user.v1.UserStatsResponseB\xc9\x01\n" +
 	"\x14com.exchange.user.v1B\tUserProtoP\x01ZDgithub.com/lidp280504357/exchange/api/gen/go/exchange/user/v1;userv1\xa2\x02\x03EUX\xaa\x02\x10Exchange.User.V1\xca\x02\x10Exchange\\User\\V1\xe2\x02\x1cExchange\\User\\V1\\GPBMetadata\xea\x02\x12Exchange::User::V1b\x06proto3"
 
 var (
@@ -666,7 +1001,7 @@ func file_exchange_user_v1_user_proto_rawDescGZIP() []byte {
 	return file_exchange_user_v1_user_proto_rawDescData
 }
 
-var file_exchange_user_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_exchange_user_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_exchange_user_v1_user_proto_goTypes = []any{
 	(*User)(nil),                     // 0: exchange.user.v1.User
 	(*CreateUserRequest)(nil),        // 1: exchange.user.v1.CreateUserRequest
@@ -677,25 +1012,39 @@ var file_exchange_user_v1_user_proto_goTypes = []any{
 	(*CheckEligibilityResponse)(nil), // 6: exchange.user.v1.CheckEligibilityResponse
 	(*ChangeStatusRequest)(nil),      // 7: exchange.user.v1.ChangeStatusRequest
 	(*ChangeStatusResponse)(nil),     // 8: exchange.user.v1.ChangeStatusResponse
-	(*timestamppb.Timestamp)(nil),    // 9: google.protobuf.Timestamp
+	(*ListUsersRequest)(nil),         // 9: exchange.user.v1.ListUsersRequest
+	(*ListUsersResponse)(nil),        // 10: exchange.user.v1.ListUsersResponse
+	(*UserStatsRequest)(nil),         // 11: exchange.user.v1.UserStatsRequest
+	(*UserStatsResponse)(nil),        // 12: exchange.user.v1.UserStatsResponse
+	(*DayCount)(nil),                 // 13: exchange.user.v1.DayCount
+	(*timestamppb.Timestamp)(nil),    // 14: google.protobuf.Timestamp
 }
 var file_exchange_user_v1_user_proto_depIdxs = []int32{
-	9, // 0: exchange.user.v1.User.created_at:type_name -> google.protobuf.Timestamp
-	0, // 1: exchange.user.v1.CreateUserResponse.user:type_name -> exchange.user.v1.User
-	0, // 2: exchange.user.v1.GetUserResponse.user:type_name -> exchange.user.v1.User
-	1, // 3: exchange.user.v1.UserService.CreateUser:input_type -> exchange.user.v1.CreateUserRequest
-	3, // 4: exchange.user.v1.UserService.GetUser:input_type -> exchange.user.v1.GetUserRequest
-	5, // 5: exchange.user.v1.UserService.CheckEligibility:input_type -> exchange.user.v1.CheckEligibilityRequest
-	7, // 6: exchange.user.v1.UserService.ChangeStatus:input_type -> exchange.user.v1.ChangeStatusRequest
-	2, // 7: exchange.user.v1.UserService.CreateUser:output_type -> exchange.user.v1.CreateUserResponse
-	4, // 8: exchange.user.v1.UserService.GetUser:output_type -> exchange.user.v1.GetUserResponse
-	6, // 9: exchange.user.v1.UserService.CheckEligibility:output_type -> exchange.user.v1.CheckEligibilityResponse
-	8, // 10: exchange.user.v1.UserService.ChangeStatus:output_type -> exchange.user.v1.ChangeStatusResponse
-	7, // [7:11] is the sub-list for method output_type
-	3, // [3:7] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	14, // 0: exchange.user.v1.User.created_at:type_name -> google.protobuf.Timestamp
+	0,  // 1: exchange.user.v1.CreateUserResponse.user:type_name -> exchange.user.v1.User
+	0,  // 2: exchange.user.v1.GetUserResponse.user:type_name -> exchange.user.v1.User
+	14, // 3: exchange.user.v1.ListUsersRequest.created_from:type_name -> google.protobuf.Timestamp
+	14, // 4: exchange.user.v1.ListUsersRequest.created_before:type_name -> google.protobuf.Timestamp
+	0,  // 5: exchange.user.v1.ListUsersResponse.users:type_name -> exchange.user.v1.User
+	14, // 6: exchange.user.v1.UserStatsRequest.since:type_name -> google.protobuf.Timestamp
+	13, // 7: exchange.user.v1.UserStatsResponse.days:type_name -> exchange.user.v1.DayCount
+	1,  // 8: exchange.user.v1.UserService.CreateUser:input_type -> exchange.user.v1.CreateUserRequest
+	3,  // 9: exchange.user.v1.UserService.GetUser:input_type -> exchange.user.v1.GetUserRequest
+	5,  // 10: exchange.user.v1.UserService.CheckEligibility:input_type -> exchange.user.v1.CheckEligibilityRequest
+	7,  // 11: exchange.user.v1.UserService.ChangeStatus:input_type -> exchange.user.v1.ChangeStatusRequest
+	9,  // 12: exchange.user.v1.UserService.ListUsers:input_type -> exchange.user.v1.ListUsersRequest
+	11, // 13: exchange.user.v1.UserService.UserStats:input_type -> exchange.user.v1.UserStatsRequest
+	2,  // 14: exchange.user.v1.UserService.CreateUser:output_type -> exchange.user.v1.CreateUserResponse
+	4,  // 15: exchange.user.v1.UserService.GetUser:output_type -> exchange.user.v1.GetUserResponse
+	6,  // 16: exchange.user.v1.UserService.CheckEligibility:output_type -> exchange.user.v1.CheckEligibilityResponse
+	8,  // 17: exchange.user.v1.UserService.ChangeStatus:output_type -> exchange.user.v1.ChangeStatusResponse
+	10, // 18: exchange.user.v1.UserService.ListUsers:output_type -> exchange.user.v1.ListUsersResponse
+	12, // 19: exchange.user.v1.UserService.UserStats:output_type -> exchange.user.v1.UserStatsResponse
+	14, // [14:20] is the sub-list for method output_type
+	8,  // [8:14] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_exchange_user_v1_user_proto_init() }
@@ -709,7 +1058,7 @@ func file_exchange_user_v1_user_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_user_v1_user_proto_rawDesc), len(file_exchange_user_v1_user_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

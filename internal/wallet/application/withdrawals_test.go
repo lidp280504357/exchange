@@ -111,6 +111,17 @@ func (w memWithdrawals) ByStatus(_ context.Context, network string, statuses ...
 	return w.all(func(x domain.Withdrawal) bool { return x.Network == network && slices.Contains(statuses, x.Status) }), nil
 }
 
+func (w memWithdrawals) Page(_ context.Context, _ string, f ports.WithdrawalFilter) ([]domain.Withdrawal, error) {
+	out := w.all(func(x domain.Withdrawal) bool {
+		return (f.Status == "" || x.Status == f.Status) && (f.UserID == "" || x.UserID == f.UserID) &&
+			(f.After == "" || (f.Oldest && x.ID > f.After) || (!f.Oldest && x.ID < f.After))
+	})
+	if !f.Oldest {
+		slices.Reverse(out)
+	}
+	return out[:min(f.Limit, len(out))], nil
+}
+
 func (w memWithdrawals) Unreleased(_ context.Context, network string) ([]domain.Withdrawal, error) {
 	return w.all(func(x domain.Withdrawal) bool { return x.Network == network && x.NeedsRelease() }), nil
 }
@@ -499,4 +510,41 @@ func (refusingSigner) HotWallet(context.Context) (string, error) { return hotWal
 
 func (refusingSigner) Sign(context.Context, ports.SignRequest) (ports.Signed, error) {
 	return ports.Signed{}, apperr.New(apperr.KindForbidden, "SIGNER_REFUSED", "no").WithDetail("reason", "daily limit")
+}
+
+func TestValidateAddress(t *testing.T) {
+	w := newWithdrawHarness(t)
+	ctx := context.Background()
+	bobAddr, _, err := w.svc.DepositAddress(ctx, "bob", "ETH", net)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliceAddr, _, err := w.svc.DepositAddress(ctx, "alice", "ETH", net)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name, address, reason string
+		internal              bool
+	}{
+		{"outside", "0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed", "", false},
+		{"another user's deposit address", bobAddr.Address, "", true},
+		{"own deposit address", aliceAddr.Address, domain.ReasonAddressOwn, false},
+		{"typo", "0x5AAeb6053F3E94C9b9A09f33669435E7Ef1BeAed", domain.ReasonAddressChecksum, false},
+	} {
+		v, err := w.svc.ValidateAddress(ctx, "alice", "", net, c.address, "")
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if v.Valid != (c.reason == "") || v.Reason != c.reason || v.Internal != c.internal {
+			t.Errorf("%s: %+v", c.name, v)
+		}
+	}
+	if _, err := w.svc.ValidateAddress(ctx, "alice", "BTC", net, "0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed", ""); err == nil {
+		t.Error("an asset the network does not carry")
+	}
+	nets, err := w.svc.NetworksOf(ctx, "eth")
+	if err != nil || len(nets) != 1 || nets[0].Network != net {
+		t.Fatalf("networks %+v %v", nets, err)
+	}
 }

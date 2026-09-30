@@ -144,3 +144,46 @@ func TestPairStatusMachine(t *testing.T) {
 		t.Fatal("a reason is required")
 	}
 }
+
+func TestListingMetadata(t *testing.T) {
+	svc, _ := setup(t)
+	ctx := context.Background()
+	cfg := config()
+	cfg.Assets[1].Rank, cfg.Assets[1].Categories = 1, []string{"layer-1", "pow"}
+	cfg.Assets[0].Networks[0].DisplayName, cfg.Assets[0].Networks[0].ETAMinutes = "Sepolia", 3
+	cfg.Assets[0].Networks[0].ExplorerTxURL = "https://sepolia.etherscan.io/tx/{tx}"
+	cfg.Pairs[0].ReferenceSymbol = "BTCUSDT"
+	if _, err := svc.Apply(ctx, cfg, "cli:test", "seed"); err != nil {
+		t.Fatal(err)
+	}
+	p, err := svc.Pair(ctx, "BTC-USDT")
+	if err != nil || p.ReferenceSymbol != "BTCUSDT" || !p.ReferenceMultiplier.Equal(d("1")) || p.ListedAt.IsZero() ||
+		p.BaseName != "Bitcoin" || p.Rank != 1 || len(p.Categories) != 2 {
+		t.Fatalf("pair: %+v %v", p, err)
+	}
+	// Omitted multiplier and listing time keep what is stored: nothing changes.
+	if res, err := svc.Apply(ctx, cfg, "cli:test", "again"); err != nil || len(res.Changed) != 0 {
+		t.Fatalf("second apply: %+v %v", res, err)
+	}
+	listed := p.ListedAt
+	cfg.Pairs[0].ReferenceSymbol, cfg.Pairs[0].ReferenceMultiplier = "PEPEUSDT", d("1000")
+	if res, err := svc.Apply(ctx, cfg, "cli:test", "remap"); err != nil || len(res.Changed) != 1 {
+		t.Fatalf("remap: %+v %v", res, err)
+	}
+	pairs, err := svc.Pairs(ctx)
+	if err != nil || len(pairs) != 1 || pairs[0].ReferenceSymbol != "PEPEUSDT" || !pairs[0].ReferenceMultiplier.Equal(d("1000")) ||
+		!pairs[0].ListedAt.Equal(listed) || pairs[0].BaseName != "Bitcoin" {
+		t.Fatalf("pairs: %+v %v", pairs, err)
+	}
+	assets, err := svc.Assets(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := assets[1].Networks[0]
+	if n.DisplayName != "Sepolia" || n.AddressFormat != domain.FormatEVM || n.ETAMinutes != 3 || n.ExplorerTxURL == "" {
+		t.Fatalf("network: %+v", n)
+	}
+	if assets[0].Rank != 1 || assets[0].Categories[1] != "pow" {
+		t.Fatalf("asset: %+v", assets[0])
+	}
+}

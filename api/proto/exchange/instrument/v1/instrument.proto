@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package exchange.instrument.v1;
 
+import "google/protobuf/timestamp.proto";
+
 // InstrumentService serves the reference data other services rely on:
 // assets with their networks, trading pairs and fee schedules
 // (requirements §5.5). Decimal values are strings (ADR-0008). Public REST
@@ -35,6 +37,10 @@ message Asset {
   bool risk_restricted = 7;
   repeated Network networks = 8;
   int64 version = 9;
+  // Market-cap rank at listing; 0 when unranked.
+  int32 rank = 10;
+  // Sector tags in lower case, e.g. layer-1, defi, meme.
+  repeated string categories = 11;
 }
 
 // Network is an asset on one chain.
@@ -55,6 +61,16 @@ message Network {
   bool deposit_enabled = 10;
   bool withdraw_enabled = 11;
   int64 version = 12;
+  // Name users see, e.g. TRC20, BEP20, ERC20, Bitcoin.
+  string display_name = 13;
+  // Address format: EVM, TRON or BTC.
+  string address_format = 14;
+  // Typical minutes from the transfer to the credit.
+  int32 eta_minutes = 15;
+  // Block explorer links with a {tx} or {address} placeholder; empty when
+  // the network has none.
+  string explorer_tx_url = 16;
+  string explorer_address_url = 17;
 }
 
 message TradingPair {
@@ -80,6 +96,13 @@ message TradingPair {
   // PREPARE, TRADING, HALT, CANCEL_ONLY or DELISTED.
   string status = 13;
   int64 version = 14;
+  // The reference market followed for display (ADR-0010), e.g. BTCUSDT;
+  // empty when the pair shows only its own market data.
+  string reference_symbol = 15;
+  // Platform price = reference price x reference_multiplier (1000 for a
+  // 1000PEPE pair, ADR-0014); quantities divide by it.
+  string reference_multiplier = 16;
+  google.protobuf.Timestamp listed_at = 17;
 }
 
 // RiskTier is one step of a contract's risk limit ladder (requirements

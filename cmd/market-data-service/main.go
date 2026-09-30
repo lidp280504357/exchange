@@ -38,13 +38,12 @@ type settings struct {
 	// InstrumentAddr is instrument-service's gRPC address, for the listed
 	// pairs (INSTRUMENT_GRPC_ADDR).
 	InstrumentAddr string `koanf:"instrument_grpc_addr"`
-	// ReferenceSymbols are the pairs that get reference prices while
-	// market.reference_feed is on (REFERENCE_SYMBOLS, e.g. BTC-USDT);
-	// the source is Binance public data at BINANCE_REST_URL and
-	// BINANCE_STREAM_URL (§11.9: test environments only).
-	ReferenceSymbols []string `koanf:"reference_symbols"`
-	BinanceREST      string   `koanf:"binance_rest_url"`
-	BinanceStream    string   `koanf:"binance_stream_url"`
+	// The reference source is Binance public data at BINANCE_REST_URL and
+	// BINANCE_STREAM_URL (§11.9, ADR-0010: test environments only). It
+	// follows the pairs whose reference_symbol is set while
+	// market.reference_feed is on.
+	BinanceREST   string `koanf:"binance_rest_url"`
+	BinanceStream string `koanf:"binance_stream_url"`
 	// IndexMinSources is the fewest reference sources an index price
 	// needs (INDEX_MIN_SOURCES, §11.7: 2); test environments with Binance
 	// alone set 1.
@@ -130,27 +129,25 @@ func setup(ctx context.Context, a *app.App) error {
 	}
 	pusher := application.NewPusher(svc, prod, events, a.Metrics())
 	a.Add("market push", app.Loop(pusher.Run))
-	var (
-		feed      *application.ReferenceFeed
-		sources   application.IndexSources
-		refKlines *application.ReferenceCandles
-	)
-	if len(cfg.ReferenceSymbols) > 0 {
-		flagClient, err := bootstrap.Flags(ctx, a, cfg.Postgres)
-		if err != nil {
-			return err
-		}
-		src := binance.New(cfg.BinanceREST, cfg.BinanceStream, &http.Client{Timeout: 15 * time.Second})
-		feed = application.NewReferenceFeed(src, store, flagClient, cfg.ReferenceSymbols, a.Logger(), a.Metrics())
-		sources = feed
-		a.Add("reference feed", app.Loop(feed.Run))
-		// Reference K-lines (market.reference_kline, test environments).
-		refKlines = application.NewReferenceCandles(src, flagClient, listed, cfg.ReferenceSymbols, a.Logger())
-		feed.Observe(refKlines.Observe)
-		pusher.UseReference(refKlines)
+	flagClient, err := bootstrap.Flags(ctx, a, cfg.Postgres)
+	if err != nil {
+		return err
 	}
+	// Reference market data (ADR-0010): candles, tickers and prices of the
+	// pairs with a reference market, while market.reference_feed is on.
+	src := binance.New(cfg.BinanceREST, cfg.BinanceStream, &http.Client{Timeout: 15 * time.Second})
+	refs := application.NewReferenceMap(listed, a.Logger())
+	feed := application.NewReferenceFeed(src, store, flagClient, listed, a.Logger(), a.Metrics())
+	a.Add("reference feed", app.Loop(feed.Run))
+	refKlines := application.NewReferenceCandles(src, flagClient, refs, a.Logger())
+	feed.Observe(refKlines.Observe)
+	tickers := application.NewTickers(svc, feed, refs, flagClient, listed)
+	pusher.Use(refKlines.Push)
+	pusher.Use(tickers.Push)
+	guard := application.NewFeedGuard(feed, listed, store, flagClient, a.Logger(), a.Metrics())
+	a.Add("feed guard", app.Loop(guard.Run))
 	sourceWeights, _ := weights(cfg.IndexSourceWeights) // validated
-	marks := application.NewMarks(svc, listed, sources, store, pusher, prod, events,
+	marks := application.NewMarks(svc, listed, feed, store, pusher, prod, events,
 		application.MarksConfig{MinSources: cfg.IndexMinSources, Weights: sourceWeights}, a.Logger(), a.Metrics())
 	a.Add("contract prices", app.Loop(marks.Run))
 	a.Add("purge", app.Loop(func(ctx context.Context) error {
@@ -167,16 +164,14 @@ func setup(ctx context.Context, a *app.App) error {
 			} else if n > 0 {
 				a.Logger().InfoContext(ctx, "trades purged", "trades", n)
 			}
-			if feed != nil {
-				if n, err := feed.Purge(ctx); err != nil {
-					a.Logger().WarnContext(ctx, "reference purge failed", "error", err)
-				} else if n > 0 {
-					a.Logger().InfoContext(ctx, "reference candles purged", "candles", n)
-				}
+			if n, err := feed.Purge(ctx); err != nil {
+				a.Logger().WarnContext(ctx, "reference purge failed", "error", err)
+			} else if n > 0 {
+				a.Logger().InfoContext(ctx, "reference candles purged", "candles", n)
 			}
 		}
 	}))
 	r := a.NewRouter()
-	(&httpapi.Handler{Svc: svc, Ref: feed, Marks: marks, RefKlines: refKlines, Now: time.Now}).Routes(r)
+	(&httpapi.Handler{Svc: svc, Tickers: tickers, Ref: feed, Guard: guard, Marks: marks, RefKlines: refKlines, Now: time.Now}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
 }

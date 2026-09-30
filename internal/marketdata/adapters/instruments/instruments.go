@@ -1,5 +1,5 @@
 // Package instruments tells market-data-service which pairs and contracts
-// exist.
+// exist, what they follow, and halts pairs for it.
 package instruments
 
 import (
@@ -15,8 +15,11 @@ import (
 	"github.com/lidp280504357/exchange/internal/marketdata/ports"
 )
 
-// Client implements ports.Instruments from ListTradingPairs and
-// ListContracts, cached for ttl.
+// Actor is who market-data-service's own status changes are recorded as.
+const Actor = "market-data-service"
+
+// Client implements ports.Instruments from ListTradingPairs, ListContracts
+// and ListAssets, cached for ttl.
 type Client struct {
 	c   instrumentv1.InstrumentServiceClient
 	ttl time.Duration
@@ -24,6 +27,8 @@ type Client struct {
 	mu        sync.Mutex
 	symbols   []string
 	contracts []ports.Contract
+	pairs     []ports.Pair
+	ranks     map[string]int32
 	at        time.Time
 }
 
@@ -32,7 +37,7 @@ func New(c instrumentv1.InstrumentServiceClient, ttl time.Duration) *Client {
 	return &Client{c: c, ttl: ttl}
 }
 
-// refresh reloads both lists when the cache is older than ttl; c.mu is
+// refresh reloads the lists when the cache is older than ttl; c.mu is
 // held.
 func (c *Client) refresh(ctx context.Context) error {
 	if c.symbols != nil && time.Since(c.at) < c.ttl {
@@ -46,11 +51,28 @@ func (c *Client) refresh(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	assets, err := c.c.ListAssets(ctx, &instrumentv1.ListAssetsRequest{})
+	if err != nil {
+		return err
+	}
+	assetRank := map[string]int32{}
+	for _, a := range assets.GetAssets() {
+		assetRank[a.GetAssetCode()] = a.GetRank()
+	}
 	symbols := []string{}
+	listed := []ports.Pair{}
+	ranks := map[string]int32{}
 	for _, p := range pairs.GetPairs() {
-		if p.GetStatus() != "DELISTED" {
-			symbols = append(symbols, p.GetSymbol())
+		if p.GetStatus() == "DELISTED" {
+			continue
 		}
+		pair, err := toPair(p, assetRank[p.GetBaseAsset()])
+		if err != nil {
+			return err
+		}
+		listed = append(listed, pair)
+		symbols = append(symbols, p.GetSymbol())
+		ranks[p.GetSymbol()] = pair.Rank
 	}
 	contracts := []ports.Contract{}
 	for _, k := range list.GetContracts() {
@@ -63,10 +85,28 @@ func (c *Client) refresh(ctx context.Context) error {
 		}
 		contracts = append(contracts, ct)
 		symbols = append(symbols, k.GetSymbol())
+		ranks[k.GetSymbol()] = assetRank[k.GetBaseAsset()]
 	}
 	slices.Sort(symbols)
-	c.symbols, c.contracts, c.at = symbols, contracts, time.Now()
+	c.symbols, c.contracts, c.pairs, c.ranks, c.at = symbols, contracts, listed, ranks, time.Now()
 	return nil
+}
+
+func toPair(p *instrumentv1.TradingPair, rank int32) (ports.Pair, error) {
+	out := ports.Pair{Symbol: p.GetSymbol(), Base: p.GetBaseAsset(), Quote: p.GetQuoteAsset(), Status: p.GetStatus(), Rank: rank}
+	if p.GetReferenceSymbol() == "" {
+		return out, nil
+	}
+	m := decimal.NewFromInt(1)
+	if s := p.GetReferenceMultiplier(); s != "" {
+		d, err := decimal.NewFromString(s)
+		if err != nil || !d.IsPositive() {
+			return ports.Pair{}, fmt.Errorf("pair %s: bad reference multiplier %q", p.GetSymbol(), s)
+		}
+		m = d
+	}
+	out.Reference = ports.Reference{Symbol: p.GetSymbol(), Remote: p.GetReferenceSymbol(), Multiplier: m}
+	return out, nil
 }
 
 func contract(k *instrumentv1.Contract) (ports.Contract, error) {
@@ -113,4 +153,37 @@ func (c *Client) Contracts(ctx context.Context) ([]ports.Contract, error) {
 		return nil, err
 	}
 	return c.contracts, nil
+}
+
+// Pairs lists the spot pairs that are not delisted.
+func (c *Client) Pairs(ctx context.Context) ([]ports.Pair, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.refresh(ctx); err != nil {
+		return nil, err
+	}
+	return c.pairs, nil
+}
+
+// Ranks returns the base asset's rank of each listed pair and contract.
+func (c *Client) Ranks(ctx context.Context) (map[string]int32, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.refresh(ctx); err != nil {
+		return nil, err
+	}
+	return c.ranks, nil
+}
+
+// SetPairStatus moves a pair for market-data-service and drops the cache,
+// so the next listing shows the new status.
+func (c *Client) SetPairStatus(ctx context.Context, symbol, to, reason string) (string, error) {
+	resp, err := c.c.SetPairStatus(ctx, &instrumentv1.SetPairStatusRequest{Symbol: symbol, ToStatus: to, Reason: reason, Actor: Actor})
+	c.mu.Lock()
+	c.at = time.Time{}
+	c.mu.Unlock()
+	if err != nil {
+		return "", err
+	}
+	return resp.GetFromStatus(), nil
 }

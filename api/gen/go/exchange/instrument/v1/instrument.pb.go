@@ -9,6 +9,7 @@ package instrumentv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -35,8 +36,12 @@ type Asset struct {
 	RiskRestricted bool       `protobuf:"varint,7,opt,name=risk_restricted,json=riskRestricted,proto3" json:"risk_restricted,omitempty"`
 	Networks       []*Network `protobuf:"bytes,8,rep,name=networks,proto3" json:"networks,omitempty"`
 	Version        int64      `protobuf:"varint,9,opt,name=version,proto3" json:"version,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Market-cap rank at listing; 0 when unranked.
+	Rank int32 `protobuf:"varint,10,opt,name=rank,proto3" json:"rank,omitempty"`
+	// Sector tags in lower case, e.g. layer-1, defi, meme.
+	Categories    []string `protobuf:"bytes,11,rep,name=categories,proto3" json:"categories,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Asset) Reset() {
@@ -132,6 +137,20 @@ func (x *Asset) GetVersion() int64 {
 	return 0
 }
 
+func (x *Asset) GetRank() int32 {
+	if x != nil {
+		return x.Rank
+	}
+	return 0
+}
+
+func (x *Asset) GetCategories() []string {
+	if x != nil {
+		return x.Categories
+	}
+	return nil
+}
+
 // Network is an asset on one chain.
 type Network struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
@@ -151,8 +170,18 @@ type Network struct {
 	DepositEnabled  bool   `protobuf:"varint,10,opt,name=deposit_enabled,json=depositEnabled,proto3" json:"deposit_enabled,omitempty"`
 	WithdrawEnabled bool   `protobuf:"varint,11,opt,name=withdraw_enabled,json=withdrawEnabled,proto3" json:"withdraw_enabled,omitempty"`
 	Version         int64  `protobuf:"varint,12,opt,name=version,proto3" json:"version,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Name users see, e.g. TRC20, BEP20, ERC20, Bitcoin.
+	DisplayName string `protobuf:"bytes,13,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	// Address format: EVM, TRON or BTC.
+	AddressFormat string `protobuf:"bytes,14,opt,name=address_format,json=addressFormat,proto3" json:"address_format,omitempty"`
+	// Typical minutes from the transfer to the credit.
+	EtaMinutes int32 `protobuf:"varint,15,opt,name=eta_minutes,json=etaMinutes,proto3" json:"eta_minutes,omitempty"`
+	// Block explorer links with a {tx} or {address} placeholder; empty when
+	// the network has none.
+	ExplorerTxUrl      string `protobuf:"bytes,16,opt,name=explorer_tx_url,json=explorerTxUrl,proto3" json:"explorer_tx_url,omitempty"`
+	ExplorerAddressUrl string `protobuf:"bytes,17,opt,name=explorer_address_url,json=explorerAddressUrl,proto3" json:"explorer_address_url,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *Network) Reset() {
@@ -269,6 +298,41 @@ func (x *Network) GetVersion() int64 {
 	return 0
 }
 
+func (x *Network) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
+func (x *Network) GetAddressFormat() string {
+	if x != nil {
+		return x.AddressFormat
+	}
+	return ""
+}
+
+func (x *Network) GetEtaMinutes() int32 {
+	if x != nil {
+		return x.EtaMinutes
+	}
+	return 0
+}
+
+func (x *Network) GetExplorerTxUrl() string {
+	if x != nil {
+		return x.ExplorerTxUrl
+	}
+	return ""
+}
+
+func (x *Network) GetExplorerAddressUrl() string {
+	if x != nil {
+		return x.ExplorerAddressUrl
+	}
+	return ""
+}
+
 type TradingPair struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// BASE-QUOTE, e.g. BTC-USDT.
@@ -291,10 +355,17 @@ type TradingPair struct {
 	MakerFeeRate string `protobuf:"bytes,11,opt,name=maker_fee_rate,json=makerFeeRate,proto3" json:"maker_fee_rate,omitempty"`
 	TakerFeeRate string `protobuf:"bytes,12,opt,name=taker_fee_rate,json=takerFeeRate,proto3" json:"taker_fee_rate,omitempty"`
 	// PREPARE, TRADING, HALT, CANCEL_ONLY or DELISTED.
-	Status        string `protobuf:"bytes,13,opt,name=status,proto3" json:"status,omitempty"`
-	Version       int64  `protobuf:"varint,14,opt,name=version,proto3" json:"version,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Status  string `protobuf:"bytes,13,opt,name=status,proto3" json:"status,omitempty"`
+	Version int64  `protobuf:"varint,14,opt,name=version,proto3" json:"version,omitempty"`
+	// The reference market followed for display (ADR-0010), e.g. BTCUSDT;
+	// empty when the pair shows only its own market data.
+	ReferenceSymbol string `protobuf:"bytes,15,opt,name=reference_symbol,json=referenceSymbol,proto3" json:"reference_symbol,omitempty"`
+	// Platform price = reference price x reference_multiplier (1000 for a
+	// 1000PEPE pair, ADR-0014); quantities divide by it.
+	ReferenceMultiplier string                 `protobuf:"bytes,16,opt,name=reference_multiplier,json=referenceMultiplier,proto3" json:"reference_multiplier,omitempty"`
+	ListedAt            *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=listed_at,json=listedAt,proto3" json:"listed_at,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *TradingPair) Reset() {
@@ -423,6 +494,27 @@ func (x *TradingPair) GetVersion() int64 {
 		return x.Version
 	}
 	return 0
+}
+
+func (x *TradingPair) GetReferenceSymbol() string {
+	if x != nil {
+		return x.ReferenceSymbol
+	}
+	return ""
+}
+
+func (x *TradingPair) GetReferenceMultiplier() string {
+	if x != nil {
+		return x.ReferenceMultiplier
+	}
+	return ""
+}
+
+func (x *TradingPair) GetListedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ListedAt
+	}
+	return nil
 }
 
 // RiskTier is one step of a contract's risk limit ladder (requirements
@@ -1502,7 +1594,7 @@ var File_exchange_instrument_v1_instrument_proto protoreflect.FileDescriptor
 
 const file_exchange_instrument_v1_instrument_proto_rawDesc = "" +
 	"\n" +
-	"'exchange/instrument/v1/instrument.proto\x12\x16exchange.instrument.v1\"\xd3\x02\n" +
+	"'exchange/instrument/v1/instrument.proto\x12\x16exchange.instrument.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x87\x03\n" +
 	"\x05Asset\x12\x1d\n" +
 	"\n" +
 	"asset_code\x18\x01 \x01(\tR\tassetCode\x12\x12\n" +
@@ -1513,7 +1605,12 @@ const file_exchange_instrument_v1_instrument_proto_rawDesc = "" +
 	"\x0ftrading_enabled\x18\x06 \x01(\bR\x0etradingEnabled\x12'\n" +
 	"\x0frisk_restricted\x18\a \x01(\bR\x0eriskRestricted\x12;\n" +
 	"\bnetworks\x18\b \x03(\v2\x1f.exchange.instrument.v1.NetworkR\bnetworks\x12\x18\n" +
-	"\aversion\x18\t \x01(\x03R\aversion\"\xa3\x03\n" +
+	"\aversion\x18\t \x01(\x03R\aversion\x12\x12\n" +
+	"\x04rank\x18\n" +
+	" \x01(\x05R\x04rank\x12\x1e\n" +
+	"\n" +
+	"categories\x18\v \x03(\tR\n" +
+	"categories\"\xe8\x04\n" +
 	"\aNetwork\x12\x1d\n" +
 	"\n" +
 	"asset_code\x18\x01 \x01(\tR\tassetCode\x12\x18\n" +
@@ -1529,7 +1626,13 @@ const file_exchange_instrument_v1_instrument_proto_rawDesc = "" +
 	"\x0fdeposit_enabled\x18\n" +
 	" \x01(\bR\x0edepositEnabled\x12)\n" +
 	"\x10withdraw_enabled\x18\v \x01(\bR\x0fwithdrawEnabled\x12\x18\n" +
-	"\aversion\x18\f \x01(\x03R\aversion\"\xbe\x03\n" +
+	"\aversion\x18\f \x01(\x03R\aversion\x12!\n" +
+	"\fdisplay_name\x18\r \x01(\tR\vdisplayName\x12%\n" +
+	"\x0eaddress_format\x18\x0e \x01(\tR\raddressFormat\x12\x1f\n" +
+	"\veta_minutes\x18\x0f \x01(\x05R\n" +
+	"etaMinutes\x12&\n" +
+	"\x0fexplorer_tx_url\x18\x10 \x01(\tR\rexplorerTxUrl\x120\n" +
+	"\x14explorer_address_url\x18\x11 \x01(\tR\x12explorerAddressUrl\"\xd5\x04\n" +
 	"\vTradingPair\x12\x16\n" +
 	"\x06symbol\x18\x01 \x01(\tR\x06symbol\x12\x1d\n" +
 	"\n" +
@@ -1548,7 +1651,10 @@ const file_exchange_instrument_v1_instrument_proto_rawDesc = "" +
 	"\x0emaker_fee_rate\x18\v \x01(\tR\fmakerFeeRate\x12$\n" +
 	"\x0etaker_fee_rate\x18\f \x01(\tR\ftakerFeeRate\x12\x16\n" +
 	"\x06status\x18\r \x01(\tR\x06status\x12\x18\n" +
-	"\aversion\x18\x0e \x01(\x03R\aversion\"b\n" +
+	"\aversion\x18\x0e \x01(\x03R\aversion\x12)\n" +
+	"\x10reference_symbol\x18\x0f \x01(\tR\x0freferenceSymbol\x121\n" +
+	"\x14reference_multiplier\x18\x10 \x01(\tR\x13referenceMultiplier\x127\n" +
+	"\tlisted_at\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampR\blistedAt\"b\n" +
 	"\bRiskTier\x12!\n" +
 	"\fmax_notional\x18\x01 \x01(\tR\vmaxNotional\x12!\n" +
 	"\fmax_leverage\x18\x02 \x01(\x05R\vmaxLeverage\x12\x10\n" +
@@ -1672,37 +1778,39 @@ var file_exchange_instrument_v1_instrument_proto_goTypes = []any{
 	(*ListContractsResponse)(nil),     // 19: exchange.instrument.v1.ListContractsResponse
 	(*SetContractStatusRequest)(nil),  // 20: exchange.instrument.v1.SetContractStatusRequest
 	(*SetContractStatusResponse)(nil), // 21: exchange.instrument.v1.SetContractStatusResponse
+	(*timestamppb.Timestamp)(nil),     // 22: google.protobuf.Timestamp
 }
 var file_exchange_instrument_v1_instrument_proto_depIdxs = []int32{
 	1,  // 0: exchange.instrument.v1.Asset.networks:type_name -> exchange.instrument.v1.Network
-	3,  // 1: exchange.instrument.v1.Contract.risk_tiers:type_name -> exchange.instrument.v1.RiskTier
-	0,  // 2: exchange.instrument.v1.GetAssetResponse.asset:type_name -> exchange.instrument.v1.Asset
-	0,  // 3: exchange.instrument.v1.ListAssetsResponse.assets:type_name -> exchange.instrument.v1.Asset
-	2,  // 4: exchange.instrument.v1.GetTradingPairResponse.pair:type_name -> exchange.instrument.v1.TradingPair
-	2,  // 5: exchange.instrument.v1.ListTradingPairsResponse.pairs:type_name -> exchange.instrument.v1.TradingPair
-	4,  // 6: exchange.instrument.v1.GetContractResponse.contract:type_name -> exchange.instrument.v1.Contract
-	4,  // 7: exchange.instrument.v1.ListContractsResponse.contracts:type_name -> exchange.instrument.v1.Contract
-	6,  // 8: exchange.instrument.v1.InstrumentService.GetAsset:input_type -> exchange.instrument.v1.GetAssetRequest
-	8,  // 9: exchange.instrument.v1.InstrumentService.ListAssets:input_type -> exchange.instrument.v1.ListAssetsRequest
-	10, // 10: exchange.instrument.v1.InstrumentService.GetTradingPair:input_type -> exchange.instrument.v1.GetTradingPairRequest
-	12, // 11: exchange.instrument.v1.InstrumentService.ListTradingPairs:input_type -> exchange.instrument.v1.ListTradingPairsRequest
-	14, // 12: exchange.instrument.v1.InstrumentService.SetPairStatus:input_type -> exchange.instrument.v1.SetPairStatusRequest
-	16, // 13: exchange.instrument.v1.InstrumentService.GetContract:input_type -> exchange.instrument.v1.GetContractRequest
-	18, // 14: exchange.instrument.v1.InstrumentService.ListContracts:input_type -> exchange.instrument.v1.ListContractsRequest
-	20, // 15: exchange.instrument.v1.InstrumentService.SetContractStatus:input_type -> exchange.instrument.v1.SetContractStatusRequest
-	7,  // 16: exchange.instrument.v1.InstrumentService.GetAsset:output_type -> exchange.instrument.v1.GetAssetResponse
-	9,  // 17: exchange.instrument.v1.InstrumentService.ListAssets:output_type -> exchange.instrument.v1.ListAssetsResponse
-	11, // 18: exchange.instrument.v1.InstrumentService.GetTradingPair:output_type -> exchange.instrument.v1.GetTradingPairResponse
-	13, // 19: exchange.instrument.v1.InstrumentService.ListTradingPairs:output_type -> exchange.instrument.v1.ListTradingPairsResponse
-	15, // 20: exchange.instrument.v1.InstrumentService.SetPairStatus:output_type -> exchange.instrument.v1.SetPairStatusResponse
-	17, // 21: exchange.instrument.v1.InstrumentService.GetContract:output_type -> exchange.instrument.v1.GetContractResponse
-	19, // 22: exchange.instrument.v1.InstrumentService.ListContracts:output_type -> exchange.instrument.v1.ListContractsResponse
-	21, // 23: exchange.instrument.v1.InstrumentService.SetContractStatus:output_type -> exchange.instrument.v1.SetContractStatusResponse
-	16, // [16:24] is the sub-list for method output_type
-	8,  // [8:16] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	22, // 1: exchange.instrument.v1.TradingPair.listed_at:type_name -> google.protobuf.Timestamp
+	3,  // 2: exchange.instrument.v1.Contract.risk_tiers:type_name -> exchange.instrument.v1.RiskTier
+	0,  // 3: exchange.instrument.v1.GetAssetResponse.asset:type_name -> exchange.instrument.v1.Asset
+	0,  // 4: exchange.instrument.v1.ListAssetsResponse.assets:type_name -> exchange.instrument.v1.Asset
+	2,  // 5: exchange.instrument.v1.GetTradingPairResponse.pair:type_name -> exchange.instrument.v1.TradingPair
+	2,  // 6: exchange.instrument.v1.ListTradingPairsResponse.pairs:type_name -> exchange.instrument.v1.TradingPair
+	4,  // 7: exchange.instrument.v1.GetContractResponse.contract:type_name -> exchange.instrument.v1.Contract
+	4,  // 8: exchange.instrument.v1.ListContractsResponse.contracts:type_name -> exchange.instrument.v1.Contract
+	6,  // 9: exchange.instrument.v1.InstrumentService.GetAsset:input_type -> exchange.instrument.v1.GetAssetRequest
+	8,  // 10: exchange.instrument.v1.InstrumentService.ListAssets:input_type -> exchange.instrument.v1.ListAssetsRequest
+	10, // 11: exchange.instrument.v1.InstrumentService.GetTradingPair:input_type -> exchange.instrument.v1.GetTradingPairRequest
+	12, // 12: exchange.instrument.v1.InstrumentService.ListTradingPairs:input_type -> exchange.instrument.v1.ListTradingPairsRequest
+	14, // 13: exchange.instrument.v1.InstrumentService.SetPairStatus:input_type -> exchange.instrument.v1.SetPairStatusRequest
+	16, // 14: exchange.instrument.v1.InstrumentService.GetContract:input_type -> exchange.instrument.v1.GetContractRequest
+	18, // 15: exchange.instrument.v1.InstrumentService.ListContracts:input_type -> exchange.instrument.v1.ListContractsRequest
+	20, // 16: exchange.instrument.v1.InstrumentService.SetContractStatus:input_type -> exchange.instrument.v1.SetContractStatusRequest
+	7,  // 17: exchange.instrument.v1.InstrumentService.GetAsset:output_type -> exchange.instrument.v1.GetAssetResponse
+	9,  // 18: exchange.instrument.v1.InstrumentService.ListAssets:output_type -> exchange.instrument.v1.ListAssetsResponse
+	11, // 19: exchange.instrument.v1.InstrumentService.GetTradingPair:output_type -> exchange.instrument.v1.GetTradingPairResponse
+	13, // 20: exchange.instrument.v1.InstrumentService.ListTradingPairs:output_type -> exchange.instrument.v1.ListTradingPairsResponse
+	15, // 21: exchange.instrument.v1.InstrumentService.SetPairStatus:output_type -> exchange.instrument.v1.SetPairStatusResponse
+	17, // 22: exchange.instrument.v1.InstrumentService.GetContract:output_type -> exchange.instrument.v1.GetContractResponse
+	19, // 23: exchange.instrument.v1.InstrumentService.ListContracts:output_type -> exchange.instrument.v1.ListContractsResponse
+	21, // 24: exchange.instrument.v1.InstrumentService.SetContractStatus:output_type -> exchange.instrument.v1.SetContractStatusResponse
+	17, // [17:25] is the sub-list for method output_type
+	9,  // [9:17] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_exchange_instrument_v1_instrument_proto_init() }

@@ -49,7 +49,7 @@ type settings struct {
 	ClickHouse chx.Config    `koanf:",squash"`
 	// gRPC addresses: AUTH_GRPC_ADDR, USER_GRPC_ADDR, LEDGER_GRPC_ADDR,
 	// INSTRUMENT_GRPC_ADDR; internal REST: WALLET_SERVICE_URL,
-	// TRADING_SERVICE_URL, DERIVATIVES_SERVICE_URL.
+	// TRADING_SERVICE_URL, DERIVATIVES_SERVICE_URL, MARKET_DATA_SERVICE_URL.
 	AuthAddr       string `koanf:"auth_grpc_addr"`
 	UserAddr       string `koanf:"user_grpc_addr"`
 	LedgerAddr     string `koanf:"ledger_grpc_addr"`
@@ -57,6 +57,7 @@ type settings struct {
 	WalletURL      string `koanf:"wallet_service_url"`
 	TradingURL     string `koanf:"trading_service_url"`
 	DerivativesURL string `koanf:"derivatives_service_url"`
+	MarketDataURL  string `koanf:"market_data_service_url"`
 	// SecretKey seals the administrators' authenticator secrets
 	// (ADMIN_SECRET_KEY, base64 of 32 bytes; in apps.env only).
 	SecretKey string `koanf:"admin_secret_key"`
@@ -81,7 +82,8 @@ func setup(ctx context.Context, a *app.App) error {
 	cfg := settings{
 		HTTPAddr: ":8093", Postgres: pg.DefaultConfig(), AuthAddr: "localhost:9181", UserAddr: "localhost:9182",
 		LedgerAddr: "localhost:9185", InstrumentAddr: "localhost:9184", WalletURL: "http://localhost:8092",
-		TradingURL: "http://localhost:8088", DerivativesURL: "http://localhost:8095", PasswordHashConcurrency: 2,
+		TradingURL: "http://localhost:8088", DerivativesURL: "http://localhost:8095", MarketDataURL: "http://localhost:8090",
+		PasswordHashConcurrency: 2,
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -138,6 +140,8 @@ func setup(ctx context.Context, a *app.App) error {
 		Ledger:      backends.Ledger{C: ledgerClient},
 		AuditLog:    backends.Audit{Conn: ch},
 		Reports:     backends.Reports{Conn: ch},
+		Records:     backends.Records{Conn: ch},
+		Market:      backends.Market{REST: rest, Base: cfg.MarketDataURL},
 		Log:         a.Logger(),
 		Now:         time.Now,
 	}

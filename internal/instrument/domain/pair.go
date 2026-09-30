@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -60,7 +61,28 @@ type TradingPair struct {
 	PriceBand   decimal.Decimal `json:"price_band"`
 	FeeTier     string          `json:"fee_tier"`
 	Status      string          `json:"status"`
-	Version     int64           `json:"version,omitempty"`
+	// ReferenceSymbol is the reference market shown for the pair
+	// (ADR-0010), e.g. BTCUSDT; empty: the pair shows its own data.
+	// Platform prices are reference prices x ReferenceMultiplier (1 unless
+	// a low-priced coin trades per 1000, ADR-0014).
+	ReferenceSymbol     string          `json:"reference_symbol,omitempty"`
+	ReferenceMultiplier decimal.Decimal `json:"reference_multiplier"`
+	// ListedAt is when the pair was listed; set on creation unless given.
+	ListedAt time.Time `json:"listed_at,omitzero"`
+	Version  int64     `json:"version,omitempty"`
+}
+
+var referenceRE = regexp.MustCompile(`^[A-Z0-9]{2,20}$`)
+
+// ValidMultiplier reports whether m is a power of ten from 1 to 10^9, so
+// that converting prices and quantities stays exact.
+func ValidMultiplier(m decimal.Decimal) bool {
+	for p, ten := decimal.NewFromInt(1), decimal.NewFromInt(10); p.LessThanOrEqual(decimal.NewFromInt(1_000_000_000)); p = p.Mul(ten) {
+		if m.Equal(p) {
+			return true
+		}
+	}
+	return false
 }
 
 // Validate checks the pair against its assets: steps fit the assets'
@@ -98,6 +120,10 @@ func (p TradingPair) Validate(base, quote Asset) error {
 		return apperr.Invalid(fmt.Sprintf("pair %s: unknown fee tier %q", p.Symbol, p.FeeTier))
 	case !ValidPairStatus(p.Status):
 		return apperr.Invalid(fmt.Sprintf("pair %s: unknown status %q", p.Symbol, p.Status))
+	case p.ReferenceSymbol != "" && !referenceRE.MatchString(p.ReferenceSymbol):
+		return apperr.Invalid(fmt.Sprintf("pair %s: reference_symbol %q: use 2-20 upper-case letters or digits", p.Symbol, p.ReferenceSymbol))
+	case !p.ReferenceMultiplier.IsZero() && !ValidMultiplier(p.ReferenceMultiplier): // zero stands for 1
+		return apperr.Invalid(fmt.Sprintf("pair %s: reference_multiplier must be a power of ten from 1 to 1000000000", p.Symbol))
 	}
 	return nil
 }
@@ -109,7 +135,9 @@ func (p TradingPair) SameConfig(other TradingPair) bool {
 	return p.Symbol == other.Symbol && p.BaseAsset == other.BaseAsset && p.QuoteAsset == other.QuoteAsset &&
 		p.TickSize.Equal(other.TickSize) && p.LotSize.Equal(other.LotSize) &&
 		p.MinQuantity.Equal(other.MinQuantity) && p.MaxQuantity.Equal(other.MaxQuantity) &&
-		p.MinNotional.Equal(other.MinNotional) && p.PriceBand.Equal(other.PriceBand) && p.FeeTier == other.FeeTier
+		p.MinNotional.Equal(other.MinNotional) && p.PriceBand.Equal(other.PriceBand) && p.FeeTier == other.FeeTier &&
+		p.ReferenceSymbol == other.ReferenceSymbol && p.ReferenceMultiplier.Equal(other.ReferenceMultiplier) &&
+		p.ListedAt.Equal(other.ListedAt)
 }
 
 // ValidReason checks the free-text reason of a change.

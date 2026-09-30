@@ -39,6 +39,14 @@ ssh exchange sudo docker exec exchange-infra-user-service-1 /app/exchangectl use
 
 `PATCH /v1/user/profile` 可改语言、时区、防钓鱼码。防钓鱼码（4–20 位字母数字，空串清除）要 step-up：user-service 调 auth-service gRPC `ConsumeStepUp` 兑换 `X-Step-Up-Token`。防钓鱼码会出现在我们发出的每封安全通知邮件开头。
 
+自选（阶段 4 B1）：`GET /v1/user/favorites` 与 `PUT /v1/user/favorites`（`{"symbols": [...]}`），存在 `users.favorites`（每用户一行）。
+- 最多 100 个。
+- 代码转大写，重复的只保留第一个，顺序按用户给的。
+- 只检查格式（交易对 `BTC-USDT` 或合约 `BTC-USDT-PERP`），不核对是否上架。
+- 前端未登录时存本地，登录后把两边合并再写回。
+
+管理后台的账户列表与概览用 gRPC `ListUsers`（按注册时间新到旧，游标分页）与 `UserStats`（总数、某时刻以来的新增、最近若干天每日新增）。
+
 ## 用户通知
 
 notification-service 以消费组 `notification-service` 读 `auth.events` 与 `user.events`，每个事件最多生成一条站内信（inbox 去重），同事务发 `notification.NotificationCreated`（阶段 1 任务 15 起经 WebSocket `notifications` 频道推送）。

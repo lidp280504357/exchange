@@ -21,6 +21,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/admin/domain"
 	"github.com/lidp280504357/exchange/internal/admin/ports"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/lidp280504357/exchange/internal/platform/pagecursor"
 	"github.com/lidp280504357/exchange/internal/platform/password"
 	"github.com/lidp280504357/exchange/internal/platform/secretbox"
 	"github.com/lidp280504357/exchange/internal/platform/totp"
@@ -41,8 +42,12 @@ type Service struct {
 	Ledger      ports.Ledger
 	AuditLog    ports.AuditLog
 	Reports     ports.Reports
-	Log         *slog.Logger
-	Now         func() time.Time
+	// Records pages through the read models' orders, trades and deposits;
+	// Market reads market-data-service's reference feed.
+	Records ports.Records
+	Market  ports.Market
+	Log     *slog.Logger
+	Now     func() time.Time
 }
 
 // Principal is the administrator behind a request.
@@ -255,12 +260,31 @@ func (s *Service) CancelOrders(ctx context.Context, p Principal, userID, reason 
 	return s.audit(ctx, p, "user:"+userID, "admin.orders.cancel_all", reason, "{}")
 }
 
-// Withdrawals lists withdrawals in a status (default PENDING_REVIEW).
-func (s *Service) Withdrawals(ctx context.Context, p Principal, status string) ([]byte, error) {
+// Withdrawals returns a page of withdrawals (default: PENDING_REVIEW,
+// oldest first).
+func (s *Service) Withdrawals(ctx context.Context, p Principal, q ports.WithdrawalQuery) ([]byte, error) {
 	if err := p.require(domain.PermWithdrawalsRead); err != nil {
 		return nil, err
 	}
-	return s.Wallet.List(ctx, status)
+	q.Status, q.Asset, q.Order = strings.ToUpper(q.Status), strings.ToUpper(q.Asset), strings.ToLower(q.Order)
+	if q.Order != "" && q.Order != "asc" && q.Order != "desc" {
+		return nil, apperr.Invalid("order must be asc or desc")
+	}
+	if q.UserID != "" {
+		if _, err := uuid.Parse(q.UserID); err != nil {
+			return nil, apperr.Invalid("user_id must be a user ID")
+		}
+	}
+	q.Limit = pageLimit(q.Limit)
+	return s.Wallet.List(ctx, q)
+}
+
+// pageLimit bounds a page: 1 to 200, 50 by default.
+func pageLimit(n int) int {
+	if n <= 0 || n > 200 {
+		return 50
+	}
+	return n
 }
 
 // ReviewWithdrawal approves or rejects a withdrawal in review; the wallet
@@ -359,14 +383,26 @@ func (s *Service) RequestAdjustment(ctx context.Context, p Principal, in Adjustm
 	return a, err
 }
 
-// Approvals lists two-person requests in a status ("": all).
-func (s *Service) Approvals(ctx context.Context, p Principal, status string) ([]domain.Approval, error) {
+// Approvals returns a page of two-person requests in a status ("": all),
+// newest first, and the cursor of the next ("" on the last).
+func (s *Service) Approvals(ctx context.Context, p Principal, status, cursor string, limit int) ([]domain.Approval, string, error) {
 	if err := p.require(domain.PermAdjustRequest); err != nil {
 		if p.require(domain.PermAuditRead) != nil {
-			return nil, err
+			return nil, "", err
 		}
 	}
-	return s.Store.Read().Approvals().List(ctx, status, 100)
+	at, id, err := pagecursor.Decode(cursor)
+	if err != nil {
+		return nil, "", apperr.Invalid("bad cursor")
+	}
+	limit = pageLimit(limit)
+	list, err := s.Store.Read().Approvals().List(ctx, status, at, id, limit+1)
+	if err != nil || len(list) <= limit {
+		return list, "", err
+	}
+	list = list[:limit]
+	last := list[limit-1]
+	return list, pagecursor.Encode(last.CreatedAt, last.ID), nil
 }
 
 // approvalActions names the audit actions of approving and rejecting each
@@ -587,32 +623,33 @@ func (s *Service) RequestInsuranceFunding(ctx context.Context, p Principal, asse
 // Liquidation step kinds of the read model.
 var liquidationKinds = []string{"", "WARNING", "STARTED", "FILLED", "ADL"}
 
-// Liquidations returns the newest liquidation steps of the last days
+// Liquidations returns a page of the liquidation steps of the last days
 // (default 7, at most 90), of one kind (WARNING, STARTED, FILLED, ADL)
-// or all; at most limit (default 100, at most 500).
-func (s *Service) Liquidations(ctx context.Context, p Principal, days int, kind string, limit int) ([]ports.LiquidationStep, error) {
+// or all, newest first; limit defaults to 100, at most 500.
+func (s *Service) Liquidations(ctx context.Context, p Principal, days int, kind, cursor string, limit int) ([]ports.LiquidationStep, string, error) {
 	if err := p.require(domain.PermDerivativesRead); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	kind = strings.ToUpper(strings.TrimSpace(kind))
 	if !slices.Contains(liquidationKinds, kind) {
-		return nil, apperr.Invalid("kind must be WARNING, STARTED, FILLED or ADL")
+		return nil, "", apperr.Invalid("kind must be WARNING, STARTED, FILLED or ADL")
 	}
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	return s.Reports.Liquidations(ctx, reportDays(days), kind, limit)
+	return s.Reports.Liquidations(ctx, reportDays(days), kind, cursor, limit)
 }
 
-// AuditLogs searches the audit trail.
-func (s *Service) AuditLogs(ctx context.Context, p Principal, actor, target string, limit int) ([]ports.AuditEntry, error) {
+// AuditLogs returns a page of the audit trail, newest first; limit
+// defaults to 100, at most 500.
+func (s *Service) AuditLogs(ctx context.Context, p Principal, q ports.AuditQuery) ([]ports.AuditEntry, string, error) {
 	if err := p.require(domain.PermAuditRead); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	if limit <= 0 || limit > 500 {
-		limit = 100
+	if q.Limit <= 0 || q.Limit > 500 {
+		q.Limit = 100
 	}
-	return s.AuditLog.Search(ctx, actor, target, limit)
+	return s.AuditLog.Search(ctx, q)
 }
 
 // Intervals of the candle report, in seconds.

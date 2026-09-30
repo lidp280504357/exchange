@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/lidp280504357/exchange/internal/admin/application"
 	"github.com/lidp280504357/exchange/internal/admin/domain"
+	"github.com/lidp280504357/exchange/internal/admin/ports"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/httpx"
 	"github.com/lidp280504357/exchange/internal/platform/ratelimit"
@@ -56,7 +58,12 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Use(h.authenticate)
 			r.Post("/logout", h.logout)
 			r.Get("/me", h.me)
+			r.Get("/users", h.users)
 			r.Get("/users/lookup", h.lookup)
+			r.Get("/orders", h.orders)
+			r.Get("/trades", h.trades)
+			r.Get("/deposits", h.deposits)
+			r.Get("/dashboard", h.dashboard)
 			r.Post("/users/{id}/status", h.userStatus)
 			r.Post("/users/{id}/cancel-orders", h.cancelOrders)
 			r.Get("/withdrawals", h.withdrawals)
@@ -241,12 +248,169 @@ func writeRaw(w http.ResponseWriter, raw []byte) {
 }
 
 func (h *Handler) withdrawals(w http.ResponseWriter, r *http.Request) {
-	raw, err := h.Svc.Withdrawals(r.Context(), principal(r), r.URL.Query().Get("status"))
+	q := r.URL.Query()
+	raw, err := h.Svc.Withdrawals(r.Context(), principal(r), ports.WithdrawalQuery{
+		Status: q.Get("status"), UserID: q.Get("user_id"), Asset: q.Get("asset"), Cursor: q.Get("cursor"), Limit: intParam(q, "limit"),
+		Order: q.Get("order"),
+	})
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
 	writeRaw(w, raw)
+}
+
+func intParam(q url.Values, name string) int {
+	n, _ := strconv.Atoi(q.Get(name))
+	return n
+}
+
+// timeParams reads the RFC 3339 times from and to; empty ones are zero.
+func timeParams(q url.Values) (time.Time, time.Time, error) {
+	var out [2]time.Time
+	for i, name := range []string{"from", "to"} {
+		v := q.Get(name)
+		if v == "" {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			return time.Time{}, time.Time{}, apperr.Invalid(name + " must be an RFC 3339 time")
+		}
+		out[i] = t
+	}
+	return out[0], out[1], nil
+}
+
+// writePage answers a page of items with the cursor of the next.
+func writePage(w http.ResponseWriter, items any, next string) {
+	var cursor *string
+	if next != "" {
+		cursor = &next
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": cursor})
+}
+
+func userJSON(u ports.User) map[string]any {
+	return map[string]any{
+		"id": u.ID, "status": u.Status, "region": u.Region, "language": u.Language, "kyc_level": u.KYCLevel,
+		"created_at": httpx.FormatTime(u.CreatedAt),
+	}
+}
+
+func (h *Handler) users(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	from, to, err := timeParams(q)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	list, next, err := h.Svc.ListUsers(r.Context(), principal(r), ports.UserQuery{
+		Status: q.Get("status"), Region: q.Get("region"), CreatedFrom: from, CreatedBefore: to, Cursor: q.Get("cursor"),
+		Limit: intParam(q, "limit"),
+	})
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	items := make([]map[string]any, 0, len(list))
+	for _, u := range list {
+		items = append(items, userJSON(u))
+	}
+	writePage(w, items, next)
+}
+
+func (h *Handler) orders(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	from, to, err := timeParams(q)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	list, next, err := h.Svc.OrderList(r.Context(), principal(r), ports.OrderQuery{
+		UserID: q.Get("user_id"), Symbol: q.Get("symbol"), Status: q.Get("status"), Side: q.Get("side"), From: from, To: to,
+		Cursor: q.Get("cursor"), Limit: intParam(q, "limit"),
+	})
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writePage(w, list, next)
+}
+
+func (h *Handler) trades(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	from, to, err := timeParams(q)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	list, next, err := h.Svc.TradeList(r.Context(), principal(r), ports.TradeQuery{
+		Symbol: q.Get("symbol"), UserID: q.Get("user_id"), From: from, To: to, Cursor: q.Get("cursor"), Limit: intParam(q, "limit"),
+	})
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writePage(w, list, next)
+}
+
+func (h *Handler) deposits(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	list, next, err := h.Svc.DepositList(r.Context(), principal(r), ports.DepositQuery{
+		UserID: q.Get("user_id"), Asset: q.Get("asset"), Network: q.Get("network"), Status: q.Get("status"), Cursor: q.Get("cursor"),
+		Limit: intParam(q, "limit"),
+	})
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writePage(w, list, next)
+}
+
+func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
+	d, err := h.Svc.Dashboard(r.Context(), principal(r), intParam(r.URL.Query(), "days"))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	series := make([]map[string]any, 0, len(d.Days))
+	for _, day := range d.Days {
+		turnover := d.Activity.TurnoverUSDTByDay[day]
+		if turnover == "" {
+			turnover = "0"
+		}
+		series = append(series, map[string]any{
+			"day": day, "new_users": d.Users.Days[day], "trades": d.Activity.TradesByDay[day], "turnover_usdt": turnover,
+		})
+	}
+	turnover := d.Activity.Turnover24h
+	if turnover == nil {
+		turnover = []ports.Turnover{}
+	}
+	partial := d.Partial
+	if partial == nil {
+		partial = []string{}
+	}
+	var feed any
+	if d.Feed != nil {
+		halted := d.Feed.Halted
+		if len(halted) == 0 {
+			halted = json.RawMessage("[]")
+		}
+		feed = map[string]any{"state": d.Feed.State, "received_at": d.Feed.ReceivedAt, "followed": d.Feed.Followed, "halted": halted}
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"users": map[string]any{"total": d.Users.Total, "new_24h": d.Users.CreatedSince},
+		"trading": map[string]any{
+			"trades_24h": d.Activity.Trades24h, "active_traders_24h": d.Activity.ActiveTraders24h, "turnover_24h": turnover,
+		},
+		"wallet":  map[string]any{"pending_deposits": d.Activity.PendingDeposits, "pending_withdrawals": d.Activity.PendingWithdraws},
+		"risk":    map[string]any{"events_24h": d.Activity.RiskEvents24h},
+		"feed":    feed,
+		"series":  series,
+		"partial": partial,
+	})
 }
 
 func (h *Handler) review(w http.ResponseWriter, r *http.Request) {
@@ -378,7 +542,8 @@ func (h *Handler) requestAdjustment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) approvals(w http.ResponseWriter, r *http.Request) {
-	list, err := h.Svc.Approvals(r.Context(), principal(r), r.URL.Query().Get("status"))
+	q := r.URL.Query()
+	list, next, err := h.Svc.Approvals(r.Context(), principal(r), q.Get("status"), q.Get("cursor"), intParam(q, "limit"))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -387,7 +552,7 @@ func (h *Handler) approvals(w http.ResponseWriter, r *http.Request) {
 	for _, a := range list {
 		out = append(out, approvalJSON(a))
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+	writePage(w, out, next)
 }
 
 func (h *Handler) decide(w http.ResponseWriter, r *http.Request) {
@@ -409,13 +574,20 @@ func (h *Handler) decide(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) auditLogs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit, _ := strconv.Atoi(q.Get("limit"))
-	list, err := h.Svc.AuditLogs(r.Context(), principal(r), q.Get("actor"), q.Get("target"), limit)
+	from, to, err := timeParams(q)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": list})
+	list, next, err := h.Svc.AuditLogs(r.Context(), principal(r), ports.AuditQuery{
+		Actor: q.Get("actor"), Target: q.Get("target"), EventType: q.Get("event_type"), From: from, To: to, Cursor: q.Get("cursor"),
+		Limit: intParam(q, "limit"),
+	})
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writePage(w, list, next)
 }
 
 func (h *Handler) tradingReport(w http.ResponseWriter, r *http.Request) {
@@ -523,14 +695,12 @@ func (h *Handler) derivativesRisk(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) liquidations(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	days, _ := strconv.Atoi(q.Get("days"))
-	limit, _ := strconv.Atoi(q.Get("limit"))
-	list, err := h.Svc.Liquidations(r.Context(), principal(r), days, q.Get("kind"), limit)
+	list, next, err := h.Svc.Liquidations(r.Context(), principal(r), intParam(q, "days"), q.Get("kind"), q.Get("cursor"), intParam(q, "limit"))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": list})
+	writePage(w, list, next)
 }
 
 func (h *Handler) insuranceFund(w http.ResponseWriter, r *http.Request) {

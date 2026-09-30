@@ -17,6 +17,10 @@ service UserService {
   // ChangeStatus moves an account to another status for an operator, with
   // a reason code and an audit event.
   rpc ChangeStatus(ChangeStatusRequest) returns (ChangeStatusResponse);
+  // ListUsers pages through accounts for the admin console, newest first.
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+  // UserStats counts accounts for the admin console's overview.
+  rpc UserStats(UserStatsRequest) returns (UserStatsResponse);
 }
 
 message User {
@@ -87,4 +91,46 @@ message ChangeStatusRequest {
 message ChangeStatusResponse {
   string from_status = 1;
   string to_status = 2;
+}
+
+message ListUsersRequest {
+  // Only accounts in this status (ACTIVE, RISK_REVIEW, FROZEN, CLOSED);
+  // empty for all.
+  string status = 1;
+  // Only accounts of this region (ISO 3166-1 alpha-2); empty for all.
+  string region = 2;
+  // Accounts created from this time on (unset: no bound) and before
+  // created_before (unset: no bound).
+  google.protobuf.Timestamp created_from = 3;
+  google.protobuf.Timestamp created_before = 4;
+  // The previous page's next_cursor; empty for the newest.
+  string cursor = 5;
+  // At most this many (1 to 200; default 50).
+  int32 limit = 6;
+}
+
+message ListUsersResponse {
+  repeated User users = 1;
+  // Empty on the last page.
+  string next_cursor = 2;
+}
+
+message UserStatsRequest {
+  // Accounts created from this time on are also counted apart.
+  google.protobuf.Timestamp since = 1;
+  // New accounts per UTC day for the last days (today included; 0 to 90).
+  int32 days = 2;
+}
+
+message UserStatsResponse {
+  int64 total = 1;
+  int64 created_since = 2;
+  repeated DayCount days = 3;
+}
+
+// DayCount is a number of accounts created on one UTC day.
+message DayCount {
+  // YYYY-MM-DD.
+  string day = 1;
+  int64 count = 2;
 }

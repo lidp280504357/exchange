@@ -3,6 +3,7 @@ package ports
 
 import (
 	"context"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -24,6 +25,7 @@ type Store interface {
 // Repos groups the repositories of one transaction.
 type Repos interface {
 	Users() UserRepo
+	Favorites() FavoriteRepo
 	// Emit queues an event on topic, keyed by aggregateID.
 	Emit(ctx context.Context, topic string, msg proto.Message, aggregateType, aggregateID string) error
 }
@@ -42,6 +44,40 @@ type UserRepo interface {
 	AddStatusChange(ctx context.Context, c domain.StatusChange) error
 	// StatusHistory lists the user's status changes, newest first.
 	StatusHistory(ctx context.Context, userID string, limit int) ([]domain.StatusChange, error)
+	// List returns up to f.Limit accounts matching f, newest first, after
+	// the account created at f.AfterTime with ID f.AfterID (the previous
+	// page's last; zero for the newest).
+	List(ctx context.Context, f UserFilter) ([]domain.User, error)
+	// Stats counts every account, those created at or after since, and
+	// those created on each of the last days (UTC, today included).
+	Stats(ctx context.Context, since time.Time, days int) (UserStats, error)
+}
+
+// UserFilter selects accounts for the admin console.
+type UserFilter struct {
+	Status        string
+	Region        string
+	CreatedFrom   time.Time
+	CreatedBefore time.Time
+	AfterTime     time.Time
+	AfterID       string
+	Limit         int
+}
+
+// UserStats are the admin console's account counts.
+type UserStats struct {
+	Total        int64
+	CreatedSince int64
+	// Days maps a UTC day (YYYY-MM-DD) to its new accounts.
+	Days map[string]int64
+}
+
+// FavoriteRepo stores each user's favorite markets.
+type FavoriteRepo interface {
+	// Get returns the user's list, empty with a zero time when never set.
+	Get(ctx context.Context, userID string) ([]string, time.Time, error)
+	// Set replaces the list and returns when.
+	Set(ctx context.Context, userID string, symbols []string) (time.Time, error)
 }
 
 // Flags reads the local copy of the feature flags.

@@ -83,6 +83,9 @@ type WithdrawalRepo interface {
 	// ByStatus lists the network's withdrawals in the statuses, oldest
 	// first.
 	ByStatus(ctx context.Context, network string, statuses ...string) ([]domain.Withdrawal, error)
+	// Page returns up to f.Limit of the network's withdrawals matching f,
+	// after the one with ID f.After in f's order ("": from the start).
+	Page(ctx context.Context, network string, f WithdrawalFilter) ([]domain.Withdrawal, error)
 	// Unreleased lists the refused withdrawals whose funds are not released.
 	Unreleased(ctx context.Context, network string) ([]domain.Withdrawal, error)
 	// Unsettled lists the broadcast withdrawals the ledger has not settled.
@@ -339,6 +342,18 @@ type Ledger interface {
 	SystemBalances(ctx context.Context, asset string) (map[string]decimal.Decimal, error)
 }
 
+// WithdrawalFilter selects withdrawals for the admin console; empty
+// fields match everything.
+type WithdrawalFilter struct {
+	Status string
+	UserID string
+	Asset  string
+	After  string
+	// Oldest lists oldest first (the review queue), else newest first.
+	Oldest bool
+	Limit  int
+}
+
 // Networks reads deposit networks (instrument-service).
 type Networks interface {
 	// Network returns an asset's network; unknown ones fail with
@@ -346,6 +361,9 @@ type Networks interface {
 	Network(ctx context.Context, asset, network string) (domain.Network, error)
 	// OnNetwork lists the assets of a network that take deposits.
 	OnNetwork(ctx context.Context, network string) ([]domain.Network, error)
+	// ForAsset lists an asset's networks (every network when asset is
+	// empty), open or not.
+	ForAsset(ctx context.Context, asset string) ([]domain.Network, error)
 }
 
 // Eligibility asks user-service whether a user may use a feature now.

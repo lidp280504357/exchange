@@ -23,6 +23,15 @@ apps.env WALLET_XPUB ──> wallet-service ──分配地址 m/44'/60'/0'/0/i�
 
 - 服务：wallet-service，HTTP 8092（网关转发 `/v1/wallet/*`），运维 9092，schema `wallet`。
 - 接口：`GET /v1/wallet/deposit-address?asset=ETH&network=ETH-SEPOLIA`（首次请求分配下一个派生地址，同一网络的所有资产共用一个地址）、`GET /v1/wallet/deposits`（新到旧，`cursor`/`limit`），契约 `api/openapi/wallet.yaml`。H5 充值页 `/deposit`（资产页"充值"按钮进入）。
+- 充提页用的接口（阶段 4 B1）：
+  - `GET /v1/wallet/networks?asset=USDT`：资产可用的网络（不带 `asset` 时列全部），每个网络带显示名、地址格式、确认数、通常到账分钟数、最小充/提、提现手续费、Memo 与浏览器链接模板，数据来自 instrument-service 的 `networks`（见 [instruments.md](instruments.md)）。
+  - `POST /v1/wallet/withdraw-addresses/validate`（`{network, address, memo?, asset?}`）：按网络的地址格式检查：
+    - EVM：`0x` 加 40 位十六进制，大小写混合时校验 EIP-55，返回校验和形式；
+    - TRON：Base58Check，`T` 开头，前缀 0x41；
+    - BTC：bech32/bech32m 与 Base58Check，并按链名区分主网、测试网与 regtest。
+
+    返回 `valid`、`normalized`，`reason` 取 `ADDRESS_FORMAT`、`ADDRESS_CHECKSUM`、`ADDRESS_NETWORK`、`MEMO_REQUIRED` 或 `ADDRESS_OWN`（自己的充值地址）。另有 `internal`：地址属于别的用户时为 true，这笔提现走站内转账、免手续费。
+  - 这个接口只检查格式，不能保证地址有人持有。
 - 测试服目前只开放 ETH（Sepolia，12 个确认，最小充值 0.001 ETH），见 `deploy/instruments/test.json`。
 
 ## 密钥与 keystore

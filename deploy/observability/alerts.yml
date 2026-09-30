@@ -119,6 +119,13 @@ groups:
           summary: "the reference price of {{ $labels.symbol }} is {{ $value }} seconds old; the market maker has pulled its quotes"
           runbook: docs/runbook/market-maker.md
 
+      - alert: MarketFeedHalted
+        expr: max by (job) (market_feed_halted_pairs) > 0
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $value }} pairs are halted because the reference feed has been lost for 5 minutes (market.halt_on_feed_loss)"
+          runbook: docs/runbook/market-data.md
+
       - alert: ContractDegraded
         expr: max by (job, symbol) (market_contract_degraded) == 1
         labels: {severity: critical}

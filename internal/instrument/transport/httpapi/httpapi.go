@@ -5,8 +5,10 @@ package httpapi
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/lidp280504357/exchange/internal/instrument/application"
 	"github.com/lidp280504357/exchange/internal/instrument/domain"
@@ -29,22 +31,29 @@ func (h *Handler) Routes(r chi.Router) {
 }
 
 type networkJSON struct {
-	Network         string `json:"network"`
-	Chain           string `json:"chain"`
-	ContractAddress string `json:"contract_address"`
-	Confirmations   int32  `json:"confirmations"`
-	MinDeposit      string `json:"min_deposit"`
-	MinWithdraw     string `json:"min_withdraw"`
-	WithdrawFee     string `json:"withdraw_fee"`
-	MemoRequired    bool   `json:"memo_required"`
-	DepositEnabled  bool   `json:"deposit_enabled"`
-	WithdrawEnabled bool   `json:"withdraw_enabled"`
+	Network            string  `json:"network"`
+	DisplayName        string  `json:"display_name"`
+	Chain              string  `json:"chain"`
+	AddressFormat      string  `json:"address_format"`
+	ContractAddress    string  `json:"contract_address"`
+	Confirmations      int32   `json:"confirmations"`
+	ETAMinutes         int32   `json:"eta_minutes"`
+	MinDeposit         string  `json:"min_deposit"`
+	MinWithdraw        string  `json:"min_withdraw"`
+	WithdrawFee        string  `json:"withdraw_fee"`
+	MemoRequired       bool    `json:"memo_required"`
+	DepositEnabled     bool    `json:"deposit_enabled"`
+	WithdrawEnabled    bool    `json:"withdraw_enabled"`
+	ExplorerTxURL      *string `json:"explorer_tx_url"`
+	ExplorerAddressURL *string `json:"explorer_address_url"`
 }
 
 type assetJSON struct {
 	AssetCode       string        `json:"asset_code"`
 	Name            string        `json:"name"`
 	Decimals        int32         `json:"decimals"`
+	Rank            *int32        `json:"rank"`
+	Categories      []string      `json:"categories"`
 	DepositEnabled  bool          `json:"deposit_enabled"`
 	WithdrawEnabled bool          `json:"withdraw_enabled"`
 	TradingEnabled  bool          `json:"trading_enabled"`
@@ -52,27 +61,74 @@ type assetJSON struct {
 }
 
 type pairJSON struct {
-	Symbol       string `json:"symbol"`
-	BaseAsset    string `json:"base_asset"`
-	QuoteAsset   string `json:"quote_asset"`
-	TickSize     string `json:"tick_size"`
-	LotSize      string `json:"lot_size"`
-	MinQuantity  string `json:"min_quantity"`
-	MaxQuantity  string `json:"max_quantity"`
-	MinNotional  string `json:"min_notional"`
-	PriceBand    string `json:"price_band"`
-	MakerFeeRate string `json:"maker_fee_rate"`
-	TakerFeeRate string `json:"taker_fee_rate"`
-	Status       string `json:"status"`
+	Symbol              string   `json:"symbol"`
+	BaseAsset           string   `json:"base_asset"`
+	QuoteAsset          string   `json:"quote_asset"`
+	BaseName            string   `json:"base_name"`
+	Rank                *int32   `json:"rank"`
+	Categories          []string `json:"categories"`
+	TickSize            string   `json:"tick_size"`
+	LotSize             string   `json:"lot_size"`
+	PriceDecimals       int32    `json:"price_decimals"`
+	QtyDecimals         int32    `json:"qty_decimals"`
+	MinQuantity         string   `json:"min_quantity"`
+	MaxQuantity         string   `json:"max_quantity"`
+	MinNotional         string   `json:"min_notional"`
+	PriceBand           string   `json:"price_band"`
+	MakerFeeRate        string   `json:"maker_fee_rate"`
+	TakerFeeRate        string   `json:"taker_fee_rate"`
+	Status              string   `json:"status"`
+	ReferenceSymbol     *string  `json:"reference_symbol"`
+	ReferenceMultiplier string   `json:"reference_multiplier"`
+	ListedAt            string   `json:"listed_at"`
+}
+
+// rank is null for an unranked asset.
+func rank(r int32) *int32 {
+	if r <= 0 {
+		return nil
+	}
+	return &r
+}
+
+func optional(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func categories(c []string) []string {
+	if c == nil {
+		return []string{}
+	}
+	return c
+}
+
+// places is the number of decimal places of a step such as 0.01.
+func places(d decimal.Decimal) int32 {
+	_, frac, _ := strings.Cut(d.String(), ".")
+	return int32(len(frac)) //nolint:gosec // a decimal string is short
 }
 
 func toPairJSON(p application.PairView) pairJSON {
 	return pairJSON{
-		Symbol: p.Symbol, BaseAsset: p.BaseAsset, QuoteAsset: p.QuoteAsset, TickSize: p.TickSize.String(),
-		LotSize: p.LotSize.String(), MinQuantity: p.MinQuantity.String(), MaxQuantity: p.MaxQuantity.String(),
-		MinNotional: p.MinNotional.String(), PriceBand: p.PriceBand.String(), MakerFeeRate: p.MakerFeeRate.String(),
-		TakerFeeRate: p.TakerFeeRate.String(), Status: p.Status,
+		Symbol: p.Symbol, BaseAsset: p.BaseAsset, QuoteAsset: p.QuoteAsset, BaseName: p.BaseName, Rank: rank(p.Rank),
+		Categories: categories(p.Categories), TickSize: p.TickSize.String(), LotSize: p.LotSize.String(),
+		PriceDecimals: places(p.TickSize), QtyDecimals: places(p.LotSize), MinQuantity: p.MinQuantity.String(),
+		MaxQuantity: p.MaxQuantity.String(), MinNotional: p.MinNotional.String(), PriceBand: p.PriceBand.String(),
+		MakerFeeRate: p.MakerFeeRate.String(), TakerFeeRate: p.TakerFeeRate.String(), Status: p.Status,
+		ReferenceSymbol: optional(p.ReferenceSymbol), ReferenceMultiplier: p.ReferenceMultiplier.String(),
+		ListedAt: p.ListedAt.UTC().Format(time.RFC3339),
 	}
+}
+
+// displayName falls back to the network code.
+func displayName(n domain.Network) string {
+	if n.DisplayName != "" {
+		return n.DisplayName
+	}
+	return n.Network
 }
 
 // cacheable lets browsers and Cloudflare keep reference data briefly.
@@ -87,14 +143,17 @@ func (h *Handler) assets(w http.ResponseWriter, r *http.Request) {
 	out := make([]assetJSON, 0, len(list))
 	for _, a := range list {
 		aj := assetJSON{
-			AssetCode: a.Code, Name: a.Name, Decimals: a.Decimals, DepositEnabled: a.DepositEnabled,
-			WithdrawEnabled: a.WithdrawEnabled, TradingEnabled: a.TradingEnabled, Networks: []networkJSON{},
+			AssetCode: a.Code, Name: a.Name, Decimals: a.Decimals, Rank: rank(a.Rank), Categories: categories(a.Categories),
+			DepositEnabled: a.DepositEnabled, WithdrawEnabled: a.WithdrawEnabled, TradingEnabled: a.TradingEnabled,
+			Networks: []networkJSON{},
 		}
 		for _, n := range a.Networks {
 			aj.Networks = append(aj.Networks, networkJSON{
-				Network: n.Network, Chain: n.Chain, ContractAddress: n.ContractAddress, Confirmations: n.Confirmations,
+				Network: n.Network, DisplayName: displayName(n), Chain: n.Chain, AddressFormat: n.AddressFormat,
+				ContractAddress: n.ContractAddress, Confirmations: n.Confirmations, ETAMinutes: n.ETAMinutes,
 				MinDeposit: n.MinDeposit.String(), MinWithdraw: n.MinWithdraw.String(), WithdrawFee: n.WithdrawFee.String(),
 				MemoRequired: n.MemoRequired, DepositEnabled: n.DepositEnabled, WithdrawEnabled: n.WithdrawEnabled,
+				ExplorerTxURL: optional(n.ExplorerTxURL), ExplorerAddressURL: optional(n.ExplorerAddressURL),
 			})
 		}
 		out = append(out, aj)

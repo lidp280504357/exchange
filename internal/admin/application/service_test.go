@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,14 +152,21 @@ func (r memApprovals) GetForUpdate(_ context.Context, id string) (*domain.Approv
 	return nil, nil
 }
 
-func (r memApprovals) List(_ context.Context, status string, _ int) ([]domain.Approval, error) {
+func (r memApprovals) List(_ context.Context, status string, afterTime time.Time, afterID string, limit int) ([]domain.Approval, error) {
 	var out []domain.Approval
 	for _, a := range r.m.approvals {
-		if status == "" || a.Status == status {
+		after := afterID == "" || a.CreatedAt.Before(afterTime) || (a.CreatedAt.Equal(afterTime) && a.ID < afterID)
+		if (status == "" || a.Status == status) && after {
 			out = append(out, a)
 		}
 	}
-	return out, nil
+	slices.SortFunc(out, func(a, b domain.Approval) int {
+		if c := b.CreatedAt.Compare(a.CreatedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(b.ID, a.ID)
+	})
+	return out[:min(limit, len(out))], nil
 }
 
 type adjustment struct {
@@ -230,7 +238,7 @@ func (o *fakeOrders) CancelAll(_ context.Context, userID string) error {
 
 type fakeWallet struct{ reviewer string }
 
-func (w *fakeWallet) List(context.Context, string) (json.RawMessage, error) {
+func (w *fakeWallet) List(context.Context, ports.WithdrawalQuery) (json.RawMessage, error) {
 	return json.RawMessage(`{"items":[]}`), nil
 }
 
@@ -562,7 +570,7 @@ func TestLiftingReduceOnly(t *testing.T) {
 	if !slices.Contains(h.actions(), "admin.derivatives.reduce_only_lifted") {
 		t.Fatalf("audit %v", h.actions())
 	}
-	if _, err := h.svc.Liquidations(ctx, fin, 7, "sideways", 10); code(err) != apperr.CodeInvalidArgument {
+	if _, _, err := h.svc.Liquidations(ctx, fin, 7, "sideways", "", 10); code(err) != apperr.CodeInvalidArgument {
 		t.Fatalf("unknown kind: %v", err)
 	}
 }

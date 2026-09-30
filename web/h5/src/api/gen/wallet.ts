@@ -1,6 +1,56 @@
 // Generated from api/openapi/wallet.yaml by scripts/gen-api.mjs; do not edit.
 
 export interface paths {
+    "/v1/wallet/networks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The networks an asset moves on
+         * @description What the deposit and withdrawal pages show of each network: its
+         *     name, address format, confirmations, usual time to a credit,
+         *     minimums, withdrawal fee and explorer links. USDT has one balance
+         *     whatever network it arrives on; the network is chosen per deposit
+         *     address and per withdrawal.
+         */
+        get: operations["listWalletNetworks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/wallet/withdraw-addresses/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check an address before saving or using it
+         * @description Checks the form for the network (EVM: 0x and 40 hex digits, EIP-55
+         *     when mixed case; TRON: Base58Check starting with T; Bitcoin:
+         *     bech32/bech32m or Base58Check of the right network) and whether it
+         *     is a platform deposit address: the caller's own is refused, another
+         *     user's makes the withdrawal an internal transfer without a network
+         *     fee. The form is all it can tell: a valid address may still belong
+         *     to nobody.
+         */
+        post: operations["validateWithdrawAddress"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/wallet/deposit-address": {
         parameters: {
             query?: never;
@@ -138,6 +188,35 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        WalletNetwork: {
+            asset: string;
+            /** @example ETH-SEPOLIA */
+            network: string;
+            /**
+             * @example TRC20
+             * @example ERC20
+             * @example Sepolia
+             */
+            display_name: string;
+            chain: string;
+            /** @enum {string} */
+            address_format: "EVM" | "TRON" | "BTC";
+            /** @description The token contract; null for the chain's native coin. */
+            contract: string | null;
+            confirmations: number;
+            /** @description Usual minutes from the transfer to the credit; 0 when unknown. */
+            eta_minutes: number;
+            min_deposit: string;
+            min_withdraw: string;
+            withdraw_fee: string;
+            memo_required: boolean;
+            deposit_enabled: boolean;
+            withdraw_enabled: boolean;
+            /** @description Explorer link of a transaction with a {tx} placeholder. */
+            explorer_tx_url: string | null;
+            /** @description Explorer link of an address with an {address} placeholder. */
+            explorer_address_url: string | null;
+        };
         DepositAddress: {
             asset: string;
             network: string;
@@ -277,6 +356,82 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    listWalletNetworks: {
+        parameters: {
+            query?: {
+                /** @description The asset (case-insensitive); every asset's networks when omitted. */
+                asset?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The networks, closed ones included (see the switches). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        networks: components["schemas"]["WalletNetwork"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    validateWithdrawAddress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Picks the network's asset when several share it. */
+                    asset?: string;
+                    /** @example ETH-SEPOLIA */
+                    network: string;
+                    address: string;
+                    /** @description Memo or tag, for networks that need one. */
+                    memo?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The outcome; an invalid address is not an error. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        valid: boolean;
+                        network: string;
+                        /** @enum {string} */
+                        address_format: "EVM" | "TRON" | "BTC";
+                        /** @description The address as the network writes it (EIP-55 case for EVM); null when invalid. */
+                        normalized: string | null;
+                        /**
+                         * @description Why it is invalid: not an address of the network's kind,
+                         *     a checksum mismatch (a typo), an address of another
+                         *     network (e.g. testnet), a missing memo, or the caller's
+                         *     own deposit address.
+                         * @enum {string|null}
+                         */
+                        reason: "ADDRESS_FORMAT" | "ADDRESS_CHECKSUM" | "ADDRESS_NETWORK" | "MEMO_REQUIRED" | "ADDRESS_OWN" | null;
+                        /** @description Another user's deposit address; the withdrawal completes inside the platform with no fee. */
+                        internal: boolean;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     getDepositAddress: {
         parameters: {
             query: {

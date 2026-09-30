@@ -30,6 +30,8 @@ func TestContractRoutes(t *testing.T) {
 		"/v1/market/contracts/BTC-USDT-PERP": "instrument",
 		"/v1/market/pairs/BTC-USDT":          "instrument",
 		"/v1/market/BTC-USDT/depth":          "market",
+		"/v1/market/summary":                 "market",
+		"/v1/market/tickers":                 "market",
 	} {
 		got = ""
 		rec := httptest.NewRecorder()

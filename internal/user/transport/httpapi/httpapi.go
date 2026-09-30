@@ -3,6 +3,7 @@ package httpapi
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -27,7 +28,51 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Get("/v1/user/profile", h.profile)
 		r.Patch("/v1/user/profile", h.updateProfile)
 		r.Get("/v1/user/eligibility", h.eligibility)
+		r.Get("/v1/user/favorites", h.favorites)
+		r.Put("/v1/user/favorites", h.setFavorites)
 	})
+}
+
+type favoritesJSON struct {
+	Symbols   []string `json:"symbols"`
+	UpdatedAt *string  `json:"updated_at"`
+}
+
+func toFavorites(symbols []string, at time.Time) favoritesJSON {
+	out := favoritesJSON{Symbols: symbols}
+	if out.Symbols == nil {
+		out.Symbols = []string{}
+	}
+	if !at.IsZero() {
+		s := httpx.FormatTime(at)
+		out.UpdatedAt = &s
+	}
+	return out
+}
+
+func (h *Handler) favorites(w http.ResponseWriter, r *http.Request) {
+	list, at, err := h.Svc.Favorites(r.Context(), httpx.UserID(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, toFavorites(list, at))
+}
+
+func (h *Handler) setFavorites(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Symbols []string `json:"symbols"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	list, at, err := h.Svc.SetFavorites(r.Context(), httpx.UserID(r), body.Symbols)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, toFavorites(list, at))
 }
 
 func requireUser(next http.Handler) http.Handler {

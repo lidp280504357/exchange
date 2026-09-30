@@ -59,6 +59,10 @@ type Hub struct {
 	public map[string]map[*wsConn]struct{}
 	depth  map[string]*depthBook
 	latest map[string]wsMarket
+	// tickers are every symbol's latest; tickersDirty the ones that
+	// changed since the last "tickers" update.
+	tickers      map[string]tickerData
+	tickersDirty map[string]bool
 
 	connected prometheus.Gauge
 	pushed    *prometheus.CounterVec
@@ -89,6 +93,7 @@ func NewHub(auth TokenChecker, originPatterns []string, log *slog.Logger, reg pr
 		auth: auth, origins: originPatterns, log: log, now: time.Now,
 		users: map[string]*wsUser{}, conns: map[*wsConn]struct{}{},
 		public: map[string]map[*wsConn]struct{}{}, depth: map[string]*depthBook{}, latest: map[string]wsMarket{},
+		tickers: map[string]tickerData{}, tickersDirty: map[string]bool{},
 		connected: prometheus.NewGauge(prometheus.GaugeOpts{Name: "ws_connections", Help: "Open WebSocket connections."}),
 		pushed: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "ws_pushed_total", Help: "Messages pushed to connections, by channel (public ones by kind: ticker, depth, ...).",
@@ -135,12 +140,17 @@ func (h *Hub) Run() error {
 	defer t.Stop()
 	depth := time.NewTicker(wsDepthResend)
 	defer depth.Stop()
+	tickers := time.NewTicker(wsTickersEvery)
+	defer tickers.Stop()
 	for {
 		select {
 		case <-h.stop:
 			return nil
 		case <-depth.C:
 			h.resendDepth()
+			continue
+		case <-tickers.C:
+			h.flushTickers()
 			continue
 		case <-t.C:
 		}

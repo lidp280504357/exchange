@@ -352,13 +352,12 @@ func WSEvents(h *Hub) func(context.Context, *eventv1.Envelope) error {
 				return err
 			}
 			t := ticker.GetTicker()
-			ch := "ticker:" + t.GetSymbol()
-			h.OnMarket(wsMarket{Channel: ch, Data: tickerData{
+			h.OnTicker(tickerData{
 				Symbol: t.GetSymbol(), Last: optional(t.GetLast()), Open: optional(t.GetOpen()), High: optional(t.GetHigh()),
 				Low: optional(t.GetLow()), Volume: t.GetVolume(), QuoteVolume: t.GetQuoteVolume(), TradeCount: t.GetTradeCount(),
 				Change: optional(t.GetChange()), Bid: optional(t.GetBid()), Ask: optional(t.GetAsk()),
 				UpdatedAt: t.GetUpdatedAt().AsTime().UTC().Format(time.RFC3339Nano),
-			}}, true)
+			})
 		case p.MessageIs(&mark):
 			if err := p.UnmarshalTo(&mark); err != nil {
 				return err

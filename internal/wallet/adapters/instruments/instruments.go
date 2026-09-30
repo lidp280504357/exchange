@@ -60,6 +60,8 @@ func (c *Client) all(ctx context.Context) ([]domain.Network, error) {
 				Decimals: a.GetDecimals(), Confirmations: uint32(max(n.GetConfirmations(), 0)), //nolint:gosec // non-negative
 				MinDeposit: amounts[0], Enabled: a.GetDepositEnabled() && n.GetDepositEnabled(),
 				WithdrawEnabled: a.GetWithdrawEnabled() && n.GetWithdrawEnabled(), MinWithdraw: amounts[1], WithdrawFee: amounts[2],
+				MemoRequired: n.GetMemoRequired(), DisplayName: n.GetDisplayName(), AddressFormat: n.GetAddressFormat(),
+				ETAMinutes: n.GetEtaMinutes(), ExplorerTxURL: n.GetExplorerTxUrl(), ExplorerAddressURL: n.GetExplorerAddressUrl(),
 			})
 		}
 	}
@@ -93,6 +95,21 @@ func (c *Client) OnNetwork(ctx context.Context, network string) ([]domain.Networ
 	var out []domain.Network
 	for _, n := range nets {
 		if n.Network == network {
+			out = append(out, n)
+		}
+	}
+	return out, nil
+}
+
+// ForAsset lists an asset's networks, every one when asset is empty.
+func (c *Client) ForAsset(ctx context.Context, asset string) ([]domain.Network, error) {
+	nets, err := c.all(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []domain.Network
+	for _, n := range nets {
+		if asset == "" || n.Asset == asset {
 			out = append(out, n)
 		}
 	}

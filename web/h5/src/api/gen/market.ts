@@ -109,6 +109,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/market/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Top movers and most traded USDT pairs
+         * @description The home page overview, from the tickers of the USDT pairs that are
+         *     trading and have a price: gainers by 24-hour change (highest
+         *     first), losers (lowest first) and turnover by quote volume
+         *     (highest first).
+         */
+        get: operations["getMarketSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/market/{symbol}/ticker": {
         parameters: {
             query?: never;
@@ -222,10 +245,13 @@ export interface paths {
         };
         /**
          * Candles of a pair, oldest first
-         * @description Built from the platform's trades, aligned to UTC (weeks start on
-         *     Monday). Intervals without trades repeat the previous close with
-         *     zero volume, so the series has no gaps; intervals before the first
-         *     trade are left out. At most `limit` candles, the latest ones.
+         * @description Aligned to UTC (weeks start on Monday). A pair in reference mode
+         *     (market.reference_kline) shows its reference market's candles; the
+         *     platform's own are built from its trades: intervals without trades
+         *     repeat the previous close with zero volume, so the series has no
+         *     gaps, and intervals before the first trade are left out. At most
+         *     `limit` candles, the latest ones opening before `to`. To page back
+         *     through history, pass the oldest open_time received as `to`.
          */
         get: operations["listCandles"];
         put?: never;
@@ -245,11 +271,27 @@ export interface components {
         Network: {
             /** @example ETH-SEPOLIA */
             network: string;
+            /** @description The name users see, e.g. TRC20, BEP20, ERC20, Bitcoin; the network code when none is set. */
+            display_name: string;
             /** @description Chain identifier, e.g. the EVM chain ID. */
             chain: string;
+            /**
+             * @description How addresses are written and checked.
+             * @enum {string}
+             */
+            address_format: "EVM" | "TRON" | "BTC";
             /** @description Empty for the chain's native coin. */
             contract_address: string;
             confirmations: number;
+            /** @description Usual minutes from the transfer to the credit; 0 when unknown. */
+            eta_minutes: number;
+            /**
+             * @description Block explorer link of a transaction, with a {tx} placeholder.
+             * @example https://sepolia.etherscan.io/tx/{tx}
+             */
+            explorer_tx_url: string | null;
+            /** @description Block explorer link of an address, with an {address} placeholder. */
+            explorer_address_url: string | null;
             min_deposit: components["schemas"]["Decimal"];
             min_withdraw: components["schemas"]["Decimal"];
             withdraw_fee: components["schemas"]["Decimal"];
@@ -261,6 +303,10 @@ export interface components {
             /** @example BTC */
             asset_code: string;
             name: string;
+            /** @description Market-cap rank at listing; null when unranked. */
+            rank: number | null;
+            /** @description Sector tags, e.g. layer-1, defi, meme. */
+            categories: string[];
             /** @description Amounts of the asset have at most this many decimal places. */
             decimals: number;
             deposit_enabled: boolean;
@@ -309,8 +355,18 @@ export interface components {
             symbol: string;
             base_asset: string;
             quote_asset: string;
+            /** @description The base asset's name, e.g. Bitcoin. */
+            base_name: string;
+            /** @description The base asset's market-cap rank at listing; null when unranked. */
+            rank: number | null;
+            /** @description The base asset's sector tags. */
+            categories: string[];
             tick_size: components["schemas"]["Decimal"];
             lot_size: components["schemas"]["Decimal"];
+            /** @description Decimal places of tick_size, for display. */
+            price_decimals: number;
+            /** @description Decimal places of lot_size, for display. */
+            qty_decimals: number;
             min_quantity: components["schemas"]["Decimal"];
             max_quantity: components["schemas"]["Decimal"];
             min_notional: components["schemas"]["Decimal"];
@@ -319,14 +375,29 @@ export interface components {
             taker_fee_rate: components["schemas"]["Decimal"];
             /** @enum {string} */
             status: "PREPARE" | "TRADING" | "HALT" | "CANCEL_ONLY" | "DELISTED";
+            /**
+             * @description The reference market the pair's market data follows (ADR-0010),
+             *     e.g. BTCUSDT; null when the pair shows its own trades and book.
+             */
+            reference_symbol: string | null;
+            /** @description Platform price = reference price x multiplier (1000 for a 1000PEPE pair); quantities divide by it. */
+            reference_multiplier: components["schemas"]["Decimal"];
+            /** Format: date-time */
+            listed_at: string;
         };
         NullableDecimal: string | null;
         /**
-         * @description Rolling 24 hours at minute resolution (§11.8). Prices are null while
-         *     unknown: a pair that never traded, or an empty side of the book.
+         * @description Rolling 24 hours (§11.8): the reference market's while
+         *     market.reference_ticker is on for the symbol (ADR-0010), else the
+         *     platform's at minute resolution. Prices are null while unknown: a
+         *     pair that never traded, or an empty side of the book. A reference
+         *     ticker keeps its updated_at when the feed stalls: clients show a
+         *     warning once it is 30 seconds old.
          */
         Ticker: {
             symbol: string;
+            /** @description The base asset's market-cap rank; null when unranked. */
+            rank: number | null;
             last: components["schemas"]["NullableDecimal"];
             /** @description The last trade price 24 hours ago. */
             open: components["schemas"]["NullableDecimal"];
@@ -340,7 +411,10 @@ export interface components {
             change: components["schemas"]["NullableDecimal"];
             bid: components["schemas"]["NullableDecimal"];
             ask: components["schemas"]["NullableDecimal"];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the reference source computed the ticker, or now for the platform's.
+             */
             updated_at: string;
         };
         MarkPrice: {
@@ -589,6 +663,36 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getMarketSummary: {
+        parameters: {
+            query?: {
+                /** @description Tickers per list. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The overview. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        gainers: components["schemas"]["Ticker"][];
+                        losers: components["schemas"]["Ticker"][];
+                        turnover: components["schemas"]["Ticker"][];
+                        /** Format: date-time */
+                        updated_at: string;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     getTicker: {
         parameters: {
             query?: never;
@@ -743,7 +847,7 @@ export interface operations {
                 interval: "1m" | "3m" | "5m" | "15m" | "30m" | "1h" | "2h" | "4h" | "6h" | "12h" | "1d" | "1w" | "1M";
                 /** @description First candle, the one containing this time (RFC 3339); default limit intervals before to. */
                 from?: string;
-                /** @description Candles opening before this time (RFC 3339); default now. */
+                /** @description Candles opening before this time (RFC 3339); default now, which includes the open candle. */
                 to?: string;
                 limit?: number;
             };

@@ -179,4 +179,13 @@ type Network struct {
 	WithdrawEnabled bool
 	MinWithdraw     decimal.Decimal
 	WithdrawFee     decimal.Decimal
+	MemoRequired    bool
+	// What users see of the network: its name (TRC20, ERC20, ...), how
+	// its addresses look (FormatEVM, FormatTRON, FormatBTC), the usual
+	// minutes to a credit, and block explorer links with {tx} or {address}.
+	DisplayName        string
+	AddressFormat      string
+	ETAMinutes         int32
+	ExplorerTxURL      string
+	ExplorerAddressURL string
 }

@@ -63,6 +63,16 @@ func (s *Service) Updates(now time.Time) []Update {
 	return out
 }
 
+// RepushTicker has the next Updates push the symbol's ticker even if it
+// did not change.
+func (s *Service) RepushTicker(symbol string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if st, ok := s.symbols[symbol]; ok {
+		st.pushedTicker = nil
+	}
+}
+
 func sameTicker(a, b domain.Ticker) bool {
 	return a.Last.Equal(b.Last) && a.Open.Equal(b.Open) && a.High.Equal(b.High) && a.Low.Equal(b.Low) &&
 		a.Volume.Equal(b.Volume) && a.QuoteVolume.Equal(b.QuoteVolume) && a.Trades == b.Trades &&
@@ -99,17 +109,18 @@ func TickerProto(t domain.Ticker, now time.Time) *marketv1.Ticker {
 // Pusher publishes Updates to market.candle.events every PushInterval,
 // straight to Kafka: they are derived and the next push supersedes them.
 type Pusher struct {
-	svc    *Service
-	pub    kafka.Publisher
-	events *event.Factory
-	ref    *ReferenceCandles
-	pushed prometheus.Counter
-	failed prometheus.Counter
+	svc     *Service
+	pub     kafka.Publisher
+	events  *event.Factory
+	filters []func(context.Context, []Update) []Update
+	pushed  prometheus.Counter
+	failed  prometheus.Counter
 }
 
-// UseReference swaps the candles of symbols in reference mode for their
-// reference K-lines (before Run starts).
-func (p *Pusher) UseReference(rc *ReferenceCandles) { p.ref = rc }
+// Use passes every push through fn before it is published (before Run
+// starts): reference K-lines and tickers swap the platform's updates of
+// the symbols that show them.
+func (p *Pusher) Use(fn func(context.Context, []Update) []Update) { p.filters = append(p.filters, fn) }
 
 // NewPusher registers the push metrics with reg.
 func NewPusher(svc *Service, pub kafka.Publisher, events *event.Factory, reg prometheus.Registerer) *Pusher {
@@ -136,8 +147,8 @@ func (p *Pusher) Run(ctx context.Context) error {
 			return nil
 		case now := <-tick.C:
 			updates := p.svc.Updates(now)
-			if p.ref != nil {
-				updates = p.ref.Push(ctx, updates)
+			for _, fn := range p.filters {
+				updates = fn(ctx, updates)
 			}
 			if err := p.Push(ctx, updates); err != nil && ctx.Err() == nil {
 				p.failed.Inc()

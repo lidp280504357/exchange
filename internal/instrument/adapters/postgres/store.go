@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lidp280504357/exchange/internal/instrument/domain"
@@ -121,11 +123,13 @@ func (r fees) Save(ctx context.Context, f domain.FeeSchedule) (domain.FeeSchedul
 
 type assets repos
 
-const assetColumns = `asset_code, name, decimals, deposit_enabled, withdraw_enabled, trading_enabled, risk_restricted, version`
+const assetColumns = `asset_code, name, decimals, deposit_enabled, withdraw_enabled, trading_enabled, risk_restricted, rank,
+	categories, version`
 
 func scanAsset(row pgx.Row) (domain.Asset, error) {
 	var a domain.Asset
-	err := row.Scan(&a.Code, &a.Name, &a.Decimals, &a.DepositEnabled, &a.WithdrawEnabled, &a.TradingEnabled, &a.RiskRestricted, &a.Version)
+	err := row.Scan(&a.Code, &a.Name, &a.Decimals, &a.DepositEnabled, &a.WithdrawEnabled, &a.TradingEnabled, &a.RiskRestricted,
+		&a.Rank, &a.Categories, &a.Version)
 	return a, err
 }
 
@@ -139,24 +143,32 @@ func (r assets) List(ctx context.Context) ([]domain.Asset, error) {
 }
 
 func (r assets) Save(ctx context.Context, a domain.Asset) (domain.Asset, error) {
+	categories := a.Categories
+	if categories == nil {
+		categories = []string{}
+	}
 	return scanAsset(r.q.QueryRow(ctx, `INSERT INTO assets (asset_code, name, decimals, deposit_enabled, withdraw_enabled,
-		trading_enabled, risk_restricted) VALUES ($1, $2, $3, $4, $5, $6, $7)
+		trading_enabled, risk_restricted, rank, categories) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (asset_code) DO UPDATE SET name = EXCLUDED.name, decimals = EXCLUDED.decimals,
 		deposit_enabled = EXCLUDED.deposit_enabled, withdraw_enabled = EXCLUDED.withdraw_enabled,
 		trading_enabled = EXCLUDED.trading_enabled, risk_restricted = EXCLUDED.risk_restricted,
+		rank = EXCLUDED.rank, categories = EXCLUDED.categories,
 		version = assets.version + 1, updated_at = now()
-		RETURNING `+assetColumns, a.Code, a.Name, a.Decimals, a.DepositEnabled, a.WithdrawEnabled, a.TradingEnabled, a.RiskRestricted))
+		RETURNING `+assetColumns, a.Code, a.Name, a.Decimals, a.DepositEnabled, a.WithdrawEnabled, a.TradingEnabled, a.RiskRestricted,
+		a.Rank, categories))
 }
 
 type networks repos
 
 const networkColumns = `asset_code, network, chain, contract_address, confirmations, min_deposit, min_withdraw, withdraw_fee,
-	memo_required, deposit_enabled, withdraw_enabled, version`
+	memo_required, deposit_enabled, withdraw_enabled, display_name, address_format, eta_minutes, explorer_tx_url,
+	explorer_address_url, version`
 
 func scanNetwork(row pgx.Row) (domain.Network, error) {
 	var n domain.Network
 	err := row.Scan(&n.AssetCode, &n.Network, &n.Chain, &n.ContractAddress, &n.Confirmations, &n.MinDeposit, &n.MinWithdraw,
-		&n.WithdrawFee, &n.MemoRequired, &n.DepositEnabled, &n.WithdrawEnabled, &n.Version)
+		&n.WithdrawFee, &n.MemoRequired, &n.DepositEnabled, &n.WithdrawEnabled, &n.DisplayName, &n.AddressFormat, &n.ETAMinutes,
+		&n.ExplorerTxURL, &n.ExplorerAddressURL, &n.Version)
 	return n, err
 }
 
@@ -170,27 +182,35 @@ func (r networks) List(ctx context.Context) ([]domain.Network, error) {
 }
 
 func (r networks) Save(ctx context.Context, n domain.Network) (domain.Network, error) {
+	if n.AddressFormat == "" {
+		n.AddressFormat = domain.FormatEVM
+	}
 	return scanNetwork(r.q.QueryRow(ctx, `INSERT INTO networks (asset_code, network, chain, contract_address, confirmations,
-		min_deposit, min_withdraw, withdraw_fee, memo_required, deposit_enabled, withdraw_enabled)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		min_deposit, min_withdraw, withdraw_fee, memo_required, deposit_enabled, withdraw_enabled, display_name, address_format,
+		eta_minutes, explorer_tx_url, explorer_address_url)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		ON CONFLICT (asset_code, network) DO UPDATE SET chain = EXCLUDED.chain, contract_address = EXCLUDED.contract_address,
 		confirmations = EXCLUDED.confirmations, min_deposit = EXCLUDED.min_deposit, min_withdraw = EXCLUDED.min_withdraw,
 		withdraw_fee = EXCLUDED.withdraw_fee, memo_required = EXCLUDED.memo_required,
 		deposit_enabled = EXCLUDED.deposit_enabled, withdraw_enabled = EXCLUDED.withdraw_enabled,
+		display_name = EXCLUDED.display_name, address_format = EXCLUDED.address_format, eta_minutes = EXCLUDED.eta_minutes,
+		explorer_tx_url = EXCLUDED.explorer_tx_url, explorer_address_url = EXCLUDED.explorer_address_url,
 		version = networks.version + 1, updated_at = now()
 		RETURNING `+networkColumns, n.AssetCode, n.Network, n.Chain, n.ContractAddress, n.Confirmations, n.MinDeposit,
-		n.MinWithdraw, n.WithdrawFee, n.MemoRequired, n.DepositEnabled, n.WithdrawEnabled))
+		n.MinWithdraw, n.WithdrawFee, n.MemoRequired, n.DepositEnabled, n.WithdrawEnabled, n.DisplayName, n.AddressFormat,
+		n.ETAMinutes, n.ExplorerTxURL, n.ExplorerAddressURL))
 }
 
 type pairs repos
 
 const pairColumns = `symbol, base_asset, quote_asset, tick_size, lot_size, min_quantity, max_quantity, min_notional,
-	price_band, fee_tier, status, version`
+	price_band, fee_tier, status, reference_symbol, reference_multiplier, listed_at, version`
 
 func scanPair(row pgx.Row) (domain.TradingPair, error) {
 	var p domain.TradingPair
 	err := row.Scan(&p.Symbol, &p.BaseAsset, &p.QuoteAsset, &p.TickSize, &p.LotSize, &p.MinQuantity, &p.MaxQuantity,
-		&p.MinNotional, &p.PriceBand, &p.FeeTier, &p.Status, &p.Version)
+		&p.MinNotional, &p.PriceBand, &p.FeeTier, &p.Status, &p.ReferenceSymbol, &p.ReferenceMultiplier, &p.ListedAt, &p.Version)
+	p.ListedAt = p.ListedAt.UTC()
 	return p, err
 }
 
@@ -208,15 +228,25 @@ func (r pairs) List(ctx context.Context) ([]domain.TradingPair, error) {
 }
 
 func (r pairs) Save(ctx context.Context, p domain.TradingPair) (domain.TradingPair, error) {
+	var listed *time.Time // now() when not given
+	if !p.ListedAt.IsZero() {
+		listed = &p.ListedAt
+	}
+	multiplier := p.ReferenceMultiplier
+	if multiplier.IsZero() {
+		multiplier = decimal.NewFromInt(1)
+	}
 	return scanPair(r.q.QueryRow(ctx, `INSERT INTO trading_pairs (symbol, base_asset, quote_asset, tick_size, lot_size,
-		min_quantity, max_quantity, min_notional, price_band, fee_tier, status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		min_quantity, max_quantity, min_notional, price_band, fee_tier, status, reference_symbol, reference_multiplier, listed_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, COALESCE($14, now()))
 		ON CONFLICT (symbol) DO UPDATE SET tick_size = EXCLUDED.tick_size, lot_size = EXCLUDED.lot_size,
 		min_quantity = EXCLUDED.min_quantity, max_quantity = EXCLUDED.max_quantity, min_notional = EXCLUDED.min_notional,
 		price_band = EXCLUDED.price_band, fee_tier = EXCLUDED.fee_tier, status = EXCLUDED.status,
+		reference_symbol = EXCLUDED.reference_symbol, reference_multiplier = EXCLUDED.reference_multiplier,
+		listed_at = COALESCE($14, trading_pairs.listed_at),
 		version = trading_pairs.version + 1, updated_at = now()
 		RETURNING `+pairColumns, p.Symbol, p.BaseAsset, p.QuoteAsset, p.TickSize, p.LotSize, p.MinQuantity, p.MaxQuantity,
-		p.MinNotional, p.PriceBand, p.FeeTier, p.Status))
+		p.MinNotional, p.PriceBand, p.FeeTier, p.Status, p.ReferenceSymbol, multiplier, listed))
 }
 
 type contracts repos

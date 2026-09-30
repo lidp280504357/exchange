@@ -319,6 +319,40 @@ as AUDITOR GET /admin/v1/reports/open-interest ""
 expect 200 - "open interest"
 check '.items | type == "array" and all(.[]; .long == .short)' "long equals short per contract"
 
+echo "== paged lists and the overview"
+as AUDITOR GET "/admin/v1/users?limit=2" ""
+expect 200 - "accounts, newest first"
+check '(.items | length) == 2 and (.next_cursor | type) == "string" and (.items[0].created_at >= .items[1].created_at)' "a page of two with a cursor"
+CURSOR=$(jq -r .next_cursor <<<"$BODY")
+FIRST=$(jq -r '.items | map(.id) | join(",")' <<<"$BODY")
+as AUDITOR GET "/admin/v1/users?limit=2&cursor=$CURSOR" ""
+expect 200 - "the next page"
+check "(.items | length) >= 1 and ([.items[].id] | map(. as \$i | \"$FIRST\" | contains(\$i)) | any | not)" "without the first page's accounts"
+as AUDITOR GET "/admin/v1/users?status=GONE" ""
+expect 400 COMMON_INVALID_ARGUMENT "an unknown status"
+as AUDITOR GET "/admin/v1/users?cursor=not-a-cursor" ""
+expect 400 COMMON_INVALID_ARGUMENT "a cursor the console did not make"
+orders_listed() {
+  as AUDITOR GET "/admin/v1/orders?user_id=$USER_ID" ""
+  [[ $STATUS == 200 ]] && jq -e --arg o "$ORDER" '.items | map(.order_id) | index($o) != null' <<<"$BODY" >/dev/null
+}
+eventually 60 "the user's canceled order is in the orders view" orders_listed
+check '.items[0].status == "CANCELED" and .items[0].symbol == "ETH-BTC"' "in its latest state"
+as AUDITOR GET "/admin/v1/trades?symbol=ETH-BTC&limit=3" ""
+expect 200 - "trades"
+check '(.items | length) <= 3 and all(.items[]; .symbol == "ETH-BTC" and (.price | test("^[0-9.]+$")))' "of one symbol"
+as AUDITOR GET "/admin/v1/deposits?limit=5" ""
+expect 200 - "deposits"
+check '.items | type == "array" and length <= 5' "a page"
+as FINANCE GET "/admin/v1/withdrawals?status=ALL&limit=1" ""
+expect 200 - "withdrawals of every status"
+check '(.items | length) <= 1 and has("next_cursor")' "a page with its cursor"
+as ADMIN GET "/admin/v1/approvals?limit=1" ""
+check '(.items | length) == 1 and (.next_cursor | type) == "string"' "approvals page too"
+as AUDITOR GET "/admin/v1/dashboard?days=7" ""
+expect 200 - "the overview"
+check '.users.total >= 1 and (.series | length) == 7 and (.partial | length) == 0 and (.feed.state | test("^(OK|DELAYED|DOWN|OFF)$"))' "accounts, a week of days, the feed; nothing missing"
+
 echo "== the audit trail"
 audited() { # audited ROLE QUERY JQ
   as "$1" GET "/admin/v1/audit-logs?$2" ""

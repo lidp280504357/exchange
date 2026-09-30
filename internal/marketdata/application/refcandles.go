@@ -17,14 +17,12 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/flags"
 )
 
-// Reference K-lines (flag market.reference_kline, test environments only):
-// a symbol's chart shows the reference source's candles instead of the
-// platform's (the user's decision of 2026-09-30: a test environment trades
-// too little for its own candles to move). History comes from the source
-// and is cached for a few seconds; the open candles of every interval are
-// aggregated from the feed's live 1m updates and pushed on
-// market.candle.events like the platform's. A spot pair uses its own
-// reference symbol, a contract its index symbol.
+// Reference K-lines (flag market.reference_kline, ADR-0010): a symbol's
+// chart shows the reference market's candles instead of the platform's.
+// History comes from the source and is cached for a few seconds; the open
+// candles of every interval are aggregated from the feed's live 1m
+// updates and pushed on market.candle.events like the platform's. A spot
+// pair follows its own reference market, a contract its index pair's.
 
 const (
 	// referenceCacheTTL bounds how often the same chart request reaches
@@ -35,23 +33,84 @@ const (
 	referenceListing = 30 * time.Second
 )
 
-// ReferenceCandles serves reference K-lines.
+// ReferenceCandles serves reference K-lines. Open candles are kept by the
+// followed pair's symbol, which the feed's updates carry.
 type ReferenceCandles struct {
-	history     ports.ReferenceHistory
-	flags       Flags
+	history ports.ReferenceHistory
+	flags   Flags
+	refs    *ReferenceMap
+	log     *slog.Logger
+	now     func() time.Time
+
+	mu      sync.Mutex
+	open    map[string]map[domain.Interval]*openCandle // by followed pair
+	closed  map[string][]domain.Candle                 // ended since the last push
+	pending map[string]bool                            // pair|interval being initialized
+	cache   map[string]cachedCandles
+	wg      sync.WaitGroup
+}
+
+// ReferenceMap tells which listed symbols show which reference market: a
+// pair its own (its reference_symbol), a contract its index pair's. The
+// mapping is cached for referenceListing; the stale one serves while the
+// listing is unavailable.
+type ReferenceMap struct {
 	instruments ports.Instruments
-	followed    map[string]bool // the reference symbols the feed follows
 	log         *slog.Logger
 	now         func() time.Time
 
-	mu       sync.Mutex
-	open     map[string]map[domain.Interval]*openCandle // by reference symbol
-	closed   map[string][]domain.Candle                 // ended since the last push
-	pending  map[string]bool                            // reference|interval being initialized
-	cache    map[string]cachedCandles
-	listed   map[string]string // platform symbol → reference symbol
-	listedAt time.Time
-	wg       sync.WaitGroup
+	mu sync.Mutex
+	m  map[string]ports.Reference
+	at time.Time
+}
+
+// NewReferenceMap reads the mapping from instruments.
+func NewReferenceMap(instruments ports.Instruments, log *slog.Logger) *ReferenceMap {
+	return &ReferenceMap{instruments: instruments, log: log, now: time.Now}
+}
+
+// Get returns the mapping, refreshed when older than referenceListing.
+func (r *ReferenceMap) Get(ctx context.Context) map[string]ports.Reference {
+	r.mu.Lock()
+	if r.m != nil && r.now().Sub(r.at) < referenceListing {
+		m := r.m
+		r.mu.Unlock()
+		return m
+	}
+	stale := r.m
+	r.mu.Unlock()
+	pairs, err := r.instruments.Pairs(ctx)
+	if err != nil {
+		r.log.WarnContext(ctx, "reference mapping: listing unavailable", "error", err)
+		return stale
+	}
+	contracts, err := r.instruments.Contracts(ctx)
+	if err != nil {
+		r.log.WarnContext(ctx, "reference mapping: contracts unavailable", "error", err)
+		return stale
+	}
+	m := map[string]ports.Reference{}
+	for _, p := range pairs {
+		if p.Reference.Remote != "" {
+			m[p.Symbol] = p.Reference
+		}
+	}
+	for _, c := range contracts {
+		if ref, ok := m[c.IndexSymbol]; ok {
+			m[c.Symbol] = ref
+		}
+	}
+	r.mu.Lock()
+	r.m, r.at = m, r.now()
+	r.mu.Unlock()
+	return m
+}
+
+// cached returns the mapping as last read, without reading it again.
+func (r *ReferenceMap) cached() map[string]ports.Reference {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.m
 }
 
 // openCandle is the open candle of one interval, built from 1m updates:
@@ -69,26 +128,20 @@ type cachedCandles struct {
 	until   time.Time
 }
 
-// NewReferenceCandles serves the reference symbols followed by the feed
-// from history.
-func NewReferenceCandles(history ports.ReferenceHistory, fl Flags, instruments ports.Instruments, followed []string,
-	log *slog.Logger,
-) *ReferenceCandles {
-	rc := &ReferenceCandles{
-		history: history, flags: fl, instruments: instruments, followed: map[string]bool{}, log: log, now: time.Now,
+// NewReferenceCandles serves the reference markets refs maps from
+// history.
+func NewReferenceCandles(history ports.ReferenceHistory, fl Flags, refs *ReferenceMap, log *slog.Logger) *ReferenceCandles {
+	return &ReferenceCandles{
+		history: history, flags: fl, refs: refs, log: log, now: time.Now,
 		open: map[string]map[domain.Interval]*openCandle{}, closed: map[string][]domain.Candle{}, pending: map[string]bool{},
 		cache: map[string]cachedCandles{},
 	}
-	for _, s := range followed {
-		rc.followed[s] = true
-	}
-	return rc
 }
 
 // Serves reports whether symbol's chart shows reference candles now, and
-// of which reference symbol.
-func (rc *ReferenceCandles) Serves(ctx context.Context, symbol string) (string, bool) {
-	ref, ok := rc.mapping(ctx)[symbol]
+// of which reference market.
+func (rc *ReferenceCandles) Serves(ctx context.Context, symbol string) (ports.Reference, bool) {
+	ref, ok := rc.refs.Get(ctx)[symbol]
 	return ref, ok && rc.on(symbol)
 }
 
@@ -97,48 +150,12 @@ func (rc *ReferenceCandles) on(symbol string) bool {
 		rc.flags.Enabled(flags.KeyReferenceKline, flags.Subject{Symbol: symbol})
 }
 
-// mapping returns the listed symbols that have a followed reference: a
-// pair its own symbol, a contract its index symbol.
-func (rc *ReferenceCandles) mapping(ctx context.Context) map[string]string {
-	rc.mu.Lock()
-	if rc.listed != nil && rc.now().Sub(rc.listedAt) < referenceListing {
-		m := rc.listed
-		rc.mu.Unlock()
-		return m
-	}
-	stale := rc.listed
-	rc.mu.Unlock()
-	symbols, err := rc.instruments.Symbols(ctx)
-	if err != nil {
-		rc.log.WarnContext(ctx, "reference K-lines: listing unavailable", "error", err)
-		return stale
-	}
-	contracts, err := rc.instruments.Contracts(ctx)
-	if err != nil {
-		rc.log.WarnContext(ctx, "reference K-lines: contracts unavailable", "error", err)
-		return stale
-	}
-	m := map[string]string{}
-	for _, s := range symbols {
-		if rc.followed[s] {
-			m[s] = s
-		}
-	}
-	for _, c := range contracts {
-		if rc.followed[c.IndexSymbol] {
-			m[c.Symbol] = c.IndexSymbol
-		}
-	}
-	rc.mu.Lock()
-	rc.listed, rc.listedAt = m, rc.now()
-	rc.mu.Unlock()
-	return m
-}
-
 // Candles returns symbol's reference candles like Service.Candles: the
 // latest limit intervals up to to (now when zero), not before from. The
 // open candle is the one aggregated from the stream when there is one.
-func (rc *ReferenceCandles) Candles(ctx context.Context, symbol, ref, interval string, from, to time.Time, limit int) ([]domain.Candle, error) {
+func (rc *ReferenceCandles) Candles(ctx context.Context, symbol string, ref ports.Reference, interval string, from, to time.Time,
+	limit int,
+) ([]domain.Candle, error) {
 	i, ok := domain.ParseInterval(interval)
 	if !ok {
 		return nil, apperr.Invalid(fmt.Sprintf("interval must be one of %v", domain.Intervals))
@@ -147,7 +164,7 @@ func (rc *ReferenceCandles) Candles(ctx context.Context, symbol, ref, interval s
 		limit = DefaultLimit
 	}
 	now := rc.now()
-	key := fmt.Sprintf("%s|%s|%d|%d", ref, i, to.UnixMilli(), limit)
+	key := fmt.Sprintf("%s|%s|%d|%d", ref.Symbol, i, to.UnixMilli(), limit)
 	rc.mu.Lock()
 	hit, cached := rc.cache[key]
 	rc.mu.Unlock()
@@ -158,7 +175,7 @@ func (rc *ReferenceCandles) Candles(ctx context.Context, symbol, ref, interval s
 			return nil, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "reference candles are unavailable")
 		}
 		ttl := referenceCacheTTL
-		if !to.IsZero() && !i.Next(i.Start(to)).After(now) {
+		if !to.IsZero() && !to.After(now) {
 			ttl = referencePastCacheTTL
 		}
 		rc.mu.Lock()
@@ -177,7 +194,7 @@ func (rc *ReferenceCandles) Candles(ctx context.Context, symbol, ref, interval s
 	}
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
-	open := rc.open[ref][i]
+	open := rc.open[ref.Symbol][i]
 	out := make([]domain.Candle, 0, len(list))
 	for _, c := range list {
 		if c.OpenTime.Before(earliest) {
@@ -192,7 +209,7 @@ func (rc *ReferenceCandles) Candles(ctx context.Context, symbol, ref, interval s
 	return out, nil
 }
 
-// Observe takes a live 1m candle update of a reference symbol (the feed's
+// Observe takes a live 1m candle update of a followed pair (the feed's
 // hook) into the open candle of every interval. An interval seen for the
 // first time in the middle is initialized from the source.
 func (rc *ReferenceCandles) Observe(k domain.Candle) {
@@ -258,13 +275,17 @@ func (rc *ReferenceCandles) initialize(ref string, i domain.Interval) {
 	if rc.pending[key] {
 		return
 	}
+	mapped, ok := rc.refs.cached()[ref]
+	if !ok {
+		return // the next update asks again once the mapping is known
+	}
 	rc.pending[key] = true
 	rc.wg.Add(1)
 	go func() {
 		defer rc.wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		got, err := rc.history.Klines(ctx, ref, i, time.Time{}, 1)
+		got, err := rc.history.Klines(ctx, mapped, i, time.Time{}, 1)
 		rc.mu.Lock()
 		defer rc.mu.Unlock()
 		delete(rc.pending, key)
@@ -295,9 +316,9 @@ func (rc *ReferenceCandles) initialize(ref string, i domain.Interval) {
 // candles (tickers stay the platform's).
 func (rc *ReferenceCandles) Push(ctx context.Context, updates []Update) []Update {
 	served := map[string]string{}
-	for symbol, ref := range rc.mapping(ctx) {
+	for symbol, ref := range rc.refs.Get(ctx) {
 		if rc.on(symbol) {
-			served[symbol] = ref
+			served[symbol] = ref.Symbol
 		}
 	}
 	out := make([]Update, 0, len(updates))

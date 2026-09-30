@@ -300,6 +300,32 @@ func TestWithdrawalStorage(t *testing.T) {
 	if list, err := read.Withdrawals().ByStatus(ctx, net, domain.WithdrawalBroadcast, domain.WithdrawalConfirming); err != nil || len(list) != 1 {
 		t.Fatalf("by status %v %v", list, err)
 	}
+	// Two more of another user: the admin pages filter and page by ID.
+	other := uuid.NewString()
+	var more []string
+	for range 2 {
+		x := w
+		x.ID, x.UserID, x.Status, x.Nonce, x.TxHash, x.FreezeJournal = uuid.Must(uuid.NewV7()).String(), other, domain.WithdrawalRequested, -1, "", ""
+		x.Approvals = nil
+		if err := store.Tx(ctx, func(r ports.Repos) error { return r.Withdrawals().Insert(ctx, x) }); err != nil {
+			t.Fatal(err)
+		}
+		more = append(more, x.ID)
+	}
+	page, err := read.Withdrawals().Page(ctx, net, ports.WithdrawalFilter{Limit: 2})
+	if err != nil || len(page) != 2 || page[0].ID != more[1] || page[1].ID != more[0] {
+		t.Fatalf("newest first %v %v", page, err)
+	}
+	if rest, _ := read.Withdrawals().Page(ctx, net, ports.WithdrawalFilter{After: page[1].ID, Limit: 2}); len(rest) != 1 || rest[0].ID != w.ID {
+		t.Fatalf("second page %v", rest)
+	}
+	if oldest, _ := read.Withdrawals().Page(ctx, net, ports.WithdrawalFilter{UserID: other, Oldest: true, Limit: 5}); len(oldest) != 2 ||
+		oldest[0].ID != more[0] {
+		t.Fatalf("oldest of a user %v", oldest)
+	}
+	if one, _ := read.Withdrawals().Page(ctx, net, ports.WithdrawalFilter{Status: domain.WithdrawalBroadcast, Limit: 5}); len(one) != 1 {
+		t.Fatalf("by status %v", one)
+	}
 	if atts, err := read.Attempts().Of(ctx, w.ID); err != nil || len(atts) != 1 || atts[0].MaxFee.Int64() != 3e9 {
 		t.Fatalf("attempts %v %v", atts, err)
 	}

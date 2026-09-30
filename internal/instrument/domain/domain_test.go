@@ -49,6 +49,9 @@ func TestPairValidation(t *testing.T) {
 		"band above 100%":       func(p *TradingPair) { p.PriceBand = d("1.5") },
 		"unknown status":        func(p *TradingPair) { p.Status = "LIVE" },
 		"fee tier format":       func(p *TradingPair) { p.FeeTier = "VIP 1" },
+		"reference symbol":      func(p *TradingPair) { p.ReferenceSymbol = "btc-usdt" },
+		"multiplier not 10^n":   func(p *TradingPair) { p.ReferenceMultiplier = d("500") },
+		"multiplier below 1":    func(p *TradingPair) { p.ReferenceMultiplier = d("0.001") },
 	}
 	for name, mutate := range cases {
 		p := pair()
@@ -70,6 +73,22 @@ func TestPairValidation(t *testing.T) {
 	other.TickSize = d("0.1")
 	if pair().SameConfig(other) {
 		t.Error("tick size is configuration")
+	}
+	mapped := pair()
+	mapped.ReferenceSymbol, mapped.ReferenceMultiplier = "PEPEUSDT", d("1000")
+	if err := mapped.Validate(btc, usdt); err != nil {
+		t.Errorf("mapped pair: %v", err)
+	}
+	if pair().SameConfig(mapped) {
+		t.Error("the reference mapping is configuration")
+	}
+	for _, m := range []string{"1", "10", "1000", "1000000000"} {
+		if !ValidMultiplier(d(m)) {
+			t.Errorf("multiplier %s", m)
+		}
+	}
+	if ValidMultiplier(d("10000000000")) || ValidMultiplier(d("0")) {
+		t.Error("multipliers stop at 10^9 and start at 1")
 	}
 }
 
@@ -108,6 +127,39 @@ func TestAssetNetworkFee(t *testing.T) {
 	n.WithdrawFee, n.Network = d("1"), "eth sepolia"
 	if n.Validate(usdt) == nil {
 		t.Error("network code format")
+	}
+	n.Network = "ETH-SEPOLIA"
+	for name, mutate := range map[string]func(*Network){
+		"address format": func(n *Network) { n.AddressFormat = "SOL" },
+		"explorer http":  func(n *Network) { n.ExplorerTxURL = "http://sepolia.etherscan.io/tx/{tx}" },
+		"no placeholder": func(n *Network) { n.ExplorerAddressURL = "https://sepolia.etherscan.io/address/" },
+		"eta":            func(n *Network) { n.ETAMinutes = -1 },
+	} {
+		bad := n
+		bad.AddressFormat = FormatEVM
+		mutate(&bad)
+		if bad.Validate(usdt) == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	n.AddressFormat, n.ExplorerTxURL = FormatTRON, "https://tronscan.org/#/transaction/{tx}"
+	if err := n.Validate(usdt); err != nil {
+		t.Errorf("TRON network: %v", err)
+	}
+	tagged := btc
+	tagged.Rank, tagged.Categories = 1, []string{"layer-1", "pow"}
+	if err := tagged.Validate(); err != nil {
+		t.Errorf("ranked asset: %v", err)
+	}
+	if tagged.Same(btc) {
+		t.Error("rank and categories are configuration")
+	}
+	for _, c := range [][]string{{"Layer 1"}, {"defi", "defi"}, {"a"}} {
+		bad := btc
+		bad.Categories = c
+		if bad.Validate() == nil {
+			t.Errorf("categories %v accepted", c)
+		}
 	}
 	f := FeeSchedule{Tier: "default", MakerFeeRate: d("0.001"), TakerFeeRate: d("0.001")}
 	if err := f.Validate(); err != nil {

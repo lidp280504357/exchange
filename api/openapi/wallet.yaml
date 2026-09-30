@@ -36,6 +36,103 @@ tags:
   - name: deposits
   - name: withdrawals
 paths:
+  /v1/wallet/networks:
+    get:
+      operationId: listWalletNetworks
+      summary: The networks an asset moves on
+      description: |
+        What the deposit and withdrawal pages show of each network: its
+        name, address format, confirmations, usual time to a credit,
+        minimums, withdrawal fee and explorer links. USDT has one balance
+        whatever network it arrives on; the network is chosen per deposit
+        address and per withdrawal.
+      tags: [deposits]
+      parameters:
+        - name: asset
+          in: query
+          description: The asset (case-insensitive); every asset's networks when omitted.
+          schema:
+            type: string
+            examples: [USDT]
+      responses:
+        '200':
+          description: The networks, closed ones included (see the switches).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [networks]
+                properties:
+                  networks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WalletNetwork'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/wallet/withdraw-addresses/validate:
+    post:
+      operationId: validateWithdrawAddress
+      summary: Check an address before saving or using it
+      description: |
+        Checks the form for the network (EVM: 0x and 40 hex digits, EIP-55
+        when mixed case; TRON: Base58Check starting with T; Bitcoin:
+        bech32/bech32m or Base58Check of the right network) and whether it
+        is a platform deposit address: the caller's own is refused, another
+        user's makes the withdrawal an internal transfer without a network
+        fee. The form is all it can tell: a valid address may still belong
+        to nobody.
+      tags: [withdrawals]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [network, address]
+              properties:
+                asset:
+                  type: string
+                  description: Picks the network's asset when several share it.
+                network:
+                  type: string
+                  examples: [ETH-SEPOLIA]
+                address:
+                  type: string
+                memo:
+                  type: string
+                  description: Memo or tag, for networks that need one.
+      responses:
+        '200':
+          description: The outcome; an invalid address is not an error.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [valid, network, address_format, normalized, reason, internal]
+                properties:
+                  valid:
+                    type: boolean
+                  network:
+                    type: string
+                  address_format:
+                    type: string
+                    enum: [EVM, TRON, BTC]
+                  normalized:
+                    type: [string, 'null']
+                    description: The address as the network writes it (EIP-55 case for EVM); null when invalid.
+                  reason:
+                    type: [string, 'null']
+                    enum: [ADDRESS_FORMAT, ADDRESS_CHECKSUM, ADDRESS_NETWORK, MEMO_REQUIRED, ADDRESS_OWN, null]
+                    description: |
+                      Why it is invalid: not an address of the network's kind,
+                      a checksum mismatch (a typo), an address of another
+                      network (e.g. testnet), a missing memo, or the caller's
+                      own deposit address.
+                  internal:
+                    type: boolean
+                    description: Another user's deposit address; the withdrawal completes inside the platform with no fee.
+        default:
+          $ref: './common.yaml#/components/responses/Error'
   /v1/wallet/deposit-address:
     get:
       operationId: getDepositAddress
@@ -314,6 +411,50 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    WalletNetwork:
+      type: object
+      required: [asset, network, display_name, chain, address_format, contract, confirmations, eta_minutes, min_deposit, min_withdraw,
+        withdraw_fee, memo_required, deposit_enabled, withdraw_enabled, explorer_tx_url, explorer_address_url]
+      properties:
+        asset:
+          type: string
+        network:
+          type: string
+          examples: [ETH-SEPOLIA]
+        display_name:
+          type: string
+          examples: [TRC20, ERC20, Sepolia]
+        chain:
+          type: string
+        address_format:
+          type: string
+          enum: [EVM, TRON, BTC]
+        contract:
+          type: [string, 'null']
+          description: The token contract; null for the chain's native coin.
+        confirmations:
+          type: integer
+        eta_minutes:
+          type: integer
+          description: Usual minutes from the transfer to the credit; 0 when unknown.
+        min_deposit:
+          type: string
+        min_withdraw:
+          type: string
+        withdraw_fee:
+          type: string
+        memo_required:
+          type: boolean
+        deposit_enabled:
+          type: boolean
+        withdraw_enabled:
+          type: boolean
+        explorer_tx_url:
+          type: [string, 'null']
+          description: Explorer link of a transaction with a {tx} placeholder.
+        explorer_address_url:
+          type: [string, 'null']
+          description: Explorer link of an address with an {address} placeholder.
     DepositAddress:
       type: object
       required: [asset, network, address, contract, min_deposit, confirmations]

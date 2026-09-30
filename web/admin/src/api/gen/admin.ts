@@ -58,6 +58,109 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Accounts, newest first
+         * @description Needs users.read. Contact data stays in auth-service; find an account by email or phone with users/lookup.
+         */
+        get: operations["listUsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Spot orders in their latest state, newest first
+         * @description From the read model orders_current. Needs reports.read.
+         */
+        get: operations["listOrders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/trades": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Spot trades, newest first
+         * @description From the read model trades; user_id matches either side. Needs reports.read.
+         */
+        get: operations["listTrades"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/deposits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Deposits in their latest state, newest first
+         * @description From the read model wallet_deposits. Needs withdrawals.read.
+         */
+        get: operations["listDeposits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/dashboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The overview
+         * @description Accounts (user-service), the last 24 hours' trading and what waits
+         *     in the wallet (read models), the reference feed (market-data-service)
+         *     and a daily series. A part that cannot be read is left empty and
+         *     named in `partial`. Needs reports.read.
+         */
+        get: operations["getDashboard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/users/lookup": {
         parameters: {
             query?: never;
@@ -127,8 +230,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Withdrawals in a status, oldest first
-         * @description Needs withdrawals.read.
+         * Withdrawals, the review queue by default
+         * @description From wallet-service. The review queue (PENDING_REVIEW) lists oldest
+         *     first, every other status newest first, unless order says otherwise.
+         *     Needs withdrawals.read.
          */
         get: operations["listWithdrawals"];
         put?: never;
@@ -280,7 +385,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Two-person requests, newest first (at most 100)
+         * Two-person requests, newest first
          * @description Needs ledger.adjust.request or audit.read.
          */
         get: operations["listApprovals"];
@@ -607,6 +712,151 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description Pass as cursor for the next page; null on the last. */
+        NextCursor: string | null;
+        UserSummary: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            status: "ACTIVE" | "RISK_REVIEW" | "FROZEN" | "CLOSED";
+            region: string;
+            language: string;
+            kyc_level: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        Order: {
+            /** Format: uuid */
+            order_id: string;
+            client_order_id: string;
+            /** Format: uuid */
+            user_id: string;
+            symbol: string;
+            /** @enum {string} */
+            side: "BUY" | "SELL";
+            /**
+             * @example LIMIT
+             * @example MARKET
+             */
+            type: string;
+            time_in_force: string;
+            price: components["schemas"]["NullableDecimal"];
+            quantity: components["schemas"]["NullableDecimal"];
+            quote_amount: components["schemas"]["NullableDecimal"];
+            status: string;
+            filled_quantity: components["schemas"]["Decimal"];
+            filled_quote: components["schemas"]["Decimal"];
+            /** @description Why it was canceled or rejected; empty otherwise. */
+            reason: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        Trade: {
+            /** Format: uuid */
+            trade_id: string;
+            symbol: string;
+            /** Format: int64 */
+            trade_number: number;
+            price: components["schemas"]["Decimal"];
+            quantity: components["schemas"]["Decimal"];
+            quote_quantity: components["schemas"]["Decimal"];
+            /** @enum {string} */
+            taker_side: "BUY" | "SELL";
+            buyer_user_id: string;
+            buyer_order_id: string;
+            seller_user_id: string;
+            seller_order_id: string;
+            buyer_is_maker: boolean;
+            buyer_fee: components["schemas"]["Decimal"];
+            seller_fee: components["schemas"]["Decimal"];
+            /** Format: date-time */
+            executed_at: string;
+        };
+        Deposit: {
+            /** Format: uuid */
+            deposit_id: string;
+            /** @description Empty for a deposit to no known address. */
+            user_id: string;
+            asset: string;
+            network: string;
+            /**
+             * @example CHAIN
+             * @example INTERNAL
+             */
+            kind: string;
+            address: string;
+            tx_hash: string;
+            amount: components["schemas"]["Decimal"];
+            status: string;
+            unclaimed: boolean;
+            reason: string;
+            confirmations: number;
+            required_confirmations: number;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        Dashboard: {
+            users: {
+                /** Format: int64 */
+                total: number;
+                /** Format: int64 */
+                new_24h: number;
+            };
+            trading: {
+                /** Format: int64 */
+                trades_24h: number;
+                /** Format: int64 */
+                active_traders_24h: number;
+                turnover_24h: {
+                    quote_asset: string;
+                    amount: components["schemas"]["Decimal"];
+                }[];
+            };
+            wallet: {
+                /**
+                 * Format: int64
+                 * @description Deposits detected or confirming.
+                 */
+                pending_deposits: number;
+                /**
+                 * Format: int64
+                 * @description Withdrawals waiting for review.
+                 */
+                pending_withdrawals: number;
+            };
+            risk: {
+                /** Format: int64 */
+                events_24h: number;
+            };
+            /** @description The reference feed; null when market-data-service could not be asked. */
+            feed: null | {
+                /** @enum {string} */
+                state: "OFF" | "OK" | "DELAYED" | "DOWN";
+                /** Format: date-time */
+                received_at: string | null;
+                followed: string[];
+                /** @description Pairs halted because the feed was lost (market.halt_on_feed_loss). */
+                halted: {
+                    symbol: string;
+                    /** Format: date-time */
+                    halted_at: string;
+                }[];
+            };
+            /** @description One per UTC day, oldest first. */
+            series: {
+                /** Format: date */
+                day: string;
+                /** Format: int64 */
+                new_users: number;
+                /** Format: int64 */
+                trades: number;
+                turnover_usdt: components["schemas"]["Decimal"];
+            }[];
+            /** @description The parts that could not be read (users, activity, feed). */
+            partial: string[];
+        };
         /** @example 12.5 */
         Decimal: string;
         Reason: {
@@ -971,6 +1221,14 @@ export interface components {
         };
     };
     parameters: {
+        /** @description The previous page's next_cursor; omitted for the first page. */
+        Cursor: string;
+        Limit: number;
+        /** @description From this time on (RFC 3339). */
+        From: string;
+        /** @description Before this time (RFC 3339). */
+        To: string;
+        UserFilter: string;
         /** @description Days back, today included. */
         Days: number;
         UserID: string;
@@ -1061,6 +1319,167 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listUsers: {
+        parameters: {
+            query?: {
+                status?: "ACTIVE" | "RISK_REVIEW" | "FROZEN" | "CLOSED";
+                /** @description ISO 3166-1 alpha-2. */
+                region?: string;
+                /** @description From this time on (RFC 3339). */
+                from?: components["parameters"]["From"];
+                /** @description Before this time (RFC 3339). */
+                to?: components["parameters"]["To"];
+                /** @description The previous page's next_cursor; omitted for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of accounts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["UserSummary"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listOrders: {
+        parameters: {
+            query?: {
+                user_id?: components["parameters"]["UserFilter"];
+                symbol?: string;
+                status?: "NEW" | "OPEN" | "PARTIALLY_FILLED" | "FILLED" | "CANCELED" | "REJECTED";
+                side?: "BUY" | "SELL";
+                /** @description From this time on (RFC 3339). */
+                from?: components["parameters"]["From"];
+                /** @description Before this time (RFC 3339). */
+                to?: components["parameters"]["To"];
+                /** @description The previous page's next_cursor; omitted for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of orders. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["Order"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listTrades: {
+        parameters: {
+            query?: {
+                user_id?: components["parameters"]["UserFilter"];
+                symbol?: string;
+                /** @description From this time on (RFC 3339). */
+                from?: components["parameters"]["From"];
+                /** @description Before this time (RFC 3339). */
+                to?: components["parameters"]["To"];
+                /** @description The previous page's next_cursor; omitted for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of trades. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["Trade"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listDeposits: {
+        parameters: {
+            query?: {
+                user_id?: components["parameters"]["UserFilter"];
+                asset?: string;
+                network?: string;
+                status?: "DETECTED" | "CONFIRMING" | "CONFIRMED" | "CREDITED" | "ORPHANED" | "REJECTED";
+                /** @description The previous page's next_cursor; omitted for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of deposits. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["Deposit"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getDashboard: {
+        parameters: {
+            query?: {
+                /** @description Days back, today included. */
+                days?: components["parameters"]["Days"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The overview. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Dashboard"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     lookupUser: {
         parameters: {
             query: {
@@ -1145,8 +1564,14 @@ export interface operations {
     listWithdrawals: {
         parameters: {
             query?: {
-                /** @description A withdrawal status (appendix B), e.g. APPROVED, BROADCAST, CONFIRMED, REJECTED, FAILED. */
+                /** @description A withdrawal status (appendix B), e.g. APPROVED, BROADCAST, CONFIRMED, REJECTED, FAILED; ALL for every status. */
                 status?: string;
+                user_id?: components["parameters"]["UserFilter"];
+                asset?: string;
+                order?: "asc" | "desc";
+                /** @description The previous page's next_cursor; omitted for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
             };
             header?: never;
             path?: never;
@@ -1154,7 +1579,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The withdrawals. */
+            /** @description A page of withdrawals. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1162,6 +1587,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         items: components["schemas"]["Withdrawal"][];
+                        next_cursor: components["schemas"]["NextCursor"];
                     };
                 };
             };
@@ -1344,6 +1770,9 @@ export interface operations {
             query?: {
                 /** @description Empty for all. */
                 status?: "PENDING" | "EXECUTED" | "REJECTED" | "FAILED";
+                /** @description The previous page's next_cursor; omitted for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
             };
             header?: never;
             path?: never;
@@ -1351,7 +1780,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The requests. */
+            /** @description A page of requests. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1359,6 +1788,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         items: components["schemas"]["Approval"][];
+                        next_cursor: components["schemas"]["NextCursor"];
                     };
                 };
             };
@@ -1402,6 +1832,14 @@ export interface operations {
                 actor?: string;
                 /** @description Exact target, e.g. user:<id>, pair:BTC-USDT, flag:wallet.withdraw. */
                 target?: string;
+                /** @description Exact event type, e.g. exchange.audit.v1.AdminAction. */
+                event_type?: string;
+                /** @description From this time on (RFC 3339). */
+                from?: components["parameters"]["From"];
+                /** @description Before this time (RFC 3339). */
+                to?: components["parameters"]["To"];
+                /** @description The previous page's next_cursor; omitted for the first page. */
+                cursor?: components["parameters"]["Cursor"];
                 limit?: number;
             };
             header?: never;
@@ -1410,7 +1848,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The entries. */
+            /** @description A page of entries. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1418,6 +1856,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         items: components["schemas"]["AuditEntry"][];
+                        next_cursor: components["schemas"]["NextCursor"];
                     };
                 };
             };
@@ -1666,6 +2105,8 @@ export interface operations {
                 days?: components["parameters"]["Days"];
                 /** @description Empty for all. */
                 kind?: "WARNING" | "STARTED" | "FILLED" | "ADL";
+                /** @description The previous page's next_cursor; omitted for the first page. */
+                cursor?: components["parameters"]["Cursor"];
                 limit?: number;
             };
             header?: never;
@@ -1674,7 +2115,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The steps. */
+            /** @description A page of steps. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1682,6 +2123,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         items: components["schemas"]["LiquidationStep"][];
+                        next_cursor: components["schemas"]["NextCursor"];
                     };
                 };
             };

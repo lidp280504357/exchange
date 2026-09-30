@@ -4,6 +4,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -47,6 +48,40 @@ type repos struct {
 }
 
 func (r repos) Users() ports.UserRepo { return users(r) }
+
+func (r repos) Favorites() ports.FavoriteRepo { return favorites(r) }
+
+type favorites repos
+
+func (r favorites) Get(ctx context.Context, userID string) ([]string, time.Time, error) {
+	if _, err := uuid.Parse(userID); err != nil {
+		return nil, time.Time{}, domain.ErrUserNotFound
+	}
+	var symbols []string
+	var at time.Time
+	err := r.q.QueryRow(ctx, `SELECT symbols, updated_at FROM favorites WHERE user_id = $1`, userID).Scan(&symbols, &at)
+	if pg.IsNoRows(err) {
+		return []string{}, time.Time{}, nil
+	}
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("get favorites: %w", err)
+	}
+	return symbols, at, nil
+}
+
+func (r favorites) Set(ctx context.Context, userID string, symbols []string) (time.Time, error) {
+	if symbols == nil {
+		symbols = []string{}
+	}
+	var at time.Time
+	err := r.q.QueryRow(ctx, `INSERT INTO favorites (user_id, symbols) VALUES ($1, $2)
+		ON CONFLICT (user_id) DO UPDATE SET symbols = EXCLUDED.symbols, updated_at = now() RETURNING updated_at`,
+		userID, symbols).Scan(&at)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("set favorites: %w", err)
+	}
+	return at, nil
+}
 
 func (r repos) Emit(ctx context.Context, topic string, msg proto.Message, aggregateType, aggregateID string) error {
 	env, err := r.events.New(ctx, msg, aggregateType, aggregateID)
@@ -136,6 +171,70 @@ func (r users) StatusHistory(ctx context.Context, userID string, limit int) ([]d
 			return nil, fmt.Errorf("status history: %w", err)
 		}
 		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (r users) List(ctx context.Context, f ports.UserFilter) ([]domain.User, error) {
+	var after *time.Time
+	var afterID *uuid.UUID
+	if f.AfterID != "" {
+		id, err := uuid.Parse(f.AfterID)
+		if err != nil {
+			return nil, domain.ErrUserNotFound
+		}
+		after, afterID = &f.AfterTime, &id
+	}
+	var from, before *time.Time
+	if !f.CreatedFrom.IsZero() {
+		from = &f.CreatedFrom
+	}
+	if !f.CreatedBefore.IsZero() {
+		before = &f.CreatedBefore
+	}
+	rows, err := r.q.Query(ctx, `SELECT `+userColumns+` FROM users
+		WHERE ($1 = '' OR status = $1) AND ($2 = '' OR region = $2)
+		AND ($3::timestamptz IS NULL OR created_at >= $3) AND ($4::timestamptz IS NULL OR created_at < $4)
+		AND ($5::timestamptz IS NULL OR (created_at, id) < ($5, $6::uuid))
+		ORDER BY created_at DESC, id DESC LIMIT $7`, f.Status, f.Region, from, before, after, afterID, f.Limit)
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list users: %w", err)
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+func (r users) Stats(ctx context.Context, since time.Time, days int) (ports.UserStats, error) {
+	out := ports.UserStats{Days: map[string]int64{}}
+	if err := r.q.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE created_at >= $1) FROM users`, since).
+		Scan(&out.Total, &out.CreatedSince); err != nil {
+		return out, fmt.Errorf("user stats: %w", err)
+	}
+	if days <= 0 {
+		return out, nil
+	}
+	rows, err := r.q.Query(ctx, `SELECT to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, count(*) FROM users
+		WHERE created_at >= (date_trunc('day', now() AT TIME ZONE 'UTC') - make_interval(days => $1 - 1)) AT TIME ZONE 'UTC'
+		GROUP BY day`, days)
+	if err != nil {
+		return out, fmt.Errorf("user stats: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var day string
+		var n int64
+		if err := rows.Scan(&day, &n); err != nil {
+			return out, fmt.Errorf("user stats: %w", err)
+		}
+		out.Days[day] = n
 	}
 	return out, rows.Err()
 }

@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http/httptest"
 	"strings"
@@ -359,5 +360,66 @@ func TestWebSocketContractChannels(t *testing.T) {
 	hub.mu.Unlock()
 	if kept != "estimate" {
 		t.Fatalf("new subscribers would start from %q", kept)
+	}
+}
+
+func TestWebSocketTickersChannel(t *testing.T) {
+	hub := NewHub(nil, nil, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	go func() { _ = hub.Run() }()
+	t.Cleanup(func() { _ = hub.Stop(context.Background()) })
+	srv := httptest.NewServer(hub)
+	t.Cleanup(srv.Close)
+	events := WSEvents(hub)
+	emit := func(symbol, last string) {
+		t.Helper()
+		env, err := event.NewFactory("test", "t").New(context.Background(), &marketv1.TickerUpdated{
+			Ticker: &marketv1.Ticker{Symbol: symbol, Last: last, Volume: "1", QuoteVolume: "1", UpdatedAt: timestamppb.Now()},
+		}, "symbol", symbol)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := events(context.Background(), env); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Fifty symbols before anyone subscribes.
+	for i := range 50 {
+		emit(fmt.Sprintf("C%02d-USDT", i), "1")
+	}
+	hub.flushTickers()
+
+	c := dial(t, "ws"+strings.TrimPrefix(srv.URL, "http"))
+	c.send(`{"op":"subscribe","args":["tickers"]}`)
+	if m := c.next(); m["ok"] != true {
+		t.Fatalf("subscribe: %v", m)
+	}
+	m := c.next()
+	snap, _ := m["data"].([]any)
+	if m["channel"] != "tickers" || m["type"] != "snapshot" || len(snap) != 50 || snap[0].(map[string]any)["symbol"] != "C00-USDT" {
+		t.Fatalf("snapshot: %v", m["type"])
+	}
+	// Changes within a second arrive together: only the changed symbols,
+	// each at its latest.
+	start := time.Now()
+	emit("C07-USDT", "2")
+	emit("C03-USDT", "3")
+	emit("C07-USDT", "4")
+	m = c.next()
+	upd, _ := m["data"].([]any)
+	if m["type"] != "update" || len(upd) != 2 || upd[0].(map[string]any)["symbol"] != "C03-USDT" ||
+		upd[1].(map[string]any)["last"] != "4" {
+		t.Fatalf("update: %v", m)
+	}
+	if took := time.Since(start); took > 2*wsTickersEvery {
+		t.Fatalf("the update took %s", took)
+	}
+	// Still one subscription toward the limit of 50.
+	var args []string
+	for i := range 49 {
+		args = append(args, fmt.Sprintf(`"ticker:C%02d-USDT"`, i))
+	}
+	c.send(`{"op":"subscribe","args":[` + strings.Join(args, ",") + `]}`)
+	if m := c.next(); m["ok"] != true {
+		t.Fatalf("49 more subscriptions: %v", m)
 	}
 }

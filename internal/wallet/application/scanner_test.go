@@ -249,6 +249,16 @@ func (f *fakeNetworks) OnNetwork(context.Context, string) ([]domain.Network, err
 	return f.nets, nil
 }
 
+func (f *fakeNetworks) ForAsset(_ context.Context, asset string) ([]domain.Network, error) {
+	var out []domain.Network
+	for _, n := range f.nets {
+		if asset == "" || n.Asset == asset {
+			out = append(out, n)
+		}
+	}
+	return out, nil
+}
+
 type fakeEligibility map[string]string // user -> refusal code
 
 func (f fakeEligibility) Check(_ context.Context, userID, _ string) (bool, string, error) {

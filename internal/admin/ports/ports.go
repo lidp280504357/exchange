@@ -57,8 +57,10 @@ type ApprovalRepo interface {
 	Insert(ctx context.Context, a domain.Approval) error
 	Update(ctx context.Context, a domain.Approval) error
 	GetForUpdate(ctx context.Context, id string) (*domain.Approval, error)
-	// List returns the requests in a status ("": all), newest first.
-	List(ctx context.Context, status string, limit int) ([]domain.Approval, error)
+	// List returns up to limit requests in a status ("": all), newest
+	// first, after the one created at afterTime with ID afterID (zero for
+	// the newest).
+	List(ctx context.Context, status string, afterTime time.Time, afterID string, limit int) ([]domain.Approval, error)
 }
 
 // User is an account as the console shows it.
@@ -79,6 +81,24 @@ type Balance struct {
 	Frozen      string
 }
 
+// UserQuery selects accounts; empty fields match everything.
+type UserQuery struct {
+	Status        string
+	Region        string
+	CreatedFrom   time.Time
+	CreatedBefore time.Time
+	Cursor        string
+	Limit         int
+}
+
+// UserStats are the overview's account counts.
+type UserStats struct {
+	Total        int64
+	CreatedSince int64
+	// Days maps a UTC day (YYYY-MM-DD) to its new accounts.
+	Days map[string]int64
+}
+
 // Users reads and changes accounts (auth-, user- and ledger-service).
 type Users interface {
 	// Find returns the user of an email address or phone number.
@@ -87,6 +107,12 @@ type Users interface {
 	Balances(ctx context.Context, userID string) ([]Balance, error)
 	// ChangeStatus returns the previous status.
 	ChangeStatus(ctx context.Context, userID, to, reason, actor, note string) (string, error)
+	// List returns a page of accounts, newest first, and the cursor of
+	// the next ("" on the last).
+	List(ctx context.Context, q UserQuery) ([]User, string, error)
+	// Stats counts all accounts, those created since, and per day for the
+	// last days.
+	Stats(ctx context.Context, since time.Time, days int) (UserStats, error)
 }
 
 // Orders cancels a user's orders (spot-trading-service).
@@ -94,10 +120,22 @@ type Orders interface {
 	CancelAll(ctx context.Context, userID string) error
 }
 
-// Withdrawals lists and reviews withdrawals (wallet-service); the items
-// pass through as the wallet renders them.
+// WithdrawalQuery selects withdrawals: a status (PENDING_REVIEW when
+// empty, ALL for every status), a user and an asset, a page.
+type WithdrawalQuery struct {
+	Status string
+	UserID string
+	Asset  string
+	Cursor string
+	Limit  int
+	// Order is asc (oldest first, the review queue's default) or desc.
+	Order string
+}
+
+// Withdrawals lists and reviews withdrawals (wallet-service); the page
+// ({items, next_cursor}) passes through as the wallet renders it.
 type Withdrawals interface {
-	List(ctx context.Context, status string) (json.RawMessage, error)
+	List(ctx context.Context, q WithdrawalQuery) (json.RawMessage, error)
 	Review(ctx context.Context, id string, approve bool, reviewer, reason string) (json.RawMessage, error)
 }
 
@@ -162,9 +200,23 @@ type AuditEntry struct {
 	Payload    json.RawMessage `json:"payload"`
 }
 
+// AuditQuery selects audit entries: an exact actor, target and event
+// type, a time range, a page.
+type AuditQuery struct {
+	Actor     string
+	Target    string
+	EventType string
+	From      time.Time
+	To        time.Time
+	Cursor    string
+	Limit     int
+}
+
 // AuditLog reads the audit trail (ClickHouse audit_logs).
 type AuditLog interface {
-	Search(ctx context.Context, actor, target string, limit int) ([]AuditEntry, error)
+	// Search returns a page of entries, newest first, and the cursor of
+	// the next ("" on the last).
+	Search(ctx context.Context, q AuditQuery) ([]AuditEntry, string, error)
 }
 
 // TradingDay is one symbol's trading on one day (UTC); amounts are
@@ -260,7 +312,141 @@ type Reports interface {
 	Candles(ctx context.Context, symbol string, seconds uint32, limit int) ([]Candle, error)
 	Derivatives(ctx context.Context, days int) ([]DerivativesDay, error)
 	OpenInterest(ctx context.Context) ([]OpenInterest, error)
-	// Liquidations returns the newest liquidation steps of the last days,
-	// of one kind unless kind is empty.
-	Liquidations(ctx context.Context, days int, kind string, limit int) ([]LiquidationStep, error)
+	// Liquidations returns a page of the liquidation steps of the last
+	// days, of one kind unless kind is empty, newest first, and the
+	// cursor of the next ("" on the last).
+	Liquidations(ctx context.Context, days int, kind, cursor string, limit int) ([]LiquidationStep, string, error)
+}
+
+// OrderQuery selects spot orders; empty fields match everything.
+type OrderQuery struct {
+	UserID string
+	Symbol string
+	Status string
+	Side   string
+	From   time.Time
+	To     time.Time
+	Cursor string
+	Limit  int
+}
+
+// Order is a spot order in its latest state (ClickHouse orders_current).
+type Order struct {
+	OrderID        string    `json:"order_id"`
+	ClientOrderID  string    `json:"client_order_id"`
+	UserID         string    `json:"user_id"`
+	Symbol         string    `json:"symbol"`
+	Side           string    `json:"side"`
+	Type           string    `json:"type"`
+	TimeInForce    string    `json:"time_in_force"`
+	Price          *string   `json:"price"`
+	Quantity       *string   `json:"quantity"`
+	QuoteAmount    *string   `json:"quote_amount"`
+	Status         string    `json:"status"`
+	FilledQuantity string    `json:"filled_quantity"`
+	FilledQuote    string    `json:"filled_quote"`
+	Reason         string    `json:"reason"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// TradeQuery selects spot trades: a symbol, a user on either side, a time
+// range, a page.
+type TradeQuery struct {
+	Symbol string
+	UserID string
+	From   time.Time
+	To     time.Time
+	Cursor string
+	Limit  int
+}
+
+// Trade is a spot trade (ClickHouse trades).
+type Trade struct {
+	TradeID       string    `json:"trade_id"`
+	Symbol        string    `json:"symbol"`
+	TradeNumber   uint64    `json:"trade_number"`
+	Price         string    `json:"price"`
+	Quantity      string    `json:"quantity"`
+	QuoteQuantity string    `json:"quote_quantity"`
+	TakerSide     string    `json:"taker_side"`
+	BuyerUserID   string    `json:"buyer_user_id"`
+	BuyerOrderID  string    `json:"buyer_order_id"`
+	SellerUserID  string    `json:"seller_user_id"`
+	SellerOrderID string    `json:"seller_order_id"`
+	BuyerIsMaker  bool      `json:"buyer_is_maker"`
+	BuyerFee      string    `json:"buyer_fee"`
+	SellerFee     string    `json:"seller_fee"`
+	ExecutedAt    time.Time `json:"executed_at"`
+}
+
+// DepositQuery selects deposits; empty fields match everything.
+type DepositQuery struct {
+	UserID  string
+	Asset   string
+	Network string
+	Status  string
+	Cursor  string
+	Limit   int
+}
+
+// Deposit is a deposit in its latest state (ClickHouse wallet_deposits).
+type Deposit struct {
+	DepositID             string    `json:"deposit_id"`
+	UserID                string    `json:"user_id"`
+	Asset                 string    `json:"asset"`
+	Network               string    `json:"network"`
+	Kind                  string    `json:"kind"`
+	Address               string    `json:"address"`
+	TxHash                string    `json:"tx_hash"`
+	Amount                string    `json:"amount"`
+	Status                string    `json:"status"`
+	Unclaimed             bool      `json:"unclaimed"`
+	Reason                string    `json:"reason"`
+	Confirmations         uint32    `json:"confirmations"`
+	RequiredConfirmations uint32    `json:"required_confirmations"`
+	UpdatedAt             time.Time `json:"updated_at"`
+}
+
+// Turnover is a day's (or a period's) traded value in one quote asset.
+type Turnover struct {
+	QuoteAsset string `json:"quote_asset"`
+	Amount     string `json:"amount"`
+}
+
+// Activity is the overview's trading and wallet figures from the read
+// models: the last 24 hours, and per UTC day for the last days.
+type Activity struct {
+	Trades24h         uint64
+	ActiveTraders24h  uint64
+	Turnover24h       []Turnover
+	PendingDeposits   uint64
+	PendingWithdraws  uint64
+	RiskEvents24h     uint64
+	TradesByDay       map[string]uint64
+	TurnoverUSDTByDay map[string]string
+}
+
+// Records pages through the read models' orders, trades and deposits and
+// sums the overview's activity (ClickHouse).
+type Records interface {
+	// Each returns a page, newest first, and the cursor of the next (""
+	// on the last).
+	Orders(ctx context.Context, q OrderQuery) ([]Order, string, error)
+	Trades(ctx context.Context, q TradeQuery) ([]Trade, string, error)
+	Deposits(ctx context.Context, q DepositQuery) ([]Deposit, string, error)
+	Activity(ctx context.Context, days int) (Activity, error)
+}
+
+// FeedStatus is market-data-service's reference feed state.
+type FeedStatus struct {
+	State      string          `json:"state"`
+	ReceivedAt *time.Time      `json:"received_at"`
+	Followed   []string        `json:"followed"`
+	Halted     json.RawMessage `json:"halted"`
+}
+
+// Market reads market-data-service's internal state.
+type Market interface {
+	Feed(ctx context.Context) (FeedStatus, error)
 }

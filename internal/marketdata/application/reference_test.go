@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,30 +12,50 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/lidp280504357/exchange/internal/marketdata/domain"
+	"github.com/lidp280504357/exchange/internal/marketdata/ports"
 	"github.com/lidp280504357/exchange/internal/platform/flags"
 )
 
 type fakeSource struct {
 	backfills atomic.Int32
+	tickers   atomic.Int32
 	streams   atomic.Int32
+	mu        sync.Mutex
+	followed  [][]string // the symbols of each stream
 }
 
 func (s *fakeSource) Name() string { return "fake" }
 
-func (s *fakeSource) Backfill(_ context.Context, symbol string, _ time.Time) ([]domain.Candle, error) {
+func (s *fakeSource) Backfill(_ context.Context, ref ports.Reference, _, to time.Time) ([]domain.Candle, error) {
 	s.backfills.Add(1)
-	now := domain.Minute1.Start(time.Now())
 	return []domain.Candle{
-		{Symbol: symbol, Interval: domain.Minute1, OpenTime: now.Add(-time.Minute), Close: d("83900")},
-		{Symbol: symbol, Interval: domain.Minute1, OpenTime: now, Close: d("83910")},
+		{Symbol: ref.Symbol, Interval: domain.Minute1, OpenTime: to.Add(-2 * time.Minute), Close: d("83900")},
+		{Symbol: ref.Symbol, Interval: domain.Minute1, OpenTime: to.Add(-time.Minute), Close: d("83910")},
 	}, nil
 }
 
-// Stream sends one update, then fails the first connection and holds the
-// second until ctx ends.
-func (s *fakeSource) Stream(ctx context.Context, symbols []string, on func(domain.Candle)) error {
+func (s *fakeSource) Tickers(_ context.Context, refs []ports.Reference) ([]domain.Ticker, error) {
+	s.tickers.Add(1)
+	out := make([]domain.Ticker, 0, len(refs))
+	for _, r := range refs {
+		out = append(out, domain.Ticker{Symbol: r.Symbol, Last: d("83000"), Open: d("82000"), At: time.Now().Add(-time.Second)})
+	}
+	return out, nil
+}
+
+// Stream sends a candle and a ticker, then fails the first connection and
+// holds the others until ctx ends.
+func (s *fakeSource) Stream(ctx context.Context, refs []ports.Reference, on ports.StreamHandlers) error {
 	n := s.streams.Add(1)
-	on(domain.Candle{Symbol: symbols[0], Interval: domain.Minute1, OpenTime: domain.Minute1.Start(time.Now()), Close: d("83920")})
+	var symbols []string
+	for _, r := range refs {
+		symbols = append(symbols, r.Symbol)
+	}
+	s.mu.Lock()
+	s.followed = append(s.followed, symbols)
+	s.mu.Unlock()
+	on.Candle(domain.Candle{Symbol: refs[0].Symbol, Interval: domain.Minute1, OpenTime: domain.Minute1.Start(time.Now()), Close: d("83920")})
+	on.Ticker(domain.Ticker{Symbol: refs[0].Symbol, Last: d("83921"), Open: d("82000"), At: time.Now()})
 	if n == 1 {
 		return errors.New("connection reset")
 	}
@@ -42,15 +63,30 @@ func (s *fakeSource) Stream(ctx context.Context, symbols []string, on func(domai
 	return ctx.Err()
 }
 
-type switchFlags struct{ on atomic.Bool }
+func (s *fakeSource) streamed(i int) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if i >= len(s.followed) {
+		return nil
+	}
+	return s.followed[i]
+}
+
+type switchFlags struct{ on, halt atomic.Bool }
 
 func (f *switchFlags) Enabled(key string, _ flags.Subject) bool {
-	return key == flags.KeyReferenceFeed && f.on.Load()
+	switch key {
+	case flags.KeyReferenceFeed:
+		return f.on.Load()
+	case flags.KeyHaltOnFeedLoss:
+		return f.halt.Load()
+	}
+	return false
 }
 
 func eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	for range 200 {
+	for range 300 {
 		if cond() {
 			return
 		}
@@ -63,36 +99,73 @@ func TestReferenceFeed(t *testing.T) {
 	store := newMemStore()
 	src := &fakeSource{}
 	fl := &switchFlags{}
-	f := NewReferenceFeed(src, store, fl, []string{"BTC-USDT"}, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
-	f.recheck = 20 * time.Millisecond
+	list := testListing()
+	f := NewReferenceFeed(src, store, fl, list, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	f.recheck, f.remap = 20*time.Millisecond, 50*time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan struct{})
 	go func() { _ = f.Run(ctx); close(done) }()
 
 	time.Sleep(50 * time.Millisecond)
-	if src.backfills.Load() != 0 {
+	if src.streams.Load() != 0 {
 		t.Fatal("the feed must stay off while its flag is off")
 	}
 	fl.on.Store(true)
-	// The first connection fails; the feed backfills again and reconnects.
+	// The first connection fails; the feed reconnects and loads the
+	// tickers alongside the stream.
 	eventually(t, "a second stream", func() bool { return src.streams.Load() == 2 })
-	if src.backfills.Load() != 2 {
-		t.Fatalf("%d backfills, want one per connection", src.backfills.Load())
+	eventually(t, "the tickers loaded", func() bool { return src.tickers.Load() >= 1 })
+	if got := src.streamed(0); len(got) != 1 || got[0] != "BTC-USDT" {
+		t.Fatalf("followed %v: only the pairs with a reference market", got)
 	}
-	ref, fresh := f.Latest("BTC-USDT")
-	if !fresh || !ref.Price.Equal(d("83920")) || ref.Source != "fake" {
-		t.Fatalf("latest %+v fresh %v", ref, fresh)
+	latest, fresh := f.Latest("BTC-USDT")
+	if !fresh || !latest.Price.Equal(d("83921")) || latest.Source != "fake" {
+		t.Fatalf("latest %+v fresh %v", latest, fresh)
+	}
+	if tk, ok := f.Ticker("BTC-USDT"); !ok || !tk.Last.Equal(d("83921")) {
+		t.Fatalf("ticker %+v %v", tk, ok)
 	}
 	if last, _ := store.Read().References().Latest(ctx, "fake", "BTC-USDT"); last == nil || !last.Close.Equal(d("83920")) {
 		t.Fatalf("stored %+v", last)
 	}
-	if _, fresh := f.Latest("ETH-USDT"); fresh {
-		t.Fatal("a symbol the feed does not follow has no reference")
+	if f.Received().IsZero() {
+		t.Fatal("the stream's messages are noted")
 	}
-	// Off again: the stream stops and the price is dropped.
+	if _, fresh := f.Latest("ETH-BTC"); fresh {
+		t.Fatal("a pair without a reference market has no reference")
+	}
+	// A pair gets a reference market: the feed reconnects to follow it.
+	list.mu.Lock()
+	list.pairs[1].Reference = ref("ETH-BTC", "ETHBTC")
+	list.mu.Unlock()
+	eventually(t, "a stream with both pairs", func() bool { return len(src.streamed(2)) == 2 })
+	// Off again: the stream stops and the data is dropped.
 	fl.on.Store(false)
 	eventually(t, "the price dropped", func() bool { _, ok := f.get("BTC-USDT"); return !ok })
+	if _, ok := f.Ticker("BTC-USDT"); ok || !f.Received().IsZero() {
+		t.Fatal("the tickers are dropped with the prices")
+	}
 	cancel()
 	<-done
+}
+
+func TestReferenceBackfillStopsWhereTheStreamStarted(t *testing.T) {
+	store := newMemStore()
+	src := &fakeSource{}
+	f := NewReferenceFeed(src, store, &switchFlags{}, testListing(), slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	ctx := context.Background()
+	streaming := domain.Minute1.Start(time.Now())
+	btc := ref("BTC-USDT", "BTCUSDT")
+	if err := f.backfill(ctx, btc, streaming); err != nil || src.backfills.Load() != 1 {
+		t.Fatalf("backfill: %v, %d calls", err, src.backfills.Load())
+	}
+	last, _ := store.Read().References().Latest(ctx, "fake", "BTC-USDT")
+	if last == nil || !last.OpenTime.Equal(streaming.Add(-time.Minute)) {
+		t.Fatalf("latest stored %+v", last)
+	}
+	// Nothing missing up to the stream's first minute: no request.
+	if err := f.backfill(ctx, btc, streaming.Add(-time.Minute)); err != nil || src.backfills.Load() != 1 {
+		t.Fatalf("second backfill: %v, %d calls", err, src.backfills.Load())
+	}
 }

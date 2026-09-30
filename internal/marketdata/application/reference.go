@@ -15,8 +15,9 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/flags"
 )
 
-// Reference prices (requirements §5.11, §11.9): the latest price of each
-// configured symbol from an external source, and its 1m candles.
+// Reference data (requirements §5.11, §11.9, ADR-0010): the latest price,
+// 1m candles and rolling 24-hour ticker of every listed pair that has a
+// reference market, from an external source.
 const (
 	// ReferenceStale is how old a reference may be before quotes built on
 	// it stop (§11.10: 5 seconds).
@@ -38,57 +39,76 @@ type Flags interface {
 	Enabled(key string, s flags.Subject) bool
 }
 
-// ReferenceFeed keeps the reference prices while market.reference_feed is
-// on: each connection first backfills the candles missed since the latest
-// stored one (at most a day), then streams; a failure reconnects with
-// backoff. When the flag goes off the stream stops and the prices are
-// dropped, so everything built on them sees none.
+// ReferenceFeed keeps the reference data while market.reference_feed is
+// on. It follows the listed pairs that have a reference market (the
+// pairs' reference_symbol): each connection starts the stream first, then
+// loads the tickers and backfills the 1m candles missed since the latest
+// stored one (at most a day) up to the stream's first minute. A failure
+// reconnects with backoff, and so does a change of the followed pairs.
+// When the flag goes off the stream stops and the data is dropped, so
+// everything built on it sees none.
 type ReferenceFeed struct {
-	src     ports.ReferenceSource
-	store   ports.Store
-	flags   Flags
-	symbols []string
-	log     *slog.Logger
-	now     func() time.Time
-	// recheck is how often the flag is looked at.
+	src         ports.ReferenceSource
+	store       ports.Store
+	flags       Flags
+	instruments ports.Instruments
+	log         *slog.Logger
+	now         func() time.Time
+	// recheck is how often the flag is looked at, remap how often the
+	// followed pairs are.
 	recheck time.Duration
+	remap   time.Duration
 
 	mu        sync.Mutex
+	followed  []ports.Reference
 	latest    map[string]Reference
+	tickers   map[string]domain.Ticker
+	received  time.Time // the stream's latest message
 	observers []func(domain.Candle)
 
 	updates *prometheus.CounterVec
 	errors  prometheus.Counter
 }
 
-// NewReferenceFeed follows symbols on src and registers the feed metrics
-// with reg: market_reference_age_seconds per symbol is -1 while there is
-// no price.
-func NewReferenceFeed(src ports.ReferenceSource, store ports.Store, fl Flags, symbols []string, log *slog.Logger, reg prometheus.Registerer) *ReferenceFeed {
+// NewReferenceFeed follows the pairs instruments lists with a reference
+// market on src, and registers the feed metrics with reg:
+// market_reference_age_seconds per followed symbol is -1 while there is no
+// price.
+func NewReferenceFeed(src ports.ReferenceSource, store ports.Store, fl Flags, instruments ports.Instruments, log *slog.Logger,
+	reg prometheus.Registerer,
+) *ReferenceFeed {
 	f := &ReferenceFeed{
-		src: src, store: store, flags: fl, symbols: symbols, log: log, now: time.Now, recheck: 10 * time.Second,
-		latest: map[string]Reference{},
+		src: src, store: store, flags: fl, instruments: instruments, log: log, now: time.Now,
+		recheck: 10 * time.Second, remap: time.Minute,
+		latest: map[string]Reference{}, tickers: map[string]domain.Ticker{},
 		updates: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "market_reference_updates_total", Help: "Reference candle updates received, by symbol.",
+			Name: "market_reference_updates_total", Help: "Reference candle and ticker updates received, by symbol.",
 		}, []string{"symbol"}),
 		errors: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "market_reference_errors_total", Help: "Reference feed connections that failed.",
 		}),
 	}
-	reg.MustRegister(f.updates, f.errors)
-	for _, s := range symbols {
-		reg.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-			Name: "market_reference_age_seconds", Help: "Age of the symbol's reference price; -1 while there is none.",
-			ConstLabels: prometheus.Labels{"symbol": s},
-		}, func() float64 {
-			r, ok := f.get(s)
-			if !ok {
-				return -1
-			}
-			return f.now().Sub(r.At).Seconds()
-		}))
-	}
+	reg.MustRegister(f.updates, f.errors, ageCollector{f})
 	return f
+}
+
+// ageCollector reports market_reference_age_seconds of the followed
+// symbols.
+type ageCollector struct{ f *ReferenceFeed }
+
+var ageDesc = prometheus.NewDesc("market_reference_age_seconds", "Age of the symbol's reference price; -1 while there is none.",
+	[]string{"symbol"}, nil)
+
+func (c ageCollector) Describe(ch chan<- *prometheus.Desc) { ch <- ageDesc }
+
+func (c ageCollector) Collect(ch chan<- prometheus.Metric) {
+	for _, ref := range c.f.Followed() {
+		age := -1.0
+		if r, ok := c.f.get(ref.Symbol); ok {
+			age = c.f.now().Sub(r.At).Seconds()
+		}
+		ch <- prometheus.MustNewConstMetric(ageDesc, prometheus.GaugeValue, age, ref.Symbol)
+	}
 }
 
 func (f *ReferenceFeed) enabled() bool {
@@ -109,9 +129,44 @@ func (f *ReferenceFeed) Latest(symbol string) (Reference, bool) {
 	return r, ok && f.now().Sub(r.At) < ReferenceStale
 }
 
-func (f *ReferenceFeed) set(c domain.Candle, at time.Time) {
+// Ticker returns the symbol's latest reference ticker, however old: a
+// client tells a stalled feed by its time.
+func (f *ReferenceFeed) Ticker(symbol string) (domain.Ticker, bool) {
 	f.mu.Lock()
-	f.latest[c.Symbol] = Reference{Symbol: c.Symbol, Source: f.src.Name(), Price: c.Close, At: at}
+	defer f.mu.Unlock()
+	t, ok := f.tickers[symbol]
+	return t, ok
+}
+
+// Followed returns the pairs the feed follows (or last followed).
+func (f *ReferenceFeed) Followed() []ports.Reference {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.followed
+}
+
+// Received returns when the stream last sent anything; zero while the
+// feed is off or has not connected.
+func (f *ReferenceFeed) Received() time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.received
+}
+
+func (f *ReferenceFeed) setPrice(symbol string, price decimal.Decimal, at time.Time) {
+	if !price.IsPositive() {
+		return
+	}
+	f.mu.Lock()
+	f.latest[symbol] = Reference{Symbol: symbol, Source: f.src.Name(), Price: price, At: at}
+	f.mu.Unlock()
+}
+
+func (f *ReferenceFeed) setTicker(t domain.Ticker) {
+	f.mu.Lock()
+	if old, ok := f.tickers[t.Symbol]; !ok || !t.At.Before(old.At) {
+		f.tickers[t.Symbol] = t
+	}
 	f.mu.Unlock()
 }
 
@@ -132,33 +187,78 @@ func (f *ReferenceFeed) notify(c domain.Candle) {
 	}
 }
 
+// drop forgets everything received, when the feed goes off.
+func (f *ReferenceFeed) drop() {
+	f.mu.Lock()
+	clear(f.latest)
+	clear(f.tickers)
+	f.received = time.Time{}
+	f.mu.Unlock()
+}
+
+// follow reads which pairs have a reference market, sorted by symbol.
+func (f *ReferenceFeed) follow(ctx context.Context) ([]ports.Reference, error) {
+	pairs, err := f.instruments.Pairs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var refs []ports.Reference
+	for _, p := range pairs {
+		if p.Reference.Remote != "" {
+			refs = append(refs, p.Reference)
+		}
+	}
+	slices.SortFunc(refs, func(a, b ports.Reference) int {
+		switch {
+		case a.Symbol < b.Symbol:
+			return -1
+		case a.Symbol > b.Symbol:
+			return 1
+		}
+		return 0
+	})
+	f.mu.Lock()
+	f.followed = refs
+	f.mu.Unlock()
+	return refs, nil
+}
+
+func sameRefs(a, b []ports.Reference) bool {
+	return slices.EqualFunc(a, b, func(x, y ports.Reference) bool {
+		return x.Symbol == y.Symbol && x.Remote == y.Remote && x.Multiplier.Equal(y.Multiplier)
+	})
+}
+
 // Run feeds until ctx ends (an app.Loop body).
 func (f *ReferenceFeed) Run(ctx context.Context) error {
 	backoff := time.Second
 	for ctx.Err() == nil {
 		if !f.enabled() {
-			f.mu.Lock()
-			clear(f.latest)
-			f.mu.Unlock()
+			f.drop()
+			sleep(ctx, f.recheck)
+			continue
+		}
+		refs, err := f.follow(ctx)
+		if err != nil || len(refs) == 0 {
+			if err != nil && ctx.Err() == nil {
+				f.log.WarnContext(ctx, "reference feed: listing unavailable", "error", err)
+			}
 			sleep(ctx, f.recheck)
 			continue
 		}
 		session, stop := context.WithCancel(ctx)
-		go func() { // the flag may go off while streaming
-			for session.Err() == nil {
-				sleep(session, f.recheck)
-				if !f.enabled() {
-					stop()
-				}
-			}
-		}()
+		go f.watch(session, stop, refs)
 		started := f.now()
-		err := f.session(session)
+		err = f.session(session, refs)
+		ended := session.Err() != nil // stopped by the watcher, not failed
 		stop()
 		if ctx.Err() != nil {
 			return nil
 		}
-		if err != nil && f.enabled() {
+		if ended {
+			continue // the flag went off or the followed pairs changed: no backoff
+		}
+		if err != nil {
 			f.errors.Inc()
 			f.log.WarnContext(ctx, "reference feed failed", "source", f.src.Name(), "error", err)
 		}
@@ -171,6 +271,31 @@ func (f *ReferenceFeed) Run(ctx context.Context) error {
 	return nil
 }
 
+// watch ends a session when the flag goes off or the followed pairs
+// change.
+func (f *ReferenceFeed) watch(session context.Context, stop context.CancelFunc, refs []ports.Reference) {
+	mapped := f.now()
+	for session.Err() == nil {
+		sleep(session, f.recheck)
+		if session.Err() != nil {
+			return
+		}
+		if !f.enabled() {
+			stop()
+			return
+		}
+		if f.now().Sub(mapped) < f.remap {
+			continue
+		}
+		mapped = f.now()
+		if now, err := f.follow(session); err == nil && !sameRefs(now, refs) {
+			f.log.InfoContext(session, "reference feed: followed pairs changed", "pairs", len(now))
+			stop()
+			return
+		}
+	}
+}
+
 func sleep(ctx context.Context, d time.Duration) {
 	select {
 	case <-ctx.Done():
@@ -178,44 +303,88 @@ func sleep(ctx context.Context, d time.Duration) {
 	}
 }
 
-// session backfills every symbol, then streams until the connection ends.
-func (f *ReferenceFeed) session(ctx context.Context) error {
-	for _, symbol := range f.symbols {
-		if err := f.backfill(ctx, symbol); err != nil {
-			return err
-		}
-	}
-	return f.src.Stream(ctx, f.symbols, func(c domain.Candle) {
-		f.set(c, f.now())
-		f.updates.WithLabelValues(c.Symbol).Inc()
-		f.notify(c)
-		if err := f.store.Read().References().Upsert(ctx, f.src.Name(), []domain.Candle{c}); err != nil && ctx.Err() == nil {
-			f.log.WarnContext(ctx, "reference candle not stored", "symbol", c.Symbol, "error", err)
-		}
+// session streams refs until the connection ends, loading the tickers
+// and backfilling the candles alongside.
+func (f *ReferenceFeed) session(ctx context.Context, refs []ports.Reference) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		f.catchUp(ctx, refs, domain.Minute1.Start(f.now()))
+	}()
+	err := f.src.Stream(ctx, refs, ports.StreamHandlers{
+		Candle: func(c domain.Candle) {
+			at := f.now()
+			f.mu.Lock()
+			f.received = at
+			f.mu.Unlock()
+			f.setPrice(c.Symbol, c.Close, at)
+			f.updates.WithLabelValues(c.Symbol).Inc()
+			f.notify(c)
+			if err := f.store.Read().References().Upsert(ctx, f.src.Name(), []domain.Candle{c}); err != nil && ctx.Err() == nil {
+				f.log.WarnContext(ctx, "reference candle not stored", "symbol", c.Symbol, "error", err)
+			}
+		},
+		Ticker: func(t domain.Ticker) {
+			at := f.now()
+			f.mu.Lock()
+			f.received = at
+			f.mu.Unlock()
+			f.setTicker(t)
+			f.setPrice(t.Symbol, t.Last, at)
+			f.updates.WithLabelValues(t.Symbol).Inc()
+		},
 	})
+	cancel()
+	wg.Wait()
+	return err
 }
 
-// backfill fetches the candles since the latest stored one; the current
-// minute's candle also sets the price.
-func (f *ReferenceFeed) backfill(ctx context.Context, symbol string) error {
+// catchUp loads the current tickers and the candles missed before
+// streaming (the minute the stream started in).
+func (f *ReferenceFeed) catchUp(ctx context.Context, refs []ports.Reference, streaming time.Time) {
+	if tickers, err := f.src.Tickers(ctx, refs); err != nil {
+		if ctx.Err() == nil {
+			f.log.WarnContext(ctx, "reference tickers not loaded", "error", err)
+		}
+	} else {
+		for _, t := range tickers {
+			f.setTicker(t)
+		}
+	}
+	for _, ref := range refs {
+		if ctx.Err() != nil {
+			return
+		}
+		if err := f.backfill(ctx, ref, streaming); err != nil && ctx.Err() == nil {
+			f.log.WarnContext(ctx, "reference backfill failed", "symbol", ref.Symbol, "error", err)
+		}
+	}
+}
+
+// backfill fetches the candles since the latest stored one up to the
+// minute the stream started in (the stream has everything from there).
+func (f *ReferenceFeed) backfill(ctx context.Context, ref ports.Reference, to time.Time) error {
 	r := f.store.Read().References()
-	from := f.now().Add(-referenceBackfill)
-	if last, err := r.Latest(ctx, f.src.Name(), symbol); err != nil {
+	from := to.Add(-referenceBackfill)
+	if last, err := r.Latest(ctx, f.src.Name(), ref.Symbol); err != nil {
 		return err
 	} else if last != nil && last.OpenTime.After(from) {
 		from = last.OpenTime // redone: it may have been open
 	}
-	candles, err := f.src.Backfill(ctx, symbol, from)
+	if !from.Before(to) {
+		return nil
+	}
+	candles, err := f.src.Backfill(ctx, ref, from, to)
 	if err != nil {
 		return err
 	}
 	if err := r.Upsert(ctx, f.src.Name(), candles); err != nil {
 		return err
 	}
-	if n := len(candles); n > 0 && f.now().Sub(candles[n-1].OpenTime) < 2*time.Minute {
-		f.set(candles[n-1], f.now())
-	}
-	f.log.InfoContext(ctx, "reference backfilled", "source", f.src.Name(), "symbol", symbol, "candles", len(candles))
+	f.log.InfoContext(ctx, "reference backfilled", "source", f.src.Name(), "symbol", ref.Symbol, "candles", len(candles))
 	return nil
 }
 

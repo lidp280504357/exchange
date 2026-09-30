@@ -152,3 +152,19 @@ tests:
             exp_annotations:
               summary: derivatives reconciliation check PNL_CLEARING_MATCHES_POSITIONS found 1 mismatches
               runbook: docs/runbook/derivatives.md
+
+  - interval: 1m
+    input_series:
+      - series: 'market_feed_halted_pairs{job="market-data-service"}'
+        values: '0 0 2 2'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: MarketFeedHalted
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: MarketFeedHalted
+        exp_alerts:
+          - exp_labels: {severity: critical, job: market-data-service}
+            exp_annotations:
+              summary: 2 pairs are halted because the reference feed has been lost for 5 minutes (market.halt_on_feed_loss)
+              runbook: docs/runbook/market-data.md

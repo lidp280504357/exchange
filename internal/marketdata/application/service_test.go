@@ -27,6 +27,7 @@ type memStore struct {
 	trades     []domain.Trade
 	references map[string]domain.Candle
 	funding    map[string]ports.FundingPeriod
+	halts      map[string]ports.Halt
 	mu         sync.Mutex // the reference feed writes from its own goroutine
 	down       bool
 	// outbox holds the emitted events; emitFails makes Emit fail.
@@ -37,7 +38,7 @@ type memStore struct {
 func newMemStore() *memStore {
 	return &memStore{
 		symbols: map[string]ports.SymbolState{}, candles: map[string]domain.Candle{}, references: map[string]domain.Candle{},
-		funding: map[string]ports.FundingPeriod{},
+		funding: map[string]ports.FundingPeriod{}, halts: map[string]ports.Halt{},
 	}
 }
 
@@ -59,6 +60,37 @@ func (r memRepos) Trades() ports.TradeRepo   { return memTrades(r) }
 func (r memRepos) References() ports.ReferenceRepo { return memReferences(r) }
 
 func (r memRepos) Funding() ports.FundingRepo { return memFunding(r) }
+
+func (r memRepos) Halts() ports.HaltRepo { return memHalts(r) }
+
+type memHalts memRepos
+
+func (r memHalts) List(context.Context) ([]ports.Halt, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	out := make([]ports.Halt, 0, len(r.s.halts))
+	for _, h := range r.s.halts {
+		out = append(out, h)
+	}
+	slices.SortFunc(out, func(a, b ports.Halt) int { return strings.Compare(a.Symbol, b.Symbol) })
+	return out, nil
+}
+
+func (r memHalts) Add(_ context.Context, symbol string, at time.Time) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	if _, ok := r.s.halts[symbol]; !ok {
+		r.s.halts[symbol] = ports.Halt{Symbol: symbol, HaltedAt: at}
+	}
+	return nil
+}
+
+func (r memHalts) Remove(_ context.Context, symbol string) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	delete(r.s.halts, symbol)
+	return nil
+}
 
 func (r memRepos) Emit(_ context.Context, _ string, env *eventv1.Envelope) error {
 	r.s.mu.Lock()
@@ -264,6 +296,20 @@ func (p pairs) Symbols(context.Context) ([]string, error) { return p, nil }
 
 func (p pairs) Contracts(context.Context) ([]ports.Contract, error) { return nil, nil }
 
+func (p pairs) Pairs(context.Context) ([]ports.Pair, error) {
+	out := make([]ports.Pair, 0, len(p))
+	for _, s := range p {
+		out = append(out, ports.Pair{Symbol: s, Status: "TRADING"})
+	}
+	return out, nil
+}
+
+func (p pairs) Ranks(context.Context) (map[string]int32, error) { return map[string]int32{}, nil }
+
+func (p pairs) SetPairStatus(context.Context, string, string, string) (string, error) {
+	return "", ErrUnknownSymbol
+}
+
 func d(s string) decimal.Decimal { return decimal.RequireFromString(s) }
 
 func at(s string) time.Time {
@@ -347,6 +393,11 @@ func TestTradesBuildCandlesTickerAndTradeList(t *testing.T) {
 	}
 	if _, err := s.Candles(ctx, "BTC-USDT", "2d", time.Time{}, time.Time{}, 5); !apperr.Is(err, apperr.CodeInvalidArgument) {
 		t.Fatalf("a bad interval: %v", err)
+	}
+	// Paging: to at the oldest candle loaded gives exactly limit older ones.
+	page, err := s.Candles(ctx, "BTC-USDT", "1m", time.Time{}, at("2026-09-30T10:03:00Z"), 2)
+	if err != nil || len(page) != 2 || !page[0].OpenTime.Equal(at("2026-09-30T10:01:00Z")) || !page[1].OpenTime.Equal(at("2026-09-30T10:02:00Z")) {
+		t.Fatalf("page before 10:03: %+v %v", page, err)
 	}
 
 	// After a restart the state comes back from the store.

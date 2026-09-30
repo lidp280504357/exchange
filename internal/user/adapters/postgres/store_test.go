@@ -105,3 +105,76 @@ func TestUpdateStatusHistoryAndEvents(t *testing.T) {
 		t.Fatalf("outbox: %s %v", topic, err)
 	}
 }
+
+func TestFavoritesRoundTrip(t *testing.T) {
+	store, _ := setup(t)
+	ctx := context.Background()
+	u, err := domain.NewUser(uuid.NewString(), "sg", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Read().Users().Create(ctx, u, nil); err != nil {
+		t.Fatal(err)
+	}
+	fav := store.Read().Favorites()
+	if list, at, err := fav.Get(ctx, u.ID); err != nil || len(list) != 0 || !at.IsZero() {
+		t.Fatalf("empty: %v %v %v", list, at, err)
+	}
+	if _, err := fav.Set(ctx, u.ID, []string{"ETH-USDT", "BTC-USDT"}); err != nil {
+		t.Fatal(err)
+	}
+	at, err := fav.Set(ctx, u.ID, []string{"BTC-USDT-PERP", "ETH-USDT"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, got, err := fav.Get(ctx, u.ID)
+	if err != nil || len(list) != 2 || list[0] != "BTC-USDT-PERP" || !got.Equal(at) {
+		t.Fatalf("stored %v at %v %v", list, got, err)
+	}
+	if _, err := fav.Set(ctx, uuid.NewString(), []string{"BTC-USDT"}); err == nil {
+		t.Fatal("favorites of an unknown user")
+	}
+}
+
+func TestListAndCountUsers(t *testing.T) {
+	store, db := setup(t)
+	ctx := context.Background()
+	users := store.Read().Users()
+	base := time.Now().UTC().Truncate(time.Second).Add(-3 * time.Hour)
+	var ids []string
+	for i := range 3 {
+		u, err := domain.NewUser(uuid.NewString(), "sg", "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := users.Create(ctx, u, nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(ctx, `UPDATE users SET created_at = $2 WHERE id = $1`, u.ID, base.Add(time.Duration(i)*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, u.ID)
+	}
+	page, err := users.List(ctx, ports.UserFilter{Region: "SG", CreatedFrom: base, Limit: 2})
+	if err != nil || len(page) != 2 || page[0].ID != ids[2] || page[1].ID != ids[1] {
+		t.Fatalf("first page %+v %v", page, err)
+	}
+	rest, err := users.List(ctx, ports.UserFilter{Region: "SG", CreatedFrom: base, AfterTime: page[1].CreatedAt, AfterID: page[1].ID, Limit: 2})
+	if err != nil || len(rest) != 1 || rest[0].ID != ids[0] {
+		t.Fatalf("second page %+v %v", rest, err)
+	}
+	if none, _ := users.List(ctx, ports.UserFilter{Status: "FROZEN", CreatedFrom: base, Limit: 10}); len(none) != 0 {
+		t.Fatalf("frozen %+v", none)
+	}
+	st, err := users.Stats(ctx, base.Add(90*time.Minute), 3)
+	if err != nil || st.Total < 3 || st.CreatedSince < 1 {
+		t.Fatalf("stats %+v %v", st, err)
+	}
+	var days int64
+	for _, n := range st.Days {
+		days += n
+	}
+	if days < 3 {
+		t.Fatalf("per day %+v", st.Days)
+	}
+}

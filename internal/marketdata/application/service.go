@@ -368,8 +368,9 @@ func (s *Service) Candles(ctx context.Context, symbol, interval string, from, to
 	if to.IsZero() {
 		to = s.now()
 	}
-	// Only the latest limit intervals can be returned: start there.
-	earliest := i.Start(to)
+	// Only the latest limit intervals opening before to can be returned:
+	// start there (to at an open time pages back by exactly limit).
+	earliest := i.Start(to.Add(-time.Nanosecond))
 	for range limit - 1 {
 		earliest = previous(i, earliest)
 	}

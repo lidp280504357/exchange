@@ -31,15 +31,17 @@ REST（经网关，无需登录，`Cache-Control: public, max-age=1`）：
 
 | 路径 | 内容 |
 |---|---|
-| `GET /v1/market/tickers` | 所有上架交易对的 ticker |
+| `GET /v1/market/tickers` | 所有上架交易对的 ticker（带 `rank`，基础资产的市值排名） |
+| `GET /v1/market/summary?limit=` | 首页概览：TRADING 状态、以 USDT 计价、有价格的交易对的涨幅榜、跌幅榜、成交额榜（各 `limit` 条，默认 5，最多 20） |
 | `GET /v1/market/{symbol}/ticker` | 一个交易对的 ticker；未上架或已下线 404 |
 | `GET /v1/market/{symbol}/depth?limit=` | 深度 `[价格, 数量]`，最多 200 档，带引擎 sequence |
 | `GET /v1/market/{symbol}/trades?limit=` | 最近成交（最多 100 条，新的在前），带交易对内编号 `trade_number` |
-| `GET /v1/market/{symbol}/candles?interval=&from=&to=&limit=` | K 线（最多 1000 根，时间 RFC 3339） |
+| `GET /v1/market/{symbol}/candles?interval=&from=&to=&limit=` | K 线（最多 1000 根，时间 RFC 3339）；返回 `to` 之前开盘的最近 `limit` 根。向前翻页：把已拿到的最早一根的 `open_time` 作为 `to`，正好再拿 `limit` 根、不重叠 |
 
 WebSocket `wss://astras.vip/v1/ws`：
 
 - 公共频道无需 `auth`：`ticker:{symbol}`、`depth:{symbol}`、`trades:{symbol}`、`candles:{symbol}:{interval}`（交易对与合约），合约另有 `mark-price:{symbol}`、`funding:{symbol}`（见下节）。消息 `{"channel": ..., "type": ..., "data": ...}`；订阅 ticker、K 线时先收到最近一条。
+- `tickers`：一个订阅拿到全部交易对与合约的 ticker（行情列表、首页、跑马灯用，只占 50 个订阅名额中的 1 个）。订阅后先收 `{"channel":"tickers","type":"snapshot","data":[...全部 ticker，按代码排序]}`，之后网关每秒把这一秒内变化过的交易对合成一条 `{"type":"update","data":[...]}` 发出（每个交易对只带最新一条）；没有变化就不发。
 - 深度：订阅后先收 `{"type":"snapshot","seq":n,"data":{"bids":[...],"asks":[...]}}`，之后是 `{"type":"update","seq":n+1,"prev_seq":n,"data":{变化的档位}}`，数量 `"0"` 表示该档消失。`seq` 是本网关实例的计数，`prev_seq` 对不上就重新订阅；每 30 秒重发一次快照。
 - 私有频道（需 `auth`，带每用户 `seq`，可用 `last_seq` 补发）新增 `orders`（订单状态变化：NEW、OPEN、PARTIALLY_FILLED、FILLED、CANCELED、REJECTED 及成交累计）与 `fills`（每笔成交的一方：角色、价格、数量、手续费）。
 
@@ -92,24 +94,41 @@ SELECT symbol, funding_time, funding_rate, mark_price, samples FROM market.fundi
 
 指标：`market_mark_age_seconds{symbol}`（-1 表示从未算出）、`market_index_sources{symbol}`（最近一次指数价用到的源数）、`market_contract_degraded{symbol}`、`market_funding_settled_total`；告警 `ContractDegraded`、`ContractIndexSourceMissing`。
 
+## 参考行情：跟随哪些交易对（ADR-0010）
+
+- 交易对表的 `reference_symbol`（币安符号，如 `BTCUSDT`）决定是否跟随：有它的交易对都跟随，没有的（测试服 ETH-BTC）始终显示平台数据。`reference_multiplier` 是价格倍数（1000 倍计价的币，如 `1000PEPE-USDT` ↔ `PEPEUSDT`，倍数 1000）：适配器把币安的价格乘以倍数、数量除以倍数，成交额不变，之后一切都按平台的代码与单位处理。两个字段在 `deploy/instruments/test.json` 里维护，部署时幂等同步（见 [instruments.md](instruments.md)）。
+- 行情服务每分钟重读一次映射，跟随的交易对变了就重连。每次连接先建流（每个交易对 `kline_1m` 与 `ticker` 两条，一个组合连接），同时用 REST 取一次全部 24h ticker、补齐 1 分钟 K 线（从库里最新一根到建流那一分钟，最多一天）；REST 请求间隔 200 毫秒，币安回 429/418 时按 `Retry-After` 暂停全部请求。
+- 旧的环境变量 `REFERENCE_SYMBOLS` 已去掉。
+
+## 参考 ticker（`market.reference_ticker`）
+
+开关按交易对生效（还需要 `market.reference_feed` 开着）：打开时 `GET /v1/market/tickers`、`/{symbol}/ticker`、`/summary` 与 `ticker:`、`tickers` 频道的最新价、24h 开高低、成交量、成交额、笔数、买一卖一都来自币安的 24h ticker（`<symbol>@ticker`，每秒一次），`updated_at` 是币安计算它的时间；合约显示它的指数交易对的 ticker。币安流中断时继续显示最后一条（`updated_at` 停住），客户端据此在 30 秒后显示"行情连接中断"；从未收到过参考 ticker 时显示平台自己的。开关关掉后下一次推送（500 毫秒内）恢复平台 ticker。
+
+## 行情中断保护（`market.halt_on_feed_loss`）
+
+- 状态（`GET /internal/market/feed`，不经网关，后台概览用）：`OFF`（`market.reference_feed` 关着或没有跟随的交易对）、`OK`（30 秒内收到过数据）、`DELAYED`（30 秒到 5 分钟没有数据）、`DOWN`（5 分钟以上）。服务启动或开关刚打开时从那一刻起算。
+- `DOWN` 且开关打开：把跟随币安、处于 TRADING 的交易对置为 HALT（操作人 `market-data-service`，原因 `reference feed lost`），先记入 `market.feed_halts` 再改状态。数据恢复并持续 30 秒后，只把 `feed_halts` 里的交易对从 HALT 改回 TRADING；期间被运营改成别的状态的交易对只删记录、不动它。两个开关任一关掉时也会恢复。合约不受影响（它们有自己的只减仓降级）。
+- 指标：`market_reference_feed_state{state}`（当前状态为 1）、`market_feed_halted_pairs`；告警 `MarketFeedHalted`。
+
 ## 参考 K 线（`market.reference_kline`，测试环境）
 
 用户决定（2026-09-30）：测试环境成交太少，平台自己的 K 线几乎不动，图表一律显示币安的 K 线。开关 `market.reference_kline` 按交易对生效（还需要 `market.reference_feed` 开着）：
 
-- 哪些交易对：参考行情跟踪的交易对（`REFERENCE_SYMBOLS`，测试服 BTC-USDT、ETH-USDT）用自己的参考数据，合约用它的指数交易对（BTC-USDT-PERP → BTC-USDT）。没有参考数据的交易对（ETH-BTC）照常显示平台 K 线。
+- 哪些交易对：跟随币安的交易对（有 `reference_symbol` 的，测试服 BTC-USDT、ETH-USDT）用自己的参考数据，合约用它的指数交易对（BTC-USDT-PERP → BTC-USDT）。没有参考数据的交易对（ETH-BTC）照常显示平台 K 线。
 - 历史：`GET /v1/market/{symbol}/candles` 改为向币安取同周期的 K 线（`/api/v3/klines`，周期名与对齐方式和平台一致），同样的请求 5 秒内走缓存，已结束的历史页缓存 1 分钟；取不到时返回 `COMMON_UNAVAILABLE`。
-- 实时：参考行情收到的每条 1 分钟推送，在服务里累加成各周期的当前 K 线（开高低收、成交量、笔数），随每 500 毫秒一次的推送发到 `market.candle.events`，前端的 `candles:{symbol}:{interval}` 频道和平台 K 线一样收到；服务启动后第一次遇到进行到一半的周期，先向币安取这一根的当前值再累加。这些交易对不再推送平台自己的 K 线；ticker、成交记录、深度仍是平台的数据。
-- 测试服设置：`exchangectl flags set market.reference_kline --on --deny-symbols ETH-BTC --reason "..."`。ETH-BTC 要保留平台 K 线，因为端到端 `marketdata.sh` 在它上面成交后检查平台 K 线。
+- 实时：参考行情收到的每条 1 分钟推送，在服务里累加成各周期的当前 K 线（开高低收、成交量、笔数），随每 500 毫秒一次的推送发到 `market.candle.events`，前端的 `candles:{symbol}:{interval}` 频道和平台 K 线一样收到；服务启动后第一次遇到进行到一半的周期，先向币安取这一根的当前值再累加。这些交易对不再推送平台自己的 K 线；ticker 见上一节，成交记录、深度仍是平台的数据（阶段 4 B4 接入币安深度与成交）。
+- 测试服设置：`exchangectl flags set market.reference_kline --on --deny-symbols ETH-BTC --reason "..."`，`market.reference_ticker`、`market.halt_on_feed_loss` 同样打开。ETH-BTC 没有 `reference_symbol`，本来就显示平台数据；端到端 `marketdata.sh` 在它上面成交后检查平台 K 线与 ticker。
 - 数据授权：参考数据给客户端看同样受 §11.9 限制，只在测试环境用；上线前关掉开关，或换成有授权的数据源。
 
 ## 故障与处理
 
 | 情况 | 表现 | 处理 |
 |---|---|---|
+| 币安行情中断（`MarketFeedHalted`） | `/internal/market/feed` 为 `DOWN`，跟随的交易对被置 HALT；ticker 的 `updated_at` 停住 | 查 `reference feed failed` 日志与出网；恢复后 30 秒自动放开；要提前放开就关掉 `market.halt_on_feed_loss` |
 | 合约降级（`ContractDegraded`） | `mark-price` 的 `degraded` 为 true，`updated_at` 停住；`market_index_sources` 为 0 | 查参考行情（`market_reference_age_seconds`、开关 `market.reference_feed`、`reference feed failed` 日志，见 [market-maker.md](market-maker.md)）；恢复后确认标记价正常，再按合约服务手册人工解除只减仓 |
 | 市场服务重启 | 深度最多 10 秒为空；K 线、ticker 从库恢复 | 自动 |
 | PostgreSQL 不可用 | 成交批次写库失败，消费者退避重试，积压上升 | 恢复后自动重载并继续；成交量不会重复累加 |
 | 引擎重启或切换 | 深度更新暂停，恢复后继续（sequence 不回退） | 自动；客户端 `prev_seq` 不连续时重新订阅 |
 | 需要重建 K 线 | — | 停服务，清空 `market.candles`、`market.trades`、`market.symbols`，删除消费组 `market-data` 的位移后重启，会从 `trade.events`（保留 30 天）重算 |
 
-端到端检查：`scripts/e2e/marketdata.sh`（REST 与 WebSocket 围绕一笔成交的全部推送）。
+端到端检查：`scripts/e2e/marketdata.sh`（参考行情的映射、ticker、概览、K 线翻页与 `tickers` 频道；REST 与 WebSocket 围绕一笔成交的全部推送）。

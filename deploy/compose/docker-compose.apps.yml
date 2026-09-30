@@ -209,11 +209,11 @@ services:
     environment:
       <<: *base-env
       INSTRUMENT_GRPC_ADDR: instrument-service:9184
-      # Reference prices while market.reference_feed is on (Binance public
-      # data: test environments only, §11.9). They are also the contracts'
-      # index sources: Binance alone, so one source is enough here
-      # (§11.7 asks for 2).
-      REFERENCE_SYMBOLS: BTC-USDT,ETH-USDT
+      # Reference market data while market.reference_feed is on (Binance
+      # public data: test environments only, §11.9, ADR-0010), for the
+      # pairs whose reference_symbol is set (deploy/instruments/test.json).
+      # The prices are also the contracts' index sources: Binance alone,
+      # so one source is enough here (§11.7 asks for 2).
       INDEX_MIN_SOURCES: "1"
     depends_on:
       postgres: {condition: service_healthy}
@@ -308,6 +308,7 @@ services:
       WALLET_SERVICE_URL: http://wallet-service:8092
       TRADING_SERVICE_URL: http://spot-trading-service:8088
       DERIVATIVES_SERVICE_URL: http://derivatives-service:8095
+      MARKET_DATA_SERVICE_URL: http://market-data-service:8090
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}

@@ -29,6 +29,9 @@ type Ticker struct {
 	// Bid and Ask are the best prices, zero when that side is empty.
 	Bid decimal.Decimal
 	Ask decimal.Decimal
+	// At is when a reference source computed the ticker; zero for the
+	// platform's own, computed on demand.
+	At time.Time
 }
 
 // WindowStart returns the open time of the window's first minute at now.

@@ -102,7 +102,7 @@ func setup(ctx context.Context, a *app.App) error {
 		TermsVersion:     "2026-09-28",
 		RiskVersion:      "2026-09-28",
 		LoginSilence:     domain.LoginSilence,
-		AllowedOrigins:   []string{"https://astras.vip", "http://localhost:5173"},
+		AllowedOrigins:   []string{"https://astras.vip", "https://m.astras.vip", "http://localhost:5173", "http://localhost:5174"},
 
 		PasswordHashConcurrency: 2,
 	}

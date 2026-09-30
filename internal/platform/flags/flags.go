@@ -32,6 +32,8 @@ const (
 	KeyRiskEnforce      = "risk.enforce"             // carry out the actions of risk rules
 	KeyReferenceFeed    = "market.reference_feed"    // external reference prices (Binance public data, test only)
 	KeyMarketMaker      = "market.maker"             // the platform market maker quotes, per symbol
+	KeyReferenceTicker  = "market.reference_ticker"  // show the reference market's tickers, per symbol (ADR-0010)
+	KeyHaltOnFeedLoss   = "market.halt_on_feed_loss" // halt followed pairs after 5 minutes without reference data
 )
 
 // Known describes the known flags.
@@ -42,10 +44,12 @@ var Known = map[string]string{
 	KeyWelcomeCredit:    "Simulated demo funds for newly registered users (test environments only)",
 	KeyWithdraw:         "Withdrawals (phase 2)",
 	KeyDerivatives:      "Perpetual futures trading (phase 3)",
-	KeyReferenceKline:   "Reference candles for pairs without trades yet",
+	KeyReferenceKline:   "Candles from the reference market instead of the platform's, per symbol (ADR-0010)",
 	KeyRiskEnforce:      "Carry out risk rule actions (accounts scored for review move to RISK_REVIEW); off only records the scores",
 	KeyReferenceFeed:    "External reference prices from Binance public data; test environments only until a data license exists (§11.9)",
 	KeyMarketMaker:      "Quotes of the platform market maker around the reference price; the symbol list limits the pairs (§11.10)",
+	KeyReferenceTicker:  "Tickers (last price, 24-hour statistics, best bid and ask) from the reference market instead of the platform's (ADR-0010)",
+	KeyHaltOnFeedLoss:   "Halt the pairs that follow a reference market after 5 minutes without reference data; resume them when it is back (ADR-0010)",
 }
 
 // List allows or denies values of one dimension. An empty Allow allows
