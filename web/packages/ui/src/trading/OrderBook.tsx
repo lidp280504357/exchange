@@ -6,7 +6,7 @@ import { PriceText } from "../components/PriceText";
 import { Select } from "../components/Select";
 import { Skeleton } from "../components/Skeleton";
 import { cn } from "../lib/cn";
-import { useFlash } from "../lib/useFlash";
+import { FlashLayer, useFlash } from "../lib/useFlash";
 import { DepthBars } from "../data/DepthBars";
 
 export type BookMode = "both" | "bids" | "asks";
@@ -79,7 +79,8 @@ const BookRow = memo(function BookRow({ side, price, quantity, total, ratio, pri
       <DepthBars ratio={ratio} side={side === "bid" ? "buy" : "sell"} />
       <span className={cn("relative text-left", side === "bid" ? "text-up" : "text-down")}>{formatPrice(price, priceDecimals)}</span>
       <span className="relative text-right text-fg-1">
-        <span key={flash.key} className={cn("rounded-1 px-0.5", flash.className)}>
+        <span className="relative isolate rounded-1 px-0.5">
+          <FlashLayer flash={flash} />
           {formatAmount(quantity, qtyDecimals)}
         </span>
       </span>

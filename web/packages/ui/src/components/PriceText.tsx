@@ -1,6 +1,6 @@
 import { dec, formatPrice } from "@exchange/core";
-import { useRef } from "react";
 import { cn } from "../lib/cn";
+import { FlashLayer, useFlash } from "../lib/useFlash";
 
 export type Tone = "up" | "down" | "neutral";
 
@@ -27,35 +27,17 @@ const toneClass: Record<Tone, string> = { up: "text-up", down: "text-down", neut
 
 /**
  * PriceText shows a price at the pair's decimals, coloured by direction,
- * and flashes its background for 400 ms when it moves (a CSS animation
- * restarted by remounting the span, no timers).
+ * and flashes its background for 400 ms when it moves: a CSS animation on
+ * a layer behind the text, restarted by remounting that layer (no
+ * timers). The text itself stays the same element, so a moving price is
+ * not a new largest paint to Lighthouse every time it changes.
  */
 export function PriceText({ value, decimals, tone, change, flash = true, className }: PriceTextProps) {
-  const prev = useRef<string | null | undefined>(value);
-  const gen = useRef(0);
-  const dir = useRef<"up" | "down" | null>(null);
-  if (value !== prev.current) {
-    if (flash && value && prev.current && dec.isDecimal(value) && dec.isDecimal(prev.current)) {
-      const c = dec.cmp(value, prev.current);
-      if (c !== 0) {
-        dir.current = c > 0 ? "up" : "down";
-        gen.current++;
-      }
-    }
-    prev.current = value;
-  }
+  const moved = useFlash(value, flash);
   const t = tone ?? (change !== undefined ? toneOf(change) : "neutral");
   return (
-    <span
-      key={gen.current}
-      className={cn(
-        "rounded-1 tabular-nums",
-        toneClass[t],
-        dir.current === "up" && gen.current > 0 && "animate-flash-up",
-        dir.current === "down" && gen.current > 0 && "animate-flash-down",
-        className,
-      )}
-    >
+    <span className={cn("relative isolate rounded-1 tabular-nums", toneClass[t], className)}>
+      <FlashLayer flash={moved} />
       {formatPrice(value, decimals)}
     </span>
   );

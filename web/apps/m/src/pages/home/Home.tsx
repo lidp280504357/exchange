@@ -286,7 +286,15 @@ const NewsBanner = memo(function NewsBanner() {
   };
 
   let body: ReactNode;
-  if (q.isPending) body = <Skeleton className="h-[88px] w-full rounded-3" />;
+  // The skeleton takes the loaded banner's height (the card with its
+  // borders, then the dots row), so nothing below moves when it arrives.
+  if (q.isPending)
+    body = (
+      <>
+        <Skeleton className="h-[90px] w-full rounded-3" />
+        <div aria-hidden className="mt-2 h-1.5" />
+      </>
+    );
   else if (q.isError)
     body = (
       <div className="rounded-3 border border-line-1 bg-bg-1">
@@ -342,13 +350,12 @@ const NewsBanner = memo(function NewsBanner() {
             </Link>
           ))}
         </div>
-        {list.length > 1 && (
-          <div aria-hidden className="mt-2 flex justify-center gap-1.5">
-            {list.map((a, i) => (
+        <div aria-hidden className="mt-2 flex h-1.5 justify-center gap-1.5">
+          {list.length > 1 &&
+            list.map((a, i) => (
               <span key={a.slug} className={cn("size-1.5 rounded-full transition-colors duration-[var(--t-base)]", i === index ? "bg-brand" : "bg-line-2")} />
             ))}
-          </div>
-        )}
+        </div>
       </>
     );
 
@@ -447,7 +454,7 @@ function Boards({ rows, loading, error, onRetry, tickerOf }: Section) {
   let body: ReactNode;
   if (loading)
     body = (
-      <ul>
+      <ul className="divide-y divide-line-1">
         {Array.from({ length: BOARD_ROWS }, (_, i) => (
           <li key={i} className="flex h-14 items-center gap-3 px-4">
             <Skeleton round className="size-7" />
