@@ -31,10 +31,13 @@ const (
 	KeyReferenceKline   = "market.reference_kline"   // show reference candles for new pairs
 	KeyRiskEnforce      = "risk.enforce"             // carry out the actions of risk rules
 	KeyReferenceFeed    = "market.reference_feed"    // external reference prices (Binance public data, test only)
-	KeyMarketMaker      = "market.maker"             // the platform market maker quotes, per symbol
+	KeyMarketMaker      = "market.maker"             // retired (ADR-0015): the quoting market maker
 	KeyReferenceTicker  = "market.reference_ticker"  // show the reference market's tickers, per symbol (ADR-0010)
 	KeyHaltOnFeedLoss   = "market.halt_on_feed_loss" // halt followed pairs after 5 minutes without reference data
 	KeyAdminNoTOTP      = "admin.login_without_totp" // admin console sign-in without the authenticator code
+	KeyReferenceDepth   = "market.reference_depth"   // show the reference market's book and trades, per symbol (ADR-0010)
+	KeyHouseLiquidity   = "market.house_liquidity"   // HOUSE's virtual liquidity from the reference book, per symbol (ADR-0015)
+	KeyInternalMatching = "market.internal_matching" // users' orders trade with each other on pairs with HOUSE liquidity (ADR-0015)
 )
 
 // Known describes the known flags.
@@ -48,10 +51,13 @@ var Known = map[string]string{
 	KeyReferenceKline:   "Candles from the reference market instead of the platform's, per symbol (ADR-0010)",
 	KeyRiskEnforce:      "Carry out risk rule actions (accounts scored for review move to RISK_REVIEW); off only records the scores",
 	KeyReferenceFeed:    "External reference prices from Binance public data; test environments only until a data license exists (§11.9)",
-	KeyMarketMaker:      "Quotes of the platform market maker around the reference price; the symbol list limits the pairs (§11.10)",
+	KeyMarketMaker:      "Retired with ADR-0015: the quoting market maker of §11.10, replaced by HOUSE's virtual liquidity (market.house_liquidity)",
 	KeyReferenceTicker:  "Tickers (last price, 24-hour statistics, best bid and ask) from the reference market instead of the platform's (ADR-0010)",
 	KeyHaltOnFeedLoss:   "Halt the pairs that follow a reference market after 5 minutes without reference data; resume them when it is back (ADR-0010)",
 	KeyAdminNoTOTP:      "Admin console sign-in with the password alone: the authenticator code is not asked for or checked (test environments only)",
+	KeyReferenceDepth:   "Order book and public trades from the reference market instead of the platform's, per symbol (ADR-0010)",
+	KeyHouseLiquidity:   "HOUSE trades against orders at the reference market's book (virtual liquidity), per symbol; off leaves the platform's own book (ADR-0015)",
+	KeyInternalMatching: "Users' orders also trade with each other on pairs with HOUSE liquidity; off makes HOUSE the counterparty of every trade (ADR-0015)",
 }
 
 // List allows or denies values of one dimension. An empty Allow allows

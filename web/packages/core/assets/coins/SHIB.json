@@ -1,0 +1,17 @@
+{
+  "symbol": "SHIB",
+  "name": {
+    "zh-CN": "柴犬币",
+    "en": "Shiba Inu"
+  },
+  "intro": {
+    "zh-CN": "Shiba Inu 是 2020 年发行于以太坊的迷因代币。本站以 1000 枚为一个交易单位（1000SHIB）。",
+    "en": "Shiba Inu is a meme token issued on Ethereum in 2020. It trades here 1,000 at a time (1000SHIB)."
+  },
+  "links": {
+    "website": "https://shibatoken.com",
+    "explorer": "https://etherscan.io/token/0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4ce"
+  },
+  "color": "orange",
+  "asOf": "2026-10-01"
+}

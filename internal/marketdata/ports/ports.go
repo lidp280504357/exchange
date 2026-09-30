@@ -104,6 +104,27 @@ type StreamHandlers struct {
 	Ticker func(domain.Ticker)
 }
 
+// BookHandlers take a reference book stream's updates, already in the
+// platform's symbols and units.
+type BookHandlers struct {
+	// Depth gets every depth update of a symbol's book.
+	Depth func(symbol string, d domain.DepthDiff)
+	// Trade gets every (aggregate) trade.
+	Trade func(domain.Trade)
+}
+
+// BookSource is the reference market's order books and trades (ADR-0010,
+// ADR-0015), of spot pairs or, futures true, of perpetual contracts.
+type BookSource interface {
+	// DepthSnapshot returns ref's book and the update ID it stands at.
+	DepthSnapshot(ctx context.Context, ref Reference, futures bool) (lastID int64, bids, asks []domain.Level, err error)
+	// RecentTrades returns ref's latest trades, oldest first.
+	RecentTrades(ctx context.Context, ref Reference, futures bool, limit int) ([]domain.Trade, error)
+	// BookStream passes every depth update and trade of refs to on until
+	// ctx ends or the connection fails.
+	BookStream(ctx context.Context, refs []Reference, futures bool, on BookHandlers) error
+}
+
 // Halt is a pair market-data-service halted when the reference feed was
 // lost.
 type Halt struct {

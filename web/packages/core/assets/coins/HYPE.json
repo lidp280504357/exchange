@@ -1,0 +1,17 @@
+{
+  "symbol": "HYPE",
+  "name": {
+    "zh-CN": "Hyperliquid",
+    "en": "Hyperliquid"
+  },
+  "intro": {
+    "zh-CN": "HYPE 是 Hyperliquid 的原生代币。Hyperliquid 是为链上订单簿交易设计的高性能公链，以永续合约交易闻名。",
+    "en": "HYPE is the native token of Hyperliquid, a high-performance chain built for on-chain order books and best known for perpetual futures."
+  },
+  "links": {
+    "website": "https://hyperliquid.xyz",
+    "explorer": "https://app.hyperliquid.xyz/explorer"
+  },
+  "color": "teal",
+  "asOf": "2026-10-01"
+}

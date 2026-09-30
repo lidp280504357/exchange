@@ -925,3 +925,47 @@ func TestTheAdminOverviewAndRiskList(t *testing.T) {
 		t.Fatalf("a second lift %v %v", ok, err)
 	}
 }
+
+// HOUSE takes the other side of a trade against its reference liquidity
+// (ADR-0015): no order, a one-way cross position of its own, no fee, and
+// the books still balance.
+func TestHouseFillsHaveNoOrder(t *testing.T) {
+	r := setup(t)
+	ctx := context.Background()
+	alice, house := uuid.NewString(), uuid.NewString()
+	r.svc.HouseUser = house
+	r.fund(alice, "10000")
+	r.fund(house, "100000")
+	bid := r.place(t, alice, domain.Buy, "60000", "0.1", false)
+	r.seq++
+	tr := application.Trade{
+		ID: uuid.Must(uuid.NewV7()).String(), Symbol: perp.Symbol, Seq: r.seq, Price: d("60000"), Qty: d("0.1"),
+		BuyerOrderID: bid.ID, BuyerUserID: alice, SellerUserID: house, BuyerIsMaker: false, HouseSide: domain.Sell, At: time.Now(),
+	}
+	for range 2 { // a redelivery changes nothing
+		if err := r.svc.OnTrade(ctx, tr); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.seq++
+	if err := r.svc.OnUpdate(ctx, domain.Update{OrderID: bid.ID, Seq: r.seq, Status: domain.StatusFilled, Filled: d("0.1"), FilledQuote: d("6000")}); err != nil {
+		t.Fatal(err)
+	}
+	long, short := r.position(t, alice), r.position(t, house)
+	if !long.Qty.Equal(d("0.1")) || !short.Qty.Equal(d("-0.1")) || short.MarginMode != domain.Cross || short.Side != domain.SideBoth {
+		t.Fatalf("positions %+v %+v", long, short)
+	}
+	fills, _, err := r.svc.Fills(ctx, house, "", "", 10)
+	if err != nil || len(fills) != 1 || fills[0].OrderID != domain.HouseOrderID || !fills[0].Fee.IsZero() {
+		t.Fatalf("HOUSE fills %+v %v", fills, err)
+	}
+	r.reconcile(t)
+	// HOUSE's margin is never checked for liquidation.
+	r.book.Set(perp.Symbol, d("120000"), time.Now())
+	if err := r.svc.Monitor(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if p := r.position(t, house); p.Liquidating {
+		t.Fatalf("HOUSE was taken over for liquidation: %+v", p)
+	}
+}

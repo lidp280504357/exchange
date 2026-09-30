@@ -108,6 +108,23 @@ type Credit struct {
 	Decimals int32
 }
 
+// HouseAdjustmentPosting credits (or debits) HOUSE's inventory, the
+// MARKET_MAKER system accounts, against ADJUSTMENT: its simulated funding
+// (ADR-0013).
+func HouseAdjustmentPosting(idemKey string, credits []Credit, memo string) (Posting, error) {
+	p := Posting{IdemKey: idemKey, EntryType: EntryManualAdjustment, Memo: memo}
+	for _, c := range credits {
+		if c.Amount.IsZero() || !c.Amount.Equal(c.Amount.Truncate(c.Decimals)) {
+			return Posting{}, apperr.Invalid(fmt.Sprintf("invalid %s amount %s", c.Asset, c.Amount))
+		}
+		p.Lines = append(p.Lines,
+			Line{Account: SystemAccount(AccountMarketMaker, c.Asset), Amount: c.Amount, Kind: Available},
+			Line{Account: SystemAccount(AccountAdjustment, c.Asset), Amount: c.Amount.Neg(), Kind: Available},
+		)
+	}
+	return p, nil
+}
+
 // AdjustmentPosting credits (or, with negative amounts, debits) a user's
 // SPOT account against the ADJUSTMENT account: operator corrections and
 // the simulated funds of phase 1 (§11.4).

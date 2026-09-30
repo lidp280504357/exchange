@@ -1,0 +1,17 @@
+{
+  "symbol": "BNB",
+  "name": {
+    "zh-CN": "BNB",
+    "en": "BNB"
+  },
+  "intro": {
+    "zh-CN": "BNB 是 BNB Chain 的原生代币，用于支付链上手续费，也是币安生态的平台币。",
+    "en": "BNB is the native token of BNB Chain, used for network fees and across the Binance ecosystem."
+  },
+  "links": {
+    "website": "https://www.bnbchain.org",
+    "explorer": "https://bscscan.com"
+  },
+  "color": "amber",
+  "asOf": "2026-10-01"
+}

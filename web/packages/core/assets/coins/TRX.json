@@ -1,0 +1,17 @@
+{
+  "symbol": "TRX",
+  "name": {
+    "zh-CN": "波场",
+    "en": "TRON"
+  },
+  "intro": {
+    "zh-CN": "TRON 是 2018 年上线主网的公链，兼容以太坊虚拟机，被广泛用于稳定币转账。",
+    "en": "TRON, with its mainnet live since 2018, is an EVM-compatible blockchain widely used for stablecoin transfers."
+  },
+  "links": {
+    "website": "https://tron.network",
+    "explorer": "https://tronscan.org"
+  },
+  "color": "rose",
+  "asOf": "2026-10-01"
+}

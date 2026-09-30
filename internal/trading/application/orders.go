@@ -15,6 +15,7 @@ import (
 	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/event"
+	"github.com/lidp280504357/exchange/internal/platform/flags"
 	"github.com/lidp280504357/exchange/internal/trading/domain"
 	"github.com/lidp280504357/exchange/internal/trading/ports"
 )
@@ -29,6 +30,9 @@ type Service struct {
 	Instruments ports.Instruments
 	Eligibility ports.Eligibility
 	Prices      ports.Prices
+	// Features decides whether orders of a pair trade only with HOUSE
+	// (ADR-0015); nil means users always trade with each other.
+	Features ports.Features
 	// FeeFree are the market maker's accounts: their orders pay no fees
 	// (§11.10).
 	FeeFree []string
@@ -146,7 +150,7 @@ func (s *Service) fund(ctx context.Context, o domain.Order) (domain.Order, error
 		}, "symbol", cur.Symbol); err != nil {
 			return err
 		}
-		if err := r.Emit(ctx, event.TopicOrderCommands, &orderv1.PlaceOrder{Order: msg}, "symbol", cur.Symbol); err != nil {
+		if err := r.Emit(ctx, event.TopicOrderCommands, &orderv1.PlaceOrder{Order: msg, HouseOnly: s.houseOnly(ctx, cur.Symbol)}, "symbol", cur.Symbol); err != nil {
 			return err
 		}
 		if cur.CancelRequested { // canceled while its freeze was pending
@@ -155,6 +159,22 @@ func (s *Service) fund(ctx context.Context, o domain.Order) (domain.Order, error
 		return nil
 	})
 	return out, err
+}
+
+// houseOnly decides whether an order of the pair trades only with HOUSE's
+// reference liquidity (ADR-0015): the pair follows a reference market,
+// market.house_liquidity is on for it and market.internal_matching off.
+// When the pair cannot be read the order matches users, as before HOUSE.
+func (s *Service) houseOnly(ctx context.Context, symbol string) bool {
+	if s.Features == nil {
+		return false
+	}
+	pair, err := s.Instruments.Pair(ctx, symbol)
+	if err != nil || pair.Reference == "" {
+		return false
+	}
+	subject := flags.Subject{Symbol: symbol}
+	return s.Features.Enabled(flags.KeyHouseLiquidity, subject) && !s.Features.Enabled(flags.KeyInternalMatching, subject)
 }
 
 // reject stores the order as REJECTED with OrderRejected and returns the

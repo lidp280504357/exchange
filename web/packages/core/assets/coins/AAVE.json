@@ -1,0 +1,17 @@
+{
+  "symbol": "AAVE",
+  "name": {
+    "zh-CN": "Aave",
+    "en": "Aave"
+  },
+  "intro": {
+    "zh-CN": "Aave 是去中心化借贷协议，用户可以存入资产赚取利息，或超额抵押借款，AAVE 是其治理代币。",
+    "en": "Aave is a decentralized lending protocol where users earn interest on deposits or borrow against more collateral; AAVE is its governance token."
+  },
+  "links": {
+    "website": "https://aave.com",
+    "explorer": "https://etherscan.io/token/0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9"
+  },
+  "color": "violet",
+  "asOf": "2026-10-01"
+}

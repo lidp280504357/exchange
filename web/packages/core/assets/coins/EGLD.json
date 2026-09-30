@@ -1,0 +1,17 @@
+{
+  "symbol": "EGLD",
+  "name": {
+    "zh-CN": "MultiversX",
+    "en": "MultiversX"
+  },
+  "intro": {
+    "zh-CN": "MultiversX（原 Elrond）是采用自适应状态分片的公链，EGLD 是其原生代币。",
+    "en": "MultiversX, formerly Elrond, is a blockchain with adaptive state sharding; EGLD is its native token."
+  },
+  "links": {
+    "website": "https://multiversx.com",
+    "explorer": "https://explorer.multiversx.com"
+  },
+  "color": "cyan",
+  "asOf": "2026-10-01"
+}

@@ -1,0 +1,16 @@
+{
+  "symbol": "SAND",
+  "name": {
+    "zh-CN": "The Sandbox",
+    "en": "The Sandbox"
+  },
+  "intro": {
+    "zh-CN": "The Sandbox 是基于区块链的虚拟世界，用户可以创建、拥有并交易其中的土地与物品。",
+    "en": "The Sandbox is a blockchain-based virtual world where users build, own and trade land and items."
+  },
+  "links": {
+    "website": "https://www.sandbox.game"
+  },
+  "color": "cyan",
+  "asOf": "2026-10-01"
+}

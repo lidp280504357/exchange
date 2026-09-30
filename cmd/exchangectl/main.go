@@ -70,8 +70,9 @@ commands:
                               move a pair: PREPARE -> TRADING <-> HALT -> CANCEL_ONLY -> DELISTED
   instruments contract-status <symbol> --to STATUS --reason TEXT
                               move a perpetual contract along the same statuses
-  ledger adjust --user U --asset A --amount X --reason TEXT [--key K]
-                              credit (or debit) a user's SPOT account against ADJUSTMENT
+  ledger adjust --user U|--house --asset A --amount X --reason TEXT [--key K]
+                              credit (or debit) a user's SPOT account, or HOUSE's MARKET_MAKER
+                              inventory (--house), against ADJUSTMENT
                               (needs ledger.manual_adjustment; audited)
   ledger balances <user_id>   a user's accounts
   ledger reconcile            check the ledger invariants now

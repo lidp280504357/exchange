@@ -30,30 +30,42 @@ func TestWALSnapshotsAndOutbox(t *testing.T) {
 	}
 	store := postgres.NewStore(db)
 	old := time.Now().Add(-48 * time.Hour).UTC().Truncate(time.Microsecond)
-	wal := func(p int32, o int64, at time.Time) ports.WALEntry {
-		return ports.WALEntry{Partition: p, Offset: o, Symbol: "BTC-USDT", Command: []byte(strconv.FormatInt(o, 10)), AppliedAt: at}
+	// Entry seq of a partition came from source at offset.
+	wal := func(p int32, seq int64, source string, o int64, at time.Time) ports.WALEntry {
+		return ports.WALEntry{
+			Partition: p, Seq: seq, Source: source, Offset: o, Symbol: "BTC-USDT", Command: []byte(strconv.FormatInt(o, 10)), AppliedAt: at,
+		}
 	}
+	cmd, ref := ports.SourceCommands, ports.SourceReferences
 	env, err := event.NewFactory("matching-engine", "test").New(ctx, wrapperspb.String("x"), "symbol", "BTC-USDT")
 	if err != nil {
 		t.Fatal(err)
 	}
 	book := domain.NewBook("BTC-USDT")
 	book.Seq = 7
-	snap := ports.Snapshot{Partition: 0, Offset: 1, Books: []domain.Snapshot{book.Snapshot()}, TakenAt: old}
-	if err := store.Save(ctx, []ports.WALEntry{wal(0, 0, old), wal(0, 1, old), wal(1, 0, old)},
+	// Partition 0: a command, a reference book, a command; the snapshot
+	// covers the first two entries.
+	snap := ports.Snapshot{Partition: 0, Seq: 1, Offset: 0, RefOffset: 0, Books: []domain.Snapshot{book.Snapshot()}, TakenAt: old}
+	if err := store.Save(ctx, []ports.WALEntry{wal(0, 0, cmd, 0, old), wal(0, 1, ref, 0, old), wal(1, 0, cmd, 0, old)},
 		[]ports.Output{{Topic: "trade.events", Envelope: env}}, []ports.Snapshot{snap}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Save(ctx, []ports.WALEntry{wal(0, 2, time.Now())}, nil, nil); err != nil {
+	if err := store.Save(ctx, []ports.WALEntry{wal(0, 2, cmd, 1, time.Now())}, nil, nil); err != nil {
 		t.Fatal(err)
+	}
+	// The same offset of a source cannot be applied twice.
+	if err := store.Save(ctx, []ports.WALEntry{wal(0, 3, ref, 0, time.Now())}, nil, nil); err == nil {
+		t.Fatal("a reference book applied twice")
 	}
 
 	snaps, err := store.Snapshots(ctx)
-	if err != nil || len(snaps) != 1 || snaps[0].Offset != 1 || len(snaps[0].Books) != 1 || snaps[0].Books[0].Seq != 7 {
+	if err != nil || len(snaps) != 1 || snaps[0].Seq != 1 || snaps[0].Offset != 0 || snaps[0].RefOffset != 0 ||
+		len(snaps[0].Books) != 1 || snaps[0].Books[0].Seq != 7 {
 		t.Fatalf("snapshots: %+v %v", snaps, err)
 	}
 	after, err := store.WAL(ctx, map[int32]int64{0: 1})
-	if err != nil || len(after) != 2 || after[0].Partition != 0 || after[0].Offset != 2 || after[1].Partition != 1 {
+	if err != nil || len(after) != 2 || after[0].Partition != 0 || after[0].Seq != 2 || after[0].Source != cmd || after[0].Offset != 1 ||
+		after[1].Partition != 1 {
 		t.Fatalf("wal after the snapshot: %+v %v", after, err)
 	}
 	var queued int
@@ -67,11 +79,11 @@ func TestWALSnapshotsAndOutbox(t *testing.T) {
 	if left, _ := store.WAL(ctx, nil); len(left) != 2 {
 		t.Fatalf("left after purge: %+v", left)
 	}
-	snap.Offset, snap.TakenAt = 2, time.Now()
+	snap.Seq, snap.Offset, snap.TakenAt = 2, 1, time.Now()
 	if err := store.Save(ctx, nil, nil, []ports.Snapshot{snap}); err != nil {
 		t.Fatal(err)
 	}
-	if snaps, _ := store.Snapshots(ctx); len(snaps) != 1 || snaps[0].Offset != 2 {
+	if snaps, _ := store.Snapshots(ctx); len(snaps) != 1 || snaps[0].Seq != 2 || snaps[0].Offset != 1 {
 		t.Fatalf("a new snapshot replaces the old one: %+v", snaps)
 	}
 }

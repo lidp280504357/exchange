@@ -1,0 +1,17 @@
+{
+  "symbol": "NEAR",
+  "name": {
+    "zh-CN": "NEAR",
+    "en": "NEAR Protocol"
+  },
+  "intro": {
+    "zh-CN": "NEAR 是采用分片技术的权益证明公链，注重易用性，近年也在发展链上 AI。",
+    "en": "NEAR is a sharded proof-of-stake blockchain focused on usability, and lately on on-chain AI."
+  },
+  "links": {
+    "website": "https://near.org",
+    "explorer": "https://nearblocks.io"
+  },
+  "color": "teal",
+  "asOf": "2026-10-01"
+}

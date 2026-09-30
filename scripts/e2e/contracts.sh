@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Perpetual contracts end to end (implementation plan §7.3): the contract
 # specifications (task 1), the index price, mark price and funding (task
-# 3) over REST and WebSocket, and the market maker's quotes on
-# BTC-USDT-PERP (requirements §11.10). The mark price needs the reference
-# feed (flag market.reference_feed, on in the test environment); the
-# quotes need market.maker to allow BTC-USDT-PERP and USDT in the market
-# maker's FUTURES account.
+# 3) over REST and WebSocket, and BTC-USDT-PERP's public book: Binance
+# futures' (ADR-0015), which HOUSE offers. The mark price needs the
+# reference feed (flag market.reference_feed, on in the test environment);
+# the book needs market.reference_depth to allow BTC-USDT-PERP.
 #
 #   scripts/e2e/contracts.sh
 set -euo pipefail
@@ -44,7 +43,7 @@ expect 200 - "contracts have tickers"
 call GET /v1/market/tickers ""
 check '[.tickers[].symbol] | index("BTC-USDT-PERP") != null' "the tickers include the contracts"
 
-echo "== the market maker quotes BTC-USDT-PERP (docs/runbook/market-maker.md)"
+echo "== BTC-USDT-PERP shows the reference market's book (docs/runbook/market-data.md)"
 quoted() {
   call GET "/v1/market/BTC-USDT-PERP/depth?limit=5" "" && [[ $STATUS == 200 ]] &&
     jq -e '(.bids | length) > 0 and (.asks | length) > 0' <<<"$BODY"

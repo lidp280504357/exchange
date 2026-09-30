@@ -116,8 +116,8 @@ groups:
         for: 2m
         labels: {severity: warning}
         annotations:
-          summary: "the reference price of {{ $labels.symbol }} is {{ $value }} seconds old; the market maker has pulled its quotes"
-          runbook: docs/runbook/market-maker.md
+          summary: "the reference price of {{ $labels.symbol }} is {{ $value }} seconds old; index and mark prices go without it"
+          runbook: docs/runbook/market-data.md
 
       - alert: MarketFeedHalted
         expr: max by (job) (market_feed_halted_pairs) > 0
@@ -125,6 +125,37 @@ groups:
         annotations:
           summary: "{{ $value }} pairs are halted because the reference feed has been lost for 5 minutes (market.halt_on_feed_loss)"
           runbook: docs/runbook/market-data.md
+
+      # HOUSE's virtual liquidity (ADR-0013, ADR-0015).
+      - alert: ReferenceBookStale
+        expr: max by (job, symbol) (market_reference_book_age_seconds) > 30 or min by (job, symbol) (market_reference_book_age_seconds) < 0
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "the reference book of {{ $labels.symbol }} is out of sync or unchanged for 30 seconds; HOUSE offers nothing there"
+          runbook: docs/runbook/market-data.md
+
+      - alert: HouseInventoryNegative
+        expr: min by (job, asset) (market_house_inventory{backed="true"}) < 0
+        labels: {severity: critical}
+        annotations:
+          summary: "HOUSE holds {{ $value }} {{ $labels.asset }}: it sold more of a withdrawable asset than it had"
+          runbook: docs/runbook/market-maker.md
+
+      - alert: HouseRoomExhausted
+        expr: max by (job, symbol, side) (market_house_room) == 0 and on (job, symbol) max by (job, symbol) (market_house_active) == 1
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "HOUSE can no longer {{ $labels.side }} on {{ $labels.symbol }}: its inventory or a cap is used up"
+          runbook: docs/runbook/market-maker.md
+
+      - alert: HousePublishFailing
+        expr: sum by (job) (increase(market_house_publish_failures_total[5m])) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value }} rounds of HOUSE's reference books could not be published in 5 minutes; the engines drop books older than 5 seconds"
+          runbook: docs/runbook/market-maker.md
 
       - alert: ContractDegraded
         expr: max by (job, symbol) (market_contract_degraded) == 1

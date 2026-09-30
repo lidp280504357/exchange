@@ -1,0 +1,17 @@
+{
+  "symbol": "TIA",
+  "name": {
+    "zh-CN": "Celestia",
+    "en": "Celestia"
+  },
+  "intro": {
+    "zh-CN": "Celestia 是模块化区块链中的数据可用性层，2023 年上线，供其他链发布交易数据。",
+    "en": "Celestia, launched in 2023, is a modular data-availability layer where other chains publish their transaction data."
+  },
+  "links": {
+    "website": "https://celestia.org",
+    "explorer": "https://celenium.io"
+  },
+  "color": "violet",
+  "asOf": "2026-10-01"
+}

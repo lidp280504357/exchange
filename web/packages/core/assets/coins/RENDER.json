@@ -1,0 +1,16 @@
+{
+  "symbol": "RENDER",
+  "name": {
+    "zh-CN": "Render",
+    "en": "Render"
+  },
+  "intro": {
+    "zh-CN": "Render Network 是去中心化的 GPU 渲染网络，把闲置显卡算力提供给 3D 渲染与 AI 计算。",
+    "en": "Render Network is a decentralized GPU network that supplies idle graphics power to 3D rendering and AI workloads."
+  },
+  "links": {
+    "website": "https://rendernetwork.com"
+  },
+  "color": "rose",
+  "asOf": "2026-10-01"
+}

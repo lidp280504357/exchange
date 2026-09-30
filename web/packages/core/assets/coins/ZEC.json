@@ -1,0 +1,17 @@
+{
+  "symbol": "ZEC",
+  "name": {
+    "zh-CN": "大零币",
+    "en": "Zcash"
+  },
+  "intro": {
+    "zh-CN": "Zcash 于 2016 年上线，使用零知识证明提供可选的隐私交易。",
+    "en": "Zcash, launched in 2016, uses zero-knowledge proofs for optional private transactions."
+  },
+  "links": {
+    "website": "https://z.cash",
+    "explorer": "https://blockchair.com/zcash"
+  },
+  "color": "amber",
+  "asOf": "2026-10-01"
+}

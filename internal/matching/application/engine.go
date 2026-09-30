@@ -1,7 +1,8 @@
 // Package application runs the matching engine (requirements §5.7,
-// ADR-0002): commands from order.commands are applied to in-memory books
-// and, per batch in one transaction, written to the WAL together with the
-// events they produced (published through the outbox) and, now and then,
+// ADR-0002): commands from order.commands and reference books from
+// order.references (ADR-0015) are applied to in-memory books and, per
+// batch in one transaction, written to the WAL together with the events
+// they produced (published through the outbox) and, now and then,
 // snapshots. On start, and after a failed write, the books are rebuilt
 // from the latest snapshots and the WAL.
 package application
@@ -54,9 +55,12 @@ type Engine struct {
 }
 
 type partition struct {
-	applied int64 // offset of the last command applied; -1 for none
+	seq int64 // WAL position of the last entry applied; -1 for none
+	// applied is, per source (ports.SourceCommands, SourceReferences),
+	// the offset of the last entry applied; -1 for none.
+	applied map[string]int64
 	books   map[string]*domain.Book
-	since   int // commands since the last snapshot
+	since   int // entries since the last snapshot
 }
 
 // New returns an engine; call Recover before Handle.
@@ -80,10 +84,20 @@ func New(store ports.Store, events *event.Factory, log *slog.Logger, reg prometh
 func (e *Engine) partition(p int32) *partition {
 	st, ok := e.parts[p]
 	if !ok {
-		st = &partition{applied: -1, books: map[string]*domain.Book{}}
+		st = &partition{
+			seq: -1, applied: map[string]int64{ports.SourceCommands: -1, ports.SourceReferences: -1}, books: map[string]*domain.Book{},
+		}
 		e.parts[p] = st
 	}
 	return st
+}
+
+// source names the input a delivery came from.
+func (e *Engine) source(topic string) string {
+	if topic == e.Topics.References {
+		return ports.SourceReferences
+	}
+	return ports.SourceCommands
 }
 
 func (st *partition) book(symbol string) *domain.Book {
@@ -95,7 +109,7 @@ func (st *partition) book(symbol string) *domain.Book {
 	return b
 }
 
-// Recover rebuilds the books from the latest snapshots and the commands
+// Recover rebuilds the books from the latest snapshots and the WAL entries
 // after them, without publishing anything again.
 func (e *Engine) Recover(ctx context.Context) error {
 	e.mu.Lock()
@@ -115,8 +129,9 @@ func (e *Engine) recover(ctx context.Context) error {
 		for _, b := range s.Books {
 			st.books[b.Symbol] = domain.Restore(b)
 		}
-		st.applied = s.Offset
-		after[s.Partition] = s.Offset
+		st.seq = s.Seq
+		st.applied[ports.SourceCommands], st.applied[ports.SourceReferences] = s.Offset, s.RefOffset
+		after[s.Partition] = s.Seq
 	}
 	wal, err := e.store.WAL(ctx, after)
 	if err != nil {
@@ -125,13 +140,13 @@ func (e *Engine) recover(ctx context.Context) error {
 	for _, w := range wal {
 		var env eventv1.Envelope
 		if err := proto.Unmarshal(w.Command, &env); err != nil {
-			return fmt.Errorf("wal %d:%d: %w", w.Partition, w.Offset, err)
+			return fmt.Errorf("wal %d:%d: %w", w.Partition, w.Seq, err)
 		}
 		st := e.partition(w.Partition)
 		if _, _, err := apply(st, &env); err != nil {
-			return fmt.Errorf("wal %d:%d: %w", w.Partition, w.Offset, err)
+			return fmt.Errorf("wal %d:%d: %w", w.Partition, w.Seq, err)
 		}
-		st.applied = w.Offset
+		st.seq, st.applied[w.Source] = w.Seq, w.Offset
 		st.since++
 	}
 	e.dirty = false
@@ -153,10 +168,10 @@ func (e *Engine) bookCount() int {
 	return n
 }
 
-// Handle applies a batch of commands (kafka.BatchHandler). Commands the
-// WAL already holds (a redelivery) are skipped. If the batch cannot be
-// saved, the books are rebuilt before the retry, so memory never runs
-// ahead of the log.
+// Handle applies a batch of commands and reference books
+// (kafka.BatchHandler). Entries the WAL already holds (a redelivery) are
+// skipped. If the batch cannot be saved, the books are rebuilt before the
+// retry, so memory never runs ahead of the log.
 func (e *Engine) Handle(ctx context.Context, batch []kafka.Delivery) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -171,7 +186,8 @@ func (e *Engine) Handle(ctx context.Context, batch []kafka.Delivery) error {
 	now := e.now()
 	for _, d := range batch {
 		st := e.partition(d.Partition)
-		if d.Offset <= st.applied {
+		source := e.source(d.Topic)
+		if d.Offset <= st.applied[source] {
 			continue
 		}
 		symbol, evs, err := apply(st, d.Envelope)
@@ -179,9 +195,9 @@ func (e *Engine) Handle(ctx context.Context, batch []kafka.Delivery) error {
 			// A malformed command would block the partition if retried; it
 			// changes nothing, so it is skipped (and never in the WAL).
 			e.log.ErrorContext(ctx, "invalid command skipped", "partition", d.Partition, "offset", d.Offset,
-				"event_id", d.Envelope.GetEventId(), "error", err)
+				"source", source, "event_id", d.Envelope.GetEventId(), "error", err)
 			e.commands.WithLabelValues("invalid").Inc()
-			st.applied = d.Offset
+			st.applied[source] = d.Offset
 			continue
 		}
 		raw, err := proto.Marshal(d.Envelope)
@@ -189,7 +205,10 @@ func (e *Engine) Handle(ctx context.Context, batch []kafka.Delivery) error {
 			e.dirty = true
 			return err
 		}
-		wal = append(wal, ports.WALEntry{Partition: d.Partition, Offset: d.Offset, Symbol: symbol, Command: raw, AppliedAt: now})
+		st.seq++
+		wal = append(wal, ports.WALEntry{
+			Partition: d.Partition, Seq: st.seq, Source: source, Offset: d.Offset, Symbol: symbol, Command: raw, AppliedAt: now,
+		})
 		cmdCtx := event.ContextFrom(ctx, d.Envelope) // events continue the order's trace
 		for _, ev := range evs {
 			o, err := e.output(cmdCtx, ev)
@@ -199,8 +218,8 @@ func (e *Engine) Handle(ctx context.Context, batch []kafka.Delivery) error {
 			}
 			out = append(out, o)
 		}
-		e.commands.WithLabelValues(string(proto.MessageName(payloadOf(d.Envelope)).Name())).Inc()
-		st.applied = d.Offset
+		e.commands.WithLabelValues(commandName(d.Envelope)).Inc()
+		st.applied[source] = d.Offset
 		st.since++
 		touched[d.Partition] = true
 	}
@@ -233,18 +252,32 @@ func (e *Engine) Handle(ctx context.Context, batch []kafka.Delivery) error {
 }
 
 func snapshotOf(p int32, st *partition, now time.Time) ports.Snapshot {
-	s := ports.Snapshot{Partition: p, Offset: st.applied, TakenAt: now}
+	s := ports.Snapshot{
+		Partition: p, Seq: st.seq, Offset: st.applied[ports.SourceCommands], RefOffset: st.applied[ports.SourceReferences], TakenAt: now,
+	}
 	for _, b := range st.books {
 		s.Books = append(s.Books, b.Snapshot())
 	}
 	return s
 }
 
-func payloadOf(env *eventv1.Envelope) proto.Message {
-	if env.GetPayload().MessageIs(&orderv1.CancelOrder{}) {
-		return &orderv1.CancelOrder{}
+// commandName is the metric label of a command: its message name
+// (PlaceOrder, CancelOrder, ReferenceBookUpdate).
+func commandName(env *eventv1.Envelope) string {
+	for _, m := range []proto.Message{&orderv1.PlaceOrder{}, &orderv1.CancelOrder{}, &orderv1.ReferenceBookUpdate{}} {
+		if env.GetPayload().MessageIs(m) {
+			return string(proto.MessageName(m).Name())
+		}
 	}
-	return &orderv1.PlaceOrder{}
+	return "unknown"
+}
+
+// issued is when a command was issued; zero when its envelope has no time.
+func issued(env *eventv1.Envelope) time.Time {
+	if env.GetOccurredAt() == nil {
+		return time.Time{}
+	}
+	return env.GetOccurredAt().AsTime()
 }
 
 // apply runs one command on its book and returns the book's symbol and
@@ -260,7 +293,18 @@ func apply(st *partition, env *eventv1.Envelope) (string, []domain.Event, error)
 		if err != nil {
 			return "", nil, err
 		}
+		o.HouseOnly, o.At = cmd.GetHouseOnly(), issued(env)
 		return o.Symbol, st.book(o.Symbol).Place(o), nil
+	case env.GetPayload().MessageIs(&orderv1.ReferenceBookUpdate{}):
+		var cmd orderv1.ReferenceBookUpdate
+		if err := env.GetPayload().UnmarshalTo(&cmd); err != nil {
+			return "", nil, err
+		}
+		r, err := referenceFromProto(&cmd, issued(env))
+		if err != nil {
+			return "", nil, err
+		}
+		return cmd.GetSymbol(), st.book(cmd.GetSymbol()).Reference(r), nil
 	case env.GetPayload().MessageIs(&orderv1.CancelOrder{}):
 		var cmd orderv1.CancelOrder
 		if err := env.GetPayload().UnmarshalTo(&cmd); err != nil {

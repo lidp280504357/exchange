@@ -2,22 +2,33 @@ syntax = "proto3";
 
 package exchange.market.v1;
 
+import "exchange/order/v1/order.proto";
 import "google/protobuf/timestamp.proto";
 
-// Platform market data (requirements §5.11, §7.3, §11.8), keyed by symbol.
-// Amounts are decimal strings.
+// Market data (requirements §5.11, §7.3, §11.8; ADR-0010, ADR-0015), keyed
+// by symbol. Amounts are decimal strings.
 //
-//   market.depth          DepthSnapshot, from the matching engine: the
-//                         aggregated book at most every 100 ms when it
-//                         changed, all books every 10 s. Derived state,
-//                         kept one hour, not ingested into ClickHouse.
-//   market.candle.events  CandleUpdated, CandleClosed, TickerUpdated, and for
-//                         perpetual contracts MarkPriceUpdated,
-//                         IndexPriceUpdated, FundingRateUpdated, from
-//                         market-data-service.
+//   market.depth           The public books, from market-data-service:
+//                          DepthSnapshot on (re)start and every few
+//                          seconds, DepthUpdate in between (at most every
+//                          100 ms). A symbol that shows the reference
+//                          market (market.reference_depth) has Binance's
+//                          book, the others the engine's, relayed.
+//   market.depth.internal  DepthSnapshot of the engine's own book (at most
+//                          every 100 ms when it changed, all books every
+//                          10 s), for market-data-service, the admin
+//                          console and reconciliation.
+//   market.trades          TradesPrinted, the public trades, from
+//                          market-data-service, chosen like the depth.
+//   market.candle.events   CandleUpdated, CandleClosed, TickerUpdated, and
+//                          for perpetual contracts MarkPriceUpdated,
+//                          IndexPriceUpdated, FundingRateUpdated, from
+//                          market-data-service.
 //
-// The derivatives engine publishes the contracts' depth on
-// derivatives.market.depth, in the same DepthSnapshot.
+// Depth and trades are derived state, kept one hour and not ingested into
+// ClickHouse. The contracts' books use derivatives.market.depth and
+// derivatives.market.depth.internal the same way; their public trades
+// share market.trades.
 
 // PriceLevel is the total resting quantity at one price.
 message PriceLevel {
@@ -28,11 +39,52 @@ message PriceLevel {
 // DepthSnapshot is the top of a book, best prices first.
 message DepthSnapshot {
   string symbol = 1;
-  // The book's event sequence when the snapshot was taken.
+  // The engine's event sequence of the book on the internal topics; on
+  // the public ones the publisher's own sequence of the symbol's
+  // messages, which only grows (it starts from the publisher's start
+  // time), so a restart never looks like going back.
   int64 sequence = 2;
   repeated PriceLevel bids = 3;
   repeated PriceLevel asks = 4;
   google.protobuf.Timestamp taken_at = 5;
+  // True when the book is the reference market's (Binance).
+  bool reference = 6;
+}
+
+// DepthUpdate is how a public book changed since the message before it on
+// the symbol's topic: the levels that changed, quantity "0" removing one.
+// prev_sequence is that message's sequence; a consumer that did not see
+// it keeps its book until the next DepthSnapshot.
+message DepthUpdate {
+  string symbol = 1;
+  int64 sequence = 2;
+  int64 prev_sequence = 3;
+  repeated PriceLevel bids = 4;
+  repeated PriceLevel asks = 5;
+  google.protobuf.Timestamp taken_at = 6;
+  bool reference = 7;
+}
+
+// TradesPrinted is a batch of a symbol's public trades, oldest first.
+message TradesPrinted {
+  string symbol = 1;
+  repeated PublicTrade trades = 2;
+  // True when they are the reference market's trades.
+  bool reference = 3;
+}
+
+// PublicTrade is one trade as everyone may see it: no orders, no users.
+message PublicTrade {
+  // A UUID: the platform's trade ID, or one derived from the reference
+  // market's trade ID.
+  string trade_id = 1;
+  // The platform's trade number, or the reference market's trade ID.
+  uint64 trade_number = 2;
+  string price = 3;
+  string quantity = 4;
+  string quote_quantity = 5;
+  exchange.order.v1.Side taker_side = 6;
+  google.protobuf.Timestamp executed_at = 7;
 }
 
 // Candle is one interval of a symbol's trades (§11.8). An interval without

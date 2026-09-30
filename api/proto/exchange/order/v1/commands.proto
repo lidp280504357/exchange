@@ -3,15 +3,25 @@ syntax = "proto3";
 package exchange.order.v1;
 
 import "exchange/order/v1/order.proto";
+import "google/protobuf/timestamp.proto";
 
-// Commands on order.commands, keyed by symbol: the matching engine's only
-// input (requirements §5.7). The trading service writes them to its
-// outbox in the transaction that accepts or cancels the order.
+// Commands on order.commands, keyed by symbol: the matching engine's input
+// (requirements §5.7). The trading service writes them to its outbox in
+// the transaction that accepts or cancels the order. Reference books
+// arrive on order.references (ADR-0015), keyed and partitioned the same
+// way, so a symbol's orders and reference books meet in one partition.
 
 // PlaceOrder hands an accepted order, whose funds are frozen, to the
 // engine.
 message PlaceOrder {
   Order order = 1;
+  // house_only keeps the order away from other users' orders: it trades
+  // only with HOUSE's reference liquidity, and what rests waits for the
+  // reference price to reach it (ADR-0015). The trading service sets it
+  // for a pair that follows a reference market while
+  // market.house_liquidity is on and market.internal_matching is off.
+  // Commands from before it match users as always.
+  bool house_only = 2;
 }
 
 // CancelOrder asks the engine to cancel an order that is still open; the
@@ -21,4 +31,32 @@ message CancelOrder {
   string order_id = 1;
   string user_id = 2;
   string symbol = 3;
+}
+
+// ReferenceBookUpdate replaces a symbol's reference book: HOUSE's virtual
+// liquidity, the top of the reference market's book in the platform's
+// units with every level capped (ADR-0015). The house liquidity publisher
+// (market-maker) sends it on order.references; the engine writes it to
+// its WAL like an order. An update without levels takes the liquidity
+// away. The engine uses a book for an order only while the order's
+// envelope is at most 5 seconds younger than the update's.
+message ReferenceBookUpdate {
+  string symbol = 1;
+  // Best first; quantities in base units.
+  repeated ReferenceLevel bids = 2;
+  repeated ReferenceLevel asks = 3;
+  // How much HOUSE may still buy (against the bids) and sell (against the
+  // asks) until the next update, in base units; empty is none.
+  string buy_room = 4;
+  string sell_room = 5;
+  // HOUSE's user ID on the trades against the book.
+  string house_user_id = 6;
+  // When the reference market's book was last updated.
+  google.protobuf.Timestamp source_time = 7;
+}
+
+// ReferenceLevel is the quantity HOUSE offers at one price.
+message ReferenceLevel {
+  string price = 1;
+  string quantity = 2;
 }

@@ -1,0 +1,17 @@
+{
+  "symbol": "POL",
+  "name": {
+    "zh-CN": "Polygon",
+    "en": "Polygon"
+  },
+  "intro": {
+    "zh-CN": "Polygon 是以太坊的扩容网络，POL 是 2024 年由 MATIC 升级而来的原生代币。",
+    "en": "Polygon is a scaling network for Ethereum; POL is its native token, upgraded from MATIC in 2024."
+  },
+  "links": {
+    "website": "https://polygon.technology",
+    "explorer": "https://polygonscan.com"
+  },
+  "color": "violet",
+  "asOf": "2026-10-01"
+}

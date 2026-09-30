@@ -1,0 +1,16 @@
+{
+  "symbol": "AXS",
+  "name": {
+    "zh-CN": "Axie Infinity",
+    "en": "Axie Infinity"
+  },
+  "intro": {
+    "zh-CN": "Axie Infinity 是区块链宠物对战游戏，AXS 是其治理与质押代币。",
+    "en": "Axie Infinity is a blockchain game of collectible battling creatures; AXS is its governance and staking token."
+  },
+  "links": {
+    "website": "https://axieinfinity.com"
+  },
+  "color": "blue",
+  "asOf": "2026-10-01"
+}

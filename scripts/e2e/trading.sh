@@ -4,9 +4,10 @@
 # not stored; an order the balance cannot fund is stored as REJECTED; a
 # client_order_id makes retries safe; cancels complete through the matching
 # engine and give the frozen funds back. It trades ETH-BTC, which has no
-# market maker: the orders rest far from the prices of matching.sh but
+# HOUSE liquidity: the orders rest far from the prices of matching.sh but
 # inside the price band around its last trade (ETH-BTC's band is 100% in
-# the test data). Needs ETH-BTC in TRADING and ETH-USDT not.
+# the test data). Needs ETH-BTC in TRADING and SOL-BTC not (the test data
+# keeps it PREPARE).
 #
 #   scripts/e2e/trading.sh
 set -euo pipefail
@@ -64,9 +65,9 @@ order '{"symbol":"ETH-BTC","side":"BUY","type":"LIMIT","price":"0.03","quantity"
 expect 422 ORDER_MIN_NOTIONAL "below the minimum notional"
 order '{"symbol":"ETH-BTC","side":"BUY","type":"MARKET","quantity":"0.1"}'
 expect 400 COMMON_INVALID_ARGUMENT "a market buy by quantity"
-order '{"symbol":"ETH-USDT","side":"BUY","type":"LIMIT","price":"2000","quantity":"0.01"}'
+order '{"symbol":"SOL-BTC","side":"BUY","type":"LIMIT","price":"0.002","quantity":"1"}'
 expect 422 INSTRUMENT_NOT_TRADING "a pair that is not trading"
-order '{"symbol":"DOGE-USDT","side":"BUY","type":"LIMIT","price":"1","quantity":"10"}'
+order '{"symbol":"NOPE-USDT","side":"BUY","type":"LIMIT","price":"1","quantity":"10"}'
 expect 404 COMMON_NOT_FOUND "an unknown pair"
 call GET "/v1/orders?symbol=ETH-BTC" "" "${AUTH[@]}"
 check '.items | length == 1' "refused orders are not stored"

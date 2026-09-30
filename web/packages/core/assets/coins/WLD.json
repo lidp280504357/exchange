@@ -1,0 +1,16 @@
+{
+  "symbol": "WLD",
+  "name": {
+    "zh-CN": "Worldcoin",
+    "en": "Worldcoin"
+  },
+  "intro": {
+    "zh-CN": "Worldcoin（World）以验证真人身份为核心，WLD 运行在以太坊及其二层网络 World Chain 上。",
+    "en": "Worldcoin (World) is built around proof of personhood; WLD lives on Ethereum and its layer 2, World Chain."
+  },
+  "links": {
+    "website": "https://world.org"
+  },
+  "color": "indigo",
+  "asOf": "2026-10-01"
+}

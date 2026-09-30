@@ -28,6 +28,9 @@ type Pair struct {
 	// Tradable is false when either asset has trading disabled or is
 	// risk-restricted.
 	Tradable bool
+	// Reference is the reference market's symbol the pair follows
+	// (ADR-0010), "" when it follows none.
+	Reference string
 }
 
 // PairTrading is the pair status that accepts new orders.

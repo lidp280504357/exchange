@@ -41,7 +41,7 @@ func (s *memStore) Snapshots(context.Context) ([]ports.Snapshot, error) {
 func (s *memStore) WAL(_ context.Context, after map[int32]int64) ([]ports.WALEntry, error) {
 	var out []ports.WALEntry
 	for _, w := range s.wal {
-		if o, ok := after[w.Partition]; !ok || w.Offset > o {
+		if seq, ok := after[w.Partition]; !ok || w.Seq > seq {
 			out = append(out, w)
 		}
 	}
@@ -280,7 +280,7 @@ func TestDepthsOfChangedBooksArePublished(t *testing.T) {
 	if err := x.Export(ctx, depths); err != nil {
 		t.Fatal(err)
 	}
-	if len(pub.recs) != 1 || pub.recs[0].Topic != event.TopicMarketDepth || pub.recs[0].Key != "BTC-USDT" {
+	if len(pub.recs) != 1 || pub.recs[0].Topic != event.TopicMarketDepthInternal || pub.recs[0].Key != "BTC-USDT" {
 		t.Fatalf("records: %+v", pub.recs)
 	}
 	var env eventv1.Envelope
@@ -313,5 +313,133 @@ func TestTheDerivativesShardPublishesToItsTopics(t *testing.T) {
 	}
 	if topics[event.TopicDerivOrder] != 3 || topics[event.TopicDerivTrade] != 1 || len(topics) != 2 {
 		t.Fatalf("topics %v", topics)
+	}
+}
+
+// references builds a reference book delivery published at when: HOUSE
+// sells 0.5 at 60010 and buys 0.5 at 59990, with room for 1 either way.
+func reference(t *testing.T, when time.Time, askPrice string) *eventv1.Envelope {
+	t.Helper()
+	env, err := event.NewFactory("market-maker", "test").New(context.Background(), &orderv1.ReferenceBookUpdate{
+		Symbol: "BTC-USDT", HouseUserId: "house", BuyRoom: "1", SellRoom: "1",
+		Bids: []*orderv1.ReferenceLevel{{Price: "59990", Quantity: "0.5"}},
+		Asks: []*orderv1.ReferenceLevel{{Price: askPrice, Quantity: "0.5"}},
+	}, "symbol", "BTC-USDT", event.WithOccurredAt(when))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return env
+}
+
+// placeAt is place issued at when, trading only with HOUSE.
+func placeAt(t *testing.T, when time.Time, id, user string, side orderv1.Side, price, qty string) *eventv1.Envelope {
+	t.Helper()
+	cmd := mustPayload(place(t, id, user, side, price, qty)).(*orderv1.PlaceOrder)
+	cmd.HouseOnly = true
+	env, err := factory.New(context.Background(), cmd, "symbol", "BTC-USDT", event.WithOccurredAt(when))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return env
+}
+
+func refDeliveries(offset int64, envs ...*eventv1.Envelope) []kafka.Delivery {
+	out := deliveries(offset, envs...)
+	for i := range out {
+		out[i].Topic = event.TopicOrderReferences
+	}
+	return out
+}
+
+func TestReferenceBooksAreLoggedAndTradeAgainstHouse(t *testing.T) {
+	store := &memStore{snapshots: map[int32]ports.Snapshot{}}
+	e := newEngine(t, store)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if err := e.Handle(ctx, refDeliveries(0, reference(t, now, "60010"))); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Handle(ctx, deliveries(0, placeAt(t, now.Add(time.Second), "b1", "bob", orderv1.Side_SIDE_BUY, "60010", "0.2"))); err != nil {
+		t.Fatal(err)
+	}
+	trade := mustPayload(store.outbox[0].Envelope).(*tradev1.TradeExecuted)
+	if trade.GetHouseSide() != orderv1.Side_SIDE_SELL || trade.GetSellerUserId() != "house" || trade.GetSellerOrderId() != "" ||
+		trade.GetBuyerOrderId() != "b1" || trade.GetPrice() != "60010" || trade.GetSellerFee() != "0" {
+		t.Fatalf("trade: %v", trade)
+	}
+	// Two sources, one WAL in the order applied.
+	if len(store.wal) != 2 || store.wal[0].Source != ports.SourceReferences || store.wal[0].Seq != 0 ||
+		store.wal[1].Source != ports.SourceCommands || store.wal[1].Seq != 1 || store.wal[1].Offset != 0 {
+		t.Fatalf("wal %+v", store.wal)
+	}
+	// A redelivered book is skipped by its own offset.
+	if err := e.Handle(ctx, refDeliveries(0, reference(t, now, "60010"))); err != nil || len(store.wal) != 2 {
+		t.Fatalf("redelivery: %v, wal %d", err, len(store.wal))
+	}
+	// An order issued more than 5 seconds after the book does not use it.
+	late := placeAt(t, now.Add(6*time.Second), "b2", "bob", orderv1.Side_SIDE_BUY, "60010", "0.1")
+	if err := e.Handle(ctx, deliveries(1, late)); err != nil {
+		t.Fatal(err)
+	}
+	if last := kinds(store.outbox[len(store.outbox)-1:]); last[0] != "order.events OrderOpened" {
+		t.Fatalf("the late order rests: %v", kinds(store.outbox))
+	}
+	// The next book at 60005 reaches it: it fills at its limit against HOUSE.
+	if err := e.Handle(ctx, refDeliveries(1, reference(t, now.Add(7*time.Second), "60005"))); err != nil {
+		t.Fatal(err)
+	}
+	trade = mustPayload(store.outbox[len(store.outbox)-2].Envelope).(*tradev1.TradeExecuted)
+	if trade.GetBuyerOrderId() != "b2" || trade.GetPrice() != "60010" || !trade.GetBuyerIsMaker() || trade.GetTakerSide() != orderv1.Side_SIDE_SELL {
+		t.Fatalf("triggered trade: %v", trade)
+	}
+}
+
+// A restart replays commands and reference books alike: an engine that
+// stops half way ends with the same books and events as one that did not.
+func TestRecoveryReplaysReferenceBooks(t *testing.T) {
+	now := time.Now().UTC()
+	steps := []kafka.Delivery{
+		refDeliveries(0, reference(t, now, "60010"))[0],
+		deliveries(0, placeAt(t, now, "b1", "bob", orderv1.Side_SIDE_BUY, "60010", "0.3"))[0],
+		deliveries(1, placeAt(t, now, "b2", "bob", orderv1.Side_SIDE_BUY, "60000", "0.4"))[0],
+		refDeliveries(1, reference(t, now.Add(time.Second), "59999"))[0], // reaches b2
+		deliveries(2, placeAt(t, now.Add(time.Second), "s1", "alice", orderv1.Side_SIDE_SELL, "59990", "0.6"))[0],
+		refDeliveries(2, reference(t, now.Add(2*time.Second), "60020"))[0],
+		deliveries(3, placeAt(t, now.Add(2*time.Second), "b3", "bob", orderv1.Side_SIDE_BUY, "60020", "0.2"))[0],
+	}
+	run := func(stopAt int) []string {
+		store := &memStore{snapshots: map[int32]ports.Snapshot{}}
+		e := newEngine(t, store)
+		for i, d := range steps {
+			if i == stopAt {
+				e = newEngine(t, store) // a restart: snapshot (every 3) and WAL
+			}
+			if err := e.Handle(context.Background(), []kafka.Delivery{d}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var out []string
+		for _, o := range store.outbox {
+			m := mustPayload(o.Envelope)
+			if tr, ok := m.(*tradev1.TradeExecuted); ok {
+				out = append(out, tr.GetTradeId()+" "+tr.GetPrice()+" "+tr.GetQuantity())
+			}
+		}
+		depth := e.Depths(DepthLevels, true)
+		for _, dp := range depth {
+			for _, l := range append(dp.Bids, dp.Asks...) {
+				out = append(out, "rest "+l.Price.String()+" "+l.Quantity.String())
+			}
+		}
+		return out
+	}
+	want := run(-1)
+	if len(want) < 4 {
+		t.Fatalf("too few trades to compare: %v", want)
+	}
+	for stop := 1; stop < len(steps); stop++ {
+		if got := run(stop); !slices.Equal(got, want) {
+			t.Fatalf("restart before step %d:\n got %v\nwant %v", stop, got, want)
+		}
 	}
 }

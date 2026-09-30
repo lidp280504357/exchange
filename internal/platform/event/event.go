@@ -41,18 +41,32 @@ const (
 	TopicWalletWithdrawal = "wallet.withdrawal.events"
 	// TopicOrderCommands is the matching engine's input (§5.7), keyed by symbol.
 	TopicOrderCommands = "order.commands"
-	// TopicMarketDepth carries the engine's depth snapshots (§11.8): derived
-	// state published straight from memory, kept an hour, no retry topics.
+	// TopicOrderReferences is the engine's other input: the reference
+	// books of HOUSE's virtual liquidity (ADR-0015), keyed by symbol with
+	// as many partitions as order.commands, kept an hour.
+	TopicOrderReferences = "order.references"
+	// TopicMarketDepth carries the public books from market-data-service:
+	// the reference market's or the engine's (ADR-0015). Derived state,
+	// published straight from memory, kept an hour, no retry topics; so
+	// are the depth and trade topics below.
 	TopicMarketDepth = "market.depth"
+	// TopicMarketDepthInternal carries the engine's own depth snapshots
+	// (§11.8).
+	TopicMarketDepthInternal = "market.depth.internal"
+	// TopicMarketTrades carries the public trades of pairs and contracts
+	// from market-data-service.
+	TopicMarketTrades = "market.trades"
 	// TopicMarketCandle carries candles and tickers from market-data-service.
 	TopicMarketCandle = "market.candle.events"
 	// The perpetual contracts' matching shard (implementation plan §7.3
-	// task 2): the same engine with its own commands, order and trade
-	// events and depth, keyed by symbol.
-	TopicDerivOrderCommands = "derivatives.order.commands"
-	TopicDerivOrder         = "derivatives.order.events"
-	TopicDerivTrade         = "derivatives.trade.events"
-	TopicDerivMarketDepth   = "derivatives.market.depth"
+	// task 2): the same engine with its own commands, reference books,
+	// order and trade events and depth, keyed by symbol.
+	TopicDerivOrderCommands       = "derivatives.order.commands"
+	TopicDerivOrderReferences     = "derivatives.order.references"
+	TopicDerivOrder               = "derivatives.order.events"
+	TopicDerivTrade               = "derivatives.trade.events"
+	TopicDerivMarketDepth         = "derivatives.market.depth"
+	TopicDerivMarketDepthInternal = "derivatives.market.depth.internal"
 	// Positions, fills, margin and funding of derivatives-service, and its
 	// liquidations, keyed by user.
 	TopicDerivPosition    = "derivatives.position.events"

@@ -1,0 +1,17 @@
+{
+  "symbol": "NEO",
+  "name": {
+    "zh-CN": "小蚁",
+    "en": "Neo"
+  },
+  "intro": {
+    "zh-CN": "Neo 是 2014 年发起的智能合约平台，最初名为小蚁（Antshares）。",
+    "en": "Neo, started in 2014 as Antshares, is a smart-contract platform."
+  },
+  "links": {
+    "website": "https://neo.org",
+    "explorer": "https://neotube.io"
+  },
+  "color": "emerald",
+  "asOf": "2026-10-01"
+}

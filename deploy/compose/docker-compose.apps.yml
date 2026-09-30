@@ -322,24 +322,21 @@ services:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9094/readyz"]
 
-  # The platform market maker (§11.10): quotes the symbols below while
-  # market.maker allows them; its account MARKET_MAKER_USER_ID comes from
-  # apps.env.
+  # HOUSE's virtual liquidity (ADR-0015): reference books for the engines
+  # from the public books, HOUSE's inventory and its caps (HOUSE_*_CAP,
+  # defaults in cmd/market-maker). HOUSE_USER_ID comes from apps.env.
   market-maker:
     <<: *app
     command: ["/app/market-maker"]
     environment:
       <<: *base-env
-      MARKET_MAKER_SYMBOLS: BTC-USDT
-      MARKET_MAKER_CONTRACTS: BTC-USDT-PERP
-      TRADING_SERVICE_URL: http://spot-trading-service:8088
-      LEDGER_SERVICE_URL: http://ledger-service:8085
-      MARKET_DATA_SERVICE_URL: http://market-data-service:8090
+      LEDGER_GRPC_ADDR: ledger-service:9185
       INSTRUMENT_SERVICE_URL: http://instrument-service:8084
       DERIVATIVES_SERVICE_URL: http://derivatives-service:8095
     depends_on:
       postgres: {condition: service_healthy}
-      spot-trading-service: {condition: service_started}
+      redpanda: {condition: service_healthy}
+      ledger-service: {condition: service_started}
       market-data-service: {condition: service_started}
       derivatives-service: {condition: service_started}
     healthcheck:
@@ -347,7 +344,8 @@ services:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9091/readyz"]
 
   # One active engine (it holds a database lease); a second instance would
-  # wait as a standby (ADR-0002).
+  # wait as a standby (ADR-0002). Reference books of 50 pairs (ADR-0015)
+  # add up to ~200 WAL entries a second: keep two hours of WAL.
   matching-engine:
     <<: *app
     command: ["/app/matching-engine"]
@@ -355,6 +353,7 @@ services:
     environment:
       <<: *base-env
       GOMEMLIMIT: 200MiB
+      MATCHING_WAL_RETENTION: 2h
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}
@@ -363,8 +362,9 @@ services:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9089/readyz"]
 
   # The perpetual contracts' matching shard (implementation plan §7.3 task
-  # 2): the same engine on derivatives.order.commands, schema
-  # deriv_matching, its own lease and consumer group.
+  # 2): the same engine on derivatives.order.commands and
+  # derivatives.order.references, schema deriv_matching, its own lease and
+  # consumer group.
   derivatives-engine:
     <<: *app
     command: ["/app/matching-engine"]
@@ -373,6 +373,7 @@ services:
       <<: *base-env
       GOMEMLIMIT: 200MiB
       MATCHING_SHARD: derivatives
+      MATCHING_WAL_RETENTION: 2h
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}

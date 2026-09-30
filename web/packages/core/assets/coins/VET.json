@@ -1,0 +1,17 @@
+{
+  "symbol": "VET",
+  "name": {
+    "zh-CN": "唯链",
+    "en": "VeChain"
+  },
+  "intro": {
+    "zh-CN": "VeChain 是面向企业与供应链场景的公链，采用权威证明共识。",
+    "en": "VeChain is a blockchain for enterprise and supply-chain uses, run on proof of authority."
+  },
+  "links": {
+    "website": "https://www.vechain.org",
+    "explorer": "https://explore.vechain.org"
+  },
+  "color": "sky",
+  "asOf": "2026-10-01"
+}

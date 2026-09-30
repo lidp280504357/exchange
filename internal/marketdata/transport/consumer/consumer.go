@@ -1,6 +1,8 @@
 // Package consumer feeds market-data-service from Kafka: trades in batches
-// (a consumer group, committed after they are stored) and depth snapshots
-// from the tail of market.depth (only the latest matter).
+// (a consumer group, committed after they are stored) and the engines'
+// depth snapshots from the tail of their internal depth topics (only the
+// latest matter). Both are relayed as the public book and trades of the
+// symbols that do not show the reference market's (ADR-0015).
 package consumer
 
 import (
@@ -20,8 +22,9 @@ import (
 // Group is the consumer group on trade.events.
 const Group = "market-data"
 
-// Trades is the kafka.BatchHandler for trade.events.
-func Trades(svc *application.Service) kafka.BatchHandler {
+// Trades is the kafka.BatchHandler for trade.events; relay (nil for none)
+// republishes the public trades.
+func Trades(svc *application.Service, relay *application.Books) kafka.BatchHandler {
 	return func(ctx context.Context, batch []kafka.Delivery) error {
 		trades := make([]domain.Trade, 0, len(batch))
 		for _, d := range batch {
@@ -41,7 +44,13 @@ func Trades(svc *application.Service) kafka.BatchHandler {
 		if len(trades) == 0 {
 			return nil
 		}
-		return svc.OnTrades(ctx, trades)
+		if err := svc.OnTrades(ctx, trades); err != nil {
+			return err
+		}
+		if relay != nil {
+			relay.RelayTrades(ctx, trades) // after storing: a redelivery would count them twice
+		}
+		return nil
 	}
 }
 
@@ -62,9 +71,10 @@ func fromProto(m *tradev1.TradeExecuted, env *eventv1.Envelope) (domain.Trade, b
 	}, true
 }
 
-// Depth is the kafka.Handler for the tail of market.depth.
-func Depth(svc *application.Service) kafka.Handler {
-	return func(_ context.Context, env *eventv1.Envelope) error {
+// Depth is the kafka.Handler for the tail of the engines' internal depth
+// topics; relay (nil for none) republishes the public books.
+func Depth(svc *application.Service, relay *application.Books) kafka.Handler {
+	return func(ctx context.Context, env *eventv1.Envelope) error {
 		var d marketv1.DepthSnapshot
 		if !env.GetPayload().MessageIs(&d) {
 			return nil
@@ -73,6 +83,9 @@ func Depth(svc *application.Service) kafka.Handler {
 			return err
 		}
 		svc.OnDepth(&d)
+		if relay != nil {
+			relay.RelayDepth(ctx, &d)
+		}
 		return nil
 	}
 }

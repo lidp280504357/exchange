@@ -52,7 +52,13 @@ type TradeExecuted struct {
 	// The symbol's trades counted from 1, so consumers can tell a missing
 	// trade (settlement reconciliation, public trade IDs). Trades from
 	// before this field carry 0.
-	TradeNumber   uint64 `protobuf:"varint,18,opt,name=trade_number,json=tradeNumber,proto3" json:"trade_number,omitempty"`
+	TradeNumber uint64 `protobuf:"varint,18,opt,name=trade_number,json=tradeNumber,proto3" json:"trade_number,omitempty"`
+	// The side HOUSE took when the trade was against its reference
+	// liquidity (ADR-0015): SIDE_BUY when HOUSE bought. HOUSE has no order
+	// (its order ID is empty) and pays no fee; the ledger books its side on
+	// the system account MARKET_MAKER (HOUSE_TRADE_SETTLE). Unspecified for
+	// a trade between users.
+	HouseSide     v1.Side `protobuf:"varint,19,opt,name=house_side,json=houseSide,proto3,enum=exchange.order.v1.Side" json:"house_side,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -213,11 +219,18 @@ func (x *TradeExecuted) GetTradeNumber() uint64 {
 	return 0
 }
 
+func (x *TradeExecuted) GetHouseSide() v1.Side {
+	if x != nil {
+		return x.HouseSide
+	}
+	return v1.Side(0)
+}
+
 var File_exchange_trade_v1_events_proto protoreflect.FileDescriptor
 
 const file_exchange_trade_v1_events_proto_rawDesc = "" +
 	"\n" +
-	"\x1eexchange/trade/v1/events.proto\x12\x11exchange.trade.v1\x1a\x1dexchange/order/v1/order.proto\"\xf8\x04\n" +
+	"\x1eexchange/trade/v1/events.proto\x12\x11exchange.trade.v1\x1a\x1dexchange/order/v1/order.proto\"\xb0\x05\n" +
 	"\rTradeExecuted\x12\x19\n" +
 	"\btrade_id\x18\x01 \x01(\tR\atradeId\x12\x16\n" +
 	"\x06symbol\x18\x02 \x01(\tR\x06symbol\x12\x1d\n" +
@@ -241,7 +254,9 @@ const file_exchange_trade_v1_events_proto_rawDesc = "" +
 	"\n" +
 	"seller_fee\x18\x10 \x01(\tR\tsellerFee\x12*\n" +
 	"\x11buyer_limit_price\x18\x11 \x01(\tR\x0fbuyerLimitPrice\x12!\n" +
-	"\ftrade_number\x18\x12 \x01(\x04R\vtradeNumberB\xd2\x01\n" +
+	"\ftrade_number\x18\x12 \x01(\x04R\vtradeNumber\x126\n" +
+	"\n" +
+	"house_side\x18\x13 \x01(\x0e2\x17.exchange.order.v1.SideR\thouseSideB\xd2\x01\n" +
 	"\x15com.exchange.trade.v1B\vEventsProtoP\x01ZFgithub.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1;tradev1\xa2\x02\x03ETX\xaa\x02\x11Exchange.Trade.V1\xca\x02\x11Exchange\\Trade\\V1\xe2\x02\x1dExchange\\Trade\\V1\\GPBMetadata\xea\x02\x13Exchange::Trade::V1b\x06proto3"
 
 var (
@@ -263,11 +278,12 @@ var file_exchange_trade_v1_events_proto_goTypes = []any{
 }
 var file_exchange_trade_v1_events_proto_depIdxs = []int32{
 	1, // 0: exchange.trade.v1.TradeExecuted.taker_side:type_name -> exchange.order.v1.Side
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	1, // 1: exchange.trade.v1.TradeExecuted.house_side:type_name -> exchange.order.v1.Side
+	2, // [2:2] is the sub-list for method output_type
+	2, // [2:2] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_exchange_trade_v1_events_proto_init() }

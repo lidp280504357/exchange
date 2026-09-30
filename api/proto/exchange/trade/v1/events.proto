@@ -37,4 +37,10 @@ message TradeExecuted {
   // trade (settlement reconciliation, public trade IDs). Trades from
   // before this field carry 0.
   uint64 trade_number = 18;
+  // The side HOUSE took when the trade was against its reference
+  // liquidity (ADR-0015): SIDE_BUY when HOUSE bought. HOUSE has no order
+  // (its order ID is empty) and pays no fee; the ledger books its side on
+  // the system account MARKET_MAKER (HOUSE_TRADE_SETTLE). Unspecified for
+  // a trade between users.
+  exchange.order.v1.Side house_side = 19;
 }

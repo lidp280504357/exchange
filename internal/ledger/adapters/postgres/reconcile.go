@@ -19,10 +19,11 @@ const (
 	// Per symbol, the recorded trades are numbered 1..n without gaps or
 	// repeats (trades from before numbering count first, as 0).
 	CheckTradesNumbered = "TRADES_NUMBERED"
-	// Invariant 5: per asset, the TRADE_SETTLE credits equal the traded
-	// amounts of the engine's spot trades, and the fees charged equal
-	// theirs (contract fees are TRADE_FEE journals too, keyed futures:...,
-	// and belong to derivatives-service's trades, not these).
+	// Invariant 5: per asset, the TRADE_SETTLE and HOUSE_TRADE_SETTLE
+	// (ADR-0015) credits equal the traded amounts of the engine's spot
+	// trades, and the fees charged equal theirs (contract fees are
+	// TRADE_FEE journals too, keyed futures:..., and belong to
+	// derivatives-service's trades, not these).
 	CheckTradeSettleMatches = "TRADE_SETTLE_MATCHES_TRADES"
 	CheckTradeFeeMatches    = "TRADE_FEE_MATCHES_TRADES"
 	// Per funding settlement (contract and funding time), payers paid at
@@ -76,7 +77,7 @@ var checks = []struct {
 			GROUP BY asset),
 		booked AS (
 			SELECT l.asset, sum(l.amount) AS amount FROM journal_lines l JOIN journals j ON j.id = l.journal_id
-			WHERE j.entry_type = 'TRADE_SETTLE' AND l.amount > 0 GROUP BY l.asset)
+			WHERE j.entry_type IN ('TRADE_SETTLE', 'HOUSE_TRADE_SETTLE') AND l.amount > 0 GROUP BY l.asset)
 		SELECT COALESCE(e.asset, b.asset), format('trades %s, TRADE_SETTLE %s', COALESCE(e.amount, 0), COALESCE(b.amount, 0))
 		FROM expected e FULL JOIN booked b ON b.asset = e.asset
 		WHERE COALESCE(e.amount, 0) <> COALESCE(b.amount, 0) LIMIT 100`},

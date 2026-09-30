@@ -7,9 +7,10 @@
 # bid; a limit buy above the ask pays the ask; a user cancels. Fills carry
 # role and fee; the ledger settles every trade (TRADE_SETTLE, TRADE_FEE,
 # the saved difference unfrozen) and unused funds come back when an order
-# finishes, so the final balances check every step. ETH-BTC has no market
-# maker (BTC-USDT has one since task 7); the prices assume no other resting
-# order between 0.035 and 0.042 (the e2e scripts cancel theirs on exit).
+# finishes, so the final balances check every step. ETH-BTC follows no
+# reference market, so users meet each other there (HOUSE offers the USDT
+# pairs, ADR-0015); the prices assume no other resting order between 0.035
+# and 0.042 (the e2e scripts cancel theirs on exit).
 # Needs ETH-BTC in TRADING.
 #
 #   scripts/e2e/matching.sh

@@ -185,6 +185,7 @@ message FundSystemAccountResponse {
 }
 
 message GetSystemBalancesRequest {
+  // The asset; empty for every asset.
   string asset = 1;
 }
 

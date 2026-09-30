@@ -68,6 +68,9 @@ func (s *Service) Monitor(ctx context.Context) error {
 		}
 		marks[c.Symbol] = m.Price
 		for _, p := range open {
+			if s.HouseUser != "" && p.UserID == s.HouseUser {
+				continue // HOUSE is the platform's own book: never liquidated (ADR-0015)
+			}
 			if p.MarginMode == domain.Cross {
 				cross[p.UserID] = append(cross[p.UserID], p)
 				continue

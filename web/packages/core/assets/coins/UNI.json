@@ -1,0 +1,18 @@
+{
+  "symbol": "UNI",
+  "name": {
+    "zh-CN": "Uniswap",
+    "en": "Uniswap"
+  },
+  "intro": {
+    "zh-CN": "Uniswap 是以太坊上最早的自动做市商去中心化交易所之一，UNI 是其治理代币。",
+    "en": "Uniswap is one of the first automated-market-maker exchanges on Ethereum; UNI is its governance token."
+  },
+  "links": {
+    "website": "https://uniswap.org",
+    "explorer": "https://etherscan.io/token/0x1f9840a85d5af5bf1d1762f925bdaddc4201f984",
+    "whitepaper": "https://uniswap.org/whitepaper-v3.pdf"
+  },
+  "color": "fuchsia",
+  "asOf": "2026-10-01"
+}

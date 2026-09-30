@@ -1,0 +1,17 @@
+{
+  "symbol": "ADA",
+  "name": {
+    "zh-CN": "卡尔达诺",
+    "en": "Cardano"
+  },
+  "intro": {
+    "zh-CN": "Cardano 是 2017 年上线的权益证明公链，采用 Ouroboros 共识，原生代币为 ADA。",
+    "en": "Cardano, launched in 2017, is a proof-of-stake blockchain using the Ouroboros protocol; ADA is its native token."
+  },
+  "links": {
+    "website": "https://cardano.org",
+    "explorer": "https://cardanoscan.io"
+  },
+  "color": "blue",
+  "asOf": "2026-10-01"
+}

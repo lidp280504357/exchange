@@ -59,7 +59,8 @@ func (c *Client) Pair(ctx context.Context, symbol string) (domain.Pair, error) {
 	pair := domain.Pair{
 		Symbol: p.GetSymbol(), Base: p.GetBaseAsset(), Quote: p.GetQuoteAsset(), Status: p.GetStatus(),
 		BaseDecimals: base.GetAsset().GetDecimals(), QuoteDecimals: quote.GetAsset().GetDecimals(),
-		Tradable: tradable(base.GetAsset()) && tradable(quote.GetAsset()),
+		Tradable:  tradable(base.GetAsset()) && tradable(quote.GetAsset()),
+		Reference: p.GetReferenceSymbol(),
 	}
 	for _, f := range []struct {
 		dst *decimal.Decimal

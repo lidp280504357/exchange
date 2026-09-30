@@ -1,0 +1,18 @@
+{
+  "symbol": "LINK",
+  "name": {
+    "zh-CN": "Chainlink",
+    "en": "Chainlink"
+  },
+  "intro": {
+    "zh-CN": "Chainlink 是去中心化预言机网络，为智能合约提供价格等链外数据，LINK 用于支付节点服务。",
+    "en": "Chainlink is a decentralized oracle network that brings off-chain data such as prices to smart contracts; LINK pays its node operators."
+  },
+  "links": {
+    "website": "https://chain.link",
+    "explorer": "https://etherscan.io/token/0x514910771af9ca656af840dff83e8264ecf986ca",
+    "whitepaper": "https://chain.link/whitepaper"
+  },
+  "color": "blue",
+  "asOf": "2026-10-01"
+}

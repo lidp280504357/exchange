@@ -33,7 +33,10 @@ type Handler struct {
 	Marks *application.Marks
 	// RefKlines serves the charts in reference mode; nil without a feed.
 	RefKlines *application.ReferenceCandles
-	Now       func() time.Time
+	// Books serves the reference market's book and trades of the symbols
+	// that show them (ADR-0010); nil without a feed.
+	Books *application.Books
+	Now   func() time.Time
 }
 
 // Routes mounts the endpoints on r.
@@ -217,10 +220,19 @@ func levels(in []*marketv1.PriceLevel) [][2]string {
 }
 
 func (h *Handler) depth(w http.ResponseWriter, r *http.Request) {
-	d, err := h.Svc.Depth(r.Context(), symbol(r), limit(r))
+	d, err := h.Svc.Depth(r.Context(), symbol(r), limit(r)) // checks the symbol is listed
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
+	}
+	if h.Books != nil {
+		n := limit(r)
+		if n <= 0 || n > application.MaxDepth {
+			n = 100
+		}
+		if ref, ok := h.Books.Depth(d.GetSymbol(), n); ok {
+			d = ref
+		}
 	}
 	var updated *string
 	if d.GetTakenAt() != nil {
@@ -254,10 +266,19 @@ func toTradeJSON(t domain.Trade) tradeJSON {
 
 func (h *Handler) trades(w http.ResponseWriter, r *http.Request) {
 	s := symbol(r)
-	list, err := h.Svc.Trades(r.Context(), s, limit(r))
+	list, err := h.Svc.Trades(r.Context(), s, limit(r)) // checks the symbol is listed
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
+	}
+	if h.Books != nil {
+		n := limit(r)
+		if n <= 0 || n > application.RecentTrades {
+			n = 50
+		}
+		if ref, ok := h.Books.Trades(s, n); ok {
+			list = ref
+		}
 	}
 	out := make([]tradeJSON, 0, len(list))
 	for _, t := range list {

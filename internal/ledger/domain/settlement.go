@@ -16,6 +16,12 @@ const (
 	TradeFailed  = "FAILED"
 )
 
+// Sides HOUSE takes in a trade against its reference liquidity (ADR-0015).
+const (
+	HouseBuy  = "BUY"
+	HouseSell = "SELL"
+)
+
 // Trade is an engine trade to settle (trade.events: TradeExecuted), and the
 // ledger's record of it.
 type Trade struct {
@@ -38,6 +44,10 @@ type Trade struct {
 	SellerFee     decimal.Decimal // quote
 	// BuyerLimit is the buy order's limit price, zero for a market buy.
 	BuyerLimit decimal.Decimal
+	// HouseSide is the side HOUSE took (HouseBuy, HouseSell), "" for a
+	// trade between users. HOUSE's side settles on its MARKET_MAKER
+	// system accounts, without an order, a freeze or a fee (ADR-0013).
+	HouseSide  string
 	EventID    string
 	ExecutedAt time.Time
 
@@ -73,6 +83,12 @@ func (t Trade) Validate() error {
 		return fail("the seller's fee %s is not below the quote", t.SellerFee)
 	case !t.BuyerLimit.IsZero() && t.BuyerLimit.LessThan(t.Price):
 		return fail("the buyer's limit %s is below the price %s", t.BuyerLimit, t.Price)
+	case t.HouseSide != "" && t.HouseSide != HouseBuy && t.HouseSide != HouseSell:
+		return fail("HOUSE's side %q is neither BUY nor SELL", t.HouseSide)
+	case t.HouseSide == HouseBuy && (!t.BuyerFee.IsZero() || !t.BuyerLimit.IsZero()):
+		return fail("HOUSE buys without a fee or a limit")
+	case t.HouseSide == HouseSell && !t.SellerFee.IsZero():
+		return fail("HOUSE sells without a fee")
 	}
 	return nil
 }
@@ -87,7 +103,10 @@ func releaseKey(id string) string { return "trade-release:" + id }
 //   - TRADE_SETTLE swaps the traded amounts: the buyer's frozen quote to
 //     the seller's available quote, the seller's frozen base to the buyer's
 //     available base. It carries nothing else, so its sums equal the
-//     engine's traded amounts (invariant 5).
+//     engine's traded amounts (invariant 5). Against HOUSE it is
+//     HOUSE_TRADE_SETTLE: the user's side the same, HOUSE's side on the
+//     available balances of its MARKET_MAKER accounts, which may go below
+//     zero (ADR-0013).
 //   - TRADE_FEE moves each side's fee from what it received to FEE_REVENUE:
 //     the buyer pays in base, the seller in quote (§11.3). No journal when
 //     both fees are zero.
@@ -103,10 +122,19 @@ func SettlementPostings(t Trade) ([]Posting, error) {
 	memo := fmt.Sprintf("trade %s %s", t.Symbol, t.ID)
 	buyerBase, buyerQuote := UserAccount(t.BuyerUserID, AccountSpot, t.BaseAsset), UserAccount(t.BuyerUserID, AccountSpot, t.QuoteAsset)
 	sellerBase, sellerQuote := UserAccount(t.SellerUserID, AccountSpot, t.BaseAsset), UserAccount(t.SellerUserID, AccountSpot, t.QuoteAsset)
-	out := []Posting{{IdemKey: settleKey(t.ID), EntryType: EntryTradeSettle, SourceEventID: t.EventID, Memo: memo, Lines: []Line{
-		{Account: buyerQuote, Amount: t.Quote.Neg(), Kind: Frozen},
+	entry, buyerPays, sellerPays := EntryTradeSettle, Frozen, Frozen
+	switch t.HouseSide {
+	case HouseBuy:
+		entry, buyerPays = EntryHouseTradeSettle, Available
+		buyerBase, buyerQuote = SystemAccount(AccountMarketMaker, t.BaseAsset), SystemAccount(AccountMarketMaker, t.QuoteAsset)
+	case HouseSell:
+		entry, sellerPays = EntryHouseTradeSettle, Available
+		sellerBase, sellerQuote = SystemAccount(AccountMarketMaker, t.BaseAsset), SystemAccount(AccountMarketMaker, t.QuoteAsset)
+	}
+	out := []Posting{{IdemKey: settleKey(t.ID), EntryType: entry, SourceEventID: t.EventID, Memo: memo, Lines: []Line{
+		{Account: buyerQuote, Amount: t.Quote.Neg(), Kind: buyerPays},
 		{Account: sellerQuote, Amount: t.Quote, Kind: Available},
-		{Account: sellerBase, Amount: t.Quantity.Neg(), Kind: Frozen},
+		{Account: sellerBase, Amount: t.Quantity.Neg(), Kind: sellerPays},
 		{Account: buyerBase, Amount: t.Quantity, Kind: Available},
 	}}}
 	fee := Posting{IdemKey: feeKey(t.ID), EntryType: EntryTradeFee, SourceEventID: t.EventID, Memo: memo}

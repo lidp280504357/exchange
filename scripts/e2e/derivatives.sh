@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Perpetual contract trading end to end (implementation plan §7.3 task 5)
-# on ETH-USDT-PERP, which has no market maker: two new users move USDT to
+# on ETH-USDT-PERP, where HOUSE offers nothing: two new users move USDT to
 # FUTURES; the buyer (cross, 10x) bids, the seller (isolated, 20x) sells
 # into it; both see their positions, reservations and fees; the buyer
 # closes with a reduce-only order that the seller's buy takes, 0.10 higher:

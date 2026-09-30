@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
 )
 
@@ -73,10 +75,10 @@ type depthData struct {
 }
 
 type depthBook struct {
-	engineSeq int64 // sequence of the engine snapshot applied last
-	seq       int64 // this gateway's update counter
-	bids      [][2]string
-	asks      [][2]string
+	srcSeq int64 // sequence of the public book message applied last
+	seq    int64 // this gateway's update counter
+	bids   [][2]string
+	asks   [][2]string
 }
 
 func levelsOf(in []*marketv1.PriceLevel) [][2]string {
@@ -110,9 +112,9 @@ func diffLevels(prev, next [][2]string) [][2]string {
 	return out
 }
 
-// OnDepth applies an engine depth snapshot and sends the changed levels to
-// the symbol's depth subscribers. A snapshot older than the last applied
-// one (a restarted engine replaying) is ignored.
+// OnDepth applies a public book snapshot and sends the changed levels to
+// the symbol's depth subscribers. A snapshot older than the last message
+// applied is ignored (market-data-service's sequences only grow).
 func (h *Hub) OnDepth(d *marketv1.DepthSnapshot) {
 	ch := "depth:" + d.GetSymbol()
 	h.mu.Lock()
@@ -122,17 +124,80 @@ func (h *Hub) OnDepth(d *marketv1.DepthSnapshot) {
 		book = &depthBook{}
 		h.depth[d.GetSymbol()] = book
 	}
-	if d.GetSequence() < book.engineSeq {
+	if d.GetSequence() < book.srcSeq {
 		return
 	}
 	bids, asks := levelsOf(d.GetBids()), levelsOf(d.GetAsks())
 	changes := depthData{Bids: diffLevels(book.bids, bids), Asks: diffLevels(book.asks, asks)}
-	book.engineSeq, book.bids, book.asks = d.GetSequence(), bids, asks
+	book.srcSeq, book.bids, book.asks = d.GetSequence(), bids, asks
+	h.sendLocked(ch, book, changes)
+}
+
+// OnDepthUpdate applies a public book update that follows the message
+// applied last (its prev_sequence), and sends the changed levels on. An
+// update that does not follow is dropped: the book waits for the next
+// snapshot (every 10 s at most).
+func (h *Hub) OnDepthUpdate(u *marketv1.DepthUpdate) {
+	ch := "depth:" + u.GetSymbol()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	book := h.depth[u.GetSymbol()]
+	if book == nil || u.GetPrevSequence() != book.srcSeq {
+		return
+	}
+	changes := depthData{Bids: levelsOf(u.GetBids()), Asks: levelsOf(u.GetAsks())}
+	book.srcSeq = u.GetSequence()
+	book.bids = applyLevels(book.bids, changes.Bids, true)
+	book.asks = applyLevels(book.asks, changes.Asks, false)
+	h.sendLocked(ch, book, changes)
+}
+
+// sendLocked sends changed levels to the subscribers under the gateway's
+// own sequence.
+func (h *Hub) sendLocked(ch string, book *depthBook, changes depthData) {
 	if len(changes.Bids)+len(changes.Asks) == 0 {
 		return
 	}
 	book.seq++
 	h.broadcastLocked(ch, wsMarket{Channel: ch, Type: "update", Seq: book.seq, PrevSeq: book.seq - 1, Data: changes})
+}
+
+// applyLevels applies changed levels (quantity "0" removes one) to a side
+// kept best first: bids by falling price, asks by rising price. Each
+// change finds its place by binary search.
+func applyLevels(side, changes [][2]string, bids bool) [][2]string {
+	for _, l := range changes {
+		p, err := decimal.NewFromString(l[0])
+		if err != nil {
+			continue
+		}
+		i, found := slices.BinarySearchFunc(side, p, func(e [2]string, target decimal.Decimal) int {
+			ep, err := decimal.NewFromString(e[0])
+			if err != nil {
+				return 0
+			}
+			c := ep.Cmp(target)
+			if bids {
+				return -c
+			}
+			return c
+		})
+		switch {
+		case found && isZero(l[1]):
+			side = slices.Delete(side, i, i+1)
+		case found:
+			side[i][1] = l[1]
+		case !isZero(l[1]):
+			side = slices.Insert(side, i, l)
+		}
+	}
+	return side
+}
+
+// isZero reports whether a decimal string is zero ("0", "0.000").
+func isZero(q string) bool {
+	d, err := decimal.NewFromString(q)
+	return err == nil && d.IsZero()
 }
 
 // depthSnapshotLocked is the current depth of a symbol for ch; an empty

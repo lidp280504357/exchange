@@ -1,0 +1,17 @@
+{
+  "symbol": "AVAX",
+  "name": {
+    "zh-CN": "雪崩",
+    "en": "Avalanche"
+  },
+  "intro": {
+    "zh-CN": "Avalanche 是 2020 年上线的智能合约平台，以快速确认的共识协议和可定制的子网著称。",
+    "en": "Avalanche, launched in 2020, is a smart-contract platform known for fast finality and customisable subnets."
+  },
+  "links": {
+    "website": "https://www.avax.network",
+    "explorer": "https://snowtrace.io"
+  },
+  "color": "rose",
+  "asOf": "2026-10-01"
+}

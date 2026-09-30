@@ -19,9 +19,12 @@ import (
 
 // WSTopics are the topics the hub follows from their end (requirements
 // §7.3: every gateway instance reads every partition).
+// The public books and trades are market-data-service's (market.depth,
+// derivatives.market.depth, market.trades: the reference market's or the
+// platform's, ADR-0015); trade.events only feeds the users' "fills".
 var WSTopics = []string{
-	"ledger.events", "notification.events", "order.events", "trade.events", "market.depth", "market.candle.events",
-	"wallet.deposit.events", "wallet.withdrawal.events", "derivatives.trade.events", "derivatives.market.depth",
+	"ledger.events", "notification.events", "order.events", "trade.events", "market.depth", "market.trades", "market.candle.events",
+	"wallet.deposit.events", "wallet.withdrawal.events", "derivatives.market.depth",
 	"derivatives.order.events", "derivatives.position.events", "derivatives.liquidation.events",
 }
 
@@ -237,6 +240,8 @@ func WSEvents(h *Hub) func(context.Context, *eventv1.Envelope) error {
 			canceled  orderv1.OrderCanceled
 			trade     tradev1.TradeExecuted
 			depth     marketv1.DepthSnapshot
+			depthUp   marketv1.DepthUpdate
+			printed   marketv1.TradesPrinted
 			candleUp  marketv1.CandleUpdated
 			candleEnd marketv1.CandleClosed
 			ticker    marketv1.TickerUpdated
@@ -332,11 +337,21 @@ func WSEvents(h *Hub) func(context.Context, *eventv1.Envelope) error {
 				return err
 			}
 			onTrade(h, &trade, env.GetOccurredAt().AsTime())
+		case p.MessageIs(&printed):
+			if err := p.UnmarshalTo(&printed); err != nil {
+				return err
+			}
+			onPrinted(h, &printed)
 		case p.MessageIs(&depth):
 			if err := p.UnmarshalTo(&depth); err != nil {
 				return err
 			}
 			h.OnDepth(&depth)
+		case p.MessageIs(&depthUp):
+			if err := p.UnmarshalTo(&depthUp); err != nil {
+				return err
+			}
+			h.OnDepthUpdate(&depthUp)
 		case p.MessageIs(&candleUp):
 			if err := p.UnmarshalTo(&candleUp); err != nil {
 				return err
@@ -547,9 +562,10 @@ func withdrawalOf(p interface {
 	return nil, false
 }
 
-// onTrade pushes a trade to both sides' "fills" and to "trades:{symbol}".
-// A contract's fills come from derivatives-service, with the fees and
-// profit the engine does not know: only the public trade goes out here.
+// onTrade pushes a spot trade to both sides' "fills" (HOUSE's side has no
+// subscriber). A contract's fills come from derivatives-service, with the
+// fees and profit the engine does not know; public trades come from
+// market.trades (onPrinted).
 func onTrade(h *Hub, t *tradev1.TradeExecuted, at time.Time) {
 	executed := at.UTC().Format(time.RFC3339Nano)
 	if !contractRE.MatchString(t.GetSymbol()) {
@@ -569,11 +585,19 @@ func onTrade(h *Hub, t *tradev1.TradeExecuted, at time.Time) {
 		h.Publish(t.GetBuyerUserId(), "fills", buy)
 		h.Publish(t.GetSellerUserId(), "fills", sell)
 	}
-	ch := "trades:" + t.GetSymbol()
-	h.OnMarket(wsMarket{Channel: ch, Data: tradeData{
-		TradeID: t.GetTradeId(), TradeNumber: t.GetTradeNumber(), Price: t.GetPrice(), Quantity: t.GetQuantity(),
-		QuoteQuantity: t.GetQuoteQuantity(), TakerSide: sideName(t.GetTakerSide()), ExecutedAt: executed,
-	}}, false)
+}
+
+// onPrinted pushes a batch of public trades to "trades:{symbol}", one
+// message a trade, oldest first.
+func onPrinted(h *Hub, p *marketv1.TradesPrinted) {
+	ch := "trades:" + p.GetSymbol()
+	for _, t := range p.GetTrades() {
+		h.OnMarket(wsMarket{Channel: ch, Data: tradeData{
+			TradeID: t.GetTradeId(), TradeNumber: t.GetTradeNumber(), Price: t.GetPrice(), Quantity: t.GetQuantity(),
+			QuoteQuantity: t.GetQuoteQuantity(), TakerSide: sideName(t.GetTakerSide()),
+			ExecutedAt: t.GetExecutedAt().AsTime().UTC().Format(time.RFC3339Nano),
+		}}, false)
+	}
 }
 
 func onCandle(h *Hub, c *marketv1.Candle, kind string) {

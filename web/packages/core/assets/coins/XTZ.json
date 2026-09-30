@@ -1,0 +1,17 @@
+{
+  "symbol": "XTZ",
+  "name": {
+    "zh-CN": "Tezos",
+    "en": "Tezos"
+  },
+  "intro": {
+    "zh-CN": "Tezos 是 2018 年上线的权益证明公链，协议可以通过链上治理自我升级。",
+    "en": "Tezos, launched in 2018, is a proof-of-stake blockchain that upgrades itself through on-chain governance."
+  },
+  "links": {
+    "website": "https://tezos.com",
+    "explorer": "https://tzkt.io"
+  },
+  "color": "blue",
+  "asOf": "2026-10-01"
+}

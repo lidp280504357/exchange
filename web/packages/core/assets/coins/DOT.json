@@ -1,0 +1,17 @@
+{
+  "symbol": "DOT",
+  "name": {
+    "zh-CN": "波卡",
+    "en": "Polkadot"
+  },
+  "intro": {
+    "zh-CN": "Polkadot 是 2020 年上线的多链网络，平行链共享中继链的安全性，并可以互相通信。",
+    "en": "Polkadot, launched in 2020, is a multi-chain network whose parachains share the relay chain's security and talk to each other."
+  },
+  "links": {
+    "website": "https://polkadot.com",
+    "explorer": "https://polkadot.subscan.io"
+  },
+  "color": "fuchsia",
+  "asOf": "2026-10-01"
+}

@@ -75,6 +75,10 @@ type Trade struct {
 	SellerFee    decimal.Decimal // quote
 	// BuyerLimit is the buy order's limit price, zero for a market buy.
 	BuyerLimit decimal.Decimal
+	// HouseSide is the side HOUSE took when the trade was against its
+	// reference liquidity, "" between users. HOUSE's order ID is empty and
+	// its fee zero (ADR-0015).
+	HouseSide Side
 }
 
 // tradeID derives a trade's ID from its symbol and sequence, so a replay

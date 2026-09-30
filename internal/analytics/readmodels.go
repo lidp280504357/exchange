@@ -41,7 +41,7 @@ var ReadModelTopics = []string{
 const (
 	insertTrades = `INSERT INTO trades (trade_id, symbol, base_asset, quote_asset, trade_number, sequence, price, quantity,
 		quote_quantity, taker_side, buyer_order_id, buyer_user_id, seller_order_id, seller_user_id, buyer_is_maker, buyer_fee,
-		seller_fee, executed_at)`
+		seller_fee, house_side, executed_at)`
 	insertOrders = `INSERT INTO orders (order_id, client_order_id, user_id, symbol, side, type, time_in_force, price, quantity,
 		quote_amount, frozen_asset, frozen_amount, accepted_at)`
 	insertOrderUpdates = `INSERT INTO order_updates (order_id, user_id, symbol, sequence, status, filled_quantity, filled_quote,
@@ -107,6 +107,15 @@ func id(s string) (uuid.UUID, error) {
 		return uuid.Nil, fmt.Errorf("%w: id %q", errMalformed, s)
 	}
 	return u, nil
+}
+
+// orderID parses a trade side's order ID: HOUSE's side has none (ADR-0015)
+// and gets the nil UUID.
+func orderID(s string) (uuid.UUID, error) {
+	if s == "" {
+		return uuid.Nil, nil
+	}
+	return id(s)
 }
 
 // amount parses a decimal string; empty is zero.
@@ -179,16 +188,24 @@ func (m *readModels) add(d kafka.Delivery) error {
 	return nil
 }
 
+// houseSide is the side HOUSE took in a trade, "" between users.
+func houseSide(t *tradev1.TradeExecuted) string {
+	if t.GetHouseSide() == orderv1.Side_SIDE_UNSPECIFIED {
+		return ""
+	}
+	return enum(t.GetHouseSide().String(), "SIDE_")
+}
+
 func (m *readModels) addTrade(t *tradev1.TradeExecuted, at time.Time) error {
 	var errs []error
 	check := func(err error) { errs = append(errs, err) }
 	tradeID, err := id(t.GetTradeId())
 	check(err)
-	buyerOrder, err := id(t.GetBuyerOrderId())
+	buyerOrder, err := orderID(t.GetBuyerOrderId())
 	check(err)
 	buyer, err := id(t.GetBuyerUserId())
 	check(err)
-	sellerOrder, err := id(t.GetSellerOrderId())
+	sellerOrder, err := orderID(t.GetSellerOrderId())
 	check(err)
 	seller, err := id(t.GetSellerUserId())
 	check(err)
@@ -207,7 +224,8 @@ func (m *readModels) addTrade(t *tradev1.TradeExecuted, at time.Time) error {
 	}
 	m.trades = append(m.trades, []any{
 		tradeID, t.GetSymbol(), t.GetBaseAsset(), t.GetQuoteAsset(), t.GetTradeNumber(), t.GetSequence(), price, qty, quote,
-		enum(t.GetTakerSide().String(), "SIDE_"), buyerOrder, buyer, sellerOrder, seller, t.GetBuyerIsMaker(), buyerFee, sellerFee, at,
+		enum(t.GetTakerSide().String(), "SIDE_"), buyerOrder, buyer, sellerOrder, seller, t.GetBuyerIsMaker(), buyerFee, sellerFee,
+		houseSide(t), at,
 	})
 	if m.touched == nil {
 		m.touched = map[string]span{}

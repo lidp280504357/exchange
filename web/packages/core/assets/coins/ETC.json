@@ -1,0 +1,17 @@
+{
+  "symbol": "ETC",
+  "name": {
+    "zh-CN": "以太经典",
+    "en": "Ethereum Classic"
+  },
+  "intro": {
+    "zh-CN": "以太经典是 2016 年 The DAO 事件后坚持原链的以太坊分支，至今仍采用工作量证明。",
+    "en": "Ethereum Classic is the branch of Ethereum that kept the original chain after The DAO fork in 2016; it still uses proof of work."
+  },
+  "links": {
+    "website": "https://ethereumclassic.org",
+    "explorer": "https://etc.blockscout.com"
+  },
+  "color": "emerald",
+  "asOf": "2026-10-01"
+}

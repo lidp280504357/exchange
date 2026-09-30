@@ -9,6 +9,7 @@ package orderv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -24,8 +25,15 @@ const (
 // PlaceOrder hands an accepted order, whose funds are frozen, to the
 // engine.
 type PlaceOrder struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Order         *Order                 `protobuf:"bytes,1,opt,name=order,proto3" json:"order,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Order *Order                 `protobuf:"bytes,1,opt,name=order,proto3" json:"order,omitempty"`
+	// house_only keeps the order away from other users' orders: it trades
+	// only with HOUSE's reference liquidity, and what rests waits for the
+	// reference price to reach it (ADR-0015). The trading service sets it
+	// for a pair that follows a reference market while
+	// market.house_liquidity is on and market.internal_matching is off.
+	// Commands from before it match users as always.
+	HouseOnly     bool `protobuf:"varint,2,opt,name=house_only,json=houseOnly,proto3" json:"house_only,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -65,6 +73,13 @@ func (x *PlaceOrder) GetOrder() *Order {
 		return x.Order
 	}
 	return nil
+}
+
+func (x *PlaceOrder) GetHouseOnly() bool {
+	if x != nil {
+		return x.HouseOnly
+	}
+	return false
 }
 
 // CancelOrder asks the engine to cancel an order that is still open; the
@@ -130,18 +145,189 @@ func (x *CancelOrder) GetSymbol() string {
 	return ""
 }
 
+// ReferenceBookUpdate replaces a symbol's reference book: HOUSE's virtual
+// liquidity, the top of the reference market's book in the platform's
+// units with every level capped (ADR-0015). The house liquidity publisher
+// (market-maker) sends it on order.references; the engine writes it to
+// its WAL like an order. An update without levels takes the liquidity
+// away. The engine uses a book for an order only while the order's
+// envelope is at most 5 seconds younger than the update's.
+type ReferenceBookUpdate struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Symbol string                 `protobuf:"bytes,1,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	// Best first; quantities in base units.
+	Bids []*ReferenceLevel `protobuf:"bytes,2,rep,name=bids,proto3" json:"bids,omitempty"`
+	Asks []*ReferenceLevel `protobuf:"bytes,3,rep,name=asks,proto3" json:"asks,omitempty"`
+	// How much HOUSE may still buy (against the bids) and sell (against the
+	// asks) until the next update, in base units; empty is none.
+	BuyRoom  string `protobuf:"bytes,4,opt,name=buy_room,json=buyRoom,proto3" json:"buy_room,omitempty"`
+	SellRoom string `protobuf:"bytes,5,opt,name=sell_room,json=sellRoom,proto3" json:"sell_room,omitempty"`
+	// HOUSE's user ID on the trades against the book.
+	HouseUserId string `protobuf:"bytes,6,opt,name=house_user_id,json=houseUserId,proto3" json:"house_user_id,omitempty"`
+	// When the reference market's book was last updated.
+	SourceTime    *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=source_time,json=sourceTime,proto3" json:"source_time,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReferenceBookUpdate) Reset() {
+	*x = ReferenceBookUpdate{}
+	mi := &file_exchange_order_v1_commands_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReferenceBookUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReferenceBookUpdate) ProtoMessage() {}
+
+func (x *ReferenceBookUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_order_v1_commands_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReferenceBookUpdate.ProtoReflect.Descriptor instead.
+func (*ReferenceBookUpdate) Descriptor() ([]byte, []int) {
+	return file_exchange_order_v1_commands_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ReferenceBookUpdate) GetSymbol() string {
+	if x != nil {
+		return x.Symbol
+	}
+	return ""
+}
+
+func (x *ReferenceBookUpdate) GetBids() []*ReferenceLevel {
+	if x != nil {
+		return x.Bids
+	}
+	return nil
+}
+
+func (x *ReferenceBookUpdate) GetAsks() []*ReferenceLevel {
+	if x != nil {
+		return x.Asks
+	}
+	return nil
+}
+
+func (x *ReferenceBookUpdate) GetBuyRoom() string {
+	if x != nil {
+		return x.BuyRoom
+	}
+	return ""
+}
+
+func (x *ReferenceBookUpdate) GetSellRoom() string {
+	if x != nil {
+		return x.SellRoom
+	}
+	return ""
+}
+
+func (x *ReferenceBookUpdate) GetHouseUserId() string {
+	if x != nil {
+		return x.HouseUserId
+	}
+	return ""
+}
+
+func (x *ReferenceBookUpdate) GetSourceTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.SourceTime
+	}
+	return nil
+}
+
+// ReferenceLevel is the quantity HOUSE offers at one price.
+type ReferenceLevel struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Price         string                 `protobuf:"bytes,1,opt,name=price,proto3" json:"price,omitempty"`
+	Quantity      string                 `protobuf:"bytes,2,opt,name=quantity,proto3" json:"quantity,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReferenceLevel) Reset() {
+	*x = ReferenceLevel{}
+	mi := &file_exchange_order_v1_commands_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReferenceLevel) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReferenceLevel) ProtoMessage() {}
+
+func (x *ReferenceLevel) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_order_v1_commands_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReferenceLevel.ProtoReflect.Descriptor instead.
+func (*ReferenceLevel) Descriptor() ([]byte, []int) {
+	return file_exchange_order_v1_commands_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ReferenceLevel) GetPrice() string {
+	if x != nil {
+		return x.Price
+	}
+	return ""
+}
+
+func (x *ReferenceLevel) GetQuantity() string {
+	if x != nil {
+		return x.Quantity
+	}
+	return ""
+}
+
 var File_exchange_order_v1_commands_proto protoreflect.FileDescriptor
 
 const file_exchange_order_v1_commands_proto_rawDesc = "" +
 	"\n" +
-	" exchange/order/v1/commands.proto\x12\x11exchange.order.v1\x1a\x1dexchange/order/v1/order.proto\"<\n" +
+	" exchange/order/v1/commands.proto\x12\x11exchange.order.v1\x1a\x1dexchange/order/v1/order.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"[\n" +
 	"\n" +
 	"PlaceOrder\x12.\n" +
-	"\x05order\x18\x01 \x01(\v2\x18.exchange.order.v1.OrderR\x05order\"Y\n" +
+	"\x05order\x18\x01 \x01(\v2\x18.exchange.order.v1.OrderR\x05order\x12\x1d\n" +
+	"\n" +
+	"house_only\x18\x02 \x01(\bR\thouseOnly\"Y\n" +
 	"\vCancelOrder\x12\x19\n" +
 	"\border_id\x18\x01 \x01(\tR\aorderId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
-	"\x06symbol\x18\x03 \x01(\tR\x06symbolB\xd4\x01\n" +
+	"\x06symbol\x18\x03 \x01(\tR\x06symbol\"\xb4\x02\n" +
+	"\x13ReferenceBookUpdate\x12\x16\n" +
+	"\x06symbol\x18\x01 \x01(\tR\x06symbol\x125\n" +
+	"\x04bids\x18\x02 \x03(\v2!.exchange.order.v1.ReferenceLevelR\x04bids\x125\n" +
+	"\x04asks\x18\x03 \x03(\v2!.exchange.order.v1.ReferenceLevelR\x04asks\x12\x19\n" +
+	"\bbuy_room\x18\x04 \x01(\tR\abuyRoom\x12\x1b\n" +
+	"\tsell_room\x18\x05 \x01(\tR\bsellRoom\x12\"\n" +
+	"\rhouse_user_id\x18\x06 \x01(\tR\vhouseUserId\x12;\n" +
+	"\vsource_time\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"sourceTime\"B\n" +
+	"\x0eReferenceLevel\x12\x14\n" +
+	"\x05price\x18\x01 \x01(\tR\x05price\x12\x1a\n" +
+	"\bquantity\x18\x02 \x01(\tR\bquantityB\xd4\x01\n" +
 	"\x15com.exchange.order.v1B\rCommandsProtoP\x01ZFgithub.com/lidp280504357/exchange/api/gen/go/exchange/order/v1;orderv1\xa2\x02\x03EOX\xaa\x02\x11Exchange.Order.V1\xca\x02\x11Exchange\\Order\\V1\xe2\x02\x1dExchange\\Order\\V1\\GPBMetadata\xea\x02\x13Exchange::Order::V1b\x06proto3"
 
 var (
@@ -156,19 +342,25 @@ func file_exchange_order_v1_commands_proto_rawDescGZIP() []byte {
 	return file_exchange_order_v1_commands_proto_rawDescData
 }
 
-var file_exchange_order_v1_commands_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_exchange_order_v1_commands_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_exchange_order_v1_commands_proto_goTypes = []any{
-	(*PlaceOrder)(nil),  // 0: exchange.order.v1.PlaceOrder
-	(*CancelOrder)(nil), // 1: exchange.order.v1.CancelOrder
-	(*Order)(nil),       // 2: exchange.order.v1.Order
+	(*PlaceOrder)(nil),            // 0: exchange.order.v1.PlaceOrder
+	(*CancelOrder)(nil),           // 1: exchange.order.v1.CancelOrder
+	(*ReferenceBookUpdate)(nil),   // 2: exchange.order.v1.ReferenceBookUpdate
+	(*ReferenceLevel)(nil),        // 3: exchange.order.v1.ReferenceLevel
+	(*Order)(nil),                 // 4: exchange.order.v1.Order
+	(*timestamppb.Timestamp)(nil), // 5: google.protobuf.Timestamp
 }
 var file_exchange_order_v1_commands_proto_depIdxs = []int32{
-	2, // 0: exchange.order.v1.PlaceOrder.order:type_name -> exchange.order.v1.Order
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	4, // 0: exchange.order.v1.PlaceOrder.order:type_name -> exchange.order.v1.Order
+	3, // 1: exchange.order.v1.ReferenceBookUpdate.bids:type_name -> exchange.order.v1.ReferenceLevel
+	3, // 2: exchange.order.v1.ReferenceBookUpdate.asks:type_name -> exchange.order.v1.ReferenceLevel
+	5, // 3: exchange.order.v1.ReferenceBookUpdate.source_time:type_name -> google.protobuf.Timestamp
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_exchange_order_v1_commands_proto_init() }
@@ -183,7 +375,7 @@ func file_exchange_order_v1_commands_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_order_v1_commands_proto_rawDesc), len(file_exchange_order_v1_commands_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

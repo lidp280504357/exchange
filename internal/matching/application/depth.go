@@ -16,8 +16,10 @@ import (
 )
 
 // Depth export (requirements §11.8): the aggregated top of each book goes
-// to market.depth straight from memory, not through the outbox; it is
-// derived state, and a lost snapshot is replaced by the next.
+// to the engine's depth topic (market.depth.internal) straight from
+// memory, not through the outbox; it is derived state, and a lost snapshot
+// is replaced by the next. market-data-service turns it into the public
+// book (ADR-0015).
 const (
 	DepthLevels   = 200
 	DepthInterval = 100 * time.Millisecond
@@ -62,7 +64,7 @@ func NewDepthExporter(engine *Engine, pub kafka.Publisher, events *event.Factory
 	x := &DepthExporter{
 		engine: engine, pub: pub, events: events,
 		published: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "matching_depth_published_total", Help: "Depth snapshots published to market.depth.",
+			Name: "matching_depth_published_total", Help: "Depth snapshots published to the engine's depth topic.",
 		}),
 		failed: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "matching_depth_publish_failures_total", Help: "Depth exports that failed; the next one replaces them.",

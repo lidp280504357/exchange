@@ -1,0 +1,17 @@
+{
+  "symbol": "LTC",
+  "name": {
+    "zh-CN": "莱特币",
+    "en": "Litecoin"
+  },
+  "intro": {
+    "zh-CN": "莱特币诞生于 2011 年，源自比特币代码，出块更快，采用 Scrypt 工作量证明。",
+    "en": "Litecoin, created in 2011 from Bitcoin's code, has faster blocks and uses Scrypt proof of work."
+  },
+  "links": {
+    "website": "https://litecoin.org",
+    "explorer": "https://litecoinspace.org"
+  },
+  "color": "sky",
+  "asOf": "2026-10-01"
+}

@@ -1,9 +1,11 @@
-// Command market-data-service builds the platform market data from the
-// platform's own trades and the engines' depth (requirements §5.11,
-// §11.8): candles, tickers, recent trades and depth of pairs and
-// contracts over REST, and candle and ticker updates on
-// market.candle.events for the WebSocket gateway. For perpetual contracts
-// it computes the index and mark prices and the funding rates (§11.7).
+// Command market-data-service builds the market data (requirements §5.11,
+// §11.8; ADR-0010): candles, tickers, recent trades and depth of pairs and
+// contracts over REST, candle and ticker updates on market.candle.events,
+// and the public books and trades (market.depth, derivatives.market.depth,
+// market.trades) for the WebSocket gateway: the reference market's for
+// the symbols that show it, the platform's own (the engines' depth and
+// trade.events) for the others. For perpetual contracts it computes the
+// index and mark prices and the funding rates (§11.7).
 package main
 
 import (
@@ -44,6 +46,10 @@ type settings struct {
 	// market.reference_feed is on.
 	BinanceREST   string `koanf:"binance_rest_url"`
 	BinanceStream string `koanf:"binance_stream_url"`
+	// The contracts' books and trades come from Binance USDⓈ-M futures at
+	// BINANCE_FUTURES_REST_URL and BINANCE_FUTURES_STREAM_URL.
+	BinanceFuturesREST   string `koanf:"binance_futures_rest_url"`
+	BinanceFuturesStream string `koanf:"binance_futures_stream_url"`
 	// IndexMinSources is the fewest reference sources an index price
 	// needs (INDEX_MIN_SOURCES, §11.7: 2); test environments with Binance
 	// alone set 1.
@@ -87,6 +93,7 @@ func setup(ctx context.Context, a *app.App) error {
 	cfg := settings{
 		HTTPAddr: ":8090", Postgres: pg.DefaultConfig(), InstrumentAddr: "localhost:9184",
 		BinanceREST: "https://data-api.binance.vision", BinanceStream: "wss://data-stream.binance.vision",
+		BinanceFuturesREST: "https://fapi.binance.com", BinanceFuturesStream: "wss://fstream.binance.com",
 		IndexMinSources: 2,
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
@@ -106,17 +113,6 @@ func setup(ctx context.Context, a *app.App) error {
 	if err := svc.Load(ctx); err != nil {
 		return err
 	}
-	// Pairs and contracts alike: their symbols differ.
-	if err := bootstrap.BatchConsumerWith(ctx, a, cfg.Kafka, kafka.BatchOptions{
-		Group: consumer.Group, Topics: []string{event.TopicTrade, event.TopicDerivTrade}, Handler: consumer.Trades(svc),
-		MaxBatch: 500, MaxWait: 50 * time.Millisecond,
-	}); err != nil {
-		return err
-	}
-	// Only the latest depth matters: read the depth topics from their end.
-	if err := bootstrap.Tail(ctx, a, cfg.Kafka, []string{event.TopicMarketDepth, event.TopicDerivMarketDepth}, consumer.Depth(svc)); err != nil {
-		return err
-	}
 	prod, err := bootstrap.Producer(ctx, a, cfg.Kafka)
 	if err != nil {
 		return err
@@ -127,16 +123,36 @@ func setup(ctx context.Context, a *app.App) error {
 	if err != nil {
 		return err
 	}
-	pusher := application.NewPusher(svc, prod, events, a.Metrics())
-	a.Add("market push", app.Loop(pusher.Run))
 	flagClient, err := bootstrap.Flags(ctx, a, cfg.Postgres)
 	if err != nil {
 		return err
 	}
-	// Reference market data (ADR-0010): candles, tickers and prices of the
-	// pairs with a reference market, while market.reference_feed is on.
-	src := binance.New(cfg.BinanceREST, cfg.BinanceStream, &http.Client{Timeout: 15 * time.Second})
+	// Reference market data (ADR-0010): candles, tickers, prices, books and
+	// trades of the symbols with a reference market, while
+	// market.reference_feed is on.
+	src := binance.New(cfg.BinanceREST, cfg.BinanceStream, &http.Client{Timeout: 15 * time.Second}).
+		WithFutures(cfg.BinanceFuturesREST, cfg.BinanceFuturesStream)
 	refs := application.NewReferenceMap(listed, a.Logger())
+	books := application.NewBooks(src, refs, flagClient, prod, events, a.Logger(), a.Metrics())
+	a.Add("reference books", app.Loop(books.Run))
+	a.Add("public books", app.Loop(books.Push))
+	// Pairs and contracts alike: their symbols differ. The platform's
+	// trades are relayed as public trades where the reference market's are
+	// not shown.
+	if err := bootstrap.BatchConsumerWith(ctx, a, cfg.Kafka, kafka.BatchOptions{
+		Group: consumer.Group, Topics: []string{event.TopicTrade, event.TopicDerivTrade}, Handler: consumer.Trades(svc, books),
+		MaxBatch: 500, MaxWait: 50 * time.Millisecond,
+	}); err != nil {
+		return err
+	}
+	// Only the latest depth matters: read the engines' depth from the end,
+	// relayed as the public book where the reference market's is not shown.
+	if err := bootstrap.Tail(ctx, a, cfg.Kafka, []string{event.TopicMarketDepthInternal, event.TopicDerivMarketDepthInternal},
+		consumer.Depth(svc, books)); err != nil {
+		return err
+	}
+	pusher := application.NewPusher(svc, prod, events, a.Metrics())
+	a.Add("market push", app.Loop(pusher.Run))
 	feed := application.NewReferenceFeed(src, store, flagClient, listed, a.Logger(), a.Metrics())
 	a.Add("reference feed", app.Loop(feed.Run))
 	refKlines := application.NewReferenceCandles(src, flagClient, refs, a.Logger())
@@ -149,6 +165,7 @@ func setup(ctx context.Context, a *app.App) error {
 	sourceWeights, _ := weights(cfg.IndexSourceWeights) // validated
 	marks := application.NewMarks(svc, listed, feed, store, pusher, prod, events,
 		application.MarksConfig{MinSources: cfg.IndexMinSources, Weights: sourceWeights}, a.Logger(), a.Metrics())
+	marks.UseReferenceBooks(books.Levels) // HOUSE trades at the reference book's prices (ADR-0015)
 	a.Add("contract prices", app.Loop(marks.Run))
 	a.Add("purge", app.Loop(func(ctx context.Context) error {
 		ticker := time.NewTicker(time.Hour)
@@ -172,6 +189,6 @@ func setup(ctx context.Context, a *app.App) error {
 		}
 	}))
 	r := a.NewRouter()
-	(&httpapi.Handler{Svc: svc, Tickers: tickers, Ref: feed, Guard: guard, Marks: marks, RefKlines: refKlines, Now: time.Now}).Routes(r)
+	(&httpapi.Handler{Svc: svc, Tickers: tickers, Ref: feed, Guard: guard, Marks: marks, RefKlines: refKlines, Books: books, Now: time.Now}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
 }

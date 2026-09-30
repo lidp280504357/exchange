@@ -1,6 +1,7 @@
 // Command matching-engine matches orders (requirements §5.7, ADR-0002):
-// it consumes order commands, keeps one book per symbol in memory, and
-// publishes order and trade events and depth. Only the holder of the
+// it consumes order commands and HOUSE's reference books (ADR-0015), keeps
+// one book per symbol in memory, and publishes order and trade events and
+// the books' own depth. Only the holder of the
 // engine lease runs; another instance waits as a standby. MATCHING_SHARD
 // picks the shard: spot (order.commands, schema matching) or derivatives,
 // the perpetual contracts (derivatives.order.commands, schema
@@ -29,8 +30,9 @@ type settings struct {
 	// SnapshotEvery is how many commands of a partition may follow its last
 	// snapshot (MATCHING_SNAPSHOT_EVERY).
 	SnapshotEvery int `koanf:"matching_snapshot_every"`
-	// WALRetention keeps applied commands this long after a snapshot covers
-	// them (MATCHING_WAL_RETENTION).
+	// WALRetention keeps applied commands and reference books this long
+	// after a snapshot covers them (MATCHING_WAL_RETENTION; reference books
+	// make the spot WAL grow fast, so keep it to hours there).
 	WALRetention time.Duration `koanf:"matching_wal_retention"`
 	// Shard is spot or derivatives (MATCHING_SHARD).
 	Shard string `koanf:"matching_shard"`
@@ -104,7 +106,7 @@ func setup(ctx context.Context, a *app.App) error {
 		return err
 	}
 	if err := bootstrap.BatchConsumerWith(ctx, a, cfg.Kafka, kafka.BatchOptions{
-		Group: sh.group, Topics: []string{sh.topics.Commands}, Handler: engine.Handle,
+		Group: sh.group, Topics: []string{sh.topics.Commands, sh.topics.References}, Handler: engine.Handle,
 		MaxBatch: 500, MaxWait: 20 * time.Millisecond,
 	}); err != nil {
 		return err

@@ -1,0 +1,16 @@
+{
+  "symbol": "ONDO",
+  "name": {
+    "zh-CN": "Ondo",
+    "en": "Ondo"
+  },
+  "intro": {
+    "zh-CN": "Ondo Finance 把美国国债等现实世界资产代币化，ONDO 是其治理代币。",
+    "en": "Ondo Finance tokenises real-world assets such as US Treasuries; ONDO is its governance token."
+  },
+  "links": {
+    "website": "https://ondo.finance"
+  },
+  "color": "blue",
+  "asOf": "2026-10-01"
+}

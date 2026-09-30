@@ -1,0 +1,17 @@
+{
+  "symbol": "APT",
+  "name": {
+    "zh-CN": "Aptos",
+    "en": "Aptos"
+  },
+  "intro": {
+    "zh-CN": "Aptos 是 2022 年上线的公链，使用 Move 语言编写智能合约，强调并行执行与高吞吐。",
+    "en": "Aptos, launched in 2022, is a blockchain whose smart contracts are written in Move, built for parallel execution and high throughput."
+  },
+  "links": {
+    "website": "https://aptosfoundation.org",
+    "explorer": "https://explorer.aptoslabs.com"
+  },
+  "color": "teal",
+  "asOf": "2026-10-01"
+}

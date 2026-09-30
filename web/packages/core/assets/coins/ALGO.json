@@ -1,0 +1,17 @@
+{
+  "symbol": "ALGO",
+  "name": {
+    "zh-CN": "Algorand",
+    "en": "Algorand"
+  },
+  "intro": {
+    "zh-CN": "Algorand 是 2019 年上线的纯权益证明公链，由图灵奖得主 Silvio Micali 创立。",
+    "en": "Algorand, launched in 2019 and founded by Turing Award winner Silvio Micali, is a pure proof-of-stake blockchain."
+  },
+  "links": {
+    "website": "https://algorand.co",
+    "explorer": "https://allo.info"
+  },
+  "color": "teal",
+  "asOf": "2026-10-01"
+}

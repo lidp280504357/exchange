@@ -53,6 +53,7 @@ const (
 	EntryOrderFreeze           = "ORDER_FREEZE"
 	EntryOrderUnfreeze         = "ORDER_UNFREEZE"
 	EntryTradeSettle           = "TRADE_SETTLE"
+	EntryHouseTradeSettle      = "HOUSE_TRADE_SETTLE"
 	EntryTradeFee              = "TRADE_FEE"
 	EntryAccountTransfer       = "ACCOUNT_TRANSFER"
 	EntryFundingPayment        = "FUNDING_PAYMENT"
@@ -67,7 +68,7 @@ const (
 var entryTypes = []string{
 	EntryDepositCredit, EntryWithdrawFreeze, EntryWithdrawSettle, EntryWithdrawUnfreeze, EntryOrderFreeze, EntryOrderUnfreeze,
 	EntryTradeSettle, EntryTradeFee, EntryAccountTransfer, EntryFundingPayment, EntryRealizedPnL, EntryLiquidationSettle,
-	EntryInsuranceContribution, EntryADLSettle, EntryInternalTransfer, EntryManualAdjustment,
+	EntryInsuranceContribution, EntryADLSettle, EntryInternalTransfer, EntryManualAdjustment, EntryHouseTradeSettle,
 }
 
 var systemAccounts = []string{
@@ -114,9 +115,13 @@ func (k AccountKey) Validate() error {
 }
 
 // MayGoNegative reports whether the account is a counterparty allowed below
-// zero (invariant 3): DEPOSIT_PENDING, ADJUSTMENT and PNL_CLEARING.
+// zero (invariant 3): DEPOSIT_PENDING, ADJUSTMENT and PNL_CLEARING, and
+// MARKET_MAKER, HOUSE's inventory: a trade against HOUSE settles whatever
+// its balance (ADR-0013), the house liquidity publisher keeps the backed
+// assets above zero and alerts when one is not.
 func (k AccountKey) MayGoNegative() bool {
-	return k.Type == AccountDepositPending || k.Type == AccountAdjustment || k.Type == AccountPnLClearing
+	return k.Type == AccountDepositPending || k.Type == AccountAdjustment || k.Type == AccountPnLClearing ||
+		k.Type == AccountMarketMaker
 }
 
 func (k AccountKey) String() string {

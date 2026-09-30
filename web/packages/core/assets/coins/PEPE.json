@@ -1,0 +1,17 @@
+{
+  "symbol": "PEPE",
+  "name": {
+    "zh-CN": "佩佩",
+    "en": "Pepe"
+  },
+  "intro": {
+    "zh-CN": "Pepe 是 2023 年发行于以太坊的迷因代币。本站以 1000 枚为一个交易单位（1000PEPE）。",
+    "en": "Pepe is a meme token issued on Ethereum in 2023. It trades here 1,000 at a time (1000PEPE)."
+  },
+  "links": {
+    "website": "https://www.pepe.vip",
+    "explorer": "https://etherscan.io/token/0x6982508145454ce325ddbe47a25d4ec3d2311933"
+  },
+  "color": "emerald",
+  "asOf": "2026-10-01"
+}

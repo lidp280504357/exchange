@@ -5,6 +5,8 @@
 package domain
 
 import (
+	"time"
+
 	"github.com/shopspring/decimal"
 )
 
@@ -73,6 +75,13 @@ type Order struct {
 
 	Filled      decimal.Decimal `json:"filled"`       // base
 	FilledQuote decimal.Decimal `json:"filled_quote"` // quote exchanged
+
+	// HouseOnly keeps the order away from other users' orders: it trades
+	// with HOUSE's reference liquidity only (ADR-0015).
+	HouseOnly bool `json:"house_only,omitempty"`
+	// At is when the order's command was issued: a reference book older
+	// than the order by more than RefMaxAge does not serve it.
+	At time.Time `json:"at,omitzero"`
 }
 
 // Remaining is the base quantity still open (not for market buys, which

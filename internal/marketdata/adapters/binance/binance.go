@@ -31,7 +31,11 @@ import (
 type Source struct {
 	rest   string
 	stream string
-	client *http.Client
+	// futuresREST and futuresStream are the USDⓈ-M futures endpoints of the
+	// contracts' books and trades (WithFutures).
+	futuresREST   string
+	futuresStream string
+	client        *http.Client
 	// gap spaces REST requests: Binance allows 6000 request weight a
 	// minute per IP; a klines call weighs 2.
 	gap time.Duration
@@ -103,12 +107,18 @@ func (s *Source) backOff(resp *http.Response) {
 	s.mu.Unlock()
 }
 
-// get fetches a REST path into out.
+// get fetches a spot REST path into out.
 func (s *Source) get(ctx context.Context, what, path string, q url.Values, out any) error {
+	return s.getAt(ctx, what, s.rest, path, q, out)
+}
+
+// getAt fetches a REST path of base into out; requests to every base wait
+// their turn together.
+func (s *Source) getAt(ctx context.Context, what, base, path string, q url.Values, out any) error {
 	if err := s.wait(ctx); err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.rest+path+"?"+q.Encode(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path+"?"+q.Encode(), nil)
 	if err != nil {
 		return err
 	}

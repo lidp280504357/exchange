@@ -8,6 +8,7 @@ import (
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/lidp280504357/exchange/internal/platform/flags"
 	"github.com/lidp280504357/exchange/internal/trading/domain"
 )
 
@@ -91,6 +92,11 @@ type Ledger interface {
 // Instruments reads trading pairs (instrument-service gRPC).
 type Instruments interface {
 	Pair(ctx context.Context, symbol string) (domain.Pair, error)
+}
+
+// Features answers feature-flag checks.
+type Features interface {
+	Enabled(key string, s flags.Subject) bool
 }
 
 // Eligibility asks user-service whether a user may use a feature.

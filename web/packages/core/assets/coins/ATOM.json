@@ -1,0 +1,17 @@
+{
+  "symbol": "ATOM",
+  "name": {
+    "zh-CN": "Cosmos",
+    "en": "Cosmos"
+  },
+  "intro": {
+    "zh-CN": "Cosmos 是由可互操作的独立区块链组成的生态，链与链之间通过 IBC 协议通信，ATOM 用于质押以保护 Cosmos Hub。",
+    "en": "Cosmos is an ecosystem of independent, interoperable blockchains that talk over IBC; ATOM is staked to secure the Cosmos Hub."
+  },
+  "links": {
+    "website": "https://cosmos.network",
+    "explorer": "https://www.mintscan.io/cosmos"
+  },
+  "color": "indigo",
+  "asOf": "2026-10-01"
+}

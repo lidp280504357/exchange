@@ -1,0 +1,17 @@
+{
+  "symbol": "ARB",
+  "name": {
+    "zh-CN": "Arbitrum",
+    "en": "Arbitrum"
+  },
+  "intro": {
+    "zh-CN": "Arbitrum 是以太坊的 Optimistic Rollup 二层网络，ARB 是其治理代币。",
+    "en": "Arbitrum is an optimistic-rollup layer 2 on Ethereum; ARB is its governance token."
+  },
+  "links": {
+    "website": "https://arbitrum.io",
+    "explorer": "https://arbiscan.io"
+  },
+  "color": "sky",
+  "asOf": "2026-10-01"
+}

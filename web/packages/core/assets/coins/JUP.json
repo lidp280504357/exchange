@@ -1,0 +1,16 @@
+{
+  "symbol": "JUP",
+  "name": {
+    "zh-CN": "Jupiter",
+    "en": "Jupiter"
+  },
+  "intro": {
+    "zh-CN": "Jupiter 是 Solana 上的交易聚合器与去中心化交易平台，JUP 是其治理代币。",
+    "en": "Jupiter is a trading aggregator and decentralized exchange on Solana; JUP is its governance token."
+  },
+  "links": {
+    "website": "https://jup.ag"
+  },
+  "color": "lime",
+  "asOf": "2026-10-01"
+}

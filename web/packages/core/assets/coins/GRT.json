@@ -1,0 +1,17 @@
+{
+  "symbol": "GRT",
+  "name": {
+    "zh-CN": "The Graph",
+    "en": "The Graph"
+  },
+  "intro": {
+    "zh-CN": "The Graph 是区块链数据的去中心化索引与查询协议，GRT 用于质押和支付查询费用。",
+    "en": "The Graph is a decentralized protocol for indexing and querying blockchain data; GRT is staked and pays for queries."
+  },
+  "links": {
+    "website": "https://thegraph.com",
+    "explorer": "https://etherscan.io/token/0xc944e90c64b2c07662a292be6244bdf05cda44a7"
+  },
+  "color": "indigo",
+  "asOf": "2026-10-01"
+}

@@ -53,7 +53,26 @@ const (
 	KindADL         Kind = "ADL"
 	KindTakeProfit  Kind = "TAKE_PROFIT"
 	KindStopLoss    Kind = "STOP_LOSS"
+	// KindHouse is HOUSE's side of a trade against its reference liquidity
+	// (ADR-0015): never stored, only the shape its fills are worked out in.
+	KindHouse Kind = "HOUSE"
 )
+
+// HouseOrderID stands for the order HOUSE does not have on its fills.
+const HouseOrderID = "00000000-0000-0000-0000-000000000000"
+
+// HouseOrder is the order HOUSE's side of a fill is worked out as
+// (ADR-0015): one-way, cross margin at the contract's top leverage, no
+// fees, nothing reserved (opening freezes margin from its available
+// balance as far as it goes).
+func HouseOrder(c Contract, user string, side Side, qty decimal.Decimal) Order {
+	return Order{
+		ID: HouseOrderID, UserID: user, Symbol: c.Symbol, Side: side, PositionSide: SideBoth, Type: Limit, TimeInForce: IOC,
+		Qty: qty, Kind: KindHouse, Leverage: c.MaxLeverage(), MarginMode: Cross, MakerFee: decimal.Zero, TakerFee: decimal.Zero,
+		LotSize: c.LotSize, Status: StatusNew, FreezeState: FreezeNone,
+		Consumed: decimal.Zero, Filled: decimal.Zero, FilledQuote: decimal.Zero, Fee: decimal.Zero, RealizedPnL: decimal.Zero,
+	}
+}
 
 // Status of an order (appendix B, as spot).
 type Status string

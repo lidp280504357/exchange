@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Funding end to end (implementation plan §7.3 task 10, requirements
-# §11.7). A standing hedge of 0.001 BTC-USDT-PERP between two e2e users
-# lives across runs; their addresses and password stay in a local state
+# §11.7). A standing hedge of 0.01 ETH-USDT-PERP between two e2e users
+# lives across runs (ETH-USDT-PERP has no HOUSE liquidity, so the two meet
+# each other; a hedge opened before B4 stays on BTC-USDT-PERP); their addresses and password stay in a local state
 # file (E2E_STATE_DIR, default ~/.cache/exchange-e2e), never in the
 # repository. The first run opens it; every later run signs both in
 # (answering the 7-day login challenge from the dev inbox) and checks each
@@ -20,8 +21,8 @@ source "$(dirname "$0")/lib/common.sh"
 # shellcheck source=lib/remote.sh
 source "$(dirname "$0")/lib/remote.sh"
 
-SYMBOL=BTC-USDT-PERP
-QTY=0.001
+NEW_SYMBOL=ETH-USDT-PERP
+NEW_QTY=0.01
 STATE_DIR=${E2E_STATE_DIR:-$HOME/.cache/exchange-e2e}
 STATE="$STATE_DIR/funding-$(sed -E 's#^https?://##; s#[^A-Za-z0-9]+#_#g' <<<"$BASE")"
 
@@ -56,6 +57,7 @@ position() { # position AUTH...: BODY holds the user's only position on the cont
 # trade 0.001 at the mark price and records them in the state file.
 open_hedge() {
   local who price
+  SYMBOL=$NEW_SYMBOL QTY=$NEW_QTY
   PASSWORD="e2e-$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20 || true)"
   for who in long short; do
     register "e2e-funding-$who-$RUN@example.com" "e2e-funding-$who-$RUN" "$PASSWORD"
@@ -91,6 +93,7 @@ open_hedge() {
     printf 'EMAIL_LONG=%q\nEMAIL_SHORT=%q\n' "e2e-funding-long-$RUN@example.com" "e2e-funding-short-$RUN@example.com"
     printf 'DEVICE_LONG=%q\nDEVICE_SHORT=%q\n' "e2e-funding-long-$RUN" "e2e-funding-short-$RUN"
     printf 'PASSWORD=%q\nOPENED_AT=%q\n' "$PASSWORD" "$(date +%s)"
+    printf 'SYMBOL=%q\nQTY=%q\n' "$SYMBOL" "$QTY"
   } >"$STATE"
   echo "ok   the hedge is open; the next run after a funding time (00:00, 08:00, 16:00 UTC) checks its payments"
 }
@@ -102,6 +105,7 @@ if [[ ! -f $STATE ]]; then
   exit 0
 fi
 
+SYMBOL=BTC-USDT-PERP QTY=0.001 # a state file from before B4 names neither
 # shellcheck source=/dev/null
 source "$STATE"
 echo "== the standing hedge (opened $(date -u -r "$OPENED_AT" +%FT%TZ 2>/dev/null || date -u -d "@$OPENED_AT" +%FT%TZ))"

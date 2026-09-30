@@ -171,13 +171,17 @@ func (s *Service) emit(ctx context.Context, r ports.Repos, j domain.Journal, seq
 	if err := r.Emit(ctx, event.TopicLedger, posted, "journal", j.ID); err != nil {
 		return err
 	}
+	entry := j.EntryType
+	if entry == domain.EntryHouseTradeSettle {
+		entry = domain.EntryTradeSettle // to its user, a trade against HOUSE is a trade (ADR-0015)
+	}
 	for _, a := range accounts {
 		if a.Key.OwnerType != domain.OwnerUser {
 			continue
 		}
 		if err := r.Emit(ctx, event.TopicLedger, &ledgerv1.BalanceChanged{
 			AccountId: a.ID, UserId: a.Key.OwnerID, AccountType: a.Key.Type, Asset: a.Key.Asset,
-			Available: a.Available.String(), Frozen: a.Frozen.String(), JournalId: j.ID, EntryType: j.EntryType,
+			Available: a.Available.String(), Frozen: a.Frozen.String(), JournalId: j.ID, EntryType: entry,
 		}, "account", a.ID); err != nil {
 			return err
 		}

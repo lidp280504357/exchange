@@ -1,0 +1,18 @@
+{
+  "symbol": "FIL",
+  "name": {
+    "zh-CN": "文件币",
+    "en": "Filecoin"
+  },
+  "intro": {
+    "zh-CN": "Filecoin 是去中心化存储网络，存储服务商提供存储空间以获得 FIL 奖励。",
+    "en": "Filecoin is a decentralized storage network; storage providers earn FIL for the space they supply."
+  },
+  "links": {
+    "website": "https://filecoin.io",
+    "explorer": "https://filfox.info",
+    "whitepaper": "https://filecoin.io/filecoin.pdf"
+  },
+  "color": "cyan",
+  "asOf": "2026-10-01"
+}

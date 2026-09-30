@@ -1,0 +1,17 @@
+{
+  "symbol": "OP",
+  "name": {
+    "zh-CN": "Optimism",
+    "en": "Optimism"
+  },
+  "intro": {
+    "zh-CN": "Optimism 是以太坊的 Optimistic Rollup 二层网络，也是 OP Stack 与超级链（Superchain）的发起者，OP 为治理代币。",
+    "en": "Optimism is an optimistic-rollup layer 2 on Ethereum and the origin of the OP Stack and the Superchain; OP is its governance token."
+  },
+  "links": {
+    "website": "https://www.optimism.io",
+    "explorer": "https://optimistic.etherscan.io"
+  },
+  "color": "rose",
+  "asOf": "2026-10-01"
+}

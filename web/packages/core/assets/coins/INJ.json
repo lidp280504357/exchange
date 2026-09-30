@@ -1,0 +1,17 @@
+{
+  "symbol": "INJ",
+  "name": {
+    "zh-CN": "Injective",
+    "en": "Injective"
+  },
+  "intro": {
+    "zh-CN": "Injective 是为金融应用构建的公链，内置链上订单簿等交易模块。",
+    "en": "Injective is a blockchain built for finance, with an on-chain order book among its native modules."
+  },
+  "links": {
+    "website": "https://injective.com",
+    "explorer": "https://explorer.injective.network"
+  },
+  "color": "cyan",
+  "asOf": "2026-10-01"
+}

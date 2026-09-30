@@ -1,0 +1,17 @@
+{
+  "symbol": "THETA",
+  "name": {
+    "zh-CN": "Theta",
+    "en": "Theta Network"
+  },
+  "intro": {
+    "zh-CN": "Theta 是去中心化的视频传输与边缘计算网络。",
+    "en": "Theta is a decentralized network for video delivery and edge computing."
+  },
+  "links": {
+    "website": "https://www.thetatoken.org",
+    "explorer": "https://explorer.thetatoken.org"
+  },
+  "color": "teal",
+  "asOf": "2026-10-01"
+}

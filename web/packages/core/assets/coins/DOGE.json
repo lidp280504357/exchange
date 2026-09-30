@@ -1,0 +1,17 @@
+{
+  "symbol": "DOGE",
+  "name": {
+    "zh-CN": "狗狗币",
+    "en": "Dogecoin"
+  },
+  "intro": {
+    "zh-CN": "狗狗币诞生于 2013 年，最初以网络迷因为灵感，采用工作量证明，发行量没有上限。",
+    "en": "Dogecoin started in 2013 as a meme-inspired coin; it uses proof of work and has no supply cap."
+  },
+  "links": {
+    "website": "https://dogecoin.com",
+    "explorer": "https://blockchair.com/dogecoin"
+  },
+  "color": "amber",
+  "asOf": "2026-10-01"
+}

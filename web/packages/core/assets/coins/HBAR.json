@@ -1,0 +1,17 @@
+{
+  "symbol": "HBAR",
+  "name": {
+    "zh-CN": "Hedera",
+    "en": "Hedera"
+  },
+  "intro": {
+    "zh-CN": "Hedera 是采用哈希图（Hashgraph）共识的公共网络，由多家机构组成的理事会治理。",
+    "en": "Hedera is a public network running hashgraph consensus, governed by a council of organisations."
+  },
+  "links": {
+    "website": "https://hedera.com",
+    "explorer": "https://hashscan.io"
+  },
+  "color": "indigo",
+  "asOf": "2026-10-01"
+}

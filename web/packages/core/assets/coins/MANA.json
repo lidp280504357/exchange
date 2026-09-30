@@ -1,0 +1,16 @@
+{
+  "symbol": "MANA",
+  "name": {
+    "zh-CN": "Decentraland",
+    "en": "Decentraland"
+  },
+  "intro": {
+    "zh-CN": "Decentraland 是运行在以太坊上的虚拟世界，MANA 用于购买其中的土地与虚拟物品。",
+    "en": "Decentraland is a virtual world on Ethereum; MANA buys its land and virtual goods."
+  },
+  "links": {
+    "website": "https://decentraland.org"
+  },
+  "color": "rose",
+  "asOf": "2026-10-01"
+}

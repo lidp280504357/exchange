@@ -79,7 +79,7 @@ tasks:
     desc: 部署脚本语法检查
     cmds:
       - bash -n deploy/server-update.sh deploy/redpanda/topics.sh deploy/compose/nginx/update-cloudflare-ips.sh
-      - for f in scripts/*.sh scripts/e2e/*.sh scripts/e2e/lib/*.sh scripts/fault/*.sh; do bash -n "$f"; done
+      - for f in scripts/*.sh scripts/e2e/*.sh scripts/e2e/lib/*.sh scripts/fault/*.sh scripts/ops/*.sh; do bash -n "$f"; done
 
   dev:
     desc: 本机启动全部服务（直连测试服基础设施的 dev 命名空间：库 exchange_dev、Redis DB 1、Kafka 前缀 dev.；网关 http://localhost:8080；Ctrl-C 停止）

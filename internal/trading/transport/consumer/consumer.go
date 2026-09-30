@@ -64,7 +64,8 @@ func update(ctx context.Context, svc *application.Service, orderID string, seq i
 	return svc.OnUpdate(ctx, domain.Update{OrderID: orderID, Seq: seq, Status: status, Filled: f, FilledQuote: q, Reason: reason})
 }
 
-// fills records both sides of a trade.
+// fills records both sides of a trade; HOUSE's side (ADR-0015) has no
+// order here and is not recorded.
 func fills(ctx context.Context, svc *application.Service, env *eventv1.Envelope, t *tradev1.TradeExecuted) error {
 	var amounts [5]decimal.Decimal
 	for i, s := range []string{t.GetPrice(), t.GetQuantity(), t.GetQuoteQuantity(), t.GetBuyerFee(), t.GetSellerFee()} {
@@ -86,6 +87,10 @@ func fills(ctx context.Context, svc *application.Service, env *eventv1.Envelope,
 			FeeAsset: t.GetQuoteAsset(), Fee: sellerFee,
 		},
 	} {
+		if (f.Side == domain.SideBuy && t.GetHouseSide() == orderv1.Side_SIDE_BUY) ||
+			(f.Side == domain.SideSell && t.GetHouseSide() == orderv1.Side_SIDE_SELL) {
+			continue
+		}
 		f.TradeID, f.Symbol, f.Price, f.Quantity, f.Quote, f.Seq, f.ExecutedAt = t.GetTradeId(), t.GetSymbol(), price, qty, quote, t.GetSequence(), at
 		if err := svc.OnFill(ctx, f); err != nil {
 			return err

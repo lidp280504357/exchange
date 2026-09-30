@@ -63,8 +63,12 @@ done
 ensure "${NS}order.commands" 3 30
 ensure "${NS}derivatives.order.commands" 3 30
 
-# 撮合引擎直接导出的深度快照：派生状态，丢了由下一份补上，只保留 1 小时，没有 retry/dlq
-for t in "${NS}market.depth" "${NS}derivatives.market.depth"; do
+# 派生状态只保留 1 小时，没有 retry/dlq，丢了由下一份补上（ADR-0015）：
+#   - 引擎的第二个输入：虚拟流动性的参考簿（分区数必须与 order.commands 相同，同一交易对落在同一分区号）；
+#   - 公共深度（market-data-service 发布）与引擎自己的深度（*.internal）；
+#   - 公共成交（market.trades，现货与合约共用）。
+for t in "${NS}order.references" "${NS}derivatives.order.references" "${NS}market.depth" "${NS}derivatives.market.depth" \
+  "${NS}market.depth.internal" "${NS}derivatives.market.depth.internal" "${NS}market.trades"; do
   if grep -qx "$t" <<<"$existing"; then
     echo "exists : $t"
   else

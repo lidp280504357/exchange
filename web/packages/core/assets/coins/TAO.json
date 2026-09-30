@@ -1,0 +1,17 @@
+{
+  "symbol": "TAO",
+  "name": {
+    "zh-CN": "Bittensor",
+    "en": "Bittensor"
+  },
+  "intro": {
+    "zh-CN": "Bittensor 是去中心化机器学习网络，节点贡献模型与算力并以 TAO 获得奖励。",
+    "en": "Bittensor is a decentralized machine-learning network whose nodes contribute models and compute and earn TAO."
+  },
+  "links": {
+    "website": "https://bittensor.com",
+    "explorer": "https://taostats.io"
+  },
+  "color": "lime",
+  "asOf": "2026-10-01"
+}

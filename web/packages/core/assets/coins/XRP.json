@@ -1,0 +1,17 @@
+{
+  "symbol": "XRP",
+  "name": {
+    "zh-CN": "瑞波币",
+    "en": "XRP"
+  },
+  "intro": {
+    "zh-CN": "XRP 是 XRP Ledger 的原生资产。XRP Ledger 于 2012 年上线，主打快速、低成本的跨境支付。",
+    "en": "XRP is the native asset of the XRP Ledger, live since 2012 and built for fast, low-cost cross-border payments."
+  },
+  "links": {
+    "website": "https://xrpl.org",
+    "explorer": "https://livenet.xrpl.org"
+  },
+  "color": "indigo",
+  "asOf": "2026-10-01"
+}

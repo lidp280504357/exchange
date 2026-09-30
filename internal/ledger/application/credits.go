@@ -116,6 +116,38 @@ func (s *Service) CreditDeposit(ctx context.Context, eventID string, d domain.De
 	return s.Post(ctx, p)
 }
 
+// AdjustHouse credits (or debits) HOUSE's inventory against ADJUSTMENT,
+// audited like a user's adjustment (ADR-0013: HOUSE's simulated funding).
+// The caller checks ledger.manual_adjustment.
+func (s *Service) AdjustHouse(ctx context.Context, idemKey, asset string, amount decimal.Decimal, actor, reason string) (Result, error) {
+	if len(strings.TrimSpace(reason)) < 3 {
+		return Result{}, apperr.Invalid("a reason is required")
+	}
+	credits, err := s.credits(ctx, []Credit{{Asset: asset, Amount: amount}})
+	if err != nil {
+		return Result{}, err
+	}
+	p, err := domain.HouseAdjustmentPosting("adjust-house:"+idemKey, credits, reason)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := s.checkPrecision(ctx, p); err != nil {
+		return Result{}, err
+	}
+	var res Result
+	err = s.Store.Tx(ctx, func(r ports.Repos) error {
+		var err error
+		if res, err = s.post(ctx, r, p); err != nil || res.Replayed {
+			return err
+		}
+		return r.Emit(ctx, event.TopicAudit, &auditv1.AdminActionPerformed{
+			Target: "house:" + domain.AccountMarketMaker, Action: "ledger.manual_adjustment", Actor: actor, Reason: reason,
+			Details: fmt.Sprintf(`{"asset":%q,"amount":%q,"journal_id":%q}`, asset, amount.String(), res.JournalID),
+		}, "actor", actor)
+	})
+	return res, err
+}
+
 // AdjustApproved is Adjust for the admin console, called once two people
 // approved the adjustment (§5.12); it needs ledger.manual_adjustment on.
 func (s *Service) AdjustApproved(ctx context.Context, idemKey, userID, asset string, amount decimal.Decimal, actor, reason string) (Result, error) {

@@ -1,0 +1,17 @@
+{
+  "symbol": "XLM",
+  "name": {
+    "zh-CN": "恒星币",
+    "en": "Stellar"
+  },
+  "intro": {
+    "zh-CN": "Stellar 是 2014 年上线的支付网络，面向跨境汇款与资产发行，原生资产为 XLM（Lumens）。",
+    "en": "Stellar, live since 2014, is a payment network for cross-border transfers and asset issuance; its native asset is XLM (lumens)."
+  },
+  "links": {
+    "website": "https://stellar.org",
+    "explorer": "https://stellar.expert"
+  },
+  "color": "sky",
+  "asOf": "2026-10-01"
+}

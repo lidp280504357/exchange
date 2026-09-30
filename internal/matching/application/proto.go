@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
@@ -17,21 +18,23 @@ import (
 
 // Topics names what an engine shard consumes and publishes.
 type Topics struct {
-	Commands string // input, e.g. order.commands
-	Orders   string // order events
-	Trades   string // trade events
-	Depth    string // depth snapshots
+	Commands   string // input, e.g. order.commands
+	References string // input, the reference books (ADR-0015)
+	Orders     string // order events
+	Trades     string // trade events
+	Depth      string // the engine's own depth snapshots
 }
 
 // SpotTopics are the spot shard's topics; DerivativesTopics the perpetual
 // contracts' (implementation plan §7.3 task 2).
 var (
 	SpotTopics = Topics{
-		Commands: event.TopicOrderCommands, Orders: event.TopicOrder, Trades: event.TopicTrade, Depth: event.TopicMarketDepth,
+		Commands: event.TopicOrderCommands, References: event.TopicOrderReferences, Orders: event.TopicOrder, Trades: event.TopicTrade,
+		Depth: event.TopicMarketDepthInternal,
 	}
 	DerivativesTopics = Topics{
-		Commands: event.TopicDerivOrderCommands, Orders: event.TopicDerivOrder, Trades: event.TopicDerivTrade,
-		Depth: event.TopicDerivMarketDepth,
+		Commands: event.TopicDerivOrderCommands, References: event.TopicDerivOrderReferences, Orders: event.TopicDerivOrder,
+		Trades: event.TopicDerivTrade, Depth: event.TopicDerivMarketDepthInternal,
 	}
 )
 
@@ -95,6 +98,54 @@ func fromProto(p *orderv1.Order) (domain.Order, error) {
 	return o, nil
 }
 
+// referenceFromProto reads a ReferenceBookUpdate published at: the levels
+// best first (bids falling, asks rising, positive amounts), the rooms
+// (empty is none) and HOUSE's user when there is anything to trade.
+func referenceFromProto(m *orderv1.ReferenceBookUpdate, at time.Time) (domain.Reference, error) {
+	r := domain.Reference{HouseUser: m.GetHouseUserId(), At: at, BuyRoom: decimal.Zero, SellRoom: decimal.Zero}
+	if m.GetSymbol() == "" {
+		return r, fmt.Errorf("reference book without a symbol")
+	}
+	var err error
+	for _, f := range []struct {
+		dst  *decimal.Decimal
+		src  string
+		name string
+	}{{&r.BuyRoom, m.GetBuyRoom(), "buy_room"}, {&r.SellRoom, m.GetSellRoom(), "sell_room"}} {
+		if f.src == "" {
+			continue
+		}
+		if *f.dst, err = decimal.NewFromString(f.src); err != nil || f.dst.IsNegative() {
+			return r, fmt.Errorf("reference book %s: bad %s %q", m.GetSymbol(), f.name, f.src)
+		}
+	}
+	read := func(in []*orderv1.ReferenceLevel, falling bool) ([]domain.RefLevel, error) {
+		out := make([]domain.RefLevel, 0, len(in))
+		for _, l := range in {
+			p, err1 := decimal.NewFromString(l.GetPrice())
+			q, err2 := decimal.NewFromString(l.GetQuantity())
+			if err1 != nil || err2 != nil || !p.IsPositive() || !q.IsPositive() {
+				return nil, fmt.Errorf("reference book %s: bad level %q x %q", m.GetSymbol(), l.GetPrice(), l.GetQuantity())
+			}
+			if n := len(out); n > 0 && (falling && !p.LessThan(out[n-1].Price) || !falling && !p.GreaterThan(out[n-1].Price)) {
+				return nil, fmt.Errorf("reference book %s: level %s out of order", m.GetSymbol(), p)
+			}
+			out = append(out, domain.RefLevel{Price: p, Quantity: q})
+		}
+		return out, nil
+	}
+	if r.Bids, err = read(m.GetBids(), true); err != nil {
+		return r, err
+	}
+	if r.Asks, err = read(m.GetAsks(), false); err != nil {
+		return r, err
+	}
+	if len(r.Bids)+len(r.Asks) > 0 && r.HouseUser == "" {
+		return r, fmt.Errorf("reference book %s without HOUSE's user", m.GetSymbol())
+	}
+	return r, nil
+}
+
 // output turns an engine event into the envelope to publish.
 func (e *Engine) output(ctx context.Context, ev domain.Event) (ports.Output, error) {
 	topic := e.Topics.Orders
@@ -117,6 +168,12 @@ func (e *Engine) output(ctx context.Context, ev domain.Event) (ports.Output, err
 		}
 		if !t.BuyerLimit.IsZero() {
 			m.BuyerLimitPrice = t.BuyerLimit.String()
+		}
+		switch t.HouseSide {
+		case domain.Buy:
+			m.HouseSide = orderv1.Side_SIDE_BUY
+		case domain.Sell:
+			m.HouseSide = orderv1.Side_SIDE_SELL
 		}
 		msg = m
 	case domain.KindOpened:

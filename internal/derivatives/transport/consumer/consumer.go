@@ -87,8 +87,15 @@ func trade(m *tradev1.TradeExecuted, env *eventv1.Envelope) (application.Trade, 
 	if err1 != nil || err2 != nil {
 		return application.Trade{}, fmt.Errorf("trade %s: bad price %q or quantity %q", m.GetTradeId(), m.GetPrice(), m.GetQuantity())
 	}
+	house := domain.Side("")
+	switch m.GetHouseSide() {
+	case orderv1.Side_SIDE_BUY:
+		house = domain.Buy
+	case orderv1.Side_SIDE_SELL:
+		house = domain.Sell
+	}
 	return application.Trade{
-		ID: m.GetTradeId(), Symbol: m.GetSymbol(), Seq: m.GetSequence(), Price: price, Qty: qty,
+		ID: m.GetTradeId(), Symbol: m.GetSymbol(), Seq: m.GetSequence(), Price: price, Qty: qty, HouseSide: house,
 		BuyerOrderID: m.GetBuyerOrderId(), BuyerUserID: m.GetBuyerUserId(), SellerOrderID: m.GetSellerOrderId(),
 		SellerUserID: m.GetSellerUserId(), BuyerIsMaker: m.GetBuyerIsMaker(), At: env.GetOccurredAt().AsTime().UTC(),
 	}, nil

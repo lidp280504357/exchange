@@ -8,6 +8,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
 
+	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
 	tradev1 "github.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1"
 	"github.com/lidp280504357/exchange/internal/ledger/application"
 	"github.com/lidp280504357/exchange/internal/ledger/domain"
@@ -94,8 +95,15 @@ func (s *Settlement) fromProto(ctx context.Context, m *tradev1.TradeExecuted, d 
 		}
 		return out
 	}
+	house := ""
+	switch m.GetHouseSide() {
+	case orderv1.Side_SIDE_BUY:
+		house = domain.HouseBuy
+	case orderv1.Side_SIDE_SELL:
+		house = domain.HouseSell
+	}
 	return domain.Trade{
-		ID: m.GetTradeId(), Number: m.GetTradeNumber(), Symbol: m.GetSymbol(),
+		ID: m.GetTradeId(), Number: m.GetTradeNumber(), Symbol: m.GetSymbol(), HouseSide: house,
 		BaseAsset: m.GetBaseAsset(), QuoteAsset: m.GetQuoteAsset(),
 		Price: amount("price", m.GetPrice()), Quantity: amount("quantity", m.GetQuantity()),
 		Quote:        amount("quote_quantity", m.GetQuoteQuantity()),

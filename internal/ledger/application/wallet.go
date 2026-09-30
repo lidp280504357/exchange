@@ -83,18 +83,17 @@ func (s *Service) FundSystemAccount(ctx context.Context, key, accountType, asset
 	}, asset)
 }
 
-// SystemBalances returns the system accounts in asset.
+// SystemBalances returns the system accounts in asset, of every asset
+// when it is "" (HOUSE's liquidity reads all its MARKET_MAKER accounts at
+// once).
 func (s *Service) SystemBalances(ctx context.Context, asset string) ([]domain.Account, error) {
-	if asset == "" {
-		return nil, apperr.Invalid("asset is required")
-	}
 	all, err := s.Store.Read().Accounts().ByOwner(ctx, domain.OwnerSystem, "")
 	if err != nil {
 		return nil, err
 	}
 	var out []domain.Account
 	for _, a := range all {
-		if a.Key.Asset == asset {
+		if asset == "" || a.Key.Asset == asset {
 			out = append(out, a)
 		}
 	}

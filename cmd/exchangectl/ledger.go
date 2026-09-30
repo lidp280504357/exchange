@@ -123,6 +123,7 @@ func ledgerAdjust(ctx context.Context, svc *application.Service, args []string, 
 	fs := flag.NewFlagSet("ledger adjust", flag.ContinueOnError)
 	fs.SetOutput(out)
 	user := fs.String("user", "", "user ID")
+	house := fs.Bool("house", false, "credit HOUSE's inventory (the MARKET_MAKER system account, ADR-0013) instead of a user")
 	asset := fs.String("asset", "", "asset code, e.g. USDT")
 	amount := fs.String("amount", "", "decimal amount; negative debits")
 	reason := fs.String("reason", "", "why (required, goes to the audit log)")
@@ -130,9 +131,9 @@ func ledgerAdjust(ctx context.Context, svc *application.Service, args []string, 
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *user == "" || *asset == "" || *amount == "" || *reason == "" {
+	if (*user == "") == !*house || *asset == "" || *amount == "" || *reason == "" {
 		fs.Usage()
-		return errors.New("--user, --asset, --amount and --reason are required")
+		return errors.New("--user or --house, --asset, --amount and --reason are required")
 	}
 	if !svc.Flags.Enabled(flags.KeyManualAdjustment, flags.Subject{UserID: *user}) {
 		return fmt.Errorf("manual adjustments are off; turn on %s with exchangectl flags set", flags.KeyManualAdjustment)
@@ -144,7 +145,12 @@ func ledgerAdjust(ctx context.Context, svc *application.Service, args []string, 
 	if *key == "" {
 		*key = uuid.NewString()
 	}
-	res, err := svc.Adjust(ctx, *key, *user, *asset, d, actor(), *reason)
+	var res application.Result
+	if *house {
+		res, err = svc.AdjustHouse(ctx, *key, *asset, d, actor(), *reason)
+	} else {
+		res, err = svc.Adjust(ctx, *key, *user, *asset, d, actor(), *reason)
+	}
 	if err != nil {
 		return err
 	}

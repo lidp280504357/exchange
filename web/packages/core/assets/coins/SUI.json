@@ -1,0 +1,17 @@
+{
+  "symbol": "SUI",
+  "name": {
+    "zh-CN": "Sui",
+    "en": "Sui"
+  },
+  "intro": {
+    "zh-CN": "Sui 是 2023 年上线的公链，使用 Move 语言和以对象为中心的数据模型，交易可以并行执行。",
+    "en": "Sui, launched in 2023, is a blockchain using Move and an object-centric data model that lets transactions run in parallel."
+  },
+  "links": {
+    "website": "https://sui.io",
+    "explorer": "https://suiscan.xyz"
+  },
+  "color": "sky",
+  "asOf": "2026-10-01"
+}

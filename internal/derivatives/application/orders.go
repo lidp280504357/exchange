@@ -14,6 +14,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/derivatives/ports"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/event"
+	"github.com/lidp280504357/exchange/internal/platform/flags"
 )
 
 // Place checks, stores and funds a new order: it answers with the order
@@ -209,13 +210,24 @@ func (s *Service) accept(ctx context.Context, r ports.Repos, o domain.Order, c d
 	}, "symbol", o.Symbol); err != nil {
 		return err
 	}
-	if err := r.Emit(ctx, event.TopicDerivOrderCommands, &orderv1.PlaceOrder{Order: toProto(o, c)}, "symbol", o.Symbol); err != nil {
+	if err := r.Emit(ctx, event.TopicDerivOrderCommands, &orderv1.PlaceOrder{Order: toProto(o, c), HouseOnly: s.houseOnly(o.Symbol)}, "symbol", o.Symbol); err != nil {
 		return err
 	}
 	if o.CancelRequested {
 		return r.Emit(ctx, event.TopicDerivOrderCommands, cancelCommand(o), "symbol", o.Symbol)
 	}
 	return nil
+}
+
+// houseOnly decides whether an order of the contract trades only with
+// HOUSE's reference liquidity (ADR-0015): market.house_liquidity is on for
+// the contract and market.internal_matching off.
+func (s *Service) houseOnly(symbol string) bool {
+	if s.Features == nil {
+		return false
+	}
+	subject := flags.Subject{Symbol: symbol}
+	return s.Features.Enabled(flags.KeyHouseLiquidity, subject) && !s.Features.Enabled(flags.KeyInternalMatching, subject)
 }
 
 // reject stores the order as REJECTED with OrderRejected and returns the

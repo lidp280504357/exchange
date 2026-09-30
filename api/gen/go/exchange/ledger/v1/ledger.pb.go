@@ -1148,8 +1148,9 @@ func (x *FundSystemAccountResponse) GetPosting() *Posting {
 }
 
 type GetSystemBalancesRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Asset         string                 `protobuf:"bytes,1,opt,name=asset,proto3" json:"asset,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The asset; empty for every asset.
+	Asset         string `protobuf:"bytes,1,opt,name=asset,proto3" json:"asset,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

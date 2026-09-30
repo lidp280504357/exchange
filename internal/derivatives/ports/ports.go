@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lidp280504357/exchange/internal/derivatives/domain"
+	"github.com/lidp280504357/exchange/internal/platform/flags"
 )
 
 // Store is the unit of work over the derivatives schema.
@@ -276,4 +277,9 @@ type Mark struct {
 type Marks interface {
 	// Mark returns the contract's mark price and whether it is fresh.
 	Mark(symbol string) (Mark, bool)
+}
+
+// Features answers feature-flag checks.
+type Features interface {
+	Enabled(key string, s flags.Subject) bool
 }

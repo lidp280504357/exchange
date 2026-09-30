@@ -256,12 +256,35 @@ func TestWebSocketPublicChannels(t *testing.T) {
 		t.Fatalf("second update: %v %s", m, data)
 	}
 
+	// Updates follow the message applied last; one that does not is
+	// dropped until the next snapshot.
+	emit(&marketv1.DepthUpdate{Symbol: "BTC-USDT", Sequence: 10, PrevSequence: 9, Bids: levels("69900", "0", "69850", "3")})
+	m = c.next()
+	data, _ = json.Marshal(m["data"])
+	if m["seq"] != float64(3) || string(data) != `{"asks":[],"bids":[["69900","0"],["69850","3"]]}` {
+		t.Fatalf("update: %v %s", m, data)
+	}
+	emit(&marketv1.DepthUpdate{Symbol: "BTC-USDT", Sequence: 12, PrevSequence: 11, Bids: levels("1", "1")}) // a gap: dropped
+	emit(&marketv1.DepthUpdate{Symbol: "BTC-USDT", Sequence: 11, PrevSequence: 10, Asks: levels("70100", "0.7")})
+	if m := c.next(); m["seq"] != float64(4) || m["data"].(map[string]any)["asks"].([]any)[0].([]any)[1] != "0.7" {
+		t.Fatalf("update after a dropped one: %v", m)
+	}
+
+	// Public trades come from market.trades, a batch at a time; the
+	// engine's trades feed the users' fills only.
 	emit(&tradev1.TradeExecuted{
-		TradeId: "t1", TradeNumber: 7, Symbol: "BTC-USDT", BaseAsset: "BTC", QuoteAsset: "USDT", Price: "70100", Quantity: "0.1",
-		QuoteQuantity: "7010", TakerSide: orderv1.Side_SIDE_BUY, BuyerUserId: "u-1", SellerUserId: "u-2", BuyerFee: "0.0001", SellerFee: "7.01",
+		TradeId: "t0", TradeNumber: 6, Symbol: "BTC-USDT", BaseAsset: "BTC", QuoteAsset: "USDT", Price: "70000", Quantity: "0.1",
+		QuoteQuantity: "7000", TakerSide: orderv1.Side_SIDE_BUY, BuyerUserId: "u-1", SellerUserId: "u-2", BuyerFee: "0.0001", SellerFee: "7",
 	})
+	emit(&marketv1.TradesPrinted{Symbol: "BTC-USDT", Reference: true, Trades: []*marketv1.PublicTrade{
+		{TradeId: "t1", TradeNumber: 7, Price: "70100", Quantity: "0.1", QuoteQuantity: "7010", TakerSide: orderv1.Side_SIDE_BUY, ExecutedAt: timestamppb.Now()},
+		{TradeId: "t2", TradeNumber: 8, Price: "70090", Quantity: "0.2", QuoteQuantity: "14018", TakerSide: orderv1.Side_SIDE_SELL, ExecutedAt: timestamppb.Now()},
+	}})
 	if m := c.next(); m["channel"] != "trades:BTC-USDT" || m["data"].(map[string]any)["taker_side"] != "BUY" || m["data"].(map[string]any)["trade_number"] != float64(7) {
 		t.Fatalf("public trade: %v", m)
+	}
+	if m := c.next(); m["data"].(map[string]any)["trade_number"] != float64(8) {
+		t.Fatalf("second public trade: %v", m)
 	}
 
 	// A late subscriber gets the current book, at the current seq.
@@ -270,15 +293,15 @@ func TestWebSocketPublicChannels(t *testing.T) {
 	c2.next()
 	m = c2.next()
 	data, _ = json.Marshal(m["data"])
-	if m["type"] != "snapshot" || m["seq"] != float64(2) || string(data) != `{"asks":[["70100","0.5"]],"bids":[["69900","1.5"]]}` {
+	if m["type"] != "snapshot" || m["seq"] != float64(4) || string(data) != `{"asks":[["70100","0.7"]],"bids":[["69850","3"]]}` {
 		t.Fatalf("late snapshot: %v %s", m, data)
 	}
 	c2.send(`{"op":"unsubscribe","args":["depth:BTC-USDT"]}`)
 	if m := c2.next(); m["op"] != "unsubscribe" {
 		t.Fatalf("unsubscribe: %v", m)
 	}
-	emit(&marketv1.DepthSnapshot{Symbol: "BTC-USDT", Sequence: 10, Bids: levels("69950", "1")})
-	if m := c.next(); m["seq"] != float64(3) {
+	emit(&marketv1.DepthSnapshot{Symbol: "BTC-USDT", Sequence: 13, Bids: levels("69950", "1")})
+	if m := c.next(); m["seq"] != float64(5) {
 		t.Fatalf("update after the other left: %v", m)
 	}
 	hub.mu.Lock()
@@ -338,13 +361,12 @@ func TestWebSocketContractChannels(t *testing.T) {
 	if m := c.next(); m["type"] != "settled" || m["data"].(map[string]any)["mark_price"] != "60010" {
 		t.Fatalf("settled rate: %v", m)
 	}
-	// A contract's trade is public only: its fills come from
+	// A contract's public trades come from market.trades; its fills from
 	// derivatives-service.
 	c.send(`{"op":"subscribe","args":["fills"]}`)
-	emit(&tradev1.TradeExecuted{
-		TradeId: "t9", TradeNumber: 3, Symbol: "BTC-USDT-PERP", Price: "60010", Quantity: "0.5", QuoteQuantity: "30005",
-		TakerSide: orderv1.Side_SIDE_SELL, BuyerUserId: "u-1", SellerUserId: "u-2", BuyerFee: "0", SellerFee: "0",
-	})
+	emit(&marketv1.TradesPrinted{Symbol: "BTC-USDT-PERP", Trades: []*marketv1.PublicTrade{
+		{TradeId: "t9", TradeNumber: 3, Price: "60010", Quantity: "0.5", QuoteQuantity: "30005", TakerSide: orderv1.Side_SIDE_SELL, ExecutedAt: timestamppb.Now()},
+	}})
 	for {
 		m := c.next()
 		if m["op"] == "subscribe" {

@@ -141,3 +141,98 @@ func TestSimulateSettlesWholeOrNothing(t *testing.T) {
 		t.Fatal("an account that was not loaded must fail the simulation")
 	}
 }
+
+// houseTrade: a user's limit buy at 70100 takes 0.002 BTC at 70000 from
+// HOUSE's reference liquidity; HOUSE pays no fee (ADR-0015).
+func houseTrade() Trade {
+	tr := buyTrade()
+	tr.SellerOrderID, tr.SellerUserID, tr.SellerFee, tr.HouseSide = "", "house", decimal.Zero, HouseSell
+	return tr
+}
+
+func TestHouseTradesSettleOnMarketMaker(t *testing.T) {
+	ps, err := SettlementPostings(houseTrade())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ps) != 3 || ps[0].EntryType != EntryHouseTradeSettle || ps[1].EntryType != EntryTradeFee || ps[2].EntryType != EntryOrderUnfreeze {
+		t.Fatalf("postings: %+v", ps)
+	}
+	want := map[string]string{ // the user's frozen quote for HOUSE's base, straight from HOUSE's available
+		"buyer/SPOT/USDT/FROZEN": "-140", "SYSTEM/MARKET_MAKER/USDT/AVAILABLE": "140",
+		"SYSTEM/MARKET_MAKER/BTC/AVAILABLE": "-0.002", "buyer/SPOT/BTC/AVAILABLE": "0.002",
+	}
+	if got := lines(ps[0]); len(got) != len(want) || got["SYSTEM/MARKET_MAKER/BTC/AVAILABLE"] != "-0.002" ||
+		got["SYSTEM/MARKET_MAKER/USDT/AVAILABLE"] != "140" || got["buyer/SPOT/USDT/FROZEN"] != "-140" {
+		t.Fatalf("settle lines %v, want %v", got, want)
+	}
+	if got := lines(ps[1]); len(got) != 2 || got["buyer/SPOT/BTC/AVAILABLE"] != "-0.000002" {
+		t.Fatalf("only the user pays a fee: %v", got)
+	}
+
+	// HOUSE buying: the user's frozen base for HOUSE's quote.
+	tr := buyTrade()
+	tr.BuyerOrderID, tr.BuyerUserID, tr.BuyerFee, tr.BuyerLimit, tr.HouseSide = "", "house", decimal.Zero, decimal.Zero, HouseBuy
+	ps, err = SettlementPostings(tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ps) != 2 || ps[0].EntryType != EntryHouseTradeSettle {
+		t.Fatalf("postings: %+v", ps)
+	}
+	got := lines(ps[0])
+	if got["SYSTEM/MARKET_MAKER/USDT/AVAILABLE"] != "-140" || got["seller/SPOT/USDT/AVAILABLE"] != "140" ||
+		got["seller/SPOT/BTC/FROZEN"] != "-0.002" || got["SYSTEM/MARKET_MAKER/BTC/AVAILABLE"] != "0.002" {
+		t.Fatalf("settle lines %v", got)
+	}
+}
+
+func TestHouseMayGoNegative(t *testing.T) {
+	ps, err := SettlementPostings(houseTrade())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var accounts []Account
+	for _, k := range PostingAccounts(ps) {
+		a := Account{Key: k}
+		if k.OwnerID == "buyer" && k.Asset == "USDT" {
+			a.Frozen = dec("140.2")
+		}
+		accounts = append(accounts, a) // HOUSE holds nothing: an internal asset it sells
+	}
+	if err := Simulate(accounts, ps); err != nil {
+		t.Fatalf("a trade against HOUSE settles whatever HOUSE holds: %v", err)
+	}
+	if !SystemAccount(AccountMarketMaker, "BTC").MayGoNegative() || SystemAccount(AccountFeeRevenue, "BTC").MayGoNegative() {
+		t.Fatal("only MARKET_MAKER among the new ones may go negative")
+	}
+}
+
+func TestInvalidHouseTradesAreRefused(t *testing.T) {
+	for name, change := range map[string]func(*Trade){
+		"unknown side":         func(t *Trade) { t.HouseSide = "BOTH" },
+		"house pays a fee":     func(t *Trade) { t.SellerFee = dec("0.14") },
+		"house buys at limit":  func(t *Trade) { t.HouseSide, t.SellerFee, t.BuyerFee = HouseBuy, dec("0.14"), decimal.Zero },
+		"house buyer with fee": func(t *Trade) { t.HouseSide, t.SellerFee, t.BuyerLimit = HouseBuy, dec("0.14"), decimal.Zero },
+	} {
+		tr := houseTrade()
+		change(&tr)
+		if _, err := SettlementPostings(tr); !apperr.Is(err, "LEDGER_INVALID_TRADE") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+func TestHouseInventoryIsFundedAgainstAdjustment(t *testing.T) {
+	p, err := HouseAdjustmentPosting("adjust-house:k", []Credit{{Asset: "BTC", Amount: dec("0.24"), Decimals: 8}}, "HOUSE inventory")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := lines(p)
+	if p.EntryType != EntryManualAdjustment || got["SYSTEM/MARKET_MAKER/BTC/AVAILABLE"] != "0.24" || got["SYSTEM/ADJUSTMENT/BTC/AVAILABLE"] != "-0.24" {
+		t.Fatalf("posting %s %v", p.EntryType, got)
+	}
+	if _, err := HouseAdjustmentPosting("k", []Credit{{Asset: "BTC", Amount: dec("0.000000001"), Decimals: 8}}, "too fine"); err == nil {
+		t.Fatal("an amount finer than the asset was accepted")
+	}
+}

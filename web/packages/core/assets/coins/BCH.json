@@ -1,0 +1,17 @@
+{
+  "symbol": "BCH",
+  "name": {
+    "zh-CN": "比特币现金",
+    "en": "Bitcoin Cash"
+  },
+  "intro": {
+    "zh-CN": "比特币现金于 2017 年从比特币硬分叉而来，扩大区块容量以支持小额支付。",
+    "en": "Bitcoin Cash split from Bitcoin in 2017 with larger blocks meant for everyday payments."
+  },
+  "links": {
+    "website": "https://bitcoincash.org",
+    "explorer": "https://blockchair.com/bitcoin-cash"
+  },
+  "color": "emerald",
+  "asOf": "2026-10-01"
+}

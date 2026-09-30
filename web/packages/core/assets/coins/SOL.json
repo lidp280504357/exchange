@@ -1,0 +1,18 @@
+{
+  "symbol": "SOL",
+  "name": {
+    "zh-CN": "Solana",
+    "en": "Solana"
+  },
+  "intro": {
+    "zh-CN": "Solana 是 2020 年上线的高性能公链，采用权益证明，并以历史证明（Proof of History）为交易排序。",
+    "en": "Solana, launched in 2020, is a high-throughput proof-of-stake blockchain that orders transactions with Proof of History."
+  },
+  "links": {
+    "website": "https://solana.com",
+    "explorer": "https://explorer.solana.com",
+    "whitepaper": "https://solana.com/solana-whitepaper.pdf"
+  },
+  "color": "violet",
+  "asOf": "2026-10-01"
+}

@@ -157,10 +157,14 @@ func (r journals) Entries(ctx context.Context, ownerID, asset, entryType string,
 	if beforeID <= 0 {
 		beforeID = 1<<63 - 1
 	}
-	rows, err := r.q.Query(ctx, `SELECT l.id, j.id, j.entry_type, a.account_type, l.asset, l.amount, l.balance_kind,
-		l.available_after, l.frozen_after, j.posted_at
+	// A trade against HOUSE is a trade to its user (ADR-0015): it shows and
+	// filters as TRADE_SETTLE.
+	rows, err := r.q.Query(ctx, `SELECT l.id, j.id,
+			CASE WHEN j.entry_type = 'HOUSE_TRADE_SETTLE' THEN 'TRADE_SETTLE' ELSE j.entry_type END,
+			a.account_type, l.asset, l.amount, l.balance_kind, l.available_after, l.frozen_after, j.posted_at
 		FROM journal_lines l JOIN accounts a ON a.id = l.account_id JOIN journals j ON j.id = l.journal_id
-		WHERE a.owner_id = $1 AND a.owner_type = 'USER' AND l.id < $2 AND ($3 = '' OR l.asset = $3) AND ($4 = '' OR j.entry_type = $4)
+		WHERE a.owner_id = $1 AND a.owner_type = 'USER' AND l.id < $2 AND ($3 = '' OR l.asset = $3)
+			AND ($4 = '' OR j.entry_type = $4 OR ($4 = 'TRADE_SETTLE' AND j.entry_type = 'HOUSE_TRADE_SETTLE'))
 		ORDER BY l.id DESC LIMIT $5`, ownerID, beforeID, asset, entryType, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list entries: %w", err)

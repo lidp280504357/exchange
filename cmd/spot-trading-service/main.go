@@ -80,6 +80,11 @@ func setup(ctx context.Context, a *app.App) error {
 	if err != nil {
 		return err
 	}
+	// Flags decide whether a pair's orders trade only with HOUSE (ADR-0015).
+	features, err := bootstrap.Flags(ctx, a, cfg.Postgres)
+	if err != nil {
+		return err
+	}
 	store := postgres.NewStore(db, events)
 	svc := &application.Service{
 		Store:       store,
@@ -89,9 +94,10 @@ func setup(ctx context.Context, a *app.App) error {
 		// The latest trade anchors price bands and market protection.
 		Prices: prices.NewLastTrade(store.Read().Fills().LastTrade,
 			prices.ReferenceClient{Base: cfg.MarketURL, Client: &http.Client{Timeout: 2 * time.Second}}.Price, time.Second),
-		FeeFree: cfg.MarketMakerUsers,
-		Log:     a.Logger(),
-		Now:     time.Now,
+		Features: features,
+		FeeFree:  cfg.MarketMakerUsers,
+		Log:      a.Logger(),
+		Now:      time.Now,
 	}
 	// The engine's updates and fills.
 	if err := bootstrap.Consumer(ctx, a, cfg.Kafka, application.Consumer, []string{event.TopicOrder, event.TopicTrade}, consumer.Handler(svc)); err != nil {

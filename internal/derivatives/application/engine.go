@@ -98,7 +98,10 @@ type Trade struct {
 	SellerOrderID string
 	SellerUserID  string
 	BuyerIsMaker  bool
-	At            time.Time
+	// HouseSide is the side HOUSE took against its reference liquidity
+	// (ADR-0015), "" between users: that side has no order.
+	HouseSide domain.Side
+	At        time.Time
 }
 
 // OnTrade applies both sides of a trade, the buyer's first. Trades come in
@@ -136,13 +139,20 @@ func (s *Service) applyFill(ctx context.Context, c domain.Contract, t Trade, sid
 		if done, err := r.Fills().Has(ctx, t.ID, side); err != nil || done {
 			return err
 		}
-		o, err := r.Orders().GetForUpdate(ctx, orderID)
-		if errors.Is(err, domain.ErrOrderNotFound) {
-			s.Log.ErrorContext(ctx, "contract trade of an unknown order", "trade_id", t.ID, "order_id", orderID)
-			return nil
-		}
-		if err != nil {
-			return err
+		house := t.HouseSide == side
+		var o domain.Order
+		if house {
+			o = domain.HouseOrder(c, userID, side, t.Qty)
+		} else {
+			var err error
+			o, err = r.Orders().GetForUpdate(ctx, orderID)
+			if errors.Is(err, domain.ErrOrderNotFound) {
+				s.Log.ErrorContext(ctx, "contract trade of an unknown order", "trade_id", t.ID, "order_id", orderID)
+				return nil
+			}
+			if err != nil {
+				return err
+			}
 		}
 		held, err := r.Positions().OfUser(ctx, userID, t.Symbol)
 		if err != nil {
@@ -182,8 +192,10 @@ func (s *Service) applyFill(ctx context.Context, c domain.Contract, t Trade, sid
 				return err
 			}
 		}
-		if err := r.Orders().Update(ctx, plan.Order); err != nil {
-			return err
+		if !house {
+			if err := r.Orders().Update(ctx, plan.Order); err != nil {
+				return err
+			}
 		}
 		if err := r.Fills().Insert(ctx, plan.Fill); err != nil {
 			return err

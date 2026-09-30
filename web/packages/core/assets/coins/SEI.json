@@ -1,0 +1,17 @@
+{
+  "symbol": "SEI",
+  "name": {
+    "zh-CN": "Sei",
+    "en": "Sei"
+  },
+  "intro": {
+    "zh-CN": "Sei 是面向交易场景优化的高性能公链，兼容以太坊虚拟机。",
+    "en": "Sei is a high-performance blockchain tuned for trading and compatible with the Ethereum Virtual Machine."
+  },
+  "links": {
+    "website": "https://sei.io",
+    "explorer": "https://seitrace.com"
+  },
+  "color": "rose",
+  "asOf": "2026-10-01"
+}

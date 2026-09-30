@@ -49,6 +49,9 @@ type settings struct {
 	MarketURL string `koanf:"market_data_service_url"`
 	// MarketMakerUsers trade without fees (MARKET_MAKER_USER_IDS, §11.10).
 	MarketMakerUsers []string `koanf:"market_maker_user_ids"`
+	// HouseUser is HOUSE's account on the contracts (HOUSE_USER_ID,
+	// ADR-0015): its side of a trade against the reference liquidity.
+	HouseUser string `koanf:"house_user_id"`
 	// SettlementAsset is the contracts' margin asset (SETTLEMENT_ASSET).
 	SettlementAsset string `koanf:"settlement_asset"`
 	// ReconcileInterval is how often invariant 6 is checked
@@ -93,6 +96,11 @@ func setup(ctx context.Context, a *app.App) error {
 	if err != nil {
 		return err
 	}
+	// Flags decide whether a contract's orders trade only with HOUSE (ADR-0015).
+	features, err := bootstrap.Flags(ctx, a, cfg.Postgres)
+	if err != nil {
+		return err
+	}
 	store := postgres.NewStore(db, events)
 	book := marks.New()
 	svc := &application.Service{
@@ -103,6 +111,8 @@ func setup(ctx context.Context, a *app.App) error {
 		Marks:       book,
 		Rates:       rates.Client{Base: cfg.MarketURL, Client: &http.Client{Timeout: 5 * time.Second}},
 		FeeFree:     cfg.MarketMakerUsers,
+		HouseUser:   cfg.HouseUser,
+		Features:    features,
 		Log:         a.Logger(),
 		Now:         time.Now,
 		Metrics:     application.NewMetrics(a.Metrics()),

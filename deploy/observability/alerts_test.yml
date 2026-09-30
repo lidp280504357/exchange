@@ -168,3 +168,63 @@ tests:
             exp_annotations:
               summary: 2 pairs are halted because the reference feed has been lost for 5 minutes (market.halt_on_feed_loss)
               runbook: docs/runbook/market-data.md
+
+  - interval: 1m
+    input_series:
+      - series: 'market_house_inventory{job="market-maker", asset="BTC", backed="true"}'
+        values: '0.2 0.1 -0.05 -0.05'
+      - series: 'market_house_inventory{job="market-maker", asset="SOL", backed="false"}'
+        values: '-5 -5 -5 -5'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: HouseInventoryNegative
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: HouseInventoryNegative
+        exp_alerts:
+          - exp_labels: {severity: critical, job: market-maker, asset: BTC}
+            exp_annotations:
+              summary: "HOUSE holds -0.05 BTC: it sold more of a withdrawable asset than it had"
+              runbook: docs/runbook/market-maker.md
+
+  - interval: 1m
+    input_series:
+      - series: 'market_house_room{job="market-maker", symbol="BTC-USDT", side="sell"}'
+        values: '0x15'
+      - series: 'market_house_room{job="market-maker", symbol="BTC-USDT", side="buy"}'
+        values: '2x15'
+      - series: 'market_house_active{job="market-maker", symbol="BTC-USDT"}'
+        values: '1x15'
+      - series: 'market_house_room{job="market-maker", symbol="ETH-USDT", side="sell"}'
+        values: '0x15'
+      - series: 'market_house_active{job="market-maker", symbol="ETH-USDT"}'
+        values: '0x15'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: HouseRoomExhausted
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: HouseRoomExhausted
+        exp_alerts:
+          - exp_labels: {severity: warning, job: market-maker, symbol: BTC-USDT, side: sell}
+            exp_annotations:
+              summary: "HOUSE can no longer sell on BTC-USDT: its inventory or a cap is used up"
+              runbook: docs/runbook/market-maker.md
+
+  - interval: 1m
+    input_series:
+      - series: 'market_reference_book_age_seconds{job="market-data-service", symbol="SOL-USDT"}'
+        values: '0.2 -1 -1 -1 -1 -1'
+      - series: 'market_reference_book_age_seconds{job="market-data-service", symbol="BTC-USDT"}'
+        values: '0.1 0.3 0.2 0.1 0.4 0.2'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: ReferenceBookStale
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: ReferenceBookStale
+        exp_alerts:
+          - exp_labels: {severity: warning, job: market-data-service, symbol: SOL-USDT}
+            exp_annotations:
+              summary: "the reference book of SOL-USDT is out of sync or unchanged for 30 seconds; HOUSE offers nothing there"
+              runbook: docs/runbook/market-data.md

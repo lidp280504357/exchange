@@ -89,6 +89,9 @@ type Marks struct {
 	minSources  int
 	log         *slog.Logger
 	now         func() time.Time
+	// refBook is the reference market's book of a contract while it is
+	// usable (UseReferenceBooks); the engine's book otherwise.
+	refBook func(symbol string, limit int) (bids, asks []domain.Level, ok bool)
 
 	// Loop state, touched by the loop only.
 	contracts map[string]*contractMarks
@@ -104,6 +107,23 @@ type Marks struct {
 	used     *prometheus.GaugeVec
 	degraded *prometheus.GaugeVec
 	settled  prometheus.Counter
+}
+
+// UseReferenceBooks has the premium read the reference market's book of a
+// contract (Books.Levels) while it is usable (ADR-0015: HOUSE trades at
+// its prices), the engine's book otherwise. Call it before Run.
+func (m *Marks) UseReferenceBooks(levels func(symbol string, limit int) (bids, asks []domain.Level, ok bool)) {
+	m.refBook = levels
+}
+
+// book is the book a contract's premium reads.
+func (m *Marks) book(symbol string) (bids, asks []domain.Level) {
+	if m.refBook != nil {
+		if bids, asks, ok := m.refBook(symbol, PublicDepth); ok {
+			return bids, asks
+		}
+	}
+	return m.svc.Book(symbol)
 }
 
 type contractMarks struct {
@@ -324,7 +344,7 @@ func (m *Marks) tickContract(ctx context.Context, st *contractMarks, now time.Ti
 	m.used.WithLabelValues(spec.Symbol).Set(float64(included))
 	fresh := err == nil
 	if fresh {
-		bids, asks := m.svc.Book(spec.Symbol)
+		bids, asks := m.book(spec.Symbol)
 		var bid, ask decimal.Decimal
 		if len(bids) > 0 {
 			bid = bids[0].Price

@@ -1,0 +1,17 @@
+{
+  "symbol": "ICP",
+  "name": {
+    "zh-CN": "互联网计算机",
+    "en": "Internet Computer"
+  },
+  "intro": {
+    "zh-CN": "Internet Computer 由 DFINITY 基金会开发，2021 年上线，可以在链上直接运行完整的应用与网站。",
+    "en": "The Internet Computer, built by the DFINITY Foundation and launched in 2021, runs full applications and websites on chain."
+  },
+  "links": {
+    "website": "https://internetcomputer.org",
+    "explorer": "https://dashboard.internetcomputer.org"
+  },
+  "color": "violet",
+  "asOf": "2026-10-01"
+}

@@ -36,9 +36,16 @@ type Service struct {
 	Rates       ports.FundingRates
 	// FeeFree are the market maker's accounts (§11.10).
 	FeeFree []string
-	Log     *slog.Logger
-	Now     func() time.Time
-	Metrics *Metrics
+	// HouseUser is HOUSE's account (HOUSE_USER_ID, ADR-0015): its side of
+	// a trade against the reference liquidity has no order, and its
+	// positions are never liquidated or deleveraged.
+	HouseUser string
+	// Features decides whether a contract's orders trade only with HOUSE;
+	// nil means users always trade with each other.
+	Features ports.Features
+	Log      *slog.Logger
+	Now      func() time.Time
+	Metrics  *Metrics
 	// Started is when the service started: missing mark prices count as
 	// stale only some time after it.
 	Started time.Time

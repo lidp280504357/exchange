@@ -1,75 +1,117 @@
 {
   "fee_schedules": [
-    {"tier": "default", "maker_fee_rate": "0.001", "taker_fee_rate": "0.001"},
-    {"tier": "perp", "maker_fee_rate": "0.0002", "taker_fee_rate": "0.0005"}
+    {"maker_fee_rate":"0.001","taker_fee_rate":"0.001","tier":"default"},
+    {"maker_fee_rate":"0.0002","taker_fee_rate":"0.0005","tier":"perp"}
   ],
   "assets": [
-    {
-      "asset_code": "USDT", "name": "Tether USD", "decimals": 6, "rank": 3, "categories": ["stablecoin"],
-      "deposit_enabled": false, "withdraw_enabled": false, "trading_enabled": true, "risk_restricted": false,
-      "networks": []
-    },
-    {
-      "asset_code": "BTC", "name": "Bitcoin", "decimals": 8, "rank": 1, "categories": ["layer-1", "pow"],
-      "deposit_enabled": false, "withdraw_enabled": false, "trading_enabled": true, "risk_restricted": false,
-      "networks": []
-    },
-    {
-      "asset_code": "ETH", "name": "Ethereum", "decimals": 18, "rank": 2, "categories": ["layer-1", "smart-contracts"],
-      "deposit_enabled": true, "withdraw_enabled": true, "trading_enabled": true, "risk_restricted": false,
-      "networks": [
-        {
-          "network": "ETH-SEPOLIA", "chain": "11155111", "contract_address": "", "confirmations": 12,
-          "min_deposit": "0.001", "min_withdraw": "0.001", "withdraw_fee": "0.0002", "memo_required": false,
-          "deposit_enabled": true, "withdraw_enabled": true,
-          "display_name": "Sepolia", "address_format": "EVM", "eta_minutes": 3,
-          "explorer_tx_url": "https://sepolia.etherscan.io/tx/{tx}",
-          "explorer_address_url": "https://sepolia.etherscan.io/address/{address}"
-        }
-      ]
-    }
+    {"asset_code":"USDT","categories":["stablecoin"],"decimals":6,"deposit_enabled":false,"name":"Tether USD","networks":[],"rank":3,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"BTC","categories":["layer-1","pow"],"decimals":8,"deposit_enabled":false,"name":"Bitcoin","networks":[],"rank":1,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"ETH","categories":["layer-1","smart-contracts"],"decimals":18,"deposit_enabled":true,"name":"Ethereum","networks":[{"address_format":"EVM","chain":"11155111","confirmations":12,"contract_address":"","deposit_enabled":true,"display_name":"Sepolia","eta_minutes":3,"explorer_address_url":"https://sepolia.etherscan.io/address/{address}","explorer_tx_url":"https://sepolia.etherscan.io/tx/{tx}","memo_required":false,"min_deposit":"0.001","min_withdraw":"0.001","network":"ETH-SEPOLIA","withdraw_enabled":true,"withdraw_fee":"0.0002"}],"rank":2,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":true},
+    {"asset_code":"BNB","categories":["exchange","layer-1"],"decimals":6,"deposit_enabled":false,"name":"BNB","networks":[],"rank":4,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"SOL","categories":["layer-1","smart-contracts"],"decimals":6,"deposit_enabled":false,"name":"Solana","networks":[],"rank":5,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"XRP","categories":["payments"],"decimals":6,"deposit_enabled":false,"name":"XRP","networks":[],"rank":6,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"DOGE","categories":["meme","pow"],"decimals":6,"deposit_enabled":false,"name":"Dogecoin","networks":[],"rank":7,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"ADA","categories":["layer-1","pos"],"decimals":6,"deposit_enabled":false,"name":"Cardano","networks":[],"rank":8,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"TRX","categories":["layer-1","smart-contracts"],"decimals":6,"deposit_enabled":false,"name":"TRON","networks":[],"rank":9,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"HYPE","categories":["defi","layer-1"],"decimals":6,"deposit_enabled":false,"name":"Hyperliquid","networks":[],"rank":10,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"AVAX","categories":["layer-1","smart-contracts"],"decimals":6,"deposit_enabled":false,"name":"Avalanche","networks":[],"rank":11,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"LINK","categories":["oracle","infrastructure"],"decimals":6,"deposit_enabled":false,"name":"Chainlink","networks":[],"rank":12,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"DOT","categories":["layer-1","interoperability"],"decimals":6,"deposit_enabled":false,"name":"Polkadot","networks":[],"rank":13,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"LTC","categories":["pow","payments"],"decimals":6,"deposit_enabled":false,"name":"Litecoin","networks":[],"rank":14,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"BCH","categories":["pow","payments"],"decimals":6,"deposit_enabled":false,"name":"Bitcoin Cash","networks":[],"rank":15,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"1000SHIB","categories":["meme"],"decimals":6,"deposit_enabled":false,"name":"1000 Shiba Inu","networks":[],"rank":16,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"UNI","categories":["defi"],"decimals":6,"deposit_enabled":false,"name":"Uniswap","networks":[],"rank":17,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"NEAR","categories":["layer-1","ai"],"decimals":6,"deposit_enabled":false,"name":"NEAR Protocol","networks":[],"rank":18,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"XLM","categories":["payments"],"decimals":6,"deposit_enabled":false,"name":"Stellar","networks":[],"rank":19,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"ATOM","categories":["interoperability","layer-1"],"decimals":6,"deposit_enabled":false,"name":"Cosmos","networks":[],"rank":20,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"ICP","categories":["layer-1","infrastructure"],"decimals":6,"deposit_enabled":false,"name":"Internet Computer","networks":[],"rank":21,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"APT","categories":["layer-1"],"decimals":6,"deposit_enabled":false,"name":"Aptos","networks":[],"rank":22,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"ARB","categories":["layer-2"],"decimals":6,"deposit_enabled":false,"name":"Arbitrum","networks":[],"rank":23,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"OP","categories":["layer-2"],"decimals":6,"deposit_enabled":false,"name":"Optimism","networks":[],"rank":24,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"FIL","categories":["storage","depin"],"decimals":6,"deposit_enabled":false,"name":"Filecoin","networks":[],"rank":25,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"ETC","categories":["pow","layer-1"],"decimals":6,"deposit_enabled":false,"name":"Ethereum Classic","networks":[],"rank":26,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"HBAR","categories":["layer-1"],"decimals":6,"deposit_enabled":false,"name":"Hedera","networks":[],"rank":27,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"SUI","categories":["layer-1"],"decimals":6,"deposit_enabled":false,"name":"Sui","networks":[],"rank":28,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"1000PEPE","categories":["meme"],"decimals":6,"deposit_enabled":false,"name":"1000 Pepe","networks":[],"rank":29,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"RENDER","categories":["ai","depin"],"decimals":6,"deposit_enabled":false,"name":"Render","networks":[],"rank":30,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"INJ","categories":["defi","layer-1"],"decimals":6,"deposit_enabled":false,"name":"Injective","networks":[],"rank":31,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"TIA","categories":["infrastructure","layer-1"],"decimals":6,"deposit_enabled":false,"name":"Celestia","networks":[],"rank":32,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"SEI","categories":["layer-1"],"decimals":6,"deposit_enabled":false,"name":"Sei","networks":[],"rank":33,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"AAVE","categories":["defi"],"decimals":6,"deposit_enabled":false,"name":"Aave","networks":[],"rank":34,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"GRT","categories":["infrastructure","ai"],"decimals":6,"deposit_enabled":false,"name":"The Graph","networks":[],"rank":35,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"ALGO","categories":["layer-1","pos"],"decimals":6,"deposit_enabled":false,"name":"Algorand","networks":[],"rank":36,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"VET","categories":["layer-1"],"decimals":6,"deposit_enabled":false,"name":"VeChain","networks":[],"rank":37,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"POL","categories":["layer-2"],"decimals":6,"deposit_enabled":false,"name":"Polygon","networks":[],"rank":38,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"THETA","categories":["depin"],"decimals":6,"deposit_enabled":false,"name":"Theta Network","networks":[],"rank":39,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"EGLD","categories":["layer-1"],"decimals":6,"deposit_enabled":false,"name":"MultiversX","networks":[],"rank":40,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"XTZ","categories":["layer-1","pos"],"decimals":6,"deposit_enabled":false,"name":"Tezos","networks":[],"rank":41,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"SAND","categories":["metaverse","gaming"],"decimals":6,"deposit_enabled":false,"name":"The Sandbox","networks":[],"rank":42,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"MANA","categories":["metaverse","gaming"],"decimals":6,"deposit_enabled":false,"name":"Decentraland","networks":[],"rank":43,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"AXS","categories":["gaming"],"decimals":6,"deposit_enabled":false,"name":"Axie Infinity","networks":[],"rank":44,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"NEO","categories":["layer-1","smart-contracts"],"decimals":6,"deposit_enabled":false,"name":"Neo","networks":[],"rank":45,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"ZEC","categories":["privacy","pow"],"decimals":6,"deposit_enabled":false,"name":"Zcash","networks":[],"rank":46,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"TAO","categories":["ai"],"decimals":7,"deposit_enabled":false,"name":"Bittensor","networks":[],"rank":47,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"WLD","categories":["ai","infrastructure"],"decimals":6,"deposit_enabled":false,"name":"Worldcoin","networks":[],"rank":48,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"ENA","categories":["defi"],"decimals":6,"deposit_enabled":false,"name":"Ethena","networks":[],"rank":49,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"ONDO","categories":["rwa","defi"],"decimals":6,"deposit_enabled":false,"name":"Ondo","networks":[],"rank":50,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"JUP","categories":["defi"],"decimals":6,"deposit_enabled":false,"name":"Jupiter","networks":[],"rank":51,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false}
   ],
   "pairs": [
-    {
-      "symbol": "BTC-USDT", "base_asset": "BTC", "quote_asset": "USDT", "reference_symbol": "BTCUSDT",
-      "tick_size": "0.01", "lot_size": "0.0001", "min_quantity": "0.0001", "max_quantity": "100",
-      "min_notional": "5", "price_band": "0.1", "fee_tier": "default", "status": "PREPARE"
-    },
-    {
-      "symbol": "ETH-USDT", "base_asset": "ETH", "quote_asset": "USDT", "reference_symbol": "ETHUSDT",
-      "tick_size": "0.01", "lot_size": "0.0001", "min_quantity": "0.0001", "max_quantity": "1000",
-      "min_notional": "5", "price_band": "0.1", "fee_tier": "default", "status": "PREPARE"
-    },
-    {
-      "symbol": "ETH-BTC", "base_asset": "ETH", "quote_asset": "BTC",
-      "tick_size": "0.00001", "lot_size": "0.001", "min_quantity": "0.001", "max_quantity": "1000",
-      "min_notional": "0.0001", "price_band": "1", "fee_tier": "default", "status": "PREPARE"
-    }
+    {"base_asset":"BTC","fee_tier":"default","lot_size":"0.0001","max_quantity":"11.9283","min_notional":"5","min_quantity":"0.0001","price_band":"0.1","quote_asset":"USDT","reference_symbol":"BTCUSDT","status":"PREPARE","symbol":"BTC-USDT","tick_size":"0.01"},
+    {"base_asset":"ETH","fee_tier":"default","lot_size":"0.0001","max_quantity":"371.6035","min_notional":"5","min_quantity":"0.0001","price_band":"0.1","quote_asset":"USDT","reference_symbol":"ETHUSDT","status":"PREPARE","symbol":"ETH-USDT","tick_size":"0.01"},
+    {"base_asset":"ETH","fee_tier":"default","lot_size":"0.001","max_quantity":"1000","min_notional":"0.0001","min_quantity":"0.001","price_band":"1","quote_asset":"BTC","status":"PREPARE","symbol":"ETH-BTC","tick_size":"0.00001"},
+    {"base_asset":"SOL","fee_tier":"default","lot_size":"0.1","max_quantity":"100000","min_notional":"0.0001","min_quantity":"0.1","price_band":"1","quote_asset":"BTC","status":"PREPARE","symbol":"SOL-BTC","tick_size":"0.0000001"},
+    {"base_asset":"BNB","fee_tier":"default","lot_size":"0.001","max_quantity":"1300.745","min_notional":"5","min_quantity":"0.001","price_band":"0.1","quote_asset":"USDT","reference_symbol":"BNBUSDT","status":"PREPARE","symbol":"BNB-USDT","tick_size":"0.01"},
+    {"base_asset":"SOL","fee_tier":"default","lot_size":"0.001","max_quantity":"8439.53","min_notional":"5","min_quantity":"0.001","price_band":"0.1","quote_asset":"USDT","reference_symbol":"SOLUSDT","status":"PREPARE","symbol":"SOL-USDT","tick_size":"0.01"},
+    {"base_asset":"XRP","fee_tier":"default","lot_size":"0.1","max_quantity":"669254.4","min_notional":"5","min_quantity":"0.1","price_band":"0.1","quote_asset":"USDT","reference_symbol":"XRPUSDT","status":"PREPARE","symbol":"XRP-USDT","tick_size":"0.0001"},
+    {"base_asset":"DOGE","fee_tier":"default","lot_size":"1","max_quantity":"10556317","min_notional":"5","min_quantity":"1","price_band":"0.1","quote_asset":"USDT","reference_symbol":"DOGEUSDT","status":"PREPARE","symbol":"DOGE-USDT","tick_size":"0.00001"},
+    {"base_asset":"ADA","fee_tier":"default","lot_size":"0.1","max_quantity":"4043671.6","min_notional":"5","min_quantity":"0.1","price_band":"0.1","quote_asset":"USDT","reference_symbol":"ADAUSDT","status":"PREPARE","symbol":"ADA-USDT","tick_size":"0.0001"},
+    {"base_asset":"TRX","fee_tier":"default","lot_size":"0.1","max_quantity":"2961208.1","min_notional":"5","min_quantity":"0.1","price_band":"0.1","quote_asset":"USDT","reference_symbol":"TRXUSDT","status":"PREPARE","symbol":"TRX-USDT","tick_size":"0.0001"},
+    {"base_asset":"HYPE","fee_tier":"default","lot_size":"0.001","max_quantity":"10937.329","min_notional":"5","min_quantity":"0.001","price_band":"0.1","quote_asset":"USDT","reference_symbol":"HYPEUSDT","status":"PREPARE","symbol":"HYPE-USDT","tick_size":"0.01"},
+    {"base_asset":"AVAX","fee_tier":"default","lot_size":"0.01","max_quantity":"91107.87","min_notional":"5","min_quantity":"0.01","price_band":"0.1","quote_asset":"USDT","reference_symbol":"AVAXUSDT","status":"PREPARE","symbol":"AVAX-USDT","tick_size":"0.001"},
+    {"base_asset":"LINK","fee_tier":"default","lot_size":"0.01","max_quantity":"69367.36","min_notional":"5","min_quantity":"0.01","price_band":"0.1","quote_asset":"USDT","reference_symbol":"LINKUSDT","status":"PREPARE","symbol":"LINK-USDT","tick_size":"0.001"},
+    {"base_asset":"DOT","fee_tier":"default","lot_size":"0.01","max_quantity":"807102.5","min_notional":"5","min_quantity":"0.01","price_band":"0.1","quote_asset":"USDT","reference_symbol":"DOTUSDT","status":"PREPARE","symbol":"DOT-USDT","tick_size":"0.001"},
+    {"base_asset":"LTC","fee_tier":"default","lot_size":"0.001","max_quantity":"14852.22","min_notional":"5","min_quantity":"0.001","price_band":"0.1","quote_asset":"USDT","reference_symbol":"LTCUSDT","status":"PREPARE","symbol":"LTC-USDT","tick_size":"0.01"},
+    {"base_asset":"BCH","fee_tier":"default","lot_size":"0.001","max_quantity":"3260.515","min_notional":"5","min_quantity":"0.001","price_band":"0.1","quote_asset":"USDT","reference_symbol":"BCHUSDT","status":"PREPARE","symbol":"BCH-USDT","tick_size":"0.1"},
+    {"base_asset":"1000SHIB","fee_tier":"default","lot_size":"0.1","max_quantity":"173010380.6","min_notional":"5","min_quantity":"0.1","price_band":"0.1","quote_asset":"USDT","reference_multiplier":"1000","reference_symbol":"SHIBUSDT","status":"PREPARE","symbol":"1000SHIB-USDT","tick_size":"0.00001"},
+    {"base_asset":"UNI","fee_tier":"default","lot_size":"0.01","max_quantity":"112549.24","min_notional":"5","min_quantity":"0.01","price_band":"0.1","quote_asset":"USDT","reference_symbol":"UNIUSDT","status":"PREPARE","symbol":"UNI-USDT","tick_size":"0.001"},
+    {"base_asset":"NEAR","fee_tier":"default","lot_size":"0.1","max_quantity":"185597.6","min_notional":"5","min_quantity":"0.1","price_band":"0.1","quote_asset":"USDT","reference_symbol":"NEARUSDT","status":"PREPARE","symbol":"NEAR-USDT","tick_size":"0.001"},
+    {"base_asset":"XLM","fee_tier":"default","lot_size":"1","max_quantity":"4391743","min_notional":"5","min_quantity":"1","price_band":"0.1","quote_asset":"USDT","reference_symbol":"XLMUSDT","status":"PREPARE","symbol":"XLM-USDT","tick_size":"0.0001"},
+    {"base_asset":"ATOM","fee_tier":"default","lot_size":"0.01","max_quantity":"573723.46","min_notional":"5","min_quantity":"0.01","price_band":"0.1","quote_asset":"USDT","reference_symbol":"ATOMUSDT","status":"PREPARE","symbol":"ATOM-USDT","tick_size":"0.001"},
+    {"base_asset":"ICP","fee_tier":"default","lot_size":"0.01","max_quantity":"299580.58","min_notional":"5","min_quantity":"0.01","price_band":"0.1","quote_asset":"USDT","reference_symbol":"ICPUSDT","status":"PREPARE","symbol":"ICP-USDT","tick_size":"0.001"},
+    {"base_asset":"APT","fee_tier":"default","lot_size":"0.01","max_quantity":"1294498.38","min_notional":"5","min_quantity":"0.01","price_band":"0.1","quote_asset":"USDT","reference_symbol":"APTUSDT","status":"PREPARE","symbol":"APT-USDT","tick_size":"0.0001"},
+    {"base_asset":"ARB","fee_tier":"default","lot_size":"0.1","max_quantity":"4904364.8","min_notional":"5","min_quantity":"0.1","price_band":"0.1","quote_asset":"USDT","reference_symbol":"ARBUSDT","status":"PREPARE","symbol":"ARB-USDT","tick_size":"0.0001"},
+    {"base_asset":"OP","fee_tier":"default","lot_size":"0.01","max_quantity":"7710100.23","min_notional":"5","min_quantity":"0.01","price_band":"0.1","quote_asset":"USDT","reference_symbol":"OPUSDT","status":"PREPARE","symbol":"OP-USDT","tick_size":"0.0001"},
+    {"base_asset":"FIL","fee_tier":"default","lot_size":"0.01","max_quantity":"959969.28","min_notional":"5","min_quantity":"0.01","price_band":"0.1","quote_asset":"USDT","reference_symbol":"FILUSDT","status":"PREPARE","symbol":"FIL-USDT","tick_size":"0.0001"},
+    {"base_asset":"ETC","fee_tier":"default","lot_size":"0.01","max_quantity":"112485.93","min_notional":"5","min_quantity":"0.01","price_band":"0.1","quote_asset":"USDT","reference_symbol":"ETCUSDT","status":"PREPARE","symbol":"ETC-USDT","tick_size":"0.01"},
+    {"base_asset":"HBAR","fee_tier":"default","lot_size":"1","max_quantity":"9452689","min_notional":"5","min_quantity":"1","price_band":"0.1","quote_asset":"USDT","reference_symbol":"HBARUSDT","status":"PREPARE","symbol":"HBAR-USDT","tick_size":"0.00001"},
+    {"base_asset":"SUI","fee_tier":"default","lot_size":"0.1","max_quantity":"852442.2","min_notional":"5","min_quantity":"0.1","price_band":"0.1","quote_asset":"USDT","reference_symbol":"SUIUSDT","status":"PREPARE","symbol":"SUI-USDT","tick_size":"0.0001"},
+    {"base_asset":"1000PEPE","fee_tier":"default","lot_size":"0.1","max_quantity":"232018561.4","min_notional":"5","min_quantity":"0.1","price_band":"0.1","quote_asset":"USDT","reference_multiplier":"1000","reference_symbol":"PEPEUSDT","status":"PREPARE","symbol":"1000PEPE-USDT","tick_size":"0.00001"},
+    {"base_asset":"RENDER","fee_tier":"default","lot_size":"0.01","max_quantity":"520833.33","min_notional":"5","min_quantity":"0.01","price_band":"0.1","quote_asset":"USDT","reference_symbol":"RENDERUSDT","status":"PREPARE","symbol":"RENDER-USDT","tick_size":"0.001"},
+    {"base_asset":"INJ","fee_tier":"default","lot_size":"0.01","max_quantity":"134390.53","min_notional":"5","min_quantity":"0.01","price_band":"0.1","quote_asset":"USDT","reference_symbol":"INJUSDT","status":"PREPARE","symbol":"INJ-USDT","tick_size":"0.001"},
+    {"base_asset":"TIA","fee_tier":"default","lot_size":"0.01","max_quantity":"2261931.68","min_notional":"5","min_quantity":"0.01","price_band":"0.1","quote_asset":"USDT","reference_symbol":"TIAUSDT","status":"PREPARE","symbol":"TIA-USDT","tick_size":"0.0001"},
+    {"base_asset":"SEI","fee_tier":"default","lot_size":"0.1","max_quantity":"13489815.1","min_notional":"5","min_quantity":"0.1","price_band":"0.1","quote_asset":"USDT","reference_symbol":"SEIUSDT","status":"PREPARE","symbol":"SEI-USDT","tick_size":"0.00001"},
+    {"base_asset":"AAVE","fee_tier":"default","lot_size":"0.001","max_quantity":"6251.953","min_notional":"5","min_quantity":"0.001","price_band":"0.1","quote_asset":"USDT","reference_symbol":"AAVEUSDT","status":"PREPARE","symbol":"AAVE-USDT","tick_size":"0.01"},
+    {"base_asset":"GRT","fee_tier":"default","lot_size":"1","max_quantity":"34118048","min_notional":"5","min_quantity":"1","price_band":"0.1","quote_asset":"USDT","reference_symbol":"GRTUSDT","status":"PREPARE","symbol":"GRT-USDT","tick_size":"0.00001"},
+    {"base_asset":"ALGO","fee_tier":"default","lot_size":"1","max_quantity":"7942811","min_notional":"5","min_quantity":"1","price_band":"0.1","quote_asset":"USDT","reference_symbol":"ALGOUSDT","status":"PREPARE","symbol":"ALGO-USDT","tick_size":"0.0001"},
+    {"base_asset":"VET","fee_tier":"default","lot_size":"1","max_quantity":"112841345","min_notional":"5","min_quantity":"1","price_band":"0.1","quote_asset":"USDT","reference_symbol":"VETUSDT","status":"PREPARE","symbol":"VET-USDT","tick_size":"0.000001"},
+    {"base_asset":"POL","fee_tier":"default","lot_size":"0.1","max_quantity":"8853474.9","min_notional":"5","min_quantity":"0.1","price_band":"0.1","quote_asset":"USDT","reference_symbol":"POLUSDT","status":"PREPARE","symbol":"POL-USDT","tick_size":"0.00001"},
+    {"base_asset":"THETA","fee_tier":"default","lot_size":"0.1","max_quantity":"4430660.1","min_notional":"5","min_quantity":"0.1","price_band":"0.1","quote_asset":"USDT","reference_symbol":"THETAUSDT","status":"PREPARE","symbol":"THETA-USDT","tick_size":"0.0001"},
+    {"base_asset":"EGLD","fee_tier":"default","lot_size":"0.01","max_quantity":"222222.22","min_notional":"5","min_quantity":"0.01","price_band":"0.1","quote_asset":"USDT","reference_symbol":"EGLDUSDT","status":"PREPARE","symbol":"EGLD-USDT","tick_size":"0.001"},
+    {"base_asset":"XTZ","fee_tier":"default","lot_size":"0.1","max_quantity":"3172588.8","min_notional":"5","min_quantity":"0.1","price_band":"0.1","quote_asset":"USDT","reference_symbol":"XTZUSDT","status":"PREPARE","symbol":"XTZ-USDT","tick_size":"0.0001"},
+    {"base_asset":"SAND","fee_tier":"default","lot_size":"1","max_quantity":"22909507","min_notional":"5","min_quantity":"1","price_band":"0.1","quote_asset":"USDT","reference_symbol":"SANDUSDT","status":"PREPARE","symbol":"SAND-USDT","tick_size":"0.00001"},
+    {"base_asset":"MANA","fee_tier":"default","lot_size":"1","max_quantity":"11160714","min_notional":"5","min_quantity":"1","price_band":"0.1","quote_asset":"USDT","reference_symbol":"MANAUSDT","status":"PREPARE","symbol":"MANA-USDT","tick_size":"0.0001"},
+    {"base_asset":"AXS","fee_tier":"default","lot_size":"0.01","max_quantity":"871080.13","min_notional":"5","min_quantity":"0.01","price_band":"0.1","quote_asset":"USDT","reference_symbol":"AXSUSDT","status":"PREPARE","symbol":"AXS-USDT","tick_size":"0.001"},
+    {"base_asset":"NEO","fee_tier":"default","lot_size":"0.01","max_quantity":"395413.2","min_notional":"5","min_quantity":"0.01","price_band":"0.1","quote_asset":"USDT","reference_symbol":"NEOUSDT","status":"PREPARE","symbol":"NEO-USDT","tick_size":"0.001"},
+    {"base_asset":"ZEC","fee_tier":"default","lot_size":"0.001","max_quantity":"698.797","min_notional":"5","min_quantity":"0.001","price_band":"0.1","quote_asset":"USDT","reference_symbol":"ZECUSDT","status":"PREPARE","symbol":"ZEC-USDT","tick_size":"0.01"},
+    {"base_asset":"TAO","fee_tier":"default","lot_size":"0.0001","max_quantity":"3293.8076","min_notional":"5","min_quantity":"0.0001","price_band":"0.1","quote_asset":"USDT","reference_symbol":"TAOUSDT","status":"PREPARE","symbol":"TAO-USDT","tick_size":"0.1"},
+    {"base_asset":"WLD","fee_tier":"default","lot_size":"0.1","max_quantity":"1851851.8","min_notional":"5","min_quantity":"0.1","price_band":"0.1","quote_asset":"USDT","reference_symbol":"WLDUSDT","status":"PREPARE","symbol":"WLD-USDT","tick_size":"0.0001"},
+    {"base_asset":"ENA","fee_tier":"default","lot_size":"0.01","max_quantity":"3750937.73","min_notional":"5","min_quantity":"0.01","price_band":"0.1","quote_asset":"USDT","reference_symbol":"ENAUSDT","status":"PREPARE","symbol":"ENA-USDT","tick_size":"0.0001"},
+    {"base_asset":"ONDO","fee_tier":"default","lot_size":"0.1","max_quantity":"1993620.4","min_notional":"5","min_quantity":"0.1","price_band":"0.1","quote_asset":"USDT","reference_symbol":"ONDOUSDT","status":"PREPARE","symbol":"ONDO-USDT","tick_size":"0.0001"},
+    {"base_asset":"JUP","fee_tier":"default","lot_size":"0.1","max_quantity":"3018412.3","min_notional":"5","min_quantity":"0.1","price_band":"0.1","quote_asset":"USDT","reference_symbol":"JUPUSDT","status":"PREPARE","symbol":"JUP-USDT","tick_size":"0.0001"}
   ],
   "contracts": [
-    {
-      "symbol": "BTC-USDT-PERP", "type": "PERPETUAL", "base_asset": "BTC", "quote_asset": "USDT", "index_symbol": "BTC-USDT",
-      "tick_size": "0.1", "lot_size": "0.001", "min_quantity": "0.001", "max_quantity": "100", "min_notional": "5",
-      "price_band": "0.05", "funding_interval_hours": 8, "interest_rate": "0.0001", "funding_cap": "0.0075",
-      "impact_notional": "10000", "fee_tier": "perp", "status": "TRADING",
-      "risk_tiers": [
-        {"max_notional": "50000", "max_leverage": 50, "mmr": "0.004"},
-        {"max_notional": "250000", "max_leverage": 20, "mmr": "0.01"},
-        {"max_notional": "1000000", "max_leverage": 10, "mmr": "0.025"},
-        {"max_notional": "5000000", "max_leverage": 5, "mmr": "0.05"}
-      ]
-    },
-    {
-      "symbol": "ETH-USDT-PERP", "type": "PERPETUAL", "base_asset": "ETH", "quote_asset": "USDT", "index_symbol": "ETH-USDT",
-      "tick_size": "0.01", "lot_size": "0.01", "min_quantity": "0.01", "max_quantity": "1000", "min_notional": "5",
-      "price_band": "0.05", "funding_interval_hours": 8, "interest_rate": "0.0001", "funding_cap": "0.0075",
-      "impact_notional": "10000", "fee_tier": "perp", "status": "TRADING",
-      "risk_tiers": [
-        {"max_notional": "25000", "max_leverage": 50, "mmr": "0.005"},
-        {"max_notional": "100000", "max_leverage": 20, "mmr": "0.01"},
-        {"max_notional": "500000", "max_leverage": 10, "mmr": "0.025"},
-        {"max_notional": "2000000", "max_leverage": 5, "mmr": "0.05"}
-      ]
-    }
+    {"base_asset":"BTC","fee_tier":"perp","funding_cap":"0.0075","funding_interval_hours":8,"impact_notional":"10000","index_symbol":"BTC-USDT","interest_rate":"0.0001","lot_size":"0.001","max_quantity":"100","min_notional":"5","min_quantity":"0.001","price_band":"0.05","quote_asset":"USDT","risk_tiers":[{"max_leverage":50,"max_notional":"50000","mmr":"0.004"},{"max_leverage":20,"max_notional":"250000","mmr":"0.01"},{"max_leverage":10,"max_notional":"1000000","mmr":"0.025"},{"max_leverage":5,"max_notional":"5000000","mmr":"0.05"}],"status":"TRADING","symbol":"BTC-USDT-PERP","tick_size":"0.1","type":"PERPETUAL"},
+    {"base_asset":"ETH","fee_tier":"perp","funding_cap":"0.0075","funding_interval_hours":8,"impact_notional":"10000","index_symbol":"ETH-USDT","interest_rate":"0.0001","lot_size":"0.01","max_quantity":"1000","min_notional":"5","min_quantity":"0.01","price_band":"0.05","quote_asset":"USDT","risk_tiers":[{"max_leverage":50,"max_notional":"25000","mmr":"0.005"},{"max_leverage":20,"max_notional":"100000","mmr":"0.01"},{"max_leverage":10,"max_notional":"500000","mmr":"0.025"},{"max_leverage":5,"max_notional":"2000000","mmr":"0.05"}],"status":"TRADING","symbol":"ETH-USDT-PERP","tick_size":"0.01","type":"PERPETUAL"}
   ]
 }

@@ -4,7 +4,7 @@
 # on ETH-BTC at 0.0402 while lib/md-check.mjs follows the WebSocket
 # channels (depth, trades, ticker, candles without sign-in; the buyer's
 # orders and fills) and checks REST trades, ticker, candles and depth
-# afterwards. ETH-BTC has no market maker; needs it in TRADING and no other
+# afterwards. ETH-BTC has no HOUSE liquidity; needs it in TRADING and no other
 # resting order at 0.0402.
 #
 #   scripts/e2e/marketdata.sh
