@@ -19,16 +19,24 @@ type history struct {
 	mu     sync.Mutex
 	klines map[domain.Interval][]domain.Candle
 	calls  map[domain.Interval]int
+	order  []domain.Interval
+	// Reads of the held intervals wait until release is closed.
+	hold    map[domain.Interval]bool
+	release chan struct{}
 }
 
 func (h *history) Klines(_ context.Context, ref ports.Reference, i domain.Interval, _ time.Time, limit int) ([]domain.Candle, error) {
 	symbol := ref.Symbol
+	if h.hold[i] {
+		<-h.release
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.calls == nil {
 		h.calls = map[domain.Interval]int{}
 	}
 	h.calls[i]++
+	h.order = append(h.order, i)
 	list := h.klines[i]
 	if len(list) > limit {
 		list = list[len(list)-limit:]
@@ -289,5 +297,46 @@ func TestReferenceCandlesServeTheSourcesHistory(t *testing.T) {
 	}
 	if _, err := rc.Candles(context.Background(), "BTC-USDT", ref("BTC-USDT", "BTCUSDT"), "2d", time.Time{}, time.Time{}, 3); err == nil {
 		t.Fatal("an unknown interval")
+	}
+}
+
+func TestOpenCandlesAreReadOneAtATimeTheChartedFirst(t *testing.T) {
+	h := &history{}
+	rc := newReferenceRig(h)
+	// 10:07 is midway through every interval but 1m: twelve to read.
+	rc.Observe(minute("2026-09-30T10:07:00Z", "104", "104", "103", "103", "1"))
+	rc.wg.Wait()
+	h.mu.Lock()
+	order := slices.Clone(h.order)
+	h.mu.Unlock()
+	if len(order) != len(domain.Intervals)-1 || order[0] != domain.Minute15 || order[1] != domain.Hour1 || order[len(order)-1] != domain.Month1 {
+		t.Fatalf("read %v", order)
+	}
+}
+
+func TestAChartRequestSeedsItsOpenCandle(t *testing.T) {
+	h := &history{hold: map[domain.Interval]bool{domain.Minute15: true}, release: make(chan struct{}), klines: map[domain.Interval][]domain.Candle{
+		domain.Hour1: {{
+			OpenTime: at("2026-09-30T10:00:00Z"), Open: d("99"), High: d("105"), Low: d("98"), Close: d("104"), Volume: d("10"),
+			QuoteVolume: d("1000"), Trades: 7,
+		}},
+	}}
+	rc := newReferenceRig(h)
+	rc.now = func() time.Time { return at("2026-09-30T10:07:30Z") }
+	// The initializer starts with 15m and waits at the source.
+	rc.Observe(minute("2026-09-30T10:07:00Z", "104", "104", "103", "103", "1"))
+	if _, err := rc.Candles(context.Background(), "BTC-USDT", ref("BTC-USDT", "BTCUSDT"), "1h", time.Time{}, time.Time{}, 1); err != nil {
+		t.Fatal(err)
+	}
+	rc.mu.Lock()
+	o := rc.open["BTC-USDT"][domain.Hour1]
+	rc.mu.Unlock()
+	if o == nil || !o.c.Open.Equal(d("99")) || !o.base.Volume.Equal(d("9")) {
+		t.Fatalf("1h after the chart request: %+v", o)
+	}
+	close(h.release)
+	rc.wg.Wait()
+	if n := h.count(domain.Hour1); n != 1 {
+		t.Fatalf("1h read %d times; the initializer skips a seeded interval", n)
 	}
 }

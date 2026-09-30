@@ -82,6 +82,9 @@ type aggTradeRow struct {
 	Quantity     string `json:"q"`
 	Time         int64  `json:"T"`
 	BuyerIsMaker bool   `json:"m"`
+	// BestMatch keeps "M" (spot's best price match, true) out of
+	// BuyerIsMaker: keys that differ only in case need a field each.
+	BestMatch bool `json:"M"`
 }
 
 // RecentTrades returns ref's latest aggregate trades, oldest first.
@@ -202,9 +205,13 @@ func (s *Source) BookStream(ctx context.Context, refs []ports.Reference, futures
 		var msg struct {
 			Data json.RawMessage `json:"data"`
 		}
+		// Every key the header's fields match regardless of case needs a
+		// field of its own: without EventTime, "E" (a number) would land in
+		// Event and fail the whole message.
 		var head struct {
-			Event  string `json:"e"`
-			Symbol string `json:"s"`
+			Event     string `json:"e"`
+			EventTime int64  `json:"E"`
+			Symbol    string `json:"s"`
 		}
 		if json.Unmarshal(data, &msg) != nil || json.Unmarshal(msg.Data, &head) != nil {
 			continue

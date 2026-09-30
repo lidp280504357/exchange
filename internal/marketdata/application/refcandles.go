@@ -45,10 +45,29 @@ type ReferenceCandles struct {
 	mu      sync.Mutex
 	open    map[string]map[domain.Interval]*openCandle // by followed pair
 	closed  map[string][]domain.Candle                 // ended since the last push
-	pending map[string]bool                            // pair|interval being initialized
+	pending map[string]bool                            // pair|interval queued or being initialized
+	queue   []initRequest                              // waiting for the source, see initialize
+	working bool                                       // the initializer is running
 	cache   map[string]cachedCandles
 	wg      sync.WaitGroup
 }
+
+// initRequest is an open candle to read from the source.
+type initRequest struct {
+	ref      string
+	interval domain.Interval
+}
+
+// initRank orders the open candles read from the source: the intervals
+// charted most first (the terminals open on 15m).
+var initRank = map[domain.Interval]int{
+	domain.Minute15: 0, domain.Hour1: 1, domain.Hour4: 2, domain.Day1: 3, domain.Minute5: 4, domain.Minute30: 5, domain.Week1: 6,
+	domain.Minute3: 7, domain.Hour2: 8, domain.Hour6: 9, domain.Hour12: 10, domain.Month1: 11,
+}
+
+// initTimeout bounds one read of an open candle, the wait for its turn at
+// the source included.
+const initTimeout = 30 * time.Second
 
 // ReferenceMap tells which listed symbols show which reference market: a
 // pair its own (its reference_symbol), a contract its index pair's. The
@@ -194,6 +213,9 @@ func (rc *ReferenceCandles) Candles(ctx context.Context, symbol string, ref port
 	}
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
+	if to.IsZero() && len(list) > 0 && i != domain.Minute1 {
+		rc.seedLocked(ref.Symbol, i, list[len(list)-1]) // the latest page ends with the open candle
+	}
 	open := rc.open[ref.Symbol][i]
 	out := make([]domain.Candle, 0, len(list))
 	for _, c := range list {
@@ -267,48 +289,95 @@ func (o *openCandle) add(k domain.Candle) {
 	o.changed = true
 }
 
-// initialize reads the open candle of an interval from the source (locked
-// by the caller; the fetch runs apart). The earlier minutes' volumes are
-// the source's total less the followed minute's.
+// initialize queues the open candle of an interval to be read from the
+// source (locked by the caller). One reader works through the queue, the
+// most charted intervals first: after a restart every followed pair finds
+// most intervals midway (50 pairs, some 600 candles), and reading them all
+// at once would crowd the reference books' snapshots out of the source's
+// request budget. A chart request seeds its interval sooner (Candles).
 func (rc *ReferenceCandles) initialize(ref string, i domain.Interval) {
 	key := ref + "|" + string(i)
 	if rc.pending[key] {
 		return
 	}
-	mapped, ok := rc.refs.cached()[ref]
-	if !ok {
+	if _, ok := rc.refs.cached()[ref]; !ok {
 		return // the next update asks again once the mapping is known
 	}
 	rc.pending[key] = true
-	rc.wg.Add(1)
-	go func() {
-		defer rc.wg.Done()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		got, err := rc.history.Klines(ctx, mapped, i, time.Time{}, 1)
+	rc.queue = append(rc.queue, initRequest{ref: ref, interval: i})
+	if !rc.working {
+		rc.working = true
+		rc.wg.Add(1)
+		go rc.initializer()
+	}
+}
+
+// initializer reads the queued open candles one by one until the queue is
+// empty.
+func (rc *ReferenceCandles) initializer() {
+	defer rc.wg.Done()
+	for {
 		rc.mu.Lock()
-		defer rc.mu.Unlock()
-		delete(rc.pending, key)
-		if err != nil || len(got) == 0 {
-			if err != nil {
-				rc.log.WarnContext(ctx, "reference K-lines: open candle unavailable", "symbol", ref, "interval", i, "error", err)
-			}
-			return // the next update asks again
-		}
-		minute := rc.open[ref][domain.Minute1]
-		b := got[len(got)-1]
-		if minute == nil || !b.OpenTime.Equal(i.Start(minute.minute.OpenTime)) || rc.open[ref][i] != nil {
+		if len(rc.queue) == 0 {
+			rc.working = false
+			rc.mu.Unlock()
 			return
 		}
-		m := minute.minute
-		o := &openCandle{c: b, minute: m, changed: true}
-		o.c.Symbol, o.c.Interval = ref, i
-		o.base.Volume = decimal.Max(b.Volume.Sub(m.Volume), decimal.Zero)
-		o.base.QuoteVolume = decimal.Max(b.QuoteVolume.Sub(m.QuoteVolume), decimal.Zero)
-		o.base.Trades = max(b.Trades-m.Trades, 0)
-		o.c.High, o.c.Low, o.c.Close = decimal.Max(b.High, m.High), decimal.Min(b.Low, m.Low), m.Close
-		rc.open[ref][i] = o
-	}()
+		next := 0
+		for k, q := range rc.queue {
+			if initRank[q.interval] < initRank[rc.queue[next].interval] {
+				next = k
+			}
+		}
+		req := rc.queue[next]
+		rc.queue = slices.Delete(rc.queue, next, next+1)
+		mapped, known := rc.refs.cached()[req.ref]
+		done := rc.open[req.ref][req.interval] != nil // seeded by a chart request meanwhile
+		rc.mu.Unlock()
+		if !known || done {
+			rc.forget(req)
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), initTimeout)
+		got, err := rc.history.Klines(ctx, mapped, req.interval, time.Time{}, 1)
+		cancel()
+		rc.mu.Lock()
+		delete(rc.pending, req.ref+"|"+string(req.interval))
+		if err != nil || len(got) == 0 {
+			rc.mu.Unlock()
+			if err != nil {
+				rc.log.Warn("reference K-lines: open candle unavailable", "symbol", req.ref, "interval", req.interval, "error", err)
+			}
+			continue // the next update asks again
+		}
+		rc.seedLocked(req.ref, req.interval, got[len(got)-1])
+		rc.mu.Unlock()
+	}
+}
+
+func (rc *ReferenceCandles) forget(req initRequest) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	delete(rc.pending, req.ref+"|"+string(req.interval))
+}
+
+// seedLocked starts the open candle of an interval from the source's
+// candle b when it is the one the followed minute belongs to and the
+// interval has none yet: the earlier minutes' volumes are the source's
+// total less the followed minute's. rc.mu is held.
+func (rc *ReferenceCandles) seedLocked(ref string, i domain.Interval, b domain.Candle) {
+	minute := rc.open[ref][domain.Minute1]
+	if minute == nil || !b.OpenTime.Equal(i.Start(minute.minute.OpenTime)) || rc.open[ref][i] != nil {
+		return
+	}
+	m := minute.minute
+	o := &openCandle{c: b, minute: m, changed: true}
+	o.c.Symbol, o.c.Interval = ref, i
+	o.base.Volume = decimal.Max(b.Volume.Sub(m.Volume), decimal.Zero)
+	o.base.QuoteVolume = decimal.Max(b.QuoteVolume.Sub(m.QuoteVolume), decimal.Zero)
+	o.base.Trades = max(b.Trades-m.Trades, 0)
+	o.c.High, o.c.Low, o.c.Close = decimal.Max(b.High, m.High), decimal.Min(b.Low, m.Low), m.Close
+	rc.open[ref][i] = o
 }
 
 // Push turns the platform's updates into what a push publishes: the
