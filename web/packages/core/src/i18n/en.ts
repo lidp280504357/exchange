@@ -14,7 +14,6 @@ export const en = {
     products: "Products", support: "Support", about: "About", toMobile: "Mobile site", toPC: "Desktop site",
     copyright: "© 2026 Astras · a learning project with simulated funds",
     risk: "Digital asset prices swing widely. This is a test environment for learning; every balance is simulated.",
-    legacy: "Previous version",
   },
   common: {
     loading: "Loading…", empty: "Nothing here", retry: "Retry", error: "Something went wrong", confirm: "Confirm", cancel: "Cancel",

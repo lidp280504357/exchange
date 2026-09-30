@@ -3,9 +3,9 @@
 # site's page and SPA fallback, cache headers, the device routing between
 # astras.vip and m.astras.vip (site_pref overrides it), the admin console's
 # security headers, the API reference, the design system catalogue and the
-# PWA manifest; then the browser smoke tests in headless Chrome (skipped
-# when no Chrome is found): the PC site (web/e2e/pc-smoke.mjs) and the
-# previous H5 at /h5/ (web/h5/e2e/smoke.mjs).
+# PWA manifest and service worker; then the browser smoke tests in
+# headless Chrome (skipped when no Chrome is found): the PC site
+# (web/e2e/pc-smoke.mjs) and the mobile site (web/e2e/m-smoke.mjs).
 #
 #   scripts/e2e/web.sh
 set -euo pipefail
@@ -39,14 +39,23 @@ echo "== device routing"
 [[ $(page "$BASE/markets" "$PHONE" "site_pref=pc") == "200 " ]] || fail "site_pref=pc keeps a phone on the PC site"
 [[ $(page "$M_BASE/trade/BTC-USDT" "$DESKTOP") == "302 $BASE/trade/BTC-USDT" ]] || fail "a desktop on the mobile site: $(page "$M_BASE/trade/BTC-USDT" "$DESKTOP")"
 [[ $(page "$M_BASE/trade/BTC-USDT" "$DESKTOP" "site_pref=m") == "200 " ]] || fail "site_pref=m keeps a desktop on the mobile site"
-[[ $(page "$BASE/h5/" "$PHONE") == "200 " && $(page "$BASE/docs/" "$PHONE") == "200 " ]] || fail "the previous H5 and the API reference are not routed"
-ok "phones go to m.astras.vip and desktops back, path kept; site_pref overrides both"
+[[ $(page "$BASE/docs/" "$PHONE") == "200 " ]] || fail "the API reference is not routed: $(page "$BASE/docs/" "$PHONE")"
+[[ $(page "$BASE/h5/transfer" "$PHONE") == "301 $BASE/" ]] || fail "the retired H5 must lead home: $(page "$BASE/h5/transfer" "$PHONE")"
+ok "phones go to m.astras.vip and desktops back, path kept; site_pref overrides both; /h5/ leads home"
 
 echo "== mobile site ($M_BASE)"
-grep -q '<div id="root">' <<<"$(curl -s -A "$PHONE" "$M_BASE/")" || fail "mobile index.html"
+mindex=$(curl -s -A "$PHONE" "$M_BASE/")
+grep -q '<div id="root">' <<<"$mindex" || fail "mobile index.html"
+mdeep=$(curl -s -D - -o "$WORK/mdeep" -A "$PHONE" "$M_BASE/assets/transfer")
+[[ $(head -1 <<<"$mdeep") == *" 200"* ]] && grep -q '<div id="root">' "$WORK/mdeep" || fail "mobile SPA fallback: $mdeep"
+masset=$(grep -oE '/static/index-[A-Za-z0-9_-]+\.js' <<<"$mindex" | head -1)
+[[ $(curl -s -D - -o /dev/null "$M_BASE$masset" | header cache-control) == *immutable* ]] || fail "$masset is not immutable"
 manifest=$(curl -s "$M_BASE/manifest.webmanifest")
 jq -e '.icons | map(.sizes) | index("192x192") and index("512x512")' <<<"$manifest" >/dev/null || fail "manifest: $manifest"
-ok "the mobile site with its PWA manifest (192 and 512 px icons)"
+sw=$(curl -s -D - -o "$WORK/sw" "$M_BASE/sw.js")
+[[ $(header cache-control <<<"$sw") == "no-cache" ]] && grep -q 'offline.html' "$WORK/sw" || fail "service worker: $sw"
+grep -q '<html' <<<"$(curl -s "$M_BASE/offline.html")" || fail "the offline page is missing"
+ok "the mobile site: pages fall back to index.html, hashed assets immutable, PWA manifest, service worker and offline page"
 
 echo "== admin console ($ADMIN_BASE)"
 # The console is restricted by an IP allowlist (403 elsewhere) or by
@@ -79,7 +88,5 @@ ok "design system catalogue at /storybook/ ($(curl -s "$BASE/storybook/index.jso
 echo "== PC site in the browser"
 CAPTCHA_BYPASS_TOKEN="$BYPASS" APP="$BASE" node "$(dirname "$0")/../../web/e2e/pc-smoke.mjs"
 
-echo "== previous H5 at /h5/"
-grep -q '<div id="root">' <<<"$(curl -s "$BASE/h5/transfer")" || fail "/h5/ SPA fallback"
-ok "served under /h5/"
-CAPTCHA_BYPASS_TOKEN="$BYPASS" APP="$BASE/h5" node "$(dirname "$0")/../../web/h5/e2e/smoke.mjs"
+echo "== mobile site in the browser"
+CAPTCHA_BYPASS_TOKEN="$BYPASS" APP="$M_BASE" node "$(dirname "$0")/../../web/e2e/m-smoke.mjs"

@@ -26,6 +26,6 @@ The Astras website has been rebuilt: desktops and phones no longer share one res
 - **Announcements and a help center**: this board, and help articles on signing up, security, deposits and withdrawals, spot trading and futures.
 - **Languages and preferences**: every screen in Chinese and English; choose your time zone, the colors of rises and falls (green up or red up) and order confirmations in the settings.
 
-During the transition the previous interface remains at astras.vip/h5/.
+Since the mobile site went live (2026-10-01) the previous interface at astras.vip/h5/ is retired; its links lead to the home page.
 
 > This site is a test environment for learning; every balance is simulated.

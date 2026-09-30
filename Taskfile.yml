@@ -97,12 +97,12 @@ tasks:
       - for f in scripts/fault/*.sh; do echo "### $f"; bash "$f" || exit 1; done
 
   web:install:
-    desc: 安装前端依赖（web/ 的 pnpm workspace：apps/pc、apps/m、apps/admin、packages/core、packages/ui 与旧 h5、admin）
+    desc: 安装前端依赖（web/ 的 pnpm workspace：apps/pc、apps/m、apps/admin、packages/core、packages/ui 与旧后台 admin）
     dir: web
     cmds: [pnpm install --prefer-offline]
 
   web:dev:
-    desc: 本机启动前端（task web:dev -- pc|m|admin|h5|admin-legacy，默认 pc；/v1 与 WebSocket 代理到测试服；端口 5173/5174/5180）
+    desc: 本机启动前端（task web:dev -- pc|m|admin|admin-legacy，默认 pc；/v1 与 WebSocket 代理到测试服；端口 5173/5174/5180）
     dir: web
     cmds:
       - pnpm install --prefer-offline --silent
@@ -110,19 +110,18 @@ tasks:
         case "{{.CLI_ARGS}}" in
           m) f=@exchange/m ;;
           admin) f=@exchange/admin ;;
-          h5) f=exchange-h5 ;;
           admin-legacy) f=exchange-admin ;;
           *) f=@exchange/pc ;;
         esac
         pnpm --filter "$f" dev
 
   web:build:
-    desc: 构建三个站点、旧 H5 与旧后台（各自的 dist/）
+    desc: 构建三个站点与旧后台（各自的 dist/）
     dir: web
     cmds: [pnpm install --frozen-lockfile --prefer-offline, pnpm build]
 
   web:types:
-    desc: 由 api/openapi 与 api/admin 重新生成 TypeScript 类型（packages/core 与旧 h5、admin）
+    desc: 由 api/openapi 与 api/admin 重新生成 TypeScript 类型（packages/core 与旧后台 admin）
     dir: web
     cmds: [pnpm types]
 
@@ -136,7 +135,7 @@ tasks:
     dir: web
     cmds:
       - pnpm install --frozen-lockfile --prefer-offline --silent
-      - pnpm types >/dev/null && git diff --exit-code -- packages/core/src/api/gen h5/src/api/gen admin/src/api/gen
+      - pnpm types >/dev/null && git diff --exit-code -- packages/core/src/api/gen admin/src/api/gen
       - pnpm lint
       - pnpm typecheck
       - pnpm test

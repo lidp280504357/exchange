@@ -33,7 +33,7 @@ const PROSE = cn(
 );
 
 // Paths nginx serves outside this app (a router link would show not found).
-const OUTSIDE_APP = /^\/(docs|h5|storybook|admin)(\/|$)/;
+const OUTSIDE_APP = /^\/(docs|storybook|admin)(\/|$)/;
 
 function ContentLink({ href, title, external, children }: LinkProps) {
   const { t } = useTranslation();

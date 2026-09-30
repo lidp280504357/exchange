@@ -124,14 +124,12 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - name: API types match the contracts
-        run: pnpm types && git diff --exit-code -- packages/core/src/api/gen h5/src/api/gen admin/src/api/gen
+        run: pnpm types && git diff --exit-code -- packages/core/src/api/gen admin/src/api/gen
       - name: no raw colours outside the tokens
         run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
-        env:
-          H5_BASE: /h5/
       - run: pnpm --filter @exchange/ui build-storybook
 
   deploy-config:

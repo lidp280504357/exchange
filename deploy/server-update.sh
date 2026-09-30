@@ -55,12 +55,12 @@ main() {
 
   # 4. 参考数据已在第 3 步随 instrument-service 同步（apply_instruments）
   # 5. 前端（web/ 的 pnpm workspace，ADR-0012）：在 node 容器里装一次依赖（glibc 镜像，打包器与 Tailwind 的原生模块
-  #    都有对应二进制；pnpm 缓存放命名卷），构建三个站点、旧 H5（base /h5/）、旧后台与 Storybook，全部成功才替换 nginx 的
+  #    都有对应二进制；pnpm 缓存放命名卷），构建三个站点、旧后台与 Storybook，全部成功才替换 nginx 的
   #    静态目录。Turnstile 站点密钥是公开值。挂整个仓库：API 参考页要读 api/openapi
   if [ -f web/pnpm-workspace.yaml ]; then
     local site_key
     site_key="$(sudo grep -E '^TURNSTILE_SITE_KEY=' "$INFRA/apps.env" | cut -d= -f2- | tr -d '"' || true)"
-    sudo docker run --rm -e CI=true -e TURNSTILE_SITE_KEY="$site_key" -e H5_BASE=/h5/ -v "$SRC:/src" -v exchange-pnpm-store:/pnpm-store \
+    sudo docker run --rm -e CI=true -e TURNSTILE_SITE_KEY="$site_key" -v "$SRC:/src" -v exchange-pnpm-store:/pnpm-store \
       -w /src/web node:24-slim sh -c 'npm install -g pnpm@11 --silent >/dev/null && pnpm config set store-dir /pnpm-store >/dev/null \
         && pnpm install --frozen-lockfile --silent \
         && { { pnpm build && pnpm --filter @exchange/ui build-storybook; } >/tmp/build.log 2>&1 || { cat /tmp/build.log; exit 1; }; }'
@@ -69,7 +69,8 @@ main() {
     for site in pc m admin; do
       sudo rsync -a --delete "web/apps/$site/dist/" "$INFRA/nginx/sites/$site/"
     done
-    sudo rsync -a --delete web/h5/dist/ "$INFRA/nginx/sites/h5/"
+    # 旧 H5（阶段 1–3）已由手机站取代（B3），/h5/ 由 nginx 301 到首页
+    sudo rm -rf "$INFRA/nginx/sites/h5"
     sudo rsync -a --delete web/packages/ui/storybook-static/ "$INFRA/nginx/sites/storybook/"
     sudo rsync -a --delete web/admin/dist/ "$INFRA/nginx/admin/"
     echo "== 前端已构建：PC $(ls web/apps/pc/dist/static | wc -l)、手机 $(ls web/apps/m/dist/static | wc -l)、后台 $(ls web/apps/admin/dist/assets | wc -l) 个资源文件"

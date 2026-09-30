@@ -32,7 +32,6 @@ export function Footer() {
           <button type="button" className="text-left" onClick={() => setLocale(locale === "zh-CN" ? "en" : "zh-CN")}>
             {locale === "zh-CN" ? "English" : "中文"}
           </button>
-          <a href="/h5/">{t("footer.legacy")}</a>
         </Column>
       </div>
       <div className="border-t border-line-1 py-4 text-center text-xs text-fg-3">{t("footer.copyright")}</div>

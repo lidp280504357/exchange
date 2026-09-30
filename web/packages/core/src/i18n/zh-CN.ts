@@ -12,7 +12,6 @@ export const zhCN = {
   footer: {
     products: "产品", support: "支持", about: "关于", toMobile: "切换到手机版", toPC: "切换到电脑版",
     copyright: "© 2026 Astras · 学习项目，资金为模拟", risk: "数字资产价格波动大，本站为学习用途的测试环境，所有资金均为模拟。",
-    legacy: "旧版界面",
   },
   common: {
     loading: "加载中…", empty: "暂无数据", retry: "重试", error: "出错了", confirm: "确认", cancel: "取消", save: "保存",
