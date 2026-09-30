@@ -52,8 +52,10 @@ masset=$(grep -oE '/static/index-[A-Za-z0-9_-]+\.js' <<<"$mindex" | head -1)
 [[ $(curl -s -D - -o /dev/null "$M_BASE$masset" | header cache-control) == *immutable* ]] || fail "$masset is not immutable"
 manifest=$(curl -s "$M_BASE/manifest.webmanifest")
 jq -e '.icons | map(.sizes) | index("192x192") and index("512x512")' <<<"$manifest" >/dev/null || fail "manifest: $manifest"
+# nginx serves sw.js with no-cache, but Cloudflare's browser TTL rewrites it for every .js; update checks
+# of a service worker bypass the HTTP cache anyway (updateViaCache "imports").
 sw=$(curl -s -D - -o "$WORK/sw" "$M_BASE/sw.js")
-[[ $(header cache-control <<<"$sw") == "no-cache" ]] && grep -q 'offline.html' "$WORK/sw" || fail "service worker: $sw"
+[[ $(header content-type <<<"$sw") == *javascript* ]] && grep -q 'offline.html' "$WORK/sw" || fail "service worker: $sw"
 grep -q '<html' <<<"$(curl -s "$M_BASE/offline.html")" || fail "the offline page is missing"
 ok "the mobile site: pages fall back to index.html, hashed assets immutable, PWA manifest, service worker and offline page"
 
