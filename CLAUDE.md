@@ -33,7 +33,8 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
     - B1 后端接口：`tickers` 频道、币安 ticker、`/v1/market/summary`、自选、网络与地址校验、后台游标分页与新视图；提交 `e72a905`、`2ad58c3`、`1fc2a1d`。
     - B0 前端地基：`web/` pnpm workspace（`apps/{pc,m,admin}`、`packages/{core,ui}`）、Storybook `https://astras.vip/storybook/`、nginx 三个 server 块；提交 `dc3b9f1`，见 `docs/runbook/web.md`、ADR-0012。
     - B2 PC 站：设计 §6 全部页面；共享逻辑在 `packages/core/src/{trading,markets,assets,wallet,user,auth,content}`（按子路径导入，如 `@exchange/core/markets/index`）；浏览器冒烟测试 `web/e2e/pc-smoke.mjs`（`scripts/e2e/web.sh` 运行）；提交 `d66b1cc`、`c827dea`、`57160ec`、`12f3e48`。用户站的构建产物在 `/static/`（`/assets/*` 是资产页面路由）。
-  - 下一步：B3（手机站，设计 §7 全部页面），之后 B4 → B5 → B6 → B7。
+    - B3 手机站：设计 §7 全部页面（`web/apps/m`，外壳见 `layout/`，页面挂在哪个外壳由 `routing.tsx` 的 `shell` 决定）；浏览器冒烟测试 `web/e2e/m-smoke.mjs`（与 PC 共用 `web/e2e/lib.mjs`）；旧 H5 `web/h5` 已删除，`/h5/*` 301 到首页；品牌为 Astras；提交 `8802570`、`44b2cd8`、`74339c0`、`f6c0a75`、`2392a82`；`index.html` 按地址预加载页面 chunk（`web/scripts/route-preload.mjs`，两站都用）。
+  - 进行中：B4（市场扩展）。ADR-0013/0014/0015 已写：参考簿命令走 `order.references`（与 `order.commands` 同分区号），引擎 WAL 按 `seq` 编号；HOUSE 现货记在系统科目 `MARKET_MAKER`（`HOUSE_TRADE_SETTLE`），合约是用户 `HOUSE_USER_ID`；虚拟流动性由 market-maker 服务发布。之后 B5 → B6 → B7。
 - 服务隔离：`.golangci.yml` 的 depguard 规则禁止 `internal/<服务>` 互相 import，新服务要在那里补一组规则。消费事件用 `bootstrap.Consumer` + 应用层经 inbox 去重（auth 的 `Store.Once`、notification 的 `inbox.ProcessID`）。
 - 鉴权：网关验 JWT 后把身份写进 `X-User-Id`/`X-Session-Id`/`X-Auth-Scope` 头转发（客户端同名头会被剥掉），服务端用 `httpx.UserID(r)`/`httpx.SessionID(r)` 读取；新的公开接口要加进 `internal/gateway/routes.go`，否则默认必须登录。敏感操作读 `X-Step-Up-Token`，跨服务用 auth-service gRPC `ConsumeStepUp` 兑换。
 - 功能开关：`bootstrap.Flags` 拿 `*flags.Client`，`Enabled(key, flags.Subject{...})`；改开关用 `exchangectl flags set`（见 `docs/runbook/feature-flags.md`）。
@@ -57,14 +58,14 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
 
 ## 开发与部署
 
-- 本机不装 Docker。本机开发栈 `task dev`（全部服务）/ `task run -- <服务>` 在本机运行服务，连测试服基础设施里单独的 dev 命名空间（库 `exchange_dev`、Redis DB 1、Kafka 前缀 `dev.`，见 `docs/runbook/local-dev.md`），不碰测试环境数据；地址与凭据在本地 `.env`。`task web:dev`（PC 站；`task web:dev -- m|admin|h5|admin-legacy` 换站点）默认代理到测试服，`API_ORIGIN=http://localhost:8080` 改连本机网关。
-- 推送 GitHub 后在测试服更新：`task deploy`（等价 `ssh exchange 'bash /opt/exchange/src/deploy/server-update.sh'`），带提交号回滚；脚本同时同步参考数据、热加载 nginx、在 node 容器里构建并发布前端（三个站点、旧 H5 `/h5/`、旧后台 `/admin/`、Storybook）。
+- 本机不装 Docker。本机开发栈 `task dev`（全部服务）/ `task run -- <服务>` 在本机运行服务，连测试服基础设施里单独的 dev 命名空间（库 `exchange_dev`、Redis DB 1、Kafka 前缀 `dev.`，见 `docs/runbook/local-dev.md`），不碰测试环境数据；地址与凭据在本地 `.env`。`task web:dev`（PC 站；`task web:dev -- m|admin|admin-legacy` 换站点）默认代理到测试服，`API_ORIGIN=http://localhost:8080` 改连本机网关。
+- 推送 GitHub 后在测试服更新：`task deploy`（等价 `ssh exchange 'bash /opt/exchange/src/deploy/server-update.sh'`），带提交号回滚；脚本同时同步参考数据、热加载 nginx、在 node 容器里构建并发布前端（三个站点、旧后台 `/admin/`、Storybook）。
 - 入口 `https://astras.vip`（PC 站）、`https://m.astras.vip`（手机站）、`https://admin.astras.vip`（后台）：Cloudflare → nginx 容器（三个 server 块）→ `/v1/*` 到 `api-gateway:8080`、`/admin/v1/` 到 admin-service，其余为各站静态文件。
 - 应用容器编排在 `deploy/compose/docker-compose.apps.yml`，密钥由服务器 `apps.env` 经 `env_file` 注入。
-- 前端：`web/` pnpm workspace（pnpm 11、Node 24；`apps/{pc,m,admin}` 与 `packages/{core,ui}`，旧 `h5`、`admin` 过渡期保留；见 `docs/runbook/web.md`）。
+- 前端：`web/` pnpm workspace（pnpm 11、Node 24；`apps/{pc,m,admin}` 与 `packages/{core,ui}`，旧后台 `admin` 过渡期保留到 B5；见 `docs/runbook/web.md`）。
   - `task web:check` 在 `task ci` 里；改 OpenAPI 或 `api/admin` 后 `task web:types` 并提交生成文件。
   - 应用之间不互相 import，共享的放 `packages`；组件只用语义色类名，`pnpm lint` 检查。
-  - Claude Code 预览用 `.claude/launch.json` 的 `pc`（5173）、`m`（5174）、`admin`（5180）、`storybook`（6006）、`h5`（5175）。端口不能换：刷新 Cookie 与 WebSocket 的来源白名单写的是 5173 与 5174。
+  - Claude Code 预览用 `.claude/launch.json` 的 `pc`（5173）、`m`（5174）、`admin`（5180）、`storybook`（6006）。端口不能换：刷新 Cookie 与 WebSocket 的来源白名单写的是 5173 与 5174。
   - 预览标签页的 `document.visibilityState` 是 hidden，WsClient 会压住高频推送，看实时变化时要注意。
 
 ## Claude Code 会话提示

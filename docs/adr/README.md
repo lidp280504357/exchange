@@ -15,5 +15,8 @@
 | [0009](0009-auth-model.md) | 密码 + 验证码注册登录，7 天无登录触发二次验证 | 已接受 |
 | [0010](0010-binance-market-display.md) | 行情展示全部使用币安数据且不标注来源 | 已接受 |
 | [0012](0012-frontend-architecture.md) | 前端采用三应用两包、共享设计系统与单一 WebSocket 数据层 | 已接受 |
+| [0013](0013-house-assets-and-inventory.md) | 站内资产与 HOUSE 库存 | 已接受 |
+| [0014](0014-price-multiplier-and-reference-mapping.md) | 低价币 1000 倍计价与参考符号映射 | 已接受 |
+| [0015](0015-house-liquidity.md) | 合并簿与虚拟参考流动性（B-book） | 已接受 |
 
 领域词汇表见需求文档附录 A，状态机见附录 B。

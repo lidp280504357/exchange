@@ -22,10 +22,10 @@ task ci            # 本地跑与 CI 相同的检查（格式、go.mod、vet、l
 task test:integration  # 连同集成测试（.env 的 TEST_*，测试服 exchange_test 库）
 task run -- api-gateway  # 本机运行一个服务（读取根目录 .env，Ctrl-C 优雅退出）
 task build         # 编译全部服务到 bin/
-task web:dev       # 本机启动 H5（web/h5，http://localhost:5173，API 代理到测试服）
+task web:dev       # 本机启动 PC 站（web/apps/pc，http://localhost:5173；-- m 为手机站；API 代理到测试服）
 task deploy        # 测试服拉取最新代码并更新（task deploy -- <commit> 回滚）
 task deploy:status # 测试服容器状态
-task e2e           # 对测试环境跑端到端检查（scripts/e2e，含无头 Chrome 的 H5 冒烟测试）
+task e2e           # 对测试环境跑端到端检查（scripts/e2e，含无头 Chrome 的 PC 站与手机站冒烟测试）
 ```
 
-本机只需 Go 1.26+、Node 24+（pnpm 11）和 `~/go/bin` 里的工具（gofumpt、golangci-lint、task 等），不需要 Docker；部署流程见 [docs/runbook/server-deploy.md](docs/runbook/server-deploy.md)，前端见 [docs/runbook/h5.md](docs/runbook/h5.md)。
+本机只需 Go 1.26+、Node 24+（pnpm 11）和 `~/go/bin` 里的工具（gofumpt、golangci-lint、task 等），不需要 Docker；部署流程见 [docs/runbook/server-deploy.md](docs/runbook/server-deploy.md)，前端见 [docs/runbook/web.md](docs/runbook/web.md)。

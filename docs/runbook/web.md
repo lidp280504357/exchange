@@ -11,7 +11,6 @@
 | 管理后台（浅色） | `https://admin.astras.vip` | `web/apps/admin` | 5180 |
 | 设计系统目录（Storybook） | `https://astras.vip/storybook/` | `web/packages/ui` | 6006 |
 | API 参考 | `https://astras.vip/docs/` | 由 `web/apps/pc/scripts/build-docs.mjs` 从 `api/openapi` 生成 | — |
-| 旧 H5（阶段 1–3，过渡期保留） | `https://astras.vip/h5/` | `web/h5`（`H5_BASE=/h5/` 构建），见 [h5.md](h5.md) | 5175 |
 | 旧管理后台（过渡期保留） | `https://astras.vip/admin/` | `web/admin`，见 [admin.md](admin.md) | 5181 |
 
 共享包：
@@ -51,11 +50,44 @@
 - 敏感操作：`features/auth/StepUp.tsx` 的 `useStepUp()`（身份验证器或邮箱/短信验证码换 step-up 令牌），`OtpStep` 是"人机验证 → 发送验证码 → 6 位码"的共用步骤。
 - 快捷键：`⌘K`/`Ctrl+K` 全站搜索；终端里 `/` 打开交易对搜索，`B`/`S` 切买卖。
 
+## 手机站页面（B3）
+
+路径与 PC 站完全一致（`packages/core/src/routes.ts`），多一个"我的" tab `/me`。PC 站把 `/me` 转到账户页，切换站点或设备分流都不会落到 404。
+
+| 区域 | 路径 | 代码（`web/apps/m/src`） | 外壳 |
+|---|---|---|---|
+| 首页、行情、币种 | `/`、`/markets`、`/coin/:symbol` | `pages/home` | 首页与行情：tab 外壳；币种：页面外壳 |
+| 交易终端 | `/trade/:symbol`、`/futures/:symbol` | `pages/trade` | tab 外壳 |
+| 资产 | `/assets`、`/assets/{deposit,withdraw,transfer,history}` | `pages/assets` | 总览：tab 外壳；其余：页面外壳 |
+| 我的与账户 | `/me`、`/account/{security,sessions,settings}`、`/notifications` | `pages/account` | "我的"：tab 外壳；其余：页面外壳 |
+| 认证 | `/login`、`/register`、`/reset` | `pages/auth` | 全屏 `AuthShell` |
+| 公告、帮助 | `/announcements`、`/help` | `pages/content` | 页面外壳 |
+
+- 外壳（`layout/`）：
+  - `MobileShell`：底部 5 个 tab（首页、行情、交易、资产、我的），顶栏的标题与右侧按钮由页面经 `usePageHeader` 填入（`layout/header.tsx`）。
+  - `PageShell`：返回栏；直接打开时返回首页或页面指定的上级。
+  - `AuthShell`：全屏，右上角关闭回首页。
+  - `routing.tsx` 的 `PageRoute.shell` 决定页面挂在哪个外壳。三个外壳在经链接到达新页面时滚到顶部，后退时保留浏览器的滚动位置（`components/useScrollTop.ts`）。
+- 交易终端：
+  - 图表、盘口、成交三个 tab 可以左右滑动（`parts/SwipeTabs.tsx`）。
+  - 买入、卖出按钮固定在 tab 栏上方，点开下单面板（`Sheet`）。下单确认（设置里可关）在面板内完成。
+  - 下方是当前委托、历史委托、成交明细；合约另有仓位。
+  - 顶栏右侧有币种信息与自选。
+- 手势与组件（`components/`）：
+  - `PullToRefresh`：下拉刷新。横向滑动与从面板冒上来的触摸不触发。
+  - `WindowList`：按页面滚动的虚拟列表，行情 50 行以上只渲染可见的行。
+  - `PillBar`：分类胶囊。
+  - 长按切换自选。
+- 敏感操作：`features/auth/StepUp.tsx` 的 `useStepUp()` 在面板里完成 step-up；面板里再要 step-up 时叠在上面。
+- 触控目标不小于 44 px：页面里直接做大。共享组件里的小图标按钮（清除、复制、重试、面板关闭）用 `hit-area` 工具类（`packages/ui/src/styles/theme.css`），在触屏上给出 44 px 的点击区，外观不变。
+- 离线：`public/sw.js` 只缓存 `offline.html`，导航请求断网时显示"网络不可用"页；构建产物由 nginx 的 `immutable` 缓存负责，不进 service worker。
+- 文案：外壳的在 `src/i18n.ts`（命名空间 `m`），各区域的在 `src/i18n/<区域>.ts`（`mAuth`、`mTrade`、`mAssets`、`mAccount`、`mMarkets`、`mContent`），随页面加载。
+
 ## 本机开发
 
 ```bash
 task web:install            # 装依赖（第一次或改了 package.json 后）
-task web:dev                # PC 站 http://localhost:5173；task web:dev -- m|admin|h5|admin-legacy
+task web:dev                # PC 站 http://localhost:5173；task web:dev -- m|admin|admin-legacy
 task web:storybook          # 设计系统目录 http://localhost:6006
 task web:check              # 类型与契约一致、无硬编码颜色、类型检查、单元测试（task ci 也跑）
 task web:types              # 改了 api/openapi 或 api/admin 后重新生成类型（生成文件提交入库）
@@ -65,7 +97,7 @@ task web:lighthouse         # 对部署后的两站各三页跑 Lighthouse（性
 
 - 代理与来源：PC 站与手机站的 `/v1` 和 WebSocket 由 Vite 代理到 `https://astras.vip`，`API_ORIGIN=...` 可改；后台的 `/admin/v1` 代理到 `https://admin.astras.vip`。
 - 端口不能换：刷新令牌 Cookie 的来源白名单（auth-service `ALLOWED_ORIGINS`）和网关 WebSocket 的 `WS_ORIGINS` 默认包含 `localhost:5173` 与 `localhost:5174`，以及线上的 `astras.vip`、`m.astras.vip`。
-- Claude Code 预览：`.claude/launch.json` 的 `pc`、`m`、`admin`、`storybook`、`h5`。
+- Claude Code 预览：`.claude/launch.json` 的 `pc`、`m`、`admin`、`storybook`。手机站在预览里用 `preview_resize` 的 mobile 预设看。
 
 ## 数据层要点（设计 §4.3）
 
@@ -86,10 +118,10 @@ task web:lighthouse         # 对部署后的两站各三页跑 Lighthouse（性
 
 `deploy/server-update.sh` 第 5 步在 `node:24-slim` 容器里对 `web/` 执行一次 `pnpm install --frozen-lockfile`，构建以下内容：
 
-- `pnpm build`：三个站点、旧 H5（`H5_BASE=/h5/`）与旧后台；PC 站构建时同时生成 API 参考；
+- `pnpm build`：三个站点与旧后台；PC 站构建时同时生成 API 参考；
 - `pnpm --filter @exchange/ui build-storybook`：Storybook。
 
-全部成功后才同步到 nginx 的静态目录：`/opt/exchange/infra/nginx/sites/{pc,m,admin,h5,storybook}`，旧后台仍在 `nginx/admin`。pnpm 缓存在命名卷 `exchange-pnpm-store`，Turnstile 站点密钥取自服务器 `apps.env`。
+全部成功后才同步到 nginx 的静态目录：`/opt/exchange/infra/nginx/sites/{pc,m,admin,storybook}`，旧后台仍在 `nginx/admin`。旧 H5（`web/h5`，阶段 1–3）在手机站完成后（B3）删除，`/h5/*` 由 nginx 301 到首页。pnpm 缓存在命名卷 `exchange-pnpm-store`，Turnstile 站点密钥取自服务器 `apps.env`。
 
 nginx（`deploy/compose/nginx/conf.d/astras.vip.conf` 与 `snippets/site-{pc,m,admin}.conf`）：
 
@@ -98,7 +130,7 @@ nginx（`deploy/compose/nginx/conf.d/astras.vip.conf` 与 `snippets/site-{pc,m,a
 - **设备分流**：
   - 手机 UA 请求 PC 站的页面时，302 到 `https://m.astras.vip` 的同一路径；桌面 UA 请求手机站时 302 回 PC 站。
   - 有 `site_pref=pc|m` Cookie 时按 Cookie（页脚"切换到电脑版 / 手机版"写入，`Domain=.astras.vip`，一年）。
-  - 平板按桌面处理。`/v1/`、静态资源、`/docs/`、`/storybook/`、`/h5/`、`/admin/` 不分流。
+  - 平板按桌面处理。`/v1/`、静态资源、`/docs/`、`/storybook/`、`/admin/` 不分流。
 - **后台访问限制**：`admin.astras.vip` 整站包含服务器上的 `snippets/admin-access*.conf`。用户 2026-09-30 决定暂不做访问限制，服务器上没有这个文件，后台对外可访问。
   - 以后要限制，二选一：
     - IP 白名单：建 `/opt/exchange/infra/nginx/snippets/admin-access.local.conf`，写 `allow <出口 IP>; deny all;`，然后 `nginx -s reload`；
@@ -110,7 +142,9 @@ nginx（`deploy/compose/nginx/conf.d/astras.vip.conf` 与 `snippets/site-{pc,m,a
 
 - 预算见设计 §12.1：首屏 JS gzip 分别不超过 250 KB（PC）与 200 KB（手机），且不含图表库；CLS 不超过 0.05；Lighthouse 分数分别不低于 90 与 80。
   - 页面按路由懒加载，每页一个 chunk。
-  - `index.html` 预取 `/v1/market/pairs` 与 `/v1/market/tickers`。
+  - `index.html` 预取 `/v1/market/pairs` 与 `/v1/market/tickers`；终端的首个价格直接取这份列表。
+  - `index.html` 按打开的地址预加载该页的 chunk 及其依赖（构建插件 `web/scripts/route-preload.mjs`；落地页在两个用户站的 `vite.config.ts` 里登记），不必等入口执行完再去请求。
+  - 跳动的数字（价格、盘口数量）用 `FlashLayer` 闪动：闪动层在文字后面重挂，文字节点不变。不要用 `key` 重挂文字：每次重挂都是一次新的"最大绘制"，会把 LCP 拖到最后一次跳价。
   - 共享包标了 `sideEffects`，便于摇树。
 - `pnpm lint`（`web/scripts/check-tokens.mjs`）：新应用与共享包里不许出现颜色值（`tokens.css` 除外）和直接的 `toLocale*` 调用。
 - web-vitals：LCP、CLS、INP、TTFB 输出到浏览器控制台，前缀 `[vitals]`。
@@ -118,9 +152,11 @@ nginx（`deploy/compose/nginx/conf.d/astras.vip.conf` 与 `snippets/site-{pc,m,a
   - 三站的首页与 SPA 回退；
   - 缓存头与 gzip；
   - 设备分流，含 `site_pref` 覆盖；
-  - 手机站 manifest；
+  - 手机站的 SPA 回退、`/static/` 缓存头、manifest、service worker（`no-cache`）与离线页；
+  - `/h5/*` 301 到首页；
   - 后台安全头与未登录的 API；
   - `/docs/` 与 `/storybook/`；
   - PC 站浏览器冒烟测试 `web/e2e/pc-smoke.mjs`（workspace 包 `@exchange/e2e`，headless Chrome，中文界面）：表单注册（人机验证用环境的旁路令牌，验证码读开发收件箱）→ 资产页欢迎资金 → 退出再登录（错误密码就地提示、`?next=` 回跳）→ 行情搜索 → 现货终端挂限价单并撤单 → 划转到合约并在资金流水出现 → 充值地址 → 合约终端 → 通知、设备、帮助 → 语言切换 → 退出；页面脚本错误即失败，所有 API 响应按 OpenAPI 契约校验。本机对开发服务器跑：`APP=http://localhost:5173 node web/e2e/pc-smoke.mjs`（`SHOTS=目录` 保存截图）；
-  - 最后用旧 H5 跑浏览器冒烟测试 `web/h5/e2e/smoke.mjs`（`APP=https://astras.vip/h5`）。
+  - 手机站浏览器冒烟测试 `web/e2e/m-smoke.mjs`（390 × 844、触屏、iPhone UA，nginx 因此不分流到 PC 站）：表单注册 → 资产 tab 欢迎资金 → 在"我的"里退出（确认面板）再登录 → 行情搜索 → 现货终端从下单面板挂限价单（下单确认）并撤单 → 划转与流水 → 充值地址 → 合约终端 → 通知、设备、帮助 → 语言切换 → 退出；检查同 PC。本机：`APP=http://localhost:5174 node web/e2e/m-smoke.mjs`；
+  - 两个冒烟测试共用 `web/e2e/lib.mjs`（Chrome、旁路令牌、开发收件箱、契约校验、按可见文字找按钮）。面板有滑入动画，测试等它停稳（`sheetOpen`）再点，关闭后等遮罩消失再点页面。
 - 人工检查清单：[ui-checklist.md](ui-checklist.md)。

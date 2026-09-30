@@ -1,6 +1,6 @@
 # 运行手册索引
 
-测试环境入口 `https://astras.vip`（PC 站）、`https://m.astras.vip`（手机站）、`https://admin.astras.vip`（管理后台）、`https://astras.vip/docs/`（API 参考）、`https://astras.vip/storybook/`（设计系统目录）；过渡期旧版在 `https://astras.vip/h5/`（H5）与 `https://astras.vip/admin/`（旧后台）。服务器操作见 [server-deploy.md](server-deploy.md)。凭据只在本地 `.env` 与服务器 `/opt/exchange/infra/{.env,apps.env}`。
+测试环境入口 `https://astras.vip`（PC 站）、`https://m.astras.vip`（手机站）、`https://admin.astras.vip`（管理后台）、`https://astras.vip/docs/`（API 参考）、`https://astras.vip/storybook/`（设计系统目录）；过渡期旧后台在 `https://astras.vip/admin/`（旧 H5 已在手机站完成后下线，`/h5/` 301 到首页）。服务器操作见 [server-deploy.md](server-deploy.md)。凭据只在本地 `.env` 与服务器 `/opt/exchange/infra/{.env,apps.env}`。
 
 ## 开发、部署与测试
 
@@ -11,7 +11,6 @@
 | [testing.md](testing.md) | 测试层级、端到端（`task e2e`）与故障注入（`task fault`） |
 | [web.md](web.md) | 前端：PC 站、手机站、管理后台与共享包（数据层、设计系统），开发、构建、部署、设备分流、性能检查 |
 | [ui-checklist.md](ui-checklist.md) | 前端人工检查清单（每批前端验收前逐项勾选） |
-| [h5.md](h5.md) | 旧 H5（阶段 1–3，过渡期挂在 `/h5/`）：页面结构与浏览器冒烟测试 |
 | [cloudflare-nginx-tls.md](cloudflare-nginx-tls.md) | 域名、Cloudflare 代理、nginx 与源站证书 |
 | [turnstile.md](turnstile.md) | Cloudflare Turnstile 人机验证 |
 
@@ -41,4 +40,4 @@
 
 ## API 文档
 
-`https://astras.vip/docs/` 由 `web/h5/scripts/build-docs.mjs` 在 H5 构建时生成：把 `api/openapi/*.yaml`（每个服务一份）合并成一个 OpenAPI 文档 `docs/openapi.json`，用 Redoc 展示（固定版本，浏览器按 SRI 哈希校验）。合并时组件同名但内容不同、路径重复、引用无法解析都会让构建失败。事件契约在 `api/proto`（`buf lint`、`buf breaking`）。
+`https://astras.vip/docs/` 由 `web/apps/pc/scripts/build-docs.mjs` 在 PC 站构建时生成：把 `api/openapi/*.yaml`（每个服务一份）合并成一个 OpenAPI 文档 `docs/openapi.json`，用 Redoc 展示（固定版本，浏览器按 SRI 哈希校验）。合并时组件同名但内容不同、路径重复、引用无法解析都会让构建失败。事件契约在 `api/proto`（`buf lint`、`buf breaking`）。
