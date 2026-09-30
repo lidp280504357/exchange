@@ -489,13 +489,20 @@ func (p page) next(found int, at func(i int) (time.Time, string)) string {
 	return pagecursor.Encode(t, id)
 }
 
-// timeRange bounds a ClickHouse time column; zero ends are open.
-func timeRange(from, to time.Time) (time.Time, time.Time) {
+// timeRange bounds a ClickHouse time column in epoch milliseconds; zero
+// ends are open. Times go to ClickHouse as numbers
+// (fromUnixTimestamp64Milli(toInt64(?), 'UTC')): a bound time.Time is sent
+// as text that the server reads in its own zone and precision.
+func timeRange(from, to time.Time) (int64, int64) {
 	if to.IsZero() {
 		to = time.Date(2200, 1, 1, 0, 0, 0, 0, time.UTC)
 	}
-	return from.UTC(), to.UTC()
+	return from.UnixMilli(), to.UnixMilli()
 }
+
+// ms is fromUnixTimestamp64Milli(toInt64(?), 'UTC'): a bound epoch
+// millisecond as a UTC DateTime64(3).
+const ms = "fromUnixTimestamp64Milli(toInt64(?), 'UTC')"
 
 // Search returns a page of audit entries, newest first.
 func (a Audit) Search(ctx context.Context, q ports.AuditQuery) ([]ports.AuditEntry, string, error) {
@@ -506,9 +513,9 @@ func (a Audit) Search(ctx context.Context, q ports.AuditQuery) ([]ports.AuditEnt
 	from, to := timeRange(q.From, q.To)
 	rows, err := a.Conn.Query(ctx, `SELECT toString(event_id), event_type, actor_id, target, occurred_at, payload FROM audit_logs FINAL
 		WHERE (? = '' OR actor_id = ?) AND (? = '' OR target = ?) AND (? = '' OR event_type = ?)
-		AND occurred_at >= ? AND occurred_at < ? AND (NOT ? OR (occurred_at, toString(event_id)) < (?, ?))
+		AND occurred_at >= `+ms+` AND occurred_at < `+ms+` AND (NOT ? OR (occurred_at, toString(event_id)) < (`+ms+`, ?))
 		ORDER BY occurred_at DESC, toString(event_id) DESC LIMIT ?`,
-		q.Actor, q.Actor, q.Target, q.Target, q.EventType, q.EventType, from, to, pc.on, pc.at, pc.id, pc.limit+1)
+		q.Actor, q.Actor, q.Target, q.Target, q.EventType, q.EventType, from, to, pc.on, pc.at.UnixMilli(), pc.id, pc.limit+1)
 	if err != nil {
 		return nil, "", apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "the audit trail is unavailable")
 	}
@@ -734,8 +741,8 @@ func (r Reports) Liquidations(ctx context.Context, days int, kind, cursor string
 		price, quantity, realized_pnl, insurance_paid, mark_price, bankruptcy_price, margin_balance, maintenance_margin, occurred_at
 		FROM derivatives_liquidations FINAL
 		WHERE occurred_at >= toDateTime64(today() - ?, 3, 'UTC') AND (? = '' OR kind = ?)
-		AND (NOT ? OR (occurred_at, toString(event_id)) < (?, ?))
-		ORDER BY occurred_at DESC, toString(event_id) DESC LIMIT ?`, days-1, kind, kind, pc.on, pc.at, pc.id, pc.limit+1)
+		AND (NOT ? OR (occurred_at, toString(event_id)) < (`+ms+`, ?))
+		ORDER BY occurred_at DESC, toString(event_id) DESC LIMIT ?`, days-1, kind, kind, pc.on, pc.at.UnixMilli(), pc.id, pc.limit+1)
 	if err != nil {
 		return nil, "", unavailable(err)
 	}

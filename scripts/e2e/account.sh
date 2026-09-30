@@ -68,7 +68,7 @@ check '.valid == false and .reason == "ADDRESS_CHECKSUM"' "a typo in the mixed c
 call POST /v1/wallet/withdraw-addresses/validate '{"network":"ETH-SEPOLIA","address":"TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"}' "${AUTH[@]}"
 check '.valid == false and .reason == "ADDRESS_FORMAT"' "a TRON address on an EVM network"
 call POST /v1/wallet/withdraw-addresses/validate '{"network":"NOPE","address":"0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed"}' "${AUTH[@]}"
-expect 404 - "an unknown network"
+expect 404 WALLET_NETWORK_UNKNOWN "an unknown network"
 
 echo "== notifications"
 has_notice() {

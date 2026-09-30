@@ -33,9 +33,9 @@ func (r Records) Orders(ctx context.Context, q ports.OrderQuery) ([]ports.Order,
 	rows, err := r.Conn.Query(ctx, `SELECT toString(order_id), client_order_id, toString(user_id), symbol, side, type, time_in_force,
 		price, quantity, quote_amount, status, filled_quantity, filled_quote, reason, created_at, updated_at FROM orders_current
 		WHERE (? = '' OR toString(user_id) = ?) AND (? = '' OR symbol = ?) AND (? = '' OR status = ?) AND (? = '' OR side = ?)
-		AND created_at >= ? AND created_at < ? AND (NOT ? OR (created_at, toString(order_id)) < (?, ?))
+		AND created_at >= `+ms+` AND created_at < `+ms+` AND (NOT ? OR (created_at, toString(order_id)) < (`+ms+`, ?))
 		ORDER BY created_at DESC, toString(order_id) DESC LIMIT ?`,
-		q.UserID, q.UserID, q.Symbol, q.Symbol, q.Status, q.Status, q.Side, q.Side, from, to, pc.on, pc.at, pc.id, pc.limit+1)
+		q.UserID, q.UserID, q.Symbol, q.Symbol, q.Status, q.Status, q.Side, q.Side, from, to, pc.on, pc.at.UnixMilli(), pc.id, pc.limit+1)
 	if err != nil {
 		return nil, "", unavailable(err)
 	}
@@ -71,9 +71,9 @@ func (r Records) Trades(ctx context.Context, q ports.TradeQuery) ([]ports.Trade,
 		toString(buyer_user_id), toString(buyer_order_id), toString(seller_user_id), toString(seller_order_id), buyer_is_maker,
 		buyer_fee, seller_fee, executed_at FROM trades FINAL
 		WHERE (? = '' OR symbol = ?) AND (? = '' OR toString(buyer_user_id) = ? OR toString(seller_user_id) = ?)
-		AND executed_at >= ? AND executed_at < ? AND (NOT ? OR (executed_at, toString(trade_id)) < (?, ?))
+		AND executed_at >= `+ms+` AND executed_at < `+ms+` AND (NOT ? OR (executed_at, toString(trade_id)) < (`+ms+`, ?))
 		ORDER BY executed_at DESC, toString(trade_id) DESC LIMIT ?`,
-		q.Symbol, q.Symbol, q.UserID, q.UserID, q.UserID, from, to, pc.on, pc.at, pc.id, pc.limit+1)
+		q.Symbol, q.Symbol, q.UserID, q.UserID, q.UserID, from, to, pc.on, pc.at.UnixMilli(), pc.id, pc.limit+1)
 	if err != nil {
 		return nil, "", unavailable(err)
 	}
@@ -137,15 +137,15 @@ func (r Records) Deposits(ctx context.Context, q ports.DepositQuery) ([]ports.De
 // turnover.
 func (r Records) Activity(ctx context.Context, days int) (ports.Activity, error) {
 	out := ports.Activity{TradesByDay: map[string]uint64{}, TurnoverUSDTByDay: map[string]string{}}
-	since := time.Now().UTC().Add(-24 * time.Hour)
+	since := time.Now().Add(-24 * time.Hour).UnixMilli()
 	if err := r.Conn.QueryRow(ctx, `SELECT count(), uniqExact(u) FROM (
-			SELECT trade_id, buyer_user_id AS u FROM trades FINAL WHERE executed_at >= ?
-			UNION ALL SELECT trade_id, seller_user_id AS u FROM trades FINAL WHERE executed_at >= ?)`, since, since).
+			SELECT trade_id, buyer_user_id AS u FROM trades FINAL WHERE executed_at >= `+ms+`
+			UNION ALL SELECT trade_id, seller_user_id AS u FROM trades FINAL WHERE executed_at >= `+ms+`)`, since, since).
 		Scan(&out.Trades24h, &out.ActiveTraders24h); err != nil {
 		return out, unavailable(err)
 	}
 	out.Trades24h /= 2 // each trade counted from both sides
-	rows, err := r.Conn.Query(ctx, `SELECT quote_asset, sum(quote_quantity) FROM trades FINAL WHERE executed_at >= ?
+	rows, err := r.Conn.Query(ctx, `SELECT quote_asset, sum(quote_quantity) FROM trades FINAL WHERE executed_at >= `+ms+`
 		GROUP BY quote_asset ORDER BY quote_asset`, since)
 	if err != nil {
 		return out, unavailable(err)
@@ -164,7 +164,7 @@ func (r Records) Activity(ctx context.Context, days int) (ports.Activity, error)
 	if err := r.Conn.QueryRow(ctx, `SELECT
 			(SELECT count() FROM wallet_deposits FINAL WHERE status IN ('DETECTED', 'CONFIRMING')),
 			(SELECT count() FROM wallet_withdrawals FINAL WHERE status = 'PENDING_REVIEW'),
-			(SELECT count() FROM events WHERE topic = 'risk.events' AND occurred_at >= ?)`, since).
+			(SELECT count() FROM events WHERE topic = 'risk.events' AND occurred_at >= `+ms+`)`, since).
 		Scan(&out.PendingDeposits, &out.PendingWithdraws, &out.RiskEvents24h); err != nil {
 		return out, unavailable(err)
 	}
