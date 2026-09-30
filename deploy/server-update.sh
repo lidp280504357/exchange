@@ -72,7 +72,7 @@ main() {
     sudo rsync -a --delete web/h5/dist/ "$INFRA/nginx/sites/h5/"
     sudo rsync -a --delete web/packages/ui/storybook-static/ "$INFRA/nginx/sites/storybook/"
     sudo rsync -a --delete web/admin/dist/ "$INFRA/nginx/admin/"
-    echo "== 前端已构建：PC $(ls web/apps/pc/dist/assets | wc -l)、手机 $(ls web/apps/m/dist/assets | wc -l)、后台 $(ls web/apps/admin/dist/assets | wc -l) 个资源文件"
+    echo "== 前端已构建：PC $(ls web/apps/pc/dist/static | wc -l)、手机 $(ls web/apps/m/dist/static | wc -l)、后台 $(ls web/apps/admin/dist/assets | wc -l) 个资源文件"
   fi
   echo "== 服务状态"
   sudo docker compose "${COMPOSE[@]}" ps --format 'table {{.Service}}\t{{.Status}}'

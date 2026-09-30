@@ -18,5 +18,7 @@ export default defineConfig({
       "/v1": { target: api, changeOrigin: true },
     },
   },
-  build: { sourcemap: false },
+  // Built files go to /static/: /assets/* are the assets pages' routes (/assets/deposit, …),
+  // which nginx must answer with index.html.
+  build: { sourcemap: false, assetsDir: "static" },
 });

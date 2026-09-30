@@ -94,7 +94,7 @@ task web:lighthouse         # 对部署后的两站各三页跑 Lighthouse（性
 nginx（`deploy/compose/nginx/conf.d/astras.vip.conf` 与 `snippets/site-{pc,m,admin}.conf`）：
 
 - 三个 server 块共用源站证书（覆盖 `*.astras.vip`，`snippets/tls.conf`）。用户站的 `/v1/` 与 `/v1/ws` 转给网关（`snippets/api.conf`），同源、不需要 CORS。
-- 缓存：带哈希的 `/assets/*` 设 `immutable` 一年；`index.html` 与 SPA 回退 `no-cache`；文本资源 gzip（brotli 由 Cloudflare 做）。
+- 缓存：带哈希的构建产物在 `/static/*`（Vite `build.assetsDir`，后台仍是 `/assets/*`），设 `immutable` 一年；`index.html` 与 SPA 回退 `no-cache`；文本资源 gzip（brotli 由 Cloudflare 做）。用户站的 `/assets/*` 是资产页面的路由（`/assets/deposit` 等），不能被静态资源的 location 拦下。
 - **设备分流**：
   - 手机 UA 请求 PC 站的页面时，302 到 `https://m.astras.vip` 的同一路径；桌面 UA 请求手机站时 302 回 PC 站。
   - 有 `site_pref=pc|m` Cookie 时按 Cookie（页脚"切换到电脑版 / 手机版"写入，`Domain=.astras.vip`，一年）。

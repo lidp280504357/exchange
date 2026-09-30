@@ -29,7 +29,7 @@ grep -q '<div id="root">' <<<"$index" || fail "index.html: $index"
 deep=$(curl -s -D - -o "$WORK/deep" -A "$DESKTOP" "$BASE/markets")
 [[ $(head -1 <<<"$deep") == *" 200"* ]] && grep -q '<div id="root">' "$WORK/deep" || fail "SPA fallback: $deep"
 [[ $(header cache-control <<<"$deep") == "no-cache" ]] || fail "index.html must be revalidated: $deep"
-asset=$(grep -oE '/assets/index-[A-Za-z0-9_-]+\.js' <<<"$index" | head -1)
+asset=$(grep -oE '/static/index-[A-Za-z0-9_-]+\.js' <<<"$index" | head -1)
 [[ $(curl -s -D - -o /dev/null "$BASE$asset" | header cache-control) == *immutable* ]] || fail "$asset is not immutable"
 [[ $(curl -s -D - -o /dev/null -H 'Accept-Encoding: gzip' "$BASE$asset" | header content-encoding) == gzip ]] || fail "$asset is not compressed"
 ok "pages fall back to index.html, which revalidates; hashed assets are immutable and compressed"

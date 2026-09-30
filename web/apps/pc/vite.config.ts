@@ -23,5 +23,7 @@ export default defineConfig({
   },
   // Pages load lazily (one chunk each, charts and tables with the pages
   // that use them); sourcemaps stay out of the public build.
-  build: { sourcemap: false },
+  // Built files go to /static/: /assets/* are the assets pages' routes (/assets/deposit, …),
+  // which nginx must answer with index.html.
+  build: { sourcemap: false, assetsDir: "static" },
 });
