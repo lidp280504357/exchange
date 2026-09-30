@@ -70,7 +70,7 @@ export function useSyncing(channel: string): boolean {
  */
 export function useOrderBook(symbol: string, depth: number, step = ""): BookView {
   const market = useMarket();
-  useEffect(() => market.followDepth(symbol), [market, symbol]);
+  useEffect(() => (symbol ? market.followDepth(symbol) : undefined), [market, symbol]);
   const key = `depth:${symbol}`;
   const subscribe = useCallback((fn: () => void) => market.subscribe(key, fn), [market, key]);
   const version = useSyncExternalStore(
@@ -86,7 +86,7 @@ export function useOrderBook(symbol: string, depth: number, step = ""): BookView
 /** useTrades follows a symbol's public trades, newest first. */
 export function useTrades(symbol: string): TradeData[] {
   const market = useMarket();
-  useEffect(() => market.followTrades(symbol), [market, symbol]);
+  useEffect(() => (symbol ? market.followTrades(symbol) : undefined), [market, symbol]);
   const subscribe = useCallback((fn: () => void) => market.subscribe(`trades:${symbol}`, fn), [market, symbol]);
   return useSyncExternalStore(
     subscribe,
@@ -98,7 +98,7 @@ export function useTrades(symbol: string): TradeData[] {
 /** useTicker follows one symbol's ticker. */
 export function useTicker(symbol: string): TickerData | undefined {
   const market = useMarket();
-  useEffect(() => market.followTicker(symbol), [market, symbol]);
+  useEffect(() => (symbol ? market.followTicker(symbol) : undefined), [market, symbol]);
   const subscribe = useCallback((fn: () => void) => market.subscribe(`ticker:${symbol}`, fn), [market, symbol]);
   return useSyncExternalStore(
     subscribe,

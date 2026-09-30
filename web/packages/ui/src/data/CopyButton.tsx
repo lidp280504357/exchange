@@ -37,7 +37,7 @@ export function CopyButton({ value, children, size = 14, onCopied, className }: 
       aria-label={children ? undefined : done ? t("common.copied") : t("common.copy")}
       title={done ? t("common.copied") : t("common.copy")}
       className={cn(
-        "inline-flex shrink-0 items-center gap-1 rounded-1 text-fg-3 transition-colors hover:text-fg-1",
+        "hit-area inline-flex shrink-0 items-center gap-1 rounded-1 text-fg-3 transition-colors hover:text-fg-1",
         done && "text-success hover:text-success",
         children ? "px-1.5 py-0.5 text-xs" : "p-0.5",
         className,

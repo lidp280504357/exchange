@@ -80,7 +80,7 @@ export function Segmented({ value, onValueChange, items, size = "sm", block, squ
                 layoutId={`${id}-thumb`}
                 aria-hidden
                 transition={reduced ? { duration: 0 } : thumbSpring}
-                className={cn("absolute inset-0 -z-10 bg-bg-3 shadow-pop", square ? "rounded-1" : "rounded-full", it.thumbClassName)}
+                className={cn("pointer-events-none absolute inset-0 -z-10 bg-bg-3 shadow-pop", square ? "rounded-1" : "rounded-full", it.thumbClassName)}
               />
             )}
             {it.icon}

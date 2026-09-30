@@ -68,13 +68,16 @@
   --animate-flash-up: flash-up 400ms var(--ease);
   --animate-flash-down: flash-down 400ms var(--ease);
   --animate-shimmer: shimmer 1.2s linear infinite;
-  --animate-fade-up: fade-up var(--t-base) var(--ease) both;
-  --animate-fade-in: fade-in var(--t-base) var(--ease) both;
-  --animate-slide-down: slide-down 150ms var(--ease) both;
+  /* Entrances fill backwards only: an animation still in effect after it
+     ends (fill "both") keeps its element a containing block, and a
+     position: fixed bar inside a page would then scroll with the page. */
+  --animate-fade-up: fade-up var(--t-base) var(--ease) backwards;
+  --animate-fade-in: fade-in var(--t-base) var(--ease) backwards;
+  --animate-slide-down: slide-down 150ms var(--ease) backwards;
   --animate-spin: spin 0.8s linear infinite;
   --animate-float: float 14s ease-in-out infinite alternate;
   --animate-marquee: marquee 40s linear infinite;
-  --animate-pop-in: pop-in var(--t-fast) var(--ease) both;
+  --animate-pop-in: pop-in var(--t-fast) var(--ease) backwards;
   --animate-pop-out: pop-out var(--t-fast) var(--ease) both;
 }
 
@@ -181,5 +184,23 @@
   }
   to {
     transform: translateX(-50%);
+  }
+}
+
+/* hit-area gives a small control (a clear or copy icon) a 44 px touch
+   target on touch screens without changing its size or the layout: an
+   invisible ring around it takes the taps (design §7.1, WCAG 2.5.5). */
+@utility hit-area {
+  position: relative;
+  @media (pointer: coarse) {
+    &::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: max(100%, 44px);
+      height: max(100%, 44px);
+      transform: translate(-50%, -50%);
+    }
   }
 }

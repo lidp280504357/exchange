@@ -38,6 +38,8 @@ export function App({ queryClient }: { queryClient: QueryClient }) {
           {shellRoutes.map(route)}
           <Route path="/trade" element={<Navigate to={routes.trade(DEFAULT_SYMBOL)} replace />} />
           <Route path="/futures" element={<Navigate to={routes.futures(DEFAULT_CONTRACT)} replace />} />
+          {/* The mobile site's "me" tab: a switch or device redirect from it lands on the account pages. */}
+          <Route path={routes.me} element={<Navigate to={routes.security} replace />} />
           <Route path="*" element={<NotFound />} />
         </Route>
         <Route element={<TerminalShell />}>{tradeRoutes.map(route)}</Route>

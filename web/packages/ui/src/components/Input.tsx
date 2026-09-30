@@ -113,7 +113,7 @@ export function Input({
             tabIndex={-1}
             aria-label={t("ui.clear")}
             onClick={clear}
-            className="mr-1 grid size-5 shrink-0 place-items-center rounded-full text-fg-3 hover:bg-bg-3 hover:text-fg-1"
+            className="hit-area mr-1 grid size-5 shrink-0 place-items-center rounded-full text-fg-3 hover:bg-bg-3 hover:text-fg-1"
           >
             <X size={12} />
           </button>

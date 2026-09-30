@@ -1,18 +1,25 @@
-import { DEFAULT_SYMBOL, routes, switchSite, useWsStatus } from "@exchange/core";
+import { DEFAULT_SYMBOL, routes, selectSignedIn, useSession } from "@exchange/core";
+import { useUnreadNotifications } from "@exchange/core/user/notifications";
 import { cn } from "@exchange/ui";
-import { ArrowLeftRight, CandlestickChart, Home, UserRound, Wallet } from "lucide-react";
+import { ArrowLeftRight, Bell, CandlestickChart, Home, Search, UserRound, Wallet } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { NavLink, Outlet, useLocation } from "react-router";
+import { Link, NavLink, Outlet, useLocation } from "react-router";
+import { useScrollTop } from "../components/useScrollTop";
+import { useHeader } from "./header";
+import { StatusStrip } from "./StatusStrip";
 
 /**
- * MobileShell (design §7.1): a 44 px top bar, the page, and a 56 px tab bar
- * above the safe area — home, markets, trade (the last pair), assets, me.
- * Touch targets are at least 44 px; nothing scrolls sideways.
+ * MobileShell (design §7.1): a 44 px top bar (the page's title or pair
+ * switcher, or the logo with search and notifications), the page, and a
+ * 56 px tab bar above the safe area — home, markets, trade (the last
+ * pair), assets, me. Touch targets are at least 44 px; nothing scrolls
+ * sideways.
  */
 export function MobileShell() {
   const { t } = useTranslation();
   const { pathname } = useLocation();
+  useScrollTop(pathname);
   const [lastTrade, setLastTrade] = useState(() => localStorage.getItem("m.lastTrade") ?? routes.trade(DEFAULT_SYMBOL));
   useEffect(() => {
     if (pathname.startsWith("/trade/") || pathname.startsWith("/futures/")) {
@@ -23,10 +30,13 @@ export function MobileShell() {
   return (
     <div className="flex min-h-dvh flex-col bg-bg-0 pb-[calc(56px+env(safe-area-inset-bottom))]">
       <TopBar />
-      <main className="flex-1">
+      <main key={pathname} className="flex-1 animate-fade-up">
         <Outlet />
       </main>
-      <nav className="fixed inset-x-0 bottom-0 z-[var(--z-sticky)] border-t border-line-1 bg-bg-1/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
+      <nav
+        aria-label={t("nav.home")}
+        className="fixed inset-x-0 bottom-0 z-[var(--z-sticky)] border-t border-line-1 bg-bg-1/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
+      >
         <div className="grid h-14 grid-cols-5">
           <Tab to={routes.home} icon={<Home size={20} />} label={t("nav.home")} end />
           <Tab to={routes.markets} icon={<CandlestickChart size={20} />} label={t("nav.markets")} />
@@ -60,31 +70,38 @@ function Tab({ to, icon, label, end, match }: { to: string; icon: ReactNode; lab
 
 function TopBar() {
   const { t } = useTranslation();
-  const status = useWsStatus();
-  const [online, setOnline] = useState(() => navigator.onLine);
-  useEffect(() => {
-    const on = () => setOnline(true);
-    const off = () => setOnline(false);
-    window.addEventListener("online", on);
-    window.addEventListener("offline", off);
-    return () => {
-      window.removeEventListener("online", on);
-      window.removeEventListener("offline", off);
-    };
-  }, []);
+  const header = useHeader();
+  const signedIn = useSession(selectSignedIn);
+  const unread = useUnreadNotifications();
   return (
     <header className="sticky top-0 z-[var(--z-sticky)] bg-bg-0/95 pt-[env(safe-area-inset-top)] backdrop-blur">
-      <div className="flex h-11 items-center justify-between px-4">
-        <span className="font-semibold tracking-wide">ASTRAS</span>
-        <button type="button" onClick={() => switchSite("pc")} className="min-h-11 px-2 text-xs text-fg-3">
-          {t("footer.toPC")}
-        </button>
-      </div>
-      {(!online || status === "reconnecting") && (
-        <div role="status" className="bg-warn px-4 py-1 text-center text-xs text-brand-fg">
-          {online ? t("common.reconnecting") : t("common.offline")}
+      <div className="flex h-11 items-center justify-between gap-2 px-4">
+        <div className="min-w-0 flex-1 truncate">{header?.title ?? <span className="font-semibold tracking-wide text-fg-1">ASTRAS</span>}</div>
+        <div className="flex items-center">
+          {header?.right ?? (
+            <>
+              <Link to={routes.markets} aria-label={t("nav.search")} className="grid size-11 place-items-center text-fg-2">
+                <Search size={20} />
+              </Link>
+              {signedIn && (
+                <Link
+                  to={routes.notifications}
+                  aria-label={unread > 0 ? `${t("nav.notifications")} (${unread})` : t("nav.notifications")}
+                  className="relative grid size-11 place-items-center text-fg-2"
+                >
+                  <Bell size={20} />
+                  {unread > 0 && (
+                    <span className="absolute right-1.5 top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-danger px-1 text-[10px] font-semibold leading-none text-white">
+                      {unread > 99 ? "99+" : unread}
+                    </span>
+                  )}
+                </Link>
+              )}
+            </>
+          )}
         </div>
-      )}
+      </div>
+      <StatusStrip />
     </header>
   );
 }

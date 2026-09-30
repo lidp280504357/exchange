@@ -49,7 +49,7 @@ export function ErrorState({ title, message, traceId, onRetry, compact, classNam
       <div className="max-w-sm text-sm text-fg-3">{message ?? t("state.errorHint")}</div>
       {traceId && <code className="text-xs text-fg-3">trace {traceId.slice(0, 12)}</code>}
       {onRetry && (
-        <Button size="sm" variant="secondary" onClick={onRetry}>
+        <Button size="sm" variant="secondary" onClick={onRetry} className="hit-area">
           {t("common.retry")}
         </Button>
       )}

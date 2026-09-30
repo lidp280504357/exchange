@@ -1,9 +1,10 @@
 @import "@exchange/ui/styles.css";
 @source "./";
 
-/* The mobile site never scrolls sideways (design §7.1). */
+/* The mobile site never scrolls sideways (design §7.1). clip, unlike
+   hidden, keeps position: sticky working (the top bar, the pill bars). */
 html,
 body {
-  overflow-x: hidden;
+  overflow-x: clip;
   overscroll-behavior-y: none;
 }

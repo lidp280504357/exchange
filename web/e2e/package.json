@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Browser smoke tests of the deployed sites, run by scripts/e2e/web.sh",
   "scripts": {
-    "pc": "node pc-smoke.mjs"
+    "pc": "node pc-smoke.mjs",
+    "m": "node m-smoke.mjs"
   },
   "devDependencies": {
     "ajv": "^8.20.0",

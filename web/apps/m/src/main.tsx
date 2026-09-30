@@ -30,3 +30,8 @@ const app = (
 );
 
 createRoot(document.getElementById("root")!).render(import.meta.env.DEV ? <StrictMode>{app}</StrictMode> : app);
+
+// The service worker gives pages opened offline a "网络不可用" page (design §7.1).
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => void navigator.serviceWorker.register("/sw.js").catch(() => {}));
+}

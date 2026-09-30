@@ -124,6 +124,12 @@ export class WsClient {
 
   /** subscribe adds a listener to a channel; returns the unsubscribe. */
   subscribe(channel: string, fn: Listener): () => void {
+    // A channel without its symbol ("ticker:" while the pair loads) would
+    // make the server refuse the whole batch it is sent in.
+    if (/:$|::/.test(channel)) {
+      if (import.meta.env?.DEV) console.warn(`WsClient: ignoring incomplete channel "${channel}"`);
+      return () => {};
+    }
     let sub = this.subs.get(channel);
     if (!sub) {
       sub = { listeners: new Set(), active: false };

@@ -150,6 +150,14 @@ describe("WsClient", () => {
     expect(resync).toHaveBeenCalledOnce();
   });
 
+  it("ignores a channel without its symbol, which would spoil the whole batch", () => {
+    const ws = client();
+    ws.subscribe("ticker:", vi.fn());
+    ws.subscribe("ticker:BTC-USDT", vi.fn());
+    last().open();
+    expect(last().ops("subscribe")[0]).toEqual({ op: "subscribe", args: ["ticker:BTC-USDT"] });
+  });
+
   it("refreshes an expired token and authenticates again", async () => {
     const ws = client({ token: () => "old", refresh: async () => "new" });
     ws.subscribe("balances", vi.fn());

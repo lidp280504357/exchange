@@ -97,7 +97,7 @@ export function Sheet({
                       <RDialog.Close
                         aria-label={t("common.close")}
                         onPointerDown={(e) => e.stopPropagation()}
-                        className="-mr-1 grid size-9 place-items-center rounded-2 text-fg-3 hover:bg-bg-2 hover:text-fg-1"
+                        className="-mr-2 grid size-11 place-items-center rounded-2 text-fg-3 hover:bg-bg-2 hover:text-fg-1"
                       >
                         <X size={18} />
                       </RDialog.Close>

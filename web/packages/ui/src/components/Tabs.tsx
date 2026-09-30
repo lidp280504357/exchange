@@ -82,7 +82,7 @@ export function Tabs({
                     aria-hidden
                     transition={reduced ? { duration: 0 } : thumbSpring}
                     className={cn(
-                      "absolute -z-10",
+                      "pointer-events-none absolute -z-10",
                       underline ? "inset-x-0 -bottom-px h-0.5 rounded-full bg-brand" : "inset-0 rounded-full bg-brand-soft",
                     )}
                   />
