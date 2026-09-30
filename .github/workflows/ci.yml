@@ -107,11 +107,11 @@ jobs:
           govulncheck ./...
 
   web:
-    name: web (H5 types, tests, build)
+    name: web (workspace types, lint, tests, build, Storybook)
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: web/h5
+        working-directory: web
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -121,36 +121,18 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: web/h5/pnpm-lock.yaml
+          cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - name: API types match the OpenAPI contracts
-        run: pnpm api:types && git diff --exit-code -- src/api/gen
+      - name: API types match the contracts
+        run: pnpm types && git diff --exit-code -- packages/core/src/api/gen h5/src/api/gen admin/src/api/gen
+      - name: no raw colours outside the tokens
+        run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
-
-  web-admin:
-    name: web (admin console types, tests, build)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web/admin
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: web/admin/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - name: API types match the admin contract
-        run: pnpm api:types && git diff --exit-code -- src/api/gen
-      - run: pnpm typecheck
-      - run: pnpm test
-      - run: pnpm build
+        env:
+          H5_BASE: /h5/
+      - run: pnpm --filter @exchange/ui build-storybook
 
   deploy-config:
     name: deploy config (shell, compose, nginx)

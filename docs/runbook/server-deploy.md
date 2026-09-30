@@ -37,7 +37,16 @@ bash /opt/exchange/src/deploy/server-update.sh          # 更新到 origin/main
 bash /opt/exchange/src/deploy/server-update.sh 305e2a7  # 回滚/切换到指定提交
 ```
 
-脚本依次：拉代码并重置到目标版本；把 `deploy/compose/` 同步到 `/opt/exchange/infra`（不碰 `.env`、`apps.env`、证书、Cloudflare IP 列表、`nginx/html/`、`nginx/admin/`；`signer/`、`admin/` 两个密钥目录不在仓库里，也不受影响）；幂等核对 Redpanda topic；`docker compose up -d --build` 构建并更新容器、清理悬空镜像并把构建缓存压到 3 GB；校验并热加载 nginx 配置；按 `deploy/instruments/test.json` 幂等同步参考数据（[instruments.md](instruments.md)）；在 node 容器里构建 H5 并发布到 nginx 静态目录（[h5.md](h5.md)）；同样构建管理后台 `web/admin` 并发布到 `nginx/admin`（[admin.md](admin.md)）。
+脚本依次执行以下步骤：
+
+1. 拉代码并重置到目标版本。
+2. 把 `deploy/compose/` 同步到 `/opt/exchange/infra`。不碰 `.env`、`apps.env`、证书、Cloudflare IP 列表、`nginx/html/`、`nginx/admin/`、`nginx/sites/`；`signer/`、`admin/` 两个密钥目录不在仓库里，也不受影响。
+3. 幂等核对 Redpanda topic。
+4. `docker compose build` 构建全部镜像。
+5. 先起 instrument-service，按 `deploy/instruments/test.json` 幂等同步参考数据（[instruments.md](instruments.md)），再 `up -d` 其余服务。其余服务启动时就要读交易对与参考行情映射，所以参考数据必须先到。
+6. 清理悬空镜像，把构建缓存压到 3 GB。
+7. 校验并热加载 nginx 配置。
+8. 在 node 容器里对 `web/` 装一次依赖，构建 PC 站、手机站、管理后台、旧 H5（`/h5/`）、旧后台与 Storybook，发布到 `nginx/sites/*` 与 `nginx/admin`（[web.md](web.md)）。
 
 ## 首次克隆（部署密钥加到 GitHub 之后）
 
@@ -100,4 +109,4 @@ ssh exchange 'sudo docker exec exchange-infra-api-gateway-1 wget -qO- http://127
 
 ## 本机调试
 
-本机开发栈 `task dev`、单个服务 `task run -- <service>`：服务在本机运行，连测试服基础设施里单独的 dev 命名空间（库 `exchange_dev`、Redis DB 1、Kafka 前缀 `dev.`），不碰测试环境的数据，见 [local-dev.md](local-dev.md)。`task web:dev` 的 H5 默认代理到测试服，`API_ORIGIN=http://localhost:8080` 改连本机网关。安全组已放行本机 IP，本机不需要 Docker。Ctrl-C 触发优雅退出。
+本机开发栈 `task dev`、单个服务 `task run -- <service>`：服务在本机运行，连测试服基础设施里单独的 dev 命名空间（库 `exchange_dev`、Redis DB 1、Kafka 前缀 `dev.`），不碰测试环境的数据，见 [local-dev.md](local-dev.md)。`task web:dev`（PC 站，`-- m`、`-- admin` 为手机站、后台）默认代理到测试服，`API_ORIGIN=http://localhost:8080` 改连本机网关。安全组已放行本机 IP，本机不需要 Docker。Ctrl-C 触发优雅退出。

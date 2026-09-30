@@ -1,5 +1,6 @@
 // Package application runs the admin console (requirements §5.12):
-// sign-in with a password and an authenticator code, role checks on every
+// sign-in with a password and an authenticator code (the code can be
+// switched off with the flag admin.login_without_totp), role checks on every
 // action, two-person approval of ledger adjustments and insurance fund
 // contributions, and an audit event for every change the acting service
 // does not audit itself.
@@ -21,6 +22,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/admin/domain"
 	"github.com/lidp280504357/exchange/internal/admin/ports"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/lidp280504357/exchange/internal/platform/flags"
 	"github.com/lidp280504357/exchange/internal/platform/pagecursor"
 	"github.com/lidp280504357/exchange/internal/platform/password"
 	"github.com/lidp280504357/exchange/internal/platform/secretbox"
@@ -39,9 +41,12 @@ type Service struct {
 	// Derivatives is derivatives-service (perpetual contracts).
 	Derivatives ports.Derivatives
 	Flags       ports.Flags
-	Ledger      ports.Ledger
-	AuditLog    ports.AuditLog
-	Reports     ports.Reports
+	// Features switches the console's own behavior; nil leaves every
+	// flag off (the authenticator code is required).
+	Features ports.Features
+	Ledger   ports.Ledger
+	AuditLog ports.AuditLog
+	Reports  ports.Reports
 	// Records pages through the read models' orders, trades and deposits;
 	// Market reads market-data-service's reference feed.
 	Records ports.Records
@@ -63,12 +68,22 @@ func (p Principal) require(perm string) error {
 	return nil
 }
 
+// TOTPRequired reports whether sign-in asks for the authenticator code:
+// always, unless the flag admin.login_without_totp is on (test
+// environments, user decision of 2026-09-30).
+func (s *Service) TOTPRequired() bool {
+	return s.Features == nil || !s.Features.Enabled(flags.KeyAdminNoTOTP, flags.Subject{})
+}
+
 // Login checks the password and the authenticator code and opens a
 // session; it returns the session token. Five failures lock the account
 // for 15 minutes; an unknown email costs the same time as a known one.
+// With the code switched off (TOTPRequired) the password alone signs in,
+// the code is ignored and the audit event says it was not checked.
 func (s *Service) Login(ctx context.Context, email, pw, code, ip, userAgent string) (string, domain.Session, domain.Admin, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	now := s.Now()
+	checkCode := s.TOTPRequired()
 	var (
 		token   string
 		session domain.Session
@@ -93,8 +108,8 @@ func (s *Service) Login(ctx context.Context, email, pw, code, ip, userAgent stri
 		if err != nil {
 			return err
 		}
-		step := int64(0)
-		if ok {
+		step := a.TOTPLastStep
+		if ok && checkCode {
 			secret, err := s.Box.Open(a.TOTPSealed, []byte(a.ID))
 			if err != nil {
 				return err
@@ -127,7 +142,8 @@ func (s *Service) Login(ctx context.Context, email, pw, code, ip, userAgent stri
 			return err
 		}
 		return r.Audit(ctx, &auditv1.AdminActionPerformed{
-			Target: "admin:" + a.ID, Action: "admin.login", Actor: a.Email, Reason: "signed in", Details: fmt.Sprintf(`{"ip":%q}`, ip),
+			Target: "admin:" + a.ID, Action: "admin.login", Actor: a.Email, Reason: "signed in",
+			Details: fmt.Sprintf(`{"ip":%q,"totp_checked":%t}`, ip, checkCode),
 		}, a.Email)
 	})
 	if err == nil {

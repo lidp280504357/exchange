@@ -11,7 +11,8 @@ export default defineConfig({
   base: "/admin/",
   plugins: [react(), tailwindcss()],
   server: {
-    port: 5180,
+    // 5180 is the new admin console's; the legacy one runs next to it.
+    port: 5181,
     proxy: { "/admin/v1": { target: api, changeOrigin: true } },
   },
   build: { sourcemap: false },

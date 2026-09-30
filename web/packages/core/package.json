@@ -1,0 +1,37 @@
+{
+  "name": "@exchange/core",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "The front end's data layer: API client and types, the WebSocket client, market stores, formatting, i18n, routes",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "api:types": "node scripts/gen-api.mjs"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.104.0",
+    "i18next": "^26.4.2",
+    "openapi-fetch": "^0.17.0",
+    "react-i18next": "^17.0.15",
+    "web-vitals": "^6.2.2",
+    "zustand": "^5.0.15"
+  },
+  "peerDependencies": {
+    "react": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "happy-dom": "^20.14.5",
+    "openapi-typescript": "^7.13.0",
+    "react": "^19.3.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.1",
+    "vitest": "^5.0.2"
+  }
+}

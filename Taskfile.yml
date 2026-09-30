@@ -96,52 +96,65 @@ tasks:
     cmds:
       - for f in scripts/fault/*.sh; do echo "### $f"; bash "$f" || exit 1; done
 
+  web:install:
+    desc: 安装前端依赖（web/ 的 pnpm workspace：apps/pc、apps/m、apps/admin、packages/core、packages/ui 与旧 h5、admin）
+    dir: web
+    cmds: [pnpm install --prefer-offline]
+
   web:dev:
-    desc: 本机启动 H5（Vite，/v1 与 WebSocket 代理到测试服，http://localhost:5173）
-    dir: web/h5
-    cmds: [pnpm install --prefer-offline, pnpm dev]
+    desc: 本机启动前端（task web:dev -- pc|m|admin|h5|admin-legacy，默认 pc；/v1 与 WebSocket 代理到测试服；端口 5173/5174/5180）
+    dir: web
+    cmds:
+      - pnpm install --prefer-offline --silent
+      - |
+        case "{{.CLI_ARGS}}" in
+          m) f=@exchange/m ;;
+          admin) f=@exchange/admin ;;
+          h5) f=exchange-h5 ;;
+          admin-legacy) f=exchange-admin ;;
+          *) f=@exchange/pc ;;
+        esac
+        pnpm --filter "$f" dev
 
   web:build:
-    desc: 构建 H5 到 web/h5/dist
-    dir: web/h5
+    desc: 构建三个站点、旧 H5 与旧后台（各自的 dist/）
+    dir: web
     cmds: [pnpm install --frozen-lockfile --prefer-offline, pnpm build]
 
   web:types:
-    desc: 由 api/openapi 重新生成 H5 的 TypeScript 类型
-    dir: web/h5
-    cmds: [pnpm api:types]
+    desc: 由 api/openapi 与 api/admin 重新生成 TypeScript 类型（packages/core 与旧 h5、admin）
+    dir: web
+    cmds: [pnpm types]
+
+  web:storybook:
+    desc: 本机启动设计系统目录（Storybook，http://localhost:6006）
+    dir: web
+    cmds: [pnpm install --prefer-offline --silent, pnpm storybook]
 
   web:check:
-    desc: H5 类型与契约一致、类型检查、单元测试
-    dir: web/h5
+    desc: 前端类型与契约一致、无硬编码颜色、类型检查、单元测试
+    dir: web
     cmds:
       - pnpm install --frozen-lockfile --prefer-offline --silent
-      - pnpm api:types >/dev/null && git diff --exit-code -- src/api/gen
+      - pnpm types >/dev/null && git diff --exit-code -- packages/core/src/api/gen h5/src/api/gen admin/src/api/gen
+      - pnpm lint
       - pnpm typecheck
       - pnpm test
 
-  admin:dev:
-    desc: 本机启动管理后台（Vite，/admin/v1 代理到测试服，http://localhost:5180/admin/）
-    dir: web/admin
-    cmds: [pnpm install --prefer-offline, pnpm dev]
+  web:lighthouse:
+    desc: 对部署后的 PC 站与手机站各三页跑 Lighthouse（设计 §12.1 的性能预算；需要本机 Chrome；报告在 .lighthouseci/）
+    dir: web/lighthouse
+    cmds:
+      - pnpm dlx @lhci/cli@0.15 autorun --config=pc.json || true
+      - pnpm dlx @lhci/cli@0.15 autorun --config=m.json || true
 
   admin:types:
-    desc: 由 api/admin/admin.yaml 重新生成管理后台的 TypeScript 类型
-    dir: web/admin
-    cmds: [pnpm api:types]
-
-  admin:check:
-    desc: 管理后台类型与契约一致、类型检查、单元测试
-    dir: web/admin
-    cmds:
-      - pnpm install --frozen-lockfile --prefer-offline --silent
-      - pnpm api:types >/dev/null && git diff --exit-code -- src/api/gen
-      - pnpm typecheck
-      - pnpm test
+    desc: 同 web:types（管理后台的类型也由它生成）
+    cmds: [task: web:types]
 
   ci:
     desc: 与 CI 相同的本地检查（不含 vuln）
-    deps: [fmt:check, mod:check, vet, lint, scripts:check, web:check, admin:check]
+    deps: [fmt:check, mod:check, vet, lint, scripts:check, web:check]
     cmds:
       - task: test
 

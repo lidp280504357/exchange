@@ -124,8 +124,9 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./nginx/snippets:/etc/nginx/snippets:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
-      - ./nginx/html:/usr/share/nginx/html:ro
-      # 管理后台前端（web/admin 构建产物，deploy/server-update.sh 写入）：路径与 URL 一致，root 指向上一级
+      # 三个站点与 Storybook、旧 H5（web/ 的构建产物，deploy/server-update.sh 写入 nginx/sites/{pc,m,admin,h5,storybook}）
+      - ./nginx/sites:/usr/share/nginx/sites:ro
+      # 旧管理后台前端（web/admin 构建产物）：路径与 URL 一致，root 指向上一级
       - ./nginx/admin:/usr/share/nginx/console/admin:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null --header 'Host: astras.vip' http://127.0.0.1/healthz || exit 1"]

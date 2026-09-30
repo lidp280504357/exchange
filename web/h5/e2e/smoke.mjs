@@ -18,8 +18,12 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import puppeteer from "puppeteer-core";
 import { loadContracts } from "./contract.mjs";
 
-const APP = process.env.APP ?? "https://astras.vip";
-const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://astras.vip" : APP);
+const APP = (process.env.APP ?? "https://astras.vip/h5").replace(/\/$/, "");
+// The H5 is served under a path (/h5 since phase 4, ADR-0012); the API and
+// the API reference are at the site's root.
+const ORIGIN = new URL(APP).origin;
+const BASE_PATH = new URL(APP).pathname.replace(/\/$/, "");
+const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://astras.vip" : ORIGIN);
 const SHOTS = process.env.SHOTS ?? "";
 const CHROME =
   process.env.CHROME ??
@@ -170,7 +174,7 @@ try {
   const page = await preparePage({ mobile: true });
   await page.goto(APP + "/", { waitUntil: "networkidle0" });
   await page.waitForSelector('input[autocomplete="username"]');
-  if (new URL(page.url()).pathname !== "/login") throw new Error("anonymous visit should land on /login: " + page.url());
+  if (new URL(page.url()).pathname !== BASE_PATH + "/login") throw new Error("anonymous visit should land on /login: " + page.url());
   if (page.requests.includes("/v1/auth/token/refresh")) throw new Error("an anonymous visit should not try to refresh");
   ok("anonymous visit redirects to the login page without a refresh call");
   await shot(page, "1-login");
@@ -182,7 +186,7 @@ try {
   ok("a wrong password shows the localized message of its error code");
   await typeInto(page, 'input[autocomplete="current-password"]', password);
   await clickText(page, "form button", "Sign in");
-  await page.waitForFunction(() => location.pathname === "/", { timeout: 15000 });
+  await page.waitForFunction((p) => location.pathname.replace(/\/$/, "") === p.replace(/\/$/, ""), { timeout: 15000 }, BASE_PATH + "/");
   await waitText(page, "10,000", 30000);
   await waitText(page, "Adjustment (simulated funds)", 15000);
   ok("signed in; assets and the fund flow show the 10,000 USDT welcome funds");
@@ -276,7 +280,7 @@ try {
   await shot(page, "8-settings");
 
   await clickText(page, "header button", "Sign out");
-  await page.waitForFunction(() => location.pathname === "/login", { timeout: 10000 });
+  await page.waitForFunction((p) => location.pathname.replace(/\/$/, "") === p.replace(/\/$/, ""), { timeout: 10000 }, BASE_PATH + "/login");
   await page.reload({ waitUntil: "networkidle0" });
   await page.waitForSelector('input[autocomplete="username"]');
   ok("sign out ends the session; a reload stays signed out");
@@ -309,7 +313,7 @@ try {
   await signup.waitForSelector('input[type="checkbox"]', { visible: true });
   await signup.click('input[type="checkbox"]');
   await clickText(signup, "form button", "Sign up");
-  await signup.waitForFunction(() => location.pathname === "/", { timeout: 15000 });
+  await signup.waitForFunction((p) => location.pathname.replace(/\/$/, "") === p.replace(/\/$/, ""), { timeout: 15000 }, BASE_PATH + "/");
   await waitText(signup, "10,000", 30000);
   ok("sign-up through the form (code, password, terms) lands on the assets with the welcome funds");
   await shot(signup, "10-signup");
@@ -318,7 +322,7 @@ try {
   // only runs when its pinned hash matches, so rendering proves both.
   if (!APP.startsWith("http://localhost")) {
     const docs = await preparePage({ mobile: false });
-    await docs.goto(APP + "/docs/", { waitUntil: "networkidle0" });
+    await docs.goto(ORIGIN + "/docs/", { waitUntil: "networkidle0" });
     await waitText(docs, "Idempotency", 30000);
     await waitText(docs, "Move funds between the SPOT and FUTURES accounts");
     await waitText(docs, "Send a one-time code");

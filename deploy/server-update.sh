@@ -27,7 +27,7 @@ main() {
 
   # 1. 基础设施与 nginx 配置以仓库为准同步到 infra 目录；不覆盖服务器上的 .env、证书和生成的 Cloudflare IP 列表
   rsync -a --exclude '.env' --exclude 'apps.env' --exclude 'ssl/' --exclude '00-cloudflare-real-ip.conf' --exclude 'nginx/html/' \
-    --exclude 'nginx/admin/' deploy/compose/ "$INFRA"/
+    --exclude 'nginx/admin/' --exclude 'nginx/sites/' deploy/compose/ "$INFRA"/
   cp deploy/redpanda/topics.sh "$INFRA/redpanda/topics.sh"
   mkdir -p "$INFRA/backup" && cp deploy/backup/pg-backup.sh "$INFRA/backup/pg-backup.sh"
 
@@ -54,26 +54,25 @@ main() {
   sudo docker compose "${COMPOSE[@]}" exec -T nginx sh -c 'nginx -t -q && nginx -s reload' && echo "== nginx 配置已重新加载"
 
   # 4. 参考数据已在第 3 步随 instrument-service 同步（apply_instruments）
-  # 5. H5 前端：在 node 容器里构建（glibc 镜像，打包器与 Tailwind 的原生模块都有对应二进制；pnpm 缓存放命名卷），
-  #    构建成功才替换 nginx 的静态目录；Turnstile 站点密钥是公开值。挂整个仓库：API 文档页要读 api/openapi
-  if [ -f web/h5/package.json ]; then
+  # 5. 前端（web/ 的 pnpm workspace，ADR-0012）：在 node 容器里装一次依赖（glibc 镜像，打包器与 Tailwind 的原生模块
+  #    都有对应二进制；pnpm 缓存放命名卷），构建三个站点、旧 H5（base /h5/）、旧后台与 Storybook，全部成功才替换 nginx 的
+  #    静态目录。Turnstile 站点密钥是公开值。挂整个仓库：API 参考页要读 api/openapi
+  if [ -f web/pnpm-workspace.yaml ]; then
     local site_key
     site_key="$(sudo grep -E '^TURNSTILE_SITE_KEY=' "$INFRA/apps.env" | cut -d= -f2- | tr -d '"' || true)"
-    sudo docker run --rm -e CI=true -e TURNSTILE_SITE_KEY="$site_key" -v "$SRC:/src" -v exchange-pnpm-store:/pnpm-store -w /src/web/h5 \
-      node:24-slim sh -c 'npm install -g pnpm@11 --silent >/dev/null && pnpm config set store-dir /pnpm-store >/dev/null \
-        && pnpm install --frozen-lockfile --silent && { pnpm build >/tmp/build.log 2>&1 || { cat /tmp/build.log; exit 1; }; }'
-    sudo mkdir -p "$INFRA/nginx/html"
-    sudo rsync -a --delete web/h5/dist/ "$INFRA/nginx/html/"
-    echo "== H5 已构建：$(ls web/h5/dist/assets | wc -l) 个资源文件"
-  fi
-  # 6. 管理后台前端（web/admin，nginx 在 /admin/ 提供），构建方式同 H5
-  if [ -f web/admin/package.json ]; then
-    sudo docker run --rm -e CI=true -v "$SRC:/src" -v exchange-pnpm-store:/pnpm-store -w /src/web/admin \
-      node:24-slim sh -c 'npm install -g pnpm@11 --silent >/dev/null && pnpm config set store-dir /pnpm-store >/dev/null \
-        && pnpm install --frozen-lockfile --silent && { pnpm build >/tmp/build.log 2>&1 || { cat /tmp/build.log; exit 1; }; }'
-    sudo mkdir -p "$INFRA/nginx/admin"
+    sudo docker run --rm -e CI=true -e TURNSTILE_SITE_KEY="$site_key" -e H5_BASE=/h5/ -v "$SRC:/src" -v exchange-pnpm-store:/pnpm-store \
+      -w /src/web node:24-slim sh -c 'npm install -g pnpm@11 --silent >/dev/null && pnpm config set store-dir /pnpm-store >/dev/null \
+        && pnpm install --frozen-lockfile --silent \
+        && { { pnpm build && pnpm --filter @exchange/ui build-storybook; } >/tmp/build.log 2>&1 || { cat /tmp/build.log; exit 1; }; }'
+    sudo mkdir -p "$INFRA/nginx/sites" "$INFRA/nginx/admin"
+    local site
+    for site in pc m admin; do
+      sudo rsync -a --delete "web/apps/$site/dist/" "$INFRA/nginx/sites/$site/"
+    done
+    sudo rsync -a --delete web/h5/dist/ "$INFRA/nginx/sites/h5/"
+    sudo rsync -a --delete web/packages/ui/storybook-static/ "$INFRA/nginx/sites/storybook/"
     sudo rsync -a --delete web/admin/dist/ "$INFRA/nginx/admin/"
-    echo "== 管理后台已构建：$(ls web/admin/dist/assets | wc -l) 个资源文件"
+    echo "== 前端已构建：PC $(ls web/apps/pc/dist/assets | wc -l)、手机 $(ls web/apps/m/dist/assets | wc -l)、后台 $(ls web/apps/admin/dist/assets | wc -l) 个资源文件"
   fi
   echo "== 服务状态"
   sudo docker compose "${COMPOSE[@]}" ps --format 'table {{.Service}}\t{{.Status}}'

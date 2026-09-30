@@ -56,3 +56,8 @@ coverage.out
 # TLS private material (server-side only)
 deploy/compose/nginx/ssl/
 *.key
+
+# Lighthouse CI reports (task web:lighthouse)
+.lighthouseci/
+# Storybook static build (web/packages/ui)
+storybook-static/

@@ -1,0 +1,104 @@
+/*
+ * Design tokens (design 2026-09-30 §5.1, ADR-0012). The only file with raw
+ * colours: components use the semantic utilities of theme.css (bg-bg-1,
+ * text-up, border-line-1 ...). The user sites are dark; the admin console
+ * sets data-theme="light". data-updown="red-up" swaps rises and falls.
+ */
+:root,
+[data-theme="dark"] {
+  --bg-0: #0b0e11;
+  --bg-1: #12161c;
+  --bg-2: #1a1f27;
+  --bg-3: #232a34;
+  --fg-1: #eaecef;
+  --fg-2: #a7b1bc;
+  --fg-3: #6b7280;
+  --line-1: #232a34;
+  --line-2: #2f3742;
+  --brand: #f0b90b;
+  --brand-fg: #0b0e11;
+  --brand-soft: #f0b90b26;
+  --green: #0ecb81;
+  --red: #f6465d;
+  --up: var(--green);
+  --down: var(--red);
+  /* Translucent rise and fall, for canvas drawings that cannot use
+     Tailwind opacity modifiers (the chart's volume bars). */
+  --green-soft: #0ecb8159;
+  --red-soft: #f6465d59;
+  --up-soft: var(--green-soft);
+  --down-soft: var(--red-soft);
+  --info: #3b82f6;
+  --warn: #f59e0b;
+  --danger: #ef4444;
+  --success: #22c55e;
+  --white: #ffffff;
+  --black: #000000;
+  --overlay: #0b0e11b3;
+  --shadow: 0 8px 24px #00000066;
+  --glow: #f0b90b33;
+
+  /* Identity colours: letter icons of coins and avatars without a logo
+     (CoinIcon picks one per symbol, or the coin profile's palette name).
+     Mid tones that carry white text on both themes. */
+  --id-orange: #f7931a;
+  --id-amber: #d4a017;
+  --id-lime: #65a30d;
+  --id-emerald: #059669;
+  --id-teal: #26a17b;
+  --id-cyan: #0891b2;
+  --id-sky: #0284c7;
+  --id-blue: #2563eb;
+  --id-indigo: #627eea;
+  --id-violet: #7c3aed;
+  --id-fuchsia: #c026d3;
+  --id-rose: #e11d48;
+
+  /* Indicator lines of the charts (MA 7/25/99, EMA 12/26), read at run
+     time by CandleChart. */
+  --chart-1: var(--brand);
+  --chart-2: var(--id-fuchsia);
+  --chart-3: var(--id-sky);
+  --chart-4: var(--id-lime);
+  --chart-5: var(--id-orange);
+
+  --r-1: 4px;
+  --r-2: 8px;
+  --r-3: 12px;
+
+  --t-fast: 120ms;
+  --t-base: 200ms;
+  --t-slow: 320ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --z-dropdown: 20;
+  --z-sticky: 30;
+  --z-sheet: 40;
+  --z-dialog: 50;
+  --z-toast: 60;
+
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg-0: #f5f7fa;
+  --bg-1: #ffffff;
+  --bg-2: #f0f2f5;
+  --bg-3: #e6e9ee;
+  --fg-1: #111827;
+  --fg-2: #4b5563;
+  --fg-3: #9ca3af;
+  --line-1: #e5e7eb;
+  --line-2: #d1d5db;
+  --brand-soft: #f0b90b33;
+  --overlay: #11182766;
+  --shadow: 0 8px 24px #1118271f;
+  color-scheme: light;
+}
+
+[data-updown="red-up"] {
+  --up: var(--red);
+  --down: var(--green);
+  --up-soft: var(--red-soft);
+  --down-soft: var(--green-soft);
+}

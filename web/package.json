@@ -1,0 +1,14 @@
+{
+  "name": "exchange-web",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.5.2",
+  "scripts": {
+    "build": "pnpm -r --filter './apps/*' --filter exchange-h5 --filter exchange-admin build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "types": "pnpm --filter @exchange/core api:types && pnpm --filter exchange-h5 api:types && pnpm --filter exchange-admin api:types",
+    "lint": "node scripts/check-tokens.mjs",
+    "storybook": "pnpm --filter @exchange/ui storybook"
+  }
+}

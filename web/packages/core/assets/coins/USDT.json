@@ -1,0 +1,11 @@
+{
+  "symbol": "USDT",
+  "name": { "zh-CN": "泰达币", "en": "Tether USD" },
+  "intro": {
+    "zh-CN": "USDT 是与美元 1:1 锚定的稳定币，发行在多条链上；本站把各链充入的 USDT 记为同一种资产。",
+    "en": "USDT is a stablecoin pegged 1:1 to the US dollar and issued on several chains; here every chain's USDT is one asset."
+  },
+  "links": { "website": "https://tether.to", "explorer": "https://tronscan.org", "whitepaper": "https://tether.to/en/whitepaper" },
+  "color": "teal",
+  "asOf": "2026-09-30"
+}

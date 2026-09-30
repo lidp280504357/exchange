@@ -1,6 +1,6 @@
 # 运行手册索引
 
-测试环境入口 `https://astras.vip`（H5）、`https://astras.vip/docs/`（API 参考）、`https://astras.vip/admin/`（管理后台）；服务器操作见 [server-deploy.md](server-deploy.md)。凭据只在本地 `.env` 与服务器 `/opt/exchange/infra/{.env,apps.env}`。
+测试环境入口 `https://astras.vip`（PC 站）、`https://m.astras.vip`（手机站）、`https://admin.astras.vip`（管理后台）、`https://astras.vip/docs/`（API 参考）、`https://astras.vip/storybook/`（设计系统目录）；过渡期旧版在 `https://astras.vip/h5/`（H5）与 `https://astras.vip/admin/`（旧后台）。服务器操作见 [server-deploy.md](server-deploy.md)。凭据只在本地 `.env` 与服务器 `/opt/exchange/infra/{.env,apps.env}`。
 
 ## 开发、部署与测试
 
@@ -9,7 +9,8 @@
 | [local-dev.md](local-dev.md) | 本机开发栈 `task dev`：本机跑全部服务，连测试服基础设施的 dev 命名空间 |
 | [server-deploy.md](server-deploy.md) | 测试服部署与回滚、端口表、应用环境变量 |
 | [testing.md](testing.md) | 测试层级、端到端（`task e2e`）与故障注入（`task fault`） |
-| [h5.md](h5.md) | H5 前端：开发、构建、发布、浏览器冒烟测试 |
+| [web.md](web.md) | 前端：PC 站、手机站、管理后台与共享包（数据层、设计系统），开发、构建、部署、设备分流、性能检查 |
+| [h5.md](h5.md) | 旧 H5（阶段 1–3，过渡期挂在 `/h5/`）：页面结构与浏览器冒烟测试 |
 | [cloudflare-nginx-tls.md](cloudflare-nginx-tls.md) | 域名、Cloudflare 代理、nginx 与源站证书 |
 | [turnstile.md](turnstile.md) | Cloudflare Turnstile 人机验证 |
 

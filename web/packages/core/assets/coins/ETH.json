@@ -1,0 +1,11 @@
+{
+  "symbol": "ETH",
+  "name": { "zh-CN": "以太坊", "en": "Ethereum" },
+  "intro": {
+    "zh-CN": "以太坊是支持智能合约的公链，ETH 用于支付交易费用与质押，2022 年起采用权益证明。",
+    "en": "Ethereum is a smart-contract blockchain; ETH pays for transactions and secures the network through proof of stake since 2022."
+  },
+  "links": { "website": "https://ethereum.org", "explorer": "https://etherscan.io", "whitepaper": "https://ethereum.org/whitepaper" },
+  "color": "indigo",
+  "asOf": "2026-09-30"
+}

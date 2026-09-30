@@ -53,6 +53,7 @@ func principal(r *http.Request) application.Principal {
 func (h *Handler) Routes(r chi.Router) {
 	r.Route("/admin/v1", func(r chi.Router) {
 		r.Use(h.csrf)
+		r.Get("/login-options", h.loginOptions)
 		r.Post("/login", h.login)
 		r.Group(func(r chi.Router) {
 			r.Use(h.authenticate)
@@ -136,6 +137,12 @@ type AdminJSON struct {
 
 func adminJSON(a domain.Admin) AdminJSON {
 	return AdminJSON{ID: a.ID, Email: a.Email, Name: a.Name, Role: a.Role, Permissions: domain.Permissions(a.Role)}
+}
+
+// loginOptions tells the sign-in page whether to ask for the
+// authenticator code (flag admin.login_without_totp).
+func (h *Handler) loginOptions(w http.ResponseWriter, _ *http.Request) {
+	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"totp_required": h.Svc.TOTPRequired()})
 }
 
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {

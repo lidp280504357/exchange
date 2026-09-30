@@ -18,13 +18,17 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 ```
 
 - 服务：admin-service，HTTP 8093（nginx 转发 `/admin/v1/`），运维 9094，schema `admin`（`admins`、`admin_sessions`、`approvals`）。契约 `api/admin/admin.yaml`（不进公开 API 文档）。
-- 前端：`web/admin`（React + TS + Vite，`base: /admin/`），部署脚本第 6 步在 node 容器里构建后同步到 nginx。本机 `task admin:dev`（http://localhost:5180/admin/，`/admin/v1` 代理到测试服）。
-- 与需求的差异：需求要求独立域名与网关、仅办公网/VPN 访问。学习项目只有一个域名，改为同域名的 `/admin/` 路径 + 独立服务（不经用户网关）+ 强制 TOTP；会话 Cookie 限定 `Path=/admin/`，与用户站的 Cookie 互不可见。需要 IP 白名单时见下文。
+- 前端：阶段 4 起新后台在 `https://admin.astras.vip`（`web/apps/admin`，浅色主题）。整站包含 `snippets/admin-access*.conf`，可以挂访问限制，见 [web.md](web.md)；用户 2026-09-30 决定暂不做访问限制，服务器上没有这个文件。B0 已有登录与概览，其余页面在 B5 重做；在此之前旧后台 `web/admin`（`base: /admin/`）继续挂在 `https://astras.vip/admin/`。两者用同一个 admin-service 与会话 Cookie（`Path=/admin/`，按域名各自登录）。本机 `task web:dev -- admin`（新，http://localhost:5180）、`task web:dev -- admin-legacy`（旧，http://localhost:5181/admin/），`/admin/v1` 都代理到测试服。
+- 与需求的差异：需求要求独立域名与网关、仅办公网/VPN 访问。学习项目只有一个域名，改为同域名的 `/admin/` 路径 + 独立服务（不经用户网关）+ 强制 TOTP；会话 Cookie 限定 `Path=/admin/`，与用户站的 Cookie 互不可见。阶段 4 起后台有了独立域名 `admin.astras.vip`；访问限制与 TOTP 目前按用户决定暂缓（见下文）。
 
 ## 登录与会话
 
 - 没有注册入口：管理员由运维用 `exchangectl admin create` 在 admin-service 容器里创建（它有 `ADMIN_SECRET_KEY`）。
 - 登录 = 邮箱 + 密码（Argon2id，至少 12 位）+ 身份验证器 6 位码（RFC 6238，前后一步误差，每个时间步只能用一次）。连续 5 次失败锁定 15 分钟；同一 IP 每分钟最多 10 次登录请求。未知邮箱与已知邮箱耗时相同。
+- **暂不校验验证码**（用户 2026-09-30 决定）：开关 `admin.login_without_totp` 打开时只凭邮箱与密码登录。
+  - 验证码不要求也不校验；登录页通过 `GET /admin/v1/login-options`（`totp_required`）得知后隐藏验证码输入框，新旧两个后台都这样。
+  - 登录审计的 `details` 带 `"totp_checked":false`，锁定与限流不变。
+  - 测试服已打开这个开关。恢复要求验证码：`exchangectl flags set admin.login_without_totp --off --reason "..."`，5 秒内生效，不用重新部署；已绑定的身份验证器不受影响。
 - 会话：随机令牌只存 SHA-256；Cookie `admin_session`，HttpOnly、Secure、SameSite=Strict、Path=/admin/；8 小时到期，1 小时无请求失效；退出或停用管理员时服务端撤销。
 - CSRF：除 GET 外每个请求必须带 `X-Admin-CSRF: 1`（跨站表单无法设置自定义头；Cookie 又是 SameSite=Strict）。
 - TOTP 密钥用 `ADMIN_SECRET_KEY`（AES-256-GCM，附加数据为管理员 ID）加密存放；换掉这个密钥会让所有管理员的 TOTP 失效，只能重建账号。
@@ -91,7 +95,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 
 - `ADMIN_SECRET_KEY` 在服务器 `/opt/exchange/infra/admin/admin.env`（目录 700、文件 600，属主 root，只注入 admin-service，不在 `apps.env`），2026-09-29 用 `openssl rand -base64 32` 生成，从未打印。本机开发的在 `.env`。
 - 锁定：等 15 分钟自动解锁；忘记密码或丢失 TOTP：停用后用新邮箱重建（没有重置入口，避免成为绕过 TOTP 的后门）。
-- IP 白名单（可选）：在服务器建 `/opt/exchange/infra/nginx/snippets/admin-access.local.conf`，内容如 `allow 203.0.113.7; deny all;`，`task deploy` 或 `nginx -s reload` 后对 `/admin/` 全部生效（真实客户端 IP 由 Cloudflare real-ip 配置还原）。部署同步不会覆盖或删除这个文件。
+- IP 白名单（可选）：在服务器建 `/opt/exchange/infra/nginx/snippets/admin-access.local.conf`，内容如 `allow 203.0.113.7; deny all;`，`task deploy` 或 `nginx -s reload` 后对 `admin.astras.vip` 整站与旧路径 `astras.vip/admin/` 生效（真实客户端 IP 由 Cloudflare real-ip 配置还原）。目前按用户决定不设。部署同步不会覆盖或删除这个文件。
 - 指标：运维端口 9094（`outbox_pending`、`http_server_*`）；Prometheus 任务 `admin-service`。
 - 端到端：`bash scripts/e2e/admin.sh`（每次创建 4 个随机管理员、结束时停用；覆盖页面与安全头、登录与 Cookie、角色、冻结/解冻、交易对状态往返、撤单、开关往返、双人调账、合约（状态、只减仓、合约状态往返、强平监控与记录、双人保险基金注资 1 USDT）、报表、审计查询、退出与停用）。
 - admin-service 连 derivatives-service 的内部地址：`DERIVATIVES_SERVICE_URL`（compose 里是 `http://derivatives-service:8095`）。
@@ -100,7 +104,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 
 | 错误码 | 含义 |
 |---|---|
-| `ADMIN_LOGIN_FAILED` | 邮箱、密码或验证码错误，或验证码已用过 |
+| `ADMIN_LOGIN_FAILED` | 邮箱、密码或验证码错误，或验证码已用过（`admin.login_without_totp` 打开时只看邮箱与密码） |
 | `ADMIN_LOCKED` | 连续失败 5 次，锁定 15 分钟 |
 | `ADMIN_UNAUTHORIZED` | 没有会话或会话已过期/撤销 |
 | `ADMIN_FORBIDDEN` | 角色没有该权限 |

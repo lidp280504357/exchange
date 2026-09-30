@@ -11,7 +11,7 @@ const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, sta
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, "")}>
         <App />
       </BrowserRouter>
     </QueryClientProvider>

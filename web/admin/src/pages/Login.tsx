@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { api, data, describe } from "../api/client";
@@ -10,8 +10,16 @@ export function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
+  // The code field is left out while the flag admin.login_without_totp is on.
+  const options = useQuery({
+    queryKey: ["login-options"],
+    queryFn: async () => data(await api.GET("/admin/v1/login-options")),
+    staleTime: 60_000,
+  });
+  const askCode = options.data?.totp_required ?? true;
   const login = useMutation({
-    mutationFn: async () => data(await api.POST("/admin/v1/login", { body: { email, password, totp_code: code } })),
+    mutationFn: async () =>
+      data(await api.POST("/admin/v1/login", { body: askCode ? { email, password, totp_code: code } : { email, password } })),
     onSuccess: (res) => {
       qc.setQueryData(["me"], res.admin);
       navigate("/", { replace: true });
@@ -37,17 +45,19 @@ export function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
-            <Field
-              label="身份验证器 6 位验证码"
-              name="totp_code"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              pattern="[0-9]{6}"
-              maxLength={6}
-              required
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-            />
+            {askCode && (
+              <Field
+                label="身份验证器 6 位验证码"
+                name="totp_code"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                pattern="[0-9]{6}"
+                maxLength={6}
+                required
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+              />
+            )}
             <ErrorText text={login.isError ? describe(login.error) : undefined} />
             <Button type="submit" className="w-full" disabled={login.isPending}>
               {login.isPending ? "登录中…" : "登录"}

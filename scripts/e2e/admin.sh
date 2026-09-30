@@ -4,7 +4,8 @@
 # never the gateway). Four administrators are created for the run with
 # exchangectl in the admin-service container (random passwords and
 # authenticator secrets passed on stdin, never printed) and disabled at
-# the end. It checks sign-in (password + TOTP, one use per code, the
+# the end. It checks sign-in (password + TOTP, one use per code, or the
+# password alone while the flag admin.login_without_totp is on; the
 # cookie's attributes, the CSRF header), roles, freezing and unfreezing
 # an account, cancelling its orders, a pair's status round trip, a flag
 # round trip, a two-person ledger adjustment, the withdrawal list, the
@@ -91,6 +92,9 @@ as() { # as ROLE METHOD PATH JSON: a call with the role's session
 }
 
 echo "== sign-in"
+call GET /admin/v1/login-options ""
+expect 200 - "the sign-in options need no session"
+TOTP_REQUIRED=$(jq -r .totp_required <<<"$BODY")
 login ADMIN
 expect 200 - "ADMIN signs in with password and code"
 check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 15" "with every permission"
@@ -99,8 +103,13 @@ for attr in 'Path=/admin/' 'HttpOnly' 'Secure' 'SameSite=Strict'; do
   grep -qi "$attr" <<<"$cookie" || { echo "FAIL the session cookie lacks $attr: $cookie" >&2; exit 1; }
 done
 echo "ok   the cookie is HttpOnly, Secure, SameSite=Strict, Path=/admin/"
-login ADMIN "$CODE_ADMIN"
-expect 401 ADMIN_LOGIN_FAILED "the same code does not sign in twice"
+if [[ $TOTP_REQUIRED == true ]]; then
+  login ADMIN "$CODE_ADMIN"
+  expect 401 ADMIN_LOGIN_FAILED "the same code does not sign in twice"
+else
+  login ADMIN 000000
+  expect 200 - "the password alone signs in while admin.login_without_totp is on"
+fi
 for role in OPERATOR FINANCE AUDITOR; do
   login "$role"
   expect 200 - "$role signs in"

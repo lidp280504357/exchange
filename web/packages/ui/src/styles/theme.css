@@ -1,0 +1,185 @@
+/*
+ * Tailwind 4 theme on the tokens: the default palette is removed, so only
+ * the semantic colours exist (bg-bg-1, text-fg-2, border-line-1, bg-brand,
+ * text-up, text-down, bg-info ...) and a raw colour cannot slip in.
+ */
+@theme inline {
+  --color-*: initial;
+  --color-bg-0: var(--bg-0);
+  --color-bg-1: var(--bg-1);
+  --color-bg-2: var(--bg-2);
+  --color-bg-3: var(--bg-3);
+  --color-fg-1: var(--fg-1);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+  --color-line-1: var(--line-1);
+  --color-line-2: var(--line-2);
+  --color-brand: var(--brand);
+  --color-brand-fg: var(--brand-fg);
+  --color-brand-soft: var(--brand-soft);
+  --color-up: var(--up);
+  --color-down: var(--down);
+  --color-info: var(--info);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --color-white: var(--white);
+  --color-black: var(--black);
+  --color-overlay: var(--overlay);
+  --color-glow: var(--glow);
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --color-id-orange: var(--id-orange);
+  --color-id-amber: var(--id-amber);
+  --color-id-lime: var(--id-lime);
+  --color-id-emerald: var(--id-emerald);
+  --color-id-teal: var(--id-teal);
+  --color-id-cyan: var(--id-cyan);
+  --color-id-sky: var(--id-sky);
+  --color-id-blue: var(--id-blue);
+  --color-id-indigo: var(--id-indigo);
+  --color-id-violet: var(--id-violet);
+  --color-id-fuchsia: var(--id-fuchsia);
+  --color-id-rose: var(--id-rose);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --radius-1: var(--r-1);
+  --radius-2: var(--r-2);
+  --radius-3: var(--r-3);
+
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 16px;
+  --text-lg: 20px;
+  --text-xl: 24px;
+  --text-2xl: 32px;
+
+  --ease-out: var(--ease);
+  --shadow-pop: var(--shadow);
+
+  --animate-flash-up: flash-up 400ms var(--ease);
+  --animate-flash-down: flash-down 400ms var(--ease);
+  --animate-shimmer: shimmer 1.2s linear infinite;
+  --animate-fade-up: fade-up var(--t-base) var(--ease) both;
+  --animate-fade-in: fade-in var(--t-base) var(--ease) both;
+  --animate-slide-down: slide-down 150ms var(--ease) both;
+  --animate-spin: spin 0.8s linear infinite;
+  --animate-float: float 14s ease-in-out infinite alternate;
+  --animate-marquee: marquee 40s linear infinite;
+  --animate-pop-in: pop-in var(--t-fast) var(--ease) both;
+  --animate-pop-out: pop-out var(--t-fast) var(--ease) both;
+}
+
+/* Popovers, menus, tooltips and select lists (the CSS twin of the motion
+   "pop" preset): Radix waits for the exit animation before unmounting. */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pop-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+@keyframes flash-up {
+  from {
+    background-color: color-mix(in srgb, var(--up) 22%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+@keyframes flash-down {
+  from {
+    background-color: color-mix(in srgb, var(--down) 22%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes float {
+  from {
+    transform: translate3d(-4%, -3%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(5%, 4%, 0) scale(1.08);
+  }
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}

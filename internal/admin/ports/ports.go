@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lidp280504357/exchange/internal/admin/domain"
+	"github.com/lidp280504357/exchange/internal/platform/flags"
 )
 
 // Store is the unit of work over the admin schema.
@@ -179,6 +180,12 @@ type Flag struct {
 type Flags interface {
 	List(ctx context.Context) ([]Flag, error)
 	Switch(ctx context.Context, key string, enabled bool, actor, reason string) (Flag, error)
+}
+
+// Features evaluates the feature flags that change the console's own
+// behavior (a *flags.Client).
+type Features interface {
+	Enabled(key string, s flags.Subject) bool
 }
 
 // Ledger books manual adjustments and insurance fund contributions and

@@ -1,0 +1,11 @@
+{
+  "symbol": "BTC",
+  "name": { "zh-CN": "比特币", "en": "Bitcoin" },
+  "intro": {
+    "zh-CN": "比特币是 2009 年上线的第一种去中心化数字货币，由工作量证明共识维护，总量上限 2100 万枚。",
+    "en": "Bitcoin, launched in 2009, is the first decentralized digital currency, secured by proof of work with a supply capped at 21 million."
+  },
+  "links": { "website": "https://bitcoin.org", "explorer": "https://mempool.space", "whitepaper": "https://bitcoin.org/bitcoin.pdf" },
+  "color": "orange",
+  "asOf": "2026-09-30"
+}

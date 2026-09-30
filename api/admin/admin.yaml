@@ -10,7 +10,10 @@ info:
     Administrators are created with `exchangectl admin create` (no
     sign-up). Signing in takes the password and a code of the
     authenticator app bound at creation; each code works once, and five
-    failures lock the account for 15 minutes. The session is an HttpOnly,
+    failures lock the account for 15 minutes. The feature flag
+    admin.login_without_totp switches the code off (test environments):
+    the password alone signs in, and GET /admin/v1/login-options tells the
+    sign-in page not to ask for it. The session is an HttpOnly,
     Secure, SameSite=Strict cookie `admin_session` scoped to /admin/; it
     ends after 8 hours, or after an hour without a request. Every request
     other than GET must carry the header `X-Admin-CSRF: 1`.
@@ -33,7 +36,7 @@ info:
     trades, deposits and the overview come from the ClickHouse read
     models, a few seconds behind the services.
 servers:
-  - url: https://astras.vip
+  - url: https://admin.astras.vip
 security:
   - session: []
 tags:
@@ -47,6 +50,27 @@ tags:
   - name: reports
   - name: derivatives
 paths:
+  /admin/v1/login-options:
+    get:
+      operationId: loginOptions
+      summary: What signing in asks for
+      description: |
+        Whether the sign-in page asks for the authenticator code: true
+        unless the feature flag admin.login_without_totp is on. Needs no
+        session.
+      tags: [session]
+      security: []
+      responses:
+        '200':
+          description: The sign-in options.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [totp_required]
+                properties:
+                  totp_required:
+                    type: boolean
   /admin/v1/login:
     post:
       operationId: login
@@ -55,7 +79,9 @@ paths:
         Sets the session cookie. Fails with ADMIN_LOGIN_FAILED for a wrong
         email, password or code (or a code used before), ADMIN_LOCKED
         after five failures in a row (15 minutes), and COMMON_RATE_LIMITED
-        beyond 10 attempts a minute from one IP.
+        beyond 10 attempts a minute from one IP. The code may be left out
+        while the flag admin.login_without_totp is on; it is then not
+        checked.
       tags: [session]
       security:
         - csrf: []
@@ -65,7 +91,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [email, password, totp_code]
+              required: [email, password]
               properties:
                 email:
                   type: string
@@ -75,6 +101,7 @@ paths:
                 totp_code:
                   type: string
                   pattern: '^[0-9]{6}$'
+                  description: Required unless GET /admin/v1/login-options says otherwise.
       responses:
         '200':
           description: Signed in.

@@ -15,6 +15,7 @@
 | `market.reference_kline` | 图表显示参考行情（币安）的 K 线而不是平台的（按交易对；合约用指数交易对；测试服打开，ETH-BTC 除外，见 [market-data.md](market-data.md#参考-k-线marketreference_kline测试环境)） | 2 |
 | `market.reference_ticker` | 最新价、24h 统计、买一卖一显示参考行情（币安）的 ticker（按交易对；合约用指数交易对；测试服打开，ADR-0010，见 [market-data.md](market-data.md#参考-tickermarketreference_ticker)） | 4 |
 | `market.halt_on_feed_loss` | 币安行情中断 5 分钟时暂停跟随它的交易对，恢复 30 秒后放开（测试服打开，见 [market-data.md](market-data.md#行情中断保护markethalt_on_feed_loss)） | 4 |
+| `admin.login_without_totp` | 管理后台只凭邮箱与密码登录，不要求也不校验身份验证器验证码（用户 2026-09-30 决定暂不启用验证码；测试服打开，见 [admin.md](admin.md#登录与会话)） | 4 |
 | `risk.enforce` | 执行风控规则的动作（评分为 REVIEW 的 ACTIVE 账户置为 `RISK_REVIEW`）；关闭时只记分。测试服只对地区 `AQ` 打开（[risk.md](risk.md)） | 2 |
 
 ## 规则维度

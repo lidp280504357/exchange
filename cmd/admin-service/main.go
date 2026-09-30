@@ -29,6 +29,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/chx"
 	"github.com/lidp280504357/exchange/internal/platform/config"
 	"github.com/lidp280504357/exchange/internal/platform/event"
+	"github.com/lidp280504357/exchange/internal/platform/flags"
 	"github.com/lidp280504357/exchange/internal/platform/kafka"
 	"github.com/lidp280504357/exchange/internal/platform/migrate"
 	"github.com/lidp280504357/exchange/internal/platform/outbox"
@@ -104,6 +105,12 @@ func setup(ctx context.Context, a *app.App) error {
 	if err != nil {
 		return err
 	}
+	// The console's own switches (admin.login_without_totp), refreshed every 5 seconds.
+	features := flags.NewClient(configDB, a.Logger(), a.Metrics())
+	if err := features.Refresh(ctx); err != nil {
+		return err
+	}
+	a.Add("flags", app.Loop(features.Run))
 	rdb, err := bootstrap.Redis(ctx, a, cfg.Redis)
 	if err != nil {
 		return err
@@ -137,6 +144,7 @@ func setup(ctx context.Context, a *app.App) error {
 		Catalog:     backends.Instruments{C: instrumentv1.NewInstrumentServiceClient(clients["instrument"])},
 		Derivatives: backends.Derivatives{REST: rest, Base: cfg.DerivativesURL},
 		Flags:       backends.Flags{DB: configDB, Events: event.NewFactory(a.Name(), a.Config().InstanceID)},
+		Features:    features,
 		Ledger:      backends.Ledger{C: ledgerClient},
 		AuditLog:    backends.Audit{Conn: ch},
 		Reports:     backends.Reports{Conn: ch},

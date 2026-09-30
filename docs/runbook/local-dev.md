@@ -17,7 +17,7 @@ Kafka 前缀由配置 `KAFKA_NAMESPACE` 实现（`internal/platform/kafka`）：
 
 ```bash
 task dev                                    # = scripts/dev.sh：全部 8 个服务，Ctrl-C 全部停止
-API_ORIGIN=http://localhost:8080 task web:dev   # 另开终端：H5 连本机网关
+API_ORIGIN=http://localhost:8080 task web:dev   # 另开终端：PC 站连本机网关（-- m 手机站）
 ```
 
 `scripts/dev.sh` 依次：

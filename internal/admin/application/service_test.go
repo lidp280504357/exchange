@@ -18,6 +18,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/admin/domain"
 	"github.com/lidp280504357/exchange/internal/admin/ports"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/lidp280504357/exchange/internal/platform/flags"
 	"github.com/lidp280504357/exchange/internal/platform/password"
 	"github.com/lidp280504357/exchange/internal/platform/secretbox"
 	"github.com/lidp280504357/exchange/internal/platform/totp"
@@ -344,6 +345,45 @@ func TestLoginNeedsPasswordAndFreshCode(t *testing.T) {
 	if got := h.store.actions(); !slices.Equal(got, want) {
 		t.Fatalf("audit %v, want %v", got, want)
 	}
+}
+
+// onFlags is a feature flag evaluator with some flags on.
+type onFlags map[string]bool
+
+func (f onFlags) Enabled(key string, _ flags.Subject) bool { return f[key] }
+
+func TestLoginWithoutTheCodeWhenSwitchedOff(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.admin(t, "ann@example.com", domain.RoleAdmin)
+	if !h.svc.TOTPRequired() {
+		t.Fatal("the code is required unless the flag is on")
+	}
+	h.svc.Features = onFlags{}
+	if _, _, _, err := h.svc.Login(ctx, "ann@example.com", testPassword, "", "ip", "ua"); code(err) != "ADMIN_LOGIN_FAILED" {
+		t.Fatalf("no code with the flag off: %v", err)
+	}
+
+	h.svc.Features = onFlags{flags.KeyAdminNoTOTP: true}
+	if h.svc.TOTPRequired() {
+		t.Fatal("the flag switches the code off")
+	}
+	if _, _, _, err := h.svc.Login(ctx, "ann@example.com", "wrong password!", "", "ip", "ua"); code(err) != "ADMIN_LOGIN_FAILED" {
+		t.Fatalf("the password is still checked: %v", err)
+	}
+	for _, c := range []string{"", "000000"} {
+		if _, _, _, err := h.svc.Login(ctx, "ann@example.com", testPassword, c, "ip", "ua"); err != nil {
+			t.Fatalf("password alone, code %q: %v", c, err)
+		}
+	}
+	last := h.store.audits[len(h.store.audits)-1]
+	if last.GetAction() != "admin.login" || !strings.Contains(last.GetDetails(), `"totp_checked":false`) {
+		t.Fatalf("audit %v", last)
+	}
+
+	// Switched back on, the code is checked again and an unused one still works.
+	h.svc.Features = onFlags{}
+	h.login(t, "ann@example.com")
 }
 
 func TestLoginLocksAfterFiveFailures(t *testing.T) {

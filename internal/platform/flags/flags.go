@@ -34,6 +34,7 @@ const (
 	KeyMarketMaker      = "market.maker"             // the platform market maker quotes, per symbol
 	KeyReferenceTicker  = "market.reference_ticker"  // show the reference market's tickers, per symbol (ADR-0010)
 	KeyHaltOnFeedLoss   = "market.halt_on_feed_loss" // halt followed pairs after 5 minutes without reference data
+	KeyAdminNoTOTP      = "admin.login_without_totp" // admin console sign-in without the authenticator code
 )
 
 // Known describes the known flags.
@@ -50,6 +51,7 @@ var Known = map[string]string{
 	KeyMarketMaker:      "Quotes of the platform market maker around the reference price; the symbol list limits the pairs (§11.10)",
 	KeyReferenceTicker:  "Tickers (last price, 24-hour statistics, best bid and ask) from the reference market instead of the platform's (ADR-0010)",
 	KeyHaltOnFeedLoss:   "Halt the pairs that follow a reference market after 5 minutes without reference data; resume them when it is back (ADR-0010)",
+	KeyAdminNoTOTP:      "Admin console sign-in with the password alone: the authenticator code is not asked for or checked (test environments only)",
 }
 
 // List allows or denies values of one dimension. An empty Allow allows

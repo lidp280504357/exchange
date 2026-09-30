@@ -1,0 +1,17 @@
+{
+  "ci": {
+    "collect": {
+      "url": ["https://astras.vip/", "https://astras.vip/markets", "https://astras.vip/trade/BTC-USDT"],
+      "numberOfRuns": 1,
+      "settings": { "preset": "desktop", "throttlingMethod": "simulate" }
+    },
+    "assert": {
+      "assertions": {
+        "categories:performance": ["warn", { "minScore": 0.9 }],
+        "cumulative-layout-shift": ["error", { "maxNumericValue": 0.05 }],
+        "largest-contentful-paint": ["warn", { "maxNumericValue": 2500 }]
+      }
+    },
+    "upload": { "target": "filesystem", "outputDir": "../../.lighthouseci/pc" }
+  }
+}

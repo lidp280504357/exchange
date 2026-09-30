@@ -1,0 +1,9 @@
+@import "@exchange/ui/styles.css";
+@source "./";
+
+/* The mobile site never scrolls sideways (design §7.1). */
+html,
+body {
+  overflow-x: hidden;
+  overscroll-behavior-y: none;
+}
