@@ -127,6 +127,29 @@ describe("WsClient", () => {
     expect(resync).toHaveBeenCalledWith(["orders"]);
   });
 
+  it("reloads private data once after the first private subscription, which the server cannot replay", () => {
+    const ws = client({ token: () => "t1" });
+    const resync = vi.fn();
+    ws.onResync(resync);
+    ws.subscribe("orders", vi.fn());
+    last().open();
+    last().push({ op: "auth", ok: true });
+    expect(resync).not.toHaveBeenCalled();
+    last().push({ op: "subscribe", ok: true, args: ["orders"] });
+    expect(resync).toHaveBeenCalledOnce();
+    // A public subscription afterwards, or the same reply again, changes nothing.
+    last().push({ op: "subscribe", ok: true, args: ["orders"] });
+    expect(resync).toHaveBeenCalledOnce();
+    // After a reconnect with a sequence the server replays instead.
+    last().push({ channel: "orders", seq: 3, data: {} });
+    last().drop();
+    vi.advanceTimersByTime(1000);
+    last().open();
+    last().push({ op: "auth", ok: true });
+    last().push({ op: "subscribe", ok: true, args: ["orders"] });
+    expect(resync).toHaveBeenCalledOnce();
+  });
+
   it("refreshes an expired token and authenticates again", async () => {
     const ws = client({ token: () => "old", refresh: async () => "new" });
     ws.subscribe("balances", vi.fn());

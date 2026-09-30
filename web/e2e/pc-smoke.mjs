@@ -155,6 +155,8 @@ try {
   await go("/register");
   await typeInto('input[type="email"]', email);
   await typeInto('input[autocomplete="new-password"]', password);
+  // The terms box shows once the current versions have loaded.
+  await page.waitForSelector('button[role="checkbox"]', { visible: true });
   await page.click('button[role="checkbox"]');
   await clickButton("继续");
   await waitText("验证你的邮箱");
@@ -252,6 +254,7 @@ try {
 
   // 9. Settings: English switches the site's language at once.
   await go("/account/settings");
+  await page.waitForSelector('button[role="radio"][value="en"]', { visible: true });
   await page.click('button[role="radio"][value="en"]');
   await page.waitForFunction(() => document.querySelector("header")?.innerText.includes("Markets"), { timeout: 10000 });
   await page.click('button[role="radio"][value="zh-CN"]');

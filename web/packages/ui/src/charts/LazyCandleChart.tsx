@@ -18,7 +18,7 @@ export function CandleChart(props: CandleChartProps) {
       fallback={
         <div className={cn("flex flex-col bg-bg-1", props.className)}>
           {props.toolbar !== false && <div className="h-9 border-b border-line-1" />}
-          <div className="p-3" style={{ height }}>
+          <div className={cn("p-3", height === "fill" && "min-h-0 flex-1")} style={height === "fill" ? undefined : { height }}>
             <Skeleton className="h-full w-full" />
           </div>
         </div>

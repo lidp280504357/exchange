@@ -69,6 +69,8 @@ export class WsClient {
   private _status: WsStatus = "idle";
   private attempt = 0;
   private retryTimer?: ReturnType<typeof setTimeout>;
+  /** The first private subscription has no sequence to replay from: reload once it is up. */
+  private catchUp = false;
   private authed = false;
   private authedToken = "";
   private lastSeq = 0;
@@ -338,6 +340,10 @@ export class WsClient {
             for (const [, sub] of privateChannels) sub.active = true;
             const m: Record<string, unknown> = { op: "subscribe", args: privateChannels.map(([ch]) => ch) };
             if (this.lastSeq > 0) m.last_seq = this.lastSeq;
+            // Without a sequence the server cannot replay what happened
+            // before this subscription (the page's first seconds): once it
+            // is in place, the private data reloads once.
+            else this.catchUp = true;
             this.send(m);
           }
         } else if (msg.code === "AUTH_TOKEN_EXPIRED") {
@@ -346,6 +352,12 @@ export class WsClient {
         return;
       case "error":
         if (msg.code === "AUTH_TOKEN_EXPIRED") this.renewToken();
+        return;
+      case "subscribe":
+        if (msg.ok && this.catchUp && (msg.args ?? []).some((ch) => isPrivateChannel(ch))) {
+          this.catchUp = false;
+          for (const fn of this.resyncListeners) fn(msg.args ?? []);
+        }
         return;
       case "resync":
         for (const fn of this.resyncListeners) fn(msg.args ?? []);

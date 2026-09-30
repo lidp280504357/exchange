@@ -1,6 +1,7 @@
 import { useCandles, useOrderBook, useTerminalPrefs, type CandleInterval } from "@exchange/core";
-import { DepthChart, cn, type Indicator } from "@exchange/ui";
-import { CandleChart } from "@exchange/ui/charts/CandleChart";
+// The index's CandleChart loads the chart library in its own chunk, so the
+// book, the form and the ticker render before it.
+import { CandleChart, DepthChart, cn, type Indicator } from "@exchange/ui";
 import { ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
