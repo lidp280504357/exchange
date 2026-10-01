@@ -18,7 +18,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
               ──admin schema──> 管理员、会话、双人审批申请；自己的 outbox 发 audit.events
 ```
 
-- 服务：admin-service，HTTP 8093（nginx 转发 `/admin/v1/`），运维 9094，schema `admin`（`admins`、`admin_sessions`、`approvals`）。契约 `api/admin/admin.yaml`（不进公开 API 文档）。
+- 服务：admin-service，HTTP 8093（nginx 转发 `/admin/v1/`），运维 9094，schema `admin`（`admins`、`admin_sessions`、`approvals`、`settings`）。契约 `api/admin/admin.yaml`（不进公开 API 文档）。
 - 前端：`https://admin.astras.vip`（`web/apps/admin`，浅色主题，阶段 4 B5 重做完成，见下文「后台页面」）。整站包含 `snippets/admin-access*.conf`，可以挂访问限制，见 [web.md](web.md)；用户 2026-09-30 决定暂不做访问限制，服务器上没有这个文件。阶段 2 的旧后台 `web/admin`（`https://astras.vip/admin/`）已删除，旧地址 301 到新后台的同一路径。本机 `task web:dev -- admin`（http://localhost:5180），`/admin/v1` 代理到测试服。
 - 与需求的差异：需求要求独立域名与网关、仅办公网/VPN 访问。学习项目只有一个域名，改为同域名的 `/admin/` 路径 + 独立服务（不经用户网关）+ 强制 TOTP；会话 Cookie 限定 `Path=/admin/`，与用户站的 Cookie 互不可见。阶段 4 起后台有了独立域名 `admin.astras.vip`；访问限制与 TOTP 目前按用户决定暂缓（见下文）。
 
@@ -38,12 +38,38 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 
 | 角色 | 权限 |
 |---|---|
-| ADMIN | 全部 |
-| OPERATOR | 读 + 改账户状态、撤销用户挂单、改交易对与合约状态、解除合约只减仓（`derivatives.write`）、切换功能开关 |
+| ADMIN | 全部，包括只有它有的 `settings.write`（后台设置：双人审批与单人限额） |
+| OPERATOR | 读 + 改账户状态、撤销用户挂单、改交易对与合约状态、解除合约只减仓（`derivatives.write`）、切换功能开关（后台自己的 `admin.*` 开关除外） |
 | FINANCE | 读 + 提现审批、发起与审批手动调账和保险基金注资 |
 | AUDITOR | 只读（用户、资产与交易对、合约（`derivatives.read`）、功能开关、提现、审计日志、报表） |
 
-越权返回 403 `ADMIN_FORBIDDEN`。前端按 `/admin/v1/me` 返回的权限列表显示菜单与按钮，但以服务端检查为准。
+越权返回 403 `ADMIN_FORBIDDEN`。前端按 `/admin/v1/me` 返回的权限列表显示菜单与按钮，但以服务端检查为准。`admin.*` 开关（`admin.login_without_totp`、`admin.two_person_approval`）在开关页也要 `settings.write`，运营不能借开关页关掉双人审批。
+
+## 资金操作：单人与双人审批（2026-10-02 设计 C1）
+
+资金操作 = 手动调账（`MANUAL_ADJUSTMENT`，对手方 `ADJUSTMENT`）与保险基金注资（`INSURANCE_CONTRIBUTION`）。每笔都是 `approvals` 表的一行（`mode` 为 `SINGLE` 或 `TWO_PERSON`），账本以幂等键 `approval:<id>` 只记一次。
+
+- **开关 `admin.two_person_approval`**（未设置即关闭）。打开：每笔都要另一位管理员批准（原流程）。关闭（单人模式，测试服现状，因为只有一位管理员）：有权限的管理员自己执行，但有护栏：
+  - 单笔折合不超过 `single_max_usdt`（默认 100,000 USDT）；
+  - 同一管理员 24 小时内单人操作合计（含结果未知的待处理项）不超过 `daily_max_usdt`（默认 500,000）；
+  - 折合按该资产 USDT 交易对的最新价（market-data-service tickers），USDT 按 1；没有报价的不能单人执行；
+  - 超过任一限额、或没有报价时，自动转为待另一位管理员批准，`escalation` 写明原因（`SINGLE_LIMIT`、`DAILY_LIMIT`、`NO_PRICE`；双人模式下是 `TWO_PERSON_MODE`，明确要求审批的是 `REQUESTED`）。
+- **提现**：单人模式下，需两人审核的提现（> 20,000 USDT，wallet-service 规则）折合不超过 `withdrawal_max_usdt`（默认 100,000）时一人批准即完成（admin-service 把 `sole_max_usdt` 传给 wallet-service 的内部审核接口，wallet 审计里记 `sole_max_usdt`）。
+- **接口**：
+  - `POST /admin/v1/users/{id}/adjustments`：用户页的调账，单人模式限额内立即记账（返回 `EXECUTED` 与 `journal_id`），否则返回 `PENDING`；
+  - `POST /admin/v1/ledger/adjustments` 与 `POST /admin/v1/derivatives/insurance-fund/contributions`：不带 `direct` 时总是交给另一位管理员（原行为，端到端的双人流程用它），带 `"direct": true` 同上；
+  - 可选 `reference`（工单号等，≤ 64 字）写进分录备注；
+  - 账本无响应时返回 `COMMON_UNAVAILABLE`，详情 `approval_id` 指向那笔留在 `PENDING` 的操作，申请人可在「审批」里点「完成」重试（`POST /admin/v1/approvals/{id}/decide`，单人模式的操作允许申请人自己完成），不会重复记账。
+- **自己的申请**：不能自己批准双人申请（`ADMIN_SELF_APPROVAL`），但可以自己拒绝（撤回）。
+- **分录备注只取申请理由**（加 `[reference]`），不再拼审批理由：账本比对幂等请求时包括备注，重试换了理由会被当作冲突（修于 C1）。审批理由在审计里。
+- **设置**：`GET /admin/v1/settings`（所有管理员可读，含调用者 24 小时已用额 `daily_used_usdt`），`PUT /admin/v1/settings`（ADMIN，理由必填；限额审计 `admin.settings.changed`，双人开关经开关表审计 `flag:admin.two_person_approval`，本实例立即生效，其它 5 秒内）。也可以用 `exchangectl flags set admin.two_person_approval --on --reason "..."` 打开。
+- **审计动作**：`admin.ledger.adjustment_requested/executed/failed/approved/rejected`、`admin.derivatives.insurance_requested/executed/failed/approved/rejected`，详情含 `mode`、`escalation`、`value_usdt`。
+
+## 待办与实时推送（C1）
+
+- `GET /admin/v1/todo`：待审核提现（最多数到 200）与待处理的资金操作数，按角色返回（没有权限的为 0），读不到的记在 `partial`。
+- `GET /admin/v1/events`：Server-Sent Events。连上即发一次 `todo`，之后每 10 秒检查、变了才发；20 秒没有事件发一行注释保活（nginx 读超时 60 秒、Cloudflare 100 秒）；会话结束（退出、过期、停用）时发 `signed_out` 并关闭。流本身不算请求，不会让会话保持活跃。响应头 `X-Accel-Buffering: no` 让 nginx 不缓冲；服务端对这条连接取消读写超时。
+- 前端只开一条流，写进 Query 缓存；流断开时每 15 秒轮询 `/todo`。
 
 ## 功能
 
@@ -78,27 +104,33 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 - **资产与交易对**：列出资产、网络与交易对；交易对状态是单交易对紧急开关（`TRADING ⇄ HALT`，`CANCEL_ONLY` 之后只能下线，不可恢复交易）。资产与网络参数（精度、充提开关、手续费等）仍以 `deploy/instruments/test.json` 为准，每次部署幂等同步，后台只读——否则下次部署会把后台改动覆盖回去。
 - **功能开关**：列出全部已知开关（从未设置的显示为关闭、版本 0），切换启用状态并写理由；地区、账户状态、白名单等规则保持不变（改规则用 `exchangectl flags set`）。服务 5 秒内生效。
 - **合约**（阶段 3 任务 10，见 [derivatives.md](derivatives.md#管理后台与读模型)）：每个永续合约的状态、只减仓（原因与时间）、标记价是否新鲜、持仓量；解除只减仓（标记价恢复后才可操作，审计 `admin.derivatives.reduce_only_lifted`）；改合约状态（与交易对同一状态机，instrument-service 记录，审计 `admin.instruments.contract_status`，合约服务约一分钟内按新状态处理）；保险基金余额与 `PNL_CLEARING`；发起保险基金注资（双人审批，类型 `INSURANCE_FUND`）；强平监控（被接管、已预警、保证金率 ≥ 0.5 的仓位，每 5 秒刷新）；强平记录（读模型，可按 WARNING/STARTED/FILLED/ADL 过滤）。
-- **双人审批**（原「调账审批」）：FINANCE/ADMIN 发起给用户现货账户加（正数）或扣（负数）某资产，另一位有审批权限的管理员批准后，由 ledger-service 以幂等键 `approval:<id>` 记 `MANUAL_ADJUSTMENT` 分录（对手方 `ADJUSTMENT` 系统账户）。自己不能批准自己的申请；账本拒绝（例如开关 `ledger.manual_adjustment` 关闭）则申请变为 `FAILED`；账本无响应则保持 `PENDING`，可再次批准（幂等键保证不重复记账）。审批期间申请行加锁，两人同时处理时后到者得到 `ADMIN_APPROVAL_DECIDED`。保险基金注资申请（`INSURANCE_FUND`，金额为正）走同一流程，批准后账本 `FundInsurance` 以同样的幂等键记 `INSURANCE_CONTRIBUTION`（对手方 `ADJUSTMENT`），审计 `admin.derivatives.insurance_requested/approved/rejected`。
+- **双人审批**（原「调账审批」；单人模式见上文「资金操作」）：FINANCE/ADMIN 发起给用户现货账户加（正数）或扣（负数）某资产，另一位有审批权限的管理员批准后，由 ledger-service 以幂等键 `approval:<id>` 记 `MANUAL_ADJUSTMENT` 分录（对手方 `ADJUSTMENT` 系统账户）。自己不能批准自己的申请（可以撤回）；账本拒绝（例如开关 `ledger.manual_adjustment` 关闭）则申请变为 `FAILED`；账本无响应则保持 `PENDING`，可再次批准（幂等键保证不重复记账）。审批期间申请行加锁，两人同时处理时后到者得到 `ADMIN_APPROVAL_DECIDED`。保险基金注资申请（`INSURANCE_FUND`，金额为正）走同一流程，批准后账本 `FundInsurance` 以同样的幂等键记 `INSURANCE_CONTRIBUTION`（对手方 `ADJUSTMENT`），审计 `admin.derivatives.insurance_requested/approved/rejected`。
 - **报表**（任务 12，所有角色可读）：来自 ClickHouse 读模型（[analytics.md](analytics.md)），按交易对与 UTC 日的成交笔数、成交量、成交额、受理与被拒订单（含合约）；按资产与日的入账充值（不含未认领）与完成提现（金额、手续费）；任意交易对 1m/5m/15m/1h/4h/1d K 线；按合约与日的成交（双边笔数、成交量与成交额按买方算一次、手续费、已实现盈亏）、资金费付出与收到、强平数、ADL 数、保险基金垫付；当前各合约持仓量（多头、空头、持仓数）。数据比服务晚几秒。
 - **审计日志**：按操作者（管理员邮箱、`cli:<用户名>`）或对象（`user:<id>`、`pair:<symbol>`、`contract:<symbol>`、`insurance:<asset>`、`flag:<key>`、`approval:<id>`、`admin:<id>`）查询 ClickHouse `audit_logs`，写入后几秒可查。后台的每个动作都有审计事件：登录/登录失败/退出、账户状态（user-service 记，操作者为管理员邮箱）、撤单、交易对状态、开关（含前后值）、调账申请/批准/驳回、提现审批（wallet-service 记）。
 
-## 后台页面（阶段 4 B5，设计稿 §10）
+## 后台页面（阶段 4 B5，设计稿 §10；2026-10-02 重构 C1 起）
 
-`web/apps/admin`，左侧导航按角色显示（没有权限的项隐藏），每 15 秒刷新"待审提现"与"待审批"角标；顶栏有环境标识、全局搜索（用户 ID、邮箱、手机号打开用户抽屉，订单号进入订单列表，交易哈希进入充值列表）、当前管理员与角色、退出。
+`web/apps/admin`。C1 起的外壳（设计 2026-10-02 §3、§6）：
+
+- 浅色为主，顶栏菜单与「设置 → 外观」可切深色（存在本机 `admin.theme`；深色复用用户站令牌）。侧栏是 `data-theme="dark"` 的深色岛，按「概览 · 用户 · 资金 · 交易 · 市场 · 风控 · 运营 · 系统」分组折叠（记在本机），没有权限的项隐藏，可收成图标栏。
+- 角标与顶栏铃铛来自事件流（`/admin/v1/events`），数字增加时弹跳。
+- 顶栏：环境标识、审批方式（单人/双人，点开设置）、全局搜索（⌘K / Ctrl+K；用户 ID、邮箱、手机号打开用户抽屉，订单号进入订单列表，交易哈希进入充值列表）、待办、主题、账户菜单（邮箱、角色、主题、退出）。
+- 动效：登录页左半屏网格与两团漂移光斑、字标描边绘制，表单淡入上移、输入框聚焦底线从中间展开、登录中进度条、成功打勾；验证码 6 格输入（粘贴自动填满）。进入控制台侧栏滑入、卡片间隔 40 ms 淡入；切换页面内容区淡入上移 160 ms；概览数字滚动、趋势图从左向右描画 600 ms、异常服务的状态点呼吸；提示从右上滑入、成功打勾。只动 transform/opacity（字标与对勾的描边除外），`prefers-reduced-motion` 时全部关闭。
+- 新页面：资金 → 资金调整（`/adjustments`：审批方式与 24 小时已用额、查找用户、方向/资产/数量/关联单号，单人模式下立即记账并显示分录号与两条分录，或显示待审原因；最近的资金操作）、资金 → 审批（`/approvals`：默认待处理，显示方式与转审原因、申请人与审批人邮箱；自己的单人操作可「完成」，自己的申请可「撤回」）、系统 → 设置（`/settings`：双人审批开关与三个限额，ADMIN 可改、其他人只读；本机主题与语言）。原「账本」页只留对账与系统科目。
 
 | 页面 | 内容 |
 |---|---|
-| 概览 | 24 小时指标（可点进对应列表）、近 7/30 天成交与新增用户图、17 个服务的就绪状态与耗时、HOUSE 库存估值与盈亏、托管方状态（可访问、短缺、待处理回调、处理中的提现） |
+| 概览 | 待办（待审提现、待处理资金操作）、24 小时指标（数字滚动，可点进对应列表）、近 7/30 天成交与新增用户图、17 个服务的就绪状态与耗时、HOUSE 库存估值与盈亏、托管方状态（可访问、短缺、待处理回调、处理中的提现） |
 | 用户 | 按 ID/邮箱/手机号查找，按状态、地区、注册时间筛选；行点击打开用户抽屉：概览（基本信息、余额、改状态与撤销全部挂单）、订单、成交、充值、提现、审计 |
 | 订单与成交 | 两个标签；按用户、订单号、交易对、状态、方向、时间筛选；HOUSE 一方显示为 HOUSE；导出已加载的行为 CSV |
 | 充值 | 按用户、资产、网络、状态、交易哈希筛选；行点击看详情 |
 | 提现审批 | 默认待审批队列（旧到新），可切换状态；行点击打开详情：进度、风控分与命中规则、审批人、批准/拒绝；有新的待审批提现时出现"有新数据"条，不整表轮询 |
 | 托管方 | 托管方状态与处理中的提现（可跳到提现列表）、币种与余额、对账（持有、其它持有方、在途、未入账手续费、应有、短缺）、回调日志（筛选、原始请求、重放） |
 | 资产与交易对 | 交易对（参考市场与倍数、步长、费率）、资产（充提开关、网络）、合约三个标签，可搜索；交易对与合约按状态机改状态 |
-| 合约 | 合约状态、只减仓与解除、标记价、持仓量；保险基金与注资申请（双人）；风险仓位；强平记录 |
+| 合约与保险基金 | 合约状态、只减仓与解除、标记价、持仓量；保险基金与注资（按审批方式：单人模式限额内立即记账）；风险仓位；强平记录 |
 | HOUSE 流动性 | 库存估值（可充提/站内）、各交易对的买卖与盈亏、合约仓位，每 30 秒刷新 |
 | 风控与开关 | 全部功能开关（说明、规则摘要、最后修改人），开关切换要确认 |
-| 账本 | 双人审批（批准/拒绝）、申请调账（用户 ID 与十进制金额校验）、对账（每项检查最近一次结果与最近的不一致）、系统科目余额 |
+| 对账与系统科目 | 对账（每项检查最近一次结果与最近的不一致）、系统科目余额（资金调整与审批见上文的新页面） |
 | 审计 | 按操作人、对象、事件、时间筛选，导出 CSV，行点击看事件全文 |
 | 报表 | 交易、充提、合约（图表与表格两种视图，近 7/30/90 天）与持仓量 |
 
@@ -107,7 +139,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 - 列表一律服务端游标分页，每页 50 条，滚到底自动加载下一页；筛选条件写在地址栏（可分享、后退可恢复），可另存为本机"视图"；文本筛选在停止输入 0.5 秒或回车后生效。
 - 危险操作统一用确认框：显示对象、理由至少 10 个字（进审计）、手动输入确认词（ID 后 4 位、交易对代码或金额），结果用提示条告知，失败时附可复制的追踪 ID。
 - 枚举都有中文标签，悬停显示原始代码；金额按十进制字符串原样显示并加千分位；时间按设置里的时区。
-- 端到端：`web/e2e/admin-smoke.mjs`（`scripts/e2e/web.sh` 运行，每次建一个临时 ADMIN、结束停用）：登录、概览、用户抽屉与各标签、搜索、订单与成交、充值与提现队列、交易对改状态的确认框（取消，不真的改）、合约、HOUSE、开关、对账、审计、报表、退出，所有 `/admin/v1` 响应按 `api/admin/admin.yaml` 校验。
+- 端到端：`web/e2e/admin-smoke.mjs`（`scripts/e2e/web.sh` 运行，每次建一个临时 ADMIN、结束停用）：登录、概览、用户抽屉与各标签、搜索、订单与成交、充值与提现队列、交易对改状态的确认框（取消，不真的改）、合约、HOUSE、开关、对账、审计、报表、资金调整页（审批方式、表单、记录）、审批、设置、事件流、从账户菜单退出，所有 `/admin/v1` 响应按 `api/admin/admin.yaml` 校验。
 
 ## 运维
 
@@ -131,7 +163,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 - 锁定：等 15 分钟自动解锁；忘记密码或丢失 TOTP：停用后用新邮箱重建（没有重置入口，避免成为绕过 TOTP 的后门）。
 - IP 白名单（可选）：在服务器建 `/opt/exchange/infra/nginx/snippets/admin-access.local.conf`，内容如 `allow 203.0.113.7; deny all;`，`task deploy` 或 `nginx -s reload` 后对 `admin.astras.vip` 整站生效（真实客户端 IP 由 Cloudflare real-ip 配置还原）。目前按用户决定不设。部署同步不会覆盖或删除这个文件。
 - 指标：运维端口 9094（`outbox_pending`、`http_server_*`）；Prometheus 任务 `admin-service`。
-- 端到端：`bash scripts/e2e/admin.sh`（对 `https://admin.astras.vip`，每次创建 4 个随机管理员、结束时停用；覆盖页面与安全头、旧地址的跳转、登录与 Cookie、角色、冻结/解冻、交易对状态往返、撤单、开关往返、双人调账、合约（状态、只减仓、合约状态往返、强平监控与记录、双人保险基金注资 1 USDT）、报表、审计查询、退出与停用）。
+- 端到端：`bash scripts/e2e/admin.sh`（对 `https://admin.astras.vip`，每次创建 4 个随机管理员、结束时停用；覆盖页面与安全头、旧地址的跳转、登录与 Cookie、角色、冻结/解冻、交易对状态往返、撤单、开关往返、双人调账、设置的权限与校验、单人模式（ADMIN 直接 +2.5/−2.5 USDT，超过单笔限额的转审并撤回；双人模式时跳过）、待办与事件流、合约（状态、只减仓、合约状态往返、强平监控与记录、双人保险基金注资 1 USDT）、报表、审计查询、退出与停用）。
 - admin-service 连 derivatives-service 的内部地址：`DERIVATIVES_SERVICE_URL`（compose 里是 `http://derivatives-service:8095`）。
 
 ## 常见错误码
@@ -143,6 +175,6 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | `ADMIN_UNAUTHORIZED` | 没有会话或会话已过期/撤销 |
 | `ADMIN_FORBIDDEN` | 角色没有该权限 |
 | `ADMIN_CSRF` | 写请求缺少 `X-Admin-CSRF: 1` |
-| `ADMIN_SELF_APPROVAL` | 不能批准自己的调账申请 |
+| `ADMIN_SELF_APPROVAL` | 不能批准自己的双人申请（可以撤回；单人模式下结果未知的操作可以自己完成） |
 | `ADMIN_APPROVAL_DECIDED` | 申请已处理 |
 | `ADMIN_EXISTS` | `admin create` 的邮箱已存在 |

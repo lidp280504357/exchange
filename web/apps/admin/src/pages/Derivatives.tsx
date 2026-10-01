@@ -8,8 +8,10 @@ import { useTranslation } from "react-i18next";
 import { DangerAction } from "../kit/actions";
 import { EnumBadge } from "../kit/enums";
 import { Num, TimeText, UserCell } from "../kit/format";
+import { FundAction } from "../kit/funds";
 import { ListTable, PAGE_SIZE, useCursorList } from "../kit/lists";
 import { Card, Page } from "../kit/Page";
+import { ModeBanner } from "./funds/ModeBanner";
 import { StatusActions } from "./Instruments";
 
 type ContractState = AdminSchemas["ContractState"];
@@ -121,9 +123,10 @@ function Insurance({ admin }: { admin: Admin }) {
       </div>
       {can(admin, "ledger.adjust.request") && (
         <Card title={t("admin.derivatives.contribute")}>
+          <ModeBanner className="mb-4" />
           <div className="flex flex-wrap items-end gap-2">
             <Input size="sm" value={amount} onValueChange={setAmount} unit="USDT" inputMode="decimal" placeholder="100000" containerClassName="w-56" error={amount !== "" && !valid} />
-            <DangerAction
+            <FundAction
               trigger={(open) => (
                 <Button size="sm" disabled={!valid} onClick={open}>
                   {t("admin.derivatives.contribute")}
@@ -133,9 +136,9 @@ function Insurance({ admin }: { admin: Admin }) {
               title={t("admin.derivatives.contributeTitle")}
               target={<Num value={amount} unit="USDT" />}
               confirmWord={amount}
-              run={async (reason) => adminData(await adminApi.POST("/admin/v1/derivatives/insurance-fund/contributions", { body: { asset: "USDT", amount, reason } }))}
-              success={t("admin.derivatives.requested")}
-              invalidate={[["admin", "approvals"], ["admin", "count", "approvals"]]}
+              run={async (reason) =>
+                adminData(await adminApi.POST("/admin/v1/derivatives/insurance-fund/contributions", { body: { asset: "USDT", amount, reason, direct: true } }))
+              }
               onDone={() => setAmount("")}
             />
           </div>

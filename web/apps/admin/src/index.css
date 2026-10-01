@@ -1,2 +1,161 @@
 @import "@exchange/ui/styles.css";
 @source "./";
+
+/*
+ * The console's own look and motion (design 2026-10-02 §6): white cards
+ * with a fine border and a soft shadow on a light grey ground, a dark
+ * sidebar (the sidebar takes data-theme="dark", the user sites' tokens),
+ * and motion that moves transform and opacity only; styles.css turns all
+ * of it off for prefers-reduced-motion. Colours come from the tokens.
+ */
+@theme inline {
+  --animate-sidebar-in: sidebar-in 240ms var(--ease) backwards;
+  --animate-rise: rise 160ms var(--ease) backwards;
+  --animate-card-in: rise 320ms var(--ease) backwards;
+  --animate-wipe: wipe 600ms var(--ease) forwards;
+  --animate-badge-pop: badge-pop 420ms var(--ease);
+  --animate-breathe: breathe 1.6s ease-in-out infinite;
+  --animate-drift-a: drift-a 18s ease-in-out infinite alternate;
+  --animate-drift-b: drift-b 23s ease-in-out infinite alternate;
+  --animate-draw: draw 1.2s var(--ease) forwards;
+  --animate-indeterminate: indeterminate 1.1s ease-in-out infinite;
+  --animate-toast-in: toast-in 240ms var(--ease) backwards;
+  --animate-check: draw 360ms var(--ease) 80ms forwards;
+  --animate-bob: bob 3.2s ease-in-out infinite alternate;
+}
+
+@keyframes sidebar-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A chart is drawn from left to right: a cover of the card's colour shrinks away. */
+@keyframes wipe {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes badge-pop {
+  0% {
+    transform: scale(1);
+  }
+  30% {
+    transform: scale(1.35);
+  }
+  60% {
+    transform: scale(0.9);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.25;
+    transform: scale(2.2);
+  }
+}
+
+@keyframes drift-a {
+  from {
+    transform: translate3d(-8%, -6%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(12%, 10%, 0) scale(1.15);
+  }
+}
+
+@keyframes drift-b {
+  from {
+    transform: translate3d(8%, 12%, 0) scale(1.1);
+  }
+  to {
+    transform: translate3d(-12%, -6%, 0) scale(0.92);
+  }
+}
+
+/* Strokes drawn with stroke-dashoffset (the wordmark, check marks). */
+@keyframes draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(260%);
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(32px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes bob {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-6px);
+  }
+}
+
+/* A panel of the console: white, a fine border, a soft shadow. */
+@utility card {
+  border-radius: var(--r-3);
+  border: 1px solid var(--line-1);
+  background: var(--bg-1);
+  box-shadow:
+    0 1px 2px color-mix(in oklab, var(--black) 5%, transparent),
+    0 12px 32px -20px color-mix(in oklab, var(--black) 24%, transparent);
+}
+
+/* The sign-in page's grid, fading out from its centre. */
+@utility login-grid {
+  background-image:
+    linear-gradient(var(--line-1) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-1) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 70% 60% at 35% 40%, var(--black) 20%, transparent 75%);
+}
+
+/* Cards enter one after another: each sets --i, 40 ms apart. */
+@utility stagger {
+  animation: rise 320ms var(--ease) backwards;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}

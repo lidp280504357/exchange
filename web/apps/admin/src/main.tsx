@@ -1,4 +1,4 @@
-import { applySettings, createQueryClient, initI18n, useSettings } from "@exchange/core";
+import { createQueryClient, initI18n, useSettings } from "@exchange/core";
 import { uiMessages } from "@exchange/ui";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { MotionConfig } from "motion/react";
@@ -7,12 +7,13 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
 import { App } from "./App";
 import { adminMessages } from "./i18n";
+import { applyTheme } from "./theme";
 import "./index.css";
 
-// The console is light (design §3 #10) and in Chinese by default.
+// The console is light unless switched to dark (design 2026-10-02 §6) and in Chinese by default.
 initI18n({ "zh-CN": { ...uiMessages["zh-CN"], ...adminMessages["zh-CN"] }, en: { ...uiMessages.en, ...adminMessages.en } });
-applySettings(useSettings.getState(), "light");
-useSettings.subscribe((s) => applySettings(s, "light"));
+applyTheme();
+useSettings.subscribe(applyTheme);
 const queryClient = createQueryClient();
 
 const app = (

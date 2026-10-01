@@ -1,8 +1,10 @@
+import { dec } from "@exchange/core";
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
 import { Badge, Button, Drawer, KeyValue, Stepper, type DataColumnMeta, type ColumnDef } from "@exchange/ui";
 
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { useConsoleSettings } from "../../live";
 import { DangerAction, lastFour } from "../../kit/actions";
 import { EnumBadge, useEnum } from "../../kit/enums";
 import { IdText, Num, TimeText, useTimeText, UserCell } from "../../kit/format";
@@ -74,6 +76,10 @@ export function WithdrawalDrawer({ admin, w, onClose }: { admin: Admin; w: Withd
   ];
   const current = steps.reduce((n, s, i) => (s.at ? i : n), 0);
   const reviewable = w.status === "PENDING_REVIEW" && can(admin, "withdrawals.review");
+  // Single-person mode: one approval completes a withdrawal within the limit.
+  const settings = useConsoleSettings().data;
+  const alone =
+    !!settings && !settings.two_person_approval && !!w.value_usdt && dec.isDecimal(w.value_usdt) && dec.lte(w.value_usdt, settings.withdrawal_max_usdt);
   const review = (approve: boolean) => async (reason: string) =>
     adminData(await adminApi.POST("/admin/v1/withdrawals/{id}/review", { params: { path: { id: w.id } }, body: { approve, reason } }));
   const target = (
@@ -138,11 +144,15 @@ export function WithdrawalDrawer({ admin, w, onClose }: { admin: Admin; w: Withd
               confirmWord={lastFour(w.id)}
               run={review(true)}
               success={t("admin.withdrawals.approved")}
-              invalidate={[["admin", "withdrawals"], ["admin", "count", "withdrawals"]]}
+              invalidate={[["admin", "withdrawals"], ["admin", "todo"]]}
               onDone={onClose}
             >
-              {(w.approvals?.length ?? 0) + 1 < w.approvals_required && (
-                <p className="text-sm text-fg-3">{t("admin.withdrawals.secondReviewer", { n: (w.approvals?.length ?? 0) + 1, required: w.approvals_required })}</p>
+              {alone ? (
+                w.approvals_required > 1 && <p className="text-sm text-info">{t("admin.withdrawals.alone", { max: settings?.withdrawal_max_usdt })}</p>
+              ) : (
+                (w.approvals?.length ?? 0) + 1 < w.approvals_required && (
+                  <p className="text-sm text-fg-3">{t("admin.withdrawals.secondReviewer", { n: (w.approvals?.length ?? 0) + 1, required: w.approvals_required })}</p>
+                )
               )}
             </DangerAction>
             <DangerAction
@@ -156,7 +166,7 @@ export function WithdrawalDrawer({ admin, w, onClose }: { admin: Admin; w: Withd
               confirmWord={lastFour(w.id)}
               run={review(false)}
               success={t("admin.withdrawals.rejected")}
-              invalidate={[["admin", "withdrawals"], ["admin", "count", "withdrawals"]]}
+              invalidate={[["admin", "withdrawals"], ["admin", "todo"]]}
               onDone={onClose}
             />
           </div>

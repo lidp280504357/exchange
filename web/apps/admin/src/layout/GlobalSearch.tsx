@@ -2,7 +2,7 @@ import { ApiError } from "@exchange/core";
 import { adminApi, adminData, can, type Admin } from "@exchange/core/api/admin";
 import { Input, toast } from "@exchange/ui";
 import { Search } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router";
 import { errorToast } from "../kit/actions";
@@ -12,14 +12,27 @@ const TX = /^(0x)?[0-9a-f]{64}$/i;
 
 /**
  * GlobalSearch finds what an ID, an email, a phone number or a
- * transaction hash names (design §10.1): a user opens in the drawer, an
- * order in the orders list, a transaction in the deposits list.
+ * transaction hash names: a user opens in the drawer, an order in the
+ * orders list, a transaction in the deposits list. ⌘K (Ctrl+K) puts the
+ * cursor in it from anywhere.
  */
 export function GlobalSearch({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        input.current?.focus();
+        input.current?.select();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const [, setParams] = useSearchParams();
   // The drawer opens over the current page, its filters kept.
@@ -62,20 +75,29 @@ export function GlobalSearch({ admin }: { admin: Admin }) {
       setBusy(false);
     }
   };
+  const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
   return (
     <div className="w-full max-w-md">
       <Input
+        ref={input}
         size="sm"
         value={q}
         onValueChange={setQ}
         onKeyDown={(e) => {
           if (e.key === "Enter") void run();
+          if (e.key === "Escape") input.current?.blur();
         }}
         prefix={<Search size={14} className="text-fg-3" />}
+        suffix={
+          q ? undefined : (
+            <kbd className="mr-2 hidden rounded-1 border border-line-2 px-1.5 font-sans text-xs text-fg-3 sm:inline">{mac ? "⌘K" : "Ctrl K"}</kbd>
+          )
+        }
         placeholder={busy ? t("admin.search.searching") : t("admin.search.placeholder")}
         aria-label={t("admin.common.search")}
         clearable
         onClear={() => setQ("")}
+        boxClassName="bg-bg-0"
       />
     </div>
   );

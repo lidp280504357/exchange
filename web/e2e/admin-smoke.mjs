@@ -1,12 +1,14 @@
-// Browser smoke test of the admin console (admin.astras.vip, design §10):
-// an administrator signs in (the flag admin.login_without_totp is on in
-// the test environment) and walks every section: the overview with the
-// services' health and HOUSE, users with a user's drawer and its tabs,
-// orders and trades, deposits, the withdrawal queue, assets and pairs (a
-// status change is confirmed and canceled, never done), futures, HOUSE,
-// the flags, the ledger's reconciliation, the audit trail and the
-// reports; the search opens a user; signing out ends the session. Every
-// admin API response is checked against api/admin/admin.yaml.
+// Browser smoke test of the admin console (admin.astras.vip, design §10
+// and design 2026-10-02): an administrator signs in (the flag
+// admin.login_without_totp is on in the test environment) and walks every
+// section: the overview with the services' health and HOUSE, users with a
+// user's drawer and its tabs, orders and trades, deposits, the withdrawal
+// queue, assets and pairs (a status change is confirmed and canceled,
+// never done), futures, HOUSE, the flags, the ledger's reconciliation, the
+// audit trail, the reports, the fund operations (approval mode, form,
+// records), the settings and the event stream; the search opens a user;
+// signing out from the account menu ends the session. Every admin API
+// response is checked against api/admin/admin.yaml.
 //
 //   ADMIN_EMAIL=... ADMIN_PASSWORD=... node admin-smoke.mjs
 //
@@ -140,8 +142,38 @@ try {
   await t.shot("4-reports");
   ok("the ledger's reconciliation, the audit trail and the reports");
 
-  // 10. Sign out.
-  await clickButton("退出");
+  // 10. Fund operations: the approval mode with its limits, the form, the
+  // records; the settings; the counts pushed on the event stream.
+  await go("/adjustments");
+  await page.waitForFunction(() => /单人模式|双人模式/.test(document.querySelector("main")?.innerText ?? ""), { timeout: 20000 });
+  await waitText("调整余额");
+  await rows(1);
+  await go("/approvals");
+  await sleep(1000);
+  await noError("approvals");
+  await go("/settings");
+  await waitText("单笔上限");
+  await waitText("每人 24 小时累计上限");
+  const stream = await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const es = new EventSource("/admin/v1/events");
+        const done = (v) => {
+          es.close();
+          resolve(v);
+        };
+        es.addEventListener("todo", (e) => done(JSON.parse(e.data)));
+        setTimeout(() => done(null), 15000);
+      }),
+  );
+  if (!stream || typeof stream.withdrawals !== "number" || typeof stream.approvals !== "number") throw new Error(`event stream: ${JSON.stringify(stream)}`);
+  await t.shot("5-settings");
+  ok(`fund operations: the approval mode, the form and the records; the settings; the event stream (${JSON.stringify(stream)})`);
+
+  // 11. Sign out from the account menu.
+  await page.click('header button[aria-label="账户菜单"]');
+  await page.waitForFunction(() => [...document.querySelectorAll("[role=menuitem]")].some((e) => e.textContent.includes("退出")));
+  await page.evaluate(() => [...document.querySelectorAll("[role=menuitem]")].find((e) => e.textContent.includes("退出")).click());
   await waitPath("/login");
   ok("signing out ends the session");
 } catch (e) {
