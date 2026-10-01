@@ -38,6 +38,7 @@ import (
 	"os"
 	"os/signal"
 	"os/user"
+	"strings"
 	"syscall"
 
 	"github.com/lidp280504357/exchange/internal/platform/config"
@@ -174,6 +175,10 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 
 // actor names the operator in audit records.
 func actor() string {
+	// Scripts name themselves (the deploy lifting a contract's reduce-only).
+	if a := strings.TrimSpace(os.Getenv("EXCHANGECTL_ACTOR")); a != "" {
+		return a
+	}
 	if u, err := user.Current(); err == nil && u.Username != "" {
 		return "cli:" + u.Username
 	}

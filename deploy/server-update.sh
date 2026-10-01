@@ -13,7 +13,22 @@ apply_instruments() {
     --file - --reason "deploy $APP_VERSION" < deploy/instruments/test.json | tail -1 | sed 's/^/== 参考数据：/'
 }
 
+# lift_deploy_degradations 解除部署期间开始的合约只减仓。部署会重启 market-data-service，标记价短暂中断，
+# 合约可能因此进入只减仓（INDEX_SOURCES、MARK_PRICE_STALE）；按阶段 3 的设计只减仓须由人解除，部署者就是这个人：
+# 等标记价恢复后解除，解除人记为本次部署。价源若真的断了，10 秒后会再次进入只减仓。
+lift_deploy_degradations() {
+  local started=$1 symbol
+  sleep 20
+  sudo docker compose "${COMPOSE[@]}" exec -T derivatives-service /app/exchangectl derivatives states 2>/dev/null |
+    awk -v since="$started" 'NR > 1 && $2 == "true" && ($3 == "INDEX_SOURCES" || $3 == "MARK_PRICE_STALE") && $4 >= since {print $1}' |
+    while read -r symbol; do
+      sudo docker compose "${COMPOSE[@]}" exec -T -e EXCHANGECTL_ACTOR="deploy-$APP_VERSION" derivatives-service /app/exchangectl derivatives resume "$symbol" \
+        </dev/null >/dev/null && echo "== $symbol 在部署期间进入只减仓，标记价已恢复，已解除"
+    done
+}
+
 main() {
+  DEPLOY_STARTED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   SRC="${SRC:-/opt/exchange/src}"
   INFRA="${INFRA:-/opt/exchange/infra}"
   REF="${1:-origin/main}"
@@ -54,6 +69,9 @@ main() {
   sudo docker builder prune -f --keep-storage 3gb >/dev/null 2>&1 || echo "== 构建缓存清理失败（不影响部署）"
   # nginx 配置是挂载进容器的文件，内容变了 compose 不会重启它：校验后热加载（校验失败则部署失败，旧配置继续服务）
   sudo docker compose "${COMPOSE[@]}" exec -T nginx sh -c 'nginx -t -q && nginx -s reload' && echo "== nginx 配置已重新加载"
+  if [ -f "$INFRA/docker-compose.apps.yml" ]; then
+    lift_deploy_degradations "$DEPLOY_STARTED"
+  fi
 
   # 4. 参考数据已在第 3 步随 instrument-service 同步（apply_instruments）
   # 5. 前端（web/ 的 pnpm workspace，ADR-0012）：在 node 容器里装一次依赖（glibc 镜像，打包器与 Tailwind 的原生模块

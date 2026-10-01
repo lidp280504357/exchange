@@ -109,6 +109,8 @@ ssh exchange sudo docker exec exchange-infra-derivatives-service-1 /app/exchange
 
 故障注入 `scripts/fault/contract-degrade.sh` 演练整个过程：切断 market-data-service 的外网 → 标记价报 `degraded` → 合约只减仓、开仓单被拒 → 恢复外网后仍只减仓（开仓单报 `DERIV_REDUCE_ONLY_MODE`）→ `resume` 后恢复。
 
+部署会重启 market-data-service，标记价可能中断超过 10 秒，合约因此进入只减仓（2026-10-01 有一次 ETH-USDT-PERP 停在只减仓几个小时，直到端到端测试失败才发现）。`deploy/server-update.sh` 最后等 20 秒，解除部署期间开始、原因为 `INDEX_SOURCES` 或 `MARK_PRICE_STALE` 的只减仓，解除人记为 `deploy-<版本>`（`exchangectl` 读 `EXCHANGECTL_ACTOR`）；价源若真断了，10 秒后又会只减仓。部署之外开始的只减仓仍须人工解除。
+
 ## 对账（不变量 6）
 
 每小时（`RECONCILE_INTERVAL`，启动 1 分钟后先跑一次），持有成交处理锁，结果写 `derivatives.reconciliation_runs`，指标 `derivatives_reconcile_mismatches{check}`，告警 `DerivativesReconciliationMismatch`：
