@@ -1368,9 +1368,7 @@ func (x *AdjustResponse) GetPosting() *Posting {
 type FuturesMove struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// UNFREEZE: the user's frozen to available (reservations, released
-	//
-	//	margin). FREEZE: available to frozen (margin added).
-	//
+	// margin). FREEZE: available to frozen (margin added).
 	// FEE: the user to FEE_REVENUE.
 	// PROFIT: PNL_CLEARING to the user. LOSS: the user to PNL_CLEARING.
 	// FUNDING_PAY: the user to FUNDING_CLEARING. FUNDING_RECEIVE: back.
