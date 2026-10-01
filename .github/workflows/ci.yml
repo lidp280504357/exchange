@@ -25,15 +25,15 @@ jobs:
       TEST_CLICKHOUSE_USER: exchange
       TEST_CLICKHOUSE_PASSWORD: exchange
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 2 # buf breaking compares with the previous commit
       # The newest patch release, as the app images build with golang:1.26-alpine:
       # go.mod's "go 1.26.0" is the oldest Go that builds the module, and govulncheck
       # judges the standard library of the Go that runs it.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
-          go-version: 1.26.x
+          go-version: '1.26.x'
           check-latest: true
           cache: true
       # 集成测试的依赖（internal/platform/testenv）：拉取镜像会重试，失败原因写进注解
@@ -65,7 +65,7 @@ jobs:
       - name: go vet
         run: go vet ./...
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.14.0
       # Unlike `task ci`, this runs the integration tests too (the TEST_* variables above).
@@ -107,11 +107,11 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v5
         with:
           version: 11
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -130,7 +130,7 @@ jobs:
     name: deploy config (shell, compose, nginx)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: shell syntax
         run: |
           bash -n deploy/server-update.sh deploy/redpanda/topics.sh deploy/compose/nginx/update-cloudflare-ips.sh
