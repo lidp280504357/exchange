@@ -39,20 +39,26 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { FavoriteStar } from "../../features/markets/FavoriteStar";
+import { TOP_NAV_HEIGHT } from "../../layout/TopNav";
 import { isTyping, useMediaQuery, usePageTitle } from "./hooks";
 import { MarketName, SparkCell, tradePath, useFavoriteToggle } from "./parts";
 
 // /markets (design §6.2): a category rail (all, favourites, spot, futures,
 // new, sectors), a search box ("/" focuses it), four small boards and the
 // table of every market with live prices from the one tickers channel,
-// sortable headers, 7-day lines loaded as rows scroll into view, and
-// virtual scrolling from 50 rows. Category, search and sort live in the
-// URL, so links and the back button keep them.
+// sortable headers stuck under the top bar, 7-day lines loaded as rows
+// scroll into view; the page scrolls the table (VIRTUAL_FROM). Category,
+// search and sort live in the URL, so links and the back button keep them.
 
 type Item = { row: MarketRow; t: TickerData | undefined; fav: boolean };
 
-/** Rows from which the table scrolls virtually. */
-const VIRTUAL_FROM = 50;
+/**
+ * Rows from which the table scrolls virtually, in a box of its own. Below
+ * it every row renders and the page scrolls (55 rows of 56 px with their
+ * sparklines loading in view are light); a box beside the long category
+ * rail left a blank under it and scrolled inside the scrolling page.
+ */
+const VIRTUAL_FROM = 200;
 
 const SORT_COLUMN: Partial<Record<SortKey, string>> = { symbol: "coin", last: "last", change: "change", high: "highLow", turnover: "turnover" };
 const COLUMN_SORT: Record<string, SortKey> = { coin: "symbol", last: "last", change: "change", highLow: "high", turnover: "turnover" };
@@ -285,7 +291,7 @@ export default function Markets() {
       <Highlights rows={rows} tickerOf={tickerOf} now={now} loading={loading} onPick={pickBoard} />
       <StaleNotice rows={rows} tickerOf={tickerOf} />
 
-      <div className="mt-6 grid grid-cols-[168px_minmax(0,1fr)] gap-5 xl:grid-cols-[200px_minmax(0,1fr)] xl:gap-6">
+      <div className="mt-6 grid grid-cols-[168px_minmax(0,1fr)] items-start gap-5 xl:grid-cols-[200px_minmax(0,1fr)] xl:gap-6">
         <CategoryRail
           rows={rows}
           loading={loading}
@@ -296,7 +302,8 @@ export default function Markets() {
           tags={tags.map((x) => x.tag)}
         />
 
-        <section className="min-w-0 overflow-hidden rounded-3 border border-line-1 bg-bg-1">
+        {/* clip, not hidden: the table's header sticks to the page under the top bar. */}
+        <section className="min-w-0 overflow-clip rounded-3 border border-line-1 bg-bg-1">
           <div className="flex items-center gap-3 border-b border-line-1 px-4 py-3">
             <Input
               ref={searchRef}
@@ -338,10 +345,10 @@ export default function Markets() {
             manualSorting
             onRowClick={(it) => navigate(tradePath(it.row))}
             virtual={virtual}
-            // The list is long (50 pairs and more): its height is kept while
-            // it loads, so the footer does not jump down when it arrives.
-            height={virtual || loading ? "min(760px, calc(100dvh - 180px))" : undefined}
-            stickyHeader={virtual}
+            // The page scrolls the table; while it loads, the 14 skeleton
+            // rows keep the footer below the fold (no layout shift).
+            height={virtual ? "min(760px, calc(100dvh - 180px))" : undefined}
+            stickyTop={virtual ? 0 : TOP_NAV_HEIGHT}
           />
         </section>
       </div>

@@ -75,13 +75,14 @@ export type DataTableProps<T> = {
   height?: number | string;
   stickyHeader?: boolean;
   /**
-   * Offset of the sticky header when the page scrolls (under a top bar).
-   * Without a `height`, a table with an offset clips instead of scrolling
-   * sideways (it must fit its width): a scroll container between the
-   * header and the page would hold the header by that offset inside it,
-   * over the first rows.
+   * Offset of the sticky header when the page scrolls (under a top bar): px
+   * or a CSS length ("3.5rem"). Without a `height`, a table with an offset
+   * clips instead of scrolling sideways (it must fit its width): a scroll
+   * container between the header and the page would hold the header by
+   * that offset inside it, over the first rows. Its ancestors must not
+   * clip with overflow: hidden either (overflow: clip is fine).
    */
-  stickyTop?: number;
+  stickyTop?: number | string;
   /** Called near the end of the rows (infinite scroll). */
   onEndReached?: () => void;
   loadingMore?: boolean;
@@ -230,7 +231,7 @@ export function DataTable<T>({
   const visible = virtual ? items.map((v) => ({ row: rows[v.index], index: v.index })) : rows.map((row, index) => ({ row, index }));
   // A header stuck to the page needs no scroll container in between, and
   // overflow-x: auto makes one of the wrapper (for both axes); clip does not.
-  const pageSticky = stickyHeader && stickyTop > 0 && areaHeight === undefined;
+  const pageSticky = stickyHeader && stickyTop !== 0 && stickyTop !== "" && areaHeight === undefined;
 
   return (
     <div className={cn("relative w-full", className)}>

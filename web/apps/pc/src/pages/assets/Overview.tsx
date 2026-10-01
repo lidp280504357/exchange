@@ -35,6 +35,7 @@ import { motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
+import { TOP_NAV_HEIGHT } from "../../layout/TopNav";
 import { AllocationRing, type AllocationSegment } from "./parts/Allocation";
 import { AssetsLayout, Card } from "./parts/AssetsLayout";
 import { shownDecimals, useAssetMeta, useTradeLinks, withQuery, type AssetMeta } from "./parts/meta";
@@ -411,7 +412,7 @@ function AssetsTable({
         />
         <div className="ml-auto flex items-center gap-4">
           <Tooltip content={t("pcAssets.overview.hideSmallHint")}>
-            <span>
+            <span className="shrink-0">
               <Switch size="sm" checked={hideSmall} onCheckedChange={(v) => set({ hideSmallBalances: v })} label={t("pcAssets.overview.hideSmall")} />
             </span>
           </Tooltip>
@@ -438,7 +439,7 @@ function AssetsTable({
         loadingRows={4}
         error={rows.length === 0 ? error : undefined}
         onRetry={onRetry}
-        stickyTop={56}
+        stickyTop={TOP_NAV_HEIGHT}
         empty={
           filtered ? (
             <EmptyState

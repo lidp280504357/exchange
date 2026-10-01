@@ -56,6 +56,12 @@ try {
   });
   if (gap.headTop > 1 || gap.overlap > 1) throw new Error(`the assets table header is ${gap.headTop}px down and covers ${gap.overlap}px of the first row`);
   ok("the assets table header sits on top of its rows");
+  const switchLines = await page.evaluate(() => {
+    const label = [...document.querySelectorAll("label")].find((l) => l.textContent.trim().startsWith("隐藏小额"));
+    return label ? Math.round(label.getBoundingClientRect().height / parseFloat(getComputedStyle(label).lineHeight)) : 0;
+  });
+  if (switchLines !== 1) throw new Error(`the hide-small switch label takes ${switchLines} lines`);
+  ok("the hide-small switch label stays on one line");
 
   // 2. Sign out from the account menu, sign back in with the password.
   await go("/");
@@ -75,6 +81,19 @@ try {
 
   // 3. Markets: every market listed, the search narrows them.
   await page.waitForFunction(() => document.body.innerText.includes("BTC") && document.body.innerText.includes("ETH"), { timeout: 20000 });
+  // The page scrolls the table (it has no scroll box of its own, which left
+  // a blank under it), and its header sticks right under the top bar.
+  const scrolled = await page.evaluate(async () => {
+    const table = document.querySelector("main table");
+    const box = table.parentElement;
+    window.scrollTo(0, document.documentElement.scrollHeight / 2);
+    await new Promise((r) => setTimeout(r, 500));
+    const gap = table.tHead.rows[0].cells[0].getBoundingClientRect().top - document.querySelector("header").getBoundingClientRect().bottom;
+    window.scrollTo(0, 0);
+    return { innerScroll: box.scrollHeight > box.clientHeight + 1, gap: Math.round(gap) };
+  });
+  if (scrolled.innerScroll || Math.abs(scrolled.gap) > 1) throw new Error(`the market table scrolls in a box (${scrolled.innerScroll}) or its header is ${scrolled.gap}px off the top bar`);
+  ok("the market table scrolls with the page, its header stuck under the top bar");
   await typeInto('input[placeholder="搜索币种名称或代码"]', "ETH");
   await page.waitForFunction(
     () => {

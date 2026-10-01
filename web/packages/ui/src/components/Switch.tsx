@@ -57,7 +57,8 @@ export function Switch({
     <div className={cn("flex items-center gap-3", labelFirst && "justify-between", className)}>
       {!labelFirst && control}
       <label htmlFor={switchId} className={cn("cursor-pointer select-none text-sm text-fg-1", disabled && "cursor-not-allowed opacity-50")}>
-        {label}
+        {/* The label stays on one line; a description below it may wrap. */}
+        <span className="whitespace-nowrap">{label}</span>
         {description && <span className="block text-xs text-fg-3">{description}</span>}
       </label>
       {labelFirst && control}

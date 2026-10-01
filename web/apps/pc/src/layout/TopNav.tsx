@@ -11,10 +11,13 @@ import { Logo } from "./Logo";
 import { SearchPalette } from "./SearchPalette";
 
 /**
- * TopNav: the 56 px bar fixed on every page (design §6.1) — markets, spot,
+ * TopNav: the bar fixed on every page (design §6.1), TOP_NAV_HEIGHT tall — markets, spot,
  * futures, assets and announcements on the left; search, notifications,
  * the account and the language on the right.
  */
+/** The top bar's height (its h-14): what sticky headers of the pages stick under. */
+export const TOP_NAV_HEIGHT = "3.5rem";
+
 export function TopNav() {
   const { t } = useTranslation();
   const signedIn = useSession(selectSignedIn);
