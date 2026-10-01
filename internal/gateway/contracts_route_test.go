@@ -31,6 +31,7 @@ func TestContractRoutes(t *testing.T) {
 		"/v1/market/pairs/BTC-USDT":          "instrument",
 		"/v1/market/BTC-USDT/depth":          "market",
 		"/v1/market/summary":                 "market",
+		"/v1/market/sparklines":              "market",
 		"/v1/market/tickers":                 "market",
 	} {
 		got = ""

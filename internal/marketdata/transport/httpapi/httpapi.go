@@ -5,6 +5,8 @@ package httpapi
 
 import (
 	"net/http"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -36,13 +38,16 @@ type Handler struct {
 	// Books serves the reference market's book and trades of the symbols
 	// that show them (ADR-0010); nil without a feed.
 	Books *application.Books
-	Now   func() time.Time
+	// Sparks serves the market lists' trend lines.
+	Sparks *application.Sparklines
+	Now    func() time.Time
 }
 
 // Routes mounts the endpoints on r.
 func (h *Handler) Routes(r chi.Router) {
 	r.Get("/v1/market/tickers", h.tickers)
 	r.Get("/v1/market/summary", h.summary)
+	r.Get("/v1/market/sparklines", h.sparklines)
 	r.Get("/v1/market/{symbol}/ticker", h.ticker)
 	r.Get("/v1/market/{symbol}/depth", h.depth)
 	r.Get("/v1/market/{symbol}/trades", h.trades)
@@ -99,6 +104,43 @@ func (h *Handler) reference(w http.ResponseWriter, r *http.Request) {
 func live(w http.ResponseWriter) { w.Header().Set("Cache-Control", "public, max-age=1") }
 
 func symbol(r *http.Request) string { return strings.ToUpper(chi.URLParam(r, "symbol")) }
+
+var symbolRE = regexp.MustCompile(`^[A-Z0-9]{2,10}-[A-Z0-9]{2,10}(-PERP)?$`)
+
+// sparklines returns the trend lines of the market lists for up to 60
+// symbols (symbols=BTC-USDT,ETH-USDT): range 7d (the default) thins a
+// week of hourly closes to 56 points, 24h gives the last 24. A symbol
+// without candles is left out.
+func (h *Handler) sparklines(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	rng := q.Get("range")
+	if rng == "" {
+		rng = application.SparkWeek
+	}
+	if rng != application.SparkWeek && rng != application.SparkDay {
+		httpx.WriteError(w, r, apperr.Invalid("range must be 7d or 24h"))
+		return
+	}
+	var symbols []string
+	for _, s := range strings.Split(q.Get("symbols"), ",") {
+		s = strings.ToUpper(strings.TrimSpace(s))
+		switch {
+		case s == "" || slices.Contains(symbols, s):
+		case !symbolRE.MatchString(s):
+			httpx.WriteError(w, r, apperr.Invalid("not a symbol: "+s))
+			return
+		default:
+			symbols = append(symbols, s)
+		}
+	}
+	if len(symbols) == 0 || len(symbols) > 60 {
+		httpx.WriteError(w, r, apperr.Invalid("symbols takes 1 to 60 symbols"))
+		return
+	}
+	lines := h.Sparks.Get(r.Context(), symbols, rng)
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"range": rng, "interval": "1h", "sparklines": lines})
+}
 
 func limit(r *http.Request) int {
 	n, _ := strconv.Atoi(r.URL.Query().Get("limit"))

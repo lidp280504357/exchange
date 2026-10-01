@@ -99,6 +99,7 @@ func Mount(r chi.Router, g Guards, up Upstreams) {
 		if up.Market != nil {
 			r.Handle("/v1/market/tickers", up.Market)
 			r.Handle("/v1/market/summary", up.Market)
+			r.Handle("/v1/market/sparklines", up.Market)
 			r.Handle("/v1/market/{symbol}/*", up.Market)
 		}
 

@@ -3,13 +3,13 @@ import { marketApi, unwrap } from "../api/client";
 import { qk } from "../query/keys";
 import type { CandleData } from "../ws/types";
 
-// The 7-day trend of a market list row (design §6.2): 168 hourly candles,
-// fetched only once the row is on screen (see useInView), cached for ten
-// minutes and shared by every list that shows the same market. A small
-// queue keeps a page of fifty rows from firing fifty requests at once.
+// The trend lines of the market list rows (design §6.2, §7.2): the PC
+// table draws 7 days, the mobile rows 24 hours, from hourly closes. A row
+// asks once it is on screen (see useInView); the rows that ask within a
+// few milliseconds of each other share one request (GET
+// /v1/market/sparklines, 60 symbols at most), so a page of rows costs one
+// round trip; the server keeps each pair's closes for five minutes.
 
-export const SPARK_INTERVAL = "1h";
-export const SPARK_CANDLES = 168;
 /** Points drawn: one per 3 hours is plenty for a 100 px line. */
 export const SPARK_POINTS = 56;
 
@@ -45,17 +45,38 @@ export function createLimiter(max: number): <T>(task: () => Promise<T>) => Promi
     });
 }
 
-const limit = createLimiter(6);
+/** A line's span: the last 7 days (56 points) or the last 24 hours. */
+export type SparkRange = "7d" | "24h";
 
-/** fetchSparkline loads a market's last 7 days of hourly closes. */
-export function fetchSparkline(symbol: string): Promise<string[]> {
-  return limit(() =>
-    unwrap(
-      marketApi.GET("/v1/market/{symbol}/candles", {
-        params: { path: { symbol }, query: { interval: SPARK_INTERVAL, limit: SPARK_CANDLES } },
-      }),
-    ),
-  ).then((r) => sparkValues(r.candles));
+type Waiter = { resolve: (closes: string[]) => void; reject: (err: unknown) => void };
+
+const BATCH = 60;
+const waiting: Record<SparkRange, Map<string, Waiter[]>> = { "7d": new Map(), "24h": new Map() };
+const timers: Partial<Record<SparkRange, ReturnType<typeof setTimeout>>> = {};
+
+/** fetchSparkline loads a market's line over range, oldest first ([] when it has none). */
+export function fetchSparkline(symbol: string, range: SparkRange = "7d"): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const queue = waiting[range];
+    queue.set(symbol, [...(queue.get(symbol) ?? []), { resolve, reject }]);
+    timers[range] ??= setTimeout(() => void flush(range), 10);
+  });
+}
+
+async function flush(range: SparkRange): Promise<void> {
+  delete timers[range];
+  const batch = waiting[range];
+  waiting[range] = new Map();
+  const symbols = [...batch.keys()];
+  for (let i = 0; i < symbols.length; i += BATCH) {
+    const chunk = symbols.slice(i, i + BATCH);
+    try {
+      const r = await unwrap(marketApi.GET("/v1/market/sparklines", { params: { query: { symbols: chunk.join(","), range } } }));
+      for (const s of chunk) for (const w of batch.get(s) ?? []) w.resolve(sparkValues((r.sparklines[s] ?? []).map((close) => ({ close }))));
+    } catch (err) {
+      for (const s of chunk) for (const w of batch.get(s) ?? []) w.reject(err);
+    }
+  }
 }
 
 /** useSparkline returns a market's 7-day closes once `enabled` (the row is in view). */

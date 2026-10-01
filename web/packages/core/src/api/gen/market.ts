@@ -132,6 +132,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/market/sparklines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Trend lines of many pairs at once
+         * @description The market lists' lines from hourly closes, oldest first: 7d thins
+         *     the last week to 56 points, 24h gives the last 24 closes. One
+         *     request serves a page of rows; the server keeps each pair's closes
+         *     for five minutes. A pair without candles is left out.
+         */
+        get: operations["getSparklines"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/market/{symbol}/ticker": {
         parameters: {
             query?: never;
@@ -687,6 +710,39 @@ export interface operations {
                         turnover: components["schemas"]["Ticker"][];
                         /** Format: date-time */
                         updated_at: string;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSparklines: {
+        parameters: {
+            query: {
+                /** @description Up to 60 pairs or contracts, comma-separated. */
+                symbols: string;
+                range?: "7d" | "24h";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The lines by symbol. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        range: "7d" | "24h";
+                        /** @constant */
+                        interval: "1h";
+                        sparklines: {
+                            [key: string]: components["schemas"]["Decimal"][];
+                        };
                     };
                 };
             };

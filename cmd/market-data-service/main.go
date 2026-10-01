@@ -22,6 +22,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/marketdata/adapters/instruments"
 	"github.com/lidp280504357/exchange/internal/marketdata/adapters/postgres"
 	"github.com/lidp280504357/exchange/internal/marketdata/application"
+	"github.com/lidp280504357/exchange/internal/marketdata/domain"
 	"github.com/lidp280504357/exchange/internal/marketdata/transport/consumer"
 	"github.com/lidp280504357/exchange/internal/marketdata/transport/httpapi"
 	"github.com/lidp280504357/exchange/internal/platform/app"
@@ -188,7 +189,17 @@ func setup(ctx context.Context, a *app.App) error {
 			}
 		}
 	}))
+	// The market lists' trend lines, each symbol's hourly closes kept five
+	// minutes: from the chart's source, the reference market's or ours.
+	sparks := &application.Sparklines{Now: time.Now, TTL: 5 * time.Minute, Closes: func(ctx context.Context, symbol string, hours int) ([]domain.Candle, error) {
+		if ref, ok := refKlines.Serves(ctx, symbol); ok {
+			return refKlines.Candles(ctx, symbol, ref, "1h", time.Time{}, time.Time{}, hours)
+		}
+		return svc.Candles(ctx, symbol, "1h", time.Time{}, time.Time{}, hours)
+	}}
 	r := a.NewRouter()
-	(&httpapi.Handler{Svc: svc, Tickers: tickers, Ref: feed, Guard: guard, Marks: marks, RefKlines: refKlines, Books: books, Now: time.Now}).Routes(r)
+	(&httpapi.Handler{
+		Svc: svc, Tickers: tickers, Ref: feed, Guard: guard, Marks: marks, RefKlines: refKlines, Books: books, Sparks: sparks, Now: time.Now,
+	}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
 }

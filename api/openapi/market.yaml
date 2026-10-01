@@ -193,6 +193,53 @@ paths:
                     format: date-time
         default:
           $ref: './common.yaml#/components/responses/Error'
+  /v1/market/sparklines:
+    get:
+      operationId: getSparklines
+      summary: Trend lines of many pairs at once
+      description: |
+        The market lists' lines from hourly closes, oldest first: 7d thins
+        the last week to 56 points, 24h gives the last 24 closes. One
+        request serves a page of rows; the server keeps each pair's closes
+        for five minutes. A pair without candles is left out.
+      tags: [market]
+      parameters:
+        - name: symbols
+          in: query
+          required: true
+          description: Up to 60 pairs or contracts, comma-separated.
+          schema:
+            type: string
+            examples: ['BTC-USDT,ETH-USDT']
+        - name: range
+          in: query
+          schema:
+            type: string
+            enum: [7d, 24h]
+            default: 7d
+      responses:
+        '200':
+          description: The lines by symbol.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [range, interval, sparklines]
+                properties:
+                  range:
+                    type: string
+                    enum: [7d, 24h]
+                  interval:
+                    type: string
+                    const: 1h
+                  sparklines:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Decimal'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
   /v1/market/{symbol}/ticker:
     get:
       operationId: getTicker
