@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/lidp280504357/exchange/internal/ledger/domain"
 )
 
 // Check names of the reconciliation (§5.9, §11.4 invariants 1, 2 and 5;
@@ -139,4 +141,34 @@ func (s *Store) Reconcile(ctx context.Context, now func() time.Time) ([]CheckRes
 		out = append(out, res)
 	}
 	return out, nil
+}
+
+// ReconciliationRuns returns the latest run of each check and up to
+// failures runs that found mismatches, newest first; details keep the
+// first ten mismatches.
+func (s *Store) ReconciliationRuns(ctx context.Context, failures int) (latest, failing []domain.ReconciliationRun, err error) {
+	const cols = `check_name, started_at, mismatches, jsonb_path_query_array(details, '$[0 to 9]')`
+	scan := func(sql string, args ...any) ([]domain.ReconciliationRun, error) {
+		rows, err := s.db.Query(ctx, sql, args...)
+		if err != nil {
+			return nil, fmt.Errorf("reconciliation runs: %w", err)
+		}
+		defer rows.Close()
+		out := []domain.ReconciliationRun{}
+		for rows.Next() {
+			var r domain.ReconciliationRun
+			if err := rows.Scan(&r.Check, &r.StartedAt, &r.Mismatches, &r.Details); err != nil {
+				return nil, fmt.Errorf("reconciliation runs: %w", err)
+			}
+			out = append(out, r)
+		}
+		return out, rows.Err()
+	}
+	if latest, err = scan(`SELECT DISTINCT ON (check_name) ` + cols + ` FROM reconciliation_runs ORDER BY check_name, started_at DESC`); err != nil {
+		return nil, nil, err
+	}
+	if failing, err = scan(`SELECT `+cols+` FROM reconciliation_runs WHERE mismatches > 0 ORDER BY started_at DESC LIMIT $1`, failures); err != nil {
+		return nil, nil, err
+	}
+	return latest, failing, nil
 }

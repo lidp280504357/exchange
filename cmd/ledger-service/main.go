@@ -104,6 +104,7 @@ func setup(ctx context.Context, a *app.App) error {
 		Log:            a.Logger(),
 		Now:            time.Now,
 		WelcomeCredits: credits,
+		Runs:           store,
 	}
 	if cfg.DerivativesAddr != "" {
 		conn, err := bootstrap.GRPCClient(a, "derivatives", cfg.DerivativesAddr)

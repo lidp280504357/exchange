@@ -105,3 +105,10 @@ type Futures interface {
 type Flags interface {
 	Enabled(key string, s flags.Subject) bool
 }
+
+// ReconciliationRuns reads the recorded runs of the invariant checks.
+type ReconciliationRuns interface {
+	// ReconciliationRuns returns the latest run of each check and up to
+	// failures runs that found mismatches, newest first.
+	ReconciliationRuns(ctx context.Context, failures int) (latest, failing []domain.ReconciliationRun, err error)
+}

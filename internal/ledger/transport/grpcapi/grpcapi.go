@@ -4,6 +4,8 @@ package grpcapi
 import (
 	"context"
 	"fmt"
+	"math"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -229,4 +231,24 @@ func (s *Server) FundInsurance(ctx context.Context, req *ledgerv1.FundInsuranceR
 		return nil, err
 	}
 	return &ledgerv1.FundInsuranceResponse{Posting: posting(res)}, nil
+}
+
+// GetReconciliation returns the latest run of each invariant check and the
+// recent runs with mismatches.
+func (s *Server) GetReconciliation(ctx context.Context, req *ledgerv1.GetReconciliationRequest) (*ledgerv1.GetReconciliationResponse, error) {
+	latest, failing, err := s.svc.Reconciliation(ctx, int(req.GetFailures()))
+	if err != nil {
+		return nil, err
+	}
+	conv := func(runs []domain.ReconciliationRun) []*ledgerv1.ReconciliationRun {
+		out := make([]*ledgerv1.ReconciliationRun, 0, len(runs))
+		for _, r := range runs {
+			out = append(out, &ledgerv1.ReconciliationRun{
+				Check: r.Check, StartedAt: r.StartedAt.UTC().Format(time.RFC3339Nano), Mismatches: int32(min(r.Mismatches, math.MaxInt32)), //nolint:gosec // capped
+				Details: string(r.Details),
+			})
+		}
+		return out
+	}
+	return &ledgerv1.GetReconciliationResponse{Latest: conv(latest), Failures: conv(failing)}, nil
 }

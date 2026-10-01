@@ -137,3 +137,33 @@ func TestReports(t *testing.T) {
 		t.Fatalf("candles %+v", candles)
 	}
 }
+
+func TestHousePairs(t *testing.T) {
+	ctx := context.Background()
+	cfg := testenv.ClickHouse(t)
+	conn, err := chx.Open(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	db := chx.OpenDB(cfg)
+	defer db.Close()
+	if err := migrate.UpClickHouse(ctx, db, migrations.ClickHouse(), slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatal(err)
+	}
+	// HOUSE sold 2 SOL for 200 and bought 0.5 back for 49; a trade between
+	// users does not count.
+	if err := conn.Exec(ctx, `INSERT INTO trades (trade_id, symbol, price, quantity, quote_quantity, sequence, executed_at, house_side) VALUES
+		(generateUUIDv4(), 'SOL-USDT', 100, 2, 200, 1, now64(3), 'SELL'), (generateUUIDv4(), 'SOL-USDT', 98, 0.5, 49, 2, now64(3), 'BUY'),
+		(generateUUIDv4(), 'SOL-USDT', 99, 1, 99, 3, now64(3), '')`); err != nil {
+		t.Fatal(err)
+	}
+	pairs, err := backends.Reports{Conn: conn}.HousePairs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pairs) != 1 || pairs[0].Symbol != "SOL-USDT" || pairs[0].Trades != 2 || pairs[0].SoldBase != "2" || pairs[0].BoughtBase != "0.5" ||
+		pairs[0].GotQuote != "200" || pairs[0].PaidQuote != "49" || pairs[0].LastAt.IsZero() {
+		t.Fatalf("house pairs %+v", pairs)
+	}
+}

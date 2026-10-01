@@ -33,9 +33,11 @@ func (r Records) Orders(ctx context.Context, q ports.OrderQuery) ([]ports.Order,
 	rows, err := r.Conn.Query(ctx, `SELECT toString(order_id), client_order_id, toString(user_id), symbol, side, type, time_in_force,
 		price, quantity, quote_amount, status, filled_quantity, filled_quote, reason, created_at, updated_at FROM orders_current
 		WHERE (? = '' OR toString(user_id) = ?) AND (? = '' OR symbol = ?) AND (? = '' OR status = ?) AND (? = '' OR side = ?)
+		AND (? = '' OR toString(order_id) = ?)
 		AND created_at >= `+ms+` AND created_at < `+ms+` AND (NOT ? OR (created_at, toString(order_id)) < (`+ms+`, ?))
 		ORDER BY created_at DESC, toString(order_id) DESC LIMIT ?`,
-		q.UserID, q.UserID, q.Symbol, q.Symbol, q.Status, q.Status, q.Side, q.Side, from, to, pc.on, pc.at.UnixMilli(), pc.id, pc.limit+1)
+		q.UserID, q.UserID, q.Symbol, q.Symbol, q.Status, q.Status, q.Side, q.Side, q.OrderID, q.OrderID, from, to, pc.on, pc.at.UnixMilli(),
+		pc.id, pc.limit+1)
 	if err != nil {
 		return nil, "", unavailable(err)
 	}
@@ -106,9 +108,9 @@ func (r Records) Deposits(ctx context.Context, q ports.DepositQuery) ([]ports.De
 	rows, err := r.Conn.Query(ctx, `SELECT toString(deposit_id), user_id, asset, network, kind, address, tx_hash, amount, status, unclaimed,
 		reason, confirmations, required_confirmations, updated_at FROM wallet_deposits FINAL
 		WHERE (? = '' OR user_id = ?) AND (? = '' OR asset = ?) AND (? = '' OR network = ?) AND (? = '' OR status = ?)
-		AND (NOT ? OR toString(deposit_id) < ?)
+		AND (? = '' OR lower(tx_hash) = lower(?)) AND (NOT ? OR toString(deposit_id) < ?)
 		ORDER BY toString(deposit_id) DESC LIMIT ?`,
-		q.UserID, q.UserID, q.Asset, q.Asset, q.Network, q.Network, q.Status, q.Status, pc.on, pc.id, pc.limit+1)
+		q.UserID, q.UserID, q.Asset, q.Asset, q.Network, q.Network, q.Status, q.Status, q.TxHash, q.TxHash, pc.on, pc.id, pc.limit+1)
 	if err != nil {
 		return nil, "", unavailable(err)
 	}

@@ -34,6 +34,21 @@ type Service struct {
 	Now     func() time.Time
 	// WelcomeCredits are the simulated funds of phase 1 (ledger.welcome_credit).
 	WelcomeCredits []Credit
+	// Runs reads the reconciliation runs (the admin console); nil answers
+	// unavailable.
+	Runs ports.ReconciliationRuns
+}
+
+// Reconciliation returns the latest run of each invariant check and the
+// recent runs with mismatches (20 by default, at most 100).
+func (s *Service) Reconciliation(ctx context.Context, failures int) (latest, failing []domain.ReconciliationRun, err error) {
+	if s.Runs == nil {
+		return nil, nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "reconciliation runs are not available")
+	}
+	if failures <= 0 {
+		failures = 20
+	}
+	return s.Runs.ReconciliationRuns(ctx, min(failures, 100))
 }
 
 // Credit is an amount of an asset, as configured.

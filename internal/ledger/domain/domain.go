@@ -284,3 +284,12 @@ type Entry struct {
 	Frozen      decimal.Decimal
 	PostedAt    time.Time
 }
+
+// ReconciliationRun is one invariant check of one reconciliation: how
+// many mismatches it found and the first of them (JSON [{key, detail}]).
+type ReconciliationRun struct {
+	Check      string
+	StartedAt  time.Time
+	Mismatches int
+	Details    []byte
+}

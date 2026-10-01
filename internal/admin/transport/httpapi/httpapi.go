@@ -88,6 +88,10 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/derivatives/risk", h.derivativesRisk)
 			r.Get("/derivatives/liquidations", h.liquidations)
 			r.Get("/derivatives/insurance-fund", h.insuranceFund)
+			r.Get("/house", h.house)
+			r.Get("/health", h.health)
+			r.Get("/ledger/reconciliation", h.reconciliation)
+			r.Get("/ledger/system-balances", h.systemBalances)
 			r.Post("/derivatives/insurance-fund/contributions", h.requestInsuranceFunding)
 		})
 	})
@@ -335,8 +339,8 @@ func (h *Handler) orders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	list, next, err := h.Svc.OrderList(r.Context(), principal(r), ports.OrderQuery{
-		UserID: q.Get("user_id"), Symbol: q.Get("symbol"), Status: q.Get("status"), Side: q.Get("side"), From: from, To: to,
-		Cursor: q.Get("cursor"), Limit: intParam(q, "limit"),
+		UserID: q.Get("user_id"), OrderID: q.Get("order_id"), Symbol: q.Get("symbol"), Status: q.Get("status"), Side: q.Get("side"),
+		From: from, To: to, Cursor: q.Get("cursor"), Limit: intParam(q, "limit"),
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)
@@ -365,8 +369,8 @@ func (h *Handler) trades(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deposits(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	list, next, err := h.Svc.DepositList(r.Context(), principal(r), ports.DepositQuery{
-		UserID: q.Get("user_id"), Asset: q.Get("asset"), Network: q.Get("network"), Status: q.Get("status"), Cursor: q.Get("cursor"),
-		Limit: intParam(q, "limit"),
+		UserID: q.Get("user_id"), Asset: q.Get("asset"), Network: q.Get("network"), Status: q.Get("status"), TxHash: q.Get("tx_hash"),
+		Cursor: q.Get("cursor"), Limit: intParam(q, "limit"),
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)
@@ -740,4 +744,44 @@ func (h *Handler) requestInsuranceFunding(w http.ResponseWriter, r *http.Request
 		return
 	}
 	httpx.WriteJSON(w, http.StatusCreated, approvalJSON(a))
+}
+
+func (h *Handler) house(w http.ResponseWriter, r *http.Request) {
+	book, err := h.Svc.House(r.Context(), principal(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, book)
+}
+
+func (h *Handler) health(w http.ResponseWriter, r *http.Request) {
+	list, err := h.Svc.Health(r.Context(), principal(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"services": list})
+}
+
+func (h *Handler) reconciliation(w http.ResponseWriter, r *http.Request) {
+	rec, err := h.Svc.Reconciliation(r.Context(), principal(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, rec)
+}
+
+func (h *Handler) systemBalances(w http.ResponseWriter, r *http.Request) {
+	list, err := h.Svc.SystemBalances(r.Context(), principal(r), r.URL.Query().Get("asset"))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out := make([]map[string]string, 0, len(list))
+	for _, b := range list {
+		out = append(out, map[string]string{"account_type": b.AccountType, "asset": b.Asset, "available": b.Available, "frozen": b.Frozen})
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"balances": out})
 }

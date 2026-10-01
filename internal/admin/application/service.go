@@ -51,8 +51,13 @@ type Service struct {
 	// Market reads market-data-service's reference feed.
 	Records ports.Records
 	Market  ports.Market
-	Log     *slog.Logger
-	Now     func() time.Time
+	// HouseBook reads HOUSE's book; Probe the services' readiness; Reconciler
+	// the ledger's reconciliation runs.
+	HouseBook  HouseDeps
+	Probe      ports.Health
+	Reconciler ports.Reconciler
+	Log        *slog.Logger
+	Now        func() time.Time
 }
 
 // Principal is the administrator behind a request.

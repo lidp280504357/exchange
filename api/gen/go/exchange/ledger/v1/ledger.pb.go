@@ -1788,6 +1788,177 @@ func (x *FundInsuranceResponse) GetPosting() *Posting {
 	return nil
 }
 
+type GetReconciliationRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How many recent runs with mismatches to return: 20 when 0, at most 100.
+	Failures      int32 `protobuf:"varint,1,opt,name=failures,proto3" json:"failures,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetReconciliationRequest) Reset() {
+	*x = GetReconciliationRequest{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetReconciliationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetReconciliationRequest) ProtoMessage() {}
+
+func (x *GetReconciliationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetReconciliationRequest.ProtoReflect.Descriptor instead.
+func (*GetReconciliationRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *GetReconciliationRequest) GetFailures() int32 {
+	if x != nil {
+		return x.Failures
+	}
+	return 0
+}
+
+// ReconciliationRun is one check of one reconciliation.
+type ReconciliationRun struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// JOURNAL_BALANCED, ACCOUNT_MATCHES_LINES, ...
+	Check string `protobuf:"bytes,1,opt,name=check,proto3" json:"check,omitempty"`
+	// RFC 3339.
+	StartedAt  string `protobuf:"bytes,2,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	Mismatches int32  `protobuf:"varint,3,opt,name=mismatches,proto3" json:"mismatches,omitempty"`
+	// The first ten mismatches as JSON: [{"key": ..., "detail": ...}].
+	Details       string `protobuf:"bytes,4,opt,name=details,proto3" json:"details,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReconciliationRun) Reset() {
+	*x = ReconciliationRun{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReconciliationRun) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReconciliationRun) ProtoMessage() {}
+
+func (x *ReconciliationRun) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReconciliationRun.ProtoReflect.Descriptor instead.
+func (*ReconciliationRun) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *ReconciliationRun) GetCheck() string {
+	if x != nil {
+		return x.Check
+	}
+	return ""
+}
+
+func (x *ReconciliationRun) GetStartedAt() string {
+	if x != nil {
+		return x.StartedAt
+	}
+	return ""
+}
+
+func (x *ReconciliationRun) GetMismatches() int32 {
+	if x != nil {
+		return x.Mismatches
+	}
+	return 0
+}
+
+func (x *ReconciliationRun) GetDetails() string {
+	if x != nil {
+		return x.Details
+	}
+	return ""
+}
+
+type GetReconciliationResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The latest run of each check, by check name.
+	Latest []*ReconciliationRun `protobuf:"bytes,1,rep,name=latest,proto3" json:"latest,omitempty"`
+	// Runs with mismatches, newest first.
+	Failures      []*ReconciliationRun `protobuf:"bytes,2,rep,name=failures,proto3" json:"failures,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetReconciliationResponse) Reset() {
+	*x = GetReconciliationResponse{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetReconciliationResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetReconciliationResponse) ProtoMessage() {}
+
+func (x *GetReconciliationResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetReconciliationResponse.ProtoReflect.Descriptor instead.
+func (*GetReconciliationResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *GetReconciliationResponse) GetLatest() []*ReconciliationRun {
+	if x != nil {
+		return x.Latest
+	}
+	return nil
+}
+
+func (x *GetReconciliationResponse) GetFailures() []*ReconciliationRun {
+	if x != nil {
+		return x.Failures
+	}
+	return nil
+}
+
 var File_exchange_ledger_v1_ledger_proto protoreflect.FileDescriptor
 
 const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
@@ -1919,7 +2090,21 @@ const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
 	"\x06reason\x18\x04 \x01(\tR\x06reason\x12\x14\n" +
 	"\x05actor\x18\x05 \x01(\tR\x05actor\"N\n" +
 	"\x15FundInsuranceResponse\x125\n" +
-	"\aposting\x18\x01 \x01(\v2\x1b.exchange.ledger.v1.PostingR\aposting2\xb0\t\n" +
+	"\aposting\x18\x01 \x01(\v2\x1b.exchange.ledger.v1.PostingR\aposting\"6\n" +
+	"\x18GetReconciliationRequest\x12\x1a\n" +
+	"\bfailures\x18\x01 \x01(\x05R\bfailures\"\x82\x01\n" +
+	"\x11ReconciliationRun\x12\x14\n" +
+	"\x05check\x18\x01 \x01(\tR\x05check\x12\x1d\n" +
+	"\n" +
+	"started_at\x18\x02 \x01(\tR\tstartedAt\x12\x1e\n" +
+	"\n" +
+	"mismatches\x18\x03 \x01(\x05R\n" +
+	"mismatches\x12\x18\n" +
+	"\adetails\x18\x04 \x01(\tR\adetails\"\x9d\x01\n" +
+	"\x19GetReconciliationResponse\x12=\n" +
+	"\x06latest\x18\x01 \x03(\v2%.exchange.ledger.v1.ReconciliationRunR\x06latest\x12A\n" +
+	"\bfailures\x18\x02 \x03(\v2%.exchange.ledger.v1.ReconciliationRunR\bfailures2\xa2\n" +
+	"\n" +
 	"\rLedgerService\x12O\n" +
 	"\x06Freeze\x12!.exchange.ledger.v1.FreezeRequest\x1a\".exchange.ledger.v1.FreezeResponse\x12U\n" +
 	"\bUnfreeze\x12#.exchange.ledger.v1.UnfreezeRequest\x1a$.exchange.ledger.v1.UnfreezeResponse\x12U\n" +
@@ -1932,7 +2117,8 @@ const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
 	"\x11GetSystemBalances\x12,.exchange.ledger.v1.GetSystemBalancesRequest\x1a-.exchange.ledger.v1.GetSystemBalancesResponse\x12O\n" +
 	"\x06Adjust\x12!.exchange.ledger.v1.AdjustRequest\x1a\".exchange.ledger.v1.AdjustResponse\x12d\n" +
 	"\rSettleFutures\x12(.exchange.ledger.v1.SettleFuturesRequest\x1a).exchange.ledger.v1.SettleFuturesResponse\x12d\n" +
-	"\rFundInsurance\x12(.exchange.ledger.v1.FundInsuranceRequest\x1a).exchange.ledger.v1.FundInsuranceResponseB\xd9\x01\n" +
+	"\rFundInsurance\x12(.exchange.ledger.v1.FundInsuranceRequest\x1a).exchange.ledger.v1.FundInsuranceResponse\x12p\n" +
+	"\x11GetReconciliation\x12,.exchange.ledger.v1.GetReconciliationRequest\x1a-.exchange.ledger.v1.GetReconciliationResponseB\xd9\x01\n" +
 	"\x16com.exchange.ledger.v1B\vLedgerProtoP\x01ZHgithub.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1;ledgerv1\xa2\x02\x03ELX\xaa\x02\x12Exchange.Ledger.V1\xca\x02\x12Exchange\\Ledger\\V1\xe2\x02\x1eExchange\\Ledger\\V1\\GPBMetadata\xea\x02\x14Exchange::Ledger::V1b\x06proto3"
 
 var (
@@ -1947,7 +2133,7 @@ func file_exchange_ledger_v1_ledger_proto_rawDescGZIP() []byte {
 	return file_exchange_ledger_v1_ledger_proto_rawDescData
 }
 
-var file_exchange_ledger_v1_ledger_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
+var file_exchange_ledger_v1_ledger_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
 var file_exchange_ledger_v1_ledger_proto_goTypes = []any{
 	(*FreezeRequest)(nil),             // 0: exchange.ledger.v1.FreezeRequest
 	(*UnfreezeRequest)(nil),           // 1: exchange.ledger.v1.UnfreezeRequest
@@ -1977,6 +2163,9 @@ var file_exchange_ledger_v1_ledger_proto_goTypes = []any{
 	(*SettleFuturesResponse)(nil),     // 25: exchange.ledger.v1.SettleFuturesResponse
 	(*FundInsuranceRequest)(nil),      // 26: exchange.ledger.v1.FundInsuranceRequest
 	(*FundInsuranceResponse)(nil),     // 27: exchange.ledger.v1.FundInsuranceResponse
+	(*GetReconciliationRequest)(nil),  // 28: exchange.ledger.v1.GetReconciliationRequest
+	(*ReconciliationRun)(nil),         // 29: exchange.ledger.v1.ReconciliationRun
+	(*GetReconciliationResponse)(nil), // 30: exchange.ledger.v1.GetReconciliationResponse
 }
 var file_exchange_ledger_v1_ledger_proto_depIdxs = []int32{
 	3,  // 0: exchange.ledger.v1.FreezeResponse.posting:type_name -> exchange.ledger.v1.Posting
@@ -1992,35 +2181,39 @@ var file_exchange_ledger_v1_ledger_proto_depIdxs = []int32{
 	22, // 10: exchange.ledger.v1.SettleFuturesRequest.moves:type_name -> exchange.ledger.v1.FuturesMove
 	24, // 11: exchange.ledger.v1.SettleFuturesResponse.outcomes:type_name -> exchange.ledger.v1.FuturesOutcome
 	3,  // 12: exchange.ledger.v1.FundInsuranceResponse.posting:type_name -> exchange.ledger.v1.Posting
-	0,  // 13: exchange.ledger.v1.LedgerService.Freeze:input_type -> exchange.ledger.v1.FreezeRequest
-	1,  // 14: exchange.ledger.v1.LedgerService.Unfreeze:input_type -> exchange.ledger.v1.UnfreezeRequest
-	2,  // 15: exchange.ledger.v1.LedgerService.Transfer:input_type -> exchange.ledger.v1.TransferRequest
-	8,  // 16: exchange.ledger.v1.LedgerService.GetBalances:input_type -> exchange.ledger.v1.GetBalancesRequest
-	10, // 17: exchange.ledger.v1.LedgerService.SettleWithdrawal:input_type -> exchange.ledger.v1.SettleWithdrawalRequest
-	12, // 18: exchange.ledger.v1.LedgerService.TransferInternal:input_type -> exchange.ledger.v1.TransferInternalRequest
-	14, // 19: exchange.ledger.v1.LedgerService.BookChainFee:input_type -> exchange.ledger.v1.BookChainFeeRequest
-	16, // 20: exchange.ledger.v1.LedgerService.FundSystemAccount:input_type -> exchange.ledger.v1.FundSystemAccountRequest
-	18, // 21: exchange.ledger.v1.LedgerService.GetSystemBalances:input_type -> exchange.ledger.v1.GetSystemBalancesRequest
-	20, // 22: exchange.ledger.v1.LedgerService.Adjust:input_type -> exchange.ledger.v1.AdjustRequest
-	23, // 23: exchange.ledger.v1.LedgerService.SettleFutures:input_type -> exchange.ledger.v1.SettleFuturesRequest
-	26, // 24: exchange.ledger.v1.LedgerService.FundInsurance:input_type -> exchange.ledger.v1.FundInsuranceRequest
-	4,  // 25: exchange.ledger.v1.LedgerService.Freeze:output_type -> exchange.ledger.v1.FreezeResponse
-	5,  // 26: exchange.ledger.v1.LedgerService.Unfreeze:output_type -> exchange.ledger.v1.UnfreezeResponse
-	6,  // 27: exchange.ledger.v1.LedgerService.Transfer:output_type -> exchange.ledger.v1.TransferResponse
-	9,  // 28: exchange.ledger.v1.LedgerService.GetBalances:output_type -> exchange.ledger.v1.GetBalancesResponse
-	11, // 29: exchange.ledger.v1.LedgerService.SettleWithdrawal:output_type -> exchange.ledger.v1.SettleWithdrawalResponse
-	13, // 30: exchange.ledger.v1.LedgerService.TransferInternal:output_type -> exchange.ledger.v1.TransferInternalResponse
-	15, // 31: exchange.ledger.v1.LedgerService.BookChainFee:output_type -> exchange.ledger.v1.BookChainFeeResponse
-	17, // 32: exchange.ledger.v1.LedgerService.FundSystemAccount:output_type -> exchange.ledger.v1.FundSystemAccountResponse
-	19, // 33: exchange.ledger.v1.LedgerService.GetSystemBalances:output_type -> exchange.ledger.v1.GetSystemBalancesResponse
-	21, // 34: exchange.ledger.v1.LedgerService.Adjust:output_type -> exchange.ledger.v1.AdjustResponse
-	25, // 35: exchange.ledger.v1.LedgerService.SettleFutures:output_type -> exchange.ledger.v1.SettleFuturesResponse
-	27, // 36: exchange.ledger.v1.LedgerService.FundInsurance:output_type -> exchange.ledger.v1.FundInsuranceResponse
-	25, // [25:37] is the sub-list for method output_type
-	13, // [13:25] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	29, // 13: exchange.ledger.v1.GetReconciliationResponse.latest:type_name -> exchange.ledger.v1.ReconciliationRun
+	29, // 14: exchange.ledger.v1.GetReconciliationResponse.failures:type_name -> exchange.ledger.v1.ReconciliationRun
+	0,  // 15: exchange.ledger.v1.LedgerService.Freeze:input_type -> exchange.ledger.v1.FreezeRequest
+	1,  // 16: exchange.ledger.v1.LedgerService.Unfreeze:input_type -> exchange.ledger.v1.UnfreezeRequest
+	2,  // 17: exchange.ledger.v1.LedgerService.Transfer:input_type -> exchange.ledger.v1.TransferRequest
+	8,  // 18: exchange.ledger.v1.LedgerService.GetBalances:input_type -> exchange.ledger.v1.GetBalancesRequest
+	10, // 19: exchange.ledger.v1.LedgerService.SettleWithdrawal:input_type -> exchange.ledger.v1.SettleWithdrawalRequest
+	12, // 20: exchange.ledger.v1.LedgerService.TransferInternal:input_type -> exchange.ledger.v1.TransferInternalRequest
+	14, // 21: exchange.ledger.v1.LedgerService.BookChainFee:input_type -> exchange.ledger.v1.BookChainFeeRequest
+	16, // 22: exchange.ledger.v1.LedgerService.FundSystemAccount:input_type -> exchange.ledger.v1.FundSystemAccountRequest
+	18, // 23: exchange.ledger.v1.LedgerService.GetSystemBalances:input_type -> exchange.ledger.v1.GetSystemBalancesRequest
+	20, // 24: exchange.ledger.v1.LedgerService.Adjust:input_type -> exchange.ledger.v1.AdjustRequest
+	23, // 25: exchange.ledger.v1.LedgerService.SettleFutures:input_type -> exchange.ledger.v1.SettleFuturesRequest
+	26, // 26: exchange.ledger.v1.LedgerService.FundInsurance:input_type -> exchange.ledger.v1.FundInsuranceRequest
+	28, // 27: exchange.ledger.v1.LedgerService.GetReconciliation:input_type -> exchange.ledger.v1.GetReconciliationRequest
+	4,  // 28: exchange.ledger.v1.LedgerService.Freeze:output_type -> exchange.ledger.v1.FreezeResponse
+	5,  // 29: exchange.ledger.v1.LedgerService.Unfreeze:output_type -> exchange.ledger.v1.UnfreezeResponse
+	6,  // 30: exchange.ledger.v1.LedgerService.Transfer:output_type -> exchange.ledger.v1.TransferResponse
+	9,  // 31: exchange.ledger.v1.LedgerService.GetBalances:output_type -> exchange.ledger.v1.GetBalancesResponse
+	11, // 32: exchange.ledger.v1.LedgerService.SettleWithdrawal:output_type -> exchange.ledger.v1.SettleWithdrawalResponse
+	13, // 33: exchange.ledger.v1.LedgerService.TransferInternal:output_type -> exchange.ledger.v1.TransferInternalResponse
+	15, // 34: exchange.ledger.v1.LedgerService.BookChainFee:output_type -> exchange.ledger.v1.BookChainFeeResponse
+	17, // 35: exchange.ledger.v1.LedgerService.FundSystemAccount:output_type -> exchange.ledger.v1.FundSystemAccountResponse
+	19, // 36: exchange.ledger.v1.LedgerService.GetSystemBalances:output_type -> exchange.ledger.v1.GetSystemBalancesResponse
+	21, // 37: exchange.ledger.v1.LedgerService.Adjust:output_type -> exchange.ledger.v1.AdjustResponse
+	25, // 38: exchange.ledger.v1.LedgerService.SettleFutures:output_type -> exchange.ledger.v1.SettleFuturesResponse
+	27, // 39: exchange.ledger.v1.LedgerService.FundInsurance:output_type -> exchange.ledger.v1.FundInsuranceResponse
+	30, // 40: exchange.ledger.v1.LedgerService.GetReconciliation:output_type -> exchange.ledger.v1.GetReconciliationResponse
+	28, // [28:41] is the sub-list for method output_type
+	15, // [15:28] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_exchange_ledger_v1_ledger_proto_init() }
@@ -2034,7 +2227,7 @@ func file_exchange_ledger_v1_ledger_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_ledger_v1_ledger_proto_rawDesc), len(file_exchange_ledger_v1_ledger_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   28,
+			NumMessages:   31,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

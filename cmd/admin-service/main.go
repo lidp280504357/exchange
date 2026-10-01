@@ -10,7 +10,9 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -65,6 +67,39 @@ type settings struct {
 	// PasswordHashConcurrency caps concurrent Argon2id hashes
 	// (PASSWORD_HASH_CONCURRENCY), 64 MiB each.
 	PasswordHashConcurrency int `koanf:"password_hash_concurrency"`
+	// HouseUser is HOUSE's account on the contracts (HOUSE_USER_ID, in
+	// apps.env); without it the HOUSE page shows no contracts.
+	HouseUser string `koanf:"house_user_id"`
+	// HealthTargets are the services whose /readyz the overview shows
+	// (HEALTH_TARGETS, "name=http://host:port,..."; the compose network's
+	// by default).
+	HealthTargets []string `koanf:"health_targets"`
+}
+
+// defaultHealthTargets are the services' ops endpoints on the compose
+// network (docs/runbook/server-deploy.md).
+var defaultHealthTargets = []string{
+	"api-gateway=http://api-gateway:9080", "auth-service=http://auth-service:9081", "user-service=http://user-service:9082",
+	"notification-service=http://notification-service:9083", "instrument-service=http://instrument-service:9084",
+	"ledger-service=http://ledger-service:9085", "risk-service=http://risk-service:9086",
+	"analytics-consumer=http://analytics-consumer:9087", "spot-trading-service=http://spot-trading-service:9088",
+	"matching-engine=http://matching-engine:9089", "market-data-service=http://market-data-service:9090",
+	"market-maker=http://market-maker:9091", "wallet-service=http://wallet-service:9092", "signer=http://signer:9093",
+	"admin-service=http://127.0.0.1:9094", "derivatives-service=http://derivatives-service:9095",
+	"derivatives-engine=http://derivatives-engine:9096",
+}
+
+// healthTargets parses "name=url" entries.
+func healthTargets(list []string) ([]backends.HealthTarget, error) {
+	out := make([]backends.HealthTarget, 0, len(list))
+	for _, e := range list {
+		name, url, ok := strings.Cut(strings.TrimSpace(e), "=")
+		if !ok || name == "" || !strings.HasPrefix(url, "http") {
+			return nil, fmt.Errorf("HEALTH_TARGETS: %q is not name=http://host:port", e)
+		}
+		out = append(out, backends.HealthTarget{Service: name, URL: strings.TrimRight(url, "/")})
+	}
+	return out, nil
 }
 
 func (s *settings) Validate() error {
@@ -84,9 +119,13 @@ func setup(ctx context.Context, a *app.App) error {
 		HTTPAddr: ":8093", Postgres: pg.DefaultConfig(), AuthAddr: "localhost:9181", UserAddr: "localhost:9182",
 		LedgerAddr: "localhost:9185", InstrumentAddr: "localhost:9184", WalletURL: "http://localhost:8092",
 		TradingURL: "http://localhost:8088", DerivativesURL: "http://localhost:8095", MarketDataURL: "http://localhost:8090",
-		PasswordHashConcurrency: 2,
+		PasswordHashConcurrency: 2, HealthTargets: defaultHealthTargets,
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
+		return err
+	}
+	targets, err := healthTargets(cfg.HealthTargets)
+	if err != nil {
 		return err
 	}
 	box, err := secretbox.New(cfg.SecretKey)
@@ -150,8 +189,14 @@ func setup(ctx context.Context, a *app.App) error {
 		Reports:     backends.Reports{Conn: ch},
 		Records:     backends.Records{Conn: ch},
 		Market:      backends.Market{REST: rest, Base: cfg.MarketDataURL},
-		Log:         a.Logger(),
-		Now:         time.Now,
+		HouseBook: application.HouseDeps{
+			User: cfg.HouseUser, Prices: backends.Market{REST: rest, Base: cfg.MarketDataURL}, Trades: backends.Reports{Conn: ch},
+			Positions: backends.Derivatives{REST: rest, Base: cfg.DerivativesURL},
+		},
+		Probe:      backends.Health{Client: &http.Client{Timeout: 2 * time.Second}, Targets: targets},
+		Reconciler: backends.Ledger{C: ledgerClient},
+		Log:        a.Logger(),
+		Now:        time.Now,
 	}
 	r := a.NewRouter()
 	(&httpapi.Handler{Svc: svc, Limiter: ratelimit.New(rdb, "admin:rl:"), Secure: a.Config().Env != config.EnvLocal}).Routes(r)

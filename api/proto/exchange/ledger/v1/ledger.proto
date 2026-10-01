@@ -56,6 +56,10 @@ service LedgerService {
   // ledger.manual_adjustment. Real funds come on chain
   // (FundSystemAccount).
   rpc FundInsurance(FundInsuranceRequest) returns (FundInsuranceResponse);
+  // GetReconciliation returns the latest run of every invariant check and
+  // the recent runs that found mismatches (the admin console's ledger
+  // page).
+  rpc GetReconciliation(GetReconciliationRequest) returns (GetReconciliationResponse);
 }
 
 message FreezeRequest {
@@ -267,4 +271,27 @@ message FundInsuranceRequest {
 
 message FundInsuranceResponse {
   Posting posting = 1;
+}
+
+message GetReconciliationRequest {
+  // How many recent runs with mismatches to return: 20 when 0, at most 100.
+  int32 failures = 1;
+}
+
+// ReconciliationRun is one check of one reconciliation.
+message ReconciliationRun {
+  // JOURNAL_BALANCED, ACCOUNT_MATCHES_LINES, ...
+  string check = 1;
+  // RFC 3339.
+  string started_at = 2;
+  int32 mismatches = 3;
+  // The first ten mismatches as JSON: [{"key": ..., "detail": ...}].
+  string details = 4;
+}
+
+message GetReconciliationResponse {
+  // The latest run of each check, by check name.
+  repeated ReconciliationRun latest = 1;
+  // Runs with mismatches, newest first.
+  repeated ReconciliationRun failures = 2;
 }

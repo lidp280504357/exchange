@@ -196,6 +196,12 @@ paths:
       tags: [users]
       parameters:
         - $ref: '#/components/parameters/UserFilter'
+        - name: order_id
+          in: query
+          description: One order (the console's search).
+          schema:
+            type: string
+            format: uuid
         - name: symbol
           in: query
           schema:
@@ -285,6 +291,11 @@ paths:
           schema:
             type: string
             enum: [DETECTED, CONFIRMING, CONFIRMED, CREDITED, ORPHANED, REJECTED]
+        - name: tx_hash
+          in: query
+          description: The deposits of one transaction, any letter case (the console's search).
+          schema:
+            type: string
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -1168,6 +1179,116 @@ paths:
                 $ref: '#/components/schemas/Approval'
         default:
           $ref: '#/components/responses/Error'
+  /admin/v1/house:
+    get:
+      operationId: getHouse
+      summary: HOUSE's book (virtual liquidity, ADR-0013 and ADR-0015)
+      description: |
+        HOUSE's spot inventory (the ledger's MARKET_MAKER accounts) valued
+        at the last prices, what it traded per pair (the trades read model)
+        and its result at those prices, and its perpetual contract
+        positions (the account HOUSE_USER_ID). Internal assets go below
+        zero when HOUSE sold them short. A part that cannot be read is left
+        empty and named in `partial`. Needs reports.read.
+      tags: [reports]
+      responses:
+        '200':
+          description: The book.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/House'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/health:
+    get:
+      operationId: getHealth
+      summary: Every service's readiness
+      description: Asks each service's ops endpoint (/readyz) within 2 seconds. Needs reports.read.
+      tags: [reports]
+      responses:
+        '200':
+          description: The services.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [services]
+                properties:
+                  services:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ServiceHealth'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/ledger/system-balances:
+    get:
+      operationId: getSystemBalances
+      summary: The platform's system accounts
+      description: |
+        FEE_REVENUE, INSURANCE_FUND, MARKET_MAKER (HOUSE), PNL_CLEARING,
+        ADJUSTMENT, DEPOSIT_PENDING and the rest, in one asset or all.
+        Needs reports.read.
+      tags: [ledger]
+      parameters:
+        - name: asset
+          in: query
+          description: One asset; every asset when empty.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The accounts by type and asset.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [balances]
+                properties:
+                  balances:
+                    type: array
+                    items:
+                      type: object
+                      required: [account_type, asset, available, frozen]
+                      properties:
+                        account_type:
+                          type: string
+                        asset:
+                          type: string
+                        available:
+                          $ref: '#/components/schemas/Decimal'
+                        frozen:
+                          $ref: '#/components/schemas/Decimal'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/ledger/reconciliation:
+    get:
+      operationId: getReconciliation
+      summary: The ledger's invariant checks
+      description: |
+        The latest run of every check of the ledger's reconciliation (hourly,
+        requirements §11.4) and the last 50 runs that found mismatches, with
+        the first ten mismatches of each. Needs reports.read.
+      tags: [ledger]
+      responses:
+        '200':
+          description: The runs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [latest, failures]
+                properties:
+                  latest:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ReconciliationRun'
+                  failures:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ReconciliationRun'
+        default:
+          $ref: '#/components/responses/Error'
 components:
   securitySchemes:
     session:
@@ -1241,6 +1362,127 @@ components:
     Error:
       $ref: '../openapi/common.yaml#/components/responses/Error'
   schemas:
+    House:
+      type: object
+      required: [assets, pairs, contracts, totals, partial]
+      properties:
+        assets:
+          type: array
+          items:
+            type: object
+            required: [asset, backed, balance, price, value_usdt]
+            properties:
+              asset:
+                type: string
+              backed:
+                type: boolean
+                description: The asset has deposits or withdrawals; HOUSE must hold it to sell it.
+              balance:
+                $ref: '#/components/schemas/Decimal'
+              price:
+                description: USDT per unit (the last price of its USDT pair); null without one.
+                oneOf:
+                  - $ref: '#/components/schemas/Decimal'
+                  - type: 'null'
+              value_usdt:
+                oneOf:
+                  - $ref: '#/components/schemas/Decimal'
+                  - type: 'null'
+        pairs:
+          type: array
+          items:
+            type: object
+            required: [symbol, trades, bought_base, sold_base, paid_quote, got_quote, last_at, net_base, net_quote, price, pnl_usdt]
+            properties:
+              symbol:
+                type: string
+              trades:
+                type: integer
+              bought_base:
+                $ref: '#/components/schemas/Decimal'
+              sold_base:
+                $ref: '#/components/schemas/Decimal'
+              paid_quote:
+                $ref: '#/components/schemas/Decimal'
+              got_quote:
+                $ref: '#/components/schemas/Decimal'
+              last_at:
+                type: string
+                format: date-time
+              net_base:
+                description: Bought less sold.
+                $ref: '#/components/schemas/Decimal'
+              net_quote:
+                description: Got less paid.
+                $ref: '#/components/schemas/Decimal'
+              price:
+                oneOf:
+                  - $ref: '#/components/schemas/Decimal'
+                  - type: 'null'
+              pnl_usdt:
+                description: net_base at the last price plus net_quote (USDT pairs); null without a price.
+                oneOf:
+                  - $ref: '#/components/schemas/Decimal'
+                  - type: 'null'
+        contracts:
+          type: array
+          description: HOUSE's open positions as derivatives-service renders a user's positions.
+          items:
+            type: object
+            additionalProperties: true
+        totals:
+          type: object
+          required: [inventory_usdt, backed_usdt, internal_usdt, pnl_usdt]
+          properties:
+            inventory_usdt:
+              $ref: '#/components/schemas/Decimal'
+            backed_usdt:
+              $ref: '#/components/schemas/Decimal'
+            internal_usdt:
+              description: Below zero while HOUSE is short on internal assets.
+              $ref: '#/components/schemas/Decimal'
+            pnl_usdt:
+              $ref: '#/components/schemas/Decimal'
+        partial:
+          type: array
+          items:
+            type: string
+            enum: [prices, assets, inventory, trades, contracts]
+    ServiceHealth:
+      type: object
+      required: [service, ready, latency_ms]
+      properties:
+        service:
+          type: string
+        ready:
+          type: boolean
+        latency_ms:
+          type: integer
+        error:
+          type: string
+    ReconciliationRun:
+      type: object
+      required: [check, started_at, mismatches, details]
+      properties:
+        check:
+          type: string
+          examples: [JOURNAL_BALANCED]
+        started_at:
+          type: string
+          format: date-time
+        mismatches:
+          type: integer
+        details:
+          type: array
+          description: The first ten mismatches.
+          items:
+            type: object
+            required: [key, detail]
+            properties:
+              key:
+                type: string
+              detail:
+                type: string
     NextCursor:
       type: [string, 'null']
       description: Pass as cursor for the next page; null on the last.

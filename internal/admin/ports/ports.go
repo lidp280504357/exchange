@@ -327,14 +327,15 @@ type Reports interface {
 
 // OrderQuery selects spot orders; empty fields match everything.
 type OrderQuery struct {
-	UserID string
-	Symbol string
-	Status string
-	Side   string
-	From   time.Time
-	To     time.Time
-	Cursor string
-	Limit  int
+	UserID  string
+	OrderID string
+	Symbol  string
+	Status  string
+	Side    string
+	From    time.Time
+	To      time.Time
+	Cursor  string
+	Limit   int
 }
 
 // Order is a spot order in its latest state (ClickHouse orders_current).
@@ -393,6 +394,7 @@ type DepositQuery struct {
 	Asset   string
 	Network string
 	Status  string
+	TxHash  string
 	Cursor  string
 	Limit   int
 }
@@ -456,4 +458,69 @@ type FeedStatus struct {
 // Market reads market-data-service's internal state.
 type Market interface {
 	Feed(ctx context.Context) (FeedStatus, error)
+}
+
+// Prices are the last prices of the listed symbols (market-data-service's
+// tickers), by symbol.
+type Prices map[string]decimal.Decimal
+
+// MarketPrices reads the last prices of every listed symbol.
+type MarketPrices interface {
+	Prices(ctx context.Context) (Prices, error)
+}
+
+// HousePair is HOUSE's spot trading on one pair in the trades read model
+// (ADR-0015): the base it bought and sold, the quote it paid and got.
+type HousePair struct {
+	Symbol     string    `json:"symbol"`
+	Trades     uint64    `json:"trades"`
+	BoughtBase string    `json:"bought_base"`
+	SoldBase   string    `json:"sold_base"`
+	PaidQuote  string    `json:"paid_quote"`
+	GotQuote   string    `json:"got_quote"`
+	LastAt     time.Time `json:"last_at"`
+}
+
+// HouseTrades sums HOUSE's spot trades per pair (ClickHouse).
+type HouseTrades interface {
+	HousePairs(ctx context.Context) ([]HousePair, error)
+}
+
+// HousePositions reads HOUSE's perpetual contract positions as
+// derivatives-service renders a user's positions.
+type HousePositions interface {
+	Positions(ctx context.Context, userID string) (json.RawMessage, error)
+}
+
+// ReconciliationRun is one invariant check of one ledger reconciliation.
+type ReconciliationRun struct {
+	Check      string          `json:"check"`
+	StartedAt  time.Time       `json:"started_at"`
+	Mismatches int             `json:"mismatches"`
+	Details    json.RawMessage `json:"details"`
+}
+
+// Reconciliation is the latest run of every check and the recent runs
+// that found mismatches.
+type Reconciliation struct {
+	Latest   []ReconciliationRun `json:"latest"`
+	Failures []ReconciliationRun `json:"failures"`
+}
+
+// Reconciler reads the ledger's reconciliation runs (ledger-service).
+type Reconciler interface {
+	Reconciliation(ctx context.Context, failures int) (Reconciliation, error)
+}
+
+// ServiceHealth is a service's readiness as its ops endpoint answers.
+type ServiceHealth struct {
+	Service   string `json:"service"`
+	Ready     bool   `json:"ready"`
+	LatencyMS int64  `json:"latency_ms"`
+	Error     string `json:"error,omitempty"`
+}
+
+// Health probes every service's readiness.
+type Health interface {
+	Check(ctx context.Context) []ServiceHealth
 }

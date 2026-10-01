@@ -156,6 +156,11 @@ func TestPostingsAreIdempotent(t *testing.T) {
 			t.Fatalf("%s: %+v", r.Check, r.Mismatches)
 		}
 	}
+	// The admin console reads the runs back: the latest of every check.
+	latest, _, err := store.ReconciliationRuns(ctx, 5)
+	if err != nil || len(latest) != len(results) || latest[0].Details == nil {
+		t.Fatalf("runs: %d of %d checks, %v", len(latest), len(results), err)
+	}
 }
 
 func TestTransfers(t *testing.T) {

@@ -732,10 +732,157 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/house": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * HOUSE's book (virtual liquidity, ADR-0013 and ADR-0015)
+         * @description HOUSE's spot inventory (the ledger's MARKET_MAKER accounts) valued
+         *     at the last prices, what it traded per pair (the trades read model)
+         *     and its result at those prices, and its perpetual contract
+         *     positions (the account HOUSE_USER_ID). Internal assets go below
+         *     zero when HOUSE sold them short. A part that cannot be read is left
+         *     empty and named in `partial`. Needs reports.read.
+         */
+        get: operations["getHouse"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every service's readiness
+         * @description Asks each service's ops endpoint (/readyz) within 2 seconds. Needs reports.read.
+         */
+        get: operations["getHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/ledger/system-balances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The platform's system accounts
+         * @description FEE_REVENUE, INSURANCE_FUND, MARKET_MAKER (HOUSE), PNL_CLEARING,
+         *     ADJUSTMENT, DEPOSIT_PENDING and the rest, in one asset or all.
+         *     Needs reports.read.
+         */
+        get: operations["getSystemBalances"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/ledger/reconciliation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The ledger's invariant checks
+         * @description The latest run of every check of the ledger's reconciliation (hourly,
+         *     requirements §11.4) and the last 50 runs that found mismatches, with
+         *     the first ten mismatches of each. Needs reports.read.
+         */
+        get: operations["getReconciliation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        House: {
+            assets: {
+                asset: string;
+                /** @description The asset has deposits or withdrawals; HOUSE must hold it to sell it. */
+                backed: boolean;
+                balance: components["schemas"]["Decimal"];
+                /** @description USDT per unit (the last price of its USDT pair); null without one. */
+                price: components["schemas"]["Decimal"] | null;
+                value_usdt: components["schemas"]["Decimal"] | null;
+            }[];
+            pairs: {
+                symbol: string;
+                trades: number;
+                bought_base: components["schemas"]["Decimal"];
+                sold_base: components["schemas"]["Decimal"];
+                paid_quote: components["schemas"]["Decimal"];
+                got_quote: components["schemas"]["Decimal"];
+                /** Format: date-time */
+                last_at: string;
+                /** @description Bought less sold. */
+                net_base: components["schemas"]["Decimal"];
+                /** @description Got less paid. */
+                net_quote: components["schemas"]["Decimal"];
+                price: components["schemas"]["Decimal"] | null;
+                /** @description net_base at the last price plus net_quote (USDT pairs); null without a price. */
+                pnl_usdt: components["schemas"]["Decimal"] | null;
+            }[];
+            /** @description HOUSE's open positions as derivatives-service renders a user's positions. */
+            contracts: {
+                [key: string]: unknown;
+            }[];
+            totals: {
+                inventory_usdt: components["schemas"]["Decimal"];
+                backed_usdt: components["schemas"]["Decimal"];
+                /** @description Below zero while HOUSE is short on internal assets. */
+                internal_usdt: components["schemas"]["Decimal"];
+                pnl_usdt: components["schemas"]["Decimal"];
+            };
+            partial: ("prices" | "assets" | "inventory" | "trades" | "contracts")[];
+        };
+        ServiceHealth: {
+            service: string;
+            ready: boolean;
+            latency_ms: number;
+            error?: string;
+        };
+        ReconciliationRun: {
+            /** @example JOURNAL_BALANCED */
+            check: string;
+            /** Format: date-time */
+            started_at: string;
+            mismatches: number;
+            /** @description The first ten mismatches. */
+            details: {
+                key: string;
+                detail: string;
+            }[];
+        };
         /** @description Pass as cursor for the next page; null on the last. */
         NextCursor: string | null;
         UserSummary: {
@@ -1405,6 +1552,8 @@ export interface operations {
         parameters: {
             query?: {
                 user_id?: components["parameters"]["UserFilter"];
+                /** @description One order (the console's search). */
+                order_id?: string;
                 symbol?: string;
                 status?: "NEW" | "OPEN" | "PARTIALLY_FILLED" | "FILLED" | "CANCELED" | "REJECTED";
                 side?: "BUY" | "SELL";
@@ -1478,6 +1627,8 @@ export interface operations {
                 asset?: string;
                 network?: string;
                 status?: "DETECTED" | "CONFIRMING" | "CONFIRMED" | "CREDITED" | "ORPHANED" | "REJECTED";
+                /** @description The deposits of one transaction, any letter case (the console's search). */
+                tx_hash?: string;
                 /** @description The previous page's next_cursor; omitted for the first page. */
                 cursor?: components["parameters"]["Cursor"];
                 limit?: components["parameters"]["Limit"];
@@ -2226,6 +2377,105 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Approval"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getHouse: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The book. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["House"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The services. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        services: components["schemas"]["ServiceHealth"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSystemBalances: {
+        parameters: {
+            query?: {
+                /** @description One asset; every asset when empty. */
+                asset?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The accounts by type and asset. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        balances: {
+                            account_type: string;
+                            asset: string;
+                            available: components["schemas"]["Decimal"];
+                            frozen: components["schemas"]["Decimal"];
+                        }[];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getReconciliation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The runs. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        latest: components["schemas"]["ReconciliationRun"][];
+                        failures: components["schemas"]["ReconciliationRun"][];
+                    };
                 };
             };
             default: components["responses"]["Error"];

@@ -31,6 +31,7 @@ const (
 	LedgerService_Adjust_FullMethodName            = "/exchange.ledger.v1.LedgerService/Adjust"
 	LedgerService_SettleFutures_FullMethodName     = "/exchange.ledger.v1.LedgerService/SettleFutures"
 	LedgerService_FundInsurance_FullMethodName     = "/exchange.ledger.v1.LedgerService/FundInsurance"
+	LedgerService_GetReconciliation_FullMethodName = "/exchange.ledger.v1.LedgerService/GetReconciliation"
 )
 
 // LedgerServiceClient is the client API for LedgerService service.
@@ -91,6 +92,10 @@ type LedgerServiceClient interface {
 	// ledger.manual_adjustment. Real funds come on chain
 	// (FundSystemAccount).
 	FundInsurance(ctx context.Context, in *FundInsuranceRequest, opts ...grpc.CallOption) (*FundInsuranceResponse, error)
+	// GetReconciliation returns the latest run of every invariant check and
+	// the recent runs that found mismatches (the admin console's ledger
+	// page).
+	GetReconciliation(ctx context.Context, in *GetReconciliationRequest, opts ...grpc.CallOption) (*GetReconciliationResponse, error)
 }
 
 type ledgerServiceClient struct {
@@ -221,6 +226,16 @@ func (c *ledgerServiceClient) FundInsurance(ctx context.Context, in *FundInsuran
 	return out, nil
 }
 
+func (c *ledgerServiceClient) GetReconciliation(ctx context.Context, in *GetReconciliationRequest, opts ...grpc.CallOption) (*GetReconciliationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetReconciliationResponse)
+	err := c.cc.Invoke(ctx, LedgerService_GetReconciliation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LedgerServiceServer is the server API for LedgerService service.
 // All implementations must embed UnimplementedLedgerServiceServer
 // for forward compatibility.
@@ -279,6 +294,10 @@ type LedgerServiceServer interface {
 	// ledger.manual_adjustment. Real funds come on chain
 	// (FundSystemAccount).
 	FundInsurance(context.Context, *FundInsuranceRequest) (*FundInsuranceResponse, error)
+	// GetReconciliation returns the latest run of every invariant check and
+	// the recent runs that found mismatches (the admin console's ledger
+	// page).
+	GetReconciliation(context.Context, *GetReconciliationRequest) (*GetReconciliationResponse, error)
 	mustEmbedUnimplementedLedgerServiceServer()
 }
 
@@ -324,6 +343,9 @@ func (UnimplementedLedgerServiceServer) SettleFutures(context.Context, *SettleFu
 }
 func (UnimplementedLedgerServiceServer) FundInsurance(context.Context, *FundInsuranceRequest) (*FundInsuranceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method FundInsurance not implemented")
+}
+func (UnimplementedLedgerServiceServer) GetReconciliation(context.Context, *GetReconciliationRequest) (*GetReconciliationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetReconciliation not implemented")
 }
 func (UnimplementedLedgerServiceServer) mustEmbedUnimplementedLedgerServiceServer() {}
 func (UnimplementedLedgerServiceServer) testEmbeddedByValue()                       {}
@@ -562,6 +584,24 @@ func _LedgerService_FundInsurance_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LedgerService_GetReconciliation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetReconciliationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LedgerServiceServer).GetReconciliation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LedgerService_GetReconciliation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LedgerServiceServer).GetReconciliation(ctx, req.(*GetReconciliationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LedgerService_ServiceDesc is the grpc.ServiceDesc for LedgerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -616,6 +656,10 @@ var LedgerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "FundInsurance",
 			Handler:    _LedgerService_FundInsurance_Handler,
+		},
+		{
+			MethodName: "GetReconciliation",
+			Handler:    _LedgerService_GetReconciliation_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
