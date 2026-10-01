@@ -9,6 +9,9 @@
 # the candles of pairs without a reference market keep being served. When
 # Binance is reachable again the books load a snapshot, the public book is
 # Binance's again and HOUSE offers it.
+# The contracts lose their mark prices too and go reduce-only; once the
+# prices are back the drill lifts the reduce-only states it caused, as the
+# operator would (contract-degrade.sh exercises that path itself).
 # Needs market.reference_feed, market.reference_depth and
 # market.house_liquidity on for BTC-USDT; about four minutes; the block is
 # always lifted.
@@ -19,6 +22,7 @@ source "$(dirname "$0")/../e2e/lib/common.sh"
 # shellcheck source=../e2e/lib/remote.sh
 source "$(dirname "$0")/../e2e/lib/remote.sh"
 trap 'unblock_egress market-data-service >/dev/null 2>&1 || true; cleanup_remote' EXIT
+STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 age() { metric market-data-service 9090 market_reference_age_seconds 'symbol="BTC-USDT"' | awk '{printf "%d", $1}'; }
 book_age() { metric market-data-service 9090 market_reference_book_age_seconds 'symbol="BTC-USDT"' | awk '{printf "%d", $1}'; }
@@ -61,4 +65,10 @@ unblock_egress market-data-service
 eventually 360 "the reference is fresh again" fresh
 eventually 60 "HOUSE offers BTC-USDT again" offering
 eventually 40 "Binance's book is shown again" quoted
+sleep 15 # the mark prices follow the reference
+degraded=$(exchangectl derivatives states | awk -v since="$STARTED" 'NR > 1 && $2 == "true" && $4 >= since {print $1}')
+for symbol in $degraded; do
+  remote "sudo docker compose $COMPOSE_FILES exec -T -e EXCHANGECTL_ACTOR=fault-reference-outage derivatives-service /app/exchangectl derivatives resume $symbol" >/dev/null
+  echo "ok   $symbol went reduce-only during the outage; lifted now that its mark price is back"
+done
 echo "reference feed outage survived"
