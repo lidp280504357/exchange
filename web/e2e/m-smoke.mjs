@@ -82,16 +82,21 @@ try {
   await waitPath("/markets");
   ok("sign-out asks first; a wrong password shows its message in place; the right one returns to ?next");
 
-  // 3. Markets: every market listed, the search narrows them.
-  const rows = () => page.$$eval('ul[aria-label="行情"] > li', (els) => els.map((el) => el.innerText));
-  await page.waitForFunction(() => document.querySelectorAll('ul[aria-label="行情"] > li').length >= 3, { timeout: 20000 });
+  // 3. Markets: every market listed, the search narrows them. From 50 rows
+  // the list is windowed: a role=list of role=listitem rows instead of a ul.
+  const ROWS = ':is(ul, [role=list])[aria-label="行情"] > :is(li, [role=listitem])';
+  const rows = () => page.$$eval(ROWS, (els) => els.map((el) => el.innerText));
+  await page.waitForFunction((sel) => document.querySelectorAll(sel).length >= 3, { timeout: 20000 }, ROWS);
   await typeInto('input[placeholder="搜索币种名称或代码"]', "ETH");
+  // The search also matches names in both languages ("Ethena", "Ethereum
+  // Classic"): a few rows, ETH's among them.
   await page.waitForFunction(
-    () => {
-      const list = [...document.querySelectorAll('ul[aria-label="行情"] > li')].map((el) => el.innerText);
-      return list.length > 0 && list.every((r) => r.includes("ETH"));
+    (sel) => {
+      const list = [...document.querySelectorAll(sel)].map((el) => el.innerText);
+      return list.length > 0 && list.length <= 8 && list.some((r) => r.includes("ETH"));
     },
     { timeout: 10000 },
+    ROWS,
   );
   ok(`the market list shows the markets and the search narrows them (${(await rows()).length} rows for ETH)`);
   await shot("2-markets");

@@ -20,7 +20,7 @@ check '[.tickers[].symbol] | index("BTC-USDT") != null' "every listed pair has a
 call GET /v1/market/btc-usdt/ticker ""
 expect 200 - "a ticker (symbols are case-insensitive)"
 check '.symbol == "BTC-USDT" and (.volume | type) == "string"' "amounts are strings"
-call GET /v1/market/DOGE-USDT/ticker ""
+call GET /v1/market/NOPE-USDT/ticker ""
 expect 404 COMMON_NOT_FOUND "a pair that does not exist"
 # The test environment shows the reference source's K-lines for BTC-USDT
 # (market.reference_kline): a day of hourly candles that traded.

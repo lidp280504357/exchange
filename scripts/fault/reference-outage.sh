@@ -6,8 +6,9 @@
 # usable and HOUSE takes its liquidity away (an empty reference book to
 # the engine); the public book falls back to the platform's own orders.
 # The streams notice the silence and reconnect with backoff; tickers and
-# candles keep being served. When Binance is reachable again the books
-# load a snapshot, the public book is Binance's again and HOUSE offers it.
+# the candles of pairs without a reference market keep being served. When
+# Binance is reachable again the books load a snapshot, the public book is
+# Binance's again and HOUSE offers it.
 # Needs market.reference_feed, market.reference_depth and
 # market.house_liquidity on for BTC-USDT; about four minutes; the block is
 # always lifted.
@@ -23,12 +24,14 @@ age() { metric market-data-service 9090 market_reference_age_seconds 'symbol="BT
 book_age() { metric market-data-service 9090 market_reference_book_age_seconds 'symbol="BTC-USDT"' | awk '{printf "%d", $1}'; }
 offering() { [[ $(metric market-maker 9091 market_house_active 'symbol="BTC-USDT"') == 1 ]]; }
 errors() { metric market-data-service 9090 market_reference_book_stream_failures_total | awk '{printf "%d", $1}'; }
-book() { # book: "BIDS ASKS" levels of BTC-USDT
-  call GET "/v1/market/BTC-USDT/depth?limit=5" ""
+book() { # book [LIMIT]: "BIDS ASKS" levels of BTC-USDT
+  call GET "/v1/market/BTC-USDT/depth?limit=${1:-5}" ""
   jq -r '"\(.bids | length) \(.asks | length)"' <<<"$BODY"
 }
 quoted() { read -r bids asks <<<"$(book)" && ((bids > 0 && asks > 0)); }
-empty() { [[ $(book) == "0 0" ]]; }
+# Binance's book has 50 levels a side; the platform's holds the users'
+# resting orders, a few at most.
+platform() { read -r bids asks <<<"$(book 50)" && ((bids + asks < 20)); }
 
 fresh() { local a b; a=$(age) && b=$(book_age) && ((a >= 0 && a < 5 && b >= 0 && b < 5)); }
 eventually 60 "the BTC-USDT reference price and book are fresh" fresh
@@ -42,11 +45,14 @@ stale() { (($(age) > 5)); }
 eventually 60 "the reference goes stale" stale
 not_offering() { ! offering; }
 eventually 60 "HOUSE takes its liquidity away" not_offering
-eventually 40 "the public book is the platform's own (empty)" empty
+eventually 40 "the public book falls back to the platform's own (users' orders only)" platform
 call GET /v1/market/tickers ""
 expect 200 - "the platform's tickers are still served"
-call GET "/v1/market/BTC-USDT/candles?interval=1m&limit=5" ""
-expect 200 - "and its candles"
+# BTC-USDT's chart history is Binance's (market.reference_kline) and
+# unavailable while it is silent; a pair without a reference market keeps
+# its own.
+call GET "/v1/market/ETH-BTC/candles?interval=1m&limit=5" ""
+expect 200 - "and the platform's own candles (ETH-BTC)"
 noticed() { (($(errors) > errors_before)); }
 eventually 180 "the silent stream is noticed and retried" noticed
 

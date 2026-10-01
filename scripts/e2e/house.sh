@@ -2,7 +2,8 @@
 # HOUSE's virtual liquidity end to end (design §8, ADR-0013, ADR-0015):
 # the top 50 USDT pairs trade and show Binance's book (1000SHIB in units
 # of 1000); a new user's market buy of SOL-USDT fills at once against
-# HOUSE at the shown ask, a market sell of what it got fills at the bid; a
+# HOUSE at the shown ask, a market sell of what it got fills at the bid, a
+# limit buy above the ask fills at once at the ask (not its limit); a
 # limit buy below the book rests until canceled; on BTC-USDT-PERP a market
 # buy opens a long against HOUSE and a reduce-only market sell closes it;
 # afterwards the ledger invariants hold (HOUSE's MARKET_MAKER accounts are
@@ -87,6 +88,18 @@ call GET "/v1/orders/$SELL/fills" "" "${AUTH[@]}"
 FILL=$(jq -r '.fills[0].price' <<<"$BODY")
 near "$FILL" "$BID" || fail "filled at $FILL, the bid was $BID"
 echo "ok   sold $QTY SOL at $FILL (the bid was $BID)"
+
+echo "== a limit buy above the ask fills at once, at HOUSE's price"
+shown "$SYMBOL"
+ASK=$(jq -r '.asks[0][0]' <<<"$BODY")
+HIGH=$(awk -v a="$ASK" 'BEGIN { printf "%.2f", int(a * 100.5) / 100 }')
+place "{\"symbol\":\"$SYMBOL\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$HIGH\",\"quantity\":\"0.1\"}"
+LIM=$ORDER
+eventually 40 "the limit buy at $HIGH is FILLED" status_is "$LIM" FILLED
+call GET "/v1/orders/$LIM/fills" "" "${AUTH[@]}"
+FILL=$(jq -r '.fills[0].price' <<<"$BODY")
+near "$FILL" "$ASK" && awk -v f="$FILL" -v h="$HIGH" 'BEGIN { exit !(f <= h) }' || fail "filled at $FILL, the ask was $ASK, the limit $HIGH"
+echo "ok   filled at $FILL, not at its limit $HIGH (the ask was $ASK)"
 
 echo "== a limit buy below the book rests until canceled"
 LOW=$(awk -v b="$BID" 'BEGIN { printf "%.2f", int(b * 95) / 100 }')
