@@ -27,6 +27,23 @@ lift_deploy_degradations() {
     done
 }
 
+# prune_build_cache 删除 6 小时内没用过的构建缓存（常用的 Go 模块与编译缓存会留下）。Docker 29 上
+# --keep-storage 什么也不删，不带 -a 也只删悬空记录：2026-10-01 缓存涨到 21 GB，一次构建写满磁盘。
+prune_build_cache() {
+  sudo docker builder prune -a -f --filter until=6h >/dev/null 2>&1 || echo "== 构建缓存清理失败（不影响部署）"
+}
+
+# ensure_disk_space 在构建前确认磁盘还有余量：磁盘写满时 Docker 会丢掉运行中容器的网络端点
+# （2026-10-01 redpanda 因此对其他服务不可达，各服务就绪检查失败，合约进入只减仓）。宁可不部署。
+ensure_disk_space() {
+  local free_gb
+  free_gb=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
+  if [ "$free_gb" -lt 8 ]; then
+    echo "== 磁盘只剩 ${free_gb} GB，停止部署：先清理（见 docs/runbook/server-deploy.md）再重试"
+    exit 1
+  fi
+}
+
 main() {
   DEPLOY_STARTED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   SRC="${SRC:-/opt/exchange/src}"
@@ -57,6 +74,8 @@ main() {
   COMPOSE=(-f "$INFRA/docker-compose.yml")
   if [ -f "$INFRA/docker-compose.apps.yml" ]; then
     COMPOSE+=(-f "$INFRA/docker-compose.apps.yml")
+    prune_build_cache
+    ensure_disk_space
     sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" build
     sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" up -d --wait --wait-timeout 300 instrument-service
     apply_instruments
@@ -65,8 +84,7 @@ main() {
     sudo docker compose "${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180
   fi
   sudo docker image prune -f >/dev/null
-  # 构建缓存每次部署都在长（2026-09-28 已近 9 GB，磁盘 82%）：保留 3 GB，够 Go 模块与编译缓存和最近的层
-  sudo docker builder prune -f --keep-storage 3gb >/dev/null 2>&1 || echo "== 构建缓存清理失败（不影响部署）"
+  prune_build_cache
   # nginx 配置是挂载进容器的文件，内容变了 compose 不会重启它：校验后热加载（校验失败则部署失败，旧配置继续服务）
   sudo docker compose "${COMPOSE[@]}" exec -T nginx sh -c 'nginx -t -q && nginx -s reload' && echo "== nginx 配置已重新加载"
   if [ -f "$INFRA/docker-compose.apps.yml" ]; then

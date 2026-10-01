@@ -43,9 +43,9 @@ bash /opt/exchange/src/deploy/server-update.sh 305e2a7  # 回滚/切换到指定
 1. 拉代码并重置到目标版本。
 2. 把 `deploy/compose/` 同步到 `/opt/exchange/infra`。不碰 `.env`、`apps.env`、证书、Cloudflare IP 列表、`nginx/html/`、`nginx/admin/`、`nginx/sites/`、`udun-mock/`（托管钱包模拟网关的状态，属主 uid 10001，脚本在这里创建）；`signer/`、`admin/` 两个密钥目录不在仓库里，也不受影响。
 3. 幂等核对 Redpanda topic。
-4. `docker compose build` 构建全部镜像。
+4. 删掉 6 小时内没用过的构建缓存，确认根分区至少还有 8 GB，不够就停止部署；然后 `docker compose build` 构建全部镜像。
 5. 先起 instrument-service，按 `deploy/instruments/test.json` 幂等同步参考数据（[instruments.md](instruments.md)），再 `up -d` 其余服务。其余服务启动时就要读交易对与参考行情映射，所以参考数据必须先到。
-6. 清理悬空镜像，把构建缓存压到 3 GB。
+6. 清理悬空镜像，再删一次 6 小时内没用过的构建缓存。
 7. 校验并热加载 nginx 配置。
 8. 在 node 容器里对 `web/` 装一次依赖，构建 PC 站、手机站、管理后台与 Storybook，发布到 `nginx/sites/*`（[web.md](web.md)）。
 
@@ -107,7 +107,24 @@ ssh exchange 'sudo docker exec exchange-infra-api-gateway-1 wget -qO- http://127
 
 - ClickHouse：`deploy/compose/clickhouse/config.d/small-server.xml` 去掉诊断用的系统日志表（trace_log、metric_log 等，保留 query_log、part_log），服务日志 warning 级、100 MB × 3，内存上限为物理内存 30%。改了这个文件，部署时 compose 会重建 ClickHouse 容器（约半分钟，analytics-consumer 自动重试）。
 - Redpanda：`topics.sh` 把 `segment_fallocation_step` 设为 4 MiB（默认 32 MiB，每个分区的活动段都会预分配）。
-- 构建缓存：每次部署后压到 3 GB。
+- 构建缓存：每次部署前后各删一次 6 小时内没用过的（`docker builder prune -a --filter until=6h`）。
+  - Docker 29 上原来的 `--keep-storage 3gb` 什么也不删：不带 `-a` 只删悬空记录，`--keep-storage`/`--max-used-space` 又不计入共享的部分。
+  - 2026-10-01 缓存因此涨到 21 GB，一次构建写满了磁盘。
+
+## 磁盘写满之后（2026-10-01 实际处理）
+
+磁盘写满会让 Docker 丢掉运行中容器的网络端点。当时丢的是 redpanda：它自己的健康检查在容器内，仍显示 healthy，但其他服务解析不到它。
+
+- 症状：
+  - 应用容器大多 unhealthy。
+  - 就绪检查（`/readyz`）报 `kafka: ... lookup redpanda on 127.0.0.11:53: server misbehaving`，PostgreSQL、Redis 正常。
+  - `docker inspect exchange-infra-redpanda-1` 的 `NetworkSettings.Networks.*.IPAddress` 为空。
+  - 合约因标记价中断进入只减仓（`MARK_PRICE_STALE`）。
+- 处理：
+  1. 释放空间：`sudo docker builder prune -a -f`，当时回收 14.8 GB。
+  2. 重启丢了端点的容器：`docker compose restart redpanda`。应用服务自动重连，outbox 里积压的事件随后发出。
+  3. 确认标记价恢复（`/v1/market/<合约>/mark-price` 的 `updated_at` 在走、`degraded` 为 false）后，解除只减仓：`exchangectl derivatives resume <合约>`，用 `EXCHANGECTL_ACTOR` 记下解除人。
+- 找出哪个容器不在网络上：比较 `docker network inspect exchange-infra_exchange` 列出的容器与 `docker ps` 的差集。
 
 ## 本机调试
 
