@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -54,7 +55,11 @@ type Processor struct {
 	// waits before a replacement with a higher fee.
 	MaxFee       *big.Int
 	ReplaceAfter time.Duration
+	// Elsewhere reports what the custodian holds of an asset now, which
+	// the ledger's figure includes (nil: nothing).
+	Elsewhere ports.Holdings
 
+	mu          *sync.Mutex // guards hot, read by the custodian's check too
 	hot         string
 	lastCheck   time.Time
 	lastBalance time.Time
@@ -88,6 +93,7 @@ func NewProcessor(p Processor, reg prometheus.Registerer) *Processor {
 		Name: "wallet_withdrawals_waiting", Help: "Approved withdrawals waiting for the hot wallet or for fees within the cap.", ConstLabels: labels,
 	})
 	reg.MustRegister(p.chainGauge, p.ledgerGauge, p.shortfallGauge, p.hotGauge, p.unbookedGauge, p.openSweeps, p.waiting)
+	p.mu = new(sync.Mutex)
 	if p.MaxFee == nil {
 		p.MaxFee = new(big.Int).Mul(big.NewInt(100), big.NewInt(1_000_000_000)) // 100 gwei
 	}
@@ -103,14 +109,24 @@ func NewProcessor(p Processor, reg prometheus.Registerer) *Processor {
 	return &p
 }
 
-// Round runs every step once; a failing step does not stop the others.
-func (p *Processor) Round(ctx context.Context) error {
+// hotWallet returns the hot wallet's address, asking the signer once.
+func (p *Processor) hotWallet(ctx context.Context) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.hot == "" {
 		hot, err := p.Signer.HotWallet(ctx)
 		if err != nil {
-			return fmt.Errorf("hot wallet: %w", err)
+			return "", fmt.Errorf("hot wallet: %w", err)
 		}
 		p.hot = hot
+	}
+	return p.hot, nil
+}
+
+// Round runs every step once; a failing step does not stop the others.
+func (p *Processor) Round(ctx context.Context) error {
+	if _, err := p.hotWallet(ctx); err != nil {
+		return err
 	}
 	native, err := p.native(ctx)
 	if err != nil {
@@ -358,25 +374,31 @@ func (p *Processor) rebroadcast(ctx context.Context, hash, raw string, since tim
 // bookFees asks the ledger to book the gas of mined transactions; with
 // GAS_SUPPLY short the fees wait (wallet_chain_fees_unbooked).
 func (p *Processor) bookFees(ctx context.Context) error {
-	fees, err := p.Store.Read().ChainFees().Unbooked(ctx, p.Network)
+	left, err := p.ops().bookFees(ctx)
+	p.unbookedGauge.Set(left.InexactFloat64())
+	return err
+}
+
+// bookFees books the network's unbooked fees and returns what is left.
+func (o netOps) bookFees(ctx context.Context) (decimal.Decimal, error) {
+	fees, err := o.Store.Read().ChainFees().Unbooked(ctx, o.Network)
 	if err != nil {
-		return err
+		return decimal.Zero, err
 	}
 	left := decimal.Zero
 	var failed error
 	for _, f := range fees {
-		journal, err := p.Ledger.BookChainFee(ctx, f.TxHash, f.Asset, f.Amount, f.TxHash)
+		journal, err := o.Ledger.BookChainFee(ctx, f.TxHash, f.Asset, f.Amount, f.TxHash)
 		if err != nil {
 			left = left.Add(f.Amount)
-			failed = fmt.Errorf("book the gas of %s: %w", f.TxHash, err)
+			failed = fmt.Errorf("book the fee of %s: %w", f.TxHash, err)
 			continue
 		}
-		if err := p.Store.Tx(ctx, func(r ports.Repos) error { return r.ChainFees().MarkBooked(ctx, f.TxHash, journal) }); err != nil {
-			return err
+		if err := o.Store.Tx(ctx, func(r ports.Repos) error { return r.ChainFees().MarkBooked(ctx, f.TxHash, journal) }); err != nil {
+			return left, err
 		}
 	}
-	p.unbookedGauge.Set(left.InexactFloat64())
-	return failed
+	return left, failed
 }
 
 // fund books the platform's transfer into the hot wallet (args tx, account
@@ -450,26 +472,51 @@ func (p *Processor) fund(ctx context.Context, c domain.Command, native domain.Ne
 	return fmt.Sprintf("booked %s %s to %s (journal %s)", amount, native.Asset, account, journal), true, nil
 }
 
-// check compares the wallets' holdings with the ledger (invariant 4).
-func (p *Processor) check(ctx context.Context, native domain.Network) (domain.ChainCheck, error) {
-	r := p.Store.Read()
-	addrs, err := r.Addresses().List(ctx, p.Network)
+// holdings sums what the hot wallet and the deposit addresses hold of
+// the network's coin.
+func (p *Processor) holdings(ctx context.Context) (decimal.Decimal, int, error) {
+	hot, err := p.hotWallet(ctx)
 	if err != nil {
-		return domain.ChainCheck{}, err
+		return decimal.Zero, 0, err
+	}
+	addrs, err := p.Store.Read().Addresses().List(ctx, p.Network)
+	if err != nil {
+		return decimal.Zero, 0, err
 	}
 	total := new(big.Int)
-	for _, a := range append([]string{p.hot}, addresses(addrs)...) {
+	for _, a := range append([]string{hot}, addresses(addrs)...) {
 		b, err := p.Chain.Balance(ctx, a)
 		if err != nil {
-			return domain.ChainCheck{}, err
+			return decimal.Zero, 0, err
 		}
 		total.Add(total, b)
+	}
+	return evm.FromWei(total, evm.NativeDecimals), len(addrs) + 1, nil
+}
+
+// Holdings reports what the platform's wallets hold of asset on the
+// network now, for the custodian's check.
+func (p *Processor) Holdings(ctx context.Context, asset string) (decimal.Decimal, error) {
+	native, err := p.native(ctx)
+	if err != nil || native.Asset != asset {
+		return decimal.Zero, err
+	}
+	held, _, err := p.holdings(ctx)
+	return held, err
+}
+
+// check compares the wallets' holdings with the ledger (invariant 4),
+// counting what the custodian holds of the asset.
+func (p *Processor) check(ctx context.Context, native domain.Network) (domain.ChainCheck, error) {
+	held, n, err := p.holdings(ctx)
+	if err != nil {
+		return domain.ChainCheck{}, err
 	}
 	sys, err := p.Ledger.SystemBalances(ctx, native.Asset)
 	if err != nil {
 		return domain.ChainCheck{}, err
 	}
-	fees, err := r.ChainFees().Unbooked(ctx, p.Network)
+	fees, err := p.Store.Read().ChainFees().Unbooked(ctx, p.Network)
 	if err != nil {
 		return domain.ChainCheck{}, err
 	}
@@ -477,8 +524,14 @@ func (p *Processor) check(ctx context.Context, native domain.Network) (domain.Ch
 	for _, f := range fees {
 		unbooked = unbooked.Add(f.Amount)
 	}
-	c := domain.NewChainCheck(p.Network, native.Asset, evm.FromWei(total, evm.NativeDecimals),
-		sys[accountDepositPending].Add(sys[accountWithdrawalPending]).Neg(), unbooked, len(addrs)+1, p.Now())
+	elsewhere := decimal.Zero
+	if p.Elsewhere != nil {
+		if elsewhere, err = p.Elsewhere(ctx, native.Asset); err != nil {
+			return domain.ChainCheck{}, fmt.Errorf("what the custodian holds of %s: %w", native.Asset, err)
+		}
+	}
+	c := domain.NewChainCheck(p.Network, native.Asset, held, sys[accountDepositPending].Add(sys[accountWithdrawalPending]).Neg(),
+		unbooked, n, p.Now()).Beside(elsewhere, decimal.Zero)
 	if err := p.Store.Tx(ctx, func(r ports.Repos) error { return r.Checks().Insert(ctx, c) }); err != nil {
 		return domain.ChainCheck{}, err
 	}
@@ -487,7 +540,8 @@ func (p *Processor) check(ctx context.Context, native domain.Network) (domain.Ch
 	p.shortfallGauge.WithLabelValues(c.Asset).Set(c.Shortfall.InexactFloat64())
 	if c.Shortfall.IsPositive() {
 		p.Log.ErrorContext(ctx, "the platform wallets hold less than the ledger expects", "network", p.Network, "asset", c.Asset,
-			"held", c.Chain.String(), "expected", c.Ledger.String(), "unbooked", c.Unbooked.String(), "shortfall", c.Shortfall.String())
+			"held", c.Chain.String(), "elsewhere", c.Elsewhere.String(), "expected", c.Ledger.String(), "unbooked", c.Unbooked.String(),
+			"shortfall", c.Shortfall.String())
 	}
 	return c, nil
 }

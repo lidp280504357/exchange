@@ -28,6 +28,7 @@ func ToProtoNetwork(n domain.Network) *instrumentv1.Network {
 		WithdrawFee: n.WithdrawFee.String(), MemoRequired: n.MemoRequired, DepositEnabled: n.DepositEnabled,
 		WithdrawEnabled: n.WithdrawEnabled, Version: n.Version, DisplayName: n.DisplayName, AddressFormat: n.AddressFormat,
 		EtaMinutes: n.ETAMinutes, ExplorerTxUrl: n.ExplorerTxURL, ExplorerAddressUrl: n.ExplorerAddressURL,
+		Provider: n.Provider, ProviderCoin: n.ProviderCoin,
 	}
 }
 

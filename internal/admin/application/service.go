@@ -287,7 +287,7 @@ func (s *Service) Withdrawals(ctx context.Context, p Principal, q ports.Withdraw
 	if err := p.require(domain.PermWithdrawalsRead); err != nil {
 		return nil, err
 	}
-	q.Status, q.Asset, q.Order = strings.ToUpper(q.Status), strings.ToUpper(q.Asset), strings.ToLower(q.Order)
+	q.Status, q.Asset, q.Network, q.Order = strings.ToUpper(q.Status), strings.ToUpper(q.Asset), strings.ToUpper(q.Network), strings.ToLower(q.Order)
 	if q.Order != "" && q.Order != "asc" && q.Order != "desc" {
 		return nil, apperr.Invalid("order must be asc or desc")
 	}
@@ -318,6 +318,49 @@ func (s *Service) ReviewWithdrawal(ctx context.Context, p Principal, id string, 
 		return nil, err
 	}
 	return s.Wallet.Review(ctx, id, approve, p.Admin.Email, reason)
+}
+
+// Custody describes the custody wallet (ADR-0011).
+func (s *Service) Custody(ctx context.Context, p Principal) ([]byte, error) {
+	if err := p.require(domain.PermWithdrawalsRead); err != nil {
+		return nil, err
+	}
+	return s.Wallet.Custody(ctx)
+}
+
+// CustodyCallbacks returns a page of the custodian's callbacks.
+func (s *Service) CustodyCallbacks(ctx context.Context, p Principal, q ports.CallbackQuery) ([]byte, error) {
+	if err := p.require(domain.PermWithdrawalsRead); err != nil {
+		return nil, err
+	}
+	q.Result, q.Kind, q.Limit = strings.ToUpper(q.Result), strings.ToUpper(q.Kind), pageLimit(q.Limit)
+	return s.Wallet.Callbacks(ctx, q)
+}
+
+// CustodyCallback returns one callback as received.
+func (s *Service) CustodyCallback(ctx context.Context, p Principal, id string) ([]byte, error) {
+	if err := p.require(domain.PermWithdrawalsRead); err != nil {
+		return nil, err
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		return nil, apperr.NotFound("no such callback")
+	}
+	return s.Wallet.Callback(ctx, id)
+}
+
+// ReplayCallback applies a stored callback again; the wallet audits it
+// with this administrator as the actor.
+func (s *Service) ReplayCallback(ctx context.Context, p Principal, id, reason string) ([]byte, error) {
+	if err := p.require(domain.PermWithdrawalsEdit); err != nil {
+		return nil, err
+	}
+	if err := needReason(reason); err != nil {
+		return nil, err
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		return nil, apperr.NotFound("no such callback")
+	}
+	return s.Wallet.Replay(ctx, id, p.Admin.Email, reason)
 }
 
 // Instruments lists assets and pairs.

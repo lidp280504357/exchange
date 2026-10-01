@@ -34,7 +34,8 @@ type Withdrawal struct {
 	// Kept by the platform; zero for internal transfers.
 	Fee string `protobuf:"bytes,7,opt,name=fee,proto3" json:"fee,omitempty"`
 	// REQUESTED, PENDING_REVIEW, APPROVED, SIGNING, BROADCAST, CONFIRMING,
-	// CONFIRMED, INTERNAL_TRANSFER, REJECTED, CANCELED or FAILED.
+	// SUBMITTED (with the custodian), CONFIRMED, INTERNAL_TRANSFER,
+	// REJECTED, CANCELED or FAILED.
 	Status string `protobuf:"bytes,8,opt,name=status,proto3" json:"status,omitempty"`
 	// Set when the address is another user's deposit address: the
 	// withdrawal completes in the ledger (INTERNAL_TRANSFER).
@@ -44,8 +45,11 @@ type Withdrawal struct {
 	RequiredConfirmations uint32 `protobuf:"varint,12,opt,name=required_confirmations,json=requiredConfirmations,proto3" json:"required_confirmations,omitempty"`
 	// Why it needs review (NEW_ACCOUNT, NEW_DEVICE, SECURITY_CHANGE,
 	// NEW_ADDRESS, LARGE_AMOUNT, DAILY_SHARE) or was rejected.
-	RiskReasons   []string `protobuf:"bytes,13,rep,name=risk_reasons,json=riskReasons,proto3" json:"risk_reasons,omitempty"`
-	RejectReason  string   `protobuf:"bytes,14,opt,name=reject_reason,json=rejectReason,proto3" json:"reject_reason,omitempty"`
+	RiskReasons  []string `protobuf:"bytes,13,rep,name=risk_reasons,json=riskReasons,proto3" json:"risk_reasons,omitempty"`
+	RejectReason string   `protobuf:"bytes,14,opt,name=reject_reason,json=rejectReason,proto3" json:"reject_reason,omitempty"`
+	// The custodian that sends it (ADR-0011: UDUN); empty when the
+	// platform's own wallets do.
+	Provider      string `protobuf:"bytes,15,opt,name=provider,proto3" json:"provider,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -174,6 +178,13 @@ func (x *Withdrawal) GetRiskReasons() []string {
 func (x *Withdrawal) GetRejectReason() string {
 	if x != nil {
 		return x.RejectReason
+	}
+	return ""
+}
+
+func (x *Withdrawal) GetProvider() string {
+	if x != nil {
+		return x.Provider
 	}
 	return ""
 }
@@ -531,8 +542,9 @@ func (x *WithdrawalConfirmed) GetWithdrawal() *Withdrawal {
 	return nil
 }
 
-// WithdrawalFailed: the transaction failed on chain; it needs manual
-// handling.
+// WithdrawalFailed: the transaction failed on chain, or the custodian
+// refused or failed it; it needs manual handling. Funds that never left
+// the platform are released.
 type WithdrawalFailed struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Withdrawal    *Withdrawal            `protobuf:"bytes,1,opt,name=withdrawal,proto3" json:"withdrawal,omitempty"`
@@ -577,11 +589,58 @@ func (x *WithdrawalFailed) GetWithdrawal() *Withdrawal {
 	return nil
 }
 
+// WithdrawalSubmitted: handed to the custodian (ADR-0011), which sends it
+// after its own checks; the ledger settles it once the custodian reports
+// success (WithdrawalConfirmed).
+type WithdrawalSubmitted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Withdrawal    *Withdrawal            `protobuf:"bytes,1,opt,name=withdrawal,proto3" json:"withdrawal,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WithdrawalSubmitted) Reset() {
+	*x = WithdrawalSubmitted{}
+	mi := &file_exchange_wallet_v1_withdrawals_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WithdrawalSubmitted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WithdrawalSubmitted) ProtoMessage() {}
+
+func (x *WithdrawalSubmitted) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_wallet_v1_withdrawals_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WithdrawalSubmitted.ProtoReflect.Descriptor instead.
+func (*WithdrawalSubmitted) Descriptor() ([]byte, []int) {
+	return file_exchange_wallet_v1_withdrawals_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *WithdrawalSubmitted) GetWithdrawal() *Withdrawal {
+	if x != nil {
+		return x.Withdrawal
+	}
+	return nil
+}
+
 var File_exchange_wallet_v1_withdrawals_proto protoreflect.FileDescriptor
 
 const file_exchange_wallet_v1_withdrawals_proto_rawDesc = "" +
 	"\n" +
-	"$exchange/wallet/v1/withdrawals.proto\x12\x12exchange.wallet.v1\"\xb0\x03\n" +
+	"$exchange/wallet/v1/withdrawals.proto\x12\x12exchange.wallet.v1\"\xcc\x03\n" +
 	"\n" +
 	"Withdrawal\x12#\n" +
 	"\rwithdrawal_id\x18\x01 \x01(\tR\fwithdrawalId\x12\x17\n" +
@@ -598,7 +657,8 @@ const file_exchange_wallet_v1_withdrawals_proto_rawDesc = "" +
 	"\rconfirmations\x18\v \x01(\rR\rconfirmations\x125\n" +
 	"\x16required_confirmations\x18\f \x01(\rR\x15requiredConfirmations\x12!\n" +
 	"\frisk_reasons\x18\r \x03(\tR\vriskReasons\x12#\n" +
-	"\rreject_reason\x18\x0e \x01(\tR\frejectReason\"U\n" +
+	"\rreject_reason\x18\x0e \x01(\tR\frejectReason\x12\x1a\n" +
+	"\bprovider\x18\x0f \x01(\tR\bprovider\"U\n" +
 	"\x13WithdrawalRequested\x12>\n" +
 	"\n" +
 	"withdrawal\x18\x01 \x01(\v2\x1e.exchange.wallet.v1.WithdrawalR\n" +
@@ -635,6 +695,10 @@ const file_exchange_wallet_v1_withdrawals_proto_rawDesc = "" +
 	"\x10WithdrawalFailed\x12>\n" +
 	"\n" +
 	"withdrawal\x18\x01 \x01(\v2\x1e.exchange.wallet.v1.WithdrawalR\n" +
+	"withdrawal\"U\n" +
+	"\x13WithdrawalSubmitted\x12>\n" +
+	"\n" +
+	"withdrawal\x18\x01 \x01(\v2\x1e.exchange.wallet.v1.WithdrawalR\n" +
 	"withdrawalB\xde\x01\n" +
 	"\x16com.exchange.wallet.v1B\x10WithdrawalsProtoP\x01ZHgithub.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1;walletv1\xa2\x02\x03EWX\xaa\x02\x12Exchange.Wallet.V1\xca\x02\x12Exchange\\Wallet\\V1\xe2\x02\x1eExchange\\Wallet\\V1\\GPBMetadata\xea\x02\x14Exchange::Wallet::V1b\x06proto3"
 
@@ -650,7 +714,7 @@ func file_exchange_wallet_v1_withdrawals_proto_rawDescGZIP() []byte {
 	return file_exchange_wallet_v1_withdrawals_proto_rawDescData
 }
 
-var file_exchange_wallet_v1_withdrawals_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_exchange_wallet_v1_withdrawals_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_exchange_wallet_v1_withdrawals_proto_goTypes = []any{
 	(*Withdrawal)(nil),           // 0: exchange.wallet.v1.Withdrawal
 	(*WithdrawalRequested)(nil),  // 1: exchange.wallet.v1.WithdrawalRequested
@@ -661,6 +725,7 @@ var file_exchange_wallet_v1_withdrawals_proto_goTypes = []any{
 	(*WithdrawalBroadcast)(nil),  // 6: exchange.wallet.v1.WithdrawalBroadcast
 	(*WithdrawalConfirmed)(nil),  // 7: exchange.wallet.v1.WithdrawalConfirmed
 	(*WithdrawalFailed)(nil),     // 8: exchange.wallet.v1.WithdrawalFailed
+	(*WithdrawalSubmitted)(nil),  // 9: exchange.wallet.v1.WithdrawalSubmitted
 }
 var file_exchange_wallet_v1_withdrawals_proto_depIdxs = []int32{
 	0, // 0: exchange.wallet.v1.WithdrawalRequested.withdrawal:type_name -> exchange.wallet.v1.Withdrawal
@@ -671,11 +736,12 @@ var file_exchange_wallet_v1_withdrawals_proto_depIdxs = []int32{
 	0, // 5: exchange.wallet.v1.WithdrawalBroadcast.withdrawal:type_name -> exchange.wallet.v1.Withdrawal
 	0, // 6: exchange.wallet.v1.WithdrawalConfirmed.withdrawal:type_name -> exchange.wallet.v1.Withdrawal
 	0, // 7: exchange.wallet.v1.WithdrawalFailed.withdrawal:type_name -> exchange.wallet.v1.Withdrawal
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	0, // 8: exchange.wallet.v1.WithdrawalSubmitted.withdrawal:type_name -> exchange.wallet.v1.Withdrawal
+	9, // [9:9] is the sub-list for method output_type
+	9, // [9:9] is the sub-list for method input_type
+	9, // [9:9] is the sub-list for extension type_name
+	9, // [9:9] is the sub-list for extension extendee
+	0, // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_exchange_wallet_v1_withdrawals_proto_init() }
@@ -689,7 +755,7 @@ func file_exchange_wallet_v1_withdrawals_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_wallet_v1_withdrawals_proto_rawDesc), len(file_exchange_wallet_v1_withdrawals_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

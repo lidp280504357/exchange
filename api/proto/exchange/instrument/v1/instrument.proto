@@ -71,6 +71,13 @@ message Network {
   // the network has none.
   string explorer_tx_url = 16;
   string explorer_address_url = 17;
+  // Who moves the network's funds (ADR-0011): empty for the platform's
+  // own wallets (the signer and the block scanner), UDUN for the custody
+  // wallet.
+  string provider = 18;
+  // The custodian's code of the coin, "mainCoinType:coinType" for UDUN
+  // (e.g. 195:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t); empty without one.
+  string provider_coin = 19;
 }
 
 message TradingPair {

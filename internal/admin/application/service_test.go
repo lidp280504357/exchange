@@ -243,6 +243,23 @@ func (w *fakeWallet) List(context.Context, ports.WithdrawalQuery) (json.RawMessa
 	return json.RawMessage(`{"items":[]}`), nil
 }
 
+func (w *fakeWallet) Custody(context.Context) (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}
+
+func (w *fakeWallet) Callbacks(context.Context, ports.CallbackQuery) (json.RawMessage, error) {
+	return json.RawMessage(`{"items":[]}`), nil
+}
+
+func (w *fakeWallet) Callback(context.Context, string) (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}
+
+func (w *fakeWallet) Replay(_ context.Context, _, actor, _ string) (json.RawMessage, error) {
+	w.reviewer = actor
+	return json.RawMessage(`{}`), nil
+}
+
 func (w *fakeWallet) Review(_ context.Context, _ string, _ bool, reviewer, _ string) (json.RawMessage, error) {
 	w.reviewer = reviewer
 	return json.RawMessage(`{}`), nil

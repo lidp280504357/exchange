@@ -37,6 +37,9 @@ message Deposit {
   // CHAIN, or INTERNAL for another user's withdrawal to this address,
   // completed in the ledger.
   string kind = 17;
+  // The custodian's ID of the deposit ("UDUN:<tradeId>"); empty for one
+  // the platform's scanner found (ADR-0011).
+  string provider_tx_id = 18;
 }
 
 // DepositAddressAssigned: a user got a deposit address on a network.
@@ -44,8 +47,12 @@ message DepositAddressAssigned {
   string user_id = 1;
   string network = 2;
   string address = 3;
-  // Address index under the deposit account (m/44'/60'/0'/0/index).
+  // Address index under the deposit account (m/44'/60'/0'/0/index); 0
+  // for a custodian's address.
   uint32 derivation_index = 4;
+  // The custodian that created the address (ADR-0011); empty for the
+  // platform's own.
+  string provider = 5;
 }
 
 // DepositDetected: the transfer is on chain, not yet confirmed.

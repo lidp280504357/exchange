@@ -4,6 +4,7 @@ package httpapi
 
 import (
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -18,13 +19,16 @@ import (
 	"github.com/lidp280504357/exchange/internal/wallet/ports"
 )
 
-// Handler serves deposits and withdrawals; every /v1 route needs the
-// identity the gateway attaches. /internal routes serve the admin console
-// on the internal network (the gateway does not route them).
+// Handler serves deposits and withdrawals; every /v1 route but the
+// custodian's callback needs the identity the gateway attaches. /internal
+// routes serve the admin console on the internal network (the gateway
+// does not route them).
 type Handler struct {
 	Svc *application.Service
-	// Network is the network the internal review lists cover.
-	Network string
+	// CallbackFrom lists the addresses the custodian calls back from
+	// (UDUN_CALLBACK_ALLOWED_IPS); empty lets any address try, the
+	// signature being the check.
+	CallbackFrom []netip.Prefix
 }
 
 // Routes mounts the endpoints on r.
@@ -51,23 +55,30 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Get("/v1/wallet/withdrawals/{id}", h.getWithdrawal)
 		r.Delete("/v1/wallet/withdrawals/{id}", h.cancelWithdrawal)
 	})
+	r.Post("/v1/wallet/callbacks/{provider}", h.callback)
 	r.Get("/internal/wallet/withdrawals", h.adminWithdrawals)
 	r.Post("/internal/wallet/withdrawals/{id}/review", h.adminReview)
+	r.Get("/internal/wallet/custody", h.adminCustody)
+	r.Get("/internal/wallet/custody/callbacks", h.adminCallbacks)
+	r.Get("/internal/wallet/custody/callbacks/{id}", h.adminCallback)
+	r.Post("/internal/wallet/custody/callbacks/{id}/replay", h.adminReplay)
 }
 
 // AdminWithdrawalJSON is a withdrawal as reviewers see it.
 type AdminWithdrawalJSON struct {
 	WithdrawalJSON
-	UserID    string   `json:"user_id"`
-	RiskScore int      `json:"risk_score"`
-	ValueUSDT string   `json:"value_usdt"`
-	Approvals []string `json:"approvals"`
+	UserID         string   `json:"user_id"`
+	RiskScore      int      `json:"risk_score"`
+	ValueUSDT      string   `json:"value_usdt"`
+	Approvals      []string `json:"approvals"`
+	ProviderStatus string   `json:"provider_status"`
 }
 
-// adminWithdrawals pages through the network's withdrawals for the admin
-// console: status (default PENDING_REVIEW; ALL for every status), user_id,
-// asset, cursor (the previous page's next_cursor), limit (at most 200,
-// default 50) and order (asc, the default for the review queue, or desc).
+// adminWithdrawals pages through the withdrawals for the admin console:
+// status (default PENDING_REVIEW; ALL for every status), user_id, asset,
+// network (every one when empty), cursor (the previous page's
+// next_cursor), limit (at most 200, default 50) and order (asc, the
+// default for the review queue, or desc).
 func (h *Handler) adminWithdrawals(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	status := strings.ToUpper(q.Get("status"))
@@ -89,7 +100,7 @@ func (h *Handler) adminWithdrawals(w http.ResponseWriter, r *http.Request) {
 		Status: status, UserID: q.Get("user_id"), Asset: strings.ToUpper(q.Get("asset")), After: q.Get("cursor"),
 		Oldest: order == "asc", Limit: limit + 1,
 	}
-	list, err := h.Svc.Store.Read().Withdrawals().Page(r.Context(), h.Network, f)
+	list, err := h.Svc.Store.Read().Withdrawals().Page(r.Context(), strings.ToUpper(q.Get("network")), f)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -107,7 +118,7 @@ func (h *Handler) adminWithdrawals(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, AdminWithdrawalJSON{
 			WithdrawalJSON: WithdrawalJSONOf(wd), UserID: wd.UserID, RiskScore: wd.RiskScore, ValueUSDT: wd.ValueUSDT.String(),
-			Approvals: approvals,
+			Approvals: approvals, ProviderStatus: wd.ProviderStatus,
 		})
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "next_cursor": next})
@@ -379,6 +390,7 @@ type WithdrawalJSON struct {
 	Amount                string   `json:"amount"`
 	Fee                   string   `json:"fee"`
 	Internal              bool     `json:"internal"`
+	Custody               bool     `json:"custody"`
 	Status                string   `json:"status"`
 	RiskReasons           []string `json:"risk_reasons"`
 	ApprovalsRequired     int      `json:"approvals_required"`
@@ -388,6 +400,7 @@ type WithdrawalJSON struct {
 	RequiredConfirmations uint32   `json:"required_confirmations"`
 	CreatedAt             string   `json:"created_at"`
 	ApprovedAt            *string  `json:"approved_at"`
+	SubmittedAt           *string  `json:"submitted_at"`
 	BroadcastAt           *string  `json:"broadcast_at"`
 	ConfirmedAt           *string  `json:"confirmed_at"`
 }
@@ -409,10 +422,11 @@ func WithdrawalJSONOf(wd domain.Withdrawal) WithdrawalJSON {
 	}
 	return WithdrawalJSON{
 		ID: wd.ID, Asset: wd.Asset, Network: wd.Network, Address: wd.Address, Amount: wd.Amount.String(), Fee: wd.Fee.String(),
-		Internal: wd.InternalUserID != "", Status: wd.Status, RiskReasons: reasons, ApprovalsRequired: wd.ApprovalsRequired,
-		RejectReason: optional(wd.RejectReason), TxHash: optional(wd.TxHash), Confirmations: wd.Confirmations,
+		Internal: wd.InternalUserID != "", Custody: wd.Custody(), Status: wd.Status, RiskReasons: reasons,
+		ApprovalsRequired: wd.ApprovalsRequired,
+		RejectReason:      optional(wd.RejectReason), TxHash: optional(wd.TxHash), Confirmations: wd.Confirmations,
 		RequiredConfirmations: wd.Required, CreatedAt: httpx.FormatTime(wd.CreatedAt), ApprovedAt: timeOrNil(wd.ApprovedAt),
-		BroadcastAt: timeOrNil(wd.BroadcastAt), ConfirmedAt: timeOrNil(wd.ConfirmedAt),
+		SubmittedAt: timeOrNil(wd.SubmittedAt), BroadcastAt: timeOrNil(wd.BroadcastAt), ConfirmedAt: timeOrNil(wd.ConfirmedAt),
 	}
 }
 

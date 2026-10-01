@@ -95,23 +95,38 @@ type Funding struct {
 
 // ChainCheck compares what the platform's wallets hold with what the
 // ledger expects them to hold, −(DEPOSIT_PENDING + WITHDRAWAL_PENDING)
-// (invariant 4). Gas already paid but not yet booked explains part of a
-// difference; the rest is a shortfall when positive.
+// (invariant 4). The ledger's figure covers every holder of the asset: a
+// check is made by one holder (Network: a network of the platform's own
+// wallets, or the custodian, ProviderUdun) and counts what the others
+// held at the time (Elsewhere). Gas already paid but not yet booked, and
+// withdrawals with the custodian that it may have sent already
+// (InFlight), explain part of a difference; the rest is a shortfall when
+// positive.
 type ChainCheck struct {
 	Network   string
 	Asset     string
 	Chain     decimal.Decimal
 	Ledger    decimal.Decimal
 	Unbooked  decimal.Decimal
+	Elsewhere decimal.Decimal
+	InFlight  decimal.Decimal
 	Shortfall decimal.Decimal
 	Addresses int
 	CheckedAt time.Time
 }
 
-// NewChainCheck computes the shortfall.
+// NewChainCheck computes the shortfall of a holder that is the asset's
+// only one.
 func NewChainCheck(network, asset string, chain, ledger, unbooked decimal.Decimal, addresses int, at time.Time) ChainCheck {
 	return ChainCheck{
-		Network: network, Asset: asset, Chain: chain, Ledger: ledger, Unbooked: unbooked,
-		Shortfall: ledger.Sub(chain).Sub(unbooked), Addresses: addresses, CheckedAt: at,
-	}
+		Network: network, Asset: asset, Chain: chain, Ledger: ledger, Unbooked: unbooked, Addresses: addresses, CheckedAt: at,
+	}.Beside(decimal.Zero, decimal.Zero)
+}
+
+// Beside counts what the asset's other holders hold and what is in
+// flight, and computes the shortfall again.
+func (c ChainCheck) Beside(elsewhere, inFlight decimal.Decimal) ChainCheck {
+	c.Elsewhere, c.InFlight = elsewhere, inFlight
+	c.Shortfall = c.Ledger.Sub(c.Chain).Sub(c.Elsewhere).Sub(c.InFlight).Sub(c.Unbooked)
+	return c
 }

@@ -49,6 +49,7 @@ tags:
   - name: audit
   - name: reports
   - name: derivatives
+  - name: custody
 paths:
   /admin/v1/login-options:
     get:
@@ -430,13 +431,18 @@ paths:
       parameters:
         - name: status
           in: query
-          description: A withdrawal status (appendix B), e.g. APPROVED, BROADCAST, CONFIRMED, REJECTED, FAILED; ALL for every status.
+          description: A withdrawal status (appendix B), e.g. APPROVED, SUBMITTED, BROADCAST, CONFIRMED, REJECTED, FAILED; ALL for every status.
           schema:
             type: string
             default: PENDING_REVIEW
         - $ref: '#/components/parameters/UserFilter'
         - name: asset
           in: query
+          schema:
+            type: string
+        - name: network
+          in: query
+          description: One network, e.g. TRON or ETH-SEPOLIA; every network when empty.
           schema:
             type: string
         - name: order
@@ -1289,6 +1295,118 @@ paths:
                       $ref: '#/components/schemas/ReconciliationRun'
         default:
           $ref: '#/components/responses/Error'
+  /admin/v1/custody:
+    get:
+      operationId: getCustody
+      summary: The custody wallet (ADR-0011)
+      description: |
+        The custodian's coins with their balances as it reports them now,
+        matched to the networks that use them; the latest chain check of
+        each holder and asset (the custodian and the platform's own
+        wallets: held, expected by the ledger, held elsewhere, on its way
+        out, unbooked fees, shortfall); the withdrawals with the custodian;
+        and how many callbacks need a person. Without a configured
+        custodian `configured` is false; an unreachable one leaves `coins`
+        empty and says why in `error`. Needs withdrawals.read.
+      tags: [custody]
+      responses:
+        '200':
+          description: The custody wallet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustodyOverview'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/custody/callbacks:
+    get:
+      operationId: listCustodyCallbacks
+      summary: The custodian's callbacks, newest first
+      description: Every callback as received, with its signature check and outcome. Needs withdrawals.read.
+      tags: [custody]
+      parameters:
+        - name: result
+          in: query
+          description: One outcome; every outcome when empty.
+          schema:
+            type: string
+            enum: [RECEIVED, APPLIED, IGNORED, UNMATCHED, REJECTED, FAILED]
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [DEPOSIT, WITHDRAWAL]
+        - name: q
+          in: query
+          description: A trade ID, withdrawal ID (businessId), transaction hash or address.
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of callbacks.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CustodyCallback'
+                  next_cursor:
+                    $ref: '#/components/schemas/NextCursor'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/custody/callbacks/{id}:
+    get:
+      operationId: getCustodyCallback
+      summary: One callback with the request as received
+      description: Needs withdrawals.read.
+      tags: [custody]
+      parameters:
+        - $ref: '#/components/parameters/CallbackID'
+      responses:
+        '200':
+          description: The callback.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustodyCallback'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/custody/callbacks/{id}/replay:
+    post:
+      operationId: replayCustodyCallback
+      summary: Apply a stored callback again
+      description: |
+        For a verified callback that FAILED, stayed UNMATCHED or RECEIVED:
+        its signature is checked again (not its age) and it is applied as
+        if it had just arrived, which is harmless for one already applied.
+        Audited. Needs withdrawals.review.
+      tags: [custody]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/CallbackID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: The callback after the replay.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustodyCallback'
+        default:
+          $ref: '#/components/responses/Error'
 components:
   securitySchemes:
     session:
@@ -1301,6 +1419,13 @@ components:
       name: X-Admin-CSRF
       description: The value "1" on every request other than GET; a cross-site form cannot set it.
   parameters:
+    CallbackID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     Cursor:
       name: cursor
       in: query
@@ -1836,8 +1961,20 @@ components:
           $ref: '#/components/schemas/Decimal'
         internal:
           type: boolean
+        custody:
+          type: boolean
+          description: The custodian sends it (ADR-0011).
         status:
           type: string
+        provider_status:
+          type: string
+          description: |
+            In lists only: the custodian's last word on it (SUBMITTED until
+            it acknowledges, ACCEPTED, REVIEW, APPROVED, REJECTED, SUCCESS,
+            FAILED); empty when the platform sends it.
+        submitted_at:
+          type: [string, 'null']
+          format: date-time
         risk_score:
           type: integer
           description: In lists only.
@@ -2352,3 +2489,152 @@ components:
           $ref: '#/components/schemas/Decimal'
         positions:
           type: integer
+    CustodyOverview:
+      type: object
+      required: [provider, configured, error, coins, checks, submitted, callbacks]
+      properties:
+        provider:
+          type: string
+          examples: [UDUN]
+        configured:
+          type: boolean
+        error:
+          type: [string, 'null']
+          description: Why the custodian's coins could not be read.
+        coins:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustodyCoin'
+        checks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChainCheck'
+        submitted:
+          type: object
+          required: [count, amount_usdt, oldest_at]
+          description: Withdrawals with the custodian.
+          properties:
+            count:
+              type: integer
+            amount_usdt:
+              $ref: '#/components/schemas/Decimal'
+            oldest_at:
+              type: [string, 'null']
+              format: date-time
+        callbacks:
+          type: object
+          required: [attention, last_at]
+          properties:
+            attention:
+              type: integer
+              description: Verified callbacks that FAILED or stayed UNMATCHED.
+            last_at:
+              type: [string, 'null']
+              format: date-time
+    CustodyCoin:
+      type: object
+      required: [coin, symbol, decimals, balance, token, networks]
+      properties:
+        coin:
+          type: string
+          description: The custodian's code, mainCoinType:coinType.
+          examples: ['195:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t']
+        symbol:
+          type: string
+        decimals:
+          type: integer
+        balance:
+          type: [string, 'null']
+          description: What the custodian holds, as it reports it.
+        token:
+          type: boolean
+        networks:
+          type: array
+          description: The asset and network rows that use the coin; empty for a coin no network uses.
+          items:
+            type: object
+            required: [asset, network]
+            properties:
+              asset:
+                type: string
+              network:
+                type: string
+    ChainCheck:
+      type: object
+      required: [holder, asset, held, expected, elsewhere, in_flight, unbooked, shortfall, addresses, checked_at]
+      description: |
+        Invariant 4 for one holder of an asset: shortfall = expected −
+        held − elsewhere − in_flight − unbooked; above zero the holders
+        miss funds.
+      properties:
+        holder:
+          type: string
+          description: UDUN for the custodian, the network (e.g. ETH-SEPOLIA) for the platform's own wallets.
+        asset:
+          type: string
+        held:
+          $ref: '#/components/schemas/Decimal'
+        expected:
+          $ref: '#/components/schemas/Decimal'
+        elsewhere:
+          $ref: '#/components/schemas/Decimal'
+        in_flight:
+          $ref: '#/components/schemas/Decimal'
+        unbooked:
+          $ref: '#/components/schemas/Decimal'
+        shortfall:
+          $ref: '#/components/schemas/Decimal'
+        addresses:
+          type: integer
+        checked_at:
+          type: string
+          format: date-time
+    CustodyCallback:
+      type: object
+      required: [id, provider, trade_id, kind, status, business_id, coin, address, amount, tx_hash, signature_ok, result, detail,
+        attempts, received_at, processed_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        provider:
+          type: string
+        trade_id:
+          type: string
+        kind:
+          type: string
+          enum: ['', DEPOSIT, WITHDRAWAL]
+        status:
+          type: [integer, 'null']
+          description: The custodian's status (0 review, 1 approved, 2 refused, 3 success, 4 failed).
+        business_id:
+          type: string
+          description: The withdrawal ID of a withdrawal.
+        coin:
+          type: string
+        address:
+          type: string
+        amount:
+          oneOf:
+            - $ref: '#/components/schemas/Decimal'
+            - type: 'null'
+        tx_hash:
+          type: string
+        signature_ok:
+          type: boolean
+        result:
+          type: string
+          enum: [RECEIVED, APPLIED, IGNORED, UNMATCHED, REJECTED, FAILED]
+        detail:
+          type: string
+        attempts:
+          type: integer
+        received_at:
+          type: string
+          format: date-time
+        processed_at:
+          type: [string, 'null']
+          format: date-time
+        raw:
+          type: string
+          description: The request as received (one callback only).

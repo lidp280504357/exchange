@@ -56,17 +56,48 @@ type addresses repos
 
 func (r addresses) Get(ctx context.Context, userID, network string) (*domain.Address, error) {
 	var a domain.Address
-	var idx int32
-	err := r.q.QueryRow(ctx, `SELECT user_id, network, derivation_index, address, created_at FROM deposit_addresses
-		WHERE user_id = $1 AND network = $2`, userID, network).Scan(&a.UserID, &a.Network, &idx, &a.Address, &a.CreatedAt)
+	var idx *int32
+	err := r.q.QueryRow(ctx, `SELECT user_id, network, derivation_index, provider, address, created_at FROM deposit_addresses
+		WHERE user_id = $1 AND network = $2`, userID, network).Scan(&a.UserID, &a.Network, &idx, &a.Provider, &a.Address, &a.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get deposit address: %w", err)
 	}
-	a.Index = uint32(idx) //nolint:gosec // the column is non-negative
+	if idx != nil {
+		a.Index = uint32(*idx) //nolint:gosec // the column is non-negative
+	}
 	return &a, nil
+}
+
+func (r addresses) Lock(ctx context.Context, userID, network string) error {
+	if _, err := r.q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('deposit-address:' || $1 || ':' || $2, 0))`,
+		userID, network); err != nil {
+		return fmt.Errorf("lock deposit address: %w", err)
+	}
+	return nil
+}
+
+func (r addresses) Owner(ctx context.Context, network, address string) (string, error) {
+	var user string
+	err := r.q.QueryRow(ctx, `SELECT user_id FROM deposit_addresses WHERE network = $1 AND lower(address) = lower($2)`,
+		network, address).Scan(&user)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("find deposit address: %w", err)
+	}
+	return user, nil
+}
+
+func (r addresses) Count(ctx context.Context, networks []string) (int, error) {
+	var n int
+	if err := r.q.QueryRow(ctx, `SELECT count(*) FROM deposit_addresses WHERE network = ANY($1)`, networks).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count deposit addresses: %w", err)
+	}
+	return n, nil
 }
 
 func (r addresses) NextIndex(ctx context.Context, network string) (uint32, error) {
@@ -81,8 +112,13 @@ func (r addresses) NextIndex(ctx context.Context, network string) (uint32, error
 }
 
 func (r addresses) Insert(ctx context.Context, a domain.Address) error {
-	_, err := r.q.Exec(ctx, `INSERT INTO deposit_addresses (user_id, network, derivation_index, address, created_at)
-		VALUES ($1, $2, $3, $4, $5)`, a.UserID, a.Network, int64(a.Index), a.Address, a.CreatedAt)
+	var idx *int64
+	if a.Provider == "" {
+		v := int64(a.Index)
+		idx = &v
+	}
+	_, err := r.q.Exec(ctx, `INSERT INTO deposit_addresses (user_id, network, derivation_index, provider, address, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)`, a.UserID, a.Network, idx, a.Provider, a.Address, a.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("insert deposit address: %w", err)
 	}
@@ -110,21 +146,21 @@ type deposits repos
 
 const depositColumns = `id, user_id, asset, network, address, contract, tx_hash, log_index, block_number, block_hash, amount,
 	raw_amount, confirmations, required_confirmations, unclaimed, reason, status, journal_id, credit_requested_at, detected_at,
-	confirmed_at, credited_at, kind`
+	confirmed_at, credited_at, kind, provider_tx_id`
 
 func scanDeposit(row pgx.Row) (domain.Deposit, error) {
 	var d domain.Deposit
-	var asset, contract, reason, journal *string
+	var asset, contract, reason, journal, providerTx *string
 	var block int64
 	var conf, required int32
 	var requested, confirmed, credited *time.Time
 	err := row.Scan(&d.ID, &d.UserID, &asset, &d.Network, &d.Address, &contract, &d.TxHash, &d.LogIndex, &block, &d.BlockHash,
 		&d.Amount, &d.RawAmount, &conf, &required, &d.Unclaimed, &reason, &d.Status, &journal, &requested, &d.DetectedAt,
-		&confirmed, &credited, &d.Kind)
+		&confirmed, &credited, &d.Kind, &providerTx)
 	if err != nil {
 		return domain.Deposit{}, err
 	}
-	d.Asset, d.Contract, d.Reason, d.JournalID = str(asset), str(contract), str(reason), str(journal)
+	d.Asset, d.Contract, d.Reason, d.JournalID, d.ProviderTxID = str(asset), str(contract), str(reason), str(journal), str(providerTx)
 	d.BlockNumber, d.Confirmations, d.Required = uint64(block), uint32(conf), uint32(required) //nolint:gosec // non-negative columns
 	d.CreditRequested, d.ConfirmedAt, d.CreditedAt = at(requested), at(confirmed), at(credited)
 	return d, nil
@@ -167,10 +203,11 @@ func stamp(t time.Time) *time.Time {
 
 func (r deposits) Insert(ctx context.Context, d domain.Deposit) error {
 	_, err := r.q.Exec(ctx, `INSERT INTO deposits (`+depositColumns+`)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)`,
 		d.ID, d.UserID, text(d.Asset), d.Network, d.Address, text(d.Contract), d.TxHash, d.LogIndex, int64(d.BlockNumber), //nolint:gosec // block heights fit
 		d.BlockHash, d.Amount, d.RawAmount, int64(d.Confirmations), int64(d.Required), d.Unclaimed, text(d.Reason), d.Status,
-		text(d.JournalID), stamp(d.CreditRequested), d.DetectedAt, stamp(d.ConfirmedAt), stamp(d.CreditedAt), kind(d.Kind))
+		text(d.JournalID), stamp(d.CreditRequested), d.DetectedAt, stamp(d.ConfirmedAt), stamp(d.CreditedAt), kind(d.Kind),
+		text(d.ProviderTxID))
 	if err != nil {
 		return fmt.Errorf("insert deposit: %w", err)
 	}
@@ -201,8 +238,12 @@ func (r deposits) one(ctx context.Context, sql string, args ...any) (*domain.Dep
 }
 
 func (r deposits) Find(ctx context.Context, network, txHash string, logIndex int64) (*domain.Deposit, error) {
-	return r.one(ctx, `SELECT `+depositColumns+` FROM deposits WHERE network = $1 AND tx_hash = $2 AND log_index = $3`,
-		network, strings.ToLower(txHash), logIndex)
+	return r.one(ctx, `SELECT `+depositColumns+` FROM deposits WHERE network = $1 AND tx_hash = $2 AND log_index = $3
+		AND provider_tx_id IS NULL`, network, strings.ToLower(txHash), logIndex)
+}
+
+func (r deposits) ByProviderTx(ctx context.Context, providerTxID string) (*domain.Deposit, error) {
+	return r.one(ctx, `SELECT `+depositColumns+` FROM deposits WHERE provider_tx_id = $1`, providerTxID)
 }
 
 func (r deposits) GetForUpdate(ctx context.Context, id string) (*domain.Deposit, error) {

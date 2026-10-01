@@ -162,13 +162,13 @@ type networks repos
 
 const networkColumns = `asset_code, network, chain, contract_address, confirmations, min_deposit, min_withdraw, withdraw_fee,
 	memo_required, deposit_enabled, withdraw_enabled, display_name, address_format, eta_minutes, explorer_tx_url,
-	explorer_address_url, version`
+	explorer_address_url, provider, provider_coin, version`
 
 func scanNetwork(row pgx.Row) (domain.Network, error) {
 	var n domain.Network
 	err := row.Scan(&n.AssetCode, &n.Network, &n.Chain, &n.ContractAddress, &n.Confirmations, &n.MinDeposit, &n.MinWithdraw,
 		&n.WithdrawFee, &n.MemoRequired, &n.DepositEnabled, &n.WithdrawEnabled, &n.DisplayName, &n.AddressFormat, &n.ETAMinutes,
-		&n.ExplorerTxURL, &n.ExplorerAddressURL, &n.Version)
+		&n.ExplorerTxURL, &n.ExplorerAddressURL, &n.Provider, &n.ProviderCoin, &n.Version)
 	return n, err
 }
 
@@ -187,18 +187,19 @@ func (r networks) Save(ctx context.Context, n domain.Network) (domain.Network, e
 	}
 	return scanNetwork(r.q.QueryRow(ctx, `INSERT INTO networks (asset_code, network, chain, contract_address, confirmations,
 		min_deposit, min_withdraw, withdraw_fee, memo_required, deposit_enabled, withdraw_enabled, display_name, address_format,
-		eta_minutes, explorer_tx_url, explorer_address_url)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		eta_minutes, explorer_tx_url, explorer_address_url, provider, provider_coin)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 		ON CONFLICT (asset_code, network) DO UPDATE SET chain = EXCLUDED.chain, contract_address = EXCLUDED.contract_address,
 		confirmations = EXCLUDED.confirmations, min_deposit = EXCLUDED.min_deposit, min_withdraw = EXCLUDED.min_withdraw,
 		withdraw_fee = EXCLUDED.withdraw_fee, memo_required = EXCLUDED.memo_required,
 		deposit_enabled = EXCLUDED.deposit_enabled, withdraw_enabled = EXCLUDED.withdraw_enabled,
 		display_name = EXCLUDED.display_name, address_format = EXCLUDED.address_format, eta_minutes = EXCLUDED.eta_minutes,
 		explorer_tx_url = EXCLUDED.explorer_tx_url, explorer_address_url = EXCLUDED.explorer_address_url,
+		provider = EXCLUDED.provider, provider_coin = EXCLUDED.provider_coin,
 		version = networks.version + 1, updated_at = now()
 		RETURNING `+networkColumns, n.AssetCode, n.Network, n.Chain, n.ContractAddress, n.Confirmations, n.MinDeposit,
 		n.MinWithdraw, n.WithdrawFee, n.MemoRequired, n.DepositEnabled, n.WithdrawEnabled, n.DisplayName, n.AddressFormat,
-		n.ETAMinutes, n.ExplorerTxURL, n.ExplorerAddressURL))
+		n.ETAMinutes, n.ExplorerTxURL, n.ExplorerAddressURL, n.Provider, n.ProviderCoin))
 }
 
 type pairs repos

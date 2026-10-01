@@ -87,7 +87,8 @@ commands:
   wallet sweep [--min X]      sweep deposit addresses holding at least X (default the minimum deposit) to the hot wallet
   wallet fund --tx HASH [--account GAS_SUPPLY]
                               book the platform's transfer into the hot wallet to a system account
-  wallet reconcile            check the wallets against the ledger now (invariant 4); wallet checks shows the latest
+  wallet reconcile [--network UDUN]
+                              check the wallets (or the custodian) against the ledger now (invariant 4); wallet checks shows the latest
   wallet commands [--limit N] queued wallet operations and their results
   wallet withdrawals [--status S|ALL]
                               withdrawals in a status (default PENDING_REVIEW)

@@ -109,6 +109,8 @@ func Mount(r chi.Router, g Guards, up Upstreams) {
 		private.Handle("/v1/notifications", up.Notification)
 		private.Handle("/v1/notifications/*", up.Notification)
 		if up.Wallet != nil {
+			// The custodian's callbacks carry their own signature (ADR-0011).
+			r.Post("/v1/wallet/callbacks/{provider}", up.Wallet.ServeHTTP)
 			private.Handle("/v1/wallet/*", up.Wallet)
 		}
 		if up.Trading != nil {

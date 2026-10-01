@@ -2,7 +2,9 @@
 // deposit account's xpub, follows the chain for deposits, which the
 // ledger credits once confirmed, and sends withdrawals signed by the
 // signer (requirements §5.10, §11.5, §11.6). It never holds a private key
-// (ADR-0003).
+// (ADR-0003). Networks served by the custody wallet (ADR-0011) go through
+// the custodian's gateway instead: it creates the addresses, reports
+// deposits and sends withdrawals, and calls back.
 package main
 
 import (
@@ -10,7 +12,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -26,8 +30,10 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/evm"
 	"github.com/lidp280504357/exchange/internal/platform/kafka"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
+	"github.com/lidp280504357/exchange/internal/platform/udun"
 	"github.com/lidp280504357/exchange/internal/wallet/adapters/auth"
 	"github.com/lidp280504357/exchange/internal/wallet/adapters/chain"
+	"github.com/lidp280504357/exchange/internal/wallet/adapters/custody"
 	"github.com/lidp280504357/exchange/internal/wallet/adapters/instruments"
 	"github.com/lidp280504357/exchange/internal/wallet/adapters/ledger"
 	"github.com/lidp280504357/exchange/internal/wallet/adapters/postgres"
@@ -35,6 +41,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/wallet/adapters/signer"
 	"github.com/lidp280504357/exchange/internal/wallet/adapters/users"
 	"github.com/lidp280504357/exchange/internal/wallet/application"
+	"github.com/lidp280504357/exchange/internal/wallet/ports"
 	"github.com/lidp280504357/exchange/internal/wallet/transport/consumer"
 	"github.com/lidp280504357/exchange/internal/wallet/transport/httpapi"
 	"github.com/lidp280504357/exchange/migrations"
@@ -82,6 +89,47 @@ type settings struct {
 	// (WALLET_SCAN_START).
 	ScanInterval time.Duration `koanf:"wallet_scan_interval"`
 	ScanStart    uint64        `koanf:"wallet_scan_start"`
+	// The Udun custody wallet (ADR-0011): its gateway (UDUN_GATEWAY_URL),
+	// the merchant (UDUN_MERCHANT_ID), the signing key of requests and
+	// callbacks (UDUN_API_KEY, never logged), the wallet to use
+	// (UDUN_WALLET_ID, empty for the default), where it calls back
+	// (UDUN_CALLBACK_URL) and from which addresses
+	// (UDUN_CALLBACK_ALLOWED_IPS, comma-separated IPs or CIDRs; empty for
+	// any). Without a gateway its networks take no deposits or
+	// withdrawals. CustodyInterval paces the custodian's processor
+	// (WALLET_CUSTODY_INTERVAL).
+	UdunURL         string        `koanf:"udun_gateway_url"`
+	UdunMerchant    string        `koanf:"udun_merchant_id"`
+	UdunKey         string        `koanf:"udun_api_key"`
+	UdunWallet      string        `koanf:"udun_wallet_id"`
+	UdunCallback    string        `koanf:"udun_callback_url"`
+	UdunCallbackIPs string        `koanf:"udun_callback_allowed_ips"`
+	CustodyInterval time.Duration `koanf:"wallet_custody_interval"`
+}
+
+// callbackFrom parses UDUN_CALLBACK_ALLOWED_IPS.
+func (s *settings) callbackFrom() ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, f := range strings.Split(s.UdunCallbackIPs, ",") {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		if !strings.Contains(f, "/") {
+			a, err := netip.ParseAddr(f)
+			if err != nil {
+				return nil, fmt.Errorf("UDUN_CALLBACK_ALLOWED_IPS: %w", err)
+			}
+			out = append(out, netip.PrefixFrom(a, a.BitLen()))
+			continue
+		}
+		p, err := netip.ParsePrefix(f)
+		if err != nil {
+			return nil, fmt.Errorf("UDUN_CALLBACK_ALLOWED_IPS: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, nil
 }
 
 func (s *settings) Validate() error {
@@ -100,6 +148,12 @@ func (s *settings) Validate() error {
 	if !s.MaxFeeGwei.IsPositive() {
 		errs = append(errs, errors.New("WALLET_MAX_FEE_GWEI must be positive"))
 	}
+	if s.UdunURL != "" && (s.UdunMerchant == "" || s.UdunKey == "" || s.UdunCallback == "") {
+		errs = append(errs, errors.New("the custody wallet needs UDUN_MERCHANT_ID, UDUN_API_KEY and UDUN_CALLBACK_URL"))
+	}
+	if _, err := s.callbackFrom(); err != nil {
+		errs = append(errs, err)
+	}
 	return errors.Join(append(errs, s.Postgres.Validate(), s.Kafka.Validate())...)
 }
 
@@ -113,6 +167,7 @@ func setup(ctx context.Context, a *app.App) error {
 		LedgerAddr: "localhost:9185", AuthAddr: "localhost:9181", MarketURL: "http://localhost:8090",
 		Network: "ETH-SEPOLIA", ScanInterval: 30 * time.Second,
 		WhitelistCooldown: 24 * time.Hour, MaxFeeGwei: decimal.NewFromInt(100), ReplaceAfter: 10 * time.Minute,
+		CustodyInterval: 5 * time.Second,
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -173,6 +228,24 @@ func setup(ctx context.Context, a *app.App) error {
 	if err := bootstrap.Consumer(ctx, a, cfg.Kafka, consumer.Group, []string{event.TopicLedger}, consumer.Ledger(svc)); err != nil {
 		return err
 	}
+	var custodian *application.CustodyProcessor
+	if cfg.UdunURL != "" {
+		u := &custody.Udun{
+			Client: &udun.Client{
+				BaseURL: cfg.UdunURL, MerchantID: cfg.UdunMerchant, Key: cfg.UdunKey, HTTP: &http.Client{Timeout: 15 * time.Second},
+			},
+			CallbackURL: cfg.UdunCallback, WalletID: cfg.UdunWallet,
+		}
+		svc.Custodians = map[string]ports.Custody{u.Provider(): u}
+		custodian = application.NewCustodyProcessor(application.CustodyProcessor{
+			Store: store, Ledger: ledgerClient, Networks: networks, Eligibility: userClient, Custody: u, Log: a.Logger(), Now: time.Now,
+		}, a.Metrics())
+		a.Add("custody processor", app.Loop(func(ctx context.Context) error {
+			return leased(ctx, a, db, "wallet-custody:"+u.Provider(), []step{{"custody operations", custodian.Round}}, cfg.CustodyInterval)
+		}))
+	} else {
+		a.Logger().Warn("UDUN_GATEWAY_URL is not set: the custody wallet's networks take no deposits or withdrawals")
+	}
 	if cfg.RPCURL != "" {
 		client, err := evm.NewClient(cfg.RPCURL, nil)
 		if err != nil {
@@ -194,6 +267,11 @@ func setup(ctx context.Context, a *app.App) error {
 				Networks: networks, Log: a.Logger(), Now: time.Now, Network: cfg.Network, ChainID: cfg.ChainID,
 				MaxFee: maxFee, ReplaceAfter: cfg.ReplaceAfter,
 			}, a.Metrics())
+			// Each side's check counts what the other holds of the asset.
+			if custodian != nil {
+				processor.Elsewhere = custodian.Holdings
+				custodian.Elsewhere = processor.Holdings
+			}
 			steps = append(steps, step{"wallet operations", processor.Round})
 		} else {
 			a.Logger().Warn("SIGNER_GRPC_ADDR is not set: no withdrawals are sent, no sweeps, no chain checks")
@@ -204,8 +282,12 @@ func setup(ctx context.Context, a *app.App) error {
 	} else {
 		a.Logger().Warn("no RPC endpoint: deposits are not scanned")
 	}
+	callbackFrom, err := cfg.callbackFrom()
+	if err != nil {
+		return err
+	}
 	r := a.NewRouter()
-	(&httpapi.Handler{Svc: svc, Network: cfg.Network}).Routes(r)
+	(&httpapi.Handler{Svc: svc, CallbackFrom: callbackFrom}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
 }
 
@@ -234,26 +316,33 @@ func scan(ctx context.Context, a *app.App, db *pg.DB, client *evm.Client, steps 
 		case <-time.After(time.Minute):
 		}
 	}
-	lease, err := pg.AcquireLease(ctx, db, "wallet-scanner:"+cfg.Network)
+	a.Logger().InfoContext(ctx, "deposit scanner starting", "network", cfg.Network, "chain", strconv.FormatUint(cfg.ChainID, 10))
+	return leased(ctx, a, db, "wallet-scanner:"+cfg.Network, steps, cfg.ScanInterval)
+}
+
+// leased runs the steps every interval while this instance holds the
+// lease name, which one instance holds at a time.
+func leased(ctx context.Context, a *app.App, db *pg.DB, name string, steps []step, interval time.Duration) error {
+	lease, err := pg.AcquireLease(ctx, db, name)
 	if err != nil {
 		return err
 	}
-	a.Logger().InfoContext(ctx, "deposit scanner started", "network", cfg.Network, "chain", strconv.FormatUint(cfg.ChainID, 10))
-	scanCtx, cancel := context.WithCancelCause(ctx)
+	a.Logger().InfoContext(ctx, "lease acquired", "lease", name)
+	runCtx, cancel := context.WithCancelCause(ctx)
 	held := make(chan struct{})
 	go func() {
 		defer close(held)
-		cancel(lease.Hold(scanCtx, 5*time.Second))
+		cancel(lease.Hold(runCtx, 5*time.Second))
 	}()
-	err = rounds(scanCtx, a, steps, cfg.ScanInterval)
-	cause := context.Cause(scanCtx)
+	err = rounds(runCtx, a, steps, interval)
+	cause := context.Cause(runCtx)
 	cancel(nil)
 	<-held
 	if rerr := lease.Release(context.WithoutCancel(ctx)); rerr != nil {
-		a.Logger().WarnContext(ctx, "releasing the scanner lease failed", "error", rerr)
+		a.Logger().WarnContext(ctx, "releasing the lease failed", "lease", name, "error", rerr)
 	}
 	if cause != nil && !errors.Is(cause, context.Canceled) {
-		return cause // the lease was lost: stop, another instance may scan
+		return cause // the lease was lost: stop, another instance takes over
 	}
 	return err
 }

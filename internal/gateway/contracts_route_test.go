@@ -41,3 +41,23 @@ func TestContractRoutes(t *testing.T) {
 		}
 	}
 }
+
+// The custodian's callbacks reach wallet-service without a token: they
+// carry their own signature (ADR-0011).
+func TestCustodyCallbackIsPublic(t *testing.T) {
+	var got string
+	r := httpx.NewRouter(httpx.RouterOptions{Logger: slog.New(slog.DiscardHandler)})
+	Mount(r, Guards{}, Upstreams{
+		Auth: http.NotFoundHandler(), User: http.NotFoundHandler(), Notification: http.NotFoundHandler(),
+		Instrument: http.NotFoundHandler(), Ledger: http.NotFoundHandler(),
+		Wallet: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			got = r.URL.Path
+			w.WriteHeader(http.StatusOK)
+		}),
+	})
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/v1/wallet/callbacks/udun", http.NoBody))
+	if rec.Code != http.StatusOK || got != "/v1/wallet/callbacks/udun" {
+		t.Fatalf("%d, reached %q", rec.Code, got)
+	}
+}

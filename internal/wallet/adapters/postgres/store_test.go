@@ -371,3 +371,154 @@ func TestWithdrawalStorage(t *testing.T) {
 		t.Fatalf("internal deposit %+v %v", got, err)
 	}
 }
+
+func TestCustodyStorage(t *testing.T) {
+	store, ctx := newStore(t), context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	read := store.Read()
+	alice, bob := uuid.NewString(), uuid.NewString()
+	const tron = "TRON"
+	for user, addr := range map[string]string{alice: "TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7", bob: "TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj"} {
+		err := store.Tx(ctx, func(r ports.Repos) error {
+			if err := r.Addresses().Lock(ctx, user, tron); err != nil {
+				return err
+			}
+			return r.Addresses().Insert(ctx, domain.Address{UserID: user, Network: tron, Provider: domain.ProviderUdun, Address: addr, CreatedAt: now})
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if a, err := read.Addresses().Get(ctx, alice, tron); err != nil || a == nil || a.Provider != domain.ProviderUdun || a.Index != 0 {
+		t.Fatalf("a custodian's address %+v %v", a, err)
+	}
+	if owner, err := read.Addresses().Owner(ctx, tron, "TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7"); err != nil || owner != alice {
+		t.Fatalf("owner %q %v", owner, err)
+	}
+	if n, err := read.Addresses().Count(ctx, []string{tron, net}); err != nil || n != 2 {
+		t.Fatalf("count %d %v", n, err)
+	}
+
+	// One transaction paying two users: two deposits, keyed by the trade.
+	for i, user := range []string{alice, bob} {
+		d := domain.Deposit{
+			ID: uuid.Must(uuid.NewV7()).String(), UserID: user, Asset: "USDT", Network: tron, Address: "T-" + user, TxHash: "batch1",
+			LogIndex: domain.NativeLog, Amount: decimal.NewFromInt(25), RawAmount: decimal.NewFromInt(25_000_000), Confirmations: 20,
+			Required: 20, Status: domain.StatusConfirmed, ProviderTxID: "UDUN:t" + strconv.Itoa(i), DetectedAt: now, ConfirmedAt: now,
+		}
+		if err := store.Tx(ctx, func(r ports.Repos) error { return r.Deposits().Insert(ctx, d) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := read.Deposits().ByProviderTx(ctx, "UDUN:t1")
+	if err != nil || got == nil || got.UserID != bob || got.ProviderTxID != "UDUN:t1" || got.BlockNumber != 0 {
+		t.Fatalf("by trade %+v %v", got, err)
+	}
+	dup := *got
+	dup.ID = uuid.Must(uuid.NewV7()).String()
+	if err := store.Tx(ctx, func(r ports.Repos) error { return r.Deposits().Insert(ctx, dup) }); err == nil {
+		t.Fatal("a trade is recorded once")
+	}
+	if list, err := read.Deposits().Unrequested(ctx, tron); err != nil || len(list) != 2 {
+		t.Fatalf("unrequested %v %v", list, err)
+	}
+
+	w := domain.Withdrawal{
+		ID: uuid.Must(uuid.NewV7()).String(), UserID: alice, Asset: "USDT", Network: tron, Address: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+		Amount: decimal.NewFromInt(100), Fee: decimal.NewFromInt(1), Provider: domain.ProviderUdun, Status: domain.WithdrawalApproved,
+		Nonce: -1, Required: 20, FreezeJournal: uuid.NewString(), CreatedAt: now, UpdatedAt: now, ApprovedAt: now,
+	}
+	if err := store.Tx(ctx, func(r ports.Repos) error { return r.Withdrawals().Insert(ctx, w) }); err != nil {
+		t.Fatal(err)
+	}
+	w.Submit(now)
+	if err := store.Tx(ctx, func(r ports.Repos) error { return r.Withdrawals().Update(ctx, w) }); err != nil {
+		t.Fatal(err)
+	}
+	if list, err := read.Withdrawals().Submitted(ctx, domain.ProviderUdun); err != nil || len(list) != 1 || list[0].ProviderStatus != domain.CustodySubmitted ||
+		!list[0].SubmittedAt.Equal(now) {
+		t.Fatalf("submitted %+v %v", list, err)
+	}
+	w.Custodian(domain.CustodySuccess, "f00d", now)
+	if err := store.Tx(ctx, func(r ports.Repos) error { return r.Withdrawals().Update(ctx, w) }); err != nil {
+		t.Fatalf("a custodian's confirmed withdrawal has no nonce: %v", err)
+	}
+	if page, err := read.Withdrawals().Page(ctx, "", ports.WithdrawalFilter{Limit: 5}); err != nil || len(page) != 1 || page[0].TxHash != "f00d" {
+		t.Fatalf("every network's page %+v %v", page, err)
+	}
+	if list, err := read.Withdrawals().Unsettled(ctx, tron); err != nil || len(list) != 1 {
+		t.Fatalf("to settle %v %v", list, err)
+	}
+
+	amount := decimal.NewFromInt(100)
+	cb := domain.Callback{
+		ID: uuid.Must(uuid.NewV7()).String(), Provider: domain.ProviderUdun, TradeID: "w-1", Kind: domain.CallbackWithdrawal, Status: 3,
+		BusinessID: w.ID, Coin: "195:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", Amount: &amount, TxHash: "f00d", Raw: "timestamp=1&body=x",
+		SignatureOK: true, Result: domain.CallbackReceived, ReceivedAt: now,
+	}
+	var stored domain.Callback
+	var fresh bool
+	receive := func(c domain.Callback) {
+		t.Helper()
+		if err := store.Tx(ctx, func(r ports.Repos) error {
+			var err error
+			stored, fresh, err = r.Callbacks().Receive(ctx, c)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	receive(cb)
+	if !fresh || stored.Attempts != 1 {
+		t.Fatalf("first %+v %v", stored, fresh)
+	}
+	if err := read.Callbacks().Finish(ctx, cb.ID, domain.CallbackApplied, "sent", now); err != nil {
+		t.Fatal(err)
+	}
+	retry := cb
+	retry.ID = uuid.Must(uuid.NewV7()).String()
+	receive(retry)
+	if fresh || stored.ID != cb.ID || stored.Attempts != 2 || stored.Result != domain.CallbackApplied || !stored.Amount.Equal(amount) {
+		t.Fatalf("the custodian's retry %+v %v", stored, fresh)
+	}
+	for range 2 {
+		forged := domain.Callback{
+			ID: uuid.Must(uuid.NewV7()).String(), Provider: domain.ProviderUdun, TradeID: "w-1", Status: 3, Raw: "x",
+			Result: domain.CallbackRejected, Detail: "signature", ReceivedAt: now,
+		}
+		receive(forged)
+		if !fresh {
+			t.Fatal("a refused callback is logged every time")
+		}
+	}
+	if page, err := read.Callbacks().Page(ctx, ports.CallbackFilter{Query: "f00d", Limit: 10}); err != nil || len(page) != 1 || page[0].ID != cb.ID {
+		t.Fatalf("by transaction %+v %v", page, err)
+	}
+	if page, err := read.Callbacks().Page(ctx, ports.CallbackFilter{Result: domain.CallbackRejected, Limit: 1}); err != nil || len(page) != 1 ||
+		page[0].Status != 3 || page[0].SignatureOK {
+		t.Fatalf("refused, newest first %+v %v", page, err)
+	}
+	if n, last, err := read.Callbacks().Attention(ctx); err != nil || n != 0 || !last.Equal(now) {
+		t.Fatalf("attention %d %v %v", n, last, err)
+	}
+
+	for _, c := range []domain.ChainCheck{
+		domain.NewChainCheck(domain.ProviderUdun, "ETH", decimal.NewFromInt(3), decimal.NewFromInt(4), decimal.Zero, 2, now).
+			Beside(decimal.NewFromInt(1), decimal.Zero),
+		domain.NewChainCheck(net, "ETH", decimal.NewFromInt(1), decimal.NewFromInt(4), decimal.Zero, 3, now).
+			Beside(decimal.NewFromInt(3), decimal.Zero),
+	} {
+		if err := read.Checks().Insert(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checks, err := read.Checks().Latest(ctx, "")
+	if err != nil || len(checks) != 2 || !checks[0].Elsewhere.Equal(decimal.NewFromInt(3)) && !checks[1].Elsewhere.Equal(decimal.NewFromInt(3)) {
+		t.Fatalf("every holder's checks %+v %v", checks, err)
+	}
+	for _, c := range checks {
+		if !c.Shortfall.IsZero() {
+			t.Fatalf("both holders together hold what is expected: %+v", c)
+		}
+	}
+}

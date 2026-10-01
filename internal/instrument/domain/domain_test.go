@@ -134,6 +134,10 @@ func TestAssetNetworkFee(t *testing.T) {
 		"explorer http":  func(n *Network) { n.ExplorerTxURL = "http://sepolia.etherscan.io/tx/{tx}" },
 		"no placeholder": func(n *Network) { n.ExplorerAddressURL = "https://sepolia.etherscan.io/address/" },
 		"eta":            func(n *Network) { n.ETAMinutes = -1 },
+		"provider":       func(n *Network) { n.Provider, n.ProviderCoin = "FIREBLOCKS", "60:60" },
+		"provider coin":  func(n *Network) { n.Provider = ProviderUdun },
+		"coin alone":     func(n *Network) { n.ProviderCoin = "60:60" },
+		"coin format":    func(n *Network) { n.Provider, n.ProviderCoin = ProviderUdun, "TRON:USDT" },
 	} {
 		bad := n
 		bad.AddressFormat = FormatEVM
@@ -145,6 +149,14 @@ func TestAssetNetworkFee(t *testing.T) {
 	n.AddressFormat, n.ExplorerTxURL = FormatTRON, "https://tronscan.org/#/transaction/{tx}"
 	if err := n.Validate(usdt); err != nil {
 		t.Errorf("TRON network: %v", err)
+	}
+	custody := n
+	custody.Provider, custody.ProviderCoin = ProviderUdun, "195:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
+	if err := custody.Validate(usdt); err != nil {
+		t.Errorf("a custody network: %v", err)
+	}
+	if custody.Same(n) {
+		t.Error("the provider is configuration")
 	}
 	tagged := btc
 	tagged.Rank, tagged.Categories = 1, []string{"layer-1", "pow"}

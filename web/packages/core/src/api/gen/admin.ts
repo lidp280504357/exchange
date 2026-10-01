@@ -821,6 +821,96 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/custody": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The custody wallet (ADR-0011)
+         * @description The custodian's coins with their balances as it reports them now,
+         *     matched to the networks that use them; the latest chain check of
+         *     each holder and asset (the custodian and the platform's own
+         *     wallets: held, expected by the ledger, held elsewhere, on its way
+         *     out, unbooked fees, shortfall); the withdrawals with the custodian;
+         *     and how many callbacks need a person. Without a configured
+         *     custodian `configured` is false; an unreachable one leaves `coins`
+         *     empty and says why in `error`. Needs withdrawals.read.
+         */
+        get: operations["getCustody"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/custody/callbacks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The custodian's callbacks, newest first
+         * @description Every callback as received, with its signature check and outcome. Needs withdrawals.read.
+         */
+        get: operations["listCustodyCallbacks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/custody/callbacks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One callback with the request as received
+         * @description Needs withdrawals.read.
+         */
+        get: operations["getCustodyCallback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/custody/callbacks/{id}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply a stored callback again
+         * @description For a verified callback that FAILED, stayed UNMATCHED or RECEIVED:
+         *     its signature is checked again (not its age) and it is applied as
+         *     if it had just arrived, which is harmless for one already applied.
+         *     Audited. Needs withdrawals.review.
+         */
+        post: operations["replayCustodyCallback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1088,7 +1178,17 @@ export interface components {
             amount: components["schemas"]["Decimal"];
             fee: components["schemas"]["Decimal"];
             internal: boolean;
+            /** @description The custodian sends it (ADR-0011). */
+            custody?: boolean;
             status: string;
+            /**
+             * @description In lists only: the custodian's last word on it (SUBMITTED until
+             *     it acknowledges, ACCEPTED, REVIEW, APPROVED, REJECTED, SUCCESS,
+             *     FAILED); empty when the platform sends it.
+             */
+            provider_status?: string;
+            /** Format: date-time */
+            submitted_at?: string | null;
             /** @description In lists only. */
             risk_score?: number;
             risk_reasons: string[];
@@ -1379,6 +1479,91 @@ export interface components {
             short: components["schemas"]["Decimal"];
             positions: number;
         };
+        CustodyOverview: {
+            /** @example UDUN */
+            provider: string;
+            configured: boolean;
+            /** @description Why the custodian's coins could not be read. */
+            error: string | null;
+            coins: components["schemas"]["CustodyCoin"][];
+            checks: components["schemas"]["ChainCheck"][];
+            /** @description Withdrawals with the custodian. */
+            submitted: {
+                count: number;
+                amount_usdt: components["schemas"]["Decimal"];
+                /** Format: date-time */
+                oldest_at: string | null;
+            };
+            callbacks: {
+                /** @description Verified callbacks that FAILED or stayed UNMATCHED. */
+                attention: number;
+                /** Format: date-time */
+                last_at: string | null;
+            };
+        };
+        CustodyCoin: {
+            /**
+             * @description The custodian's code, mainCoinType:coinType.
+             * @example 195:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t
+             */
+            coin: string;
+            symbol: string;
+            decimals: number;
+            /** @description What the custodian holds, as it reports it. */
+            balance: string | null;
+            token: boolean;
+            /** @description The asset and network rows that use the coin; empty for a coin no network uses. */
+            networks: {
+                asset: string;
+                network: string;
+            }[];
+        };
+        /**
+         * @description Invariant 4 for one holder of an asset: shortfall = expected −
+         *     held − elsewhere − in_flight − unbooked; above zero the holders
+         *     miss funds.
+         */
+        ChainCheck: {
+            /** @description UDUN for the custodian, the network (e.g. ETH-SEPOLIA) for the platform's own wallets. */
+            holder: string;
+            asset: string;
+            held: components["schemas"]["Decimal"];
+            expected: components["schemas"]["Decimal"];
+            elsewhere: components["schemas"]["Decimal"];
+            in_flight: components["schemas"]["Decimal"];
+            unbooked: components["schemas"]["Decimal"];
+            shortfall: components["schemas"]["Decimal"];
+            addresses: number;
+            /** Format: date-time */
+            checked_at: string;
+        };
+        CustodyCallback: {
+            /** Format: uuid */
+            id: string;
+            provider: string;
+            trade_id: string;
+            /** @enum {string} */
+            kind: "" | "DEPOSIT" | "WITHDRAWAL";
+            /** @description The custodian's status (0 review, 1 approved, 2 refused, 3 success, 4 failed). */
+            status: number | null;
+            /** @description The withdrawal ID of a withdrawal. */
+            business_id: string;
+            coin: string;
+            address: string;
+            amount: components["schemas"]["Decimal"] | null;
+            tx_hash: string;
+            signature_ok: boolean;
+            /** @enum {string} */
+            result: "RECEIVED" | "APPLIED" | "IGNORED" | "UNMATCHED" | "REJECTED" | "FAILED";
+            detail: string;
+            attempts: number;
+            /** Format: date-time */
+            received_at: string;
+            /** Format: date-time */
+            processed_at: string | null;
+            /** @description The request as received (one callback only). */
+            raw?: string;
+        };
         Error: {
             /**
              * @description Stable machine-readable code (appendix C), used by clients for i18n.
@@ -1406,6 +1591,7 @@ export interface components {
         };
     };
     parameters: {
+        CallbackID: string;
         /** @description The previous page's next_cursor; omitted for the first page. */
         Cursor: string;
         Limit: number;
@@ -1776,10 +1962,12 @@ export interface operations {
     listWithdrawals: {
         parameters: {
             query?: {
-                /** @description A withdrawal status (appendix B), e.g. APPROVED, BROADCAST, CONFIRMED, REJECTED, FAILED; ALL for every status. */
+                /** @description A withdrawal status (appendix B), e.g. APPROVED, SUBMITTED, BROADCAST, CONFIRMED, REJECTED, FAILED; ALL for every status. */
                 status?: string;
                 user_id?: components["parameters"]["UserFilter"];
                 asset?: string;
+                /** @description One network, e.g. TRON or ETH-SEPOLIA; every network when empty. */
+                network?: string;
                 order?: "asc" | "desc";
                 /** @description The previous page's next_cursor; omitted for the first page. */
                 cursor?: components["parameters"]["Cursor"];
@@ -2490,6 +2678,110 @@ export interface operations {
                         latest: components["schemas"]["ReconciliationRun"][];
                         failures: components["schemas"]["ReconciliationRun"][];
                     };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getCustody: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The custody wallet. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustodyOverview"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listCustodyCallbacks: {
+        parameters: {
+            query?: {
+                /** @description One outcome; every outcome when empty. */
+                result?: "RECEIVED" | "APPLIED" | "IGNORED" | "UNMATCHED" | "REJECTED" | "FAILED";
+                kind?: "DEPOSIT" | "WITHDRAWAL";
+                /** @description A trade ID, withdrawal ID (businessId), transaction hash or address. */
+                q?: string;
+                /** @description The previous page's next_cursor; omitted for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of callbacks. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["CustodyCallback"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getCustodyCallback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["CallbackID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The callback. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustodyCallback"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    replayCustodyCallback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["CallbackID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description The callback after the replay. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustodyCallback"];
                 };
             };
             default: components["responses"]["Error"];

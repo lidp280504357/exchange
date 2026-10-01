@@ -12,7 +12,10 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 )
 
-// Withdrawal statuses (§11.6, appendix B).
+// Withdrawal statuses (§11.6, appendix B). The platform's own wallets
+// take an approved withdrawal through SIGNING, BROADCAST and CONFIRMING; a
+// custodian's network hands it over (SUBMITTED) until the custodian
+// reports (ADR-0011).
 const (
 	WithdrawalRequested  = "REQUESTED"
 	WithdrawalReview     = "PENDING_REVIEW"
@@ -20,11 +23,25 @@ const (
 	WithdrawalSigning    = "SIGNING"
 	WithdrawalBroadcast  = "BROADCAST"
 	WithdrawalConfirming = "CONFIRMING"
+	WithdrawalSubmitted  = "SUBMITTED"
 	WithdrawalConfirmed  = "CONFIRMED"
 	WithdrawalInternal   = "INTERNAL_TRANSFER"
 	WithdrawalRejected   = "REJECTED"
 	WithdrawalCanceled   = "CANCELED"
 	WithdrawalFailed     = "FAILED"
+)
+
+// What the custodian last said of a withdrawal (its provider status):
+// handed over but not acknowledged yet, taken, in its review, approved by
+// it, refused, sent, or failed on chain.
+const (
+	CustodySubmitted = "SUBMITTED"
+	CustodyAccepted  = "ACCEPTED"
+	CustodyReview    = "REVIEW"
+	CustodyApproved  = "APPROVED"
+	CustodyRejected  = "REJECTED"
+	CustodySuccess   = "SUCCESS"
+	CustodyFailed    = "FAILED"
 )
 
 // Risk reasons that send a withdrawal to review (§11.6).
@@ -60,7 +77,11 @@ type Withdrawal struct {
 	Fee     decimal.Decimal
 	// InternalUserID owns the destination when it is a platform deposit
 	// address: the withdrawal completes in the ledger.
-	InternalUserID    string
+	InternalUserID string
+	// Provider is the custodian that sends it (its network's), empty for
+	// the platform's own wallets; ProviderStatus is what it last said.
+	Provider          string
+	ProviderStatus    string
 	Status            string
 	RiskScore         int
 	RiskReasons       []string
@@ -82,9 +103,13 @@ type Withdrawal struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	ApprovedAt      time.Time
+	SubmittedAt     time.Time
 	BroadcastAt     time.Time
 	ConfirmedAt     time.Time
 }
+
+// Custody reports whether a custodian sends the withdrawal.
+func (w *Withdrawal) Custody() bool { return w.Provider != "" }
 
 // Frozen is what the request froze: the amount and the fee.
 func (w *Withdrawal) Frozen() decimal.Decimal { return w.Amount.Add(w.Fee) }
@@ -138,7 +163,7 @@ func (w *Withdrawal) Reject(reason string, now time.Time) error {
 }
 
 // Cancelable reports whether the withdrawal can still be withdrawn: until
-// it enters SIGNING (§11.6).
+// it enters SIGNING (§11.6) or goes to the custodian.
 func (w *Withdrawal) Cancelable() bool {
 	return w.Status == WithdrawalRequested || w.Status == WithdrawalReview || w.Status == WithdrawalApproved
 }
@@ -157,6 +182,48 @@ func (w *Withdrawal) Cancel(now time.Time) error {
 func (w *Withdrawal) NeedsRelease() bool {
 	refused := w.Status == WithdrawalRejected || w.Status == WithdrawalCanceled || (w.Status == WithdrawalFailed && w.TxHash == "")
 	return refused && w.FreezeJournal != "" && w.UnfreezeJournal == ""
+}
+
+// Submit hands an approved withdrawal to its custodian; it reports false
+// when it is not APPROVED any more (a cancellation won).
+func (w *Withdrawal) Submit(now time.Time) bool {
+	if w.Status != WithdrawalApproved || !w.Custody() {
+		return false
+	}
+	w.ProviderStatus, w.SubmittedAt = CustodySubmitted, now
+	w.set(WithdrawalSubmitted, now)
+	return true
+}
+
+// Custodian applies what the custodian says of a SUBMITTED withdrawal: it
+// took it or reviews it (it stays SUBMITTED), sent it in tx (CONFIRMED,
+// for the ledger to settle), or refused or failed it (FAILED: nothing
+// left the platform, so the frozen funds go back). It reports whether
+// anything changed; a word on a withdrawal past SUBMITTED changes nothing
+// (a repeat, or the review arriving after the outcome).
+func (w *Withdrawal) Custodian(word, tx string, now time.Time) bool {
+	if w.Status != WithdrawalSubmitted {
+		return false
+	}
+	switch word {
+	case CustodyAccepted, CustodyReview, CustodyApproved:
+		if w.ProviderStatus == word || (word == CustodyAccepted && w.ProviderStatus != CustodySubmitted) {
+			return false
+		}
+		w.ProviderStatus, w.UpdatedAt = word, now
+	case CustodySuccess:
+		w.ProviderStatus, w.TxHash, w.Confirmations, w.ConfirmedAt = word, tx, w.Required, now
+		w.set(WithdrawalConfirmed, now)
+	case CustodyRejected, CustodyFailed:
+		w.ProviderStatus, w.RejectReason = word, "CUSTODY_"+word
+		if tx != "" {
+			w.RejectReason += ": " + tx
+		}
+		w.set(WithdrawalFailed, now)
+	default:
+		return false
+	}
+	return true
 }
 
 // Broadcasted records the first broadcast of nonce with tx.

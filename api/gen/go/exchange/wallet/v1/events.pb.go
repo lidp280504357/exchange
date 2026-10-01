@@ -53,7 +53,10 @@ type Deposit struct {
 	Status string `protobuf:"bytes,16,opt,name=status,proto3" json:"status,omitempty"`
 	// CHAIN, or INTERNAL for another user's withdrawal to this address,
 	// completed in the ledger.
-	Kind          string `protobuf:"bytes,17,opt,name=kind,proto3" json:"kind,omitempty"`
+	Kind string `protobuf:"bytes,17,opt,name=kind,proto3" json:"kind,omitempty"`
+	// The custodian's ID of the deposit ("UDUN:<tradeId>"); empty for one
+	// the platform's scanner found (ADR-0011).
+	ProviderTxId  string `protobuf:"bytes,18,opt,name=provider_tx_id,json=providerTxId,proto3" json:"provider_tx_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -207,16 +210,27 @@ func (x *Deposit) GetKind() string {
 	return ""
 }
 
+func (x *Deposit) GetProviderTxId() string {
+	if x != nil {
+		return x.ProviderTxId
+	}
+	return ""
+}
+
 // DepositAddressAssigned: a user got a deposit address on a network.
 type DepositAddressAssigned struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	UserId  string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	Network string                 `protobuf:"bytes,2,opt,name=network,proto3" json:"network,omitempty"`
 	Address string                 `protobuf:"bytes,3,opt,name=address,proto3" json:"address,omitempty"`
-	// Address index under the deposit account (m/44'/60'/0'/0/index).
+	// Address index under the deposit account (m/44'/60'/0'/0/index); 0
+	// for a custodian's address.
 	DerivationIndex uint32 `protobuf:"varint,4,opt,name=derivation_index,json=derivationIndex,proto3" json:"derivation_index,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// The custodian that created the address (ADR-0011); empty for the
+	// platform's own.
+	Provider      string `protobuf:"bytes,5,opt,name=provider,proto3" json:"provider,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DepositAddressAssigned) Reset() {
@@ -275,6 +289,13 @@ func (x *DepositAddressAssigned) GetDerivationIndex() uint32 {
 		return x.DerivationIndex
 	}
 	return 0
+}
+
+func (x *DepositAddressAssigned) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
 }
 
 // DepositDetected: the transfer is on chain, not yet confirmed.
@@ -520,7 +541,7 @@ var File_exchange_wallet_v1_events_proto protoreflect.FileDescriptor
 
 const file_exchange_wallet_v1_events_proto_rawDesc = "" +
 	"\n" +
-	"\x1fexchange/wallet/v1/events.proto\x12\x12exchange.wallet.v1\"\xf6\x03\n" +
+	"\x1fexchange/wallet/v1/events.proto\x12\x12exchange.wallet.v1\"\x9c\x04\n" +
 	"\aDeposit\x12\x1d\n" +
 	"\n" +
 	"deposit_id\x18\x01 \x01(\tR\tdepositId\x12\x17\n" +
@@ -541,12 +562,14 @@ const file_exchange_wallet_v1_events_proto_rawDesc = "" +
 	"\n" +
 	"raw_amount\x18\x0f \x01(\tR\trawAmount\x12\x16\n" +
 	"\x06status\x18\x10 \x01(\tR\x06status\x12\x12\n" +
-	"\x04kind\x18\x11 \x01(\tR\x04kind\"\x90\x01\n" +
+	"\x04kind\x18\x11 \x01(\tR\x04kind\x12$\n" +
+	"\x0eprovider_tx_id\x18\x12 \x01(\tR\fproviderTxId\"\xac\x01\n" +
 	"\x16DepositAddressAssigned\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x18\n" +
 	"\anetwork\x18\x02 \x01(\tR\anetwork\x12\x18\n" +
 	"\aaddress\x18\x03 \x01(\tR\aaddress\x12)\n" +
-	"\x10derivation_index\x18\x04 \x01(\rR\x0fderivationIndex\"H\n" +
+	"\x10derivation_index\x18\x04 \x01(\rR\x0fderivationIndex\x12\x1a\n" +
+	"\bprovider\x18\x05 \x01(\tR\bprovider\"H\n" +
 	"\x0fDepositDetected\x125\n" +
 	"\adeposit\x18\x01 \x01(\v2\x1b.exchange.wallet.v1.DepositR\adeposit\"I\n" +
 	"\x10DepositConfirmed\x125\n" +

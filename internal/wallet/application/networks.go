@@ -24,9 +24,10 @@ type AddressValidation struct {
 }
 
 // ValidateAddress checks an address for a network before the user saves
-// or uses it: its form (domain.CheckAddress), and whether it belongs to
-// the user (refused like a withdrawal to oneself) or another user
-// (an internal transfer). asset picks the network's asset when several
+// or uses it: its form (domain.CheckAddress), whether it belongs to the
+// user (refused like a withdrawal to oneself) or another user (an
+// internal transfer), and on a custodian's network what the custodian
+// says of it. asset picks the network's asset when several
 // share it; empty takes the first.
 func (s *Service) ValidateAddress(ctx context.Context, userID, asset, network, address, memo string) (AddressValidation, error) {
 	asset, network = strings.ToUpper(asset), strings.ToUpper(network)
@@ -60,6 +61,21 @@ func (s *Service) ValidateAddress(ctx context.Context, userID, asset, network, a
 		out.Valid, out.Normalized, out.Reason = false, "", domain.ReasonAddressOwn
 	case owner != "":
 		out.Internal = true
+	case net.Custody():
+		// The custodian has the last word on its chains' addresses; when it
+		// cannot be asked, the form alone decides.
+		c := s.Custodians[net.Provider]
+		if c == nil {
+			break
+		}
+		ok, err := c.CheckAddress(ctx, net, out.Normalized)
+		if err != nil {
+			s.Log.WarnContext(ctx, "the custodian could not check an address", "network", net.Network, "error", err)
+			break
+		}
+		if !ok {
+			out.Valid, out.Normalized, out.Reason = false, "", domain.ReasonAddressNetwork
+		}
 	}
 	return out, nil
 }

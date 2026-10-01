@@ -1,7 +1,10 @@
-// Package application runs wallet-service's deposits (requirements
-// §5.10, §11.5): per-user deposit addresses derived from the xpub, a block
-// scanner that detects, confirms and orphans deposits, and the credit
-// the ledger books for confirmed ones.
+// Package application runs wallet-service's deposits and withdrawals
+// (requirements §5.10, §11.5, §11.6): per-user deposit addresses derived
+// from the xpub or created by the custodian (ADR-0011), a block scanner
+// that detects, confirms and orphans deposits on the platform's own
+// network, the custodian's callbacks, the credit the ledger books for
+// confirmed deposits, and withdrawals signed by the signer or handed to
+// the custodian.
 package application
 
 import (
@@ -28,6 +31,11 @@ type Service struct {
 	Eligibility ports.Eligibility
 	// Deriver is nil until WALLET_XPUB is configured.
 	Deriver ports.Deriver
+	// Custodians serve the networks whose provider they are (ADR-0011).
+	Custodians map[string]ports.Custody
+	// CallbackWindow is how far a callback's timestamp may be from now
+	// (5 minutes).
+	CallbackWindow time.Duration
 	// W serves withdrawals.
 	W   Withdrawals
 	Log *slog.Logger
@@ -51,6 +59,10 @@ func (s *Service) DepositAddress(ctx context.Context, userID, asset, network str
 	}
 	if !allowed {
 		return domain.Address{}, net, apperr.New(apperr.KindForbidden, reason, "deposits are not available to this account now")
+	}
+	if net.Custody() {
+		a, err := s.custodyAddress(ctx, userID, net)
+		return a, net, err
 	}
 	if s.Deriver == nil {
 		return domain.Address{}, net, domain.ErrNotConfigured
@@ -145,6 +157,6 @@ func ToProto(d domain.Deposit) *walletv1.Deposit {
 		DepositId: d.ID, UserId: d.UserID, Asset: d.Asset, Network: d.Network, Address: d.Address, TxHash: d.TxHash,
 		LogIndex: d.LogIndex, BlockNumber: d.BlockNumber, Amount: d.Amount.String(), Confirmations: d.Confirmations,
 		RequiredConfirmations: d.Required, Unclaimed: d.Unclaimed, Reason: d.Reason, Contract: d.Contract,
-		RawAmount: d.RawAmount.String(), Status: d.Status, Kind: depositKind(d.Kind),
+		RawAmount: d.RawAmount.String(), Status: d.Status, Kind: depositKind(d.Kind), ProviderTxId: d.ProviderTxID,
 	}
 }

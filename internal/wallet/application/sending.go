@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"strconv"
 	"strings"
@@ -25,34 +26,50 @@ import (
 // settlements, and the receipts, confirmations and replacements of
 // broadcast ones.
 func (p *Processor) withdrawals(ctx context.Context, native domain.Network) error {
-	return errors.Join(p.recoverRequested(ctx), p.release(ctx), p.dispatch(ctx, native), p.settle(ctx), p.track(ctx, native))
+	o := p.ops()
+	return errors.Join(o.recoverRequested(ctx), o.release(ctx), p.dispatch(ctx, native), o.settle(ctx), p.track(ctx, native))
 }
 
-func (p *Processor) recoverRequested(ctx context.Context) error {
-	list, err := p.Store.Read().Withdrawals().ByStatus(ctx, p.Network, domain.WithdrawalRequested)
+// netOps are the withdrawal steps the platform's wallets and a custodian
+// share on one network: requests left REQUESTED by an outage, releases of
+// refused funds, internal transfers, settlements and the booking of fees.
+type netOps struct {
+	Store   ports.Store
+	Ledger  ports.Ledger
+	Log     *slog.Logger
+	Now     func() time.Time
+	Network string
+}
+
+func (p *Processor) ops() netOps {
+	return netOps{Store: p.Store, Ledger: p.Ledger, Log: p.Log, Now: p.Now, Network: p.Network}
+}
+
+func (o netOps) recoverRequested(ctx context.Context) error {
+	list, err := o.Store.Read().Withdrawals().ByStatus(ctx, o.Network, domain.WithdrawalRequested)
 	if err != nil {
 		return err
 	}
 	var errs []error
 	for _, w := range list {
-		if p.Now().Sub(w.UpdatedAt) < time.Minute {
+		if o.Now().Sub(w.UpdatedAt) < time.Minute {
 			continue
 		}
-		if _, err := FreezeWithdrawal(ctx, p.Store, p.Ledger, w.ID, p.Now); err != nil && !apperr.Is(err, apperr.CodeUnavailable) {
+		if _, err := FreezeWithdrawal(ctx, o.Store, o.Ledger, w.ID, o.Now); err != nil && !apperr.Is(err, apperr.CodeUnavailable) {
 			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
 }
 
-func (p *Processor) release(ctx context.Context) error {
-	list, err := p.Store.Read().Withdrawals().Unreleased(ctx, p.Network)
+func (o netOps) release(ctx context.Context) error {
+	list, err := o.Store.Read().Withdrawals().Unreleased(ctx, o.Network)
 	if err != nil {
 		return err
 	}
 	var errs []error
 	for _, w := range list {
-		if _, err := ReleaseWithdrawal(ctx, p.Store, p.Ledger, w); err != nil {
+		if _, err := ReleaseWithdrawal(ctx, o.Store, o.Ledger, w); err != nil {
 			errs = append(errs, fmt.Errorf("release withdrawal %s: %w", w.ID, err))
 		}
 	}
@@ -71,7 +88,7 @@ func (p *Processor) dispatch(ctx context.Context, native domain.Network) error {
 	defer func() { p.waiting.Set(float64(waiting)) }()
 	for i, w := range list {
 		if w.InternalUserID != "" {
-			if err := p.transferInternal(ctx, w); err != nil {
+			if err := p.ops().transferInternal(ctx, w); err != nil {
 				return err
 			}
 			continue
@@ -90,17 +107,17 @@ func (p *Processor) dispatch(ctx context.Context, native domain.Network) error {
 
 // transferInternal completes a withdrawal to another user's deposit
 // address in the ledger and records the payee's internal deposit.
-func (p *Processor) transferInternal(ctx context.Context, w domain.Withdrawal) error {
-	journal, err := p.Ledger.TransferInternal(ctx, w.ID, w.UserID, w.InternalUserID, w.Asset, w.Amount, w.ID)
+func (o netOps) transferInternal(ctx context.Context, w domain.Withdrawal) error {
+	journal, err := o.Ledger.TransferInternal(ctx, w.ID, w.UserID, w.InternalUserID, w.Asset, w.Amount, w.ID)
 	if err != nil {
 		return fmt.Errorf("internal transfer %s: %w", w.ID, err)
 	}
-	return p.Store.Tx(ctx, func(r ports.Repos) error {
+	return o.Store.Tx(ctx, func(r ports.Repos) error {
 		cur, err := r.Withdrawals().GetForUpdate(ctx, w.ID)
 		if err != nil || cur == nil || cur.Status != domain.WithdrawalApproved {
 			return err
 		}
-		now := p.Now()
+		now := o.Now()
 		cur.SettleJournal, cur.Status, cur.ConfirmedAt, cur.UpdatedAt = journal, domain.WithdrawalConfirmed, now, now
 		if err := r.Withdrawals().Update(ctx, *cur); err != nil {
 			return err
@@ -129,7 +146,7 @@ func (p *Processor) transferInternal(ctx context.Context, w domain.Withdrawal) e
 		if err := r.Deposits().Insert(ctx, d); err != nil {
 			return err
 		}
-		p.Log.InfoContext(ctx, "internal withdrawal completed", "withdrawal_id", cur.ID, "deposit_id", d.ID, "journal_id", journal)
+		o.Log.InfoContext(ctx, "internal withdrawal completed", "withdrawal_id", cur.ID, "deposit_id", d.ID, "journal_id", journal)
 		return r.Emit(ctx, &walletv1.DepositCredited{Deposit: ToProto(d), JournalId: journal}, d.UserID)
 	})
 }
@@ -172,7 +189,7 @@ func (p *Processor) send(ctx context.Context, w domain.Withdrawal, native domain
 	}
 	nonce := max(recorded, pending)
 	// SIGNING closes the door to a cancellation from now on.
-	moved, err := p.transition(ctx, w.ID, domain.WithdrawalApproved, domain.WithdrawalSigning)
+	moved, err := p.ops().transition(ctx, w.ID, domain.WithdrawalApproved, domain.WithdrawalSigning)
 	if err != nil || !moved {
 		return moved, err
 	}
@@ -187,9 +204,9 @@ func (p *Processor) send(ctx context.Context, w domain.Withdrawal, native domain
 	if err != nil {
 		if apperr.Is(err, "SIGNER_REFUSED") {
 			// The signer's own limits say no: a person decides (§11.6).
-			return true, p.fail(ctx, w.ID, "SIGNER_REFUSED: "+detail(err))
+			return true, p.ops().fail(ctx, w.ID, "SIGNER_REFUSED: "+detail(err))
 		}
-		_, terr := p.transition(ctx, w.ID, domain.WithdrawalSigning, domain.WithdrawalApproved)
+		_, terr := p.ops().transition(ctx, w.ID, domain.WithdrawalSigning, domain.WithdrawalApproved)
 		return false, errors.Join(fmt.Errorf("sign withdrawal %s: %w", w.ID, err), terr)
 	}
 	hash := strings.ToLower(signed.TxHash)
@@ -234,14 +251,14 @@ func detail(err error) string {
 
 // transition moves a withdrawal from one status to another, reporting
 // false when it is no longer in the first (a cancellation won).
-func (p *Processor) transition(ctx context.Context, id, from, to string) (bool, error) {
+func (o netOps) transition(ctx context.Context, id, from, to string) (bool, error) {
 	moved := false
-	err := p.Store.Tx(ctx, func(r ports.Repos) error {
+	err := o.Store.Tx(ctx, func(r ports.Repos) error {
 		cur, err := r.Withdrawals().GetForUpdate(ctx, id)
 		if err != nil || cur == nil || cur.Status != from {
 			return err
 		}
-		cur.Status, cur.UpdatedAt = to, p.Now()
+		cur.Status, cur.UpdatedAt = to, o.Now()
 		moved = true
 		return r.Withdrawals().Update(ctx, *cur)
 	})
@@ -250,46 +267,49 @@ func (p *Processor) transition(ctx context.Context, id, from, to string) (bool, 
 
 // fail marks a withdrawal FAILED for manual handling; one that never
 // reached the chain gets its funds released.
-func (p *Processor) fail(ctx context.Context, id, reason string) error {
-	return p.Store.Tx(ctx, func(r ports.Repos) error {
+func (o netOps) fail(ctx context.Context, id, reason string) error {
+	return o.Store.Tx(ctx, func(r ports.Repos) error {
 		cur, err := r.Withdrawals().GetForUpdate(ctx, id)
 		if err != nil || cur == nil {
 			return err
 		}
-		cur.Status, cur.RejectReason, cur.UpdatedAt = domain.WithdrawalFailed, reason, p.Now()
+		cur.Status, cur.RejectReason, cur.UpdatedAt = domain.WithdrawalFailed, reason, o.Now()
 		if err := r.Withdrawals().Update(ctx, *cur); err != nil {
 			return err
 		}
-		p.Log.ErrorContext(ctx, "withdrawal failed", "withdrawal_id", id, "reason", reason)
+		o.Log.ErrorContext(ctx, "withdrawal failed", "withdrawal_id", id, "reason", reason)
 		return r.EmitWithdrawal(ctx, &walletv1.WithdrawalFailed{Withdrawal: WithdrawalProto(*cur)}, cur.UserID)
 	})
 }
 
 // settle books broadcast withdrawals in the ledger (WITHDRAW_SETTLE: §11.6
-// settles on broadcast).
-func (p *Processor) settle(ctx context.Context) error {
-	list, err := p.Store.Read().Withdrawals().Unsettled(ctx, p.Network)
+// settles on broadcast), and the custodian's once it has sent them.
+func (o netOps) settle(ctx context.Context) error {
+	list, err := o.Store.Read().Withdrawals().Unsettled(ctx, o.Network)
 	if err != nil {
 		return err
 	}
 	var errs []error
 	for _, w := range list {
-		journal, err := p.Ledger.Settle(ctx, w.ID, w.UserID, w.Asset, w.Amount, w.Fee, w.ID)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("settle withdrawal %s: %w", w.ID, err))
-			continue
-		}
-		err = p.Store.Tx(ctx, func(r ports.Repos) error {
-			cur, err := r.Withdrawals().GetForUpdate(ctx, w.ID)
-			if err != nil || cur == nil {
-				return err
-			}
-			cur.SettleJournal = journal
-			return r.Withdrawals().Update(ctx, *cur)
-		})
-		errs = append(errs, err)
+		errs = append(errs, o.settleWithdrawal(ctx, w))
 	}
 	return errors.Join(errs...)
+}
+
+// settleWithdrawal books one withdrawal; the ledger's key makes it once.
+func (o netOps) settleWithdrawal(ctx context.Context, w domain.Withdrawal) error {
+	journal, err := o.Ledger.Settle(ctx, w.ID, w.UserID, w.Asset, w.Amount, w.Fee, w.ID)
+	if err != nil {
+		return fmt.Errorf("settle withdrawal %s: %w", w.ID, err)
+	}
+	return o.Store.Tx(ctx, func(r ports.Repos) error {
+		cur, err := r.Withdrawals().GetForUpdate(ctx, w.ID)
+		if err != nil || cur == nil {
+			return err
+		}
+		cur.SettleJournal = journal
+		return r.Withdrawals().Update(ctx, *cur)
+	})
 }
 
 // track follows broadcast withdrawals: a receipt of any attempt counts
@@ -337,7 +357,7 @@ func (p *Processor) trackOne(ctx context.Context, w domain.Withdrawal, native do
 		if err := p.Store.Tx(ctx, func(r ports.Repos) error { return p.recordFee(ctx, r, minedHash, fee, native, w.ID) }); err != nil {
 			return err
 		}
-		return p.fail(ctx, w.ID, "REVERTED: "+minedHash)
+		return p.ops().fail(ctx, w.ID, "REVERTED: "+minedHash)
 	}
 	head, err := p.Chain.Head(ctx)
 	if err != nil {

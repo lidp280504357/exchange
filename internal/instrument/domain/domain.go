@@ -110,6 +110,14 @@ const (
 	FormatBTC  = "BTC"  // bech32/bech32m or Base58Check
 )
 
+// ProviderUdun is the Udun custody wallet (ADR-0011); a network without a
+// provider is served by the platform's own wallets.
+const ProviderUdun = "UDUN"
+
+// udunCoinRE is Udun's coin code: the chain's number and the coin's
+// (a number for a chain's coin, the contract for a token).
+var udunCoinRE = regexp.MustCompile(`^[0-9]{1,10}:[0-9A-Za-z]{1,100}$`)
+
 // Network is an asset on one chain (§5.5).
 type Network struct {
 	AssetCode       string          `json:"asset_code"`
@@ -132,7 +140,11 @@ type Network struct {
 	// Explorer links, https with a {tx} or {address} placeholder.
 	ExplorerTxURL      string `json:"explorer_tx_url,omitempty"`
 	ExplorerAddressURL string `json:"explorer_address_url,omitempty"`
-	Version            int64  `json:"version,omitempty"`
+	// Provider moves the network's funds (ProviderUdun) when set; it knows
+	// the coin as ProviderCoin ("mainCoinType:coinType" for Udun).
+	Provider     string `json:"provider,omitempty"`
+	ProviderCoin string `json:"provider_coin,omitempty"`
+	Version      int64  `json:"version,omitempty"`
 }
 
 // Validate checks the network against its asset's precision.
@@ -155,6 +167,12 @@ func (n Network) Validate(asset Asset) error {
 		return apperr.Invalid(fmt.Sprintf("network %s: explorer_tx_url must be an https URL with {tx}", name))
 	case !explorerLink(n.ExplorerAddressURL, "{address}"):
 		return apperr.Invalid(fmt.Sprintf("network %s: explorer_address_url must be an https URL with {address}", name))
+	case n.Provider != "" && n.Provider != ProviderUdun:
+		return apperr.Invalid(fmt.Sprintf("network %s: provider must be empty or %s", name, ProviderUdun))
+	case (n.Provider == "") != (n.ProviderCoin == ""):
+		return apperr.Invalid(fmt.Sprintf("network %s: provider and provider_coin go together", name))
+	case n.Provider == ProviderUdun && !udunCoinRE.MatchString(n.ProviderCoin):
+		return apperr.Invalid(fmt.Sprintf("network %s: provider_coin must be mainCoinType:coinType", name))
 	}
 	for field, v := range map[string]decimal.Decimal{"min_deposit": n.MinDeposit, "min_withdraw": n.MinWithdraw, "withdraw_fee": n.WithdrawFee} {
 		if v.IsNegative() {
@@ -174,7 +192,8 @@ func (n Network) Same(other Network) bool {
 		n.MinDeposit.Equal(other.MinDeposit) && n.MinWithdraw.Equal(other.MinWithdraw) && n.WithdrawFee.Equal(other.WithdrawFee) &&
 		n.MemoRequired == other.MemoRequired && n.DepositEnabled == other.DepositEnabled && n.WithdrawEnabled == other.WithdrawEnabled &&
 		n.DisplayName == other.DisplayName && n.AddressFormat == other.AddressFormat && n.ETAMinutes == other.ETAMinutes &&
-		n.ExplorerTxURL == other.ExplorerTxURL && n.ExplorerAddressURL == other.ExplorerAddressURL
+		n.ExplorerTxURL == other.ExplorerTxURL && n.ExplorerAddressURL == other.ExplorerAddressURL &&
+		n.Provider == other.Provider && n.ProviderCoin == other.ProviderCoin
 }
 
 // explorerLink accepts an empty link or an https URL with placeholder.

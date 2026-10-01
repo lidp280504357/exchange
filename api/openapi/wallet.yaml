@@ -4,8 +4,12 @@ info:
   version: 0.2.0
   description: |
     Deposits and withdrawals (requirements §5.10, §11.5, §11.6). Each user gets one deposit
-    address per network, derived from the platform's deposit key; the
-    scanner follows the chain, and a deposit is credited to the spot
+    address per network. Most networks are served by the custody wallet
+    (ADR-0011: USDT on TRC20, BEP20 and ERC20, BTC, ETH): the custodian
+    creates the address, watches the chain and reports a deposit once it
+    is confirmed; on the platform's own network (ETH on Sepolia) the
+    address is derived from the platform's deposit key and the scanner
+    follows the chain. Either way a deposit is credited to the spot
     account once it has the network's confirmations. Deposits below the
     network's minimum, or to a closed account, are not credited to the
     user but held for manual handling (UNCLAIMED_DEPOSIT); transfers of
@@ -22,12 +26,18 @@ info:
     amount plus fee frozen; it is then APPROVED, or PENDING_REVIEW when a
     rule asks for a person (new account, new device, recent security
     change, new address, large amount, a large share of the daily limit).
-    Approved withdrawals are signed and broadcast, settled in the ledger
-    at broadcast, and CONFIRMED after the network's confirmations; one to
-    another user's deposit address completes inside the ledger with no
-    fee. Until it is signed the caller can cancel it. Changes are pushed
+    On a custody network an approved withdrawal is handed to the
+    custodian (SUBMITTED), which sends it after its own checks; it is
+    settled in the ledger and CONFIRMED when the custodian reports
+    success, and FAILED with the funds released when it refuses or the
+    transfer fails. On the platform's own network approved withdrawals are
+    signed and broadcast, settled in the ledger at broadcast, and
+    CONFIRMED after the network's confirmations. One to another user's
+    deposit address completes inside the ledger with no fee. Until it is
+    signed or handed over the caller can cancel it. Changes are pushed
     on the private channel "withdrawals". Every endpoint needs the access
-    token. Amounts are decimal strings (ADR-0008).
+    token, except the custodian's callback. Amounts are decimal strings
+    (ADR-0008).
 servers:
   - url: https://astras.vip
 security:
@@ -35,6 +45,7 @@ security:
 tags:
   - name: deposits
   - name: withdrawals
+  - name: custody
 paths:
   /v1/wallet/networks:
     get:
@@ -376,7 +387,9 @@ paths:
     delete:
       operationId: cancelWithdrawal
       summary: Cancel a withdrawal that is not signed yet
-      description: Releases the frozen funds. Fails with WALLET_WITHDRAWAL_NOT_CANCELABLE once it is being sent.
+      description: |
+        Releases the frozen funds. Fails with WALLET_WITHDRAWAL_NOT_CANCELABLE
+        once it is being signed or is with the custodian.
       tags: [withdrawals]
       parameters:
         - $ref: '#/components/parameters/WithdrawalID'
@@ -387,6 +400,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Withdrawal'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/wallet/callbacks/udun:
+    post:
+      operationId: udunCallback
+      summary: The custodian's notice of a deposit or withdrawal (Udun)
+      description: |
+        Called by the custodian, not by users (ADR-0011). The four fields
+        come as a form or as JSON: body is the trade as a JSON string,
+        signed with the merchant key as sign = md5(body + key + nonce +
+        timestamp); the timestamp (seconds or milliseconds) must be within
+        five minutes. A trade is applied once per status: tradeType 1 is a
+        deposit, credited at status 3; tradeType 2 a withdrawal (businessId
+        = the withdrawal ID), 0 and 1 the custodian's review, 2 refused, 3
+        sent (settled and CONFIRMED), 4 failed. Every callback is logged
+        for the admin console. The answer is "success" once the callback is
+        recorded and applied; anything else asks the custodian to try again.
+      tags: [custody]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CustodyEnvelope'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustodyEnvelope'
+      responses:
+        '200':
+          description: Recorded and applied (or already applied before).
+          content:
+            text/plain:
+              schema:
+                type: string
+                const: success
+        '401':
+          description: Signature or timestamp wrong (WALLET_CALLBACK_SIGNATURE, WALLET_CALLBACK_STALE); logged and not applied.
+          content:
+            application/json:
+              schema:
+                $ref: './common.yaml#/components/schemas/Error'
         default:
           $ref: './common.yaml#/components/responses/Error'
 components:
@@ -546,7 +601,7 @@ components:
           type: string
         address:
           type: string
-          description: EIP-55 checksummed.
+          description: EIP-55 checksummed on EVM networks, as the network writes it elsewhere.
         label:
           type: string
         created_at:
@@ -558,8 +613,8 @@ components:
           description: The end of the cooling-off period.
     Withdrawal:
       type: object
-      required: [id, asset, network, address, amount, fee, internal, status, risk_reasons, approvals_required, reject_reason, tx_hash,
-        confirmations, required_confirmations, created_at, approved_at, broadcast_at, confirmed_at]
+      required: [id, asset, network, address, amount, fee, internal, custody, status, risk_reasons, approvals_required, reject_reason,
+        tx_hash, confirmations, required_confirmations, created_at, approved_at, submitted_at, broadcast_at, confirmed_at]
       properties:
         id:
           type: string
@@ -577,10 +632,13 @@ components:
         internal:
           type: boolean
           description: The address is another user's deposit address; the withdrawal completes inside the ledger.
+        custody:
+          type: boolean
+          description: The custodian sends it (SUBMITTED until it reports); otherwise the platform signs and broadcasts it.
         status:
           type: string
-          enum: [REQUESTED, PENDING_REVIEW, APPROVED, SIGNING, BROADCAST, CONFIRMING, CONFIRMED, INTERNAL_TRANSFER, REJECTED, CANCELED,
-            FAILED]
+          enum: [REQUESTED, PENDING_REVIEW, APPROVED, SIGNING, BROADCAST, CONFIRMING, SUBMITTED, CONFIRMED, INTERNAL_TRANSFER, REJECTED,
+            CANCELED, FAILED]
         risk_reasons:
           type: array
           items:
@@ -602,9 +660,32 @@ components:
         approved_at:
           type: [string, 'null']
           format: date-time
+        submitted_at:
+          type: [string, 'null']
+          format: date-time
+          description: When it was handed to the custodian.
         broadcast_at:
           type: [string, 'null']
           format: date-time
         confirmed_at:
           type: [string, 'null']
           format: date-time
+    CustodyEnvelope:
+      type: object
+      required: [timestamp, nonce, sign, body]
+      properties:
+        timestamp:
+          type: string
+          description: Unix time in seconds or milliseconds (a number in JSON).
+        nonce:
+          type: string
+          description: The custodian's random number (a number in JSON).
+        sign:
+          type: string
+          description: md5(body + key + nonce + timestamp), lower-case hex.
+        body:
+          type: string
+          description: |
+            The trade as JSON: address, amount and fee (integers in units of
+            10^-decimals), decimals, mainCoinType, coinType, businessId,
+            blockHigh, status, tradeId, tradeType, txId, memo.

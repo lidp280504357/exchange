@@ -311,7 +311,9 @@ type Wallet struct {
 // List returns a page of withdrawals.
 func (w Wallet) List(ctx context.Context, q ports.WithdrawalQuery) (json.RawMessage, error) {
 	v := url.Values{}
-	for k, x := range map[string]string{"status": q.Status, "user_id": q.UserID, "asset": q.Asset, "cursor": q.Cursor, "order": q.Order} {
+	for k, x := range map[string]string{
+		"status": q.Status, "user_id": q.UserID, "asset": q.Asset, "network": q.Network, "cursor": q.Cursor, "order": q.Order,
+	} {
 		if x != "" {
 			v.Set(k, x)
 		}
@@ -345,6 +347,36 @@ func (m Market) Feed(ctx context.Context) (ports.FeedStatus, error) {
 func (w Wallet) Review(ctx context.Context, id string, approve bool, reviewer, reason string) (json.RawMessage, error) {
 	return w.do(ctx, http.MethodPost, w.Base+"/internal/wallet/withdrawals/"+url.PathEscape(id)+"/review",
 		map[string]any{"approve": approve, "reviewer": reviewer, "reason": reason}, nil)
+}
+
+// Custody describes the custodian.
+func (w Wallet) Custody(ctx context.Context) (json.RawMessage, error) {
+	return w.do(ctx, http.MethodGet, w.Base+"/internal/wallet/custody", nil, nil)
+}
+
+// Callbacks returns a page of the custodian's callbacks.
+func (w Wallet) Callbacks(ctx context.Context, q ports.CallbackQuery) (json.RawMessage, error) {
+	v := url.Values{}
+	for k, x := range map[string]string{"result": q.Result, "kind": q.Kind, "q": q.Query, "cursor": q.Cursor} {
+		if x != "" {
+			v.Set(k, x)
+		}
+	}
+	if q.Limit > 0 {
+		v.Set("limit", strconv.Itoa(q.Limit))
+	}
+	return w.do(ctx, http.MethodGet, w.Base+"/internal/wallet/custody/callbacks?"+v.Encode(), nil, nil)
+}
+
+// Callback returns one callback with its request.
+func (w Wallet) Callback(ctx context.Context, id string) (json.RawMessage, error) {
+	return w.do(ctx, http.MethodGet, w.Base+"/internal/wallet/custody/callbacks/"+url.PathEscape(id), nil, nil)
+}
+
+// Replay applies a stored callback again.
+func (w Wallet) Replay(ctx context.Context, id, actor, reason string) (json.RawMessage, error) {
+	return w.do(ctx, http.MethodPost, w.Base+"/internal/wallet/custody/callbacks/"+url.PathEscape(id)+"/replay",
+		map[string]any{"actor": actor, "reason": reason}, nil)
 }
 
 // Trading implements ports.Orders over spot-trading-service's API with the

@@ -344,16 +344,28 @@ func (s *Scanner) confirm(ctx context.Context, head uint64) error {
 }
 
 // request sends confirmed deposits to the ledger (DepositConfirmed)
-// while their asset takes deposits; the others wait. A closed account's
-// deposit goes to UNCLAIMED_DEPOSIT (§5.4).
+// while their asset takes deposits; the others wait.
 func (s *Scanner) request(ctx context.Context, nets []domain.Network) error {
-	list, err := s.Store.Read().Deposits().Unrequested(ctx, s.Network)
+	held, err := requestCredits(ctx, s.Store, s.Eligibility, s.Network, nets, s.Now)
+	s.held.Set(float64(held))
+	return err
+}
+
+// requestCredits sends the network's confirmed deposits to the ledger
+// (DepositConfirmed) while their asset takes deposits, and returns how
+// many wait. A closed account's deposit goes to UNCLAIMED_DEPOSIT (§5.4).
+func requestCredits(ctx context.Context, store ports.Store, eligibility ports.Eligibility, network string, nets []domain.Network,
+	now func() time.Time,
+) (int, error) {
+	list, err := store.Read().Deposits().Unrequested(ctx, network)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	enabled := make(map[string]bool, len(nets))
 	for _, n := range nets {
-		enabled[n.Asset] = n.Enabled
+		if n.Network == network {
+			enabled[n.Asset] = n.Enabled
+		}
 	}
 	held := 0
 	for _, d := range list {
@@ -363,9 +375,9 @@ func (s *Scanner) request(ctx context.Context, nets []domain.Network) error {
 		}
 		reason := d.Reason
 		if !d.Unclaimed {
-			allowed, code, err := s.Eligibility.Check(ctx, d.UserID, FeatureDeposit)
+			allowed, code, err := eligibility.Check(ctx, d.UserID, FeatureDeposit)
 			if err != nil {
-				return err
+				return held, err
 			}
 			switch {
 			case allowed:
@@ -375,9 +387,9 @@ func (s *Scanner) request(ctx context.Context, nets []domain.Network) error {
 				reason = domain.ReasonNotEligible
 			}
 		}
-		err := s.Store.Tx(ctx, func(r ports.Repos) error {
+		err := store.Tx(ctx, func(r ports.Repos) error {
 			cur, err := r.Deposits().GetForUpdate(ctx, d.ID)
-			if err != nil || cur == nil || !cur.RequestCredit(reason, s.Now()) {
+			if err != nil || cur == nil || !cur.RequestCredit(reason, now()) {
 				return err
 			}
 			if err := r.Deposits().Update(ctx, *cur); err != nil {
@@ -386,9 +398,8 @@ func (s *Scanner) request(ctx context.Context, nets []domain.Network) error {
 			return r.Emit(ctx, &walletv1.DepositConfirmed{Deposit: ToProto(*cur)}, cur.UserID)
 		})
 		if err != nil {
-			return fmt.Errorf("deposit %s: %w", d.ID, err)
+			return held, fmt.Errorf("deposit %s: %w", d.ID, err)
 		}
 	}
-	s.held.Set(float64(held))
-	return nil
+	return held, nil
 }

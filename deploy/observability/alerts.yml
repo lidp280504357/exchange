@@ -235,6 +235,45 @@ groups:
           summary: "{{ $value }} approved withdrawals on {{ $labels.network }} wait for the hot wallet or for fees within the cap"
           runbook: docs/runbook/wallet.md
 
+      - alert: CustodyShortfall
+        expr: max by (provider, asset) (wallet_custody_shortfall) > 0
+        for: 15m
+        labels: {severity: critical}
+        annotations:
+          summary: "the custodian {{ $labels.provider }} and the platform's wallets hold {{ $value }} {{ $labels.asset }} less than the ledger expects (invariant 4)"
+          runbook: docs/runbook/custody.md
+
+      - alert: CustodyUnreachable
+        expr: max by (provider) (wallet_custody_up) == 0
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "the custodian {{ $labels.provider }} does not answer: no deposit addresses, withdrawals wait"
+          runbook: docs/runbook/custody.md
+
+      - alert: CustodyWithdrawalStuck
+        expr: max by (provider) (wallet_custody_submitted_oldest_seconds) > 86400
+        labels: {severity: warning}
+        annotations:
+          summary: "a withdrawal has been with the custodian {{ $labels.provider }} for more than 24 hours without its outcome; check it in the custodian's console"
+          runbook: docs/runbook/custody.md
+
+      - alert: CustodyCallbacksNeedAttention
+        expr: max by (provider) (wallet_custody_callbacks_attention) > 0
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value }} callbacks of {{ $labels.provider }} failed or match nothing; look at them in the admin console (custodian page)"
+          runbook: docs/runbook/custody.md
+
+      - alert: CustodyFeesUnbooked
+        expr: max by (provider) (wallet_custody_fees_unbooked) > 0
+        for: 1h
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value }} of the custodian's fees wait for GAS_SUPPLY funds"
+          runbook: docs/runbook/custody.md
+
       - alert: AnalyticsMissingEvents
         expr: max by (topic) (analytics_reconcile_missing) > 0
         for: 30m

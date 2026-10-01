@@ -180,8 +180,15 @@ type Network struct {
 	// the network has none.
 	ExplorerTxUrl      string `protobuf:"bytes,16,opt,name=explorer_tx_url,json=explorerTxUrl,proto3" json:"explorer_tx_url,omitempty"`
 	ExplorerAddressUrl string `protobuf:"bytes,17,opt,name=explorer_address_url,json=explorerAddressUrl,proto3" json:"explorer_address_url,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Who moves the network's funds (ADR-0011): empty for the platform's
+	// own wallets (the signer and the block scanner), UDUN for the custody
+	// wallet.
+	Provider string `protobuf:"bytes,18,opt,name=provider,proto3" json:"provider,omitempty"`
+	// The custodian's code of the coin, "mainCoinType:coinType" for UDUN
+	// (e.g. 195:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t); empty without one.
+	ProviderCoin  string `protobuf:"bytes,19,opt,name=provider_coin,json=providerCoin,proto3" json:"provider_coin,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Network) Reset() {
@@ -329,6 +336,20 @@ func (x *Network) GetExplorerTxUrl() string {
 func (x *Network) GetExplorerAddressUrl() string {
 	if x != nil {
 		return x.ExplorerAddressUrl
+	}
+	return ""
+}
+
+func (x *Network) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *Network) GetProviderCoin() string {
+	if x != nil {
+		return x.ProviderCoin
 	}
 	return ""
 }
@@ -1610,7 +1631,7 @@ const file_exchange_instrument_v1_instrument_proto_rawDesc = "" +
 	" \x01(\x05R\x04rank\x12\x1e\n" +
 	"\n" +
 	"categories\x18\v \x03(\tR\n" +
-	"categories\"\xe8\x04\n" +
+	"categories\"\xa9\x05\n" +
 	"\aNetwork\x12\x1d\n" +
 	"\n" +
 	"asset_code\x18\x01 \x01(\tR\tassetCode\x12\x18\n" +
@@ -1632,7 +1653,9 @@ const file_exchange_instrument_v1_instrument_proto_rawDesc = "" +
 	"\veta_minutes\x18\x0f \x01(\x05R\n" +
 	"etaMinutes\x12&\n" +
 	"\x0fexplorer_tx_url\x18\x10 \x01(\tR\rexplorerTxUrl\x120\n" +
-	"\x14explorer_address_url\x18\x11 \x01(\tR\x12explorerAddressUrl\"\xd5\x04\n" +
+	"\x14explorer_address_url\x18\x11 \x01(\tR\x12explorerAddressUrl\x12\x1a\n" +
+	"\bprovider\x18\x12 \x01(\tR\bprovider\x12#\n" +
+	"\rprovider_coin\x18\x13 \x01(\tR\fproviderCoin\"\xd5\x04\n" +
 	"\vTradingPair\x12\x16\n" +
 	"\x06symbol\x18\x01 \x01(\tR\x06symbol\x12\x1d\n" +
 	"\n" +

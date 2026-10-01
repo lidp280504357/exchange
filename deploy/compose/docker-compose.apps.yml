@@ -243,7 +243,7 @@ services:
       # (production: 24 hours); the price of the limits falls back to this
       # without a fresh reference.
       WALLET_WHITELIST_COOLDOWN: 1m
-      WALLET_FALLBACK_PRICES: ETH:3000
+      WALLET_FALLBACK_PRICES: ETH:3000,BTC:100000
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}
@@ -252,9 +252,31 @@ services:
       ledger-service: {condition: service_started}
       auth-service: {condition: service_started}
       signer: {condition: service_started}
+      udun-mock: {condition: service_started}
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9092/readyz"]
+
+  # The test environment's stand-in for the Udun custody wallet's gateway
+  # (ADR-0011, docs/runbook/custody.md): wallet-service reaches it at
+  # UDUN_GATEWAY_URL=http://udun-mock:8097 and it calls back through the
+  # gateway (UDUN_CALLBACK_URL). It shares UDUN_MERCHANT_ID and
+  # UDUN_API_KEY with wallet-service through apps.env and keeps its
+  # addresses, balances and pending callbacks in ./udun-mock (owner uid
+  # 10001). Drop it once apps.env points at the real gateway.
+  udun-mock:
+    <<: *app
+    command: ["/app/udun-mock", "serve"]
+    mem_limit: 96m
+    volumes:
+      - ./udun-mock:/data
+    environment:
+      <<: *base-env
+      GOMEMLIMIT: 64MiB
+      UDUN_MOCK_STATE: /data/state.json
+    healthcheck:
+      <<: *health
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9097/readyz"]
 
   # The signer (ADR-0003), the only holder of the wallet keys. The keystore
   # and SIGNER_PASSPHRASE live in /opt/exchange/infra/signer (700, owner

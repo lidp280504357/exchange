@@ -103,3 +103,52 @@ func TestWithdrawalLifecycle(t *testing.T) {
 		t.Fatal("released once")
 	}
 }
+
+func TestCustodianReports(t *testing.T) {
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	approved := Withdrawal{ID: "w1", Status: WithdrawalApproved, Provider: ProviderUdun, Required: 20, FreezeJournal: "j1"}
+	own := approved
+	own.Provider = ""
+	if own.Submit(now) {
+		t.Fatal("a withdrawal of the platform's wallets went to a custodian")
+	}
+	w := approved
+	if !w.Submit(now) || w.Status != WithdrawalSubmitted || w.ProviderStatus != CustodySubmitted || !w.SubmittedAt.Equal(now) {
+		t.Fatalf("Submit: %+v", w)
+	}
+	if w.Cancelable() {
+		t.Fatal("a withdrawal with the custodian can be canceled")
+	}
+	if w.Submit(now) {
+		t.Fatal("submitted twice")
+	}
+	if !w.Custodian(CustodyAccepted, "", now) || w.ProviderStatus != CustodyAccepted {
+		t.Fatalf("accepted: %+v", w)
+	}
+	if !w.Custodian(CustodyApproved, "", now) || w.Custodian(CustodyApproved, "", now) || w.Custodian(CustodyAccepted, "", now) {
+		t.Fatalf("the review changes once, and a late acknowledgment not at all: %+v", w)
+	}
+	sent := w
+	if !sent.Custodian(CustodySuccess, "0xabc", now) || sent.Status != WithdrawalConfirmed || sent.TxHash != "0xabc" || sent.Confirmations != 20 {
+		t.Fatalf("success: %+v", sent)
+	}
+	if sent.Custodian(CustodyFailed, "", now) || sent.Status != WithdrawalConfirmed {
+		t.Fatal("a failure after the success changed it")
+	}
+	if sent.NeedsRelease() {
+		t.Fatal("a sent withdrawal releases its funds")
+	}
+	for word, reason := range map[string]string{CustodyRejected: "CUSTODY_REJECTED", CustodyFailed: "CUSTODY_FAILED: 0xdead"} {
+		failed := w
+		tx := ""
+		if word == CustodyFailed {
+			tx = "0xdead"
+		}
+		if !failed.Custodian(word, tx, now) || failed.Status != WithdrawalFailed || failed.RejectReason != reason || failed.TxHash != "" {
+			t.Fatalf("%s: %+v", word, failed)
+		}
+		if !failed.NeedsRelease() {
+			t.Fatalf("%s: the frozen funds stay frozen", word)
+		}
+	}
+}

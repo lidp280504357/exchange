@@ -124,20 +124,37 @@ type Orders interface {
 // WithdrawalQuery selects withdrawals: a status (PENDING_REVIEW when
 // empty, ALL for every status), a user and an asset, a page.
 type WithdrawalQuery struct {
-	Status string
-	UserID string
-	Asset  string
-	Cursor string
-	Limit  int
+	Status  string
+	UserID  string
+	Asset   string
+	Network string
+	Cursor  string
+	Limit   int
 	// Order is asc (oldest first, the review queue's default) or desc.
 	Order string
 }
 
-// Withdrawals lists and reviews withdrawals (wallet-service); the page
-// ({items, next_cursor}) passes through as the wallet renders it.
+// CallbackQuery selects the custodian's callbacks: an outcome, a kind, a
+// trade/withdrawal ID, transaction hash or address, a page.
+type CallbackQuery struct {
+	Result string
+	Kind   string
+	Query  string
+	Cursor string
+	Limit  int
+}
+
+// Withdrawals lists and reviews withdrawals and shows the custody wallet
+// (wallet-service); answers pass through as the wallet renders them.
 type Withdrawals interface {
 	List(ctx context.Context, q WithdrawalQuery) (json.RawMessage, error)
 	Review(ctx context.Context, id string, approve bool, reviewer, reason string) (json.RawMessage, error)
+	// Custody describes the custodian: coins, checks, what is with it.
+	Custody(ctx context.Context) (json.RawMessage, error)
+	Callbacks(ctx context.Context, q CallbackQuery) (json.RawMessage, error)
+	Callback(ctx context.Context, id string) (json.RawMessage, error)
+	// Replay applies a stored callback again for actor.
+	Replay(ctx context.Context, id, actor, reason string) (json.RawMessage, error)
 }
 
 // Instruments lists and changes reference data (instrument-service).

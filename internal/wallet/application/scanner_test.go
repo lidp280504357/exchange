@@ -38,6 +38,7 @@ type memStore struct {
 	prices    map[string]decimal.Decimal
 	wevents   []proto.Message
 	audits    []proto.Message
+	callbacks []domain.Callback
 }
 
 func newMemStore() *memStore {
@@ -245,8 +246,14 @@ func (f *fakeNetworks) Network(_ context.Context, asset, network string) (domain
 	return domain.Network{}, domain.ErrUnknownNetwork
 }
 
-func (f *fakeNetworks) OnNetwork(context.Context, string) ([]domain.Network, error) {
-	return f.nets, nil
+func (f *fakeNetworks) OnNetwork(_ context.Context, network string) ([]domain.Network, error) {
+	var out []domain.Network
+	for _, n := range f.nets {
+		if n.Network == network {
+			out = append(out, n)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeNetworks) ForAsset(_ context.Context, asset string) ([]domain.Network, error) {

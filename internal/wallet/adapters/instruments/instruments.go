@@ -55,13 +55,20 @@ func (c *Client) all(ctx context.Context) ([]domain.Network, error) {
 				}
 				amounts[i] = v
 			}
+			// EVM contracts are compared in lower case; other chains' are
+			// case-sensitive (TRON's Base58).
+			contract := n.GetContractAddress()
+			if f := n.GetAddressFormat(); f == "" || f == domain.FormatEVM {
+				contract = strings.ToLower(contract)
+			}
 			nets = append(nets, domain.Network{
-				Asset: a.GetAssetCode(), Network: n.GetNetwork(), Chain: n.GetChain(), Contract: strings.ToLower(n.GetContractAddress()),
+				Asset: a.GetAssetCode(), Network: n.GetNetwork(), Chain: n.GetChain(), Contract: contract,
 				Decimals: a.GetDecimals(), Confirmations: uint32(max(n.GetConfirmations(), 0)), //nolint:gosec // non-negative
 				MinDeposit: amounts[0], Enabled: a.GetDepositEnabled() && n.GetDepositEnabled(),
 				WithdrawEnabled: a.GetWithdrawEnabled() && n.GetWithdrawEnabled(), MinWithdraw: amounts[1], WithdrawFee: amounts[2],
 				MemoRequired: n.GetMemoRequired(), DisplayName: n.GetDisplayName(), AddressFormat: n.GetAddressFormat(),
 				ETAMinutes: n.GetEtaMinutes(), ExplorerTxURL: n.GetExplorerTxUrl(), ExplorerAddressURL: n.GetExplorerAddressUrl(),
+				Provider: n.GetProvider(), ProviderCoin: n.GetProviderCoin(),
 			})
 		}
 	}

@@ -176,9 +176,39 @@ export interface paths {
         post?: never;
         /**
          * Cancel a withdrawal that is not signed yet
-         * @description Releases the frozen funds. Fails with WALLET_WITHDRAWAL_NOT_CANCELABLE once it is being sent.
+         * @description Releases the frozen funds. Fails with WALLET_WITHDRAWAL_NOT_CANCELABLE
+         *     once it is being signed or is with the custodian.
          */
         delete: operations["cancelWithdrawal"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/wallet/callbacks/udun": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The custodian's notice of a deposit or withdrawal (Udun)
+         * @description Called by the custodian, not by users (ADR-0011). The four fields
+         *     come as a form or as JSON: body is the trade as a JSON string,
+         *     signed with the merchant key as sign = md5(body + key + nonce +
+         *     timestamp); the timestamp (seconds or milliseconds) must be within
+         *     five minutes. A trade is applied once per status: tradeType 1 is a
+         *     deposit, credited at status 3; tradeType 2 a withdrawal (businessId
+         *     = the withdrawal ID), 0 and 1 the custodian's review, 2 refused, 3
+         *     sent (settled and CONFIRMED), 4 failed. Every callback is logged
+         *     for the admin console. The answer is "success" once the callback is
+         *     recorded and applied; anything else asks the custodian to try again.
+         */
+        post: operations["udunCallback"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -276,7 +306,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             network: string;
-            /** @description EIP-55 checksummed. */
+            /** @description EIP-55 checksummed on EVM networks, as the network writes it elsewhere. */
             address: string;
             label: string;
             /** Format: date-time */
@@ -297,8 +327,10 @@ export interface components {
             fee: components["schemas"]["Decimal"];
             /** @description The address is another user's deposit address; the withdrawal completes inside the ledger. */
             internal: boolean;
+            /** @description The custodian sends it (SUBMITTED until it reports); otherwise the platform signs and broadcasts it. */
+            custody: boolean;
             /** @enum {string} */
-            status: "REQUESTED" | "PENDING_REVIEW" | "APPROVED" | "SIGNING" | "BROADCAST" | "CONFIRMING" | "CONFIRMED" | "INTERNAL_TRANSFER" | "REJECTED" | "CANCELED" | "FAILED";
+            status: "REQUESTED" | "PENDING_REVIEW" | "APPROVED" | "SIGNING" | "BROADCAST" | "CONFIRMING" | "SUBMITTED" | "CONFIRMED" | "INTERNAL_TRANSFER" | "REJECTED" | "CANCELED" | "FAILED";
             risk_reasons: ("NEW_ACCOUNT" | "NEW_DEVICE" | "SECURITY_CHANGE" | "NEW_ADDRESS" | "LARGE_AMOUNT" | "DAILY_SHARE")[];
             approvals_required: number;
             reject_reason: string | null;
@@ -309,10 +341,29 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             approved_at: string | null;
+            /**
+             * Format: date-time
+             * @description When it was handed to the custodian.
+             */
+            submitted_at: string | null;
             /** Format: date-time */
             broadcast_at: string | null;
             /** Format: date-time */
             confirmed_at: string | null;
+        };
+        CustodyEnvelope: {
+            /** @description Unix time in seconds or milliseconds (a number in JSON). */
+            timestamp: string;
+            /** @description The custodian's random number (a number in JSON). */
+            nonce: string;
+            /** @description md5(body + key + nonce + timestamp), lower-case hex. */
+            sign: string;
+            /**
+             * @description The trade as JSON: address, amount and fee (integers in units of
+             *     10^-decimals), decimals, mainCoinType, coinType, businessId,
+             *     blockHigh, status, tradeId, tradeType, txId, memo.
+             */
+            body: string;
         };
         Error: {
             /**
@@ -665,6 +716,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Withdrawal"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    udunCallback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["CustodyEnvelope"];
+                "application/json": components["schemas"]["CustodyEnvelope"];
+            };
+        };
+        responses: {
+            /** @description Recorded and applied (or already applied before). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": "success";
+                };
+            };
+            /** @description Signature or timestamp wrong (WALLET_CALLBACK_SIGNATURE, WALLET_CALLBACK_STALE); logged and not applied. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             default: components["responses"]["Error"];

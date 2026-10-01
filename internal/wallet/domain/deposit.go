@@ -1,10 +1,12 @@
 // Package domain holds the wallet's model (requirements §5.10, §11.5):
-// deposit addresses derived per user and network, and deposits that move
-// DETECTED -> CONFIRMING -> CONFIRMED -> CREDITED as blocks confirm them,
-// to ORPHANED when a reorganization drops them (back to DETECTED if they
-// reappear) and to REJECTED when they cannot go to the user: unclaimed
-// ones (below the minimum, closed account) are booked to
-// UNCLAIMED_DEPOSIT, unsupported tokens are not booked at all.
+// deposit addresses per user and network, derived from the platform's
+// key or created by the custodian (ADR-0011), and deposits that move
+// DETECTED -> CONFIRMING -> CONFIRMED -> CREDITED as blocks confirm them
+// (a custodian reports them CONFIRMED), to ORPHANED when a reorganization
+// drops them (back to DETECTED if they reappear) and to REJECTED when they
+// cannot go to the user: unclaimed ones (below the minimum, closed
+// account) are booked to UNCLAIMED_DEPOSIT, unsupported tokens are not
+// booked at all.
 package domain
 
 import (
@@ -51,11 +53,17 @@ var (
 	ErrNotConfigured    = apperr.New(apperr.KindUnavailable, "WALLET_UNAVAILABLE", "deposit addresses are not available yet")
 )
 
-// Address is a user's deposit address on a network.
+// ProviderUdun is the Udun custody wallet (instrument-service's network
+// provider).
+const ProviderUdun = "UDUN"
+
+// Address is a user's deposit address on a network: derived at Index, or
+// created by Provider.
 type Address struct {
 	UserID    string
 	Network   string
 	Index     uint32
+	Provider  string
 	Address   string
 	CreatedAt time.Time
 }
@@ -84,6 +92,9 @@ type Deposit struct {
 	Reason    string
 	Status    string
 	JournalID string
+	// ProviderTxID is the custodian's ID of a deposit it reported
+	// ("UDUN:<tradeId>"), which keys it.
+	ProviderTxID string
 	// CreditRequested is when DepositConfirmed went to the ledger.
 	CreditRequested time.Time
 	DetectedAt      time.Time
@@ -188,4 +199,12 @@ type Network struct {
 	ETAMinutes         int32
 	ExplorerTxURL      string
 	ExplorerAddressURL string
+	// Provider is the custodian that serves the network (ProviderUdun),
+	// empty for the platform's own wallets; ProviderCoin its code of the
+	// asset there ("mainCoinType:coinType").
+	Provider     string
+	ProviderCoin string
 }
+
+// Custody reports whether a custodian serves the network.
+func (n Network) Custody() bool { return n.Provider != "" }

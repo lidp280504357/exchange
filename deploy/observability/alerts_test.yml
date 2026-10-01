@@ -123,6 +123,34 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'wallet_custody_shortfall{job="wallet-service", provider="UDUN", asset="USDT"}'
+        values: '0x10 12.5x20'
+      - series: 'wallet_custody_submitted_oldest_seconds{job="wallet-service", provider="UDUN"}'
+        values: '86000 86400 86460'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CustodyShortfall
+        exp_alerts: []
+      - eval_time: 26m
+        alertname: CustodyShortfall
+        exp_alerts:
+          - exp_labels: {severity: critical, provider: UDUN, asset: USDT}
+            exp_annotations:
+              summary: "the custodian UDUN and the platform's wallets hold 12.5 USDT less than the ledger expects (invariant 4)"
+              runbook: docs/runbook/custody.md
+      - eval_time: 1m
+        alertname: CustodyWithdrawalStuck
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: CustodyWithdrawalStuck
+        exp_alerts:
+          - exp_labels: {severity: warning, provider: UDUN}
+            exp_annotations:
+              summary: "a withdrawal has been with the custodian UDUN for more than 24 hours without its outcome; check it in the custodian's console"
+              runbook: docs/runbook/custody.md
+
+  - interval: 1m
+    input_series:
       - series: 'market_contract_degraded{job="market-data-service", symbol="BTC-USDT-PERP"}'
         values: '0 0 1 1'
     alert_rule_test:

@@ -35,6 +35,7 @@ type Repos interface {
 	Attempts() AttemptRepo
 	Nonces() NonceRepo
 	Prices() PriceRepo
+	Callbacks() CallbackRepo
 	// Emit queues a wallet.deposit.events event keyed by the user.
 	Emit(ctx context.Context, msg proto.Message, userID string) error
 	// EmitWithdrawal queues a wallet.withdrawal.events event keyed by the
@@ -48,6 +49,13 @@ type Repos interface {
 type AddressRepo interface {
 	// Get returns the user's address on network, or nil.
 	Get(ctx context.Context, userID, network string) (*domain.Address, error)
+	// Lock holds the user's first address request on network for the
+	// transaction: a custodian's address is created only once.
+	Lock(ctx context.Context, userID, network string) error
+	// Owner returns the user of an address on network, "" when none.
+	Owner(ctx context.Context, network, address string) (string, error)
+	// Count counts the addresses on the networks.
+	Count(ctx context.Context, networks []string) (int, error)
 	// NextIndex reserves the next derivation index of network.
 	NextIndex(ctx context.Context, network string) (uint32, error)
 	Insert(ctx context.Context, a domain.Address) error
@@ -69,6 +77,35 @@ type WithdrawAddressRepo interface {
 	Delete(ctx context.Context, userID, id string, now time.Time) (bool, error)
 }
 
+// CallbackFilter selects callbacks for the admin console; empty fields
+// match everything. Query matches a trade ID, withdrawal ID, transaction
+// hash or address.
+type CallbackFilter struct {
+	Result string
+	Kind   string
+	Query  string
+	After  string
+	Limit  int
+}
+
+// CallbackRepo keeps the custodian's callbacks.
+type CallbackRepo interface {
+	// Receive records a callback. A verified one is kept once per
+	// provider, trade and status: a repeat counts one more attempt and
+	// returns the stored callback with its result (fresh false).
+	Receive(ctx context.Context, c domain.Callback) (stored domain.Callback, fresh bool, err error)
+	// Finish records what became of a callback.
+	Finish(ctx context.Context, id, result, detail string, at time.Time) error
+	// Get returns a callback, or nil.
+	Get(ctx context.Context, id string) (*domain.Callback, error)
+	// Page returns up to f.Limit callbacks matching f, newest first,
+	// after the one with ID f.After.
+	Page(ctx context.Context, f CallbackFilter) ([]domain.Callback, error)
+	// Attention counts the verified callbacks that failed or found
+	// nothing to apply to, and returns when the last one arrived.
+	Attention(ctx context.Context) (int, time.Time, error)
+}
+
 // WithdrawalRepo stores withdrawals.
 type WithdrawalRepo interface {
 	Insert(ctx context.Context, w domain.Withdrawal) error
@@ -83,8 +120,12 @@ type WithdrawalRepo interface {
 	// ByStatus lists the network's withdrawals in the statuses, oldest
 	// first.
 	ByStatus(ctx context.Context, network string, statuses ...string) ([]domain.Withdrawal, error)
-	// Page returns up to f.Limit of the network's withdrawals matching f,
-	// after the one with ID f.After in f's order ("": from the start).
+	// Submitted lists the withdrawals with the custodian provider, oldest
+	// first.
+	Submitted(ctx context.Context, provider string) ([]domain.Withdrawal, error)
+	// Page returns up to f.Limit of the network's withdrawals ("": every
+	// network's) matching f, after the one with ID f.After in f's order
+	// ("": from the start).
 	Page(ctx context.Context, network string, f WithdrawalFilter) ([]domain.Withdrawal, error)
 	// Unreleased lists the refused withdrawals whose funds are not released.
 	Unreleased(ctx context.Context, network string) ([]domain.Withdrawal, error)
@@ -158,7 +199,8 @@ type FundingRepo interface {
 // CheckRepo keeps the chain checks.
 type CheckRepo interface {
 	Insert(ctx context.Context, c domain.ChainCheck) error
-	// Latest returns the latest check of each asset of network.
+	// Latest returns the latest check of each asset of network (of every
+	// holder when network is empty).
 	Latest(ctx context.Context, network string) ([]domain.ChainCheck, error)
 }
 
@@ -168,6 +210,8 @@ type DepositRepo interface {
 	Update(ctx context.Context, d domain.Deposit) error
 	// Find returns the deposit of a transfer, or nil.
 	Find(ctx context.Context, network, txHash string, logIndex int64) (*domain.Deposit, error)
+	// ByProviderTx returns the deposit a custodian reported, or nil.
+	ByProviderTx(ctx context.Context, providerTxID string) (*domain.Deposit, error)
 	// GetForUpdate returns a deposit locked, or nil.
 	GetForUpdate(ctx context.Context, id string) (*domain.Deposit, error)
 	// Pending lists the deposits of network waiting for confirmations.
@@ -341,6 +385,65 @@ type Ledger interface {
 	// in asset.
 	SystemBalances(ctx context.Context, asset string) (map[string]decimal.Decimal, error)
 }
+
+// CustodyCoin is one of the custodian's coins with what it holds of it.
+type CustodyCoin struct {
+	// Code is the custodian's "mainCoinType:coinType", networks'
+	// provider_coin.
+	Code     string
+	Symbol   string
+	Decimals int32
+	Token    bool
+	// Balance is nil when the custodian did not report one.
+	Balance *decimal.Decimal
+}
+
+// CustodyTrade is a verified callback: a deposit to one of the platform's
+// addresses, or news of a withdrawal (BusinessID: its ID).
+type CustodyTrade struct {
+	TradeID string
+	Kind    string // domain.CallbackDeposit or domain.CallbackWithdrawal
+	// Status is the custodian's code; Word what it means for a withdrawal
+	// (domain.Custody*), and domain.CustodySuccess for a credited deposit.
+	Status  int
+	Word    string
+	Coin    string
+	Address string
+	Memo    string
+	Amount  decimal.Decimal
+	Fee     decimal.Decimal
+	// RawAmount is the amount in the coin's smallest unit.
+	RawAmount  decimal.Decimal
+	TxHash     string
+	Block      uint64
+	BusinessID string
+}
+
+// Custody is a custodian's gateway (ADR-0011): it creates deposit
+// addresses, takes withdrawals, checks addresses, reports its coins and
+// balances, and signs the callbacks it sends.
+type Custody interface {
+	// Provider is the code networks name it by (domain.ProviderUdun).
+	Provider() string
+	// CreateAddress asks for a new deposit address of net for the user.
+	CreateAddress(ctx context.Context, net domain.Network, userID string) (string, error)
+	// Submit hands a withdrawal over. The withdrawal's ID makes a repeat
+	// harmless; a refusal for good fails with domain.ErrCustodyRefused.
+	Submit(ctx context.Context, w domain.Withdrawal, net domain.Network) error
+	// CheckAddress asks whether address belongs to net's chain.
+	CheckAddress(ctx context.Context, net domain.Network, address string) (bool, error)
+	// Coins lists the custodian's coins with their balances.
+	Coins(ctx context.Context) ([]CustodyCoin, error)
+	// Parse verifies a callback as received and reads its trade; window 0
+	// skips the age check (a stored callback replayed). It fails with
+	// domain.ErrCallbackSignature, ErrCallbackStale or
+	// ErrCallbackMalformed.
+	Parse(contentType string, raw []byte, now time.Time, window time.Duration) (CustodyTrade, error)
+}
+
+// Holdings reports what an asset's other holder holds now: the custodian
+// for the chain check of the platform's wallets, and the other way round.
+type Holdings func(ctx context.Context, asset string) (decimal.Decimal, error)
 
 // WithdrawalFilter selects withdrawals for the admin console; empty
 // fields match everything.

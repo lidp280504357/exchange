@@ -45,7 +45,7 @@ func walletWith(ctx context.Context, db *pg.DB, args []string, out io.Writer) er
 	store := postgres.NewStore(db, event.NewFactory("exchangectl", host))
 	fs := flag.NewFlagSet("wallet "+args[0], flag.ContinueOnError)
 	fs.SetOutput(out)
-	network := fs.String("network", "ETH-SEPOLIA", "network")
+	network := fs.String("network", "ETH-SEPOLIA", "network; UDUN for the custodian's reconcile and checks")
 	queue := func(kind string, a map[string]string) error {
 		c, err := application.Queue(ctx, store, *network, kind, a, actor(), time.Now())
 		if err != nil {
@@ -97,7 +97,7 @@ func walletWith(ctx context.Context, db *pg.DB, args []string, out io.Writer) er
 		if *status == "ALL" {
 			statuses = []string{
 				domain.WithdrawalRequested, domain.WithdrawalReview, domain.WithdrawalApproved, domain.WithdrawalSigning,
-				domain.WithdrawalBroadcast, domain.WithdrawalConfirming, domain.WithdrawalConfirmed, domain.WithdrawalRejected,
+				domain.WithdrawalBroadcast, domain.WithdrawalConfirming, domain.WithdrawalSubmitted, domain.WithdrawalConfirmed, domain.WithdrawalRejected,
 				domain.WithdrawalCanceled, domain.WithdrawalFailed,
 			}
 		}
@@ -160,10 +160,10 @@ func printChecks(ctx context.Context, store *postgres.Store, network string, out
 		return nil
 	}
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "CHECKED\tASSET\tHELD\tEXPECTED\tUNBOOKED GAS\tSHORTFALL\tADDRESSES")
+	fmt.Fprintln(w, "CHECKED\tASSET\tHELD\tELSEWHERE\tIN FLIGHT\tEXPECTED\tUNBOOKED FEES\tSHORTFALL\tADDRESSES")
 	for _, c := range list {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%d\n", c.CheckedAt.UTC().Format(time.RFC3339), c.Asset, c.Chain, c.Ledger, c.Unbooked,
-			c.Shortfall, c.Addresses)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n", c.CheckedAt.UTC().Format(time.RFC3339), c.Asset, c.Chain, c.Elsewhere,
+			c.InFlight, c.Ledger, c.Unbooked, c.Shortfall, c.Addresses)
 	}
 	return w.Flush()
 }

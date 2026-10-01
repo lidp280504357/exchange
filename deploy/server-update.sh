@@ -27,9 +27,11 @@ main() {
 
   # 1. 基础设施与 nginx 配置以仓库为准同步到 infra 目录；不覆盖服务器上的 .env、证书和生成的 Cloudflare IP 列表
   rsync -a --exclude '.env' --exclude 'apps.env' --exclude 'ssl/' --exclude '00-cloudflare-real-ip.conf' --exclude 'nginx/html/' \
-    --exclude 'nginx/admin/' --exclude 'nginx/sites/' deploy/compose/ "$INFRA"/
+    --exclude 'nginx/admin/' --exclude 'nginx/sites/' --exclude 'udun-mock/' deploy/compose/ "$INFRA"/
   cp deploy/redpanda/topics.sh "$INFRA/redpanda/topics.sh"
   mkdir -p "$INFRA/backup" && cp deploy/backup/pg-backup.sh "$INFRA/backup/pg-backup.sh"
+  # 托管钱包模拟网关（ADR-0011）的状态目录，容器用户 uid 10001 可写
+  sudo install -d -o 10001 -g 10001 -m 700 "$INFRA/udun-mock"
 
   # 2. Topic 幂等核对
   bash "$INFRA/redpanda/topics.sh" >/dev/null && echo "== topic 核对完成"

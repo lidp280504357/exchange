@@ -206,8 +206,9 @@ func (r fundings) Insert(ctx context.Context, f domain.Funding) error {
 type checks repos
 
 func (r checks) Insert(ctx context.Context, c domain.ChainCheck) error {
-	_, err := r.q.Exec(ctx, `INSERT INTO chain_checks (network, asset, chain, ledger, unbooked, shortfall, addresses, checked_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, c.Network, c.Asset, c.Chain, c.Ledger, c.Unbooked, c.Shortfall, c.Addresses, c.CheckedAt)
+	_, err := r.q.Exec(ctx, `INSERT INTO chain_checks (network, asset, chain, ledger, unbooked, elsewhere, in_flight, shortfall,
+		addresses, checked_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`, c.Network, c.Asset, c.Chain, c.Ledger, c.Unbooked,
+		c.Elsewhere, c.InFlight, c.Shortfall, c.Addresses, c.CheckedAt)
 	if err != nil {
 		return fmt.Errorf("insert chain check: %w", err)
 	}
@@ -215,14 +216,16 @@ func (r checks) Insert(ctx context.Context, c domain.ChainCheck) error {
 }
 
 func (r checks) Latest(ctx context.Context, network string) ([]domain.ChainCheck, error) {
-	rows, err := r.q.Query(ctx, `SELECT DISTINCT ON (asset) network, asset, chain, ledger, unbooked, shortfall, addresses, checked_at
-		FROM chain_checks WHERE network = $1 ORDER BY asset, checked_at DESC`, network)
+	rows, err := r.q.Query(ctx, `SELECT DISTINCT ON (network, asset) network, asset, chain, ledger, unbooked, elsewhere, in_flight,
+		shortfall, addresses, checked_at
+		FROM chain_checks WHERE $1 = '' OR network = $1 ORDER BY network, asset, checked_at DESC`, network)
 	if err != nil {
 		return nil, fmt.Errorf("list chain checks: %w", err)
 	}
 	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.ChainCheck, error) {
 		var c domain.ChainCheck
-		err := row.Scan(&c.Network, &c.Asset, &c.Chain, &c.Ledger, &c.Unbooked, &c.Shortfall, &c.Addresses, &c.CheckedAt)
+		err := row.Scan(&c.Network, &c.Asset, &c.Chain, &c.Ledger, &c.Unbooked, &c.Elsewhere, &c.InFlight, &c.Shortfall, &c.Addresses,
+			&c.CheckedAt)
 		return c, err
 	})
 	if err != nil {

@@ -17,7 +17,8 @@ message Withdrawal {
   // Kept by the platform; zero for internal transfers.
   string fee = 7;
   // REQUESTED, PENDING_REVIEW, APPROVED, SIGNING, BROADCAST, CONFIRMING,
-  // CONFIRMED, INTERNAL_TRANSFER, REJECTED, CANCELED or FAILED.
+  // SUBMITTED (with the custodian), CONFIRMED, INTERNAL_TRANSFER,
+  // REJECTED, CANCELED or FAILED.
   string status = 8;
   // Set when the address is another user's deposit address: the
   // withdrawal completes in the ledger (INTERNAL_TRANSFER).
@@ -29,6 +30,9 @@ message Withdrawal {
   // NEW_ADDRESS, LARGE_AMOUNT, DAILY_SHARE) or was rejected.
   repeated string risk_reasons = 13;
   string reject_reason = 14;
+  // The custodian that sends it (ADR-0011: UDUN); empty when the
+  // platform's own wallets do.
+  string provider = 15;
 }
 
 // WithdrawalRequested: the amount and fee are frozen.
@@ -76,8 +80,16 @@ message WithdrawalConfirmed {
   Withdrawal withdrawal = 1;
 }
 
-// WithdrawalFailed: the transaction failed on chain; it needs manual
-// handling.
+// WithdrawalFailed: the transaction failed on chain, or the custodian
+// refused or failed it; it needs manual handling. Funds that never left
+// the platform are released.
 message WithdrawalFailed {
+  Withdrawal withdrawal = 1;
+}
+
+// WithdrawalSubmitted: handed to the custodian (ADR-0011), which sends it
+// after its own checks; the ledger settles it once the custodian reports
+// success (WithdrawalConfirmed).
+message WithdrawalSubmitted {
   Withdrawal withdrawal = 1;
 }

@@ -69,6 +69,10 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Post("/users/{id}/cancel-orders", h.cancelOrders)
 			r.Get("/withdrawals", h.withdrawals)
 			r.Post("/withdrawals/{id}/review", h.review)
+			r.Get("/custody", h.custody)
+			r.Get("/custody/callbacks", h.custodyCallbacks)
+			r.Get("/custody/callbacks/{id}", h.custodyCallback)
+			r.Post("/custody/callbacks/{id}/replay", h.replayCallback)
 			r.Get("/instruments", h.instruments)
 			r.Post("/instruments/pairs/{symbol}/status", h.pairStatus)
 			r.Get("/flags", h.flags)
@@ -261,8 +265,8 @@ func writeRaw(w http.ResponseWriter, raw []byte) {
 func (h *Handler) withdrawals(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	raw, err := h.Svc.Withdrawals(r.Context(), principal(r), ports.WithdrawalQuery{
-		Status: q.Get("status"), UserID: q.Get("user_id"), Asset: q.Get("asset"), Cursor: q.Get("cursor"), Limit: intParam(q, "limit"),
-		Order: q.Get("order"),
+		Status: q.Get("status"), UserID: q.Get("user_id"), Asset: q.Get("asset"), Network: q.Get("network"), Cursor: q.Get("cursor"),
+		Limit: intParam(q, "limit"), Order: q.Get("order"),
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)
@@ -434,6 +438,52 @@ func (h *Handler) review(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	raw, err := h.Svc.ReviewWithdrawal(r.Context(), principal(r), chi.URLParam(r, "id"), body.Approve, body.Reason)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeRaw(w, raw)
+}
+
+func (h *Handler) custody(w http.ResponseWriter, r *http.Request) {
+	raw, err := h.Svc.Custody(r.Context(), principal(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeRaw(w, raw)
+}
+
+func (h *Handler) custodyCallbacks(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	raw, err := h.Svc.CustodyCallbacks(r.Context(), principal(r), ports.CallbackQuery{
+		Result: q.Get("result"), Kind: q.Get("kind"), Query: q.Get("q"), Cursor: q.Get("cursor"), Limit: intParam(q, "limit"),
+	})
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeRaw(w, raw)
+}
+
+func (h *Handler) custodyCallback(w http.ResponseWriter, r *http.Request) {
+	raw, err := h.Svc.CustodyCallback(r.Context(), principal(r), chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeRaw(w, raw)
+}
+
+func (h *Handler) replayCallback(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	raw, err := h.Svc.ReplayCallback(r.Context(), principal(r), chi.URLParam(r, "id"), body.Reason)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

@@ -13,7 +13,6 @@ import (
 	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
 	walletv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/evm"
 	"github.com/lidp280504357/exchange/internal/wallet/domain"
 	"github.com/lidp280504357/exchange/internal/wallet/ports"
 )
@@ -43,27 +42,24 @@ type AddressInput struct {
 
 // AddAddress adds an address to the user's book after a step-up; it can
 // be used once its cooling-off period ends. The same address again
-// returns the entry it has.
+// returns the entry it has. The address is checked like ValidateAddress
+// does (its form, the custodian, not the user's own).
 func (s *Service) AddAddress(ctx context.Context, userID string, in AddressInput) (domain.WithdrawAddress, error) {
 	label := strings.TrimSpace(in.Label)
-	switch {
-	case !evm.ValidAddress(in.Address):
-		return domain.WithdrawAddress{}, domain.ErrInvalidAddress
-	case len(label) > 50:
+	if len(label) > 50 {
 		return domain.WithdrawAddress{}, apperr.Invalid("the label has at most 50 characters")
 	}
-	if nets, err := s.Networks.OnNetwork(ctx, in.Network); err != nil || len(nets) == 0 {
-		if err == nil {
-			err = domain.ErrUnknownNetwork
-		}
+	v, err := s.ValidateAddress(ctx, userID, "", in.Network, in.Address, "")
+	switch {
+	case err != nil:
 		return domain.WithdrawAddress{}, err
-	}
-	r := s.Store.Read()
-	if own, err := r.Addresses().Get(ctx, userID, in.Network); err != nil {
-		return domain.WithdrawAddress{}, err
-	} else if own != nil && strings.EqualFold(own.Address, in.Address) {
+	case v.Reason == domain.ReasonAddressOwn:
 		return domain.WithdrawAddress{}, domain.ErrOwnAddress
+	case !v.Valid:
+		return domain.WithdrawAddress{}, domain.ErrInvalidAddress.WithDetail("reason", v.Reason)
 	}
+	in.Address = v.Normalized
+	r := s.Store.Read()
 	if known, err := r.WithdrawAddresses().Find(ctx, userID, in.Network, in.Address); err != nil || known != nil {
 		if known != nil {
 			return *known, nil
@@ -75,7 +71,7 @@ func (s *Service) AddAddress(ctx context.Context, userID string, in AddressInput
 	}
 	now := s.Now()
 	a := domain.WithdrawAddress{
-		ID: uuid.Must(uuid.NewV7()).String(), UserID: userID, Network: in.Network, Address: evm.Checksum(in.Address), Label: label,
+		ID: uuid.Must(uuid.NewV7()).String(), UserID: userID, Network: in.Network, Address: in.Address, Label: label,
 		CreatedAt: now, UsableAt: now.Add(s.W.Cooldown),
 	}
 	return a, s.Store.Tx(ctx, func(r ports.Repos) error { return r.WithdrawAddresses().Insert(ctx, a) })
@@ -142,12 +138,13 @@ func (s *Service) RequestWithdrawal(ctx context.Context, userID string, in Withd
 	if err != nil {
 		return domain.Withdrawal{}, err
 	}
+	check := domain.CheckAddress(net, in.Address, "")
 	switch {
-	case !net.WithdrawEnabled || net.Contract != "":
-		// Token withdrawals come with token contracts in the signer.
+	case !net.WithdrawEnabled || (net.Contract != "" && !net.Custody()):
+		// The signer sends only the chain's coin; the custodian sends tokens too.
 		return domain.Withdrawal{}, domain.ErrWithdrawClosed
-	case !evm.ValidAddress(in.Address):
-		return domain.Withdrawal{}, domain.ErrInvalidAddress
+	case !check.Valid:
+		return domain.Withdrawal{}, domain.ErrInvalidAddress.WithDetail("reason", check.Reason)
 	case !in.Amount.IsPositive() || !in.Amount.Equal(in.Amount.Truncate(net.Decimals)):
 		return domain.Withdrawal{}, apperr.New(apperr.KindInvalid, "WALLET_AMOUNT_PRECISION", "the amount must be positive within the asset's decimals").
 			WithDetail("decimals", net.Decimals)
@@ -161,6 +158,7 @@ func (s *Service) RequestWithdrawal(ctx context.Context, userID string, in Withd
 	if !allowed {
 		return domain.Withdrawal{}, apperr.New(apperr.KindForbidden, reason, "withdrawals are not available to this account now")
 	}
+	in.Address = check.Normalized
 	r := s.Store.Read()
 	entry, err := r.WithdrawAddresses().Find(ctx, userID, in.Network, in.Address)
 	if err != nil {
@@ -219,8 +217,8 @@ func (s *Service) RequestWithdrawal(ctx context.Context, userID string, in Withd
 		DailyLimit: limits.Daily,
 	})
 	w := domain.Withdrawal{
-		ID: uuid.Must(uuid.NewV7()).String(), UserID: userID, Asset: in.Asset, Network: in.Network, Address: evm.Checksum(in.Address),
-		Amount: in.Amount, Fee: fee, InternalUserID: payee, Status: domain.WithdrawalRequested, RiskScore: risk.Score,
+		ID: uuid.Must(uuid.NewV7()).String(), UserID: userID, Asset: in.Asset, Network: in.Network, Address: in.Address,
+		Amount: in.Amount, Fee: fee, InternalUserID: payee, Provider: net.Provider, Status: domain.WithdrawalRequested, RiskScore: risk.Score,
 		RiskReasons: risk.Reasons, ApprovalsRequired: risk.Approvals, ValueUSDT: value, Nonce: -1, Required: max(net.Confirmations, 1),
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -460,6 +458,6 @@ func WithdrawalProto(w domain.Withdrawal) *walletv1.Withdrawal {
 	return &walletv1.Withdrawal{
 		WithdrawalId: w.ID, UserId: w.UserID, Asset: w.Asset, Network: w.Network, Address: w.Address, Amount: w.Amount.String(),
 		Fee: w.Fee.String(), Status: w.Status, Internal: w.InternalUserID != "", TxHash: w.TxHash, Confirmations: w.Confirmations,
-		RequiredConfirmations: w.Required, RiskReasons: w.RiskReasons, RejectReason: w.RejectReason,
+		RequiredConfirmations: w.Required, RiskReasons: w.RiskReasons, RejectReason: w.RejectReason, Provider: w.Provider,
 	}
 }

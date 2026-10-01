@@ -550,7 +550,7 @@ func withdrawalOf(p interface {
 	}{
 		&walletv1.WithdrawalRequested{}, &walletv1.WithdrawalRiskScored{}, &walletv1.WithdrawalApproved{},
 		&walletv1.WithdrawalRejected{}, &walletv1.WithdrawalCanceled{}, &walletv1.WithdrawalBroadcast{},
-		&walletv1.WithdrawalConfirmed{}, &walletv1.WithdrawalFailed{},
+		&walletv1.WithdrawalConfirmed{}, &walletv1.WithdrawalFailed{}, &walletv1.WithdrawalSubmitted{},
 	} {
 		if p.MessageIs(m) {
 			if err := p.UnmarshalTo(m); err != nil {
