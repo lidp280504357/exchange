@@ -9,7 +9,9 @@ import (
 
 func TestMarginStatesAndLiquidationOrders(t *testing.T) {
 	// An isolated long of 1 at 60000 with 1200 of margin (50x): its
-	// maintenance margin at 58900 is 58900 x 0.01 = 589 (tier 2).
+	// maintenance margin at m is m x 1% less tier 2's amount, 50000 x
+	// (1% − 0.4%) = 300, so it reaches it near 59090.91, not at 59393.94 as
+	// with the rate alone (which jumps from 0.4% at 50000).
 	long := Position{
 		UserID: "u1", Symbol: btcPerp.Symbol, Side: SideBoth, Qty: d("1"), EntryCost: d("60000"), Margin: d("1200"),
 		MarginMode: Isolated, Leverage: 50,
@@ -19,8 +21,9 @@ func TestMarginStatesAndLiquidationOrders(t *testing.T) {
 		want MarginState
 	}{
 		{"60000", MarginHealthy},
-		{"59400", MarginWarning},   // balance 600 <= 1.2 x 594
-		{"59390", MarginLiquidate}, // 590 <= 593.9
+		{"59400", MarginHealthy},   // balance 600 > 1.2 x 294
+		{"59100", MarginWarning},   // 300 <= 1.2 x 291
+		{"59090", MarginLiquidate}, // 290 <= 290.9
 	} {
 		mark := d(c.mark)
 		if got := State(long.MarginBalance(mark), long.MaintenanceMargin(btcPerp, mark)); got != c.want {
@@ -157,26 +160,28 @@ func TestCrossLiquidationPrice(t *testing.T) {
 	mark := d("84000")
 	// A cross long of 2 at 84101.3 (20x, 8412.06 of margin) with 1587.94
 	// available: 10,000 in all. At x the equity 10000 + 2x − 168202.6
-	// meets 2x × 0.5%: x = 158202.6 / 1.99.
+	// meets 2x × 0.5% − 50: x = 158152.6 / 1.99.
 	long := Position{
 		UserID: "u1", Symbol: c.Symbol, Side: SideBoth, Qty: d("2"), EntryCost: d("168202.6"), Margin: d("8412.06"),
 		MarginMode: Cross, Leverage: 20,
 	}
 	marks := map[string]decimal.Decimal{c.Symbol: mark}
 	equity, maintenance := CrossEquity(d("1587.94"), nil, []Position{long}, contracts, marks)
-	if !equity.Equal(d("9797.4")) || !maintenance.Equal(d("840")) {
+	// 168000 x 0.5% less tier 2's 50000 x (0.5% − 0.4%) = 50.
+	if !equity.Equal(d("9797.4")) || !maintenance.Equal(d("790")) {
 		t.Fatalf("equity %s, maintenance %s", equity, maintenance)
 	}
-	if got := CrossLiquidationPrice(c, long, mark, equity, decimal.Zero); !got.Equal(d("79498.79396985")) {
+	if got := CrossLiquidationPrice(c, long, mark, equity, decimal.Zero); !got.Equal(d("79473.66834171")) {
 		t.Fatalf("long %s", got)
 	}
-	// A cross short of 1 at 60000 with 1000 of equity: 61000 / 1.005.
+	// A cross short of 1 at 60000 with 1000 of equity: 61050 / 1.005.
 	short := Position{UserID: "u2", Symbol: c.Symbol, Side: SideBoth, Qty: d("-1"), EntryCost: d("60000"), Margin: d("600"), MarginMode: Cross}
-	if got := CrossLiquidationPrice(c, short, d("60000"), d("1000"), decimal.Zero); !got.Equal(d("60696.51741294")) {
+	if got := CrossLiquidationPrice(c, short, d("60000"), d("1000"), decimal.Zero); !got.Equal(d("60746.26865672")) {
 		t.Fatalf("short %s", got)
 	}
 	// With 12,000 of equity the long of 1 at 60000 falls below 50,000 of
-	// notional before liquidation: the 0.4% tier's rate decides it.
+	// notional before liquidation: tier 2 gives 48190.95, in tier 1, whose
+	// rate decides it.
 	one := Position{Symbol: c.Symbol, Side: SideBoth, Qty: d("1"), EntryCost: d("60000"), Margin: d("3000"), MarginMode: Cross}
 	if got := CrossLiquidationPrice(c, one, d("60000"), d("12000"), decimal.Zero); !got.Equal(d("48192.77108434")) {
 		t.Fatalf("across a tier %s", got)
@@ -188,5 +193,32 @@ func TestCrossLiquidationPrice(t *testing.T) {
 	}
 	if got := CrossLiquidationPrice(c, one, d("60000"), d("70000"), decimal.Zero); !got.IsZero() {
 		t.Fatalf("covered %s", got)
+	}
+}
+
+// The maintenance margin has no step at a tier boundary (Binance's
+// cumulative maintenance amount): a cent past it costs about a cent's
+// worth of the new rate, not the whole notional's.
+func TestMaintenanceIsContinuousAcrossTiers(t *testing.T) {
+	c := btcPerp
+	c.Tiers = []RiskTier{
+		{MaxNotional: d("50000"), MaxLeverage: 125, MMR: d("0.004")},
+		{MaxNotional: d("250000"), MaxLeverage: 100, MMR: d("0.005")},
+		{MaxNotional: d("1000000"), MaxLeverage: 50, MMR: d("0.01")},
+		{MaxNotional: d("5000000"), MaxLeverage: 20, MMR: d("0.025")},
+		{MaxNotional: d("20000000"), MaxLeverage: 10, MMR: d("0.05")},
+		{MaxNotional: d("50000000"), MaxLeverage: 5, MMR: d("0.1")},
+		{MaxNotional: d("100000000"), MaxLeverage: 2, MMR: d("0.125")},
+	}
+	cent := d("0.01")
+	for _, tier := range c.Tiers[:len(c.Tiers)-1] {
+		at, past := c.Maintenance(tier.MaxNotional), c.Maintenance(tier.MaxNotional.Add(cent))
+		if jump := past.Sub(at); jump.IsNegative() || jump.GreaterThan(cent) {
+			t.Errorf("at %s: %s, a cent past it %s", tier.MaxNotional, at, past)
+		}
+	}
+	// 1,000,000 of notional: 1% less 50000 x 0.1% + 250000 x 0.5% = 1300.
+	if got := c.Maintenance(d("1000000")); !got.Equal(d("8700")) {
+		t.Fatalf("maintenance %s", got)
 	}
 }

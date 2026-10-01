@@ -217,6 +217,9 @@ func (p *Publisher) refresh(ctx context.Context) {
 		}
 	}
 	if houseDue {
+		// The holdings count what settled before the read began; the
+		// engine takes later fills off the rooms (holdings_at).
+		readAt := p.now()
 		holdings, err1 := p.house.Holdings(ctx)
 		positions, err2 := p.house.Positions(ctx)
 		if err1 != nil || err2 != nil {
@@ -224,7 +227,7 @@ func (p *Publisher) refresh(ctx context.Context) {
 			return
 		}
 		p.mu.Lock()
-		p.holdings, p.positions, p.houseAt = holdings, positions, p.now()
+		p.holdings, p.positions, p.houseAt = holdings, positions, readAt
 		p.mu.Unlock()
 		for asset, amount := range holdings {
 			p.inventory.WithLabelValues(asset, fmt.Sprint(p.backed(asset))).Set(amount.InexactFloat64())
@@ -271,7 +274,7 @@ func (p *Publisher) round() []outgoing {
 			}
 			msg.Bids, msg.Asks = refLevels(bids), refLevels(asks)
 			msg.BuyRoom, msg.SellRoom = buy.String(), sell.String()
-			msg.SourceTime = timestamppb.New(b.taken)
+			msg.SourceTime, msg.HoldingsAt = timestamppb.New(b.taken), timestamppb.New(p.houseAt)
 			p.room.WithLabelValues(spec.Symbol, "buy").Set(buy.InexactFloat64())
 			p.room.WithLabelValues(spec.Symbol, "sell").Set(sell.InexactFloat64())
 		}

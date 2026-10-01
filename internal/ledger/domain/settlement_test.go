@@ -187,24 +187,38 @@ func TestHouseTradesSettleOnMarketMaker(t *testing.T) {
 	}
 }
 
-func TestHouseMayGoNegative(t *testing.T) {
-	ps, err := SettlementPostings(houseTrade())
-	if err != nil {
-		t.Fatal(err)
-	}
-	var accounts []Account
-	for _, k := range PostingAccounts(ps) {
-		a := Account{Key: k}
-		if k.OwnerID == "buyer" && k.Asset == "USDT" {
-			a.Frozen = dec("140.2")
+// HOUSE may sell an internal asset it does not hold (it goes short), never
+// a backed one (ADR-0013): that trade is refused, to be parked.
+func TestHouseMayGoShortOnlyInInternalAssets(t *testing.T) {
+	for _, c := range []struct {
+		base string
+		ok   bool
+	}{{"SOL", true}, {"BTC", false}} {
+		tr := houseTrade()
+		tr.BaseAsset = c.base
+		ps, err := SettlementPostings(tr)
+		if err != nil {
+			t.Fatal(err)
 		}
-		accounts = append(accounts, a) // HOUSE holds nothing: an internal asset it sells
+		var accounts []Account
+		for _, k := range PostingAccounts(ps) {
+			a := Account{Key: k}
+			if k.OwnerID == "buyer" && k.Asset == "USDT" {
+				a.Frozen = dec("140.2")
+			}
+			accounts = append(accounts, a) // HOUSE holds nothing
+		}
+		err = Simulate(accounts, ps)
+		if c.ok && err != nil {
+			t.Fatalf("HOUSE sells %s short: %v", c.base, err)
+		}
+		if !c.ok && apperr.From(err).Code != "LEDGER_INSUFFICIENT_BALANCE" {
+			t.Fatalf("HOUSE sells %s it does not hold: %v", c.base, err)
+		}
 	}
-	if err := Simulate(accounts, ps); err != nil {
-		t.Fatalf("a trade against HOUSE settles whatever HOUSE holds: %v", err)
-	}
-	if !SystemAccount(AccountMarketMaker, "BTC").MayGoNegative() || SystemAccount(AccountFeeRevenue, "BTC").MayGoNegative() {
-		t.Fatal("only MARKET_MAKER among the new ones may go negative")
+	if !SystemAccount(AccountMarketMaker, "SOL").MayGoNegative() || SystemAccount(AccountMarketMaker, "BTC").MayGoNegative() ||
+		SystemAccount(AccountFeeRevenue, "SOL").MayGoNegative() {
+		t.Fatal("only MARKET_MAKER of an internal asset may go negative")
 	}
 }
 

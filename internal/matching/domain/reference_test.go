@@ -166,3 +166,42 @@ func TestSnapshotsKeepTheReference(t *testing.T) {
 		t.Fatalf("room %s", c.ref.BuyRoom)
 	}
 }
+
+// Updates come every 250 ms but HOUSE's holdings every second: an update
+// read from the same holdings must not give back room a fill already used,
+// or HOUSE sells more than it holds (ADR-0013).
+func TestUpdatesDoNotGiveBackUsedRoom(t *testing.T) {
+	b := NewBook("BTC-USDT")
+	first := ref()
+	first.SellRoom, first.HoldingsAt = d("0.6"), t0.Add(-time.Second)
+	b.Reference(first)
+	buy := at(order("u", Buy, Limit, IOC, "61000", "0.4"), 100*time.Millisecond)
+	expect(t, b.Place(buy), "T 0.4@60010; "+buy.ID+" FILLED 0.4/24004")
+	// The next update was computed from the same holdings: 0.6 of room
+	// again, of which 0.4 is gone.
+	again := ref()
+	again.SellRoom, again.HoldingsAt, again.At = d("0.6"), first.HoldingsAt, t0.Add(250*time.Millisecond)
+	b.Reference(again)
+	if !b.ref.SellRoom.Equal(d("0.2")) {
+		t.Fatalf("room %s, want 0.2", b.ref.SellRoom)
+	}
+	buy2 := at(order("u", Buy, Limit, IOC, "61000", "0.4"), 300*time.Millisecond)
+	expect(t, b.Place(buy2), "T 0.2@60010; "+buy2.ID+" CANCELED 0.2/12002 IOC")
+	// Holdings read well after both fills count them: the room is as given.
+	later := ref()
+	later.SellRoom, later.HoldingsAt, later.At = d("0.5"), t0.Add(3*time.Second), t0.Add(3*time.Second)
+	b.Reference(later)
+	if !b.ref.SellRoom.Equal(d("0.5")) || len(b.houseFills) != 0 {
+		t.Fatalf("room %s, fills %v", b.ref.SellRoom, b.houseFills)
+	}
+	// A restored book remembers the fills the rooms do not count yet.
+	b.Place(at(order("u", Sell, Market, IOC, "", "0.3"), 3100*time.Millisecond))
+	c := Restore(b.Snapshot())
+	next := ref()
+	next.BuyRoom, next.HoldingsAt, next.At = d("0.8"), t0.Add(3*time.Second), t0.Add(3250*time.Millisecond)
+	b.Reference(next)
+	c.Reference(next)
+	if !b.ref.BuyRoom.Equal(d("0.5")) || !c.ref.BuyRoom.Equal(b.ref.BuyRoom) {
+		t.Fatalf("buy room %s, restored %s, want 0.5", b.ref.BuyRoom, c.ref.BuyRoom)
+	}
+}

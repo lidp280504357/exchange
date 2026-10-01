@@ -34,6 +34,9 @@ const (
 	CheckFundingBatches = "FUNDING_BATCHES_BALANCED"
 	// PNL_CLEARING moves only with realized profit and loss.
 	CheckPnLClearingEntries = "PNL_CLEARING_ONLY_PNL"
+	// HOUSE's inventory of a backed asset (domain.HouseBacked) is not below
+	// zero (ADR-0013); only internal assets may go short.
+	CheckHouseBackedNonNegative = "HOUSE_BACKED_NON_NEGATIVE"
 )
 
 // Mismatch is one finding of a check.
@@ -108,6 +111,21 @@ var checks = []struct {
 		FROM accounts a JOIN journal_lines l ON l.account_id = a.id JOIN journals j ON j.id = l.journal_id
 		WHERE a.account_type = 'PNL_CLEARING' AND j.entry_type NOT IN ('REALIZED_PNL', 'LIQUIDATION_SETTLE', 'ADL_SETTLE')
 		LIMIT 100`},
+	{CheckHouseBackedNonNegative, `SELECT asset, format('MARKET_MAKER %s available %s, frozen %s', asset, available, frozen)
+		FROM accounts WHERE account_type = 'MARKET_MAKER' AND asset = ANY($1) AND (available < 0 OR frozen < 0)
+		ORDER BY asset LIMIT 100`},
+}
+
+// checkArgs are the query arguments of the checks that take some.
+var checkArgs = map[string]func() []any{CheckHouseBackedNonNegative: houseBacked}
+
+// houseBacked lists domain.HouseBacked for the query.
+func houseBacked() []any {
+	assets := make([]string, 0, len(domain.HouseBacked))
+	for a := range domain.HouseBacked {
+		assets = append(assets, a)
+	}
+	return []any{assets}
 }
 
 // Reconcile runs every check over the whole ledger and records each result
@@ -117,7 +135,11 @@ func (s *Store) Reconcile(ctx context.Context, now func() time.Time) ([]CheckRes
 	for _, c := range checks {
 		started := now()
 		res := CheckResult{Check: c.name, Mismatches: []Mismatch{}}
-		rows, err := s.db.Query(ctx, c.sql)
+		var args []any
+		if f := checkArgs[c.name]; f != nil {
+			args = f()
+		}
+		rows, err := s.db.Query(ctx, c.sql, args...)
 		if err != nil {
 			return nil, fmt.Errorf("reconcile %s: %w", c.name, err)
 		}

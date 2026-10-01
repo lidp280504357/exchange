@@ -114,14 +114,20 @@ func (k AccountKey) Validate() error {
 	return apperr.Invalid(fmt.Sprintf("invalid account %s/%s/%s", k.OwnerType, k.Type, k.Asset))
 }
 
+// HouseBacked are the assets HOUSE must hold to sell (ADR-0013): they can
+// be deposited and withdrawn, so its MARKET_MAKER account of them never goes
+// below zero. The internal assets it may sell short.
+var HouseBacked = map[string]bool{"USDT": true, "BTC": true, "ETH": true}
+
 // MayGoNegative reports whether the account is a counterparty allowed below
 // zero (invariant 3): DEPOSIT_PENDING, ADJUSTMENT and PNL_CLEARING, and
-// MARKET_MAKER, HOUSE's inventory: a trade against HOUSE settles whatever
-// its balance (ADR-0013), the house liquidity publisher keeps the backed
-// assets above zero and alerts when one is not.
+// MARKET_MAKER, HOUSE's inventory, of an internal asset. A trade that would
+// take HOUSE below zero in a backed asset is refused and parked (the house
+// liquidity publisher and the engine keep its rooms within its holdings,
+// so this is the last guard).
 func (k AccountKey) MayGoNegative() bool {
 	return k.Type == AccountDepositPending || k.Type == AccountAdjustment || k.Type == AccountPnLClearing ||
-		k.Type == AccountMarketMaker
+		(k.Type == AccountMarketMaker && !HouseBacked[k.Asset])
 }
 
 func (k AccountKey) String() string {

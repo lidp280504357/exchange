@@ -72,15 +72,44 @@ func (c Contract) MaxNotional(leverage int32) decimal.Decimal {
 // MMR is the maintenance margin rate of a position of notional: its
 // tier's, the last tier's beyond the ladder.
 func (c Contract) MMR(notional decimal.Decimal) decimal.Decimal {
-	for _, t := range c.Tiers {
-		if notional.LessThanOrEqual(t.MaxNotional) {
-			return t.MMR
-		}
-	}
 	if len(c.Tiers) == 0 {
 		return decimal.Zero
 	}
-	return c.Tiers[len(c.Tiers)-1].MMR
+	return c.Tiers[c.tierOf(notional)].MMR
+}
+
+// tierOf is the index of the tier of notional, the last beyond the ladder.
+func (c Contract) tierOf(notional decimal.Decimal) int {
+	for i, t := range c.Tiers {
+		if notional.LessThanOrEqual(t.MaxNotional) {
+			return i
+		}
+	}
+	return max(len(c.Tiers)-1, 0)
+}
+
+// maintenanceAmount is what tier i takes off notional x its rate: each
+// step up the ladder charged only on the notional above the step, as
+// Binance's cumulative maintenance amount does.
+func (c Contract) maintenanceAmount(i int) decimal.Decimal {
+	cum := decimal.Zero
+	for j := 1; j <= i && j < len(c.Tiers); j++ {
+		cum = cum.Add(c.Tiers[j-1].MaxNotional.Mul(c.Tiers[j].MMR.Sub(c.Tiers[j-1].MMR)))
+	}
+	return cum
+}
+
+// Maintenance is the maintenance margin of a position of notional
+// (§11.7): notional x its tier's rate less the tier's maintenance amount.
+// It rises continuously across a tier boundary instead of jumping, so a
+// position does not go from healthy to liquidated when its notional
+// crosses into the next tier.
+func (c Contract) Maintenance(notional decimal.Decimal) decimal.Decimal {
+	if len(c.Tiers) == 0 {
+		return decimal.Zero
+	}
+	i := c.tierOf(notional)
+	return notional.Mul(c.Tiers[i].MMR).Sub(c.maintenanceAmount(i))
 }
 
 // Errors of contract trading (appendix C).

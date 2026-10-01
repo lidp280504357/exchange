@@ -103,6 +103,9 @@ func fromProto(p *orderv1.Order) (domain.Order, error) {
 // (empty is none) and HOUSE's user when there is anything to trade.
 func referenceFromProto(m *orderv1.ReferenceBookUpdate, at time.Time) (domain.Reference, error) {
 	r := domain.Reference{HouseUser: m.GetHouseUserId(), At: at, BuyRoom: decimal.Zero, SellRoom: decimal.Zero}
+	if m.GetHoldingsAt() != nil {
+		r.HoldingsAt = m.GetHoldingsAt().AsTime()
+	}
 	if m.GetSymbol() == "" {
 		return r, fmt.Errorf("reference book without a symbol")
 	}

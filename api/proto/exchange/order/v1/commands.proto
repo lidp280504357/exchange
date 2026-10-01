@@ -53,6 +53,9 @@ message ReferenceBookUpdate {
   string house_user_id = 6;
   // When the reference market's book was last updated.
   google.protobuf.Timestamp source_time = 7;
+  // When HOUSE's holdings behind the rooms were read: the rooms do not yet
+  // count the trades HOUSE made since, which the engine takes off them.
+  google.protobuf.Timestamp holdings_at = 8;
 }
 
 // ReferenceLevel is the quantity HOUSE offers at one price.

@@ -19,6 +19,14 @@ const (
 	Sell Side = "SELL"
 )
 
+// Opposite is the other side.
+func (s Side) Opposite() Side {
+	if s == Buy {
+		return Sell
+	}
+	return Buy
+}
+
 // Type of an order.
 type Type string
 

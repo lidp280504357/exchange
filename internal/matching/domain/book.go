@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"slices"
 	"sort"
 
 	"github.com/shopspring/decimal"
@@ -26,6 +27,9 @@ type Book struct {
 	// ref is HOUSE's reference liquidity (ADR-0015), nil until the first
 	// ReferenceBookUpdate.
 	ref *Reference
+	// houseFills are HOUSE's fills that an update's holdings may not count
+	// yet (Book.tightenRooms).
+	houseFills []HouseFill
 }
 
 // NewBook returns an empty book.
@@ -435,11 +439,13 @@ type Snapshot struct {
 	Trades    uint64     `json:"trades"`
 	Orders    []Order    `json:"orders"`
 	Reference *Reference `json:"reference,omitempty"`
+	// HouseFills are HOUSE's recent fills (Book.tightenRooms).
+	HouseFills []HouseFill `json:"house_fills,omitempty"`
 }
 
 // Snapshot returns the book's state.
 func (b *Book) Snapshot() Snapshot {
-	s := Snapshot{Symbol: b.Symbol, Seq: b.Seq, Trades: b.Trades}
+	s := Snapshot{Symbol: b.Symbol, Seq: b.Seq, Trades: b.Trades, HouseFills: slices.Clone(b.houseFills)}
 	if b.ref != nil {
 		s.Reference = b.ref.clone()
 	}
@@ -456,7 +462,7 @@ func (b *Book) Snapshot() Snapshot {
 // Restore rebuilds a book from a snapshot.
 func Restore(s Snapshot) *Book {
 	b := NewBook(s.Symbol)
-	b.Seq, b.Trades = s.Seq, s.Trades
+	b.Seq, b.Trades, b.houseFills = s.Seq, s.Trades, slices.Clone(s.HouseFills)
 	if s.Reference != nil {
 		b.ref = s.Reference.clone()
 	}

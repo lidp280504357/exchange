@@ -12,6 +12,11 @@ import (
 // replay decides the same.
 const RefMaxAge = 5 * time.Second
 
+// SettleLag is how long a trade may take to reach HOUSE's balances: an
+// update's rooms are taken to miss the fills from that long before its
+// holdings were read on (it errs towards less room).
+const SettleLag = 2 * time.Second
+
 // RefLevel is what HOUSE offers at one price of a reference book.
 type RefLevel struct {
 	Price    decimal.Decimal `json:"price"`
@@ -35,6 +40,17 @@ type Reference struct {
 	HouseUser string `json:"house_user"`
 	// At is when the update was published.
 	At time.Time `json:"at"`
+	// HoldingsAt is when HOUSE's holdings behind the rooms were read; zero
+	// when the publisher does not say (the rooms are taken as they come).
+	HoldingsAt time.Time `json:"holdings_at,omitzero"`
+}
+
+// HouseFill is a fill HOUSE made on the book: its side and base quantity,
+// at the time of the command that made it.
+type HouseFill struct {
+	At   time.Time       `json:"at"`
+	Side Side            `json:"side"`
+	Qty  decimal.Decimal `json:"qty"`
 }
 
 // clone copies the levels, which fills use up.
@@ -139,6 +155,13 @@ func (b *Book) takeHouse(o *Order, r *Reference) (ev Event, done, dust bool) {
 func (b *Book) houseFill(u *Order, userMaker bool, house string, price, qty decimal.Decimal) Event {
 	quote := price.Mul(qty)
 	u.Filled, u.FilledQuote = u.Filled.Add(qty), u.FilledQuote.Add(quote)
+	// HOUSE takes the other side, at the time of the command that traded:
+	// the user's order, or HOUSE's update reaching a resting order.
+	at := u.At
+	if userMaker {
+		at = b.ref.At
+	}
+	b.houseFills = append(b.houseFills, HouseFill{At: at, Side: u.Side.Opposite(), Qty: qty})
 	rate := u.TakerFeeRate
 	if userMaker {
 		rate = u.MakerFeeRate
@@ -178,11 +201,39 @@ func (b *Book) houseFill(u *Order, userMaker bool, house string, price, qty deci
 // order is the maker. It returns the trades and the orders' changes.
 func (b *Book) Reference(r Reference) []Event {
 	b.ref = r.clone()
+	b.tightenRooms()
 	var out []Event
 	for _, side := range []Side{Buy, Sell} {
 		out = append(out, b.trigger(side)...)
 	}
 	return out
+}
+
+// tightenRooms takes off the new rooms what HOUSE traded on the book since
+// its holdings were read (allowing SettleLag for the settlement): the
+// publisher refreshes the holdings every second but sends an update every
+// 250 ms, and each update would otherwise give back room already used, so
+// HOUSE could sell more than it holds (ADR-0013). Fills from before that
+// are in the holdings; they are forgotten.
+func (b *Book) tightenRooms() {
+	if b.ref.HoldingsAt.IsZero() {
+		b.houseFills = nil
+		return
+	}
+	since := b.ref.HoldingsAt.Add(-SettleLag)
+	kept := b.houseFills[:0]
+	for _, f := range b.houseFills {
+		if !f.At.After(since) {
+			continue
+		}
+		kept = append(kept, f)
+		if f.Side == Sell {
+			b.ref.SellRoom = decimal.Max(b.ref.SellRoom.Sub(f.Qty), decimal.Zero)
+		} else {
+			b.ref.BuyRoom = decimal.Max(b.ref.BuyRoom.Sub(f.Qty), decimal.Zero)
+		}
+	}
+	b.houseFills = kept
 }
 
 // trigger fills the resting orders of one side that HOUSE's reference

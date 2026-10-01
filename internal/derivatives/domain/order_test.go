@@ -160,8 +160,9 @@ func TestPositionFigures(t *testing.T) {
 	if !long.EntryPrice().Equal(d("60000")) || !long.UnrealizedPnL(d("61000")).Equal(d("2000")) || !long.BankruptcyPrice().Equal(d("57000")) {
 		t.Fatalf("long %s %s %s", long.EntryPrice(), long.UnrealizedPnL(d("61000")), long.BankruptcyPrice())
 	}
-	// (120000 − 6000) / (2 x (1 − 0.01)) = 57575.75757576
-	if got := long.LiquidationPrice(btcPerp); !got.Equal(d("57575.75757576")) {
+	// Tier 2 (1%) takes 50000 x (1% − 0.4%) = 300 off its maintenance:
+	// (120000 − 6000 − 300) / (2 x (1 − 0.01)) = 57424.24242424.
+	if got := long.LiquidationPrice(btcPerp); !got.Equal(d("57424.24242424")) {
 		t.Fatalf("liquidation price %s", got)
 	}
 	short := Position{Qty: d("-2"), EntryCost: d("120000"), Margin: d("6000")}

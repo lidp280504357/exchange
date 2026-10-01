@@ -165,7 +165,10 @@ type ReferenceBookUpdate struct {
 	// HOUSE's user ID on the trades against the book.
 	HouseUserId string `protobuf:"bytes,6,opt,name=house_user_id,json=houseUserId,proto3" json:"house_user_id,omitempty"`
 	// When the reference market's book was last updated.
-	SourceTime    *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=source_time,json=sourceTime,proto3" json:"source_time,omitempty"`
+	SourceTime *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=source_time,json=sourceTime,proto3" json:"source_time,omitempty"`
+	// When HOUSE's holdings behind the rooms were read: the rooms do not yet
+	// count the trades HOUSE made since, which the engine takes off them.
+	HoldingsAt    *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=holdings_at,json=holdingsAt,proto3" json:"holdings_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -249,6 +252,13 @@ func (x *ReferenceBookUpdate) GetSourceTime() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *ReferenceBookUpdate) GetHoldingsAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.HoldingsAt
+	}
+	return nil
+}
+
 // ReferenceLevel is the quantity HOUSE offers at one price.
 type ReferenceLevel struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -315,7 +325,7 @@ const file_exchange_order_v1_commands_proto_rawDesc = "" +
 	"\vCancelOrder\x12\x19\n" +
 	"\border_id\x18\x01 \x01(\tR\aorderId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
-	"\x06symbol\x18\x03 \x01(\tR\x06symbol\"\xb4\x02\n" +
+	"\x06symbol\x18\x03 \x01(\tR\x06symbol\"\xf1\x02\n" +
 	"\x13ReferenceBookUpdate\x12\x16\n" +
 	"\x06symbol\x18\x01 \x01(\tR\x06symbol\x125\n" +
 	"\x04bids\x18\x02 \x03(\v2!.exchange.order.v1.ReferenceLevelR\x04bids\x125\n" +
@@ -324,7 +334,9 @@ const file_exchange_order_v1_commands_proto_rawDesc = "" +
 	"\tsell_room\x18\x05 \x01(\tR\bsellRoom\x12\"\n" +
 	"\rhouse_user_id\x18\x06 \x01(\tR\vhouseUserId\x12;\n" +
 	"\vsource_time\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"sourceTime\"B\n" +
+	"sourceTime\x12;\n" +
+	"\vholdings_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"holdingsAt\"B\n" +
 	"\x0eReferenceLevel\x12\x14\n" +
 	"\x05price\x18\x01 \x01(\tR\x05price\x12\x1a\n" +
 	"\bquantity\x18\x02 \x01(\tR\bquantityB\xd4\x01\n" +
@@ -356,11 +368,12 @@ var file_exchange_order_v1_commands_proto_depIdxs = []int32{
 	3, // 1: exchange.order.v1.ReferenceBookUpdate.bids:type_name -> exchange.order.v1.ReferenceLevel
 	3, // 2: exchange.order.v1.ReferenceBookUpdate.asks:type_name -> exchange.order.v1.ReferenceLevel
 	5, // 3: exchange.order.v1.ReferenceBookUpdate.source_time:type_name -> google.protobuf.Timestamp
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	5, // 4: exchange.order.v1.ReferenceBookUpdate.holdings_at:type_name -> google.protobuf.Timestamp
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_exchange_order_v1_commands_proto_init() }
