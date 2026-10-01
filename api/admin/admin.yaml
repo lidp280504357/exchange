@@ -1522,7 +1522,8 @@ components:
           type: string
         side:
           type: string
-          enum: [BUY, SELL]
+          enum: [BUY, SELL, '']
+          description: Empty for an order the trading service refused before it was accepted (its rejection carries no side or type).
         type:
           type: string
           examples: [LIMIT, MARKET]
@@ -1588,6 +1589,10 @@ components:
         executed_at:
           type: string
           format: date-time
+        house_side:
+          type: string
+          enum: ['', BUY, SELL]
+          description: The side HOUSE took (its virtual liquidity, ADR-0015); empty between users.
     Deposit:
       type: object
       required: [deposit_id, user_id, asset, network, kind, address, tx_hash, amount, status, unclaimed, reason, confirmations,
@@ -1949,6 +1954,15 @@ components:
           enum: [PREPARE, TRADING, HALT, CANCEL_ONLY, DELISTED]
         version:
           type: string
+        reference_symbol:
+          type: string
+          description: The Binance symbol it follows (ADR-0010); empty when it follows none.
+        reference_multiplier:
+          type: string
+          description: Platform price = reference price x multiplier (1000 for 1000SHIB, ADR-0014); empty for 1.
+        listed_at:
+          type: string
+          format: date-time
     Flag:
       type: object
       required: [key, enabled, description, version, updated_by, updated_at]

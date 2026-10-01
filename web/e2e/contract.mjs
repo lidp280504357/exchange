@@ -8,6 +8,8 @@ import addFormats from "ajv-formats";
 import { parse } from "yaml";
 
 const DIR = new URL("../../api/openapi/", import.meta.url);
+// The admin console's contract lives apart (it stays out of the public reference).
+const ADMIN = new URL("../../api/admin/admin.yaml", import.meta.url);
 const METHODS = ["get", "post", "put", "patch", "delete"];
 
 // pointer builds a URI-fragment JSON pointer from path segments.
@@ -27,8 +29,11 @@ export function loadContracts() {
   addFormats(ajv);
   ajv.addFormat("int64", true);
   const docs = {};
-  for (const f of readdirSync(DIR).filter((n) => n.endsWith(".yaml"))) {
-    const doc = parse(readFileSync(new URL(f, DIR), "utf8"));
+  const files = readdirSync(DIR)
+    .filter((n) => n.endsWith(".yaml"))
+    .map((f) => [f, new URL(f, DIR)]);
+  for (const [f, url] of [...files, ["admin.yaml", ADMIN]]) {
+    const doc = parse(readFileSync(url, "utf8"));
     doc.$id = f;
     docs[f] = doc;
     ajv.addSchema(doc, f);

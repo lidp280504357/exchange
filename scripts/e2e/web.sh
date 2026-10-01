@@ -5,7 +5,9 @@
 # security headers, the API reference, the design system catalogue and the
 # PWA manifest and service worker; then the browser smoke tests in
 # headless Chrome (skipped when no Chrome is found): the PC site
-# (web/e2e/pc-smoke.mjs) and the mobile site (web/e2e/m-smoke.mjs).
+# (web/e2e/pc-smoke.mjs), the mobile site (web/e2e/m-smoke.mjs) and the
+# admin console (web/e2e/admin-smoke.mjs, with a throwaway administrator
+# made over ssh).
 #
 #   scripts/e2e/web.sh
 set -euo pipefail
@@ -92,3 +94,19 @@ CAPTCHA_BYPASS_TOKEN="$BYPASS" APP="$BASE" node "$(dirname "$0")/../../web/e2e/p
 
 echo "== mobile site in the browser"
 CAPTCHA_BYPASS_TOKEN="$BYPASS" APP="$M_BASE" node "$(dirname "$0")/../../web/e2e/m-smoke.mjs"
+
+echo "== admin console in the browser"
+# A throwaway administrator (random password and authenticator secret on
+# stdin, never printed), disabled when the script ends; the browser signs
+# in with the password alone (admin.login_without_totp on the test server).
+# shellcheck source=lib/remote.sh
+source "$(dirname "$0")/lib/remote.sh"
+ADMIN_EMAIL="e2e-console-$RUN@example.com"
+ADMIN_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24 || true)
+secret=$(LC_ALL=C tr -dc 'A-Z2-7' </dev/urandom | head -c 32 || true)
+out=$(remote "sudo docker compose $COMPOSE_FILES exec -T admin-service /app/exchangectl admin create --email $ADMIN_EMAIL --name 'e2e console' --role ADMIN --secrets-stdin" \
+  "$(printf '%s\n%s\n' "$ADMIN_PASSWORD" "$secret")")
+grep -q "^created .* $ADMIN_EMAIL (ADMIN)" <<<"$out" || fail "admin create: $out"
+# shellcheck disable=SC2016 # expanded when the script ends
+at_exit 'remote "sudo docker compose $COMPOSE_FILES exec -T admin-service /app/exchangectl admin disable $ADMIN_EMAIL --reason \"e2e run over\"" >/dev/null'
+ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_PASSWORD" APP="$ADMIN_BASE" CAPTCHA_BYPASS_TOKEN="$BYPASS" node "$(dirname "$0")/../../web/e2e/admin-smoke.mjs"

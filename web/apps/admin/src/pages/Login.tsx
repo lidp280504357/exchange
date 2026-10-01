@@ -23,8 +23,11 @@ export default function Login() {
     queryFn: async () => adminData(await adminApi.GET("/admin/v1/login-options")),
     staleTime: 60_000,
   });
-  // Until the options arrive (or when they fail) the field is shown: the server decides anyway.
-  const askCode = options.data?.totp_required ?? true;
+  // The code is asked for unless the options say otherwise; when they
+  // cannot be read the field shows (the server decides anyway). Until they
+  // arrive the form waits, so a fast Enter is not stopped by a code field
+  // that is about to go away.
+  const askCode = options.data?.totp_required ?? options.isError;
   const login = useMutation({
     mutationFn: async () =>
       adminData(await adminApi.POST("/admin/v1/login", { body: askCode ? { email, password, totp_code: code } : { email, password } })),
@@ -74,7 +77,7 @@ export default function Login() {
             {errorText(login.error)}
           </p>
         )}
-        <Button type="submit" block loading={login.isPending}>
+        <Button type="submit" block loading={login.isPending || options.isPending}>
           {login.isPending ? t("admin.loggingIn") : t("admin.login")}
         </Button>
         <p className="mt-4 text-xs text-fg-3">{t("admin.loginHint")}</p>

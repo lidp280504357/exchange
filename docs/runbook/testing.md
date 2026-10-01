@@ -4,7 +4,7 @@
 
 | 层级 | 在哪里 | 怎么跑 |
 |---|---|---|
-| 单元测试 | 各包 `*_test.go`（状态机全部非法转移、金额与精度、幂等、错误码映射、令牌、限流、调度重试与熔断）；前端 Vitest（`web/packages/*/src`、`web/apps/*/src` 的 `*.test.ts(x)`，旧 `web/admin`） | `task test`、`task web:check`（都在 `task ci` 里） |
+| 单元测试 | 各包 `*_test.go`（状态机全部非法转移、金额与精度、幂等、错误码映射、令牌、限流、调度重试与熔断）；前端 Vitest（`web/packages/*/src`、`web/apps/*/src` 的 `*.test.ts(x)`） | `task test`、`task web:check`（都在 `task ci` 里） |
 | 属性测试 | `internal/ledger/domain`：固定种子的随机分录序列下每资产零和、受限账户不为负 | 同上 |
 | 契约测试 | Protobuf：`buf lint`、生成代码一致、`buf breaking`（CI 对比上一个提交，本机 `task proto:breaking` 对比 main）；OpenAPI：前端类型由契约生成且一致（`packages/core/src/api/gen`），浏览器冒烟测试把看到的每个 API 响应按契约校验（`web/e2e/contract.mjs`，Ajv/JSON Schema 2020-12）；gRPC 错误码跨服务保持（`grpcx` 测试） | `task ci`、`task e2e` |
 | 集成测试 | 连测试服的 `exchange_test` 库、Redis DB 15、临时 topic 与 ClickHouse 库（`internal/platform/testenv`，未配置则跳过）：仓储、迁移与回滚、outbox/inbox、Kafka 重试/死信/重放、账本并发与对账、CLI | `task test:integration`（约 8 分钟） |

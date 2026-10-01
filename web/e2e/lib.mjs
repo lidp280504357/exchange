@@ -1,4 +1,5 @@
-// Shared plumbing of the browser smoke tests (pc-smoke.mjs, m-smoke.mjs):
+// Shared plumbing of the browser smoke tests (pc-smoke.mjs, m-smoke.mjs,
+// admin-smoke.mjs):
 // Chrome, the human-check bypass, the dev inbox, the contract check of
 // every API response, and helpers that find elements the way a user does,
 // by their visible text.
@@ -28,7 +29,7 @@ function bypassToken() {
  * (a phone sets isMobile and hasTouch in its viewport); name prefixes the
  * screenshots written to SHOTS. Without Chrome the run is skipped.
  */
-export async function start({ app, api, name, device }) {
+export async function start({ app, api, name, device, apiPrefix = "/v1/" }) {
   if (!CHROME) {
     console.log("SKIP browser checks: no Chrome found (set CHROME)");
     process.exit(0);
@@ -61,7 +62,7 @@ export async function start({ app, api, name, device }) {
   });
   page.on("response", async (r) => {
     const type = r.request().resourceType();
-    if ((type !== "fetch" && type !== "xhr") || !r.url().includes("/v1/")) return;
+    if ((type !== "fetch" && type !== "xhr") || !r.url().includes(apiPrefix)) return;
     let body;
     try {
       const text = r.status() === 204 ? "" : await r.text();
@@ -70,7 +71,7 @@ export async function start({ app, api, name, device }) {
       return; // body unavailable (navigated away)
     }
     const path = new URL(r.url()).pathname;
-    if (!path.startsWith("/v1/") || path.startsWith("/v1/dev/") || path === "/v1/ws") return;
+    if (!path.startsWith(apiPrefix) || path.startsWith("/v1/dev/") || path === "/v1/ws") return;
     const problem = contracts.check(r.request().method(), path, r.status(), body);
     if (problem) violations.add(problem);
   });

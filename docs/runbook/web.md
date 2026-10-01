@@ -11,7 +11,7 @@
 | 管理后台（浅色） | `https://admin.astras.vip` | `web/apps/admin` | 5180 |
 | 设计系统目录（Storybook） | `https://astras.vip/storybook/` | `web/packages/ui` | 6006 |
 | API 参考 | `https://astras.vip/docs/` | 由 `web/apps/pc/scripts/build-docs.mjs` 从 `api/openapi` 生成 | — |
-| 旧管理后台（过渡期保留） | `https://astras.vip/admin/` | `web/admin`，见 [admin.md](admin.md) | 5181 |
+| 旧管理后台（已删除，阶段 4 B5） | `https://astras.vip/admin/*` 301 到 `https://admin.astras.vip/*` | — | — |
 
 共享包：
 
@@ -87,7 +87,7 @@
 
 ```bash
 task web:install            # 装依赖（第一次或改了 package.json 后）
-task web:dev                # PC 站 http://localhost:5173；task web:dev -- m|admin|admin-legacy
+task web:dev                # PC 站 http://localhost:5173；task web:dev -- m|admin
 task web:storybook          # 设计系统目录 http://localhost:6006
 task web:check              # 类型与契约一致、无硬编码颜色、类型检查、单元测试（task ci 也跑）
 task web:types              # 改了 api/openapi 或 api/admin 后重新生成类型（生成文件提交入库）
@@ -118,10 +118,10 @@ task web:lighthouse         # 对部署后的两站各三页跑 Lighthouse（性
 
 `deploy/server-update.sh` 第 5 步在 `node:24-slim` 容器里对 `web/` 执行一次 `pnpm install --frozen-lockfile`，构建以下内容：
 
-- `pnpm build`：三个站点与旧后台；PC 站构建时同时生成 API 参考；
+- `pnpm build`：三个站点；PC 站构建时同时生成 API 参考；
 - `pnpm --filter @exchange/ui build-storybook`：Storybook。
 
-全部成功后才同步到 nginx 的静态目录：`/opt/exchange/infra/nginx/sites/{pc,m,admin,storybook}`，旧后台仍在 `nginx/admin`。旧 H5（`web/h5`，阶段 1–3）在手机站完成后（B3）删除，`/h5/*` 由 nginx 301 到首页。pnpm 缓存在命名卷 `exchange-pnpm-store`，Turnstile 站点密钥取自服务器 `apps.env`。
+全部成功后才同步到 nginx 的静态目录：`/opt/exchange/infra/nginx/sites/{pc,m,admin,storybook}`；旧后台 `web/admin` 在新后台完成后（B5）删除，部署时清掉 `nginx/admin`，`astras.vip/admin/*` 由 nginx 301 到 `admin.astras.vip`。旧 H5（`web/h5`，阶段 1–3）在手机站完成后（B3）删除，`/h5/*` 由 nginx 301 到首页。pnpm 缓存在命名卷 `exchange-pnpm-store`，Turnstile 站点密钥取自服务器 `apps.env`。
 
 nginx（`deploy/compose/nginx/conf.d/astras.vip.conf` 与 `snippets/site-{pc,m,admin}.conf`）：
 
@@ -158,5 +158,6 @@ nginx（`deploy/compose/nginx/conf.d/astras.vip.conf` 与 `snippets/site-{pc,m,a
   - `/docs/` 与 `/storybook/`；
   - PC 站浏览器冒烟测试 `web/e2e/pc-smoke.mjs`（workspace 包 `@exchange/e2e`，headless Chrome，中文界面）：表单注册（人机验证用环境的旁路令牌，验证码读开发收件箱）→ 资产页欢迎资金 → 退出再登录（错误密码就地提示、`?next=` 回跳）→ 行情搜索 → 现货终端挂限价单并撤单 → 划转到合约并在资金流水出现 → 充值地址 → 合约终端 → 通知、设备、帮助 → 语言切换 → 退出；页面脚本错误即失败，所有 API 响应按 OpenAPI 契约校验。本机对开发服务器跑：`APP=http://localhost:5173 node web/e2e/pc-smoke.mjs`（`SHOTS=目录` 保存截图）；
   - 手机站浏览器冒烟测试 `web/e2e/m-smoke.mjs`（390 × 844、触屏、iPhone UA，nginx 因此不分流到 PC 站）：表单注册 → 资产 tab 欢迎资金 → 在"我的"里退出（确认面板）再登录 → 行情搜索 → 现货终端从下单面板挂限价单（下单确认）并撤单 → 划转与流水 → 充值地址 → 合约终端 → 通知、设备、帮助 → 语言切换 → 退出；检查同 PC。本机：`APP=http://localhost:5174 node web/e2e/m-smoke.mjs`；
-  - 两个冒烟测试共用 `web/e2e/lib.mjs`（Chrome、旁路令牌、开发收件箱、契约校验、按可见文字找按钮）。面板有滑入动画，测试等它停稳（`sheetOpen`）再点，关闭后等遮罩消失再点页面。
+  - 管理后台浏览器冒烟测试 `web/e2e/admin-smoke.mjs`（阶段 4 B5，1440 × 900）：`web.sh` 经 ssh 建一个临时 ADMIN（随机密码从标准输入传入、不打印，结束时停用），登录后走遍全部页面，见 [admin.md](admin.md#后台页面阶段-4-b5设计稿-10)；`/admin/v1` 的响应按 `api/admin/admin.yaml` 校验。本机：`ADMIN_EMAIL=… ADMIN_PASSWORD=… APP=http://localhost:5180 node web/e2e/admin-smoke.mjs`（开发服务器第一次打开会预构建依赖并刷新页面，等它就绪再跑）；
+  - 三个冒烟测试共用 `web/e2e/lib.mjs`（Chrome、旁路令牌、开发收件箱、契约校验、按可见文字找按钮）。面板有滑入动画，测试等它停稳（`sheetOpen`）再点，关闭后等遮罩消失再点页面。
 - 人工检查清单：[ui-checklist.md](ui-checklist.md)。

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The admin console end to end (implementation plan §6.3 task 11): nginx
-# serves the console at /admin/ and its API at /admin/v1 (admin-service,
-# never the gateway). Four administrators are created for the run with
+# serves the console on its own domain (admin.astras.vip, phase 4 B5; the
+# old /admin/ of the user site redirects there) and its API at /admin/v1
+# (admin-service, never the gateway). Four administrators are created for the run with
 # exchangectl in the admin-service container (random passwords and
 # authenticator secrets passed on stdin, never printed) and disabled at
 # the end. It checks sign-in (password + TOTP, one use per code, or the
@@ -22,33 +23,46 @@ source "$(dirname "$0")/lib/common.sh"
 source "$(dirname "$0")/lib/remote.sh"
 
 CSRF=(-H 'X-Admin-CSRF: 1')
+ADMIN_BASE="${ADMIN_BASE:-https://admin.astras.vip}"
+# acall is call on the console's domain.
+acall() {
+  local user_base=$BASE rc=0
+  BASE=$ADMIN_BASE
+  call "$@" || rc=$?
+  BASE=$user_base
+  return $rc
+}
 totp() { node "$(dirname "$0")/lib/totp.mjs" "$1" "${2:-0}"; }
 # A base32 secret of 160 bits and a password, both random (tr ends on
 # SIGPIPE when head has enough, which pipefail would count as a failure).
 secret() { LC_ALL=C tr -dc 'A-Z2-7' </dev/urandom | head -c 32 || true; }
 password() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24 || true; }
 
-echo "== the console is served at /admin/"
-call GET /admin/ "" -D "$WORK/headers"
-[[ $STATUS == 200 ]] && grep -q '管理后台' <<<"$BODY" || { echo "FAIL GET /admin/: $STATUS" >&2; exit 1; }
+echo "== the console is served at $ADMIN_BASE"
+acall GET / "" -D "$WORK/headers"
+[[ $STATUS == 200 ]] && grep -q '管理后台' <<<"$BODY" || { echo "FAIL GET $ADMIN_BASE/: $STATUS" >&2; exit 1; }
 grep -qi '^x-frame-options: DENY' "$WORK/headers" && grep -qi "^content-security-policy: default-src 'self'" "$WORK/headers" &&
   grep -qi '^x-robots-tag: noindex' "$WORK/headers" || { echo "FAIL the console's security headers:" >&2; cat "$WORK/headers" >&2; exit 1; }
 echo "ok   the console page, with X-Frame-Options, CSP and noindex"
-ASSET=$(grep -oE '/admin/assets/index-[A-Za-z0-9_-]+\.js' <<<"$BODY" | head -1)
-call GET "$ASSET" "" -D "$WORK/headers"
+ASSET=$(grep -oE '/assets/index-[A-Za-z0-9_-]+\.js' <<<"$BODY" | head -1)
+acall GET "$ASSET" "" -D "$WORK/headers"
 [[ $STATUS == 200 ]] && grep -qi '^cache-control: public, max-age=31536000, immutable' "$WORK/headers" ||
   { echo "FAIL $ASSET: $STATUS" >&2; exit 1; }
 echo "ok   its hashed assets are cached for good"
-call GET /admin/withdrawals ""
+acall GET /withdrawals ""
 [[ $STATUS == 200 ]] && grep -q '管理后台' <<<"$BODY" || { echo "FAIL the SPA fallback: $STATUS" >&2; exit 1; }
 echo "ok   deep links fall back to the console page"
+call GET /admin/withdrawals "" -D "$WORK/headers"
+[[ $STATUS == 301 ]] && grep -qi "^location: $ADMIN_BASE/withdrawals" "$WORK/headers" ||
+  { echo "FAIL the old console's address does not lead to $ADMIN_BASE: $STATUS" >&2; exit 1; }
+echo "ok   the old /admin/ of the user site redirects to the console's domain"
 
 echo "== the API wants a session and the CSRF header"
-call GET /admin/v1/me ""
+acall GET /admin/v1/me ""
 expect 401 ADMIN_UNAUTHORIZED "no session"
-call POST /admin/v1/login '{"email":"nobody@example.com","password":"x","totp_code":"000000"}'
+acall POST /admin/v1/login '{"email":"nobody@example.com","password":"x","totp_code":"000000"}'
 expect 403 ADMIN_CSRF "a write without X-Admin-CSRF"
-call POST /admin/v1/login '{"email":"nobody@example.com","password":"a wrong password","totp_code":"000000"}' "${CSRF[@]}"
+acall POST /admin/v1/login '{"email":"nobody@example.com","password":"a wrong password","totp_code":"000000"}' "${CSRF[@]}"
 expect 401 ADMIN_LOGIN_FAILED "an unknown administrator"
 call GET /v1/admin/v1/me ""
 [[ $STATUS == 404 ]] || { echo "FAIL the gateway answers for the console: $STATUS" >&2; exit 1; }
@@ -82,17 +96,17 @@ login() {
     code=$(totp "$sec") jar="$WORK/$role.jar"
     eval "CODE_$role=\$code"
   fi
-  call POST /admin/v1/login "$(jq -nc --arg e "$email" --arg p "$pw" --arg c "$code" '{email: $e, password: $p, totp_code: $c}')" \
+  acall POST /admin/v1/login "$(jq -nc --arg e "$email" --arg p "$pw" --arg c "$code" '{email: $e, password: $p, totp_code: $c}')" \
     "${CSRF[@]}" -c "$jar" -D "$WORK/$role.headers"
 }
 as() { # as ROLE METHOD PATH JSON: a call with the role's session
   local role=$1
   shift
-  call "$1" "$2" "$3" -b "$WORK/$role.jar" "${CSRF[@]}"
+  acall "$1" "$2" "$3" -b "$WORK/$role.jar" "${CSRF[@]}"
 }
 
 echo "== sign-in"
-call GET /admin/v1/login-options ""
+acall GET /admin/v1/login-options ""
 expect 200 - "the sign-in options need no session"
 TOTP_REQUIRED=$(jq -r .totp_required <<<"$BODY")
 login ADMIN
@@ -128,9 +142,9 @@ expect 403 ADMIN_FORBIDDEN "FINANCE cannot cancel orders"
 as FINANCE GET "/admin/v1/withdrawals?status=CONFIRMED" ""
 expect 200 - "FINANCE lists withdrawals"
 check '.items | type == "array"' "the list is an array"
-call GET /admin/v1/me "" -b "$WORK/AUDITOR.jar"
+acall GET /admin/v1/me "" -b "$WORK/AUDITOR.jar"
 expect 200 - "reads need no CSRF header"
-call PUT /admin/v1/flags/market.reference_kline '{"enabled":true,"reason":"e2e"}' -b "$WORK/OPERATOR.jar"
+acall PUT /admin/v1/flags/market.reference_kline '{"enabled":true,"reason":"e2e"}' -b "$WORK/OPERATOR.jar"
 expect 403 ADMIN_CSRF "writes do, even with a session"
 
 EMAIL="e2e-admin-user-$RUN@example.com"

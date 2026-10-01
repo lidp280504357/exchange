@@ -903,8 +903,11 @@ export interface components {
             /** Format: uuid */
             user_id: string;
             symbol: string;
-            /** @enum {string} */
-            side: "BUY" | "SELL";
+            /**
+             * @description Empty for an order the trading service refused before it was accepted (its rejection carries no side or type).
+             * @enum {string}
+             */
+            side: "BUY" | "SELL" | "";
             /**
              * @example LIMIT
              * @example MARKET
@@ -944,6 +947,11 @@ export interface components {
             seller_fee: components["schemas"]["Decimal"];
             /** Format: date-time */
             executed_at: string;
+            /**
+             * @description The side HOUSE took (its virtual liquidity, ADR-0015); empty between users.
+             * @enum {string}
+             */
+            house_side?: "" | "BUY" | "SELL";
         };
         Deposit: {
             /** Format: uuid */
@@ -1139,6 +1147,12 @@ export interface components {
             /** @enum {string} */
             status?: "PREPARE" | "TRADING" | "HALT" | "CANCEL_ONLY" | "DELISTED";
             version?: string;
+            /** @description The Binance symbol it follows (ADR-0010); empty when it follows none. */
+            reference_symbol?: string;
+            /** @description Platform price = reference price x multiplier (1000 for 1000SHIB, ADR-0014); empty for 1. */
+            reference_multiplier?: string;
+            /** Format: date-time */
+            listed_at?: string;
         };
         Flag: {
             key: string;

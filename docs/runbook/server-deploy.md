@@ -46,7 +46,7 @@ bash /opt/exchange/src/deploy/server-update.sh 305e2a7  # 回滚/切换到指定
 5. 先起 instrument-service，按 `deploy/instruments/test.json` 幂等同步参考数据（[instruments.md](instruments.md)），再 `up -d` 其余服务。其余服务启动时就要读交易对与参考行情映射，所以参考数据必须先到。
 6. 清理悬空镜像，把构建缓存压到 3 GB。
 7. 校验并热加载 nginx 配置。
-8. 在 node 容器里对 `web/` 装一次依赖，构建 PC 站、手机站、管理后台、旧后台与 Storybook，发布到 `nginx/sites/*` 与 `nginx/admin`（[web.md](web.md)）。
+8. 在 node 容器里对 `web/` 装一次依赖，构建 PC 站、手机站、管理后台与 Storybook，发布到 `nginx/sites/*`（[web.md](web.md)）。
 
 ## 首次克隆（部署密钥加到 GitHub 之后）
 

@@ -386,6 +386,8 @@ type Trade struct {
 	BuyerFee      string    `json:"buyer_fee"`
 	SellerFee     string    `json:"seller_fee"`
 	ExecutedAt    time.Time `json:"executed_at"`
+	// HouseSide is the side HOUSE took (ADR-0015), "" between users.
+	HouseSide string `json:"house_side"`
 }
 
 // DepositQuery selects deposits; empty fields match everything.

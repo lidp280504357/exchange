@@ -281,9 +281,9 @@ services:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9093/readyz"]
 
-  # The admin console's API (§5.12), reached through nginx at /admin/v1 and
-  # never through the gateway; the console itself is static files
-  # (web/admin) served by nginx at /admin/. ADMIN_SECRET_KEY seals the
+  # The admin console's API (§5.12), reached through nginx at /admin/v1 of
+  # admin.astras.vip and never through the gateway; the console itself is
+  # static files (web/apps/admin) of the same domain. ADMIN_SECRET_KEY seals the
   # administrators' authenticator secrets and lives in admin/admin.env
   # (600, see docs/runbook/admin.md), not in apps.env. Administrators are
   # created with exchangectl in this container. One Argon2id hash (64 MiB)

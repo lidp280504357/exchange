@@ -71,7 +71,7 @@ func (r Records) Trades(ctx context.Context, q ports.TradeQuery) ([]ports.Trade,
 	from, to := timeRange(q.From, q.To)
 	rows, err := r.Conn.Query(ctx, `SELECT toString(trade_id), symbol, trade_number, price, quantity, quote_quantity, taker_side,
 		toString(buyer_user_id), toString(buyer_order_id), toString(seller_user_id), toString(seller_order_id), buyer_is_maker,
-		buyer_fee, seller_fee, executed_at FROM trades FINAL
+		buyer_fee, seller_fee, executed_at, house_side FROM trades FINAL
 		WHERE (? = '' OR symbol = ?) AND (? = '' OR toString(buyer_user_id) = ? OR toString(seller_user_id) = ?)
 		AND executed_at >= `+ms+` AND executed_at < `+ms+` AND (NOT ? OR (executed_at, toString(trade_id)) < (`+ms+`, ?))
 		ORDER BY executed_at DESC, toString(trade_id) DESC LIMIT ?`,
@@ -85,7 +85,7 @@ func (r Records) Trades(ctx context.Context, q ports.TradeQuery) ([]ports.Trade,
 		var t ports.Trade
 		var v [5]decimal.Decimal
 		if err := rows.Scan(&t.TradeID, &t.Symbol, &t.TradeNumber, &v[0], &v[1], &v[2], &t.TakerSide, &t.BuyerUserID, &t.BuyerOrderID,
-			&t.SellerUserID, &t.SellerOrderID, &t.BuyerIsMaker, &v[3], &v[4], &t.ExecutedAt); err != nil {
+			&t.SellerUserID, &t.SellerOrderID, &t.BuyerIsMaker, &v[3], &v[4], &t.ExecutedAt, &t.HouseSide); err != nil {
 			return nil, "", unavailable(err)
 		}
 		t.Price, t.Quantity, t.QuoteQuantity, t.BuyerFee, t.SellerFee = v[0].String(), v[1].String(), v[2].String(), v[3].String(), v[4].String()
