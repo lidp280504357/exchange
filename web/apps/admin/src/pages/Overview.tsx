@@ -101,10 +101,49 @@ export default function Overview({ admin }: { admin: Admin }) {
         <Health />
         <HouseSummary />
       </div>
-      <Card title={t("admin.overview.custody")}>
-        <p className="text-sm text-fg-3">{t("admin.overview.custodySoon")}</p>
-      </Card>
+      <CustodySummary />
     </Page>
+  );
+}
+
+/** CustodySummary is the custodian at a glance: reachable, short of nothing, no callback or withdrawal stuck. */
+function CustodySummary() {
+  const { t } = useTranslation();
+  const q = useQuery({ queryKey: ["admin", "custody"], queryFn: async () => adminData(await adminApi.GET("/admin/v1/custody")), refetchInterval: 30_000 });
+  const o = q.data;
+  const short = (o?.checks ?? []).filter((c) => Number(c.shortfall) > 0);
+  return (
+    <Card
+      title={t("admin.overview.custody")}
+      extra={
+        <Link className="text-sm text-brand hover:underline" to="/custody">
+          {t("admin.common.details")}
+        </Link>
+      }
+    >
+      {q.isError ? (
+        <p className="text-sm text-danger">{errorText(q.error)}</p>
+      ) : !o ? (
+        <Skeleton className="h-6 w-64" />
+      ) : (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          {!o.configured ? (
+            <Badge tone="neutral">{t("admin.overview.custodyOff")}</Badge>
+          ) : o.error ? (
+            <Badge tone="danger">{t("admin.overview.custodyDown", { error: o.error })}</Badge>
+          ) : (
+            <Badge tone="success">{t("admin.overview.custodyOk", { n: o.coins.length })}</Badge>
+          )}
+          {short.map((c) => (
+            <Badge key={`${c.holder}/${c.asset}`} tone="danger">
+              {t("admin.overview.custodyShort", { asset: c.asset, amount: c.shortfall })}
+            </Badge>
+          ))}
+          {o.callbacks.attention > 0 && <Badge tone="warn">{t("admin.overview.custodyCallbacks", { n: o.callbacks.attention })}</Badge>}
+          {o.submitted.count > 0 && <Badge tone="info">{t("admin.overview.custodySubmitted", { n: o.submitted.count })}</Badge>}
+        </div>
+      )}
+    </Card>
   );
 }
 

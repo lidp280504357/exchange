@@ -46,6 +46,7 @@ export const en = {
     BUY: "Buy", SELL: "Sell", LIMIT: "Limit", MARKET: "Market", GTC: "Good till canceled", IOC: "Immediate or cancel", FOK: "Fill or kill", POST_ONLY: "Post only",
     MAKER: "Maker", TAKER: "Taker", USER: "Canceled by you", SELF_TRADE: "Self-trade prevention", NO_LIQUIDITY: "Not enough liquidity",
     REQUESTED: "Processing", PENDING_REVIEW: "Under review", APPROVED: "Approved", SIGNING: "Signing", BROADCAST: "Broadcast", CONFIRMING: "Confirming",
+    SUBMITTED: "With the custodian", CUSTODY_REJECTED: "Refused by the custodian", CUSTODY_FAILED: "The transfer failed",
     CONFIRMED: "Completed", FAILED: "Failed", LEDGER_INSUFFICIENT_BALANCE: "Insufficient balance",
     REALIZED_PNL: "Realized PnL", FUNDING_PAYMENT: "Funding", LIQUIDATION_SETTLE: "Liquidation", ADL_SETTLE: "Auto-deleveraging",
     INSURANCE_CONTRIBUTION: "Insurance fund", ONE_WAY: "One-way", HEDGE: "Hedge", CROSS: "Cross", ISOLATED: "Isolated",

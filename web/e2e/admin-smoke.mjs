@@ -90,6 +90,20 @@ try {
   await noError("withdrawals");
   ok("deposits and the withdrawal queue");
 
+  // 6b. The custodian: reachable, its coins, the reconciliation and the
+  // callback log, a callback's request as received.
+  await go("/custody");
+  await waitText("可访问");
+  await waitText("TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t".slice(0, 12));
+  await rows(1, 'main table[aria-label="custody callbacks"]');
+  await page.click('main table[aria-label="custody callbacks"] tbody tr');
+  await page.waitForSelector("[role=dialog]");
+  await waitText("原始请求");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
+  await t.shot("2b-custody");
+  ok("the custodian: reachable, coins, reconciliation and a callback as received");
+
   // 7. Pairs: 50 and more; a status change asks for a confirmation (canceled).
   await go("/instruments");
   await rows(50);

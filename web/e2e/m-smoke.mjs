@@ -27,7 +27,7 @@ const phone = {
     "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1",
 };
 const t = await start({ app: APP, api: API, name: "m", device: phone });
-const { page, shot, go, waitText, waitPath, clickButton, clickContaining, typeInto } = t;
+const { page, shot, go, waitText, waitPath, clickButton, typeInto } = t;
 
 // openOrders waits for the open orders tab to show n orders.
 const openOrders = (n) =>
@@ -131,13 +131,17 @@ try {
   await waitText("账户划转");
   ok("a transfer of 12.34 USDT to futures completes and shows in the history");
 
-  // 6. The deposit address of ETH (Sepolia, its only network).
-  await go("/assets/deposit");
-  await clickContaining(["ETH"], "ul");
-  await page.waitForSelector('[data-testid="deposit-address"]', { visible: true, timeout: 20000 });
-  const address = await page.$eval('[data-testid="deposit-address"]', (el) => el.innerText.trim());
-  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) throw new Error("deposit address: " + address);
-  ok(`the deposit page gives an ETH address (${address.slice(0, 8)}…)`);
+  // 6. Deposit addresses: ETH on Sepolia (the platform's own wallet) and
+  // USDT on TRC20 (the custodian's, ADR-0011).
+  const depositAddress = async (query, pattern, what) => {
+    await go(`/assets/deposit?${query}`);
+    await page.waitForSelector('[data-testid="deposit-address"]', { visible: true, timeout: 20000 });
+    await page.waitForFunction((re) => new RegExp(re).test(document.querySelector('[data-testid="deposit-address"]')?.innerText.trim() ?? ""), { timeout: 20000 }, pattern);
+    const address = await page.$eval('[data-testid="deposit-address"]', (el) => el.innerText.trim());
+    ok(`the deposit page gives ${what} (${address.slice(0, 8)}…)`);
+  };
+  await depositAddress("asset=ETH&network=ETH-SEPOLIA", "^0x[0-9a-fA-F]{40}$", "an ETH address on Sepolia");
+  await depositAddress("asset=USDT&network=TRON", "^T[1-9A-HJ-NP-Za-km-z]{33}$", "a TRC20 address from the custodian");
 
   // 7. The futures terminal: mark price and funding.
   await go("/futures/BTC-USDT-PERP");

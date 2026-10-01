@@ -59,7 +59,7 @@ describe("assets page strings", () => {
       ...["confirming", "crediting", "credited", "failed"].map((p) => `mAssets.deposit.phase.${p}`),
       ...["detected", "confirming", "credited", "failed"].map((s) => `mAssets.deposit.steps.${s}`),
       ...["BELOW_MINIMUM", "ACCOUNT_CLOSED", "NOT_ELIGIBLE", "UNSUPPORTED_TOKEN"].map((r) => `mAssets.deposit.reasons.${r}`),
-      ...["risk", "review", "sign", "broadcast", "confirm", "done"].map((s) => `mAssets.withdraw.steps.${s}`),
+      ...["risk", "review", "sign", "broadcast", "confirm", "custody", "done"].map((s) => `mAssets.withdraw.steps.${s}`),
       ...["ADDRESS_FORMAT", "ADDRESS_CHECKSUM", "ADDRESS_NETWORK", "MEMO_REQUIRED", "ADDRESS_OWN"].map((r) => `mAssets.withdraw.reasons.${r}`),
       ...["NEW_ACCOUNT", "NEW_DEVICE", "SECURITY_CHANGE", "NEW_ADDRESS", "LARGE_AMOUNT", "DAILY_SHARE"].map((r) => `mAssets.withdraw.risk.${r}`),
       ...["all", "7d", "30d", "90d", "custom"].map((p) => `mAssets.history.ranges.${p}`),
@@ -75,7 +75,7 @@ describe("assets page strings", () => {
     const codes = [
       ...LEDGER_ENTRY_TYPES,
       ...["SPOT", "FUTURES", "AVAILABLE", "FROZEN", "CHAIN", "INTERNAL", "COMPLETED", "FAILED"],
-      ...["REQUESTED", "PENDING_REVIEW", "APPROVED", "SIGNING", "BROADCAST", "CONFIRMING", "CONFIRMED", "INTERNAL_TRANSFER", "REJECTED", "CANCELED"],
+      ...["REQUESTED", "PENDING_REVIEW", "APPROVED", "SIGNING", "BROADCAST", "CONFIRMING", "SUBMITTED", "CONFIRMED", "INTERNAL_TRANSFER", "REJECTED", "CANCELED"],
     ];
     for (const c of codes) {
       expect(typeof lookup(coreZh, `codes.${c}`), c).toBe("string");

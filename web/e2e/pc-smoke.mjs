@@ -23,7 +23,7 @@ const email = `e2e-pc-${run}@example.com`;
 const password = `e2e pc site ${run}`;
 
 const t = await start({ app: APP, api: API, name: "pc", device: { viewport: { width: 1440, height: 900 } } });
-const { page, shot, go, waitText, waitPath, clickButton, clickContaining, typeInto } = t;
+const { page, shot, go, waitText, waitPath, clickButton, typeInto } = t;
 
 try {
   // 1. Sign-up through the form: account, password, terms, then the code.
@@ -104,13 +104,17 @@ try {
   await waitText("账户划转");
   ok("a transfer of 12.34 USDT to futures completes and shows in the ledger");
 
-  // 6. The deposit address of ETH (Sepolia).
-  await go("/assets/deposit");
-  await clickContaining(["ETH", "以太坊"]);
-  await page.waitForSelector('[data-testid="deposit-address"]', { visible: true, timeout: 20000 });
-  const address = await page.$eval('[data-testid="deposit-address"]', (el) => el.innerText.trim());
-  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) throw new Error("deposit address: " + address);
-  ok(`the deposit page gives an ETH address (${address.slice(0, 8)}…)`);
+  // 6. Deposit addresses: ETH on Sepolia (the platform's own wallet) and
+  // USDT on TRC20 (the custodian's, ADR-0011).
+  const depositAddress = async (query, pattern, what) => {
+    await go(`/assets/deposit?${query}`);
+    await page.waitForSelector('[data-testid="deposit-address"]', { visible: true, timeout: 20000 });
+    await page.waitForFunction((re) => new RegExp(re).test(document.querySelector('[data-testid="deposit-address"]')?.innerText.trim() ?? ""), { timeout: 20000 }, pattern);
+    const address = await page.$eval('[data-testid="deposit-address"]', (el) => el.innerText.trim());
+    ok(`the deposit page gives ${what} (${address.slice(0, 8)}…)`);
+  };
+  await depositAddress("asset=ETH&network=ETH-SEPOLIA", "^0x[0-9a-fA-F]{40}$", "an ETH address on Sepolia");
+  await depositAddress("asset=USDT&network=TRON", "^T[1-9A-HJ-NP-Za-km-z]{33}$", "a TRC20 address from the custodian");
 
   // 7. The futures terminal: mark price and funding.
   await go("/futures/BTC-USDT-PERP");

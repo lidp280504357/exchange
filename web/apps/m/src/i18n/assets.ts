@@ -187,7 +187,7 @@ export default {
         cancelBody: "冻结的数量与手续费会退回可用余额。",
         canceled: "提现已撤销",
         keep: "不撤销",
-        steps: { risk: "风控", review: "审核", sign: "签名", broadcast: "广播", confirm: "确认", done: "完成" },
+        steps: { risk: "风控", review: "审核", sign: "签名", broadcast: "广播", confirm: "确认", custody: "托管方", done: "完成" },
         reviewing: "人工审核中：{{reasons}}",
         risk: {
           NEW_ACCOUNT: "新注册账户",
@@ -451,7 +451,7 @@ export default {
         cancelBody: "The frozen amount and fee go back to your available balance.",
         canceled: "Withdrawal canceled",
         keep: "Keep it",
-        steps: { risk: "Checks", review: "Review", sign: "Sign", broadcast: "Send", confirm: "Confirm", done: "Done" },
+        steps: { risk: "Checks", review: "Review", sign: "Sign", broadcast: "Send", confirm: "Confirm", custody: "Custodian", done: "Done" },
         reviewing: "Under manual review: {{reasons}}",
         risk: {
           NEW_ACCOUNT: "new account",

@@ -50,6 +50,7 @@ describe("depositTimeline", () => {
 const withdrawal = {
   status: "REQUESTED",
   internal: false,
+  custody: false,
   risk_reasons: [] as ("NEW_ADDRESS" | "LARGE_AMOUNT")[],
   approvals_required: 0,
   tx_hash: null,
@@ -57,6 +58,7 @@ const withdrawal = {
   required_confirmations: 12,
   created_at: "2026-09-30T10:00:00Z",
   approved_at: null,
+  submitted_at: null,
   broadcast_at: null,
   confirmed_at: null,
 } as const;
@@ -111,8 +113,23 @@ describe("withdrawalTimeline", () => {
     expect(withdrawalTimeline({ ...withdrawal, status: "FAILED" } as never).outcome).toBe("failed");
   });
 
-  it("allows canceling until signing starts", () => {
+  it("hands over to the custodian: risk → review → custody → done", () => {
+    const at = (status: string, extra: object = {}) =>
+      states(withdrawalTimeline({ ...withdrawal, ...extra, custody: true, status: status as never }));
+    expect(at("APPROVED")).toEqual(["risk:done", "review:done", "custody:current", "done:upcoming"]);
+    expect(at("SUBMITTED", { tx_hash: null })).toEqual(["risk:done", "review:done", "custody:current", "done:upcoming"]);
+    expect(at("CONFIRMED").every((s) => s.endsWith(":done"))).toBe(true);
+    expect(at("FAILED", { approved_at: "x", submitted_at: "y" })).toEqual(["risk:done", "review:done", "failed:error"]);
+    const done = withdrawalTimeline({
+      ...withdrawal, custody: true, status: "CONFIRMED", tx_hash: "0xabc" as never, approved_at: "2026-09-30T10:01:00Z" as never,
+      submitted_at: "2026-09-30T10:01:05Z" as never, confirmed_at: "2026-09-30T10:03:00Z" as never,
+    });
+    expect(done.steps.map((s) => s.at)).toEqual(["2026-09-30T10:00:00Z", "2026-09-30T10:01:00Z", "2026-09-30T10:01:05Z", "2026-09-30T10:03:00Z"]);
+    expect(done.confirmations).toBeNull();
+  });
+
+  it("allows canceling until signing starts or the custodian has it", () => {
     expect(["REQUESTED", "PENDING_REVIEW", "APPROVED"].every(withdrawalCancelable)).toBe(true);
-    expect(["SIGNING", "BROADCAST", "CONFIRMING", "CONFIRMED", "CANCELED", "REJECTED"].some(withdrawalCancelable)).toBe(false);
+    expect(["SIGNING", "BROADCAST", "CONFIRMING", "SUBMITTED", "CONFIRMED", "CANCELED", "REJECTED"].some(withdrawalCancelable)).toBe(false);
   });
 });

@@ -10,7 +10,7 @@ import { ListTable, PAGE_SIZE, useCursorList, type CursorList } from "../../kit/
 import { clean } from "../records/tables";
 
 export type Withdrawal = AdminSchemas["Withdrawal"];
-export type WithdrawalQuery = { user_id?: string; asset?: string; status?: string };
+export type WithdrawalQuery = { user_id?: string; asset?: string; network?: string; status?: string };
 
 const right: DataColumnMeta = { align: "right" };
 
@@ -69,7 +69,7 @@ export function WithdrawalDrawer({ admin, w, onClose }: { admin: Admin; w: Withd
   const steps = [
     { key: "requested", at: w.created_at },
     { key: "approvedAt", at: w.approved_at },
-    { key: "broadcastAt", at: w.broadcast_at },
+    w.custody ? { key: "submittedAt", at: w.submitted_at } : { key: "broadcastAt", at: w.broadcast_at },
     { key: "confirmedAt", at: w.confirmed_at },
   ];
   const current = steps.reduce((n, s, i) => (s.at ? i : n), 0);
@@ -97,7 +97,13 @@ export function WithdrawalDrawer({ admin, w, onClose }: { admin: Admin; w: Withd
         <KeyValue
           items={[
             { label: t("admin.common.user"), value: <UserCell id={w.user_id} /> },
-            { label: t("admin.common.network"), value: `${w.network}${w.internal ? ` · ${t("admin.withdrawals.internal")}` : ""}` },
+            {
+              label: t("admin.common.network"),
+              value: `${w.network}${w.internal ? ` · ${t("admin.withdrawals.internal")}` : w.custody ? ` · ${t("admin.withdrawals.custody")}` : ""}`,
+            },
+            ...(w.custody && w.provider_status
+              ? [{ label: t("admin.withdrawals.providerStatus"), value: <EnumBadge group="providerStatus" code={w.provider_status} /> }]
+              : []),
             { label: t("admin.withdrawals.address"), value: <span className="font-mono text-xs">{w.address}</span>, copy: w.address },
             { label: t("admin.withdrawals.fee"), value: <Num value={w.fee} unit={w.asset} /> },
             { label: t("admin.withdrawals.value"), value: <Num value={w.value_usdt} decimals={2} unit="USDT" /> },

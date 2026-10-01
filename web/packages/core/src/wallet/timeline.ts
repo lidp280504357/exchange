@@ -96,23 +96,25 @@ export function depositTimeline(d: DepositLike): Timeline<DepositStep> {
 
 // ---- withdrawals ----
 
-export type WithdrawalStep = "risk" | "review" | "sign" | "broadcast" | "confirm" | "done" | "failed";
+export type WithdrawalStep = "risk" | "review" | "sign" | "broadcast" | "confirm" | "custody" | "done" | "failed";
 
 const CHAIN_STEPS: WithdrawalStep[] = ["risk", "review", "sign", "broadcast", "confirm", "done"];
+// The custodian signs, sends and confirms on its side (ADR-0011).
+const CUSTODY_STEPS: WithdrawalStep[] = ["risk", "review", "custody", "done"];
 const INTERNAL_STEPS: WithdrawalStep[] = ["risk", "review", "done"];
 
 const FAILED = new Set(["REJECTED", "CANCELED", "FAILED"]);
 const CANCELABLE = new Set(["REQUESTED", "PENDING_REVIEW", "APPROVED"]);
 
-/** withdrawalCancelable reports whether the caller may still cancel: until it is being signed. */
+/** withdrawalCancelable reports whether the caller may still cancel: until it is being signed or is with the custodian. */
 export function withdrawalCancelable(status: string): boolean {
   return CANCELABLE.has(status);
 }
 
 type WithdrawalLike = Pick<
   Withdrawal,
-  | "status" | "internal" | "risk_reasons" | "approvals_required" | "tx_hash" | "confirmations" | "required_confirmations"
-  | "created_at" | "approved_at" | "broadcast_at" | "confirmed_at"
+  | "status" | "internal" | "custody" | "risk_reasons" | "approvals_required" | "tx_hash" | "confirmations" | "required_confirmations"
+  | "created_at" | "approved_at" | "submitted_at" | "broadcast_at" | "confirmed_at"
 >;
 
 // progressIndex is the step in progress; steps.length once completed.
@@ -124,6 +126,7 @@ function progressIndex(w: WithdrawalLike, count: number): number {
       return 1;
     case "APPROVED":
     case "SIGNING":
+    case "SUBMITTED":
       return 2;
     case "BROADCAST":
       return 3;
@@ -139,6 +142,7 @@ function progressIndex(w: WithdrawalLike, count: number): number {
 
 // failureIndex is the step a refused, canceled or failed withdrawal stopped at.
 function failureIndex(w: WithdrawalLike): number {
+  if (w.status === "FAILED" && w.custody) return w.approved_at ? 2 : 0;
   if (w.status === "FAILED") {
     if (w.broadcast_at) return 4;
     if (w.tx_hash) return 3;
@@ -156,6 +160,8 @@ function stepTime(key: WithdrawalStep, w: WithdrawalLike): string | null {
       return w.approved_at;
     case "broadcast":
       return w.broadcast_at;
+    case "custody":
+      return w.submitted_at;
     case "confirm":
       return w.confirmed_at;
     case "done":
@@ -167,11 +173,12 @@ function stepTime(key: WithdrawalStep, w: WithdrawalLike): string | null {
 
 /**
  * withdrawalTimeline lays a withdrawal out as risk → review → sign →
- * broadcast → confirm → done (risk → review → done inside the platform).
- * A refused, canceled or failed one ends in an error step where it stopped.
+ * broadcast → confirm → done (risk → review → custody → done with the
+ * custodian, risk → review → done inside the platform). A refused,
+ * canceled or failed one ends in an error step where it stopped.
  */
 export function withdrawalTimeline(w: WithdrawalLike): Timeline<WithdrawalStep> {
-  const keys = w.internal ? INTERNAL_STEPS : CHAIN_STEPS;
+  const keys = w.internal ? INTERNAL_STEPS : w.custody ? CUSTODY_STEPS : CHAIN_STEPS;
   if (FAILED.has(w.status)) {
     const at = Math.min(failureIndex(w), keys.length - 1);
     return {
@@ -181,7 +188,7 @@ export function withdrawalTimeline(w: WithdrawalLike): Timeline<WithdrawalStep> 
     };
   }
   const p = Math.min(progressIndex(w, keys.length), keys.length);
-  const counting = !w.internal && (w.status === "BROADCAST" || w.status === "CONFIRMING");
+  const counting = !w.internal && !w.custody && (w.status === "BROADCAST" || w.status === "CONFIRMING");
   const of = Math.max(1, w.required_confirmations);
   return {
     steps: keys.map((k, i) => step(k, i < p ? "done" : i === p ? "current" : "upcoming", i < p ? stepTime(k, w) : null)),

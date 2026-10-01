@@ -43,6 +43,7 @@ export const zhCN = {
     BUY: "买入", SELL: "卖出", LIMIT: "限价", MARKET: "市价", GTC: "一直有效", IOC: "立即成交剩余撤销", FOK: "全部成交或撤销", POST_ONLY: "只做挂单",
     MAKER: "挂单", TAKER: "吃单", USER: "用户撤单", SELF_TRADE: "自成交保护", NO_LIQUIDITY: "盘口不足",
     REQUESTED: "处理中", PENDING_REVIEW: "待审核", APPROVED: "已批准", SIGNING: "签名中", BROADCAST: "已广播", CONFIRMING: "确认中",
+    SUBMITTED: "托管方处理中", CUSTODY_REJECTED: "托管方拒绝", CUSTODY_FAILED: "链上转账失败",
     CONFIRMED: "已完成", FAILED: "失败", LEDGER_INSUFFICIENT_BALANCE: "可用余额不足",
     REALIZED_PNL: "已实现盈亏", FUNDING_PAYMENT: "资金费", LIQUIDATION_SETTLE: "强平结算", ADL_SETTLE: "自动减仓",
     INSURANCE_CONTRIBUTION: "保险基金", ONE_WAY: "单向持仓", HEDGE: "双向持仓", CROSS: "全仓", ISOLATED: "逐仓",

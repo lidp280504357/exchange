@@ -7,7 +7,9 @@ import { NewerBar, useNewer } from "../../kit/lists";
 import { Page } from "../../kit/Page";
 import { WithdrawalDrawer, WithdrawalsTable, useWithdrawals, type Withdrawal } from "./withdrawalTable";
 
-const STATUSES = ["PENDING_REVIEW", "APPROVED", "SIGNING", "BROADCAST", "CONFIRMING", "CONFIRMED", "INTERNAL_TRANSFER", "REJECTED", "CANCELED", "FAILED"];
+const STATUSES = [
+  "PENDING_REVIEW", "APPROVED", "SIGNING", "BROADCAST", "CONFIRMING", "SUBMITTED", "CONFIRMED", "INTERNAL_TRANSFER", "REJECTED", "CANCELED", "FAILED",
+];
 
 /**
  * Withdrawals (design §10.3): the review queue by default, oldest first;
@@ -17,10 +19,10 @@ const STATUSES = ["PENDING_REVIEW", "APPROVED", "SIGNING", "BROADCAST", "CONFIRM
 export default function Withdrawals({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
   const label = useEnum();
-  const filters = useFilters(["status", "user_id", "asset"]);
+  const filters = useFilters(["status", "user_id", "asset", "network"]);
   const f = filters.values;
   const status = f.status || "PENDING_REVIEW";
-  const q = { status, user_id: f.user_id, asset: f.asset?.toUpperCase() };
+  const q = { status, user_id: f.user_id, asset: f.asset?.toUpperCase(), network: f.network?.toUpperCase() };
   const list = useWithdrawals(q);
   const [open, setOpen] = useState<Withdrawal | null>(null);
   const newer = useNewer(
@@ -49,6 +51,7 @@ export default function Withdrawals({ admin }: { admin: Admin }) {
           },
           { key: "user_id", label: t("admin.orders.userFilter"), kind: "text" },
           { key: "asset", label: t("admin.common.asset"), kind: "text", placeholder: "USDT", width: 100 },
+          { key: "network", label: t("admin.common.network"), kind: "text", placeholder: "TRON", width: 120 },
         ]}
       />
       {newer && <NewerBar listKey={list.key} />}

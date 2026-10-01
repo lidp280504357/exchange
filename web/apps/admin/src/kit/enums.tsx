@@ -21,7 +21,11 @@ export type EnumGroup =
   | "reasonCode"
   | "riskReason"
   | "feed"
-  | "role";
+  | "role"
+  | "providerStatus"
+  | "callbackResult"
+  | "callbackKind"
+  | "custodyStatus";
 
 /** useEnum returns a function that labels a code of a group (the code itself when unknown). */
 export function useEnum() {
@@ -36,8 +40,14 @@ const tones: Partial<Record<EnumGroup, Record<string, BadgeTone>>> = {
   depositStatus: { DETECTED: "info", CONFIRMING: "info", CONFIRMED: "brand", CREDITED: "success", ORPHANED: "warn", REJECTED: "danger" },
   withdrawalStatus: {
     REQUESTED: "info", RISK_SCORING: "info", PENDING_REVIEW: "warn", APPROVED: "brand", SIGNING: "brand", BROADCAST: "brand",
-    CONFIRMING: "brand", CONFIRMED: "success", INTERNAL_TRANSFER: "success", REJECTED: "danger", CANCELED: "neutral", FAILED: "danger",
+    CONFIRMING: "brand", SUBMITTED: "brand", CONFIRMED: "success", INTERNAL_TRANSFER: "success", REJECTED: "danger", CANCELED: "neutral",
+    FAILED: "danger",
   },
+  providerStatus: {
+    SUBMITTED: "warn", ACCEPTED: "info", REVIEW: "info", APPROVED: "brand", REJECTED: "danger", SUCCESS: "success", FAILED: "danger",
+  },
+  callbackResult: { RECEIVED: "info", APPLIED: "success", IGNORED: "neutral", UNMATCHED: "warn", REJECTED: "danger", FAILED: "danger" },
+  custodyStatus: { "0": "info", "1": "brand", "2": "danger", "3": "success", "4": "danger" },
   pairStatus: { PREPARE: "neutral", TRADING: "success", HALT: "warn", CANCEL_ONLY: "warn", DELISTED: "danger" },
   approvalStatus: { PENDING: "warn", EXECUTED: "success", REJECTED: "neutral", FAILED: "danger" },
   feed: { OK: "success", DELAYED: "warn", DOWN: "danger", OFF: "neutral" },
