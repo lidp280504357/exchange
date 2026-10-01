@@ -65,7 +65,7 @@ jobs:
       - name: go vet
         run: go vet ./...
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.14.0
       # Unlike `task ci`, this runs the integration tests too (the TEST_* variables above).
