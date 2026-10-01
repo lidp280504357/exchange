@@ -125,6 +125,22 @@ export async function start({ app, api, name, device, apiPrefix = "/v1/" }) {
       throw new Error(`no visible, enabled button "${label}"`);
     },
 
+    /**
+     * clickLive clicks the element of a list that refreshes itself (the
+     * admin's live tables): when a refresh replaces it between finding and
+     * clicking, it finds it again, a few times.
+     */
+    async clickLive(selector) {
+      for (let i = 0; ; i++) {
+        try {
+          return await page.click(selector);
+        } catch (e) {
+          if (i >= 5 || !/detached|not clickable/i.test(String(e))) throw e;
+          await sleep(300);
+        }
+      }
+    },
+
     /** clickContaining clicks the first visible, enabled button whose text has every part. */
     async clickContaining(parts, scope = "") {
       for (let i = 0; i < 40; i++) {

@@ -56,7 +56,7 @@ try {
   // 3. Users: the list; a row opens the drawer with balances and tabs.
   await go("/users");
   await rows(3);
-  await page.click("main tbody tr");
+  await t.clickLive("main tbody tr");
   await page.waitForSelector("[role=dialog]");
   await waitText("余额");
   const userId = await page.evaluate(() => new URL(location.href).searchParams.get("user"));
@@ -96,7 +96,7 @@ try {
   await waitText("可访问");
   await waitText("TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t".slice(0, 12));
   await rows(1, 'main table[aria-label="custody callbacks"]');
-  await page.click('main table[aria-label="custody callbacks"] tbody tr');
+  await t.clickLive('main table[aria-label="custody callbacks"] tbody tr');
   await page.waitForSelector("[role=dialog]");
   await waitText("原始请求");
   await page.keyboard.press("Escape");
