@@ -53,7 +53,8 @@ func TestTheDeployedReferenceDataIsValid(t *testing.T) {
 		}
 		if p.QuoteAsset == "USDT" {
 			usdt++
-			if p.ReferenceSymbol == "" {
+			// The platform coin's market is its own (ASTRA design §2).
+			if p.ReferenceSymbol == "" && p.BaseAsset != "ASTRA" {
 				t.Errorf("pair %s follows no reference market", p.Symbol)
 			}
 		}

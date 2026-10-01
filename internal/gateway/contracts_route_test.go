@@ -10,8 +10,8 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/httpx"
 )
 
-// Contract reference data goes to instrument-service although
-// /v1/market/{symbol}/* would match it for market-data-service.
+// Contract reference data and asset logos go to instrument-service although
+// /v1/market/{symbol}/* would match them for market-data-service.
 func TestContractRoutes(t *testing.T) {
 	var got string
 	stub := func(name string) http.Handler {
@@ -29,6 +29,7 @@ func TestContractRoutes(t *testing.T) {
 		"/v1/market/contracts":               "instrument",
 		"/v1/market/contracts/BTC-USDT-PERP": "instrument",
 		"/v1/market/pairs/BTC-USDT":          "instrument",
+		"/v1/market/assets/ASTRA/logo":       "instrument",
 		"/v1/market/BTC-USDT/depth":          "market",
 		"/v1/market/summary":                 "market",
 		"/v1/market/sparklines":              "market",

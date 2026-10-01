@@ -26,6 +26,7 @@ type Repos interface {
 	Networks() NetworkRepo
 	Pairs() PairRepo
 	Contracts() ContractRepo
+	Profiles() ProfileRepo
 	// Record appends a version to the configuration history.
 	Record(ctx context.Context, entity, key string, version int64, value any, actor, reason string) error
 	// Emit queues an instrument.events event keyed by aggregateID.
@@ -69,4 +70,19 @@ type ContractRepo interface {
 	GetForUpdate(ctx context.Context, symbol string) (*domain.Contract, error)
 	List(ctx context.Context) ([]domain.Contract, error)
 	Save(ctx context.Context, c domain.Contract) (domain.Contract, error)
+}
+
+// ProfileRepo stores the assets' profiles (ASTRA design §5.3) on the asset
+// rows; Get and List leave the logo itself out.
+type ProfileRepo interface {
+	// GetForUpdate returns an asset's profile with a row lock; nil
+	// without the asset.
+	GetForUpdate(ctx context.Context, code string) (*domain.AssetProfile, error)
+	List(ctx context.Context) ([]domain.AssetProfile, error)
+	// Logo returns an asset's logo, nil without one, and the profile
+	// version.
+	Logo(ctx context.Context, code string) (*domain.Logo, int64, error)
+	// Save writes the profile's text and, unless logo is nil, its logo
+	// (no data clears it), raising the profile version by one.
+	Save(ctx context.Context, p domain.AssetProfile, logo *domain.Logo) (domain.AssetProfile, error)
 }

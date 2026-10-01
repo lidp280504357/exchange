@@ -1,4 +1,4 @@
-import { dec, errorText, formatPercent, formatPrice, useContracts, usePairs, useTickers } from "@exchange/core";
+import { dec, errorText, formatPercent, formatPrice, pairName, useContracts, usePairs, useTickers } from "@exchange/core";
 import { useFavorites } from "@exchange/core/markets/favorites";
 import { CoinIcon, Input, Segmented, Sheet, cn, toast } from "@exchange/ui";
 import { Search, Star } from "lucide-react";
@@ -31,7 +31,7 @@ export function PairSheet({
   const rows = useMemo<Row[]>(() => {
     const spot = (pairs.data?.pairs ?? [])
       .filter((p) => p.status !== "DELISTED")
-      .map((p) => ({ symbol: p.symbol, base: p.base_asset, quote: p.quote_asset, name: p.base_name, decimals: p.price_decimals, futures: false }));
+      .map((p) => ({ symbol: p.symbol, base: p.base_asset, quote: p.quote_asset, name: pairName(p), decimals: p.price_decimals, futures: false }));
     const perp = (contracts.data?.contracts ?? []).map((c) => ({
       symbol: c.symbol, base: c.base_asset, quote: c.quote_asset, name: t("m.perpetual"), decimals: dec.decimalsOf(c.tick_size), futures: true,
     }));

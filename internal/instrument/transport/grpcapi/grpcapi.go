@@ -3,9 +3,11 @@ package grpcapi
 
 import (
 	"context"
+	"strings"
 
 	instrumentv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/instrument/v1"
 	"github.com/lidp280504357/exchange/internal/instrument/application"
+	"github.com/lidp280504357/exchange/internal/instrument/domain"
 )
 
 // Server implements instrumentv1.InstrumentServiceServer.
@@ -23,7 +25,7 @@ func (s *Server) GetAsset(ctx context.Context, req *instrumentv1.GetAssetRequest
 	if err != nil {
 		return nil, err
 	}
-	return &instrumentv1.GetAssetResponse{Asset: application.ToProtoAsset(a.Asset, a.Networks)}, nil
+	return &instrumentv1.GetAssetResponse{Asset: assetOf(a)}, nil
 }
 
 // ListAssets returns every asset.
@@ -34,9 +36,30 @@ func (s *Server) ListAssets(ctx context.Context, _ *instrumentv1.ListAssetsReque
 	}
 	resp := &instrumentv1.ListAssetsResponse{}
 	for _, a := range list {
-		resp.Assets = append(resp.Assets, application.ToProtoAsset(a.Asset, a.Networks))
+		resp.Assets = append(resp.Assets, assetOf(a))
 	}
 	return resp, nil
+}
+
+func assetOf(a application.AssetView) *instrumentv1.Asset {
+	out := application.ToProtoAsset(a.Asset, a.Networks)
+	out.Profile = application.ToProtoProfile(a.Profile)
+	return out
+}
+
+// UpdateAssetProfile changes an asset's profile for an operator.
+func (s *Server) UpdateAssetProfile(ctx context.Context, req *instrumentv1.UpdateAssetProfileRequest) (*instrumentv1.UpdateAssetProfileResponse, error) {
+	ch := application.ProfileChange{
+		DisplayName: req.GetDisplayName(), Description: req.GetDescription(), Links: req.GetLinks(), ClearLogo: req.GetClearLogo(),
+	}
+	if len(req.GetLogo()) > 0 {
+		ch.Logo = &domain.Logo{Data: req.GetLogo(), MIME: req.GetLogoMime()}
+	}
+	p, err := s.svc.UpdateProfile(ctx, strings.ToUpper(req.GetAssetCode()), ch, req.GetActor(), req.GetReason())
+	if err != nil {
+		return nil, err
+	}
+	return &instrumentv1.UpdateAssetProfileResponse{Profile: application.ToProtoProfile(p)}, nil
 }
 
 // GetTradingPair returns a pair with its fee rates.

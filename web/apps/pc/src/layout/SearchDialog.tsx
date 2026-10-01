@@ -1,4 +1,4 @@
-import { dec, formatPercent, formatPrice, routes, useContracts, usePairs, useTickers } from "@exchange/core";
+import { dec, formatPercent, formatPrice, pairName, routes, useContracts, usePairs, useTickers } from "@exchange/core";
 import { CoinIcon, DialogPrimitive as RDialog, cn } from "@exchange/ui";
 import { Search } from "lucide-react";
 import { useMemo, useState, type KeyboardEvent } from "react";
@@ -51,7 +51,7 @@ function Results({
     const spot = (pairs.data?.pairs ?? [])
       .filter((p) => p.status !== "DELISTED")
       .map((p) => ({
-        key: p.symbol, symbol: p.symbol, base: p.base_asset, quote: p.quote_asset, name: p.base_name, to: routes.trade(p.symbol),
+        key: p.symbol, symbol: p.symbol, base: p.base_asset, quote: p.quote_asset, name: pairName(p), to: routes.trade(p.symbol),
         decimals: p.price_decimals, futures: false,
       }));
     const perp = (contracts.data?.contracts ?? []).map((c) => ({

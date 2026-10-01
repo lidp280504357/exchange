@@ -22,6 +22,11 @@ service InstrumentService {
   // SetContractStatus moves a perpetual contract along the same machine as
   // a pair; the change is versioned.
   rpc SetContractStatus(SetContractStatusRequest) returns (SetContractStatusResponse);
+  // UpdateAssetProfile changes what the sites show of an asset for an
+  // operator (ASTRA design §5.3): its display name, introductions, links
+  // and logo. The asset code never changes; the history keeps the profile
+  // before and after.
+  rpc UpdateAssetProfile(UpdateAssetProfileRequest) returns (UpdateAssetProfileResponse);
 }
 
 message Asset {
@@ -41,6 +46,26 @@ message Asset {
   int32 rank = 10;
   // Sector tags in lower case, e.g. layer-1, defi, meme.
   repeated string categories = 11;
+  AssetProfile profile = 12;
+}
+
+// AssetProfile is what the sites show of an asset beyond its code.
+message AssetProfile {
+  // Replaces the asset's name on the sites when set.
+  string display_name = 1;
+  // Introductions by language: "zh-CN", "en".
+  map<string, string> description = 2;
+  // https URLs by kind: "website", "explorer", "whitepaper".
+  map<string, string> links = 3;
+  // The logo's type (image/png, image/svg+xml or image/webp) and bytes;
+  // empty and 0 without a logo.
+  string logo_mime = 4;
+  int32 logo_size = 5;
+  // The public logo URL path, with the version so that a new logo gets a
+  // new URL; empty without a logo.
+  string logo_url = 6;
+  // Goes up with every change.
+  int64 version = 7;
 }
 
 // Network is an asset on one chain.
@@ -199,6 +224,29 @@ message SetPairStatusRequest {
 
 message SetPairStatusResponse {
   string from_status = 1;
+}
+
+// UpdateAssetProfileRequest replaces an asset's profile text; the logo
+// changes only with logo (or clear_logo).
+message UpdateAssetProfileRequest {
+  string asset_code = 1;
+  // 2-32 printable characters, or empty for the asset's name.
+  string display_name = 2;
+  // Up to 1,000 characters each.
+  map<string, string> description = 3;
+  map<string, string> links = 4;
+  // A new logo: PNG, SVG (cleaned on upload) or WebP, square, at most
+  // 200 KB, with its logo_mime. Empty keeps the logo.
+  bytes logo = 5;
+  string logo_mime = 6;
+  // Removes the logo (the letter icon shows).
+  bool clear_logo = 7;
+  string actor = 8;
+  string reason = 9;
+}
+
+message UpdateAssetProfileResponse {
+  AssetProfile profile = 1;
 }
 
 message GetContractRequest {

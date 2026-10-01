@@ -41,6 +41,43 @@ paths:
                       $ref: '#/components/schemas/Asset'
         default:
           $ref: './common.yaml#/components/responses/Error'
+  /v1/market/assets/{code}/logo:
+    get:
+      operationId: getAssetLogo
+      summary: An asset's logo
+      description: >-
+        PNG, SVG (cleaned on upload) or WebP. Asked for with the current profile version (v, as
+        logo_url carries it) it is cached for a year; with another version, for a minute.
+      tags: [market]
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+            examples: [ASTRA]
+        - name: v
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: The logo.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/svg+xml:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        default:
+          $ref: './common.yaml#/components/responses/Error'
   /v1/market/pairs:
     get:
       operationId: listPairs
@@ -525,7 +562,8 @@ components:
           type: boolean
     Asset:
       type: object
-      required: [asset_code, name, decimals, rank, categories, deposit_enabled, withdraw_enabled, trading_enabled, networks]
+      required: [asset_code, name, decimals, rank, categories, deposit_enabled, withdraw_enabled, trading_enabled, networks,
+        display_name, description, links, logo_url, profile_version]
       properties:
         asset_code:
           type: string
@@ -555,6 +593,28 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Network'
+        display_name:
+          type: [string, 'null']
+          description: The name operators set for the sites (ASTRA design §5.3); null shows the name.
+        description:
+          type: object
+          description: Introductions by language ("zh-CN", "en"), set by operators; empty when none.
+          additionalProperties:
+            type: string
+        links:
+          type: object
+          description: https links by kind ("website", "explorer", "whitepaper"); empty when none.
+          additionalProperties:
+            type: string
+        logo_url:
+          type: [string, 'null']
+          description: >-
+            The logo (GET /v1/market/assets/{code}/logo?v=...): the URL changes with every profile
+            change, so it can be cached for good. Null without a logo (the sites draw the letter icon).
+        profile_version:
+          type: integer
+          minimum: 0
+          description: Goes up with every change of the profile.
     RiskTier:
       type: object
       required: [max_notional, max_leverage, mmr]
@@ -626,7 +686,7 @@ components:
       type: object
       required: [symbol, base_asset, quote_asset, base_name, rank, categories, tick_size, lot_size, price_decimals, qty_decimals,
         min_quantity, max_quantity, min_notional, price_band, maker_fee_rate, taker_fee_rate, status, reference_symbol,
-        reference_multiplier, listed_at]
+        reference_multiplier, listed_at, base_display_name, base_logo_url]
       properties:
         symbol:
           type: string
@@ -682,6 +742,12 @@ components:
         listed_at:
           type: string
           format: date-time
+        base_display_name:
+          type: [string, 'null']
+          description: The base asset's display name (Asset.display_name); null shows base_name.
+        base_logo_url:
+          type: [string, 'null']
+          description: The base asset's logo (Asset.logo_url); null without one.
     NullableDecimal:
       type: [string, 'null']
       pattern: '^-?[0-9]+(\.[0-9]+)?$'

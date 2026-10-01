@@ -4,6 +4,7 @@ package httpapi
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ type Handler struct {
 // Routes mounts the endpoints on r.
 func (h *Handler) Routes(r chi.Router) {
 	r.Get("/v1/market/assets", h.assets)
+	r.Get("/v1/market/assets/{code}/logo", h.logo)
 	r.Get("/v1/market/pairs", h.pairs)
 	r.Get("/v1/market/pairs/{symbol}", h.pair)
 	r.Get("/v1/market/contracts", h.contracts)
@@ -58,6 +60,12 @@ type assetJSON struct {
 	WithdrawEnabled bool          `json:"withdraw_enabled"`
 	TradingEnabled  bool          `json:"trading_enabled"`
 	Networks        []networkJSON `json:"networks"`
+	// The profile operators maintain (ASTRA design §5.3).
+	DisplayName    *string           `json:"display_name"`
+	Description    map[string]string `json:"description"`
+	Links          map[string]string `json:"links"`
+	LogoURL        *string           `json:"logo_url"`
+	ProfileVersion int64             `json:"profile_version"`
 }
 
 type pairJSON struct {
@@ -81,6 +89,8 @@ type pairJSON struct {
 	ReferenceSymbol     *string  `json:"reference_symbol"`
 	ReferenceMultiplier string   `json:"reference_multiplier"`
 	ListedAt            string   `json:"listed_at"`
+	BaseDisplayName     *string  `json:"base_display_name"`
+	BaseLogoURL         *string  `json:"base_logo_url"`
 }
 
 // rank is null for an unranked asset.
@@ -119,8 +129,16 @@ func toPairJSON(p application.PairView) pairJSON {
 		MaxQuantity: p.MaxQuantity.String(), MinNotional: p.MinNotional.String(), PriceBand: p.PriceBand.String(),
 		MakerFeeRate: p.MakerFeeRate.String(), TakerFeeRate: p.TakerFeeRate.String(), Status: p.Status,
 		ReferenceSymbol: optional(p.ReferenceSymbol), ReferenceMultiplier: p.ReferenceMultiplier.String(),
-		ListedAt: p.ListedAt.UTC().Format(time.RFC3339),
+		ListedAt: p.ListedAt.UTC().Format(time.RFC3339), BaseDisplayName: optional(p.BaseProfile.DisplayName),
+		BaseLogoURL: optional(application.LogoURL(p.BaseProfile)),
 	}
+}
+
+func texts(m map[string]string) map[string]string {
+	if m == nil {
+		return map[string]string{}
+	}
+	return m
 }
 
 // displayName falls back to the network code.
@@ -145,7 +163,8 @@ func (h *Handler) assets(w http.ResponseWriter, r *http.Request) {
 		aj := assetJSON{
 			AssetCode: a.Code, Name: a.Name, Decimals: a.Decimals, Rank: rank(a.Rank), Categories: categories(a.Categories),
 			DepositEnabled: a.DepositEnabled, WithdrawEnabled: a.WithdrawEnabled, TradingEnabled: a.TradingEnabled,
-			Networks: []networkJSON{},
+			Networks: []networkJSON{}, DisplayName: optional(a.Profile.DisplayName), Description: texts(a.Profile.Description),
+			Links: texts(a.Profile.Links), LogoURL: optional(application.LogoURL(a.Profile)), ProfileVersion: a.Profile.Version,
 		}
 		for _, n := range a.Networks {
 			aj.Networks = append(aj.Networks, networkJSON{
@@ -160,6 +179,29 @@ func (h *Handler) assets(w http.ResponseWriter, r *http.Request) {
 	}
 	cacheable(w)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"assets": out})
+}
+
+// logo serves an asset's logo. Its URL carries the profile version
+// (application.LogoURL): at the current version it is cached for good, an
+// older one briefly (it gets the current logo). An SVG opened on its own
+// runs nothing: no scripts or embeds, and nosniff keeps the type.
+func (h *Handler) logo(w http.ResponseWriter, r *http.Request) {
+	l, version, err := h.Svc.Logo(r.Context(), strings.ToUpper(chi.URLParam(r, "code")))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	hdr := w.Header()
+	hdr.Set("Content-Type", l.MIME)
+	hdr.Set("X-Content-Type-Options", "nosniff")
+	hdr.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+	if r.URL.Query().Get("v") == strconv.FormatInt(version, 10) {
+		hdr.Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		hdr.Set("Cache-Control", "public, max-age=60")
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(l.Data)
 }
 
 // pairs lists every pair but the delisted ones.

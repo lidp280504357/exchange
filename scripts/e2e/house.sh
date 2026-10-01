@@ -29,7 +29,8 @@ fail() { echo "FAIL $1" >&2; exit 1; }
 echo "== HOUSE offers every trading pair and contract"
 call GET /v1/market/pairs ""
 expect 200 - "pairs"
-WANT=$(jq -r '[.pairs[] | select(.status == "TRADING") | .symbol] | join(" ")' <<<"$BODY")
+# Pairs with their own market (the platform coin, ASTRA design §2) have no HOUSE.
+WANT=$(jq -r '[.pairs[] | select(.status == "TRADING" and .reference_symbol != null) | .symbol] | join(" ")' <<<"$BODY")
 call GET /v1/market/contracts ""
 expect 200 - "contracts"
 WANT="$WANT $(jq -r '[.contracts[] | select(.status == "TRADING") | .symbol] | join(" ")' <<<"$BODY")"
@@ -46,10 +47,10 @@ offered || fail "HOUSE offers nothing on:$MISSING"
 echo "ok   HOUSE offers all $(wc -w <<<"$WANT" | tr -d ' ') of them"
 
 echo "== the USDT pairs"
-USDT_PAIRS=$(jq '[.pairs[] | select(.quote_asset == "USDT")] | length' "$(dirname "$0")/../../deploy/instruments/test.json")
+USDT_PAIRS=$(jq '[.pairs[] | select(.quote_asset == "USDT" and .reference_symbol != null)] | length' "$(dirname "$0")/../../deploy/instruments/test.json")
 call GET /v1/market/pairs ""
 expect 200 - "pairs"
-check "[.pairs[] | select(.quote_asset == \"USDT\" and .status == \"TRADING\")] | length == $USDT_PAIRS" "all $USDT_PAIRS USDT pairs trade"
+check "[.pairs[] | select(.quote_asset == \"USDT\" and .reference_symbol != null and .status == \"TRADING\")] | length == $USDT_PAIRS" "all $USDT_PAIRS USDT pairs following Binance trade"
 check '(.pairs[] | select(.symbol == "1000BONK-USDT")) | .reference_symbol == "BONKUSDT" and .reference_multiplier == "1000"' "1000BONK-USDT follows BONKUSDT x 1000"
 check '(.pairs[] | select(.symbol == "1000SHIB-USDT")) | .reference_symbol == "SHIBUSDT" and .reference_multiplier == "1000"' "1000SHIB-USDT follows SHIBUSDT x 1000"
 shown() { # shown SYMBOL: BODY holds a two-sided book of SYMBOL

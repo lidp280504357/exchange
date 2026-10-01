@@ -18,6 +18,7 @@ export * from "./routes";
 export * from "./site";
 export * from "./live";
 export * from "./coins";
+export * from "./markets/profiles";
 export * from "./vitals";
 export * from "./auth/otp";
 export * from "./auth/stepup";

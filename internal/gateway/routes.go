@@ -91,6 +91,7 @@ func Mount(r chi.Router, g Guards, up Upstreams) {
 		})
 		// Public reference data.
 		r.Handle("/v1/market/assets", up.Instrument)
+		r.Handle("/v1/market/assets/*", up.Instrument) // logos
 		r.Handle("/v1/market/pairs", up.Instrument)
 		r.Handle("/v1/market/pairs/*", up.Instrument)
 		r.Handle("/v1/market/contracts", up.Instrument)

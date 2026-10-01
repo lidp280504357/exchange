@@ -16,7 +16,7 @@ type ContractSpec = components["schemas"]["Contract"];
 export type PairLike = Pick<
   TradingPair,
   "symbol" | "base_asset" | "quote_asset" | "base_name" | "rank" | "categories" | "price_decimals" | "status" | "listed_at"
-> & { reference_symbol?: string | null };
+> & { reference_symbol?: string | null; base_display_name?: string | null };
 
 /** The contract fields the list reads. */
 export type ContractLike = Pick<ContractSpec, "symbol" | "base_asset" | "quote_asset" | "index_symbol" | "tick_size" | "status" | "max_leverage">;
@@ -81,7 +81,7 @@ export function buildRows(pairs: readonly PairLike[], contracts: readonly Contra
       kind: "spot",
       base: p.base_asset,
       quote: p.quote_asset,
-      name: p.base_name || p.base_asset,
+      name: p.base_display_name || p.base_name || p.base_asset,
       rank: p.rank,
       categories: p.categories,
       status: p.status,
@@ -89,13 +89,13 @@ export function buildRows(pairs: readonly PairLike[], contracts: readonly Contra
       listedAt: p.listed_at,
       maxLeverage: 0,
       reference: Boolean(p.reference_symbol),
-      search: searchText([p.symbol, p.base_asset + p.quote_asset, p.base_asset, p.base_name, ...profileNames(p.base_asset)]),
+      search: searchText([p.symbol, p.base_asset + p.quote_asset, p.base_asset, p.base_name, p.base_display_name ?? "", ...profileNames(p.base_asset)]),
     });
   }
   for (const c of contracts) {
     if (c.status === "DELISTED") continue;
     const index = pairs.find((p) => p.symbol === c.index_symbol) ?? pairs.find((p) => p.base_asset === c.base_asset);
-    const name = index?.base_name || coinProfile(c.base_asset)?.name.en || c.base_asset;
+    const name = index?.base_display_name || index?.base_name || coinProfile(c.base_asset)?.name.en || c.base_asset;
     rows.push({
       symbol: c.symbol,
       kind: "perp",

@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { marketApi, unwrap } from "../api/client";
 import type { components } from "../api/gen/market";
 import { cmp, isDecimal, mul, normalize, sign } from "../format/decimal";
+import { rememberAssets, rememberPairs } from "../markets/profiles";
 import { qk } from "../query/keys";
 
 // Reference data every trading page needs: the pairs with their rules and
@@ -14,7 +15,22 @@ export type Contract = components["schemas"]["Contract"];
 
 /** usePairs returns the spot pairs (cached for a minute). */
 export function usePairs() {
-  return useQuery({ queryKey: qk.pairs, queryFn: () => unwrap(marketApi.GET("/v1/market/pairs")), staleTime: 60_000 });
+  return useQuery({
+    queryKey: qk.pairs,
+    queryFn: async () => {
+      const data = await unwrap(marketApi.GET("/v1/market/pairs"));
+      rememberPairs(data.pairs);
+      return data;
+    },
+    staleTime: 60_000,
+    // Display names and logos operators change show within a minute.
+    refetchInterval: 60_000,
+  });
+}
+
+/** pairName is the name the sites show for a pair's base asset: the display name operators set, else the asset's. */
+export function pairName(p: Pick<Pair, "base_asset" | "base_name"> & { base_display_name?: string | null }): string {
+  return p.base_display_name || p.base_name || p.base_asset;
 }
 
 /** usePair finds one pair by symbol (case-insensitive), with the query's state. */
@@ -26,7 +42,16 @@ export function usePair(symbol: string) {
 
 /** useAssets returns the assets with their precisions (cached for a minute). */
 export function useAssets() {
-  return useQuery({ queryKey: qk.assets, queryFn: () => unwrap(marketApi.GET("/v1/market/assets")), staleTime: 60_000 });
+  return useQuery({
+    queryKey: qk.assets,
+    queryFn: async () => {
+      const data = await unwrap(marketApi.GET("/v1/market/assets"));
+      rememberAssets(data.assets);
+      return data;
+    },
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  });
 }
 
 /** assetDecimals is an asset's precision, or the fallback while unknown. */

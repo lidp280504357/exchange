@@ -19,14 +19,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	InstrumentService_GetAsset_FullMethodName          = "/exchange.instrument.v1.InstrumentService/GetAsset"
-	InstrumentService_ListAssets_FullMethodName        = "/exchange.instrument.v1.InstrumentService/ListAssets"
-	InstrumentService_GetTradingPair_FullMethodName    = "/exchange.instrument.v1.InstrumentService/GetTradingPair"
-	InstrumentService_ListTradingPairs_FullMethodName  = "/exchange.instrument.v1.InstrumentService/ListTradingPairs"
-	InstrumentService_SetPairStatus_FullMethodName     = "/exchange.instrument.v1.InstrumentService/SetPairStatus"
-	InstrumentService_GetContract_FullMethodName       = "/exchange.instrument.v1.InstrumentService/GetContract"
-	InstrumentService_ListContracts_FullMethodName     = "/exchange.instrument.v1.InstrumentService/ListContracts"
-	InstrumentService_SetContractStatus_FullMethodName = "/exchange.instrument.v1.InstrumentService/SetContractStatus"
+	InstrumentService_GetAsset_FullMethodName           = "/exchange.instrument.v1.InstrumentService/GetAsset"
+	InstrumentService_ListAssets_FullMethodName         = "/exchange.instrument.v1.InstrumentService/ListAssets"
+	InstrumentService_GetTradingPair_FullMethodName     = "/exchange.instrument.v1.InstrumentService/GetTradingPair"
+	InstrumentService_ListTradingPairs_FullMethodName   = "/exchange.instrument.v1.InstrumentService/ListTradingPairs"
+	InstrumentService_SetPairStatus_FullMethodName      = "/exchange.instrument.v1.InstrumentService/SetPairStatus"
+	InstrumentService_GetContract_FullMethodName        = "/exchange.instrument.v1.InstrumentService/GetContract"
+	InstrumentService_ListContracts_FullMethodName      = "/exchange.instrument.v1.InstrumentService/ListContracts"
+	InstrumentService_SetContractStatus_FullMethodName  = "/exchange.instrument.v1.InstrumentService/SetContractStatus"
+	InstrumentService_UpdateAssetProfile_FullMethodName = "/exchange.instrument.v1.InstrumentService/UpdateAssetProfile"
 )
 
 // InstrumentServiceClient is the client API for InstrumentService service.
@@ -51,6 +52,11 @@ type InstrumentServiceClient interface {
 	// SetContractStatus moves a perpetual contract along the same machine as
 	// a pair; the change is versioned.
 	SetContractStatus(ctx context.Context, in *SetContractStatusRequest, opts ...grpc.CallOption) (*SetContractStatusResponse, error)
+	// UpdateAssetProfile changes what the sites show of an asset for an
+	// operator (ASTRA design §5.3): its display name, introductions, links
+	// and logo. The asset code never changes; the history keeps the profile
+	// before and after.
+	UpdateAssetProfile(ctx context.Context, in *UpdateAssetProfileRequest, opts ...grpc.CallOption) (*UpdateAssetProfileResponse, error)
 }
 
 type instrumentServiceClient struct {
@@ -141,6 +147,16 @@ func (c *instrumentServiceClient) SetContractStatus(ctx context.Context, in *Set
 	return out, nil
 }
 
+func (c *instrumentServiceClient) UpdateAssetProfile(ctx context.Context, in *UpdateAssetProfileRequest, opts ...grpc.CallOption) (*UpdateAssetProfileResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateAssetProfileResponse)
+	err := c.cc.Invoke(ctx, InstrumentService_UpdateAssetProfile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // InstrumentServiceServer is the server API for InstrumentService service.
 // All implementations must embed UnimplementedInstrumentServiceServer
 // for forward compatibility.
@@ -163,6 +179,11 @@ type InstrumentServiceServer interface {
 	// SetContractStatus moves a perpetual contract along the same machine as
 	// a pair; the change is versioned.
 	SetContractStatus(context.Context, *SetContractStatusRequest) (*SetContractStatusResponse, error)
+	// UpdateAssetProfile changes what the sites show of an asset for an
+	// operator (ASTRA design §5.3): its display name, introductions, links
+	// and logo. The asset code never changes; the history keeps the profile
+	// before and after.
+	UpdateAssetProfile(context.Context, *UpdateAssetProfileRequest) (*UpdateAssetProfileResponse, error)
 	mustEmbedUnimplementedInstrumentServiceServer()
 }
 
@@ -196,6 +217,9 @@ func (UnimplementedInstrumentServiceServer) ListContracts(context.Context, *List
 }
 func (UnimplementedInstrumentServiceServer) SetContractStatus(context.Context, *SetContractStatusRequest) (*SetContractStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetContractStatus not implemented")
+}
+func (UnimplementedInstrumentServiceServer) UpdateAssetProfile(context.Context, *UpdateAssetProfileRequest) (*UpdateAssetProfileResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateAssetProfile not implemented")
 }
 func (UnimplementedInstrumentServiceServer) mustEmbedUnimplementedInstrumentServiceServer() {}
 func (UnimplementedInstrumentServiceServer) testEmbeddedByValue()                           {}
@@ -362,6 +386,24 @@ func _InstrumentService_SetContractStatus_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _InstrumentService_UpdateAssetProfile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateAssetProfileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InstrumentServiceServer).UpdateAssetProfile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InstrumentService_UpdateAssetProfile_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InstrumentServiceServer).UpdateAssetProfile(ctx, req.(*UpdateAssetProfileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // InstrumentService_ServiceDesc is the grpc.ServiceDesc for InstrumentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -400,6 +442,10 @@ var InstrumentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetContractStatus",
 			Handler:    _InstrumentService_SetContractStatus_Handler,
+		},
+		{
+			MethodName: "UpdateAssetProfile",
+			Handler:    _InstrumentService_UpdateAssetProfile_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

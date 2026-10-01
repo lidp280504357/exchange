@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/lidp280504357/exchange/internal/instrument/adapters/postgres"
 	"github.com/lidp280504357/exchange/internal/instrument/application"
+	"github.com/lidp280504357/exchange/internal/instrument/domain"
 	"github.com/lidp280504357/exchange/internal/platform/event"
 	"github.com/lidp280504357/exchange/internal/platform/migrate"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
@@ -51,6 +54,8 @@ func instrumentsWith(ctx context.Context, db *pg.DB, args []string, in io.Reader
 		return instrumentsPairStatus(ctx, svc, args[1:], out)
 	case "contract-status":
 		return instrumentsContractStatus(ctx, svc, args[1:], out)
+	case "profile":
+		return instrumentsProfile(ctx, svc, args[1:], in, out)
 	default:
 		return fmt.Errorf("unknown instruments command %q", args[0])
 	}
@@ -190,4 +195,128 @@ func instrumentsContractStatus(ctx context.Context, svc *application.Service, ar
 	}
 	fmt.Fprintf(out, "%s: %s -> %s\n", symbol, from, *to)
 	return nil
+}
+
+// instrumentsProfile shows an asset's profile, or changes the parts given
+// (ASTRA design §5.3): the display name, the introductions, the links and
+// the logo, read from a file or from stdin ("-").
+func instrumentsProfile(ctx context.Context, svc *application.Service, args []string, in io.Reader, out io.Writer) error {
+	fs := flag.NewFlagSet("instruments profile", flag.ContinueOnError)
+	fs.SetOutput(out)
+	name := fs.String("display-name", "", "the name the sites show (2-32 characters; empty for the asset's name)")
+	zh := fs.String("zh", "", "the Chinese introduction")
+	en := fs.String("en", "", "the English introduction")
+	website := fs.String("website", "", "https link")
+	explorer := fs.String("explorer", "", "https link")
+	whitepaper := fs.String("whitepaper", "", "https link")
+	logoFile := fs.String("logo", "", "a square PNG, SVG or WebP of at most 200 KB; - reads stdin")
+	logoType := fs.String("logo-type", "", "image/png, image/svg+xml or image/webp (default: from the file name)")
+	clearLogo := fs.Bool("clear-logo", false, "remove the logo")
+	reason := fs.String("reason", "", "why (required for a change)")
+	if len(args) == 0 {
+		fs.Usage()
+		return errors.New("profile needs an asset code first")
+	}
+	code := strings.ToUpper(args[0])
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	profiles, err := svc.Profiles(ctx)
+	if err != nil {
+		return err
+	}
+	cur, ok := profiles[code]
+	if !ok {
+		return fmt.Errorf("no asset %s", code)
+	}
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if len(set) == 0 {
+		return printProfile(out, cur)
+	}
+	if *reason == "" {
+		return errors.New("--reason is required")
+	}
+	ch := application.ProfileChange{
+		DisplayName: cur.DisplayName, Description: copyTexts(cur.Description), Links: copyTexts(cur.Links), ClearLogo: *clearLogo,
+	}
+	if set["display-name"] {
+		ch.DisplayName = *name
+	}
+	for flagName, v := range map[string]*string{"zh": zh, "en": en} {
+		if set[flagName] {
+			setText(ch.Description, map[string]string{"zh": "zh-CN", "en": "en"}[flagName], *v)
+		}
+	}
+	for flagName, v := range map[string]*string{"website": website, "explorer": explorer, "whitepaper": whitepaper} {
+		if set[flagName] {
+			setText(ch.Links, flagName, *v)
+		}
+	}
+	if *logoFile != "" {
+		logo, err := readLogo(*logoFile, *logoType, in)
+		if err != nil {
+			return err
+		}
+		ch.Logo = logo
+	}
+	saved, err := svc.UpdateProfile(ctx, code, ch, actor(), *reason)
+	if err != nil {
+		return err
+	}
+	return printProfile(out, saved)
+}
+
+func copyTexts(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// setText sets a text, or removes it when empty.
+func setText(m map[string]string, key, v string) {
+	if v == "" {
+		delete(m, key)
+		return
+	}
+	m[key] = v
+}
+
+// readLogo reads a logo file (or stdin for "-") with its type.
+func readLogo(file, mime string, in io.Reader) (*domain.Logo, error) {
+	var data []byte
+	var err error
+	if file == "-" {
+		data, err = io.ReadAll(io.LimitReader(in, domain.MaxLogoBytes+1))
+	} else {
+		data, err = os.ReadFile(file) //nolint:gosec // an operator's own file
+	}
+	if err != nil {
+		return nil, err
+	}
+	if mime == "" {
+		switch strings.ToLower(filepath.Ext(file)) {
+		case ".png":
+			mime = domain.LogoPNG
+		case ".svg":
+			mime = domain.LogoSVG
+		case ".webp":
+			mime = domain.LogoWebP
+		default:
+			return nil, errors.New("--logo-type is required (image/png, image/svg+xml or image/webp)")
+		}
+	}
+	return &domain.Logo{Data: data, MIME: mime}, nil
+}
+
+func printProfile(out io.Writer, p domain.AssetProfile) error {
+	view := map[string]any{
+		"asset_code": p.Code, "display_name": p.DisplayName, "description": p.Description, "links": p.Links,
+		"logo_mime": p.LogoMIME, "logo_size": p.LogoSize, "logo_url": application.LogoURL(p), "profile_version": p.Version,
+	}
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+	return enc.Encode(view)
 }

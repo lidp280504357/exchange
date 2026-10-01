@@ -247,10 +247,11 @@ func (s *Service) SetPairStatus(ctx context.Context, symbol, to, actor, reason s
 	return from, err
 }
 
-// AssetView is an asset with its networks.
+// AssetView is an asset with its networks and its profile.
 type AssetView struct {
 	domain.Asset
-	Networks []domain.Network `json:"networks"`
+	Networks []domain.Network    `json:"networks"`
+	Profile  domain.AssetProfile `json:"profile"`
 }
 
 // Assets lists every asset with its networks.
@@ -264,9 +265,13 @@ func (s *Service) Assets(ctx context.Context) ([]AssetView, error) {
 	if err != nil {
 		return nil, err
 	}
+	profiles, err := s.Profiles(ctx)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]AssetView, 0, len(list))
 	for _, a := range list {
-		v := AssetView{Asset: a, Networks: []domain.Network{}}
+		v := AssetView{Asset: a, Networks: []domain.Network{}, Profile: profiles[a.Code]}
 		for _, n := range nets {
 			if n.AssetCode == a.Code {
 				v.Networks = append(v.Networks, n)
@@ -292,14 +297,15 @@ func (s *Service) Asset(ctx context.Context, code string) (AssetView, error) {
 }
 
 // PairView is a pair with the rates of its fee tier and what the market
-// lists show of its base asset.
+// lists show of its base asset (its profile too).
 type PairView struct {
 	domain.TradingPair
-	MakerFeeRate decimal.Decimal `json:"maker_fee_rate"`
-	TakerFeeRate decimal.Decimal `json:"taker_fee_rate"`
-	BaseName     string          `json:"base_name"`
-	Rank         int32           `json:"rank"`
-	Categories   []string        `json:"categories"`
+	MakerFeeRate decimal.Decimal     `json:"maker_fee_rate"`
+	TakerFeeRate decimal.Decimal     `json:"taker_fee_rate"`
+	BaseName     string              `json:"base_name"`
+	Rank         int32               `json:"rank"`
+	Categories   []string            `json:"categories"`
+	BaseProfile  domain.AssetProfile `json:"base_profile"`
 }
 
 func (s *Service) pairView(ctx context.Context, r ports.Repos, p domain.TradingPair) (PairView, error) {
@@ -318,6 +324,11 @@ func (s *Service) pairView(ctx context.Context, r ports.Repos, p domain.TradingP
 	if base != nil {
 		v.BaseName, v.Rank, v.Categories = base.Name, base.Rank, base.Categories
 	}
+	profiles, err := s.Profiles(ctx)
+	if err != nil {
+		return PairView{}, err
+	}
+	v.BaseProfile = profiles[p.BaseAsset]
 	return v, nil
 }
 
@@ -344,12 +355,16 @@ func (s *Service) Pairs(ctx context.Context) ([]PairView, error) {
 	for _, a := range assets {
 		bases[a.Code] = a
 	}
+	profiles, err := s.Profiles(ctx)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]PairView, 0, len(list))
 	for _, p := range list {
 		base := bases[p.BaseAsset]
 		out = append(out, PairView{
 			TradingPair: p, MakerFeeRate: rates[p.FeeTier].MakerFeeRate, TakerFeeRate: rates[p.FeeTier].TakerFeeRate,
-			BaseName: base.Name, Rank: base.Rank, Categories: base.Categories,
+			BaseName: base.Name, Rank: base.Rank, Categories: base.Categories, BaseProfile: profiles[p.BaseAsset],
 		})
 	}
 	return out, nil

@@ -49,3 +49,11 @@ func ToProtoFee(f domain.FeeSchedule) *instrumentv1.FeeSchedule {
 		Tier: f.Tier, MakerFeeRate: f.MakerFeeRate.String(), TakerFeeRate: f.TakerFeeRate.String(), Version: f.Version,
 	}
 }
+
+// ToProtoProfile converts an asset's profile.
+func ToProtoProfile(p domain.AssetProfile) *instrumentv1.AssetProfile {
+	return &instrumentv1.AssetProfile{
+		DisplayName: p.DisplayName, Description: p.Description, Links: p.Links, LogoMime: p.LogoMIME,
+		LogoSize: int32(p.LogoSize), LogoUrl: LogoURL(p), Version: p.Version, //nolint:gosec // at most 200 KB
+	}
+}

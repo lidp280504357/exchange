@@ -18,6 +18,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/market/assets/{code}/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An asset's logo
+         * @description PNG, SVG (cleaned on upload) or WebP. Asked for with the current profile version (v, as logo_url carries it) it is cached for a year; with another version, for a minute.
+         */
+        get: operations["getAssetLogo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/market/pairs": {
         parameters: {
             query?: never;
@@ -336,6 +356,20 @@ export interface components {
             withdraw_enabled: boolean;
             trading_enabled: boolean;
             networks: components["schemas"]["Network"][];
+            /** @description The name operators set for the sites (ASTRA design §5.3); null shows the name. */
+            display_name: string | null;
+            /** @description Introductions by language ("zh-CN", "en"), set by operators; empty when none. */
+            description: {
+                [key: string]: string;
+            };
+            /** @description https links by kind ("website", "explorer", "whitepaper"); empty when none. */
+            links: {
+                [key: string]: string;
+            };
+            /** @description The logo (GET /v1/market/assets/{code}/logo?v=...): the URL changes with every profile change, so it can be cached for good. Null without a logo (the sites draw the letter icon). */
+            logo_url: string | null;
+            /** @description Goes up with every change of the profile. */
+            profile_version: number;
         };
         RiskTier: {
             /** @description Largest position notional (USDT) of the tier. */
@@ -407,6 +441,10 @@ export interface components {
             reference_multiplier: components["schemas"]["Decimal"];
             /** Format: date-time */
             listed_at: string;
+            /** @description The base asset's display name (Asset.display_name); null shows base_name. */
+            base_display_name: string | null;
+            /** @description The base asset's logo (Asset.logo_url); null without one. */
+            base_logo_url: string | null;
         };
         NullableDecimal: string | null;
         /**
@@ -566,6 +604,33 @@ export interface operations {
                     "application/json": {
                         assets: components["schemas"]["Asset"][];
                     };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getAssetLogo: {
+        parameters: {
+            query?: {
+                v?: number;
+            };
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The logo. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                    "image/svg+xml": string;
+                    "image/webp": string;
                 };
             };
             default: components["responses"]["Error"];

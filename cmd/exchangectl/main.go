@@ -14,6 +14,7 @@
 //	exchangectl instruments apply --file deploy/instruments/test.json --reason "..."
 //	exchangectl instruments pair-status BTC-USDT --to TRADING --reason "..."
 //	exchangectl instruments contract-status BTC-USDT-PERP --to TRADING --reason "..."
+//	exchangectl instruments profile ASTRA --display-name Astra --logo astra.svg --reason "..."
 //	exchangectl ledger adjust --user <user_id> --asset USDT --amount 100 --reason "..." [--key K]
 //	exchangectl ledger balances <user_id>
 //	exchangectl ledger reconcile
@@ -71,6 +72,9 @@ commands:
                               move a pair: PREPARE -> TRADING <-> HALT -> CANCEL_ONLY -> DELISTED
   instruments contract-status <symbol> --to STATUS --reason TEXT
                               move a perpetual contract along the same statuses
+  instruments profile <asset> [--display-name N] [--zh T] [--en T] [--website U] [--explorer U]
+                      [--whitepaper U] [--logo FILE|- [--logo-type MIME]] [--clear-logo] --reason TEXT
+                              show an asset's profile, or change the parts given
   ledger adjust --user U|--house --asset A --amount X --reason TEXT [--key K]
                               credit (or debit) a user's SPOT account, or HOUSE's MARKET_MAKER
                               inventory (--house), against ADJUSTMENT

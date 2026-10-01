@@ -1,0 +1,16 @@
+{
+  "symbol": "ASTRA",
+  "name": {
+    "zh-CN": "Astra",
+    "en": "Astra"
+  },
+  "intro": {
+    "zh-CN": "ASTRA 是 Astras 的平台币，只在本站交易，不能充值或提现；它的行情来自平台自己的市场（学习项目的模拟市场）。",
+    "en": "ASTRA is the Astras platform coin. It trades only here and cannot be deposited or withdrawn; its market is the platform's own (the simulated market of a learning project)."
+  },
+  "links": {
+    "website": "https://astras.vip"
+  },
+  "color": "amber",
+  "asOf": "2026-10-02"
+}

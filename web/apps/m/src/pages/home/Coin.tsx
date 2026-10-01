@@ -315,7 +315,7 @@ function About({ profile }: { profile: ProfileStats | undefined }) {
   return (
     <Card title={t("mMarkets.coin.about")}>
       <div className="px-4 pb-4 pt-1">
-        <p className="text-sm leading-relaxed text-fg-2">{profile?.intro[locale] ?? t("mMarkets.coin.noIntro")}</p>
+        <p className="text-sm leading-relaxed text-fg-2">{profile?.intro[locale] || t("mMarkets.coin.noIntro")}</p>
         {present.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2">
             {present.map((l) => (

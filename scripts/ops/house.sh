@@ -18,7 +18,8 @@
 #                               against HOUSE (user decision 2026-10-02;
 #                               market.internal_matching stays off).
 #   scripts/ops/house.sh open   the USDT pairs of deploy/instruments/test.json
-#                               still PREPARE move to TRADING.
+#                               that follow Binance and are still PREPARE
+#                               move to TRADING.
 #   scripts/ops/house.sh show   HOUSE's MARKET_MAKER balances.
 #
 # Internal assets need no inventory: HOUSE may sell them short (ADR-0013).
@@ -54,13 +55,14 @@ seed)
   done
   ;;
 flags)
-  allow="$(jq -r '[(.pairs[] | .symbol), (.contracts[] | .symbol)] | join(",")' "$DATA")"
+  # Pairs with their own market (the platform coin) have no HOUSE.
+  allow="$(jq -r '[(.pairs[] | select(.reference_symbol != null) | .symbol), (.contracts[] | .symbol)] | join(",")' "$DATA")"
   ctl user-service flags set market.reference_depth --on --reason "Binance books on every followed symbol (ADR-0010)"
   ctl user-service flags set market.reference_kline --on --deny-symbols "" --reason "Binance charts on every pair, ETH-BTC included"
   ctl user-service flags set market.house_liquidity --on --allow-symbols "$allow" --reason "every order trades against HOUSE (ADR-0015, 2026-10-02)"
   ;;
 open)
-  symbols=$(jq -r '.pairs[] | select(.quote_asset == "USDT") | .symbol' "$DATA")
+  symbols=$(jq -r '.pairs[] | select(.quote_asset == "USDT" and .reference_symbol != null) | .symbol' "$DATA")
   listed=$(ctl instrument-service instruments list)
   for s in $symbols; do
     if grep -E "^$s[[:space:]]" <<<"$listed" | grep -q PREPARE; then
@@ -73,7 +75,7 @@ show)
   ssh exchange "cd $INFRA && set -a && . ./.env && set +a && sudo docker compose exec -T postgres psql -U \"\$POSTGRES_USER\" -d exchange -At -c \"SELECT asset, available FROM ledger.accounts WHERE account_type = 'MARKET_MAKER' ORDER BY asset\""
   ;;
 *)
-  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
   ;;
 esac

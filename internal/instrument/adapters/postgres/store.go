@@ -4,6 +4,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -46,6 +47,8 @@ func (r repos) Networks() ports.NetworkRepo { return networks(r) }
 func (r repos) Pairs() ports.PairRepo       { return pairs(r) }
 
 func (r repos) Contracts() ports.ContractRepo { return contracts(r) }
+
+func (r repos) Profiles() ports.ProfileRepo { return profiles(r) }
 
 func (r repos) Record(ctx context.Context, entity, key string, version int64, value any, actor, reason string) error {
 	b, err := json.Marshal(value)
@@ -156,6 +159,79 @@ func (r assets) Save(ctx context.Context, a domain.Asset) (domain.Asset, error) 
 		version = assets.version + 1, updated_at = now()
 		RETURNING `+assetColumns, a.Code, a.Name, a.Decimals, a.DepositEnabled, a.WithdrawEnabled, a.TradingEnabled, a.RiskRestricted,
 		a.Rank, categories))
+}
+
+type profiles repos
+
+const profileColumns = `asset_code, display_name, description, links, logo_mime, coalesce(octet_length(logo), 0), profile_version`
+
+func scanProfile(row pgx.Row) (domain.AssetProfile, error) {
+	var p domain.AssetProfile
+	var description, links []byte
+	if err := row.Scan(&p.Code, &p.DisplayName, &description, &links, &p.LogoMIME, &p.LogoSize, &p.Version); err != nil {
+		return p, err
+	}
+	if err := json.Unmarshal(description, &p.Description); err != nil {
+		return p, fmt.Errorf("asset %s description: %w", p.Code, err)
+	}
+	if err := json.Unmarshal(links, &p.Links); err != nil {
+		return p, fmt.Errorf("asset %s links: %w", p.Code, err)
+	}
+	return p, nil
+}
+
+func (r profiles) GetForUpdate(ctx context.Context, code string) (*domain.AssetProfile, error) {
+	return one(r.q.QueryRow(ctx, `SELECT `+profileColumns+` FROM assets WHERE asset_code = $1 FOR UPDATE`, code), scanProfile)
+}
+
+func (r profiles) List(ctx context.Context) ([]domain.AssetProfile, error) {
+	rows, err := r.q.Query(ctx, `SELECT `+profileColumns+` FROM assets ORDER BY asset_code`)
+	return all(rows, err, scanProfile)
+}
+
+func (r profiles) Logo(ctx context.Context, code string) (*domain.Logo, int64, error) {
+	var data []byte
+	var mime string
+	var version int64
+	err := r.q.QueryRow(ctx, `SELECT logo, logo_mime, profile_version FROM assets WHERE asset_code = $1`, code).Scan(&data, &mime, &version)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, 0, nil
+	}
+	if err != nil || data == nil {
+		return nil, version, err
+	}
+	return &domain.Logo{Data: data, MIME: mime}, version, nil
+}
+
+func (r profiles) Save(ctx context.Context, p domain.AssetProfile, logo *domain.Logo) (domain.AssetProfile, error) {
+	description, err := json.Marshal(orEmpty(p.Description))
+	if err != nil {
+		return domain.AssetProfile{}, err
+	}
+	links, err := json.Marshal(orEmpty(p.Links))
+	if err != nil {
+		return domain.AssetProfile{}, err
+	}
+	if logo == nil {
+		return scanProfile(r.q.QueryRow(ctx, `UPDATE assets SET display_name = $2, description = $3, links = $4,
+			profile_version = profile_version + 1, updated_at = now() WHERE asset_code = $1 RETURNING `+profileColumns,
+			p.Code, p.DisplayName, description, links))
+	}
+	var data []byte
+	mime := ""
+	if len(logo.Data) > 0 {
+		data, mime = logo.Data, logo.MIME
+	}
+	return scanProfile(r.q.QueryRow(ctx, `UPDATE assets SET display_name = $2, description = $3, links = $4, logo = $5,
+		logo_mime = $6, profile_version = profile_version + 1, updated_at = now() WHERE asset_code = $1 RETURNING `+profileColumns,
+		p.Code, p.DisplayName, description, links, data, mime))
+}
+
+func orEmpty(m map[string]string) map[string]string {
+	if m == nil {
+		return map[string]string{}
+	}
+	return m
 }
 
 type networks repos

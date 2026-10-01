@@ -1,4 +1,6 @@
-import { enumLabel, errorText, formatCompact, formatPercent, formatPrice, useSettings, useTicker, useTickerSeed, type Pair } from "@exchange/core";
+import {
+  enumLabel, errorText, formatCompact, formatPercent, formatPrice, pairName, useSettings, useTicker, useTickerSeed, type Pair,
+} from "@exchange/core";
 import { useFavorites } from "@exchange/core/markets/favorites";
 import { Badge, PriceText, Tooltip, cn, toast } from "@exchange/ui";
 import { TriangleAlert } from "lucide-react";
@@ -43,7 +45,7 @@ export function SpotTickerBar({ pair, onPick, extra }: { pair: Pair; onPick: (sy
       {pair.status !== "TRADING" && <Badge tone="warn">{enumLabel(pair.status)}</Badge>}
       <div className="flex flex-col leading-tight">
         <PriceText value={tk?.last} decimals={pair.price_decimals} tone={dir ?? "neutral"} flash={false} arrow className="text-lg font-semibold" />
-        <span className="text-xs text-fg-3">{pair.base_name}</span>
+        <span className="text-xs text-fg-3">{pairName(pair)}</span>
       </div>
       <Stat label={t("market.change")}>
         <span className={cn(tk?.change ? (down ? "text-down" : "text-up") : "text-fg-2")}>{formatPercent(tk?.change)}</span>

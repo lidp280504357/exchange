@@ -187,3 +187,72 @@ func TestListingMetadata(t *testing.T) {
 		t.Fatalf("asset: %+v", assets[0])
 	}
 }
+
+// An operator's profile change (ASTRA design §5.3): the text and a cleaned
+// logo are stored, the version goes up, the history keeps both sides and a
+// later apply of the reference data leaves the profile alone.
+func TestAssetProfiles(t *testing.T) {
+	svc, db := setup(t)
+	ctx := context.Background()
+	if _, err := svc.Apply(ctx, config(), "test", "seed"); err != nil {
+		t.Fatal(err)
+	}
+	svg := []byte(`<svg viewBox="0 0 10 10"><script>x</script><circle cx="5" cy="5" r="5"/></svg>`)
+	p, err := svc.UpdateProfile(ctx, "BTC", application.ProfileChange{
+		DisplayName: "Bitcoin 比特币", Description: map[string]string{"zh-CN": "数字黄金", "en": "Digital gold"},
+		Links: map[string]string{"website": "https://bitcoin.org"}, Logo: &domain.Logo{Data: svg, MIME: domain.LogoSVG},
+	}, "ops", "a new profile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Version != 1 || p.DisplayName != "Bitcoin 比特币" || p.LogoMIME != domain.LogoSVG || p.LogoSize == 0 || application.LogoURL(p) != "/v1/market/assets/BTC/logo?v=1" {
+		t.Fatalf("profile %+v", p)
+	}
+	logo, version, err := svc.Logo(ctx, "BTC")
+	if err != nil || version != 1 || len(logo.Data) != p.LogoSize || string(logo.Data) == string(svg) {
+		t.Fatalf("logo %s v%d %v", logo.Data, version, err)
+	}
+	if n := count(t, db, `SELECT count(*) FROM config_history WHERE entity = 'ASSET_PROFILE' AND key = 'BTC'
+		AND value->'old'->>'display_name' = '' AND value->'new'->>'logo_sha256' <> '' AND actor = 'ops'`); n != 1 {
+		t.Fatalf("%d history rows", n)
+	}
+	// Text only keeps the logo; clearing it removes it.
+	p, err = svc.UpdateProfile(ctx, "BTC", application.ProfileChange{DisplayName: "Bitcoin"}, "ops", "the name only")
+	if err != nil || p.Version != 2 || p.LogoSize == 0 || len(p.Description) != 0 {
+		t.Fatalf("text only %+v %v", p, err)
+	}
+	if _, err := svc.Apply(ctx, config(), "test", "again"); err != nil {
+		t.Fatal(err)
+	}
+	views, err := svc.Assets(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range views {
+		if v.Code == "BTC" && (v.Profile.DisplayName != "Bitcoin" || v.Profile.Version != 2) {
+			t.Fatalf("after an apply %+v", v.Profile)
+		}
+	}
+	if p, err = svc.UpdateProfile(ctx, "BTC", application.ProfileChange{ClearLogo: true}, "ops", "no logo"); err != nil || p.LogoSize != 0 {
+		t.Fatalf("cleared %+v %v", p, err)
+	}
+	if _, _, err := svc.Logo(ctx, "BTC"); apperr.From(err).Code != "COMMON_NOT_FOUND" {
+		t.Fatalf("no logo: %v", err)
+	}
+	// What the server refuses.
+	for name, ch := range map[string]application.ProfileChange{
+		"an oblong logo": {Logo: &domain.Logo{Data: []byte(`<svg viewBox="0 0 10 20"/>`), MIME: domain.LogoSVG}},
+		"a GIF":          {Logo: &domain.Logo{Data: []byte("GIF89a"), MIME: "image/gif"}},
+		"a bad link":     {Links: map[string]string{"website": "ftp://x"}},
+	} {
+		if _, err := svc.UpdateProfile(ctx, "BTC", ch, "ops", "bad"); apperr.From(err).Code != "COMMON_INVALID_ARGUMENT" {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if _, err := svc.UpdateProfile(ctx, "NOPE", application.ProfileChange{}, "ops", "missing"); apperr.From(err).Code != "COMMON_NOT_FOUND" {
+		t.Fatalf("unknown asset: %v", err)
+	}
+	if _, err := svc.UpdateProfile(ctx, "BTC", application.ProfileChange{}, "ops", ""); apperr.From(err).Code != "COMMON_INVALID_ARGUMENT" {
+		t.Fatalf("no reason: %v", err)
+	}
+}

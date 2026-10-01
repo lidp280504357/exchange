@@ -124,6 +124,15 @@ func TestInstrumentSchema(t *testing.T) {
 	rejects(t, db, "unknown status", `UPDATE trading_pairs SET status = 'LIVE'`)
 	rejects(t, db, "networks need an asset", `INSERT INTO networks (asset_code, network, chain, confirmations, min_deposit,
 		min_withdraw, withdraw_fee) VALUES ('ETH', 'ETH-SEPOLIA', '11155111', 12, 0, 0, 0)`)
+	// Asset profiles: a logo always has its type, and stays small.
+	accepts(t, db, `UPDATE assets SET display_name = 'Bitcoin', logo = '\x89504e47'::bytea, logo_mime = 'image/png',
+		description = '{"en": "x"}', profile_version = 1 WHERE asset_code = 'BTC'`)
+	rejects(t, db, "a logo without its type", `UPDATE assets SET logo = '\x3c737667'::bytea WHERE asset_code = 'USDT'`)
+	rejects(t, db, "a type without a logo", `UPDATE assets SET logo_mime = 'image/png' WHERE asset_code = 'USDT'`)
+	rejects(t, db, "only PNG, SVG and WebP", `UPDATE assets SET logo = '\x47494638'::bytea, logo_mime = 'image/gif' WHERE asset_code = 'USDT'`)
+	rejects(t, db, "at most 200 KB", `UPDATE assets SET logo = decode(repeat('00', 204801), 'hex'), logo_mime = 'image/png' WHERE asset_code = 'USDT'`)
+	rejects(t, db, "a display name of at most 32 characters", `UPDATE assets SET display_name = repeat('x', 33) WHERE asset_code = 'USDT'`)
+	rejects(t, db, "introductions by language", `UPDATE assets SET description = '["x"]' WHERE asset_code = 'USDT'`)
 }
 
 func TestLedgerSchema(t *testing.T) {

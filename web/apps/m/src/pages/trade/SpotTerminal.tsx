@@ -1,6 +1,6 @@
 import {
-  channels, displayUnit, errorText, formatPercent, routes, useBookStep, useOrderBook, usePair, useSyncing, useTerminalPrefs, useTicker, useTickerSeed, useTrades,
-  useTradesSeed, useCandles, type CandleInterval,
+  channels, displayUnit, errorText, formatPercent, pairName, routes, useBookStep, useCandles, useOrderBook, usePair, useSyncing,
+  useTerminalPrefs, useTicker, useTickerSeed, useTrades, useTradesSeed, type CandleInterval,
 } from "@exchange/core";
 import { useFavorites } from "@exchange/core/markets/favorites";
 import { Button, CandleChart, EmptyState, ErrorState, OrderBook, PriceText, Skeleton, TradeTape, cn, toast, type OrderSide } from "@exchange/ui";
@@ -103,7 +103,7 @@ export default function SpotTerminal() {
     <div className="pb-20">
       <div className="flex items-end justify-between px-4 pb-2 pt-1">
         <PriceText value={tk?.last} decimals={pair.price_decimals} change={tk?.change} flash={false} arrow className="text-2xl font-semibold" />
-        <span className="text-xs text-fg-3">{pair.base_name}</span>
+        <span className="text-xs text-fg-3">{pairName(pair)}</span>
       </div>
       <SwipeTabs
         value={tab}

@@ -370,7 +370,7 @@ function About({ profile }: { profile: ProfileStats | undefined }) {
   const present = links.filter((l) => l.href && /^https?:\/\//.test(l.href));
   return (
     <Card title={t("pcMarkets.coin.about")}>
-      <p className="text-sm leading-relaxed text-fg-2">{profile?.intro[locale] ?? t("pcMarkets.coin.noIntro")}</p>
+      <p className="text-sm leading-relaxed text-fg-2">{profile?.intro[locale] || t("pcMarkets.coin.noIntro")}</p>
       {present.length > 0 && (
         <div className="mt-4 flex flex-wrap gap-2">
           {present.map((l) => (

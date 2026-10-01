@@ -40,12 +40,25 @@ sudo docker compose ... exec -T instrument-service /app/exchangectl instruments 
 - 币的介绍资料（前端详情页与字母图标的颜色）在 `web/packages/core/assets/coins/<代码>.json`（1000 倍币用去掉前缀的代码，如 `BONK.json`）；上新币时一起补上。
 - `internal/instrument/application/testdata_test.go` 在不连库的情况下按 apply 的规则校验整个文件（至少前 50 个 USDT 交易对、交易对不重复、内部资产无网络、1000 倍币的倍数）。
 
+## 资产资料（平台币设计稿 §5.3）
+
+运营可以改资产在站点上的显示名、中英文简介、链接（website/explorer/whitepaper，只收 https）与图标；资产代码不变。资料存在 `assets` 表的 `display_name`、`description`、`links`、`logo`/`logo_mime`、`profile_version` 列（迁移 `00005`），声明式同步（apply）从不碰它们。
+
+- 规则（`internal/instrument/domain/profile.go`）：显示名 2–32 个可打印字符或留空（用资产名称）；简介每种语言最多 1,000 字；图标 PNG、SVG、WebP，正方形，最多 200 KB。SVG 上传时按白名单重建（只留图形、渐变、裁剪、文字等元素与外观属性），脚本、事件属性、外部引用、样式表都去掉。
+- 每次修改 `profile_version` 加 1，`config_history` 记一行 `ASSET_PROFILE`：前后两份资料（图标记类型、大小与 sha256）、操作人与原因。
+- 接口：gRPC `UpdateAssetProfile`（管理后台用；`GetAsset`/`ListAssets` 带 `profile`）；公开 `GET /v1/market/assets` 带 `display_name`、`description`、`links`、`logo_url`、`profile_version`，`GET /v1/market/pairs` 带 `base_display_name`、`base_logo_url`；图标 `GET /v1/market/assets/{code}/logo?v=<版本>`：版本是当前的就缓存一年（`immutable`），否则 60 秒，响应带 `nosniff` 与禁止执行的 CSP。
+- 前端：`packages/core` 的 `markets/profiles` 把接口给的资料记下来，`coinProfile()` 把它盖在仓库的静态资料（`web/packages/core/assets/coins/`）上，显示名、简介、链接都优先用接口的；交易对与资产的查询每 60 秒刷新，所以改动一分钟内在三个站生效。
+- 平台币：`scripts/ops/astra.sh profile` 写入默认资料与图标（`deploy/instruments/astra.svg`），`astra.sh open` 开放 ASTRA-USDT。ASTRA 是站内资产，不能充提；它的交易对不跟随币安（没有 `reference_symbol`），用户之间撮合（ADR-0015 第 6 条），HOUSE 不报价，机器人（market-sim）在批次 A2 加入。
+
 ## 常用命令
 
 ```bash
 ssh exchange sudo docker exec exchange-infra-instrument-service-1 /app/exchangectl instruments list
 ssh exchange sudo docker exec exchange-infra-instrument-service-1 /app/exchangectl instruments pair-status BTC-USDT --to HALT --reason "行情异常"
 ssh exchange sudo docker exec exchange-infra-instrument-service-1 /app/exchangectl instruments contract-status BTC-USDT-PERP --to TRADING --reason "合约上线"
+# 看或改资产资料：只改给出的部分；图标从文件或标准输入（-）读
+ssh exchange sudo docker exec exchange-infra-instrument-service-1 /app/exchangectl instruments profile ASTRA
+ssh exchange sudo docker exec -i exchange-infra-instrument-service-1 /app/exchangectl instruments profile ASTRA --display-name Astra --logo - --logo-type image/svg+xml --reason "新图标" < astra.svg
 ```
 
 历史：
@@ -57,6 +70,6 @@ SELECT entity, key, version, actor, reason, created_at FROM instrument.config_hi
 ## 接口
 
 - 公开 REST（经网关，无需登录，`Cache-Control: public, max-age=10`）：`GET /v1/market/assets`（含网络）、`GET /v1/market/pairs`（不含已下线）、`GET /v1/market/pairs/{symbol}`（含已下线，大小写不敏感）、`GET /v1/market/contracts`、`GET /v1/market/contracts/{symbol}`（永续合约与风险限额阶梯）。交易对另带基础资产的 `base_name`、`rank`、`categories`，以及由 tick/lot 算出的显示位数 `price_decimals`、`qty_decimals`。
-- gRPC `InstrumentService`（`instrument-service:9184`）：`GetAsset`、`ListAssets`、`GetTradingPair`、`ListTradingPairs`、`GetContract`、`ListContracts`，供账本、交易、合约等服务校验精度与状态；`SetPairStatus`、`SetContractStatus` 供管理后台。
+- gRPC `InstrumentService`（`instrument-service:9184`）：`GetAsset`、`ListAssets`、`GetTradingPair`、`ListTradingPairs`、`GetContract`、`ListContracts`，供账本、交易、合约等服务校验精度与状态；`SetPairStatus`、`SetContractStatus`、`UpdateAssetProfile` 供管理后台。
 - 测试服的两个合约 `BTC-USDT-PERP`、`ETH-USDT-PERP` 用费率档 `perp`（maker 0.02%、taker 0.05%），创建时为 `PREPARE`，合约服务上线后再改 `TRADING`。
 - 端到端检查：`scripts/e2e/market.sh`（`task e2e` 一起跑）。

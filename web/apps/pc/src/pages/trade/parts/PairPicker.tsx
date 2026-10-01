@@ -1,4 +1,4 @@
-import { dec, errorText, formatPercent, formatPrice, useContracts, usePairs, useTickers } from "@exchange/core";
+import { dec, errorText, formatPercent, formatPrice, pairName, useContracts, usePairs, useTickers } from "@exchange/core";
 import { useFavorites } from "@exchange/core/markets/favorites";
 import { CoinIcon, Input, Popover, Segmented, cn, toast } from "@exchange/ui";
 import { ChevronDown, Search } from "lucide-react";
@@ -39,7 +39,7 @@ export function PairPicker({
     }
     return (pairs.data?.pairs ?? [])
       .filter((p) => p.status !== "DELISTED")
-      .map((p) => ({ symbol: p.symbol, base: p.base_asset, quote: p.quote_asset, name: p.base_name, decimals: p.price_decimals }));
+      .map((p) => ({ symbol: p.symbol, base: p.base_asset, quote: p.quote_asset, name: pairName(p), decimals: p.price_decimals }));
   }, [kind, pairs.data, contracts.data, t]);
 
   const groups = useMemo(() => ["fav", "all", ...new Set(rows.map((r) => r.quote))], [rows]);
