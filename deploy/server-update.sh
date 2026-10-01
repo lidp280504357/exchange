@@ -30,8 +30,8 @@ main() {
     --exclude 'nginx/admin/' --exclude 'nginx/sites/' --exclude 'udun-mock/' deploy/compose/ "$INFRA"/
   cp deploy/redpanda/topics.sh "$INFRA/redpanda/topics.sh"
   mkdir -p "$INFRA/backup" && cp deploy/backup/pg-backup.sh "$INFRA/backup/pg-backup.sh"
-  # 托管钱包模拟网关（ADR-0011）的状态目录，容器用户 uid 10001 可写
-  sudo install -d -o 10001 -g 10001 -m 700 "$INFRA/udun-mock"
+  # 托管钱包模拟网关（ADR-0011）的状态目录，容器用户 uid 10001 可写（install -o 不认数字 uid，用 chown）
+  sudo mkdir -p "$INFRA/udun-mock" && sudo chown 10001:10001 "$INFRA/udun-mock" && sudo chmod 700 "$INFRA/udun-mock"
 
   # 2. Topic 幂等核对
   bash "$INFRA/redpanda/topics.sh" >/dev/null && echo "== topic 核对完成"
