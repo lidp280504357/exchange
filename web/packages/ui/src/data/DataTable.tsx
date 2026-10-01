@@ -74,7 +74,13 @@ export type DataTableProps<T> = {
   /** Height of the scroll area; without it the page scrolls. */
   height?: number | string;
   stickyHeader?: boolean;
-  /** Offset of the sticky header when the page scrolls (under a top bar). */
+  /**
+   * Offset of the sticky header when the page scrolls (under a top bar).
+   * Without a `height`, a table with an offset clips instead of scrolling
+   * sideways (it must fit its width): a scroll container between the
+   * header and the page would hold the header by that offset inside it,
+   * over the first rows.
+   */
   stickyTop?: number;
   /** Called near the end of the rows (infinite scroll). */
   onEndReached?: () => void;
@@ -222,13 +228,16 @@ export function DataTable<T>({
   const showEmpty = !showSkeleton && !showError && rows.length === 0;
   const pad = PAD[density];
   const visible = virtual ? items.map((v) => ({ row: rows[v.index], index: v.index })) : rows.map((row, index) => ({ row, index }));
+  // A header stuck to the page needs no scroll container in between, and
+  // overflow-x: auto makes one of the wrapper (for both axes); clip does not.
+  const pageSticky = stickyHeader && stickyTop > 0 && areaHeight === undefined;
 
   return (
     <div className={cn("relative w-full", className)}>
       {loading && data.length > 0 && <Progress value={null} size="xs" className="absolute inset-x-0 top-0 z-[var(--z-sticky)]" aria-label={t("common.loading")} />}
       <div
         ref={scrollRef}
-        className={cn("w-full overflow-x-auto", areaHeight !== undefined && "overflow-y-auto overscroll-contain")}
+        className={cn("w-full", pageSticky ? "overflow-x-clip" : "overflow-x-auto", areaHeight !== undefined && "overflow-y-auto overscroll-contain")}
         style={areaHeight !== undefined ? { height: areaHeight } : undefined}
       >
         <table aria-label={ariaLabel} aria-busy={loading || undefined} className={cn("w-full border-collapse", virtual && "table-fixed")}>

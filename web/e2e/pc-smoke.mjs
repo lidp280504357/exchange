@@ -44,6 +44,18 @@ try {
   await waitText("10,000", 30000);
   ok(`signed up ${email} through the form; the assets page shows the welcome funds`);
   await shot("1-assets");
+  // The balance table's header sits right on top of its rows: a header stuck
+  // 56 px under the top bar once sat 56 px down inside its own scroll
+  // container instead, over the first row.
+  await page.waitForFunction(() => document.querySelector('table[aria-label="我的资产"] tbody')?.innerText.includes("USDT"), { timeout: 20000 });
+  const gap = await page.$eval('table[aria-label="我的资产"]', (table) => {
+    // A header cell: the sticky offset moves the cells, not the thead box.
+    const head = table.tHead.rows[0].cells[0].getBoundingClientRect();
+    const first = table.tBodies[0].rows[0].getBoundingClientRect();
+    return { headTop: head.top - table.getBoundingClientRect().top, overlap: head.bottom - first.top };
+  });
+  if (gap.headTop > 1 || gap.overlap > 1) throw new Error(`the assets table header is ${gap.headTop}px down and covers ${gap.overlap}px of the first row`);
+  ok("the assets table header sits on top of its rows");
 
   // 2. Sign out from the account menu, sign back in with the password.
   await go("/");
