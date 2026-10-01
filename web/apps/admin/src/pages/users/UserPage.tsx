@@ -15,7 +15,11 @@ import { AdjustForm, Outcome } from "../funds/Adjustments";
 import { AuditTable, DepositsTable, OrdersTable, TradesTable, useAudit, useDeposits, useOrders, useTrades } from "../records/tables";
 import { useWithdrawals, WithdrawalsTable } from "../wallet/withdrawalTable";
 import { UserActions } from "./actions";
+import { useRisk, useSecurity } from "./data";
 import { Notes, TagChips, TagsEditor } from "./NotesTags";
+import { Contacts, ProfileTab } from "./profile";
+import { RiskTab, Score } from "./risk";
+import { SecurityTab } from "./security";
 
 type UserSummary = AdminSchemas["UserSummary"];
 type Balance = AdminSchemas["UserView"]["balances"][number];
@@ -37,9 +41,9 @@ export default function UserPage({ admin }: { admin: Admin }) {
     retry: false,
   });
   const tabs = [
-    "profile", "balances", "orders", "trades",
+    "profile", "security", "balances", "orders", "trades",
     ...(can(admin, "withdrawals.read") ? ["deposits", "withdrawals"] : []),
-    "notes",
+    "risk", "notes",
     ...(can(admin, "audit.read") ? ["audit"] : []),
   ];
   const tab = tabs.includes(params.get("tab") ?? "") ? params.get("tab")! : "profile";
@@ -62,7 +66,7 @@ export default function UserPage({ admin }: { admin: Admin }) {
       </Link>
       <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
         <aside className="flex flex-col gap-4">
-          <Card className="stagger">{u ? <Summary user={u} /> : <Skeleton className="h-48 w-full" />}</Card>
+          <Card className="stagger">{u ? <Summary admin={admin} user={u} /> : <Skeleton className="h-48 w-full" />}</Card>
           {u && (can(admin, "users.status") || can(admin, "orders.cancel")) && (
             <Card title={t("admin.user.actions")} className="stagger" style={stagger(1)}>
               <UserActions admin={admin} userId={u.id} status={u.status} />
@@ -72,12 +76,14 @@ export default function UserPage({ admin }: { admin: Admin }) {
         <section className="card stagger min-w-0 p-4" style={stagger(2)}>
           <Tabs items={tabs.map((k) => ({ value: k, label: t(`admin.user.tabs.${k}`) }))} value={tab} onValueChange={setTab} />
           <div key={tab} className="mt-4 animate-rise">
-            {tab === "profile" && (u ? <Profile user={u} /> : <Skeleton className="h-32 w-full" />)}
+            {tab === "profile" && (u ? <ProfileTab admin={admin} user={u} /> : <Skeleton className="h-32 w-full" />)}
+            {tab === "security" && <SecurityTab admin={admin} userId={id} />}
             {tab === "balances" && <Balances admin={admin} userId={id} />}
             {tab === "orders" && <UserOrders userId={id} />}
             {tab === "trades" && <UserTrades userId={id} />}
             {tab === "deposits" && <UserDeposits userId={id} />}
             {tab === "withdrawals" && <UserWithdrawals userId={id} />}
+            {tab === "risk" && (u ? <RiskTab admin={admin} userId={id} status={u.status} /> : <Skeleton className="h-32 w-full" />)}
             {tab === "notes" && (
               <div className="flex flex-col gap-6">
                 <div>
@@ -98,9 +104,12 @@ export default function UserPage({ admin }: { admin: Admin }) {
   );
 }
 
-/** Summary is the account at a glance. */
-function Summary({ user }: { user: UserSummary }) {
+/** Summary is the account at a glance: who, its contacts (masked until revealed), status, tags, last sign-in and risk. */
+function Summary({ admin, user }: { admin: Admin; user: UserSummary }) {
   const { t } = useTranslation();
+  const sec = useSecurity(user.id);
+  const risk = useRisk(user.id);
+  const latest = risk.data?.[0];
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-3">
@@ -110,6 +119,7 @@ function Summary({ user }: { user: UserSummary }) {
           <IdText value={user.id} chars={13} className="text-sm" />
         </div>
       </div>
+      <Contacts admin={admin} userId={user.id} />
       <div className="flex flex-wrap items-center gap-2">
         <EnumBadge group="userStatus" code={user.status} />
         <TagChips tags={user.tags} />
@@ -117,30 +127,26 @@ function Summary({ user }: { user: UserSummary }) {
       <KeyValue
         items={[
           { label: t("admin.user.registered"), value: <TimeText value={user.created_at} /> },
+          { label: t("admin.user.lastLogin"), value: sec.data ? <TimeText value={sec.data.last_login_at} /> : "—" },
+          {
+            label: t("admin.user.riskScore"),
+            hint: t("admin.user.riskScoreHint"),
+            value: latest ? (
+              <span className="inline-flex items-center gap-1.5">
+                <Score value={latest.score} />
+                <EnumBadge group="riskAction" code={latest.action} />
+              </span>
+            ) : risk.isPending ? (
+              "…"
+            ) : (
+              <span className="text-fg-3">{t("admin.user.noRisk")}</span>
+            ),
+          },
           { label: t("admin.user.profileRows.region"), value: user.region || "—" },
           { label: t("admin.user.profileRows.kyc"), value: user.kyc_level },
         ]}
       />
     </div>
-  );
-}
-
-function Profile({ user }: { user: UserSummary }) {
-  const { t } = useTranslation();
-  return (
-    <KeyValue
-      layout="grid"
-      columns={3}
-      items={[
-        { label: t("admin.users.id"), value: <span className="font-mono text-xs">{user.id}</span>, copy: user.id },
-        { label: t("admin.user.profileRows.status"), value: <EnumBadge group="userStatus" code={user.status} /> },
-        { label: t("admin.user.registered"), value: <TimeText value={user.created_at} /> },
-        { label: t("admin.user.profileRows.region"), value: user.region || "—" },
-        { label: t("admin.user.profileRows.language"), value: user.language || "—" },
-        { label: t("admin.user.timezone"), value: user.timezone || t("admin.user.browserZone") },
-        { label: t("admin.user.profileRows.kyc"), value: user.kyc_level },
-      ]}
-    />
   );
 }
 

@@ -72,6 +72,8 @@ ClickHouse：
 SELECT occurred_at, payload FROM events WHERE topic = 'risk.events' ORDER BY occurred_at DESC LIMIT 20
 ```
 
+管理后台（2026-10-02 设计 C2）：用户页的「风控」标签列出该用户的评估，头部显示最近一次的分数与动作，并可转人工审核（`RISK_REVIEW`）或审核通过后恢复。数据经 risk-service 只读的 gRPC `ListAssessments`（端口 9186，admin-service 用 `RISK_GRPC_ADDR` 连接）。
+
 ## 数据
 
 | 表（`risk` schema） | 内容 | 保留 |

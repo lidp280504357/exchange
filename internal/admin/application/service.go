@@ -31,13 +31,19 @@ import (
 
 // Service is the admin console.
 type Service struct {
-	Store   ports.Store
-	Hasher  *password.Hasher
-	Box     *secretbox.Box
-	Users   ports.Users
-	Orders  ports.Orders
-	Wallet  ports.Withdrawals
-	Catalog ports.Instruments
+	Store  ports.Store
+	Hasher *password.Hasher
+	Box    *secretbox.Box
+	Users  ports.Users
+	// Security is auth-service's view of an account's sign-in security;
+	// History user-service's status changes and consents; Risk
+	// risk-service's assessments.
+	Security ports.AccountSecurity
+	History  ports.AccountHistory
+	Risk     ports.Risk
+	Orders   ports.Orders
+	Wallet   ports.Withdrawals
+	Catalog  ports.Instruments
 	// Derivatives is derivatives-service (perpetual contracts).
 	Derivatives ports.Derivatives
 	Flags       ports.Flags

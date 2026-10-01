@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package exchange.risk.v1;
+
+import "exchange/risk/v1/events.proto";
+import "google/protobuf/timestamp.proto";
+
+// RiskService answers the admin console's questions about the rules'
+// assessments (design 2026-10-02 §4.1); it changes nothing.
+service RiskService {
+  // ListAssessments returns the newest stored assessments (those with at
+  // least one rule hit), of one user when user_id is set.
+  rpc ListAssessments(ListAssessmentsRequest) returns (ListAssessmentsResponse);
+}
+
+message ListAssessmentsRequest {
+  string user_id = 1;
+  // 1 to 200; 50 when 0.
+  int32 limit = 2;
+}
+
+message Assessment {
+  string id = 1;
+  string user_id = 2;
+  // The auth event that was assessed, e.g. auth.LoginSucceeded.
+  string source_event_type = 3;
+  int32 score = 4;
+  // NONE, STEP_UP, REVIEW or REJECT.
+  string action = 5;
+  repeated RuleHit hits = 6;
+  // Whether the action was carried out (risk.enforce).
+  bool enforced = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+message ListAssessmentsResponse {
+  repeated Assessment assessments = 1;
+}

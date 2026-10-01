@@ -32,7 +32,9 @@ export function Sidebar({ admin, collapsed, onToggle }: { admin: Admin; collapse
   const todo = useTodo();
   const [closed, setClosed] = useState(loadClosed);
   const visible = sections.filter((s) => allowed(admin, s));
-  const counts: Record<string, number> = { withdrawals: todo?.withdrawals ?? 0, approvals: todo?.approvals ?? 0 };
+  const counts: Record<string, number> = {
+    withdrawals: todo?.withdrawals ?? 0, approvals: todo?.approvals ?? 0, identityRequests: todo?.identity_requests ?? 0,
+  };
   const isActive = (s: Section) => (s.path === "" ? pathname === "/" : pathname === `/${s.path}` || pathname.startsWith(`/${s.path}/`));
   const toggleGroup = (g: GroupKey) => {
     const next = new Set(closed);

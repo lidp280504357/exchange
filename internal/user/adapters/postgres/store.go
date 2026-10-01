@@ -175,6 +175,24 @@ func (r users) StatusHistory(ctx context.Context, userID string, limit int) ([]d
 	return out, rows.Err()
 }
 
+func (r users) Consents(ctx context.Context, userID string) ([]domain.Consent, error) {
+	rows, err := r.q.Query(ctx, `SELECT document, version, accepted_at FROM consents WHERE user_id = $1
+		ORDER BY accepted_at DESC, document`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("consents: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.Consent
+	for rows.Next() {
+		var c domain.Consent
+		if err := rows.Scan(&c.Document, &c.Version, &c.AcceptedAt); err != nil {
+			return nil, fmt.Errorf("consents: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 func (r users) List(ctx context.Context, f ports.UserFilter) ([]domain.User, error) {
 	var after *time.Time
 	var afterID *uuid.UUID

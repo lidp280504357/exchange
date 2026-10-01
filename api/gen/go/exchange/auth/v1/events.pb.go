@@ -528,7 +528,8 @@ type SessionRevoked struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	UserId    string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	SessionId string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	// LOGOUT, LOGOUT_ALL, USER, REPLAY, LIMIT, PASSWORD_RESET, PASSWORD_CHANGE
+	// LOGOUT, LOGOUT_ALL, USER, REPLAY, LIMIT, PASSWORD_RESET, PASSWORD_CHANGE,
+	// ACCOUNT_CLOSED, ADMIN (ended from the admin console)
 	Reason        string `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

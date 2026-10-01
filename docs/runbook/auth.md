@@ -72,11 +72,18 @@ ssh exchange 'cd /opt/exchange/infra && sudo sed -i "/^JWT_SIGNING_KEY=/d;/^JWT_
 
 ## 换绑审核
 
-只有一种身份的账户换绑会写 `auth.identity_rebind_requests`（`PENDING_REVIEW`），等阶段 2 管理后台双人审批；目前只能查表：
+只有一种身份的账户换绑会写 `auth.identity_rebind_requests`（`PENDING_REVIEW`），由管理后台「身份变更申请」页处理（2026-10-02 设计 C2，见 [admin.md](admin.md#用户页2026-10-02-设计-c2)）：通过时身份改为新值并发 `auth.IdentityRebound`（用户收到通知），拒绝只记结果；处理人（管理员邮箱）与理由记在 `decided_by`、`decision_reason`（迁移 auth 00004）。新值已被其他账户占用时通过失败（`AUTH_IDENTITY_TAKEN`）。
 
-```sql
-SELECT id, user_id, kind, created_at FROM auth.identity_rebind_requests WHERE status = 'PENDING_REVIEW';
-```
+## 管理后台的安全操作（gRPC，C2）
+
+admin-service 经 auth-service 的 gRPC 读写账户安全，权限由后台检查并写审计，auth-service 只记录效果：
+
+- `GetSecurity`：身份（完整值，后台默认脱敏）、身份验证器、密码修改时间与登录锁定剩余秒数、活跃会话（IP 已脱敏）与设备、待审换绑数。
+- `ListLoginHistory`：登录记录，IP 已脱敏。
+- `RevokeSessions`：结束一个或全部会话，原因 `ADMIN`（`auth.SessionRevoked`，网关立即拒绝其令牌）。
+- `ResetTOTP`：删除身份验证器（已绑定的发 `auth.TotpDisabled`，用户收到邮件）。
+- `SetTemporaryPassword`：生成 16 位临时密码（四组四位，去掉易混字符），替换原密码，结束全部会话、清除密码登录锁定，发 `auth.PasswordChanged{via_reset: true}`（与找回密码相同：用户收到邮件，24 小时内的提现转人工审核）。临时密码只在这次应答里，不进日志与审计。
+- `ListIdentityRequests`、`DecideIdentityRequest`：换绑审核（上一节）。
 
 ## 清理
 

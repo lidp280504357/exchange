@@ -699,6 +699,323 @@ paths:
           description: Cancellations requested.
         default:
           $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/security:
+    get:
+      operationId: getUserSecurity
+      summary: An account's sign-in security
+      description: |
+        Identities (masked: a***@x.com, +65912****4567), authenticator,
+        password, lock, live sessions and devices (addresses masked), and
+        the rebind requests waiting (auth-service). Needs users.read.
+      tags: [users]
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200':
+          description: The account's security.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Security'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/contacts/reveal:
+    post:
+      operationId: revealUserContacts
+      summary: An account's email and phone, unmasked
+      description: |
+        Each call is audited (admin.users.contacts_revealed, naming the
+        kinds shown, not the values); the answer is not cached. Needs
+        users.contacts.
+      tags: [users]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200':
+          description: The identities.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [identities]
+                properties:
+                  identities:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Identity'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/login-history:
+    get:
+      operationId: listUserLogins
+      summary: An account's sign-in attempts, newest first
+      description: Addresses are masked. Needs users.read.
+      tags: [users]
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of sign-ins.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LoginEntry'
+                  next_cursor:
+                    $ref: '#/components/schemas/NextCursor'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/sessions/revoke:
+    post:
+      operationId: revokeUserSessions
+      summary: End one of an account's sessions, or all of them
+      description: |
+        The sessions end with reason ADMIN (auth-service); audited as
+        admin.users.sessions_revoked. Needs users.security.
+      tags: [users]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                session_id:
+                  type: string
+                  format: uuid
+                  description: Omitted for every live session.
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: How many sessions ended.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revoked]
+                properties:
+                  revoked:
+                    type: integer
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/totp-reset:
+    post:
+      operationId: resetUserTotp
+      summary: Remove an account's authenticator app
+      description: |
+        The user is told by mail and can bind a new one; audited as
+        admin.users.totp_reset. Needs users.security.
+      tags: [users]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: Whether there was one to remove.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [removed]
+                properties:
+                  removed:
+                    type: boolean
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/password-reset:
+    post:
+      operationId: resetUserPassword
+      summary: Give an account a temporary password
+      description: |
+        A random password (four groups of four letters and digits) replaces
+        the user's; every session ends, the password lock is cleared and
+        the user is told by mail as for a reset (withdrawals are reviewed
+        for a day). The password is in this answer only: pass it on and
+        ask the user to change it. Audited as admin.users.password_reset,
+        without the password. Needs users.security.
+      tags: [users]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: The temporary password (not cached).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [temporary_password, sessions_revoked]
+                properties:
+                  temporary_password:
+                    type: string
+                  sessions_revoked:
+                    type: integer
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/history:
+    get:
+      operationId: getUserHistory
+      summary: An account's status changes and accepted documents
+      description: Status changes newest first, at most 50 (user-service). Needs users.read.
+      tags: [users]
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200':
+          description: The history.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status_changes, consents]
+                properties:
+                  status_changes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/StatusChange'
+                  consents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Consent'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/risk:
+    get:
+      operationId: getUserRisk
+      summary: The risk rules' assessments of an account, newest first
+      description: |
+        Only assessments with a rule hit are kept (risk-service). Moving the
+        account to RISK_REVIEW and back is POST /admin/v1/users/{id}/status.
+        Needs users.read.
+      tags: [users]
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: The assessments.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [assessments]
+                properties:
+                  assessments:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Assessment'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/identity-requests:
+    get:
+      operationId: listIdentityRequests
+      summary: Identity rebind requests, newest first
+      description: |
+        A user with a single identity asks to move it to a new value and an
+        administrator decides (auth-service). Values are masked. Needs
+        users.read.
+      tags: [users]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING_REVIEW, APPROVED, REJECTED]
+        - $ref: '#/components/parameters/UserFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of requests.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IdentityRequest'
+                  next_cursor:
+                    $ref: '#/components/schemas/NextCursor'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/identity-requests/{id}/decide:
+    post:
+      operationId: decideIdentityRequest
+      summary: Approve or reject an identity rebind request
+      description: |
+        Approving moves the identity to the new value and tells the user;
+        a value another account holds fails with AUTH_IDENTITY_TAKEN. Audited as
+        admin.users.identity_request_decided. Needs users.security.
+      tags: [users]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve, reason]
+              properties:
+                approve:
+                  type: boolean
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: The decided request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentityRequest'
+        default:
+          $ref: '#/components/responses/Error'
   /admin/v1/withdrawals:
     get:
       operationId: listWithdrawals
@@ -2286,7 +2603,7 @@ components:
             type: string
             enum: [users.read, users.status, orders.cancel, instruments.read, instruments.write, flags.read, flags.write,
               withdrawals.read, withdrawals.review, ledger.adjust.request, ledger.adjust.approve, audit.read, reports.read,
-              derivatives.read, derivatives.write, settings.write, users.notes]
+              derivatives.read, derivatives.write, settings.write, users.notes, users.security, users.contacts]
     Settings:
       type: object
       required: [two_person_approval, single_max_usdt, daily_max_usdt, withdrawal_max_usdt, daily_used_usdt, updated_by, updated_at]
@@ -2314,7 +2631,7 @@ components:
           format: date-time
     Todo:
       type: object
-      required: [withdrawals, approvals, partial]
+      required: [withdrawals, approvals, identity_requests, partial]
       properties:
         withdrawals:
           type: integer
@@ -2322,11 +2639,219 @@ components:
         approvals:
           type: integer
           description: Fund operations waiting for a decision (with ledger.adjust.request or ledger.adjust.approve).
+        identity_requests:
+          type: integer
+          description: Identity rebind requests waiting for a decision (with users.security; counted up to 200).
         partial:
           type: array
           items:
             type: string
-            enum: [withdrawals]
+            enum: [withdrawals, identity_requests]
+    Identity:
+      type: object
+      required: [kind, value, verified_at, created_at]
+      properties:
+        kind:
+          type: string
+          enum: [EMAIL, PHONE]
+        value:
+          type: string
+          description: Masked except from POST /admin/v1/users/{id}/contacts/reveal.
+        verified_at:
+          type: [string, 'null']
+          format: date-time
+        created_at:
+          type: [string, 'null']
+          format: date-time
+    Security:
+      type: object
+      required: [identities, totp, password_changed_at, last_login_at, locked_seconds, sessions, devices, pending_identity_requests]
+      properties:
+        identities:
+          type: array
+          items:
+            $ref: '#/components/schemas/Identity'
+        totp:
+          type: object
+          required: [status, activated_at]
+          properties:
+            status:
+              type: string
+              enum: [ACTIVE, PENDING, NONE]
+              description: PENDING is set up but never confirmed.
+            activated_at:
+              type: [string, 'null']
+              format: date-time
+        password_changed_at:
+          type: [string, 'null']
+          format: date-time
+        last_login_at:
+          type: [string, 'null']
+          format: date-time
+        locked_seconds:
+          type: integer
+          description: How long password sign-in stays locked after repeated failures; 0 when it is not.
+        sessions:
+          type: array
+          items:
+            type: object
+            required: [id, device_id, client_type, user_agent, ip, created_at, last_seen_at]
+            properties:
+              id:
+                type: string
+                format: uuid
+              device_id:
+                type: string
+              client_type:
+                type: string
+              user_agent:
+                type: string
+              ip:
+                type: string
+                description: Masked (203.0.113.*).
+              created_at:
+                type: [string, 'null']
+                format: date-time
+              last_seen_at:
+                type: [string, 'null']
+                format: date-time
+        devices:
+          type: array
+          items:
+            type: object
+            required: [device_id, first_seen_at, last_seen_at]
+            properties:
+              device_id:
+                type: string
+              first_seen_at:
+                type: [string, 'null']
+                format: date-time
+              last_seen_at:
+                type: [string, 'null']
+                format: date-time
+        pending_identity_requests:
+          type: integer
+    LoginEntry:
+      type: object
+      required: [id, method, result, identity_mask, device_id, user_agent, ip, new_device, created_at]
+      properties:
+        id:
+          type: integer
+        method:
+          type: string
+          description: PASSWORD, OTP, LOGIN_CHALLENGE or REGISTER.
+        result:
+          type: string
+          description: SUCCESS or a failure code.
+        identity_mask:
+          type: string
+        device_id:
+          type: string
+        user_agent:
+          type: string
+        ip:
+          type: string
+          description: Masked.
+        new_device:
+          type: boolean
+        created_at:
+          type: [string, 'null']
+          format: date-time
+    StatusChange:
+      type: object
+      required: [from_status, to_status, reason_code, actor, at]
+      properties:
+        from_status:
+          type: string
+        to_status:
+          type: string
+        reason_code:
+          type: string
+        actor:
+          type: string
+          description: An administrator's email, cli:<os user> or a service.
+        at:
+          type: [string, 'null']
+          format: date-time
+    Consent:
+      type: object
+      required: [document, version, accepted_at]
+      properties:
+        document:
+          type: string
+          description: TERMS or RISK_DISCLOSURE.
+        version:
+          type: string
+        accepted_at:
+          type: [string, 'null']
+          format: date-time
+    Assessment:
+      type: object
+      required: [id, source_event_type, score, action, hits, enforced, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        source_event_type:
+          type: string
+          description: The auth event assessed, e.g. auth.LoginSucceeded.
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        action:
+          type: string
+          enum: [NONE, STEP_UP, REVIEW, REJECT]
+        hits:
+          type: array
+          items:
+            type: object
+            required: [rule, score, detail]
+            properties:
+              rule:
+                type: string
+              score:
+                type: integer
+              detail:
+                type: string
+        enforced:
+          type: boolean
+          description: Whether the action was carried out (risk.enforce).
+        created_at:
+          type: [string, 'null']
+          format: date-time
+    IdentityRequest:
+      type: object
+      required: [id, user_id, kind, new_value, current_value, status, created_at, decided_at, decided_by, reason]
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [EMAIL, PHONE]
+        new_value:
+          type: string
+          description: Masked.
+        current_value:
+          type: string
+          description: Masked; empty when the identity is gone.
+        status:
+          type: string
+          enum: [PENDING_REVIEW, APPROVED, REJECTED]
+        created_at:
+          type: [string, 'null']
+          format: date-time
+        decided_at:
+          type: [string, 'null']
+          format: date-time
+        decided_by:
+          type: string
+        reason:
+          type: string
     UserView:
       type: object
       required: [user, balances]

@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -276,5 +277,69 @@ func TestSecurityContext(t *testing.T) {
 	}
 	if c, err := store.Read().Security().Context(ctx, user.String(), uuid.NewString()); err != nil || c.DeviceID != "" || c.Identities != 2 {
 		t.Fatalf("an unknown session has no device: %+v %v", c, err)
+	}
+}
+
+func TestAdminReads(t *testing.T) {
+	store, db := setup(t)
+	ctx := context.Background()
+	user := uuid.New()
+	for _, sql := range []string{
+		`INSERT INTO identities (id, user_id, kind, value, verified_at) VALUES (gen_random_uuid(), $1, 'EMAIL', 'adm@example.com', '2026-09-20T00:00:00Z')`,
+		`INSERT INTO credentials (user_id, password_hash, password_changed_at) VALUES ($1, 'x', '2026-09-26T00:00:00Z')`,
+		`INSERT INTO known_devices (user_id, device_id, first_seen_at, last_seen_at) VALUES ($1, 'old', '2026-09-01T00:00:00Z', '2026-09-02T00:00:00Z')`,
+		`INSERT INTO known_devices (user_id, device_id, first_seen_at, last_seen_at) VALUES ($1, 'new', '2026-09-27T00:00:00Z', '2026-09-28T00:00:00Z')`,
+	} {
+		if _, err := db.Exec(ctx, sql, user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := store.Read()
+	ids, err := r.Identities().ByUser(ctx, user.String())
+	if err != nil || len(ids) != 1 || ids[0].VerifiedAt.Day() != 20 || ids[0].CreatedAt.IsZero() {
+		t.Fatalf("identities %+v %v", ids, err)
+	}
+	if c, err := r.Credentials().Get(ctx, user.String()); err != nil || c.PasswordChangedAt.Day() != 26 {
+		t.Fatalf("credential %+v %v", c, err)
+	}
+	if d, err := r.Devices().List(ctx, user.String()); err != nil || len(d) != 2 || d[0].DeviceID != "new" || d[1].FirstSeenAt.Day() != 1 {
+		t.Fatalf("devices %+v %v", d, err)
+	}
+
+	rebinds := r.RebindRequests()
+	first, second := uuid.NewString(), uuid.NewString()
+	for _, id := range []string{first, second} {
+		if err := rebinds.Create(ctx, domain.RebindRequest{ID: id, UserID: user.String(), Kind: "EMAIL", NewValue: id[:8] + "@example.com"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := rebinds.CountPending(ctx, user.String()); err != nil || n != 2 {
+		t.Fatalf("pending %d %v", n, err)
+	}
+	page, err := rebinds.List(ctx, domain.RebindPending, "", time.Time{}, "", 1)
+	if err != nil || len(page) != 1 || page[0].Status != domain.RebindPending {
+		t.Fatalf("a page %+v %v", page, err)
+	}
+	rest, err := rebinds.List(ctx, "", user.String(), page[0].CreatedAt, page[0].ID, 10)
+	if err != nil || len(rest) != 1 || rest[0].ID == page[0].ID {
+		t.Fatalf("the next page %+v %v", rest, err)
+	}
+	err = store.Tx(ctx, func(tx ports.Repos) error {
+		rr, err := tx.RebindRequests().GetForUpdate(ctx, first)
+		if err != nil || rr == nil {
+			return fmt.Errorf("get %v %w", rr, err)
+		}
+		rr.Status, rr.DecidedAt, rr.DecidedBy, rr.Reason = domain.RebindRejected, time.Now(), "ops@example.com", "could not confirm"
+		return tx.RebindRequests().Decide(ctx, *rr)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decided, err := rebinds.List(ctx, domain.RebindRejected, user.String(), time.Time{}, "", 10)
+	if err != nil || len(decided) != 1 || decided[0].DecidedBy != "ops@example.com" || decided[0].Reason != "could not confirm" || decided[0].DecidedAt.IsZero() {
+		t.Fatalf("decided %+v %v", decided, err)
+	}
+	if n, err := rebinds.CountPending(ctx, user.String()); err != nil || n != 1 {
+		t.Fatalf("pending after %d %v", n, err)
 	}
 }

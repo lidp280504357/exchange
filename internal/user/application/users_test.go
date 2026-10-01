@@ -161,6 +161,8 @@ func (r memUsers) StatusHistory(_ context.Context, userID string, _ int) ([]doma
 	return out, nil
 }
 
+func (r memUsers) Consents(context.Context, string) ([]domain.Consent, error) { return nil, nil }
+
 type fakeFlags map[string]flags.Flag
 
 func (f fakeFlags) Get(k string) (flags.Flag, bool) { fl, ok := f[k]; return fl, ok }

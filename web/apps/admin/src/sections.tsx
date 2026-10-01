@@ -14,6 +14,7 @@ import {
   ShieldAlert,
   SlidersHorizontal,
   Stamp,
+  UserCheck,
   Users,
   Warehouse,
   type LucideIcon,
@@ -39,6 +40,10 @@ export type Section = {
 export const sections: Section[] = [
   { path: "", key: "overview", group: "overview", perm: "reports.read", icon: LayoutDashboard, page: lazy(() => import("./pages/Overview")) },
   { path: "users", key: "users", group: "users", perm: "users.read", icon: Users, page: lazy(() => import("./pages/users/Users")) },
+  {
+    path: "identity-requests", key: "identityRequests", group: "users", perm: "users.read", icon: UserCheck,
+    page: lazy(() => import("./pages/users/IdentityRequests")),
+  },
   { path: "deposits", key: "deposits", group: "funds", perm: "withdrawals.read", icon: ArrowDownToLine, page: lazy(() => import("./pages/wallet/Deposits")) },
   { path: "withdrawals", key: "withdrawals", group: "funds", perm: "withdrawals.read", icon: ArrowUpFromLine, page: lazy(() => import("./pages/wallet/Withdrawals")) },
   { path: "custody", key: "custody", group: "funds", perm: "withdrawals.read", icon: Landmark, page: lazy(() => import("./pages/wallet/Custody")) },

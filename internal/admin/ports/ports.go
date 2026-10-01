@@ -157,6 +157,161 @@ type Users interface {
 	Stats(ctx context.Context, since time.Time, days int) (UserStats, error)
 }
 
+// Identity is one of an account's sign-in identities.
+type Identity struct {
+	// Kind is EMAIL or PHONE.
+	Kind string
+	// Value is the lower-case email or E.164 number (masked unless the
+	// console reveals it).
+	Value      string
+	VerifiedAt time.Time
+	CreatedAt  time.Time
+}
+
+// LiveSession is one of an account's sessions that has not ended; IP is
+// masked.
+type LiveSession struct {
+	ID         string
+	DeviceID   string
+	ClientType string
+	UserAgent  string
+	IP         string
+	CreatedAt  time.Time
+	LastSeenAt time.Time
+}
+
+// Device is a device an account signed in from.
+type Device struct {
+	ID          string
+	FirstSeenAt time.Time
+	LastSeenAt  time.Time
+}
+
+// Security is an account's sign-in security.
+type Security struct {
+	Identities []Identity
+	// TOTP is ACTIVE, PENDING (set up, not confirmed) or "" (none).
+	TOTP              string
+	TOTPActivatedAt   time.Time
+	PasswordChangedAt time.Time
+	LastLoginAt       time.Time
+	// LockedSeconds is how long password sign-in stays locked, 0 when it
+	// is not.
+	LockedSeconds int
+	Sessions      []LiveSession
+	Devices       []Device
+	// PendingIdentityRequests counts its rebind requests waiting.
+	PendingIdentityRequests int
+}
+
+// LoginEntry is a sign-in attempt; IP is masked.
+type LoginEntry struct {
+	ID           int64
+	Method       string
+	Result       string
+	IdentityMask string
+	DeviceID     string
+	UserAgent    string
+	IP           string
+	NewDevice    bool
+	CreatedAt    time.Time
+}
+
+// IdentityRequest is a request to move an identity to a new value, which
+// an administrator decides when the account has no other identity.
+type IdentityRequest struct {
+	ID     string
+	UserID string
+	Kind   string
+	// NewValue and CurrentValue are masked unless revealed; CurrentValue
+	// is "" when the identity is gone.
+	NewValue     string
+	CurrentValue string
+	// Status is PENDING_REVIEW, APPROVED or REJECTED.
+	Status    string
+	CreatedAt time.Time
+	DecidedAt time.Time
+	DecidedBy string
+	Reason    string
+}
+
+// IdentityRequestQuery selects rebind requests; empty fields match all.
+type IdentityRequestQuery struct {
+	Status string
+	UserID string
+	Cursor string
+	Limit  int
+}
+
+// AccountSecurity reads and changes an account's sign-in security
+// (auth-service); actor names the administrator, who has been checked.
+type AccountSecurity interface {
+	Get(ctx context.Context, userID string) (Security, error)
+	// LoginHistory returns sign-ins newest first before the one with ID
+	// beforeID (0: the newest) and the beforeID of the next page (0 on the
+	// last).
+	LoginHistory(ctx context.Context, userID string, beforeID int64, limit int) ([]LoginEntry, int64, error)
+	// RevokeSessions ends one live session, or all when sessionID is "",
+	// and returns how many ended.
+	RevokeSessions(ctx context.Context, userID, sessionID, actor, reason string) (int, error)
+	// ResetTOTP removes the authenticator app; false when there was none.
+	ResetTOTP(ctx context.Context, userID, actor, reason string) (bool, error)
+	// TemporaryPassword sets a random password, ends every session and
+	// returns the password and how many sessions ended.
+	TemporaryPassword(ctx context.Context, userID, actor, reason string) (string, int, error)
+	IdentityRequests(ctx context.Context, q IdentityRequestQuery) ([]IdentityRequest, string, error)
+	DecideIdentityRequest(ctx context.Context, id string, approve bool, actor, reason string) (IdentityRequest, error)
+}
+
+// StatusChange is a move of an account to another status.
+type StatusChange struct {
+	From   string
+	To     string
+	Reason string
+	// Actor is an administrator's email, cli:<os user> or a service.
+	Actor string
+	At    time.Time
+}
+
+// Consent is a document version an account accepted.
+type Consent struct {
+	// Document is TERMS or RISK_DISCLOSURE.
+	Document   string
+	Version    string
+	AcceptedAt time.Time
+}
+
+// AccountHistory reads an account's status changes, newest first, and its
+// consents (user-service).
+type AccountHistory interface {
+	History(ctx context.Context, userID string) ([]StatusChange, []Consent, error)
+}
+
+// RuleHit is a risk rule that matched.
+type RuleHit struct {
+	Rule   string
+	Score  int
+	Detail string
+}
+
+// Assessment is an assessment of the risk rules with at least one hit.
+type Assessment struct {
+	ID              string
+	SourceEventType string
+	Score           int
+	// Action is NONE, STEP_UP, REVIEW or REJECT.
+	Action string
+	Hits   []RuleHit
+	// Enforced tells whether the action was carried out (risk.enforce).
+	Enforced  bool
+	CreatedAt time.Time
+}
+
+// Risk reads risk-service's assessments of an account, newest first.
+type Risk interface {
+	Assessments(ctx context.Context, userID string, limit int) ([]Assessment, error)
+}
+
 // Orders cancels a user's orders (spot-trading-service).
 type Orders interface {
 	CancelAll(ctx context.Context, userID string) error

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -414,6 +415,16 @@ func (r memDevices) Seen(_ context.Context, userID, deviceID string, _ time.Time
 	return !seen, nil
 }
 
+func (r memDevices) List(_ context.Context, userID string) ([]domain.Device, error) {
+	var out []domain.Device
+	for key := range r.s.devices {
+		if user, device, _ := strings.Cut(key, "/"); user == userID {
+			out = append(out, domain.Device{DeviceID: device})
+		}
+	}
+	return out, nil
+}
+
 type memHistory memRepos
 
 func (r memHistory) Add(_ context.Context, e domain.LoginEvent) error {
@@ -436,8 +447,48 @@ func (r memHistory) List(_ context.Context, userID string, beforeID int64, limit
 type memRebinds memRepos
 
 func (r memRebinds) Create(_ context.Context, req domain.RebindRequest) error {
+	req.Status = domain.RebindPending
 	r.s.rebinds = append(r.s.rebinds, req)
 	return nil
+}
+
+func (r memRebinds) List(_ context.Context, status, userID string, _ time.Time, _ string, limit int) ([]domain.RebindRequest, error) {
+	var out []domain.RebindRequest
+	for i := len(r.s.rebinds) - 1; i >= 0 && len(out) < limit; i-- {
+		rr := r.s.rebinds[i]
+		if (status == "" || rr.Status == status) && (userID == "" || rr.UserID == userID) {
+			out = append(out, rr)
+		}
+	}
+	return out, nil
+}
+
+func (r memRebinds) GetForUpdate(_ context.Context, id string) (*domain.RebindRequest, error) {
+	for _, rr := range r.s.rebinds {
+		if rr.ID == id {
+			return &rr, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r memRebinds) Decide(_ context.Context, req domain.RebindRequest) error {
+	for i, rr := range r.s.rebinds {
+		if rr.ID == req.ID && rr.Status == domain.RebindPending {
+			r.s.rebinds[i] = req
+		}
+	}
+	return nil
+}
+
+func (r memRebinds) CountPending(_ context.Context, userID string) (int, error) {
+	n := 0
+	for _, rr := range r.s.rebinds {
+		if rr.Status == domain.RebindPending && (userID == "" || rr.UserID == userID) {
+			n++
+		}
+	}
+	return n, nil
 }
 
 func compareStrings(a, b string) int {

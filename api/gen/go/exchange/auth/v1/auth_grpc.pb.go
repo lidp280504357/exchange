@@ -19,9 +19,16 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AuthService_GetContacts_FullMethodName   = "/exchange.auth.v1.AuthService/GetContacts"
-	AuthService_ConsumeStepUp_FullMethodName = "/exchange.auth.v1.AuthService/ConsumeStepUp"
-	AuthService_FindUser_FullMethodName      = "/exchange.auth.v1.AuthService/FindUser"
+	AuthService_GetContacts_FullMethodName           = "/exchange.auth.v1.AuthService/GetContacts"
+	AuthService_ConsumeStepUp_FullMethodName         = "/exchange.auth.v1.AuthService/ConsumeStepUp"
+	AuthService_FindUser_FullMethodName              = "/exchange.auth.v1.AuthService/FindUser"
+	AuthService_GetSecurity_FullMethodName           = "/exchange.auth.v1.AuthService/GetSecurity"
+	AuthService_ListLoginHistory_FullMethodName      = "/exchange.auth.v1.AuthService/ListLoginHistory"
+	AuthService_RevokeSessions_FullMethodName        = "/exchange.auth.v1.AuthService/RevokeSessions"
+	AuthService_ResetTOTP_FullMethodName             = "/exchange.auth.v1.AuthService/ResetTOTP"
+	AuthService_SetTemporaryPassword_FullMethodName  = "/exchange.auth.v1.AuthService/SetTemporaryPassword"
+	AuthService_ListIdentityRequests_FullMethodName  = "/exchange.auth.v1.AuthService/ListIdentityRequests"
+	AuthService_DecideIdentityRequest_FullMethodName = "/exchange.auth.v1.AuthService/DecideIdentityRequest"
 )
 
 // AuthServiceClient is the client API for AuthService service.
@@ -42,6 +49,28 @@ type AuthServiceClient interface {
 	// FindUser returns the user an email address or phone number (E.164)
 	// belongs to, for the admin console; unknown ones fail with NOT_FOUND.
 	FindUser(ctx context.Context, in *FindUserRequest, opts ...grpc.CallOption) (*FindUserResponse, error)
+	// GetSecurity returns a user's identities, authenticator, password and
+	// lock, live sessions (addresses masked) and devices.
+	GetSecurity(ctx context.Context, in *GetSecurityRequest, opts ...grpc.CallOption) (*GetSecurityResponse, error)
+	// ListLoginHistory pages through a user's sign-ins, newest first
+	// (addresses masked).
+	ListLoginHistory(ctx context.Context, in *ListLoginHistoryRequest, opts ...grpc.CallOption) (*ListLoginHistoryResponse, error)
+	// RevokeSessions ends one of a user's live sessions, or all of them,
+	// with reason ADMIN.
+	RevokeSessions(ctx context.Context, in *RevokeSessionsRequest, opts ...grpc.CallOption) (*RevokeSessionsResponse, error)
+	// ResetTOTP removes a user's authenticator app; the user is told by mail.
+	ResetTOTP(ctx context.Context, in *ResetTOTPRequest, opts ...grpc.CallOption) (*ResetTOTPResponse, error)
+	// SetTemporaryPassword gives a user a random password for the
+	// administrator to pass on, ends every session and clears the password
+	// lock; the user is told as for a reset (withdrawals are reviewed for a
+	// day). The password is in the answer only.
+	SetTemporaryPassword(ctx context.Context, in *SetTemporaryPasswordRequest, opts ...grpc.CallOption) (*SetTemporaryPasswordResponse, error)
+	// ListIdentityRequests pages through the rebind requests of users with a
+	// single identity, which wait for an administrator.
+	ListIdentityRequests(ctx context.Context, in *ListIdentityRequestsRequest, opts ...grpc.CallOption) (*ListIdentityRequestsResponse, error)
+	// DecideIdentityRequest approves (the identity takes the new value) or
+	// rejects a pending rebind request.
+	DecideIdentityRequest(ctx context.Context, in *DecideIdentityRequestRequest, opts ...grpc.CallOption) (*DecideIdentityRequestResponse, error)
 }
 
 type authServiceClient struct {
@@ -82,6 +111,76 @@ func (c *authServiceClient) FindUser(ctx context.Context, in *FindUserRequest, o
 	return out, nil
 }
 
+func (c *authServiceClient) GetSecurity(ctx context.Context, in *GetSecurityRequest, opts ...grpc.CallOption) (*GetSecurityResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSecurityResponse)
+	err := c.cc.Invoke(ctx, AuthService_GetSecurity_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) ListLoginHistory(ctx context.Context, in *ListLoginHistoryRequest, opts ...grpc.CallOption) (*ListLoginHistoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListLoginHistoryResponse)
+	err := c.cc.Invoke(ctx, AuthService_ListLoginHistory_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) RevokeSessions(ctx context.Context, in *RevokeSessionsRequest, opts ...grpc.CallOption) (*RevokeSessionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RevokeSessionsResponse)
+	err := c.cc.Invoke(ctx, AuthService_RevokeSessions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) ResetTOTP(ctx context.Context, in *ResetTOTPRequest, opts ...grpc.CallOption) (*ResetTOTPResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetTOTPResponse)
+	err := c.cc.Invoke(ctx, AuthService_ResetTOTP_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) SetTemporaryPassword(ctx context.Context, in *SetTemporaryPasswordRequest, opts ...grpc.CallOption) (*SetTemporaryPasswordResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetTemporaryPasswordResponse)
+	err := c.cc.Invoke(ctx, AuthService_SetTemporaryPassword_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) ListIdentityRequests(ctx context.Context, in *ListIdentityRequestsRequest, opts ...grpc.CallOption) (*ListIdentityRequestsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListIdentityRequestsResponse)
+	err := c.cc.Invoke(ctx, AuthService_ListIdentityRequests_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) DecideIdentityRequest(ctx context.Context, in *DecideIdentityRequestRequest, opts ...grpc.CallOption) (*DecideIdentityRequestResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DecideIdentityRequestResponse)
+	err := c.cc.Invoke(ctx, AuthService_DecideIdentityRequest_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AuthServiceServer is the server API for AuthService service.
 // All implementations must embed UnimplementedAuthServiceServer
 // for forward compatibility.
@@ -100,6 +199,28 @@ type AuthServiceServer interface {
 	// FindUser returns the user an email address or phone number (E.164)
 	// belongs to, for the admin console; unknown ones fail with NOT_FOUND.
 	FindUser(context.Context, *FindUserRequest) (*FindUserResponse, error)
+	// GetSecurity returns a user's identities, authenticator, password and
+	// lock, live sessions (addresses masked) and devices.
+	GetSecurity(context.Context, *GetSecurityRequest) (*GetSecurityResponse, error)
+	// ListLoginHistory pages through a user's sign-ins, newest first
+	// (addresses masked).
+	ListLoginHistory(context.Context, *ListLoginHistoryRequest) (*ListLoginHistoryResponse, error)
+	// RevokeSessions ends one of a user's live sessions, or all of them,
+	// with reason ADMIN.
+	RevokeSessions(context.Context, *RevokeSessionsRequest) (*RevokeSessionsResponse, error)
+	// ResetTOTP removes a user's authenticator app; the user is told by mail.
+	ResetTOTP(context.Context, *ResetTOTPRequest) (*ResetTOTPResponse, error)
+	// SetTemporaryPassword gives a user a random password for the
+	// administrator to pass on, ends every session and clears the password
+	// lock; the user is told as for a reset (withdrawals are reviewed for a
+	// day). The password is in the answer only.
+	SetTemporaryPassword(context.Context, *SetTemporaryPasswordRequest) (*SetTemporaryPasswordResponse, error)
+	// ListIdentityRequests pages through the rebind requests of users with a
+	// single identity, which wait for an administrator.
+	ListIdentityRequests(context.Context, *ListIdentityRequestsRequest) (*ListIdentityRequestsResponse, error)
+	// DecideIdentityRequest approves (the identity takes the new value) or
+	// rejects a pending rebind request.
+	DecideIdentityRequest(context.Context, *DecideIdentityRequestRequest) (*DecideIdentityRequestResponse, error)
 	mustEmbedUnimplementedAuthServiceServer()
 }
 
@@ -118,6 +239,27 @@ func (UnimplementedAuthServiceServer) ConsumeStepUp(context.Context, *ConsumeSte
 }
 func (UnimplementedAuthServiceServer) FindUser(context.Context, *FindUserRequest) (*FindUserResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method FindUser not implemented")
+}
+func (UnimplementedAuthServiceServer) GetSecurity(context.Context, *GetSecurityRequest) (*GetSecurityResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetSecurity not implemented")
+}
+func (UnimplementedAuthServiceServer) ListLoginHistory(context.Context, *ListLoginHistoryRequest) (*ListLoginHistoryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListLoginHistory not implemented")
+}
+func (UnimplementedAuthServiceServer) RevokeSessions(context.Context, *RevokeSessionsRequest) (*RevokeSessionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RevokeSessions not implemented")
+}
+func (UnimplementedAuthServiceServer) ResetTOTP(context.Context, *ResetTOTPRequest) (*ResetTOTPResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetTOTP not implemented")
+}
+func (UnimplementedAuthServiceServer) SetTemporaryPassword(context.Context, *SetTemporaryPasswordRequest) (*SetTemporaryPasswordResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetTemporaryPassword not implemented")
+}
+func (UnimplementedAuthServiceServer) ListIdentityRequests(context.Context, *ListIdentityRequestsRequest) (*ListIdentityRequestsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListIdentityRequests not implemented")
+}
+func (UnimplementedAuthServiceServer) DecideIdentityRequest(context.Context, *DecideIdentityRequestRequest) (*DecideIdentityRequestResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DecideIdentityRequest not implemented")
 }
 func (UnimplementedAuthServiceServer) mustEmbedUnimplementedAuthServiceServer() {}
 func (UnimplementedAuthServiceServer) testEmbeddedByValue()                     {}
@@ -194,6 +336,132 @@ func _AuthService_FindUser_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AuthService_GetSecurity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSecurityRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).GetSecurity(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_GetSecurity_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).GetSecurity(ctx, req.(*GetSecurityRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_ListLoginHistory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListLoginHistoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).ListLoginHistory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_ListLoginHistory_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).ListLoginHistory(ctx, req.(*ListLoginHistoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_RevokeSessions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RevokeSessionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).RevokeSessions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_RevokeSessions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).RevokeSessions(ctx, req.(*RevokeSessionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_ResetTOTP_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetTOTPRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).ResetTOTP(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_ResetTOTP_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).ResetTOTP(ctx, req.(*ResetTOTPRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_SetTemporaryPassword_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetTemporaryPasswordRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).SetTemporaryPassword(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_SetTemporaryPassword_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).SetTemporaryPassword(ctx, req.(*SetTemporaryPasswordRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_ListIdentityRequests_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListIdentityRequestsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).ListIdentityRequests(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_ListIdentityRequests_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).ListIdentityRequests(ctx, req.(*ListIdentityRequestsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_DecideIdentityRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DecideIdentityRequestRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).DecideIdentityRequest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_DecideIdentityRequest_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).DecideIdentityRequest(ctx, req.(*DecideIdentityRequestRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AuthService_ServiceDesc is the grpc.ServiceDesc for AuthService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -212,6 +480,34 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "FindUser",
 			Handler:    _AuthService_FindUser_Handler,
+		},
+		{
+			MethodName: "GetSecurity",
+			Handler:    _AuthService_GetSecurity_Handler,
+		},
+		{
+			MethodName: "ListLoginHistory",
+			Handler:    _AuthService_ListLoginHistory_Handler,
+		},
+		{
+			MethodName: "RevokeSessions",
+			Handler:    _AuthService_RevokeSessions_Handler,
+		},
+		{
+			MethodName: "ResetTOTP",
+			Handler:    _AuthService_ResetTOTP_Handler,
+		},
+		{
+			MethodName: "SetTemporaryPassword",
+			Handler:    _AuthService_SetTemporaryPassword_Handler,
+		},
+		{
+			MethodName: "ListIdentityRequests",
+			Handler:    _AuthService_ListIdentityRequests_Handler,
+		},
+		{
+			MethodName: "DecideIdentityRequest",
+			Handler:    _AuthService_DecideIdentityRequest_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

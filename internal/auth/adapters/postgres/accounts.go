@@ -58,8 +58,8 @@ func (r credentials) Create(ctx context.Context, userID, hash string, now time.T
 func (r credentials) Get(ctx context.Context, userID string) (*domain.Credential, error) {
 	var c domain.Credential
 	var locked, last *time.Time
-	err := r.q.QueryRow(ctx, `SELECT user_id::text, password_hash, failed_attempts, locked_until, last_login_at
-		FROM credentials WHERE user_id = $1`, userID).Scan(&c.UserID, &c.PasswordHash, &c.FailedAttempts, &locked, &last)
+	err := r.q.QueryRow(ctx, `SELECT user_id::text, password_hash, failed_attempts, locked_until, last_login_at, password_changed_at
+		FROM credentials WHERE user_id = $1`, userID).Scan(&c.UserID, &c.PasswordHash, &c.FailedAttempts, &locked, &last, &c.PasswordChangedAt)
 	if pg.IsNoRows(err) {
 		return nil, nil
 	}
@@ -287,6 +287,24 @@ func (r devices) Seen(ctx context.Context, userID, deviceID string, now time.Tim
 	return inserted, nil
 }
 
+func (r devices) List(ctx context.Context, userID string) ([]domain.Device, error) {
+	rows, err := r.q.Query(ctx, `SELECT device_id, first_seen_at, last_seen_at FROM known_devices WHERE user_id = $1
+		ORDER BY last_seen_at DESC LIMIT 100`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list devices: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.Device
+	for rows.Next() {
+		var d domain.Device
+		if err := rows.Scan(&d.DeviceID, &d.FirstSeenAt, &d.LastSeenAt); err != nil {
+			return nil, fmt.Errorf("list devices: %w", err)
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 type history repos
 
 func (r history) Add(ctx context.Context, e domain.LoginEvent) error {
@@ -329,4 +347,72 @@ func (r rebinds) Create(ctx context.Context, rr domain.RebindRequest) error {
 		return fmt.Errorf("create rebind request: %w", err)
 	}
 	return nil
+}
+
+const rebindColumns = `id::text, user_id::text, kind, new_value, status, created_at, decided_at, coalesce(decided_by, ''),
+	coalesce(decision_reason, '')`
+
+func scanRebind(row interface{ Scan(...any) error }) (domain.RebindRequest, error) {
+	var rr domain.RebindRequest
+	var decided *time.Time
+	err := row.Scan(&rr.ID, &rr.UserID, &rr.Kind, &rr.NewValue, &rr.Status, &rr.CreatedAt, &decided, &rr.DecidedBy, &rr.Reason)
+	if decided != nil {
+		rr.DecidedAt = *decided
+	}
+	return rr, err
+}
+
+func (r rebinds) List(ctx context.Context, status, userID string, afterTime time.Time, afterID string, limit int) ([]domain.RebindRequest, error) {
+	var after *time.Time
+	var afterUUID any
+	if afterID != "" {
+		after, afterUUID = &afterTime, afterID
+	}
+	rows, err := r.q.Query(ctx, `SELECT `+rebindColumns+` FROM identity_rebind_requests
+		WHERE ($1 = '' OR status = $1) AND ($2 = '' OR user_id::text = $2)
+		AND ($3::timestamptz IS NULL OR (created_at, id) < ($3, $4::uuid)) ORDER BY created_at DESC, id DESC LIMIT $5`,
+		status, userID, after, afterUUID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list rebind requests: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.RebindRequest
+	for rows.Next() {
+		rr, err := scanRebind(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list rebind requests: %w", err)
+		}
+		out = append(out, rr)
+	}
+	return out, rows.Err()
+}
+
+func (r rebinds) GetForUpdate(ctx context.Context, id string) (*domain.RebindRequest, error) {
+	rr, err := scanRebind(r.q.QueryRow(ctx, `SELECT `+rebindColumns+` FROM identity_rebind_requests WHERE id = $1 FOR UPDATE`, id))
+	if pg.IsNoRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get rebind request: %w", err)
+	}
+	return &rr, nil
+}
+
+func (r rebinds) Decide(ctx context.Context, rr domain.RebindRequest) error {
+	_, err := r.q.Exec(ctx, `UPDATE identity_rebind_requests SET status = $2, decided_at = $3, decided_by = $4, decision_reason = $5
+		WHERE id = $1 AND status = 'PENDING_REVIEW'`, rr.ID, rr.Status, rr.DecidedAt, rr.DecidedBy, rr.Reason)
+	if err != nil {
+		return fmt.Errorf("decide rebind request: %w", err)
+	}
+	return nil
+}
+
+func (r rebinds) CountPending(ctx context.Context, userID string) (int, error) {
+	var n int
+	err := r.q.QueryRow(ctx, `SELECT count(*) FROM identity_rebind_requests WHERE status = 'PENDING_REVIEW' AND ($1 = '' OR user_id::text = $1)`,
+		userID).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count rebind requests: %w", err)
+	}
+	return n, nil
 }

@@ -111,3 +111,21 @@ func (s *Server) UserStats(ctx context.Context, req *userv1.UserStatsRequest) (*
 	}
 	return resp, nil
 }
+
+// GetUserHistory returns an account's status changes and consents.
+func (s *Server) GetUserHistory(ctx context.Context, req *userv1.GetUserHistoryRequest) (*userv1.GetUserHistoryResponse, error) {
+	changes, consents, err := s.svc.History(ctx, req.GetUserId())
+	if err != nil {
+		return nil, err
+	}
+	resp := &userv1.GetUserHistoryResponse{}
+	for _, c := range changes {
+		resp.StatusChanges = append(resp.StatusChanges, &userv1.StatusChange{
+			FromStatus: c.From, ToStatus: c.To, ReasonCode: c.Reason, Actor: c.Actor, At: timestamppb.New(c.At),
+		})
+	}
+	for _, c := range consents {
+		resp.Consents = append(resp.Consents, &userv1.Consent{Document: c.Document, Version: c.Version, AcceptedAt: timestamppb.New(c.AcceptedAt)})
+	}
+	return resp, nil
+}

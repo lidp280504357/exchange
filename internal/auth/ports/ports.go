@@ -146,6 +146,8 @@ type SecurityRepo interface {
 type DeviceRepo interface {
 	// Seen records a login from device and reports whether it is new.
 	Seen(ctx context.Context, userID, deviceID string, now time.Time) (bool, error)
+	// List returns the user's devices, most recently seen first.
+	List(ctx context.Context, userID string) ([]domain.Device, error)
 }
 
 // HistoryRepo stores the login history.
@@ -158,6 +160,16 @@ type HistoryRepo interface {
 // RebindRepo stores rebind requests awaiting review.
 type RebindRepo interface {
 	Create(ctx context.Context, r domain.RebindRequest) error
+	// List returns requests in a status ("": all) of a user ("": all),
+	// newest first, after the one created at afterTime with ID afterID
+	// (zero for the newest).
+	List(ctx context.Context, status, userID string, afterTime time.Time, afterID string, limit int) ([]domain.RebindRequest, error)
+	// GetForUpdate locks a request; nil when unknown.
+	GetForUpdate(ctx context.Context, id string) (*domain.RebindRequest, error)
+	// Decide records the decision on a pending request.
+	Decide(ctx context.Context, r domain.RebindRequest) error
+	// CountPending counts a user's pending requests ("": everyone's).
+	CountPending(ctx context.Context, userID string) (int, error)
 }
 
 // OTPDelivery is a code on its way to the user.

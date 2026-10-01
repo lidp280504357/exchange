@@ -52,6 +52,13 @@ const (
 	PermSettingsEdit = "settings.write"
 	// PermUsersNotes writes notes on an account and sets its tags.
 	PermUsersNotes = "users.notes"
+	// PermUsersSecurity ends an account's sessions, removes its
+	// authenticator, gives it a temporary password and decides its
+	// identity rebind requests.
+	PermUsersSecurity = "users.security"
+	// PermUsersContacts shows an account's email and phone unmasked
+	// (audited each time).
+	PermUsersContacts = "users.contacts"
 )
 
 var reads = []string{
@@ -60,10 +67,11 @@ var reads = []string{
 
 var roles = map[string][]string{
 	RoleAdmin: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit,
-		PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermDerivativesEdit, PermSettingsEdit, PermUsersNotes),
+		PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermDerivativesEdit, PermSettingsEdit, PermUsersNotes,
+		PermUsersSecurity, PermUsersContacts),
 	RoleOperator: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit, PermDerivativesEdit,
-		PermUsersNotes),
-	RoleFinance: append(slices.Clone(reads), PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermUsersNotes),
+		PermUsersNotes, PermUsersSecurity, PermUsersContacts),
+	RoleFinance: append(slices.Clone(reads), PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermUsersNotes, PermUsersContacts),
 	RoleAuditor: slices.Clone(reads),
 }
 

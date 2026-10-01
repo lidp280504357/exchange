@@ -177,6 +177,21 @@ func (s *Service) StatusHistory(ctx context.Context, userID string) ([]domain.St
 	return s.Store.Read().Users().StatusHistory(ctx, userID, 50)
 }
 
+// History returns a user's recent status changes and accepted document
+// versions (the admin console's user page).
+func (s *Service) History(ctx context.Context, userID string) ([]domain.StatusChange, []domain.Consent, error) {
+	if _, err := s.Get(ctx, userID); err != nil {
+		return nil, nil, err
+	}
+	r := s.Store.Read().Users()
+	changes, err := r.StatusHistory(ctx, userID, 50)
+	if err != nil {
+		return nil, nil, err
+	}
+	consents, err := r.Consents(ctx, userID)
+	return changes, consents, err
+}
+
 // CheckEligibility decides whether a user may use a feature now.
 func (s *Service) CheckEligibility(ctx context.Context, userID, feature, asset, symbol string) (bool, string, error) {
 	feature, err := domain.ParseFeature(feature)

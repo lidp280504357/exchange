@@ -327,6 +327,7 @@ services:
       USER_GRPC_ADDR: user-service:9182
       INSTRUMENT_GRPC_ADDR: instrument-service:9184
       LEDGER_GRPC_ADDR: ledger-service:9185
+      RISK_GRPC_ADDR: risk-service:9186
       WALLET_SERVICE_URL: http://wallet-service:8092
       TRADING_SERVICE_URL: http://spot-trading-service:8088
       DERIVATIVES_SERVICE_URL: http://derivatives-service:8095
@@ -340,6 +341,7 @@ services:
       user-service: {condition: service_started}
       instrument-service: {condition: service_started}
       ledger-service: {condition: service_started}
+      risk-service: {condition: service_started}
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9094/readyz"]

@@ -49,6 +49,8 @@ const (
 	RevokePasswordReset  = "PASSWORD_RESET"
 	RevokePasswordChange = "PASSWORD_CHANGE"
 	RevokeClosed         = "ACCOUNT_CLOSED"
+	// RevokeAdmin: an administrator ended it from the admin console.
+	RevokeAdmin = "ADMIN"
 )
 
 // Errors of the login and session flows (appendix C).
@@ -67,11 +69,12 @@ var (
 
 // Credential is a user's password record.
 type Credential struct {
-	UserID         string
-	PasswordHash   string
-	FailedAttempts int
-	LockedUntil    time.Time
-	LastLoginAt    time.Time
+	UserID            string
+	PasswordHash      string
+	FailedAttempts    int
+	LockedUntil       time.Time
+	LastLoginAt       time.Time
+	PasswordChangedAt time.Time
 }
 
 // Session is a device session.
@@ -130,12 +133,32 @@ type LoginEvent struct {
 	CreatedAt    time.Time
 }
 
-// RebindRequest waits for two-person review (§6.4).
+// RebindRequest waits for two-person review (§6.4): the user proved the
+// new identity, an administrator decides.
 type RebindRequest struct {
-	ID       string
-	UserID   string
-	Kind     string
-	NewValue string
+	ID        string
+	UserID    string
+	Kind      string
+	NewValue  string
+	Status    string
+	CreatedAt time.Time
+	DecidedAt time.Time
+	DecidedBy string
+	Reason    string
+}
+
+// Rebind request statuses.
+const (
+	RebindPending  = "PENDING_REVIEW"
+	RebindApproved = "APPROVED"
+	RebindRejected = "REJECTED"
+)
+
+// Device is a device a user signed in from.
+type Device struct {
+	DeviceID    string
+	FirstSeenAt time.Time
+	LastSeenAt  time.Time
 }
 
 // SecurityContext is what the risk rules of sensitive actions weigh

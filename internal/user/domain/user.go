@@ -50,6 +50,8 @@ type User struct {
 type Consent struct {
 	Document string
 	Version  string
+	// AcceptedAt is read back by Consents.
+	AcceptedAt time.Time
 }
 
 // ErrUserNotFound is returned for unknown user IDs.

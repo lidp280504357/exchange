@@ -2,7 +2,8 @@
 // and design 2026-10-02): an administrator signs in (the flag
 // admin.login_without_totp is on in the test environment) and walks every
 // section: the overview with the services' health and HOUSE, users with a
-// user's drawer and its tabs, orders and trades, deposits, the withdrawal
+// user's page and its tabs (profile, security, risk …), the identity
+// requests, orders and trades, deposits, the withdrawal
 // queue, assets and pairs (a status change is confirmed and canceled,
 // never done), futures, HOUSE, the flags, the ledger's reconciliation, the
 // audit trail, the reports, the fund operations (approval mode, form,
@@ -62,12 +63,25 @@ try {
   await page.waitForFunction(() => /^\/users\/[0-9a-f-]{36}$/.test(location.pathname), { timeout: 20000 });
   const userId = await page.evaluate(() => location.pathname.split("/").pop());
   await waitText("UID");
-  await clickButton("余额与资金");
+  await waitText("最近登录");
+  await waitText("已同意的文件");
+  await clickButton("安全", "main");
+  await waitText("身份验证器");
+  await waitText("登录记录");
+  await noError("the security tab");
+  await clickButton("余额与资金", "main");
   await waitText("调整余额");
-  for (const tab of ["订单", "成交", "提现", "备注与标签", "审计"]) await clickButton(tab, "main");
+  for (const tab of ["订单", "成交", "提现", "风控", "备注与标签", "审计"]) await clickButton(tab, "main");
   await waitText("UID");
   await t.shot("2-user");
-  ok(`users: the list, a user's page (${userId.slice(0, 8)}…) with its tabs`);
+  ok(`users: the list, a user's page (${userId.slice(0, 8)}…) with its tabs (profile, security, risk …)`);
+
+  // 3b. The identity requests (the queue waiting for a decision).
+  await go("/identity-requests");
+  await waitText("身份变更申请");
+  await sleep(1000);
+  await noError("identity requests");
+  ok("the identity requests");
 
   // 4. The search opens the same user; the drawer's old address leads there too.
   await go("/");
@@ -171,7 +185,9 @@ try {
         setTimeout(() => done(null), 15000);
       }),
   );
-  if (!stream || typeof stream.withdrawals !== "number" || typeof stream.approvals !== "number") throw new Error(`event stream: ${JSON.stringify(stream)}`);
+  if (!stream || typeof stream.withdrawals !== "number" || typeof stream.approvals !== "number" || typeof stream.identity_requests !== "number") {
+    throw new Error(`event stream: ${JSON.stringify(stream)}`);
+  }
   await t.shot("5-settings");
   ok(`fund operations: the approval mode, the form and the records; the settings; the event stream (${JSON.stringify(stream)})`);
 

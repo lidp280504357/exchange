@@ -177,7 +177,8 @@ func (r identities) Find(ctx context.Context, kind, value string) (*domain.Ident
 }
 
 func (r identities) ByUser(ctx context.Context, userID string) ([]domain.Identity, error) {
-	rows, err := r.q.Query(ctx, `SELECT id::text, user_id::text, kind, value FROM identities WHERE user_id = $1 ORDER BY kind`, userID)
+	rows, err := r.q.Query(ctx, `SELECT id::text, user_id::text, kind, value, verified_at, created_at FROM identities
+		WHERE user_id = $1 ORDER BY kind`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list identities: %w", err)
 	}
@@ -185,7 +186,7 @@ func (r identities) ByUser(ctx context.Context, userID string) ([]domain.Identit
 	var out []domain.Identity
 	for rows.Next() {
 		var id domain.Identity
-		if err := rows.Scan(&id.ID, &id.UserID, &id.Kind, &id.Value); err != nil {
+		if err := rows.Scan(&id.ID, &id.UserID, &id.Kind, &id.Value, &id.VerifiedAt, &id.CreatedAt); err != nil {
 			return nil, fmt.Errorf("list identities: %w", err)
 		}
 		out = append(out, id)

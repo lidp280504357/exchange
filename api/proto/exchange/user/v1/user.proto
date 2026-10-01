@@ -21,6 +21,35 @@ service UserService {
   rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
   // UserStats counts accounts for the admin console's overview.
   rpc UserStats(UserStatsRequest) returns (UserStatsResponse);
+  // GetUserHistory returns an account's status changes (newest first) and
+  // the document versions it accepted, for the admin console.
+  rpc GetUserHistory(GetUserHistoryRequest) returns (GetUserHistoryResponse);
+}
+
+message GetUserHistoryRequest {
+  string user_id = 1;
+}
+
+message StatusChange {
+  string from_status = 1;
+  string to_status = 2;
+  // An upper-case code, e.g. SUSPICIOUS_LOGIN, RISK_RULE, REVIEW_CLEARED.
+  string reason_code = 3;
+  // An administrator's email, cli:<os user> or system:<service>.
+  string actor = 4;
+  google.protobuf.Timestamp at = 5;
+}
+
+message Consent {
+  // TERMS or RISK_DISCLOSURE.
+  string document = 1;
+  string version = 2;
+  google.protobuf.Timestamp accepted_at = 3;
+}
+
+message GetUserHistoryResponse {
+  repeated StatusChange status_changes = 1;
+  repeated Consent consents = 2;
 }
 
 message User {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	riskv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/risk/v1"
 	"github.com/lidp280504357/exchange/internal/platform/app"
 	"github.com/lidp280504357/exchange/internal/platform/bootstrap"
 	"github.com/lidp280504357/exchange/internal/platform/event"
@@ -18,6 +19,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/risk/application"
 	"github.com/lidp280504357/exchange/internal/risk/domain"
 	"github.com/lidp280504357/exchange/internal/risk/transport/consumer"
+	"github.com/lidp280504357/exchange/internal/risk/transport/grpcapi"
 	"github.com/lidp280504357/exchange/migrations"
 )
 
@@ -72,8 +74,12 @@ func setup(ctx context.Context, a *app.App) error {
 		return err
 	}
 	a.Add("velocity purge", app.Loop(purgeLoop(a, svc)))
-	_, err = bootstrap.GRPCServer(ctx, a, cfg.GRPCAddr)
-	return err
+	srv, err := bootstrap.GRPCServer(ctx, a, cfg.GRPCAddr)
+	if err != nil {
+		return err
+	}
+	riskv1.RegisterRiskServiceServer(srv, grpcapi.NewServer(svc))
+	return nil
 }
 
 func loadRules(file string) ([]domain.Rule, error) {

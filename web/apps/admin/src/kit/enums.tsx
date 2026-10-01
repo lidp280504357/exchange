@@ -25,7 +25,13 @@ export type EnumGroup =
   | "providerStatus"
   | "callbackResult"
   | "callbackKind"
-  | "custodyStatus";
+  | "custodyStatus"
+  | "identityKind"
+  | "identityRequestStatus"
+  | "totpStatus"
+  | "riskAction"
+  | "consentDocument"
+  | "loginMethod";
 
 /** useEnum returns a function that labels a code of a group (the code itself when unknown). */
 export function useEnum() {
@@ -52,6 +58,9 @@ const tones: Partial<Record<EnumGroup, Record<string, BadgeTone>>> = {
   approvalStatus: { PENDING: "warn", EXECUTED: "success", REJECTED: "neutral", FAILED: "danger" },
   feed: { OK: "success", DELAYED: "warn", DOWN: "danger", OFF: "neutral" },
   liquidationKind: { WARNING: "warn", STARTED: "danger", FILLED: "danger", ADL: "danger", ENDED: "neutral" },
+  identityRequestStatus: { PENDING_REVIEW: "warn", APPROVED: "success", REJECTED: "neutral" },
+  totpStatus: { ACTIVE: "success", PENDING: "warn", NONE: "neutral" },
+  riskAction: { NONE: "neutral", STEP_UP: "info", REVIEW: "warn", REJECT: "danger" },
 };
 
 /** EnumBadge labels a code as a badge toned by its meaning. */

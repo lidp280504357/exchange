@@ -44,6 +44,8 @@ type UserRepo interface {
 	AddStatusChange(ctx context.Context, c domain.StatusChange) error
 	// StatusHistory lists the user's status changes, newest first.
 	StatusHistory(ctx context.Context, userID string, limit int) ([]domain.StatusChange, error)
+	// Consents lists the document versions the user accepted, newest first.
+	Consents(ctx context.Context, userID string) ([]domain.Consent, error)
 	// List returns up to f.Limit accounts matching f, newest first, after
 	// the account created at f.AfterTime with ID f.AfterID (the previous
 	// page's last; zero for the newest).

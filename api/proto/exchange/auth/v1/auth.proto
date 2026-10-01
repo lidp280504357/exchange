@@ -18,6 +18,182 @@ service AuthService {
   // FindUser returns the user an email address or phone number (E.164)
   // belongs to, for the admin console; unknown ones fail with NOT_FOUND.
   rpc FindUser(FindUserRequest) returns (FindUserResponse);
+
+  // The admin console's view of and actions on an account's security
+  // (design 2026-10-02 §4.1); the console checks the administrator's role
+  // and audits, actor names the administrator.
+
+  // GetSecurity returns a user's identities, authenticator, password and
+  // lock, live sessions (addresses masked) and devices.
+  rpc GetSecurity(GetSecurityRequest) returns (GetSecurityResponse);
+  // ListLoginHistory pages through a user's sign-ins, newest first
+  // (addresses masked).
+  rpc ListLoginHistory(ListLoginHistoryRequest) returns (ListLoginHistoryResponse);
+  // RevokeSessions ends one of a user's live sessions, or all of them,
+  // with reason ADMIN.
+  rpc RevokeSessions(RevokeSessionsRequest) returns (RevokeSessionsResponse);
+  // ResetTOTP removes a user's authenticator app; the user is told by mail.
+  rpc ResetTOTP(ResetTOTPRequest) returns (ResetTOTPResponse);
+  // SetTemporaryPassword gives a user a random password for the
+  // administrator to pass on, ends every session and clears the password
+  // lock; the user is told as for a reset (withdrawals are reviewed for a
+  // day). The password is in the answer only.
+  rpc SetTemporaryPassword(SetTemporaryPasswordRequest) returns (SetTemporaryPasswordResponse);
+  // ListIdentityRequests pages through the rebind requests of users with a
+  // single identity, which wait for an administrator.
+  rpc ListIdentityRequests(ListIdentityRequestsRequest) returns (ListIdentityRequestsResponse);
+  // DecideIdentityRequest approves (the identity takes the new value) or
+  // rejects a pending rebind request.
+  rpc DecideIdentityRequest(DecideIdentityRequestRequest) returns (DecideIdentityRequestResponse);
+}
+
+message GetSecurityRequest {
+  string user_id = 1;
+}
+
+message IdentityInfo {
+  // EMAIL or PHONE.
+  string kind = 1;
+  // Normalized: lower-case email or E.164 phone number.
+  string value = 2;
+  google.protobuf.Timestamp verified_at = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message SessionInfo {
+  string id = 1;
+  string device_id = 2;
+  // WEB or APP.
+  string client_type = 3;
+  string user_agent = 4;
+  // Masked.
+  string ip = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp last_seen_at = 7;
+}
+
+message DeviceInfo {
+  string device_id = 1;
+  google.protobuf.Timestamp first_seen_at = 2;
+  google.protobuf.Timestamp last_seen_at = 3;
+}
+
+message GetSecurityResponse {
+  repeated IdentityInfo identities = 1;
+  // ACTIVE, PENDING (set up, not confirmed) or empty when none.
+  string totp_status = 2;
+  google.protobuf.Timestamp totp_activated_at = 3;
+  google.protobuf.Timestamp password_changed_at = 4;
+  google.protobuf.Timestamp last_login_at = 5;
+  // Seconds password sign-in stays locked after repeated failures; 0 when
+  // it is not.
+  int32 locked_seconds = 6;
+  repeated SessionInfo sessions = 7;
+  repeated DeviceInfo devices = 8;
+  int32 pending_identity_requests = 9;
+}
+
+message ListLoginHistoryRequest {
+  string user_id = 1;
+  // The previous page's next_before_id; 0 for the newest.
+  int64 before_id = 2;
+  int32 limit = 3;
+}
+
+message LoginEntry {
+  int64 id = 1;
+  // PASSWORD, OTP, LOGIN_CHALLENGE or REGISTER.
+  string method = 2;
+  string result = 3;
+  string identity_mask = 4;
+  string device_id = 5;
+  string user_agent = 6;
+  // Masked.
+  string ip = 7;
+  bool new_device = 8;
+  google.protobuf.Timestamp created_at = 9;
+}
+
+message ListLoginHistoryResponse {
+  repeated LoginEntry entries = 1;
+  // 0 on the last page.
+  int64 next_before_id = 2;
+}
+
+message RevokeSessionsRequest {
+  string user_id = 1;
+  // Empty for every live session.
+  string session_id = 2;
+  string actor = 3;
+  string reason = 4;
+}
+
+message RevokeSessionsResponse {
+  int32 revoked = 1;
+}
+
+message ResetTOTPRequest {
+  string user_id = 1;
+  string actor = 2;
+  string reason = 3;
+}
+
+message ResetTOTPResponse {
+  // Whether there was one to remove.
+  bool removed = 1;
+}
+
+message SetTemporaryPasswordRequest {
+  string user_id = 1;
+  string actor = 2;
+  string reason = 3;
+}
+
+message SetTemporaryPasswordResponse {
+  string password = 1;
+  int32 sessions_revoked = 2;
+}
+
+message IdentityRequest {
+  string id = 1;
+  string user_id = 2;
+  // EMAIL or PHONE.
+  string kind = 3;
+  string new_value = 4;
+  // The identity's value now; empty when it is gone.
+  string current_value = 5;
+  // PENDING_REVIEW, APPROVED or REJECTED.
+  string status = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp decided_at = 8;
+  string decided_by = 9;
+  string reason = 10;
+}
+
+message ListIdentityRequestsRequest {
+  // Empty for every status.
+  string status = 1;
+  // Empty for every user.
+  string user_id = 2;
+  string cursor = 3;
+  int32 limit = 4;
+}
+
+message ListIdentityRequestsResponse {
+  repeated IdentityRequest requests = 1;
+  // Empty on the last page.
+  string next_cursor = 2;
+}
+
+message DecideIdentityRequestRequest {
+  string id = 1;
+  bool approve = 2;
+  string actor = 3;
+  string reason = 4;
+}
+
+message DecideIdentityRequestResponse {
+  IdentityRequest request = 1;
 }
 
 message GetContactsRequest {

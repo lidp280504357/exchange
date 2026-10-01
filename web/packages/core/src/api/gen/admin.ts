@@ -419,6 +419,223 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/users/{id}/security": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An account's sign-in security
+         * @description Identities (masked: a***@x.com, +65912****4567), authenticator,
+         *     password, lock, live sessions and devices (addresses masked), and
+         *     the rebind requests waiting (auth-service). Needs users.read.
+         */
+        get: operations["getUserSecurity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{id}/contacts/reveal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * An account's email and phone, unmasked
+         * @description Each call is audited (admin.users.contacts_revealed, naming the
+         *     kinds shown, not the values); the answer is not cached. Needs
+         *     users.contacts.
+         */
+        post: operations["revealUserContacts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{id}/login-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An account's sign-in attempts, newest first
+         * @description Addresses are masked. Needs users.read.
+         */
+        get: operations["listUserLogins"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{id}/sessions/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End one of an account's sessions, or all of them
+         * @description The sessions end with reason ADMIN (auth-service); audited as
+         *     admin.users.sessions_revoked. Needs users.security.
+         */
+        post: operations["revokeUserSessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{id}/totp-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove an account's authenticator app
+         * @description The user is told by mail and can bind a new one; audited as
+         *     admin.users.totp_reset. Needs users.security.
+         */
+        post: operations["resetUserTotp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{id}/password-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Give an account a temporary password
+         * @description A random password (four groups of four letters and digits) replaces
+         *     the user's; every session ends, the password lock is cleared and
+         *     the user is told by mail as for a reset (withdrawals are reviewed
+         *     for a day). The password is in this answer only: pass it on and
+         *     ask the user to change it. Audited as admin.users.password_reset,
+         *     without the password. Needs users.security.
+         */
+        post: operations["resetUserPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An account's status changes and accepted documents
+         * @description Status changes newest first, at most 50 (user-service). Needs users.read.
+         */
+        get: operations["getUserHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{id}/risk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The risk rules' assessments of an account, newest first
+         * @description Only assessments with a rule hit are kept (risk-service). Moving the
+         *     account to RISK_REVIEW and back is POST /admin/v1/users/{id}/status.
+         *     Needs users.read.
+         */
+        get: operations["getUserRisk"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/identity-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Identity rebind requests, newest first
+         * @description A user with a single identity asks to move it to a new value and an
+         *     administrator decides (auth-service). Values are masked. Needs
+         *     users.read.
+         */
+        get: operations["listIdentityRequests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/identity-requests/{id}/decide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve or reject an identity rebind request
+         * @description Approving moves the identity to the new value and tells the user;
+         *     a value another account holds fails with AUTH_IDENTITY_TAKEN. Audited as
+         *     admin.users.identity_request_decided. Needs users.security.
+         */
+        post: operations["decideIdentityRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/withdrawals": {
         parameters: {
             query?: never;
@@ -1359,7 +1576,7 @@ export interface components {
             name: string;
             /** @enum {string} */
             role: "ADMIN" | "OPERATOR" | "FINANCE" | "AUDITOR";
-            permissions: ("users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write" | "settings.write" | "users.notes")[];
+            permissions: ("users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write" | "settings.write" | "users.notes" | "users.security" | "users.contacts")[];
         };
         Settings: {
             /** @description Fund operations need a second administrator (the flag admin.two_person_approval). */
@@ -1382,7 +1599,127 @@ export interface components {
             withdrawals: number;
             /** @description Fund operations waiting for a decision (with ledger.adjust.request or ledger.adjust.approve). */
             approvals: number;
-            partial: "withdrawals"[];
+            /** @description Identity rebind requests waiting for a decision (with users.security; counted up to 200). */
+            identity_requests: number;
+            partial: ("withdrawals" | "identity_requests")[];
+        };
+        Identity: {
+            /** @enum {string} */
+            kind: "EMAIL" | "PHONE";
+            /** @description Masked except from POST /admin/v1/users/{id}/contacts/reveal. */
+            value: string;
+            /** Format: date-time */
+            verified_at: string | null;
+            /** Format: date-time */
+            created_at: string | null;
+        };
+        Security: {
+            identities: components["schemas"]["Identity"][];
+            totp: {
+                /**
+                 * @description PENDING is set up but never confirmed.
+                 * @enum {string}
+                 */
+                status: "ACTIVE" | "PENDING" | "NONE";
+                /** Format: date-time */
+                activated_at: string | null;
+            };
+            /** Format: date-time */
+            password_changed_at: string | null;
+            /** Format: date-time */
+            last_login_at: string | null;
+            /** @description How long password sign-in stays locked after repeated failures; 0 when it is not. */
+            locked_seconds: number;
+            sessions: {
+                /** Format: uuid */
+                id: string;
+                device_id: string;
+                client_type: string;
+                user_agent: string;
+                /** @description Masked (203.0.113.*). */
+                ip: string;
+                /** Format: date-time */
+                created_at: string | null;
+                /** Format: date-time */
+                last_seen_at: string | null;
+            }[];
+            devices: {
+                device_id: string;
+                /** Format: date-time */
+                first_seen_at: string | null;
+                /** Format: date-time */
+                last_seen_at: string | null;
+            }[];
+            pending_identity_requests: number;
+        };
+        LoginEntry: {
+            id: number;
+            /** @description PASSWORD, OTP, LOGIN_CHALLENGE or REGISTER. */
+            method: string;
+            /** @description SUCCESS or a failure code. */
+            result: string;
+            identity_mask: string;
+            device_id: string;
+            user_agent: string;
+            /** @description Masked. */
+            ip: string;
+            new_device: boolean;
+            /** Format: date-time */
+            created_at: string | null;
+        };
+        StatusChange: {
+            from_status: string;
+            to_status: string;
+            reason_code: string;
+            /** @description An administrator's email, cli:<os user> or a service. */
+            actor: string;
+            /** Format: date-time */
+            at: string | null;
+        };
+        Consent: {
+            /** @description TERMS or RISK_DISCLOSURE. */
+            document: string;
+            version: string;
+            /** Format: date-time */
+            accepted_at: string | null;
+        };
+        Assessment: {
+            /** Format: uuid */
+            id: string;
+            /** @description The auth event assessed, e.g. auth.LoginSucceeded. */
+            source_event_type: string;
+            score: number;
+            /** @enum {string} */
+            action: "NONE" | "STEP_UP" | "REVIEW" | "REJECT";
+            hits: {
+                rule: string;
+                score: number;
+                detail: string;
+            }[];
+            /** @description Whether the action was carried out (risk.enforce). */
+            enforced: boolean;
+            /** Format: date-time */
+            created_at: string | null;
+        };
+        IdentityRequest: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            user_id: string;
+            /** @enum {string} */
+            kind: "EMAIL" | "PHONE";
+            /** @description Masked. */
+            new_value: string;
+            /** @description Masked; empty when the identity is gone. */
+            current_value: string;
+            /** @enum {string} */
+            status: "PENDING_REVIEW" | "APPROVED" | "REJECTED";
+            /** Format: date-time */
+            created_at: string | null;
+            /** Format: date-time */
+            decided_at: string | null;
+            decided_by: string;
+            reason: string;
         };
         UserView: {
             user: {
@@ -2461,6 +2798,292 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getUserSecurity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account's security. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Security"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    revealUserContacts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The identities. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        identities: components["schemas"]["Identity"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listUserLogins: {
+        parameters: {
+            query?: {
+                /** @description The previous page's next_cursor; omitted for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of sign-ins. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["LoginEntry"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    revokeUserSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description Omitted for every live session.
+                     */
+                    session_id?: string;
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description How many sessions ended. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        revoked: number;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    resetUserTotp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description Whether there was one to remove. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        removed: boolean;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    resetUserPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description The temporary password (not cached). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        temporary_password: string;
+                        sessions_revoked: number;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getUserHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The history. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        status_changes: components["schemas"]["StatusChange"][];
+                        consents: components["schemas"]["Consent"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getUserRisk: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The assessments. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        assessments: components["schemas"]["Assessment"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listIdentityRequests: {
+        parameters: {
+            query?: {
+                status?: "PENDING_REVIEW" | "APPROVED" | "REJECTED";
+                user_id?: components["parameters"]["UserFilter"];
+                /** @description The previous page's next_cursor; omitted for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of requests. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["IdentityRequest"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    decideIdentityRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    approve: boolean;
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The decided request. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityRequest"];
+                };
             };
             default: components["responses"]["Error"];
         };

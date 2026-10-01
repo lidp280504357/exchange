@@ -8,13 +8,16 @@ import { useEnum } from "../../kit/enums";
 const STATUSES = ["ACTIVE", "RISK_REVIEW", "FROZEN", "CLOSED"] as const;
 const REASONS = ["SUSPICIOUS_LOGIN", "FRAUD_SUSPECTED", "COMPLIANCE_REVIEW", "USER_REQUEST", "REVIEW_CLEARED"];
 
-/** StatusAction moves an account to another status (user-service's state machine) with a reason code and a note. */
-export function StatusAction({ userId, status }: { userId: string; status: string }) {
+/**
+ * StatusAction moves an account to another status (user-service's state machine) with a reason code and a note;
+ * initialTo and initialReason preselect them (the risk tab offers RISK_REVIEW and back).
+ */
+export function StatusAction({ userId, status, initialTo, initialReason }: { userId: string; status: string; initialTo?: string; initialReason?: string }) {
   const { t } = useTranslation();
   const label = useEnum();
   // Never preselect a freeze: the first status other than the current one.
-  const [to, setTo] = useState<string>(STATUSES.find((s) => s !== status) ?? "ACTIVE");
-  const [reason, setReason] = useState(REASONS[0]!);
+  const [to, setTo] = useState<string>(initialTo && initialTo !== status ? initialTo : (STATUSES.find((s) => s !== status) ?? "ACTIVE"));
+  const [reason, setReason] = useState(initialReason && REASONS.includes(initialReason) ? initialReason : REASONS[0]!);
   return (
     <div className="flex flex-col gap-2">
       <div className="grid grid-cols-2 gap-2">

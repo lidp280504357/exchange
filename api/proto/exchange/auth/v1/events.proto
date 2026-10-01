@@ -77,7 +77,8 @@ message LoginFailed {
 message SessionRevoked {
   string user_id = 1;
   string session_id = 2;
-  // LOGOUT, LOGOUT_ALL, USER, REPLAY, LIMIT, PASSWORD_RESET, PASSWORD_CHANGE
+  // LOGOUT, LOGOUT_ALL, USER, REPLAY, LIMIT, PASSWORD_RESET, PASSWORD_CHANGE,
+  // ACCOUNT_CLOSED, ADMIN (ended from the admin console)
   string reason = 3;
 }
 

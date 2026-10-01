@@ -51,12 +51,6 @@ func (s *Server) ConsumeStepUp(ctx context.Context, req *authv1.ConsumeStepUpReq
 	if err != nil {
 		return nil, err
 	}
-	stamp := func(t time.Time) *timestamppb.Timestamp {
-		if t.IsZero() {
-			return nil
-		}
-		return timestamppb.New(t)
-	}
 	return &authv1.ConsumeStepUpResponse{SessionId: su.SessionID, Channel: string(su.Channel), Security: &authv1.SecurityContext{
 		Identities: int32(sec.Identities), TotpEnabled: sec.TOTPEnabled, DeviceId: sec.DeviceID, //nolint:gosec // a handful
 		DeviceFirstSeenAt: stamp(sec.DeviceFirstSeenAt), IdentityChangedAt: stamp(sec.IdentityChangedAt),
@@ -71,4 +65,114 @@ func (s *Server) FindUser(ctx context.Context, req *authv1.FindUserRequest) (*au
 		return nil, err
 	}
 	return &authv1.FindUserResponse{UserId: id}, nil
+}
+
+func stamp(t time.Time) *timestamppb.Timestamp {
+	if t.IsZero() {
+		return nil
+	}
+	return timestamppb.New(t)
+}
+
+// GetSecurity returns an account's security for the admin console.
+func (s *Server) GetSecurity(ctx context.Context, req *authv1.GetSecurityRequest) (*authv1.GetSecurityResponse, error) {
+	sec, err := s.accounts.AdminSecurity(ctx, req.GetUserId())
+	if err != nil {
+		return nil, err
+	}
+	out := &authv1.GetSecurityResponse{
+		TotpStatus: sec.TOTP, TotpActivatedAt: stamp(sec.TOTPActivated), PasswordChangedAt: stamp(sec.Credential.PasswordChangedAt),
+		LastLoginAt: stamp(sec.Credential.LastLoginAt), LockedSeconds: int32(sec.LockedFor.Seconds()), //nolint:gosec // at most 15 minutes
+		PendingIdentityRequests: int32(sec.PendingRequests), //nolint:gosec // a handful
+	}
+	for _, id := range sec.Identities {
+		out.Identities = append(out.Identities, &authv1.IdentityInfo{
+			Kind: id.Kind, Value: id.Value, VerifiedAt: stamp(id.VerifiedAt), CreatedAt: stamp(id.CreatedAt),
+		})
+	}
+	for _, x := range sec.Sessions {
+		out.Sessions = append(out.Sessions, &authv1.SessionInfo{
+			Id: x.ID, DeviceId: x.DeviceID, ClientType: x.ClientType, UserAgent: x.UserAgent, Ip: x.IP, CreatedAt: stamp(x.CreatedAt),
+			LastSeenAt: stamp(x.LastSeenAt),
+		})
+	}
+	for _, d := range sec.Devices {
+		out.Devices = append(out.Devices, &authv1.DeviceInfo{DeviceId: d.DeviceID, FirstSeenAt: stamp(d.FirstSeenAt), LastSeenAt: stamp(d.LastSeenAt)})
+	}
+	return out, nil
+}
+
+// ListLoginHistory pages through a user's sign-ins.
+func (s *Server) ListLoginHistory(ctx context.Context, req *authv1.ListLoginHistoryRequest) (*authv1.ListLoginHistoryResponse, error) {
+	if req.GetUserId() == "" {
+		return nil, apperr.Invalid("user_id is required")
+	}
+	events, next, err := s.accounts.History(ctx, req.GetUserId(), req.GetBeforeId(), int(req.GetLimit()))
+	if err != nil {
+		return nil, err
+	}
+	out := &authv1.ListLoginHistoryResponse{NextBeforeId: next}
+	for _, e := range events {
+		out.Entries = append(out.Entries, &authv1.LoginEntry{
+			Id: e.ID, Method: e.Method, Result: e.Result, IdentityMask: e.IdentityMask, DeviceId: e.DeviceID, UserAgent: e.UserAgent, Ip: e.IP,
+			NewDevice: e.NewDevice, CreatedAt: stamp(e.CreatedAt),
+		})
+	}
+	return out, nil
+}
+
+// RevokeSessions ends a user's sessions for an administrator.
+func (s *Server) RevokeSessions(ctx context.Context, req *authv1.RevokeSessionsRequest) (*authv1.RevokeSessionsResponse, error) {
+	n, err := s.accounts.AdminRevokeSessions(ctx, req.GetUserId(), req.GetSessionId(), req.GetActor(), req.GetReason())
+	if err != nil {
+		return nil, err
+	}
+	return &authv1.RevokeSessionsResponse{Revoked: int32(n)}, nil //nolint:gosec // at most ten
+}
+
+// ResetTOTP removes a user's authenticator app for an administrator.
+func (s *Server) ResetTOTP(ctx context.Context, req *authv1.ResetTOTPRequest) (*authv1.ResetTOTPResponse, error) {
+	removed, err := s.accounts.AdminResetTOTP(ctx, req.GetUserId(), req.GetActor(), req.GetReason())
+	if err != nil {
+		return nil, err
+	}
+	return &authv1.ResetTOTPResponse{Removed: removed}, nil
+}
+
+// SetTemporaryPassword gives a user a temporary password for an administrator.
+func (s *Server) SetTemporaryPassword(ctx context.Context, req *authv1.SetTemporaryPasswordRequest) (*authv1.SetTemporaryPasswordResponse, error) {
+	pw, n, err := s.accounts.AdminTemporaryPassword(ctx, req.GetUserId(), req.GetActor(), req.GetReason())
+	if err != nil {
+		return nil, err
+	}
+	return &authv1.SetTemporaryPasswordResponse{Password: pw, SessionsRevoked: int32(n)}, nil //nolint:gosec // at most ten
+}
+
+func identityRequest(r application.IdentityRequest) *authv1.IdentityRequest {
+	return &authv1.IdentityRequest{
+		Id: r.ID, UserId: r.UserID, Kind: r.Kind, NewValue: r.NewValue, CurrentValue: r.Current, Status: r.Status, CreatedAt: stamp(r.CreatedAt),
+		DecidedAt: stamp(r.DecidedAt), DecidedBy: r.DecidedBy, Reason: r.Reason,
+	}
+}
+
+// ListIdentityRequests pages through the rebind requests.
+func (s *Server) ListIdentityRequests(ctx context.Context, req *authv1.ListIdentityRequestsRequest) (*authv1.ListIdentityRequestsResponse, error) {
+	list, next, err := s.accounts.AdminIdentityRequests(ctx, req.GetStatus(), req.GetUserId(), req.GetCursor(), int(req.GetLimit()))
+	if err != nil {
+		return nil, err
+	}
+	out := &authv1.ListIdentityRequestsResponse{NextCursor: next}
+	for _, r := range list {
+		out.Requests = append(out.Requests, identityRequest(r))
+	}
+	return out, nil
+}
+
+// DecideIdentityRequest approves or rejects a rebind request.
+func (s *Server) DecideIdentityRequest(ctx context.Context, req *authv1.DecideIdentityRequestRequest) (*authv1.DecideIdentityRequestResponse, error) {
+	r, err := s.accounts.AdminDecideIdentityRequest(ctx, req.GetId(), req.GetApprove(), req.GetActor(), req.GetReason())
+	if err != nil {
+		return nil, err
+	}
+	return &authv1.DecideIdentityRequestResponse{Request: identityRequest(r)}, nil
 }

@@ -9,16 +9,18 @@ import (
 )
 
 // Todo counts what waits for an administrator, as far as their role shows
-// it: withdrawals to review and fund operations to decide (the console's
-// badges, pushed on GET /admin/v1/events).
+// it: withdrawals to review, fund operations and identity rebind requests
+// to decide (the console's badges, pushed on GET /admin/v1/events).
 type Todo struct {
-	Withdrawals int `json:"withdrawals"`
-	Approvals   int `json:"approvals"`
+	Withdrawals      int `json:"withdrawals"`
+	Approvals        int `json:"approvals"`
+	IdentityRequests int `json:"identity_requests"`
 	// Partial names the counts that could not be read.
 	Partial []string `json:"partial"`
 }
 
-// todoPage bounds the withdrawals counted: beyond it the badge says so.
+// todoPage bounds the withdrawals and requests counted: beyond it the
+// badge says so.
 const todoPage = 200
 
 // Todo returns the administrator's counts; a service that does not answer
@@ -45,6 +47,14 @@ func (s *Service) Todo(ctx context.Context, p Principal) (Todo, error) {
 			return Todo{}, err
 		}
 		out.Approvals = n
+	}
+	if p.require(domain.PermUsersSecurity) == nil {
+		list, _, err := s.Security.IdentityRequests(ctx, ports.IdentityRequestQuery{Status: RebindPending, Limit: todoPage})
+		if err != nil {
+			s.Log.WarnContext(ctx, "todo: identity requests unavailable", "error", err)
+			out.Partial = append(out.Partial, "identity_requests")
+		}
+		out.IdentityRequests = len(list)
 	}
 	return out, nil
 }

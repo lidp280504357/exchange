@@ -6,6 +6,7 @@ package domain
 
 import (
 	"strings"
+	"time"
 
 	"github.com/nyaruka/phonenumbers"
 
@@ -30,6 +31,14 @@ func (c Channel) Kind() string {
 		return "PHONE"
 	}
 	return "EMAIL"
+}
+
+// ChannelFor returns the channel that reaches an identity kind.
+func ChannelFor(kind string) Channel {
+	if kind == "PHONE" {
+		return ChannelSMS
+	}
+	return ChannelEmail
 }
 
 // ParseChannel accepts EMAIL or SMS.
@@ -91,4 +100,7 @@ type Identity struct {
 	UserID string
 	Kind   string
 	Value  string
+	// VerifiedAt and CreatedAt are read back by ByUser.
+	VerifiedAt time.Time
+	CreatedAt  time.Time
 }

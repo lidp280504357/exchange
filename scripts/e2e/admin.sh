@@ -113,7 +113,7 @@ expect 200 - "the sign-in options need no session"
 TOTP_REQUIRED=$(jq -r .totp_required <<<"$BODY")
 login ADMIN
 expect 200 - "ADMIN signs in with password and code"
-check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 17" "with every permission"
+check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 19" "with every permission"
 cookie=$(grep -i '^set-cookie: admin_session=' "$WORK/ADMIN.headers")
 for attr in 'Path=/admin/' 'HttpOnly' 'Secure' 'SameSite=Strict'; do
   grep -qi "$attr" <<<"$cookie" || { echo "FAIL the session cookie lacks $attr: $cookie" >&2; exit 1; }
@@ -454,6 +454,86 @@ as AUDITOR GET "/admin/v1/dashboard?days=7" ""
 expect 200 - "the overview"
 check '.users.total >= 1 and (.series | length) == 7 and (.partial | length) == 0 and (.feed.state | test("^(OK|DELAYED|DOWN|OFF)$"))' "accounts, a week of days, the feed; nothing missing"
 
+echo "== the account's security, history and risk"
+as AUDITOR GET "/admin/v1/users/$USER_ID/security" ""
+expect 200 - "AUDITOR reads the account's security"
+check '(.identities | length) == 1 and .identities[0].kind == "EMAIL" and (.identities[0].value | contains("***")) and .totp.status == "NONE" and (.sessions | length) >= 1 and .locked_seconds == 0' \
+  "one masked email, no authenticator, a live session"
+as AUDITOR GET "/admin/v1/users/$USER_ID/login-history?limit=1" ""
+expect 200 - "the sign-ins, a page of one"
+check '(.items | length) == 1 and .items[0].result == "SUCCESS" and (.items[0].ip == "" or (.items[0].ip | contains("*")))' "a success, its address masked"
+as AUDITOR GET "/admin/v1/users/$USER_ID/history" ""
+expect 200 - "the history"
+check '(.consents | length) == 2 and ([.status_changes[].to_status] | index("FROZEN")) != null' "two consents; the freeze is there"
+as AUDITOR GET "/admin/v1/users/$USER_ID/risk" ""
+expect 200 - "the risk rules' assessments"
+check '.assessments | type == "array"' "a list"
+as AUDITOR POST "/admin/v1/users/$USER_ID/contacts/reveal" ""
+expect 403 ADMIN_FORBIDDEN "AUDITOR cannot unmask the contacts"
+as FINANCE POST "/admin/v1/users/$USER_ID/contacts/reveal" ""
+expect 200 - "FINANCE unmasks them (audited)"
+check ".identities[0].value == \"$EMAIL\"" "the whole email"
+
+echo "== an identity rebind waits for an administrator"
+# A fresh access token: the one from the unfreeze may be near its 15 minutes.
+call POST /v1/auth/token/refresh "{\"refresh_token\":\"$REFRESH\",\"device_id\":\"$DEVICE\"}" "${APP[@]}"
+expect 200 - "the user refreshes"
+REFRESH=$(jq -r .refresh_token <<<"$BODY")
+UACCESS=$(jq -r .access_token <<<"$BODY")
+UAUTH=(-H "Authorization: Bearer $UACCESS")
+NEW_EMAIL="e2e-admin-moved-$RUN@example.com"
+wait_resend "$EMAIL"
+otp STEP_UP "$EMAIL" "$DEVICE" "$UACCESS"
+call POST /v1/auth/step-up "{\"otp_ticket\":\"$TICKET\",\"device_id\":\"$DEVICE\"}" "${UAUTH[@]}"
+expect 200 - "the user steps up by email"
+STEP=$(jq -r .step_up_token <<<"$BODY")
+otp REBIND_IDENTITY "$NEW_EMAIL" "$DEVICE" "$UACCESS"
+call POST /v1/auth/identity/rebind "{\"otp_ticket\":\"$TICKET\",\"device_id\":\"$DEVICE\"}" "${UAUTH[@]}" -H "X-Step-Up-Token: $STEP"
+expect 200 - "and asks to move the only email"
+check '.status == "PENDING_REVIEW"' "a single identity waits for review"
+as AUDITOR GET "/admin/v1/identity-requests?user_id=$USER_ID" ""
+expect 200 - "the request is listed"
+check '(.items | length) == 1 and .items[0].status == "PENDING_REVIEW" and (.items[0].new_value | contains("***")) and (.items[0].current_value | contains("***"))' "pending, masked"
+REQ=$(jq -r '.items[0].id' <<<"$BODY")
+as OPERATOR GET /admin/v1/todo ""
+check '.identity_requests >= 1' "OPERATOR's todo counts it"
+as AUDITOR POST "/admin/v1/identity-requests/$REQ/decide" '{"approve":true,"reason":"e2e"}'
+expect 403 ADMIN_FORBIDDEN "AUDITOR decides nothing"
+as OPERATOR POST "/admin/v1/identity-requests/$REQ/decide" '{"approve":true,"reason":"e2e: checked by phone"}'
+expect 200 - "OPERATOR approves it"
+check '.status == "APPROVED" and .decided_by != ""' "approved"
+as OPERATOR POST "/admin/v1/identity-requests/$REQ/decide" '{"approve":false,"reason":"e2e again"}'
+expect 409 COMMON_CONFLICT "a request is decided once"
+as OPERATOR GET "/admin/v1/users/lookup?q=$(jq -rn --arg e "$NEW_EMAIL" '$e|@uri')" ""
+expect 200 - "the account is found by the new email"
+check ".user.id == \"$USER_ID\"" "the same account"
+
+echo "== sessions, authenticator and a temporary password"
+as FINANCE POST "/admin/v1/users/$USER_ID/totp-reset" '{"reason":"e2e lost phone"}'
+expect 403 ADMIN_FORBIDDEN "FINANCE resets no authenticator"
+as OPERATOR POST "/admin/v1/users/$USER_ID/totp-reset" '{"reason":"e2e lost phone"}'
+expect 200 - "OPERATOR resets the authenticator"
+check '.removed == false' "there was none"
+as OPERATOR POST "/admin/v1/users/$USER_ID/sessions/revoke" '{"reason":""}'
+expect 400 COMMON_INVALID_ARGUMENT "ending sessions needs a reason"
+as OPERATOR POST "/admin/v1/users/$USER_ID/sessions/revoke" '{"reason":"e2e stolen phone"}'
+expect 200 - "OPERATOR ends every session"
+check '.revoked >= 1' "at least the user's own"
+revoked_token() {
+  call GET /v1/user/profile "" "${UAUTH[@]}"
+  [[ $STATUS == 401 && $(jq -r .code <<<"$BODY") == AUTH_SESSION_REVOKED ]]
+}
+eventually 20 "the user's token stops working" revoked_token
+as OPERATOR POST "/admin/v1/users/$USER_ID/password-reset" '{"reason":"e2e forgot the password"}'
+expect 200 - "OPERATOR sets a temporary password"
+TEMP=$(jq -r .temporary_password <<<"$BODY")
+check '(.temporary_password | test("^[A-Za-z0-9]{4}(-[A-Za-z0-9]{4}){3}$")) and .sessions_revoked == 0' "four groups of four; nothing left to end"
+call POST /v1/auth/login/password "{\"identifier\":\"$NEW_EMAIL\",\"password\":\"e2e admin user $RUN\",\"device_id\":\"$DEVICE\"}" "${APP[@]}"
+expect 401 AUTH_PASSWORD_INVALID "the old password no longer works"
+call POST /v1/auth/login/password "{\"identifier\":\"$NEW_EMAIL\",\"password\":\"$TEMP\",\"device_id\":\"$DEVICE\"}" "${APP[@]}"
+expect 200 - "the temporary password signs in with the new email"
+UAUTH=(-H "Authorization: Bearer $(jq -r .access_token <<<"$BODY")")
+
 echo "== the audit trail"
 audited() { # audited ROLE QUERY JQ
   as "$1" GET "/admin/v1/audit-logs?$2" ""
@@ -468,6 +548,8 @@ if [[ $TWO_PERSON == false ]]; then
 fi
 eventually 60 "the freeze is audited on the account, by the OPERATOR" audited AUDITOR "target=user:$USER_ID" \
   "[.items[] | select(.actor == \"$EMAIL_OPERATOR\")] | length >= 3"
+eventually 60 "the security actions are audited, the temporary password is not" audited AUDITOR "target=user:$USER_ID" \
+  "([.items[].payload.action] | (index(\"admin.users.contacts_revealed\") != null and index(\"admin.users.identity_request_decided\") != null and index(\"admin.users.sessions_revoked\") != null and index(\"admin.users.password_reset\") != null)) and (tostring | contains(\"$TEMP\") | not)"
 eventually 60 "the flag switches are audited" audited AUDITOR "target=flag:market.reference_kline" \
   "[.items[] | select(.actor == \"$EMAIL_OPERATOR\")] | length >= 2"
 

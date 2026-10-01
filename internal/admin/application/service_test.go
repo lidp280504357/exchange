@@ -415,6 +415,7 @@ type harness struct {
 	orders      *fakeOrders
 	wallet      *fakeWallet
 	derivatives *fakeDerivatives
+	security    *fakeSecurity
 	now         time.Time
 	// secrets by email, for signing in.
 	secrets map[string][]byte
@@ -431,12 +432,12 @@ func newHarness(t *testing.T) *harness {
 	h := &harness{
 		store: newMemStore(), ledger: &fakeLedger{}, flags: &fakeFlags{}, orders: &fakeOrders{}, wallet: &fakeWallet{},
 		derivatives: &fakeDerivatives{}, now: time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC), secrets: map[string][]byte{},
-		users: &fakeUsers{known: map[string]ports.User{}},
+		users: &fakeUsers{known: map[string]ports.User{}}, security: newFakeSecurity(),
 	}
 	h.svc = &Service{
 		Store: h.store, Hasher: password.NewHasher(1, testCost), Box: box, Orders: h.orders, Wallet: h.wallet, Flags: h.flags,
-		Ledger: h.ledger, Derivatives: h.derivatives, Users: h.users, Log: slog.New(slog.DiscardHandler),
-		Now: func() time.Time { return h.now },
+		Ledger: h.ledger, Derivatives: h.derivatives, Users: h.users, Security: h.security, History: h.security, Risk: h.security,
+		Log: slog.New(slog.DiscardHandler), Now: func() time.Time { return h.now },
 	}
 	return h
 }

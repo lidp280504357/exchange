@@ -72,13 +72,14 @@ export function Topbar({ admin }: { admin: Admin }) {
   );
 }
 
-/** TodoBell sums what waits (withdrawals to review, fund operations to decide) and leads to each. */
+/** TodoBell sums what waits (withdrawals to review, fund operations and identity requests to decide) and leads to each. */
 function TodoBell({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
   const todo = useTodo();
   const rows = [
     { key: "withdrawals", to: "/withdrawals", n: todo?.withdrawals ?? 0, show: can(admin, "withdrawals.read") },
     { key: "approvals", to: "/approvals", n: todo?.approvals ?? 0, show: can(admin, "ledger.adjust.request") || can(admin, "ledger.adjust.approve") },
+    { key: "identityRequests", to: "/identity-requests", n: todo?.identity_requests ?? 0, show: can(admin, "users.security") },
   ].filter((r) => r.show);
   const total = rows.reduce((n, r) => n + r.n, 0);
   return (

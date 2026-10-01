@@ -24,6 +24,7 @@ import (
 	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
 	instrumentv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/instrument/v1"
 	ledgerv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1"
+	riskv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/risk/v1"
 	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
 	"github.com/lidp280504357/exchange/internal/admin/adapters/backends"
 	"github.com/lidp280504357/exchange/internal/admin/adapters/postgres"
@@ -54,12 +55,14 @@ type settings struct {
 	Redis      redisx.Config `koanf:",squash"`
 	ClickHouse chx.Config    `koanf:",squash"`
 	// gRPC addresses: AUTH_GRPC_ADDR, USER_GRPC_ADDR, LEDGER_GRPC_ADDR,
-	// INSTRUMENT_GRPC_ADDR; internal REST: WALLET_SERVICE_URL,
-	// TRADING_SERVICE_URL, DERIVATIVES_SERVICE_URL, MARKET_DATA_SERVICE_URL.
+	// INSTRUMENT_GRPC_ADDR, RISK_GRPC_ADDR; internal REST:
+	// WALLET_SERVICE_URL, TRADING_SERVICE_URL, DERIVATIVES_SERVICE_URL,
+	// MARKET_DATA_SERVICE_URL.
 	AuthAddr       string `koanf:"auth_grpc_addr"`
 	UserAddr       string `koanf:"user_grpc_addr"`
 	LedgerAddr     string `koanf:"ledger_grpc_addr"`
 	InstrumentAddr string `koanf:"instrument_grpc_addr"`
+	RiskAddr       string `koanf:"risk_grpc_addr"`
 	WalletURL      string `koanf:"wallet_service_url"`
 	TradingURL     string `koanf:"trading_service_url"`
 	DerivativesURL string `koanf:"derivatives_service_url"`
@@ -120,7 +123,7 @@ func main() {
 func setup(ctx context.Context, a *app.App) error {
 	cfg := settings{
 		HTTPAddr: ":8093", Postgres: pg.DefaultConfig(), AuthAddr: "localhost:9181", UserAddr: "localhost:9182",
-		LedgerAddr: "localhost:9185", InstrumentAddr: "localhost:9184", WalletURL: "http://localhost:8092",
+		LedgerAddr: "localhost:9185", InstrumentAddr: "localhost:9184", RiskAddr: "localhost:9186", WalletURL: "http://localhost:8092",
 		TradingURL: "http://localhost:8088", DerivativesURL: "http://localhost:8095", MarketDataURL: "http://localhost:8090",
 		PasswordHashConcurrency: 2, HealthTargets: defaultHealthTargets,
 	}
@@ -162,7 +165,9 @@ func setup(ctx context.Context, a *app.App) error {
 		return err
 	}
 	a.Cleanup("clickhouse", func(context.Context) error { return ch.Close() })
-	conns := map[string]string{"auth": cfg.AuthAddr, "user": cfg.UserAddr, "ledger": cfg.LedgerAddr, "instrument": cfg.InstrumentAddr}
+	conns := map[string]string{
+		"auth": cfg.AuthAddr, "user": cfg.UserAddr, "ledger": cfg.LedgerAddr, "instrument": cfg.InstrumentAddr, "risk": cfg.RiskAddr,
+	}
 	clients := map[string]*grpc.ClientConn{}
 	for name, addr := range conns {
 		conn, err := bootstrap.GRPCClient(a, name, addr)
@@ -173,14 +178,16 @@ func setup(ctx context.Context, a *app.App) error {
 	}
 	rest := backends.REST{Client: &http.Client{Timeout: 10 * time.Second}}
 	ledgerClient := ledgerv1.NewLedgerServiceClient(clients["ledger"])
+	authClient := authv1.NewAuthServiceClient(clients["auth"])
+	users := backends.Users{Auth: authClient, User: userv1.NewUserServiceClient(clients["user"]), Ledger: ledgerClient}
 	svc := &application.Service{
-		Store:  postgres.NewStore(db, events),
-		Hasher: password.NewHasher(cfg.PasswordHashConcurrency, password.DefaultCost),
-		Box:    box,
-		Users: backends.Users{
-			Auth: authv1.NewAuthServiceClient(clients["auth"]), User: userv1.NewUserServiceClient(clients["user"]),
-			Ledger: ledgerClient,
-		},
+		Store:       postgres.NewStore(db, events),
+		Hasher:      password.NewHasher(cfg.PasswordHashConcurrency, password.DefaultCost),
+		Box:         box,
+		Users:       users,
+		Security:    backends.Security{C: authClient},
+		History:     users,
+		Risk:        backends.Risk{C: riskv1.NewRiskServiceClient(clients["risk"])},
 		Orders:      backends.Trading{REST: rest, Base: cfg.TradingURL},
 		Wallet:      backends.Wallet{REST: rest, Base: cfg.WalletURL},
 		Catalog:     backends.Instruments{C: instrumentv1.NewInstrumentServiceClient(clients["instrument"])},

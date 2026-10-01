@@ -58,6 +58,9 @@ func TestCreateIsIdempotent(t *testing.T) {
 	if err := db.QueryRow(ctx, `SELECT count(*) FROM consents WHERE user_id = $1`, u.ID).Scan(&n); err != nil || n != 2 {
 		t.Fatalf("consents: %d %v", n, err)
 	}
+	if cs, err := users.Consents(ctx, u.ID); err != nil || len(cs) != 2 || cs[0].Version != "v1" || cs[0].AcceptedAt.IsZero() {
+		t.Fatalf("consents read back: %+v %v", cs, err)
+	}
 	for _, id := range []string{uuid.NewString(), "not-a-uuid"} {
 		if _, err := users.Get(ctx, id); err != domain.ErrUserNotFound { //nolint:errorlint // sentinel returned as is
 			t.Fatalf("get %s: %v", id, err)
