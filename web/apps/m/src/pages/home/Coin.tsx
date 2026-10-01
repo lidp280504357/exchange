@@ -153,7 +153,7 @@ export default function Coin() {
         </div>
         {primary ? (
           <div className="relative mt-4 flex flex-wrap items-center gap-x-2 gap-y-1">
-            <PriceText value={tk?.last} decimals={primary.priceDecimals} className="text-2xl font-semibold" />
+            <PriceText value={tk?.last} decimals={primary.priceDecimals} flash={false} arrow className="text-2xl font-semibold" />
             <span className="text-sm text-fg-3">{primary.quote}</span>
             <ChangeBadge value={tk?.change} size="md" />
           </div>

@@ -150,6 +150,9 @@ export function CandleChart({
         fontSize: 11,
         fontFamily: th.fontFamily,
         panes: { separatorColor: th.border },
+        // The licence's link to TradingView is in the site footer (PC) and
+        // the help page (mobile) instead of a logo on every chart.
+        attributionLogo: false,
       },
       grid: { vertLines: { color: th.grid }, horzLines: { color: th.grid } },
       crosshair: {

@@ -65,8 +65,8 @@
   --ease-out: var(--ease);
   --shadow-pop: var(--shadow);
 
-  --animate-flash-up: flash-up 400ms var(--ease);
-  --animate-flash-down: flash-down 400ms var(--ease);
+  --animate-flash-up: flash-up 600ms var(--ease);
+  --animate-flash-down: flash-down 600ms var(--ease);
   --animate-shimmer: shimmer 1.2s linear infinite;
   /* Entrances fill backwards only: an animation still in effect after it
      ends (fill "both") keeps its element a containing block, and a
@@ -107,7 +107,7 @@
 
 @keyframes flash-up {
   from {
-    background-color: color-mix(in srgb, var(--up) 22%, transparent);
+    background-color: color-mix(in srgb, var(--up) 10%, transparent);
   }
   to {
     background-color: transparent;
@@ -116,7 +116,7 @@
 
 @keyframes flash-down {
   from {
-    background-color: color-mix(in srgb, var(--down) 22%, transparent);
+    background-color: color-mix(in srgb, var(--down) 10%, transparent);
   }
   to {
     background-color: transparent;

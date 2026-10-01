@@ -6,7 +6,6 @@ import { PriceText } from "../components/PriceText";
 import { Select } from "../components/Select";
 import { Skeleton } from "../components/Skeleton";
 import { cn } from "../lib/cn";
-import { FlashLayer, useFlash } from "../lib/useFlash";
 import { DepthBars } from "../data/DepthBars";
 
 export type BookMode = "both" | "bids" | "asks";
@@ -64,9 +63,10 @@ type RowProps = {
 
 // One level. Memoized with primitive props: a frame re-renders only the
 // rows whose numbers changed. A new price mounts a new row (key = price),
-// which fades in; a changed quantity flashes (the PriceText pattern).
+// which fades in, and the depth bar eases to its new length. Quantities do
+// not flash: the book moves ten times a second, and forty rows flashing at
+// that rate is noise.
 const BookRow = memo(function BookRow({ side, price, quantity, total, ratio, priceDecimals, qtyDecimals, height, focusable, onPick }: RowProps) {
-  const flash = useFlash(quantity);
   return (
     <button
       type="button"
@@ -78,12 +78,7 @@ const BookRow = memo(function BookRow({ side, price, quantity, total, ratio, pri
     >
       <DepthBars ratio={ratio} side={side === "bid" ? "buy" : "sell"} />
       <span className={cn("relative text-left", side === "bid" ? "text-up" : "text-down")}>{formatPrice(price, priceDecimals)}</span>
-      <span className="relative text-right text-fg-1">
-        <span className="relative isolate rounded-1 px-0.5">
-          <FlashLayer flash={flash} />
-          {formatAmount(quantity, qtyDecimals)}
-        </span>
-      </span>
+      <span className="relative text-right text-fg-1">{formatAmount(quantity, qtyDecimals)}</span>
       <span className="relative text-right text-fg-2">{formatAmount(total, qtyDecimals)}</span>
     </button>
   );
@@ -108,7 +103,7 @@ function ModeIcon({ mode }: { mode: BookMode }) {
  * OrderBook renders a BookView: asks on top with the lowest ask next to the
  * middle row (last price and spread), bids below, each row with a depth
  * bar. Built for 20 levels a side at 60 fps: memoized rows, fixed section
- * heights (no layout shift), flashes and bars by CSS. Arrow keys move
+ * heights (no layout shift), bars by CSS. Arrow keys move
  * between rows; Enter fills the price, Shift+Enter or Shift+click also the
  * cumulative quantity.
  */
@@ -180,7 +175,7 @@ export function OrderBook({
         onClick={() => lastPrice && onPriceClick?.(lastPrice)}
         className="flex items-center gap-1 text-md font-semibold disabled:cursor-default"
       >
-        <PriceText value={lastPrice} decimals={priceDecimals} tone={lastDirection ?? "neutral"} />
+        <PriceText value={lastPrice} decimals={priceDecimals} tone={lastDirection ?? "neutral"} flash={false} />
         {lastDirection === "up" && <ArrowUp size={14} className="text-up" aria-hidden />}
         {lastDirection === "down" && <ArrowDown size={14} className="text-down" aria-hidden />}
       </button>

@@ -42,7 +42,7 @@ export function SpotTickerBar({ pair, onPick, extra }: { pair: Pair; onPick: (sy
       />
       {pair.status !== "TRADING" && <Badge tone="warn">{enumLabel(pair.status)}</Badge>}
       <div className="flex flex-col leading-tight">
-        <PriceText value={tk?.last} decimals={pair.price_decimals} tone={dir ?? "neutral"} className="text-lg font-semibold" />
+        <PriceText value={tk?.last} decimals={pair.price_decimals} tone={dir ?? "neutral"} flash={false} arrow className="text-lg font-semibold" />
         <span className="text-xs text-fg-3">{pair.base_name}</span>
       </div>
       <Stat label={t("market.change")}>

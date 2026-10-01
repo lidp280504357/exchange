@@ -5,21 +5,24 @@ import { cn } from "./cn";
 export type Flash = {
   /** Changes on every move: remounting FlashLayer with it restarts the CSS animation. */
   key: number;
-  /** animate-flash-up / -down after a move, "" before the first one. */
+  /** animate-flash-up / -down after a move, "" before the first one or when flashing is off. */
   className: string;
+  /** The way the value last moved; null before its first move. */
+  dir: "up" | "down" | null;
 };
 
 /**
- * useFlash follows a decimal value and reports a flash class when it
- * rises or falls (the PriceText pattern): no timers, the animation runs
- * once per remount of the FlashLayer that carries `key`.
+ * useFlash follows a decimal value and reports which way it last moved,
+ * and a flash class for that move unless `enabled` is false (the
+ * PriceText pattern): no timers, the animation runs once per remount of
+ * the FlashLayer that carries `key`.
  */
 export function useFlash(value: string | null | undefined, enabled = true): Flash {
   const prev = useRef(value);
   const gen = useRef(0);
   const dir = useRef<"up" | "down" | null>(null);
   if (value !== prev.current) {
-    if (enabled && value && prev.current && dec.isDecimal(value) && dec.isDecimal(prev.current)) {
+    if (value && prev.current && dec.isDecimal(value) && dec.isDecimal(prev.current)) {
       const c = dec.cmp(value, prev.current);
       if (c !== 0) {
         dir.current = c > 0 ? "up" : "down";
@@ -28,8 +31,8 @@ export function useFlash(value: string | null | undefined, enabled = true): Flas
     }
     prev.current = value;
   }
-  const className = gen.current === 0 ? "" : dir.current === "up" ? "animate-flash-up" : "animate-flash-down";
-  return { key: gen.current, className };
+  const className = !enabled || gen.current === 0 ? "" : dir.current === "up" ? "animate-flash-up" : "animate-flash-down";
+  return { key: gen.current, className, dir: dir.current };
 }
 
 /**

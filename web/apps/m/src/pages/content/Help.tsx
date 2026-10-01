@@ -1,6 +1,6 @@
 import { errorText, routes } from "@exchange/core";
 import { useArticles } from "@exchange/core/content/index";
-import { Button, EmptyState, ErrorState, Input, Skeleton, SkeletonLines, Tag } from "@exchange/ui";
+import { Button, ChartCredit, EmptyState, ErrorState, Input, Skeleton, SkeletonLines, Tag } from "@exchange/ui";
 import { BookOpen, CandlestickChart, CircleHelp, Layers, Search, ShieldCheck, Wallet, X } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -161,6 +161,7 @@ export default function Help() {
       <div className="mt-2 px-4">
         {body}
         <SimNotice className="mt-6" />
+        <ChartCredit className="mt-4 text-center" />
       </div>
     </div>
   );

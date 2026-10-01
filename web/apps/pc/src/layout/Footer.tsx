@@ -1,10 +1,11 @@
 import { routes, setLocale, switchSite, useSettings } from "@exchange/core";
+import { ChartCredit } from "@exchange/ui";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { Logo } from "./Logo";
 
-/** Footer: product and support links, the risk note, the switch to the mobile site. */
+/** Footer: product and support links, the risk note, the switch to the mobile site, the chart library's credit. */
 export function Footer() {
   const { t } = useTranslation();
   const locale = useSettings((s) => s.locale);
@@ -34,7 +35,10 @@ export function Footer() {
           </button>
         </Column>
       </div>
-      <div className="border-t border-line-1 py-4 text-center text-xs text-fg-3">{t("footer.copyright")}</div>
+      <div className="flex flex-col items-center gap-1 border-t border-line-1 py-4 text-center text-xs text-fg-3">
+        <span>{t("footer.copyright")}</span>
+        <ChartCredit />
+      </div>
     </footer>
   );
 }

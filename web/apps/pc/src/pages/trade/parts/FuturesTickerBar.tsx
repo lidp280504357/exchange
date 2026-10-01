@@ -45,7 +45,7 @@ export function FuturesTickerBar({ contract, onPick }: { contract: Contract; onP
         className="-ml-4"
       />
       {contract.status !== "TRADING" && <Badge tone="warn">{enumLabel(contract.status)}</Badge>}
-      <PriceText value={tk?.last} decimals={decimals} tone={dir ?? "neutral"} className="text-lg font-semibold" />
+      <PriceText value={tk?.last} decimals={decimals} tone={dir ?? "neutral"} flash={false} arrow className="text-lg font-semibold" />
       <Stat label={t("pcTrade.markPrice")}>{formatPrice(mark?.mark_price, decimals)}</Stat>
       <Stat label={t("pcTrade.indexPrice")}>{formatPrice(mark?.index_price, decimals)}</Stat>
       <FundingCountdown nextFundingTime={mark?.next_funding_time} rate={mark?.funding_rate} layout="stacked" />

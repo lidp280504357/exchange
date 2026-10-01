@@ -69,6 +69,7 @@ export * from "./trading/TpSlDialog";
 // chunk); "@exchange/ui/charts/CandleChart" is the eager component.
 export { CandleChart } from "./charts/LazyCandleChart";
 export type { CandleChartProps, Indicator } from "./charts/CandleChart";
+export * from "./charts/ChartCredit";
 export * from "./charts/candles";
 export * from "./charts/DepthChart";
 export * from "./charts/TrendChart";

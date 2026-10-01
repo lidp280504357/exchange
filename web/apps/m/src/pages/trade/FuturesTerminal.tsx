@@ -114,7 +114,7 @@ export default function FuturesTerminal() {
         </div>
       )}
       <div className="flex items-end justify-between gap-3 px-4 pb-2 pt-1">
-        <PriceText value={tk?.last} decimals={pd} change={tk?.change} className="text-2xl font-semibold" />
+        <PriceText value={tk?.last} decimals={pd} change={tk?.change} flash={false} arrow className="text-2xl font-semibold" />
         <div className="flex flex-col items-end gap-0.5 text-xs">
           <span className="text-fg-3">
             {t("mTrade.markPrice")} <span className="tabular-nums text-fg-1">{formatPrice(mark?.mark_price, pd)}</span>

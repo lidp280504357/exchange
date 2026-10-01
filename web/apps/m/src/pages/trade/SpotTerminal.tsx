@@ -100,7 +100,7 @@ export default function SpotTerminal() {
   return (
     <div className="pb-20">
       <div className="flex items-end justify-between px-4 pb-2 pt-1">
-        <PriceText value={tk?.last} decimals={pair.price_decimals} change={tk?.change} className="text-2xl font-semibold" />
+        <PriceText value={tk?.last} decimals={pair.price_decimals} change={tk?.change} flash={false} arrow className="text-2xl font-semibold" />
         <span className="text-xs text-fg-3">{pair.base_name}</span>
       </div>
       <SwipeTabs
