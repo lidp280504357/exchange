@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CandleData } from "../ws/types";
 import { flatten, mergeLive } from "./candles";
-import { bookSteps } from "./pairs";
+import { bookSteps, defaultBookStep } from "./pairs";
 
 const c = (t: string, close: string): CandleData => ({
   open_time: t, open: "1", high: "2", low: "0.5", close, volume: "1", quote_volume: "1", trade_count: 1, closed: false,
@@ -28,5 +28,22 @@ describe("bookSteps", () => {
     expect(bookSteps("0.01")).toEqual(["0.01", "0.1", "1", "10"]);
     expect(bookSteps("0.00001", 3)).toEqual(["0.00001", "0.0001", "0.001"]);
     expect(bookSteps("1")).toEqual(["1", "10", "100", "1000"]);
+  });
+});
+
+describe("defaultBookStep", () => {
+  const usdt = bookSteps("0.01");
+  it("opens at the finest step of a 100,000th of the price or more", () => {
+    expect(defaultBookStep(usdt, "83950.12")).toBe("1");
+    expect(defaultBookStep(usdt, "2704.36")).toBe("0.1");
+    expect(defaultBookStep(usdt, "770.94")).toBe("0.01");
+    expect(defaultBookStep(bookSteps("0.00001"), "0.1234")).toBe("0.00001");
+  });
+
+  it("keeps to the steps on offer", () => {
+    expect(defaultBookStep(usdt, "5000000")).toBe("10");
+    expect(defaultBookStep(usdt, null)).toBe("0.01");
+    expect(defaultBookStep(usdt, "0")).toBe("0.01");
+    expect(defaultBookStep([], "100")).toBe("");
   });
 });

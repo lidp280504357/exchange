@@ -62,10 +62,13 @@ export class OrderBook {
    * view returns the best `depth` levels of each side, merged into steps of
    * `step` (a multiple of the tick, e.g. "0.1"; "" keeps the raw prices):
    * bids round down, asks up, so a level never looks better than it is.
+   * A level smaller than `minQty` (what the page can show, displayUnit)
+   * is folded into the next one away from the spread rather than shown as
+   * 0.0000; one at the far end is left out.
    */
-  view(depth: number, step = ""): BookView {
-    const bids = aggregate(this.bids, depth, step, "down");
-    const asks = aggregate(this.asks, depth, step, "up");
+  view(depth: number, step = "", minQty = ""): BookView {
+    const bids = aggregate(this.bids, depth, step, "down", minQty);
+    const asks = aggregate(this.asks, depth, step, "up", minQty);
     const lastBid = bids[bids.length - 1]?.total ?? "0";
     const lastAsk = asks[asks.length - 1]?.total ?? "0";
     const best = { bid: this.bestBid, ask: this.bestAsk };
@@ -95,10 +98,11 @@ function apply(side: Level[], level: Level, dir: 1 | -1): void {
   else side.splice(lo, 0, [price, qty]);
 }
 
-function aggregate(side: Level[], depth: number, step: string, mode: "down" | "up"): BookLevel[] {
+function aggregate(side: Level[], depth: number, step: string, mode: "down" | "up", minQty: string): BookLevel[] {
   const out: BookLevel[] = [];
   let total = "0";
   const places = step ? decimalsOf(step) : -1;
+  const dust = (l: BookLevel | undefined) => l !== undefined && minQty !== "" && cmp(l.quantity, minQty) < 0;
   for (const [price, qty] of side) {
     const p = step ? fixed(quantize(price, step, mode), places) : price;
     const lastLevel = out[out.length - 1];
@@ -108,11 +112,19 @@ function aggregate(side: Level[], depth: number, step: string, mode: "down" | "u
       lastLevel.total = total;
       continue;
     }
+    // A new price closes the level before it: dust goes into this one.
+    const carry = dust(lastLevel) ? out.pop()!.quantity : "0";
     if (out.length === depth) break;
     total = add(total, qty);
-    out.push({ price: p, quantity: qty, total });
+    out.push({ price: p, quantity: add(carry, qty), total });
   }
+  if (dust(out[out.length - 1])) out.pop();
   return out;
+}
+
+/** displayUnit is the smallest amount shown at `decimals` places: 4 → "0.0001", 0 → "1". */
+export function displayUnit(decimals: number): string {
+  return decimals > 0 ? `0.${"0".repeat(decimals - 1)}1` : "1";
 }
 
 // fixed pads a quantized price to the step's decimals ("63210" at 0.1 →

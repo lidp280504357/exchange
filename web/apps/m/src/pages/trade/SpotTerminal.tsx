@@ -1,5 +1,5 @@
 import {
-  bookSteps, channels, errorText, formatPercent, routes, useOrderBook, usePair, useSyncing, useTerminalPrefs, useTicker, useTickerSeed, useTrades,
+  channels, displayUnit, errorText, formatPercent, routes, useBookStep, useOrderBook, usePair, useSyncing, useTerminalPrefs, useTicker, useTickerSeed, useTrades,
   useTradesSeed, useCandles, type CandleInterval,
 } from "@exchange/core";
 import { useFavorites } from "@exchange/core/markets/favorites";
@@ -16,6 +16,8 @@ import { SwipeTabs } from "./parts/SwipeTabs";
 
 const INTERVALS: CandleInterval[] = ["1m", "15m", "1h", "4h", "1d"];
 const LEVELS = 12;
+/** The book redraws at most this often (ms): ten updates a second is more than an eye follows. */
+const BOOK_EVERY = 250;
 
 /**
  * The spot terminal in portrait (design §7.2): the pair switcher and price
@@ -184,12 +186,10 @@ function BookTab(props: {
   symbol: string; tickSize: string; priceDecimals: number; qtyDecimals: number; base: string; quote: string;
   onPick: (price: string, quantity?: string) => void;
 }) {
-  const step = useTerminalPrefs((s) => s.bookStep[props.symbol] ?? "");
-  const setStep = useTerminalPrefs((s) => s.setStep);
-  const view = useOrderBook(props.symbol, LEVELS, step);
-  const syncing = useSyncing(channels.depth(props.symbol));
   const tk = useTicker(props.symbol);
-  const steps = bookSteps(props.tickSize);
+  const { steps, step, setStep } = useBookStep(props.symbol, props.tickSize, tk?.last);
+  const view = useOrderBook(props.symbol, LEVELS, step, { minQty: displayUnit(props.qtyDecimals), every: BOOK_EVERY });
+  const syncing = useSyncing(channels.depth(props.symbol));
   return (
     <OrderBook
       view={view}
@@ -198,8 +198,8 @@ function BookTab(props: {
       levels={LEVELS}
       lastPrice={tk?.last}
       steps={steps}
-      step={step || steps[0]}
-      onStepChange={(s) => setStep(props.symbol, s === steps[0] ? "" : s)}
+      step={step}
+      onStepChange={setStep}
       onPriceClick={props.onPick}
       syncing={syncing}
       loading={view.asks.length === 0 && view.bids.length === 0 && !tk}

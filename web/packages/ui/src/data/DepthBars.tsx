@@ -23,8 +23,9 @@ export function depthRatio(value: string | number | undefined, max: string | num
 
 /**
  * DepthBars is the depth bar behind an order book row: an absolutely
- * placed span scaled on X (transform only, 200 ms), green for bids and red
- * for asks. Put it in a relative parent.
+ * placed span scaled on X, green for bids and red for asks. Put it in a
+ * relative parent. It does not ease: the depth changes ten times a second,
+ * and bars always sliding read as flicker.
  */
 export function DepthBars({ value, max, ratio, side, align = "right", className }: DepthBarsProps) {
   const r = ratio ?? depthRatio(value, max);
@@ -32,7 +33,7 @@ export function DepthBars({ value, max, ratio, side, align = "right", className 
     <span
       aria-hidden
       className={cn(
-        "pointer-events-none absolute inset-y-0 w-full transition-transform duration-200 ease-out will-change-transform",
+        "pointer-events-none absolute inset-y-0 w-full",
         align === "right" ? "right-0 origin-right" : "left-0 origin-left",
         side === "buy" ? "bg-up/15" : "bg-down/15",
         className,

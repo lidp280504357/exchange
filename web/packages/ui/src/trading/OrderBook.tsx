@@ -61,11 +61,11 @@ type RowProps = {
   onPick: Pick;
 };
 
-// One level. Memoized with primitive props: a frame re-renders only the
-// rows whose numbers changed. A new price mounts a new row (key = price),
-// which fades in, and the depth bar eases to its new length. Quantities do
-// not flash: the book moves ten times a second, and forty rows flashing at
-// that rate is noise.
+// One level. Memoized with primitive props: a render updates only the rows
+// whose numbers changed. Rows are slots keyed by their rank from the
+// spread, so a price coming or going rewrites text in place instead of
+// mounting rows; nothing fades, flashes or slides: the book moves ten
+// times a second, and motion at that rate reads as flicker.
 const BookRow = memo(function BookRow({ side, price, quantity, total, ratio, priceDecimals, qtyDecimals, height, focusable, onPick }: RowProps) {
   return (
     <button
@@ -74,7 +74,7 @@ const BookRow = memo(function BookRow({ side, price, quantity, total, ratio, pri
       tabIndex={focusable ? 0 : -1}
       onClick={(e) => onPick(price, total, e.shiftKey)}
       style={{ height }}
-      className="relative grid w-full shrink-0 animate-fade-in grid-cols-[1fr_1fr_1fr] items-center px-3 text-xs tabular-nums hover:bg-bg-2 focus-visible:bg-bg-2 focus-visible:outline-none"
+      className="relative grid w-full shrink-0 grid-cols-[1fr_1fr_1fr] items-center px-3 text-xs tabular-nums hover:bg-bg-2 focus-visible:bg-bg-2 focus-visible:outline-none"
     >
       <DepthBars ratio={ratio} side={side === "bid" ? "buy" : "sell"} />
       <span className={cn("relative text-left", side === "bid" ? "text-up" : "text-down")}>{formatPrice(price, priceDecimals)}</span>
@@ -102,8 +102,8 @@ function ModeIcon({ mode }: { mode: BookMode }) {
 /**
  * OrderBook renders a BookView: asks on top with the lowest ask next to the
  * middle row (last price and spread), bids below, each row with a depth
- * bar. Built for 20 levels a side at 60 fps: memoized rows, fixed section
- * heights (no layout shift), bars by CSS. Arrow keys move
+ * bar. Built for 20 levels a side: memoized rows in fixed slots, fixed
+ * section heights (no layout shift), no motion. Arrow keys move
  * between rows; Enter fills the price, Shift+Enter or Shift+click also the
  * cumulative quantity.
  */
@@ -151,7 +151,8 @@ export function OrderBook({
           ))
         : list.map((l, i) => (
             <BookRow
-              key={l.price}
+              // Slots by rank from the spread (asks are drawn best last).
+              key={side === "ask" ? list.length - 1 - i : i}
               side={side}
               price={l.price}
               quantity={l.quantity}

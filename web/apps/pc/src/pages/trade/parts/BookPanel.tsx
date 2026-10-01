@@ -1,4 +1,4 @@
-import { bookSteps, channels, useOrderBook, useSyncing, useTerminalPrefs, useTicker, useTrades, useTradesSeed } from "@exchange/core";
+import { channels, displayUnit, useBookStep, useOrderBook, useSyncing, useTerminalPrefs, useTicker, useTrades, useTradesSeed } from "@exchange/core";
 import { OrderBook, Tabs, TabsPanel, TradeTape, cn } from "@exchange/ui";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -6,6 +6,8 @@ import { useDirection } from "./useDirection";
 import { useElementHeight } from "./useElementHeight";
 
 const ROW = 20;
+/** The book redraws at most this often (ms): ten updates a second is more than an eye follows. */
+const BOOK_EVERY = 250;
 // Tabs, the book's toolbar, its column header and the middle row.
 const CHROME = 36 + 36 + 24 + 36;
 
@@ -26,24 +28,25 @@ export type BookPanelProps = {
 /**
  * BookPanel: the order book and the latest trades in tabs (design §6.2),
  * sized to the panel's height (up to 20 levels a side), with the view and
- * the step kept per pair.
+ * the step kept per pair (by default one that suits the price: core
+ * defaultBookStep). The book redraws at most four times a second and folds
+ * levels too small to show into the next one.
  */
 export function BookPanel({ symbol, base, quote, tickSize, priceDecimals, qtyDecimals, markPrice, onPick, className }: BookPanelProps) {
   const { t } = useTranslation();
   const [tab, setTab] = useState("book");
   const [ref, height] = useElementHeight<HTMLDivElement>();
   const mode = useTerminalPrefs((s) => s.bookMode);
-  const step = useTerminalPrefs((s) => s.bookStep[symbol] ?? "");
   const prefs = useTerminalPrefs.getState;
+  const tk = useTicker(symbol);
+  const { steps, step, setStep } = useBookStep(symbol, tickSize, tk?.last);
   const levels = Math.max(5, Math.min(20, Math.floor((height - CHROME) / 2 / ROW) || 12));
   const depth = mode === "both" ? levels : levels * 2;
-  const view = useOrderBook(symbol, depth, step);
+  const view = useOrderBook(symbol, depth, step, { minQty: displayUnit(qtyDecimals), every: BOOK_EVERY });
   const syncing = useSyncing(channels.depth(symbol));
   useTradesSeed(symbol);
   const trades = useTrades(symbol);
-  const tk = useTicker(symbol);
   const dir = useDirection(tk?.last);
-  const steps = bookSteps(tickSize);
   const loading = view.asks.length === 0 && view.bids.length === 0 && !tk;
 
   return (
@@ -71,8 +74,8 @@ export function BookPanel({ symbol, base, quote, tickSize, priceDecimals, qtyDec
             lastDirection={dir}
             markPrice={markPrice}
             steps={steps}
-            step={step || steps[0]}
-            onStepChange={(s) => prefs().setStep(symbol, s === steps[0] ? "" : s)}
+            step={step}
+            onStepChange={setStep}
             onPriceClick={onPick}
             syncing={syncing}
             loading={loading}

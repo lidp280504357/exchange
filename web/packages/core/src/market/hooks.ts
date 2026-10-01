@@ -63,24 +63,68 @@ export function useSyncing(channel: string): boolean {
   );
 }
 
+export type OrderBookOptions = {
+  /** Levels below this are folded away from the spread (OrderBook.view; displayUnit of the quantity decimals). */
+  minQty?: string;
+  /** Re-render at most once per this many ms (a book a person reads; charts take every frame). */
+  every?: number;
+};
+
 /**
  * useOrderBook follows a symbol's depth and returns its best `depth`
  * levels per side, merged into steps of `step`; re-renders at most once
- * per frame.
+ * per frame, or per `every` ms.
  */
-export function useOrderBook(symbol: string, depth: number, step = ""): BookView {
+export function useOrderBook(symbol: string, depth: number, step = "", { minQty = "", every = 0 }: OrderBookOptions = {}): BookView {
   const market = useMarket();
   useEffect(() => (symbol ? market.followDepth(symbol) : undefined), [market, symbol]);
   const key = `depth:${symbol}`;
-  const subscribe = useCallback((fn: () => void) => market.subscribe(key, fn), [market, key]);
+  const subscribe = useCallback(
+    (fn: () => void) => {
+      if (every <= 0) return market.subscribe(key, fn);
+      const t = throttle(fn, every);
+      const off = market.subscribe(key, t.call);
+      return () => {
+        off();
+        t.cancel();
+      };
+    },
+    [market, key, every],
+  );
   const version = useSyncExternalStore(
     subscribe,
     () => market.version(key),
     () => 0,
   );
   // version changes with every applied message; the view is cut only when
-  // a frame's notification re-renders.
-  return useMemo(() => market.book(symbol).view(depth, step), [market, symbol, depth, step, version]);
+  // a notification re-renders.
+  return useMemo(() => market.book(symbol).view(depth, step, minQty), [market, symbol, depth, step, minQty, version]);
+}
+
+// throttle calls fn at most once per ms: at once after a quiet spell, else
+// once at the end of the spell, so the last change always shows.
+function throttle(fn: () => void, ms: number): { call: () => void; cancel: () => void } {
+  let last = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return {
+    call: () => {
+      const wait = last + ms - Date.now();
+      if (wait <= 0) {
+        last = Date.now();
+        fn();
+      } else if (!timer) {
+        timer = setTimeout(() => {
+          timer = null;
+          last = Date.now();
+          fn();
+        }, wait);
+      }
+    },
+    cancel: () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+    },
+  };
 }
 
 /** useTrades follows a symbol's public trades, newest first. */

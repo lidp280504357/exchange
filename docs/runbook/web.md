@@ -146,7 +146,11 @@ nginx（`deploy/compose/nginx/conf.d/astras.vip.conf` 与 `snippets/site-{pc,m,a
   - `index.html` 按打开的地址预加载该页的 chunk 及其依赖（构建插件 `web/scripts/route-preload.mjs`；落地页在两个用户站的 `vite.config.ts` 里登记），不必等入口执行完再去请求。
   - 列表里跳动的价格用 `FlashLayer` 闪动：闪动层在文字后面重挂，文字节点不变。不要用 `key` 重挂文字：每次重挂都是一次新的"最大绘制"，会把 LCP 拖到最后一次跳价。
   - 闪动只给列表用（10% 底色、600 ms）。头部大号价格用 `PriceText` 的 `flash={false} arrow`：文字色 150 ms 过渡，旁边的箭头指示最近一次涨跌，箭头位置一直占着，不会挤动旁边的内容。
-  - 盘口数量不闪：深度每秒推 10 次，几十行同时闪是噪声。只保留新档位淡入与深度条过渡。
+  - 盘口没有动效。深度每秒推 10 次，任何淡入、滑动、闪动在这个频率下都是闪烁：
+    - `OrderBook` 的行是按与价差的名次作 key 的固定槽位，档位进出只改文字；深度条不过渡。
+    - `useOrderBook` 的 `every: 250` 限制重画频率，`minQty: displayUnit(数量位数)` 把会显示成 0.0000 的档位并入外侧一档。
+    - 默认聚合步长由 core 的 `useBookStep` 按价格取（`defaultBookStep`），用户的选择按交易对存在本机。
+    - 改动后用无头 Chrome 数 20 秒内 `[data-book-row]` 的挂载次数，目标为 0。预览标签页在后台，会压住推送，测不准。
   - 横向滚动的轮播（公告条等）里不要放视觉隐藏的文字（`sr-only`）。它是绝对定位的，在滚出视野的那一页里不受滚动容器裁剪，手机上会把布局视口撑宽：`position: fixed` 的 tab 栏跟着变宽，只露出前几个，`html` 的 `overflow-x: clip` 挡不住。要补给读屏的文字放进链接的 `aria-label`。排查方法：看 `innerWidth` 是否大于屏宽，再逐个隐藏区块，看哪个让它恢复。
   - 手机站「我的 → 关于 Astras」显示的版本号来自构建时的 `VITE_APP_VERSION`（部署脚本传入提交号），本机为 `dev`。
   - K 线图关掉了 TradingView 角标（`attributionLogo: false`）。图表库许可要求的归属与链接由 `ChartCredit` 显示在 PC 页脚与手机帮助页底部，换图表库或删这两处之前要另找位置放。

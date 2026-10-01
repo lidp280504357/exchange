@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { marketApi, unwrap } from "../api/client";
 import type { components } from "../api/gen/market";
-import { mul, normalize } from "../format/decimal";
+import { cmp, isDecimal, mul, normalize, sign } from "../format/decimal";
 import { qk } from "../query/keys";
 
 // Reference data every trading page needs: the pairs with their rules and
@@ -59,4 +59,16 @@ export function bookSteps(tickSize: string, count = 4): string[] {
   const out = [normalize(tickSize)];
   for (let i = 1; i < count; i++) out.push(normalize(mul(out[i - 1]!, "10")));
   return out;
+}
+
+/**
+ * defaultBookStep is the step a book opens at before the user picks one:
+ * the finest step of at least a 100,000th of the price (BTC at 84,000 → 1,
+ * ETH at 2,700 → 0.1). At the tick, a reference book's top levels are dust
+ * that comes and goes ten times a second. Without a price, the tick.
+ */
+export function defaultBookStep(steps: readonly string[], price: string | null | undefined): string {
+  if (!price || !isDecimal(price) || sign(price) <= 0) return steps[0] ?? "";
+  const want = mul(price, "0.00001");
+  return steps.find((s) => cmp(s, want) >= 0) ?? steps[steps.length - 1] ?? "";
 }
