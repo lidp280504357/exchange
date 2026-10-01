@@ -1,4 +1,4 @@
-import { DEFAULT_CONTRACT, DEFAULT_SYMBOL, routes, usePrivateSync } from "@exchange/core";
+import { DEFAULT_CONTRACT, DEFAULT_SYMBOL, routes, useAssetProfiles, usePrivateSync } from "@exchange/core";
 import type { QueryClient } from "@tanstack/react-query";
 import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router";
@@ -31,6 +31,7 @@ function route(r: PageRoute) {
 
 export function App({ queryClient }: { queryClient: QueryClient }) {
   usePrivateSync(queryClient);
+  useAssetProfiles();
   return (
     <Suspense fallback={<PageSkeleton />}>
       <Routes>

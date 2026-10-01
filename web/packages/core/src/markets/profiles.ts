@@ -74,6 +74,16 @@ export function rememberAssets(assets: readonly AssetProfileFields[]): void {
   merge(updates);
 }
 
+/**
+ * useCoinLogo is an asset's logo URL from the API: the code as given
+ * ("1000BONK") first, then its base ("BONK"). Each caller selects only its
+ * own asset's logo, so an update re-renders only the icons whose logo
+ * changed (a market table has 90 of them).
+ */
+export function useCoinLogo(code: string, base?: string): string | undefined {
+  return useApiProfiles((s) => s.profiles[code]?.logo ?? (base && base !== code ? s.profiles[base]?.logo : undefined));
+}
+
 /** apiProfile returns what the API says of an asset, if anything. */
 export function apiProfile(code: string): ApiProfile | undefined {
   return useApiProfiles.getState().profiles[code];

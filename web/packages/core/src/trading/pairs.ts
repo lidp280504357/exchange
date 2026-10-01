@@ -54,6 +54,17 @@ export function useAssets() {
   });
 }
 
+/**
+ * useAssetProfiles keeps the asset profiles (display names, introductions,
+ * logos) of ../markets/profiles filled on every page: the sites call it
+ * once at their root, so a coin icon shows the uploaded logo even on a page
+ * that asks for neither the pairs nor the assets.
+ */
+export function useAssetProfiles(): void {
+  usePairs();
+  useAssets();
+}
+
 /** assetDecimals is an asset's precision, or the fallback while unknown. */
 export function assetDecimals(assets: AssetInfo[] | undefined, asset: string, fallback = 8): number {
   return assets?.find((a) => a.asset_code === asset)?.decimals ?? fallback;

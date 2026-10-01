@@ -1,4 +1,4 @@
-import { coinProfile } from "@exchange/core";
+import { coinProfile, useCoinLogo } from "@exchange/core";
 import { Avatar as RAvatar } from "radix-ui";
 import { cn } from "../lib/cn";
 import { identityClass } from "../lib/identity";
@@ -21,12 +21,15 @@ export function coinBase(symbol: string): string {
 }
 
 /**
- * CoinIcon is a coin's round icon: its logo when given, otherwise its first
+ * CoinIcon is a coin's round icon: its logo (the one given, else the one
+ * operators uploaded, which the market queries bring), otherwise its first
  * letter on a colour that is stable per symbol (the coin profile's palette
  * name when it has one).
  */
 export function CoinIcon({ symbol, size = 24, src, label, className }: CoinIconProps) {
   const base = coinBase(symbol.toUpperCase());
+  const uploaded = useCoinLogo(symbol.toUpperCase(), base);
+  const logo = src ?? uploaded;
   const letter = base.charAt(0) || "?";
   const color = identityClass(base, coinProfile(base)?.color);
   return (
@@ -37,9 +40,9 @@ export function CoinIcon({ symbol, size = 24, src, label, className }: CoinIconP
       className={cn("relative inline-flex shrink-0 select-none items-center justify-center overflow-hidden rounded-full align-middle", className)}
       style={{ width: size, height: size }}
     >
-      {src && <RAvatar.Image src={src} alt="" className="size-full object-cover" />}
+      {logo && <RAvatar.Image src={logo} alt="" className="size-full object-cover" />}
       <RAvatar.Fallback
-        delayMs={src ? 250 : undefined}
+        delayMs={logo ? 250 : undefined}
         className={cn("flex size-full items-center justify-center font-semibold leading-none text-white", color)}
         style={{ fontSize: Math.max(9, Math.round(size * 0.46)) }}
       >

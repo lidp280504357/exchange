@@ -489,7 +489,7 @@ expect 200 - "the user steps up by email"
 STEP=$(jq -r .step_up_token <<<"$BODY")
 otp REBIND_IDENTITY "$NEW_EMAIL" "$DEVICE" "$UACCESS"
 call POST /v1/auth/identity/rebind "{\"otp_ticket\":\"$TICKET\",\"device_id\":\"$DEVICE\"}" "${UAUTH[@]}" -H "X-Step-Up-Token: $STEP"
-expect 200 - "and asks to move the only email"
+expect 202 - "and asks to move the only email"
 check '.status == "PENDING_REVIEW"' "a single identity waits for review"
 as AUDITOR GET "/admin/v1/identity-requests?user_id=$USER_ID" ""
 expect 200 - "the request is listed"
