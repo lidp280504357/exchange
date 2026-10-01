@@ -1,7 +1,7 @@
 {
   "ci": {
     "collect": {
-      "url": ["https://m.astras.vip/", "https://m.astras.vip/markets", "https://m.astras.vip/trade/BTC-USDT"],
+      "url": ["https://m.astras.vip/", "https://m.astras.vip/markets", "https://m.astras.vip/trade/BTC-USDT", "https://m.astras.vip/me"],
       "numberOfRuns": 1,
       "settings": { "formFactor": "mobile", "screenEmulation": { "mobile": true }, "throttlingMethod": "simulate" }
     },
