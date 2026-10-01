@@ -124,18 +124,30 @@ func (h *Handler) adminWithdrawals(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "next_cursor": next})
 }
 
+// adminReview records a reviewer's decision; sole_max_usdt (the admin
+// console's single-person mode) lets an approval alone complete a
+// withdrawal worth at most that much.
 func (h *Handler) adminReview(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Approve  bool   `json:"approve"`
 		Reviewer string `json:"reviewer"`
 		Reason   string `json:"reason"`
+		SoleMax  string `json:"sole_max_usdt"`
 	}
 	if err := httpx.DecodeJSON(w, r, &body); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
+	var soleMax decimal.Decimal
+	if body.SoleMax != "" {
+		var err error
+		if soleMax, err = decimal.NewFromString(body.SoleMax); err != nil {
+			httpx.WriteError(w, r, apperr.Invalid("sole_max_usdt must be a decimal"))
+			return
+		}
+	}
 	wd, err := application.ReviewWithdrawal(r.Context(), h.Svc.Store, application.Review{
-		ID: chi.URLParam(r, "id"), Reviewer: body.Reviewer, Reason: body.Reason, Approve: body.Approve,
+		ID: chi.URLParam(r, "id"), Reviewer: body.Reviewer, Reason: body.Reason, Approve: body.Approve, SoleMax: soleMax,
 	}, h.Svc.Now())
 	if err != nil {
 		httpx.WriteError(w, r, err)

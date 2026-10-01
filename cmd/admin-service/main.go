@@ -1,10 +1,13 @@
 // Command admin-service runs the admin console's API under /admin/v1
 // (requirements §5.12): administrators sign in with a password and an
 // authenticator code, act within their roles on accounts, orders,
-// withdrawals, instruments, perpetual contracts and feature flags, approve
-// each other's ledger adjustments and insurance fund contributions and
-// read the audit trail and the reports. nginx routes /admin/ to it and
-// to the console's static files (web/admin); the user gateway never does.
+// withdrawals, instruments, perpetual contracts and feature flags, carry
+// out fund operations (ledger adjustments and insurance fund
+// contributions: approved by a second administrator, or alone within
+// limits while the flag admin.two_person_approval is off) and read the
+// audit trail and the reports. nginx routes admin.astras.vip's /admin/v1/
+// to it and serves the console's static files (web/apps/admin); the user
+// gateway never does.
 package main
 
 import (
@@ -189,6 +192,7 @@ func setup(ctx context.Context, a *app.App) error {
 		Reports:     backends.Reports{Conn: ch},
 		Records:     backends.Records{Conn: ch},
 		Market:      backends.Market{REST: rest, Base: cfg.MarketDataURL},
+		Prices:      backends.Market{REST: rest, Base: cfg.MarketDataURL},
 		HouseBook: application.HouseDeps{
 			User: cfg.HouseUser, Prices: backends.Market{REST: rest, Base: cfg.MarketDataURL}, Trades: backends.Reports{Conn: ch},
 			Positions: backends.Derivatives{REST: rest, Base: cfg.DerivativesURL},

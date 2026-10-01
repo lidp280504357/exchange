@@ -1,14 +1,14 @@
 // Package application runs the admin console (requirements §5.12):
 // sign-in with a password and an authenticator code (the code can be
 // switched off with the flag admin.login_without_totp), role checks on every
-// action, two-person approval of ledger adjustments and insurance fund
-// contributions, and an audit event for every change the acting service
-// does not audit itself.
+// action, fund operations (ledger adjustments and insurance fund
+// contributions) approved by a second administrator or, in single-person
+// mode, carried out alone within limits, and an audit event for every
+// change the acting service does not audit itself.
 package application
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -23,7 +23,6 @@ import (
 	"github.com/lidp280504357/exchange/internal/admin/ports"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/flags"
-	"github.com/lidp280504357/exchange/internal/platform/pagecursor"
 	"github.com/lidp280504357/exchange/internal/platform/password"
 	"github.com/lidp280504357/exchange/internal/platform/secretbox"
 	"github.com/lidp280504357/exchange/internal/platform/totp"
@@ -51,6 +50,9 @@ type Service struct {
 	// Market reads market-data-service's reference feed.
 	Records ports.Records
 	Market  ports.Market
+	// Prices values fund operations in USDT for the single-person limits;
+	// nil values only USDT.
+	Prices ports.MarketPrices
 	// HouseBook reads HOUSE's book; Probe the services' readiness; Reconciler
 	// the ledger's reconciliation runs.
 	HouseBook  HouseDeps
@@ -198,6 +200,18 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Principal, er
 	return Principal{Admin: *a, Session: hash}, nil
 }
 
+// SignedIn reports whether a principal's session still holds, without
+// counting as a request: an open stream of events keeps no session alive.
+func (s *Service) SignedIn(ctx context.Context, p Principal) bool {
+	r := s.Store.Read()
+	sess, err := r.Sessions().Get(ctx, p.Session)
+	if err != nil || sess == nil || !sess.Live(s.Now()) {
+		return false
+	}
+	a, err := r.Admins().Get(ctx, sess.AdminID)
+	return err == nil && a != nil && a.Status == domain.StatusActive
+}
+
 // Logout ends the session.
 func (s *Service) Logout(ctx context.Context, p Principal) error {
 	return s.Store.Tx(ctx, func(r ports.Repos) error {
@@ -309,7 +323,9 @@ func pageLimit(n int) int {
 }
 
 // ReviewWithdrawal approves or rejects a withdrawal in review; the wallet
-// records it with this administrator as the reviewer and audits it.
+// records it with this administrator as the reviewer and audits it. In
+// single-person mode one approval completes a withdrawal worth at most
+// the settings' WithdrawalMax, however many reviewers it needs.
 func (s *Service) ReviewWithdrawal(ctx context.Context, p Principal, id string, approve bool, reason string) ([]byte, error) {
 	if err := p.require(domain.PermWithdrawalsEdit); err != nil {
 		return nil, err
@@ -317,7 +333,15 @@ func (s *Service) ReviewWithdrawal(ctx context.Context, p Principal, id string, 
 	if err := needReason(reason); err != nil {
 		return nil, err
 	}
-	return s.Wallet.Review(ctx, id, approve, p.Admin.Email, reason)
+	var soleMax decimal.Decimal
+	if approve && !s.TwoPerson() {
+		set, err := s.settings(ctx, s.Store.Read())
+		if err != nil {
+			return nil, err
+		}
+		soleMax = set.WithdrawalMax
+	}
+	return s.Wallet.Review(ctx, id, approve, p.Admin.Email, reason, soleMax)
 }
 
 // Custody describes the custody wallet (ADR-0011).
@@ -394,10 +418,17 @@ func (s *Service) FlagList(ctx context.Context, p Principal) ([]ports.Flag, erro
 	return s.Flags.List(ctx)
 }
 
-// SwitchFlag turns a flag on or off; the change is audited with it.
+// SwitchFlag turns a flag on or off; the change is audited with it. The
+// console's own flags (admin.*: sign-in and two-person approval) take the
+// right to change its settings too.
 func (s *Service) SwitchFlag(ctx context.Context, p Principal, key string, enabled bool, reason string) (ports.Flag, error) {
 	if err := p.require(domain.PermFlagsEdit); err != nil {
 		return ports.Flag{}, err
+	}
+	if strings.HasPrefix(key, "admin.") {
+		if err := p.require(domain.PermSettingsEdit); err != nil {
+			return ports.Flag{}, err
+		}
 	}
 	if err := needReason(reason); err != nil {
 		return ports.Flag{}, err
@@ -411,152 +442,6 @@ type Adjustment struct {
 	Asset  string
 	Amount decimal.Decimal
 	Reason string
-}
-
-// RequestAdjustment records a manual adjustment for a second
-// administrator to approve.
-func (s *Service) RequestAdjustment(ctx context.Context, p Principal, in Adjustment) (domain.Approval, error) {
-	if err := p.require(domain.PermAdjustRequest); err != nil {
-		return domain.Approval{}, err
-	}
-	switch {
-	case needReason(in.Reason) != nil:
-		return domain.Approval{}, needReason(in.Reason)
-	case in.Amount.IsZero():
-		return domain.Approval{}, apperr.Invalid("the amount must not be zero")
-	case strings.TrimSpace(in.Asset) == "":
-		return domain.Approval{}, apperr.Invalid("the asset is required")
-	}
-	if _, err := uuid.Parse(in.UserID); err != nil {
-		return domain.Approval{}, apperr.Invalid("user_id must be a UUID")
-	}
-	a := domain.Approval{
-		ID: uuid.Must(uuid.NewV7()).String(), Kind: domain.KindLedgerAdjustment, Reason: strings.TrimSpace(in.Reason),
-		Payload: map[string]string{"user_id": in.UserID, "asset": strings.ToUpper(in.Asset), "amount": in.Amount.String()},
-		Status:  domain.ApprovalPending, RequestedBy: p.Admin.ID, CreatedAt: s.Now(),
-	}
-	err := s.Store.Tx(ctx, func(r ports.Repos) error {
-		if err := r.Approvals().Insert(ctx, a); err != nil {
-			return err
-		}
-		return r.Audit(ctx, &auditv1.AdminActionPerformed{
-			Target: "user:" + in.UserID, Action: "admin.ledger.adjustment_requested", Actor: p.Admin.Email, Reason: a.Reason,
-			Details: fmt.Sprintf(`{"approval_id":%q,"asset":%q,"amount":%q}`, a.ID, a.Payload["asset"], a.Payload["amount"]),
-		}, p.Admin.Email)
-	})
-	return a, err
-}
-
-// Approvals returns a page of two-person requests in a status ("": all),
-// newest first, and the cursor of the next ("" on the last).
-func (s *Service) Approvals(ctx context.Context, p Principal, status, cursor string, limit int) ([]domain.Approval, string, error) {
-	if err := p.require(domain.PermAdjustRequest); err != nil {
-		if p.require(domain.PermAuditRead) != nil {
-			return nil, "", err
-		}
-	}
-	at, id, err := pagecursor.Decode(cursor)
-	if err != nil {
-		return nil, "", apperr.Invalid("bad cursor")
-	}
-	limit = pageLimit(limit)
-	list, err := s.Store.Read().Approvals().List(ctx, status, at, id, limit+1)
-	if err != nil || len(list) <= limit {
-		return list, "", err
-	}
-	list = list[:limit]
-	last := list[limit-1]
-	return list, pagecursor.Encode(last.CreatedAt, last.ID), nil
-}
-
-// approvalActions names the audit actions of approving and rejecting each
-// kind of request.
-var approvalActions = map[string][2]string{
-	domain.KindLedgerAdjustment: {"admin.ledger.adjustment_approved", "admin.ledger.adjustment_rejected"},
-	domain.KindInsuranceFund:    {"admin.derivatives.insurance_approved", "admin.derivatives.insurance_rejected"},
-}
-
-// DecideApproval approves (and carries out) or rejects another
-// administrator's request. The request stays locked while the ledger
-// books it, so a second decision waits and then finds it decided.
-func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, approve bool, reason string) (domain.Approval, error) {
-	if err := p.require(domain.PermAdjustApprove); err != nil {
-		return domain.Approval{}, err
-	}
-	if err := needReason(reason); err != nil {
-		return domain.Approval{}, err
-	}
-	if _, err := uuid.Parse(id); err != nil {
-		return domain.Approval{}, apperr.NotFound("no such request")
-	}
-	var a domain.Approval
-	err := s.Store.Tx(ctx, func(r ports.Repos) error {
-		cur, err := r.Approvals().GetForUpdate(ctx, id)
-		if err != nil {
-			return err
-		}
-		if cur == nil {
-			return apperr.NotFound("no such request")
-		}
-		if err := cur.Decide(p.Admin.ID); err != nil {
-			return err
-		}
-		a = *cur
-		a.DecidedBy, a.DecidedAt = p.Admin.ID, s.Now()
-		actions, ok := approvalActions[a.Kind]
-		if !ok {
-			return fmt.Errorf("approval %s: unknown kind %q", a.ID, a.Kind)
-		}
-		action := actions[1]
-		if !approve {
-			a.Status, a.Result = domain.ApprovalRejected, strings.TrimSpace(reason)
-		} else {
-			action = actions[0]
-			if err := s.execute(ctx, &a, p, reason); err != nil {
-				return err
-			}
-		}
-		if err := r.Approvals().Update(ctx, a); err != nil {
-			return err
-		}
-		return r.Audit(ctx, &auditv1.AdminActionPerformed{
-			Target: "approval:" + a.ID, Action: action, Actor: p.Admin.Email, Reason: reason,
-			Details: fmt.Sprintf(`{"status":%q,"result":%q}`, a.Status, a.Result),
-		}, p.Admin.Email)
-	})
-	if err != nil {
-		return domain.Approval{}, err
-	}
-	return a, nil
-}
-
-// execute books an approved adjustment or insurance fund contribution. An
-// error means the outcome is unknown: the request stays pending and the
-// idempotency key makes a second approval safe. A refusal marks the
-// request FAILED.
-func (s *Service) execute(ctx context.Context, a *domain.Approval, p Principal, reason string) error {
-	amount, err := decimal.NewFromString(a.Payload["amount"])
-	if err != nil {
-		return err
-	}
-	key, note := "approval:"+a.ID, a.Reason+" (approved: "+strings.TrimSpace(reason)+")"
-	var journal string
-	switch a.Kind {
-	case domain.KindInsuranceFund:
-		journal, err = s.Ledger.FundInsurance(ctx, key, a.Payload["asset"], amount, p.Admin.Email, note)
-	default:
-		journal, err = s.Ledger.Adjust(ctx, key, a.Payload["user_id"], a.Payload["asset"], amount, p.Admin.Email, note)
-	}
-	if err != nil {
-		var e *apperr.Error
-		if !errors.As(err, &e) || e.Kind == apperr.KindUnavailable || e.Kind == apperr.KindInternal {
-			return err
-		}
-		a.Status, a.Result = domain.ApprovalFailed, e.Code+": "+e.Message
-		return nil
-	}
-	a.Status, a.Result = domain.ApprovalExecuted, "journal "+journal
-	return nil
 }
 
 // DerivativesContracts returns each perpetual contract's status,
@@ -652,36 +537,6 @@ func (s *Service) InsuranceFund(ctx context.Context, p Principal, asset string) 
 		}
 	}
 	return out, nil
-}
-
-// RequestInsuranceFunding records a contribution of simulated funds to the
-// insurance fund for a second administrator to approve.
-func (s *Service) RequestInsuranceFunding(ctx context.Context, p Principal, asset string, amount decimal.Decimal, reason string) (domain.Approval, error) {
-	if err := p.require(domain.PermAdjustRequest); err != nil {
-		return domain.Approval{}, err
-	}
-	if err := needReason(reason); err != nil {
-		return domain.Approval{}, err
-	}
-	if !amount.IsPositive() {
-		return domain.Approval{}, apperr.Invalid("the amount must be positive")
-	}
-	asset = assetOrUSDT(asset)
-	a := domain.Approval{
-		ID: uuid.Must(uuid.NewV7()).String(), Kind: domain.KindInsuranceFund, Reason: strings.TrimSpace(reason),
-		Payload: map[string]string{"asset": asset, "amount": amount.String()},
-		Status:  domain.ApprovalPending, RequestedBy: p.Admin.ID, CreatedAt: s.Now(),
-	}
-	err := s.Store.Tx(ctx, func(r ports.Repos) error {
-		if err := r.Approvals().Insert(ctx, a); err != nil {
-			return err
-		}
-		return r.Audit(ctx, &auditv1.AdminActionPerformed{
-			Target: "insurance:" + asset, Action: "admin.derivatives.insurance_requested", Actor: p.Admin.Email, Reason: a.Reason,
-			Details: fmt.Sprintf(`{"approval_id":%q,"amount":%q}`, a.ID, a.Payload["amount"]),
-		}, p.Admin.Email)
-	})
-	return a, err
 }
 
 // Liquidation step kinds of the read model.

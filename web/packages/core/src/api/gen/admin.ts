@@ -82,6 +82,84 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The console's settings
+         * @description Whether fund operations need a second administrator (the flag
+         *     admin.two_person_approval) and the single-person limits, with the
+         *     caller's single-person total of the last 24 hours. Every
+         *     administrator may read them.
+         */
+        get: operations["getSettings"];
+        /**
+         * Change the console's settings
+         * @description Changes the fields given: the limits (audited as
+         *     admin.settings.changed) and two-person approval (switches the flag
+         *     admin.two_person_approval, audited by the flags; the other
+         *     instances follow within 5 seconds). The daily limit must cover the
+         *     single-operation one. Needs settings.write (ADMIN).
+         */
+        put: operations["updateSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/todo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What waits for the administrator
+         * @description The counts behind the console's badges, as far as the role shows
+         *     them (zero otherwise): withdrawals in review (counted up to 200)
+         *     and fund operations waiting for a decision. A count that cannot be
+         *     read is zero and named in `partial`.
+         */
+        get: operations["getTodo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The counts as they change (Server-Sent Events)
+         * @description An event stream: `todo` with the counts of GET /admin/v1/todo at
+         *     once and whenever they change (checked every 10 seconds),
+         *     `signed_out` when the session ends, and a comment after 20 seconds
+         *     without an event. The stream does not keep the session alive; the
+         *     browser reconnects after 5 seconds when it drops.
+         */
+        get: operations["streamEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/users": {
         parameters: {
             query?: never;
@@ -220,6 +298,34 @@ export interface paths {
          *     change with the administrator as the actor. Needs users.status.
          */
         post: operations["changeUserStatus"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{id}/adjustments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Credit or debit a user's balance
+         * @description A manual adjustment (MANUAL_ADJUSTMENT against the ADJUSTMENT system
+         *     account) of the user's SPOT account: booked at once in
+         *     single-person mode within the limits (EXECUTED with its journal, or
+         *     FAILED with the ledger's refusal such as
+         *     LEDGER_ADJUSTMENT_DISABLED), otherwise PENDING for a second
+         *     administrator with the reason in `escalation`. When the ledger does
+         *     not answer the call fails with COMMON_UNAVAILABLE and the detail
+         *     `approval_id` names the operation, left PENDING for its requester
+         *     to finish (decide). Needs ledger.adjust.request.
+         */
+        post: operations["adjustUserBalance"];
         delete?: never;
         options?: never;
         head?: never;
@@ -390,9 +496,11 @@ export interface paths {
         /**
          * Request a manual adjustment of a user's spot balance
          * @description Creates a PENDING request for another administrator with
-         *     ledger.adjust.approve. A positive amount credits the user's SPOT
-         *     account against the ADJUSTMENT system account, a negative one
-         *     debits it. Needs ledger.adjust.request.
+         *     ledger.adjust.approve (escalation REQUESTED), unless `direct` asks
+         *     to carry it out at once, which works as POST
+         *     /admin/v1/users/{id}/adjustments. A positive amount credits the
+         *     user's SPOT account against the ADJUSTMENT system account, a
+         *     negative one debits it. Needs ledger.adjust.request.
          */
         post: operations["requestAdjustment"];
         delete?: never;
@@ -409,8 +517,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Two-person requests, newest first
-         * @description Needs ledger.adjust.request or audit.read.
+         * Fund operations, newest first
+         * @description Two-person requests and single-person operations. Needs ledger.adjust.request or audit.read.
          */
         get: operations["listApprovals"];
         put?: never;
@@ -431,10 +539,12 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Approve (and book) or reject another administrator's request
-         * @description Fails with ADMIN_SELF_APPROVAL for one's own request and
-         *     ADMIN_APPROVAL_DECIDED once decided. Approving books the
-         *     adjustment with the idempotency key approval:<id>: EXECUTED with
+         * Approve (and book) or reject a pending fund operation
+         * @description Approving one's own request fails with ADMIN_SELF_APPROVAL, except
+         *     a single-person operation whose outcome was unknown (its requester
+         *     finishes it); rejecting one's own request withdraws it. A decided
+         *     one fails with ADMIN_APPROVAL_DECIDED. Approving books the
+         *     operation with the idempotency key approval:<id>: EXECUTED with
          *     the journal, or FAILED when the ledger refuses (for instance
          *     LEDGER_ADJUSTMENT_DISABLED while the flag ledger.manual_adjustment
          *     is off). When the ledger cannot be reached the request stays
@@ -719,11 +829,14 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Request a contribution of simulated funds to the insurance fund
+         * Contribute simulated funds to the insurance fund
          * @description Creates a PENDING INSURANCE_FUND request for another administrator
-         *     with ledger.adjust.approve; approving books it (ledger
-         *     FundInsurance, INSURANCE_CONTRIBUTION from ADJUSTMENT), which needs
-         *     the flag ledger.manual_adjustment. Needs ledger.adjust.request.
+         *     with ledger.adjust.approve, or with `direct` carries it out at once
+         *     when single-person mode and its limits allow (as POST
+         *     /admin/v1/users/{id}/adjustments does for an adjustment); booking
+         *     it (ledger FundInsurance, INSURANCE_CONTRIBUTION from ADJUSTMENT)
+         *     needs the flag ledger.manual_adjustment. Needs
+         *     ledger.adjust.request.
          */
         post: operations["requestInsuranceFunding"];
         delete?: never;
@@ -1142,7 +1255,30 @@ export interface components {
             name: string;
             /** @enum {string} */
             role: "ADMIN" | "OPERATOR" | "FINANCE" | "AUDITOR";
-            permissions: ("users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write")[];
+            permissions: ("users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write" | "settings.write")[];
+        };
+        Settings: {
+            /** @description Fund operations need a second administrator (the flag admin.two_person_approval). */
+            two_person_approval: boolean;
+            /** @description In single-person mode, one fund operation is worth at most this much. */
+            single_max_usdt: components["schemas"]["Decimal"];
+            /** @description In single-person mode, an administrator's fund operations of the last 24 hours sum to at most this much. */
+            daily_max_usdt: components["schemas"]["Decimal"];
+            /** @description In single-person mode, one approval completes a withdrawal worth at most this much, however many reviewers it needs. */
+            withdrawal_max_usdt: components["schemas"]["Decimal"];
+            /** @description The caller's single-person fund operations of the last 24 hours (pending ones included). */
+            daily_used_usdt: components["schemas"]["Decimal"];
+            /** @description Who last changed the limits; empty for the defaults. */
+            updated_by: string;
+            /** Format: date-time */
+            updated_at: string | null;
+        };
+        Todo: {
+            /** @description Withdrawals in review (with withdrawals.read; counted up to 200). */
+            withdrawals: number;
+            /** @description Fund operations waiting for a decision (with ledger.adjust.request or ledger.adjust.approve). */
+            approvals: number;
+            partial: "withdrawals"[];
         };
         UserView: {
             user: {
@@ -1268,12 +1404,13 @@ export interface components {
              */
             updated_at: string | null;
         };
+        /** @description A fund operation (a manual adjustment or an insurance fund contribution). */
         Approval: {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
             kind: "LEDGER_ADJUSTMENT" | "INSURANCE_FUND";
-            /** @description For LEDGER_ADJUSTMENT user_id, asset and amount; for INSURANCE_FUND asset and amount. */
+            /** @description For LEDGER_ADJUSTMENT user_id, asset and amount; for INSURANCE_FUND asset and amount; reference when given. */
             payload: {
                 [key: string]: string;
             };
@@ -1285,12 +1422,30 @@ export interface components {
              * @description The requesting administrator's ID.
              */
             requested_by: string;
+            requested_by_email: string;
             decided_by: string | null;
+            decided_by_email: string | null;
             /** @description The journal once executed, the ledger's refusal, or the rejection reason. */
             result: string;
             /** Format: date-time */
             created_at: string;
             decided_at: string | null;
+            /**
+             * @description SINGLE when its requester carries it out alone (single-person mode).
+             * @enum {string}
+             */
+            mode: "TWO_PERSON" | "SINGLE";
+            /** @description Its worth in USDT when requested; null without a price. */
+            value_usdt: components["schemas"]["NullableDecimal"];
+            /**
+             * @description Why a two-person operation waits for a second administrator:
+             *     asked for, two-person mode on, above the single-operation
+             *     limit, over the 24-hour limit, or of unknown worth; empty in
+             *     single-person mode.
+             * @enum {string}
+             */
+            escalation: "" | "REQUESTED" | "TWO_PERSON_MODE" | "SINGLE_LIMIT" | "DAILY_LIMIT" | "NO_PRICE";
+            journal_id: string | null;
         };
         AuditEntry: {
             /** Format: uuid */
@@ -1713,6 +1868,100 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Settings"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    two_person_approval?: boolean;
+                    single_max_usdt?: components["schemas"]["Decimal"];
+                    daily_max_usdt?: components["schemas"]["Decimal"];
+                    withdrawal_max_usdt?: components["schemas"]["Decimal"];
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The settings after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Settings"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getTodo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The counts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Todo"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    streamEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The stream. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     listUsers: {
         parameters: {
             query?: {
@@ -1934,6 +2183,46 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    adjustUserBalance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @default SPOT
+                     * @enum {string}
+                     */
+                    account_type?: "SPOT";
+                    /** @example USDT */
+                    asset: string;
+                    /** @description Positive credits, negative debits. */
+                    amount: components["schemas"]["Decimal"];
+                    reason: string;
+                    /** @description A ticket or order number kept with it (in the journal's memo). */
+                    reference?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The operation. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Approval"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     cancelUserOrders: {
         parameters: {
             query?: never;
@@ -2149,6 +2438,12 @@ export interface operations {
                     asset: string;
                     amount: components["schemas"]["Decimal"];
                     reason: string;
+                    reference?: string;
+                    /**
+                     * @description Carry it out at once when single-person mode and its limits allow.
+                     * @default false
+                     */
+                    direct?: boolean;
                 };
             };
         };
@@ -2568,6 +2863,9 @@ export interface operations {
                     /** @description Positive. */
                     amount: components["schemas"]["Decimal"];
                     reason: string;
+                    reference?: string;
+                    /** @default false */
+                    direct?: boolean;
                 };
             };
         };

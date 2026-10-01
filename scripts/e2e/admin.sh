@@ -9,10 +9,12 @@
 # password alone while the flag admin.login_without_totp is on; the
 # cookie's attributes, the CSRF header), roles, freezing and unfreezing
 # an account, cancelling its orders, a pair's status round trip, a flag
-# round trip, a two-person ledger adjustment, the withdrawal list, the
-# perpetual contracts (states, reduce-only, a status round trip, the
-# liquidation monitor, a two-person insurance fund contribution), the
-# reports, the audit trail and sign-out.
+# round trip, a two-person ledger adjustment, the settings and
+# single-person mode (adjustments booked alone, one above the limit
+# waiting and withdrawn), the counts and their event stream, the
+# withdrawal list, the perpetual contracts (states, reduce-only, a status
+# round trip, the liquidation monitor, a two-person insurance fund
+# contribution), the reports, the audit trail and sign-out.
 #
 #   scripts/e2e/admin.sh
 set -euo pipefail
@@ -111,7 +113,7 @@ expect 200 - "the sign-in options need no session"
 TOTP_REQUIRED=$(jq -r .totp_required <<<"$BODY")
 login ADMIN
 expect 200 - "ADMIN signs in with password and code"
-check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 15" "with every permission"
+check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 16" "with every permission"
 cookie=$(grep -i '^set-cookie: admin_session=' "$WORK/ADMIN.headers")
 for attr in 'Path=/admin/' 'HttpOnly' 'Secure' 'SameSite=Strict'; do
   grep -qi "$attr" <<<"$cookie" || { echo "FAIL the session cookie lacks $attr: $cookie" >&2; exit 1; }
@@ -275,6 +277,53 @@ as ADMIN POST "/admin/v1/approvals/$REVERSAL/decide" '{"approve":false,"reason":
 expect 200 - "ADMIN rejects it"
 check '.status == "REJECTED"' "REJECTED, nothing booked"
 
+echo "== single-person mode and the settings"
+as AUDITOR GET /admin/v1/settings ""
+expect 200 - "every administrator reads the settings"
+check '(.single_max_usdt | test("^[0-9.]+$")) and (.daily_max_usdt | test("^[0-9.]+$")) and (.daily_used_usdt | test("^[0-9.]+$"))' "the limits and the caller's use"
+TWO_PERSON=$(jq -r .two_person_approval <<<"$BODY")
+as FINANCE PUT /admin/v1/settings '{"single_max_usdt":"1","reason":"e2e"}'
+expect 403 ADMIN_FORBIDDEN "only an ADMIN changes them"
+as OPERATOR PUT /admin/v1/flags/admin.two_person_approval '{"enabled":true,"reason":"e2e"}'
+expect 403 ADMIN_FORBIDDEN "nor does an OPERATOR switch two-person approval as a flag"
+as ADMIN PUT /admin/v1/settings '{"single_max_usdt":"600000000","reason":"e2e"}'
+expect 400 COMMON_INVALID_ARGUMENT "a single limit above the day's"
+if [[ $TWO_PERSON == false ]]; then
+  call GET /v1/account/balances "" "${UAUTH[@]}"
+  USDT_BEFORE=$(jq -r '.balances[] | select(.asset == "USDT" and .account_type == "SPOT") | .available' <<<"$BODY")
+  USDT_BEFORE=${USDT_BEFORE:-0}
+  as ADMIN POST "/admin/v1/users/$USER_ID/adjustments" "{\"asset\":\"usdt\",\"amount\":\"2.5\",\"reason\":\"e2e single credit\",\"reference\":\"e2e-$RUN\"}"
+  expect 201 - "ADMIN credits 2.5 USDT alone"
+  check '.status == "EXECUTED" and .mode == "SINGLE" and (.journal_id | type) == "string" and .value_usdt == "2.5" and .escalation == ""' "booked at once, with its journal"
+  plus() {
+    call GET /v1/account/balances "" "${UAUTH[@]}"
+    jq -e --arg b "$USDT_BEFORE" --arg d "$1" '.balances[] | select(.asset == "USDT" and .account_type == "SPOT") | (.available | tonumber) == (($b | tonumber) + ($d | tonumber))' <<<"$BODY" >/dev/null
+  }
+  eventually 20 "the user has 2.5 USDT more" plus 2.5
+  as ADMIN POST "/admin/v1/users/$USER_ID/adjustments" '{"asset":"USDT","amount":"-2.5","reason":"e2e single reversal"}'
+  expect 201 - "and takes it back"
+  check '.status == "EXECUTED" and .mode == "SINGLE"' "booked"
+  eventually 20 "the balance is back" plus 0
+  as ADMIN POST "/admin/v1/users/$USER_ID/adjustments" '{"asset":"USDT","amount":"100000000","reason":"e2e above the limit"}'
+  expect 201 - "an adjustment above the single-operation limit"
+  check '.status == "PENDING" and .mode == "TWO_PERSON" and .escalation == "SINGLE_LIMIT"' "waits for a second administrator"
+  BIG=$(jq -r .id <<<"$BODY")
+  at_exit "as ADMIN POST /admin/v1/approvals/$BIG/decide '{\"approve\":false,\"reason\":\"e2e cleanup\"}'"
+  as ADMIN POST "/admin/v1/approvals/$BIG/decide" '{"approve":true,"reason":"my own"}'
+  expect 403 ADMIN_SELF_APPROVAL "not approved by its requester"
+  as ADMIN POST "/admin/v1/approvals/$BIG/decide" '{"approve":false,"reason":"e2e withdraws it"}'
+  expect 200 - "who may withdraw it"
+  check '.status == "REJECTED" and .decided_by_email != null' "REJECTED, nothing booked"
+else
+  echo "skip the single-person adjustments: two-person approval is on"
+fi
+as ADMIN GET /admin/v1/todo ""
+expect 200 - "the counts waiting"
+check '(.withdrawals | type) == "number" and (.approvals | type) == "number" and (.partial | length) == 0' "withdrawals and fund operations"
+events=$(curl -sN --max-time 4 -b "$WORK/ADMIN.jar" "$ADMIN_BASE/admin/v1/events" || true)
+grep -q '^event: todo' <<<"$events" || { echo "FAIL the event stream: $events" >&2; exit 1; }
+echo "ok   the event stream pushes the counts"
+
 echo "== perpetual contracts"
 as AUDITOR GET /admin/v1/derivatives/contracts ""
 expect 200 - "contracts"
@@ -388,6 +437,10 @@ audited() { # audited ROLE QUERY JQ
 q_admin="actor=$(jq -rn --arg e "$EMAIL_ADMIN" '$e|@uri')"
 eventually 60 "the ADMIN's sign-in and approval are in the trail" audited AUDITOR "$q_admin" \
   '[.items[].payload.action] | (index("admin.login") != null and index("admin.ledger.adjustment_approved") != null and index("admin.derivatives.insurance_approved") != null)'
+if [[ $TWO_PERSON == false ]]; then
+  eventually 60 "the ADMIN's single-person adjustments are in the trail" audited AUDITOR "$q_admin" \
+    '[.items[].payload.action] | (index("admin.ledger.adjustment_executed") != null and index("admin.ledger.adjustment_rejected") != null)'
+fi
 eventually 60 "the freeze is audited on the account, by the OPERATOR" audited AUDITOR "target=user:$USER_ID" \
   "[.items[] | select(.actor == \"$EMAIL_OPERATOR\")] | length >= 3"
 eventually 60 "the flag switches are audited" audited AUDITOR "target=flag:market.reference_kline" \

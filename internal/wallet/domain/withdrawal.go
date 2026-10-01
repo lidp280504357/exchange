@@ -152,6 +152,17 @@ func (w *Withdrawal) Approve(reviewer string, now time.Time) (bool, error) {
 	return true, nil
 }
 
+// ApproveAlone is Approve by a reviewer whose approval alone completes the
+// review of a withdrawal worth at most limit USDT, however many reviewers
+// it needed (the admin console's single-person mode); a larger one still
+// waits for its other reviewers, and a zero limit changes nothing.
+func (w *Withdrawal) ApproveAlone(reviewer string, limit decimal.Decimal, now time.Time) (bool, error) {
+	if limit.IsPositive() && !w.ValueUSDT.GreaterThan(limit) && w.Status == WithdrawalReview {
+		w.ApprovalsRequired = min(w.ApprovalsRequired, len(w.Approvals)+1)
+	}
+	return w.Approve(reviewer, now)
+}
+
 // Reject refuses a withdrawal that is not being sent yet.
 func (w *Withdrawal) Reject(reason string, now time.Time) error {
 	if !w.Cancelable() {

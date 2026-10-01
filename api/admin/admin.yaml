@@ -18,17 +18,26 @@ info:
     ends after 8 hours, or after an hour without a request. Every request
     other than GET must carry the header `X-Admin-CSRF: 1`.
 
-    Roles grant permissions: ADMIN (everything), OPERATOR (accounts,
-    orders, trading pairs and contracts, lifting a contract's reduce-only,
-    feature flags), FINANCE (withdrawal reviews, ledger adjustments,
+    Roles grant permissions: ADMIN (everything, and alone the console's
+    settings), OPERATOR (accounts, orders, trading pairs and contracts,
+    lifting a contract's reduce-only, feature flags other than the
+    console's own), FINANCE (withdrawal reviews, ledger adjustments,
     insurance fund contributions), AUDITOR (read-only). Everyone may read,
     including the reports from the ClickHouse read models. A call
     outside the role fails with ADMIN_FORBIDDEN. Every change is audited
     (audit.events → ClickHouse audit_logs) with the administrator's email
     as the actor; changes also carry a reason of at least 3 characters.
-    Manual ledger adjustments and insurance fund contributions take two
-    administrators: one requests, a different one approves, and the ledger
-    books it idempotently.
+
+    Fund operations (manual ledger adjustments and insurance fund
+    contributions) are approved by a second administrator while the flag
+    admin.two_person_approval is on. Off (single-person mode, the test
+    server), an administrator carries one out alone when asked to
+    (`direct`, and always from a user's page) if it is worth at most the
+    single-operation limit and keeps their operations of the last 24 hours
+    within the daily limit (GET /admin/v1/settings; 100,000 and 500,000
+    USDT by default); anything larger, or of unknown worth, still waits
+    for a second administrator. The ledger books each operation once with
+    the idempotency key approval:<id>.
 
     Lists page with an opaque cursor: an answer's `next_cursor` (null on
     the last page) is passed back as `cursor` for the next; `limit` is
@@ -149,6 +158,105 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Admin'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/settings:
+    get:
+      operationId: getSettings
+      summary: The console's settings
+      description: |
+        Whether fund operations need a second administrator (the flag
+        admin.two_person_approval) and the single-person limits, with the
+        caller's single-person total of the last 24 hours. Every
+        administrator may read them.
+      tags: [session]
+      responses:
+        '200':
+          description: The settings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Settings'
+        default:
+          $ref: '#/components/responses/Error'
+    put:
+      operationId: updateSettings
+      summary: Change the console's settings
+      description: |
+        Changes the fields given: the limits (audited as
+        admin.settings.changed) and two-person approval (switches the flag
+        admin.two_person_approval, audited by the flags; the other
+        instances follow within 5 seconds). The daily limit must cover the
+        single-operation one. Needs settings.write (ADMIN).
+      tags: [session]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                two_person_approval:
+                  type: boolean
+                single_max_usdt:
+                  $ref: '#/components/schemas/Decimal'
+                daily_max_usdt:
+                  $ref: '#/components/schemas/Decimal'
+                withdrawal_max_usdt:
+                  $ref: '#/components/schemas/Decimal'
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: The settings after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Settings'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/todo:
+    get:
+      operationId: getTodo
+      summary: What waits for the administrator
+      description: |
+        The counts behind the console's badges, as far as the role shows
+        them (zero otherwise): withdrawals in review (counted up to 200)
+        and fund operations waiting for a decision. A count that cannot be
+        read is zero and named in `partial`.
+      tags: [session]
+      responses:
+        '200':
+          description: The counts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Todo'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/events:
+    get:
+      operationId: streamEvents
+      summary: The counts as they change (Server-Sent Events)
+      description: |
+        An event stream: `todo` with the counts of GET /admin/v1/todo at
+        once and whenever they change (checked every 10 seconds),
+        `signed_out` when the session ends, and a comment after 20 seconds
+        without an event. The stream does not keep the session alive; the
+        browser reconnects after 5 seconds when it drops.
+      tags: [session]
+      responses:
+        '200':
+          description: The stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/users:
@@ -395,6 +503,60 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Transition'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/adjustments:
+    post:
+      operationId: adjustUserBalance
+      summary: Credit or debit a user's balance
+      description: |
+        A manual adjustment (MANUAL_ADJUSTMENT against the ADJUSTMENT system
+        account) of the user's SPOT account: booked at once in
+        single-person mode within the limits (EXECUTED with its journal, or
+        FAILED with the ledger's refusal such as
+        LEDGER_ADJUSTMENT_DISABLED), otherwise PENDING for a second
+        administrator with the reason in `escalation`. When the ledger does
+        not answer the call fails with COMMON_UNAVAILABLE and the detail
+        `approval_id` names the operation, left PENDING for its requester
+        to finish (decide). Needs ledger.adjust.request.
+      tags: [users, ledger]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [asset, amount, reason]
+              properties:
+                account_type:
+                  type: string
+                  enum: [SPOT]
+                  default: SPOT
+                asset:
+                  type: string
+                  examples: [USDT]
+                amount:
+                  description: Positive credits, negative debits.
+                  $ref: '#/components/schemas/Decimal'
+                reason:
+                  type: string
+                  minLength: 3
+                reference:
+                  type: string
+                  maxLength: 64
+                  description: A ticket or order number kept with it (in the journal's memo).
+      responses:
+        '201':
+          description: The operation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/users/{id}/cancel-orders:
@@ -654,9 +816,11 @@ paths:
       summary: Request a manual adjustment of a user's spot balance
       description: |
         Creates a PENDING request for another administrator with
-        ledger.adjust.approve. A positive amount credits the user's SPOT
-        account against the ADJUSTMENT system account, a negative one
-        debits it. Needs ledger.adjust.request.
+        ledger.adjust.approve (escalation REQUESTED), unless `direct` asks
+        to carry it out at once, which works as POST
+        /admin/v1/users/{id}/adjustments. A positive amount credits the
+        user's SPOT account against the ADJUSTMENT system account, a
+        negative one debits it. Needs ledger.adjust.request.
       tags: [ledger]
       security:
         - session: []
@@ -680,6 +844,13 @@ paths:
                 reason:
                   type: string
                   minLength: 3
+                reference:
+                  type: string
+                  maxLength: 64
+                direct:
+                  type: boolean
+                  default: false
+                  description: Carry it out at once when single-person mode and its limits allow.
       responses:
         '201':
           description: The request.
@@ -692,8 +863,8 @@ paths:
   /admin/v1/approvals:
     get:
       operationId: listApprovals
-      summary: Two-person requests, newest first
-      description: Needs ledger.adjust.request or audit.read.
+      summary: Fund operations, newest first
+      description: Two-person requests and single-person operations. Needs ledger.adjust.request or audit.read.
       tags: [ledger]
       parameters:
         - name: status
@@ -724,11 +895,13 @@ paths:
   /admin/v1/approvals/{id}/decide:
     post:
       operationId: decideApproval
-      summary: Approve (and book) or reject another administrator's request
+      summary: Approve (and book) or reject a pending fund operation
       description: |
-        Fails with ADMIN_SELF_APPROVAL for one's own request and
-        ADMIN_APPROVAL_DECIDED once decided. Approving books the
-        adjustment with the idempotency key approval:<id>: EXECUTED with
+        Approving one's own request fails with ADMIN_SELF_APPROVAL, except
+        a single-person operation whose outcome was unknown (its requester
+        finishes it); rejecting one's own request withdraws it. A decided
+        one fails with ADMIN_APPROVAL_DECIDED. Approving books the
+        operation with the idempotency key approval:<id>: EXECUTED with
         the journal, or FAILED when the ledger refuses (for instance
         LEDGER_ADJUSTMENT_DISABLED while the flag ledger.manual_adjustment
         is off). When the ledger cannot be reached the request stays
@@ -1149,12 +1322,15 @@ paths:
   /admin/v1/derivatives/insurance-fund/contributions:
     post:
       operationId: requestInsuranceFunding
-      summary: Request a contribution of simulated funds to the insurance fund
+      summary: Contribute simulated funds to the insurance fund
       description: |
         Creates a PENDING INSURANCE_FUND request for another administrator
-        with ledger.adjust.approve; approving books it (ledger
-        FundInsurance, INSURANCE_CONTRIBUTION from ADJUSTMENT), which needs
-        the flag ledger.manual_adjustment. Needs ledger.adjust.request.
+        with ledger.adjust.approve, or with `direct` carries it out at once
+        when single-person mode and its limits allow (as POST
+        /admin/v1/users/{id}/adjustments does for an adjustment); booking
+        it (ledger FundInsurance, INSURANCE_CONTRIBUTION from ADJUSTMENT)
+        needs the flag ledger.manual_adjustment. Needs
+        ledger.adjust.request.
       tags: [derivatives, ledger]
       security:
         - session: []
@@ -1176,6 +1352,12 @@ paths:
                 reason:
                   type: string
                   minLength: 3
+                reference:
+                  type: string
+                  maxLength: 64
+                direct:
+                  type: boolean
+                  default: false
       responses:
         '201':
           description: The request.
@@ -1899,7 +2081,47 @@ components:
             type: string
             enum: [users.read, users.status, orders.cancel, instruments.read, instruments.write, flags.read, flags.write,
               withdrawals.read, withdrawals.review, ledger.adjust.request, ledger.adjust.approve, audit.read, reports.read,
-              derivatives.read, derivatives.write]
+              derivatives.read, derivatives.write, settings.write]
+    Settings:
+      type: object
+      required: [two_person_approval, single_max_usdt, daily_max_usdt, withdrawal_max_usdt, daily_used_usdt, updated_by, updated_at]
+      properties:
+        two_person_approval:
+          type: boolean
+          description: Fund operations need a second administrator (the flag admin.two_person_approval).
+        single_max_usdt:
+          description: In single-person mode, one fund operation is worth at most this much.
+          $ref: '#/components/schemas/Decimal'
+        daily_max_usdt:
+          description: In single-person mode, an administrator's fund operations of the last 24 hours sum to at most this much.
+          $ref: '#/components/schemas/Decimal'
+        withdrawal_max_usdt:
+          description: In single-person mode, one approval completes a withdrawal worth at most this much, however many reviewers it needs.
+          $ref: '#/components/schemas/Decimal'
+        daily_used_usdt:
+          description: The caller's single-person fund operations of the last 24 hours (pending ones included).
+          $ref: '#/components/schemas/Decimal'
+        updated_by:
+          type: string
+          description: Who last changed the limits; empty for the defaults.
+        updated_at:
+          type: [string, 'null']
+          format: date-time
+    Todo:
+      type: object
+      required: [withdrawals, approvals, partial]
+      properties:
+        withdrawals:
+          type: integer
+          description: Withdrawals in review (with withdrawals.read; counted up to 200).
+        approvals:
+          type: integer
+          description: Fund operations waiting for a decision (with ledger.adjust.request or ledger.adjust.approve).
+        partial:
+          type: array
+          items:
+            type: string
+            enum: [withdrawals]
     UserView:
       type: object
       required: [user, balances]
@@ -2122,7 +2344,9 @@ components:
           description: Null for a known flag never set (off).
     Approval:
       type: object
-      required: [id, kind, payload, reason, status, requested_by, decided_by, result, created_at, decided_at]
+      description: A fund operation (a manual adjustment or an insurance fund contribution).
+      required: [id, kind, payload, reason, status, requested_by, requested_by_email, decided_by, decided_by_email, result, created_at,
+        decided_at, mode, value_usdt, escalation, journal_id]
       properties:
         id:
           type: string
@@ -2132,7 +2356,7 @@ components:
           enum: [LEDGER_ADJUSTMENT, INSURANCE_FUND]
         payload:
           type: object
-          description: For LEDGER_ADJUSTMENT user_id, asset and amount; for INSURANCE_FUND asset and amount.
+          description: For LEDGER_ADJUSTMENT user_id, asset and amount; for INSURANCE_FUND asset and amount; reference when given.
           additionalProperties:
             type: string
         reason:
@@ -2144,7 +2368,11 @@ components:
           type: string
           format: uuid
           description: The requesting administrator's ID.
+        requested_by_email:
+          type: string
         decided_by:
+          type: [string, 'null']
+        decided_by_email:
           type: [string, 'null']
         result:
           type: string
@@ -2153,6 +2381,23 @@ components:
           type: string
           format: date-time
         decided_at:
+          type: [string, 'null']
+        mode:
+          type: string
+          enum: [TWO_PERSON, SINGLE]
+          description: SINGLE when its requester carries it out alone (single-person mode).
+        value_usdt:
+          description: Its worth in USDT when requested; null without a price.
+          $ref: '#/components/schemas/NullableDecimal'
+        escalation:
+          type: string
+          enum: ['', REQUESTED, TWO_PERSON_MODE, SINGLE_LIMIT, DAILY_LIMIT, NO_PRICE]
+          description: |
+            Why a two-person operation waits for a second administrator:
+            asked for, two-person mode on, above the single-operation
+            limit, over the 24-hour limit, or of unknown worth; empty in
+            single-person mode.
+        journal_id:
           type: [string, 'null']
     AuditEntry:
       type: object

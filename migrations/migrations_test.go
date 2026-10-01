@@ -300,4 +300,15 @@ func TestAdminSchema(t *testing.T) {
 	accepts(t, db, ap, uuid.New(), "EXECUTED", a, b)
 	rejects(t, db, "no self-approval", ap, uuid.New(), "EXECUTED", a, a)
 	rejects(t, db, "a decided request names who decided", ap, uuid.New(), "REJECTED", a, nil)
+	accepts(t, db, ap, uuid.New(), "REJECTED", a, a) // a requester withdraws their own request
+	single := `INSERT INTO approvals (id, kind, payload, reason, status, requested_by, decided_by, created_at, mode, value_usdt)
+		VALUES ($1, 'LEDGER_ADJUSTMENT', '{}', 'r', 'EXECUTED', $2, $2, now(), $3, 12.5)`
+	accepts(t, db, single, uuid.New(), a, "SINGLE")
+	rejects(t, db, "known modes only", single, uuid.New(), a, "ALONE")
+
+	settings := `INSERT INTO settings (single_max_usdt, daily_max_usdt, withdrawal_max_usdt, updated_by, updated_at) VALUES ($1, $2, 1, 'x', now())`
+	rejects(t, db, "a day's limit covers one operation", settings, 100, 50)
+	rejects(t, db, "positive limits", settings, 0, 50)
+	accepts(t, db, settings, 100, 500)
+	rejects(t, db, "one row of settings", settings, 100, 500)
 }

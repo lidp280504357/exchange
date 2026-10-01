@@ -31,6 +31,7 @@ type memStore struct {
 	sessions  map[string]domain.Session
 	revoked   map[string]bool
 	approvals map[string]domain.Approval
+	settings  *domain.Settings
 	audits    []*auditv1.AdminActionPerformed
 }
 
@@ -50,6 +51,17 @@ func (m *memStore) Admins() ports.AdminRepo { return memAdmins{m} }
 func (m *memStore) Sessions() ports.SessionRepo { return memSessions{m} }
 
 func (m *memStore) Approvals() ports.ApprovalRepo { return memApprovals{m} }
+
+func (m *memStore) Settings() ports.SettingsRepo { return memSettings{m} }
+
+type memSettings struct{ m *memStore }
+
+func (r memSettings) Get(context.Context) (*domain.Settings, error) { return r.m.settings, nil }
+
+func (r memSettings) Put(_ context.Context, s domain.Settings) error {
+	r.m.settings = &s
+	return nil
+}
 
 func (m *memStore) Audit(_ context.Context, msg proto.Message, _ string) error {
 	m.audits = append(m.audits, msg.(*auditv1.AdminActionPerformed))
@@ -88,6 +100,10 @@ func (r memAdmins) Get(_ context.Context, id string) (*domain.Admin, error) {
 		return &a, nil
 	}
 	return nil, nil
+}
+
+func (r memAdmins) GetForUpdate(ctx context.Context, id string) (*domain.Admin, error) {
+	return r.Get(ctx, id)
 }
 
 func (r memAdmins) List(context.Context) ([]domain.Admin, error) {
@@ -153,6 +169,31 @@ func (r memApprovals) GetForUpdate(_ context.Context, id string) (*domain.Approv
 	return nil, nil
 }
 
+func (r memApprovals) Get(ctx context.Context, id string) (*domain.Approval, error) {
+	return r.GetForUpdate(ctx, id)
+}
+
+func (r memApprovals) SingleUsage(_ context.Context, adminID string, since time.Time) (decimal.Decimal, error) {
+	sum := decimal.Zero
+	for _, a := range r.m.approvals {
+		live := a.Status == domain.ApprovalPending || a.Status == domain.ApprovalExecuted
+		if a.RequestedBy == adminID && a.Mode == domain.ModeSingle && !a.CreatedAt.Before(since) && live && a.ValueUSDT != nil {
+			sum = sum.Add(a.ValueUSDT.Abs())
+		}
+	}
+	return sum, nil
+}
+
+func (r memApprovals) CountPending(context.Context) (int, error) {
+	n := 0
+	for _, a := range r.m.approvals {
+		if a.Status == domain.ApprovalPending {
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (r memApprovals) List(_ context.Context, status string, afterTime time.Time, afterID string, limit int) ([]domain.Approval, error) {
 	var out []domain.Approval
 	for _, a := range r.m.approvals {
@@ -171,8 +212,8 @@ func (r memApprovals) List(_ context.Context, status string, afterTime time.Time
 }
 
 type adjustment struct {
-	key, userID, asset, actor string
-	amount                    decimal.Decimal
+	key, userID, asset, actor, memo string
+	amount                          decimal.Decimal
 }
 
 type fakeLedger struct {
@@ -180,16 +221,16 @@ type fakeLedger struct {
 	err   error
 }
 
-func (l *fakeLedger) Adjust(_ context.Context, key, userID, asset string, amount decimal.Decimal, actor, _ string) (string, error) {
-	l.calls = append(l.calls, adjustment{key: key, userID: userID, asset: asset, actor: actor, amount: amount})
+func (l *fakeLedger) Adjust(_ context.Context, key, userID, asset string, amount decimal.Decimal, actor, memo string) (string, error) {
+	l.calls = append(l.calls, adjustment{key: key, userID: userID, asset: asset, actor: actor, amount: amount, memo: memo})
 	if l.err != nil {
 		return "", l.err
 	}
 	return "journal-1", nil
 }
 
-func (l *fakeLedger) FundInsurance(_ context.Context, key, asset string, amount decimal.Decimal, actor, _ string) (string, error) {
-	l.calls = append(l.calls, adjustment{key: key, asset: asset, actor: actor, amount: amount})
+func (l *fakeLedger) FundInsurance(_ context.Context, key, asset string, amount decimal.Decimal, actor, memo string) (string, error) {
+	l.calls = append(l.calls, adjustment{key: key, asset: asset, actor: actor, amount: amount, memo: memo})
 	if l.err != nil {
 		return "", l.err
 	}
@@ -237,10 +278,23 @@ func (o *fakeOrders) CancelAll(_ context.Context, userID string) error {
 	return nil
 }
 
-type fakeWallet struct{ reviewer string }
+type fakeWallet struct {
+	reviewer string
+	soleMax  decimal.Decimal
+	// pending is the review queue's length.
+	pending int
+	err     error
+}
 
 func (w *fakeWallet) List(context.Context, ports.WithdrawalQuery) (json.RawMessage, error) {
-	return json.RawMessage(`{"items":[]}`), nil
+	if w.err != nil {
+		return nil, w.err
+	}
+	items := make([]string, w.pending)
+	for i := range items {
+		items[i] = "{}"
+	}
+	return json.RawMessage(`{"items":[` + strings.Join(items, ",") + `]}`), nil
 }
 
 func (w *fakeWallet) Custody(context.Context) (json.RawMessage, error) {
@@ -260,10 +314,15 @@ func (w *fakeWallet) Replay(_ context.Context, _, actor, _ string) (json.RawMess
 	return json.RawMessage(`{}`), nil
 }
 
-func (w *fakeWallet) Review(_ context.Context, _ string, _ bool, reviewer, _ string) (json.RawMessage, error) {
-	w.reviewer = reviewer
+func (w *fakeWallet) Review(_ context.Context, _ string, _ bool, reviewer, _ string, soleMax decimal.Decimal) (json.RawMessage, error) {
+	w.reviewer, w.soleMax = reviewer, soleMax
 	return json.RawMessage(`{}`), nil
 }
+
+// fakePrices are the last prices of the USDT pairs.
+type fakePrices ports.Prices
+
+func (p fakePrices) Prices(context.Context) (ports.Prices, error) { return ports.Prices(p), nil }
 
 type harness struct {
 	svc         *Service

@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lidp280504357/exchange/internal/admin/domain"
@@ -45,6 +46,7 @@ type repos struct {
 func (r repos) Admins() ports.AdminRepo       { return admins(r) }
 func (r repos) Sessions() ports.SessionRepo   { return sessions(r) }
 func (r repos) Approvals() ports.ApprovalRepo { return approvals(r) }
+func (r repos) Settings() ports.SettingsRepo  { return settings(r) }
 
 func (r repos) Audit(ctx context.Context, msg proto.Message, actor string) error {
 	env, err := r.events.New(ctx, msg, "actor", actor)
@@ -127,6 +129,10 @@ func (r admins) Get(ctx context.Context, id string) (*domain.Admin, error) {
 	return r.one(ctx, `SELECT `+adminColumns+` FROM admins WHERE id = $1`, id)
 }
 
+func (r admins) GetForUpdate(ctx context.Context, id string) (*domain.Admin, error) {
+	return r.one(ctx, `SELECT `+adminColumns+` FROM admins WHERE id = $1 FOR UPDATE`, id)
+}
+
 func (r admins) List(ctx context.Context) ([]domain.Admin, error) {
 	rows, err := r.q.Query(ctx, `SELECT `+adminColumns+` FROM admins ORDER BY created_at`)
 	if err != nil {
@@ -187,14 +193,28 @@ func (r sessions) RevokeAll(ctx context.Context, adminID string, now time.Time) 
 
 type approvals repos
 
-const approvalColumns = `id, kind, payload, reason, status, requested_by, decided_by, result, created_at, decided_at`
+const approvalColumns = `id, kind, payload, reason, status, requested_by, decided_by, result, created_at, decided_at, mode,
+	value_usdt, escalation, journal_id`
 
-func scanApproval(row pgx.Row) (domain.Approval, error) {
+// approvalSelect reads approvals with their administrators' emails.
+const approvalSelect = `SELECT a.id, a.kind, a.payload, a.reason, a.status, a.requested_by, a.decided_by, a.result, a.created_at,
+	a.decided_at, a.mode, a.value_usdt, a.escalation, a.journal_id, coalesce(r.email, ''), coalesce(d.email, '')
+	FROM approvals a LEFT JOIN admins r ON r.id = a.requested_by LEFT JOIN admins d ON d.id = a.decided_by`
+
+func scanApproval(row pgx.Row, emails bool) (domain.Approval, error) {
 	var a domain.Approval
 	var payload []byte
 	var decidedBy *string
 	var decided *time.Time
-	if err := row.Scan(&a.ID, &a.Kind, &payload, &a.Reason, &a.Status, &a.RequestedBy, &decidedBy, &a.Result, &a.CreatedAt, &decided); err != nil {
+	var value decimal.NullDecimal
+	dest := []any{
+		&a.ID, &a.Kind, &payload, &a.Reason, &a.Status, &a.RequestedBy, &decidedBy, &a.Result, &a.CreatedAt, &decided, &a.Mode, &value,
+		&a.Escalation, &a.JournalID,
+	}
+	if emails {
+		dest = append(dest, &a.RequestedByEmail, &a.DecidedByEmail)
+	}
+	if err := row.Scan(dest...); err != nil {
 		return domain.Approval{}, err
 	}
 	if err := json.Unmarshal(payload, &a.Payload); err != nil {
@@ -202,6 +222,9 @@ func scanApproval(row pgx.Row) (domain.Approval, error) {
 	}
 	if decidedBy != nil {
 		a.DecidedBy = *decidedBy
+	}
+	if value.Valid {
+		a.ValueUSDT = &value.Decimal
 	}
 	a.DecidedAt = at(decided)
 	return a, nil
@@ -212,8 +235,17 @@ func (r approvals) Insert(ctx context.Context, a domain.Approval) error {
 	if err != nil {
 		return err
 	}
-	_, err = r.q.Exec(ctx, `INSERT INTO approvals (`+approvalColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-		a.ID, a.Kind, payload, a.Reason, a.Status, a.RequestedBy, nullable(a.DecidedBy), a.Result, a.CreatedAt, stamp(a.DecidedAt))
+	if a.Mode == "" {
+		a.Mode = domain.ModeTwoPerson
+	}
+	var value decimal.NullDecimal
+	if a.ValueUSDT != nil {
+		value = decimal.NullDecimal{Decimal: *a.ValueUSDT, Valid: true}
+	}
+	_, err = r.q.Exec(ctx, `INSERT INTO approvals (`+approvalColumns+`)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+		a.ID, a.Kind, payload, a.Reason, a.Status, a.RequestedBy, nullable(a.DecidedBy), a.Result, a.CreatedAt, stamp(a.DecidedAt),
+		a.Mode, value, a.Escalation, a.JournalID)
 	if err != nil {
 		return fmt.Errorf("insert approval: %w", err)
 	}
@@ -228,16 +260,16 @@ func nullable(s string) *string {
 }
 
 func (r approvals) Update(ctx context.Context, a domain.Approval) error {
-	_, err := r.q.Exec(ctx, `UPDATE approvals SET status = $2, decided_by = $3, result = $4, decided_at = $5 WHERE id = $1`,
-		a.ID, a.Status, nullable(a.DecidedBy), a.Result, stamp(a.DecidedAt))
+	_, err := r.q.Exec(ctx, `UPDATE approvals SET status = $2, decided_by = $3, result = $4, decided_at = $5, journal_id = $6
+		WHERE id = $1`, a.ID, a.Status, nullable(a.DecidedBy), a.Result, stamp(a.DecidedAt), a.JournalID)
 	if err != nil {
 		return fmt.Errorf("update approval: %w", err)
 	}
 	return nil
 }
 
-func (r approvals) GetForUpdate(ctx context.Context, id string) (*domain.Approval, error) {
-	a, err := scanApproval(r.q.QueryRow(ctx, `SELECT `+approvalColumns+` FROM approvals WHERE id = $1 FOR UPDATE`, id))
+func (r approvals) one(ctx context.Context, emails bool, sql string, args ...any) (*domain.Approval, error) {
+	a, err := scanApproval(r.q.QueryRow(ctx, sql, args...), emails)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -245,6 +277,14 @@ func (r approvals) GetForUpdate(ctx context.Context, id string) (*domain.Approva
 		return nil, fmt.Errorf("get approval: %w", err)
 	}
 	return &a, nil
+}
+
+func (r approvals) GetForUpdate(ctx context.Context, id string) (*domain.Approval, error) {
+	return r.one(ctx, false, `SELECT `+approvalColumns+` FROM approvals WHERE id = $1 FOR UPDATE`, id)
+}
+
+func (r approvals) Get(ctx context.Context, id string) (*domain.Approval, error) {
+	return r.one(ctx, true, approvalSelect+` WHERE a.id = $1`, id)
 }
 
 func (r approvals) List(ctx context.Context, status string, afterTime time.Time, afterID string, limit int) ([]domain.Approval, error) {
@@ -257,15 +297,58 @@ func (r approvals) List(ctx context.Context, status string, afterTime time.Time,
 		}
 		after, afterUUID = &afterTime, &id
 	}
-	rows, err := r.q.Query(ctx, `SELECT `+approvalColumns+` FROM approvals WHERE ($1 = '' OR status = $1)
-		AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3::uuid)) ORDER BY created_at DESC, id DESC LIMIT $4`,
+	rows, err := r.q.Query(ctx, approvalSelect+` WHERE ($1 = '' OR a.status = $1)
+		AND ($2::timestamptz IS NULL OR (a.created_at, a.id) < ($2, $3::uuid)) ORDER BY a.created_at DESC, a.id DESC LIMIT $4`,
 		status, after, afterUUID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list approvals: %w", err)
 	}
-	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.Approval, error) { return scanApproval(row) })
+	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.Approval, error) { return scanApproval(row, true) })
 	if err != nil {
 		return nil, fmt.Errorf("list approvals: %w", err)
 	}
 	return out, nil
+}
+
+func (r approvals) SingleUsage(ctx context.Context, adminID string, since time.Time) (decimal.Decimal, error) {
+	var sum decimal.Decimal
+	err := r.q.QueryRow(ctx, `SELECT coalesce(sum(abs(value_usdt)), 0) FROM approvals
+		WHERE requested_by = $1 AND mode = 'SINGLE' AND created_at >= $2 AND status IN ('PENDING', 'EXECUTED')`, adminID, since).Scan(&sum)
+	if err != nil {
+		return decimal.Zero, fmt.Errorf("single-person usage: %w", err)
+	}
+	return sum, nil
+}
+
+func (r approvals) CountPending(ctx context.Context) (int, error) {
+	var n int
+	if err := r.q.QueryRow(ctx, `SELECT count(*) FROM approvals WHERE status = 'PENDING'`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count approvals: %w", err)
+	}
+	return n, nil
+}
+
+type settings repos
+
+func (r settings) Get(ctx context.Context) (*domain.Settings, error) {
+	var s domain.Settings
+	err := r.q.QueryRow(ctx, `SELECT single_max_usdt, daily_max_usdt, withdrawal_max_usdt, updated_by, updated_at FROM settings`).
+		Scan(&s.SingleMax, &s.DailyMax, &s.WithdrawalMax, &s.UpdatedBy, &s.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get settings: %w", err)
+	}
+	return &s, nil
+}
+
+func (r settings) Put(ctx context.Context, s domain.Settings) error {
+	_, err := r.q.Exec(ctx, `INSERT INTO settings (single_max_usdt, daily_max_usdt, withdrawal_max_usdt, updated_by, updated_at)
+		VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO UPDATE SET single_max_usdt = $1, daily_max_usdt = $2,
+		withdrawal_max_usdt = $3, updated_by = $4, updated_at = $5`, s.SingleMax, s.DailyMax, s.WithdrawalMax, s.UpdatedBy, s.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("put settings: %w", err)
+	}
+	return nil
 }

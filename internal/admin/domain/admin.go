@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 )
 
@@ -44,6 +46,9 @@ const (
 	// the positions near liquidation; lifting a contract's reduce-only.
 	PermDerivativesRead = "derivatives.read"
 	PermDerivativesEdit = "derivatives.write"
+	// PermSettingsEdit changes the console's settings: two-person approval
+	// and the single-person limits (and the flags of the console itself).
+	PermSettingsEdit = "settings.write"
 )
 
 var reads = []string{
@@ -52,7 +57,7 @@ var reads = []string{
 
 var roles = map[string][]string{
 	RoleAdmin: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit,
-		PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermDerivativesEdit),
+		PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermDerivativesEdit, PermSettingsEdit),
 	RoleOperator: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit, PermDerivativesEdit),
 	RoleFinance:  append(slices.Clone(reads), PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove),
 	RoleAuditor:  slices.Clone(reads),
@@ -187,9 +192,26 @@ const (
 	ApprovalFailed   = "FAILED"
 )
 
-// Approval is a request a second administrator must approve (§5.12:
-// manual ledger adjustments and insurance fund contributions need two
-// people).
+// Approval modes: a second administrator decides, or (with the flag
+// admin.two_person_approval off) the requester carries it out alone
+// within the single-person limits.
+const (
+	ModeTwoPerson = "TWO_PERSON"
+	ModeSingle    = "SINGLE"
+)
+
+// Why a request waits for a second administrator.
+const (
+	EscalationRequested = "REQUESTED"       // asked for one
+	EscalationTwoPerson = "TWO_PERSON_MODE" // the flag admin.two_person_approval is on
+	EscalationSingleMax = "SINGLE_LIMIT"    // worth more than one operation may be
+	EscalationDailyMax  = "DAILY_LIMIT"     // over the requester's 24-hour total
+	EscalationNoPrice   = "NO_PRICE"        // its worth in USDT is unknown
+)
+
+// Approval is a fund operation (§5.12: manual ledger adjustments and
+// insurance fund contributions): a request a second administrator must
+// approve, or one carried out alone in single-person mode.
 type Approval struct {
 	ID          string
 	Kind        string
@@ -201,15 +223,59 @@ type Approval struct {
 	Result      string
 	CreatedAt   time.Time
 	DecidedAt   time.Time
+	Mode        string
+	// ValueUSDT is the amount's worth when requested (nil: no price).
+	ValueUSDT *decimal.Decimal
+	// Escalation says why a two-person request waits ("" in single mode).
+	Escalation string
+	JournalID  string
+	// The administrators' emails, for display (read only).
+	RequestedByEmail string
+	DecidedByEmail   string
 }
 
-// Decide checks that decider may decide the request.
-func (a *Approval) Decide(decider string) error {
+// Decide checks that decider may decide the request: another
+// administrator, except that the requester may finish a single-person
+// operation whose outcome was unknown and withdraw (reject) their own
+// request.
+func (a *Approval) Decide(decider string, approve bool) error {
 	switch {
 	case a.Status != ApprovalPending:
 		return ErrNotPending
-	case a.RequestedBy == decider:
+	case a.RequestedBy == decider && approve && a.Mode != ModeSingle:
 		return ErrSelfApproval
+	}
+	return nil
+}
+
+// Settings are the console's single-person limits (design 2026-10-02 §2):
+// with two-person approval off, one administrator may carry out a fund
+// operation worth at most SingleMax, at most DailyMax within 24 hours,
+// and approve alone a withdrawal worth at most WithdrawalMax; above these
+// a second administrator is needed anyway. Amounts are in USDT.
+type Settings struct {
+	SingleMax     decimal.Decimal
+	DailyMax      decimal.Decimal
+	WithdrawalMax decimal.Decimal
+	UpdatedBy     string
+	UpdatedAt     time.Time
+}
+
+// DefaultSettings are the limits until an administrator changes them.
+func DefaultSettings() Settings {
+	return Settings{SingleMax: decimal.NewFromInt(100_000), DailyMax: decimal.NewFromInt(500_000), WithdrawalMax: decimal.NewFromInt(100_000)}
+}
+
+// Validate checks the limits: positive, and a day's total no smaller than
+// one operation.
+func (s Settings) Validate() error {
+	for _, v := range []decimal.Decimal{s.SingleMax, s.DailyMax, s.WithdrawalMax} {
+		if !v.IsPositive() {
+			return apperr.Invalid("the limits must be positive")
+		}
+	}
+	if s.DailyMax.LessThan(s.SingleMax) {
+		return apperr.Invalid("the 24-hour limit must be at least the single-operation limit")
 	}
 	return nil
 }

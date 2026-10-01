@@ -63,6 +63,30 @@ func TestLimits(t *testing.T) {
 	}
 }
 
+func TestApproveAlone(t *testing.T) {
+	now := time.Now()
+	review := func(value int64) *Withdrawal {
+		w := &Withdrawal{ID: "w1", Status: WithdrawalRequested, ValueUSDT: decimal.NewFromInt(value)}
+		w.Scored(RiskResult{Score: 30, Reasons: []string{RiskLargeAmount}, Approvals: 2}, now)
+		return w
+	}
+	limit := decimal.NewFromInt(100_000)
+	small := review(25_000)
+	if done, err := small.ApproveAlone("alice", limit, now); err != nil || !done || small.Status != WithdrawalApproved {
+		t.Fatalf("one approval within the single-person limit: %v %v %+v", done, err, small)
+	}
+	w := review(150_000)
+	if done, err := w.ApproveAlone("alice", limit, now); err != nil || done || w.ApprovalsRequired != 2 {
+		t.Fatalf("above the limit two reviewers stay needed: %v %v %+v", done, err, w)
+	}
+	if done, err := w.ApproveAlone("bob", decimal.Zero, now); err != nil || !done {
+		t.Fatalf("the second reviewer: %v %v", done, err)
+	}
+	if done, err := review(25_000).ApproveAlone("alice", decimal.Zero, now); err != nil || done {
+		t.Fatalf("without a limit the usual count: %v %v", done, err)
+	}
+}
+
 func TestWithdrawalLifecycle(t *testing.T) {
 	now := time.Now()
 	w := &Withdrawal{ID: "w1", Status: WithdrawalRequested, Required: 12, Nonce: -1, FreezeJournal: "j1"}

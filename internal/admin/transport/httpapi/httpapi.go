@@ -40,6 +40,9 @@ type Handler struct {
 	Limiter *ratelimit.Limiter
 	// Secure marks the cookie Secure (off only for plain-HTTP development).
 	Secure bool
+	// EventsEvery is how often the event stream checks the counts (10
+	// seconds when zero).
+	EventsEvery time.Duration
 }
 
 type ctxKey struct{}
@@ -59,8 +62,13 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Use(h.authenticate)
 			r.Post("/logout", h.logout)
 			r.Get("/me", h.me)
+			r.Get("/settings", h.settings)
+			r.Put("/settings", h.updateSettings)
+			r.Get("/todo", h.todo)
+			r.Get("/events", h.events)
 			r.Get("/users", h.users)
 			r.Get("/users/lookup", h.lookup)
+			r.Post("/users/{id}/adjustments", h.userAdjustment)
 			r.Get("/orders", h.orders)
 			r.Get("/trades", h.trades)
 			r.Get("/deposits", h.deposits)
@@ -547,59 +555,196 @@ func (h *Handler) switchFlag(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, f)
 }
 
-// ApprovalJSON is a two-person request.
+// ApprovalJSON is a fund operation: a two-person request or a
+// single-person operation.
 type ApprovalJSON struct {
-	ID          string            `json:"id"`
-	Kind        string            `json:"kind"`
-	Payload     map[string]string `json:"payload"`
-	Reason      string            `json:"reason"`
-	Status      string            `json:"status"`
-	RequestedBy string            `json:"requested_by"`
-	DecidedBy   *string           `json:"decided_by"`
-	Result      string            `json:"result"`
-	CreatedAt   string            `json:"created_at"`
-	DecidedAt   *string           `json:"decided_at"`
+	ID               string            `json:"id"`
+	Kind             string            `json:"kind"`
+	Payload          map[string]string `json:"payload"`
+	Reason           string            `json:"reason"`
+	Status           string            `json:"status"`
+	RequestedBy      string            `json:"requested_by"`
+	RequestedByEmail string            `json:"requested_by_email"`
+	DecidedBy        *string           `json:"decided_by"`
+	DecidedByEmail   *string           `json:"decided_by_email"`
+	Result           string            `json:"result"`
+	CreatedAt        string            `json:"created_at"`
+	DecidedAt        *string           `json:"decided_at"`
+	Mode             string            `json:"mode"`
+	ValueUSDT        *string           `json:"value_usdt"`
+	Escalation       string            `json:"escalation"`
+	JournalID        *string           `json:"journal_id"`
 }
 
 func approvalJSON(a domain.Approval) ApprovalJSON {
 	out := ApprovalJSON{
-		ID: a.ID, Kind: a.Kind, Payload: a.Payload, Reason: a.Reason, Status: a.Status, RequestedBy: a.RequestedBy, Result: a.Result,
-		CreatedAt: httpx.FormatTime(a.CreatedAt),
+		ID: a.ID, Kind: a.Kind, Payload: a.Payload, Reason: a.Reason, Status: a.Status, RequestedBy: a.RequestedBy,
+		RequestedByEmail: a.RequestedByEmail, Result: a.Result, CreatedAt: httpx.FormatTime(a.CreatedAt), Mode: a.Mode,
+		Escalation: a.Escalation,
+	}
+	if out.Mode == "" {
+		out.Mode = domain.ModeTwoPerson
 	}
 	if a.DecidedBy != "" {
 		out.DecidedBy = &a.DecidedBy
+	}
+	if a.DecidedByEmail != "" {
+		out.DecidedByEmail = &a.DecidedByEmail
 	}
 	if !a.DecidedAt.IsZero() {
 		s := httpx.FormatTime(a.DecidedAt)
 		out.DecidedAt = &s
 	}
+	if a.ValueUSDT != nil {
+		v := a.ValueUSDT.String()
+		out.ValueUSDT = &v
+	}
+	if a.JournalID != "" {
+		out.JournalID = &a.JournalID
+	}
 	return out
 }
 
-func (h *Handler) requestAdjustment(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		UserID string `json:"user_id"`
-		Asset  string `json:"asset"`
-		Amount string `json:"amount"`
-		Reason string `json:"reason"`
-	}
-	if err := httpx.DecodeJSON(w, r, &body); err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
+// fundBody is the body of a fund operation.
+type fundBody struct {
+	UserID    string `json:"user_id"`
+	Asset     string `json:"asset"`
+	Amount    string `json:"amount"`
+	Reason    string `json:"reason"`
+	Reference string `json:"reference"`
+	Direct    bool   `json:"direct"`
+}
+
+// submitFunds answers a fund operation: 201 with it, whatever came of it.
+func (h *Handler) submitFunds(w http.ResponseWriter, r *http.Request, kind string, body fundBody) {
 	amount, err := decimal.NewFromString(body.Amount)
 	if err != nil {
 		httpx.WriteError(w, r, apperr.Invalid("amount must be a decimal string"))
 		return
 	}
-	a, err := h.Svc.RequestAdjustment(r.Context(), principal(r), application.Adjustment{
-		UserID: body.UserID, Asset: body.Asset, Amount: amount, Reason: body.Reason,
+	a, err := h.Svc.SubmitFunds(r.Context(), principal(r), application.FundRequest{
+		Kind: kind, UserID: body.UserID, Asset: body.Asset, Amount: amount, Reason: body.Reason, Reference: body.Reference,
+		Direct: body.Direct,
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusCreated, approvalJSON(a))
+}
+
+func (h *Handler) requestAdjustment(w http.ResponseWriter, r *http.Request) {
+	var body fundBody
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	h.submitFunds(w, r, domain.KindLedgerAdjustment, body)
+}
+
+// userAdjustment adjusts a user's balance, at once in single-person mode
+// within the limits.
+func (h *Handler) userAdjustment(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Asset       string `json:"asset"`
+		Amount      string `json:"amount"`
+		Reason      string `json:"reason"`
+		Reference   string `json:"reference"`
+		AccountType string `json:"account_type"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if t := strings.ToUpper(body.AccountType); t != "" && t != "SPOT" {
+		httpx.WriteError(w, r, apperr.Invalid("account_type must be SPOT"))
+		return
+	}
+	h.submitFunds(w, r, domain.KindLedgerAdjustment, fundBody{
+		UserID: chi.URLParam(r, "id"), Asset: body.Asset, Amount: body.Amount, Reason: body.Reason, Reference: body.Reference, Direct: true,
+	})
+}
+
+// SettingsJSON is the console's settings with the caller's single-person
+// total of the last 24 hours.
+type SettingsJSON struct {
+	TwoPerson     bool    `json:"two_person_approval"`
+	SingleMax     string  `json:"single_max_usdt"`
+	DailyMax      string  `json:"daily_max_usdt"`
+	WithdrawalMax string  `json:"withdrawal_max_usdt"`
+	DailyUsed     string  `json:"daily_used_usdt"`
+	UpdatedBy     string  `json:"updated_by"`
+	UpdatedAt     *string `json:"updated_at"`
+}
+
+func settingsJSON(v application.SettingsView) SettingsJSON {
+	out := SettingsJSON{
+		TwoPerson: v.TwoPerson, SingleMax: v.SingleMax.String(), DailyMax: v.DailyMax.String(), WithdrawalMax: v.WithdrawalMax.String(),
+		DailyUsed: v.Used.String(), UpdatedBy: v.UpdatedBy,
+	}
+	if !v.UpdatedAt.IsZero() {
+		s := httpx.FormatTime(v.UpdatedAt)
+		out.UpdatedAt = &s
+	}
+	return out
+}
+
+func (h *Handler) settings(w http.ResponseWriter, r *http.Request) {
+	v, err := h.Svc.Settings(r.Context(), principal(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, settingsJSON(v))
+}
+
+func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		TwoPerson     *bool   `json:"two_person_approval"`
+		SingleMax     *string `json:"single_max_usdt"`
+		DailyMax      *string `json:"daily_max_usdt"`
+		WithdrawalMax *string `json:"withdrawal_max_usdt"`
+		Reason        string  `json:"reason"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	patch := application.SettingsPatch{TwoPerson: body.TwoPerson, Reason: body.Reason}
+	for _, f := range []struct {
+		in   *string
+		out  **decimal.Decimal
+		name string
+	}{
+		{body.SingleMax, &patch.SingleMax, "single_max_usdt"},
+		{body.DailyMax, &patch.DailyMax, "daily_max_usdt"},
+		{body.WithdrawalMax, &patch.WithdrawalMax, "withdrawal_max_usdt"},
+	} {
+		if f.in == nil {
+			continue
+		}
+		d, err := decimal.NewFromString(*f.in)
+		if err != nil {
+			httpx.WriteError(w, r, apperr.Invalid(f.name+" must be a decimal string"))
+			return
+		}
+		*f.out = &d
+	}
+	v, err := h.Svc.UpdateSettings(r.Context(), principal(r), patch)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, settingsJSON(v))
+}
+
+func (h *Handler) todo(w http.ResponseWriter, r *http.Request) {
+	t, err := h.Svc.Todo(r.Context(), principal(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, t)
 }
 
 func (h *Handler) approvals(w http.ResponseWriter, r *http.Request) {
@@ -775,25 +920,19 @@ func (h *Handler) insuranceFund(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) requestInsuranceFunding(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Asset  string `json:"asset"`
-		Amount string `json:"amount"`
-		Reason string `json:"reason"`
+		Asset     string `json:"asset"`
+		Amount    string `json:"amount"`
+		Reason    string `json:"reason"`
+		Reference string `json:"reference"`
+		Direct    bool   `json:"direct"`
 	}
 	if err := httpx.DecodeJSON(w, r, &body); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	amount, err := decimal.NewFromString(body.Amount)
-	if err != nil {
-		httpx.WriteError(w, r, apperr.Invalid("amount must be a decimal string"))
-		return
-	}
-	a, err := h.Svc.RequestInsuranceFunding(r.Context(), principal(r), body.Asset, amount, body.Reason)
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	httpx.WriteJSON(w, http.StatusCreated, approvalJSON(a))
+	h.submitFunds(w, r, domain.KindInsuranceFund, fundBody{
+		Asset: body.Asset, Amount: body.Amount, Reason: body.Reason, Reference: body.Reference, Direct: body.Direct,
+	})
 }
 
 func (h *Handler) house(w http.ResponseWriter, r *http.Request) {

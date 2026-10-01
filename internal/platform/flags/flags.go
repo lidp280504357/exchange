@@ -40,6 +40,11 @@ const (
 	KeyInternalMatching = "market.internal_matching" // users' orders trade with each other on pairs with HOUSE liquidity (ADR-0015)
 )
 
+// KeyTwoPerson makes the admin console's fund operations take a second
+// administrator; off, one carries them out within limits (design
+// 2026-10-02 §2).
+const KeyTwoPerson = "admin.two_person_approval"
+
 // Known describes the known flags.
 var Known = map[string]string{
 	KeyRegistrationSMS:  "SMS as a registration and login channel (high-risk regions stay email-only)",
@@ -58,6 +63,7 @@ var Known = map[string]string{
 	KeyReferenceDepth:   "Order book and public trades from the reference market instead of the platform's, per symbol (ADR-0010)",
 	KeyHouseLiquidity:   "HOUSE trades against orders at the reference market's book (virtual liquidity), per symbol; off leaves the platform's own book (ADR-0015)",
 	KeyInternalMatching: "Users' orders also trade with each other on pairs with HOUSE liquidity; off makes HOUSE the counterparty of every trade (ADR-0015)",
+	KeyTwoPerson:        "Admin console: manual adjustments, insurance fund contributions and withdrawals needing two reviewers take a second administrator; off lets one administrator carry them out within the console's single-person limits",
 }
 
 // List allows or denies values of one dimension. An empty Allow allows

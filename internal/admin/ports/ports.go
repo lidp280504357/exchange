@@ -25,8 +25,16 @@ type Repos interface {
 	Admins() AdminRepo
 	Sessions() SessionRepo
 	Approvals() ApprovalRepo
+	Settings() SettingsRepo
 	// Audit queues an administrator's action on audit.events.
 	Audit(ctx context.Context, msg proto.Message, actor string) error
+}
+
+// SettingsRepo stores the console's settings (one row).
+type SettingsRepo interface {
+	// Get returns the settings, or nil while nobody changed them.
+	Get(ctx context.Context) (*domain.Settings, error)
+	Put(ctx context.Context, s domain.Settings) error
 }
 
 // AdminRepo stores administrators.
@@ -39,6 +47,8 @@ type AdminRepo interface {
 	ByEmailForUpdate(ctx context.Context, email string) (*domain.Admin, error)
 	// Get returns an administrator, or nil.
 	Get(ctx context.Context, id string) (*domain.Admin, error)
+	// GetForUpdate is Get with the row locked.
+	GetForUpdate(ctx context.Context, id string) (*domain.Admin, error)
 	List(ctx context.Context) ([]domain.Admin, error)
 }
 
@@ -53,15 +63,24 @@ type SessionRepo interface {
 	RevokeAll(ctx context.Context, adminID string, now time.Time) error
 }
 
-// ApprovalRepo stores two-person requests.
+// ApprovalRepo stores fund operations: two-person requests and
+// single-person operations.
 type ApprovalRepo interface {
 	Insert(ctx context.Context, a domain.Approval) error
 	Update(ctx context.Context, a domain.Approval) error
 	GetForUpdate(ctx context.Context, id string) (*domain.Approval, error)
+	// Get returns one with the administrators' emails, or nil.
+	Get(ctx context.Context, id string) (*domain.Approval, error)
 	// List returns up to limit requests in a status ("": all), newest
 	// first, after the one created at afterTime with ID afterID (zero for
-	// the newest).
+	// the newest), with the administrators' emails.
 	List(ctx context.Context, status string, afterTime time.Time, afterID string, limit int) ([]domain.Approval, error)
+	// SingleUsage sums the worth of an administrator's single-person
+	// operations requested since then that were not refused (pending ones
+	// count: their outcome may be booked).
+	SingleUsage(ctx context.Context, adminID string, since time.Time) (decimal.Decimal, error)
+	// CountPending counts the requests waiting for a decision.
+	CountPending(ctx context.Context) (int, error)
 }
 
 // User is an account as the console shows it.
@@ -148,7 +167,10 @@ type CallbackQuery struct {
 // (wallet-service); answers pass through as the wallet renders them.
 type Withdrawals interface {
 	List(ctx context.Context, q WithdrawalQuery) (json.RawMessage, error)
-	Review(ctx context.Context, id string, approve bool, reviewer, reason string) (json.RawMessage, error)
+	// Review approves or rejects a withdrawal in review; a positive
+	// soleMax lets this approval complete one worth at most that much in
+	// USDT however many reviewers it needs (single-person mode).
+	Review(ctx context.Context, id string, approve bool, reviewer, reason string, soleMax decimal.Decimal) (json.RawMessage, error)
 	// Custody describes the custodian: coins, checks, what is with it.
 	Custody(ctx context.Context) (json.RawMessage, error)
 	Callbacks(ctx context.Context, q CallbackQuery) (json.RawMessage, error)

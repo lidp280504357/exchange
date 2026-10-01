@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 func TestRoles(t *testing.T) {
@@ -18,6 +20,9 @@ func TestRoles(t *testing.T) {
 		{RoleOperator, PermWithdrawalsEdit, false},
 		{RoleAuditor, PermAuditRead, true},
 		{RoleAuditor, PermUsersStatus, false},
+		{RoleAdmin, PermSettingsEdit, true},
+		{RoleFinance, PermSettingsEdit, false},
+		{RoleOperator, PermSettingsEdit, false},
 		{"ROOT", PermUsersRead, false},
 	} {
 		if Allows(c.role, c.perm) != c.want {
@@ -64,15 +69,39 @@ func TestSessionsAndApprovals(t *testing.T) {
 	if !s.Live(now.Add(time.Minute)) || s.Live(now.Add(SessionIdle)) || s.Live(now.Add(SessionTTL)) {
 		t.Fatal("session lifetime")
 	}
-	ap := Approval{Status: ApprovalPending, RequestedBy: "a1"}
-	if err := ap.Decide("a1"); !errors.Is(err, ErrSelfApproval) {
+	ap := Approval{Status: ApprovalPending, RequestedBy: "a1", Mode: ModeTwoPerson}
+	if err := ap.Decide("a1", true); !errors.Is(err, ErrSelfApproval) {
 		t.Fatal("no self-approval")
 	}
-	if err := ap.Decide("a2"); err != nil {
+	if err := ap.Decide("a1", false); err != nil {
+		t.Fatalf("withdrawing one's own request: %v", err)
+	}
+	if err := ap.Decide("a2", true); err != nil {
+		t.Fatal(err)
+	}
+	// A single-person operation whose outcome was unknown is finished by its requester.
+	single := Approval{Status: ApprovalPending, RequestedBy: "a1", Mode: ModeSingle}
+	if err := single.Decide("a1", true); err != nil {
 		t.Fatal(err)
 	}
 	ap.Status = ApprovalExecuted
-	if err := ap.Decide("a2"); !errors.Is(err, ErrNotPending) {
+	if err := ap.Decide("a2", true); !errors.Is(err, ErrNotPending) {
 		t.Fatal("decided once")
+	}
+}
+
+func TestSettings(t *testing.T) {
+	s := DefaultSettings()
+	if err := s.Validate(); err != nil || s.SingleMax.String() != "100000" || s.DailyMax.String() != "500000" {
+		t.Fatalf("defaults %+v %v", s, err)
+	}
+	s.DailyMax = s.SingleMax.Sub(decimal.NewFromInt(1))
+	if s.Validate() == nil {
+		t.Fatal("a day's limit below one operation's")
+	}
+	s = DefaultSettings()
+	s.WithdrawalMax = decimal.Zero
+	if s.Validate() == nil {
+		t.Fatal("a zero limit")
 	}
 }

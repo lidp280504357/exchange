@@ -1,6 +1,7 @@
 package postgres_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -41,6 +42,76 @@ func (l *ledger) FundInsurance(_ context.Context, key, _ string, _ decimal.Decim
 }
 
 func (l *ledger) SystemBalances(context.Context, string) ([]ports.Balance, error) { return nil, nil }
+
+// wallet has an empty review queue.
+type wallet struct{}
+
+func (wallet) List(context.Context, ports.WithdrawalQuery) (json.RawMessage, error) {
+	return json.RawMessage(`{"items":[],"next_cursor":null}`), nil
+}
+
+func (wallet) Review(context.Context, string, bool, string, string, decimal.Decimal) (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}
+
+func (wallet) Custody(context.Context) (json.RawMessage, error) { return json.RawMessage(`{}`), nil }
+
+func (wallet) Callbacks(context.Context, ports.CallbackQuery) (json.RawMessage, error) {
+	return json.RawMessage(`{"items":[]}`), nil
+}
+
+func (wallet) Callback(context.Context, string) (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}
+
+func (wallet) Replay(context.Context, string, string, string) (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}
+
+// stream opens the console's event stream and passes on its lines until
+// the test ends.
+func (c *client) stream(ctx context.Context) <-chan string {
+	c.t.Helper()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.srv.URL+"/admin/v1/events", nil)
+	req.AddCookie(c.cookie)
+	res, err := c.srv.Client().Do(req) //nolint:bodyclose // the reader below closes it
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "text/event-stream" {
+		_ = res.Body.Close()
+		c.t.Fatalf("events: %d %s", res.StatusCode, res.Header.Get("Content-Type"))
+	}
+	lines := make(chan string, 64)
+	go func() {
+		defer res.Body.Close()
+		defer close(lines)
+		sc := bufio.NewScanner(res.Body)
+		for sc.Scan() {
+			lines <- sc.Text()
+		}
+	}()
+	return lines
+}
+
+// await reads the stream until a line, failing after 10 seconds.
+func await(t *testing.T, lines <-chan string, want string) {
+	t.Helper()
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				t.Fatalf("the stream ended before %q", want)
+			}
+			if strings.HasPrefix(line, want) {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("no %q on the stream", want)
+		}
+	}
+}
 
 type client struct {
 	t      *testing.T
@@ -98,7 +169,8 @@ func TestConsole(t *testing.T) {
 	store := postgres.NewStore(db, event.NewFactory("admin-test", "t"))
 	hasher := password.NewHasher(1, password.Cost{MemoryKiB: 64, Iterations: 1})
 	led := &ledger{}
-	svc := &application.Service{Store: store, Hasher: hasher, Box: box, Ledger: led, Log: log, Now: time.Now}
+	// No flags: two-person approval is off (single-person mode).
+	svc := &application.Service{Store: store, Hasher: hasher, Box: box, Ledger: led, Wallet: wallet{}, Log: log, Now: time.Now}
 	secrets := map[string][]byte{}
 	for _, a := range []struct{ email, role string }{{"fin@example.com", domain.RoleFinance}, {"boss@example.com", domain.RoleAdmin}} {
 		secrets[a.email] = totp.NewSecret()
@@ -112,7 +184,7 @@ func TestConsole(t *testing.T) {
 		t.Fatal("a second account with the same address (in another case) was created")
 	}
 	r := httpx.NewRouter(httpx.RouterOptions{Logger: log})
-	(&httpapi.Handler{Svc: svc, Secure: true}).Routes(r)
+	(&httpapi.Handler{Svc: svc, Secure: true, EventsEvery: 50 * time.Millisecond}).Routes(r)
 	srv := httptest.NewServer(r)
 	defer srv.Close()
 	codes := map[string]string{}
@@ -176,14 +248,49 @@ func TestConsole(t *testing.T) {
 	if status != http.StatusOK || body["status"] != domain.ApprovalExecuted || len(led.keys) != 2 || led.keys[1] != "approval:"+fund {
 		t.Fatalf("insurance approval: %d %v (ledger %v)", status, body, led.keys)
 	}
+
+	// Single-person mode: an adjustment from the user's page is booked at once.
+	user := "/admin/v1/users/01929c3e-7f3a-7d7e-8a1b-2c3d4e5f6a7b/adjustments"
+	status, body = boss.do(http.MethodPost, user, map[string]string{"asset": "usdt", "amount": "12.5", "reason": "goodwill", "reference": "T-7"}, true)
+	if status != http.StatusCreated || body["status"] != domain.ApprovalExecuted || body["mode"] != domain.ModeSingle || body["journal_id"] != "j1" ||
+		body["decided_by_email"] != "boss@example.com" || body["value_usdt"] != "12.5" || len(led.keys) != 3 {
+		t.Fatalf("single-person adjustment: %d %v", status, body)
+	}
+	status, body = boss.do(http.MethodGet, "/admin/v1/settings", nil, false)
+	if status != http.StatusOK || body["two_person_approval"] != false || body["single_max_usdt"] != "100000" || body["daily_used_usdt"] != "12.5" {
+		t.Fatalf("settings: %d %v", status, body)
+	}
+	if status, body := fin.do(http.MethodPut, "/admin/v1/settings", map[string]string{"single_max_usdt": "10", "reason": "cautious"}, true); status != http.StatusForbidden {
+		t.Fatalf("finance changes the settings: %d %v", status, body)
+	}
+	if status, body := boss.do(http.MethodPut, "/admin/v1/settings", map[string]string{"single_max_usdt": "10", "reason": "cautious"}, true); status != http.StatusOK || body["single_max_usdt"] != "10" || body["updated_by"] != "boss@example.com" {
+		t.Fatalf("settings changed: %d %v", status, body)
+	}
+	// Above the limit it waits for a second administrator; its requester may withdraw it.
+	status, body = boss.do(http.MethodPost, user, map[string]string{"asset": "USDT", "amount": "-20", "reason": "fee correction"}, true)
+	if status != http.StatusCreated || body["status"] != domain.ApprovalPending || body["escalation"] != domain.EscalationSingleMax {
+		t.Fatalf("over the limit: %d %v", status, body)
+	}
+	over, _ := body["id"].(string)
+	status, body = boss.do(http.MethodPost, "/admin/v1/approvals/"+over+"/decide", map[string]any{"approve": false, "reason": "withdrawn"}, true)
+	if status != http.StatusOK || body["status"] != domain.ApprovalRejected || body["decided_by_email"] != "boss@example.com" {
+		t.Fatalf("withdrawn: %d %v", status, body)
+	}
+	// The event stream counts what waits and ends with the session.
+	streamCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	lines := fin.stream(streamCtx)
+	await(t, lines, `data: {"withdrawals":0,"approvals":0`)
+	if err := application.DisableAdmin(ctx, store, "fin@example.com", "test", "left the team", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	await(t, lines, "event: signed_out")
+
 	if status, _ := boss.do(http.MethodPost, "/admin/v1/logout", nil, true); status != http.StatusNoContent {
 		t.Fatalf("logout: %d", status)
 	}
 	if status, _ := boss.do(http.MethodGet, "/admin/v1/me", nil, false); status != http.StatusUnauthorized {
 		t.Fatalf("me after logout: %d", status)
-	}
-	if err := application.DisableAdmin(ctx, store, "fin@example.com", "test", "left the team", time.Now()); err != nil {
-		t.Fatal(err)
 	}
 	if status, _ := fin.do(http.MethodGet, "/admin/v1/me", nil, false); status != http.StatusUnauthorized {
 		t.Fatalf("me after disable: %d", status)
@@ -193,9 +300,10 @@ func TestConsole(t *testing.T) {
 	if err := db.QueryRow(ctx, `SELECT count(*) FROM outbox WHERE topic = 'audit.events'`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	// created ×2, login ×2, login_failed, requested ×2, approved ×2, logout, disabled
-	if n != 11 {
-		t.Fatalf("%d audit events in the outbox, want 11", n)
+	// created ×2, login ×2, login_failed, requested ×2, approved ×2, single-person requested and executed,
+	// settings changed, requested and withdrawn, disabled, logout
+	if n != 16 {
+		t.Fatalf("%d audit events in the outbox, want 16", n)
 	}
 	var admins string
 	if err := db.QueryRow(ctx, `SELECT string_agg(email || ':' || status || ':' || failed_attempts, ',' ORDER BY email) FROM admins`).Scan(&admins); err != nil {
