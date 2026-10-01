@@ -37,6 +37,7 @@ REST（经网关，无需登录，`Cache-Control: public, max-age=1`）：
 |---|---|
 | `GET /v1/market/tickers` | 所有上架交易对的 ticker（带 `rank`，基础资产的市值排名） |
 | `GET /v1/market/summary?limit=` | 首页概览：TRADING 状态、以 USDT 计价、有价格的交易对的涨幅榜、跌幅榜、成交额榜（各 `limit` 条，默认 5，最多 20） |
+| `GET /v1/market/sparklines?symbols=A,B&range=7d\|24h` | 行情列表的走势，一次最多 60 个交易对（阶段 4 B7）：取图表同源（参考市场或平台自己）的最近 168 根 1 小时 K 线收盘价，`7d` 均匀抽成 56 个点、`24h` 取最后 24 个；每个交易对的收盘价缓存 5 分钟，取不到的交易对不出现在结果里。两个用户站 10 ms 内要的行合成一个请求 |
 | `GET /v1/market/{symbol}/ticker` | 一个交易对的 ticker；未上架或已下线 404 |
 | `GET /v1/market/{symbol}/depth?limit=` | 深度 `[价格, 数量]`，最多 200 档，带公共盘口的 sequence；显示参考市场时是币安的盘口 |
 | `GET /v1/market/{symbol}/trades?limit=` | 最近成交（最多 100 条，新的在前），带交易对内编号 `trade_number`；显示参考市场时是币安的成交 |
