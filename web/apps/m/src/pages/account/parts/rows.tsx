@@ -57,11 +57,12 @@ export type NavRowProps = {
 
 /**
  * NavRow is a large row of the "me" tab: an icon, a label, an optional
- * value and a chevron, 56 px tall with press feedback. A link with `to`,
+ * value and a chevron, 56 px tall; a press darkens it and nudges the
+ * chevron 2 px right. A link with `to`,
  * a button with `onClick`.
  */
 export function NavRow({ icon, label, trailing, to, onClick, tone = "default", chevron = true }: NavRowProps) {
-  const className = "flex min-h-14 w-full items-center gap-3 px-4 text-left transition-colors active:bg-bg-2";
+  const className = "group flex min-h-14 w-full items-center gap-3 px-4 text-left transition-colors active:bg-bg-2";
   const body = (
     <>
       <span
@@ -72,7 +73,9 @@ export function NavRow({ icon, label, trailing, to, onClick, tone = "default", c
       </span>
       <span className={cn("min-w-0 flex-1 truncate text-base", tone === "danger" ? "text-danger" : "text-fg-1")}>{label}</span>
       {trailing}
-      {chevron && <ChevronRight size={18} className="shrink-0 text-fg-3" aria-hidden />}
+      {chevron && (
+        <ChevronRight size={18} className="shrink-0 text-fg-3 transition-transform duration-[var(--t-fast)] group-active:translate-x-0.5" aria-hidden />
+      )}
     </>
   );
   if (to !== undefined) {

@@ -4,19 +4,27 @@ import {
 } from "@exchange/core";
 import { Button, EmptyState, ErrorState, Progress, Skeleton, Tabs, TimeText, cn, toast } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
+import { ordersTabOf } from "../../account/me/logic";
 
 /**
  * SpotOrders: the caller's orders of this pair under the terminal as cards
  * (design §7.2): open orders with cancel, history and fills. The pushes
- * keep them current.
+ * keep them current. ?orders=open|history|fills (the "me" shortcuts)
+ * opens a tab and scrolls the orders into view.
  */
 export function SpotOrders({ pair }: { pair: Pair }) {
   const { t } = useTranslation();
   const signedIn = useSession(selectSignedIn);
-  const [tab, setTab] = useState("open");
+  const [params] = useSearchParams();
+  const asked = params.get("orders");
+  const [tab, setTab] = useState<string>(() => ordersTabOf(asked));
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (asked !== null) ref.current?.scrollIntoView({ block: "start" });
+  }, [asked]);
   const open = useOpenOrders(pair.symbol);
   if (!signedIn) {
     return (
@@ -32,7 +40,7 @@ export function SpotOrders({ pair }: { pair: Pair }) {
     );
   }
   return (
-    <div>
+    <div ref={ref} className="scroll-mt-14">
       <Tabs
         value={tab}
         onValueChange={setTab}

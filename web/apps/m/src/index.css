@@ -8,3 +8,59 @@ body {
   overflow-x: clip;
   overscroll-behavior-y: none;
 }
+
+/* The "me" tab (design §7.3): the identity card's grid fading out from a
+   corner and its two drifting lights, and the wordmark drawn once. The
+   lights move by transform only; reduced motion stills every animation
+   (@exchange/ui styles). */
+.me-grid {
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--brand) 14%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--brand) 14%, transparent) 1px, transparent 1px);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse 90% 85% at 100% 0%, var(--black), transparent 75%);
+}
+
+@keyframes me-drift-a {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(-56px, 32px, 0) scale(1.2);
+  }
+}
+
+@keyframes me-drift-b {
+  from {
+    transform: translate3d(0, 0, 0) scale(1.1);
+  }
+  to {
+    transform: translate3d(64px, -28px, 0) scale(0.9);
+  }
+}
+
+/* The wordmark: its outline is drawn, then it fills. */
+@keyframes me-draw {
+  from {
+    stroke-dashoffset: 320;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes me-fill {
+  from {
+    fill-opacity: 0;
+  }
+  to {
+    fill-opacity: 1;
+  }
+}
+
+.me-wordmark {
+  stroke-dasharray: 320;
+  animation:
+    me-draw 1.2s var(--ease) both,
+    me-fill 0.5s ease-out 0.9s both;
+}

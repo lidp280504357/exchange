@@ -1,26 +1,34 @@
-import { enumLabel, errorText, routes, selectRestoring, selectSignedIn, selectUserId, signOut, switchSite, useSession } from "@exchange/core";
+import { errorText, routes, selectRestoring, selectSignedIn, signOut, switchSite, useSession } from "@exchange/core";
+import { useTerminalPrefs } from "@exchange/core/trading/prefs";
 import { useUnreadNotifications } from "@exchange/core/user/notifications";
-import { useProfile } from "@exchange/core/user/profile";
-import { useBoundIdentities } from "@exchange/core/user/security";
-import { Badge, Button, Skeleton, copyText, listItem, toast } from "@exchange/ui";
+import { toast } from "@exchange/ui";
 import {
-  Bell, Copy, LifeBuoy, LogOut, Megaphone, Monitor, MonitorSmartphone, RotateCcw, ShieldCheck, SlidersHorizontal, UserRound,
+  Bell, ClipboardList, History, Info, LifeBuoy, ListChecks, LogOut, Megaphone, Monitor, MonitorSmartphone, ReceiptText, ShieldCheck,
+  SlidersHorizontal, Star,
 } from "lucide-react";
-import { motion } from "motion/react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 import { usePageHeader } from "../../layout/header";
+import { AboutSheet } from "./me/AboutSheet";
+import { AssetsCard } from "./me/AssetsCard";
+import { GuardCard } from "./me/GuardCard";
+import { HeaderActions } from "./me/HeaderActions";
+import { IdentityCard, IdentitySkeleton } from "./me/IdentityCard";
+import { ordersPath } from "./me/logic";
+import { MarketGlance } from "./me/MarketGlance";
+import { NewsStrip } from "./me/NewsStrip";
+import { QuickGrid, type QuickItem } from "./me/QuickGrid";
+import { WelcomeCard } from "./me/WelcomeCard";
 import { ConfirmSheet } from "./parts/ConfirmSheet";
-import { countBadge, primaryIdentity, shortId } from "./parts/logic";
+import { countBadge } from "./parts/logic";
 import { Group, NavRow, Section } from "./parts/rows";
 
 /**
- * Me (design §7.2 我的), a tab: the avatar, the masked identity and the
- * UID (tap to copy), then large rows — security, devices, notifications
- * with the unread count, settings, announcements, help, the PC site and
- * sign-out (after a confirmation sheet). Visitors get a sign-in card and
- * the public rows only.
+ * Me (design §7.3), a tab. Signed in: the identity card, the assets card,
+ * shortcuts, the security ring, the announcement strip, then the grouped
+ * rows and sign-out (after a confirmation sheet). Visitors get a welcome
+ * card, a glance at the markets, the public shortcuts and rows.
  */
 export default function Me() {
   const { t } = useTranslation();
@@ -28,9 +36,14 @@ export default function Me() {
   const signedIn = useSession(selectSignedIn);
   const restoring = useSession(selectRestoring);
   const unread = useUnreadNotifications();
+  const recent = useTerminalPrefs((s) => s.recent);
   const [confirm, setConfirm] = useState(false);
+  const [about, setAbout] = useState(false);
   const [busy, setBusy] = useState(false);
-  usePageHeader({ title: <span className="text-md font-semibold text-fg-1">{t("nav.me")}</span> }, [t]);
+  usePageHeader(
+    { title: <span className="text-md font-semibold text-fg-1">{t("nav.me")}</span>, right: <HeaderActions signedIn={signedIn} /> },
+    [t, signedIn],
+  );
 
   const toPC = () => {
     // switchSite keeps the path, and the PC site has no "me" page: go
@@ -54,56 +67,74 @@ export default function Me() {
     }
   };
 
+  const news: QuickItem = { key: "announcements", icon: <Megaphone size={18} />, label: t("nav.announcements"), to: routes.announcements };
+  const help: QuickItem = { key: "help", icon: <LifeBuoy size={18} />, label: t("nav.help"), to: routes.help };
+  const publicItems: QuickItem[] = [news, help, { key: "pc", icon: <Monitor size={18} />, label: t("mAccount.me.quick.toPC"), onClick: toPC }];
+  const memberItems: QuickItem[] = [
+    { key: "open", icon: <ClipboardList size={18} />, label: t("mAccount.me.quick.open"), to: ordersPath(recent, "open") },
+    { key: "history", icon: <History size={18} />, label: t("mAccount.me.quick.history"), to: ordersPath(recent, "history") },
+    { key: "fills", icon: <ListChecks size={18} />, label: t("mAccount.me.quick.fills"), to: ordersPath(recent, "fills") },
+    { key: "ledger", icon: <ReceiptText size={18} />, label: t("mAccount.me.quick.ledger"), to: routes.history },
+    { key: "favorites", icon: <Star size={18} />, label: t("mAccount.me.quick.favorites"), to: `${routes.markets}?cat=favorites` },
+    { key: "devices", icon: <MonitorSmartphone size={18} />, label: t("mAccount.me.quick.devices"), to: routes.sessions },
+    news,
+    help,
+  ];
+
   return (
     <div className="flex flex-col gap-4 px-4 py-3">
-      {restoring ? <ProfileSkeleton /> : signedIn ? <ProfileCard /> : <WelcomeCard />}
+      {restoring ? <IdentitySkeleton /> : signedIn ? <IdentityCard /> : <WelcomeCard />}
+      {signedIn && <AssetsCard index={1} />}
+      {!signedIn && !restoring && <MarketGlance index={1} />}
+      {!restoring && <QuickGrid items={signedIn ? memberItems : publicItems} index={2} />}
+      {signedIn && <GuardCard index={3} />}
+      <NewsStrip index={4} />
 
-      {(signedIn || restoring) && (
-        <Section title={t("mAccount.me.account")}>
-          {restoring ? (
-            <div aria-busy className="flex flex-col divide-y divide-line-1 rounded-3 bg-bg-1">
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="flex min-h-14 items-center gap-3 px-4">
-                  <Skeleton className="size-9 rounded-2" />
-                  <Skeleton className="h-4 w-28" />
-                </div>
-              ))}
-            </div>
-          ) : (
-            <Group index={1}>
-              <NavRow icon={<ShieldCheck size={18} />} label={t("mAccount.security.title")} to={routes.security} />
-              <NavRow icon={<MonitorSmartphone size={18} />} label={t("nav.sessions")} to={routes.sessions} />
-              <NavRow
-                icon={<Bell size={18} />}
-                label={t("nav.notifications")}
-                to={routes.notifications}
-                trailing={
-                  unread > 0 && (
-                    <>
-                      <span aria-hidden className="min-w-5 rounded-full bg-danger px-1.5 text-center text-xs font-semibold leading-5 text-white tabular-nums">
-                        {countBadge(unread)}
-                      </span>
-                      <span className="sr-only">{t("mAccount.me.unread", { count: unread })}</span>
-                    </>
-                  )
-                }
-              />
-            </Group>
-          )}
+      {signedIn && (
+        <Section title={t("mAccount.me.groups.account")}>
+          <Group index={5}>
+            <NavRow icon={<ShieldCheck size={18} />} label={t("mAccount.security.title")} to={routes.security} />
+            <NavRow icon={<MonitorSmartphone size={18} />} label={t("mAccount.me.devices")} to={routes.sessions} />
+            <NavRow
+              icon={<Bell size={18} />}
+              label={t("nav.notifications")}
+              to={routes.notifications}
+              trailing={
+                unread > 0 && (
+                  <>
+                    <span aria-hidden className="min-w-5 rounded-full bg-danger px-1.5 text-center text-xs font-semibold leading-5 text-white tabular-nums">
+                      {countBadge(unread)}
+                    </span>
+                    <span className="sr-only">{t("mAccount.me.unread", { count: unread })}</span>
+                  </>
+                )
+              }
+            />
+          </Group>
         </Section>
       )}
 
-      <Section title={t("mAccount.me.general")}>
-        <Group index={2}>
+      <Section title={t("mAccount.me.groups.prefs")}>
+        <Group index={6}>
           <NavRow icon={<SlidersHorizontal size={18} />} label={t("nav.settings")} to={routes.settings} />
-          <NavRow icon={<Megaphone size={18} />} label={t("nav.announcements")} to={routes.announcements} />
+        </Group>
+      </Section>
+
+      <Section title={t("mAccount.me.groups.support")}>
+        <Group index={7}>
           <NavRow icon={<LifeBuoy size={18} />} label={t("nav.help")} to={routes.help} />
+          <NavRow icon={<Info size={18} />} label={t("mAccount.me.about.title")} onClick={() => setAbout(true)} />
+        </Group>
+      </Section>
+
+      <Section title={t("mAccount.me.groups.other")}>
+        <Group index={8}>
           <NavRow icon={<Monitor size={18} />} label={t("footer.toPC")} onClick={toPC} />
         </Group>
       </Section>
 
       {signedIn && (
-        <Group index={3}>
+        <Group index={9}>
           <NavRow icon={<LogOut size={18} />} label={t("nav.logout")} tone="danger" chevron={false} onClick={() => setConfirm(true)} />
         </Group>
       )}
@@ -120,98 +151,7 @@ export default function Me() {
         loading={busy}
         onConfirm={() => void logout()}
       />
-    </div>
-  );
-}
-
-function ProfileCard() {
-  const { t } = useTranslation();
-  const userId = useSession(selectUserId);
-  const ids = useBoundIdentities();
-  const profile = useProfile();
-  const identity = primaryIdentity(ids.data);
-  const status = profile.data?.status;
-
-  const copy = async () => {
-    if (await copyText(userId)) toast.success(t("mAccount.me.uidCopied"));
-  };
-
-  return (
-    <motion.section variants={listItem} initial="initial" animate="animate" custom={0} className="flex items-center gap-4 rounded-3 bg-bg-1 p-4">
-      <span aria-hidden className="grid size-14 shrink-0 place-items-center rounded-full bg-brand-soft text-brand">
-        <UserRound size={28} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex min-h-7 min-w-0 items-center gap-2">
-          {ids.isPending ? (
-            <Skeleton className="h-5 w-40 max-w-full" />
-          ) : (
-            <span className="min-w-0 truncate text-md font-semibold text-fg-1">{identity ?? t("mAccount.me.user")}</span>
-          )}
-          {status && status !== "ACTIVE" && (
-            <Badge tone={status === "CLOSED" ? "neutral" : "warn"} dot>
-              {enumLabel(status, "accountStatus")}
-            </Badge>
-          )}
-          {ids.isError && (
-            // The identity could not be read: the fallback name shows, with a way to try again.
-            <button
-              type="button"
-              aria-label={`${t("common.retry")}: ${errorText(ids.error)}`}
-              onClick={() => void ids.refetch()}
-              className="-my-2 grid size-11 shrink-0 place-items-center text-danger"
-            >
-              <RotateCcw size={16} />
-            </button>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={() => void copy()}
-          aria-label={`${t("mAccount.me.copyUid")}: ${userId}`}
-          className="-ml-1 inline-flex min-h-11 items-center gap-1.5 rounded-2 px-1 text-sm text-fg-3 transition-colors active:text-fg-1"
-        >
-          {t("mAccount.uid")}
-          <span className="text-fg-2 tabular-nums">{shortId(userId)}</span>
-          <Copy size={14} aria-hidden />
-        </button>
-      </div>
-    </motion.section>
-  );
-}
-
-function WelcomeCard() {
-  const { t } = useTranslation();
-  return (
-    <motion.section variants={listItem} initial="initial" animate="animate" custom={0} className="relative overflow-hidden rounded-3 bg-bg-1 p-5">
-      <div aria-hidden className="pointer-events-none absolute -right-10 -top-10 size-40 rounded-full bg-brand-soft blur-2xl" />
-      <div className="relative flex items-center gap-3">
-        <span aria-hidden className="grid size-12 shrink-0 place-items-center rounded-full bg-bg-2 text-fg-3">
-          <UserRound size={24} />
-        </span>
-        <h2 className="text-lg font-semibold text-fg-1">{t("mAccount.me.welcome")}</h2>
-      </div>
-      <p className="relative mt-3 text-sm leading-relaxed text-fg-2">{t("mAccount.me.welcomeHint")}</p>
-      <div className="relative mt-4 grid grid-cols-2 gap-3">
-        <Button asChild size="lg">
-          <Link to={`${routes.login}?next=${encodeURIComponent(routes.me)}`}>{t("nav.login")}</Link>
-        </Button>
-        <Button asChild size="lg" variant="secondary">
-          <Link to={routes.register}>{t("nav.register")}</Link>
-        </Button>
-      </div>
-    </motion.section>
-  );
-}
-
-function ProfileSkeleton() {
-  return (
-    <div aria-busy className="flex items-center gap-4 rounded-3 bg-bg-1 p-4">
-      <Skeleton round className="size-14" />
-      <div className="flex flex-1 flex-col gap-2">
-        <Skeleton className="h-5 w-40" />
-        <Skeleton className="h-4 w-32" />
-      </div>
+      <AboutSheet open={about} onOpenChange={setAbout} />
     </div>
   );
 }

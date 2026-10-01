@@ -40,6 +40,10 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
     - B5 管理后台：设计 §10 页面上线 `admin.astras.vip`（`web/apps/admin`：公共组件在 `src/kit/`（游标列表、地址栏筛选与视图、危险操作确认、枚举标签、格式化），页面在 `src/pages/`，登录后的外壳按需加载）；新接口 `/admin/v1/{house,health,ledger/reconciliation,ledger/system-balances}`；旧后台 `web/admin` 已删除，`astras.vip/admin/*` 301 到新后台；`packages/ui` 有 `Drawer` 与 `TrendChart`；浏览器冒烟测试 `web/e2e/admin-smoke.mjs`（`web.sh` 建临时 ADMIN）；提交 `314c3dd`、`52550b5`、`dd796c4`。
     - B6 托管钱包（测试服用模拟网关，ADR-0011）：网络行 `provider`/`provider_coin` 选择托管方；协议 `internal/platform/udun`（按优盾官方 Go SDK），端口 `ports.Custody`、适配器 `internal/wallet/adapters/custody`、应用 `internal/wallet/application/custody*.go`；提现新状态 `SUBMITTED`；公开回调 `POST /v1/wallet/callbacks/udun`（`custody_callbacks` 记日志，后台可重放）；对账按资产覆盖全部持有方（`chain_checks.elsewhere`、`in_flight`），`exchangectl wallet reconcile --network UDUN`；模拟网关 `cmd/udun-mock`（容器 `udun-mock`，状态 `infra/udun-mock/state.json`，`UDUN_*` 在 `apps.env`）；端到端 `custody.sh`；提交 `14523e5`、`e2a2a94`、`546641a`、`c9edb1d`。见 `docs/runbook/custody.md`。BSC 的主链编码 9006 待托管方 `support-coins` 确认。
     - B7 收尾：运行时性能测量 `task web:perf`（`web/e2e/perf.mjs`，Lighthouse 管不到的 §12.1 预算，全部达标）；行情列表的走势一页一个请求 `GET /v1/market/sparklines`（market-data-service 按交易对缓存 5 分钟，`range=7d|24h`）；故障注入 `scripts/fault/custody-callbacks.sh`；部署脚本解除部署期间开始的合约只减仓；`docs/阶段4验收报告.md`。**阶段 4 完成**（除托管方真网关联调、真机验证与人工检查清单、后台访问限制，均等用户）。
+    - 阶段 4 之后（2026-10-01，用户反馈）：
+      - 交易页不再闪：头部大价格用 `PriceText` 的 `flash={false} arrow`，盘口数量不闪，K 线去掉 TradingView 角标，归属文字由 `ChartCredit` 放在 PC 页脚与手机帮助页。
+      - 资产表头修复：`DataTable` 的 `stickyTop` 不带 `height` 时外层用 clip。
+      - 手机站「我的」按设计 §7.3 重做：`apps/m/src/pages/account/me/`，资产汇总钩子是 core 的 `usePortfolio`。
   - 下一步：与用户一起测试（报告 §8 的清单）；托管方真网关联调等商户号与密钥。
 - 服务隔离：`.golangci.yml` 的 depguard 规则禁止 `internal/<服务>` 互相 import，新服务要在那里补一组规则。消费事件用 `bootstrap.Consumer` + 应用层经 inbox 去重（auth 的 `Store.Once`、notification 的 `inbox.ProcessID`）。
 - 鉴权：网关验 JWT 后把身份写进 `X-User-Id`/`X-Session-Id`/`X-Auth-Scope` 头转发（客户端同名头会被剥掉），服务端用 `httpx.UserID(r)`/`httpx.SessionID(r)` 读取；新的公开接口要加进 `internal/gateway/routes.go`，否则默认必须登录。敏感操作读 `X-Step-Up-Token`，跨服务用 auth-service gRPC `ConsumeStepUp` 兑换。

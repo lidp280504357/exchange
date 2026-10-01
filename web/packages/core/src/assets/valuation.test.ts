@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { convertValue, distribution, isSmall, referencePrice, valuePortfolio, type Tickers } from "./valuation";
+import { convertValue, dayChange, distribution, isSmall, referenceChange, referencePrice, valuePortfolio, type Tickers } from "./valuation";
 
 const tickers: Tickers = new Map([
   ["BTC-USDT", { last: "63214.5" }],
@@ -100,5 +100,41 @@ describe("convertValue", () => {
   it("expresses a USDT value in BTC, cut down", () => {
     expect(convertValue("2382.645", "63214.5", 8)).toBe("0.03769143");
     expect(convertValue("100", null, 8)).toBeNull();
+  });
+});
+
+describe("referenceChange", () => {
+  const moving: Tickers = new Map([
+    ["BTC-USDT", { last: "63214.5", change: "0.02" }],
+    ["ETH-USDT", { last: null, change: null }],
+    ["ETH-BTC", { last: "0.04", change: "-0.01" }],
+    ["SOL-USDT", { last: "150.25", change: "-0.05" }],
+  ]);
+
+  it("follows the path of the price", () => {
+    expect(referenceChange("USDT", moving)).toBe("0");
+    expect(referenceChange("SOL", moving)).toBe("-0.05");
+    expect(referenceChange("ETH", moving)).toBe("0.0098"); // 0.99 × 1.02 − 1
+  });
+
+  it("has none without a priced pair", () => {
+    expect(referenceChange("DOGE", moving)).toBeNull();
+    expect(referenceChange("BTC", new Map([["BTC-USDT", { last: "63214.5" }]]))).toBeNull();
+  });
+});
+
+describe("dayChange", () => {
+  const changes: Record<string, string | null> = { USDT: "0", BTC: "0.25", SOL: "-0.2", DOGE: null };
+  const row = (asset: string, value: string | null) => ({ asset, value });
+
+  it("adds each holding's move over the day", () => {
+    // BTC worth 125 now was 100: +25; SOL worth 80 was 100: −20.
+    const d = dayChange([row("USDT", "1000"), row("BTC", "125"), row("SOL", "80"), row("DOGE", "7"), row("XRP", null)], (a) => changes[a] ?? null);
+    expect(d.value).toBe("5");
+    expect(d.ratio).toBe("0.004142"); // 5 ÷ 1207 (DOGE counts, unmoved), cut down
+  });
+
+  it("is zero, without a ratio, for nothing held", () => {
+    expect(dayChange([], () => "0.1")).toEqual({ value: "0", ratio: null });
   });
 });

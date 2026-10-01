@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { accountApi, derivativesApi, marketApi, unwrap, userApi } from "../api/client";
 import { ApiError } from "../api/errors";
 import type { components as AccountSchemas } from "../api/gen/account";
@@ -10,6 +10,7 @@ import { selectSignedIn, useSession } from "../session/store";
 import { prependItem, type Page } from "../wallet/push";
 import { retryServerErrors } from "../wallet/hooks";
 import type { AccountType } from "./transfer";
+import { convertValue, dayChange, referenceChange, referencePrice, valuePortfolio } from "./valuation";
 
 // Account data for the assets pages of both sites (design §6.2, §7.2):
 // balances (kept current by the balance pushes, query/private.ts), live
@@ -63,6 +64,22 @@ export function useLiveTickers() {
     if (rest.data) market.seedTickers(rest.data.tickers);
   }, [market, rest.data]);
   return { tickers, pending: rest.isPending && tickers.size === 0, error: tickers.size === 0 ? rest.error : null, refetch: rest.refetch };
+}
+
+/**
+ * usePortfolio values the caller's balances at live reference prices: the
+ * portfolio (total, account subtotals, rows), the total in BTC and the
+ * estimated 24-hour change of the holdings (valuation dayChange). It
+ * recomputes as balances and tickers move.
+ */
+export function usePortfolio() {
+  const balances = useBalances();
+  const { tickers, pending: pricesPending } = useLiveTickers();
+  const list = balances.data?.balances;
+  const portfolio = useMemo(() => valuePortfolio(list ?? [], (asset) => referencePrice(asset, tickers)), [list, tickers]);
+  const day = useMemo(() => dayChange(portfolio.rows.ALL, (asset) => referenceChange(asset, tickers)), [portfolio, tickers]);
+  const inBtc = convertValue(portfolio.total, referencePrice("BTC", tickers), 8);
+  return { balances, portfolio, day, inBtc, pricesPending };
 }
 
 /** useLedger pages through the fund flow, newest first, by asset and entry type ("" for all). */

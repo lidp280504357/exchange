@@ -12,7 +12,7 @@ export const VALUATION_BRIDGE = "BTC";
 /** Rows valued below this (USDT) are "small" for the hide-small switch. */
 export const SMALL_VALUE = "1";
 
-export type TickerLike = { last: string | null };
+export type TickerLike = { last: string | null; change?: string | null };
 export type Tickers = ReadonlyMap<string, TickerLike>;
 
 function lastPrice(tickers: Tickers, symbol: string): string | null {
@@ -29,6 +29,56 @@ export function referencePrice(asset: string, tickers: Tickers): string | null {
   const cross = lastPrice(tickers, `${asset}-${VALUATION_BRIDGE}`);
   const bridge = lastPrice(tickers, `${VALUATION_BRIDGE}-${VALUATION_QUOTE}`);
   return cross && bridge ? dec.mul(cross, bridge) : null;
+}
+
+function changeOf(tickers: Tickers, symbol: string): string | null {
+  const c = tickers.get(symbol)?.change;
+  return lastPrice(tickers, symbol) && c && dec.isDecimal(c) ? c : null;
+}
+
+/**
+ * referenceChange is the 24-hour change of an asset's USDT price as a
+ * ratio ("0.0231" for +2.31%), along the path referencePrice takes: 0 for
+ * USDT, the USDT pair's change, or (1 + the BTC pair's) × (1 + BTC-USDT's)
+ * − 1; null without one.
+ */
+export function referenceChange(asset: string, tickers: Tickers): string | null {
+  if (asset === VALUATION_QUOTE) return "0";
+  if (lastPrice(tickers, `${asset}-${VALUATION_QUOTE}`)) return changeOf(tickers, `${asset}-${VALUATION_QUOTE}`);
+  if (asset === VALUATION_BRIDGE) return null;
+  const cross = changeOf(tickers, `${asset}-${VALUATION_BRIDGE}`);
+  const bridge = changeOf(tickers, `${VALUATION_BRIDGE}-${VALUATION_QUOTE}`);
+  return cross !== null && bridge !== null ? dec.sub(dec.mul(dec.add("1", cross), dec.add("1", bridge)), "1") : null;
+}
+
+export type DayChange = {
+  /** USDT the holdings gained over 24 hours (negative: lost). */
+  value: string;
+  /** value ÷ their worth 24 hours earlier; null when that was nothing. */
+  ratio: string | null;
+};
+
+/**
+ * dayChange estimates the last 24 hours' profit or loss of what is held
+ * now: value × change ÷ (1 + change) for each priced row, at its asset's
+ * 24-hour change. There are no daily balance snapshots, so funds that came
+ * or went during the day count as held all day: the market's effect on
+ * the current holdings, which is how pages label it ("24h").
+ */
+export function dayChange(rows: readonly Pick<AssetRow, "asset" | "value">[], changeOfAsset: (asset: string) => string | null): DayChange {
+  let value = "0";
+  let now = "0";
+  for (const r of rows) {
+    if (r.value === null) continue;
+    now = dec.add(now, r.value);
+    const c = changeOfAsset(r.asset);
+    if (c === null || dec.sign(c) === 0) continue;
+    const base = dec.add("1", c);
+    if (dec.sign(base) <= 0) continue;
+    value = dec.add(value, dec.div(dec.mul(r.value, c), base, 8));
+  }
+  const before = dec.sub(now, value);
+  return { value, ratio: dec.sign(before) > 0 ? dec.div(value, before, 6) : null };
 }
 
 export type BalanceLike = { account_type: string; asset: string; available: string; frozen: string; total: string };

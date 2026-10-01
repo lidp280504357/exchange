@@ -5,8 +5,9 @@
 //
 // Drives the deployed site as a phone would (390 x 844, touch, an iPhone
 // user agent, so nginx does not send it to the PC site), in Chinese: sign
-// up through the form, the welcome funds on the assets tab, sign out from
-// the "me" tab and back in, the market list and its search, a limit order
+// up through the form, the welcome funds on the assets tab, the "me" tab's
+// cards signed in and out (sign-out is there), sign back in, the market
+// list and its search, a limit order
 // placed from the spot terminal's order sheet and cancelled from its open
 // orders, a transfer to futures and its ledger entry, a deposit address,
 // the futures terminal, notifications, devices, help, the language switch
@@ -46,7 +47,7 @@ async function signOut() {
   await clickButton("退出登录");
   await sheetOpen();
   await clickButton("退出登录", "[role=dialog]");
-  await waitText("欢迎来到 Astras", 10000);
+  await page.waitForSelector('[data-testid="me-welcome"]', { visible: true, timeout: 10000 });
 }
 
 try {
@@ -70,8 +71,17 @@ try {
   ok(`signed up ${email} through the form; the assets tab shows the welcome funds`);
   await shot("1-assets");
 
-  // 2. Sign out from the "me" tab, sign back in with the password.
+  // 2. The "me" tab (design §7.3) signed in, then out; sign back in with the password.
+  const cards = async (ids) => {
+    for (const id of ids) await page.waitForSelector(`[data-testid="${id}"]`, { visible: true, timeout: 20000 });
+  };
+  await go("/me");
+  await cards(["me-identity", "me-assets", "me-quick", "me-guard"]);
+  ok('the "me" tab shows the identity, assets, shortcuts and security cards');
+  await shot("1-me");
   await signOut();
+  await cards(["me-welcome", "me-glance", "me-quick"]);
+  ok('signed out, the "me" tab welcomes the visitor with a glance at the markets');
   await go("/login?next=%2Fmarkets");
   await typeInto('input[autocomplete="username"]', email);
   await typeInto('input[autocomplete="current-password"]', "a wrong password!");

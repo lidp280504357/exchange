@@ -4,7 +4,8 @@ import { lazyPage, type PageRoute } from "../../routing";
 // Me (a tab), security, devices and sign-ins, settings, notifications
 // (design §7.2). Security and devices ask for step-ups, whose sheet uses
 // the auth strings.
-const Me = lazyPage(() => import("./Me"), () => import("../../i18n/account"));
+// The visitors' market glance on "me" shows market names, with the markets strings.
+const Me = lazyPage(() => import("./Me"), () => import("../../i18n/account"), () => import("../../i18n/markets"));
 const Security = lazyPage(() => import("./Security"), () => import("../../i18n/account"), () => import("../../i18n/auth"));
 const Sessions = lazyPage(() => import("./Sessions"), () => import("../../i18n/account"), () => import("../../i18n/auth"));
 const Settings = lazyPage(() => import("./Settings"), () => import("../../i18n/account"));
