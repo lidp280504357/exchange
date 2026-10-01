@@ -20,9 +20,10 @@
 - 集成测试的依赖由 `scripts/ci/services.sh` 起成容器（PostgreSQL、Redis、ClickHouse、Redpanda，与测试服同版本，每次都是空库）。
   - 拉镜像失败会退避重试最多六次，每次失败的原因写进注解。
   - ClickHouse 取自 `mirror.gcr.io`：Docker Hub 对匿名拉取限流，GitHub 自带的服务容器只在几秒内重试三次，曾让任务在 `Initialize containers` 失败。
-- Go 版本是 1.26 的最新补丁版（`setup-go` 的 `1.26.x` + `check-latest`），与应用镜像 `golang:1.26-alpine` 一致。
-  - go.mod 的 `go 1.26.0` 只表示能构建本模块的最低版本。
-  - govulncheck 按运行它的 Go 判断标准库漏洞，按 go.mod 装 1.26.0 会一直报标准库漏洞。
+- Go 版本是 1.27 的最新补丁版（`setup-go` 的 `1.27.x` + `check-latest`），与应用镜像 `golang:1.27-alpine` 一致。项目 2026-10-01 从 1.26 升到 1.27。
+  - go.mod 的 `go 1.27.0` 只表示能构建本模块的最低版本。
+  - govulncheck 按运行它的 Go 判断标准库漏洞。按 go.mod 装 `.0` 版会一直报标准库漏洞，所以 CI 取最新补丁版。
+  - 换 Go 小版本时要一起改四处：go.mod（含 `tools/devmcp`）、CI 工作流 `.github/workflows/ci.yml`、`deploy/docker/Dockerfile` 的 `GO_IMAGE`、本机工具。本机工具指 golangci-lint 与 govulncheck，要用新 Go 重新 `go install`，否则它们按旧标准库分析。
   - 有漏洞但还没有修复版的依赖，govulncheck 也会失败。GO-2026-6443 就是这样：gRPC 的 1.84 线没有修复版，所以退到已修复的 v1.83.2。
 - 运行日志要登录且有仓库权限才能看，注解不用。
   - `go test` 或 govulncheck 失败时，「name the failures」步骤把失败的测试、竞态、编译错误或漏洞编号写成一条注解。

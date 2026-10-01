@@ -1,6 +1,6 @@
 module github.com/lidp280504357/exchange
 
-go 1.26.0
+go 1.27.0
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0

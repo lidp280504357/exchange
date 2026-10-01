@@ -28,12 +28,12 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 2 # buf breaking compares with the previous commit
-      # The newest patch release, as the app images build with golang:1.26-alpine:
-      # go.mod's "go 1.26.0" is the oldest Go that builds the module, and govulncheck
+      # The newest patch release, as the app images build with golang:1.27-alpine:
+      # go.mod's "go 1.27.0" is the oldest Go that builds the module, and govulncheck
       # judges the standard library of the Go that runs it.
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.26.x'
+          go-version: '1.27.x'
           check-latest: true
           cache: true
       # 集成测试的依赖（internal/platform/testenv）：拉取镜像会重试，失败原因写进注解

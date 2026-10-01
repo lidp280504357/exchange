@@ -6,7 +6,7 @@
 
 2026-09-30 起是新服务器：AWS 4 vCPU / 7.8 GiB（非突发型），Ubuntu 26.04，48 GB 磁盘，公网 IP `3.107.113.199`（`ssh exchange`）；旧的 t2.medium（`16.176.196.40`）2026-09-29 晚整机无响应后弃用，数据没有迁移。
 
-- git 2.53、Go 1.26.4（`/usr/local/go`，`/etc/profile.d/go.sh` 已加 PATH，重新登录生效）、2 GB swap（swappiness 10）
+- git 2.53、Go 1.27.1（`/usr/local/go`，2026-10-01 由 1.26.4 升级；`/etc/profile.d/go.sh` 已加 PATH，重新登录生效；应用在 Docker 里用 `golang:1.27-alpine` 构建，不用它）、2 GB swap（swappiness 10）
 - 部署密钥 `~/.ssh/exchange_deploy_ed25519`，`~/.ssh/config` 已为 `github.com` 指定该密钥（目前按账号级 SSH key 添加；改成仓库只读 Deploy key 更安全）
 - 源码目录 `/opt/exchange/src`（仓库克隆位置），基础设施目录 `/opt/exchange/infra`
 - Docker 29.8 + Compose v5.5（Docker 官方 apt 源），应用镜像用多阶段 Dockerfile 在服务器上构建，不需要本机 Docker

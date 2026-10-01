@@ -3,7 +3,7 @@
 # 构建上下文是仓库根目录（服务器上为 /opt/exchange/src），见 deploy/compose/docker-compose.apps.yml。
 # 基础镜像用 AWS ECR Public 的 Docker 官方镜像，避免 Docker Hub 拉取限额。
 
-ARG GO_IMAGE=public.ecr.aws/docker/library/golang:1.26-alpine
+ARG GO_IMAGE=public.ecr.aws/docker/library/golang:1.27-alpine
 ARG RUNTIME_IMAGE=public.ecr.aws/docker/library/alpine:3.22
 
 FROM ${GO_IMAGE} AS build

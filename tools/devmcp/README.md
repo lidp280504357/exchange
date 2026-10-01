@@ -5,7 +5,7 @@
 ## 前置条件
 
 - 本地 `ssh exchange` 能免密登录测试服务器（`~/.ssh/config` 已配置 `ProxyJump ye`）。
-- 本机安装 Go 1.26 以上。
+- 本机安装 Go 1.27 以上。
 - 第一次在项目里启动 Claude Code 时，会提示是否信任 `.mcp.json` 里的 Server，选择允许。
 
 ## 提供的工具

@@ -28,4 +28,4 @@ task deploy:status # 测试服容器状态
 task e2e           # 对测试环境跑端到端检查（scripts/e2e，含无头 Chrome 的 PC 站与手机站冒烟测试）
 ```
 
-本机只需 Go 1.26+、Node 24+（pnpm 11）和 `~/go/bin` 里的工具（gofumpt、golangci-lint、task 等），不需要 Docker；部署流程见 [docs/runbook/server-deploy.md](docs/runbook/server-deploy.md)，前端见 [docs/runbook/web.md](docs/runbook/web.md)。
+本机只需 Go 1.27+、Node 24+（pnpm 11）和 `~/go/bin` 里的工具（gofumpt、golangci-lint、task 等），不需要 Docker；部署流程见 [docs/runbook/server-deploy.md](docs/runbook/server-deploy.md)，前端见 [docs/runbook/web.md](docs/runbook/web.md)。
