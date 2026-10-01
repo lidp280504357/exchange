@@ -1,0 +1,16 @@
+{
+  "ci": {
+    "collect": {
+      "url": ["https://admin.astras.vip/login"],
+      "numberOfRuns": 1,
+      "settings": { "preset": "desktop", "throttlingMethod": "simulate" }
+    },
+    "assert": {
+      "assertions": {
+        "categories:performance": ["warn", { "minScore": 0.85 }],
+        "cumulative-layout-shift": ["error", { "maxNumericValue": 0.05 }]
+      }
+    },
+    "upload": { "target": "filesystem", "outputDir": "../../.lighthouseci/admin" }
+  }
+}

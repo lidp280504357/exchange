@@ -140,11 +140,12 @@ tasks:
       - pnpm test
 
   web:lighthouse:
-    desc: 对部署后的 PC 站与手机站各三页跑 Lighthouse（设计 §12.1 的性能预算；需要本机 Chrome；报告在 .lighthouseci/）
+    desc: 对部署后的 PC 站与手机站各三页、后台登录页跑 Lighthouse（设计 §12.1 的性能预算；需要本机 Chrome；报告在 .lighthouseci/）
     dir: web/lighthouse
     cmds:
       - pnpm dlx @lhci/cli@0.15 autorun --config=pc.json || true
       - pnpm dlx @lhci/cli@0.15 autorun --config=m.json || true
+      - pnpm dlx @lhci/cli@0.15 autorun --config=admin.json || true
 
   admin:types:
     desc: 同 web:types（管理后台的类型也由它生成）

@@ -58,7 +58,11 @@ export async function start({ app, api, name, device, apiPrefix = "/v1/" }) {
   // Chrome logs every 4xx fetch as an error; expected API errors are
   // asserted by the scripts, so only script errors count here.
   page.on("console", (m) => {
-    if (m.type() === "error" && !m.text().startsWith("Failed to load resource")) errors.push("console: " + m.text());
+    // Cloudflare injects its analytics beacon into every page; the admin
+    // console's CSP (default-src 'self') blocks it, which is the point.
+    if (m.type() === "error" && !m.text().startsWith("Failed to load resource") && !m.text().includes("cloudflareinsights.com")) {
+      errors.push("console: " + m.text());
+    }
   });
   page.on("response", async (r) => {
     const type = r.request().resourceType();

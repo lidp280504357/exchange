@@ -2,12 +2,13 @@ import { adminApi, adminData, can, type Admin } from "@exchange/core/api/admin";
 import { Badge, Button, cn, Toaster } from "@exchange/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { LogOut, PanelLeftClose, PanelLeftOpen } from "lucide-react";
-import { Suspense, useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink, Outlet, useSearchParams } from "react-router";
-import { sections } from "../App";
-import { UserDrawer } from "../pages/users/UserDrawer";
+import { sections } from "../sections";
 import { GlobalSearch } from "./GlobalSearch";
+
+const UserDrawer = lazy(() => import("../pages/users/UserDrawer"));
 
 /**
  * ConsoleShell (design §10.1): a collapsible sidebar with the sections the
@@ -105,7 +106,11 @@ export function ConsoleShell({ admin }: { admin: Admin }) {
           </Suspense>
         </main>
       </div>
-      {userId && can(admin, "users.read") && <UserDrawer admin={admin} userId={userId} onClose={closeUser} />}
+      {userId && can(admin, "users.read") && (
+        <Suspense fallback={null}>
+          <UserDrawer admin={admin} userId={userId} onClose={closeUser} />
+        </Suspense>
+      )}
       <Toaster />
     </div>
   );

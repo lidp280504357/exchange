@@ -18,7 +18,7 @@ const STATUSES = ["ACTIVE", "RISK_REVIEW", "FROZEN", "CLOSED"] as const;
 const REASONS = ["SUSPICIOUS_LOGIN", "FRAUD_SUSPECTED", "COMPLIANCE_REVIEW", "USER_REQUEST", "REVIEW_CLEARED"];
 
 /** UserDrawer is a user's detail panel (design §10.3): account, balances, records and actions. */
-export function UserDrawer({ admin, userId, onClose }: { admin: Admin; userId: string; onClose: () => void }) {
+export default function UserDrawer({ admin, userId, onClose }: { admin: Admin; userId: string; onClose: () => void }) {
   const { t } = useTranslation();
   const [tab, setTab] = useState("overview");
   const view = useQuery({
