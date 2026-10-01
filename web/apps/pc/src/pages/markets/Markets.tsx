@@ -329,7 +329,7 @@ export default function Markets() {
             data={data}
             getRowId={(it) => it.row.symbol}
             loading={loading}
-            loadingRows={6}
+            loadingRows={14}
             error={error}
             onRetry={refetch}
             empty={empty}
@@ -338,7 +338,9 @@ export default function Markets() {
             manualSorting
             onRowClick={(it) => navigate(tradePath(it.row))}
             virtual={virtual}
-            height={virtual ? "min(760px, calc(100dvh - 180px))" : undefined}
+            // The list is long (50 pairs and more): its height is kept while
+            // it loads, so the footer does not jump down when it arrives.
+            height={virtual || loading ? "min(760px, calc(100dvh - 180px))" : undefined}
             stickyHeader={virtual}
           />
         </section>

@@ -147,6 +147,11 @@ tasks:
       - pnpm dlx @lhci/cli@0.15 autorun --config=m.json || true
       - pnpm dlx @lhci/cli@0.15 autorun --config=admin.json || true
 
+  web:perf:
+    desc: 对部署后的站点测量 Lighthouse 管不到的性能预算（设计 §12.1：长任务、消息到像素、切换交易对、路由往返、列表与 1000 行表格帧率；需要本机 Chrome）
+    dir: web/e2e
+    cmds: [node perf.mjs]
+
   admin:types:
     desc: 同 web:types（管理后台的类型也由它生成）
     cmds: [task: web:types]

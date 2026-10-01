@@ -160,4 +160,13 @@ nginx（`deploy/compose/nginx/conf.d/astras.vip.conf` 与 `snippets/site-{pc,m,a
   - 手机站浏览器冒烟测试 `web/e2e/m-smoke.mjs`（390 × 844、触屏、iPhone UA，nginx 因此不分流到 PC 站）：表单注册 → 资产 tab 欢迎资金 → 在"我的"里退出（确认面板）再登录 → 行情搜索 → 现货终端从下单面板挂限价单（下单确认）并撤单 → 划转与流水 → 充值地址 → 合约终端 → 通知、设备、帮助 → 语言切换 → 退出；检查同 PC。本机：`APP=http://localhost:5174 node web/e2e/m-smoke.mjs`；
   - 管理后台浏览器冒烟测试 `web/e2e/admin-smoke.mjs`（阶段 4 B5，1440 × 900）：`web.sh` 经 ssh 建一个临时 ADMIN（随机密码从标准输入传入、不打印，结束时停用），登录后走遍全部页面，见 [admin.md](admin.md#后台页面阶段-4-b5设计稿-10)；`/admin/v1` 的响应按 `api/admin/admin.yaml` 校验。本机：`ADMIN_EMAIL=… ADMIN_PASSWORD=… APP=http://localhost:5180 node web/e2e/admin-smoke.mjs`（开发服务器第一次打开会预构建依赖并刷新页面，等它就绪再跑）；
   - 三个冒烟测试共用 `web/e2e/lib.mjs`（Chrome、旁路令牌、开发收件箱、契约校验、按可见文字找按钮）。面板有滑入动画，测试等它停稳（`sheetOpen`）再点，关闭后等遮罩消失再点页面。
+- 运行时性能（阶段 4 B7）：`task web:perf`（`web/e2e/perf.mjs`，headless Chrome，对已部署的站点，BTC-USDT 每秒约 10 条深度消息）测量 Lighthouse 管不到的 §12.1 预算：
+  - 终端页一分钟推流里的主线程长任务（> 50 ms）；
+  - 深度消息到显示它的那一帧（每次盘口更新对照它显示的最新一条消息，p50/p95）；
+  - 切换交易对（新交易对的快照到达到盘口出现）；
+  - 离开再回到终端（15 秒宽限内不新建 WebSocket、不重收快照，盘口重新出现的时间）；
+  - 手机站以四分之一 CPU（`emulateCPUThrottling(4)`，近似中端手机）跑同样的测量，另测行情列表滚动帧率；
+  - 设计系统里 1000 行虚拟表格（Storybook `data-datatable--virtual-1000`）滚动 3 秒的帧率；
+  - `node web/e2e/perf.mjs memory`：PC 终端页 30 分钟（`MINUTES`）的 JS 堆增长（前后各强制一次 GC）。
+  未达预算时退出码非 0；`BUDGET=warn` 只报告。结果记在 `docs/阶段4验收报告.md`。
 - 人工检查清单：[ui-checklist.md](ui-checklist.md)。

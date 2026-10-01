@@ -3,11 +3,12 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Browser smoke tests of the deployed sites, run by scripts/e2e/web.sh",
+  "description": "Browser smoke tests of the deployed sites (scripts/e2e/web.sh) and their runtime performance (task web:perf)",
   "scripts": {
     "pc": "node pc-smoke.mjs",
     "m": "node m-smoke.mjs",
-    "admin": "node admin-smoke.mjs"
+    "admin": "node admin-smoke.mjs",
+    "perf": "node perf.mjs"
   },
   "devDependencies": {
     "ajv": "^8.20.0",
