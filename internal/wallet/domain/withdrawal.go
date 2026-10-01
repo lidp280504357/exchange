@@ -33,7 +33,11 @@ const (
 
 // What the custodian last said of a withdrawal (its provider status):
 // handed over but not acknowledged yet, taken, in its review, approved by
-// it, refused, sent, or failed on chain.
+// it, refused, sent, or failed on chain. Uncertain is ours: handed over
+// again after an unknown outcome and refused, though the custodian may
+// hold the first hand-over (its refusal can say "insufficient balance"
+// because the first one took the balance), so the withdrawal waits for its
+// callback or a person; nothing is released.
 const (
 	CustodySubmitted = "SUBMITTED"
 	CustodyAccepted  = "ACCEPTED"
@@ -42,6 +46,7 @@ const (
 	CustodyRejected  = "REJECTED"
 	CustodySuccess   = "SUCCESS"
 	CustodyFailed    = "FAILED"
+	CustodyUncertain = "UNCERTAIN"
 )
 
 // Risk reasons that send a withdrawal to review (§11.6).
@@ -223,7 +228,7 @@ func (w *Withdrawal) Custodian(word, tx string, now time.Time) bool {
 		}
 		w.ProviderStatus, w.UpdatedAt = word, now
 	case CustodySuccess:
-		w.ProviderStatus, w.TxHash, w.Confirmations, w.ConfirmedAt = word, tx, w.Required, now
+		w.ProviderStatus, w.TxHash, w.Confirmations, w.ConfirmedAt, w.RejectReason = word, tx, w.Required, now, ""
 		w.set(WithdrawalConfirmed, now)
 	case CustodyRejected, CustodyFailed:
 		w.ProviderStatus, w.RejectReason = word, "CUSTODY_"+word
@@ -234,6 +239,16 @@ func (w *Withdrawal) Custodian(word, tx string, now time.Time) bool {
 	default:
 		return false
 	}
+	return true
+}
+
+// Uncertain marks a withdrawal with the custodian whose hand-over was
+// refused on a retry (CustodyUncertain); reason is the refusal.
+func (w *Withdrawal) Uncertain(reason string, now time.Time) bool {
+	if w.Status != WithdrawalSubmitted || w.ProviderStatus == CustodyUncertain {
+		return false
+	}
+	w.ProviderStatus, w.RejectReason, w.UpdatedAt = CustodyUncertain, "UNCERTAIN: "+reason, now
 	return true
 }
 

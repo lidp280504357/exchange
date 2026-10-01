@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 
 	walletv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
@@ -40,6 +41,9 @@ type Service struct {
 	W   Withdrawals
 	Log *slog.Logger
 	Now func() time.Time
+	// FeesRefused counts custodian fees not booked for being above the
+	// amount sent (applyWithdrawal); nil counts nothing.
+	FeesRefused prometheus.Counter
 }
 
 // DepositAddress returns the user's deposit address for an asset on a

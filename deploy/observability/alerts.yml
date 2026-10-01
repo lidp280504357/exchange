@@ -266,6 +266,21 @@ groups:
           summary: "{{ $value }} callbacks of {{ $labels.provider }} failed or match nothing; look at them in the admin console (custodian page)"
           runbook: docs/runbook/custody.md
 
+      - alert: CustodyWithdrawalsUncertain
+        expr: max by (provider) (wallet_custody_withdrawals_uncertain) > 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $value }} withdrawals were refused on a retry though {{ $labels.provider }} may hold the first hand-over; their funds stay frozen until its callback, or ask it and run exchangectl wallet custody-resolve"
+          runbook: docs/runbook/custody.md
+
+      - alert: CustodyFeeRefused
+        expr: max by (instance) (increase(wallet_custody_fees_refused_total[1h])) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "a custodian fee above the amount sent was not booked: check the fee's unit for that coin (gas in its smallest unit?)"
+          runbook: docs/runbook/custody.md
+
       - alert: CustodyFeesUnbooked
         expr: max by (provider) (wallet_custody_fees_unbooked) > 0
         for: 1h

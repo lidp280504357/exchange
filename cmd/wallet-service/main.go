@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
 
 	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
@@ -215,7 +216,12 @@ func setup(ctx context.Context, a *app.App) error {
 			Prices:   &prices.Client{Base: cfg.MarketURL, Client: &http.Client{Timeout: 5 * time.Second}, Fallback: fallback},
 			Cooldown: cfg.WhitelistCooldown,
 		},
+		FeesRefused: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "wallet_custody_fees_refused_total",
+			Help: "Custodian fees not booked for being above the amount sent (another unit?); a person checks them.",
+		}),
 	}
+	a.Metrics().MustRegister(svc.FeesRefused)
 	if cfg.XPub != "" {
 		deriver, err := evm.NewDeriver(cfg.XPub)
 		if err != nil {

@@ -504,3 +504,85 @@ func TestReplayCallback(t *testing.T) {
 		t.Fatalf("an applied callback replayed: %v", err)
 	}
 }
+
+// Review finding B1: the first hand-over's outcome is unknown, and the
+// custodian refuses the retry ("balance too low": the first took it). It
+// may still send the first, so nothing is released: the withdrawal waits,
+// uncertain, for the custodian's callback or a person.
+func TestCustodyRefusedRetriesWaitForTheCustodian(t *testing.T) {
+	h := newCustodyHarness(t)
+	sent := h.requestCustody(t, "20")
+	unsent := h.requestCustody(t, "30")
+	h.custody.down = true
+	_ = h.cproc.Round(context.Background())
+	h.custody.down, h.custody.refuse = false, true
+	h.now = h.now.Add(2 * time.Minute)
+	h.cround(t)
+	for _, id := range []string{sent.ID, unsent.ID} {
+		got := h.store.wds[id]
+		if got.Status != domain.WithdrawalSubmitted || got.ProviderStatus != domain.CustodyUncertain || got.UnfreezeJournal != "" ||
+			!strings.HasPrefix(got.RejectReason, "UNCERTAIN: code 4001") {
+			t.Fatalf("a refused retry: %+v", got)
+		}
+	}
+	if !h.ledger.frozen["alice"].Equal(d("52")) {
+		t.Fatalf("frozen %s, want both withdrawals' 50 and their fees", h.ledger.frozen["alice"])
+	}
+	// No more hand-overs; the custodian's callback still applies.
+	h.custody.refuse = false
+	h.now = h.now.Add(2 * time.Minute)
+	h.cround(t)
+	if got := h.store.wds[sent.ID]; got.ProviderStatus != domain.CustodyUncertain {
+		t.Fatalf("handed over again: %+v", got)
+	}
+	h.callback(t, ports.CustodyTrade{
+		TradeID: "w-1", Kind: domain.CallbackWithdrawal, Status: 3, Word: domain.CustodySuccess, Coin: usdtCoin, BusinessID: sent.ID,
+		TxHash: "beef",
+	})
+	if got := h.store.wds[sent.ID]; got.Status != domain.WithdrawalConfirmed || got.RejectReason != "" {
+		t.Fatalf("sent after all: %+v", got)
+	}
+	// A person finds the other was never sent: released within a round.
+	if _, err := ResolveCustodyWithdrawal(context.Background(), h.store, unsent.ID, false, "", "ops", "", h.now); err == nil {
+		t.Fatal("resolved without a reason")
+	}
+	got, err := ResolveCustodyWithdrawal(context.Background(), h.store, unsent.ID, false, "", "ops", "not in the custodian's records", h.now)
+	if err != nil || got.Status != domain.WithdrawalFailed || got.RejectReason != "CUSTODY_FAILED: resolved by ops: not in the custodian's records" {
+		t.Fatalf("resolved %+v %v", got, err)
+	}
+	h.cround(t)
+	if got := h.store.wds[unsent.ID]; got.UnfreezeJournal == "" {
+		t.Fatalf("not released: %+v", got)
+	}
+	if _, err := ResolveCustodyWithdrawal(context.Background(), h.store, unsent.ID, true, "beef", "ops", "again", h.now); err == nil {
+		t.Fatal("resolved twice")
+	}
+}
+
+// Review finding B2: a fee above what was sent is in another unit or
+// wrong; it is not booked (GAS_SUPPLY would never cover it) but counted.
+func TestCustodyFeesAboveTheAmountAreNotBooked(t *testing.T) {
+	h := newCustodyHarness(t)
+	refused := &countingCounter{}
+	h.svc.FeesRefused = refused
+	wd := h.requestCustody(t, "20")
+	h.cround(t)
+	cb := h.callback(t, ports.CustodyTrade{
+		TradeID: "w-9", Kind: domain.CallbackWithdrawal, Status: 3, Word: domain.CustodySuccess, Coin: usdtCoin, BusinessID: wd.ID,
+		TxHash: "f00d", Fee: d("1500000000"),
+	})
+	if got := h.store.wds[wd.ID]; got.Status != domain.WithdrawalConfirmed || !strings.Contains(cb.Detail, "not booked") {
+		t.Fatalf("sent %+v, callback %+v", got, cb)
+	}
+	if len(h.store.fees) != 0 || refused.n != 1 {
+		t.Fatalf("fees %v, refused %d", h.store.fees, refused.n)
+	}
+}
+
+// countingCounter counts Inc calls (the rest of prometheus.Counter is not used).
+type countingCounter struct {
+	prometheus.Counter
+	n int
+}
+
+func (c *countingCounter) Inc() { c.n++ }

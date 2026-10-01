@@ -54,6 +54,7 @@ type CustodyProcessor struct {
 	submitted prometheus.Gauge
 	oldest    prometheus.Gauge
 	attention prometheus.Gauge
+	uncertain prometheus.Gauge
 	waiting   prometheus.Gauge
 	unbooked  prometheus.Gauge
 }
@@ -75,9 +76,10 @@ func NewCustodyProcessor(p CustodyProcessor, reg prometheus.Registerer) *Custody
 	p.submitted = gauge("wallet_custody_submitted", "Withdrawals with the custodian, not reported sent or failed yet.")
 	p.oldest = gauge("wallet_custody_submitted_oldest_seconds", "How long the oldest withdrawal has been with the custodian.")
 	p.attention = gauge("wallet_custody_callbacks_attention", "Verified callbacks that failed or found nothing to apply to.")
+	p.uncertain = gauge("wallet_custody_withdrawals_uncertain", "Withdrawals refused on a retry that the custodian may still send: they wait for its callback or a person.")
 	p.waiting = gauge("wallet_custody_deposits_held", "Deposits the custodian confirmed that wait because their asset takes no deposits.")
 	p.unbooked = gauge("wallet_custody_fees_unbooked", "The custodian's fees the ledger has not booked yet (GAS_SUPPLY short?).")
-	reg.MustRegister(p.up, p.balance, p.held, p.expected, p.shortfall, p.submitted, p.oldest, p.attention, p.waiting, p.unbooked)
+	reg.MustRegister(p.up, p.balance, p.held, p.expected, p.shortfall, p.submitted, p.oldest, p.attention, p.uncertain, p.waiting, p.unbooked)
 	if p.CheckEvery <= 0 {
 		p.CheckEvery = time.Hour
 	}
@@ -236,13 +238,16 @@ func (p *CustodyProcessor) submit(ctx context.Context, w domain.Withdrawal, nets
 	if err != nil || !moved {
 		return err
 	}
-	return p.handOver(ctx, w, net)
+	return p.handOver(ctx, w, net, false)
 }
 
-// handOver gives a SUBMITTED withdrawal to the custodian. A refusal fails
-// it and releases its funds; an unknown outcome leaves it for resubmit
-// (the withdrawal ID makes a repeat harmless).
-func (p *CustodyProcessor) handOver(ctx context.Context, w domain.Withdrawal, net domain.Network) error {
+// handOver gives a SUBMITTED withdrawal to the custodian. An unknown
+// outcome leaves it for resubmit (the withdrawal ID makes a repeat
+// harmless). A refusal of the first hand-over fails it and releases its
+// funds; a refusal of a retry does neither: the custodian may hold the
+// first and send it, so the withdrawal is marked uncertain and waits for
+// the custodian's callback or a person (CustodyUncertain).
+func (p *CustodyProcessor) handOver(ctx context.Context, w domain.Withdrawal, net domain.Network, retry bool) error {
 	err := p.Custody.Submit(ctx, w, net)
 	refused := apperr.Is(err, domain.ErrCustodyRefused.Code)
 	if err != nil && !refused {
@@ -254,6 +259,14 @@ func (p *CustodyProcessor) handOver(ctx context.Context, w domain.Withdrawal, ne
 		cur, rerr := r.Withdrawals().GetForUpdate(ctx, w.ID)
 		if rerr != nil || cur == nil {
 			return rerr
+		}
+		if refused && retry {
+			if !cur.Uncertain(detail(err), p.Now()) {
+				return nil
+			}
+			p.Log.ErrorContext(ctx, "the custodian refused a withdrawal handed over again, it may hold the first: left for its callback or a person",
+				"withdrawal_id", cur.ID, "reason", cur.RejectReason)
+			return r.Withdrawals().Update(ctx, *cur)
 		}
 		if !refused {
 			if !cur.Custodian(domain.CustodyAccepted, "", p.Now()) {
@@ -297,7 +310,7 @@ func (p *CustodyProcessor) resubmit(ctx context.Context, nets []domain.Network) 
 			errs = append(errs, fmt.Errorf("withdrawal %s: no network %s for %s", w.ID, w.Network, w.Asset))
 			continue
 		}
-		errs = append(errs, p.handOver(ctx, w, net))
+		errs = append(errs, p.handOver(ctx, w, net, true))
 	}
 	return errors.Join(errs...)
 }
@@ -311,6 +324,13 @@ func (p *CustodyProcessor) observe(ctx context.Context) error {
 		return err
 	}
 	p.submitted.Set(float64(len(list)))
+	uncertain := 0
+	for _, w := range list {
+		if w.ProviderStatus == domain.CustodyUncertain {
+			uncertain++
+		}
+	}
+	p.uncertain.Set(float64(uncertain))
 	oldest := 0.0
 	if len(list) > 0 {
 		oldest = p.Now().Sub(list[0].SubmittedAt).Seconds()

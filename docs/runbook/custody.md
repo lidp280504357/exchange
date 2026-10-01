@@ -53,10 +53,11 @@ custody_callbacks（原文、验签、结果、次数）──> 充值：deposit
 
 **提现**：申请、地址簿、冷却、限额、风控、审批与自建模式相同；地址按网络格式校验（TRON Base58Check、比特币 bech32/Base58、EVM 校验和），再问托管方 `/mch/check/address`（托管方不可达时只用本地规则）。批准后处理器先把提现改为 `SUBMITTED`（从此不能撤销，发 `WithdrawalSubmitted`），再调 `/mch/withdraw`（`businessId` = 提现 ID）：
 - 成功或 4288（托管方已有）→ 托管方状态 `ACCEPTED`；
-- 4000–4999 的业务拒绝 → `FAILED`（原因 `CUSTODY_REFUSED: code …`），立即解冻；
-- 网络错误等结果未知 → 保持 `SUBMITTED`/`SUBMITTED`，1 分钟后重交（重复的 `businessId` 被托管方拒绝，所以重交无害）。
+- 首次提交被 4000–4999 的业务拒绝 → `FAILED`（原因 `CUSTODY_REFUSED: code …`），立即解冻；
+- 网络错误等结果未知 → 保持 `SUBMITTED`/`SUBMITTED`，1 分钟后重交（重复的 `businessId` 被托管方拒绝，所以重交无害）；
+- 重交时被 4288 以外的理由拒绝 → **不解冻**：托管方可能已经收下第一次（例如第一次超时但已受理，重交时余额已被它用掉，返回"余额不足"），这时解冻就是双花。提现保持 `SUBMITTED`，托管方状态记为 `UNCERTAIN`（原因 `UNCERTAIN: code …`），不再重交，只等托管方的 2/3/4 回调；告警 `CustodyWithdrawalsUncertain`。人工到托管方后台核实后用 `exchangectl wallet custody-resolve <提现ID> --sent --tx <哈希> --reason …`（已发出，处理器结算）或 `--failed --reason …`（没发出，处理器解冻）了结。
 
-回调 `status` 0/1 只更新托管方状态（`REVIEW`/`APPROVED`）；3 → `CONFIRMED`、记交易哈希，并立即结算 `WITHDRAW_SETTLE`（处理器兜底重试）；2 或 4 → `FAILED`（原因 `CUSTODY_REJECTED`、`CUSTODY_FAILED: <txId>`），处理器解冻。托管方结算前资金一直冻结在用户账户，失败时不需要冲正。回调里的 `fee`（托管方向平台收的费）记入 `chain_fees`，像自建模式的 gas 一样从 `GAS_SUPPLY` 入账；`fee` 按提现币种计，以正式文档为准。
+回调 `status` 0/1 只更新托管方状态（`REVIEW`/`APPROVED`）；3 → `CONFIRMED`、记交易哈希，并立即结算 `WITHDRAW_SETTLE`（处理器兜底重试）；2 或 4 → `FAILED`（原因 `CUSTODY_REJECTED`、`CUSTODY_FAILED: <txId>`），处理器解冻。托管方结算前资金一直冻结在用户账户，失败时不需要冲正。回调里的 `fee`（托管方向平台收的费）记入 `chain_fees`，像自建模式的 gas 一样从 `GAS_SUPPLY` 入账；`fee` 按提现币种与 `decimals` 换算，以正式文档为准。**大于提现金额的 `fee` 不入账**（多半是另一种单位，例如代币提现按链的最小单位计的 gas；照记会在 `GAS_SUPPLY` 留下永远补不上的缺口），回调结果里注明，计数 `wallet_custody_fees_refused_total`，告警 `CustodyFeeRefused`。接真网关后每个币种的第一笔真实提现都要人工核对手续费的单位。
 
 **回调**：先把原文（最多 16 KiB）、验签与时间检查结果记入 `custody_callbacks`，验签通过的同一（provider, tradeId, status）只记一行，托管方重试只加 `attempts`；再在一个事务里应用并记结果：
 
@@ -112,8 +113,8 @@ sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T udu
 
 ## 指标与告警
 
-- `wallet_custody_up`、`wallet_custody_balance{coin}`（5 分钟）、`wallet_custody_held/expected/shortfall{asset}`（每次对账）、`wallet_custody_submitted`、`wallet_custody_submitted_oldest_seconds`、`wallet_custody_callbacks_attention`、`wallet_custody_deposits_held`、`wallet_custody_fees_unbooked`，常量标签 `provider`。
-- 告警（`deploy/observability/alerts.yml`）：`CustodyShortfall`（短缺 15 分钟，严重）、`CustodyUnreachable`（10 分钟）、`CustodyWithdrawalStuck`（`SUBMITTED` 超过 24 小时，人工到托管方后台核对）、`CustodyCallbacksNeedAttention`（15 分钟）、`CustodyFeesUnbooked`（1 小时）。
+- `wallet_custody_up`、`wallet_custody_balance{coin}`（5 分钟）、`wallet_custody_held/expected/shortfall{asset}`（每次对账）、`wallet_custody_submitted`、`wallet_custody_submitted_oldest_seconds`、`wallet_custody_withdrawals_uncertain`、`wallet_custody_callbacks_attention`、`wallet_custody_deposits_held`、`wallet_custody_fees_unbooked`，常量标签 `provider`；`wallet_custody_fees_refused_total`（不入账的手续费）。
+- 告警（`deploy/observability/alerts.yml`）：`CustodyShortfall`（短缺 15 分钟，严重）、`CustodyUnreachable`（10 分钟）、`CustodyWithdrawalStuck`（`SUBMITTED` 超过 24 小时，人工到托管方后台核对）、`CustodyWithdrawalsUncertain`（重交被拒、托管方可能仍会发出，5 分钟，严重）、`CustodyCallbacksNeedAttention`（15 分钟）、`CustodyFeeRefused`、`CustodyFeesUnbooked`（1 小时）。
 
 ## 端到端
 

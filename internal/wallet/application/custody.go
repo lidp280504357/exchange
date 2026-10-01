@@ -257,7 +257,21 @@ func (s *Service) applyWithdrawal(ctx context.Context, r ports.Repos, provider s
 	}
 	switch w.Status {
 	case domain.WithdrawalConfirmed:
-		if t.Fee.IsPositive() {
+		feeNote := ""
+		switch {
+		case !t.Fee.IsPositive():
+		case t.Fee.GreaterThan(w.Amount):
+			// A fee above what was sent is in another unit (gas in the
+			// chain's smallest unit for a token?) or wrong: booking it would
+			// leave a hole GAS_SUPPLY never fills. A person checks the unit
+			// (the first real withdrawal of each coin is checked by hand).
+			s.Log.ErrorContext(ctx, "the custodian's fee is above the amount sent: not booked, check its unit", "withdrawal_id", w.ID,
+				"fee", t.Fee, "amount", w.Amount, "asset", w.Asset)
+			if s.FeesRefused != nil {
+				s.FeesRefused.Inc()
+			}
+			feeNote = "; fee " + t.Fee.String() + " not booked: above the amount"
+		default:
 			// What the custodian charged the platform for sending it: booked
 			// like gas, from GAS_SUPPLY (ADR-0011).
 			if err := r.ChainFees().Insert(ctx, domain.ChainFee{
@@ -270,7 +284,7 @@ func (s *Service) applyWithdrawal(ctx context.Context, r ports.Repos, provider s
 		if err := r.EmitWithdrawal(ctx, &walletv1.WithdrawalConfirmed{Withdrawal: WithdrawalProto(*w)}, w.UserID); err != nil {
 			return "", "", false, err
 		}
-		return domain.CallbackApplied, "withdrawal " + w.ID + " sent in " + t.TxHash, true, nil
+		return domain.CallbackApplied, "withdrawal " + w.ID + " sent in " + t.TxHash + feeNote, true, nil
 	case domain.WithdrawalFailed:
 		s.Log.ErrorContext(ctx, "the custodian did not send a withdrawal", "withdrawal_id", w.ID, "reason", w.RejectReason)
 		if err := r.EmitWithdrawal(ctx, &walletv1.WithdrawalFailed{Withdrawal: WithdrawalProto(*w)}, w.UserID); err != nil {
@@ -279,6 +293,50 @@ func (s *Service) applyWithdrawal(ctx context.Context, r ports.Repos, provider s
 		return domain.CallbackApplied, "withdrawal " + w.ID + " " + w.RejectReason, false, nil
 	}
 	return domain.CallbackApplied, "withdrawal " + w.ID + ": " + w.ProviderStatus, false, nil
+}
+
+// ResolveCustodyWithdrawal records what a person found out about a
+// withdrawal with the custodian whose outcome the platform does not know
+// (CustodyUncertain, or a callback that never came): sent in tx, or not
+// sent. The processors then settle a sent one and release an unsent one,
+// as after the custodian's callback.
+func ResolveCustodyWithdrawal(ctx context.Context, store ports.Store, id string, sent bool, tx, actor, reason string, now time.Time,
+) (domain.Withdrawal, error) {
+	if strings.TrimSpace(actor) == "" || strings.TrimSpace(reason) == "" {
+		return domain.Withdrawal{}, apperr.Invalid("an actor and a reason are required")
+	}
+	if sent && strings.TrimSpace(tx) == "" {
+		return domain.Withdrawal{}, apperr.Invalid("a sent withdrawal needs its transaction")
+	}
+	var out domain.Withdrawal
+	err := store.Tx(ctx, func(r ports.Repos) error {
+		w, err := r.Withdrawals().GetForUpdate(ctx, id)
+		if err != nil {
+			return err
+		}
+		if w == nil || w.Provider == "" {
+			return apperr.NotFound("no such withdrawal with a custodian")
+		}
+		word := domain.CustodyFailed
+		if sent {
+			word = domain.CustodySuccess
+		}
+		if !w.Custodian(word, tx, now) {
+			return apperr.New(apperr.KindConflict, apperr.CodeConflict, "the withdrawal is "+w.Status+", not with the custodian")
+		}
+		if !sent {
+			w.RejectReason = "CUSTODY_FAILED: resolved by " + actor + ": " + reason
+		}
+		if err := r.Withdrawals().Update(ctx, *w); err != nil {
+			return err
+		}
+		out = *w
+		if sent {
+			return r.EmitWithdrawal(ctx, &walletv1.WithdrawalConfirmed{Withdrawal: WithdrawalProto(*w)}, w.UserID)
+		}
+		return r.EmitWithdrawal(ctx, &walletv1.WithdrawalFailed{Withdrawal: WithdrawalProto(*w)}, w.UserID)
+	})
+	return out, err
 }
 
 // settleOne books a confirmed custody withdrawal in the ledger now; the

@@ -102,6 +102,8 @@ commands:
                               withdrawals in a status (default PENDING_REVIEW)
   wallet approve|reject <withdrawal_id> --reviewer NAME --reason TEXT
                               decide on a withdrawal waiting for review (audited; approvals need distinct reviewers)
+  wallet custody-resolve <withdrawal_id> (--sent --tx HASH | --failed) --reason TEXT
+                              record what a person found out about a withdrawal the custodian may hold
   admin create --email E --name N --role R [--secrets-stdin]
                               add an admin console account (roles ADMIN, OPERATOR, FINANCE, AUDITOR);
                               run in the admin-service container, which has ADMIN_SECRET_KEY

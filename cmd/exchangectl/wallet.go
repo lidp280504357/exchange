@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -128,6 +129,26 @@ func walletWith(ctx context.Context, db *pg.DB, args []string, out io.Writer) er
 			return err
 		}
 		fmt.Fprintf(out, "%s: %s (%d/%d approvals)\n", wd.ID, wd.Status, len(wd.Approvals), wd.ApprovalsRequired)
+		return nil
+	case "custody-resolve":
+		if len(args) < 2 {
+			return errors.New("usage: wallet custody-resolve <withdrawal_id> (--sent --tx HASH | --failed) --reason TEXT")
+		}
+		sent := fs.Bool("sent", false, "the custodian sent it (give --tx)")
+		failed := fs.Bool("failed", false, "the custodian did not send it: its funds are released")
+		tx := fs.String("tx", "", "the transaction that sent it")
+		reason := fs.String("reason", "", "how it was found out (required)")
+		if err := fs.Parse(args[2:]); err != nil {
+			return err
+		}
+		if *sent == *failed {
+			return errors.New("give one of --sent and --failed")
+		}
+		wd, err := application.ResolveCustodyWithdrawal(ctx, store, args[1], *sent, *tx, actor(), *reason, time.Now())
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s: %s (%s); the processor settles or releases it within a round\n", wd.ID, wd.Status, wd.ProviderStatus)
 		return nil
 	case "commands":
 		limit := fs.Int("limit", 20, "how many")
