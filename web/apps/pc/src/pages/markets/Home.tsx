@@ -191,11 +191,11 @@ function HeadlineStats({ rows, loading, tickerOf }: Section) {
     { key: "fee", label: t("pcMarkets.home.stats.fee"), value: <span>{formatPercent(fee, 2, false)}</span> },
   ];
   return (
-    // Labels stay on one line: four columns as wide as they need from 1280 px,
-    // two rows of two below (four English labels do not fit at 1024).
-    <dl className="mt-4 grid w-full max-w-4xl grid-cols-2 gap-x-6 gap-y-4 border-t border-line-1 pt-6 xl:grid-cols-[repeat(4,auto)] xl:justify-between">
+    // Side by side, each as wide as its one-line label, a fixed gap apart; a
+    // figure that does not fit moves to the next row whole.
+    <dl className="mt-4 flex w-fit max-w-full flex-wrap gap-x-12 gap-y-4 border-t border-line-1 pt-6">
       {stats.map((s) => (
-        <div key={s.key} className="flex min-w-0 flex-col-reverse">
+        <div key={s.key} className="flex flex-col-reverse">
           <dt className="mt-1 whitespace-nowrap text-xs text-fg-3">{s.label}</dt>
           <dd className="text-xl font-semibold text-fg-1 tabular-nums">{loading ? <Skeleton className="h-7 w-20" /> : s.value}</dd>
         </div>
