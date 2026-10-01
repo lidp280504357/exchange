@@ -4,6 +4,8 @@
 # work again without restarting any service, and the ledger still
 # reconciles. Disrupts the test environment for a few seconds.
 set -euo pipefail
+# One drill at a time on the server (scripts/ops/lock.sh); task fault holds the lock for all of them.
+[[ -n ${OPS_LOCK_HELD:-} ]] || exec "$(dirname "$0")/../ops/lock.sh" run --owner "fault $(basename "$0")" -- bash "$0" "$@"
 
 # shellcheck source=../e2e/lib/common.sh
 source "$(dirname "$0")/../e2e/lib/common.sh"

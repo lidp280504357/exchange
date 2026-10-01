@@ -14,9 +14,9 @@ tasks:
     cmds: [golangci-lint fmt ./...]
 
   fmt:check:
-    desc: 检查格式，不修改
+    desc: 检查格式，不修改（只看本仓库跟踪的、非生成的 Go 文件：另一个会话的工作树在 .claude/worktrees 下）
     cmds:
-      - test -z "$(gofumpt -l .)" || { gofumpt -l .; echo '请运行 task fmt'; exit 1; }
+      - test -z "$(git ls-files -z --cached --others --exclude-standard '*.go' ':!:api/gen/**' | xargs -0 gofumpt -l)" || { git ls-files -z --cached --others --exclude-standard '*.go' ':!:api/gen/**' | xargs -0 gofumpt -l; echo '请运行 task fmt'; exit 1; }
 
   proto:
     desc: Protobuf lint 与代码生成（api/proto -> api/gen/go）
@@ -87,14 +87,14 @@ tasks:
       - bash scripts/dev.sh
 
   e2e:
-    desc: 对已部署的非生产环境跑端到端检查（默认 https://astras.vip，BASE=... 可改；读 .env 的 CAPTCHA_BYPASS_TOKEN；约 15 分钟）
+    desc: 对已部署的非生产环境跑端到端检查（默认 https://astras.vip，BASE=... 可改；读 .env 的 CAPTCHA_BYPASS_TOKEN；约 15 分钟；持运维锁，见 scripts/ops/lock.sh）
     cmds:
-      - for f in scripts/e2e/*.sh; do bash "$f" || exit 1; done
+      - scripts/ops/lock.sh run --owner "task e2e" -- bash -c 'for f in scripts/e2e/*.sh; do bash "$f" || exit 1; done'
 
   fault:
-    desc: 对测试环境做故障注入（Redpanda、ClickHouse、Redis 停机与 PostgreSQL 重启），每项会中断服务约半分钟，结束时恢复
+    desc: 对测试环境做故障注入（Redpanda、ClickHouse、Redis 停机与 PostgreSQL 重启），每项会中断服务约半分钟，结束时恢复；持运维锁
     cmds:
-      - for f in scripts/fault/*.sh; do echo "### $f"; bash "$f" || exit 1; done
+      - scripts/ops/lock.sh run --owner "task fault" -- bash -c 'for f in scripts/fault/*.sh; do echo "### $f"; bash "$f" || exit 1; done'
 
   web:install:
     desc: 安装前端依赖（web/ 的 pnpm workspace：apps/pc、apps/m、apps/admin、packages/core、packages/ui、e2e）
@@ -163,8 +163,8 @@ tasks:
       - task: test
 
   deploy:
-    desc: 在测试服拉取并更新（可带提交号：task deploy -- <ref>）
-    cmds: ["ssh exchange 'bash /opt/exchange/src/deploy/server-update.sh {{.CLI_ARGS}}'"]
+    desc: 在测试服拉取并更新（可带提交号：task deploy -- <ref>）；持运维锁，与另一个会话的部署、完整端到端、故障演练轮流
+    cmds: ["scripts/ops/lock.sh run --owner 'task deploy {{.CLI_ARGS}}' -- ssh exchange 'OPS_LOCK_HELD=1 bash /opt/exchange/src/deploy/server-update.sh {{.CLI_ARGS}}'"]
 
   deploy:status:
     desc: 测试服容器状态（基础设施 + 应用）

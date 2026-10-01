@@ -33,10 +33,13 @@
 ## 日常更新
 
 ```bash
+task deploy                  # 本机：经运维锁更新到 origin/main
+task deploy -- 305e2a7       # 回滚/切换到指定提交
 ssh exchange
-bash /opt/exchange/src/deploy/server-update.sh          # 更新到 origin/main
-bash /opt/exchange/src/deploy/server-update.sh 305e2a7  # 回滚/切换到指定提交
+bash /opt/exchange/src/deploy/server-update.sh          # 在服务器上直接跑：脚本自己拿运维锁
 ```
+
+**运维锁**（2026-10-02 起，两个编码会话共用测试服）：部署、完整端到端（`task e2e`）与故障演练（`task fault`、单独运行的 `scripts/fault/*.sh`）一次只跑一个。`scripts/ops/lock.sh run --owner 说明 -- 命令` 经 ssh 在服务器上 `flock` 持有 `/opt/exchange/infra/ops.lock`，把持有者与开始时间写进 `ops.lock.owner`，命令结束（或本机进程退出、ssh 断开）即释放；最多等 60 分钟，最多持有 2 小时。`scripts/ops/lock.sh status` 看谁在持有。被它调起的命令带 `OPS_LOCK_HELD=1`，里面再拿锁的步骤（演练脚本、`server-update.sh`）就不重复等待；不经它直接在服务器上跑的 `server-update.sh` 自己拿同一把锁。
 
 脚本依次执行以下步骤：
 

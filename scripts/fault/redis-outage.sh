@@ -7,6 +7,8 @@
 # Redis is back. Disrupts sign-ins for about half a minute; always
 # restarts Redis.
 set -euo pipefail
+# One drill at a time on the server (scripts/ops/lock.sh); task fault holds the lock for all of them.
+[[ -n ${OPS_LOCK_HELD:-} ]] || exec "$(dirname "$0")/../ops/lock.sh" run --owner "fault $(basename "$0")" -- bash "$0" "$@"
 
 # shellcheck source=../e2e/lib/common.sh
 source "$(dirname "$0")/../e2e/lib/common.sh"

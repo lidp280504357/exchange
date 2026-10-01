@@ -37,5 +37,5 @@
 - 每个脚本自己注册新用户（邮箱 `e2e-*@example.com` 走模拟邮件通道，手机号走模拟短信），不依赖历史数据，可反复运行（`funding` 例外：它有意保留一对跨运行的用户与仓位）；同一目标的验证码要间隔 60 秒，所以 `auth`、`identity` 各有一两次等待。
 - 带测试绕过令牌的验证码请求不计入同 IP 每小时额度，整套端到端测试可以在一小时内反复运行。
 - 脚本也能对本机开发栈跑：`BASE=http://localhost:8080 bash scripts/e2e/ledger.sh`（[local-dev.md](local-dev.md)）。
-- 故障注入脚本在 EXIT 时总会把停掉的组件启动回来；不要与端到端测试同时运行。
+- 故障注入脚本在 EXIT 时总会把停掉的组件启动回来；不要与端到端测试同时运行。`task e2e`、`task fault` 与单独运行的演练脚本都经运维锁（`scripts/ops/lock.sh`，见 [server-deploy.md](server-deploy.md#日常更新)），与另一个会话的部署、完整端到端、演练轮流进行；单个端到端脚本不拿锁。
 - 压测：`cmd/loadgen`（`users`、`orders`、`ws`，在服务器的 compose 网络里以容器运行，绕过 Cloudflare 与网关每 IP 配额），用法、结果与升级后的复测计划见 [../压测报告-阶段2.md](../压测报告-阶段2.md)；撮合订单簿基准 `go test -bench BenchmarkBook ./internal/matching/domain`。压测会产生大量订单与成交，不要与端到端测试同时运行，跑完核对账本（`exchangectl ledger reconcile`）。

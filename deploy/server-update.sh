@@ -44,11 +44,24 @@ ensure_disk_space() {
   fi
 }
 
+# take_ops_lock 在没有经 scripts/ops/lock.sh 调用时（OPS_LOCK_HELD 未设）自己拿运维锁：部署、完整端到端与
+# 故障演练轮流进行，两个会话不会同时部署。锁随本进程结束释放；最多等一小时。
+take_ops_lock() {
+  [ -z "${OPS_LOCK_HELD:-}" ] || return 0
+  exec 9>"$INFRA/ops.lock"
+  if ! flock -n 9; then
+    echo "== 等待运维锁：$(cat "$INFRA/ops.lock.owner" 2>/dev/null || echo ?)"
+    flock -w 3600 9 || { echo "== 运维锁一小时内没有释放，放弃部署"; exit 1; }
+  fi
+  echo "server-update.sh ${1:-origin/main} since $(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$INFRA/ops.lock.owner"
+}
+
 main() {
   DEPLOY_STARTED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   SRC="${SRC:-/opt/exchange/src}"
   INFRA="${INFRA:-/opt/exchange/infra}"
   REF="${1:-origin/main}"
+  take_ops_lock "$REF"
 
   cd "$SRC"
   git fetch --prune origin
