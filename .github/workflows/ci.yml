@@ -25,7 +25,7 @@ jobs:
       TEST_CLICKHOUSE_USER: exchange
       TEST_CLICKHOUSE_PASSWORD: exchange
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 2 # buf breaking compares with the previous commit
       # The newest patch release, as the app images build with golang:1.26-alpine:
@@ -107,7 +107,7 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
         with:
           version: 11
@@ -130,7 +130,7 @@ jobs:
     name: deploy config (shell, compose, nginx)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: shell syntax
         run: |
           bash -n deploy/server-update.sh deploy/redpanda/topics.sh deploy/compose/nginx/update-cloudflare-ips.sh
