@@ -127,9 +127,12 @@ try {
   await go("/house");
   await waitText("各交易对");
   await rows(3);
+  // Every contract has a row, flat or not.
+  await waitText("各合约净头寸");
+  await waitText("ETH-USDT-PERP");
   await go("/risk");
   await waitText("market.house_liquidity");
-  ok("futures, HOUSE's book and the flags");
+  ok("futures, HOUSE's book with every contract's net position, and the flags");
 
   // 9. Ledger: the reconciliation; audit; reports.
   await go("/ledger");
