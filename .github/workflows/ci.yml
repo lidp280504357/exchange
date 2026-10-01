@@ -31,7 +31,7 @@ jobs:
       # The newest patch release, as the app images build with golang:1.26-alpine:
       # go.mod's "go 1.26.0" is the oldest Go that builds the module, and govulncheck
       # judges the standard library of the Go that runs it.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: 1.26.x
           check-latest: true
