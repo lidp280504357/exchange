@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/mail"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -49,6 +50,8 @@ const (
 	// PermSettingsEdit changes the console's settings: two-person approval
 	// and the single-person limits (and the flags of the console itself).
 	PermSettingsEdit = "settings.write"
+	// PermUsersNotes writes notes on an account and sets its tags.
+	PermUsersNotes = "users.notes"
 )
 
 var reads = []string{
@@ -57,10 +60,11 @@ var reads = []string{
 
 var roles = map[string][]string{
 	RoleAdmin: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit,
-		PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermDerivativesEdit, PermSettingsEdit),
-	RoleOperator: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit, PermDerivativesEdit),
-	RoleFinance:  append(slices.Clone(reads), PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove),
-	RoleAuditor:  slices.Clone(reads),
+		PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermDerivativesEdit, PermSettingsEdit, PermUsersNotes),
+	RoleOperator: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit, PermDerivativesEdit,
+		PermUsersNotes),
+	RoleFinance: append(slices.Clone(reads), PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermUsersNotes),
+	RoleAuditor: slices.Clone(reads),
 }
 
 // ValidRole reports whether role exists.
@@ -246,6 +250,53 @@ func (a *Approval) Decide(decider string, approve bool) error {
 		return ErrSelfApproval
 	}
 	return nil
+}
+
+// Note is an administrator's note on an account (append-only).
+type Note struct {
+	ID         string
+	UserID     string
+	AdminID    string
+	AdminEmail string // read only
+	Body       string
+	CreatedAt  time.Time
+}
+
+// MaxNote bounds a note's length in characters.
+const MaxNote = 2000
+
+// NewNote validates a note.
+func NewNote(id, userID, adminID, body string, now time.Time) (Note, error) {
+	body = strings.TrimSpace(body)
+	if n := len([]rune(body)); n == 0 || n > MaxNote {
+		return Note{}, apperr.Invalid(fmt.Sprintf("a note has 1 to %d characters", MaxNote))
+	}
+	return Note{ID: id, UserID: userID, AdminID: adminID, Body: body, CreatedAt: now}, nil
+}
+
+// MaxTags bounds an account's tags.
+const MaxTags = 10
+
+var tagPattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,31}$`)
+
+// Tags normalizes an account's tags: upper case codes (VIP, SUSPICIOUS,
+// TEST, ...), each once, sorted.
+func Tags(in []string) ([]string, error) {
+	out := make([]string, 0, len(in))
+	for _, t := range in {
+		t = strings.ToUpper(strings.TrimSpace(t))
+		if !tagPattern.MatchString(t) {
+			return nil, apperr.Invalid(fmt.Sprintf("tag %q: letters, digits and _ (up to 32), starting with a letter", t))
+		}
+		if !slices.Contains(out, t) {
+			out = append(out, t)
+		}
+	}
+	if len(out) > MaxTags {
+		return nil, apperr.Invalid(fmt.Sprintf("at most %d tags", MaxTags))
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 // Settings are the console's single-person limits (design 2026-10-02 §2):

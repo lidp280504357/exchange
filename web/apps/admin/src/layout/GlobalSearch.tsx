@@ -4,7 +4,7 @@ import { Input, toast } from "@exchange/ui";
 import { Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useSearchParams } from "react-router";
+import { useNavigate } from "react-router";
 import { errorToast } from "../kit/actions";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -12,7 +12,7 @@ const TX = /^(0x)?[0-9a-f]{64}$/i;
 
 /**
  * GlobalSearch finds what an ID, an email, a phone number or a
- * transaction hash names: a user opens in the drawer, an order in the
+ * transaction hash names: a user opens on its page, an order in the
  * orders list, a transaction in the deposits list. ⌘K (Ctrl+K) puts the
  * cursor in it from anywhere.
  */
@@ -34,14 +34,7 @@ export function GlobalSearch({ admin }: { admin: Admin }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const [, setParams] = useSearchParams();
-  // The drawer opens over the current page, its filters kept.
-  const openUser = (id: string) =>
-    setParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.set("user", id);
-      return next;
-    });
+  const openUser = (id: string) => navigate(`/users/${id}`);
   const lookup = async (query: string): Promise<string | null> => {
     try {
       return adminData(await adminApi.GET("/admin/v1/users/lookup", { params: { query: { q: query } } })).user.id;

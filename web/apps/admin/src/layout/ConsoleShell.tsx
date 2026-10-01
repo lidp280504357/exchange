@@ -1,38 +1,28 @@
-import { can, type Admin } from "@exchange/core/api/admin";
-import { lazy, Suspense, useState } from "react";
-import { Outlet, useLocation, useSearchParams } from "react-router";
+import type { Admin } from "@exchange/core/api/admin";
+import { Suspense, useState } from "react";
+import { Navigate, Outlet, useLocation, useSearchParams } from "react-router";
 import { useTodoStream } from "../live";
 import { Sidebar } from "./Sidebar";
 import { Toasts } from "./Toasts";
 import { Topbar } from "./Topbar";
 
-const UserDrawer = lazy(() => import("../pages/users/UserDrawer"));
-
 /**
  * ConsoleShell (design 2026-10-02 §3, §6): the dark sidebar with its
  * groups and the counts waiting (pushed by the event stream), the top bar,
- * and the page, which rises in on every change of section. ?user=<id> on
- * any page opens that user's drawer.
+ * and the page, which rises in on every change of section. The address
+ * ?user=<id> of the former user drawer leads to the user's page.
  */
 export function ConsoleShell({ admin }: { admin: Admin }) {
   const { pathname } = useLocation();
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("admin.sidebar") === "collapsed");
   useTodoStream();
   const toggle = () => {
     localStorage.setItem("admin.sidebar", collapsed ? "open" : "collapsed");
     setCollapsed(!collapsed);
   };
-  const userId = params.get("user");
-  const closeUser = () =>
-    setParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete("user");
-        return next;
-      },
-      { replace: true },
-    );
+  const user = params.get("user");
+  if (user) return <Navigate to={`/users/${encodeURIComponent(user)}`} replace />;
   return (
     <div className="flex min-h-dvh bg-bg-0 text-fg-1">
       <Sidebar admin={admin} collapsed={collapsed} onToggle={toggle} />
@@ -46,11 +36,6 @@ export function ConsoleShell({ admin }: { admin: Admin }) {
           </div>
         </main>
       </div>
-      {userId && can(admin, "users.read") && (
-        <Suspense fallback={null}>
-          <UserDrawer admin={admin} userId={userId} onClose={closeUser} />
-        </Suspense>
-      )}
       <Toasts />
     </div>
   );

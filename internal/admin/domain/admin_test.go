@@ -23,6 +23,8 @@ func TestRoles(t *testing.T) {
 		{RoleAdmin, PermSettingsEdit, true},
 		{RoleFinance, PermSettingsEdit, false},
 		{RoleOperator, PermSettingsEdit, false},
+		{RoleFinance, PermUsersNotes, true},
+		{RoleAuditor, PermUsersNotes, false},
 		{"ROOT", PermUsersRead, false},
 	} {
 		if Allows(c.role, c.perm) != c.want {

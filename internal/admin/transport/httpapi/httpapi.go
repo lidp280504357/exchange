@@ -68,6 +68,10 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/events", h.events)
 			r.Get("/users", h.users)
 			r.Get("/users/lookup", h.lookup)
+			r.Get("/users/{id}", h.userDetail)
+			r.Get("/users/{id}/notes", h.notes)
+			r.Post("/users/{id}/notes", h.addNote)
+			r.Put("/users/{id}/tags", h.setTags)
 			r.Post("/users/{id}/adjustments", h.userAdjustment)
 			r.Get("/orders", h.orders)
 			r.Get("/trades", h.trades)
@@ -77,6 +81,7 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Post("/users/{id}/cancel-orders", h.cancelOrders)
 			r.Get("/withdrawals", h.withdrawals)
 			r.Post("/withdrawals/{id}/review", h.review)
+			r.Post("/withdrawals/review-batch", h.reviewBatch)
 			r.Get("/custody", h.custody)
 			r.Get("/custody/callbacks", h.custodyCallbacks)
 			r.Get("/custody/callbacks/{id}", h.custodyCallback)
@@ -315,10 +320,82 @@ func writePage(w http.ResponseWriter, items any, next string) {
 }
 
 func userJSON(u ports.User) map[string]any {
-	return map[string]any{
-		"id": u.ID, "status": u.Status, "region": u.Region, "language": u.Language, "kyc_level": u.KYCLevel,
-		"created_at": httpx.FormatTime(u.CreatedAt),
+	tags := u.Tags
+	if tags == nil {
+		tags = []string{}
 	}
+	return map[string]any{
+		"id": u.ID, "status": u.Status, "region": u.Region, "language": u.Language, "timezone": u.Timezone, "kyc_level": u.KYCLevel,
+		"created_at": httpx.FormatTime(u.CreatedAt), "tags": tags,
+	}
+}
+
+func (h *Handler) userDetail(w http.ResponseWriter, r *http.Request) {
+	u, err := h.Svc.UserDetail(r.Context(), principal(r), chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, userJSON(u))
+}
+
+// NoteJSON is an administrator's note on an account.
+type NoteJSON struct {
+	ID         string `json:"id"`
+	Body       string `json:"body"`
+	AdminID    string `json:"admin_id"`
+	AdminEmail string `json:"admin_email"`
+	CreatedAt  string `json:"created_at"`
+}
+
+func noteJSON(n domain.Note) NoteJSON {
+	return NoteJSON{ID: n.ID, Body: n.Body, AdminID: n.AdminID, AdminEmail: n.AdminEmail, CreatedAt: httpx.FormatTime(n.CreatedAt)}
+}
+
+func (h *Handler) notes(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	list, next, err := h.Svc.Notes(r.Context(), principal(r), chi.URLParam(r, "id"), q.Get("cursor"), intParam(q, "limit"))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out := make([]NoteJSON, 0, len(list))
+	for _, n := range list {
+		out = append(out, noteJSON(n))
+	}
+	writePage(w, out, next)
+}
+
+func (h *Handler) addNote(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Body string `json:"body"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	n, err := h.Svc.AddNote(r.Context(), principal(r), chi.URLParam(r, "id"), body.Body)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusCreated, noteJSON(n))
+}
+
+func (h *Handler) setTags(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Tags []string `json:"tags"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	tags, err := h.Svc.SetTags(r.Context(), principal(r), chi.URLParam(r, "id"), body.Tags)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"tags": tags})
 }
 
 func (h *Handler) users(w http.ResponseWriter, r *http.Request) {
@@ -451,6 +528,24 @@ func (h *Handler) review(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeRaw(w, raw)
+}
+
+func (h *Handler) reviewBatch(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs     []string `json:"ids"`
+		Approve bool     `json:"approve"`
+		Reason  string   `json:"reason"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	results, err := h.Svc.ReviewBatch(r.Context(), principal(r), body.IDs, body.Approve, body.Reason)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"results": results})
 }
 
 func (h *Handler) custody(w http.ResponseWriter, r *http.Request) {

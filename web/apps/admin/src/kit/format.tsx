@@ -1,12 +1,12 @@
 import { dec, formatDecimal, formatTime, timeZoneOf, useSettings, type TimeStyle } from "@exchange/core";
 import { cn, CopyButton } from "@exchange/ui";
 import type { ReactNode } from "react";
-import { useSearchParams } from "react-router";
+import { useNavigate } from "react-router";
 
 // How the console shows values (design §10.2): amounts as exact decimal
 // strings with thousands separators, times in the administrator's time
 // zone (settings), IDs shortened with a copy button and the whole ID on
-// hover.
+// hover; a user ID leads to the user's page.
 
 /** useTimeText formats times in the administrator's locale and time zone. */
 export function useTimeText() {
@@ -55,18 +55,13 @@ export function IdText({ value, chars = 8, className }: { value: string | null |
   );
 }
 
-/** useOpenUser opens a user's drawer over the current page (?user=<id>). */
+/** useOpenUser opens a user's page (/users/<id>). */
 export function useOpenUser() {
-  const [, setParams] = useSearchParams();
-  return (id: string) =>
-    setParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.set("user", id);
-      return next;
-    });
+  const navigate = useNavigate();
+  return (id: string) => navigate(`/users/${id}`);
 }
 
-/** UserCell is a user ID that opens the user's drawer. */
+/** UserCell is a user ID that opens the user's page. */
 export function UserCell({ id }: { id: string | null | undefined }) {
   const open = useOpenUser();
   if (!id) return <span className="text-fg-3">—</span>;

@@ -9,6 +9,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -342,6 +343,54 @@ func (s *Service) ReviewWithdrawal(ctx context.Context, p Principal, id string, 
 		soleMax = set.WithdrawalMax
 	}
 	return s.Wallet.Review(ctx, id, approve, p.Admin.Email, reason, soleMax)
+}
+
+// MaxBatch bounds a batch review.
+const MaxBatch = 50
+
+// BatchResult is one withdrawal of a batch review: its status after the
+// review, or why it failed.
+type BatchResult struct {
+	ID      string `json:"id"`
+	OK      bool   `json:"ok"`
+	Status  string `json:"status,omitempty"`
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// ReviewBatch approves or rejects withdrawals one by one with one reason
+// (each reviewed, and audited by the wallet, on its own); a failure leaves
+// the others decided.
+func (s *Service) ReviewBatch(ctx context.Context, p Principal, ids []string, approve bool, reason string) ([]BatchResult, error) {
+	if err := p.require(domain.PermWithdrawalsEdit); err != nil {
+		return nil, err
+	}
+	if err := needReason(reason); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 || len(ids) > MaxBatch {
+		return nil, apperr.Invalid(fmt.Sprintf("a batch has 1 to %d withdrawals", MaxBatch))
+	}
+	seen := map[string]bool{}
+	out := make([]BatchResult, 0, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		raw, err := s.ReviewWithdrawal(ctx, p, id, approve, reason)
+		if err != nil {
+			e := apperr.From(err)
+			out = append(out, BatchResult{ID: id, Code: e.Code, Message: e.Message})
+			continue
+		}
+		var w struct {
+			Status string `json:"status"`
+		}
+		_ = json.Unmarshal(raw, &w)
+		out = append(out, BatchResult{ID: id, OK: true, Status: w.Status})
+	}
+	return out, nil
 }
 
 // Custody describes the custody wallet (ADR-0011).

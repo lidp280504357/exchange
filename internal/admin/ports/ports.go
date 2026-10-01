@@ -26,8 +26,27 @@ type Repos interface {
 	Sessions() SessionRepo
 	Approvals() ApprovalRepo
 	Settings() SettingsRepo
+	Notes() NoteRepo
+	Tags() TagRepo
 	// Audit queues an administrator's action on audit.events.
 	Audit(ctx context.Context, msg proto.Message, actor string) error
+}
+
+// NoteRepo stores administrators' notes on accounts.
+type NoteRepo interface {
+	Insert(ctx context.Context, n domain.Note) error
+	// List returns an account's notes, newest first, with their authors'
+	// emails, after the one created at afterTime with ID afterID (zero for
+	// the newest).
+	List(ctx context.Context, userID string, afterTime time.Time, afterID string, limit int) ([]domain.Note, error)
+}
+
+// TagRepo stores accounts' tags.
+type TagRepo interface {
+	// Of returns the tags of each account (absent: none).
+	Of(ctx context.Context, userIDs []string) (map[string][]string, error)
+	// Set replaces an account's tags.
+	Set(ctx context.Context, userID string, tags []string, adminID string, now time.Time) error
 }
 
 // SettingsRepo stores the console's settings (one row).
@@ -89,8 +108,11 @@ type User struct {
 	Status    string
 	Region    string
 	Language  string
+	Timezone  string
 	KYCLevel  int32
 	CreatedAt time.Time
+	// Tags are the console's tags on it (filled by the console).
+	Tags []string
 }
 
 // Balance is one of a user's balances.

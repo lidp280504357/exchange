@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -66,6 +67,29 @@ func (wallet) Callback(context.Context, string) (json.RawMessage, error) {
 
 func (wallet) Replay(context.Context, string, string, string) (json.RawMessage, error) {
 	return json.RawMessage(`{}`), nil
+}
+
+// users knows every account.
+type users struct{}
+
+func (users) Find(context.Context, string) (string, error) { return "", nil }
+
+func (users) Get(_ context.Context, id string) (ports.User, error) {
+	return ports.User{ID: id, Status: "ACTIVE", Region: "SG", Language: "en", CreatedAt: time.Now()}, nil
+}
+
+func (users) Balances(context.Context, string) ([]ports.Balance, error) { return nil, nil }
+
+func (users) ChangeStatus(context.Context, string, string, string, string, string) (string, error) {
+	return "ACTIVE", nil
+}
+
+func (users) List(context.Context, ports.UserQuery) ([]ports.User, string, error) {
+	return nil, "", nil
+}
+
+func (users) Stats(context.Context, time.Time, int) (ports.UserStats, error) {
+	return ports.UserStats{}, nil
 }
 
 // stream opens the console's event stream and passes on its lines until
@@ -170,7 +194,7 @@ func TestConsole(t *testing.T) {
 	hasher := password.NewHasher(1, password.Cost{MemoryKiB: 64, Iterations: 1})
 	led := &ledger{}
 	// No flags: two-person approval is off (single-person mode).
-	svc := &application.Service{Store: store, Hasher: hasher, Box: box, Ledger: led, Wallet: wallet{}, Log: log, Now: time.Now}
+	svc := &application.Service{Store: store, Hasher: hasher, Box: box, Ledger: led, Wallet: wallet{}, Users: users{}, Log: log, Now: time.Now}
 	secrets := map[string][]byte{}
 	for _, a := range []struct{ email, role string }{{"fin@example.com", domain.RoleFinance}, {"boss@example.com", domain.RoleAdmin}} {
 		secrets[a.email] = totp.NewSecret()
@@ -276,6 +300,30 @@ func TestConsole(t *testing.T) {
 	if status != http.StatusOK || body["status"] != domain.ApprovalRejected || body["decided_by_email"] != "boss@example.com" {
 		t.Fatalf("withdrawn: %d %v", status, body)
 	}
+	// Notes and tags on an account.
+	account := "/admin/v1/users/01929c3e-7f3a-7d7e-8a1b-2c3d4e5f6a7b"
+	if status, body := boss.do(http.MethodPost, account+"/notes", map[string]string{"body": "called about a deposit"}, true); status != http.StatusCreated || body["admin_email"] != "boss@example.com" {
+		t.Fatalf("a note: %d %v", status, body)
+	}
+	if status, body := fin.do(http.MethodPost, account+"/notes", map[string]string{"body": "refund promised"}, true); status != http.StatusCreated {
+		t.Fatalf("a second note: %d %v", status, body)
+	}
+	status, body = boss.do(http.MethodGet, account+"/notes?limit=1", nil, false)
+	if items, _ := body["items"].([]any); status != http.StatusOK || len(items) != 1 || items[0].(map[string]any)["body"] != "refund promised" || body["next_cursor"] == nil {
+		t.Fatalf("notes, newest first: %d %v", status, body)
+	}
+	if status, body := boss.do(http.MethodPut, account+"/tags", map[string]any{"tags": []string{"vip", "test"}}, true); status != http.StatusOK ||
+		fmt.Sprint(body["tags"]) != "[TEST VIP]" {
+		t.Fatalf("tags: %d %v", status, body)
+	}
+	if status, body := boss.do(http.MethodGet, account, nil, false); status != http.StatusOK || fmt.Sprint(body["tags"]) != "[TEST VIP]" {
+		t.Fatalf("the account with its tags: %d %v", status, body)
+	}
+	if status, body := boss.do(http.MethodPut, account+"/tags", map[string]any{"tags": []string{}}, true); status != http.StatusOK ||
+		fmt.Sprint(body["tags"]) != "[]" {
+		t.Fatalf("no tags: %d %v", status, body)
+	}
+
 	// The event stream counts what waits and ends with the session.
 	streamCtx, stop := context.WithCancel(ctx)
 	defer stop()
@@ -301,9 +349,9 @@ func TestConsole(t *testing.T) {
 		t.Fatal(err)
 	}
 	// created ×2, login ×2, login_failed, requested ×2, approved ×2, single-person requested and executed,
-	// settings changed, requested and withdrawn, disabled, logout
-	if n != 16 {
-		t.Fatalf("%d audit events in the outbox, want 16", n)
+	// settings changed, requested and withdrawn, notes ×2, tags ×2, disabled, logout
+	if n != 20 {
+		t.Fatalf("%d audit events in the outbox, want 20", n)
 	}
 	var admins string
 	if err := db.QueryRow(ctx, `SELECT string_agg(email || ':' || status || ':' || failed_attempts, ',' ORDER BY email) FROM admins`).Scan(&admins); err != nil {

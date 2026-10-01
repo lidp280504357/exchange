@@ -27,7 +27,12 @@ func (s *Service) ListUsers(ctx context.Context, p Principal, q ports.UserQuery)
 		return nil, "", apperr.Invalid("status must be ACTIVE, RISK_REVIEW, FROZEN or CLOSED")
 	}
 	q.Limit = pageLimit(q.Limit)
-	return s.Users.List(ctx, q)
+	list, next, err := s.Users.List(ctx, q)
+	if err != nil {
+		return nil, "", err
+	}
+	list, err = s.withTags(ctx, list)
+	return list, next, err
 }
 
 func checkUserID(id string) error {

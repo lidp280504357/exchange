@@ -113,7 +113,7 @@ expect 200 - "the sign-in options need no session"
 TOTP_REQUIRED=$(jq -r .totp_required <<<"$BODY")
 login ADMIN
 expect 200 - "ADMIN signs in with password and code"
-check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 16" "with every permission"
+check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 17" "with every permission"
 cookie=$(grep -i '^set-cookie: admin_session=' "$WORK/ADMIN.headers")
 for attr in 'Path=/admin/' 'HttpOnly' 'Secure' 'SameSite=Strict'; do
   grep -qi "$attr" <<<"$cookie" || { echo "FAIL the session cookie lacks $attr: $cookie" >&2; exit 1; }
@@ -144,6 +144,11 @@ expect 403 ADMIN_FORBIDDEN "FINANCE cannot cancel orders"
 as FINANCE GET "/admin/v1/withdrawals?status=CONFIRMED" ""
 expect 200 - "FINANCE lists withdrawals"
 check '.items | type == "array"' "the list is an array"
+as OPERATOR POST /admin/v1/withdrawals/review-batch '{"ids":["01929c3e-7f3a-7d7e-8a1b-2c3d4e5f6a7b"],"approve":true,"reason":"e2e"}'
+expect 403 ADMIN_FORBIDDEN "OPERATOR reviews no batch"
+as FINANCE POST /admin/v1/withdrawals/review-batch '{"ids":["01929c3e-7f3a-7d7e-8a1b-2c3d4e5f6a7b"],"approve":true,"reason":"e2e batch"}'
+expect 200 - "FINANCE reviews a batch"
+check '.results == [.results[0]] and .results[0].ok == false and .results[0].code == "COMMON_NOT_FOUND"' "an unknown withdrawal fails alone"
 acall GET /admin/v1/me "" -b "$WORK/AUDITOR.jar"
 expect 200 - "reads need no CSRF header"
 acall PUT /admin/v1/flags/market.reference_kline '{"enabled":true,"reason":"e2e"}' -b "$WORK/OPERATOR.jar"
@@ -163,6 +168,26 @@ expect 200 - "OPERATOR finds the account by email"
 check ".user.id == \"$USER_ID\" and .user.status == \"ACTIVE\"" "the account"
 as OPERATOR GET "/admin/v1/users/lookup?q=$USER_ID" ""
 expect 200 - "and by ID"
+
+echo "== the account's page: notes and tags"
+as AUDITOR GET "/admin/v1/users/$USER_ID" ""
+expect 200 - "the account"
+check ".id == \"$USER_ID\" and .tags == []" "without tags"
+as AUDITOR POST "/admin/v1/users/$USER_ID/notes" '{"body":"e2e"}'
+expect 403 ADMIN_FORBIDDEN "AUDITOR writes no notes"
+as FINANCE POST "/admin/v1/users/$USER_ID/notes" '{"body":"e2e: called about a deposit"}'
+expect 201 - "FINANCE writes a note"
+check ".admin_email == \"$EMAIL_FINANCE\"" "signed with the administrator's email"
+as OPERATOR PUT "/admin/v1/users/$USER_ID/tags" '{"tags":["test","vip","TEST"]}'
+expect 200 - "OPERATOR tags the account"
+check '.tags == ["TEST","VIP"]' "upper case, once each, sorted"
+as AUDITOR GET "/admin/v1/users/$USER_ID/notes" ""
+expect 200 - "the notes"
+check '(.items | length) == 1 and .items[0].body == "e2e: called about a deposit"' "the note"
+as OPERATOR PUT "/admin/v1/users/$USER_ID/tags" '{"tags":["not a tag"]}'
+expect 400 COMMON_INVALID_ARGUMENT "a tag is a code"
+as OPERATOR PUT "/admin/v1/users/$USER_ID/tags" '{"tags":[]}'
+expect 200 - "and removes the tags"
 
 echo "== freeze and unfreeze"
 as OPERATOR POST "/admin/v1/users/$USER_ID/status" '{"to":"FROZEN","reason":"SUSPICIOUS_LOGIN","note":"scripts/e2e/admin.sh"}'

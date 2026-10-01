@@ -304,6 +304,73 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/users/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An account with the console's tags on it
+         * @description Needs users.read. Unknown accounts fail with COMMON_NOT_FOUND.
+         */
+        get: operations["getUser"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{id}/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Administrators' notes on an account, newest first
+         * @description Needs users.read.
+         */
+        get: operations["listUserNotes"];
+        put?: never;
+        /**
+         * Write a note on an account
+         * @description Notes are never edited or removed; each is audited (admin.users.note_added). Needs users.notes.
+         */
+        post: operations["addUserNote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace an account's tags
+         * @description Tags are upper case codes (letters, digits, _; up to 32, at most
+         *     10), e.g. VIP, SUSPICIOUS, TEST; the console's own, user-service
+         *     never sees them. A change is audited with the tags before and after
+         *     (admin.users.tags_changed). Needs users.notes.
+         */
+        put: operations["setUserTags"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/users/{id}/adjustments": {
         parameters: {
             query?: never;
@@ -390,6 +457,29 @@ export interface paths {
          *     frozen amount. Needs withdrawals.review.
          */
         post: operations["reviewWithdrawal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/withdrawals/review-batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve or reject several withdrawals with one reason
+         * @description Each withdrawal is reviewed on its own as by POST
+         *     /admin/v1/withdrawals/{id}/review (and audited by the wallet); one
+         *     that fails (already decided, unknown) leaves the others decided and
+         *     says why. At most 50 at a time. Needs withdrawals.review.
+         */
+        post: operations["reviewWithdrawalBatch"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1095,7 +1185,21 @@ export interface components {
             status: "ACTIVE" | "RISK_REVIEW" | "FROZEN" | "CLOSED";
             region: string;
             language: string;
+            /** @description An IANA zone; empty for the browser's. */
+            timezone?: string;
             kyc_level: number;
+            /** Format: date-time */
+            created_at: string;
+            /** @description The console's tags on the account. */
+            tags: string[];
+        };
+        Note: {
+            /** Format: uuid */
+            id: string;
+            body: string;
+            /** Format: uuid */
+            admin_id: string;
+            admin_email: string;
             /** Format: date-time */
             created_at: string;
         };
@@ -1255,7 +1359,7 @@ export interface components {
             name: string;
             /** @enum {string} */
             role: "ADMIN" | "OPERATOR" | "FINANCE" | "AUDITOR";
-            permissions: ("users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write" | "settings.write")[];
+            permissions: ("users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write" | "settings.write" | "users.notes")[];
         };
         Settings: {
             /** @description Fund operations need a second administrator (the flag admin.two_person_approval). */
@@ -2183,6 +2287,119 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserSummary"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listUserNotes: {
+        parameters: {
+            query?: {
+                /** @description The previous page's next_cursor; omitted for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of notes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["Note"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    addUserNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    body: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The note. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Note"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setUserTags: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    tags: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description The tags as stored (upper case, sorted). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        tags: string[];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     adjustUserBalance: {
         parameters: {
             query?: never;
@@ -2308,6 +2525,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Withdrawal"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    reviewWithdrawalBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    ids: string[];
+                    approve: boolean;
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description What came of each. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        results: {
+                            id: string;
+                            ok: boolean;
+                            /** @description The withdrawal's status after the review. */
+                            status?: string;
+                            /** @description The error code of a failed one. */
+                            code?: string;
+                            message?: string;
+                        }[];
+                    };
                 };
             };
             default: components["responses"]["Error"];

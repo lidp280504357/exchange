@@ -505,6 +505,124 @@ paths:
                 $ref: '#/components/schemas/Transition'
         default:
           $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}:
+    get:
+      operationId: getUser
+      summary: An account with the console's tags on it
+      description: Needs users.read. Unknown accounts fail with COMMON_NOT_FOUND.
+      tags: [users]
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200':
+          description: The account.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSummary'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/notes:
+    get:
+      operationId: listUserNotes
+      summary: Administrators' notes on an account, newest first
+      description: Needs users.read.
+      tags: [users]
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of notes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Note'
+                  next_cursor:
+                    $ref: '#/components/schemas/NextCursor'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: addUserNote
+      summary: Write a note on an account
+      description: Notes are never edited or removed; each is audited (admin.users.note_added). Needs users.notes.
+      tags: [users]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body:
+                  type: string
+                  minLength: 1
+                  maxLength: 2000
+      responses:
+        '201':
+          description: The note.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/tags:
+    put:
+      operationId: setUserTags
+      summary: Replace an account's tags
+      description: |
+        Tags are upper case codes (letters, digits, _; up to 32, at most
+        10), e.g. VIP, SUSPICIOUS, TEST; the console's own, user-service
+        never sees them. A change is audited with the tags before and after
+        (admin.users.tags_changed). Needs users.notes.
+      tags: [users]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tags]
+              properties:
+                tags:
+                  type: array
+                  maxItems: 10
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: The tags as stored (upper case, sorted).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tags]
+                properties:
+                  tags:
+                    type: array
+                    items:
+                      type: string
+        default:
+          $ref: '#/components/responses/Error'
   /admin/v1/users/{id}/adjustments:
     post:
       operationId: adjustUserBalance
@@ -670,6 +788,68 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Withdrawal'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/withdrawals/review-batch:
+    post:
+      operationId: reviewWithdrawalBatch
+      summary: Approve or reject several withdrawals with one reason
+      description: |
+        Each withdrawal is reviewed on its own as by POST
+        /admin/v1/withdrawals/{id}/review (and audited by the wallet); one
+        that fails (already decided, unknown) leaves the others decided and
+        says why. At most 50 at a time. Needs withdrawals.review.
+      tags: [withdrawals]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids, approve, reason]
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items:
+                    type: string
+                    format: uuid
+                approve:
+                  type: boolean
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: What came of each.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, ok]
+                      properties:
+                        id:
+                          type: string
+                        ok:
+                          type: boolean
+                        status:
+                          type: string
+                          description: The withdrawal's status after the review.
+                        code:
+                          type: string
+                          description: The error code of a failed one.
+                        message:
+                          type: string
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/instruments:
@@ -1795,7 +1975,7 @@ components:
       description: Pass as cursor for the next page; null on the last.
     UserSummary:
       type: object
-      required: [id, status, region, language, kyc_level, created_at]
+      required: [id, status, region, language, kyc_level, created_at, tags]
       properties:
         id:
           type: string
@@ -1807,8 +1987,33 @@ components:
           type: string
         language:
           type: string
+        timezone:
+          type: string
+          description: An IANA zone; empty for the browser's.
         kyc_level:
           type: integer
+        created_at:
+          type: string
+          format: date-time
+        tags:
+          type: array
+          description: The console's tags on the account.
+          items:
+            type: string
+    Note:
+      type: object
+      required: [id, body, admin_id, admin_email, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        body:
+          type: string
+        admin_id:
+          type: string
+          format: uuid
+        admin_email:
+          type: string
         created_at:
           type: string
           format: date-time
@@ -2081,7 +2286,7 @@ components:
             type: string
             enum: [users.read, users.status, orders.cancel, instruments.read, instruments.write, flags.read, flags.write,
               withdrawals.read, withdrawals.review, ledger.adjust.request, ledger.adjust.approve, audit.read, reports.read,
-              derivatives.read, derivatives.write, settings.write]
+              derivatives.read, derivatives.write, settings.write, users.notes]
     Settings:
       type: object
       required: [two_person_approval, single_max_usdt, daily_max_usdt, withdrawal_max_usdt, daily_used_usdt, updated_by, updated_at]

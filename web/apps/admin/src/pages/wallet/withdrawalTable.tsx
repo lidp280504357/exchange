@@ -1,7 +1,7 @@
 import { dec } from "@exchange/core";
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
-import { Badge, Button, Drawer, KeyValue, Stepper, type DataColumnMeta, type ColumnDef } from "@exchange/ui";
-
+import { Badge, Button, Drawer, KeyValue, Skeleton, Stepper, type DataColumnMeta, type ColumnDef, type RowSelectionState } from "@exchange/ui";
+import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useConsoleSettings } from "../../live";
@@ -22,7 +22,16 @@ export function useWithdrawals(q: WithdrawalQuery) {
   );
 }
 
-export function WithdrawalsTable({ list, withUser = true, onRowClick }: { list: CursorList<Withdrawal>; withUser?: boolean; onRowClick?: (w: Withdrawal) => void }) {
+export function WithdrawalsTable({
+  list, withUser = true, onRowClick, selection, onSelectionChange,
+}: {
+  list: CursorList<Withdrawal>;
+  withUser?: boolean;
+  onRowClick?: (w: Withdrawal) => void;
+  /** Rows checked for a batch review (by withdrawal ID); without it no checkboxes. */
+  selection?: RowSelectionState;
+  onSelectionChange?: (s: RowSelectionState) => void;
+}) {
   const { t } = useTranslation();
   const label = useEnum();
   const columns = useMemo<ColumnDef<Withdrawal, unknown>[]>(
@@ -60,7 +69,18 @@ export function WithdrawalsTable({ list, withUser = true, onRowClick }: { list: 
     ],
     [t, withUser, label],
   );
-  return <ListTable list={list} columns={columns} getRowId={(w) => w.id} onRowClick={onRowClick} aria-label="withdrawals" />;
+  return (
+    <ListTable
+      list={list}
+      columns={columns}
+      getRowId={(w) => w.id}
+      onRowClick={onRowClick}
+      selectable={!!onSelectionChange}
+      rowSelection={selection}
+      onRowSelectionChange={onSelectionChange}
+      aria-label="withdrawals"
+    />
+  );
 }
 
 /** WithdrawalDrawer shows a withdrawal's risk, approvals and progress, with the review actions. */
@@ -171,7 +191,75 @@ export function WithdrawalDrawer({ admin, w, onClose }: { admin: Admin; w: Withd
             />
           </div>
         )}
+        {w.user_id && <RecentOfUser userId={w.user_id} exclude={w.id} />}
+        {w.custody && <Callbacks withdrawalId={w.id} />}
       </div>
     </Drawer>
+  );
+}
+
+/** RecentOfUser lists the user's other recent withdrawals (a pattern is easier to see). */
+function RecentOfUser({ userId, exclude }: { userId: string; exclude: string }) {
+  const { t } = useTranslation();
+  const time = useTimeText();
+  const q = useQuery({
+    queryKey: ["admin", "withdrawals", "recent", userId],
+    queryFn: async () =>
+      adminData(await adminApi.GET("/admin/v1/withdrawals", { params: { query: { user_id: userId, status: "ALL", order: "desc", limit: 6 } } })).items,
+  });
+  const rows = (q.data ?? []).filter((x) => x.id !== exclude).slice(0, 5);
+  return (
+    <section>
+      <h3 className="mb-2 text-sm font-semibold">{t("admin.withdrawalDetail.recent")}</h3>
+      {q.isPending ? (
+        <Skeleton className="h-16 w-full" />
+      ) : rows.length === 0 ? (
+        <p className="text-sm text-fg-3">{t("admin.withdrawalDetail.noRecent")}</p>
+      ) : (
+        <ul className="flex flex-col divide-y divide-line-1 text-sm">
+          {rows.map((x) => (
+            <li key={x.id} className="flex items-center gap-3 py-1.5">
+              <span className="w-36 shrink-0 text-xs tabular-nums text-fg-3">{time(x.created_at)}</span>
+              <Num value={x.amount} unit={x.asset} className="flex-1" />
+              <span className="text-xs text-fg-3">{x.network}</span>
+              <EnumBadge group="withdrawalStatus" code={x.status} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** Callbacks is the custodian's word on a withdrawal, oldest first. */
+function Callbacks({ withdrawalId }: { withdrawalId: string }) {
+  const { t } = useTranslation();
+  const time = useTimeText();
+  const q = useQuery({
+    queryKey: ["admin", "custody", "callbacks", withdrawalId],
+    queryFn: async () =>
+      adminData(await adminApi.GET("/admin/v1/custody/callbacks", { params: { query: { q: withdrawalId, kind: "WITHDRAWAL", limit: 20 } } })).items,
+  });
+  const rows = [...(q.data ?? [])].reverse();
+  return (
+    <section>
+      <h3 className="mb-2 text-sm font-semibold">{t("admin.withdrawalDetail.callbacks")}</h3>
+      {q.isPending ? (
+        <Skeleton className="h-12 w-full" />
+      ) : rows.length === 0 ? (
+        <p className="text-sm text-fg-3">{t("admin.withdrawalDetail.noCallbacks")}</p>
+      ) : (
+        <ol className="flex flex-col gap-2 border-l border-line-1 pl-4 text-sm">
+          {rows.map((c) => (
+            <li key={c.id} className="flex flex-wrap items-center gap-2">
+              <span className="text-xs tabular-nums text-fg-3">{time(c.received_at)}</span>
+              {c.status !== null && <EnumBadge group="custodyStatus" code={String(c.status)} />}
+              <EnumBadge group="callbackResult" code={c.result} />
+              {c.detail && <span className="text-xs text-fg-3">{c.detail}</span>}
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
   );
 }

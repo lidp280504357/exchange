@@ -12,11 +12,12 @@ import { IdText, TimeText, useOpenUser } from "../../kit/format";
 import { ListTable, PAGE_SIZE, useCursorList } from "../../kit/lists";
 import { Page } from "../../kit/Page";
 import { clean } from "../records/tables";
+import { TagChips } from "./NotesTags";
 
 type UserSummary = AdminSchemas["UserSummary"];
 const KEYS = ["status", "region", "from", "to"] as const;
 
-/** Users (design §10.3): find one by ID, email or phone, or browse the accounts with filters; a row opens the drawer. */
+/** Users (design §10.3): find one by ID, email or phone, or browse the accounts with filters; a row opens the user's page. */
 export default function Users() {
   const { t } = useTranslation();
   const label = useEnum();
@@ -34,6 +35,7 @@ export default function Users() {
       { accessorKey: "region", header: t("admin.users.region") },
       { accessorKey: "language", header: t("admin.users.language") },
       { accessorKey: "kyc_level", header: t("admin.users.kyc") },
+      { id: "tags", header: t("admin.user.tags"), cell: ({ row }) => (row.original.tags.length ? <TagChips tags={row.original.tags} /> : null) },
       { id: "created", header: t("admin.users.createdAt"), cell: ({ row }) => <TimeText value={row.original.created_at} /> },
     ],
     [t],

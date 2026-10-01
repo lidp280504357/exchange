@@ -1,6 +1,6 @@
 import type { Admin } from "@exchange/core/api/admin";
 import { Navigate, Route, Routes } from "react-router";
-import { allowed, sections } from "../sections";
+import { allowed, sections, subpages } from "../sections";
 import { ConsoleShell } from "./ConsoleShell";
 
 /** SignedIn is the console behind the sign-in, loaded once signed in (the sign-in page stays small). */
@@ -8,10 +8,10 @@ export default function SignedIn({ admin }: { admin: Admin }) {
   return (
     <Routes>
       <Route element={<ConsoleShell admin={admin} />}>
-        {sections
+        {[...sections, ...subpages]
           .filter((s) => allowed(admin, s))
           .map((s) => (
-            <Route key={s.key} index={s.path === ""} path={s.path || undefined} element={<s.page admin={admin} />} />
+            <Route key={s.path} index={s.path === ""} path={s.path || undefined} element={<s.page admin={admin} />} />
           ))}
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />

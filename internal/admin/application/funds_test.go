@@ -215,6 +215,27 @@ func TestWithdrawalReviewAlone(t *testing.T) {
 	}
 }
 
+func TestReviewBatch(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.admin(t, "fin@example.com", domain.RoleFinance)
+	h.admin(t, "ops@example.com", domain.RoleOperator)
+	fin, ops := h.login(t, "fin@example.com"), h.login(t, "ops@example.com")
+	if _, err := h.svc.ReviewBatch(ctx, ops, []string{"w1"}, true, "low risk batch"); code(err) != "ADMIN_FORBIDDEN" {
+		t.Fatalf("an operator reviews: %v", err)
+	}
+	if _, err := h.svc.ReviewBatch(ctx, fin, nil, true, "low risk batch"); code(err) != apperr.CodeInvalidArgument {
+		t.Fatalf("an empty batch: %v", err)
+	}
+	got, err := h.svc.ReviewBatch(ctx, fin, []string{"w1", "busy", "w2", "w1"}, true, "low risk batch")
+	if err != nil || len(got) != 3 || !got[0].OK || got[0].Status != "APPROVED" || got[1].OK || got[1].Code != apperr.CodeConflict || !got[2].OK {
+		t.Fatalf("batch %+v %v", got, err)
+	}
+	if !slices.Equal(h.wallet.reviewed, []string{"w1", "busy", "w2"}) {
+		t.Fatalf("reviewed %v: each once", h.wallet.reviewed)
+	}
+}
+
 func TestTodo(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

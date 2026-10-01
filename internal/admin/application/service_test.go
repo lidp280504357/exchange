@@ -32,14 +32,88 @@ type memStore struct {
 	revoked   map[string]bool
 	approvals map[string]domain.Approval
 	settings  *domain.Settings
+	notes     []domain.Note
+	tags      map[string][]string
 	audits    []*auditv1.AdminActionPerformed
 }
 
 func newMemStore() *memStore {
 	return &memStore{
 		admins: map[string]domain.Admin{}, sessions: map[string]domain.Session{}, revoked: map[string]bool{},
-		approvals: map[string]domain.Approval{},
+		approvals: map[string]domain.Approval{}, tags: map[string][]string{},
 	}
+}
+
+func (m *memStore) Notes() ports.NoteRepo { return memNotes{m} }
+
+func (m *memStore) Tags() ports.TagRepo { return memTags{m} }
+
+type memNotes struct{ m *memStore }
+
+func (r memNotes) Insert(_ context.Context, n domain.Note) error {
+	r.m.notes = append(r.m.notes, n)
+	return nil
+}
+
+func (r memNotes) List(_ context.Context, userID string, afterTime time.Time, afterID string, limit int) ([]domain.Note, error) {
+	var out []domain.Note
+	for i := len(r.m.notes) - 1; i >= 0; i-- {
+		n := r.m.notes[i]
+		after := afterID == "" || n.CreatedAt.Before(afterTime) || (n.CreatedAt.Equal(afterTime) && n.ID < afterID)
+		if n.UserID == userID && after {
+			out = append(out, n)
+		}
+	}
+	return out[:min(limit, len(out))], nil
+}
+
+type memTags struct{ m *memStore }
+
+func (r memTags) Of(_ context.Context, ids []string) (map[string][]string, error) {
+	out := map[string][]string{}
+	for _, id := range ids {
+		if t := r.m.tags[id]; len(t) > 0 {
+			out[id] = slices.Clone(t)
+		}
+	}
+	return out, nil
+}
+
+func (r memTags) Set(_ context.Context, userID string, tags []string, _ string, _ time.Time) error {
+	r.m.tags[userID] = slices.Clone(tags)
+	return nil
+}
+
+// fakeUsers knows some accounts.
+type fakeUsers struct{ known map[string]ports.User }
+
+func (u *fakeUsers) Find(context.Context, string) (string, error) {
+	return "", apperr.NotFound("no such user")
+}
+
+func (u *fakeUsers) Get(_ context.Context, id string) (ports.User, error) {
+	if v, ok := u.known[id]; ok {
+		return v, nil
+	}
+	return ports.User{}, apperr.NotFound("no such user")
+}
+
+func (u *fakeUsers) Balances(context.Context, string) ([]ports.Balance, error) { return nil, nil }
+
+func (u *fakeUsers) ChangeStatus(context.Context, string, string, string, string, string) (string, error) {
+	return "ACTIVE", nil
+}
+
+func (u *fakeUsers) List(context.Context, ports.UserQuery) ([]ports.User, string, error) {
+	var out []ports.User
+	for _, v := range u.known {
+		out = append(out, v)
+	}
+	return out, "", nil
+}
+
+func (u *fakeUsers) Stats(context.Context, time.Time, int) (ports.UserStats, error) {
+	return ports.UserStats{}, nil
 }
 
 func (m *memStore) Tx(_ context.Context, fn func(ports.Repos) error) error { return fn(m) }
@@ -281,6 +355,7 @@ func (o *fakeOrders) CancelAll(_ context.Context, userID string) error {
 type fakeWallet struct {
 	reviewer string
 	soleMax  decimal.Decimal
+	reviewed []string
 	// pending is the review queue's length.
 	pending int
 	err     error
@@ -314,9 +389,16 @@ func (w *fakeWallet) Replay(_ context.Context, _, actor, _ string) (json.RawMess
 	return json.RawMessage(`{}`), nil
 }
 
-func (w *fakeWallet) Review(_ context.Context, _ string, _ bool, reviewer, _ string, soleMax decimal.Decimal) (json.RawMessage, error) {
+func (w *fakeWallet) Review(_ context.Context, id string, approve bool, reviewer, _ string, soleMax decimal.Decimal) (json.RawMessage, error) {
 	w.reviewer, w.soleMax = reviewer, soleMax
-	return json.RawMessage(`{}`), nil
+	w.reviewed = append(w.reviewed, id)
+	if id == "busy" {
+		return nil, apperr.New(apperr.KindConflict, apperr.CodeConflict, "the withdrawal is APPROVED, not waiting for review")
+	}
+	if approve {
+		return json.RawMessage(`{"status":"APPROVED"}`), nil
+	}
+	return json.RawMessage(`{"status":"REJECTED"}`), nil
 }
 
 // fakePrices are the last prices of the USDT pairs.
@@ -327,6 +409,7 @@ func (p fakePrices) Prices(context.Context) (ports.Prices, error) { return ports
 type harness struct {
 	svc         *Service
 	store       *memStore
+	users       *fakeUsers
 	ledger      *fakeLedger
 	flags       *fakeFlags
 	orders      *fakeOrders
@@ -348,10 +431,12 @@ func newHarness(t *testing.T) *harness {
 	h := &harness{
 		store: newMemStore(), ledger: &fakeLedger{}, flags: &fakeFlags{}, orders: &fakeOrders{}, wallet: &fakeWallet{},
 		derivatives: &fakeDerivatives{}, now: time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC), secrets: map[string][]byte{},
+		users: &fakeUsers{known: map[string]ports.User{}},
 	}
 	h.svc = &Service{
 		Store: h.store, Hasher: password.NewHasher(1, testCost), Box: box, Orders: h.orders, Wallet: h.wallet, Flags: h.flags,
-		Ledger: h.ledger, Derivatives: h.derivatives, Log: slog.New(slog.DiscardHandler), Now: func() time.Time { return h.now },
+		Ledger: h.ledger, Derivatives: h.derivatives, Users: h.users, Log: slog.New(slog.DiscardHandler),
+		Now: func() time.Time { return h.now },
 	}
 	return h
 }

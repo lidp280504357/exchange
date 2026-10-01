@@ -61,6 +61,11 @@ export const sections: Section[] = [
   { path: "settings", key: "settings", group: "system", icon: Settings, page: lazy(() => import("./pages/system/Settings")) },
 ];
 
+/** Pages under a section that the sidebar does not list (a record's own page). */
+export const subpages: Section[] = [
+  { path: "users/:id", key: "users", group: "users", perm: "users.read", icon: Users, page: lazy(() => import("./pages/users/UserPage")) },
+];
+
 /** allowed reports whether an administrator may open a section. */
 export function allowed(admin: Admin, s: Section): boolean {
   if (!s.perm) return true;

@@ -47,6 +47,8 @@ func (r repos) Admins() ports.AdminRepo       { return admins(r) }
 func (r repos) Sessions() ports.SessionRepo   { return sessions(r) }
 func (r repos) Approvals() ports.ApprovalRepo { return approvals(r) }
 func (r repos) Settings() ports.SettingsRepo  { return settings(r) }
+func (r repos) Notes() ports.NoteRepo         { return notes(r) }
+func (r repos) Tags() ports.TagRepo           { return tags(r) }
 
 func (r repos) Audit(ctx context.Context, msg proto.Message, actor string) error {
 	env, err := r.events.New(ctx, msg, "actor", actor)
@@ -349,6 +351,81 @@ func (r settings) Put(ctx context.Context, s domain.Settings) error {
 		withdrawal_max_usdt = $3, updated_by = $4, updated_at = $5`, s.SingleMax, s.DailyMax, s.WithdrawalMax, s.UpdatedBy, s.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("put settings: %w", err)
+	}
+	return nil
+}
+
+type notes repos
+
+func (r notes) Insert(ctx context.Context, n domain.Note) error {
+	_, err := r.q.Exec(ctx, `INSERT INTO user_notes (id, user_id, admin_id, body, created_at) VALUES ($1, $2, $3, $4, $5)`,
+		n.ID, n.UserID, n.AdminID, n.Body, n.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("insert note: %w", err)
+	}
+	return nil
+}
+
+func (r notes) List(ctx context.Context, userID string, afterTime time.Time, afterID string, limit int) ([]domain.Note, error) {
+	var after *time.Time
+	var afterUUID *uuid.UUID
+	if afterID != "" {
+		id, err := uuid.Parse(afterID)
+		if err != nil {
+			return nil, apperr.Invalid("bad cursor")
+		}
+		after, afterUUID = &afterTime, &id
+	}
+	rows, err := r.q.Query(ctx, `SELECT n.id, n.user_id, n.admin_id, coalesce(a.email, ''), n.body, n.created_at
+		FROM user_notes n LEFT JOIN admins a ON a.id = n.admin_id
+		WHERE n.user_id = $1 AND ($2::timestamptz IS NULL OR (n.created_at, n.id) < ($2, $3::uuid))
+		ORDER BY n.created_at DESC, n.id DESC LIMIT $4`, userID, after, afterUUID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list notes: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.Note, error) {
+		var n domain.Note
+		err := row.Scan(&n.ID, &n.UserID, &n.AdminID, &n.AdminEmail, &n.Body, &n.CreatedAt)
+		return n, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list notes: %w", err)
+	}
+	return out, nil
+}
+
+type tags repos
+
+func (r tags) Of(ctx context.Context, userIDs []string) (map[string][]string, error) {
+	out := map[string][]string{}
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.q.Query(ctx, `SELECT user_id, tag FROM user_tags WHERE user_id = ANY($1::uuid[]) ORDER BY user_id, tag`, userIDs)
+	if err != nil {
+		return nil, fmt.Errorf("tags: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var user, tag string
+		if err := rows.Scan(&user, &tag); err != nil {
+			return nil, fmt.Errorf("tags: %w", err)
+		}
+		out[user] = append(out[user], tag)
+	}
+	return out, rows.Err()
+}
+
+func (r tags) Set(ctx context.Context, userID string, tags []string, adminID string, now time.Time) error {
+	if tags == nil {
+		tags = []string{} // NULL would match nothing and keep every tag
+	}
+	if _, err := r.q.Exec(ctx, `DELETE FROM user_tags WHERE user_id = $1 AND NOT (tag = ANY($2::text[]))`, userID, tags); err != nil {
+		return fmt.Errorf("set tags: %w", err)
+	}
+	if _, err := r.q.Exec(ctx, `INSERT INTO user_tags (user_id, tag, added_by, added_at)
+		SELECT $1, t, $3, $4 FROM unnest($2::text[]) AS t ON CONFLICT DO NOTHING`, userID, tags, adminID, now); err != nil {
+		return fmt.Errorf("set tags: %w", err)
 	}
 	return nil
 }

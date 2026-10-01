@@ -320,4 +320,13 @@ func TestAdminSchema(t *testing.T) {
 	rejects(t, db, "positive limits", settings, 0, 50)
 	accepts(t, db, settings, 100, 500)
 	rejects(t, db, "one row of settings", settings, 100, 500)
+
+	user := uuid.New()
+	note := `INSERT INTO user_notes (id, user_id, admin_id, body, created_at) VALUES ($1, $2, $3, $4, now())`
+	accepts(t, db, note, uuid.New(), user, a, "called about a deposit")
+	rejects(t, db, "a note says something", note, uuid.New(), user, a, "")
+	tag := `INSERT INTO user_tags (user_id, tag, added_by, added_at) VALUES ($1, $2, $3, now())`
+	accepts(t, db, tag, user, "VIP", a)
+	rejects(t, db, "a tag once per account", tag, user, "VIP", b)
+	rejects(t, db, "tags are upper case codes", tag, user, "vip", a)
 }

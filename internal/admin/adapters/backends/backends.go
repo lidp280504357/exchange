@@ -60,12 +60,18 @@ func (u Users) Get(ctx context.Context, userID string) (ports.User, error) {
 	if err != nil {
 		return ports.User{}, err
 	}
-	p := resp.GetUser()
-	out := ports.User{ID: p.GetId(), Status: p.GetStatus(), Region: p.GetRegion(), Language: p.GetLanguage(), KYCLevel: p.GetKycLevel()}
+	return userOf(resp.GetUser()), nil
+}
+
+func userOf(p *userv1.User) ports.User {
+	out := ports.User{
+		ID: p.GetId(), Status: p.GetStatus(), Region: p.GetRegion(), Language: p.GetLanguage(), Timezone: p.GetTimezone(),
+		KYCLevel: p.GetKycLevel(),
+	}
 	if t := p.GetCreatedAt(); t != nil {
 		out.CreatedAt = t.AsTime()
 	}
-	return out, nil
+	return out
 }
 
 // Balances returns a user's balances.
@@ -105,11 +111,7 @@ func (u Users) List(ctx context.Context, q ports.UserQuery) ([]ports.User, strin
 	}
 	out := make([]ports.User, 0, len(resp.GetUsers()))
 	for _, p := range resp.GetUsers() {
-		v := ports.User{ID: p.GetId(), Status: p.GetStatus(), Region: p.GetRegion(), Language: p.GetLanguage(), KYCLevel: p.GetKycLevel()}
-		if t := p.GetCreatedAt(); t != nil {
-			v.CreatedAt = t.AsTime()
-		}
-		out = append(out, v)
+		out = append(out, userOf(p))
 	}
 	return out, resp.GetNextCursor(), nil
 }

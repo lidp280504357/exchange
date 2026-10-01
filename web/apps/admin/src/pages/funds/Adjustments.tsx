@@ -49,7 +49,8 @@ export default function Adjustments({ admin }: { admin: Admin }) {
   );
 }
 
-function AdjustForm({ userId, onUser, onDone }: { userId: string; onUser: (id: string) => void; onDone: (a: Approval) => void }) {
+/** AdjustForm credits or debits a user's spot balance; without onUser the user is fixed (the user's page). */
+export function AdjustForm({ userId, onUser, onDone }: { userId: string; onUser?: (id: string) => void; onDone: (a: Approval) => void }) {
   const { t } = useTranslation();
   const settings = useConsoleSettings().data;
   const [query, setQuery] = useState(userId);
@@ -65,7 +66,7 @@ function AdjustForm({ userId, onUser, onDone }: { userId: string; onUser: (id: s
   });
   const find = async () => {
     const q = query.trim();
-    if (!q) return;
+    if (!q || !onUser) return;
     try {
       onUser(adminData(await adminApi.GET("/admin/v1/users/lookup", { params: { query: { q } } })).user.id);
     } catch (err) {
@@ -80,22 +81,24 @@ function AdjustForm({ userId, onUser, onDone }: { userId: string; onUser: (id: s
   const balance = user.data?.balances.find((b) => b.account_type === "SPOT" && b.asset === asset.trim().toUpperCase());
   return (
     <div className="flex flex-col gap-4">
-      <label className="flex flex-col gap-1.5 text-sm text-fg-2">
-        {t("admin.funds.user")}
-        <Input
-          value={query}
-          onValueChange={setQuery}
-          onKeyDown={(e) => e.key === "Enter" && void find()}
-          prefix={<Search size={16} className="text-fg-3" />}
-          suffix={
-            <Button size="sm" variant="ghost" className="mr-1" onClick={() => void find()}>
-              {t("admin.users.lookup")}
-            </Button>
-          }
-          placeholder={t("admin.users.lookupHint")}
-          aria-label={t("admin.funds.user")}
-        />
-      </label>
+      {onUser && (
+        <label className="flex flex-col gap-1.5 text-sm text-fg-2">
+          {t("admin.funds.user")}
+          <Input
+            value={query}
+            onValueChange={setQuery}
+            onKeyDown={(e) => e.key === "Enter" && void find()}
+            prefix={<Search size={16} className="text-fg-3" />}
+            suffix={
+              <Button size="sm" variant="ghost" className="mr-1" onClick={() => void find()}>
+                {t("admin.users.lookup")}
+              </Button>
+            }
+            placeholder={t("admin.users.lookupHint")}
+            aria-label={t("admin.funds.user")}
+          />
+        </label>
+      )}
       {userId && <UserLine view={user.data} loading={user.isPending} error={user.isError} asset={asset.trim().toUpperCase()} />}
       <div className="grid gap-3 sm:grid-cols-[auto_1fr_1.4fr]">
         <label className="flex flex-col gap-1.5 text-sm text-fg-2">
@@ -195,7 +198,7 @@ function UserLine({ view, loading, error, asset }: { view?: UserView; loading: b
 }
 
 /** Outcome shows the last operation: booked with its journal and two lines, refused, or waiting. */
-function Outcome({ a }: { a: Approval }) {
+export function Outcome({ a }: { a: Approval }) {
   const { t } = useTranslation();
   const open = useOpenUser();
   const p = a.payload as Record<string, string>;

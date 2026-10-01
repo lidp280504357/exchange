@@ -55,26 +55,28 @@ try {
   await t.shot("1-overview");
   ok(`the overview: figures, trend chart, ${health}, HOUSE`);
 
-  // 3. Users: the list; a row opens the drawer with balances and tabs.
+  // 3. Users: the list; a row opens the user's page with its tabs.
   await go("/users");
   await rows(3);
   await t.clickLive("main tbody tr");
-  await page.waitForSelector("[role=dialog]");
-  await waitText("余额");
-  const userId = await page.evaluate(() => new URL(location.href).searchParams.get("user"));
-  if (!userId) throw new Error("the drawer did not put the user in the address");
-  for (const tab of ["订单", "成交", "提现", "审计"]) await clickButton(tab, "[role=dialog]");
+  await page.waitForFunction(() => /^\/users\/[0-9a-f-]{36}$/.test(location.pathname), { timeout: 20000 });
+  const userId = await page.evaluate(() => location.pathname.split("/").pop());
+  await waitText("UID");
+  await clickButton("余额与资金");
+  await waitText("调整余额");
+  for (const tab of ["订单", "成交", "提现", "备注与标签", "审计"]) await clickButton(tab, "main");
+  await waitText("UID");
   await t.shot("2-user");
-  await page.keyboard.press("Escape");
-  await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
-  ok(`users: the list, a user's drawer (${userId.slice(0, 8)}…) with its tabs`);
+  ok(`users: the list, a user's page (${userId.slice(0, 8)}…) with its tabs`);
 
-  // 4. The search opens the same user.
+  // 4. The search opens the same user; the drawer's old address leads there too.
+  await go("/");
   await typeInto(`header input`, userId);
   await page.keyboard.press("Enter");
-  await page.waitForSelector("[role=dialog]");
-  await page.keyboard.press("Escape");
-  ok("the search finds a user by ID");
+  await waitPath(`/users/${userId}`);
+  await go(`/orders?user=${userId}`);
+  await waitPath(`/users/${userId}`);
+  ok("the search finds a user by ID; ?user= leads to the user's page");
 
   // 5. Orders and trades (HOUSE shows as a party).
   await go("/orders");
