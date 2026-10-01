@@ -212,8 +212,12 @@ balance() {
 }
 funded() { [[ $(balance BTC) == "0.1 0" ]]; }
 eventually 40 "welcome funds arrived" funded
-call POST /v1/orders '{"symbol":"ETH-BTC","side":"BUY","type":"LIMIT","price":"0.03","quantity":"0.1"}' "${UAUTH[@]}" -H "Idempotency-Key: e2e-admin-$RUN"
-expect 202 - "the user rests a buy"
+# A buy well under HOUSE's bid rests (every order trades against HOUSE).
+call GET "/v1/market/ETH-BTC/depth?limit=5" ""
+expect 200 - "ETH-BTC's book"
+LOW=$(jq -r '.bids[0][0] | tonumber * 0.9 * 100000 | floor / 100000 | tostring' <<<"$BODY")
+call POST /v1/orders "{\"symbol\":\"ETH-BTC\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$LOW\",\"quantity\":\"0.1\"}" "${UAUTH[@]}" -H "Idempotency-Key: e2e-admin-$RUN"
+expect 202 - "the user rests a buy at $LOW"
 ORDER=$(jq -r .order_id <<<"$BODY")
 as OPERATOR POST "/admin/v1/users/$USER_ID/cancel-orders" '{"reason":"e2e cancel all"}'
 expect 202 - "OPERATOR cancels all its orders"

@@ -46,6 +46,10 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
       - 交易页不再闪：头部大价格用 `PriceText` 的 `flash={false} arrow`，盘口数量不闪，K 线去掉 TradingView 角标，归属文字由 `ChartCredit` 放在 PC 页脚与手机帮助页。
       - 资产表头修复：`DataTable` 的 `stickyTop` 不带 `height` 时外层用 clip。
       - 手机站「我的」按设计 §7.3 重做：`apps/m/src/pages/account/me/`，资产汇总钩子是 core 的 `usePortfolio`。
+    - 用户决定（2026-10-02）：
+      - 合约最高 125 倍，7 档风险限额阶梯在 `deploy/instruments/test.json`（前端与规格接口都从这里读）。
+      - 所有交易一律和 HOUSE 成交（现货、合约，开多开空都是），用户之间不撮合（`market.internal_matching` 关）。HOUSE 为全部交易对与合约报价（`scripts/ops/house.sh flags`）；以 BTC 计价的交易对按 USDT 价折算额度。测试服的上限在 compose 里放大（单资产 2,000,000、单合约 5,000,000 USDT），资金由 `house.sh seed` 补到相应水平（合约保证金用 `exchangectl ledger house-margin`）。库存也算头寸：持有超过单资产上限会让 HOUSE 在所有交易对上停止买入该资产。
+      - 端到端脚本全部以 HOUSE 为对手方，价格从当时的盘口推出；`matching-failover` 也改为与 HOUSE 成交。见 `docs/runbook/market-maker.md`。
   - 下一步：与用户一起测试（报告 §8 的清单）；托管方真网关联调等商户号与密钥。
 - 服务隔离：`.golangci.yml` 的 depguard 规则禁止 `internal/<服务>` 互相 import，新服务要在那里补一组规则。消费事件用 `bootstrap.Consumer` + 应用层经 inbox 去重（auth 的 `Store.Once`、notification 的 `inbox.ProcessID`）。
 - 鉴权：网关验 JWT 后把身份写进 `X-User-Id`/`X-Session-Id`/`X-Auth-Scope` 头转发（客户端同名头会被剥掉），服务端用 `httpx.UserID(r)`/`httpx.SessionID(r)` 读取；新的公开接口要加进 `internal/gateway/routes.go`，否则默认必须登录。敏感操作读 `X-Step-Up-Token`，跨服务用 auth-service gRPC `ConsumeStepUp` 兑换。

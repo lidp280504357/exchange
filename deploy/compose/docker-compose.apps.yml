@@ -347,11 +347,18 @@ services:
   # HOUSE's virtual liquidity (ADR-0015): reference books for the engines
   # from the public books, HOUSE's inventory and its caps (HOUSE_*_CAP,
   # defaults in cmd/market-maker). HOUSE_USER_ID comes from apps.env.
+  # Every order trades against HOUSE here (user decision 2026-10-02), so its
+  # caps are well above the design's (§8.6) and scripts/ops/house.sh seeds
+  # it to match: a pair's position (its inventory included) up to 2,000,000
+  # USDT, all spot positions 20,000,000, a contract's 5,000,000.
   market-maker:
     <<: *app
     command: ["/app/market-maker"]
     environment:
       <<: *base-env
+      HOUSE_SYMBOL_CAP: "2000000"
+      HOUSE_TOTAL_CAP: "20000000"
+      HOUSE_CONTRACT_CAP: "5000000"
       LEDGER_GRPC_ADDR: ledger-service:9185
       INSTRUMENT_SERVICE_URL: http://instrument-service:8084
       DERIVATIVES_SERVICE_URL: http://derivatives-service:8095

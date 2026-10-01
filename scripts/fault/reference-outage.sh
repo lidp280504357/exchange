@@ -5,10 +5,11 @@
 # reference price goes stale, BTC-USDT's reference book is no longer
 # usable and HOUSE takes its liquidity away (an empty reference book to
 # the engine); the public book falls back to the platform's own orders.
-# The streams notice the silence and reconnect with backoff; tickers and
-# the candles of pairs without a reference market keep being served. When
-# Binance is reachable again the books load a snapshot, the public book is
-# Binance's again and HOUSE offers it.
+# The streams notice the silence and reconnect with backoff; the tickers
+# keep being served (every pair follows Binance now, so there is no pair
+# whose own candles could be checked). When Binance is reachable again the
+# books load a snapshot, the public book is Binance's again and HOUSE
+# offers it.
 # The contracts lose their mark prices too and go reduce-only; once the
 # prices are back the drill lifts the reduce-only states it caused, as the
 # operator would (contract-degrade.sh exercises that path itself).
@@ -52,11 +53,6 @@ eventually 60 "HOUSE takes its liquidity away" not_offering
 eventually 40 "the public book falls back to the platform's own (users' orders only)" platform
 call GET /v1/market/tickers ""
 expect 200 - "the platform's tickers are still served"
-# BTC-USDT's chart history is Binance's (market.reference_kline) and
-# unavailable while it is silent; a pair without a reference market keeps
-# its own.
-call GET "/v1/market/ETH-BTC/candles?interval=1m&limit=5" ""
-expect 200 - "and the platform's own candles (ETH-BTC)"
 noticed() { (($(errors) > errors_before)); }
 eventually 180 "the silent stream is noticed and retried" noticed
 

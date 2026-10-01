@@ -44,7 +44,7 @@ if reduce_only; then
   derivatives resume "$SYMBOL" | sed 's/^/     /'
 fi
 # A bid 3% under the mark (inside the 5% price band) rests without filling:
-# nobody quotes the contract.
+# HOUSE's ask is at the reference market's, far above it.
 bid() { # bid: an opening order under the mark price in BODY
   local price
   price=$(jq -r '.mark_price | tonumber * 0.97 | floor' <<<"$BODY")

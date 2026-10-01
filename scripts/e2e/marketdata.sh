@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Market data end to end (implementation plan §6.3 task 5): the public
-# REST endpoints answer and refuse bad input; then two users trade 0.01 ETH
-# on ETH-BTC at 0.0402 while lib/md-check.mjs follows the WebSocket
-# channels (depth, trades, ticker, candles without sign-in; the buyer's
-# orders and fills) and checks REST trades, ticker, candles and depth
-# afterwards. ETH-BTC has no HOUSE liquidity; needs it in TRADING and no other
-# resting order at 0.0402.
+# REST endpoints answer and refuse bad input; the reference market's data
+# (ADR-0010); then lib/md-check.mjs follows ETH-BTC's WebSocket channels
+# (depth, trades, ticker, candles without sign-in: Binance's ETHBTC) while
+# a user buys at the market against HOUSE (orders and fills pushed to it),
+# and checks REST afterwards. Needs ETH-BTC in TRADING with HOUSE liquidity.
 #
 #   scripts/e2e/marketdata.sh
 set -euo pipefail
@@ -39,7 +38,7 @@ echo "== reference market data (ADR-0010)"
 call GET /v1/market/pairs ""
 expect 200 - "pairs"
 check '(.pairs[] | select(.symbol == "BTC-USDT")) | .reference_symbol == "BTCUSDT" and .reference_multiplier == "1" and .base_name == "Bitcoin" and .rank == 1 and .price_decimals == 2 and .qty_decimals == 4' "BTC-USDT follows BTCUSDT, with its listing data"
-check '(.pairs[] | select(.symbol == "ETH-BTC")) | .reference_symbol == null' "ETH-BTC follows nothing"
+check '(.pairs[] | select(.symbol == "ETH-BTC")) | .reference_symbol == "ETHBTC"' "ETH-BTC follows ETHBTC (every pair trades against HOUSE)"
 # market.reference_ticker: Binance's 24-hour ticker, updated every second.
 call GET /v1/market/BTC-USDT/ticker ""
 expect 200 - "BTC-USDT ticker"
@@ -54,27 +53,17 @@ expect 200 - "the page before"
 check "(.candles | length) == 5 and .candles[4].open_time < \"$FIRST_OPEN\"" "five older candles, none repeated"
 node "$(dirname "$0")/lib/tickers-check.mjs" "$BASE"
 
-signup() { # signup NAME: registers a user, sets NAME_TOKEN
-  register "e2e-md-$1-$RUN@example.com" "e2e-md-$1-$RUN" "e2e md $RUN"
-  eval "${1}_TOKEN=$(jq -r .access_token <<<"$BODY")"
-}
-echo "== two traders"
-signup seller
-signup buyer
-# shellcheck disable=SC2154 # set by signup
-SELLER=(-H "Authorization: Bearer $seller_TOKEN")
-# shellcheck disable=SC2154
-BUYER=(-H "Authorization: Bearer $buyer_TOKEN")
+echo "== a trader"
+register "e2e-md-buyer-$RUN@example.com" "e2e-md-buyer-$RUN" "e2e md $RUN"
+TOKEN=$(jq -r .access_token <<<"$BODY")
+BUYER=(-H "Authorization: Bearer $TOKEN")
 # shellcheck disable=SC2016 # expanded when the script ends
-at_exit 'call DELETE /v1/orders "" "${SELLER[@]}"; call DELETE /v1/orders "" "${BUYER[@]}"'
-funded() { # funded ASSET AUTH...
-  local asset=$1
-  shift
-  call GET /v1/account/balances "" "$@"
-  [[ $(jq -r --arg a "$asset" '[.balances[] | select(.account_type == "SPOT" and .asset == $a)][0].available' <<<"$BODY") != "null" ]]
+at_exit 'call DELETE /v1/orders "" "${BUYER[@]}"'
+funded() {
+  call GET /v1/account/balances "" "${BUYER[@]}"
+  [[ $(jq -r '[.balances[] | select(.account_type == "SPOT" and .asset == "BTC")][0].available' <<<"$BODY") != "null" ]]
 }
-eventually 40 "welcome funds arrived for the seller" funded ETH "${SELLER[@]}"
-eventually 40 "welcome funds arrived for the buyer" funded BTC "${BUYER[@]}"
+eventually 40 "welcome funds arrived" funded
 
-echo "== WebSocket and REST around one trade"
-node "$(dirname "$0")/lib/md-check.mjs" "$BASE" "$seller_TOKEN" "$buyer_TOKEN"
+echo "== WebSocket and REST around a trade against HOUSE"
+node "$(dirname "$0")/lib/md-check.mjs" "$BASE" "$TOKEN"

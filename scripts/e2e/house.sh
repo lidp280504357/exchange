@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 # HOUSE's virtual liquidity end to end (design §8, ADR-0013, ADR-0015):
-# the top 50 USDT pairs trade and show Binance's book (1000SHIB in units
-# of 1000); a new user's market buy of SOL-USDT fills at once against
-# HOUSE at the shown ask, a market sell of what it got fills at the bid, a
-# limit buy above the ask fills at once at the ask (not its limit); a
-# limit buy below the book rests until canceled; on BTC-USDT-PERP a market
-# buy opens a long against HOUSE and a reduce-only market sell closes it;
-# afterwards the ledger invariants hold (HOUSE's MARKET_MAKER accounts are
-# the exception to invariant 3). Needs market.reference_depth and
-# market.house_liquidity on for the pairs and BTC-USDT-PERP, HOUSE seeded
-# and the pairs open (scripts/ops/house.sh), and ssh to the server.
+# every trade is against HOUSE, so HOUSE offers every trading pair and
+# contract; the top 50 USDT pairs trade and show Binance's book (1000SHIB
+# in units of 1000); a new user's market buy of SOL-USDT fills at once
+# against HOUSE at the shown ask, a market sell of what it got fills at the
+# bid, a limit buy above the ask fills at once at the ask (not its limit);
+# a limit buy below the book rests until canceled; ETH-BTC (quoted in BTC)
+# fills at HOUSE's ask and bid too; on each contract a market buy opens a
+# long against HOUSE and a reduce-only market sell closes it; afterwards
+# the ledger invariants hold (HOUSE's MARKET_MAKER accounts are the
+# exception to invariant 3). Needs market.reference_depth and
+# market.house_liquidity on for every symbol, HOUSE seeded and the pairs
+# open (scripts/ops/house.sh), and ssh to the server.
 #
 #   scripts/e2e/house.sh
 set -euo pipefail
@@ -20,7 +22,27 @@ source "$(dirname "$0")/lib/common.sh"
 source "$(dirname "$0")/lib/remote.sh"
 
 SYMBOL=SOL-USDT
-PERP=BTC-USDT-PERP
+PERPS=(BTC-USDT-PERP ETH-USDT-PERP)
+fail() { echo "FAIL $1" >&2; exit 1; }
+
+echo "== HOUSE offers every trading pair and contract"
+call GET /v1/market/pairs ""
+expect 200 - "pairs"
+WANT=$(jq -r '[.pairs[] | select(.status == "TRADING") | .symbol] | join(" ")' <<<"$BODY")
+call GET /v1/market/contracts ""
+expect 200 - "contracts"
+WANT="$WANT $(jq -r '[.contracts[] | select(.status == "TRADING") | .symbol] | join(" ")' <<<"$BODY")"
+offered() { # MISSING: the symbols of WANT whose HOUSE book is empty
+  local out s
+  out=$(compose "exec -T market-maker wget -qO- http://127.0.0.1:9091/metrics") || return 1
+  MISSING=""
+  for s in $WANT; do
+    grep -qF "market_house_active{symbol=\"$s\"} 1" <<<"$out" || MISSING="$MISSING $s"
+  done
+  [[ -z $MISSING ]]
+}
+offered || fail "HOUSE offers nothing on:$MISSING"
+echo "ok   HOUSE offers all $(wc -w <<<"$WANT" | tr -d ' ') of them"
 
 echo "== the top 50"
 call GET /v1/market/pairs ""
@@ -41,7 +63,7 @@ echo "== register $EMAIL"
 register "$EMAIL" "e2e-house-$RUN" "e2e house $RUN"
 AUTH=(-H "Authorization: Bearer $(jq -r .access_token <<<"$BODY")")
 # shellcheck disable=SC2016 # expanded when the script ends
-at_exit 'call DELETE /v1/orders "" "${AUTH[@]}"; call DELETE "/v1/derivatives/orders?symbol='$PERP'" "" "${AUTH[@]}"'
+at_exit 'call DELETE /v1/orders "" "${AUTH[@]}"; for p in "${PERPS[@]}"; do call DELETE "/v1/derivatives/orders?symbol=$p" "" "${AUTH[@]}"; done'
 balance() { # balance ASSET prints the SPOT account's available amount
   call GET /v1/account/balances "" "${AUTH[@]}"
   jq -r --arg a "$1" '[.balances[] | select(.asset == $a and .account_type == "SPOT")][0].available // "0"' <<<"$BODY"
@@ -58,7 +80,6 @@ status_is() { # status_is ORDER STATUS
   call GET "/v1/orders/$1" "" "${AUTH[@]}"
   [[ $(jq -r .status <<<"$BODY") == "$2" ]]
 }
-fail() { echo "FAIL $1" >&2; exit 1; }
 near() { # near PRICE REF: within 0.5%
   awk -v p="$1" -v r="$2" 'BEGIN { d = (p - r) / r; exit !(d < 0.005 && d > -0.005) }'
 }
@@ -110,20 +131,44 @@ call DELETE "/v1/orders/$REST" "" "${AUTH[@]}"
 expect 202 - "cancel it"
 eventually 40 "it is canceled" status_is "$REST" CANCELED
 
-echo "== $PERP: a market buy opens a long against HOUSE, a reduce-only sell closes it"
+echo "== ETH-BTC, quoted in BTC: HOUSE's ask and bid"
+shown ETH-BTC
+ASK=$(jq -r '.asks[0][0]' <<<"$BODY")
+place '{"symbol":"ETH-BTC","side":"BUY","type":"MARKET","quote_amount":"0.0005"}'
+EBUY=$ORDER
+eventually 40 "the market buy of 0.0005 BTC is FILLED" status_is "$EBUY" FILLED
+call GET "/v1/orders/$EBUY/fills" "" "${AUTH[@]}"
+FILL=$(jq -r '.fills[0].price' <<<"$BODY")
+near "$FILL" "$ASK" || fail "filled at $FILL, the ask was $ASK"
+echo "ok   bought at $FILL (the ask was $ASK)"
+shown ETH-BTC
+BID=$(jq -r '.bids[0][0]' <<<"$BODY")
+place '{"symbol":"ETH-BTC","side":"SELL","type":"MARKET","quantity":"0.01"}'
+ESELL=$ORDER
+eventually 40 "the market sell of 0.01 ETH is FILLED" status_is "$ESELL" FILLED
+call GET "/v1/orders/$ESELL/fills" "" "${AUTH[@]}"
+FILL=$(jq -r '.fills[0].price' <<<"$BODY")
+near "$FILL" "$BID" || fail "filled at $FILL, the bid was $BID"
+echo "ok   sold at $FILL (the bid was $BID)"
+
 call POST /v1/account/transfers '{"asset":"USDT","amount":"200","from_account_type":"SPOT","to_account_type":"FUTURES"}' \
   "${AUTH[@]}" -H "Idempotency-Key: house-in-$RUN"
 expect 201 - "200 USDT to FUTURES"
-position() { # position QTY: the caller's position on PERP is QTY (none for 0)
-  call GET "/v1/derivatives/positions?symbol=$PERP" "" "${AUTH[@]}" &&
-    jq -e --arg q "$1" '([.positions[] | .quantity | tonumber] | add // 0) == ($q | tonumber)' <<<"$BODY" >/dev/null
+position() { # position SYMBOL QTY: the caller's position on SYMBOL is QTY (none for 0)
+  call GET "/v1/derivatives/positions?symbol=$1" "" "${AUTH[@]}" &&
+    jq -e --arg q "$2" '([.positions[] | .quantity | tonumber] | add // 0) == ($q | tonumber)' <<<"$BODY" >/dev/null
 }
-call POST /v1/derivatives/orders "{\"symbol\":\"$PERP\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"0.001\"}" "${AUTH[@]}"
-expect 202 - "a market buy of 0.001"
-eventually 40 "a long of 0.001" position 0.001
-call POST /v1/derivatives/orders "{\"symbol\":\"$PERP\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"0.001\",\"reduce_only\":true}" "${AUTH[@]}"
-expect 202 - "a reduce-only market sell"
-eventually 40 "flat again" position 0
+for PERP in "${PERPS[@]}"; do
+  echo "== $PERP: a market buy opens a long against HOUSE, a reduce-only sell closes it"
+  call GET "/v1/market/contracts/$PERP" ""
+  QTY=$(jq -r .min_quantity <<<"$BODY")
+  call POST /v1/derivatives/orders "{\"symbol\":\"$PERP\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"$QTY\"}" "${AUTH[@]}"
+  expect 202 - "a market buy of $QTY"
+  eventually 40 "a long of $QTY" position "$PERP" "$QTY"
+  call POST /v1/derivatives/orders "{\"symbol\":\"$PERP\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"$QTY\",\"reduce_only\":true}" "${AUTH[@]}"
+  expect 202 - "a reduce-only market sell"
+  eventually 40 "flat again" position "$PERP" 0
+done
 
 echo "== the ledger after HOUSE's trades"
 remote "sudo docker compose $COMPOSE_FILES exec -T ledger-service /app/exchangectl ledger reconcile" | sed 's/^/     /'

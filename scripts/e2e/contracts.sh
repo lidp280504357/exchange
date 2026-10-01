@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Perpetual contracts end to end (implementation plan §7.3): the contract
 # specifications (task 1), the index price, mark price and funding (task
-# 3) over REST and WebSocket, and BTC-USDT-PERP's public book: Binance
-# futures' (ADR-0015), which HOUSE offers. The mark price needs the
-# reference feed (flag market.reference_feed, on in the test environment);
-# the book needs market.reference_depth to allow BTC-USDT-PERP.
+# 3) over REST and WebSocket, and every contract's public book: Binance
+# futures' (ADR-0015), which HOUSE offers. Every contract goes to 125x on
+# the same seven-tier ladder. The mark price needs the reference feed (flag
+# market.reference_feed, on in the test environment); the books need
+# market.reference_depth to allow the contracts.
 #
 #   scripts/e2e/contracts.sh
 set -euo pipefail
@@ -16,9 +17,11 @@ echo "== specifications"
 call GET /v1/market/contracts ""
 expect 200 - "contracts"
 check '[.contracts[].symbol] | contains(["BTC-USDT-PERP","ETH-USDT-PERP"])' "seeded contracts listed"
+check 'all(.contracts[]; .max_leverage == 125 and .risk_tiers[0].max_leverage == 125)' "every contract goes to 125x"
 call GET /v1/market/contracts/btc-usdt-perp ""
 expect 200 - "one contract (symbol is case-insensitive)"
-check '.index_symbol == "BTC-USDT" and .max_leverage == 50 and (.risk_tiers | length) == 4 and .risk_tiers[0].mmr == "0.004" and .funding_interval_hours == 8' "risk limit tiers and funding interval"
+check '.index_symbol == "BTC-USDT" and .funding_interval_hours == 8' "its index and funding interval"
+check '[.risk_tiers[] | [.max_notional, .max_leverage, .mmr]] == [["50000",125,"0.004"],["250000",100,"0.005"],["1000000",50,"0.01"],["5000000",20,"0.025"],["20000000",10,"0.05"],["50000000",5,"0.1"],["100000000",2,"0.125"]]' "the risk limit ladder: 125x to 50,000 USDT, down to 2x"
 call GET /v1/market/contracts/BTC-USDT ""
 expect 404 COMMON_NOT_FOUND "a pair is not a contract"
 
@@ -43,13 +46,15 @@ expect 200 - "contracts have tickers"
 call GET /v1/market/tickers ""
 check '[.tickers[].symbol] | index("BTC-USDT-PERP") != null' "the tickers include the contracts"
 
-echo "== BTC-USDT-PERP shows the reference market's book (docs/runbook/market-data.md)"
-quoted() {
-  call GET "/v1/market/BTC-USDT-PERP/depth?limit=5" "" && [[ $STATUS == 200 ]] &&
-    jq -e '(.bids | length) > 0 and (.asks | length) > 0' <<<"$BODY"
-}
-eventually 30 "bids and asks on the contract's book" quoted
-check '((.asks[0][0] | tonumber) - (.bids[0][0] | tonumber)) / (.bids[0][0] | tonumber) | . > 0 and . < 0.01' "a spread under 1% around the mark"
+echo "== the contracts show the reference market's book (docs/runbook/market-data.md)"
+for c in BTC-USDT-PERP ETH-USDT-PERP; do
+  quoted() {
+    call GET "/v1/market/$c/depth?limit=5" "" && [[ $STATUS == 200 ]] &&
+      jq -e '(.bids | length) > 0 and (.asks | length) > 0' <<<"$BODY"
+  }
+  eventually 30 "bids and asks on $c's book" quoted
+  check '((.asks[0][0] | tonumber) - (.bids[0][0] | tonumber)) / (.bids[0][0] | tonumber) | . > 0 and . < 0.01' "a spread under 1% around the mark"
+done
 
 echo "== WebSocket"
 node - "$BASE" <<'EOF'

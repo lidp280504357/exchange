@@ -1,13 +1,14 @@
 // Market data end-to-end check, run by scripts/e2e/marketdata.sh with Node
 // 22+ (built-in WebSocket and fetch):
-//   node md-check.mjs <base URL> <seller token> <buyer token>
-// Public channels need no sign-in; the buyer also follows orders and fills.
-// The seller rests an ask, the buyer takes it, and every channel and REST
-// endpoint must show the trade.
-const [base, sellerToken, buyerToken] = process.argv.slice(2);
+//   node md-check.mjs <base URL> <buyer token>
+// Public channels need no sign-in and show Binance's ETHBTC for ETH-BTC (a
+// depth snapshot, then updates in sequence; ticker and 1m candles; live
+// trades are watched on BTC-USDT, as ETHBTC may trade only every minute or
+// two). The buyer follows orders and fills, buys at the market against
+// HOUSE (every order trades against HOUSE; its own trades are not public),
+// and REST agrees with the pushes.
+const [base, buyerToken] = process.argv.slice(2);
 const symbol = "ETH-BTC";
-const price = "0.0402";
-const qty = "0.01";
 const wsURL = base.replace(/^http/, "ws") + "/v1/ws";
 const deadline = (ms, what) => new Promise((_, reject) => setTimeout(() => reject(new Error("timeout: " + what)), ms));
 const ok = (what) => console.log("ok   " + what);
@@ -33,24 +34,25 @@ const api = async (method, path, token, body) => {
   const res = await fetch(base + path, { method, headers, body: body && JSON.stringify(body) });
   return { status: res.status, body: await res.json().catch(() => null) };
 };
-const eventually = async (what, fn, ms = 10000) => {
-  const until = Date.now() + ms;
-  for (;;) {
-    const v = await fn();
-    if (v) return v;
-    if (Date.now() > until) throw new Error("timeout: " + what);
-    await new Promise((r) => setTimeout(r, 300));
-  }
-};
-const level = (levels, p) => levels.find((l) => l[0] === p);
 
 await Promise.race([new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; }), deadline(10000, "connect")]);
-ws.send(JSON.stringify({ op: "subscribe", args: [`depth:${symbol}`, `trades:${symbol}`, `ticker:${symbol}`, `candles:${symbol}:1m`] }));
+ws.send(JSON.stringify({ op: "subscribe", args: [`depth:${symbol}`, `trades:${symbol}`, "trades:BTC-USDT", `ticker:${symbol}`, `candles:${symbol}:1m`] }));
 let m = await next((m) => m.op === "subscribe", "public subscribe reply");
 if (!m.ok) fail("public channels need no sign-in", m);
 const snapshot = await next((m) => m.channel === `depth:${symbol}` && m.type === "snapshot", "depth snapshot");
-if (!Array.isArray(snapshot.data.bids) || !Array.isArray(snapshot.data.asks)) fail("depth snapshot", snapshot);
-ok(`public channels without sign-in; depth snapshot at seq ${snapshot.seq ?? 0}`);
+if (!(snapshot.data.bids?.length > 0) || !(snapshot.data.asks?.length > 0)) fail("a two-sided depth snapshot", snapshot);
+ok(`public channels without sign-in; a two-sided depth snapshot at seq ${snapshot.seq ?? 0}`);
+// Two updates in a row, each following the one before.
+const first = await next((m) => m.channel === `depth:${symbol}` && m.type === "update", "a depth update");
+const second = await next((m) => m.channel === `depth:${symbol}` && m.type === "update" && m.seq > first.seq, "another depth update");
+if (second.prev_seq !== second.seq - 1 && second.prev_seq !== first.seq) fail("depth updates in sequence", { first, second });
+ok(`depth updates in sequence (${first.seq}, ${second.seq})`);
+const trade = await next((m) => m.channel === "trades:BTC-USDT" && Number(m.data.price) > 0 && m.data.trade_number > 0, "a public BTC-USDT trade");
+ok(`trades: Binance's, BTC-USDT #${trade.data.trade_number} at ${trade.data.price}`);
+const tick = await next((m) => m.channel === `ticker:${symbol}` && Number(m.data.last) > 0, "a ticker");
+ok(`ticker: last ${tick.data.last}`);
+await next((m) => m.channel === `candles:${symbol}:1m` && Number(m.data.close) > 0, "a 1m candle", 30000);
+ok("candles:1m: the open candle");
 
 ws.send(JSON.stringify({ op: "auth", token: buyerToken }));
 m = await next((m) => m.op === "auth", "auth reply");
@@ -59,49 +61,32 @@ ws.send(JSON.stringify({ op: "subscribe", args: ["orders", "fills"] }));
 await next((m) => m.op === "subscribe" && m.ok && m.args.includes("orders"), "private subscribe");
 ok("the buyer follows orders and fills");
 
-let r = await api("POST", "/v1/orders", sellerToken, { symbol, side: "SELL", type: "LIMIT", price, quantity: qty });
-if (r.status !== 202) fail("the seller's ask", r);
-const ask = await next((m) => m.channel === `depth:${symbol}` && m.type === "update" && level(m.data.asks, price), "depth update with the ask");
-if (level(ask.data.asks, price)[1] !== qty || ask.prev_seq !== (ask.seq - 1 || undefined)) fail("depth update", ask);
-ok(`the ask shows in a depth update (seq ${ask.seq})`);
-
-r = await api("POST", "/v1/orders", buyerToken, { symbol, side: "BUY", type: "LIMIT", price, quantity: qty });
-if (r.status !== 202) fail("the buyer's order", r);
+const r = await api("POST", "/v1/orders", buyerToken, { symbol, side: "BUY", type: "MARKET", quote_amount: "0.0005" });
+if (r.status !== 202) fail("the buyer's market buy", r);
 const orderID = r.body.order_id;
 await next((m) => m.channel === "orders" && m.data.order_id === orderID && m.data.status === "NEW", "orders: NEW");
 const filled = await next((m) => m.channel === "orders" && m.data.order_id === orderID && m.data.status === "FILLED", "orders: FILLED");
-if (filled.data.filled_quantity !== qty || !(filled.seq > 0)) fail("orders FILLED", filled);
-ok("orders: NEW, then FILLED");
+if (!(Number(filled.data.filled_quantity) > 0) || !(Number(filled.data.filled_quote) <= 0.0005) || !(filled.seq > 0)) fail("orders FILLED", filled);
+ok(`orders: NEW, then FILLED (${filled.data.filled_quantity} ETH for ${filled.data.filled_quote} BTC)`);
 const fill = await next((m) => m.channel === "fills" && m.data.order_id === orderID, "fills");
-if (fill.data.role !== "TAKER" || fill.data.price !== price || fill.data.fee !== "0.00001" || fill.data.fee_asset !== "ETH") fail("fill", fill);
-ok("fills: taker at 0.0402, fee 0.00001 ETH");
-const trade = await next((m) => m.channel === `trades:${symbol}` && m.data.price === price && m.data.taker_side === "BUY", "public trade");
-if (!(trade.data.trade_number > 0)) fail("public trade", trade);
-ok(`trades: #${trade.data.trade_number} at 0.0402, taker BUY`);
-await next((m) => m.channel === `depth:${symbol}` && m.type === "update" && level(m.data.asks, price)?.[1] === "0", "depth update removing the ask");
-ok("the taken ask leaves the book (quantity 0)");
-await next((m) => m.channel === `ticker:${symbol}` && m.data.last === price && m.data.trade_count > 0, "ticker with the trade");
-ok("ticker: last 0.0402");
-await next((m) => m.channel === `candles:${symbol}:1m` && m.data.close === price && m.data.trade_count > 0, "1m candle with the trade");
-ok("candles:1m: close 0.0402");
+const fee = (Number(fill.data.quantity) * 0.001).toFixed(8);
+if (fill.data.role !== "TAKER" || fill.data.fee_asset !== "ETH" || Number(fill.data.fee).toFixed(8) !== fee) fail("fill", fill);
+ok(`fills: taker against HOUSE at ${fill.data.price}, fee ${fill.data.fee} ETH (0.1%)`);
 
-const trades = await eventually("REST trades", async () => {
-  const r = await api("GET", `/v1/market/${symbol}/trades?limit=1`);
-  return r.status === 200 && r.body.trades[0]?.trade_id === trade.data.trade_id ? r.body : null;
-});
-if (trades.trades[0].trade_number !== trade.data.trade_number || trades.trades[0].quote_quantity !== "0.000402") fail("REST trades", trades);
-ok("REST trades: the same trade, 0.000402 BTC");
+const fills = await api("GET", `/v1/orders/${orderID}/fills`, buyerToken);
+if (fills.status !== 200 || !fills.body.fills.some((f) => f.trade_id === fill.data.trade_id)) fail("REST fills", fills);
+ok("REST fills: the same fill");
+const trades = await api("GET", `/v1/market/${symbol}/trades?limit=5`);
+if (trades.status !== 200 || !(trades.body.trades.length > 0)) fail("REST trades", trades);
+ok("REST trades: Binance's");
 const ticker = await api("GET", `/v1/market/${symbol}/ticker`);
-if (ticker.status !== 200 || ticker.body.last !== price || !(Number(ticker.body.trade_count) > 0)) fail("REST ticker", ticker);
-ok("REST ticker: last 0.0402");
+if (ticker.status !== 200 || !(Number(ticker.body.last) > 0)) fail("REST ticker", ticker);
+ok(`REST ticker: last ${ticker.body.last}`);
 const candles = await api("GET", `/v1/market/${symbol}/candles?interval=1m&limit=3`);
-const lastCandle = candles.body?.candles?.at(-1);
-if (candles.status !== 200 || lastCandle?.close !== price || lastCandle.closed) fail("REST candles", candles);
-ok("REST candles: the open 1m candle closes at 0.0402");
-const depth = await eventually("REST depth without the ask", async () => {
-  const r = await api("GET", `/v1/market/${symbol}/depth?limit=50`);
-  return r.status === 200 && r.body.sequence > 0 && !level(r.body.asks, price) ? r.body : null;
-});
-ok(`REST depth at sequence ${depth.sequence}, the ask gone`);
+if (candles.status !== 200 || !(candles.body?.candles?.length > 0)) fail("REST candles", candles);
+ok("REST candles: Binance's 1m candles");
+const depth = await api("GET", `/v1/market/${symbol}/depth?limit=50`);
+if (depth.status !== 200 || !(depth.body.sequence > 0) || !(depth.body.bids.length > 0 && depth.body.asks.length > 0)) fail("REST depth", depth);
+ok(`REST depth at sequence ${depth.body.sequence}, two-sided`);
 ws.close();
 console.log("all market data checks passed");

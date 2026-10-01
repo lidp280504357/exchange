@@ -2,9 +2,11 @@
 # HOUSE's virtual liquidity on the test server (ADR-0013, ADR-0015,
 # docs/runbook/market-maker.md):
 #
-#   scripts/ops/house.sh seed   HOUSE's funds: spot inventory of 500,000 USDT,
-#                               0.24 BTC and 7.4 ETH (MARKET_MAKER), and
-#                               100,000 USDT of contract margin in its
+#   scripts/ops/house.sh seed   HOUSE's funds: spot inventory of 5,000,000
+#                               USDT, 11.74 BTC and 370.4 ETH (MARKET_MAKER;
+#                               about half the pair cap each, so HOUSE can
+#                               sell and buy about 1,000,000 USDT of them),
+#                               and 2,000,000 USDT of contract margin in its
 #                               FUTURES account (HOUSE_USER_ID); audited
 #                               adjustments, needs ledger.manual_adjustment.
 #                               Idempotent.
@@ -37,15 +39,19 @@ ctl() {
 case "${1:-}" in
 seed)
   # Inventory counts as HOUSE's position: an asset held past HOUSE_SYMBOL_CAP
-  # (100,000 USDT) stops HOUSE buying it on every pair. A v2 top-up of 1 BTC
-  # and 30 ETH (2026-10-02) did exactly that and was undone (keys *-v2-undo).
-  for spec in "USDT 500000" "BTC 0.24" "ETH 7.4"; do
-    read -r asset amount <<<"$spec"
+  # stops HOUSE buying it on every pair. Under the design's 100,000 USDT cap
+  # a v2 top-up of 1 BTC and 30 ETH did exactly that and was undone (keys
+  # *-v2-undo); v3 came with the test server's 2,000,000 (2026-10-02).
+  for spec in "USDT 500000 v1" "BTC 0.24 v1" "ETH 7.4 v1" "USDT 4500000 v3" "BTC 11.5 v3" "ETH 363 v3"; do
+    read -r asset amount version <<<"$spec"
     ctl ledger-service ledger adjust --house --asset "$asset" --amount "$amount" \
-      --reason "HOUSE inventory (ADR-0013)" --key "seed-house-$asset-v1"
+      --reason "HOUSE inventory (ADR-0013)" --key "seed-house-$asset-$version"
   done
-  ctl ledger-service ledger house-margin --amount 100000 \
-    --reason "HOUSE contract margin: every contract trades against HOUSE (ADR-0015)" --key seed-house-margin-v1
+  for spec in "100000 v1" "1900000 v2"; do
+    read -r amount version <<<"$spec"
+    ctl ledger-service ledger house-margin --amount "$amount" \
+      --reason "HOUSE contract margin: every contract trades against HOUSE (ADR-0015)" --key "seed-house-margin-$version"
+  done
   ;;
 flags)
   allow="$(jq -r '[(.pairs[] | .symbol), (.contracts[] | .symbol)] | join(",")' "$DATA")"
@@ -67,7 +73,7 @@ show)
   ssh exchange "cd $INFRA && set -a && . ./.env && set +a && sudo docker compose exec -T postgres psql -U \"\$POSTGRES_USER\" -d exchange -At -c \"SELECT asset, available FROM ledger.accounts WHERE account_type = 'MARKET_MAKER' ORDER BY asset\""
   ;;
 *)
-  sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
   ;;
 esac

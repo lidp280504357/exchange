@@ -12,13 +12,13 @@
 | `ledger.welcome_credit` | 新注册用户自动获得模拟演示资金，仅测试环境 | 1 |
 | `wallet.withdraw` | 提现 | 2 |
 | `derivatives.trading` | 永续合约交易 | 3 |
-| `market.reference_kline` | 图表显示参考行情（币安）的 K 线而不是平台的（按交易对；合约用指数交易对；测试服打开，ETH-BTC 除外，见 [market-data.md](market-data.md#参考-k-线marketreference_kline测试环境)） | 2 |
+| `market.reference_kline` | 图表显示参考行情（币安）的 K 线而不是平台的（按交易对；合约用指数交易对；测试服对全部交易对打开，ETH-BTC 也跟随 ETHBTC，见 [market-data.md](market-data.md#参考-k-线marketreference_kline测试环境)） | 2 |
 | `market.reference_ticker` | 最新价、24h 统计、买一卖一显示参考行情（币安）的 ticker（按交易对；合约用指数交易对；测试服打开，ADR-0010，见 [market-data.md](market-data.md#参考-tickermarketreference_ticker)） | 4 |
 | `market.halt_on_feed_loss` | 币安行情中断 5 分钟时暂停跟随它的交易对，恢复 30 秒后放开（测试服打开，见 [market-data.md](market-data.md#行情中断保护markethalt_on_feed_loss)） | 4 |
 | `admin.login_without_totp` | 管理后台只凭邮箱与密码登录，不要求也不校验身份验证器验证码（用户 2026-09-30 决定暂不启用验证码；测试服打开，见 [admin.md](admin.md#登录与会话)） | 4 |
 | `market.reference_feed` | 接入参考行情（币安公开数据，仅测试环境）：参考价、K 线、ticker、盘口，指数价与标记价都依赖它（测试服打开，见 [market-data.md](market-data.md)） | 2 |
 | `market.reference_depth` | 公共盘口与成交显示参考市场（币安）的而不是平台的（按交易对；测试服对全部跟随的交易对打开，见 [market-data.md](market-data.md#参考盘口与成交marketreference_depth阶段-4-b4)） | 4 |
-| `market.house_liquidity` | HOUSE 按参考盘口当对手方（虚拟流动性，按交易对/合约；测试服允许 50 个 USDT 交易对与 BTC-USDT-PERP，见 [market-maker.md](market-maker.md)） | 4 |
+| `market.house_liquidity` | HOUSE 按参考盘口当对手方（虚拟流动性，按交易对/合约；测试服允许 `deploy/instruments/test.json` 的全部交易对与合约：所有交易都与 HOUSE 成交，用户决定 2026-10-02，`scripts/ops/house.sh flags`，见 [market-maker.md](market-maker.md)） | 4 |
 | `market.internal_matching` | 有 HOUSE 流动性的交易对上，用户订单也互相成交（关闭时一律只和 HOUSE 成交；测试服关闭，ADR-0015） | 4 |
 | `market.maker` | 已退役（ADR-0015）：阶段 2 的挂单做市机器人，由 `market.house_liquidity` 取代；表里的行保留，不再有服务读取 | 2 |
 | `risk.enforce` | 执行风控规则的动作（评分为 REVIEW 的 ACTIVE 账户置为 `RISK_REVIEW`）；关闭时只记分。测试服只对地区 `AQ` 打开（[risk.md](risk.md)） | 2 |

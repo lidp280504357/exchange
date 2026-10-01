@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # Funding end to end (implementation plan §7.3 task 10, requirements
-# §11.7). A standing hedge of 0.01 ETH-USDT-PERP between two e2e users
-# lives across runs (ETH-USDT-PERP has no HOUSE liquidity, so the two meet
-# each other; a hedge opened before B4 stays on BTC-USDT-PERP); their addresses and password stay in a local state
-# file (E2E_STATE_DIR, default ~/.cache/exchange-e2e), never in the
-# repository. The first run opens it; every later run signs both in
-# (answering the 7-day login challenge from the dev inbox) and checks each
-# funding time since it opened: both positions were settled at the rate
-# market-data-service settled, the payer paid and the receiver received
-# 0.001 × the settlement mark × |rate| (the payer rounded up, the receiver
-# down). Every run checks that derivatives-service's funding rounds are
-# neither stuck nor short. Needs derivatives.trading, a mark price
+# §11.7). A standing hedge of two e2e users, one long and one short 0.01
+# ETH-USDT-PERP (each opened against HOUSE, which takes every order; a hedge
+# opened before B4 stays on BTC-USDT-PERP at 0.001), lives across runs;
+# their addresses and password stay in a local state file (E2E_STATE_DIR,
+# default ~/.cache/exchange-e2e), never in the repository. The first run
+# opens it; every later run signs both in (answering the 7-day login
+# challenge from the dev inbox) and checks each funding time since it
+# opened: both positions were settled at the rate market-data-service
+# settled, the payer paid and the receiver received the quantity × the
+# settlement mark × |rate| (the payer rounded up, the receiver down).
+# Every run checks that derivatives-service's funding rounds are neither
+# stuck nor short. Needs derivatives.trading, a mark price
 # (market.reference_feed) and ssh to the server.
 #
 #   scripts/e2e/funding.sh
@@ -53,10 +54,11 @@ position() { # position AUTH...: BODY holds the user's only position on the cont
   call GET "/v1/derivatives/positions?symbol=$SYMBOL" "" "$@" && jq -e '.positions | length == 1' <<<"$BODY"
 }
 
-# open_hedge registers two users, gives each 100 USDT in FUTURES, has them
-# trade 0.001 at the mark price and records them in the state file.
+# open_hedge registers two users, gives each 100 USDT in FUTURES, opens a
+# long for one and a short for the other with market orders against HOUSE
+# and records them in the state file.
 open_hedge() {
-  local who price
+  local who
   SYMBOL=$NEW_SYMBOL QTY=$NEW_QTY
   PASSWORD="e2e-$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20 || true)"
   for who in long short; do
@@ -78,13 +80,10 @@ open_hedge() {
       "${auth[@]}" -H "Idempotency-Key: funding-in-$RUN-$who"
     expect 201 - "100 USDT to FUTURES ($who)"
   done
-  call GET "/v1/market/$SYMBOL/mark-price" ""
-  expect 200 - "the mark price"
-  price=$(jq -r '.mark_price | tonumber | floor' <<<"$BODY")
-  call POST /v1/derivatives/orders "{\"symbol\":\"$SYMBOL\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$price\",\"quantity\":\"$QTY\"}" "${LONG[@]}"
-  expect 202 - "the long bids $QTY at $price"
-  call POST /v1/derivatives/orders "{\"symbol\":\"$SYMBOL\",\"side\":\"SELL\",\"type\":\"LIMIT\",\"price\":\"$price\",\"quantity\":\"$QTY\"}" "${SHORT[@]}"
-  expect 202 - "the short sells into it"
+  call POST /v1/derivatives/orders "{\"symbol\":\"$SYMBOL\",\"side\":\"BUY\",\"type\":\"MARKET\",\"quantity\":\"$QTY\"}" "${LONG[@]}"
+  expect 202 - "the long buys $QTY at the market"
+  call POST /v1/derivatives/orders "{\"symbol\":\"$SYMBOL\",\"side\":\"SELL\",\"type\":\"MARKET\",\"quantity\":\"$QTY\"}" "${SHORT[@]}"
+  expect 202 - "the short sells $QTY at the market"
   eventually 40 "the long holds $QTY" position "${LONG[@]}"
   eventually 40 "the short holds -$QTY" position "${SHORT[@]}"
   mkdir -p "$STATE_DIR"

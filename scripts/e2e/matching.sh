@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 # Matching and settlement end to end (implementation plan §6.3 tasks 3 and
-# 4): two users trade on ETH-BTC through the matching engine. A resting
-# sell fills against a buy at its price; an IOC buy takes the rest and
-# cancels its own rest; a post-only order that would take and a self-trade
-# are rejected; a market buy runs out of book; a market sell takes the best
-# bid; a limit buy above the ask pays the ask; a user cancels. Fills carry
-# role and fee; the ledger settles every trade (TRADE_SETTLE, TRADE_FEE,
-# the saved difference unfrozen) and unused funds come back when an order
-# finishes, so the final balances check every step. ETH-BTC follows no
-# reference market, so users meet each other there (HOUSE offers the USDT
-# pairs, ADR-0015); the prices assume no other resting order between 0.035
-# and 0.042 (the e2e scripts cancel theirs on exit).
-# Needs ETH-BTC in TRADING.
+# 4, ADR-0015): every order trades against HOUSE, which quotes Binance's
+# book; users never meet each other while market.internal_matching is off
+# (user decision 2026-10-02). Two users trade ETH-BTC (Binance's ETHBTC):
+# a limit buy above the ask fills at once at HOUSE's price, not at its
+# limit; a limit sell below the bid likewise; a sell resting above the
+# market is not taken by the other user's crossing buy, which fills against
+# HOUSE instead; a post-only order that would take is rejected and one
+# below the market rests; an IOC under the market is canceled unfilled; a
+# market buy spends its quote amount and a market sell its quantity; a
+# cancel unfreezes. Prices come from the public book each time. Fills
+# carry role and fee (0.1% of what is received); the ledger settles every
+# fill, so in the end each user holds the welcome funds plus what its fills
+# say, with nothing frozen.
+# Needs ETH-BTC in TRADING with HOUSE liquidity (scripts/ops/house.sh flags).
 #
 #   scripts/e2e/matching.sh
 set -euo pipefail
@@ -20,7 +22,7 @@ set -euo pipefail
 source "$(dirname "$0")/lib/common.sh"
 
 call GET /v1/market/pairs/ETH-BTC ""
-check '.status == "TRADING"' "ETH-BTC accepts orders"
+check '.status == "TRADING" and .reference_symbol == "ETHBTC"' "ETH-BTC accepts orders and follows Binance's ETHBTC"
 
 signup() { # signup NAME: registers a user, sets NAME_AUTH
   register "e2e-match-$1-$RUN@example.com" "e2e-match-$1-$RUN" "e2e match $RUN"
@@ -41,8 +43,11 @@ balance() { # balance ASSET AUTH... prints "available frozen"
   call GET /v1/account/balances "" "$@"
   jq -r --arg a "$asset" '.balances[] | select(.asset == $a and .account_type == "SPOT") | "\(.available) \(.frozen)"' <<<"$BODY"
 }
-funded() { [[ $(balance ETH "${SELLER[@]}") == "2 0" && $(balance BTC "${BUYER[@]}") == "0.1 0" ]]; }
-eventually 40 "welcome funds arrived for both" funded
+funded() {
+  [[ $(balance ETH "${SELLER[@]}") == "2 0" && $(balance BTC "${SELLER[@]}") == "0.1 0" &&
+    $(balance ETH "${BUYER[@]}") == "2 0" && $(balance BTC "${BUYER[@]}") == "0.1 0" ]]
+}
+eventually 40 "welcome funds arrived for both (0.1 BTC, 2 ETH)" funded
 
 place() { # place JSON AUTH...; sets ORDER
   local body=$1
@@ -58,94 +63,114 @@ status_is() {
   call GET "/v1/orders/$id" "" "$@"
   [[ $(jq -r .status <<<"$BODY") == "$want" ]]
 }
+# book sets BID and ASK from the public book (Binance's; HOUSE quotes it at
+# the pair's tick, which is Binance's).
+book() {
+  call GET "/v1/market/ETH-BTC/depth?limit=5" "" && [[ $STATUS == 200 ]] || return 1
+  BID=$(jq -r '.bids[0][0] // empty' <<<"$BODY")
+  ASK=$(jq -r '.asks[0][0] // empty' <<<"$BODY")
+  [[ -n $BID && -n $ASK ]]
+}
+eventually 40 "ETH-BTC shows a two-sided book" book
+times() { awk -v p="$1" -v f="$2" 'BEGIN { printf "%.5f", p * f }'; } # times PRICE FACTOR, at the tick
 
-echo "== a resting sell fills against a buy at its price"
-place '{"symbol":"ETH-BTC","side":"SELL","type":"LIMIT","price":"0.04","quantity":"0.1"}' "${SELLER[@]}"
-SELL=$ORDER
-eventually 40 "the sell rests (OPEN)" status_is "$SELL" OPEN "${SELLER[@]}"
-place '{"symbol":"ETH-BTC","side":"BUY","type":"LIMIT","price":"0.04","quantity":"0.04"}' "${BUYER[@]}"
+echo "== a limit buy above the ask fills at once, at HOUSE's price"
+book
+LIMIT=$(times "$ASK" 1.02)
+place "{\"symbol\":\"ETH-BTC\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$LIMIT\",\"quantity\":\"0.04\"}" "${BUYER[@]}"
 BUY1=$ORDER
-eventually 40 "the buy fills (FILLED)" status_is "$BUY1" FILLED "${BUYER[@]}"
-check '.filled_quantity == "0.04" and .filled_quote == "0.0016"' "0.04 ETH for 0.0016 BTC"
-eventually 40 "the sell is partly filled" status_is "$SELL" PARTIALLY_FILLED "${SELLER[@]}"
+eventually 40 "the buy at $LIMIT fills (FILLED)" status_is "$BUY1" FILLED "${BUYER[@]}"
+check '.filled_quantity == "0.04" and (.filled_quote | tonumber) < (.frozen_amount | tonumber)' "0.04 ETH, for less than its limit froze (the rest comes back)"
 call GET "/v1/orders/$BUY1/fills" "" "${BUYER[@]}"
-check '(.fills | length == 1) and (.fills[0] | .price == "0.04" and .role == "TAKER" and .fee_asset == "ETH" and .fee == "0.00004")' "the buyer's fill: taker, 0.1% in ETH"
-call GET "/v1/orders/$SELL/fills" "" "${SELLER[@]}"
-check '(.fills | length == 1) and (.fills[0] | .role == "MAKER" and .fee_asset == "BTC" and .fee == "0.0000016")' "the seller's fill: maker, 0.1% in BTC"
+check "(.fills | length) >= 1 and all(.fills[]; .role == \"TAKER\" and .fee_asset == \"ETH\" and (.price | tonumber) <= $LIMIT)" "taker fills at or under its limit (the ask was $ASK), the fee in ETH"
+check '([.fills[].fee | tonumber] | add) == 0.00004' "0.1% of 0.04 ETH in fees"
 
-echo "== an IOC buy takes the rest and cancels its own rest"
-place '{"symbol":"ETH-BTC","side":"BUY","type":"LIMIT","time_in_force":"IOC","price":"0.04","quantity":"0.1"}' "${BUYER[@]}"
-BUY2=$ORDER
-eventually 40 "the IOC rest is canceled" status_is "$BUY2" CANCELED "${BUYER[@]}"
-check '.filled_quantity == "0.06" and .cancel_reason == "IOC"' "0.06 filled, the rest canceled (IOC)"
-eventually 40 "the sell is filled" status_is "$SELL" FILLED "${SELLER[@]}"
-released() { [[ $(balance BTC "${BUYER[@]}") == "0.096 0" ]]; }
-eventually 40 "0.004 BTC paid, the IOC's unused 0.0016 came back" released
+echo "== a limit sell below the bid fills at once, at HOUSE's price"
+book
+LIMIT=$(times "$BID" 0.98)
+place "{\"symbol\":\"ETH-BTC\",\"side\":\"SELL\",\"type\":\"LIMIT\",\"price\":\"$LIMIT\",\"quantity\":\"0.05\"}" "${SELLER[@]}"
+SELL1=$ORDER
+eventually 40 "the sell at $LIMIT fills (FILLED)" status_is "$SELL1" FILLED "${SELLER[@]}"
+call GET "/v1/orders/$SELL1/fills" "" "${SELLER[@]}"
+check "(.fills | length) >= 1 and all(.fills[]; .role == \"TAKER\" and .fee_asset == \"BTC\" and (.price | tonumber) >= $LIMIT)" "taker fills at or over its limit (the bid was $BID), the fee in BTC"
 
-echo "== rejections"
-place '{"symbol":"ETH-BTC","side":"SELL","type":"LIMIT","price":"0.0401","quantity":"0.01"}' "${SELLER[@]}"
-ASK=$ORDER
-eventually 40 "a new ask rests" status_is "$ASK" OPEN "${SELLER[@]}"
-place '{"symbol":"ETH-BTC","side":"BUY","type":"LIMIT","time_in_force":"POST_ONLY","price":"0.0401","quantity":"0.01"}' "${BUYER[@]}"
+echo "== users do not meet: a crossing buy takes HOUSE's ask, not the other user's sell"
+book
+HIGH=$(times "$ASK" 1.05)
+place "{\"symbol\":\"ETH-BTC\",\"side\":\"SELL\",\"type\":\"LIMIT\",\"price\":\"$HIGH\",\"quantity\":\"0.02\"}" "${SELLER[@]}"
+REST=$ORDER
+eventually 40 "the seller's sell at $HIGH rests (OPEN)" status_is "$REST" OPEN "${SELLER[@]}"
+place "{\"symbol\":\"ETH-BTC\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$HIGH\",\"quantity\":\"0.02\"}" "${BUYER[@]}"
+CROSS=$ORDER
+eventually 40 "the buyer's buy at $HIGH fills" status_is "$CROSS" FILLED "${BUYER[@]}"
+call GET "/v1/orders/$CROSS/fills" "" "${BUYER[@]}"
+check "all(.fills[]; (.price | tonumber) < $HIGH)" "below the seller's price: HOUSE's ask (it was $ASK)"
+call GET "/v1/orders/$REST" "" "${SELLER[@]}"
+check '.status == "OPEN" and .filled_quantity == "0"' "the seller's sell still rests, untouched"
+call DELETE "/v1/orders/$REST" "" "${SELLER[@]}"
+expect 202 - "the seller cancels it"
+eventually 40 "it is canceled" status_is "$REST" CANCELED "${SELLER[@]}"
+check '.cancel_reason == "USER"' "canceled by the user"
+
+echo "== post-only and IOC"
+book
+place "{\"symbol\":\"ETH-BTC\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"time_in_force\":\"POST_ONLY\",\"price\":\"$(times "$ASK" 1.01)\",\"quantity\":\"0.01\"}" "${BUYER[@]}"
 POST=$ORDER
-eventually 40 "a post-only order that would take is rejected" status_is "$POST" REJECTED "${BUYER[@]}"
+eventually 40 "a post-only buy over the ask is rejected" status_is "$POST" REJECTED "${BUYER[@]}"
 check '.reject_reason == "ORDER_WOULD_TAKE"' "ORDER_WOULD_TAKE"
-place '{"symbol":"ETH-BTC","side":"BUY","type":"LIMIT","price":"0.0401","quantity":"0.01"}' "${SELLER[@]}"
-SELF=$ORDER
-eventually 40 "a buy against one's own ask is rejected" status_is "$SELF" REJECTED "${SELLER[@]}"
-check '.reject_reason == "ORDER_SELF_TRADE"' "ORDER_SELF_TRADE (CANCEL_NEWEST)"
+LOW=$(times "$BID" 0.95)
+place "{\"symbol\":\"ETH-BTC\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"time_in_force\":\"POST_ONLY\",\"price\":\"$LOW\",\"quantity\":\"0.01\"}" "${BUYER[@]}"
+MAKER=$ORDER
+eventually 40 "a post-only buy under the bid rests" status_is "$MAKER" OPEN "${BUYER[@]}"
+call DELETE "/v1/orders/$MAKER" "" "${BUYER[@]}"
+expect 202 - "cancel it"
+eventually 40 "it is canceled" status_is "$MAKER" CANCELED "${BUYER[@]}"
+place "{\"symbol\":\"ETH-BTC\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"time_in_force\":\"IOC\",\"price\":\"$LOW\",\"quantity\":\"0.01\"}" "${BUYER[@]}"
+IOC=$ORDER
+eventually 40 "an IOC under the bid is canceled" status_is "$IOC" CANCELED "${BUYER[@]}"
+check '.filled_quantity == "0" and .cancel_reason == "IOC"' "nothing filled, canceled (IOC)"
 
-echo "== a market buy runs out of book"
-place '{"symbol":"ETH-BTC","side":"BUY","type":"MARKET","quote_amount":"0.001"}' "${BUYER[@]}"
+echo "== market orders"
+place '{"symbol":"ETH-BTC","side":"BUY","type":"MARKET","quote_amount":"0.0005"}' "${BUYER[@]}"
 MKT=$ORDER
-eventually 40 "the market buy's rest is canceled" status_is "$MKT" CANCELED "${BUYER[@]}"
-check '.filled_quantity == "0.01" and .filled_quote == "0.000401" and .cancel_reason == "NO_LIQUIDITY"' "0.01 ETH for 0.000401 BTC, then no more book"
-
-echo "== a market sell takes the best bid"
-place '{"symbol":"ETH-BTC","side":"BUY","type":"LIMIT","price":"0.035","quantity":"0.01"}' "${BUYER[@]}"
-BID=$ORDER
-eventually 40 "a bid rests" status_is "$BID" OPEN "${BUYER[@]}"
+eventually 40 "a market buy of 0.0005 BTC fills" status_is "$MKT" FILLED "${BUYER[@]}"
+check '(.filled_quote | tonumber) <= 0.0005 and (.filled_quantity | tonumber) >= 0.01' "it spent at most 0.0005 BTC, on whole lots"
 place '{"symbol":"ETH-BTC","side":"SELL","type":"MARKET","quantity":"0.01"}' "${SELLER[@]}"
 MKTS=$ORDER
-eventually 40 "the market sell fills" status_is "$MKTS" FILLED "${SELLER[@]}"
-check '.time_in_force == "IOC" and .filled_quote == "0.00035"' "IOC, 0.01 ETH for 0.00035 BTC"
+eventually 40 "a market sell of 0.01 ETH fills" status_is "$MKTS" FILLED "${SELLER[@]}"
+check '.time_in_force == "IOC" and .filled_quantity == "0.01"' "IOC, 0.01 ETH sold"
 call GET "/v1/orders/$MKTS/fills" "" "${SELLER[@]}"
-check '(.fills | length == 1) and (.fills[0] | .price == "0.035" and .role == "TAKER" and .fee_asset == "BTC" and .fee == "0.00000035")' "the seller's fill: taker at the bid, 0.1% in BTC"
-
-echo "== a limit buy above the ask pays the ask"
-place '{"symbol":"ETH-BTC","side":"SELL","type":"LIMIT","price":"0.0405","quantity":"0.01"}' "${SELLER[@]}"
-ASK2=$ORDER
-eventually 40 "an ask rests at 0.0405" status_is "$ASK2" OPEN "${SELLER[@]}"
-place '{"symbol":"ETH-BTC","side":"BUY","type":"LIMIT","price":"0.041","quantity":"0.01"}' "${BUYER[@]}"
-IMP=$ORDER
-eventually 40 "the buy fills at the ask" status_is "$IMP" FILLED "${BUYER[@]}"
-check '.frozen_amount == "0.00041" and .filled_quote == "0.000405"' "0.00041 BTC frozen, 0.000405 paid (settlement returns 0.000005)"
-
-echo "== cancels"
-place '{"symbol":"ETH-BTC","side":"SELL","type":"LIMIT","price":"0.042","quantity":"0.02"}' "${SELLER[@]}"
-LATE=$ORDER
-eventually 40 "an ask rests" status_is "$LATE" OPEN "${SELLER[@]}"
-call DELETE "/v1/orders/$LATE" "" "${SELLER[@]}"
-expect 202 - "cancel it"
-eventually 40 "it is canceled" status_is "$LATE" CANCELED "${SELLER[@]}"
-check '.cancel_reason == "USER"' "canceled by the user"
-call GET "/v1/fills?symbol=ETH-BTC" "" "${BUYER[@]}"
-check '.items | length == 5' "the buyer has five fills"
+check 'all(.fills[]; .role == "TAKER" and .fee_asset == "BTC")' "taker fills, the fee in BTC"
 
 echo "== settlement"
-# The buyer paid 0.0016 + 0.0024 + 0.000401 + 0.00035 + 0.000405 BTC for
-# 0.13 ETH less 0.1% fees (in ETH); the seller got the BTC less 0.1%
-# (rounded up to the satoshi) and gave the ETH. The IOC rest, the rejected
-# orders, the market buy's rest, the canceled ask and what the last buy
-# saved all came back, so nothing stays frozen.
-settled() {
-  [[ $(balance BTC "${BUYER[@]}") == "0.094844 0" && $(balance ETH "${BUYER[@]}") == "2.12987 0" &&
-    $(balance BTC "${SELLER[@]}") == "0.10515083 0" && $(balance ETH "${SELLER[@]}") == "1.87 0" ]]
+# Each user holds the welcome funds (0.1 BTC, 2 ETH) plus what its fills
+# say: a buy pays the quote and receives the quantity less the fee, a
+# sell gives the quantity and receives the quote less the fee. What limits
+# froze beyond their fills, the rests and the rejected orders came back,
+# so nothing stays frozen.
+settled() { # settled AUTH...
+  call GET "/v1/fills?symbol=ETH-BTC&limit=50" "" "$@"
+  local want
+  want=$(jq -r '
+    def sum(f): map(f) | add // 0;
+    [.items[] | select(.side == "BUY")] as $b | [.items[] | select(.side == "SELL")] as $s |
+    "\(0.1 - ($b | sum(.quote_quantity | tonumber)) + ($s | sum((.quote_quantity | tonumber) - (.fee | tonumber)))) \(2 + ($b | sum((.quantity | tonumber) - (.fee | tonumber))) - ($s | sum(.quantity | tonumber)))"' <<<"$BODY")
+  local btc eth
+  btc=$(balance BTC "$@")
+  eth=$(balance ETH "$@")
+  awk -v w="$want" -v b="$btc" -v e="$eth" 'BEGIN {
+    split(w, x, " "); split(b, y, " "); split(e, z, " ")
+    d1 = x[1] - y[1]; d2 = x[2] - z[1]
+    exit !(d1 < 5e-9 && d1 > -5e-9 && d2 < 5e-9 && d2 > -5e-9 && y[2] == 0 && z[2] == 0)
+  }'
 }
-eventually 40 "both sides settled, nothing left frozen" settled
+eventually 40 "the buyer's balances are the welcome funds plus its fills, nothing frozen" settled "${BUYER[@]}"
+eventually 40 "the seller's balances are the welcome funds plus its fills, nothing frozen" settled "${SELLER[@]}"
+call GET "/v1/fills?symbol=ETH-BTC&limit=50" "" "${BUYER[@]}"
+FILLS=$(jq '.items | length' <<<"$BODY")
 call GET "/v1/account/ledger?type=TRADE_SETTLE&limit=50" "" "${BUYER[@]}"
-check '.items | length == 10' "five TRADE_SETTLE journals, each on the buyer's BTC and ETH"
-call GET "/v1/account/ledger?type=TRADE_FEE&asset=ETH" "" "${BUYER[@]}"
-check '[.items[].amount] | sort == ["-0.00001", "-0.00001", "-0.00001", "-0.00004", "-0.00006"]' "the buyer's fees, in ETH"
+check ".items | length == $((FILLS * 2))" "a TRADE_SETTLE journal per fill, on the buyer's BTC and ETH ($FILLS fills)"
+call GET "/v1/account/ledger?type=TRADE_FEE&limit=50" "" "${BUYER[@]}"
+check ".items | length == $FILLS" "a TRADE_FEE per fill"
 
 echo "all matching checks passed"

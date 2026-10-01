@@ -3,10 +3,10 @@
 # is accepted (202, NEW) with its funds frozen; bad orders are refused and
 # not stored; an order the balance cannot fund is stored as REJECTED; a
 # client_order_id makes retries safe; cancels complete through the matching
-# engine and give the frozen funds back. It trades ETH-BTC, which has no
-# HOUSE liquidity: the orders rest far from the prices of matching.sh but
-# inside the price band around its last trade (ETH-BTC's band is 100% in
-# the test data). Needs ETH-BTC in TRADING and SOL-BTC not (the test data
+# engine and give the frozen funds back. It trades ETH-BTC, where HOUSE
+# quotes Binance's ETHBTC: prices come from that book, the orders resting
+# 10% away from it (inside ETH-BTC's price band of 100% around the
+# reference price). Needs ETH-BTC in TRADING and SOL-BTC not (the test data
 # keeps it PREPARE).
 #
 #   scripts/e2e/trading.sh
@@ -37,31 +37,49 @@ funded() { [[ $(balance BTC) == "0.1 0" && $(balance ETH) == "2 0" ]]; }
 eventually 40 "welcome funds arrived" funded
 
 order() { call POST /v1/orders "$1" "${AUTH[@]}" -H "Idempotency-Key: $(uuidgen 2>/dev/null || date +%s%N)"; }
+# BID and ASK: Binance's ETHBTC book, which HOUSE quotes.
+book() {
+  call GET "/v1/market/ETH-BTC/depth?limit=5" "" && [[ $STATUS == 200 ]] || return 1
+  BID=$(jq -r '.bids[0][0] // empty' <<<"$BODY")
+  ASK=$(jq -r '.asks[0][0] // empty' <<<"$BODY")
+  [[ -n $BID && -n $ASK ]]
+}
+eventually 40 "ETH-BTC shows a two-sided book" book
+times() { awk -v p="$1" -v f="$2" 'BEGIN { printf "%.5f", p * f }'; } # times PRICE FACTOR, at the tick (0.00001)
+LOW=$(times "$BID" 0.9)   # a buy that rests
+HIGH=$(times "$ASK" 1.1)  # a sell that rests
+FAR=$(times "$ASK" 3)     # above the band (2 x the reference price)
+FROZEN=$(awk -v p="$LOW" 'BEGIN { printf "%.6f", p * 0.1 }')
+# holds ASSET AVAILABLE FROZEN: the SPOT account holds those (compared as numbers).
+holds() {
+  awk -v got="$(balance "$1")" -v a="$2" -v f="$3" 'BEGIN { split(got, x, " "); d1 = x[1] - a; d2 = x[2] - f; exit !(d1 < 1e-12 && d1 > -1e-12 && d2 < 1e-12 && d2 > -1e-12) }'
+}
 
-echo "== a limit buy"
-BUY="{\"symbol\":\"ETH-BTC\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"0.03\",\"quantity\":\"0.1\",\"client_order_id\":\"e2e-$RUN\"}"
+echo "== a limit buy at $LOW (the bid is $BID)"
+BUY="{\"symbol\":\"ETH-BTC\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$LOW\",\"quantity\":\"0.1\",\"client_order_id\":\"e2e-$RUN\"}"
 order "$BUY"
 expect 202 - "limit buy accepted"
-check '.status == "NEW" and .frozen_asset == "BTC" and .frozen_amount == "0.003" and .time_in_force == "GTC" and .cancel_requested == false' "NEW, 0.003 BTC frozen"
+check ".status == \"NEW\" and .frozen_asset == \"BTC\" and ((.frozen_amount | tonumber) - $FROZEN | fabs) < 1e-12 and .time_in_force == \"GTC\" and .cancel_requested == false" "NEW, $FROZEN BTC frozen"
 ORDER=$(jq -r .order_id <<<"$BODY")
-[[ $(balance BTC) == "0.097 0.003" ]] || { echo "FAIL BTC balance after the buy: $(balance BTC)" >&2; exit 1; }
-echo "ok   the balance shows 0.097 available, 0.003 frozen"
+LEFT=$(awk -v f="$FROZEN" 'BEGIN { printf "%.6f", 0.1 - f }')
+holds BTC "$LEFT" "$FROZEN" || { echo "FAIL BTC balance after the buy: $(balance BTC)" >&2; exit 1; }
+echo "ok   the balance shows $LEFT available, $FROZEN frozen"
 order "$BUY"
 expect 202 - "the same client_order_id again"
 check ".order_id == \"$ORDER\"" "returns the same order"
-[[ $(balance BTC) == "0.097 0.003" ]] || { echo "FAIL a retry froze again: $(balance BTC)" >&2; exit 1; }
+holds BTC "$LEFT" "$FROZEN" || { echo "FAIL a retry froze again: $(balance BTC)" >&2; exit 1; }
 echo "ok   nothing frozen twice"
-order "${BUY/0.1/0.2}"
+order "{\"symbol\":\"ETH-BTC\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$LOW\",\"quantity\":\"0.2\",\"client_order_id\":\"e2e-$RUN\"}"
 expect 409 COMMON_IDEMPOTENCY_CONFLICT "another order under the same client_order_id"
 
 echo "== checks refuse bad orders"
-order '{"symbol":"ETH-BTC","side":"BUY","type":"LIMIT","price":"0.030001","quantity":"0.1"}'
+order "{\"symbol\":\"ETH-BTC\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"${LOW}1\",\"quantity\":\"0.1\"}"
 expect 400 INSTRUMENT_PRECISION "price off the tick"
-order '{"symbol":"ETH-BTC","side":"SELL","type":"LIMIT","price":"0.05","quantity":"1001"}'
+order "{\"symbol\":\"ETH-BTC\",\"side\":\"SELL\",\"type\":\"LIMIT\",\"price\":\"$HIGH\",\"quantity\":\"1001\"}"
 expect 400 ORDER_QUANTITY_OUT_OF_RANGE "quantity above the maximum"
-order '{"symbol":"ETH-BTC","side":"SELL","type":"LIMIT","price":"0.5","quantity":"0.1"}'
-expect 422 ORDER_PRICE_OUT_OF_BAND "more than the band above the last trade"
-order '{"symbol":"ETH-BTC","side":"BUY","type":"LIMIT","price":"0.03","quantity":"0.001"}'
+order "{\"symbol\":\"ETH-BTC\",\"side\":\"SELL\",\"type\":\"LIMIT\",\"price\":\"$FAR\",\"quantity\":\"0.1\"}"
+expect 422 ORDER_PRICE_OUT_OF_BAND "three times the reference price, past the band"
+order "{\"symbol\":\"ETH-BTC\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$LOW\",\"quantity\":\"0.001\"}"
 expect 422 ORDER_MIN_NOTIONAL "below the minimum notional"
 order '{"symbol":"ETH-BTC","side":"BUY","type":"MARKET","quantity":"0.1"}'
 expect 400 COMMON_INVALID_ARGUMENT "a market buy by quantity"
@@ -73,15 +91,15 @@ call GET "/v1/orders?symbol=ETH-BTC" "" "${AUTH[@]}"
 check '.items | length == 1' "refused orders are not stored"
 
 echo "== an order the balance cannot fund"
-order '{"symbol":"ETH-BTC","side":"BUY","type":"LIMIT","price":"0.03","quantity":"10"}'
-expect 422 LEDGER_INSUFFICIENT_BALANCE "0.3 BTC is more than the balance"
+order "{\"symbol\":\"ETH-BTC\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$LOW\",\"quantity\":\"10\"}"
+expect 422 LEDGER_INSUFFICIENT_BALANCE "10 ETH's worth is more than the balance"
 REJECTED=$(jq -r .details.order_id <<<"$BODY")
 call GET "/v1/orders/$REJECTED" "" "${AUTH[@]}"
 expect 200 - "the rejected order"
 check '.status == "REJECTED" and .reject_reason == "LEDGER_INSUFFICIENT_BALANCE"' "stored as REJECTED"
 
-echo "== a limit sell"
-order '{"symbol":"ETH-BTC","side":"SELL","type":"LIMIT","price":"0.06","quantity":"0.1"}'
+echo "== a limit sell at $HIGH (the ask is $ASK)"
+order "{\"symbol\":\"ETH-BTC\",\"side\":\"SELL\",\"type\":\"LIMIT\",\"price\":\"$HIGH\",\"quantity\":\"0.1\"}"
 expect 202 - "limit sell accepted"
 check '.frozen_asset == "ETH" and .frozen_amount == "0.1"' "0.1 ETH frozen"
 SELL=$(jq -r .order_id <<<"$BODY")
