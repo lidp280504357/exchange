@@ -36,7 +36,8 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
     - B3 手机站：设计 §7 全部页面（`web/apps/m`，外壳见 `layout/`，页面挂在哪个外壳由 `routing.tsx` 的 `shell` 决定）；浏览器冒烟测试 `web/e2e/m-smoke.mjs`（与 PC 共用 `web/e2e/lib.mjs`）；旧 H5 `web/h5` 已删除，`/h5/*` 301 到首页；品牌为 Astras；提交 `8802570`、`44b2cd8`、`74339c0`、`f6c0a75`、`2392a82`；`index.html` 按地址预加载页面 chunk（`web/scripts/route-preload.mjs`，两站都用）。
     - B4 市场扩展：50 个 USDT 交易对（`deploy/instruments/gen-top50.go` 生成，TON 换成 HYPE，1000SHIB/1000PEPE 千倍计价，47 个内部资产不能充提；SOL-BTC 故意保持 PREPARE）；行情全部为币安数据（market-data-service 维护本地盘口，发 `market.depth`/`market.trades`，开关 `market.reference_depth`；引擎深度改发 `*.depth.internal`）；HOUSE 虚拟流动性（ADR-0013/0014/0015：market-maker 发参考簿到 `order.references`，引擎合并撮合与触发、参考簿进 WAL（按 `seq`），开关 `market.house_liquidity`，`market.internal_matching` 关闭即纯 B-book；账本 `HOUSE_TRADE_SETTLE` 记在可为负的 `MARKET_MAKER`；合约里 HOUSE 是用户 `HOUSE_USER_ID`，不被强平）；运维 `scripts/ops/house.sh`（seed/flags/open/show），端到端 `house.sh`；提交 `c2898d0`、`98b816c`。挂单做市机器人与开关 `market.maker` 已退役。见 `docs/runbook/market-maker.md`。
       - 币安报文解码要给只差大小写的键（`e`/`E`、`m`/`M`）各留字段，否则 encoding/json 会把它们混在一起、整条消息解码失败（B4 部署后盘口不动的原因）。
-  - 下一步：B5（管理后台，含 HOUSE 敞口页）→ B6 → B7。
+    - B5 管理后台：设计 §10 页面上线 `admin.astras.vip`（`web/apps/admin`：公共组件在 `src/kit/`（游标列表、地址栏筛选与视图、危险操作确认、枚举标签、格式化），页面在 `src/pages/`，登录后的外壳按需加载）；新接口 `/admin/v1/{house,health,ledger/reconciliation,ledger/system-balances}`；旧后台 `web/admin` 已删除，`astras.vip/admin/*` 301 到新后台；`packages/ui` 有 `Drawer` 与 `TrendChart`；浏览器冒烟测试 `web/e2e/admin-smoke.mjs`（`web.sh` 建临时 ADMIN）；提交 `314c3dd`、`52550b5`、`dd796c4`。
+  - 下一步：B6（托管钱包，先接 mock）→ B7。
 - 服务隔离：`.golangci.yml` 的 depguard 规则禁止 `internal/<服务>` 互相 import，新服务要在那里补一组规则。消费事件用 `bootstrap.Consumer` + 应用层经 inbox 去重（auth 的 `Store.Once`、notification 的 `inbox.ProcessID`）。
 - 鉴权：网关验 JWT 后把身份写进 `X-User-Id`/`X-Session-Id`/`X-Auth-Scope` 头转发（客户端同名头会被剥掉），服务端用 `httpx.UserID(r)`/`httpx.SessionID(r)` 读取；新的公开接口要加进 `internal/gateway/routes.go`，否则默认必须登录。敏感操作读 `X-Step-Up-Token`，跨服务用 auth-service gRPC `ConsumeStepUp` 兑换。
 - 功能开关：`bootstrap.Flags` 拿 `*flags.Client`，`Enabled(key, flags.Subject{...})`；改开关用 `exchangectl flags set`（见 `docs/runbook/feature-flags.md`）。
@@ -64,8 +65,8 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
 - 推送 GitHub 后在测试服更新：`task deploy`（等价 `ssh exchange 'bash /opt/exchange/src/deploy/server-update.sh'`），带提交号回滚；脚本同时同步参考数据、热加载 nginx、在 node 容器里构建并发布前端（三个站点、旧后台 `/admin/`、Storybook）。
 - 入口 `https://astras.vip`（PC 站）、`https://m.astras.vip`（手机站）、`https://admin.astras.vip`（后台）：Cloudflare → nginx 容器（三个 server 块）→ `/v1/*` 到 `api-gateway:8080`、`/admin/v1/` 到 admin-service，其余为各站静态文件。
 - 应用容器编排在 `deploy/compose/docker-compose.apps.yml`，密钥由服务器 `apps.env` 经 `env_file` 注入。
-- 前端：`web/` pnpm workspace（pnpm 11、Node 24；`apps/{pc,m,admin}` 与 `packages/{core,ui}`，旧后台 `admin` 过渡期保留到 B5；见 `docs/runbook/web.md`）。
-  - `task web:check` 在 `task ci` 里；改 OpenAPI 或 `api/admin` 后 `task web:types` 并提交生成文件。
+- 前端：`web/` pnpm workspace（pnpm 11、Node 24；`apps/{pc,m,admin}`、`packages/{core,ui}` 与浏览器冒烟测试 `e2e`；见 `docs/runbook/web.md`）。
+  - `task web:check` 在 `task ci` 里；改 OpenAPI 或 `api/admin` 后 `task web:types` 并提交生成文件（先 `git add` 生成文件再跑 `task ci`，否则它的 `git diff --exit-code` 会报差异）。
   - 应用之间不互相 import，共享的放 `packages`；组件只用语义色类名，`pnpm lint` 检查。
   - Claude Code 预览用 `.claude/launch.json` 的 `pc`（5173）、`m`（5174）、`admin`（5180）、`storybook`（6006）。端口不能换：刷新 Cookie 与 WebSocket 的来源白名单写的是 5173 与 5174。
   - 预览标签页的 `document.visibilityState` 是 hidden，WsClient 会压住高频推送，看实时变化时要注意。
