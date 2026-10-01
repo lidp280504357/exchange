@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -216,7 +217,14 @@ func TestWalletSchema(t *testing.T) {
 	rejects(t, db, "one address per user and network", addr, user, 1, "0x0000000000000000000000000000000000000001")
 	rejects(t, db, "an index is used once", addr, uuid.New(), 0, "0x0000000000000000000000000000000000000002")
 	rejects(t, db, "an address belongs to one user", addr, uuid.New(), 2, "0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed")
-	rejects(t, db, "addresses are 0x hex", addr, uuid.New(), 3, "5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed")
+
+	// A custodian creates its addresses (ADR-0011): no derivation index, and
+	// not every network is EVM.
+	custodied := `INSERT INTO deposit_addresses (user_id, network, derivation_index, address, provider, created_at) VALUES ($1, $2, $3, $4, $5, now())`
+	accepts(t, db, custodied, user, "BTC", nil, "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq", "UDUN")
+	accepts(t, db, custodied, user, "TRON", nil, "TJRabPrwbZy45sbavfcjinPJC18kjpRTv8", "UDUN")
+	rejects(t, db, "the platform's own addresses have an index", custodied, uuid.New(), "ETH-SEPOLIA", nil, "0x0000000000000000000000000000000000000003", "")
+	rejects(t, db, "a custodian's addresses have none", custodied, uuid.New(), "BTC", 4, "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh", "UDUN")
 
 	dep := `INSERT INTO deposits (id, user_id, asset, network, address, tx_hash, log_index, block_number, block_hash, amount,
 		raw_amount, required_confirmations, unclaimed, reason, status, journal_id, detected_at)
@@ -233,6 +241,36 @@ func TestWalletSchema(t *testing.T) {
 	rejects(t, db, "credited deposits have a journal", dep, uuid.New(), user, "ETH", tx, 9, false, nil, "CREDITED", nil)
 	rejects(t, db, "unclaimed deposits end REJECTED", dep, uuid.New(), user, "ETH", tx, 10, true, "BELOW_MINIMUM", "CREDITED", uuid.New())
 	rejects(t, db, "known statuses only", dep, uuid.New(), user, "ETH", tx, 11, false, nil, "LOST", nil)
+
+	// A custodian's deposit is its trade: one transaction may pay several
+	// addresses, and its hash need not be EVM's.
+	reported := `INSERT INTO deposits (id, user_id, asset, network, address, tx_hash, log_index, block_number, block_hash, amount,
+		raw_amount, required_confirmations, provider_tx_id, status, detected_at)
+		VALUES ($1, $2, 'BTC', 'BTC', 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq', $3, -1, 0, '', 0.01, 1000000, 0, $4, 'CONFIRMED', now())`
+	btcTx := strings.Repeat("cd", 32)
+	accepts(t, db, reported, uuid.New(), user, btcTx, "trade-1")
+	accepts(t, db, reported, uuid.New(), user, btcTx, "trade-2")
+	rejects(t, db, "a trade is one deposit", reported, uuid.New(), user, strings.Repeat("ef", 32), "trade-1")
+
+	wd := `INSERT INTO withdrawals (id, user_id, asset, network, address, amount, fee, status, required_confirmations, provider,
+		submitted_at, created_at, updated_at) VALUES ($1, $2, 'BTC', 'BTC', 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh', 0.01, 0.0001,
+		$3, 0, $4, $5, now(), now())`
+	accepts(t, db, wd, uuid.New(), user, "SUBMITTED", "UDUN", time.Now())
+	rejects(t, db, "a submitted withdrawal names its custodian", wd, uuid.New(), user, "SUBMITTED", "", time.Now())
+	rejects(t, db, "a submitted withdrawal says when", wd, uuid.New(), user, "SUBMITTED", "UDUN", nil)
+	accepts(t, db, wd, uuid.New(), user, "CONFIRMED", "UDUN", time.Now())
+	rejects(t, db, "the platform's own withdrawals confirm a transaction", wd, uuid.New(), user, "CONFIRMED", "", nil)
+	withdrawTo := `INSERT INTO withdraw_addresses (id, user_id, network, address, created_at, usable_at) VALUES ($1, $2, 'BTC', $3, now(), now())`
+	accepts(t, db, withdrawTo, uuid.New(), user, "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh")
+
+	callback := `INSERT INTO custody_callbacks (id, provider, trade_id, status, raw, signature_ok, result, received_at)
+		VALUES ($1, 'UDUN', $2, $3, $4, $5, $6, now())`
+	accepts(t, db, callback, uuid.New(), "trade-1", 3, "{}", true, "APPLIED")
+	rejects(t, db, "a verified callback is kept once per trade and status", callback, uuid.New(), "trade-1", 3, "{}", true, "IGNORED")
+	accepts(t, db, callback, uuid.New(), "trade-1", 3, "{}", false, "REJECTED")
+	accepts(t, db, callback, uuid.New(), "trade-1", 3, "{}", false, "REJECTED")
+	rejects(t, db, "a forged callback is rejected", callback, uuid.New(), "trade-1", 4, "{}", false, "APPLIED")
+	rejects(t, db, "at most 16 KiB of a callback is kept", callback, uuid.New(), "trade-2", 3, strings.Repeat("x", 16385), true, "RECEIVED")
 }
 
 func TestSignerSchema(t *testing.T) {

@@ -7,9 +7,28 @@
 | 单元测试 | 各包 `*_test.go`（状态机全部非法转移、金额与精度、幂等、错误码映射、令牌、限流、调度重试与熔断）；前端 Vitest（`web/packages/*/src`、`web/apps/*/src` 的 `*.test.ts(x)`） | `task test`、`task web:check`（都在 `task ci` 里） |
 | 属性测试 | `internal/ledger/domain`：固定种子的随机分录序列下每资产零和、受限账户不为负 | 同上 |
 | 契约测试 | Protobuf：`buf lint`、生成代码一致、`buf breaking`（CI 对比上一个提交，本机 `task proto:breaking` 对比 main）；OpenAPI：前端类型由契约生成且一致（`packages/core/src/api/gen`），浏览器冒烟测试把看到的每个 API 响应按契约校验（`web/e2e/contract.mjs`，Ajv/JSON Schema 2020-12）；gRPC 错误码跨服务保持（`grpcx` 测试） | `task ci`、`task e2e` |
-| 集成测试 | 连测试服的 `exchange_test` 库、Redis DB 15、临时 topic 与 ClickHouse 库（`internal/platform/testenv`，未配置则跳过）：仓储、迁移与回滚、outbox/inbox、Kafka 重试/死信/重放、账本并发与对账、CLI | `task test:integration`（约 8 分钟） |
+| 集成测试 | 连测试服的 `exchange_test` 库、Redis DB 15、临时 topic 与 ClickHouse 库（`internal/platform/testenv`，未配置则跳过）：仓储、迁移与回滚、outbox/inbox、Kafka 重试/死信/重放、账本并发与对账、CLI | `task test:integration`（本机到测试服约 25 分钟；ClickHouse 要经 SSH 隧道，见下文 CI 一节）；CI 每次推送都跑（约 5 分钟） |
 | 端到端 | `scripts/e2e/*.sh` 对已部署环境：`auth`（注册、令牌轮换与重放、会话、step-up）、`identity`（手机号注册登录、绑定、换绑）、`account`（资料、资格、冻结与令牌刷新、通知）、`gateway`（限流头、幂等重放、WebSocket）、`ledger`（欢迎资金、划转）、`market`、`web`（PC 站、手机站、后台三站的页面与 SPA 回退、缓存头与 gzip、设备分流与 `site_pref`、手机站 manifest、service worker 与离线页、`/h5/` 跳首页、后台安全头、API 参考页与 Storybook，最后用无头 Chrome 跑 PC 站与手机站的浏览器冒烟测试 `web/e2e/{pc,m}-smoke.mjs`，见 [web.md](web.md#性能与检查)）、`ops`（trace ID、健康与指标、账本与 ClickHouse 核对为 0）、`pii`（ClickHouse 与日志里没有明文邮箱与验证码）、`risk`（新设备登录记分、同设备注册爆发进入风控审核）、`trading`（下单冻结、校验、余额不足被拒、client_order_id 重试、撤单请求）、`matching`（两个用户实际成交：挂单与吃单、IOC、POST_ONLY 与自成交被拒、市价单、限价买单差额、撤单与解冻、结算后的余额与流水）、`marketdata`（行情 REST 的校验；参考行情：交易对映射、币安 ticker、概览、K 线翻页与 `tickers` 频道；一笔成交在 WebSocket 深度、成交、ticker、K 线与 orders/fills 频道上的推送，以及 REST 成交、ticker、K 线、深度）、`totp`、`deposit`/`withdraw`（Sepolia 真实转账）、`custody`（托管钱包与测试服模拟网关：托管方地址、充值入账一次、伪造与过期回调被拒、提现 `SUBMITTED` → `CONFIRMED`/`FAILED`、托管方对账，见 [custody.md](custody.md)）、`house`（HOUSE 虚拟流动性）、`admin`（管理后台：页面与安全头、密码 + TOTP 登录与 Cookie、CSRF、角色、冻结/解冻、交易对状态、强制撤单、开关、双人调账、合约状态与只减仓、强平监控、双人保险基金注资、报表、审计查询、退出与停用）；阶段 3：`contracts`（合约规格、标记价、资金费率与推送）、`derivatives`（两个用户在 ETH-USDT-PERP 上开仓、平仓、转回、对账）、`funding`（常驻对冲仓位的每次资金费，状态文件在本机 `~/.cache/exchange-e2e/`，见 [derivatives.md](derivatives.md#测试服设置)）；下单与成交类脚本在没有做市的 ETH-BTC 上进行（BTC-USDT 有做市报价），`ops` 还检查做市与参考行情的指标 | `task e2e`（约 15 分钟，需 ssh 到测试服、本机 Chrome、`.env` 的 `CAPTCHA_BYPASS_TOKEN`） |
 | 故障注入 | `scripts/fault/*.sh`：Redpanda 停机（API 可用、恢复后事件补发且只处理一次、无新死信）、ClickHouse 停机（核心状态不受影响、恢复后补齐）、Redis 停机（登录态请求放行、发验证码与密码登录 503 拒绝、恢复后正常）、PostgreSQL 重启（连接池自愈、同一幂等键至多一笔划转、账本核对通过）；阶段 2 任务 12 新增：撮合引擎主备切换 `matching-failover`（起第二个实例作备、`kill -9` 主进程，备机接管租约、由快照与 WAL 重建订单簿，崩溃前挂的单在接管后恰好成交一次、账本结清；Docker 把崩溃的实例拉起为新备机，最后优雅停掉第二个实例、第一个再次接管）、链节点不可用 `chain-outage`（主机防火墙丢弃 wallet-service 出网流量：扫描停在原处、服务仍就绪、分配地址与充提查询正常，恢复后追上链高）、参考行情中断 `reference-outage`（丢弃 market-data-service 出网流量：参考价数秒内过期、HOUSE 撤出 BTC-USDT 的流动性、平台行情照常，30 秒无数据断开重连，恢复后参考价新鲜、HOUSE 重新报价；合约在断流期间进入只减仓，演练结束时等标记价恢复后解除它造成的只减仓）；阶段 3 新增合约降级 `contract-degrade`（同样丢弃 market-data-service 出网流量：BTC-USDT-PERP 标记价报 degraded、合约进入只减仓、开仓单被拒；恢复后仍只减仓，`exchangectl derivatives resume` 后开仓单恢复）；阶段 4 新增托管方回调 `custody-callbacks`（模拟网关把回调延后两分钟：充值等到回调才入账、只入账一次，三次重放不变；wallet-service 停机时托管方退避重试，恢复后入账一次；网关停机时新地址返回 `WALLET_UNAVAILABLE`、已有地址照常、对账失败且 `wallet_custody_up` 为 0，恢复后对账短缺为 0。见 [custody.md](custody.md)） | `task fault`（旧四项每项中断约半分钟；新三项各约三到四分钟，结束时恢复；防火墙规则带 `exchange-fault-<服务>` 注释，退出时删除） |
+
+## CI（GitHub Actions）
+
+`.github/workflows/ci.yml` 有三个任务：`go`、`web`、`deploy config`（只做质量门禁，不部署，ADR-0007）。
+
+- `go` 任务比本机 `task ci` 多跑集成测试：CI 设了 `TEST_*`，`task ci` 没设，所以集成测试只在 CI 里失败的情况是有的。
+  - 改迁移或表约束时，提交前至少跑相关包与 `./migrations/` 的集成测试。B6 删了充值地址的 0x 约束，却没改 `TestWalletSchema`，CI 因此连红了五次。
+- 集成测试的依赖由 `scripts/ci/services.sh` 起成容器（PostgreSQL、Redis、ClickHouse、Redpanda，与测试服同版本，每次都是空库）。
+  - 拉镜像失败会退避重试最多六次，每次失败的原因写进注解。
+  - ClickHouse 取自 `mirror.gcr.io`：Docker Hub 对匿名拉取限流，GitHub 自带的服务容器只在几秒内重试三次，曾让任务在 `Initialize containers` 失败。
+- Go 版本是 1.26 的最新补丁版（`setup-go` 的 `1.26.x` + `check-latest`），与应用镜像 `golang:1.26-alpine` 一致。
+  - go.mod 的 `go 1.26.0` 只表示能构建本模块的最低版本。
+  - govulncheck 按运行它的 Go 判断标准库漏洞，按 go.mod 装 1.26.0 会一直报标准库漏洞。
+  - 有漏洞但还没有修复版的依赖，govulncheck 也会失败。GO-2026-6443 就是这样：gRPC 的 1.84 线没有修复版，所以退到已修复的 v1.83.2。
+- 运行日志要登录且有仓库权限才能看，注解不用。
+  - `go test` 或 govulncheck 失败时，「name the failures」步骤把失败的测试、竞态、编译错误或漏洞编号写成一条注解。
+  - 打开运行页面就能看到这条注解，接口是 `GET /repos/{owner}/{repo}/check-runs/{job_id}/annotations`。
+- 本机复现 CI 的测试步骤：先 `ssh -f -N -L 19000:127.0.0.1:9000 exchange` 建隧道（本机连不上测试服 ClickHouse 的 9000 端口）。
+  - 再把 `.env` 的 `TEST_CLICKHOUSE_ADDR` 设为 `127.0.0.1:19000`，然后跑 `task test:integration`（它从 `.env` 读 `TEST_*`，会覆盖命令行上设的值）。
 
 ## 约定
 

@@ -45,7 +45,7 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
 - 鉴权：网关验 JWT 后把身份写进 `X-User-Id`/`X-Session-Id`/`X-Auth-Scope` 头转发（客户端同名头会被剥掉），服务端用 `httpx.UserID(r)`/`httpx.SessionID(r)` 读取；新的公开接口要加进 `internal/gateway/routes.go`，否则默认必须登录。敏感操作读 `X-Step-Up-Token`，跨服务用 auth-service gRPC `ConsumeStepUp` 兑换。
 - 功能开关：`bootstrap.Flags` 拿 `*flags.Client`，`Enabled(key, flags.Subject{...})`；改开关用 `exchangectl flags set`（见 `docs/runbook/feature-flags.md`）。
 - 事件：契约在 `api/proto`，改完 `task proto`（buf，生成到 `api/gen/go` 并提交）；发事件 = `bootstrap.Events` 拿 `event.Factory` → 业务事务里 `outbox.Add`；消费 = `bootstrap.Consumer` + 处理函数里 `inbox.Process` 去重。
-- 加依赖后必须 `go mod tidy`（本机 macOS，Linux 专用依赖只有 tidy 才会写进 go.sum；`task ci` 含 `go mod tidy -diff`）。集成测试：`task test:integration`（读 `.env` 的 `TEST_*`，测试服 `exchange_test` 库、Redis DB 15）。
+- 加依赖后必须 `go mod tidy`（本机 macOS，Linux 专用依赖只有 tidy 才会写进 go.sum；`task ci` 含 `go mod tidy -diff`）。集成测试：`task test:integration`（读 `.env` 的 `TEST_*`，测试服 `exchange_test` 库、Redis DB 15）。`task ci` 不跑集成测试，GitHub Actions 的 go 任务会跑（`-race`，空库容器）：改迁移或表约束时先跑相关包与 `./migrations/` 的集成测试；CI 失败的测试与漏洞编号写在运行页面的注解里，不用登录就能看（见 `docs/runbook/testing.md` 的 CI 一节）。
 - 新服务照 `cmd/auth-service` 写：`main` 调 `app.Main(name, setup, app.WithDefaultOpsAddr(":90xx"))`；`setup` 里 `a.LoadConfig(&cfg)`（`koanf` 标签 = 小写环境变量名，嵌套配置用 `koanf:",squash"`），用 `bootstrap.Postgres/Redis/GRPCServer/HTTPServer` 接基础设施（自动登记就绪检查、指标、清理），`a.NewRouter()` 建路由。端口表见 `docs/runbook/server-deploy.md`。
 - 本机 `/usr/bin/python3` 是 3.9，源码里超长的中文行会误报 "Non-UTF-8 code"；改文档用 Edit 工具，别用内联 Python 长字符串。
 - 契约初稿（OpenAPI、Protobuf）和数据库初始化脚本开始前先给用户过目（用户 2026-09-28 说不必等回复，可在进度消息里展示后继续）。
