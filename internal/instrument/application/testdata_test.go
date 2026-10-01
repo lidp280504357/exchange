@@ -38,8 +38,12 @@ func TestTheDeployedReferenceDataIsValid(t *testing.T) {
 		}
 		assets[a.Code] = a.Asset
 	}
-	usdt := 0
+	usdt, seen := 0, map[string]bool{}
 	for _, p := range cfg.Pairs {
+		if seen[p.Symbol] {
+			t.Errorf("pair %s listed twice", p.Symbol)
+		}
+		seen[p.Symbol] = true
 		if p.ReferenceMultiplier.IsZero() {
 			p.ReferenceMultiplier = p.ReferenceMultiplier.Add(one)
 		}
@@ -57,8 +61,9 @@ func TestTheDeployedReferenceDataIsValid(t *testing.T) {
 			t.Errorf("pair %s is 1000x without the multiplier", p.Symbol)
 		}
 	}
-	if usdt != 50 {
-		t.Fatalf("%d USDT pairs, want the top 50", usdt)
+	// The top 50 and the 2026-10-02 extension (the coins Binance trades).
+	if usdt < 50 {
+		t.Fatalf("%d USDT pairs, want the top 50 at least", usdt)
 	}
 }
 

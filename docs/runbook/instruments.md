@@ -32,13 +32,13 @@ sudo docker compose ... exec -T instrument-service /app/exchangectl instruments 
 
 ### 主流 50 币（阶段 4 B4，设计稿 §8.5，ADR-0013、ADR-0014）
 
-- 50 个币各有一个资产与一个 USDT 交易对，都跟随币安现货（`reference_symbol`），由 `go run deploy/instruments/gen-top50.go` 生成进 `test.json`：它读一次币安的交易规则与价格，价格步长取币安的（乘以倍数，至少 0.000001）、数量步长取币安的（除以倍数）并加粗到 tick × lot 最多 6 位小数，最小名义金额 5 USDT、单笔最多值 100 万 USDT、价格保护带 10%、默认费率档；文件里的其他内容（费率档、USDT/BTC/ETH 与网络、ETH-BTC、SOL-BTC、合约）原样保留。
-- 单价低于 0.001 USDT 的币按 1000 个计价（`1000SHIB` ↔ `SHIBUSDT`、`1000PEPE` ↔ `PEPEUSDT`，倍数 1000，ADR-0014）。
-- 除 USDT、BTC、ETH 外的 47 个是**内部资产**：没有网络、不能充提（ADR-0013），只能在平台上交易；精度 6 到 8 位，取决于数量步长。
+- 前 50 个币与 2026-10-02 的扩展名单（用户要求再上一批知名币，只做现货、站内资产：37 个，TON 因币安现货暂停交易而跳过；单价低于 0.001 USDT 的 BONK、FLOKI 以 1000 个计价）各有一个资产与一个 USDT 交易对，都跟随币安现货（`reference_symbol`），由 `go run deploy/instruments/gen-top50.go` 生成进 `test.json`（扩展名单里币安没有在交易的 USDT 对就跳过；已上架的交易对保留原有的 tick、lot 与数量上下限，免得挂单落在新步长之外）：它读一次币安的交易规则与价格，价格步长取币安的（乘以倍数，至少 0.000001）、数量步长取币安的（除以倍数）并加粗到 tick × lot 最多 6 位小数，最小名义金额 5 USDT、单笔最多值 100 万 USDT、价格保护带 10%、默认费率档；文件里的其他内容（费率档、USDT/BTC/ETH 与网络、ETH-BTC、SOL-BTC、合约）原样保留。
+- 单价低于 0.001 USDT 的币按 1000 个计价（`1000SHIB` ↔ `SHIBUSDT`、`1000PEPE` ↔ `PEPEUSDT`、`1000BONK`、`1000FLOKI`，倍数 1000，ADR-0014）；0.001 到 0.01 之间的（ZIL、GALA、PENGU 等）按 1 个计价，tick 为 USDT 精度 0.000001。
+- 除 USDT、BTC、ETH 外的资产（前 50 里 47 个，加扩展的 37 个）都是**内部资产**：没有网络、不能充提（ADR-0013），只能在平台上交易；精度 6 到 8 位，取决于数量步长。
 - 设计稿名单里的 TON 在币安现货已停止交易（2026-10-01 查询为 `BREAK`），换成 HYPE（Hyperliquid）。
 - 新交易对以 `PREPARE` 创建，HOUSE 流动性就绪后用 `scripts/ops/house.sh open` 统一开放（见 [market-maker.md](market-maker.md)）。`SOL-BTC` 故意一直保持 `PREPARE`，端到端 `trading.sh` 用它检查"未开放的交易对不能下单"。
-- 币的介绍资料（前端详情页用）在 `web/packages/core/assets/coins/<代码>.json`。
-- `internal/instrument/application/testdata_test.go` 在不连库的情况下按 apply 的规则校验整个文件（50 个 USDT 交易对、内部资产无网络、1000 倍币的倍数）。
+- 币的介绍资料（前端详情页与字母图标的颜色）在 `web/packages/core/assets/coins/<代码>.json`（1000 倍币用去掉前缀的代码，如 `BONK.json`）；上新币时一起补上。
+- `internal/instrument/application/testdata_test.go` 在不连库的情况下按 apply 的规则校验整个文件（至少前 50 个 USDT 交易对、交易对不重复、内部资产无网络、1000 倍币的倍数）。
 
 ## 常用命令
 

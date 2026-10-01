@@ -1,0 +1,14 @@
+{
+  "symbol": "WIF",
+  "name": {
+    "zh-CN": "dogwifhat",
+    "en": "dogwifhat"
+  },
+  "intro": {
+    "zh-CN": "dogwifhat 是 2023 年发行于 Solana 的迷因代币，形象是一只戴着毛线帽的柴犬。",
+    "en": "dogwifhat is a Solana meme token launched in 2023, featuring a Shiba Inu wearing a knitted hat."
+  },
+  "links": {},
+  "color": "orange",
+  "asOf": "2026-10-02"
+}

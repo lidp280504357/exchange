@@ -1,0 +1,16 @@
+{
+  "symbol": "CRV",
+  "name": {
+    "zh-CN": "Curve",
+    "en": "Curve DAO"
+  },
+  "intro": {
+    "zh-CN": "Curve 是专注稳定币与同类资产兑换的去中心化交易所，CRV 用于治理与流动性激励。",
+    "en": "Curve is a decentralized exchange for stablecoins and like-priced assets; CRV governs it and rewards its liquidity."
+  },
+  "links": {
+    "website": "https://curve.finance"
+  },
+  "color": "indigo",
+  "asOf": "2026-10-02"
+}

@@ -1,0 +1,16 @@
+{
+  "symbol": "BAT",
+  "name": {
+    "zh-CN": "注意力币",
+    "en": "Basic Attention Token"
+  },
+  "intro": {
+    "zh-CN": "BAT（基本注意力代币）用于 Brave 浏览器的广告与创作者打赏体系。",
+    "en": "BAT (Basic Attention Token) powers the ads and creator tipping of the Brave browser."
+  },
+  "links": {
+    "website": "https://basicattentiontoken.org"
+  },
+  "color": "orange",
+  "asOf": "2026-10-02"
+}

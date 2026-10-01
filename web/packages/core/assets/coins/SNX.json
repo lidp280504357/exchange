@@ -1,0 +1,16 @@
+{
+  "symbol": "SNX",
+  "name": {
+    "zh-CN": "Synthetix",
+    "en": "Synthetix"
+  },
+  "intro": {
+    "zh-CN": "Synthetix 是发行与交易合成资产、衍生品的去中心化协议，SNX 是其质押与治理代币。",
+    "en": "Synthetix is a decentralized protocol for synthetic assets and derivatives; SNX is staked in it and governs it."
+  },
+  "links": {
+    "website": "https://synthetix.io"
+  },
+  "color": "violet",
+  "asOf": "2026-10-02"
+}

@@ -1,0 +1,16 @@
+{
+  "symbol": "CFX",
+  "name": {
+    "zh-CN": "Conflux（树图）",
+    "en": "Conflux"
+  },
+  "intro": {
+    "zh-CN": "Conflux（树图）是采用树图结构共识的公链，CFX 是其原生代币。",
+    "en": "Conflux is a layer 1 with a Tree-Graph consensus; CFX is its native token."
+  },
+  "links": {
+    "website": "https://confluxnetwork.org"
+  },
+  "color": "sky",
+  "asOf": "2026-10-02"
+}

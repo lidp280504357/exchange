@@ -1,0 +1,16 @@
+{
+  "symbol": "IOTA",
+  "name": {
+    "zh-CN": "IOTA",
+    "en": "IOTA"
+  },
+  "intro": {
+    "zh-CN": "IOTA 是面向物联网与数据交换的分布式账本，IOTA 是其原生代币。",
+    "en": "IOTA is a distributed ledger for the internet of things and data exchange; IOTA is its native token."
+  },
+  "links": {
+    "website": "https://www.iota.org"
+  },
+  "color": "indigo",
+  "asOf": "2026-10-02"
+}

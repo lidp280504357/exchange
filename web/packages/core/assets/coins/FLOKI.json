@@ -1,0 +1,16 @@
+{
+  "symbol": "FLOKI",
+  "name": {
+    "zh-CN": "Floki",
+    "en": "Floki"
+  },
+  "intro": {
+    "zh-CN": "Floki 是以马斯克爱犬命名的迷因代币，发行于以太坊和 BNB Chain。本站以 1000 枚为一个交易单位（1000FLOKI）。",
+    "en": "Floki is a meme token named after Elon Musk's dog, issued on Ethereum and BNB Chain. It trades here 1,000 at a time (1000FLOKI)."
+  },
+  "links": {
+    "website": "https://floki.com"
+  },
+  "color": "amber",
+  "asOf": "2026-10-02"
+}

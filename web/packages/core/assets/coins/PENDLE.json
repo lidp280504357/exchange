@@ -1,0 +1,16 @@
+{
+  "symbol": "PENDLE",
+  "name": {
+    "zh-CN": "Pendle",
+    "en": "Pendle"
+  },
+  "intro": {
+    "zh-CN": "Pendle 把生息资产拆成本金与收益两部分分别交易，PENDLE 是其治理与激励代币。",
+    "en": "Pendle splits yield-bearing assets into principal and yield that trade separately; PENDLE is its governance and incentive token."
+  },
+  "links": {
+    "website": "https://www.pendle.finance"
+  },
+  "color": "cyan",
+  "asOf": "2026-10-02"
+}

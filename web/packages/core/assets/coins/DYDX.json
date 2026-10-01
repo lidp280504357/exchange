@@ -1,0 +1,16 @@
+{
+  "symbol": "DYDX",
+  "name": {
+    "zh-CN": "dYdX",
+    "en": "dYdX"
+  },
+  "intro": {
+    "zh-CN": "dYdX 是去中心化永续合约交易所，运行在自己的应用链上，DYDX 用于质押与治理。",
+    "en": "dYdX is a decentralized perpetuals exchange running on its own app chain; DYDX is used for staking and governance."
+  },
+  "links": {
+    "website": "https://dydx.exchange"
+  },
+  "color": "indigo",
+  "asOf": "2026-10-02"
+}

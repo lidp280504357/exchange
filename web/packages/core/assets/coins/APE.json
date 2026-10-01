@@ -1,0 +1,16 @@
+{
+  "symbol": "APE",
+  "name": {
+    "zh-CN": "ApeCoin",
+    "en": "ApeCoin"
+  },
+  "intro": {
+    "zh-CN": "ApeCoin 是与 NFT 系列 Bored Ape Yacht Club 相关的生态代币，由 ApeCoin DAO 治理。",
+    "en": "ApeCoin is the ecosystem token tied to the Bored Ape Yacht Club NFT collection, governed by the ApeCoin DAO."
+  },
+  "links": {
+    "website": "https://apecoin.com"
+  },
+  "color": "blue",
+  "asOf": "2026-10-02"
+}

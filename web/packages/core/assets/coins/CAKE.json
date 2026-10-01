@@ -1,0 +1,16 @@
+{
+  "symbol": "CAKE",
+  "name": {
+    "zh-CN": "PancakeSwap",
+    "en": "PancakeSwap"
+  },
+  "intro": {
+    "zh-CN": "PancakeSwap 是 BNB Chain 上最大的去中心化交易所，CAKE 是其奖励与治理代币。",
+    "en": "PancakeSwap is the largest decentralized exchange on BNB Chain; CAKE is its reward and governance token."
+  },
+  "links": {
+    "website": "https://pancakeswap.finance"
+  },
+  "color": "teal",
+  "asOf": "2026-10-02"
+}

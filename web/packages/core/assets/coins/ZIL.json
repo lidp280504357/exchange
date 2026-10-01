@@ -1,0 +1,16 @@
+{
+  "symbol": "ZIL",
+  "name": {
+    "zh-CN": "Zilliqa",
+    "en": "Zilliqa"
+  },
+  "intro": {
+    "zh-CN": "Zilliqa 是较早用分片技术提升吞吐量的公链，ZIL 是其原生代币。",
+    "en": "Zilliqa is one of the first layer 1s to scale with sharding; ZIL is its native token."
+  },
+  "links": {
+    "website": "https://www.zilliqa.com"
+  },
+  "color": "teal",
+  "asOf": "2026-10-02"
+}

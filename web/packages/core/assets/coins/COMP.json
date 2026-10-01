@@ -1,0 +1,16 @@
+{
+  "symbol": "COMP",
+  "name": {
+    "zh-CN": "Compound",
+    "en": "Compound"
+  },
+  "intro": {
+    "zh-CN": "Compound 是以太坊上的借贷协议，COMP 是其治理代币。",
+    "en": "Compound is a lending protocol on Ethereum; COMP is its governance token."
+  },
+  "links": {
+    "website": "https://compound.finance"
+  },
+  "color": "emerald",
+  "asOf": "2026-10-02"
+}

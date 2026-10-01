@@ -1,0 +1,16 @@
+{
+  "symbol": "MINA",
+  "name": {
+    "zh-CN": "Mina",
+    "en": "Mina"
+  },
+  "intro": {
+    "zh-CN": "Mina 是用零知识证明让链的体积保持恒定（约 22 KB）的公链，MINA 是其原生代币。",
+    "en": "Mina is a layer 1 that keeps its chain at a constant size (about 22 KB) with zero-knowledge proofs; MINA is its native token."
+  },
+  "links": {
+    "website": "https://minaprotocol.com"
+  },
+  "color": "amber",
+  "asOf": "2026-10-02"
+}

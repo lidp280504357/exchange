@@ -1,0 +1,16 @@
+{
+  "symbol": "RUNE",
+  "name": {
+    "zh-CN": "THORChain",
+    "en": "THORChain"
+  },
+  "intro": {
+    "zh-CN": "THORChain 是跨链去中心化交易网络，可以直接兑换比特币等原生资产，RUNE 用于池子结算与网络安全。",
+    "en": "THORChain is a cross-chain decentralized exchange network that swaps native assets such as Bitcoin directly; RUNE settles its pools and secures it."
+  },
+  "links": {
+    "website": "https://thorchain.org"
+  },
+  "color": "teal",
+  "asOf": "2026-10-02"
+}

@@ -1,0 +1,16 @@
+{
+  "symbol": "KSM",
+  "name": {
+    "zh-CN": "Kusama",
+    "en": "Kusama"
+  },
+  "intro": {
+    "zh-CN": "Kusama 是 Polkadot 的先行网络，新功能通常先在这里上线，KSM 是其原生代币。",
+    "en": "Kusama is Polkadot's canary network, where new features usually go live first; KSM is its native token."
+  },
+  "links": {
+    "website": "https://kusama.network"
+  },
+  "color": "fuchsia",
+  "asOf": "2026-10-02"
+}

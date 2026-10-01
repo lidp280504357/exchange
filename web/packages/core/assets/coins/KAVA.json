@@ -1,0 +1,16 @@
+{
+  "symbol": "KAVA",
+  "name": {
+    "zh-CN": "Kava",
+    "en": "Kava"
+  },
+  "intro": {
+    "zh-CN": "Kava 是基于 Cosmos 的公链，兼容以太坊虚拟机，KAVA 是其原生代币。",
+    "en": "Kava is a Cosmos-based layer 1 compatible with the Ethereum Virtual Machine; KAVA is its native token."
+  },
+  "links": {
+    "website": "https://www.kava.io"
+  },
+  "color": "rose",
+  "asOf": "2026-10-02"
+}

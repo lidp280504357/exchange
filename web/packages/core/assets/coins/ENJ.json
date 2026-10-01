@@ -1,0 +1,16 @@
+{
+  "symbol": "ENJ",
+  "name": {
+    "zh-CN": "恩金币",
+    "en": "Enjin Coin"
+  },
+  "intro": {
+    "zh-CN": "Enjin 为游戏打造数字资产与 NFT 工具，ENJ 是其区块链 Enjin Blockchain 的代币。",
+    "en": "Enjin builds digital asset and NFT tools for games; ENJ is the token of its Enjin Blockchain."
+  },
+  "links": {
+    "website": "https://enjin.io"
+  },
+  "color": "violet",
+  "asOf": "2026-10-02"
+}

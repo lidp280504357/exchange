@@ -1,0 +1,16 @@
+{
+  "symbol": "BONK",
+  "name": {
+    "zh-CN": "Bonk",
+    "en": "Bonk"
+  },
+  "intro": {
+    "zh-CN": "Bonk 是 2022 年底发行于 Solana 的社区迷因代币，大部分供应空投给了 Solana 社区。本站以 1000 枚为一个交易单位（1000BONK）。",
+    "en": "Bonk is a community meme token launched on Solana at the end of 2022, most of it airdropped to the Solana community. It trades here 1,000 at a time (1000BONK)."
+  },
+  "links": {
+    "website": "https://bonkcoin.com"
+  },
+  "color": "orange",
+  "asOf": "2026-10-02"
+}

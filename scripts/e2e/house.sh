@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # HOUSE's virtual liquidity end to end (design §8, ADR-0013, ADR-0015):
 # every trade is against HOUSE, so HOUSE offers every trading pair and
-# contract; the top 50 USDT pairs trade and show Binance's book (1000SHIB
-# in units of 1000); a new user's market buy of SOL-USDT fills at once
+# contract; every USDT pair of deploy/instruments/test.json (the top 50 and
+# the 2026-10-02 extension) trades and shows Binance's book (1000SHIB in
+# units of 1000); a new user's market buy of SOL-USDT fills at once
 # against HOUSE at the shown ask, a market sell of what it got fills at the
 # bid, a limit buy above the ask fills at once at the ask (not its limit);
 # a limit buy below the book rests until canceled; ETH-BTC (quoted in BTC)
@@ -44,10 +45,12 @@ offered() { # MISSING: the symbols of WANT whose HOUSE book is empty
 offered || fail "HOUSE offers nothing on:$MISSING"
 echo "ok   HOUSE offers all $(wc -w <<<"$WANT" | tr -d ' ') of them"
 
-echo "== the top 50"
+echo "== the USDT pairs"
+USDT_PAIRS=$(jq '[.pairs[] | select(.quote_asset == "USDT")] | length' "$(dirname "$0")/../../deploy/instruments/test.json")
 call GET /v1/market/pairs ""
 expect 200 - "pairs"
-check '[.pairs[] | select(.quote_asset == "USDT" and .status == "TRADING")] | length == 50' "50 USDT pairs trade"
+check "[.pairs[] | select(.quote_asset == \"USDT\" and .status == \"TRADING\")] | length == $USDT_PAIRS" "all $USDT_PAIRS USDT pairs trade"
+check '(.pairs[] | select(.symbol == "1000BONK-USDT")) | .reference_symbol == "BONKUSDT" and .reference_multiplier == "1000"' "1000BONK-USDT follows BONKUSDT x 1000"
 check '(.pairs[] | select(.symbol == "1000SHIB-USDT")) | .reference_symbol == "SHIBUSDT" and .reference_multiplier == "1000"' "1000SHIB-USDT follows SHIBUSDT x 1000"
 shown() { # shown SYMBOL: BODY holds a two-sided book of SYMBOL
   call GET "/v1/market/$1/depth?limit=5" "" && [[ $STATUS == 200 ]] &&

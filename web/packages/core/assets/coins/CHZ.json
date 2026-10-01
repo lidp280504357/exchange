@@ -1,0 +1,16 @@
+{
+  "symbol": "CHZ",
+  "name": {
+    "zh-CN": "Chiliz",
+    "en": "Chiliz"
+  },
+  "intro": {
+    "zh-CN": "Chiliz 是面向体育与娱乐的区块链，球迷代币平台 Socios 运行在其上，CHZ 是其原生代币。",
+    "en": "Chiliz is a blockchain for sports and entertainment that runs the Socios fan token platform; CHZ is its native token."
+  },
+  "links": {
+    "website": "https://www.chiliz.com"
+  },
+  "color": "rose",
+  "asOf": "2026-10-02"
+}

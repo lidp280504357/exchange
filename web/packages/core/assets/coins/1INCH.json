@@ -1,0 +1,16 @@
+{
+  "symbol": "1INCH",
+  "name": {
+    "zh-CN": "1inch",
+    "en": "1inch"
+  },
+  "intro": {
+    "zh-CN": "1inch 是去中心化交易聚合器，在多个交易所之间寻找最优兑换路径，1INCH 是其治理代币。",
+    "en": "1inch is a decentralized exchange aggregator that routes swaps across many exchanges for the best rate; 1INCH is its governance token."
+  },
+  "links": {
+    "website": "https://1inch.io"
+  },
+  "color": "rose",
+  "asOf": "2026-10-02"
+}

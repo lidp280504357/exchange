@@ -1,9 +1,10 @@
 //go:build ignore
 
-// gen-top50 lists the top 50 coins in deploy/instruments/test.json
-// (design §8.5, ADR-0013, ADR-0014): an asset and a USDT pair each,
-// following Binance spot. It reads Binance's filters and prices once, at
-// generation time, and keeps everything else in the file (fee tiers,
+// gen-top50 lists the top 50 coins and the 2026-10-02 extension in
+// deploy/instruments/test.json (design §8.5, ADR-0013, ADR-0014): an asset
+// and a USDT pair each, following Binance spot. It reads Binance's filters
+// and prices once, at generation time, and keeps everything else in the
+// file (fee tiers,
 // USDT/BTC/ETH with their networks, ETH-BTC, SOL-BTC kept PREPARE for the
 // end-to-end check of a pair not trading, the contracts):
 //
@@ -20,7 +21,10 @@
 //   - assets other than USDT, BTC and ETH are internal: no networks, no
 //     deposits or withdrawals (ADR-0013); decimals 6 to 8 from the lot;
 //   - new pairs are listed PREPARE (apply never changes a status): open
-//     them once HOUSE's liquidity is on (docs/runbook/market-maker.md).
+//     them once HOUSE's liquidity is on (docs/runbook/market-maker.md); a
+//     listed pair keeps its tick, lot and quantity limits;
+//   - a coin of the extension without a trading Binance USDT pair is
+//     skipped (one of the top 50 stops the run).
 package main
 
 import (
@@ -103,6 +107,49 @@ var top50 = []coin{
 	{"JUP", "Jupiter", "JUPUSDT", 1, []string{"defi"}},
 }
 
+// extension is design §8.5's 2026-10-02 extension: well-known coins after
+// the top 50, spot only and internal like them.
+var extension = []coin{
+	{"TRUMP", "Official Trump", "TRUMPUSDT", 1, []string{"meme"}},
+	{"WIF", "dogwifhat", "WIFUSDT", 1, []string{"meme"}},
+	{"1000BONK", "1000 Bonk", "BONKUSDT", 1000, []string{"meme"}},
+	{"1000FLOKI", "1000 Floki", "FLOKIUSDT", 1000, []string{"meme"}},
+	{"PNUT", "Peanut the Squirrel", "PNUTUSDT", 1, []string{"meme"}},
+	{"PENGU", "Pudgy Penguins", "PENGUUSDT", 1, []string{"meme", "nft"}},
+	{"CAKE", "PancakeSwap", "CAKEUSDT", 1, []string{"defi"}},
+	{"LDO", "Lido DAO", "LDOUSDT", 1, []string{"defi"}},
+	{"CRV", "Curve DAO", "CRVUSDT", 1, []string{"defi"}},
+	{"COMP", "Compound", "COMPUSDT", 1, []string{"defi"}},
+	{"SNX", "Synthetix", "SNXUSDT", 1, []string{"defi"}},
+	{"1INCH", "1inch", "1INCHUSDT", 1, []string{"defi"}},
+	{"DYDX", "dYdX", "DYDXUSDT", 1, []string{"defi"}},
+	{"PENDLE", "Pendle", "PENDLEUSDT", 1, []string{"defi"}},
+	{"YFI", "yearn.finance", "YFIUSDT", 1, []string{"defi"}},
+	{"TON", "Toncoin", "TONUSDT", 1, []string{"layer-1"}},
+	{"STX", "Stacks", "STXUSDT", 1, []string{"layer-2"}},
+	{"IMX", "Immutable", "IMXUSDT", 1, []string{"layer-2", "gaming"}},
+	{"KAVA", "Kava", "KAVAUSDT", 1, []string{"layer-1", "defi"}},
+	{"MINA", "Mina", "MINAUSDT", 1, []string{"layer-1"}},
+	{"FLOW", "Flow", "FLOWUSDT", 1, []string{"layer-1", "nft"}},
+	{"KSM", "Kusama", "KSMUSDT", 1, []string{"layer-1", "interoperability"}},
+	{"ZIL", "Zilliqa", "ZILUSDT", 1, []string{"layer-1"}},
+	{"IOTA", "IOTA", "IOTAUSDT", 1, []string{"layer-1", "infrastructure"}},
+	{"CFX", "Conflux", "CFXUSDT", 1, []string{"layer-1"}},
+	{"FET", "Artificial Superintelligence Alliance", "FETUSDT", 1, []string{"ai"}},
+	{"AR", "Arweave", "ARUSDT", 1, []string{"storage"}},
+	{"PYTH", "Pyth Network", "PYTHUSDT", 1, []string{"oracle"}},
+	{"JTO", "Jito", "JTOUSDT", 1, []string{"defi"}},
+	{"RUNE", "THORChain", "RUNEUSDT", 1, []string{"defi", "interoperability"}},
+	{"GALA", "Gala", "GALAUSDT", 1, []string{"gaming"}},
+	{"ENS", "Ethereum Name Service", "ENSUSDT", 1, []string{"infrastructure"}},
+	{"APE", "ApeCoin", "APEUSDT", 1, []string{"nft", "metaverse"}},
+	{"CHZ", "Chiliz", "CHZUSDT", 1, []string{"layer-1", "nft"}},
+	{"QNT", "Quant", "QNTUSDT", 1, []string{"interoperability"}},
+	{"DASH", "Dash", "DASHUSDT", 1, []string{"payments", "pow"}},
+	{"BAT", "Basic Attention Token", "BATUSDT", 1, []string{"payments"}},
+	{"ENJ", "Enjin Coin", "ENJUSDT", 1, []string{"gaming", "nft"}},
+}
+
 // backed are the assets with deposits and withdrawals; the file keeps
 // their definitions.
 var backed = map[string]bool{"USDT": true, "BTC": true, "ETH": true}
@@ -138,22 +185,19 @@ func main() {
 	api := flag.String("api", "https://data-api.binance.vision", "Binance spot REST base URL")
 	flag.Parse()
 
-	remotes := make([]string, 0, len(top50))
-	for _, c := range top50 {
-		remotes = append(remotes, c.Remote)
-	}
-	list, _ := json.Marshal(remotes)
+	// Every symbol's rules and price: asking for a list fails as a whole
+	// when one of it is unknown.
 	var info struct {
 		Symbols []symbolInfo `json:"symbols"`
 	}
-	if err := get(*api, "/api/v3/exchangeInfo", url.Values{"symbols": {string(list)}}, &info); err != nil {
+	if err := get(*api, "/api/v3/exchangeInfo", url.Values{"permissions": {"SPOT"}}, &info); err != nil {
 		log.Fatalf("exchange info: %v", err)
 	}
 	var prices []struct {
 		Symbol string `json:"symbol"`
 		Price  string `json:"price"`
 	}
-	if err := get(*api, "/api/v3/ticker/price", url.Values{"symbols": {string(list)}}, &prices); err != nil {
+	if err := get(*api, "/api/v3/ticker/price", url.Values{}, &prices); err != nil {
 		log.Fatalf("prices: %v", err)
 	}
 	filters := map[string]symbolInfo{}
@@ -188,12 +232,19 @@ func main() {
 		pairs[p["symbol"].(string)] = p
 	}
 	mult1000 := decimal.NewFromInt(1000)
-	for rank, c := range top50 {
+	coins := append(append([]coin{}, top50...), extension...)
+	var listed []coin
+	for rank, c := range coins {
 		s, ok := filters[c.Remote]
 		p, priced := price[c.Remote]
 		if !ok || !priced || s.Status != "TRADING" {
-			log.Fatalf("%s: not a trading Binance spot symbol", c.Remote)
+			if rank < len(top50) {
+				log.Fatalf("%s: not a trading Binance spot symbol", c.Remote)
+			}
+			log.Printf("skip %s: not a trading Binance spot symbol", c.Remote)
+			continue
 		}
+		listed = append(listed, c)
 		var tick, step decimal.Decimal
 		for _, f := range s.Filters {
 			switch f.FilterType {
@@ -232,12 +283,18 @@ func main() {
 		}
 		pair := pairs[symbol]
 		status := "PREPARE"
+		rules := map[string]any{"tick_size": tick.String(), "lot_size": lot.String(), "min_quantity": lot.String(), "max_quantity": maxQty.String()}
 		if pair != nil {
+			// A listed pair keeps its rules: a new tick or lot would strand
+			// the resting orders.
 			status = pair["status"].(string)
+			for k := range rules {
+				rules[k] = pair[k]
+			}
 		}
 		pairs[symbol] = map[string]any{
 			"symbol": symbol, "base_asset": c.Code, "quote_asset": "USDT", "reference_symbol": c.Remote,
-			"tick_size": tick.String(), "lot_size": lot.String(), "min_quantity": lot.String(), "max_quantity": maxQty.String(),
+			"tick_size": rules["tick_size"], "lot_size": rules["lot_size"], "min_quantity": rules["min_quantity"], "max_quantity": rules["max_quantity"],
 			"min_notional": "5", "price_band": "0.1", "fee_tier": "default", "status": status,
 		}
 		if c.Multiplier > 1 {
@@ -253,7 +310,7 @@ func main() {
 		code := a["asset_code"].(string)
 		outAssets, seen[code] = append(outAssets, assets[code]), true
 	}
-	for _, c := range top50 {
+	for _, c := range listed {
 		if !seen[c.Code] {
 			outAssets, seen[c.Code] = append(outAssets, assets[c.Code]), true
 		}
@@ -263,7 +320,7 @@ func main() {
 		sym := p["symbol"].(string)
 		outPairs, seen[sym] = append(outPairs, pairs[sym]), true
 	}
-	for _, c := range top50 {
+	for _, c := range listed {
 		if sym := c.Code + "-USDT"; !seen[sym] {
 			outPairs, seen[sym] = append(outPairs, pairs[sym]), true
 		}

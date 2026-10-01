@@ -1,0 +1,16 @@
+{
+  "symbol": "QNT",
+  "name": {
+    "zh-CN": "Quant",
+    "en": "Quant"
+  },
+  "intro": {
+    "zh-CN": "Quant 的 Overledger 用来连接不同区块链与企业系统，QNT 用于支付其服务。",
+    "en": "Quant's Overledger connects blockchains and enterprise systems; QNT pays for its services."
+  },
+  "links": {
+    "website": "https://quant.network"
+  },
+  "color": "cyan",
+  "asOf": "2026-10-02"
+}

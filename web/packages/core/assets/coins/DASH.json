@@ -1,0 +1,16 @@
+{
+  "symbol": "DASH",
+  "name": {
+    "zh-CN": "达世币",
+    "en": "Dash"
+  },
+  "intro": {
+    "zh-CN": "Dash 是 2014 年推出的支付型加密货币（最初叫 Darkcoin），主打快速、低费用转账。",
+    "en": "Dash is a payments cryptocurrency launched in 2014 (first as Darkcoin), built for fast, cheap transfers."
+  },
+  "links": {
+    "website": "https://www.dash.org"
+  },
+  "color": "sky",
+  "asOf": "2026-10-02"
+}

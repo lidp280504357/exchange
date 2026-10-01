@@ -1,0 +1,16 @@
+{
+  "symbol": "TRUMP",
+  "name": {
+    "zh-CN": "特朗普币",
+    "en": "Official Trump"
+  },
+  "intro": {
+    "zh-CN": "OFFICIAL TRUMP 是 2025 年 1 月在 Solana 上发行的迷因代币，以美国总统唐纳德·特朗普为主题。",
+    "en": "OFFICIAL TRUMP is a meme token launched on Solana in January 2025, themed on US President Donald Trump."
+  },
+  "links": {
+    "website": "https://gettrumpmemes.com"
+  },
+  "color": "amber",
+  "asOf": "2026-10-02"
+}

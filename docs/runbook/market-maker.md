@@ -65,7 +65,7 @@ scripts/ops/house.sh open
 
 ## 验证与故障
 
-- `scripts/e2e/house.sh`：HOUSE 在每个交易中的交易对与合约上都有报价（`market_house_active`）；50 个 USDT 交易对在交易、盘口是币安的（1000SHIB 按 1000 个计价）、新用户市价买卖 SOL-USDT 立即按盘口价与 HOUSE 成交、低于盘口的限价单挂着直到撤单、ETH-BTC（以 BTC 计价）按 HOUSE 的卖一买一成交、两个合约各自市价开仓与只减仓平仓、之后账本与合约对账通过。其余端到端脚本（`matching.sh`、`trading.sh`、`marketdata.sh`、`derivatives.sh`、`funding.sh`、`admin.sh`）也都以 HOUSE 为对手方，价格从当时的盘口推出。
+- `scripts/e2e/house.sh`：HOUSE 在每个交易中的交易对与合约上都有报价（`market_house_active`）；`test.json` 的全部 USDT 交易对（前 50 与 2026-10-02 的扩展）都在交易、盘口是币安的（1000SHIB、1000BONK 按 1000 个计价）、新用户市价买卖 SOL-USDT 立即按盘口价与 HOUSE 成交、低于盘口的限价单挂着直到撤单、ETH-BTC（以 BTC 计价）按 HOUSE 的卖一买一成交、两个合约各自市价开仓与只减仓平仓、之后账本与合约对账通过。其余端到端脚本（`matching.sh`、`trading.sh`、`marketdata.sh`、`derivatives.sh`、`funding.sh`、`admin.sh`）也都以 HOUSE 为对手方，价格从当时的盘口推出。
 - `scripts/fault/reference-outage.sh`：切断 market-data-service 的外网，几秒内 HOUSE 撤走流动性、公共盘口退回平台自己的（空）；恢复后重新显示币安盘口、HOUSE 重新提供流动性。
 - `scripts/fault/matching-failover.sh`：撮合主实例被杀时发出的市价单在备实例接管后与 HOUSE 成交且只成交一次，接管前挂着的单子还在、能撤。
 - 要临时停掉 HOUSE：`exchangectl flags set market.house_liquidity --off --reason "..."`（或把某个交易对从 allow 列表去掉），下一轮就发空簿；用户挂着的单子留在簿上，等开关恢复后按参考价成交。

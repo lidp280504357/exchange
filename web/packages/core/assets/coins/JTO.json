@@ -1,0 +1,16 @@
+{
+  "symbol": "JTO",
+  "name": {
+    "zh-CN": "Jito",
+    "en": "Jito"
+  },
+  "intro": {
+    "zh-CN": "Jito 是 Solana 上的流动性质押与 MEV 基础设施，JTO 是其治理代币。",
+    "en": "Jito provides liquid staking and MEV infrastructure on Solana; JTO is its governance token."
+  },
+  "links": {
+    "website": "https://www.jito.network"
+  },
+  "color": "emerald",
+  "asOf": "2026-10-02"
+}

@@ -1,0 +1,16 @@
+{
+  "symbol": "LDO",
+  "name": {
+    "zh-CN": "Lido DAO",
+    "en": "Lido DAO"
+  },
+  "intro": {
+    "zh-CN": "Lido 是以太坊上最大的流动性质押协议，LDO 是 Lido DAO 的治理代币。",
+    "en": "Lido is the largest liquid staking protocol on Ethereum; LDO is the governance token of the Lido DAO."
+  },
+  "links": {
+    "website": "https://lido.fi"
+  },
+  "color": "sky",
+  "asOf": "2026-10-02"
+}

@@ -1,0 +1,16 @@
+{
+  "symbol": "PENGU",
+  "name": {
+    "zh-CN": "胖企鹅",
+    "en": "Pudgy Penguins"
+  },
+  "intro": {
+    "zh-CN": "PENGU 是 NFT 系列 Pudgy Penguins 于 2024 年 12 月在 Solana 上发行的代币。",
+    "en": "PENGU is the token that the Pudgy Penguins NFT collection launched on Solana in December 2024."
+  },
+  "links": {
+    "website": "https://pudgypenguins.com"
+  },
+  "color": "sky",
+  "asOf": "2026-10-02"
+}

@@ -1,0 +1,16 @@
+{
+  "symbol": "STX",
+  "name": {
+    "zh-CN": "Stacks",
+    "en": "Stacks"
+  },
+  "intro": {
+    "zh-CN": "Stacks 是比特币的二层网络，为比特币带来智能合约，STX 是其原生代币。",
+    "en": "Stacks is a Bitcoin layer 2 that brings smart contracts to Bitcoin; STX is its native token."
+  },
+  "links": {
+    "website": "https://www.stacks.co"
+  },
+  "color": "orange",
+  "asOf": "2026-10-02"
+}

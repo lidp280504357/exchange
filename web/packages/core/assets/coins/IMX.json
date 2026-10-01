@@ -1,0 +1,16 @@
+{
+  "symbol": "IMX",
+  "name": {
+    "zh-CN": "Immutable",
+    "en": "Immutable"
+  },
+  "intro": {
+    "zh-CN": "Immutable 是面向 Web3 游戏的二层网络与平台，IMX 用于手续费、质押与治理。",
+    "en": "Immutable is a layer 2 and platform for Web3 games; IMX pays its fees and is used for staking and governance."
+  },
+  "links": {
+    "website": "https://www.immutable.com"
+  },
+  "color": "cyan",
+  "asOf": "2026-10-02"
+}

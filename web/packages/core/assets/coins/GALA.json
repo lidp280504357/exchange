@@ -1,0 +1,16 @@
+{
+  "symbol": "GALA",
+  "name": {
+    "zh-CN": "Gala",
+    "en": "Gala"
+  },
+  "intro": {
+    "zh-CN": "Gala Games 是区块链游戏平台，GALA 是平台内的通用代币。",
+    "en": "Gala Games is a blockchain gaming platform; GALA is its utility token."
+  },
+  "links": {
+    "website": "https://gala.com"
+  },
+  "color": "indigo",
+  "asOf": "2026-10-02"
+}

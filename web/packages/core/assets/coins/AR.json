@@ -1,0 +1,16 @@
+{
+  "symbol": "AR",
+  "name": {
+    "zh-CN": "Arweave",
+    "en": "Arweave"
+  },
+  "intro": {
+    "zh-CN": "Arweave 是一次付费、永久保存数据的去中心化存储网络，AR 是其原生代币。",
+    "en": "Arweave is a decentralized storage network where data is kept permanently for a one-time fee; AR is its native token."
+  },
+  "links": {
+    "website": "https://www.arweave.org"
+  },
+  "color": "lime",
+  "asOf": "2026-10-02"
+}

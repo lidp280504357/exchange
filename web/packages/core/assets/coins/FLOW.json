@@ -1,0 +1,16 @@
+{
+  "symbol": "FLOW",
+  "name": {
+    "zh-CN": "Flow",
+    "en": "Flow"
+  },
+  "intro": {
+    "zh-CN": "Flow 是 Dapper Labs 为游戏与数字藏品打造的公链，NBA Top Shot 运行在其上。",
+    "en": "Flow is the layer 1 Dapper Labs built for games and digital collectibles; NBA Top Shot runs on it."
+  },
+  "links": {
+    "website": "https://flow.com"
+  },
+  "color": "emerald",
+  "asOf": "2026-10-02"
+}

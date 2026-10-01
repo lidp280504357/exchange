@@ -1,0 +1,16 @@
+{
+  "symbol": "ENS",
+  "name": {
+    "zh-CN": "以太坊域名服务",
+    "en": "Ethereum Name Service"
+  },
+  "intro": {
+    "zh-CN": "以太坊域名服务（ENS）把以太坊地址映射成 .eth 这类易读的名字，ENS 是其治理代币。",
+    "en": "The Ethereum Name Service maps Ethereum addresses to readable names such as .eth; ENS is its governance token."
+  },
+  "links": {
+    "website": "https://ens.domains"
+  },
+  "color": "sky",
+  "asOf": "2026-10-02"
+}

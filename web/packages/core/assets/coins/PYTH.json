@@ -1,0 +1,16 @@
+{
+  "symbol": "PYTH",
+  "name": {
+    "zh-CN": "Pyth Network",
+    "en": "Pyth Network"
+  },
+  "intro": {
+    "zh-CN": "Pyth Network 是为链上应用提供实时金融行情的预言机网络，PYTH 是其治理代币。",
+    "en": "Pyth Network is an oracle network delivering real-time market data to blockchains; PYTH is its governance token."
+  },
+  "links": {
+    "website": "https://pyth.network"
+  },
+  "color": "violet",
+  "asOf": "2026-10-02"
+}

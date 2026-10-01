@@ -1,0 +1,16 @@
+{
+  "symbol": "YFI",
+  "name": {
+    "zh-CN": "yearn.finance",
+    "en": "yearn.finance"
+  },
+  "intro": {
+    "zh-CN": "yearn.finance 是自动寻找收益的 DeFi 金库协议，YFI 是其治理代币，总量只有约 3.7 万枚。",
+    "en": "yearn.finance runs DeFi vaults that seek yield automatically; YFI is its governance token, with a supply of only about 37,000."
+  },
+  "links": {
+    "website": "https://yearn.fi"
+  },
+  "color": "blue",
+  "asOf": "2026-10-02"
+}

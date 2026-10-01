@@ -1,0 +1,16 @@
+{
+  "symbol": "FET",
+  "name": {
+    "zh-CN": "人工智能超级智能联盟",
+    "en": "Artificial Superintelligence Alliance"
+  },
+  "intro": {
+    "zh-CN": "FET 原为 Fetch.ai 的代币；2024 年 Fetch.ai、SingularityNET 与 Ocean Protocol 组成人工智能超级智能联盟（ASI），沿用 FET 交易。",
+    "en": "FET began as Fetch.ai's token; in 2024 Fetch.ai, SingularityNET and Ocean Protocol formed the Artificial Superintelligence Alliance (ASI), which trades as FET."
+  },
+  "links": {
+    "website": "https://fetch.ai"
+  },
+  "color": "indigo",
+  "asOf": "2026-10-02"
+}
