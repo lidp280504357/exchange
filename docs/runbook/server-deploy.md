@@ -24,6 +24,7 @@
    - 功能开关：`ledger.welcome_credit`、`account.transfer`、`ledger.manual_adjustment`、`auth.sms`、`market.reference_feed`、`wallet.withdraw`、`derivatives.trading` 打开，`risk.enforce --allow-regions AQ`，`market.maker --allow-symbols BTC-USDT,BTC-USDT-PERP`（[feature-flags.md](feature-flags.md)）。
    - 交易对：参考数据文件新建的交易对是 `PREPARE`，`exchangectl instruments pair-status BTC-USDT --to TRADING`，ETH-BTC 同样（端到端在它上面成交）；ETH-USDT 保持 PREPARE。
    - 合约：参考行情打开前算不出标记价，合约 10 秒后自动进入只减仓（`INDEX_SOURCES`）；打开参考行情、确认标记价有了之后 `exchangectl derivatives resume <合约>` 解除。
+   - 托管钱包（[custody.md](custody.md)）：`apps.env` 加 `UDUN_GATEWAY_URL=http://udun-mock:8097`、`UDUN_CALLBACK_URL=http://api-gateway:8080/v1/wallet/callbacks/udun`、随机的 `UDUN_MERCHANT_ID` 与 `UDUN_API_KEY`（`openssl rand -hex 16`、`openssl rand -hex 32`，不打印），模拟网关与 wallet-service 共用。
    - 做市账户：注册一个 `@example.com` 用户，`exchangectl ledger adjust` 注入 1 BTC 与 100000 USDT，`apps.env` 加 `MARKET_MAKER_USER_ID`、`MARKET_MAKER_USER_IDS` 后重建 spot-trading-service、derivatives-service、market-maker，再转 20000 USDT 到它的合约账户（[market-maker.md](market-maker.md)）。
    - 保险基金：`exchangectl ledger insurance-fund --amount 1000000 --key insurance-seed-1`。
    - 热钱包：用端到端发送方转一些 Sepolia ETH 到 signer 日志里的 `hot_wallet` 地址，`exchangectl wallet fund --tx <hash>` 记到 GAS_SUPPLY。
@@ -40,7 +41,7 @@ bash /opt/exchange/src/deploy/server-update.sh 305e2a7  # 回滚/切换到指定
 脚本依次执行以下步骤：
 
 1. 拉代码并重置到目标版本。
-2. 把 `deploy/compose/` 同步到 `/opt/exchange/infra`。不碰 `.env`、`apps.env`、证书、Cloudflare IP 列表、`nginx/html/`、`nginx/admin/`、`nginx/sites/`；`signer/`、`admin/` 两个密钥目录不在仓库里，也不受影响。
+2. 把 `deploy/compose/` 同步到 `/opt/exchange/infra`。不碰 `.env`、`apps.env`、证书、Cloudflare IP 列表、`nginx/html/`、`nginx/admin/`、`nginx/sites/`、`udun-mock/`（托管钱包模拟网关的状态，属主 uid 10001，脚本在这里创建）；`signer/`、`admin/` 两个密钥目录不在仓库里，也不受影响。
 3. 幂等核对 Redpanda topic。
 4. `docker compose build` 构建全部镜像。
 5. 先起 instrument-service，按 `deploy/instruments/test.json` 幂等同步参考数据（[instruments.md](instruments.md)），再 `up -d` 其余服务。其余服务启动时就要读交易对与参考行情映射，所以参考数据必须先到。
@@ -90,6 +91,7 @@ bash /opt/exchange/src/deploy/server-update.sh
 | risk-service | — | 9186 | 9086 |
 | analytics-consumer | — | — | 9087 |
 | admin-service | 8093（nginx 转发 `/admin/v1/`，不经网关） | — | 9094 |
+| udun-mock（测试服的托管钱包模拟网关，只在内网，见 custody.md） | 8097（wallet-service 调用） | — | 9097 |
 
 compose 健康检查请求运维端口的 `/readyz`：启动完成且依赖可用才返回 200，收到 SIGTERM 后立即变为 503（draining）。部署验证：
 

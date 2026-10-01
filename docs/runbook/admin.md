@@ -72,7 +72,8 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
   - `GET /admin/v1/health`：各服务运维端口 `/readyz` 的就绪状态与耗时（2 秒超时，并发）。目标默认是 compose 网络里的 17 个服务，可用 `HEALTH_TARGETS`（`名称=http://主机:端口,...`）覆盖。
   - `GET /admin/v1/ledger/reconciliation`：账本对账每项检查的最近一次结果与最近 50 次不一致（各带前 10 条差异），经 ledger-service 新增的 gRPC `GetReconciliation` 读 `reconciliation_runs`。
   - `GET /admin/v1/ledger/system-balances?asset=`：全部系统科目余额（留空为全部资产）。
-- **提现审批**：按状态列出提现（默认 `PENDING_REVIEW`），显示风控分与命中规则；批准/拒绝需理由，审批人为管理员邮箱（超过 20,000 USDT 需两位不同审批人，规则在 wallet-service）。`exchangectl wallet approve|reject` 仍可用。
+- **提现审批**：按状态列出提现（默认 `PENDING_REVIEW`），显示风控分与命中规则；批准/拒绝需理由，审批人为管理员邮箱（超过 20,000 USDT 需两位不同审批人，规则在 wallet-service）。`exchangectl wallet approve|reject` 仍可用。可按网络筛选（`network`），托管网络的提现带 `custody`、托管方状态 `provider_status` 与交给托管方的时间 `submitted_at`。
+- **托管方**（阶段 4 B6，[custody.md](custody.md)）：`GET /admin/v1/custody`（托管方币种与余额、使用它的网络、每个持有方与资产最近一次对账、托管方处理中的提现、待处理回调数）、`GET /admin/v1/custody/callbacks`（`result`、`kind`、`q` 按交易/提现 ID、哈希或地址；游标分页）、`GET /admin/v1/custody/callbacks/{id}`（含原始请求）、`POST /admin/v1/custody/callbacks/{id}/replay`（理由；只限验签通过且 `FAILED`、`UNMATCHED`、`RECEIVED` 的回调，需 `withdrawals.review`，wallet-service 写审计 `wallet.custody.callback.replay`）。
 - **用户**：按用户 ID、邮箱或手机号（`+` 开头的 E.164）查找，显示状态与余额；改账户状态（状态机见附录 B，原因为大写代码，例如 `SUSPICIOUS_LOGIN`、`REVIEW_CLEARED`）；强制撤销全部挂单（撮合引擎异步完成）。
 - **资产与交易对**：列出资产、网络与交易对；交易对状态是单交易对紧急开关（`TRADING ⇄ HALT`，`CANCEL_ONLY` 之后只能下线，不可恢复交易）。资产与网络参数（精度、充提开关、手续费等）仍以 `deploy/instruments/test.json` 为准，每次部署幂等同步，后台只读——否则下次部署会把后台改动覆盖回去。
 - **功能开关**：列出全部已知开关（从未设置的显示为关闭、版本 0），切换启用状态并写理由；地区、账户状态、白名单等规则保持不变（改规则用 `exchangectl flags set`）。服务 5 秒内生效。
@@ -87,12 +88,12 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 
 | 页面 | 内容 |
 |---|---|
-| 概览 | 24 小时指标（可点进对应列表）、近 7/30 天成交与新增用户图、17 个服务的就绪状态与耗时、HOUSE 库存估值与盈亏、托管方（B6 接入） |
+| 概览 | 24 小时指标（可点进对应列表）、近 7/30 天成交与新增用户图、17 个服务的就绪状态与耗时、HOUSE 库存估值与盈亏、托管方状态（可访问、短缺、待处理回调、处理中的提现） |
 | 用户 | 按 ID/邮箱/手机号查找，按状态、地区、注册时间筛选；行点击打开用户抽屉：概览（基本信息、余额、改状态与撤销全部挂单）、订单、成交、充值、提现、审计 |
 | 订单与成交 | 两个标签；按用户、订单号、交易对、状态、方向、时间筛选；HOUSE 一方显示为 HOUSE；导出已加载的行为 CSV |
 | 充值 | 按用户、资产、网络、状态、交易哈希筛选；行点击看详情 |
 | 提现审批 | 默认待审批队列（旧到新），可切换状态；行点击打开详情：进度、风控分与命中规则、审批人、批准/拒绝；有新的待审批提现时出现"有新数据"条，不整表轮询 |
-| 托管方 | B6 接入优盾后显示余额、费率、回调日志与对账 |
+| 托管方 | 托管方状态与处理中的提现（可跳到提现列表）、币种与余额、对账（持有、其它持有方、在途、未入账手续费、应有、短缺）、回调日志（筛选、原始请求、重放） |
 | 资产与交易对 | 交易对（参考市场与倍数、步长、费率）、资产（充提开关、网络）、合约三个标签，可搜索；交易对与合约按状态机改状态 |
 | 合约 | 合约状态、只减仓与解除、标记价、持仓量；保险基金与注资申请（双人）；风险仓位；强平记录 |
 | HOUSE 流动性 | 库存估值（可充提/站内）、各交易对的买卖与盈亏、合约仓位，每 30 秒刷新 |

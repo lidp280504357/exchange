@@ -2,6 +2,8 @@
 
 实施计划 §6.3 任务 9–10，需求 §5.10、§11.4–§11.6，ADR-0001（余额只经账本）、ADR-0003（私钥只在 signer）。
 
+阶段 4 B6 起，USDT（TRC20、BEP20、ERC20）、BTC 与 ETH（以太坊主网）的充提由托管钱包（优盾，ADR-0011）完成，见 [custody.md](custody.md)；本文是自建模式（Sepolia 的 ETH：signer、扫描、归集），作为备用与现有端到端测试继续运行。两种模式共用地址簿、冷却、限额、风控、审批、step-up 与站内地址；网络行的 `provider` 决定走哪种。
+
 ## 组成
 
 ```
@@ -83,12 +85,12 @@ ssh exchange sudo docker exec exchange-infra-wallet-service-1 /app/exchangectl w
 
 ## 提现
 
-状态机（§11.6）：`REQUESTED → PENDING_REVIEW / APPROVED → SIGNING → BROADCAST → CONFIRMING → CONFIRMED`；分支 `REJECTED`、`CANCELED`（签名前用户撤销）、`FAILED`；站内地址 `APPROVED → CONFIRMED`（账本 `INTERNAL_TRANSFER`，不签名不广播）。风控评分在申请时同步完成，没有单独的 `RISK_SCORING` 停留态。
+状态机（§11.6）：`REQUESTED → PENDING_REVIEW / APPROVED → SIGNING → BROADCAST → CONFIRMING → CONFIRMED`；托管网络 `APPROVED → SUBMITTED → CONFIRMED / FAILED`（[custody.md](custody.md)）；分支 `REJECTED`、`CANCELED`（签名或交给托管方前用户撤销）、`FAILED`；站内地址 `APPROVED → CONFIRMED`（账本 `INTERNAL_TRANSFER`，不签名不广播）。风控评分在申请时同步完成，没有单独的 `RISK_SCORING` 停留态。
 
 - **地址簿**：`POST /v1/wallet/withdraw-addresses`（需 step-up）；新地址冷却期后才能用（`WALLET_WHITELIST_COOLDOWN`，生产 24 小时，测试服 1 分钟）；不能添加自己的充值地址。
-- **申请** `POST /v1/wallet/withdrawals`（需 step-up，已绑定身份验证器时只能用 TOTP 证明）：eligibility `WITHDRAW`（开关 `wallet.withdraw`，默认关，测试服已开）→ 资产与网络开放提现、只支持链上原生币 → 地址格式 → 精度与最小提现额 → 地址在地址簿且过了冷却期 → 当日价格折算 USDT（当天第一次取价后固定，存 `price_snapshots`；来源 market-data 的 `ASSET-USDT` 参考价，没有新鲜参考价时用 `WALLET_FALLBACK_PRICES`）→ 日/月限额（双身份 + TOTP：2,000 / 20,000 USDT，否则 20%）→ 风控规则 → 冻结金额 + 手续费（`WITHDRAW_FREEZE`，键 `withdraw:<id>`）。账本拒绝冻结时记为 REJECTED 并返回账本错误码；账本不可达时停在 REQUESTED，处理器一分钟后用同一个键补完。
+- **申请** `POST /v1/wallet/withdrawals`（需 step-up，已绑定身份验证器时只能用 TOTP 证明）：eligibility `WITHDRAW`（开关 `wallet.withdraw`，默认关，测试服已开）→ 资产与网络开放提现（自建网络只支持链上原生币，托管网络也支持代币）→ 地址格式（按网络：EVM 校验和、TRON、比特币） → 精度与最小提现额 → 地址在地址簿且过了冷却期 → 当日价格折算 USDT（当天第一次取价后固定，存 `price_snapshots`；来源 market-data 的 `ASSET-USDT` 参考价，没有新鲜参考价时用 `WALLET_FALLBACK_PRICES`）→ 日/月限额（双身份 + TOTP：2,000 / 20,000 USDT，否则 20%）→ 风控规则 → 冻结金额 + 手续费（`WITHDRAW_FREEZE`，键 `withdraw:<id>`）。账本拒绝冻结时记为 REJECTED 并返回账本错误码；账本不可达时停在 REQUESTED，处理器一分钟后用同一个键补完。
 - **风控规则**（`internal/wallet/domain/withdrawal.go`）：新账户（< 72 小时）、新设备（该会话设备首次登录 < 24 小时）、近期安全变更（换绑或改/重置密码 < 24 小时）、新地址（加入地址簿 < 72 小时）、大额（> 1,000 USDT）、当日累计超过日限额一半，任一命中即 PENDING_REVIEW 需一人批准；> 20,000 USDT 需两人。安全上下文由 auth-service 在兑换 step-up 时一并返回（`ConsumeStepUp` 的 `security`）。
-- **审批**：管理后台 `/admin/` 的"提现审批"（FINANCE/ADMIN 角色，审批人为管理员邮箱，见 [admin.md](admin.md)），或 `exchangectl`；每次审批/拒绝写 `audit.events`：
+- **审批**：管理后台 `admin.astras.vip` 的"提现审批"（FINANCE/ADMIN 角色，审批人为管理员邮箱，见 [admin.md](admin.md)），或 `exchangectl`；每次审批/拒绝写 `audit.events`：
 
   ```bash
   ssh exchange sudo docker exec exchange-infra-wallet-service-1 /app/exchangectl wallet withdrawals             # 待审核
@@ -131,6 +133,7 @@ ssh exchange sudo docker exec exchange-infra-wallet-service-1 /app/exchangectl w
 
 - `wallet_scan_block`、`wallet_scan_lag_blocks`、`wallet_scan_last_success_timestamp_seconds`、`wallet_deposits_held`、`wallet_deposits_detected_total{status}`、`wallet_deposits_orphaned_total`（标签 `network`）。
 - 告警（`deploy/observability/alerts.yml`）：`WalletScanLagging`（落后 50 块以上持续 10 分钟）、`WalletScanStalled`（10 分钟没有完成一轮：节点、租约或数据库）、`WalletDepositsHeld`（有已确认充值因资产关闭充值挂起超过 1 小时）。
+- 链上检查（不变量 4）把托管方此刻持有的同一资产算作"其它持有方"（`chain_checks.elsewhere`）：测试服的 ETH 一部分在 Sepolia、一部分在托管方，账本的应有数额是两者之和。
 
 ## 常用操作
 
