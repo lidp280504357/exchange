@@ -16,9 +16,9 @@
     - 内部资产（其余 47 个币）没有库存也能卖（HOUSE 在 `MARKET_MAKER` 科目上记负数，ADR-0013）；
     - 一个资产的净头寸（多或空，**库存本身也算多头**）最多值 `HOUSE_SYMBOL_CAP`，全部现货头寸合计最多 `HOUSE_TOTAL_CAP`；持有某资产超过前者后，HOUSE 在所有交易对上都不再买入它（2026-10-02 曾因一次补库存超限导致 BTC、ETH 无人接盘，已撤回）。
     - 额度一律按 USDT 计价：以 BTC 计价的交易对（ETH-BTC）把两边资产各按自己的 USDT 价格折算（`internal/marketmaker/domain/house.go` 的 `SpotRooms`），USDT 本身恒为 1、不计入头寸。
-  - 合约额度：HOUSE 在该合约的净仓位多空各最多值 `HOUSE_CONTRACT_CAP`；到上限后该方向不再报价（`market_house_room` 为 0），用户只能做反方向，直到有人平仓或调高上限。HOUSE 在合约上是一个普通用户账户（`HOUSE_USER_ID`），仓位与保证金在它的 FUTURES 账户里，**自己永不被强平**（用户穿仓后的自动减仓里，HOUSE 与其他盈利仓位一样可以是对手方，ADR-0015）。
+  - 合约额度：HOUSE 在该合约的净仓位多空各最多值 `HOUSE_CONTRACT_CAP`；到上限后该方向不再报价（`market_house_room` 为 0），用户只能做反方向，直到有人平仓或调高上限。HOUSE 在合约上是一个普通用户账户（`HOUSE_USER_ID`），仓位与保证金在它的 FUTURES 账户里，**自己永不被强平**（用户穿仓后的自动减仓里，HOUSE 与其他盈利仓位一样可以是对手方，ADR-0015）。正因为不被强平，HOUSE 的全部合约仓位按标记价合计最多值它合约权益（FUTURES 钱包余额加未实现盈亏，即 `margin_balance`）的 `HOUSE_CONTRACT_LEVERAGE` 倍（默认 10）：超过后各合约只报减仓方向，直到亏损收回或补了保证金（审查 A4）。
 - 发空簿（撤走 HOUSE 的流动性）的情况：开关 `market.house_liquidity` 不允许该交易对、`market.reference_feed` 关闭、参考盘口 3 秒没有消息或漏了增量（等下一个快照）、HOUSE 的余额与仓位 10 秒没读到。引擎自己也会丢弃比订单早 5 秒以上的参考簿（`RefMaxAge`，时间都在命令里，重放结果一致）。
-- 库存每秒从账本 gRPC（`MARKET_MAKER` 各资产的可用余额）与 derivatives-service 内网接口（HOUSE 账户的仓位）读一次；交易对与合约规格每 30 秒从 instrument-service 读一次。
+- 库存每秒从账本 gRPC（`MARKET_MAKER` 各资产的可用余额）与 derivatives-service 内网接口（HOUSE 账户的仓位与合约账户）读一次；交易对与合约规格每 30 秒从 instrument-service 读一次。
 
 ## 引擎怎么用参考簿
 
@@ -38,14 +38,17 @@
 | `market_house_room{symbol,side}` | 最近一次发出的可买、可卖数量（基础资产） |
 | `market_house_updates_total{kind}` | 发出的参考簿（`levels`/`empty`） |
 | `market_house_publish_failures_total` | 发布失败的轮次（下一轮重发） |
+| `market_house_contract_equity_usdt` | HOUSE 的合约权益（FUTURES `margin_balance`，按标记价） |
+| `market_house_contract_exposure_usdt` | HOUSE 全部合约仓位按标记价的合计价值 |
+| `market_house_contract_max_leverage` | 配置的 `HOUSE_CONTRACT_LEVERAGE` |
 
-告警（`deploy/observability/alerts.yml`）：`HouseInventoryNegative`（可充提资产库存为负，critical）、`HouseRoomExhausted`（某方向额度 10 分钟为 0：补库存或调上限）、`HousePublishFailing`、`ReferenceBookStale`（参考盘口不同步或 30 秒没变，见 [market-data.md](market-data.md)）。
+告警（`deploy/observability/alerts.yml`）：`HouseInventoryNegative`（可充提资产库存为负，critical）、`HouseRoomExhausted`（某方向额度 10 分钟为 0：补库存或调上限）、`HouseContractOverLeveraged`（合约仓位合计超过权益的 `HOUSE_CONTRACT_LEVERAGE` 倍 5 分钟：只能减仓，用 `exchangectl ledger house-margin` 补保证金）、`HouseContractEquityGone`（合约权益不大于 0，critical：之后的亏损由保险基金承担）、`HousePublishFailing`、`ReferenceBookStale`（参考盘口不同步或 30 秒没变，见 [market-data.md](market-data.md)）。
 
 日志：`house liquidity not published`、`house liquidity: HOUSE's holdings not read`、`house liquidity idle: set HOUSE_USER_ID`（没配 HOUSE 账户时服务空转）。
 
 ## 配置
 
-`deploy/compose/docker-compose.apps.yml` 的 market-maker 段：`LEDGER_GRPC_ADDR`、`INSTRUMENT_SERVICE_URL`、`DERIVATIVES_SERVICE_URL`；上限用 `HOUSE_LEVEL_CAP`、`HOUSE_SYMBOL_CAP`、`HOUSE_TOTAL_CAP`、`HOUSE_CONTRACT_CAP`、`HOUSE_SAFETY`（USDT，代码默认值按设计稿 §8.6：20000、100000、1000000、100000、1000）与 `HOUSE_BACKED_ASSETS` 覆盖。**测试服**因为所有订单都由 HOUSE 接（2026-10-02），在 compose 里把单资产上限设为 2,000,000、现货合计 20,000,000、单合约 5,000,000（单档与保留额不变）：按设计默认值，一个用户 125 倍开 2 BTC 就能占满 BTC-USDT-PERP 一侧，HOUSE 持有的 0.24 BTC 也只够全体用户买 0.23 BTC。`HOUSE_USER_ID` 在服务器 `apps.env`（market-maker 与 derivatives-service 都读；测试服沿用原做市账户的用户 ID）。
+`deploy/compose/docker-compose.apps.yml` 的 market-maker 段：`LEDGER_GRPC_ADDR`、`INSTRUMENT_SERVICE_URL`、`DERIVATIVES_SERVICE_URL`；上限用 `HOUSE_LEVEL_CAP`、`HOUSE_SYMBOL_CAP`、`HOUSE_TOTAL_CAP`、`HOUSE_CONTRACT_CAP`、`HOUSE_SAFETY`（USDT，代码默认值按设计稿 §8.6：20000、100000、1000000、100000、1000）、`HOUSE_CONTRACT_LEVERAGE`（倍数，默认 10）与 `HOUSE_BACKED_ASSETS` 覆盖；启动日志 `house liquidity caps` 打出生效的值。**测试服**因为所有订单都由 HOUSE 接（2026-10-02），在 compose 里把单资产上限设为 2,000,000、现货合计 20,000,000、单合约 5,000,000（单档与保留额不变）：按设计默认值，一个用户 125 倍开 2 BTC 就能占满 BTC-USDT-PERP 一侧，HOUSE 持有的 0.24 BTC 也只够全体用户买 0.23 BTC。`HOUSE_USER_ID` 在服务器 `apps.env`（market-maker 与 derivatives-service 都读；测试服沿用原做市账户的用户 ID）。
 
 ## 测试服设置（一次性）
 

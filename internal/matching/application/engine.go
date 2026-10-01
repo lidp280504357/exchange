@@ -4,7 +4,8 @@
 // batch in one transaction, written to the WAL together with the events
 // they produced (published through the outbox) and, now and then,
 // snapshots. On start, and after a failed write, the books are rebuilt
-// from the latest snapshots and the WAL.
+// from the latest snapshots and the WAL; on start the engine then catches
+// up on the reference books before it reads a command.
 package application
 
 import (
@@ -158,6 +159,56 @@ func (e *Engine) recover(ctx context.Context) error {
 	}
 	e.log.InfoContext(ctx, "matching engine recovered", "snapshots", len(snaps), "replayed", len(wal), "books", e.bookCount())
 	return nil
+}
+
+// ReferenceReader hands handle, in order, the reference books of each
+// partition from the given offsets (per partition, the next one to read)
+// up to the end of the shard's references topic, and returns how many it
+// handed over (kafka.ReadToEnd).
+type ReferenceReader func(ctx context.Context, from map[int32]int64, handle kafka.BatchHandler) (int, error)
+
+// catchUpRounds bounds CatchUp; a round that takes less than catchUpQuick
+// leaves so few books behind that consuming both topics together serves
+// them in time.
+const (
+	catchUpRounds = 5
+	catchUpQuick  = time.Second
+)
+
+// CatchUp applies the reference books published while no engine ran, and
+// call it after Recover and before consuming commands. Otherwise an engine
+// that takes over, or restarts, would read the commands of the gap from
+// one topic and the books from the other in any order, and a command read
+// first would find only a book more than RefMaxAge older than itself and
+// trade nothing with HOUSE. Books keep coming while it reads, so it reads
+// again until a round is quick.
+func (e *Engine) CatchUp(ctx context.Context, read ReferenceReader) error {
+	began, total := time.Now(), 0
+	for range catchUpRounds {
+		start := time.Now()
+		n, err := read(ctx, e.nextReferences(), e.Handle)
+		total += n
+		if err != nil {
+			return fmt.Errorf("reference catch-up: %w", err)
+		}
+		if time.Since(start) < catchUpQuick {
+			break
+		}
+	}
+	e.log.InfoContext(ctx, "reference books caught up", "books", total, "took", time.Since(began).Round(time.Millisecond).String())
+	return nil
+}
+
+// nextReferences is, per partition the engine knows, the offset of the
+// next reference book to apply.
+func (e *Engine) nextReferences() map[int32]int64 {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	next := make(map[int32]int64, len(e.parts))
+	for p, st := range e.parts {
+		next[p] = st.applied[ports.SourceReferences] + 1
+	}
+	return next
 }
 
 func (e *Engine) bookCount() int {

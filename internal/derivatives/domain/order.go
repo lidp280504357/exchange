@@ -146,7 +146,8 @@ type Order struct {
 	LotSize    decimal.Decimal
 	// MarginPerLot and FeePerLot are what an opening order reserved per
 	// lot: price x lot / leverage and price x lot x taker rate, rounded
-	// up. Both zero for an order that only closes.
+	// up, a sell's price no lower than the mark when it was placed. Both
+	// zero for an order that only closes.
 	MarginPerLot decimal.Decimal
 	FeePerLot    decimal.Decimal
 	// Consumed is the quantity whose reservation fills used; the rest is
@@ -351,8 +352,17 @@ func NewOrder(id string, req Request, c Contract, s Settings, mark decimal.Decim
 		return Order{}, ErrMinNotional.WithDetail("min_notional", c.MinNotional.String())
 	}
 	if !o.Closing() {
-		o.MarginPerLot = ceil(o.Price.Mul(c.LotSize).Div(decimal.NewFromInt32(o.Leverage)), c.QuoteDecimals)
-		o.FeePerLot = ceil(o.Price.Mul(c.LotSize).Mul(c.TakerFeeRate), c.QuoteDecimals)
+		// A buy fills at its price or below, so its price covers the margin
+		// at the fill. A sell fills at its price or above, near the mark
+		// when it crosses: it reserves at the higher of the two, or a market
+		// sell, whose protection price is the band below the mark, would
+		// hold less than the initial margin (0.76% at 125x).
+		reserveAt := o.Price
+		if o.Side == Sell {
+			reserveAt = decimal.Max(o.Price, mark)
+		}
+		o.MarginPerLot = ceil(reserveAt.Mul(c.LotSize).Div(decimal.NewFromInt32(o.Leverage)), c.QuoteDecimals)
+		o.FeePerLot = ceil(reserveAt.Mul(c.LotSize).Mul(c.TakerFeeRate), c.QuoteDecimals)
 	} else {
 		o.FreezeState = FreezeDone // nothing to freeze
 	}

@@ -115,6 +115,14 @@ func TestMarketOrdersCarryTheirProtection(t *testing.T) {
 	if err != nil || !unbounded.ProtectionPrice.IsZero() {
 		t.Fatalf("without an anchor: %+v %v", unbounded, err)
 	}
+	// A band of 100% (ETH-BTC) still keeps a sell above half the anchor.
+	wide := btcUSDT
+	wide.PriceBand = d("1")
+	sell, err = domain.NewOrder("01a0e7de-9e72-74e7-87e8-61cdf564e6a8",
+		domain.Request{UserID: "u", Side: domain.SideSell, Type: domain.TypeMarket, Quantity: d("0.01")}, wide, d("60000.05"), time.Now())
+	if err != nil || !sell.ProtectionPrice.Equal(d("30000.03")) {
+		t.Fatalf("a sell on a 100%% band: %s %v", sell.ProtectionPrice, err)
+	}
 }
 
 func TestStateMachine(t *testing.T) {

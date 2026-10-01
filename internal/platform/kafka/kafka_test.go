@@ -355,3 +355,55 @@ func TestNamespaceMustEndInADot(t *testing.T) {
 		}
 	}
 }
+
+func TestReadToEndReadsFromTheGivenOffsets(t *testing.T) {
+	cfg, topic, prod := setup(t)
+	envs := publish(t, prod, topic, "a", "b", "c", "d")
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	var got []kafka.Delivery
+	calls := 0
+	collect := func(_ context.Context, batch []kafka.Delivery) error {
+		calls++
+		got = append(got, batch...)
+		return nil
+	}
+	n, err := kafka.ReadToEnd(ctx, cfg, topic, nil, 3, collect)
+	if err != nil || n != len(envs) || len(got) != len(envs) || calls < 2 {
+		t.Fatalf("from the start: n=%d calls=%d got %d, err %v", n, calls, len(got), err)
+	}
+	ids := map[string]bool{}
+	first, next := map[int32]int64{}, map[int32]int64{}
+	for _, d := range got {
+		ids[d.Envelope.GetEventId()] = true
+		if d.Topic != topic {
+			t.Fatalf("topic %q", d.Topic)
+		}
+		if _, ok := first[d.Partition]; !ok {
+			first[d.Partition] = d.Offset
+		}
+		next[d.Partition] = d.Offset + 1
+	}
+	for _, env := range envs {
+		if !ids[env.GetEventId()] {
+			t.Fatalf("missing %s", env.GetEventId())
+		}
+	}
+	// From where it ended there is nothing; from the second record of each
+	// partition, all but the first ones.
+	got = nil
+	if n, err := kafka.ReadToEnd(ctx, cfg, topic, next, 3, collect); err != nil || n != 0 {
+		t.Fatalf("from the end: %d, %v", n, err)
+	}
+	for p := range first {
+		first[p]++
+	}
+	if n, err := kafka.ReadToEnd(ctx, cfg, topic, first, 3, collect); err != nil || n != len(envs)-len(first) {
+		t.Fatalf("from the second records: %d, %v", n, err)
+	}
+	// A handler error ends the read.
+	boom := errors.New("boom")
+	if _, err := kafka.ReadToEnd(ctx, cfg, topic, nil, 1, func(context.Context, []kafka.Delivery) error { return boom }); !errors.Is(err, boom) {
+		t.Fatalf("handler error: %v", err)
+	}
+}

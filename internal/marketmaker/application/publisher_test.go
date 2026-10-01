@@ -30,12 +30,12 @@ func (s specList) Specs(context.Context) ([]domain.Spec, error) { return s, nil 
 
 type fakeHouse struct {
 	holdings  domain.Holdings
-	positions map[string]decimal.Decimal
+	contracts *domain.ContractAccount
 }
 
 func (h fakeHouse) Holdings(context.Context) (domain.Holdings, error) { return h.holdings, nil }
-func (h fakeHouse) Positions(context.Context) (map[string]decimal.Decimal, error) {
-	return h.positions, nil
+func (h fakeHouse) Contracts(context.Context) (domain.ContractAccount, error) {
+	return *h.contracts, nil
 }
 
 type onFlags struct {
@@ -94,12 +94,19 @@ func levels(pq ...string) []*marketv1.PriceLevel {
 	return out
 }
 
+// rigContracts is HOUSE's FUTURES account in newRig: short 0.5 BTC-USDT-PERP
+// with 1,000,000 of equity. Tests may change it, then refresh.
+var rigContracts domain.ContractAccount
+
 func newRig(t *testing.T) (*Publisher, *records, *onFlags, *time.Time) {
 	t.Helper()
 	now := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
+	rigContracts = domain.ContractAccount{
+		Positions: map[string]decimal.Decimal{"BTC-USDT-PERP": d("-0.5")}, Exposure: d("25000"), Equity: d("1000000"),
+	}
 	house := fakeHouse{
 		holdings:  domain.Holdings{"BTC": d("0.4"), "USDT": d("500000")},
-		positions: map[string]decimal.Decimal{"BTC-USDT-PERP": d("-0.5")},
+		contracts: &rigContracts,
 	}
 	fl := &onFlags{}
 	rec := &records{}
@@ -193,7 +200,7 @@ func TestHouseStopsWhereItMustNotTrade(t *testing.T) {
 }
 
 func TestContractsGoToTheirEngineWithTheirRooms(t *testing.T) {
-	p, rec, _, _ := newRig(t)
+	p, rec, _, now := newRig(t)
 	ctx := context.Background()
 	p.OnSnapshot(&marketv1.DepthSnapshot{Symbol: "BTC-USDT-PERP", Sequence: 1, Reference: true, Bids: levels("49999.9", "5"), Asks: levels("50000.1", "5")})
 	// An update applies on top of the snapshot.
@@ -207,5 +214,15 @@ func TestContractsGoToTheirEngineWithTheirRooms(t *testing.T) {
 	// HOUSE short 0.5 at a 50,000 mid: 100,000 caps the position either way.
 	if books[0].GetBuyRoom() != "2.5" || books[0].GetSellRoom() != "1.5" {
 		t.Fatalf("rooms buy %s sell %s", books[0].GetBuyRoom(), books[0].GetSellRoom())
+	}
+	// A loss leaves HOUSE 2,000 of equity: ten times that is less than its
+	// positions are worth, so it only reduces them.
+	rigContracts.Equity = d("2000")
+	*now = now.Add(2 * time.Second) // the holdings are due again, and so is the heartbeat
+	p.refresh(ctx)
+	_ = p.publish(ctx, p.round())
+	_, books = rec.take(t)
+	if len(books) != 1 || books[0].GetBuyRoom() != "0.5" || books[0].GetSellRoom() != "0" {
+		t.Fatalf("over its leverage: %v", books)
 	}
 }

@@ -34,7 +34,8 @@ type Service struct {
 	Eligibility ports.Eligibility
 	Marks       ports.Marks
 	Rates       ports.FundingRates
-	// FeeFree are the market maker's accounts (§11.10).
+	// FeeFree are the accounts whose orders pay no fees: the simulated
+	// market's bots (ASTRA design §4).
 	FeeFree []string
 	// HouseUser is HOUSE's account (HOUSE_USER_ID, ADR-0015): its side of
 	// a trade against the reference liquidity has no order, and its

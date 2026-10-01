@@ -63,6 +63,19 @@ func TestMarketOrdersGoAsLimitOrdersAtTheirProtection(t *testing.T) {
 	if err != nil || !sell.Price.Equal(d("57000.1")) || sell.TimeInForce != FOK {
 		t.Fatalf("market sell %+v %v", sell, err)
 	}
+	// A sell fills at its price or above: it reserves at the mark, not 5%
+	// below it, so the position gets its whole initial margin.
+	if !sell.MarginPerLot.Equal(d("3.000004")) || !sell.FeePerLot.Equal(d("0.030001")) {
+		t.Fatalf("market sell reserves %s and %s per lot", sell.MarginPerLot, sell.FeePerLot)
+	}
+	limit, err := NewOrder("o3", Request{UserID: "u1", Side: Sell, Type: Limit, Price: d("59000"), Qty: d("0.1")}, btcPerp, s, d("60000.07"), t0)
+	if err != nil || !limit.MarginPerLot.Equal(d("3.000004")) {
+		t.Fatalf("a limit sell below the mark reserves at the mark: %s %v", limit.MarginPerLot, err)
+	}
+	limit, err = NewOrder("o4", Request{UserID: "u1", Side: Sell, Type: Limit, Price: d("61000"), Qty: d("0.1")}, btcPerp, s, d("60000.07"), t0)
+	if err != nil || !limit.MarginPerLot.Equal(d("3.05")) {
+		t.Fatalf("a limit sell above the mark reserves at its price: %s %v", limit.MarginPerLot, err)
+	}
 }
 
 func TestClosingOrdersFitTheirPosition(t *testing.T) {

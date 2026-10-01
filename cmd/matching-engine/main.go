@@ -105,6 +105,11 @@ func setup(ctx context.Context, a *app.App) error {
 	if err := engine.Recover(ctx); err != nil {
 		return err
 	}
+	if err := engine.CatchUp(ctx, func(ctx context.Context, from map[int32]int64, handle kafka.BatchHandler) (int, error) {
+		return kafka.ReadToEnd(ctx, cfg.Kafka, sh.topics.References, from, 500, handle)
+	}); err != nil {
+		return err
+	}
 	if err := bootstrap.BatchConsumerWith(ctx, a, cfg.Kafka, kafka.BatchOptions{
 		Group: sh.group, Topics: []string{sh.topics.Commands, sh.topics.References}, Handler: engine.Handle,
 		MaxBatch: 500, MaxWait: 20 * time.Millisecond,

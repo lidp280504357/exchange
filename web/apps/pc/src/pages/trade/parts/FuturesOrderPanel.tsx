@@ -1,12 +1,12 @@
 import {
   ApiError, checkRiskLimit, closeableQuantity, dec, dk, errorText, formatAmount, formatPrice, maxNotional, maxOpenQuantity, newIdempotencyKey,
-  openCost, openLimit, placeContractOrder, riskRoom, routes, selectSignedIn, sideExposure, updateContractSettings, useContractOpenOrders,
+  openCost, openLimit, placeContractOrder, reservePrice, riskRoom, routes, selectSignedIn, sideExposure, updateContractSettings, useContractOpenOrders,
   useContractSettings, useFuturesAccount, useMarkPrice, usePositions, useSession, useSettings, useTicker, type Contract, type NewContractOrder,
 } from "@exchange/core";
 import { Button, Checkbox, Dialog, KeyValue, LeverageDialog, NumberInput, Segmented, Slider, Tabs, toast, cn } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRightLeft } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router";
 
@@ -80,18 +80,21 @@ export function FuturesOrderPanel({
   const longPos = hedge ? list.find((p) => p.position_side === "LONG") : oneWay && dec.sign(oneWay.quantity) > 0 ? oneWay : undefined;
   const shortPos = hedge ? list.find((p) => p.position_side === "SHORT") : oneWay && dec.sign(oneWay.quantity) < 0 ? oneWay : undefined;
 
-  // What opening may add on each side: the margin's limit at the order's
-  // price and the leverage's risk limit at the mark price (§11.7), less
-  // what the side holds and has on order.
+  // What opening may add on each side: the margin's limit at the price the
+  // order reserves at (a buy its price, a sell no lower than the mark) and
+  // the leverage's risk limit at the mark price (§11.7), less what the side
+  // holds and has on order.
   const riskMark = mark?.mark_price ?? refPrice;
   const orders = openOrders.data?.items ?? [];
   const exposure = (side: "BUY" | "SELL") => sideExposure(side, hedge ? (side === "BUY" ? "LONG" : "SHORT") : "BOTH", list, orders);
-  const byMargin = useMemo(
-    () => (dec.isDecimal(refPrice || "x") ? maxOpenQuantity(available, refPrice, leverage, contract.taker_fee_rate, contract.lot_size) : "0"),
-    [available, refPrice, leverage, contract.taker_fee_rate, contract.lot_size],
-  );
+  const byMargin = (side: "BUY" | "SELL") => {
+    const at = reservePrice(side, type, price, mark?.mark_price ?? tk?.last ?? "", contract.price_band, contract.tick_size);
+    return at ? maxOpenQuantity(available, at, leverage, contract.taker_fee_rate, contract.lot_size) : "0";
+  };
   const maxOpenOf = (side: "BUY" | "SELL") =>
-    dec.isDecimal(riskMark || "x") ? openLimit(byMargin, riskRoom(contract.risk_tiers, leverage, riskMark, exposure(side), contract.lot_size)) : byMargin;
+    dec.isDecimal(riskMark || "x")
+      ? openLimit(byMargin(side), riskRoom(contract.risk_tiers, leverage, riskMark, exposure(side), contract.lot_size))
+      : byMargin(side);
   const maxOpen = { BUY: maxOpenOf("BUY"), SELL: maxOpenOf("SELL") };
   const maxClose = (side: "BUY" | "SELL") => closeableQuantity((side === "SELL" ? longPos : shortPos)?.quantity);
   const cost = quantity && refPrice ? openCost(refPrice, quantity, leverage, contract.taker_fee_rate) : "0";

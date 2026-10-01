@@ -241,6 +241,42 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'market_house_contract_exposure_usdt{job="market-maker", instance="a"}'
+        values: '150000x3 250000x10'
+      - series: 'market_house_contract_equity_usdt{job="market-maker", instance="a"}'
+        values: '20000x13'
+      - series: 'market_house_contract_max_leverage{job="market-maker", instance="a"}'
+        values: '10x13'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: HouseContractOverLeveraged
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: HouseContractOverLeveraged
+        exp_alerts:
+          - exp_labels: {severity: warning, job: market-maker}
+            exp_annotations:
+              summary: "HOUSE's contract positions are worth 250000 USDT, more than HOUSE_CONTRACT_LEVERAGE times its contract equity: it only reduces them until the equity is topped up"
+              runbook: docs/runbook/market-maker.md
+
+  - interval: 1m
+    input_series:
+      - series: 'market_house_contract_equity_usdt{job="market-maker", instance="a"}'
+        values: '5000 -1200 -1200 -1200'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: HouseContractEquityGone
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: HouseContractEquityGone
+        exp_alerts:
+          - exp_labels: {severity: critical, job: market-maker}
+            exp_annotations:
+              summary: "HOUSE's contract equity is -1200 USDT: it is never liquidated, so its losses now come out of the insurance fund"
+              runbook: docs/runbook/market-maker.md
+
+  - interval: 1m
+    input_series:
       - series: 'market_reference_book_age_seconds{job="market-data-service", symbol="SOL-USDT"}'
         values: '0.2 -1 -1 -1 -1 -1'
       - series: 'market_reference_book_age_seconds{job="market-data-service", symbol="BTC-USDT"}'

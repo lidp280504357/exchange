@@ -443,3 +443,61 @@ func TestRecoveryReplaysReferenceBooks(t *testing.T) {
 		}
 	}
 }
+
+// An engine that starts catches up on the reference books published while
+// none ran before it reads a command: an order of the gap trades with
+// HOUSE on the newest book, even when the group hands it over first.
+func TestStartCatchesUpOnReferenceBooks(t *testing.T) {
+	store := &memStore{snapshots: map[int32]ports.Snapshot{}}
+	e := newEngine(t, store)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if err := e.Handle(ctx, refDeliveries(0, reference(t, now, "60010"))); err != nil {
+		t.Fatal(err)
+	}
+	// The engine stops for 20 seconds; books 1 and 2 come meanwhile.
+	gap := refDeliveries(1, reference(t, now.Add(10*time.Second), "60010"), reference(t, now.Add(20*time.Second), "60010"))
+	e = newEngine(t, store)
+	var asked []map[int32]int64
+	read := func(ctx context.Context, from map[int32]int64, handle kafka.BatchHandler) (int, error) {
+		asked = append(asked, from)
+		var batch []kafka.Delivery
+		for _, d := range gap {
+			if d.Offset >= from[d.Partition] {
+				batch = append(batch, d)
+			}
+		}
+		return len(batch), handle(ctx, batch)
+	}
+	if err := e.CatchUp(ctx, read); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 1 || len(asked[0]) != 1 || asked[0][0] != 1 {
+		t.Fatalf("read from %v", asked)
+	}
+	// The group hands over an order of the gap first, then the books again.
+	order := placeAt(t, now.Add(19*time.Second), "b1", "bob", orderv1.Side_SIDE_BUY, "60010", "0.2")
+	if err := e.Handle(ctx, append(deliveries(0, order), gap...)); err != nil {
+		t.Fatal(err)
+	}
+	var trades []*tradev1.TradeExecuted
+	for _, o := range store.outbox {
+		if tr, ok := mustPayload(o.Envelope).(*tradev1.TradeExecuted); ok {
+			trades = append(trades, tr)
+		}
+	}
+	// It takes the book as it comes; without the catch-up it would rest
+	// until a book of the gap reached it.
+	if len(trades) != 1 || trades[0].GetBuyerOrderId() != "b1" || trades[0].GetSellerUserId() != "house" || trades[0].GetBuyerIsMaker() {
+		t.Fatalf("trades %v", trades)
+	}
+	// Three books and the order in the WAL; the books handed over again were skipped.
+	if len(store.wal) != 4 || store.wal[2].Source != ports.SourceReferences || store.wal[2].Offset != 2 || store.wal[3].Source != ports.SourceCommands {
+		t.Fatalf("wal %+v", store.wal)
+	}
+	// Caught up, the next start reads from book 3.
+	asked = nil
+	if err := newEngine(t, store).CatchUp(ctx, read); err != nil || len(asked) != 1 || asked[0][0] != 3 {
+		t.Fatalf("second start: %v, read from %v", err, asked)
+	}
+}

@@ -1,8 +1,8 @@
 // Package api reads the platform's services over their internal REST
 // addresses for HOUSE's liquidity publisher: the pairs and contracts from
-// instrument-service, HOUSE's contract positions from derivatives-service
-// (as HOUSE's account, the user identity in X-User-Id as the gateway
-// would pass it).
+// instrument-service, HOUSE's contract positions and account from
+// derivatives-service (as HOUSE's account, the user identity in X-User-Id
+// as the gateway would pass it).
 package api
 
 import (
@@ -16,7 +16,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/marketmaker/domain"
 )
 
-// Client implements ports.Specs and the positions half of ports.House.
+// Client implements ports.Specs and the contracts half of ports.House.
 type Client struct {
 	Instrument  string
 	Derivatives string
@@ -103,24 +103,51 @@ func (c *Client) Specs(ctx context.Context) ([]domain.Spec, error) {
 	return out, nil
 }
 
-// Positions returns HOUSE's net position on each contract, long positive.
-func (c *Client) Positions(ctx context.Context) (map[string]decimal.Decimal, error) {
+// Contracts returns HOUSE's FUTURES account: its net position on each
+// contract (long positive); what its positions are worth together, each
+// at its mark price (at its entry price before the contract's first mark
+// price); and its equity, the account's margin balance.
+func (c *Client) Contracts(ctx context.Context) (domain.ContractAccount, error) {
 	var body struct {
 		Positions []struct {
-			Symbol   string `json:"symbol"`
-			Quantity string `json:"quantity"`
+			Symbol     string  `json:"symbol"`
+			Quantity   string  `json:"quantity"`
+			EntryPrice string  `json:"entry_price"`
+			Notional   *string `json:"notional"`
 		} `json:"positions"`
 	}
 	if err := c.get(ctx, c.Derivatives+"/v1/derivatives/positions", &body); err != nil {
-		return nil, fmt.Errorf("positions: %w", err)
+		return domain.ContractAccount{}, fmt.Errorf("positions: %w", err)
 	}
-	out := map[string]decimal.Decimal{}
+	a := domain.ContractAccount{Positions: map[string]decimal.Decimal{}}
 	for _, p := range body.Positions {
 		q, err := decimal.NewFromString(p.Quantity)
 		if err != nil {
-			return nil, fmt.Errorf("position of %s: bad quantity %q", p.Symbol, p.Quantity)
+			return domain.ContractAccount{}, fmt.Errorf("position of %s: bad quantity %q", p.Symbol, p.Quantity)
 		}
-		out[p.Symbol] = out[p.Symbol].Add(q)
+		a.Positions[p.Symbol] = a.Positions[p.Symbol].Add(q)
+		var worth decimal.Decimal
+		if p.Notional != nil {
+			worth, err = decimal.NewFromString(*p.Notional)
+		} else {
+			worth, err = decimal.NewFromString(p.EntryPrice)
+			worth = worth.Mul(q)
+		}
+		if err != nil {
+			return domain.ContractAccount{}, fmt.Errorf("position of %s: bad notional or entry price", p.Symbol)
+		}
+		a.Exposure = a.Exposure.Add(worth.Abs())
 	}
-	return out, nil
+	var acct struct {
+		MarginBalance string `json:"margin_balance"`
+	}
+	if err := c.get(ctx, c.Derivatives+"/v1/derivatives/account", &acct); err != nil {
+		return domain.ContractAccount{}, fmt.Errorf("account: %w", err)
+	}
+	equity, err := decimal.NewFromString(acct.MarginBalance)
+	if err != nil {
+		return domain.ContractAccount{}, fmt.Errorf("account: bad margin balance %q", acct.MarginBalance)
+	}
+	a.Equity = equity
+	return a, nil
 }

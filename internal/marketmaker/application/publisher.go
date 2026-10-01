@@ -48,13 +48,14 @@ type Config struct {
 
 // DefaultConfig follows the design (§8.6): levels up to 20,000 USDT, a
 // symbol's position up to 100,000, all spot positions up to 1,000,000,
-// 1,000 of backed inventory kept back; the best 20 levels, every 250 ms at
-// most, every 2 s at least.
+// 1,000 of backed inventory kept back, all contract positions up to 10
+// times HOUSE's contract equity; the best 20 levels, every 250 ms at most,
+// every 2 s at least.
 func DefaultConfig() Config {
 	return Config{
 		Caps: domain.Caps{
 			Level: decimal.NewFromInt(20000), Symbol: decimal.NewFromInt(100000), Total: decimal.NewFromInt(1000000),
-			Contract: decimal.NewFromInt(100000), Safety: decimal.NewFromInt(1000),
+			Contract: decimal.NewFromInt(100000), Safety: decimal.NewFromInt(1000), ContractLeverage: decimal.NewFromInt(10),
 		},
 		Backed: []string{"USDT", "BTC", "ETH"}, Levels: 20,
 		Interval: 250 * time.Millisecond, Heartbeat: 2 * time.Second, Stale: 3 * time.Second,
@@ -86,7 +87,7 @@ type Publisher struct {
 	list      []domain.Spec
 	listAt    time.Time
 	holdings  domain.Holdings
-	positions map[string]decimal.Decimal
+	contracts domain.ContractAccount
 	houseAt   time.Time
 	sent      map[string]sent
 
@@ -96,6 +97,9 @@ type Publisher struct {
 	active    *prometheus.GaugeVec
 	updates   *prometheus.CounterVec
 	failures  prometheus.Counter
+	// HOUSE's contract equity, what its contract positions are worth and
+	// how many times the equity they may be worth (ContractLeverage).
+	equity, worth, leverage prometheus.Gauge
 }
 
 // refBook is a reference market's book as the public messages give it.
@@ -118,7 +122,7 @@ func New(cfg Config, specs ports.Specs, house ports.House, fl ports.Flags, pub k
 ) *Publisher {
 	p := &Publisher{
 		cfg: cfg, specs: specs, house: house, flags: fl, pub: pub, events: events, log: log, now: time.Now,
-		books: map[string]*refBook{}, positions: map[string]decimal.Decimal{}, sent: map[string]sent{},
+		books: map[string]*refBook{}, contracts: domain.ContractAccount{Positions: map[string]decimal.Decimal{}}, sent: map[string]sent{},
 		inventory: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "market_house_inventory", Help: "HOUSE's spot holding of an asset (MARKET_MAKER available; below zero for an internal asset it sold).",
 		}, []string{"asset", "backed"}),
@@ -137,8 +141,18 @@ func New(cfg Config, specs ports.Specs, house ports.House, fl ports.Flags, pub k
 		failures: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "market_house_publish_failures_total", Help: "Rounds of reference books that could not be published.",
 		}),
+		equity: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "market_house_contract_equity_usdt", Help: "HOUSE's contract equity: its FUTURES margin balance at the mark prices.",
+		}),
+		worth: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "market_house_contract_exposure_usdt", Help: "What HOUSE's contract positions are worth together at the mark prices.",
+		}),
+		leverage: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "market_house_contract_max_leverage", Help: "How many times its contract equity HOUSE's contract positions may be worth (HOUSE_CONTRACT_LEVERAGE).",
+		}),
 	}
-	reg.MustRegister(p.inventory, p.exposure, p.room, p.active, p.updates, p.failures)
+	p.leverage.Set(cfg.Caps.ContractLeverage.InexactFloat64())
+	reg.MustRegister(p.inventory, p.exposure, p.room, p.active, p.updates, p.failures, p.equity, p.worth, p.leverage)
 	return p
 }
 
@@ -221,17 +235,19 @@ func (p *Publisher) refresh(ctx context.Context) {
 		// engine takes later fills off the rooms (holdings_at).
 		readAt := p.now()
 		holdings, err1 := p.house.Holdings(ctx)
-		positions, err2 := p.house.Positions(ctx)
+		contracts, err2 := p.house.Contracts(ctx)
 		if err1 != nil || err2 != nil {
-			p.log.WarnContext(ctx, "house liquidity: HOUSE's holdings not read", "holdings", err1, "positions", err2)
+			p.log.WarnContext(ctx, "house liquidity: HOUSE's holdings not read", "holdings", err1, "contracts", err2)
 			return
 		}
 		p.mu.Lock()
-		p.holdings, p.positions, p.houseAt = holdings, positions, readAt
+		p.holdings, p.contracts, p.houseAt = holdings, contracts, readAt
 		p.mu.Unlock()
 		for asset, amount := range holdings {
 			p.inventory.WithLabelValues(asset, fmt.Sprint(p.backed(asset))).Set(amount.InexactFloat64())
 		}
+		p.equity.Set(contracts.Equity.InexactFloat64())
+		p.worth.Set(contracts.Exposure.InexactFloat64())
 	}
 }
 
@@ -253,6 +269,7 @@ func (p *Publisher) round() []outgoing {
 	feed := p.flags.Enabled(flags.KeyReferenceFeed, flags.Subject{})
 	houseFresh := !p.houseAt.IsZero() && now.Sub(p.houseAt) < houseStale
 	prices := p.prices(now)
+	contractRoom := domain.ContractRoom(p.contracts, p.cfg.Caps)
 	var out []outgoing
 	for _, spec := range p.list {
 		b := p.books[spec.Symbol]
@@ -265,8 +282,8 @@ func (p *Publisher) round() []outgoing {
 			asks := domain.Levels(b.asks, false, spec, levelCap, p.cfg.Levels)
 			var buy, sell decimal.Decimal
 			if spec.Contract {
-				pos, mid := p.positions[spec.Symbol], midOf(b)
-				buy, sell = domain.ContractRooms(spec, pos, mid, p.cfg.Caps)
+				pos, mid := p.contracts.Positions[spec.Symbol], midOf(b)
+				buy, sell = domain.ContractRooms(spec, pos, mid, contractRoom, p.cfg.Caps)
 				p.exposure.WithLabelValues(spec.Symbol).Set(pos.Mul(mid).InexactFloat64())
 			} else {
 				buy, sell = domain.SpotRooms(spec, p.holdings, prices, p.backed, p.cfg.Caps)

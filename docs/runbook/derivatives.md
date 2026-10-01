@@ -18,9 +18,9 @@
 - **开仓单**（单向模式的普通单、双向模式的 BUY LONG / SELL SHORT）还要：
   - 账户资格 `DERIVATIVES_TRADE`，它同时检查功能开关 `derivatives.trading`；
   - 风险限额：该方向上的持仓 + 同方向活动开仓单 + 本单，按标记价的名义价值不超过杠杆对应的上限（最后一个"最高杠杆 ≥ 本杠杆"的档位的名义价值上限），否则 `DERIV_RISK_LIMIT_EXCEEDED`；
-  - 保证金：按手预留 `价格 × lot / 杠杆` 与 `价格 × lot × taker 费率`（各自向上取整），合计不超过"可用余额减去全仓未实现亏损"（`DERIV_INSUFFICIENT_MARGIN`）。预留经账本冻结（`ORDER_FREEZE`，键 `order:<订单ID>`）；冻结结果不明时订单停在 `PENDING`，恢复循环每 5 秒用同一个键重试。
+  - 保证金：按手预留 `价格 × lot / 杠杆` 与 `价格 × lot × taker 费率`（各自向上取整；卖单的价格取限价与下单时标记价中较高的，因为卖单只会以不低于限价的价格成交，穿价时成交在标记价附近，审查 A5），合计不超过"可用余额减去全仓未实现亏损"（`DERIV_INSUFFICIENT_MARGIN`）。预留经账本冻结（`ORDER_FREEZE`，键 `order:<订单ID>`）；冻结结果不明时订单停在 `PENDING`，恢复循环每 5 秒用同一个键重试。
 - **平仓单**（`reduce_only`，或双向模式的 SELL LONG / BUY SHORT）不预留任何东西、不查资格与最小名义价值，但数量不能超过该仓位还没被其他平仓单占用的部分（`DERIV_REDUCE_ONLY_REJECTED`）。
-- 市价单：以"标记价 ± 价格带"（买单向下、卖单向上取到 tick）为价格的 IOC（默认）或 FOK 限价单交给引擎，预留也按这个价格算。
+- 市价单：以"标记价 ± 价格带"（买单向下、卖单向上取到 tick）为价格的 IOC（默认）或 FOK 限价单交给引擎；买单按这个保护价预留，卖单按标记价预留（保护价在标记价下方 5%，按它预留在 125 倍时只有 0.76%，低于 0.8% 的初始保证金）。两个下单表单算"最大可开"时用同样的价格（`reservePrice`）。
 - 发给引擎的命令（`derivatives.order.commands`）手续费率为 0：合约手续费由合约服务按 USDT 计。订单受理与拒绝（`OrderAccepted`/`OrderRejected`）和引擎的订单事件一起在 `derivatives.order.events` 上。
 - HOUSE 流动性（阶段 4 B4，ADR-0015）：`market.house_liquidity` 对该合约打开且 `market.internal_matching` 关闭时，命令带 `house_only`，订单只和 HOUSE 的参考簿（币安 U 本位合约的盘口）成交，见 [market-maker.md](market-maker.md)。测试服对全部合约打开（用户决定 2026-10-02：所有交易都与 HOUSE 成交，开多开空都是，用户之间不撮合）。
 

@@ -29,13 +29,15 @@ const Valuation = "USDT"
 // Caps are HOUSE's limits, in USDT: what one level offers at most, what a
 // pair's or contract's position may be worth, what all spot positions
 // together may be worth, and the inventory of backed assets kept back
-// (ADR-0013).
+// (ADR-0013); and how many times its contract equity all its contract
+// positions together may be worth.
 type Caps struct {
-	Level    decimal.Decimal
-	Symbol   decimal.Decimal
-	Total    decimal.Decimal
-	Contract decimal.Decimal
-	Safety   decimal.Decimal
+	Level            decimal.Decimal
+	Symbol           decimal.Decimal
+	Total            decimal.Decimal
+	Contract         decimal.Decimal
+	Safety           decimal.Decimal
+	ContractLeverage decimal.Decimal
 }
 
 // Levels turns one side of the reference market's book (best first, in
@@ -133,16 +135,36 @@ func LevelCap(spec Spec, caps Caps, prices map[string]decimal.Decimal) (decimal.
 	return caps.Level.Div(qp), true
 }
 
+// ContractAccount is HOUSE's FUTURES account as its rooms need it: its net
+// position on each contract (long positive), what its positions are worth
+// together at the mark prices, and its equity (wallet balance and
+// unrealized PnL).
+type ContractAccount struct {
+	Positions map[string]decimal.Decimal
+	Exposure  decimal.Decimal
+	Equity    decimal.Decimal
+}
+
+// ContractRoom is how much, in USDT, HOUSE's contract positions together
+// may still grow: up to ContractLeverage times its equity. HOUSE is never
+// liquidated (ADR-0015), so this is what keeps its losses within what it
+// can pay; with no equity left it only reduces positions.
+func ContractRoom(a ContractAccount, caps Caps) decimal.Decimal {
+	return positive(a.Equity.Mul(caps.ContractLeverage).Sub(a.Exposure))
+}
+
 // ContractRooms works out how much of a contract HOUSE may still buy and
 // sell: its net position (long positive) may be worth at most Contract
-// either way. Its margin is its own business: HOUSE is never liquidated
-// (ADR-0015).
-func ContractRooms(spec Spec, position, price decimal.Decimal, caps Caps) (buy, sell decimal.Decimal) {
+// either way, and what grows it beyond zero takes from room, the USDT
+// that all its contract positions may still grow by (ContractRoom).
+func ContractRooms(spec Spec, position, price, room decimal.Decimal, caps Caps) (buy, sell decimal.Decimal) {
 	if !price.IsPositive() {
 		return decimal.Zero, decimal.Zero
 	}
-	limit := caps.Contract.Div(price)
-	return floor(positive(limit.Sub(position)), spec.LotSize), floor(positive(limit.Add(position)), spec.LotSize)
+	limit, grow := caps.Contract.Div(price), room.Div(price)
+	buy = decimal.Min(positive(limit.Sub(position)), positive(position.Neg()).Add(grow))
+	sell = decimal.Min(positive(limit.Add(position)), positive(position).Add(grow))
+	return floor(buy, spec.LotSize), floor(sell, spec.LotSize)
 }
 
 func positive(d decimal.Decimal) decimal.Decimal { return decimal.Max(d, decimal.Zero) }

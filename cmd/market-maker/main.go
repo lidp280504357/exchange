@@ -39,13 +39,15 @@ type settings struct {
 	// (HOUSE_SYMBOL_CAP), all spot positions (HOUSE_TOTAL_CAP), a
 	// contract's position (HOUSE_CONTRACT_CAP), and the backed inventory
 	// kept back (HOUSE_SAFETY); HOUSE_BACKED_ASSETS must be held to be
-	// sold (ADR-0013).
-	LevelCap    string   `koanf:"house_level_cap"`
-	SymbolCap   string   `koanf:"house_symbol_cap"`
-	TotalCap    string   `koanf:"house_total_cap"`
-	ContractCap string   `koanf:"house_contract_cap"`
-	Safety      string   `koanf:"house_safety"`
-	Backed      []string `koanf:"house_backed_assets"`
+	// sold (ADR-0013). All contract positions together may be worth
+	// HOUSE_CONTRACT_LEVERAGE times HOUSE's contract equity.
+	LevelCap         string   `koanf:"house_level_cap"`
+	SymbolCap        string   `koanf:"house_symbol_cap"`
+	TotalCap         string   `koanf:"house_total_cap"`
+	ContractCap      string   `koanf:"house_contract_cap"`
+	Safety           string   `koanf:"house_safety"`
+	ContractLeverage string   `koanf:"house_contract_leverage"`
+	Backed           []string `koanf:"house_backed_assets"`
 	// LedgerAddr is ledger-service's gRPC address (LEDGER_GRPC_ADDR);
 	// INSTRUMENT_SERVICE_URL and DERIVATIVES_SERVICE_URL its REST peers.
 	LedgerAddr     string `koanf:"ledger_grpc_addr"`
@@ -57,7 +59,7 @@ func (s *settings) Validate() error {
 	var errs []error
 	for name, v := range map[string]string{
 		"HOUSE_LEVEL_CAP": s.LevelCap, "HOUSE_SYMBOL_CAP": s.SymbolCap, "HOUSE_TOTAL_CAP": s.TotalCap,
-		"HOUSE_CONTRACT_CAP": s.ContractCap, "HOUSE_SAFETY": s.Safety,
+		"HOUSE_CONTRACT_CAP": s.ContractCap, "HOUSE_SAFETY": s.Safety, "HOUSE_CONTRACT_LEVERAGE": s.ContractLeverage,
 	} {
 		if d, err := decimal.NewFromString(v); err != nil || d.IsNegative() {
 			errs = append(errs, errors.New(name+" must be a decimal not below zero"))
@@ -75,7 +77,7 @@ func setup(ctx context.Context, a *app.App) error {
 	cfg := settings{
 		Postgres: pg.DefaultConfig(), LevelCap: def.Caps.Level.String(), SymbolCap: def.Caps.Symbol.String(),
 		TotalCap: def.Caps.Total.String(), ContractCap: def.Caps.Contract.String(), Safety: def.Caps.Safety.String(),
-		Backed: def.Backed, LedgerAddr: "localhost:9185", InstrumentURL: "http://localhost:8084",
+		ContractLeverage: def.Caps.ContractLeverage.String(), Backed: def.Backed, LedgerAddr: "localhost:9185", InstrumentURL: "http://localhost:8084",
 		DerivativesURL: "http://localhost:8095",
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
@@ -102,8 +104,11 @@ func setup(ctx context.Context, a *app.App) error {
 	conf.Caps = domain.Caps{
 		Level: decimal.RequireFromString(cfg.LevelCap), Symbol: decimal.RequireFromString(cfg.SymbolCap),
 		Total: decimal.RequireFromString(cfg.TotalCap), Contract: decimal.RequireFromString(cfg.ContractCap),
-		Safety: decimal.RequireFromString(cfg.Safety),
+		Safety: decimal.RequireFromString(cfg.Safety), ContractLeverage: decimal.RequireFromString(cfg.ContractLeverage),
 	}
+	a.Logger().Info("house liquidity caps", "level", conf.Caps.Level.String(), "symbol", conf.Caps.Symbol.String(),
+		"total", conf.Caps.Total.String(), "contract", conf.Caps.Contract.String(), "safety", conf.Caps.Safety.String(),
+		"contract_leverage", conf.Caps.ContractLeverage.String(), "backed", conf.Backed)
 	client := &api.Client{
 		Instrument: cfg.InstrumentURL, Derivatives: cfg.DerivativesURL, HouseUser: cfg.HouseUser, HTTP: &http.Client{Timeout: 5 * time.Second},
 	}

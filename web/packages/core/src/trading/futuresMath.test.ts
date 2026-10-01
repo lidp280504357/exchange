@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  checkRiskLimit, closeableQuantity, maxNotional, maxOpenQuantity, openCost, openLimit, riskRoom, roe, sideExposure, unrealizedPnl,
+  checkRiskLimit, closeableQuantity, maxNotional, maxOpenQuantity, openCost, openLimit, reservePrice, riskRoom, roe, sideExposure, unrealizedPnl,
   type ExposedOrder, type ExposedPosition, type RiskTier,
 } from "./futuresMath";
 
@@ -89,5 +89,21 @@ describe("risk limits", () => {
     expect(openLimit("3.51", "11.177")).toBe("3.51");
     expect(checkRiskLimit(ladder, 30, "84196", "0", "1")).toEqual({ ok: true, cap: "1000000", notional: "84196" });
     expect(checkRiskLimit(ladder, 125, "84196", "0", "1")).toEqual({ ok: false, cap: "50000", notional: "84196" });
+  });
+});
+
+describe("reservePrice", () => {
+  it("is where derivatives-service reserves an opening order", () => {
+    // A buy at its price; a market buy at the mark plus the band, down to the tick.
+    expect(reservePrice("BUY", "limit", "59000", "60000.07", "0.05", "0.1")).toBe("59000");
+    expect(reservePrice("BUY", "market", "", "60000.07", "0.05", "0.1")).toBe("63000");
+    // A sell at the higher of its price and the mark; a market sell at the mark.
+    expect(reservePrice("SELL", "limit", "61000", "60000.07", "0.05", "0.1")).toBe("61000");
+    expect(reservePrice("SELL", "limit", "59000", "60000.07", "0.05", "0.1")).toBe("60000.07");
+    expect(reservePrice("SELL", "market", "", "60000.07", "0.05", "0.1")).toBe("60000.07");
+    // Without a mark a limit order still has its price; a market one has nothing.
+    expect(reservePrice("SELL", "limit", "59000", "", "0.05", "0.1")).toBe("59000");
+    expect(reservePrice("BUY", "market", "", "", "0.05", "0.1")).toBe("");
+    expect(reservePrice("SELL", "limit", "", "60000", "0.05", "0.1")).toBe("");
   });
 });

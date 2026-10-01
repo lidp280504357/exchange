@@ -160,7 +160,7 @@ services:
       INSTRUMENT_GRPC_ADDR: instrument-service:9184
       USER_GRPC_ADDR: user-service:9182
       MARKET_DATA_SERVICE_URL: http://market-data-service:8090
-      # MARKET_MAKER_USER_IDS (zero fees) comes from apps.env.
+      # MARKET_MAKER_USER_IDS (zero fees: the simulated market's bots) comes from apps.env.
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}
@@ -182,7 +182,7 @@ services:
       INSTRUMENT_GRPC_ADDR: instrument-service:9184
       USER_GRPC_ADDR: user-service:9182
       MARKET_DATA_SERVICE_URL: http://market-data-service:8090
-      # MARKET_MAKER_USER_IDS (zero fees) comes from apps.env.
+      # MARKET_MAKER_USER_IDS (zero fees: the simulated market's bots) comes from apps.env.
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}

@@ -33,6 +33,25 @@ export function maxOpenQuantity(available: string, price: string, leverage: numb
   return normalize(quantize(q, lotSize, "down"));
 }
 
+/**
+ * reservePrice is the price an opening order reserves its margin and fee
+ * at, as derivatives-service does: a buy at its price, a market buy at its
+ * protection price (the mark plus the price band, down to the tick); a
+ * sell at the higher of its price and the mark, since it fills at its
+ * price or above (a market sell at the mark). "" without the prices it
+ * needs.
+ */
+export function reservePrice(side: "BUY" | "SELL", type: "limit" | "market", price: string, mark: string, band: string, tick: string): string {
+  if (side === "BUY") {
+    if (type === "limit") return ok(price) ? price : "";
+    if (!ok(mark) || !isDecimal(band) || !ok(tick)) return "";
+    return normalize(quantize(mul(mark, add("1", band)), tick, "down"));
+  }
+  if (type === "market") return ok(mark) ? mark : "";
+  if (!ok(price)) return "";
+  return ok(mark) && gt(mark, price) ? mark : price;
+}
+
 /** closeableQuantity is how much of a position (signed quantity) a close order may take. */
 export function closeableQuantity(positionQuantity: string | undefined): string {
   if (!positionQuantity || !isDecimal(positionQuantity)) return "0";

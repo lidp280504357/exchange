@@ -65,6 +65,7 @@
   - 需要时写快照。每个分区最多 `MATCHING_SNAPSHOT_EVERY`（默认 1000）条后存一次该分区全部订单簿与参考簿（`matching.snapshots`，带覆盖到的 `seq` 与两个主题各自应用到的偏移）。
 - WAL 已有的（来源, 偏移）不再处理，所以 Kafka 重投没有影响。格式错误的命令记错误日志后跳过，不写 WAL，也不会卡住分区。
 - 启动时，以及写库失败后下一批处理前：从各分区最新快照恢复订单簿，再按 `seq` 重放快照之后的 WAL，不重复发事件。这样内存状态不会领先于已落库的状态。
+- 启动时（包括备机接管）恢复之后、消费命令之前，先把参考簿主题从各分区已应用的偏移读到当时的末尾（不经消费组，`kafka.ReadToEnd`），照常写 WAL；读一轮超过 1 秒就再读一轮，最多 5 轮。否则停机期间排队的命令可能先于这段时间的参考簿被处理，只看到比自己早 5 秒以上的参考簿而和 HOUSE 成交不了（审查 A3）。之后消费组重投这些参考簿时按偏移跳过。日志 `reference books caught up` 记读了多少份、用了多久；参考簿只保留 1 小时，停机再久也最多读 1 小时的量。
 - 快照已覆盖、且早于 `MATCHING_WAL_RETENTION` 的 WAL 每小时清理。默认 24 小时；参考簿每个交易对每秒最多 4 份（2026-10-01 实测 50 个交易对约每秒 106 条、每条约 1 KB，每小时约 400 MB），测试服两个引擎都设为 2 小时（`docker-compose.apps.yml`），`matching.wal` 稳定在 1.5 GB 以内。
 - 主备：进程启动时先取数据库租约（会话级咨询锁 `lease:matching-engine`）才开始消费。第二个实例每秒试一次锁，停在"waiting for the engine lease"。持有者每 5 秒 ping 一次租约连接，失败或超过 5 秒即视为丢失并退出，由容器重启后重新竞争。测试环境只跑一个实例。
 - 首次部署时引擎从头消费 `order.commands`，任务 2 以来的全部下单与撤单都会重放一遍（当时还没撤掉的订单会互相成交）。那时的命令不带资产与 lot：资产按交易对代码 `BASE-QUOTE` 拆出，lot 退回基础资产的最小单位。
@@ -79,14 +80,14 @@ SELECT pg_size_pretty(pg_total_relation_size('matching.wal'));
 ```
 
 - 指标：`matching_commands_total{type}`（PlaceOrder、CancelOrder、ReferenceBookUpdate、invalid）、`matching_trades_total`、`kafka_consumer_lag{group="matching-engine"}`、`outbox_pending{schema="matching"}`。
-- 日志：`matching engine recovered`（恢复时的快照数、重放条数、订单簿数）、`invalid command skipped`。
+- 日志：`matching engine recovered`（恢复时的快照数、重放条数、订单簿数）、`reference books caught up`（启动时补读的参考簿份数与用时）、`invalid command skipped`。
 - ClickHouse：`SELECT occurred_at, payload FROM events WHERE topic = 'trade.events' ORDER BY occurred_at DESC LIMIT 20`。
 
 ## 故障与处理
 
 | 情况 | 表现 | 处理 |
 |---|---|---|
-| 引擎重启 | 恢复期间命令在 Kafka 排队 | 自动：快照 + WAL 重建后继续消费 |
+| 引擎重启 | 恢复期间命令在 Kafka 排队 | 自动：快照 + WAL 重建，追上参考簿后继续消费 |
 | PostgreSQL 不可用 | 批写入失败，消费者退避重试，积压上升 | 恢复后自动重建并继续；事件只发一次 |
 | Redpanda 不可用 | 收不到命令；outbox 待发上升 | 恢复后自动继续 |
 | 快照损坏或需要从头重放 | — | 停引擎，删除 `matching.snapshots` 行，重启会从 WAL 头重放（WAL 需完整覆盖该分区；清理过的部分无法重放） |

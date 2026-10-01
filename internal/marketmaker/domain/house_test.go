@@ -117,8 +117,42 @@ func TestLevelCapIsInTheQuoteAsset(t *testing.T) {
 func TestContractRoomsCapTheNetPosition(t *testing.T) {
 	perp := Spec{Symbol: "BTC-USDT-PERP", Base: "BTC", Quote: "USDT", TickSize: d("0.1"), LotSize: d("0.001"), Contract: true}
 	caps := Caps{Contract: d("100000")}
-	buy, sell := ContractRooms(perp, d("-0.5"), d("50000"), caps) // HOUSE short 0.5
+	buy, sell := ContractRooms(perp, d("-0.5"), d("50000"), d("1000000"), caps) // HOUSE short 0.5
 	if buy.String() != "2.5" || sell.String() != "1.5" {
 		t.Fatalf("buy %s sell %s", buy, sell)
+	}
+}
+
+// HOUSE is never liquidated, so its equity bounds its contract positions
+// (review A4): together they may be worth ContractLeverage times it, and
+// past that, or with no equity, HOUSE only reduces them.
+func TestContractRoomsKeepWithinHouseEquity(t *testing.T) {
+	perp := Spec{Symbol: "BTC-USDT-PERP", Base: "BTC", Quote: "USDT", TickSize: d("0.1"), LotSize: d("0.001"), Contract: true}
+	caps := Caps{Contract: d("1000000"), ContractLeverage: d("10")}
+	acct := ContractAccount{Equity: d("20000"), Exposure: d("175000")} // 25,000 of room
+	room := ContractRoom(acct, caps)
+	if !room.Equal(d("25000")) {
+		t.Fatalf("room %s", room)
+	}
+	// Short 0.5 at 50,000: buying closes it, then grows a long by 0.5 more.
+	buy, sell := ContractRooms(perp, d("-0.5"), d("50000"), room, caps)
+	if buy.String() != "1" || sell.String() != "0.5" {
+		t.Fatalf("buy %s sell %s", buy, sell)
+	}
+	// Over its leverage after a loss: it only reduces.
+	acct.Equity = d("15000")
+	room = ContractRoom(acct, caps)
+	buy, sell = ContractRooms(perp, d("-0.5"), d("50000"), room, caps)
+	if !room.IsZero() || buy.String() != "0.5" || !sell.IsZero() {
+		t.Fatalf("over its leverage: room %s buy %s sell %s", room, buy, sell)
+	}
+	// No equity at all: the same.
+	acct.Equity = d("-100")
+	if room = ContractRoom(acct, caps); !room.IsZero() {
+		t.Fatalf("no equity: room %s", room)
+	}
+	// A zero ContractLeverage leaves no room.
+	if room = ContractRoom(ContractAccount{Equity: d("1000000")}, Caps{}); !room.IsZero() {
+		t.Fatalf("no leverage: room %s", room)
 	}
 }

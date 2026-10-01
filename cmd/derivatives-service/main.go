@@ -47,7 +47,9 @@ type settings struct {
 	// MarketURL is market-data-service, for the settled funding rates
 	// (MARKET_DATA_SERVICE_URL).
 	MarketURL string `koanf:"market_data_service_url"`
-	// MarketMakerUsers trade without fees (MARKET_MAKER_USER_IDS, §11.10).
+	// MarketMakerUsers are the accounts whose orders pay no fees
+	// (MARKET_MAKER_USER_IDS): the simulated market's bots (ASTRA design
+	// §4). HOUSE needs no entry: its side of a trade has no order.
 	MarketMakerUsers []string `koanf:"market_maker_user_ids"`
 	// HouseUser is HOUSE's account on the contracts (HOUSE_USER_ID,
 	// ADR-0015): its side of a trade against the reference liquidity.
@@ -103,6 +105,7 @@ func setup(ctx context.Context, a *app.App) error {
 	}
 	store := postgres.NewStore(db, events)
 	book := marks.New()
+	a.Logger().Info("fee-free accounts", "users", cfg.MarketMakerUsers)
 	svc := &application.Service{
 		Store:       store,
 		Ledger:      ledger.New(ledgerv1.NewLedgerServiceClient(ledgerConn)),

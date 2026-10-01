@@ -150,6 +150,22 @@ groups:
           summary: "HOUSE can no longer {{ $labels.side }} on {{ $labels.symbol }}: its inventory or a cap is used up"
           runbook: docs/runbook/market-maker.md
 
+      - alert: HouseContractOverLeveraged
+        expr: max by (job) (market_house_contract_exposure_usdt) > max by (job) (market_house_contract_equity_usdt * market_house_contract_max_leverage)
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "HOUSE's contract positions are worth {{ $value }} USDT, more than HOUSE_CONTRACT_LEVERAGE times its contract equity: it only reduces them until the equity is topped up"
+          runbook: docs/runbook/market-maker.md
+
+      - alert: HouseContractEquityGone
+        expr: max by (job) (market_house_contract_equity_usdt) <= 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "HOUSE's contract equity is {{ $value }} USDT: it is never liquidated, so its losses now come out of the insurance fund"
+          runbook: docs/runbook/market-maker.md
+
       - alert: HousePublishFailing
         expr: sum by (job) (increase(market_house_publish_failures_total[5m])) > 0
         labels: {severity: warning}

@@ -33,8 +33,8 @@ type Service struct {
 	// Features decides whether orders of a pair trade only with HOUSE
 	// (ADR-0015); nil means users always trade with each other.
 	Features ports.Features
-	// FeeFree are the market maker's accounts: their orders pay no fees
-	// (§11.10).
+	// FeeFree are the accounts whose orders pay no fees: the simulated
+	// market's bots (ASTRA design §4).
 	FeeFree []string
 	Log     *slog.Logger
 	Now     func() time.Time

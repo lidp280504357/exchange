@@ -180,11 +180,17 @@ func (o *Order) checkMarket(pair Pair, anchor decimal.Decimal) error {
 		if anchor.Mul(o.Quantity).LessThan(pair.MinNotional) {
 			return ErrMinNotional.WithDetail("min_notional", pair.MinNotional.String())
 		}
-		// The lowest price a sell may accept, on the tick grid.
-		o.ProtectionPrice = ceilTo(anchor.Mul(decimal.NewFromInt(1).Sub(pair.PriceBand)), pair.TickSize)
+		// The lowest price a sell may accept, on the tick grid: the band
+		// below the anchor, never under half of it (a band of 100%, as on
+		// ETH-BTC, would leave the sell no protection at all).
+		o.ProtectionPrice = ceilTo(anchor.Mul(decimal.Max(decimal.NewFromInt(1).Sub(pair.PriceBand), minSellProtection)), pair.TickSize)
 	}
 	return nil
 }
+
+// minSellProtection is the least share of the anchor a market sell
+// accepts, whatever the pair's price band.
+var minSellProtection = decimal.RequireFromString("0.5")
 
 func checkQuantity(q decimal.Decimal, pair Pair) error {
 	if !q.IsPositive() {

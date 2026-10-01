@@ -5,8 +5,6 @@ package ports
 import (
 	"context"
 
-	"github.com/shopspring/decimal"
-
 	"github.com/lidp280504357/exchange/internal/marketmaker/domain"
 	"github.com/lidp280504357/exchange/internal/platform/flags"
 )
@@ -22,8 +20,10 @@ type House interface {
 	// Holdings returns its spot inventory: the available balance of each
 	// asset's MARKET_MAKER system account.
 	Holdings(ctx context.Context) (domain.Holdings, error)
-	// Positions returns its net position on each contract, long positive.
-	Positions(ctx context.Context) (map[string]decimal.Decimal, error)
+	// Contracts returns its FUTURES account: its net position on each
+	// contract, what its positions are worth at the mark prices and its
+	// equity.
+	Contracts(ctx context.Context) (domain.ContractAccount, error)
 }
 
 // Flags answers feature-flag checks.
