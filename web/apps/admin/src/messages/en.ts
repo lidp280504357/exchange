@@ -156,7 +156,7 @@ export const en = {
     },
     house: {
       title: "HOUSE virtual liquidity", inventory: "Inventory value", backed: "Withdrawable assets", internal: "Internal assets (may go below 0)",
-      pnl: "Trading result at last prices", assets: "Inventory", pairs: "Per pair", contracts: "Contract positions", balance: "Balance",
+      pnl: "Trading result at last prices", assets: "Inventory", pairs: "Per pair", contracts: "Net position per contract", net: "Net position", notional: "Notional (USDT)", entry: "Entry price", balance: "Balance",
       value: "Value (USDT)", trades: "Trades", bought: "Bought", sold: "Sold", netBase: "Net held", netQuote: "Net received (USDT)",
       lastAt: "Last trade", noContracts: "No contract positions", unrealized: "Unrealized PnL",
       help: "HOUSE trades with users at Binance's book (ADR-0015). Its inventory is the MARKET_MAKER system account; internal assets go below zero once sold; result = net held × last price + net received.",

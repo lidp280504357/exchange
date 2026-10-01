@@ -415,7 +415,8 @@ function BoardFiller({ rows, empty }: { rows: number; empty: boolean }) {
 // The sections below do not show prices: memo keeps the per-second ticker renders away from them.
 const Why = memo(function Why({ rows }: { rows: MarketRow[] }) {
   const { t } = useTranslation();
-  const leverage = rows.reduce((m, r) => Math.max(m, r.maxLeverage), 0) || 50;
+  // The contracts' own leverage (instrument-service); 0 until they load.
+  const leverage = rows.reduce((m, r) => Math.max(m, r.maxLeverage), 0);
   const tiles = [
     { id: "wallet", icon: <Network size={22} /> },
     { id: "futures", icon: <Layers size={22} /> },
@@ -441,7 +442,7 @@ const Why = memo(function Why({ rows }: { rows: MarketRow[] }) {
             </span>
             <span className="grid size-11 place-items-center rounded-2 bg-brand-soft text-brand">{tile.icon}</span>
             <h3 className="mt-4 text-md font-semibold text-fg-1">{t(`pcMarkets.home.why.${tile.id}.title`)}</h3>
-            <p className="mt-2 text-sm leading-relaxed text-fg-3">{t(`pcMarkets.home.why.${tile.id}.desc`, { leverage })}</p>
+            <p className="mt-2 text-sm leading-relaxed text-fg-3">{t(`pcMarkets.home.why.${tile.id}.${tile.id === "futures" && leverage === 0 ? "descAny" : "desc"}`, { leverage })}</p>
           </motion.article>
         ))}
       </div>

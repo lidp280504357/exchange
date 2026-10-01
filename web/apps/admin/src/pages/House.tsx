@@ -1,4 +1,4 @@
-import { errorText } from "@exchange/core";
+import { dec, errorText } from "@exchange/core";
 import { adminApi, adminData, type AdminSchemas } from "@exchange/core/api/admin";
 import { Badge, DataTable, ErrorState, Stat, type DataColumnMeta, type ColumnDef } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
@@ -12,18 +12,45 @@ type House = AdminSchemas["House"];
 type Asset = House["assets"][number];
 type Pair = House["pairs"][number];
 type Position = { symbol?: string; position_side?: string; quantity?: string; entry_price?: string; mark_price?: string | null; unrealized_pnl?: string | null; margin?: string; leverage?: number };
+type ContractState = AdminSchemas["ContractState"];
+
+/** HOUSE's net position on one contract: 0 when it is flat there. */
+type NetPosition = { symbol: string; quantity: string; notional: string | null; entry: string | null; mark: string | null; upnl: string | null };
+
+/** netPositions lists every contract with HOUSE's net position (its positions summed; one-way mode has at most one). */
+function netPositions(contracts: readonly ContractState[], positions: readonly Position[]): NetPosition[] {
+  return contracts.map((c) => {
+    const own = positions.filter((p) => p.symbol === c.symbol);
+    const quantity = own.reduce((sum, p) => dec.add(sum, p.quantity ?? "0"), "0");
+    const mark = own[0]?.mark_price ?? c.mark_price ?? null;
+    return {
+      symbol: c.symbol,
+      quantity,
+      notional: mark ? dec.mul(quantity, mark) : null,
+      entry: own.length === 1 ? (own[0]?.entry_price ?? null) : null,
+      mark,
+      upnl: own.length > 0 ? own.reduce((sum, p) => dec.add(sum, p.unrealized_pnl ?? "0"), "0") : null,
+    };
+  });
+}
 
 const right: DataColumnMeta = { align: "right" };
 
 /**
  * HOUSE (ADR-0013, ADR-0015): its inventory valued at the last prices
  * (withdrawable assets first; internal ones go below zero once sold), what
- * it traded per pair with the result at those prices, and its contract
- * positions; refreshed every 30 seconds.
+ * it traded per pair with the result at those prices, and its net position
+ * on every contract (0 where it is flat); refreshed every 30 seconds.
  */
 export default function HousePage() {
   const { t } = useTranslation();
   const q = useQuery({ queryKey: ["admin", "house"], queryFn: async () => adminData(await adminApi.GET("/admin/v1/house")), refetchInterval: 30_000 });
+  // The contracts page's query: every contract, so flat ones show too.
+  const contractsQ = useQuery({
+    queryKey: ["admin", "derivatives", "contracts"],
+    queryFn: async () => adminData(await adminApi.GET("/admin/v1/derivatives/contracts")).contracts,
+    refetchInterval: 30_000,
+  });
   const assetColumns = useMemo<ColumnDef<Asset, unknown>[]>(
     () => [
       {
@@ -56,19 +83,20 @@ export default function HousePage() {
     ],
     [t],
   );
-  const positionColumns = useMemo<ColumnDef<Position, unknown>[]>(
+  const positionColumns = useMemo<ColumnDef<NetPosition, unknown>[]>(
     () => [
       { accessorKey: "symbol", header: t("admin.common.symbol") },
-      { id: "qty", header: t("admin.common.quantity"), meta: right, cell: ({ row }) => <Num value={row.original.quantity} signed /> },
-      { id: "entry", header: t("admin.common.price"), meta: right, cell: ({ row }) => <Num value={row.original.entry_price} /> },
-      { id: "mark", header: t("admin.derivatives.mark"), meta: right, cell: ({ row }) => <Num value={row.original.mark_price} /> },
-      { id: "upnl", header: t("admin.house.unrealized"), meta: right, cell: ({ row }) => <Num value={row.original.unrealized_pnl} decimals={2} signed /> },
+      { id: "qty", header: t("admin.house.net"), meta: right, cell: ({ row }) => <Num value={row.original.quantity} signed /> },
+      { id: "notional", header: t("admin.house.notional"), meta: right, cell: ({ row }) => <Num value={row.original.notional} decimals={2} signed /> },
+      { id: "entry", header: t("admin.house.entry"), meta: right, cell: ({ row }) => <Num value={row.original.entry} /> },
+      { id: "mark", header: t("admin.derivatives.mark"), meta: right, cell: ({ row }) => <Num value={row.original.mark} /> },
+      { id: "upnl", header: t("admin.house.unrealized"), meta: right, cell: ({ row }) => <Num value={row.original.upnl} decimals={2} signed /> },
     ],
     [t],
   );
   if (q.isError) return <ErrorState message={errorText(q.error)} onRetry={() => void q.refetch()} />;
   const h = q.data;
-  const contracts = (h?.contracts ?? []) as Position[];
+  const contracts = netPositions(contractsQ.data ?? [], (h?.contracts ?? []) as Position[]);
   return (
     <Page title={t("admin.house.title")} help={t("admin.house.help")}>
       {h && h.partial.length > 0 && <div className="rounded-2 border border-warn px-4 py-2 text-sm text-fg-2">{t("admin.partial", { parts: h.partial.join(", ") })}</div>}
@@ -96,8 +124,8 @@ export default function HousePage() {
         <DataTable
           columns={positionColumns}
           data={contracts}
-          getRowId={(p) => `${p.symbol}:${p.position_side}`}
-          loading={q.isPending}
+          getRowId={(p) => p.symbol}
+          loading={q.isPending || contractsQ.isPending}
           density="compact"
           empty={<p className="py-4 text-center text-sm text-fg-3">{t("admin.house.noContracts")}</p>}
         />

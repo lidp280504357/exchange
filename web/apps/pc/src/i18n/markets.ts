@@ -32,7 +32,11 @@ export default {
         whyHint: "从行情到下单，从充值到合约，每一步都清晰可见",
         why: {
           wallet: { title: "多链充提", desc: "按网络充值与提现，页面列出确认数、最小额与预计到账时间；测试环境目前开放 Sepolia 测试网 ETH。" },
-          futures: { title: "永续合约", desc: "BTC、ETH 的 USDT 永续合约，最高 {{leverage}} 倍杠杆，逐仓与全仓、止盈止损与只减仓。" },
+          futures: {
+            title: "永续合约",
+            desc: "BTC、ETH 的 USDT 永续合约，最高 {{leverage}} 倍杠杆，逐仓与全仓、止盈止损与只减仓。",
+            descAny: "BTC、ETH 的 USDT 永续合约，逐仓与全仓、止盈止损与只减仓。",
+          },
           liquidity: { title: "深度流动性", desc: "价格、K 线与盘口实时跟随主流市场，一条连接推送全站行情，切换页面不断线。" },
           security: { title: "安全", desc: "余额只由账本分录改变，私钥在独立的签名服务；提现需要安全验证、地址簿冷却与风控审核。" },
         },
@@ -162,7 +166,11 @@ export default {
             title: "Deposits by network",
             desc: "Deposit and withdraw per network, with confirmations, minimums and usual times shown up front. The test environment accepts Sepolia test ETH.",
           },
-          futures: { title: "Perpetual futures", desc: "USDT perpetuals on BTC and ETH, up to {{leverage}}x leverage, isolated or cross margin, take profit, stop loss and reduce only." },
+          futures: {
+            title: "Perpetual futures",
+            desc: "USDT perpetuals on BTC and ETH, up to {{leverage}}x leverage, isolated or cross margin, take profit, stop loss and reduce only.",
+            descAny: "USDT perpetuals on BTC and ETH, isolated or cross margin, take profit, stop loss and reduce only.",
+          },
           liquidity: { title: "Deep liquidity", desc: "Prices, candles and order books follow the major markets live over one connection that survives page changes." },
           security: {
             title: "Security",

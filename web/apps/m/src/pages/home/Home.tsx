@@ -546,7 +546,7 @@ const Why = memo(function Why({ leverage }: { leverage: number }) {
           <article key={w.id} className="min-w-0 rounded-3 border border-line-1 bg-bg-1 p-4">
             <span className="grid size-9 place-items-center rounded-2 bg-brand-soft text-brand">{w.icon}</span>
             <h3 className="mt-3 text-sm font-semibold text-fg-1">{t(`mMarkets.home.why.${w.id}.title`)}</h3>
-            <p className="mt-1 text-xs leading-relaxed text-fg-3">{t(`mMarkets.home.why.${w.id}.desc`, { leverage })}</p>
+            <p className="mt-1 text-xs leading-relaxed text-fg-3">{t(`mMarkets.home.why.${w.id}.${w.id === "futures" && leverage === 0 ? "descAny" : "desc"}`, { leverage })}</p>
           </article>
         ))}
       </div>

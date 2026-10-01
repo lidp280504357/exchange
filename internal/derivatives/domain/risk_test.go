@@ -93,3 +93,51 @@ func TestConditionalOrders(t *testing.T) {
 		t.Fatalf("no position: %v", err)
 	}
 }
+
+// The deployed ladder since 2026-10-01 (deploy/instruments/test.json):
+// 125x up to 50,000 at 0.4% maintenance, down to 2x above 50,000,000.
+func TestTheLadderAt125x(t *testing.T) {
+	c := btcPerp
+	c.Tiers = []RiskTier{
+		{MaxNotional: d("50000"), MaxLeverage: 125, MMR: d("0.004")},
+		{MaxNotional: d("250000"), MaxLeverage: 100, MMR: d("0.005")},
+		{MaxNotional: d("1000000"), MaxLeverage: 50, MMR: d("0.01")},
+		{MaxNotional: d("5000000"), MaxLeverage: 20, MMR: d("0.025")},
+		{MaxNotional: d("20000000"), MaxLeverage: 10, MMR: d("0.05")},
+		{MaxNotional: d("50000000"), MaxLeverage: 5, MMR: d("0.1")},
+		{MaxNotional: d("100000000"), MaxLeverage: 2, MMR: d("0.125")},
+	}
+	if c.MaxLeverage() != 125 || !c.MaxNotional(125).Equal(d("50000")) || !c.MaxNotional(100).Equal(d("250000")) || !c.MaxNotional(2).Equal(d("100000000")) {
+		t.Fatalf("leverage %d, caps %s %s %s", c.MaxLeverage(), c.MaxNotional(125), c.MaxNotional(100), c.MaxNotional(2))
+	}
+	if !c.MMR(d("60000")).Equal(d("0.005")) || !c.MMR(d("200000000")).Equal(d("0.125")) {
+		t.Fatalf("mmr %s %s", c.MMR(d("60000")), c.MMR(d("200000000")))
+	}
+	// An isolated long of 0.5 at 84000 at 125x: 336 of margin against 0.4%
+	// maintenance leaves 0.4% of room: liquidation near 83662.65.
+	long := Position{
+		UserID: "u1", Symbol: c.Symbol, Side: SideBoth, Qty: d("0.5"), EntryCost: d("42000"), Margin: d("336"),
+		MarginMode: Isolated, Leverage: 125,
+	}
+	if got := long.LiquidationPrice(c); !got.Equal(d("83662.65060241")) {
+		t.Fatalf("liquidation price %s", got)
+	}
+	for _, s := range []struct {
+		mark string
+		want MarginState
+	}{
+		{"84000", MarginHealthy},
+		{"83700", MarginWarning},   // balance 186 <= 1.2 x 167.4
+		{"83660", MarginLiquidate}, // 166 <= 167.32
+	} {
+		mark := d(s.mark)
+		if got := State(long.MarginBalance(mark), long.MaintenanceMargin(c, mark)); got != s.want {
+			t.Errorf("at %s: %v, want %v", s.mark, got, s.want)
+		}
+	}
+	// Bankruptcy at (42000 − 336) / 0.5 = 83328, 0.4% below the entry:
+	// the liquidation sell still goes 0.5% under it.
+	if o := LiquidationOrder("l1", c, long, long.BankruptcyPrice(), time.Now()); o.Side != Sell || !o.Price.Equal(d("82911.3")) || !o.ReduceOnly {
+		t.Fatalf("liquidation order %+v", o)
+	}
+}

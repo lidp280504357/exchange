@@ -76,6 +76,9 @@ commands:
                               inventory (--house), against ADJUSTMENT
                               (needs ledger.manual_adjustment; audited)
   ledger balances <user_id>   a user's accounts
+  ledger house-margin --amount X --reason TEXT [--key K]
+                              add USDT to HOUSE's futures account: an audited credit to its SPOT,
+                              then a transfer to FUTURES (in an app container; needs ledger.manual_adjustment)
   ledger reconcile            check the ledger invariants now
   ledger trades [--failed] [--limit N]
                               settled trades, newest first (--failed: the ones parked by a refusal)

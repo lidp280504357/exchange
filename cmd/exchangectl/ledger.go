@@ -114,6 +114,8 @@ func ledgerWith(ctx context.Context, dbs ledgerDBs, args []string, out io.Writer
 		return ledgerSystem(ctx, svc, asset, out)
 	case "insurance-fund":
 		return ledgerInsuranceFund(ctx, svc, args[1:], out)
+	case "house-margin":
+		return ledgerHouseMargin(ctx, svc, args[1:], out)
 	default:
 		return fmt.Errorf("unknown ledger command %q", args[0])
 	}
@@ -155,6 +157,69 @@ func ledgerAdjust(ctx context.Context, svc *application.Service, args []string, 
 		return err
 	}
 	fmt.Fprintf(out, "journal %s (key %s, replayed %v)\n", res.JournalID, *key, res.Replayed)
+	return nil
+}
+
+// houseOnly lets the operator move HOUSE's funds between its accounts:
+// HOUSE is a system user (HOUSE_USER_ID) that cannot sign in.
+type houseOnly string
+
+func (h houseOnly) Check(_ context.Context, userID, _ string) (bool, string, error) {
+	if userID != string(h) {
+		return false, "OPERATOR_TRANSFER_HOUSE_ONLY", nil
+	}
+	return true, "", nil
+}
+
+// ledgerHouseMargin adds USDT to HOUSE's futures account (ADR-0015): on the
+// contracts HOUSE is the user HOUSE_USER_ID, whose margin and losses come
+// out of its FUTURES account. An audited adjustment credits its SPOT
+// account, then the ledger's own transfer moves the amount to FUTURES;
+// both are idempotent under the key. Run it in an app container (it reads
+// HOUSE_USER_ID from apps.env).
+func ledgerHouseMargin(ctx context.Context, svc *application.Service, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("ledger house-margin", flag.ContinueOnError)
+	fs.SetOutput(out)
+	amount := fs.String("amount", "", "USDT to add to HOUSE's futures account")
+	reason := fs.String("reason", "", "why (required, goes to the audit log)")
+	key := fs.String("key", "", "idempotency key; repeat it to retry safely (default: a new one)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	house := strings.TrimSpace(os.Getenv("HOUSE_USER_ID"))
+	if house == "" {
+		return errors.New("HOUSE_USER_ID is not set; run this in an app container")
+	}
+	if *amount == "" || *reason == "" {
+		fs.Usage()
+		return errors.New("--amount and --reason are required")
+	}
+	if !svc.Flags.Enabled(flags.KeyManualAdjustment, flags.Subject{UserID: house}) {
+		return fmt.Errorf("manual adjustments are off; turn on %s with exchangectl flags set", flags.KeyManualAdjustment)
+	}
+	d, err := decimal.NewFromString(*amount)
+	if err != nil || !d.IsPositive() {
+		return errors.New("--amount must be a positive decimal")
+	}
+	if *key == "" {
+		*key = uuid.NewString()
+	}
+	res, err := svc.Adjust(ctx, *key+":credit", house, "USDT", d, actor(), *reason)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "credited HOUSE's SPOT: journal %s (replayed %v)\n", res.JournalID, res.Replayed)
+	svc.Eligibility = houseOnly(house)
+	t, err := svc.Transfer(ctx, application.TransferInput{
+		UserID: house, IdemKey: *key + ":move", Asset: "USDT", Amount: d, From: domain.AccountSpot, To: domain.AccountFutures,
+	})
+	if err != nil {
+		return err
+	}
+	if t.Status != domain.TransferCompleted {
+		return fmt.Errorf("the move to FUTURES did not complete: %s %s", t.Status, t.FailureReason)
+	}
+	fmt.Fprintf(out, "moved to HOUSE's FUTURES: transfer %s\n", t.ID)
 	return nil
 }
 

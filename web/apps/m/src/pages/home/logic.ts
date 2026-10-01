@@ -75,7 +75,7 @@ export function boardPath(board: Board): string {
   return `${routes.markets}?sort=change&dir=${board === "gainers" ? "desc" : "asc"}`;
 }
 
-/** maxLeverage is the largest contract leverage among the rows, or the fallback without contracts. */
-export function maxLeverage(rows: readonly MarketRow[], fallback = 50): number {
-  return rows.reduce((m, r) => Math.max(m, r.maxLeverage), 0) || fallback;
+/** maxLeverage is the largest contract leverage among the rows (instrument-service's risk tiers), 0 without contracts. */
+export function maxLeverage(rows: readonly MarketRow[]): number {
+  return rows.reduce((m, r) => Math.max(m, r.maxLeverage), 0);
 }

@@ -149,7 +149,7 @@ export const zh = {
     },
     house: {
       title: "HOUSE 虚拟流动性", inventory: "库存估值", backed: "可充提资产", internal: "站内资产（可为负）", pnl: "按现价的交易盈亏",
-      assets: "库存", pairs: "各交易对", contracts: "合约仓位", balance: "余额", value: "估值（USDT）", trades: "成交笔数",
+      assets: "库存", pairs: "各交易对", contracts: "各合约净头寸", net: "净头寸", notional: "名义价值（USDT）", entry: "开仓均价", balance: "余额", value: "估值（USDT）", trades: "成交笔数",
       bought: "买入", sold: "卖出", netBase: "净持有", netQuote: "净收入（USDT）", lastAt: "最近成交", noContracts: "没有合约仓位", unrealized: "未实现盈亏",
       help: "HOUSE 按币安盘口与用户成交（ADR-0015）。库存记在系统科目 MARKET_MAKER；站内资产卖出后为负；盈亏 = 净持有 × 现价 + 净收入。",
     },

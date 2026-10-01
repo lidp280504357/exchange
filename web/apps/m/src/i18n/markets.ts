@@ -35,7 +35,7 @@ export default {
         whyTitle: "为什么选择 Astras",
         why: {
           wallet: { title: "多链充提", desc: "按网络充值与提现，确认数与到账时间一目了然" },
-          futures: { title: "永续合约", desc: "USDT 永续合约，最高 {{leverage}} 倍杠杆" },
+          futures: { title: "永续合约", desc: "USDT 永续合约，最高 {{leverage}} 倍杠杆", descAny: "USDT 永续合约" },
           liquidity: { title: "深度流动性", desc: "价格、K 线与盘口实时跟随主流市场" },
           security: { title: "安全", desc: "账本记账、独立签名服务与提现风控" },
         },
@@ -149,7 +149,7 @@ export default {
         whyTitle: "Why Astras",
         why: {
           wallet: { title: "Deposits by network", desc: "Confirmations and usual times shown for every network" },
-          futures: { title: "Perpetual futures", desc: "USDT perpetuals with up to {{leverage}}x leverage" },
+          futures: { title: "Perpetual futures", desc: "USDT perpetuals with up to {{leverage}}x leverage", descAny: "USDT perpetuals" },
           liquidity: { title: "Deep liquidity", desc: "Prices, candles and books follow the major markets live" },
           security: { title: "Security", desc: "A double-entry ledger, a separate signer and withdrawal checks" },
         },

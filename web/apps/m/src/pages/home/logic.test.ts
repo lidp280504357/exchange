@@ -104,6 +104,6 @@ describe("boards and figures", () => {
 
   it("finds the largest leverage, or the fallback", () => {
     expect(maxLeverage(rows)).toBe(100);
-    expect(maxLeverage(buildRows([pair("BTC-USDT")], []))).toBe(50);
+    expect(maxLeverage(buildRows([pair("BTC-USDT")], []))).toBe(0);
   });
 });
