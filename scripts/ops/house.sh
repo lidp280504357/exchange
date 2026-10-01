@@ -3,7 +3,7 @@
 # docs/runbook/market-maker.md):
 #
 #   scripts/ops/house.sh seed   HOUSE's funds: spot inventory of 500,000 USDT,
-#                               1.24 BTC and 37.4 ETH (MARKET_MAKER), and
+#                               0.24 BTC and 7.4 ETH (MARKET_MAKER), and
 #                               100,000 USDT of contract margin in its
 #                               FUTURES account (HOUSE_USER_ID); audited
 #                               adjustments, needs ledger.manual_adjustment.
@@ -36,11 +36,13 @@ ctl() {
 
 case "${1:-}" in
 seed)
-  # v1: the B4 inventory; v2: more BTC and ETH once ETH-BTC trades against HOUSE too.
-  for spec in "USDT 500000 v1" "BTC 0.24 v1" "ETH 7.4 v1" "BTC 1 v2" "ETH 30 v2"; do
-    read -r asset amount version <<<"$spec"
+  # Inventory counts as HOUSE's position: an asset held past HOUSE_SYMBOL_CAP
+  # (100,000 USDT) stops HOUSE buying it on every pair. A v2 top-up of 1 BTC
+  # and 30 ETH (2026-10-02) did exactly that and was undone (keys *-v2-undo).
+  for spec in "USDT 500000" "BTC 0.24" "ETH 7.4"; do
+    read -r asset amount <<<"$spec"
     ctl ledger-service ledger adjust --house --asset "$asset" --amount "$amount" \
-      --reason "HOUSE inventory (ADR-0013)" --key "seed-house-$asset-$version"
+      --reason "HOUSE inventory (ADR-0013)" --key "seed-house-$asset-v1"
   done
   ctl ledger-service ledger house-margin --amount 100000 \
     --reason "HOUSE contract margin: every contract trades against HOUSE (ADR-0015)" --key seed-house-margin-v1

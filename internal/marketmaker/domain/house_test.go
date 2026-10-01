@@ -75,6 +75,45 @@ func TestSpotRoomsFollowInventoryAndExposure(t *testing.T) {
 	}
 }
 
+// On a pair quoted in BTC the limits are still in USDT: buying ETH spends
+// BTC worth its USDT price, and BTC counts towards the total.
+func TestSpotRoomsOnAPairQuotedInBTC(t *testing.T) {
+	ethBTC := Spec{Symbol: "ETH-BTC", Base: "ETH", Quote: "BTC", TickSize: d("0.00001"), LotSize: d("0.001")}
+	prices := map[string]decimal.Decimal{"USDT": d("1"), "ETH": d("2700"), "BTC": d("84000")}
+	backed := func(a string) bool { return a == "BTC" || a == "ETH" || a == "USDT" }
+	caps := Caps{Level: d("20000"), Symbol: d("100000"), Total: d("1000000"), Safety: d("1000")}
+	h := Holdings{"ETH": d("7.4"), "BTC": d("0.24"), "USDT": d("500000")}
+	// Buying: 0.24 BTC is 20,160 USDT, 19,160 above the safety: 7.096 ETH.
+	// Selling: 7.4 ETH less the safety's 0.370 ETH.
+	buy, sell := SpotRooms(ethBTC, h, prices, backed, caps)
+	if buy.String() != "7.096" || sell.String() != "7.029" {
+		t.Fatalf("buy %s sell %s", buy, sell)
+	}
+	delete(prices, "BTC")
+	if b, s := SpotRooms(ethBTC, h, prices, backed, caps); !b.IsZero() || !s.IsZero() {
+		t.Fatalf("no price for the quote, no room: %s %s", b, s)
+	}
+}
+
+func TestLevelCapIsInTheQuoteAsset(t *testing.T) {
+	caps := Caps{Level: d("20000")}
+	prices := map[string]decimal.Decimal{"USDT": d("1"), "BTC": d("84000")}
+	if c, ok := LevelCap(btc, caps, prices); !ok || !c.Equal(d("20000")) {
+		t.Fatalf("a USDT pair: %s %v", c, ok)
+	}
+	ethBTC := Spec{Symbol: "ETH-BTC", Base: "ETH", Quote: "BTC"}
+	if c, ok := LevelCap(ethBTC, caps, prices); !ok || !c.Equal(d("20000").Div(d("84000"))) {
+		t.Fatalf("ETH-BTC: %s %v", c, ok)
+	}
+	if _, ok := LevelCap(ethBTC, caps, map[string]decimal.Decimal{"USDT": d("1")}); ok {
+		t.Fatal("ETH-BTC without a BTC price has no cap")
+	}
+	perp := Spec{Symbol: "BTC-USDT-PERP", Base: "BTC", Quote: "USDT", Contract: true}
+	if c, ok := LevelCap(perp, caps, nil); !ok || !c.Equal(d("20000")) {
+		t.Fatalf("a contract: %s %v", c, ok)
+	}
+}
+
 func TestContractRoomsCapTheNetPosition(t *testing.T) {
 	perp := Spec{Symbol: "BTC-USDT-PERP", Base: "BTC", Quote: "USDT", TickSize: d("0.1"), LotSize: d("0.001"), Contract: true}
 	caps := Caps{Contract: d("100000")}

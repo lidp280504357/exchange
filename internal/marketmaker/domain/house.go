@@ -23,10 +23,13 @@ type Spec struct {
 	Contract bool
 }
 
-// Caps are HOUSE's limits, in the quote asset (USDT): what one level
-// offers at most, what a pair's or contract's position may be worth, what
-// all spot positions together may be worth, and the inventory of backed
-// assets kept back (ADR-0013).
+// Valuation is the asset HOUSE's limits and prices are in.
+const Valuation = "USDT"
+
+// Caps are HOUSE's limits, in USDT: what one level offers at most, what a
+// pair's or contract's position may be worth, what all spot positions
+// together may be worth, and the inventory of backed assets kept back
+// (ADR-0013).
 type Caps struct {
 	Level    decimal.Decimal
 	Symbol   decimal.Decimal
@@ -39,8 +42,8 @@ type Caps struct {
 // the platform's units) into what HOUSE offers there: prices on the
 // symbol's tick grid, rounded away from the other side (bids down, asks
 // up) so HOUSE never gives more than the reference market, levels that
-// meet on the grid merged, each worth at most levelCap, in whole lots,
-// the best n.
+// meet on the grid merged, each worth at most levelCap in the quote asset
+// (LevelCap), in whole lots, the best n.
 func Levels(ref []Level, bids bool, spec Spec, levelCap decimal.Decimal, n int) []Level {
 	var out []Level
 	for _, l := range ref {
@@ -77,24 +80,28 @@ type Holdings map[string]decimal.Decimal
 
 // SpotRooms works out how much of a pair's base asset HOUSE may still buy
 // and sell (ADR-0013), given its holdings and the USDT value of one unit
-// of each asset (prices). Each limit applies to the direction that grows
-// what it limits:
+// of each asset (prices, USDT itself 1). Each limit applies to the
+// direction that grows what it limits:
 //
 //   - inventory: a backed asset keeps Safety's worth back (selling the
-//     base; buying spends the quote);
-//   - the pair: the base position may be worth at most Symbol either way;
-//   - in total: all positions together may be worth at most Total.
+//     base; buying spends the quote, which on ETH-BTC is BTC);
+//   - the base asset: HOUSE's holding of it may be worth at most Symbol
+//     either way (every pair of that base shares it);
+//   - in total: everything but USDT together may be worth at most Total.
 //
-// Both are in whole lots; zero without a price.
+// Both are in whole lots; zero without a price for the base or the quote.
 func SpotRooms(spec Spec, h Holdings, prices map[string]decimal.Decimal, backed func(string) bool, caps Caps) (buy, sell decimal.Decimal) {
-	p := prices[spec.Base]
-	if !p.IsPositive() {
+	p, qp := prices[spec.Base], prices[spec.Quote]
+	if spec.Quote == Valuation {
+		qp = decimal.NewFromInt(1)
+	}
+	if !p.IsPositive() || !qp.IsPositive() {
 		return decimal.Zero, decimal.Zero
 	}
 	bal := h[spec.Base]
 	exposure := decimal.Zero
 	for asset, amount := range h {
-		if asset != spec.Quote && prices[asset].IsPositive() {
+		if asset != Valuation && prices[asset].IsPositive() {
 			exposure = exposure.Add(amount.Abs().Mul(prices[asset]))
 		}
 	}
@@ -106,9 +113,24 @@ func SpotRooms(spec Spec, h Holdings, prices map[string]decimal.Decimal, backed 
 	}
 	buy = decimal.Min(positive(caps.Symbol.Div(p).Sub(bal)), positive(bal.Neg()).Add(totalRoom))
 	if backed(spec.Quote) {
-		buy = decimal.Min(buy, positive(h[spec.Quote].Sub(caps.Safety)).Div(p))
+		buy = decimal.Min(buy, positive(h[spec.Quote].Mul(qp).Sub(caps.Safety)).Div(p))
 	}
 	return floor(buy, spec.LotSize), floor(sell, spec.LotSize)
+}
+
+// LevelCap is Caps.Level in a symbol's quote asset, for Levels: as it is
+// for contracts and USDT pairs, converted at the quote's USDT price
+// otherwise (20,000 USDT is about 0.24 BTC on ETH-BTC); false without that
+// price.
+func LevelCap(spec Spec, caps Caps, prices map[string]decimal.Decimal) (decimal.Decimal, bool) {
+	if spec.Contract || spec.Quote == Valuation {
+		return caps.Level, true
+	}
+	qp := prices[spec.Quote]
+	if !qp.IsPositive() {
+		return decimal.Zero, false
+	}
+	return caps.Level.Div(qp), true
 }
 
 // ContractRooms works out how much of a contract HOUSE may still buy and

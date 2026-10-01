@@ -254,11 +254,12 @@ func (p *Publisher) round() []outgoing {
 	for _, spec := range p.list {
 		b := p.books[spec.Symbol]
 		msg := &orderv1.ReferenceBookUpdate{Symbol: spec.Symbol, HouseUserId: p.cfg.HouseUser}
-		usable := feed && houseFresh && b != nil && !b.gap && now.Sub(b.heard) < p.cfg.Stale &&
+		levelCap, priced := domain.LevelCap(spec, p.cfg.Caps, prices)
+		usable := feed && houseFresh && b != nil && !b.gap && now.Sub(b.heard) < p.cfg.Stale && priced &&
 			p.flags.Enabled(flags.KeyHouseLiquidity, flags.Subject{Symbol: spec.Symbol})
 		if usable {
-			bids := domain.Levels(b.bids, true, spec, p.cfg.Caps.Level, p.cfg.Levels)
-			asks := domain.Levels(b.asks, false, spec, p.cfg.Caps.Level, p.cfg.Levels)
+			bids := domain.Levels(b.bids, true, spec, levelCap, p.cfg.Levels)
+			asks := domain.Levels(b.asks, false, spec, levelCap, p.cfg.Levels)
 			var buy, sell decimal.Decimal
 			if spec.Contract {
 				pos, mid := p.positions[spec.Symbol], midOf(b)
