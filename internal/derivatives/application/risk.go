@@ -140,17 +140,7 @@ func (s *Service) checkCross(ctx context.Context, userID string, positions []dom
 	if err != nil {
 		return err
 	}
-	equity, maintenance := bal.Available, decimal.Zero
-	for _, o := range orders {
-		if o.MarginMode == domain.Cross {
-			equity = equity.Add(o.Unreleased())
-		}
-	}
-	for _, p := range positions {
-		mark := marks[p.Symbol]
-		equity = equity.Add(p.Margin).Add(p.UnrealizedPnL(mark))
-		maintenance = maintenance.Add(p.MaintenanceMargin(contracts[p.Symbol], mark))
-	}
+	equity, maintenance := domain.CrossEquity(bal.Available, orders, positions, contracts, marks)
 	warned, err := s.Store.Read().Cross().WarnedAt(ctx, userID)
 	if err != nil {
 		return err

@@ -60,7 +60,8 @@ paths:
         The position mode and the margin mode change only without positions
         or active orders on the contract (DERIV_SETTINGS_LOCKED). A new
         leverage is checked against the open positions: each must fit in
-        the risk limit of the new leverage (DERIV_RISK_LIMIT_EXCEEDED); a
+        the risk limit of the new leverage (DERIV_RISK_LIMIT_EXCEEDED, with
+        details max_notional, leverage and the position's notional); a
         cross position's margin becomes its entry cost / leverage, frozen or
         freed (DERIV_INSUFFICIENT_MARGIN when more cannot be frozen); an
         isolated position's margin must still cover that.
@@ -167,7 +168,9 @@ paths:
         ORDER_PRICE_OUT_OF_BAND (a limit price further from the mark than
         the band), DERIV_MARK_PRICE_UNAVAILABLE, DERIV_REDUCE_ONLY_MODE (the
         contract is degraded), DERIV_REDUCE_ONLY_REJECTED (more than the
-        position left to close), DERIV_RISK_LIMIT_EXCEEDED,
+        position left to close), DERIV_RISK_LIMIT_EXCEEDED (the side's
+        position, its opening orders and this one at the mark price above
+        the leverage's cap; details max_notional, leverage and notional),
         DERIV_INSUFFICIENT_MARGIN (the available balance less the cross
         positions' unrealized loss), ORDER_TOO_MANY_OPEN or the USER_
         eligibility codes. A client_order_id repeated with the same order
@@ -598,7 +601,11 @@ components:
         maintenance_margin:
           $ref: './market.yaml#/components/schemas/NullableDecimal'
         liquidation_price:
-          description: The estimate of an isolated position; null for cross positions.
+          description: >-
+            The liquidation estimate (requirements §11.7): an isolated position's own; a cross
+            position's against the whole cross account (the available balance, the cross orders'
+            reservations and every cross position at its mark). Null when there is none (a long
+            the account covers down to zero) or before the first mark price.
           $ref: './market.yaml#/components/schemas/NullableDecimal'
         realized_pnl:
           $ref: './market.yaml#/components/schemas/Decimal'

@@ -783,7 +783,12 @@ func TestACrossAccountIsLiquidatedTogether(t *testing.T) {
 	short := r.place(t, alice, domain.Sell, "60000", "0.5", false)
 	r.trade(t, long, short, "60000")
 	// Alice's cross equity: 85 available + 600 margin, less her loss;
-	// maintenance 0.4% of the notional.
+	// maintenance 0.4% of the notional. Her position shows where the two
+	// meet: 685 + 0.5 × (60000 − x) = 0.5x × 0.4%, x = 30685 / 0.502.
+	r.book.Set(perp.Symbol, d("60000"), time.Now())
+	if views, err := r.svc.Positions(ctx, alice, perp.Symbol); err != nil || len(views) != 1 || !views[0].LiquidationPrice.Equal(d("61125.49800797")) {
+		t.Fatalf("estimate %+v %v", views, err)
+	}
 	r.monitor(t, "61100")
 	if at, err := r.store.Read().Cross().WarnedAt(ctx, alice); err != nil || at.IsZero() {
 		t.Fatalf("cross warning %v %v", at, err)

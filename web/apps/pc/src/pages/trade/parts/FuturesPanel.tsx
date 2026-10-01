@@ -1,6 +1,6 @@
 import {
   adjustPositionMargin, cancelAllContractOrders, cancelConditionalOrder, cancelContractOrder, closeableQuantity, dec, enumLabel, errorText,
-  formatAmount, formatPercent, formatPrice, isActive, newIdempotencyKey, placeConditionalOrder, placeContractOrder, roe, routes, selectSignedIn,
+  formatAmount, formatPercent, formatPrice, isActive, liveFigures, newIdempotencyKey, placeConditionalOrder, placeContractOrder, routes, selectSignedIn,
   useConditionalOrders, useContractFills, useContractOpenOrders, useContractOrderHistory, useContracts, useFundingPayments, useMarkPrice,
   usePositions, useSession, useTicker, type ConditionalOrder, type Contract, type ContractFill, type ContractOrder, type ContractPosition,
   type FundingPayment,
@@ -168,6 +168,7 @@ function PositionItem({ p, specs, tpsl }: { p: ContractPosition; specs: Specs; t
   const d = spec(specs, p.symbol);
   const long = dec.sign(p.quantity) > 0;
   const mark = useMarkPrice(p.symbol).data;
+  const live = liveFigures(p, mark?.mark_price);
   const last = useTicker(p.symbol)?.last;
   const [closing, setClosing] = useState(false);
   const [tpslOpen, setTpslOpen] = useState(false);
@@ -218,9 +219,9 @@ function PositionItem({ p, specs, tpsl }: { p: ContractPosition; specs: Specs; t
   return (
     <PositionCard
       position={{
-        symbol: label(p.symbol), side: long ? "LONG" : "SHORT", quantity: size, entryPrice: p.entry_price, markPrice: p.mark_price ?? "0",
-        liquidationPrice: p.liquidation_price, margin: p.margin, leverage: p.leverage, unrealizedPnl: p.unrealized_pnl ?? "0",
-        roe: roe(p.unrealized_pnl, p.margin), marginMode: p.margin_mode,
+        symbol: label(p.symbol), side: long ? "LONG" : "SHORT", quantity: size, entryPrice: p.entry_price, markPrice: live.markPrice,
+        liquidationPrice: p.liquidation_price, margin: p.margin, leverage: p.leverage, unrealizedPnl: live.unrealizedPnl,
+        roe: live.roe, marginMode: p.margin_mode,
       }}
       priceDecimals={d.price}
       qtyDecimals={d.qty}

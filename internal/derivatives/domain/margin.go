@@ -38,8 +38,8 @@ func ChangeLeverage(c Contract, leverage int32, positions []Position, mark decim
 		if !mark.IsPositive() {
 			return nil, ErrMarkUnavailable
 		}
-		if p.Notional(mark).GreaterThan(limit) {
-			return nil, ErrRiskLimitExceeded.WithDetail("max_notional", limit.String()).WithDetail("leverage", leverage)
+		if n := p.Notional(mark); n.GreaterThan(limit) {
+			return nil, riskLimitExceeded(limit, leverage, n)
 		}
 		im := InitialMargin(p.EntryCost, leverage, c.QuoteDecimals)
 		next := p

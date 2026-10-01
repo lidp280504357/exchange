@@ -244,7 +244,7 @@ export default function Markets() {
             />
           </div>
 
-          <div className="sticky top-[calc(44px+env(safe-area-inset-top))] z-[var(--z-dropdown)] mt-1 flex items-center border-b border-line-1 bg-bg-0/95 backdrop-blur">
+          <div className="sticky top-[calc(44px+env(safe-area-inset-top))] z-[var(--z-sticky)] mt-1 flex items-center border-b border-line-1 bg-bg-0/95 backdrop-blur">
             {loading ? (
               <div className="flex h-11 min-w-0 flex-1 items-center gap-2 overflow-hidden px-4">
                 {[0, 1, 2, 3].map((i) => (

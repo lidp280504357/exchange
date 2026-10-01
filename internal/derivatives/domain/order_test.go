@@ -103,10 +103,15 @@ func TestRiskLimits(t *testing.T) {
 	if err := CheckRiskLimit(btcPerp, sell, held, []Order{pending}, d("60000")); err != nil {
 		t.Fatal(err)
 	}
-	// At 50x only 50000.
+	// At 50x only 50000; the error names the cap, the leverage and the
+	// notional the order would make (at the mark, to the cent).
 	fifty := order(t, Buy, SideBoth, "60000", "1", false, settings(OneWay, Cross, 50))
-	if err := CheckRiskLimit(btcPerp, fifty, nil, nil, d("60000")); code(err) != "DERIV_RISK_LIMIT_EXCEEDED" {
+	err := CheckRiskLimit(btcPerp, fifty, nil, nil, d("60000.004"))
+	if code(err) != "DERIV_RISK_LIMIT_EXCEEDED" {
 		t.Fatalf("60000 at 50x: %v", err)
+	}
+	if det := apperr.From(err).Details; det["max_notional"] != "50000" || det["leverage"] != int32(50) || det["notional"] != "60000.01" {
+		t.Fatalf("details %v", det)
 	}
 	if !btcPerp.MaxNotional(21).Equal(d("50000")) || !btcPerp.MaxNotional(60).IsZero() || !btcPerp.MMR(d("60000")).Equal(d("0.01")) {
 		t.Fatal("ladder lookups")

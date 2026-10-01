@@ -1,6 +1,7 @@
 import i18n, { type Resource } from "i18next";
 import { initReactI18next } from "react-i18next";
 import { ApiError } from "../api/errors";
+import { formatAmount } from "../format/number";
 import { useSettings, type Locale } from "../settings/store";
 import { en } from "./en";
 import { zhCN } from "./zh-CN";
@@ -87,10 +88,32 @@ export function enumLabel(code: string | null | undefined, kind?: string): strin
 /** errorText localizes an error by its stable code (requirements §7.1). */
 export function errorText(err: unknown): string {
   if (err instanceof ApiError) {
+    const detailed = withDetails(err);
+    if (detailed) return detailed;
     const key = `errors.${err.code}`;
     return i18n.exists(key) ? i18n.t(key) : i18n.t("errors.unknown", { code: err.code });
   }
   return i18n.t("errors.unknown", { code: err instanceof Error ? err.message : String(err) });
+}
+
+// The details some errors' messages name: amounts with their decimals,
+// other values (null) as they come.
+const detailFields: Record<string, Record<string, number | null>> = {
+  DERIV_RISK_LIMIT_EXCEEDED: { max_notional: 0, notional: 2, leverage: null },
+};
+
+/** withDetails is the error's message with its details, when it has one and they all came. */
+function withDetails(err: ApiError): string | null {
+  const fields = detailFields[err.code];
+  const key = `errorDetails.${err.code}`;
+  if (!fields || !i18n.exists(key)) return null;
+  const values: Record<string, string> = {};
+  for (const [k, decimals] of Object.entries(fields)) {
+    const v = err.details[k];
+    if (v === undefined || v === null || v === "") return null;
+    values[k] = decimals === null ? String(v) : formatAmount(String(v), decimals);
+  }
+  return i18n.t(key, values);
 }
 
 export { i18n };

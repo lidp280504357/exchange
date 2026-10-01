@@ -165,6 +165,64 @@ func (p Position) LiquidationPrice(c Contract) decimal.Decimal {
 	return p.EntryCost.Add(p.Margin).DivRound(q.Mul(one.Add(mmr)), 8)
 }
 
+// CrossLiquidationPrice estimates the mark price of p's contract at which
+// its account's cross equity falls to the cross maintenance margin
+// (§11.7), the other cross positions staying at their marks. equity is
+// the cross equity at mark (CrossEquity) and others the maintenance margin
+// of the other cross positions. p's own maintenance rate is its tier's at
+// the price found, which a few rounds settle when the price crosses a
+// tier. Zero when flat, without a mark, or when there is no such price: a
+// long whose equity covers a fall to zero, a short with no equity left.
+func CrossLiquidationPrice(c Contract, p Position, mark, equity, others decimal.Decimal) decimal.Decimal {
+	if p.Qty.IsZero() || !mark.IsPositive() {
+		return decimal.Zero
+	}
+	q := p.Qty.Abs()
+	rest := equity.Sub(p.UnrealizedPnL(mark)) // the equity without p's result
+	one := decimal.NewFromInt(1)
+	mmr := c.MMR(p.Notional(mark))
+	price := decimal.Zero
+	for range 4 {
+		// A long: rest + q·x − cost = others + q·x·mmr; a short:
+		// rest + cost − q·x = others + q·x·mmr.
+		v, per := p.EntryCost.Add(others).Sub(rest), q.Mul(one.Sub(mmr))
+		if !p.Long() {
+			v, per = rest.Add(p.EntryCost).Sub(others), q.Mul(one.Add(mmr))
+		}
+		if !v.IsPositive() || !per.IsPositive() {
+			return decimal.Zero
+		}
+		price = v.DivRound(per, 8)
+		next := c.MMR(q.Mul(price))
+		if next.Equal(mmr) {
+			break
+		}
+		mmr = next
+	}
+	return price
+}
+
+// CrossEquity is a user's cross margin account at the marks (§11.7), as
+// the margin monitor measures it: the equity is the available balance,
+// what cross orders still reserve, and each cross position's margin and
+// unrealized result; the maintenance margin is the cross positions'.
+func CrossEquity(available decimal.Decimal, orders []Order, positions []Position, contracts map[string]Contract,
+	marks map[string]decimal.Decimal,
+) (equity, maintenance decimal.Decimal) {
+	equity, maintenance = available, decimal.Zero
+	for _, o := range orders {
+		if o.MarginMode == Cross {
+			equity = equity.Add(o.Unreleased())
+		}
+	}
+	for _, p := range positions {
+		mark := marks[p.Symbol]
+		equity = equity.Add(p.Margin).Add(p.UnrealizedPnL(mark))
+		maintenance = maintenance.Add(p.MaintenanceMargin(contracts[p.Symbol], mark))
+	}
+	return equity, maintenance
+}
+
 // share is the part of v that qty of the position's open quantity takes:
 // all of it when qty closes the position, else rounded to decimals (half
 // up for the cost, down for the margin), the rest staying with the

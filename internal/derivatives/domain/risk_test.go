@@ -3,6 +3,8 @@ package domain
 import (
 	"testing"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 func TestMarginStatesAndLiquidationOrders(t *testing.T) {
@@ -139,5 +141,52 @@ func TestTheLadderAt125x(t *testing.T) {
 	// the liquidation sell still goes 0.5% under it.
 	if o := LiquidationOrder("l1", c, long, long.BankruptcyPrice(), time.Now()); o.Side != Sell || !o.Price.Equal(d("82911.3")) || !o.ReduceOnly {
 		t.Fatalf("liquidation order %+v", o)
+	}
+}
+
+// The cross estimate puts the account's cross equity at the maintenance
+// margin, the other positions at their marks (§11.7).
+func TestCrossLiquidationPrice(t *testing.T) {
+	c := btcPerp
+	c.Tiers = []RiskTier{
+		{MaxNotional: d("50000"), MaxLeverage: 125, MMR: d("0.004")},
+		{MaxNotional: d("250000"), MaxLeverage: 100, MMR: d("0.005")},
+		{MaxNotional: d("1000000"), MaxLeverage: 50, MMR: d("0.01")},
+	}
+	contracts := map[string]Contract{c.Symbol: c}
+	mark := d("84000")
+	// A cross long of 2 at 84101.3 (20x, 8412.06 of margin) with 1587.94
+	// available: 10,000 in all. At x the equity 10000 + 2x − 168202.6
+	// meets 2x × 0.5%: x = 158202.6 / 1.99.
+	long := Position{
+		UserID: "u1", Symbol: c.Symbol, Side: SideBoth, Qty: d("2"), EntryCost: d("168202.6"), Margin: d("8412.06"),
+		MarginMode: Cross, Leverage: 20,
+	}
+	marks := map[string]decimal.Decimal{c.Symbol: mark}
+	equity, maintenance := CrossEquity(d("1587.94"), nil, []Position{long}, contracts, marks)
+	if !equity.Equal(d("9797.4")) || !maintenance.Equal(d("840")) {
+		t.Fatalf("equity %s, maintenance %s", equity, maintenance)
+	}
+	if got := CrossLiquidationPrice(c, long, mark, equity, decimal.Zero); !got.Equal(d("79498.79396985")) {
+		t.Fatalf("long %s", got)
+	}
+	// A cross short of 1 at 60000 with 1000 of equity: 61000 / 1.005.
+	short := Position{UserID: "u2", Symbol: c.Symbol, Side: SideBoth, Qty: d("-1"), EntryCost: d("60000"), Margin: d("600"), MarginMode: Cross}
+	if got := CrossLiquidationPrice(c, short, d("60000"), d("1000"), decimal.Zero); !got.Equal(d("60696.51741294")) {
+		t.Fatalf("short %s", got)
+	}
+	// With 12,000 of equity the long of 1 at 60000 falls below 50,000 of
+	// notional before liquidation: the 0.4% tier's rate decides it.
+	one := Position{Symbol: c.Symbol, Side: SideBoth, Qty: d("1"), EntryCost: d("60000"), Margin: d("3000"), MarginMode: Cross}
+	if got := CrossLiquidationPrice(c, one, d("60000"), d("12000"), decimal.Zero); !got.Equal(d("48192.77108434")) {
+		t.Fatalf("across a tier %s", got)
+	}
+	// Another position's maintenance margin brings it closer; equity that
+	// covers a fall to zero leaves none.
+	if got := CrossLiquidationPrice(c, one, d("60000"), d("12000"), d("1000")); !got.GreaterThan(d("48192.77108434")) {
+		t.Fatalf("with others %s", got)
+	}
+	if got := CrossLiquidationPrice(c, one, d("60000"), d("70000"), decimal.Zero); !got.IsZero() {
+		t.Fatalf("covered %s", got)
 	}
 }

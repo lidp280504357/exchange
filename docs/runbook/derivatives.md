@@ -131,7 +131,7 @@ REST（经网关 `/v1/derivatives/*`，需登录）：
 |---|---|
 | `GET /v1/derivatives/account` | FUTURES 余额、挂单预留、仓位保证金、未实现盈亏（全部 / 全仓）、保证金余额、可转出 |
 | `GET/PUT /v1/derivatives/settings/{symbol}` | 持仓模式、保证金模式、杠杆 |
-| `GET /v1/derivatives/positions?symbol=` | 未平仓位：数量（带符号）、开仓均价、标记价、名义价值、未实现盈亏、保证金、维持保证金、逐仓预估强平价、已实现盈亏、资金费 |
+| `GET /v1/derivatives/positions?symbol=` | 未平仓位：数量（带符号）、开仓均价、标记价、名义价值、未实现盈亏、保证金、维持保证金、预估强平价（逐仓按自己的保证金；全仓按整个全仓账户：可用余额、全仓挂单预留与各全仓仓位按各自标记价计，求本合约标记价到哪里时权益等于维持保证金，`domain.CrossLiquidationPrice`；多仓的权益覆盖得了跌到 0 时为空）、已实现盈亏、资金费 |
 | `POST /v1/derivatives/positions/{symbol}/margin` | 逐仓追加 / 减少保证金 |
 | `POST/GET/DELETE /v1/derivatives/orders`、`GET/DELETE /v1/derivatives/orders/{id}` | 下单、订单列表、撤单 |
 | `GET /v1/derivatives/fills?symbol=` | 成交（角色、平仓数量、手续费、已实现盈亏、是否强平、是否已记账） |
@@ -152,7 +152,7 @@ WebSocket 私有频道：`orders`（合约订单与现货订单同一频道，�
 
 - 开关 `derivatives.trading` 默认关闭（ADR-0005），测试服打开：`exchangectl flags set derivatives.trading --on --reason "测试环境开放合约"`。
 - 合约在 `deploy/instruments/test.json` 里以 `TRADING` 创建（状态只在创建时取文件里的值，之后用 `exchangectl instruments contract-status` 改）。
-- 风险限额（用户决定 2026-10-02，两个合约相同，`deploy/instruments/test.json` 的 `risk_tiers`）：名义价值 ≤ 50,000 USDT 最高 125 倍、维持保证金率 0.4%；≤ 250,000 为 100 倍、0.5%；≤ 1,000,000 为 50 倍、1%；≤ 5,000,000 为 20 倍、2.5%；≤ 20,000,000 为 10 倍、5%；≤ 50,000,000 为 5 倍、10%；≤ 100,000,000 为 2 倍、12.5%。杠杆对话框的上限、首页"合约最高杠杆"与规格接口都从这里读，不写死；强平价按所在档位的维持保证金率算（`internal/derivatives/domain/risk_test.go` 的 `TestTheLadderAt125x`）。
+- 风险限额（用户决定 2026-10-02，两个合约相同，`deploy/instruments/test.json` 的 `risk_tiers`）：名义价值 ≤ 50,000 USDT 最高 125 倍、维持保证金率 0.4%；≤ 250,000 为 100 倍、0.5%；≤ 1,000,000 为 50 倍、1%；≤ 5,000,000 为 20 倍、2.5%；≤ 20,000,000 为 10 倍、5%；≤ 50,000,000 为 5 倍、10%；≤ 100,000,000 为 2 倍、12.5%。杠杆对话框的上限、首页"合约最高杠杆"与规格接口都从这里读，不写死；强平价按所在档位的维持保证金率算（`internal/derivatives/domain/risk_test.go` 的 `TestTheLadderAt125x`）。超出风险限额的错误 `DERIV_RISK_LIMIT_EXCEEDED` 带 `max_notional`、`leverage` 与 `notional`（下单后或调杠杆时该方向的名义价值，按标记价），前端据此说出具体数字；PC 与手机的下单表单分别显示"可开多 / 可开空"（保证金与风险限额两者取小，`packages/core` 的 `riskRoom`、`sideExposure`），提交前就用同样的规则检查（`checkRiskLimit`）。
 - 流动性：两个合约都由 HOUSE 按币安合约盘口提供（开关 `market.house_liquidity` 允许全部合约，见 [market-maker.md](market-maker.md)）。`HOUSE_USER_ID` 沿用原做市账户，其 FUTURES 账户由 `scripts/ops/house.sh seed` 注资到 2,000,000 USDT（`exchangectl ledger house-margin`）；测试服 HOUSE 在每个合约上多空各最多接 5,000,000 USDT（`HOUSE_CONTRACT_CAP`），到上限后该方向没有报价。阶段 3 的挂单做市（`MARKET_MAKER_CONTRACTS`、开关 `market.maker`）已随 ADR-0015 退役。
 - 保险基金用模拟资金注资：`exchangectl ledger insurance-fund --amount 1000000 --reason "测试环境保险基金" --key insurance-seed-1`（ledger-service 容器里执行，需 `ledger.manual_adjustment`）。
 - 端到端：`scripts/e2e/contracts.sh`（规格与 125 倍阶梯、标记价、资金费率、两个合约的盘口）、`scripts/e2e/derivatives.sh`（两个用户在 ETH-USDT-PERP 上各自与 HOUSE 开多、开空，杠杆到 125 倍为止，挂单预留与撤单，只减仓市价平仓，按成交核对盈亏、手续费与余额，转回，最后跑对账）、`scripts/e2e/house.sh` 的合约部分（两个合约各开平一次）、`scripts/e2e/funding.sh`（资金费，见下）、`scripts/e2e/admin.sh` 的合约部分（合约状态、只减仓、状态往返、强平监控、双人审批的保险基金注资）；故障注入 `scripts/fault/contract-degrade.sh`（降级与人工解除）。

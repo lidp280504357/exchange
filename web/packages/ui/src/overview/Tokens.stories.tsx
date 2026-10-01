@@ -198,11 +198,11 @@ export const RadiiTypeShadow: Story = {
         <div className="flex gap-6">
           <div className="grid h-24 w-48 place-items-center rounded-3 border border-line-1 bg-bg-2 text-sm text-fg-2 shadow-pop">shadow-pop</div>
           <ul className="text-xs text-fg-3">
-            <li>--z-dropdown 20</li>
             <li>--z-sticky 30</li>
             <li>--z-sheet 40</li>
             <li>--z-dialog 50</li>
-            <li>--z-toast 60</li>
+            <li>--z-dropdown 60 (menus, lists, popovers)</li>
+            <li>--z-toast 70 (toasts, tooltips)</li>
           </ul>
         </div>
       </Section>

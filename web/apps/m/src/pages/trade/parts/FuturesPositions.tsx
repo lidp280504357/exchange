@@ -1,6 +1,6 @@
 import {
-  adjustPositionMargin, closeableQuantity, dec, enumLabel, errorText, formatAmount, formatPrice, newIdempotencyKey, placeConditionalOrder,
-  placeContractOrder, roe, useConditionalOrders, useContracts, useMarkPrice, usePositions, useTicker, type ConditionalOrder, type ContractPosition,
+  adjustPositionMargin, closeableQuantity, dec, enumLabel, errorText, formatAmount, formatPrice, liveFigures, newIdempotencyKey, placeConditionalOrder,
+  placeContractOrder, useConditionalOrders, useContracts, useMarkPrice, usePositions, useTicker, type ConditionalOrder, type ContractPosition,
 } from "@exchange/core";
 import { Button, Dialog, EmptyState, ErrorState, NumberInput, PositionCard, Segmented, Sheet, Skeleton, TpSlDialog, toast, type TpSlValues } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
@@ -47,6 +47,7 @@ function PositionItem({ p, spec, tpsl }: { p: ContractPosition; spec: { price: n
   const qc = useQueryClient();
   const long = dec.sign(p.quantity) > 0;
   const mark = useMarkPrice(p.symbol).data;
+  const live = liveFigures(p, mark?.mark_price);
   const last = useTicker(p.symbol)?.last;
   const [closing, setClosing] = useState(false);
   const [tpslOpen, setTpslOpen] = useState(false);
@@ -96,9 +97,9 @@ function PositionItem({ p, spec, tpsl }: { p: ContractPosition; spec: { price: n
   return (
     <PositionCard
       position={{
-        symbol: label(p.symbol), side: long ? "LONG" : "SHORT", quantity: size, entryPrice: p.entry_price, markPrice: p.mark_price ?? "0",
-        liquidationPrice: p.liquidation_price, margin: p.margin, leverage: p.leverage, unrealizedPnl: p.unrealized_pnl ?? "0",
-        roe: roe(p.unrealized_pnl, p.margin), marginMode: p.margin_mode,
+        symbol: label(p.symbol), side: long ? "LONG" : "SHORT", quantity: size, entryPrice: p.entry_price, markPrice: live.markPrice,
+        liquidationPrice: p.liquidation_price, margin: p.margin, leverage: p.leverage, unrealizedPnl: live.unrealizedPnl,
+        roe: live.roe, marginMode: p.margin_mode,
       }}
       priceDecimals={spec.price}
       qtyDecimals={spec.qty}

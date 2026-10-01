@@ -79,4 +79,8 @@ export const zhCN = {
     DERIV_MARGIN_REDUCE_TOO_LARGE: "减少后保证金不足", DERIV_POSITION_LIQUIDATING: "仓位正在强平", DERIV_TRIGGER_IMMEDIATE: "触发价已被越过，请直接下单",
     format: "请输入正确的数字", zero: "数量必须大于 0", precision: "最多 {{n}} 位小数", unknown: "出错了（{{code}}）",
   },
+  // Messages that name what the error's details carry (errorText).
+  errorDetails: {
+    DERIV_RISK_LIMIT_EXCEEDED: "超出 {{leverage}}x 的风险限额：该方向最多 {{max_notional}} USDT，现为 {{notional}} USDT，请降低杠杆或数量",
+  },
 };

@@ -1,7 +1,7 @@
 import {
-  ApiError, closeableQuantity, dec, dk, errorText, formatAmount, formatPrice, maxOpenQuantity, newIdempotencyKey, openCost, placeContractOrder,
-  routes, selectSignedIn, updateContractSettings, useContractSettings, useFuturesAccount, useMarkPrice, usePositions, useSession, useSettings,
-  useTicker, type Contract, type NewContractOrder,
+  ApiError, checkRiskLimit, closeableQuantity, dec, dk, errorText, formatAmount, formatPrice, maxNotional, maxOpenQuantity, newIdempotencyKey,
+  openCost, openLimit, placeContractOrder, riskRoom, routes, selectSignedIn, sideExposure, updateContractSettings, useContractOpenOrders,
+  useContractSettings, useFuturesAccount, useMarkPrice, usePositions, useSession, useSettings, useTicker, type Contract, type NewContractOrder,
 } from "@exchange/core";
 import { Button, Checkbox, Dialog, KeyValue, LeverageDialog, NumberInput, Segmented, Slider, Tabs, toast, cn } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
@@ -39,6 +39,7 @@ export function FuturesOrderPanel({
   const settings = useContractSettings(symbol);
   const account = useFuturesAccount();
   const positions = usePositions(symbol);
+  const openOrders = useContractOpenOrders(symbol);
   const mark = useMarkPrice(symbol).data;
   const tk = useTicker(symbol);
 
@@ -79,10 +80,19 @@ export function FuturesOrderPanel({
   const longPos = hedge ? list.find((p) => p.position_side === "LONG") : oneWay && dec.sign(oneWay.quantity) > 0 ? oneWay : undefined;
   const shortPos = hedge ? list.find((p) => p.position_side === "SHORT") : oneWay && dec.sign(oneWay.quantity) < 0 ? oneWay : undefined;
 
-  const maxOpen = useMemo(
+  // What opening may add on each side: the margin's limit at the order's
+  // price and the leverage's risk limit at the mark price (§11.7), less
+  // what the side holds and has on order.
+  const riskMark = mark?.mark_price ?? refPrice;
+  const orders = openOrders.data?.items ?? [];
+  const exposure = (side: "BUY" | "SELL") => sideExposure(side, hedge ? (side === "BUY" ? "LONG" : "SHORT") : "BOTH", list, orders);
+  const byMargin = useMemo(
     () => (dec.isDecimal(refPrice || "x") ? maxOpenQuantity(available, refPrice, leverage, contract.taker_fee_rate, contract.lot_size) : "0"),
     [available, refPrice, leverage, contract.taker_fee_rate, contract.lot_size],
   );
+  const maxOpenOf = (side: "BUY" | "SELL") =>
+    dec.isDecimal(riskMark || "x") ? openLimit(byMargin, riskRoom(contract.risk_tiers, leverage, riskMark, exposure(side), contract.lot_size)) : byMargin;
+  const maxOpen = { BUY: maxOpenOf("BUY"), SELL: maxOpenOf("SELL") };
   const maxClose = (side: "BUY" | "SELL") => closeableQuantity((side === "SELL" ? longPos : shortPos)?.quantity);
   const cost = quantity && refPrice ? openCost(refPrice, quantity, leverage, contract.taker_fee_rate) : "0";
 
@@ -99,7 +109,7 @@ export function FuturesOrderPanel({
 
   const setPercent = (p: number) => {
     setPct(p);
-    const base = tab === "open" ? maxOpen : dec.max(maxClose("BUY"), maxClose("SELL"));
+    const base = tab === "open" ? dec.max(maxOpen.BUY, maxOpen.SELL) : dec.max(maxClose("BUY"), maxClose("SELL"));
     if (!dec.isDecimal(base) || dec.sign(base) <= 0 || p <= 0) return setQuantity("");
     const q = dec.quantize(dec.div(dec.mul(base, String(Math.round(p))), "100", qtyDecimals, "down"), contract.lot_size, "down");
     setQuantity(dec.sign(q) > 0 ? dec.normalize(q) : "");
@@ -113,6 +123,10 @@ export function FuturesOrderPanel({
     if (refPrice && dec.isDecimal(refPrice) && dec.lt(dec.mul(refPrice, quantity), contract.min_notional))
       return t("pcTrade.minNotional", { value: contract.min_notional });
     if (tab === "close" && dec.gt(quantity, maxClose(a.side))) return t("pcTrade.overClose");
+    if (tab === "open" && !a.reduceOnly && dec.isDecimal(riskMark || "x")) {
+      const r = checkRiskLimit(contract.risk_tiers, leverage, riskMark, exposure(a.side), quantity);
+      if (!r.ok) return t("pcTrade.overRisk", { leverage, cap: formatAmount(r.cap, 0), notional: formatAmount(r.notional, 2) });
+    }
     return null;
   };
 
@@ -277,8 +291,11 @@ export function FuturesOrderPanel({
         </Row>
         {tab === "open" ? (
           <>
-            <Row label={t("pcTrade.maxOpen")}>
-              {formatAmount(maxOpen, qtyDecimals)} {contract.base_asset}
+            <Row label={t("pcTrade.maxOpenLong")}>
+              {formatAmount(maxOpen.BUY, qtyDecimals)} {contract.base_asset}
+            </Row>
+            <Row label={t("pcTrade.maxOpenShort")}>
+              {formatAmount(maxOpen.SELL, qtyDecimals)} {contract.base_asset}
             </Row>
             <Row label={t("pcTrade.cost")}>
               {formatAmount(cost, 2)} {contract.quote_asset}
@@ -313,8 +330,13 @@ export function FuturesOrderPanel({
         submitting={saving}
         symbol={symbol}
         info={(l) => {
-          const tier = contract.risk_tiers.find((r) => r.max_leverage >= l);
-          return tier ? t("pcTrade.tierInfo", { value: formatAmount(tier.max_notional, 0) }) : null;
+          const cap = maxNotional(contract.risk_tiers, l);
+          if (dec.sign(cap) <= 0) return null;
+          // A leverage whose cap a position already exceeds is refused (DERIV_RISK_LIMIT_EXCEEDED).
+          const held = dec.isDecimal(riskMark || "x") ? list.reduce((m, p) => dec.max(m, dec.mul(dec.abs(p.quantity), riskMark)), "0") : "0";
+          return dec.gt(held, cap)
+            ? t("pcTrade.tierOver", { held: formatAmount(held, 2) })
+            : t("pcTrade.tierInfo", { value: formatAmount(cap, 0) });
         }}
       />
       <Dialog

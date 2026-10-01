@@ -83,4 +83,8 @@ export const en = {
     DERIV_POSITION_LIQUIDATING: "The position is being liquidated", DERIV_TRIGGER_IMMEDIATE: "The trigger price is already reached: place an order",
     format: "Enter a valid number", zero: "The amount must be above 0", precision: "At most {{n}} decimals", unknown: "Something went wrong ({{code}})",
   },
+  // Messages that name what the error's details carry (errorText).
+  errorDetails: {
+    DERIV_RISK_LIMIT_EXCEEDED: "Above the {{leverage}}x risk limit: this side may hold {{max_notional}} USDT, it would be {{notional}} USDT. Lower the leverage or the size",
+  },
 };

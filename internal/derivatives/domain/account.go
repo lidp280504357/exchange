@@ -57,10 +57,17 @@ func CheckRiskLimit(c Contract, o Order, held map[PositionSide]Position, active 
 		}
 	}
 	limit := c.MaxNotional(o.Leverage)
-	if exposure.Add(o.Qty).Mul(mark).GreaterThan(limit) {
-		return ErrRiskLimitExceeded.WithDetail("max_notional", limit.String()).WithDetail("leverage", o.Leverage)
+	if notional := exposure.Add(o.Qty).Mul(mark); notional.GreaterThan(limit) {
+		return riskLimitExceeded(limit, o.Leverage, notional)
 	}
 	return nil
+}
+
+// riskLimitExceeded names the cap of the leverage and the notional that
+// went past it (up to the cent), so that the client can say by how much.
+func riskLimitExceeded(limit decimal.Decimal, leverage int32, notional decimal.Decimal) error {
+	return ErrRiskLimitExceeded.WithDetail("max_notional", limit.String()).WithDetail("leverage", leverage).
+		WithDetail("notional", ceil(notional, 2).String())
 }
 
 // Summary is a user's FUTURES account at the mark prices.

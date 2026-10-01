@@ -71,11 +71,13 @@
   --t-slow: 320ms;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 
-  --z-dropdown: 20;
+  /* Floating layers sit above whatever opened them: a menu or list opened
+     under a sticky header, in a sheet or in a dialog stays on top. */
   --z-sticky: 30;
   --z-sheet: 40;
   --z-dialog: 50;
-  --z-toast: 60;
+  --z-dropdown: 60;
+  --z-toast: 70;
 
   color-scheme: dark;
 }

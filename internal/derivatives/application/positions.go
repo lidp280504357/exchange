@@ -23,8 +23,9 @@ type PositionView struct {
 	Mark              decimal.Decimal
 	UnrealizedPnL     decimal.Decimal
 	MaintenanceMargin decimal.Decimal
-	// LiquidationPrice is the estimate of an isolated position (§11.7);
-	// zero for cross positions, whose price depends on the whole account.
+	// LiquidationPrice is the estimate of §11.7: an isolated position's
+	// own; a cross position's against the whole cross account, the other
+	// positions at their marks. Zero when there is none.
 	LiquidationPrice decimal.Decimal
 }
 
@@ -53,7 +54,64 @@ func (s *Service) Positions(ctx context.Context, userID, symbol string) ([]Posit
 		}
 		out = append(out, v)
 	}
+	if slices.ContainsFunc(out, func(v PositionView) bool { return v.MarginMode == domain.Cross }) {
+		if err := s.crossLiquidation(ctx, userID, out); err != nil {
+			s.Log.WarnContext(ctx, "cross liquidation prices not estimated", "user_id", userID, "error", err)
+		}
+	}
 	return out, nil
+}
+
+// crossLiquidation sets the liquidation price estimates of the cross
+// positions among views: the cross equity of the account and the
+// maintenance margin of its other cross positions, every contract of them
+// at its mark, as the margin monitor measures them (checkCross). Without a
+// mark for one of the account's cross positions the estimates stay unset.
+func (s *Service) crossLiquidation(ctx context.Context, userID string, views []PositionView) error {
+	all, err := s.Store.Read().Positions().OfUser(ctx, userID, "")
+	if err != nil {
+		return err
+	}
+	contracts := map[string]domain.Contract{}
+	marks := map[string]decimal.Decimal{}
+	var cross []domain.Position
+	for _, p := range all {
+		if p.Flat() || p.MarginMode != domain.Cross {
+			continue
+		}
+		c, err := s.Instruments.Contract(ctx, p.Symbol)
+		if err != nil {
+			return err
+		}
+		m, _ := s.Marks.Mark(p.Symbol)
+		if !m.Price.IsPositive() {
+			return nil
+		}
+		contracts[p.Symbol], marks[p.Symbol] = c, m.Price
+		cross = append(cross, p)
+	}
+	if len(cross) == 0 {
+		return nil
+	}
+	bal, err := s.Ledger.Balance(ctx, userID, contracts[cross[0].Symbol].Quote)
+	if err != nil {
+		return err
+	}
+	orders, err := s.Store.Read().Orders().Unreleased(ctx, userID)
+	if err != nil {
+		return err
+	}
+	equity, maintenance := domain.CrossEquity(bal.Available, orders, cross, contracts, marks)
+	for i, v := range views {
+		c, ok := contracts[v.Symbol]
+		if v.MarginMode != domain.Cross || !ok {
+			continue
+		}
+		mark := marks[v.Symbol]
+		others := maintenance.Sub(v.Position.MaintenanceMargin(c, mark))
+		views[i].LiquidationPrice = domain.CrossLiquidationPrice(c, v.Position, mark, equity, others)
+	}
+	return nil
 }
 
 // Settings returns the user's settings on a contract.
