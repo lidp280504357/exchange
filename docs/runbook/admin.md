@@ -39,8 +39,8 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 | 角色 | 权限 |
 |---|---|
 | ADMIN | 全部，包括只有它有的 `settings.write`（后台设置：双人审批与单人限额） |
-| OPERATOR | 读 + 改账户状态、撤销用户挂单、改交易对与合约状态、解除合约只减仓（`derivatives.write`）、切换功能开关（后台自己的 `admin.*` 开关除外）、备注与标签（`users.notes`）、账户安全操作与换绑审核（`users.security`）、查看完整联系方式（`users.contacts`） |
-| FINANCE | 读 + 提现审批、发起与审批手动调账和保险基金注资、备注与标签、查看完整联系方式 |
+| OPERATOR | 读 + 改账户状态、撤销用户挂单（全部或单笔）、改交易对与合约状态、解除合约只减仓与强制平仓（`derivatives.write`）、切换功能开关（后台自己的 `admin.*` 开关除外）、备注与标签（`users.notes`）、账户安全操作与换绑审核（`users.security`）、查看完整联系方式（`users.contacts`）、风控冻结（`ledger.hold`） |
+| FINANCE | 读 + 提现审批、发起与审批手动调账（现货或合约账户）和保险基金注资、备注与标签、查看完整联系方式、风控冻结 |
 | AUDITOR | 只读（用户（联系方式脱敏）、资产与交易对、合约（`derivatives.read`）、功能开关、提现、审计日志、报表） |
 
 越权返回 403 `ADMIN_FORBIDDEN`。前端按 `/admin/v1/me` 返回的权限列表显示菜单与按钮，但以服务端检查为准。`admin.*` 开关（`admin.login_without_totp`、`admin.two_person_approval`）在开关页也要 `settings.write`，运营不能借开关页关掉双人审批。
@@ -81,11 +81,14 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 - **安全**（auth-service 新增的 gRPC，见 [auth.md](auth.md#管理后台的安全操作grpcc2)）：身份验证器状态与重置、密码修改时间与登录锁定、生成临时密码、活跃会话（逐个或全部退出）、设备、登录记录（游标分页）。操作需 `users.security` 与理由，审计 `admin.users.totp_reset`、`admin.users.password_reset`、`admin.users.sessions_revoked`。
   - **临时密码**只显示一次（应答带 `Cache-Control: no-store`，不进日志与审计）：原密码失效、全部会话退出、登录锁定清除，用户收到密码重置邮件，24 小时内的提现转人工审核。通过可信渠道告知用户，并提醒用户登录后立即修改。用户站暂不强制"下次登录必须改密码"（见设计稿 §10 C2 的遗留）。
 - **风控**：风控规则对该用户的评估（触发事件、分数、动作、是否执行、命中规则及说明；risk-service 新增只读 gRPC `ListAssessments`），并可转人工审核（`RISK_REVIEW`）或审核通过后恢复（同「改账户状态」，需 `users.status`）。
-- **余额与资金**、订单、成交、充值、提现、**备注与标签**（`users.notes`；备注只增不改，审计 `admin.users.note_added`；标签为大写代码，整体替换，审计 `admin.users.tags_changed` 带前后值）、审计。
+- **余额与资金**：现货与合约账户每个资产的可用、冻结、合计与 USDT 估值（按该资产 USDT 交易对的最新价，没有价格的列出来、不计入总估值）；**风控冻结**（`ledger.hold`，ADMIN、OPERATOR、FINANCE）：冻结现货可用余额的一部分或解冻，由账本记分录与审计（见 [ledger.md](ledger.md#接口)）；调整余额可选现货或合约账户。
+- **订单**：现货订单（可单笔撤单，`orders.cancel`，审计 `admin.orders.canceled`）与合约当前委托（可单笔撤单，审计 `admin.derivatives.order_canceled`）。
+- **仓位**：合约持仓（开仓均价、标记价、预估强平价、未实现盈亏、保证金与模式），每 5 秒刷新；**强制平仓**（`derivatives.write`）先撤该仓位的平仓挂单，再以市价全部平掉，见 [derivatives.md](derivatives.md#管理后台与读模型)。
+- 成交、充值、提现、**备注与标签**（`users.notes`；备注只增不改，审计 `admin.users.note_added`；标签为大写代码，整体替换，审计 `admin.users.tags_changed` 带前后值）、审计。
 - **身份变更申请**（`/identity-requests`，侧栏「用户」组）：只有一种身份的用户换绑邮箱或手机号要人工审核。默认列出待审核的，值脱敏；有 `users.security` 的可通过（身份改为新值并通知用户）或拒绝，需理由，审计 `admin.users.identity_request_decided`。
 - **批量审核提现**：`POST /admin/v1/withdrawals/review-batch` 一次最多 50 笔，用同一个理由逐笔处理、逐笔审计，各自返回结果；审核队列可勾选（一键选中低风险的）后一起批准或拒绝。提现详情列出该用户最近的提现与托管方回调。
 
-接口：`GET /admin/v1/users/{id}`、`/notes`（GET、POST）、`PUT …/tags`、`GET …/security`、`POST …/contacts/reveal`、`GET …/login-history`、`POST …/sessions/revoke`、`POST …/totp-reset`、`POST …/password-reset`、`GET …/history`、`GET …/risk`、`GET /admin/v1/identity-requests`、`POST /admin/v1/identity-requests/{id}/decide`（契约 `api/admin/admin.yaml`）。
+接口：`GET /admin/v1/users/{id}`、`/notes`（GET、POST）、`PUT …/tags`、`GET …/security`、`POST …/contacts/reveal`、`GET …/login-history`、`POST …/sessions/revoke`、`POST …/totp-reset`、`POST …/password-reset`、`GET …/history`、`GET …/risk`、`GET /admin/v1/identity-requests`、`POST /admin/v1/identity-requests/{id}/decide`、`GET …/balances`、`GET/POST …/holds`、`DELETE …/holds/{hold}`、`POST …/orders/{order}/cancel`、`GET …/contract-orders`、`POST …/contract-orders/{order}/cancel`、`GET …/positions`、`POST …/positions/close`（契约 `api/admin/admin.yaml`）。与设计稿 §5 的差别：强制平仓按（用户、合约、持仓方向）指定仓位（`POST /admin/v1/users/{id}/positions/close`），不用仓位 ID（平仓后再开会换 ID）；解冻用 `DELETE …/holds/{hold}` 带理由的请求体。
 
 ## 功能
 
@@ -179,7 +182,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 - 锁定：等 15 分钟自动解锁；忘记密码或丢失 TOTP：停用后用新邮箱重建（没有重置入口，避免成为绕过 TOTP 的后门）。
 - IP 白名单（可选）：在服务器建 `/opt/exchange/infra/nginx/snippets/admin-access.local.conf`，内容如 `allow 203.0.113.7; deny all;`，`task deploy` 或 `nginx -s reload` 后对 `admin.astras.vip` 整站生效（真实客户端 IP 由 Cloudflare real-ip 配置还原）。目前按用户决定不设。部署同步不会覆盖或删除这个文件。
 - 指标：运维端口 9094（`outbox_pending`、`http_server_*`）；Prometheus 任务 `admin-service`。
-- 端到端：`bash scripts/e2e/admin.sh`（对 `https://admin.astras.vip`，每次创建 4 个随机管理员、结束时停用；覆盖页面与安全头、旧地址的跳转、登录与 Cookie、角色、备注与标签、批量审核提现、冻结/解冻、交易对状态往返、撤单、开关往返、双人调账、设置的权限与校验、单人模式（ADMIN 直接 +2.5/−2.5 USDT，超过单笔限额的转审并撤回；双人模式时跳过）、待办与事件流、合约（状态、只减仓、合约状态往返、强平监控与记录、双人保险基金注资 1 USDT）、报表、用户页的安全/历史/风控与完整联系方式、换绑审核（用户换绑唯一的邮箱 → 后台通过 → 按新邮箱能查到）、重置身份验证器、全部会话退出（用户令牌立即失效）、临时密码（旧密码失效、临时密码可登录、审计里没有它）、审计查询、退出与停用）。
+- 端到端：`bash scripts/e2e/admin.sh`（对 `https://admin.astras.vip`，每次创建 4 个随机管理员、结束时停用；覆盖页面与安全头、旧地址的跳转、登录与 Cookie、角色、备注与标签、批量审核提现、冻结/解冻、交易对状态往返、撤单、开关往返、双人调账、设置的权限与校验、单人模式（ADMIN 直接 +2.5/−2.5 USDT，超过单笔限额的转审并撤回；双人模式时跳过）、待办与事件流、合约（状态、只减仓、合约状态往返、强平监控与记录、双人保险基金注资 1 USDT）、报表、用户页的估值余额、风控冻结与解冻（用户资金流水里看得到 `ADMIN_FREEZE`）、单笔撤单、合约账户调账（单人模式时）、强制平仓（用户市价买入 0.1 ETH-USDT-PERP，后台平掉后仓位为空；合约交易关闭时跳过）、安全/历史/风控与完整联系方式、换绑审核（用户换绑唯一的邮箱 → 后台通过 → 按新邮箱能查到）、重置身份验证器、全部会话退出（用户令牌立即失效）、临时密码（旧密码失效、临时密码可登录、审计里没有它）、审计查询、退出与停用）。
 - admin-service 连 derivatives-service 的内部地址：`DERIVATIVES_SERVICE_URL`（compose 里是 `http://derivatives-service:8095`）。
 
 ## 常见错误码

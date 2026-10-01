@@ -53,6 +53,9 @@ const (
 	KindADL         Kind = "ADL"
 	KindTakeProfit  Kind = "TAKE_PROFIT"
 	KindStopLoss    Kind = "STOP_LOSS"
+	// KindAdmin closes a position for the admin console (design
+	// 2026-10-02 §4.1, force close).
+	KindAdmin Kind = "ADMIN"
 	// KindHouse is HOUSE's side of a trade against its reference liquidity
 	// (ADR-0015): never stored, only the shape its fills are worked out in.
 	KindHouse Kind = "HOUSE"

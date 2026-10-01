@@ -16,6 +16,13 @@
 - gRPC `LedgerService`（`ledger-service:9185`）：`Freeze`、`Unfreeze`（`ORDER_*`/`WITHDRAW_*`）、`Transfer`、`GetBalances`，写操作都要幂等键。
 - REST（经网关，需登录）：`GET /v1/account/balances`、`POST /v1/account/transfers`（必须带 `Idempotency-Key`）、`GET /v1/account/transfers`、`GET /v1/account/ledger`。
 - 划转：现货 ↔ 合约在一个事务里完成（§13 验收 11）。需要功能开关 `account.transfer` 且账户资格允许（user-service `CheckEligibility(TRANSFER)`）；余额不足的划转记为 `FAILED` 并保留，同键重试得到同样的错误；成功/失败分别发 `account.AccountTransferCompleted`/`AccountTransferFailed`。
+- 管理后台（2026-10-02 设计 C2）：
+  - `Adjust` 可调现货或合约账户（`account_type`，默认 `SPOT`）。
+  - **风控冻结**：`PlaceHold`、`ReleaseHold`、`ListHolds`。冻结把用户现货可用余额的一部分转入冻结（分录 `ADMIN_FREEZE`，键 `hold:<冻结单ID>`），解冻原样转回（`ADMIN_UNFREEZE`，键 `hold-release:<ID>`，备注为解冻理由），每张冻结单只能解冻一次（`LEDGER_HOLD_RELEASED`）。冻结单记在 `ledger.holds`（迁移 ledger 00005），两步都在同一事务里写审计 `ledger.hold_placed`/`ledger.hold_released`（操作者为管理员邮箱）。只做现货：合约账户的冻结是保证金，由 derivatives-service 对账。用户的资金流水能看到这两类分录（站内显示为"风控冻结/风控解冻"）。
+
+```sql
+SELECT id, user_id, asset, amount, reason, actor, created_at, released_at, released_by FROM ledger.holds WHERE released_at IS NULL ORDER BY created_at DESC;
+```
 
 ## 模拟资金（阶段 1）
 

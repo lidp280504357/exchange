@@ -1,30 +1,25 @@
 import { errorText } from "@exchange/core";
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
-import { Avatar, DataTable, ErrorState, KeyValue, Skeleton, Tabs, type ColumnDef, type DataColumnMeta } from "@exchange/ui";
+import { Avatar, ErrorState, KeyValue, Skeleton, Tabs } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
-import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams, useSearchParams } from "react-router";
-import { EnumBadge, EnumText } from "../../kit/enums";
-import { IdText, Num, TimeText } from "../../kit/format";
-import type { Approval } from "../../kit/funds";
+import { EnumBadge } from "../../kit/enums";
+import { IdText, TimeText } from "../../kit/format";
 import { stagger } from "../../kit/motion";
 import { Card } from "../../kit/Page";
-import { AdjustForm, Outcome } from "../funds/Adjustments";
-import { AuditTable, DepositsTable, OrdersTable, TradesTable, useAudit, useDeposits, useOrders, useTrades } from "../records/tables";
+import { AuditTable, DepositsTable, TradesTable, useAudit, useDeposits, useTrades } from "../records/tables";
 import { useWithdrawals, WithdrawalsTable } from "../wallet/withdrawalTable";
 import { UserActions } from "./actions";
 import { useRisk, useSecurity } from "./data";
+import { BalancesTab, OrdersTab, PositionsTab } from "./money";
 import { Notes, TagChips, TagsEditor } from "./NotesTags";
 import { Contacts, ProfileTab } from "./profile";
 import { RiskTab, Score } from "./risk";
 import { SecurityTab } from "./security";
 
 type UserSummary = AdminSchemas["UserSummary"];
-type Balance = AdminSchemas["UserView"]["balances"][number];
-
-const right: DataColumnMeta = { align: "right" };
 
 /**
  * UserPage is a user's page (design 2026-10-02 §4.1): the account at the
@@ -41,7 +36,7 @@ export default function UserPage({ admin }: { admin: Admin }) {
     retry: false,
   });
   const tabs = [
-    "profile", "security", "balances", "orders", "trades",
+    "profile", "security", "balances", "orders", "positions", "trades",
     ...(can(admin, "withdrawals.read") ? ["deposits", "withdrawals"] : []),
     "risk", "notes",
     ...(can(admin, "audit.read") ? ["audit"] : []),
@@ -78,8 +73,9 @@ export default function UserPage({ admin }: { admin: Admin }) {
           <div key={tab} className="mt-4 animate-rise">
             {tab === "profile" && (u ? <ProfileTab admin={admin} user={u} /> : <Skeleton className="h-32 w-full" />)}
             {tab === "security" && <SecurityTab admin={admin} userId={id} />}
-            {tab === "balances" && <Balances admin={admin} userId={id} />}
-            {tab === "orders" && <UserOrders userId={id} />}
+            {tab === "balances" && <BalancesTab admin={admin} userId={id} />}
+            {tab === "orders" && <OrdersTab admin={admin} userId={id} />}
+            {tab === "positions" && <PositionsTab admin={admin} userId={id} />}
             {tab === "trades" && <UserTrades userId={id} />}
             {tab === "deposits" && <UserDeposits userId={id} />}
             {tab === "withdrawals" && <UserWithdrawals userId={id} />}
@@ -148,55 +144,6 @@ function Summary({ admin, user }: { admin: Admin; user: UserSummary }) {
       />
     </div>
   );
-}
-
-/** Balances lists every account and asset with what is frozen; an adjustment is made right here. */
-function Balances({ admin, userId }: { admin: Admin; userId: string }) {
-  const { t } = useTranslation();
-  const [last, setLast] = useState<Approval | null>(null);
-  const view = useQuery({
-    queryKey: ["admin", "user", userId],
-    queryFn: async () => adminData(await adminApi.GET("/admin/v1/users/lookup", { params: { query: { q: userId } } })),
-  });
-  const columns = useMemo<ColumnDef<Balance, unknown>[]>(
-    () => [
-      { id: "account", header: t("admin.users.account"), cell: ({ row }) => <EnumText group="accountType" code={row.original.account_type} /> },
-      { accessorKey: "asset", header: t("admin.common.asset") },
-      { id: "available", header: t("admin.users.available"), meta: right, cell: ({ row }) => <Num value={row.original.available} /> },
-      { id: "frozen", header: t("admin.users.frozen"), meta: right, cell: ({ row }) => <Num value={row.original.frozen} /> },
-    ],
-    [t],
-  );
-  return (
-    <div className="flex flex-col gap-5">
-      {view.isError ? (
-        <ErrorState message={errorText(view.error)} onRetry={() => void view.refetch()} />
-      ) : (
-        <DataTable
-          columns={columns}
-          data={view.data?.balances ?? []}
-          getRowId={(b) => `${b.account_type}:${b.asset}`}
-          loading={view.isPending}
-          density="compact"
-          empty={<p className="py-4 text-center text-sm text-fg-3">{t("admin.user.balancesEmpty")}</p>}
-        />
-      )}
-      {can(admin, "ledger.adjust.request") && (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-          <Card title={t("admin.user.adjust")}>
-            <AdjustForm userId={userId} onDone={setLast} />
-          </Card>
-          <Card title={t("admin.funds.outcome")}>
-            {last ? <Outcome a={last} /> : <p className="py-6 text-center text-sm text-fg-3">{t("admin.funds.noOutcome")}</p>}
-          </Card>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function UserOrders({ userId }: { userId: string }) {
-  return <OrdersTable list={useOrders({ user_id: userId })} withUser={false} />;
 }
 
 function UserTrades({ userId }: { userId: string }) {

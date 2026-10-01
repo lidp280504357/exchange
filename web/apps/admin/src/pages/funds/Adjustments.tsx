@@ -49,12 +49,15 @@ export default function Adjustments({ admin }: { admin: Admin }) {
   );
 }
 
-/** AdjustForm credits or debits a user's spot balance; without onUser the user is fixed (the user's page). */
+type Account = "SPOT" | "FUTURES";
+
+/** AdjustForm credits or debits a user's spot or futures balance; without onUser the user is fixed (the user's page). */
 export function AdjustForm({ userId, onUser, onDone }: { userId: string; onUser?: (id: string) => void; onDone: (a: Approval) => void }) {
   const { t } = useTranslation();
   const settings = useConsoleSettings().data;
   const [query, setQuery] = useState(userId);
   const [direction, setDirection] = useState<"credit" | "debit">("credit");
+  const [account, setAccount] = useState<Account>("SPOT");
   const [asset, setAsset] = useState("USDT");
   const [amount, setAmount] = useState("");
   const [reference, setReference] = useState("");
@@ -78,7 +81,7 @@ export function AdjustForm({ userId, onUser, onDone }: { userId: string; onUser?
   const amountOk = dec.isDecimal(a) && dec.gt(a, "0");
   const signed = direction === "credit" ? a : `-${a}`;
   const ready = !!user.data && amountOk && asset.trim() !== "";
-  const balance = user.data?.balances.find((b) => b.account_type === "SPOT" && b.asset === asset.trim().toUpperCase());
+  const balance = user.data?.balances.find((b) => b.account_type === account && b.asset === asset.trim().toUpperCase());
   return (
     <div className="flex flex-col gap-4">
       {onUser && (
@@ -99,8 +102,20 @@ export function AdjustForm({ userId, onUser, onDone }: { userId: string; onUser?
           />
         </label>
       )}
-      {userId && <UserLine view={user.data} loading={user.isPending} error={user.isError} asset={asset.trim().toUpperCase()} />}
-      <div className="grid gap-3 sm:grid-cols-[auto_1fr_1.4fr]">
+      {userId && <UserLine view={user.data} loading={user.isPending} error={user.isError} asset={asset.trim().toUpperCase()} account={account} />}
+      <label className="flex flex-col gap-1.5 text-sm text-fg-2">
+        {t("admin.money.account")}
+        <Segmented
+          size="md"
+          value={account}
+          onValueChange={(v) => setAccount(v as Account)}
+          items={[
+            { value: "SPOT", label: t("admin.enum.accountType.SPOT") },
+            { value: "FUTURES", label: t("admin.enum.accountType.FUTURES") },
+          ]}
+        />
+      </label>
+      <div className="grid gap-3 sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,1.4fr)]">
         <label className="flex flex-col gap-1.5 text-sm text-fg-2">
           {t("admin.funds.direction")}
           <Segmented
@@ -149,6 +164,7 @@ export function AdjustForm({ userId, onUser, onDone }: { userId: string; onUser?
         target={
           <span className="inline-flex flex-wrap items-center gap-2">
             <span className="font-mono text-xs">{userId}</span>
+            <EnumBadge group="accountType" code={account} />
             <Num value={signed} unit={asset.trim().toUpperCase()} signed />
           </span>
         }
@@ -157,7 +173,10 @@ export function AdjustForm({ userId, onUser, onDone }: { userId: string; onUser?
           adminData(
             await adminApi.POST("/admin/v1/users/{id}/adjustments", {
               params: { path: { id: userId } },
-              body: { asset: asset.trim().toUpperCase(), amount: signed, reason, ...(reference.trim() ? { reference: reference.trim() } : {}) },
+              body: {
+                account_type: account, asset: asset.trim().toUpperCase(), amount: signed, reason,
+                ...(reference.trim() ? { reference: reference.trim() } : {}),
+              },
             }),
           )
         }
@@ -172,18 +191,20 @@ export function AdjustForm({ userId, onUser, onDone }: { userId: string; onUser?
   );
 }
 
-/** UserLine is the chosen account with its spot balance of the asset. */
-function UserLine({ view, loading, error, asset }: { view?: UserView; loading: boolean; error: boolean; asset: string }) {
+/** UserLine is the chosen account with its balance of the asset in the account chosen. */
+function UserLine({ view, loading, error, asset, account }: { view?: UserView; loading: boolean; error: boolean; asset: string; account: Account }) {
   const { t } = useTranslation();
   const open = useOpenUser();
   if (loading) return <Skeleton className="h-12 w-full" />;
   if (error || !view) return <p className="text-sm text-danger">{t("admin.funds.noUser")}</p>;
-  const b = view.balances.find((x) => x.account_type === "SPOT" && x.asset === asset);
+  const b = view.balances.find((x) => x.account_type === account && x.asset === asset);
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-2 border border-line-1 bg-bg-0 px-3 py-2.5 text-sm">
       <IdText value={view.user.id} chars={13} />
       <EnumBadge group="userStatus" code={view.user.status} />
-      <span className="text-fg-3">{t("admin.funds.spotBalance", { asset })}</span>
+      <span className="text-fg-3">
+        {account === "SPOT" ? t("admin.funds.spotBalance", { asset }) : t("admin.money.futuresBalance", { asset })}
+      </span>
       <Num value={b?.available ?? "0"} unit={asset} />
       {b && dec.gt(b.frozen, "0") && (
         <span className="text-xs text-fg-3">
@@ -224,7 +245,11 @@ export function Outcome({ a }: { a: Approval }) {
             </thead>
             <tbody className="font-mono text-xs">
               <tr className="border-t border-line-1">
-                <td className="py-1.5">{t("admin.funds.entryUser", { id: (p.user_id ?? "").slice(0, 8) })}</td>
+                <td className="py-1.5">
+                  {p.account_type === "FUTURES"
+                    ? t("admin.money.entryUserFutures", { id: (p.user_id ?? "").slice(0, 8) })
+                    : t("admin.funds.entryUser", { id: (p.user_id ?? "").slice(0, 8) })}
+                </td>
                 <td className="py-1.5 text-right">
                   <Num value={p.amount} unit={p.asset} signed />
                 </td>

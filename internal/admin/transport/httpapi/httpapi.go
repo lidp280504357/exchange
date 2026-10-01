@@ -82,6 +82,15 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/users/{id}/risk", h.userRisk)
 			r.Get("/identity-requests", h.identityRequests)
 			r.Post("/identity-requests/{id}/decide", h.decideIdentityRequest)
+			r.Get("/users/{id}/balances", h.balances)
+			r.Get("/users/{id}/holds", h.holds)
+			r.Post("/users/{id}/holds", h.placeHold)
+			r.Delete("/users/{id}/holds/{hold}", h.releaseHold)
+			r.Post("/users/{id}/orders/{order}/cancel", h.cancelOrder)
+			r.Get("/users/{id}/contract-orders", h.contractOrders)
+			r.Post("/users/{id}/contract-orders/{order}/cancel", h.cancelContractOrder)
+			r.Get("/users/{id}/positions", h.userPositions)
+			r.Post("/users/{id}/positions/close", h.closePosition)
 			r.Post("/users/{id}/adjustments", h.userAdjustment)
 			r.Get("/orders", h.orders)
 			r.Get("/trades", h.trades)
@@ -712,12 +721,13 @@ func approvalJSON(a domain.Approval) ApprovalJSON {
 
 // fundBody is the body of a fund operation.
 type fundBody struct {
-	UserID    string `json:"user_id"`
-	Asset     string `json:"asset"`
-	Amount    string `json:"amount"`
-	Reason    string `json:"reason"`
-	Reference string `json:"reference"`
-	Direct    bool   `json:"direct"`
+	UserID      string `json:"user_id"`
+	AccountType string `json:"account_type"`
+	Asset       string `json:"asset"`
+	Amount      string `json:"amount"`
+	Reason      string `json:"reason"`
+	Reference   string `json:"reference"`
+	Direct      bool   `json:"direct"`
 }
 
 // submitFunds answers a fund operation: 201 with it, whatever came of it.
@@ -728,8 +738,8 @@ func (h *Handler) submitFunds(w http.ResponseWriter, r *http.Request, kind strin
 		return
 	}
 	a, err := h.Svc.SubmitFunds(r.Context(), principal(r), application.FundRequest{
-		Kind: kind, UserID: body.UserID, Asset: body.Asset, Amount: amount, Reason: body.Reason, Reference: body.Reference,
-		Direct: body.Direct,
+		Kind: kind, UserID: body.UserID, AccountType: body.AccountType, Asset: body.Asset, Amount: amount, Reason: body.Reason,
+		Reference: body.Reference, Direct: body.Direct,
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)
@@ -761,12 +771,9 @@ func (h *Handler) userAdjustment(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	if t := strings.ToUpper(body.AccountType); t != "" && t != "SPOT" {
-		httpx.WriteError(w, r, apperr.Invalid("account_type must be SPOT"))
-		return
-	}
 	h.submitFunds(w, r, domain.KindLedgerAdjustment, fundBody{
-		UserID: chi.URLParam(r, "id"), Asset: body.Asset, Amount: body.Amount, Reason: body.Reason, Reference: body.Reference, Direct: true,
+		UserID: chi.URLParam(r, "id"), AccountType: body.AccountType, Asset: body.Asset, Amount: body.Amount, Reason: body.Reason,
+		Reference: body.Reference, Direct: true,
 	})
 }
 

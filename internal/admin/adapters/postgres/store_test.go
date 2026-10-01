@@ -32,10 +32,20 @@ import (
 
 type ledger struct{ keys []string }
 
-func (l *ledger) Adjust(_ context.Context, key, _, _ string, _ decimal.Decimal, _, _ string) (string, error) {
+func (l *ledger) Adjust(_ context.Context, key, _, _, _ string, _ decimal.Decimal, _, _ string) (string, error) {
 	l.keys = append(l.keys, key)
 	return "j1", nil
 }
+
+func (l *ledger) PlaceHold(context.Context, string, string, string, decimal.Decimal, string, string) (ports.Hold, error) {
+	return ports.Hold{}, nil
+}
+
+func (l *ledger) ReleaseHold(context.Context, string, string, string) (ports.Hold, error) {
+	return ports.Hold{}, nil
+}
+
+func (l *ledger) Holds(context.Context, string, bool) ([]ports.Hold, error) { return nil, nil }
 
 func (l *ledger) FundInsurance(_ context.Context, key, _ string, _ decimal.Decimal, _, _ string) (string, error) {
 	l.keys = append(l.keys, key)

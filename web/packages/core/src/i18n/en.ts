@@ -37,7 +37,7 @@ export const en = {
     SPOT: "Spot", FUTURES: "Futures", AVAILABLE: "Available", FROZEN: "Frozen",
     MANUAL_ADJUSTMENT: "Adjustment (simulated funds)", ACCOUNT_TRANSFER: "Transfer", ORDER_FREEZE: "Order hold", ORDER_UNFREEZE: "Order release",
     TRADE_SETTLE: "Trade", HOUSE_TRADE_SETTLE: "Trade", TRADE_FEE: "Fee", DEPOSIT_CREDIT: "Deposit", WITHDRAW_FREEZE: "Withdrawal hold", WITHDRAW_SETTLE: "Withdrawal",
-    WITHDRAW_UNFREEZE: "Withdrawal release", INTERNAL_TRANSFER: "Internal transfer",
+    WITHDRAW_UNFREEZE: "Withdrawal release", INTERNAL_TRANSFER: "Internal transfer", ADMIN_FREEZE: "Risk hold", ADMIN_UNFREEZE: "Risk hold released",
     PASSWORD: "Password", OTP: "Code", LOGIN_CHALLENGE: "Sign-in check", REGISTER: "Sign-up",
     SUCCESS: "Success", FAILED_PASSWORD: "Wrong password", LOCKED: "Locked", CHALLENGE_REQUIRED: "Check required",
     WEB: "Web", APP: "App", ACTIVE: "Active", RISK_REVIEW: "Under review", FROZEN_ACCOUNT: "Frozen", CLOSED: "Closed",

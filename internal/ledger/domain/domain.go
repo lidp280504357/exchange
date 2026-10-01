@@ -63,12 +63,17 @@ const (
 	EntryADLSettle             = "ADL_SETTLE"
 	EntryInternalTransfer      = "INTERNAL_TRANSFER"
 	EntryManualAdjustment      = "MANUAL_ADJUSTMENT"
+	// An administrator's hold on part of a balance and its release
+	// (design 2026-10-02 §4.1, risk control).
+	EntryAdminFreeze   = "ADMIN_FREEZE"
+	EntryAdminUnfreeze = "ADMIN_UNFREEZE"
 )
 
 var entryTypes = []string{
 	EntryDepositCredit, EntryWithdrawFreeze, EntryWithdrawSettle, EntryWithdrawUnfreeze, EntryOrderFreeze, EntryOrderUnfreeze,
 	EntryTradeSettle, EntryTradeFee, EntryAccountTransfer, EntryFundingPayment, EntryRealizedPnL, EntryLiquidationSettle,
 	EntryInsuranceContribution, EntryADLSettle, EntryInternalTransfer, EntryManualAdjustment, EntryHouseTradeSettle,
+	EntryAdminFreeze, EntryAdminUnfreeze,
 }
 
 var systemAccounts = []string{

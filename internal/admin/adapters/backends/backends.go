@@ -133,9 +133,9 @@ func (u Users) Stats(ctx context.Context, since time.Time, days int) (ports.User
 type Ledger struct{ C ledgerv1.LedgerServiceClient }
 
 // Adjust books an approved manual adjustment.
-func (l Ledger) Adjust(ctx context.Context, key, userID, asset string, amount decimal.Decimal, actor, reason string) (string, error) {
+func (l Ledger) Adjust(ctx context.Context, key, userID, accountType, asset string, amount decimal.Decimal, actor, reason string) (string, error) {
 	resp, err := l.C.Adjust(ctx, &ledgerv1.AdjustRequest{
-		IdempotencyKey: key, UserId: userID, Asset: asset, Amount: amount.String(), Reason: reason, Actor: actor,
+		IdempotencyKey: key, UserId: userID, Asset: asset, Amount: amount.String(), Reason: reason, Actor: actor, AccountType: accountType,
 	})
 	if err != nil {
 		return "", err

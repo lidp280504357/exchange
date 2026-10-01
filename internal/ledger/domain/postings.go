@@ -129,13 +129,22 @@ func HouseAdjustmentPosting(idemKey string, credits []Credit, memo string) (Post
 // SPOT account against the ADJUSTMENT account: operator corrections and
 // the simulated funds of phase 1 (§11.4).
 func AdjustmentPosting(idemKey, userID string, credits []Credit, memo string) (Posting, error) {
+	return AccountAdjustmentPosting(idemKey, userID, AccountSpot, credits, memo)
+}
+
+// AccountAdjustmentPosting is AdjustmentPosting on the user's SPOT or
+// FUTURES account (the admin console adjusts either).
+func AccountAdjustmentPosting(idemKey, userID, accountType string, credits []Credit, memo string) (Posting, error) {
+	if err := userAccountType(accountType); err != nil {
+		return Posting{}, err
+	}
 	p := Posting{IdemKey: idemKey, EntryType: EntryManualAdjustment, Memo: memo}
 	for _, c := range credits {
 		if c.Amount.IsZero() || !c.Amount.Equal(c.Amount.Truncate(c.Decimals)) {
 			return Posting{}, apperr.Invalid(fmt.Sprintf("invalid %s amount %s", c.Asset, c.Amount))
 		}
 		p.Lines = append(p.Lines,
-			Line{Account: UserAccount(userID, AccountSpot, c.Asset), Amount: c.Amount, Kind: Available},
+			Line{Account: UserAccount(userID, accountType, c.Asset), Amount: c.Amount, Kind: Available},
 			Line{Account: SystemAccount(AccountAdjustment, c.Asset), Amount: c.Amount.Neg(), Kind: Available},
 		)
 	}

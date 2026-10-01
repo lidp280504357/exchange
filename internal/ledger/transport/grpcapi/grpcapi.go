@@ -178,7 +178,8 @@ func (s *Server) Adjust(ctx context.Context, req *ledgerv1.AdjustRequest) (*ledg
 	if err != nil {
 		return nil, err
 	}
-	res, err := s.svc.AdjustApproved(ctx, req.GetIdempotencyKey(), req.GetUserId(), req.GetAsset(), a, req.GetActor(), req.GetReason())
+	res, err := s.svc.AdjustApproved(ctx, req.GetIdempotencyKey(), req.GetUserId(), req.GetAccountType(), req.GetAsset(), a, req.GetActor(),
+		req.GetReason())
 	if err != nil {
 		return nil, err
 	}

@@ -34,7 +34,7 @@ export const zhCN = {
     SPOT: "现货", FUTURES: "合约", AVAILABLE: "可用", FROZEN: "冻结",
     MANUAL_ADJUSTMENT: "调账（模拟资金）", ACCOUNT_TRANSFER: "账户划转", ORDER_FREEZE: "下单冻结", ORDER_UNFREEZE: "订单解冻",
     TRADE_SETTLE: "成交", HOUSE_TRADE_SETTLE: "成交", TRADE_FEE: "手续费", DEPOSIT_CREDIT: "充值入账", WITHDRAW_FREEZE: "提现冻结", WITHDRAW_SETTLE: "提现",
-    WITHDRAW_UNFREEZE: "提现解冻", INTERNAL_TRANSFER: "站内转账",
+    WITHDRAW_UNFREEZE: "提现解冻", INTERNAL_TRANSFER: "站内转账", ADMIN_FREEZE: "风控冻结", ADMIN_UNFREEZE: "风控解冻",
     PASSWORD: "密码", OTP: "验证码", LOGIN_CHALLENGE: "登录验证", REGISTER: "注册",
     SUCCESS: "成功", FAILED_PASSWORD: "密码错误", LOCKED: "已锁定", CHALLENGE_REQUIRED: "需要验证",
     WEB: "网页", APP: "应用", ACTIVE: "正常", RISK_REVIEW: "审核中", FROZEN_ACCOUNT: "已冻结", CLOSED: "已注销",

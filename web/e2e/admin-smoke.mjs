@@ -70,8 +70,15 @@ try {
   await waitText("登录记录");
   await noError("the security tab");
   await clickButton("余额与资金", "main");
+  await waitText("总估值");
+  await waitText("风控冻结");
   await waitText("调整余额");
-  for (const tab of ["订单", "成交", "提现", "风控", "备注与标签", "审计"]) await clickButton(tab, "main");
+  await clickButton("订单", "main");
+  await waitText("合约当前委托");
+  await clickButton("仓位", "main");
+  await sleep(1000);
+  await noError("the positions tab");
+  for (const tab of ["成交", "提现", "风控", "备注与标签", "审计"]) await clickButton(tab, "main");
   await waitText("UID");
   await t.shot("2-user");
   ok(`users: the list, a user's page (${userId.slice(0, 8)}…) with its tabs (profile, security, risk …)`);

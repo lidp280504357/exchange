@@ -32,6 +32,9 @@ const (
 	LedgerService_SettleFutures_FullMethodName     = "/exchange.ledger.v1.LedgerService/SettleFutures"
 	LedgerService_FundInsurance_FullMethodName     = "/exchange.ledger.v1.LedgerService/FundInsurance"
 	LedgerService_GetReconciliation_FullMethodName = "/exchange.ledger.v1.LedgerService/GetReconciliation"
+	LedgerService_PlaceHold_FullMethodName         = "/exchange.ledger.v1.LedgerService/PlaceHold"
+	LedgerService_ReleaseHold_FullMethodName       = "/exchange.ledger.v1.LedgerService/ReleaseHold"
+	LedgerService_ListHolds_FullMethodName         = "/exchange.ledger.v1.LedgerService/ListHolds"
 )
 
 // LedgerServiceClient is the client API for LedgerService service.
@@ -73,9 +76,9 @@ type LedgerServiceClient interface {
 	FundSystemAccount(ctx context.Context, in *FundSystemAccountRequest, opts ...grpc.CallOption) (*FundSystemAccountResponse, error)
 	// GetSystemBalances returns the platform's system accounts in an asset.
 	GetSystemBalances(ctx context.Context, in *GetSystemBalancesRequest, opts ...grpc.CallOption) (*GetSystemBalancesResponse, error)
-	// Adjust credits (or, negative, debits) a user's SPOT account against
-	// ADJUSTMENT (MANUAL_ADJUSTMENT) with an audit event; the admin console
-	// calls it once two people approved (§5.12). Needs
+	// Adjust credits (or, negative, debits) a user's SPOT or FUTURES account
+	// against ADJUSTMENT (MANUAL_ADJUSTMENT) with an audit event; the admin
+	// console calls it once the adjustment was approved (§5.12). Needs
 	// ledger.manual_adjustment.
 	Adjust(ctx context.Context, in *AdjustRequest, opts ...grpc.CallOption) (*AdjustResponse, error)
 	// SettleFutures books one settlement step of a user's perpetual contract
@@ -96,6 +99,15 @@ type LedgerServiceClient interface {
 	// the recent runs that found mismatches (the admin console's ledger
 	// page).
 	GetReconciliation(ctx context.Context, in *GetReconciliationRequest, opts ...grpc.CallOption) (*GetReconciliationResponse, error)
+	// PlaceHold freezes part of a user's SPOT balance for the admin console
+	// (ADMIN_FREEZE, design 2026-10-02 §4.1) with an audit event; the hold
+	// ID is the caller's, and repeating it with the same hold returns it.
+	PlaceHold(ctx context.Context, in *PlaceHoldRequest, opts ...grpc.CallOption) (*PlaceHoldResponse, error)
+	// ReleaseHold returns a hold to the available balance (ADMIN_UNFREEZE)
+	// with an audit event; a hold is released once (LEDGER_HOLD_RELEASED).
+	ReleaseHold(ctx context.Context, in *ReleaseHoldRequest, opts ...grpc.CallOption) (*ReleaseHoldResponse, error)
+	// ListHolds lists a user's holds, newest first.
+	ListHolds(ctx context.Context, in *ListHoldsRequest, opts ...grpc.CallOption) (*ListHoldsResponse, error)
 }
 
 type ledgerServiceClient struct {
@@ -236,6 +248,36 @@ func (c *ledgerServiceClient) GetReconciliation(ctx context.Context, in *GetReco
 	return out, nil
 }
 
+func (c *ledgerServiceClient) PlaceHold(ctx context.Context, in *PlaceHoldRequest, opts ...grpc.CallOption) (*PlaceHoldResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PlaceHoldResponse)
+	err := c.cc.Invoke(ctx, LedgerService_PlaceHold_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ledgerServiceClient) ReleaseHold(ctx context.Context, in *ReleaseHoldRequest, opts ...grpc.CallOption) (*ReleaseHoldResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReleaseHoldResponse)
+	err := c.cc.Invoke(ctx, LedgerService_ReleaseHold_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ledgerServiceClient) ListHolds(ctx context.Context, in *ListHoldsRequest, opts ...grpc.CallOption) (*ListHoldsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListHoldsResponse)
+	err := c.cc.Invoke(ctx, LedgerService_ListHolds_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LedgerServiceServer is the server API for LedgerService service.
 // All implementations must embed UnimplementedLedgerServiceServer
 // for forward compatibility.
@@ -275,9 +317,9 @@ type LedgerServiceServer interface {
 	FundSystemAccount(context.Context, *FundSystemAccountRequest) (*FundSystemAccountResponse, error)
 	// GetSystemBalances returns the platform's system accounts in an asset.
 	GetSystemBalances(context.Context, *GetSystemBalancesRequest) (*GetSystemBalancesResponse, error)
-	// Adjust credits (or, negative, debits) a user's SPOT account against
-	// ADJUSTMENT (MANUAL_ADJUSTMENT) with an audit event; the admin console
-	// calls it once two people approved (§5.12). Needs
+	// Adjust credits (or, negative, debits) a user's SPOT or FUTURES account
+	// against ADJUSTMENT (MANUAL_ADJUSTMENT) with an audit event; the admin
+	// console calls it once the adjustment was approved (§5.12). Needs
 	// ledger.manual_adjustment.
 	Adjust(context.Context, *AdjustRequest) (*AdjustResponse, error)
 	// SettleFutures books one settlement step of a user's perpetual contract
@@ -298,6 +340,15 @@ type LedgerServiceServer interface {
 	// the recent runs that found mismatches (the admin console's ledger
 	// page).
 	GetReconciliation(context.Context, *GetReconciliationRequest) (*GetReconciliationResponse, error)
+	// PlaceHold freezes part of a user's SPOT balance for the admin console
+	// (ADMIN_FREEZE, design 2026-10-02 §4.1) with an audit event; the hold
+	// ID is the caller's, and repeating it with the same hold returns it.
+	PlaceHold(context.Context, *PlaceHoldRequest) (*PlaceHoldResponse, error)
+	// ReleaseHold returns a hold to the available balance (ADMIN_UNFREEZE)
+	// with an audit event; a hold is released once (LEDGER_HOLD_RELEASED).
+	ReleaseHold(context.Context, *ReleaseHoldRequest) (*ReleaseHoldResponse, error)
+	// ListHolds lists a user's holds, newest first.
+	ListHolds(context.Context, *ListHoldsRequest) (*ListHoldsResponse, error)
 	mustEmbedUnimplementedLedgerServiceServer()
 }
 
@@ -346,6 +397,15 @@ func (UnimplementedLedgerServiceServer) FundInsurance(context.Context, *FundInsu
 }
 func (UnimplementedLedgerServiceServer) GetReconciliation(context.Context, *GetReconciliationRequest) (*GetReconciliationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetReconciliation not implemented")
+}
+func (UnimplementedLedgerServiceServer) PlaceHold(context.Context, *PlaceHoldRequest) (*PlaceHoldResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PlaceHold not implemented")
+}
+func (UnimplementedLedgerServiceServer) ReleaseHold(context.Context, *ReleaseHoldRequest) (*ReleaseHoldResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReleaseHold not implemented")
+}
+func (UnimplementedLedgerServiceServer) ListHolds(context.Context, *ListHoldsRequest) (*ListHoldsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListHolds not implemented")
 }
 func (UnimplementedLedgerServiceServer) mustEmbedUnimplementedLedgerServiceServer() {}
 func (UnimplementedLedgerServiceServer) testEmbeddedByValue()                       {}
@@ -602,6 +662,60 @@ func _LedgerService_GetReconciliation_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LedgerService_PlaceHold_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PlaceHoldRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LedgerServiceServer).PlaceHold(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LedgerService_PlaceHold_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LedgerServiceServer).PlaceHold(ctx, req.(*PlaceHoldRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _LedgerService_ReleaseHold_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReleaseHoldRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LedgerServiceServer).ReleaseHold(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LedgerService_ReleaseHold_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LedgerServiceServer).ReleaseHold(ctx, req.(*ReleaseHoldRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _LedgerService_ListHolds_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListHoldsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LedgerServiceServer).ListHolds(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LedgerService_ListHolds_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LedgerServiceServer).ListHolds(ctx, req.(*ListHoldsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LedgerService_ServiceDesc is the grpc.ServiceDesc for LedgerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -660,6 +774,18 @@ var LedgerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetReconciliation",
 			Handler:    _LedgerService_GetReconciliation_Handler,
+		},
+		{
+			MethodName: "PlaceHold",
+			Handler:    _LedgerService_PlaceHold_Handler,
+		},
+		{
+			MethodName: "ReleaseHold",
+			Handler:    _LedgerService_ReleaseHold_Handler,
+		},
+		{
+			MethodName: "ListHolds",
+			Handler:    _LedgerService_ListHolds_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

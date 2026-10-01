@@ -383,7 +383,7 @@ export interface paths {
         /**
          * Credit or debit a user's balance
          * @description A manual adjustment (MANUAL_ADJUSTMENT against the ADJUSTMENT system
-         *     account) of the user's SPOT account: booked at once in
+         *     account) of the user's SPOT or FUTURES account: booked at once in
          *     single-person mode within the limits (EXECUTED with its journal, or
          *     FAILED with the ledger's refusal such as
          *     LEDGER_ADJUSTMENT_DISABLED), otherwise PENDING for a second
@@ -636,6 +636,187 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/users/{id}/balances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An account's balances, valued in USDT
+         * @description Every SPOT and FUTURES balance with its total (available + frozen)
+         *     valued at its USDT pair's last price, SPOT first and the larger
+         *     worth first; assets without a USDT price are listed in `unpriced`
+         *     and left out of the total. Needs users.read.
+         */
+        get: operations["getUserBalances"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{id}/holds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Holds on an account's SPOT balance, newest first
+         * @description Active and released. Needs users.read.
+         */
+        get: operations["listUserHolds"];
+        put?: never;
+        /**
+         * Freeze part of an account's SPOT balance
+         * @description The ledger moves the amount from available to frozen (ADMIN_FREEZE)
+         *     and audits it as ledger.hold_placed; more than the available
+         *     balance fails with LEDGER_INSUFFICIENT_BALANCE. The user sees the
+         *     amount frozen until it is released. Needs ledger.hold.
+         */
+        post: operations["placeUserHold"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{id}/holds/{hold}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Release a hold
+         * @description The ledger returns the amount to the available balance
+         *     (ADMIN_UNFREEZE) and audits it as ledger.hold_released; a hold is
+         *     released once (LEDGER_HOLD_RELEASED). Needs ledger.hold.
+         */
+        delete: operations["releaseUserHold"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{id}/orders/{order}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel one of an account's spot orders
+         * @description The cancel completes asynchronously in the matching engine; the
+         *     answer is the order as spot-trading-service has it. Audited as
+         *     admin.orders.canceled. Needs orders.cancel.
+         */
+        post: operations["cancelUserOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{id}/contract-orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An account's active contract orders
+         * @description As derivatives-service renders them, at most 100. Needs users.read.
+         */
+        get: operations["listUserContractOrders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{id}/contract-orders/{order}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel one of an account's contract orders
+         * @description Completes asynchronously in the engine. Audited as admin.derivatives.order_canceled. Needs orders.cancel.
+         */
+        post: operations["cancelUserContractOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{id}/positions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An account's open contract positions
+         * @description As derivatives-service renders them, with the liquidation estimate. Needs users.read.
+         */
+        get: operations["listUserPositions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/users/{id}/positions/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close a position at the market (force close)
+         * @description The closing orders resting on the position are canceled first;
+         *     once the engine confirmed (the console waits a few seconds, then
+         *     fails with DERIV_CLOSE_PENDING to try again), a market order of
+         *     kind ADMIN takes the whole position: reduce-only in one-way mode,
+         *     against its side in hedge mode. A position under liquidation is
+         *     left to the liquidation engine (DERIV_POSITION_LIQUIDATING). The
+         *     answer is the order. Audited as admin.derivatives.position_closed.
+         *     Needs derivatives.write.
+         */
+        post: operations["closeUserPosition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/withdrawals": {
         parameters: {
             query?: never;
@@ -801,13 +982,13 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Request a manual adjustment of a user's spot balance
+         * Request a manual adjustment of a user's balance
          * @description Creates a PENDING request for another administrator with
          *     ledger.adjust.approve (escalation REQUESTED), unless `direct` asks
          *     to carry it out at once, which works as POST
          *     /admin/v1/users/{id}/adjustments. A positive amount credits the
-         *     user's SPOT account against the ADJUSTMENT system account, a
-         *     negative one debits it. Needs ledger.adjust.request.
+         *     user's SPOT (or FUTURES) account against the ADJUSTMENT system
+         *     account, a negative one debits it. Needs ledger.adjust.request.
          */
         post: operations["requestAdjustment"];
         delete?: never;
@@ -1576,7 +1757,7 @@ export interface components {
             name: string;
             /** @enum {string} */
             role: "ADMIN" | "OPERATOR" | "FINANCE" | "AUDITOR";
-            permissions: ("users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write" | "settings.write" | "users.notes" | "users.security" | "users.contacts")[];
+            permissions: ("users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write" | "settings.write" | "users.notes" | "users.security" | "users.contacts" | "ledger.hold")[];
         };
         Settings: {
             /** @description Fund operations need a second administrator (the flag admin.two_person_approval). */
@@ -1700,6 +1881,89 @@ export interface components {
             enforced: boolean;
             /** Format: date-time */
             created_at: string | null;
+        };
+        ValuedBalance: {
+            /** @enum {string} */
+            account_type: "SPOT" | "FUTURES";
+            asset: string;
+            available: components["schemas"]["Decimal"];
+            frozen: components["schemas"]["Decimal"];
+            total: components["schemas"]["Decimal"];
+            /** @description The total at the asset's USDT pair's last price; null without one. */
+            value_usdt: components["schemas"]["NullableDecimal"];
+        };
+        /** @description An administrator's hold on part of a user's SPOT balance (ADMIN_FREEZE until released with ADMIN_UNFREEZE). */
+        Hold: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            account_type: "SPOT";
+            asset: string;
+            amount: components["schemas"]["Decimal"];
+            reason: string;
+            /** @description The administrator who placed it. */
+            actor: string;
+            /** Format: uuid */
+            journal_id: string;
+            /** Format: date-time */
+            created_at: string | null;
+            active: boolean;
+            /** Format: date-time */
+            released_at: string | null;
+            released_by: string;
+            release_reason: string;
+            release_journal_id: string | null;
+        };
+        /** @description An order as the service that holds it renders it. */
+        ServiceOrder: {
+            /** Format: uuid */
+            order_id: string;
+            status: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /** @description A contract order as derivatives-service renders it. */
+        ContractOrder: {
+            /** Format: uuid */
+            order_id: string;
+            client_order_id: string;
+            symbol: string;
+            /** @enum {string} */
+            side: "BUY" | "SELL";
+            /** @enum {string} */
+            position_side: "BOTH" | "LONG" | "SHORT";
+            /** @enum {string} */
+            type: "LIMIT" | "MARKET";
+            price: components["schemas"]["Decimal"];
+            quantity: components["schemas"]["Decimal"];
+            reduce_only: boolean;
+            status: string;
+            filled_quantity: components["schemas"]["Decimal"];
+            cancel_requested: boolean;
+            /** Format: date-time */
+            created_at: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /** @description A contract position as derivatives-service renders it. */
+        UserPosition: {
+            /** Format: uuid */
+            position_id: string;
+            symbol: string;
+            /** @enum {string} */
+            position_side: "BOTH" | "LONG" | "SHORT";
+            /** @description Signed, positive long. */
+            quantity: components["schemas"]["Decimal"];
+            entry_price: components["schemas"]["Decimal"];
+            mark_price: components["schemas"]["NullableDecimal"];
+            unrealized_pnl: components["schemas"]["NullableDecimal"];
+            margin: components["schemas"]["Decimal"];
+            /** @enum {string} */
+            margin_mode: "CROSS" | "ISOLATED";
+            leverage: number;
+            liquidation_price: components["schemas"]["NullableDecimal"];
+        } & {
+            [key: string]: unknown;
         };
         IdentityRequest: {
             /** Format: uuid */
@@ -1851,7 +2115,10 @@ export interface components {
             id: string;
             /** @enum {string} */
             kind: "LEDGER_ADJUSTMENT" | "INSURANCE_FUND";
-            /** @description For LEDGER_ADJUSTMENT user_id, asset and amount; for INSURANCE_FUND asset and amount; reference when given. */
+            /**
+             * @description For LEDGER_ADJUSTMENT user_id, asset and amount, account_type FUTURES when not the SPOT account; for INSURANCE_FUND
+             *     asset and amount; reference when given.
+             */
             payload: {
                 [key: string]: string;
             };
@@ -2199,6 +2466,7 @@ export interface components {
         /** @description Days back, today included. */
         Days: number;
         UserID: string;
+        OrderID: string;
         Contract: string;
     };
     requestBodies: never;
@@ -2753,7 +3021,7 @@ export interface operations {
                      * @default SPOT
                      * @enum {string}
                      */
-                    account_type?: "SPOT";
+                    account_type?: "SPOT" | "FUTURES";
                     /** @example USDT */
                     asset: string;
                     /** @description Positive credits, negative debits. */
@@ -3088,6 +3356,259 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getUserBalances: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The balances. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        balances: components["schemas"]["ValuedBalance"][];
+                        total_usdt: components["schemas"]["Decimal"];
+                        unpriced: string[];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listUserHolds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The holds. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        holds: components["schemas"]["Hold"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    placeUserHold: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example USDT */
+                    asset: string;
+                    /** @description Positive. */
+                    amount: components["schemas"]["Decimal"];
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The hold. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Hold"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    releaseUserHold: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+                hold: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description The released hold. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Hold"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    cancelUserOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+                order: components["parameters"]["OrderID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description Cancel requested. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceOrder"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listUserContractOrders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The orders. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ContractOrder"][];
+                        next_cursor?: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    cancelUserContractOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+                order: components["parameters"]["OrderID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description Cancel requested. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractOrder"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listUserPositions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The positions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        positions: components["schemas"]["UserPosition"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    closeUserPosition: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example BTC-USDT-PERP */
+                    symbol: string;
+                    /** @enum {string} */
+                    position_side: "BOTH" | "LONG" | "SHORT";
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The closing order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractOrder"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     listWithdrawals: {
         parameters: {
             query?: {
@@ -3313,6 +3834,11 @@ export interface operations {
                 "application/json": {
                     /** Format: uuid */
                     user_id: string;
+                    /**
+                     * @default SPOT
+                     * @enum {string}
+                     */
+                    account_type?: "SPOT" | "FUTURES";
                     /** @example USDT */
                     asset: string;
                     amount: components["schemas"]["Decimal"];

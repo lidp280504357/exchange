@@ -1,0 +1,101 @@
+package postgres_test
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/lidp280504357/exchange/internal/ledger/domain"
+	"github.com/lidp280504357/exchange/internal/platform/apperr"
+)
+
+func TestHoldsAndAccountAdjustments(t *testing.T) {
+	svc, store, db := setup(t)
+	ctx := context.Background()
+	user := uuid.NewString()
+	if err := svc.OnUserRegistered(ctx, uuid.NewString(), user, "SG"); err != nil {
+		t.Fatal(err)
+	}
+
+	id := uuid.NewString()
+	h, err := svc.PlaceHold(ctx, id, user, "USDT", d("250"), "risk@example.com", "chargeback under review")
+	if err != nil || h.JournalID == "" || !h.Active() || h.AccountType != domain.AccountSpot {
+		t.Fatalf("hold: %+v %v", h, err)
+	}
+	if av, fr := usdt(t, svc, user, domain.AccountSpot); !av.Equal(d("9750")) || !fr.Equal(d("250")) {
+		t.Fatalf("after the hold: %s/%s", av, fr)
+	}
+	again, err := svc.PlaceHold(ctx, id, user, "USDT", d("250"), "risk@example.com", "chargeback under review")
+	if err != nil || again.JournalID != h.JournalID {
+		t.Fatalf("repeated: %+v %v", again, err)
+	}
+	if _, err := svc.PlaceHold(ctx, id, user, "USDT", d("300"), "risk@example.com", "chargeback under review"); !apperr.Is(err, apperr.CodeIdempotencyConflict) {
+		t.Fatalf("same ID, other amount: %v", err)
+	}
+	if _, err := svc.PlaceHold(ctx, uuid.NewString(), user, "USDT", d("9750.000001"), "risk@example.com", "too much"); !apperr.Is(err, "LEDGER_INSUFFICIENT_BALANCE") {
+		t.Fatalf("more than available: %v", err)
+	}
+	if _, err := svc.PlaceHold(ctx, uuid.NewString(), user, "USDT", d("1"), "risk@example.com", " "); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("no reason: %v", err)
+	}
+	list, err := svc.Holds(ctx, user, true)
+	if err != nil || len(list) != 1 || list[0].ID != id {
+		t.Fatalf("active holds: %+v %v", list, err)
+	}
+
+	released, err := svc.ReleaseHold(ctx, id, "ops@example.com", "cleared by the bank")
+	if err != nil || released.Active() || released.ReleasedBy != "ops@example.com" || released.ReleaseJournalID == "" {
+		t.Fatalf("release: %+v %v", released, err)
+	}
+	if _, err := svc.ReleaseHold(ctx, id, "ops@example.com", "cleared by the bank"); !apperr.Is(err, "LEDGER_HOLD_RELEASED") {
+		t.Fatalf("released twice: %v", err)
+	}
+	if _, err := svc.ReleaseHold(ctx, uuid.NewString(), "ops@example.com", "nothing"); !apperr.Is(err, apperr.CodeNotFound) {
+		t.Fatalf("an unknown hold: %v", err)
+	}
+	if av, fr := usdt(t, svc, user, domain.AccountSpot); !av.Equal(d("10000")) || !fr.IsZero() {
+		t.Fatalf("after the release: %s/%s", av, fr)
+	}
+	if list, _ := svc.Holds(ctx, user, true); len(list) != 0 {
+		t.Fatalf("no active hold left: %+v", list)
+	}
+	if list, _ := svc.Holds(ctx, user, false); len(list) != 1 || list[0].ReleaseReason != "cleared by the bank" {
+		t.Fatalf("every hold: %+v", list)
+	}
+	if n := count(t, db, `SELECT count(*) FROM journals WHERE entry_type IN ('ADMIN_FREEZE', 'ADMIN_UNFREEZE')`); n != 2 {
+		t.Fatalf("hold journals: %d", n)
+	}
+	if n := count(t, db, `SELECT count(*) FROM outbox WHERE event_type = 'audit.AdminActionPerformed'`); n != 2 {
+		t.Fatalf("hold audits: %d", n)
+	}
+
+	// The admin console adjusts the FUTURES account too.
+	res, err := svc.AdjustApproved(ctx, "approval:f1", user, domain.AccountFutures, "USDT", d("15"), "fin@example.com", "goodwill on fees")
+	if err != nil || res.Replayed {
+		t.Fatalf("futures adjustment: %+v %v", res, err)
+	}
+	if av, _ := usdt(t, svc, user, domain.AccountFutures); !av.Equal(d("15")) {
+		t.Fatalf("futures balance: %s", av)
+	}
+	if _, err := svc.AdjustApproved(ctx, "approval:f1", user, domain.AccountSpot, "USDT", d("15"), "fin@example.com", "goodwill on fees"); !apperr.Is(err, apperr.CodeIdempotencyConflict) {
+		t.Fatalf("same key, other account: %v", err)
+	}
+	if _, err := svc.AdjustApproved(ctx, "approval:f2", user, "MARGIN", "USDT", d("1"), "fin@example.com", "no such account"); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("an unknown account type: %v", err)
+	}
+	if _, err := svc.AdjustApproved(ctx, "approval:f3", user, domain.AccountFutures, "USDT", d("-15.000001"), "fin@example.com", "too much"); !apperr.Is(err, "LEDGER_INSUFFICIENT_BALANCE") {
+		t.Fatalf("debit beyond the balance: %v", err)
+	}
+
+	results, err := store.Reconcile(ctx, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range results {
+		if len(r.Mismatches) != 0 {
+			t.Fatalf("%s: %+v", r.Check, r.Mismatches)
+		}
+	}
+}

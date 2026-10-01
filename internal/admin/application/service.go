@@ -67,6 +67,9 @@ type Service struct {
 	Reconciler ports.Reconciler
 	Log        *slog.Logger
 	Now        func() time.Time
+	// CloseWait is the pause between attempts to close a position while
+	// its closing orders are being canceled (700 ms when zero).
+	CloseWait time.Duration
 }
 
 // Principal is the administrator behind a request.

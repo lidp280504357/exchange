@@ -113,7 +113,7 @@ expect 200 - "the sign-in options need no session"
 TOTP_REQUIRED=$(jq -r .totp_required <<<"$BODY")
 login ADMIN
 expect 200 - "ADMIN signs in with password and code"
-check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 19" "with every permission"
+check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 20" "with every permission"
 cookie=$(grep -i '^set-cookie: admin_session=' "$WORK/ADMIN.headers")
 for attr in 'Path=/admin/' 'HttpOnly' 'Secure' 'SameSite=Strict'; do
   grep -qi "$attr" <<<"$cookie" || { echo "FAIL the session cookie lacks $attr: $cookie" >&2; exit 1; }
@@ -453,6 +453,102 @@ check '(.items | length) == 1 and (.next_cursor | type) == "string"' "approvals 
 as AUDITOR GET "/admin/v1/dashboard?days=7" ""
 expect 200 - "the overview"
 check '.users.total >= 1 and (.series | length) == 7 and (.partial | length) == 0 and (.feed.state | test("^(OK|DELAYED|DOWN|OFF)$"))' "accounts, a week of days, the feed; nothing missing"
+
+echo "== the account's money: valued balances, a hold, a single cancel"
+call POST /v1/auth/token/refresh "{\"refresh_token\":\"$REFRESH\",\"device_id\":\"$DEVICE\"}" "${APP[@]}"
+expect 200 - "the user refreshes"
+REFRESH=$(jq -r .refresh_token <<<"$BODY")
+UAUTH=(-H "Authorization: Bearer $(jq -r .access_token <<<"$BODY")")
+as AUDITOR GET "/admin/v1/users/$USER_ID/balances" ""
+expect 200 - "the balances, valued"
+check '(.balances | length) >= 1 and .balances[0].account_type == "SPOT" and (.total_usdt | tonumber) > 0' "SPOT first, a total in USDT"
+spot_usdt() { # spot_usdt FIELD: the user's SPOT USDT available or frozen
+  as AUDITOR GET "/admin/v1/users/$USER_ID/balances" ""
+  jq -r --arg f "$1" '[.balances[] | select(.account_type == "SPOT" and .asset == "USDT")][0][$f] // "0"' <<<"$BODY"
+}
+FROZEN_BEFORE=$(spot_usdt frozen)
+as AUDITOR POST "/admin/v1/users/$USER_ID/holds" '{"asset":"USDT","amount":"1.5","reason":"e2e"}'
+expect 403 ADMIN_FORBIDDEN "AUDITOR holds nothing"
+as FINANCE POST "/admin/v1/users/$USER_ID/holds" '{"asset":"USDT","amount":"1.5","reason":"e2e chargeback check"}'
+expect 201 - "FINANCE holds 1.5 USDT"
+check ".active == true and .amount == \"1.5\" and .actor == \"$EMAIL_FINANCE\"" "an active hold by FINANCE"
+HOLD=$(jq -r .id <<<"$BODY")
+[[ $(jq -n --arg a "$(spot_usdt frozen)" --arg b "$FROZEN_BEFORE" '($a | tonumber) - ($b | tonumber) == 1.5') == true ]] ||
+  { echo "FAIL the hold is frozen: $FROZEN_BEFORE -> $(spot_usdt frozen)" >&2; exit 1; }
+echo "ok   1.5 USDT more frozen"
+call GET "/v1/account/ledger?asset=USDT&type=ADMIN_FREEZE" "" "${UAUTH[@]}"
+expect 200 - "the user's fund flow"
+check '(.items | length) == 2 and all(.items[]; .entry_type == "ADMIN_FREEZE")' "shows the hold (available to frozen)"
+as FINANCE DELETE "/admin/v1/users/$USER_ID/holds/$HOLD" '{"reason":"e2e cleared"}'
+expect 200 - "and releases it"
+check '.active == false and .released_by != "" and .release_journal_id != null' "released"
+as FINANCE DELETE "/admin/v1/users/$USER_ID/holds/$HOLD" '{"reason":"e2e again"}'
+expect 409 LEDGER_HOLD_RELEASED "a hold is released once"
+[[ $(spot_usdt frozen) == "$FROZEN_BEFORE" ]] || { echo "FAIL the release: $FROZEN_BEFORE -> $(spot_usdt frozen)" >&2; exit 1; }
+echo "ok   the frozen balance is back"
+as AUDITOR GET "/admin/v1/users/$USER_ID/holds" ""
+check "(.holds | length) == 1 and .holds[0].id == \"$HOLD\"" "the hold stays listed"
+
+call GET "/v1/market/ETH-BTC/depth?limit=5" ""
+LOW=$(jq -r '.bids[0][0] | tonumber * 0.9 * 100000 | floor / 100000 | tostring' <<<"$BODY")
+call POST /v1/orders "{\"symbol\":\"ETH-BTC\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$LOW\",\"quantity\":\"0.1\"}" "${UAUTH[@]}" -H "Idempotency-Key: e2e-admin-one-$RUN"
+expect 202 - "the user rests a buy at $LOW"
+ONE=$(jq -r .order_id <<<"$BODY")
+as FINANCE POST "/admin/v1/users/$USER_ID/orders/$ONE/cancel" '{"reason":"e2e single cancel"}'
+expect 403 ADMIN_FORBIDDEN "FINANCE cancels no orders"
+as OPERATOR POST "/admin/v1/users/$USER_ID/orders/$ONE/cancel" '{"reason":"e2e single cancel"}'
+expect 202 - "OPERATOR cancels that one order"
+one_canceled() {
+  call GET "/v1/orders/$ONE" "" "${UAUTH[@]}"
+  [[ $(jq -r .status <<<"$BODY") == CANCELED ]]
+}
+eventually 40 "the order is canceled" one_canceled
+
+if [[ $TWO_PERSON == false ]]; then
+  echo "== a futures adjustment (single-person mode)"
+  as ADMIN POST "/admin/v1/users/$USER_ID/adjustments" '{"account_type":"FUTURES","asset":"USDT","amount":"2","reason":"e2e futures credit"}'
+  expect 201 - "ADMIN credits 2 USDT to FUTURES"
+  check '.status == "EXECUTED" and .payload.account_type == "FUTURES"' "booked on FUTURES"
+  futures_usdt() {
+    call GET /v1/account/balances "" "${UAUTH[@]}"
+    jq -r '[.balances[] | select(.account_type == "FUTURES" and .asset == "USDT")][0].available // "0"' <<<"$BODY"
+  }
+  [[ $(futures_usdt) == 2 ]] || { echo "FAIL futures balance $(futures_usdt), want 2" >&2; exit 1; }
+  echo "ok   the user has 2 USDT in FUTURES"
+  as ADMIN POST "/admin/v1/users/$USER_ID/adjustments" '{"account_type":"FUTURES","asset":"USDT","amount":"-2","reason":"e2e futures reversal"}'
+  expect 201 - "and takes it back"
+  check '.status == "EXECUTED"' "booked"
+fi
+
+echo "== a force close"
+call POST /v1/account/transfers '{"asset":"USDT","amount":"100","from_account_type":"SPOT","to_account_type":"FUTURES"}' \
+  "${UAUTH[@]}" -H "Idempotency-Key: e2e-admin-perp-$RUN"
+expect 201 - "the user moves 100 USDT to FUTURES"
+# shellcheck disable=SC2016 # expanded when the script ends
+at_exit 'call DELETE "/v1/derivatives/orders?symbol=ETH-USDT-PERP" "" "${UAUTH[@]}"'
+call POST /v1/derivatives/orders '{"symbol":"ETH-USDT-PERP","side":"BUY","type":"MARKET","quantity":"0.10"}' "${UAUTH[@]}"
+if [[ $STATUS == 403 ]]; then
+  echo "skip force close: contract trading is off ($(jq -r .code <<<"$BODY"))"
+else
+  expect 202 - "the user buys 0.1 ETH-USDT-PERP at the market"
+  user_long() {
+    as AUDITOR GET "/admin/v1/users/$USER_ID/positions" ""
+    [[ $STATUS == 200 ]] && jq -e '.positions | length == 1 and .[0].quantity == "0.1"' <<<"$BODY" >/dev/null
+  }
+  eventually 40 "the console shows the long" user_long
+  as FINANCE POST "/admin/v1/users/$USER_ID/positions/close" '{"symbol":"ETH-USDT-PERP","position_side":"BOTH","reason":"e2e force close"}'
+  expect 403 ADMIN_FORBIDDEN "FINANCE closes no positions"
+  as OPERATOR POST "/admin/v1/users/$USER_ID/positions/close" '{"symbol":"ETH-USDT-PERP","position_side":"BOTH","reason":"e2e force close"}'
+  expect 200 - "OPERATOR closes it at the market"
+  check '.type == "MARKET" and .reduce_only == true and .side == "SELL" and .quantity == "0.1"' "a reduce-only market sell of 0.1"
+  user_flat() {
+    as AUDITOR GET "/admin/v1/users/$USER_ID/positions" ""
+    [[ $STATUS == 200 ]] && jq -e '.positions | length == 0' <<<"$BODY" >/dev/null
+  }
+  eventually 40 "the position is closed" user_flat
+  as OPERATOR POST "/admin/v1/users/$USER_ID/positions/close" '{"symbol":"ETH-USDT-PERP","position_side":"BOTH","reason":"e2e again"}'
+  expect 422 DERIV_NO_POSITION "nothing left to close"
+fi
 
 echo "== the account's security, history and risk"
 as AUDITOR GET "/admin/v1/users/$USER_ID/security" ""

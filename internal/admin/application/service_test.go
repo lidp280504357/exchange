@@ -85,7 +85,10 @@ func (r memTags) Set(_ context.Context, userID string, tags []string, _ string, 
 }
 
 // fakeUsers knows some accounts.
-type fakeUsers struct{ known map[string]ports.User }
+type fakeUsers struct {
+	known    map[string]ports.User
+	balances []ports.Balance
+}
 
 func (u *fakeUsers) Find(context.Context, string) (string, error) {
 	return "", apperr.NotFound("no such user")
@@ -98,7 +101,9 @@ func (u *fakeUsers) Get(_ context.Context, id string) (ports.User, error) {
 	return ports.User{}, apperr.NotFound("no such user")
 }
 
-func (u *fakeUsers) Balances(context.Context, string) ([]ports.Balance, error) { return nil, nil }
+func (u *fakeUsers) Balances(context.Context, string) ([]ports.Balance, error) {
+	return u.balances, nil
+}
 
 func (u *fakeUsers) ChangeStatus(context.Context, string, string, string, string, string) (string, error) {
 	return "ACTIVE", nil
@@ -286,21 +291,55 @@ func (r memApprovals) List(_ context.Context, status string, afterTime time.Time
 }
 
 type adjustment struct {
-	key, userID, asset, actor, memo string
-	amount                          decimal.Decimal
+	key, userID, account, asset, actor, memo string
+	amount                                   decimal.Decimal
 }
 
 type fakeLedger struct {
 	calls []adjustment
 	err   error
+	holds []ports.Hold
 }
 
-func (l *fakeLedger) Adjust(_ context.Context, key, userID, asset string, amount decimal.Decimal, actor, memo string) (string, error) {
-	l.calls = append(l.calls, adjustment{key: key, userID: userID, asset: asset, actor: actor, amount: amount, memo: memo})
+func (l *fakeLedger) Adjust(_ context.Context, key, userID, account, asset string, amount decimal.Decimal, actor, memo string) (string, error) {
+	l.calls = append(l.calls, adjustment{key: key, userID: userID, account: account, asset: asset, actor: actor, amount: amount, memo: memo})
 	if l.err != nil {
 		return "", l.err
 	}
 	return "journal-1", nil
+}
+
+func (l *fakeLedger) PlaceHold(_ context.Context, id, userID, asset string, amount decimal.Decimal, actor, reason string) (ports.Hold, error) {
+	if l.err != nil {
+		return ports.Hold{}, l.err
+	}
+	h := ports.Hold{ID: id, UserID: userID, AccountType: "SPOT", Asset: asset, Amount: amount.String(), Reason: reason, Actor: actor}
+	l.holds = append(l.holds, h)
+	return h, nil
+}
+
+func (l *fakeLedger) ReleaseHold(_ context.Context, id, actor, reason string) (ports.Hold, error) {
+	for i, h := range l.holds {
+		if h.ID == id {
+			if !h.ReleasedAt.IsZero() {
+				return ports.Hold{}, apperr.New(apperr.KindConflict, "LEDGER_HOLD_RELEASED", "released")
+			}
+			h.ReleasedAt, h.ReleasedBy, h.ReleaseReason = time.Now(), actor, reason
+			l.holds[i] = h
+			return h, nil
+		}
+	}
+	return ports.Hold{}, apperr.NotFound("no such hold")
+}
+
+func (l *fakeLedger) Holds(_ context.Context, userID string, activeOnly bool) ([]ports.Hold, error) {
+	var out []ports.Hold
+	for _, h := range l.holds {
+		if h.UserID == userID && (!activeOnly || h.ReleasedAt.IsZero()) {
+			out = append(out, h)
+		}
+	}
+	return out, nil
 }
 
 func (l *fakeLedger) FundInsurance(_ context.Context, key, asset string, amount decimal.Decimal, actor, memo string) (string, error) {
@@ -319,7 +358,35 @@ func (l *fakeLedger) SystemBalances(_ context.Context, asset string) ([]ports.Ba
 	}, nil
 }
 
-type fakeDerivatives struct{ lifted []string }
+type fakeDerivatives struct {
+	lifted []string
+	// pending is how many close attempts answer DERIV_CLOSE_PENDING.
+	pending  int
+	closes   []string
+	canceled []string
+}
+
+func (d *fakeDerivatives) Positions(context.Context, string) (json.RawMessage, error) {
+	return json.RawMessage(`[{"symbol":"BTC-USDT-PERP","position_side":"BOTH","quantity":"0.2"}]`), nil
+}
+
+func (d *fakeDerivatives) OpenOrders(context.Context, string) (json.RawMessage, error) {
+	return json.RawMessage(`{"items":[],"next_cursor":null}`), nil
+}
+
+func (d *fakeDerivatives) CancelOrder(_ context.Context, _, id string) (json.RawMessage, error) {
+	d.canceled = append(d.canceled, id)
+	return json.RawMessage(`{"order_id":"` + id + `","status":"OPEN","cancel_requested":true}`), nil
+}
+
+func (d *fakeDerivatives) ClosePosition(_ context.Context, _, symbol, side, client string) (json.RawMessage, error) {
+	d.closes = append(d.closes, symbol+" "+side+" "+client)
+	if d.pending > 0 {
+		d.pending--
+		return nil, apperr.New(apperr.KindConflict, "DERIV_CLOSE_PENDING", "pending")
+	}
+	return json.RawMessage(`{"order_id":"0192a000-0000-7000-8000-0000000000c1","client_order_id":"` + client + `","status":"NEW"}`), nil
+}
 
 func (d *fakeDerivatives) Contracts(context.Context) (json.RawMessage, error) {
 	return json.RawMessage(`{"contracts":[]}`), nil
@@ -350,6 +417,11 @@ type fakeOrders struct{ canceled []string }
 func (o *fakeOrders) CancelAll(_ context.Context, userID string) error {
 	o.canceled = append(o.canceled, userID)
 	return nil
+}
+
+func (o *fakeOrders) Cancel(_ context.Context, userID, id string) (json.RawMessage, error) {
+	o.canceled = append(o.canceled, userID+"/"+id)
+	return json.RawMessage(`{"order_id":"` + id + `","status":"OPEN"}`), nil
 }
 
 type fakeWallet struct {

@@ -315,6 +315,9 @@ type Risk interface {
 // Orders cancels a user's orders (spot-trading-service).
 type Orders interface {
 	CancelAll(ctx context.Context, userID string) error
+	// Cancel asks the engine to cancel one of a user's spot orders; the
+	// answer is the order.
+	Cancel(ctx context.Context, userID, orderID string) (json.RawMessage, error)
 }
 
 // WithdrawalQuery selects withdrawals: a status (PENDING_REVIEW when
@@ -377,6 +380,18 @@ type Derivatives interface {
 	LiftReduceOnly(ctx context.Context, symbol, actor string) (json.RawMessage, error)
 	// Risk returns the positions warned, taken over or close to it.
 	Risk(ctx context.Context) (json.RawMessage, error)
+	// Positions returns a user's open positions as derivatives-service
+	// renders them.
+	Positions(ctx context.Context, userID string) (json.RawMessage, error)
+	// OpenOrders returns a user's active contract orders.
+	OpenOrders(ctx context.Context, userID string) (json.RawMessage, error)
+	// CancelOrder asks the engine to cancel one of a user's contract
+	// orders; the answer is the order.
+	CancelOrder(ctx context.Context, userID, orderID string) (json.RawMessage, error)
+	// ClosePosition closes a user's position at the market with an order
+	// of kind ADMIN (DERIV_CLOSE_PENDING while its closing orders are
+	// being canceled); clientOrderID makes it idempotent.
+	ClosePosition(ctx context.Context, userID, symbol, positionSide, clientOrderID string) (json.RawMessage, error)
 }
 
 // Flag is a feature switch.
@@ -407,10 +422,36 @@ type Features interface {
 // Ledger books manual adjustments and insurance fund contributions and
 // reads the platform's system accounts (ledger-service).
 type Ledger interface {
-	Adjust(ctx context.Context, key, userID, asset string, amount decimal.Decimal, actor, reason string) (journalID string, err error)
+	// Adjust credits or debits a user's SPOT or FUTURES account.
+	Adjust(ctx context.Context, key, userID, accountType, asset string, amount decimal.Decimal, actor, reason string) (journalID string, err error)
 	FundInsurance(ctx context.Context, key, asset string, amount decimal.Decimal, actor, reason string) (journalID string, err error)
 	// SystemBalances returns the system accounts in an asset.
 	SystemBalances(ctx context.Context, asset string) ([]Balance, error)
+	// PlaceHold freezes part of a user's SPOT balance under the hold ID
+	// (repeating it returns the hold); ReleaseHold returns it; the ledger
+	// audits both with actor.
+	PlaceHold(ctx context.Context, id, userID, asset string, amount decimal.Decimal, actor, reason string) (Hold, error)
+	ReleaseHold(ctx context.Context, id, actor, reason string) (Hold, error)
+	// Holds lists a user's holds, newest first.
+	Holds(ctx context.Context, userID string, activeOnly bool) ([]Hold, error)
+}
+
+// Hold is an administrator's hold on part of a user's SPOT balance.
+type Hold struct {
+	ID          string
+	UserID      string
+	AccountType string
+	Asset       string
+	Amount      string
+	Reason      string
+	Actor       string
+	JournalID   string
+	CreatedAt   time.Time
+	// ReleasedAt is zero while the hold is active.
+	ReleasedAt       time.Time
+	ReleasedBy       string
+	ReleaseReason    string
+	ReleaseJournalID string
 }
 
 // AuditEntry is a line of the audit trail.

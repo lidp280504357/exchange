@@ -57,9 +57,11 @@ func fundTarget(a domain.Approval) string {
 // administrator for.
 type FundRequest struct {
 	Kind string // domain.KindLedgerAdjustment or domain.KindInsuranceFund
-	// UserID owns the balance an adjustment changes (its SPOT account).
-	UserID string
-	Asset  string
+	// UserID owns the balance an adjustment changes, in its SPOT account
+	// unless AccountType is FUTURES.
+	UserID      string
+	AccountType string
+	Asset       string
 	// Amount credits (positive) or debits (negative) an adjustment; a
 	// contribution is positive.
 	Amount decimal.Decimal
@@ -90,6 +92,13 @@ func (in *FundRequest) validate() error {
 		}
 		if _, err := uuid.Parse(in.UserID); err != nil {
 			return apperr.Invalid("user_id must be a UUID")
+		}
+		switch in.AccountType = strings.ToUpper(strings.TrimSpace(in.AccountType)); in.AccountType {
+		case "":
+			in.AccountType = AccountSpot
+		case AccountSpot, AccountFutures:
+		default:
+			return apperr.Invalid("account_type must be SPOT or FUTURES")
 		}
 	case domain.KindInsuranceFund:
 		if !in.Amount.IsPositive() {
@@ -140,6 +149,9 @@ func (s *Service) SubmitFunds(ctx context.Context, p Principal, in FundRequest) 
 	}
 	if in.Kind == domain.KindLedgerAdjustment {
 		a.Payload["user_id"] = in.UserID
+		if in.AccountType != AccountSpot {
+			a.Payload["account_type"] = in.AccountType
+		}
 	}
 	if in.Reference != "" {
 		a.Payload["reference"] = in.Reference
@@ -238,14 +250,33 @@ func (s *Service) record(ctx context.Context, a domain.Approval, p Principal, ex
 	return a, nil
 }
 
+// User account types an adjustment changes.
+const (
+	AccountSpot    = "SPOT"
+	AccountFutures = "FUTURES"
+)
+
+// accountOf is the account an adjustment changes (SPOT unless its payload
+// names FUTURES).
+func accountOf(a domain.Approval) string {
+	if t := a.Payload["account_type"]; t != "" {
+		return t
+	}
+	return AccountSpot
+}
+
 // fundDetails is an operation's audit detail.
 func fundDetails(a domain.Approval) string {
 	value := "null"
 	if a.ValueUSDT != nil {
 		value = fmt.Sprintf("%q", a.ValueUSDT.String())
 	}
-	return fmt.Sprintf(`{"approval_id":%q,"asset":%q,"amount":%q,"mode":%q,"escalation":%q,"value_usdt":%s,"status":%q,"result":%q}`,
-		a.ID, a.Payload["asset"], a.Payload["amount"], a.Mode, a.Escalation, value, a.Status, a.Result)
+	account := ""
+	if a.Kind == domain.KindLedgerAdjustment {
+		account = fmt.Sprintf(`"account_type":%q,`, accountOf(a))
+	}
+	return fmt.Sprintf(`{"approval_id":%q,%s"asset":%q,"amount":%q,"mode":%q,"escalation":%q,"value_usdt":%s,"status":%q,"result":%q}`,
+		a.ID, account, a.Payload["asset"], a.Payload["amount"], a.Mode, a.Escalation, value, a.Status, a.Result)
 }
 
 // worth values an amount of an asset in USDT at its USDT pair's last
@@ -370,7 +401,7 @@ func (s *Service) execute(ctx context.Context, a *domain.Approval, p Principal) 
 	case domain.KindInsuranceFund:
 		journal, err = s.Ledger.FundInsurance(ctx, key, a.Payload["asset"], amount, p.Admin.Email, note)
 	default:
-		journal, err = s.Ledger.Adjust(ctx, key, a.Payload["user_id"], a.Payload["asset"], amount, p.Admin.Email, note)
+		journal, err = s.Ledger.Adjust(ctx, key, a.Payload["user_id"], accountOf(*a), a.Payload["asset"], amount, p.Admin.Email, note)
 	}
 	if err != nil {
 		var e *apperr.Error

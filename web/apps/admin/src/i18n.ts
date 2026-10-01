@@ -1,4 +1,5 @@
 import { en } from "./messages/en";
+import { moneyEn, moneyZh } from "./messages/money";
 import { usersEn, usersZh } from "./messages/users";
 import { walletEn, walletZh } from "./messages/wallet";
 import { zh } from "./messages/zh";
@@ -9,15 +10,17 @@ import { zh } from "./messages/zh";
 
 type Tree = Record<string, unknown>;
 
-function merge(base: Tree, extra: Tree): Tree {
+function merge(base: Tree, ...extras: Tree[]): Tree {
   const out: Tree = { ...base };
-  for (const [k, v] of Object.entries(extra)) {
-    const b = out[k];
-    out[k] = isTree(b) && isTree(v) ? merge(b, v) : v;
+  for (const extra of extras) {
+    for (const [k, v] of Object.entries(extra)) {
+      const b = out[k];
+      out[k] = isTree(b) && isTree(v) ? merge(b, v) : v;
+    }
   }
   return out;
 }
 
 const isTree = (v: unknown): v is Tree => typeof v === "object" && v !== null && !Array.isArray(v);
 
-export const adminMessages = { "zh-CN": merge(merge(zh, usersZh), walletZh), en: merge(merge(en, usersEn), walletEn) };
+export const adminMessages = { "zh-CN": merge(zh, usersZh, walletZh, moneyZh), en: merge(en, usersEn, walletEn, moneyEn) };

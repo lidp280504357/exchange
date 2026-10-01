@@ -131,6 +131,8 @@ var (
 		"the position is being liquidated")
 	ErrMarginTooLarge = apperr.New(apperr.KindUnprocessable, "DERIV_MARGIN_REDUCE_TOO_LARGE",
 		"the position would keep less than its initial margin")
+	ErrClosePending = apperr.New(apperr.KindConflict, "DERIV_CLOSE_PENDING",
+		"the position's closing orders are being canceled; close it again in a moment")
 )
 
 // ceil rounds up to decimals, floor down.

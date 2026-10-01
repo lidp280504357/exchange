@@ -528,11 +528,32 @@ func (h *Handler) cancelConditional(w http.ResponseWriter, r *http.Request) {
 // InternalRoutes serves the admin console (the gateway does not route
 // /internal): the contracts with their reduce-only state, mark price and
 // open interest; lifting reduce-only; the positions close to or in
-// liquidation.
+// liquidation; closing a user's position at the market.
 func (h *Handler) InternalRoutes(r chi.Router) {
 	r.Get("/internal/derivatives/contracts", h.overview)
 	r.Post("/internal/derivatives/contracts/{symbol}/lift-reduce-only", h.liftReduceOnly)
 	r.Get("/internal/derivatives/risk", h.risk)
+	r.Post("/internal/derivatives/positions/close", h.adminClose)
+}
+
+func (h *Handler) adminClose(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		UserID        string `json:"user_id"`
+		Symbol        string `json:"symbol"`
+		PositionSide  string `json:"position_side"`
+		ClientOrderID string `json:"client_order_id"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	o, err := h.Svc.AdminClose(r.Context(), body.UserID, strings.ToUpper(strings.TrimSpace(body.Symbol)),
+		domain.PositionSide(strings.ToUpper(body.PositionSide)), body.ClientOrderID)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, toOrderJSON(o))
 }
 
 func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {

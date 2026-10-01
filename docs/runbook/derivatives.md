@@ -175,6 +175,7 @@ SELECT check_name, mismatches, details FROM derivatives.reconciliation_runs ORDE
 ## 管理后台与读模型
 
 - 管理后台「合约」页（[admin.md](admin.md#功能)）：合约状态与只减仓（解除需 `derivatives.write`，改状态需 `instruments.write`）、保险基金余额与 `PNL_CLEARING`、发起保险基金注资（双人审批，批准后账本 `FundInsurance` 以幂等键 `approval:<id>` 记 `INSURANCE_CONTRIBUTION`，需开关 `ledger.manual_adjustment`）、强平监控（每 5 秒刷新）、强平记录。报表页有合约日报与当前持仓量。
+- **强制平仓**（2026-10-02 设计 C2，用户页「仓位」标签，需 `derivatives.write`）：内部接口 `POST /internal/derivatives/positions/close`（`user_id`、`symbol`、`position_side`、`client_order_id`）。先对该仓位方向上仍在挂的平仓单请求撤单，只要还有没撤完的就答 409 `DERIV_CLOSE_PENDING`（后台每 0.7 秒重试，最多 8 次）；撤完后以市价单平掉整个仓位：订单类型 `ADMIN`（迁移 derivatives 00005），单向持仓为只减仓、双向持仓按方向平。同一个 `client_order_id` 重复调用返回同一笔订单。正在强平的仓位交给强平引擎（`DERIV_POSITION_LIQUIDATING`），没有仓位答 `DERIV_NO_POSITION`。后台记审计 `admin.derivatives.position_closed`；单笔撤合约委托记 `admin.derivatives.order_canceled`。
 - ClickHouse 读模型（`migrations/clickhouse/00005_derivatives_read_models.sql`，analytics-consumer 投影，见 [analytics.md](analytics.md)）：`derivatives_positions`（每个仓位的最新快照，按 `version` 取最新）、`derivatives_fills`（已记账的成交，每笔两边各一行，带名义价值）、`derivatives_funding`（每个仓位每次资金费）、`derivatives_liquidations`（WARNING、STARTED、FILLED、ADL 各步骤）。合约的订单与成交并入现货的 `orders`、`order_updates`、`trades`（按 `symbol` 区分），所以交易报表与 K 线也覆盖合约。
 
 ```sql

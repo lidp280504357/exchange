@@ -629,7 +629,7 @@ paths:
       summary: Credit or debit a user's balance
       description: |
         A manual adjustment (MANUAL_ADJUSTMENT against the ADJUSTMENT system
-        account) of the user's SPOT account: booked at once in
+        account) of the user's SPOT or FUTURES account: booked at once in
         single-person mode within the limits (EXECUTED with its journal, or
         FAILED with the ledger's refusal such as
         LEDGER_ADJUSTMENT_DISABLED), otherwise PENDING for a second
@@ -653,7 +653,7 @@ paths:
               properties:
                 account_type:
                   type: string
-                  enum: [SPOT]
+                  enum: [SPOT, FUTURES]
                   default: SPOT
                 asset:
                   type: string
@@ -1016,6 +1016,287 @@ paths:
                 $ref: '#/components/schemas/IdentityRequest'
         default:
           $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/balances:
+    get:
+      operationId: getUserBalances
+      summary: An account's balances, valued in USDT
+      description: |
+        Every SPOT and FUTURES balance with its total (available + frozen)
+        valued at its USDT pair's last price, SPOT first and the larger
+        worth first; assets without a USDT price are listed in `unpriced`
+        and left out of the total. Needs users.read.
+      tags: [users, ledger]
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200':
+          description: The balances.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [balances, total_usdt, unpriced]
+                properties:
+                  balances:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ValuedBalance'
+                  total_usdt:
+                    $ref: '#/components/schemas/Decimal'
+                  unpriced:
+                    type: array
+                    items:
+                      type: string
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/holds:
+    get:
+      operationId: listUserHolds
+      summary: Holds on an account's SPOT balance, newest first
+      description: Active and released. Needs users.read.
+      tags: [users, ledger]
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200':
+          description: The holds.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [holds]
+                properties:
+                  holds:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Hold'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: placeUserHold
+      summary: Freeze part of an account's SPOT balance
+      description: |
+        The ledger moves the amount from available to frozen (ADMIN_FREEZE)
+        and audits it as ledger.hold_placed; more than the available
+        balance fails with LEDGER_INSUFFICIENT_BALANCE. The user sees the
+        amount frozen until it is released. Needs ledger.hold.
+      tags: [users, ledger]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [asset, amount, reason]
+              properties:
+                asset:
+                  type: string
+                  examples: [USDT]
+                amount:
+                  description: Positive.
+                  $ref: '#/components/schemas/Decimal'
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '201':
+          description: The hold.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Hold'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/holds/{hold}:
+    delete:
+      operationId: releaseUserHold
+      summary: Release a hold
+      description: |
+        The ledger returns the amount to the available balance
+        (ADMIN_UNFREEZE) and audits it as ledger.hold_released; a hold is
+        released once (LEDGER_HOLD_RELEASED). Needs ledger.hold.
+      tags: [users, ledger]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - name: hold
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: The released hold.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Hold'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/orders/{order}/cancel:
+    post:
+      operationId: cancelUserOrder
+      summary: Cancel one of an account's spot orders
+      description: |
+        The cancel completes asynchronously in the matching engine; the
+        answer is the order as spot-trading-service has it. Audited as
+        admin.orders.canceled. Needs orders.cancel.
+      tags: [users]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/OrderID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Reason'
+      responses:
+        '202':
+          description: Cancel requested.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceOrder'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/contract-orders:
+    get:
+      operationId: listUserContractOrders
+      summary: An account's active contract orders
+      description: As derivatives-service renders them, at most 100. Needs users.read.
+      tags: [users, derivatives]
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200':
+          description: The orders.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ContractOrder'
+                  next_cursor:
+                    $ref: '#/components/schemas/NextCursor'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/contract-orders/{order}/cancel:
+    post:
+      operationId: cancelUserContractOrder
+      summary: Cancel one of an account's contract orders
+      description: Completes asynchronously in the engine. Audited as admin.derivatives.order_canceled. Needs orders.cancel.
+      tags: [users, derivatives]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - $ref: '#/components/parameters/OrderID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Reason'
+      responses:
+        '202':
+          description: Cancel requested.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContractOrder'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/positions:
+    get:
+      operationId: listUserPositions
+      summary: An account's open contract positions
+      description: As derivatives-service renders them, with the liquidation estimate. Needs users.read.
+      tags: [users, derivatives]
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      responses:
+        '200':
+          description: The positions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [positions]
+                properties:
+                  positions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/UserPosition'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/positions/close:
+    post:
+      operationId: closeUserPosition
+      summary: Close a position at the market (force close)
+      description: |
+        The closing orders resting on the position are canceled first;
+        once the engine confirmed (the console waits a few seconds, then
+        fails with DERIV_CLOSE_PENDING to try again), a market order of
+        kind ADMIN takes the whole position: reduce-only in one-way mode,
+        against its side in hedge mode. A position under liquidation is
+        left to the liquidation engine (DERIV_POSITION_LIQUIDATING). The
+        answer is the order. Audited as admin.derivatives.position_closed.
+        Needs derivatives.write.
+      tags: [users, derivatives]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [symbol, position_side, reason]
+              properties:
+                symbol:
+                  type: string
+                  examples: [BTC-USDT-PERP]
+                position_side:
+                  type: string
+                  enum: [BOTH, LONG, SHORT]
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: The closing order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContractOrder'
+        default:
+          $ref: '#/components/responses/Error'
   /admin/v1/withdrawals:
     get:
       operationId: listWithdrawals
@@ -1310,14 +1591,14 @@ paths:
   /admin/v1/ledger/adjustments:
     post:
       operationId: requestAdjustment
-      summary: Request a manual adjustment of a user's spot balance
+      summary: Request a manual adjustment of a user's balance
       description: |
         Creates a PENDING request for another administrator with
         ledger.adjust.approve (escalation REQUESTED), unless `direct` asks
         to carry it out at once, which works as POST
         /admin/v1/users/{id}/adjustments. A positive amount credits the
-        user's SPOT account against the ADJUSTMENT system account, a
-        negative one debits it. Needs ledger.adjust.request.
+        user's SPOT (or FUTURES) account against the ADJUSTMENT system
+        account, a negative one debits it. Needs ledger.adjust.request.
       tags: [ledger]
       security:
         - session: []
@@ -1333,6 +1614,10 @@ paths:
                 user_id:
                   type: string
                   format: uuid
+                account_type:
+                  type: string
+                  enum: [SPOT, FUTURES]
+                  default: SPOT
                 asset:
                   type: string
                   examples: [USDT]
@@ -2155,6 +2440,13 @@ components:
       schema:
         type: string
         format: uuid
+    OrderID:
+      name: order
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     Contract:
       name: symbol
       in: path
@@ -2603,7 +2895,7 @@ components:
             type: string
             enum: [users.read, users.status, orders.cancel, instruments.read, instruments.write, flags.read, flags.write,
               withdrawals.read, withdrawals.review, ledger.adjust.request, ledger.adjust.approve, audit.read, reports.read,
-              derivatives.read, derivatives.write, settings.write, users.notes, users.security, users.contacts]
+              derivatives.read, derivatives.write, settings.write, users.notes, users.security, users.contacts, ledger.hold]
     Settings:
       type: object
       required: [two_person_approval, single_max_usdt, daily_max_usdt, withdrawal_max_usdt, daily_used_usdt, updated_by, updated_at]
@@ -2820,6 +3112,144 @@ components:
         created_at:
           type: [string, 'null']
           format: date-time
+    ValuedBalance:
+      type: object
+      required: [account_type, asset, available, frozen, total, value_usdt]
+      properties:
+        account_type:
+          type: string
+          enum: [SPOT, FUTURES]
+        asset:
+          type: string
+        available:
+          $ref: '#/components/schemas/Decimal'
+        frozen:
+          $ref: '#/components/schemas/Decimal'
+        total:
+          $ref: '#/components/schemas/Decimal'
+        value_usdt:
+          description: The total at the asset's USDT pair's last price; null without one.
+          $ref: '#/components/schemas/NullableDecimal'
+    Hold:
+      type: object
+      description: An administrator's hold on part of a user's SPOT balance (ADMIN_FREEZE until released with ADMIN_UNFREEZE).
+      required: [id, account_type, asset, amount, reason, actor, journal_id, created_at, active, released_at, released_by, release_reason,
+        release_journal_id]
+      properties:
+        id:
+          type: string
+          format: uuid
+        account_type:
+          type: string
+          enum: [SPOT]
+        asset:
+          type: string
+        amount:
+          $ref: '#/components/schemas/Decimal'
+        reason:
+          type: string
+        actor:
+          type: string
+          description: The administrator who placed it.
+        journal_id:
+          type: string
+          format: uuid
+        created_at:
+          type: [string, 'null']
+          format: date-time
+        active:
+          type: boolean
+        released_at:
+          type: [string, 'null']
+          format: date-time
+        released_by:
+          type: string
+        release_reason:
+          type: string
+        release_journal_id:
+          type: [string, 'null']
+    ServiceOrder:
+      type: object
+      description: An order as the service that holds it renders it.
+      required: [order_id, status]
+      additionalProperties: true
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+    ContractOrder:
+      type: object
+      description: A contract order as derivatives-service renders it.
+      required: [order_id, client_order_id, symbol, side, position_side, type, price, quantity, reduce_only, status, filled_quantity,
+        cancel_requested, created_at]
+      additionalProperties: true
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        client_order_id:
+          type: string
+        symbol:
+          type: string
+        side:
+          type: string
+          enum: [BUY, SELL]
+        position_side:
+          type: string
+          enum: [BOTH, LONG, SHORT]
+        type:
+          type: string
+          enum: [LIMIT, MARKET]
+        price:
+          $ref: '#/components/schemas/Decimal'
+        quantity:
+          $ref: '#/components/schemas/Decimal'
+        reduce_only:
+          type: boolean
+        status:
+          type: string
+        filled_quantity:
+          $ref: '#/components/schemas/Decimal'
+        cancel_requested:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+    UserPosition:
+      type: object
+      description: A contract position as derivatives-service renders it.
+      required: [position_id, symbol, position_side, quantity, entry_price, mark_price, unrealized_pnl, margin, margin_mode, leverage,
+        liquidation_price]
+      additionalProperties: true
+      properties:
+        position_id:
+          type: string
+          format: uuid
+        symbol:
+          type: string
+        position_side:
+          type: string
+          enum: [BOTH, LONG, SHORT]
+        quantity:
+          description: Signed, positive long.
+          $ref: '#/components/schemas/Decimal'
+        entry_price:
+          $ref: '#/components/schemas/Decimal'
+        mark_price:
+          $ref: '#/components/schemas/NullableDecimal'
+        unrealized_pnl:
+          $ref: '#/components/schemas/NullableDecimal'
+        margin:
+          $ref: '#/components/schemas/Decimal'
+        margin_mode:
+          type: string
+          enum: [CROSS, ISOLATED]
+        leverage:
+          type: integer
+        liquidation_price:
+          $ref: '#/components/schemas/NullableDecimal'
     IdentityRequest:
       type: object
       required: [id, user_id, kind, new_value, current_value, status, created_at, decided_at, decided_by, reason]
@@ -3086,7 +3516,9 @@ components:
           enum: [LEDGER_ADJUSTMENT, INSURANCE_FUND]
         payload:
           type: object
-          description: For LEDGER_ADJUSTMENT user_id, asset and amount; for INSURANCE_FUND asset and amount; reference when given.
+          description: |
+            For LEDGER_ADJUSTMENT user_id, asset and amount, account_type FUTURES when not the SPOT account; for INSURANCE_FUND
+            asset and amount; reference when given.
           additionalProperties:
             type: string
         reason:

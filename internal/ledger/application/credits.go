@@ -72,6 +72,12 @@ func (s *Service) OnUserRegistered(ctx context.Context, eventID, userID, region 
 // the operator's correction tool of phase 1 behind
 // ledger.manual_adjustment; phase 2 adds two-person approval (§5.9).
 func (s *Service) Adjust(ctx context.Context, idemKey, userID, asset string, amount decimal.Decimal, actor, reason string) (Result, error) {
+	return s.AdjustAccount(ctx, idemKey, userID, domain.AccountSpot, asset, amount, actor, reason)
+}
+
+// AdjustAccount is Adjust on the user's SPOT or FUTURES account; the
+// audit event names the account type unless it is SPOT.
+func (s *Service) AdjustAccount(ctx context.Context, idemKey, userID, accountType, asset string, amount decimal.Decimal, actor, reason string) (Result, error) {
 	if _, err := uuid.Parse(userID); err != nil {
 		return Result{}, apperr.Invalid("user_id must be a UUID")
 	}
@@ -82,7 +88,7 @@ func (s *Service) Adjust(ctx context.Context, idemKey, userID, asset string, amo
 	if err != nil {
 		return Result{}, err
 	}
-	p, err := domain.AdjustmentPosting("adjust:"+idemKey, userID, credits, reason)
+	p, err := domain.AccountAdjustmentPosting("adjust:"+idemKey, userID, accountType, credits, reason)
 	if err != nil {
 		return Result{}, err
 	}
@@ -95,9 +101,12 @@ func (s *Service) Adjust(ctx context.Context, idemKey, userID, asset string, amo
 		if res, err = s.post(ctx, r, p); err != nil || res.Replayed {
 			return err
 		}
+		details := fmt.Sprintf(`{"asset":%q,"amount":%q,"journal_id":%q}`, asset, amount.String(), res.JournalID)
+		if accountType != domain.AccountSpot {
+			details = fmt.Sprintf(`{"account_type":%q,"asset":%q,"amount":%q,"journal_id":%q}`, accountType, asset, amount.String(), res.JournalID)
+		}
 		return r.Emit(ctx, event.TopicAudit, &auditv1.AdminActionPerformed{
-			Target: "user:" + userID, Action: "ledger.manual_adjustment", Actor: actor, Reason: reason,
-			Details: fmt.Sprintf(`{"asset":%q,"amount":%q,"journal_id":%q}`, asset, amount.String(), res.JournalID),
+			Target: "user:" + userID, Action: "ledger.manual_adjustment", Actor: actor, Reason: reason, Details: details,
 		}, "actor", actor)
 	})
 	return res, err
@@ -148,14 +157,18 @@ func (s *Service) AdjustHouse(ctx context.Context, idemKey, asset string, amount
 	return res, err
 }
 
-// AdjustApproved is Adjust for the admin console, called once two people
-// approved the adjustment (§5.12); it needs ledger.manual_adjustment on.
-func (s *Service) AdjustApproved(ctx context.Context, idemKey, userID, asset string, amount decimal.Decimal, actor, reason string) (Result, error) {
+// AdjustApproved is AdjustAccount for the admin console, called once the
+// adjustment was approved (§5.12) on a user's SPOT ("" too) or FUTURES
+// account; it needs ledger.manual_adjustment on.
+func (s *Service) AdjustApproved(ctx context.Context, idemKey, userID, accountType, asset string, amount decimal.Decimal, actor, reason string) (Result, error) {
 	if !s.Flags.Enabled(flags.KeyManualAdjustment, flags.Subject{UserID: userID}) {
 		return Result{}, apperr.New(apperr.KindForbidden, "LEDGER_ADJUSTMENT_DISABLED", "manual adjustments are switched off (ledger.manual_adjustment)")
 	}
 	if strings.TrimSpace(idemKey) == "" {
 		return Result{}, apperr.Invalid("an idempotency key is required")
 	}
-	return s.Adjust(ctx, idemKey, userID, asset, amount, actor, reason)
+	if accountType == "" {
+		accountType = domain.AccountSpot
+	}
+	return s.AdjustAccount(ctx, idemKey, userID, accountType, asset, amount, actor, reason)
 }

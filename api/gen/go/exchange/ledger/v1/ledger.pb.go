@@ -1244,8 +1244,10 @@ type AdjustRequest struct {
 	Amount         string                 `protobuf:"bytes,4,opt,name=amount,proto3" json:"amount,omitempty"`
 	Reason         string                 `protobuf:"bytes,5,opt,name=reason,proto3" json:"reason,omitempty"`
 	Actor          string                 `protobuf:"bytes,6,opt,name=actor,proto3" json:"actor,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// SPOT (also when empty) or FUTURES.
+	AccountType   string `protobuf:"bytes,7,opt,name=account_type,json=accountType,proto3" json:"account_type,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AdjustRequest) Reset() {
@@ -1316,6 +1318,13 @@ func (x *AdjustRequest) GetReason() string {
 func (x *AdjustRequest) GetActor() string {
 	if x != nil {
 		return x.Actor
+	}
+	return ""
+}
+
+func (x *AdjustRequest) GetAccountType() string {
+	if x != nil {
+		return x.AccountType
 	}
 	return ""
 }
@@ -1957,6 +1966,480 @@ func (x *GetReconciliationResponse) GetFailures() []*ReconciliationRun {
 	return nil
 }
 
+// Hold is an administrator's hold on part of a user's SPOT balance.
+type Hold struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	HoldId string                 `protobuf:"bytes,1,opt,name=hold_id,json=holdId,proto3" json:"hold_id,omitempty"`
+	UserId string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// SPOT.
+	AccountType string `protobuf:"bytes,3,opt,name=account_type,json=accountType,proto3" json:"account_type,omitempty"`
+	Asset       string `protobuf:"bytes,4,opt,name=asset,proto3" json:"asset,omitempty"`
+	Amount      string `protobuf:"bytes,5,opt,name=amount,proto3" json:"amount,omitempty"`
+	Reason      string `protobuf:"bytes,6,opt,name=reason,proto3" json:"reason,omitempty"`
+	// The administrator who placed it.
+	Actor     string `protobuf:"bytes,7,opt,name=actor,proto3" json:"actor,omitempty"`
+	JournalId string `protobuf:"bytes,8,opt,name=journal_id,json=journalId,proto3" json:"journal_id,omitempty"`
+	// RFC 3339.
+	CreatedAt string `protobuf:"bytes,9,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// RFC 3339; empty while the hold is active.
+	ReleasedAt       string `protobuf:"bytes,10,opt,name=released_at,json=releasedAt,proto3" json:"released_at,omitempty"`
+	ReleasedBy       string `protobuf:"bytes,11,opt,name=released_by,json=releasedBy,proto3" json:"released_by,omitempty"`
+	ReleaseReason    string `protobuf:"bytes,12,opt,name=release_reason,json=releaseReason,proto3" json:"release_reason,omitempty"`
+	ReleaseJournalId string `protobuf:"bytes,13,opt,name=release_journal_id,json=releaseJournalId,proto3" json:"release_journal_id,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *Hold) Reset() {
+	*x = Hold{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Hold) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Hold) ProtoMessage() {}
+
+func (x *Hold) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Hold.ProtoReflect.Descriptor instead.
+func (*Hold) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *Hold) GetHoldId() string {
+	if x != nil {
+		return x.HoldId
+	}
+	return ""
+}
+
+func (x *Hold) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *Hold) GetAccountType() string {
+	if x != nil {
+		return x.AccountType
+	}
+	return ""
+}
+
+func (x *Hold) GetAsset() string {
+	if x != nil {
+		return x.Asset
+	}
+	return ""
+}
+
+func (x *Hold) GetAmount() string {
+	if x != nil {
+		return x.Amount
+	}
+	return ""
+}
+
+func (x *Hold) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *Hold) GetActor() string {
+	if x != nil {
+		return x.Actor
+	}
+	return ""
+}
+
+func (x *Hold) GetJournalId() string {
+	if x != nil {
+		return x.JournalId
+	}
+	return ""
+}
+
+func (x *Hold) GetCreatedAt() string {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return ""
+}
+
+func (x *Hold) GetReleasedAt() string {
+	if x != nil {
+		return x.ReleasedAt
+	}
+	return ""
+}
+
+func (x *Hold) GetReleasedBy() string {
+	if x != nil {
+		return x.ReleasedBy
+	}
+	return ""
+}
+
+func (x *Hold) GetReleaseReason() string {
+	if x != nil {
+		return x.ReleaseReason
+	}
+	return ""
+}
+
+func (x *Hold) GetReleaseJournalId() string {
+	if x != nil {
+		return x.ReleaseJournalId
+	}
+	return ""
+}
+
+type PlaceHoldRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// A UUID the caller chooses.
+	HoldId        string `protobuf:"bytes,1,opt,name=hold_id,json=holdId,proto3" json:"hold_id,omitempty"`
+	UserId        string `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Asset         string `protobuf:"bytes,3,opt,name=asset,proto3" json:"asset,omitempty"`
+	Amount        string `protobuf:"bytes,4,opt,name=amount,proto3" json:"amount,omitempty"`
+	Actor         string `protobuf:"bytes,5,opt,name=actor,proto3" json:"actor,omitempty"`
+	Reason        string `protobuf:"bytes,6,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlaceHoldRequest) Reset() {
+	*x = PlaceHoldRequest{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlaceHoldRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlaceHoldRequest) ProtoMessage() {}
+
+func (x *PlaceHoldRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlaceHoldRequest.ProtoReflect.Descriptor instead.
+func (*PlaceHoldRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *PlaceHoldRequest) GetHoldId() string {
+	if x != nil {
+		return x.HoldId
+	}
+	return ""
+}
+
+func (x *PlaceHoldRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *PlaceHoldRequest) GetAsset() string {
+	if x != nil {
+		return x.Asset
+	}
+	return ""
+}
+
+func (x *PlaceHoldRequest) GetAmount() string {
+	if x != nil {
+		return x.Amount
+	}
+	return ""
+}
+
+func (x *PlaceHoldRequest) GetActor() string {
+	if x != nil {
+		return x.Actor
+	}
+	return ""
+}
+
+func (x *PlaceHoldRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type PlaceHoldResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Hold          *Hold                  `protobuf:"bytes,1,opt,name=hold,proto3" json:"hold,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlaceHoldResponse) Reset() {
+	*x = PlaceHoldResponse{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlaceHoldResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlaceHoldResponse) ProtoMessage() {}
+
+func (x *PlaceHoldResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlaceHoldResponse.ProtoReflect.Descriptor instead.
+func (*PlaceHoldResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *PlaceHoldResponse) GetHold() *Hold {
+	if x != nil {
+		return x.Hold
+	}
+	return nil
+}
+
+type ReleaseHoldRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	HoldId        string                 `protobuf:"bytes,1,opt,name=hold_id,json=holdId,proto3" json:"hold_id,omitempty"`
+	Actor         string                 `protobuf:"bytes,2,opt,name=actor,proto3" json:"actor,omitempty"`
+	Reason        string                 `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReleaseHoldRequest) Reset() {
+	*x = ReleaseHoldRequest{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReleaseHoldRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReleaseHoldRequest) ProtoMessage() {}
+
+func (x *ReleaseHoldRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReleaseHoldRequest.ProtoReflect.Descriptor instead.
+func (*ReleaseHoldRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *ReleaseHoldRequest) GetHoldId() string {
+	if x != nil {
+		return x.HoldId
+	}
+	return ""
+}
+
+func (x *ReleaseHoldRequest) GetActor() string {
+	if x != nil {
+		return x.Actor
+	}
+	return ""
+}
+
+func (x *ReleaseHoldRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type ReleaseHoldResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Hold          *Hold                  `protobuf:"bytes,1,opt,name=hold,proto3" json:"hold,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReleaseHoldResponse) Reset() {
+	*x = ReleaseHoldResponse{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReleaseHoldResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReleaseHoldResponse) ProtoMessage() {}
+
+func (x *ReleaseHoldResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReleaseHoldResponse.ProtoReflect.Descriptor instead.
+func (*ReleaseHoldResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *ReleaseHoldResponse) GetHold() *Hold {
+	if x != nil {
+		return x.Hold
+	}
+	return nil
+}
+
+type ListHoldsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ActiveOnly    bool                   `protobuf:"varint,2,opt,name=active_only,json=activeOnly,proto3" json:"active_only,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListHoldsRequest) Reset() {
+	*x = ListHoldsRequest{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListHoldsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListHoldsRequest) ProtoMessage() {}
+
+func (x *ListHoldsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListHoldsRequest.ProtoReflect.Descriptor instead.
+func (*ListHoldsRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *ListHoldsRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ListHoldsRequest) GetActiveOnly() bool {
+	if x != nil {
+		return x.ActiveOnly
+	}
+	return false
+}
+
+type ListHoldsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Holds         []*Hold                `protobuf:"bytes,1,rep,name=holds,proto3" json:"holds,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListHoldsResponse) Reset() {
+	*x = ListHoldsResponse{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListHoldsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListHoldsResponse) ProtoMessage() {}
+
+func (x *ListHoldsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListHoldsResponse.ProtoReflect.Descriptor instead.
+func (*ListHoldsResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *ListHoldsResponse) GetHolds() []*Hold {
+	if x != nil {
+		return x.Holds
+	}
+	return nil
+}
+
 var File_exchange_ledger_v1_ledger_proto protoreflect.FileDescriptor
 
 const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
@@ -2047,14 +2530,15 @@ const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
 	"\x18GetSystemBalancesRequest\x12\x14\n" +
 	"\x05asset\x18\x01 \x01(\tR\x05asset\"T\n" +
 	"\x19GetSystemBalancesResponse\x127\n" +
-	"\bbalances\x18\x01 \x03(\v2\x1b.exchange.ledger.v1.BalanceR\bbalances\"\xad\x01\n" +
+	"\bbalances\x18\x01 \x03(\v2\x1b.exchange.ledger.v1.BalanceR\bbalances\"\xd0\x01\n" +
 	"\rAdjustRequest\x12'\n" +
 	"\x0fidempotency_key\x18\x01 \x01(\tR\x0eidempotencyKey\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
 	"\x05asset\x18\x03 \x01(\tR\x05asset\x12\x16\n" +
 	"\x06amount\x18\x04 \x01(\tR\x06amount\x12\x16\n" +
 	"\x06reason\x18\x05 \x01(\tR\x06reason\x12\x14\n" +
-	"\x05actor\x18\x06 \x01(\tR\x05actor\"G\n" +
+	"\x05actor\x18\x06 \x01(\tR\x05actor\x12!\n" +
+	"\faccount_type\x18\a \x01(\tR\vaccountType\"G\n" +
 	"\x0eAdjustResponse\x125\n" +
 	"\aposting\x18\x01 \x01(\v2\x1b.exchange.ledger.v1.PostingR\aposting\"\xab\x01\n" +
 	"\vFuturesMove\x12\x12\n" +
@@ -2101,8 +2585,47 @@ const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
 	"\adetails\x18\x04 \x01(\tR\adetails\"\x9d\x01\n" +
 	"\x19GetReconciliationResponse\x12=\n" +
 	"\x06latest\x18\x01 \x03(\v2%.exchange.ledger.v1.ReconciliationRunR\x06latest\x12A\n" +
-	"\bfailures\x18\x02 \x03(\v2%.exchange.ledger.v1.ReconciliationRunR\bfailures2\xa2\n" +
+	"\bfailures\x18\x02 \x03(\v2%.exchange.ledger.v1.ReconciliationRunR\bfailures\"\x8c\x03\n" +
+	"\x04Hold\x12\x17\n" +
+	"\ahold_id\x18\x01 \x01(\tR\x06holdId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12!\n" +
+	"\faccount_type\x18\x03 \x01(\tR\vaccountType\x12\x14\n" +
+	"\x05asset\x18\x04 \x01(\tR\x05asset\x12\x16\n" +
+	"\x06amount\x18\x05 \x01(\tR\x06amount\x12\x16\n" +
+	"\x06reason\x18\x06 \x01(\tR\x06reason\x12\x14\n" +
+	"\x05actor\x18\a \x01(\tR\x05actor\x12\x1d\n" +
 	"\n" +
+	"journal_id\x18\b \x01(\tR\tjournalId\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\t \x01(\tR\tcreatedAt\x12\x1f\n" +
+	"\vreleased_at\x18\n" +
+	" \x01(\tR\n" +
+	"releasedAt\x12\x1f\n" +
+	"\vreleased_by\x18\v \x01(\tR\n" +
+	"releasedBy\x12%\n" +
+	"\x0erelease_reason\x18\f \x01(\tR\rreleaseReason\x12,\n" +
+	"\x12release_journal_id\x18\r \x01(\tR\x10releaseJournalId\"\xa0\x01\n" +
+	"\x10PlaceHoldRequest\x12\x17\n" +
+	"\ahold_id\x18\x01 \x01(\tR\x06holdId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
+	"\x05asset\x18\x03 \x01(\tR\x05asset\x12\x16\n" +
+	"\x06amount\x18\x04 \x01(\tR\x06amount\x12\x14\n" +
+	"\x05actor\x18\x05 \x01(\tR\x05actor\x12\x16\n" +
+	"\x06reason\x18\x06 \x01(\tR\x06reason\"A\n" +
+	"\x11PlaceHoldResponse\x12,\n" +
+	"\x04hold\x18\x01 \x01(\v2\x18.exchange.ledger.v1.HoldR\x04hold\"[\n" +
+	"\x12ReleaseHoldRequest\x12\x17\n" +
+	"\ahold_id\x18\x01 \x01(\tR\x06holdId\x12\x14\n" +
+	"\x05actor\x18\x02 \x01(\tR\x05actor\x12\x16\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\"C\n" +
+	"\x13ReleaseHoldResponse\x12,\n" +
+	"\x04hold\x18\x01 \x01(\v2\x18.exchange.ledger.v1.HoldR\x04hold\"L\n" +
+	"\x10ListHoldsRequest\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1f\n" +
+	"\vactive_only\x18\x02 \x01(\bR\n" +
+	"activeOnly\"C\n" +
+	"\x11ListHoldsResponse\x12.\n" +
+	"\x05holds\x18\x01 \x03(\v2\x18.exchange.ledger.v1.HoldR\x05holds2\xb6\f\n" +
 	"\rLedgerService\x12O\n" +
 	"\x06Freeze\x12!.exchange.ledger.v1.FreezeRequest\x1a\".exchange.ledger.v1.FreezeResponse\x12U\n" +
 	"\bUnfreeze\x12#.exchange.ledger.v1.UnfreezeRequest\x1a$.exchange.ledger.v1.UnfreezeResponse\x12U\n" +
@@ -2116,7 +2639,10 @@ const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
 	"\x06Adjust\x12!.exchange.ledger.v1.AdjustRequest\x1a\".exchange.ledger.v1.AdjustResponse\x12d\n" +
 	"\rSettleFutures\x12(.exchange.ledger.v1.SettleFuturesRequest\x1a).exchange.ledger.v1.SettleFuturesResponse\x12d\n" +
 	"\rFundInsurance\x12(.exchange.ledger.v1.FundInsuranceRequest\x1a).exchange.ledger.v1.FundInsuranceResponse\x12p\n" +
-	"\x11GetReconciliation\x12,.exchange.ledger.v1.GetReconciliationRequest\x1a-.exchange.ledger.v1.GetReconciliationResponseB\xd9\x01\n" +
+	"\x11GetReconciliation\x12,.exchange.ledger.v1.GetReconciliationRequest\x1a-.exchange.ledger.v1.GetReconciliationResponse\x12X\n" +
+	"\tPlaceHold\x12$.exchange.ledger.v1.PlaceHoldRequest\x1a%.exchange.ledger.v1.PlaceHoldResponse\x12^\n" +
+	"\vReleaseHold\x12&.exchange.ledger.v1.ReleaseHoldRequest\x1a'.exchange.ledger.v1.ReleaseHoldResponse\x12X\n" +
+	"\tListHolds\x12$.exchange.ledger.v1.ListHoldsRequest\x1a%.exchange.ledger.v1.ListHoldsResponseB\xd9\x01\n" +
 	"\x16com.exchange.ledger.v1B\vLedgerProtoP\x01ZHgithub.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1;ledgerv1\xa2\x02\x03ELX\xaa\x02\x12Exchange.Ledger.V1\xca\x02\x12Exchange\\Ledger\\V1\xe2\x02\x1eExchange\\Ledger\\V1\\GPBMetadata\xea\x02\x14Exchange::Ledger::V1b\x06proto3"
 
 var (
@@ -2131,7 +2657,7 @@ func file_exchange_ledger_v1_ledger_proto_rawDescGZIP() []byte {
 	return file_exchange_ledger_v1_ledger_proto_rawDescData
 }
 
-var file_exchange_ledger_v1_ledger_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
+var file_exchange_ledger_v1_ledger_proto_msgTypes = make([]protoimpl.MessageInfo, 38)
 var file_exchange_ledger_v1_ledger_proto_goTypes = []any{
 	(*FreezeRequest)(nil),             // 0: exchange.ledger.v1.FreezeRequest
 	(*UnfreezeRequest)(nil),           // 1: exchange.ledger.v1.UnfreezeRequest
@@ -2164,6 +2690,13 @@ var file_exchange_ledger_v1_ledger_proto_goTypes = []any{
 	(*GetReconciliationRequest)(nil),  // 28: exchange.ledger.v1.GetReconciliationRequest
 	(*ReconciliationRun)(nil),         // 29: exchange.ledger.v1.ReconciliationRun
 	(*GetReconciliationResponse)(nil), // 30: exchange.ledger.v1.GetReconciliationResponse
+	(*Hold)(nil),                      // 31: exchange.ledger.v1.Hold
+	(*PlaceHoldRequest)(nil),          // 32: exchange.ledger.v1.PlaceHoldRequest
+	(*PlaceHoldResponse)(nil),         // 33: exchange.ledger.v1.PlaceHoldResponse
+	(*ReleaseHoldRequest)(nil),        // 34: exchange.ledger.v1.ReleaseHoldRequest
+	(*ReleaseHoldResponse)(nil),       // 35: exchange.ledger.v1.ReleaseHoldResponse
+	(*ListHoldsRequest)(nil),          // 36: exchange.ledger.v1.ListHoldsRequest
+	(*ListHoldsResponse)(nil),         // 37: exchange.ledger.v1.ListHoldsResponse
 }
 var file_exchange_ledger_v1_ledger_proto_depIdxs = []int32{
 	3,  // 0: exchange.ledger.v1.FreezeResponse.posting:type_name -> exchange.ledger.v1.Posting
@@ -2181,37 +2714,46 @@ var file_exchange_ledger_v1_ledger_proto_depIdxs = []int32{
 	3,  // 12: exchange.ledger.v1.FundInsuranceResponse.posting:type_name -> exchange.ledger.v1.Posting
 	29, // 13: exchange.ledger.v1.GetReconciliationResponse.latest:type_name -> exchange.ledger.v1.ReconciliationRun
 	29, // 14: exchange.ledger.v1.GetReconciliationResponse.failures:type_name -> exchange.ledger.v1.ReconciliationRun
-	0,  // 15: exchange.ledger.v1.LedgerService.Freeze:input_type -> exchange.ledger.v1.FreezeRequest
-	1,  // 16: exchange.ledger.v1.LedgerService.Unfreeze:input_type -> exchange.ledger.v1.UnfreezeRequest
-	2,  // 17: exchange.ledger.v1.LedgerService.Transfer:input_type -> exchange.ledger.v1.TransferRequest
-	8,  // 18: exchange.ledger.v1.LedgerService.GetBalances:input_type -> exchange.ledger.v1.GetBalancesRequest
-	10, // 19: exchange.ledger.v1.LedgerService.SettleWithdrawal:input_type -> exchange.ledger.v1.SettleWithdrawalRequest
-	12, // 20: exchange.ledger.v1.LedgerService.TransferInternal:input_type -> exchange.ledger.v1.TransferInternalRequest
-	14, // 21: exchange.ledger.v1.LedgerService.BookChainFee:input_type -> exchange.ledger.v1.BookChainFeeRequest
-	16, // 22: exchange.ledger.v1.LedgerService.FundSystemAccount:input_type -> exchange.ledger.v1.FundSystemAccountRequest
-	18, // 23: exchange.ledger.v1.LedgerService.GetSystemBalances:input_type -> exchange.ledger.v1.GetSystemBalancesRequest
-	20, // 24: exchange.ledger.v1.LedgerService.Adjust:input_type -> exchange.ledger.v1.AdjustRequest
-	23, // 25: exchange.ledger.v1.LedgerService.SettleFutures:input_type -> exchange.ledger.v1.SettleFuturesRequest
-	26, // 26: exchange.ledger.v1.LedgerService.FundInsurance:input_type -> exchange.ledger.v1.FundInsuranceRequest
-	28, // 27: exchange.ledger.v1.LedgerService.GetReconciliation:input_type -> exchange.ledger.v1.GetReconciliationRequest
-	4,  // 28: exchange.ledger.v1.LedgerService.Freeze:output_type -> exchange.ledger.v1.FreezeResponse
-	5,  // 29: exchange.ledger.v1.LedgerService.Unfreeze:output_type -> exchange.ledger.v1.UnfreezeResponse
-	6,  // 30: exchange.ledger.v1.LedgerService.Transfer:output_type -> exchange.ledger.v1.TransferResponse
-	9,  // 31: exchange.ledger.v1.LedgerService.GetBalances:output_type -> exchange.ledger.v1.GetBalancesResponse
-	11, // 32: exchange.ledger.v1.LedgerService.SettleWithdrawal:output_type -> exchange.ledger.v1.SettleWithdrawalResponse
-	13, // 33: exchange.ledger.v1.LedgerService.TransferInternal:output_type -> exchange.ledger.v1.TransferInternalResponse
-	15, // 34: exchange.ledger.v1.LedgerService.BookChainFee:output_type -> exchange.ledger.v1.BookChainFeeResponse
-	17, // 35: exchange.ledger.v1.LedgerService.FundSystemAccount:output_type -> exchange.ledger.v1.FundSystemAccountResponse
-	19, // 36: exchange.ledger.v1.LedgerService.GetSystemBalances:output_type -> exchange.ledger.v1.GetSystemBalancesResponse
-	21, // 37: exchange.ledger.v1.LedgerService.Adjust:output_type -> exchange.ledger.v1.AdjustResponse
-	25, // 38: exchange.ledger.v1.LedgerService.SettleFutures:output_type -> exchange.ledger.v1.SettleFuturesResponse
-	27, // 39: exchange.ledger.v1.LedgerService.FundInsurance:output_type -> exchange.ledger.v1.FundInsuranceResponse
-	30, // 40: exchange.ledger.v1.LedgerService.GetReconciliation:output_type -> exchange.ledger.v1.GetReconciliationResponse
-	28, // [28:41] is the sub-list for method output_type
-	15, // [15:28] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	31, // 15: exchange.ledger.v1.PlaceHoldResponse.hold:type_name -> exchange.ledger.v1.Hold
+	31, // 16: exchange.ledger.v1.ReleaseHoldResponse.hold:type_name -> exchange.ledger.v1.Hold
+	31, // 17: exchange.ledger.v1.ListHoldsResponse.holds:type_name -> exchange.ledger.v1.Hold
+	0,  // 18: exchange.ledger.v1.LedgerService.Freeze:input_type -> exchange.ledger.v1.FreezeRequest
+	1,  // 19: exchange.ledger.v1.LedgerService.Unfreeze:input_type -> exchange.ledger.v1.UnfreezeRequest
+	2,  // 20: exchange.ledger.v1.LedgerService.Transfer:input_type -> exchange.ledger.v1.TransferRequest
+	8,  // 21: exchange.ledger.v1.LedgerService.GetBalances:input_type -> exchange.ledger.v1.GetBalancesRequest
+	10, // 22: exchange.ledger.v1.LedgerService.SettleWithdrawal:input_type -> exchange.ledger.v1.SettleWithdrawalRequest
+	12, // 23: exchange.ledger.v1.LedgerService.TransferInternal:input_type -> exchange.ledger.v1.TransferInternalRequest
+	14, // 24: exchange.ledger.v1.LedgerService.BookChainFee:input_type -> exchange.ledger.v1.BookChainFeeRequest
+	16, // 25: exchange.ledger.v1.LedgerService.FundSystemAccount:input_type -> exchange.ledger.v1.FundSystemAccountRequest
+	18, // 26: exchange.ledger.v1.LedgerService.GetSystemBalances:input_type -> exchange.ledger.v1.GetSystemBalancesRequest
+	20, // 27: exchange.ledger.v1.LedgerService.Adjust:input_type -> exchange.ledger.v1.AdjustRequest
+	23, // 28: exchange.ledger.v1.LedgerService.SettleFutures:input_type -> exchange.ledger.v1.SettleFuturesRequest
+	26, // 29: exchange.ledger.v1.LedgerService.FundInsurance:input_type -> exchange.ledger.v1.FundInsuranceRequest
+	28, // 30: exchange.ledger.v1.LedgerService.GetReconciliation:input_type -> exchange.ledger.v1.GetReconciliationRequest
+	32, // 31: exchange.ledger.v1.LedgerService.PlaceHold:input_type -> exchange.ledger.v1.PlaceHoldRequest
+	34, // 32: exchange.ledger.v1.LedgerService.ReleaseHold:input_type -> exchange.ledger.v1.ReleaseHoldRequest
+	36, // 33: exchange.ledger.v1.LedgerService.ListHolds:input_type -> exchange.ledger.v1.ListHoldsRequest
+	4,  // 34: exchange.ledger.v1.LedgerService.Freeze:output_type -> exchange.ledger.v1.FreezeResponse
+	5,  // 35: exchange.ledger.v1.LedgerService.Unfreeze:output_type -> exchange.ledger.v1.UnfreezeResponse
+	6,  // 36: exchange.ledger.v1.LedgerService.Transfer:output_type -> exchange.ledger.v1.TransferResponse
+	9,  // 37: exchange.ledger.v1.LedgerService.GetBalances:output_type -> exchange.ledger.v1.GetBalancesResponse
+	11, // 38: exchange.ledger.v1.LedgerService.SettleWithdrawal:output_type -> exchange.ledger.v1.SettleWithdrawalResponse
+	13, // 39: exchange.ledger.v1.LedgerService.TransferInternal:output_type -> exchange.ledger.v1.TransferInternalResponse
+	15, // 40: exchange.ledger.v1.LedgerService.BookChainFee:output_type -> exchange.ledger.v1.BookChainFeeResponse
+	17, // 41: exchange.ledger.v1.LedgerService.FundSystemAccount:output_type -> exchange.ledger.v1.FundSystemAccountResponse
+	19, // 42: exchange.ledger.v1.LedgerService.GetSystemBalances:output_type -> exchange.ledger.v1.GetSystemBalancesResponse
+	21, // 43: exchange.ledger.v1.LedgerService.Adjust:output_type -> exchange.ledger.v1.AdjustResponse
+	25, // 44: exchange.ledger.v1.LedgerService.SettleFutures:output_type -> exchange.ledger.v1.SettleFuturesResponse
+	27, // 45: exchange.ledger.v1.LedgerService.FundInsurance:output_type -> exchange.ledger.v1.FundInsuranceResponse
+	30, // 46: exchange.ledger.v1.LedgerService.GetReconciliation:output_type -> exchange.ledger.v1.GetReconciliationResponse
+	33, // 47: exchange.ledger.v1.LedgerService.PlaceHold:output_type -> exchange.ledger.v1.PlaceHoldResponse
+	35, // 48: exchange.ledger.v1.LedgerService.ReleaseHold:output_type -> exchange.ledger.v1.ReleaseHoldResponse
+	37, // 49: exchange.ledger.v1.LedgerService.ListHolds:output_type -> exchange.ledger.v1.ListHoldsResponse
+	34, // [34:50] is the sub-list for method output_type
+	18, // [18:34] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_exchange_ledger_v1_ledger_proto_init() }
@@ -2225,7 +2767,7 @@ func file_exchange_ledger_v1_ledger_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_ledger_v1_ledger_proto_rawDesc), len(file_exchange_ledger_v1_ledger_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   31,
+			NumMessages:   38,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

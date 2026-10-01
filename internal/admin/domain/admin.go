@@ -59,6 +59,9 @@ const (
 	// PermUsersContacts shows an account's email and phone unmasked
 	// (audited each time).
 	PermUsersContacts = "users.contacts"
+	// PermLedgerHold freezes part of a user's SPOT balance and releases it
+	// (risk control).
+	PermLedgerHold = "ledger.hold"
 )
 
 var reads = []string{
@@ -68,10 +71,11 @@ var reads = []string{
 var roles = map[string][]string{
 	RoleAdmin: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit,
 		PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermDerivativesEdit, PermSettingsEdit, PermUsersNotes,
-		PermUsersSecurity, PermUsersContacts),
+		PermUsersSecurity, PermUsersContacts, PermLedgerHold),
 	RoleOperator: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit, PermDerivativesEdit,
-		PermUsersNotes, PermUsersSecurity, PermUsersContacts),
-	RoleFinance: append(slices.Clone(reads), PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermUsersNotes, PermUsersContacts),
+		PermUsersNotes, PermUsersSecurity, PermUsersContacts, PermLedgerHold),
+	RoleFinance: append(slices.Clone(reads), PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermUsersNotes, PermUsersContacts,
+		PermLedgerHold),
 	RoleAuditor: slices.Clone(reads),
 }
 

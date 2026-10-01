@@ -1,7 +1,7 @@
 import { adminApi, adminData, type AdminSchemas } from "@exchange/core/api/admin";
 import { Badge, type DataColumnMeta, type ColumnDef } from "@exchange/ui";
 
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { EnumBadge, EnumText } from "../../kit/enums";
 import { IdText, Num, TimeText, UserCell } from "../../kit/format";
@@ -71,8 +71,20 @@ export function useOrderColumns(withUser = true): ColumnDef<Order, unknown>[] {
   );
 }
 
-export function OrdersTable({ list, withUser = true, onRowClick }: { list: CursorList<Order>; withUser?: boolean; onRowClick?: (o: Order) => void }) {
-  const columns = useOrderColumns(withUser);
+/** OrdersTable lists orders; action adds a last column of what may be done to one (the user page's cancel). */
+export function OrdersTable({
+  list, withUser = true, onRowClick, action,
+}: {
+  list: CursorList<Order>;
+  withUser?: boolean;
+  onRowClick?: (o: Order) => void;
+  action?: (o: Order) => ReactNode;
+}) {
+  const base = useOrderColumns(withUser);
+  const columns = useMemo<ColumnDef<Order, unknown>[]>(
+    () => (action ? [...base, { id: "act", header: "", meta: right, cell: ({ row }) => action(row.original) }] : base),
+    [base, action],
+  );
   return <ListTable list={list} columns={columns} getRowId={(o) => o.order_id} onRowClick={onRowClick} aria-label="orders" />;
 }
 

@@ -37,9 +37,9 @@ service LedgerService {
   rpc FundSystemAccount(FundSystemAccountRequest) returns (FundSystemAccountResponse);
   // GetSystemBalances returns the platform's system accounts in an asset.
   rpc GetSystemBalances(GetSystemBalancesRequest) returns (GetSystemBalancesResponse);
-  // Adjust credits (or, negative, debits) a user's SPOT account against
-  // ADJUSTMENT (MANUAL_ADJUSTMENT) with an audit event; the admin console
-  // calls it once two people approved (§5.12). Needs
+  // Adjust credits (or, negative, debits) a user's SPOT or FUTURES account
+  // against ADJUSTMENT (MANUAL_ADJUSTMENT) with an audit event; the admin
+  // console calls it once the adjustment was approved (§5.12). Needs
   // ledger.manual_adjustment.
   rpc Adjust(AdjustRequest) returns (AdjustResponse);
   // SettleFutures books one settlement step of a user's perpetual contract
@@ -60,6 +60,15 @@ service LedgerService {
   // the recent runs that found mismatches (the admin console's ledger
   // page).
   rpc GetReconciliation(GetReconciliationRequest) returns (GetReconciliationResponse);
+  // PlaceHold freezes part of a user's SPOT balance for the admin console
+  // (ADMIN_FREEZE, design 2026-10-02 §4.1) with an audit event; the hold
+  // ID is the caller's, and repeating it with the same hold returns it.
+  rpc PlaceHold(PlaceHoldRequest) returns (PlaceHoldResponse);
+  // ReleaseHold returns a hold to the available balance (ADMIN_UNFREEZE)
+  // with an audit event; a hold is released once (LEDGER_HOLD_RELEASED).
+  rpc ReleaseHold(ReleaseHoldRequest) returns (ReleaseHoldResponse);
+  // ListHolds lists a user's holds, newest first.
+  rpc ListHolds(ListHoldsRequest) returns (ListHoldsResponse);
 }
 
 message FreezeRequest {
@@ -204,6 +213,8 @@ message AdjustRequest {
   string amount = 4;
   string reason = 5;
   string actor = 6;
+  // SPOT (also when empty) or FUTURES.
+  string account_type = 7;
 }
 
 message AdjustResponse {
@@ -294,4 +305,58 @@ message GetReconciliationResponse {
   repeated ReconciliationRun latest = 1;
   // Runs with mismatches, newest first.
   repeated ReconciliationRun failures = 2;
+}
+
+// Hold is an administrator's hold on part of a user's SPOT balance.
+message Hold {
+  string hold_id = 1;
+  string user_id = 2;
+  // SPOT.
+  string account_type = 3;
+  string asset = 4;
+  string amount = 5;
+  string reason = 6;
+  // The administrator who placed it.
+  string actor = 7;
+  string journal_id = 8;
+  // RFC 3339.
+  string created_at = 9;
+  // RFC 3339; empty while the hold is active.
+  string released_at = 10;
+  string released_by = 11;
+  string release_reason = 12;
+  string release_journal_id = 13;
+}
+
+message PlaceHoldRequest {
+  // A UUID the caller chooses.
+  string hold_id = 1;
+  string user_id = 2;
+  string asset = 3;
+  string amount = 4;
+  string actor = 5;
+  string reason = 6;
+}
+
+message PlaceHoldResponse {
+  Hold hold = 1;
+}
+
+message ReleaseHoldRequest {
+  string hold_id = 1;
+  string actor = 2;
+  string reason = 3;
+}
+
+message ReleaseHoldResponse {
+  Hold hold = 1;
+}
+
+message ListHoldsRequest {
+  string user_id = 1;
+  bool active_only = 2;
+}
+
+message ListHoldsResponse {
+  repeated Hold holds = 1;
 }

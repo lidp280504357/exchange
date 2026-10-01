@@ -26,6 +26,7 @@ type Repos interface {
 	Transfers() TransferRepo
 	Trades() TradeRepo
 	Futures() FuturesRepo
+	Holds() HoldRepo
 	// Emit queues an event on topic, keyed by aggregateID.
 	Emit(ctx context.Context, topic string, msg proto.Message, aggregateType, aggregateID string) error
 }
@@ -81,6 +82,20 @@ type FuturesRepo interface {
 	// ByKey returns the request booked under key, or nil.
 	ByKey(ctx context.Context, key string) (*domain.FuturesSettlement, error)
 	Insert(ctx context.Context, s domain.FuturesSettlement) error
+}
+
+// HoldRepo stores administrators' holds.
+type HoldRepo interface {
+	// Get returns a hold, or nil.
+	Get(ctx context.Context, id string) (*domain.Hold, error)
+	// GetForUpdate is Get with the row locked.
+	GetForUpdate(ctx context.Context, id string) (*domain.Hold, error)
+	Insert(ctx context.Context, h domain.Hold) error
+	// Release stores a hold's release; one released already fails with
+	// ErrHoldReleased.
+	Release(ctx context.Context, h domain.Hold) error
+	// OfUser returns a user's holds, newest first.
+	OfUser(ctx context.Context, userID string, activeOnly bool, limit int) ([]domain.Hold, error)
 }
 
 // Assets tells the precision of an asset (instrument-service); unknown
