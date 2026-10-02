@@ -77,6 +77,7 @@ type App struct {
 	log         *slog.Logger
 	loader      config.Loader
 	health      *health.Registry
+	ops         *early // the ops server, serving from before setup
 	metrics     *prometheus.Registry
 	httpMetrics *httpx.HTTPMetrics
 	components  []component

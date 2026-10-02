@@ -467,10 +467,12 @@ func (s *Sim) quote(ctx context.Context, now time.Time, center float64) {
 // requote brings a maker's orders to its ladder around center, within the
 // price band: the orders no longer wanted canceled, the missing levels
 // placed nearest first, bids and asks in turn, as far as the throttle
-// lets (leaving the other roles their share). A side the bot cannot fund
-// waits for the next requote; another refusal makes the bot wait.
+// lets (leaving the other roles their share), their sizes leaning by the
+// maker's USDT (makerLean). A side the bot cannot fund waits for the next
+// requote; another refusal makes the bot wait.
 func (s *Sim) requote(ctx context.Context, now time.Time, b *bot, center float64) {
 	rng := s.model.Rand()
+	lean := s.makerLean(b)
 	b.nextQuote = now.Add(time.Second + time.Duration(rng.Int64N(int64(2*time.Second))))
 	open, err := s.trading.Open(ctx, b.UserID, s.cfg.Symbol)
 	if err != nil {
@@ -503,7 +505,13 @@ func (s *Sim) requote(ctx context.Context, now time.Time, b *bot, center float64
 			stop = true
 			return
 		}
-		qty := domain.Quantity(domain.Worth(rng, s.params.LevelSize, 0.5), price, s.pair)
+		worth := domain.Worth(rng, s.params.LevelSize, 0.5)
+		if side == domain.Buy {
+			worth *= 1 + lean/2
+		} else {
+			worth *= 1 - lean/2
+		}
+		qty := domain.Quantity(worth, price, s.pair)
 		_, err := s.trading.Limit(ctx, b.UserID, s.cfg.Symbol, side, price, qty)
 		switch {
 		case err == nil:
@@ -528,6 +536,27 @@ func (s *Sim) requote(ctx context.Context, now time.Time, b *bot, center float64
 	}
 	s.refused(now, len(placeBids)+len(placeAsks), placed, outOfBand)
 	b.quotedP = center
+}
+
+// makerLean is how far a maker's USDT (as last read) is from the makers'
+// average, within -1 and 1 (ASTRA design §4: the makers lean by their
+// inventory). One short of USDT quotes smaller bids and larger asks, down
+// to half and up to one and a half times, and sells its way back; one
+// rich in USDT the other way. The takers lean by theirs (take).
+func (s *Sim) makerLean(b *bot) float64 {
+	if !b.known {
+		return 0
+	}
+	sum, n := 0.0, 0
+	for _, m := range s.botsOf(domain.RoleMaker) {
+		if m.known {
+			sum, n = sum+m.usdt.InexactFloat64(), n+1
+		}
+	}
+	if n < 2 {
+		return 0
+	}
+	return domain.Lean(b.usdt.InexactFloat64(), sum/float64(n))
 }
 
 // take sends the takers' market orders that arrived in dt, each by a taker

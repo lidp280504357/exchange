@@ -41,7 +41,14 @@ func TestOpsEndpointsFollowTheLifecycle(t *testing.T) {
 	if err := a.setupOps(t.Context()); err != nil {
 		t.Fatalf("setupOps: %v", err)
 	}
-	base := "http://" + a.components[0].Component.(*HTTPServer).Addr().String()
+	base := "http://" + a.ops.c.(*HTTPServer).Addr().String()
+	// It serves from before setup: not ready while setup works.
+	if code, body := opsGet(t, base, "/readyz"); code != http.StatusServiceUnavailable || readyStatus(t, body) != "starting" {
+		t.Fatalf("before Run: %d %s", code, body)
+	}
+	if code, _ := opsGet(t, base, "/healthz"); code != http.StatusOK {
+		t.Fatalf("healthz before Run = %d", code)
+	}
 
 	stopping, release := make(chan struct{}), make(chan struct{})
 	a.Add("worker", Loop(func(ctx context.Context) error {

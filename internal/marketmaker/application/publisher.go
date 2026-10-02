@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -152,6 +153,11 @@ func New(cfg Config, specs ports.Specs, house ports.House, fl ports.Flags, pub k
 		}),
 	}
 	p.leverage.Set(cfg.Caps.ContractLeverage.InexactFloat64())
+	// Not a number until HOUSE's contract account is read: 0 would say its
+	// equity is gone (HouseContractEquityGone) while derivatives-service
+	// was only not reached yet.
+	p.equity.Set(math.NaN())
+	p.worth.Set(math.NaN())
 	reg.MustRegister(p.inventory, p.exposure, p.room, p.active, p.updates, p.failures, p.equity, p.worth, p.leverage)
 	return p
 }
@@ -269,15 +275,30 @@ func (p *Publisher) round() []outgoing {
 	feed := p.flags.Enabled(flags.KeyReferenceFeed, flags.Subject{})
 	houseFresh := !p.houseAt.IsZero() && now.Sub(p.houseAt) < houseStale
 	prices := p.prices(now)
+	usable := make([]bool, len(p.list))
+	offered := 0 // the contracts HOUSE offers
+	for i, spec := range p.list {
+		b := p.books[spec.Symbol]
+		_, priced := domain.LevelCap(spec, p.cfg.Caps, prices)
+		usable[i] = feed && houseFresh && b != nil && !b.gap && now.Sub(b.heard) < p.cfg.Stale && priced &&
+			p.flags.Enabled(flags.KeyHouseLiquidity, flags.Subject{Symbol: spec.Symbol})
+		if usable[i] && spec.Contract {
+			offered++
+		}
+	}
+	// The contracts HOUSE offers share the room its positions may still
+	// grow by in equal parts: between two reads of its positions, fills on
+	// all of them cannot together take more than the room.
 	contractRoom := domain.ContractRoom(p.contracts, p.cfg.Caps)
+	if offered > 1 {
+		contractRoom = contractRoom.Div(decimal.NewFromInt(int64(offered)))
+	}
 	var out []outgoing
-	for _, spec := range p.list {
+	for i, spec := range p.list {
 		b := p.books[spec.Symbol]
 		msg := &orderv1.ReferenceBookUpdate{Symbol: spec.Symbol, HouseUserId: p.cfg.HouseUser}
-		levelCap, priced := domain.LevelCap(spec, p.cfg.Caps, prices)
-		usable := feed && houseFresh && b != nil && !b.gap && now.Sub(b.heard) < p.cfg.Stale && priced &&
-			p.flags.Enabled(flags.KeyHouseLiquidity, flags.Subject{Symbol: spec.Symbol})
-		if usable {
+		levelCap, _ := domain.LevelCap(spec, p.cfg.Caps, prices)
+		if usable[i] {
 			bids := domain.Levels(b.bids, true, spec, levelCap, p.cfg.Levels)
 			asks := domain.Levels(b.asks, false, spec, levelCap, p.cfg.Levels)
 			var buy, sell decimal.Decimal

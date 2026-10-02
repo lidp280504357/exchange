@@ -90,3 +90,4 @@ ADR-0010 让用户看到的盘口与成交全部来自币安。如果成交仍�
 ## 修订
 
 - 2026-10-02（用户决定）：所有交易一律与 HOUSE 成交，现货与合约、开多开空都是。ETH-BTC 也跟随币安 ETHBTC（第 6 条里"没有参考市场"的例子不再存在），HOUSE 为全部交易对与合约报价。测试服的额度在 compose 里放大：单币 2,000,000 USDT、总敞口 20,000,000 USDT、单合约 5,000,000 USDT；第 8 条的数值仍是代码默认值。原因是按默认值，一个用户 125 倍开 2 BTC 就占满 BTC-USDT-PERP 一侧。HOUSE 的库存与合约保证金相应补足，见 [market-maker.md](../runbook/market-maker.md)。
+- 2026-10-02（审查 2e404d6 ④ 后补记，不改决策）：HOUSE 的合约仓位合计不超过合约权益的 `HOUSE_CONTRACT_LEVERAGE` 倍（10），到了以后只减仓；HOUSE 报价的合约上强平单也是 `house_only` 的 IOC，所以与 HOUSE 同侧的用户被强平时（强平方向正是 HOUSE 不能再加的方向）没有对手方，强平单重试 3 次后转 ADL、缺口由保险基金承担。这是"HOUSE 永不被强平、用户之间不撮合"的必然结果，运维上靠补 HOUSE 合约保证金让它恢复接单（见 [derivatives.md](../runbook/derivatives.md) 强平一节）。同一轮还把 HOUSE 剩余的增长额度按它在报价的合约个数均分（两次读取仓位之间，所有合约合计不会超过额度），HOUSE 合约权益在第一次读到之前不报 0（报 NaN，免得误报 `HouseContractEquityGone`）。

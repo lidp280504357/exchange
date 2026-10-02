@@ -20,8 +20,13 @@ import (
 
 // callback takes a custodian's callback (ADR-0011): recorded and applied,
 // it is answered with the reply the custodian expects; anything else
-// makes the custodian try again.
+// makes the custodian try again. The provider is named in lower case
+// only, the one path the edge proxy guards.
 func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
+	if p := chi.URLParam(r, "provider"); p != strings.ToLower(p) {
+		httpx.WriteError(w, r, apperr.NotFound("no such callback"))
+		return
+	}
 	if len(h.CallbackFrom) > 0 {
 		ip, err := netip.ParseAddr(httpx.ClientIPFrom(r.Context()))
 		if err != nil || !slices.ContainsFunc(h.CallbackFrom, func(p netip.Prefix) bool { return p.Contains(ip.Unmap()) }) {

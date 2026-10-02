@@ -31,6 +31,8 @@ type Repos interface {
 	// those halted for their simulated market's.
 	Halts() HaltRepo
 	SimHalts() HaltRepo
+	// SimHeartbeats are when the simulated markets last reported.
+	SimHeartbeats() HeartbeatRepo
 	// Emit queues an event on the outbox (business events that must not
 	// be lost, such as risk.events' SystemDegraded; derived market data
 	// goes out directly).
@@ -141,6 +143,13 @@ type HaltRepo interface {
 	// Add records a halt; one recorded already is kept.
 	Add(ctx context.Context, symbol string, at time.Time) error
 	Remove(ctx context.Context, symbol string) error
+}
+
+// HeartbeatRepo remembers when each simulated market last reported.
+type HeartbeatRepo interface {
+	List(ctx context.Context) (map[string]time.Time, error)
+	// Save records a report at at, unless a later one is recorded.
+	Save(ctx context.Context, symbol string, at time.Time) error
 }
 
 // ReferenceSource is an external market data source (§5.11: several may

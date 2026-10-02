@@ -82,6 +82,7 @@ SELECT count(*) FILTER (WHERE settled_at IS NULL) AS waiting, sum(amount) AS net
 - **预警**：保证金余额 ≤ 1.2 × 维持保证金时发 `LiquidationWarning`（WebSocket `risk` 频道 `event=WARNING`），同一段只发一次，回到 1.3 倍以上才重置（逐仓记在仓位的 `warned_at`，全仓记在 `derivatives.cross_accounts`）。
 - **接管**：保证金余额 ≤ 维持保证金时，撤掉相关挂单（逐仓：该仓位的挂单；全仓：该用户所有全仓挂单），仓位标为 `liquidating`，发 `LiquidationStarted`（`risk` 频道 `event=STARTED`）。此后用户不能再对该仓位下单、调保证金或杠杆（`DERIV_POSITION_LIQUIDATING`）。
 - **强平单**：每秒检查，没有进行中的强平单就下一张 IOC 限价单（`kind=LIQUIDATION`，平掉剩余数量）：逐仓以破产价、全仓以标记价为基准，向不利方向偏 0.5%（`domain.Slippage`），取到 tick。成交按强平结算：逐仓亏损最多到保证金、剩余保证金进保险基金（`INSURANCE_CONTRIBUTION`）、缺口由保险基金补，分录类型 `LIQUIDATION_SETTLE`；全仓亏损从可用余额付，不够的由保险基金补。每次成交发 `LiquidationFilled`（`event=LIQUIDATED`）。
+  - HOUSE 报价的合约上强平单也带 `house_only`，对手方只有 HOUSE。HOUSE 的合约仓位合计到了权益的 `HOUSE_CONTRACT_LEVERAGE` 倍（或该方向到了单合约上限）后只减仓：被强平的用户若与 HOUSE 站在同一侧（例如都多头，强平要卖、HOUSE 不再买入），HOUSE 那一侧没有报价，强平单成交不了，重试 3 次后转 ADL、缺口由保险基金补。这是"HOUSE 永不被强平、用户之间不撮合"（ADR-0015）的必然结果；告警 `HouseContractEquityGone` 与指标 `market_house_contract_exposure_usdt` 提示 HOUSE 快到上限，补 HOUSE 合约保证金（`exchangectl ledger house-margin`）能让它恢复接单。
 - **ADL**：强平单下了 3 次（`MaxLiquidationAttempts`）仍没平完，剩余部分对对手方执行自动减仓：同合约反方向、未在强平中的其他用户仓位按"盈利率（未实现盈亏 / 入场成本）× 有效杠杆（名义价值 / 保证金余额）"从高到低排队，按破产价（逐仓）或标记价（全仓）在订单簿之外成交，无手续费，分录类型 `ADL_SETTLE`。被减仓的一方收到 `AdlExecuted`（`event=ADL`）。
 - 仓位平完后 `liquidating`、预警标记自动清除。
 

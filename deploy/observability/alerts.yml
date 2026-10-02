@@ -295,6 +295,18 @@ groups:
           summary: "the custodian {{ $labels.provider }} and the platform's wallets hold {{ $value }} {{ $labels.asset }} less than the ledger expects (invariant 4)"
           runbook: docs/runbook/custody.md
 
+      # An asset left out of the check has no shortfall to alert on: the
+      # custodian reported no balance of it, or one in the coin's smallest
+      # unit. Left so for half an hour, nobody knows whether funds are
+      # missing.
+      - alert: CustodyNotCompared
+        expr: max by (provider, asset) (wallet_custody_not_compared) == 1
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.asset }} with the custodian {{ $labels.provider }} has not been compared with the ledger for 30 minutes (invariant 4 unknown)"
+          runbook: docs/runbook/custody.md
+
       - alert: CustodyUnreachable
         expr: max by (provider) (wallet_custody_up) == 0
         for: 10m

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -29,6 +30,7 @@ type memStore struct {
 	funding    map[string]ports.FundingPeriod
 	halts      map[string]ports.Halt
 	simHalts   map[string]ports.Halt
+	heartbeats map[string]time.Time
 	mu         sync.Mutex // the reference feed writes from its own goroutine
 	down       bool
 	// outbox holds the emitted events; emitFails makes Emit fail.
@@ -40,6 +42,7 @@ func newMemStore() *memStore {
 	return &memStore{
 		symbols: map[string]ports.SymbolState{}, candles: map[string]domain.Candle{}, references: map[string]domain.Candle{},
 		funding: map[string]ports.FundingPeriod{}, halts: map[string]ports.Halt{}, simHalts: map[string]ports.Halt{},
+		heartbeats: map[string]time.Time{},
 	}
 }
 
@@ -64,6 +67,25 @@ func (r memRepos) Funding() ports.FundingRepo { return memFunding(r) }
 
 func (r memRepos) Halts() ports.HaltRepo    { return memHalts{s: r.s, m: r.s.halts} }
 func (r memRepos) SimHalts() ports.HaltRepo { return memHalts{s: r.s, m: r.s.simHalts} }
+
+func (r memRepos) SimHeartbeats() ports.HeartbeatRepo { return memHeartbeats(r) }
+
+type memHeartbeats memRepos
+
+func (r memHeartbeats) List(context.Context) (map[string]time.Time, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	return maps.Clone(r.s.heartbeats), nil
+}
+
+func (r memHeartbeats) Save(_ context.Context, symbol string, at time.Time) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	if at.After(r.s.heartbeats[symbol]) {
+		r.s.heartbeats[symbol] = at
+	}
+	return nil
+}
 
 type memHalts struct {
 	s *memStore

@@ -30,7 +30,7 @@ custody_callbacks（原文、验签、结果、次数）──> 充值：deposit
 | `UDUN_API_KEY` | 签名密钥（请求与回调共用），只在本地 `.env` 与服务器 `apps.env`；至少 32 个字符（128 位随机，例如 32 位十六进制），短了 wallet-service 不启动 |
 | `UDUN_WALLET_ID` | 可选，商户下的钱包 |
 | `UDUN_CALLBACK_URL` | 托管方回调地址：真网关用 `https://astras.vip/v1/wallet/callbacks/udun`；测试服模拟网关用 `http://api-gateway:8080/v1/wallet/callbacks/udun`（内网，经网关） |
-| `UDUN_CALLBACK_ALLOWED_IPS` | 配了网关就必填（否则 wallet-service 不启动）：托管方回调的出口 IP（逗号分隔，可写 CIDR）。测试服填容器网段 `172.18.0.0/16`（模拟网关在内网经网关回调）。公网这一层另由 nginx 把关：回调路径只放行 `deploy/compose/nginx/snippets/custody-callback-allow.conf` 里的 `allow` 地址，文件里没有地址时全部 403（审查 B3） |
+| `UDUN_CALLBACK_ALLOWED_IPS` | 配了网关就必填（否则 wallet-service 不启动）：托管方回调的出口 IP（逗号分隔，可写 CIDR）。测试服填容器网段 `172.18.0.0/16`（模拟网关在内网经网关回调）。公网这一层另由 nginx 把关：回调路径（`/v1/wallet/callbacks/` 下任何托管方、不分大小写，按解码后的地址匹配）只放行 `deploy/compose/nginx/snippets/custody-callback-allow.conf` 里的 `allow` 地址，文件里没有地址时全部 403（审查 B3）；wallet-service 只认小写的托管方名，`/v1/wallet/callbacks/UDUN` 这类写法 404 |
 | `WALLET_CUSTODY_INTERVAL` | 托管方处理周期，默认 5 秒 |
 
 网络在 `deploy/instruments/test.json`（`exchangectl instruments apply` 同步）：
@@ -85,7 +85,7 @@ custody_callbacks（原文、验签、结果、次数）──> 充值：deposit
 - 托管方余额：`/mch/support-coins` 各币种余额之和（USDT 三条链合计）。
 - 其它持有方：资产的另一种保管方式此刻持有的数额。测试服的 ETH 同时在 Sepolia 自建钱包与托管方：托管方的检查把 Sepolia 热钱包与充值地址的链上余额算作"其它持有方"，Sepolia 的链上检查（[wallet.md](wallet.md)）把托管方余额算作"其它持有方"，两边都看整笔资产。
 - 在途提现：托管方已收下（托管方状态 `ACCEPTED`、`REVIEW`、`APPROVED`）或已报告发出（`SUCCESS`、账本还没结算）的提现金额：这些托管方余额里已经没有、账本还算在内。交出去还没有回音（`SUBMITTED`）或 `UNCERTAIN` 的不算：托管方未必收下了，算进去会把同样大的短缺遮住（审查 B5）。
-- 托管方没报某个币种的余额（或报的余额小数位多于该币种精度）时，这个资产这次不比较、报错（`not compared`），而不是当成 0 报一笔假短缺；报的余额达到账本应有的 1000 倍时也不比较（多半是按最小单位报的，照比会遮住真正的短缺）。其他资产照常比较。
+- 托管方没报某个币种的余额（或报的余额小数位多于该币种精度）时，这个资产这次不比较、报错（`not compared`），而不是当成 0 报一笔假短缺；某个币报的余额达到账本应有数按该币最小单位（托管方 `support-coins` 的 `decimals`）的一半以上时也不比较（多半是按最小单位报的，照比会遮住真正的短缺；按币种精度判断，小数位少的币也拦得住）。其他资产照常比较。没比较的资产 `wallet_custody_not_compared{asset}` 为 1（比较了为 0），持续 30 分钟告警 `CustodyNotCompared`：这期间它短不短缺没人知道。
 - 结果写 `chain_checks`（`network = UDUN`，多了 `elsewhere`、`in_flight` 两列），`exchangectl wallet checks --network UDUN` 或后台「托管方」页查看。
 
 ## 测试服的模拟网关 udun-mock
@@ -119,11 +119,11 @@ sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T udu
 ## 指标与告警
 
 - `wallet_custody_up`、`wallet_custody_balance{coin}`（5 分钟）、`wallet_custody_held/expected/shortfall{asset}`（每次对账）、`wallet_custody_submitted`、`wallet_custody_submitted_oldest_seconds`、`wallet_custody_withdrawals_uncertain`、`wallet_custody_callbacks_attention`、`wallet_custody_deposits_held`、`wallet_custody_fees_unbooked`，常量标签 `provider`；`wallet_custody_fees_refused_total`（不入账的手续费）、`wallet_custody_callbacks_rejected_total`（被拒的回调，记不记表都算）、`wallet_custody_deposit_discrepancies_total`（与补记不一致的回调）。
-- 告警（`deploy/observability/alerts.yml`）：`CustodyShortfall`（短缺 15 分钟，严重）、`CustodyUnreachable`（10 分钟）、`CustodyWithdrawalStuck`（`SUBMITTED` 超过 24 小时，人工到托管方后台核对）、`CustodyWithdrawalsUncertain`（重交被拒、托管方可能仍会发出，5 分钟，严重）、`CustodyCallbacksNeedAttention`（15 分钟）、`CustodyCallbacksRejected`（15 分钟内有回调被拒：伪造，或 `UDUN_API_KEY` 与托管方的不一致、充值进不来，审查 B6）、`CustodyFeeRefused`、`CustodyFeesUnbooked`（1 小时）、`CustodyDepositDiscrepancy`（回调与补记不一致，严重；在后台「充值 → 待处理」查明后驳回或调账）、`CustodyWithdrawalContradiction`（托管方的回调与已结束的提现矛盾，严重；`CustodyCallbacksNeedAttention` 也把 `DISCREPANCY` 计入）。
+- 告警（`deploy/observability/alerts.yml`）：`CustodyShortfall`（短缺 15 分钟，严重）、`CustodyNotCompared`（某资产 30 分钟没比较）、`CustodyUnreachable`（10 分钟）、`CustodyWithdrawalStuck`（`SUBMITTED` 超过 24 小时，人工到托管方后台核对）、`CustodyWithdrawalsUncertain`（重交被拒、托管方可能仍会发出，5 分钟，严重）、`CustodyCallbacksNeedAttention`（15 分钟）、`CustodyCallbacksRejected`（15 分钟内有回调被拒：伪造，或 `UDUN_API_KEY` 与托管方的不一致、充值进不来，审查 B6）、`CustodyFeeRefused`、`CustodyFeesUnbooked`（1 小时）、`CustodyDepositDiscrepancy`（回调与补记不一致，严重；在后台「充值 → 待处理」查明后驳回或调账）、`CustodyWithdrawalContradiction`（托管方的回调与已结束的提现矛盾，严重；`CustodyCallbacksNeedAttention` 也把 `DISCREPANCY` 计入）。
 
 ## 端到端
 
-`scripts/e2e/custody.sh`：新用户拿 TRC20 与比特币地址；模拟网关报 30 USDT 到账（入账一次，重试与重放不重复），0.5 USDT 记未入账；伪造签名与过期回调被拒并记录；经公网发到 `https://astras.vip` 的回调在 nginx 就被拒（403），到不了平台；绑定身份验证器后 12 USDT 经审批交给托管方、`SUBMITTED` → `CONFIRMED` 带交易哈希并结算，10 USDT 发往失败地址 → `FAILED` 资金退回；模拟网关对第三个地址收下提现却丢了应答、重交时以余额不足拒绝、先报审核中、按最小单位报 1500 USDT 手续费：提现停在 `UNCERTAIN`、资金冻结，之后回调到达照常发出并结算，手续费不入账；最后对账无短缺。浏览器冒烟测试的充值页同时取 Sepolia 与 TRC20 地址，后台冒烟测试打开「托管方」页与一条回调。
+`scripts/e2e/custody.sh`：新用户拿 TRC20 与比特币地址；模拟网关报 30 USDT 到账（入账一次，重试与重放不重复），0.5 USDT 记未入账；伪造签名与过期回调被拒并记录；经公网发到 `https://astras.vip` 的回调（`udun`、`UDUN`、`Udun` 三种写法）在 nginx 就被拒（403），到不了平台；绑定身份验证器后 12 USDT 经审批交给托管方、`SUBMITTED` → `CONFIRMED` 带交易哈希并结算，10 USDT 发往失败地址 → `FAILED` 资金退回；模拟网关对第三个地址收下提现却丢了应答、重交时以余额不足拒绝、先报审核中、按最小单位报 1500 USDT 手续费：提现停在 `UNCERTAIN`、资金冻结，之后回调到达照常发出并结算，手续费不入账；最后对账无短缺。浏览器冒烟测试的充值页同时取 Sepolia 与 TRC20 地址，后台冒烟测试打开「托管方」页与一条回调。
 
 ## 已知局限
 

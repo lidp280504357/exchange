@@ -40,6 +40,7 @@ type fakeTrading struct {
 	refuse    map[string]error // by user
 	tries     map[string]int   // limit orders asked for, by user
 	outOfBand int
+	quantity  map[string]map[domain.Side]decimal.Decimal // placed, by user and side
 }
 
 func newFakeTrading() *fakeTrading {
@@ -47,6 +48,7 @@ func newFakeTrading() *fakeTrading {
 		pair: domain.Pair{Symbol: "ASTRA-USDT", Tick: d("0.0001"), Lot: d("1"), MinQty: d("1"), MinNotional: d("5"), Status: "TRADING", Trading: true},
 		open: map[string][]domain.Order{}, markets: map[domain.Side]int{}, cancelAl: map[string]int{},
 		balances: map[string]map[string]decimal.Decimal{}, refuse: map[string]error{}, tries: map[string]int{},
+		quantity: map[string]map[domain.Side]decimal.Decimal{},
 	}
 }
 
@@ -83,6 +85,10 @@ func (f *fakeTrading) Limit(_ context.Context, user, _ string, side domain.Side,
 	f.seq++
 	id := fmt.Sprintf("o%d", f.seq)
 	f.open[user] = append(f.open[user], domain.Order{ID: id, Side: side, Price: price})
+	if f.quantity[user] == nil {
+		f.quantity[user] = map[domain.Side]decimal.Decimal{}
+	}
+	f.quantity[user][side] = f.quantity[user][side].Add(qty)
 	return id, nil
 }
 
@@ -1183,6 +1189,25 @@ func TestARefusedBotWaitsAndCostsNoToken(t *testing.T) {
 	}
 	if st := r.sim.Status(); !st.Bots[0].RetryAt.After(r.now) || st.Bots[0].Error == "" {
 		t.Fatalf("m1 %+v", st.Bots[0])
+	}
+}
+
+// A maker short of USDT against the makers' average quotes smaller bids
+// and larger asks; one rich in it the other way round.
+func TestTheMakersLeanByTheirUSDT(t *testing.T) {
+	p := domain.DefaultParams()
+	p.DailyVolume = 0
+	r := newRig(t, &memStore{params: &p, version: 1})
+	r.trading.mu.Lock()
+	r.trading.balances["m1"] = map[string]decimal.Decimal{"USDT": d("20000"), "ASTRA": d("40000000")}
+	r.trading.balances["m2"] = map[string]decimal.Decimal{"USDT": d("180000"), "ASTRA": d("40000000")}
+	r.trading.mu.Unlock()
+	r.rounds(4 * 10)
+	r.trading.mu.Lock()
+	defer r.trading.mu.Unlock()
+	poor, rich := r.trading.quantity["m1"], r.trading.quantity["m2"]
+	if !poor[domain.Buy].Mul(d("1.5")).LessThan(poor[domain.Sell]) || !rich[domain.Sell].Mul(d("1.5")).LessThan(rich[domain.Buy]) {
+		t.Fatalf("short of USDT: bids %s, asks %s; rich: bids %s, asks %s", poor[domain.Buy], poor[domain.Sell], rich[domain.Buy], rich[domain.Sell])
 	}
 }
 

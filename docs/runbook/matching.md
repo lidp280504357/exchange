@@ -90,4 +90,4 @@ SELECT pg_size_pretty(pg_total_relation_size('matching.wal'));
 | 引擎重启 | 恢复期间命令在 Kafka 排队 | 自动：快照 + WAL 重建，追上参考簿后继续消费 |
 | PostgreSQL 不可用 | 批写入失败，消费者退避重试，积压上升 | 恢复后自动重建并继续；事件只发一次 |
 | Redpanda 不可用 | 收不到命令；outbox 待发上升 | 恢复后自动继续 |
-| 快照损坏或需要从头重放 | — | 停引擎，删除 `matching.snapshots` 行，重启会从 WAL 头重放（WAL 需完整覆盖该分区；清理过的部分无法重放） |
+| 快照损坏或需要从头重放 | — | 停引擎，删除 `matching.snapshots` 行，重启会从 WAL 头重放（WAL 需完整覆盖该分区；清理过的部分无法重放）。重放与追上参考簿可能要几分钟以上：运维端口从启动就应答，`/healthz` 为 200、`/readyz` 为 503 `starting`，日志在走即可；别用 `task deploy` 等它（`up --wait` 只等 600 秒），直接 `docker compose up -d` 这一个引擎 |

@@ -39,6 +39,10 @@ ssh exchange
 bash /opt/exchange/src/deploy/server-update.sh          # 在服务器上直接跑：脚本自己拿运维锁
 ```
 
+脚本整个读进内存后才执行（`main` 函数），拉取新提交时跑的仍是旧版本；拉取改了脚本本身时，它 exec 新版本重来一遍（日志 `== 部署脚本有更新，改跑新版本`，运维锁随 fd 9 带过去），新加的步骤当次生效。这条逻辑是 2026-10-02 加的：在它之前的版本上部署，脚本里新加的步骤（例如生成新的密钥文件）要到下一次部署才跑，需要的文件得先在服务器上手工准备（530ed59 的 `sim/admin.env` 就是这样补的）。
+
+部署会重启 market-data-service，合约的标记价断几秒就可能进入只减仓（`MARK_PRICE_STALE`、`INDEX_SOURCES`）：脚本在服务都起来后最多等三分钟，标记价恢复（`degraded` 为 false）就以 `deploy-<提交>` 的名义解除这次部署期间开始的只减仓。部署中途失败时，它的开始时间留在 `infra/deploy.started`，下一次走完的部署从那时算起一起解除，然后删掉这个文件（2026-10-02 一次失败的部署后 ASTRA-USDT-PERP 因此停在只减仓，下一次部署也没解除）。
+
 **运维锁**（2026-10-02 起，两个编码会话共用测试服）：部署、完整端到端（`task e2e`）与故障演练（`task fault`、单独运行的 `scripts/fault/*.sh`）一次只跑一个。`scripts/ops/lock.sh run --owner 说明 -- 命令` 经 ssh 在服务器上 `flock` 持有 `/opt/exchange/infra/ops.lock`，把持有者与开始时间写进 `ops.lock.owner`，命令结束（或本机进程退出、ssh 断开）即释放；最多等 60 分钟，最多持有 2 小时。服务器忙到 5 分钟不回 ssh 保活时连接会断、锁随之释放（2026-10-02 一次端到端中途因此被另一会话的部署插入）：`lock.sh` 立即打印 `lock: LOST`，命令本身通过时也以状态 75 结束，结果不能算数，要重跑。`scripts/ops/lock.sh status` 看谁在持有。被它调起的命令带 `OPS_LOCK_HELD=1`，里面再拿锁的步骤（演练脚本、`server-update.sh`）就不重复等待；不经它直接在服务器上跑的 `server-update.sh` 自己拿同一把锁。
 
 脚本依次执行以下步骤：

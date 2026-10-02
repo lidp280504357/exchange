@@ -127,7 +127,19 @@ tests:
         values: '0x10 12.5x20'
       - series: 'wallet_custody_submitted_oldest_seconds{job="wallet-service", provider="UDUN"}'
         values: '86000 86400 86460'
+      - series: 'wallet_custody_not_compared{job="wallet-service", provider="UDUN", asset="BTC"}'
+        values: '0x5 1x40'
     alert_rule_test:
+      - eval_time: 30m
+        alertname: CustodyNotCompared
+        exp_alerts: []
+      - eval_time: 36m
+        alertname: CustodyNotCompared
+        exp_alerts:
+          - exp_labels: {severity: warning, provider: UDUN, asset: BTC}
+            exp_annotations:
+              summary: "BTC with the custodian UDUN has not been compared with the ledger for 30 minutes (invariant 4 unknown)"
+              runbook: docs/runbook/custody.md
       - eval_time: 20m
         alertname: CustodyShortfall
         exp_alerts: []

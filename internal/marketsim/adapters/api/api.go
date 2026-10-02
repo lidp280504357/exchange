@@ -140,27 +140,54 @@ func (c *Client) Pair(ctx context.Context, symbol string) (domain.Pair, error) {
 
 // Open lists the bot's active orders on symbol.
 func (c *Client) Open(ctx context.Context, user, symbol string) ([]domain.Order, error) {
-	var page struct {
-		Items []struct {
-			OrderID         string `json:"order_id"`
-			Side            string `json:"side"`
-			Price           string `json:"price"`
-			CancelRequested bool   `json:"cancel_requested"`
-		} `json:"items"`
-	}
-	q := url.Values{"symbol": {symbol}, "status": {"ACTIVE"}, "limit": {"200"}}
-	if err := c.do(ctx, http.MethodGet, c.TradingURL+"/v1/orders?"+q.Encode(), user, nil, &page); err != nil {
+	out, err := c.open(ctx, c.TradingURL+"/v1/orders", user, symbol)
+	if err != nil {
 		return nil, fmt.Errorf("open orders: %w", err)
 	}
-	out := make([]domain.Order, 0, len(page.Items))
-	for _, o := range page.Items {
-		price, err := decimal.NewFromString(o.Price)
-		if err != nil {
-			continue // a market order: never resting
-		}
-		out = append(out, domain.Order{ID: o.OrderID, Side: domain.Side(o.Side), Price: price, Canceling: o.CancelRequested})
-	}
 	return out, nil
+}
+
+// openPages bounds the pages of a bot's active orders read at once.
+const openPages = 10
+
+// open reads a bot's active limit orders on symbol from list (a trading
+// service's order list, which gives 100 at most a page) page by page.
+// More than openPages pages is an error rather than a part of the list,
+// which would have a maker place its "missing" levels again.
+func (c *Client) open(ctx context.Context, list, user, symbol string) ([]domain.Order, error) {
+	var out []domain.Order
+	cursor := ""
+	for range openPages {
+		q := url.Values{"symbol": {symbol}, "status": {"ACTIVE"}, "limit": {"100"}}
+		if cursor != "" {
+			q.Set("cursor", cursor)
+		}
+		var page struct {
+			Items []struct {
+				OrderID         string `json:"order_id"`
+				Side            string `json:"side"`
+				Type            string `json:"type"`
+				Price           string `json:"price"`
+				CancelRequested bool   `json:"cancel_requested"`
+			} `json:"items"`
+			NextCursor *string `json:"next_cursor"`
+		}
+		if err := c.do(ctx, http.MethodGet, list+"?"+q.Encode(), user, nil, &page); err != nil {
+			return nil, err
+		}
+		for _, o := range page.Items {
+			price, err := decimal.NewFromString(o.Price)
+			if err != nil || (o.Type != "" && o.Type != "LIMIT") {
+				continue // a market order (or its protection price): never resting
+			}
+			out = append(out, domain.Order{ID: o.OrderID, Side: domain.Side(o.Side), Price: price, Canceling: o.CancelRequested})
+		}
+		if page.NextCursor == nil || *page.NextCursor == "" {
+			return out, nil
+		}
+		cursor = *page.NextCursor
+	}
+	return nil, fmt.Errorf("more than %d active orders", openPages*100)
 }
 
 // clientID is a new client order ID (at most 36 characters).
@@ -350,26 +377,9 @@ func (c *Client) Contract(ctx context.Context, symbol string) (domain.Pair, erro
 
 // OpenContract lists the bot's active orders on the contract.
 func (c *Client) OpenContract(ctx context.Context, user, symbol string) ([]domain.Order, error) {
-	var page struct {
-		Items []struct {
-			OrderID         string `json:"order_id"`
-			Side            string `json:"side"`
-			Type            string `json:"type"`
-			Price           string `json:"price"`
-			CancelRequested bool   `json:"cancel_requested"`
-		} `json:"items"`
-	}
-	q := url.Values{"symbol": {symbol}, "status": {"ACTIVE"}, "limit": {"200"}}
-	if err := c.do(ctx, http.MethodGet, c.DerivativesURL+"/v1/derivatives/orders?"+q.Encode(), user, nil, &page); err != nil {
+	out, err := c.open(ctx, c.DerivativesURL+"/v1/derivatives/orders", user, symbol)
+	if err != nil {
 		return nil, fmt.Errorf("open contract orders: %w", err)
-	}
-	out := make([]domain.Order, 0, len(page.Items))
-	for _, o := range page.Items {
-		price, err := decimal.NewFromString(o.Price)
-		if err != nil || o.Type != "LIMIT" {
-			continue // a market order (its protection price): never resting
-		}
-		out = append(out, domain.Order{ID: o.OrderID, Side: domain.Side(o.Side), Price: price, Canceling: o.CancelRequested})
 	}
 	return out, nil
 }

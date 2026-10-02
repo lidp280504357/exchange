@@ -33,7 +33,9 @@ const (
 // that failed halfway (instrument-service unavailable) is finished; to let
 // a silent market trade, an operator turns sim.halt_on_loss off. On
 // resuming, a pair or contract an operator moved elsewhere is left as it
-// is. Only pairs heard since the service started are watched.
+// is. The pairs watched are those ever heard: their last reports are
+// saved (market.sim_heartbeats), so that a market that went silent
+// before a restart still halts after it.
 type SimGuard struct {
 	platform    *PlatformReference
 	instruments ports.Instruments
@@ -44,6 +46,7 @@ type SimGuard struct {
 	check       time.Duration
 
 	backSince map[string]time.Time // when a halted pair's reports came back
+	heard     map[string]time.Time // the last reports, saved ones included; nil until loaded
 
 	age    *prometheus.GaugeVec
 	halted prometheus.Gauge
@@ -88,7 +91,23 @@ func (g *SimGuard) Run(ctx context.Context) error {
 func (g *SimGuard) Step(ctx context.Context) error {
 	now := g.now()
 	on := g.flags.Enabled(flags.KeySimHaltOnLoss, flags.Subject{})
-	reports := g.platform.Reports()
+	if g.heard == nil {
+		saved, err := g.store.Read().SimHeartbeats().List(ctx)
+		if err != nil {
+			return err
+		}
+		g.heard = saved
+	}
+	for symbol, at := range g.platform.Reports() {
+		if !at.After(g.heard[symbol]) {
+			continue
+		}
+		if err := g.store.Read().SimHeartbeats().Save(ctx, symbol, at); err != nil {
+			return err
+		}
+		g.heard[symbol] = at
+	}
+	reports := g.heard
 	for symbol, at := range reports {
 		g.age.WithLabelValues(symbol).Set(now.Sub(at).Seconds())
 	}

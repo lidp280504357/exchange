@@ -75,11 +75,24 @@ main() {
   INFRA="${INFRA:-/opt/exchange/infra}"
   REF="${1:-origin/main}"
   take_ops_lock "$REF"
+  # 上一次部署没有走完（例如某个服务起不来）时，它开始后进入的只减仓也算"部署期间"：从它的开始时间算起，成功后才清掉
+  if [ -s "$INFRA/deploy.started" ]; then
+    DEPLOY_STARTED="$(cat "$INFRA/deploy.started")"
+  else
+    echo "$DEPLOY_STARTED" >"$INFRA/deploy.started"
+  fi
 
   cd "$SRC"
+  local before
+  before="$(git hash-object deploy/server-update.sh 2>/dev/null || true)"
   git fetch --prune origin
   git checkout -q main
   git reset -q --hard "$REF"
+  # bash 已把本脚本旧版的 main 读进内存：拉取改了脚本时改跑新版本，新加的步骤这次就生效（fd 9 上的运维锁随 exec 带过去）
+  if [ -z "${SERVER_UPDATE_REEXEC:-}" ] && [ "$before" != "$(git hash-object deploy/server-update.sh)" ]; then
+    echo "== 部署脚本有更新，改跑新版本"
+    exec env SERVER_UPDATE_REEXEC=1 OPS_LOCK_HELD=1 bash "$SRC/deploy/server-update.sh" "$@"
+  fi
   APP_VERSION="$(git rev-parse --short HEAD)"
   echo "== 代码版本 $APP_VERSION：$(git log -1 --pretty=%s)"
 
@@ -156,6 +169,7 @@ main() {
   fi
   echo "== 服务状态"
   sudo docker compose "${COMPOSE[@]}" ps --format 'table {{.Service}}\t{{.Status}}'
+  rm -f "$INFRA/deploy.started"
 }
 
 main "$@"

@@ -583,7 +583,8 @@ func TestCustodyCheck(t *testing.T) {
 	if len(checks) != 0 || !errors.Is(err, errNotCompared) {
 		t.Fatalf("no balance: %+v %v", checks, err)
 	}
-	// Nor is one a thousand times what the ledger expects (in its smallest unit).
+	// Nor is one at half of what the ledger expects in the coin's smallest
+	// unit (6 decimals) or more, however short of it.
 	raw := d("500000000")
 	h.custody.coins[0].Balance = &raw
 	checks, err = h.cproc.Check(context.Background())

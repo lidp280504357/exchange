@@ -226,3 +226,35 @@ func TestContractsGoToTheirEngineWithTheirRooms(t *testing.T) {
 		t.Fatalf("over its leverage: %v", books)
 	}
 }
+
+// The contracts HOUSE offers share the room its positions may still grow
+// by: two offered, each may take half of it before HOUSE's positions are
+// read again.
+func TestTheContractsShareTheRoom(t *testing.T) {
+	now := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
+	// Ten times 2,600 of equity less 25,000 of positions: 1,000 to grow by.
+	account := domain.ContractAccount{
+		Positions: map[string]decimal.Decimal{"BTC-USDT-PERP": d("-0.5")}, Exposure: d("25000"), Equity: d("2600"),
+	}
+	ethPerp := domain.Spec{Symbol: "ETH-USDT-PERP", Base: "ETH", Quote: "USDT", TickSize: d("0.01"), LotSize: d("0.001"), Contract: true}
+	rec := &records{}
+	cfg := DefaultConfig()
+	cfg.HouseUser = "house"
+	p := New(cfg, specList{btcSpec, perpSpec, ethPerp}, fakeHouse{holdings: domain.Holdings{"USDT": d("500000")}, contracts: &account},
+		&onFlags{}, rec, event.NewFactory("market-maker", "test"), slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	p.now = func() time.Time { return now }
+	ctx := context.Background()
+	p.refresh(ctx)
+	p.OnSnapshot(&marketv1.DepthSnapshot{Symbol: "BTC-USDT-PERP", Sequence: 1, Reference: true, Bids: levels("49999.9", "5"), Asks: levels("50000.1", "5")})
+	p.OnSnapshot(&marketv1.DepthSnapshot{Symbol: "ETH-USDT-PERP", Sequence: 1, Reference: true, Bids: levels("2499.99", "5"), Asks: levels("2500.01", "5")})
+	_ = p.publish(ctx, p.round())
+	_, books := rec.take(t)
+	rooms := map[string][2]string{}
+	for _, b := range books {
+		rooms[b.GetSymbol()] = [2]string{b.GetBuyRoom(), b.GetSellRoom()}
+	}
+	// 500 each: 0.01 BTC beyond the short's 0.5 back, 0.2 ETH either way.
+	if rooms["BTC-USDT-PERP"] != [2]string{"0.51", "0.01"} || rooms["ETH-USDT-PERP"] != [2]string{"0.2", "0.2"} {
+		t.Fatalf("rooms %v", rooms)
+	}
+}

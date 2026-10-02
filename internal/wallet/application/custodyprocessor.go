@@ -51,6 +51,7 @@ type CustodyProcessor struct {
 	held      *prometheus.GaugeVec
 	expected  *prometheus.GaugeVec
 	shortfall *prometheus.GaugeVec
+	compared  *prometheus.GaugeVec
 	submitted prometheus.Gauge
 	oldest    prometheus.Gauge
 	attention prometheus.Gauge
@@ -73,13 +74,15 @@ func NewCustodyProcessor(p CustodyProcessor, reg prometheus.Registerer) *Custody
 	p.held = vec("wallet_custody_held", "What the custodian holds of an asset, at the last check.", "asset")
 	p.expected = vec("wallet_custody_expected", "What the ledger expects every holder of the asset to hold: −(DEPOSIT_PENDING + WITHDRAWAL_PENDING).", "asset")
 	p.shortfall = vec("wallet_custody_shortfall", "Expected minus what every holder holds, what is in flight and the unbooked fees; above 0 funds are missing (invariant 4).", "asset")
+	p.compared = vec("wallet_custody_not_compared", "1 when the last check left the asset out (no balance reported, or one beyond belief): its shortfall is not known.", "asset")
 	p.submitted = gauge("wallet_custody_submitted", "Withdrawals with the custodian, not reported sent or failed yet.")
 	p.oldest = gauge("wallet_custody_submitted_oldest_seconds", "How long the oldest withdrawal has been with the custodian.")
 	p.attention = gauge("wallet_custody_callbacks_attention", "Verified callbacks that failed or found nothing to apply to.")
 	p.uncertain = gauge("wallet_custody_withdrawals_uncertain", "Withdrawals refused on a retry that the custodian may still send: they wait for its callback or a person.")
 	p.waiting = gauge("wallet_custody_deposits_held", "Deposits the custodian confirmed that wait because their asset takes no deposits.")
 	p.unbooked = gauge("wallet_custody_fees_unbooked", "The custodian's fees the ledger has not booked yet (GAS_SUPPLY short?).")
-	reg.MustRegister(p.up, p.balance, p.held, p.expected, p.shortfall, p.submitted, p.oldest, p.attention, p.uncertain, p.waiting, p.unbooked)
+	reg.MustRegister(p.up, p.balance, p.held, p.expected, p.shortfall, p.compared, p.submitted, p.oldest, p.attention, p.uncertain, p.waiting,
+		p.unbooked)
 	if p.CheckEvery <= 0 {
 		p.CheckEvery = time.Hour
 	}
@@ -365,8 +368,12 @@ func (p *CustodyProcessor) coins(ctx context.Context) ([]ports.CustodyCoin, erro
 	return coins, nil
 }
 
-// heldOf sums the balances of the asset's coins with the custodian.
-func heldOf(coins []ports.CustodyCoin, nets []domain.Network, asset string) (decimal.Decimal, error) {
+// heldOf sums the balances of the asset's coins with the custodian. Given
+// expected, what the ledger expects every holder of the asset to hold, a
+// coin's balance of half of that in the coin's smallest unit or more is
+// not believed: it is in that unit rather than in coins, and compared as
+// it is it would hide any shortfall.
+func heldOf(coins []ports.CustodyCoin, nets []domain.Network, asset string, expected decimal.Decimal) (decimal.Decimal, error) {
 	var codes []string
 	for _, n := range nets {
 		if n.Asset == asset && !slices.Contains(codes, n.ProviderCoin) {
@@ -380,7 +387,12 @@ func heldOf(coins []ports.CustodyCoin, nets []domain.Network, asset string) (dec
 			// Taken as zero it would look like a shortfall of all of it.
 			return decimal.Zero, fmt.Errorf("the custodian reported no balance of %s (%s)", asset, code)
 		}
-		held = held.Add(*coins[i].Balance)
+		b, d := *coins[i].Balance, coins[i].Decimals
+		if expected.IsPositive() && d > 0 && b.GreaterThanOrEqual(expected.Shift(d).Div(decimal.NewFromInt(2))) {
+			return decimal.Zero, fmt.Errorf("the custodian reports %s of %s (%s) against %s the ledger expects: in its smallest unit (%d decimals)?",
+				b, asset, code, expected, d)
+		}
+		held = held.Add(b)
 	}
 	return held, nil
 }
@@ -388,11 +400,6 @@ func heldOf(coins []ports.CustodyCoin, nets []domain.Network, asset string) (dec
 // errNotCompared marks an asset Check left out; the others' checks still
 // count.
 var errNotCompared = errors.New("not compared")
-
-// implausible is how many times what the ledger expects a custodian's
-// balance must not reach: such a balance is in the coin's smallest unit
-// rather than in coins, and compared as it is it would hide any shortfall.
-var implausible = decimal.NewFromInt(1000)
 
 // Holdings reports what the custodian holds of asset now, for the chain
 // check of the platform's own wallets.
@@ -405,7 +412,7 @@ func (p *CustodyProcessor) Holdings(ctx context.Context, asset string) (decimal.
 	if err != nil {
 		return decimal.Zero, err
 	}
-	return heldOf(coins, nets, asset)
+	return heldOf(coins, nets, asset, decimal.Zero)
 }
 
 // Check compares, for every asset the custodian serves, what it holds with
@@ -452,14 +459,16 @@ func (p *CustodyProcessor) Check(ctx context.Context) ([]domain.ChainCheck, erro
 	var out []domain.ChainCheck
 	var skipped []error
 	for _, asset := range assets {
-		held, err := heldOf(coins, nets, asset)
-		if err != nil {
-			skipped = append(skipped, fmt.Errorf("%s %w: %w", asset, errNotCompared, err))
-			continue
-		}
 		sys, err := p.Ledger.SystemBalances(ctx, asset)
 		if err != nil {
 			return out, err
+		}
+		expected := sys[accountDepositPending].Add(sys[accountWithdrawalPending]).Neg()
+		held, err := heldOf(coins, nets, asset, expected)
+		if err != nil {
+			p.compared.WithLabelValues(asset).Set(1)
+			skipped = append(skipped, fmt.Errorf("%s %w: %w", asset, errNotCompared, err))
+			continue
 		}
 		elsewhere := decimal.Zero
 		if p.Elsewhere != nil {
@@ -471,17 +480,12 @@ func (p *CustodyProcessor) Check(ctx context.Context) ([]domain.ChainCheck, erro
 		if err != nil {
 			return out, err
 		}
-		c := domain.NewChainCheck(p.Custody.Provider(), asset, held,
-			sys[accountDepositPending].Add(sys[accountWithdrawalPending]).Neg(), unbooked[asset], addresses, p.Now()).
+		c := domain.NewChainCheck(p.Custody.Provider(), asset, held, expected, unbooked[asset], addresses, p.Now()).
 			Beside(elsewhere, flying[asset])
-		if c.Ledger.IsPositive() && c.Chain.GreaterThanOrEqual(c.Ledger.Mul(implausible)) {
-			skipped = append(skipped, fmt.Errorf("%s %w: the custodian reports %s against %s the ledger expects (in its smallest unit?)",
-				asset, errNotCompared, c.Chain, c.Ledger))
-			continue
-		}
 		if err := p.Store.Tx(ctx, func(r ports.Repos) error { return r.Checks().Insert(ctx, c) }); err != nil {
 			return out, err
 		}
+		p.compared.WithLabelValues(asset).Set(0)
 		p.held.WithLabelValues(asset).Set(c.Chain.InexactFloat64())
 		p.expected.WithLabelValues(asset).Set(c.Ledger.InexactFloat64())
 		p.shortfall.WithLabelValues(asset).Set(c.Shortfall.InexactFloat64())

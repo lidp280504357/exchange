@@ -135,3 +135,37 @@ func TestSimGuardFinishesAHaltThatFailed(t *testing.T) {
 		t.Fatalf("halted again: %v %v", err, *list.moves)
 	}
 }
+
+// A market that went silent before a restart halts after it: the guard
+// watches the heartbeats it saved, and saves the new ones.
+func TestSimGuardRemembersAcrossARestart(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	list := newListing([]ports.Pair{{Symbol: "ASTRA-USDT", Base: "ASTRA", Quote: "USDT", Status: "TRADING"}}, nil)
+	store := newMemStore()
+	if err := store.Read().SimHeartbeats().Save(ctx, "ASTRA-USDT", now.Add(-2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	svc := newService(t, store, &now)
+	platform := &PlatformReference{Svc: svc, Refs: NewReferenceMap(list, slog.New(slog.DiscardHandler)), Now: func() time.Time { return now }}
+	fl := &simHaltFlag{}
+	fl.on.Store(true)
+	g := NewSimGuard(platform, list, store, fl, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	g.now = func() time.Time { return now }
+	if err := g.Step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"ASTRA-USDT TRADING->HALT"}; !slices.Equal(*list.moves, want) {
+		t.Fatalf("silent since before the restart: %v", *list.moves)
+	}
+	if err := platform.Report(ctx, "ASTRA-USDT", d("1.01")); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(5 * time.Second)
+	if err := g.Step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if saved, _ := store.Read().SimHeartbeats().List(ctx); !saved["ASTRA-USDT"].Equal(now.Add(-5 * time.Second)) {
+		t.Fatalf("saved %v", saved)
+	}
+}

@@ -49,6 +49,9 @@ func run(name string, setup SetupFunc, opts ...Option) int {
 		a.log.Error("setup failed", "error", err)
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), a.cfg.ShutdownTimeout)
 		defer cancel()
+		if a.ops != nil {
+			_ = a.ops.Stop(cleanupCtx)
+		}
 		if err := errors.Join(a.runCleanups(cleanupCtx)...); err != nil {
 			a.log.Error("cleanup after failed setup", "error", err)
 		}
@@ -60,15 +63,34 @@ func run(name string, setup SetupFunc, opts ...Option) int {
 	return 0
 }
 
-// setupOps binds the ops server first, so that it stops last.
+// setupOps starts the ops server before setup, so that /healthz answers
+// and /readyz says "starting" while setup works (an engine's recovery can
+// take minutes) instead of leaving probes hanging; registered first, it
+// stops last.
 func (a *App) setupOps(ctx context.Context) error {
 	srv, err := NewHTTPServer(ctx, a.cfg.OpsAddr, a.opsHandler(), a.log.With("server", "ops"))
 	if err != nil {
 		return err
 	}
-	a.Add("ops", srv)
+	a.ops = startEarly(srv)
+	a.Add("ops", a.ops)
 	return nil
 }
+
+// early is a component started before Run: Run waits for it to stop.
+type early struct {
+	c    Component
+	done chan error
+}
+
+func startEarly(c Component) *early {
+	e := &early{c: c, done: make(chan error, 1)}
+	go func() { e.done <- runGuarded(c) }()
+	return e
+}
+
+func (e *early) Run() error                     { return <-e.done }
+func (e *early) Stop(ctx context.Context) error { return e.c.Stop(ctx) }
 
 // buildVersion is set at link time by the image build, which has no .git:
 // -ldflags "-X github.com/lidp280504357/exchange/internal/platform/app.buildVersion=<sha>".

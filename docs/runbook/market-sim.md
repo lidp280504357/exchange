@@ -65,7 +65,7 @@ ASTRA-USDT 的价格带是 ±10%，锚点是交易服务看到的最近成交（
 
 ## 心跳与停牌（设计 §9，A5）
 
-market-sim 每 5 秒把目标价上报给 market-data-service（`PUT /internal/market/{symbol}/simulated-price`），不管机器人是否在交易、交易对是否在交易——这同时是它的心跳。上报在单独的协程里，报最近一轮的目标价：一轮慢了（交易服务变慢）不耽误心跳，market-data-service 慢了也不拖住机器人；但 30 秒没有新的一轮（主循环卡住）心跳就停，让交易对停牌。market-data-service 的 `SimGuard` 每 5 秒看一次：启动以来上报过的交易对 1 分钟没有心跳，且开关 `sim.halt_on_loss` 打开时，先记入 `market.sim_halts`，再把交易对与以它为指数的永续置 `HALT`（原因 `simulated market silent for a minute`）；静默期间每次都把其中还在交易的再停一次，停到一半失败（instrument-service 不可用）的下一轮补完——运营想让静默的市场继续交易，就关 `sim.halt_on_loss`。心跳恢复并持续 30 秒（或开关关掉）后只把它停的恢复 `TRADING`，期间被运营改成别的状态的不动。指标 `market_sim_heartbeat_age_seconds{symbol}`、`market_sim_halted_pairs`，告警 `MarketSimHeartbeatLost`（超过 60 秒）。market-sim 停着时做市商的挂单留在簿上，噪声与趋势交易停止；重启后从保存的状态继续，交易对恢复后最多 30 秒（读交易对状态的周期）重新报价。
+market-sim 每 5 秒把目标价上报给 market-data-service（`PUT /internal/market/{symbol}/simulated-price`），不管机器人是否在交易、交易对是否在交易——这同时是它的心跳。上报在单独的协程里，报最近一轮的目标价：一轮慢了（交易服务变慢）不耽误心跳，market-data-service 慢了也不拖住机器人；但 30 秒没有新的一轮（主循环卡住）心跳就停，让交易对停牌。market-data-service 的 `SimGuard` 每 5 秒看一次：上报过的交易对（每次上报的时间存在 `market.sim_heartbeats`，所以 market-sim 先停、market-data-service 后重启也照样盯着；要彻底忘掉一个模拟市场，删掉它那一行再重启 market-data-service）1 分钟没有心跳，且开关 `sim.halt_on_loss` 打开时，先记入 `market.sim_halts`，再把交易对与以它为指数的永续置 `HALT`（原因 `simulated market silent for a minute`）；静默期间每次都把其中还在交易的再停一次，停到一半失败（instrument-service 不可用）的下一轮补完——运营想让静默的市场继续交易，就关 `sim.halt_on_loss`。心跳恢复并持续 30 秒（或开关关掉）后只把它停的恢复 `TRADING`，期间被运营改成别的状态的不动。指标 `market_sim_heartbeat_age_seconds{symbol}`、`market_sim_halted_pairs`，告警 `MarketSimHeartbeatLost`（超过 60 秒）。market-sim 停着时做市商的挂单留在簿上，噪声与趋势交易停止；重启后从保存的状态继续，交易对恢复后最多 30 秒（读交易对状态的周期）重新报价。
 
 演练 `scripts/fault/market-sim-down.sh`：停掉 market-sim，挂单留在簿上，1 分钟后交易对与永续停牌，心跳年龄过 60 秒；再启动，30 秒后两者恢复交易、每侧 8 档以上，价格带看门狗不介入。`scripts/fault/reference-outage.sh` 另查币安断流时模拟市场的 BTC/ETH 参考价变为不新鲜（市场因子保持）而 ASTRA-USDT 照常成交，恢复后重新跟随。
 
@@ -73,13 +73,13 @@ market-sim 每 5 秒把目标价上报给 market-data-service（`PUT /internal/m
 
 | 角色 | 测试服数量 | 行为 |
 |---|---|---|
-| MAKER 做市商 | 6 | 每侧 `levels`（8）档，最优买卖相距 `spread`（0.2%），档距 `level_ticks`（5 个 tick）；价格放在按做市商错开相位的网格上，目标价小幅移动时大部分挂单不动。目标价偏离上次报价 `requote_ticks`（3 个 tick）或每 1–3 秒（随机）重报一次：撤掉不再需要的价位、补上缺的价位（由近到远、买卖交替）；每轮最多 2 个做市商重报。每档价值对数正态，中位 `level_size`（800 USDT） |
+| MAKER 做市商 | 6 | 每侧 `levels`（8）档，最优买卖相距 `spread`（0.2%），档距 `level_ticks`（5 个 tick）；价格放在按做市商错开相位的网格上，目标价小幅移动时大部分挂单不动。目标价偏离上次报价 `requote_ticks`（3 个 tick）或每 1–3 秒（随机）重报一次：撤掉不再需要的价位、补上缺的价位（由近到远、买卖交替）；每轮最多 2 个做市商重报。每档价值对数正态，中位 `level_size`（800 USDT），按做市商的 USDT 相对全体做市商平均值倾斜：少一半的买单只挂一半大小、卖单一倍半（多的反过来），靠卖出把 USDT 补回来。重报前按页读自己的全部挂单（每页 100，最多 10 页，超过即出错而不是只看前几页，免得把"缺"的档位重复挂上） |
 | TAKER 噪声交易者 | 12 | 泊松到达，一天合计 `daily_volume` 的 80%：平均每天 `daily_volume × 0.8 / (order_size × e^0.32)` 单（单笔价值对数正态，中位 `order_size`、对数标准差 0.8，均值是中位的 1.38 倍；默认约 2,900 单），按 UTC 小时加权（欧美重叠时段最多）；方向五五开，按 `mu` 最多偏 10 个百分点，按自己的 USDT 偏离 `bot_usdt` 最多偏 20 个百分点；市价单 |
 | TREND 趋势交易者 | 4 | 平均每 30 秒看目标价最近 `trend_minutes`（15）分钟的方向，各以 `trend_strength`（0.3）的概率顺势下市价单；单笔价值使趋势交易者合计一天是 `daily_volume` 的 20%（`domain.TrendWorth`）。`daily_volume` 因此是噪声与趋势交易合计的日成交额目标（不含事件与走价时事件执行者的成交） |
 | EXECUTOR 事件执行者 | 2 | 只在事件移动价格时（及之后一分钟）下市价单，让成交价跟上目标价（见「价格事件」） |
 
 - 节流：全部机器人合计每秒 `orders_per_second`（20）单、`cancels_per_second`（10）次撤单（令牌桶），超出的这一轮放弃（`market_sim_throttled_total`）。
-- 余额：每 10 分钟（以及开始交易时）读一遍每个机器人的 SPOT 余额（`market_sim_inventory{asset}` 是合计）；余额不够的单子被账本拒绝时计为 `unfunded`，下一轮再说。整体不够时用 `astra.sh mint` 增发。
+- 余额：每 10 分钟（以及开始交易时）读一遍每个机器人的 SPOT 余额（`market_sim_inventory{asset}` 是合计）；余额不够的单子被账本拒绝时计为 `unfunded`，下一轮再说。库存靠倾斜自己回到平均：做市商按上表倾斜挂单大小，噪声交易者按自己的 USDT 偏离 `bot_usdt` 偏向买或卖；设计 §4 说的"机器人之间划转"没有做（要给账本加一种用户之间的划转，暂不值得），整体不够时用 `astra.sh mint` 增发。
 - 机器人全部零手续费：它们的用户 ID 在 `MARKET_MAKER_USER_IDS`（spot-trading-service、derivatives-service 读，`astra.sh seed` 写入 `apps.env` 并重启这两个服务）。
 
 ## 永续 ASTRA-USDT-PERP（设计 §5.2，A4）

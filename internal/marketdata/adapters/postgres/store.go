@@ -46,6 +46,36 @@ func (r repos) References() ports.ReferenceRepo { return references(r) }
 func (r repos) Halts() ports.HaltRepo    { return halts{q: r.q, sql: feedHalts} }
 func (r repos) SimHalts() ports.HaltRepo { return halts{q: r.q, sql: simHalts} }
 
+func (r repos) SimHeartbeats() ports.HeartbeatRepo { return heartbeats(r) }
+
+type heartbeats struct{ q pg.Querier }
+
+func (r heartbeats) List(ctx context.Context) (map[string]time.Time, error) {
+	rows, err := r.q.Query(ctx, `SELECT symbol, last_at FROM sim_heartbeats`)
+	if err != nil {
+		return nil, fmt.Errorf("list heartbeats: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]time.Time{}
+	for rows.Next() {
+		var symbol string
+		var at time.Time
+		if err := rows.Scan(&symbol, &at); err != nil {
+			return nil, fmt.Errorf("list heartbeats: %w", err)
+		}
+		out[symbol] = at
+	}
+	return out, rows.Err()
+}
+
+func (r heartbeats) Save(ctx context.Context, symbol string, at time.Time) error {
+	if _, err := r.q.Exec(ctx, `INSERT INTO sim_heartbeats (symbol, last_at) VALUES ($1, $2)
+		ON CONFLICT (symbol) DO UPDATE SET last_at = GREATEST(sim_heartbeats.last_at, EXCLUDED.last_at)`, symbol, at); err != nil {
+		return fmt.Errorf("save heartbeat: %w", err)
+	}
+	return nil
+}
+
 // haltSQL are the queries of one table of halts.
 type haltSQL struct{ list, add, remove string }
 
