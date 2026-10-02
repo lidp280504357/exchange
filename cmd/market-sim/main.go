@@ -13,18 +13,22 @@ import (
 	"net/http"
 	"time"
 
+	instrumentv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/instrument/v1"
 	"github.com/lidp280504357/exchange/internal/marketsim/adapters/api"
+	"github.com/lidp280504357/exchange/internal/marketsim/adapters/instruments"
 	"github.com/lidp280504357/exchange/internal/marketsim/adapters/postgres"
 	"github.com/lidp280504357/exchange/internal/marketsim/application"
 	"github.com/lidp280504357/exchange/internal/marketsim/transport/httpapi"
 	"github.com/lidp280504357/exchange/internal/platform/app"
 	"github.com/lidp280504357/exchange/internal/platform/bootstrap"
+	"github.com/lidp280504357/exchange/internal/platform/kafka"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
 	"github.com/lidp280504357/exchange/migrations"
 )
 
 type settings struct {
-	Postgres pg.Config `koanf:",squash"`
+	Postgres pg.Config    `koanf:",squash"`
+	Kafka    kafka.Config `koanf:",squash"`
 	// HTTPAddr is the internal management API (HTTP_ADDR).
 	HTTPAddr string `koanf:"http_addr"`
 	// Symbol is the pair the bots trade (SIM_SYMBOL), Quote its quote
@@ -32,11 +36,13 @@ type settings struct {
 	Symbol string `koanf:"sim_symbol"`
 	Quote  string `koanf:"sim_quote"`
 	Seed   uint64 `koanf:"sim_seed"`
-	// The platform's REST peers.
-	TradingURL    string `koanf:"trading_service_url"`
-	LedgerURL     string `koanf:"ledger_service_url"`
-	MarketURL     string `koanf:"market_data_service_url"`
-	InstrumentURL string `koanf:"instrument_service_url"`
+	// The platform's REST peers, and instrument-service's gRPC address
+	// (INSTRUMENT_GRPC_ADDR) for the halts.
+	TradingURL     string `koanf:"trading_service_url"`
+	LedgerURL      string `koanf:"ledger_service_url"`
+	MarketURL      string `koanf:"market_data_service_url"`
+	InstrumentURL  string `koanf:"instrument_service_url"`
+	InstrumentAddr string `koanf:"instrument_grpc_addr"`
 }
 
 func (s *settings) Validate() error {
@@ -44,7 +50,7 @@ func (s *settings) Validate() error {
 	if s.Symbol == "" || s.Quote == "" {
 		errs = append(errs, errors.New("SIM_SYMBOL and SIM_QUOTE are required"))
 	}
-	return errors.Join(append(errs, s.Postgres.Validate())...)
+	return errors.Join(append(errs, s.Postgres.Validate(), s.Kafka.Validate())...)
 }
 
 func main() {
@@ -55,7 +61,7 @@ func setup(ctx context.Context, a *app.App) error {
 	cfg := settings{
 		Postgres: pg.DefaultConfig(), HTTPAddr: ":8098", Symbol: "ASTRA-USDT", Quote: "USDT",
 		TradingURL: "http://localhost:8088", LedgerURL: "http://localhost:8085", MarketURL: "http://localhost:8090",
-		InstrumentURL: "http://localhost:8084",
+		InstrumentURL: "http://localhost:8084", InstrumentAddr: "localhost:9184",
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -68,12 +74,22 @@ func setup(ctx context.Context, a *app.App) error {
 	if err != nil {
 		return err
 	}
+	// Audit records of the operators' actions go out through the outbox.
+	events, err := bootstrap.Events(ctx, a, db, cfg.Kafka)
+	if err != nil {
+		return err
+	}
+	instrumentConn, err := bootstrap.GRPCClient(a, "instrument", cfg.InstrumentAddr)
+	if err != nil {
+		return err
+	}
 	client := &api.Client{
 		TradingURL: cfg.TradingURL, LedgerURL: cfg.LedgerURL, MarketURL: cfg.MarketURL, InstrumentURL: cfg.InstrumentURL,
 		HTTP: &http.Client{Timeout: 2 * time.Second},
 	}
 	sim := application.New(application.Config{Symbol: cfg.Symbol, Quote: cfg.Quote, Tick: 250 * time.Millisecond, Seed: cfg.Seed},
-		client, client, postgres.NewStore(db), flagClient, a.Logger(), a.Metrics())
+		client, client, instruments.Client{API: instrumentv1.NewInstrumentServiceClient(instrumentConn)}, postgres.NewStore(db, events),
+		flagClient, a.Logger(), a.Metrics())
 	r := a.NewRouter()
 	(&httpapi.Handler{Sim: sim}).Routes(r)
 	if err := bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r); err != nil {

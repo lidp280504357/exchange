@@ -82,11 +82,12 @@ func (m *Model) Snapshot() State {
 	return st
 }
 
-// Step advances the model to now. btc and eth are the reference prices,
-// 0 when not fresh: the market factor then keeps its last value, and a
-// first fresh price anchors it. It returns the target, the model's price
-// within the guards, and the guard that bounded it, if any.
-func (m *Model) Step(now time.Time, btc, eth float64) (float64, Guard) {
+// Step advances the model to now under the running events' shape. btc and
+// eth are the reference prices, 0 when not fresh: the market factor then
+// keeps its last value, and a first fresh price anchors it. It returns
+// the target, the model's price within the guards, and the guard that
+// bounded it, if any.
+func (m *Model) Step(now time.Time, btc, eth float64, sh Shape) (float64, Guard) {
 	p, st := m.Params, &m.State
 	dt := maxStep
 	if !st.At.IsZero() {
@@ -101,10 +102,23 @@ func (m *Model) Step(now time.Time, btc, eth float64) (float64, Guard) {
 	if btc > 0 && eth > 0 && st.BTC0 > 0 && st.ETH0 > 0 {
 		st.LogM = p.Beta * (p.WBTC*math.Log(btc/st.BTC0) + p.WETH*math.Log(eth/st.ETH0))
 	}
+	mu, sigma := p.Mu, p.Sigma
+	if sh.Mu != nil {
+		mu = *sh.Mu
+	}
+	if sh.Vol > 0 {
+		sigma *= sh.Vol
+	}
+	if sh.LogE != nil {
+		st.LogE = *sh.LogE
+	}
 	hours, days := dt.Hours(), dt.Hours()/24
-	st.X += -p.Theta*st.X*hours + p.Mu*days + p.Sigma*math.Sqrt(days)*m.rng.NormFloat64()
+	st.X += -p.Theta*st.X*hours + mu*days + sigma*math.Sqrt(days)*m.rng.NormFloat64()
 
 	price := p.P0 * math.Exp(st.LogM+st.X+st.LogE)
+	if sh.Pin > 0 {
+		price = sh.Pin
+	}
 	guard := GuardNone
 	// The minute's reference: the oldest target within the last minute.
 	cut := now.Add(-time.Minute)
@@ -118,6 +132,10 @@ func (m *Model) Step(now time.Time, btc, eth float64) (float64, Guard) {
 	ref := st.P
 	if len(st.Minute) > 0 {
 		ref = st.Minute[0].P
+	}
+	if sh.Moving {
+		// An event moves the price: the guard starts again from it.
+		ref, st.Minute = 0, st.Minute[:0]
 	}
 	if ref > 0 {
 		lo, hi := ref*(1-p.MaxMinuteMove), ref*(1+p.MaxMinuteMove)
@@ -136,6 +154,15 @@ func (m *Model) Step(now time.Time, btc, eth float64) (float64, Guard) {
 	st.P, st.At = price, now
 	st.Minute = append(st.Minute, Mark{At: now, P: price})
 	return price, guard
+}
+
+// Hold makes the model's price p now, through the event factor: a pause
+// or a target's hold ends where it held the price, and the model goes on
+// from there.
+func (m *Model) Hold(p float64) {
+	if p > 0 && m.Params.P0 > 0 {
+		m.State.LogE = math.Log(p/m.Params.P0) - m.State.LogM - m.State.X
+	}
 }
 
 // Reanchor makes the current target the anchor: P0 is the target, the

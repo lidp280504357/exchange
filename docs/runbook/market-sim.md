@@ -1,6 +1,6 @@
 # market-sim：平台币 ASTRA 的模拟市场
 
-设计见 [docs/设计-平台币ASTRA与模拟做市-2026-10-02.md](../设计-平台币ASTRA与模拟做市-2026-10-02.md)（下称"设计"）。本文对应批次 A2：价格模型与机器人集群。后台的价格控制与事件（A3）、永续（A4）还没做。
+设计见 [docs/设计-平台币ASTRA与模拟做市-2026-10-02.md](../设计-平台币ASTRA与模拟做市-2026-10-02.md)（下称"设计"）。本文对应批次 A2（价格模型与机器人集群）与 A3 的服务端（价格事件、守卫与审计；后台页面归后台会话）。永续（A4）还没做。
 
 ## 做什么
 
@@ -22,7 +22,26 @@ dX   = −θ X dt + μ dt + σ dW          （θ 按小时，μ、σ 按天）
 - BTC、ETH 取 market-data-service 内网参考价（`/internal/market/{symbol}/reference`，每秒读一次）；不新鲜时 `M` 保持上一个值（指标 `market_sim_references_fresh`）。第一次拿到新鲜价格时锚定 `BTC_0`、`ETH_0`。
 - 守卫：目标价一分钟内最多变动 `max_minute_move`（默认 3%），只限制目标价的速度，不改模型：大盘跳 10% 时目标价每分钟追 3%，几分钟后追上；下限 0.0001、上限 1,000,000。触发次数 `market_sim_guards_total{guard}`。
 - 模型用 float64（对数与高斯噪声），价格与数量出模型时按交易对的 tick 与 lot 转成 decimal。随机源可设种子（`SIM_SEED`），状态里存着随机源，测试可复现。
-- `E(t)`（后台事件）在 A3 加入，现在恒为 1。
+- `E(t)` 是运营事件的因子（下一节），没有事件时保持上一个值（初始为 1）。
+
+## 价格事件（设计 §6.2，A3）
+
+开关 `sim.events`（按交易对，默认关）打开后，运营可以经管理接口建事件（立即或按 `starts_at` 定时），也可以提前结束：
+
+| 类型 | 参数 | 效果 |
+|---|---|---|
+| `JUMP` | `size`（0.1 即 +10%，大于 −0.9），`duration_seconds`（0 立即，最长 600） | 事件因子 `E` 在这段时间内（对数线性）乘上 `1+size`，之后保持 |
+| `TARGET` | `price`，`duration_seconds`，`hold_seconds` | 目标价沿指数路径走到 `price`，再固定 `hold_seconds`（0 不固定）；结束后模型从该价继续 |
+| `TREND` | `mu`（每天），`duration_seconds`（0 直到结束） | 期间漂移改为 `mu` |
+| `VOLATILITY` | `factor`，`duration_seconds`（0 直到结束） | 期间波动率乘 `factor` |
+| `PAUSE` | `duration_seconds`（0 直到结束） | 目标价冻结；做市商照常报价，噪声与趋势交易者停止 |
+| `HALT` | — | 撤掉做市商全部挂单，交易对置 `HALT`（经 instrument-service gRPC）；结束事件即恢复 `TRADING`，机器人重新报价 |
+| `REANCHOR` | — | `P0` 设为当前目标价，`BTC_0`、`ETH_0` 重新锚定，偏离与事件因子清零 |
+
+- 同一时间只运行一个移动或固定价格的事件（`JUMP`、`TARGET`、`PAUSE`），后到的排队等前一个结束。事件移动价格时分钟守卫让路，并从事件价格重新开始计算，事件结束后照常限速。
+- 单人限额：单次移动（跳涨跳跌、目标价与当前价的距离）不超过 30%，一小时内（含这次，已取消的不算）合计不超过 50%；超过时需要另一名运营批准（`approved_by` 填另一个人，不能是自己），否则 403 `SIM_EVENT_NEEDS_APPROVAL`（`details.move` 是这次的幅度）。双人审批的流程在后台做。
+- 事件移动价格时（以及之后一分钟）事件执行者每 1–2 秒比较最近成交价与目标价，差距超过半个价差就按方向下市价单（差得越远单子越大），让成交价跟上目标价。
+- 建事件、提前结束、改设置都写审计（`audit.events`：`market.sim.event_created`、`market.sim.event_canceled`、`market.sim.event_ended`、`market.sim.params_changed`，带参数与当时的目标价）。
 
 ## 机器人（设计 §4）
 
@@ -51,7 +70,14 @@ dX   = −θ X dt + μ dt + σ dW          （θ 按小时，μ、σ 按天）
 |---|---|---|
 | GET | `/internal/sim` | 状态：`symbol`、`enabled`、`running`、`target_price`、`last_price`（十进制字符串，可为 null）、`references_fresh`、`params`、`version`、`guards`（按守卫计数）、`bots`（`user_id`、`role`、`label`、`enabled`、`balances_known`、`usdt`、`coin`、`error`、`error_at`）、`at` |
 | PUT | `/internal/sim/params` | `{"params": {...全部字段...}, "actor": "操作人"}` → `{"version": n}`；不合法返回 400 |
-| POST | `/internal/sim/bots` | `{"user_id", "role": "MAKER|TAKER|TREND|EXECUTOR", "label"}` → 204；同一用户再登记无变化，标签被别的用户占用返回 409；一分钟内开始交易 |
+| POST | `/internal/sim/bots` | `{"user_id", "role": "MAKER|TAKER|TREND|EXECUTOR", "label"}` → 204；同一用户再登记无变化，标签被别的用户占用返回 409；下一轮开始交易 |
+| GET | `/internal/sim/events` | 进行中与排队的事件；`?all=1&limit=50` 取最近的全部状态。每条：`id`、`type`、`size`、`price`、`mu`、`factor`、`duration_seconds`、`hold_seconds`、`starts_at`、`status`（`SCHEDULED`、`RUNNING`、`DONE`、`CANCELED`）、`created_by`、`approved_by`、`reason`、`created_at`、`started_at`、`ended_at`、`from_price`、`ended_by` |
+| POST | `/internal/sim/events` | `{"type", "size", "price", "mu", "factor", "duration_seconds", "hold_seconds", "starts_at"（RFC 3339，可省）, "actor", "approved_by", "reason"}` → 201 事件；`sim.events` 关时 403 `SIM_EVENTS_OFF`，超过单人限额 403 `SIM_EVENT_NEEDS_APPROVAL`，参数不合法 400 |
+| POST | `/internal/sim/events/{id}/end` | `{"actor", "reason"}` → 200 事件：排队的取消，进行中的就地结束（`HALT` 恢复交易）；已结束的 409 |
+| GET | `/internal/sim/history` | `?minutes=`（默认与最长一天）：每 10 秒一个点 `{at, target_price, last_price}`（内存里，重启后从头积累） |
+| GET | `/internal/sim/stream` | 同样的点每秒一个，server-sent events（`data: {...}`） |
+
+`GET /internal/sim` 另有 `events`（进行中与排队的事件）。
 
 后台（admin-service，另一个会话负责）按这个接口做"模拟市场"页面（设计 §6）。
 
@@ -82,7 +108,7 @@ scripts/ops/astra.sh status
 
 ## 还没做（后续批次）
 
-- A3：后台价格控制与事件（`E(t)`、跳涨跳跌、目标价、趋势、波动、暂停、停牌、重新锚定）、守卫与双人审批、审计、事件主题 `market.sim.events`。
+- A3 的后台页面（概览、价格控制、事件日程、机器人集群，后台会话负责）、确认框里的强平影响估算（等 A4 的永续）、事件主题 `market.sim.events` 进 ClickHouse（概览先用 `/history` 与 `/stream`）。
 - A4：`platform:` 指数源与 ASTRA-USDT-PERP，机器人在永续上做市（`sim.perp`）；derivatives 的"只与 HOUSE 成交"判断要加"有参考市场"条件。
 - A5：market-sim 心跳中断 60 秒自动停牌、故障注入、ADR-0016。
 - 后台按 `bot` 标记过滤机器人的订单与成交：用户标签在 admin 的库里，需要后台会话提供写入方式。

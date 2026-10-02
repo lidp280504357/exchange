@@ -2,8 +2,10 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/lidp280504357/exchange/internal/marketsim/domain"
 	"github.com/lidp280504357/exchange/internal/marketsim/ports"
+	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/flags"
 )
 
@@ -109,7 +112,10 @@ func (f *fakeTrading) orders(user string) []domain.Order {
 	return append([]domain.Order(nil), f.open[user]...)
 }
 
-type fakePrices struct{ btc, eth decimal.Decimal }
+type fakePrices struct {
+	mu             sync.Mutex
+	btc, eth, last decimal.Decimal
+}
 
 func (p *fakePrices) Reference(_ context.Context, symbol string) (decimal.Decimal, bool, error) {
 	if symbol == btcPair {
@@ -118,7 +124,11 @@ func (p *fakePrices) Reference(_ context.Context, symbol string) (decimal.Decima
 	return p.eth, true, nil
 }
 
-func (p *fakePrices) Last(context.Context, string) (decimal.Decimal, error) { return d("1.0001"), nil }
+func (p *fakePrices) Last(context.Context, string) (decimal.Decimal, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.last, nil
+}
 
 type memStore struct {
 	bots    []ports.Bot
@@ -127,6 +137,8 @@ type memStore struct {
 	state   *domain.State
 	saves   int
 	byWhom  string
+	events  []domain.Event
+	audits  []ports.Audit
 	mu      sync.Mutex
 }
 
@@ -150,10 +162,82 @@ func (m *memStore) Settings(context.Context) (domain.Params, int64, bool, error)
 	return *m.params, m.version, true, nil
 }
 
-func (m *memStore) SaveSettings(_ context.Context, p domain.Params, actor string) (int64, error) {
+func (m *memStore) SaveSettings(_ context.Context, p domain.Params, actor string, audit *ports.Audit) (int64, error) {
 	m.params, m.byWhom = &p, actor
 	m.version++
+	if audit != nil {
+		m.audits = append(m.audits, *audit)
+	}
 	return m.version, nil
+}
+
+func (m *memStore) Events(_ context.Context, open bool, limit int) ([]domain.Event, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []domain.Event
+	for _, e := range m.events {
+		if !open || e.Status == domain.EventScheduled || e.Status == domain.EventRunning {
+			out = append(out, e)
+		}
+	}
+	if !open && len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	return out, nil
+}
+
+func (m *memStore) EventsSince(_ context.Context, t time.Time) ([]domain.Event, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []domain.Event
+	for _, e := range m.events {
+		if !e.CreatedAt.Before(t) {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+func (m *memStore) SaveEvent(_ context.Context, e domain.Event, audit *ports.Audit) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if i := slices.IndexFunc(m.events, func(x domain.Event) bool { return x.ID == e.ID }); i >= 0 {
+		m.events[i] = e
+	} else {
+		m.events = append(m.events, e)
+	}
+	if audit != nil {
+		m.audits = append(m.audits, *audit)
+	}
+	return nil
+}
+
+func (m *memStore) event(id string) domain.Event {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, e := range m.events {
+		if e.ID == id {
+			return e
+		}
+	}
+	return domain.Event{}
+}
+
+// fakePairs records the pair's status changes.
+type fakePairs struct {
+	mu      sync.Mutex
+	trading *fakeTrading
+	changes []string
+}
+
+func (f *fakePairs) SetPairStatus(_ context.Context, _, to, _, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.changes = append(f.changes, to)
+	f.trading.mu.Lock()
+	f.trading.pair.Trading = to == "TRADING"
+	f.trading.mu.Unlock()
+	return nil
 }
 
 func (m *memStore) State(context.Context) (domain.State, bool, error) {
@@ -169,17 +253,25 @@ func (m *memStore) SaveState(_ context.Context, st domain.State) error {
 	return nil
 }
 
-type flagSet struct{ on bool }
+type flagSet struct{ on, events bool }
 
 func (f *flagSet) Enabled(key string, _ flags.Subject) bool {
-	return key == flags.KeySimEnabled && f.on
+	switch key {
+	case flags.KeySimEnabled:
+		return f.on
+	case flags.KeySimEvents:
+		return f.events
+	}
+	return false
 }
 
 type rig struct {
 	sim     *Sim
 	trading *fakeTrading
+	pairs   *fakePairs
 	store   *memStore
 	flags   *flagSet
+	prices  *fakePrices
 	now     time.Time
 }
 
@@ -196,9 +288,11 @@ func newRig(t *testing.T, store *memStore) *rig {
 			{UserID: "r1", Role: domain.RoleTrend, Label: "bot-04", Enabled: true},
 		}
 	}
-	r := &rig{trading: newFakeTrading(), store: store, flags: &flagSet{on: true}, now: time.Date(2026, 10, 2, 14, 0, 0, 0, time.UTC)}
+	r := &rig{trading: newFakeTrading(), store: store, flags: &flagSet{on: true, events: true}, now: time.Date(2026, 10, 2, 14, 0, 0, 0, time.UTC)}
+	r.pairs = &fakePairs{trading: r.trading}
+	r.prices = &fakePrices{btc: d("60000"), eth: d("3000"), last: d("1.0001")}
 	r.sim = New(Config{Symbol: "ASTRA-USDT", Quote: "USDT", Tick: 250 * time.Millisecond, Seed: 11}, r.trading,
-		&fakePrices{btc: d("60000"), eth: d("3000")}, store, r.flags, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+		r.prices, r.pairs, store, r.flags, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
 	r.sim.now = func() time.Time { return r.now }
 	if err := r.sim.Start(context.Background()); err != nil {
 		t.Fatal(err)
@@ -377,3 +471,169 @@ func TestBotsShowWhileOff(t *testing.T) {
 		t.Fatalf("status %+v", st)
 	}
 }
+
+func (r *rig) create(t *testing.T, e domain.Event) domain.Event {
+	t.Helper()
+	if e.CreatedBy == "" {
+		e.CreatedBy, e.Reason = "ops", "e2e of an event"
+	}
+	out, err := r.sim.CreateEvent(context.Background(), e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func TestAJumpMovesTheTargetAndStays(t *testing.T) {
+	r := newRig(t, nil)
+	r.rounds(8)
+	before := r.sim.Status().Target
+	e := r.create(t, domain.Event{Type: domain.EventJump, Size: 0.1})
+	r.rounds(1)
+	after := r.sim.Status().Target
+	if after < before*1.09 || after > before*1.11 {
+		t.Fatalf("jumped from %v to %v", before, after)
+	}
+	if got := r.store.event(e.ID); got.Status != domain.EventDone || got.StartedAt.IsZero() || !got.FromP.IsPositive() {
+		t.Fatalf("event %+v", got)
+	}
+	r.rounds(4 * 70) // more than a minute: the guard does not pull it back
+	if p := r.sim.Status().Target; p < before*1.07 {
+		t.Fatalf("a minute later %v (was %v before the jump)", p, before)
+	}
+	if len(r.store.audits) == 0 || r.store.audits[len(r.store.audits)-1].Action != "market.sim.event_created" {
+		t.Fatalf("audits %+v", r.store.audits)
+	}
+}
+
+func TestEventsNeedTheSwitchAndBeyondLimitsASecondOperator(t *testing.T) {
+	r := newRig(t, nil)
+	r.rounds(4)
+	r.flags.events = false
+	if _, err := r.sim.CreateEvent(context.Background(), domain.Event{Type: domain.EventJump, Size: 0.1, CreatedBy: "ops", Reason: "test"}); !errors.Is(err, ErrEventsOff) {
+		t.Fatalf("switched off: %v", err)
+	}
+	r.flags.events = true
+	big := domain.Event{Type: domain.EventJump, Size: -0.35, CreatedBy: "ops", Reason: "test"}
+	if _, err := r.sim.CreateEvent(context.Background(), big); err == nil || !apperrIs(err, "SIM_EVENT_NEEDS_APPROVAL") {
+		t.Fatalf("alone: %v", err)
+	}
+	big.ApprovedBy = "ops"
+	if _, err := r.sim.CreateEvent(context.Background(), big); !apperrIs(err, "SIM_EVENT_NEEDS_APPROVAL") {
+		t.Fatalf("approved by the same operator: %v", err)
+	}
+	big.ApprovedBy = "ops2"
+	if _, err := r.sim.CreateEvent(context.Background(), big); err != nil {
+		t.Fatalf("approved: %v", err)
+	}
+}
+
+func TestATargetIsReachedAndHeld(t *testing.T) {
+	r := newRig(t, nil)
+	r.rounds(4)
+	e := r.create(t, domain.Event{Type: domain.EventTarget, Price: d("1.2"), Duration: 10 * time.Second, Hold: 5 * time.Second})
+	r.rounds(4 * 11)
+	if p := r.sim.Status().Target; p != 1.2 {
+		t.Fatalf("arrived at %v", p)
+	}
+	if got := r.store.event(e.ID); got.Status != domain.EventRunning {
+		t.Fatalf("holding: %s", got.Status)
+	}
+	r.rounds(4 * 5)
+	if got := r.store.event(e.ID); got.Status != domain.EventDone {
+		t.Fatalf("after the hold: %s", got.Status)
+	}
+	if p := r.sim.Status().Target; p < 1.19 || p > 1.21 {
+		t.Fatalf("goes on from 1.2: %v", p)
+	}
+}
+
+func TestAPauseStopsTheTakers(t *testing.T) {
+	p := domain.DefaultParams()
+	p.DailyVolume = 86_400 * 400 * 4 // four orders a second
+	r := newRig(t, &memStore{params: &p, version: 1})
+	r.rounds(4)
+	e := r.create(t, domain.Event{Type: domain.EventPause})
+	r.rounds(1)
+	r.trading.mu.Lock()
+	before := r.trading.markets[domain.Buy] + r.trading.markets[domain.Sell]
+	r.trading.mu.Unlock()
+	held := r.sim.Status().Target
+	r.rounds(40)
+	r.trading.mu.Lock()
+	during := r.trading.markets[domain.Buy] + r.trading.markets[domain.Sell]
+	r.trading.mu.Unlock()
+	if during != before || r.sim.Status().Target != held {
+		t.Fatalf("paused: %d market orders more, target %v -> %v", during-before, held, r.sim.Status().Target)
+	}
+	if _, err := r.sim.EndEvent(context.Background(), e.ID, "ops", "resume"); err != nil {
+		t.Fatal(err)
+	}
+	r.rounds(40)
+	r.trading.mu.Lock()
+	after := r.trading.markets[domain.Buy] + r.trading.markets[domain.Sell]
+	r.trading.mu.Unlock()
+	if after == during {
+		t.Fatal("the takers did not come back")
+	}
+}
+
+func TestAHaltCancelsTheBotsAndTheResumeRestoresThem(t *testing.T) {
+	r := newRig(t, nil)
+	r.rounds(20)
+	e := r.create(t, domain.Event{Type: domain.EventHalt})
+	r.rounds(2)
+	if r.trading.cancelAl["m1"] == 0 || len(r.trading.orders("m1")) != 0 || !slices.Equal(r.pairs.changes, []string{"HALT"}) {
+		t.Fatalf("halt: cancel all %v, pair %v", r.trading.cancelAl, r.pairs.changes)
+	}
+	r.rounds(8)
+	if len(r.trading.orders("m1")) != 0 {
+		t.Fatal("quoted while halted")
+	}
+	if _, err := r.sim.EndEvent(context.Background(), e.ID, "ops", "resume trading"); err != nil {
+		t.Fatal(err)
+	}
+	r.rounds(20)
+	if !slices.Equal(r.pairs.changes, []string{"HALT", "TRADING"}) || len(r.trading.orders("m1")) == 0 {
+		t.Fatalf("resumed: pair %v, %d orders", r.pairs.changes, len(r.trading.orders("m1")))
+	}
+	if _, err := r.sim.EndEvent(context.Background(), e.ID, "ops", "again"); !errors.Is(err, ErrEventNotOpen) {
+		t.Fatalf("ended twice: %v", err)
+	}
+}
+
+func TestExecutorsPushThePrintedPriceAfterAJump(t *testing.T) {
+	store := &memStore{bots: []ports.Bot{
+		{UserID: "m1", Role: domain.RoleMaker, Label: "bot-01", Enabled: true},
+		{UserID: "x1", Role: domain.RoleExecutor, Label: "bot-02", Enabled: true},
+	}}
+	p := domain.DefaultParams()
+	p.DailyVolume = 0
+	store.params = &p
+	store.version = 1
+	r := newRig(t, store)
+	r.rounds(4)
+	r.create(t, domain.Event{Type: domain.EventJump, Size: 0.1})
+	r.rounds(4 * 10) // the last price stays at 1.0001: they keep buying
+	r.trading.mu.Lock()
+	buys, sells := r.trading.markets[domain.Buy], r.trading.markets[domain.Sell]
+	r.trading.mu.Unlock()
+	if buys < 4 || sells != 0 {
+		t.Fatalf("executors: %d buys, %d sells", buys, sells)
+	}
+}
+
+func TestAScheduledEventIsCanceled(t *testing.T) {
+	r := newRig(t, nil)
+	e := r.create(t, domain.Event{Type: domain.EventJump, Size: 0.05, StartsAt: r.now.Add(time.Hour)})
+	got, err := r.sim.EndEvent(context.Background(), e.ID, "ops", "not today")
+	if err != nil || got.Status != domain.EventCanceled {
+		t.Fatalf("%+v %v", got, err)
+	}
+	r.rounds(4)
+	if st := r.sim.Status(); len(st.Events) != 0 {
+		t.Fatalf("open events %+v", st.Events)
+	}
+}
+
+func apperrIs(err error, code string) bool { return err != nil && apperr.Is(err, code) }

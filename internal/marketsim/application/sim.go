@@ -9,6 +9,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"math"
@@ -60,6 +61,7 @@ type Sim struct {
 	cfg     Config
 	trading ports.Trading
 	prices  ports.Prices
+	pairs   ports.Pairs
 	store   ports.Store
 	flags   ports.Flags
 	log     *slog.Logger
@@ -88,6 +90,10 @@ type Sim struct {
 	trendAt   time.Time
 	turn      int
 	guards    map[domain.Guard]int
+	events    []*domain.Event // scheduled and running
+	movedAt   time.Time       // when an event last moved the price
+	executeAt time.Time       // the executors' next turn
+	samples   []Sample
 }
 
 // bot is a bot account as the simulation runs it.
@@ -104,14 +110,14 @@ type bot struct {
 }
 
 // New returns a simulation; Start it before Run.
-func New(cfg Config, trading ports.Trading, prices ports.Prices, store ports.Store, fl ports.Flags, log *slog.Logger,
+func New(cfg Config, trading ports.Trading, prices ports.Prices, pairs ports.Pairs, store ports.Store, fl ports.Flags, log *slog.Logger,
 	reg prometheus.Registerer,
 ) *Sim {
 	if cfg.Tick <= 0 {
 		cfg.Tick = 250 * time.Millisecond
 	}
 	return &Sim{
-		cfg: cfg, trading: trading, prices: prices, store: store, flags: fl, log: log, m: newMetrics(reg), now: time.Now,
+		cfg: cfg, trading: trading, prices: prices, pairs: pairs, store: store, flags: fl, log: log, m: newMetrics(reg), now: time.Now,
 		guards: map[domain.Guard]int{},
 	}
 }
@@ -127,7 +133,7 @@ func (s *Sim) Start(ctx context.Context) error {
 	}
 	if !ok {
 		p = domain.DefaultParams()
-		if version, err = s.store.SaveSettings(ctx, p, "market-sim"); err != nil {
+		if version, err = s.store.SaveSettings(ctx, p, "market-sim", nil); err != nil {
 			return err
 		}
 	}
@@ -143,6 +149,13 @@ func (s *Sim) Start(ctx context.Context) error {
 	s.apply(p, version)
 	if err := s.loadBots(ctx); err != nil {
 		return err
+	}
+	open, err := s.store.Events(ctx, true, 0)
+	if err != nil {
+		return err
+	}
+	for i := range open {
+		s.events = append(s.events, &open[i])
 	}
 	s.log.InfoContext(ctx, "simulated market loaded", "symbol", s.cfg.Symbol, "bots", len(s.bots), "settings_version", version,
 		"target", st.P)
@@ -244,7 +257,10 @@ func (s *Sim) Round(ctx context.Context) {
 	}
 	s.m.running.Set(1)
 	s.refreshRefs(ctx, now)
-	p, guard := s.model.Step(now, s.btc, s.eth)
+	s.startDue(ctx, now)
+	sh, ended := domain.ShapeOf(s.runningEvents(), now)
+	p, guard := s.model.Step(now, s.btc, s.eth, sh)
+	s.finish(ctx, now, ended, p)
 	s.m.target.Set(p)
 	if guard != domain.GuardNone {
 		s.guards[guard]++
@@ -256,9 +272,16 @@ func (s *Sim) Round(ctx context.Context) {
 			s.history = s.history[len(s.history)-keep:]
 		}
 	}
+	s.sample(now, p)
+	if sh.Halted {
+		return // the halt canceled the makers' orders; the pair waits
+	}
 	s.quote(ctx, now, p)
-	s.take(ctx, now, p, dt)
-	s.follow(ctx, now, p)
+	if !s.runs(domain.EventPause) { // a pause keeps the makers only
+		s.take(ctx, now, p, dt)
+		s.follow(ctx, now, p)
+	}
+	s.execute(ctx, now, p)
 	s.chores(ctx, now)
 }
 
@@ -534,6 +557,7 @@ type Status struct {
 	Version   int64
 	Guards    map[domain.Guard]int
 	Bots      []BotStatus
+	Events    []domain.Event // scheduled and running
 	At        time.Time
 }
 
@@ -563,6 +587,9 @@ func (s *Sim) Status() Status {
 	for _, b := range s.bots {
 		st.Bots = append(st.Bots, BotStatus{Bot: b.Bot, USDT: b.usdt, Coin: b.coin, Known: b.known, Error: b.err, ErrorAt: b.errAt})
 	}
+	for _, e := range s.events {
+		st.Events = append(st.Events, *e)
+	}
 	return st
 }
 
@@ -577,7 +604,10 @@ func (s *Sim) UpdateParams(ctx context.Context, p domain.Params, actor string) (
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	version, err := s.store.SaveSettings(ctx, p, actor)
+	details, _ := json.Marshal(map[string]any{"from": s.params, "to": p})
+	version, err := s.store.SaveSettings(ctx, p, actor, &ports.Audit{
+		Action: "market.sim.params_changed", Target: "sim:" + s.cfg.Symbol, Actor: actor, Reason: "settings", Details: string(details),
+	})
 	if err != nil {
 		return 0, err
 	}

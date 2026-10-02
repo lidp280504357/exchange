@@ -2,13 +2,23 @@
 // design §5.1), on the internal network only: the gateway does not route
 // it; the admin console's service and the ops scripts call it.
 //
-//	GET  /internal/sim          the state: target and last price, settings, bots
-//	PUT  /internal/sim/params   new settings {"params": {...}, "actor": "..."}
-//	POST /internal/sim/bots     a bot {"user_id", "role", "label"}
+//	GET  /internal/sim                   the state: prices, settings, bots, open events
+//	PUT  /internal/sim/params            new settings {"params": {...}, "actor": "..."}
+//	POST /internal/sim/bots              a bot {"user_id", "role", "label"}
+//	GET  /internal/sim/events            the open events (?all=1: the latest, &limit=)
+//	POST /internal/sim/events            a price event (design §6.2)
+//	POST /internal/sim/events/{id}/end   ends an event early {"actor", "reason"}
+//	GET  /internal/sim/history           the target and last price every 10 s (?minutes=, a day at most)
+//	GET  /internal/sim/stream            the same, every second, as server-sent events
 package httpapi
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
@@ -16,6 +26,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/marketsim/application"
 	"github.com/lidp280504357/exchange/internal/marketsim/domain"
 	"github.com/lidp280504357/exchange/internal/marketsim/ports"
+	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/httpx"
 )
 
@@ -29,6 +40,11 @@ func (h *Handler) Routes(r chi.Router) {
 	r.Get("/internal/sim", h.status)
 	r.Put("/internal/sim/params", h.params)
 	r.Post("/internal/sim/bots", h.addBot)
+	r.Get("/internal/sim/events", h.events)
+	r.Post("/internal/sim/events", h.createEvent)
+	r.Post("/internal/sim/events/{id}/end", h.endEvent)
+	r.Get("/internal/sim/history", h.history)
+	r.Get("/internal/sim/stream", h.stream)
 }
 
 // StatusJSON is the simulation's state; prices are decimal strings, the
@@ -44,7 +60,56 @@ type StatusJSON struct {
 	Version         int64          `json:"version"`
 	Guards          map[string]int `json:"guards"`
 	Bots            []BotJSON      `json:"bots"`
+	Events          []EventJSON    `json:"events"`
 	At              *string        `json:"at"`
+}
+
+// EventJSON is a price event; prices are decimal strings.
+type EventJSON struct {
+	ID         string  `json:"id"`
+	Type       string  `json:"type"`
+	Size       float64 `json:"size"`
+	Price      *string `json:"price"`
+	Mu         float64 `json:"mu"`
+	Factor     float64 `json:"factor"`
+	DurationS  int     `json:"duration_seconds"`
+	HoldS      int     `json:"hold_seconds"`
+	StartsAt   string  `json:"starts_at"`
+	Status     string  `json:"status"`
+	CreatedBy  string  `json:"created_by"`
+	ApprovedBy string  `json:"approved_by"`
+	Reason     string  `json:"reason"`
+	CreatedAt  string  `json:"created_at"`
+	StartedAt  *string `json:"started_at"`
+	EndedAt    *string `json:"ended_at"`
+	FromPrice  *string `json:"from_price"`
+	EndedBy    string  `json:"ended_by"`
+}
+
+func eventJSON(e domain.Event) EventJSON {
+	j := EventJSON{
+		ID: e.ID, Type: string(e.Type), Size: e.Size, Mu: e.Mu, Factor: e.Factor, DurationS: int(e.Duration.Seconds()),
+		HoldS: int(e.Hold.Seconds()), StartsAt: httpx.FormatTime(e.StartsAt), Status: e.Status, CreatedBy: e.CreatedBy,
+		ApprovedBy: e.ApprovedBy, Reason: e.Reason, CreatedAt: httpx.FormatTime(e.CreatedAt), StartedAt: timeOrNil(e.StartedAt),
+		EndedAt: timeOrNil(e.EndedAt), EndedBy: e.EndedBy,
+	}
+	if e.Price.IsPositive() {
+		v := e.Price.String()
+		j.Price = &v
+	}
+	if e.FromP.IsPositive() {
+		v := e.FromP.Round(8).String()
+		j.FromPrice = &v
+	}
+	return j
+}
+
+func timeOrNil(t time.Time) *string {
+	if t.IsZero() {
+		return nil
+	}
+	v := httpx.FormatTime(t)
+	return &v
 }
 
 // BotJSON is one bot.
@@ -80,6 +145,10 @@ func (h *Handler) status(w http.ResponseWriter, _ *http.Request) {
 	}
 	for g, n := range st.Guards {
 		out.Guards[string(g)] = n
+	}
+	out.Events = []EventJSON{}
+	for _, e := range st.Events {
+		out.Events = append(out.Events, eventJSON(e))
 	}
 	for _, b := range st.Bots {
 		j := BotJSON{
@@ -127,4 +196,138 @@ func (h *Handler) addBot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	list, err := h.Sim.Events(r.Context(), r.URL.Query().Get("all") == "", limit)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out := make([]EventJSON, 0, len(list))
+	for _, e := range list {
+		out = append(out, eventJSON(e))
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+}
+
+func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Type       string  `json:"type"`
+		Size       float64 `json:"size"`
+		Price      string  `json:"price"`
+		Mu         float64 `json:"mu"`
+		Factor     float64 `json:"factor"`
+		DurationS  int     `json:"duration_seconds"`
+		HoldS      int     `json:"hold_seconds"`
+		StartsAt   string  `json:"starts_at"`
+		Actor      string  `json:"actor"`
+		ApprovedBy string  `json:"approved_by"`
+		Reason     string  `json:"reason"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	e := domain.Event{
+		Type: domain.EventType(body.Type), Size: body.Size, Mu: body.Mu, Factor: body.Factor,
+		Duration: time.Duration(body.DurationS) * time.Second, Hold: time.Duration(body.HoldS) * time.Second,
+		CreatedBy: body.Actor, ApprovedBy: body.ApprovedBy, Reason: body.Reason,
+	}
+	if body.Price != "" {
+		p, err := decimal.NewFromString(body.Price)
+		if err != nil {
+			httpx.WriteError(w, r, apperr.Invalid("price is a decimal"))
+			return
+		}
+		e.Price = p
+	}
+	if body.StartsAt != "" {
+		t, err := time.Parse(time.RFC3339, body.StartsAt)
+		if err != nil {
+			httpx.WriteError(w, r, apperr.Invalid("starts_at is an RFC 3339 time"))
+			return
+		}
+		e.StartsAt = t
+	}
+	out, err := h.Sim.CreateEvent(r.Context(), e)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusCreated, eventJSON(out))
+}
+
+func (h *Handler) endEvent(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Actor  string `json:"actor"`
+		Reason string `json:"reason"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out, err := h.Sim.EndEvent(r.Context(), chi.URLParam(r, "id"), body.Actor, body.Reason)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, eventJSON(out))
+}
+
+// SampleJSON is the target and the last price at a time.
+type SampleJSON struct {
+	At          string  `json:"at"`
+	TargetPrice string  `json:"target_price"`
+	LastPrice   *string `json:"last_price"`
+}
+
+func sampleJSON(s application.Sample) SampleJSON {
+	j := SampleJSON{At: httpx.FormatTime(s.At), TargetPrice: decimal.NewFromFloat(s.Target).Round(8).String()}
+	if s.Last.IsPositive() {
+		v := s.Last.String()
+		j.LastPrice = &v
+	}
+	return j
+}
+
+func (h *Handler) history(w http.ResponseWriter, r *http.Request) {
+	minutes, _ := strconv.Atoi(r.URL.Query().Get("minutes"))
+	if minutes <= 0 || minutes > 24*60 {
+		minutes = 24 * 60
+	}
+	list := h.Sim.History(time.Now().Add(-time.Duration(minutes) * time.Minute))
+	out := make([]SampleJSON, 0, len(list))
+	for _, s := range list {
+		out = append(out, sampleJSON(s))
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
+}
+
+// stream sends the target and the last price every second until the
+// client leaves.
+func (h *Handler) stream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		httpx.WriteError(w, r, apperr.Internal(errors.New("streaming is not supported")))
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	for {
+		st := h.Sim.Status()
+		raw, _ := json.Marshal(sampleJSON(application.Sample{At: time.Now(), Target: st.Target, Last: st.Last}))
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", raw); err != nil {
+			return
+		}
+		flusher.Flush()
+		select {
+		case <-r.Context().Done():
+			return
+		case <-tick.C:
+		}
+	}
 }

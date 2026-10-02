@@ -7,6 +7,7 @@ package ports
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -53,6 +54,18 @@ type Bot struct {
 	Enabled bool
 }
 
+// Audit is an operator's action, for the audit trail (audit.events).
+type Audit struct {
+	Action, Target, Actor, Reason string
+	// Details is a JSON object.
+	Details string
+}
+
+// Pairs changes a pair's status (instrument-service).
+type Pairs interface {
+	SetPairStatus(ctx context.Context, symbol, to, actor, reason string) error
+}
+
 // Store keeps the bots, the settings and the model's state.
 type Store interface {
 	// Bots lists the bot accounts by label.
@@ -62,8 +75,17 @@ type Store interface {
 	// Settings returns the settings and their version; false when none
 	// were saved yet.
 	Settings(ctx context.Context) (domain.Params, int64, bool, error)
-	// SaveSettings stores new settings for actor and returns their version.
-	SaveSettings(ctx context.Context, p domain.Params, actor string) (int64, error)
+	// SaveSettings stores new settings for actor and returns their
+	// version, with the audit record when there is one.
+	SaveSettings(ctx context.Context, p domain.Params, actor string, audit *Audit) (int64, error)
+	// Events returns the scheduled and running events (open), or the
+	// latest limit events of any status.
+	Events(ctx context.Context, open bool, limit int) ([]domain.Event, error)
+	// EventsSince returns the events created since t.
+	EventsSince(ctx context.Context, t time.Time) ([]domain.Event, error)
+	// SaveEvent stores an event (new or changed), with the audit record
+	// when there is one.
+	SaveEvent(ctx context.Context, e domain.Event, audit *Audit) error
 	// State returns the model's saved state; false when there is none.
 	State(ctx context.Context) (domain.State, bool, error)
 	// SaveState stores the model's state.

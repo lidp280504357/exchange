@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 
 	"github.com/lidp280504357/exchange/internal/marketsim/adapters/postgres"
 	"github.com/lidp280504357/exchange/internal/marketsim/domain"
@@ -23,7 +24,7 @@ func TestBotsSettingsAndState(t *testing.T) {
 	if err := migrate.Up(ctx, db, migrations.MarketSim(), slog.New(slog.DiscardHandler)); err != nil {
 		t.Fatal(err)
 	}
-	store := postgres.NewStore(db)
+	store := postgres.NewStore(db, nil)
 
 	// Bots: once per user, a label belongs to one.
 	a, b := uuid.NewString(), uuid.NewString()
@@ -49,11 +50,11 @@ func TestBotsSettingsAndState(t *testing.T) {
 		t.Fatalf("settings before any: %v %v", ok, err)
 	}
 	p := domain.DefaultParams()
-	if v, err := store.SaveSettings(ctx, p, "market-sim"); err != nil || v != 1 {
+	if v, err := store.SaveSettings(ctx, p, "market-sim", nil); err != nil || v != 1 {
 		t.Fatalf("first settings: %d %v", v, err)
 	}
 	p.Levels = 5
-	if v, err := store.SaveSettings(ctx, p, "ops"); err != nil || v != 2 {
+	if v, err := store.SaveSettings(ctx, p, "ops", nil); err != nil || v != 2 {
 		t.Fatalf("second settings: %d %v", v, err)
 	}
 	got, v, ok, err := store.Settings(ctx)
@@ -64,8 +65,8 @@ func TestBotsSettingsAndState(t *testing.T) {
 	// State: the random source and the minute come back as saved.
 	m := domain.NewModel(domain.DefaultParams(), domain.State{}, 9)
 	at := time.Date(2026, 10, 2, 8, 0, 0, 0, time.UTC)
-	m.Step(at, 60000, 3000)
-	m.Step(at.Add(time.Second), 60100, 3001)
+	m.Step(at, 60000, 3000, domain.Shape{})
+	m.Step(at.Add(time.Second), 60100, 3001, domain.Shape{})
 	if err := store.SaveState(ctx, m.Snapshot()); err != nil {
 		t.Fatal(err)
 	}
@@ -74,8 +75,42 @@ func TestBotsSettingsAndState(t *testing.T) {
 		t.Fatalf("state %+v %v %v", st, ok, err)
 	}
 	next := domain.NewModel(domain.DefaultParams(), st, 1)
-	want, _ := m.Step(at.Add(2*time.Second), 60100, 3001)
-	if got, _ := next.Step(at.Add(2*time.Second), 60100, 3001); got != want {
+	want, _ := m.Step(at.Add(2*time.Second), 60100, 3001, domain.Shape{})
+	if got, _ := next.Step(at.Add(2*time.Second), 60100, 3001, domain.Shape{}); got != want {
 		t.Fatalf("restored: %v, want %v", got, want)
+	}
+
+	// Events: created, open, started and ended, recent.
+	e := domain.Event{
+		ID: uuid.NewString(), Type: domain.EventTarget, Price: decimal.RequireFromString("1.2345"), Duration: time.Minute,
+		Hold: 30 * time.Second, StartsAt: at, Status: domain.EventScheduled, CreatedBy: "ops", ApprovedBy: "ops2", Reason: "a test",
+		CreatedAt: at,
+	}
+	if err := store.SaveEvent(ctx, e, nil); err != nil {
+		t.Fatal(err)
+	}
+	open, err := store.Events(ctx, true, 0)
+	if err != nil || len(open) != 1 || !open[0].Price.Equal(e.Price) || open[0].Hold != e.Hold || open[0].ApprovedBy != "ops2" ||
+		!open[0].StartedAt.IsZero() {
+		t.Fatalf("open %+v %v", open, err)
+	}
+	e.Status, e.StartedAt, e.FromLogE, e.FromP = domain.EventRunning, at.Add(time.Second), 0.05, decimal.RequireFromString("0.99876543")
+	if err := store.SaveEvent(ctx, e, nil); err != nil {
+		t.Fatal(err)
+	}
+	e.Status, e.EndedAt, e.EndedBy = domain.EventDone, at.Add(time.Minute), "ops"
+	if err := store.SaveEvent(ctx, e, nil); err != nil {
+		t.Fatal(err)
+	}
+	if open, err := store.Events(ctx, true, 0); err != nil || len(open) != 0 {
+		t.Fatalf("open after it ended: %+v %v", open, err)
+	}
+	all, err := store.Events(ctx, false, 10)
+	if err != nil || len(all) != 1 || all[0].Status != domain.EventDone || all[0].FromLogE != 0.05 || all[0].FromP.String() != "0.99876543" ||
+		all[0].EndedBy != "ops" || !all[0].EndedAt.Equal(e.EndedAt) {
+		t.Fatalf("latest %+v %v", all, err)
+	}
+	if since, err := store.EventsSince(ctx, at.Add(-time.Hour)); err != nil || len(since) != 1 {
+		t.Fatalf("since %+v %v", since, err)
 	}
 }

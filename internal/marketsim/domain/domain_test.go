@@ -26,46 +26,46 @@ func quiet() Params {
 
 func TestTheTargetFollowsTheReturnsOfBTCAndETH(t *testing.T) {
 	m := NewModel(quiet(), State{}, 1)
-	if p, _ := m.Step(t0, 60000, 3000); math.Abs(p-1) > 1e-12 {
+	if p, _ := m.Step(t0, 60000, 3000, Shape{}); math.Abs(p-1) > 1e-12 {
 		t.Fatalf("anchored at %v", p)
 	}
 	// Both up 1%: ASTRA up about 1% (beta 1, half each).
-	p, g := m.Step(t0.Add(250*time.Millisecond), 60600, 3030)
+	p, g := m.Step(t0.Add(250*time.Millisecond), 60600, 3030, Shape{})
 	if g != GuardNone || math.Abs(p-1.01) > 1e-9 {
 		t.Fatalf("both up 1%%: %v %q", p, g)
 	}
 	// BTC up 2%, ETH flat: about +1%, as a weighted log return.
-	p, _ = m.Step(t0.Add(500*time.Millisecond), 61200, 3000)
+	p, _ = m.Step(t0.Add(500*time.Millisecond), 61200, 3000, Shape{})
 	if want := math.Exp(0.5 * math.Log(1.02)); math.Abs(p-want) > 1e-9 {
 		t.Fatalf("BTC up 2%%: %v, want %v", p, want)
 	}
 	// Prices that are not fresh keep the factor.
-	if q, _ := m.Step(t0.Add(750*time.Millisecond), 0, 0); q != p {
+	if q, _ := m.Step(t0.Add(750*time.Millisecond), 0, 0, Shape{}); q != p {
 		t.Fatalf("stale prices moved the target: %v -> %v", p, q)
 	}
 	// Beta 0 does not follow.
 	flat := quiet()
 	flat.Beta = 0
 	m = NewModel(flat, State{}, 1)
-	m.Step(t0, 60000, 3000)
-	if p, _ := m.Step(t0.Add(time.Second), 70000, 3500); p != 1 {
+	m.Step(t0, 60000, 3000, Shape{})
+	if p, _ := m.Step(t0.Add(time.Second), 70000, 3500, Shape{}); p != 1 {
 		t.Fatalf("beta 0: %v", p)
 	}
 }
 
 func TestTheMinuteGuardBoundsTheSpeedNotTheLevel(t *testing.T) {
 	m := NewModel(quiet(), State{}, 1)
-	m.Step(t0, 60000, 3000)
+	m.Step(t0, 60000, 3000, Shape{})
 	// BTC and ETH jump 10%: the target moves 3% in the minute, then
 	// catches up a minute at a time.
-	p, g := m.Step(t0.Add(time.Second), 66000, 3300)
+	p, g := m.Step(t0.Add(time.Second), 66000, 3300, Shape{})
 	if g != GuardMinute || math.Abs(p-1.03) > 1e-9 {
 		t.Fatalf("the jump: %v %q", p, g)
 	}
 	now := t0.Add(time.Second)
 	for i := 0; i < 5; i++ {
 		now = now.Add(61 * time.Second)
-		p, _ = m.Step(now, 66000, 3300)
+		p, _ = m.Step(now, 66000, 3300, Shape{})
 	}
 	if math.Abs(p-1.1) > 1e-9 {
 		t.Fatalf("five minutes on: %v, want 1.1", p)
@@ -76,11 +76,11 @@ func TestTheFloorAndCeilingHold(t *testing.T) {
 	p := quiet()
 	p.P0, p.Floor, p.Ceiling, p.MaxMinuteMove = 1, 0.99, 1.005, 0.5
 	m := NewModel(p, State{}, 1)
-	m.Step(t0, 60000, 3000)
-	if got, g := m.Step(t0.Add(time.Second), 66000, 3300); got != 1.005 || g != GuardCeil {
+	m.Step(t0, 60000, 3000, Shape{})
+	if got, g := m.Step(t0.Add(time.Second), 66000, 3300, Shape{}); got != 1.005 || g != GuardCeil {
 		t.Fatalf("ceiling: %v %q", got, g)
 	}
-	if got, g := m.Step(t0.Add(2*time.Second), 54000, 2700); got != 0.99 || g != GuardFloor {
+	if got, g := m.Step(t0.Add(2*time.Second), 54000, 2700, Shape{}); got != 0.99 || g != GuardFloor {
 		t.Fatalf("floor: %v %q", got, g)
 	}
 }
@@ -90,7 +90,7 @@ func TestThePathRepeatsFromItsSeedOrItsState(t *testing.T) {
 	run := func(m *Model, from time.Time, n int) []float64 {
 		var out []float64
 		for i := range n {
-			p, _ := m.Step(from.Add(time.Duration(i+1)*250*time.Millisecond), 60000, 3000)
+			p, _ := m.Step(from.Add(time.Duration(i+1)*250*time.Millisecond), 60000, 3000, Shape{})
 			out = append(out, p)
 		}
 		return out
@@ -119,13 +119,13 @@ func TestThePathRepeatsFromItsSeedOrItsState(t *testing.T) {
 
 func TestReanchor(t *testing.T) {
 	m := NewModel(quiet(), State{}, 1)
-	m.Step(t0, 60000, 3000)
-	m.Step(t0.Add(time.Second), 60600, 3030)
+	m.Step(t0, 60000, 3000, Shape{})
+	m.Step(t0.Add(time.Second), 60600, 3030, Shape{})
 	m.Reanchor(60600, 3030)
 	if math.Abs(m.Params.P0-1.01) > 1e-9 {
 		t.Fatalf("P0 %v", m.Params.P0)
 	}
-	if p, _ := m.Step(t0.Add(2*time.Second), 60600, 3030); math.Abs(p-1.01) > 1e-9 {
+	if p, _ := m.Step(t0.Add(2*time.Second), 60600, 3030, Shape{}); math.Abs(p-1.01) > 1e-9 {
 		t.Fatalf("after reanchoring: %v", p)
 	}
 }
@@ -261,5 +261,106 @@ func TestParamsValidate(t *testing.T) {
 	p.Sigma = math.NaN()
 	if err := p.Validate(); err == nil {
 		t.Fatal("NaN passed")
+	}
+}
+
+func started(t EventType, from string) *Event {
+	return &Event{Type: t, Status: EventRunning, StartedAt: t0, FromP: d(from), CreatedBy: "ops", Reason: "test"}
+}
+
+func TestEventShapes(t *testing.T) {
+	// An instant jump: the factor at once, and it ends.
+	jump := started(EventJump, "1")
+	jump.Size = 0.1
+	sh, ended := ShapeOf([]*Event{jump}, t0)
+	if sh.LogE == nil || math.Abs(*sh.LogE-math.Log(1.1)) > 1e-12 || !sh.Moving || len(ended) != 1 {
+		t.Fatalf("instant jump: %+v %v", sh, ended)
+	}
+	// Over a minute: half of it at 30 seconds.
+	jump.Duration = time.Minute
+	sh, ended = ShapeOf([]*Event{jump}, t0.Add(30*time.Second))
+	if math.Abs(*sh.LogE-0.5*math.Log(1.1)) > 1e-12 || len(ended) != 0 {
+		t.Fatalf("half way: %v %v", *sh.LogE, ended)
+	}
+	// A target: an exponential path, then held, then done.
+	target := started(EventTarget, "1")
+	target.Price, target.Duration, target.Hold = d("1.21"), time.Minute, 30*time.Second
+	if sh, _ = ShapeOf([]*Event{target}, t0.Add(30*time.Second)); math.Abs(sh.Pin-1.1) > 1e-12 {
+		t.Fatalf("half way to 1.21: %v", sh.Pin)
+	}
+	if sh, ended = ShapeOf([]*Event{target}, t0.Add(80*time.Second)); sh.Pin != 1.21 || len(ended) != 0 {
+		t.Fatalf("held: %v %v", sh.Pin, ended)
+	}
+	if _, ended = ShapeOf([]*Event{target}, t0.Add(90*time.Second)); len(ended) != 1 {
+		t.Fatal("the hold did not end")
+	}
+	// A pause holds the price it started at; a trend and a volatility
+	// change the model's own; a halt halts until ended.
+	pause := started(EventPause, "0.97")
+	trend := started(EventTrend, "1")
+	trend.Mu = 0.2
+	vol := started(EventVolatility, "1")
+	vol.Factor, vol.Duration = 3, time.Minute
+	halt := started(EventHalt, "1")
+	sh, ended = ShapeOf([]*Event{pause, trend, vol, halt}, t0.Add(2*time.Minute))
+	if sh.Pin != 0.97 || *sh.Mu != 0.2 || sh.Vol != 3 || !sh.Halted || len(ended) != 1 || ended[0] != vol {
+		t.Fatalf("shape %+v ended %v", sh, ended)
+	}
+}
+
+func TestOneOperatorsLimits(t *testing.T) {
+	jump := func(size float64) Event { return Event{Type: EventJump, Size: size} }
+	if NeedsApproval(jump(0.3), 1, nil) || !NeedsApproval(jump(-0.31), 1, nil) {
+		t.Fatal("a single jump")
+	}
+	target := Event{Type: EventTarget, Price: d("1.4")}
+	if !NeedsApproval(target, 1, nil) {
+		t.Fatal("a target 40% away")
+	}
+	recent := []Event{jump(0.2), {Type: EventTarget, Price: d("0.9"), FromP: d("1"), Status: EventDone}, jump(0.3)}
+	recent[2].Status = EventCanceled
+	if NeedsApproval(jump(0.19), 1, recent) || !NeedsApproval(jump(0.21), 1, recent) {
+		t.Fatal("the hour's moves: 0.2 and 0.1, a canceled one left out")
+	}
+}
+
+func TestEventValidate(t *testing.T) {
+	ok := Event{Type: EventJump, Size: 0.1, CreatedBy: "ops", Reason: "test"}
+	if err := ok.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []Event{
+		{Type: EventJump, Size: 0, CreatedBy: "ops", Reason: "test"},
+		{Type: EventJump, Size: 0.1, Duration: 11 * time.Minute, CreatedBy: "ops", Reason: "test"},
+		{Type: EventTarget, CreatedBy: "ops", Reason: "test"},
+		{Type: EventVolatility, Factor: 0, CreatedBy: "ops", Reason: "test"},
+		{Type: "BOOM", CreatedBy: "ops", Reason: "test"},
+		{Type: EventPause, Reason: "test"},
+	} {
+		if err := e.Validate(); err == nil {
+			t.Errorf("%+v passed", e)
+		}
+	}
+}
+
+// An event moves the price past the minute guard, which then starts again
+// from the event's price instead of pulling it back.
+func TestAnEventPassesTheMinuteGuard(t *testing.T) {
+	m := NewModel(quiet(), State{}, 1)
+	m.Step(t0, 60000, 3000, Shape{})
+	logE := math.Log(1.2)
+	if p, g := m.Step(t0.Add(time.Second), 60000, 3000, Shape{LogE: &logE, Moving: true}); math.Abs(p-1.2) > 1e-9 || g != GuardNone {
+		t.Fatalf("the jump: %v %q", p, g)
+	}
+	if p, g := m.Step(t0.Add(2*time.Second), 60000, 3000, Shape{}); math.Abs(p-1.2) > 1e-9 || g != GuardNone {
+		t.Fatalf("after the jump: %v %q", p, g)
+	}
+	// A pin, and the model goes on from it.
+	if p, _ := m.Step(t0.Add(3*time.Second), 60000, 3000, Shape{Pin: 0.8, Moving: true}); p != 0.8 {
+		t.Fatalf("pinned: %v", p)
+	}
+	m.Hold(0.8)
+	if p, _ := m.Step(t0.Add(4*time.Second), 60000, 3000, Shape{}); math.Abs(p-0.8) > 1e-9 {
+		t.Fatalf("after the pin: %v", p)
 	}
 }
