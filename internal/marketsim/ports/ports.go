@@ -83,8 +83,8 @@ type Prices interface {
 	// Report gives the simulated market's target of symbol, which stands
 	// in for its reference while its book has no middle.
 	Report(ctx context.Context, symbol string, price decimal.Decimal) error
-	// Mark returns a contract's mark price (0: none yet).
-	Mark(ctx context.Context, symbol string) (decimal.Decimal, error)
+	// Mark returns a contract's mark and index prices (0: none yet).
+	Mark(ctx context.Context, symbol string) (mark, index decimal.Decimal, err error)
 }
 
 // Bot is one of the bot accounts.

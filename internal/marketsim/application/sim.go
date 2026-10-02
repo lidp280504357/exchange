@@ -117,7 +117,8 @@ type Sim struct {
 
 	perpPair      domain.Pair
 	perpPairAt    time.Time
-	perpMark      float64 // the contract's mark price as last read
+	perpMark      float64 // the contract's mark and index prices as last read
+	perpIndex     float64
 	perpMarkAt    time.Time
 	perpRunning   bool
 	perpTurn      int
@@ -288,6 +289,10 @@ func (s *Sim) Round(ctx context.Context) {
 		}
 	}
 	s.refreshPair(ctx, now)
+	// The report is also the heartbeat market-data-service watches (a pair
+	// whose simulated market went silent halts, ASTRA design §9): it goes
+	// out whether the bots trade or not.
+	s.report(ctx, now, s.model.State.P)
 	if !s.flags.Enabled(flags.KeySimEnabled, flags.Subject{Symbol: s.cfg.Symbol}) || !s.pair.Trading {
 		if s.running {
 			s.stop(ctx)
@@ -321,7 +326,6 @@ func (s *Sim) Round(ctx context.Context) {
 	}
 	s.sample(now, p)
 	s.refreshAnchor(ctx, now)
-	s.report(ctx, now, p)
 	s.watch(ctx, now, sh)
 	if sh.Halted {
 		if s.perpRunning {

@@ -43,12 +43,32 @@ func (r repos) Trades() ports.TradeRepo   { return trades(r) }
 
 func (r repos) References() ports.ReferenceRepo { return references(r) }
 
-func (r repos) Halts() ports.HaltRepo { return halts(r) }
+func (r repos) Halts() ports.HaltRepo    { return halts{q: r.q, sql: feedHalts} }
+func (r repos) SimHalts() ports.HaltRepo { return halts{q: r.q, sql: simHalts} }
 
-type halts repos
+// haltSQL are the queries of one table of halts.
+type haltSQL struct{ list, add, remove string }
+
+var (
+	feedHalts = haltSQL{
+		list:   `SELECT symbol, halted_at FROM feed_halts ORDER BY symbol`,
+		add:    `INSERT INTO feed_halts (symbol, halted_at) VALUES ($1, $2) ON CONFLICT (symbol) DO NOTHING`,
+		remove: `DELETE FROM feed_halts WHERE symbol = $1`,
+	}
+	simHalts = haltSQL{
+		list:   `SELECT symbol, halted_at FROM sim_halts ORDER BY symbol`,
+		add:    `INSERT INTO sim_halts (symbol, halted_at) VALUES ($1, $2) ON CONFLICT (symbol) DO NOTHING`,
+		remove: `DELETE FROM sim_halts WHERE symbol = $1`,
+	}
+)
+
+type halts struct {
+	q   pg.Querier
+	sql haltSQL
+}
 
 func (r halts) List(ctx context.Context) ([]ports.Halt, error) {
-	rows, err := r.q.Query(ctx, `SELECT symbol, halted_at FROM feed_halts ORDER BY symbol`)
+	rows, err := r.q.Query(ctx, r.sql.list)
 	if err != nil {
 		return nil, fmt.Errorf("list halts: %w", err)
 	}
@@ -65,14 +85,14 @@ func (r halts) List(ctx context.Context) ([]ports.Halt, error) {
 }
 
 func (r halts) Add(ctx context.Context, symbol string, at time.Time) error {
-	if _, err := r.q.Exec(ctx, `INSERT INTO feed_halts (symbol, halted_at) VALUES ($1, $2) ON CONFLICT (symbol) DO NOTHING`, symbol, at); err != nil {
+	if _, err := r.q.Exec(ctx, r.sql.add, symbol, at); err != nil {
 		return fmt.Errorf("add halt: %w", err)
 	}
 	return nil
 }
 
 func (r halts) Remove(ctx context.Context, symbol string) error {
-	if _, err := r.q.Exec(ctx, `DELETE FROM feed_halts WHERE symbol = $1`, symbol); err != nil {
+	if _, err := r.q.Exec(ctx, r.sql.remove, symbol); err != nil {
 		return fmt.Errorf("remove halt: %w", err)
 	}
 	return nil

@@ -342,3 +342,19 @@ tests:
             exp_annotations:
               summary: "the platform coin's market was locked (three minutes without a trade, or every level refused for the price band); market-sim rebased its price at the band's anchor"
               runbook: docs/runbook/market-sim.md
+
+  - interval: 1m
+    input_series:
+      - series: 'market_sim_heartbeat_age_seconds{job="market-data-service", instance="d", symbol="ASTRA-USDT"}'
+        values: '5 5 5 70 130'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: MarketSimHeartbeatLost
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: MarketSimHeartbeatLost
+        exp_alerts:
+          - exp_labels: {severity: critical, symbol: ASTRA-USDT}
+            exp_annotations:
+              summary: "the simulated market of ASTRA-USDT has been silent for over a minute: market-sim is down or stuck; with sim.halt_on_loss the pair and its perpetual are halted until it is back"
+              runbook: docs/runbook/market-sim.md

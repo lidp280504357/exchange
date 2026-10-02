@@ -32,6 +32,10 @@ func (c contractList) SetPairStatus(context.Context, string, string, string) (st
 	return "", ErrUnknownSymbol
 }
 
+func (c contractList) SetContractStatus(context.Context, string, string, string) (string, error) {
+	return "", ErrUnknownSymbol
+}
+
 type fakeSources map[string][]domain.SourcePrice
 
 func (f fakeSources) Prices(symbol string) []domain.SourcePrice {

@@ -163,6 +163,7 @@ type fakePrices struct {
 	lastAt         time.Time
 	frozen         bool // market orders do not trade
 	ref, mark      decimal.Decimal
+	index          decimal.Decimal
 	reported       []decimal.Decimal
 	now            func() time.Time
 }
@@ -196,10 +197,10 @@ func (p *fakePrices) Report(_ context.Context, _ string, price decimal.Decimal) 
 	return nil
 }
 
-func (p *fakePrices) Mark(context.Context, string) (decimal.Decimal, error) {
+func (p *fakePrices) Mark(context.Context, string) (decimal.Decimal, decimal.Decimal, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.mark, nil
+	return p.mark, p.index, nil
 }
 
 func (p *fakePrices) lastPrice() decimal.Decimal {
@@ -1160,7 +1161,8 @@ func TestTheTargetIsReportedAndTheAnchorFallsBack(t *testing.T) {
 	}
 }
 
-// The perpetual's makers quote around its mark price, within its band.
+// The perpetual's makers quote around its mark price pulled halfway to
+// its index (a premium decays), within its band.
 func TestThePerpetualQuotesAroundItsMark(t *testing.T) {
 	p := domain.DefaultParams()
 	p.DailyVolume, p.PerpDailyVolume = 0, 0
@@ -1169,7 +1171,7 @@ func TestThePerpetualQuotesAroundItsMark(t *testing.T) {
 	fd.contract.Band = 0.05
 	fd.mu.Unlock()
 	r.prices.mu.Lock()
-	r.prices.mark = d("1.04")
+	r.prices.mark, r.prices.index = d("1.05"), d("1.03")
 	r.prices.mu.Unlock()
 	r.rounds(4 * 20)
 	orders := fd.orders("m1")
@@ -1178,8 +1180,8 @@ func TestThePerpetualQuotesAroundItsMark(t *testing.T) {
 	}
 	for _, o := range orders {
 		if (o.Side == domain.Buy && o.Price.GreaterThanOrEqual(d("1.04"))) || (o.Side == domain.Sell && o.Price.LessThanOrEqual(d("1.04"))) ||
-			o.Price.Sub(d("1.04")).Abs().GreaterThan(d("0.052")) {
-			t.Fatalf("%s at %s around a mark of 1.04", o.Side, o.Price)
+			o.Price.Sub(d("1.05")).Abs().GreaterThan(d("0.0525")) {
+			t.Fatalf("%s at %s around 1.04, between a mark of 1.05 and an index of 1.03", o.Side, o.Price)
 		}
 	}
 }

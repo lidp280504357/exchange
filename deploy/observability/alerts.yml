@@ -181,6 +181,13 @@ groups:
           summary: "the simulated market has had no fresh BTC and ETH reference prices for 5 minutes: the platform coin's price no longer follows the market"
           runbook: docs/runbook/market-sim.md
 
+      - alert: MarketSimHeartbeatLost
+        expr: max by (symbol) (market_sim_heartbeat_age_seconds) > 60
+        labels: {severity: critical}
+        annotations:
+          summary: "the simulated market of {{ $labels.symbol }} has been silent for over a minute: market-sim is down or stuck; with sim.halt_on_loss the pair and its perpetual are halted until it is back"
+          runbook: docs/runbook/market-sim.md
+
       - alert: MarketSimBandDeadlock
         expr: sum by (job) (increase(market_sim_band_deadlocks_total[15m])) > 0
         labels: {severity: warning}

@@ -187,3 +187,16 @@ func (c *Client) SetPairStatus(ctx context.Context, symbol, to, reason string) (
 	}
 	return resp.GetFromStatus(), nil
 }
+
+// SetContractStatus moves a contract for market-data-service and drops
+// the cache, like SetPairStatus.
+func (c *Client) SetContractStatus(ctx context.Context, symbol, to, reason string) (string, error) {
+	resp, err := c.c.SetContractStatus(ctx, &instrumentv1.SetContractStatusRequest{Symbol: symbol, ToStatus: to, Reason: reason, Actor: Actor})
+	c.mu.Lock()
+	c.at = time.Time{}
+	c.mu.Unlock()
+	if err != nil {
+		return "", err
+	}
+	return resp.GetFromStatus(), nil
+}

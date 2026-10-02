@@ -27,7 +27,10 @@ type Repos interface {
 	Trades() TradeRepo
 	References() ReferenceRepo
 	Funding() FundingRepo
+	// Halts are the pairs halted for the reference feed's loss, SimHalts
+	// those halted for their simulated market's.
 	Halts() HaltRepo
+	SimHalts() HaltRepo
 	// Emit queues an event on the outbox (business events that must not
 	// be lost, such as risk.events' SystemDegraded; derived market data
 	// goes out directly).
@@ -197,6 +200,9 @@ type Instruments interface {
 	// market-data-service itself (a halt on reference feed loss) and
 	// returns the previous status.
 	SetPairStatus(ctx context.Context, symbol, to, reason string) (string, error)
+	// SetContractStatus does the same for a contract (the platform coin's
+	// perpetual halts with its index pair).
+	SetContractStatus(ctx context.Context, symbol, to, reason string) (string, error)
 }
 
 // Contract is what the mark price and funding need of a perpetual

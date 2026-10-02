@@ -52,6 +52,10 @@ const (
 	KeySimEnabled = "sim.enabled"
 	KeySimEvents  = "sim.events"
 	KeySimPerp    = "sim.perp"
+	// KeySimHaltOnLoss halts a pair whose simulated market went silent
+	// (market-sim's heartbeat lost for a minute) and resumes it when the
+	// heartbeat is back (ASTRA design §9).
+	KeySimHaltOnLoss = "sim.halt_on_loss"
 )
 
 // Known describes the known flags.
@@ -76,6 +80,7 @@ var Known = map[string]string{
 	KeySimEnabled:       "The simulated market of the platform coin (market-sim): its bots quote and trade ASTRA-USDT around the model's price; off cancels their orders",
 	KeySimEvents:        "Operators' price events in the simulated market (jumps, targets, trends, pauses)",
 	KeySimPerp:          "The simulated market's bots also make the market on the platform coin's perpetual",
+	KeySimHaltOnLoss:    "Halt a pair (and its perpetual) a minute after its simulated market's heartbeat stopped; resume when it is back",
 }
 
 // List allows or denies values of one dimension. An empty Allow allows

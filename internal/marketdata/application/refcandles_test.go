@@ -115,6 +115,20 @@ func (l listing) SetPairStatus(_ context.Context, symbol, to, _ string) (string,
 	return "", ErrUnknownSymbol
 }
 
+func (l listing) SetContractStatus(_ context.Context, symbol, to, _ string) (string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i, c := range l.contracts {
+		if c.Symbol == symbol {
+			from := c.Status
+			l.contracts[i].Status = to
+			*l.moves = append(*l.moves, symbol+" "+from+"->"+to)
+			return from, nil
+		}
+	}
+	return "", ErrUnknownSymbol
+}
+
 func (l listing) setStatus(symbol, status string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

@@ -28,6 +28,7 @@ type memStore struct {
 	references map[string]domain.Candle
 	funding    map[string]ports.FundingPeriod
 	halts      map[string]ports.Halt
+	simHalts   map[string]ports.Halt
 	mu         sync.Mutex // the reference feed writes from its own goroutine
 	down       bool
 	// outbox holds the emitted events; emitFails makes Emit fail.
@@ -38,7 +39,7 @@ type memStore struct {
 func newMemStore() *memStore {
 	return &memStore{
 		symbols: map[string]ports.SymbolState{}, candles: map[string]domain.Candle{}, references: map[string]domain.Candle{},
-		funding: map[string]ports.FundingPeriod{}, halts: map[string]ports.Halt{},
+		funding: map[string]ports.FundingPeriod{}, halts: map[string]ports.Halt{}, simHalts: map[string]ports.Halt{},
 	}
 }
 
@@ -61,15 +62,19 @@ func (r memRepos) References() ports.ReferenceRepo { return memReferences(r) }
 
 func (r memRepos) Funding() ports.FundingRepo { return memFunding(r) }
 
-func (r memRepos) Halts() ports.HaltRepo { return memHalts(r) }
+func (r memRepos) Halts() ports.HaltRepo    { return memHalts{s: r.s, m: r.s.halts} }
+func (r memRepos) SimHalts() ports.HaltRepo { return memHalts{s: r.s, m: r.s.simHalts} }
 
-type memHalts memRepos
+type memHalts struct {
+	s *memStore
+	m map[string]ports.Halt
+}
 
 func (r memHalts) List(context.Context) ([]ports.Halt, error) {
 	r.s.mu.Lock()
 	defer r.s.mu.Unlock()
-	out := make([]ports.Halt, 0, len(r.s.halts))
-	for _, h := range r.s.halts {
+	out := make([]ports.Halt, 0, len(r.m))
+	for _, h := range r.m {
 		out = append(out, h)
 	}
 	slices.SortFunc(out, func(a, b ports.Halt) int { return strings.Compare(a.Symbol, b.Symbol) })
@@ -79,8 +84,8 @@ func (r memHalts) List(context.Context) ([]ports.Halt, error) {
 func (r memHalts) Add(_ context.Context, symbol string, at time.Time) error {
 	r.s.mu.Lock()
 	defer r.s.mu.Unlock()
-	if _, ok := r.s.halts[symbol]; !ok {
-		r.s.halts[symbol] = ports.Halt{Symbol: symbol, HaltedAt: at}
+	if _, ok := r.m[symbol]; !ok {
+		r.m[symbol] = ports.Halt{Symbol: symbol, HaltedAt: at}
 	}
 	return nil
 }
@@ -88,7 +93,7 @@ func (r memHalts) Add(_ context.Context, symbol string, at time.Time) error {
 func (r memHalts) Remove(_ context.Context, symbol string) error {
 	r.s.mu.Lock()
 	defer r.s.mu.Unlock()
-	delete(r.s.halts, symbol)
+	delete(r.m, symbol)
 	return nil
 }
 
@@ -307,6 +312,10 @@ func (p pairs) Pairs(context.Context) ([]ports.Pair, error) {
 func (p pairs) Ranks(context.Context) (map[string]int32, error) { return map[string]int32{}, nil }
 
 func (p pairs) SetPairStatus(context.Context, string, string, string) (string, error) {
+	return "", ErrUnknownSymbol
+}
+
+func (p pairs) SetContractStatus(context.Context, string, string, string) (string, error) {
 	return "", ErrUnknownSymbol
 }
 

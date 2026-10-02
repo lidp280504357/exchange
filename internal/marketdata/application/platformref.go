@@ -63,6 +63,18 @@ func (p *PlatformReference) Report(ctx context.Context, symbol string, price dec
 	return nil
 }
 
+// Reports returns when the simulated market last reported each pair: its
+// heartbeat (SimGuard).
+func (p *PlatformReference) Reports() map[string]time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make(map[string]time.Time, len(p.simulated))
+	for symbol, r := range p.simulated {
+		out[symbol] = r.At
+	}
+	return out
+}
+
 // Price returns the reference of symbol, false when a reference market
 // follows it or nothing prices it.
 func (p *PlatformReference) Price(ctx context.Context, symbol string) (Reference, bool) {

@@ -200,10 +200,16 @@ func setup(ctx context.Context, a *app.App) error {
 		}
 		return svc.Candles(ctx, symbol, "1h", time.Time{}, time.Time{}, hours)
 	}}
+	// A pair the reference market does not follow (the platform coin):
+	// its own market's price, else its simulated market's report, which is
+	// also that market's heartbeat (a silent one halts the pair).
+	platform := &application.PlatformReference{Svc: svc, Refs: refs}
+	simGuard := application.NewSimGuard(platform, listed, store, flagClient, a.Logger(), a.Metrics())
+	a.Add("simulated market guard", app.Loop(simGuard.Run))
 	r := a.NewRouter()
 	(&httpapi.Handler{
 		Svc: svc, Tickers: tickers, Ref: feed, Guard: guard, Marks: marks, RefKlines: refKlines, Books: books, Sparks: sparks,
-		Platform: &application.PlatformReference{Svc: svc, Refs: refs}, Now: time.Now,
+		Platform: platform, Now: time.Now,
 	}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
 }

@@ -289,18 +289,26 @@ func (c *Client) Report(ctx context.Context, symbol string, price decimal.Decima
 	return nil
 }
 
-// Mark reads a contract's mark price (0: none yet).
-func (c *Client) Mark(ctx context.Context, symbol string) (decimal.Decimal, error) {
+// Mark reads a contract's mark and index prices (0: none yet).
+func (c *Client) Mark(ctx context.Context, symbol string) (mark, index decimal.Decimal, err error) {
 	var body struct {
-		MarkPrice *string `json:"mark_price"`
+		MarkPrice  *string `json:"mark_price"`
+		IndexPrice *string `json:"index_price"`
 	}
 	if err := c.do(ctx, http.MethodGet, c.MarketURL+"/v1/market/"+url.PathEscape(symbol)+"/mark-price", "", nil, &body); err != nil {
-		return decimal.Zero, fmt.Errorf("mark price %s: %w", symbol, err)
+		return decimal.Zero, decimal.Zero, fmt.Errorf("mark price %s: %w", symbol, err)
 	}
-	if body.MarkPrice == nil || *body.MarkPrice == "" {
-		return decimal.Zero, nil
+	parse := func(s *string) decimal.Decimal {
+		if s == nil {
+			return decimal.Zero
+		}
+		v, err := decimal.NewFromString(*s)
+		if err != nil {
+			return decimal.Zero
+		}
+		return v
 	}
-	return decimal.NewFromString(*body.MarkPrice)
+	return parse(body.MarkPrice), parse(body.IndexPrice), nil
 }
 
 // Contract reads the contract's rules from instrument-service.

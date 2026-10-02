@@ -16,9 +16,12 @@ import (
 
 // The platform coin's perpetual (ASTRA design §4 and §5.2, batch A4): with
 // sim.perp on and the contract trading, the makers keep ladders on it
-// around its mark price (the design's quote center for the perpetual; the
-// mark follows the index, the spot pair's own market, and the contract's
-// price band is around it), and the takers trade it at the market. Each
+// around its mark price (the design's quote center for the perpetual: the
+// contract's price band is around it), pulled halfway to the index — the
+// mark is the index times one plus the EMA of the book's premium, so
+// quotes at the mark itself would keep any premium the takers' flow made,
+// and the funding rate with it; halfway, the premium decays — and the
+// takers trade it at the market. Each
 // bot's position stays within PerpBotCap worth (beyond it the bot only
 // reduces), and its FUTURES margin is topped up to PerpMargin from its
 // spot USDT. The bots' positions net out across the pool.
@@ -80,15 +83,18 @@ func (s *Sim) perp(ctx context.Context, now time.Time, p float64, dt time.Durati
 	s.perpRunning = true
 	if s.perpMarkAt.IsZero() || now.Sub(s.perpMarkAt) >= markEvery {
 		s.perpMarkAt = now
-		if mark, err := s.prices.Mark(ctx, s.cfg.Perp); err != nil {
+		if mark, index, err := s.prices.Mark(ctx, s.cfg.Perp); err != nil {
 			s.m.errors.WithLabelValues("mark").Inc()
 		} else if mark.IsPositive() {
-			s.perpMark = mark.InexactFloat64()
+			s.perpMark, s.perpIndex = mark.InexactFloat64(), index.InexactFloat64()
 		}
 	}
 	center := p // before the contract's first mark price
 	if s.perpMark > 0 {
 		center = s.perpMark
+		if s.perpIndex > 0 {
+			center = (s.perpMark + s.perpIndex) / 2
+		}
 	}
 	s.quotePerp(ctx, now, center)
 	if !s.runs(domain.EventPause) {

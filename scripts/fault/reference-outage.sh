@@ -13,6 +13,9 @@
 # The contracts lose their mark prices too and go reduce-only; once the
 # prices are back the drill lifts the reduce-only states it caused, as the
 # operator would (contract-degrade.sh exercises that path itself).
+# The platform coin's simulated market loses BTC's and ETH's references
+# (ASTRA design §9): its market factor holds and ASTRA-USDT keeps trading
+# on its own until they are back (checked while its bots run).
 # Needs market.reference_feed, market.reference_depth and
 # market.house_liquidity on for BTC-USDT; about four minutes; the block is
 # always lifted.
@@ -45,6 +48,14 @@ eventually 60 "the BTC-USDT reference price and book are fresh" fresh
 eventually 60 "HOUSE offers BTC-USDT" offering
 eventually 20 "Binance's book is shown" quoted
 errors_before=$(errors)
+# The platform coin: its bots trade, and its last trade.
+astra() { call GET /v1/market/pairs/ASTRA-USDT "" && [[ $(jq -r .status <<<"$BODY") == TRADING ]] && [[ $(metric market-sim 9098 market_sim_running) == 1 ]]; }
+astra_last() { call GET "/v1/market/ASTRA-USDT/trades?limit=1" "" && jq -r '.trades[0].executed_at // ""' <<<"$BODY"; }
+sim_refs() { metric market-sim 9098 market_sim_references_fresh | awk '{printf "%d", $1}'; }
+ASTRA=""
+if astra; then
+  ASTRA=1
+fi
 
 echo "== Binance goes silent"
 block_egress market-data-service
@@ -57,12 +68,23 @@ call GET /v1/market/tickers ""
 expect 200 - "the platform's tickers are still served"
 noticed() { (($(errors) > errors_before)); }
 eventually 180 "the silent stream is noticed and retried" noticed
+if [[ -n $ASTRA ]]; then
+  refs_stale() { [[ $(sim_refs) == 0 ]]; }
+  eventually 60 "the simulated market's BTC and ETH references go stale" refs_stale
+  since=$(astra_last)
+  traded() { local last; last=$(astra_last) && [[ -n $last && $last != "$since" ]]; }
+  eventually 120 "ASTRA-USDT keeps trading on its own" traded
+fi
 
 echo "== Binance is back"
 unblock_egress market-data-service
 eventually 360 "the reference is fresh again" fresh
 eventually 60 "HOUSE offers BTC-USDT again" offering
 eventually 40 "Binance's book is shown again" quoted
+if [[ -n $ASTRA ]]; then
+  refs_fresh() { [[ $(sim_refs) == 1 ]]; }
+  eventually 60 "the simulated market follows BTC and ETH again" refs_fresh
+fi
 sleep 15 # the mark prices follow the reference
 degraded=$(exchangectl derivatives states | awk -v since="$STARTED" 'NR > 1 && $2 == "true" && $4 >= since {print $1}')
 for symbol in $degraded; do
