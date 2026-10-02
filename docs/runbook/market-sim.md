@@ -70,8 +70,8 @@ market-sim 每 5 秒把目标价上报给 market-data-service（`PUT /internal/m
 | 角色 | 测试服数量 | 行为 |
 |---|---|---|
 | MAKER 做市商 | 6 | 每侧 `levels`（8）档，最优买卖相距 `spread`（0.2%），档距 `level_ticks`（5 个 tick）；价格放在按做市商错开相位的网格上，目标价小幅移动时大部分挂单不动。目标价偏离上次报价 `requote_ticks`（3 个 tick）或每 1–3 秒（随机）重报一次：撤掉不再需要的价位、补上缺的价位（由近到远、买卖交替）；每轮最多 2 个做市商重报。每档价值对数正态，中位 `level_size`（800 USDT） |
-| TAKER 噪声交易者 | 12 | 泊松到达，平均每天 `daily_volume / order_size` 单（默认 2,000,000 / 400 = 5,000 单），按 UTC 小时加权（欧美重叠时段最多）；方向五五开，按 `mu` 最多偏 10 个百分点，按自己的 USDT 偏离 `bot_usdt` 最多偏 20 个百分点；市价单，价值对数正态，中位 `order_size` |
-| TREND 趋势交易者 | 4 | 每半分钟左右看目标价最近 `trend_minutes`（15）分钟的方向，各以 `trend_strength`（0.3）的概率顺势下市价单 |
+| TAKER 噪声交易者 | 12 | 泊松到达，一天合计 `daily_volume` 的 80%：平均每天 `daily_volume × 0.8 / (order_size × e^0.32)` 单（单笔价值对数正态，中位 `order_size`、对数标准差 0.8，均值是中位的 1.38 倍；默认约 2,900 单），按 UTC 小时加权（欧美重叠时段最多）；方向五五开，按 `mu` 最多偏 10 个百分点，按自己的 USDT 偏离 `bot_usdt` 最多偏 20 个百分点；市价单 |
+| TREND 趋势交易者 | 4 | 平均每 30 秒看目标价最近 `trend_minutes`（15）分钟的方向，各以 `trend_strength`（0.3）的概率顺势下市价单；单笔价值使趋势交易者合计一天是 `daily_volume` 的 20%（`domain.TrendWorth`）。`daily_volume` 因此是噪声与趋势交易合计的日成交额目标（不含事件与走价时事件执行者的成交） |
 | EXECUTOR 事件执行者 | 2 | 只在事件移动价格时（及之后一分钟）下市价单，让成交价跟上目标价（见「价格事件」） |
 
 - 节流：全部机器人合计每秒 `orders_per_second`（20）单、`cancels_per_second`（10）次撤单（令牌桶），超出的这一轮放弃（`market_sim_throttled_total`）。

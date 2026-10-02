@@ -130,6 +130,29 @@ func Worth(rng *rand.Rand, median, sd float64) float64 {
 	return median * math.Exp(sd*rng.NormFloat64())
 }
 
+// The day's turnover (DailyVolume) is the takers' and the trend
+// followers', TrendShare of it the trend followers'. Their orders' worths
+// are log-normal with the spread OrderSpread, whose mean is the median
+// times exp(OrderSpread²/2).
+const (
+	TrendShare  = 0.2
+	OrderSpread = 0.8
+)
+
+// MeanWorth is the mean of a log-normal worth with median and spread sd.
+func MeanWorth(median, sd float64) float64 { return median * math.Exp(sd*sd/2) }
+
+// TrendWorth is the median worth of a trend follower's order that makes
+// the trend followers' day TrendShare of DailyVolume: n of them, each
+// acting with TrendStrength's chance once every every on average.
+func TrendWorth(p Params, n int, every time.Duration) float64 {
+	if n <= 0 || p.TrendStrength <= 0 || every <= 0 || p.DailyVolume <= 0 {
+		return 0
+	}
+	perDay := float64(24*time.Hour) / float64(every)
+	return p.DailyVolume * TrendShare / (perDay * float64(n) * p.TrendStrength) / MeanWorth(1, OrderSpread)
+}
+
 // hourWeights shape the day's taker flow (UTC hours): quieter late in the
 // American evening, busiest while Europe and America overlap.
 var hourWeights = func() [24]float64 {
@@ -150,14 +173,14 @@ var hourWeights = func() [24]float64 {
 	return w
 }()
 
-// Arrivals draws how many taker orders arrive in dt: Poisson, so that the
-// day's turnover is DailyVolume in orders of OrderSize, shaped by the
-// hour's weight.
-func Arrivals(rng *rand.Rand, p Params, dt time.Duration, now time.Time) int {
-	if p.DailyVolume <= 0 || p.OrderSize <= 0 || dt <= 0 {
+// Arrivals draws how many taker orders arrive in dt: Poisson, so that a
+// day of them is worth daily in orders of the median worth orderSize (the
+// mean is MeanWorth), shaped by the hour's weight.
+func Arrivals(rng *rand.Rand, daily, orderSize float64, dt time.Duration, now time.Time) int {
+	if daily <= 0 || orderSize <= 0 || dt <= 0 {
 		return 0
 	}
-	perSecond := p.DailyVolume / p.OrderSize / 86400 * hourWeights[now.UTC().Hour()]
+	perSecond := daily / MeanWorth(orderSize, OrderSpread) / 86400 * hourWeights[now.UTC().Hour()]
 	return poisson(rng, perSecond*dt.Seconds())
 }
 

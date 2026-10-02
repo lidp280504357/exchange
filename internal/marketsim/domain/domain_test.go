@@ -180,20 +180,30 @@ func TestQuantityMeetsThePairsMinimums(t *testing.T) {
 	}
 }
 
+// A day of taker orders is worth the turnover asked for: 1,600,000 (the
+// takers' share of 2,000,000) in orders of a median 400, a mean of 551.
 func TestArrivalsMakeTheDaysTurnover(t *testing.T) {
 	rng := rand.New(rand.NewPCG(3, 4)) //nolint:gosec // a repeatable test
-	p := DefaultParams()               // 2,000,000 a day in orders of 400: 5,000 orders
-	n, now := 0, t0.Truncate(24*time.Hour)
+	n, worth, now := 0, 0.0, t0.Truncate(24*time.Hour)
 	for i := 0; i < 86400*4; i++ {
 		now = now.Add(250 * time.Millisecond)
-		n += Arrivals(rng, p, 250*time.Millisecond, now)
+		for range Arrivals(rng, 1_600_000, 400, 250*time.Millisecond, now) {
+			n++
+			worth += Worth(rng, 400, OrderSpread)
+		}
 	}
-	if n < 4700 || n > 5300 {
-		t.Fatalf("%d orders in a day, want about 5000", n)
+	if n < 2700 || n > 3100 || worth < 1_500_000 || worth > 1_700_000 {
+		t.Fatalf("%d orders worth %.0f in a day, want about 2,900 worth 1,600,000", n, worth)
 	}
-	p.DailyVolume = 0
-	if Arrivals(rng, p, time.Second, now) != 0 {
+	if Arrivals(rng, 0, 400, time.Second, now) != 0 {
 		t.Fatal("orders without a turnover")
+	}
+	// The trend followers' share: 4 of them deciding every 30 seconds with
+	// a chance of 0.3 make 400,000 a day.
+	p := DefaultParams()
+	median := TrendWorth(p, 4, 30*time.Second)
+	if day := MeanWorth(median, OrderSpread) * 2880 * 4 * 0.3; math.Abs(day-400_000) > 1 {
+		t.Fatalf("the trend followers' day: %.0f", day)
 	}
 }
 

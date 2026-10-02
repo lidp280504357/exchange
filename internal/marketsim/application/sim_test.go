@@ -471,12 +471,15 @@ func TestTheThrottleHoldsOrdersBack(t *testing.T) {
 
 func TestTakersTradeTheDaysTurnover(t *testing.T) {
 	p := domain.DefaultParams()
-	p.DailyVolume, p.OrderSize = 86_400*400*2, 400 // two orders a second
+	// 69,120,000 a day, 80% of it the takers' in orders of a mean 551: 1.16
+	// a second, 1.5 at 14:00 UTC (Europe and America: the hour's weight
+	// 1.3); the trend follower adds one now and then.
+	p.DailyVolume, p.OrderSize = 86_400*400*2, 400
 	r := newRig(t, &memStore{params: &p, version: 1})
 	r.rounds(4 * 60)
 	got := r.trading.markets[domain.Buy] + r.trading.markets[domain.Sell]
-	if got < 120 || got > 360 {
-		t.Fatalf("%d market orders in a minute, want about 120 to 360 (two a second, by the hour's weight)", got)
+	if got < 60 || got > 130 {
+		t.Fatalf("%d market orders in a minute, want about 90", got)
 	}
 	if r.trading.markets[domain.Buy] == 0 || r.trading.markets[domain.Sell] == 0 {
 		t.Fatalf("one-sided: %v", r.trading.markets)

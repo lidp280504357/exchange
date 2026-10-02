@@ -8,8 +8,10 @@
 # canceled. With sim.events on, a jump of 35% by one operator is refused,
 # one of 2% moves the target and a target event brings it back (A3); with
 # the bots on ASTRA-USDT-PERP, the user opens a long against them and
-# closes it (A4). Skipped while ASTRA-USDT is not trading or the bots are
-# off (scripts/ops/astra.sh seed, open, on, events-on, perp-open, perp-on).
+# closes it, and with the events on an operator's target 5% down
+# liquidates a 50x long (A4). Skipped while ASTRA-USDT is not trading or
+# the bots are off (scripts/ops/astra.sh seed, open, on, events-on,
+# perp-open, perp-on).
 #
 #   scripts/e2e/astra.sh
 set -euo pipefail
@@ -196,5 +198,35 @@ else
   expect 202 - "closed at the market"
   flat() { call GET /v1/derivatives/positions "" "${AUTH[@]}" && [[ $(jq -r '[.positions[] | select(.symbol == "ASTRA-USDT-PERP")] | length' <<<"$BODY") == 0 ]]; }
   eventually 80 "flat again" flat
+
+  # An operator's event liquidates a leveraged long (design §7, A4): 50x
+  # isolated, 1500 ASTRA (about 30 USDT of margin, liquidated about 1.6%
+  # down); a target 5% down moves the spot pair, the index (its minute's
+  # TWAP) and the mark follow, the position is taken over and closed by a
+  # liquidation order against the bots. Then the target goes back.
+  if [[ $EVENTS_ON == t ]]; then
+    echo "== an event liquidates a leveraged long"
+    call PUT /v1/derivatives/settings/ASTRA-USDT-PERP '{"margin_mode":"ISOLATED","leverage":50}' "${AUTH[@]}"
+    expect 200 - "isolated, 50x"
+    call POST /v1/derivatives/orders '{"symbol":"ASTRA-USDT-PERP","side":"BUY","type":"MARKET","quantity":"1500"}' "${AUTH[@]}"
+    expect 202 - "a market buy of 1500 ASTRA-USDT-PERP"
+    levered() { call GET /v1/derivatives/positions "" "${AUTH[@]}" && [[ $(jq -r '[.positions[] | select(.symbol == "ASTRA-USDT-PERP")][0].quantity // "0"' <<<"$BODY") == 1500 ]]; }
+    eventually 80 "long 1500 at 50x" levered
+    LIQ=$(jq -r '[.positions[] | select(.symbol == "ASTRA-USDT-PERP")][0].liquidation_price' <<<"$BODY")
+    BACK=$(simget /internal/sim | jq -r .target_price)
+    DOWN=$(jq -rn --argjson p "$BACK" '$p * 0.95 * 10000 | floor / 10000 | tostring')
+    simpost /internal/sim/events "{\"type\":\"TARGET\",\"price\":\"$DOWN\",\"actor\":\"e2e-ops\",\"approved_by\":\"e2e-ops-2\",\"reason\":\"e2e: liquidate a long\"}"
+    [[ $SIM_STATUS == 201 ]] || { echo "FAIL a target of $DOWN: HTTP $SIM_STATUS $SIM_BODY" >&2; exit 1; }
+    echo "     the target goes from $BACK to $DOWN; the long's liquidation price is $LIQ"
+    liquidated() {
+      flat && call GET "/v1/derivatives/fills?symbol=ASTRA-USDT-PERP&limit=20" "" "${AUTH[@]}" &&
+        [[ $(jq '[.items[] | select(.liquidation)] | length' <<<"$BODY") -gt 0 ]]
+    }
+    eventually 240 "the long is liquidated against the bots" liquidated
+    check '[.items[] | select(.liquidation)] | all(.side == "SELL" and (.realized_pnl | tonumber) < 0)' "a liquidation sell at a loss"
+    simpost /internal/sim/events "{\"type\":\"TARGET\",\"price\":\"$BACK\",\"actor\":\"e2e-ops\",\"approved_by\":\"e2e-ops-2\",\"reason\":\"e2e: back after the liquidation\"}"
+    [[ $SIM_STATUS == 201 ]] || { echo "FAIL back to $BACK: HTTP $SIM_STATUS $SIM_BODY" >&2; exit 1; }
+    echo "ok   the target goes back to $BACK"
+  fi
 fi
 echo "all platform coin checks passed"

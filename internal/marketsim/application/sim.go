@@ -505,7 +505,8 @@ func (s *Sim) take(ctx context.Context, now time.Time, p float64, dt time.Durati
 		return
 	}
 	rng := s.model.Rand()
-	for range domain.Arrivals(rng, s.params, dt, now) {
+	daily := s.params.DailyVolume * (1 - domain.TrendShare) // the rest is the trend followers'
+	for range domain.Arrivals(rng, daily, s.params.OrderSize, dt, now) {
 		b := pick(rng, takers, now)
 		if b == nil {
 			continue
@@ -514,7 +515,7 @@ func (s *Sim) take(ctx context.Context, now time.Time, p float64, dt time.Durati
 		if b.known {
 			lean = domain.Lean(b.usdt.InexactFloat64(), s.params.BotUSDT)
 		}
-		s.market(ctx, now, b, domain.TakerSide(rng, s.params, lean), domain.Worth(rng, s.params.OrderSize, 0.8), p)
+		s.market(ctx, now, b, domain.TakerSide(rng, s.params, lean), domain.Worth(rng, s.params.OrderSize, domain.OrderSpread), p)
 	}
 }
 
@@ -530,9 +531,11 @@ func (s *Sim) follow(ctx context.Context, now time.Time, p float64) {
 	if !ok {
 		return
 	}
-	for _, b := range s.botsOf(domain.RoleTrend) {
-		if rng.Float64() < s.params.TrendStrength && b.ready(now) {
-			s.market(ctx, now, b, side, domain.Worth(rng, s.params.OrderSize, 0.8), p)
+	followers := s.botsOf(domain.RoleTrend)
+	median := domain.TrendWorth(s.params, len(followers), trendEvery)
+	for _, b := range followers {
+		if rng.Float64() < s.params.TrendStrength && b.ready(now) && median > 0 {
+			s.market(ctx, now, b, side, domain.Worth(rng, median, domain.OrderSpread), p)
 		}
 	}
 }

@@ -239,9 +239,7 @@ func (s *Sim) takePerp(ctx context.Context, now time.Time, p float64, dt time.Du
 		return
 	}
 	rng := s.model.Rand()
-	flow := s.params
-	flow.DailyVolume = s.params.PerpDailyVolume
-	for range domain.Arrivals(rng, flow, dt, now) {
+	for range domain.Arrivals(rng, s.params.PerpDailyVolume, s.params.OrderSize, dt, now) {
 		b := takers[rng.IntN(len(takers))]
 		pb := s.perpOf(b)
 		if !pb.ready(now) {
@@ -254,7 +252,7 @@ func (s *Sim) takePerp(ctx context.Context, now time.Time, p float64, dt time.Du
 				side = domain.Buy
 			}
 		}
-		qty := domain.Quantity(domain.Worth(rng, s.params.OrderSize, 0.8), decimal.NewFromFloat(p), s.perpPair)
+		qty := domain.Quantity(domain.Worth(rng, s.params.OrderSize, domain.OrderSpread), decimal.NewFromFloat(p), s.perpPair)
 		if reduce {
 			qty = decimal.Min(qty, pb.position.Abs())
 		}
