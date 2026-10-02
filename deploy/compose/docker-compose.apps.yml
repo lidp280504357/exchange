@@ -388,10 +388,12 @@ services:
       MARKET_DATA_SERVICE_URL: http://market-data-service:8090
       INSTRUMENT_SERVICE_URL: http://instrument-service:8084
       INSTRUMENT_GRPC_ADDR: instrument-service:9184
+      DERIVATIVES_SERVICE_URL: http://derivatives-service:8095
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}
       spot-trading-service: {condition: service_started}
+      derivatives-service: {condition: service_started}
       ledger-service: {condition: service_started}
       market-data-service: {condition: service_started}
       instrument-service: {condition: service_started}

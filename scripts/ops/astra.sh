@@ -22,6 +22,17 @@
 #                                 more for the bots (ASTRA by default), spread
 #                                 evenly, audited (ledger adjustments).
 #   scripts/ops/astra.sh on|off   switch the bots (flag sim.enabled).
+#   scripts/ops/astra.sh perp-open
+#                                 ASTRA-USDT-PERP moves from PREPARE to
+#                                 TRADING (its index is the platform's
+#                                 ASTRA-USDT; HOUSE does not quote it).
+#   scripts/ops/astra.sh perp-on|perp-off
+#                                 switch the bots on the perpetual (flag
+#                                 sim.perp); they top up their margin from
+#                                 their spot USDT.
+#   scripts/ops/astra.sh events-on|events-off
+#                                 allow the operators' price events (flag
+#                                 sim.events).
 #   scripts/ops/astra.sh status   what market-sim reports.
 #
 # Adjustments need the flag ledger.manual_adjustment.
@@ -31,6 +42,7 @@ INFRA=/opt/exchange/infra
 ROOT="$(dirname "$0")/../.."
 COMPOSE="sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml"
 SYMBOL=ASTRA-USDT
+PERP=ASTRA-USDT-PERP
 
 # ctl SERVICE ARGS... runs exchangectl in a service's container, stdin passed on.
 ctl() {
@@ -132,9 +144,24 @@ on)
 off)
   ctl market-sim flags set sim.enabled --off --reason "the simulated market's bots stop (astra.sh off)" </dev/null
   ;;
+perp-open)
+  ctl instrument-service instruments contract-status "$PERP" --to TRADING --reason "ASTRA-USDT-PERP opens (design 2026-10-02 batch A4)" </dev/null
+  ;;
+perp-on)
+  ctl market-sim flags set sim.perp --on --allow-symbols "$PERP" --reason "the bots make the platform coin's perpetual (astra.sh perp-on)" </dev/null
+  ;;
+perp-off)
+  ctl market-sim flags set sim.perp --off --reason "the bots leave the perpetual (astra.sh perp-off)" </dev/null
+  ;;
+events-on)
+  ctl market-sim flags set sim.events --on --allow-symbols "$SYMBOL" --reason "operators' price events allowed (astra.sh events-on)" </dev/null
+  ;;
+events-off)
+  ctl market-sim flags set sim.events --off --reason "operators' price events stopped (astra.sh events-off)" </dev/null
+  ;;
 status) sim | jq . ;;
 *)
-  sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
   ;;
 esac

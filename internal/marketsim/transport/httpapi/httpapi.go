@@ -61,6 +61,8 @@ type StatusJSON struct {
 	Guards          map[string]int `json:"guards"`
 	Bots            []BotJSON      `json:"bots"`
 	Events          []EventJSON    `json:"events"`
+	Perp            string         `json:"perp"`
+	PerpRunning     bool           `json:"perp_running"`
 	At              *string        `json:"at"`
 }
 
@@ -121,6 +123,8 @@ type BotJSON struct {
 	BalancesKnown bool    `json:"balances_known"`
 	USDT          string  `json:"usdt"`
 	Coin          string  `json:"coin"`
+	Position      string  `json:"perp_position"`
+	Futures       string  `json:"futures_usdt"`
 	Error         string  `json:"error"`
 	ErrorAt       *string `json:"error_at"`
 }
@@ -129,7 +133,7 @@ func (h *Handler) status(w http.ResponseWriter, _ *http.Request) {
 	st := h.Sim.Status()
 	out := StatusJSON{
 		Symbol: st.Symbol, Enabled: st.Enabled, Running: st.Running, ReferencesFresh: st.RefsFresh, Params: st.Params, Version: st.Version,
-		Guards: map[string]int{}, Bots: []BotJSON{},
+		Guards: map[string]int{}, Bots: []BotJSON{}, Perp: st.Perp, PerpRunning: st.PerpOn,
 	}
 	if st.Target > 0 {
 		v := decimal.NewFromFloat(st.Target).Round(8).String()
@@ -153,7 +157,7 @@ func (h *Handler) status(w http.ResponseWriter, _ *http.Request) {
 	for _, b := range st.Bots {
 		j := BotJSON{
 			UserID: b.UserID, Role: string(b.Role), Label: b.Label, Enabled: b.Enabled, BalancesKnown: b.Known,
-			USDT: b.USDT.String(), Coin: b.Coin.String(), Error: b.Error,
+			USDT: b.USDT.String(), Coin: b.Coin.String(), Position: b.Position.String(), Futures: b.Futures.String(), Error: b.Error,
 		}
 		if !b.ErrorAt.IsZero() {
 			v := httpx.FormatTime(b.ErrorAt)

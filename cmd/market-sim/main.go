@@ -36,6 +36,10 @@ type settings struct {
 	Symbol string `koanf:"sim_symbol"`
 	Quote  string `koanf:"sim_quote"`
 	Seed   uint64 `koanf:"sim_seed"`
+	// Perp is the coin's perpetual (SIM_PERP_SYMBOL; empty: none), traded
+	// through derivatives-service (DERIVATIVES_SERVICE_URL).
+	Perp           string `koanf:"sim_perp_symbol"`
+	DerivativesURL string `koanf:"derivatives_service_url"`
 	// The platform's REST peers, and instrument-service's gRPC address
 	// (INSTRUMENT_GRPC_ADDR) for the halts.
 	TradingURL     string `koanf:"trading_service_url"`
@@ -62,6 +66,7 @@ func setup(ctx context.Context, a *app.App) error {
 		Postgres: pg.DefaultConfig(), HTTPAddr: ":8098", Symbol: "ASTRA-USDT", Quote: "USDT",
 		TradingURL: "http://localhost:8088", LedgerURL: "http://localhost:8085", MarketURL: "http://localhost:8090",
 		InstrumentURL: "http://localhost:8084", InstrumentAddr: "localhost:9184",
+		Perp: "ASTRA-USDT-PERP", DerivativesURL: "http://localhost:8095",
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -85,11 +90,12 @@ func setup(ctx context.Context, a *app.App) error {
 	}
 	client := &api.Client{
 		TradingURL: cfg.TradingURL, LedgerURL: cfg.LedgerURL, MarketURL: cfg.MarketURL, InstrumentURL: cfg.InstrumentURL,
-		HTTP: &http.Client{Timeout: 2 * time.Second},
+		DerivativesURL: cfg.DerivativesURL, HTTP: &http.Client{Timeout: 2 * time.Second},
 	}
-	sim := application.New(application.Config{Symbol: cfg.Symbol, Quote: cfg.Quote, Tick: 250 * time.Millisecond, Seed: cfg.Seed},
+	sim := application.New(application.Config{Symbol: cfg.Symbol, Quote: cfg.Quote, Perp: cfg.Perp, Tick: 250 * time.Millisecond, Seed: cfg.Seed},
 		client, client, instruments.Client{API: instrumentv1.NewInstrumentServiceClient(instrumentConn)}, postgres.NewStore(db, events),
 		flagClient, a.Logger(), a.Metrics())
+	sim.Derivatives = client
 	r := a.NewRouter()
 	(&httpapi.Handler{Sim: sim}).Routes(r)
 	if err := bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r); err != nil {

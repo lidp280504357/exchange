@@ -29,8 +29,9 @@ import (
 // Config is the simulation's fixed setup.
 type Config struct {
 	// Symbol is the pair the bots trade (ASTRA-USDT); Quote its quote
-	// asset, which the bots keep about BotUSDT of.
-	Symbol, Quote string
+	// asset, which the bots keep about BotUSDT of; Perp its perpetual
+	// (empty: none).
+	Symbol, Quote, Perp string
 	// Tick is how often the model steps and the bots act (250 ms).
 	Tick time.Duration
 	// Seed seeds a first start's random source; 0 takes the clock.
@@ -58,6 +59,9 @@ const (
 
 // Sim is the simulated market.
 type Sim struct {
+	// Derivatives trades the perpetual; nil leaves it alone.
+	Derivatives ports.Derivatives
+
 	cfg     Config
 	trading ports.Trading
 	prices  ports.Prices
@@ -94,6 +98,13 @@ type Sim struct {
 	movedAt   time.Time       // when an event last moved the price
 	executeAt time.Time       // the executors' next turn
 	samples   []Sample
+
+	perpPair      domain.Pair
+	perpPairAt    time.Time
+	perpRunning   bool
+	perpTurn      int
+	perpBots      map[string]*perpBot
+	perpCheckedAt time.Time
 }
 
 // bot is a bot account as the simulation runs it.
@@ -248,6 +259,9 @@ func (s *Sim) Round(ctx context.Context) {
 		if s.running {
 			s.stop(ctx)
 		}
+		if s.perpRunning {
+			s.stopPerp(ctx)
+		}
 		s.m.running.Set(0)
 		return
 	}
@@ -274,6 +288,9 @@ func (s *Sim) Round(ctx context.Context) {
 	}
 	s.sample(now, p)
 	if sh.Halted {
+		if s.perpRunning {
+			s.stopPerp(ctx)
+		}
 		return // the halt canceled the makers' orders; the pair waits
 	}
 	s.quote(ctx, now, p)
@@ -282,8 +299,11 @@ func (s *Sim) Round(ctx context.Context) {
 		s.follow(ctx, now, p)
 	}
 	s.execute(ctx, now, p)
+	s.perp(ctx, now, p, dt)
 	s.chores(ctx, now)
 }
+
+func isFunds(err error) bool { return errors.Is(err, ports.ErrFunds) }
 
 func (s *Sim) refreshPair(ctx context.Context, now time.Time) {
 	if !s.pairAt.IsZero() && now.Sub(s.pairAt) < pairEvery {
@@ -558,6 +578,8 @@ type Status struct {
 	Guards    map[domain.Guard]int
 	Bots      []BotStatus
 	Events    []domain.Event // scheduled and running
+	Perp      string
+	PerpOn    bool // the bots trade the perpetual
 	At        time.Time
 }
 
@@ -566,8 +588,11 @@ type BotStatus struct {
 	ports.Bot
 	USDT, Coin decimal.Decimal
 	Known      bool
-	Error      string
-	ErrorAt    time.Time
+	// Position and Futures are its signed position on the perpetual and
+	// its available FUTURES balance, as last read.
+	Position, Futures decimal.Decimal
+	Error             string
+	ErrorAt           time.Time
 }
 
 // Status reports the simulation's state.
@@ -584,8 +609,13 @@ func (s *Sim) Status() Status {
 	for g, n := range s.guards {
 		st.Guards[g] = n
 	}
+	st.Perp, st.PerpOn = s.cfg.Perp, s.perpRunning
 	for _, b := range s.bots {
-		st.Bots = append(st.Bots, BotStatus{Bot: b.Bot, USDT: b.usdt, Coin: b.coin, Known: b.known, Error: b.err, ErrorAt: b.errAt})
+		bs := BotStatus{Bot: b.Bot, USDT: b.usdt, Coin: b.coin, Known: b.known, Error: b.err, ErrorAt: b.errAt}
+		if pb, ok := s.perpBots[b.UserID]; ok {
+			bs.Position, bs.Futures = pb.position, pb.futures
+		}
+		st.Bots = append(st.Bots, bs)
 	}
 	for _, e := range s.events {
 		st.Events = append(st.Events, *e)

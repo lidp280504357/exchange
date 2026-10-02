@@ -38,6 +38,34 @@ type Trading interface {
 	Balances(ctx context.Context, user string) (map[string]decimal.Decimal, error)
 }
 
+// Derivatives is the platform's contract trading as a bot uses it (one-way
+// positions, the contract's default settings).
+type Derivatives interface {
+	// Contract reads the contract's rules and whether it trades.
+	Contract(ctx context.Context, symbol string) (domain.Pair, error)
+	// OpenContract lists the bot's active orders on the contract.
+	OpenContract(ctx context.Context, user, symbol string) ([]domain.Order, error)
+	// LimitContract places a GTC limit order; a refusal for margin is
+	// ErrFunds.
+	LimitContract(ctx context.Context, user, symbol string, side domain.Side, price, qty decimal.Decimal) (string, error)
+	// MarketContract places a market order of qty, reducing the position
+	// only when reduceOnly.
+	MarketContract(ctx context.Context, user, symbol string, side domain.Side, qty decimal.Decimal, reduceOnly bool) error
+	// CancelContract asks to cancel an order; one that just finished is fine.
+	CancelContract(ctx context.Context, user, orderID string) error
+	// CancelAllContract asks to cancel every active order of the bot on the
+	// contract.
+	CancelAllContract(ctx context.Context, user, symbol string) error
+	// Position returns the bot's signed position on the contract (long
+	// positive).
+	Position(ctx context.Context, user, symbol string) (decimal.Decimal, error)
+	// Futures returns the bot's available FUTURES balance.
+	Futures(ctx context.Context, user string) (decimal.Decimal, error)
+	// ToFutures moves amount of USDT from the bot's SPOT account to its
+	// FUTURES account; key makes a retry safe.
+	ToFutures(ctx context.Context, user string, amount decimal.Decimal, key string) error
+}
+
 // Prices reads the reference market's prices.
 type Prices interface {
 	// Reference returns symbol's reference price and whether it is fresh.

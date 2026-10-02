@@ -253,7 +253,7 @@ func (m *memStore) SaveState(_ context.Context, st domain.State) error {
 	return nil
 }
 
-type flagSet struct{ on, events bool }
+type flagSet struct{ on, events, perp bool }
 
 func (f *flagSet) Enabled(key string, _ flags.Subject) bool {
 	switch key {
@@ -261,6 +261,8 @@ func (f *flagSet) Enabled(key string, _ flags.Subject) bool {
 		return f.on
 	case flags.KeySimEvents:
 		return f.events
+	case flags.KeySimPerp:
+		return f.perp
 	}
 	return false
 }
@@ -637,3 +639,192 @@ func TestAScheduledEventIsCanceled(t *testing.T) {
 }
 
 func apperrIs(err error, code string) bool { return err != nil && apperr.Is(err, code) }
+
+// fakeDerivatives is the perpetual as the bots see it: limit orders rest
+// until canceled, market orders move the position, transfers fund margin.
+type fakeDerivatives struct {
+	mu        sync.Mutex
+	contract  domain.Pair
+	seq       int
+	open      map[string][]domain.Order
+	positions map[string]decimal.Decimal
+	futures   map[string]decimal.Decimal
+	markets   []string // "user side qty reduce"
+	transfers map[string]bool
+	cancelAll map[string]int
+}
+
+func newFakeDerivatives() *fakeDerivatives {
+	return &fakeDerivatives{
+		contract: domain.Pair{Symbol: "ASTRA-USDT-PERP", Tick: d("0.0001"), Lot: d("1"), MinQty: d("1"), MinNotional: d("5"), Trading: true},
+		open:     map[string][]domain.Order{}, positions: map[string]decimal.Decimal{}, futures: map[string]decimal.Decimal{},
+		transfers: map[string]bool{}, cancelAll: map[string]int{},
+	}
+}
+
+func (f *fakeDerivatives) Contract(context.Context, string) (domain.Pair, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.contract, nil
+}
+
+func (f *fakeDerivatives) OpenContract(_ context.Context, user, _ string) ([]domain.Order, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.open[user]), nil
+}
+
+func (f *fakeDerivatives) LimitContract(_ context.Context, user, _ string, side domain.Side, price, _ decimal.Decimal) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.seq++
+	id := fmt.Sprintf("k%d", f.seq)
+	f.open[user] = append(f.open[user], domain.Order{ID: id, Side: side, Price: price})
+	return id, nil
+}
+
+func (f *fakeDerivatives) MarketContract(_ context.Context, user, _ string, side domain.Side, qty decimal.Decimal, reduce bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if side == domain.Buy {
+		f.positions[user] = f.positions[user].Add(qty)
+	} else {
+		f.positions[user] = f.positions[user].Sub(qty)
+	}
+	f.markets = append(f.markets, fmt.Sprintf("%s %s %s %v", user, side, qty, reduce))
+	return nil
+}
+
+func (f *fakeDerivatives) CancelContract(_ context.Context, user, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.open[user] = slices.DeleteFunc(f.open[user], func(o domain.Order) bool { return o.ID == id })
+	return nil
+}
+
+func (f *fakeDerivatives) CancelAllContract(_ context.Context, user, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cancelAll[user]++
+	delete(f.open, user)
+	return nil
+}
+
+func (f *fakeDerivatives) Position(_ context.Context, user, _ string) (decimal.Decimal, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.positions[user], nil
+}
+
+func (f *fakeDerivatives) Futures(_ context.Context, user string) (decimal.Decimal, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.futures[user], nil
+}
+
+func (f *fakeDerivatives) ToFutures(_ context.Context, user string, amount decimal.Decimal, key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.transfers[key] {
+		f.transfers[key] = true
+		f.futures[user] = f.futures[user].Add(amount)
+	}
+	return nil
+}
+
+func (f *fakeDerivatives) orders(user string) []domain.Order {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.open[user])
+}
+
+func perpRig(t *testing.T, p domain.Params) (*rig, *fakeDerivatives) {
+	t.Helper()
+	r := newRig(t, &memStore{params: &p, version: 1})
+	fd := newFakeDerivatives()
+	r.sim.cfg.Perp = "ASTRA-USDT-PERP"
+	r.sim.Derivatives = fd
+	r.flags.perp = true
+	return r, fd
+}
+
+func TestTheBotsMakeThePerpetual(t *testing.T) {
+	p := domain.DefaultParams()
+	p.DailyVolume, p.PerpDailyVolume = 0, 86_400*400*2 // two perpetual orders a second
+	r, fd := perpRig(t, p)
+	r.rounds(4 * 20)
+	for _, m := range []string{"m1", "m2"} {
+		bids, asks := 0, 0
+		for _, o := range fd.orders(m) {
+			if o.Side == domain.Buy {
+				bids++
+			} else {
+				asks++
+			}
+		}
+		if bids != 8 || asks != 8 {
+			t.Fatalf("%s on the perpetual: %d bids, %d asks", m, bids, asks)
+		}
+	}
+	fd.mu.Lock()
+	markets, funded := len(fd.markets), fd.futures["m1"]
+	fd.mu.Unlock()
+	if markets < 10 || !funded.Equal(d("30000")) {
+		t.Fatalf("%d market orders, m1's margin %s", markets, funded)
+	}
+	if st := r.sim.Status(); !st.PerpOn || st.Perp != "ASTRA-USDT-PERP" {
+		t.Fatalf("status %+v", st)
+	}
+	// Switched off, the makers leave the perpetual (the spot pair stays).
+	r.flags.perp = false
+	r.rounds(1)
+	if fd.cancelAll["m1"] != 1 || len(fd.orders("m1")) != 0 || len(r.trading.orders("m1")) == 0 {
+		t.Fatalf("perpetual off: %v, spot %d orders", fd.cancelAll, len(r.trading.orders("m1")))
+	}
+}
+
+func TestAPositionAtTheCapOnlyReduces(t *testing.T) {
+	p := domain.DefaultParams()
+	p.DailyVolume, p.PerpDailyVolume, p.PerpBotCap = 0, 86_400*400*2, 1000
+	r, fd := perpRig(t, p)
+	fd.mu.Lock()
+	fd.positions["t1"] = d("5000") // long, worth about 5,000: over the cap
+	fd.positions["m1"] = d("-5000")
+	fd.mu.Unlock()
+	r.rounds(4 * 10)
+	fd.mu.Lock()
+	defer fd.mu.Unlock()
+	// Replayed from 5,000: while the position is worth the cap or more,
+	// every order reduces it; below, the taker trades either way again.
+	pos, reduced := d("5000"), 0
+	for _, m := range fd.markets {
+		var user, side, qty string
+		var reduce bool
+		if _, err := fmt.Sscanf(m, "%s %s %s %v", &user, &side, &qty, &reduce); err != nil {
+			t.Fatal(err)
+		}
+		if user != "t1" {
+			continue
+		}
+		if pos.GreaterThanOrEqual(d("1001")) { // the cap at a target near 1
+			if side != "SELL" || !reduce {
+				t.Fatalf("over the cap at %s: %s", pos, m)
+			}
+			reduced++
+		}
+		if side == "SELL" {
+			pos = pos.Sub(d(qty))
+		} else {
+			pos = pos.Add(d(qty))
+		}
+	}
+	if reduced == 0 {
+		t.Fatalf("t1 did not reduce: %v", fd.markets)
+	}
+	// The maker short at the cap quotes no asks.
+	for _, o := range fd.open["m1"] {
+		if o.Side == domain.Sell {
+			t.Fatalf("m1 short at the cap asks at %s", o.Price)
+		}
+	}
+}

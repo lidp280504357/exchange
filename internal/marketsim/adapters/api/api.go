@@ -23,15 +23,16 @@ import (
 	"github.com/lidp280504357/exchange/internal/marketsim/ports"
 )
 
-// Client implements ports.Trading and ports.Prices: the base URLs of
-// spot-trading-service, ledger-service, market-data-service and
-// instrument-service.
+// Client implements ports.Trading, ports.Derivatives and ports.Prices:
+// the base URLs of spot-trading-service, ledger-service,
+// market-data-service, instrument-service and derivatives-service.
 type Client struct {
-	TradingURL    string
-	LedgerURL     string
-	MarketURL     string
-	InstrumentURL string
-	HTTP          *http.Client
+	TradingURL     string
+	LedgerURL      string
+	MarketURL      string
+	InstrumentURL  string
+	DerivativesURL string
+	HTTP           *http.Client
 }
 
 // Error is a refusal from a service: its unified error code.
@@ -248,4 +249,185 @@ func (c *Client) Last(ctx context.Context, symbol string) (decimal.Decimal, erro
 		return decimal.Zero, nil
 	}
 	return decimal.NewFromString(*body.Last)
+}
+
+// Contract reads the contract's rules from instrument-service.
+func (c *Client) Contract(ctx context.Context, symbol string) (domain.Pair, error) {
+	var k struct {
+		Symbol      string `json:"symbol"`
+		TickSize    string `json:"tick_size"`
+		LotSize     string `json:"lot_size"`
+		MinQuantity string `json:"min_quantity"`
+		MinNotional string `json:"min_notional"`
+		Status      string `json:"status"`
+	}
+	if err := c.do(ctx, http.MethodGet, c.InstrumentURL+"/v1/market/contracts/"+url.PathEscape(symbol), "", nil, &k); err != nil {
+		return domain.Pair{}, fmt.Errorf("contract %s: %w", symbol, err)
+	}
+	var ds [4]decimal.Decimal
+	for i, s := range []string{k.TickSize, k.LotSize, k.MinQuantity, k.MinNotional} {
+		v, err := decimal.NewFromString(s)
+		if err != nil {
+			return domain.Pair{}, fmt.Errorf("contract %s: bad rule %q", symbol, s)
+		}
+		ds[i] = v
+	}
+	if !ds[0].IsPositive() || !ds[1].IsPositive() {
+		return domain.Pair{}, fmt.Errorf("contract %s: no tick or lot size", symbol)
+	}
+	return domain.Pair{Symbol: k.Symbol, Tick: ds[0], Lot: ds[1], MinQty: ds[2], MinNotional: ds[3], Trading: k.Status == "TRADING"}, nil
+}
+
+// OpenContract lists the bot's active orders on the contract.
+func (c *Client) OpenContract(ctx context.Context, user, symbol string) ([]domain.Order, error) {
+	var page struct {
+		Items []struct {
+			OrderID         string `json:"order_id"`
+			Side            string `json:"side"`
+			Type            string `json:"type"`
+			Price           string `json:"price"`
+			CancelRequested bool   `json:"cancel_requested"`
+		} `json:"items"`
+	}
+	q := url.Values{"symbol": {symbol}, "status": {"ACTIVE"}, "limit": {"200"}}
+	if err := c.do(ctx, http.MethodGet, c.DerivativesURL+"/v1/derivatives/orders?"+q.Encode(), user, nil, &page); err != nil {
+		return nil, fmt.Errorf("open contract orders: %w", err)
+	}
+	out := make([]domain.Order, 0, len(page.Items))
+	for _, o := range page.Items {
+		price, err := decimal.NewFromString(o.Price)
+		if err != nil || o.Type != "LIMIT" {
+			continue // a market order (its protection price): never resting
+		}
+		out = append(out, domain.Order{ID: o.OrderID, Side: domain.Side(o.Side), Price: price, Canceling: o.CancelRequested})
+	}
+	return out, nil
+}
+
+// LimitContract places a GTC limit order on the contract.
+func (c *Client) LimitContract(ctx context.Context, user, symbol string, side domain.Side, price, qty decimal.Decimal) (string, error) {
+	body := map[string]any{
+		"symbol": symbol, "side": string(side), "type": "LIMIT", "time_in_force": "GTC",
+		"price": price.String(), "quantity": qty.String(), "client_order_id": clientID(),
+	}
+	var out struct {
+		OrderID string `json:"order_id"`
+	}
+	err := c.do(ctx, http.MethodPost, c.DerivativesURL+"/v1/derivatives/orders", user, body, &out)
+	switch code(err) {
+	case "DERIV_INSUFFICIENT_MARGIN", "LEDGER_INSUFFICIENT_BALANCE", "DERIV_RISK_LIMIT_EXCEEDED":
+		return "", ports.ErrFunds
+	}
+	if err != nil {
+		return "", fmt.Errorf("contract limit %s %s@%s: %w", side, qty, price, err)
+	}
+	return out.OrderID, nil
+}
+
+// MarketContract places a market order on the contract.
+func (c *Client) MarketContract(ctx context.Context, user, symbol string, side domain.Side, qty decimal.Decimal, reduceOnly bool) error {
+	body := map[string]any{
+		"symbol": symbol, "side": string(side), "type": "MARKET", "quantity": qty.String(), "client_order_id": clientID(),
+	}
+	if reduceOnly {
+		body["reduce_only"] = true
+	}
+	err := c.do(ctx, http.MethodPost, c.DerivativesURL+"/v1/derivatives/orders", user, body, nil)
+	switch code(err) {
+	case "DERIV_INSUFFICIENT_MARGIN", "LEDGER_INSUFFICIENT_BALANCE", "DERIV_RISK_LIMIT_EXCEEDED", "DERIV_REDUCE_ONLY_REJECTED":
+		return ports.ErrFunds
+	}
+	if err != nil {
+		return fmt.Errorf("contract market %s: %w", side, err)
+	}
+	return nil
+}
+
+// CancelContract asks to cancel one contract order.
+func (c *Client) CancelContract(ctx context.Context, user, orderID string) error {
+	err := c.do(ctx, http.MethodDelete, c.DerivativesURL+"/v1/derivatives/orders/"+url.PathEscape(orderID), user, nil, nil)
+	switch code(err) {
+	case "ORDER_ALREADY_FILLED", "COMMON_CONFLICT", "ORDER_NOT_FOUND":
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("cancel contract order %s: %w", orderID, err)
+	}
+	return nil
+}
+
+// CancelAllContract asks to cancel every active contract order of the bot.
+func (c *Client) CancelAllContract(ctx context.Context, user, symbol string) error {
+	if err := c.do(ctx, http.MethodDelete, c.DerivativesURL+"/v1/derivatives/orders?"+url.Values{"symbol": {symbol}}.Encode(), user, nil, nil); err != nil {
+		return fmt.Errorf("cancel all contract orders %s: %w", symbol, err)
+	}
+	return nil
+}
+
+// Position returns the bot's signed position on the contract.
+func (c *Client) Position(ctx context.Context, user, symbol string) (decimal.Decimal, error) {
+	var body struct {
+		Positions []struct {
+			Symbol   string `json:"symbol"`
+			Quantity string `json:"quantity"`
+		} `json:"positions"`
+	}
+	if err := c.do(ctx, http.MethodGet, c.DerivativesURL+"/v1/derivatives/positions", user, nil, &body); err != nil {
+		return decimal.Zero, fmt.Errorf("positions: %w", err)
+	}
+	total := decimal.Zero
+	for _, p := range body.Positions {
+		if p.Symbol != symbol {
+			continue
+		}
+		q, err := decimal.NewFromString(p.Quantity)
+		if err != nil {
+			return decimal.Zero, fmt.Errorf("position of %s: bad quantity %q", symbol, p.Quantity)
+		}
+		total = total.Add(q)
+	}
+	return total, nil
+}
+
+// Futures returns the bot's available FUTURES balance.
+func (c *Client) Futures(ctx context.Context, user string) (decimal.Decimal, error) {
+	var body struct {
+		Available string `json:"available"`
+	}
+	if err := c.do(ctx, http.MethodGet, c.DerivativesURL+"/v1/derivatives/account", user, nil, &body); err != nil {
+		return decimal.Zero, fmt.Errorf("futures account: %w", err)
+	}
+	return decimal.NewFromString(body.Available)
+}
+
+// ToFutures moves USDT from the bot's SPOT account to its FUTURES account.
+func (c *Client) ToFutures(ctx context.Context, user string, amount decimal.Decimal, key string) error {
+	body := map[string]string{"asset": "USDT", "amount": amount.String(), "from_account_type": "SPOT", "to_account_type": "FUTURES"}
+	b, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.LedgerURL+"/v1/account/transfers", bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-User-Id", user)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", key)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return fmt.Errorf("transfer to futures: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 300 {
+		var e struct {
+			Code string `json:"code"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&e)
+		if e.Code == "LEDGER_INSUFFICIENT_BALANCE" {
+			return ports.ErrFunds
+		}
+		return fmt.Errorf("transfer to futures: HTTP %d %s", resp.StatusCode, e.Code)
+	}
+	return nil
 }

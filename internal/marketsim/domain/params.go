@@ -49,6 +49,12 @@ type Params struct {
 	// BotUSDT is the USDT a bot keeps about: one with less leans to
 	// selling the coin, one with more to buying it.
 	BotUSDT float64 `json:"bot_usdt"`
+	// The perpetual (A4): the takers' day of turnover on it, the most a
+	// bot's position may be worth (beyond, it only reduces), the FUTURES
+	// margin a bot is topped up to.
+	PerpDailyVolume float64 `json:"perp_daily_volume"`
+	PerpBotCap      float64 `json:"perp_bot_cap"`
+	PerpMargin      float64 `json:"perp_margin"`
 }
 
 // DefaultParams are the design's (§3, §4): ASTRA near 1 USDT, following
@@ -62,6 +68,7 @@ func DefaultParams() Params {
 		Levels: 8, Spread: 0.002, LevelTicks: 5, LevelSize: 800, RequoteTick: 3,
 		DailyVolume: 2_000_000, OrderSize: 400, TrendMinutes: 15, TrendStrength: 0.3,
 		OrdersPerSecond: 20, CancelsPerSecond: 10, BotUSDT: 100_000,
+		PerpDailyVolume: 1_000_000, PerpBotCap: 20_000, PerpMargin: 30_000,
 	}
 }
 
@@ -83,7 +90,8 @@ func (p Params) Validate() error {
 		return true
 	}
 	check(finite(p.P0, p.WBTC, p.WETH, p.Beta, p.Theta, p.Sigma, p.Mu, p.MaxMinuteMove, p.Floor, p.Ceiling, p.Spread,
-		p.LevelSize, p.DailyVolume, p.OrderSize, p.TrendStrength, p.OrdersPerSecond, p.CancelsPerSecond, p.BotUSDT),
+		p.LevelSize, p.DailyVolume, p.OrderSize, p.TrendStrength, p.OrdersPerSecond, p.CancelsPerSecond, p.BotUSDT,
+		p.PerpDailyVolume, p.PerpBotCap, p.PerpMargin),
 		"every number must be finite")
 	check(p.Floor > 0 && p.Ceiling > p.Floor, "0 < floor < ceiling")
 	check(p.P0 >= p.Floor && p.P0 <= p.Ceiling, "p0 must be between the floor and the ceiling")
@@ -103,5 +111,7 @@ func (p Params) Validate() error {
 	check(p.TrendStrength >= 0 && p.TrendStrength <= 1, "trend_strength must be between 0 and 1")
 	check(p.OrdersPerSecond > 0 && p.CancelsPerSecond > 0, "the throttle must allow some orders and cancels")
 	check(p.BotUSDT > 0, "bot_usdt must be positive")
+	check(p.PerpDailyVolume >= 0 && p.PerpBotCap > 0 && p.PerpMargin > 0,
+		"perp_daily_volume must not be negative, perp_bot_cap and perp_margin must be positive")
 	return errors.Join(errs...)
 }
