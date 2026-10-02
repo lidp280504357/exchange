@@ -16,6 +16,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/wallet/adapters/postgres"
 	"github.com/lidp280504357/exchange/internal/wallet/application"
 	"github.com/lidp280504357/exchange/internal/wallet/domain"
+	"github.com/lidp280504357/exchange/internal/wallet/ports"
 	"github.com/lidp280504357/exchange/migrations"
 )
 
@@ -178,13 +179,41 @@ func printChecks(ctx context.Context, store *postgres.Store, network string, out
 	}
 	if len(list) == 0 {
 		fmt.Fprintln(out, "no chain check yet")
+	} else {
+		w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "CHECKED\tASSET\tHELD\tELSEWHERE\tIN FLIGHT\tEXPECTED\tUNBOOKED FEES\tSHORTFALL\tADDRESSES")
+		for _, c := range list {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n", c.CheckedAt.UTC().Format(time.RFC3339), c.Asset, c.Chain, c.Elsewhere,
+				c.InFlight, c.Ledger, c.Unbooked, c.Shortfall, c.Addresses)
+		}
+		if err := w.Flush(); err != nil {
+			return err
+		}
+	}
+	if network == domain.ProviderUdun {
+		return printBackfills(ctx, store, out)
+	}
+	return nil
+}
+
+// printBackfills lists the deposits administrators backfilled that no
+// custodian callback has matched yet (design 2026-10-02 §4.3): the
+// custodian's balance holds no such deposit if one was entered wrongly.
+func printBackfills(ctx context.Context, store *postgres.Store, out io.Writer) error {
+	list, err := store.Read().Deposits().Page(ctx, ports.DepositFilter{ManualPending: true, Limit: 200})
+	if err != nil {
+		return err
+	}
+	if len(list) == 0 {
+		fmt.Fprintln(out, "\nno backfilled deposit waits for its callback")
 		return nil
 	}
+	fmt.Fprintf(out, "\n%d backfilled deposits without a custodian callback yet (each should be in the custodian's balance):\n", len(list))
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "CHECKED\tASSET\tHELD\tELSEWHERE\tIN FLIGHT\tEXPECTED\tUNBOOKED FEES\tSHORTFALL\tADDRESSES")
-	for _, c := range list {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n", c.CheckedAt.UTC().Format(time.RFC3339), c.Asset, c.Chain, c.Elsewhere,
-			c.InFlight, c.Ledger, c.Unbooked, c.Shortfall, c.Addresses)
+	fmt.Fprintln(w, "DETECTED\tID\tUSER\tAMOUNT\tNETWORK\tTRADE\tTX\tSTATUS\tBY")
+	for _, d := range list {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s %s\t%s\t%s\t%s\t%s\t%s\n", d.DetectedAt.UTC().Format(time.RFC3339), d.ID, d.UserID, d.Amount, d.Asset,
+			d.Network, d.ProviderTxID, d.TxHash, d.Status, d.EnteredBy)
 	}
 	return w.Flush()
 }

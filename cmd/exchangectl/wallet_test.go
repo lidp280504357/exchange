@@ -25,7 +25,10 @@ func TestWalletCommandsQueue(t *testing.T) {
 	if out := run("fund", "--tx", "0x"+strings.Repeat("a", 64)); !strings.HasPrefix(out, "queued FUND") {
 		t.Fatal(out)
 	}
-	if out := run("reconcile"); !strings.Contains(out, "no chain check yet") {
+	if out := run("reconcile"); !strings.Contains(out, "no chain check yet") || strings.Contains(out, "backfilled") {
+		t.Fatal(out)
+	}
+	if out := run("checks", "--network", "UDUN"); !strings.Contains(out, "no backfilled deposit waits for its callback") {
 		t.Fatal(out)
 	}
 	out := run("commands")

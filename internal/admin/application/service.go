@@ -42,6 +42,8 @@ type Service struct {
 	History  ports.AccountHistory
 	Risk     ports.Risk
 	Orders   ports.Orders
+	// Deposits handles the deposits that need a person (wallet-service).
+	Deposits ports.Deposits
 	Wallet   ports.Withdrawals
 	Catalog  ports.Instruments
 	// Derivatives is derivatives-service (perpetual contracts).

@@ -8,9 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/event"
 	"github.com/lidp280504357/exchange/internal/platform/outbox"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
@@ -146,23 +148,26 @@ type deposits repos
 
 const depositColumns = `id, user_id, asset, network, address, contract, tx_hash, log_index, block_number, block_hash, amount,
 	raw_amount, confirmations, required_confirmations, unclaimed, reason, status, journal_id, credit_requested_at, detected_at,
-	confirmed_at, credited_at, kind, provider_tx_id`
+	confirmed_at, credited_at, kind, provider_tx_id, source, entered_by, callback_at, discrepancy, resolution, resolved_by, resolved_at,
+	resolution_note, release_journal_id`
 
 func scanDeposit(row pgx.Row) (domain.Deposit, error) {
 	var d domain.Deposit
-	var asset, contract, reason, journal, providerTx *string
+	var asset, contract, reason, journal, providerTx, release *string
 	var block int64
 	var conf, required int32
-	var requested, confirmed, credited *time.Time
+	var requested, confirmed, credited, callback, resolved *time.Time
 	err := row.Scan(&d.ID, &d.UserID, &asset, &d.Network, &d.Address, &contract, &d.TxHash, &d.LogIndex, &block, &d.BlockHash,
 		&d.Amount, &d.RawAmount, &conf, &required, &d.Unclaimed, &reason, &d.Status, &journal, &requested, &d.DetectedAt,
-		&confirmed, &credited, &d.Kind, &providerTx)
+		&confirmed, &credited, &d.Kind, &providerTx, &d.Source, &d.EnteredBy, &callback, &d.Discrepancy, &d.Resolution, &d.ResolvedBy,
+		&resolved, &d.ResolutionNote, &release)
 	if err != nil {
 		return domain.Deposit{}, err
 	}
 	d.Asset, d.Contract, d.Reason, d.JournalID, d.ProviderTxID = str(asset), str(contract), str(reason), str(journal), str(providerTx)
 	d.BlockNumber, d.Confirmations, d.Required = uint64(block), uint32(conf), uint32(required) //nolint:gosec // non-negative columns
 	d.CreditRequested, d.ConfirmedAt, d.CreditedAt = at(requested), at(confirmed), at(credited)
+	d.CallbackAt, d.ResolvedAt, d.ReleaseJournalID = at(callback), at(resolved), str(release)
 	return d, nil
 }
 
@@ -203,11 +208,13 @@ func stamp(t time.Time) *time.Time {
 
 func (r deposits) Insert(ctx context.Context, d domain.Deposit) error {
 	_, err := r.q.Exec(ctx, `INSERT INTO deposits (`+depositColumns+`)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
+			$27, $28, $29, $30, $31, $32, $33)`,
 		d.ID, d.UserID, text(d.Asset), d.Network, d.Address, text(d.Contract), d.TxHash, d.LogIndex, int64(d.BlockNumber), //nolint:gosec // block heights fit
 		d.BlockHash, d.Amount, d.RawAmount, int64(d.Confirmations), int64(d.Required), d.Unclaimed, text(d.Reason), d.Status,
 		text(d.JournalID), stamp(d.CreditRequested), d.DetectedAt, stamp(d.ConfirmedAt), stamp(d.CreditedAt), kind(d.Kind),
-		text(d.ProviderTxID))
+		text(d.ProviderTxID), d.Source, d.EnteredBy, stamp(d.CallbackAt), d.Discrepancy, d.Resolution, d.ResolvedBy, stamp(d.ResolvedAt),
+		d.ResolutionNote, text(d.ReleaseJournalID))
 	if err != nil {
 		return fmt.Errorf("insert deposit: %w", err)
 	}
@@ -216,14 +223,51 @@ func (r deposits) Insert(ctx context.Context, d domain.Deposit) error {
 
 func (r deposits) Update(ctx context.Context, d domain.Deposit) error {
 	_, err := r.q.Exec(ctx, `UPDATE deposits SET block_number = $2, block_hash = $3, confirmations = $4, unclaimed = $5,
-		reason = $6, status = $7, journal_id = $8, credit_requested_at = $9, confirmed_at = $10, credited_at = $11, updated_at = now()
-		WHERE id = $1`,
+		reason = $6, status = $7, journal_id = $8, credit_requested_at = $9, confirmed_at = $10, credited_at = $11, callback_at = $12,
+		discrepancy = $13, resolution = $14, resolved_by = $15, resolved_at = $16, resolution_note = $17, release_journal_id = $18,
+		updated_at = now() WHERE id = $1`,
 		d.ID, int64(d.BlockNumber), d.BlockHash, int64(d.Confirmations), d.Unclaimed, text(d.Reason), d.Status, //nolint:gosec // block heights fit
-		text(d.JournalID), stamp(d.CreditRequested), stamp(d.ConfirmedAt), stamp(d.CreditedAt))
+		text(d.JournalID), stamp(d.CreditRequested), stamp(d.ConfirmedAt), stamp(d.CreditedAt), stamp(d.CallbackAt), d.Discrepancy,
+		d.Resolution, d.ResolvedBy, stamp(d.ResolvedAt), d.ResolutionNote, text(d.ReleaseJournalID))
 	if err != nil {
 		return fmt.Errorf("update deposit: %w", err)
 	}
 	return nil
+}
+
+func (r deposits) ByTransfer(ctx context.Context, network, txHash, address string) (*domain.Deposit, error) {
+	return r.one(ctx, `SELECT `+depositColumns+` FROM deposits WHERE network = $1 AND lower(tx_hash) = lower($2)
+		AND lower(address) = lower($3) ORDER BY id LIMIT 1`, network, txHash, address)
+}
+
+func (r deposits) Get(ctx context.Context, id string) (*domain.Deposit, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return nil, nil
+	}
+	return r.one(ctx, `SELECT `+depositColumns+` FROM deposits WHERE id = $1`, id)
+}
+
+func (r deposits) Page(ctx context.Context, f ports.DepositFilter) ([]domain.Deposit, error) {
+	var user, after *uuid.UUID
+	for _, v := range []struct {
+		dst **uuid.UUID
+		src string
+	}{{&user, f.UserID}, {&after, f.After}} {
+		if v.src == "" {
+			continue
+		}
+		id, err := uuid.Parse(v.src)
+		if err != nil {
+			return nil, apperr.Invalid("not an ID: " + v.src)
+		}
+		*v.dst = &id
+	}
+	return r.list(ctx, `SELECT `+depositColumns+` FROM deposits WHERE ($1::uuid IS NULL OR user_id = $1) AND ($2 = '' OR status = $2)
+		AND ($3 = '' OR network = $3)
+		AND (NOT $4 OR (resolution = '' AND (status = 'REJECTED' OR discrepancy <> '')))
+		AND (NOT $5 OR (source = 'MANUAL' AND callback_at IS NULL))
+		AND ($6::uuid IS NULL OR id < $6) ORDER BY id DESC LIMIT $7`,
+		user, f.Status, f.Network, f.Attention, f.ManualPending, after, f.Limit)
 }
 
 func (r deposits) one(ctx context.Context, sql string, args ...any) (*domain.Deposit, error) {

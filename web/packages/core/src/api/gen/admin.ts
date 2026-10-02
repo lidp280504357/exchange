@@ -240,6 +240,150 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/deposits/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * wallet-service's deposits, for decisions
+         * @description Newest first, straight from wallet-service (not the read model):
+         *     attention=true lists the deposits waiting for a decision (booked
+         *     to UNCLAIMED_DEPOSIT, or a backfill the custodian's callback
+         *     disagreed with), manual_pending=true the backfilled ones without
+         *     a callback yet. Needs withdrawals.read.
+         */
+        get: operations["listReviewDeposits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/deposits/manual/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check a backfill of a lost custodian callback without booking it
+         * @description The checks of POST /admin/v1/deposits/manual (the network is a
+         *     custodian's, the address is a user's on it, neither the trade nor
+         *     the transfer is known, the amount fits the asset's precision) and
+         *     what it would book. Not audited. Needs deposits.review.
+         */
+        post: operations["checkDepositBackfill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/deposits/manual": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Backfill a custodian deposit whose callback was lost
+         * @description For a deposit the administrator found in the custodian's console
+         *     (this console cannot ask the custodian, so nothing here checks it
+         *     there). After the checks of POST /admin/v1/deposits/manual/check
+         *     it is a fund operation (kind DEPOSIT_BACKFILL): in single-person
+         *     mode within the limits it is booked at once (EXECUTED), otherwise
+         *     it waits for a second administrator (PENDING). Booked like a
+         *     callback (credited, or to UNCLAIMED_DEPOSIT below the minimum)
+         *     with source MANUAL; the custodian's own callback, when it comes,
+         *     is matched against it, never booked again. Audited. Needs
+         *     deposits.review.
+         */
+        post: operations["backfillDeposit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/deposits/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One of wallet-service's deposits
+         * @description Needs withdrawals.read.
+         */
+        get: operations["getReviewDeposit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/deposits/{id}/credit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Give an unclaimed deposit to its user
+         * @description Only a deposit booked to UNCLAIMED_DEPOSIT (below the minimum, the
+         *     account closed or not eligible) and only its own asset and amount:
+         *     the ledger moves it to the user's spot account (DEPOSIT_CREDIT,
+         *     audited as ledger.unclaimed_released). An unsupported token has no
+         *     asset and can only be rejected (WALLET_DEPOSIT_NOT_RELEASABLE).
+         *     Needs deposits.review.
+         */
+        post: operations["creditDeposit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/deposits/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close a deposit waiting for a decision without moving funds
+         * @description Marks it handled with the reason (resolution DISMISSED): an
+         *     unclaimed deposit stays in UNCLAIMED_DEPOSIT, a disagreeing
+         *     callback stays unbooked. Audited by the wallet
+         *     (wallet.deposit.dismissed). Needs deposits.review.
+         */
+        post: operations["rejectDeposit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/dashboard": {
         parameters: {
             query?: never;
@@ -878,6 +1022,54 @@ export interface paths {
          *     says why. At most 50 at a time. Needs withdrawals.review.
          */
         post: operations["reviewWithdrawalBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/withdrawals/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A withdrawal with what its review needs
+         * @description From wallet-service: the withdrawal, its address in the user's
+         *     address book (when it was added, when its cooling-off ended) and
+         *     the user's withdrawals' worth today and this month. Needs
+         *     withdrawals.read.
+         */
+        get: operations["getWithdrawal"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/withdrawals/{id}/hold": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Put a withdrawal in review on hold, or take it off hold
+         * @description A held withdrawal stays in review with the reviewer's note (say,
+         *     while the user is called) until it is taken off hold or decided;
+         *     deciding it takes it off hold. Only a withdrawal in review
+         *     (WALLET_WITHDRAWAL_NOT_IN_REVIEW otherwise). Audited by the wallet
+         *     (wallet.withdrawal.hold, wallet.withdrawal.unhold). Needs
+         *     withdrawals.review.
+         */
+        post: operations["holdWithdrawal"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1757,7 +1949,7 @@ export interface components {
             name: string;
             /** @enum {string} */
             role: "ADMIN" | "OPERATOR" | "FINANCE" | "AUDITOR";
-            permissions: ("users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write" | "settings.write" | "users.notes" | "users.security" | "users.contacts" | "ledger.hold")[];
+            permissions: ("users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write" | "settings.write" | "users.notes" | "users.security" | "users.contacts" | "ledger.hold" | "deposits.review")[];
         };
         Settings: {
             /** @description Fund operations need a second administrator (the flag admin.two_person_approval). */
@@ -1782,7 +1974,9 @@ export interface components {
             approvals: number;
             /** @description Identity rebind requests waiting for a decision (with users.security; counted up to 200). */
             identity_requests: number;
-            partial: ("withdrawals" | "identity_requests")[];
+            /** @description Deposits waiting for a decision (with deposits.review; counted up to 200). */
+            deposits: number;
+            partial: ("withdrawals" | "identity_requests" | "deposits")[];
         };
         Identity: {
             /** @enum {string} */
@@ -2046,6 +2240,93 @@ export interface components {
             approved_at?: string | null;
             broadcast_at?: string | null;
             confirmed_at?: string | null;
+            /**
+             * Format: date-time
+             * @description Set while a reviewer has it on hold (held_by, with hold_note).
+             */
+            held_at?: string | null;
+            held_by?: string;
+            hold_note?: string;
+        };
+        WithdrawalDetail: {
+            withdrawal: components["schemas"]["Withdrawal"];
+            /** @description The address in the user's address book; null when it was deleted. */
+            address_book: {
+                label: string;
+                /** Format: date-time */
+                created_at: string;
+                /**
+                 * Format: date-time
+                 * @description The end of its cooling-off period.
+                 */
+                usable_at: string;
+            } | null;
+            /** @description The user's withdrawals' worth today (UTC), refused ones left out. */
+            used_today_usdt: components["schemas"]["Decimal"];
+            /** @description The same this month. */
+            used_month_usdt: components["schemas"]["Decimal"];
+        };
+        /** @description A deposit as wallet-service has it, with the admin console's decisions on it. */
+        ReviewDeposit: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            user_id: string;
+            /** @enum {string} */
+            kind: "CHAIN" | "INTERNAL";
+            /** @description Null for a token no asset is configured for. */
+            asset: string | null;
+            network: string;
+            address: string;
+            tx_hash: string;
+            amount: components["schemas"]["Decimal"];
+            /** @enum {string} */
+            status: "DETECTED" | "CONFIRMING" | "CONFIRMED" | "CREDITED" | "ORPHANED" | "REJECTED";
+            /** @description Booked to UNCLAIMED_DEPOSIT instead of the user. */
+            unclaimed: boolean;
+            /** @enum {string|null} */
+            reason: "BELOW_MINIMUM" | "ACCOUNT_CLOSED" | "NOT_ELIGIBLE" | "UNSUPPORTED_TOKEN" | null;
+            /** @description The custodian's trade (UDUN:<tradeId>). */
+            trade_id: string | null;
+            confirmations: number;
+            required_confirmations: number;
+            journal_id: string | null;
+            /** Format: date-time */
+            detected_at: string;
+            confirmed_at: string | null;
+            credited_at: string | null;
+            /**
+             * @description MANUAL for an administrator's backfill of a lost callback.
+             * @enum {string}
+             */
+            source: "AUTO" | "MANUAL";
+            entered_by: string;
+            /** @description When the custodian's own callback matched a backfill. */
+            callback_at: string | null;
+            /** @description What in the custodian's callback disagreed with a backfill. */
+            discrepancy: string;
+            /** @description Waits for an administrator's decision. */
+            attention: boolean;
+            /** @enum {string} */
+            resolution: "" | "CREDITED" | "DISMISSED";
+            resolved_by: string;
+            resolved_at: string | null;
+            resolution_note: string;
+            release_journal_id: string | null;
+        };
+        ReasonRequest: {
+            reason: string;
+        };
+        /** @description A custodian deposit as the custodian's console shows it. */
+        BackfillRequest: {
+            /** @description A network whose custodian is not the chain itself (provider UDUN). */
+            network: string;
+            /** @description The custodian's trade ID as its console shows it (kept as <provider>:<tradeId>, like a callback's). */
+            trade_id: string;
+            /** @description The user's deposit address on the network. */
+            address: string;
+            tx_hash: string;
+            amount: components["schemas"]["Decimal"];
         };
         Network: {
             asset_code?: string;
@@ -2109,15 +2390,16 @@ export interface components {
              */
             updated_at: string | null;
         };
-        /** @description A fund operation (a manual adjustment or an insurance fund contribution). */
+        /** @description A fund operation (a manual adjustment, an insurance fund contribution or a deposit backfill). */
         Approval: {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            kind: "LEDGER_ADJUSTMENT" | "INSURANCE_FUND";
+            kind: "LEDGER_ADJUSTMENT" | "INSURANCE_FUND" | "DEPOSIT_BACKFILL";
             /**
              * @description For LEDGER_ADJUSTMENT user_id, asset and amount, account_type FUTURES when not the SPOT account; for INSURANCE_FUND
-             *     asset and amount; reference when given.
+             *     asset and amount; reference when given. For DEPOSIT_BACKFILL user_id, asset, amount, network, trade_id, address,
+             *     tx_hash and entered_by (the backfill's result names the deposit, its journal_id stays null).
              */
             payload: {
                 [key: string]: string;
@@ -2417,7 +2699,7 @@ export interface components {
             tx_hash: string;
             signature_ok: boolean;
             /** @enum {string} */
-            result: "RECEIVED" | "APPLIED" | "IGNORED" | "UNMATCHED" | "REJECTED" | "FAILED";
+            result: "RECEIVED" | "APPLIED" | "IGNORED" | "UNMATCHED" | "REJECTED" | "FAILED" | "DISCREPANCY";
             detail: string;
             attempts: number;
             /** Format: date-time */
@@ -2807,6 +3089,176 @@ export interface operations {
                         items: components["schemas"]["Deposit"][];
                         next_cursor: components["schemas"]["NextCursor"];
                     };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listReviewDeposits: {
+        parameters: {
+            query?: {
+                user_id?: components["parameters"]["UserFilter"];
+                status?: "DETECTED" | "CONFIRMING" | "CONFIRMED" | "CREDITED" | "ORPHANED" | "REJECTED";
+                network?: string;
+                attention?: "true";
+                manual_pending?: "true";
+                /** @description The previous page's next_cursor; omitted for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of deposits. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ReviewDeposit"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    checkDepositBackfill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackfillRequest"];
+            };
+        };
+        responses: {
+            /** @description What the backfill would book. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        user_id: string;
+                        asset: string;
+                        /** @description Below the network's minimum, so booked to UNCLAIMED_DEPOSIT instead of the user. */
+                        unclaimed: boolean;
+                        /** @description The amount's worth; null without a price (a second administrator then decides). */
+                        value_usdt: components["schemas"]["NullableDecimal"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    backfillDeposit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackfillRequest"] & {
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The fund operation, executed or waiting for a second administrator. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Approval"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getReviewDeposit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The deposit. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewDeposit"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    creditDeposit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReasonRequest"];
+            };
+        };
+        responses: {
+            /** @description The deposit, CREDITED. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewDeposit"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    rejectDeposit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReasonRequest"];
+            };
+        };
+        responses: {
+            /** @description The deposit. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewDeposit"];
                 };
             };
             default: components["responses"]["Error"];
@@ -3619,6 +4071,12 @@ export interface operations {
                 /** @description One network, e.g. TRON or ETH-SEPOLIA; every network when empty. */
                 network?: string;
                 order?: "asc" | "desc";
+                /** @description true for the withdrawals on hold, false for the others. */
+                held?: "true" | "false";
+                min_value_usdt?: components["schemas"]["Decimal"];
+                max_value_usdt?: components["schemas"]["Decimal"];
+                /** @description The lowest risk score listed. */
+                min_risk?: number;
                 /** @description The previous page's next_cursor; omitted for the first page. */
                 cursor?: components["parameters"]["Cursor"];
                 limit?: components["parameters"]["Limit"];
@@ -3708,6 +4166,60 @@ export interface operations {
                             message?: string;
                         }[];
                     };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getWithdrawal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The withdrawal. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WithdrawalDetail"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    holdWithdrawal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    hold: boolean;
+                    /** @description Required to put it on hold. */
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The withdrawal. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Withdrawal"];
                 };
             };
             default: components["responses"]["Error"];
@@ -4411,7 +4923,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description One outcome; every outcome when empty. */
-                result?: "RECEIVED" | "APPLIED" | "IGNORED" | "UNMATCHED" | "REJECTED" | "FAILED";
+                result?: "RECEIVED" | "APPLIED" | "IGNORED" | "UNMATCHED" | "REJECTED" | "FAILED" | "DISCREPANCY";
                 kind?: "DEPOSIT" | "WITHDRAWAL";
                 /** @description A trade ID, withdrawal ID (businessId), transaction hash or address. */
                 q?: string;

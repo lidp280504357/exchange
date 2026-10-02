@@ -190,6 +190,7 @@ func setup(ctx context.Context, a *app.App) error {
 		Risk:        backends.Risk{C: riskv1.NewRiskServiceClient(clients["risk"])},
 		Orders:      backends.Trading{REST: rest, Base: cfg.TradingURL},
 		Wallet:      backends.Wallet{REST: rest, Base: cfg.WalletURL},
+		Deposits:    backends.WalletDeposits{Wallet: backends.Wallet{REST: rest, Base: cfg.WalletURL}},
 		Catalog:     backends.Instruments{C: instrumentv1.NewInstrumentServiceClient(clients["instrument"])},
 		Derivatives: backends.Derivatives{REST: rest, Base: cfg.DerivativesURL},
 		Flags:       backends.Flags{DB: configDB, Events: event.NewFactory(a.Name(), a.Config().InstanceID)},

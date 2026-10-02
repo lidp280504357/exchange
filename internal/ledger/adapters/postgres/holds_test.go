@@ -11,6 +11,54 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 )
 
+func TestReleaseUnclaimed(t *testing.T) {
+	svc, _, db := setup(t)
+	ctx := context.Background()
+	user, dep := uuid.NewString(), uuid.NewString()
+	unclaimed := func() string {
+		list, err := svc.SystemBalances(ctx, "USDT")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range list {
+			if a.Key.Type == domain.AccountUnclaimedDeposit {
+				return a.Available.String()
+			}
+		}
+		return "0"
+	}
+	// Below the minimum: booked to UNCLAIMED_DEPOSIT.
+	if _, err := svc.CreditDeposit(ctx, uuid.NewString(), domain.Deposit{
+		ID: dep, UserID: user, Asset: "USDT", Amount: d("0.8"), Network: "TRON", TxHash: "t1", Unclaimed: true, Reason: "BELOW_MINIMUM",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := unclaimed(); got != "0.8" {
+		t.Fatalf("unclaimed %s", got)
+	}
+	res, err := svc.ReleaseUnclaimed(ctx, dep, user, "USDT", d("0.8"), "ops@example.com", "the user asked")
+	if err != nil || res.Replayed {
+		t.Fatalf("release %+v %v", res, err)
+	}
+	if av, _ := usdt(t, svc, user, domain.AccountSpot); !av.Equal(d("0.8")) || unclaimed() != "0" {
+		t.Fatalf("after the release: user %s, unclaimed %s", av, unclaimed())
+	}
+	again, err := svc.ReleaseUnclaimed(ctx, dep, user, "USDT", d("0.8"), "ops@example.com", "the user asked")
+	if err != nil || !again.Replayed || again.JournalID != res.JournalID {
+		t.Fatalf("repeated %+v %v", again, err)
+	}
+	other := uuid.NewString()
+	if _, err := svc.ReleaseUnclaimed(ctx, other, user, "USDT", d("0.1"), "ops@example.com", "nothing is unclaimed"); !apperr.Is(err, "LEDGER_INSUFFICIENT_BALANCE") {
+		t.Fatalf("more than UNCLAIMED_DEPOSIT holds: %v", err)
+	}
+	if _, err := svc.ReleaseUnclaimed(ctx, other, user, "USDT", d("0.1"), "", "no actor"); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("no actor: %v", err)
+	}
+	if n := count(t, db, `SELECT count(*) FROM outbox WHERE event_type = 'audit.AdminActionPerformed'`); n != 1 {
+		t.Fatalf("release audits: %d", n)
+	}
+}
+
 func TestHoldsAndAccountAdjustments(t *testing.T) {
 	svc, store, db := setup(t)
 	ctx := context.Background()

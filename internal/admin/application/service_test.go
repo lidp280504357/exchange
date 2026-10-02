@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -473,6 +474,70 @@ func (w *fakeWallet) Review(_ context.Context, id string, approve bool, reviewer
 	return json.RawMessage(`{"status":"REJECTED"}`), nil
 }
 
+func (w *fakeWallet) Detail(_ context.Context, id string) (json.RawMessage, error) {
+	return json.RawMessage(`{"withdrawal":{"id":"` + id + `"}}`), nil
+}
+
+func (w *fakeWallet) Hold(_ context.Context, id string, hold bool, reviewer, _ string) (json.RawMessage, error) {
+	w.reviewer = reviewer
+	w.reviewed = append(w.reviewed, fmt.Sprintf("hold %s %t", id, hold))
+	return json.RawMessage(`{}`), nil
+}
+
+// fakeDeposits is wallet-service's deposits that need a person.
+type fakeDeposits struct {
+	attention int
+	booked    []ports.ManualDeposit
+	decided   []string
+	known     map[string]string // trade ID -> deposit ID
+}
+
+func (d *fakeDeposits) List(_ context.Context, q ports.DepositReviewQuery) (json.RawMessage, error) {
+	n := 0
+	if q.Attention {
+		n = d.attention
+	}
+	items := make([]string, n)
+	for i := range items {
+		items[i] = "{}"
+	}
+	return json.RawMessage(`{"items":[` + strings.Join(items, ",") + `],"next_cursor":null}`), nil
+}
+
+func (d *fakeDeposits) Get(_ context.Context, id string) (json.RawMessage, error) {
+	return json.RawMessage(`{"id":"` + id + `"}`), nil
+}
+
+func (d *fakeDeposits) Credit(_ context.Context, id, actor, _ string) (json.RawMessage, error) {
+	d.decided = append(d.decided, "credit "+id+" by "+actor)
+	return json.RawMessage(`{"id":"` + id + `","status":"CREDITED"}`), nil
+}
+
+func (d *fakeDeposits) Dismiss(_ context.Context, id, actor, _ string) (json.RawMessage, error) {
+	d.decided = append(d.decided, "dismiss "+id+" by "+actor)
+	return json.RawMessage(`{"id":"` + id + `","resolution":"DISMISSED"}`), nil
+}
+
+func (d *fakeDeposits) CheckManual(_ context.Context, m ports.ManualDeposit) (ports.ManualCheck, error) {
+	if m.Address == "nobody" {
+		return ports.ManualCheck{}, apperr.Invalid("no user's deposit address")
+	}
+	return ports.ManualCheck{UserID: someUser, Asset: "USDT"}, nil
+}
+
+func (d *fakeDeposits) BookManual(_ context.Context, m ports.ManualDeposit, _ string) (json.RawMessage, error) {
+	if d.known == nil {
+		d.known = map[string]string{}
+	}
+	id, ok := d.known[m.TradeID]
+	if !ok {
+		id = fmt.Sprintf("0192a000-0000-7000-8000-%012d", len(d.known)+1)
+		d.known[m.TradeID] = id
+		d.booked = append(d.booked, m)
+	}
+	return json.RawMessage(`{"id":"` + id + `","status":"CONFIRMED","source":"MANUAL"}`), nil
+}
+
 // fakePrices are the last prices of the USDT pairs.
 type fakePrices ports.Prices
 
@@ -488,6 +553,7 @@ type harness struct {
 	wallet      *fakeWallet
 	derivatives *fakeDerivatives
 	security    *fakeSecurity
+	deposits    *fakeDeposits
 	now         time.Time
 	// secrets by email, for signing in.
 	secrets map[string][]byte
@@ -504,12 +570,13 @@ func newHarness(t *testing.T) *harness {
 	h := &harness{
 		store: newMemStore(), ledger: &fakeLedger{}, flags: &fakeFlags{}, orders: &fakeOrders{}, wallet: &fakeWallet{},
 		derivatives: &fakeDerivatives{}, now: time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC), secrets: map[string][]byte{},
-		users: &fakeUsers{known: map[string]ports.User{}}, security: newFakeSecurity(),
+		users: &fakeUsers{known: map[string]ports.User{}}, security: newFakeSecurity(), deposits: &fakeDeposits{},
 	}
 	h.svc = &Service{
 		Store: h.store, Hasher: password.NewHasher(1, testCost), Box: box, Orders: h.orders, Wallet: h.wallet, Flags: h.flags,
 		Ledger: h.ledger, Derivatives: h.derivatives, Users: h.users, Security: h.security, History: h.security, Risk: h.security,
-		Log: slog.New(slog.DiscardHandler), Now: func() time.Time { return h.now },
+		Deposits: h.deposits,
+		Log:      slog.New(slog.DiscardHandler), Now: func() time.Time { return h.now },
 	}
 	return h
 }

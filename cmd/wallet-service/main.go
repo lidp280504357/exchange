@@ -235,8 +235,12 @@ func setup(ctx context.Context, a *app.App) error {
 			Name: "wallet_custody_callbacks_rejected_total",
 			Help: "Custodian callbacks refused for their signature, age or form (forged, or the key differs from the custodian's).",
 		}),
+		Discrepancies: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "wallet_custody_deposit_discrepancies_total",
+			Help: "Custodian callbacks that disagree with a deposit an administrator backfilled; a person checks them.",
+		}),
 	}
-	a.Metrics().MustRegister(svc.FeesRefused, svc.CallbacksRejected)
+	a.Metrics().MustRegister(svc.FeesRefused, svc.CallbacksRejected, svc.Discrepancies)
 	if cfg.XPub != "" {
 		deriver, err := evm.NewDeriver(cfg.XPub)
 		if err != nil {

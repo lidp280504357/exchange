@@ -35,6 +35,7 @@ const (
 	LedgerService_PlaceHold_FullMethodName         = "/exchange.ledger.v1.LedgerService/PlaceHold"
 	LedgerService_ReleaseHold_FullMethodName       = "/exchange.ledger.v1.LedgerService/ReleaseHold"
 	LedgerService_ListHolds_FullMethodName         = "/exchange.ledger.v1.LedgerService/ListHolds"
+	LedgerService_ReleaseUnclaimed_FullMethodName  = "/exchange.ledger.v1.LedgerService/ReleaseUnclaimed"
 )
 
 // LedgerServiceClient is the client API for LedgerService service.
@@ -108,6 +109,12 @@ type LedgerServiceClient interface {
 	ReleaseHold(ctx context.Context, in *ReleaseHoldRequest, opts ...grpc.CallOption) (*ReleaseHoldResponse, error)
 	// ListHolds lists a user's holds, newest first.
 	ListHolds(ctx context.Context, in *ListHoldsRequest, opts ...grpc.CallOption) (*ListHoldsResponse, error)
+	// ReleaseUnclaimed books an unclaimed deposit to its user once an
+	// administrator decided it is theirs (design 2026-10-02 §4.3):
+	// UNCLAIMED_DEPOSIT pays the user's SPOT account the deposit's asset and
+	// amount (DEPOSIT_CREDIT, key deposit-release:<deposit_id>), with an
+	// audit event. wallet-service calls it.
+	ReleaseUnclaimed(ctx context.Context, in *ReleaseUnclaimedRequest, opts ...grpc.CallOption) (*ReleaseUnclaimedResponse, error)
 }
 
 type ledgerServiceClient struct {
@@ -278,6 +285,16 @@ func (c *ledgerServiceClient) ListHolds(ctx context.Context, in *ListHoldsReques
 	return out, nil
 }
 
+func (c *ledgerServiceClient) ReleaseUnclaimed(ctx context.Context, in *ReleaseUnclaimedRequest, opts ...grpc.CallOption) (*ReleaseUnclaimedResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReleaseUnclaimedResponse)
+	err := c.cc.Invoke(ctx, LedgerService_ReleaseUnclaimed_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LedgerServiceServer is the server API for LedgerService service.
 // All implementations must embed UnimplementedLedgerServiceServer
 // for forward compatibility.
@@ -349,6 +366,12 @@ type LedgerServiceServer interface {
 	ReleaseHold(context.Context, *ReleaseHoldRequest) (*ReleaseHoldResponse, error)
 	// ListHolds lists a user's holds, newest first.
 	ListHolds(context.Context, *ListHoldsRequest) (*ListHoldsResponse, error)
+	// ReleaseUnclaimed books an unclaimed deposit to its user once an
+	// administrator decided it is theirs (design 2026-10-02 §4.3):
+	// UNCLAIMED_DEPOSIT pays the user's SPOT account the deposit's asset and
+	// amount (DEPOSIT_CREDIT, key deposit-release:<deposit_id>), with an
+	// audit event. wallet-service calls it.
+	ReleaseUnclaimed(context.Context, *ReleaseUnclaimedRequest) (*ReleaseUnclaimedResponse, error)
 	mustEmbedUnimplementedLedgerServiceServer()
 }
 
@@ -406,6 +429,9 @@ func (UnimplementedLedgerServiceServer) ReleaseHold(context.Context, *ReleaseHol
 }
 func (UnimplementedLedgerServiceServer) ListHolds(context.Context, *ListHoldsRequest) (*ListHoldsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListHolds not implemented")
+}
+func (UnimplementedLedgerServiceServer) ReleaseUnclaimed(context.Context, *ReleaseUnclaimedRequest) (*ReleaseUnclaimedResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReleaseUnclaimed not implemented")
 }
 func (UnimplementedLedgerServiceServer) mustEmbedUnimplementedLedgerServiceServer() {}
 func (UnimplementedLedgerServiceServer) testEmbeddedByValue()                       {}
@@ -716,6 +742,24 @@ func _LedgerService_ListHolds_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LedgerService_ReleaseUnclaimed_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReleaseUnclaimedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LedgerServiceServer).ReleaseUnclaimed(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LedgerService_ReleaseUnclaimed_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LedgerServiceServer).ReleaseUnclaimed(ctx, req.(*ReleaseUnclaimedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LedgerService_ServiceDesc is the grpc.ServiceDesc for LedgerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -786,6 +830,10 @@ var LedgerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListHolds",
 			Handler:    _LedgerService_ListHolds_Handler,
+		},
+		{
+			MethodName: "ReleaseUnclaimed",
+			Handler:    _LedgerService_ReleaseUnclaimed_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

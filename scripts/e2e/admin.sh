@@ -14,7 +14,11 @@
 # waiting and withdrawn), the counts and their event stream, the
 # withdrawal list, the perpetual contracts (states, reduce-only, a status
 # round trip, the liquidation monitor, a two-person insurance fund
-# contribution), the reports, the audit trail and sign-out.
+# contribution), the reports, the deposits that need a person (with the
+# custodian's stand-in: a deposit whose callback comes late, backfilled
+# and then confirmed by it; one below the minimum credited to the user,
+# another rejected), a withdrawal's review details and holds, the audit
+# trail and sign-out.
 #
 #   scripts/e2e/admin.sh
 set -euo pipefail
@@ -113,7 +117,7 @@ expect 200 - "the sign-in options need no session"
 TOTP_REQUIRED=$(jq -r .totp_required <<<"$BODY")
 login ADMIN
 expect 200 - "ADMIN signs in with password and code"
-check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 20" "with every permission"
+check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 21" "with every permission"
 cookie=$(grep -i '^set-cookie: admin_session=' "$WORK/ADMIN.headers")
 for attr in 'Path=/admin/' 'HttpOnly' 'Secure' 'SameSite=Strict'; do
   grep -qi "$attr" <<<"$cookie" || { echo "FAIL the session cookie lacks $attr: $cookie" >&2; exit 1; }
@@ -344,7 +348,8 @@ else
 fi
 as ADMIN GET /admin/v1/todo ""
 expect 200 - "the counts waiting"
-check '(.withdrawals | type) == "number" and (.approvals | type) == "number" and (.partial | length) == 0' "withdrawals and fund operations"
+check '(.withdrawals | type) == "number" and (.approvals | type) == "number" and (.deposits | type) == "number" and (.partial | length) == 0' \
+  "withdrawals, fund operations and deposits"
 events=$(curl -sN --max-time 4 -b "$WORK/ADMIN.jar" "$ADMIN_BASE/admin/v1/events" || true)
 grep -q '^event: todo' <<<"$events" || { echo "FAIL the event stream: $events" >&2; exit 1; }
 echo "ok   the event stream pushes the counts"
@@ -550,6 +555,120 @@ else
   expect 422 DERIV_NO_POSITION "nothing left to close"
 fi
 
+echo "== deposits that need a person (with the custodian's stand-in)"
+# mock ARGS... drives the custodian's stand-in on the server (udun-mock).
+mock() {
+  local args
+  args=$(printf '%q ' "$@")
+  remote "sudo docker compose $COMPOSE_FILES exec -T udun-mock /app/udun-mock $args"
+}
+USDT_TRC20="195:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
+call GET "/v1/wallet/deposit-address?asset=USDT&network=TRON" "" "${UAUTH[@]}"
+if [[ $STATUS != 200 ]]; then
+  echo "skip the deposit decisions: no TRC20 address from the custodian ($STATUS $(jq -r .code <<<"$BODY"))"
+else
+  ADDR=$(jq -r .address <<<"$BODY")
+  SPOT_BEFORE=$(spot_usdt available)
+  more_usdt() { # more_usdt AMOUNT: the user's SPOT USDT is AMOUNT above SPOT_BEFORE (to a hair: jq counts in floats)
+    [[ $(jq -n --arg a "$(spot_usdt available)" --arg b "$SPOT_BEFORE" --arg d "$1" \
+      '(($a | tonumber) - ($b | tonumber) - ($d | tonumber)) | fabs < 0.0000001') == true ]]
+  }
+  # The custodian receives 2 USDT and its callback is held back 45 s: lost, for now.
+  at_exit "mock delay --seconds 0 >/dev/null"
+  mock delay --seconds 45 >/dev/null
+  read -r TRADE TX < <(mock deposit --address "$ADDR" --coin "$USDT_TRC20" --amount 2 | jq -r '"\(.trade_id) \(.tx_id)"')
+  mock delay --seconds 0 >/dev/null
+  echo "     the custodian received 2 USDT (trade $TRADE); its callback is late"
+  BACKFILL=$(jq -nc --arg a "$ADDR" --arg t "$TRADE" --arg h "$TX" '{network: "TRON", trade_id: $t, address: $a, tx_hash: $h, amount: "2"}')
+  as OPERATOR POST /admin/v1/deposits/manual/check "$BACKFILL"
+  expect 403 ADMIN_FORBIDDEN "OPERATOR backfills nothing"
+  as FINANCE POST /admin/v1/deposits/manual/check "$(jq -c '.network = "ETH-SEPOLIA"' <<<"$BACKFILL")"
+  expect 400 COMMON_INVALID_ARGUMENT "only a custodian's network is backfilled"
+  as FINANCE POST /admin/v1/deposits/manual/check "$BACKFILL"
+  expect 200 - "FINANCE checks the backfill"
+  check ".user_id == \"$USER_ID\" and .asset == \"USDT\" and .unclaimed == false and .value_usdt != null" "the user's address, USDT, above the minimum"
+  as FINANCE POST /admin/v1/deposits/manual "$(jq -c '.reason = "e2e: in the custodian console, callback lost"' <<<"$BACKFILL")"
+  expect 201 - "FINANCE backfills it"
+  if [[ $(jq -r .status <<<"$BODY") == PENDING ]]; then
+    as ADMIN POST "/admin/v1/approvals/$(jq -r .id <<<"$BODY")/decide" '{"approve":true,"reason":"e2e second administrator"}'
+    expect 200 - "a second administrator approves it (two-person mode)"
+  fi
+  check '.kind == "DEPOSIT_BACKFILL" and .status == "EXECUTED" and (.result | startswith("deposit ")) and .payload.trade_id != null' \
+    "a fund operation, booked as a deposit"
+  BACKFILLED=$(jq -r '.result | ltrimstr("deposit ")' <<<"$BODY")
+  eventually 60 "the user has 2 USDT more" more_usdt 2
+  as FINANCE GET "/admin/v1/deposits/review?manual_pending=true&user_id=$USER_ID" ""
+  expect 200 - "the backfills waiting for their callback"
+  check "[.items[] | select(.id == \"$BACKFILLED\" and .source == \"MANUAL\" and .entered_by == \"$EMAIL_FINANCE\" and .callback_at == null)] | length == 1" \
+    "this one, by FINANCE, no callback yet"
+  as FINANCE POST /admin/v1/deposits/manual "$(jq -c '.reason = "e2e: the same trade again"' <<<"$BACKFILL")"
+  expect 409 WALLET_DEPOSIT_KNOWN "the same trade is not booked twice"
+
+  # Below the minimum (1 USDT): booked to UNCLAIMED_DEPOSIT, waiting for a decision.
+  mock deposit --address "$ADDR" --coin "$USDT_TRC20" --amount 0.5 >/dev/null
+  mock deposit --address "$ADDR" --coin "$USDT_TRC20" --amount 0.25 >/dev/null
+  waiting() { # waiting AMOUNT VAR: the unclaimed deposit of AMOUNT waits; its ID goes to VAR
+    local id
+    as FINANCE GET "/admin/v1/deposits/review?attention=true&user_id=$USER_ID" ""
+    id=$(jq -r --arg a "$1" '[.items[] | select(.amount == $a and .reason == "BELOW_MINIMUM" and .unclaimed and .journal_id != null)][0].id // empty' <<<"$BODY")
+    [[ -n $id ]] && eval "$2=\$id"
+  }
+  eventually 120 "0.5 USDT below the minimum waits for a decision" waiting 0.5 SMALL
+  eventually 60 "so do 0.25 USDT" waiting 0.25 SMALLER
+  as ADMIN GET /admin/v1/todo ""
+  check '.deposits >= 2' "the console's counts include them"
+  as OPERATOR POST "/admin/v1/deposits/$SMALL/credit" '{"reason":"e2e"}'
+  expect 403 ADMIN_FORBIDDEN "OPERATOR credits nothing"
+  as FINANCE POST "/admin/v1/deposits/$SMALL/credit" '{"reason":"e2e minimum waived"}'
+  expect 200 - "FINANCE credits 0.5 USDT to the user"
+  check ".status == \"CREDITED\" and .resolution == \"CREDITED\" and .resolved_by == \"$EMAIL_FINANCE\" and .release_journal_id != null" \
+    "CREDITED, with the release's journal"
+  eventually 60 "the user has 2.5 USDT more" more_usdt 2.5
+  as FINANCE POST "/admin/v1/deposits/$SMALLER/reject" '{"reason":"e2e below the minimum, stays unclaimed"}'
+  expect 200 - "FINANCE rejects 0.25 USDT"
+  check '.resolution == "DISMISSED" and .status == "REJECTED" and .attention == false' "handled, no funds moved"
+  as FINANCE POST "/admin/v1/deposits/$SMALLER/credit" '{"reason":"e2e changed my mind"}'
+  expect 409 WALLET_DEPOSIT_NOT_RELEASABLE "a rejected one is not credited later"
+  as FINANCE GET "/admin/v1/deposits/review?attention=true&user_id=$USER_ID" ""
+  check "[.items[].id] | (index(\"$SMALL\") == null and index(\"$SMALLER\") == null)" "neither waits any more"
+
+  late_callback() {
+    as FINANCE GET "/admin/v1/deposits/$BACKFILLED" ""
+    [[ $STATUS == 200 ]] && jq -e '.callback_at != null and .discrepancy == "" and .attention == false' <<<"$BODY" >/dev/null
+  }
+  eventually 150 "the custodian's late callback confirms the backfill" late_callback
+  more_usdt 2.5 || { echo "FAIL the late callback booked the deposit again: $(spot_usdt available) from $SPOT_BEFORE" >&2; exit 1; }
+  echo "ok   and books nothing again"
+  [[ $(pg "SELECT result FROM wallet.custody_callbacks WHERE trade_id = '$TRADE' ORDER BY received_at DESC LIMIT 1") == APPLIED ]] ||
+    { echo "FAIL the late callback of trade $TRADE is not APPLIED" >&2; exit 1; }
+  echo "ok   the callback is logged APPLIED"
+  as FINANCE GET "/admin/v1/deposits/review?manual_pending=true&user_id=$USER_ID" ""
+  check "[.items[].id] | index(\"$BACKFILLED\") == null" "no longer waiting for its callback"
+  if exchangectl wallet checks --network UDUN | grep -q "$BACKFILLED"; then
+    echo "FAIL exchangectl still lists $BACKFILLED as backfilled without a callback" >&2
+    exit 1
+  fi
+  echo "ok   nor in exchangectl's custodian report"
+fi
+
+echo "== a withdrawal's review details and holds"
+as FINANCE GET "/admin/v1/withdrawals?held=false&min_risk=0&min_value_usdt=0&max_value_usdt=1000000" ""
+expect 200 - "the queue filters by hold, risk and worth"
+as FINANCE GET "/admin/v1/withdrawals?status=CONFIRMED&limit=1" ""
+WD=$(jq -r '.items[0].id // empty' <<<"$BODY")
+if [[ -z $WD ]]; then
+  echo "skip a withdrawal's details: no confirmed withdrawal on this server"
+else
+  as AUDITOR GET "/admin/v1/withdrawals/$WD" ""
+  expect 200 - "a withdrawal with what its review needs"
+  check ".withdrawal.id == \"$WD\" and (.used_today_usdt | test(\"^[0-9.]+$\")) and (.used_month_usdt | test(\"^[0-9.]+$\")) and has(\"address_book\")" \
+    "the user's withdrawals so far and the address book"
+  as OPERATOR POST "/admin/v1/withdrawals/$WD/hold" '{"hold":true,"note":"e2e"}'
+  expect 403 ADMIN_FORBIDDEN "OPERATOR holds no withdrawal"
+  as FINANCE POST "/admin/v1/withdrawals/$WD/hold" '{"hold":true,"note":"e2e hold"}'
+  expect 409 WALLET_WITHDRAWAL_NOT_IN_REVIEW "only one in review is held"
+fi
+
 echo "== the account's security, history and risk"
 as AUDITOR GET "/admin/v1/users/$USER_ID/security" ""
 expect 200 - "AUDITOR reads the account's security"
@@ -587,6 +706,13 @@ otp REBIND_IDENTITY "$NEW_EMAIL" "$DEVICE" "$UACCESS"
 call POST /v1/auth/identity/rebind "{\"otp_ticket\":\"$TICKET\",\"device_id\":\"$DEVICE\"}" "${UAUTH[@]}" -H "X-Step-Up-Token: $STEP"
 expect 202 - "and asks to move the only email"
 check '.status == "PENDING_REVIEW"' "a single identity waits for review"
+reject_pending_rebinds() { # leaves no request waiting when a check below fails
+  as OPERATOR GET "/admin/v1/identity-requests?user_id=$USER_ID" "" || return 0
+  for id in $(jq -r '.items[]? | select(.status == "PENDING_REVIEW") | .id' <<<"$BODY"); do
+    as OPERATOR POST "/admin/v1/identity-requests/$id/decide" '{"approve":false,"reason":"e2e cleanup"}' || true
+  done
+}
+at_exit reject_pending_rebinds
 as AUDITOR GET "/admin/v1/identity-requests?user_id=$USER_ID" ""
 expect 200 - "the request is listed"
 check '(.items | length) == 1 and .items[0].status == "PENDING_REVIEW" and (.items[0].new_value | contains("***")) and (.items[0].current_value | contains("***"))' "pending, masked"
@@ -648,6 +774,10 @@ eventually 60 "the security actions are audited, the temporary password is not" 
   "([.items[].payload.action] | (index(\"admin.users.contacts_revealed\") != null and index(\"admin.users.identity_request_decided\") != null and index(\"admin.users.sessions_revoked\") != null and index(\"admin.users.password_reset\") != null)) and (tostring | contains(\"$TEMP\") | not)"
 eventually 60 "the flag switches are audited" audited AUDITOR "target=flag:market.reference_kline" \
   "[.items[] | select(.actor == \"$EMAIL_OPERATOR\")] | length >= 2"
+if [[ -n ${BACKFILLED:-} ]]; then
+  eventually 60 "the deposit decisions are audited on the account, by FINANCE" audited AUDITOR "target=user:$USER_ID" \
+    "[.items[] | select(.actor == \"$EMAIL_FINANCE\") | .payload.action] | ((index(\"admin.deposits.backfill_executed\") != null or index(\"admin.deposits.backfill_requested\") != null) and index(\"wallet.deposit.backfilled\") != null and index(\"ledger.unclaimed_released\") != null and index(\"wallet.deposit.dismissed\") != null)"
+fi
 
 echo "== sign-out"
 as AUDITOR POST /admin/v1/logout ""

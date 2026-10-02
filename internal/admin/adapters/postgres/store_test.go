@@ -57,6 +57,14 @@ func (l *ledger) SystemBalances(context.Context, string) ([]ports.Balance, error
 // wallet has an empty review queue.
 type wallet struct{}
 
+func (wallet) Detail(context.Context, string) (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}
+
+func (wallet) Hold(context.Context, string, bool, string, string) (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}
+
 func (wallet) List(context.Context, ports.WithdrawalQuery) (json.RawMessage, error) {
 	return json.RawMessage(`{"items":[],"next_cursor":null}`), nil
 }
@@ -76,6 +84,33 @@ func (wallet) Callback(context.Context, string) (json.RawMessage, error) {
 }
 
 func (wallet) Replay(context.Context, string, string, string) (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}
+
+// deposits has no deposit waiting for a decision.
+type deposits struct{}
+
+func (deposits) List(context.Context, ports.DepositReviewQuery) (json.RawMessage, error) {
+	return json.RawMessage(`{"items":[],"next_cursor":null}`), nil
+}
+
+func (deposits) Get(context.Context, string) (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}
+
+func (deposits) Credit(context.Context, string, string, string) (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}
+
+func (deposits) Dismiss(context.Context, string, string, string) (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}
+
+func (deposits) CheckManual(context.Context, ports.ManualDeposit) (ports.ManualCheck, error) {
+	return ports.ManualCheck{}, nil
+}
+
+func (deposits) BookManual(context.Context, ports.ManualDeposit, string) (json.RawMessage, error) {
 	return json.RawMessage(`{}`), nil
 }
 
@@ -204,7 +239,9 @@ func TestConsole(t *testing.T) {
 	hasher := password.NewHasher(1, password.Cost{MemoryKiB: 64, Iterations: 1})
 	led := &ledger{}
 	// No flags: two-person approval is off (single-person mode).
-	svc := &application.Service{Store: store, Hasher: hasher, Box: box, Ledger: led, Wallet: wallet{}, Users: users{}, Log: log, Now: time.Now}
+	svc := &application.Service{
+		Store: store, Hasher: hasher, Box: box, Ledger: led, Wallet: wallet{}, Deposits: deposits{}, Users: users{}, Log: log, Now: time.Now,
+	}
 	secrets := map[string][]byte{}
 	for _, a := range []struct{ email, role string }{{"fin@example.com", domain.RoleFinance}, {"boss@example.com", domain.RoleAdmin}} {
 		secrets[a.email] = totp.NewSecret()

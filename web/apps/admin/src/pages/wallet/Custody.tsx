@@ -19,7 +19,7 @@ type Check = AdminSchemas["ChainCheck"];
 type Callback = AdminSchemas["CustodyCallback"];
 
 const right: DataColumnMeta = { align: "right" };
-const RESULTS = ["RECEIVED", "APPLIED", "IGNORED", "UNMATCHED", "REJECTED", "FAILED"];
+const RESULTS = ["RECEIVED", "APPLIED", "IGNORED", "UNMATCHED", "REJECTED", "FAILED", "DISCREPANCY"];
 const KINDS = ["DEPOSIT", "WITHDRAWAL"];
 
 /** replayable mirrors wallet-service: a verified callback that failed, found nothing or was never finished. */

@@ -424,6 +424,233 @@ paths:
                     $ref: '#/components/schemas/NextCursor'
         default:
           $ref: '#/components/responses/Error'
+  /admin/v1/deposits/review:
+    get:
+      operationId: listReviewDeposits
+      summary: wallet-service's deposits, for decisions
+      description: |
+        Newest first, straight from wallet-service (not the read model):
+        attention=true lists the deposits waiting for a decision (booked
+        to UNCLAIMED_DEPOSIT, or a backfill the custodian's callback
+        disagreed with), manual_pending=true the backfilled ones without
+        a callback yet. Needs withdrawals.read.
+      tags: [withdrawals]
+      parameters:
+        - $ref: '#/components/parameters/UserFilter'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [DETECTED, CONFIRMING, CONFIRMED, CREDITED, ORPHANED, REJECTED]
+        - name: network
+          in: query
+          schema:
+            type: string
+        - name: attention
+          in: query
+          schema:
+            type: string
+            enum: ['true']
+        - name: manual_pending
+          in: query
+          schema:
+            type: string
+            enum: ['true']
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of deposits.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ReviewDeposit'
+                  next_cursor:
+                    $ref: '#/components/schemas/NextCursor'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/deposits/manual/check:
+    post:
+      operationId: checkDepositBackfill
+      summary: Check a backfill of a lost custodian callback without booking it
+      description: |
+        The checks of POST /admin/v1/deposits/manual (the network is a
+        custodian's, the address is a user's on it, neither the trade nor
+        the transfer is known, the amount fits the asset's precision) and
+        what it would book. Not audited. Needs deposits.review.
+      tags: [withdrawals]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BackfillRequest'
+      responses:
+        '200':
+          description: What the backfill would book.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user_id, asset, unclaimed, value_usdt]
+                properties:
+                  user_id:
+                    type: string
+                    format: uuid
+                  asset:
+                    type: string
+                  unclaimed:
+                    type: boolean
+                    description: Below the network's minimum, so booked to UNCLAIMED_DEPOSIT instead of the user.
+                  value_usdt:
+                    description: The amount's worth; null without a price (a second administrator then decides).
+                    $ref: '#/components/schemas/NullableDecimal'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/deposits/manual:
+    post:
+      operationId: backfillDeposit
+      summary: Backfill a custodian deposit whose callback was lost
+      description: |
+        For a deposit the administrator found in the custodian's console
+        (this console cannot ask the custodian, so nothing here checks it
+        there). After the checks of POST /admin/v1/deposits/manual/check
+        it is a fund operation (kind DEPOSIT_BACKFILL): in single-person
+        mode within the limits it is booked at once (EXECUTED), otherwise
+        it waits for a second administrator (PENDING). Booked like a
+        callback (credited, or to UNCLAIMED_DEPOSIT below the minimum)
+        with source MANUAL; the custodian's own callback, when it comes,
+        is matched against it, never booked again. Audited. Needs
+        deposits.review.
+      tags: [withdrawals]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/BackfillRequest'
+                - type: object
+                  required: [reason]
+                  properties:
+                    reason:
+                      type: string
+                      minLength: 10
+      responses:
+        '201':
+          description: The fund operation, executed or waiting for a second administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/deposits/{id}:
+    get:
+      operationId: getReviewDeposit
+      summary: One of wallet-service's deposits
+      description: Needs withdrawals.read.
+      tags: [withdrawals]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The deposit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewDeposit'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/deposits/{id}/credit:
+    post:
+      operationId: creditDeposit
+      summary: Give an unclaimed deposit to its user
+      description: |
+        Only a deposit booked to UNCLAIMED_DEPOSIT (below the minimum, the
+        account closed or not eligible) and only its own asset and amount:
+        the ledger moves it to the user's spot account (DEPOSIT_CREDIT,
+        audited as ledger.unclaimed_released). An unsupported token has no
+        asset and can only be rejected (WALLET_DEPOSIT_NOT_RELEASABLE).
+        Needs deposits.review.
+      tags: [withdrawals]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonRequest'
+      responses:
+        '200':
+          description: The deposit, CREDITED.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewDeposit'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/deposits/{id}/reject:
+    post:
+      operationId: rejectDeposit
+      summary: Close a deposit waiting for a decision without moving funds
+      description: |
+        Marks it handled with the reason (resolution DISMISSED): an
+        unclaimed deposit stays in UNCLAIMED_DEPOSIT, a disagreeing
+        callback stays unbooked. Audited by the wallet
+        (wallet.deposit.dismissed). Needs deposits.review.
+      tags: [withdrawals]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonRequest'
+      responses:
+        '200':
+          description: The deposit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewDeposit'
+        default:
+          $ref: '#/components/responses/Error'
   /admin/v1/dashboard:
     get:
       operationId: getDashboard
@@ -1328,6 +1555,26 @@ paths:
           schema:
             type: string
             enum: [asc, desc]
+        - name: held
+          in: query
+          description: true for the withdrawals on hold, false for the others.
+          schema:
+            type: string
+            enum: ['true', 'false']
+        - name: min_value_usdt
+          in: query
+          schema:
+            $ref: '#/components/schemas/Decimal'
+        - name: max_value_usdt
+          in: query
+          schema:
+            $ref: '#/components/schemas/Decimal'
+        - name: min_risk
+          in: query
+          description: The lowest risk score listed.
+          schema:
+            type: integer
+            minimum: 0
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -1448,6 +1695,77 @@ paths:
                           description: The error code of a failed one.
                         message:
                           type: string
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/withdrawals/{id}:
+    get:
+      operationId: getWithdrawal
+      summary: A withdrawal with what its review needs
+      description: |
+        From wallet-service: the withdrawal, its address in the user's
+        address book (when it was added, when its cooling-off ended) and
+        the user's withdrawals' worth today and this month. Needs
+        withdrawals.read.
+      tags: [withdrawals]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The withdrawal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WithdrawalDetail'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/withdrawals/{id}/hold:
+    post:
+      operationId: holdWithdrawal
+      summary: Put a withdrawal in review on hold, or take it off hold
+      description: |
+        A held withdrawal stays in review with the reviewer's note (say,
+        while the user is called) until it is taken off hold or decided;
+        deciding it takes it off hold. Only a withdrawal in review
+        (WALLET_WITHDRAWAL_NOT_IN_REVIEW otherwise). Audited by the wallet
+        (wallet.withdrawal.hold, wallet.withdrawal.unhold). Needs
+        withdrawals.review.
+      tags: [withdrawals]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hold]
+              properties:
+                hold:
+                  type: boolean
+                note:
+                  type: string
+                  minLength: 3
+                  description: Required to put it on hold.
+      responses:
+        '200':
+          description: The withdrawal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Withdrawal'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/instruments:
@@ -2294,7 +2612,7 @@ paths:
           description: One outcome; every outcome when empty.
           schema:
             type: string
-            enum: [RECEIVED, APPLIED, IGNORED, UNMATCHED, REJECTED, FAILED]
+            enum: [RECEIVED, APPLIED, IGNORED, UNMATCHED, REJECTED, FAILED, DISCREPANCY]
         - name: kind
           in: query
           schema:
@@ -2895,7 +3213,8 @@ components:
             type: string
             enum: [users.read, users.status, orders.cancel, instruments.read, instruments.write, flags.read, flags.write,
               withdrawals.read, withdrawals.review, ledger.adjust.request, ledger.adjust.approve, audit.read, reports.read,
-              derivatives.read, derivatives.write, settings.write, users.notes, users.security, users.contacts, ledger.hold]
+              derivatives.read, derivatives.write, settings.write, users.notes, users.security, users.contacts, ledger.hold,
+              deposits.review]
     Settings:
       type: object
       required: [two_person_approval, single_max_usdt, daily_max_usdt, withdrawal_max_usdt, daily_used_usdt, updated_by, updated_at]
@@ -2923,7 +3242,7 @@ components:
           format: date-time
     Todo:
       type: object
-      required: [withdrawals, approvals, identity_requests, partial]
+      required: [withdrawals, approvals, identity_requests, deposits, partial]
       properties:
         withdrawals:
           type: integer
@@ -2934,11 +3253,14 @@ components:
         identity_requests:
           type: integer
           description: Identity rebind requests waiting for a decision (with users.security; counted up to 200).
+        deposits:
+          type: integer
+          description: Deposits waiting for a decision (with deposits.review; counted up to 200).
         partial:
           type: array
           items:
             type: string
-            enum: [withdrawals, identity_requests]
+            enum: [withdrawals, identity_requests, deposits]
     Identity:
       type: object
       required: [kind, value, verified_at, created_at]
@@ -3391,6 +3713,145 @@ components:
           type: [string, 'null']
         confirmed_at:
           type: [string, 'null']
+        held_at:
+          type: [string, 'null']
+          format: date-time
+          description: Set while a reviewer has it on hold (held_by, with hold_note).
+        held_by:
+          type: string
+        hold_note:
+          type: string
+    WithdrawalDetail:
+      type: object
+      required: [withdrawal, address_book, used_today_usdt, used_month_usdt]
+      properties:
+        withdrawal:
+          $ref: '#/components/schemas/Withdrawal'
+        address_book:
+          description: The address in the user's address book; null when it was deleted.
+          oneOf:
+            - type: object
+              required: [label, created_at, usable_at]
+              properties:
+                label:
+                  type: string
+                created_at:
+                  type: string
+                  format: date-time
+                usable_at:
+                  type: string
+                  format: date-time
+                  description: The end of its cooling-off period.
+            - type: 'null'
+        used_today_usdt:
+          description: The user's withdrawals' worth today (UTC), refused ones left out.
+          $ref: '#/components/schemas/Decimal'
+        used_month_usdt:
+          description: The same this month.
+          $ref: '#/components/schemas/Decimal'
+    ReviewDeposit:
+      type: object
+      description: A deposit as wallet-service has it, with the admin console's decisions on it.
+      required: [id, user_id, kind, asset, network, address, tx_hash, amount, status, unclaimed, reason, trade_id, confirmations,
+        required_confirmations, journal_id, detected_at, confirmed_at, credited_at, source, entered_by, callback_at, discrepancy, attention,
+        resolution, resolved_by, resolved_at, resolution_note, release_journal_id]
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [CHAIN, INTERNAL]
+        asset:
+          type: [string, 'null']
+          description: Null for a token no asset is configured for.
+        network:
+          type: string
+        address:
+          type: string
+        tx_hash:
+          type: string
+        amount:
+          $ref: '#/components/schemas/Decimal'
+        status:
+          type: string
+          enum: [DETECTED, CONFIRMING, CONFIRMED, CREDITED, ORPHANED, REJECTED]
+        unclaimed:
+          type: boolean
+          description: Booked to UNCLAIMED_DEPOSIT instead of the user.
+        reason:
+          type: [string, 'null']
+          enum: [BELOW_MINIMUM, ACCOUNT_CLOSED, NOT_ELIGIBLE, UNSUPPORTED_TOKEN, null]
+        trade_id:
+          type: [string, 'null']
+          description: The custodian's trade (UDUN:<tradeId>).
+        confirmations:
+          type: integer
+        required_confirmations:
+          type: integer
+        journal_id:
+          type: [string, 'null']
+        detected_at:
+          type: string
+          format: date-time
+        confirmed_at:
+          type: [string, 'null']
+        credited_at:
+          type: [string, 'null']
+        source:
+          type: string
+          enum: [AUTO, MANUAL]
+          description: MANUAL for an administrator's backfill of a lost callback.
+        entered_by:
+          type: string
+        callback_at:
+          type: [string, 'null']
+          description: When the custodian's own callback matched a backfill.
+        discrepancy:
+          type: string
+          description: What in the custodian's callback disagreed with a backfill.
+        attention:
+          type: boolean
+          description: Waits for an administrator's decision.
+        resolution:
+          type: string
+          enum: ['', CREDITED, DISMISSED]
+        resolved_by:
+          type: string
+        resolved_at:
+          type: [string, 'null']
+        resolution_note:
+          type: string
+        release_journal_id:
+          type: [string, 'null']
+    ReasonRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 3
+    BackfillRequest:
+      type: object
+      description: A custodian deposit as the custodian's console shows it.
+      required: [network, trade_id, address, tx_hash, amount]
+      properties:
+        network:
+          type: string
+          description: A network whose custodian is not the chain itself (provider UDUN).
+        trade_id:
+          type: string
+          description: The custodian's trade ID as its console shows it (kept as <provider>:<tradeId>, like a callback's).
+        address:
+          type: string
+          description: The user's deposit address on the network.
+        tx_hash:
+          type: string
+        amount:
+          $ref: '#/components/schemas/Decimal'
     Network:
       type: object
       properties:
@@ -3504,7 +3965,7 @@ components:
           description: Null for a known flag never set (off).
     Approval:
       type: object
-      description: A fund operation (a manual adjustment or an insurance fund contribution).
+      description: A fund operation (a manual adjustment, an insurance fund contribution or a deposit backfill).
       required: [id, kind, payload, reason, status, requested_by, requested_by_email, decided_by, decided_by_email, result, created_at,
         decided_at, mode, value_usdt, escalation, journal_id]
       properties:
@@ -3513,12 +3974,13 @@ components:
           format: uuid
         kind:
           type: string
-          enum: [LEDGER_ADJUSTMENT, INSURANCE_FUND]
+          enum: [LEDGER_ADJUSTMENT, INSURANCE_FUND, DEPOSIT_BACKFILL]
         payload:
           type: object
           description: |
             For LEDGER_ADJUSTMENT user_id, asset and amount, account_type FUTURES when not the SPOT account; for INSURANCE_FUND
-            asset and amount; reference when given.
+            asset and amount; reference when given. For DEPOSIT_BACKFILL user_id, asset, amount, network, trade_id, address,
+            tx_hash and entered_by (the backfill's result names the deposit, its journal_id stays null).
           additionalProperties:
             type: string
         reason:
@@ -4031,7 +4493,7 @@ components:
           type: boolean
         result:
           type: string
-          enum: [RECEIVED, APPLIED, IGNORED, UNMATCHED, REJECTED, FAILED]
+          enum: [RECEIVED, APPLIED, IGNORED, UNMATCHED, REJECTED, FAILED, DISCREPANCY]
         detail:
           type: string
         attempts:

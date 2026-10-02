@@ -315,6 +315,7 @@ func (w Wallet) List(ctx context.Context, q ports.WithdrawalQuery) (json.RawMess
 	v := url.Values{}
 	for k, x := range map[string]string{
 		"status": q.Status, "user_id": q.UserID, "asset": q.Asset, "network": q.Network, "cursor": q.Cursor, "order": q.Order,
+		"held": q.Held, "min_value_usdt": q.MinValue, "max_value_usdt": q.MaxValue,
 	} {
 		if x != "" {
 			v.Set(k, x)
@@ -322,6 +323,9 @@ func (w Wallet) List(ctx context.Context, q ports.WithdrawalQuery) (json.RawMess
 	}
 	if q.Limit > 0 {
 		v.Set("limit", strconv.Itoa(q.Limit))
+	}
+	if q.MinRisk > 0 {
+		v.Set("min_risk", strconv.Itoa(q.MinRisk))
 	}
 	return w.do(ctx, http.MethodGet, w.Base+"/internal/wallet/withdrawals?"+v.Encode(), nil, nil)
 }

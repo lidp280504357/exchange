@@ -91,6 +91,14 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Post("/users/{id}/contract-orders/{order}/cancel", h.cancelContractOrder)
 			r.Get("/users/{id}/positions", h.userPositions)
 			r.Post("/users/{id}/positions/close", h.closePosition)
+			r.Get("/withdrawals/{id}", h.withdrawalDetail)
+			r.Post("/withdrawals/{id}/hold", h.holdWithdrawal)
+			r.Get("/deposits/review", h.depositReviews)
+			r.Post("/deposits/manual/check", h.checkBackfill)
+			r.Post("/deposits/manual", h.backfill)
+			r.Get("/deposits/{id}", h.depositDetail)
+			r.Post("/deposits/{id}/credit", h.creditDeposit)
+			r.Post("/deposits/{id}/reject", h.rejectDeposit)
 			r.Post("/users/{id}/adjustments", h.userAdjustment)
 			r.Get("/orders", h.orders)
 			r.Get("/trades", h.trades)
@@ -298,7 +306,8 @@ func (h *Handler) withdrawals(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	raw, err := h.Svc.Withdrawals(r.Context(), principal(r), ports.WithdrawalQuery{
 		Status: q.Get("status"), UserID: q.Get("user_id"), Asset: q.Get("asset"), Network: q.Get("network"), Cursor: q.Get("cursor"),
-		Limit: intParam(q, "limit"), Order: q.Get("order"),
+		Limit: intParam(q, "limit"), Order: q.Get("order"), Held: q.Get("held"), MinValue: q.Get("min_value_usdt"),
+		MaxValue: q.Get("max_value_usdt"), MinRisk: intParam(q, "min_risk"),
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)

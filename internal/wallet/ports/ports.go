@@ -230,6 +230,13 @@ type DepositRepo interface {
 	// ByUser returns up to limit of a user's deposits older than before
 	// ("": newest), newest first.
 	ByUser(ctx context.Context, userID, before string, limit int) ([]domain.Deposit, error)
+	// ByTransfer returns a deposit of the transfer txHash to address on
+	// network, whatever its source, or nil.
+	ByTransfer(ctx context.Context, network, txHash, address string) (*domain.Deposit, error)
+	// Get returns a deposit, or nil.
+	Get(ctx context.Context, id string) (*domain.Deposit, error)
+	// Page returns up to f.Limit deposits matching f, newest first.
+	Page(ctx context.Context, f DepositFilter) ([]domain.Deposit, error)
 }
 
 // BlockRepo keeps the scan cursor and recent block hashes per network.
@@ -389,6 +396,10 @@ type Ledger interface {
 	// SystemBalances returns the available balance of each system account
 	// in asset.
 	SystemBalances(ctx context.Context, asset string) (map[string]decimal.Decimal, error)
+	// ReleaseUnclaimed books an unclaimed deposit, booked to
+	// UNCLAIMED_DEPOSIT, to its user (DEPOSIT_CREDIT) for an administrator
+	// (actor); the deposit ID keys it.
+	ReleaseUnclaimed(ctx context.Context, depositID, userID, asset string, amount decimal.Decimal, actor, reason string) (journalID string, err error)
 }
 
 // CustodyCoin is one of the custodian's coins with what it holds of it.
@@ -460,6 +471,30 @@ type WithdrawalFilter struct {
 	// Oldest lists oldest first (the review queue), else newest first.
 	Oldest bool
 	Limit  int
+	// Held is "true" for the withdrawals on hold, "false" for the others,
+	// "" for both.
+	Held string
+	// MinValue and MaxValue bound the worth in USDT (zero: unbounded);
+	// MinRisk the risk score.
+	MinValue decimal.Decimal
+	MaxValue decimal.Decimal
+	MinRisk  int
+}
+
+// DepositFilter selects deposits for the admin console; empty fields match
+// everything.
+type DepositFilter struct {
+	UserID  string
+	Status  string
+	Network string
+	// Attention lists the deposits waiting for an administrator's decision
+	// (domain.Deposit.Attention); ManualPending the backfilled ones whose
+	// custodian callback has not come.
+	Attention     bool
+	ManualPending bool
+	// After is the last ID of the previous page, newest first.
+	After string
+	Limit int
 }
 
 // Networks reads deposit networks (instrument-service).

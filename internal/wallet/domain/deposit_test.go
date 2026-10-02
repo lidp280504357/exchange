@@ -3,6 +3,8 @@ package domain
 import (
 	"testing"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 func TestDepositLifecycle(t *testing.T) {
@@ -40,6 +42,43 @@ func TestDepositLifecycle(t *testing.T) {
 	}
 	if !u.Credit("j3", now) || u.Status != StatusRejected {
 		t.Fatalf("an unclaimed deposit ends REJECTED: %+v", u)
+	}
+}
+
+func TestDepositDecisions(t *testing.T) {
+	now := time.Now()
+	unclaimed := func() *Deposit {
+		return &Deposit{ID: "d1", Status: StatusRejected, Unclaimed: true, Reason: ReasonBelowMinimum, JournalID: "j1", Asset: "USDT"}
+	}
+	d := unclaimed()
+	if !d.Attention() {
+		t.Fatal("an unclaimed deposit waits for a decision")
+	}
+	if err := d.Release("j2", "ops", "minimum waived", now); err != nil || d.Status != StatusCredited || d.Attention() {
+		t.Fatalf("released: %+v %v", d, err)
+	}
+	if err := d.Release("j3", "ops", "again", now); err == nil {
+		t.Fatal("released once")
+	}
+	if err := d.Dismiss("ops", "again", now); err == nil {
+		t.Fatal("a decided deposit needs no other")
+	}
+
+	odd := unclaimed()
+	odd.Source = SourceManual
+	if odd.MatchCallback("addr", "USDT", decimal.NewFromInt(1), now) || !odd.Attention() {
+		t.Fatalf("a disagreeing callback needs a person: %+v", odd)
+	}
+	if err := odd.Release("j2", "ops", "credit it", now); err == nil {
+		t.Fatal("a backfill in doubt is not released")
+	}
+	if err := odd.Dismiss("ops", "entered wrongly", now); err != nil || odd.Resolution != ResolutionDismissed || odd.Attention() {
+		t.Fatalf("dismissed: %+v %v", odd, err)
+	}
+
+	token := &Deposit{ID: "d3", Status: StatusRejected, Reason: ReasonUnsupportedToken}
+	if !token.Attention() || token.Release("j1", "ops", "credit it", now) == nil {
+		t.Fatal("an unsupported token waits, but only to be dismissed")
 	}
 }
 

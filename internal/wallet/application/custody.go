@@ -208,6 +208,11 @@ func (s *Service) applyDeposit(ctx context.Context, r ports.Repos, provider stri
 	if t.Word != domain.CustodySuccess {
 		return domain.CallbackIgnored, fmt.Sprintf("status %d: credited when the custodian reports success", t.Status), nil
 	}
+	if known, err := r.Deposits().ByProviderTx(ctx, provider+":"+t.TradeID); err != nil {
+		return "", "", err
+	} else if known != nil && known.Source == domain.SourceManual && known.CallbackAt.IsZero() {
+		return s.matchManual(ctx, r, provider, *known, t, now)
+	}
 	net, ok, err := s.networkOfCoin(ctx, provider, t.Coin)
 	if err != nil {
 		return "", "", err
@@ -259,6 +264,33 @@ func (s *Service) applyDeposit(ctx context.Context, r ports.Repos, provider stri
 		return "", "", err
 	}
 	return domain.CallbackApplied, fmt.Sprintf("deposit %s: %s %s to %s", d.ID, d.Amount, d.Asset, owner), nil
+}
+
+// matchManual applies the custodian's late callback of a deposit an
+// administrator backfilled (design 2026-10-02 §4.3): the same address,
+// asset and amount confirm it (APPLIED: booked already); anything else is
+// recorded on the deposit as a discrepancy for a person and counted for
+// the alert, never corrected or booked again (DISCREPANCY).
+func (s *Service) matchManual(ctx context.Context, r ports.Repos, provider string, d domain.Deposit, t ports.CustodyTrade, now time.Time) (string, string, error) {
+	asset, amount := "", t.Amount
+	if net, ok, err := s.networkOfCoin(ctx, provider, t.Coin); err != nil {
+		return "", "", err
+	} else if ok {
+		asset, amount = net.Asset, t.Amount.Truncate(net.Decimals)
+	}
+	matched := d.MatchCallback(t.Address, asset, amount, now)
+	if err := r.Deposits().Update(ctx, d); err != nil {
+		return "", "", err
+	}
+	if matched {
+		return domain.CallbackApplied, fmt.Sprintf("deposit %s, backfilled by %s, confirmed by the callback", d.ID, d.EnteredBy), nil
+	}
+	if s.Discrepancies != nil {
+		s.Discrepancies.Inc()
+	}
+	s.Log.ErrorContext(ctx, "custodian callback disagrees with a backfilled deposit", "deposit_id", d.ID, "trade_id", t.TradeID,
+		"entered_by", d.EnteredBy, "discrepancy", d.Discrepancy)
+	return domain.CallbackDiscrepancy, fmt.Sprintf("deposit %s, backfilled by %s: %s", d.ID, d.EnteredBy, d.Discrepancy), nil
 }
 
 // applyWithdrawal applies the custodian's word on a withdrawal it was

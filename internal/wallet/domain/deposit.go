@@ -11,6 +11,7 @@ package domain
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -100,6 +101,94 @@ type Deposit struct {
 	DetectedAt      time.Time
 	ConfirmedAt     time.Time
 	CreditedAt      time.Time
+	// Source is SourceManual for an administrator's backfill of a
+	// custodian deposit whose callback was lost (EnteredBy names who),
+	// empty otherwise. CallbackAt is when the custodian's own callback
+	// matched it; Discrepancy what in that callback disagreed.
+	Source      string
+	EnteredBy   string
+	CallbackAt  time.Time
+	Discrepancy string
+	// An administrator's decision on a deposit that needs one (Attention):
+	// Resolution* and, for released unclaimed funds, the release's journal.
+	Resolution       string
+	ResolvedBy       string
+	ResolvedAt       time.Time
+	ResolutionNote   string
+	ReleaseJournalID string
+}
+
+// SourceManual marks a deposit an administrator backfilled (design
+// 2026-10-02 §4.3).
+const SourceManual = "MANUAL"
+
+// Resolutions of a deposit that needs a decision: its unclaimed funds
+// released to the user, or the item dismissed.
+const (
+	ResolutionCredited  = "CREDITED"
+	ResolutionDismissed = "DISMISSED"
+)
+
+// Errors of the admin console's deposit handling (appendix C).
+var (
+	ErrNotReleasable = apperr.New(apperr.KindConflict, "WALLET_DEPOSIT_NOT_RELEASABLE",
+		"only an unclaimed deposit booked to UNCLAIMED_DEPOSIT and not decided yet can be credited")
+	ErrResolved = apperr.New(apperr.KindConflict, "WALLET_DEPOSIT_RESOLVED", "the deposit needs no decision")
+	ErrKnown    = apperr.New(apperr.KindConflict, "WALLET_DEPOSIT_KNOWN", "this deposit is known already")
+)
+
+// Attention reports whether the deposit waits for an administrator: it
+// did not reach the user (REJECTED), or the custodian's callback of a
+// backfilled one disagreed, and nobody decided yet.
+func (d *Deposit) Attention() bool {
+	return d.Resolution == "" && (d.Status == StatusRejected || d.Discrepancy != "")
+}
+
+// Release records an administrator crediting an unclaimed deposit's
+// funds, booked to UNCLAIMED_DEPOSIT, to the user (journal is the
+// release's): it becomes CREDITED. A backfill the custodian's callback
+// disagreed with is not released: what it says is in doubt.
+func (d *Deposit) Release(journal, actor, note string, now time.Time) error {
+	if d.Status != StatusRejected || !d.Unclaimed || d.JournalID == "" || d.Resolution != "" || d.Discrepancy != "" {
+		return ErrNotReleasable
+	}
+	d.Status, d.CreditedAt = StatusCredited, now
+	d.Resolution, d.ResolvedBy, d.ResolvedAt, d.ResolutionNote, d.ReleaseJournalID = ResolutionCredited, actor, now, note, journal
+	return nil
+}
+
+// Dismiss records an administrator closing a deposit that waited for a
+// decision without moving funds.
+func (d *Deposit) Dismiss(actor, note string, now time.Time) error {
+	if !d.Attention() {
+		return ErrResolved
+	}
+	d.Resolution, d.ResolvedBy, d.ResolvedAt, d.ResolutionNote = ResolutionDismissed, actor, now, note
+	return nil
+}
+
+// MatchCallback compares a backfilled deposit with the custodian's own
+// callback that arrived later: the same address, asset and amount mark it
+// confirmed; anything else is recorded as a discrepancy for an
+// administrator, never corrected or booked again. It reports whether the
+// callback matched.
+func (d *Deposit) MatchCallback(address, asset string, amount decimal.Decimal, now time.Time) bool {
+	d.CallbackAt = now
+	var diffs []string
+	if !strings.EqualFold(d.Address, address) {
+		diffs = append(diffs, fmt.Sprintf("address %s, entered %s", address, d.Address))
+	}
+	if d.Asset != asset {
+		diffs = append(diffs, fmt.Sprintf("asset %s, entered %s", asset, d.Asset))
+	}
+	if !d.Amount.Equal(amount) {
+		diffs = append(diffs, fmt.Sprintf("amount %s, entered %s", amount, d.Amount))
+	}
+	if len(diffs) == 0 {
+		return true
+	}
+	d.Discrepancy = "the custodian's callback says " + strings.Join(diffs, "; ")
+	return false
 }
 
 // Pending reports whether the deposit still waits for confirmations.

@@ -3,8 +3,8 @@
 // admin.login_without_totp is on in the test environment) and walks every
 // section: the overview with the services' health and HOUSE, users with a
 // user's page and its tabs (profile, security, risk …), the identity
-// requests, orders and trades, deposits, the withdrawal
-// queue, assets and pairs (a status change is confirmed and canceled,
+// requests, orders and trades, deposits (those to handle, the backfills,
+// the backfill form), the withdrawal queue, assets and pairs (a status change is confirmed and canceled,
 // never done), futures, HOUSE, the flags, the ledger's reconciliation, the
 // audit trail, the reports, the fund operations (approval mode, form,
 // records), the settings and the event stream; the search opens a user;
@@ -107,13 +107,29 @@ try {
   await noError("trades");
   ok("orders and trades");
 
-  // 6. Deposits and the withdrawal queue.
+  // 6. Deposits (every one, those to handle, the backfills waiting for
+  // their callback, the backfill form up to its check) and the withdrawal
+  // queue with its filters.
   await go("/deposits");
   await rows(1);
-  await go("/withdrawals");
+  await go("/deposits?view=attention");
+  await waitText("待处理充值");
+  await sleep(1000);
+  await noError("deposits to handle");
+  await go("/deposits?view=manual");
+  await waitText("回调到来时自动核对");
+  await sleep(1000);
+  await noError("backfills waiting for their callback");
+  await clickButton("补记充值", "main");
+  await waitText("托管方交易号");
+  await waitText("系统无法向托管方查询交易");
+  await t.shot("2a-backfill");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
+  await go("/withdrawals?held=false&min_risk=0");
   await sleep(1500);
   await noError("withdrawals");
-  ok("deposits and the withdrawal queue");
+  ok("deposits (to handle, backfills, the backfill form) and the withdrawal queue with its filters");
 
   // 6b. The custodian: reachable, its coins, the reconciliation and the
   // callback log, a callback's request as received.
@@ -192,7 +208,10 @@ try {
         setTimeout(() => done(null), 15000);
       }),
   );
-  if (!stream || typeof stream.withdrawals !== "number" || typeof stream.approvals !== "number" || typeof stream.identity_requests !== "number") {
+  if (
+    !stream || typeof stream.withdrawals !== "number" || typeof stream.approvals !== "number" || typeof stream.identity_requests !== "number" ||
+    typeof stream.deposits !== "number"
+  ) {
     throw new Error(`event stream: ${JSON.stringify(stream)}`);
   }
   await t.shot("5-settings");

@@ -21,18 +21,24 @@ const LOW_RISK = 50;
 
 /**
  * Withdrawals (design §10.3, 2026-10-02 §4.2): the review queue by
- * default, oldest first; a row opens its risk, approvals and progress with
- * the review actions. In the queue rows can be checked and approved or
- * rejected together (the low-risk ones in one click). New withdrawals to
- * review show as a bar instead of reloading the list.
+ * default, oldest first, filtered also by worth, risk score and hold; a
+ * row opens its risk, address book entry, the user's withdrawals so far,
+ * approvals and progress with the review actions (approve, reject, hold
+ * with a note). In the queue rows can be checked and approved or rejected
+ * together (the low-risk ones in one click). New withdrawals to review
+ * show as a bar instead of reloading the list.
  */
 export default function Withdrawals({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
   const label = useEnum();
-  const filters = useFilters(["status", "user_id", "asset", "network"]);
+  const filters = useFilters(["status", "user_id", "asset", "network", "held", "min_value_usdt", "max_value_usdt", "min_risk"]);
   const f = filters.values;
   const status = f.status || "PENDING_REVIEW";
-  const q = { status, user_id: f.user_id, asset: f.asset?.toUpperCase(), network: f.network?.toUpperCase() };
+  const decimal = (v: string | undefined) => (v && dec.isDecimal(v) ? v : undefined);
+  const q = {
+    status, user_id: f.user_id, asset: f.asset?.toUpperCase(), network: f.network?.toUpperCase(), held: f.held,
+    min_value_usdt: decimal(f.min_value_usdt), max_value_usdt: decimal(f.max_value_usdt), min_risk: f.min_risk,
+  };
   const list = useWithdrawals(q);
   const [open, setOpen] = useState<Withdrawal | null>(null);
   const [selection, setSelection] = useState<RowSelectionState>({});
@@ -65,6 +71,20 @@ export default function Withdrawals({ admin }: { admin: Admin }) {
           { key: "user_id", label: t("admin.orders.userFilter"), kind: "text" },
           { key: "asset", label: t("admin.common.asset"), kind: "text", placeholder: "USDT", width: 100 },
           { key: "network", label: t("admin.common.network"), kind: "text", placeholder: "TRON", width: 120 },
+          { key: "min_value_usdt", label: t("admin.hold.minValue"), kind: "text", placeholder: "0", width: 110 },
+          { key: "max_value_usdt", label: t("admin.hold.maxValue"), kind: "text", placeholder: "20000", width: 110 },
+          { key: "min_risk", label: t("admin.hold.minRisk"), kind: "text", placeholder: "50", width: 100 },
+          {
+            key: "held",
+            label: t("admin.hold.filter"),
+            kind: "select",
+            options: [
+              { value: ALL, label: t("admin.common.all") },
+              { value: "true", label: t("admin.hold.held") },
+              { value: "false", label: t("admin.hold.notHeld") },
+            ],
+            width: 110,
+          },
         ]}
       />
       {batch && list.rows.length > 0 && (

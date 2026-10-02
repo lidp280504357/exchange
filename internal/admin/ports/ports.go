@@ -331,6 +331,61 @@ type WithdrawalQuery struct {
 	Limit   int
 	// Order is asc (oldest first, the review queue's default) or desc.
 	Order string
+	// Held is "true" or "false" ("" for both); MinValue and MaxValue bound
+	// the worth in USDT, MinRisk the risk score ("" or 0: unbounded).
+	Held     string
+	MinValue string
+	MaxValue string
+	MinRisk  int
+}
+
+// DepositReviewQuery selects deposits in wallet-service: a user, a status, a
+// network, those waiting for a decision (Attention), the backfilled ones
+// without a callback yet (ManualPending), a page.
+type DepositReviewQuery struct {
+	UserID        string
+	Status        string
+	Network       string
+	Attention     bool
+	ManualPending bool
+	Cursor        string
+	Limit         int
+}
+
+// ManualDeposit is a backfill of a custodian deposit whose callback was
+// lost, as an administrator enters it (design 2026-10-02 §4.3).
+type ManualDeposit struct {
+	Network string
+	TradeID string
+	Address string
+	TxHash  string
+	Amount  decimal.Decimal
+	// Actor is the administrator who entered it.
+	Actor string
+}
+
+// ManualCheck is what wallet-service would book for a backfill.
+type ManualCheck struct {
+	UserID string `json:"user_id"`
+	Asset  string `json:"asset"`
+	// Unclaimed is true below the network's minimum (booked to
+	// UNCLAIMED_DEPOSIT).
+	Unclaimed bool `json:"unclaimed"`
+}
+
+// Deposits handles the deposits that need a person (wallet-service's
+// internal API; the items pass through as it renders them).
+type Deposits interface {
+	List(ctx context.Context, q DepositReviewQuery) (json.RawMessage, error)
+	Get(ctx context.Context, id string) (json.RawMessage, error)
+	// Credit gives an unclaimed deposit's funds to its user; Dismiss closes
+	// a deposit that waited for a decision.
+	Credit(ctx context.Context, id, actor, reason string) (json.RawMessage, error)
+	Dismiss(ctx context.Context, id, actor, reason string) (json.RawMessage, error)
+	// CheckManual checks a backfill without booking it; BookManual books
+	// it (the same backfill again returns its deposit).
+	CheckManual(ctx context.Context, m ManualDeposit) (ManualCheck, error)
+	BookManual(ctx context.Context, m ManualDeposit, reason string) (json.RawMessage, error)
 }
 
 // CallbackQuery selects the custodian's callbacks: an outcome, a kind, a
@@ -357,6 +412,11 @@ type Withdrawals interface {
 	Callback(ctx context.Context, id string) (json.RawMessage, error)
 	// Replay applies a stored callback again for actor.
 	Replay(ctx context.Context, id, actor, reason string) (json.RawMessage, error)
+	// Detail returns a withdrawal with its address-book entry and its
+	// user's withdrawals' worth today and this month.
+	Detail(ctx context.Context, id string) (json.RawMessage, error)
+	// Hold puts a withdrawal in review on hold with a note, or off hold.
+	Hold(ctx context.Context, id string, hold bool, reviewer, note string) (json.RawMessage, error)
 }
 
 // Instruments lists and changes reference data (instrument-service).

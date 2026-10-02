@@ -153,6 +153,29 @@ func (d memDeposits) ByUser(context.Context, string, string, int) ([]domain.Depo
 	return nil, nil
 }
 
+func (d memDeposits) ByTransfer(_ context.Context, network, txHash, address string) (*domain.Deposit, error) {
+	for _, x := range d.list(func(x domain.Deposit) bool {
+		return x.Network == network && strings.EqualFold(x.TxHash, txHash) && strings.EqualFold(x.Address, address)
+	}) {
+		return &x, nil
+	}
+	return nil, nil
+}
+
+func (d memDeposits) Get(ctx context.Context, id string) (*domain.Deposit, error) {
+	return d.GetForUpdate(ctx, id)
+}
+
+func (d memDeposits) Page(_ context.Context, f ports.DepositFilter) ([]domain.Deposit, error) {
+	out := d.list(func(x domain.Deposit) bool {
+		return (f.UserID == "" || x.UserID == f.UserID) && (f.Status == "" || x.Status == f.Status) &&
+			(f.Network == "" || x.Network == f.Network) && (!f.Attention || x.Attention()) &&
+			(!f.ManualPending || (x.Source == domain.SourceManual && x.CallbackAt.IsZero())) && (f.After == "" || x.ID < f.After)
+	})
+	slices.Reverse(out)
+	return out[:min(len(out), f.Limit)], nil
+}
+
 type memBlocks struct{ m *memStore }
 
 func (b memBlocks) Cursor(context.Context, string) (uint64, error) { return b.m.cursor, nil }

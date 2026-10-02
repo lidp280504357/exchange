@@ -1,7 +1,8 @@
-import { dec } from "@exchange/core";
+import { dec, errorText, formatDecimal } from "@exchange/core";
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
 import { Badge, Button, Drawer, KeyValue, Skeleton, Stepper, type DataColumnMeta, type ColumnDef, type RowSelectionState } from "@exchange/ui";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { CirclePause, CirclePlay } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useConsoleSettings } from "../../live";
@@ -12,13 +13,42 @@ import { ListTable, PAGE_SIZE, useCursorList, type CursorList } from "../../kit/
 import { clean } from "../records/tables";
 
 export type Withdrawal = AdminSchemas["Withdrawal"];
-export type WithdrawalQuery = { user_id?: string; asset?: string; network?: string; status?: string };
+export type WithdrawalQuery = {
+  user_id?: string;
+  asset?: string;
+  network?: string;
+  status?: string;
+  /** "true" for those on hold, "false" for the others. */
+  held?: string;
+  min_value_usdt?: string;
+  max_value_usdt?: string;
+  min_risk?: string;
+};
 
 const right: DataColumnMeta = { align: "right" };
 
 export function useWithdrawals(q: WithdrawalQuery) {
-  return useCursorList<Withdrawal>(["admin", "withdrawals", q], async (cursor) =>
-    adminData(await adminApi.GET("/admin/v1/withdrawals", { params: { query: { ...clean(q), cursor, limit: PAGE_SIZE } } })),
+  return useCursorList<Withdrawal>(["admin", "withdrawals", q], async (cursor) => {
+    const { held, min_risk, ...rest } = clean(q);
+    const risk = min_risk && /^\d+$/.test(min_risk) ? Number(min_risk) : undefined;
+    return adminData(
+      await adminApi.GET("/admin/v1/withdrawals", {
+        params: {
+          query: { ...rest, held: held === "true" || held === "false" ? held : undefined, min_risk: risk, cursor, limit: PAGE_SIZE },
+        },
+      }),
+    );
+  });
+}
+
+/** HeldBadge marks a withdrawal on hold, with its note on hover. */
+function HeldBadge({ w }: { w: Withdrawal }) {
+  const { t } = useTranslation();
+  if (!w.held_at) return null;
+  return (
+    <Badge tone="warn" title={w.hold_note || undefined} icon={<CirclePause size={12} />}>
+      {t("admin.hold.held")}
+    </Badge>
   );
 }
 
@@ -65,7 +95,16 @@ export function WithdrawalsTable({
           </span>
         ),
       },
-      { id: "status", header: t("admin.common.status"), cell: ({ row }) => <EnumBadge group="withdrawalStatus" code={row.original.status} /> },
+      {
+        id: "status",
+        header: t("admin.common.status"),
+        cell: ({ row }) => (
+          <span className="inline-flex flex-wrap items-center gap-1">
+            <EnumBadge group="withdrawalStatus" code={row.original.status} />
+            <HeldBadge w={row.original} />
+          </span>
+        ),
+      },
     ],
     [t, withUser, label],
   );
@@ -83,11 +122,25 @@ export function WithdrawalsTable({
   );
 }
 
-/** WithdrawalDrawer shows a withdrawal's risk, approvals and progress, with the review actions. */
-export function WithdrawalDrawer({ admin, w, onClose }: { admin: Admin; w: Withdrawal; onClose: () => void }) {
+// An address added to the address book this shortly before a withdrawal
+// is new (the wallet's NEW_ADDRESS risk rule).
+const NEW_ADDRESS_MS = 72 * 3600_000;
+
+/**
+ * WithdrawalDrawer shows a withdrawal's risk, its address in the user's
+ * address book, the user's withdrawals so far, approvals and progress,
+ * with the review actions (approve, reject, hold).
+ */
+export function WithdrawalDrawer({ admin, w: row, onClose }: { admin: Admin; w: Withdrawal; onClose: () => void }) {
   const { t } = useTranslation();
   const label = useEnum();
   const time = useTimeText();
+  const detail = useQuery({
+    queryKey: ["admin", "withdrawals", "detail", row.id],
+    queryFn: async () => adminData(await adminApi.GET("/admin/v1/withdrawals/{id}", { params: { path: { id: row.id } } })),
+  });
+  // The detail is the latest word on it (say, a hold since the list loaded).
+  const w = detail.data?.withdrawal ?? row;
   const steps = [
     { key: "requested", at: w.created_at },
     { key: "approvedAt", at: w.approved_at },
@@ -102,6 +155,9 @@ export function WithdrawalDrawer({ admin, w, onClose }: { admin: Admin; w: Withd
     !!settings && !settings.two_person_approval && !!w.value_usdt && dec.isDecimal(w.value_usdt) && dec.lte(w.value_usdt, settings.withdrawal_max_usdt);
   const review = (approve: boolean) => async (reason: string) =>
     adminData(await adminApi.POST("/admin/v1/withdrawals/{id}/review", { params: { path: { id: w.id } }, body: { approve, reason } }));
+  const hold = (on: boolean) => async (note: string) =>
+    adminData(await adminApi.POST("/admin/v1/withdrawals/{id}/hold", { params: { path: { id: w.id } }, body: { hold: on, note } }));
+  const held = !!w.held_at;
   const target = (
     <span className="text-sm">
       <Num value={w.amount} unit={w.asset} /> → <span className="font-mono text-xs">{w.address}</span>
@@ -131,8 +187,36 @@ export function WithdrawalDrawer({ admin, w, onClose }: { admin: Admin; w: Withd
               ? [{ label: t("admin.withdrawals.providerStatus"), value: <EnumBadge group="providerStatus" code={w.provider_status} /> }]
               : []),
             { label: t("admin.withdrawals.address"), value: <span className="font-mono text-xs">{w.address}</span>, copy: w.address },
+            { label: t("admin.withdrawalDetail.addressBook"), value: <AddressBook detail={detail} w={w} /> },
             { label: t("admin.withdrawals.fee"), value: <Num value={w.fee} unit={w.asset} /> },
             { label: t("admin.withdrawals.value"), value: <Num value={w.value_usdt} decimals={2} unit="USDT" /> },
+            {
+              label: t("admin.withdrawalDetail.used"),
+              hint: t("admin.withdrawalDetail.usedHint"),
+              value: detail.data ? (
+                t("admin.withdrawalDetail.usedValue", {
+                  today: formatDecimal(detail.data.used_today_usdt, { decimals: 2 }),
+                  month: formatDecimal(detail.data.used_month_usdt, { decimals: 2 }),
+                })
+              ) : detail.isPending ? (
+                <Skeleton className="h-4 w-40" />
+              ) : (
+                "—"
+              ),
+            },
+            ...(held
+              ? [
+                  {
+                    label: t("admin.hold.note"),
+                    value: (
+                      <span className="flex flex-col items-end gap-0.5">
+                        <span>{w.hold_note}</span>
+                        <span className="text-xs text-fg-3">{t("admin.hold.by", { by: w.held_by, time: time(w.held_at!) })}</span>
+                      </span>
+                    ),
+                  },
+                ]
+              : []),
             {
               label: t("admin.withdrawals.risk"),
               value: (
@@ -189,12 +273,53 @@ export function WithdrawalDrawer({ admin, w, onClose }: { admin: Admin; w: Withd
               invalidate={[["admin", "withdrawals"], ["admin", "todo"]]}
               onDone={onClose}
             />
+            <DangerAction
+              trigger={(open) => (
+                <Button variant="secondary" icon={held ? <CirclePlay size={16} /> : <CirclePause size={16} />} onClick={open}>
+                  {held ? t("admin.hold.unhold") : t("admin.hold.hold")}
+                </Button>
+              )}
+              danger={false}
+              title={held ? t("admin.hold.unholdTitle") : t("admin.hold.holdTitle")}
+              description={held ? undefined : t("admin.hold.holdHint")}
+              target={target}
+              confirmWord={lastFour(w.id)}
+              run={hold(!held)}
+              success={held ? t("admin.hold.unholdDone") : t("admin.hold.holdDone")}
+              invalidate={[["admin", "withdrawals"]]}
+            />
           </div>
         )}
         {w.user_id && <RecentOfUser userId={w.user_id} exclude={w.id} />}
         {w.custody && <Callbacks withdrawalId={w.id} />}
       </div>
     </Drawer>
+  );
+}
+
+type Detail = UseQueryResult<AdminSchemas["WithdrawalDetail"]>;
+
+/** AddressBook is the withdrawal's address in the user's address book: when added (new or not), whether it still cools off. */
+function AddressBook({ detail, w }: { detail: Detail; w: Withdrawal }) {
+  const { t } = useTranslation();
+  const time = useTimeText();
+  if (detail.isPending) return <Skeleton className="h-4 w-40" />;
+  if (detail.isError) return <span className="text-danger">{errorText(detail.error)}</span>;
+  const book = detail.data.address_book;
+  if (!book) return <span className="text-fg-3">{t("admin.withdrawalDetail.addressGone")}</span>;
+  const fresh = Date.parse(w.created_at) - Date.parse(book.created_at) < NEW_ADDRESS_MS;
+  const cooling = Date.parse(book.usable_at) > Date.now();
+  return (
+    <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
+      {book.label && <span>{book.label}</span>}
+      <span className="text-xs text-fg-3">{t("admin.withdrawalDetail.addedAt", { time: time(book.created_at) })}</span>
+      {fresh && (
+        <Badge tone="warn" title={t("admin.withdrawalDetail.newAddressHint")}>
+          {t("admin.withdrawalDetail.newAddress")}
+        </Badge>
+      )}
+      {cooling && <Badge tone="warn">{t("admin.withdrawalDetail.cooling", { time: time(book.usable_at) })}</Badge>}
+    </span>
   );
 }
 

@@ -6,7 +6,8 @@ import { useState, type ReactNode } from "react";
 import { settingsKey, todoKey } from "../live";
 import { errorToast } from "./actions";
 
-// Fund operations (manual adjustments, insurance fund contributions) end
+// Fund operations (manual adjustments, insurance fund contributions,
+// deposit backfills) end
 // three ways: booked at once (single-person mode within the limits),
 // waiting for a second administrator, or refused by the ledger. The
 // administrator is told which, with the journal or the reason.
@@ -17,6 +18,11 @@ export type Approval = AdminSchemas["Approval"];
 export function announce(a: Approval) {
   const t = i18n.t.bind(i18n);
   if (a.status === "EXECUTED") {
+    // A backfill books a deposit (the ledger follows shortly), not a journal.
+    if (a.kind === "DEPOSIT_BACKFILL") {
+      toast.success(t("admin.backfill.booked"), { description: t("admin.backfill.done", { id: a.result.replace(/^deposit /, "") }), duration: 6000 });
+      return;
+    }
     toast.success(t("admin.funds.executed"), { description: t("admin.funds.journal", { id: a.journal_id ?? "—" }), duration: 6000 });
   } else if (a.status === "FAILED") {
     toast.error(t("admin.funds.failed"), { description: a.result, duration: 10000 });
@@ -75,7 +81,7 @@ export function FundAction({ trigger, title, description, target, confirmWord, c
           } catch (err) {
             fundError(err);
           } finally {
-            for (const key of [["admin", "approvals"], todoKey, settingsKey, ["admin", "user"], ["admin", "derivatives"]]) {
+            for (const key of [["admin", "approvals"], todoKey, settingsKey, ["admin", "user"], ["admin", "derivatives"], ["admin", "deposits"]]) {
               void qc.invalidateQueries({ queryKey: key });
             }
           }

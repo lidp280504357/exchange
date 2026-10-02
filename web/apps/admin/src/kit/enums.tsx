@@ -31,7 +31,10 @@ export type EnumGroup =
   | "totpStatus"
   | "riskAction"
   | "consentDocument"
-  | "loginMethod";
+  | "loginMethod"
+  | "depositReason"
+  | "depositSource"
+  | "depositResolution";
 
 /** useEnum returns a function that labels a code of a group (the code itself when unknown). */
 export function useEnum() {
@@ -52,7 +55,12 @@ const tones: Partial<Record<EnumGroup, Record<string, BadgeTone>>> = {
   providerStatus: {
     SUBMITTED: "warn", ACCEPTED: "info", REVIEW: "info", APPROVED: "brand", REJECTED: "danger", SUCCESS: "success", FAILED: "danger",
   },
-  callbackResult: { RECEIVED: "info", APPLIED: "success", IGNORED: "neutral", UNMATCHED: "warn", REJECTED: "danger", FAILED: "danger" },
+  callbackResult: {
+    RECEIVED: "info", APPLIED: "success", IGNORED: "neutral", UNMATCHED: "warn", REJECTED: "danger", FAILED: "danger", DISCREPANCY: "danger",
+  },
+  depositReason: { BELOW_MINIMUM: "warn", ACCOUNT_CLOSED: "warn", NOT_ELIGIBLE: "warn", UNSUPPORTED_TOKEN: "danger" },
+  depositSource: { AUTO: "neutral", MANUAL: "info" },
+  depositResolution: { CREDITED: "success", DISMISSED: "neutral" },
   custodyStatus: { "0": "info", "1": "brand", "2": "danger", "3": "success", "4": "danger" },
   pairStatus: { PREPARE: "neutral", TRADING: "success", HALT: "warn", CANCEL_ONLY: "warn", DELISTED: "danger" },
   approvalStatus: { PENDING: "warn", EXECUTED: "success", REJECTED: "neutral", FAILED: "danger" },

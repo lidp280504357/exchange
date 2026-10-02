@@ -47,6 +47,9 @@ type Service struct {
 	// CallbacksRejected counts the callbacks refused for their signature,
 	// age or form, kept or not (HandleCallback); nil counts nothing.
 	CallbacksRejected prometheus.Counter
+	// Discrepancies counts custodian callbacks that disagree with a deposit
+	// an administrator backfilled (matchManual); nil counts nothing.
+	Discrepancies prometheus.Counter
 }
 
 // DepositAddress returns the user's deposit address for an asset on a

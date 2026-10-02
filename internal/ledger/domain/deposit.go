@@ -26,6 +26,25 @@ type Deposit struct {
 // DepositKey is the idempotency key of a deposit's credit.
 func DepositKey(depositID string) string { return "deposit:" + depositID }
 
+// ReleaseKey is the idempotency key of an unclaimed deposit's release.
+func ReleaseKey(depositID string) string { return "deposit-release:" + depositID }
+
+// ReleasePostingOf moves an unclaimed deposit from UNCLAIMED_DEPOSIT to
+// its user's SPOT account once an administrator decided it is theirs
+// (design 2026-10-02 §4.3): the same asset and amount, DEPOSIT_CREDIT.
+func ReleasePostingOf(d Deposit, memo string) (Posting, error) {
+	if d.ID == "" || d.Asset == "" || d.UserID == "" || !d.Amount.IsPositive() {
+		return Posting{}, apperr.Invalid("a release needs a deposit ID, an asset, a user and a positive amount")
+	}
+	return Posting{
+		IdemKey: ReleaseKey(d.ID), EntryType: EntryDepositCredit, Memo: memo,
+		Lines: []Line{
+			{Account: SystemAccount(AccountUnclaimedDeposit, d.Asset), Amount: d.Amount.Neg(), Kind: Available},
+			{Account: UserAccount(d.UserID, AccountSpot, d.Asset), Amount: d.Amount, Kind: Available},
+		},
+	}, nil
+}
+
 // DepositPosting is the DEPOSIT_CREDIT journal of a deposit:
 // DEPOSIT_PENDING pays the user's SPOT account, or UNCLAIMED_DEPOSIT
 // (§11.4 sign convention: DEPOSIT_PENDING accumulates the negative of all

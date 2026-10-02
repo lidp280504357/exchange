@@ -268,6 +268,13 @@ func (l *fakeLedger) SystemBalances(context.Context, string) (map[string]decimal
 	return l.system, nil
 }
 
+func (l *fakeLedger) ReleaseUnclaimed(_ context.Context, id, user, _ string, amount decimal.Decimal, _, _ string) (string, error) {
+	return l.once("deposit-release:"+id, func() error {
+		l.available[user] = l.available[user].Add(amount)
+		return nil
+	})
+}
+
 func gwei(n int64) *big.Int { return new(big.Int).Mul(big.NewInt(n), big.NewInt(1_000_000_000)) }
 
 func TestProcessorSweepsFundsAndChecks(t *testing.T) {

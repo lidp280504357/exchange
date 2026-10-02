@@ -62,6 +62,7 @@ func (h *Handler) Routes(r chi.Router) {
 	r.Get("/internal/wallet/custody/callbacks", h.adminCallbacks)
 	r.Get("/internal/wallet/custody/callbacks/{id}", h.adminCallback)
 	r.Post("/internal/wallet/custody/callbacks/{id}/replay", h.adminReplay)
+	h.adminRoutes(r)
 }
 
 // AdminWithdrawalJSON is a withdrawal as reviewers see it.
@@ -72,6 +73,22 @@ type AdminWithdrawalJSON struct {
 	ValueUSDT      string   `json:"value_usdt"`
 	Approvals      []string `json:"approvals"`
 	ProviderStatus string   `json:"provider_status"`
+	// HeldAt is set while a reviewer put it on hold (by HeldBy, HoldNote).
+	HeldAt   *string `json:"held_at"`
+	HeldBy   string  `json:"held_by"`
+	HoldNote string  `json:"hold_note"`
+}
+
+// AdminWithdrawalJSONOf renders a withdrawal for reviewers.
+func AdminWithdrawalJSONOf(wd domain.Withdrawal) AdminWithdrawalJSON {
+	approvals := wd.Approvals
+	if approvals == nil {
+		approvals = []string{}
+	}
+	return AdminWithdrawalJSON{
+		WithdrawalJSON: WithdrawalJSONOf(wd), UserID: wd.UserID, RiskScore: wd.RiskScore, ValueUSDT: wd.ValueUSDT.String(),
+		Approvals: approvals, ProviderStatus: wd.ProviderStatus, HeldAt: timeOrNil(wd.HeldAt), HeldBy: wd.HeldBy, HoldNote: wd.HoldNote,
+	}
 }
 
 // adminWithdrawals pages through the withdrawals for the admin console:
@@ -98,8 +115,26 @@ func (h *Handler) adminWithdrawals(w http.ResponseWriter, r *http.Request) {
 	}
 	f := ports.WithdrawalFilter{
 		Status: status, UserID: q.Get("user_id"), Asset: strings.ToUpper(q.Get("asset")), After: q.Get("cursor"),
-		Oldest: order == "asc", Limit: limit + 1,
+		Oldest: order == "asc", Limit: limit + 1, Held: q.Get("held"),
 	}
+	if f.Held != "" && f.Held != "true" && f.Held != "false" {
+		httpx.WriteError(w, r, apperr.Invalid("held must be true or false"))
+		return
+	}
+	for _, v := range []struct {
+		dst  *decimal.Decimal
+		name string
+	}{{&f.MinValue, "min_value_usdt"}, {&f.MaxValue, "max_value_usdt"}} {
+		if s := q.Get(v.name); s != "" {
+			d, err := decimal.NewFromString(s)
+			if err != nil || d.IsNegative() {
+				httpx.WriteError(w, r, apperr.Invalid(v.name+" must be a decimal"))
+				return
+			}
+			*v.dst = d
+		}
+	}
+	f.MinRisk, _ = strconv.Atoi(q.Get("min_risk"))
 	list, err := h.Svc.Store.Read().Withdrawals().Page(r.Context(), strings.ToUpper(q.Get("network")), f)
 	if err != nil {
 		httpx.WriteError(w, r, err)
@@ -112,14 +147,7 @@ func (h *Handler) adminWithdrawals(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]AdminWithdrawalJSON, 0, len(list))
 	for _, wd := range list {
-		approvals := wd.Approvals
-		if approvals == nil {
-			approvals = []string{}
-		}
-		out = append(out, AdminWithdrawalJSON{
-			WithdrawalJSON: WithdrawalJSONOf(wd), UserID: wd.UserID, RiskScore: wd.RiskScore, ValueUSDT: wd.ValueUSDT.String(),
-			Approvals: approvals, ProviderStatus: wd.ProviderStatus,
-		})
+		out = append(out, AdminWithdrawalJSONOf(wd))
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "next_cursor": next})
 }

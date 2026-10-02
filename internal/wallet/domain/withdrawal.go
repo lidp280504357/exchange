@@ -111,6 +111,40 @@ type Withdrawal struct {
 	SubmittedAt     time.Time
 	BroadcastAt     time.Time
 	ConfirmedAt     time.Time
+	// HeldAt is set while a reviewer put the withdrawal in review aside
+	// (design 2026-10-02 §4.2), by HeldBy with HoldNote.
+	HeldAt   time.Time
+	HeldBy   string
+	HoldNote string
+}
+
+// ErrNotInReview refuses a hold of a withdrawal that is not in review.
+var ErrNotInReview = apperr.New(apperr.KindConflict, "WALLET_WITHDRAWAL_NOT_IN_REVIEW", "only a withdrawal in review can be put on hold")
+
+// Hold puts a withdrawal in review aside with a note while a reviewer
+// looks into it; it stays in review and may still be approved or
+// rejected. Holding it again replaces the note.
+func (w *Withdrawal) Hold(reviewer, note string, now time.Time) error {
+	reviewer, note = strings.TrimSpace(reviewer), strings.TrimSpace(note)
+	switch {
+	case w.Status != WithdrawalReview:
+		return ErrNotInReview
+	case reviewer == "":
+		return apperr.Invalid("the reviewer is required")
+	case len(note) < 3:
+		return apperr.Invalid("a note of at least 3 characters is required")
+	}
+	w.HeldAt, w.HeldBy, w.HoldNote, w.UpdatedAt = now, reviewer, note, now
+	return nil
+}
+
+// Unhold takes a withdrawal off hold; it reports whether it was held.
+func (w *Withdrawal) Unhold(now time.Time) bool {
+	if w.HeldAt.IsZero() {
+		return false
+	}
+	w.HeldAt, w.HeldBy, w.HoldNote, w.UpdatedAt = time.Time{}, "", "", now
+	return true
 }
 
 // Custody reports whether a custodian sends the withdrawal.

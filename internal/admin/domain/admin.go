@@ -62,6 +62,10 @@ const (
 	// PermLedgerHold freezes part of a user's SPOT balance and releases it
 	// (risk control).
 	PermLedgerHold = "ledger.hold"
+	// PermDepositsReview decides the deposits that need a person (credits
+	// an unclaimed one, dismisses one) and requests backfills of those
+	// whose callback was lost.
+	PermDepositsReview = "deposits.review"
 )
 
 var reads = []string{
@@ -71,11 +75,11 @@ var reads = []string{
 var roles = map[string][]string{
 	RoleAdmin: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit,
 		PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermDerivativesEdit, PermSettingsEdit, PermUsersNotes,
-		PermUsersSecurity, PermUsersContacts, PermLedgerHold),
+		PermUsersSecurity, PermUsersContacts, PermLedgerHold, PermDepositsReview),
 	RoleOperator: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit, PermDerivativesEdit,
 		PermUsersNotes, PermUsersSecurity, PermUsersContacts, PermLedgerHold),
 	RoleFinance: append(slices.Clone(reads), PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermUsersNotes, PermUsersContacts,
-		PermLedgerHold),
+		PermLedgerHold, PermDepositsReview),
 	RoleAuditor: slices.Clone(reads),
 }
 
@@ -201,6 +205,9 @@ const (
 	// KindInsuranceFund adds simulated funds to the contracts' insurance
 	// fund (ledger FundInsurance).
 	KindInsuranceFund = "INSURANCE_FUND"
+	// KindDepositBackfill books a custodian deposit whose callback was
+	// lost (wallet-service, design 2026-10-02 §4.3).
+	KindDepositBackfill = "DEPOSIT_BACKFILL"
 
 	ApprovalPending  = "PENDING"
 	ApprovalExecuted = "EXECUTED"

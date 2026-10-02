@@ -27,6 +27,17 @@ func (c *Client) BookChainFee(ctx context.Context, key, asset string, amount dec
 	return resp.GetPosting().GetJournalId(), nil
 }
 
+// ReleaseUnclaimed books an unclaimed deposit to its user.
+func (c *Client) ReleaseUnclaimed(ctx context.Context, depositID, userID, asset string, amount decimal.Decimal, actor, reason string) (string, error) {
+	resp, err := c.c.ReleaseUnclaimed(ctx, &ledgerv1.ReleaseUnclaimedRequest{
+		DepositId: depositID, UserId: userID, Asset: asset, Amount: amount.String(), Actor: actor, Reason: reason,
+	})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetPosting().GetJournalId(), nil
+}
+
 // Fund books a platform funding to a system account.
 func (c *Client) Fund(ctx context.Context, key, accountType, asset string, amount decimal.Decimal, reference string) (string, error) {
 	resp, err := c.c.FundSystemAccount(ctx, &ledgerv1.FundSystemAccountRequest{

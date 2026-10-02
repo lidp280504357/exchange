@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -43,6 +44,10 @@ var fundActions = map[string]struct{ requested, approved, rejected, executed, fa
 		"admin.derivatives.insurance_requested", "admin.derivatives.insurance_approved", "admin.derivatives.insurance_rejected",
 		"admin.derivatives.insurance_executed", "admin.derivatives.insurance_failed",
 	},
+	domain.KindDepositBackfill: {
+		"admin.deposits.backfill_requested", "admin.deposits.backfill_approved", "admin.deposits.backfill_rejected",
+		"admin.deposits.backfill_executed", "admin.deposits.backfill_failed",
+	},
 }
 
 // fundTarget is the audit target of an operation.
@@ -68,6 +73,9 @@ type FundRequest struct {
 	Reason string
 	// Reference is an optional ticket or order number kept with it.
 	Reference string
+	// Backfill is a deposit backfill's custodian trade (Kind
+	// DEPOSIT_BACKFILL): wallet-service finds the user and the asset.
+	Backfill *ports.ManualDeposit
 	// Direct carries it out at once when single-person mode and its limits
 	// allow; without it a second administrator always decides.
 	Direct bool
@@ -107,10 +115,40 @@ func (in *FundRequest) validate() error {
 		if in.Asset == "" {
 			in.Asset = "USDT"
 		}
+	case domain.KindDepositBackfill:
+		b := in.Backfill
+		if b == nil || !b.Amount.IsPositive() {
+			return apperr.Invalid("a backfill needs the custodian's trade and a positive amount")
+		}
+		b.Network, b.TradeID = strings.ToUpper(strings.TrimSpace(b.Network)), strings.TrimSpace(b.TradeID)
+		b.Address, b.TxHash = strings.TrimSpace(b.Address), strings.TrimSpace(b.TxHash)
+		if b.Network == "" || b.TradeID == "" || b.Address == "" || b.TxHash == "" {
+			return apperr.Invalid("the network, trade ID, address and transaction hash are required")
+		}
+		in.Amount = b.Amount
 	default:
 		return fmt.Errorf("fund operation of unknown kind %q", in.Kind)
 	}
 	return nil
+}
+
+// backfillPayload records a backfill's trade in its operation.
+func backfillPayload(a *domain.Approval, b ports.ManualDeposit, check ports.ManualCheck) {
+	a.Payload["user_id"], a.Payload["asset"] = check.UserID, check.Asset
+	a.Payload["network"], a.Payload["trade_id"], a.Payload["address"], a.Payload["tx_hash"] = b.Network, b.TradeID, b.Address, b.TxHash
+	a.Payload["entered_by"] = b.Actor
+}
+
+// backfillOf reads a backfill's trade back from its operation.
+func backfillOf(a domain.Approval) (ports.ManualDeposit, error) {
+	amount, err := decimal.NewFromString(a.Payload["amount"])
+	if err != nil {
+		return ports.ManualDeposit{}, err
+	}
+	return ports.ManualDeposit{
+		Network: a.Payload["network"], TradeID: a.Payload["trade_id"], Address: a.Payload["address"], TxHash: a.Payload["tx_hash"],
+		Amount: amount, Actor: a.Payload["entered_by"],
+	}, nil
 }
 
 // RequestAdjustment records a manual adjustment for a second
@@ -134,11 +172,24 @@ func (s *Service) RequestInsuranceFunding(ctx context.Context, p Principal, asse
 // When the ledger does not answer, the operation stays PENDING (single
 // mode: its requester may finish it later) and the error names it.
 func (s *Service) SubmitFunds(ctx context.Context, p Principal, in FundRequest) (domain.Approval, error) {
-	if err := p.require(domain.PermAdjustRequest); err != nil {
+	perm := domain.PermAdjustRequest
+	if in.Kind == domain.KindDepositBackfill {
+		perm = domain.PermDepositsReview
+	}
+	if err := p.require(perm); err != nil {
 		return domain.Approval{}, err
 	}
 	if err := in.validate(); err != nil {
 		return domain.Approval{}, err
+	}
+	var check ports.ManualCheck
+	if in.Kind == domain.KindDepositBackfill {
+		in.Backfill.Actor = p.Admin.Email
+		var err error
+		if check, err = s.Deposits.CheckManual(ctx, *in.Backfill); err != nil {
+			return domain.Approval{}, err
+		}
+		in.Asset = check.Asset
 	}
 	now := s.Now()
 	a := domain.Approval{
@@ -146,6 +197,9 @@ func (s *Service) SubmitFunds(ctx context.Context, p Principal, in FundRequest) 
 		Payload: map[string]string{"asset": in.Asset, "amount": in.Amount.String()},
 		Status:  domain.ApprovalPending, RequestedBy: p.Admin.ID, CreatedAt: now, Mode: domain.ModeTwoPerson,
 		RequestedByEmail: p.Admin.Email,
+	}
+	if in.Kind == domain.KindDepositBackfill {
+		backfillPayload(&a, *in.Backfill, check)
 	}
 	if in.Kind == domain.KindLedgerAdjustment {
 		a.Payload["user_id"] = in.UserID
@@ -272,8 +326,12 @@ func fundDetails(a domain.Approval) string {
 		value = fmt.Sprintf("%q", a.ValueUSDT.String())
 	}
 	account := ""
-	if a.Kind == domain.KindLedgerAdjustment {
+	switch a.Kind {
+	case domain.KindLedgerAdjustment:
 		account = fmt.Sprintf(`"account_type":%q,`, accountOf(a))
+	case domain.KindDepositBackfill:
+		account = fmt.Sprintf(`"network":%q,"trade_id":%q,"tx_hash":%q,"address":%q,"custodian_checked":false,`,
+			a.Payload["network"], a.Payload["trade_id"], a.Payload["tx_hash"], a.Payload["address"])
 	}
 	return fmt.Sprintf(`{"approval_id":%q,%s"asset":%q,"amount":%q,"mode":%q,"escalation":%q,"value_usdt":%s,"status":%q,"result":%q}`,
 		a.ID, account, a.Payload["asset"], a.Payload["amount"], a.Mode, a.Escalation, value, a.Status, a.Result)
@@ -396,10 +454,12 @@ func (s *Service) execute(ctx context.Context, a *domain.Approval, p Principal) 
 	if ref := a.Payload["reference"]; ref != "" {
 		note += " [" + ref + "]"
 	}
-	var journal string
+	var journal, deposit string
 	switch a.Kind {
 	case domain.KindInsuranceFund:
 		journal, err = s.Ledger.FundInsurance(ctx, key, a.Payload["asset"], amount, p.Admin.Email, note)
+	case domain.KindDepositBackfill:
+		deposit, err = s.backfill(ctx, *a)
 	default:
 		journal, err = s.Ledger.Adjust(ctx, key, a.Payload["user_id"], accountOf(*a), a.Payload["asset"], amount, p.Admin.Email, note)
 	}
@@ -411,8 +471,33 @@ func (s *Service) execute(ctx context.Context, a *domain.Approval, p Principal) 
 		a.Status, a.Result = domain.ApprovalFailed, e.Code+": "+e.Message
 		return nil
 	}
+	if deposit != "" {
+		// The ledger books it when the wallet's processor sends it, shortly.
+		a.Status, a.Result = domain.ApprovalExecuted, "deposit "+deposit
+		return nil
+	}
 	a.Status, a.Result, a.JournalID = domain.ApprovalExecuted, "journal "+journal, journal
 	return nil
+}
+
+// backfill books an approved deposit backfill in wallet-service and
+// returns the deposit's ID; the same backfill again finds its deposit.
+func (s *Service) backfill(ctx context.Context, a domain.Approval) (string, error) {
+	b, err := backfillOf(a)
+	if err != nil {
+		return "", err
+	}
+	raw, err := s.Deposits.BookManual(ctx, b, a.Reason)
+	if err != nil {
+		return "", err
+	}
+	var d struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &d); err != nil || d.ID == "" {
+		return "", apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "wallet-service answered badly")
+	}
+	return d.ID, nil
 }
 
 // settings returns the console's settings, the defaults until changed.

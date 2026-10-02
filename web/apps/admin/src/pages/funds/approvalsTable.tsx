@@ -88,6 +88,11 @@ function Payload({ a }: { a: Approval }) {
       {p.user_id && <UserCell id={p.user_id} />}
       <Num value={p.amount} unit={p.asset} signed />
       {p.reference && <span className="text-xs text-fg-3">#{p.reference}</span>}
+      {p.trade_id && (
+        <span className="font-mono text-xs text-fg-3" title={p.tx_hash}>
+          {p.network} · {p.trade_id}
+        </span>
+      )}
     </span>
   );
 }

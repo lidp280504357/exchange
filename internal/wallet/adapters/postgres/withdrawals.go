@@ -99,21 +99,22 @@ type withdrawals repos
 const withdrawalColumns = `id, user_id, asset, network, address, amount, fee, internal_user_id, status, risk_score, risk_reasons,
 	approvals_required, approvals, reject_reason, value_usdt, nonce, tx_hash, block_number, confirmations, required_confirmations,
 	freeze_journal_id, settle_journal_id, unfreeze_journal_id, created_at, updated_at, approved_at, broadcast_at, confirmed_at,
-	provider, provider_status, submitted_at`
+	provider, provider_status, submitted_at, held_at, held_by, hold_note`
 
 func scanWithdrawal(row pgx.Row) (domain.Withdrawal, error) {
 	var w domain.Withdrawal
 	var internal, txHash, freeze, settle, unfreeze *string
 	var nonce, block *int64
 	var score, required, conf, reqConf int32
-	var approved, broadcast, confirmed, submitted *time.Time
+	var approved, broadcast, confirmed, submitted, held *time.Time
 	err := row.Scan(&w.ID, &w.UserID, &w.Asset, &w.Network, &w.Address, &w.Amount, &w.Fee, &internal, &w.Status, &score,
 		&w.RiskReasons, &required, &w.Approvals, &w.RejectReason, &w.ValueUSDT, &nonce, &txHash, &block, &conf, &reqConf,
 		&freeze, &settle, &unfreeze, &w.CreatedAt, &w.UpdatedAt, &approved, &broadcast, &confirmed, &w.Provider, &w.ProviderStatus,
-		&submitted)
+		&submitted, &held, &w.HeldBy, &w.HoldNote)
 	if err != nil {
 		return domain.Withdrawal{}, err
 	}
+	w.HeldAt = at(held)
 	w.InternalUserID, w.TxHash = str(internal), str(txHash)
 	w.FreezeJournal, w.SettleJournal, w.UnfreezeJournal = str(freeze), str(settle), str(unfreeze)
 	w.RiskScore, w.ApprovalsRequired = int(score), int(required)
@@ -147,12 +148,12 @@ func blockArg(n uint64) *int64 {
 func (r withdrawals) Insert(ctx context.Context, w domain.Withdrawal) error {
 	_, err := r.q.Exec(ctx, `INSERT INTO withdrawals (`+withdrawalColumns+`)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
-			$27, $28, $29, $30, $31)`,
+			$27, $28, $29, $30, $31, $32, $33, $34)`,
 		w.ID, w.UserID, w.Asset, w.Network, w.Address, w.Amount, w.Fee, text(w.InternalUserID), w.Status, w.RiskScore,
 		nonNil(w.RiskReasons), w.ApprovalsRequired, nonNil(w.Approvals), w.RejectReason, w.ValueUSDT, nonceArg(w.Nonce), text(w.TxHash),
 		blockArg(w.BlockNumber), int64(w.Confirmations), int64(w.Required), text(w.FreezeJournal), text(w.SettleJournal),
 		text(w.UnfreezeJournal), w.CreatedAt, w.UpdatedAt, stamp(w.ApprovedAt), stamp(w.BroadcastAt), stamp(w.ConfirmedAt), w.Provider,
-		w.ProviderStatus, stamp(w.SubmittedAt))
+		w.ProviderStatus, stamp(w.SubmittedAt), stamp(w.HeldAt), w.HeldBy, w.HoldNote)
 	if err != nil {
 		return fmt.Errorf("insert withdrawal: %w", err)
 	}
@@ -170,11 +171,12 @@ func (r withdrawals) Update(ctx context.Context, w domain.Withdrawal) error {
 	_, err := r.q.Exec(ctx, `UPDATE withdrawals SET status = $2, risk_score = $3, risk_reasons = $4, approvals_required = $5,
 		approvals = $6, reject_reason = $7, nonce = $8, tx_hash = $9, block_number = $10, confirmations = $11,
 		freeze_journal_id = $12, settle_journal_id = $13, unfreeze_journal_id = $14, updated_at = $15, approved_at = $16,
-		broadcast_at = $17, confirmed_at = $18, provider_status = $19, submitted_at = $20 WHERE id = $1`,
+		broadcast_at = $17, confirmed_at = $18, provider_status = $19, submitted_at = $20, held_at = $21, held_by = $22,
+		hold_note = $23 WHERE id = $1`,
 		w.ID, w.Status, w.RiskScore, nonNil(w.RiskReasons), w.ApprovalsRequired, nonNil(w.Approvals), w.RejectReason,
 		nonceArg(w.Nonce), text(w.TxHash), blockArg(w.BlockNumber), int64(w.Confirmations), text(w.FreezeJournal),
 		text(w.SettleJournal), text(w.UnfreezeJournal), w.UpdatedAt, stamp(w.ApprovedAt), stamp(w.BroadcastAt), stamp(w.ConfirmedAt),
-		w.ProviderStatus, stamp(w.SubmittedAt))
+		w.ProviderStatus, stamp(w.SubmittedAt), stamp(w.HeldAt), w.HeldBy, w.HoldNote)
 	if err != nil {
 		return fmt.Errorf("update withdrawal: %w", err)
 	}
@@ -248,9 +250,18 @@ func (r withdrawals) Page(ctx context.Context, network string, f ports.Withdrawa
 	if f.Oldest {
 		order, cmp = "ASC", ">"
 	}
+	var minValue, maxValue *decimal.Decimal
+	if f.MinValue.IsPositive() {
+		minValue = &f.MinValue
+	}
+	if f.MaxValue.IsPositive() {
+		maxValue = &f.MaxValue
+	}
 	return r.list(ctx, `SELECT `+withdrawalColumns+` FROM withdrawals WHERE ($1 = '' OR network = $1) AND ($2 = '' OR status = $2)
 		AND ($3::uuid IS NULL OR user_id = $3) AND ($4 = '' OR asset = $4) AND ($5::uuid IS NULL OR id `+cmp+` $5)
-		ORDER BY id `+order+` LIMIT $6`, network, f.Status, user, f.Asset, after, f.Limit)
+		AND ($7 = '' OR (held_at IS NOT NULL) = ($7 = 'true')) AND ($8::numeric IS NULL OR value_usdt >= $8)
+		AND ($9::numeric IS NULL OR value_usdt <= $9) AND risk_score >= $10
+		ORDER BY id `+order+` LIMIT $6`, network, f.Status, user, f.Asset, after, f.Limit, f.Held, minValue, maxValue, f.MinRisk)
 }
 
 func (r withdrawals) Unreleased(ctx context.Context, network string) ([]domain.Withdrawal, error) {

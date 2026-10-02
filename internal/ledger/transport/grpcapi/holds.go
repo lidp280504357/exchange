@@ -42,6 +42,19 @@ func (s *Server) ReleaseHold(ctx context.Context, req *ledgerv1.ReleaseHoldReque
 	return &ledgerv1.ReleaseHoldResponse{Hold: holdProto(h)}, nil
 }
 
+// ReleaseUnclaimed books an unclaimed deposit to its user.
+func (s *Server) ReleaseUnclaimed(ctx context.Context, req *ledgerv1.ReleaseUnclaimedRequest) (*ledgerv1.ReleaseUnclaimedResponse, error) {
+	a, err := amount(req.GetAmount())
+	if err != nil {
+		return nil, err
+	}
+	res, err := s.svc.ReleaseUnclaimed(ctx, req.GetDepositId(), req.GetUserId(), req.GetAsset(), a, req.GetActor(), req.GetReason())
+	if err != nil {
+		return nil, err
+	}
+	return &ledgerv1.ReleaseUnclaimedResponse{Posting: posting(res)}, nil
+}
+
 // ListHolds lists a user's holds.
 func (s *Server) ListHolds(ctx context.Context, req *ledgerv1.ListHoldsRequest) (*ledgerv1.ListHoldsResponse, error) {
 	list, err := s.svc.Holds(ctx, req.GetUserId(), req.GetActiveOnly())

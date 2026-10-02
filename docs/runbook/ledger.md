@@ -19,6 +19,7 @@
 - 管理后台（2026-10-02 设计 C2）：
   - `Adjust` 可调现货或合约账户（`account_type`，默认 `SPOT`）。
   - **风控冻结**：`PlaceHold`、`ReleaseHold`、`ListHolds`。冻结把用户现货可用余额的一部分转入冻结（分录 `ADMIN_FREEZE`，键 `hold:<冻结单ID>`），解冻原样转回（`ADMIN_UNFREEZE`，键 `hold-release:<ID>`，备注为解冻理由），每张冻结单只能解冻一次（`LEDGER_HOLD_RELEASED`）。冻结单记在 `ledger.holds`（迁移 ledger 00005），两步都在同一事务里写审计 `ledger.hold_placed`/`ledger.hold_released`（操作者为管理员邮箱）。只做现货：合约账户的冻结是保证金，由 derivatives-service 对账。用户的资金流水能看到这两类分录（站内显示为"风控冻结/风控解冻"）。
+  - **未入账充值的放行**（C2c）：`ReleaseUnclaimed`（wallet-service 调用，后台「充值 → 待处理 → 入账给用户」）把一笔已记入 `UNCLAIMED_DEPOSIT` 的充值按原资产、原数量转给用户现货账户，分录仍是 `DEPOSIT_CREDIT`（`UNCLAIMED_DEPOSIT` → 用户 `SPOT`，键 `deposit-release:<充值ID>`，备注带理由），同一事务写审计 `ledger.unclaimed_released`（操作者为管理员邮箱）。同键重放返回原分录；`UNCLAIMED_DEPOSIT` 不够（不可为负）时被拒。
 
 ```sql
 SELECT id, user_id, asset, amount, reason, actor, created_at, released_at, released_by FROM ledger.holds WHERE released_at IS NULL ORDER BY created_at DESC;

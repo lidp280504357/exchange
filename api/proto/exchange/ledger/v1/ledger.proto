@@ -69,6 +69,12 @@ service LedgerService {
   rpc ReleaseHold(ReleaseHoldRequest) returns (ReleaseHoldResponse);
   // ListHolds lists a user's holds, newest first.
   rpc ListHolds(ListHoldsRequest) returns (ListHoldsResponse);
+  // ReleaseUnclaimed books an unclaimed deposit to its user once an
+  // administrator decided it is theirs (design 2026-10-02 §4.3):
+  // UNCLAIMED_DEPOSIT pays the user's SPOT account the deposit's asset and
+  // amount (DEPOSIT_CREDIT, key deposit-release:<deposit_id>), with an
+  // audit event. wallet-service calls it.
+  rpc ReleaseUnclaimed(ReleaseUnclaimedRequest) returns (ReleaseUnclaimedResponse);
 }
 
 message FreezeRequest {
@@ -359,4 +365,18 @@ message ListHoldsRequest {
 
 message ListHoldsResponse {
   repeated Hold holds = 1;
+}
+
+message ReleaseUnclaimedRequest {
+  string deposit_id = 1;
+  string user_id = 2;
+  string asset = 3;
+  string amount = 4;
+  // The administrator who decided.
+  string actor = 5;
+  string reason = 6;
+}
+
+message ReleaseUnclaimedResponse {
+  Posting posting = 1;
 }

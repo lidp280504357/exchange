@@ -63,13 +63,16 @@ custody_callbacks（原文、验签、结果、次数）──> 充值：deposit
 
 | 结果 | 含义 |
 |---|---|
-| `APPLIED` | 已入账 / 已改状态 |
+| `APPLIED` | 已入账 / 已改状态；或与管理员的补记一致（已核对，不再入账） |
 | `IGNORED` | 无需处理（充值的审核中状态、重复、晚到的审核回调） |
 | `UNMATCHED` | 找不到网络、地址或提现，回 `success` 停止重试，等人工处理（告警） |
 | `REJECTED` | 验签失败、时间超窗或格式不对，回 401/400，不处理 |
 | `FAILED` | 应用时出错，回 500 让托管方重试，也可在后台重放 |
+| `DISCREPANCY` | 与管理员补记的充值不一致（地址、资产或数量），不更正、不入账，充值转为待处理并告警；回 `success` |
 
 后台「托管方」页可以重放 `FAILED`、`UNMATCHED`、`RECEIVED` 的回调（重新验签但不查时间，写审计 `wallet.custody.callback.replay`）。
+
+**回调丢失时的补记**（2026-10-02 管理后台设计 §4.3）：网关没有按交易号查询的接口，托管方重试也放弃时，管理员先在优盾商户后台或区块浏览器核对到账，再在后台「充值 → 补记充值」录入网络、交易号、地址、哈希与数量。系统核对：网络由托管方服务、地址属于该网络上的用户、`UDUN:<tradeId>` 与（网络、哈希、地址）都没出现过、数量符合资产精度；按资金操作的护栏执行（单人模式限额内立即，否则第二位管理员批准），之后与回调一样记 `CONFIRMED`（来源 `MANUAL`、录入人），由处理器交账本入账。真回调晚到时按交易号找到这笔补记：一致记 `APPLIED`（`callback_at`），不一致记 `DISCREPANCY`（计数 `wallet_custody_deposit_discrepancies_total`，告警 `CustodyDepositDiscrepancy`）。还没等到回调的补记在 `exchangectl wallet reconcile --network UDUN`（或 `checks`）的报告里单列——托管方余额里没有对应到账，就是录错了。操作见 [admin.md](admin.md#充值处置与补记2026-10-02-设计-43c2c)。
 
 ## 对账（不变量 4 的托管版）
 
@@ -115,8 +118,8 @@ sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T udu
 
 ## 指标与告警
 
-- `wallet_custody_up`、`wallet_custody_balance{coin}`（5 分钟）、`wallet_custody_held/expected/shortfall{asset}`（每次对账）、`wallet_custody_submitted`、`wallet_custody_submitted_oldest_seconds`、`wallet_custody_withdrawals_uncertain`、`wallet_custody_callbacks_attention`、`wallet_custody_deposits_held`、`wallet_custody_fees_unbooked`，常量标签 `provider`；`wallet_custody_fees_refused_total`（不入账的手续费）、`wallet_custody_callbacks_rejected_total`（被拒的回调，记不记表都算）。
-- 告警（`deploy/observability/alerts.yml`）：`CustodyShortfall`（短缺 15 分钟，严重）、`CustodyUnreachable`（10 分钟）、`CustodyWithdrawalStuck`（`SUBMITTED` 超过 24 小时，人工到托管方后台核对）、`CustodyWithdrawalsUncertain`（重交被拒、托管方可能仍会发出，5 分钟，严重）、`CustodyCallbacksNeedAttention`（15 分钟）、`CustodyCallbacksRejected`（15 分钟内有回调被拒：伪造，或 `UDUN_API_KEY` 与托管方的不一致、充值进不来，审查 B6）、`CustodyFeeRefused`、`CustodyFeesUnbooked`（1 小时）。
+- `wallet_custody_up`、`wallet_custody_balance{coin}`（5 分钟）、`wallet_custody_held/expected/shortfall{asset}`（每次对账）、`wallet_custody_submitted`、`wallet_custody_submitted_oldest_seconds`、`wallet_custody_withdrawals_uncertain`、`wallet_custody_callbacks_attention`、`wallet_custody_deposits_held`、`wallet_custody_fees_unbooked`，常量标签 `provider`；`wallet_custody_fees_refused_total`（不入账的手续费）、`wallet_custody_callbacks_rejected_total`（被拒的回调，记不记表都算）、`wallet_custody_deposit_discrepancies_total`（与补记不一致的回调）。
+- 告警（`deploy/observability/alerts.yml`）：`CustodyShortfall`（短缺 15 分钟，严重）、`CustodyUnreachable`（10 分钟）、`CustodyWithdrawalStuck`（`SUBMITTED` 超过 24 小时，人工到托管方后台核对）、`CustodyWithdrawalsUncertain`（重交被拒、托管方可能仍会发出，5 分钟，严重）、`CustodyCallbacksNeedAttention`（15 分钟）、`CustodyCallbacksRejected`（15 分钟内有回调被拒：伪造，或 `UDUN_API_KEY` 与托管方的不一致、充值进不来，审查 B6）、`CustodyFeeRefused`、`CustodyFeesUnbooked`（1 小时）、`CustodyDepositDiscrepancy`（回调与补记不一致，严重；在后台「充值 → 待处理」查明后驳回或调账）。
 
 ## 端到端
 
@@ -124,5 +127,5 @@ sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T udu
 
 ## 已知局限
 
-- 公开文档没有提现查询与充值列表接口：提现以回调为准（`SUBMITTED` 超 24 小时告警），漏掉的充值回调靠托管方重试与人工核对。
+- 公开文档没有提现查询与充值列表接口：提现以回调为准（`SUBMITTED` 超 24 小时告警），漏掉的充值回调靠托管方重试，再不行由管理员核对后补记（见上文「回调丢失时的补记」）。
 - 托管方没有测试环境：真网关的应答码、余额格式、`fee` 的币种以正式文档与小额联调为准。

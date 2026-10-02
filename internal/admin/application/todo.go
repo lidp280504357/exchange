@@ -15,6 +15,8 @@ type Todo struct {
 	Withdrawals      int `json:"withdrawals"`
 	Approvals        int `json:"approvals"`
 	IdentityRequests int `json:"identity_requests"`
+	// Deposits waiting for a decision (with deposits.review).
+	Deposits int `json:"deposits"`
 	// Partial names the counts that could not be read.
 	Partial []string `json:"partial"`
 }
@@ -55,6 +57,20 @@ func (s *Service) Todo(ctx context.Context, p Principal) (Todo, error) {
 			out.Partial = append(out.Partial, "identity_requests")
 		}
 		out.IdentityRequests = len(list)
+	}
+	if p.require(domain.PermDepositsReview) == nil {
+		raw, err := s.Deposits.List(ctx, ports.DepositReviewQuery{Attention: true, Limit: todoPage})
+		var page struct {
+			Items []json.RawMessage `json:"items"`
+		}
+		if err == nil {
+			err = json.Unmarshal(raw, &page)
+		}
+		if err != nil {
+			s.Log.WarnContext(ctx, "todo: deposits unavailable", "error", err)
+			out.Partial = append(out.Partial, "deposits")
+		}
+		out.Deposits = len(page.Items)
 	}
 	return out, nil
 }

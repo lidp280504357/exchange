@@ -12,14 +12,17 @@ import (
 // processed yet, applied, nothing to do (a review step of a deposit, a
 // repeat), no deposit address, coin or withdrawal of ours to apply it to
 // (a person looks), refused (signature, age or form) or failed while
-// being applied (the custodian retries; an operator may replay it).
+// being applied (the custodian retries; an operator may replay it); or a
+// deposit an administrator backfilled that the callback disagrees with
+// (a person looks; nothing is booked again).
 const (
-	CallbackReceived  = "RECEIVED"
-	CallbackApplied   = "APPLIED"
-	CallbackIgnored   = "IGNORED"
-	CallbackUnmatched = "UNMATCHED"
-	CallbackRejected  = "REJECTED"
-	CallbackFailed    = "FAILED"
+	CallbackReceived    = "RECEIVED"
+	CallbackApplied     = "APPLIED"
+	CallbackIgnored     = "IGNORED"
+	CallbackUnmatched   = "UNMATCHED"
+	CallbackRejected    = "REJECTED"
+	CallbackFailed      = "FAILED"
+	CallbackDiscrepancy = "DISCREPANCY"
 )
 
 // Kinds of callbacks.

@@ -2,7 +2,7 @@ import { errorText, formatAmount } from "@exchange/core";
 import { adminApi, adminData, can, type Admin } from "@exchange/core/api/admin";
 import { Badge, cn, CountUp, ErrorState, Segmented, Skeleton, TrendChart } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowUpFromLine, ChevronRight, Stamp, UserCheck } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, ChevronRight, Stamp, UserCheck } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
@@ -137,7 +137,7 @@ export default function Overview({ admin }: { admin: Admin }) {
   );
 }
 
-/** Todo leads to what waits: withdrawals to review, fund operations and identity requests to decide. */
+/** Todo leads to what waits: withdrawals to review, fund operations, identity requests and deposits to decide. */
 function Todo({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
   const todo = useTodo();
@@ -148,6 +148,7 @@ function Todo({ admin }: { admin: Admin }) {
       show: can(admin, "ledger.adjust.request") || can(admin, "ledger.adjust.approve"),
     },
     { key: "identityRequests", to: "/identity-requests", icon: UserCheck, n: todo?.identity_requests, show: can(admin, "users.security") },
+    { key: "deposits", to: "/deposits?view=attention", icon: ArrowDownToLine, n: todo?.deposits, show: can(admin, "deposits.review") },
   ].filter((x) => x.show);
   if (items.length === 0) return null;
   return (

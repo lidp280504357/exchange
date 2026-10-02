@@ -319,6 +319,13 @@ groups:
           summary: "{{ $value }} custodian callbacks were refused in 15 minutes (signature, age or form): forged, or UDUN_API_KEY differs from the custodian's and deposits go uncredited"
           runbook: docs/runbook/custody.md
 
+      - alert: CustodyDepositDiscrepancy
+        expr: max by (instance) (increase(wallet_custody_deposit_discrepancies_total[1h])) > 0
+        labels: {severity: critical}
+        annotations:
+          summary: "the custodian's callback disagrees with a deposit an administrator backfilled (address, asset or amount); nothing was booked again: check it in the admin console (deposits needing a decision)"
+          runbook: docs/runbook/custody.md
+
       - alert: CustodyFeesUnbooked
         expr: max by (provider) (wallet_custody_fees_unbooked) > 0
         for: 1h
