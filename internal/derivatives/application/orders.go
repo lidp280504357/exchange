@@ -210,7 +210,7 @@ func (s *Service) accept(ctx context.Context, r ports.Repos, o domain.Order, c d
 	}, "symbol", o.Symbol); err != nil {
 		return err
 	}
-	if err := r.Emit(ctx, event.TopicDerivOrderCommands, &orderv1.PlaceOrder{Order: toProto(o, c), HouseOnly: s.houseOnly(o.Symbol)}, "symbol", o.Symbol); err != nil {
+	if err := r.Emit(ctx, event.TopicDerivOrderCommands, &orderv1.PlaceOrder{Order: toProto(o, c), HouseOnly: s.houseOnly(c)}, "symbol", o.Symbol); err != nil {
 		return err
 	}
 	if o.CancelRequested {
@@ -220,13 +220,14 @@ func (s *Service) accept(ctx context.Context, r ports.Repos, o domain.Order, c d
 }
 
 // houseOnly decides whether an order of the contract trades only with
-// HOUSE's reference liquidity (ADR-0015): market.house_liquidity is on for
-// the contract and market.internal_matching off.
-func (s *Service) houseOnly(symbol string) bool {
-	if s.Features == nil {
+// HOUSE's reference liquidity (ADR-0015): its index pair follows a
+// reference market, market.house_liquidity is on for the contract and
+// market.internal_matching off.
+func (s *Service) houseOnly(c domain.Contract) bool {
+	if s.Features == nil || !c.Followed {
 		return false
 	}
-	subject := flags.Subject{Symbol: symbol}
+	subject := flags.Subject{Symbol: c.Symbol}
 	return s.Features.Enabled(flags.KeyHouseLiquidity, subject) && !s.Features.Enabled(flags.KeyInternalMatching, subject)
 }
 

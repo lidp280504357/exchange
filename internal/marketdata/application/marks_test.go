@@ -289,3 +289,40 @@ func TestIndexWeightsAndMinimumSources(t *testing.T) {
 		t.Fatalf("one source of the two required made a price at %s", p.At)
 	}
 }
+
+// The platform coin's index pair follows no reference market: its index
+// is the platform's own price, the middle of the engine's book, else a
+// recent trade. A followed pair keeps the reference market's sources only.
+func TestPlatformIndex(t *testing.T) {
+	ctx := context.Background()
+	now := at("2026-10-02T10:00:00Z")
+	svc := newService(t, newMemStore(), &now)
+	refs := NewReferenceMap(testListing(), slog.New(slog.DiscardHandler))
+	idx := PlatformIndex{Feed: fakeSources{"BTC-USDT": {{Source: "binance", Price: d("60000")}}}, Svc: svc, Refs: refs}
+	if got := idx.Prices("BTC-USDT"); len(got) != 1 || got[0].Source != "binance" {
+		t.Fatalf("a followed pair: %+v", got)
+	}
+	if got := idx.Prices("ASTRA-USDT"); len(got) != 0 {
+		t.Fatalf("no market yet: %+v", got)
+	}
+	trade := trade(1, "1.02", "100", "2026-10-02T09:58:00Z")
+	trade.Symbol = "ASTRA-USDT"
+	if _, err := svc.OnTrades(ctx, []domain.Trade{trade}); err != nil {
+		t.Fatal(err)
+	}
+	if got := idx.Prices("ASTRA-USDT"); len(got) != 1 || got[0].Source != SourcePlatform || !got[0].Price.Equal(d("1.02")) {
+		t.Fatalf("a recent trade: %+v", got)
+	}
+	svc.OnDepth(&marketv1.DepthSnapshot{
+		Symbol: "ASTRA-USDT", Sequence: 1, Bids: []*marketv1.PriceLevel{{Price: "1.01", Quantity: "10"}},
+		Asks: []*marketv1.PriceLevel{{Price: "1.03", Quantity: "10"}},
+	})
+	if got := idx.Prices("ASTRA-USDT"); len(got) != 1 || !got[0].Price.Equal(d("1.02")) {
+		t.Fatalf("the middle of the book: %+v", got)
+	}
+	svc.OnDepth(&marketv1.DepthSnapshot{Symbol: "ASTRA-USDT", Sequence: 2, Bids: []*marketv1.PriceLevel{{Price: "1.01", Quantity: "10"}}})
+	now = now.Add(6 * time.Minute)
+	if got := idx.Prices("ASTRA-USDT"); len(got) != 0 {
+		t.Fatalf("a one-sided book and an old trade: %+v", got)
+	}
+}

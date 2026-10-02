@@ -46,6 +46,10 @@ type Contract struct {
 	// which are 0 for contracts).
 	QuoteDecimals int32
 	BaseDecimals  int32
+	// Followed is true when the contract's index pair follows a reference
+	// market, whose book HOUSE quotes (ADR-0015); the platform coin's
+	// perpetual is not: its users and bots trade with each other.
+	Followed bool
 }
 
 // MaxLeverage is the leverage of the first tier.

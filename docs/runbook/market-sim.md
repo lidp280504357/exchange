@@ -109,6 +109,6 @@ scripts/ops/astra.sh status
 ## 还没做（后续批次）
 
 - A3 的后台页面（概览、价格控制、事件日程、机器人集群，后台会话负责）、确认框里的强平影响估算（等 A4 的永续）、事件主题 `market.sim.events` 进 ClickHouse（概览先用 `/history` 与 `/stream`）。
-- A4：`platform:` 指数源与 ASTRA-USDT-PERP，机器人在永续上做市（`sim.perp`）；derivatives 的"只与 HOUSE 成交"判断要加"有参考市场"条件。
+- A4：ASTRA-USDT-PERP 的规格（`deploy/instruments/test.json`，`PREPARE`，风险阶梯按 125 倍表、名义上限缩小 10 倍）、`platform` 指数源（[market-data.md](market-data.md)）与 derivatives 的"只与 HOUSE 成交"要求指数交易对跟随参考市场已经做了；机器人在永续上做市与交易（`sim.perp`）、合约开放、端到端（开多开空、资金费、事件触发强平）还没做。
 - A5：market-sim 心跳中断 60 秒自动停牌、故障注入、ADR-0016。
 - 后台按 `bot` 标记过滤机器人的订单与成交：用户标签在 admin 的库里，需要后台会话提供写入方式。

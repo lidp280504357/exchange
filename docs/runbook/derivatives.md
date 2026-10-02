@@ -22,7 +22,7 @@
 - **平仓单**（`reduce_only`，或双向模式的 SELL LONG / BUY SHORT）不预留任何东西、不查资格与最小名义价值，但数量不能超过该仓位还没被其他平仓单占用的部分（`DERIV_REDUCE_ONLY_REJECTED`）。
 - 市价单：以"标记价 ± 价格带"（买单向下、卖单向上取到 tick）为价格的 IOC（默认）或 FOK 限价单交给引擎；买单按这个保护价预留，卖单按标记价预留（保护价在标记价下方 5%，按它预留在 125 倍时只有 0.76%，低于 0.8% 的初始保证金）。两个下单表单算"最大可开"时用同样的价格（`reservePrice`）。
 - 发给引擎的命令（`derivatives.order.commands`）手续费率为 0：合约手续费由合约服务按 USDT 计。订单受理与拒绝（`OrderAccepted`/`OrderRejected`）和引擎的订单事件一起在 `derivatives.order.events` 上。
-- HOUSE 流动性（阶段 4 B4，ADR-0015）：`market.house_liquidity` 对该合约打开且 `market.internal_matching` 关闭时，命令带 `house_only`，订单只和 HOUSE 的参考簿（币安 U 本位合约的盘口）成交，见 [market-maker.md](market-maker.md)。测试服对全部合约打开（用户决定 2026-10-02：所有交易都与 HOUSE 成交，开多开空都是，用户之间不撮合）。
+- HOUSE 流动性（阶段 4 B4，ADR-0015）：合约的指数交易对跟随参考市场、`market.house_liquidity` 对该合约打开且 `market.internal_matching` 关闭时，命令带 `house_only`，订单只和 HOUSE 的参考簿（币安 U 本位合约的盘口）成交，见 [market-maker.md](market-maker.md)。测试服对全部合约打开（用户决定 2026-10-02：所有交易都与 HOUSE 成交，开多开空都是，用户之间不撮合）。平台币的永续 ASTRA-USDT-PERP 的指数交易对不跟随参考市场，HOUSE 不为它报价，它的订单互相成交（对手方是模拟市场的机器人，见 [market-sim.md](market-sim.md)）；`scripts/ops/house.sh flags` 也不把它列进 `market.house_liquidity`。
 
 撤单：`DELETE /v1/derivatives/orders/{id}`、`DELETE /v1/derivatives/orders?symbol=`，由引擎确认。订单结束（成交完、撤销、拒绝）时，没成交那部分的预留（按手数）解冻，键 `release:<订单ID>`；这与成交先到还是后到无关，因为每笔成交只动用自己那几手的预留。
 

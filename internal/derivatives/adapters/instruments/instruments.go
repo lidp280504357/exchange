@@ -26,6 +26,18 @@ type Client struct {
 	decimals map[string]int32
 }
 
+// followed reports whether the index pair follows a reference market.
+func (c *Client) followed(ctx context.Context, indexSymbol string) (bool, error) {
+	if indexSymbol == "" {
+		return false, nil
+	}
+	resp, err := c.c.GetTradingPair(ctx, &instrumentv1.GetTradingPairRequest{Symbol: indexSymbol})
+	if err != nil {
+		return false, fmt.Errorf("index pair %s: %w", indexSymbol, err)
+	}
+	return resp.GetPair().GetReferenceSymbol() != "", nil
+}
+
 type cached struct {
 	contract domain.Contract
 	at       time.Time
@@ -103,9 +115,13 @@ func (c *Client) convert(ctx context.Context, k *instrumentv1.Contract) (domain.
 	if err != nil {
 		return domain.Contract{}, err
 	}
+	followed, err := c.followed(ctx, k.GetIndexSymbol())
+	if err != nil {
+		return domain.Contract{}, err
+	}
 	ct := domain.Contract{
 		Symbol: k.GetSymbol(), Base: k.GetBaseAsset(), Quote: k.GetQuoteAsset(), Status: k.GetStatus(),
-		FundingIntervalHours: k.GetFundingIntervalHours(), BaseDecimals: base, QuoteDecimals: quote,
+		FundingIntervalHours: k.GetFundingIntervalHours(), BaseDecimals: base, QuoteDecimals: quote, Followed: followed,
 	}
 	for _, f := range []struct {
 		dst *decimal.Decimal

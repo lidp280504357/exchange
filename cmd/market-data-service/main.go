@@ -164,7 +164,10 @@ func setup(ctx context.Context, a *app.App) error {
 	guard := application.NewFeedGuard(feed, listed, store, flagClient, a.Logger(), a.Metrics())
 	a.Add("feed guard", app.Loop(guard.Run))
 	sourceWeights, _ := weights(cfg.IndexSourceWeights) // validated
-	marks := application.NewMarks(svc, listed, feed, store, pusher, prod, events,
+	// An index pair the reference market does not follow (the platform
+	// coin) is priced by the platform's own market.
+	indexes := application.PlatformIndex{Feed: feed, Svc: svc, Refs: refs}
+	marks := application.NewMarks(svc, listed, indexes, store, pusher, prod, events,
 		application.MarksConfig{MinSources: cfg.IndexMinSources, Weights: sourceWeights}, a.Logger(), a.Metrics())
 	marks.UseReferenceBooks(books.Levels) // HOUSE trades at the reference book's prices (ADR-0015)
 	a.Add("contract prices", app.Loop(marks.Run))

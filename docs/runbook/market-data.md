@@ -66,7 +66,7 @@ ssh exchange 'curl -s localhost:9090/metrics' | grep -E '^market_|kafka_consumer
 
 - 合约（如 `BTC-USDT-PERP`）的 K 线、ticker、最近成交与深度和交易对一样，来自合约分片 derivatives-engine 的 `derivatives.trade.events` 与 `derivatives.market.depth`（见 [matching.md](matching.md#分片现货与合约)），同在上面的接口里，`/v1/market/tickers` 也包含合约。
 - 每秒对每个未下线的合约：
-  - **指数价**：`index_symbol`（如 `BTC-USDT`）各价源的最新现货价（参考行情，5 秒内的才算）按权重取中位数（两边权重正好各半时取两价平均），剔除偏离中位数超过 3% 的源后再取一次，8 位小数。可用源少于 `INDEX_MIN_SOURCES`（默认 2）时本轮没有指数价。平台自己的现货成交不算独立价源。价源权重 `INDEX_SOURCE_WEIGHTS`（如 `binance=1`，未列出为 1，0 表示停用）。**测试服只有币安一个源，配置为 1**；上线前按 §11.9 接入至少 3 个有授权的源。
+  - **指数价**：`index_symbol`（如 `BTC-USDT`）各价源的最新现货价（参考行情，5 秒内的才算）按权重取中位数（两边权重正好各半时取两价平均），剔除偏离中位数超过 3% 的源后再取一次，8 位小数。可用源少于 `INDEX_MIN_SOURCES`（默认 2）时本轮没有指数价。平台自己的现货成交不算独立价源。价源权重 `INDEX_SOURCE_WEIGHTS`（如 `binance=1`，未列出为 1，0 表示停用）。**测试服只有币安一个源，配置为 1**；上线前按 §11.9 接入至少 3 个有授权的源。指数交易对不跟随参考市场时（平台币 ASTRA-USDT，ASTRA 设计 §5.2）唯一的价源是平台自己的市场（`platform`）：引擎盘口的中间价，盘口缺一边时用 5 分钟内的成交价，都没有时本轮没有指数价；跟随参考市场的指数交易对从不改用平台盘口（那是 HOUSE 对参考盘口的复制）。
   - **标记价**：`index × (1 + basis)`，`basis` 是合约盘口中间价相对指数的偏离 `(mid − index) / index` 的 30 秒 EMA（每秒一个样本，α = 2/31，保留 12 位小数），盘口缺一边时样本为 0；`basis` 限制在 ±1% 以内，8 位小数。服务启动时 EMA 从 0 开始（标记价等于指数价）。
   - **溢价指数样本**：按合约的冲击名义金额（`impact_notional`，测试服 10000 USDT）在盘口两边算平均成交价（冲击买价、冲击卖价），`premium = (max(0, 冲击买价 − index) − max(0, index − 冲击卖价)) / index`；深度不够冲击名义金额的一边记 0。
   - **预估资金费率**：本周期样本平均值 `P`，`rate = clamp(P + clamp(interest − P, ±0.05%), ±funding_cap)`，8 位小数；正值多头付空头。
