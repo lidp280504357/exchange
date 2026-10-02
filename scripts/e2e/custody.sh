@@ -14,13 +14,17 @@
 #     does not use is refused by nginx before it reaches the platform;
 #   - with an authenticator app bound, 12 USDT go to a TRON address: in
 #     review, approved (exchangectl), handed to the custodian (SUBMITTED),
-#     sent (CONFIRMED with its transaction) and settled; 10 USDT to an
-#     address the custodian fails end FAILED with the funds back;
-#   - the gateway misbehaves (review B1, B2): it takes a withdrawal but its
-#     answer is lost, refuses the repeat for the balance the first took,
-#     reviews it (status 0) and charges a fee in its smallest unit: the
+#     sent (CONFIRMED with its transaction) and settled; the custodian
+#     charges 1.2 USDT for it, which is booked from GAS_SUPPLY (its unit on
+#     TRC20 confirmed SELF; GAS_SUPPLY topped up from fee revenue when
+#     low); 10 USDT to an address the custodian fails end FAILED with the
+#     funds back;
+#   - the gateway misbehaves (review B1, B2, ④): it takes a withdrawal but
+#     its answer is lost, refuses the repeat for the balance the first
+#     took, reviews it (status 0) and reports its 1.5 USDT fee as 1500: the
 #     withdrawal waits UNCERTAIN with its funds frozen, is then sent and
-#     settled, and the fee is not booked;
+#     settled; the fee is held for a person, who books the 1.5 charged
+#     (exchangectl wallet custody-fee);
 #   - a reconciliation of the custodian finds nothing missing.
 # Needs wallet.withdraw on and ssh to the server; about five minutes.
 #
@@ -44,6 +48,18 @@ mock() {
   local args
   args=$(printf '%q ' "$@")
   remote "sudo docker compose $COMPOSE_FILES exec -T udun-mock /app/udun-mock $args"
+}
+
+# eventually_pg SECONDS SQL WANT WHAT polls a query until it prints WANT.
+eventually_pg() {
+  local secs=$1 sql=$2 want=$3 what=$4 start=$SECONDS got=""
+  while ((SECONDS - start < secs)); do
+    got=$(pg "$sql")
+    [[ $got == "$want" ]] && { printf 'ok   %s (%ss)\n' "$what" "$((SECONDS - start))"; return 0; }
+    sleep 3
+  done
+  printf 'FAIL %s: %s after %ss, want %s\n' "$what" "$got" "$secs" "$want" >&2
+  exit 1
 }
 
 # eventually_call SECONDS PATH CONDITION WHAT polls a GET until the jq
@@ -144,6 +160,23 @@ step_up() {
 }
 
 echo "== withdrawals through the custodian"
+# The mock counts its fees in the coin itself, as the documentation reads:
+# confirmed for TRC20 (review ④), its fees are booked from GAS_SUPPLY,
+# which fee revenue keeps supplied.
+exchangectl wallet custody-fee-unit --asset USDT --network TRON --unit SELF --reason "end-to-end: the mock gateway charges in the coin" >/dev/null
+GAS=$(pg "SELECT COALESCE(sum(available), 0) FROM ledger.accounts WHERE account_type = 'GAS_SUPPLY' AND asset = 'USDT'")
+if [[ $(jq -n "$GAS < 10") == true ]]; then
+  exchangectl ledger gas-supply --asset USDT --amount 20 --reason "end-to-end: the custodian's fees" >/dev/null
+  echo "     GAS_SUPPLY had $GAS USDT: 20 more from fee revenue"
+fi
+fee_row() { # fee_row WITHDRAWAL_ID prints status|amount|asset|booked
+  pg "SELECT status, trim_scale(amount), asset, booked_at IS NOT NULL FROM wallet.chain_fees WHERE reference = '$1'"
+}
+eventually_booked() { # eventually_booked WITHDRAWAL_ID AMOUNT WHAT
+  eventually_pg 60 "SELECT status, trim_scale(amount), asset, booked_at IS NOT NULL FROM wallet.chain_fees WHERE reference = '$1'" \
+    "BOOKABLE|$2|USDT|t" "$3"
+}
+mock outcome --address "$PAYEE" --status 3 --fee 1200000 --charge 1200000 >/dev/null
 mock outcome --address "$FAILING" --status 4 >/dev/null
 for to in "$PAYEE" "$FAILING" "$QUIRKY"; do
   step_up
@@ -178,30 +211,38 @@ check '[.items[].entry_type] | (index("DEPOSIT_CREDIT") != null and index("WITHD
   "credit, settlement and release in the fund flow"
 grep -q '"status":"SUBMITTED"' "$WORK/ws.log" || { echo "FAIL no SUBMITTED push on the withdrawals channel" >&2; cat "$WORK/ws.log" >&2; exit 1; }
 echo "ok   the withdrawals channel pushed SUBMITTED"
+eventually_booked "$SENT_ID" 1.2 "the custodian's 1.2 USDT for sending it booked from GAS_SUPPLY"
 
-echo "== a gateway that loses an answer and charges in its smallest unit"
-mock outcome --address "$QUIRKY" --status 3 --lose-answer --repeat-code 4001 --review --fee 1500000000 >/dev/null
+echo "== a gateway that loses an answer and reports its fee in another unit"
+mock outcome --address "$QUIRKY" --status 3 --lose-answer --repeat-code 4001 --review --fee 1500000000 --charge 1500000 >/dev/null
 withdraw "$QUIRKY" 11
 QUIRK_ID=$(jq -r .id <<<"$BODY")
 exchangectl wallet approve "$QUIRK_ID" --reviewer e2e-ops --reason "end-to-end test"
 eventually_call 60 "/v1/wallet/withdrawals/$QUIRK_ID" '.status == "SUBMITTED"' "handed over, its answer lost"
 # Hold back the callbacks the repeat (a minute later) releases.
 mock delay --seconds 45 >/dev/null
-eventually_call 120 "/v1/wallet/withdrawals/$QUIRK_ID" '.status == "SUBMITTED" and ((.reject_reason // "") | startswith("UNCERTAIN"))' \
-  "the repeat refused for the balance: UNCERTAIN, nothing released"
+eventually_pg 120 "SELECT status, provider_status, reject_reason LIKE 'UNCERTAIN%' FROM wallet.withdrawals WHERE id = '$QUIRK_ID'" \
+  "SUBMITTED|UNCERTAIN|t" "the repeat refused for the balance: UNCERTAIN, nothing released"
+call GET "/v1/wallet/withdrawals/$QUIRK_ID" "" "${AUTH[@]}"
+check '.status == "SUBMITTED" and .reject_reason == null' "its user sees it with the custodian, not the custodian's words"
 mock delay --seconds 0 >/dev/null
 call GET /v1/account/balances "" "${AUTH[@]}"
 check '[.balances[] | select(.account_type == "SPOT" and .asset == "USDT")][0] | (.frozen | tonumber) == 12' "the 11 and the fee stay frozen"
 eventually_call 90 "/v1/wallet/withdrawals/$QUIRK_ID" '.status == "CONFIRMED" and .tx_hash != null' "the gateway's callbacks send it after all"
 DETAIL=$(pg "SELECT detail FROM wallet.custody_callbacks WHERE business_id = '$QUIRK_ID' AND status = 3 ORDER BY received_at DESC LIMIT 1")
-[[ $DETAIL == *"not booked"* ]] || { echo "FAIL the fee in the smallest unit: $DETAIL" >&2; exit 1; }
-echo "ok   a fee above the amount is not booked"
+[[ $DETAIL == *"held for a person"* && $(fee_row "$QUIRK_ID") == "HELD|1500|USDT|f" ]] ||
+  { echo "FAIL the fee reported as 1500: $DETAIL, $(fee_row "$QUIRK_ID")" >&2; exit 1; }
+[[ $(exchangectl wallet custody-fees) == *"$QUIRK_ID"*"above 5 USDT"* ]] || { echo "FAIL the held fee is not listed" >&2; exit 1; }
+echo "ok   the fee reported as 1500 USDT is held for a person, not booked"
+exchangectl wallet custody-fee "$QUIRK_ID" --book --amount 1.5 --reason "end-to-end: the mock took 1.5" >/dev/null
+eventually_booked "$QUIRK_ID" 1.5 "booked as the person found it charged, 1.5 USDT"
 REVIEWED=$(pg "SELECT count(*) FROM wallet.custody_callbacks WHERE business_id = '$QUIRK_ID' AND status = 0")
 ((REVIEWED == 1)) || { echo "FAIL $REVIEWED review callbacks, want 1" >&2; exit 1; }
 echo "ok   the gateway's review (status 0) is taken"
 eventually_call 60 /v1/account/balances "[.balances[] | select(.account_type == \"SPOT\" and .asset == \"USDT\")][0] | (.available | tonumber) == ($BEFORE + 30 - 25) and (.frozen | tonumber) == 0" \
   "settled: 11 and the fee out"
 mock outcome --address "$QUIRKY" --status 3 >/dev/null
+mock outcome --address "$PAYEE" --status 3 >/dev/null
 
 echo "== reconciliation"
 SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)

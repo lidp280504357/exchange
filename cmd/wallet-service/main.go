@@ -227,9 +227,9 @@ func setup(ctx context.Context, a *app.App) error {
 			Prices:   &prices.Client{Base: cfg.MarketURL, Client: &http.Client{Timeout: 5 * time.Second}, Fallback: fallback},
 			Cooldown: cfg.WhitelistCooldown,
 		},
-		FeesRefused: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "wallet_custody_fees_refused_total",
-			Help: "Custodian fees not booked for being above the amount sent (another unit?); a person checks them.",
+		FeesHeld: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "wallet_custody_fees_held_total",
+			Help: "Custodian fees held for a person rather than booked (above the bound, or a token whose fee unit nobody confirmed).",
 		}),
 		CallbacksRejected: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "wallet_custody_callbacks_rejected_total",
@@ -244,7 +244,7 @@ func setup(ctx context.Context, a *app.App) error {
 		Name: "wallet_custody_withdrawal_contradictions_total",
 		Help: "Custodian callbacks that deny what a finished withdrawal became (sent after it failed, failed after it was confirmed); nothing is reversed, a person checks.",
 	})
-	a.Metrics().MustRegister(svc.FeesRefused, svc.CallbacksRejected, svc.Discrepancies, svc.Contradictions)
+	a.Metrics().MustRegister(svc.FeesHeld, svc.CallbacksRejected, svc.Discrepancies, svc.Contradictions)
 	if cfg.XPub != "" {
 		deriver, err := evm.NewDeriver(cfg.XPub)
 		if err != nil {

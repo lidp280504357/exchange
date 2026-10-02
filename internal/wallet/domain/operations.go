@@ -67,8 +67,11 @@ const (
 	FeeWithdrawal = "WITHDRAWAL"
 )
 
-// ChainFee is the gas a mined platform transaction cost; the ledger books
-// it from GAS_SUPPLY to WITHDRAWAL_PENDING.
+// ChainFee is the gas a mined platform transaction cost, or the fee a
+// custodian charged for a withdrawal it sent; the ledger books it from
+// GAS_SUPPLY to WITHDRAWAL_PENDING. A custodian's fee a person must look
+// at first is held (FeeHeld, HoldReason) until they book it, in the asset
+// and amount they found it charged, or write it off (review ④).
 type ChainFee struct {
 	TxHash    string
 	Network   string
@@ -78,6 +81,53 @@ type ChainFee struct {
 	Reference string
 	JournalID string
 	BookedAt  time.Time
+	// Status is FeeBookable ("" when inserted), FeeHeld or
+	// FeeWrittenOff.
+	Status     string
+	HoldReason string
+	ResolvedBy string
+	Resolution string
+	ResolvedAt time.Time
+	CreatedAt  time.Time
+}
+
+// What becomes of a fee.
+const (
+	FeeBookable   = "BOOKABLE"
+	FeeHeld       = "HELD"
+	FeeWrittenOff = "WRITTEN_OFF"
+)
+
+// How a custodian counts its fee on a network's withdrawals, as a person
+// confirmed it against a real withdrawal (FeeUnit, review ④).
+const (
+	// FeeUnitSelf: in the withdrawal's asset, at the callback's decimals,
+	// as the custodian's documentation reads; taken without a
+	// confirmation for a chain's own coin.
+	FeeUnitSelf = "SELF"
+	// FeeUnitMain: in the chain's own coin at its decimals (the gas of a
+	// token's transfer), booked in the asset the platform holds of that
+	// coin with the custodian.
+	FeeUnitMain = "MAIN"
+	// FeeUnitOutside: charged outside the coin balances the platform
+	// reconciles; not booked.
+	FeeUnitOutside = "OUTSIDE"
+)
+
+// FeeUnits are the units a person may confirm.
+var FeeUnits = []string{FeeUnitSelf, FeeUnitMain, FeeUnitOutside}
+
+// FeeUnit is a person's confirmation of how a custodian counts its fee on
+// one of its networks. Until a token's is confirmed, each of its fees is
+// held for a person.
+type FeeUnit struct {
+	Provider    string
+	Asset       string
+	Network     string
+	Unit        string
+	ConfirmedBy string
+	Reason      string
+	ConfirmedAt time.Time
 }
 
 // Funding is the platform's own transfer into its hot wallet, booked to a

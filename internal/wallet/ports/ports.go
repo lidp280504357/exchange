@@ -190,9 +190,24 @@ type SweepRepo interface {
 type ChainFeeRepo interface {
 	// Insert records a fee once per transaction.
 	Insert(ctx context.Context, f domain.ChainFee) error
-	// Unbooked lists the network's fees the ledger has not booked yet.
+	// Unbooked lists the network's fees the ledger has not booked yet and
+	// may (neither held for a person nor written off).
 	Unbooked(ctx context.Context, network string) ([]domain.ChainFee, error)
 	MarkBooked(ctx context.Context, txHash, journalID string) error
+	// Held lists the fees waiting for a person, oldest first.
+	Held(ctx context.Context) ([]domain.ChainFee, error)
+	// OfReference returns the fees of a withdrawal or sweep, oldest first.
+	OfReference(ctx context.Context, reference string) ([]domain.ChainFee, error)
+	// Resolve stores a person's decision on a held fee (its status,
+	// asset, amount and who decided why) if it is still held; false when
+	// it is not.
+	Resolve(ctx context.Context, f domain.ChainFee) (bool, error)
+	// Unit returns the confirmed fee unit of a custodian's network, or nil.
+	Unit(ctx context.Context, provider, asset, network string) (*domain.FeeUnit, error)
+	// PutUnit records a fee unit, replacing the network's earlier one.
+	PutUnit(ctx context.Context, u domain.FeeUnit) error
+	// Units lists the confirmed fee units.
+	Units(ctx context.Context) ([]domain.FeeUnit, error)
 }
 
 // FundingRepo stores platform fundings, one per transaction.

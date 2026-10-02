@@ -66,6 +66,21 @@ func ChainFeePosting(idemKey, asset string, amount decimal.Decimal, decimals int
 	}}, nil
 }
 
+// GasSupplyPosting sets fee revenue aside for the fees the platform pays
+// (FEE_REVENUE to GAS_SUPPLY): with a custodian, what users paid in fees
+// is held where its fees are taken from (ADR-0011), so they are paid out
+// of it. Neither account is what a wallet should hold, so invariant 4 is
+// unchanged.
+func GasSupplyPosting(idemKey, asset string, amount decimal.Decimal, decimals int32, reason string) (Posting, error) {
+	if err := checkAmount(amount, decimals); err != nil {
+		return Posting{}, err
+	}
+	return Posting{IdemKey: idemKey, EntryType: EntryManualAdjustment, Memo: reason, Lines: []Line{
+		{Account: SystemAccount(AccountFeeRevenue, asset), Amount: amount.Neg(), Kind: Available},
+		{Account: SystemAccount(AccountGasSupply, asset), Amount: amount, Kind: Available},
+	}}, nil
+}
+
 // FundingPosting books the platform's own transfer into its hot wallet as
 // a deposit to a system account (§11.4: DEPOSIT_CREDIT from
 // DEPOSIT_PENDING).

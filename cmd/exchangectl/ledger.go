@@ -116,6 +116,8 @@ func ledgerWith(ctx context.Context, dbs ledgerDBs, args []string, out io.Writer
 		return ledgerInsuranceFund(ctx, svc, args[1:], out)
 	case "house-margin":
 		return ledgerHouseMargin(ctx, svc, args[1:], out)
+	case "gas-supply":
+		return ledgerGasSupply(ctx, svc, args[1:], out)
 	default:
 		return fmt.Errorf("unknown ledger command %q", args[0])
 	}
@@ -312,6 +314,39 @@ func ledgerSystem(ctx context.Context, svc *application.Service, asset string, o
 }
 
 // ledgerInsuranceFund seeds the insurance fund with simulated funds.
+// ledgerGasSupply sets fee revenue aside in GAS_SUPPLY, which the
+// custodian's fees are booked from (ADR-0011): with a custodian there is
+// no transfer of the platform's own to book (wallet fund), what users paid
+// in fees is already where the custodian takes its fees from.
+func ledgerGasSupply(ctx context.Context, svc *application.Service, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("ledger gas-supply", flag.ContinueOnError)
+	fs.SetOutput(out)
+	asset := fs.String("asset", "USDT", "asset code")
+	amount := fs.String("amount", "", "decimal amount to move from FEE_REVENUE")
+	reason := fs.String("reason", "", "why (required, goes to the audit log)")
+	key := fs.String("key", "", "idempotency key; repeat it to retry safely (default: a new one)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *amount == "" || *reason == "" {
+		fs.Usage()
+		return errors.New("--amount and --reason are required")
+	}
+	d, err := decimal.NewFromString(*amount)
+	if err != nil {
+		return fmt.Errorf("amount: %w", err)
+	}
+	if *key == "" {
+		*key = uuid.NewString()
+	}
+	res, err := svc.FundGasSupply(ctx, *key, strings.ToUpper(*asset), d, actor(), *reason)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "journal %s (key %s, replayed %v)\n", res.JournalID, *key, res.Replayed)
+	return nil
+}
+
 func ledgerInsuranceFund(ctx context.Context, svc *application.Service, args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("ledger insurance-fund", flag.ContinueOnError)
 	fs.SetOutput(out)

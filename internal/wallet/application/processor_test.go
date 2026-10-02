@@ -91,19 +91,29 @@ type memFees struct{ m *memStore }
 
 func (f memFees) Insert(_ context.Context, x domain.ChainFee) error {
 	if _, ok := f.m.fees[x.TxHash]; !ok {
+		if x.Status == "" {
+			x.Status = domain.FeeBookable
+		}
 		f.m.fees[x.TxHash] = x
 	}
 	return nil
 }
 
-func (f memFees) Unbooked(_ context.Context, network string) ([]domain.ChainFee, error) {
+func (f memFees) where(keep func(domain.ChainFee) bool) []domain.ChainFee {
 	var out []domain.ChainFee
 	for _, x := range f.m.fees {
-		if x.Network == network && x.JournalID == "" {
+		if keep(x) {
 			out = append(out, x)
 		}
 	}
-	return out, nil
+	slices.SortFunc(out, func(a, b domain.ChainFee) int { return strings.Compare(a.TxHash, b.TxHash) })
+	return out
+}
+
+func (f memFees) Unbooked(_ context.Context, network string) ([]domain.ChainFee, error) {
+	return f.where(func(x domain.ChainFee) bool {
+		return x.Network == network && x.JournalID == "" && x.Status == domain.FeeBookable
+	}), nil
 }
 
 func (f memFees) MarkBooked(_ context.Context, tx, journal string) error {
@@ -111,6 +121,42 @@ func (f memFees) MarkBooked(_ context.Context, tx, journal string) error {
 	x.JournalID = journal
 	f.m.fees[tx] = x
 	return nil
+}
+
+func (f memFees) Held(context.Context) ([]domain.ChainFee, error) {
+	return f.where(func(x domain.ChainFee) bool { return x.Status == domain.FeeHeld }), nil
+}
+
+func (f memFees) OfReference(_ context.Context, reference string) ([]domain.ChainFee, error) {
+	return f.where(func(x domain.ChainFee) bool { return x.Reference == reference }), nil
+}
+
+func (f memFees) Resolve(_ context.Context, x domain.ChainFee) (bool, error) {
+	if cur, ok := f.m.fees[x.TxHash]; !ok || cur.Status != domain.FeeHeld {
+		return false, nil
+	}
+	f.m.fees[x.TxHash] = x
+	return true, nil
+}
+
+func (f memFees) Unit(_ context.Context, provider, asset, network string) (*domain.FeeUnit, error) {
+	if u, ok := f.m.units[provider+"|"+asset+"|"+network]; ok {
+		return &u, nil
+	}
+	return nil, nil
+}
+
+func (f memFees) PutUnit(_ context.Context, u domain.FeeUnit) error {
+	f.m.units[u.Provider+"|"+u.Asset+"|"+u.Network] = u
+	return nil
+}
+
+func (f memFees) Units(context.Context) ([]domain.FeeUnit, error) {
+	var out []domain.FeeUnit
+	for _, u := range f.m.units {
+		out = append(out, u)
+	}
+	return out, nil
 }
 
 type memFundings struct{ m *memStore }

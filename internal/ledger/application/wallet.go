@@ -2,12 +2,17 @@ package application
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
+	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
 	"github.com/lidp280504357/exchange/internal/ledger/domain"
+	"github.com/lidp280504357/exchange/internal/ledger/ports"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/lidp280504357/exchange/internal/platform/event"
 )
 
 // Journals wallet-service asks for (§11.6). Their keys are prefixed per
@@ -70,6 +75,39 @@ func (s *Service) BookChainFee(ctx context.Context, key, asset string, amount de
 	return s.postWallet(ctx, func(decimals int32) (domain.Posting, error) {
 		return domain.ChainFeePosting("chain-fee:"+key, asset, amount, decimals, reference)
 	}, asset)
+}
+
+// FundGasSupply moves fee revenue to GAS_SUPPLY for the custodian's fees
+// (GasSupplyPosting), with an audit event; the key makes a repeat
+// harmless.
+func (s *Service) FundGasSupply(ctx context.Context, key, asset string, amount decimal.Decimal, actor, reason string) (Result, error) {
+	if err := requireKey(key); err != nil {
+		return Result{}, err
+	}
+	if strings.TrimSpace(actor) == "" || len(strings.TrimSpace(reason)) < 3 {
+		return Result{}, apperr.Invalid("an actor and a reason are required")
+	}
+	decimals, err := s.Assets.Decimals(ctx, asset)
+	if err != nil {
+		return Result{}, err
+	}
+	p, err := domain.GasSupplyPosting("gas-supply:"+key, asset, amount, decimals, reason)
+	if err != nil {
+		return Result{}, err
+	}
+	var res Result
+	err = s.Store.Tx(ctx, func(r ports.Repos) error {
+		var err error
+		if res, err = s.post(ctx, r, p); err != nil || res.Replayed {
+			return err
+		}
+		return r.Emit(ctx, event.TopicAudit, &auditv1.AdminActionPerformed{
+			Target: "system:" + domain.AccountGasSupply, Action: "ledger.gas_supply", Actor: actor, Reason: reason,
+			Details: fmt.Sprintf(`{"asset":%q,"amount":%q,"from":%q,"journal_id":%q}`, asset, amount.String(), domain.AccountFeeRevenue,
+				res.JournalID),
+		}, "actor", actor)
+	})
+	return res, err
 }
 
 // FundSystemAccount books the platform's own transfer into its wallet as

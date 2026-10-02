@@ -222,6 +222,62 @@ func TestOperations(t *testing.T) {
 	if fees, _ := read.ChainFees().Unbooked(ctx, net); len(fees) != 0 {
 		t.Fatal("booked fees are not listed")
 	}
+
+	// A custodian's fee held for a person (review ④): not bookable until
+	// resolved, resolved once.
+	held := domain.ChainFee{
+		TxHash: "UDUN:t-1", Network: "TRON", Asset: "USDT", Amount: decimal.RequireFromString("1500"), Purpose: domain.FeeWithdrawal,
+		Reference: "w-1", Status: domain.FeeHeld, HoldReason: "above 5 USDT",
+	}
+	if err := read.ChainFees().Insert(ctx, held); err != nil {
+		t.Fatal(err)
+	}
+	if fees, err := read.ChainFees().Unbooked(ctx, "TRON"); err != nil || len(fees) != 0 {
+		t.Fatalf("a held fee is bookable: %v %v", fees, err)
+	}
+	if list, err := read.ChainFees().Held(ctx); err != nil || len(list) != 1 || list[0].HoldReason != "above 5 USDT" || list[0].CreatedAt.IsZero() {
+		t.Fatalf("held %+v %v", list, err)
+	}
+	held.Status, held.Amount, held.ResolvedBy, held.Resolution, held.ResolvedAt = domain.FeeBookable, decimal.RequireFromString("1.5"), "ops",
+		"the statement", now
+	if done, err := read.ChainFees().Resolve(ctx, held); err != nil || !done {
+		t.Fatalf("resolved %v %v", done, err)
+	}
+	if done, err := read.ChainFees().Resolve(ctx, held); err != nil || done {
+		t.Fatalf("resolved twice %v %v", done, err)
+	}
+	if fees, err := read.ChainFees().OfReference(ctx, "w-1"); err != nil || len(fees) != 1 || fees[0].Status != domain.FeeBookable ||
+		!fees[0].Amount.Equal(decimal.RequireFromString("1.5")) || fees[0].ResolvedBy != "ops" || fees[0].HoldReason != "above 5 USDT" {
+		t.Fatalf("of the withdrawal %+v %v", fees, err)
+	}
+	if fees, err := read.ChainFees().Unbooked(ctx, "TRON"); err != nil || len(fees) != 1 {
+		t.Fatalf("bookable once resolved: %v %v", fees, err)
+	}
+	// Written off without a time: refused by the table.
+	off := domain.ChainFee{
+		TxHash: "UDUN:t-2", Network: "TRON", Asset: "USDT", Amount: decimal.RequireFromString("2"), Purpose: domain.FeeWithdrawal,
+		Reference: "w-2", Status: domain.FeeWrittenOff,
+	}
+	if err := read.ChainFees().Insert(ctx, off); err == nil {
+		t.Fatal("a written-off fee without its decision")
+	}
+	unit := domain.FeeUnit{Provider: "UDUN", Asset: "USDT", Network: "TRON", Unit: domain.FeeUnitSelf, ConfirmedBy: "ops", Reason: "tronscan", ConfirmedAt: now}
+	if got, err := read.ChainFees().Unit(ctx, "UDUN", "USDT", "TRON"); err != nil || got != nil {
+		t.Fatalf("no unit yet %+v %v", got, err)
+	}
+	if err := read.ChainFees().PutUnit(ctx, unit); err != nil {
+		t.Fatal(err)
+	}
+	unit.Unit = domain.FeeUnitMain
+	if err := read.ChainFees().PutUnit(ctx, unit); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := read.ChainFees().Unit(ctx, "UDUN", "USDT", "TRON"); err != nil || got == nil || got.Unit != domain.FeeUnitMain {
+		t.Fatalf("unit %+v %v", got, err)
+	}
+	if list, err := read.ChainFees().Units(ctx); err != nil || len(list) != 1 {
+		t.Fatalf("units %+v %v", list, err)
+	}
 	f := domain.Funding{
 		TxHash: tx, Network: net, Asset: "ETH", AccountType: "GAS_SUPPLY", Amount: decimal.RequireFromString("0.005"),
 		JournalID: uuid.NewString(), CreatedAt: now,

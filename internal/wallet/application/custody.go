@@ -200,6 +200,14 @@ const coinsEvery = 10 * time.Minute
 // when the list cannot be read (the callback's own decimals are then
 // taken: the custodian's API being down must not stop the callbacks).
 func (s *Service) coinDecimals(ctx context.Context, c ports.Custody, coin string) (int32, bool) {
+	k, ok := s.coin(ctx, c, coin)
+	return k.Decimals, ok
+}
+
+// coin is the custodian's listing of a coin (support-coins, read again
+// every coinsEvery), false when it is not listed or the list cannot be
+// read.
+func (s *Service) coin(ctx context.Context, c ports.Custody, coin string) (ports.CustodyCoin, bool) {
 	s.coinsMu.Lock()
 	defer s.coinsMu.Unlock()
 	if s.coinsAt.IsZero() || s.Now().Sub(s.coinsAt) >= coinsEvery {
@@ -207,15 +215,15 @@ func (s *Service) coinDecimals(ctx context.Context, c ports.Custody, coin string
 		if err != nil {
 			s.Log.WarnContext(ctx, "the custodian's coins not read: callbacks taken at their own decimals", "error", err)
 		} else {
-			s.coinDecimalsOf = make(map[string]int32, len(list))
+			s.coinsOf = make(map[string]ports.CustodyCoin, len(list))
 			for _, k := range list {
-				s.coinDecimalsOf[k.Code] = k.Decimals
+				s.coinsOf[k.Code] = k
 			}
 			s.coinsAt = s.Now()
 		}
 	}
-	d, ok := s.coinDecimalsOf[coin]
-	return d, ok
+	k, ok := s.coinsOf[coin]
+	return k, ok
 }
 
 // networkOfCoin finds the custodian's network of a coin.
@@ -378,27 +386,14 @@ func (s *Service) applyWithdrawal(ctx context.Context, r ports.Repos, provider s
 	}
 	switch w.Status {
 	case domain.WithdrawalConfirmed:
-		feeNote := ""
-		switch {
-		case !t.Fee.IsPositive():
-		case t.Fee.GreaterThan(w.Amount):
-			// A fee above what was sent is in another unit (gas in the
-			// chain's smallest unit for a token?) or wrong: booking it would
-			// leave a hole GAS_SUPPLY never fills. A person checks the unit
-			// (the first real withdrawal of each coin is checked by hand).
-			s.Log.ErrorContext(ctx, "the custodian's fee is above the amount sent: not booked, check its unit", "withdrawal_id", w.ID,
-				"fee", t.Fee, "amount", w.Amount, "asset", w.Asset)
-			if s.FeesRefused != nil {
-				s.FeesRefused.Inc()
-			}
-			feeNote = "; fee " + t.Fee.String() + " not booked: above the amount"
-		default:
-			// What the custodian charged the platform for sending it: booked
-			// like gas, from GAS_SUPPLY (ADR-0011).
-			if err := r.ChainFees().Insert(ctx, domain.ChainFee{
-				TxHash: provider + ":" + t.TradeID, Network: w.Network, Asset: w.Asset, Amount: t.Fee, Purpose: domain.FeeWithdrawal,
-				Reference: w.ID,
-			}); err != nil {
+		// What the custodian charged the platform for sending it: booked
+		// like gas, from GAS_SUPPLY (ADR-0011), or held for a person.
+		fee, feeNote, err := s.custodyFee(ctx, r, provider, *w, t)
+		if err != nil {
+			return "", "", false, err
+		}
+		if fee != nil {
+			if err := r.ChainFees().Insert(ctx, *fee); err != nil {
 				return "", "", false, err
 			}
 		}

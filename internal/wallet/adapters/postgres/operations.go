@@ -142,9 +142,39 @@ func (r sweeps) Open(ctx context.Context, network string) ([]domain.Sweep, error
 
 type chainFees repos
 
+const chainFeeColumns = `tx_hash, network, asset, amount, purpose, reference, journal_id, booked_at, status, hold_reason, resolved_by,
+	resolution, resolved_at, created_at`
+
+func scanChainFee(row pgx.CollectableRow) (domain.ChainFee, error) {
+	var f domain.ChainFee
+	var journal *string
+	var booked, resolved *time.Time
+	err := row.Scan(&f.TxHash, &f.Network, &f.Asset, &f.Amount, &f.Purpose, &f.Reference, &journal, &booked, &f.Status, &f.HoldReason,
+		&f.ResolvedBy, &f.Resolution, &resolved, &f.CreatedAt)
+	f.JournalID, f.BookedAt, f.ResolvedAt = str(journal), at(booked), at(resolved)
+	return f, err
+}
+
+func (r chainFees) list(ctx context.Context, where string, args ...any) ([]domain.ChainFee, error) {
+	rows, err := r.q.Query(ctx, `SELECT `+chainFeeColumns+` FROM chain_fees WHERE `+where+` ORDER BY created_at`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list chain fees: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, scanChainFee)
+	if err != nil {
+		return nil, fmt.Errorf("list chain fees: %w", err)
+	}
+	return out, nil
+}
+
 func (r chainFees) Insert(ctx context.Context, f domain.ChainFee) error {
-	_, err := r.q.Exec(ctx, `INSERT INTO chain_fees (tx_hash, network, asset, amount, purpose, reference) VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (tx_hash) DO NOTHING`, f.TxHash, f.Network, f.Asset, f.Amount, f.Purpose, f.Reference)
+	status := f.Status
+	if status == "" {
+		status = domain.FeeBookable
+	}
+	_, err := r.q.Exec(ctx, `INSERT INTO chain_fees (tx_hash, network, asset, amount, purpose, reference, status, hold_reason)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (tx_hash) DO NOTHING`,
+		f.TxHash, f.Network, f.Asset, f.Amount, f.Purpose, f.Reference, status, f.HoldReason)
 	if err != nil {
 		return fmt.Errorf("insert chain fee: %w", err)
 	}
@@ -152,20 +182,7 @@ func (r chainFees) Insert(ctx context.Context, f domain.ChainFee) error {
 }
 
 func (r chainFees) Unbooked(ctx context.Context, network string) ([]domain.ChainFee, error) {
-	rows, err := r.q.Query(ctx, `SELECT tx_hash, network, asset, amount, purpose, reference FROM chain_fees
-		WHERE network = $1 AND booked_at IS NULL ORDER BY created_at`, network)
-	if err != nil {
-		return nil, fmt.Errorf("list chain fees: %w", err)
-	}
-	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.ChainFee, error) {
-		var f domain.ChainFee
-		err := row.Scan(&f.TxHash, &f.Network, &f.Asset, &f.Amount, &f.Purpose, &f.Reference)
-		return f, err
-	})
-	if err != nil {
-		return nil, fmt.Errorf("list chain fees: %w", err)
-	}
-	return out, nil
+	return r.list(ctx, `network = $1 AND booked_at IS NULL AND status = 'BOOKABLE'`, network)
 }
 
 func (r chainFees) MarkBooked(ctx context.Context, txHash, journalID string) error {
@@ -175,6 +192,70 @@ func (r chainFees) MarkBooked(ctx context.Context, txHash, journalID string) err
 		return fmt.Errorf("mark chain fee booked: %w", err)
 	}
 	return nil
+}
+
+func (r chainFees) Held(ctx context.Context) ([]domain.ChainFee, error) {
+	return r.list(ctx, `status = 'HELD'`)
+}
+
+func (r chainFees) OfReference(ctx context.Context, reference string) ([]domain.ChainFee, error) {
+	return r.list(ctx, `reference = $1`, reference)
+}
+
+func (r chainFees) Resolve(ctx context.Context, f domain.ChainFee) (bool, error) {
+	tag, err := r.q.Exec(ctx, `UPDATE chain_fees SET status = $2, asset = $3, amount = $4, resolved_by = $5, resolution = $6, resolved_at = $7
+		WHERE tx_hash = $1 AND status = 'HELD'`, f.TxHash, f.Status, f.Asset, f.Amount, f.ResolvedBy, f.Resolution, f.ResolvedAt)
+	if err != nil {
+		return false, fmt.Errorf("resolve chain fee: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+const feeUnitColumns = `provider, asset, network, unit, confirmed_by, reason, confirmed_at`
+
+func scanFeeUnit(row pgx.CollectableRow) (domain.FeeUnit, error) {
+	var u domain.FeeUnit
+	err := row.Scan(&u.Provider, &u.Asset, &u.Network, &u.Unit, &u.ConfirmedBy, &u.Reason, &u.ConfirmedAt)
+	return u, err
+}
+
+func (r chainFees) Unit(ctx context.Context, provider, asset, network string) (*domain.FeeUnit, error) {
+	rows, err := r.q.Query(ctx, `SELECT `+feeUnitColumns+` FROM custody_fee_units WHERE provider = $1 AND asset = $2 AND network = $3`,
+		provider, asset, network)
+	if err != nil {
+		return nil, fmt.Errorf("get fee unit: %w", err)
+	}
+	u, err := pgx.CollectOneRow(rows, scanFeeUnit)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get fee unit: %w", err)
+	}
+	return &u, nil
+}
+
+func (r chainFees) PutUnit(ctx context.Context, u domain.FeeUnit) error {
+	_, err := r.q.Exec(ctx, `INSERT INTO custody_fee_units (`+feeUnitColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (provider, asset, network) DO UPDATE SET unit = EXCLUDED.unit, confirmed_by = EXCLUDED.confirmed_by,
+			reason = EXCLUDED.reason, confirmed_at = EXCLUDED.confirmed_at`,
+		u.Provider, u.Asset, u.Network, u.Unit, u.ConfirmedBy, u.Reason, u.ConfirmedAt)
+	if err != nil {
+		return fmt.Errorf("put fee unit: %w", err)
+	}
+	return nil
+}
+
+func (r chainFees) Units(ctx context.Context) ([]domain.FeeUnit, error) {
+	rows, err := r.q.Query(ctx, `SELECT `+feeUnitColumns+` FROM custody_fee_units ORDER BY provider, asset, network`)
+	if err != nil {
+		return nil, fmt.Errorf("list fee units: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, scanFeeUnit)
+	if err != nil {
+		return nil, fmt.Errorf("list fee units: %w", err)
+	}
+	return out, nil
 }
 
 type fundings repos

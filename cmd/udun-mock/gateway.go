@@ -62,21 +62,29 @@ type withdrawal struct {
 	Status     int             `json:"status"` // -1 until reviewed
 	TxID       string          `json:"tx_id"`
 	CreatedAt  time.Time       `json:"created_at"`
+	// Charge is what the gateway takes from the coin's balance for
+	// sending it, beside the amount (quirk Charge, in the coin's unit);
+	// Charged once it did.
+	Charge  decimal.Decimal `json:"charge,omitzero"`
+	Charged bool            `json:"charged,omitempty"`
 	// Held: its answer was lost, and its callbacks wait for the
 	// hand-over to come again (quirk LoseAnswer).
 	Held bool `json:"held,omitempty"`
 }
 
-// quirk is how the gateway misbehaves for withdrawals to an address, to
-// take the platform down the paths a gateway that behaves never does
-// (review B7): a fee on the callbacks in the coin's smallest unit, a
-// review (status 0) before the approval, the first hand-over taken but its
-// answer lost (HTTP 502; the callbacks wait until it is handed over
-// again), and a repeated business ID refused with RepeatCode rather than
-// 4288 (as a gateway that checks the balance first, which the first
-// hand-over took, would say "insufficient balance").
+// quirk is how the gateway charges and misbehaves for withdrawals to an
+// address, to take the platform down the paths a gateway that behaves
+// never does (review B7): a fee on the callbacks in the coin's smallest
+// unit, and what it takes from the coin's balance for sending (Charge, in
+// the same unit: the fee as reported, or another figure for a report in
+// the wrong unit; review ④); a review (status 0) before the approval, the
+// first hand-over taken but its answer lost (HTTP 502; the callbacks wait
+// until it is handed over again), and a repeated business ID refused with
+// RepeatCode rather than 4288 (as a gateway that checks the balance first,
+// which the first hand-over took, would say "insufficient balance").
 type quirk struct {
 	Fee        string `json:"fee,omitempty"`
+	Charge     string `json:"charge,omitempty"`
 	Review     bool   `json:"review,omitempty"`
 	LoseAnswer bool   `json:"lose_answer,omitempty"`
 	RepeatCode int    `json:"repeat_code,omitempty"`
@@ -370,16 +378,20 @@ func (g *gateway) withdraw(body []byte) answer {
 		return answer{Code: udun.CodeDuplicateBusiness, Message: "duplicate businessId"}
 	}
 	c := g.coinLocked(req.MainCoinType + ":" + req.CoinType)
-	switch {
-	case c == nil:
+	if c == nil {
 		return answer{Code: 4005, Message: "unsupported coin"}
-	case c.Balance.LessThan(amount):
+	}
+	charge := decimal.Zero
+	if raw, err := decimal.NewFromString(g.st.Quirks[req.Address].Charge); err == nil {
+		charge = raw.Shift(-c.Decimals)
+	}
+	if c.Balance.LessThan(amount.Add(charge)) {
 		return answer{Code: errInsufficient, Message: "insufficient balance"}
 	}
 	c.Balance = c.Balance.Sub(amount)
 	wd := &withdrawal{
 		BusinessID: req.BusinessID, Address: req.Address, Amount: amount, Coin: c.code(), CallURL: req.CallURL, TradeID: g.nextTradeLocked(),
-		Status: -1, CreatedAt: g.now(),
+		Status: -1, CreatedAt: g.now(), Charge: charge,
 	}
 	g.st.Withdrawals[wd.BusinessID] = wd
 	lost := g.st.Quirks[req.Address].LoseAnswer
@@ -504,10 +516,13 @@ func (g *gateway) send(ctx context.Context, c *callback) {
 	if wd := g.st.Withdrawals[string(c.Trade.BusinessID)]; wd != nil && c.Trade.TradeType == udun.Text(strconv.Itoa(udun.TradeWithdrawal)) {
 		status, _ := strconv.Atoi(string(c.Trade.Status))
 		wd.Status = status
-		if status == udun.StatusRefused || status == udun.StatusFailed {
-			if coin := g.coinLocked(wd.Coin); coin != nil {
-				coin.Balance = coin.Balance.Add(wd.Amount)
-			}
+		coin := g.coinLocked(wd.Coin)
+		switch {
+		case coin == nil:
+		case status == udun.StatusRefused || status == udun.StatusFailed:
+			coin.Balance = coin.Balance.Add(wd.Amount)
+		case status == udun.StatusSuccess && !wd.Charged:
+			coin.Balance, wd.Charged = coin.Balance.Sub(wd.Charge), true
 		}
 	}
 	g.log.Info("callback delivered", "trade_id", c.Trade.TradeID, "trade_type", c.Trade.TradeType, "status", c.Trade.Status,
@@ -598,9 +613,12 @@ func (g *gateway) mockOutcome(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "status is 2, 3 or 4", http.StatusBadRequest)
 		return
 	}
-	if req.Fee != "" {
-		if f, err := decimal.NewFromString(req.Fee); err != nil || f.IsNegative() || !f.Equal(f.Truncate(0)) {
-			http.Error(w, "fee is a whole number of the coin's smallest unit", http.StatusBadRequest)
+	for _, v := range []string{req.Fee, req.Charge} {
+		if v == "" {
+			continue
+		}
+		if f, err := decimal.NewFromString(v); err != nil || f.IsNegative() || !f.Equal(f.Truncate(0)) {
+			http.Error(w, "fee and charge are whole numbers of the coin's smallest unit", http.StatusBadRequest)
 			return
 		}
 	}

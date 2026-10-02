@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/lidp280504357/exchange/internal/platform/udun"
 	"github.com/lidp280504357/exchange/internal/wallet/domain"
@@ -222,7 +223,8 @@ func TestGatewayQuirks(t *testing.T) {
 	post("/mock/deposit", `{"address":"`+a.Address+`","coin":"195:`+usdt+`","amount":"100"}`)
 	g.flush(ctx)
 	payee := "TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7"
-	post("/mock/outcome", `{"address":"`+payee+`","status":3,"fee":"1500000000","review":true,"lose_answer":true,"repeat_code":4001}`)
+	post("/mock/outcome", `{"address":"`+payee+`","status":3,"fee":"1500000000","charge":"1500000","review":true,"lose_answer":true,`+
+		`"repeat_code":4001}`)
 
 	w := udun.Withdrawal{Address: payee, Amount: "20", MainCoinType: "195", CoinType: usdt, CallURL: wallet.URL, BusinessID: "w1"}
 	if err := c.Withdraw(ctx, w); err == nil || udun.IsCode(err, udun.CodeOK) {
@@ -247,9 +249,17 @@ func TestGatewayQuirks(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, x := range coins {
-		if x.Code() == "195:"+usdt && x.Balance != "80" {
-			t.Fatalf("the balance: %s, want 100 - 20 taken once", x.Balance)
+		if x.Code() == "195:"+usdt && x.Balance != "78.5" {
+			t.Fatalf("the balance: %s, want 100 - 20 taken once - 1.5 charged for sending it", x.Balance)
 		}
+	}
+	// A repeat of the success callback charges nothing more.
+	g.mu.Lock()
+	g.st.Pending = append(g.st.Pending, &callback{URL: wallet.URL, Trade: rc.last(), Due: clock})
+	g.mu.Unlock()
+	tick()
+	if c := g.coinLocked("195:" + usdt); c == nil || !c.Balance.Equal(decimal.RequireFromString("78.5")) {
+		t.Fatalf("charged twice: %+v", c)
 	}
 	// No quirk fields clear them.
 	post("/mock/outcome", `{"address":"`+payee+`","status":3}`)

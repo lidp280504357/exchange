@@ -85,8 +85,10 @@ func AdminWithdrawalJSONOf(wd domain.Withdrawal) AdminWithdrawalJSON {
 	if approvals == nil {
 		approvals = []string{}
 	}
+	j := withdrawalJSON(wd)
+	j.RejectReason = optional(wd.RejectReason) // the custodian's own words too (UNCERTAIN: ...)
 	return AdminWithdrawalJSON{
-		WithdrawalJSON: WithdrawalJSONOf(wd), UserID: wd.UserID, RiskScore: wd.RiskScore, ValueUSDT: wd.ValueUSDT.String(),
+		WithdrawalJSON: j, UserID: wd.UserID, RiskScore: wd.RiskScore, ValueUSDT: wd.ValueUSDT.String(),
 		Approvals: approvals, ProviderStatus: wd.ProviderStatus, HeldAt: timeOrNil(wd.HeldAt), HeldBy: wd.HeldBy, HoldNote: wd.HoldNote,
 	}
 }
@@ -453,9 +455,21 @@ func timeOrNil(t time.Time) *string {
 	return &s
 }
 
-// WithdrawalJSONOf renders a withdrawal. Internal transfers never show a
-// transaction hash.
+// WithdrawalJSONOf renders a withdrawal for its user. Internal transfers
+// never show a transaction hash, and the reason only shows once it was
+// rejected, canceled or failed: while it is with the custodian the reason
+// is for the operators (UNCERTAIN: the custodian's own words; review
+// 2026-10-02).
 func WithdrawalJSONOf(wd domain.Withdrawal) WithdrawalJSON {
+	j := withdrawalJSON(wd)
+	switch wd.Status {
+	case domain.WithdrawalRejected, domain.WithdrawalCanceled, domain.WithdrawalFailed:
+		j.RejectReason = optional(wd.RejectReason)
+	}
+	return j
+}
+
+func withdrawalJSON(wd domain.Withdrawal) WithdrawalJSON {
 	reasons := wd.RiskReasons
 	if reasons == nil {
 		reasons = []string{}
@@ -464,7 +478,7 @@ func WithdrawalJSONOf(wd domain.Withdrawal) WithdrawalJSON {
 		ID: wd.ID, Asset: wd.Asset, Network: wd.Network, Address: wd.Address, Amount: wd.Amount.String(), Fee: wd.Fee.String(),
 		Internal: wd.InternalUserID != "", Custody: wd.Custody(), Status: wd.Status, RiskReasons: reasons,
 		ApprovalsRequired: wd.ApprovalsRequired,
-		RejectReason:      optional(wd.RejectReason), TxHash: optional(wd.TxHash), Confirmations: wd.Confirmations,
+		TxHash:            optional(wd.TxHash), Confirmations: wd.Confirmations,
 		RequiredConfirmations: wd.Required, CreatedAt: httpx.FormatTime(wd.CreatedAt), ApprovedAt: timeOrNil(wd.ApprovedAt),
 		SubmittedAt: timeOrNil(wd.SubmittedAt), BroadcastAt: timeOrNil(wd.BroadcastAt), ConfirmedAt: timeOrNil(wd.ConfirmedAt),
 	}

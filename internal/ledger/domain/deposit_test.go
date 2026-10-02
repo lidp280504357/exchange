@@ -61,4 +61,12 @@ func TestWalletPostings(t *testing.T) {
 	if _, err := FundingPosting("k8", AccountFeeRevenue, "ETH", d("1"), 18, "0xef"); err == nil {
 		t.Fatal("FEE_REVENUE is not funded from outside")
 	}
+	p, err = GasSupplyPosting("k9", "USDT", d("20"), 6, "the custodian's fees")
+	if err != nil || p.Validate() != nil || p.Lines[0].Account.Type != AccountFeeRevenue || !p.Lines[0].Amount.Equal(d("-20")) ||
+		p.Lines[1].Account.Type != AccountGasSupply {
+		t.Fatalf("gas supply %+v %v", p, err)
+	}
+	if _, err := GasSupplyPosting("k10", "USDT", d("0.0000001"), 6, "too fine"); err == nil {
+		t.Fatal("beyond the asset's decimals")
+	}
 }

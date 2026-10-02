@@ -6,7 +6,7 @@
 //
 //	udun-mock serve
 //	udun-mock deposit --address A --amount 25 [--coin MAIN:COIN]
-//	udun-mock outcome --address A --status 2|3|4 [--fee N] [--review] [--lose-answer] [--repeat-code C]
+//	udun-mock outcome --address A --status 2|3|4 [--fee N] [--charge N] [--review] [--lose-answer] [--repeat-code C]
 //	udun-mock delay --seconds N
 //	udun-mock replay [--trade T] [--age SECONDS] [--forge]
 //	udun-mock state
@@ -20,10 +20,11 @@
 // another, unless its address is told to end otherwise. The other
 // commands drive a running mock on this host: deposit reports a
 // confirmed deposit to one of its addresses, outcome sets how withdrawals
-// to an address end (2 refused, 3 sent, 4 failed) and how the gateway
-// misbehaves on the way (a fee in the coin's smallest unit, a review
-// before the approval, the first hand-over's answer lost so it comes
-// again, a repeat refused with code C), delay holds callbacks
+// to an address end (2 refused, 3 sent, 4 failed), what sending them
+// costs and how the gateway misbehaves on the way (a fee reported in the
+// coin's smallest unit and what it takes from the coin's balance, a
+// review before the approval, the first hand-over's answer lost so it
+// comes again, a repeat refused with code C), delay holds callbacks
 // back, replay sends a delivered callback again (signed age seconds ago,
 // or with another key), state prints the coins and what is pending.
 package main
@@ -116,6 +117,7 @@ func control(args []string, out io.Writer) error {
 		address := fs.String("address", "", "a withdrawal address")
 		status := fs.Int("status", 3, "2 refused, 3 sent, 4 failed")
 		fee := fs.String("fee", "", "the fee on the callbacks, in the coin's smallest unit")
+		charge := fs.String("charge", "", "what sending takes from the coin's balance beside the amount, in its smallest unit")
 		review := fs.Bool("review", false, "report a review (status 0) before the approval")
 		lose := fs.Bool("lose-answer", false, "take the first hand-over but answer 502; its callbacks wait for it to come again")
 		repeat := fs.Int("repeat-code", 0, "refuse a repeated business ID with this code instead of 4288")
@@ -123,7 +125,8 @@ func control(args []string, out io.Writer) error {
 			return err
 		}
 		path, body = "/mock/outcome", map[string]any{
-			"address": *address, "status": *status, "fee": *fee, "review": *review, "lose_answer": *lose, "repeat_code": *repeat,
+			"address": *address, "status": *status, "fee": *fee, "charge": *charge, "review": *review, "lose_answer": *lose,
+			"repeat_code": *repeat,
 		}
 	case "delay":
 		seconds := fs.Int("seconds", 0, "hold callbacks back this long; 0 restores")

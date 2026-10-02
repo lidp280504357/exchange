@@ -42,9 +42,9 @@ type Service struct {
 	W   Withdrawals
 	Log *slog.Logger
 	Now func() time.Time
-	// FeesRefused counts custodian fees not booked for being above the
-	// amount sent (applyWithdrawal); nil counts nothing.
-	FeesRefused prometheus.Counter
+	// FeesHeld counts custodian fees held for a person rather than booked
+	// (custodyFee); nil counts nothing.
+	FeesHeld prometheus.Counter
 	// CallbacksRejected counts the callbacks refused for their signature,
 	// age or form, kept or not (HandleCallback); nil counts nothing.
 	CallbacksRejected prometheus.Counter
@@ -56,10 +56,10 @@ type Service struct {
 	// an administrator backfilled (matchManual); nil counts nothing.
 	Discrepancies prometheus.Counter
 
-	// The custodian's coins' decimals, as last read (coinDecimals).
-	coinsMu        sync.Mutex
-	coinsAt        time.Time
-	coinDecimalsOf map[string]int32
+	// The custodian's coins, as last read (coin).
+	coinsMu sync.Mutex
+	coinsAt time.Time
+	coinsOf map[string]ports.CustodyCoin
 }
 
 // DepositAddress returns the user's deposit address for an asset on a

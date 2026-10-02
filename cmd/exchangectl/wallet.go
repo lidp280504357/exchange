@@ -7,9 +7,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"text/tabwriter"
 	"time"
 
+	"github.com/shopspring/decimal"
+
+	instrumentpg "github.com/lidp280504357/exchange/internal/instrument/adapters/postgres"
+	instrumentapp "github.com/lidp280504357/exchange/internal/instrument/application"
+	instrumentdomain "github.com/lidp280504357/exchange/internal/instrument/domain"
 	"github.com/lidp280504357/exchange/internal/platform/event"
 	"github.com/lidp280504357/exchange/internal/platform/migrate"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
@@ -33,18 +39,31 @@ func walletCmd(ctx context.Context, cfg settings, args []string, out io.Writer) 
 		return err
 	}
 	defer db.Close()
-	return walletWith(ctx, db, args, out)
+	// The custodian's networks and the assets' decimals, for its fees.
+	idb, err := pg.Open(ctx, pg.Config{DSN: cfg.Postgres.DSN, MaxConns: 1}, "instrument")
+	if err != nil {
+		return err
+	}
+	defer idb.Close()
+	return walletWith(ctx, db, idb, args, out)
 }
 
-func walletWith(ctx context.Context, db *pg.DB, args []string, out io.Writer) error {
+func walletWith(ctx context.Context, db, idb *pg.DB, args []string, out io.Writer) error {
 	if err := migrate.UpPlatform(ctx, db, quiet); err != nil {
 		return err
 	}
 	if err := migrate.Up(ctx, db, migrations.Wallet(), quiet); err != nil {
 		return err
 	}
+	if err := migrate.UpPlatform(ctx, idb, quiet); err != nil {
+		return err
+	}
+	if err := migrate.Up(ctx, idb, migrations.Instrument(), quiet); err != nil {
+		return err
+	}
 	host, _ := os.Hostname()
 	store := postgres.NewStore(db, event.NewFactory("exchangectl", host))
+	instruments := &instrumentapp.Service{Store: instrumentpg.NewStore(idb, nil)}
 	fs := flag.NewFlagSet("wallet "+args[0], flag.ContinueOnError)
 	fs.SetOutput(out)
 	network := fs.String("network", "ETH-SEPOLIA", "network; UDUN for the custodian's reconcile and checks")
@@ -151,6 +170,63 @@ func walletWith(ctx context.Context, db *pg.DB, args []string, out io.Writer) er
 		}
 		fmt.Fprintf(out, "%s: %s (%s); the processor settles or releases it within a round\n", wd.ID, wd.Status, wd.ProviderStatus)
 		return nil
+	case "custody-fees":
+		return printCustodyFees(ctx, store, out)
+	case "custody-fee":
+		if len(args) < 2 {
+			return errors.New("usage: wallet custody-fee <withdrawal_id> (--book [--asset A] [--amount X] | --write-off) --reason TEXT")
+		}
+		book := fs.Bool("book", false, "book it from GAS_SUPPLY: as reported, or in --asset and --amount as found charged")
+		writeOff := fs.Bool("write-off", false, "never book it (not taken from the coin balances, or reported in another unit)")
+		asset := fs.String("asset", "", "the asset the custodian took it in, when not the reported one")
+		amount := fs.String("amount", "", "what the custodian took, when not the reported amount")
+		reason := fs.String("reason", "", "how it was found out (required)")
+		if err := fs.Parse(args[2:]); err != nil {
+			return err
+		}
+		if *book == *writeOff {
+			return errors.New("give one of --book and --write-off")
+		}
+		d := application.FeeResolution{WithdrawalID: args[1], Book: *book, Asset: *asset, Actor: actor(), Reason: *reason}
+		if *amount != "" {
+			v, err := decimal.NewFromString(*amount)
+			if err != nil {
+				return fmt.Errorf("amount: %w", err)
+			}
+			d.Amount = v
+		}
+		f, err := application.ResolveCustodyFee(ctx, store, custodied(instruments), d, time.Now())
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s: %s %s %s; a booked fee is booked within a round\n", f.TxHash, f.Status, f.Amount, f.Asset)
+		return nil
+	case "custody-fee-unit":
+		asset := fs.String("asset", "", "the network's asset, e.g. USDT")
+		unit := fs.String("unit", "", "SELF (in the asset, as documented), MAIN (in the chain's own coin) or OUTSIDE (not in the coin balances)")
+		reason := fs.String("reason", "", "how it was confirmed, e.g. against the first real withdrawal on the block explorer (required)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *unit == "" {
+			return printFeeUnits(ctx, store, out)
+		}
+		u := domain.FeeUnit{
+			Provider: domain.ProviderUdun, Asset: strings.ToUpper(*asset), Network: strings.ToUpper(*network), Unit: *unit, ConfirmedBy: actor(),
+			Reason: *reason, ConfirmedAt: time.Now(),
+		}
+		if ok, err := servedBy(ctx, instruments, u.Provider, u.Asset, u.Network); err != nil || !ok {
+			if err == nil {
+				err = fmt.Errorf("%s does not serve %s on %s", u.Provider, u.Asset, u.Network)
+			}
+			return err
+		}
+		if err := application.SetCustodyFeeUnit(ctx, store, u); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%s counts its fee on %s %s as %s; fees held before stay held (wallet custody-fees)\n", u.Provider, u.Asset, u.Network,
+			strings.ToUpper(u.Unit))
+		return nil
 	case "commands":
 		limit := fs.Int("limit", 20, "how many")
 		if err := fs.Parse(args[1:]); err != nil {
@@ -170,6 +246,81 @@ func walletWith(ctx context.Context, db *pg.DB, args []string, out io.Writer) er
 		fmt.Fprint(out, usage)
 		return fmt.Errorf("unknown wallet command %q", args[0])
 	}
+}
+
+// custodied finds the decimals of an asset the custodian holds for the
+// platform (a network of its) in the instrument schema.
+func custodied(svc *instrumentapp.Service) application.Custodied {
+	return func(ctx context.Context, provider, asset string) (int32, bool, error) {
+		v, err := svc.Asset(ctx, asset)
+		if errors.Is(err, instrumentdomain.ErrNotFound) {
+			return 0, false, nil
+		}
+		if err != nil {
+			return 0, false, err
+		}
+		for _, n := range v.Networks {
+			if n.Provider == provider {
+				return v.Decimals, true, nil
+			}
+		}
+		return 0, false, nil
+	}
+}
+
+// servedBy reports whether the custodian serves an asset's network.
+func servedBy(ctx context.Context, svc *instrumentapp.Service, provider, asset, network string) (bool, error) {
+	v, err := svc.Asset(ctx, asset)
+	if errors.Is(err, instrumentdomain.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	for _, n := range v.Networks {
+		if n.Network == network && n.Provider == provider {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// printCustodyFees lists the custodian's fees held for a person (review ④).
+func printCustodyFees(ctx context.Context, store *postgres.Store, out io.Writer) error {
+	list, err := store.Read().ChainFees().Held(ctx)
+	if err != nil {
+		return err
+	}
+	if len(list) == 0 {
+		fmt.Fprintln(out, "no custodian fee waits for a person")
+		return nil
+	}
+	fmt.Fprintf(out, "%d custodian fees wait for a person (wallet custody-fee <withdrawal_id> --book|--write-off):\n", len(list))
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "RECEIVED\tWITHDRAWAL\tNETWORK\tFEE\tWHY")
+	for _, f := range list {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s %s\t%s\n", f.CreatedAt.UTC().Format(time.RFC3339), f.Reference, f.Network, f.Amount, f.Asset, f.HoldReason)
+	}
+	return w.Flush()
+}
+
+// printFeeUnits lists how the custodian counts its fees, as confirmed.
+func printFeeUnits(ctx context.Context, store *postgres.Store, out io.Writer) error {
+	list, err := store.Read().ChainFees().Units(ctx)
+	if err != nil {
+		return err
+	}
+	if len(list) == 0 {
+		fmt.Fprintln(out, "no fee unit confirmed: a chain's own coin is taken as SELF, a token's fees are held for a person")
+		return nil
+	}
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "CUSTODIAN\tASSET\tNETWORK\tUNIT\tCONFIRMED\tBY\tHOW")
+	for _, u := range list {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", u.Provider, u.Asset, u.Network, u.Unit, u.ConfirmedAt.UTC().Format(time.RFC3339),
+			u.ConfirmedBy, u.Reason)
+	}
+	return w.Flush()
 }
 
 func printChecks(ctx context.Context, store *postgres.Store, network string, out io.Writer) error {

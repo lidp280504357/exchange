@@ -63,6 +63,7 @@ type CustodyProcessor struct {
 	uncertain prometheus.Gauge
 	waiting   prometheus.Gauge
 	unbooked  prometheus.Gauge
+	feesHeld  prometheus.Gauge
 }
 
 // NewCustodyProcessor registers the processor's metrics with reg.
@@ -86,8 +87,9 @@ func NewCustodyProcessor(p CustodyProcessor, reg prometheus.Registerer) *Custody
 	p.uncertain = gauge("wallet_custody_withdrawals_uncertain", "Withdrawals refused on a retry that the custodian may still send: they wait for its callback or a person.")
 	p.waiting = gauge("wallet_custody_deposits_held", "Deposits the custodian confirmed that wait because their asset takes no deposits.")
 	p.unbooked = gauge("wallet_custody_fees_unbooked", "The custodian's fees the ledger has not booked yet (GAS_SUPPLY short?).")
+	p.feesHeld = gauge("wallet_custody_fees_held", "The custodian's fees held for a person to book or write off (exchangectl wallet custody-fees).")
 	reg.MustRegister(p.up, p.balance, p.held, p.expected, p.shortfall, p.compared, p.submitted, p.oldest, p.attention, p.uncertain, p.waiting,
-		p.unbooked)
+		p.unbooked, p.feesHeld)
 	if p.CheckEvery <= 0 {
 		p.CheckEvery = time.Hour
 	}
@@ -390,6 +392,17 @@ func (p *CustodyProcessor) observe(ctx context.Context) error {
 		return err
 	}
 	p.attention.Set(float64(n))
+	fees, err := r.ChainFees().Held(ctx)
+	if err != nil {
+		return err
+	}
+	held := 0
+	for _, f := range fees {
+		if strings.HasPrefix(f.TxHash, p.Custody.Provider()+":") {
+			held++
+		}
+	}
+	p.feesHeld.Set(float64(held))
 	return nil
 }
 

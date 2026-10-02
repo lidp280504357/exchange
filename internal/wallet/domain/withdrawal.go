@@ -279,7 +279,9 @@ func (w *Withdrawal) Custodian(word, tx string, now time.Time) bool {
 // Uncertain marks a withdrawal with the custodian whose hand-over was
 // refused on a retry (CustodyUncertain); reason is the refusal.
 func (w *Withdrawal) Uncertain(reason string, now time.Time) bool {
-	if w.Status != WithdrawalSubmitted || w.ProviderStatus == CustodyUncertain {
+	// Only while no word came from the custodian: one that answered since
+	// (ACCEPTED, REVIEW, APPROVED) holds it, and its word stands.
+	if w.Status != WithdrawalSubmitted || w.ProviderStatus != CustodySubmitted {
 		return false
 	}
 	w.ProviderStatus, w.RejectReason, w.UpdatedAt = CustodyUncertain, "UNCERTAIN: "+reason, now

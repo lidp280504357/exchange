@@ -155,16 +155,16 @@ func (f *fakeCustody) CreateAddress(context.Context, domain.Network, string) (st
 }
 
 func (f *fakeCustody) Submit(_ context.Context, w domain.Withdrawal, _ domain.Network) error {
-	switch {
-	case f.down:
+	if f.down {
 		return errors.New("gateway down")
-	case f.refuse:
-		return domain.ErrCustodyRefused.WithDetail("reason", "code 4001: balance too low")
 	}
-	f.submitted = append(f.submitted, w.ID)
 	if f.onSubmit != nil {
 		f.onSubmit(w.ID)
 	}
+	if f.refuse {
+		return domain.ErrCustodyRefused.WithDetail("reason", "code 4001: balance too low")
+	}
+	f.submitted = append(f.submitted, w.ID)
 	return nil
 }
 
@@ -207,6 +207,7 @@ type custodyHarness struct {
 	*withdrawHarness
 	custody *fakeCustody
 	cproc   *CustodyProcessor
+	reg     *prometheus.Registry
 }
 
 func newCustodyHarness(t *testing.T) *custodyHarness {
@@ -222,11 +223,11 @@ func newCustodyHarness(t *testing.T) *custodyHarness {
 	none := decimal.Zero
 	c := &fakeCustody{invalid: map[string]bool{}, coins: []ports.CustodyCoin{{Code: usdtCoin, Symbol: "USDT", Decimals: 6, Token: true, Balance: &none}}}
 	w.svc.Custodians = map[string]ports.Custody{domain.ProviderUdun: c}
-	h := &custodyHarness{withdrawHarness: w, custody: c}
+	h := &custodyHarness{withdrawHarness: w, custody: c, reg: prometheus.NewRegistry()}
 	h.cproc = NewCustodyProcessor(CustodyProcessor{
 		Store: w.store, Ledger: w.ledger, Networks: w.nets, Eligibility: w.elig, Custody: c, Log: slog.New(slog.DiscardHandler),
 		Now: func() time.Time { return w.now },
-	}, prometheus.NewRegistry())
+	}, h.reg)
 	return h
 }
 
@@ -426,6 +427,14 @@ func TestCustodyWithdrawalSent(t *testing.T) {
 	h.callback(t, trade)
 	if got := h.store.wds[wd.ID]; got.ProviderStatus != domain.CustodyApproved || got.Status != domain.WithdrawalSubmitted {
 		t.Fatalf("approved by the custodian: %+v", got)
+	}
+	// A person confirmed the custodian counts its fee on TRC20 in USDT, as
+	// documented (review ④): booked as reported.
+	if err := SetCustodyFeeUnit(context.Background(), h.store, domain.FeeUnit{
+		Provider: domain.ProviderUdun, Asset: "USDT", Network: tron, Unit: "self", ConfirmedBy: "ops", Reason: "the first withdrawal on tronscan",
+		ConfirmedAt: h.now,
+	}); err != nil || h.audited("wallet.custody.fee_unit") != 1 {
+		t.Fatalf("the fee unit: %v", err)
 	}
 	trade.Status, trade.Word, trade.TxHash, trade.Fee = 3, domain.CustodySuccess, "f00d", d("1.1")
 	h.ledger.system[accountGasSupply] = d("5")
@@ -727,6 +736,27 @@ func TestCustodyRefusedRetriesWaitForTheCustodian(t *testing.T) {
 	}
 }
 
+// A retry refused after the custodian's callback said it holds the
+// withdrawal (review, 2026-10-02 low): its word stands, not UNCERTAIN.
+func TestARefusedRetryLeavesTheCustodiansWord(t *testing.T) {
+	h := newCustodyHarness(t)
+	wd := h.requestCustody(t, "20")
+	h.custody.down = true
+	_ = h.cproc.Round(context.Background())
+	h.custody.down, h.custody.refuse = false, true
+	h.custody.onSubmit = func(id string) {
+		h.custody.onSubmit = nil
+		h.callback(t, ports.CustodyTrade{
+			TradeID: "w-1", Kind: domain.CallbackWithdrawal, Status: 0, Word: domain.CustodyReview, Coin: usdtCoin, BusinessID: id,
+		})
+	}
+	h.now = h.now.Add(2 * time.Minute)
+	h.cround(t)
+	if got := h.store.wds[wd.ID]; got.Status != domain.WithdrawalSubmitted || got.ProviderStatus != domain.CustodyReview || got.RejectReason != "" {
+		t.Fatalf("the custodian's review was overwritten: %+v", got)
+	}
+}
+
 // The custodian accepting a handover of a withdrawal that failed and was
 // released meanwhile (a callback while it was on its way) may still send
 // it: counted with the contradictions and logged, nothing reversed.
@@ -746,24 +776,204 @@ func TestALateHandoverOfAFailedWithdrawalIsCounted(t *testing.T) {
 	}
 }
 
-// Review finding B2: a fee above what was sent is in another unit or
-// wrong; it is not booked (GAS_SUPPLY would never cover it) but counted.
-func TestCustodyFeesAboveTheAmountAreNotBooked(t *testing.T) {
+// Review ④ (2026-10-03): the custodian's fee is booked only when its unit
+// is known and it is within feeBound times the network's withdrawal fee
+// and the amount sent; otherwise it is held for a person, who books it
+// (as they found it charged) or writes it off.
+func TestCustodyFeesHeldForAPerson(t *testing.T) {
 	h := newCustodyHarness(t)
-	refused := &countingCounter{}
-	h.svc.FeesRefused = refused
-	wd := h.requestCustody(t, "20")
+	ctx := context.Background()
+	held := &countingCounter{}
+	h.svc.FeesHeld = held
+	h.ledger.system[accountGasSupply] = d("10")
+	sent := func(id, trade, fee string) domain.Callback {
+		t.Helper()
+		return h.callback(t, ports.CustodyTrade{
+			TradeID: trade, Kind: domain.CallbackWithdrawal, Status: 3, Word: domain.CustodySuccess, Coin: usdtCoin, BusinessID: id,
+			TxHash: "tx-" + trade, Fee: d(fee),
+		})
+	}
+	custodied := func(_ context.Context, provider, asset string) (int32, bool, error) {
+		return 6, provider == domain.ProviderUdun && asset == "USDT", nil
+	}
+
+	// A token whose fee unit nobody confirmed: held, whatever its size.
+	first := h.requestCustody(t, "20")
 	h.cround(t)
-	cb := h.callback(t, ports.CustodyTrade{
-		TradeID: "w-9", Kind: domain.CallbackWithdrawal, Status: 3, Word: domain.CustodySuccess, Coin: usdtCoin, BusinessID: wd.ID,
-		TxHash: "f00d", Fee: d("1500000000"),
-	})
-	if got := h.store.wds[wd.ID]; got.Status != domain.WithdrawalConfirmed || !strings.Contains(cb.Detail, "not booked") {
+	cb := sent(first.ID, "w-1", "0.8")
+	if got := h.store.wds[first.ID]; got.Status != domain.WithdrawalConfirmed || !strings.Contains(cb.Detail, "held for a person") {
 		t.Fatalf("sent %+v, callback %+v", got, cb)
 	}
-	if len(h.store.fees) != 0 || refused.n != 1 {
-		t.Fatalf("fees %v, refused %d", h.store.fees, refused.n)
+	if f := h.store.fees["UDUN:w-1"]; f.Status != domain.FeeHeld || !strings.Contains(f.HoldReason, "nobody has confirmed") ||
+		!f.Amount.Equal(d("0.8")) || held.n != 1 {
+		t.Fatalf("held %+v (%d)", f, held.n)
 	}
+
+	// Confirmed in the coin itself: a fee within five times the network's
+	// fee (1 USDT) is booked; one in another unit, 1500 "USDT" on 20 sent,
+	// is held.
+	if err := SetCustodyFeeUnit(ctx, h.store, domain.FeeUnit{
+		Provider: domain.ProviderUdun, Asset: "USDT", Network: tron, Unit: domain.FeeUnitSelf, ConfirmedBy: "ops", Reason: "on tronscan",
+		ConfirmedAt: h.now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	second, third := h.requestCustody(t, "20"), h.requestCustody(t, "20")
+	h.cround(t)
+	sent(second.ID, "w-2", "1.2")
+	sent(third.ID, "w-3", "1500")
+	if f := h.store.fees["UDUN:w-2"]; f.Status != domain.FeeBookable || !f.Amount.Equal(d("1.2")) {
+		t.Fatalf("within the bound %+v", f)
+	}
+	if f := h.store.fees["UDUN:w-3"]; f.Status != domain.FeeHeld || !strings.Contains(f.HoldReason, "above 5 USDT") || held.n != 2 {
+		t.Fatalf("beyond belief %+v (%d)", f, held.n)
+	}
+	h.cround(t)
+	if h.store.fees["UDUN:w-2"].JournalID == "" || h.store.fees["UDUN:w-1"].JournalID != "" || h.store.fees["UDUN:w-3"].JournalID != "" {
+		t.Fatalf("only the bookable fee is booked: %+v", h.store.fees)
+	}
+	if v := h.gauge(t, "wallet_custody_fees_held"); v != 2 {
+		t.Fatalf("%v fees held", v)
+	}
+
+	// The person books the first as reported and the third as they found
+	// it charged; a write-off of the same fee then finds nothing held.
+	resolve := func(r FeeResolution) (domain.ChainFee, error) {
+		r.Actor, r.Reason = "ops", "the custodian's statement"
+		return ResolveCustodyFee(ctx, h.store, custodied, r, h.now)
+	}
+	if _, err := resolve(FeeResolution{WithdrawalID: third.ID, Book: true, Asset: "TRX", Amount: d("13.6")}); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("an asset not held with the custodian: %v", err)
+	}
+	if _, err := resolve(FeeResolution{WithdrawalID: third.ID, Book: true, Amount: d("1.5000001")}); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("beyond the asset's decimals: %v", err)
+	}
+	if _, err := resolve(FeeResolution{WithdrawalID: third.ID, Amount: d("1")}); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("an amount on a write-off: %v", err)
+	}
+	if f, err := resolve(FeeResolution{WithdrawalID: third.ID, Book: true, Amount: d("1.5")}); err != nil || f.Status != domain.FeeBookable ||
+		!f.Amount.Equal(d("1.5")) || f.ResolvedBy != "ops" {
+		t.Fatalf("booked as charged: %+v %v", f, err)
+	}
+	if _, err := resolve(FeeResolution{WithdrawalID: first.ID, Book: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolve(FeeResolution{WithdrawalID: first.ID}); !apperr.Is(err, apperr.CodeNotFound) {
+		t.Fatalf("nothing held any more: %v", err)
+	}
+	if h.audited("wallet.custody.fee.book") != 2 {
+		t.Fatalf("%d bookings audited", h.audited("wallet.custody.fee.book"))
+	}
+	h.cround(t)
+	if !h.store.fees["UDUN:w-1"].Amount.Equal(d("0.8")) || h.store.fees["UDUN:w-1"].JournalID == "" || h.store.fees["UDUN:w-3"].JournalID == "" {
+		t.Fatalf("booked after the decisions: %+v", h.store.fees)
+	}
+	if v := h.gauge(t, "wallet_custody_fees_held"); v != 0 {
+		t.Fatalf("%v fees held", v)
+	}
+
+	// A fee written off is never booked.
+	fourth := h.requestCustody(t, "20")
+	h.cround(t)
+	sent(fourth.ID, "w-4", "6")
+	if f, err := resolve(FeeResolution{WithdrawalID: fourth.ID}); err != nil || f.Status != domain.FeeWrittenOff {
+		t.Fatalf("written off %+v %v", f, err)
+	}
+	h.cround(t)
+	if f := h.store.fees["UDUN:w-4"]; f.JournalID != "" || h.audited("wallet.custody.fee.write_off") != 1 {
+		t.Fatalf("a written-off fee %+v", f)
+	}
+}
+
+// The other units a person may confirm: fees charged outside the coin
+// balances are not recorded; fees in the chain's coin are booked in the
+// asset the platform holds of it with the custodian, at that coin's
+// decimals, and held when it holds none.
+func TestCustodyFeeUnits(t *testing.T) {
+	h := newCustodyHarness(t)
+	ctx := context.Background()
+	h.ledger.system[accountGasSupply] = d("10")
+	const ethCoin, erc20 = "60:60", "60:0xdAC17F958D2ee523a2206206994597C13D831ec7"
+	h.nets.nets = append(h.nets.nets,
+		domain.Network{
+			Asset: "ETH", Network: "ETH", Chain: "1", Decimals: 18, Enabled: true, WithdrawEnabled: true, WithdrawFee: d("0.001"),
+			Provider: domain.ProviderUdun, ProviderCoin: ethCoin,
+		},
+		domain.Network{
+			Asset: "USDT", Network: "ETH", Chain: "1", Decimals: 6, Enabled: true, WithdrawEnabled: true, WithdrawFee: d("5"),
+			Provider: domain.ProviderUdun, ProviderCoin: erc20,
+		})
+	none := decimal.Zero
+	h.custody.coins = append(h.custody.coins, ports.CustodyCoin{Code: ethCoin, Decimals: 18, Balance: &none},
+		ports.CustodyCoin{Code: erc20, Decimals: 6, Token: true, Balance: &none})
+	unit := func(network, u string) {
+		t.Helper()
+		if err := SetCustodyFeeUnit(ctx, h.store, domain.FeeUnit{
+			Provider: domain.ProviderUdun, Asset: "USDT", Network: network, Unit: u, ConfirmedBy: "ops", Reason: "the first withdrawal",
+			ConfirmedAt: h.now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := SetCustodyFeeUnit(ctx, h.store, domain.FeeUnit{
+		Provider: domain.ProviderUdun, Asset: "USDT", Network: tron, Unit: "GAS",
+		ConfirmedBy: "ops", Reason: "?",
+	}); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("an unknown unit: %v", err)
+	}
+	// sent hands a withdrawal over and reports it sent on network with a
+	// fee of raw in the smallest unit of the callback's decimals.
+	sent := func(trade, network, coin string, decimals int32, raw string) domain.Callback {
+		t.Helper()
+		wd := h.requestCustody(t, "20")
+		h.cround(t)
+		cur := h.store.wds[wd.ID]
+		cur.Network = network
+		h.store.wds[wd.ID] = cur
+		return h.callback(t, ports.CustodyTrade{
+			TradeID: trade, Kind: domain.CallbackWithdrawal, Status: 3, Word: domain.CustodySuccess, Coin: coin, BusinessID: wd.ID,
+			TxHash: "tx-" + trade, Fee: d(raw).Shift(-decimals), Decimals: decimals,
+		})
+	}
+
+	unit(tron, domain.FeeUnitOutside)
+	if cb := sent("w-1", tron, usdtCoin, 6, "13600000"); !strings.Contains(cb.Detail, "charged outside") || len(h.store.fees) != 0 {
+		t.Fatalf("outside: %+v, fees %v", cb, h.store.fees)
+	}
+
+	// The gas of an ERC20 transfer in wei, at the token's 6 decimals: read
+	// as ETH at 18, 0.0021 ETH, booked in ETH.
+	unit("ETH", domain.FeeUnitMain)
+	sent("w-2", "ETH", erc20, 6, "2100000000000000")
+	if f := h.store.fees["UDUN:w-2"]; f.Status != domain.FeeBookable || f.Asset != "ETH" || !f.Amount.Equal(d("0.0021")) || f.Network != "ETH" {
+		t.Fatalf("in the chain's coin %+v", f)
+	}
+	// Beyond five times ETH's own withdrawal fee: held.
+	sent("w-3", "ETH", erc20, 6, "9000000000000000")
+	if f := h.store.fees["UDUN:w-3"]; f.Status != domain.FeeHeld || !strings.Contains(f.HoldReason, "above 0.005 ETH") {
+		t.Fatalf("above the chain coin's bound %+v", f)
+	}
+	// TRX is no coin the platform holds with the custodian: held.
+	unit(tron, domain.FeeUnitMain)
+	sent("w-4", tron, usdtCoin, 6, "13600000")
+	if f := h.store.fees["UDUN:w-4"]; f.Status != domain.FeeHeld || !strings.Contains(f.HoldReason, "on no network") {
+		t.Fatalf("a chain coin the platform does not hold %+v", f)
+	}
+}
+
+func (h *custodyHarness) gauge(t *testing.T, name string) float64 {
+	t.Helper()
+	mfs, err := h.reg.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mf := range mfs {
+		if mf.GetName() == name {
+			return mf.GetMetric()[0].GetGauge().GetValue()
+		}
+	}
+	t.Fatalf("no metric %s", name)
+	return 0
 }
 
 // countingCounter counts Inc calls (the rest of prometheus.Counter is not used).

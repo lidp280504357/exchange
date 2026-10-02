@@ -98,6 +98,8 @@ commands:
   ledger insurance-fund --amount X --reason TEXT [--asset USDT] [--key K]
                               add simulated funds to INSURANCE_FUND against ADJUSTMENT
                               (needs ledger.manual_adjustment; audited)
+  ledger gas-supply --amount X --reason TEXT [--asset USDT] [--key K]
+                              set fee revenue aside in GAS_SUPPLY, which the custodian's fees are booked from (audited)
   wallet sweep [--min X]      sweep deposit addresses holding at least X (default the minimum deposit) to the hot wallet
   wallet fund --tx HASH [--account GAS_SUPPLY]
                               book the platform's transfer into the hot wallet to a system account
@@ -110,6 +112,11 @@ commands:
                               decide on a withdrawal waiting for review (audited; approvals need distinct reviewers)
   wallet custody-resolve <withdrawal_id> (--sent --tx HASH | --failed) --reason TEXT
                               record what a person found out about a withdrawal the custodian may hold
+  wallet custody-fees         the custodian's fees held for a person, and why
+  wallet custody-fee <withdrawal_id> (--book [--asset A] [--amount X] | --write-off) --reason TEXT
+                              book a held fee from GAS_SUPPLY (as reported, or as found charged) or write it off (audited)
+  wallet custody-fee-unit [--asset A --network N --unit SELF|MAIN|OUTSIDE --reason TEXT]
+                              how the custodian counts its fee on a network, as confirmed (audited); without --unit, the list
   admin create --email E --name N --role R [--secrets-stdin]
                               add an admin console account (roles ADMIN, OPERATOR, FINANCE, AUDITOR);
                               run in the admin-service container, which has ADMIN_SECRET_KEY

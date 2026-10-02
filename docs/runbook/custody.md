@@ -55,9 +55,36 @@ custody_callbacks（原文、验签、结果、次数）──> 充值：deposit
 - 成功或 4288（托管方已有）→ 托管方状态 `ACCEPTED`；
 - 首次提交被 4000–4999 的业务拒绝 → `FAILED`（原因 `CUSTODY_REFUSED: code …`），立即解冻；
 - 网络错误等结果未知 → 保持 `SUBMITTED`/`SUBMITTED`，1 分钟后重交（重复的 `businessId` 被托管方拒绝，所以重交无害）；
-- 重交时被 4288 以外的理由拒绝 → **不解冻**：托管方可能已经收下第一次（例如第一次超时但已受理，重交时余额已被它用掉，返回"余额不足"），这时解冻就是双花。提现保持 `SUBMITTED`，托管方状态记为 `UNCERTAIN`（原因 `UNCERTAIN: code …`），不再重交，只等托管方的 2/3/4 回调；告警 `CustodyWithdrawalsUncertain`。人工到托管方后台核实后用 `exchangectl wallet custody-resolve <提现ID> --sent --tx <哈希> --reason …`（已发出，处理器结算）或 `--failed --reason …`（没发出，处理器解冻）了结；两种都记审计 `wallet.custody.withdrawal.resolve`（前后状态、交易哈希）。托管方状态还是 `SUBMITTED`（处理器每分钟重交、还没有答复）时 `--failed` 被拒（`WALLET_CUSTODY_HANDOVER_PENDING`）：这时判失败并解冻，之后某次重交被托管方收下就是双付。万一托管方在提现已失败解冻后才收下一次交接（回调与重交赛跑），处理器记错误日志并计入 `wallet_custody_withdrawal_contradictions_total`（告警 `CustodyWithdrawalContradiction`），人工到托管方后台核对。
+- 重交时被 4288 以外的理由拒绝 → **不解冻**：托管方可能已经收下第一次（例如第一次超时但已受理，重交时余额已被它用掉，返回"余额不足"），这时解冻就是双花。提现保持 `SUBMITTED`，托管方状态记为 `UNCERTAIN`（原因 `UNCERTAIN: code …`），不再重交，只等托管方的 2/3/4 回调；告警 `CustodyWithdrawalsUncertain`。重交期间托管方的回调已经说收下了（`ACCEPTED`、`REVIEW`、`APPROVED`）的不改成 `UNCERTAIN`，以它的回调为准。这个原因是托管方的原话，只给后台看：用户的提现接口在提现被拒、取消或失败之前不返回 `reject_reason`（审查 2026-10-02）。人工到托管方后台核实后用 `exchangectl wallet custody-resolve <提现ID> --sent --tx <哈希> --reason …`（已发出，处理器结算）或 `--failed --reason …`（没发出，处理器解冻）了结；两种都记审计 `wallet.custody.withdrawal.resolve`（前后状态、交易哈希）。托管方状态还是 `SUBMITTED`（处理器每分钟重交、还没有答复）时 `--failed` 被拒（`WALLET_CUSTODY_HANDOVER_PENDING`）：这时判失败并解冻，之后某次重交被托管方收下就是双付。万一托管方在提现已失败解冻后才收下一次交接（回调与重交赛跑），处理器记错误日志并计入 `wallet_custody_withdrawal_contradictions_total`（告警 `CustodyWithdrawalContradiction`），人工到托管方后台核对。
 
-回调 `status` 0/1 只更新托管方状态（`REVIEW`/`APPROVED`）；3 → `CONFIRMED`、记交易哈希，并立即结算 `WITHDRAW_SETTLE`（处理器兜底重试）；2 或 4 → `FAILED`（原因 `CUSTODY_REJECTED`、`CUSTODY_FAILED: <txId>`），处理器解冻。托管方结算前资金一直冻结在用户账户，失败时不需要冲正。回调里的 `fee`（托管方向平台收的费）记入 `chain_fees`，像自建模式的 gas 一样从 `GAS_SUPPLY` 入账；`fee` 按提现币种与 `decimals` 换算，以正式文档为准。**大于提现金额的 `fee` 不入账**（多半是另一种单位，例如代币提现按链的最小单位计的 gas；照记会在 `GAS_SUPPLY` 留下永远补不上的缺口），回调结果里注明，计数 `wallet_custody_fees_refused_total`，告警 `CustodyFeeRefused`。接真网关后每个币种的第一笔真实提现都要人工核对手续费的单位。
+回调 `status` 0/1 只更新托管方状态（`REVIEW`/`APPROVED`）；3 → `CONFIRMED`、记交易哈希，并立即结算 `WITHDRAW_SETTLE`（处理器兜底重试）；2 或 4 → `FAILED`（原因 `CUSTODY_REJECTED`、`CUSTODY_FAILED: <txId>`），处理器解冻。托管方结算前资金一直冻结在用户账户，失败时不需要冲正。
+
+### 托管方的手续费（审查 ④，2026-10-03）
+
+回调里的 `fee` 是托管方为发出这笔提现向平台收的费，记入 `chain_fees`，像自建模式的 gas 一样从 `GAS_SUPPLY` 入账（`GAS_SUPPLY` → `WITHDRAWAL_PENDING`，对账的"账本应有"随之减少）。正式文档只说 `fee` 与 `amount` 一样按 `decimals` 换算，没说代币提现的手续费按哪种币计（链上的 gas 是用链的主币付的：ERC20 USDT 的 gas 是 ETH，按 18 位算会差 10¹² 倍；TRC20 与 TRX 都是 6 位，按错了也看不出来）。所以每个"资产·网络"的手续费单位要人工确认：
+
+| 单位 | 含义 | 怎么记账 |
+|---|---|---|
+| `SELF` | 按提现的币种、回调的 `decimals` 计（文档的读法） | 记在提现资产上；链的主币（`coinType` 等于 `mainCoinType`，`support-coins` 的 `tokenStatus` 0，如 BTC `0:0`、ETH `60:60`）不确认也按它 |
+| `MAIN` | 按链的主币、主币的精度计（代币提现的 gas） | 记在平台在同一托管方持有的主币资产上（ERC20 → ETH 网络 `60:60` 的 ETH）；平台没有这个主币的托管网络（TRX、BNB）时挂起 |
+| `OUTSIDE` | 不从对账的币种余额里扣（托管方另有手续费账户） | 不记账，回调结果注明 |
+
+确认用 `exchangectl wallet custody-fee-unit --asset USDT --network TRON --unit SELF --reason "第一笔真实提现在 tronscan 上核对过"`（不带 `--unit` 列出已确认的单位；写 `custody_fee_units` 并记审计 `wallet.custody.fee_unit`）。**代币的单位没人确认之前，它的每笔手续费都挂起**，不记账。
+
+确认了单位的手续费再看数额：超过"网络手续费（用户付的 `withdraw_fee`）× 5"与提现金额两者中较小的那个（`MAIN` 只看主币网络的 `withdraw_fee` × 5）也挂起：错了单位的手续费通常差得远（按最小单位的 gas，或把 13.6 TRX 当成 13.6 USDT，而 TRC20 的网络手续费是 1 USDT）。入账金额按资产精度向上取整（托管方扣的是整笔，多记零头不会留下短缺）。
+
+挂起的手续费状态 `HELD`，写明原因（报的数额、原始整数与 `decimals`、为什么挂起），不入账，也**不算进对账的"未入账手续费"**（不遮住短缺：托管方真扣了的话，对账会报这笔短缺，直到人工处理）。计数 `wallet_custody_fees_held_total`，现有数 `wallet_custody_fees_held`，告警 `CustodyFeesHeld`。人工到托管方后台或区块浏览器核对后：
+
+```bash
+exchangectl wallet custody-fees                                    # 挂起的手续费与原因
+exchangectl wallet custody-fee <提现ID> --book --reason "..."       # 按报的数额入账
+exchangectl wallet custody-fee <提现ID> --book --amount 1.5 [--asset ETH] --reason "托管方账单上是 1.5"   # 按实际扣的入账
+exchangectl wallet custody-fee <提现ID> --write-off --reason "..."  # 不入账：没从对账的余额里扣，或单位报错、实际没收
+```
+
+`--book` 的资产必须是平台在该托管方持有的资产（有它的托管网络），数额不能超过资产精度；处理器下一轮入账。两种都记审计（`wallet.custody.fee.book`、`wallet.custody.fee.write_off`，含报的数额、入账的数额与挂起原因）。
+
+**`GAS_SUPPLY` 的钱从哪来**：托管模式下没有"平台转进热钱包"可以记（`wallet fund` 是自建钱包用的）；用户付的提现手续费（`FEE_REVENUE`）本来就在托管方的余额里，托管方的手续费就从这里出：`exchangectl ledger gas-supply --asset USDT --amount 20 --reason "..."` 把手续费收入挪到 `GAS_SUPPLY`（两边都不是钱包应有数，对账不变；不能超过 `FEE_REVENUE`；审计 `ledger.gas_supply`）。`GAS_SUPPLY` 不够时手续费等着（`wallet_custody_fees_unbooked`，对账算作未入账手续费），告警 `CustodyFeesUnbooked`。
 
 **回调**：先把原文（最多 16 KiB）、验签与时间检查结果记入 `custody_callbacks`，验签通过的同一（provider, tradeId, status）只记一行，托管方重试只加 `attempts`；再在一个事务里应用并记结果。验签失败、超出时间窗或格式不对的回调都计入 `wallet_custody_callbacks_rejected_total`，但每小时最多记 100 条、每条原文截到 2 KiB，免得伪造的回调灌满表（审查 B3）；后台看到的原文里 `sign` 打了码（审查 B7）：
 
@@ -101,12 +128,12 @@ cd /opt/exchange/infra
 sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T udun-mock /app/udun-mock state
 sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T udun-mock /app/udun-mock deposit --address T... --coin 195:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t --amount 25
 sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T udun-mock /app/udun-mock outcome --address T... --status 4
-sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T udun-mock /app/udun-mock outcome --address T... --status 3 --lose-answer --repeat-code 4001 --review --fee 1500000000
+sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T udun-mock /app/udun-mock outcome --address T... --status 3 --lose-answer --repeat-code 4001 --review --fee 1500000000 --charge 1500000
 sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T udun-mock /app/udun-mock delay --seconds 600
 sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T udun-mock /app/udun-mock replay --trade TRADE_ID --age 600
 ```
 
-`deposit` 模拟一笔到账（地址必须是模拟网关生成的），`outcome` 设置发往某地址的提现结局（2 拒绝、3 成功、4 链上失败），以及模拟网关在途中怎么"不守规矩"（审查 B7，让 B1/B2 的路径都能走到）：`--fee N` 回调里带按币种最小单位计的手续费、`--review` 先报审核中（status 0）再报通过、`--lose-answer` 收下第一次提交但回 502（回调等它重交后才发）、`--repeat-code C` 重复的 `businessId` 用 C 拒绝而不是 4288（像先查余额的网关那样，因为第一次已用掉余额而回"余额不足"）；只写 `--status` 即清掉这些设置。`delay` 让回调延后（故障演练），`replay` 重发一条已送达的回调（`--age` 签成若干秒前、`--forge` 用错误密钥签）。**不要删 state.json**：模拟网关余额与账本对不上，对账会一直报短缺。
+`deposit` 模拟一笔到账（地址必须是模拟网关生成的），`outcome` 设置发往某地址的提现结局（2 拒绝、3 成功、4 链上失败），以及模拟网关在途中怎么"不守规矩"（审查 B7，让 B1/B2 的路径都能走到）：`--fee N` 回调里带按币种最小单位计的手续费、`--charge N` 发出时从该币余额里另扣的手续费（同样按最小单位；与 `--fee` 相同就是如实报，不同就是报错了单位，审查 ④）、`--review` 先报审核中（status 0）再报通过、`--lose-answer` 收下第一次提交但回 502（回调等它重交后才发）、`--repeat-code C` 重复的 `businessId` 用 C 拒绝而不是 4288（像先查余额的网关那样，因为第一次已用掉余额而回"余额不足"）；只写 `--status` 即清掉这些设置。`delay` 让回调延后（故障演练），`replay` 重发一条已送达的回调（`--age` 签成若干秒前、`--forge` 用错误密钥签）。**不要删 state.json**：模拟网关余额与账本对不上，对账会一直报短缺。
 
 ## 换成真网关
 
@@ -118,14 +145,14 @@ sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T udu
 
 ## 指标与告警
 
-- `wallet_custody_up`、`wallet_custody_balance{coin}`（5 分钟）、`wallet_custody_held/expected/shortfall{asset}`（每次对账）、`wallet_custody_submitted`、`wallet_custody_submitted_oldest_seconds`、`wallet_custody_withdrawals_uncertain`、`wallet_custody_callbacks_attention`、`wallet_custody_deposits_held`、`wallet_custody_fees_unbooked`，常量标签 `provider`；`wallet_custody_fees_refused_total`（不入账的手续费）、`wallet_custody_callbacks_rejected_total`（被拒的回调，记不记表都算）、`wallet_custody_deposit_discrepancies_total`（与补记不一致的回调）。
-- 告警（`deploy/observability/alerts.yml`）：`CustodyShortfall`（短缺 15 分钟，严重）、`CustodyNotCompared`（某资产 30 分钟没比较）、`CustodyUnreachable`（10 分钟）、`CustodyWithdrawalStuck`（`SUBMITTED` 超过 24 小时，人工到托管方后台核对）、`CustodyWithdrawalsUncertain`（重交被拒、托管方可能仍会发出，5 分钟，严重）、`CustodyCallbacksNeedAttention`（15 分钟）、`CustodyCallbacksRejected`（15 分钟内有回调被拒：伪造，或 `UDUN_API_KEY` 与托管方的不一致、充值进不来，审查 B6）、`CustodyFeeRefused`、`CustodyFeesUnbooked`（1 小时）、`CustodyDepositDiscrepancy`（回调与补记不一致，严重；在后台「充值 → 待处理」查明后驳回或调账）、`CustodyWithdrawalContradiction`（托管方的回调与已结束的提现矛盾，严重；`CustodyCallbacksNeedAttention` 也把 `DISCREPANCY` 计入）。
+- `wallet_custody_up`、`wallet_custody_balance{coin}`（5 分钟）、`wallet_custody_held/expected/shortfall{asset}`（每次对账）、`wallet_custody_submitted`、`wallet_custody_submitted_oldest_seconds`、`wallet_custody_withdrawals_uncertain`、`wallet_custody_callbacks_attention`、`wallet_custody_deposits_held`、`wallet_custody_fees_unbooked`、`wallet_custody_fees_held`（等人工处理的手续费笔数），常量标签 `provider`；`wallet_custody_fees_held_total`（挂起的手续费）、`wallet_custody_callbacks_rejected_total`（被拒的回调，记不记表都算）、`wallet_custody_deposit_discrepancies_total`（与补记不一致的回调）。
+- 告警（`deploy/observability/alerts.yml`）：`CustodyShortfall`（短缺 15 分钟，严重）、`CustodyNotCompared`（某资产 30 分钟没比较）、`CustodyUnreachable`（10 分钟）、`CustodyWithdrawalStuck`（`SUBMITTED` 超过 24 小时，人工到托管方后台核对）、`CustodyWithdrawalsUncertain`（重交被拒、托管方可能仍会发出，5 分钟，严重）、`CustodyCallbacksNeedAttention`（15 分钟）、`CustodyCallbacksRejected`（15 分钟内有回调被拒：伪造，或 `UDUN_API_KEY` 与托管方的不一致、充值进不来，审查 B6）、`CustodyFeesHeld`（有手续费等人工入账或核销）、`CustodyFeesUnbooked`（1 小时，`GAS_SUPPLY` 不够：`exchangectl ledger gas-supply`）、`CustodyDepositDiscrepancy`（回调与补记不一致，严重；在后台「充值 → 待处理」查明后驳回或调账）、`CustodyWithdrawalContradiction`（托管方的回调与已结束的提现矛盾，严重；`CustodyCallbacksNeedAttention` 也把 `DISCREPANCY` 计入）。
 
 ## 端到端
 
-`scripts/e2e/custody.sh`：新用户拿 TRC20 与比特币地址；模拟网关报 30 USDT 到账（入账一次，重试与重放不重复），0.5 USDT 记未入账；伪造签名与过期回调被拒并记录；经公网发到 `https://astras.vip` 的回调（`udun`、`UDUN`、`Udun` 三种写法）在 nginx 就被拒（403），到不了平台；绑定身份验证器后 12 USDT 经审批交给托管方、`SUBMITTED` → `CONFIRMED` 带交易哈希并结算，10 USDT 发往失败地址 → `FAILED` 资金退回；模拟网关对第三个地址收下提现却丢了应答、重交时以余额不足拒绝、先报审核中、按最小单位报 1500 USDT 手续费：提现停在 `UNCERTAIN`、资金冻结，之后回调到达照常发出并结算，手续费不入账；最后对账无短缺。浏览器冒烟测试的充值页同时取 Sepolia 与 TRC20 地址，后台冒烟测试打开「托管方」页与一条回调。
+`scripts/e2e/custody.sh`：新用户拿 TRC20 与比特币地址；模拟网关报 30 USDT 到账（入账一次，重试与重放不重复），0.5 USDT 记未入账；伪造签名与过期回调被拒并记录；经公网发到 `https://astras.vip` 的回调（`udun`、`UDUN`、`Udun` 三种写法）在 nginx 就被拒（403），到不了平台；绑定身份验证器后 12 USDT 经审批交给托管方、`SUBMITTED` → `CONFIRMED` 带交易哈希并结算，托管方为它扣的 1.2 USDT 从 `GAS_SUPPLY` 入账（脚本先确认 TRC20 的手续费单位为 `SELF`，`GAS_SUPPLY` 不到 10 USDT 时从手续费收入挪 20）；10 USDT 发往失败地址 → `FAILED` 资金退回；模拟网关对第三个地址收下提现却丢了应答、重交时以余额不足拒绝、先报审核中、把实际扣的 1.5 USDT 报成 1500：提现停在 `UNCERTAIN`、资金冻结，之后回调到达照常发出并结算，手续费挂起不入账，`exchangectl wallet custody-fee --book --amount 1.5` 后入账；最后对账无短缺（托管方余额与账本都少了这两笔手续费）。浏览器冒烟测试的充值页同时取 Sepolia 与 TRC20 地址，后台冒烟测试打开「托管方」页与一条回调。
 
 ## 已知局限
 
 - 公开文档没有提现查询与充值列表接口：提现以回调为准（`SUBMITTED` 超 24 小时告警），漏掉的充值回调靠托管方重试，再不行由管理员核对后补记（见上文「回调丢失时的补记」）。
-- 托管方没有测试环境：真网关的应答码、余额格式、`fee` 的币种以正式文档与小额联调为准。
+- 托管方没有测试环境：真网关的应答码、余额格式、`fee` 的币种以正式文档与小额联调为准；每个代币网络第一笔真实提现的手续费要对照区块浏览器确认单位（`custody-fee-unit`），确认前它的手续费一律挂起。

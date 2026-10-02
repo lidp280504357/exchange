@@ -157,3 +157,44 @@ func ptr(v decimal.Decimal) *decimal.Decimal { return &v }
 func transferInput(user, key, amount, from, to string) application.TransferInput {
 	return application.TransferInput{UserID: user, IdemKey: key, Asset: "USDT", Amount: d(amount), From: from, To: to}
 }
+
+// GAS_SUPPLY is funded out of fee revenue for the custodian's fees
+// (ADR-0011): no more than the revenue, once per key, audited.
+func TestFundGasSupplyFromFeeRevenue(t *testing.T) {
+	svc, _, _ := setup(t)
+	ctx := context.Background()
+	system := func() ([]domain.Account, error) { return svc.SystemBalances(ctx, "USDT") }
+	u := uuid.NewString()
+	if err := svc.OnUserRegistered(ctx, uuid.NewString(), u, "SG"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Transfer(ctx, transferInput(u, "futures-in", "10", domain.AccountSpot, domain.AccountFutures)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Freeze(ctx, "order-fee", domain.EntryOrderFreeze, u, domain.AccountFutures, "USDT", d("1"), "order"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SettleFutures(ctx, domain.FuturesRequest{
+		IdemKey: "fill:fee", UserID: u, Asset: "USDT", Reference: "a fee",
+		Moves: []domain.FuturesMove{{Type: domain.MoveFee, Amount: d("0.4"), Kind: domain.Frozen}, {Type: domain.MoveUnfreeze, Amount: d("0.6")}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.FundGasSupply(ctx, "too-much", "USDT", d("0.5"), "ops", "the custodian's fees"); err == nil {
+		t.Fatal("more than the fee revenue")
+	}
+	if _, err := svc.FundGasSupply(ctx, "k1", "USDT", d("0.3"), "ops", ""); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("no reason: %v", err)
+	}
+	res, err := svc.FundGasSupply(ctx, "k1", "USDT", d("0.3"), "ops", "the custodian's fees")
+	if err != nil || res.Replayed {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if again, err := svc.FundGasSupply(ctx, "k1", "USDT", d("0.3"), "ops", "the custodian's fees"); err != nil || !again.Replayed {
+		t.Fatalf("a repeat: %+v %v", again, err)
+	}
+	if gas, rev := systemBalance(t, system, domain.AccountGasSupply), systemBalance(t, system, domain.AccountFeeRevenue); !gas.Equal(d("0.3")) ||
+		!rev.Equal(d("0.1")) {
+		t.Fatalf("GAS_SUPPLY %s, FEE_REVENUE %s", gas, rev)
+	}
+}
