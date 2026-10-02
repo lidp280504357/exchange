@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
 
 	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
@@ -291,8 +292,11 @@ func TestIndexWeightsAndMinimumSources(t *testing.T) {
 }
 
 // The platform coin's index pair follows no reference market: its index
-// is the platform's own price, the middle of the engine's book, else a
-// recent trade. A followed pair keeps the reference market's sources only.
+// is the platform's own price, the minute's time-weighted last price,
+// averaged with the book's middle while that is within 1% of the last
+// trade and the top of the book is worth 100 on both sides; the middle
+// alone a while after the last trade. A followed pair keeps the reference
+// market's sources only.
 func TestPlatformIndex(t *testing.T) {
 	ctx := context.Background()
 	now := at("2026-10-02T10:00:00Z")
@@ -305,24 +309,56 @@ func TestPlatformIndex(t *testing.T) {
 	if got := idx.Prices("ASTRA-USDT"); len(got) != 0 {
 		t.Fatalf("no market yet: %+v", got)
 	}
-	trade := trade(1, "1.02", "100", "2026-10-02T09:58:00Z")
-	trade.Symbol = "ASTRA-USDT"
-	if _, err := svc.OnTrades(ctx, []domain.Trade{trade}); err != nil {
+	older := trade(1, "0.9", "100", "2026-10-02T09:58:00Z")
+	first := trade(2, "1.00", "100", "2026-10-02T09:59:10Z")
+	second := trade(3, "1.02", "100", "2026-10-02T09:59:40Z")
+	for _, tr := range []*domain.Trade{&older, &first, &second} {
+		tr.Symbol = "ASTRA-USDT"
+	}
+	if _, err := svc.OnTrades(ctx, []domain.Trade{older, first, second}); err != nil {
 		t.Fatal(err)
 	}
-	if got := idx.Prices("ASTRA-USDT"); len(got) != 1 || got[0].Source != SourcePlatform || !got[0].Price.Equal(d("1.02")) {
-		t.Fatalf("a recent trade: %+v", got)
+	price := func() decimal.Decimal {
+		t.Helper()
+		got := idx.Prices("ASTRA-USDT")
+		if len(got) != 1 || got[0].Source != SourcePlatform {
+			t.Fatalf("sources %+v", got)
+		}
+		return got[0].Price
 	}
-	svc.OnDepth(&marketv1.DepthSnapshot{
-		Symbol: "ASTRA-USDT", Sequence: 1, Bids: []*marketv1.PriceLevel{{Price: "1.01", Quantity: "10"}},
-		Asks: []*marketv1.PriceLevel{{Price: "1.03", Quantity: "10"}},
-	})
-	if got := idx.Prices("ASTRA-USDT"); len(got) != 1 || !got[0].Price.Equal(d("1.02")) {
-		t.Fatalf("the middle of the book: %+v", got)
+	// The window opens at 09:59:00 at 0.9: 10 s at 0.9, 30 s at 1.00,
+	// 20 s at 1.02.
+	if got := price(); !got.Equal(d("0.99")) {
+		t.Fatalf("the minute's TWAP: %s", got)
 	}
-	svc.OnDepth(&marketv1.DepthSnapshot{Symbol: "ASTRA-USDT", Sequence: 2, Bids: []*marketv1.PriceLevel{{Price: "1.01", Quantity: "10"}}})
-	now = now.Add(6 * time.Minute)
+	depth := func(seq int64, bid, bidQty, ask, askQty string) {
+		svc.OnDepth(&marketv1.DepthSnapshot{
+			Symbol: "ASTRA-USDT", Sequence: seq, Bids: []*marketv1.PriceLevel{{Price: bid, Quantity: bidQty}},
+			Asks: []*marketv1.PriceLevel{{Price: ask, Quantity: askQty}},
+		})
+	}
+	depth(1, "1.01", "100", "1.03", "100")
+	if got := price(); !got.Equal(d("1.005")) {
+		t.Fatalf("with the middle 1.02: %s", got)
+	}
+	depth(2, "1.04", "100", "1.06", "100")
+	if got := price(); !got.Equal(d("0.99")) {
+		t.Fatalf("a middle 3%% from the last trade is left out: %s", got)
+	}
+	depth(3, "1.01", "100", "1.03", "1")
+	if got := price(); !got.Equal(d("0.99")) {
+		t.Fatalf("a thin top is left out: %s", got)
+	}
+	depth(4, "1.01", "100", "1.03", "100")
+	now = now.Add(2 * time.Minute)
+	if got := price(); !got.Equal(d("1.02")) {
+		t.Fatalf("no trade in the minute: the middle, %s", got)
+	}
+	now = now.Add(4 * time.Minute)
 	if got := idx.Prices("ASTRA-USDT"); len(got) != 0 {
-		t.Fatalf("a one-sided book and an old trade: %+v", got)
+		t.Fatalf("the last trade 6 minutes old: %+v", got)
+	}
+	if mid, ok := svc.PlatformMid("ASTRA-USDT"); !ok || !mid.Equal(d("1.02")) {
+		t.Fatalf("the book's middle still: %s %v", mid, ok)
 	}
 }

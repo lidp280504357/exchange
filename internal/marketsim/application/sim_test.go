@@ -223,6 +223,7 @@ type memStore struct {
 	state   *domain.State
 	saves   int
 	byWhom  string
+	changes []ports.ParamChange
 	events  []domain.Event
 	audits  []ports.Audit
 	mu      sync.Mutex
@@ -248,13 +249,28 @@ func (m *memStore) Settings(context.Context) (domain.Params, int64, bool, error)
 	return *m.params, m.version, true, nil
 }
 
-func (m *memStore) SaveSettings(_ context.Context, p domain.Params, actor string, audit *ports.Audit) (int64, error) {
-	m.params, m.byWhom = &p, actor
+func (m *memStore) SaveSettings(_ context.Context, p domain.Params, change ports.ParamChange, audit *ports.Audit) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.params, m.byWhom = &p, change.Actor
 	m.version++
+	m.changes = append(m.changes, change)
 	if audit != nil {
 		m.audits = append(m.audits, *audit)
 	}
 	return m.version, nil
+}
+
+func (m *memStore) ParamChanges(_ context.Context, from, to time.Time) ([]ports.ParamChange, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []ports.ParamChange
+	for _, c := range m.changes {
+		if !c.At.Before(from) && !c.At.After(to) {
+			out = append(out, c)
+		}
+	}
+	return out, nil
 }
 
 func (m *memStore) Events(_ context.Context, open bool, limit int) ([]domain.Event, error) {
@@ -272,12 +288,12 @@ func (m *memStore) Events(_ context.Context, open bool, limit int) ([]domain.Eve
 	return out, nil
 }
 
-func (m *memStore) EventsSince(_ context.Context, t time.Time) ([]domain.Event, error) {
+func (m *memStore) EventsStarting(_ context.Context, from, to time.Time) ([]domain.Event, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []domain.Event
 	for _, e := range m.events {
-		if !e.CreatedAt.Before(t) {
+		if e.Status != domain.EventCanceled && !e.StartsAt.Before(from) && !e.StartsAt.After(to) {
 			out = append(out, e)
 		}
 	}
@@ -309,11 +325,25 @@ func (m *memStore) event(id string) domain.Event {
 	return domain.Event{}
 }
 
-// fakePairs records the pair's status changes.
+// fakePairs records the pair's and the contract's status changes.
 type fakePairs struct {
-	mu      sync.Mutex
-	trading *fakeTrading
-	changes []string
+	mu        sync.Mutex
+	trading   *fakeTrading
+	changes   []string
+	contracts []string
+	perp      *fakeDerivatives
+}
+
+func (f *fakePairs) SetContractStatus(_ context.Context, _, to, _, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.contracts = append(f.contracts, to)
+	if f.perp != nil {
+		f.perp.mu.Lock()
+		f.perp.contract.Status, f.perp.contract.Trading = to, to == "TRADING"
+		f.perp.mu.Unlock()
+	}
+	return nil
 }
 
 func (f *fakePairs) SetPairStatus(_ context.Context, _, to, _, _ string) error {
@@ -512,12 +542,12 @@ func TestUpdateParams(t *testing.T) {
 	r := newRig(t, nil)
 	p := domain.DefaultParams()
 	p.Spread = 0
-	if _, err := r.sim.UpdateParams(context.Background(), p, "ops"); err == nil {
+	if _, err := r.sim.UpdateParams(context.Background(), p, "ops", ""); err == nil {
 		t.Fatal("a spread of 0 passed")
 	}
 	p = domain.DefaultParams()
 	p.Levels = 3
-	v, err := r.sim.UpdateParams(context.Background(), p, "ops")
+	v, err := r.sim.UpdateParams(context.Background(), p, "ops", "")
 	if err != nil || v != 2 || r.store.byWhom != "ops" {
 		t.Fatalf("version %d, %v, by %q", v, err, r.store.byWhom)
 	}
@@ -742,7 +772,7 @@ type fakeDerivatives struct {
 
 func newFakeDerivatives() *fakeDerivatives {
 	return &fakeDerivatives{
-		contract: domain.Pair{Symbol: "ASTRA-USDT-PERP", Tick: d("0.0001"), Lot: d("1"), MinQty: d("1"), MinNotional: d("5"), Trading: true},
+		contract: domain.Pair{Symbol: "ASTRA-USDT-PERP", Tick: d("0.0001"), Lot: d("1"), MinQty: d("1"), MinNotional: d("5"), Status: "TRADING", Trading: true},
 		open:     map[string][]domain.Order{}, positions: map[string]decimal.Decimal{}, futures: map[string]decimal.Decimal{},
 		transfers: map[string]bool{}, cancelAll: map[string]int{},
 	}
@@ -830,6 +860,7 @@ func perpRig(t *testing.T, p domain.Params) (*rig, *fakeDerivatives) {
 	fd := newFakeDerivatives()
 	r.sim.cfg.Perp = "ASTRA-USDT-PERP"
 	r.sim.Derivatives = fd
+	r.pairs.perp = fd
 	r.flags.perp = true
 	return r, fd
 }
@@ -1150,5 +1181,107 @@ func TestThePerpetualQuotesAroundItsMark(t *testing.T) {
 			o.Price.Sub(d("1.04")).Abs().GreaterThan(d("0.052")) {
 			t.Fatalf("%s at %s around a mark of 1.04", o.Side, o.Price)
 		}
+	}
+}
+
+// A halt stops the perpetual with its index pair, and its end lets both
+// trade again (ASTRA design §5.2).
+func TestAHaltStopsThePerpetualToo(t *testing.T) {
+	p := domain.DefaultParams()
+	p.DailyVolume, p.PerpDailyVolume = 0, 0
+	r, fd := perpRig(t, p)
+	r.rounds(20)
+	e := r.create(t, domain.Event{Type: domain.EventHalt})
+	r.rounds(2)
+	if !slices.Equal(r.pairs.changes, []string{"HALT"}) || !slices.Equal(r.pairs.contracts, []string{"HALT"}) || len(fd.orders("m1")) != 0 {
+		t.Fatalf("halted: pair %v, contract %v, %d perpetual orders", r.pairs.changes, r.pairs.contracts, len(fd.orders("m1")))
+	}
+	if _, err := r.sim.EndEvent(context.Background(), e.ID, "ops", "resume"); err != nil {
+		t.Fatal(err)
+	}
+	r.rounds(4 * 10)
+	if !slices.Equal(r.pairs.contracts, []string{"HALT", "TRADING"}) || len(fd.orders("m1")) == 0 {
+		t.Fatalf("resumed: contract %v, %d perpetual orders", r.pairs.contracts, len(fd.orders("m1")))
+	}
+}
+
+// The budget counts by when the moves take effect: a jump scheduled two
+// hours ahead leaves this hour's budget alone; one within the hour takes
+// from it. An event is due within a day; a jump or a target is at most
+// +100% even approved.
+func TestTheBudgetCountsByWhenEventsStart(t *testing.T) {
+	r := newRig(t, nil)
+	r.rounds(4)
+	r.create(t, domain.Event{Type: domain.EventJump, Size: 0.25, StartsAt: r.now.Add(2 * time.Hour)})
+	r.create(t, domain.Event{Type: domain.EventJump, Size: 0.25, StartsAt: r.now.Add(10 * time.Minute)})
+	ev := domain.Event{Type: domain.EventJump, Size: 0.3, CreatedBy: "ops", Reason: "test", StartsAt: r.now.Add(20 * time.Minute)}
+	if _, err := r.sim.CreateEvent(context.Background(), ev); !apperrIs(err, "SIM_EVENT_NEEDS_APPROVAL") {
+		t.Fatalf("0.25 and 0.3 within an hour of the first: %v", err)
+	}
+	ev.StartsAt = r.now.Add(80 * time.Minute) // within an hour of the one at 2 h, not of the one at 10 min
+	if _, err := r.sim.CreateEvent(context.Background(), ev); !apperrIs(err, "SIM_EVENT_NEEDS_APPROVAL") {
+		t.Fatalf("0.25 at 2 h and 0.3 at 80 min: %v", err)
+	}
+	ev.StartsAt = r.now.Add(5 * time.Hour)
+	if _, err := r.sim.CreateEvent(context.Background(), ev); err != nil {
+		t.Fatalf("an hour of its own: %v", err)
+	}
+	ev.StartsAt = r.now.Add(25 * time.Hour)
+	if _, err := r.sim.CreateEvent(context.Background(), ev); !apperrIs(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("more than a day ahead: %v", err)
+	}
+	big := domain.Event{Type: domain.EventJump, Size: 1.5, CreatedBy: "ops", ApprovedBy: "ops2", Reason: "test"}
+	if _, err := r.sim.CreateEvent(context.Background(), big); !apperrIs(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("a jump of 150%%, approved: %v", err)
+	}
+	far := domain.Event{Type: domain.EventTarget, Price: d("2.5"), CreatedBy: "ops", ApprovedBy: "ops2", Reason: "test"}
+	if _, err := r.sim.CreateEvent(context.Background(), far); !apperrIs(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("a target 150%% away, approved: %v", err)
+	}
+	// A trend of 40% a day is beyond one operator.
+	trend := domain.Event{Type: domain.EventTrend, Mu: 0.4, CreatedBy: "ops", Reason: "test", StartsAt: r.now.Add(10 * time.Hour)}
+	if _, err := r.sim.CreateEvent(context.Background(), trend); !apperrIs(err, "SIM_EVENT_NEEDS_APPROVAL") {
+		t.Fatalf("a trend of 40%% a day: %v", err)
+	}
+}
+
+// A change of the settings takes from the same budget: P0 40% up needs a
+// second operator, recorded with the change; then a jump in the hour is
+// beyond one operator too. max_minute_move stops at 5%.
+func TestSettingsChangesShareTheBudget(t *testing.T) {
+	r := newRig(t, nil)
+	r.rounds(4)
+	p := domain.DefaultParams()
+	p.P0 = 1.4
+	if _, err := r.sim.UpdateParams(context.Background(), p, "ops", ""); !apperrIs(err, "SIM_PARAMS_NEED_APPROVAL") {
+		t.Fatalf("P0 40%% up alone: %v", err)
+	}
+	if _, err := r.sim.UpdateParams(context.Background(), p, "ops", "ops"); !apperrIs(err, "SIM_PARAMS_NEED_APPROVAL") {
+		t.Fatalf("approved by the same operator: %v", err)
+	}
+	if _, err := r.sim.UpdateParams(context.Background(), p, "ops", "ops2"); err != nil {
+		t.Fatal(err)
+	}
+	last := r.store.changes[len(r.store.changes)-1]
+	if last.ApprovedBy != "ops2" || math.Abs(last.Move-0.4) > 1e-9 {
+		t.Fatalf("change %+v", last)
+	}
+	jump := domain.Event{Type: domain.EventJump, Size: 0.15, CreatedBy: "ops", Reason: "test"}
+	if _, err := r.sim.CreateEvent(context.Background(), jump); !apperrIs(err, "SIM_EVENT_NEEDS_APPROVAL") {
+		t.Fatalf("a jump after P0 moved 40%%: %v", err)
+	}
+	q := p
+	q.MaxMinuteMove = 0.06
+	if _, err := r.sim.UpdateParams(context.Background(), q, "ops", "ops2"); !apperrIs(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("max_minute_move 6%%: %v", err)
+	}
+	q = p
+	q.DailyVolume = 5_000_000 // 2.5 times
+	if _, err := r.sim.UpdateParams(context.Background(), q, "ops", ""); !apperrIs(err, "SIM_PARAMS_NEED_APPROVAL") {
+		t.Fatalf("the turnover 2.5 times alone: %v", err)
+	}
+	q.DailyVolume = 3_000_000
+	if _, err := r.sim.UpdateParams(context.Background(), q, "ops", ""); err != nil {
+		t.Fatalf("the turnover 1.5 times alone: %v", err)
 	}
 }

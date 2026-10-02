@@ -378,9 +378,17 @@ services:
   # are ordinary users trading ASTRA-USDT through the trading service and
   # the ledger. One instance holds a database lease; sim.enabled switches
   # the bots on. Management API on 8098 (internal only).
+  # The management API's changes are signed with SIM_API_SECRET (ASTRA
+  # design §6.2), which only market-sim and admin-service get: sim/sim.env,
+  # made by the deploy script on its first run.
   market-sim:
     <<: *app
     command: ["/app/market-sim"]
+    env_file:
+      - path: apps.env
+        required: false
+      - path: sim/sim.env
+        required: false
     environment:
       <<: *base-env
       TRADING_SERVICE_URL: http://spot-trading-service:8088

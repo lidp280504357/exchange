@@ -24,7 +24,7 @@
 
 同一 `client_order_id` 的重复请求：内容相同返回原订单（原订单被拒则返回同样的错误），内容不同返回 409 `COMMON_IDEMPOTENCY_CONFLICT`。不传则用订单 ID。
 
-价格带与市价保护价的锚点按顺序取：① 该交易对 5 分钟内的最新成交价（交易服务从自己的 `fills` 取）；② 新鲜的参考价（market-data-service 内网接口 `/internal/market/{symbol}/reference`：跟随参考市场的交易对是币安价，见 [market-maker.md](market-maker.md)；不跟随的平台币 ASTRA-USDT 是引擎盘口中间价，盘口缺一边时是 market-sim 30 秒内上报的目标价，见 [market-data.md](market-data.md)、[market-sim.md](market-sim.md#价格带不锁死市场设计-4)），这样一笔旧成交不会把没有参考市场的交易对锁死；③ 最后一笔成交价，不论多旧；缓存 1 秒：限价价格偏离锚点超过交易对的 `price_band` 返回 `ORDER_PRICE_OUT_OF_BAND`；市价买单保护价为锚点 × (1 + band)，卖单为锚点 × (1 − band)，市价卖单还按锚点检查最小名义金额。既无成交也无参考价的交易对没有锚点：限价单不检查价格带，市价单不带保护价（空订单簿的市价单由引擎拒绝）。测试数据里 ETH-BTC（端到端脚本用的交易对）的价格带是 100%，BTC-USDT 为 10%。做市账户（`MARKET_MAKER_USER_IDS`）的订单手续费率为 0。
+价格带与市价保护价的锚点按顺序取：① 该交易对 5 分钟内的最新成交价（交易服务从自己的 `fills` 取）；② 新鲜的参考价（market-data-service 内网接口 `/internal/market/{symbol}/reference`：跟随参考市场的交易对是币安价，见 [market-maker.md](market-maker.md)；不跟随的平台币 ASTRA-USDT 是平台自己的价格或盘口中价，都没有时是 market-sim 30 秒内上报的目标价，见 [market-data.md](market-data.md)、[market-sim.md](market-sim.md#价格带不锁死市场设计-4)），这样一笔旧成交不会把没有参考市场的交易对锁死；③ 最后一笔成交价，不论多旧；缓存 1 秒：限价价格偏离锚点超过交易对的 `price_band` 返回 `ORDER_PRICE_OUT_OF_BAND`；市价买单保护价为锚点 × (1 + band)，卖单为锚点 × (1 − band)，市价卖单还按锚点检查最小名义金额。既无成交也无参考价的交易对没有锚点：限价单不检查价格带，市价单不带保护价（空订单簿的市价单由引擎拒绝）。测试数据里 ETH-BTC（端到端脚本用的交易对）的价格带是 100%，BTC-USDT 为 10%。做市账户（`MARKET_MAKER_USER_IDS`）的订单手续费率为 0。
 
 ## 撤单
 

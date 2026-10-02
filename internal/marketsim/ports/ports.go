@@ -95,6 +95,15 @@ type Bot struct {
 	Enabled bool
 }
 
+// ParamChange is a change of the settings as the guards count it (ASTRA
+// design §6.2): when, by whom, approved by whom, and how far it moves the
+// price (a share) and the day's turnover (a logarithm).
+type ParamChange struct {
+	At                time.Time
+	Actor, ApprovedBy string
+	Move, Volume      float64
+}
+
 // Audit is an operator's action, for the audit trail (audit.events).
 type Audit struct {
 	Action, Target, Actor, Reason string
@@ -102,9 +111,10 @@ type Audit struct {
 	Details string
 }
 
-// Pairs changes a pair's status (instrument-service).
+// Pairs changes a pair's or a contract's status (instrument-service).
 type Pairs interface {
 	SetPairStatus(ctx context.Context, symbol, to, actor, reason string) error
+	SetContractStatus(ctx context.Context, symbol, to, actor, reason string) error
 }
 
 // Store keeps the bots, the settings and the model's state.
@@ -116,14 +126,18 @@ type Store interface {
 	// Settings returns the settings and their version; false when none
 	// were saved yet.
 	Settings(ctx context.Context) (domain.Params, int64, bool, error)
-	// SaveSettings stores new settings for actor and returns their
-	// version, with the audit record when there is one.
-	SaveSettings(ctx context.Context, p domain.Params, actor string, audit *Audit) (int64, error)
+	// SaveSettings stores new settings, the change as the guards count it
+	// and the audit record when there is one, and returns their version.
+	SaveSettings(ctx context.Context, p domain.Params, change ParamChange, audit *Audit) (int64, error)
+	// ParamChanges returns the changes of the settings made from from to
+	// to.
+	ParamChanges(ctx context.Context, from, to time.Time) ([]ParamChange, error)
 	// Events returns the scheduled and running events (open), or the
 	// latest limit events of any status.
 	Events(ctx context.Context, open bool, limit int) ([]domain.Event, error)
-	// EventsSince returns the events created since t.
-	EventsSince(ctx context.Context, t time.Time) ([]domain.Event, error)
+	// EventsStarting returns the events not canceled that start (or
+	// started) from from to to.
+	EventsStarting(ctx context.Context, from, to time.Time) ([]domain.Event, error)
 	// SaveEvent stores an event (new or changed), with the audit record
 	// when there is one.
 	SaveEvent(ctx context.Context, e domain.Event, audit *Audit) error

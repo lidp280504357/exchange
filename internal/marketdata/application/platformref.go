@@ -25,11 +25,11 @@ var ErrFollowed = apperr.New(apperr.KindConflict, "MARKET_NOT_SIMULATED",
 
 // PlatformReference is the reference price of a listed pair the reference
 // market does not follow (the platform coin's ASTRA-USDT, ASTRA design §4):
-// the pair's own market (PlatformPrice: the middle of the engine's book,
-// else a trade of the last five minutes), else the target the simulated
-// market reported in the last SimulatedPriceAge. The trading service
-// anchors such a pair's price band on it once the pair has gone five
-// minutes without a trade, so that an old trade cannot lock the market.
+// the pair's own market (PlatformPrice, its index price; else the middle
+// of its book, PlatformMid), else the target the simulated market reported
+// in the last SimulatedPriceAge. The trading service anchors such a pair's
+// price band on it once the pair has gone five minutes without a trade, so
+// that an old trade cannot lock the market.
 type PlatformReference struct {
 	Svc  *Service
 	Refs *ReferenceMap
@@ -70,6 +70,9 @@ func (p *PlatformReference) Price(ctx context.Context, symbol string) (Reference
 		return Reference{}, false
 	}
 	if price, ok := p.Svc.PlatformPrice(symbol); ok {
+		return Reference{Symbol: symbol, Source: SourcePlatform, Price: price, At: p.now()}, true
+	}
+	if price, ok := p.Svc.PlatformMid(symbol); ok {
 		return Reference{Symbol: symbol, Source: SourcePlatform, Price: price, At: p.now()}, true
 	}
 	p.mu.Lock()

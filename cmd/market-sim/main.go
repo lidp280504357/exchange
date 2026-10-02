@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/bootstrap"
 	"github.com/lidp280504357/exchange/internal/platform/kafka"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
+	"github.com/lidp280504357/exchange/internal/platform/svcsign"
 	"github.com/lidp280504357/exchange/migrations"
 )
 
@@ -47,12 +49,20 @@ type settings struct {
 	MarketURL      string `koanf:"market_data_service_url"`
 	InstrumentURL  string `koanf:"instrument_service_url"`
 	InstrumentAddr string `koanf:"instrument_grpc_addr"`
+	// APISecret signs the management API's changes (SIM_API_SECRET, at
+	// least 32 characters; ASTRA design §6.2): only a caller holding it,
+	// the admin console's service or exchangectl in this container, may
+	// say who acts and who approved.
+	APISecret string `koanf:"sim_api_secret"`
 }
 
 func (s *settings) Validate() error {
 	var errs []error
 	if s.Symbol == "" || s.Quote == "" {
 		errs = append(errs, errors.New("SIM_SYMBOL and SIM_QUOTE are required"))
+	}
+	if err := svcsign.CheckSecret(s.APISecret); err != nil {
+		errs = append(errs, fmt.Errorf("SIM_API_SECRET: %w", err))
 	}
 	return errors.Join(append(errs, s.Postgres.Validate(), s.Kafka.Validate())...)
 }
@@ -97,7 +107,7 @@ func setup(ctx context.Context, a *app.App) error {
 		flagClient, a.Logger(), a.Metrics())
 	sim.Derivatives = client
 	r := a.NewRouter()
-	(&httpapi.Handler{Sim: sim}).Routes(r)
+	(&httpapi.Handler{Sim: sim, Signed: &svcsign.Verifier{Secret: []byte(cfg.APISecret)}}).Routes(r)
 	if err := bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r); err != nil {
 		return err
 	}

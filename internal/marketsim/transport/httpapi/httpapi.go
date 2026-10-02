@@ -1,9 +1,12 @@
 // Package httpapi is the simulated market's internal management API (ASTRA
 // design §5.1), on the internal network only: the gateway does not route
-// it; the admin console's service and the ops scripts call it.
+// it; the admin console's service and the ops scripts call it. The
+// changes (PUT, POST) must be signed with the shared secret
+// SIM_API_SECRET (internal/platform/svcsign): the caller vouches for the
+// actor and the approver it names (design §6.2).
 //
 //	GET  /internal/sim                   the state: prices, settings, bots, open events
-//	PUT  /internal/sim/params            new settings {"params": {...}, "actor": "..."}
+//	PUT  /internal/sim/params            new settings {"params": {...}, "actor": "...", "approved_by": "..."}
 //	POST /internal/sim/bots              a bot {"user_id", "role", "label"}
 //	GET  /internal/sim/events            the open events (?all=1: the latest, &limit=)
 //	POST /internal/sim/events            a price event (design §6.2)
@@ -29,23 +32,29 @@ import (
 	"github.com/lidp280504357/exchange/internal/marketsim/ports"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/httpx"
+	"github.com/lidp280504357/exchange/internal/platform/svcsign"
 )
 
-// Handler serves the management API.
+// Handler serves the management API; Signed checks the changes'
+// signatures.
 type Handler struct {
-	Sim *application.Sim
+	Sim    *application.Sim
+	Signed *svcsign.Verifier
 }
 
 // Routes mounts the API.
 func (h *Handler) Routes(r chi.Router) {
-	r.Get("/internal/sim", h.status)
-	r.Put("/internal/sim/params", h.params)
-	r.Post("/internal/sim/bots", h.addBot)
-	r.Get("/internal/sim/events", h.events)
-	r.Post("/internal/sim/events", h.createEvent)
-	r.Post("/internal/sim/events/{id}/end", h.endEvent)
-	r.Get("/internal/sim/history", h.history)
-	r.Get("/internal/sim/stream", h.stream)
+	r.Group(func(r chi.Router) {
+		r.Use(h.Signed.Changes)
+		r.Get("/internal/sim", h.status)
+		r.Put("/internal/sim/params", h.params)
+		r.Post("/internal/sim/bots", h.addBot)
+		r.Get("/internal/sim/events", h.events)
+		r.Post("/internal/sim/events", h.createEvent)
+		r.Post("/internal/sim/events/{id}/end", h.endEvent)
+		r.Get("/internal/sim/history", h.history)
+		r.Get("/internal/sim/stream", h.stream)
+	})
 }
 
 // StatusJSON is the simulation's state; prices are decimal strings, the
@@ -208,14 +217,15 @@ func (h *Handler) status(w http.ResponseWriter, _ *http.Request) {
 
 func (h *Handler) params(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Params domain.Params `json:"params"`
-		Actor  string        `json:"actor"`
+		Params     domain.Params `json:"params"`
+		Actor      string        `json:"actor"`
+		ApprovedBy string        `json:"approved_by"`
 	}
 	if err := httpx.DecodeJSON(w, r, &body); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	version, err := h.Sim.UpdateParams(r.Context(), body.Params, body.Actor)
+	version, err := h.Sim.UpdateParams(r.Context(), body.Params, body.Actor, body.ApprovedBy)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

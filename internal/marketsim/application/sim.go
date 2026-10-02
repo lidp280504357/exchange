@@ -177,7 +177,7 @@ func (s *Sim) Start(ctx context.Context) error {
 	}
 	if !ok {
 		p = domain.DefaultParams()
-		if version, err = s.store.SaveSettings(ctx, p, "market-sim", nil); err != nil {
+		if version, err = s.store.SaveSettings(ctx, p, ports.ParamChange{At: s.now(), Actor: "market-sim"}, nil); err != nil {
 			return err
 		}
 	}
@@ -732,25 +732,43 @@ func (s *Sim) Status() Status {
 }
 
 // UpdateParams validates and stores new settings for actor, which take
-// effect from the next round, and returns their version.
-func (s *Sim) UpdateParams(ctx context.Context, p domain.Params, actor string) (int64, error) {
+// effect from the next round, and returns their version. A change takes
+// from the operators' hourly budget like an event (§6.2): how far it
+// moves the price (domain.ParamsMove) and the day's turnover
+// (domain.VolumeMove); beyond one operator's share another one approves
+// (approvedBy).
+func (s *Sim) UpdateParams(ctx context.Context, p domain.Params, actor, approvedBy string) (int64, error) {
 	if err := p.Validate(); err != nil {
 		return 0, apperr.Invalid(err.Error())
 	}
 	if actor == "" {
 		return 0, apperr.Invalid("the operator is required")
 	}
+	now := s.now()
+	spent, err := s.budget(ctx, now)
+	if err != nil {
+		return 0, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	details, _ := json.Marshal(map[string]any{"from": s.params, "to": p})
-	version, err := s.store.SaveSettings(ctx, p, actor, &ports.Audit{
+	target := s.model.State.P
+	change := ports.ParamChange{
+		At: now, Actor: actor, ApprovedBy: approvedBy, Move: domain.ParamsMove(s.params, p, target), Volume: domain.VolumeMove(s.params, p),
+	}
+	if domain.NeedsApproval(domain.Spend{At: now, Move: change.Move, Volume: change.Volume}, spent.spends(target, s.params.Sigma)) &&
+		(approvedBy == "" || approvedBy == actor) {
+		return 0, ErrParamsNeedApproval.WithDetail("move", math.Round(change.Move*1e4)/1e4).
+			WithDetail("volume", math.Round(change.Volume*1e4)/1e4)
+	}
+	details, _ := json.Marshal(map[string]any{"from": s.params, "to": p, "approved_by": approvedBy, "move": change.Move, "volume": change.Volume})
+	version, err := s.store.SaveSettings(ctx, p, change, &ports.Audit{
 		Action: "market.sim.params_changed", Target: "sim:" + s.cfg.Symbol, Actor: actor, Reason: "settings", Details: string(details),
 	})
 	if err != nil {
 		return 0, err
 	}
 	s.apply(p, version)
-	s.log.InfoContext(ctx, "simulated market settings changed", "by", actor, "version", version)
+	s.log.InfoContext(ctx, "simulated market settings changed", "by", actor, "approved_by", approvedBy, "version", version)
 	return version, nil
 }
 

@@ -27,6 +27,7 @@
 //	exchangectl admin create --email E --name N --role ADMIN [--secrets-stdin] | list | disable <email> --reason TEXT
 //	exchangectl dlq list auth.events
 //	exchangectl dlq replay auth.events --all [--group notification-service] | --offset 0:12
+//	exchangectl sim status | call POST /internal/sim/events '{"type":"JUMP",...}'
 //
 // On the test server: sudo docker exec exchange-infra-user-service-1 /app/exchangectl flags list
 package main
@@ -53,6 +54,10 @@ type settings struct {
 	// AdminSecretKey seals administrators' authenticator secrets
 	// (admin create only).
 	AdminSecretKey string `koanf:"admin_secret_key"`
+	// MarketSimURL and SimAPISecret reach market-sim's management API and
+	// sign its changes (sim only).
+	MarketSimURL string `koanf:"market_sim_url"`
+	SimAPISecret string `koanf:"sim_api_secret"`
 }
 
 const usage = `usage: exchangectl <command> ...
@@ -122,6 +127,10 @@ commands:
                               the newest funding rounds: rate, mark, positions, paid, received, insurance;
                               fails on a round stuck without its rate or receivers paid more than was collected
   derivatives reconcile       check invariant 6 now: long = short per contract, PNL_CLEARING + long cost − short cost = 0
+  sim status                  market-sim's state (the platform coin's simulated market)
+  sim call METHOD PATH [JSON] a request to market-sim's management API, its changes signed with
+                              SIM_API_SECRET (run in the market-sim container); prints "HTTP <status>"
+                              to standard error and the answer, fails on 300 or more
 `
 
 func main() {
@@ -145,7 +154,7 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		fmt.Fprint(out, usage)
 		return errUsage
 	}
-	cfg := settings{Postgres: pg.DefaultConfig()}
+	cfg := settings{Postgres: pg.DefaultConfig(), MarketSimURL: "http://127.0.0.1:8098"}
 	if err := config.Load(&cfg); err != nil {
 		return err
 	}
@@ -176,6 +185,8 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return adminCmd(ctx, cfg, args[1:], os.Stdin, out)
 	case "derivatives":
 		return derivativesCmd(ctx, cfg, args[1:], out)
+	case "sim":
+		return simCmd(ctx, cfg, args[1:], out)
 	default:
 		fmt.Fprint(out, usage)
 		return fmt.Errorf("unknown command %q", args[0])

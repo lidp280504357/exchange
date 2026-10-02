@@ -52,12 +52,14 @@ ctl() {
   ssh exchange "cd $INFRA && $COMPOSE exec -T $service /app/exchangectl$args"
 }
 
-# sim [JSON] reads market-sim's state, or posts JSON to its bots.
+# sim [JSON] reads market-sim's state, or registers a bot with JSON: a
+# change, signed with SIM_API_SECRET by exchangectl in market-sim's
+# container.
 sim() {
   if [[ $# -eq 0 ]]; then
     ssh exchange "cd $INFRA && $COMPOSE exec -T market-sim wget -qO- http://127.0.0.1:8098/internal/sim"
   else
-    ssh exchange "cd $INFRA && $COMPOSE exec -T market-sim wget -qO- --header 'Content-Type: application/json' --post-data $(printf %q "$1") http://127.0.0.1:8098/internal/sim/bots"
+    ctl market-sim sim call POST /internal/sim/bots "$1" </dev/null
   fi
 }
 

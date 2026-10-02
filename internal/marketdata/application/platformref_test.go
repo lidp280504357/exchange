@@ -43,13 +43,13 @@ func TestPlatformReference(t *testing.T) {
 		t.Fatalf("the simulated price: %+v %v", r, ok)
 	}
 	svc.OnDepth(&marketv1.DepthSnapshot{
-		Symbol: "ASTRA-USDT", Sequence: 1, Bids: []*marketv1.PriceLevel{{Price: "1.01", Quantity: "10"}},
-		Asks: []*marketv1.PriceLevel{{Price: "1.03", Quantity: "10"}},
+		Symbol: "ASTRA-USDT", Sequence: 1, Bids: []*marketv1.PriceLevel{{Price: "1.01", Quantity: "100"}},
+		Asks: []*marketv1.PriceLevel{{Price: "1.03", Quantity: "100"}},
 	})
 	if r, ok := pr.Price(ctx, "ASTRA-USDT"); !ok || r.Source != SourcePlatform || !r.Price.Equal(d("1.02")) {
 		t.Fatalf("the middle of the book comes first: %+v %v", r, ok)
 	}
-	svc.OnDepth(&marketv1.DepthSnapshot{Symbol: "ASTRA-USDT", Sequence: 2, Asks: []*marketv1.PriceLevel{{Price: "1.03", Quantity: "10"}}})
+	svc.OnDepth(&marketv1.DepthSnapshot{Symbol: "ASTRA-USDT", Sequence: 2, Asks: []*marketv1.PriceLevel{{Price: "1.03", Quantity: "100"}}})
 	if r, ok := pr.Price(ctx, "ASTRA-USDT"); !ok || r.Source != SourceSimulation {
 		t.Fatalf("a one-sided book: the simulated price again: %+v %v", r, ok)
 	}

@@ -35,11 +35,20 @@ const (
 	EventCanceled  = "CANCELED"
 )
 
-// What one operator may do alone (§6.2): a jump of at most 30%, and moves
-// of at most 50% in an hour together; beyond, a second operator approves.
+// The guards (§6.2, clarified after the A3 review): one operator alone
+// moves the price by at most 30% at a time (a jump, a target, the
+// equivalent of a trend or a volatility, a change of the settings) and by
+// at most 50% within any hour, counted by when the moves take effect, and
+// changes the day's turnover by at most a factor of two within any hour;
+// beyond, a second operator approves. Even approved, a jump or a target
+// moves the price by at most +100% (and less than −90%), and an event is
+// scheduled at most MaxLead ahead.
 const (
-	SoloJump = 0.30
-	SoloHour = 0.50
+	SoloJump   = 0.30
+	SoloHour   = 0.50
+	SoloVolume = math.Ln2
+	MaxJump    = 1.0
+	MaxLead    = 24 * time.Hour
 )
 
 // Event is an operator's price event and its course.
@@ -82,8 +91,8 @@ func (e Event) Validate() error {
 	}
 	switch e.Type {
 	case EventJump:
-		if e.Size <= -0.9 || e.Size > 10 || e.Size == 0 || math.IsNaN(e.Size) {
-			fail("a jump's size is a share above -0.9 and at most 10, not 0")
+		if e.Size <= -0.9 || e.Size > MaxJump || e.Size == 0 || math.IsNaN(e.Size) {
+			fail("a jump's size is a share above -0.9 and at most 1 (+100%%), not 0")
 		}
 		if e.Duration > 10*time.Minute {
 			fail("a jump takes at most 10 minutes")
@@ -116,9 +125,17 @@ func (e Event) Moves() bool {
 	return e.Type == EventJump || e.Type == EventTarget || e.Type == EventPause
 }
 
-// Move is how far the event moves the target from p, as a share: a jump's
-// size, the way to a target price; 0 for the others.
-func (e Event) Move(p float64) float64 {
+// Move is how far the event moves the price, as a share, for the guards:
+// a jump's size; the way to a target price from where it started (from p,
+// the target now, before it starts); a trend's drift over its time; a
+// volatility factor's extra one-sigma move over its time (sigma being the
+// model's volatility a day). A trend or a volatility counts a day at most,
+// and a day when it has no end. The other events move nothing.
+func (e Event) Move(p, sigma float64) float64 {
+	days := 1.0
+	if e.Duration > 0 {
+		days = math.Min(1, e.Duration.Hours()/24)
+	}
 	switch e.Type {
 	case EventJump:
 		return e.Size
@@ -130,25 +147,81 @@ func (e Event) Move(p float64) float64 {
 		if from > 0 {
 			return e.Price.InexactFloat64()/from - 1
 		}
+	case EventTrend:
+		return math.Expm1(e.Mu * days)
+	case EventVolatility:
+		return sigma * math.Abs(e.Factor-1) * math.Sqrt(days)
 	}
 	return 0
 }
 
-// NeedsApproval reports whether one operator may not create e alone at
-// the target p: a move beyond SoloJump, or the moves of the hour (recent,
-// the events created in the last hour) and e together beyond SoloHour.
-func NeedsApproval(e Event, p float64, recent []Event) bool {
-	move := math.Abs(e.Move(p))
-	if move > SoloJump {
+// Spend is what a move of the operators takes from the guards' budget: a
+// move of the price (a share) and of the day's turnover (a logarithm), at
+// the time it takes effect.
+type Spend struct {
+	At           time.Time
+	Move, Volume float64
+}
+
+// NeedsApproval reports whether one operator may not make s alone, given
+// the others made or scheduled: a move beyond SoloJump, or, within some
+// hour that holds s, the moves together beyond SoloHour or the turnover's
+// changes beyond SoloVolume.
+func NeedsApproval(s Spend, others []Spend) bool {
+	if math.Abs(s.Move) > SoloJump || math.Abs(s.Volume) > SoloVolume {
 		return true
 	}
-	sum := move
-	for _, r := range recent {
-		if r.Status != EventCanceled {
-			sum += math.Abs(r.Move(p))
+	// The hours that hold s start between an hour before it and s itself;
+	// which spends they hold changes only where an hour starts or ends at
+	// one of them.
+	lo, hi := s.At.Add(-time.Hour), s.At
+	starts := []time.Time{lo, hi}
+	for _, o := range others {
+		for _, w := range []time.Time{o.At, o.At.Add(-time.Hour)} {
+			if !w.Before(lo) && !w.After(hi) {
+				starts = append(starts, w)
+			}
 		}
 	}
-	return sum > SoloHour
+	for _, w := range starts {
+		move, volume := math.Abs(s.Move), math.Abs(s.Volume)
+		for _, o := range others {
+			if !o.At.Before(w) && !o.At.After(w.Add(time.Hour)) {
+				move, volume = move+math.Abs(o.Move), volume+math.Abs(o.Volume)
+			}
+		}
+		if move > SoloHour+1e-12 || volume > SoloVolume+1e-12 {
+			return true
+		}
+	}
+	return false
+}
+
+// ParamsMove is how far a change of the settings moves the price, for the
+// guards: the anchor P0's change, the target p forced into a new floor or
+// ceiling, and the extra move a minute a higher max_minute_move allows.
+func ParamsMove(from, to Params, p float64) float64 {
+	m := math.Max(0, to.MaxMinuteMove-from.MaxMinuteMove)
+	if from.P0 > 0 {
+		m += math.Abs(to.P0/from.P0 - 1)
+	}
+	if p > 0 {
+		m += math.Abs(math.Min(math.Max(p, to.Floor), to.Ceiling)/p - 1)
+	}
+	return m
+}
+
+// VolumeMove is how far a change of the settings moves the day's taker
+// turnover, a logarithm: stopping the takers or starting them from none
+// counts as twice what one operator may do alone.
+func VolumeMove(from, to Params) float64 {
+	switch {
+	case from.DailyVolume == to.DailyVolume:
+		return 0
+	case from.DailyVolume <= 0 || to.DailyVolume <= 0:
+		return 2 * SoloVolume
+	}
+	return math.Abs(math.Log(to.DailyVolume / from.DailyVolume))
 }
 
 // Shape is what the running events do to the model's next step.

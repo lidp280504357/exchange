@@ -34,6 +34,10 @@ var (
 	ErrNeedsApproval = apperr.New(apperr.KindForbidden, "SIM_EVENT_NEEDS_APPROVAL",
 		"beyond what one operator may do alone (a jump of 30%, moves of 50% in an hour): a second operator approves")
 	ErrEventNotOpen = apperr.New(apperr.KindConflict, apperr.CodeConflict, "the event is not scheduled or running")
+	// ErrParamsNeedApproval refuses a change of the settings beyond one
+	// operator's share of the guards' budget.
+	ErrParamsNeedApproval = apperr.New(apperr.KindForbidden, "SIM_PARAMS_NEED_APPROVAL",
+		"beyond what one operator may change alone (the price by 30% at once or 50% in an hour, the turnover by half or double): a second operator approves")
 )
 
 // Sample is the target and the last price at a time, for the operators'
@@ -76,11 +80,23 @@ func (s *Sim) startDue(ctx context.Context, now time.Time) {
 			s.keepAnchor(ctx, e)
 		case domain.EventHalt:
 			s.stop(ctx)
-			if err := s.pairs.SetPairStatus(ctx, s.cfg.Symbol, "HALT", "system:market-sim", "simulated market event "+e.ID+": "+e.Reason); err != nil {
+			why := "simulated market event " + e.ID + ": " + e.Reason
+			if err := s.pairs.SetPairStatus(ctx, s.cfg.Symbol, "HALT", "system:market-sim", why); err != nil {
 				s.m.errors.WithLabelValues("halt").Inc()
 				s.log.WarnContext(ctx, "simulated market: the pair not halted", "event", e.ID, "error", err)
 			}
 			s.pairAt = time.Time{}
+			// The perpetual halts with its index pair (§5.2).
+			if s.cfg.Perp != "" && s.perpPair.Trading {
+				if s.perpRunning {
+					s.stopPerp(ctx)
+				}
+				if err := s.pairs.SetContractStatus(ctx, s.cfg.Perp, "HALT", "system:market-sim", why); err != nil {
+					s.m.errors.WithLabelValues("halt").Inc()
+					s.log.WarnContext(ctx, "simulated market: the perpetual not halted", "event", e.ID, "error", err)
+				}
+				s.perpPairAt = time.Time{}
+			}
 		}
 		s.persist(ctx, e, nil)
 		s.log.InfoContext(ctx, "simulated market event started", "event", e.ID, "type", e.Type, "target", s.model.State.P)
@@ -107,13 +123,15 @@ func (s *Sim) finish(ctx context.Context, now time.Time, ended []*domain.Event, 
 }
 
 // keepAnchor saves the new P0 of a re-anchoring in the settings: the
-// model's next start, and the operators' form, go on from it.
+// model's next start, and the operators' form, go on from it. It moves no
+// price: the target stays where it was.
 func (s *Sim) keepAnchor(ctx context.Context, e *domain.Event) {
 	p := s.params
 	from := p.P0
 	p.P0 = s.model.Params.P0
 	details, _ := json.Marshal(map[string]any{"p0": map[string]float64{"from": from, "to": p.P0}, "event": e.ID})
-	version, err := s.store.SaveSettings(ctx, p, e.CreatedBy, &ports.Audit{
+	change := ports.ParamChange{At: s.now(), Actor: e.CreatedBy, ApprovedBy: e.ApprovedBy}
+	version, err := s.store.SaveSettings(ctx, p, change, &ports.Audit{
 		Action: "market.sim.params_changed", Target: "sim:" + s.cfg.Symbol, Actor: e.CreatedBy, Reason: "REANCHOR " + e.ID, Details: string(details),
 	})
 	if err != nil {
@@ -184,9 +202,44 @@ func (s *Sim) History(t time.Time) []Sample {
 	return slices.Clone(s.samples[i:])
 }
 
+// budget is what the operators spent within an hour of at, either side:
+// the events not canceled, by when they start, and the changes of the
+// settings.
+type budget struct {
+	events  []domain.Event
+	changes []ports.ParamChange
+}
+
+func (s *Sim) budget(ctx context.Context, at time.Time) (budget, error) {
+	events, err := s.store.EventsStarting(ctx, at.Add(-time.Hour), at.Add(time.Hour))
+	if err != nil {
+		return budget{}, err
+	}
+	changes, err := s.store.ParamChanges(ctx, at.Add(-time.Hour), at.Add(time.Hour))
+	if err != nil {
+		return budget{}, err
+	}
+	return budget{events: events, changes: changes}, nil
+}
+
+// spends are the budget's moves with the target p and the volatility
+// sigma of now.
+func (b budget) spends(p, sigma float64) []domain.Spend {
+	out := make([]domain.Spend, 0, len(b.events)+len(b.changes))
+	for _, e := range b.events {
+		out = append(out, domain.Spend{At: e.StartsAt, Move: e.Move(p, sigma)})
+	}
+	for _, c := range b.changes {
+		out = append(out, domain.Spend{At: c.At, Move: c.Move, Volume: c.Volume})
+	}
+	return out
+}
+
 // CreateEvent schedules an operator's event, at once when it starts no
 // later than now, after the checks of §6.2: sim.events on, the event
-// valid, and within one operator's limits unless another approved it.
+// valid and due within MaxLead, a target no farther than a jump may go,
+// and within one operator's share of the budget where it starts unless
+// another operator approved it.
 func (s *Sim) CreateEvent(ctx context.Context, e domain.Event) (domain.Event, error) {
 	if !s.flags.Enabled(flags.KeySimEvents, flags.Subject{Symbol: s.cfg.Symbol}) {
 		return domain.Event{}, ErrEventsOff
@@ -200,15 +253,23 @@ func (s *Sim) CreateEvent(ctx context.Context, e domain.Event) (domain.Event, er
 	if err := e.Validate(); err != nil {
 		return domain.Event{}, apperr.Invalid(err.Error())
 	}
-	recent, err := s.store.EventsSince(ctx, now.Add(-time.Hour))
+	if e.StartsAt.After(now.Add(domain.MaxLead)) {
+		return domain.Event{}, apperr.Invalid("an event starts within 24 hours")
+	}
+	spent, err := s.budget(ctx, e.StartsAt)
 	if err != nil {
 		return domain.Event{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p := s.model.State.P
-	if domain.NeedsApproval(e, p, recent) && (e.ApprovedBy == "" || e.ApprovedBy == e.CreatedBy) {
-		return domain.Event{}, ErrNeedsApproval.WithDetail("move", math.Round(e.Move(p)*1e4)/1e4)
+	move := e.Move(p, s.params.Sigma)
+	if e.Type == domain.EventTarget && (move > domain.MaxJump || move <= -0.9) {
+		return domain.Event{}, apperr.Invalid("a target moves the price by at most +100% and by less than -90%")
+	}
+	if domain.NeedsApproval(domain.Spend{At: e.StartsAt, Move: move}, spent.spends(p, s.params.Sigma)) &&
+		(e.ApprovedBy == "" || e.ApprovedBy == e.CreatedBy) {
+		return domain.Event{}, ErrNeedsApproval.WithDetail("move", math.Round(move*1e4)/1e4)
 	}
 	details, _ := json.Marshal(map[string]any{
 		"type": e.Type, "size": e.Size, "price": e.Price.String(), "mu": e.Mu, "factor": e.Factor,
@@ -249,10 +310,14 @@ func (s *Sim) EndEvent(ctx context.Context, id, actor, reason string) (domain.Ev
 		case domain.EventPause, domain.EventTarget:
 			s.model.Hold(s.model.State.P)
 		case domain.EventHalt:
-			if err := s.pairs.SetPairStatus(ctx, s.cfg.Symbol, "TRADING", actor, "simulated market event "+e.ID+" ended: "+reason); err != nil {
+			why := "simulated market event " + e.ID + " ended: " + reason
+			if err := s.pairs.SetPairStatus(ctx, s.cfg.Symbol, "TRADING", actor, why); err != nil {
 				return domain.Event{}, err
 			}
 			s.pairAt = time.Time{}
+			if err := s.resumePerp(ctx, actor, why); err != nil {
+				return domain.Event{}, err
+			}
 		}
 		if e.Moves() {
 			s.movedAt = now
@@ -268,6 +333,26 @@ func (s *Sim) EndEvent(ctx context.Context, id, actor, reason string) (domain.Ev
 	}
 	s.events = slices.Delete(s.events, i, i+1)
 	return *e, nil
+}
+
+// resumePerp lets the perpetual trade again after a halt, if a halt left
+// it halted.
+func (s *Sim) resumePerp(ctx context.Context, actor, why string) error {
+	if s.cfg.Perp == "" || s.Derivatives == nil {
+		return nil
+	}
+	k, err := s.Derivatives.Contract(ctx, s.cfg.Perp)
+	if err != nil {
+		return err
+	}
+	if k.Status != "HALT" {
+		return nil
+	}
+	if err := s.pairs.SetContractStatus(ctx, s.cfg.Perp, "TRADING", actor, why); err != nil {
+		return err
+	}
+	s.perpPairAt = time.Time{}
+	return nil
 }
 
 // Events lists the scheduled and running events, or the latest limit.

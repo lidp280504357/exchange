@@ -97,19 +97,27 @@ func (s *Store) Settings(ctx context.Context) (domain.Params, int64, bool, error
 	return p, version, true, nil
 }
 
-// SaveSettings stores new settings and returns their version.
-func (s *Store) SaveSettings(ctx context.Context, p domain.Params, actor string, audit *ports.Audit) (int64, error) {
+// SaveSettings stores new settings and the change as the guards count it,
+// and returns their version.
+func (s *Store) SaveSettings(ctx context.Context, p domain.Params, change ports.ParamChange, audit *ports.Audit) (int64, error) {
 	raw, err := json.Marshal(p)
 	if err != nil {
 		return 0, err
+	}
+	if change.At.IsZero() {
+		change.At = time.Now()
 	}
 	var version int64
 	err = s.db.InTx(ctx, func(tx pgx.Tx) error {
 		err := tx.QueryRow(ctx, `INSERT INTO settings (id, params, version, updated_by, updated_at) VALUES (1, $1, 1, $2, $3)
 			ON CONFLICT (id) DO UPDATE SET params = EXCLUDED.params, version = settings.version + 1,
 				updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at
-			RETURNING version`, raw, actor, time.Now()).Scan(&version)
+			RETURNING version`, raw, change.Actor, change.At).Scan(&version)
 		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO param_changes (version, at, actor, approved_by, move, volume) VALUES ($1, $2, $3, $4, $5, $6)`,
+			version, change.At, change.Actor, change.ApprovedBy, change.Move, change.Volume); err != nil {
 			return err
 		}
 		return s.audit(ctx, tx, audit)
@@ -118,6 +126,23 @@ func (s *Store) SaveSettings(ctx context.Context, p domain.Params, actor string,
 		return 0, fmt.Errorf("save settings: %w", err)
 	}
 	return version, nil
+}
+
+// ParamChanges returns the changes of the settings made from from to to.
+func (s *Store) ParamChanges(ctx context.Context, from, to time.Time) ([]ports.ParamChange, error) {
+	rows, err := s.db.Query(ctx, `SELECT at, actor, approved_by, move, volume FROM param_changes WHERE at BETWEEN $1 AND $2 ORDER BY at`, from, to)
+	if err != nil {
+		return nil, fmt.Errorf("param changes: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (ports.ParamChange, error) {
+		var c ports.ParamChange
+		err := row.Scan(&c.At, &c.Actor, &c.ApprovedBy, &c.Move, &c.Volume)
+		return c, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("param changes: %w", err)
+	}
+	return out, nil
 }
 
 const eventColumns = `id::text, type, size, price, mu, factor, duration_s, hold_s, starts_at, status, created_by, approved_by, reason,
@@ -151,9 +176,11 @@ func (s *Store) Events(ctx context.Context, open bool, limit int) ([]domain.Even
 	return s.list(ctx, q, args...)
 }
 
-// EventsSince returns the events created since t.
-func (s *Store) EventsSince(ctx context.Context, t time.Time) ([]domain.Event, error) {
-	return s.list(ctx, `SELECT `+eventColumns+` FROM events WHERE created_at >= $1 ORDER BY created_at`, t)
+// EventsStarting returns the events not canceled that start from from to
+// to.
+func (s *Store) EventsStarting(ctx context.Context, from, to time.Time) ([]domain.Event, error) {
+	return s.list(ctx, `SELECT `+eventColumns+` FROM events WHERE starts_at BETWEEN $1 AND $2 AND status <> 'CANCELED' ORDER BY starts_at`,
+		from, to)
 }
 
 func (s *Store) list(ctx context.Context, q string, args ...any) ([]domain.Event, error) {

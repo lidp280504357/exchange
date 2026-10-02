@@ -127,7 +127,8 @@ func (c *Client) Pair(ctx context.Context, symbol string) (domain.Pair, error) {
 		return domain.Pair{}, fmt.Errorf("pair %s: no tick or lot size", symbol)
 	}
 	return domain.Pair{
-		Symbol: p.Symbol, Tick: ds[0], Lot: ds[1], MinQty: ds[2], MinNotional: ds[3], Band: band(p.PriceBand), Trading: p.Status == "TRADING",
+		Symbol: p.Symbol, Tick: ds[0], Lot: ds[1], MinQty: ds[2], MinNotional: ds[3], Band: band(p.PriceBand), Status: p.Status,
+		Trading: p.Status == "TRADING",
 	}, nil
 }
 
@@ -328,7 +329,8 @@ func (c *Client) Contract(ctx context.Context, symbol string) (domain.Pair, erro
 		return domain.Pair{}, fmt.Errorf("contract %s: no tick or lot size", symbol)
 	}
 	return domain.Pair{
-		Symbol: k.Symbol, Tick: ds[0], Lot: ds[1], MinQty: ds[2], MinNotional: ds[3], Band: band(k.PriceBand), Trading: k.Status == "TRADING",
+		Symbol: k.Symbol, Tick: ds[0], Lot: ds[1], MinQty: ds[2], MinNotional: ds[3], Band: band(k.PriceBand), Status: k.Status,
+		Trading: k.Status == "TRADING",
 	}, nil
 }
 

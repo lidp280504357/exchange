@@ -35,11 +35,13 @@ dX   = −θ X dt + μ dt + σ dW          （θ 按小时，μ、σ 按天）
 | `TREND` | `mu`（每天），`duration_seconds`（0 直到结束） | 期间漂移改为 `mu` |
 | `VOLATILITY` | `factor`，`duration_seconds`（0 直到结束） | 期间波动率乘 `factor` |
 | `PAUSE` | `duration_seconds`（0 直到结束） | 目标价冻结；做市商照常报价，噪声与趋势交易者停止 |
-| `HALT` | — | 撤掉做市商全部挂单，交易对置 `HALT`（经 instrument-service gRPC）；结束事件即恢复 `TRADING`，机器人重新报价 |
+| `HALT` | — | 撤掉做市商全部挂单，交易对置 `HALT`，永续（在交易时）一起置 `HALT`（经 instrument-service gRPC）；结束事件即恢复 `TRADING`（永续若仍是 `HALT` 也恢复），机器人重新报价 |
 | `REANCHOR` | — | `P0` 设为当前目标价，`BTC_0`、`ETH_0` 重新锚定，偏离与事件因子清零；新的 `P0` 写回设置（版本加一，审计 `market.sim.params_changed`，操作人为事件创建人），重启后从它继续 |
 
 - 同一时间只运行一个移动或固定价格的事件（`JUMP`、`TARGET`、`PAUSE`），后到的排队等前一个结束。事件移动价格时分钟守卫让路，并从事件价格重新开始计算，事件结束后照常限速。
-- 单人限额：单次移动（跳涨跳跌、目标价与当前价的距离）不超过 30%，一小时内（含这次，已取消的不算）合计不超过 50%；超过时需要另一名运营批准（`approved_by` 填另一个人，不能是自己），否则 403 `SIM_EVENT_NEEDS_APPROVAL`（`details.move` 是这次的幅度）。双人审批的流程在后台做。
+- 守卫（设计 §6.2，A3 审查后澄清）：一个运营单独一次最多让价格移动 30%，任何一小时内合计最多 50%，按生效时间（事件的 `starts_at`、参数改动的时刻）计，前后各一小时的都算；已取消的不算。各自的"幅度"：`JUMP` 是 `size`；`TARGET` 是目标价离当前目标价（开始后离起点）的距离；`TREND` 是 `mu` 在其时长内（最多一天，没有结束时间按一天）累计的漂移 `e^(mu×天数)−1`；`VOLATILITY` 是多出的一倍标准差 `sigma×|factor−1|×√天数`；参数改动见下文。超过时需要另一名运营批准（`approved_by`，不能是自己），否则 403 `SIM_EVENT_NEEDS_APPROVAL`（`details.move`）。即使批准，`JUMP` 最多 +100%（大于 −90%），`TARGET` 同样；事件最多提前 24 小时安排。
+- 参数改动走同一套守卫（`PUT /internal/sim/params`）：幅度 = `p0` 的变化比例 + 新的 `floor`/`ceiling` 迫使当前目标价移动的比例 + `max_minute_move` 调高的部分；另有成交额预算：`daily_volume` 的对数变化，一小时内合计不超过 ln 2（一个人最多翻倍或减半，停掉或从零开启按两倍计）。超过需第二人，否则 403 `SIM_PARAMS_NEED_APPROVAL`（`details.move`、`details.volume`）；`max_minute_move` 硬上限 5%/分。每次改动连同批准人、幅度存在 `marketsim.param_changes` 并进审计。`REANCHOR` 写回的 `P0` 不移动价格，幅度为 0。
+- 审批人身份来自调用方凭据：改动类请求（PUT、POST）必须用共享密钥 `SIM_API_SECRET` 签名（`internal/platform/svcsign`，头 `X-Service-Signature: t=<秒>,v1=<HMAC-SHA256(t\n方法\n路径与查询\n正文)>`，5 分钟内有效、同一签名只收一次），未签名或签错 401 `SERVICE_UNSIGNED`。只有 admin-service（它在后台认证两名运营后替他们签名，正文里的 `actor`、`approved_by` 由它担保）与 market-sim 容器里的 `exchangectl sim` 持有密钥；测试服的密钥在 `/opt/exchange/infra/sim/sim.env`（部署脚本第一次运行时生成，不打印），compose 只把它给 market-sim（admin-service 接入时同样挂这个文件）。
 - 事件移动价格时（以及之后一分钟）、报价沿价格带走价时（下一节），事件执行者每 1–2 秒比较最近成交价与报价中心，差距超过半个价差就按方向下市价单（差得越远单子越大，最多 20 档），让成交价跟上。
 - 建事件、提前结束、改设置都写审计（`audit.events`：`market.sim.event_created`、`market.sim.event_canceled`、`market.sim.event_ended`、`market.sim.params_changed`，带参数与当时的目标价）。
 
@@ -91,15 +93,25 @@ ASTRA-USDT 的价格带是 ±10%，锚点是交易服务看到的最近成交（
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/internal/sim` | 状态：`symbol`、`enabled`、`running`、`target_price`、`last_price`（十进制字符串，可为 null）、`references_fresh`、`params`、`version`、`guards`（按守卫计数）、`bots`（`user_id`、`role`、`label`、`enabled`、`balances_known`、`usdt`、`coin`、`perp_position`、`futures_usdt`、`error`、`error_at`、`retry_at`（退避到何时，null 为不在退避））、价格带（`anchor_price` 锚点、`price_band`、`quote_center` 报价中心、`walking`、`band_distance` 目标价离锚点几个带宽（±1 以内在带内）、`last_trade_at`、`watchdog` 的 `fired` 与 `last_at`）、`perp`、`perp_running`、`at` |
-| PUT | `/internal/sim/params` | `{"params": {...全部字段...}, "actor": "操作人"}` → `{"version": n}`；不合法返回 400 |
+| PUT | `/internal/sim/params` | `{"params": {...全部字段...}, "actor": "操作人", "approved_by": "批准人（需要时）"}` → `{"version": n}`；不合法 400，超过单人份额 403 `SIM_PARAMS_NEED_APPROVAL` |
 | POST | `/internal/sim/bots` | `{"user_id", "role": "MAKER|TAKER|TREND|EXECUTOR", "label"}` → 204；同一用户再登记无变化，标签被别的用户占用返回 409；下一轮开始交易 |
 | GET | `/internal/sim/events` | 进行中与排队的事件；`?all=1&limit=50` 取最近的全部状态。每条：`id`、`type`、`size`、`price`、`mu`、`factor`、`duration_seconds`、`hold_seconds`、`starts_at`、`status`（`SCHEDULED`、`RUNNING`、`DONE`、`CANCELED`）、`created_by`、`approved_by`、`reason`、`created_at`、`started_at`、`ended_at`、`from_price`、`ended_by` |
-| POST | `/internal/sim/events` | `{"type", "size", "price", "mu", "factor", "duration_seconds", "hold_seconds", "starts_at"（RFC 3339，可省）, "actor", "approved_by", "reason"}` → 201 事件；`sim.events` 关时 403 `SIM_EVENTS_OFF`，超过单人限额 403 `SIM_EVENT_NEEDS_APPROVAL`，参数不合法 400 |
+| POST | `/internal/sim/events` | `{"type", "size", "price", "mu", "factor", "duration_seconds", "hold_seconds", "starts_at"（RFC 3339，可省，最多 24 小时后）, "actor", "approved_by", "reason"}` → 201 事件；`sim.events` 关时 403 `SIM_EVENTS_OFF`，超过单人份额 403 `SIM_EVENT_NEEDS_APPROVAL`，参数不合法或超过硬上限 400 |
 | POST | `/internal/sim/events/{id}/end` | `{"actor", "reason"}` → 200 事件：排队的取消，进行中的就地结束（`HALT` 恢复交易）；已结束的 409 |
 | GET | `/internal/sim/history` | `?minutes=`（默认与最长一天）：每 10 秒一个点 `{at, target_price, last_price}`（内存里，重启后从头积累） |
 | GET | `/internal/sim/stream` | 同样的点每秒一个，server-sent events（`data: {...}`） |
 
-`GET /internal/sim` 另有 `events`（进行中与排队的事件）。
+`GET /internal/sim` 另有 `events`（进行中与排队的事件）。上表的 PUT、POST 都要签名（见「价格事件」的守卫一节）；GET 不用。
+
+运维与端到端经 `exchangectl sim` 调（在 market-sim 容器里，它有密钥）：
+
+```bash
+# 在测试服的 /opt/exchange/infra
+sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T market-sim \
+  /app/exchangectl sim call POST /internal/sim/events '{"type":"JUMP","size":0.05,"actor":"ops","reason":"..."}'
+```
+
+它把 `HTTP <状态>` 打到标准错误、答复打到标准输出，状态 300 以上时以 1 退出。
 
 后台（admin-service，另一个会话负责）按这个接口做"模拟市场"页面（设计 §6）。
 
@@ -125,7 +137,7 @@ scripts/ops/astra.sh perp-open   # ASTRA-USDT-PERP 置 TRADING
 scripts/ops/astra.sh perp-on     # sim.perp
 ```
 
-永续盘口每侧 10 档以上、以标记价为中心、价差约 0.2%，指数来自平台现货（`source` 为 `platform`）、未降级；机器人的 FUTURES 保证金补到约 30,000 USDT。端到端 `scripts/e2e/astra.sh` 检查盘口、成交、K 线、用户的一买一卖与限价挂撤，以及（开关打开时）事件的单人限额、跳涨与回调、价格带走价（15% 上去再回来，看门狗不介入）和永续开平仓；交易对不在交易或机器人没开时跳过。
+永续盘口每侧 10 档以上、以标记价为中心、价差约 0.2%，指数来自平台现货（`source` 为 `platform`）、未降级；机器人的 FUTURES 保证金补到约 30,000 USDT。端到端 `scripts/e2e/astra.sh` 检查盘口、成交、K 线、用户的一买一卖与限价挂撤，以及（开关打开时）未签名的改动被拒、事件的单人限额、跳涨与回调、价格带走价（15% 上去再回来，看门狗不介入）和永续开平仓；交易对不在交易或机器人没开时跳过。
 
 - `astra.sh off` 关掉机器人（撤掉做市商挂单）；`astra.sh mint 50000000` 给机器人再增发 5000 万 ASTRA（平均分，`mint 100000 USDT` 增发 USDT），都是带审计的账本调整，需要开关 `ledger.manual_adjustment`。
 - 重新跑 `seed` 只注册还没有的机器人；调整用固定的幂等键，不会重复入账。

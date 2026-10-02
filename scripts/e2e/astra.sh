@@ -112,14 +112,14 @@ eventually 40 "canceled" canceled
 released() { [[ $(balance USDT | cut -d' ' -f2) == 0 ]]; }
 eventually 40 "its funds released" released
 
-# simpost PATH JSON posts JSON to market-sim's management API: SIM_STATUS
-# is the HTTP status, SIM_BODY the answer (BusyBox wget prints none for an
-# error status).
+# simpost PATH JSON posts JSON to market-sim's management API, signed by
+# exchangectl in its container (the changes need SIM_API_SECRET):
+# SIM_STATUS is the HTTP status, SIM_BODY the answer.
 simpost() {
   local out
-  out=$(remote "sudo docker compose $COMPOSE_FILES exec -T market-sim wget -S -qO- --header 'Content-Type: application/json' --post-data $(printf %q "$2") http://127.0.0.1:8098$1 2>&1" || true)
-  SIM_STATUS=$(grep -oE 'HTTP/1\.1 [0-9]+' <<<"$out" | tail -1 | cut -d' ' -f2)
-  SIM_BODY=$(sed -n '/^{/,$p' <<<"$out")
+  out=$(remote "sudo docker compose $COMPOSE_FILES exec -T market-sim /app/exchangectl sim call POST $1 $(printf %q "$2") 2>&1" || true)
+  SIM_STATUS=$(grep -oE '^HTTP [0-9]+' <<<"$out" | tail -1 | cut -d' ' -f2)
+  SIM_BODY=$(sed -n '/^{/,/^}/p' <<<"$out")
 }
 simget() { remote "sudo docker compose $COMPOSE_FILES exec -T market-sim wget -qO- 'http://127.0.0.1:8098$1'"; }
 
@@ -129,11 +129,14 @@ if [[ $EVENTS_ON != t ]]; then
   echo "skip: the operators' price events are off (scripts/ops/astra.sh events-on)"
 else
   FROM=$(simget /internal/sim | jq -r .target_price)
-  # BusyBox wget prints no body for a refusal: its status, and no event.
+  # Only a caller holding SIM_API_SECRET may say who acts and who approved.
+  unsigned=$(remote "sudo docker compose $COMPOSE_FILES exec -T market-sim wget -S -qO- --header 'Content-Type: application/json' --post-data '{\"type\":\"JUMP\",\"size\":0.01,\"actor\":\"x\",\"approved_by\":\"y\",\"reason\":\"unsigned\"}' http://127.0.0.1:8098/internal/sim/events 2>&1" || true)
+  grep -q 'HTTP/1.1 401' <<<"$unsigned" || { echo "FAIL an unsigned change: $unsigned" >&2; exit 1; }
+  echo "ok   an unsigned change is refused (401)"
   simpost /internal/sim/events '{"type":"JUMP","size":0.35,"actor":"e2e-ops","reason":"e2e: beyond one operator"}'
-  [[ $SIM_STATUS == 403 && $(pg "SELECT count(*) FROM marketsim.events WHERE reason = 'e2e: beyond one operator'") == 0 ]] ||
-    { echo "FAIL a jump of 35% alone: HTTP $SIM_STATUS" >&2; exit 1; }
-  echo "ok   a jump of 35% needs a second operator (403)"
+  [[ $SIM_STATUS == 403 && $(jq -r .code <<<"$SIM_BODY") == SIM_EVENT_NEEDS_APPROVAL ]] ||
+    { echo "FAIL a jump of 35% alone: HTTP $SIM_STATUS $SIM_BODY" >&2; exit 1; }
+  echo "ok   a jump of 35% needs a second operator (403 SIM_EVENT_NEEDS_APPROVAL)"
   # Approved by a second operator: repeated runs stay within any hour's
   # limit (one operator's own limits have unit tests).
   simpost /internal/sim/events '{"type":"JUMP","size":0.02,"duration_seconds":10,"actor":"e2e-ops","approved_by":"e2e-ops-2","reason":"e2e: a small jump"}'

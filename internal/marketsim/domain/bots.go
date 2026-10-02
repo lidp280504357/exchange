@@ -42,6 +42,7 @@ type Pair struct {
 	MinNotional   decimal.Decimal
 	QuoteDecimals int32
 	Band          float64
+	Status        string
 	Trading       bool
 }
 

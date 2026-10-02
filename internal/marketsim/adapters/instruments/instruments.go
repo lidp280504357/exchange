@@ -1,5 +1,6 @@
-// Package instruments changes a pair's status through instrument-service's
-// gRPC API, for the operators' halts (ASTRA design §6.2).
+// Package instruments changes a pair's and a contract's status through
+// instrument-service's gRPC API, for the operators' halts (ASTRA design
+// §6.2; the perpetual halts with its index pair).
 package instruments
 
 import (
@@ -12,6 +13,14 @@ import (
 // Client implements ports.Pairs.
 type Client struct {
 	API instrumentv1.InstrumentServiceClient
+}
+
+// SetContractStatus moves the contract symbol to the status to.
+func (c Client) SetContractStatus(ctx context.Context, symbol, to, actor, reason string) error {
+	if _, err := c.API.SetContractStatus(ctx, &instrumentv1.SetContractStatusRequest{Symbol: symbol, ToStatus: to, Actor: actor, Reason: reason}); err != nil {
+		return fmt.Errorf("contract %s to %s: %w", symbol, to, err)
+	}
+	return nil
 }
 
 // SetPairStatus moves symbol to the status to.

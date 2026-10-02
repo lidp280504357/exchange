@@ -50,21 +50,27 @@ func TestBotsSettingsAndState(t *testing.T) {
 		t.Fatalf("settings before any: %v %v", ok, err)
 	}
 	p := domain.DefaultParams()
-	if v, err := store.SaveSettings(ctx, p, "market-sim", nil); err != nil || v != 1 {
+	at := time.Date(2026, 10, 2, 8, 0, 0, 0, time.UTC)
+	if v, err := store.SaveSettings(ctx, p, ports.ParamChange{At: at.Add(-2 * time.Hour), Actor: "market-sim"}, nil); err != nil || v != 1 {
 		t.Fatalf("first settings: %d %v", v, err)
 	}
-	p.Levels = 5
-	if v, err := store.SaveSettings(ctx, p, "ops", nil); err != nil || v != 2 {
+	p.Levels, p.P0 = 5, 1.1
+	change := ports.ParamChange{At: at, Actor: "ops", ApprovedBy: "ops2", Move: 0.1, Volume: 0.2}
+	if v, err := store.SaveSettings(ctx, p, change, nil); err != nil || v != 2 {
 		t.Fatalf("second settings: %d %v", v, err)
 	}
 	got, v, ok, err := store.Settings(ctx)
 	if err != nil || !ok || v != 2 || got.Levels != 5 || got.Spread != p.Spread {
 		t.Fatalf("settings %+v v%d %v %v", got, v, ok, err)
 	}
+	changes, err := store.ParamChanges(ctx, at.Add(-time.Hour), at.Add(time.Hour))
+	if err != nil || len(changes) != 1 || changes[0].ApprovedBy != "ops2" || changes[0].Move != 0.1 || changes[0].Volume != 0.2 ||
+		!changes[0].At.Equal(at) {
+		t.Fatalf("changes of the hour %+v %v", changes, err)
+	}
 
 	// State: the random source and the minute come back as saved.
 	m := domain.NewModel(domain.DefaultParams(), domain.State{}, 9)
-	at := time.Date(2026, 10, 2, 8, 0, 0, 0, time.UTC)
 	m.Step(at, 60000, 3000, domain.Shape{})
 	m.Step(at.Add(time.Second), 60100, 3001, domain.Shape{})
 	if err := store.SaveState(ctx, m.Snapshot()); err != nil {
@@ -110,7 +116,18 @@ func TestBotsSettingsAndState(t *testing.T) {
 		all[0].EndedBy != "ops" || !all[0].EndedAt.Equal(e.EndedAt) {
 		t.Fatalf("latest %+v %v", all, err)
 	}
-	if since, err := store.EventsSince(ctx, at.Add(-time.Hour)); err != nil || len(since) != 1 {
-		t.Fatalf("since %+v %v", since, err)
+	if starting, err := store.EventsStarting(ctx, at.Add(-time.Hour), at.Add(time.Hour)); err != nil || len(starting) != 1 {
+		t.Fatalf("starting within the hour %+v %v", starting, err)
+	}
+	if starting, err := store.EventsStarting(ctx, at.Add(time.Minute), at.Add(time.Hour)); err != nil || len(starting) != 0 {
+		t.Fatalf("starting later %+v %v", starting, err)
+	}
+	canceled := e
+	canceled.ID, canceled.Status, canceled.StartsAt = uuid.NewString(), domain.EventCanceled, at.Add(10*time.Minute)
+	if err := store.SaveEvent(ctx, canceled, nil); err != nil {
+		t.Fatal(err)
+	}
+	if starting, err := store.EventsStarting(ctx, at, at.Add(time.Hour)); err != nil || len(starting) != 1 {
+		t.Fatalf("a canceled one counts: %+v %v", starting, err)
 	}
 }

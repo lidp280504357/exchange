@@ -309,18 +309,64 @@ func TestEventShapes(t *testing.T) {
 }
 
 func TestOneOperatorsLimits(t *testing.T) {
-	jump := func(size float64) Event { return Event{Type: EventJump, Size: size} }
-	if NeedsApproval(jump(0.3), 1, nil) || !NeedsApproval(jump(-0.31), 1, nil) {
-		t.Fatal("a single jump")
+	t0 := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	at := func(minutes int, move float64) Spend {
+		return Spend{At: t0.Add(time.Duration(minutes) * time.Minute), Move: move}
 	}
-	target := Event{Type: EventTarget, Price: d("1.4")}
-	if !NeedsApproval(target, 1, nil) {
-		t.Fatal("a target 40% away")
+	if NeedsApproval(at(0, 0.3), nil) || !NeedsApproval(at(0, -0.31), nil) {
+		t.Fatal("a single move")
 	}
-	recent := []Event{jump(0.2), {Type: EventTarget, Price: d("0.9"), FromP: d("1"), Status: EventDone}, jump(0.3)}
-	recent[2].Status = EventCanceled
-	if NeedsApproval(jump(0.19), 1, recent) || !NeedsApproval(jump(0.21), 1, recent) {
-		t.Fatal("the hour's moves: 0.2 and 0.1, a canceled one left out")
+	// The hours that hold a move, by when the moves take effect: 0.2 at
+	// −50 minutes and 0.25 at +40 are never in one hour with each other,
+	// but each is with a move at 0; the ones at −70 and +75 are not.
+	others := []Spend{at(-50, 0.2), at(40, -0.25), at(-70, 0.3), at(75, 0.3)}
+	if NeedsApproval(at(0, 0.25), others) || !NeedsApproval(at(0, 0.26), others) {
+		t.Fatal("the busiest hour holds 0.25 besides")
+	}
+	if !NeedsApproval(at(-10, 0.1), others) {
+		t.Fatal("at −10: 0.3 at −70 and 0.2 at −50 with it")
+	}
+	// The day's turnover: at most double or half within an hour.
+	vol := func(minutes int, v float64) Spend {
+		return Spend{At: t0.Add(time.Duration(minutes) * time.Minute), Volume: v}
+	}
+	if NeedsApproval(vol(0, math.Log(1.5)), []Spend{vol(-90, math.Log(2))}) || !NeedsApproval(vol(0, math.Log(1.5)), []Spend{vol(-30, math.Log(1.5))}) {
+		t.Fatal("the turnover's budget")
+	}
+}
+
+func TestMoves(t *testing.T) {
+	for _, c := range []struct {
+		e    Event
+		want float64
+	}{
+		{Event{Type: EventJump, Size: -0.2}, -0.2},
+		{Event{Type: EventTarget, Price: d("1.3")}, 0.3},
+		{Event{Type: EventTarget, Price: d("1.3"), FromP: d("1.3")}, 0},
+		{Event{Type: EventTrend, Mu: 0.1}, math.Expm1(0.1)},                            // a day without an end
+		{Event{Type: EventTrend, Mu: 0.1, Duration: 12 * time.Hour}, math.Expm1(0.05)}, // half a day
+		{Event{Type: EventVolatility, Factor: 5}, 0.02 * 4},
+		{Event{Type: EventVolatility, Factor: 5, Duration: 6 * time.Hour}, 0.02 * 4 * 0.5},
+		{Event{Type: EventPause}, 0},
+	} {
+		if got := c.e.Move(1, 0.02); math.Abs(got-c.want) > 1e-9 {
+			t.Fatalf("%+v: %v, want %v", c.e, got, c.want)
+		}
+	}
+	p := DefaultParams()
+	q := p
+	q.P0, q.Floor, q.MaxMinuteMove = 1.1, 1.05, 0.05
+	if got := ParamsMove(p, q, 1); math.Abs(got-(0.02+0.1+0.05)) > 1e-9 {
+		t.Fatalf("settings move %v", got)
+	}
+	q = p
+	q.DailyVolume = 4_000_000
+	if got := VolumeMove(p, q); math.Abs(got-math.Ln2) > 1e-9 {
+		t.Fatalf("turnover %v", got)
+	}
+	q.DailyVolume = 0
+	if got := VolumeMove(p, q); got <= SoloVolume {
+		t.Fatalf("stopping the takers %v", got)
 	}
 }
 
@@ -331,6 +377,7 @@ func TestEventValidate(t *testing.T) {
 	}
 	for _, e := range []Event{
 		{Type: EventJump, Size: 0, CreatedBy: "ops", Reason: "test"},
+		{Type: EventJump, Size: 1.01, CreatedBy: "ops", ApprovedBy: "ops2", Reason: "beyond the hard cap"},
 		{Type: EventJump, Size: 0.1, Duration: 11 * time.Minute, CreatedBy: "ops", Reason: "test"},
 		{Type: EventTarget, CreatedBy: "ops", Reason: "test"},
 		{Type: EventVolatility, Factor: 0, CreatedBy: "ops", Reason: "test"},

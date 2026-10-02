@@ -10,6 +10,9 @@ import (
 	"math"
 )
 
+// MaxMinuteMove is the most max_minute_move may be (§6.2): 5% a minute.
+const MaxMinuteMove = 0.05
+
 // Params are the simulated market's settings.
 type Params struct {
 	// The price model (§3): the anchor price; the market factor's
@@ -100,7 +103,7 @@ func (p Params) Validate() error {
 	check(p.Theta >= 0 && p.Theta <= 10, "theta must be between 0 and 10 an hour")
 	check(p.Sigma >= 0 && p.Sigma <= 1, "sigma must be between 0 and 1 (a day)")
 	check(math.Abs(p.Mu) <= 1, "mu must be within ±1 (a day)")
-	check(p.MaxMinuteMove > 0 && p.MaxMinuteMove <= 0.5, "max_minute_move must be above 0 and at most 0.5")
+	check(p.MaxMinuteMove > 0 && p.MaxMinuteMove <= MaxMinuteMove, "max_minute_move must be above 0 and at most 0.05 (5%% a minute)")
 	check(p.Levels >= 1 && p.Levels <= 30, "levels must be between 1 and 30")
 	check(p.Spread > 0 && p.Spread <= 0.05, "spread must be above 0 and at most 0.05")
 	check(p.LevelTicks >= 1 && p.LevelTicks <= 100, "level_ticks must be between 1 and 100")
