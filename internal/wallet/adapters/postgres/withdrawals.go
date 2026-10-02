@@ -259,6 +259,11 @@ func (r withdrawals) Unreleased(ctx context.Context, network string) ([]domain.W
 		AND freeze_journal_id IS NOT NULL AND unfreeze_journal_id IS NULL ORDER BY id`, network)
 }
 
+func (r withdrawals) Outstanding(ctx context.Context, provider string) ([]domain.Withdrawal, error) {
+	return r.list(ctx, `SELECT `+withdrawalColumns+` FROM withdrawals WHERE provider = $1
+		AND (status = 'SUBMITTED' OR (status = 'CONFIRMED' AND settle_journal_id IS NULL)) ORDER BY id`, provider)
+}
+
 func (r withdrawals) Unsettled(ctx context.Context, network string) ([]domain.Withdrawal, error) {
 	return r.list(ctx, `SELECT `+withdrawalColumns+` FROM withdrawals WHERE network = $1
 		AND status IN ('BROADCAST', 'CONFIRMING', 'CONFIRMED') AND internal_user_id IS NULL AND settle_journal_id IS NULL ORDER BY id`, network)

@@ -21,16 +21,28 @@ import (
 const DefaultCallbackWindow = 5 * time.Minute
 
 // custodyAddress returns the user's address on a custodian's network,
-// asking the custodian for one on first use. The lock makes concurrent
-// first requests wait for the one that asks: the custodian creates one
-// address per user and network.
+// asking the custodian for one on first use. The custodian's call (up to
+// its timeout) is made outside any transaction; the address is recorded
+// under the lock, so of two first requests at once the second takes the
+// first's address, and the custodian keeps one that nobody is shown.
 func (s *Service) custodyAddress(ctx context.Context, userID string, net domain.Network) (domain.Address, error) {
 	c := s.Custodians[net.Provider]
 	if c == nil {
 		return domain.Address{}, domain.ErrNotConfigured
 	}
+	if a, err := s.Store.Read().Addresses().Get(ctx, userID, net.Network); err != nil || a != nil {
+		if a != nil {
+			return *a, nil
+		}
+		return domain.Address{}, err
+	}
+	addr, err := c.CreateAddress(ctx, net, userID)
+	if err != nil {
+		s.Log.WarnContext(ctx, "the custodian did not create a deposit address", "network", net.Network, "error", err)
+		return domain.Address{}, apperr.Wrap(err, apperr.KindUnavailable, "WALLET_UNAVAILABLE", "the deposit address cannot be created now, try again shortly")
+	}
 	var out domain.Address
-	err := s.Store.Tx(ctx, func(r ports.Repos) error {
+	err = s.Store.Tx(ctx, func(r ports.Repos) error {
 		if err := r.Addresses().Lock(ctx, userID, net.Network); err != nil {
 			return err
 		}
@@ -39,11 +51,6 @@ func (s *Service) custodyAddress(ctx context.Context, userID string, net domain.
 				out = *a
 			}
 			return err
-		}
-		addr, err := c.CreateAddress(ctx, net, userID)
-		if err != nil {
-			s.Log.WarnContext(ctx, "the custodian did not create a deposit address", "network", net.Network, "error", err)
-			return apperr.Wrap(err, apperr.KindUnavailable, "WALLET_UNAVAILABLE", "the deposit address cannot be created now, try again shortly")
 		}
 		out = domain.Address{UserID: userID, Network: net.Network, Provider: net.Provider, Address: addr, CreatedAt: s.Now()}
 		if err := r.Addresses().Insert(ctx, out); err != nil {
@@ -75,8 +82,11 @@ func (s *Service) HandleCallback(ctx context.Context, provider, contentType stri
 	t, perr := c.Parse(contentType, raw, now, window)
 	cb := callbackOf(provider, t, string(raw), now)
 	if perr != nil {
+		if s.CallbacksRejected != nil {
+			s.CallbacksRejected.Inc()
+		}
 		cb.Result, cb.Detail = domain.CallbackRejected, apperr.From(perr).Message
-		if _, _, err := s.receive(ctx, cb); err != nil {
+		if err := s.keepRejected(ctx, cb); err != nil {
 			return domain.Callback{}, errors.Join(perr, err)
 		}
 		s.Log.WarnContext(ctx, "custodian callback refused", "provider", provider, "error", perr)
@@ -91,6 +101,27 @@ func (s *Service) HandleCallback(ctx context.Context, provider, contentType stri
 		return stored, nil
 	}
 	return s.apply(ctx, c, stored, t)
+}
+
+// A refused callback is kept for a person to look at, but a flood of them
+// (forged, or signed with another key) must not fill the table: at most
+// rejectedPerHour an hour, each cut to rejectedRaw bytes; the rest are only
+// counted (CallbacksRejected).
+const (
+	rejectedPerHour = 100
+	rejectedRaw     = 2048
+)
+
+func (s *Service) keepRejected(ctx context.Context, cb domain.Callback) error {
+	n, err := s.Store.Read().Callbacks().RejectedSince(ctx, cb.ReceivedAt.Add(-time.Hour))
+	if err != nil || n >= rejectedPerHour {
+		return err
+	}
+	if len(cb.Raw) > rejectedRaw {
+		cb.Raw = strings.ToValidUTF8(cb.Raw[:rejectedRaw], "")
+	}
+	_, _, err = s.receive(ctx, cb)
+	return err
 }
 
 func (s *Service) receive(ctx context.Context, cb domain.Callback) (domain.Callback, bool, error) {
@@ -483,10 +514,18 @@ func (s *Service) Callback(ctx context.Context, id string) (domain.Callback, err
 
 // inFlight sums the amounts of the withdrawals with the custodian by
 // asset.
+// inFlight sums, per asset, the outstanding withdrawals the custodian has
+// taken (its balance no longer holds them) and the ledger has not settled
+// (it still expects them held). One handed over without an answer yet, or
+// uncertain, is not counted: the custodian may not hold it, and counting
+// it would hide a shortfall as large.
 func inFlight(list []domain.Withdrawal) map[string]decimal.Decimal {
 	out := map[string]decimal.Decimal{}
 	for _, w := range list {
-		out[w.Asset] = out[w.Asset].Add(w.Amount)
+		switch w.ProviderStatus {
+		case domain.CustodyAccepted, domain.CustodyReview, domain.CustodyApproved, domain.CustodySuccess:
+			out[w.Asset] = out[w.Asset].Add(w.Amount)
+		}
 	}
 	return out
 }

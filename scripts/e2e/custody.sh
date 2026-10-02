@@ -10,13 +10,19 @@
 #     custodian's retry and a replay change nothing; 0.5 USDT, below the
 #     minimum, goes to UNCLAIMED_DEPOSIT;
 #   - callbacks with a forged signature or a stale timestamp are refused
-#     (also one forged over the internet) and logged;
+#     and logged; one over the internet from an address the custodian
+#     does not use is refused by nginx before it reaches the platform;
 #   - with an authenticator app bound, 12 USDT go to a TRON address: in
 #     review, approved (exchangectl), handed to the custodian (SUBMITTED),
 #     sent (CONFIRMED with its transaction) and settled; 10 USDT to an
 #     address the custodian fails end FAILED with the funds back;
+#   - the gateway misbehaves (review B1, B2): it takes a withdrawal but its
+#     answer is lost, refuses the repeat for the balance the first took,
+#     reviews it (status 0) and charges a fee in its smallest unit: the
+#     withdrawal waits UNCERTAIN with its funds frozen, is then sent and
+#     settled, and the fee is not booked;
 #   - a reconciliation of the custodian finds nothing missing.
-# Needs wallet.withdraw on and ssh to the server; about three minutes.
+# Needs wallet.withdraw on and ssh to the server; about five minutes.
 #
 #   scripts/e2e/custody.sh
 set -euo pipefail
@@ -28,9 +34,10 @@ source "$(dirname "$0")/lib/remote.sh"
 
 USDT_TRC20="195:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
 # Valid TRON addresses outside the platform: the custodian sends to the
-# first and fails transfers to the second.
+# first, fails transfers to the second and misbehaves on the third.
 PAYEE=TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7
 FAILING=TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj
+QUIRKY=TWeptS7njqhCtHdDCSFGKA1ttrs6WXxLzj
 
 # mock ARGS... drives the mock gateway on the server.
 mock() {
@@ -102,10 +109,10 @@ echo "ok   the custodian's replay is answered success"
 echo "ok   stale and forged callbacks are refused"
 FORM="timestamp=$(date +%s)&nonce=123456&sign=0123456789abcdef0123456789abcdef&body=%7B%22tradeId%22%3A%22e2e-$RUN%22%7D"
 STATUS=$(curl -s -o "$WORK/body" -w '%{http_code}' -X POST "$BASE/v1/wallet/callbacks/udun" -H 'Content-Type: application/x-www-form-urlencoded' --data "$FORM")
-BODY=$(cat "$WORK/body")
-expect 401 WALLET_CALLBACK_SIGNATURE "a forged callback over the internet is refused"
+[[ $STATUS == 403 ]] || { echo "FAIL a callback over the internet: HTTP $STATUS, want 403 from nginx" >&2; exit 1; }
+echo "ok   a callback over the internet from an address not on the list stops at nginx (403)"
 LOGGED=$(pg "SELECT count(*) FROM wallet.custody_callbacks WHERE result = 'REJECTED' AND received_at > now() - interval '5 minutes'")
-((LOGGED >= 3)) || { echo "FAIL $LOGGED refused callbacks logged, want 3" >&2; exit 1; }
+((LOGGED >= 2)) || { echo "FAIL $LOGGED refused callbacks logged, want 2" >&2; exit 1; }
 echo "ok   the refused callbacks are logged ($LOGGED)"
 call GET /v1/wallet/deposits "" "${AUTH[@]}"
 check '[.items[] | select(.amount == "30")] | length == 1' "still one deposit of 30"
@@ -136,7 +143,7 @@ step_up() {
 
 echo "== withdrawals through the custodian"
 mock outcome --address "$FAILING" --status 4 >/dev/null
-for to in "$PAYEE" "$FAILING"; do
+for to in "$PAYEE" "$FAILING" "$QUIRKY"; do
   step_up
   call POST /v1/wallet/withdraw-addresses "{\"network\":\"TRON\",\"address\":\"$to\"}" "${AUTH[@]}" -H "X-Step-Up-Token: $STEP"
   expect 201 - "TRON address $to added"
@@ -169,6 +176,30 @@ check '[.items[].entry_type] | (index("DEPOSIT_CREDIT") != null and index("WITHD
   "credit, settlement and release in the fund flow"
 grep -q '"status":"SUBMITTED"' "$WORK/ws.log" || { echo "FAIL no SUBMITTED push on the withdrawals channel" >&2; cat "$WORK/ws.log" >&2; exit 1; }
 echo "ok   the withdrawals channel pushed SUBMITTED"
+
+echo "== a gateway that loses an answer and charges in its smallest unit"
+mock outcome --address "$QUIRKY" --status 3 --lose-answer --repeat-code 4001 --review --fee 1500000000 >/dev/null
+withdraw "$QUIRKY" 11
+QUIRK_ID=$(jq -r .id <<<"$BODY")
+exchangectl wallet approve "$QUIRK_ID" --reviewer e2e-ops --reason "end-to-end test"
+eventually_call 60 "/v1/wallet/withdrawals/$QUIRK_ID" '.status == "SUBMITTED"' "handed over, its answer lost"
+# Hold back the callbacks the repeat (a minute later) releases.
+mock delay --seconds 45 >/dev/null
+eventually_call 120 "/v1/wallet/withdrawals/$QUIRK_ID" '.status == "SUBMITTED" and ((.reject_reason // "") | startswith("UNCERTAIN"))' \
+  "the repeat refused for the balance: UNCERTAIN, nothing released"
+mock delay --seconds 0 >/dev/null
+call GET /v1/account/balances "" "${AUTH[@]}"
+check '[.balances[] | select(.account_type == "SPOT" and .asset == "USDT")][0] | (.frozen | tonumber) == 12' "the 11 and the fee stay frozen"
+eventually_call 90 "/v1/wallet/withdrawals/$QUIRK_ID" '.status == "CONFIRMED" and .tx_hash != null' "the gateway's callbacks send it after all"
+DETAIL=$(pg "SELECT detail FROM wallet.custody_callbacks WHERE business_id = '$QUIRK_ID' AND status = 3 ORDER BY received_at DESC LIMIT 1")
+[[ $DETAIL == *"not booked"* ]] || { echo "FAIL the fee in the smallest unit: $DETAIL" >&2; exit 1; }
+echo "ok   a fee above the amount is not booked"
+REVIEWED=$(pg "SELECT count(*) FROM wallet.custody_callbacks WHERE business_id = '$QUIRK_ID' AND status = 0")
+((REVIEWED == 1)) || { echo "FAIL $REVIEWED review callbacks, want 1" >&2; exit 1; }
+echo "ok   the gateway's review (status 0) is taken"
+eventually_call 60 /v1/account/balances "[.balances[] | select(.account_type == \"SPOT\" and .asset == \"USDT\")][0] | (.available | tonumber) == ($BEFORE + 30 - 25) and (.frozen | tonumber) == 0" \
+  "settled: 11 and the fee out"
+mock outcome --address "$QUIRKY" --status 3 >/dev/null
 
 echo "== reconciliation"
 SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)

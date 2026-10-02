@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
@@ -57,6 +58,12 @@ func (w memWithdrawals) Submitted(_ context.Context, provider string) ([]domain.
 	}), nil
 }
 
+func (w memWithdrawals) Outstanding(_ context.Context, provider string) ([]domain.Withdrawal, error) {
+	return w.all(func(x domain.Withdrawal) bool {
+		return x.Provider == provider && (x.Status == domain.WithdrawalSubmitted || (x.Status == domain.WithdrawalConfirmed && x.SettleJournal == ""))
+	}), nil
+}
+
 type memCallbacks struct{ m *memStore }
 
 func (c memCallbacks) Receive(_ context.Context, x domain.Callback) (domain.Callback, bool, error) {
@@ -97,6 +104,16 @@ func (c memCallbacks) Page(context.Context, ports.CallbackFilter) ([]domain.Call
 	return out, nil
 }
 
+func (c memCallbacks) RejectedSince(_ context.Context, t time.Time) (int, error) {
+	n := 0
+	for _, y := range c.m.callbacks {
+		if y.Result == domain.CallbackRejected && !y.ReceivedAt.Before(t) {
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (c memCallbacks) Attention(context.Context) (int, time.Time, error) {
 	n := 0
 	for _, y := range c.m.callbacks {
@@ -111,6 +128,8 @@ func (c memCallbacks) Attention(context.Context) (int, time.Time, error) {
 // ports.CustodyTrade, "bad:" before it for a wrong signature and "stale:"
 // for an old one.
 type fakeCustody struct {
+	// onCreate runs while an address is created (a concurrent request).
+	onCreate  func()
 	created   int
 	submitted []string
 	refuse    bool
@@ -126,7 +145,11 @@ func (f *fakeCustody) CreateAddress(context.Context, domain.Network, string) (st
 		return "", errors.New("gateway down")
 	}
 	f.created++
-	return []string{"TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7", "TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj"}[f.created-1], nil
+	n := f.created
+	if f.onCreate != nil {
+		f.onCreate()
+	}
+	return []string{"TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7", "TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj"}[n-1], nil
 }
 
 func (f *fakeCustody) Submit(_ context.Context, w domain.Withdrawal, _ domain.Network) error {
@@ -190,7 +213,9 @@ func newCustodyHarness(t *testing.T) *custodyHarness {
 	})
 	w.ledger.available["alice"] = d("1000")
 	w.svc.W.Prices = fakePrices{usdt: d("1")}
-	c := &fakeCustody{invalid: map[string]bool{}}
+	// The custodian reports its balance of every coin, as a real one does.
+	none := decimal.Zero
+	c := &fakeCustody{invalid: map[string]bool{}, coins: []ports.CustodyCoin{{Code: usdtCoin, Symbol: "USDT", Decimals: 6, Token: true, Balance: &none}}}
 	w.svc.Custodians = map[string]ports.Custody{domain.ProviderUdun: c}
 	h := &custodyHarness{withdrawHarness: w, custody: c}
 	h.cproc = NewCustodyProcessor(CustodyProcessor{
@@ -237,6 +262,24 @@ func TestCustodyDepositAddress(t *testing.T) {
 	}
 	if got := types(h.store.take()); !slices.Equal(got, []string{"DepositAddressAssigned"}) {
 		t.Fatalf("events %v", got)
+	}
+
+	// Two first requests at once: the one that records second takes the
+	// first's address; the custodian's other one is never shown.
+	h.custody.down = false
+	h.custody.onCreate = func() {
+		h.custody.onCreate = nil
+		if _, _, err := h.svc.DepositAddress(ctx, "carol", "USDT", tron); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.custody.created = 0
+	got, _, err := h.svc.DepositAddress(ctx, "carol", "USDT", tron)
+	if err != nil || got.Address != "TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj" || h.custody.created != 2 {
+		t.Fatalf("raced: %+v %v (created %d)", got, err, h.custody.created)
+	}
+	if got := types(h.store.take()); !slices.Equal(got, []string{"DepositAddressAssigned"}) {
+		t.Fatalf("one address assigned: %v", got)
 	}
 }
 
@@ -476,7 +519,37 @@ func TestCustodyCheck(t *testing.T) {
 	if held, err := h.cproc.Holdings(context.Background(), "USDT"); err != nil || !held.Equal(missing) {
 		t.Fatalf("holdings %s %v", held, err)
 	}
-	_ = wd
+
+	// Handed over without an answer, the withdrawal is not in flight: the
+	// custodian may not hold it, and counting it would hide a shortfall.
+	cur := h.store.wds[wd.ID]
+	cur.ProviderStatus = domain.CustodySubmitted
+	h.store.wds[wd.ID] = cur
+	checks, _ = h.cproc.Check(context.Background())
+	if !checks[0].InFlight.IsZero() || !checks[0].Shortfall.Equal(d("105")) {
+		t.Fatalf("unacknowledged: %+v", checks[0])
+	}
+	// Sent, and not booked by the ledger yet: in flight.
+	cur.Status, cur.ProviderStatus = domain.WithdrawalConfirmed, domain.CustodySuccess
+	h.store.wds[wd.ID] = cur
+	checks, _ = h.cproc.Check(context.Background())
+	if !checks[0].InFlight.Equal(d("100")) {
+		t.Fatalf("sent, not booked: %+v", checks[0])
+	}
+
+	// A coin without a balance is not compared, rather than taken as zero.
+	h.custody.coins[0].Balance = nil
+	checks, err = h.cproc.Check(context.Background())
+	if len(checks) != 0 || !errors.Is(err, errNotCompared) {
+		t.Fatalf("no balance: %+v %v", checks, err)
+	}
+	// Nor is one a thousand times what the ledger expects (in its smallest unit).
+	raw := d("500000000")
+	h.custody.coins[0].Balance = &raw
+	checks, err = h.cproc.Check(context.Background())
+	if len(checks) != 0 || !errors.Is(err, errNotCompared) || !strings.Contains(err.Error(), "smallest unit") {
+		t.Fatalf("smallest unit: %+v %v", checks, err)
+	}
 }
 
 func TestReplayCallback(t *testing.T) {
@@ -586,3 +659,29 @@ type countingCounter struct {
 }
 
 func (c *countingCounter) Inc() { c.n++ }
+
+// Refused callbacks are counted, and kept for a look only within limits:
+// a flood of forged ones fills neither the table nor its rows.
+func TestRefusedCallbacksAreCountedAndKeptWithinLimits(t *testing.T) {
+	h := newCustodyHarness(t)
+	ctx := context.Background()
+	refused := &countingCounter{}
+	h.svc.CallbacksRejected = refused
+	long := "bad:" + strings.Repeat("é", 3000) // 6,000 bytes
+	for range rejectedPerHour + 20 {
+		if _, err := h.svc.HandleCallback(ctx, domain.ProviderUdun, "", []byte(long)); !apperr.Is(err, "WALLET_CALLBACK_SIGNATURE") {
+			t.Fatal(err)
+		}
+	}
+	if refused.n != rejectedPerHour+20 || len(h.store.callbacks) != rejectedPerHour {
+		t.Fatalf("counted %d, kept %d", refused.n, len(h.store.callbacks))
+	}
+	if raw := h.store.callbacks[0].Raw; len(raw) > rejectedRaw || !utf8.ValidString(raw) || !strings.HasPrefix(raw, "bad:é") {
+		t.Fatalf("kept %d bytes, valid %v", len(raw), utf8.ValidString(raw))
+	}
+	// An hour later there is room again.
+	h.now = h.now.Add(time.Hour + time.Second)
+	if _, err := h.svc.HandleCallback(ctx, domain.ProviderUdun, "", []byte("bad:{}")); err == nil || len(h.store.callbacks) != rejectedPerHour+1 {
+		t.Fatalf("an hour later: %v, kept %d", err, len(h.store.callbacks))
+	}
+}

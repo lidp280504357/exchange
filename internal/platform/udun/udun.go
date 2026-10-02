@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -188,6 +189,19 @@ func ParseEnvelope(contentType string, raw []byte) (Envelope, error) {
 		return Envelope{}, fmt.Errorf("%w: %w", ErrMalformed, err)
 	}
 	return Envelope{Timestamp: form.Get("timestamp"), Nonce: form.Get("nonce"), Sign: form.Get("sign"), Body: form.Get("body")}, nil
+}
+
+var (
+	jsonSign = regexp.MustCompile(`("sign"\s*:\s*")[^"]*"`)
+	formSign = regexp.MustCompile(`(^|&)sign=[^&]*`)
+)
+
+// MaskSign hides the signature of a callback as received (JSON or form)
+// for showing it to people: with the body, nonce and time beside it, a
+// signature is what an offline guess at the key would be checked against.
+func MaskSign(raw string) string {
+	raw = jsonSign.ReplaceAllString(raw, `${1}***"`)
+	return formSign.ReplaceAllString(raw, `${1}sign=***`)
 }
 
 // Text is a JSON string or number kept as its text: the gateway writes

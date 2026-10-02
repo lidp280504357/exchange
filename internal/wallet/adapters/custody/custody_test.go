@@ -75,3 +75,25 @@ func TestSubmitMapsRefusals(t *testing.T) {
 		}
 	}
 }
+
+func TestCoinsKeepOnlyBalancesInCoins(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"code":200,"message":"SUCCESS","data":[`+
+			`{"name":"USDT","symbol":"USDT","mainCoinType":"195","coinType":"TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t","decimals":"6","tokenStatus":1,"balance":"25.500000"},`+
+			`{"name":"ETH","symbol":"ETH","mainCoinType":"60","coinType":"60","decimals":"18","tokenStatus":0,"balance":"0.1234567890123456789"},`+
+			`{"name":"BTC","symbol":"BTC","mainCoinType":"0","coinType":"0","decimals":"8","tokenStatus":0,"balance":"n/a"}]}`)
+	}))
+	defer srv.Close()
+	u := &Udun{Client: &udun.Client{BaseURL: srv.URL, MerchantID: "m", Key: "k", HTTP: srv.Client()}}
+	coins, err := u.Coins(context.Background())
+	if err != nil || len(coins) != 3 {
+		t.Fatalf("coins %+v %v", coins, err)
+	}
+	if coins[0].Balance == nil || coins[0].Balance.String() != "25.5" {
+		t.Fatalf("USDT: %v", coins[0].Balance)
+	}
+	// 19 decimals of an 18-decimal coin, and no number: no balance.
+	if coins[1].Balance != nil || coins[2].Balance != nil {
+		t.Fatalf("ETH %v, BTC %v", coins[1].Balance, coins[2].Balance)
+	}
+}

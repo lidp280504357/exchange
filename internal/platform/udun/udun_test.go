@@ -194,3 +194,18 @@ func TestSplitCoin(t *testing.T) {
 		}
 	}
 }
+
+func TestMaskSign(t *testing.T) {
+	for raw, want := range map[string]string{
+		`{"timestamp":"1","nonce":"n","sign":"0123abcd","body":"{}"}`: `{"timestamp":"1","nonce":"n","sign":"***","body":"{}"}`,
+		`{"sign" : "0123abcd"}`:                         `{"sign" : "***"}`,
+		`timestamp=1&nonce=n&sign=0123abcd&body=%7B%7D`: `timestamp=1&nonce=n&sign=***&body=%7B%7D`,
+		`sign=0123abcd&body=%7B%7D`:                     `sign=***&body=%7B%7D`,
+		`body=%7B%22design%22%3A1%7D&mysign=1`:          `body=%7B%22design%22%3A1%7D&mysign=1`,
+		`not a callback`:                                `not a callback`,
+	} {
+		if got := MaskSign(raw); got != want {
+			t.Errorf("MaskSign(%s) = %s, want %s", raw, got, want)
+		}
+	}
+}

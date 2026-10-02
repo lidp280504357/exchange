@@ -44,6 +44,9 @@ type Service struct {
 	// FeesRefused counts custodian fees not booked for being above the
 	// amount sent (applyWithdrawal); nil counts nothing.
 	FeesRefused prometheus.Counter
+	// CallbacksRejected counts the callbacks refused for their signature,
+	// age or form, kept or not (HandleCallback); nil counts nothing.
+	CallbacksRejected prometheus.Counter
 }
 
 // DepositAddress returns the user's deposit address for an asset on a

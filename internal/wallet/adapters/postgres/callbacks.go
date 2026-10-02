@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -44,9 +45,9 @@ func (r callbacks) Receive(ctx context.Context, c domain.Callback) (domain.Callb
 	if c.Status >= 0 {
 		status = &c.Status
 	}
-	if len(c.Raw) > 16384 {
-		c.Raw = c.Raw[:16384]
-	}
+	// Text the database takes (no NUL, valid UTF-8; a verified callback
+	// already is, so a replay verifies it again), cut on a character.
+	c.Raw = clip(strings.ToValidUTF8(strings.ReplaceAll(c.Raw, "\x00", ""), "\uFFFD"), 16384)
 	if c.SignatureOK {
 		// The custodian's retry of a callback it sent before: one more attempt.
 		stored, err := scanCallback(r.q.QueryRow(ctx, `UPDATE custody_callbacks SET attempts = attempts + 1
@@ -113,6 +114,22 @@ func (r callbacks) Page(ctx context.Context, f ports.CallbackFilter) ([]domain.C
 		return nil, fmt.Errorf("list callbacks: %w", err)
 	}
 	return out, nil
+}
+
+func (r callbacks) RejectedSince(ctx context.Context, t time.Time) (int, error) {
+	var n int
+	if err := r.q.QueryRow(ctx, `SELECT count(*) FROM custody_callbacks WHERE result = 'REJECTED' AND received_at >= $1`, t).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count refused callbacks: %w", err)
+	}
+	return n, nil
+}
+
+// clip cuts s to at most n bytes without splitting a character.
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return strings.ToValidUTF8(s[:n], "")
 }
 
 func (r callbacks) Attention(ctx context.Context) (int, time.Time, error) {

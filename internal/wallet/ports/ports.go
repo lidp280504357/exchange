@@ -104,6 +104,8 @@ type CallbackRepo interface {
 	// Attention counts the verified callbacks that failed or found
 	// nothing to apply to, and returns when the last one arrived.
 	Attention(ctx context.Context) (int, time.Time, error)
+	// RejectedSince counts the refused callbacks kept since t.
+	RejectedSince(ctx context.Context, t time.Time) (int, error)
 }
 
 // WithdrawalRepo stores withdrawals.
@@ -123,6 +125,9 @@ type WithdrawalRepo interface {
 	// Submitted lists the withdrawals with the custodian provider, oldest
 	// first.
 	Submitted(ctx context.Context, provider string) ([]domain.Withdrawal, error)
+	// Outstanding lists the custodian provider's withdrawals the ledger
+	// has not settled: SUBMITTED, or CONFIRMED and not booked yet.
+	Outstanding(ctx context.Context, provider string) ([]domain.Withdrawal, error)
 	// Page returns up to f.Limit of the network's withdrawals ("": every
 	// network's) matching f, after the one with ID f.After in f's order
 	// ("": from the start).

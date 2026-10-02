@@ -62,6 +62,24 @@ type withdrawal struct {
 	Status     int             `json:"status"` // -1 until reviewed
 	TxID       string          `json:"tx_id"`
 	CreatedAt  time.Time       `json:"created_at"`
+	// Held: its answer was lost, and its callbacks wait for the
+	// hand-over to come again (quirk LoseAnswer).
+	Held bool `json:"held,omitempty"`
+}
+
+// quirk is how the gateway misbehaves for withdrawals to an address, to
+// take the platform down the paths a gateway that behaves never does
+// (review B7): a fee on the callbacks in the coin's smallest unit, a
+// review (status 0) before the approval, the first hand-over taken but its
+// answer lost (HTTP 502; the callbacks wait until it is handed over
+// again), and a repeated business ID refused with RepeatCode rather than
+// 4288 (as a gateway that checks the balance first, which the first
+// hand-over took, would say "insufficient balance").
+type quirk struct {
+	Fee        string `json:"fee,omitempty"`
+	Review     bool   `json:"review,omitempty"`
+	LoseAnswer bool   `json:"lose_answer,omitempty"`
+	RepeatCode int    `json:"repeat_code,omitempty"`
 }
 
 // callback is a callback to deliver; one that is not answered "success"
@@ -80,8 +98,10 @@ type state struct {
 	Addresses   map[string]address     `json:"addresses"`
 	Withdrawals map[string]*withdrawal `json:"withdrawals"`
 	// Outcomes say how withdrawals to an address end: 2 refused, 3 sent
-	// (the default), 4 failed on chain.
-	Outcomes map[string]int `json:"outcomes"`
+	// (the default), 4 failed on chain; Quirks how the gateway misbehaves
+	// on the way.
+	Outcomes map[string]int   `json:"outcomes"`
+	Quirks   map[string]quirk `json:"quirks,omitempty"`
 	// Pending callbacks, and the last ones delivered for replays.
 	Pending   []*callback `json:"pending"`
 	Delivered []*callback `json:"delivered"`
@@ -207,9 +227,15 @@ type answer struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Data    any    `json:"data,omitempty"`
+	// lost answers 502 instead, as if the answer never arrived.
+	lost bool
 }
 
 func reply(w http.ResponseWriter, a answer) {
+	if a.lost {
+		http.Error(w, "bad gateway", http.StatusBadGateway)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(a)
 }
@@ -328,7 +354,19 @@ func (g *gateway) withdraw(body []byte) answer {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if _, dup := g.st.Withdrawals[req.BusinessID]; dup {
+	if wd, dup := g.st.Withdrawals[req.BusinessID]; dup {
+		q := g.st.Quirks[wd.Address]
+		if wd.Held {
+			// Handed over again: the first one goes ahead now.
+			wd.Held = false
+			if c := g.coinLocked(wd.Coin); c != nil {
+				g.queueWithdrawalLocked(*c, wd)
+			}
+			_ = g.saveLocked()
+		}
+		if q.RepeatCode != 0 {
+			return answer{Code: q.RepeatCode, Message: "insufficient balance"}
+		}
 		return answer{Code: udun.CodeDuplicateBusiness, Message: "duplicate businessId"}
 	}
 	c := g.coinLocked(req.MainCoinType + ":" + req.CoinType)
@@ -344,30 +382,49 @@ func (g *gateway) withdraw(body []byte) answer {
 		Status: -1, CreatedAt: g.now(),
 	}
 	g.st.Withdrawals[wd.BusinessID] = wd
-	outcome, ok := g.st.Outcomes[req.Address]
-	if !ok {
-		outcome = udun.StatusSuccess
-	}
-	// The review comes first; a refusal ends it there, else the transfer's
-	// outcome follows.
-	first := udun.StatusApproved
-	if outcome == udun.StatusRefused {
-		first = udun.StatusRefused
-	}
-	g.queueLocked(wd.CallURL, g.withdrawalTrade(*c, wd, first), g.step)
-	if first != udun.StatusRefused {
-		g.queueLocked(wd.CallURL, g.withdrawalTrade(*c, wd, outcome), 2*g.step)
+	lost := g.st.Quirks[req.Address].LoseAnswer
+	if lost {
+		wd.Held = true
+	} else {
+		g.queueWithdrawalLocked(*c, wd)
 	}
 	if err := g.saveLocked(); err != nil {
 		return answer{Code: 500, Message: err.Error()}
 	}
-	g.log.Info("withdrawal taken", "business_id", wd.BusinessID, "amount", amount.String(), "coin", wd.Coin, "outcome", outcome)
-	return answer{Code: udun.CodeOK, Message: "SUCCESS"}
+	g.log.Info("withdrawal taken", "business_id", wd.BusinessID, "amount", amount.String(), "coin", wd.Coin, "answer_lost", lost)
+	return answer{Code: udun.CodeOK, Message: "SUCCESS", lost: lost}
+}
+
+// queueWithdrawalLocked queues a withdrawal's callbacks: its review first
+// (a review in progress before it when the address's quirk says so); a
+// refusal ends it there, else the transfer's outcome follows.
+func (g *gateway) queueWithdrawalLocked(c coin, wd *withdrawal) {
+	outcome, ok := g.st.Outcomes[wd.Address]
+	if !ok {
+		outcome = udun.StatusSuccess
+	}
+	at := g.step
+	if g.st.Quirks[wd.Address].Review {
+		g.queueLocked(wd.CallURL, g.withdrawalTrade(c, wd, udun.StatusReview), at)
+		at += g.step
+	}
+	first := udun.StatusApproved
+	if outcome == udun.StatusRefused {
+		first = udun.StatusRefused
+	}
+	g.queueLocked(wd.CallURL, g.withdrawalTrade(c, wd, first), at)
+	if first != udun.StatusRefused {
+		g.queueLocked(wd.CallURL, g.withdrawalTrade(c, wd, outcome), at+g.step)
+	}
 }
 
 func (g *gateway) withdrawalTrade(c coin, wd *withdrawal, status int) udun.Trade {
+	fee := g.st.Quirks[wd.Address].Fee
+	if fee == "" {
+		fee = "0"
+	}
 	t := udun.Trade{
-		Address: udun.Text(wd.Address), Amount: udun.Text(wd.Amount.Shift(c.Decimals).String()), Fee: "0",
+		Address: udun.Text(wd.Address), Amount: udun.Text(wd.Amount.Shift(c.Decimals).String()), Fee: udun.Text(fee),
 		Decimals: udun.Text(strconv.Itoa(int(c.Decimals))), CoinType: udun.Text(c.CoinType), MainCoinType: udun.Text(c.MainCoinType),
 		BusinessID: udun.Text(wd.BusinessID), Status: udun.Text(strconv.Itoa(status)), TradeID: udun.Text(wd.TradeID),
 		TradeType: udun.Text(strconv.Itoa(udun.TradeWithdrawal)),
@@ -526,11 +583,13 @@ func (g *gateway) mockDeposit(w http.ResponseWriter, r *http.Request) {
 }
 
 // mockOutcome sets how withdrawals to an address end: {"address",
-// "status": 2 refused, 3 sent, 4 failed}.
+// "status": 2 refused, 3 sent, 4 failed}, and how the gateway misbehaves
+// on the way (the quirk's fields beside them; none clears it).
 func (g *gateway) mockOutcome(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Address string `json:"address"`
 		Status  int    `json:"status"`
+		quirk
 	}
 	if !decode(w, r, &req) {
 		return
@@ -539,11 +598,25 @@ func (g *gateway) mockOutcome(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "status is 2, 3 or 4", http.StatusBadRequest)
 		return
 	}
+	if req.Fee != "" {
+		if f, err := decimal.NewFromString(req.Fee); err != nil || f.IsNegative() || !f.Equal(f.Truncate(0)) {
+			http.Error(w, "fee is a whole number of the coin's smallest unit", http.StatusBadRequest)
+			return
+		}
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.st.Outcomes[req.Address] = req.Status
+	if g.st.Quirks == nil {
+		g.st.Quirks = map[string]quirk{}
+	}
+	if req.quirk == (quirk{}) {
+		delete(g.st.Quirks, req.Address)
+	} else {
+		g.st.Quirks[req.Address] = req.quirk
+	}
 	_ = g.saveLocked()
-	writeJSON(w, map[string]any{"address": req.Address, "status": req.Status})
+	writeJSON(w, map[string]any{"address": req.Address, "status": req.Status, "quirk": req.quirk})
 }
 
 // mockDelay holds callbacks back: {"seconds"}; 0 restores.

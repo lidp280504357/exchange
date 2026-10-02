@@ -149,7 +149,8 @@ func callbackJSON(c domain.Callback, raw bool) CallbackJSON {
 		j.Amount = &a
 	}
 	if raw {
-		j.Raw = &c.Raw
+		masked := udun.MaskSign(c.Raw)
+		j.Raw = &masked
 	}
 	return j
 }

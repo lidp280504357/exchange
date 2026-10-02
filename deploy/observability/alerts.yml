@@ -297,6 +297,13 @@ groups:
           summary: "a custodian fee above the amount sent was not booked: check the fee's unit for that coin (gas in its smallest unit?)"
           runbook: docs/runbook/custody.md
 
+      - alert: CustodyCallbacksRejected
+        expr: max by (instance) (increase(wallet_custody_callbacks_rejected_total[15m])) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value }} custodian callbacks were refused in 15 minutes (signature, age or form): forged, or UDUN_API_KEY differs from the custodian's and deposits go uncredited"
+          runbook: docs/runbook/custody.md
+
       - alert: CustodyFeesUnbooked
         expr: max by (provider) (wallet_custody_fees_unbooked) > 0
         for: 1h

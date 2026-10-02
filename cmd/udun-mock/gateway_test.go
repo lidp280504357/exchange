@@ -176,3 +176,84 @@ func TestGatewayRoundTrips(t *testing.T) {
 		t.Fatalf("reloaded %+v %v", again.st, err)
 	}
 }
+
+// The quirks take the platform down the paths a gateway that behaves
+// never does: a lost answer, a repeat refused for the balance the first
+// hand-over took, a review before the approval, a fee in the smallest
+// unit.
+func TestGatewayQuirks(t *testing.T) {
+	rc := &receiver{}
+	wallet := httptest.NewServer(rc)
+	defer wallet.Close()
+	// Ten seconds a step: five of them stay inside the signatures' window.
+	g, err := newGateway("m1", key, t.TempDir()+"/state.json", defaultCoins(), 10*time.Second, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := time.Now()
+	g.now = func() time.Time { return clock }
+	tick := func() {
+		clock = clock.Add(10 * time.Second)
+		g.flush(context.Background())
+	}
+	r := chi.NewRouter()
+	g.routes(r)
+	gw := httptest.NewServer(r)
+	defer gw.Close()
+	ctx := context.Background()
+	c := &udun.Client{BaseURL: gw.URL, MerchantID: "m1", Key: key, HTTP: gw.Client()}
+	post := func(path, body string) {
+		t.Helper()
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, gw.URL+path, bytes.NewReader([]byte(body)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := gw.Client().Do(req)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: %v %v", path, resp, err)
+		}
+		_ = resp.Body.Close()
+	}
+	usdt := "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
+	a, err := c.CreateAddress(ctx, 195, wallet.URL, "", "u1:TRON")
+	if err != nil {
+		t.Fatal(err)
+	}
+	post("/mock/deposit", `{"address":"`+a.Address+`","coin":"195:`+usdt+`","amount":"100"}`)
+	g.flush(ctx)
+	payee := "TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7"
+	post("/mock/outcome", `{"address":"`+payee+`","status":3,"fee":"1500000000","review":true,"lose_answer":true,"repeat_code":4001}`)
+
+	w := udun.Withdrawal{Address: payee, Amount: "20", MainCoinType: "195", CoinType: usdt, CallURL: wallet.URL, BusinessID: "w1"}
+	if err := c.Withdraw(ctx, w); err == nil || udun.IsCode(err, udun.CodeOK) {
+		t.Fatalf("the first hand-over's answer is lost: %v", err)
+	}
+	tick()
+	tick()
+	if n := len(rc.trades); n != 1 {
+		t.Fatalf("%d callbacks before the hand-over came again, want the deposit's only", n)
+	}
+	if err := c.Withdraw(ctx, w); !udun.IsCode(err, errInsufficient) {
+		t.Fatalf("the repeat: %v", err)
+	}
+	for _, want := range []string{"0", "1", "3"} {
+		tick()
+		if tr := rc.last(); tr.Status != udun.Text(want) || tr.BusinessID != "w1" || tr.Fee != "1500000000" {
+			t.Fatalf("status %s: %+v", want, tr)
+		}
+	}
+	coins, err := c.SupportCoins(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range coins {
+		if x.Code() == "195:"+usdt && x.Balance != "80" {
+			t.Fatalf("the balance: %s, want 100 - 20 taken once", x.Balance)
+		}
+	}
+	// No quirk fields clear them.
+	post("/mock/outcome", `{"address":"`+payee+`","status":3}`)
+	if _, ok := g.st.Quirks[payee]; ok {
+		t.Fatal("the quirks were not cleared")
+	}
+}

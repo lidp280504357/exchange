@@ -95,9 +95,9 @@ type settings struct {
 	// callbacks (UDUN_API_KEY, never logged), the wallet to use
 	// (UDUN_WALLET_ID, empty for the default), where it calls back
 	// (UDUN_CALLBACK_URL) and from which addresses
-	// (UDUN_CALLBACK_ALLOWED_IPS, comma-separated IPs or CIDRs; empty for
-	// any). Without a gateway its networks take no deposits or
-	// withdrawals. CustodyInterval paces the custodian's processor
+	// (UDUN_CALLBACK_ALLOWED_IPS, comma-separated IPs or CIDRs; required
+	// with a gateway: the mock's network on the test server). Without a
+	// gateway its networks take no deposits or withdrawals. CustodyInterval paces the custodian's processor
 	// (WALLET_CUSTODY_INTERVAL).
 	UdunURL         string        `koanf:"udun_gateway_url"`
 	UdunMerchant    string        `koanf:"udun_merchant_id"`
@@ -107,6 +107,9 @@ type settings struct {
 	UdunCallbackIPs string        `koanf:"udun_callback_allowed_ips"`
 	CustodyInterval time.Duration `koanf:"wallet_custody_interval"`
 }
+
+// minUdunKey is the shortest UDUN_API_KEY taken.
+const minUdunKey = 32
 
 // callbackFrom parses UDUN_CALLBACK_ALLOWED_IPS.
 func (s *settings) callbackFrom() ([]netip.Prefix, error) {
@@ -151,6 +154,14 @@ func (s *settings) Validate() error {
 	}
 	if s.UdunURL != "" && (s.UdunMerchant == "" || s.UdunKey == "" || s.UdunCallback == "") {
 		errs = append(errs, errors.New("the custody wallet needs UDUN_MERCHANT_ID, UDUN_API_KEY and UDUN_CALLBACK_URL"))
+	}
+	if s.UdunURL != "" && strings.TrimSpace(s.UdunCallbackIPs) == "" {
+		errs = append(errs, errors.New("the custody wallet needs UDUN_CALLBACK_ALLOWED_IPS: the addresses its callbacks come from"))
+	}
+	// The key signs requests and callbacks: a short one could be guessed
+	// offline from a signed message (128 bits at least, as 32 hex digits).
+	if s.UdunKey != "" && len(s.UdunKey) < minUdunKey {
+		errs = append(errs, fmt.Errorf("UDUN_API_KEY must have at least %d characters", minUdunKey))
 	}
 	if _, err := s.callbackFrom(); err != nil {
 		errs = append(errs, err)
@@ -220,8 +231,12 @@ func setup(ctx context.Context, a *app.App) error {
 			Name: "wallet_custody_fees_refused_total",
 			Help: "Custodian fees not booked for being above the amount sent (another unit?); a person checks them.",
 		}),
+		CallbacksRejected: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "wallet_custody_callbacks_rejected_total",
+			Help: "Custodian callbacks refused for their signature, age or form (forged, or the key differs from the custodian's).",
+		}),
 	}
-	a.Metrics().MustRegister(svc.FeesRefused)
+	a.Metrics().MustRegister(svc.FeesRefused, svc.CallbacksRejected)
 	if cfg.XPub != "" {
 		deriver, err := evm.NewDeriver(cfg.XPub)
 		if err != nil {

@@ -146,10 +146,12 @@ func (p *CustodyProcessor) Round(ctx context.Context) error {
 		}
 	}
 	if now.Sub(p.lastCheck) >= p.CheckEvery {
-		if _, err := p.Check(ctx); err != nil {
-			errs = append(errs, fmt.Errorf("custody check: %w", err))
-		} else {
+		_, err := p.Check(ctx)
+		if err == nil || errors.Is(err, errNotCompared) {
 			p.lastCheck = now
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("custody check: %w", err))
 		}
 	}
 	return errors.Join(errs...)
@@ -166,13 +168,16 @@ func (p *CustodyProcessor) commands(ctx context.Context) error {
 		c.Status, c.DoneAt = domain.CommandDone, p.Now()
 		if c.Kind != domain.CommandReconcile {
 			c.Status, c.Result = domain.CommandFailed, "only RECONCILE runs for the custodian"
-		} else if checks, err := p.Check(ctx); err != nil {
+		} else if checks, err := p.Check(ctx); err != nil && !errors.Is(err, errNotCompared) {
 			c.Status, c.Result = domain.CommandFailed, err.Error()
 		} else {
 			var parts []string
 			for _, x := range checks {
 				parts = append(parts, fmt.Sprintf("%s held %s, elsewhere %s, in flight %s, expected %s, shortfall %s", x.Asset, x.Chain,
 					x.Elsewhere, x.InFlight, x.Ledger, x.Shortfall))
+			}
+			if err != nil {
+				parts = append(parts, err.Error())
 			}
 			c.Result = strings.Join(parts, "; ")
 			p.lastCheck = p.Now()
@@ -361,7 +366,7 @@ func (p *CustodyProcessor) coins(ctx context.Context) ([]ports.CustodyCoin, erro
 }
 
 // heldOf sums the balances of the asset's coins with the custodian.
-func heldOf(coins []ports.CustodyCoin, nets []domain.Network, asset string) decimal.Decimal {
+func heldOf(coins []ports.CustodyCoin, nets []domain.Network, asset string) (decimal.Decimal, error) {
 	var codes []string
 	for _, n := range nets {
 		if n.Asset == asset && !slices.Contains(codes, n.ProviderCoin) {
@@ -369,13 +374,25 @@ func heldOf(coins []ports.CustodyCoin, nets []domain.Network, asset string) deci
 		}
 	}
 	held := decimal.Zero
-	for _, c := range coins {
-		if c.Balance != nil && slices.Contains(codes, c.Code) {
-			held = held.Add(*c.Balance)
+	for _, code := range codes {
+		i := slices.IndexFunc(coins, func(c ports.CustodyCoin) bool { return c.Code == code })
+		if i < 0 || coins[i].Balance == nil {
+			// Taken as zero it would look like a shortfall of all of it.
+			return decimal.Zero, fmt.Errorf("the custodian reported no balance of %s (%s)", asset, code)
 		}
+		held = held.Add(*coins[i].Balance)
 	}
-	return held
+	return held, nil
 }
+
+// errNotCompared marks an asset Check left out; the others' checks still
+// count.
+var errNotCompared = errors.New("not compared")
+
+// implausible is how many times what the ledger expects a custodian's
+// balance must not reach: such a balance is in the coin's smallest unit
+// rather than in coins, and compared as it is it would hide any shortfall.
+var implausible = decimal.NewFromInt(1000)
 
 // Holdings reports what the custodian holds of asset now, for the chain
 // check of the platform's own wallets.
@@ -388,13 +405,15 @@ func (p *CustodyProcessor) Holdings(ctx context.Context, asset string) (decimal.
 	if err != nil {
 		return decimal.Zero, err
 	}
-	return heldOf(coins, nets, asset), nil
+	return heldOf(coins, nets, asset)
 }
 
 // Check compares, for every asset the custodian serves, what it holds with
 // what the ledger expects every holder to hold, counting the platform's
 // own wallets (Elsewhere), the withdrawals with the custodian (in flight)
-// and its fees not booked yet (invariant 4).
+// and its fees not booked yet (invariant 4). An asset whose balance the
+// custodian did not report, or reported beyond belief, is not compared:
+// its error is returned with the others' checks.
 func (p *CustodyProcessor) Check(ctx context.Context) ([]domain.ChainCheck, error) {
 	nets, err := p.networks(ctx)
 	if err != nil {
@@ -405,11 +424,11 @@ func (p *CustodyProcessor) Check(ctx context.Context) ([]domain.ChainCheck, erro
 		return nil, err
 	}
 	r := p.Store.Read()
-	submitted, err := r.Withdrawals().Submitted(ctx, p.Custody.Provider())
+	outstanding, err := r.Withdrawals().Outstanding(ctx, p.Custody.Provider())
 	if err != nil {
 		return nil, err
 	}
-	flying := inFlight(submitted)
+	flying := inFlight(outstanding)
 	unbooked := map[string]decimal.Decimal{}
 	networksOf := map[string][]string{}
 	var assets []string
@@ -431,7 +450,13 @@ func (p *CustodyProcessor) Check(ctx context.Context) ([]domain.ChainCheck, erro
 		}
 	}
 	var out []domain.ChainCheck
+	var skipped []error
 	for _, asset := range assets {
+		held, err := heldOf(coins, nets, asset)
+		if err != nil {
+			skipped = append(skipped, fmt.Errorf("%s %w: %w", asset, errNotCompared, err))
+			continue
+		}
 		sys, err := p.Ledger.SystemBalances(ctx, asset)
 		if err != nil {
 			return out, err
@@ -446,9 +471,14 @@ func (p *CustodyProcessor) Check(ctx context.Context) ([]domain.ChainCheck, erro
 		if err != nil {
 			return out, err
 		}
-		c := domain.NewChainCheck(p.Custody.Provider(), asset, heldOf(coins, nets, asset),
+		c := domain.NewChainCheck(p.Custody.Provider(), asset, held,
 			sys[accountDepositPending].Add(sys[accountWithdrawalPending]).Neg(), unbooked[asset], addresses, p.Now()).
 			Beside(elsewhere, flying[asset])
+		if c.Ledger.IsPositive() && c.Chain.GreaterThanOrEqual(c.Ledger.Mul(implausible)) {
+			skipped = append(skipped, fmt.Errorf("%s %w: the custodian reports %s against %s the ledger expects (in its smallest unit?)",
+				asset, errNotCompared, c.Chain, c.Ledger))
+			continue
+		}
 		if err := p.Store.Tx(ctx, func(r ports.Repos) error { return r.Checks().Insert(ctx, c) }); err != nil {
 			return out, err
 		}
@@ -462,5 +492,5 @@ func (p *CustodyProcessor) Check(ctx context.Context) ([]domain.ChainCheck, erro
 		}
 		out = append(out, c)
 	}
-	return out, nil
+	return out, errors.Join(skipped...)
 }

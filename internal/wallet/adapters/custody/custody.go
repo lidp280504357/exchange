@@ -99,7 +99,9 @@ func (u *Udun) Coins(ctx context.Context) ([]ports.CustodyCoin, error) {
 		if d, err := strconv.ParseInt(string(c.Decimals), 10, 32); err == nil {
 			coin.Decimals = int32(d)
 		}
-		if b, err := decimal.NewFromString(string(c.Balance)); err == nil {
+		// A balance with more decimals than the coin has is not in coins;
+		// left out, it fails the check instead of skewing it.
+		if b, err := decimal.NewFromString(string(c.Balance)); err == nil && (coin.Decimals == 0 || b.Equal(b.Truncate(coin.Decimals))) {
 			coin.Balance = &b
 		}
 		out = append(out, coin)
