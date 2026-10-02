@@ -53,6 +53,10 @@ type Config struct {
 	// InstanceID names this process in events and logs (INSTANCE_ID);
 	// defaults to the host name, which is the container ID under Docker.
 	InstanceID string `koanf:"instance_id"`
+	// OutboxRetention is how long published outbox rows are kept
+	// (OUTBOX_RETENTION): seven days for reconciliation by default, less
+	// where the disk is small.
+	OutboxRetention time.Duration `koanf:"outbox_retention"`
 }
 
 // Validate reports missing or invalid shared settings.
@@ -66,6 +70,9 @@ func (c *Config) Validate() error {
 	}
 	if c.OpsAddr == "" {
 		errs = append(errs, errors.New("OPS_ADDR is required"))
+	}
+	if c.OutboxRetention < time.Hour {
+		errs = append(errs, fmt.Errorf("OUTBOX_RETENTION must be an hour or more, got %s", c.OutboxRetention))
 	}
 	return errors.Join(errs...)
 }
@@ -135,6 +142,7 @@ func New(name string, opts ...Option) (*App, error) {
 		ShutdownTimeout: defaultShutdownTimeout,
 		OpsAddr:         o.opsAddr,
 		InstanceID:      host,
+		OutboxRetention: 7 * 24 * time.Hour,
 	}
 	if err := o.loader.Load(&cfg); err != nil {
 		return nil, err

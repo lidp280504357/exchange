@@ -33,9 +33,9 @@ import (
 	"github.com/lidp280504357/exchange/migrations"
 )
 
-// Retention of the platform tables in every service schema.
+// Retention of the platform tables in every service schema; published
+// outbox rows are kept for app.Config.OutboxRetention.
 const (
-	outboxRetention = 7 * 24 * time.Hour  // published events, for reconciliation
 	inboxRetention  = 35 * 24 * time.Hour // longer than the 30-day topic retention
 	janitorInterval = time.Hour
 )
@@ -68,7 +68,7 @@ func janitor(ctx context.Context, a *app.App, db *pg.DB) error {
 	for {
 		now := time.Now()
 		purged := map[string]func() (int64, error){
-			"outbox":           func() (int64, error) { return outbox.Purge(ctx, db, now.Add(-outboxRetention)) },
+			"outbox":           func() (int64, error) { return outbox.Purge(ctx, db, now.Add(-a.Config().OutboxRetention)) },
 			"inbox":            func() (int64, error) { return inbox.Purge(ctx, db, now.Add(-inboxRetention)) },
 			"idempotency_keys": func() (int64, error) { return idempotency.Purge(ctx, db, now.Add(-idempotency.TTL)) },
 		}

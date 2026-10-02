@@ -74,6 +74,7 @@ func setup(ctx context.Context, a *app.App) error {
 		}
 	}))
 	reconciler := analytics.NewReconciler(db, conn, cfg.ReconcileSchemas, a.Logger(), a.Metrics())
+	reconciler.SetRetention(a.Config().OutboxRetention)
 	a.Add("reconciler", app.Loop(reconciler.Run))
 	return nil
 }

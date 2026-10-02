@@ -80,7 +80,7 @@ metrics=$(compose "exec -T analytics-consumer sh -c 'wget -qO- http://127.0.0.1:
 grep -q '^analytics_reconcile_missing{topic="auth.events"}' <<<"$metrics" || { echo "FAIL no ClickHouse reconciliation has run" >&2; exit 1; }
 off=$(awk '/^analytics_reconcile_missing/ && $2 != 0' <<<"$metrics")
 [[ -z "$off" ]] || { echo "FAIL ClickHouse and the outboxes disagree (published minus ingested): $off" >&2; exit 1; }
-echo "ok   ClickHouse holds exactly the events the outboxes published in the last day"
+echo "ok   ClickHouse holds exactly the events the outboxes published in the reconciliation window"
 
 echo "== read models"
 # Trades and order changes are one row per event (a minute old, so

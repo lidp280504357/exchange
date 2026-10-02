@@ -10,7 +10,7 @@
 4. 处理失败：记录转到 `<topic>.retry`，按 1s/5s/30s/5m 重试 4 次，仍失败转到 `<topic>.dlq`；无法解码的记录直接进 `.dlq`。记录头带 `x-origin-topic`、`x-group`（放弃它的消费组）、`x-attempt`、`x-not-before`、`x-error`。
 5. 指标：`kafka_consumer_records_total{group,topic,result=ok|retry|dlq|skipped}`、`kafka_consumer_handle_seconds`、`kafka_consumer_lag`（每 30 秒）。
 
-派生状态的主题不走 outbox、没有 `.retry`/`.dlq`，只保留 1 小时，丢一条由下一条补上：`order.references`、`derivatives.order.references`（HOUSE 的参考簿，market-maker 直接发；分区数必须与 `order.commands` 相同）、`market.depth`、`derivatives.market.depth`、`market.trades`（公共盘口与成交，market-data-service 发）、`market.depth.internal`、`derivatives.market.depth.internal`（引擎自己的深度）。见 ADR-0015 与 [market-data.md](market-data.md)。
+派生状态的主题不走 outbox、没有 `.retry`/`.dlq`，只保留 1 小时（`topics.sh` 每次部署都对已存在的这些 topic 重设一遍；`market.candle.events` 在测试服保留 1 天，它也只被实时跟读），丢一条由下一条补上：`order.references`、`derivatives.order.references`（HOUSE 的参考簿，market-maker 直接发；分区数必须与 `order.commands` 相同）、`market.depth`、`derivatives.market.depth`、`market.trades`（公共盘口与成交，market-data-service 发）、`market.depth.internal`、`derivatives.market.depth.internal`（引擎自己的深度）。见 ADR-0015 与 [market-data.md](market-data.md)。
 
 Redpanda 停机时 API 照常工作，事件留在各服务的 outbox；恢复后自动重连并补发，消费组从已提交位点继续（`scripts/fault/redpanda-outage.sh` 验证）。
 
@@ -31,5 +31,6 @@ ssh exchange sudo docker exec exchange-infra-ledger-service-1 /app/exchangectl d
 
 ## 核对
 
-- analytics-consumer 每小时按 topic 核对最近 24 小时 outbox 已发布条数与 ClickHouse 条数，指标 `analytics_reconcile_missing{topic}`。
+- analytics-consumer 每小时按 topic 核对最近一段时间 outbox 已发布条数与 ClickHouse 条数，指标 `analytics_reconcile_missing{topic}`。这段时间最长 24 小时，并且落在 outbox 的保留期以内（保留期减 40 分钟），免得已清理的行被当成缺失。
+- outbox 里已发布的行保留 `OUTBOX_RETENTION`（默认 7 天，各服务的 janitor 每小时清一次）；测试服磁盘小，compose 设为 6 小时（一天的 HOUSE 与模拟市场成交，光账本的 outbox 就约 0.4 GB）。
 - 账本每小时核对三项不变量，见 [ledger.md](ledger.md)。

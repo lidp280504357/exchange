@@ -15,6 +15,9 @@ x-logging: &default-logging
 # 服务里写 environment 会覆盖整个映射，所以公共变量用锚点合并
 x-env: &base-env
   GOMEMLIMIT: 160MiB
+  # Published outbox rows: six hours here (the disk is small; a day of HOUSE
+  # and market-sim trades is ~0.4 GB of ledger outbox), seven days by default.
+  OUTBOX_RETENTION: 6h
 
 x-app: &app
   image: exchange-app:latest
@@ -419,8 +422,10 @@ services:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9098/readyz"]
 
   # One active engine (it holds a database lease); a second instance would
-  # wait as a standby (ADR-0002). Reference books of 50 pairs (ADR-0015)
-  # add up to ~200 WAL entries a second: keep two hours of WAL.
+  # wait as a standby (ADR-0002). Reference books of some 90 pairs
+  # (ADR-0015) add up to ~220 WAL entries a second (2026-10-02: 5.8 GB for
+  # two to three hours): keep half an hour. Recovery needs only what
+  # follows the latest snapshot (every 1000 entries, seconds).
   matching-engine:
     <<: *app
     command: ["/app/matching-engine"]
@@ -428,7 +433,7 @@ services:
     environment:
       <<: *base-env
       GOMEMLIMIT: 200MiB
-      MATCHING_WAL_RETENTION: 2h
+      MATCHING_WAL_RETENTION: 30m
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}

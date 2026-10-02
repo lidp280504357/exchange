@@ -39,11 +39,31 @@ lift_deploy_degradations() {
   done
 }
 
-# prune_build_cache [AGE] 删除 AGE（默认 6h）内没用过的构建缓存（常用的 Go 模块与编译缓存会留下）。Docker 29 上
-# --keep-storage 什么也不删，不带 -a 也只删悬空记录：2026-10-01 缓存涨到 21 GB，一次构建写满磁盘。部署成功后
-# 用 1h：只留这次构建用到的；只在构建前删 6 小时没用过的，一天十几次部署的旧层仍会攒到 14 GB（2026-10-02）。
+# prune_build_cache 把构建缓存删到 2 GB 以内（最近用过的留下，通常是 Go 模块与编译缓存）。Docker 29 的 buildx
+# 已没有 --keep-storage（对应的是 --max-used-space），不带 -a 只删悬空记录：2026-10-01 缓存涨到 21 GB，一次构建写满磁盘。
+# 2026-10-02 的 14 GB 是另一回事：全部记录都算"在用"（Reclaimable 0B），怎么删都删不掉，要重启 dockerd 才释放，
+# 见 docs/runbook/server-deploy.md。
 prune_build_cache() {
-  sudo docker builder prune -a -f --filter "until=${1:-6h}" >/dev/null 2>&1 || echo "== 构建缓存清理失败（不影响部署）"
+  sudo docker builder prune -a -f --max-used-space 2gb >/dev/null 2>&1 || echo "== 构建缓存清理失败（不影响部署）"
+}
+
+# pull_app_image 拉 GitHub Actions 为本提交构建的镜像（.github/workflows/image.yml，
+# ghcr.io/lidp280504357/exchange-app:<完整提交号>）并标成 exchange-app:latest：服务器登录过 ghcr.io（只读令牌，
+# 见 docs/runbook/server-deploy.md）时最多等 10 分钟（推送后 Actions 要几分钟才构建完）。没登录、等不到或拉取失败
+# 就返回非 0，由调用方在服务器上构建。
+pull_app_image() {
+  local image deadline=$((SECONDS + 600))
+  image="ghcr.io/lidp280504357/exchange-app:$(git rev-parse HEAD)"
+  sudo grep -qs '"ghcr.io"' /root/.docker/config.json || return 1
+  until sudo docker pull -q "$image" >/dev/null 2>&1; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      echo "== 等了 10 分钟没拉到 $image（Actions 的 image 任务失败或还没跑完），改在服务器上构建"
+      return 1
+    fi
+    sleep 20
+  done
+  sudo docker tag "$image" exchange-app:latest
+  echo "== 用 Actions 构建的镜像 $image"
 }
 
 # ensure_disk_space 在构建前确认磁盘还有余量：磁盘写满时 Docker 会丢掉运行中容器的网络端点
@@ -125,9 +145,12 @@ main() {
     COMPOSE+=(-f "$INFRA/docker-compose.apps.yml")
     prune_build_cache
     ensure_disk_space
-    # 所有应用服务运行同一个镜像 exchange-app:latest：只构建一次（按服务逐个构建会把同一镜像导出二十多次、
-    # 每次解出全部二进制，2026-10-02 因此在构建中写满磁盘）；up 用 --no-build 直接用这个镜像重建容器。
-    sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" build api-gateway
+    # 所有应用服务运行同一个镜像 exchange-app:latest：优先拉 Actions 构建好的，拉不到才在这里构建，且只构建一次
+    # （按服务逐个构建会把同一镜像导出二十多次、每次解出全部二进制，2026-10-02 因此在构建中写满磁盘）；
+    # up 用 --no-build 直接用这个镜像重建容器。
+    if ! pull_app_image; then
+      sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" build api-gateway
+    fi
     sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" up -d --no-build --wait --wait-timeout 300 instrument-service
     apply_instruments
     sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" up -d --no-build --remove-orphans --wait --wait-timeout 600
@@ -135,7 +158,7 @@ main() {
     sudo docker compose "${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180
   fi
   sudo docker image prune -f >/dev/null
-  prune_build_cache 1h
+  prune_build_cache
   # nginx 配置是挂载进容器的文件，内容变了 compose 不会重启它：校验后热加载（校验失败则部署失败，旧配置继续服务）
   sudo docker compose "${COMPOSE[@]}" exec -T nginx sh -c 'nginx -t -q && nginx -s reload' && echo "== nginx 配置已重新加载"
   if [ -f "$INFRA/docker-compose.apps.yml" ]; then

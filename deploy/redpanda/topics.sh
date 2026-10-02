@@ -82,5 +82,14 @@ for t in "${NS}trade.events" "${NS}order.commands" "${NS}derivatives.trade.event
   rpk topic alter-config "$t" --set "retention.ms=$((30 * DAY_MS))" >/dev/null && echo "retention: $t = 30d"
 done
 
+# 派生状态的保留期也对已存在的 topic 生效：早于上面"创建时 1 小时"规则建的 topic 还是 7 天，
+# 2026-10-02 测试服磁盘因此到 85%（market.depth 约 1 GB、order.references 约 0.7 GB）。它们只被实时跟读（tail），
+# 1 小时足够。行情 K 线与 ticker（market.candle.events）同样只被跟读（衍生品服务的标记价、网关推送），测试服保留 1 天。
+for t in "${NS}order.references" "${NS}derivatives.order.references" "${NS}market.depth" "${NS}derivatives.market.depth" \
+  "${NS}market.depth.internal" "${NS}derivatives.market.depth.internal" "${NS}market.trades"; do
+  rpk topic alter-config "$t" --set "retention.ms=3600000" >/dev/null && echo "retention: $t = 1h"
+done
+rpk topic alter-config "${NS}market.candle.events" --set "retention.ms=$DAY_MS" >/dev/null && echo "retention: ${NS}market.candle.events = 1d"
+
 echo
 rpk topic list

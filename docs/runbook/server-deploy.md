@@ -28,6 +28,7 @@
    - 做市账户：注册一个 `@example.com` 用户，`exchangectl ledger adjust` 注入 1 BTC 与 100000 USDT，`apps.env` 加 `MARKET_MAKER_USER_ID`、`MARKET_MAKER_USER_IDS` 后重建 spot-trading-service、derivatives-service、market-maker，再转 20000 USDT 到它的合约账户（[market-maker.md](market-maker.md)）。
    - 保险基金：`exchangectl ledger insurance-fund --amount 1000000 --key insurance-seed-1`。
    - 热钱包：用端到端发送方转一些 Sepolia ETH 到 signer 日志里的 `hot_wallet` 地址，`exchangectl wallet fund --tx <hash>` 记到 GAS_SUPPLY。
+   - 币种图标：`bash deploy/instruments/fetch-logos.sh upload /opt/exchange/src/deploy/instruments/logos` 给全部资产装上仓库里的默认图标（88 个，来源见同目录 `SOURCES.md`，不需要外网；`all` 改为从网上重新抓取再上传）。已有图标的资产（后台上传的）跳过，`FORCE=1` 才覆盖；平台币 ASTRA 用 `scripts/ops/astra.sh profile`。
 8. 验证：`https://astras.vip/v1/time`、全部容器 healthy、`task test:integration`、`task e2e`。
 
 ## 日常更新
@@ -40,6 +41,11 @@ bash /opt/exchange/src/deploy/server-update.sh          # 在服务器上直接�
 ```
 
 脚本整个读进内存后才执行（`main` 函数），拉取新提交时跑的仍是旧版本；拉取改了脚本本身时，它 exec 新版本重来一遍（日志 `== 部署脚本有更新，改跑新版本`，运维锁随 fd 9 带过去），新加的步骤当次生效。这条逻辑是 2026-10-02 加的：在它之前的版本上部署，脚本里新加的步骤（例如生成新的密钥文件）要到下一次部署才跑，需要的文件得先在服务器上手工准备（530ed59 的 `sim/admin.env` 就是这样补的）。
+
+**镜像在 GitHub Actions 里构建**（2026-10-03 起，用户选私有镜像加服务器只读令牌）：每次推送 main，`.github/workflows/image.yml` 构建 `exchange-app` 并推到 `ghcr.io/lidp280504357/exchange-app:<完整提交号>`（另有 `:main`，保留最近 10 个版本）；部署脚本登录过 ghcr.io 时拉这个镜像（推送后最多等 10 分钟），没登录、没等到或拉取失败才在服务器上构建，所以令牌没放好之前一切照旧。放令牌：
+1. 用户在 GitHub 的 Settings → Developer settings → Personal access tokens (classic) 建一个只勾 `read:packages` 的令牌。
+2. 在服务器上 `printf '%s' '<令牌>' | sudo docker login ghcr.io -u lidp280504357 --password-stdin`（只存在 `/root/.docker/config.json`，不进仓库、不打印）；`sudo docker pull ghcr.io/lidp280504357/exchange-app:main` 能拉下来即可。
+3. 额度：免费账户的私有包只有 500 MB 存储、每月 1 GB 流出（拉到 Actions 以外的机器都算），一个版本的二进制层约一两百 MB，按现在一天十来次部署，几天就会用完（用完后拉取失败，部署自动退回服务器构建）。仓库本身是公开的，镜像里没有密钥（都在服务器的 env 文件里），把包设为公开就没有这些限制；要不要改由用户决定。
 
 部署会重启 market-data-service，合约的标记价断几秒就可能进入只减仓（`MARK_PRICE_STALE`、`INDEX_SOURCES`）：脚本在服务都起来后最多等三分钟，标记价恢复（`degraded` 为 false）就以 `deploy-<提交>` 的名义解除这次部署期间开始的只减仓。部署中途失败时，它的开始时间留在 `infra/deploy.started`，下一次走完的部署从那时算起一起解除，然后删掉这个文件（2026-10-02 一次失败的部署后 ASTRA-USDT-PERP 因此停在只减仓，下一次部署也没解除）。
 
@@ -133,6 +139,19 @@ ssh exchange 'sudo docker exec exchange-infra-api-gateway-1 wget -qO- http://127
   2. 重启丢了端点的容器：`docker compose restart redpanda`。应用服务自动重连，outbox 里积压的事件随后发出。
   3. 确认标记价恢复（`/v1/market/<合约>/mark-price` 的 `updated_at` 在走、`degraded` 为 false）后，解除只减仓：`exchangectl derivatives resume <合约>`，用 `EXCHANGECTL_ACTOR` 记下解除人。
 - 找出哪个容器不在网络上：比较 `docker network inspect exchange-infra_exchange` 列出的容器与 `docker ps` 的差集。
+
+## 磁盘去哪了（2026-10-02 从 86% 降到 45%）
+
+先看 `df -h /`、`sudo docker system df`、`sudo du -sh /var/lib/docker/volumes/*/_data`，再看库里最大的表（`pg_stat_user_tables` 按 `pg_total_relation_size` 排序）与 Redpanda 各 topic（`rpk cluster logdirs describe`）。当时的四处与现在的设置：
+
+| 来源 | 当时 | 处理与设置 |
+|---|---|---|
+| 构建缓存 | 14 GB，全部记录"在用"（`docker buildx du` 的 Reclaimable 为 0），`docker builder prune -af` 删不掉 | 重启 dockerd（`sudo systemctl restart docker`，全部容器停约 40 秒后按重启策略自动起来）后 `docker builder prune -af` 回收 13.7 GB。部署前后各把缓存删到 2 GB 以内（`--max-used-space 2gb`；Docker 29 已没有 `--keep-storage`）。又攒到删不掉时重复这一步，并按 [运维锁](#日常更新) 先拿锁 |
+| `matching.wal` | 5.8 GB（约 90 个交易对的参考簿每秒约 220 条，保留两三个小时） | 现货引擎保留 30 分钟、每 10 分钟清理（[matching.md](matching.md)）；已有的大表要 `VACUUM FULL matching.wal` 才把空间还给磁盘 |
+| 各服务 outbox | 账本 540 MB 等，共约 1 GB | 已发布的行测试服保留 6 小时（`OUTBOX_RETENTION`，[events.md](events.md)）；同样要 `VACUUM FULL <schema>.outbox` 才变小 |
+| Redpanda | 6.8 GB，其中 `market.candle.events` 4 GB（7 天）、`market.depth` 约 1 GB | 派生行情流保留 1 小时、K 线流 1 天，`topics.sh` 每次部署都重设（[events.md](events.md)） |
+
+做完后 `matching.wal` 482 MB、库 1.5 GB、根分区 45%（27 GB 空闲）。`VACUUM FULL` 独占整张表：WAL 表几秒到一分钟，期间引擎排队；要在运维锁里做。
 
 ## 本机调试
 

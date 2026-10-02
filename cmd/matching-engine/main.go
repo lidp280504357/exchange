@@ -121,8 +121,10 @@ func setup(ctx context.Context, a *app.App) error {
 		return err
 	}
 	a.Add("depth export", app.Loop(application.NewDepthExporter(engine, prod, events, a.Metrics()).Run))
+	// Every ten minutes: the spot WAL takes in a few hundred reference
+	// books a second, so its retention is short.
 	a.Add("wal purge", app.Loop(func(ctx context.Context) error {
-		ticker := time.NewTicker(time.Hour)
+		ticker := time.NewTicker(10 * time.Minute)
 		defer ticker.Stop()
 		for {
 			select {

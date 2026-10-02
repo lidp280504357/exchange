@@ -35,6 +35,10 @@ type Reconciler struct {
 	ch      driver.Conn
 	schemas []string
 	log     *slog.Logger
+	// Window is how far back each run looks (a day at most): within the
+	// outboxes' retention, less the minutes left to the consumer and a
+	// margin, so that no purged row counts as missing (SetRetention).
+	Window time.Duration
 
 	missing *prometheus.GaugeVec
 	lastRun prometheus.Gauge
@@ -43,7 +47,7 @@ type Reconciler struct {
 // NewReconciler registers the reconciliation metrics with reg.
 func NewReconciler(db *pg.DB, ch driver.Conn, schemas []string, log *slog.Logger, reg prometheus.Registerer) *Reconciler {
 	r := &Reconciler{
-		db: db, ch: ch, schemas: schemas, log: log,
+		db: db, ch: ch, schemas: schemas, log: log, Window: window,
 		missing: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "analytics_reconcile_missing",
 			Help: "Events published in the last window but absent from ClickHouse, by topic.",
@@ -65,11 +69,18 @@ const (
 	interval = time.Hour
 )
 
+// SetRetention fits the window within the outboxes' retention (the
+// janitor deletes published rows older than it): what is left of it after
+// the settling minutes and half an hour of margin, a day at most.
+func (r *Reconciler) SetRetention(retention time.Duration) {
+	r.Window = max(min(window, retention-settle-30*time.Minute), time.Minute)
+}
+
 // Run reconciles every hour until ctx ends.
 func (r *Reconciler) Run(ctx context.Context) error {
 	for {
 		to := time.Now().Add(-settle).Truncate(time.Minute)
-		results, err := r.Reconcile(ctx, to.Add(-window), to)
+		results, err := r.Reconcile(ctx, to.Add(-r.Window), to)
 		switch {
 		case err != nil && ctx.Err() == nil:
 			r.log.WarnContext(ctx, "reconciliation failed", "error", err)

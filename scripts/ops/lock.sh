@@ -101,7 +101,8 @@ run() {
   # when this script closes it.
   (
     exec 7>&-
-    cat <&8 >/dev/null
+    cat <&8 >/dev/null || exit 0 # interrupted (Ctrl-C), not dropped
+    [ -d "$dir" ] || exit 0      # this script is ending anyway
     touch "$dir/lost"
     echo "lock: LOST - the server dropped the connection and released the lock; another deploy or run may overlap this one" >&2
   ) &
