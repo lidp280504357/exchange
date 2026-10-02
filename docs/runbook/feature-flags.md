@@ -23,8 +23,8 @@
 | `market.internal_matching` | 有 HOUSE 流动性的交易对上，用户订单也互相成交（关闭时一律只和 HOUSE 成交；测试服关闭，ADR-0015） | 4 |
 | `market.maker` | 已退役（ADR-0015）：阶段 2 的挂单做市机器人，由 `market.house_liquidity` 取代；表里的行保留，不再有服务读取 | 2 |
 | `sim.enabled` | 平台币的模拟市场：market-sim 的机器人在 ASTRA-USDT 上报价与交易（按交易对；关闭时撤掉做市商挂单；测试服对 ASTRA-USDT 打开，`scripts/ops/astra.sh on`，见 [market-sim.md](market-sim.md)） | 4 |
-| `sim.events` | 模拟市场的运营价格事件（跳涨跳跌、目标价、趋势、波动、暂停、停牌、重新锚定；按交易对，见 [market-sim.md](market-sim.md#价格事件设计-62a3)） | 4 |
-| `sim.perp` | 机器人在平台币永续 ASTRA-USDT-PERP 上做市与交易（按合约；关闭时撤掉做市商在永续上的挂单，见 [market-sim.md](market-sim.md#永续-astra-usdt-perp设计-52a4)） | 4 |
+| `sim.events` | 模拟市场的运营价格事件（跳涨跳跌、目标价、趋势、波动、暂停、停牌、重新锚定；按交易对；测试服对 ASTRA-USDT 打开，`scripts/ops/astra.sh events-on`，见 [market-sim.md](market-sim.md#价格事件设计-62a3)） | 4 |
+| `sim.perp` | 机器人在平台币永续 ASTRA-USDT-PERP 上做市与交易（按合约；关闭时撤掉做市商在永续上的挂单；测试服对 ASTRA-USDT-PERP 打开，`astra.sh perp-on`，见 [market-sim.md](market-sim.md#永续-astra-usdt-perp设计-52a4)） | 4 |
 | `risk.enforce` | 执行风控规则的动作（评分为 REVIEW 的 ACTIVE 账户置为 `RISK_REVIEW`）；关闭时只记分。测试服只对地区 `AQ` 打开（[risk.md](risk.md)） | 2 |
 
 ## 规则维度

@@ -118,7 +118,7 @@ task web:lighthouse         # 对部署后的两站各三页跑 Lighthouse（性
 
 `deploy/server-update.sh` 第 5 步在 `node:24-slim` 容器里对 `web/` 执行一次 `pnpm install --frozen-lockfile`，构建以下内容：
 
-- `pnpm build`：三个站点；PC 站构建时同时生成 API 参考；
+- 三个站点逐个构建（`pnpm -r --workspace-concurrency=1 --filter "./apps/*" build`，与 `pnpm build` 相同但不并行：每个站点是 `tsc` 加 `vite`，三个同时构建会用尽测试服的内存，2026-10-02 两次让整机几分钟无响应）；PC 站构建时同时生成 API 参考；
 - `pnpm --filter @exchange/ui build-storybook`：Storybook。
 
 全部成功后才同步到 nginx 的静态目录：`/opt/exchange/infra/nginx/sites/{pc,m,admin,storybook}`；旧后台 `web/admin` 在新后台完成后（B5）删除，部署时清掉 `nginx/admin`，`astras.vip/admin/*` 由 nginx 301 到 `admin.astras.vip`。旧 H5（`web/h5`，阶段 1–3）在手机站完成后（B3）删除，`/h5/*` 由 nginx 301 到首页。pnpm 缓存在命名卷 `exchange-pnpm-store`，Turnstile 站点密钥取自服务器 `apps.env`。

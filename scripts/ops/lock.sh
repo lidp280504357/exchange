@@ -7,7 +7,11 @@
 #       /opt/exchange/infra/ops.lock), writes who holds it and since when to
 #       ops.lock.owner, runs COMMAND here and releases the lock when it ends.
 #       The lock lapses after 2 hours, or as soon as this side goes away
-#       (the server holds it for as long as the ssh connection lives).
+#       (the server holds it for as long as the ssh connection lives). A
+#       server too busy to answer for 5 minutes drops the connection and
+#       with it the lock: that is reported at once, and the run fails
+#       (status 75 if COMMAND itself passed) since another deploy or run
+#       may have overlapped it.
 #       COMMAND sees OPS_LOCK_HELD=1, so the steps it runs that lock on
 #       their own (a fault script, server-update.sh) do not wait for it.
 #   scripts/ops/lock.sh status
@@ -60,7 +64,7 @@ run() {
   # The server keeps the lock while it reads this connection's stdin: when
   # this side closes it (or dies) the shell ends and the lock goes with it.
   # shellcheck disable=SC2016 # expanded on the server
-  ssh -o ConnectTimeout=20 -o ServerAliveInterval=30 exchange "exec 9>$LOCK
+  ssh -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=10 exchange "exec 9>$LOCK
     if ! flock -n 9; then
       echo \"WAITING for \$(cat $LOCK.owner 2>/dev/null || echo ?)\"
       flock -w $WAIT 9 || { echo TIMEOUT; exit 1; }
@@ -92,8 +96,22 @@ run() {
     exit 1
   fi
   echo "lock: held by $owner" >&2
-  local status=0
-  OPS_LOCK_HELD=1 "$@" || status=$?
+  # The connection's end while COMMAND runs is the lock lost. Neither the
+  # watcher nor COMMAND keeps the connection's stdin open: the lock goes
+  # when this script closes it.
+  (
+    exec 7>&-
+    cat <&8 >/dev/null
+    touch "$dir/lost"
+    echo "lock: LOST - the server dropped the connection and released the lock; another deploy or run may overlap this one" >&2
+  ) &
+  local watcher=$! status=0
+  OPS_LOCK_HELD=1 "$@" 7>&- 8<&- || status=$?
+  kill "$watcher" 2>/dev/null || true
+  wait "$watcher" 2>/dev/null || true
+  if [[ -e $dir/lost && $status -eq 0 ]]; then
+    status=75
+  fi
   exec 7>&- 8<&-
   wait "$pid" 2>/dev/null || true
   echo "lock: released" >&2

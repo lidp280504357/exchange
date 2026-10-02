@@ -110,13 +110,15 @@ main() {
   # 5. 前端（web/ 的 pnpm workspace，ADR-0012）：在 node 容器里装一次依赖（glibc 镜像，打包器与 Tailwind 的原生模块
   #    都有对应二进制；pnpm 缓存放命名卷），构建三个站点与 Storybook，全部成功才替换 nginx 的
   #    静态目录。Turnstile 站点密钥是公开值；VITE_APP_VERSION 是手机站「关于」里显示的版本。挂整个仓库：API 参考页要读 api/openapi
+  #    三个站点逐个构建（每个是 tsc 加 vite，各要 1 GB 以上）：并行构建在 7.8 GB 的测试服上把内存与交换区用尽，
+  #    2026-10-02 两次让整机几分钟无响应（负载 139、ssh 连不上、运维锁的连接断开）
   if [ -f web/pnpm-workspace.yaml ]; then
     local site_key
     site_key="$(sudo grep -E '^TURNSTILE_SITE_KEY=' "$INFRA/apps.env" | cut -d= -f2- | tr -d '"' || true)"
     sudo docker run --rm -e CI=true -e TURNSTILE_SITE_KEY="$site_key" -e VITE_APP_VERSION="$APP_VERSION" -v "$SRC:/src" -v exchange-pnpm-store:/pnpm-store \
       -w /src/web node:24-slim sh -c 'npm install -g pnpm@11 --silent >/dev/null && pnpm config set store-dir /pnpm-store >/dev/null \
         && pnpm install --frozen-lockfile --silent \
-        && { { pnpm build && pnpm --filter @exchange/ui build-storybook; } >/tmp/build.log 2>&1 || { cat /tmp/build.log; exit 1; }; }'
+        && { { pnpm -r --workspace-concurrency=1 --filter "./apps/*" build && pnpm --filter @exchange/ui build-storybook; } >/tmp/build.log 2>&1 || { cat /tmp/build.log; exit 1; }; }'
     sudo mkdir -p "$INFRA/nginx/sites"
     local site
     for site in pc m admin; do
