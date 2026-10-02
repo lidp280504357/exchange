@@ -48,14 +48,25 @@ prune_build_cache() {
 }
 
 # pull_app_image 拉 GitHub Actions 为本提交构建的镜像（.github/workflows/image.yml，
-# ghcr.io/lidp280504357/exchange-app:<完整提交号>）并标成 exchange-app:latest：服务器登录过 ghcr.io（只读令牌，
-# 见 docs/runbook/server-deploy.md）时最多等 10 分钟（推送后 Actions 要几分钟才构建完）。没登录、等不到或拉取失败
-# 就返回非 0，由调用方在服务器上构建。
+# ghcr.io/lidp280504357/exchange-app:<完整提交号>）并标成 exchange-app:latest；服务器要登录过 ghcr.io（只读令牌，
+# 见 docs/runbook/server-deploy.md）。本地已有就直接用。提交是 20 分钟内的（刚推送，Actions 可能还在构建）时，
+# "还没有这个版本"最多等 10 分钟；更早的提交（回滚、image.yml 之前的、已被清掉的版本）与令牌被拒都不等。
+# 拉不到就返回非 0，由调用方在服务器上构建。打完标签就去掉 ghcr 的标签：否则 image prune 不删它，每次部署都留下
+# 一整份镜像（约 600 MB）。
 pull_app_image() {
-  local image deadline=$((SECONDS + 600))
+  local image out fresh deadline=$((SECONDS + 600))
   image="ghcr.io/lidp280504357/exchange-app:$(git rev-parse HEAD)"
   sudo grep -qs '"ghcr.io"' /root/.docker/config.json || return 1
-  until sudo docker pull -q "$image" >/dev/null 2>&1; do
+  fresh=$(($(date +%s) - $(git log -1 --format=%ct HEAD) < 1200))
+  until sudo docker image inspect "$image" >/dev/null 2>&1 || out=$(sudo docker pull -q "$image" 2>&1); do
+    if grep -qiE 'denied|unauthorized' <<<"$out"; then
+      echo "== ghcr.io 拒绝了令牌（过期或没有 read:packages），改在服务器上构建"
+      return 1
+    fi
+    if grep -qiE 'manifest unknown|not found' <<<"$out" && [ "$fresh" != 1 ]; then
+      echo "== ghcr.io 上没有 $image（提交早于 image.yml 或版本已清理），改在服务器上构建"
+      return 1
+    fi
     if [ "$SECONDS" -ge "$deadline" ]; then
       echo "== 等了 10 分钟没拉到 $image（Actions 的 image 任务失败或还没跑完），改在服务器上构建"
       return 1
@@ -63,6 +74,7 @@ pull_app_image() {
     sleep 20
   done
   sudo docker tag "$image" exchange-app:latest
+  sudo docker rmi "$image" >/dev/null
   echo "== 用 Actions 构建的镜像 $image"
 }
 
@@ -153,11 +165,21 @@ main() {
     fi
     sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" up -d --no-build --wait --wait-timeout 300 instrument-service
     apply_instruments
-    sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" up -d --no-build --remove-orphans --wait --wait-timeout 600
+    # 先全部起来，部署只等站点离不开的服务；ClickHouse 停着时 analytics-consumer 不就绪之类的（批量消费者的下游
+    # 一直失败时就绪检查不通过，这是对的）只报出来，不让部署在热加载 nginx、解除只减仓与发布前端之前中止
+    local optional=(analytics-consumer market-sim udun-mock) core
+    sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" up -d --no-build --remove-orphans
+    mapfile -t core < <(sudo docker compose "${COMPOSE[@]}" config --services | grep -vxF -f <(printf '%s\n' "${optional[@]}"))
+    sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" up -d --no-build --wait --wait-timeout 600 "${core[@]}"
+    if ! sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" up -d --no-build --wait --wait-timeout 180 "${optional[@]}"; then
+      echo "== 这些服务还没就绪（不影响部署，稍后看）：$(sudo docker compose "${COMPOSE[@]}" ps --format '{{.Service}} {{.Status}}' | grep -v '(healthy)' | tr '\n' ';')"
+    fi
   else
     sudo docker compose "${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180
   fi
   sudo docker image prune -f >/dev/null
+  # 两天没用的镜像也删（构建前端用的 node、拉过的旧版本），下次要用时再拉
+  sudo docker image prune -af --filter "until=48h" >/dev/null
   prune_build_cache
   # nginx 配置是挂载进容器的文件，内容变了 compose 不会重启它：校验后热加载（校验失败则部署失败，旧配置继续服务）
   sudo docker compose "${COMPOSE[@]}" exec -T nginx sh -c 'nginx -t -q && nginx -s reload' && echo "== nginx 配置已重新加载"

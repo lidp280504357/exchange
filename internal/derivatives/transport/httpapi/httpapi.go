@@ -537,6 +537,7 @@ func (h *Handler) InternalRoutes(r chi.Router) {
 	r.Get("/internal/derivatives/positions", h.openPositions)
 	r.Post("/internal/derivatives/positions/close", h.adminClose)
 	r.Post("/internal/derivatives/contracts/{symbol}/tier-impact", h.tierImpact)
+	r.Post("/internal/derivatives/contracts/{symbol}/price-impact", h.priceImpact)
 }
 
 func (h *Handler) adminClose(w http.ResponseWriter, r *http.Request) {
@@ -724,4 +725,52 @@ func riskRows(list []application.PositionView) []riskJSON {
 		out = append(out, row)
 	}
 	return out
+}
+
+// priceImpact answers what a mark price would do to a contract's open
+// positions (the admin console's confirmation of a simulated-market price
+// event): {"target_price"} → the positions it would liquidate, their
+// notional at the target, their accounts, what the insurance fund would
+// bear and the positions it could not measure.
+func (h *Handler) priceImpact(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		TargetPrice string `json:"target_price"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	target, err := decimal.NewFromString(body.TargetPrice)
+	if err != nil {
+		httpx.WriteError(w, r, apperr.Invalid("target_price must be a decimal string"))
+		return
+	}
+	imp, err := h.Svc.PriceImpact(r.Context(), strings.ToUpper(chi.URLParam(r, "symbol")), target)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	type exampleJSON struct {
+		UserID            string `json:"user_id"`
+		Symbol            string `json:"symbol"`
+		PositionSide      string `json:"position_side"`
+		Cross             bool   `json:"cross"`
+		Notional          string `json:"notional"`
+		MarginBalance     string `json:"margin_balance"`
+		MaintenanceBefore string `json:"maintenance_before"`
+		MaintenanceAfter  string `json:"maintenance_after"`
+	}
+	examples := make([]exampleJSON, 0, len(imp.Examples))
+	for _, e := range imp.Examples {
+		examples = append(examples, exampleJSON{
+			UserID: e.UserID, Symbol: e.Symbol, PositionSide: string(e.PositionSide), Cross: e.Cross, Notional: e.Notional.StringFixed(2),
+			MarginBalance: e.MarginBalance.StringFixed(2), MaintenanceBefore: e.MaintenanceBefore.StringFixed(2),
+			MaintenanceAfter: e.MaintenanceAfter.StringFixed(2),
+		})
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"symbol": imp.Symbol, "target_price": imp.Target.String(), "positions": imp.Positions, "liquidated": imp.Liquidated,
+		"notional": imp.Notional.StringFixed(2), "accounts": imp.Accounts, "insurance_cost": imp.InsuranceCost.StringFixed(2),
+		"unmeasured": imp.Unmeasured, "examples": examples,
+	})
 }

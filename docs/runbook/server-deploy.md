@@ -42,7 +42,11 @@ bash /opt/exchange/src/deploy/server-update.sh          # 在服务器上直接�
 
 脚本整个读进内存后才执行（`main` 函数），拉取新提交时跑的仍是旧版本；拉取改了脚本本身时，它 exec 新版本重来一遍（日志 `== 部署脚本有更新，改跑新版本`，运维锁随 fd 9 带过去），新加的步骤当次生效。这条逻辑是 2026-10-02 加的：在它之前的版本上部署，脚本里新加的步骤（例如生成新的密钥文件）要到下一次部署才跑，需要的文件得先在服务器上手工准备（530ed59 的 `sim/admin.env` 就是这样补的）。
 
-**镜像在 GitHub Actions 里构建**（2026-10-03 起，用户选私有镜像加服务器只读令牌）：每次推送 main，`.github/workflows/image.yml` 构建 `exchange-app` 并推到 `ghcr.io/lidp280504357/exchange-app:<完整提交号>`（另有 `:main`，保留最近 10 个版本）；部署脚本登录过 ghcr.io 时拉这个镜像（推送后最多等 10 分钟），没登录、没等到或拉取失败才在服务器上构建，所以令牌没放好之前一切照旧。放令牌：
+**镜像在 GitHub Actions 里构建**（2026-10-03 起，用户选私有镜像加服务器只读令牌）：每次推送 main，`.github/workflows/image.yml` 构建 `exchange-app` 并推到 `ghcr.io/lidp280504357/exchange-app:<完整提交号>`（另有 `:main`，保留最近 10 个版本）；部署脚本登录过 ghcr.io 时拉这个镜像，没登录、没等到或拉取失败才在服务器上构建，所以令牌没放好之前一切照旧。本地已有这个版本就直接用；只有 20 分钟内的提交（刚推送，Actions 可能还在构建）才最多等 10 分钟，回滚到旧提交、版本已被清理或令牌被拒都立刻改在服务器构建。拉下来打成 `exchange-app:latest` 后去掉 ghcr 的标签，部署后还会删掉两天没用的镜像，不然每次部署留下一整份（约 600 MB）。
+
+部署只等站点离不开的服务就绪才往下走；`analytics-consumer`（依赖 ClickHouse）、`market-sim`、`udun-mock` 另等 3 分钟，没就绪只打印出来，不中止部署（以前 ClickHouse 一停，部署就卡在这里，nginx 热加载、解除只减仓与前端发布都不跑）。
+
+放令牌：
 1. 用户在 GitHub 的 Settings → Developer settings → Personal access tokens (classic) 建一个只勾 `read:packages` 的令牌。
 2. 在服务器上 `printf '%s' '<令牌>' | sudo docker login ghcr.io -u lidp280504357 --password-stdin`（只存在 `/root/.docker/config.json`，不进仓库、不打印）；`sudo docker pull ghcr.io/lidp280504357/exchange-app:main` 能拉下来即可。
 3. 额度：免费账户的私有包只有 500 MB 存储、每月 1 GB 流出（拉到 Actions 以外的机器都算），一个版本的二进制层约一两百 MB，按现在一天十来次部署，几天就会用完（用完后拉取失败，部署自动退回服务器构建）。仓库本身是公开的，镜像里没有密钥（都在服务器的 env 文件里），把包设为公开就没有这些限制；要不要改由用户决定。

@@ -118,7 +118,19 @@ func NewBatchConsumer(ctx context.Context, cfg Config, opts BatchOptions) (*Batc
 		return nil, fmt.Errorf("kafka batch consumer %s: ping: %w", opts.Group, err)
 	}
 	c.cl, c.adm = cl, kadm.NewClient(cl)
+	// The series exist from the start: a consumer that never gets into
+	// its group shows 0 partitions (KafkaConsumerUnassigned).
+	c.setAssigned(0)
+	c.touchPoll(time.Unix(0, now))
 	return c, nil
+}
+
+// touchPoll records a poll's return (Ready, the last-poll gauge).
+func (c *BatchConsumer) touchPoll(at time.Time) {
+	c.lastPoll.Store(at.UnixNano())
+	if c.opts.Metrics != nil {
+		c.opts.Metrics.lastPoll.WithLabelValues(c.opts.Group).Set(float64(at.Unix()))
+	}
 }
 
 func partitions(m map[string][]int32) int64 {
@@ -134,9 +146,26 @@ func partitions(m map[string][]int32) int64 {
 func (c *BatchConsumer) onAssigned(ctx context.Context, _ *kgo.Client, assigned map[string][]int32) {
 	c.setAssigned(c.assigned.Add(partitions(assigned)))
 	c.opts.Logger.Info("kafka batch consumer assigned partitions", "group", c.opts.Group, "partitions", c.assigned.Load())
-	if c.opts.OnAssigned != nil {
-		c.opts.OnAssigned(ctx)
+	if c.opts.OnAssigned == nil {
+		return
 	}
+	// The group's goroutine runs the hook while polls wait for it: a long
+	// catch-up is the consumer at work, not stuck.
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(10 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case at := <-t.C:
+				c.touchPoll(at)
+			}
+		}
+	}()
+	c.opts.OnAssigned(ctx)
+	close(done)
 }
 
 // onLost counts the partitions revoked by a rebalance, or lost when the
@@ -213,11 +242,7 @@ func (c *BatchConsumer) cycle() {
 		if fetches.IsClientClosed() || c.ctx.Err() != nil {
 			return // uncommitted records are redelivered after restart
 		}
-		now := time.Now()
-		c.lastPoll.Store(now.UnixNano())
-		if c.opts.Metrics != nil {
-			c.opts.Metrics.lastPoll.WithLabelValues(c.opts.Group).Set(float64(now.Unix()))
-		}
+		c.touchPoll(time.Now())
 		fetches.EachError(func(topic string, p int32, err error) {
 			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 				c.opts.Logger.Warn("kafka fetch error", "group", c.opts.Group, "topic", topic, "partition", p, "error", err)
