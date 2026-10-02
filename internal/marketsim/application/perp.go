@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -9,18 +10,25 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/lidp280504357/exchange/internal/marketsim/domain"
+	"github.com/lidp280504357/exchange/internal/marketsim/ports"
 	"github.com/lidp280504357/exchange/internal/platform/flags"
 )
 
-// The platform coin's perpetual (ASTRA design §5.2, batch A4): with
+// The platform coin's perpetual (ASTRA design §4 and §5.2, batch A4): with
 // sim.perp on and the contract trading, the makers keep ladders on it
-// around the target as on the spot pair, and the takers trade it at the
-// market. Each bot's position stays within PerpBotCap worth (beyond it the
-// bot only reduces), and its FUTURES margin is topped up to PerpMargin
-// from its spot USDT. The bots' positions net out across the pool.
+// around its mark price (the design's quote center for the perpetual; the
+// mark follows the index, the spot pair's own market, and the contract's
+// price band is around it), and the takers trade it at the market. Each
+// bot's position stays within PerpBotCap worth (beyond it the bot only
+// reduces), and its FUTURES margin is topped up to PerpMargin from its
+// spot USDT. The bots' positions net out across the pool.
 
-// perpCheckEvery is how often the bots' positions and margins are read.
-const perpCheckEvery = time.Minute
+// perpCheckEvery is how often the bots' positions and margins are read,
+// markEvery the mark price.
+const (
+	perpCheckEvery = time.Minute
+	markEvery      = time.Second
+)
 
 // perpBot is what the simulation knows of a bot on the perpetual.
 type perpBot struct {
@@ -29,7 +37,12 @@ type perpBot struct {
 	position  decimal.Decimal // signed, at the last check plus own market orders
 	futures   decimal.Decimal // available FUTURES balance at the last check
 	known     bool
+	// After a refused order the bot waits on the perpetual until retryAt.
+	wait    time.Duration
+	retryAt time.Time
 }
+
+func (pb *perpBot) ready(now time.Time) bool { return !now.Before(pb.retryAt) }
 
 func (s *Sim) perpOf(b *bot) *perpBot {
 	if s.perpBots == nil {
@@ -65,9 +78,21 @@ func (s *Sim) perp(ctx context.Context, now time.Time, p float64, dt time.Durati
 		s.checkPerp(ctx, now)
 	}
 	s.perpRunning = true
-	s.quotePerp(ctx, now, p)
+	if s.perpMarkAt.IsZero() || now.Sub(s.perpMarkAt) >= markEvery {
+		s.perpMarkAt = now
+		if mark, err := s.prices.Mark(ctx, s.cfg.Perp); err != nil {
+			s.m.errors.WithLabelValues("mark").Inc()
+		} else if mark.IsPositive() {
+			s.perpMark = mark.InexactFloat64()
+		}
+	}
+	center := p // before the contract's first mark price
+	if s.perpMark > 0 {
+		center = s.perpMark
+	}
+	s.quotePerp(ctx, now, center)
 	if !s.runs(domain.EventPause) {
-		s.takePerp(ctx, now, p, dt)
+		s.takePerp(ctx, now, center, dt)
 	}
 }
 
@@ -111,8 +136,8 @@ func (s *Sim) overCap(pos decimal.Decimal, p float64) bool {
 }
 
 // quotePerp lets the perpetual's makers requote in turn, one a round:
-// their ladder around the target, without the side that would grow a
-// position at the cap.
+// their ladder around the mark price p, within the contract's price band,
+// without the side that would grow a position at the cap.
 func (s *Sim) quotePerp(ctx context.Context, now time.Time, p float64) {
 	makers := s.botsOf(domain.RoleMaker)
 	if len(makers) == 0 {
@@ -122,6 +147,9 @@ func (s *Sim) quotePerp(ctx context.Context, now time.Time, p float64) {
 	for i := range makers {
 		b := makers[(s.perpTurn+i)%len(makers)]
 		pb := s.perpOf(b)
+		if !pb.ready(now) {
+			continue
+		}
 		moved := tick > 0 && math.Abs(p-pb.quotedP)/tick >= float64(s.params.RequoteTick)
 		if !moved && now.Before(pb.nextQuote) {
 			continue
@@ -141,6 +169,10 @@ func (s *Sim) requotePerp(ctx context.Context, now time.Time, b *bot, pb *perpBo
 		return
 	}
 	bids, asks := domain.LadderPrices(p, b.phase, s.params, s.perpPair)
+	if s.perpMark > 0 {
+		mark := domain.Anchors{Lo: s.perpMark, Hi: s.perpMark}
+		bids, asks = domain.InBand(bids, mark, s.perpPair.Band), domain.InBand(asks, mark, s.perpPair.Band)
+	}
 	if s.overCap(pb.position, p) {
 		if pb.position.IsPositive() {
 			bids = nil // long at the cap: no more buying
@@ -160,29 +192,41 @@ func (s *Sim) requotePerp(ctx context.Context, now time.Time, b *bot, pb *perpBo
 		}
 		s.m.cancels.WithLabelValues("PERP_" + string(b.Role)).Inc()
 	}
-	place := func(side domain.Side, price decimal.Decimal) bool {
-		if !s.orders.Take(now) {
+	stop, unfunded := false, map[domain.Side]bool{}
+	place := func(side domain.Side, price decimal.Decimal) {
+		if stop || unfunded[side] {
+			return
+		}
+		if !s.orders.TakeLeaving(now, s.params.OrdersPerSecond*makerReserve) {
 			s.m.throttled.WithLabelValues("order").Inc()
-			return false
+			stop = true
+			return
 		}
 		qty := domain.Quantity(domain.Worth(rng, s.params.LevelSize, 0.5), price, s.perpPair)
 		_, err := s.Derivatives.LimitContract(ctx, b.UserID, s.cfg.Perp, side, price, qty)
-		s.placedPerp(ctx, b, err)
-		return true
+		switch {
+		case err == nil:
+		case isFunds(err):
+			unfunded[side] = true // the side waits; the bot does not
+		default:
+			stop = true
+		}
+		s.placedPerp(ctx, now, b, pb, err, !isFunds(err))
 	}
 	for i := 0; i < max(len(placeBids), len(placeAsks)); i++ {
-		if i < len(placeBids) && !place(domain.Buy, placeBids[i]) {
-			break
+		if i < len(placeBids) {
+			place(domain.Buy, placeBids[i])
 		}
-		if i < len(placeAsks) && !place(domain.Sell, placeAsks[i]) {
-			break
+		if i < len(placeAsks) {
+			place(domain.Sell, placeAsks[i])
 		}
 	}
 	pb.quotedP = p
 }
 
 // takePerp sends the takers' market orders on the perpetual that arrived
-// in dt; a taker at its cap only reduces.
+// in dt; a taker at its cap only reduces, one waiting after a refusal
+// sits the order out.
 func (s *Sim) takePerp(ctx context.Context, now time.Time, p float64, dt time.Duration) {
 	takers := s.botsOf(domain.RoleTaker)
 	if len(takers) == 0 || s.params.PerpDailyVolume <= 0 {
@@ -194,6 +238,9 @@ func (s *Sim) takePerp(ctx context.Context, now time.Time, p float64, dt time.Du
 	for range domain.Arrivals(rng, flow, dt, now) {
 		b := takers[rng.IntN(len(takers))]
 		pb := s.perpOf(b)
+		if !pb.ready(now) {
+			continue
+		}
 		side, reduce := domain.TakerSide(rng, s.params, 0), false
 		if s.overCap(pb.position, p) {
 			side, reduce = domain.Sell, true
@@ -213,7 +260,7 @@ func (s *Sim) takePerp(ctx context.Context, now time.Time, p float64, dt time.Du
 			return
 		}
 		err := s.Derivatives.MarketContract(ctx, b.UserID, s.cfg.Perp, side, qty, reduce)
-		s.placedPerp(ctx, b, err)
+		s.placedPerp(ctx, now, b, pb, err, true)
 		if err == nil {
 			if side == domain.Buy {
 				pb.position = pb.position.Add(qty)
@@ -224,16 +271,29 @@ func (s *Sim) takePerp(ctx context.Context, now time.Time, p float64, dt time.Du
 	}
 }
 
-func (s *Sim) placedPerp(ctx context.Context, b *bot, err error) {
-	role := "PERP_" + string(b.Role)
+// placedPerp counts an order's result on the perpetual; a refused one
+// gives its token back and, with backOff, makes the bot wait there.
+func (s *Sim) placedPerp(ctx context.Context, now time.Time, b *bot, pb *perpBot, err error, backOff bool) {
+	role, result := "PERP_"+string(b.Role), "placed"
 	switch {
 	case err == nil:
-		s.m.orders.WithLabelValues(role, "placed").Inc()
+		pb.wait, pb.retryAt = 0, time.Time{}
 	case isFunds(err):
-		s.m.orders.WithLabelValues(role, "unfunded").Inc()
+		result = "unfunded"
+	case errors.Is(err, ports.ErrOutOfBand):
+		result = "out_of_band"
 	default:
-		s.m.orders.WithLabelValues(role, "failed").Inc()
+		result = "failed"
 		s.fail(ctx, b, "contract_order", err)
+	}
+	s.m.orders.WithLabelValues(role, result).Inc()
+	if err == nil {
+		return
+	}
+	s.orders.Return()
+	if backOff {
+		pb.wait = domain.Backoff(pb.wait)
+		pb.retryAt = now.Add(pb.wait)
 	}
 }
 

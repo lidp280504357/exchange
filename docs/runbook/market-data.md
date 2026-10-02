@@ -27,7 +27,7 @@ derivatives-engine ──derivatives.market.depth.internal / derivatives.trade.e
 - K 线周期 `1m 3m 5m 15m 30m 1h 2h 4h 6h 12h 1d 1w 1M`，UTC 对齐，周从周一开始。只存有成交的区间；查询时无成交区间用上一根收盘价补平（成交量 0），第一笔成交之前的区间不返回。
 - 当前 K 线变化时每 500 ms 推 `CandleUpdated`；区间结束时推一次 `CandleClosed`，新区间在有成交前推一根平盘 K 线。ticker 变化时推 `TickerUpdated`，没变化也每 15 秒重推一次（`TickerHeartbeat`）：网关从 `market.candle.events` 的末尾读，没有参考市场替它推送的冷清交易对（如 ASTRA-USDT）否则要等下一笔成交才出现在 `tickers` 频道里。
 - 24 小时 ticker 按分钟计算：窗口是当前分钟加前 1439 分钟；`open` 是窗口前最后一笔成交价（之前没有成交时取窗口内第一笔），`change = (last − open) / open`（小数，8 位）；窗口内没有成交时 `last` 沿用上一笔、成交量 0；从未成交的交易对价格为 null。
-- 最新成交价同时是下单价格带与市价保护价的锚点：交易服务从自己的 `fills` 取（缓存 1 秒），没有成交时用参考价。参考行情（币安公开数据，仅测试环境）见下文，HOUSE 虚拟流动性见 [market-maker.md](market-maker.md)；端到端脚本 `marketdata.sh` 在不跟随参考市场的 ETH-BTC 上成交。
+- 最新成交价同时是下单价格带与市价保护价的锚点：交易服务从自己的 `fills` 取（缓存 1 秒），5 分钟内没有成交时用内网参考价 `GET /internal/market/{symbol}/reference`（顺序见 [trading.md](trading.md)）。不跟随参考市场的交易对（平台币 ASTRA-USDT）的"参考价"是平台自己的市场：引擎盘口中间价（`source: platform`），盘口缺一边时 5 分钟内的成交价，再没有时 market-sim 30 秒内上报的目标价（`source: simulation`）；market-sim 每 5 秒经 `PUT /internal/market/{symbol}/simulated-price`（`{"price": "…"}`，204；只接受已上市、不跟随参考市场的交易对，否则 409 `MARKET_NOT_SIMULATED`）上报。这样交易对很久没有成交、盘口又空时，价格带不会锁在一笔旧成交上（ASTRA 设计 §4，见 [market-sim.md](market-sim.md#价格带不锁死市场设计-4)）。参考行情（币安公开数据，仅测试环境）见下文，HOUSE 虚拟流动性见 [market-maker.md](market-maker.md)；端到端脚本 `marketdata.sh` 在不跟随参考市场的 ETH-BTC 上成交。
 
 ## 接口
 
@@ -101,7 +101,7 @@ SELECT symbol, funding_time, funding_rate, mark_price, samples FROM market.fundi
 
 ## 参考行情：跟随哪些交易对（ADR-0010）
 
-- 交易对表的 `reference_symbol`（币安符号，如 `BTCUSDT`）决定是否跟随：有它的交易对都跟随，没有的（测试服 ETH-BTC、平台币 ASTRA-USDT）始终显示平台数据，与 `market.reference_*` 开关怎么设无关：ticker 与 24 小时统计、K 线（REST 与频道）、盘口、成交、走势图、`tickers` 频道与 `/v1/market/summary` 都来自平台自己的 `trade.events` 与引擎盘口（2026-10-02 核对，单元测试覆盖）。`reference_multiplier` 是价格倍数（1000 倍计价的币，如 `1000PEPE-USDT` ↔ `PEPEUSDT`，倍数 1000）：适配器把币安的价格乘以倍数、数量除以倍数，成交额不变，之后一切都按平台的代码与单位处理。两个字段在 `deploy/instruments/test.json` 里维护，部署时幂等同步（见 [instruments.md](instruments.md)）。
+- 交易对表的 `reference_symbol`（币安符号，如 `BTCUSDT`）决定是否跟随：有它的交易对都跟随，没有的（测试服只有平台币 ASTRA-USDT；ETH-BTC 自 B4 起跟随 ETHBTC）始终显示平台数据，与 `market.reference_*` 开关怎么设无关：ticker 与 24 小时统计、K 线（REST 与频道）、盘口、成交、走势图、`tickers` 频道与 `/v1/market/summary` 都来自平台自己的 `trade.events` 与引擎盘口（2026-10-02 核对，单元测试覆盖）。`reference_multiplier` 是价格倍数（1000 倍计价的币，如 `1000PEPE-USDT` ↔ `PEPEUSDT`，倍数 1000）：适配器把币安的价格乘以倍数、数量除以倍数，成交额不变，之后一切都按平台的代码与单位处理。两个字段在 `deploy/instruments/test.json` 里维护，部署时幂等同步（见 [instruments.md](instruments.md)）。
 - 行情服务每分钟重读一次映射，跟随的交易对变了就重连。每次连接先建流（每个交易对 `kline_1m` 与 `ticker` 两条，一个组合连接），同时用 REST 取一次全部 24h ticker、补齐 1 分钟 K 线（从库里最新一根到建流那一分钟，最多一天）；REST 请求间隔 200 毫秒，币安回 429/418 时按 `Retry-After` 暂停全部请求。
 - 旧的环境变量 `REFERENCE_SYMBOLS` 已去掉。
 

@@ -364,3 +364,84 @@ func TestAnEventPassesTheMinuteGuard(t *testing.T) {
 		t.Fatalf("after the pin: %v", p)
 	}
 }
+
+func TestQuoteCenter(t *testing.T) {
+	a := Anchors{Lo: 1, Hi: 1}
+	for _, c := range []struct {
+		target, band, center float64
+		walking              bool
+	}{
+		{1.05, 0.1, 1.05, false}, // inside: the target
+		{1.35, 0.1, 1.07, true},  // beyond: 70% into the band
+		{0.5, 0.1, 0.93, true},
+		{1.35, 0, 1.35, false}, // no band
+	} {
+		got, walking := QuoteCenter(c.target, a, c.band)
+		if math.Abs(got-c.center) > 1e-9 || walking != c.walking {
+			t.Fatalf("%+v: %v %v", c, got, walking)
+		}
+	}
+	// Reads that moved: the band both of them allow.
+	if got, _ := QuoteCenter(1.35, Anchors{Lo: 1, Hi: 1.05}, 0.1); math.Abs(got-1.07) > 1e-9 {
+		t.Fatalf("up from the lower read: %v", got)
+	}
+	if got, _ := QuoteCenter(0.5, Anchors{Lo: 1, Hi: 1.05}, 0.1); math.Abs(got-1.05*0.93) > 1e-9 {
+		t.Fatalf("down from the higher read: %v", got)
+	}
+	if got, walking := QuoteCenter(1, Anchors{}, 0.1); got != 1 || walking {
+		t.Fatal("no anchor, no band")
+	}
+}
+
+func TestInBand(t *testing.T) {
+	prices := []decimal.Decimal{d("0.89"), d("0.95"), d("1.0999"), d("1.1"), d("1.11")}
+	got := InBand(prices, Anchors{Lo: 1, Hi: 1}, 0.1)
+	if len(got) != 2 || !got[0].Equal(d("0.95")) || !got[1].Equal(d("1.0999")) {
+		t.Fatalf("in band: %v", got)
+	}
+	if got := InBand(prices, Anchors{Lo: 1, Hi: 1}, 0); len(got) != len(prices) {
+		t.Fatalf("no band: %v", got)
+	}
+}
+
+func TestTheBucketsShareAndReturns(t *testing.T) {
+	now := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
+	b := Bucket{Rate: 4, Burst: 4}
+	n := 0
+	for b.TakeLeaving(now, 1) {
+		n++
+	}
+	if n != 3 || !b.Take(now) || b.Take(now) {
+		t.Fatalf("the makers took %d of 4, leaving one", n)
+	}
+	b.Return()
+	if !b.Take(now) {
+		t.Fatal("a returned token was not there")
+	}
+	if one := (Bucket{Rate: 1, Burst: 1}); !one.TakeLeaving(now, 5) {
+		t.Fatal("a burst of one: the makers never take")
+	}
+}
+
+func TestBackoff(t *testing.T) {
+	var waits []time.Duration
+	w := time.Duration(0)
+	for range 8 {
+		w = Backoff(w)
+		waits = append(waits, w)
+	}
+	if waits[0] != time.Second || waits[3] != 8*time.Second || waits[7] != time.Minute {
+		t.Fatalf("waits %v", waits)
+	}
+}
+
+func TestRebase(t *testing.T) {
+	m := NewModel(DefaultParams(), State{}, 7)
+	now := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
+	m.Step(now, 60000, 3000, Shape{})
+	m.Rebase(1.5)
+	p, guard := m.Step(now.Add(time.Second), 60000, 3000, Shape{})
+	if math.Abs(p/1.5-1) > 0.01 || guard != GuardNone {
+		t.Fatalf("rebased at 1.5: %v %q", p, guard)
+	}
+}

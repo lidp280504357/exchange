@@ -20,7 +20,8 @@ import (
 // The operators' events (ASTRA design §6.2): the API creates and ends
 // them, each round starts the ones due and applies the running ones'
 // shape to the model, and the executors push the printed price after the
-// target while one moves it (and for executeAfter more).
+// quotes while one moves it (and for executeAfter more) or while the
+// quotes walk the price band.
 const (
 	executeAfter = time.Minute
 	sampleEvery  = 10 * time.Second
@@ -72,6 +73,7 @@ func (s *Sim) startDue(ctx context.Context, now time.Time) {
 		switch e.Type {
 		case domain.EventReanchor:
 			s.model.Reanchor(s.btc, s.eth)
+			s.keepAnchor(ctx, e)
 		case domain.EventHalt:
 			s.stop(ctx)
 			if err := s.pairs.SetPairStatus(ctx, s.cfg.Symbol, "HALT", "system:market-sim", "simulated market event "+e.ID+": "+e.Reason); err != nil {
@@ -104,6 +106,24 @@ func (s *Sim) finish(ctx context.Context, now time.Time, ended []*domain.Event, 
 	})
 }
 
+// keepAnchor saves the new P0 of a re-anchoring in the settings: the
+// model's next start, and the operators' form, go on from it.
+func (s *Sim) keepAnchor(ctx context.Context, e *domain.Event) {
+	p := s.params
+	from := p.P0
+	p.P0 = s.model.Params.P0
+	details, _ := json.Marshal(map[string]any{"p0": map[string]float64{"from": from, "to": p.P0}, "event": e.ID})
+	version, err := s.store.SaveSettings(ctx, p, e.CreatedBy, &ports.Audit{
+		Action: "market.sim.params_changed", Target: "sim:" + s.cfg.Symbol, Actor: e.CreatedBy, Reason: "REANCHOR " + e.ID, Details: string(details),
+	})
+	if err != nil {
+		s.m.errors.WithLabelValues("settings").Inc()
+		s.log.WarnContext(ctx, "simulated market: the new anchor not saved", "event", e.ID, "error", err)
+		return
+	}
+	s.params, s.version = p, version
+}
+
 func (s *Sim) persist(ctx context.Context, e *domain.Event, audit *ports.Audit) {
 	if err := s.store.SaveEvent(ctx, *e, audit); err != nil {
 		s.m.errors.WithLabelValues("event").Inc()
@@ -111,27 +131,24 @@ func (s *Sim) persist(ctx context.Context, e *domain.Event, audit *ports.Audit) 
 	}
 }
 
-// execute lets an executor push the printed price after the target while
-// an event moves it: every second or two, a market order in the target's
-// direction when the last price is off by more than half the spread,
-// larger the farther off.
-func (s *Sim) execute(ctx context.Context, now time.Time, p float64) {
+// execute lets an executor push the printed price after the quotes'
+// center while an event moves the target, or the quotes walk the price
+// band toward it: every second or two, a market order in the center's
+// direction when the last trade is off by more than half the spread,
+// larger the farther off. The trades move the band's anchor, and the
+// walk goes on from there.
+func (s *Sim) execute(ctx context.Context, now time.Time, center float64) {
 	moving := slices.ContainsFunc(s.runningEvents(), func(e *domain.Event) bool { return e.Type == domain.EventJump || e.Type == domain.EventTarget })
-	if (!moving && now.Sub(s.movedAt) > executeAfter) || now.Before(s.executeAt) {
+	if (!moving && !s.walking && now.Sub(s.movedAt) > executeAfter) || now.Before(s.executeAt) {
 		return
 	}
 	executors := s.botsOf(domain.RoleExecutor)
-	if len(executors) == 0 {
+	if len(executors) == 0 || !s.last.IsPositive() {
 		return
 	}
 	rng := s.model.Rand()
 	s.executeAt = now.Add(time.Second + time.Duration(rng.Int64N(int64(time.Second))))
-	last, err := s.prices.Last(ctx, s.cfg.Symbol)
-	if err != nil || !last.IsPositive() {
-		return
-	}
-	s.last = last
-	gap := p/last.InexactFloat64() - 1
+	gap := center/s.last.InexactFloat64() - 1
 	if math.Abs(gap) <= s.params.Spread/2 {
 		return
 	}
@@ -139,8 +156,12 @@ func (s *Sim) execute(ctx context.Context, now time.Time, p float64) {
 	if gap < 0 {
 		side = domain.Sell
 	}
+	b := pick(rng, executors, now)
+	if b == nil {
+		return
+	}
 	worth := s.params.LevelSize * math.Min(20, math.Max(1, math.Abs(gap)/0.001))
-	s.market(ctx, now, executors[rng.IntN(len(executors))], side, worth, p)
+	s.market(ctx, now, b, side, worth, center)
 }
 
 // sample keeps the target and the last price every sampleEvery, a day of

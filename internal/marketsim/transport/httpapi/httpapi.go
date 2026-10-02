@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -63,7 +64,25 @@ type StatusJSON struct {
 	Events          []EventJSON    `json:"events"`
 	Perp            string         `json:"perp"`
 	PerpRunning     bool           `json:"perp_running"`
-	At              *string        `json:"at"`
+	// The price band (ASTRA design §4): its anchor as market-sim reads it,
+	// the band, where the makers quote, whether the quotes walk toward a
+	// target beyond the band, how far the target is from the anchor in
+	// bands (within ±1: inside), the pair's last trade, the watchdog.
+	AnchorPrice  *string      `json:"anchor_price"`
+	PriceBand    string       `json:"price_band"`
+	QuoteCenter  *string      `json:"quote_center"`
+	Walking      bool         `json:"walking"`
+	BandDistance *float64     `json:"band_distance"`
+	LastTradeAt  *string      `json:"last_trade_at"`
+	Watchdog     WatchdogJSON `json:"watchdog"`
+	At           *string      `json:"at"`
+}
+
+// WatchdogJSON is how often the watchdog found the market locked and
+// rebased the model, and when last.
+type WatchdogJSON struct {
+	Fired  int     `json:"fired"`
+	LastAt *string `json:"last_at"`
 }
 
 // EventJSON is a price event; prices are decimal strings.
@@ -127,6 +146,9 @@ type BotJSON struct {
 	Futures       string  `json:"futures_usdt"`
 	Error         string  `json:"error"`
 	ErrorAt       *string `json:"error_at"`
+	// RetryAt is when the bot places orders again after a refusal; null
+	// while it does.
+	RetryAt *string `json:"retry_at"`
 }
 
 func (h *Handler) status(w http.ResponseWriter, _ *http.Request) {
@@ -150,6 +172,21 @@ func (h *Handler) status(w http.ResponseWriter, _ *http.Request) {
 	for g, n := range st.Guards {
 		out.Guards[string(g)] = n
 	}
+	out.PriceBand = decimal.NewFromFloat(st.Band).String()
+	if st.Anchor > 0 {
+		v := decimal.NewFromFloat(st.Anchor).Round(8).String()
+		out.AnchorPrice = &v
+		if st.Band > 0 && st.Target > 0 {
+			dist := math.Round((st.Target/st.Anchor-1)/st.Band*100) / 100
+			out.BandDistance = &dist
+		}
+	}
+	if st.Center > 0 {
+		v := decimal.NewFromFloat(st.Center).Round(8).String()
+		out.QuoteCenter = &v
+	}
+	out.Walking, out.LastTradeAt = st.Walking, timeOrNil(st.LastTradeAt)
+	out.Watchdog = WatchdogJSON{Fired: st.Deadlocks, LastAt: timeOrNil(st.DeadlockAt)}
 	out.Events = []EventJSON{}
 	for _, e := range st.Events {
 		out.Events = append(out.Events, eventJSON(e))
@@ -163,6 +200,7 @@ func (h *Handler) status(w http.ResponseWriter, _ *http.Request) {
 			v := httpx.FormatTime(b.ErrorAt)
 			j.ErrorAt = &v
 		}
+		j.RetryAt = timeOrNil(b.RetryAt)
 		out.Bots = append(out.Bots, j)
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)

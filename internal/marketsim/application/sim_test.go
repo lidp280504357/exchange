@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"slices"
 	"sync"
 	"testing"
@@ -22,23 +23,30 @@ import (
 func d(s string) decimal.Decimal { return decimal.RequireFromString(s) }
 
 // fakeTrading is the platform as the bots see it: limit orders rest until
-// canceled, market orders are counted, balances are fixed.
+// canceled (refused beyond the pair's band around the last trade, or with
+// a user's refusal), market orders are counted and, with prices, trade at
+// the best price on the other side, which becomes the last trade.
 type fakeTrading struct {
-	mu       sync.Mutex
-	pair     domain.Pair
-	seq      int
-	open     map[string][]domain.Order // by user
-	markets  map[domain.Side]int
-	cancels  int
-	cancelAl map[string]int
-	balances map[string]map[string]decimal.Decimal
+	mu        sync.Mutex
+	pair      domain.Pair
+	seq       int
+	open      map[string][]domain.Order // by user
+	markets   map[domain.Side]int
+	cancels   int
+	cancelAl  map[string]int
+	balances  map[string]map[string]decimal.Decimal
+	prices    *fakePrices
+	anchor    decimal.Decimal  // the band's anchor when set, else the last trade
+	refuse    map[string]error // by user
+	tries     map[string]int   // limit orders asked for, by user
+	outOfBand int
 }
 
 func newFakeTrading() *fakeTrading {
 	return &fakeTrading{
 		pair: domain.Pair{Symbol: "ASTRA-USDT", Tick: d("0.0001"), Lot: d("1"), MinQty: d("1"), MinNotional: d("5"), Trading: true},
 		open: map[string][]domain.Order{}, markets: map[domain.Side]int{}, cancelAl: map[string]int{},
-		balances: map[string]map[string]decimal.Decimal{},
+		balances: map[string]map[string]decimal.Decimal{}, refuse: map[string]error{}, tries: map[string]int{},
 	}
 }
 
@@ -57,8 +65,20 @@ func (f *fakeTrading) Open(_ context.Context, user, _ string) ([]domain.Order, e
 func (f *fakeTrading) Limit(_ context.Context, user, _ string, side domain.Side, price, qty decimal.Decimal) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.tries[user]++
 	if !qty.IsPositive() {
 		return "", fmt.Errorf("quantity %s", qty)
+	}
+	if err := f.refuse[user]; err != nil {
+		return "", err
+	}
+	anchor := f.anchor
+	if anchor.IsZero() && f.prices != nil {
+		anchor = f.prices.lastPrice()
+	}
+	if band := decimal.NewFromFloat(f.pair.Band); band.IsPositive() && anchor.IsPositive() && price.Sub(anchor).Abs().GreaterThan(anchor.Mul(band)) {
+		f.outOfBand++
+		return "", ports.ErrOutOfBand
 	}
 	f.seq++
 	id := fmt.Sprintf("o%d", f.seq)
@@ -66,13 +86,35 @@ func (f *fakeTrading) Limit(_ context.Context, user, _ string, side domain.Side,
 	return id, nil
 }
 
-func (f *fakeTrading) Market(_ context.Context, _, _ string, side domain.Side, quote, qty decimal.Decimal) error {
+func (f *fakeTrading) Market(_ context.Context, user, _ string, side domain.Side, quote, qty decimal.Decimal) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if (side == domain.Buy && !quote.IsPositive()) || (side == domain.Sell && !qty.IsPositive()) {
 		return fmt.Errorf("market %s: quote %s qty %s", side, quote, qty)
 	}
+	if err := f.refuse[user]; err != nil {
+		return err
+	}
 	f.markets[side]++
+	if f.prices == nil {
+		return nil
+	}
+	// It trades at the best price on the other side, which becomes the
+	// last trade.
+	var best decimal.Decimal
+	for _, orders := range f.open {
+		for _, o := range orders {
+			if o.Side == side {
+				continue
+			}
+			if best.IsZero() || (side == domain.Buy && o.Price.LessThan(best)) || (side == domain.Sell && o.Price.GreaterThan(best)) {
+				best = o.Price
+			}
+		}
+	}
+	if best.IsPositive() {
+		f.prices.trade(best)
+	}
 	return nil
 }
 
@@ -112,22 +154,66 @@ func (f *fakeTrading) orders(user string) []domain.Order {
 	return append([]domain.Order(nil), f.open[user]...)
 }
 
+// fakePrices are the reference prices and the pair's market data: its
+// last trade (at lastAt; zero: just now), its own reference ref, the
+// prices reported, the perpetual's mark.
 type fakePrices struct {
 	mu             sync.Mutex
 	btc, eth, last decimal.Decimal
+	lastAt         time.Time
+	frozen         bool // market orders do not trade
+	ref, mark      decimal.Decimal
+	reported       []decimal.Decimal
+	now            func() time.Time
 }
 
 func (p *fakePrices) Reference(_ context.Context, symbol string) (decimal.Decimal, bool, error) {
-	if symbol == btcPair {
-		return p.btc, true, nil
-	}
-	return p.eth, true, nil
-}
-
-func (p *fakePrices) Last(context.Context, string) (decimal.Decimal, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.last, nil
+	switch symbol {
+	case btcPair:
+		return p.btc, true, nil
+	case ethPair:
+		return p.eth, true, nil
+	}
+	return p.ref, p.ref.IsPositive(), nil
+}
+
+func (p *fakePrices) LastTrade(context.Context, string) (decimal.Decimal, time.Time, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	at := p.lastAt
+	if at.IsZero() {
+		at = p.now()
+	}
+	return p.last, at, nil
+}
+
+func (p *fakePrices) Report(_ context.Context, _ string, price decimal.Decimal) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.reported = append(p.reported, price)
+	return nil
+}
+
+func (p *fakePrices) Mark(context.Context, string) (decimal.Decimal, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.mark, nil
+}
+
+func (p *fakePrices) lastPrice() decimal.Decimal {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.last
+}
+
+func (p *fakePrices) trade(price decimal.Decimal) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.frozen {
+		p.last = price
+	}
 }
 
 type memStore struct {
@@ -292,7 +378,7 @@ func newRig(t *testing.T, store *memStore) *rig {
 	}
 	r := &rig{trading: newFakeTrading(), store: store, flags: &flagSet{on: true, events: true}, now: time.Date(2026, 10, 2, 14, 0, 0, 0, time.UTC)}
 	r.pairs = &fakePairs{trading: r.trading}
-	r.prices = &fakePrices{btc: d("60000"), eth: d("3000"), last: d("1.0001")}
+	r.prices = &fakePrices{btc: d("60000"), eth: d("3000"), last: d("1.0001"), now: func() time.Time { return r.now }}
 	r.sim = New(Config{Symbol: "ASTRA-USDT", Quote: "USDT", Tick: 250 * time.Millisecond, Seed: 11}, r.trading,
 		r.prices, r.pairs, store, r.flags, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
 	r.sim.now = func() time.Time { return r.now }
@@ -825,6 +911,244 @@ func TestAPositionAtTheCapOnlyReduces(t *testing.T) {
 	for _, o := range fd.open["m1"] {
 		if o.Side == domain.Sell {
 			t.Fatalf("m1 short at the cap asks at %s", o.Price)
+		}
+	}
+}
+
+// bandRig is a rig whose pair has a band of 10% around the last trade,
+// which market orders move.
+func bandRig(t *testing.T, store *memStore) *rig {
+	t.Helper()
+	r := newRig(t, store)
+	r.trading.mu.Lock()
+	r.trading.pair.Band = 0.1
+	r.trading.prices = r.prices
+	r.trading.mu.Unlock()
+	r.sim.pairAt = time.Time{} // read the band at once
+	return r
+}
+
+func executorStore() *memStore {
+	p := domain.DefaultParams()
+	p.DailyVolume = 0
+	return &memStore{params: &p, version: 1, bots: []ports.Bot{
+		{UserID: "m1", Role: domain.RoleMaker, Label: "bot-01", Enabled: true},
+		{UserID: "m2", Role: domain.RoleMaker, Label: "bot-02", Enabled: true},
+		{UserID: "x1", Role: domain.RoleExecutor, Label: "bot-03", Enabled: true},
+	}}
+}
+
+// A target 35% above the last trade is beyond the band of 10%: the makers
+// quote at the band's edge, never beyond it, the executors trade there,
+// the anchor follows, and the quotes walk up to the target (ASTRA design
+// §4: the band must not lock the market).
+func TestTheQuotesWalkTheBandToATargetBeyondIt(t *testing.T) {
+	r := bandRig(t, executorStore())
+	r.rounds(8)
+	r.create(t, domain.Event{Type: domain.EventTarget, Price: d("1.35"), Hold: time.Hour, ApprovedBy: "ops2"})
+	r.rounds(2)
+	if st := r.sim.Status(); !st.Walking || st.Center > 1.0001*1.1 || st.Band != 0.1 || st.Anchor != 1.0001 {
+		t.Fatalf("the quotes do not walk from the band's edge: %+v", st)
+	}
+	for range 4 * 60 {
+		r.rounds(1)
+		if last := r.prices.lastPrice(); last.GreaterThan(d("1.33")) {
+			break
+		}
+	}
+	if last := r.prices.lastPrice(); last.LessThan(d("1.33")) {
+		t.Fatalf("a minute later the last trade is %s, the target 1.35", last)
+	}
+	r.rounds(4 * 10)
+	if r.trading.outOfBand != 0 {
+		t.Fatalf("%d levels refused for the band", r.trading.outOfBand)
+	}
+	if st := r.sim.Status(); st.Walking || st.Deadlocks != 0 {
+		t.Fatalf("arrived: %+v", st)
+	}
+	for _, m := range []string{"m1", "m2"} {
+		var bids, asks int
+		for _, o := range r.trading.orders(m) {
+			if o.Side == domain.Buy {
+				bids++
+			} else {
+				asks++
+			}
+		}
+		if bids != 8 || asks != 8 {
+			t.Fatalf("%s at the target: %d bids, %d asks", m, bids, asks)
+		}
+	}
+}
+
+// Nothing trades for three minutes (the market orders go nowhere): the
+// watchdog ends the target that holds the price beyond the band and
+// rebases the model at the band's anchor. A pause is no lock.
+func TestTheWatchdogRebasesALockedMarket(t *testing.T) {
+	r := bandRig(t, executorStore())
+	r.prices.mu.Lock()
+	r.prices.frozen, r.prices.lastAt = true, r.now
+	r.prices.mu.Unlock()
+	r.rounds(4)
+	e := r.create(t, domain.Event{Type: domain.EventPause, Duration: 4 * time.Minute})
+	r.rounds(4*4*60 + 8)
+	if st := r.sim.Status(); st.Deadlocks != 0 {
+		t.Fatalf("a pause of four minutes: %+v", st)
+	}
+	if got := r.store.event(e.ID); got.Status != domain.EventDone {
+		t.Fatalf("the pause: %s", got.Status)
+	}
+	e = r.create(t, domain.Event{Type: domain.EventTarget, Price: d("1.35"), Hold: time.Hour, ApprovedBy: "ops2"})
+	r.rounds(4 * 170)
+	if st := r.sim.Status(); st.Deadlocks != 0 || st.Target != 1.35 {
+		t.Fatalf("before three minutes: %+v", st)
+	}
+	r.rounds(4 * 15)
+	st := r.sim.Status()
+	if st.Deadlocks != 1 || st.Target > 1.0001*1.01 || st.Target < 1.0001*0.99 {
+		t.Fatalf("after three minutes: deadlocks %d, target %v", st.Deadlocks, st.Target)
+	}
+	got := r.store.event(e.ID)
+	if got.Status != domain.EventDone || got.EndedBy != watchdogActor {
+		t.Fatalf("the target: %+v", got)
+	}
+	if a := r.store.audits[len(r.store.audits)-1]; a.Action != "market.sim.event_ended" || a.Actor != watchdogActor {
+		t.Fatalf("audit %+v", a)
+	}
+}
+
+// Every level the makers place is refused for the band (the platform's
+// anchor is not where the bots read it) for three minutes: the watchdog
+// fires although the takers keep trading.
+func TestTheWatchdogSeesEveryLevelRefused(t *testing.T) {
+	r := bandRig(t, executorStore())
+	r.trading.mu.Lock()
+	r.trading.anchor = d("0.5")
+	r.trading.mu.Unlock()
+	r.rounds(4 * 170)
+	if st := r.sim.Status(); st.Deadlocks != 0 || r.trading.outOfBand == 0 {
+		t.Fatalf("before three minutes: %+v, %d refused", st, r.trading.outOfBand)
+	}
+	r.rounds(4 * 15)
+	if st := r.sim.Status(); st.Deadlocks != 1 {
+		t.Fatalf("after three minutes: %+v", st)
+	}
+	// A refusal for the band makes the maker wait: far fewer tries than
+	// rounds.
+	if n := r.trading.tries["m1"]; n > 40 {
+		t.Fatalf("m1 tried %d orders in three minutes", n)
+	}
+}
+
+// A refused order costs no token and makes its bot wait, longer each
+// time; the other bots trade on.
+func TestARefusedBotWaitsAndCostsNoToken(t *testing.T) {
+	p := domain.DefaultParams()
+	p.OrdersPerSecond, p.DailyVolume = 4, 0
+	r := newRig(t, &memStore{params: &p, version: 1})
+	r.trading.mu.Lock()
+	r.trading.refuse["m1"] = errors.New("HTTP 500")
+	r.trading.mu.Unlock()
+	r.rounds(4 * 20)
+	r.trading.mu.Lock()
+	tries := r.trading.tries["m1"]
+	r.trading.mu.Unlock()
+	if tries < 3 || tries > 6 {
+		t.Fatalf("m1 tried %d times in twenty seconds (waiting 1, 2, 4, 8 s)", tries)
+	}
+	if n := len(r.trading.orders("m2")); n != 16 {
+		t.Fatalf("m2 has %d orders", n)
+	}
+	if st := r.sim.Status(); !st.Bots[0].RetryAt.After(r.now) || st.Bots[0].Error == "" {
+		t.Fatalf("m1 %+v", st.Bots[0])
+	}
+}
+
+// The makers leave the takers their share of the throttle: with four
+// orders a second and both makers building their ladders, the takers'
+// orders still go out.
+func TestTheMakersLeaveTheTakersTheirShare(t *testing.T) {
+	p := domain.DefaultParams()
+	p.OrdersPerSecond, p.DailyVolume, p.OrderSize = 4, 86_400*400, 400 // a taker order a second
+	r := newRig(t, &memStore{params: &p, version: 1})
+	r.rounds(4 * 5)
+	r.trading.mu.Lock()
+	markets := r.trading.markets[domain.Buy] + r.trading.markets[domain.Sell]
+	r.trading.mu.Unlock()
+	if markets < 2 {
+		t.Fatalf("%d taker orders in five seconds while the makers quote", markets)
+	}
+}
+
+// A re-anchoring keeps its anchor P0 in the settings: a restart goes on
+// from it rather than from the old P0.
+func TestAReanchorKeepsItsAnchor(t *testing.T) {
+	r := newRig(t, nil)
+	r.rounds(4)
+	r.create(t, domain.Event{Type: domain.EventJump, Size: 0.2})
+	r.rounds(4)
+	r.create(t, domain.Event{Type: domain.EventReanchor})
+	r.rounds(1)
+	target := r.sim.Status().Target
+	if math.Abs(r.store.params.P0/target-1) > 0.001 || r.store.version < 2 || r.store.byWhom != "ops" {
+		t.Fatalf("P0 %v (target %v), version %d by %q", r.store.params.P0, target, r.store.version, r.store.byWhom)
+	}
+	if a := r.store.audits[len(r.store.audits)-1]; a.Action != "market.sim.params_changed" && a.Action != "market.sim.event_created" {
+		t.Fatalf("audit %+v", a)
+	}
+	r.rounds(4)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := r.sim.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	again := newRig(t, r.store)
+	again.now = r.now
+	again.rounds(4)
+	if p := again.sim.Status().Target; p < target*0.99 || p > target*1.01 {
+		t.Fatalf("restarted at %v, was %v", p, target)
+	}
+}
+
+// The target is reported, on the tick, every five seconds; with no recent
+// trade the band's anchor is the pair's reference, as the trading
+// service's.
+func TestTheTargetIsReportedAndTheAnchorFallsBack(t *testing.T) {
+	r := newRig(t, nil)
+	r.rounds(4 * 11)
+	r.prices.mu.Lock()
+	reported := slices.Clone(r.prices.reported)
+	r.prices.lastAt, r.prices.ref = r.now.Add(-6*time.Minute), d("1.2")
+	r.prices.mu.Unlock()
+	if len(reported) < 2 || len(reported) > 3 || !reported[0].Equal(reported[0].Round(4)) {
+		t.Fatalf("reported %v", reported)
+	}
+	r.rounds(8)
+	if st := r.sim.Status(); st.Anchor != 1.2 {
+		t.Fatalf("the anchor of an old trade: %+v", st)
+	}
+}
+
+// The perpetual's makers quote around its mark price, within its band.
+func TestThePerpetualQuotesAroundItsMark(t *testing.T) {
+	p := domain.DefaultParams()
+	p.DailyVolume, p.PerpDailyVolume = 0, 0
+	r, fd := perpRig(t, p)
+	fd.mu.Lock()
+	fd.contract.Band = 0.05
+	fd.mu.Unlock()
+	r.prices.mu.Lock()
+	r.prices.mark = d("1.04")
+	r.prices.mu.Unlock()
+	r.rounds(4 * 20)
+	orders := fd.orders("m1")
+	if len(orders) != 16 {
+		t.Fatalf("%d orders", len(orders))
+	}
+	for _, o := range orders {
+		if (o.Side == domain.Buy && o.Price.GreaterThanOrEqual(d("1.04"))) || (o.Side == domain.Sell && o.Price.LessThanOrEqual(d("1.04"))) ||
+			o.Price.Sub(d("1.04")).Abs().GreaterThan(d("0.052")) {
+			t.Fatalf("%s at %s around a mark of 1.04", o.Side, o.Price)
 		}
 	}
 }

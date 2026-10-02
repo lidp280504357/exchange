@@ -5,8 +5,11 @@
 # trades and 1m candles of its own (no reference market); a new user buys
 # ASTRA at the market from the bots and sells it back, settled in the
 # ledger like any trade; a limit order below the book rests and is
-# canceled. Skipped while ASTRA-USDT is not trading or the bots are off
-# (scripts/ops/astra.sh seed, open, on).
+# canceled. With sim.events on, a jump of 35% by one operator is refused,
+# one of 2% moves the target and a target event brings it back (A3); with
+# the bots on ASTRA-USDT-PERP, the user opens a long against them and
+# closes it (A4). Skipped while ASTRA-USDT is not trading or the bots are
+# off (scripts/ops/astra.sh seed, open, on, events-on, perp-open, perp-on).
 #
 #   scripts/e2e/astra.sh
 set -euo pipefail
@@ -108,4 +111,87 @@ canceled() { call GET "/v1/orders/$REST_ID" "" "${AUTH[@]}" && [[ $(jq -r .statu
 eventually 40 "canceled" canceled
 released() { [[ $(balance USDT | cut -d' ' -f2) == 0 ]]; }
 eventually 40 "its funds released" released
+
+# simpost PATH JSON posts JSON to market-sim's management API: SIM_STATUS
+# is the HTTP status, SIM_BODY the answer (BusyBox wget prints none for an
+# error status).
+simpost() {
+  local out
+  out=$(remote "sudo docker compose $COMPOSE_FILES exec -T market-sim wget -S -qO- --header 'Content-Type: application/json' --post-data $(printf %q "$2") http://127.0.0.1:8098$1 2>&1" || true)
+  SIM_STATUS=$(grep -oE 'HTTP/1\.1 [0-9]+' <<<"$out" | tail -1 | cut -d' ' -f2)
+  SIM_BODY=$(sed -n '/^{/,$p' <<<"$out")
+}
+simget() { remote "sudo docker compose $COMPOSE_FILES exec -T market-sim wget -qO- 'http://127.0.0.1:8098$1'"; }
+
+echo "== an operator's price event (sim.events)"
+EVENTS_ON=$(pg "SELECT enabled FROM config.flags WHERE key = 'sim.events'")
+if [[ $EVENTS_ON != t ]]; then
+  echo "skip: the operators' price events are off (scripts/ops/astra.sh events-on)"
+else
+  FROM=$(simget /internal/sim | jq -r .target_price)
+  # BusyBox wget prints no body for a refusal: its status, and no event.
+  simpost /internal/sim/events '{"type":"JUMP","size":0.35,"actor":"e2e-ops","reason":"e2e: beyond one operator"}'
+  [[ $SIM_STATUS == 403 && $(pg "SELECT count(*) FROM marketsim.events WHERE reason = 'e2e: beyond one operator'") == 0 ]] ||
+    { echo "FAIL a jump of 35% alone: HTTP $SIM_STATUS" >&2; exit 1; }
+  echo "ok   a jump of 35% needs a second operator (403)"
+  # Approved by a second operator: repeated runs stay within any hour's
+  # limit (one operator's own limits have unit tests).
+  simpost /internal/sim/events '{"type":"JUMP","size":0.02,"duration_seconds":10,"actor":"e2e-ops","approved_by":"e2e-ops-2","reason":"e2e: a small jump"}'
+  [[ $SIM_STATUS == 201 ]] || { echo "FAIL a jump of 2%: HTTP $SIM_STATUS $SIM_BODY" >&2; exit 1; }
+  JUMP=$(jq -r .id <<<"$SIM_BODY")
+  jumped() {
+    local st
+    st=$(simget "/internal/sim/events?all=1&limit=10")
+    [[ $(jq -r --arg id "$JUMP" '.items[] | select(.id == $id) | .status' <<<"$st") == DONE ]]
+  }
+  eventually 60 "the jump ran its 10 seconds" jumped
+  TO=$(simget /internal/sim | jq -r .target_price)
+  [[ $(jq -n "$TO > $FROM * 1.01") == true ]] || { echo "FAIL the target went from $FROM to $TO" >&2; exit 1; }
+  echo "ok   the target went from $FROM to $TO"
+  simpost /internal/sim/events "{\"type\":\"TARGET\",\"price\":\"$FROM\",\"duration_seconds\":10,\"actor\":\"e2e-ops\",\"approved_by\":\"e2e-ops-2\",\"reason\":\"e2e: back\"}"
+  [[ $SIM_STATUS == 201 ]] || { echo "FAIL back to $FROM: HTTP $SIM_STATUS $SIM_BODY" >&2; exit 1; }
+  echo "ok   a target back to $FROM"
+  audited() { [[ $(pg "SELECT count(*) FROM marketsim.events WHERE created_by = 'e2e-ops' AND created_at > now() - interval '5 minutes'") -ge 2 ]]; }
+  eventually 20 "both events recorded" audited
+
+  # The price band (10% around the last trade) must not lock the market
+  # (ASTRA design §4): a target 15% away, at once; without anyone's help
+  # the quotes walk the band there within three minutes, and back.
+  echo "== a target beyond the price band"
+  # last_at PRICE: the simulation's last trade, and its book of 8 levels a side.
+  last_at() {
+    local st
+    st=$(simget /internal/sim)
+    [[ $(jq --argjson want "$1" '.last_price != null and ((.last_price | tonumber) / $want - 1 | fabs) <= 0.03' <<<"$st") == true ]] && booked
+  }
+  UP=$(jq -rn --argjson p "$FROM" '$p * 1.15 * 10000 | floor / 10000 | tostring')
+  FIRED=$(simget /internal/sim | jq '.watchdog.fired')
+  simpost /internal/sim/events "{\"type\":\"TARGET\",\"price\":\"$UP\",\"actor\":\"e2e-ops\",\"approved_by\":\"e2e-ops-2\",\"reason\":\"e2e: beyond the band\"}"
+  [[ $SIM_STATUS == 201 ]] || { echo "FAIL a target of $UP: HTTP $SIM_STATUS $SIM_BODY" >&2; exit 1; }
+  eventually 180 "the market walked the band 15% up to $UP, with 8 levels a side" last_at "$UP"
+  simpost /internal/sim/events "{\"type\":\"TARGET\",\"price\":\"$FROM\",\"actor\":\"e2e-ops\",\"approved_by\":\"e2e-ops-2\",\"reason\":\"e2e: back inside the band\"}"
+  [[ $SIM_STATUS == 201 ]] || { echo "FAIL back to $FROM: HTTP $SIM_STATUS $SIM_BODY" >&2; exit 1; }
+  eventually 180 "and back down to $FROM" last_at "$FROM"
+  [[ $(simget /internal/sim | jq '.watchdog.fired') == "$FIRED" ]] ||
+    { echo "FAIL the watchdog had to unlock the market" >&2; exit 1; }
+  echo "ok   the quotes walked the band; the watchdog stayed out of it"
+fi
+
+echo "== the perpetual (sim.perp)"
+call GET /v1/market/contracts/ASTRA-USDT-PERP ""
+if [[ $STATUS != 200 || $(jq -r .status <<<"$BODY") != TRADING || $(jq -r .perp_running <<<"$(simget /internal/sim)") != true ]]; then
+  echo "skip: ASTRA-USDT-PERP is not trading or the bots are not on it (scripts/ops/astra.sh perp-open, perp-on)"
+else
+  call POST /v1/account/transfers '{"asset":"USDT","amount":"100","from_account_type":"SPOT","to_account_type":"FUTURES"}' \
+    "${AUTH[@]}" -H "Idempotency-Key: astra-perp-$RUN"
+  expect 201 - "100 USDT to FUTURES"
+  call POST /v1/derivatives/orders '{"symbol":"ASTRA-USDT-PERP","side":"BUY","type":"MARKET","quantity":"20"}' "${AUTH[@]}"
+  expect 202 - "a market buy of 20 ASTRA-USDT-PERP"
+  long() { call GET /v1/derivatives/positions "" "${AUTH[@]}" && [[ $(jq -r '[.positions[] | select(.symbol == "ASTRA-USDT-PERP")][0].quantity // "0"' <<<"$BODY") == 20 ]]; }
+  eventually 80 "long 20 against the bots" long
+  call POST /v1/derivatives/orders '{"symbol":"ASTRA-USDT-PERP","side":"SELL","type":"MARKET","quantity":"20","reduce_only":true}' "${AUTH[@]}"
+  expect 202 - "closed at the market"
+  flat() { call GET /v1/derivatives/positions "" "${AUTH[@]}" && [[ $(jq -r '[.positions[] | select(.symbol == "ASTRA-USDT-PERP")] | length' <<<"$BODY") == 0 ]]; }
+  eventually 80 "flat again" flat
+fi
 echo "all platform coin checks passed"

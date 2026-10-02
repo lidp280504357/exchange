@@ -181,6 +181,13 @@ groups:
           summary: "the simulated market has had no fresh BTC and ETH reference prices for 5 minutes: the platform coin's price no longer follows the market"
           runbook: docs/runbook/market-sim.md
 
+      - alert: MarketSimBandDeadlock
+        expr: sum by (job) (increase(market_sim_band_deadlocks_total[15m])) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "the platform coin's market was locked (three minutes without a trade, or every level refused for the price band); market-sim rebased its price at the band's anchor"
+          runbook: docs/runbook/market-sim.md
+
       - alert: HousePublishFailing
         expr: sum by (job) (increase(market_house_publish_failures_total[5m])) > 0
         labels: {severity: warning}

@@ -202,7 +202,8 @@ func setup(ctx context.Context, a *app.App) error {
 	}}
 	r := a.NewRouter()
 	(&httpapi.Handler{
-		Svc: svc, Tickers: tickers, Ref: feed, Guard: guard, Marks: marks, RefKlines: refKlines, Books: books, Sparks: sparks, Now: time.Now,
+		Svc: svc, Tickers: tickers, Ref: feed, Guard: guard, Marks: marks, RefKlines: refKlines, Books: books, Sparks: sparks,
+		Platform: &application.PlatformReference{Svc: svc, Refs: refs}, Now: time.Now,
 	}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
 }

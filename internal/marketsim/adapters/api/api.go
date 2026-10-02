@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -80,6 +81,19 @@ func (c *Client) do(ctx context.Context, method, rawURL, user string, body, out 
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
+// outOfBand is both trading services' refusal of a limit price too far
+// from the band's anchor.
+const outOfBand = "ORDER_PRICE_OUT_OF_BAND"
+
+// band is a price band's share, 0 when there is none.
+func band(s string) float64 {
+	b, err := decimal.NewFromString(s)
+	if err != nil || !b.IsPositive() {
+		return 0
+	}
+	return b.InexactFloat64()
+}
+
 func code(err error) string {
 	if e := (*Error)(nil); errors.As(err, &e) {
 		return e.Code
@@ -95,6 +109,7 @@ func (c *Client) Pair(ctx context.Context, symbol string) (domain.Pair, error) {
 		LotSize     string `json:"lot_size"`
 		MinQuantity string `json:"min_quantity"`
 		MinNotional string `json:"min_notional"`
+		PriceBand   string `json:"price_band"`
 		Status      string `json:"status"`
 	}
 	if err := c.do(ctx, http.MethodGet, c.InstrumentURL+"/v1/market/pairs/"+url.PathEscape(symbol), "", nil, &p); err != nil {
@@ -111,7 +126,9 @@ func (c *Client) Pair(ctx context.Context, symbol string) (domain.Pair, error) {
 	if !ds[0].IsPositive() || !ds[1].IsPositive() {
 		return domain.Pair{}, fmt.Errorf("pair %s: no tick or lot size", symbol)
 	}
-	return domain.Pair{Symbol: p.Symbol, Tick: ds[0], Lot: ds[1], MinQty: ds[2], MinNotional: ds[3], Trading: p.Status == "TRADING"}, nil
+	return domain.Pair{
+		Symbol: p.Symbol, Tick: ds[0], Lot: ds[1], MinQty: ds[2], MinNotional: ds[3], Band: band(p.PriceBand), Trading: p.Status == "TRADING",
+	}, nil
 }
 
 // Open lists the bot's active orders on symbol.
@@ -152,8 +169,11 @@ func (c *Client) Limit(ctx context.Context, user, symbol string, side domain.Sid
 		OrderID string `json:"order_id"`
 	}
 	err := c.do(ctx, http.MethodPost, c.TradingURL+"/v1/orders", user, body, &out)
-	if code(err) == "LEDGER_INSUFFICIENT_BALANCE" {
+	switch code(err) {
+	case "LEDGER_INSUFFICIENT_BALANCE":
 		return "", ports.ErrFunds
+	case outOfBand:
+		return "", ports.ErrOutOfBand
 	}
 	if err != nil {
 		return "", fmt.Errorf("limit %s %s@%s: %w", side, qty, price, err)
@@ -237,18 +257,49 @@ func (c *Client) Reference(ctx context.Context, symbol string) (decimal.Decimal,
 	return p, err == nil && body.Fresh, err
 }
 
-// Last reads the pair's last traded price on the platform (0: none).
-func (c *Client) Last(ctx context.Context, symbol string) (decimal.Decimal, error) {
+// LastTrade reads the pair's last trade on the platform (0: none).
+func (c *Client) LastTrade(ctx context.Context, symbol string) (decimal.Decimal, time.Time, error) {
 	var body struct {
-		Last *string `json:"last"`
+		Trades []struct {
+			Price      string    `json:"price"`
+			ExecutedAt time.Time `json:"executed_at"`
+		} `json:"trades"`
 	}
-	if err := c.do(ctx, http.MethodGet, c.MarketURL+"/v1/market/"+url.PathEscape(symbol)+"/ticker", "", nil, &body); err != nil {
-		return decimal.Zero, fmt.Errorf("ticker %s: %w", symbol, err)
+	if err := c.do(ctx, http.MethodGet, c.MarketURL+"/v1/market/"+url.PathEscape(symbol)+"/trades?limit=1", "", nil, &body); err != nil {
+		return decimal.Zero, time.Time{}, fmt.Errorf("trades %s: %w", symbol, err)
 	}
-	if body.Last == nil || *body.Last == "" {
+	if len(body.Trades) == 0 {
+		return decimal.Zero, time.Time{}, nil
+	}
+	p, err := decimal.NewFromString(body.Trades[0].Price)
+	if err != nil {
+		return decimal.Zero, time.Time{}, fmt.Errorf("trades %s: %w", symbol, err)
+	}
+	return p, body.Trades[0].ExecutedAt, nil
+}
+
+// Report gives market-data-service the simulated market's target of
+// symbol.
+func (c *Client) Report(ctx context.Context, symbol string, price decimal.Decimal) error {
+	body := map[string]string{"price": price.String()}
+	if err := c.do(ctx, http.MethodPut, c.MarketURL+"/internal/market/"+url.PathEscape(symbol)+"/simulated-price", "", body, nil); err != nil {
+		return fmt.Errorf("simulated price %s: %w", symbol, err)
+	}
+	return nil
+}
+
+// Mark reads a contract's mark price (0: none yet).
+func (c *Client) Mark(ctx context.Context, symbol string) (decimal.Decimal, error) {
+	var body struct {
+		MarkPrice *string `json:"mark_price"`
+	}
+	if err := c.do(ctx, http.MethodGet, c.MarketURL+"/v1/market/"+url.PathEscape(symbol)+"/mark-price", "", nil, &body); err != nil {
+		return decimal.Zero, fmt.Errorf("mark price %s: %w", symbol, err)
+	}
+	if body.MarkPrice == nil || *body.MarkPrice == "" {
 		return decimal.Zero, nil
 	}
-	return decimal.NewFromString(*body.Last)
+	return decimal.NewFromString(*body.MarkPrice)
 }
 
 // Contract reads the contract's rules from instrument-service.
@@ -259,6 +310,7 @@ func (c *Client) Contract(ctx context.Context, symbol string) (domain.Pair, erro
 		LotSize     string `json:"lot_size"`
 		MinQuantity string `json:"min_quantity"`
 		MinNotional string `json:"min_notional"`
+		PriceBand   string `json:"price_band"`
 		Status      string `json:"status"`
 	}
 	if err := c.do(ctx, http.MethodGet, c.InstrumentURL+"/v1/market/contracts/"+url.PathEscape(symbol), "", nil, &k); err != nil {
@@ -275,7 +327,9 @@ func (c *Client) Contract(ctx context.Context, symbol string) (domain.Pair, erro
 	if !ds[0].IsPositive() || !ds[1].IsPositive() {
 		return domain.Pair{}, fmt.Errorf("contract %s: no tick or lot size", symbol)
 	}
-	return domain.Pair{Symbol: k.Symbol, Tick: ds[0], Lot: ds[1], MinQty: ds[2], MinNotional: ds[3], Trading: k.Status == "TRADING"}, nil
+	return domain.Pair{
+		Symbol: k.Symbol, Tick: ds[0], Lot: ds[1], MinQty: ds[2], MinNotional: ds[3], Band: band(k.PriceBand), Trading: k.Status == "TRADING",
+	}, nil
 }
 
 // OpenContract lists the bot's active orders on the contract.
@@ -317,6 +371,8 @@ func (c *Client) LimitContract(ctx context.Context, user, symbol string, side do
 	switch code(err) {
 	case "DERIV_INSUFFICIENT_MARGIN", "LEDGER_INSUFFICIENT_BALANCE", "DERIV_RISK_LIMIT_EXCEEDED":
 		return "", ports.ErrFunds
+	case outOfBand:
+		return "", ports.ErrOutOfBand
 	}
 	if err != nil {
 		return "", fmt.Errorf("contract limit %s %s@%s: %w", side, qty, price, err)

@@ -40,7 +40,10 @@ type Handler struct {
 	Books *application.Books
 	// Sparks serves the market lists' trend lines.
 	Sparks *application.Sparklines
-	Now    func() time.Time
+	// Platform is the reference of the pairs no reference market follows
+	// (their own market, else the simulated market's price); nil: none.
+	Platform *application.PlatformReference
+	Now      func() time.Time
 }
 
 // Routes mounts the endpoints on r.
@@ -58,6 +61,7 @@ func (h *Handler) Routes(r chi.Router) {
 	// (Binance, §11.9) never reaches clients; the trading service and the
 	// market maker read it, and the index components for audits.
 	r.Get("/internal/market/{symbol}/reference", h.reference)
+	r.Put("/internal/market/{symbol}/simulated-price", h.simulatedPrice)
 	r.Get("/internal/market/{symbol}/mark", h.markInternal)
 	r.Get("/internal/market/feed", h.feed)
 }
@@ -96,8 +100,41 @@ func (h *Handler) reference(w http.ResponseWriter, r *http.Request) {
 			out["updated_at"] = ref.At.UTC().Format(time.RFC3339Nano)
 		}
 	}
+	if out["source"] == nil && h.Platform != nil {
+		if ref, ok := h.Platform.Price(r.Context(), s); ok {
+			out["source"], out["price"], out["fresh"] = ref.Source, ref.Price.String(), true
+			out["updated_at"] = ref.At.UTC().Format(time.RFC3339Nano)
+		}
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// simulatedPrice keeps the price the simulated market reports for a pair
+// no reference market follows (ASTRA design §4): the pair's reference
+// while its own book has no middle.
+func (h *Handler) simulatedPrice(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Price string `json:"price"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	p, err := decimal.NewFromString(body.Price)
+	if err != nil {
+		httpx.WriteError(w, r, apperr.Invalid("price is a decimal"))
+		return
+	}
+	if h.Platform == nil {
+		httpx.WriteError(w, r, application.ErrFollowed)
+		return
+	}
+	if err := h.Platform.Report(r.Context(), symbol(r), p); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // live lets clients and Cloudflare reuse an answer for a second at most.

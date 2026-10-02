@@ -14,7 +14,8 @@ type Role string
 
 // The roles: makers quote both sides around the target, takers buy and
 // sell at the market at random, trend followers trade the target's recent
-// direction, executors carry the operators' events (none yet).
+// direction, executors push the printed price after the target while an
+// event moves it or the quotes walk the price band.
 const (
 	RoleMaker    Role = "MAKER"
 	RoleTaker    Role = "TAKER"
@@ -31,13 +32,16 @@ const (
 	Sell Side = "SELL"
 )
 
-// Pair is what the bots need of the pair they trade.
+// Pair is what the bots need of the pair they trade: its rules, its price
+// band (a share of the anchor a limit price may be off; 0: none) and
+// whether it trades.
 type Pair struct {
 	Symbol        string
 	Tick, Lot     decimal.Decimal
 	MinQty        decimal.Decimal
 	MinNotional   decimal.Decimal
 	QuoteDecimals int32
+	Band          float64
 	Trading       bool
 }
 
@@ -220,15 +224,28 @@ type Bucket struct {
 }
 
 // Take spends a token if there is one.
-func (b *Bucket) Take(now time.Time) bool {
+func (b *Bucket) Take(now time.Time) bool { return b.TakeLeaving(now, 0) }
+
+// TakeLeaving spends a token if keep more are left after it (at most all
+// but one of the burst): the makers leave the other roles their share, so
+// that requotes cannot starve them.
+func (b *Bucket) TakeLeaving(now time.Time, keep float64) bool {
 	if b.at.IsZero() {
 		b.tokens, b.at = b.Burst, now
 	}
 	b.tokens = math.Min(b.Burst, b.tokens+now.Sub(b.at).Seconds()*b.Rate)
 	b.at = now
-	if b.tokens < 1 {
+	if b.tokens < 1+math.Max(0, math.Min(keep, b.Burst-1)) {
 		return false
 	}
 	b.tokens--
 	return true
 }
+
+// Return gives back the token of an order the platform refused: only
+// orders that reach the book count against the throttle.
+func (b *Bucket) Return() { b.tokens = math.Min(b.Burst, b.tokens+1) }
+
+// Backoff is how long a bot waits after a refused order: twice its last
+// wait, from a second up to a minute.
+func Backoff(last time.Duration) time.Duration { return min(max(2*last, time.Second), time.Minute) }

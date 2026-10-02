@@ -13,6 +13,7 @@ import (
 	"errors"
 	"log/slog"
 	"math"
+	"math/rand/v2"
 	"sort"
 	"sync"
 	"time"
@@ -46,9 +47,11 @@ const (
 	saveEvery      = 5 * time.Second
 	botsEvery      = time.Minute
 	inventoryEvery = 10 * time.Minute
-	lastEvery      = 5 * time.Second
 	trendEvery     = 30 * time.Second
 	makersPerRound = 2
+	// makerReserve is the share of the order rate the makers leave the
+	// takers, trend followers and executors.
+	makerReserve = 0.25
 )
 
 // The reference pairs the market factor follows.
@@ -81,9 +84,8 @@ type Sim struct {
 	pairAt    time.Time
 	btc, eth  float64
 	refsAt    time.Time
-	last      decimal.Decimal
-	lastAt    time.Time
-	history   []domain.Mark // the target a minute apart, for the trend followers
+	last      decimal.Decimal // the pair's last trade
+	history   []domain.Mark   // the target a minute apart, for the trend followers
 	orders    domain.Bucket
 	cancels   domain.Bucket
 	running   bool
@@ -99,8 +101,24 @@ type Sim struct {
 	executeAt time.Time       // the executors' next turn
 	samples   []Sample
 
+	// The price band (band.go): the anchor as read lately, the last
+	// trade's time, where the makers quote and whether the quotes walk,
+	// the watchdog's count.
+	anchorReads  []domain.Mark
+	anchorAt     time.Time
+	lastTradeAt  time.Time
+	reportedAt   time.Time
+	center       float64
+	walking      bool
+	watchFrom    time.Time
+	refusedSince time.Time
+	deadlocks    int
+	deadlockAt   time.Time
+
 	perpPair      domain.Pair
 	perpPairAt    time.Time
+	perpMark      float64 // the contract's mark price as last read
+	perpMarkAt    time.Time
 	perpRunning   bool
 	perpTurn      int
 	perpBots      map[string]*perpBot
@@ -118,7 +136,22 @@ type bot struct {
 	coin      decimal.Decimal
 	err       string
 	errAt     time.Time
+	// After a refused order the bot waits (domain.Backoff) until retryAt.
+	wait    time.Duration
+	retryAt time.Time
 }
+
+// ready reports whether the bot may place orders: not waiting after a
+// refusal.
+func (b *bot) ready(now time.Time) bool { return !now.Before(b.retryAt) }
+
+// backOff makes the bot wait after a refusal; done ends the wait.
+func (b *bot) backOff(now time.Time) {
+	b.wait = domain.Backoff(b.wait)
+	b.retryAt = now.Add(b.wait)
+}
+
+func (b *bot) done() { b.wait, b.retryAt = 0, time.Time{} }
 
 // New returns a simulation; Start it before Run.
 func New(cfg Config, trading ports.Trading, prices ports.Prices, pairs ports.Pairs, store ports.Store, fl ports.Flags, log *slog.Logger,
@@ -266,7 +299,7 @@ func (s *Sim) Round(ctx context.Context) {
 		return
 	}
 	if !s.running {
-		s.running = true
+		s.running, s.watchFrom = true, now
 		s.checkInventory(ctx, now) // the takers lean by what they hold
 	}
 	s.m.running.Set(1)
@@ -287,18 +320,26 @@ func (s *Sim) Round(ctx context.Context) {
 		}
 	}
 	s.sample(now, p)
+	s.refreshAnchor(ctx, now)
+	s.report(ctx, now, p)
+	s.watch(ctx, now, sh)
 	if sh.Halted {
 		if s.perpRunning {
 			s.stopPerp(ctx)
 		}
 		return // the halt canceled the makers' orders; the pair waits
 	}
-	s.quote(ctx, now, p)
+	// The quotes stand within the price band around its anchor; beyond
+	// it they walk toward the target (band.go).
+	center, walking := domain.QuoteCenter(p, s.anchors(), s.pair.Band)
+	s.center, s.walking = center, walking
+	s.m.walking.Set(map[bool]float64{false: 0, true: 1}[walking])
+	s.quote(ctx, now, center)
 	if !s.runs(domain.EventPause) { // a pause keeps the makers only
-		s.take(ctx, now, p, dt)
-		s.follow(ctx, now, p)
+		s.take(ctx, now, center, dt)
+		s.follow(ctx, now, center)
 	}
-	s.execute(ctx, now, p)
+	s.execute(ctx, now, center)
 	s.perp(ctx, now, p, dt)
 	s.chores(ctx, now)
 }
@@ -357,10 +398,11 @@ func (s *Sim) botsOf(role domain.Role) []*bot {
 	return out
 }
 
-// quote lets the makers whose turn it is requote: one whose last quote is
-// RequoteTick ticks off the target, or whose time is up (every one to three
-// seconds), at most makersPerRound a round, in turn.
-func (s *Sim) quote(ctx context.Context, now time.Time, p float64) {
+// quote lets the makers whose turn it is requote around center (the
+// target within the price band): one whose last quote is RequoteTick
+// ticks off it, or whose time is up (every one to three seconds), at most
+// makersPerRound a round, in turn; a maker waiting after a refusal skips.
+func (s *Sim) quote(ctx context.Context, now time.Time, center float64) {
 	makers := s.botsOf(domain.RoleMaker)
 	if len(makers) == 0 {
 		return
@@ -372,20 +414,25 @@ func (s *Sim) quote(ctx context.Context, now time.Time, p float64) {
 			break
 		}
 		b := makers[(s.turn+i)%len(makers)]
-		moved := tick > 0 && math.Abs(p-b.quotedP)/tick >= float64(s.params.RequoteTick)
+		if !b.ready(now) {
+			continue
+		}
+		moved := tick > 0 && math.Abs(center-b.quotedP)/tick >= float64(s.params.RequoteTick)
 		if !moved && now.Before(b.nextQuote) {
 			continue
 		}
-		s.requote(ctx, now, b, p)
+		s.requote(ctx, now, b, center)
 		done++
 	}
 	s.turn = (s.turn + 1) % len(makers)
 }
 
-// requote brings a maker's orders to its ladder around p: the orders no
-// longer wanted canceled, the missing levels placed nearest first, bids
-// and asks in turn, as far as the throttle lets.
-func (s *Sim) requote(ctx context.Context, now time.Time, b *bot, p float64) {
+// requote brings a maker's orders to its ladder around center, within the
+// price band: the orders no longer wanted canceled, the missing levels
+// placed nearest first, bids and asks in turn, as far as the throttle
+// lets (leaving the other roles their share). A side the bot cannot fund
+// waits for the next requote; another refusal makes the bot wait.
+func (s *Sim) requote(ctx context.Context, now time.Time, b *bot, center float64) {
 	rng := s.model.Rand()
 	b.nextQuote = now.Add(time.Second + time.Duration(rng.Int64N(int64(2*time.Second))))
 	open, err := s.trading.Open(ctx, b.UserID, s.cfg.Symbol)
@@ -393,7 +440,9 @@ func (s *Sim) requote(ctx context.Context, now time.Time, b *bot, p float64) {
 		s.fail(ctx, b, "open", err)
 		return
 	}
-	bids, asks := domain.LadderPrices(p, b.phase, s.params, s.pair)
+	bids, asks := domain.LadderPrices(center, b.phase, s.params, s.pair)
+	a := s.anchors()
+	bids, asks = domain.InBand(bids, a, s.pair.Band), domain.InBand(asks, a, s.pair.Band)
 	cancel, placeBids, placeAsks := domain.Diff(open, bids, asks)
 	for _, o := range cancel {
 		if !s.cancels.Take(now) {
@@ -406,28 +455,46 @@ func (s *Sim) requote(ctx context.Context, now time.Time, b *bot, p float64) {
 		}
 		s.m.cancels.WithLabelValues(string(b.Role)).Inc()
 	}
-	place := func(side domain.Side, price decimal.Decimal) bool {
-		if !s.orders.Take(now) {
+	placed, outOfBand, stop := 0, 0, false
+	unfunded := map[domain.Side]bool{}
+	place := func(side domain.Side, price decimal.Decimal) {
+		if stop || unfunded[side] {
+			return
+		}
+		if !s.orders.TakeLeaving(now, s.params.OrdersPerSecond*makerReserve) {
 			s.m.throttled.WithLabelValues("order").Inc()
-			return false
+			stop = true
+			return
 		}
 		qty := domain.Quantity(domain.Worth(rng, s.params.LevelSize, 0.5), price, s.pair)
 		_, err := s.trading.Limit(ctx, b.UserID, s.cfg.Symbol, side, price, qty)
-		s.placed(ctx, b, err)
-		return true
+		switch {
+		case err == nil:
+			placed++
+		case isFunds(err):
+			unfunded[side] = true // the side waits; the bot does not
+		case errors.Is(err, ports.ErrOutOfBand):
+			outOfBand++
+			stop = true
+		default:
+			stop = true
+		}
+		s.placed(ctx, now, b, err, !isFunds(err))
 	}
 	for i := 0; i < max(len(placeBids), len(placeAsks)); i++ {
-		if i < len(placeBids) && !place(domain.Buy, placeBids[i]) {
-			break
+		if i < len(placeBids) {
+			place(domain.Buy, placeBids[i])
 		}
-		if i < len(placeAsks) && !place(domain.Sell, placeAsks[i]) {
-			break
+		if i < len(placeAsks) {
+			place(domain.Sell, placeAsks[i])
 		}
 	}
-	b.quotedP = p
+	s.refused(now, len(placeBids)+len(placeAsks), placed, outOfBand)
+	b.quotedP = center
 }
 
-// take sends the takers' market orders that arrived in dt.
+// take sends the takers' market orders that arrived in dt, each by a taker
+// not waiting after a refusal.
 func (s *Sim) take(ctx context.Context, now time.Time, p float64, dt time.Duration) {
 	takers := s.botsOf(domain.RoleTaker)
 	if len(takers) == 0 {
@@ -435,7 +502,10 @@ func (s *Sim) take(ctx context.Context, now time.Time, p float64, dt time.Durati
 	}
 	rng := s.model.Rand()
 	for range domain.Arrivals(rng, s.params, dt, now) {
-		b := takers[rng.IntN(len(takers))]
+		b := pick(rng, takers, now)
+		if b == nil {
+			continue
+		}
 		lean := 0.0
 		if b.known {
 			lean = domain.Lean(b.usdt.InexactFloat64(), s.params.BotUSDT)
@@ -457,10 +527,21 @@ func (s *Sim) follow(ctx context.Context, now time.Time, p float64) {
 		return
 	}
 	for _, b := range s.botsOf(domain.RoleTrend) {
-		if rng.Float64() < s.params.TrendStrength {
+		if rng.Float64() < s.params.TrendStrength && b.ready(now) {
 			s.market(ctx, now, b, side, domain.Worth(rng, s.params.OrderSize, 0.8), p)
 		}
 	}
+}
+
+// pick draws a bot of bots that is not waiting after a refusal, nil when
+// a few draws found none.
+func pick(rng *rand.Rand, bots []*bot, now time.Time) *bot {
+	for range 3 {
+		if b := bots[rng.IntN(len(bots))]; b.ready(now) {
+			return b
+		}
+	}
+	return nil
 }
 
 // market sends a market order worth about worth USDT: a buy spends it, a
@@ -477,18 +558,32 @@ func (s *Sim) market(ctx context.Context, now time.Time, b *bot, side domain.Sid
 	} else {
 		err = s.trading.Market(ctx, b.UserID, s.cfg.Symbol, side, decimal.Zero, domain.Quantity(worth, decimal.NewFromFloat(p), s.pair))
 	}
-	s.placed(ctx, b, err)
+	s.placed(ctx, now, b, err, true)
 }
 
-func (s *Sim) placed(ctx context.Context, b *bot, err error) {
+// placed counts an order's result. A refused one gives its token back
+// (only orders that reach the book count against the throttle) and, with
+// backOff, makes the bot wait.
+func (s *Sim) placed(ctx context.Context, now time.Time, b *bot, err error, backOff bool) {
+	result := "placed"
 	switch {
 	case err == nil:
-		s.m.orders.WithLabelValues(string(b.Role), "placed").Inc()
-	case errors.Is(err, ports.ErrFunds):
-		s.m.orders.WithLabelValues(string(b.Role), "unfunded").Inc()
+		b.done()
+	case isFunds(err):
+		result = "unfunded"
+	case errors.Is(err, ports.ErrOutOfBand):
+		result = "out_of_band"
 	default:
-		s.m.orders.WithLabelValues(string(b.Role), "failed").Inc()
+		result = "failed"
 		s.fail(ctx, b, "order", err)
+	}
+	s.m.orders.WithLabelValues(string(b.Role), result).Inc()
+	if err == nil {
+		return
+	}
+	s.orders.Return()
+	if backOff {
+		b.backOff(now)
 	}
 }
 
@@ -507,7 +602,8 @@ func (s *Sim) stop(ctx context.Context) {
 		}
 		b.quotedP, b.nextQuote = 0, time.Time{}
 	}
-	s.running = false
+	s.running, s.watchFrom, s.walking = false, time.Time{}, false
+	s.m.walking.Set(0)
 	s.save(ctx)
 	s.log.InfoContext(ctx, "simulated market stopped: the makers' orders are canceled", "symbol", s.cfg.Symbol)
 }
@@ -518,13 +614,6 @@ func (s *Sim) chores(ctx context.Context, now time.Time) {
 	}
 	if now.Sub(s.checkedAt) >= inventoryEvery {
 		s.checkInventory(ctx, now)
-	}
-	if now.Sub(s.lastAt) >= lastEvery {
-		s.lastAt = now
-		if last, err := s.prices.Last(ctx, s.cfg.Symbol); err == nil && last.IsPositive() {
-			s.last = last
-			s.m.last.Set(last.InexactFloat64())
-		}
 	}
 }
 
@@ -580,7 +669,18 @@ type Status struct {
 	Events    []domain.Event // scheduled and running
 	Perp      string
 	PerpOn    bool // the bots trade the perpetual
-	At        time.Time
+	// The price band: its anchor as last read (0: none), the band (a
+	// share; 0: none), where the makers quote, whether the quotes walk
+	// toward a target beyond the band, the pair's last trade, and how
+	// often the watchdog found the market locked and when last.
+	Anchor      float64
+	Band        float64
+	Center      float64
+	Walking     bool
+	LastTradeAt time.Time
+	Deadlocks   int
+	DeadlockAt  time.Time
+	At          time.Time
 }
 
 // BotStatus is one bot as the operators see it.
@@ -593,6 +693,9 @@ type BotStatus struct {
 	Position, Futures decimal.Decimal
 	Error             string
 	ErrorAt           time.Time
+	// RetryAt is when the bot places orders again after a refusal (zero:
+	// it does).
+	RetryAt time.Time
 }
 
 // Status reports the simulation's state.
@@ -610,8 +713,13 @@ func (s *Sim) Status() Status {
 		st.Guards[g] = n
 	}
 	st.Perp, st.PerpOn = s.cfg.Perp, s.perpRunning
+	st.Anchor, st.Band, st.Center, st.Walking = s.anchor(), s.pair.Band, s.center, s.walking
+	st.LastTradeAt, st.Deadlocks, st.DeadlockAt = s.lastTradeAt, s.deadlocks, s.deadlockAt
 	for _, b := range s.bots {
 		bs := BotStatus{Bot: b.Bot, USDT: b.usdt, Coin: b.coin, Known: b.known, Error: b.err, ErrorAt: b.errAt}
+		if s.round.Before(b.retryAt) {
+			bs.RetryAt = b.retryAt
+		}
 		if pb, ok := s.perpBots[b.UserID]; ok {
 			bs.Position, bs.Futures = pb.position, pb.futures
 		}
@@ -669,10 +777,12 @@ func (s *Sim) AddBot(ctx context.Context, b ports.Bot) error {
 // metrics are the simulation's gauges and counters.
 type metrics struct {
 	target, last, running, refsFresh prometheus.Gauge
+	walking                          prometheus.Gauge
 	inventory                        *prometheus.GaugeVec
 	orders                           *prometheus.CounterVec
 	cancels, guards, throttled       *prometheus.CounterVec
 	errors                           *prometheus.CounterVec
+	deadlocks                        prometheus.Counter
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -684,8 +794,11 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 		inventory: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "market_sim_inventory", Help: "What the bots hold together (available SPOT), by asset, at the last check.",
 		}, []string{"asset"}),
+		walking: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "market_sim_walking", Help: "1 while the target is beyond the price band and the quotes walk toward it.",
+		}),
 		orders: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "market_sim_orders_total", Help: "The bots' orders by role and result (placed, unfunded, failed).",
+			Name: "market_sim_orders_total", Help: "The bots' orders by role and result (placed, unfunded, out_of_band, failed).",
 		}, []string{"role", "result"}),
 		cancels: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "market_sim_cancels_total", Help: "The bots' cancels by role.",
@@ -699,7 +812,12 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 		errors: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "market_sim_errors_total", Help: "Failed requests to the platform's services, by operation.",
 		}, []string{"op"}),
+		deadlocks: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "market_sim_band_deadlocks_total",
+			Help: "Times the watchdog found the market locked (three minutes without a trade, or every level refused for the price band) and rebased the model at the band's anchor.",
+		}),
 	}
-	reg.MustRegister(m.target, m.last, m.running, m.refsFresh, m.inventory, m.orders, m.cancels, m.guards, m.throttled, m.errors)
+	reg.MustRegister(m.target, m.last, m.running, m.refsFresh, m.walking, m.inventory, m.orders, m.cancels, m.guards, m.throttled, m.errors,
+		m.deadlocks)
 	return m
 }

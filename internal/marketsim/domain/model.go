@@ -165,6 +165,17 @@ func (m *Model) Hold(p float64) {
 	}
 }
 
+// Rebase makes the target p now and the model go on from there, the
+// minute guard counting from p (the watchdog's way out of a locked
+// market, ASTRA design §4): through the event factor, like Hold.
+func (m *Model) Rebase(p float64) {
+	if p <= 0 {
+		return
+	}
+	m.Hold(p)
+	m.State.P, m.State.Minute = p, nil
+}
+
 // Reanchor makes the current target the anchor: P0 is the target, the
 // market factor starts again from the reference prices of now (0 when not
 // fresh: the next fresh ones), and the deviation and events are spent.

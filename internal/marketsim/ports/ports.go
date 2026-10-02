@@ -18,6 +18,10 @@ import (
 // ErrFunds is an order the bot's balance cannot fund: left for later.
 var ErrFunds = errors.New("not enough funds")
 
+// ErrOutOfBand is a limit price the platform refused as too far from the
+// band's anchor.
+var ErrOutOfBand = errors.New("price out of band")
+
 // Trading is the platform's spot trading as a bot uses it: as the bot's
 // user, through the same paths as anyone.
 type Trading interface {
@@ -26,7 +30,7 @@ type Trading interface {
 	// Open lists the bot's active orders on symbol.
 	Open(ctx context.Context, user, symbol string) ([]domain.Order, error)
 	// Limit places a GTC limit order and returns its ID; a refusal for
-	// funds is ErrFunds.
+	// funds is ErrFunds, one for the price band ErrOutOfBand.
 	Limit(ctx context.Context, user, symbol string, side domain.Side, price, qty decimal.Decimal) (string, error)
 	// Market places a market order: a buy spends quote, a sell sells qty.
 	Market(ctx context.Context, user, symbol string, side domain.Side, quote, qty decimal.Decimal) error
@@ -46,7 +50,7 @@ type Derivatives interface {
 	// OpenContract lists the bot's active orders on the contract.
 	OpenContract(ctx context.Context, user, symbol string) ([]domain.Order, error)
 	// LimitContract places a GTC limit order; a refusal for margin is
-	// ErrFunds.
+	// ErrFunds, one for the price band ErrOutOfBand.
 	LimitContract(ctx context.Context, user, symbol string, side domain.Side, price, qty decimal.Decimal) (string, error)
 	// MarketContract places a market order of qty, reducing the position
 	// only when reduceOnly.
@@ -66,12 +70,21 @@ type Derivatives interface {
 	ToFutures(ctx context.Context, user string, amount decimal.Decimal, key string) error
 }
 
-// Prices reads the reference market's prices.
+// Prices reads the reference market's prices and the platform's market
+// data (market-data-service).
 type Prices interface {
-	// Reference returns symbol's reference price and whether it is fresh.
+	// Reference returns symbol's reference price and whether it is fresh;
+	// for a pair no reference market follows, its own market's price (the
+	// middle of its book) or the simulated price Report left.
 	Reference(ctx context.Context, symbol string) (decimal.Decimal, bool, error)
-	// Last returns symbol's last traded price on the platform (0: none).
-	Last(ctx context.Context, symbol string) (decimal.Decimal, error)
+	// LastTrade returns symbol's last trade on the platform: its price and
+	// time (0 and zero: none).
+	LastTrade(ctx context.Context, symbol string) (decimal.Decimal, time.Time, error)
+	// Report gives the simulated market's target of symbol, which stands
+	// in for its reference while its book has no middle.
+	Report(ctx context.Context, symbol string, price decimal.Decimal) error
+	// Mark returns a contract's mark price (0: none yet).
+	Mark(ctx context.Context, symbol string) (decimal.Decimal, error)
 }
 
 // Bot is one of the bot accounts.
