@@ -18,7 +18,7 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
 | [需求文档-v0.2.md](需求文档-v0.2.md) | 需求；§7 API 约定、§8 事件、§11 核心规则与公式、附录 B 状态机、附录 C 错误码 |
 | [文档评审与待决策-2026-09-27.md](文档评审与待决策-2026-09-27.md) | §8 是用户逐项确认的 27 项决策结论，§9 外部账号 |
 | [准备工作清单.md](准备工作清单.md) | 环境与准备状态、后续账号 |
-| [docs/adr/](docs/adr/README.md) | 9 条架构决策记录，改决策要新增 ADR |
+| [docs/adr/](docs/adr/README.md) | 16 条架构决策记录，改决策要新增 ADR |
 | [docs/runbook/](docs/runbook/README.md) | 运维手册（README 是索引）：local-dev（本机开发栈）、observability（指标、告警、日志、trace、回滚）、testing、events、各服务手册（含 wallet、admin 管理后台）、服务器部署、Cloudflare+nginx TLS、Turnstile |
 | `环境配置.md` | **只在本地**（已被 git 忽略），含测试服凭据与实测状态 |
 

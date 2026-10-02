@@ -33,6 +33,10 @@
 #   scripts/ops/astra.sh events-on|events-off
 #                                 allow the operators' price events (flag
 #                                 sim.events).
+#   scripts/ops/astra.sh guard-on|guard-off
+#                                 halt ASTRA-USDT and its perpetual a minute
+#                                 after market-sim's heartbeat stopped
+#                                 (flag sim.halt_on_loss).
 #   scripts/ops/astra.sh status   what market-sim reports.
 #
 # Adjustments need the flag ledger.manual_adjustment.
@@ -161,9 +165,15 @@ events-on)
 events-off)
   ctl market-sim flags set sim.events --off --reason "operators' price events stopped (astra.sh events-off)" </dev/null
   ;;
+guard-on)
+  ctl market-sim flags set sim.halt_on_loss --on --reason "a silent simulated market halts its pair (astra.sh guard-on)" </dev/null
+  ;;
+guard-off)
+  ctl market-sim flags set sim.halt_on_loss --off --reason "no halt on a silent simulated market (astra.sh guard-off)" </dev/null
+  ;;
 status) sim | jq . ;;
 *)
-  sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
   ;;
 esac
