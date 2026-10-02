@@ -4,6 +4,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"regexp"
 	"slices"
@@ -43,7 +44,12 @@ type Handler struct {
 	// Platform is the reference of the pairs no reference market follows
 	// (their own market, else the simulated market's price); nil: none.
 	Platform *application.PlatformReference
-	Now      func() time.Time
+	// Listed tells whether the reference market lists a symbol, for the
+	// admin console's checks; nil answers unavailable.
+	Listed interface {
+		Listed(ctx context.Context, symbol string, futures bool) (bool, error)
+	}
+	Now func() time.Time
 }
 
 // Routes mounts the endpoints on r.
@@ -64,7 +70,37 @@ func (h *Handler) Routes(r chi.Router) {
 	r.Put("/internal/market/{symbol}/simulated-price", h.simulatedPrice)
 	r.Get("/internal/market/{symbol}/mark", h.markInternal)
 	r.Get("/internal/market/feed", h.feed)
+	r.Get("/internal/market/reference-symbols/{remote}", h.referenceSymbol)
 }
+
+// referenceSymbol tells the admin console whether Binance lists a symbol
+// (BTCUSDT) on its spot market and on USDⓈ-M futures, before a pair or a
+// contract follows it: a symbol Binance does not know fails the batched
+// reads of every pair.
+func (h *Handler) referenceSymbol(w http.ResponseWriter, r *http.Request) {
+	remote := strings.ToUpper(chi.URLParam(r, "remote"))
+	if h.Listed == nil {
+		httpx.WriteError(w, r, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "no reference market is configured"))
+		return
+	}
+	if !remoteSymbolRE.MatchString(remote) {
+		httpx.WriteError(w, r, apperr.Invalid("a reference symbol is 2-20 letters and digits (BTCUSDT)"))
+		return
+	}
+	spot, err := h.Listed.Listed(r.Context(), remote, false)
+	if err != nil {
+		httpx.WriteError(w, r, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "the reference market did not answer"))
+		return
+	}
+	futures, err := h.Listed.Listed(r.Context(), remote, true)
+	if err != nil {
+		httpx.WriteError(w, r, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "the reference market did not answer"))
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"symbol": remote, "spot": spot, "futures": futures})
+}
+
+var remoteSymbolRE = regexp.MustCompile(`^[A-Z0-9]{2,20}$`)
 
 type haltJSON struct {
 	Symbol   string `json:"symbol"`

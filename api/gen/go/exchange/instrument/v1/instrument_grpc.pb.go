@@ -28,6 +28,8 @@ const (
 	InstrumentService_ListContracts_FullMethodName      = "/exchange.instrument.v1.InstrumentService/ListContracts"
 	InstrumentService_SetContractStatus_FullMethodName  = "/exchange.instrument.v1.InstrumentService/SetContractStatus"
 	InstrumentService_UpdateAssetProfile_FullMethodName = "/exchange.instrument.v1.InstrumentService/UpdateAssetProfile"
+	InstrumentService_ExportConfig_FullMethodName       = "/exchange.instrument.v1.InstrumentService/ExportConfig"
+	InstrumentService_ApplyConfig_FullMethodName        = "/exchange.instrument.v1.InstrumentService/ApplyConfig"
 )
 
 // InstrumentServiceClient is the client API for InstrumentService service.
@@ -38,7 +40,7 @@ const (
 // assets with their networks, trading pairs and fee schedules
 // (requirements §5.5). Decimal values are strings (ADR-0008). Public REST
 // endpoints are in api/openapi/market.yaml; changes go through exchangectl
-// until the admin console arrives.
+// (a file, the deploy's sync) and the admin console (the write RPCs).
 type InstrumentServiceClient interface {
 	GetAsset(ctx context.Context, in *GetAssetRequest, opts ...grpc.CallOption) (*GetAssetResponse, error)
 	ListAssets(ctx context.Context, in *ListAssetsRequest, opts ...grpc.CallOption) (*ListAssetsResponse, error)
@@ -57,6 +59,15 @@ type InstrumentServiceClient interface {
 	// and logo. The asset code never changes; the history keeps the profile
 	// before and after.
 	UpdateAssetProfile(ctx context.Context, in *UpdateAssetProfileRequest, opts ...grpc.CallOption) (*UpdateAssetProfileResponse, error)
+	// ExportConfig returns the reference data in the shape of
+	// deploy/instruments/<env>.json (fee_schedules, assets with their
+	// networks, pairs, contracts), for the admin console to edit.
+	ExportConfig(ctx context.Context, in *ExportConfigRequest, opts ...grpc.CallOption) (*ExportConfigResponse, error)
+	// ApplyConfig applies such a JSON document for the admin console (source
+	// CONSOLE): missing items are created, changed ones versioned, statuses
+	// left alone, nothing deleted; with dry_run nothing is changed. A later
+	// file apply (the deploy's sync) keeps what the console changed last.
+	ApplyConfig(ctx context.Context, in *ApplyConfigRequest, opts ...grpc.CallOption) (*ApplyConfigResponse, error)
 }
 
 type instrumentServiceClient struct {
@@ -157,6 +168,26 @@ func (c *instrumentServiceClient) UpdateAssetProfile(ctx context.Context, in *Up
 	return out, nil
 }
 
+func (c *instrumentServiceClient) ExportConfig(ctx context.Context, in *ExportConfigRequest, opts ...grpc.CallOption) (*ExportConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExportConfigResponse)
+	err := c.cc.Invoke(ctx, InstrumentService_ExportConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *instrumentServiceClient) ApplyConfig(ctx context.Context, in *ApplyConfigRequest, opts ...grpc.CallOption) (*ApplyConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ApplyConfigResponse)
+	err := c.cc.Invoke(ctx, InstrumentService_ApplyConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // InstrumentServiceServer is the server API for InstrumentService service.
 // All implementations must embed UnimplementedInstrumentServiceServer
 // for forward compatibility.
@@ -165,7 +196,7 @@ func (c *instrumentServiceClient) UpdateAssetProfile(ctx context.Context, in *Up
 // assets with their networks, trading pairs and fee schedules
 // (requirements §5.5). Decimal values are strings (ADR-0008). Public REST
 // endpoints are in api/openapi/market.yaml; changes go through exchangectl
-// until the admin console arrives.
+// (a file, the deploy's sync) and the admin console (the write RPCs).
 type InstrumentServiceServer interface {
 	GetAsset(context.Context, *GetAssetRequest) (*GetAssetResponse, error)
 	ListAssets(context.Context, *ListAssetsRequest) (*ListAssetsResponse, error)
@@ -184,6 +215,15 @@ type InstrumentServiceServer interface {
 	// and logo. The asset code never changes; the history keeps the profile
 	// before and after.
 	UpdateAssetProfile(context.Context, *UpdateAssetProfileRequest) (*UpdateAssetProfileResponse, error)
+	// ExportConfig returns the reference data in the shape of
+	// deploy/instruments/<env>.json (fee_schedules, assets with their
+	// networks, pairs, contracts), for the admin console to edit.
+	ExportConfig(context.Context, *ExportConfigRequest) (*ExportConfigResponse, error)
+	// ApplyConfig applies such a JSON document for the admin console (source
+	// CONSOLE): missing items are created, changed ones versioned, statuses
+	// left alone, nothing deleted; with dry_run nothing is changed. A later
+	// file apply (the deploy's sync) keeps what the console changed last.
+	ApplyConfig(context.Context, *ApplyConfigRequest) (*ApplyConfigResponse, error)
 	mustEmbedUnimplementedInstrumentServiceServer()
 }
 
@@ -220,6 +260,12 @@ func (UnimplementedInstrumentServiceServer) SetContractStatus(context.Context, *
 }
 func (UnimplementedInstrumentServiceServer) UpdateAssetProfile(context.Context, *UpdateAssetProfileRequest) (*UpdateAssetProfileResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateAssetProfile not implemented")
+}
+func (UnimplementedInstrumentServiceServer) ExportConfig(context.Context, *ExportConfigRequest) (*ExportConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExportConfig not implemented")
+}
+func (UnimplementedInstrumentServiceServer) ApplyConfig(context.Context, *ApplyConfigRequest) (*ApplyConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ApplyConfig not implemented")
 }
 func (UnimplementedInstrumentServiceServer) mustEmbedUnimplementedInstrumentServiceServer() {}
 func (UnimplementedInstrumentServiceServer) testEmbeddedByValue()                           {}
@@ -404,6 +450,42 @@ func _InstrumentService_UpdateAssetProfile_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _InstrumentService_ExportConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExportConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InstrumentServiceServer).ExportConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InstrumentService_ExportConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InstrumentServiceServer).ExportConfig(ctx, req.(*ExportConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InstrumentService_ApplyConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ApplyConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InstrumentServiceServer).ApplyConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InstrumentService_ApplyConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InstrumentServiceServer).ApplyConfig(ctx, req.(*ApplyConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // InstrumentService_ServiceDesc is the grpc.ServiceDesc for InstrumentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -446,6 +528,14 @@ var InstrumentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateAssetProfile",
 			Handler:    _InstrumentService_UpdateAssetProfile_Handler,
+		},
+		{
+			MethodName: "ExportConfig",
+			Handler:    _InstrumentService_ExportConfig_Handler,
+		},
+		{
+			MethodName: "ApplyConfig",
+			Handler:    _InstrumentService_ApplyConfig_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

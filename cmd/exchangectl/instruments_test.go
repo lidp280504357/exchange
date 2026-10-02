@@ -29,6 +29,9 @@ func TestInstrumentsApplyTestData(t *testing.T) {
 	if out, err = run(seed, "apply", "--file", "-", "--reason", "seed"); err != nil || !strings.Contains(out, "0 changed") {
 		t.Fatalf("second apply: %v\n%s", err, out)
 	}
+	if out, err = run(seed, "apply", "--file", "-", "--reason", "preview", "--dry-run"); err != nil || !strings.Contains(out, "0 would change, 0 kept") {
+		t.Fatalf("dry run: %v\n%s", err, out)
+	}
 	if out, err = run(nil, "pair-status", "BTC-USDT", "--to", "TRADING", "--reason", "open"); err != nil || !strings.Contains(out, "PREPARE -> TRADING") {
 		t.Fatalf("pair-status: %v\n%s", err, out)
 	}

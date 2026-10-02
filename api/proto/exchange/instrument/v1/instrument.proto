@@ -8,7 +8,7 @@ import "google/protobuf/timestamp.proto";
 // assets with their networks, trading pairs and fee schedules
 // (requirements §5.5). Decimal values are strings (ADR-0008). Public REST
 // endpoints are in api/openapi/market.yaml; changes go through exchangectl
-// until the admin console arrives.
+// (a file, the deploy's sync) and the admin console (the write RPCs).
 service InstrumentService {
   rpc GetAsset(GetAssetRequest) returns (GetAssetResponse);
   rpc ListAssets(ListAssetsRequest) returns (ListAssetsResponse);
@@ -27,6 +27,48 @@ service InstrumentService {
   // and logo. The asset code never changes; the history keeps the profile
   // before and after.
   rpc UpdateAssetProfile(UpdateAssetProfileRequest) returns (UpdateAssetProfileResponse);
+  // ExportConfig returns the reference data in the shape of
+  // deploy/instruments/<env>.json (fee_schedules, assets with their
+  // networks, pairs, contracts), for the admin console to edit.
+  rpc ExportConfig(ExportConfigRequest) returns (ExportConfigResponse);
+  // ApplyConfig applies such a JSON document for the admin console (source
+  // CONSOLE): missing items are created, changed ones versioned, statuses
+  // left alone, nothing deleted; with dry_run nothing is changed. A later
+  // file apply (the deploy's sync) keeps what the console changed last.
+  rpc ApplyConfig(ApplyConfigRequest) returns (ApplyConfigResponse);
+}
+
+message ExportConfigRequest {}
+
+message ExportConfigResponse {
+  bytes config_json = 1;
+}
+
+message ApplyConfigRequest {
+  // The document, unknown fields refused; only the items it names.
+  bytes config_json = 1;
+  bool dry_run = 2;
+  string actor = 3;
+  string reason = 4;
+}
+
+message ConfigChange {
+  // FEE_SCHEDULE, ASSET, NETWORK, TRADING_PAIR or CONTRACT.
+  string entity = 1;
+  // The tier, asset code, ASSET/NETWORK or symbol.
+  string key = 2;
+  // CREATE or UPDATE.
+  string action = 3;
+  // The version after the change.
+  int64 version = 4;
+  // The item before (empty when created) and after, as JSON.
+  bytes before_json = 5;
+  bytes after_json = 6;
+}
+
+message ApplyConfigResponse {
+  repeated ConfigChange changes = 1;
+  int32 unchanged = 2;
 }
 
 message Asset {

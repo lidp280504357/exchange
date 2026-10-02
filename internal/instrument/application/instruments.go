@@ -3,7 +3,9 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -33,51 +35,187 @@ type Config struct {
 	Contracts    []domain.Contract    `json:"contracts"`
 }
 
-// ApplyResult lists what an apply did, as "ENTITY key vN".
+// Export returns the stored reference data as a Config, in the shape of
+// deploy/instruments/<env>.json (statuses and versions included): what
+// the admin console edits and applies back.
+func (s *Service) Export(ctx context.Context) (Config, error) {
+	r := s.Store.Read()
+	fees, err := r.FeeSchedules().List(ctx)
+	if err != nil {
+		return Config{}, err
+	}
+	assets, err := r.Assets().List(ctx)
+	if err != nil {
+		return Config{}, err
+	}
+	nets, err := r.Networks().List(ctx)
+	if err != nil {
+		return Config{}, err
+	}
+	pairs, err := r.Pairs().List(ctx)
+	if err != nil {
+		return Config{}, err
+	}
+	contracts, err := r.Contracts().List(ctx)
+	if err != nil {
+		return Config{}, err
+	}
+	out := Config{FeeSchedules: fees, Assets: make([]AssetConfig, 0, len(assets)), Pairs: pairs, Contracts: contracts}
+	for _, a := range assets {
+		ac := AssetConfig{Asset: a, Networks: []domain.Network{}}
+		for _, n := range nets {
+			if n.AssetCode == a.Code {
+				ac.Networks = append(ac.Networks, n)
+			}
+		}
+		out.Assets = append(out.Assets, ac)
+	}
+	return out, nil
+}
+
+// Where a change of the reference data came from (config_history.source).
+const (
+	// SourceFile is exchangectl instruments apply: the deploy's sync of
+	// deploy/instruments/<env>.json.
+	SourceFile = "FILE"
+	// SourceConsole is the admin console's edits.
+	SourceConsole = "CONSOLE"
+	// SourceStatus is a status change (SetPairStatus, SetContractStatus).
+	SourceStatus = "STATUS"
+	// SourceProfile is an asset profile change.
+	SourceProfile = "PROFILE"
+)
+
+// What an apply does to an item.
+const (
+	ActionCreate = "CREATE"
+	ActionUpdate = "UPDATE"
+	// ActionKeep is an item a file apply leaves as the console changed it.
+	ActionKeep = "KEEP"
+)
+
+// ApplyOptions say who applies the reference data, from where and how.
+type ApplyOptions struct {
+	Actor  string
+	Reason string
+	// Source is SourceFile or SourceConsole.
+	Source string
+	// DryRun works the changes out without making them.
+	DryRun bool
+	// Force lets a file apply change the items the console changed last.
+	Force bool
+}
+
+// Change is an item an apply creates, updates or keeps: the item before
+// (nil when created) and after, at its version after the apply.
+type Change struct {
+	Entity  string `json:"entity"`
+	Key     string `json:"key"`
+	Action  string `json:"action"`
+	Version int64  `json:"version"`
+	Before  any    `json:"before"`
+	After   any    `json:"after"`
+	// KeptBy and KeptAt say who changed a kept item in the console, and
+	// when.
+	KeptBy string    `json:"kept_by,omitempty"`
+	KeptAt time.Time `json:"kept_at,omitzero"`
+}
+
+// ApplyResult lists what an apply did: Changed as "ENTITY key vN", the
+// same in Changes with the items before and after, and Kept, the items a
+// file apply left as the console changed them.
 type ApplyResult struct {
 	Changed   []string
+	Changes   []Change
+	Kept      []Change
 	Unchanged int
 }
 
-// Apply makes the stored reference data match cfg in one transaction:
+func (res *ApplyResult) changed(entity, key string, before, after any, version int64, created bool) {
+	action := ActionUpdate
+	if created {
+		action = ActionCreate
+		before = nil
+	}
+	res.Changed = append(res.Changed, fmt.Sprintf("%s %s v%d", entity, key, version))
+	res.Changes = append(res.Changes, Change{Entity: entity, Key: key, Action: action, Version: version, Before: before, After: after})
+}
+
+// errDryRun rolls a dry run's transaction back.
+var errDryRun = errors.New("dry run")
+
+// Apply makes the stored reference data match cfg in one transaction, as
+// exchangectl instruments apply does (source FILE).
+func (s *Service) Apply(ctx context.Context, cfg Config, actor, reason string) (ApplyResult, error) {
+	return s.ApplyWith(ctx, cfg, ApplyOptions{Actor: actor, Reason: reason, Source: SourceFile})
+}
+
+// ApplyWith makes the stored reference data match cfg in one transaction:
 // missing items are created, changed ones get a new version, a history
 // row and an event, and identical ones are left alone, so applying the
 // same file twice changes nothing. A pair's status is set only when the
 // pair is created; later changes go through SetPairStatus. Items missing
-// from cfg are kept.
-func (s *Service) Apply(ctx context.Context, cfg Config, actor, reason string) (ApplyResult, error) {
-	if err := domain.ValidReason(reason); err != nil {
+// from cfg are kept. A file apply leaves an item the admin console changed
+// last as it is (KEEP) unless forced: console edits survive deploys. A
+// dry run reports the same without changing anything.
+func (s *Service) ApplyWith(ctx context.Context, cfg Config, o ApplyOptions) (ApplyResult, error) {
+	if err := domain.ValidReason(o.Reason); err != nil {
 		return ApplyResult{}, err
+	}
+	if o.Source != SourceFile && o.Source != SourceConsole {
+		return ApplyResult{}, fmt.Errorf("apply from unknown source %q", o.Source)
 	}
 	var res ApplyResult
 	err := s.Store.Tx(ctx, func(r ports.Repos) error {
 		res = ApplyResult{}
 		for _, f := range cfg.FeeSchedules {
-			if err := s.applyFee(ctx, r, f, actor, reason, &res); err != nil {
+			if err := s.applyFee(ctx, r, f, o, &res); err != nil {
 				return err
 			}
 		}
 		for _, a := range cfg.Assets {
-			if err := s.applyAsset(ctx, r, a, actor, reason, &res); err != nil {
+			if err := s.applyAsset(ctx, r, a, o, &res); err != nil {
 				return err
 			}
 		}
 		for _, p := range cfg.Pairs {
-			if err := s.applyPair(ctx, r, p, actor, reason, &res); err != nil {
+			if err := s.applyPair(ctx, r, p, o, &res); err != nil {
 				return err
 			}
 		}
 		for _, c := range cfg.Contracts {
-			if err := s.applyContract(ctx, r, c, actor, reason, &res); err != nil {
+			if err := s.applyContract(ctx, r, c, o, &res); err != nil {
 				return err
 			}
 		}
+		if o.DryRun {
+			return errDryRun
+		}
 		return nil
 	})
+	if errors.Is(err, errDryRun) {
+		err = nil
+	}
 	return res, err
 }
 
-func (s *Service) applyFee(ctx context.Context, r ports.Repos, f domain.FeeSchedule, actor, reason string, res *ApplyResult) error {
+// kept reports whether a file apply leaves an existing item (cur, at its
+// version) as the console changed it last, unless forced, noting it.
+func kept(ctx context.Context, r ports.Repos, o ApplyOptions, entity, key string, version int64, cur any, res *ApplyResult) (bool, error) {
+	if o.Source != SourceFile || o.Force {
+		return false, nil
+	}
+	last, err := r.LastEdit(ctx, entity, key)
+	if err != nil || last == nil || last.Source != SourceConsole {
+		return false, err
+	}
+	res.Kept = append(res.Kept, Change{
+		Entity: entity, Key: key, Action: ActionKeep, Version: version, Before: cur, After: cur, KeptBy: last.Actor, KeptAt: last.At,
+	})
+	return true, nil
+}
+
+func (s *Service) applyFee(ctx context.Context, r ports.Repos, f domain.FeeSchedule, o ApplyOptions, res *ApplyResult) error {
 	if err := f.Validate(); err != nil {
 		return err
 	}
@@ -89,18 +227,31 @@ func (s *Service) applyFee(ctx context.Context, r ports.Repos, f domain.FeeSched
 		res.Unchanged++
 		return nil
 	}
+	if cur != nil {
+		if keep, err := kept(ctx, r, o, "FEE_SCHEDULE", f.Tier, cur.Version, *cur, res); err != nil || keep {
+			return err
+		}
+	}
 	saved, err := r.FeeSchedules().Save(ctx, f)
 	if err != nil {
 		return err
 	}
-	res.Changed = append(res.Changed, fmt.Sprintf("FEE_SCHEDULE %s v%d", saved.Tier, saved.Version))
-	if err := r.Record(ctx, "FEE_SCHEDULE", saved.Tier, saved.Version, saved, actor, reason); err != nil {
+	res.changed("FEE_SCHEDULE", saved.Tier, deref(cur), saved, saved.Version, cur == nil)
+	if err := r.Record(ctx, "FEE_SCHEDULE", saved.Tier, saved.Version, saved, o.Actor, o.Reason, o.Source); err != nil {
 		return err
 	}
-	return r.Emit(ctx, &instrumentv1.FeeScheduleChanged{Schedule: ToProtoFee(saved), Actor: actor, Reason: reason}, "fee_tier", saved.Tier)
+	return r.Emit(ctx, &instrumentv1.FeeScheduleChanged{Schedule: ToProtoFee(saved), Actor: o.Actor, Reason: o.Reason}, "fee_tier", saved.Tier)
 }
 
-func (s *Service) applyAsset(ctx context.Context, r ports.Repos, a AssetConfig, actor, reason string, res *ApplyResult) error {
+// deref is the item an apply found, nil when there was none.
+func deref[T any](p *T) any {
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+func (s *Service) applyAsset(ctx context.Context, r ports.Repos, a AssetConfig, o ApplyOptions, res *ApplyResult) error {
 	if err := a.Validate(); err != nil {
 		return err
 	}
@@ -112,18 +263,26 @@ func (s *Service) applyAsset(ctx context.Context, r ports.Repos, a AssetConfig, 
 		// Stored amounts and pair steps depend on it.
 		return apperr.Invalid(fmt.Sprintf("asset %s: decimals cannot change once set", a.Code))
 	}
-	if cur != nil && cur.Same(a.Asset) {
+	keep := false
+	if cur != nil && !cur.Same(a.Asset) {
+		if keep, err = kept(ctx, r, o, "ASSET", a.Code, cur.Version, *cur, res); err != nil {
+			return err
+		}
+	}
+	switch {
+	case cur != nil && cur.Same(a.Asset):
 		res.Unchanged++
-	} else {
+	case keep:
+	default:
 		saved, err := r.Assets().Save(ctx, a.Asset)
 		if err != nil {
 			return err
 		}
-		res.Changed = append(res.Changed, fmt.Sprintf("ASSET %s v%d", saved.Code, saved.Version))
-		if err := r.Record(ctx, "ASSET", saved.Code, saved.Version, saved, actor, reason); err != nil {
+		res.changed("ASSET", saved.Code, deref(cur), saved, saved.Version, cur == nil)
+		if err := r.Record(ctx, "ASSET", saved.Code, saved.Version, saved, o.Actor, o.Reason, o.Source); err != nil {
 			return err
 		}
-		if err := r.Emit(ctx, &instrumentv1.AssetUpserted{Asset: ToProtoAsset(saved, nil), Actor: actor, Reason: reason}, "asset", saved.Code); err != nil {
+		if err := r.Emit(ctx, &instrumentv1.AssetUpserted{Asset: ToProtoAsset(saved, nil), Actor: o.Actor, Reason: o.Reason}, "asset", saved.Code); err != nil {
 			return err
 		}
 	}
@@ -143,23 +302,30 @@ func (s *Service) applyAsset(ctx context.Context, r ports.Repos, a AssetConfig, 
 			res.Unchanged++
 			continue
 		}
+		key := n.AssetCode + "/" + n.Network
+		if cur != nil {
+			if keep, err := kept(ctx, r, o, "NETWORK", key, cur.Version, *cur, res); err != nil {
+				return err
+			} else if keep {
+				continue
+			}
+		}
 		saved, err := r.Networks().Save(ctx, n)
 		if err != nil {
 			return err
 		}
-		key := saved.AssetCode + "/" + saved.Network
-		res.Changed = append(res.Changed, fmt.Sprintf("NETWORK %s v%d", key, saved.Version))
-		if err := r.Record(ctx, "NETWORK", key, saved.Version, saved, actor, reason); err != nil {
+		res.changed("NETWORK", key, deref(cur), saved, saved.Version, cur == nil)
+		if err := r.Record(ctx, "NETWORK", key, saved.Version, saved, o.Actor, o.Reason, o.Source); err != nil {
 			return err
 		}
-		if err := r.Emit(ctx, &instrumentv1.NetworkUpserted{Network: ToProtoNetwork(saved), Actor: actor, Reason: reason}, "asset", saved.AssetCode); err != nil {
+		if err := r.Emit(ctx, &instrumentv1.NetworkUpserted{Network: ToProtoNetwork(saved), Actor: o.Actor, Reason: o.Reason}, "asset", saved.AssetCode); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *Service) applyPair(ctx context.Context, r ports.Repos, p domain.TradingPair, actor, reason string, res *ApplyResult) error {
+func (s *Service) applyPair(ctx context.Context, r ports.Repos, p domain.TradingPair, o ApplyOptions, res *ApplyResult) error {
 	if p.Status == "" {
 		p.Status = domain.StatusPrepare
 	}
@@ -199,19 +365,24 @@ func (s *Service) applyPair(ctx context.Context, r ports.Repos, p domain.Trading
 	if err := p.Validate(*base, *quote); err != nil {
 		return err
 	}
+	if cur != nil {
+		if keep, err := kept(ctx, r, o, "TRADING_PAIR", p.Symbol, cur.Version, *cur, res); err != nil || keep {
+			return err
+		}
+	}
 	saved, err := r.Pairs().Save(ctx, p)
 	if err != nil {
 		return err
 	}
-	res.Changed = append(res.Changed, fmt.Sprintf("TRADING_PAIR %s v%d", saved.Symbol, saved.Version))
-	if err := r.Record(ctx, "TRADING_PAIR", saved.Symbol, saved.Version, saved, actor, reason); err != nil {
+	res.changed("TRADING_PAIR", saved.Symbol, deref(cur), saved, saved.Version, cur == nil)
+	if err := r.Record(ctx, "TRADING_PAIR", saved.Symbol, saved.Version, saved, o.Actor, o.Reason, o.Source); err != nil {
 		return err
 	}
 	view, err := s.pairView(ctx, r, saved)
 	if err != nil {
 		return err
 	}
-	return r.Emit(ctx, &instrumentv1.TradingPairUpserted{Pair: ToProtoPair(view), Actor: actor, Reason: reason}, "pair", saved.Symbol)
+	return r.Emit(ctx, &instrumentv1.TradingPairUpserted{Pair: ToProtoPair(view), Actor: o.Actor, Reason: o.Reason}, "pair", saved.Symbol)
 }
 
 // SetPairStatus moves a pair along its status machine (appendix B).
@@ -237,7 +408,7 @@ func (s *Service) SetPairStatus(ctx context.Context, symbol, to, actor, reason s
 		if err != nil {
 			return err
 		}
-		if err := r.Record(ctx, "TRADING_PAIR", saved.Symbol, saved.Version, saved, actor, reason); err != nil {
+		if err := r.Record(ctx, "TRADING_PAIR", saved.Symbol, saved.Version, saved, actor, reason, SourceStatus); err != nil {
 			return err
 		}
 		return r.Emit(ctx, &instrumentv1.TradingPairStatusChanged{

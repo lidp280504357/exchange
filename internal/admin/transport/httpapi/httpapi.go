@@ -114,6 +114,9 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/custody/callbacks/{id}", h.custodyCallback)
 			r.Post("/custody/callbacks/{id}/replay", h.replayCallback)
 			r.Get("/instruments", h.instruments)
+			r.Get("/instruments/config", h.instrumentConfig)
+			r.Post("/instruments/preview", h.previewConfig)
+			r.Post("/instruments/apply", h.applyConfig)
 			r.Post("/instruments/pairs/{symbol}/status", h.pairStatus)
 			r.Get("/flags", h.flags)
 			r.Put("/flags/{key}", h.switchFlag)
@@ -647,6 +650,51 @@ func (h *Handler) pairStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{"from": from, "to": strings.ToUpper(body.To)})
+}
+
+// instrumentConfig returns the reference data as a config document.
+func (h *Handler) instrumentConfig(w http.ResponseWriter, r *http.Request) {
+	raw, err := h.Svc.InstrumentConfig(r.Context(), principal(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeRaw(w, raw)
+}
+
+type configBody struct {
+	Config json.RawMessage `json:"config"`
+	Reason string          `json:"reason"`
+}
+
+// previewConfig works out what a config document would change.
+func (h *Handler) previewConfig(w http.ResponseWriter, r *http.Request) {
+	var body configBody
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	res, err := h.Svc.PreviewConfig(r.Context(), principal(r), body.Config)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, res)
+}
+
+// applyConfig applies a config document.
+func (h *Handler) applyConfig(w http.ResponseWriter, r *http.Request) {
+	var body configBody
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	res, err := h.Svc.ApplyConfig(r.Context(), principal(r), body.Config, body.Reason)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, res)
 }
 
 func (h *Handler) flags(w http.ResponseWriter, r *http.Request) {

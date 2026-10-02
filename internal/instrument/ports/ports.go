@@ -3,6 +3,7 @@ package ports
 
 import (
 	"context"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -27,10 +28,22 @@ type Repos interface {
 	Pairs() PairRepo
 	Contracts() ContractRepo
 	Profiles() ProfileRepo
-	// Record appends a version to the configuration history.
-	Record(ctx context.Context, entity, key string, version int64, value any, actor, reason string) error
+	// Record appends a version to the configuration history; source says
+	// where the change came from (FILE, CONSOLE, STATUS, PROFILE).
+	Record(ctx context.Context, entity, key string, version int64, value any, actor, reason, source string) error
+	// LastEdit returns an item's last edit in the history (status and
+	// profile changes left out); nil when it has none.
+	LastEdit(ctx context.Context, entity, key string) (*Edit, error)
 	// Emit queues an instrument.events event keyed by aggregateID.
 	Emit(ctx context.Context, msg proto.Message, aggregateType, aggregateID string) error
+}
+
+// Edit is a change of an item in the configuration history: where it came
+// from, who made it and when.
+type Edit struct {
+	Source string
+	Actor  string
+	At     time.Time
 }
 
 // FeeRepo stores fee schedules.

@@ -5,11 +5,11 @@
 // user's page and its tabs (profile, security, risk …), the identity
 // requests, orders and trades, deposits (those to handle, the backfills,
 // the backfill form), the withdrawal queue, assets and pairs (a status
-// change is confirmed and canceled, never done), futures, every user's
-// positions, the liquidation log, HOUSE, the flags, the ledger's
-// reconciliation, the audit trail, the reports, the fund operations
-// (approval mode, form, records), the settings and the event stream; the
-// search opens a user;
+// change is confirmed and canceled, never done; a pair's editor; the
+// listing wizard's preview, canceled), futures, every user's positions,
+// the liquidation log, HOUSE, the flags, the ledger's reconciliation, the
+// audit trail, the reports, the fund operations (approval mode, form,
+// records), the settings and the event stream; the search opens a user;
 // signing out from the account menu ends the session. Every admin API
 // response is checked against api/admin/admin.yaml.
 //
@@ -160,7 +160,21 @@ try {
   await t.shot("3-confirm");
   await clickButton("取消", "[role=dialog]");
   await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
-  ok("assets and pairs: 50+ pairs, a status change waits for its confirmation (canceled)");
+  // A pair's editor, and the listing wizard's preview (canceled, nothing applied).
+  await t.clickLive("main tbody tr");
+  await waitText("价格保护带");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
+  await go("/instruments?tab=wizard");
+  await clickButton("填入示例", "main");
+  await waitText("解析出 1 项");
+  await clickButton("预览变化", "main");
+  await page.waitForFunction(() => document.body.innerText.includes("确认生效") || document.body.innerText.includes("没有变化"), { timeout: 20000 });
+  if (await page.$("[role=dialog]")) {
+    await t.shot("3b-listing-preview");
+    await clickButton("取消", "[role=dialog]");
+  }
+  ok("assets and pairs: 50+ pairs, a status change waits for its confirmation (canceled); a pair's editor; the listing wizard's preview");
 
   // 8. Futures (every user's positions, the liquidation log), HOUSE, flags.
   await go("/derivatives");

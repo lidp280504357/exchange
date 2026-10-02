@@ -46,6 +46,9 @@ type Service struct {
 	Deposits ports.Deposits
 	Wallet   ports.Withdrawals
 	Catalog  ports.Instruments
+	// Reference checks the reference symbols of edited pairs; nil notes
+	// them unchecked.
+	Reference ports.ReferenceMarket
 	// Derivatives is derivatives-service (perpetual contracts).
 	Derivatives ports.Derivatives
 	Flags       ports.Flags

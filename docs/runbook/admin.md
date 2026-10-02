@@ -111,6 +111,16 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
   - 托管方的回调晚到时按交易号找到这笔补记：地址、资产、数量一致即记「已核对」（回调日志 `APPLIED`，不再入账）；不一致时不更正、不再入账，回调日志记 `DISCREPANCY`、充值转为待处理并告警（`wallet_custody_deposit_discrepancies_total`，告警 `CustodyDepositDiscrepancy`）。查明后驳回或另做资金调整。
   - 「补记待回调」列出还没等到回调的补记；`exchangectl wallet reconcile --network UDUN`（或 `checks --network UDUN`）的报告在对账表后单列它们——托管方余额里没有对应的到账，就是录错了。
 
+## 资产与交易对的编辑（C3）
+
+「资产与交易对」页按 `deploy/instruments/test.json` 的格式读写参考数据（instrument-service 的 `ExportConfig`/`ApplyConfig`，见 [instruments.md](instruments.md#管理后台编辑2026-10-02-设计-44c3)）。需要 `instruments.write`（ADMIN、OPERATOR）。
+
+- **页面**：交易对、资产（含网络）、合约（含风险阶梯）、费率档四个列表，点行编辑，右上角新增；「上架向导」粘贴交易对的 CSV（第一行表头）或一份 JSON 配置文档。每次修改都先**预览**：逐项列出新增或修改、改了哪些字段（旧值划掉、新值）、后台的提示，填理由并输入第一项的代码后才生效。新交易对与合约处于「准备中」，确认无误后用列表里的「操作」开放。
+- **接口**：`GET /admin/v1/instruments/config`（配置文档，`instruments.read`）、`POST /admin/v1/instruments/preview`（`{config}`，只算变化）、`POST /admin/v1/instruments/apply`（`{config, reason}`，审计 `admin.instruments.applied`，对象 `instruments`，详情为每项的实体、代码、动作与版本）。文档里每项整体替换（漏写的字段变空，所以页面总是从导出的整项开始改），状态不在这里改，不删除。
+- **核对与提示**：交易对的新参考符号先向币安核对，币安现货没有的拒绝（422 `ADMIN_REFERENCE_UNKNOWN`）。提示（`warnings`，按代码本地化）：`HOUSE_NOT_LISTED`（不在 `market.house_liquidity` 名单里，HOUSE 不报价）、`NO_FUTURES`（币安没有对应合约，HOUSE 不给合约盘口）、`NO_INDEX_REFERENCE`（合约的指数交易对不跟随参考行情）、`REFERENCE_UNCHECKED`（核对不了）、`STREAMS_RECONNECT`（行情服务会重连全部参考行情流，约 20 秒参考盘口为空）。
+- **与部署的关系**：后台改过的项记为来源 `CONSOLE`，之后部署同步文件时保留它（输出里有 `kept …`）；`exchangectl instruments apply --force` 让文件重新说了算。要长期保留的改动也应改进 `test.json`。
+- 与设计稿 §5 的差别：没有单独的 `POST/PUT /admin/v1/instruments/{assets,networks,pairs,contracts}` 与 `GET/PUT /admin/v1/fees`，都走配置文档的预览与应用（一条路径、同一套校验）；参考符号映射在交易对的编辑里。
+
 ## 功能
 
 - **分页**（阶段 4 B1）：所有列表接口统一用不透明游标分页，返回 `{items, next_cursor}`。`next_cursor` 原样作为下一页的 `cursor` 传回，最后一页为 null；`limit` 为 1–200，默认 50。审计日志与强平记录的 `limit` 最多 500，默认 100。按接口：
@@ -141,7 +151,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 - **提现审批**：按状态列出提现（默认 `PENDING_REVIEW`），显示风控分与命中规则；批准/拒绝需理由，审批人为管理员邮箱（超过 20,000 USDT 需两位不同审批人，规则在 wallet-service）。`exchangectl wallet approve|reject` 仍可用。可按网络筛选（`network`），托管网络的提现带 `custody`、托管方状态 `provider_status` 与交给托管方的时间 `submitted_at`。
 - **托管方**（阶段 4 B6，[custody.md](custody.md)）：`GET /admin/v1/custody`（托管方币种与余额、使用它的网络、每个持有方与资产最近一次对账、托管方处理中的提现、待处理回调数）、`GET /admin/v1/custody/callbacks`（`result`、`kind`、`q` 按交易/提现 ID、哈希或地址；游标分页）、`GET /admin/v1/custody/callbacks/{id}`（含原始请求）、`POST /admin/v1/custody/callbacks/{id}/replay`（理由；只限验签通过且 `FAILED`、`UNMATCHED`、`RECEIVED` 的回调，需 `withdrawals.review`，wallet-service 写审计 `wallet.custody.callback.replay`）。
 - **用户**：按用户 ID、邮箱或手机号（`+` 开头的 E.164）查找，显示状态与余额；改账户状态（状态机见附录 B，原因为大写代码，例如 `SUSPICIOUS_LOGIN`、`REVIEW_CLEARED`）；强制撤销全部挂单（撮合引擎异步完成）。
-- **资产与交易对**：列出资产、网络与交易对；交易对状态是单交易对紧急开关（`TRADING ⇄ HALT`，`CANCEL_ONLY` 之后只能下线，不可恢复交易）。资产与网络参数（精度、充提开关、手续费等）仍以 `deploy/instruments/test.json` 为准，每次部署幂等同步，后台只读——否则下次部署会把后台改动覆盖回去。
+- **资产与交易对**：列出资产、网络、交易对、合约与费率档；交易对状态是单交易对紧急开关（`TRADING ⇄ HALT`，`CANCEL_ONLY` 之后只能下线，不可恢复交易）。C3 起可以在后台新增与编辑（见下节）；部署时同步 `deploy/instruments/test.json` 不会覆盖后台最后改过的项。
 - **功能开关**：列出全部已知开关（从未设置的显示为关闭、版本 0），切换启用状态并写理由；地区、账户状态、白名单等规则保持不变（改规则用 `exchangectl flags set`）。服务 5 秒内生效。
 - **合约**（阶段 3 任务 10，见 [derivatives.md](derivatives.md#管理后台与读模型)）：每个永续合约的状态、只减仓（原因与时间）、标记价是否新鲜、持仓量；解除只减仓（标记价恢复后才可操作，审计 `admin.derivatives.reduce_only_lifted`）；改合约状态（与交易对同一状态机，instrument-service 记录，审计 `admin.instruments.contract_status`，合约服务约一分钟内按新状态处理）；保险基金余额与 `PNL_CLEARING`；发起保险基金注资（双人审批，类型 `INSURANCE_FUND`）；强平监控（被接管、已预警、保证金率 ≥ 0.5 的仓位，每 5 秒刷新）；强平记录（读模型，可按 WARNING/STARTED/FILLED/ADL 过滤）。
 - **双人审批**（原「调账审批」；单人模式见上文「资金操作」）：FINANCE/ADMIN 发起给用户现货账户加（正数）或扣（负数）某资产，另一位有审批权限的管理员批准后，由 ledger-service 以幂等键 `approval:<id>` 记 `MANUAL_ADJUSTMENT` 分录（对手方 `ADJUSTMENT` 系统账户）。自己不能批准自己的申请（可以撤回）；账本拒绝（例如开关 `ledger.manual_adjustment` 关闭）则申请变为 `FAILED`；账本无响应则保持 `PENDING`，可再次批准（幂等键保证不重复记账）。审批期间申请行加锁，两人同时处理时后到者得到 `ADMIN_APPROVAL_DECIDED`。保险基金注资申请（`INSURANCE_FUND`，金额为正）走同一流程，批准后账本 `FundInsurance` 以同样的幂等键记 `INSURANCE_CONTRIBUTION`（对手方 `ADJUSTMENT`），审计 `admin.derivatives.insurance_requested/approved/rejected`。
@@ -166,7 +176,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 | 充值 | 三个标签：全部（按用户、资产、网络、状态、交易哈希筛选）、待处理（入账给用户、驳回）、补记待回调；「补记充值」抽屉（先校验、再走资金操作审批，明示托管方未核对） |
 | 提现审批 | 默认待审批队列（旧到新），可切换状态，按折合金额区间、风控分、是否搁置筛选；行点击打开详情：进度、地址簿记录（新地址、冷却中）、今日与本月已提、风控分与命中规则、审批人、批准/拒绝/搁置（带备注）；可勾选批量审核；有新的待审批提现时出现"有新数据"条，不整表轮询 |
 | 托管方 | 托管方状态与处理中的提现（可跳到提现列表）、币种与余额、对账（持有、其它持有方、在途、未入账手续费、应有、短缺）、回调日志（筛选、原始请求、重放） |
-| 资产与交易对 | 交易对（参考市场与倍数、步长、费率）、资产（充提开关、网络）、合约三个标签，可搜索；交易对与合约按状态机改状态 |
+| 资产与交易对 | 交易对（参考市场与倍数、步长、费率）、资产（充提开关、网络）、合约（风险阶梯）、费率档、上架向导五个标签，可搜索；点行编辑、新增，先预览逐项变化再生效（C3）；交易对与合约按状态机改状态 |
 | 仓位（C3） | 全部用户的合约持仓，按保证金率（维持保证金 ÷ 保证金余额）从高到低、每 5 秒刷新；「风险仓位」只看被预警、被接管或保证金率 ≥ 50% 的；可按合约、用户筛选；HOUSE 的仓位标出（用户的对手方，不能在这里平）；其余可强制平仓（`derivatives.write`）。接口 `GET /admin/v1/positions`（最多 500 个，`truncated` 表示还有更多；derivatives-service 的内部接口 `/internal/derivatives/positions`） |
 | 强平记录（C3） | 强平引擎的每一步（预警、接管、强平成交、自动减仓），按环节、合约、用户、近 1/7/30/90 天筛选（读模型） |
 | 合约与保险基金 | 合约状态、只减仓与解除、标记价、持仓量；保险基金与注资（按审批方式：单人模式限额内立即记账）。风险仓位与强平记录 C3 起各有一页 |
@@ -220,6 +230,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | `ADMIN_SELF_APPROVAL` | 不能批准自己的双人申请（可以撤回；单人模式下结果未知的操作可以自己完成） |
 | `ADMIN_APPROVAL_DECIDED` | 申请已处理 |
 | `ADMIN_EXISTS` | `admin create` 的邮箱已存在 |
+| `ADMIN_REFERENCE_UNKNOWN` | 交易对的参考符号币安现货没有（详情 `symbol`、`reference_symbol`） |
 | `WALLET_DEPOSIT_KNOWN` | 补记的托管方交易号或（网络、哈希、地址）已有充值，详情 `deposit_id` |
 | `WALLET_DEPOSIT_NOT_RELEASABLE` | 只有记入 `UNCLAIMED_DEPOSIT`、有币种、回调没有不一致的待处理充值才能入账给用户 |
 | `WALLET_DEPOSIT_RESOLVED` | 这笔充值已经处理过 |

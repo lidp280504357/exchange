@@ -233,6 +233,51 @@ func (i Instruments) SetContractStatus(ctx context.Context, symbol, to, reason, 
 	return resp.GetFromStatus(), nil
 }
 
+// Export returns the reference data as a config document.
+func (i Instruments) Export(ctx context.Context) (json.RawMessage, error) {
+	resp, err := i.C.ExportConfig(ctx, &instrumentv1.ExportConfigRequest{})
+	if err != nil {
+		return nil, err
+	}
+	return resp.GetConfigJson(), nil
+}
+
+// Apply applies a config document for the console.
+func (i Instruments) Apply(ctx context.Context, config json.RawMessage, dryRun bool, actor, reason string) (ports.ConfigResult, error) {
+	resp, err := i.C.ApplyConfig(ctx, &instrumentv1.ApplyConfigRequest{ConfigJson: config, DryRun: dryRun, Actor: actor, Reason: reason})
+	if err != nil {
+		return ports.ConfigResult{}, err
+	}
+	out := ports.ConfigResult{Changes: []ports.ConfigChange{}, Unchanged: int(resp.GetUnchanged()), Warnings: []ports.ConfigWarning{}}
+	for _, c := range resp.GetChanges() {
+		before := json.RawMessage("null")
+		if len(c.GetBeforeJson()) > 0 {
+			before = c.GetBeforeJson()
+		}
+		out.Changes = append(out.Changes, ports.ConfigChange{
+			Entity: c.GetEntity(), Key: c.GetKey(), Action: c.GetAction(), Version: c.GetVersion(), Before: before, After: c.GetAfterJson(),
+		})
+	}
+	return out, nil
+}
+
+// Listed reports whether the reference market lists a symbol on spot and
+// on futures.
+func (m Market) Listed(ctx context.Context, symbol string) (bool, bool, error) {
+	raw, err := m.do(ctx, http.MethodGet, m.Base+"/internal/market/reference-symbols/"+url.PathEscape(symbol), nil, nil)
+	if err != nil {
+		return false, false, err
+	}
+	var v struct {
+		Spot    bool `json:"spot"`
+		Futures bool `json:"futures"`
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return false, false, unavailable(err)
+	}
+	return v.Spot, v.Futures, nil
+}
+
 // REST calls internal HTTP APIs.
 type REST struct {
 	Client *http.Client

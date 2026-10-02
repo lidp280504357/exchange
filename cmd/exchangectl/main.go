@@ -71,8 +71,9 @@ commands:
   users status <user_id> --to STATUS --reason CODE [--note TEXT]
                               change an account status (ACTIVE, RISK_REVIEW, FROZEN, CLOSED)
   instruments list            assets, networks and trading pairs
-  instruments apply --file F --reason TEXT
-                              make the reference data match a JSON file ("-" for stdin); idempotent
+  instruments apply --file F --reason TEXT [--dry-run] [--force]
+                              make the reference data match a JSON file ("-" for stdin); idempotent;
+                              items the admin console changed last are kept unless --force
   instruments pair-status <symbol> --to STATUS --reason TEXT
                               move a pair: PREPARE -> TRADING <-> HALT -> CANCEL_ONLY -> DELISTED
   instruments contract-status <symbol> --to STATUS --reason TEXT

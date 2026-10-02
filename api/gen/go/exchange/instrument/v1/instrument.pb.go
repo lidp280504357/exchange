@@ -22,6 +22,296 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type ExportConfigRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExportConfigRequest) Reset() {
+	*x = ExportConfigRequest{}
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExportConfigRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExportConfigRequest) ProtoMessage() {}
+
+func (x *ExportConfigRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExportConfigRequest.ProtoReflect.Descriptor instead.
+func (*ExportConfigRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{0}
+}
+
+type ExportConfigResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ConfigJson    []byte                 `protobuf:"bytes,1,opt,name=config_json,json=configJson,proto3" json:"config_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExportConfigResponse) Reset() {
+	*x = ExportConfigResponse{}
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExportConfigResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExportConfigResponse) ProtoMessage() {}
+
+func (x *ExportConfigResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExportConfigResponse.ProtoReflect.Descriptor instead.
+func (*ExportConfigResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ExportConfigResponse) GetConfigJson() []byte {
+	if x != nil {
+		return x.ConfigJson
+	}
+	return nil
+}
+
+type ApplyConfigRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The document, unknown fields refused; only the items it names.
+	ConfigJson    []byte `protobuf:"bytes,1,opt,name=config_json,json=configJson,proto3" json:"config_json,omitempty"`
+	DryRun        bool   `protobuf:"varint,2,opt,name=dry_run,json=dryRun,proto3" json:"dry_run,omitempty"`
+	Actor         string `protobuf:"bytes,3,opt,name=actor,proto3" json:"actor,omitempty"`
+	Reason        string `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ApplyConfigRequest) Reset() {
+	*x = ApplyConfigRequest{}
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ApplyConfigRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ApplyConfigRequest) ProtoMessage() {}
+
+func (x *ApplyConfigRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ApplyConfigRequest.ProtoReflect.Descriptor instead.
+func (*ApplyConfigRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ApplyConfigRequest) GetConfigJson() []byte {
+	if x != nil {
+		return x.ConfigJson
+	}
+	return nil
+}
+
+func (x *ApplyConfigRequest) GetDryRun() bool {
+	if x != nil {
+		return x.DryRun
+	}
+	return false
+}
+
+func (x *ApplyConfigRequest) GetActor() string {
+	if x != nil {
+		return x.Actor
+	}
+	return ""
+}
+
+func (x *ApplyConfigRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type ConfigChange struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// FEE_SCHEDULE, ASSET, NETWORK, TRADING_PAIR or CONTRACT.
+	Entity string `protobuf:"bytes,1,opt,name=entity,proto3" json:"entity,omitempty"`
+	// The tier, asset code, ASSET/NETWORK or symbol.
+	Key string `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
+	// CREATE or UPDATE.
+	Action string `protobuf:"bytes,3,opt,name=action,proto3" json:"action,omitempty"`
+	// The version after the change.
+	Version int64 `protobuf:"varint,4,opt,name=version,proto3" json:"version,omitempty"`
+	// The item before (empty when created) and after, as JSON.
+	BeforeJson    []byte `protobuf:"bytes,5,opt,name=before_json,json=beforeJson,proto3" json:"before_json,omitempty"`
+	AfterJson     []byte `protobuf:"bytes,6,opt,name=after_json,json=afterJson,proto3" json:"after_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConfigChange) Reset() {
+	*x = ConfigChange{}
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConfigChange) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConfigChange) ProtoMessage() {}
+
+func (x *ConfigChange) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConfigChange.ProtoReflect.Descriptor instead.
+func (*ConfigChange) Descriptor() ([]byte, []int) {
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ConfigChange) GetEntity() string {
+	if x != nil {
+		return x.Entity
+	}
+	return ""
+}
+
+func (x *ConfigChange) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *ConfigChange) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *ConfigChange) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+func (x *ConfigChange) GetBeforeJson() []byte {
+	if x != nil {
+		return x.BeforeJson
+	}
+	return nil
+}
+
+func (x *ConfigChange) GetAfterJson() []byte {
+	if x != nil {
+		return x.AfterJson
+	}
+	return nil
+}
+
+type ApplyConfigResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Changes       []*ConfigChange        `protobuf:"bytes,1,rep,name=changes,proto3" json:"changes,omitempty"`
+	Unchanged     int32                  `protobuf:"varint,2,opt,name=unchanged,proto3" json:"unchanged,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ApplyConfigResponse) Reset() {
+	*x = ApplyConfigResponse{}
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ApplyConfigResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ApplyConfigResponse) ProtoMessage() {}
+
+func (x *ApplyConfigResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ApplyConfigResponse.ProtoReflect.Descriptor instead.
+func (*ApplyConfigResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ApplyConfigResponse) GetChanges() []*ConfigChange {
+	if x != nil {
+		return x.Changes
+	}
+	return nil
+}
+
+func (x *ApplyConfigResponse) GetUnchanged() int32 {
+	if x != nil {
+		return x.Unchanged
+	}
+	return 0
+}
+
 type Asset struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Upper-case code, e.g. BTC, USDT.
@@ -47,7 +337,7 @@ type Asset struct {
 
 func (x *Asset) Reset() {
 	*x = Asset{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[0]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -59,7 +349,7 @@ func (x *Asset) String() string {
 func (*Asset) ProtoMessage() {}
 
 func (x *Asset) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[0]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -72,7 +362,7 @@ func (x *Asset) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Asset.ProtoReflect.Descriptor instead.
 func (*Asset) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{0}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Asset) GetAssetCode() string {
@@ -183,7 +473,7 @@ type AssetProfile struct {
 
 func (x *AssetProfile) Reset() {
 	*x = AssetProfile{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[1]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -195,7 +485,7 @@ func (x *AssetProfile) String() string {
 func (*AssetProfile) ProtoMessage() {}
 
 func (x *AssetProfile) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[1]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -208,7 +498,7 @@ func (x *AssetProfile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AssetProfile.ProtoReflect.Descriptor instead.
 func (*AssetProfile) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{1}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *AssetProfile) GetDisplayName() string {
@@ -302,7 +592,7 @@ type Network struct {
 
 func (x *Network) Reset() {
 	*x = Network{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[2]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -314,7 +604,7 @@ func (x *Network) String() string {
 func (*Network) ProtoMessage() {}
 
 func (x *Network) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[2]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -327,7 +617,7 @@ func (x *Network) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Network.ProtoReflect.Descriptor instead.
 func (*Network) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{2}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Network) GetAssetCode() string {
@@ -500,7 +790,7 @@ type TradingPair struct {
 
 func (x *TradingPair) Reset() {
 	*x = TradingPair{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[3]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -512,7 +802,7 @@ func (x *TradingPair) String() string {
 func (*TradingPair) ProtoMessage() {}
 
 func (x *TradingPair) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[3]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -525,7 +815,7 @@ func (x *TradingPair) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TradingPair.ProtoReflect.Descriptor instead.
 func (*TradingPair) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{3}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *TradingPair) GetSymbol() string {
@@ -662,7 +952,7 @@ type RiskTier struct {
 
 func (x *RiskTier) Reset() {
 	*x = RiskTier{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[4]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -674,7 +964,7 @@ func (x *RiskTier) String() string {
 func (*RiskTier) ProtoMessage() {}
 
 func (x *RiskTier) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[4]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -687,7 +977,7 @@ func (x *RiskTier) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RiskTier.ProtoReflect.Descriptor instead.
 func (*RiskTier) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{4}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *RiskTier) GetMaxNotional() string {
@@ -749,7 +1039,7 @@ type Contract struct {
 
 func (x *Contract) Reset() {
 	*x = Contract{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[5]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -761,7 +1051,7 @@ func (x *Contract) String() string {
 func (*Contract) ProtoMessage() {}
 
 func (x *Contract) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[5]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -774,7 +1064,7 @@ func (x *Contract) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Contract.ProtoReflect.Descriptor instead.
 func (*Contract) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{5}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Contract) GetSymbol() string {
@@ -936,7 +1226,7 @@ type FeeSchedule struct {
 
 func (x *FeeSchedule) Reset() {
 	*x = FeeSchedule{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[6]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -948,7 +1238,7 @@ func (x *FeeSchedule) String() string {
 func (*FeeSchedule) ProtoMessage() {}
 
 func (x *FeeSchedule) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[6]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -961,7 +1251,7 @@ func (x *FeeSchedule) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FeeSchedule.ProtoReflect.Descriptor instead.
 func (*FeeSchedule) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{6}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *FeeSchedule) GetTier() string {
@@ -1001,7 +1291,7 @@ type GetAssetRequest struct {
 
 func (x *GetAssetRequest) Reset() {
 	*x = GetAssetRequest{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[7]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1013,7 +1303,7 @@ func (x *GetAssetRequest) String() string {
 func (*GetAssetRequest) ProtoMessage() {}
 
 func (x *GetAssetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[7]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1026,7 +1316,7 @@ func (x *GetAssetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAssetRequest.ProtoReflect.Descriptor instead.
 func (*GetAssetRequest) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{7}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *GetAssetRequest) GetAssetCode() string {
@@ -1045,7 +1335,7 @@ type GetAssetResponse struct {
 
 func (x *GetAssetResponse) Reset() {
 	*x = GetAssetResponse{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[8]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1057,7 +1347,7 @@ func (x *GetAssetResponse) String() string {
 func (*GetAssetResponse) ProtoMessage() {}
 
 func (x *GetAssetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[8]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1070,7 +1360,7 @@ func (x *GetAssetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAssetResponse.ProtoReflect.Descriptor instead.
 func (*GetAssetResponse) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{8}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *GetAssetResponse) GetAsset() *Asset {
@@ -1088,7 +1378,7 @@ type ListAssetsRequest struct {
 
 func (x *ListAssetsRequest) Reset() {
 	*x = ListAssetsRequest{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[9]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1100,7 +1390,7 @@ func (x *ListAssetsRequest) String() string {
 func (*ListAssetsRequest) ProtoMessage() {}
 
 func (x *ListAssetsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[9]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1113,7 +1403,7 @@ func (x *ListAssetsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAssetsRequest.ProtoReflect.Descriptor instead.
 func (*ListAssetsRequest) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{9}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{14}
 }
 
 type ListAssetsResponse struct {
@@ -1125,7 +1415,7 @@ type ListAssetsResponse struct {
 
 func (x *ListAssetsResponse) Reset() {
 	*x = ListAssetsResponse{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[10]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1137,7 +1427,7 @@ func (x *ListAssetsResponse) String() string {
 func (*ListAssetsResponse) ProtoMessage() {}
 
 func (x *ListAssetsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[10]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1150,7 +1440,7 @@ func (x *ListAssetsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAssetsResponse.ProtoReflect.Descriptor instead.
 func (*ListAssetsResponse) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{10}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ListAssetsResponse) GetAssets() []*Asset {
@@ -1169,7 +1459,7 @@ type GetTradingPairRequest struct {
 
 func (x *GetTradingPairRequest) Reset() {
 	*x = GetTradingPairRequest{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[11]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1181,7 +1471,7 @@ func (x *GetTradingPairRequest) String() string {
 func (*GetTradingPairRequest) ProtoMessage() {}
 
 func (x *GetTradingPairRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[11]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1194,7 +1484,7 @@ func (x *GetTradingPairRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTradingPairRequest.ProtoReflect.Descriptor instead.
 func (*GetTradingPairRequest) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{11}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *GetTradingPairRequest) GetSymbol() string {
@@ -1213,7 +1503,7 @@ type GetTradingPairResponse struct {
 
 func (x *GetTradingPairResponse) Reset() {
 	*x = GetTradingPairResponse{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[12]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1225,7 +1515,7 @@ func (x *GetTradingPairResponse) String() string {
 func (*GetTradingPairResponse) ProtoMessage() {}
 
 func (x *GetTradingPairResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[12]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1238,7 +1528,7 @@ func (x *GetTradingPairResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTradingPairResponse.ProtoReflect.Descriptor instead.
 func (*GetTradingPairResponse) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{12}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *GetTradingPairResponse) GetPair() *TradingPair {
@@ -1256,7 +1546,7 @@ type ListTradingPairsRequest struct {
 
 func (x *ListTradingPairsRequest) Reset() {
 	*x = ListTradingPairsRequest{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[13]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1268,7 +1558,7 @@ func (x *ListTradingPairsRequest) String() string {
 func (*ListTradingPairsRequest) ProtoMessage() {}
 
 func (x *ListTradingPairsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[13]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1281,7 +1571,7 @@ func (x *ListTradingPairsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTradingPairsRequest.ProtoReflect.Descriptor instead.
 func (*ListTradingPairsRequest) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{13}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{18}
 }
 
 type ListTradingPairsResponse struct {
@@ -1293,7 +1583,7 @@ type ListTradingPairsResponse struct {
 
 func (x *ListTradingPairsResponse) Reset() {
 	*x = ListTradingPairsResponse{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[14]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1305,7 +1595,7 @@ func (x *ListTradingPairsResponse) String() string {
 func (*ListTradingPairsResponse) ProtoMessage() {}
 
 func (x *ListTradingPairsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[14]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1318,7 +1608,7 @@ func (x *ListTradingPairsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTradingPairsResponse.ProtoReflect.Descriptor instead.
 func (*ListTradingPairsResponse) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{14}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ListTradingPairsResponse) GetPairs() []*TradingPair {
@@ -1340,7 +1630,7 @@ type SetPairStatusRequest struct {
 
 func (x *SetPairStatusRequest) Reset() {
 	*x = SetPairStatusRequest{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[15]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1352,7 +1642,7 @@ func (x *SetPairStatusRequest) String() string {
 func (*SetPairStatusRequest) ProtoMessage() {}
 
 func (x *SetPairStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[15]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1365,7 +1655,7 @@ func (x *SetPairStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetPairStatusRequest.ProtoReflect.Descriptor instead.
 func (*SetPairStatusRequest) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{15}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *SetPairStatusRequest) GetSymbol() string {
@@ -1405,7 +1695,7 @@ type SetPairStatusResponse struct {
 
 func (x *SetPairStatusResponse) Reset() {
 	*x = SetPairStatusResponse{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[16]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1417,7 +1707,7 @@ func (x *SetPairStatusResponse) String() string {
 func (*SetPairStatusResponse) ProtoMessage() {}
 
 func (x *SetPairStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[16]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1430,7 +1720,7 @@ func (x *SetPairStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetPairStatusResponse.ProtoReflect.Descriptor instead.
 func (*SetPairStatusResponse) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{16}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *SetPairStatusResponse) GetFromStatus() string {
@@ -1464,7 +1754,7 @@ type UpdateAssetProfileRequest struct {
 
 func (x *UpdateAssetProfileRequest) Reset() {
 	*x = UpdateAssetProfileRequest{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[17]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1476,7 +1766,7 @@ func (x *UpdateAssetProfileRequest) String() string {
 func (*UpdateAssetProfileRequest) ProtoMessage() {}
 
 func (x *UpdateAssetProfileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[17]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1489,7 +1779,7 @@ func (x *UpdateAssetProfileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateAssetProfileRequest.ProtoReflect.Descriptor instead.
 func (*UpdateAssetProfileRequest) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{17}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *UpdateAssetProfileRequest) GetAssetCode() string {
@@ -1564,7 +1854,7 @@ type UpdateAssetProfileResponse struct {
 
 func (x *UpdateAssetProfileResponse) Reset() {
 	*x = UpdateAssetProfileResponse{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[18]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1576,7 +1866,7 @@ func (x *UpdateAssetProfileResponse) String() string {
 func (*UpdateAssetProfileResponse) ProtoMessage() {}
 
 func (x *UpdateAssetProfileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[18]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1589,7 +1879,7 @@ func (x *UpdateAssetProfileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateAssetProfileResponse.ProtoReflect.Descriptor instead.
 func (*UpdateAssetProfileResponse) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{18}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *UpdateAssetProfileResponse) GetProfile() *AssetProfile {
@@ -1608,7 +1898,7 @@ type GetContractRequest struct {
 
 func (x *GetContractRequest) Reset() {
 	*x = GetContractRequest{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[19]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1620,7 +1910,7 @@ func (x *GetContractRequest) String() string {
 func (*GetContractRequest) ProtoMessage() {}
 
 func (x *GetContractRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[19]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1633,7 +1923,7 @@ func (x *GetContractRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetContractRequest.ProtoReflect.Descriptor instead.
 func (*GetContractRequest) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{19}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *GetContractRequest) GetSymbol() string {
@@ -1652,7 +1942,7 @@ type GetContractResponse struct {
 
 func (x *GetContractResponse) Reset() {
 	*x = GetContractResponse{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[20]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1664,7 +1954,7 @@ func (x *GetContractResponse) String() string {
 func (*GetContractResponse) ProtoMessage() {}
 
 func (x *GetContractResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[20]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1677,7 +1967,7 @@ func (x *GetContractResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetContractResponse.ProtoReflect.Descriptor instead.
 func (*GetContractResponse) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{20}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *GetContractResponse) GetContract() *Contract {
@@ -1695,7 +1985,7 @@ type ListContractsRequest struct {
 
 func (x *ListContractsRequest) Reset() {
 	*x = ListContractsRequest{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[21]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1707,7 +1997,7 @@ func (x *ListContractsRequest) String() string {
 func (*ListContractsRequest) ProtoMessage() {}
 
 func (x *ListContractsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[21]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1720,7 +2010,7 @@ func (x *ListContractsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListContractsRequest.ProtoReflect.Descriptor instead.
 func (*ListContractsRequest) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{21}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{26}
 }
 
 type ListContractsResponse struct {
@@ -1732,7 +2022,7 @@ type ListContractsResponse struct {
 
 func (x *ListContractsResponse) Reset() {
 	*x = ListContractsResponse{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[22]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1744,7 +2034,7 @@ func (x *ListContractsResponse) String() string {
 func (*ListContractsResponse) ProtoMessage() {}
 
 func (x *ListContractsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[22]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1757,7 +2047,7 @@ func (x *ListContractsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListContractsResponse.ProtoReflect.Descriptor instead.
 func (*ListContractsResponse) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{22}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ListContractsResponse) GetContracts() []*Contract {
@@ -1779,7 +2069,7 @@ type SetContractStatusRequest struct {
 
 func (x *SetContractStatusRequest) Reset() {
 	*x = SetContractStatusRequest{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[23]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1791,7 +2081,7 @@ func (x *SetContractStatusRequest) String() string {
 func (*SetContractStatusRequest) ProtoMessage() {}
 
 func (x *SetContractStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[23]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1804,7 +2094,7 @@ func (x *SetContractStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetContractStatusRequest.ProtoReflect.Descriptor instead.
 func (*SetContractStatusRequest) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{23}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *SetContractStatusRequest) GetSymbol() string {
@@ -1844,7 +2134,7 @@ type SetContractStatusResponse struct {
 
 func (x *SetContractStatusResponse) Reset() {
 	*x = SetContractStatusResponse{}
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[24]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1856,7 +2146,7 @@ func (x *SetContractStatusResponse) String() string {
 func (*SetContractStatusResponse) ProtoMessage() {}
 
 func (x *SetContractStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[24]
+	mi := &file_exchange_instrument_v1_instrument_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1869,7 +2159,7 @@ func (x *SetContractStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetContractStatusResponse.ProtoReflect.Descriptor instead.
 func (*SetContractStatusResponse) Descriptor() ([]byte, []int) {
-	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{24}
+	return file_exchange_instrument_v1_instrument_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *SetContractStatusResponse) GetFromStatus() string {
@@ -1883,7 +2173,29 @@ var File_exchange_instrument_v1_instrument_proto protoreflect.FileDescriptor
 
 const file_exchange_instrument_v1_instrument_proto_rawDesc = "" +
 	"\n" +
-	"'exchange/instrument/v1/instrument.proto\x12\x16exchange.instrument.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc7\x03\n" +
+	"'exchange/instrument/v1/instrument.proto\x12\x16exchange.instrument.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x15\n" +
+	"\x13ExportConfigRequest\"7\n" +
+	"\x14ExportConfigResponse\x12\x1f\n" +
+	"\vconfig_json\x18\x01 \x01(\fR\n" +
+	"configJson\"|\n" +
+	"\x12ApplyConfigRequest\x12\x1f\n" +
+	"\vconfig_json\x18\x01 \x01(\fR\n" +
+	"configJson\x12\x17\n" +
+	"\adry_run\x18\x02 \x01(\bR\x06dryRun\x12\x14\n" +
+	"\x05actor\x18\x03 \x01(\tR\x05actor\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\"\xaa\x01\n" +
+	"\fConfigChange\x12\x16\n" +
+	"\x06entity\x18\x01 \x01(\tR\x06entity\x12\x10\n" +
+	"\x03key\x18\x02 \x01(\tR\x03key\x12\x16\n" +
+	"\x06action\x18\x03 \x01(\tR\x06action\x12\x18\n" +
+	"\aversion\x18\x04 \x01(\x03R\aversion\x12\x1f\n" +
+	"\vbefore_json\x18\x05 \x01(\fR\n" +
+	"beforeJson\x12\x1d\n" +
+	"\n" +
+	"after_json\x18\x06 \x01(\fR\tafterJson\"s\n" +
+	"\x13ApplyConfigResponse\x12>\n" +
+	"\achanges\x18\x01 \x03(\v2$.exchange.instrument.v1.ConfigChangeR\achanges\x12\x1c\n" +
+	"\tunchanged\x18\x02 \x01(\x05R\tunchanged\"\xc7\x03\n" +
 	"\x05Asset\x12\x1d\n" +
 	"\n" +
 	"asset_code\x18\x01 \x01(\tR\tassetCode\x12\x12\n" +
@@ -2057,7 +2369,7 @@ const file_exchange_instrument_v1_instrument_proto_rawDesc = "" +
 	"\x05actor\x18\x04 \x01(\tR\x05actor\"<\n" +
 	"\x19SetContractStatusResponse\x12\x1f\n" +
 	"\vfrom_status\x18\x01 \x01(\tR\n" +
-	"fromStatus2\xfa\a\n" +
+	"fromStatus2\xcd\t\n" +
 	"\x11InstrumentService\x12]\n" +
 	"\bGetAsset\x12'.exchange.instrument.v1.GetAssetRequest\x1a(.exchange.instrument.v1.GetAssetResponse\x12c\n" +
 	"\n" +
@@ -2068,7 +2380,9 @@ const file_exchange_instrument_v1_instrument_proto_rawDesc = "" +
 	"\vGetContract\x12*.exchange.instrument.v1.GetContractRequest\x1a+.exchange.instrument.v1.GetContractResponse\x12l\n" +
 	"\rListContracts\x12,.exchange.instrument.v1.ListContractsRequest\x1a-.exchange.instrument.v1.ListContractsResponse\x12x\n" +
 	"\x11SetContractStatus\x120.exchange.instrument.v1.SetContractStatusRequest\x1a1.exchange.instrument.v1.SetContractStatusResponse\x12{\n" +
-	"\x12UpdateAssetProfile\x121.exchange.instrument.v1.UpdateAssetProfileRequest\x1a2.exchange.instrument.v1.UpdateAssetProfileResponseB\xf9\x01\n" +
+	"\x12UpdateAssetProfile\x121.exchange.instrument.v1.UpdateAssetProfileRequest\x1a2.exchange.instrument.v1.UpdateAssetProfileResponse\x12i\n" +
+	"\fExportConfig\x12+.exchange.instrument.v1.ExportConfigRequest\x1a,.exchange.instrument.v1.ExportConfigResponse\x12f\n" +
+	"\vApplyConfig\x12*.exchange.instrument.v1.ApplyConfigRequest\x1a+.exchange.instrument.v1.ApplyConfigResponseB\xf9\x01\n" +
 	"\x1acom.exchange.instrument.v1B\x0fInstrumentProtoP\x01ZPgithub.com/lidp280504357/exchange/api/gen/go/exchange/instrument/v1;instrumentv1\xa2\x02\x03EIX\xaa\x02\x16Exchange.Instrument.V1\xca\x02\x16Exchange\\Instrument\\V1\xe2\x02\"Exchange\\Instrument\\V1\\GPBMetadata\xea\x02\x18Exchange::Instrument::V1b\x06proto3"
 
 var (
@@ -2083,78 +2397,88 @@ func file_exchange_instrument_v1_instrument_proto_rawDescGZIP() []byte {
 	return file_exchange_instrument_v1_instrument_proto_rawDescData
 }
 
-var file_exchange_instrument_v1_instrument_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
+var file_exchange_instrument_v1_instrument_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
 var file_exchange_instrument_v1_instrument_proto_goTypes = []any{
-	(*Asset)(nil),                      // 0: exchange.instrument.v1.Asset
-	(*AssetProfile)(nil),               // 1: exchange.instrument.v1.AssetProfile
-	(*Network)(nil),                    // 2: exchange.instrument.v1.Network
-	(*TradingPair)(nil),                // 3: exchange.instrument.v1.TradingPair
-	(*RiskTier)(nil),                   // 4: exchange.instrument.v1.RiskTier
-	(*Contract)(nil),                   // 5: exchange.instrument.v1.Contract
-	(*FeeSchedule)(nil),                // 6: exchange.instrument.v1.FeeSchedule
-	(*GetAssetRequest)(nil),            // 7: exchange.instrument.v1.GetAssetRequest
-	(*GetAssetResponse)(nil),           // 8: exchange.instrument.v1.GetAssetResponse
-	(*ListAssetsRequest)(nil),          // 9: exchange.instrument.v1.ListAssetsRequest
-	(*ListAssetsResponse)(nil),         // 10: exchange.instrument.v1.ListAssetsResponse
-	(*GetTradingPairRequest)(nil),      // 11: exchange.instrument.v1.GetTradingPairRequest
-	(*GetTradingPairResponse)(nil),     // 12: exchange.instrument.v1.GetTradingPairResponse
-	(*ListTradingPairsRequest)(nil),    // 13: exchange.instrument.v1.ListTradingPairsRequest
-	(*ListTradingPairsResponse)(nil),   // 14: exchange.instrument.v1.ListTradingPairsResponse
-	(*SetPairStatusRequest)(nil),       // 15: exchange.instrument.v1.SetPairStatusRequest
-	(*SetPairStatusResponse)(nil),      // 16: exchange.instrument.v1.SetPairStatusResponse
-	(*UpdateAssetProfileRequest)(nil),  // 17: exchange.instrument.v1.UpdateAssetProfileRequest
-	(*UpdateAssetProfileResponse)(nil), // 18: exchange.instrument.v1.UpdateAssetProfileResponse
-	(*GetContractRequest)(nil),         // 19: exchange.instrument.v1.GetContractRequest
-	(*GetContractResponse)(nil),        // 20: exchange.instrument.v1.GetContractResponse
-	(*ListContractsRequest)(nil),       // 21: exchange.instrument.v1.ListContractsRequest
-	(*ListContractsResponse)(nil),      // 22: exchange.instrument.v1.ListContractsResponse
-	(*SetContractStatusRequest)(nil),   // 23: exchange.instrument.v1.SetContractStatusRequest
-	(*SetContractStatusResponse)(nil),  // 24: exchange.instrument.v1.SetContractStatusResponse
-	nil,                                // 25: exchange.instrument.v1.AssetProfile.DescriptionEntry
-	nil,                                // 26: exchange.instrument.v1.AssetProfile.LinksEntry
-	nil,                                // 27: exchange.instrument.v1.UpdateAssetProfileRequest.DescriptionEntry
-	nil,                                // 28: exchange.instrument.v1.UpdateAssetProfileRequest.LinksEntry
-	(*timestamppb.Timestamp)(nil),      // 29: google.protobuf.Timestamp
+	(*ExportConfigRequest)(nil),        // 0: exchange.instrument.v1.ExportConfigRequest
+	(*ExportConfigResponse)(nil),       // 1: exchange.instrument.v1.ExportConfigResponse
+	(*ApplyConfigRequest)(nil),         // 2: exchange.instrument.v1.ApplyConfigRequest
+	(*ConfigChange)(nil),               // 3: exchange.instrument.v1.ConfigChange
+	(*ApplyConfigResponse)(nil),        // 4: exchange.instrument.v1.ApplyConfigResponse
+	(*Asset)(nil),                      // 5: exchange.instrument.v1.Asset
+	(*AssetProfile)(nil),               // 6: exchange.instrument.v1.AssetProfile
+	(*Network)(nil),                    // 7: exchange.instrument.v1.Network
+	(*TradingPair)(nil),                // 8: exchange.instrument.v1.TradingPair
+	(*RiskTier)(nil),                   // 9: exchange.instrument.v1.RiskTier
+	(*Contract)(nil),                   // 10: exchange.instrument.v1.Contract
+	(*FeeSchedule)(nil),                // 11: exchange.instrument.v1.FeeSchedule
+	(*GetAssetRequest)(nil),            // 12: exchange.instrument.v1.GetAssetRequest
+	(*GetAssetResponse)(nil),           // 13: exchange.instrument.v1.GetAssetResponse
+	(*ListAssetsRequest)(nil),          // 14: exchange.instrument.v1.ListAssetsRequest
+	(*ListAssetsResponse)(nil),         // 15: exchange.instrument.v1.ListAssetsResponse
+	(*GetTradingPairRequest)(nil),      // 16: exchange.instrument.v1.GetTradingPairRequest
+	(*GetTradingPairResponse)(nil),     // 17: exchange.instrument.v1.GetTradingPairResponse
+	(*ListTradingPairsRequest)(nil),    // 18: exchange.instrument.v1.ListTradingPairsRequest
+	(*ListTradingPairsResponse)(nil),   // 19: exchange.instrument.v1.ListTradingPairsResponse
+	(*SetPairStatusRequest)(nil),       // 20: exchange.instrument.v1.SetPairStatusRequest
+	(*SetPairStatusResponse)(nil),      // 21: exchange.instrument.v1.SetPairStatusResponse
+	(*UpdateAssetProfileRequest)(nil),  // 22: exchange.instrument.v1.UpdateAssetProfileRequest
+	(*UpdateAssetProfileResponse)(nil), // 23: exchange.instrument.v1.UpdateAssetProfileResponse
+	(*GetContractRequest)(nil),         // 24: exchange.instrument.v1.GetContractRequest
+	(*GetContractResponse)(nil),        // 25: exchange.instrument.v1.GetContractResponse
+	(*ListContractsRequest)(nil),       // 26: exchange.instrument.v1.ListContractsRequest
+	(*ListContractsResponse)(nil),      // 27: exchange.instrument.v1.ListContractsResponse
+	(*SetContractStatusRequest)(nil),   // 28: exchange.instrument.v1.SetContractStatusRequest
+	(*SetContractStatusResponse)(nil),  // 29: exchange.instrument.v1.SetContractStatusResponse
+	nil,                                // 30: exchange.instrument.v1.AssetProfile.DescriptionEntry
+	nil,                                // 31: exchange.instrument.v1.AssetProfile.LinksEntry
+	nil,                                // 32: exchange.instrument.v1.UpdateAssetProfileRequest.DescriptionEntry
+	nil,                                // 33: exchange.instrument.v1.UpdateAssetProfileRequest.LinksEntry
+	(*timestamppb.Timestamp)(nil),      // 34: google.protobuf.Timestamp
 }
 var file_exchange_instrument_v1_instrument_proto_depIdxs = []int32{
-	2,  // 0: exchange.instrument.v1.Asset.networks:type_name -> exchange.instrument.v1.Network
-	1,  // 1: exchange.instrument.v1.Asset.profile:type_name -> exchange.instrument.v1.AssetProfile
-	25, // 2: exchange.instrument.v1.AssetProfile.description:type_name -> exchange.instrument.v1.AssetProfile.DescriptionEntry
-	26, // 3: exchange.instrument.v1.AssetProfile.links:type_name -> exchange.instrument.v1.AssetProfile.LinksEntry
-	29, // 4: exchange.instrument.v1.TradingPair.listed_at:type_name -> google.protobuf.Timestamp
-	4,  // 5: exchange.instrument.v1.Contract.risk_tiers:type_name -> exchange.instrument.v1.RiskTier
-	0,  // 6: exchange.instrument.v1.GetAssetResponse.asset:type_name -> exchange.instrument.v1.Asset
-	0,  // 7: exchange.instrument.v1.ListAssetsResponse.assets:type_name -> exchange.instrument.v1.Asset
-	3,  // 8: exchange.instrument.v1.GetTradingPairResponse.pair:type_name -> exchange.instrument.v1.TradingPair
-	3,  // 9: exchange.instrument.v1.ListTradingPairsResponse.pairs:type_name -> exchange.instrument.v1.TradingPair
-	27, // 10: exchange.instrument.v1.UpdateAssetProfileRequest.description:type_name -> exchange.instrument.v1.UpdateAssetProfileRequest.DescriptionEntry
-	28, // 11: exchange.instrument.v1.UpdateAssetProfileRequest.links:type_name -> exchange.instrument.v1.UpdateAssetProfileRequest.LinksEntry
-	1,  // 12: exchange.instrument.v1.UpdateAssetProfileResponse.profile:type_name -> exchange.instrument.v1.AssetProfile
-	5,  // 13: exchange.instrument.v1.GetContractResponse.contract:type_name -> exchange.instrument.v1.Contract
-	5,  // 14: exchange.instrument.v1.ListContractsResponse.contracts:type_name -> exchange.instrument.v1.Contract
-	7,  // 15: exchange.instrument.v1.InstrumentService.GetAsset:input_type -> exchange.instrument.v1.GetAssetRequest
-	9,  // 16: exchange.instrument.v1.InstrumentService.ListAssets:input_type -> exchange.instrument.v1.ListAssetsRequest
-	11, // 17: exchange.instrument.v1.InstrumentService.GetTradingPair:input_type -> exchange.instrument.v1.GetTradingPairRequest
-	13, // 18: exchange.instrument.v1.InstrumentService.ListTradingPairs:input_type -> exchange.instrument.v1.ListTradingPairsRequest
-	15, // 19: exchange.instrument.v1.InstrumentService.SetPairStatus:input_type -> exchange.instrument.v1.SetPairStatusRequest
-	19, // 20: exchange.instrument.v1.InstrumentService.GetContract:input_type -> exchange.instrument.v1.GetContractRequest
-	21, // 21: exchange.instrument.v1.InstrumentService.ListContracts:input_type -> exchange.instrument.v1.ListContractsRequest
-	23, // 22: exchange.instrument.v1.InstrumentService.SetContractStatus:input_type -> exchange.instrument.v1.SetContractStatusRequest
-	17, // 23: exchange.instrument.v1.InstrumentService.UpdateAssetProfile:input_type -> exchange.instrument.v1.UpdateAssetProfileRequest
-	8,  // 24: exchange.instrument.v1.InstrumentService.GetAsset:output_type -> exchange.instrument.v1.GetAssetResponse
-	10, // 25: exchange.instrument.v1.InstrumentService.ListAssets:output_type -> exchange.instrument.v1.ListAssetsResponse
-	12, // 26: exchange.instrument.v1.InstrumentService.GetTradingPair:output_type -> exchange.instrument.v1.GetTradingPairResponse
-	14, // 27: exchange.instrument.v1.InstrumentService.ListTradingPairs:output_type -> exchange.instrument.v1.ListTradingPairsResponse
-	16, // 28: exchange.instrument.v1.InstrumentService.SetPairStatus:output_type -> exchange.instrument.v1.SetPairStatusResponse
-	20, // 29: exchange.instrument.v1.InstrumentService.GetContract:output_type -> exchange.instrument.v1.GetContractResponse
-	22, // 30: exchange.instrument.v1.InstrumentService.ListContracts:output_type -> exchange.instrument.v1.ListContractsResponse
-	24, // 31: exchange.instrument.v1.InstrumentService.SetContractStatus:output_type -> exchange.instrument.v1.SetContractStatusResponse
-	18, // 32: exchange.instrument.v1.InstrumentService.UpdateAssetProfile:output_type -> exchange.instrument.v1.UpdateAssetProfileResponse
-	24, // [24:33] is the sub-list for method output_type
-	15, // [15:24] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	3,  // 0: exchange.instrument.v1.ApplyConfigResponse.changes:type_name -> exchange.instrument.v1.ConfigChange
+	7,  // 1: exchange.instrument.v1.Asset.networks:type_name -> exchange.instrument.v1.Network
+	6,  // 2: exchange.instrument.v1.Asset.profile:type_name -> exchange.instrument.v1.AssetProfile
+	30, // 3: exchange.instrument.v1.AssetProfile.description:type_name -> exchange.instrument.v1.AssetProfile.DescriptionEntry
+	31, // 4: exchange.instrument.v1.AssetProfile.links:type_name -> exchange.instrument.v1.AssetProfile.LinksEntry
+	34, // 5: exchange.instrument.v1.TradingPair.listed_at:type_name -> google.protobuf.Timestamp
+	9,  // 6: exchange.instrument.v1.Contract.risk_tiers:type_name -> exchange.instrument.v1.RiskTier
+	5,  // 7: exchange.instrument.v1.GetAssetResponse.asset:type_name -> exchange.instrument.v1.Asset
+	5,  // 8: exchange.instrument.v1.ListAssetsResponse.assets:type_name -> exchange.instrument.v1.Asset
+	8,  // 9: exchange.instrument.v1.GetTradingPairResponse.pair:type_name -> exchange.instrument.v1.TradingPair
+	8,  // 10: exchange.instrument.v1.ListTradingPairsResponse.pairs:type_name -> exchange.instrument.v1.TradingPair
+	32, // 11: exchange.instrument.v1.UpdateAssetProfileRequest.description:type_name -> exchange.instrument.v1.UpdateAssetProfileRequest.DescriptionEntry
+	33, // 12: exchange.instrument.v1.UpdateAssetProfileRequest.links:type_name -> exchange.instrument.v1.UpdateAssetProfileRequest.LinksEntry
+	6,  // 13: exchange.instrument.v1.UpdateAssetProfileResponse.profile:type_name -> exchange.instrument.v1.AssetProfile
+	10, // 14: exchange.instrument.v1.GetContractResponse.contract:type_name -> exchange.instrument.v1.Contract
+	10, // 15: exchange.instrument.v1.ListContractsResponse.contracts:type_name -> exchange.instrument.v1.Contract
+	12, // 16: exchange.instrument.v1.InstrumentService.GetAsset:input_type -> exchange.instrument.v1.GetAssetRequest
+	14, // 17: exchange.instrument.v1.InstrumentService.ListAssets:input_type -> exchange.instrument.v1.ListAssetsRequest
+	16, // 18: exchange.instrument.v1.InstrumentService.GetTradingPair:input_type -> exchange.instrument.v1.GetTradingPairRequest
+	18, // 19: exchange.instrument.v1.InstrumentService.ListTradingPairs:input_type -> exchange.instrument.v1.ListTradingPairsRequest
+	20, // 20: exchange.instrument.v1.InstrumentService.SetPairStatus:input_type -> exchange.instrument.v1.SetPairStatusRequest
+	24, // 21: exchange.instrument.v1.InstrumentService.GetContract:input_type -> exchange.instrument.v1.GetContractRequest
+	26, // 22: exchange.instrument.v1.InstrumentService.ListContracts:input_type -> exchange.instrument.v1.ListContractsRequest
+	28, // 23: exchange.instrument.v1.InstrumentService.SetContractStatus:input_type -> exchange.instrument.v1.SetContractStatusRequest
+	22, // 24: exchange.instrument.v1.InstrumentService.UpdateAssetProfile:input_type -> exchange.instrument.v1.UpdateAssetProfileRequest
+	0,  // 25: exchange.instrument.v1.InstrumentService.ExportConfig:input_type -> exchange.instrument.v1.ExportConfigRequest
+	2,  // 26: exchange.instrument.v1.InstrumentService.ApplyConfig:input_type -> exchange.instrument.v1.ApplyConfigRequest
+	13, // 27: exchange.instrument.v1.InstrumentService.GetAsset:output_type -> exchange.instrument.v1.GetAssetResponse
+	15, // 28: exchange.instrument.v1.InstrumentService.ListAssets:output_type -> exchange.instrument.v1.ListAssetsResponse
+	17, // 29: exchange.instrument.v1.InstrumentService.GetTradingPair:output_type -> exchange.instrument.v1.GetTradingPairResponse
+	19, // 30: exchange.instrument.v1.InstrumentService.ListTradingPairs:output_type -> exchange.instrument.v1.ListTradingPairsResponse
+	21, // 31: exchange.instrument.v1.InstrumentService.SetPairStatus:output_type -> exchange.instrument.v1.SetPairStatusResponse
+	25, // 32: exchange.instrument.v1.InstrumentService.GetContract:output_type -> exchange.instrument.v1.GetContractResponse
+	27, // 33: exchange.instrument.v1.InstrumentService.ListContracts:output_type -> exchange.instrument.v1.ListContractsResponse
+	29, // 34: exchange.instrument.v1.InstrumentService.SetContractStatus:output_type -> exchange.instrument.v1.SetContractStatusResponse
+	23, // 35: exchange.instrument.v1.InstrumentService.UpdateAssetProfile:output_type -> exchange.instrument.v1.UpdateAssetProfileResponse
+	1,  // 36: exchange.instrument.v1.InstrumentService.ExportConfig:output_type -> exchange.instrument.v1.ExportConfigResponse
+	4,  // 37: exchange.instrument.v1.InstrumentService.ApplyConfig:output_type -> exchange.instrument.v1.ApplyConfigResponse
+	27, // [27:38] is the sub-list for method output_type
+	16, // [16:27] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_exchange_instrument_v1_instrument_proto_init() }
@@ -2168,7 +2492,7 @@ func file_exchange_instrument_v1_instrument_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_instrument_v1_instrument_proto_rawDesc), len(file_exchange_instrument_v1_instrument_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   29,
+			NumMessages:   34,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

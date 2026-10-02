@@ -27,8 +27,17 @@ sudo docker compose ... exec -T instrument-service /app/exchangectl instruments 
 - 整个文件在一个事务里生效：缺的创建，变了的升版本并发事件，相同的跳过——同一文件重复执行不产生任何变更。任何一项校验失败则全部回滚。
 - 文件里没有的对象保留不动（不会删除）。
 - 交易对的状态只在**创建时**取文件中的值（默认 `PREPARE`）；之后只能用 `pair-status` 改，部署不会把状态改回去。
+- **后台改过的项保留**（2026-10-02 管理后台 C3）：`config_history` 多了 `source` 列（迁移 `00006`）：`FILE`（apply，即部署同步）、`CONSOLE`（管理后台）、`STATUS`（改状态）、`PROFILE`（资产资料），之前的行为空、按 `FILE` 算。文件 apply 遇到最后一次编辑（不算改状态与资料）来自后台的项时**不改**它，输出 `kept TRADING_PAIR LINK-USDT v4: changed in the admin console by ops@… at …`。要让文件重新说了算：`exchangectl instruments apply --file … --reason … --force`，之后该项又跟随文件。`--dry-run` 只列出会改什么。
 
-改参考数据：改 `deploy/instruments/test.json` 并提交，下次部署生效；紧急情况可在服务器上手工执行同一命令。
+改参考数据：改 `deploy/instruments/test.json` 并提交，下次部署生效；紧急情况可在服务器上手工执行同一命令。也可以在管理后台「资产与交易对」里改（见下文「管理后台编辑」）。
+
+## 管理后台编辑（2026-10-02 设计 §4.4，C3）
+
+后台按 `test.json` 的格式读写参考数据：gRPC `ExportConfig` 导出整份配置文档（含状态与版本），`ApplyConfig` 应用一份只写要新增或修改的项的文档（来源 `CONSOLE`，`dry_run` 只算变化不写入）。规则与文件 apply 相同（同一份 `Service.ApplyWith`）：每项整体替换（漏写的字段变空）、状态不在这里改、不删除、校验失败全部回滚、每项变化升版本、记历史、发事件。后台的接口与页面见 [admin.md](admin.md#资产与交易对的编辑c3)。
+
+- 交易对的新参考符号先经 market-data-service 的内部接口 `GET /internal/market/reference-symbols/{symbol}` 向币安核对（现货与 U 本位合约是否上架），币安现货没有的直接拒绝：写错的符号会让行情服务按批读取的全部交易对的参考行情失败。
+- 加了参考符号的新交易对或合约会让行情服务在一分钟内重连币安的全部参考行情流（约 20 秒参考盘口为空）；HOUSE 只给开关 `market.house_liquidity` 名单里的交易对报价，名单要另外改（功能开关或 `exchangectl flags set`）。预览会提示这两点。
+- 新交易对在服务里最多 5 秒（交易服务）到 30 秒（行情服务）后可用，不用重启；撮合引擎按需建盘口。
 
 ### 主流 50 币（阶段 4 B4，设计稿 §8.5，ADR-0013、ADR-0014）
 
@@ -64,12 +73,12 @@ ssh exchange sudo docker exec -i exchange-infra-instrument-service-1 /app/exchan
 历史：
 
 ```sql
-SELECT entity, key, version, actor, reason, created_at FROM instrument.config_history ORDER BY id DESC LIMIT 20;
+SELECT entity, key, version, source, actor, reason, created_at FROM instrument.config_history ORDER BY id DESC LIMIT 20;
 ```
 
 ## 接口
 
 - 公开 REST（经网关，无需登录，`Cache-Control: public, max-age=10`）：`GET /v1/market/assets`（含网络）、`GET /v1/market/pairs`（不含已下线）、`GET /v1/market/pairs/{symbol}`（含已下线，大小写不敏感）、`GET /v1/market/contracts`、`GET /v1/market/contracts/{symbol}`（永续合约与风险限额阶梯）。交易对另带基础资产的 `base_name`、`rank`、`categories`，以及由 tick/lot 算出的显示位数 `price_decimals`、`qty_decimals`。
-- gRPC `InstrumentService`（`instrument-service:9184`）：`GetAsset`、`ListAssets`、`GetTradingPair`、`ListTradingPairs`、`GetContract`、`ListContracts`，供账本、交易、合约等服务校验精度与状态；`SetPairStatus`、`SetContractStatus`、`UpdateAssetProfile` 供管理后台。
+- gRPC `InstrumentService`（`instrument-service:9184`）：`GetAsset`、`ListAssets`、`GetTradingPair`、`ListTradingPairs`、`GetContract`、`ListContracts`，供账本、交易、合约等服务校验精度与状态；`SetPairStatus`、`SetContractStatus`、`UpdateAssetProfile`、`ExportConfig`、`ApplyConfig` 供管理后台。
 - 测试服的两个合约 `BTC-USDT-PERP`、`ETH-USDT-PERP` 用费率档 `perp`（maker 0.02%、taker 0.05%），创建时为 `PREPARE`，合约服务上线后再改 `TRADING`。
 - 端到端检查：`scripts/e2e/market.sh`（`task e2e` 一起跑）。

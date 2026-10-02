@@ -19,7 +19,7 @@ type ContractView struct {
 	TakerFeeRate decimal.Decimal `json:"taker_fee_rate"`
 }
 
-func (s *Service) applyContract(ctx context.Context, r ports.Repos, c domain.Contract, actor, reason string, res *ApplyResult) error {
+func (s *Service) applyContract(ctx context.Context, r ports.Repos, c domain.Contract, o ApplyOptions, res *ApplyResult) error {
 	if c.Status == "" {
 		c.Status = domain.StatusPrepare
 	}
@@ -56,19 +56,24 @@ func (s *Service) applyContract(ctx context.Context, r ports.Repos, c domain.Con
 	if err := c.Validate(*base, *quote); err != nil {
 		return err
 	}
+	if cur != nil {
+		if keep, err := kept(ctx, r, o, "CONTRACT", c.Symbol, cur.Version, *cur, res); err != nil || keep {
+			return err
+		}
+	}
 	saved, err := r.Contracts().Save(ctx, c)
 	if err != nil {
 		return err
 	}
-	res.Changed = append(res.Changed, fmt.Sprintf("CONTRACT %s v%d", saved.Symbol, saved.Version))
-	if err := r.Record(ctx, "CONTRACT", saved.Symbol, saved.Version, saved, actor, reason); err != nil {
+	res.changed("CONTRACT", saved.Symbol, deref(cur), saved, saved.Version, cur == nil)
+	if err := r.Record(ctx, "CONTRACT", saved.Symbol, saved.Version, saved, o.Actor, o.Reason, o.Source); err != nil {
 		return err
 	}
 	view, err := s.contractView(ctx, r, saved)
 	if err != nil {
 		return err
 	}
-	return r.Emit(ctx, &instrumentv1.ContractUpserted{Contract: ToProtoContract(view), Actor: actor, Reason: reason}, "contract", saved.Symbol)
+	return r.Emit(ctx, &instrumentv1.ContractUpserted{Contract: ToProtoContract(view), Actor: o.Actor, Reason: o.Reason}, "contract", saved.Symbol)
 }
 
 // SetContractStatus moves a contract along the pair status machine.
@@ -94,7 +99,7 @@ func (s *Service) SetContractStatus(ctx context.Context, symbol, to, actor, reas
 		if err != nil {
 			return err
 		}
-		if err := r.Record(ctx, "CONTRACT", saved.Symbol, saved.Version, saved, actor, reason); err != nil {
+		if err := r.Record(ctx, "CONTRACT", saved.Symbol, saved.Version, saved, actor, reason, SourceStatus); err != nil {
 			return err
 		}
 		return r.Emit(ctx, &instrumentv1.ContractStatusChanged{

@@ -192,6 +192,7 @@ func setup(ctx context.Context, a *app.App) error {
 		Wallet:      backends.Wallet{REST: rest, Base: cfg.WalletURL},
 		Deposits:    backends.WalletDeposits{Wallet: backends.Wallet{REST: rest, Base: cfg.WalletURL}},
 		Catalog:     backends.Instruments{C: instrumentv1.NewInstrumentServiceClient(clients["instrument"])},
+		Reference:   backends.Market{REST: rest, Base: cfg.MarketDataURL},
 		Derivatives: backends.Derivatives{REST: rest, Base: cfg.DerivativesURL},
 		Flags:       backends.Flags{DB: configDB, Events: event.NewFactory(a.Name(), a.Config().InstanceID)},
 		Features:    features,

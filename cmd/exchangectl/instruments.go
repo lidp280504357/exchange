@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/lidp280504357/exchange/internal/instrument/adapters/postgres"
 	"github.com/lidp280504357/exchange/internal/instrument/application"
@@ -114,6 +115,8 @@ func instrumentsApply(ctx context.Context, svc *application.Service, args []stri
 	fs.SetOutput(out)
 	file := fs.String("file", "", `JSON file with fee_schedules, assets, pairs and contracts ("-" reads stdin)`)
 	reason := fs.String("reason", "", "why (required, goes to the history)")
+	force := fs.Bool("force", false, "also change the items the admin console changed last (kept otherwise)")
+	dry := fs.Bool("dry-run", false, "list the changes without making them")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -136,14 +139,24 @@ func instrumentsApply(ctx context.Context, svc *application.Service, args []stri
 	if err := dec.Decode(&cfg); err != nil {
 		return fmt.Errorf("read %s: %w", *file, err)
 	}
-	res, err := svc.Apply(ctx, cfg, actor(), *reason)
+	res, err := svc.ApplyWith(ctx, cfg, application.ApplyOptions{
+		Actor: actor(), Reason: *reason, Source: application.SourceFile, DryRun: *dry, Force: *force,
+	})
 	if err != nil {
 		return err
 	}
-	for _, c := range res.Changed {
-		fmt.Fprintln(out, "changed", c)
+	verb := "changed"
+	if *dry {
+		verb = "would change"
 	}
-	fmt.Fprintf(out, "%d changed, %d unchanged\n", len(res.Changed), res.Unchanged)
+	for _, c := range res.Changed {
+		fmt.Fprintln(out, verb, c)
+	}
+	for _, k := range res.Kept {
+		fmt.Fprintf(out, "kept %s %s v%d: changed in the admin console by %s at %s (--force to apply the file)\n", k.Entity, k.Key, k.Version,
+			k.KeptBy, k.KeptAt.UTC().Format(time.RFC3339))
+	}
+	fmt.Fprintf(out, "%d %s, %d kept, %d unchanged\n", len(res.Changed), verb, len(res.Kept), res.Unchanged)
 	return nil
 }
 

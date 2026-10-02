@@ -1774,9 +1774,9 @@ paths:
       summary: Assets (with networks), trading pairs and perpetual contracts
       description: |
         As instrument-service returns them (protobuf JSON with field names;
-        int64 as strings). Assets and networks change through the
-        versioned reference-data file (exchangectl instruments apply, run
-        by every deploy). Needs instruments.read.
+        int64 as strings). They change through the versioned reference-data
+        file (exchangectl instruments apply, run by every deploy) and, since
+        C3, through POST /admin/v1/instruments/apply. Needs instruments.read.
       tags: [instruments]
       responses:
         '200':
@@ -1799,6 +1799,96 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Contract'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/instruments/config:
+    get:
+      operationId: getInstrumentConfig
+      summary: The reference data as a config document
+      description: |
+        In the shape of deploy/instruments/<env>.json (what exchangectl
+        instruments apply reads), statuses and versions included: what the
+        console's forms start from. Needs instruments.read.
+      tags: [instruments]
+      responses:
+        '200':
+          description: The document.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstrumentConfig'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/instruments/preview:
+    post:
+      operationId: previewInstrumentConfig
+      summary: What a config document would change, changing nothing
+      description: |
+        The document names only the items to create or change, each whole
+        (a field left out becomes empty). Items missing are left alone,
+        statuses never change here (the status endpoints do that). A pair's
+        new reference symbol must be listed on the reference market's spot
+        market (ADMIN_REFERENCE_UNKNOWN otherwise: it would fail the
+        reference reads of every pair); `warnings` note what else follows.
+        Needs instruments.write.
+      tags: [instruments]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [config]
+              properties:
+                config:
+                  $ref: '#/components/schemas/InstrumentConfigPatch'
+      responses:
+        '200':
+          description: The changes it would make.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigResult'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/instruments/apply:
+    post:
+      operationId: applyInstrumentConfig
+      summary: Apply a config document
+      description: |
+        As POST /admin/v1/instruments/preview, then applied in one
+        transaction by instrument-service (source CONSOLE in its history,
+        each change versioned and published). The deploy's sync of the
+        reference-data file keeps what the console changed last (exchangectl
+        instruments apply --force overrides). Audited
+        (admin.instruments.applied). Needs instruments.write.
+      tags: [instruments]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [config, reason]
+              properties:
+                config:
+                  $ref: '#/components/schemas/InstrumentConfigPatch'
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: The changes made.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigResult'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/instruments/pairs/{symbol}/status:
@@ -3883,6 +3973,285 @@ components:
           type: string
         release_journal_id:
           type: [string, 'null']
+    InstrumentConfig:
+      type: object
+      description: The reference data in the shape of deploy/instruments/<env>.json.
+      required: [fee_schedules, assets, pairs, contracts]
+      properties:
+        fee_schedules:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeeScheduleConfig'
+        assets:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetConfig'
+        pairs:
+          type: array
+          items:
+            $ref: '#/components/schemas/PairConfig'
+        contracts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContractConfig'
+    InstrumentConfigPatch:
+      type: object
+      description: Some items to create or change, each whole; the others are left alone.
+      properties:
+        fee_schedules:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeeScheduleConfig'
+        assets:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetConfig'
+        pairs:
+          type: array
+          items:
+            $ref: '#/components/schemas/PairConfig'
+        contracts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContractConfig'
+    FeeScheduleConfig:
+      type: object
+      required: [tier, maker_fee_rate, taker_fee_rate]
+      properties:
+        tier:
+          type: string
+          pattern: '^[a-z0-9_-]{1,32}$'
+        maker_fee_rate:
+          $ref: '#/components/schemas/Decimal'
+        taker_fee_rate:
+          $ref: '#/components/schemas/Decimal'
+        version:
+          type: integer
+    AssetConfig:
+      type: object
+      required: [asset_code, name, decimals, deposit_enabled, withdraw_enabled, trading_enabled, risk_restricted]
+      properties:
+        asset_code:
+          type: string
+          pattern: '^[A-Z0-9]{2,10}$'
+        name:
+          type: string
+        decimals:
+          type: integer
+          minimum: 0
+          maximum: 18
+          description: Fixed once set.
+        deposit_enabled:
+          type: boolean
+        withdraw_enabled:
+          type: boolean
+        trading_enabled:
+          type: boolean
+        risk_restricted:
+          type: boolean
+        rank:
+          type: integer
+        categories:
+          type: array
+          items:
+            type: string
+        version:
+          type: integer
+        networks:
+          type: array
+          description: The networks to create or change; the others are left alone.
+          items:
+            $ref: '#/components/schemas/NetworkConfig'
+    NetworkConfig:
+      type: object
+      required: [network, chain, contract_address, confirmations, min_deposit, min_withdraw, withdraw_fee, memo_required, deposit_enabled,
+        withdraw_enabled]
+      properties:
+        asset_code:
+          type: string
+        network:
+          type: string
+        chain:
+          type: string
+        contract_address:
+          type: string
+        confirmations:
+          type: integer
+        min_deposit:
+          $ref: '#/components/schemas/Decimal'
+        min_withdraw:
+          $ref: '#/components/schemas/Decimal'
+        withdraw_fee:
+          $ref: '#/components/schemas/Decimal'
+        memo_required:
+          type: boolean
+        deposit_enabled:
+          type: boolean
+        withdraw_enabled:
+          type: boolean
+        display_name:
+          type: string
+        address_format:
+          type: string
+          enum: [EVM, TRON, BTC]
+        eta_minutes:
+          type: integer
+        explorer_tx_url:
+          type: string
+        explorer_address_url:
+          type: string
+        provider:
+          type: string
+          description: Empty for the platform's own wallet, UDUN for the custodian.
+        provider_coin:
+          type: string
+        version:
+          type: integer
+    PairConfig:
+      type: object
+      required: [symbol, base_asset, quote_asset, tick_size, lot_size, min_quantity, max_quantity, min_notional, price_band, fee_tier, status,
+        reference_multiplier]
+      properties:
+        symbol:
+          type: string
+        base_asset:
+          type: string
+        quote_asset:
+          type: string
+        tick_size:
+          $ref: '#/components/schemas/Decimal'
+        lot_size:
+          $ref: '#/components/schemas/Decimal'
+        min_quantity:
+          $ref: '#/components/schemas/Decimal'
+        max_quantity:
+          $ref: '#/components/schemas/Decimal'
+        min_notional:
+          $ref: '#/components/schemas/Decimal'
+        price_band:
+          $ref: '#/components/schemas/Decimal'
+        fee_tier:
+          type: string
+        status:
+          type: string
+          enum: [PREPARE, TRADING, HALT, CANCEL_ONLY, DELISTED]
+          description: Only when the pair is created (PREPARE when empty); later through the status endpoint.
+        reference_symbol:
+          type: string
+          description: The reference market's symbol (BTCUSDT); empty for none.
+        reference_multiplier:
+          $ref: '#/components/schemas/Decimal'
+        listed_at:
+          type: string
+          format: date-time
+        version:
+          type: integer
+    ContractConfig:
+      type: object
+      required: [symbol, type, base_asset, quote_asset, index_symbol, tick_size, lot_size, min_quantity, max_quantity, min_notional,
+        price_band, risk_tiers, funding_interval_hours, interest_rate, funding_cap, impact_notional, fee_tier, status]
+      properties:
+        symbol:
+          type: string
+        type:
+          type: string
+          enum: [PERPETUAL]
+        base_asset:
+          type: string
+        quote_asset:
+          type: string
+        index_symbol:
+          type: string
+          description: The BASE-QUOTE spot pair whose price is the index.
+        tick_size:
+          $ref: '#/components/schemas/Decimal'
+        lot_size:
+          $ref: '#/components/schemas/Decimal'
+        min_quantity:
+          $ref: '#/components/schemas/Decimal'
+        max_quantity:
+          $ref: '#/components/schemas/Decimal'
+        min_notional:
+          $ref: '#/components/schemas/Decimal'
+        price_band:
+          $ref: '#/components/schemas/Decimal'
+        risk_tiers:
+          type: array
+          description: 1-20 tiers, growing notionals, falling leverage (1-125), mmr below 1/leverage.
+          items:
+            $ref: '#/components/schemas/RiskTier'
+        funding_interval_hours:
+          type: integer
+        interest_rate:
+          $ref: '#/components/schemas/Decimal'
+        funding_cap:
+          $ref: '#/components/schemas/Decimal'
+        impact_notional:
+          $ref: '#/components/schemas/Decimal'
+        fee_tier:
+          type: string
+        status:
+          type: string
+          enum: [PREPARE, TRADING, HALT, CANCEL_ONLY, DELISTED]
+        version:
+          type: integer
+    RiskTier:
+      type: object
+      required: [max_notional, max_leverage, mmr]
+      properties:
+        max_notional:
+          $ref: '#/components/schemas/Decimal'
+        max_leverage:
+          type: integer
+        mmr:
+          $ref: '#/components/schemas/Decimal'
+    ConfigResult:
+      type: object
+      required: [changes, unchanged, warnings]
+      properties:
+        changes:
+          type: array
+          items:
+            type: object
+            required: [entity, key, action, version, before, after]
+            properties:
+              entity:
+                type: string
+                enum: [FEE_SCHEDULE, ASSET, NETWORK, TRADING_PAIR, CONTRACT]
+              key:
+                type: string
+                description: The tier, asset code, ASSET/NETWORK or symbol.
+              action:
+                type: string
+                enum: [CREATE, UPDATE]
+              version:
+                type: integer
+              before:
+                type: [object, 'null']
+                description: The item before; null when created.
+              after:
+                type: object
+        unchanged:
+          type: integer
+        warnings:
+          type: array
+          items:
+            type: object
+            required: [code, symbol, detail]
+            properties:
+              code:
+                type: string
+                enum: [REFERENCE_UNCHECKED, HOUSE_NOT_LISTED, NO_INDEX_REFERENCE, NO_FUTURES, STREAMS_RECONNECT]
+                description: |
+                  REFERENCE_UNCHECKED: the reference market could not be asked (detail: the symbol);
+                  HOUSE_NOT_LISTED: HOUSE quotes it only once on the flag's symbol list (detail: the flag);
+                  NO_INDEX_REFERENCE: the contract's index pair (detail) follows no reference market;
+                  NO_FUTURES: no futures on the reference symbol (detail), so HOUSE gives the contract no book;
+                  STREAMS_RECONNECT: the reference streams reconnect, books empty for about 20 seconds.
+              symbol:
+                type: string
+              detail:
+                type: string
     ReasonRequest:
       type: object
       required: [reason]

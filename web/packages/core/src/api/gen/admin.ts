@@ -1086,13 +1086,86 @@ export interface paths {
         /**
          * Assets (with networks), trading pairs and perpetual contracts
          * @description As instrument-service returns them (protobuf JSON with field names;
-         *     int64 as strings). Assets and networks change through the
-         *     versioned reference-data file (exchangectl instruments apply, run
-         *     by every deploy). Needs instruments.read.
+         *     int64 as strings). They change through the versioned reference-data
+         *     file (exchangectl instruments apply, run by every deploy) and, since
+         *     C3, through POST /admin/v1/instruments/apply. Needs instruments.read.
          */
         get: operations["listInstruments"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/instruments/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The reference data as a config document
+         * @description In the shape of deploy/instruments/<env>.json (what exchangectl
+         *     instruments apply reads), statuses and versions included: what the
+         *     console's forms start from. Needs instruments.read.
+         */
+        get: operations["getInstrumentConfig"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/instruments/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What a config document would change, changing nothing
+         * @description The document names only the items to create or change, each whole
+         *     (a field left out becomes empty). Items missing are left alone,
+         *     statuses never change here (the status endpoints do that). A pair's
+         *     new reference symbol must be listed on the reference market's spot
+         *     market (ADMIN_REFERENCE_UNKNOWN otherwise: it would fail the
+         *     reference reads of every pair); `warnings` note what else follows.
+         *     Needs instruments.write.
+         */
+        post: operations["previewInstrumentConfig"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/instruments/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply a config document
+         * @description As POST /admin/v1/instruments/preview, then applied in one
+         *     transaction by instrument-service (source CONSOLE in its history,
+         *     each change versioned and published). The deploy's sync of the
+         *     reference-data file keeps what the console changed last (exchangectl
+         *     instruments apply --force overrides). Audited
+         *     (admin.instruments.applied). Needs instruments.write.
+         */
+        post: operations["applyInstrumentConfig"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2337,6 +2410,145 @@ export interface components {
             resolved_at: string | null;
             resolution_note: string;
             release_journal_id: string | null;
+        };
+        /** @description The reference data in the shape of deploy/instruments/<env>.json. */
+        InstrumentConfig: {
+            fee_schedules: components["schemas"]["FeeScheduleConfig"][];
+            assets: components["schemas"]["AssetConfig"][];
+            pairs: components["schemas"]["PairConfig"][];
+            contracts: components["schemas"]["ContractConfig"][];
+        };
+        /** @description Some items to create or change, each whole; the others are left alone. */
+        InstrumentConfigPatch: {
+            fee_schedules?: components["schemas"]["FeeScheduleConfig"][];
+            assets?: components["schemas"]["AssetConfig"][];
+            pairs?: components["schemas"]["PairConfig"][];
+            contracts?: components["schemas"]["ContractConfig"][];
+        };
+        FeeScheduleConfig: {
+            tier: string;
+            maker_fee_rate: components["schemas"]["Decimal"];
+            taker_fee_rate: components["schemas"]["Decimal"];
+            version?: number;
+        };
+        AssetConfig: {
+            asset_code: string;
+            name: string;
+            /** @description Fixed once set. */
+            decimals: number;
+            deposit_enabled: boolean;
+            withdraw_enabled: boolean;
+            trading_enabled: boolean;
+            risk_restricted: boolean;
+            rank?: number;
+            categories?: string[];
+            version?: number;
+            /** @description The networks to create or change; the others are left alone. */
+            networks?: components["schemas"]["NetworkConfig"][];
+        };
+        NetworkConfig: {
+            asset_code?: string;
+            network: string;
+            chain: string;
+            contract_address: string;
+            confirmations: number;
+            min_deposit: components["schemas"]["Decimal"];
+            min_withdraw: components["schemas"]["Decimal"];
+            withdraw_fee: components["schemas"]["Decimal"];
+            memo_required: boolean;
+            deposit_enabled: boolean;
+            withdraw_enabled: boolean;
+            display_name?: string;
+            /** @enum {string} */
+            address_format?: "EVM" | "TRON" | "BTC";
+            eta_minutes?: number;
+            explorer_tx_url?: string;
+            explorer_address_url?: string;
+            /** @description Empty for the platform's own wallet, UDUN for the custodian. */
+            provider?: string;
+            provider_coin?: string;
+            version?: number;
+        };
+        PairConfig: {
+            symbol: string;
+            base_asset: string;
+            quote_asset: string;
+            tick_size: components["schemas"]["Decimal"];
+            lot_size: components["schemas"]["Decimal"];
+            min_quantity: components["schemas"]["Decimal"];
+            max_quantity: components["schemas"]["Decimal"];
+            min_notional: components["schemas"]["Decimal"];
+            price_band: components["schemas"]["Decimal"];
+            fee_tier: string;
+            /**
+             * @description Only when the pair is created (PREPARE when empty); later through the status endpoint.
+             * @enum {string}
+             */
+            status: "PREPARE" | "TRADING" | "HALT" | "CANCEL_ONLY" | "DELISTED";
+            /** @description The reference market's symbol (BTCUSDT); empty for none. */
+            reference_symbol?: string;
+            reference_multiplier: components["schemas"]["Decimal"];
+            /** Format: date-time */
+            listed_at?: string;
+            version?: number;
+        };
+        ContractConfig: {
+            symbol: string;
+            /** @enum {string} */
+            type: "PERPETUAL";
+            base_asset: string;
+            quote_asset: string;
+            /** @description The BASE-QUOTE spot pair whose price is the index. */
+            index_symbol: string;
+            tick_size: components["schemas"]["Decimal"];
+            lot_size: components["schemas"]["Decimal"];
+            min_quantity: components["schemas"]["Decimal"];
+            max_quantity: components["schemas"]["Decimal"];
+            min_notional: components["schemas"]["Decimal"];
+            price_band: components["schemas"]["Decimal"];
+            /** @description 1-20 tiers, growing notionals, falling leverage (1-125), mmr below 1/leverage. */
+            risk_tiers: components["schemas"]["RiskTier"][];
+            funding_interval_hours: number;
+            interest_rate: components["schemas"]["Decimal"];
+            funding_cap: components["schemas"]["Decimal"];
+            impact_notional: components["schemas"]["Decimal"];
+            fee_tier: string;
+            /** @enum {string} */
+            status: "PREPARE" | "TRADING" | "HALT" | "CANCEL_ONLY" | "DELISTED";
+            version?: number;
+        };
+        RiskTier: {
+            max_notional: components["schemas"]["Decimal"];
+            max_leverage: number;
+            mmr: components["schemas"]["Decimal"];
+        };
+        ConfigResult: {
+            changes: {
+                /** @enum {string} */
+                entity: "FEE_SCHEDULE" | "ASSET" | "NETWORK" | "TRADING_PAIR" | "CONTRACT";
+                /** @description The tier, asset code, ASSET/NETWORK or symbol. */
+                key: string;
+                /** @enum {string} */
+                action: "CREATE" | "UPDATE";
+                version: number;
+                /** @description The item before; null when created. */
+                before: Record<string, never> | null;
+                after: Record<string, never>;
+            }[];
+            unchanged: number;
+            warnings: {
+                /**
+                 * @description REFERENCE_UNCHECKED: the reference market could not be asked (detail: the symbol);
+                 *     HOUSE_NOT_LISTED: HOUSE quotes it only once on the flag's symbol list (detail: the flag);
+                 *     NO_INDEX_REFERENCE: the contract's index pair (detail) follows no reference market;
+                 *     NO_FUTURES: no futures on the reference symbol (detail), so HOUSE gives the contract no book;
+                 *     STREAMS_RECONNECT: the reference streams reconnect, books empty for about 20 seconds.
+                 * @enum {string}
+                 */
+                code: "REFERENCE_UNCHECKED" | "HOUSE_NOT_LISTED" | "NO_INDEX_REFERENCE" | "NO_FUTURES" | "STREAMS_RECONNECT";
+                symbol: string;
+                detail: string;
+            }[];
         };
         ReasonRequest: {
             reason: string;
@@ -4269,6 +4481,82 @@ export interface operations {
                         pairs: components["schemas"]["Pair"][];
                         contracts: components["schemas"]["Contract"][];
                     };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getInstrumentConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The document. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstrumentConfig"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    previewInstrumentConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    config: components["schemas"]["InstrumentConfigPatch"];
+                };
+            };
+        };
+        responses: {
+            /** @description The changes it would make. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigResult"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    applyInstrumentConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    config: components["schemas"]["InstrumentConfigPatch"];
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The changes made. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigResult"];
                 };
             };
             default: components["responses"]["Error"];

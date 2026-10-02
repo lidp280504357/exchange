@@ -50,16 +50,33 @@ func (r repos) Contracts() ports.ContractRepo { return contracts(r) }
 
 func (r repos) Profiles() ports.ProfileRepo { return profiles(r) }
 
-func (r repos) Record(ctx context.Context, entity, key string, version int64, value any, actor, reason string) error {
+func (r repos) Record(ctx context.Context, entity, key string, version int64, value any, actor, reason, source string) error {
 	b, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("history value: %w", err)
 	}
-	if _, err := r.q.Exec(ctx, `INSERT INTO config_history (entity, key, version, value, actor, reason) VALUES ($1, $2, $3, $4, $5, $6)`,
-		entity, key, version, b, actor, reason); err != nil {
+	if _, err := r.q.Exec(ctx, `INSERT INTO config_history (entity, key, version, value, actor, reason, source)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`, entity, key, version, b, actor, reason, source); err != nil {
 		return fmt.Errorf("record history: %w", err)
 	}
 	return nil
+}
+
+func (r repos) LastEdit(ctx context.Context, entity, key string) (*ports.Edit, error) {
+	var e ports.Edit
+	err := r.q.QueryRow(ctx, `SELECT source, actor, created_at FROM config_history
+		WHERE entity = $1 AND key = $2 AND source IN ('', 'FILE', 'CONSOLE') ORDER BY version DESC LIMIT 1`, entity, key).
+		Scan(&e.Source, &e.Actor, &e.At)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("last edit: %w", err)
+	}
+	if e.Source == "" {
+		e.Source = "FILE"
+	}
+	return &e, nil
 }
 
 func (r repos) Emit(ctx context.Context, msg proto.Message, aggregateType, aggregateID string) error {

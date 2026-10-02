@@ -14,7 +14,10 @@
 # waiting and withdrawn), the counts and their event stream, the
 # withdrawal list, the perpetual contracts (states, reduce-only, a status
 # round trip, the liquidation monitor, a two-person insurance fund
-# contribution), the reports, the deposits that need a person (with the
+# contribution), the reports, every user's positions and the liquidation
+# log, a pair listed from the console (LINK-BTC: a reference symbol checked
+# with Binance, previewed, applied, opened, an order resting on it), the
+# deposits that need a person (with the
 # custodian's stand-in: a deposit whose callback comes late, backfilled
 # and then confirmed by it; one below the minimum credited to the user,
 # another rejected), a withdrawal's review details and holds, the audit
@@ -571,6 +574,62 @@ else
   expect 422 DERIV_NO_POSITION "nothing left to close"
 fi
 
+echo "== listing a pair from the console (LINK-BTC)"
+as AUDITOR GET /admin/v1/instruments/config ""
+expect 200 - "the reference data as a config document"
+check '(.pairs | length) >= 50 and (.fee_schedules | map(.tier) | index("default")) != null and (.assets | map(.asset_code) | index("LINK")) != null' \
+  "pairs, fee tiers and assets in the reference file's shape"
+# The pair's minimum order value alternates per run, so each run changes it.
+NOTIONAL=$(((RUN % 2) + 1))
+link_pair() { # link_pair [REFERENCE]: LINK-BTC as a config document
+  jq -nc --arg r "${1:-}" --arg n "0.000$NOTIONAL" '{pairs: [{symbol: "LINK-BTC", base_asset: "LINK", quote_asset: "BTC", tick_size: "0.0000001",
+    lot_size: "0.01", min_quantity: "0.01", max_quantity: "100000", min_notional: $n, price_band: "0.1", fee_tier: "default", status: "PREPARE",
+    reference_symbol: $r, reference_multiplier: "1"}]}'
+}
+as AUDITOR POST /admin/v1/instruments/preview "{\"config\":$(link_pair)}"
+expect 403 ADMIN_FORBIDDEN "AUDITOR previews no change"
+as OPERATOR POST /admin/v1/instruments/preview "{\"config\":$(link_pair NOPECOINBTC)}"
+expect 422 ADMIN_REFERENCE_UNKNOWN "a reference symbol Binance does not list is refused"
+as OPERATOR POST /admin/v1/instruments/preview "{\"config\":$(link_pair LINKBTC)}"
+expect 200 - "a preview with Binance's LINKBTC"
+check '(.changes | length) == 1 and .changes[0].entity == "TRADING_PAIR" and .changes[0].after.reference_symbol == "LINKBTC" and
+  ([.warnings[].code] | index("HOUSE_NOT_LISTED") != null and index("STREAMS_RECONNECT") != null)' "checked, with HOUSE's list and the reconnect noted"
+as OPERATOR POST /admin/v1/instruments/apply "{\"config\":$(link_pair),\"reason\":\"e2e lists LINK-BTC\"}"
+expect 200 - "OPERATOR applies LINK-BTC (no reference: users trade with each other)"
+check "(.changes | length) == 1 and (.changes[0].action == \"CREATE\" or .changes[0].action == \"UPDATE\") and .changes[0].after.min_notional == \"0.000$NOTIONAL\"" \
+  "created or changed, versioned"
+as OPERATOR POST /admin/v1/instruments/apply "{\"config\":$(link_pair),\"reason\":\"e2e again\"}"
+expect 200 - "the same document again"
+check '(.changes | length) == 0 and .unchanged == 1' "changes nothing"
+pair_listed() {
+  call GET /v1/market/pairs ""
+  [[ $STATUS == 200 ]] && jq -e --arg n "0.000$NOTIONAL" '.pairs[] | select(.symbol == "LINK-BTC" and .min_notional == $n)' <<<"$BODY" >/dev/null
+}
+eventually 60 "the sites list LINK-BTC as changed" pair_listed
+LINK_STATUS=$(jq -r '.pairs[] | select(.symbol == "LINK-BTC") | .status' <<<"$BODY")
+if [[ $LINK_STATUS != TRADING ]]; then
+  as OPERATOR POST /admin/v1/instruments/pairs/LINK-BTC/status '{"to":"TRADING","reason":"e2e opens LINK-BTC"}'
+  expect 200 - "and opens it for trading (from $LINK_STATUS)"
+fi
+at_exit 'as OPERATOR POST /admin/v1/instruments/pairs/LINK-BTC/status "{\"to\":\"HALT\",\"reason\":\"e2e cleanup\"}" >/dev/null'
+link_order() {
+  call POST /v1/orders '{"symbol":"LINK-BTC","side":"BUY","type":"LIMIT","price":"0.0001","quantity":"1"}' "${UAUTH[@]}" -H "Idempotency-Key: e2e-admin-link-$RUN"
+  [[ $STATUS == 202 ]]
+}
+eventually 40 "the user rests a buy on LINK-BTC" link_order
+LINK_ORDER=$(jq -r .order_id <<<"$BODY")
+link_open() {
+  call GET "/v1/orders/$LINK_ORDER" "" "${UAUTH[@]}"
+  [[ $(jq -r .status <<<"$BODY") == OPEN ]]
+}
+eventually 40 "it rests on the book" link_open
+call DELETE "/v1/orders/$LINK_ORDER" "" "${UAUTH[@]}"
+link_canceled() {
+  call GET "/v1/orders/$LINK_ORDER" "" "${UAUTH[@]}"
+  [[ $(jq -r .status <<<"$BODY") == CANCELED ]]
+}
+eventually 40 "and is canceled" link_canceled
+
 echo "== deposits that need a person (with the custodian's stand-in)"
 # mock ARGS... drives the custodian's stand-in on the server (udun-mock).
 mock() {
@@ -790,6 +849,8 @@ eventually 60 "the security actions are audited, the temporary password is not" 
   "([.items[].payload.action] | (index(\"admin.users.contacts_revealed\") != null and index(\"admin.users.identity_request_decided\") != null and index(\"admin.users.sessions_revoked\") != null and index(\"admin.users.password_reset\") != null)) and (tostring | contains(\"$TEMP\") | not)"
 eventually 60 "the flag switches are audited" audited AUDITOR "target=flag:market.reference_kline" \
   "[.items[] | select(.actor == \"$EMAIL_OPERATOR\")] | length >= 2"
+eventually 60 "the console's reference data edits are audited" audited AUDITOR "target=instruments" \
+  "[.items[] | select(.actor == \"$EMAIL_OPERATOR\") | .payload.action] | index(\"admin.instruments.applied\") != null"
 if [[ -n ${BACKFILLED:-} ]]; then
   eventually 60 "the deposit decisions are audited on the account, by FINANCE" audited AUDITOR "target=user:$USER_ID" \
     "[.items[] | select(.actor == \"$EMAIL_FINANCE\") | .payload.action] | ((index(\"admin.deposits.backfill_executed\") != null or index(\"admin.deposits.backfill_requested\") != null) and index(\"wallet.deposit.backfilled\") != null and index(\"ledger.unclaimed_released\") != null and index(\"wallet.deposit.dismissed\") != null)"

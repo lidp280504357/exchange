@@ -114,6 +114,96 @@ func TestApplyIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestConsoleEditsSurviveFileApplies checks the sources of the history:
+// the admin console's edits are kept by later file applies (the deploy's
+// sync) unless forced, dry runs change nothing, and Export round-trips.
+func TestConsoleEditsSurviveFileApplies(t *testing.T) {
+	svc, db := setup(t)
+	ctx := context.Background()
+	file := config()
+	if _, err := svc.Apply(ctx, file, "cli:deploy", "seed"); err != nil {
+		t.Fatal(err)
+	}
+	console := func(cfg application.Config, dry bool) application.ApplyResult {
+		t.Helper()
+		res, err := svc.ApplyWith(ctx, cfg, application.ApplyOptions{Actor: "ops@example.com", Reason: "tighter band", Source: application.SourceConsole, DryRun: dry})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	edit := application.Config{Pairs: []domain.TradingPair{file.Pairs[0]}}
+	edit.Pairs[0].PriceBand = d("0.05")
+
+	// A dry run reports the update and changes nothing.
+	dry := console(edit, true)
+	if len(dry.Changes) != 1 || dry.Changes[0].Action != application.ActionUpdate || dry.Changes[0].Version != 2 {
+		t.Fatalf("dry run %+v", dry)
+	}
+	if before, ok := dry.Changes[0].Before.(domain.TradingPair); !ok || !before.PriceBand.Equal(d("0.1")) {
+		t.Fatalf("before %+v", dry.Changes[0].Before)
+	}
+	if p, _ := svc.Pair(ctx, "BTC-USDT"); !p.PriceBand.Equal(d("0.1")) || p.Version != 1 {
+		t.Fatalf("a dry run changed the pair: %+v", p)
+	}
+	if n := count(t, db, `SELECT count(*) FROM outbox WHERE topic = 'instrument.events'`); n != 5 {
+		t.Fatalf("a dry run emitted: %d", n)
+	}
+
+	// The console's edit, then the file again: the pair is kept.
+	if res := console(edit, false); len(res.Changes) != 1 {
+		t.Fatalf("console %+v", res)
+	}
+	if n := count(t, db, `SELECT count(*) FROM config_history WHERE key = 'BTC-USDT' AND source = 'CONSOLE' AND actor = 'ops@example.com'`); n != 1 {
+		t.Fatalf("console history %d", n)
+	}
+	res, err := svc.Apply(ctx, file, "cli:deploy", "deploy")
+	if err != nil || len(res.Changed) != 0 || len(res.Kept) != 1 || res.Kept[0].Key != "BTC-USDT" || res.Kept[0].KeptBy != "ops@example.com" {
+		t.Fatalf("file over the console's edit: %+v %v", res, err)
+	}
+	if p, _ := svc.Pair(ctx, "BTC-USDT"); !p.PriceBand.Equal(d("0.05")) {
+		t.Fatalf("the console's edit was undone: %+v", p)
+	}
+	// A status change in between does not count as an edit.
+	if _, err := svc.SetPairStatus(ctx, "BTC-USDT", domain.StatusTrading, "market-data-service", "feed back"); err != nil {
+		t.Fatal(err)
+	}
+	if res, err = svc.Apply(ctx, file, "cli:deploy", "deploy"); err != nil || len(res.Kept) != 1 {
+		t.Fatalf("after a status change %+v %v", res, err)
+	}
+	// Forced, the file wins; from then on it is the file's again.
+	if res, err = svc.ApplyWith(ctx, file, application.ApplyOptions{Actor: "cli:ops", Reason: "back to the file", Source: application.SourceFile, Force: true}); err != nil ||
+		len(res.Changed) != 1 || len(res.Kept) != 0 {
+		t.Fatalf("forced %+v %v", res, err)
+	}
+	if p, _ := svc.Pair(ctx, "BTC-USDT"); !p.PriceBand.Equal(d("0.1")) || p.Status != domain.StatusTrading {
+		t.Fatalf("forced pair %+v", p)
+	}
+	changed := file
+	changed.Pairs = []domain.TradingPair{file.Pairs[0]}
+	changed.Pairs[0].MinNotional = d("7")
+	if res, err = svc.Apply(ctx, changed, "cli:deploy", "deploy"); err != nil || len(res.Changed) != 1 || len(res.Kept) != 0 {
+		t.Fatalf("the file's again %+v %v", res, err)
+	}
+
+	// A new item from the console; the file does not know it.
+	more := application.Config{Pairs: []domain.TradingPair{file.Pairs[0]}}
+	more.Pairs[0].Symbol, more.Pairs[0].BaseAsset, more.Pairs[0].QuoteAsset = "USDT-BTC", "USDT", "BTC"
+	more.Pairs[0].TickSize, more.Pairs[0].LotSize, more.Pairs[0].MinQuantity = d("0.00000001"), d("1"), d("1")
+	if res := console(more, false); len(res.Changes) != 1 || res.Changes[0].Action != application.ActionCreate || res.Changes[0].Before != nil {
+		t.Fatalf("created %+v", res)
+	}
+
+	exported, err := svc.Export(ctx)
+	if err != nil || len(exported.FeeSchedules) != 1 || len(exported.Assets) != 2 || len(exported.Pairs) != 2 {
+		t.Fatalf("export %+v %v", exported, err)
+	}
+	if res, err := svc.ApplyWith(ctx, exported, application.ApplyOptions{Actor: "ops@example.com", Reason: "round trip", Source: application.SourceConsole, DryRun: true}); err != nil ||
+		len(res.Changes) != 0 || res.Unchanged != 6 {
+		t.Fatalf("the export applies as no change: %+v %v", res, err)
+	}
+}
+
 func TestPairStatusMachine(t *testing.T) {
 	svc, _ := setup(t)
 	ctx := context.Background()

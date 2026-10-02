@@ -114,6 +114,7 @@ SELECT symbol, funding_time, funding_rate, mark_price, samples FROM market.fundi
 - 状态（`GET /internal/market/feed`，不经网关，后台概览用）：`OFF`（`market.reference_feed` 关着或没有跟随的交易对）、`OK`（30 秒内收到过数据）、`DELAYED`（30 秒到 5 分钟没有数据）、`DOWN`（5 分钟以上）。服务启动或开关刚打开时从那一刻起算。
 - `DOWN` 且开关打开：把跟随币安、处于 TRADING 的交易对置为 HALT（操作人 `market-data-service`，原因 `reference feed lost`），先记入 `market.feed_halts` 再改状态。数据恢复并持续 30 秒后，只把 `feed_halts` 里的交易对从 HALT 改回 TRADING；期间被运营改成别的状态的交易对只删记录、不动它。两个开关任一关掉时也会恢复。合约不受影响（它们有自己的只减仓降级）。
 - 指标：`market_reference_feed_state{state}`（当前状态为 1）、`market_feed_halted_pairs`；告警 `MarketFeedHalted`。
+- 参考符号核对（管理后台 C3，不经网关）：`GET /internal/market/reference-symbols/{symbol}` 返回 `{symbol, spot, futures}`，向币安的 `/api/v3/ticker/price` 与 `/fapi/v1/ticker/price` 各问一次（与其它请求共用 200 毫秒的间隔）。后台在交易对用上新参考符号前调用：币安不认识的符号会让按批读取的全部交易对的 ticker 失败。
 
 ## 参考 K 线（`market.reference_kline`，测试环境）
 

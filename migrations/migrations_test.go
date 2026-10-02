@@ -133,6 +133,12 @@ func TestInstrumentSchema(t *testing.T) {
 	rejects(t, db, "at most 200 KB", `UPDATE assets SET logo = decode(repeat('00', 204801), 'hex'), logo_mime = 'image/png' WHERE asset_code = 'USDT'`)
 	rejects(t, db, "a display name of at most 32 characters", `UPDATE assets SET display_name = repeat('x', 33) WHERE asset_code = 'USDT'`)
 	rejects(t, db, "introductions by language", `UPDATE assets SET description = '["x"]' WHERE asset_code = 'USDT'`)
+	// The history names where a change came from (C3: the console's edits survive deploys).
+	history := `INSERT INTO config_history (entity, key, version, value, actor, reason, source) VALUES ('TRADING_PAIR', 'BTC-USDT', $1, '{}', 'x', 'y', $2)`
+	accepts(t, db, history, 1, "FILE")
+	accepts(t, db, history, 2, "CONSOLE")
+	accepts(t, db, history, 3, "")
+	rejects(t, db, "a known source", history, 4, "API")
 }
 
 func TestLedgerSchema(t *testing.T) {

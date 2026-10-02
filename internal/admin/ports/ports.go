@@ -427,6 +427,67 @@ type Instruments interface {
 	SetPairStatus(ctx context.Context, symbol, to, reason, actor string) (string, error)
 	// SetContractStatus returns the previous status.
 	SetContractStatus(ctx context.Context, symbol, to, reason, actor string) (string, error)
+	// Export returns the reference data as a config document (the shape
+	// of deploy/instruments/<env>.json).
+	Export(ctx context.Context) (json.RawMessage, error)
+	// Apply applies a config document for the console: creates and
+	// updates, statuses left alone, nothing deleted; dryRun changes
+	// nothing.
+	Apply(ctx context.Context, config json.RawMessage, dryRun bool, actor, reason string) (ConfigResult, error)
+}
+
+// ConfigResult is what applying a config document does.
+type ConfigResult struct {
+	Changes   []ConfigChange `json:"changes"`
+	Unchanged int            `json:"unchanged"`
+	// Warnings are the console's notes on the changes (HOUSE will not
+	// quote a pair, the reference streams reconnect).
+	Warnings []ConfigWarning `json:"warnings"`
+}
+
+// ConfigWarning is a note on a change: a code, the pair or contract it is
+// about and a detail (a reference symbol, an index pair).
+type ConfigWarning struct {
+	Code   string `json:"code"`
+	Symbol string `json:"symbol"`
+	Detail string `json:"detail"`
+}
+
+// The notes of a config document's preview.
+const (
+	// WarnReferenceUnchecked: the reference market could not be asked.
+	WarnReferenceUnchecked = "REFERENCE_UNCHECKED"
+	// WarnHouseNotListed: HOUSE quotes it only once it is on the
+	// market.house_liquidity flag's symbol list.
+	WarnHouseNotListed = "HOUSE_NOT_LISTED"
+	// WarnNoIndexReference: the contract's index pair follows no
+	// reference market; the platform's own market prices it.
+	WarnNoIndexReference = "NO_INDEX_REFERENCE"
+	// WarnNoFutures: the reference market has no futures on the symbol,
+	// so HOUSE gives the contract no book.
+	WarnNoFutures = "NO_FUTURES"
+	// WarnStreamsReconnect: market-data-service reconnects every
+	// reference stream; reference books are empty for about 20 seconds.
+	WarnStreamsReconnect = "STREAMS_RECONNECT"
+)
+
+// ConfigChange is an item a config document creates or updates: before
+// (null when created) and after, at its version after the change.
+type ConfigChange struct {
+	Entity  string          `json:"entity"`
+	Key     string          `json:"key"`
+	Action  string          `json:"action"`
+	Version int64           `json:"version"`
+	Before  json.RawMessage `json:"before"`
+	After   json.RawMessage `json:"after"`
+}
+
+// ReferenceMarket checks symbols of the reference market (Binance,
+// through market-data-service).
+type ReferenceMarket interface {
+	// Listed reports whether it lists a symbol (BTCUSDT) on its spot
+	// market and on USDⓈ-M futures.
+	Listed(ctx context.Context, symbol string) (spot, futures bool, err error)
 }
 
 // Derivatives watches the perpetual contracts (derivatives-service's

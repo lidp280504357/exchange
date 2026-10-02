@@ -67,7 +67,7 @@ func (s *Service) UpdateProfile(ctx context.Context, code string, ch ProfileChan
 			return err
 		}
 		change := map[string]any{"old": profileRecord(*cur, oldDigest, logo != nil), "new": profileRecord(saved, logoDigest(logo), logo != nil)}
-		return r.Record(ctx, "ASSET_PROFILE", code, saved.Version, change, actor, reason)
+		return r.Record(ctx, "ASSET_PROFILE", code, saved.Version, change, actor, reason, SourceProfile)
 	})
 	return saved, err
 }
