@@ -6,11 +6,16 @@ set -euo pipefail
 
 # 全部逻辑放在函数里：bash 先读完整个函数再执行，脚本在执行中被 git 更新也不会读到半新半旧的内容。
 
-# apply_instruments 以仓库文件为准幂等同步参考数据（资产、网络、交易对、费率）；已存在交易对的状态不受影响
+# apply_instruments 以仓库文件为准幂等同步参考数据（资产、网络、交易对、费率）；已存在交易对的状态不受影响。
+# 改了的（changed）与因后台改过而保留的（kept：后台的改动优先，--force 才按文件覆盖）逐条列出，最后一行是汇总
+# （以前只留汇总，看不到哪些项被保留，审查 C3c）。
 apply_instruments() {
   [ -f deploy/instruments/test.json ] || return 0
-  sudo docker compose "${COMPOSE[@]}" exec -T instrument-service /app/exchangectl instruments apply \
-    --file - --reason "deploy $APP_VERSION" < deploy/instruments/test.json | tail -1 | sed 's/^/== 参考数据：/'
+  local out
+  out=$(sudo docker compose "${COMPOSE[@]}" exec -T instrument-service /app/exchangectl instruments apply \
+    --file - --reason "deploy $APP_VERSION" < deploy/instruments/test.json)
+  grep -E '^(changed|kept) ' <<<"$out" | sed 's/^/   /' || true
+  tail -1 <<<"$out" | sed 's/^/== 参考数据：/'
 }
 
 # lift_deploy_degradations 解除部署期间开始的合约只减仓。部署会重启 market-data-service，标记价短暂中断，

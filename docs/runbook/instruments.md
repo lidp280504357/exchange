@@ -27,7 +27,7 @@ sudo docker compose ... exec -T instrument-service /app/exchangectl instruments 
 - 整个文件在一个事务里生效：缺的创建，变了的升版本并发事件，相同的跳过——同一文件重复执行不产生任何变更。任何一项校验失败则全部回滚。
 - 文件里没有的对象保留不动（不会删除）。
 - 交易对的状态只在**创建时**取文件中的值（默认 `PREPARE`）；之后只能用 `pair-status` 改，部署不会把状态改回去。
-- **后台改过的项保留**（2026-10-02 管理后台 C3）：`config_history` 多了 `source` 列（迁移 `00006`）：`FILE`（apply，即部署同步）、`CONSOLE`（管理后台）、`STATUS`（改状态）、`PROFILE`（资产资料），之前的行为空、按 `FILE` 算。文件 apply 遇到最后一次编辑（不算改状态与资料）来自后台的项时**不改**它，输出 `kept TRADING_PAIR LINK-USDT v4: changed in the admin console by ops@… at …`。要让文件重新说了算：`exchangectl instruments apply --file … --reason … --force`，之后该项又跟随文件。`--dry-run` 只列出会改什么。
+- **后台改过的项保留**（2026-10-02 管理后台 C3）：`config_history` 多了 `source` 列（迁移 `00006`）：`FILE`（apply，即部署同步）、`CONSOLE`（管理后台）、`STATUS`（改状态）、`PROFILE`（资产资料），之前的行为空、按 `FILE` 算。文件 apply 遇到最后一次编辑（不算改状态与资料）来自后台的项时**不改**它，输出 `kept TRADING_PAIR LINK-USDT v4: changed in the admin console by ops@… at …`；部署日志逐条列出 `changed` 与 `kept` 行，最后一行 `== 参考数据：…` 是汇总（2026-10-03 起，以前只留汇总）。要让文件重新说了算：`exchangectl instruments apply --file … --reason … --force`，之后该项又跟随文件。`--dry-run` 只列出会改什么。
 
 改参考数据：改 `deploy/instruments/test.json` 并提交，下次部署生效；紧急情况可在服务器上手工执行同一命令。也可以在管理后台「资产与交易对」里改（见下文「管理后台编辑」）。
 
