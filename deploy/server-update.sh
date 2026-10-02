@@ -89,10 +89,12 @@ main() {
     COMPOSE+=(-f "$INFRA/docker-compose.apps.yml")
     prune_build_cache
     ensure_disk_space
-    sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" build
-    sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" up -d --wait --wait-timeout 300 instrument-service
+    # 所有应用服务运行同一个镜像 exchange-app:latest：只构建一次（按服务逐个构建会把同一镜像导出二十多次、
+    # 每次解出全部二进制，2026-10-02 因此在构建中写满磁盘）；up 用 --no-build 直接用这个镜像重建容器。
+    sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" build api-gateway
+    sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" up -d --no-build --wait --wait-timeout 300 instrument-service
     apply_instruments
-    sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 600
+    sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" up -d --no-build --remove-orphans --wait --wait-timeout 600
   else
     sudo docker compose "${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180
   fi

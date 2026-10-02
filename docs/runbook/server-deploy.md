@@ -46,7 +46,7 @@ bash /opt/exchange/src/deploy/server-update.sh          # 在服务器上直接�
 1. 拉代码并重置到目标版本。
 2. 把 `deploy/compose/` 同步到 `/opt/exchange/infra`。不碰 `.env`、`apps.env`、证书、Cloudflare IP 列表、`nginx/html/`、`nginx/admin/`、`nginx/sites/`、`udun-mock/`（托管钱包模拟网关的状态，属主 uid 10001，脚本在这里创建）；`signer/`、`admin/` 两个密钥目录不在仓库里，也不受影响。
 3. 幂等核对 Redpanda topic。
-4. 删掉 6 小时内没用过的构建缓存，确认根分区至少还有 8 GB，不够就停止部署；然后 `docker compose build` 构建全部镜像。
+4. 删掉 6 小时内没用过的构建缓存，确认根分区至少还有 8 GB，不够就停止部署；然后构建应用镜像 `exchange-app:latest`。所有应用服务共用这一个镜像，只构建一次（`docker compose build api-gateway`），之后 `up --no-build` 用它重建全部应用容器：按服务逐个构建会把同一镜像导出二十多次、每次解出全部二进制，2026-10-02 在导出时写满了磁盘。
 5. 先起 instrument-service，按 `deploy/instruments/test.json` 幂等同步参考数据（[instruments.md](instruments.md)），再 `up -d` 其余服务。其余服务启动时就要读交易对与参考行情映射，所以参考数据必须先到。
 6. 清理悬空镜像，再删一次 6 小时内没用过的构建缓存。
 7. 校验并热加载 nginx 配置。
