@@ -82,7 +82,7 @@ check() {
 }
 
 inbox_count() {
-  curl -s "$BASE/v1/dev/messages?target=$(jq -rn --arg e "$1" '$e|@uri')&limit=50" | jq '.messages | length'
+  call GET "/v1/dev/messages?target=$(jq -rn --arg e "$1" '$e|@uri')&limit=50" "" && jq '.messages | length' <<<"$BODY"
 }
 
 # otp SCENE EMAIL DEVICE [ACCESS_TOKEN] requests a code by email, reads it
@@ -111,11 +111,13 @@ otp_via() {
 # await_code TARGET BEFORE waits for the dev inbox of TARGET to hold more
 # than BEFORE messages and prints the code of the newest.
 await_code() {
-  local target=$1 before=$2 inbox
+  local target=$1 before=$2 inbox=""
   for _ in $(seq 20); do
-    inbox=$(curl -s "$BASE/v1/dev/messages?target=$(jq -rn --arg e "$target" '$e|@uri')&limit=50")
-    if (( $(jq '.messages | length' <<<"$inbox") > before )); then
-      break
+    if call GET "/v1/dev/messages?target=$(jq -rn --arg e "$target" '$e|@uri')&limit=50" ""; then
+      inbox=$BODY
+      if (($(jq '.messages | length' <<<"$inbox") > before)); then
+        break
+      fi
     fi
     sleep 0.5
   done
