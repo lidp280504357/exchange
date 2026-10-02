@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Card } from "../../kit/Page";
 import { isAmount, type ConfigPatch, type InstrumentConfig, type PairConfig } from "./config";
+import { steps } from "./forms";
 import { useReview } from "./Review";
 
 // The listing wizard (design 2026-10-02 §4.4): pairs pasted as CSV (one
@@ -20,7 +21,7 @@ const REQUIRED = ["base_asset", "quote_asset", "tick_size", "lot_size", "min_qua
 const AMOUNTS = ["tick_size", "lot_size", "min_quantity", "max_quantity", "min_notional", "price_band", "reference_multiplier"];
 
 const EXAMPLE = `${COLUMNS.join(",")}
-LINK-BTC,LINK,BTC,0.0000001,0.01,0.01,100000,0.0001,0.1,default,LINKBTC,1`;
+LINK-BTC,LINK,BTC,0.0000001,0.1,0.1,100000,0.0001,0.1,default,LINKBTC,1`;
 
 type Parsed = { patch: ConfigPatch | null; count: number; errors: string[] };
 
@@ -59,11 +60,15 @@ export function parse(text: string, cfg: InstrumentConfig | undefined, line: (n:
       fee_tier: row.fee_tier || "default", status: "PREPARE", reference_symbol: (row.reference_symbol ?? "").toUpperCase(),
       reference_multiplier: row.reference_multiplier || "1",
     };
+    const precision: ReturnType<typeof steps> = cfg ? steps(cfg, pair) : { tick: undefined, lot: undefined, product: undefined };
     const bad = [
       ...AMOUNTS.filter((k) => !isAmount(pair[k as keyof PairConfig] as string)),
       ...(assets.size && !assets.has(base) ? [base] : []),
       ...(assets.size && !assets.has(quote) ? [quote] : []),
       ...(tiers.size && !tiers.has(pair.fee_tier) ? [pair.fee_tier] : []),
+      ...(precision.tick !== undefined ? [`tick_size > ${precision.tick}`] : []),
+      ...(precision.lot !== undefined ? [`lot_size > ${precision.lot}`] : []),
+      ...(precision.product !== undefined ? [`tick_size × lot_size > ${precision.product}`] : []),
     ];
     if (bad.length) errors.push(line(i + 2, bad.join(", ")));
     pairs.push(pair);

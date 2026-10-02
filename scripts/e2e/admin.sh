@@ -583,7 +583,7 @@ check '(.pairs | length) >= 50 and (.fee_schedules | map(.tier) | index("default
 NOTIONAL=$(((RUN % 2) + 1))
 link_pair() { # link_pair [REFERENCE]: LINK-BTC as a config document
   jq -nc --arg r "${1:-}" --arg n "0.000$NOTIONAL" '{pairs: [{symbol: "LINK-BTC", base_asset: "LINK", quote_asset: "BTC", tick_size: "0.0000001",
-    lot_size: "0.01", min_quantity: "0.01", max_quantity: "100000", min_notional: $n, price_band: "0.1", fee_tier: "default", status: "PREPARE",
+    lot_size: "0.1", min_quantity: "0.1", max_quantity: "100000", min_notional: $n, price_band: "0.1", fee_tier: "default", status: "PREPARE",
     reference_symbol: $r, reference_multiplier: "1"}]}'
 }
 as AUDITOR POST /admin/v1/instruments/preview "{\"config\":$(link_pair)}"

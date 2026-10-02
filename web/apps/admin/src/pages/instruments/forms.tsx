@@ -78,9 +78,14 @@ export function PairDrawer({ cfg, pair, onClose }: { cfg: InstrumentConfig; pair
   const symbol = creating ? (v.base_asset && v.quote_asset ? `${v.base_asset}-${v.quote_asset}` : "") : v.symbol;
   const taken = creating && cfg.pairs.some((p) => p.symbol === symbol);
   const assets = cfg.assets.map((a) => ({ value: a.asset_code, label: `${a.asset_code} · ${a.name}` }));
+  const precision = steps(cfg, v);
   const errors = {
     base: !v.base_asset || v.base_asset === v.quote_asset ? t("admin.listing.needBase") : taken ? t("admin.listing.taken", { symbol }) : undefined,
-    tick: amount(v.tick_size), lot: amount(v.lot_size), minQty: amount(v.min_quantity), maxQty: amount(v.max_quantity),
+    tick: amount(v.tick_size) ?? (precision.tick !== undefined ? t("admin.listing.tooFine", { n: precision.tick }) : undefined),
+    lot:
+      amount(v.lot_size) ??
+      (precision.lot !== undefined ? t("admin.listing.tooFine", { n: precision.lot }) : precision.product !== undefined ? t("admin.listing.tickLot", { n: precision.product }) : undefined),
+    minQty: amount(v.min_quantity), maxQty: amount(v.max_quantity),
     minNotional: amount(v.min_notional, true), band: amount(v.price_band), multiplier: amount(v.reference_multiplier),
   };
   const ok = Object.values(errors).every((e) => !e);
@@ -140,6 +145,24 @@ export function PairDrawer({ cfg, pair, onClose }: { cfg: InstrumentConfig; pair
 }
 
 const feeLabel = (f: FeeSchedule) => `${f.tier} · ${f.maker_fee_rate} / ${f.taker_fee_rate}`;
+
+/**
+ * steps checks a pair's steps against its assets' decimals as
+ * instrument-service does: the price step fits the quote asset, the
+ * quantity step the base asset, and their product the quote asset (so
+ * order values are exact). Each field is the decimals allowed when
+ * exceeded.
+ */
+export function steps(cfg: InstrumentConfig, p: Pick<PairConfig, "base_asset" | "quote_asset" | "tick_size" | "lot_size">) {
+  const base = cfg.assets.find((a) => a.asset_code === p.base_asset)?.decimals;
+  const quote = cfg.assets.find((a) => a.asset_code === p.quote_asset)?.decimals;
+  const ok = (v: string) => isAmount(v) && dec.gt(v, "0");
+  const tick = quote !== undefined && ok(p.tick_size) && dec.decimalsOf(p.tick_size) > quote ? quote : undefined;
+  const lot = base !== undefined && ok(p.lot_size) && dec.decimalsOf(p.lot_size) > base ? base : undefined;
+  const product =
+    quote !== undefined && ok(p.tick_size) && ok(p.lot_size) && dec.decimalsOf(dec.mul(p.tick_size, p.lot_size)) > quote ? quote : undefined;
+  return { tick, lot, product };
+}
 
 /** blankAsset is a new asset's defaults: trading on, no deposits or withdrawals (an internal asset). */
 const blankAsset = (): AssetConfig => ({
