@@ -94,7 +94,7 @@ market-sim 每 5 秒把目标价上报给 market-data-service（`PUT /internal/m
 
 设置存在 `marketsim.settings`（一行 JSON，`version` 每次加一），首次启动写入默认值；改设置走管理接口（后台的 A3 页面也调它），下一轮生效。字段（数值，均为模型参数，不是账务金额）：
 
-`p0`、`w_btc`、`w_eth`、`beta`、`theta`、`sigma`、`mu`、`max_minute_move`、`floor`、`ceiling`、`levels`、`spread`、`level_ticks`、`level_size`、`requote_ticks`、`daily_volume`、`order_size`、`trend_minutes`、`trend_strength`、`orders_per_second`、`cancels_per_second`、`bot_usdt`、`perp_daily_volume`、`perp_bot_cap`、`perp_margin`；含义与默认值见 `internal/marketsim/domain/params.go`，`Validate` 给出范围。
+`p0`、`w_btc`、`w_eth`、`beta`、`theta`、`sigma`、`mu`、`max_minute_move`、`floor`、`ceiling`、`levels`、`spread`、`level_ticks`、`level_size`、`requote_ticks`、`daily_volume`、`order_size`、`trend_minutes`、`trend_strength`、`orders_per_second`、`cancels_per_second`、`bot_usdt`、`perp_daily_volume`、`perp_bot_cap`、`perp_margin`；含义与默认值见 `internal/marketsim/domain/params.go`，`Validate` 给出范围。其中几条是硬上限，不论谁签名、有没有批准（审查 M4）：`floor` 不低于 0.0001、`ceiling` 不高于 1,000,000，`max_minute_move` 至多 5%/分，`orders_per_second`、`cancels_per_second` 各至多 100，`daily_volume`、`perp_daily_volume` 至多每天 1 亿 USDT，`order_size`、`level_size` 至多 50,000，`bot_usdt`、`perp_bot_cap`、`perp_margin` 至多 1000 万；超出答 400。
 
 环境变量（compose 的 market-sim 段）：`TRADING_SERVICE_URL`、`LEDGER_SERVICE_URL`、`MARKET_DATA_SERVICE_URL`、`INSTRUMENT_SERVICE_URL`、`INSTRUMENT_GRPC_ADDR`、`DERIVATIVES_SERVICE_URL`；`SIM_SYMBOL`（默认 ASTRA-USDT）、`SIM_QUOTE`（默认 USDT）、`SIM_PERP_SYMBOL`（默认 ASTRA-USDT-PERP，空为不做永续）、`SIM_SEED`（默认 0，取时钟）。
 

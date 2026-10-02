@@ -272,6 +272,26 @@ func TestParamsValidate(t *testing.T) {
 	if err := p.Validate(); err == nil {
 		t.Fatal("NaN passed")
 	}
+	// The hard limits hold whoever signs the change (review M4).
+	for name, change := range map[string]func(*Params){
+		"a lower floor":       func(p *Params) { p.Floor = 0.00001 },
+		"a higher ceiling":    func(p *Params) { p.Ceiling = 2_000_000 },
+		"more orders":         func(p *Params) { p.OrdersPerSecond = 101 },
+		"more cancels":        func(p *Params) { p.CancelsPerSecond = 101 },
+		"more turnover":       func(p *Params) { p.DailyVolume = 100_000_001 },
+		"bigger orders":       func(p *Params) { p.OrderSize = 50_001 },
+		"bigger levels":       func(p *Params) { p.LevelSize = 50_001 },
+		"richer bots":         func(p *Params) { p.BotUSDT = 10_000_001 },
+		"more perp turnover":  func(p *Params) { p.PerpDailyVolume = 100_000_001 },
+		"bigger perp caps":    func(p *Params) { p.PerpBotCap = 10_000_001 },
+		"bigger perp margins": func(p *Params) { p.PerpMargin = 10_000_001 },
+	} {
+		p := DefaultParams()
+		change(&p)
+		if err := p.Validate(); err == nil {
+			t.Errorf("%s passed", name)
+		}
+	}
 }
 
 func started(t EventType, from string) *Event {

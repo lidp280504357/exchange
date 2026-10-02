@@ -13,6 +13,22 @@ import (
 // MaxMinuteMove is the most max_minute_move may be (§6.2): 5% a minute.
 const MaxMinuteMove = 0.05
 
+// The hard limits of the other settings (review M4): the price's floor
+// and ceiling stay within the defaults, and no setting sends the platform
+// more orders, or bigger ones, than a busy real market would — whoever
+// signs the change.
+const (
+	HardFloor           = 0.0001
+	HardCeiling         = 1_000_000
+	MaxOrdersPerSecond  = 100
+	MaxCancelsPerSecond = 100
+	MaxDailyVolume      = 100_000_000 // USDT a day, the takers and the trend followers
+	MaxOrderSize        = 50_000      // USDT, a taker's median order and a maker's median level
+	MaxBotUSDT          = 10_000_000
+	MaxPerpDailyVolume  = 100_000_000
+	MaxPerpBotCap       = 10_000_000
+)
+
 // Params are the simulated market's settings.
 type Params struct {
 	// The price model (§3): the anchor price; the market factor's
@@ -96,7 +112,8 @@ func (p Params) Validate() error {
 		p.LevelSize, p.DailyVolume, p.OrderSize, p.TrendStrength, p.OrdersPerSecond, p.CancelsPerSecond, p.BotUSDT,
 		p.PerpDailyVolume, p.PerpBotCap, p.PerpMargin),
 		"every number must be finite")
-	check(p.Floor > 0 && p.Ceiling > p.Floor, "0 < floor < ceiling")
+	check(p.Floor >= HardFloor && p.Ceiling <= HardCeiling && p.Ceiling > p.Floor,
+		"%g <= floor < ceiling <= %g", float64(HardFloor), float64(HardCeiling))
 	check(p.P0 >= p.Floor && p.P0 <= p.Ceiling, "p0 must be between the floor and the ceiling")
 	check(p.WBTC >= 0 && p.WETH >= 0 && p.WBTC+p.WETH <= 1+1e-9, "the weights are not negative and add up to 1 at most")
 	check(p.Beta >= 0 && p.Beta <= 5, "beta must be between 0 and 5")
@@ -107,14 +124,17 @@ func (p Params) Validate() error {
 	check(p.Levels >= 1 && p.Levels <= 30, "levels must be between 1 and 30")
 	check(p.Spread > 0 && p.Spread <= 0.05, "spread must be above 0 and at most 0.05")
 	check(p.LevelTicks >= 1 && p.LevelTicks <= 100, "level_ticks must be between 1 and 100")
-	check(p.LevelSize > 0 && p.OrderSize > 0, "level_size and order_size must be positive")
+	check(p.LevelSize > 0 && p.OrderSize > 0 && p.LevelSize <= MaxOrderSize && p.OrderSize <= MaxOrderSize,
+		"level_size and order_size must be above 0 and at most %d", MaxOrderSize)
 	check(p.RequoteTick >= 1, "requote_ticks must be at least 1")
-	check(p.DailyVolume >= 0, "daily_volume must not be negative")
+	check(p.DailyVolume >= 0 && p.DailyVolume <= MaxDailyVolume, "daily_volume must be between 0 and %d", MaxDailyVolume)
 	check(p.TrendMinutes >= 1 && p.TrendMinutes <= 240, "trend_minutes must be between 1 and 240")
 	check(p.TrendStrength >= 0 && p.TrendStrength <= 1, "trend_strength must be between 0 and 1")
-	check(p.OrdersPerSecond > 0 && p.CancelsPerSecond > 0, "the throttle must allow some orders and cancels")
-	check(p.BotUSDT > 0, "bot_usdt must be positive")
-	check(p.PerpDailyVolume >= 0 && p.PerpBotCap > 0 && p.PerpMargin > 0,
-		"perp_daily_volume must not be negative, perp_bot_cap and perp_margin must be positive")
+	check(p.OrdersPerSecond > 0 && p.CancelsPerSecond > 0 && p.OrdersPerSecond <= MaxOrdersPerSecond && p.CancelsPerSecond <= MaxCancelsPerSecond,
+		"the throttle must allow some orders and cancels, at most %d and %d a second", MaxOrdersPerSecond, MaxCancelsPerSecond)
+	check(p.BotUSDT > 0 && p.BotUSDT <= MaxBotUSDT, "bot_usdt must be above 0 and at most %d", MaxBotUSDT)
+	check(p.PerpDailyVolume >= 0 && p.PerpDailyVolume <= MaxPerpDailyVolume && p.PerpBotCap > 0 && p.PerpBotCap <= MaxPerpBotCap &&
+		p.PerpMargin > 0 && p.PerpMargin <= MaxPerpBotCap,
+		"perp_daily_volume must be between 0 and %d, perp_bot_cap and perp_margin above 0 and at most %d", MaxPerpDailyVolume, MaxPerpBotCap)
 	return errors.Join(errs...)
 }
