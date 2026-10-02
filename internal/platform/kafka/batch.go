@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kadm"
@@ -43,7 +44,20 @@ type BatchOptions struct {
 	MaxWait time.Duration
 	// LagInterval is how often the lag gauge refreshes (default 30s).
 	LagInterval time.Duration
+	// OnAssigned runs whenever the group hands the consumer partitions,
+	// at the start and after a rejoin, before it polls them; the matching
+	// engine reads the reference books to their end there.
+	OnAssigned func(ctx context.Context)
 }
+
+// Readiness of a batch consumer: it comes back from a poll at least every
+// pollIdle when nothing arrives, and holds partitions within unassignedFor
+// of starting or of losing them.
+const (
+	pollIdle      = 30 * time.Second
+	pollStale     = 2 * time.Minute
+	unassignedFor = 2 * time.Minute
+)
 
 // BatchConsumer feeds bulk sinks such as ClickHouse (requirements §9:
 // flush every second or 10,000 rows). Undecodable records go to the
@@ -57,6 +71,10 @@ type BatchConsumer struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	done   chan struct{}
+
+	assigned  atomic.Int64 // partitions held
+	changedAt atomic.Int64 // when they last changed, unix nanoseconds
+	lastPoll  atomic.Int64 // when a poll last returned, unix nanoseconds
 }
 
 // NewBatchConsumer joins the group on topics.
@@ -72,6 +90,11 @@ func NewBatchConsumer(ctx context.Context, cfg Config, opts BatchOptions) (*Batc
 	}
 	opts.Group = cfg.Namespace + opts.Group
 	opts.Topics = cfg.topics(opts.Topics...)
+	cctx, cancel := context.WithCancel(context.Background())
+	c := &BatchConsumer{opts: opts, ns: cfg.Namespace, ctx: cctx, cancel: cancel, done: make(chan struct{})}
+	now := time.Now().UnixNano()
+	c.changedAt.Store(now)
+	c.lastPoll.Store(now)
 	cl, err := kgo.NewClient(
 		kgo.SeedBrokers(cfg.Brokers...),
 		kgo.ClientID(opts.Group),
@@ -81,16 +104,69 @@ func NewBatchConsumer(ctx context.Context, cfg Config, opts BatchOptions) (*Batc
 		kgo.BlockRebalanceOnPoll(),
 		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
 		kgo.RequiredAcks(kgo.AllISRAcks()),
+		kgo.OnPartitionsAssigned(c.onAssigned),
+		kgo.OnPartitionsRevoked(c.onLost),
+		kgo.OnPartitionsLost(c.onLost),
 	)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("kafka batch consumer %s: %w", opts.Group, err)
 	}
 	if err := cl.Ping(ctx); err != nil {
 		cl.Close()
+		cancel()
 		return nil, fmt.Errorf("kafka batch consumer %s: ping: %w", opts.Group, err)
 	}
-	cctx, cancel := context.WithCancel(context.Background())
-	return &BatchConsumer{opts: opts, ns: cfg.Namespace, cl: cl, adm: kadm.NewClient(cl), ctx: cctx, cancel: cancel, done: make(chan struct{})}, nil
+	c.cl, c.adm = cl, kadm.NewClient(cl)
+	return c, nil
+}
+
+func partitions(m map[string][]int32) int64 {
+	n := 0
+	for _, ps := range m {
+		n += len(ps)
+	}
+	return int64(n)
+}
+
+// onAssigned counts the partitions the group handed over and runs
+// OnAssigned.
+func (c *BatchConsumer) onAssigned(ctx context.Context, _ *kgo.Client, assigned map[string][]int32) {
+	c.setAssigned(c.assigned.Add(partitions(assigned)))
+	c.opts.Logger.Info("kafka batch consumer assigned partitions", "group", c.opts.Group, "partitions", c.assigned.Load())
+	if c.opts.OnAssigned != nil {
+		c.opts.OnAssigned(ctx)
+	}
+}
+
+// onLost counts the partitions revoked by a rebalance, or lost when the
+// group put the consumer out.
+func (c *BatchConsumer) onLost(_ context.Context, _ *kgo.Client, lost map[string][]int32) {
+	c.setAssigned(max(c.assigned.Add(-partitions(lost)), 0))
+}
+
+func (c *BatchConsumer) setAssigned(n int64) {
+	c.assigned.Store(n)
+	c.changedAt.Store(time.Now().UnixNano())
+	if c.opts.Metrics != nil {
+		c.opts.Metrics.assigned.WithLabelValues(c.opts.Group).Set(float64(n))
+	}
+}
+
+// Ready reports a consumer that stopped polling (its handler stuck on a
+// sink that keeps failing), or that has held no partitions for a while:
+// put out of its group and not back in (2026-10-02: after Redpanda was
+// recreated every batch consumer stalled so, with the producer's ping
+// still green).
+func (c *BatchConsumer) Ready(context.Context) error {
+	now := time.Now()
+	if d := now.Sub(time.Unix(0, c.lastPoll.Load())); d > pollStale {
+		return fmt.Errorf("group %s: no poll for %s", c.opts.Group, d.Round(time.Second))
+	}
+	if d := now.Sub(time.Unix(0, c.changedAt.Load())); c.assigned.Load() == 0 && d > unassignedFor {
+		return fmt.Errorf("group %s: no partitions for %s", c.opts.Group, d.Round(time.Second))
+	}
+	return nil
 }
 
 // Run consumes until Stop.
@@ -123,18 +199,24 @@ func (c *BatchConsumer) cycle() {
 	var recs []*kgo.Record
 	var first time.Time
 	for len(recs) < c.opts.MaxBatch {
-		pollCtx, cancel := c.ctx, context.CancelFunc(func() {})
+		// The first poll of a batch waits pollIdle at most, so that an idle
+		// consumer still comes back (Ready, AllowRebalance).
+		wait := pollIdle
 		if !first.IsZero() {
-			remaining := c.opts.MaxWait - time.Since(first)
-			if remaining <= 0 {
+			if wait = c.opts.MaxWait - time.Since(first); wait <= 0 {
 				break
 			}
-			pollCtx, cancel = context.WithTimeout(c.ctx, remaining)
 		}
+		pollCtx, cancel := context.WithTimeout(c.ctx, wait)
 		fetches := c.cl.PollRecords(pollCtx, c.opts.MaxBatch-len(recs))
 		cancel()
 		if fetches.IsClientClosed() || c.ctx.Err() != nil {
 			return // uncommitted records are redelivered after restart
+		}
+		now := time.Now()
+		c.lastPoll.Store(now.UnixNano())
+		if c.opts.Metrics != nil {
+			c.opts.Metrics.lastPoll.WithLabelValues(c.opts.Group).Set(float64(now.Unix()))
 		}
 		fetches.EachError(func(topic string, p int32, err error) {
 			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {

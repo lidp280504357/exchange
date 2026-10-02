@@ -35,6 +35,8 @@ type ConsumerMetrics struct {
 	records  *prometheus.CounterVec
 	duration *prometheus.HistogramVec
 	lag      *prometheus.GaugeVec
+	assigned *prometheus.GaugeVec
+	lastPoll *prometheus.GaugeVec
 }
 
 // NewConsumerMetrics registers the consumer metrics with reg.
@@ -53,8 +55,16 @@ func NewConsumerMetrics(reg prometheus.Registerer) *ConsumerMetrics {
 			Name: "kafka_consumer_lag",
 			Help: "Records not yet consumed, by group, topic and partition.",
 		}, []string{"group", "topic", "partition"}),
+		assigned: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "kafka_consumer_assigned_partitions",
+			Help: "Partitions a batch consumer holds in its group; 0 for long means it was put out and not let back in.",
+		}, []string{"group"}),
+		lastPoll: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "kafka_consumer_last_poll_timestamp_seconds",
+			Help: "When a batch consumer last came back from a poll (it polls at least every 30 seconds unless its handler is stuck).",
+		}, []string{"group"}),
 	}
-	reg.MustRegister(m.records, m.duration, m.lag)
+	reg.MustRegister(m.records, m.duration, m.lag, m.assigned, m.lastPoll)
 	return m
 }
 

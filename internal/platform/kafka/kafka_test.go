@@ -13,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/pkg/kmsg"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
@@ -405,5 +406,70 @@ func TestReadToEndReadsFromTheGivenOffsets(t *testing.T) {
 	boom := errors.New("boom")
 	if _, err := kafka.ReadToEnd(ctx, cfg, topic, nil, 1, func(context.Context, []kafka.Delivery) error { return boom }); !errors.Is(err, boom) {
 		t.Fatalf("handler error: %v", err)
+	}
+}
+
+// A batch consumer put out of its group (its member removed, as when its
+// session lapses while the broker restarts) comes back: it runs OnAssigned
+// again on rejoining, goes on consuming and is ready (2026-10-02: every
+// batch consumer stalled after Redpanda was recreated, the engines among
+// them, until restarted).
+func TestABatchConsumerPutOutOfItsGroupComesBack(t *testing.T) {
+	cfg, topic, prod := setup(t)
+	group := testenv.Name("g")
+	var got, assigned atomic.Int64
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	c, err := kafka.NewBatchConsumer(ctx, cfg, kafka.BatchOptions{
+		Group: group, Topics: []string{topic}, Logger: discard, Metrics: kafka.NewConsumerMetrics(prometheus.NewRegistry()),
+		MaxWait: 50 * time.Millisecond,
+		Handler: func(_ context.Context, batch []kafka.Delivery) error {
+			got.Add(int64(len(batch)))
+			return nil
+		},
+		OnAssigned: func(context.Context) { assigned.Add(1) },
+	})
+	if err != nil {
+		t.Fatalf("NewBatchConsumer: %v", err)
+	}
+	go func() { _ = c.Run() }()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = c.Stop(ctx)
+	})
+	publish(t, prod, topic, "before")
+	waitFor(t, "the first record", func() bool { return got.Load() == 1 })
+	if n := assigned.Load(); n != 1 {
+		t.Fatalf("assigned %d times", n)
+	}
+	if err := c.Ready(ctx); err != nil {
+		t.Fatalf("ready: %v", err)
+	}
+
+	cl, err := kgo.NewClient(kgo.SeedBrokers(cfg.Brokers...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cl.Close()
+	described, err := kadm.NewClient(cl).DescribeGroups(ctx, group)
+	if err != nil || len(described[group].Members) != 1 {
+		t.Fatalf("describe: %+v %v", described, err)
+	}
+	leave := kmsg.NewPtrLeaveGroupRequest()
+	leave.Group = group
+	member := kmsg.NewLeaveGroupRequestMember()
+	member.MemberID = described[group].Members[0].MemberID
+	leave.Members = append(leave.Members, member)
+	resp, err := leave.RequestWith(ctx, cl)
+	if err != nil || resp.ErrorCode != 0 {
+		t.Fatalf("leave: %+v %v", resp, err)
+	}
+
+	waitFor(t, "the consumer back in its group", func() bool { return assigned.Load() >= 2 })
+	publish(t, prod, topic, "after")
+	waitFor(t, "the record after the rejoin", func() bool { return got.Load() >= 2 })
+	if err := c.Ready(ctx); err != nil {
+		t.Fatalf("ready after the rejoin: %v", err)
 	}
 }

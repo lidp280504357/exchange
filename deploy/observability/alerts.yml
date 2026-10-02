@@ -58,6 +58,27 @@ groups:
           summary: "{{ $labels.group }} is {{ $value }} records behind on {{ $labels.topic }}"
           runbook: docs/runbook/events.md
 
+      # A batch consumer put out of its group and not let back in holds no
+      # partitions: lag may not show it (the group's offsets stand still
+      # while nothing new arrives), the service is not ready.
+      - alert: KafkaConsumerUnassigned
+        expr: max by (job, group) (kafka_consumer_assigned_partitions) == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.group }} has held no partitions for 5 minutes: it is out of its group and consumes nothing"
+          runbook: docs/runbook/events.md
+
+      # A batch consumer comes back from a poll at least every 30 seconds;
+      # it stops when its handler keeps failing on the sink.
+      - alert: KafkaConsumerStalled
+        expr: time() - max by (job, group) (kafka_consumer_last_poll_timestamp_seconds) > 180
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.group }} has not polled for more than 3 minutes: its handler is stuck or failing"
+          runbook: docs/runbook/events.md
+
       - alert: OutboxBacklog
         expr: max by (job) (outbox_pending) > 100
         for: 5m

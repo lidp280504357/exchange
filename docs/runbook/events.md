@@ -9,6 +9,7 @@
 3. 消费者组手动提交位点（至少一次）；处理函数在同一事务里写 `inbox`（`inbox.Process`/`ProcessID`）或用业务幂等键（账本分录），重复投递不会重复生效。
 4. 处理失败：记录转到 `<topic>.retry`，按 1s/5s/30s/5m 重试 4 次，仍失败转到 `<topic>.dlq`；无法解码的记录直接进 `.dlq`。记录头带 `x-origin-topic`、`x-group`（放弃它的消费组）、`x-attempt`、`x-not-before`、`x-error`。
 5. 指标：`kafka_consumer_records_total{group,topic,result=ok|retry|dlq|skipped}`、`kafka_consumer_handle_seconds`、`kafka_consumer_lag`（每 30 秒）。
+6. 批量消费者（两个撮合引擎、账本结算、行情成交、analytics）另有 `kafka_consumer_assigned_partitions{group}` 与 `kafka_consumer_last_poll_timestamp_seconds{group}`：它闲着时也每 30 秒从轮询返回一次；连续 2 分钟没从轮询返回（处理函数卡在一直失败的下游），或启动、失去分区后 2 分钟仍一个分区都没有（被踢出消费组、没回来），服务的 `/readyz` 就不就绪（检查名 `kafka group <组名>`）。告警 `KafkaConsumerUnassigned`（5 分钟没有分区，严重）、`KafkaConsumerStalled`（3 分钟没轮询）。2026-10-02 Redpanda 重建后所有批量消费者都卡住、生产者的 ping 却是绿的，靠的就是这两样发现。
 
 派生状态的主题不走 outbox、没有 `.retry`/`.dlq`，只保留 1 小时（`topics.sh` 每次部署都对已存在的这些 topic 重设一遍；`market.candle.events` 在测试服保留 1 天，它也只被实时跟读），丢一条由下一条补上：`order.references`、`derivatives.order.references`（HOUSE 的参考簿，market-maker 直接发；分区数必须与 `order.commands` 相同）、`market.depth`、`derivatives.market.depth`、`market.trades`（公共盘口与成交，market-data-service 发）、`market.depth.internal`、`derivatives.market.depth.internal`（引擎自己的深度）。见 ADR-0015 与 [market-data.md](market-data.md)。
 

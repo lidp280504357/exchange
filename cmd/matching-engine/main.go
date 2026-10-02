@@ -105,14 +105,24 @@ func setup(ctx context.Context, a *app.App) error {
 	if err := engine.Recover(ctx); err != nil {
 		return err
 	}
-	if err := engine.CatchUp(ctx, func(ctx context.Context, from map[int32]int64, handle kafka.BatchHandler) (int, error) {
+	readRefs := func(ctx context.Context, from map[int32]int64, handle kafka.BatchHandler) (int, error) {
 		return kafka.ReadToEnd(ctx, cfg.Kafka, sh.topics.References, from, 500, handle)
-	}); err != nil {
+	}
+	if err := engine.CatchUp(ctx, readRefs); err != nil {
 		return err
 	}
 	if err := bootstrap.BatchConsumerWith(ctx, a, cfg.Kafka, kafka.BatchOptions{
 		Group: sh.group, Topics: []string{sh.topics.Commands, sh.topics.References}, Handler: engine.Handle,
 		MaxBatch: 500, MaxWait: 20 * time.Millisecond,
+		// Back in the group after it put the engine out (a broker restart),
+		// the books are read to their end again before the commands: the
+		// commands published meanwhile would otherwise meet books older than
+		// RefMaxAge and trade nothing with HOUSE.
+		OnAssigned: func(ctx context.Context) {
+			if err := engine.CatchUp(ctx, readRefs); err != nil && ctx.Err() == nil {
+				a.Logger().WarnContext(ctx, "reference catch-up on rejoining failed; the consumer reads the books in order", "error", err)
+			}
+		},
 	}); err != nil {
 		return err
 	}

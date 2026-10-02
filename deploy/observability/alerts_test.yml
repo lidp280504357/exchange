@@ -60,6 +60,34 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'kafka_consumer_assigned_partitions{job="matching-engine", group="matching-engine"}'
+        values: '6x5 0x10'
+      - series: 'kafka_consumer_last_poll_timestamp_seconds{job="analytics-consumer", group="analytics-consumer"}'
+        values: '0+60x5 300x10'
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: KafkaConsumerUnassigned
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: KafkaConsumerUnassigned
+        exp_alerts:
+          - exp_labels: {severity: critical, job: matching-engine, group: matching-engine}
+            exp_annotations:
+              summary: "matching-engine has held no partitions for 5 minutes: it is out of its group and consumes nothing"
+              runbook: docs/runbook/events.md
+      - eval_time: 6m
+        alertname: KafkaConsumerStalled
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: KafkaConsumerStalled
+        exp_alerts:
+          - exp_labels: {severity: warning, job: analytics-consumer, group: analytics-consumer}
+            exp_annotations:
+              summary: "analytics-consumer has not polled for more than 3 minutes: its handler is stuck or failing"
+              runbook: docs/runbook/events.md
+
+  - interval: 1m
+    input_series:
       - series: 'kafka_consumer_lag{job="notification-service", group="notification-service", topic="auth.events", partition="0"}'
         values: '5000x15'
     alert_rule_test:

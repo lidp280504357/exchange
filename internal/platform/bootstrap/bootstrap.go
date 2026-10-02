@@ -208,13 +208,15 @@ func BatchConsumer(ctx context.Context, a *app.App, cfg kafka.Config, group stri
 }
 
 // BatchConsumerWith is BatchConsumer with the batch size and wait of opts;
-// the logger and metrics are the app's.
+// the logger and metrics are the app's. The service is not ready while the
+// consumer is stuck or out of its group (kafka.BatchConsumer.Ready).
 func BatchConsumerWith(ctx context.Context, a *app.App, cfg kafka.Config, opts kafka.BatchOptions) error {
 	opts.Logger, opts.Metrics = a.Logger(), sharedConsumerMetrics(a)
 	c, err := kafka.NewBatchConsumer(ctx, cfg, opts)
 	if err != nil {
 		return err
 	}
+	a.Health().Add("kafka group "+opts.Group, c.Ready)
 	a.Add("batch consumer "+opts.Group, c)
 	return nil
 }
