@@ -224,6 +224,12 @@ func (s *Sim) Round(ctx context.Context) {
 		dt = min(max(now.Sub(s.round), 0), 5*time.Second)
 	}
 	s.round = now
+	if now.Sub(s.botsAt) >= botsEvery { // also while off: the operators see them
+		s.botsAt = now
+		if err := s.loadBots(ctx); err != nil {
+			s.m.errors.WithLabelValues("bots").Inc()
+		}
+	}
 	s.refreshPair(ctx, now)
 	if !s.flags.Enabled(flags.KeySimEnabled, flags.Subject{Symbol: s.cfg.Symbol}) || !s.pair.Trading {
 		if s.running {
@@ -467,12 +473,6 @@ func (s *Sim) chores(ctx context.Context, now time.Time) {
 	if now.Sub(s.savedAt) >= saveEvery {
 		s.save(ctx)
 	}
-	if now.Sub(s.botsAt) >= botsEvery {
-		s.botsAt = now
-		if err := s.loadBots(ctx); err != nil {
-			s.m.errors.WithLabelValues("bots").Inc()
-		}
-	}
 	if now.Sub(s.checkedAt) >= inventoryEvery {
 		s.checkInventory(ctx, now)
 	}
@@ -586,8 +586,8 @@ func (s *Sim) UpdateParams(ctx context.Context, p domain.Params, actor string) (
 	return version, nil
 }
 
-// AddBot registers a user as a bot of role; it trades from the next
-// reading of the bots (within a minute).
+// AddBot registers a user as a bot of role, which trades from the next
+// round on.
 func (s *Sim) AddBot(ctx context.Context, b ports.Bot) error {
 	switch b.Role {
 	case domain.RoleMaker, domain.RoleTaker, domain.RoleTrend, domain.RoleExecutor:
@@ -598,7 +598,12 @@ func (s *Sim) AddBot(ctx context.Context, b ports.Bot) error {
 		return apperr.Invalid("the user and a label are required")
 	}
 	b.Enabled = true
-	return s.store.AddBot(ctx, b)
+	if err := s.store.AddBot(ctx, b); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.loadBots(ctx)
 }
 
 // metrics are the simulation's gauges and counters.

@@ -356,9 +356,24 @@ func TestAddBot(t *testing.T) {
 	if err := r.sim.AddBot(context.Background(), ports.Bot{UserID: "m3", Role: domain.RoleMaker, Label: "bot-05"}); err != nil {
 		t.Fatal(err)
 	}
-	r.now = r.now.Add(botsEvery)
+	// The operators see it at once, before it trades.
+	if st := r.sim.Status(); len(st.Bots) != 5 {
+		t.Fatalf("%d bots", len(st.Bots))
+	}
 	r.rounds(40)
 	if len(r.trading.orders("m3")) == 0 {
 		t.Fatal("the new maker does not quote")
+	}
+}
+
+// Bots stored while the simulation is off still show.
+func TestBotsShowWhileOff(t *testing.T) {
+	r := newRig(t, nil)
+	r.flags.on = false
+	r.store.bots = append(r.store.bots, ports.Bot{UserID: "t9", Role: domain.RoleTaker, Label: "bot-09", Enabled: true})
+	r.now = r.now.Add(botsEvery)
+	r.rounds(1)
+	if st := r.sim.Status(); len(st.Bots) != 5 || st.Running {
+		t.Fatalf("status %+v", st)
 	}
 }

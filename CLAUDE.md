@@ -51,6 +51,11 @@ Go 微服务虚拟资产交易所，**学习项目**，1 人（用户）+ Claude
       - 所有交易一律和 HOUSE 成交（现货、合约，开多开空都是），用户之间不撮合（`market.internal_matching` 关）。HOUSE 为全部交易对与合约报价（`scripts/ops/house.sh flags`）；以 BTC 计价的交易对按 USDT 价折算额度。测试服的上限在 compose 里放大（单资产 2,000,000、单合约 5,000,000 USDT），资金由 `house.sh seed` 补到相应水平（合约保证金用 `exchangectl ledger house-margin`）。库存也算头寸：持有超过单资产上限会让 HOUSE 在所有交易对上停止买入该资产。
       - 端到端脚本全部以 HOUSE 为对手方，价格从当时的盘口推出；`matching-failover` 也改为与 HOUSE 成交。见 `docs/runbook/market-maker.md`。
       - 上币扩展：前 50 之外再上 37 个知名币（`gen-top50.go` 的 `extension` 名单，币安没在交易的跳过，TON 因此没上），全部是站内资产、只做现货、对手方 HOUSE；已上架交易对重新生成时保留原有的 tick、lot 与数量上下限；每个币的资料在 `web/packages/core/assets/coins/`。
+    - 2026-10-02 编码会话：
+      - 运维锁 `scripts/ops/lock.sh`：`task deploy`、`task e2e`、`task fault` 与单独运行的演练脚本自动持锁，两个编码会话轮流；`scripts/ops/lock.sh status` 看谁拿着。
+      - 审查修复（A1–A6、B1–B3、B5–B7，提交 `eb94cde`、`2155b61`、`ba07608`、`2e404d6`）：HOUSE 的可充提资产不能为负；维持保证金按累计抵扣额连续；引擎启动先把参考簿读到末尾；HOUSE 合约仓位合计不超过合约权益的 `HOUSE_CONTRACT_LEVERAGE`（10）倍；合约卖单按限价与标记价中较高者预留；现货市价卖保护价不低于锚价一半；托管：重交被拒停在 `UNCERTAIN`、异常手续费不入账、回调来源白名单必填且 nginx 拒公网回调、对账缺余额或疑似最小单位时不比较、只扣托管方已受理的在途、被拒回调告警，模拟网关能模拟丢应答等（`custody.sh` 覆盖）。B4（短缺自动停提）与未匹配充值的待处理科目要钱包迁移 wallet 00006，等协调会话确认。
+      - 上传的币种图标经 core 的 `useCoinLogo` 显示（pc/m 根组件调 `useAssetProfiles`）。
+      - 平台币模拟市场 A2：服务 market-sim（`docs/runbook/market-sim.md`），24 个机器人账户、开关 `sim.enabled`，运维 `scripts/ops/astra.sh seed/open/on/off/mint/status`，端到端 `astra.sh`；`MARKET_MAKER_USER_IDS` 现在是机器人的零手续费名单（`astra.sh seed` 写入）。A3（后台事件）、A4（永续）、A5 待做；后台页面归后台会话，接口见 market-sim.md。
   - 下一步：与用户一起测试（报告 §8 的清单）；托管方真网关联调等商户号与密钥。
 - 服务隔离：`.golangci.yml` 的 depguard 规则禁止 `internal/<服务>` 互相 import，新服务要在那里补一组规则。消费事件用 `bootstrap.Consumer` + 应用层经 inbox 去重（auth 的 `Store.Once`、notification 的 `inbox.ProcessID`）。
 - 鉴权：网关验 JWT 后把身份写进 `X-User-Id`/`X-Session-Id`/`X-Auth-Scope` 头转发（客户端同名头会被剥掉），服务端用 `httpx.UserID(r)`/`httpx.SessionID(r)` 读取；新的公开接口要加进 `internal/gateway/routes.go`，否则默认必须登录。敏感操作读 `X-Step-Up-Token`，跨服务用 auth-service gRPC `ConsumeStepUp` 兑换。

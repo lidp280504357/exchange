@@ -69,6 +69,8 @@ scripts/ops/astra.sh on
 scripts/ops/astra.sh status
 ```
 
+测试服 2026-10-02 已按上面三步启用：24 个机器人、ASTRA-USDT `TRADING`、`sim.enabled` 打开；目标价约 1 USDT，盘口每侧 20 档以上、价差约 0.2%。端到端 `scripts/e2e/astra.sh` 检查盘口、成交、K 线和用户的一买一卖（交易对不在交易或机器人没开时跳过）。
+
 - `astra.sh off` 关掉机器人（撤掉做市商挂单）；`astra.sh mint 50000000` 给机器人再增发 5000 万 ASTRA（平均分，`mint 100000 USDT` 增发 USDT），都是带审计的账本调整，需要开关 `ledger.manual_adjustment`。
 - 重新跑 `seed` 只注册还没有的机器人；调整用固定的幂等键，不会重复入账。
 
