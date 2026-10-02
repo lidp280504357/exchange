@@ -64,10 +64,11 @@ type symbolState struct {
 	depth  *marketv1.DepthSnapshot
 
 	// What the publisher pushed last.
-	updated      map[domain.Interval]bool
-	pushedClosed map[domain.Interval]time.Time
-	pushedFlat   map[domain.Interval]time.Time
-	pushedTicker *domain.Ticker
+	updated        map[domain.Interval]bool
+	pushedClosed   map[domain.Interval]time.Time
+	pushedFlat     map[domain.Interval]time.Time
+	pushedTicker   *domain.Ticker
+	pushedTickerAt time.Time
 }
 
 func newSymbolState() *symbolState {
@@ -148,13 +149,14 @@ func (s *Service) state(symbol string) *symbolState {
 
 // OnTrades applies trades in the order given (each symbol's in sequence
 // order, as its partition delivers them) and stores the result in one
-// transaction. Trades at or below a symbol's applied sequence are skipped.
-func (s *Service) OnTrades(ctx context.Context, trades []domain.Trade) error {
+// transaction. Trades at or below a symbol's applied sequence are skipped;
+// it returns the others, which nothing had seen before.
+func (s *Service) OnTrades(ctx context.Context, trades []domain.Trade) ([]domain.Trade, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.dirty {
 		if err := s.load(ctx); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	type key struct {
@@ -199,7 +201,7 @@ func (s *Service) OnTrades(ctx context.Context, trades []domain.Trade) error {
 		changed[t.Symbol] = st
 	}
 	if len(fresh) == 0 {
-		return nil
+		return nil, nil
 	}
 	candles := make([]domain.Candle, 0, len(touched))
 	for _, c := range touched {
@@ -221,9 +223,9 @@ func (s *Service) OnTrades(ctx context.Context, trades []domain.Trade) error {
 	})
 	if err != nil {
 		s.dirty = true
-		return err
+		return nil, err
 	}
-	return nil
+	return fresh, nil
 }
 
 // OnDepth keeps a symbol's latest depth; an older snapshot (a redelivery)

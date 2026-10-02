@@ -19,6 +19,12 @@ import (
 // PushInterval is how often open candles and tickers are pushed (§11.8).
 const PushInterval = 500 * time.Millisecond
 
+// TickerHeartbeat is how often a ticker that did not change is pushed
+// again: a gateway that starts reads market.candle.events from its end, and
+// a quiet pair of the platform's own market (no reference market pushes it)
+// would otherwise be missing from its tickers until it trades.
+const TickerHeartbeat = 15 * time.Second
+
 // Update is a message for market.candle.events.
 type Update struct {
 	Symbol  string
@@ -28,7 +34,8 @@ type Update struct {
 // Updates returns what changed since the last call, in this order per
 // symbol: a candle whose interval ended (CandleClosed, once), the flat
 // candle of an interval that has not traded yet (CandleUpdated, once), open
-// candles that took trades (CandleUpdated), and the ticker if it changed.
+// candles that took trades (CandleUpdated), and the ticker if it changed
+// or TickerHeartbeat passed.
 func (s *Service) Updates(now time.Time) []Update {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -55,9 +62,9 @@ func (s *Service) Updates(now time.Time) []Update {
 		}
 		clear(st.updated)
 		t := s.ticker(symbol, now)
-		if st.pushedTicker == nil || !sameTicker(*st.pushedTicker, t) {
+		if st.pushedTicker == nil || !sameTicker(*st.pushedTicker, t) || now.Sub(st.pushedTickerAt) >= TickerHeartbeat {
 			out = append(out, Update{symbol, &marketv1.TickerUpdated{Ticker: TickerProto(t, now)}})
-			st.pushedTicker = &t
+			st.pushedTicker, st.pushedTickerAt = &t, now
 		}
 	}
 	return out

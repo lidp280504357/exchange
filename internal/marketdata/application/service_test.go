@@ -348,12 +348,12 @@ func TestTradesBuildCandlesTickerAndTradeList(t *testing.T) {
 		trade(5, "70500", "0.2", "2026-09-30T10:01:50Z"),
 		trade(8, "69800", "0.1", "2026-09-30T10:03:05Z"),
 	}
-	if err := s.OnTrades(ctx, batch); err != nil {
-		t.Fatal(err)
+	if fresh, err := s.OnTrades(ctx, batch); err != nil || len(fresh) != 3 {
+		t.Fatalf("%d new trades, %v", len(fresh), err)
 	}
-	// A redelivery changes nothing.
-	if err := s.OnTrades(ctx, batch); err != nil {
-		t.Fatal(err)
+	// A redelivery changes nothing, and nothing in it is new (to relay).
+	if fresh, err := s.OnTrades(ctx, batch); err != nil || len(fresh) != 0 {
+		t.Fatalf("redelivered: %+v %v", fresh, err)
 	}
 	if len(store.trades) != 3 || store.symbols["BTC-USDT"].Sequence != 8 {
 		t.Fatalf("stored %d trades, sequence %d", len(store.trades), store.symbols["BTC-USDT"].Sequence)
@@ -405,7 +405,7 @@ func TestTradesBuildCandlesTickerAndTradeList(t *testing.T) {
 	if tk, _ := again.Ticker(ctx, "BTC-USDT"); !tk.Last.Equal(d("69800")) || tk.Trades != 3 {
 		t.Fatalf("reloaded ticker %+v", tk)
 	}
-	if err := again.OnTrades(ctx, batch[1:]); err != nil || len(store.trades) != 3 {
+	if _, err := again.OnTrades(ctx, batch[1:]); err != nil || len(store.trades) != 3 {
 		t.Fatalf("a reloaded service applied old trades again: %v, %d stored", err, len(store.trades))
 	}
 }
@@ -417,11 +417,11 @@ func TestAFailedWriteReloadsBeforeTheRetry(t *testing.T) {
 	s := newService(t, store, &now)
 	store.down = true
 	batch := []domain.Trade{trade(1, "70000", "0.1", "2026-09-30T10:01:10Z")}
-	if err := s.OnTrades(ctx, batch); err == nil {
+	if _, err := s.OnTrades(ctx, batch); err == nil {
 		t.Fatal("the write failed")
 	}
 	store.down = false
-	if err := s.OnTrades(ctx, batch); err != nil {
+	if _, err := s.OnTrades(ctx, batch); err != nil {
 		t.Fatal(err)
 	}
 	if len(store.trades) != 1 || store.symbols["BTC-USDT"].Sequence != 1 {
@@ -452,7 +452,7 @@ func TestUpdatesPushWhatChanged(t *testing.T) {
 	if got := s.Updates(now); len(got) != 0 {
 		t.Fatalf("nothing traded yet: %+v", kinds(got))
 	}
-	if err := s.OnTrades(ctx, []domain.Trade{trade(1, "70000", "0.1", "2026-09-30T10:01:10Z")}); err != nil {
+	if _, err := s.OnTrades(ctx, []domain.Trade{trade(1, "70000", "0.1", "2026-09-30T10:01:10Z")}); err != nil {
 		t.Fatal(err)
 	}
 	got := kinds(s.Updates(now))
@@ -462,14 +462,35 @@ func TestUpdatesPushWhatChanged(t *testing.T) {
 	if got := s.Updates(now); len(got) != 0 {
 		t.Fatalf("nothing changed: %+v", kinds(got))
 	}
-	// The minute ends: its candle closes, the next opens flat, once.
+	// The minute ends: its candle closes, the next opens flat, once; the
+	// unchanged ticker comes again, 30 seconds on.
 	now = at("2026-09-30T10:02:00Z")
 	got = kinds(s.Updates(now))
-	if got["closed:1m"] != 1 || got["updated:1m"] != 1 || got["closed:3m"] != 0 || len(got) != 2 {
+	if got["closed:1m"] != 1 || got["updated:1m"] != 1 || got["closed:3m"] != 0 || got["ticker"] != 1 || len(got) != 3 {
 		t.Fatalf("at the minute: %v", got)
 	}
-	now = at("2026-09-30T10:02:30Z")
+	now = at("2026-09-30T10:02:10Z")
 	if got := s.Updates(now); len(got) != 0 {
 		t.Fatalf("the flat candle is pushed once: %+v", kinds(got))
+	}
+	// A quiet ticker is pushed again every TickerHeartbeat, alone.
+	now = now.Add(TickerHeartbeat)
+	if got := kinds(s.Updates(now)); got["ticker"] != 1 || len(got) != 1 {
+		t.Fatalf("the heartbeat: %v", got)
+	}
+}
+
+// Of a batch redelivered with a trade more, only that one is new: the
+// public feed relays it alone.
+func TestOnTradesReturnsWhatWasNew(t *testing.T) {
+	ctx := context.Background()
+	s := newService(t, newMemStore(), new(at("2026-09-30T10:03:30Z")))
+	batch := []domain.Trade{trade(3, "70000", "0.1", "2026-09-30T10:01:10Z"), trade(5, "70500", "0.2", "2026-09-30T10:01:50Z")}
+	if _, err := s.OnTrades(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := s.OnTrades(ctx, append(batch, trade(8, "69800", "0.1", "2026-09-30T10:03:05Z")))
+	if err != nil || len(fresh) != 1 || fresh[0].Sequence != 8 {
+		t.Fatalf("new: %+v %v", fresh, err)
 	}
 }

@@ -33,6 +33,7 @@ dist/
 /signer
 /admin-service
 /derivatives-service
+/udun-mock
 /loadgen
 /devmcp
 node_modules/

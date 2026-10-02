@@ -340,3 +340,19 @@ func TestAChartRequestSeedsItsOpenCandle(t *testing.T) {
 		t.Fatalf("1h read %d times; the initializer skips a seeded interval", n)
 	}
 }
+
+// With reference K-lines on for every symbol, a pair without a reference
+// market (ASTRA-USDT) still charts the platform's candles.
+func TestAPairWithoutAReferenceChartsThePlatform(t *testing.T) {
+	refs := NewReferenceMap(testListing(), slog.New(slog.DiscardHandler))
+	rc := NewReferenceCandles(&history{}, klineFlags{}, refs, slog.New(slog.DiscardHandler))
+	defer rc.wg.Wait()
+	ctx := context.Background()
+	if _, ok := rc.Serves(ctx, "ASTRA-USDT"); ok {
+		t.Fatal("reference candles served for a pair without a reference market")
+	}
+	platform := Update{"ASTRA-USDT", &marketv1.CandleUpdated{Candle: &marketv1.Candle{Symbol: "ASTRA-USDT", Interval: "1m"}}}
+	if out := rc.Push(ctx, []Update{platform}); len(out) == 0 || out[0].Symbol != "ASTRA-USDT" {
+		t.Fatalf("the platform's candle was not pushed: %+v", out)
+	}
+}

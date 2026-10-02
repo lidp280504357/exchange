@@ -44,11 +44,13 @@ func Trades(svc *application.Service, relay *application.Books) kafka.BatchHandl
 		if len(trades) == 0 {
 			return nil
 		}
-		if err := svc.OnTrades(ctx, trades); err != nil {
+		fresh, err := svc.OnTrades(ctx, trades)
+		if err != nil {
 			return err
 		}
-		if relay != nil {
-			relay.RelayTrades(ctx, trades) // after storing: a redelivery would count them twice
+		if relay != nil && len(fresh) > 0 {
+			// Only what was new: a redelivered trade was relayed before.
+			relay.RelayTrades(ctx, fresh)
 		}
 		return nil
 	}

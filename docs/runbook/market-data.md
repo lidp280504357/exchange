@@ -25,7 +25,7 @@ derivatives-engine ──derivatives.market.depth.internal / derivatives.trade.e
 ## 规则
 
 - K 线周期 `1m 3m 5m 15m 30m 1h 2h 4h 6h 12h 1d 1w 1M`，UTC 对齐，周从周一开始。只存有成交的区间；查询时无成交区间用上一根收盘价补平（成交量 0），第一笔成交之前的区间不返回。
-- 当前 K 线变化时每 500 ms 推 `CandleUpdated`；区间结束时推一次 `CandleClosed`，新区间在有成交前推一根平盘 K 线。
+- 当前 K 线变化时每 500 ms 推 `CandleUpdated`；区间结束时推一次 `CandleClosed`，新区间在有成交前推一根平盘 K 线。ticker 变化时推 `TickerUpdated`，没变化也每 15 秒重推一次（`TickerHeartbeat`）：网关从 `market.candle.events` 的末尾读，没有参考市场替它推送的冷清交易对（如 ASTRA-USDT）否则要等下一笔成交才出现在 `tickers` 频道里。
 - 24 小时 ticker 按分钟计算：窗口是当前分钟加前 1439 分钟；`open` 是窗口前最后一笔成交价（之前没有成交时取窗口内第一笔），`change = (last − open) / open`（小数，8 位）；窗口内没有成交时 `last` 沿用上一笔、成交量 0；从未成交的交易对价格为 null。
 - 最新成交价同时是下单价格带与市价保护价的锚点：交易服务从自己的 `fills` 取（缓存 1 秒），没有成交时用参考价。参考行情（币安公开数据，仅测试环境）见下文，HOUSE 虚拟流动性见 [market-maker.md](market-maker.md)；端到端脚本 `marketdata.sh` 在不跟随参考市场的 ETH-BTC 上成交。
 
@@ -101,7 +101,7 @@ SELECT symbol, funding_time, funding_rate, mark_price, samples FROM market.fundi
 
 ## 参考行情：跟随哪些交易对（ADR-0010）
 
-- 交易对表的 `reference_symbol`（币安符号，如 `BTCUSDT`）决定是否跟随：有它的交易对都跟随，没有的（测试服 ETH-BTC）始终显示平台数据。`reference_multiplier` 是价格倍数（1000 倍计价的币，如 `1000PEPE-USDT` ↔ `PEPEUSDT`，倍数 1000）：适配器把币安的价格乘以倍数、数量除以倍数，成交额不变，之后一切都按平台的代码与单位处理。两个字段在 `deploy/instruments/test.json` 里维护，部署时幂等同步（见 [instruments.md](instruments.md)）。
+- 交易对表的 `reference_symbol`（币安符号，如 `BTCUSDT`）决定是否跟随：有它的交易对都跟随，没有的（测试服 ETH-BTC、平台币 ASTRA-USDT）始终显示平台数据，与 `market.reference_*` 开关怎么设无关：ticker 与 24 小时统计、K 线（REST 与频道）、盘口、成交、走势图、`tickers` 频道与 `/v1/market/summary` 都来自平台自己的 `trade.events` 与引擎盘口（2026-10-02 核对，单元测试覆盖）。`reference_multiplier` 是价格倍数（1000 倍计价的币，如 `1000PEPE-USDT` ↔ `PEPEUSDT`，倍数 1000）：适配器把币安的价格乘以倍数、数量除以倍数，成交额不变，之后一切都按平台的代码与单位处理。两个字段在 `deploy/instruments/test.json` 里维护，部署时幂等同步（见 [instruments.md](instruments.md)）。
 - 行情服务每分钟重读一次映射，跟随的交易对变了就重连。每次连接先建流（每个交易对 `kline_1m` 与 `ticker` 两条，一个组合连接），同时用 REST 取一次全部 24h ticker、补齐 1 分钟 K 线（从库里最新一根到建流那一分钟，最多一天）；REST 请求间隔 200 毫秒，币安回 429/418 时按 `Retry-After` 暂停全部请求。
 - 旧的环境变量 `REFERENCE_SYMBOLS` 已去掉。
 
@@ -131,7 +131,7 @@ SELECT symbol, funding_time, funding_rate, mark_price, samples FROM market.fundi
 
 - 本地盘口（`internal/marketdata/domain/localbook.go`，币安"如何正确在本地维护一个订单簿"的做法）：每个组合连接最多 25 个交易对（`<symbol>@depth@100ms` 与 `@aggTrade`），先缓存增量，再逐个用 REST 取快照（现货 `/api/v3/depth?limit=1000`，合约 `/fapi/v1/depth`），丢掉快照之前的增量；现货按 `U`/`u`、合约按 `pu` 检查连续性，断了就重新取快照（`market_reference_book_resyncs_total`）。1000 倍计价的币价格乘、数量除以倍数。
 - 可用的条件：已同步，且它的连接 5 秒内收到过消息（按连接算，冷门币盘口不变也不会被当成断流）。不可用时该交易对退回平台自己的盘口与成交（转发引擎的 `market.depth.internal`），恢复后重新发快照。
-- 发布：每 100 毫秒一轮，变化的交易对发 `DepthUpdate`（与上次发出的前 200 档比较的差异，带 `prev_sequence`），每 10 秒与刚开始显示时发 `DepthSnapshot`，没有变化时每秒一条空的 `DepthUpdate` 作心跳（`taken_at` 是连接最后收到消息的时间）。公共 sequence 按交易对递增，起点是服务启动时刻（微秒），重启后不会回退；不显示参考市场的交易对每次转发引擎快照也占一个 sequence。成交按批发 `TradesPrinted`（`market.trades`）；REST 的最近成交在启动时先从币安取一次。
+- 发布：每 100 毫秒一轮，变化的交易对发 `DepthUpdate`（与上次发出的前 200 档比较的差异，带 `prev_sequence`），每 10 秒与刚开始显示时发 `DepthSnapshot`，没有变化时每秒一条空的 `DepthUpdate` 作心跳（`taken_at` 是连接最后收到消息的时间）。公共 sequence 按交易对递增，起点是服务启动时刻（微秒），重启后不会回退；不显示参考市场的交易对每次转发引擎快照也占一个 sequence。成交按批发 `TradesPrinted`（`market.trades`）；平台自己的成交只转发这一批里新应用的（按 sequence 判断），`trade.events` 重投时不会重复出现在成交列表里。REST 的最近成交在启动时先从币安取一次。
 - 合约的盘口与成交用币安 U 本位合约的同名符号（`fapi`/`fstream`），标记价的盘口中间价也用它。
 - 指标：`market_reference_book_age_seconds{symbol}`（距上次变化的秒数，未同步为 -1）、`market_reference_book_resyncs_total`、`market_reference_book_stream_failures_total`；告警 `ReferenceBookStale`（不同步或 30 秒没变，持续 2 分钟）。
 - 日志：`reference book stream failed`（带交易对数，按 1 秒起、最长 1 分钟退避重连）、`reference book snapshot not loaded`、`reference books: followed symbols changed`。

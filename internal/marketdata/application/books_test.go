@@ -227,3 +227,37 @@ func TestBooksAreSplitIntoConnections(t *testing.T) {
 		t.Fatalf("groups %+v", gs)
 	}
 }
+
+// A pair without a reference market (ASTRA-USDT) shows the platform's own
+// book and trades whatever the flags say: the rig shows the reference
+// market for every symbol, yet nothing is served for it from there, and
+// the engine's book and trades are relayed as the platform's.
+func TestAPairWithoutAReferenceShowsThePlatform(t *testing.T) {
+	b, _, rec, _ := newBooksRig(t)
+	ctx := context.Background()
+	if b.Shown("ASTRA-USDT") {
+		t.Fatal("a pair without a reference market shows it")
+	}
+	if _, ok := b.Depth("ASTRA-USDT", 10); ok {
+		t.Fatal("a reference book served")
+	}
+	if _, ok := b.Trades("ASTRA-USDT", 10); ok {
+		t.Fatal("reference trades served")
+	}
+	b.RelayDepth(ctx, &marketv1.DepthSnapshot{Symbol: "ASTRA-USDT", Bids: []*marketv1.PriceLevel{{Price: "0.5", Quantity: "100"}}})
+	b.RelayTrades(ctx, []domain.Trade{{
+		Symbol: "ASTRA-USDT", Sequence: 1, ID: "t1", Price: d("0.5"), Quantity: d("10"), Quote: d("5"), TakerSide: "BUY", At: time.Now(),
+	}})
+	msgs := rec.take(t)
+	if len(msgs) != 2 {
+		t.Fatalf("relayed %d messages", len(msgs))
+	}
+	depth, ok := msgs[0].(*marketv1.DepthSnapshot)
+	if !ok || depth.GetReference() || depth.GetBids()[0].GetPrice() != "0.5" {
+		t.Fatalf("the platform's book: %v", msgs[0])
+	}
+	trades, ok := msgs[1].(*marketv1.TradesPrinted)
+	if !ok || trades.GetReference() || len(trades.GetTrades()) != 1 || trades.GetTrades()[0].GetPrice() != "0.5" {
+		t.Fatalf("the platform's trades: %v", msgs[1])
+	}
+}
