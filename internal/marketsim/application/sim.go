@@ -16,6 +16,7 @@ import (
 	"math/rand/v2"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -107,14 +108,25 @@ type Sim struct {
 	// the watchdog's count.
 	anchorReads  []domain.Mark
 	anchorAt     time.Time
+	readAt       time.Time // the last read of the last trade
 	lastTradeAt  time.Time
-	reportedAt   time.Time
 	center       float64
 	walking      bool
 	watchFrom    time.Time
 	refusedSince time.Time
 	deadlocks    int
 	deadlockAt   time.Time
+
+	// beat is the target the heartbeat reports, kept by the rounds and
+	// read without mu (band.go).
+	beat atomic.Pointer[beat]
+	// ready is set once Start loaded the simulation: until then (a
+	// standby waiting for the lease) the API answers ErrNotReady.
+	ready atomic.Bool
+	// ops serializes the operators' changes (events, settings), each from
+	// reading the budget to saving, so that two at once cannot both pass
+	// one operator's share.
+	ops sync.Mutex
 
 	perpPair      domain.Pair
 	perpPairAt    time.Time
@@ -209,8 +221,16 @@ func (s *Sim) Start(ctx context.Context) error {
 	}
 	s.log.InfoContext(ctx, "simulated market loaded", "symbol", s.cfg.Symbol, "bots", len(s.bots), "settings_version", version,
 		"target", st.P)
+	s.ready.Store(true)
 	return nil
 }
+
+// ErrNotReady answers the API of an instance that has not loaded the
+// simulation: a standby waiting for the lease.
+var ErrNotReady = apperr.New(apperr.KindUnavailable, "SIM_NOT_READY", "this market-sim instance is a standby: the other one runs the market")
+
+// Ready reports whether Start loaded the simulation.
+func (s *Sim) Ready() bool { return s.ready.Load() }
 
 // apply takes new settings: the model's and the throttle's.
 func (s *Sim) apply(p domain.Params, version int64) {
@@ -258,8 +278,19 @@ func (s *Sim) loadBots(ctx context.Context) error {
 	return nil
 }
 
-// Run steps the simulation every Tick until ctx ends, then saves its state.
+// Run steps the simulation every Tick until ctx ends, then saves its
+// state; the heartbeat runs alongside.
 func (s *Sim) Run(ctx context.Context) error {
+	hb, stop := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.heartbeat(hb)
+	}()
+	defer func() {
+		stop()
+		<-done
+	}()
 	t := time.NewTicker(s.cfg.Tick)
 	defer t.Stop()
 	for {
@@ -294,10 +325,7 @@ func (s *Sim) Round(ctx context.Context) {
 		}
 	}
 	s.refreshPair(ctx, now)
-	// The report is also the heartbeat market-data-service watches (a pair
-	// whose simulated market went silent halts, ASTRA design §9): it goes
-	// out whether the bots trade or not.
-	s.report(ctx, now, s.model.State.P)
+	s.noteBeat(now, s.model.State.P) // whether the bots trade or not
 	if !s.flags.Enabled(flags.KeySimEnabled, flags.Subject{Symbol: s.cfg.Symbol}) || !s.pair.Trading {
 		if s.running {
 			s.stop(ctx)
@@ -573,9 +601,11 @@ func (s *Sim) market(ctx context.Context, now time.Time, b *bot, side domain.Sid
 	s.placed(ctx, now, b, err, true)
 }
 
-// placed counts an order's result. A refused one gives its token back
-// (only orders that reach the book count against the throttle) and, with
-// backOff, makes the bot wait.
+// placed counts an order's result. One the platform refused gives its
+// token back (ports.Refused: only requests that may have done something
+// count against the throttle); with backOff a failed one makes the bot
+// wait, longer each time (up to five seconds for the band, a minute
+// otherwise).
 func (s *Sim) placed(ctx context.Context, now time.Time, b *bot, err error, backOff bool) {
 	result := "placed"
 	switch {
@@ -593,8 +623,15 @@ func (s *Sim) placed(ctx context.Context, now time.Time, b *bot, err error, back
 	if err == nil {
 		return
 	}
-	s.orders.Return()
-	if backOff {
+	if ports.Refused(err) {
+		s.orders.Return()
+	}
+	switch {
+	case !backOff:
+	case errors.Is(err, ports.ErrOutOfBand):
+		b.wait = domain.BandBackoff(b.wait)
+		b.retryAt = now.Add(b.wait)
+	default:
 		b.backOff(now)
 	}
 }
@@ -756,6 +793,8 @@ func (s *Sim) UpdateParams(ctx context.Context, p domain.Params, actor, approved
 	if actor == "" {
 		return 0, apperr.Invalid("the operator is required")
 	}
+	s.ops.Lock()
+	defer s.ops.Unlock()
 	now := s.now()
 	spent, err := s.budget(ctx, now)
 	if err != nil {

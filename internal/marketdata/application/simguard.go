@@ -28,9 +28,12 @@ const (
 
 // SimGuard halts the pairs whose simulated market went silent, and the
 // contracts on them, and resumes what it halted. Halts are recorded before
-// they happen (market.sim_halts), so a restart resumes them too; a pair or
-// contract an operator moved meanwhile is left as it is. Only pairs heard
-// since the service started are watched.
+// they happen (market.sim_halts), so a restart resumes them too. While a
+// market stays silent every step halts what of it still trades, so a halt
+// that failed halfway (instrument-service unavailable) is finished; to let
+// a silent market trade, an operator turns sim.halt_on_loss off. On
+// resuming, a pair or contract an operator moved elsewhere is left as it
+// is. Only pairs heard since the service started are watched.
 type SimGuard struct {
 	platform    *PlatformReference
 	instruments ports.Instruments
@@ -99,10 +102,14 @@ func (g *SimGuard) Step(ctx context.Context) error {
 	}
 	if on {
 		for symbol, at := range reports {
-			if !halted[symbol] && now.Sub(at) >= SimHaltAfter {
-				if err := g.halt(ctx, symbol, now, at); err != nil {
-					return err
-				}
+			if now.Sub(at) < SimHaltAfter {
+				continue
+			}
+			recorded, err := g.halt(ctx, symbol, now, at, halted[symbol])
+			if err != nil {
+				return err
+			}
+			if recorded && !halted[symbol] {
 				halts, halted[symbol] = append(halts, ports.Halt{Symbol: symbol, HaltedAt: now}), true
 			}
 		}
@@ -128,30 +135,37 @@ func (g *SimGuard) Step(ctx context.Context) error {
 	return nil
 }
 
-// halt records and halts a silent pair that trades, and the trading
-// contracts on it.
-func (g *SimGuard) halt(ctx context.Context, symbol string, now, heard time.Time) error {
+// halt halts a silent pair and the contracts on it, what of them still
+// trades, recording the halt first unless recorded already; it returns
+// whether the halt is recorded (a pair that does not trade gets none).
+func (g *SimGuard) halt(ctx context.Context, symbol string, now, heard time.Time, recorded bool) (bool, error) {
 	pairs, err := g.instruments.Pairs(ctx)
 	if err != nil {
-		return err
+		return recorded, err
 	}
 	trading := false
 	for _, p := range pairs {
 		trading = trading || (p.Symbol == symbol && p.Status == pairTrading)
 	}
-	if !trading {
-		return nil // nothing to halt; heard again or moved by hand
+	if !recorded {
+		if !trading {
+			return false, nil // nothing to halt; heard again or moved by hand
+		}
+		if err := g.store.Read().SimHalts().Add(ctx, symbol, now); err != nil {
+			return false, err
+		}
 	}
-	if err := g.store.Read().SimHalts().Add(ctx, symbol, now); err != nil {
-		return err
-	}
-	if _, err := g.instruments.SetPairStatus(ctx, symbol, pairHalt, simHaltReason); err != nil &&
-		!apperr.Is(err, "INSTRUMENT_STATUS_TRANSITION_INVALID") {
-		return err
+	halted := false
+	if trading {
+		if _, err := g.instruments.SetPairStatus(ctx, symbol, pairHalt, simHaltReason); err != nil &&
+			!apperr.Is(err, "INSTRUMENT_STATUS_TRANSITION_INVALID") {
+			return true, err
+		}
+		halted = true
 	}
 	contracts, err := g.instruments.Contracts(ctx)
 	if err != nil {
-		return err
+		return true, err
 	}
 	for _, c := range contracts {
 		if c.IndexSymbol != symbol || c.Status != pairTrading {
@@ -159,11 +173,14 @@ func (g *SimGuard) halt(ctx context.Context, symbol string, now, heard time.Time
 		}
 		if _, err := g.instruments.SetContractStatus(ctx, c.Symbol, pairHalt, simHaltReason); err != nil &&
 			!apperr.Is(err, "INSTRUMENT_STATUS_TRANSITION_INVALID") {
-			return err
+			return true, err
 		}
+		halted = true
 	}
-	g.log.WarnContext(ctx, "pair halted: its simulated market went silent", "symbol", symbol, "last_heard", heard)
-	return nil
+	if halted {
+		g.log.WarnContext(ctx, "pair halted: its simulated market went silent", "symbol", symbol, "last_heard", heard)
+	}
+	return true, nil
 }
 
 // resume lets a pair the guard halted, and its halted contracts, trade

@@ -44,6 +44,12 @@ type Error struct {
 
 func (e *Error) Error() string { return fmt.Sprintf("HTTP %d %s", e.Status, e.Code) }
 
+// Refused reports an answer of 4xx but a timeout or a rate limit: the
+// platform refused the request and did nothing (ports.Refused).
+func (e *Error) Refused() bool {
+	return e.Status >= 400 && e.Status < 500 && e.Status != http.StatusRequestTimeout && e.Status != http.StatusTooManyRequests
+}
+
 func (c *Client) do(ctx context.Context, method, rawURL, user string, body, out any) error {
 	var rd io.Reader
 	if body != nil {

@@ -334,7 +334,12 @@ func (m *Marks) tickContract(ctx context.Context, st *contractMarks, now time.Ti
 		}
 	}
 
-	index, comps, err := domain.Index(m.prices(spec.IndexSymbol), m.minSources)
+	prices := m.prices(spec.IndexSymbol)
+	need := m.minSources
+	if len(prices) == 1 && prices[0].Source == SourcePlatform {
+		need = 1 // the platform's own market is all an unfollowed pair has
+	}
+	index, comps, err := domain.Index(prices, need)
 	included := 0
 	for _, c := range comps {
 		if c.Included {
@@ -366,7 +371,7 @@ func (m *Marks) tickContract(ctx context.Context, st *contractMarks, now time.Ti
 		}
 		m.recovered(ctx, st)
 	} else {
-		m.checkDegraded(ctx, st, now, fmt.Sprintf("%d of the %d index sources required are usable", included, m.minSources))
+		m.checkDegraded(ctx, st, now, fmt.Sprintf("%d of the %d index sources required are usable", included, need))
 	}
 
 	st.latest.Premium = domain.AveragePremium(st.sum, st.samples)

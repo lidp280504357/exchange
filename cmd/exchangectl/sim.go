@@ -71,7 +71,9 @@ func simCall(ctx context.Context, cfg settings, method, path, body string, out i
 		if err := svcsign.CheckSecret(cfg.SimAPISecret); err != nil {
 			return fmt.Errorf("SIM_API_SECRET: %w", err)
 		}
-		resp, err = svcsign.Client{Secret: []byte(cfg.SimAPISecret), HTTP: hc}.Do(req, raw)
+		// exchangectl signs with the operators' key: it cannot name an
+		// approver (only the admin console's service can).
+		resp, err = svcsign.Client{KeyID: "ops", Secret: []byte(cfg.SimAPISecret), HTTP: hc}.Do(req, raw)
 	}
 	if err != nil {
 		return err

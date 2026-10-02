@@ -120,6 +120,16 @@ func (s *Store) SaveSettings(ctx context.Context, p domain.Params, change ports.
 			version, change.At, change.Actor, change.ApprovedBy, change.Move, change.Volume); err != nil {
 			return err
 		}
+		if change.State != nil {
+			st, err := json.Marshal(change.State)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO state (id, state, saved_at) VALUES (1, $1, $2)
+				ON CONFLICT (id) DO UPDATE SET state = EXCLUDED.state, saved_at = EXCLUDED.saved_at`, st, change.At); err != nil {
+				return err
+			}
+		}
 		return s.audit(ctx, tx, audit)
 	})
 	if err != nil {

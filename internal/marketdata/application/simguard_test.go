@@ -96,3 +96,42 @@ func TestSimGuardHaltsASilentPairAndResumesIt(t *testing.T) {
 		t.Fatalf("on then off: %v", *list.moves)
 	}
 }
+
+// A halt that failed (instrument-service unavailable) is recorded and
+// finished by a later step while the market stays silent.
+func TestSimGuardFinishesAHaltThatFailed(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	list := newListing([]ports.Pair{{Symbol: "ASTRA-USDT", Base: "ASTRA", Quote: "USDT", Status: "TRADING"}},
+		[]ports.Contract{{Symbol: "ASTRA-USDT-PERP", IndexSymbol: "ASTRA-USDT", Status: "TRADING"}})
+	store := newMemStore()
+	svc := newService(t, store, &now)
+	platform := &PlatformReference{Svc: svc, Refs: NewReferenceMap(list, slog.New(slog.DiscardHandler)), Now: func() time.Time { return now }}
+	fl := &simHaltFlag{}
+	fl.on.Store(true)
+	g := NewSimGuard(platform, list, store, fl, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	g.now = func() time.Time { return now }
+	if err := platform.Report(ctx, "ASTRA-USDT", d("1.01")); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(61 * time.Second)
+	list.down.Store(true)
+	if err := g.Step(ctx); err == nil {
+		t.Fatal("the halt failed, the step passed")
+	}
+	if halts, _ := store.Read().SimHalts().List(ctx); len(halts) != 1 || len(*list.moves) != 0 {
+		t.Fatalf("recorded %+v, moves %v", halts, *list.moves)
+	}
+	list.down.Store(false)
+	now = now.Add(5 * time.Second)
+	if err := g.Step(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"ASTRA-USDT TRADING->HALT", "ASTRA-USDT-PERP TRADING->HALT"}; !slices.Equal(*list.moves, want) {
+		t.Fatalf("finished: %v", *list.moves)
+	}
+	now = now.Add(5 * time.Second)
+	if err := g.Step(ctx); err != nil || len(*list.moves) != 2 {
+		t.Fatalf("halted again: %v %v", err, *list.moves)
+	}
+}

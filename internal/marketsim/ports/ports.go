@@ -22,6 +22,18 @@ var ErrFunds = errors.New("not enough funds")
 // band's anchor.
 var ErrOutOfBand = errors.New("price out of band")
 
+// Refused reports whether err is the platform refusing a request outright
+// (the funds, the price band, another answer of 4xx), which did nothing:
+// its rate token goes back. A request that failed on the way or on the
+// server may have done its work, and keeps its token.
+func Refused(err error) bool {
+	if errors.Is(err, ErrFunds) || errors.Is(err, ErrOutOfBand) {
+		return true
+	}
+	var r interface{ Refused() bool }
+	return errors.As(err, &r) && r.Refused()
+}
+
 // Trading is the platform's spot trading as a bot uses it: as the bot's
 // user, through the same paths as anyone.
 type Trading interface {
@@ -110,6 +122,10 @@ type ParamChange struct {
 	At                time.Time
 	Actor, ApprovedBy string
 	Move, Volume      float64
+	// State, when set, is the model's state saved with the settings in
+	// one transaction: a re-anchoring's new P0 goes with the state it
+	// was rebased to (a restart between the two would move the price).
+	State *domain.State
 }
 
 // Audit is an operator's action, for the audit trail (audit.events).

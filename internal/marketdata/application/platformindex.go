@@ -34,9 +34,10 @@ var PlatformTopMin = decimal.NewFromInt(100)
 
 // PlatformIndex gives the index sources of a contract: the reference
 // market's for an index pair it follows, the platform's own market for
-// one it does not (the platform coin's ASTRA-USDT): PlatformPrice. A
-// followed pair never falls back to the platform's book, which is HOUSE's
-// copy of the reference market's.
+// one listed without a reference market (the platform coin's
+// ASTRA-USDT): PlatformPrice. A followed pair never falls back to the
+// platform's book, which is HOUSE's copy of the reference market's — nor
+// does any pair while the listing was never read.
 type PlatformIndex struct {
 	Feed IndexSources
 	Svc  *Service
@@ -45,7 +46,7 @@ type PlatformIndex struct {
 
 // Prices returns the index sources of symbol.
 func (p PlatformIndex) Prices(symbol string) []domain.SourcePrice {
-	if _, followed := p.Refs.Get(context.Background())[symbol]; followed {
+	if !p.Refs.Unfollowed(context.Background(), symbol) {
 		return p.Feed.Prices(symbol)
 	}
 	if price, ok := p.Svc.PlatformPrice(symbol); ok {

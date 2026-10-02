@@ -44,7 +44,7 @@ type fakeTrading struct {
 
 func newFakeTrading() *fakeTrading {
 	return &fakeTrading{
-		pair: domain.Pair{Symbol: "ASTRA-USDT", Tick: d("0.0001"), Lot: d("1"), MinQty: d("1"), MinNotional: d("5"), Trading: true},
+		pair: domain.Pair{Symbol: "ASTRA-USDT", Tick: d("0.0001"), Lot: d("1"), MinQty: d("1"), MinNotional: d("5"), Status: "TRADING", Trading: true},
 		open: map[string][]domain.Order{}, markets: map[domain.Side]int{}, cancelAl: map[string]int{},
 		balances: map[string]map[string]decimal.Decimal{}, refuse: map[string]error{}, tries: map[string]int{},
 	}
@@ -166,6 +166,7 @@ type fakePrices struct {
 	index          decimal.Decimal
 	reported       []decimal.Decimal
 	now            func() time.Time
+	lastErr        error // the last trade cannot be read
 }
 
 func (p *fakePrices) Reference(_ context.Context, symbol string) (decimal.Decimal, bool, error) {
@@ -183,6 +184,9 @@ func (p *fakePrices) Reference(_ context.Context, symbol string) (decimal.Decima
 func (p *fakePrices) LastTrade(context.Context, string) (decimal.Decimal, time.Time, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.lastErr != nil {
+		return decimal.Zero, time.Time{}, p.lastErr
+	}
 	at := p.lastAt
 	if at.IsZero() {
 		at = p.now()
@@ -257,6 +261,10 @@ func (m *memStore) SaveSettings(_ context.Context, p domain.Params, change ports
 	m.params, m.byWhom = &p, change.Actor
 	m.version++
 	m.changes = append(m.changes, change)
+	if change.State != nil {
+		st := *change.State
+		m.state = &st
+	}
 	if audit != nil {
 		m.audits = append(m.audits, *audit)
 	}
@@ -327,18 +335,24 @@ func (m *memStore) event(id string) domain.Event {
 	return domain.Event{}
 }
 
-// fakePairs records the pair's and the contract's status changes.
+// fakePairs records the pair's and the contract's status changes; the
+// contract's next change fails with contractErr.
 type fakePairs struct {
-	mu        sync.Mutex
-	trading   *fakeTrading
-	changes   []string
-	contracts []string
-	perp      *fakeDerivatives
+	mu          sync.Mutex
+	trading     *fakeTrading
+	changes     []string
+	contracts   []string
+	perp        *fakeDerivatives
+	contractErr error
 }
 
 func (f *fakePairs) SetContractStatus(_ context.Context, _, to, _, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.contractErr; err != nil {
+		f.contractErr = nil
+		return err
+	}
 	f.contracts = append(f.contracts, to)
 	if f.perp != nil {
 		f.perp.mu.Lock()
@@ -351,10 +365,13 @@ func (f *fakePairs) SetContractStatus(_ context.Context, _, to, _, _ string) err
 func (f *fakePairs) SetPairStatus(_ context.Context, _, to, _, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.changes = append(f.changes, to)
 	f.trading.mu.Lock()
-	f.trading.pair.Trading = to == "TRADING"
-	f.trading.mu.Unlock()
+	defer f.trading.mu.Unlock()
+	if f.trading.pair.Status == to {
+		return fmt.Errorf("pair already %s", to) // as instrument-service refuses it
+	}
+	f.changes = append(f.changes, to)
+	f.trading.pair.Status, f.trading.pair.Trading = to, to == "TRADING"
 	return nil
 }
 
@@ -1079,6 +1096,43 @@ func TestTheWatchdogRebasesALockedMarket(t *testing.T) {
 	}
 }
 
+// The watchdog waits while the last trade cannot be read (a locked market
+// and a silent market-data-service look the same), and, without takers,
+// while nothing need trade.
+func TestTheWatchdogWaitsWithoutReadsOrTakers(t *testing.T) {
+	r := bandRig(t, nil)
+	r.prices.mu.Lock()
+	r.prices.frozen, r.prices.lastAt = true, r.now
+	r.prices.lastErr = errors.New("market-data-service unavailable")
+	r.prices.mu.Unlock()
+	r.rounds(4 * 4 * 60)
+	if st := r.sim.Status(); st.Deadlocks != 0 {
+		t.Fatalf("four minutes without reads: %+v", st)
+	}
+	r.prices.mu.Lock()
+	r.prices.lastErr = nil
+	r.prices.mu.Unlock()
+	r.rounds(4 * 170)
+	if st := r.sim.Status(); st.Deadlocks != 0 {
+		t.Fatalf("reads back, before three minutes: %+v", st)
+	}
+	r.rounds(4 * 15)
+	if st := r.sim.Status(); st.Deadlocks != 1 {
+		t.Fatalf("reads back for three minutes, nothing traded: %+v", st)
+	}
+
+	p := domain.DefaultParams()
+	p.DailyVolume = 0
+	r = bandRig(t, &memStore{params: &p, version: 1})
+	r.prices.mu.Lock()
+	r.prices.frozen, r.prices.lastAt = true, r.now
+	r.prices.mu.Unlock()
+	r.rounds(4 * 6 * 60)
+	if st := r.sim.Status(); st.Deadlocks != 0 {
+		t.Fatalf("six minutes without takers: %+v", st)
+	}
+}
+
 // Every level the makers place is refused for the band (the platform's
 // anchor is not where the bots read it) for three minutes: the watchdog
 // fires although the takers keep trading.
@@ -1095,12 +1149,18 @@ func TestTheWatchdogSeesEveryLevelRefused(t *testing.T) {
 	if st := r.sim.Status(); st.Deadlocks != 1 {
 		t.Fatalf("after three minutes: %+v", st)
 	}
-	// A refusal for the band makes the maker wait: far fewer tries than
-	// rounds.
+	// A refusal for the band makes the maker wait (five seconds at most):
+	// far fewer tries than rounds.
 	if n := r.trading.tries["m1"]; n > 40 {
 		t.Fatalf("m1 tried %d orders in three minutes", n)
 	}
 }
+
+// refusal is the platform's answer of 4xx (ports.Refused).
+type refusal string
+
+func (r refusal) Error() string { return string(r) }
+func (refusal) Refused() bool   { return true }
 
 // A refused order costs no token and makes its bot wait, longer each
 // time; the other bots trade on.
@@ -1109,7 +1169,7 @@ func TestARefusedBotWaitsAndCostsNoToken(t *testing.T) {
 	p.OrdersPerSecond, p.DailyVolume = 4, 0
 	r := newRig(t, &memStore{params: &p, version: 1})
 	r.trading.mu.Lock()
-	r.trading.refuse["m1"] = errors.New("HTTP 500")
+	r.trading.refuse["m1"] = refusal("HTTP 400 ORDER_INVALID")
 	r.trading.mu.Unlock()
 	r.rounds(4 * 20)
 	r.trading.mu.Lock()
@@ -1123,6 +1183,41 @@ func TestARefusedBotWaitsAndCostsNoToken(t *testing.T) {
 	}
 	if st := r.sim.Status(); !st.Bots[0].RetryAt.After(r.now) || st.Bots[0].Error == "" {
 		t.Fatalf("m1 %+v", st.Bots[0])
+	}
+}
+
+// A request that failed on the way may have reached the book: it keeps
+// its token. One refused for the price band costs none, and its bot waits
+// five seconds at most.
+func TestOnlyRefusalsGiveTheirTokenBack(t *testing.T) {
+	p := domain.DefaultParams()
+	p.OrdersPerSecond, p.DailyVolume = 4, 0
+	r := newRig(t, &memStore{params: &p, version: 1})
+	r.rounds(1)
+	b := r.sim.bots[0]
+	r.sim.mu.Lock()
+	defer r.sim.mu.Unlock()
+	now := r.now.Add(time.Minute) // the bucket full again
+	before := r.sim.orders.Tokens(now)
+	if !r.sim.orders.Take(now) {
+		t.Fatal("no token")
+	}
+	r.sim.placed(context.Background(), now, b, errors.New("HTTP 502"), true)
+	if got := r.sim.orders.Tokens(now); got != before-1 || b.retryAt.Sub(now) != time.Second {
+		t.Fatalf("a failure: tokens %v -> %v, waits %v", before, got, b.retryAt.Sub(now))
+	}
+	r.sim.placed(context.Background(), now, b, errors.New("HTTP 502"), true)
+	if b.retryAt.Sub(now) != 2*time.Second {
+		t.Fatalf("a second failure waits %v", b.retryAt.Sub(now))
+	}
+	for range 3 {
+		if !r.sim.orders.Take(now) {
+			t.Fatal("no token")
+		}
+		r.sim.placed(context.Background(), now, b, fmt.Errorf("limit: %w", ports.ErrOutOfBand), true)
+	}
+	if got := r.sim.orders.Tokens(now); got != before-1 || b.retryAt.Sub(now) != 5*time.Second {
+		t.Fatalf("out of band: tokens %v, waits %v", got, b.retryAt.Sub(now))
 	}
 }
 
@@ -1158,6 +1253,14 @@ func TestAReanchorKeepsItsAnchor(t *testing.T) {
 	if a := r.store.audits[len(r.store.audits)-1]; a.Action != "market.sim.params_changed" && a.Action != "market.sim.event_created" {
 		t.Fatalf("audit %+v", a)
 	}
+	// The state was saved with the new P0: a crash before the next save
+	// goes on from the anchor too.
+	crashed := newRig(t, r.store)
+	crashed.now = r.now
+	crashed.rounds(1)
+	if p := crashed.sim.Status().Target; p < target*0.99 || p > target*1.01 {
+		t.Fatalf("restarted after a crash at %v, was %v", p, target)
+	}
 	r.rounds(4)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -1172,17 +1275,25 @@ func TestAReanchorKeepsItsAnchor(t *testing.T) {
 	}
 }
 
-// The target is reported, on the tick, every five seconds; with no recent
-// trade the band's anchor is the pair's reference, as the trading
-// service's.
+// The heartbeat reports the target of the latest round, on the tick, and
+// nothing once no round started for 30 seconds; with no recent trade the
+// band's anchor is the pair's reference, as the trading service's.
 func TestTheTargetIsReportedAndTheAnchorFallsBack(t *testing.T) {
 	r := newRig(t, nil)
+	ctx := context.Background()
+	r.sim.beatOnce(ctx)
 	r.rounds(4 * 11)
+	r.sim.beatOnce(ctx)
+	r.now = r.now.Add(29 * time.Second)
+	r.sim.beatOnce(ctx)
+	r.now = r.now.Add(time.Second)
+	r.sim.beatOnce(ctx) // a stuck round loop: silent
+	r.now = r.now.Add(-30 * time.Second)
 	r.prices.mu.Lock()
 	reported := slices.Clone(r.prices.reported)
 	r.prices.lastAt, r.prices.ref = r.now.Add(-6*time.Minute), d("1.2")
 	r.prices.mu.Unlock()
-	if len(reported) < 2 || len(reported) > 3 || !reported[0].Equal(reported[0].Round(4)) {
+	if len(reported) != 2 || !reported[0].Equal(reported[0].Round(4)) || !reported[0].Equal(reported[1]) {
 		t.Fatalf("reported %v", reported)
 	}
 	r.rounds(8)
@@ -1234,6 +1345,29 @@ func TestAHaltStopsThePerpetualToo(t *testing.T) {
 	r.rounds(4 * 10)
 	if !slices.Equal(r.pairs.contracts, []string{"HALT", "TRADING"}) || len(fd.orders("m1")) == 0 {
 		t.Fatalf("resumed: contract %v, %d perpetual orders", r.pairs.contracts, len(fd.orders("m1")))
+	}
+}
+
+// Ending a halt again after the perpetual failed to resume goes on where
+// the first try stopped: the pair, already trading, is left alone.
+func TestEndingAHaltAgainResumesWhatIsStillHalted(t *testing.T) {
+	p := domain.DefaultParams()
+	p.DailyVolume, p.PerpDailyVolume = 0, 0
+	r, _ := perpRig(t, p)
+	r.rounds(20)
+	e := r.create(t, domain.Event{Type: domain.EventHalt})
+	r.rounds(2)
+	r.pairs.mu.Lock()
+	r.pairs.contractErr = errors.New("instrument-service unavailable")
+	r.pairs.mu.Unlock()
+	if _, err := r.sim.EndEvent(context.Background(), e.ID, "ops", "resume"); err == nil {
+		t.Fatal("the perpetual failed, the end passed")
+	}
+	if _, err := r.sim.EndEvent(context.Background(), e.ID, "ops", "resume again"); err != nil {
+		t.Fatalf("again: %v", err)
+	}
+	if !slices.Equal(r.pairs.changes, []string{"HALT", "TRADING"}) || !slices.Equal(r.pairs.contracts, []string{"HALT", "TRADING"}) {
+		t.Fatalf("pair %v, contract %v", r.pairs.changes, r.pairs.contracts)
 	}
 }
 

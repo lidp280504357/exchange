@@ -319,6 +319,9 @@ services:
         required: false
       - path: admin/admin.env
         required: true
+      # Signs its calls to market-sim's management API (key "admin").
+      - path: sim/admin.env
+        required: false
     environment:
       <<: *base-env
       GOMEMLIMIT: 240MiB
@@ -378,9 +381,11 @@ services:
   # are ordinary users trading ASTRA-USDT through the trading service and
   # the ledger. One instance holds a database lease; sim.enabled switches
   # the bots on. Management API on 8098 (internal only).
-  # The management API's changes are signed with SIM_API_SECRET (ASTRA
-  # design §6.2), which only market-sim and admin-service get: sim/sim.env,
-  # made by the deploy script on its first run.
+  # The management API's changes are signed (ASTRA design §6.2), one key
+  # per caller, made by the deploy script on its first run: sim/sim.env
+  # (SIM_API_SECRET, exchangectl in this container) and sim/admin.env
+  # (SIM_ADMIN_API_SECRET, admin-service too: the only caller that names
+  # an approver).
   market-sim:
     <<: *app
     command: ["/app/market-sim"]
@@ -388,6 +393,8 @@ services:
       - path: apps.env
         required: false
       - path: sim/sim.env
+        required: false
+      - path: sim/admin.env
         required: false
     environment:
       <<: *base-env

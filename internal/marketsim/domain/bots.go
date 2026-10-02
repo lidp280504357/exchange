@@ -270,6 +270,22 @@ func (b *Bucket) TakeLeaving(now time.Time, keep float64) bool {
 // orders that reach the book count against the throttle.
 func (b *Bucket) Return() { b.tokens = math.Min(b.Burst, b.tokens+1) }
 
+// Tokens is how many orders the bucket holds at now.
+func (b *Bucket) Tokens(now time.Time) float64 {
+	if b.at.IsZero() {
+		return b.Burst
+	}
+	return math.Min(b.Burst, b.tokens+now.Sub(b.at).Seconds()*b.Rate)
+}
+
 // Backoff is how long a bot waits after a refused order: twice its last
 // wait, from a second up to a minute.
 func Backoff(last time.Duration) time.Duration { return min(max(2*last, time.Second), time.Minute) }
+
+// BandBackoff is the wait after an order refused for the price band: the
+// same doubling up to five seconds only. Such refusals come with a fast
+// walk, when the platform's anchor runs ahead of the one the bots read;
+// longer waits would thin the ladder out after the anchors agree.
+func BandBackoff(last time.Duration) time.Duration {
+	return min(max(2*last, time.Second), 5*time.Second)
+}

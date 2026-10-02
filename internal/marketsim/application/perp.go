@@ -26,10 +26,11 @@ import (
 // reduces), and its FUTURES margin is topped up to PerpMargin from its
 // spot USDT. The bots' positions net out across the pool.
 
-// perpCheckEvery is how often the bots' positions and margins are read,
-// markEvery the mark price.
+// perpCheckEvery is how often the bots' positions and margins are read
+// (often enough that the makers' fills between two reads take a position
+// little beyond PerpBotCap), markEvery the mark price.
 const (
-	perpCheckEvery = time.Minute
+	perpCheckEvery = 10 * time.Second
 	markEvery      = time.Second
 )
 
@@ -125,7 +126,7 @@ func (s *Sim) checkPerp(ctx context.Context, now time.Time) {
 		pb.position, pb.futures, pb.known = pos, fut, true
 		if fut.LessThan(target.Div(decimal.NewFromInt(2))) {
 			need := target.Sub(fut).Round(2)
-			key := fmt.Sprintf("sim-margin-%s-%d", b.UserID, now.Unix()/60)
+			key := fmt.Sprintf("sim-margin-%s-%d", b.UserID, now.Unix()/int64(perpCheckEvery/time.Second))
 			if err := s.Derivatives.ToFutures(ctx, b.UserID, need, key); err != nil {
 				s.fail(ctx, b, "to_futures", err)
 				continue
@@ -275,8 +276,8 @@ func (s *Sim) takePerp(ctx context.Context, now time.Time, p float64, dt time.Du
 	}
 }
 
-// placedPerp counts an order's result on the perpetual; a refused one
-// gives its token back and, with backOff, makes the bot wait there.
+// placedPerp counts an order's result on the perpetual as placed does
+// for the pair, the waits being the bot's on the perpetual.
 func (s *Sim) placedPerp(ctx context.Context, now time.Time, b *bot, pb *perpBot, err error, backOff bool) {
 	role, result := "PERP_"+string(b.Role), "placed"
 	switch {
@@ -294,8 +295,15 @@ func (s *Sim) placedPerp(ctx context.Context, now time.Time, b *bot, pb *perpBot
 	if err == nil {
 		return
 	}
-	s.orders.Return()
-	if backOff {
+	if ports.Refused(err) {
+		s.orders.Return()
+	}
+	switch {
+	case !backOff:
+	case errors.Is(err, ports.ErrOutOfBand):
+		pb.wait = domain.BandBackoff(pb.wait)
+		pb.retryAt = now.Add(pb.wait)
+	default:
 		pb.wait = domain.Backoff(pb.wait)
 		pb.retryAt = now.Add(pb.wait)
 	}

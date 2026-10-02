@@ -90,13 +90,16 @@ main() {
   mkdir -p "$INFRA/backup" && cp deploy/backup/pg-backup.sh "$INFRA/backup/pg-backup.sh"
   # 托管钱包模拟网关（ADR-0011）的状态目录，容器用户 uid 10001 可写（install -o 不认数字 uid，用 chown）
   sudo mkdir -p "$INFRA/udun-mock" && sudo chown 10001:10001 "$INFRA/udun-mock" && sudo chmod 700 "$INFRA/udun-mock"
-  # market-sim 管理接口的签名密钥（ASTRA 设计 §6.2：审批人身份来自调用方凭据）：只给 market-sim 与 admin-service，
-  # 第一次部署时生成，之后不变；值不打印
-  if ! sudo test -s "$INFRA/sim/sim.env"; then
-    sudo mkdir -p "$INFRA/sim" && sudo chmod 700 "$INFRA/sim"
-    sudo sh -c "umask 077 && printf 'SIM_API_SECRET=%s\n' \"\$(openssl rand -hex 32)\" >'$INFRA/sim/sim.env'"
-    echo "== 已生成 sim/sim.env（SIM_API_SECRET）"
-  fi
+  # market-sim 管理接口的签名密钥（ASTRA 设计 §6.2：审批人身份来自调用方凭据），每个调用方一把：
+  # sim/sim.env 的 SIM_API_SECRET 只给 market-sim（容器里的 exchangectl sim 用），sim/admin.env 的
+  # SIM_ADMIN_API_SECRET 给 market-sim 与 admin-service（只有它能填批准人）。第一次部署时生成，之后不变；值不打印
+  sudo mkdir -p "$INFRA/sim" && sudo chmod 700 "$INFRA/sim"
+  for pair in sim.env:SIM_API_SECRET admin.env:SIM_ADMIN_API_SECRET; do
+    if ! sudo test -s "$INFRA/sim/${pair%%:*}"; then
+      sudo sh -c "umask 077 && printf '%s=%s\n' '${pair#*:}' \"\$(openssl rand -hex 32)\" >'$INFRA/sim/${pair%%:*}'"
+      echo "== 已生成 sim/${pair%%:*}（${pair#*:}）"
+    fi
+  done
 
   # 2. Topic 幂等核对
   bash "$INFRA/redpanda/topics.sh" >/dev/null && echo "== topic 核对完成"

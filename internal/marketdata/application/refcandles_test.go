@@ -2,9 +2,11 @@ package application
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -56,16 +58,20 @@ func (h *history) count(i domain.Interval) int {
 
 // listing is instrument-service's view: the pairs with their reference
 // markets and the contracts; SetPairStatus moves a pair and records it.
+// While down is set, the status changes fail.
 type listing struct {
 	mu        *sync.Mutex
 	pairs     []ports.Pair
 	contracts []ports.Contract
 	moves     *[]string
+	down      *atomic.Bool
 }
 
 func newListing(pairs []ports.Pair, contracts []ports.Contract) listing {
-	return listing{mu: &sync.Mutex{}, pairs: pairs, contracts: contracts, moves: &[]string{}}
+	return listing{mu: &sync.Mutex{}, pairs: pairs, contracts: contracts, moves: &[]string{}, down: &atomic.Bool{}}
 }
+
+var errListingDown = errors.New("instrument-service unavailable")
 
 func (l listing) Listed(context.Context, string) (bool, error) { return true, nil }
 
@@ -102,6 +108,9 @@ func (l listing) Ranks(context.Context) (map[string]int32, error) {
 }
 
 func (l listing) SetPairStatus(_ context.Context, symbol, to, _ string) (string, error) {
+	if l.down.Load() {
+		return "", errListingDown
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for i, p := range l.pairs {
@@ -116,6 +125,9 @@ func (l listing) SetPairStatus(_ context.Context, symbol, to, _ string) (string,
 }
 
 func (l listing) SetContractStatus(_ context.Context, symbol, to, _ string) (string, error) {
+	if l.down.Load() {
+		return "", errListingDown
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for i, c := range l.contracts {

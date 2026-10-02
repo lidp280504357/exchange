@@ -129,7 +129,7 @@ func TestTheDefaultASTRALogo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, kept := range []string{`<circle cx="32" cy="32" r="32" fill="url(#gold)">`, `<stop offset="1" stop-color="#e0a800">`, `fill="#0b0e11"`} {
+	for _, kept := range []string{`<circle cx="32" cy="32" r="32" fill="url(#night)">`, `<stop offset="1" stop-color="#e3a90a">`, `fill="#ffe680"`} {
 		if !strings.Contains(string(l.Data), kept) {
 			t.Errorf("%q lost: %s", kept, l.Data)
 		}

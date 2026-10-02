@@ -30,10 +30,17 @@ const (
 	anchorEvery  = time.Second
 	anchorWindow = 3 * time.Second
 	reportEvery  = 5 * time.Second
+	// beatStale stops the heartbeat when no round started for this long:
+	// the round loop is stuck and the pair should halt.
+	beatStale = 30 * time.Second
 	// recentTrade is how old a last trade may be and still anchor the band
 	// (the trading service's prices.RecentTrade).
 	recentTrade = 5 * time.Minute
 	watchAfter  = 3 * time.Minute
+	// staleReads is how long the last trade may go unread before the
+	// watchdog, unable to tell a locked market from a silent
+	// market-data-service, starts over.
+	staleReads = 10 * time.Second
 	// watchdogActor ends the events the watchdog stops.
 	watchdogActor = "system:watchdog"
 )
@@ -47,11 +54,13 @@ func (s *Sim) refreshAnchor(ctx context.Context, now time.Time) {
 		return
 	}
 	s.anchorAt = now
+	s.anchorReads = slices.DeleteFunc(s.anchorReads, func(m domain.Mark) bool { return now.Sub(m.At) >= anchorWindow })
 	price, at, err := s.prices.LastTrade(ctx, s.cfg.Symbol)
 	if err != nil {
 		s.m.errors.WithLabelValues("last_trade").Inc()
 		return
 	}
+	s.readAt = now
 	if price.IsPositive() {
 		s.last, s.lastTradeAt = price, at
 		s.m.last.Set(price.InexactFloat64())
@@ -64,7 +73,6 @@ func (s *Sim) refreshAnchor(ctx context.Context, now time.Time) {
 			anchor = ref
 		}
 	}
-	s.anchorReads = slices.DeleteFunc(s.anchorReads, func(m domain.Mark) bool { return now.Sub(m.At) >= anchorWindow })
 	if anchor.IsPositive() {
 		s.anchorReads = append(s.anchorReads, domain.Mark{At: now, P: anchor.InexactFloat64()})
 	}
@@ -92,21 +100,55 @@ func (s *Sim) anchor() float64 {
 	return 0
 }
 
-// report gives market-data-service the target, on the pair's tick, every
-// reportEvery.
-func (s *Sim) report(ctx context.Context, now time.Time, p float64) {
-	if (!s.reportedAt.IsZero() && now.Sub(s.reportedAt) < reportEvery) || p <= 0 {
+// beat is what the heartbeat reports: the target on the pair's tick, as
+// a round saw it, and when.
+type beat struct {
+	at    time.Time
+	price decimal.Decimal
+}
+
+// noteBeat keeps the target p of a round starting at now for the
+// heartbeat.
+func (s *Sim) noteBeat(now time.Time, p float64) {
+	if p <= 0 {
 		return
 	}
-	s.reportedAt = now
 	price := decimal.NewFromFloat(p)
 	if s.pair.Tick.IsPositive() {
 		price = price.Div(s.pair.Tick).Round(0).Mul(s.pair.Tick)
 	}
-	if !price.IsPositive() {
+	if price.IsPositive() {
+		s.beat.Store(&beat{at: now, price: price})
+	}
+}
+
+// heartbeat reports the target to market-data-service every reportEvery
+// until ctx ends. The report is the heartbeat that service watches (a
+// pair whose simulated market went silent halts, ASTRA design §9): it
+// goes out on its own, so that neither a slow round nor a slow
+// market-data-service holds up the other, and whether the bots trade or
+// not; a round loop stuck for beatStale stops it.
+func (s *Sim) heartbeat(ctx context.Context) {
+	t := time.NewTicker(reportEvery)
+	defer t.Stop()
+	for {
+		s.beatOnce(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+func (s *Sim) beatOnce(ctx context.Context) {
+	b := s.beat.Load()
+	if b == nil || s.now().Sub(b.at) >= beatStale {
 		return
 	}
-	if err := s.prices.Report(ctx, s.cfg.Symbol, price); err != nil {
+	ctx, cancel := context.WithTimeout(ctx, reportEvery)
+	defer cancel()
+	if err := s.prices.Report(ctx, s.cfg.Symbol, b.price); err != nil && ctx.Err() == nil {
 		s.m.errors.WithLabelValues("report").Inc()
 	}
 }
@@ -124,13 +166,23 @@ func (s *Sim) refused(now time.Time, wanted, placed, outOfBand int) {
 }
 
 // watch is the watchdog of a locked market: while the bots trade and no
-// pause or halt runs, three minutes without a trade, or with every level
-// the makers placed refused for the band, end a running jump or target
-// and rebase the model at the band's anchor.
+// pause or halt runs, three minutes without a trade where trades are
+// expected, or with every level the makers placed refused for the band,
+// end a running jump or target and rebase the model at the band's
+// anchor. Without fresh reads of the last trade it starts over.
 func (s *Sim) watch(ctx context.Context, now time.Time, sh domain.Shape) {
-	if sh.Halted || s.runs(domain.EventPause) || s.watchFrom.IsZero() {
+	if sh.Halted || s.runs(domain.EventPause) || s.watchFrom.IsZero() || now.Sub(s.readAt) > staleReads {
 		s.watchFrom, s.refusedSince = now, time.Time{}
 		return
+	}
+	// Without takers (daily_volume 0) nothing need trade while the quotes
+	// stand: only a walk or an event moving the price expects trades, and
+	// the quiet counts from then.
+	expected := s.params.DailyVolume > 0 || s.walking || slices.ContainsFunc(s.runningEvents(), func(e *domain.Event) bool {
+		return e.Type == domain.EventJump || e.Type == domain.EventTarget
+	})
+	if !expected {
+		s.watchFrom = now
 	}
 	from := s.watchFrom
 	if s.lastTradeAt.After(from) {
@@ -160,6 +212,7 @@ func (s *Sim) watch(ctx context.Context, now time.Time, sh domain.Shape) {
 	s.events = slices.DeleteFunc(s.events, func(e *domain.Event) bool { return e.Status == domain.EventDone })
 	if anchor > 0 {
 		s.model.Rebase(anchor)
+		s.save(ctx) // a restart goes on from the anchor, not from the lock
 	}
 	s.watchFrom, s.refusedSince = now, time.Time{}
 	s.deadlocks, s.deadlockAt = s.deadlocks+1, now

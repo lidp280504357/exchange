@@ -127,7 +127,8 @@ func (s *Sim) keepAnchor(ctx context.Context, e *domain.Event) {
 	from := p.P0
 	p.P0 = s.model.Params.P0
 	details, _ := json.Marshal(map[string]any{"p0": map[string]float64{"from": from, "to": p.P0}, "event": e.ID})
-	change := ports.ParamChange{At: s.now(), Actor: e.CreatedBy, ApprovedBy: e.ApprovedBy}
+	st := s.model.Snapshot()
+	change := ports.ParamChange{At: s.now(), Actor: e.CreatedBy, ApprovedBy: e.ApprovedBy, State: &st}
 	version, err := s.store.SaveSettings(ctx, p, change, &ports.Audit{
 		Action: "market.sim.params_changed", Target: "sim:" + s.cfg.Symbol, Actor: e.CreatedBy, Reason: "REANCHOR " + e.ID, Details: string(details),
 	})
@@ -251,6 +252,8 @@ func (s *Sim) CreateEvent(ctx context.Context, e domain.Event) (domain.Event, er
 	if !s.flags.Enabled(flags.KeySimEvents, flags.Subject{Symbol: s.cfg.Symbol}) {
 		return domain.Event{}, ErrEventsOff
 	}
+	s.ops.Lock()
+	defer s.ops.Unlock()
 	now := s.now()
 	e.ID, e.Status, e.CreatedAt = uuid.Must(uuid.NewV7()).String(), domain.EventScheduled, now
 	e.StartedAt, e.EndedAt, e.FromLogE, e.FromP, e.EndedBy = time.Time{}, time.Time{}, 0, decimal.Zero, ""
@@ -317,11 +320,13 @@ func (s *Sim) EndEvent(ctx context.Context, id, actor, reason string) (domain.Ev
 		case domain.EventPause, domain.EventTarget:
 			s.model.Hold(s.model.State.P)
 		case domain.EventHalt:
+			// Each resumes only what is still halted: ending the event
+			// again after the perpetual or the record failed goes on
+			// where the first try stopped.
 			why := "simulated market event " + e.ID + " ended: " + reason
-			if err := s.pairs.SetPairStatus(ctx, s.cfg.Symbol, "TRADING", actor, why); err != nil {
+			if err := s.resumePair(ctx, actor, why); err != nil {
 				return domain.Event{}, err
 			}
-			s.pairAt = time.Time{}
 			if err := s.resumePerp(ctx, actor, why); err != nil {
 				return domain.Event{}, err
 			}
@@ -340,6 +345,23 @@ func (s *Sim) EndEvent(ctx context.Context, id, actor, reason string) (domain.Ev
 	}
 	s.events = slices.Delete(s.events, i, i+1)
 	return *e, nil
+}
+
+// resumePair lets the pair trade again after a halt, if a halt left it
+// halted.
+func (s *Sim) resumePair(ctx context.Context, actor, why string) error {
+	pair, err := s.trading.Pair(ctx, s.cfg.Symbol)
+	if err != nil {
+		return err
+	}
+	if pair.Status != "HALT" {
+		return nil
+	}
+	if err := s.pairs.SetPairStatus(ctx, s.cfg.Symbol, "TRADING", actor, why); err != nil {
+		return err
+	}
+	s.pairAt = time.Time{}
+	return nil
 }
 
 // resumePerp lets the perpetual trade again after a halt, if a halt left

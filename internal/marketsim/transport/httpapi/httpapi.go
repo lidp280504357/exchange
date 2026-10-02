@@ -1,9 +1,12 @@
 // Package httpapi is the simulated market's internal management API (ASTRA
 // design §5.1), on the internal network only: the gateway does not route
 // it; the admin console's service and the ops scripts call it. The
-// changes (PUT, POST) must be signed with the shared secret
-// SIM_API_SECRET (internal/platform/svcsign): the caller vouches for the
-// actor and the approver it names (design §6.2).
+// changes (PUT, POST) must be signed (internal/platform/svcsign) with one
+// of two keys: KeyOps (SIM_API_SECRET, exchangectl in market-sim's
+// container) or KeyAdmin (SIM_ADMIN_API_SECRET, the admin console's
+// service). The signer vouches for the actor it names, and only KeyAdmin
+// may name an approver: the console signs both operators in (design
+// §6.2).
 //
 //	GET  /internal/sim                   the state: prices, settings, bots, open events
 //	PUT  /internal/sim/params            new settings {"params": {...}, "actor": "...", "approved_by": "..."}
@@ -35,6 +38,28 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/svcsign"
 )
 
+// The keys the changes are signed with: exchangectl's in market-sim's
+// container, and the admin console's service's — the only one that may
+// name an approver, from the two operators it signed in (ASTRA design
+// §6.2).
+const (
+	KeyOps   = "ops"
+	KeyAdmin = "admin"
+)
+
+// ErrApprovalNeedsAdmin refuses an approver named by any caller but the
+// admin console's service.
+var ErrApprovalNeedsAdmin = apperr.New(apperr.KindForbidden, "SIM_APPROVAL_NEEDS_ADMIN",
+	"only the admin console's service names an approver: it signed both operators in")
+
+// approver is the request's approver: allowed only signed with KeyAdmin.
+func approver(r *http.Request, name string) (string, error) {
+	if name != "" && svcsign.KeyID(r.Context()) != KeyAdmin {
+		return "", ErrApprovalNeedsAdmin
+	}
+	return name, nil
+}
+
 // Handler serves the management API; Signed checks the changes'
 // signatures.
 type Handler struct {
@@ -42,10 +67,22 @@ type Handler struct {
 	Signed *svcsign.Verifier
 }
 
+// ready answers 503 SIM_NOT_READY until the simulation is loaded (a
+// standby waiting for the lease has nothing to show or change).
+func (h *Handler) ready(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !h.Sim.Ready() {
+			httpx.WriteError(w, r, application.ErrNotReady)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // Routes mounts the API.
 func (h *Handler) Routes(r chi.Router) {
 	r.Group(func(r chi.Router) {
-		r.Use(h.Signed.Changes)
+		r.Use(h.ready, h.Signed.Changes)
 		r.Get("/internal/sim", h.status)
 		r.Put("/internal/sim/params", h.params)
 		r.Post("/internal/sim/bots", h.addBot)
@@ -225,7 +262,12 @@ func (h *Handler) params(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	version, err := h.Sim.UpdateParams(r.Context(), body.Params, body.Actor, body.ApprovedBy)
+	approvedBy, err := approver(r, body.ApprovedBy)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	version, err := h.Sim.UpdateParams(r.Context(), body.Params, body.Actor, approvedBy)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -279,6 +321,10 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 		Reason     string  `json:"reason"`
 	}
 	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if _, err := approver(r, body.ApprovedBy); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}

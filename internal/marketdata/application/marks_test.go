@@ -293,6 +293,13 @@ func TestIndexWeightsAndMinimumSources(t *testing.T) {
 	if p, _ := r.marks.Latest(perp.Symbol); !p.At.Equal(r.now.Add(-time.Second)) {
 		t.Fatalf("one source of the two required made a price at %s", p.At)
 	}
+	// The platform's own market is all an unfollowed pair has: it is
+	// enough whatever the minimum.
+	r.sources["BTC-USDT"] = []domain.SourcePrice{{Source: SourcePlatform, Price: d("60200")}}
+	r.run(1)
+	if p, _ := r.marks.Latest(perp.Symbol); !p.At.Equal(r.now) || !p.Index.Equal(d("60200")) {
+		t.Fatalf("the platform's market alone: %s at %s", p.Index, p.At)
+	}
 }
 
 // The platform coin's index pair follows no reference market: its index
@@ -300,12 +307,15 @@ func TestIndexWeightsAndMinimumSources(t *testing.T) {
 // averaged with the book's middle while that is within 1% of the last
 // trade and the top of the book is worth 100 on both sides; the middle
 // alone a while after the last trade. A followed pair keeps the reference
-// market's sources only.
+// market's sources only, and so does every pair while the listing was
+// never read.
 func TestPlatformIndex(t *testing.T) {
 	ctx := context.Background()
 	now := at("2026-10-02T10:00:00Z")
 	svc := newService(t, newMemStore(), &now)
-	refs := NewReferenceMap(testListing(), slog.New(slog.DiscardHandler))
+	list := testListing()
+	list.pairs = append(list.pairs, ports.Pair{Symbol: "ASTRA-USDT", Base: "ASTRA", Quote: "USDT", Status: "TRADING"})
+	refs := NewReferenceMap(list, slog.New(slog.DiscardHandler))
 	idx := PlatformIndex{Feed: fakeSources{"BTC-USDT": {{Source: "binance", Price: d("60000")}}}, Svc: svc, Refs: refs}
 	if got := idx.Prices("BTC-USDT"); len(got) != 1 || got[0].Source != "binance" {
 		t.Fatalf("a followed pair: %+v", got)
@@ -321,6 +331,10 @@ func TestPlatformIndex(t *testing.T) {
 	}
 	if _, err := svc.OnTrades(ctx, []domain.Trade{older, first, second}); err != nil {
 		t.Fatal(err)
+	}
+	blind := PlatformIndex{Feed: fakeSources{}, Svc: svc, Refs: NewReferenceMap(unlisted{list}, slog.New(slog.DiscardHandler))}
+	if got := blind.Prices("ASTRA-USDT"); len(got) != 0 {
+		t.Fatalf("the listing never read: %+v", got)
 	}
 	price := func() decimal.Decimal {
 		t.Helper()
@@ -366,3 +380,8 @@ func TestPlatformIndex(t *testing.T) {
 		t.Fatalf("the book's middle still: %s %v", mid, ok)
 	}
 }
+
+// unlisted is instrument-service without its listing.
+type unlisted struct{ listing }
+
+func (unlisted) Pairs(context.Context) ([]ports.Pair, error) { return nil, errListingDown }

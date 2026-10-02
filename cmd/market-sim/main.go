@@ -49,11 +49,13 @@ type settings struct {
 	MarketURL      string `koanf:"market_data_service_url"`
 	InstrumentURL  string `koanf:"instrument_service_url"`
 	InstrumentAddr string `koanf:"instrument_grpc_addr"`
-	// APISecret signs the management API's changes (SIM_API_SECRET, at
-	// least 32 characters; ASTRA design §6.2): only a caller holding it,
-	// the admin console's service or exchangectl in this container, may
-	// say who acts and who approved.
-	APISecret string `koanf:"sim_api_secret"`
+	// The management API's changes are signed (ASTRA design §6.2), with
+	// one key per caller, at least 32 characters each: APISecret
+	// (SIM_API_SECRET, key ID "ops") is exchangectl's in this container,
+	// AdminAPISecret (SIM_ADMIN_API_SECRET, key ID "admin") the admin
+	// console's service's, the only caller that may name an approver.
+	APISecret      string `koanf:"sim_api_secret"`
+	AdminAPISecret string `koanf:"sim_admin_api_secret"`
 }
 
 func (s *settings) Validate() error {
@@ -63,6 +65,9 @@ func (s *settings) Validate() error {
 	}
 	if err := svcsign.CheckSecret(s.APISecret); err != nil {
 		errs = append(errs, fmt.Errorf("SIM_API_SECRET: %w", err))
+	}
+	if err := svcsign.CheckSecret(s.AdminAPISecret); err != nil {
+		errs = append(errs, fmt.Errorf("SIM_ADMIN_API_SECRET: %w", err))
 	}
 	return errors.Join(append(errs, s.Postgres.Validate(), s.Kafka.Validate())...)
 }
@@ -107,7 +112,10 @@ func setup(ctx context.Context, a *app.App) error {
 		flagClient, a.Logger(), a.Metrics())
 	sim.Derivatives = client
 	r := a.NewRouter()
-	(&httpapi.Handler{Sim: sim, Signed: &svcsign.Verifier{Secret: []byte(cfg.APISecret)}}).Routes(r)
+	signed := &svcsign.Verifier{Keys: map[string][]byte{
+		httpapi.KeyOps: []byte(cfg.APISecret), httpapi.KeyAdmin: []byte(cfg.AdminAPISecret),
+	}}
+	(&httpapi.Handler{Sim: sim, Signed: signed}).Routes(r)
 	if err := bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r); err != nil {
 		return err
 	}
