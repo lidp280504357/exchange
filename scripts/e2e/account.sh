@@ -82,8 +82,12 @@ expect 200 - "login from a new device"
 eventually 20 "new-device notice" has_notice NEW_DEVICE_LOGIN
 security_mail() { (( $(inbox_count "$EMAIL") > mails_before )); }
 eventually 20 "new-device mail" security_mail
-curl -s "$BASE/v1/dev/messages?target=$(jq -rn --arg e "$EMAIL" '$e|@uri')" | jq -e '.messages[0].subject | test("New device sign-in")' >/dev/null
-echo "ok   mail is in the user's language"
+# Any of the inbox's mails, not the newest: another may have come since.
+in_language() {
+  call GET "/v1/dev/messages?target=$(jq -rn --arg e "$EMAIL" '$e|@uri')" "" &&
+    jq -e 'any(.messages[]; .subject | test("New device sign-in"))' <<<"$BODY" >/dev/null
+}
+eventually 20 "mail is in the user's language" in_language
 
 echo "== freeze"
 $EXCHANGECTL users status "$USER_ID" --to FROZEN --reason E2E_TEST --note "scripts/e2e/account.sh"
