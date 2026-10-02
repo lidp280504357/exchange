@@ -428,6 +428,8 @@ type CustodyTrade struct {
 	Memo    string
 	Amount  decimal.Decimal
 	Fee     decimal.Decimal
+	// Decimals is how many decimals the custodian counted the amounts in.
+	Decimals int32
 	// RawAmount is the amount in the coin's smallest unit.
 	RawAmount  decimal.Decimal
 	TxHash     string

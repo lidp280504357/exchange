@@ -163,11 +163,17 @@ func (s *Server) GetSystemBalances(ctx context.Context, req *ledgerv1.GetSystemB
 	if err != nil {
 		return nil, err
 	}
+	parked, err := s.svc.HouseParked(ctx)
+	if err != nil {
+		return nil, err
+	}
 	resp := &ledgerv1.GetSystemBalancesResponse{}
 	for _, a := range list {
-		resp.Balances = append(resp.Balances, &ledgerv1.Balance{
-			AccountType: a.Key.Type, Asset: a.Key.Asset, Available: a.Available.String(), Frozen: a.Frozen.String(),
-		})
+		b := &ledgerv1.Balance{AccountType: a.Key.Type, Asset: a.Key.Asset, Available: a.Available.String(), Frozen: a.Frozen.String()}
+		if a.Key.Type == domain.AccountMarketMaker {
+			b.Parked = parked[a.Key.Asset].String()
+		}
+		resp.Balances = append(resp.Balances, b)
 	}
 	return resp, nil
 }

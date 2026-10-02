@@ -157,15 +157,19 @@ type Account struct {
 }
 
 // Apply adds a line to the balances; an account that may not go negative
-// refuses to.
+// refuses a line that takes the balance it changes below zero. A line that
+// brings a balance up always passes, even while it stays below zero: an
+// account that went negative (HOUSE's MARKET_MAKER in a backed asset, by a
+// rule that changed) is made whole by credits, and the trades refused
+// meanwhile settle on their retry.
 func (a *Account) Apply(l Line) error {
 	available, frozen := a.Available, a.Frozen
+	changed := &available
 	if l.Kind == Frozen {
-		frozen = frozen.Add(l.Amount)
-	} else {
-		available = available.Add(l.Amount)
+		changed = &frozen
 	}
-	if !a.Key.MayGoNegative() && (available.IsNegative() || frozen.IsNegative()) {
+	*changed = changed.Add(l.Amount)
+	if !a.Key.MayGoNegative() && l.Amount.IsNegative() && changed.IsNegative() {
 		kind := strings.ToLower(l.Kind)
 		return ErrInsufficientBalance.WithDetail("asset", a.Key.Asset).WithDetail("account_type", a.Key.Type).WithDetail("balance", kind)
 	}

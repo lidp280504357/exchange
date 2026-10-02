@@ -205,3 +205,27 @@ func TestUpdatesDoNotGiveBackUsedRoom(t *testing.T) {
 		t.Fatalf("buy room %s, restored %s, want 0.5", b.ref.BuyRoom, c.ref.BuyRoom)
 	}
 }
+
+// An empty update (HOUSE offers nothing for a while: the publisher could
+// not read its holdings) keeps the fills: the next update, from holdings
+// read before they settled, still takes them off (review M2, 2026-10-02).
+func TestAnEmptyUpdateKeepsTheFills(t *testing.T) {
+	b := NewBook("BTC-USDT")
+	first := ref()
+	first.SellRoom, first.HoldingsAt = d("0.6"), t0.Add(-time.Second)
+	b.Reference(first)
+	buy := at(order("u", Buy, Limit, IOC, "61000", "0.4"), 100*time.Millisecond)
+	expect(t, b.Place(buy), "T 0.4@60010; "+buy.ID+" FILLED 0.4/24004")
+	empty := Reference{At: t0.Add(250 * time.Millisecond)}
+	b.Reference(empty)
+	if len(b.houseFills) != 1 {
+		t.Fatalf("fills after an empty update: %v", b.houseFills)
+	}
+	// Holdings read just before the fill settled (SettleLag): 0.6 again.
+	back := ref()
+	back.SellRoom, back.HoldingsAt, back.At = d("0.6"), t0.Add(500*time.Millisecond), t0.Add(time.Second)
+	b.Reference(back)
+	if !b.ref.SellRoom.Equal(d("0.2")) {
+		t.Fatalf("room %s, want 0.2", b.ref.SellRoom)
+	}
+}

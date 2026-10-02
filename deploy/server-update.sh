@@ -39,10 +39,11 @@ lift_deploy_degradations() {
   done
 }
 
-# prune_build_cache 删除 6 小时内没用过的构建缓存（常用的 Go 模块与编译缓存会留下）。Docker 29 上
-# --keep-storage 什么也不删，不带 -a 也只删悬空记录：2026-10-01 缓存涨到 21 GB，一次构建写满磁盘。
+# prune_build_cache [AGE] 删除 AGE（默认 6h）内没用过的构建缓存（常用的 Go 模块与编译缓存会留下）。Docker 29 上
+# --keep-storage 什么也不删，不带 -a 也只删悬空记录：2026-10-01 缓存涨到 21 GB，一次构建写满磁盘。部署成功后
+# 用 1h：只留这次构建用到的；只在构建前删 6 小时没用过的，一天十几次部署的旧层仍会攒到 14 GB（2026-10-02）。
 prune_build_cache() {
-  sudo docker builder prune -a -f --filter until=6h >/dev/null 2>&1 || echo "== 构建缓存清理失败（不影响部署）"
+  sudo docker builder prune -a -f --filter "until=${1:-6h}" >/dev/null 2>&1 || echo "== 构建缓存清理失败（不影响部署）"
 }
 
 # ensure_disk_space 在构建前确认磁盘还有余量：磁盘写满时 Docker 会丢掉运行中容器的网络端点
@@ -118,7 +119,7 @@ main() {
     sudo docker compose "${COMPOSE[@]}" up -d --remove-orphans --wait --wait-timeout 180
   fi
   sudo docker image prune -f >/dev/null
-  prune_build_cache
+  prune_build_cache 1h
   # nginx 配置是挂载进容器的文件，内容变了 compose 不会重启它：校验后热加载（校验失败则部署失败，旧配置继续服务）
   sudo docker compose "${COMPOSE[@]}" exec -T nginx sh -c 'nginx -t -q && nginx -s reload' && echo "== nginx 配置已重新加载"
   if [ -f "$INFRA/docker-compose.apps.yml" ]; then

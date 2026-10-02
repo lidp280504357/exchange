@@ -10,6 +10,7 @@ package application
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -47,9 +48,18 @@ type Service struct {
 	// CallbacksRejected counts the callbacks refused for their signature,
 	// age or form, kept or not (HandleCallback); nil counts nothing.
 	CallbacksRejected prometheus.Counter
+	// Contradictions counts custodian callbacks that deny what a finished
+	// withdrawal became (sent after it failed, failed after it was
+	// confirmed); a person checks each.
+	Contradictions prometheus.Counter
 	// Discrepancies counts custodian callbacks that disagree with a deposit
 	// an administrator backfilled (matchManual); nil counts nothing.
 	Discrepancies prometheus.Counter
+
+	// The custodian's coins' decimals, as last read (coinDecimals).
+	coinsMu        sync.Mutex
+	coinsAt        time.Time
+	coinDecimalsOf map[string]int32
 }
 
 // DepositAddress returns the user's deposit address for an asset on a

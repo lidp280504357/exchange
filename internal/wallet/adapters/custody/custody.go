@@ -167,6 +167,9 @@ func tradeOf(env udun.Envelope) (ports.CustodyTrade, error) {
 	if out.Amount, out.Fee, err = t.Value(); err != nil {
 		return out, err
 	}
+	if d, err := strconv.ParseInt(string(t.Decimals), 10, 32); err == nil {
+		out.Decimals = int32(d)
+	}
 	if t.Amount != "" {
 		if out.RawAmount, err = decimal.NewFromString(string(t.Amount)); err != nil {
 			return out, fmt.Errorf("amount %q", t.Amount)

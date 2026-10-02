@@ -124,6 +124,7 @@ func setup(ctx context.Context, a *app.App) error {
 		return err
 	}
 	a.Add("reconciliation", app.Loop(reconcileLoop(a, store, cfg.ReconcileInterval)))
+	a.Add("failed trades", app.Loop(retryLoop(a, svc, time.Minute)))
 
 	srv, err := bootstrap.GRPCServer(ctx, a, cfg.GRPCAddr)
 	if err != nil {
@@ -133,6 +134,30 @@ func setup(ctx context.Context, a *app.App) error {
 	r := a.NewRouter()
 	(&httpapi.Handler{Svc: svc}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
+}
+
+// retryLoop settles the trades parked as FAILED again every interval: the
+// cause is usually a balance short for a while (HOUSE's backed inventory
+// before it is topped up), and a person should not have to run
+// exchangectl ledger retry-trades for it. What still fails stays FAILED,
+// counted and reported by the reconciliation.
+func retryLoop(a *app.App, svc *application.Service, interval time.Duration) func(context.Context) error {
+	return func(ctx context.Context) error {
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(interval):
+			}
+			res, err := svc.RetryFailed(ctx, 200)
+			switch {
+			case err != nil && ctx.Err() == nil:
+				a.Logger().WarnContext(ctx, "retrying the failed trades failed", "error", err)
+			case res.Settled > 0:
+				a.Logger().InfoContext(ctx, "failed trades settled on their retry", "settled", res.Settled, "still_failed", res.Failed)
+			}
+		}
+	}
 }
 
 // reconcileLoop checks the ledger's invariants soon after start and then

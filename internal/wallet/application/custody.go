@@ -156,10 +156,16 @@ func (s *Service) apply(ctx context.Context, c ports.Custody, cb domain.Callback
 	err := s.Store.Tx(ctx, func(r ports.Repos) error {
 		var result, detail string
 		var err error
-		switch t.Kind {
-		case domain.CallbackDeposit:
+		switch want, known := s.coinDecimals(ctx, c, t.Coin); {
+		case known && want != t.Decimals && (t.Amount.IsPositive() || t.Fee.IsPositive()):
+			// 25500000 at 0 decimals of a coin with 6 would book 25.5
+			// million: a callback that counts in other decimals than the
+			// custodian lists for the coin is left to a person.
+			result, detail = domain.CallbackUnmatched, fmt.Sprintf("the callback counts %s in %d decimals, the custodian lists %d", t.Coin,
+				t.Decimals, want)
+		case t.Kind == domain.CallbackDeposit:
 			result, detail, err = s.applyDeposit(ctx, r, c.Provider(), t, now)
-		case domain.CallbackWithdrawal:
+		case t.Kind == domain.CallbackWithdrawal:
 			result, detail, settle, err = s.applyWithdrawal(ctx, r, c.Provider(), t, now)
 		default:
 			result, detail = domain.CallbackIgnored, "neither a deposit nor a withdrawal"
@@ -184,6 +190,32 @@ func (s *Service) apply(ctx context.Context, c ports.Custody, cb domain.Callback
 		s.settleOne(ctx, t.BusinessID)
 	}
 	return cb, nil
+}
+
+// coinsEvery is how long the custodian's list of coins (their decimals)
+// is kept.
+const coinsEvery = 10 * time.Minute
+
+// coinDecimals is how many decimals the custodian lists for coin, false
+// when the list cannot be read (the callback's own decimals are then
+// taken: the custodian's API being down must not stop the callbacks).
+func (s *Service) coinDecimals(ctx context.Context, c ports.Custody, coin string) (int32, bool) {
+	s.coinsMu.Lock()
+	defer s.coinsMu.Unlock()
+	if s.coinsAt.IsZero() || s.Now().Sub(s.coinsAt) >= coinsEvery {
+		list, err := c.Coins(ctx)
+		if err != nil {
+			s.Log.WarnContext(ctx, "the custodian's coins not read: callbacks taken at their own decimals", "error", err)
+		} else {
+			s.coinDecimalsOf = make(map[string]int32, len(list))
+			for _, k := range list {
+				s.coinDecimalsOf[k.Code] = k.Decimals
+			}
+			s.coinsAt = s.Now()
+		}
+	}
+	d, ok := s.coinDecimalsOf[coin]
+	return d, ok
 }
 
 // networkOfCoin finds the custodian's network of a coin.
@@ -293,6 +325,19 @@ func (s *Service) matchManual(ctx context.Context, r ports.Repos, provider strin
 	return domain.CallbackDiscrepancy, fmt.Sprintf("deposit %s, backfilled by %s: %s", d.ID, d.EnteredBy, d.Discrepancy), nil
 }
 
+// contradicts reports whether the custodian's word denies what a finished
+// withdrawal became: sent after it failed (its funds released), or failed
+// after it was confirmed.
+func contradicts(w *domain.Withdrawal, word string) bool {
+	switch w.Status {
+	case domain.WithdrawalFailed:
+		return word == domain.CustodySuccess
+	case domain.WithdrawalConfirmed:
+		return word == domain.CustodyFailed || word == domain.CustodyRejected
+	}
+	return false
+}
+
 // applyWithdrawal applies the custodian's word on a withdrawal it was
 // handed (domain.Withdrawal.Custodian). It reports whether the
 // withdrawal is now to be settled.
@@ -311,6 +356,19 @@ func (s *Service) applyWithdrawal(ctx context.Context, r ports.Repos, provider s
 		return domain.CallbackUnmatched, "withdrawal " + w.ID + " is not with " + provider, false, nil
 	case t.Word == "":
 		return domain.CallbackIgnored, fmt.Sprintf("unknown status %d", t.Status), false, nil
+	}
+	if contradicts(w, t.Word) {
+		// Sent after we released it as failed, or failed after it was
+		// confirmed: the only sign that money left while we unfroze it.
+		// Nothing is reversed on its own; a person checks with the
+		// custodian (Attention, CustodyWithdrawalContradiction).
+		if s.Contradictions != nil {
+			s.Contradictions.Inc()
+		}
+		s.Log.ErrorContext(ctx, "the custodian contradicts a finished withdrawal: nothing reversed, a person checks",
+			"withdrawal_id", w.ID, "status", w.Status, "custodian_says", t.Word, "tx", t.TxHash)
+		return domain.CallbackDiscrepancy, fmt.Sprintf("withdrawal %s is %s but the custodian says %s (tx %q): nothing reversed, a person checks",
+			w.ID, w.Status, t.Word, t.TxHash), false, nil
 	}
 	if !w.Custodian(t.Word, t.TxHash, now) {
 		return domain.CallbackIgnored, fmt.Sprintf("withdrawal %s is %s (%s)", w.ID, w.Status, w.ProviderStatus), false, nil

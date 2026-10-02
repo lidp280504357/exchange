@@ -3,6 +3,7 @@ package udun
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -75,16 +76,18 @@ func (t Trade) Kind() (tradeType, status int, err error) {
 	return tradeType, status, nil
 }
 
-// Value returns the amount and fee in the coin's unit.
+// Value returns the amount and fee in the coin's unit. A trade without its
+// decimals is refused: read as 0 decimals, 25500000 of a token with 6
+// would be booked as 25.5 million.
 func (t Trade) Value() (amount, fee decimal.Decimal, err error) {
-	decimals := int32(0)
-	if t.Decimals != "" {
-		d, err := strconv.ParseInt(string(t.Decimals), 10, 32)
-		if err != nil || d < 0 || d > 36 {
-			return decimal.Zero, decimal.Zero, fmt.Errorf("udun: bad decimals %q", t.Decimals)
-		}
-		decimals = int32(d)
+	if t.Decimals == "" {
+		return decimal.Zero, decimal.Zero, errors.New("udun: the trade has no decimals")
 	}
+	d, err := strconv.ParseInt(string(t.Decimals), 10, 32)
+	if err != nil || d < 0 || d > 36 {
+		return decimal.Zero, decimal.Zero, fmt.Errorf("udun: bad decimals %q", t.Decimals)
+	}
+	decimals := int32(d)
 	scaled := func(s Text, name string) (decimal.Decimal, error) {
 		if s == "" {
 			return decimal.Zero, nil

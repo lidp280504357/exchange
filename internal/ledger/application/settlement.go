@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/lidp280504357/exchange/internal/ledger/domain"
 	"github.com/lidp280504357/exchange/internal/ledger/ports"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
@@ -40,6 +42,27 @@ func (s *Service) RetryFailed(ctx context.Context, limit int) (SettleResult, err
 		failed[i], failed[j] = failed[j], failed[i]
 	}
 	return s.settle(ctx, failed, true)
+}
+
+// HouseParked is what HOUSE owes, by asset, in the trades parked as FAILED
+// (the base it sold, the quote it paid): not off its MARKET_MAKER
+// accounts yet, so its liquidity publisher takes it off the holdings it
+// quotes from until the retry settles them (review L2, 2026-10-02).
+func (s *Service) HouseParked(ctx context.Context) (map[string]decimal.Decimal, error) {
+	failed, err := s.Store.Read().Trades().List(ctx, domain.TradeFailed, 1000)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]decimal.Decimal{}
+	for _, t := range failed {
+		switch t.HouseSide {
+		case domain.HouseSell:
+			out[t.BaseAsset] = out[t.BaseAsset].Add(t.Quantity)
+		case domain.HouseBuy:
+			out[t.QuoteAsset] = out[t.QuoteAsset].Add(t.Quote)
+		}
+	}
+	return out, nil
 }
 
 // Trades lists recorded trades, newest first, optionally of one status.

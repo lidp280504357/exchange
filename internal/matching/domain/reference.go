@@ -193,6 +193,10 @@ func (b *Book) houseFill(u *Order, userMaker bool, house string, price, qty deci
 	return Event{Kind: KindTrade, Seq: seq, Symbol: b.Symbol, Trade: t}
 }
 
+// maxHouseFills bounds the fills kept while no holdings come (HOUSE trades
+// only while it offers, so this is a guard, not a limit reached).
+const maxHouseFills = 10_000
+
 // Reference replaces the book's reference liquidity (a ReferenceBookUpdate)
 // and fills the resting orders its prices reach (ADR-0015 §4): buys at or
 // above HOUSE's best ask, sells at or below its best bid, best price
@@ -214,10 +218,14 @@ func (b *Book) Reference(r Reference) []Event {
 // publisher refreshes the holdings every second but sends an update every
 // 250 ms, and each update would otherwise give back room already used, so
 // HOUSE could sell more than it holds (ADR-0013). Fills from before that
-// are in the holdings; they are forgotten.
+// are in the holdings; they are forgotten. An update without holdings (an
+// empty book: HOUSE offers nothing) keeps them: the next update with
+// holdings read after a slow settlement must still take them off.
 func (b *Book) tightenRooms() {
 	if b.ref.HoldingsAt.IsZero() {
-		b.houseFills = nil
+		if n := len(b.houseFills); n > maxHouseFills {
+			b.houseFills = append(b.houseFills[:0], b.houseFills[n-maxHouseFills:]...)
+		}
 		return
 	}
 	since := b.ref.HoldingsAt.Add(-SettleLag)

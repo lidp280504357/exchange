@@ -135,6 +135,10 @@ message Balance {
   string asset = 2;
   string available = 3;
   string frozen = 4;
+  // GetSystemBalances, MARKET_MAKER only: what HOUSE owes in this asset in
+  // trades the ledger parked as FAILED (not off available yet); HOUSE's
+  // liquidity publisher takes it off the holdings it quotes from.
+  string parked = 5;
 }
 
 message GetBalancesRequest {

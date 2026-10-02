@@ -358,3 +358,19 @@ tests:
             exp_annotations:
               summary: "the simulated market of ASTRA-USDT has been silent for over a minute: market-sim is down or stuck; with sim.halt_on_loss the pair and its perpetual are halted until it is back"
               runbook: docs/runbook/market-sim.md
+
+  - interval: 1m
+    input_series:
+      - series: 'wallet_custody_withdrawal_contradictions_total{job="wallet-service", instance="w"}'
+        values: '0x4 1x10'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: CustodyWithdrawalContradiction
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: CustodyWithdrawalContradiction
+        exp_alerts:
+          - exp_labels: {severity: critical, job: wallet-service}
+            exp_annotations:
+              summary: "the custodian contradicted a finished withdrawal (sent after it failed and was released, or failed after it was confirmed): money may have left twice or not at all; nothing was reversed, check the callback in the console's custody page"
+              runbook: docs/runbook/custody.md

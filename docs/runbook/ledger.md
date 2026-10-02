@@ -54,7 +54,7 @@ ssh exchange sudo docker exec exchange-infra-ledger-service-1 /app/exchangectl l
 - 事务里先按固定顺序锁住整批涉及的账户，再逐笔在内存里模拟全部 line：一笔成交要么三条都记，要么都不记。
 - 账本拒绝的成交（事件不合法、超精度、冻结不足）记为 `FAILED` 并写明原因，这笔什么都不记，同批其他成交照常结算。这说明上游有 bug，是 P1：
   - 表现：指标 `ledger_trades_failed_total`（告警 `TradeSettlementRefused`）、错误日志 `trade settlement refused`、对账 `TRADES_SETTLED` 非零。
-  - 处理：`exchangectl ledger trades --failed` 看原因，修复后 `exchangectl ledger retry-trades` 重新结算。
+  - 处理：`exchangectl ledger trades --failed` 看原因，修复后 `exchangectl ledger retry-trades` 重新结算。ledger-service 也每分钟自动重试一次（每次最多 200 笔，结清的记 INFO 日志 `failed trades settled on their retry`）：HOUSE 可充提资产一时不够（补足之前）这类原因不必人工处理。
 - 数据库或 instrument-service 出错时整批重试，不跳过。
 - 其他指标：`ledger_trades_settled_total`、`ledger_settlement_batch_seconds`、`kafka_consumer_lag{group="ledger-settlement"}`。
 
@@ -71,7 +71,7 @@ ssh exchange sudo docker exec exchange-infra-ledger-service-1 /app/exchangectl l
 阶段 4 B4：用户与 HOUSE 的虚拟流动性成交（见 [market-maker.md](market-maker.md)）时，成交事件带 `house_side`（HOUSE 买或卖）。
 
 - 结算分录是 `HOUSE_TRADE_SETTLE`（键同样是 `trade:<成交ID>`）：用户一方与 `TRADE_SETTLE` 完全相同（从冻结付出、收进可用），HOUSE 一方记在系统科目 `MARKET_MAKER` 各资产的**可用**余额上，没有订单、冻结与手续费。用户的手续费与限价差额照常记 `TRADE_FEE`、`ORDER_UNFREEZE`。
-- `MARKET_MAKER` 可以为负：内部资产（除 USDT、BTC、ETH 外的 47 个币）没有真实库存，HOUSE 卖出后记负数；可充提资产只在事故时为负（HOUSE 的额度保留了 1,000 USDT 的余量），告警 `HouseInventoryNegative`。
+- `MARKET_MAKER` 可以为负：内部资产（除 USDT、BTC、ETH 外的站内币）没有真实库存，HOUSE 卖出后记负数。可充提资产（USDT、BTC、ETH）不得低于 0：使它低于 0 的借方被拒、那笔成交挂为 `FAILED`；贷方永远放行，已经低于 0（事故或规则变更前留下的）也能被补足，挂起的成交随后的自动重试结清（ADR-0013「修订」）。挂起成交里 HOUSE 应付的量由 `GetSystemBalances` 的 `parked` 报给 market-maker，从报价用的持仓里扣掉，免得重试结清前再卖一次。告警 `HouseInventoryNegative`。
 - 校验：HOUSE 买入时买方手续费与限价必须为 0，卖出时卖方手续费为 0；`ledger.trades.house_side` 记下 HOUSE 的方向。
 - 对账：不变量 5 的 `TRADE_SETTLE_MATCHES_TRADES` 把 `HOUSE_TRADE_SETTLE` 一起算。
 - HOUSE 的库存（模拟资金）从 `ADJUSTMENT` 调入 `MARKET_MAKER`（`MANUAL_ADJUSTMENT`，需要 `ledger.manual_adjustment`，同事务写审计事件 `house:MARKET_MAKER`）：

@@ -135,7 +135,7 @@ func clip(s string, n int) string {
 func (r callbacks) Attention(ctx context.Context) (int, time.Time, error) {
 	var n int
 	var last *time.Time
-	err := r.q.QueryRow(ctx, `SELECT count(*) FILTER (WHERE signature_ok AND result IN ('FAILED', 'UNMATCHED')), max(received_at)
+	err := r.q.QueryRow(ctx, `SELECT count(*) FILTER (WHERE signature_ok AND result IN ('FAILED', 'UNMATCHED', 'DISCREPANCY')), max(received_at)
 		FROM custody_callbacks`).Scan(&n, &last)
 	if err != nil {
 		return 0, time.Time{}, fmt.Errorf("count callbacks: %w", err)

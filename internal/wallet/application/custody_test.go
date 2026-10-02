@@ -227,6 +227,13 @@ func newCustodyHarness(t *testing.T) *custodyHarness {
 
 func (h *custodyHarness) callback(t *testing.T, tr ports.CustodyTrade) domain.Callback {
 	t.Helper()
+	if tr.Decimals == 0 { // as the custodian counts the coin, unless a test says otherwise
+		for _, c := range h.custody.coins {
+			if c.Code == tr.Coin {
+				tr.Decimals = c.Decimals
+			}
+		}
+	}
 	raw, err := json.Marshal(tr)
 	if err != nil {
 		t.Fatal(err)
@@ -436,6 +443,39 @@ func TestCustodyWithdrawalSent(t *testing.T) {
 	}
 	if got := eventNames(h.store.wevents); !slices.Equal(got, []string{"WithdrawalSubmitted", "WithdrawalConfirmed"}) {
 		t.Fatalf("events %v", got)
+	}
+	// The custodian then says it failed: the confirmed withdrawal is left
+	// as it is and a person checks (review ①, 2026-10-02).
+	reg := prometheus.NewRegistry()
+	h.svc.Contradictions = prometheus.NewCounter(prometheus.CounterOpts{Name: "contradictions"})
+	reg.MustRegister(h.svc.Contradictions)
+	trade.TradeID, trade.Status, trade.Word = "w-1b", 4, domain.CustodyFailed
+	if cb := h.callback(t, trade); cb.Result != domain.CallbackDiscrepancy || !strings.Contains(cb.Detail, "nothing reversed") {
+		t.Fatalf("failed after it was confirmed: %+v", cb)
+	}
+	mfs, err := reg.Gather()
+	if err != nil || len(mfs) != 1 || mfs[0].GetMetric()[0].GetCounter().GetValue() != 1 {
+		t.Fatalf("not counted: %v %v", mfs, err)
+	}
+	if got := h.store.wds[wd.ID]; got.Status != domain.WithdrawalConfirmed {
+		t.Fatalf("the withdrawal %+v", got)
+	}
+}
+
+// A callback that counts a coin in other decimals than the custodian
+// lists for it is not booked: a person looks at it (review ②).
+func TestCustodyCallbacksInOtherDecimalsAreNotBooked(t *testing.T) {
+	h := newCustodyHarness(t)
+	addr, _, err := h.svc.DepositAddress(context.Background(), "alice", "USDT", tron)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cb := h.callback(t, ports.CustodyTrade{
+		TradeID: "t-dec", Kind: domain.CallbackDeposit, Status: 3, Word: domain.CustodySuccess, Coin: usdtCoin, Address: addr.Address,
+		Amount: d("0.255"), RawAmount: d("25500000"), Decimals: 8, TxHash: "dec",
+	})
+	if cb.Result != domain.CallbackUnmatched || !strings.Contains(cb.Detail, "in 8 decimals, the custodian lists 6") || len(h.store.deposits) != 0 {
+		t.Fatalf("callback %+v, deposits %d", cb, len(h.store.deposits))
 	}
 }
 

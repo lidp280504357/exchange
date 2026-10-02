@@ -79,6 +79,24 @@ func TestApplyRefusesNegativeBalances(t *testing.T) {
 	if err := fee.Apply(Line{Amount: d("-1"), Kind: Available}); err == nil {
 		t.Fatal("fee revenue may not go negative")
 	}
+	// HOUSE below zero in a backed asset (a rule that changed, a hand
+	// adjustment): credits bring it back, debits stay refused.
+	house := Account{Key: SystemAccount(AccountMarketMaker, "USDT"), Available: d("-100")}
+	if err := house.Apply(Line{Amount: d("40"), Kind: Available}); err != nil || !house.Available.Equal(d("-60")) {
+		t.Fatalf("a credit to an account below zero: %v %+v", err, house)
+	}
+	if err := house.Apply(Line{Amount: d("-1"), Kind: Available}); !apperr.Is(err, "LEDGER_INSUFFICIENT_BALANCE") {
+		t.Fatalf("a debit below zero: %v", err)
+	}
+	if err := house.Apply(Line{Amount: d("70"), Kind: Available}); err != nil || !house.Available.Equal(d("10")) {
+		t.Fatalf("made whole: %v %+v", err, house)
+	}
+	// Only the balance the line changes counts: a frozen line goes through
+	// while the available one is below zero.
+	odd := Account{Key: SystemAccount(AccountMarketMaker, "BTC"), Available: d("-1"), Frozen: d("2")}
+	if err := odd.Apply(Line{Amount: d("-1"), Kind: Frozen}); err != nil || !odd.Frozen.Equal(d("1")) {
+		t.Fatalf("a frozen line: %v %+v", err, odd)
+	}
 }
 
 func TestBuilders(t *testing.T) {

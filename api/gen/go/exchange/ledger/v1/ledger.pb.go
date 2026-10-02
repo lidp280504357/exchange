@@ -488,11 +488,15 @@ func (x *TransferResponse) GetTransferId() string {
 }
 
 type Balance struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AccountType   string                 `protobuf:"bytes,1,opt,name=account_type,json=accountType,proto3" json:"account_type,omitempty"`
-	Asset         string                 `protobuf:"bytes,2,opt,name=asset,proto3" json:"asset,omitempty"`
-	Available     string                 `protobuf:"bytes,3,opt,name=available,proto3" json:"available,omitempty"`
-	Frozen        string                 `protobuf:"bytes,4,opt,name=frozen,proto3" json:"frozen,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	AccountType string                 `protobuf:"bytes,1,opt,name=account_type,json=accountType,proto3" json:"account_type,omitempty"`
+	Asset       string                 `protobuf:"bytes,2,opt,name=asset,proto3" json:"asset,omitempty"`
+	Available   string                 `protobuf:"bytes,3,opt,name=available,proto3" json:"available,omitempty"`
+	Frozen      string                 `protobuf:"bytes,4,opt,name=frozen,proto3" json:"frozen,omitempty"`
+	// GetSystemBalances, MARKET_MAKER only: what HOUSE owes in this asset in
+	// trades the ledger parked as FAILED (not off available yet); HOUSE's
+	// liquidity publisher takes it off the holdings it quotes from.
+	Parked        string `protobuf:"bytes,5,opt,name=parked,proto3" json:"parked,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -551,6 +555,13 @@ func (x *Balance) GetAvailable() string {
 func (x *Balance) GetFrozen() string {
 	if x != nil {
 		return x.Frozen
+	}
+	return ""
+}
+
+func (x *Balance) GetParked() string {
+	if x != nil {
+		return x.Parked
 	}
 	return ""
 }
@@ -2610,12 +2621,13 @@ const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
 	"\x10TransferResponse\x125\n" +
 	"\aposting\x18\x01 \x01(\v2\x1b.exchange.ledger.v1.PostingR\aposting\x12\x1f\n" +
 	"\vtransfer_id\x18\x02 \x01(\tR\n" +
-	"transferId\"x\n" +
+	"transferId\"\x90\x01\n" +
 	"\aBalance\x12!\n" +
 	"\faccount_type\x18\x01 \x01(\tR\vaccountType\x12\x14\n" +
 	"\x05asset\x18\x02 \x01(\tR\x05asset\x12\x1c\n" +
 	"\tavailable\x18\x03 \x01(\tR\tavailable\x12\x16\n" +
-	"\x06frozen\x18\x04 \x01(\tR\x06frozen\"P\n" +
+	"\x06frozen\x18\x04 \x01(\tR\x06frozen\x12\x16\n" +
+	"\x06parked\x18\x05 \x01(\tR\x06parked\"P\n" +
 	"\x12GetBalancesRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12!\n" +
 	"\faccount_type\x18\x02 \x01(\tR\vaccountType\"N\n" +

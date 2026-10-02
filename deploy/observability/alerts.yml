@@ -181,6 +181,13 @@ groups:
           summary: "the simulated market has had no fresh BTC and ETH reference prices for 5 minutes: the platform coin's price no longer follows the market"
           runbook: docs/runbook/market-sim.md
 
+      - alert: CustodyWithdrawalContradiction
+        expr: sum by (job) (increase(wallet_custody_withdrawal_contradictions_total[15m])) > 0
+        labels: {severity: critical}
+        annotations:
+          summary: "the custodian contradicted a finished withdrawal (sent after it failed and was released, or failed after it was confirmed): money may have left twice or not at all; nothing was reversed, check the callback in the console's custody page"
+          runbook: docs/runbook/custody.md
+
       - alert: MarketSimHeartbeatLost
         expr: max by (symbol) (market_sim_heartbeat_age_seconds) > 60
         labels: {severity: critical}

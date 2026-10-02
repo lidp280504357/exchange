@@ -240,7 +240,11 @@ func setup(ctx context.Context, a *app.App) error {
 			Help: "Custodian callbacks that disagree with a deposit an administrator backfilled; a person checks them.",
 		}),
 	}
-	a.Metrics().MustRegister(svc.FeesRefused, svc.CallbacksRejected, svc.Discrepancies)
+	svc.Contradictions = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "wallet_custody_withdrawal_contradictions_total",
+		Help: "Custodian callbacks that deny what a finished withdrawal became (sent after it failed, failed after it was confirmed); nothing is reversed, a person checks.",
+	})
+	a.Metrics().MustRegister(svc.FeesRefused, svc.CallbacksRejected, svc.Discrepancies, svc.Contradictions)
 	if cfg.XPub != "" {
 		deriver, err := evm.NewDeriver(cfg.XPub)
 		if err != nil {

@@ -21,7 +21,8 @@ type Inventory struct {
 }
 
 // Holdings returns the available balance of each asset's MARKET_MAKER
-// account.
+// account, less what HOUSE owes in trades the ledger parked as FAILED: it
+// is not off the balance yet, and quoting on it would sell it twice.
 func (i Inventory) Holdings(ctx context.Context) (domain.Holdings, error) {
 	resp, err := i.Client.GetSystemBalances(ctx, &ledgerv1.GetSystemBalancesRequest{})
 	if err != nil {
@@ -35,6 +36,13 @@ func (i Inventory) Holdings(ctx context.Context) (domain.Holdings, error) {
 		v, err := decimal.NewFromString(b.GetAvailable())
 		if err != nil {
 			return nil, fmt.Errorf("MARKET_MAKER %s: bad balance %q", b.GetAsset(), b.GetAvailable())
+		}
+		if p := b.GetParked(); p != "" {
+			owed, err := decimal.NewFromString(p)
+			if err != nil {
+				return nil, fmt.Errorf("MARKET_MAKER %s: bad parked %q", b.GetAsset(), p)
+			}
+			v = v.Sub(owed)
 		}
 		out[b.GetAsset()] = v
 	}
