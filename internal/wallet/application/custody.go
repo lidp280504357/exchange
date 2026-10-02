@@ -153,9 +153,11 @@ func callbackOf(provider string, t ports.CustodyTrade, raw string, now time.Time
 func (s *Service) apply(ctx context.Context, c ports.Custody, cb domain.Callback, t ports.CustodyTrade) (domain.Callback, error) {
 	now := s.Now()
 	var settle bool
+	var after []func() // what is counted and logged once the transaction committed
 	err := s.Store.Tx(ctx, func(r ports.Repos) error {
 		var result, detail string
 		var err error
+		after = after[:0]
 		switch want, known := s.coinDecimals(ctx, c, t.Coin); {
 		case known && want != t.Decimals && (t.Amount.IsPositive() || t.Fee.IsPositive()):
 			// 25500000 at 0 decimals of a coin with 6 would book 25.5
@@ -166,7 +168,7 @@ func (s *Service) apply(ctx context.Context, c ports.Custody, cb domain.Callback
 		case t.Kind == domain.CallbackDeposit:
 			result, detail, err = s.applyDeposit(ctx, r, c.Provider(), t, now)
 		case t.Kind == domain.CallbackWithdrawal:
-			result, detail, settle, err = s.applyWithdrawal(ctx, r, c.Provider(), t, now)
+			result, detail, settle, err = s.applyWithdrawal(ctx, r, c.Provider(), t, now, &after)
 		default:
 			result, detail = domain.CallbackIgnored, "neither a deposit nor a withdrawal"
 		}
@@ -181,6 +183,9 @@ func (s *Service) apply(ctx context.Context, c ports.Custody, cb domain.Callback
 		cb.Result, cb.Detail, cb.ProcessedAt = domain.CallbackFailed, err.Error(), now
 		ferr := s.Store.Tx(ctx, func(r ports.Repos) error { return r.Callbacks().Finish(ctx, cb.ID, cb.Result, cb.Detail, now) })
 		return cb, errors.Join(err, ferr)
+	}
+	for _, f := range after {
+		f()
 	}
 	s.Log.InfoContext(ctx, "custodian callback", "callback_id", cb.ID, "trade_id", cb.TradeID, "kind", cb.Kind, "status", cb.Status,
 		"result", cb.Result, "detail", cb.Detail)
@@ -363,8 +368,10 @@ func contradicts(w *domain.Withdrawal, word string) bool {
 
 // applyWithdrawal applies the custodian's word on a withdrawal it was
 // handed (domain.Withdrawal.Custodian). It reports whether the
-// withdrawal is now to be settled.
-func (s *Service) applyWithdrawal(ctx context.Context, r ports.Repos, provider string, t ports.CustodyTrade, now time.Time) (string, string, bool, error) {
+// withdrawal is now to be settled; what it counts and logs goes to after,
+// for once the transaction committed (a failed one is tried again).
+func (s *Service) applyWithdrawal(ctx context.Context, r ports.Repos, provider string, t ports.CustodyTrade, now time.Time, after *[]func(),
+) (string, string, bool, error) {
 	if _, err := uuid.Parse(t.BusinessID); err != nil {
 		return domain.CallbackUnmatched, "businessId " + t.BusinessID + " is not a withdrawal ID", false, nil
 	}
@@ -385,11 +392,14 @@ func (s *Service) applyWithdrawal(ctx context.Context, r ports.Repos, provider s
 		// confirmed: the only sign that money left while we unfroze it.
 		// Nothing is reversed on its own; a person checks with the
 		// custodian (Attention, CustodyWithdrawalContradiction).
-		if s.Contradictions != nil {
-			s.Contradictions.Inc()
-		}
-		s.Log.ErrorContext(ctx, "the custodian contradicts a finished withdrawal: nothing reversed, a person checks",
-			"withdrawal_id", w.ID, "status", w.Status, "custodian_says", t.Word, "tx", t.TxHash)
+		status := w.Status
+		*after = append(*after, func() {
+			if s.Contradictions != nil {
+				s.Contradictions.Inc()
+			}
+			s.Log.ErrorContext(ctx, "the custodian contradicts a finished withdrawal: nothing reversed, a person checks",
+				"withdrawal_id", w.ID, "status", status, "custodian_says", t.Word, "tx", t.TxHash)
+		})
 		return domain.CallbackDiscrepancy, fmt.Sprintf("withdrawal %s is %s but the custodian says %s (tx %q): nothing reversed, a person checks",
 			w.ID, w.Status, t.Word, t.TxHash), false, nil
 	}
@@ -403,7 +413,7 @@ func (s *Service) applyWithdrawal(ctx context.Context, r ports.Repos, provider s
 	case domain.WithdrawalConfirmed:
 		// What the custodian charged the platform for sending it: booked
 		// like gas, from GAS_SUPPLY (ADR-0011), or held for a person.
-		fee, feeNote, err := s.custodyFee(ctx, r, provider, *w, t)
+		fee, feeNote, err := s.custodyFee(ctx, r, provider, *w, t, after)
 		if err != nil {
 			return "", "", false, err
 		}

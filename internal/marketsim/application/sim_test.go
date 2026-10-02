@@ -355,6 +355,8 @@ type fakePairs struct {
 	perp        *fakeDerivatives
 	down        bool
 	contractErr error
+	// contractFails is how many of the next contract changes fail.
+	contractFails int
 }
 
 func (f *fakePairs) SetContractStatus(_ context.Context, _, to, _, _ string) error {
@@ -366,6 +368,10 @@ func (f *fakePairs) SetContractStatus(_ context.Context, _, to, _, _ string) err
 	if err := f.contractErr; err != nil {
 		f.contractErr = nil
 		return err
+	}
+	if f.contractFails > 0 {
+		f.contractFails--
+		return errors.New("instrument-service unavailable")
 	}
 	f.contracts = append(f.contracts, to)
 	if f.perp != nil {
@@ -1470,6 +1476,25 @@ func TestAHaltThatFailedIsMadeWhileTheEventRuns(t *testing.T) {
 	if !failed {
 		t.Fatalf("halted while instrument-service was down: %v %v", r.pairs.changes, r.pairs.contracts)
 	}
+	r.rounds(4 * 11)
+	r.pairs.mu.Lock()
+	defer r.pairs.mu.Unlock()
+	if !slices.Equal(r.pairs.changes, []string{"HALT"}) || !slices.Equal(r.pairs.contracts, []string{"HALT"}) {
+		t.Fatalf("pair %v, contract %v", r.pairs.changes, r.pairs.contracts)
+	}
+}
+
+// Only the perpetual's halt failed: the pair is halted, so the rounds stop
+// early, and they still halt the perpetual (review of 569a958, H1).
+func TestAHaltOfOnlyThePerpetualThatFailedIsMade(t *testing.T) {
+	p := domain.DefaultParams()
+	p.DailyVolume, p.PerpDailyVolume = 0, 0
+	r, _ := perpRig(t, p)
+	r.rounds(20)
+	r.pairs.mu.Lock()
+	r.pairs.contractFails = 2 // the event's own try, and the check in the same round
+	r.pairs.mu.Unlock()
+	r.create(t, domain.Event{Type: domain.EventHalt})
 	r.rounds(4 * 11)
 	r.pairs.mu.Lock()
 	defer r.pairs.mu.Unlock()

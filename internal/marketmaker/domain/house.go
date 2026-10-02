@@ -89,7 +89,10 @@ type Holdings map[string]decimal.Decimal
 //     base; buying spends the quote, which on ETH-BTC is BTC), and what is
 //     above it is shared by the books that spend it (shares: how many
 //     HOUSE offers on): between two reads of its holdings, fills on all of
-//     them cannot together spend more than it holds (review M1, ADR-0015);
+//     them cannot together spend more than it holds (review M1, ADR-0015).
+//     Each book gets at least a lot of what is above it, so a thin share
+//     (a little USDT among 87 books) does not empty every side quietly;
+//     what the lots add beyond the share is within the safety;
 //   - the base asset: HOUSE's holding of it may be worth at most Symbol
 //     either way (every pair of that base shares it);
 //   - in total: everything but USDT together may be worth at most Total.
@@ -98,7 +101,10 @@ type Holdings map[string]decimal.Decimal
 func SpotRooms(spec Spec, h Holdings, prices map[string]decimal.Decimal, backed func(string) bool, shares func(string) int,
 	caps Caps,
 ) (buy, sell decimal.Decimal) {
-	share := func(asset string) decimal.Decimal { return decimal.NewFromInt(int64(max(shares(asset), 1))) }
+	share := func(asset string, room decimal.Decimal) decimal.Decimal {
+		n := decimal.NewFromInt(int64(max(shares(asset), 1)))
+		return decimal.Max(room.Div(n), decimal.Min(room, spec.LotSize))
+	}
 	p, qp := prices[spec.Base], prices[spec.Quote]
 	if spec.Quote == Valuation {
 		qp = decimal.NewFromInt(1)
@@ -117,11 +123,11 @@ func SpotRooms(spec Spec, h Holdings, prices map[string]decimal.Decimal, backed 
 
 	sell = decimal.Min(positive(bal.Add(caps.Symbol.Div(p))), positive(bal).Add(totalRoom))
 	if backed(spec.Base) {
-		sell = decimal.Min(sell, positive(bal.Sub(caps.Safety.Div(p))).Div(share(spec.Base)))
+		sell = decimal.Min(sell, share(spec.Base, positive(bal.Sub(caps.Safety.Div(p)))))
 	}
 	buy = decimal.Min(positive(caps.Symbol.Div(p).Sub(bal)), positive(bal.Neg()).Add(totalRoom))
 	if backed(spec.Quote) {
-		buy = decimal.Min(buy, positive(h[spec.Quote].Mul(qp).Sub(caps.Safety)).Div(p).Div(share(spec.Quote)))
+		buy = decimal.Min(buy, share(spec.Quote, positive(h[spec.Quote].Mul(qp).Sub(caps.Safety)).Div(p)))
 	}
 	return floor(buy, spec.LotSize), floor(sell, spec.LotSize)
 }

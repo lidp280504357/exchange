@@ -64,7 +64,7 @@ pull_app_image() {
   sudo grep -qs '"ghcr.io"' /root/.docker/config.json || return 1
   fresh=$(($(date +%s) - $(git log -1 --format=%ct HEAD) < 1200))
   until sudo docker image inspect "$image" >/dev/null 2>&1 || out=$(sudo docker pull -q "$image" 2>&1); do
-    if grep -qiE 'denied|unauthorized|forbidden|429|too many requests|quota|rate limit' <<<"$out"; then
+    if grep -qiE 'denied|unauthorized|forbidden|429|toomanyrequests|too many requests|quota|rate limit' <<<"$out"; then
       echo "== ghcr.io 拒绝了拉取（令牌过期、没有 read:packages，或免费额度用完），改在服务器上构建"
       return 1
     fi
@@ -83,17 +83,24 @@ pull_app_image() {
   echo "== 用 Actions 构建的镜像 $image"
 }
 
+# stop_before_changes 结束一次还没动过任何容器与站点的部署：这次写下的开始时间一并删掉，否则下一次部署会把这以后
+# 进入的只减仓当成部署造成的而解除（继承自上一次没走完的部署的开始时间保留）。
+stop_before_changes() {
+  [ -n "${STARTED_HERE:-}" ] && rm -f "$INFRA/deploy.started"
+  exit 1
+}
+
 # ensure_build_memory 在服务器上构建（Go 镜像或前端）前确认内存够：可用内存（MemAvailable）不到 3000 MB，或交换区
 # 已用超过 1500 MB，就停止部署并提示升级服务器，不让构建把内存与交换区吃光（2026-10-02 两次整机无响应）。
 # 用户决定（2026-10-03）：GHCR 额度用完时回退到本地构建，内存不够就拒绝，升级由用户处理。
-# BUILD_MIN_MEMORY_MB、BUILD_MAX_SWAP_MB 可改门槛。
+# BUILD_MIN_MEMORY_MB、BUILD_MAX_SWAP_MB 可改门槛。只在第 3 步动容器之前调用：拒绝时什么都还没换。
 ensure_build_memory() {
   local avail swap need=${BUILD_MIN_MEMORY_MB:-3000} most=${BUILD_MAX_SWAP_MB:-1500}
   avail=$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo)
   swap=$(awk '/^SwapTotal:/ {t = $2} /^SwapFree:/ {f = $2} END {print int((t - f) / 1024)}' /proc/meminfo)
   if [ "$avail" -lt "$need" ] || [ "$swap" -gt "$most" ]; then
-    echo "== 内存不足，需要升级服务器：可用 ${avail} MB（至少 ${need}）、交换区已用 ${swap} MB（至多 ${most}），不在服务器上$1，停止部署"
-    exit 1
+    echo "== 内存不足，需要升级服务器：可用 ${avail} MB（至少 ${need}）、交换区已用 ${swap} MB（至多 ${most}），不在服务器上$1，停止部署（什么都没换）"
+    stop_before_changes
   fi
 }
 
@@ -104,8 +111,37 @@ ensure_disk_space() {
   free_gb=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
   if [ "$free_gb" -lt 8 ]; then
     echo "== 磁盘只剩 ${free_gb} GB，停止部署：先清理（见 docs/runbook/server-deploy.md）再重试"
-    exit 1
+    stop_before_changes
   fi
+}
+
+# build_web 构建前端（web/ 的 pnpm workspace，ADR-0012），只写仓库里的 dist 目录，发布（publish_web）在容器更新之后：
+# 在 node 容器里装一次依赖（glibc 镜像，打包器与 Tailwind 的原生模块都有对应二进制；pnpm 缓存放命名卷），构建三个
+# 站点与 Storybook。Turnstile 站点密钥是公开值；VITE_APP_VERSION 是手机站「关于」里显示的版本。挂整个仓库：API 参考页
+# 要读 api/openapi。三个站点逐个构建（每个是 tsc 加 vite，各要 1 GB 以上）：并行构建在 7.8 GB 的测试服上把内存与
+# 交换区用尽，2026-10-02 两次让整机几分钟无响应（负载 139、ssh 连不上、运维锁的连接断开）。
+build_web() {
+  local site_key
+  site_key="$(sudo grep -E '^TURNSTILE_SITE_KEY=' "$INFRA/apps.env" | cut -d= -f2- | tr -d '"' || true)"
+  sudo docker run --rm -e CI=true -e TURNSTILE_SITE_KEY="$site_key" -e VITE_APP_VERSION="$APP_VERSION" -v "$SRC:/src" -v exchange-pnpm-store:/pnpm-store \
+    -w /src/web node:24-slim sh -c 'npm install -g pnpm@11 --silent >/dev/null && pnpm config set store-dir /pnpm-store >/dev/null \
+      && pnpm install --frozen-lockfile --silent \
+      && { { pnpm -r --workspace-concurrency=1 --filter "./apps/*" build && pnpm --filter @exchange/ui build-storybook; } >/tmp/build.log 2>&1 || { cat /tmp/build.log; exit 1; }; }'
+}
+
+# publish_web 把 build_web 构建好的站点换进 nginx 的静态目录。
+publish_web() {
+  sudo mkdir -p "$INFRA/nginx/sites"
+  local site
+  for site in pc m admin; do
+    sudo rsync -a --delete "web/apps/$site/dist/" "$INFRA/nginx/sites/$site/"
+  done
+  # 旧 H5（阶段 1–3）已由手机站取代（B3），/h5/ 由 nginx 301 到首页
+  sudo rm -rf "$INFRA/nginx/sites/h5"
+  sudo rsync -a --delete web/packages/ui/storybook-static/ "$INFRA/nginx/sites/storybook/"
+  # 旧后台 /admin/（阶段 2 至 4 B4）已由 admin.astras.vip 取代（B5），nginx 把它重定向过去
+  sudo rm -rf "$INFRA/nginx/admin"
+  echo "== 前端已发布：PC $(ls web/apps/pc/dist/static | wc -l)、手机 $(ls web/apps/m/dist/static | wc -l)、后台 $(ls web/apps/admin/dist/assets | wc -l) 个资源文件"
 }
 
 # take_ops_lock 在没有经 scripts/ops/lock.sh 调用时（OPS_LOCK_HELD 未设）自己拿运维锁：部署、完整端到端与
@@ -131,6 +167,7 @@ main() {
     DEPLOY_STARTED="$(cat "$INFRA/deploy.started")"
   else
     echo "$DEPLOY_STARTED" >"$INFRA/deploy.started"
+    STARTED_HERE=1
   fi
 
   cd "$SRC"
@@ -168,21 +205,35 @@ main() {
   # 2. Topic 幂等核对
   bash "$INFRA/redpanda/topics.sh" >/dev/null && echo "== topic 核对完成"
 
-  # 3. 构建并更新容器：应用 compose 文件存在时一起构建（镜像内版本号 = 当前提交），否则只更新基础设施。
-  #    先起 instrument-service 并同步参考数据（资产、网络、交易对、费率），再起其余服务：它们启动时就读交易对与
-  #    参考行情映射（market-data 只跟随设了 reference_symbol 的交易对，映射晚到会让合约因没有标记价而降级）
+  # 3. 先把要发布的都准备好，再动容器：应用镜像（拉 Actions 构建好的，拉不到才在这里构建）与前端都在这一步之前做完，
+  #    内存不够或构建失败时停在这里，什么都还没换，不会留下新后端加旧站点（审查 2026-10-03）。
   COMPOSE=(-f "$INFRA/docker-compose.yml")
+  local build_image="" web=""
+  [ -f web/pnpm-workspace.yaml ] && web=1
   if [ -f "$INFRA/docker-compose.apps.yml" ]; then
     COMPOSE+=(-f "$INFRA/docker-compose.apps.yml")
     prune_build_cache
     ensure_disk_space
-    # 所有应用服务运行同一个镜像 exchange-app:latest：优先拉 Actions 构建好的，拉不到才在这里构建，且只构建一次
-    # （按服务逐个构建会把同一镜像导出二十多次、每次解出全部二进制，2026-10-02 因此在构建中写满磁盘）；
-    # up 用 --no-build 直接用这个镜像重建容器。
-    if ! pull_app_image; then
-      ensure_build_memory "构建镜像"
-      sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" build api-gateway
-    fi
+    # 所有应用服务运行同一个镜像 exchange-app:latest，只构建一次（按服务逐个构建会把同一镜像导出二十多次、每次
+    # 解出全部二进制，2026-10-02 因此在构建中写满磁盘）；up 用 --no-build 直接用这个镜像重建容器。
+    pull_app_image || build_image=1
+  fi
+  if [ -n "$build_image" ] && [ -n "$web" ]; then
+    ensure_build_memory "构建镜像与前端"
+  elif [ -n "$build_image" ] || [ -n "$web" ]; then
+    ensure_build_memory "构建$([ -n "$build_image" ] && echo 镜像 || echo 前端)"
+  fi
+  if [ -n "$build_image" ]; then
+    sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" build api-gateway || stop_before_changes
+  fi
+  if [ -n "$web" ]; then
+    build_web || stop_before_changes
+  fi
+
+  # 4. 更新容器：应用 compose 文件存在时用上面的镜像（版本号 = 当前提交），否则只更新基础设施。
+  #    先起 instrument-service 并同步参考数据（资产、网络、交易对、费率），再起其余服务：它们启动时就读交易对与
+  #    参考行情映射（market-data 只跟随设了 reference_symbol 的交易对，映射晚到会让合约因没有标记价而降级）
+  if [ -f "$INFRA/docker-compose.apps.yml" ]; then
     sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" up -d --no-build --wait --wait-timeout 300 instrument-service
     apply_instruments
     # 先全部起来，部署只等站点离不开的服务；ClickHouse 停着时 analytics-consumer 不就绪之类的（批量消费者的下游
@@ -207,31 +258,9 @@ main() {
     lift_deploy_degradations "$DEPLOY_STARTED"
   fi
 
-  # 4. 参考数据已在第 3 步随 instrument-service 同步（apply_instruments）
-  # 5. 前端（web/ 的 pnpm workspace，ADR-0012）：在 node 容器里装一次依赖（glibc 镜像，打包器与 Tailwind 的原生模块
-  #    都有对应二进制；pnpm 缓存放命名卷），构建三个站点与 Storybook，全部成功才替换 nginx 的
-  #    静态目录。Turnstile 站点密钥是公开值；VITE_APP_VERSION 是手机站「关于」里显示的版本。挂整个仓库：API 参考页要读 api/openapi
-  #    三个站点逐个构建（每个是 tsc 加 vite，各要 1 GB 以上）：并行构建在 7.8 GB 的测试服上把内存与交换区用尽，
-  #    2026-10-02 两次让整机几分钟无响应（负载 139、ssh 连不上、运维锁的连接断开）
-  if [ -f web/pnpm-workspace.yaml ]; then
-    ensure_build_memory "构建前端"
-    local site_key
-    site_key="$(sudo grep -E '^TURNSTILE_SITE_KEY=' "$INFRA/apps.env" | cut -d= -f2- | tr -d '"' || true)"
-    sudo docker run --rm -e CI=true -e TURNSTILE_SITE_KEY="$site_key" -e VITE_APP_VERSION="$APP_VERSION" -v "$SRC:/src" -v exchange-pnpm-store:/pnpm-store \
-      -w /src/web node:24-slim sh -c 'npm install -g pnpm@11 --silent >/dev/null && pnpm config set store-dir /pnpm-store >/dev/null \
-        && pnpm install --frozen-lockfile --silent \
-        && { { pnpm -r --workspace-concurrency=1 --filter "./apps/*" build && pnpm --filter @exchange/ui build-storybook; } >/tmp/build.log 2>&1 || { cat /tmp/build.log; exit 1; }; }'
-    sudo mkdir -p "$INFRA/nginx/sites"
-    local site
-    for site in pc m admin; do
-      sudo rsync -a --delete "web/apps/$site/dist/" "$INFRA/nginx/sites/$site/"
-    done
-    # 旧 H5（阶段 1–3）已由手机站取代（B3），/h5/ 由 nginx 301 到首页
-    sudo rm -rf "$INFRA/nginx/sites/h5"
-    sudo rsync -a --delete web/packages/ui/storybook-static/ "$INFRA/nginx/sites/storybook/"
-    # 旧后台 /admin/（阶段 2 至 4 B4）已由 admin.astras.vip 取代（B5），nginx 把它重定向过去
-    sudo rm -rf "$INFRA/nginx/admin"
-    echo "== 前端已构建：PC $(ls web/apps/pc/dist/static | wc -l)、手机 $(ls web/apps/m/dist/static | wc -l)、后台 $(ls web/apps/admin/dist/assets | wc -l) 个资源文件"
+  # 5. 发布第 3 步构建好的前端
+  if [ -n "$web" ]; then
+    publish_web
   fi
   echo "== 服务状态"
   sudo docker compose "${COMPOSE[@]}" ps --format 'table {{.Service}}\t{{.Status}}'

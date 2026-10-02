@@ -13,6 +13,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/ledger/ports"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/event"
+	"github.com/lidp280504357/exchange/internal/platform/flags"
 )
 
 // Journals wallet-service asks for (§11.6). Their keys are prefixed per
@@ -79,8 +80,12 @@ func (s *Service) BookChainFee(ctx context.Context, key, asset string, amount de
 
 // FundGasSupply moves fee revenue to GAS_SUPPLY for the custodian's fees
 // (GasSupplyPosting), with an audit event; the key makes a repeat
-// harmless.
+// harmless. An operator's posting like the insurance fund's, it needs
+// ledger.manual_adjustment on (ADR-0005).
 func (s *Service) FundGasSupply(ctx context.Context, key, asset string, amount decimal.Decimal, actor, reason string) (Result, error) {
+	if !s.Flags.Enabled(flags.KeyManualAdjustment, flags.Subject{}) {
+		return Result{}, apperr.New(apperr.KindForbidden, "LEDGER_ADJUSTMENT_DISABLED", "manual adjustments are switched off (ledger.manual_adjustment)")
+	}
 	if err := requireKey(key); err != nil {
 		return Result{}, err
 	}

@@ -799,8 +799,8 @@ func TestCustodyFeesHeldForAPerson(t *testing.T) {
 			TxHash: "tx-" + trade, Fee: d(fee),
 		})
 	}
-	custodied := func(_ context.Context, provider, asset string) (int32, bool, error) {
-		return 6, provider == domain.ProviderUdun && asset == "USDT", nil
+	custodied := func(_ context.Context, provider, asset, network string) (int32, bool, error) {
+		return 6, provider == domain.ProviderUdun && asset == "USDT" && network == tron, nil
 	}
 
 	// A token whose fee unit nobody confirmed: held, whatever its size.
@@ -958,6 +958,17 @@ func TestCustodyFeeUnits(t *testing.T) {
 	sent("w-3", "ETH", erc20, 6, "9000000000000000")
 	if f := h.store.fees["UDUN:w-3"]; f.Status != domain.FeeHeld || !strings.Contains(f.HoldReason, "above 0.005 ETH") {
 		t.Fatalf("above the chain coin's bound %+v", f)
+	}
+	// Without a withdrawal fee on the chain coin's network nothing bounds
+	// it: held.
+	for i := range h.nets.nets {
+		if h.nets.nets[i].ProviderCoin == ethCoin {
+			h.nets.nets[i].WithdrawFee = decimal.Zero
+		}
+	}
+	sent("w-5", "ETH", erc20, 6, "2100000000000000")
+	if f := h.store.fees["UDUN:w-5"]; f.Status != domain.FeeHeld || !strings.Contains(f.HoldReason, "no bound") {
+		t.Fatalf("no bound to compare with %+v", f)
 	}
 	// TRX is no coin the platform holds with the custodian: held.
 	unit(tron, domain.FeeUnitMain)

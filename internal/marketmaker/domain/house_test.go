@@ -173,4 +173,15 @@ func TestSpotRoomsShareABackedAssetsInventory(t *testing.T) {
 	if !sell.Equal(d("0.38")) || !half.Equal(d("0.19")) {
 		t.Fatalf("alone %s, shared by two %s", sell, half)
 	}
+	// A thin share is still a lot: 1,015 USDT among 87 books buys a lot
+	// of BTC each, not nothing; below a lot above the safety, nothing.
+	many := func(string) int { return 87 }
+	h = Holdings{"BTC": d("0"), "USDT": d("1015")}
+	if buy, _ := SpotRooms(btc, h, prices, backed, many, caps); !buy.Equal(d("0.0001")) {
+		t.Fatalf("a thin share: buy %s", buy)
+	}
+	h["USDT"] = d("1004")
+	if buy, _ := SpotRooms(btc, h, prices, backed, many, caps); !buy.IsZero() {
+		t.Fatalf("less than a lot above the safety: buy %s", buy)
+	}
 }

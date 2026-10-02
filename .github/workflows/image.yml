@@ -48,12 +48,18 @@ jobs:
           tags: |
             ${{ steps.meta.outputs.image }}:${{ github.sha }}
             ${{ steps.meta.outputs.image }}:main
+          # One manifest, one package version per commit: with the default
+          # attestations each push is an index, an image and an attestation
+          # manifest, and keeping five versions would keep under two commits
+          # and delete the children of the ones kept (pulls then fail).
+          provenance: false
+          sbom: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      # Keep the last five versions, enough to roll back: storage of a
-      # private package counts against the free tier's quota. Needs the
-      # repository to have the package's Admin role (it does when this
-      # workflow created it).
+      # Keep the last five versions (five commits), enough to roll back:
+      # storage of a private package counts against the free tier's quota
+      # (user decision 2026-10-03). Needs the repository to have the
+      # package's Admin role (it does when this workflow created it).
       - uses: actions/delete-package-versions@v5
         continue-on-error: true
         with:

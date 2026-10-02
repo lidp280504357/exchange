@@ -278,6 +278,58 @@ func TestTheContractsShareTheRoom(t *testing.T) {
 	}
 }
 
+// The USDT HOUSE holds above the safety is shared by the spot books it
+// offers that spend it (review M1, ADR-0015); a book it stops offering
+// takes no share (review of 569a958).
+func TestTheSpotBooksShareTheQuote(t *testing.T) {
+	now := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
+	ethSpec := domain.Spec{Symbol: "ETH-USDT", Base: "ETH", Quote: "USDT", TickSize: d("0.01"), LotSize: d("0.001")}
+	account := domain.ContractAccount{Positions: map[string]decimal.Decimal{}}
+	rec := &records{}
+	fl := &onFlags{}
+	cfg := DefaultConfig()
+	cfg.HouseUser = "house"
+	// 41,000 USDT: 40,000 above the safety of 1,000.
+	p := New(cfg, specList{btcSpec, ethSpec}, fakeHouse{holdings: domain.Holdings{"USDT": d("41000")}, contracts: &account},
+		fl, rec, event.NewFactory("market-maker", "test"), slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	p.now = func() time.Time { return now }
+	ctx := context.Background()
+	p.refresh(ctx)
+	books := func(seq int64) map[string]string {
+		t.Helper()
+		p.OnSnapshot(&marketv1.DepthSnapshot{
+			Symbol: "BTC-USDT", Sequence: seq, Reference: true, Bids: levels("49999.99", "5"),
+			Asks: levels("50000.01", "5"),
+		})
+		p.OnSnapshot(&marketv1.DepthSnapshot{
+			Symbol: "ETH-USDT", Sequence: seq, Reference: true, Bids: levels("2499.99", "50"),
+			Asks: levels("2500.01", "50"),
+		})
+		if err := p.publish(ctx, p.round()); err != nil {
+			t.Fatal(err)
+		}
+		_, out := rec.take(t)
+		rooms := map[string]string{}
+		for _, b := range out {
+			rooms[b.GetSymbol()] = b.GetBuyRoom()
+		}
+		return rooms
+	}
+	// Two books: 20,000 each, 0.4 BTC and 8 ETH.
+	if rooms := books(1); rooms["BTC-USDT"] != "0.4" || rooms["ETH-USDT"] != "8" {
+		t.Fatalf("shared by two: %v", rooms)
+	}
+	// ETH-USDT no longer offered (an empty book once): BTC-USDT spends
+	// all 40,000.
+	fl.mu.Lock()
+	fl.deny = []string{"ETH-USDT"}
+	fl.mu.Unlock()
+	now = now.Add(3 * time.Second)
+	if rooms := books(2); rooms["BTC-USDT"] != "0.8" || rooms["ETH-USDT"] != "" {
+		t.Fatalf("one book left: %v", rooms)
+	}
+}
+
 // blindSpecs cannot read the backed assets until told.
 type blindSpecs struct {
 	specList

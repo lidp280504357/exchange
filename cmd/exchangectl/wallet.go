@@ -249,22 +249,15 @@ func walletWith(ctx context.Context, db, idb *pg.DB, args []string, out io.Write
 }
 
 // custodied finds the decimals of an asset the custodian holds for the
-// platform (a network of its) in the instrument schema.
+// platform on a network in the instrument schema.
 func custodied(svc *instrumentapp.Service) application.Custodied {
-	return func(ctx context.Context, provider, asset string) (int32, bool, error) {
-		v, err := svc.Asset(ctx, asset)
-		if errors.Is(err, instrumentdomain.ErrNotFound) {
-			return 0, false, nil
-		}
-		if err != nil {
+	return func(ctx context.Context, provider, asset, network string) (int32, bool, error) {
+		ok, err := servedBy(ctx, svc, provider, asset, network)
+		if err != nil || !ok {
 			return 0, false, err
 		}
-		for _, n := range v.Networks {
-			if n.Provider == provider {
-				return v.Decimals, true, nil
-			}
-		}
-		return 0, false, nil
+		v, err := svc.Asset(ctx, asset)
+		return v.Decimals, err == nil, err
 	}
 }
 

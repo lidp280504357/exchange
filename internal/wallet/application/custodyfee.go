@@ -24,10 +24,12 @@ const feeBound = 5
 // custodyFee works out what becomes of the fee a custodian reports for a
 // withdrawal it sent (review ④): booked from GAS_SUPPLY (FeeBookable), held
 // for a person (FeeHeld: above feeBound times the network's withdrawal fee
-// or the amount sent, or a token whose fee unit nobody confirmed), or
-// nothing (charged outside the coin balances, FeeUnitOutside). The note
-// says what happened, for the callback's log.
-func (s *Service) custodyFee(ctx context.Context, r ports.Repos, provider string, w domain.Withdrawal, t ports.CustodyTrade,
+// or the amount sent, without a bound to compare with, or a token whose
+// fee unit nobody confirmed), or nothing (charged outside the coin
+// balances, FeeUnitOutside). The note says what happened, for the
+// callback's log; a held fee is counted and logged by after, once the
+// callback's transaction committed.
+func (s *Service) custodyFee(ctx context.Context, r ports.Repos, provider string, w domain.Withdrawal, t ports.CustodyTrade, after *[]func(),
 ) (*domain.ChainFee, string, error) {
 	if !t.Fee.IsPositive() {
 		return nil, "", nil
@@ -39,11 +41,13 @@ func (s *Service) custodyFee(ctx context.Context, r ports.Repos, provider string
 	reported := fmt.Sprintf("%s %s (%s at %d decimals)", t.Fee, w.Asset, t.Fee.Shift(t.Decimals), t.Decimals)
 	hold := func(why string) (*domain.ChainFee, string, error) {
 		f.Status, f.HoldReason = domain.FeeHeld, reported+": "+why
-		if s.FeesHeld != nil {
-			s.FeesHeld.Inc()
-		}
-		s.Log.ErrorContext(ctx, "the custodian's fee is held for a person: book it or write it off (exchangectl wallet custody-fee)",
-			"withdrawal_id", w.ID, "fee", reported, "why", why)
+		*after = append(*after, func() {
+			if s.FeesHeld != nil {
+				s.FeesHeld.Inc()
+			}
+			s.Log.ErrorContext(ctx, "the custodian's fee is held for a person: book it or write it off (exchangectl wallet custody-fee)",
+				"withdrawal_id", w.ID, "fee", reported, "why", why)
+		})
 		return &f, "; fee " + reported + " held for a person: " + why, nil
 	}
 	c := s.Custodians[provider]
@@ -88,7 +92,12 @@ func (s *Service) custodyFee(ctx context.Context, r ports.Repos, provider string
 			limit = bound
 		}
 	}
-	if limit.IsPositive() && f.Amount.GreaterThan(limit) {
+	switch {
+	case !limit.IsPositive():
+		// A fee in the chain's coin whose network charges users nothing:
+		// nothing tells a plausible fee from one in another unit.
+		return hold("no bound to compare it with: the network of " + f.Asset + " has no withdrawal fee")
+	case f.Amount.GreaterThan(limit):
 		return hold(fmt.Sprintf("above %s %s, the lesser of the amount sent and %d times the network's withdrawal fee", limit, f.Asset,
 			feeBound))
 	}
@@ -128,9 +137,10 @@ func (s *Service) chainCoin(ctx context.Context, c ports.Custody, provider, coin
 }
 
 // Custodied returns the decimals the ledger books an asset in when the
-// platform holds it with the custodian (a network of its), false
-// otherwise: a custodian's fee is booked only in such an asset.
-type Custodied func(ctx context.Context, provider, asset string) (int32, bool, error)
+// custodian holds it for the platform on network (the fee's: a
+// withdrawal's asset, or the chain's own coin of a token's network),
+// false otherwise: a custodian's fee is booked only in such an asset.
+type Custodied func(ctx context.Context, provider, asset, network string) (int32, bool, error)
 
 // FeeResolution is a person's decision on a custodian's fee held for them
 // (review ④): Book it from GAS_SUPPLY, in the Asset and Amount they found
@@ -184,12 +194,13 @@ func ResolveCustodyFee(ctx context.Context, store ports.Store, custodied Custodi
 			if d.Amount.IsPositive() {
 				f.Amount = d.Amount
 			}
-			decimals, ok, err := custodied(ctx, w.Provider, f.Asset)
+			decimals, ok, err := custodied(ctx, w.Provider, f.Asset, f.Network)
 			if err != nil {
 				return err
 			}
 			if !ok {
-				return apperr.Invalid(fmt.Sprintf("the platform holds no %s with %s: write the fee off instead", f.Asset, w.Provider))
+				return apperr.Invalid(fmt.Sprintf("the platform holds no %s with %s on %s: write the fee off instead", f.Asset, w.Provider,
+					f.Network))
 			}
 			if !f.Amount.Equal(f.Amount.Truncate(decimals)) {
 				return apperr.Invalid(fmt.Sprintf("%s is booked in at most %d decimals", f.Asset, decimals))

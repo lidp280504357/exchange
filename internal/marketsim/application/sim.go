@@ -340,7 +340,8 @@ func (s *Sim) Round(ctx context.Context) {
 	}
 	s.refreshPair(ctx, now)
 	s.noteBeat(now, s.model.State.P) // whether the bots trade or not
-	if !s.flags.Enabled(flags.KeySimEnabled, flags.Subject{Symbol: s.cfg.Symbol}) || !s.pair.Trading {
+	enabled := s.flags.Enabled(flags.KeySimEnabled, flags.Subject{Symbol: s.cfg.Symbol})
+	if !enabled || !s.pair.Trading {
 		if s.running {
 			s.stop(ctx)
 		}
@@ -348,6 +349,11 @@ func (s *Sim) Round(ctx context.Context) {
 			s.stopPerp(ctx)
 		}
 		s.m.running.Set(0)
+		if enabled {
+			// The pair a running HALT event halted: the perpetual's halt
+			// may have failed though (review of 569a958, H1).
+			s.keepHalted(ctx, now)
+		}
 		return
 	}
 	if !s.running {

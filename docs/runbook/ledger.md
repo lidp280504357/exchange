@@ -115,7 +115,7 @@ ssh exchange sudo docker exec exchange-infra-ledger-service-1 /app/exchangectl l
 ssh exchange sudo docker exec exchange-infra-ledger-service-1 /app/exchangectl ledger system USDT
 ```
 
-- `GAS_SUPPLY`（平台付的链上 gas 与托管方手续费从这里出，`ChainFeePosting`）：自建钱包由 `exchangectl wallet fund` 记平台转进热钱包的真实转账（`DEPOSIT_PENDING` → `GAS_SUPPLY`）；托管模式没有这样的转账，用户付的提现手续费本来就在托管方，`exchangectl ledger gas-supply --asset USDT --amount 20 --reason "..."` 把 `FEE_REVENUE` 挪到 `GAS_SUPPLY`（`MANUAL_ADJUSTMENT` 分录、不超过 `FEE_REVENUE`、同事务写审计 `ledger.gas_supply`，键重放无害；两边都不是钱包应有数，不变量 4 不变）。见 [custody.md](custody.md#托管方的手续费审查-④2026-10-03)。
+- `GAS_SUPPLY`（平台付的链上 gas 与托管方手续费从这里出，`ChainFeePosting`）：自建钱包由 `exchangectl wallet fund` 记平台转进热钱包的真实转账（`DEPOSIT_PENDING` → `GAS_SUPPLY`）；托管模式没有这样的转账，用户付的提现手续费本来就在托管方，`exchangectl ledger gas-supply --asset USDT --amount 20 --reason "..."` 把 `FEE_REVENUE` 挪到 `GAS_SUPPLY`（`MANUAL_ADJUSTMENT` 分录、像保险基金注资一样需要开关 `ledger.manual_adjustment`、不超过 `FEE_REVENUE`、同事务写审计 `ledger.gas_supply`，键重放无害；两边都不是钱包应有数，不变量 4 不变）。见 [custody.md](custody.md#托管方的手续费审查-④2026-10-03)。
 
 ## 对账
 
