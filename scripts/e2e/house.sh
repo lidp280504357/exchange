@@ -29,11 +29,14 @@ fail() { echo "FAIL $1" >&2; exit 1; }
 echo "== HOUSE offers every trading pair and contract"
 call GET /v1/market/pairs ""
 expect 200 - "pairs"
-# Pairs with their own market (the platform coin, ASTRA design §2) have no HOUSE.
+# Pairs with their own market (the platform coin, ASTRA design §2) have no
+# HOUSE, nor have the contracts on them (ASTRA-USDT-PERP).
 WANT=$(jq -r '[.pairs[] | select(.status == "TRADING" and .reference_symbol != null) | .symbol] | join(" ")' <<<"$BODY")
+FOLLOWED=$(jq -c '[.pairs[] | select(.reference_symbol != null) | .symbol]' <<<"$BODY")
 call GET /v1/market/contracts ""
 expect 200 - "contracts"
-WANT="$WANT $(jq -r '[.contracts[] | select(.status == "TRADING") | .symbol] | join(" ")' <<<"$BODY")"
+WANT="$WANT $(jq -r --argjson followed "$FOLLOWED" \
+  '[.contracts[] | select(.status == "TRADING" and (.index_symbol as $i | $followed | index($i) != null)) | .symbol] | join(" ")' <<<"$BODY")"
 offered() { # MISSING: the symbols of WANT whose HOUSE book is empty
   local out s
   out=$(compose "exec -T market-maker wget -qO- http://127.0.0.1:9091/metrics") || return 1
