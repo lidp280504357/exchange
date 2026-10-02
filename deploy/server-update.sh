@@ -15,16 +15,28 @@ apply_instruments() {
 
 # lift_deploy_degradations 解除部署期间开始的合约只减仓。部署会重启 market-data-service，标记价短暂中断，
 # 合约可能因此进入只减仓（INDEX_SOURCES、MARK_PRICE_STALE）；按阶段 3 的设计只减仓须由人解除，部署者就是这个人：
-# 等标记价恢复后解除，解除人记为本次部署。价源若真的断了，10 秒后会再次进入只减仓。
+# 等标记价恢复（行情接口 degraded 为 false）后解除，解除人记为本次部署。最多等三分钟、每 15 秒看一次：指数靠平台
+# 自己市场的合约（平台币永续）要等机器人重新成交才恢复，太早解除会再次进入只减仓（2026-10-02 因此停了一小时）。
 lift_deploy_degradations() {
-  local started=$1 symbol
+  local started=$1 symbol left deadline=$((SECONDS + 200))
   sleep 20
-  sudo docker compose "${COMPOSE[@]}" exec -T derivatives-service /app/exchangectl derivatives states 2>/dev/null |
-    awk -v since="$started" 'NR > 1 && $2 == "true" && ($3 == "INDEX_SOURCES" || $3 == "MARK_PRICE_STALE") && $4 >= since {print $1}' |
-    while read -r symbol; do
-      sudo docker compose "${COMPOSE[@]}" exec -T -e EXCHANGECTL_ACTOR="deploy-$APP_VERSION" derivatives-service /app/exchangectl derivatives resume "$symbol" \
-        </dev/null >/dev/null && echo "== $symbol 在部署期间进入只减仓，标记价已恢复，已解除"
+  while :; do
+    left=$(sudo docker compose "${COMPOSE[@]}" exec -T derivatives-service /app/exchangectl derivatives states 2>/dev/null |
+      awk -v since="$started" 'NR > 1 && $2 == "true" && ($3 == "INDEX_SOURCES" || $3 == "MARK_PRICE_STALE") && $4 >= since {print $1}')
+    [ -z "$left" ] && return 0
+    for symbol in $left; do
+      if sudo docker compose "${COMPOSE[@]}" exec -T market-data-service wget -qO- "http://127.0.0.1:8090/v1/market/$symbol/mark-price" 2>/dev/null |
+        grep -q '"degraded":false'; then
+        sudo docker compose "${COMPOSE[@]}" exec -T -e EXCHANGECTL_ACTOR="deploy-$APP_VERSION" derivatives-service /app/exchangectl derivatives resume "$symbol" \
+          </dev/null >/dev/null && echo "== $symbol 在部署期间进入只减仓，标记价已恢复，已解除"
+      fi
     done
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      echo "== 部署后仍在只减仓（标记价未恢复）：$(echo "$left" | tr '\n' ' ')；恢复后用 exchangectl derivatives resume 解除"
+      return 0
+    fi
+    sleep 15
+  done
 }
 
 # prune_build_cache 删除 6 小时内没用过的构建缓存（常用的 Go 模块与编译缓存会留下）。Docker 29 上
