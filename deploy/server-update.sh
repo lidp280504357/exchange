@@ -59,8 +59,8 @@ pull_app_image() {
   sudo grep -qs '"ghcr.io"' /root/.docker/config.json || return 1
   fresh=$(($(date +%s) - $(git log -1 --format=%ct HEAD) < 1200))
   until sudo docker image inspect "$image" >/dev/null 2>&1 || out=$(sudo docker pull -q "$image" 2>&1); do
-    if grep -qiE 'denied|unauthorized' <<<"$out"; then
-      echo "== ghcr.io 拒绝了令牌（过期或没有 read:packages），改在服务器上构建"
+    if grep -qiE 'denied|unauthorized|429|too many requests' <<<"$out"; then
+      echo "== ghcr.io 拒绝了拉取（令牌过期、没有 read:packages，或免费额度用完），改在服务器上构建"
       return 1
     fi
     if grep -qiE 'manifest unknown|not found' <<<"$out" && [ "$fresh" != 1 ]; then
@@ -76,6 +76,18 @@ pull_app_image() {
   sudo docker tag "$image" exchange-app:latest
   sudo docker rmi "$image" >/dev/null
   echo "== 用 Actions 构建的镜像 $image"
+}
+
+# ensure_build_memory 在服务器上构建（Go 镜像或前端）前确认可用内存（MemAvailable）够：不够就停止部署、提示升级
+# 服务器，不让构建把内存与交换区吃光（2026-10-02 两次整机无响应）。用户决定（2026-10-03）：GHCR 额度用完时回退
+# 到本地构建，内存不够就拒绝，升级由用户处理。BUILD_MIN_MEMORY_MB 可改门槛（默认 2000）。
+ensure_build_memory() {
+  local avail need=${BUILD_MIN_MEMORY_MB:-2000}
+  avail=$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo)
+  if [ "$avail" -lt "$need" ]; then
+    echo "== 可用内存只有 ${avail} MB，在服务器上$1至少要 ${need} MB：停止部署。请升级服务器（或等 GitHub Actions 的镜像，见 docs/runbook/server-deploy.md）"
+    exit 1
+  fi
 }
 
 # ensure_disk_space 在构建前确认磁盘还有余量：磁盘写满时 Docker 会丢掉运行中容器的网络端点
@@ -161,6 +173,7 @@ main() {
     # （按服务逐个构建会把同一镜像导出二十多次、每次解出全部二进制，2026-10-02 因此在构建中写满磁盘）；
     # up 用 --no-build 直接用这个镜像重建容器。
     if ! pull_app_image; then
+      ensure_build_memory "构建镜像"
       sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" build api-gateway
     fi
     sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" up -d --no-build --wait --wait-timeout 300 instrument-service
@@ -194,6 +207,7 @@ main() {
   #    三个站点逐个构建（每个是 tsc 加 vite，各要 1 GB 以上）：并行构建在 7.8 GB 的测试服上把内存与交换区用尽，
   #    2026-10-02 两次让整机几分钟无响应（负载 139、ssh 连不上、运维锁的连接断开）
   if [ -f web/pnpm-workspace.yaml ]; then
+    ensure_build_memory "构建前端"
     local site_key
     site_key="$(sudo grep -E '^TURNSTILE_SITE_KEY=' "$INFRA/apps.env" | cut -d= -f2- | tr -d '"' || true)"
     sudo docker run --rm -e CI=true -e TURNSTILE_SITE_KEY="$site_key" -e VITE_APP_VERSION="$APP_VERSION" -v "$SRC:/src" -v exchange-pnpm-store:/pnpm-store \
