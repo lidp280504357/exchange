@@ -600,8 +600,9 @@ expect 200 - "and canceled before it starts"
 SIM_PARAMS=$(jq -c .params <<<"$SIM")
 as AUDITOR PUT /admin/v1/sim/params "$(jq -c '{params: ., reason: "e2e reads only"}' <<<"$SIM_PARAMS")"
 expect 403 ADMIN_FORBIDDEN "AUDITOR changes no settings"
-# shellcheck disable=SC2016 # expanded when the script ends
-at_exit 'as OPERATOR PUT /admin/v1/sim/params "$(jq -c "{params: ., reason: \"e2e cleanup\"}" <<<"$SIM_PARAMS")" >/dev/null'
+# The settings go back if the run stops before it puts them back itself.
+restore_sim_params() { as OPERATOR PUT /admin/v1/sim/params "$(jq -c '{params: ., reason: "e2e cleanup"}' <<<"$SIM_PARAMS")" >/dev/null; }
+at_exit restore_sim_params
 as OPERATOR PUT /admin/v1/sim/params "$(jq -c '{params: (. + {sigma: (.sigma + 0.01)}), reason: "e2e: a little more volatility"}' <<<"$SIM_PARAMS")"
 expect 200 - "OPERATOR changes the volatility, within its share"
 check ".version > $(jq .version <<<"$SIM")" "a new version of the settings"
