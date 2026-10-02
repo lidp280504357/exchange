@@ -70,6 +70,12 @@ services:
       - dev-container
       - --smp
       - "1"
+      # Without a cap Seastar takes memory as it goes and never gives it
+      # back: 3.4 to 4.3 GB of the test server's 7.8 on 2026-10-02, the
+      # swap full and the host unresponsive during builds. 2 GB holds the
+      # 93 partitions (topic_memory_per_partition 4 MiB allows 512).
+      - --memory
+      - 2G
       - --overprovisioned
       - --default-log-level=info
     ports:
