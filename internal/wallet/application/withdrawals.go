@@ -213,8 +213,8 @@ func (s *Service) RequestWithdrawal(ctx context.Context, userID string, in Withd
 	}
 	risk := domain.Assess(domain.RiskInput{
 		Now: now, AccountCreated: created, DeviceFirstSeen: su.DeviceFirstSeen, IdentityChanged: su.IdentityChanged,
-		PasswordChanged: su.PasswordChanged, AddressAdded: entry.CreatedAt, ValueUSDT: value, DailyUSDT: today.Add(value),
-		DailyLimit: limits.Daily,
+		PasswordChanged: su.PasswordChanged, TOTPChanged: su.TOTPChanged, AddressAdded: entry.CreatedAt,
+		ValueUSDT: value, DailyUSDT: today.Add(value), DailyLimit: limits.Daily,
 	})
 	w := domain.Withdrawal{
 		ID: uuid.Must(uuid.NewV7()).String(), UserID: userID, Asset: in.Asset, Network: in.Network, Address: in.Address,

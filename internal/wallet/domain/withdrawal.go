@@ -346,6 +346,7 @@ type RiskInput struct {
 	DeviceFirstSeen   time.Time // zero when unknown: treated as new
 	IdentityChanged   time.Time
 	PasswordChanged   time.Time
+	TOTPChanged       time.Time // the authenticator app removed (by the user or an administrator)
 	AddressAdded      time.Time
 	ValueUSDT         decimal.Decimal
 	DailyUSDT         decimal.Decimal // today's withdrawals including this one
@@ -410,8 +411,10 @@ func Assess(in RiskInput) RiskResult {
 		hit(RiskNewDevice, 30)
 	}
 	latest := in.IdentityChanged
-	if in.PasswordChanged.After(latest) {
-		latest = in.PasswordChanged
+	for _, t := range []time.Time{in.PasswordChanged, in.TOTPChanged} {
+		if t.After(latest) {
+			latest = t
+		}
 	}
 	if !latest.IsZero() && in.Now.Sub(latest) < in.SecurityPeriod {
 		hit(RiskSecurityChange, 30)

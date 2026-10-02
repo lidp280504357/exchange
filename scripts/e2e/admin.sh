@@ -23,7 +23,9 @@
 # deposits that need a person (with the
 # custodian's stand-in: a deposit whose callback comes late, backfilled
 # and then confirmed by it; one below the minimum credited to the user,
-# another rejected), a withdrawal's review details and holds, an
+# another rejected), a withdrawal's review details and holds, the user's
+# authenticator app bound and reset by the console (the reset recorded:
+# withdrawals wait for review for a day after it), an
 # administrator created from the console (an OPERATOR signing in with the
 # password shown once, which no check prints; role, password,
 # authenticator, sessions, disable and enable), the system health with
@@ -1124,11 +1126,28 @@ expect 200 - "the account is found by the new email"
 check ".user.id == \"$USER_ID\"" "the same account"
 
 echo "== sessions, authenticator and a temporary password"
+as OPERATOR POST "/admin/v1/users/$USER_ID/totp-reset" '{"reason":"e2e lost phone"}'
+expect 200 - "OPERATOR resets the authenticator of an account without one"
+check '.removed == false' "there was none"
+# The user binds an authenticator app (a step-up by mail first), which the
+# console then resets: withdrawals wait for review for a day after it.
+wait_resend "$NEW_EMAIL"
+otp STEP_UP "$NEW_EMAIL" "$DEVICE" "$UACCESS"
+call POST /v1/auth/step-up "{\"otp_ticket\":\"$TICKET\",\"device_id\":\"$DEVICE\"}" "${UAUTH[@]}"
+expect 200 - "the user steps up by mail"
+call POST /v1/auth/totp/setup "" "${UAUTH[@]}" -H "X-Step-Up-Token: $(jq -r .step_up_token <<<"$BODY")"
+expect 200 - "sets up an authenticator app"
+call POST /v1/auth/totp/confirm "{\"code\":\"$(totp "$(jq -r .secret <<<"$BODY")")\"}" "${UAUTH[@]}"
+expect 204 - "and binds it"
 as FINANCE POST "/admin/v1/users/$USER_ID/totp-reset" '{"reason":"e2e lost phone"}'
 expect 403 ADMIN_FORBIDDEN "FINANCE resets no authenticator"
 as OPERATOR POST "/admin/v1/users/$USER_ID/totp-reset" '{"reason":"e2e lost phone"}'
 expect 200 - "OPERATOR resets the authenticator"
-check '.removed == false' "there was none"
+check '.removed == true' "the bound one is gone"
+as AUDITOR GET "/admin/v1/users/$USER_ID/security" ""
+expect 200 - "the account's security"
+check '.totp.status == "NONE" and (.totp.changed_at | type) == "string" and (now - (.totp.changed_at | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601)) < 600' \
+  "records the reset: the next day's withdrawals wait for review"
 as OPERATOR POST "/admin/v1/users/$USER_ID/sessions/revoke" '{"reason":""}'
 expect 400 COMMON_INVALID_ARGUMENT "ending sessions needs a reason"
 as OPERATOR POST "/admin/v1/users/$USER_ID/sessions/revoke" '{"reason":"e2e stolen phone"}'

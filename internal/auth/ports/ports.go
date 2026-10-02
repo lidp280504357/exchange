@@ -81,6 +81,8 @@ type CredentialRepo interface {
 	// RecordFailure counts a failure and, when lockedUntil is set, locks.
 	RecordFailure(ctx context.Context, userID string, lockedUntil time.Time) error
 	SetPassword(ctx context.Context, userID, hash string, now time.Time) error
+	// TOTPChanged records the authenticator app unbound or reset at now.
+	TOTPChanged(ctx context.Context, userID string, now time.Time) error
 }
 
 // SessionRepo stores device sessions and their refresh tokens.

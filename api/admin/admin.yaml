@@ -5645,7 +5645,7 @@ components:
             $ref: '#/components/schemas/Identity'
         totp:
           type: object
-          required: [status, activated_at]
+          required: [status, activated_at, changed_at]
           properties:
             status:
               type: string
@@ -5654,6 +5654,10 @@ components:
             activated_at:
               type: [string, 'null']
               format: date-time
+            changed_at:
+              type: [string, 'null']
+              format: date-time
+              description: The app's latest removal, by the user or an administrator; withdrawals wait for review for a day after it.
         password_changed_at:
           type: [string, 'null']
           format: date-time

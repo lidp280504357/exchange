@@ -90,9 +90,11 @@ func TestAuthenticatorApps(t *testing.T) {
 	if n := len(eventsOf[*authv1.TotpDisabled](a.store)); n != 1 {
 		t.Fatalf("%d TotpDisabled events", n)
 	}
-	// Mailed codes work again.
-	if su := a.stepUp(t, tok, "EMAIL"); su == "" {
-		t.Fatal("no step-up")
+	// Mailed codes work again; the step-up carries when the app was
+	// removed, for the withdrawals' review (C5.5 ⑤).
+	su = a.stepUp(t, tok, "EMAIL")
+	if _, sec, err := a.acc.ConsumeStepUp(ctx, tok.UserID, su); err != nil || !sec.TOTPChangedAt.Equal(a.now) || sec.TOTPEnabled {
+		t.Fatalf("after disable: %+v %v", sec, err)
 	}
 	wantCode(t, a.acc.DisableTOTP(ctx, tok.UserID, a.stepUp(t, tok, "EMAIL")), "AUTH_TOTP_NOT_ENABLED")
 }

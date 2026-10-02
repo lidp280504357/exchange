@@ -73,24 +73,27 @@ type security repos
 func (r security) Context(ctx context.Context, userID, sessionID string) (domain.SecurityContext, error) {
 	var c domain.SecurityContext
 	var device *string
-	var firstSeen, identityChanged, passwordChanged *time.Time
+	var firstSeen, identityChanged, passwordChanged, totpChanged *time.Time
 	err := r.q.QueryRow(ctx, `SELECT
 			(SELECT count(*) FROM identities WHERE user_id = $1),
 			coalesce((SELECT status = 'ACTIVE' FROM totp_credentials WHERE user_id = $1), false),
 			(SELECT max(verified_at) FROM identities WHERE user_id = $1),
 			(SELECT password_changed_at FROM credentials WHERE user_id = $1),
+			(SELECT totp_changed_at FROM credentials WHERE user_id = $1),
 			s.device_id, d.first_seen_at
 		FROM (SELECT 1) one
 		LEFT JOIN sessions s ON s.id = $2 AND s.user_id = $1
 		LEFT JOIN known_devices d ON d.user_id = s.user_id AND d.device_id = s.device_id`, userID, sessionID).
-		Scan(&c.Identities, &c.TOTPEnabled, &identityChanged, &passwordChanged, &device, &firstSeen)
+		Scan(&c.Identities, &c.TOTPEnabled, &identityChanged, &passwordChanged, &totpChanged, &device, &firstSeen)
 	if err != nil {
 		return domain.SecurityContext{}, fmt.Errorf("read security context: %w", err)
 	}
 	if device != nil {
 		c.DeviceID = *device
 	}
-	for dst, src := range map[*time.Time]*time.Time{&c.DeviceFirstSeenAt: firstSeen, &c.IdentityChangedAt: identityChanged, &c.PasswordChangedAt: passwordChanged} {
+	for dst, src := range map[*time.Time]*time.Time{
+		&c.DeviceFirstSeenAt: firstSeen, &c.IdentityChangedAt: identityChanged, &c.PasswordChangedAt: passwordChanged, &c.TOTPChangedAt: totpChanged,
+	} {
 		if src != nil {
 			*dst = *src
 		}

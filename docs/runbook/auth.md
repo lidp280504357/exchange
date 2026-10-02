@@ -60,7 +60,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo sed -i "/^JWT_SIGNING_KEY=/d;/^JWT_
 
 - 绑定：`POST /v1/auth/totp/setup`（需 step-up）返回 base32 密钥与 `otpauth://` 链接，此时为 PENDING；`POST /v1/auth/totp/confirm` 用应用生成的 6 位验证码确认后 ACTIVE，发 `auth.TotpEnabled`（用户收到安全通知与邮件）。重复 setup 会替换待确认的密钥；已绑定时返回 `AUTH_TOTP_ENABLED`。
 - 使用：已绑定后 `POST /v1/auth/step-up` 只接受 `totp_code`，邮件或短信验证码票据返回 403 `AUTH_TOTP_REQUIRED`。算法 RFC 6238（HMAC-SHA1、30 秒、6 位），允许前后各一个时间步的误差；每个时间步只能用一次（`last_step`），重放返回 `AUTH_TOTP_INVALID`。
-- 解绑：`DELETE /v1/auth/totp`，需要用 TOTP 完成的 step-up，发 `auth.TotpDisabled`。
+- 解绑：`DELETE /v1/auth/totp`，需要用 TOTP 完成的 step-up，发 `auth.TotpDisabled`。解绑（以及后台重置已绑定的）记 `credentials.totp_changed_at`（迁移 auth 00005），step-up 的安全上下文带上它（`totp_changed_at`）：之后 24 小时内的提现转人工审核（风控 `SECURITY_CHANGE`）。
 - 存储：`auth.totp_credentials`，密钥用 `TOTP_SECRET_KEY` 加密后存放。
 - 丢失身份验证器：目前没有恢复码，由管理后台（任务 11）人工核验后解绑。
 
@@ -81,7 +81,7 @@ admin-service 经 auth-service 的 gRPC 读写账户安全，权限由后台检�
 - `GetSecurity`：身份（完整值，后台默认脱敏）、身份验证器、密码修改时间与登录锁定剩余秒数、活跃会话（IP 已脱敏）与设备、待审换绑数。
 - `ListLoginHistory`：登录记录，IP 已脱敏。
 - `RevokeSessions`：结束一个或全部会话，原因 `ADMIN`（`auth.SessionRevoked`，网关立即拒绝其令牌）。
-- `ResetTOTP`：删除身份验证器（已绑定的发 `auth.TotpDisabled`，用户收到邮件）。
+- `ResetTOTP`：删除身份验证器（已绑定的发 `auth.TotpDisabled`，用户收到邮件，记 `totp_changed_at`，24 小时内的提现转人工审核）；`GetSecurity` 返回 `totp_changed_at`，后台安全页显示。
 - `SetTemporaryPassword`：生成 16 位临时密码（四组四位，去掉易混字符），替换原密码，结束全部会话、清除密码登录锁定，发 `auth.PasswordChanged{via_reset: true}`（与找回密码相同：用户收到邮件，24 小时内的提现转人工审核）。临时密码只在这次应答里，不进日志与审计。
 - `ListIdentityRequests`、`DecideIdentityRequest`：换绑审核（上一节）。
 

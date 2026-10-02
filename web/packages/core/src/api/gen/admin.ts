@@ -3374,6 +3374,11 @@ export interface components {
                 status: "ACTIVE" | "PENDING" | "NONE";
                 /** Format: date-time */
                 activated_at: string | null;
+                /**
+                 * Format: date-time
+                 * @description The app's latest removal, by the user or an administrator; withdrawals wait for review for a day after it.
+                 */
+                changed_at: string | null;
             };
             /** Format: date-time */
             password_changed_at: string | null;

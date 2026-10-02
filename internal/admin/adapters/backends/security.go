@@ -29,9 +29,9 @@ func (s Security) Get(ctx context.Context, userID string) (ports.Security, error
 		return ports.Security{}, err
 	}
 	out := ports.Security{
-		TOTP: resp.GetTotpStatus(), TOTPActivatedAt: timeOf(resp.GetTotpActivatedAt()), PasswordChangedAt: timeOf(resp.GetPasswordChangedAt()),
-		LastLoginAt: timeOf(resp.GetLastLoginAt()), LockedSeconds: int(resp.GetLockedSeconds()),
-		PendingIdentityRequests: int(resp.GetPendingIdentityRequests()),
+		TOTP: resp.GetTotpStatus(), TOTPActivatedAt: timeOf(resp.GetTotpActivatedAt()), TOTPChangedAt: timeOf(resp.GetTotpChangedAt()),
+		PasswordChangedAt: timeOf(resp.GetPasswordChangedAt()), LastLoginAt: timeOf(resp.GetLastLoginAt()),
+		LockedSeconds: int(resp.GetLockedSeconds()), PendingIdentityRequests: int(resp.GetPendingIdentityRequests()),
 	}
 	for _, id := range resp.GetIdentities() {
 		out.Identities = append(out.Identities, ports.Identity{

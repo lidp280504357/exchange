@@ -155,6 +155,10 @@ func (s *AccountService) DisableTOTP(ctx context.Context, userID, stepUp string)
 		if err := r.TOTP().Delete(ctx, userID); err != nil {
 			return err
 		}
+		// Withdrawals wait for review for a day after it (C5.5 ⑤).
+		if err := r.Credentials().TOTPChanged(ctx, userID, s.Now()); err != nil {
+			return err
+		}
 		return r.Emit(ctx, &authv1.TotpDisabled{UserId: userID}, "user", userID)
 	})
 }

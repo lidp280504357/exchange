@@ -91,6 +91,9 @@ message GetSecurityResponse {
   repeated SessionInfo sessions = 7;
   repeated DeviceInfo devices = 8;
   int32 pending_identity_requests = 9;
+  // The latest removal of the authenticator app, by the user or an
+  // administrator; withdrawals wait for review for a day after it.
+  google.protobuf.Timestamp totp_changed_at = 10;
 }
 
 message ListLoginHistoryRequest {
@@ -236,6 +239,9 @@ message SecurityContext {
   google.protobuf.Timestamp identity_changed_at = 5;
   // The latest password change or reset.
   google.protobuf.Timestamp password_changed_at = 6;
+  // The latest removal of the authenticator app, by the user or an
+  // administrator.
+  google.protobuf.Timestamp totp_changed_at = 7;
 }
 
 message FindUserRequest {

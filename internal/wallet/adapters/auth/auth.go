@@ -33,5 +33,8 @@ func (c *Client) Consume(ctx context.Context, userID, token string) (ports.StepU
 	if t := sec.GetPasswordChangedAt(); t != nil {
 		su.PasswordChanged = t.AsTime()
 	}
+	if t := sec.GetTotpChangedAt(); t != nil {
+		su.TOTPChanged = t.AsTime()
+	}
 	return su, nil
 }

@@ -54,7 +54,7 @@ func (s *Server) ConsumeStepUp(ctx context.Context, req *authv1.ConsumeStepUpReq
 	return &authv1.ConsumeStepUpResponse{SessionId: su.SessionID, Channel: string(su.Channel), Security: &authv1.SecurityContext{
 		Identities: int32(sec.Identities), TotpEnabled: sec.TOTPEnabled, DeviceId: sec.DeviceID, //nolint:gosec // a handful
 		DeviceFirstSeenAt: stamp(sec.DeviceFirstSeenAt), IdentityChangedAt: stamp(sec.IdentityChangedAt),
-		PasswordChangedAt: stamp(sec.PasswordChangedAt),
+		PasswordChangedAt: stamp(sec.PasswordChangedAt), TotpChangedAt: stamp(sec.TOTPChangedAt),
 	}}, nil
 }
 
@@ -84,6 +84,7 @@ func (s *Server) GetSecurity(ctx context.Context, req *authv1.GetSecurityRequest
 		TotpStatus: sec.TOTP, TotpActivatedAt: stamp(sec.TOTPActivated), PasswordChangedAt: stamp(sec.Credential.PasswordChangedAt),
 		LastLoginAt: stamp(sec.Credential.LastLoginAt), LockedSeconds: int32(sec.LockedFor.Seconds()), //nolint:gosec // at most 15 minutes
 		PendingIdentityRequests: int32(sec.PendingRequests), //nolint:gosec // a handful
+		TotpChangedAt:           stamp(sec.Credential.TOTPChangedAt),
 	}
 	for _, id := range sec.Identities {
 		out.Identities = append(out.Identities, &authv1.IdentityInfo{

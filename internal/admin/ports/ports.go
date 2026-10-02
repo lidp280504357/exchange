@@ -216,8 +216,11 @@ type Device struct {
 type Security struct {
 	Identities []Identity
 	// TOTP is ACTIVE, PENDING (set up, not confirmed) or "" (none).
-	TOTP              string
-	TOTPActivatedAt   time.Time
+	TOTP            string
+	TOTPActivatedAt time.Time
+	// TOTPChangedAt is the app's latest removal (by the user or an
+	// administrator): withdrawals wait for review for a day after it.
+	TOTPChangedAt     time.Time
 	PasswordChangedAt time.Time
 	LastLoginAt       time.Time
 	// LockedSeconds is how long password sign-in stays locked, 0 when it

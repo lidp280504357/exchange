@@ -135,6 +135,7 @@ func (r memSecurity) Context(_ context.Context, userID, sessionID string) (domai
 	}
 	t, ok := r.s.totps[userID]
 	c.TOTPEnabled = ok && t.Status == domain.TOTPActive
+	c.TOTPChangedAt = r.s.credentials[userID].TOTPChangedAt
 	return c, nil
 }
 
@@ -288,6 +289,13 @@ func (r memCredentials) RecordFailure(_ context.Context, userID string, lockedUn
 func (r memCredentials) SetPassword(_ context.Context, userID, hash string, _ time.Time) error {
 	c := r.s.credentials[userID]
 	c.PasswordHash = hash
+	r.s.credentials[userID] = c
+	return nil
+}
+
+func (r memCredentials) TOTPChanged(_ context.Context, userID string, now time.Time) error {
+	c := r.s.credentials[userID]
+	c.TOTPChangedAt = now
 	r.s.credentials[userID] = c
 	return nil
 }

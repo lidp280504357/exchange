@@ -75,6 +75,9 @@ type Credential struct {
 	LockedUntil       time.Time
 	LastLoginAt       time.Time
 	PasswordChangedAt time.Time
+	// TOTPChangedAt is when the authenticator app was last unbound or
+	// reset by an administrator; zero if never.
+	TOTPChangedAt time.Time
 }
 
 // Session is a device session.
@@ -163,7 +166,7 @@ type Device struct {
 
 // SecurityContext is what the risk rules of sensitive actions weigh
 // (§11.6): identities, authenticator, how new the device is and recent
-// identity or password changes.
+// identity, password or authenticator changes.
 type SecurityContext struct {
 	Identities        int
 	TOTPEnabled       bool
@@ -171,4 +174,5 @@ type SecurityContext struct {
 	DeviceFirstSeenAt time.Time
 	IdentityChangedAt time.Time
 	PasswordChangedAt time.Time
+	TOTPChangedAt     time.Time
 }

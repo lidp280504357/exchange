@@ -373,6 +373,8 @@ type StepUp struct {
 	TOTPEnabled     bool
 	IdentityChanged time.Time
 	PasswordChanged time.Time
+	// TOTPChanged is when the authenticator app was last removed.
+	TOTPChanged time.Time
 }
 
 // StepUps redeems step-up tokens (auth-service).

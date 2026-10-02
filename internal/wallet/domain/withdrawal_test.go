@@ -34,6 +34,17 @@ func TestAssess(t *testing.T) {
 			t.Errorf("%s: %+v", reason, r)
 		}
 	}
+	// The authenticator app removed (by the user or an administrator)
+	// holds withdrawals for review for a day too (C5.5 ⑤).
+	app := calm
+	app.TOTPChanged = now.Add(-23 * time.Hour)
+	if r := Assess(app); !slices.Equal(r.Reasons, []string{RiskSecurityChange}) || r.Approvals != 1 {
+		t.Fatalf("the app removed a day ago: %+v", r)
+	}
+	app.TOTPChanged = now.Add(-25 * time.Hour)
+	if r := Assess(app); len(r.Reasons) != 0 {
+		t.Fatalf("a day later it counts no more: %+v", r)
+	}
 	unknown := calm
 	unknown.DeviceFirstSeen = time.Time{}
 	if r := Assess(unknown); !slices.Contains(r.Reasons, RiskNewDevice) {

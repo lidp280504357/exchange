@@ -57,9 +57,10 @@ func (r credentials) Create(ctx context.Context, userID, hash string, now time.T
 
 func (r credentials) Get(ctx context.Context, userID string) (*domain.Credential, error) {
 	var c domain.Credential
-	var locked, last *time.Time
-	err := r.q.QueryRow(ctx, `SELECT user_id::text, password_hash, failed_attempts, locked_until, last_login_at, password_changed_at
-		FROM credentials WHERE user_id = $1`, userID).Scan(&c.UserID, &c.PasswordHash, &c.FailedAttempts, &locked, &last, &c.PasswordChangedAt)
+	var locked, last, totp *time.Time
+	err := r.q.QueryRow(ctx, `SELECT user_id::text, password_hash, failed_attempts, locked_until, last_login_at, password_changed_at,
+		totp_changed_at FROM credentials WHERE user_id = $1`, userID).
+		Scan(&c.UserID, &c.PasswordHash, &c.FailedAttempts, &locked, &last, &c.PasswordChangedAt, &totp)
 	if pg.IsNoRows(err) {
 		return nil, nil
 	}
@@ -71,6 +72,9 @@ func (r credentials) Get(ctx context.Context, userID string) (*domain.Credential
 	}
 	if last != nil {
 		c.LastLoginAt = *last
+	}
+	if totp != nil {
+		c.TOTPChangedAt = *totp
 	}
 	return &c, nil
 }
@@ -102,6 +106,13 @@ func (r credentials) SetPassword(ctx context.Context, userID, hash string, now t
 		locked_until = NULL, updated_at = $3 WHERE user_id = $1`, userID, hash, now)
 	if err != nil {
 		return fmt.Errorf("set password: %w", err)
+	}
+	return nil
+}
+
+func (r credentials) TOTPChanged(ctx context.Context, userID string, now time.Time) error {
+	if _, err := r.q.Exec(ctx, `UPDATE credentials SET totp_changed_at = $2, updated_at = $2 WHERE user_id = $1`, userID, now); err != nil {
+		return fmt.Errorf("record the authenticator's change: %w", err)
 	}
 	return nil
 }

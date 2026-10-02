@@ -134,8 +134,9 @@ func (s *AccountService) AdminRevokeSessions(ctx context.Context, userID, sessio
 }
 
 // AdminResetTOTP removes a user's authenticator app (bound or being set
-// up); the user is told by mail (TotpDisabled). It reports whether there
-// was one.
+// up); the user is told by mail (TotpDisabled), and withdrawals wait for
+// review for a day after a bound one is removed. It reports whether
+// there was one.
 func (s *AccountService) AdminResetTOTP(ctx context.Context, userID, actor, reason string) (bool, error) {
 	if err := needActorReason(actor, reason); err != nil {
 		return false, err
@@ -155,6 +156,9 @@ func (s *AccountService) AdminResetTOTP(ctx context.Context, userID, actor, reas
 		removed = true
 		if t.Status != domain.TOTPActive {
 			return nil // a binding never confirmed protected nothing
+		}
+		if err := r.Credentials().TOTPChanged(ctx, userID, s.Now()); err != nil {
+			return err
 		}
 		return r.Emit(ctx, &authv1.TotpDisabled{UserId: userID}, "user", userID)
 	})

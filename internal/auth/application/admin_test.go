@@ -98,6 +98,9 @@ func TestAdminResetTOTP(t *testing.T) {
 	if removed, err := a.acc.AdminResetTOTP(ctx, tok.UserID, "ops@example.com", "lost the phone"); err != nil || removed {
 		t.Fatalf("nothing to remove: %v %v", removed, err)
 	}
+	if sec, _ := a.acc.AdminSecurity(ctx, tok.UserID); !sec.Credential.TOTPChangedAt.IsZero() {
+		t.Fatalf("nothing changed %+v", sec.Credential)
+	}
 	bindTOTP(t, a, tok)
 	if sec, _ := a.acc.AdminSecurity(ctx, tok.UserID); sec.TOTP != domain.TOTPActive {
 		t.Fatalf("bound: %q", sec.TOTP)
@@ -111,6 +114,10 @@ func TestAdminResetTOTP(t *testing.T) {
 	}
 	if ev := eventsOf[*authv1.TotpDisabled](a.store); len(ev) != 1 {
 		t.Fatalf("TotpDisabled %v", ev)
+	}
+	// Recorded for the withdrawals' review and the console (C5.5 ⑤).
+	if sec, _ := a.acc.AdminSecurity(ctx, tok.UserID); !sec.Credential.TOTPChangedAt.Equal(a.now) {
+		t.Fatalf("the reset is recorded %+v", sec.Credential)
 	}
 }
 

@@ -60,6 +60,9 @@ type SecurityJSON struct {
 		// ACTIVE, PENDING or NONE.
 		Status      string  `json:"status"`
 		ActivatedAt *string `json:"activated_at"`
+		// ChangedAt is its latest removal; withdrawals wait for review
+		// for a day after it.
+		ChangedAt *string `json:"changed_at"`
 	} `json:"totp"`
 	PasswordChangedAt       *string       `json:"password_changed_at"`
 	LastLoginAt             *string       `json:"last_login_at"`
@@ -80,7 +83,7 @@ func (h *Handler) userSecurity(w http.ResponseWriter, r *http.Request) {
 		LockedSeconds: sec.LockedSeconds, Sessions: make([]SessionJSON, 0, len(sec.Sessions)), Devices: make([]DeviceJSON, 0, len(sec.Devices)),
 		PendingIdentityRequests: sec.PendingIdentityRequests,
 	}
-	out.TOTP.Status, out.TOTP.ActivatedAt = sec.TOTP, optTime(sec.TOTPActivatedAt)
+	out.TOTP.Status, out.TOTP.ActivatedAt, out.TOTP.ChangedAt = sec.TOTP, optTime(sec.TOTPActivatedAt), optTime(sec.TOTPChangedAt)
 	if out.TOTP.Status == "" {
 		out.TOTP.Status = "NONE"
 	}

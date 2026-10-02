@@ -42,6 +42,19 @@ export function SecurityTab({ admin, userId }: { admin: Admin; userId: string })
                 items={[
                   { label: t("admin.common.status"), value: <EnumBadge group="totpStatus" code={s.totp.status} /> },
                   { label: t("admin.user.sec.totpSince"), value: <TimeText value={s.totp.activated_at} /> },
+                  {
+                    label: t("admin.user.sec.totpRemoved"),
+                    value: s.totp.changed_at ? (
+                      <span className="flex flex-col">
+                        <TimeText value={s.totp.changed_at} />
+                        {Date.now() - Date.parse(s.totp.changed_at) < 24 * 3600_000 && (
+                          <span className="text-xs text-warn" data-testid="totp-review-window">{t("admin.user.sec.totpReviewWindow")}</span>
+                        )}
+                      </span>
+                    ) : (
+                      t("admin.user.sec.never")
+                    ),
+                  },
                 ]}
               />
               {act && s.totp.status !== "NONE" && (
