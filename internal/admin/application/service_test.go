@@ -392,12 +392,14 @@ type adjustment struct {
 type fakeLedger struct {
 	calls []adjustment
 	err   error
-	holds []ports.Hold
+	// refuse refuses the adjustments of one user (with err).
+	refuse string
+	holds  []ports.Hold
 }
 
 func (l *fakeLedger) Adjust(_ context.Context, key, userID, account, asset string, amount decimal.Decimal, actor, memo string) (string, error) {
 	l.calls = append(l.calls, adjustment{key: key, userID: userID, account: account, asset: asset, actor: actor, amount: amount, memo: memo})
-	if l.err != nil {
+	if l.err != nil && (l.refuse == "" || l.refuse == userID) {
 		return "", l.err
 	}
 	return "journal-1", nil

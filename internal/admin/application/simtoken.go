@@ -118,6 +118,16 @@ const mintScale = 2
 // ErrNoBots refuses a mint without bots to share it.
 var ErrNoBots = apperr.New(apperr.KindUnprocessable, "ADMIN_SIM_NO_BOTS", "no bots to share it among")
 
+// The most one mint books, whoever approves it (admin console C5.5 ③):
+// of the coin, and of USDT.
+const (
+	mintCapCoin = 10_000_000
+	mintCapUSDT = 1_000_000
+)
+
+// ErrMintCap refuses a mint beyond its cap (details asset, max).
+var ErrMintCap = apperr.New(apperr.KindUnprocessable, "ADMIN_SIM_MINT_CAP", "more than one mint may book")
+
 // MintSimBots books more of the coin or USDT for the simulated market's
 // bots, in their SPOT accounts, as one fund operation: carried out at
 // once within the single-person limits, or waiting for a second
@@ -139,6 +149,13 @@ func (s *Service) MintSimBots(ctx context.Context, p Principal, in SimMintInput)
 	asset := strings.ToUpper(strings.TrimSpace(in.Asset))
 	if asset != st.coin() && asset != "USDT" {
 		return domain.Approval{}, apperr.Invalid(fmt.Sprintf("the bots hold %s and USDT", st.coin()))
+	}
+	most := decimal.NewFromInt(mintCapCoin)
+	if asset == "USDT" {
+		most = decimal.NewFromInt(mintCapUSDT)
+	}
+	if in.Amount.GreaterThan(most) {
+		return domain.Approval{}, ErrMintCap.WithDetail("asset", asset).WithDetail("max", most.String())
 	}
 	role := strings.ToUpper(strings.TrimSpace(in.Role))
 	var bots []simBot
@@ -182,8 +199,10 @@ func splitMint(amount decimal.Decimal, bots []simBot) ([]MintShare, error) {
 
 // mintBots books an approved mint: one adjustment per bot under the key
 // approval:<id>:<user>, so a second attempt books only what the first did
-// not. An error leaves the outcome unknown (it stays pending); a refusal
-// fails it, saying how many were booked before.
+// not. An error leaves the outcome unknown (it stays pending). A refusal
+// of the first bot fails it, nothing booked; a refusal after some were
+// booked keeps it pending (and counted in its requester's 24 hours) to be
+// finished once the cause is fixed, the error saying how far it got.
 func (s *Service) mintBots(ctx context.Context, a *domain.Approval, p Principal) error {
 	var shares []MintShare
 	if err := json.Unmarshal([]byte(a.Payload["bots"]), &shares); err != nil {
@@ -205,10 +224,10 @@ func (s *Service) mintBots(ctx context.Context, a *domain.Approval, p Principal)
 			if !errors.As(err, &e) || e.Kind == apperr.KindUnavailable || e.Kind == apperr.KindInternal {
 				return err
 			}
-			a.Status, a.Result = domain.ApprovalFailed, fmt.Sprintf("%s: %s: %s", sh.Label, e.Code, e.Message)
 			if len(journals) > 0 {
-				a.Result += fmt.Sprintf(" (%d of %d booked before)", len(journals), len(shares))
+				return e.WithDetail("bot", sh.Label).WithDetail("booked", len(journals)).WithDetail("of", len(shares))
 			}
+			a.Status, a.Result = domain.ApprovalFailed, fmt.Sprintf("%s: %s: %s", sh.Label, e.Code, e.Message)
 			return nil
 		}
 		journals = append(journals, journal)

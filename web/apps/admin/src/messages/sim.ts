@@ -66,7 +66,7 @@ export const simZh = {
       errorsOnly: "只看被拒", noBots: "没有机器人", adjustBot: "调整余额",
       clusterSettings: "集群参数", editInControl: "到价格控制修改",
       mint: "补充库存",
-      mintHelp: "按资金操作处理：总数平均分给所选的机器人（两位小数，余数给第一个），每个机器人记一笔现货账户的人工调整。单人模式在限额内立即入账，否则等另一位管理员审批。",
+      mintHelp: "按资金操作处理：总数平均分给所选的机器人（两位小数，余数给第一个），每个机器人记一笔现货账户的人工调整。单人模式在限额内立即入账，否则等另一位管理员审批。单次最多 10,000,000 个币或 1,000,000 USDT，谁批准都一样；部分机器人记上后被拒的，保持待处理，排除原因后在「审批」里完成。",
       mintAmount: "总数量", mintTo: "分给", allBots: "全部机器人", mintEach: "{{n}} 个机器人，每个约 {{each}} {{asset}}",
       mintSubmit: "增发", mintTitle: "给机器人增发", mintSplit: "分给{{to}}（{{n}} 个）",
       tokenHelp: "平台币在站点上的资料（名称、简介、链接与图标），以及谁持有它：机器人、用户与平台账户。持有数据来自分析库的账本流水，晚几秒，每分钟刷新。",
@@ -78,6 +78,7 @@ export const simZh = {
   errors: {
     SIM_EVENTS_OFF: "价格事件开关（sim.events）未打开", SIM_NOT_READY: "模拟市场正在接替，稍后再试",
     ADMIN_SIM_NO_CONTRACT: "模拟市场没有永续合约", ADMIN_SIM_NO_BOTS: "没有可分配的机器人",
+    ADMIN_SIM_MINT_CAP: "超过单次增发的上限：币最多 10,000,000 个，USDT 最多 1,000,000",
   },
 };
 
@@ -147,7 +148,7 @@ export const simEn = {
       errorsOnly: "Refused only", noBots: "No bots", adjustBot: "Adjust",
       clusterSettings: "Cluster settings", editInControl: "Change them in price control",
       mint: "More inventory",
-      mintHelp: "A fund operation: the amount split evenly over the bots chosen (two decimal places, the first takes the rest), one manual adjustment of each bot's spot account. Booked at once in single-person mode within the limits, otherwise it waits for a second administrator.",
+      mintHelp: "A fund operation: the amount split evenly over the bots chosen (two decimal places, the first takes the rest), one manual adjustment of each bot's spot account. Booked at once in single-person mode within the limits, otherwise it waits for a second administrator. At most 10,000,000 of the coin or 1,000,000 USDT at once, whoever approves; one refused after some bots were booked stays pending, to be finished on the approvals page once the cause is fixed.",
       mintAmount: "Amount in all", mintTo: "For", allBots: "every bot", mintEach: "{{n}} bots, about {{each}} {{asset}} each",
       mintSubmit: "Mint", mintTitle: "Mint for the bots", mintSplit: "for {{to}} ({{n}})",
       tokenHelp: "The platform coin's profile on the sites (name, introductions, links, logo) and who holds it: the bots, the users, the platform's accounts. The holdings come from the ledger's lines in the read model, a few seconds behind, refreshed every minute.",
@@ -159,5 +160,6 @@ export const simEn = {
   errors: {
     SIM_EVENTS_OFF: "Price events are off (flag sim.events)", SIM_NOT_READY: "The simulated market is being taken over; try again shortly",
     ADMIN_SIM_NO_CONTRACT: "The simulated market has no perpetual contract", ADMIN_SIM_NO_BOTS: "No bots to share it among",
+    ADMIN_SIM_MINT_CAP: "Beyond what one mint may book: 10,000,000 of the coin, 1,000,000 USDT",
   },
 };

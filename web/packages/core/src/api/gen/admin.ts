@@ -1693,10 +1693,16 @@ export interface paths {
          *     every one), the first taking the rounding; one manual adjustment of
          *     each bot's SPOT account, keyed by the operation and the bot.
          *     Booked at once in single-person mode within the limits (EXECUTED,
-         *     or FAILED with the ledger's refusal), otherwise PENDING for a
-         *     second administrator with ledger.adjust.approve; COMMON_UNAVAILABLE
-         *     with the detail approval_id when the ledger does not answer. Needs
-         *     ledger.adjust.request.
+         *     or FAILED with the ledger's refusal of the first bot), otherwise
+         *     PENDING for a second administrator with ledger.adjust.approve;
+         *     COMMON_UNAVAILABLE with the detail approval_id when the ledger does
+         *     not answer. A refusal after some bots were booked answers the
+         *     ledger's code with the details approval_id, bot, booked and of: the
+         *     operation stays PENDING (counted in its requester's 24 hours) to be
+         *     finished on the approvals page once the cause is fixed, its keys
+         *     booking only the rest. At most 10,000,000 of the coin or 1,000,000
+         *     USDT at once, whoever approves (422 ADMIN_SIM_MINT_CAP, details
+         *     asset and max). Needs ledger.adjust.request.
          */
         post: operations["mintSimBots"];
         delete?: never;

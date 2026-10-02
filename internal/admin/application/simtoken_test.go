@@ -127,6 +127,62 @@ func TestMoreForTheBotsIsAFundOperation(t *testing.T) {
 	}
 }
 
+func TestAMintHasACapAndIsFinishedWhenPartlyBooked(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	sim := &stateSim{}
+	h.svc.Sim, h.svc.SimBots = sim, sim
+	h.admin(t, "boss@example.com", domain.RoleAdmin)
+	h.admin(t, "fin@example.com", domain.RoleFinance)
+	boss, fin := h.login(t, "boss@example.com"), h.login(t, "fin@example.com")
+	mint := func(p Principal, asset, amount string) (domain.Approval, error) {
+		return h.svc.MintSimBots(ctx, p, SimMintInput{Asset: asset, Amount: decimal.RequireFromString(amount), Reason: "the bots run low"})
+	}
+
+	// Whoever would approve it: at most 10,000,000 of the coin, 1,000,000 USDT.
+	h.svc.Features = onFlags{flags.KeyTwoPerson: true}
+	for asset, amount := range map[string]string{"ASTRA": "10000000.01", "USDT": "1000000.01"} {
+		if _, err := mint(fin, asset, amount); !apperr.Is(err, "ADMIN_SIM_MINT_CAP") {
+			t.Fatalf("%s %s beyond the cap: %v", amount, asset, err)
+		}
+	}
+	if a, err := mint(fin, "ASTRA", "10000000"); err != nil || a.Status != domain.ApprovalPending {
+		t.Fatalf("the cap itself %+v %v", a, err)
+	}
+	h.svc.Features = nil
+
+	// The second bot refuses: the first is booked, the mint stays pending
+	// and its requester finishes it once the cause is fixed; the keys
+	// book only the rest.
+	h.ledger.calls = nil
+	h.ledger.err, h.ledger.refuse = apperr.New(apperr.KindForbidden, "LEDGER_ACCOUNT_FROZEN", "frozen"), botB
+	_, err := mint(boss, "USDT", "30")
+	e := apperr.From(err)
+	if e == nil || e.Code != "LEDGER_ACCOUNT_FROZEN" || e.Details["booked"] != 1 || e.Details["of"] != 3 || e.Details["bot"] != "bot-02" {
+		t.Fatalf("partly booked: %v", err)
+	}
+	id, _ := e.Details["approval_id"].(string)
+	a, err := h.store.Read().Approvals().Get(ctx, id)
+	if err != nil || a == nil || a.Status != domain.ApprovalPending || a.Mode != domain.ModeSingle {
+		t.Fatalf("kept pending %+v %v", a, err)
+	}
+	if used, err := h.store.Read().Approvals().SingleUsage(ctx, boss.Admin.ID, h.now.Add(-time.Hour)); err != nil || !used.Equal(decimal.NewFromInt(30)) {
+		t.Fatalf("counted in the day's single-person total: %s %v", used, err)
+	}
+	h.ledger.err, h.ledger.refuse = nil, ""
+	done, err := h.svc.DecideApproval(ctx, boss, id, true, "unfrozen, finishing it")
+	if err != nil || done.Status != domain.ApprovalExecuted || !strings.HasPrefix(done.Result, "3 adjustments") {
+		t.Fatalf("finished %+v %v", done, err)
+	}
+	keys := map[string]int{}
+	for _, c := range h.ledger.calls {
+		keys[c.key]++
+	}
+	if len(keys) != 3 || keys["approval:"+id+":"+botA] != 2 || keys["approval:"+id+":"+botB] != 2 || keys["approval:"+id+":"+botC] != 1 {
+		t.Fatalf("each bot under its own key %v", keys)
+	}
+}
+
 func TestSplittingAMint(t *testing.T) {
 	bots := []simBot{{UserID: botA, Label: "a"}, {UserID: botB, Label: "b"}, {UserID: botC, Label: "c"}, {UserID: botA, Label: "d"}}
 	shares, err := splitMint(decimal.RequireFromString("1000000.07"), bots)
