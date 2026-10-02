@@ -62,6 +62,7 @@ tags:
   - name: audit
   - name: reports
   - name: derivatives
+  - name: content
   - name: custody
 paths:
   /admin/v1/login-options:
@@ -2098,7 +2099,9 @@ paths:
       description: |
         The document names only the items to create or change, each whole
         (a field left out becomes empty). Items missing are left alone,
-        statuses never change here (the status endpoints do that). A pair's
+        statuses never change here (the status endpoints do that): a new
+        pair or contract starts in PREPARE (ADMIN_NEW_ITEM_NOT_PREPARE for
+        another status). A pair's
         new reference symbol must be listed on the reference market's spot
         market (ADMIN_REFERENCE_UNKNOWN otherwise: it would fail the
         reference reads of every pair); clearing the reference symbol of a
@@ -2208,6 +2211,305 @@ paths:
                     properties:
                       change:
                         $ref: '#/components/schemas/InstrumentChange'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/articles:
+    get:
+      operationId: listArticles
+      summary: A section's announcements or help articles, every status
+      description: |
+        Kept by notification-service and read by the sites through GET
+        /v1/announcements and /v1/help once published (design 2026-10-02
+        §4.5). Every administrator reads them.
+      tags: [content]
+      parameters:
+        - name: section
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [ANNOUNCEMENT, HELP]
+      responses:
+        '200':
+          description: The articles.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [articles]
+                properties:
+                  articles:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ContentArticle'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: createArticle
+      summary: Write a draft
+      description: |
+        Chinese (zh-CN) title and Markdown body required, English
+        optional; the slug is unique in its section
+        (NOTIFY_ARTICLE_EXISTS). Audited as admin.content.created on
+        <section>:<slug>. Needs content.write.
+      tags: [content]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/ArticleWrite'
+                - type: object
+                  required: [section, reason]
+                  properties:
+                    section:
+                      type: string
+                      enum: [ANNOUNCEMENT, HELP]
+                    reason:
+                      type: string
+                      minLength: 3
+      responses:
+        '201':
+          description: The draft.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentArticle'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/articles/{id}:
+    get:
+      operationId: getArticle
+      summary: An article with every text
+      tags: [content]
+      parameters:
+        - $ref: '#/components/parameters/ArticleID'
+      responses:
+        '200':
+          description: The article.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentArticle'
+        default:
+          $ref: '#/components/responses/Error'
+    put:
+      operationId: updateArticle
+      summary: Rewrite an article
+      description: |
+        At the version read (COMMON_CONFLICT when someone saved it
+        meanwhile); its status stays: a published article changes on the
+        sites within a minute. Audited as admin.content.updated. Needs
+        content.write.
+      tags: [content]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/ArticleID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/ArticleWrite'
+                - type: object
+                  required: [version, reason]
+                  properties:
+                    version:
+                      type: integer
+                    reason:
+                      type: string
+                      minLength: 3
+      responses:
+        '200':
+          description: The article.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentArticle'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/articles/{id}/publish:
+    post:
+      operationId: publishArticle
+      summary: Publish an article, now or at a time
+      description: |
+        The sites show it from publish_at on (now when left out). Audited
+        as admin.content.published. Needs content.write.
+      tags: [content]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/ArticleID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, reason]
+              properties:
+                version:
+                  type: integer
+                publish_at:
+                  type: string
+                  format: date-time
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: The article.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentArticle'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/articles/{id}/archive:
+    post:
+      operationId: archiveArticle
+      summary: Take an article off the sites
+      description: It may be published again. Audited as admin.content.archived. Needs content.write.
+      tags: [content]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/ArticleID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, reason]
+              properties:
+                version:
+                  type: integer
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: The article.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentArticle'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/broadcasts:
+    get:
+      operationId: listBroadcasts
+      summary: The in-app messages sent, newest first
+      description: With how many each reached and how many of them read it. Every administrator reads them.
+      tags: [content]
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: A page of messages.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Broadcast'
+                  next_cursor:
+                    $ref: '#/components/schemas/NextCursor'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: sendBroadcast
+      summary: Send an in-app message to one user, a tag's users or everyone
+      description: |
+        notification-service delivers it in rounds, each user once in their
+        language (Chinese without English), as a notice of type BROADCAST
+        on the sites' inbox and pushed live; email also mails it. A tag's
+        users are those tagged now (ADMIN_TAG_EMPTY when none, at most
+        10,000). Audited as admin.notices.sent on broadcast:<id>. Needs
+        notices.send.
+      tags: [content]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [audience, title, body, reason]
+              properties:
+                audience:
+                  type: string
+                  enum: [ALL, USER, TAG]
+                user_id:
+                  type: string
+                  format: uuid
+                  description: With USER.
+                tag:
+                  type: string
+                  description: With TAG.
+                title:
+                  $ref: '#/components/schemas/LocalizedText'
+                body:
+                  $ref: '#/components/schemas/LocalizedText'
+                link:
+                  type: string
+                  description: A path on the sites the message leads to, such as /assets.
+                email:
+                  type: boolean
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '201':
+          description: The message, being delivered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Broadcast'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/broadcasts/{id}:
+    get:
+      operationId: getBroadcast
+      summary: An in-app message sent, with its counts
+      tags: [content]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Broadcast'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/instruments/changes:
@@ -3480,6 +3782,13 @@ components:
       schema:
         type: string
         format: uuid
+    ArticleID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   responses:
     Error:
       $ref: '../openapi/common.yaml#/components/responses/Error'
@@ -3913,6 +4222,127 @@ components:
           type: string
         to:
           type: string
+    LocalizedText:
+      type: object
+      description: By locale; zh-CN required, en optional.
+      required: [zh-CN]
+      properties:
+        zh-CN:
+          type: string
+        en:
+          type: string
+    ArticleText:
+      type: object
+      required: [locale, title, summary, body]
+      properties:
+        locale:
+          type: string
+          enum: [zh-CN, en]
+        title:
+          type: string
+          maxLength: 200
+        summary:
+          type: string
+          maxLength: 500
+        body:
+          type: string
+          description: Markdown.
+    ArticleWrite:
+      type: object
+      required: [slug, category, pinned, order, texts]
+      properties:
+        slug:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]{0,63}$'
+        category:
+          type: string
+          description: Announcements notice or product; help account, funds, trading, futures or faq (others allowed).
+        pinned:
+          type: boolean
+        order:
+          type: integer
+        texts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArticleText'
+    ContentArticle:
+      type: object
+      required: [id, section, slug, category, pinned, order, status, publish_at, version, updated_by, created_at, updated_at, texts]
+      properties:
+        id:
+          type: string
+          format: uuid
+        section:
+          type: string
+          enum: [ANNOUNCEMENT, HELP]
+        slug:
+          type: string
+        category:
+          type: string
+        pinned:
+          type: boolean
+        order:
+          type: integer
+        status:
+          type: string
+          enum: [DRAFT, PUBLISHED, ARCHIVED]
+        publish_at:
+          type: [string, 'null']
+          format: date-time
+          description: A published article shows from then on (later than now when scheduled).
+        version:
+          type: integer
+        updated_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        texts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArticleText'
+    Broadcast:
+      type: object
+      required: [id, audience, users, title, body, link, email, status, recipients, read, created_by, created_at, finished_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        audience:
+          type: string
+          enum: [ALL, USERS]
+          description: Everyone, or named users (one, or a tag's when sent).
+        users:
+          type: integer
+          description: The named users; 0 for everyone.
+        title:
+          $ref: '#/components/schemas/LocalizedText'
+        body:
+          $ref: '#/components/schemas/LocalizedText'
+        link:
+          type: string
+        email:
+          type: boolean
+        status:
+          type: string
+          enum: [SENDING, SENT]
+        recipients:
+          type: integer
+          description: Users who have it.
+        read:
+          type: integer
+          description: Of them, those who read it.
+        created_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: [string, 'null']
+          format: date-time
     StatusRequest:
       type: object
       required: [to, reason]
@@ -4167,7 +4597,7 @@ components:
       enum: [users.read, users.status, orders.cancel, instruments.read, instruments.write, flags.read, flags.write,
         withdrawals.read, withdrawals.review, ledger.adjust.request, ledger.adjust.approve, audit.read, reports.read,
         derivatives.read, derivatives.write, settings.write, users.notes, users.security, users.contacts, ledger.hold,
-        deposits.review, admins.manage, instruments.trading]
+        deposits.review, admins.manage, instruments.trading, content.write, notices.send]
     RolePermissions:
       type: object
       required: [role, permissions]

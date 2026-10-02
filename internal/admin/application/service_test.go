@@ -157,6 +157,17 @@ func (r memTags) Set(_ context.Context, userID string, tags []string, _ string, 
 	return nil
 }
 
+func (r memTags) Users(_ context.Context, tag string, limit int) ([]string, error) {
+	var out []string
+	for user, tags := range r.m.tags {
+		if slices.Contains(tags, tag) && len(out) < limit {
+			out = append(out, user)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
 // fakeUsers knows some accounts.
 type fakeUsers struct {
 	known    map[string]ports.User

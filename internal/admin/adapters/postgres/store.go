@@ -559,6 +559,18 @@ func (r tags) Of(ctx context.Context, userIDs []string) (map[string][]string, er
 	return out, rows.Err()
 }
 
+func (r tags) Users(ctx context.Context, tag string, limit int) ([]string, error) {
+	rows, err := r.q.Query(ctx, `SELECT user_id FROM user_tags WHERE tag = $1 ORDER BY user_id LIMIT $2`, tag, limit)
+	if err != nil {
+		return nil, fmt.Errorf("tagged users: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("tagged users: %w", err)
+	}
+	return out, nil
+}
+
 func (r tags) Set(ctx context.Context, userID string, tags []string, adminID string, now time.Time) error {
 	if tags == nil {
 		tags = []string{} // NULL would match nothing and keep every tag

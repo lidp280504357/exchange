@@ -106,6 +106,7 @@ export const instrumentsZh = {
     ADMIN_REFERENCE_IN_USE: "HOUSE 正在给这个交易对报价，或有永续合约的指数跟随它，参考符号不能清空",
     ADMIN_CONFIRMATION_REQUIRED: "请重新预览：确认已过期，或这项修改与预览时不同",
     ADMIN_CHANGE_CLOSED: "这项修改已经生效或已关闭",
+    ADMIN_NEW_ITEM_NOT_PREPARE: "新交易对与合约先以「准备中」创建，再经状态修改开放交易",
   },
 };
 
@@ -267,5 +268,6 @@ export const instrumentsEn = {
     ADMIN_REFERENCE_IN_USE: "HOUSE quotes this pair or a perpetual's index follows it: its reference symbol stays",
     ADMIN_CONFIRMATION_REQUIRED: "Preview again: the confirmation expired or the change is no longer what was previewed",
     ADMIN_CHANGE_CLOSED: "This change already took effect or was closed",
+    ADMIN_NEW_ITEM_NOT_PREPARE: "A new pair or contract is created in PREPARE and opened with a status change",
   },
 };

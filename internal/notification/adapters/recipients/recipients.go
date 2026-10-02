@@ -44,3 +44,18 @@ func (c *Client) Contacts(ctx context.Context, userID string) ([]ports.Contact, 
 	}
 	return out, nil
 }
+
+// UserIDs pages through the accounts that are not closed (ports.Directory).
+func (c *Client) UserIDs(ctx context.Context, cursor string, limit int) ([]string, string, error) {
+	resp, err := c.users.ListUsers(ctx, &userv1.ListUsersRequest{Cursor: cursor, Limit: int32(min(max(limit, 1), 200))}) //nolint:gosec // bounded
+	if err != nil {
+		return nil, "", err
+	}
+	out := make([]string, 0, len(resp.GetUsers()))
+	for _, u := range resp.GetUsers() {
+		if u.GetStatus() != "CLOSED" {
+			out = append(out, u.GetId())
+		}
+	}
+	return out, resp.GetNextCursor(), nil
+}

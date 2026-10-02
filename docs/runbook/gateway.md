@@ -14,6 +14,7 @@
 | `/v1/user/*` | 必需 | user-service |
 | `/v1/account/*` | 必需 | ledger-service |
 | `/v1/notifications`、`/v1/notifications/*` | 必需 | notification-service |
+| `GET /v1/announcements[/{slug}]`、`GET /v1/help[/{slug}]` | 无（后台发布的公告与帮助，2026-10-02 后台设计 C4b） | notification-service |
 | `GET /v1/ws` | 协议内 `auth` | 网关自身 |
 | `/v1/dev/*`（仅非生产） | 无 | notification-service 开发收件箱 |
 

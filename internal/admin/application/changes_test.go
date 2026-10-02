@@ -371,9 +371,20 @@ func TestLadderImpactsAndReferencesInUse(t *testing.T) {
 	if err != nil || len(prev.Guard.Params) != 1 || prev.Guard.Params[0].Field != "reference_symbol" || string(prev.Guard.Params[0].After) != "null" {
 		t.Fatalf("LINK-USDT %+v %v", prev.Guard, err)
 	}
-	// A new pair touches nobody: an OPERATOR lists it at once.
+	// A new pair touches nobody: an OPERATOR lists it at once, in PREPARE;
+	// one created open would skip the guard of the status change.
+	for _, who := range []Principal{ops, boss} {
+		if _, _, err := h.svc.ApplyConfig(ctx, who, json.RawMessage(`{"pairs":[{"symbol":"SOL-USDT","fee_tier":"default","reference_symbol":"",
+		"reference_multiplier":"1","status":"TRADING"}]}`), "list SOL open", ""); code(err) != "ADMIN_NEW_ITEM_NOT_PREPARE" {
+			t.Fatalf("%s creates a pair open: %v", who.Admin.Role, err)
+		}
+	}
+	if _, err := h.svc.PreviewConfig(ctx, ops, json.RawMessage(`{"contracts":[{"symbol":"SOL-USDT-PERP","index_symbol":"SOL-USDT",
+		"fee_tier":"default","status":"HALT"}]}`)); code(err) != "ADMIN_NEW_ITEM_NOT_PREPARE" {
+		t.Fatalf("a contract created halted: %v", err)
+	}
 	if _, c, err := h.svc.ApplyConfig(ctx, ops, json.RawMessage(`{"pairs":[{"symbol":"SOL-USDT","fee_tier":"default","reference_symbol":"",
-		"reference_multiplier":"1"}]}`), "list SOL", ""); err != nil || c != nil {
+		"reference_multiplier":"1","status":"PREPARE"}]}`), "list SOL", ""); err != nil || c != nil {
 		t.Fatalf("a new pair %+v %v", c, err)
 	}
 }

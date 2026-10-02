@@ -76,6 +76,21 @@ func TestNotifySchema(t *testing.T) {
 	accepts(t, db, `INSERT INTO deliveries (id, kind, channel, template, target_mask) VALUES ($1, 'OTP', 'EMAIL', 'otp', 'a***@x.com')`, uuid.New())
 	rejects(t, db, "unknown delivery status", `INSERT INTO deliveries (id, kind, channel, template, target_mask, status)
 		VALUES ($1, 'OTP', 'EMAIL', 'otp', 'a***@x.com', 'LOST')`, uuid.New())
+
+	// The console's articles and messages (00002): a slug once per section,
+	// published only with its time, a message to at most 10,000 users.
+	article := `INSERT INTO articles (id, section, slug, status, publish_at, updated_by, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, 'ops@example.com', now(), now())`
+	accepts(t, db, article, uuid.New(), "ANNOUNCEMENT", "maintenance", "PUBLISHED", time.Now())
+	accepts(t, db, article, uuid.New(), "HELP", "maintenance", "DRAFT", nil)
+	rejects(t, db, "a slug twice in a section", article, uuid.New(), "ANNOUNCEMENT", "maintenance", "DRAFT", nil)
+	rejects(t, db, "a slug with capitals", article, uuid.New(), "HELP", "Deposit", "DRAFT", nil)
+	rejects(t, db, "published without its time", article, uuid.New(), "HELP", "fees", "PUBLISHED", nil)
+	broadcast := `INSERT INTO broadcasts (id, audience, user_ids, title, body, status, created_by, created_at)
+		VALUES ($1, $2, $3, '{"zh-CN":"t"}', '{"zh-CN":"b"}', 'SENDING', 'ops@example.com', now())`
+	accepts(t, db, broadcast, uuid.New(), "ALL", []string{})
+	accepts(t, db, broadcast, uuid.New(), "USERS", []string{uuid.NewString()})
+	rejects(t, db, "named users, none named", broadcast, uuid.New(), "USERS", []string{})
 }
 
 // TestDownMigrations checks that every schema can be rolled back to empty.

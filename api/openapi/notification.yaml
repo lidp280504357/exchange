@@ -7,13 +7,16 @@ info:
     sign-in, contact and password changes, sign-in lock, account status)
     are also mailed, with the anti-phishing code when the user set one.
     New notices are pushed on the private WebSocket channel
-    "notifications" (§7.3).
+    "notifications" (§7.3). Operators' messages (type BROADCAST) come
+    from the admin console. The announcements and help articles the
+    console publishes are public (no token).
 servers:
   - url: https://astras.vip
 security:
   - bearer: []
 tags:
   - name: notification
+  - name: content
 paths:
   /v1/notifications:
     get:
@@ -87,13 +90,168 @@ paths:
                     type: integer
         default:
           $ref: './common.yaml#/components/responses/Error'
+  /v1/announcements:
+    get:
+      operationId: listAnnouncements
+      summary: The published announcements, pinned first then newest
+      description: |
+        Written and published in the admin console (design 2026-10-02
+        §4.5); a scheduled one shows from its time. Public. Cached for 15
+        seconds: the sites show a new one within a minute.
+      tags: [content]
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Locale'
+      responses:
+        '200':
+          description: The announcements.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArticleList'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/announcements/{slug}:
+    get:
+      operationId: getAnnouncement
+      summary: A published announcement
+      tags: [content]
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+        - $ref: '#/components/parameters/Locale'
+      responses:
+        '200':
+          description: The announcement with its Markdown body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Article'
+        '404':
+          $ref: '#/components/responses/ArticleNotFound'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/help:
+    get:
+      operationId: listHelpArticles
+      summary: The published help articles
+      tags: [content]
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Locale'
+      responses:
+        '200':
+          description: The help articles.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArticleList'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/help/{slug}:
+    get:
+      operationId: getHelpArticle
+      summary: A published help article
+      tags: [content]
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+        - $ref: '#/components/parameters/Locale'
+      responses:
+        '200':
+          description: The article with its Markdown body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Article'
+        '404':
+          $ref: '#/components/responses/ArticleNotFound'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
 components:
   securitySchemes:
     bearer:
       type: http
       scheme: bearer
       bearerFormat: JWT
+  responses:
+    ArticleNotFound:
+      description: |
+        COMMON_NOT_FOUND: no such article published (the sites show their
+        bundled file of the slug, if any); NOTIFY_ARTICLE_WITHDRAWN: taken
+        off (they do not).
+      content:
+        application/json:
+          schema:
+            $ref: './common.yaml#/components/schemas/Error'
+  parameters:
+    Locale:
+      name: locale
+      in: query
+      description: en for English; Chinese otherwise. An article without English comes in Chinese (fallback true).
+      schema:
+        type: string
+        enum: [zh-CN, en]
+    Slug:
+      name: slug
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-z0-9][a-z0-9-]{0,63}$'
   schemas:
+    ArticleSummary:
+      type: object
+      required: [slug, category, pinned, order, title, summary, published_at, locale, fallback, version]
+      properties:
+        slug:
+          type: string
+        category:
+          type: string
+          description: Announcements notice, product or another; help account, funds, trading, futures, faq or another.
+        pinned:
+          type: boolean
+        order:
+          type: integer
+          description: Sorts help articles within their category.
+        title:
+          type: string
+        summary:
+          type: string
+        published_at:
+          type: string
+          format: date-time
+        locale:
+          type: string
+          enum: [zh-CN, en]
+        fallback:
+          type: boolean
+          description: No text in the language asked; the Chinese one instead.
+        version:
+          type: integer
+          description: Grows with every change; the sites may cache by it.
+    ArticleList:
+      type: object
+      required: [items, withdrawn]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArticleSummary'
+        withdrawn:
+          type: array
+          description: Slugs of articles taken off; the sites hide their bundled file of such a slug too.
+          items:
+            type: string
+    Article:
+      allOf:
+        - $ref: '#/components/schemas/ArticleSummary'
+        - type: object
+          required: [body]
+          properties:
+            body:
+              type: string
+              description: Markdown.
     Notification:
       type: object
       required: [id, type, title, body, data, read, created_at]
@@ -105,7 +263,7 @@ components:
           type: string
           enum: [WELCOME, NEW_DEVICE_LOGIN, IDENTITY_CHANGED, PASSWORD_CHANGED, ACCOUNT_LOCKED, STATUS_CHANGED, TOTP_CHANGED,
             DEPOSIT_CREDITED, DEPOSIT_UNCLAIMED, WITHDRAWAL_REQUESTED, WITHDRAWAL_COMPLETED, WITHDRAWAL_REJECTED, WITHDRAWAL_CANCELED,
-            WITHDRAWAL_FAILED]
+            WITHDRAWAL_FAILED, BROADCAST]
         title:
           type: string
         body:
@@ -115,7 +273,7 @@ components:
           type: object
           additionalProperties:
             type: string
-          description: Masked specifics, e.g. ip, channel, to.
+          description: Masked specifics, e.g. ip, channel, to; a BROADCAST (an operator's message) carries broadcast_id and maybe link, a path on the sites.
         read:
           type: boolean
         created_at:

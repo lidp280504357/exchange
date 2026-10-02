@@ -27,7 +27,10 @@
 # administrator created from the console (an OPERATOR signing in with the
 # password shown once, which no check prints; role, password,
 # authenticator, sessions, disable and enable), the system health with
-# details, the audit trail with its CSV export, and sign-out.
+# details, an announcement on both sites within a minute (scheduled,
+# published, edited while shown, taken off) and an in-app message
+# delivered to the user and read, the audit trail with its CSV export, and
+# sign-out.
 #
 #   scripts/e2e/admin.sh
 set -euo pipefail
@@ -129,7 +132,7 @@ expect 200 - "the sign-in options need no session"
 TOTP_REQUIRED=$(jq -r .totp_required <<<"$BODY")
 login ADMIN
 expect 200 - "ADMIN signs in with password and code"
-check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 23" "with every permission"
+check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 25" "with every permission"
 cookie=$(grep -i '^set-cookie: admin_session=' "$WORK/ADMIN.headers")
 for attr in 'Path=/admin/' 'HttpOnly' 'Secure' 'SameSite=Strict'; do
   grep -qi "$attr" <<<"$cookie" || { echo "FAIL the session cookie lacks $attr: $cookie" >&2; exit 1; }
@@ -604,6 +607,27 @@ if [[ $STATUS == 403 ]]; then
   echo "skip force close: contract trading is off ($(jq -r .code <<<"$BODY"))"
 else
   expect 202 - "the user buys 0.1 ETH-USDT-PERP at the market"
+  # A contract just resumed has no HOUSE book until the market maker sees
+  # it trading again: an IOC buy then cancels unfilled, and is tried again.
+  filled() { # filled ORDER_ID: it ended FILLED (polled until it ends)
+    local i
+    for i in $(seq 20); do
+      call GET "/v1/derivatives/orders/$1" "" "${UAUTH[@]}"
+      case $(jq -r .status <<<"$BODY") in
+        FILLED) return 0 ;;
+        CANCELED | REJECTED | EXPIRED) return 1 ;;
+      esac
+      sleep 0.5
+    done
+    return 1
+  }
+  perp_buy() {
+    call POST /v1/derivatives/orders '{"symbol":"ETH-USDT-PERP","side":"BUY","type":"MARKET","quantity":"0.10"}' "${UAUTH[@]}"
+    [[ $STATUS == 202 ]] && filled "$(jq -r .order_id <<<"$BODY")"
+  }
+  if ! filled "$(jq -r .order_id <<<"$BODY")"; then
+    eventually 30 "a market buy fills once HOUSE quotes the resumed contract" perp_buy
+  fi
   user_long() {
     as AUDITOR GET "/admin/v1/users/$USER_ID/positions" ""
     [[ $STATUS == 200 ]] && jq -e '.positions | length == 1 and .[0].quantity == "0.1"' <<<"$BODY" >/dev/null
@@ -655,6 +679,13 @@ as OPERATOR POST /admin/v1/instruments/preview "{\"config\":$(link_pair LINKBTC)
 expect 200 - "a preview with Binance's LINKBTC"
 check '(.changes | length) == 1 and .changes[0].entity == "TRADING_PAIR" and .changes[0].after.reference_symbol == "LINKBTC" and
   ([.warnings[].code] | index("HOUSE_NOT_LISTED") != null and index("STREAMS_RECONNECT") != null)' "checked, with HOUSE's list and the reconnect noted"
+# A new pair starts in PREPARE: one created trading would skip the guard of
+# its opening (LINK-ETH is never created).
+LINK_ETH=$(jq -nc '{pairs: [{symbol: "LINK-ETH", base_asset: "LINK", quote_asset: "ETH", tick_size: "0.000001", lot_size: "0.1",
+  min_quantity: "0.1", max_quantity: "100000", min_notional: "0.001", price_band: "0.1", fee_tier: "default", status: "TRADING",
+  reference_symbol: "", reference_multiplier: "1"}]}')
+as ADMIN POST /admin/v1/instruments/preview "{\"config\":$LINK_ETH}"
+expect 422 ADMIN_NEW_ITEM_NOT_PREPARE "a pair created trading is refused, even to an ADMIN"
 as OPERATOR POST /admin/v1/instruments/apply "{\"config\":$(link_pair),\"reason\":\"e2e lists LINK-BTC\"}"
 expect 200 - "OPERATOR applies LINK-BTC (no reference: users trade with each other)"
 check "(.changes | length) == 1 and (.changes[0].action == \"CREATE\" or .changes[0].action == \"UPDATE\") and .changes[0].after.min_notional == \"0.000$NOTIONAL\"" \
@@ -685,7 +716,7 @@ as AUDITOR GET /admin/v1/instruments/config ""
 CONFIG=$BODY
 as OPERATOR POST /admin/v1/instruments/preview "{\"config\":$(link_pair LINKBTC)}"
 expect 200 - "an OPERATOR previews a reference symbol for LINK-BTC"
-check '[.guard.params[] | select(.entity == "TRADING_PAIR" and .key == "LINK-BTC" and .field == "reference_symbol")] | length == 1 and .guard.confirmation == null' \
+check '([.guard.params[] | select(.entity == "TRADING_PAIR" and .key == "LINK-BTC" and .field == "reference_symbol")] | length == 1) and .guard.confirmation == null' \
   "a trading parameter, not the OPERATOR's to confirm"
 as OPERATOR POST /admin/v1/instruments/apply "{\"config\":$(link_pair LINKBTC),\"reason\":\"e2e follows Binance\"}"
 expect 403 ADMIN_FORBIDDEN "nor to apply"
@@ -1048,6 +1079,112 @@ check '.feed.state | IN("OK", "DELAYED", "DOWN", "OFF")' "and the reference feed
 as AUDITOR GET /admin/v1/health ""
 check 'all(.services[]; has("version") | not) and (has("feed") | not)' "without details, readiness alone"
 
+echo "== an announcement on both sites within a minute"
+# One announcement with a fixed slug (articles are never deleted): written
+# by the first run, edited by the next ones; each run schedules it,
+# publishes it, edits it while shown and takes it off.
+SLUG=e2e-console
+M_BASE="${M_BASE:-https://m.astras.vip}"
+announcement() { # announcement ENGLISH_TITLE: the e2e announcement as the console writes it
+  jq -nc --arg s "$SLUG" --arg t "$1" --arg run "$RUN" '{slug: $s, category: "notice", pinned: false, order: 0, texts: [
+    {locale: "zh-CN", title: "端到端检查公告", summary: "", body: ("## 检查\n\n第 " + $run + " 次运行；资金为模拟资产。")},
+    {locale: "en", title: $t, summary: "", body: ("## Check\n\nRun " + $run + "; funds are simulated.")}]}'
+}
+as AUDITOR GET "/admin/v1/articles?section=ANNOUNCEMENT" ""
+expect 200 - "every administrator reads the announcements"
+ARTICLE=$(jq -c --arg s "$SLUG" '[.articles[] | select(.slug == $s)][0] // empty' <<<"$BODY")
+as AUDITOR POST /admin/v1/articles "$(announcement e2e | jq -c '. + {section: "ANNOUNCEMENT", reason: "e2e writes nothing"}')"
+expect 403 ADMIN_FORBIDDEN "AUDITOR writes no announcement"
+if [[ -z $ARTICLE ]]; then
+  as OPERATOR POST /admin/v1/articles "$(announcement "E2E check $RUN" | jq -c '. + {section: "ANNOUNCEMENT", reason: "e2e writes its announcement"}')"
+  expect 201 - "OPERATOR writes the e2e announcement"
+  check '.status == "DRAFT" and .version == 1 and .publish_at == null' "a draft"
+else
+  as OPERATOR PUT "/admin/v1/articles/$(jq -r .id <<<"$ARTICLE")" \
+    "$(announcement "E2E check $RUN" | jq -c --argjson v "$(jq .version <<<"$ARTICLE")" '. + {version: $v, reason: "e2e rewrites its announcement"}')"
+  expect 200 - "OPERATOR rewrites the e2e announcement"
+fi
+ART_ID=$(jq -r .id <<<"$BODY") ART_V=$(jq -r .version <<<"$BODY")
+# shellcheck disable=SC2016 # expanded when the script ends
+at_exit 'as ADMIN GET "/admin/v1/articles/$ART_ID" "" && [[ $(jq -r .status <<<"$BODY") == PUBLISHED ]] &&
+  as ADMIN POST "/admin/v1/articles/$ART_ID/archive" "{\"version\":$(jq .version <<<"$BODY"),\"reason\":\"e2e cleanup\"}" >/dev/null'
+as OPERATOR POST /admin/v1/articles "$(announcement again | jq -c '. + {section: "ANNOUNCEMENT", reason: "e2e writes it twice"}')"
+expect 409 NOTIFY_ARTICLE_EXISTS "a slug is taken once in a section"
+as OPERATOR POST "/admin/v1/articles/$ART_ID/publish" "$(jq -nc --argjson v "$ART_V" '{version: $v, publish_at: (now + 3600 | todate), reason: "e2e schedules it an hour ahead"}')"
+expect 200 - "OPERATOR schedules it an hour ahead"
+check '.status == "PUBLISHED" and (.publish_at | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) > now' "published from a time to come"
+ART_V=$(jq -r .version <<<"$BODY")
+call GET "/v1/announcements/$SLUG" ""
+expect 404 COMMON_NOT_FOUND "the sites do not show it before its time"
+as OPERATOR POST "/admin/v1/articles/$ART_ID/publish" "{\"version\":$ART_V,\"reason\":\"e2e publishes it now\"}"
+expect 200 - "OPERATOR publishes it now"
+ART_V=$(jq -r .version <<<"$BODY")
+listed() { # listed SITE TITLE: the site's API lists the e2e announcement in English with TITLE
+  local user_base=$BASE rc=0
+  BASE=$1
+  call GET "/v1/announcements?locale=en" "" -D "$WORK/announcements.headers" || rc=$?
+  BASE=$user_base
+  [[ $rc == 0 && $STATUS == 200 ]] && jq -e --arg s "$SLUG" --arg t "$2" 'any(.items[]; .slug == $s and .title == $t and .fallback == false)' <<<"$BODY" >/dev/null
+}
+# About a minute: 50 tries of a call and half a second.
+eventually 50 "the PC site lists it within a minute" listed "$BASE" "E2E check $RUN"
+eventually 50 "so does the mobile site" listed "$M_BASE" "E2E check $RUN"
+grep -qi '^cache-control: public, max-age=15' "$WORK/announcements.headers" || { echo "FAIL the list is not cached for 15 seconds" >&2; exit 1; }
+call GET "/v1/announcements/$SLUG" ""
+expect 200 - "the article, public"
+check '.title == "端到端检查公告" and .locale == "zh-CN" and (.body | contains("模拟资产"))' "in Chinese by default, its Markdown body"
+as OPERATOR PUT "/admin/v1/articles/$ART_ID" "$(announcement "E2E check $RUN, edited" | jq -c --argjson v "$ART_V" '. + {version: $v, reason: "e2e edits it while shown"}')"
+expect 200 - "OPERATOR edits it while shown"
+ART_V=$(jq -r .version <<<"$BODY")
+as OPERATOR PUT "/admin/v1/articles/$ART_ID" "$(announcement stale | jq -c --argjson v "$((ART_V - 1))" '. + {version: $v, reason: "e2e edits an old copy"}')"
+expect 409 COMMON_CONFLICT "an edit of an older version is refused"
+eventually 50 "the PC site shows the edit" listed "$BASE" "E2E check $RUN, edited"
+eventually 50 "and the mobile site" listed "$M_BASE" "E2E check $RUN, edited"
+as OPERATOR POST "/admin/v1/articles/$ART_ID/archive" "{\"version\":$ART_V,\"reason\":\"e2e takes it off\"}"
+expect 200 - "OPERATOR takes it off"
+check '.status == "ARCHIVED"' "archived"
+withdrawn() {
+  call GET /v1/announcements ""
+  [[ $STATUS == 200 ]] && jq -e --arg s "$SLUG" '(any(.items[]; .slug == $s) | not) and (.withdrawn | index($s)) != null' <<<"$BODY" >/dev/null
+}
+eventually 50 "gone from the sites within a minute, its slug withdrawn" withdrawn
+call GET "/v1/announcements/$SLUG" ""
+expect 404 NOTIFY_ARTICLE_WITHDRAWN "the article says it was taken off (no bundled file stands in)"
+call GET "/v1/help?locale=en" ""
+expect 200 - "the help articles are public too"
+check '(.items | type) == "array" and (.withdrawn | type) == "array"' "a list and the slugs taken off"
+
+echo "== an operator's in-app message"
+as AUDITOR POST /admin/v1/broadcasts '{"audience":"ALL","title":{"zh-CN":"不发"},"body":{"zh-CN":"不发"},"reason":"e2e sends nothing"}'
+expect 403 ADMIN_FORBIDDEN "AUDITOR sends no message"
+as OPERATOR POST /admin/v1/broadcasts "{\"audience\":\"TAG\",\"tag\":\"E2E_NOBODY_$RUN\",\"title\":{\"zh-CN\":\"无人\"},\"body\":{\"zh-CN\":\"无人\"},\"reason\":\"e2e writes to nobody\"}"
+expect 422 ADMIN_TAG_EMPTY "a tag nobody has reaches nobody"
+as OPERATOR POST /admin/v1/broadcasts "{\"audience\":\"USER\",\"user_id\":\"$USER_ID\",\"title\":{\"zh-CN\":\"外链\"},\"body\":{\"zh-CN\":\"外链\"},\"link\":\"//evil.example\",\"reason\":\"e2e leads off the sites\"}"
+expect 400 COMMON_INVALID_ARGUMENT "a link off the sites is refused"
+as OPERATOR POST /admin/v1/broadcasts "$(jq -nc --arg u "$USER_ID" --arg run "$RUN" '{audience: "USER", user_id: $u,
+  title: {"zh-CN": ("端到端消息 " + $run), en: ("E2E message " + $run)}, body: {"zh-CN": "请查看资产。", en: "Have a look at your assets."},
+  link: "/assets", email: false, reason: "e2e writes to its user"}')"
+expect 201 - "OPERATOR writes to the user"
+check '.audience == "USERS" and .users == 1 and .link == "/assets" and (.status | IN("SENDING", "SENT"))' "one user, being delivered"
+BROADCAST_ID=$(jq -r .id <<<"$BODY")
+received() {
+  call GET "/v1/notifications?limit=20" "" "${UAUTH[@]}"
+  [[ $STATUS == 200 ]] && jq -e --arg b "$BROADCAST_ID" --arg r "$RUN" \
+    'any(.items[]; .type == "BROADCAST" and .data.broadcast_id == $b and .data.link == "/assets" and (.title | endswith($r)) and .read == false)' <<<"$BODY" >/dev/null
+}
+eventually 60 "the user finds it in their notifications, unread" received
+NOTICE_ID=$(jq -r --arg b "$BROADCAST_ID" '[.items[] | select(.data.broadcast_id == $b)][0].id' <<<"$BODY")
+call POST /v1/notifications/read "{\"ids\":[\"$NOTICE_ID\"]}" "${UAUTH[@]}"
+expect 200 - "the user reads it"
+counted() {
+  as AUDITOR GET "/admin/v1/broadcasts/$BROADCAST_ID" ""
+  [[ $STATUS == 200 ]] && jq -e '.status == "SENT" and .recipients == 1 and .read == 1 and .finished_at != null' <<<"$BODY" >/dev/null
+}
+eventually 60 "the console counts it delivered and read" counted
+as AUDITOR GET "/admin/v1/broadcasts?limit=5" ""
+expect 200 - "every administrator reads the messages sent"
+check "any(.items[]; .id == \"$BROADCAST_ID\")" "this one among the newest"
+
 echo "== the audit trail"
 audited() { # audited ROLE QUERY JQ
   as "$1" GET "/admin/v1/audit-logs?$2" ""
@@ -1076,6 +1213,10 @@ if [[ -n ${BACKFILLED:-} ]]; then
   eventually 60 "the deposit decisions are audited on the account, by FINANCE" audited AUDITOR "target=user:$USER_ID" \
     "[.items[] | select(.actor == \"$EMAIL_FINANCE\") | .payload.action] | ((index(\"admin.deposits.backfill_executed\") != null or index(\"admin.deposits.backfill_requested\") != null) and index(\"wallet.deposit.backfilled\") != null and index(\"ledger.unclaimed_released\") != null and index(\"wallet.deposit.dismissed\") != null)"
 fi
+eventually 60 "the announcement's changes are audited, by the OPERATOR" audited AUDITOR "target=announcement:$SLUG" \
+  "[.items[] | select(.actor == \"$EMAIL_OPERATOR\") | .payload.action] | (index(\"admin.content.published\") != null and index(\"admin.content.updated\") != null and index(\"admin.content.archived\") != null)"
+eventually 60 "the in-app message is audited" audited AUDITOR "target=broadcast:$BROADCAST_ID" \
+  "[.items[] | select(.actor == \"$EMAIL_OPERATOR\") | .payload.action] | index(\"admin.notices.sent\") != null"
 eventually 60 "the administrator's changes are audited, its credentials are not" audited AUDITOR "target=admin:$STAFF_ID" \
   "([.items[].payload.action] | (index(\"admin.created\") != null and index(\"admin.role_changed\") != null and index(\"admin.password_reset\") != null and index(\"admin.totp_reset\") != null and index(\"admin.sessions_revoked\") != null and index(\"admin.disabled\") != null and index(\"admin.enabled\") != null)) and (tostring | (contains(\"$PW_STAFF\") or contains(\"$SECRET_STAFF\")) | not)"
 exported() {

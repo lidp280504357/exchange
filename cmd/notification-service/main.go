@@ -102,13 +102,32 @@ func setup(ctx context.Context, a *app.App) error {
 	if err != nil {
 		return err
 	}
+	people := recipients.New(userv1.NewUserServiceClient(userConn), authv1.NewAuthServiceClient(authConn))
 	notices := &application.Notices{
 		Store:      store,
-		Recipients: recipients.New(userv1.NewUserServiceClient(userConn), authv1.NewAuthServiceClient(authConn)),
+		Recipients: people,
 		Dispatcher: dispatcher,
 		Log:        a.Logger(),
 		Now:        time.Now,
 	}
+	// Operations content (design 2026-10-02 §4.5): articles for the sites,
+	// the operators' in-app messages delivered in rounds.
+	content := &application.Content{Store: store, Now: time.Now}
+	broadcasts := &application.Broadcasts{Store: store, Notices: notices, Directory: people, Log: a.Logger(), Now: time.Now}
+	a.Add("broadcasts", app.Loop(func(ctx context.Context) error {
+		for {
+			if n, err := broadcasts.Round(ctx); err != nil && ctx.Err() == nil {
+				a.Logger().WarnContext(ctx, "broadcast round failed", "error", err)
+			} else if n > 0 {
+				a.Logger().InfoContext(ctx, "broadcast notices created", "count", n)
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(3 * time.Second):
+			}
+		}
+	}))
 	if err := bootstrap.Consumer(ctx, a, cfg.Kafka, application.Consumer, consumer.Topics, consumer.Handler(notices)); err != nil {
 		return err
 	}
@@ -121,6 +140,7 @@ func setup(ctx context.Context, a *app.App) error {
 
 	r := a.NewRouter()
 	(&httpapi.Notices{Svc: notices}).Routes(r)
+	(&httpapi.Content{Svc: content, Broadcasts: broadcasts}).Routes(r)
 	if !prod {
 		r.Get("/v1/dev/messages", httpapi.DevInbox(mockProvider))
 		a.Add("mock inbox purge", app.Loop(func(ctx context.Context) error {

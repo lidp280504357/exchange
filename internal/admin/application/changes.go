@@ -96,6 +96,30 @@ const (
 var ErrReferenceInUse = apperr.New(apperr.KindUnprocessable, "ADMIN_REFERENCE_IN_USE",
 	"HOUSE quotes this pair or a perpetual's index follows it; its reference symbol stays")
 
+// ErrNewItemNotPrepare refuses a pair or contract created already open
+// (instrument-service takes a new item's status from the document): it
+// starts in PREPARE and opens with a status change, which is guarded.
+var ErrNewItemNotPrepare = apperr.New(apperr.KindUnprocessable, "ADMIN_NEW_ITEM_NOT_PREPARE",
+	"a new pair or contract starts in PREPARE; open it with a status change")
+
+// newItemsPrepare checks that the pairs and contracts among changes that
+// are created start in PREPARE.
+func newItemsPrepare(changes []ports.ConfigChange) error {
+	for _, c := range changes {
+		if c.Action != "CREATE" || (c.Entity != "TRADING_PAIR" && c.Entity != "CONTRACT") {
+			continue
+		}
+		var after struct {
+			Status string `json:"status"`
+		}
+		_ = json.Unmarshal(c.After, &after)
+		if after.Status != "" && after.Status != "PREPARE" {
+			return ErrNewItemNotPrepare.WithDetail("symbol", c.Key).WithDetail("status", after.Status)
+		}
+	}
+	return nil
+}
+
 // paramChanges lists the trading parameters the updates among changes
 // move.
 func paramChanges(changes []ports.ConfigChange) []ParamChange {
@@ -188,6 +212,9 @@ func (s *Service) changeDelay(ctx context.Context) (time.Duration, error) {
 func (s *Service) previewConfig(ctx context.Context, p Principal, config json.RawMessage) (ConfigPreview, error) {
 	res, err := s.applyConfig(ctx, p, config, "preview", true)
 	if err != nil {
+		return ConfigPreview{}, err
+	}
+	if err := newItemsPrepare(res.Changes); err != nil {
 		return ConfigPreview{}, err
 	}
 	out := ConfigPreview{

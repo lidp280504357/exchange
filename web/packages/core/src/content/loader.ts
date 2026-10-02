@@ -1,3 +1,6 @@
+import { notificationApi, unwrap } from "../api/client";
+import { ApiError } from "../api/errors";
+import type { components } from "../api/gen/notification";
 import { frontBool, frontNumber, frontString, parseFrontMatter } from "./frontmatter";
 import { excerpt, parseMarkdown, type MarkdownDoc } from "./markdown";
 
@@ -98,11 +101,86 @@ export function listSlugs(section: ContentSection): string[] {
   return [...indexes[section].keys()];
 }
 
-/** loadArticle loads one article in a language (or the fallback); null when there is none. */
-export async function loadArticle(section: ContentSection, slug: string, locale: ContentLocale): Promise<Article | null> {
+/** loadBundledArticle loads one article of the repository's files in a language (or the fallback); null when there is none. */
+export async function loadBundledArticle(section: ContentSection, slug: string, locale: ContentLocale): Promise<Article | null> {
   const picked = pickLocale(indexes[section].get(slug), locale);
   if (!picked) return null;
   return toArticle(section, slug, picked.locale, picked.locale !== locale, await picked.value());
+}
+
+/** bundledSource returns a file as written, its article and Markdown body (the console copies it to edit); null when there is none in the language. */
+export async function bundledSource(section: ContentSection, slug: string, locale: ContentLocale): Promise<(Article & { body: string }) | null> {
+  const load = indexes[section].get(slug)?.get(locale);
+  if (!load) return null;
+  const src = await load();
+  return { ...toArticle(section, slug, locale, false, src), body: parseFrontMatter(src).body };
+}
+
+// The articles the admin console publishes (design 2026-10-02 §4.5, GET
+// /v1/announcements and /v1/help) join the bundled files and win over a
+// file of the same slug; while the API cannot be reached the files alone
+// are shown.
+
+type PublishedSummary = components["schemas"]["ArticleSummary"];
+
+/** fromPublished turns an article the API returns into one of ours; a list's comes without its body. */
+export function fromPublished(section: ContentSection, s: PublishedSummary, body?: string): Article {
+  const doc = parseMarkdown(body ?? "");
+  return {
+    section,
+    slug: s.slug,
+    locale: s.locale,
+    fallback: s.fallback,
+    title: s.title,
+    date: s.published_at.slice(0, 10),
+    pinned: s.pinned,
+    category: s.category || (section === "help" ? "faq" : "notice"),
+    order: s.order,
+    summary: s.summary || excerpt(doc.blocks),
+    doc,
+  };
+}
+
+type Published = { articles: Article[]; withdrawn: ReadonlySet<string> };
+
+/** fetchPublished returns the console's articles and the slugs it took off (their files are hidden too). */
+async function fetchPublished(section: ContentSection, locale: ContentLocale): Promise<Published> {
+  const query = { params: { query: { locale } } };
+  const page =
+    section === "announcements"
+      ? await unwrap(notificationApi.GET("/v1/announcements", query))
+      : await unwrap(notificationApi.GET("/v1/help", query));
+  return { articles: page.items.map((s) => fromPublished(section, s)), withdrawn: new Set(page.withdrawn ?? []) };
+}
+
+/** The console took the article off: no file stands in for it. */
+const WITHDRAWN = "withdrawn";
+
+/** fetchPublishedArticle returns the console's article, null when it published none with this slug. */
+async function fetchPublishedArticle(section: ContentSection, slug: string, locale: ContentLocale): Promise<Article | typeof WITHDRAWN | null> {
+  const query = { params: { path: { slug }, query: { locale } } };
+  try {
+    const a =
+      section === "announcements"
+        ? await unwrap(notificationApi.GET("/v1/announcements/{slug}", query))
+        : await unwrap(notificationApi.GET("/v1/help/{slug}", query));
+    return fromPublished(section, a, a.body);
+  } catch (err) {
+    if (err instanceof ApiError && err.code === "NOTIFY_ARTICLE_WITHDRAWN") return WITHDRAWN;
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+/**
+ * loadArticle loads one article in a language: the console's when it
+ * published one, else the bundled file; null when neither, or when the
+ * console took it off.
+ */
+export async function loadArticle(section: ContentSection, slug: string, locale: ContentLocale): Promise<Article | null> {
+  const published = await fetchPublishedArticle(section, slug, locale).catch(() => null);
+  if (published === WITHDRAWN) return null;
+  return published ?? loadBundledArticle(section, slug, locale);
 }
 
 function categoryRank(category: string): number {
@@ -128,13 +206,20 @@ export function sortArticles<T extends ArticleMeta>(section: ContentSection, lis
   );
 }
 
-/** loadArticles loads every article of a section in a language, sorted. */
+/**
+ * loadArticles loads every article of a section in a language, the
+ * bundled files and the console's, sorted; a file the console took off is
+ * left out.
+ */
 export async function loadArticles(section: ContentSection, locale: ContentLocale): Promise<Article[]> {
-  const all = await Promise.all(listSlugs(section).map((slug) => loadArticle(section, slug, locale)));
-  return sortArticles(
-    section,
-    all.filter((a): a is Article => a !== null),
-  );
+  const [bundled, published] = await Promise.all([
+    Promise.all(listSlugs(section).map((slug) => loadBundledArticle(section, slug, locale))),
+    fetchPublished(section, locale).catch((): Published => ({ articles: [], withdrawn: new Set() })),
+  ]);
+  const bySlug = new Map<string, Article>();
+  for (const a of bundled) if (a && !published.withdrawn.has(a.slug)) bySlug.set(a.slug, a);
+  for (const a of published.articles) bySlug.set(a.slug, a);
+  return sortArticles(section, [...bySlug.values()]);
 }
 
 /** latestArticles returns the newest n articles by date (pinned or not). */

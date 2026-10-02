@@ -34,6 +34,10 @@ func TestContractRoutes(t *testing.T) {
 		"/v1/market/summary":                 "market",
 		"/v1/market/sparklines":              "market",
 		"/v1/market/tickers":                 "market",
+		"/v1/announcements":                  "notification",
+		"/v1/announcements/new-pairs":        "notification",
+		"/v1/help":                           "notification",
+		"/v1/help/deposit-guide":             "notification",
 	} {
 		got = ""
 		rec := httptest.NewRecorder()

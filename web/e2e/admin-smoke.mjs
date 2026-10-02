@@ -247,6 +247,29 @@ try {
   await t.shot("4b-health");
   ok("the administrators with the roles' permissions and the creation form (canceled); system health with versions, Kafka lag, reconciliation and the feed");
 
+  // 9c. Operations: the announcements, the editor with its preview (closed
+  // unsaved), the help articles, the messages and their form (closed unsent).
+  await go("/announcements");
+  await page.waitForSelector('main table[aria-label="公告"]');
+  await page.click("[data-testid=article-new]");
+  await page.waitForSelector("#article-slug");
+  await page.type("#article-title-zh-CN", "冒烟测试");
+  await page.type("#article-body-zh-CN", "## 小标题\n\n正文");
+  await clickButton("预览", "[role=dialog]");
+  await page.waitForSelector("[data-testid=article-preview] h2");
+  await t.shot("4c-article");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
+  await go("/help-articles");
+  await page.waitForSelector('main table[aria-label="帮助中心"]');
+  await go("/broadcasts");
+  await page.waitForSelector('main table[aria-label="站内信"]');
+  await page.click("[data-testid=broadcast-new]");
+  await page.waitForSelector("#broadcast-user");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
+  ok("operations: the announcements with the editor's preview (closed unsaved), the help articles, the messages and their form (closed unsent)");
+
   // 10. Fund operations: the approval mode with its limits, the form, the
   // records; the settings; the counts pushed on the event stream.
   await go("/adjustments");

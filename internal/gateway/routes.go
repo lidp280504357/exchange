@@ -96,6 +96,11 @@ func Mount(r chi.Router, g Guards, up Upstreams) {
 		r.Handle("/v1/market/pairs/*", up.Instrument)
 		r.Handle("/v1/market/contracts", up.Instrument)
 		r.Handle("/v1/market/contracts/*", up.Instrument)
+		// Public announcements and help articles (written in the admin
+		// console, design 2026-10-02 §4.5); reads only.
+		for _, p := range []string{"/v1/announcements", "/v1/announcements/{slug}", "/v1/help", "/v1/help/{slug}"} {
+			r.Get(p, up.Notification.ServeHTTP)
+		}
 		// Public market data; the static routes above win over {symbol}.
 		if up.Market != nil {
 			r.Handle("/v1/market/tickers", up.Market)

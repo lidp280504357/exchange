@@ -125,9 +125,15 @@ export function noticeCategory(type: string): NoticeCategory {
   return "system";
 }
 
-/** noticeLink is the page a notice leads to, if any: the devices, the security centre, the deposit or withdrawal page. */
-export function noticeLink(n: Pick<Notice, "type">): string | null {
+/**
+ * noticeLink is the page a notice leads to, if any: the devices, the
+ * security centre, the deposit or withdrawal page; an operator's message
+ * (BROADCAST) its own link, a path on the site.
+ */
+export function noticeLink(n: Pick<Notice, "type"> & { data?: Record<string, string> }): string | null {
   switch (n.type) {
+    case "BROADCAST":
+      return n.data?.link?.startsWith("/") && !n.data.link.startsWith("//") ? n.data.link : null;
     case "NEW_DEVICE_LOGIN":
       return routes.sessions;
     case "IDENTITY_CHANGED":

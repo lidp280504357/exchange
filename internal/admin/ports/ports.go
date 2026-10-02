@@ -67,6 +67,8 @@ type TagRepo interface {
 	Of(ctx context.Context, userIDs []string) (map[string][]string, error)
 	// Set replaces an account's tags.
 	Set(ctx context.Context, userID string, tags []string, adminID string, now time.Time) error
+	// Users returns the accounts with a tag, at most limit of them.
+	Users(ctx context.Context, tag string, limit int) ([]string, error)
 }
 
 // SettingsRepo stores the console's settings (one row).
@@ -542,6 +544,56 @@ type Derivatives interface {
 	// TierImpact measures a contract's new risk ladder (the config
 	// document's risk_tiers) against its open positions, changing nothing.
 	TierImpact(ctx context.Context, symbol string, tiers json.RawMessage) (TierImpact, error)
+}
+
+// Content is notification-service's announcements, help articles and
+// in-app messages (design 2026-10-02 §4.5); the bodies are its JSON, the
+// writes carry the administrator as actor.
+type Content interface {
+	// Articles returns {articles} of a section (ANNOUNCEMENT, HELP) in
+	// every status.
+	Articles(ctx context.Context, section string) (json.RawMessage, error)
+	Article(ctx context.Context, id string) (json.RawMessage, error)
+	CreateArticle(ctx context.Context, a ArticleWrite) (json.RawMessage, error)
+	UpdateArticle(ctx context.Context, id string, a ArticleWrite) (json.RawMessage, error)
+	// PublishArticle shows it from publishAt on (now when nil).
+	PublishArticle(ctx context.Context, id string, version int, publishAt *time.Time, actor string) (json.RawMessage, error)
+	ArchiveArticle(ctx context.Context, id string, version int, actor string) (json.RawMessage, error)
+	// Broadcasts returns {items, next_cursor}.
+	Broadcasts(ctx context.Context, cursor string, limit int) (json.RawMessage, error)
+	Broadcast(ctx context.Context, id string) (json.RawMessage, error)
+	SendBroadcast(ctx context.Context, b BroadcastWrite) (json.RawMessage, error)
+}
+
+// ArticleWrite is an article as the console writes it.
+type ArticleWrite struct {
+	Section  string        `json:"section,omitempty"`
+	Slug     string        `json:"slug"`
+	Category string        `json:"category"`
+	Pinned   bool          `json:"pinned"`
+	Order    int           `json:"order"`
+	Texts    []ArticleText `json:"texts"`
+	Version  int           `json:"version,omitempty"`
+	Actor    string        `json:"actor"`
+}
+
+// ArticleText is an article in one language (Markdown body).
+type ArticleText struct {
+	Locale  string `json:"locale"`
+	Title   string `json:"title"`
+	Summary string `json:"summary"`
+	Body    string `json:"body"`
+}
+
+// BroadcastWrite is an in-app message to some users (their IDs) or all.
+type BroadcastWrite struct {
+	Audience string            `json:"audience"`
+	UserIDs  []string          `json:"user_ids"`
+	Title    map[string]string `json:"title"`
+	Body     map[string]string `json:"body"`
+	Link     string            `json:"link"`
+	Email    bool              `json:"email"`
+	Actor    string            `json:"actor"`
 }
 
 // TierImpact is what a new risk ladder would do to a contract's open

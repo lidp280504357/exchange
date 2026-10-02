@@ -39,7 +39,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 | 角色 | 权限 |
 |---|---|
 | ADMIN | 全部，包括只有它有的 `settings.write`（后台设置：双人审批与单人限额）、`admins.manage`（管理员：创建、改角色、停用与启用、重置口令与身份验证器、结束会话）与 `instruments.trading`（交易参数：状态、费率、风险阶梯、参考符号，见下文「交易参数的护栏」） |
-| OPERATOR | 读 + 改账户状态、撤销用户挂单（全部或单笔）、编辑交易参数以外的参考数据与上架新交易对（`instruments.write`）、解除合约只减仓与强制平仓（`derivatives.write`）、切换功能开关（后台自己的 `admin.*` 开关除外）、备注与标签（`users.notes`）、账户安全操作与换绑审核（`users.security`）、查看完整联系方式（`users.contacts`）、风控冻结（`ledger.hold`） |
+| OPERATOR | 读 + 改账户状态、撤销用户挂单（全部或单笔）、编辑交易参数以外的参考数据与上架新交易对（`instruments.write`）、解除合约只减仓与强制平仓（`derivatives.write`）、切换功能开关（后台自己的 `admin.*` 开关除外）、备注与标签（`users.notes`）、账户安全操作与换绑审核（`users.security`）、查看完整联系方式（`users.contacts`）、风控冻结（`ledger.hold`）、公告与帮助（`content.write`）、站内信（`notices.send`） |
 | FINANCE | 读 + 提现审批与搁置、发起与审批手动调账（现货或合约账户）和保险基金注资、充值处置与补记（`deposits.review`）、备注与标签、查看完整联系方式、风控冻结 |
 | AUDITOR | 只读（用户（联系方式脱敏）、资产与交易对、合约（`derivatives.read`）、功能开关、提现、审计日志、报表） |
 
@@ -125,8 +125,8 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 
 一次调用就能把费率改到 10%、让高杠杆仓位在几秒内被强平、或掐断 HOUSE 的流动性，所以这些"交易参数"的修改另有一套规则：
 
-- **哪些是交易参数**：交易对与合约的状态；费率档的 Maker/Taker 费率；交易对的费率档、参考符号与参考倍数；合约的费率档与风险阶梯（也就是各档的最高杠杆与维持保证金率）。新增的交易对、合约与费率档处于「准备中」或无人使用，不算（开放它是一次状态修改）。资产、网络与交易对的其它字段照旧由 OPERATOR 改、立即生效。
-- **只有 ADMIN**：新权限 `instruments.trading`（ADMIN 共 23 项权限）。OPERATOR 可以预览，确认按钮不可用（服务端 403）。
+- **哪些是交易参数**：交易对与合约的状态；费率档的 Maker/Taker 费率；交易对的费率档、参考符号与参考倍数；合约的费率档与风险阶梯（也就是各档的最高杠杆与维持保证金率）。新增的交易对、合约与费率档处于「准备中」或无人使用，不算（开放它是一次状态修改）；所以后台新建的交易对与合约只能是「准备中」，文档里写了别的状态直接拒绝（422 `ADMIN_NEW_ITEM_NOT_PREPARE`，部署同步的 `exchangectl instruments apply` 不受限）。资产、网络与交易对的其它字段照旧由 OPERATOR 改、立即生效。
+- **只有 ADMIN**：新权限 `instruments.trading`（ADMIN 当时共 23 项权限；C4b 加了 `content.write`、`notices.send`，共 25 项）。OPERATOR 可以预览，确认按钮不可用（服务端 403）。
 - **服务端二次确认**：预览（`POST /admin/v1/instruments/preview`，或状态的 `POST …/status/preview`）返回 `confirmation`：用 `ADMIN_SECRET_KEY` 封装的令牌，绑定这位管理员与这次修改的全部变化（各项的修改前后与版本），10 分钟有效。提交时带回它；没有、过期（`reason: expired`）或预览后数据变了（`reason: changed`）都返回 409 `ADMIN_CONFIRMATION_REQUIRED`，页面会让人重新预览。
 - **延迟生效**：确认后记为一条「待生效修改」（表 `instrument_changes`），设置里的等待时间（`change_delay_seconds`，60–86400 秒，默认 300）之后由 admin-service 每 5 秒一轮执行，以提交人的名义写入 instrument-service；到点时再做一次空跑，与确认时不一致（期间有人改过同一项、状态已变）就记为失败（「请重新预览」），不会套用过时的整项。`admin.two_person_approval` 打开时先等另一位 ADMIN 批准（`POST /admin/v1/instruments/changes/{id}/decide`，不能批准自己的），批准后再等同样的时间。生效前任何 ADMIN 都可以取消（`…/cancel`）。审计：`admin.instruments.change_requested`、`change_approved`、`change_rejected`、`change_canceled`、`change_applied`、`change_failed`（对象为 `instruments`、`pair:<symbol>` 或 `contract:<symbol>`）。
 - **暂停是急刹车**：改为 HALT 不需要确认令牌、立即生效（仍只有 ADMIN）；恢复交易、只撤单、下线都按上面等待。
@@ -145,6 +145,21 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 - **审计**（`/audit`）：「导出 CSV」由服务端按当前筛选导出（`GET /admin/v1/audit-logs/export`，最新的最多 10,000 条，超过时响应头 `X-Truncated: true`，页面提示缩小时间范围）；UTF-8 带 BOM，列为 `occurred_at,event_type,actor,target,action,reason,details,event_id`（配置变更的 `details` 为 `{"old","new"}`），以 `= + - @` 开头的文本前加单引号，防止表格软件当公式执行。导出本身记审计 `admin.audit.exported`（对象 `audit`，详情为筛选条件与行数）。点行打开详情：时间、操作人、对象、动作、理由、事件 ID，以及逐字段的变更表（配置变更比较前后值；`from/to`、`before/after` 与上架的 `changes` 逐项列出；未变的字段折叠），原始事件可展开。
 - **设置**：「本浏览器」里加了每页条数（20/50/100/200，存在本机 `admin.page_size`，之后打开的列表生效）。
 - 与设计稿 §5 的差别：没有 `GET /admin/v1/audit-logs/{id}`，详情直接用列表里的事件；管理员接口没有删除（停用即可，审计需要保留账号）。
+
+## 运营：公告、帮助与站内信（2026-10-02 设计 §4.5，C4b）
+
+- **存放**：notification-service（迁移 notify 00002：`articles`、`article_texts`、`broadcasts`）。admin-service 经它的内部接口 `/internal/notification/{articles,broadcasts}` 读写（`NOTIFICATION_SERVICE_URL`），检查权限、要理由并审计；notification-service 把后台管理员记为修改人。
+- **公告与帮助**（`/announcements`、`/help-articles`；任何管理员可读，写要 `content.write`，ADMIN 与 OPERATOR 有）：
+  - 一篇文章 = 栏目、slug（小写字母、数字、连字符，同栏目唯一，`NOTIFY_ARTICLE_EXISTS`）、分类、置顶（公告）、排序（帮助）与中英文本（中文必填；英文可选，没有英文时英文用户看中文）。正文是 Markdown，编辑器可切「预览」，按站点的排版显示，站内链接指向用户站。
+  - 状态：草稿 → 发布（立即，或填一个时间定时发布）→ 下线（可再发布）。每次保存带读到的版本，期间别人改过返回 409 `COMMON_CONFLICT`（重新打开再改）。审计 `admin.content.created`、`updated`、`published`、`archived`，对象 `announcement:<slug>` 或 `help:<slug>`。
+  - 站点读取：公开接口 `GET /v1/announcements[/{slug}]`、`GET /v1/help[/{slug}]`（`?locale=en`，`Cache-Control: public, max-age=15`）。两个站点把接口里的文章叠加在仓库自带的 Markdown 之上，同 slug 以接口为准；页面数据 30 秒内视为新鲜、45 秒重取一次，所以发布、修改、下线都在 1 分钟内到达两端。接口不可用时只显示自带文章。
+  - 下线的文章：列表接口的 `withdrawn` 带上它的 slug，单篇返回 404 `NOTIFY_ARTICLE_WITHDRAWN`，站点因此连同同 slug 的自带文章一起隐藏（未发布的草稿不影响自带文章）。
+  - 页面下方「站点自带的文章」列出还没被后台接管的仓库文件，「复制到后台编辑」把中英文本带进编辑器，保存为草稿、发布后替换原文件。
+- **站内信**（`/broadcasts`；任何管理员可读，发送要 `notices.send`，ADMIN 与 OPERATOR 有）：
+  - 对象：单个用户（用户 ID，确认词为 ID 后 4 位）、按标签（带这个标签的账户，最多 10,000 个，没有账户带它返回 422 `ADMIN_TAG_EMPTY`；确认词为标签的小写）、全体用户（确认词 `all`）。中文标题与正文必填，英文可选；跳转路径只能是站内路径（如 `/assets`，`//` 开头的拒绝）；可勾选同时发邮件。
+  - 送达：notification-service 分批写进每位用户的通知（类型 `BROADCAST`，实时推送到 `notifications` 频道），见 `accounts.md`「用户通知」。列表与详情显示对象人数、已收到、已读与完成时间，发送中每几秒刷新。发出后不能撤回。审计 `admin.notices.sent`，对象 `broadcast:<id>`。
+- **接口**：`GET/POST /admin/v1/articles`（`?section=ANNOUNCEMENT|HELP`）、`GET/PUT /admin/v1/articles/{id}`、`POST …/{id}/publish`（`{version, publish_at?, reason}`）、`POST …/{id}/archive`；`GET/POST /admin/v1/broadcasts`、`GET /admin/v1/broadcasts/{id}`。
+- **端到端**：`admin.sh` 用固定 slug `e2e-console` 的公告（文章不删除，第一次运行新建，以后改写）：定时发布前站点看不到，立即发布后 PC 站与手机站的接口 1 分钟内列出，发布中修改 1 分钟内更新，旧版本的修改被拒，下线后从列表消失、slug 进 `withdrawn`；给本次的测试用户发一条站内信，用户在通知里看到并读过后，后台显示已收到 1、已读 1。
 
 ## 功能
 
@@ -207,6 +222,8 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 | 合约与保险基金 | 合约状态、只减仓与解除、标记价、持仓量；保险基金与注资（按审批方式：单人模式限额内立即记账）。风险仓位与强平记录 C3 起各有一页 |
 | HOUSE 流动性 | 库存估值（可充提/站内）、各交易对的买卖与盈亏、合约仓位，每 30 秒刷新 |
 | 风控与开关 | 全部功能开关（说明、规则摘要、最后修改人），开关切换要确认 |
+| 公告、帮助中心（C4b） | 文章列表（状态、发布时间、修改人，已显示的可跳到站点）、中英文编辑器与预览、发布（立即或定时）与下线；站点自带文章可复制来编辑；见上文 |
+| 站内信（C4b） | 发过的消息（对象、已收到、已读）、详情与发送表单；见上文 |
 | 对账与系统科目 | 对账（每项检查最近一次结果与最近的不一致）、系统科目余额（资金调整与审批见上文的新页面） |
 | 管理员与角色（C4a） | 管理员列表与操作（新建、改角色、重置口令与身份验证器、会话、停用与启用），角色权限矩阵；见上文 |
 | 审计 | 按操作人、对象、事件、时间筛选；服务端导出 CSV（C4a，最多 10,000 条）；行点击看详情与逐字段的变更 |
@@ -218,7 +235,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 - 列表一律服务端游标分页，每页默认 50 条（设置里可按本浏览器改），滚到底自动加载下一页；筛选条件写在地址栏（可分享、后退可恢复），可另存为本机"视图"；文本筛选在停止输入 0.5 秒或回车后生效。
 - 危险操作统一用确认框：显示对象、理由至少 10 个字（进审计）、手动输入确认词（ID 后 4 位、交易对代码或金额），结果用提示条告知，失败时附可复制的追踪 ID。
 - 枚举都有中文标签，悬停显示原始代码；金额按十进制字符串原样显示并加千分位；时间按设置里的时区。
-- 端到端：`web/e2e/admin-smoke.mjs`（`scripts/e2e/web.sh` 运行，每次建一个临时 ADMIN、结束停用）：登录、概览、用户页与各标签（资料与身份、安全、余额、风控……）、身份变更申请、搜索、订单与成交、充值（待处理、补记待回调、补记抽屉，不提交）与提现队列（带筛选）、交易对改状态的确认框（取消，不真的改）、合约、HOUSE、开关、对账、审计（一条的详情、CSV 导出）、报表、管理员与角色（新建表单打开后取消）、系统健康（版本、Kafka 滞后、对账、行情源）、资金调整页（审批方式、表单、记录）、审批、设置（含每页条数）、事件流、从账户菜单退出，所有 `/admin/v1` 响应按 `api/admin/admin.yaml` 校验。
+- 端到端：`web/e2e/admin-smoke.mjs`（`scripts/e2e/web.sh` 运行，每次建一个临时 ADMIN、结束停用）：登录、概览、用户页与各标签（资料与身份、安全、余额、风控……）、身份变更申请、搜索、订单与成交、充值（待处理、补记待回调、补记抽屉，不提交）与提现队列（带筛选）、交易对改状态的确认框（取消，不真的改）、合约、HOUSE、开关、对账、审计（一条的详情、CSV 导出）、报表、管理员与角色（新建表单打开后取消）、系统健康（版本、Kafka 滞后、对账、行情源）、公告编辑器的预览（不保存）、帮助中心、站内信与发送表单（不发送）、资金调整页（审批方式、表单、记录）、审批、设置（含每页条数）、事件流、从账户菜单退出，所有 `/admin/v1` 响应按 `api/admin/admin.yaml` 校验。
 
 ## 运维
 
@@ -263,6 +280,10 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | `ADMIN_REFERENCE_IN_USE` | HOUSE 正在报价或有永续合约以它为指数，交易对的参考符号不能清空（详情 `symbol`、`used_by`） |
 | `ADMIN_CONFIRMATION_REQUIRED` | 交易参数的修改要带预览给的确认令牌；`reason` 为 `expired`（超过 10 分钟）或 `changed`（预览后数据变了）时重新预览 |
 | `ADMIN_CHANGE_CLOSED` | 这项待生效修改已经生效、取消、驳回或失败 |
+| `ADMIN_TAG_EMPTY` | 按标签发的站内信：没有账户带这个标签 |
+| `NOTIFY_ARTICLE_EXISTS` | 同一栏目已有这个 slug 的文章（notification-service 返回，后台原样转出） |
+| `NOTIFY_ARTICLE_WITHDRAWN` | 公开接口：文章已下线（站点不再用同 slug 的自带文章顶替） |
+| `ADMIN_NEW_ITEM_NOT_PREPARE` | 后台新建的交易对或合约写了「准备中」以外的状态（详情 `symbol`、`status`）；先建再经状态修改开放 |
 | `WALLET_DEPOSIT_KNOWN` | 补记的托管方交易号或（网络、哈希、地址）已有充值，详情 `deposit_id` |
 | `WALLET_DEPOSIT_NOT_RELEASABLE` | 只有记入 `UNCLAIMED_DEPOSIT`、有币种、回调没有不一致的待处理充值才能入账给用户 |
 | `WALLET_DEPOSIT_RESOLVED` | 这笔充值已经处理过 |

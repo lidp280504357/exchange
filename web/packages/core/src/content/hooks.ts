@@ -2,8 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useSettings } from "../settings/store";
 import { loadArticle, loadArticles, type ContentSection } from "./loader";
 
-// Query hooks of the static content: the files never change while the
-// page is open, so they are loaded once per language and kept.
+// Query hooks of the content: the bundled files and what the admin console
+// publishes (design 2026-10-02 §4.5). The API's answers are cached for 15
+// seconds; the lists ask again every 45 while shown, so a new announcement
+// appears within a minute (design §9).
 
 export const contentKeys = {
   list: (section: ContentSection, locale: string) => ["content", section, locale] as const,
@@ -16,7 +18,8 @@ export function useArticles(section: ContentSection) {
   return useQuery({
     queryKey: contentKeys.list(section, locale),
     queryFn: () => loadArticles(section, locale),
-    staleTime: Infinity,
+    staleTime: 30_000,
+    refetchInterval: 45_000,
   });
 }
 
@@ -26,6 +29,6 @@ export function useArticle(section: ContentSection, slug: string) {
   return useQuery({
     queryKey: contentKeys.article(section, locale, slug),
     queryFn: () => loadArticle(section, slug, locale),
-    staleTime: Infinity,
+    staleTime: 30_000,
   });
 }

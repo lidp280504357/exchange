@@ -1,0 +1,213 @@
+package domain
+
+import (
+	"regexp"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/lidp280504357/exchange/internal/platform/apperr"
+)
+
+// Operations content (design 2026-10-02 §4.5): announcements and help
+// articles in Chinese and English, drafted, published at once or from a
+// time, archived; the sites read the published ones.
+
+// Content sections.
+const (
+	SectionAnnouncement = "ANNOUNCEMENT"
+	SectionHelp         = "HELP"
+)
+
+// Article statuses.
+const (
+	ArticleDraft     = "DRAFT"
+	ArticlePublished = "PUBLISHED"
+	ArticleArchived  = "ARCHIVED"
+)
+
+// Content locales: Chinese is required, English optional (the sites fall
+// back to Chinese).
+const (
+	LocaleZH = "zh-CN"
+	LocaleEN = "en"
+)
+
+var (
+	slugRE     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+	categoryRE = regexp.MustCompile(`^[a-z0-9_-]{0,32}$`)
+)
+
+// ErrArticleExists refuses a second article with a section's slug.
+var ErrArticleExists = apperr.New(apperr.KindConflict, "NOTIFY_ARTICLE_EXISTS", "an article with this slug exists in the section")
+
+// ErrArticleWithdrawn is an article taken off the sites: unlike one never
+// published, the sites do not fall back to their own file of the slug.
+var ErrArticleWithdrawn = apperr.New(apperr.KindNotFound, "NOTIFY_ARTICLE_WITHDRAWN", "the article was taken off")
+
+// ArticleText is an article in one language.
+type ArticleText struct {
+	Locale  string
+	Title   string
+	Summary string
+	// Body is Markdown.
+	Body string
+}
+
+// Article is an announcement or a help article.
+type Article struct {
+	ID       string
+	Section  string
+	Slug     string
+	Category string
+	Pinned   bool
+	// Order sorts help articles within their category.
+	Order  int
+	Status string
+	// PublishAt is when a published article shows; later than now it is
+	// scheduled.
+	PublishAt time.Time
+	Version   int
+	UpdatedBy string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	Texts     []ArticleText
+}
+
+// Text returns the article in locale, else in Chinese; ok is false when
+// it fell back.
+func (a Article) Text(locale string) (ArticleText, bool) {
+	var zh ArticleText
+	for _, t := range a.Texts {
+		if t.Locale == locale {
+			return t, true
+		}
+		if t.Locale == LocaleZH {
+			zh = t
+		}
+	}
+	return zh, false
+}
+
+// Visible reports whether the sites show the article at now.
+func (a Article) Visible(now time.Time) bool {
+	return a.Status == ArticlePublished && !a.PublishAt.After(now)
+}
+
+// ValidSection reports whether s is a content section.
+func ValidSection(s string) bool { return s == SectionAnnouncement || s == SectionHelp }
+
+// Validate checks an article as written: its slug and category, Chinese
+// text, at most one text per locale, the lengths.
+func (a Article) Validate() error {
+	switch {
+	case !ValidSection(a.Section):
+		return apperr.Invalid("section must be ANNOUNCEMENT or HELP")
+	case !slugRE.MatchString(a.Slug):
+		return apperr.Invalid("slug must be 1-64 lower-case letters, digits and dashes, starting with a letter or digit")
+	case !categoryRE.MatchString(a.Category):
+		return apperr.Invalid("category must be at most 32 lower-case letters, digits, dashes and underscores")
+	case a.Order < -1000 || a.Order > 1000:
+		return apperr.Invalid("sort_order must be -1000 to 1000")
+	}
+	seen := map[string]bool{}
+	for _, t := range a.Texts {
+		switch {
+		case t.Locale != LocaleZH && t.Locale != LocaleEN:
+			return apperr.Invalid("locale must be zh-CN or en")
+		case seen[t.Locale]:
+			return apperr.Invalid("one text per locale")
+		case strings.TrimSpace(t.Title) == "" || utf8.RuneCountInString(t.Title) > 200:
+			return apperr.Invalid("a title of 1 to 200 characters is required")
+		case utf8.RuneCountInString(t.Summary) > 500:
+			return apperr.Invalid("a summary has at most 500 characters")
+		case strings.TrimSpace(t.Body) == "" || len(t.Body) > 100_000:
+			return apperr.Invalid("a body of at most 100,000 bytes is required")
+		}
+		seen[t.Locale] = true
+	}
+	if !seen[LocaleZH] {
+		return apperr.Invalid("the Chinese (zh-CN) text is required")
+	}
+	return nil
+}
+
+// Broadcast audiences.
+const (
+	AudienceAll   = "ALL"
+	AudienceUsers = "USERS"
+)
+
+// Broadcast statuses.
+const (
+	BroadcastSending = "SENDING"
+	BroadcastSent    = "SENT"
+)
+
+// NoticeBroadcast is the type of an operator's in-app message.
+const NoticeBroadcast = "BROADCAST"
+
+// MaxBroadcastUsers bounds a message to named users.
+const MaxBroadcastUsers = 10_000
+
+// Broadcast is an in-app message an operator sends to some users or all.
+type Broadcast struct {
+	ID       string
+	Audience string
+	UserIDs  []string
+	// Title and Body by locale (zh-CN required); each user reads theirs.
+	Title map[string]string
+	Body  map[string]string
+	// Link is a site path the message leads to ("" for none).
+	Link  string
+	Email bool
+	// Status is SENDING until every recipient has the message; Cursor is
+	// where the sender is.
+	Status     string
+	Cursor     string
+	Recipients int
+	// Read counts the recipients who read it (computed).
+	Read       int
+	CreatedBy  string
+	CreatedAt  time.Time
+	FinishedAt time.Time
+}
+
+// linkRE is a path on the sites: "/" and a segment, never "//" (another
+// host).
+var linkRE = regexp.MustCompile(`^/([A-Za-z0-9_\-.][A-Za-z0-9/_\-?=&.%]{0,199})?$`)
+
+// Validate checks a broadcast as written.
+func (b Broadcast) Validate() error {
+	switch {
+	case b.Audience != AudienceAll && b.Audience != AudienceUsers:
+		return apperr.Invalid("audience must be ALL or USERS")
+	case b.Audience == AudienceUsers && (len(b.UserIDs) == 0 || len(b.UserIDs) > MaxBroadcastUsers):
+		return apperr.Invalid("1 to 10,000 users are required")
+	case b.Link != "" && !linkRE.MatchString(b.Link):
+		return apperr.Invalid("link must be a path on the sites, such as /assets")
+	}
+	for _, l := range []string{LocaleZH, LocaleEN} {
+		title, body := strings.TrimSpace(b.Title[l]), strings.TrimSpace(b.Body[l])
+		if l == LocaleZH && (title == "" || body == "") {
+			return apperr.Invalid("the Chinese (zh-CN) title and body are required")
+		}
+		if utf8.RuneCountInString(title) > 100 || utf8.RuneCountInString(body) > 2000 {
+			return apperr.Invalid("a title has at most 100 characters, a body 2,000")
+		}
+	}
+	for l := range b.Title {
+		if l != LocaleZH && l != LocaleEN {
+			return apperr.Invalid("locale must be zh-CN or en")
+		}
+	}
+	return nil
+}
+
+// In returns the message in a user's language, Chinese without English.
+func (b Broadcast) In(language string) (title, body string) {
+	if strings.HasPrefix(language, "en") && strings.TrimSpace(b.Title[LocaleEN]) != "" {
+		return b.Title[LocaleEN], b.Body[LocaleEN]
+	}
+	return b.Title[LocaleZH], b.Body[LocaleZH]
+}

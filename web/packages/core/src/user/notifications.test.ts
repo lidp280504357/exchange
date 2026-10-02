@@ -36,6 +36,10 @@ describe("notifications", () => {
     expect(noticeLink({ type: "WITHDRAWAL_REJECTED" })).toBe(routes.withdraw);
     expect(noticeLink({ type: "WELCOME" })).toBe(routes.assets);
     expect(noticeLink({ type: "STATUS_CHANGED" })).toBeNull();
+    expect(noticeLink({ type: "BROADCAST", data: { broadcast_id: "b", link: "/announcements/maintenance" } })).toBe("/announcements/maintenance");
+    expect(noticeLink({ type: "BROADCAST", data: { broadcast_id: "b", link: "https://evil.example.com" } })).toBeNull();
+    expect(noticeLink({ type: "BROADCAST", data: { broadcast_id: "b" } })).toBeNull();
+    expect(noticeLink({ type: "BROADCAST", data: { broadcast_id: "b", link: "//evil.example.com" } })).toBeNull();
   });
 
   it("filters by category and unread", () => {

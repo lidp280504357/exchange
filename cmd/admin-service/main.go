@@ -67,6 +67,9 @@ type settings struct {
 	TradingURL     string `koanf:"trading_service_url"`
 	DerivativesURL string `koanf:"derivatives_service_url"`
 	MarketDataURL  string `koanf:"market_data_service_url"`
+	// NotificationURL serves the announcements, help articles and in-app
+	// messages (NOTIFICATION_SERVICE_URL).
+	NotificationURL string `koanf:"notification_service_url"`
 	// SecretKey seals the administrators' authenticator secrets
 	// (ADMIN_SECRET_KEY, base64 of 32 bytes; in apps.env only).
 	SecretKey string `koanf:"admin_secret_key"`
@@ -125,6 +128,7 @@ func setup(ctx context.Context, a *app.App) error {
 		HTTPAddr: ":8093", Postgres: pg.DefaultConfig(), AuthAddr: "localhost:9181", UserAddr: "localhost:9182",
 		LedgerAddr: "localhost:9185", InstrumentAddr: "localhost:9184", RiskAddr: "localhost:9186", WalletURL: "http://localhost:8092",
 		TradingURL: "http://localhost:8088", DerivativesURL: "http://localhost:8095", MarketDataURL: "http://localhost:8090",
+		NotificationURL:         "http://localhost:8083",
 		PasswordHashConcurrency: 2, HealthTargets: defaultHealthTargets,
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
@@ -208,6 +212,7 @@ func setup(ctx context.Context, a *app.App) error {
 		},
 		Probe:      backends.Health{Client: &http.Client{Timeout: 2 * time.Second}, Targets: targets},
 		Reconciler: backends.Ledger{C: ledgerClient},
+		Content:    backends.Notification{REST: rest, Base: cfg.NotificationURL},
 		Log:        a.Logger(),
 		Now:        time.Now,
 	}

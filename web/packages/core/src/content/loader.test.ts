@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { plainText, type Block, type Inline } from "./markdown";
 import {
+  bundledSource,
   HELP_CATEGORIES,
   indexFiles,
   latestArticles,
@@ -14,6 +15,17 @@ import {
   type ArticleMeta,
   type ContentSection,
 } from "./loader";
+
+// The console's articles come from the API; here it has none (404), so the
+// bundled files are what the tests read, unless a test answers otherwise.
+let api: (url: string) => Response = () => new Response(JSON.stringify({ code: "COMMON_NOT_FOUND", message: "none" }), { status: 404 });
+beforeEach(() => {
+  vi.stubGlobal("fetch", (input: Request | string) => Promise.resolve(api(typeof input === "string" ? input : input.url)));
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+  api = () => new Response(JSON.stringify({ code: "COMMON_NOT_FOUND", message: "none" }), { status: 404 });
+});
 
 function meta(over: Partial<ArticleMeta>): ArticleMeta {
   return { section: "announcements", slug: "x", locale: "zh-CN", fallback: false, title: "x", date: "", pinned: false, category: "", order: 0, summary: "", ...over };
@@ -151,5 +163,71 @@ describe.each<ContentSection>(["announcements", "help"])("the %s", (section) => 
 describe("loadArticle", () => {
   it("returns null for an unknown slug", async () => {
     expect(await loadArticle("help", "no-such-article", "zh-CN")).toBeNull();
+  });
+});
+
+describe("bundledSource", () => {
+  it("returns a file's Markdown as written, for the console to copy", async () => {
+    const slug = listSlugs("help")[0]!;
+    const src = (await bundledSource("help", slug, "en"))!;
+    expect(src.slug).toBe(slug);
+    expect(src.locale).toBe("en");
+    expect(src.body).not.toMatch(/^---/);
+    expect(src.body).toMatch(/^#|\n#/);
+    expect(src.title.length).toBeGreaterThan(3);
+    expect(await bundledSource("help", "no-such-article", "en")).toBeNull();
+  });
+});
+
+describe("the console's articles", () => {
+  const summary = (slug: string, over: Record<string, unknown> = {}) => ({
+    slug, category: "notice", pinned: false, order: 0, title: `T ${slug}`, summary: "", published_at: "2026-10-02T08:00:00Z", locale: "zh-CN",
+    fallback: false, version: 1, ...over,
+  });
+  const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+
+  it("join the bundled files and win for a slug", async () => {
+    const bundled = listSlugs("announcements");
+    api = (url) =>
+      url.includes("/v1/announcements")
+        ? json({ items: [summary("maintenance", { pinned: true }), summary(bundled[0]!, { title: "edited" })], withdrawn: [] })
+        : new Response("{}", { status: 404 });
+    const list = await loadArticles("announcements", "zh-CN");
+    expect(list.length).toBe(bundled.length + 1);
+    expect(list[0]!.slug).toBe("maintenance");
+    expect(list[0]!.date).toBe("2026-10-02");
+    expect(list.find((a) => a.slug === bundled[0])!.title).toBe("edited");
+  });
+
+  it("take a file off the list once the console withdrew its slug", async () => {
+    const [gone, kept] = listSlugs("help");
+    api = (url) => (url.includes("/v1/help") ? json({ items: [], withdrawn: [gone] }) : new Response("{}", { status: 404 }));
+    const slugs = (await loadArticles("help", "zh-CN")).map((a) => a.slug);
+    expect(slugs).not.toContain(gone);
+    expect(slugs).toContain(kept);
+    expect(slugs.length).toBe(listSlugs("help").length - 1);
+  });
+
+  it("are read with their Markdown body; a 404 falls back to the file", async () => {
+    api = (url) =>
+      url.includes("/v1/announcements/maintenance") ? json({ ...summary("maintenance"), body: "## Tonight\n\nOne hour." }) : new Response("{}", { status: 404 });
+    const a = (await loadArticle("announcements", "maintenance", "zh-CN")) as Article;
+    expect(a.doc.toc.map((t) => t.text)).toEqual(["Tonight"]);
+    expect(a.summary).toBe("One hour.");
+    const slug = listSlugs("help")[0]!;
+    expect((await loadArticle("help", slug, "zh-CN"))?.slug).toBe(slug);
+  });
+
+  it("is not stood in for by its file once withdrawn", async () => {
+    const slug = listSlugs("help")[0]!;
+    api = () => new Response(JSON.stringify({ code: "NOTIFY_ARTICLE_WITHDRAWN", message: "taken off", trace_id: "t" }), { status: 404 });
+    expect(await loadArticle("help", slug, "zh-CN")).toBeNull();
+  });
+
+  it("leave the files alone while the API is down", async () => {
+    api = () => {
+      throw new TypeError("offline");
+    };
+    expect((await loadArticles("help", "en")).length).toBe(listSlugs("help").length);
   });
 });

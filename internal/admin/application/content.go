@@ -1,0 +1,229 @@
+package application
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/lidp280504357/exchange/internal/admin/domain"
+	"github.com/lidp280504357/exchange/internal/admin/ports"
+	"github.com/lidp280504357/exchange/internal/platform/apperr"
+)
+
+// Operations content (design 2026-10-02 §4.5): announcements and help
+// articles kept by notification-service and read by the sites, written and
+// published here (content.write, audited on <section>:<slug>); in-app
+// messages to one user, a tag's users or everyone (notices.send, audited
+// on broadcast:<id>). Every administrator reads them.
+
+// sections maps the console's names of the sections to the service's.
+var sections = map[string]string{"ANNOUNCEMENT": "ANNOUNCEMENT", "ANNOUNCEMENTS": "ANNOUNCEMENT", "HELP": "HELP"}
+
+func section(s string) (string, error) {
+	if v, ok := sections[strings.ToUpper(strings.TrimSpace(s))]; ok {
+		return v, nil
+	}
+	return "", apperr.Invalid("section must be ANNOUNCEMENT or HELP")
+}
+
+// Articles returns a section's articles in every status.
+func (s *Service) Articles(ctx context.Context, _ Principal, sec string) (json.RawMessage, error) {
+	sec, err := section(sec)
+	if err != nil {
+		return nil, err
+	}
+	return s.Content.Articles(ctx, sec)
+}
+
+// Article returns one article with every text.
+func (s *Service) Article(ctx context.Context, _ Principal, id string) (json.RawMessage, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return nil, apperr.NotFound("no such article")
+	}
+	return s.Content.Article(ctx, id)
+}
+
+// auditArticle records a change of an article on <section>:<slug>.
+func (s *Service) auditArticle(ctx context.Context, p Principal, raw json.RawMessage, action, reason string) error {
+	var a struct {
+		ID        string  `json:"id"`
+		Section   string  `json:"section"`
+		Slug      string  `json:"slug"`
+		Status    string  `json:"status"`
+		Version   int     `json:"version"`
+		PublishAt *string `json:"publish_at"`
+	}
+	_ = json.Unmarshal(raw, &a)
+	d, _ := json.Marshal(map[string]any{"id": a.ID, "status": a.Status, "version": a.Version, "publish_at": a.PublishAt})
+	return s.audit(ctx, p, strings.ToLower(a.Section)+":"+a.Slug, action, reason, string(d))
+}
+
+// CreateArticle writes a draft.
+func (s *Service) CreateArticle(ctx context.Context, p Principal, a ports.ArticleWrite, reason string) (json.RawMessage, error) {
+	if err := p.require(domain.PermContentEdit); err != nil {
+		return nil, err
+	}
+	if err := needReason(reason); err != nil {
+		return nil, err
+	}
+	sec, err := section(a.Section)
+	if err != nil {
+		return nil, err
+	}
+	a.Section, a.Actor = sec, p.Admin.Email
+	raw, err := s.Content.CreateArticle(ctx, a)
+	if err != nil {
+		return nil, err
+	}
+	return raw, s.auditArticle(ctx, p, raw, "admin.content.created", strings.TrimSpace(reason))
+}
+
+// UpdateArticle rewrites an article at the version the console read.
+func (s *Service) UpdateArticle(ctx context.Context, p Principal, id string, a ports.ArticleWrite, reason string) (json.RawMessage, error) {
+	if err := p.require(domain.PermContentEdit); err != nil {
+		return nil, err
+	}
+	if err := needReason(reason); err != nil {
+		return nil, err
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		return nil, apperr.NotFound("no such article")
+	}
+	a.Section, a.Actor = "", p.Admin.Email
+	raw, err := s.Content.UpdateArticle(ctx, id, a)
+	if err != nil {
+		return nil, err
+	}
+	return raw, s.auditArticle(ctx, p, raw, "admin.content.updated", strings.TrimSpace(reason))
+}
+
+// PublishArticle shows an article on the sites from publishAt on (now when
+// nil; within a minute, as the sites refresh).
+func (s *Service) PublishArticle(ctx context.Context, p Principal, id string, version int, publishAt *time.Time, reason string) (json.RawMessage, error) {
+	if err := p.require(domain.PermContentEdit); err != nil {
+		return nil, err
+	}
+	if err := needReason(reason); err != nil {
+		return nil, err
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		return nil, apperr.NotFound("no such article")
+	}
+	raw, err := s.Content.PublishArticle(ctx, id, version, publishAt, p.Admin.Email)
+	if err != nil {
+		return nil, err
+	}
+	return raw, s.auditArticle(ctx, p, raw, "admin.content.published", strings.TrimSpace(reason))
+}
+
+// ArchiveArticle takes an article off the sites.
+func (s *Service) ArchiveArticle(ctx context.Context, p Principal, id string, version int, reason string) (json.RawMessage, error) {
+	if err := p.require(domain.PermContentEdit); err != nil {
+		return nil, err
+	}
+	if err := needReason(reason); err != nil {
+		return nil, err
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		return nil, apperr.NotFound("no such article")
+	}
+	raw, err := s.Content.ArchiveArticle(ctx, id, version, p.Admin.Email)
+	if err != nil {
+		return nil, err
+	}
+	return raw, s.auditArticle(ctx, p, raw, "admin.content.archived", strings.TrimSpace(reason))
+}
+
+// Broadcasts pages through the in-app messages sent, newest first.
+func (s *Service) Broadcasts(ctx context.Context, _ Principal, cursor string, limit int) (json.RawMessage, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	return s.Content.Broadcasts(ctx, cursor, limit)
+}
+
+// Broadcast returns a message sent with how many it reached and how many
+// read it.
+func (s *Service) Broadcast(ctx context.Context, _ Principal, id string) (json.RawMessage, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return nil, apperr.NotFound("no such message")
+	}
+	return s.Content.Broadcast(ctx, id)
+}
+
+// Audiences of an in-app message as the console names them.
+const (
+	AudienceAll  = "ALL"
+	AudienceUser = "USER"
+	AudienceTag  = "TAG"
+)
+
+// maxTagged bounds the users a tag's message reaches.
+const maxTagged = 10_000
+
+// BroadcastInput is an in-app message as the console sends it: to
+// everyone, one user or the users with a tag.
+type BroadcastInput struct {
+	Audience string
+	UserID   string
+	Tag      string
+	Title    map[string]string
+	Body     map[string]string
+	Link     string
+	Email    bool
+}
+
+// SendBroadcast sends an in-app message; notification-service delivers it
+// in rounds. A tag's users are those tagged now.
+func (s *Service) SendBroadcast(ctx context.Context, p Principal, in BroadcastInput, reason string) (json.RawMessage, error) {
+	if err := p.require(domain.PermNoticesSend); err != nil {
+		return nil, err
+	}
+	if err := needReason(reason); err != nil {
+		return nil, err
+	}
+	w := ports.BroadcastWrite{Title: in.Title, Body: in.Body, Link: in.Link, Email: in.Email, Actor: p.Admin.Email, Audience: "USERS"}
+	details := map[string]any{"audience": strings.ToUpper(in.Audience), "email": in.Email, "link": in.Link, "title": in.Title["zh-CN"]}
+	switch strings.ToUpper(in.Audience) {
+	case AudienceAll:
+		w.Audience = "ALL"
+	case AudienceUser:
+		if _, err := uuid.Parse(in.UserID); err != nil {
+			return nil, apperr.Invalid("user_id must be a user's ID")
+		}
+		w.UserIDs = []string{in.UserID}
+		details["user_id"] = in.UserID
+	case AudienceTag:
+		tags, err := domain.Tags([]string{in.Tag})
+		if err != nil || len(tags) != 1 {
+			return nil, apperr.Invalid("tag must be an account tag")
+		}
+		users, err := s.Store.Read().Tags().Users(ctx, tags[0], maxTagged+1)
+		if err != nil {
+			return nil, err
+		}
+		switch {
+		case len(users) == 0:
+			return nil, apperr.New(apperr.KindUnprocessable, "ADMIN_TAG_EMPTY", "no account has this tag")
+		case len(users) > maxTagged:
+			return nil, apperr.Invalid("a tag's message reaches at most 10,000 accounts")
+		}
+		w.UserIDs = users
+		details["tag"], details["users"] = tags[0], len(users)
+	default:
+		return nil, apperr.Invalid("audience must be ALL, USER or TAG")
+	}
+	raw, err := s.Content.SendBroadcast(ctx, w)
+	if err != nil {
+		return nil, err
+	}
+	var b struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(raw, &b)
+	d, _ := json.Marshal(details)
+	return raw, s.audit(ctx, p, "broadcast:"+b.ID, "admin.notices.sent", strings.TrimSpace(reason), string(d))
+}

@@ -70,8 +70,11 @@ type Service struct {
 	HouseBook  HouseDeps
 	Probe      ports.Health
 	Reconciler ports.Reconciler
-	Log        *slog.Logger
-	Now        func() time.Time
+	// Content is notification-service's announcements, help articles and
+	// in-app messages.
+	Content ports.Content
+	Log     *slog.Logger
+	Now     func() time.Time
 	// CloseWait is the pause between attempts to close a position while
 	// its closing orders are being canceled (700 ms when zero).
 	CloseWait time.Duration

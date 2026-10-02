@@ -1315,7 +1315,9 @@ export interface paths {
          * What a config document would change, changing nothing
          * @description The document names only the items to create or change, each whole
          *     (a field left out becomes empty). Items missing are left alone,
-         *     statuses never change here (the status endpoints do that). A pair's
+         *     statuses never change here (the status endpoints do that): a new
+         *     pair or contract starts in PREPARE (ADMIN_NEW_ITEM_NOT_PREPARE for
+         *     another status). A pair's
          *     new reference symbol must be listed on the reference market's spot
          *     market (ADMIN_REFERENCE_UNKNOWN otherwise: it would fail the
          *     reference reads of every pair); clearing the reference symbol of a
@@ -1367,6 +1369,146 @@ export interface paths {
          *     nobody until opened and apply at once.
          */
         post: operations["applyInstrumentConfig"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/articles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A section's announcements or help articles, every status
+         * @description Kept by notification-service and read by the sites through GET
+         *     /v1/announcements and /v1/help once published (design 2026-10-02
+         *     §4.5). Every administrator reads them.
+         */
+        get: operations["listArticles"];
+        put?: never;
+        /**
+         * Write a draft
+         * @description Chinese (zh-CN) title and Markdown body required, English
+         *     optional; the slug is unique in its section
+         *     (NOTIFY_ARTICLE_EXISTS). Audited as admin.content.created on
+         *     <section>:<slug>. Needs content.write.
+         */
+        post: operations["createArticle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/articles/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** An article with every text */
+        get: operations["getArticle"];
+        /**
+         * Rewrite an article
+         * @description At the version read (COMMON_CONFLICT when someone saved it
+         *     meanwhile); its status stays: a published article changes on the
+         *     sites within a minute. Audited as admin.content.updated. Needs
+         *     content.write.
+         */
+        put: operations["updateArticle"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/articles/{id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish an article, now or at a time
+         * @description The sites show it from publish_at on (now when left out). Audited
+         *     as admin.content.published. Needs content.write.
+         */
+        post: operations["publishArticle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/articles/{id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take an article off the sites
+         * @description It may be published again. Audited as admin.content.archived. Needs content.write.
+         */
+        post: operations["archiveArticle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/broadcasts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The in-app messages sent, newest first
+         * @description With how many each reached and how many of them read it. Every administrator reads them.
+         */
+        get: operations["listBroadcasts"];
+        put?: never;
+        /**
+         * Send an in-app message to one user, a tag's users or everyone
+         * @description notification-service delivers it in rounds, each user once in their
+         *     language (Chinese without English), as a notice of type BROADCAST
+         *     on the sites' inbox and pushed live; email also mails it. A tag's
+         *     users are those tagged now (ADMIN_TAG_EMPTY when none, at most
+         *     10,000). Audited as admin.notices.sent on broadcast:<id>. Needs
+         *     notices.send.
+         */
+        post: operations["sendBroadcast"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/broadcasts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** An in-app message sent, with its counts */
+        get: operations["getBroadcast"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2396,6 +2538,77 @@ export interface components {
             from: string;
             to: string;
         };
+        /** @description By locale; zh-CN required, en optional. */
+        LocalizedText: {
+            "zh-CN": string;
+            en?: string;
+        };
+        ArticleText: {
+            /** @enum {string} */
+            locale: "zh-CN" | "en";
+            title: string;
+            summary: string;
+            /** @description Markdown. */
+            body: string;
+        };
+        ArticleWrite: {
+            slug: string;
+            /** @description Announcements notice or product; help account, funds, trading, futures or faq (others allowed). */
+            category: string;
+            pinned: boolean;
+            order: number;
+            texts: components["schemas"]["ArticleText"][];
+        };
+        ContentArticle: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            section: "ANNOUNCEMENT" | "HELP";
+            slug: string;
+            category: string;
+            pinned: boolean;
+            order: number;
+            /** @enum {string} */
+            status: "DRAFT" | "PUBLISHED" | "ARCHIVED";
+            /**
+             * Format: date-time
+             * @description A published article shows from then on (later than now when scheduled).
+             */
+            publish_at: string | null;
+            version: number;
+            updated_by: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            texts: components["schemas"]["ArticleText"][];
+        };
+        Broadcast: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * @description Everyone, or named users (one, or a tag's when sent).
+             * @enum {string}
+             */
+            audience: "ALL" | "USERS";
+            /** @description The named users; 0 for everyone. */
+            users: number;
+            title: components["schemas"]["LocalizedText"];
+            body: components["schemas"]["LocalizedText"];
+            link: string;
+            email: boolean;
+            /** @enum {string} */
+            status: "SENDING" | "SENT";
+            /** @description Users who have it. */
+            recipients: number;
+            /** @description Of them, those who read it. */
+            read: number;
+            created_by: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            finished_at: string | null;
+        };
         StatusRequest: {
             /** @enum {string} */
             to: "PREPARE" | "TRADING" | "HALT" | "CANCEL_ONLY" | "DELISTED";
@@ -2539,7 +2752,7 @@ export interface components {
         /** @enum {string} */
         AdminRole: "ADMIN" | "OPERATOR" | "FINANCE" | "AUDITOR";
         /** @enum {string} */
-        Permission: "users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write" | "settings.write" | "users.notes" | "users.security" | "users.contacts" | "ledger.hold" | "deposits.review" | "admins.manage" | "instruments.trading";
+        Permission: "users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write" | "settings.write" | "users.notes" | "users.security" | "users.contacts" | "ledger.hold" | "deposits.review" | "admins.manage" | "instruments.trading" | "content.write" | "notices.send";
         RolePermissions: {
             role: components["schemas"]["AdminRole"];
             permissions: components["schemas"]["Permission"][];
@@ -3528,6 +3741,7 @@ export interface components {
         Contract: string;
         Symbol: string;
         ChangeID: string;
+        ArticleID: string;
     };
     requestBodies: never;
     headers: {
@@ -5358,6 +5572,267 @@ export interface operations {
                     "application/json": components["schemas"]["ConfigResult"] & {
                         change: components["schemas"]["InstrumentChange"];
                     };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listArticles: {
+        parameters: {
+            query: {
+                section: "ANNOUNCEMENT" | "HELP";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The articles. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        articles: components["schemas"]["ContentArticle"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createArticle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArticleWrite"] & {
+                    /** @enum {string} */
+                    section: "ANNOUNCEMENT" | "HELP";
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The draft. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentArticle"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getArticle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ArticleID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The article. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentArticle"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateArticle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ArticleID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArticleWrite"] & {
+                    version: number;
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The article. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentArticle"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    publishArticle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ArticleID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: number;
+                    /** Format: date-time */
+                    publish_at?: string;
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The article. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentArticle"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    archiveArticle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ArticleID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: number;
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The article. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentArticle"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listBroadcasts: {
+        parameters: {
+            query?: {
+                /** @description The previous page's next_cursor; omitted for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of messages. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["Broadcast"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    sendBroadcast: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    audience: "ALL" | "USER" | "TAG";
+                    /**
+                     * Format: uuid
+                     * @description With USER.
+                     */
+                    user_id?: string;
+                    /** @description With TAG. */
+                    tag?: string;
+                    title: components["schemas"]["LocalizedText"];
+                    body: components["schemas"]["LocalizedText"];
+                    /** @description A path on the sites the message leads to, such as /assets. */
+                    link?: string;
+                    email?: boolean;
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The message, being delivered. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Broadcast"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getBroadcast: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The message. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Broadcast"];
                 };
             };
             default: components["responses"]["Error"];

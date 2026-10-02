@@ -75,6 +75,11 @@ const (
 	// reference symbols; and approves, rejects or cancels such changes
 	// (ADMIN only, design 2026-10-02 §2 item 6).
 	PermInstrumentsTrading = "instruments.trading"
+	// PermContentEdit writes, publishes and archives the announcements and
+	// help articles (design 2026-10-02 §4.5).
+	PermContentEdit = "content.write"
+	// PermNoticesSend sends in-app messages to users: one, a tag's, or all.
+	PermNoticesSend = "notices.send"
 )
 
 var reads = []string{
@@ -84,9 +89,10 @@ var reads = []string{
 var roles = map[string][]string{
 	RoleAdmin: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit,
 		PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermDerivativesEdit, PermSettingsEdit, PermUsersNotes,
-		PermUsersSecurity, PermUsersContacts, PermLedgerHold, PermDepositsReview, PermAdminsManage, PermInstrumentsTrading),
+		PermUsersSecurity, PermUsersContacts, PermLedgerHold, PermDepositsReview, PermAdminsManage, PermInstrumentsTrading,
+		PermContentEdit, PermNoticesSend),
 	RoleOperator: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit, PermDerivativesEdit,
-		PermUsersNotes, PermUsersSecurity, PermUsersContacts, PermLedgerHold),
+		PermUsersNotes, PermUsersSecurity, PermUsersContacts, PermLedgerHold, PermContentEdit, PermNoticesSend),
 	RoleFinance: append(slices.Clone(reads), PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermUsersNotes, PermUsersContacts,
 		PermLedgerHold, PermDepositsReview),
 	RoleAuditor: slices.Clone(reads),

@@ -5,15 +5,21 @@ import { Check } from "../kit/Check";
 
 /**
  * Toasts are the console's messages (design 2026-10-02 §6): they slide in
- * at the top right, a success with its check mark drawn; hovering one
+ * at the bottom right, a success with its check mark drawn; hovering one
  * keeps it. They render the shared toast store, so toast.success() and
- * friends work as on the other sites.
+ * friends work as on the other sites. At the top they covered a drawer's
+ * buttons right after its action, and a click on one counted as a click
+ * outside the drawer and closed it: a press on a toast stops here.
  */
 export function Toasts() {
   const { t } = useTranslation();
   const items = useToasts();
   return (
-    <section aria-label={t("ui.notifications")} className="pointer-events-none fixed right-0 top-0 z-[var(--z-toast)] flex w-full max-w-sm flex-col gap-2 p-4">
+    <section
+      aria-label={t("ui.notifications")}
+      onPointerDown={(e) => e.stopPropagation()}
+      className="pointer-events-none fixed bottom-0 right-0 z-[var(--z-toast)] flex w-full max-w-sm flex-col gap-2 p-4"
+    >
       {items.map((item) => (
         <Toast key={item.id} item={item} />
       ))}
