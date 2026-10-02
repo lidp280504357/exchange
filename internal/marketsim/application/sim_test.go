@@ -224,6 +224,9 @@ func (p *fakePrices) trade(price decimal.Decimal) {
 	defer p.mu.Unlock()
 	if !p.frozen {
 		p.last = price
+		if !p.lastAt.IsZero() { // a test that keeps the time of the last trade
+			p.lastAt = p.now()
+		}
 	}
 }
 
@@ -541,6 +544,51 @@ func TestTakersTradeTheDaysTurnover(t *testing.T) {
 	}
 	if r.trading.markets[domain.Buy] == 0 || r.trading.markets[domain.Sell] == 0 {
 		t.Fatalf("one-sided: %v", r.trading.markets)
+	}
+}
+
+// A market quiet for a minute gets a taker's order (quietTake): the
+// perpetual's index needs a trade within five minutes, and the takers'
+// arrivals alone leave longer gaps at night or after a restart.
+func TestAQuietMarketGetsATakersOrder(t *testing.T) {
+	p := domain.DefaultParams()
+	p.DailyVolume = 1 // far below an order a day: only the floor trades
+	r := bandRig(t, &memStore{params: &p, version: 1, bots: []ports.Bot{
+		{UserID: "m1", Role: domain.RoleMaker, Label: "bot-01", Enabled: true},
+		{UserID: "m2", Role: domain.RoleMaker, Label: "bot-02", Enabled: true},
+		{UserID: "t1", Role: domain.RoleTaker, Label: "bot-03", Enabled: true},
+	}})
+	r.prices.mu.Lock()
+	r.prices.lastAt = r.now
+	r.prices.mu.Unlock()
+	markets := func() int {
+		r.trading.mu.Lock()
+		defer r.trading.mu.Unlock()
+		return r.trading.markets[domain.Buy] + r.trading.markets[domain.Sell]
+	}
+	r.rounds(4 * 50)
+	if n := markets(); n != 0 {
+		t.Fatalf("%d market orders within the first minute", n)
+	}
+	r.rounds(4 * 15)
+	if n := markets(); n != 1 {
+		t.Fatalf("%d market orders after a quiet minute, want 1", n)
+	}
+	r.rounds(4 * 50) // it traded: quiet again only a minute later
+	if n := markets(); n != 1 {
+		t.Fatalf("%d market orders, want still 1", n)
+	}
+	r.rounds(4 * 20)
+	if n := markets(); n != 2 {
+		t.Fatalf("%d market orders after another quiet minute, want 2", n)
+	}
+	// Switched off (daily_volume 0), the takers stay quiet.
+	r.sim.mu.Lock()
+	r.sim.params.DailyVolume = 0
+	r.sim.mu.Unlock()
+	r.rounds(4 * 130)
+	if n := markets(); n != 2 {
+		t.Fatalf("%d market orders with the takers off", n)
 	}
 }
 

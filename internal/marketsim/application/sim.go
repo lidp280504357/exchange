@@ -102,6 +102,7 @@ type Sim struct {
 	events    []*domain.Event // scheduled and running
 	movedAt   time.Time       // when an event last moved the price
 	executeAt time.Time       // the executors' next turn
+	quietAt   time.Time       // a taker's last order in a quiet market (quietTake)
 	samples   []Sample
 	prunedAt  time.Time
 
@@ -573,8 +574,17 @@ func (s *Sim) makerLean(b *bot) float64 {
 	return domain.Lean(b.usdt.InexactFloat64(), sum/float64(n))
 }
 
+// quietTake is how long the market goes without a trade before a taker
+// trades anyway. The perpetual's index is the platform's own market, which
+// needs a trade within five minutes (market-data's PlatformIndexAge), and
+// the takers' Poisson arrivals alone, at night about one a minute and the
+// only flow for the first minutes after a restart (the trend followers
+// wait for their window), left gaps of five minutes (2026-10-02 22:39 UTC:
+// the perpetual went reduce-only).
+const quietTake = time.Minute
+
 // take sends the takers' market orders that arrived in dt, each by a taker
-// not waiting after a refusal.
+// not waiting after a refusal; in a market quiet for quietTake, one now.
 func (s *Sim) take(ctx context.Context, now time.Time, p float64, dt time.Duration) {
 	takers := s.botsOf(domain.RoleTaker)
 	if len(takers) == 0 {
@@ -582,10 +592,19 @@ func (s *Sim) take(ctx context.Context, now time.Time, p float64, dt time.Durati
 	}
 	rng := s.model.Rand()
 	daily := s.params.DailyVolume * (1 - domain.TrendShare) // the rest is the trend followers'
-	for range domain.Arrivals(rng, daily, s.params.OrderSize, dt, now) {
+	n := domain.Arrivals(rng, daily, s.params.OrderSize, dt, now)
+	quiet := n == 0 && s.quiet(now)
+	if quiet {
+		n = 1
+	}
+	for range n {
 		b := pick(rng, takers, now)
 		if b == nil {
 			continue
+		}
+		if quiet {
+			s.quietAt = now
+			s.m.quiet.Inc()
 		}
 		lean := 0.0
 		if b.known {
@@ -593,6 +612,20 @@ func (s *Sim) take(ctx context.Context, now time.Time, p float64, dt time.Durati
 		}
 		s.market(ctx, now, b, domain.TakerSide(rng, s.params, lean), domain.Worth(rng, s.params.OrderSize, domain.OrderSpread), p)
 	}
+}
+
+// quiet reports whether nothing traded for quietTake (since the bots
+// started when the pair never traded) and no taker traded for that reason
+// since; never while the takers are switched off (daily_volume 0).
+func (s *Sim) quiet(now time.Time) bool {
+	since := s.lastTradeAt
+	if since.IsZero() {
+		since = s.watchFrom
+	}
+	if s.quietAt.After(since) {
+		since = s.quietAt
+	}
+	return s.params.DailyVolume > 0 && !since.IsZero() && now.Sub(since) >= quietTake
 }
 
 // follow lets the trend followers trade the target's direction over the
@@ -896,7 +929,7 @@ type metrics struct {
 	orders                           *prometheus.CounterVec
 	cancels, guards, throttled       *prometheus.CounterVec
 	errors                           *prometheus.CounterVec
-	deadlocks                        prometheus.Counter
+	deadlocks, quiet                 prometheus.Counter
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -930,8 +963,12 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Name: "market_sim_band_deadlocks_total",
 			Help: "Times the watchdog found the market locked (three minutes without a trade, or every level refused for the price band) and rebased the model at the band's anchor.",
 		}),
+		quiet: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "market_sim_quiet_takes_total",
+			Help: "Takers' orders sent because nothing had traded for a minute (the perpetual's index needs a trade within five).",
+		}),
 	}
 	reg.MustRegister(m.target, m.last, m.running, m.refsFresh, m.walking, m.inventory, m.orders, m.cancels, m.guards, m.throttled, m.errors,
-		m.deadlocks)
+		m.deadlocks, m.quiet)
 	return m
 }
