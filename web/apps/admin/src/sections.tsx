@@ -5,6 +5,7 @@ import {
   BookOpen,
   ChartColumn,
   ChartLine,
+  HeartPulse,
   Coins,
   Landmark,
   Layers,
@@ -16,6 +17,7 @@ import {
   Siren,
   SlidersHorizontal,
   Stamp,
+  UserCog,
   UserCheck,
   Users,
   Warehouse,
@@ -68,8 +70,10 @@ export const sections: Section[] = [
   { path: "house", key: "house", group: "trading", perm: "reports.read", icon: Warehouse, page: lazy(() => import("./pages/House")) },
   { path: "instruments", key: "instruments", group: "markets", perm: "instruments.read", icon: Coins, page: lazy(() => import("./pages/Instruments")) },
   { path: "risk", key: "risk", group: "risk", perm: "flags.read", icon: ShieldAlert, page: lazy(() => import("./pages/Flags")) },
+  { path: "admins", key: "admins", group: "system", perm: "admins.manage", icon: UserCog, page: lazy(() => import("./pages/system/Admins")) },
   { path: "audit", key: "audit", group: "system", perm: "audit.read", icon: ScrollText, page: lazy(() => import("./pages/Audit")) },
   { path: "reports", key: "reports", group: "system", perm: "reports.read", icon: ChartColumn, page: lazy(() => import("./pages/Reports")) },
+  { path: "health", key: "health", group: "system", perm: "reports.read", icon: HeartPulse, page: lazy(() => import("./pages/system/Health")) },
   { path: "settings", key: "settings", group: "system", icon: Settings, page: lazy(() => import("./pages/system/Settings")) },
 ];
 

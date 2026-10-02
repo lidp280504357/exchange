@@ -12,6 +12,7 @@ import { Pulse, Reveal, stagger } from "../kit/motion";
 import { Card, Page } from "../kit/Page";
 import { CountBadge } from "../layout/CountBadge";
 import { useTodo } from "../live";
+import { CustodySummary } from "./system/status";
 
 /**
  * Overview (design 2026-10-02 §3, §6): what waits for the administrator,
@@ -175,47 +176,6 @@ function Todo({ admin }: { admin: Admin }) {
   );
 }
 
-/** CustodySummary is the custodian at a glance: reachable, short of nothing, no callback or withdrawal stuck. */
-function CustodySummary() {
-  const { t } = useTranslation();
-  const q = useQuery({ queryKey: ["admin", "custody"], queryFn: async () => adminData(await adminApi.GET("/admin/v1/custody")), refetchInterval: 30_000 });
-  const o = q.data;
-  const short = (o?.checks ?? []).filter((c) => Number(c.shortfall) > 0);
-  return (
-    <Card
-      title={t("admin.overview.custody")}
-      extra={
-        <Link className="text-sm text-info hover:underline" to="/custody">
-          {t("admin.common.details")}
-        </Link>
-      }
-    >
-      {q.isError ? (
-        <p className="text-sm text-danger">{errorText(q.error)}</p>
-      ) : !o ? (
-        <Skeleton className="h-6 w-64" />
-      ) : (
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          {!o.configured ? (
-            <Badge tone="neutral">{t("admin.overview.custodyOff")}</Badge>
-          ) : o.error ? (
-            <Badge tone="danger">{t("admin.overview.custodyDown", { error: o.error })}</Badge>
-          ) : (
-            <Badge tone="success">{t("admin.overview.custodyOk", { n: o.coins.length })}</Badge>
-          )}
-          {short.map((c) => (
-            <Badge key={`${c.holder}/${c.asset}`} tone="danger">
-              {t("admin.overview.custodyShort", { asset: c.asset, amount: c.shortfall })}
-            </Badge>
-          ))}
-          {o.callbacks.attention > 0 && <Badge tone="warn">{t("admin.overview.custodyCallbacks", { n: o.callbacks.attention })}</Badge>}
-          {o.submitted.count > 0 && <Badge tone="info">{t("admin.overview.custodySubmitted", { n: o.submitted.count })}</Badge>}
-        </div>
-      )}
-    </Card>
-  );
-}
-
 function Health() {
   const { t } = useTranslation();
   const q = useQuery({
@@ -229,9 +189,14 @@ function Health() {
     <Card
       title={t("admin.overview.health")}
       extra={
-        q.data && (
-          <Badge tone={down ? "danger" : "success"}>{down ? t("admin.overview.someDown", { down }) : t("admin.overview.allReady", { n: list.length })}</Badge>
-        )
+        <>
+          {q.data && (
+            <Badge tone={down ? "danger" : "success"}>{down ? t("admin.overview.someDown", { down }) : t("admin.overview.allReady", { n: list.length })}</Badge>
+          )}
+          <Link to="/health" className="text-sm text-info hover:underline">
+            {t("admin.common.details")}
+          </Link>
+        </>
       }
     >
       {q.isError ? (

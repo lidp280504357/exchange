@@ -5,7 +5,7 @@ import { useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { EnumBadge, EnumText } from "../../kit/enums";
 import { IdText, Num, TimeText, UserCell } from "../../kit/format";
-import { ListTable, PAGE_SIZE, useCursorList, type CursorList } from "../../kit/lists";
+import { ListTable, pageSize, useCursorList, type CursorList } from "../../kit/lists";
 
 // The record lists the pages and the user drawer share: orders, trades,
 // deposits and the audit trail, each paged with its cursor.
@@ -29,7 +29,7 @@ export function useOrders(q: OrderQuery) {
             status: (q.status || undefined) as Order["status"] as never,
             side: (q.side || undefined) as never,
             cursor,
-            limit: PAGE_SIZE,
+            limit: pageSize(),
           },
         },
       }),
@@ -92,7 +92,7 @@ export type TradeQuery = { user_id?: string; symbol?: string; from?: string; to?
 
 export function useTrades(q: TradeQuery) {
   return useCursorList<Trade>(["admin", "trades", q], async (cursor) =>
-    adminData(await adminApi.GET("/admin/v1/trades", { params: { query: { ...clean(q), cursor, limit: PAGE_SIZE } } })),
+    adminData(await adminApi.GET("/admin/v1/trades", { params: { query: { ...clean(q), cursor, limit: pageSize() } } })),
   );
 }
 
@@ -128,7 +128,7 @@ export function useDeposits(q: DepositQuery) {
   return useCursorList<Deposit>(["admin", "deposits", q], async (cursor) =>
     adminData(
       await adminApi.GET("/admin/v1/deposits", {
-        params: { query: { ...clean(q), status: (q.status || undefined) as never, cursor, limit: PAGE_SIZE } },
+        params: { query: { ...clean(q), status: (q.status || undefined) as never, cursor, limit: pageSize() } },
       }),
     ),
   );
@@ -173,7 +173,7 @@ export type AuditQuery = { actor?: string; target?: string; event_type?: string;
 
 export function useAudit(q: AuditQuery) {
   return useCursorList<AuditEntry>(["admin", "audit", q], async (cursor) =>
-    adminData(await adminApi.GET("/admin/v1/audit-logs", { params: { query: { ...clean(q), cursor, limit: PAGE_SIZE } } })),
+    adminData(await adminApi.GET("/admin/v1/audit-logs", { params: { query: { ...clean(q), cursor, limit: pageSize() } } })),
   );
 }
 

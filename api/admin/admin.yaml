@@ -7,8 +7,9 @@ info:
     under /admin/v1 behind nginx; the user gateway never routes here, and
     this contract stays out of the public API reference.
 
-    Administrators are created with `exchangectl admin create` (no
-    sign-up). Signing in takes the password and a code of the
+    Administrators are created by an ADMIN on the administrators page
+    (POST /admin/v1/admins), or with `exchangectl admin create` when no
+    ADMIN can sign in (no sign-up). Signing in takes the password and a code of the
     authenticator app bound at creation; each code works once, and five
     failures lock the account for 15 minutes. The feature flag
     admin.login_without_totp switches the code off (test environments):
@@ -19,7 +20,7 @@ info:
     other than GET must carry the header `X-Admin-CSRF: 1`.
 
     Roles grant permissions: ADMIN (everything, and alone the console's
-    settings), OPERATOR (accounts, orders, trading pairs and contracts,
+    settings and the administrators), OPERATOR (accounts, orders, trading pairs and contracts,
     lifting a contract's reduce-only, feature flags other than the
     console's own), FINANCE (withdrawal reviews, ledger adjustments,
     insurance fund contributions), AUDITOR (read-only). Everyone may read,
@@ -50,6 +51,7 @@ security:
   - session: []
 tags:
   - name: session
+  - name: admins
   - name: users
   - name: withdrawals
   - name: instruments
@@ -158,6 +160,269 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Admin'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/roles:
+    get:
+      operationId: listRoles
+      summary: Every role with its permissions
+      description: Any administrator reads them.
+      tags: [admins]
+      responses:
+        '200':
+          description: The roles.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [roles]
+                properties:
+                  roles:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RolePermissions'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/admins:
+    get:
+      operationId: listAdmins
+      summary: The administrators
+      description: Every administrator, with their live sessions. Needs admins.manage.
+      tags: [admins]
+      responses:
+        '200':
+          description: The administrators.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [admins]
+                properties:
+                  admins:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ManagedAdmin'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: createAdmin
+      summary: Create an administrator
+      description: |
+        Answers with the administrator, a password and an authenticator
+        secret, shown this once: the answer is not cached (Cache-Control:
+        no-store), and neither is logged or audited. The new administrator
+        binds the secret in an authenticator app and signs in with both.
+        Audited as admin.created. Needs admins.manage.
+      tags: [admins]
+      security:
+        - session: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, name, role, reason]
+              properties:
+                email:
+                  type: string
+                  format: email
+                name:
+                  type: string
+                  minLength: 1
+                role:
+                  $ref: '#/components/schemas/AdminRole'
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '201':
+          description: The administrator and their credentials.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminCredentials'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/admins/{id}/status:
+    post:
+      operationId: setAdminStatus
+      summary: Disable or enable an administrator
+      description: |
+        Disabling ends their sessions at once; enabling also lifts a lock
+        after failed sign-ins. Nobody changes their own account here
+        (ADMIN_SELF), and an active ADMIN always remains
+        (ADMIN_LAST_ADMIN). Audited as admin.disabled or admin.enabled.
+        Needs admins.manage.
+      tags: [admins]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/AdminID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled, reason]
+              properties:
+                enabled:
+                  type: boolean
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: The administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManagedAdmin'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/admins/{id}/role:
+    post:
+      operationId: setAdminRole
+      summary: Change an administrator's role
+      description: |
+        Takes effect on their next request. Not one's own (ADMIN_SELF), nor
+        the last active ADMIN's (ADMIN_LAST_ADMIN). Audited as
+        admin.role_changed. Needs admins.manage.
+      tags: [admins]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/AdminID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role, reason]
+              properties:
+                role:
+                  $ref: '#/components/schemas/AdminRole'
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: The administrator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManagedAdmin'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/admins/{id}/password-reset:
+    post:
+      operationId: resetAdminPassword
+      summary: Give an administrator a new password
+      description: |
+        Answers with the new password, shown this once (no-store, never
+        logged or audited), and ends their sessions. Not one's own
+        (ADMIN_SELF). Audited as admin.password_reset. Needs admins.manage.
+      tags: [admins]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/AdminID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonRequest'
+      responses:
+        '200':
+          description: The new password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminCredentials'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/admins/{id}/totp-reset:
+    post:
+      operationId: resetAdminTOTP
+      summary: Give an administrator a new authenticator secret
+      description: |
+        Answers with the new secret and its otpauth URI, shown this once
+        (no-store, never logged or audited); the old authenticator stops
+        working and their sessions end. Not one's own (ADMIN_SELF).
+        Audited as admin.totp_reset. Needs admins.manage.
+      tags: [admins]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/AdminID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonRequest'
+      responses:
+        '200':
+          description: The new secret.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminCredentials'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/admins/{id}/sessions:
+    get:
+      operationId: adminSessions
+      summary: An administrator's live sessions
+      description: At most 50, the latest first. Needs admins.manage.
+      tags: [admins]
+      parameters:
+        - $ref: '#/components/parameters/AdminID'
+      responses:
+        '200':
+          description: The sessions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions]
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AdminSession'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/admins/{id}/sessions/revoke:
+    post:
+      operationId: revokeAdminSessions
+      summary: End every session of an administrator
+      description: |
+        Not one's own (ADMIN_SELF; signing out ends one's session).
+        Audited as admin.sessions_revoked. Needs admins.manage.
+      tags: [admins]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/AdminID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonRequest'
+      responses:
+        '204':
+          description: The sessions ended.
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/settings:
@@ -2180,6 +2445,50 @@ paths:
                     $ref: '#/components/schemas/NextCursor'
         default:
           $ref: '#/components/responses/Error'
+  /admin/v1/audit-logs/export:
+    get:
+      operationId: exportAuditLogs
+      summary: The audit entries matching the filters, as CSV
+      description: |
+        The search's filters, newest first, at most 10,000 rows; the header
+        X-Truncated is true when more were left out (narrow the time
+        range). UTF-8 with a byte order mark, so spreadsheets read Chinese;
+        columns occurred_at, event_type, actor, target, action, reason,
+        details, event_id (action, reason and details are the
+        administrator action's, or a configuration change's old and new
+        values). The export is itself audited as admin.audit.exported.
+        Needs audit.read.
+      tags: [audit]
+      parameters:
+        - name: actor
+          in: query
+          schema:
+            type: string
+        - name: target
+          in: query
+          schema:
+            type: string
+        - name: event_type
+          in: query
+          schema:
+            type: string
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+      responses:
+        '200':
+          description: The CSV file (Content-Disposition attachment).
+          headers:
+            X-Truncated:
+              description: More entries matched than were exported.
+              schema:
+                type: string
+                enum: ['true', 'false']
+          content:
+            text/csv:
+              schema:
+                type: string
+        default:
+          $ref: '#/components/responses/Error'
   /admin/v1/reports/trading:
     get:
       operationId: tradingReport
@@ -2638,8 +2947,19 @@ paths:
     get:
       operationId: getHealth
       summary: Every service's readiness
-      description: Asks each service's ops endpoint (/readyz) within 2 seconds. Needs reports.read.
+      description: |
+        Asks each service's ops endpoint (/readyz) within 2 seconds; with
+        details=true also reads its metrics (its version, its Kafka
+        consumers' lag and the records they parked in a DLQ since it
+        started) and the reference feed's state: the system health page.
+        Needs reports.read.
       tags: [reports]
+      parameters:
+        - name: details
+          in: query
+          schema:
+            type: string
+            enum: ['true']
       responses:
         '200':
           description: The services.
@@ -2653,6 +2973,9 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/ServiceHealth'
+                  feed:
+                    description: With details; left out when market-data-service could not be asked.
+                    $ref: '#/components/schemas/FeedStatus'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/ledger/system-balances:
@@ -2904,6 +3227,13 @@ components:
       schema:
         type: string
         format: uuid
+    AdminID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     OrderID:
       name: order
       in: path
@@ -3020,6 +3350,15 @@ components:
           type: integer
         error:
           type: string
+        version:
+          type: string
+          description: With details; the commit the service was built from.
+        kafka_lag:
+          type: integer
+          description: With details, for a service with Kafka consumers; records behind, summed over its consumers.
+        dlq:
+          type: integer
+          description: With details, for a service with Kafka consumers; records parked in a DLQ since it started.
     ReconciliationRun:
       type: object
       required: [check, started_at, mismatches, details]
@@ -3215,6 +3554,33 @@ components:
         updated_at:
           type: string
           format: date-time
+    FeedStatus:
+      type: object
+      description: The reference feed (market-data-service).
+      required: [state, received_at, followed, halted]
+      properties:
+        state:
+          type: string
+          enum: [OFF, OK, DELAYED, DOWN]
+        received_at:
+          type: [string, 'null']
+          format: date-time
+        followed:
+          type: array
+          items:
+            type: string
+        halted:
+          type: array
+          description: Pairs halted because the feed was lost (market.halt_on_feed_loss).
+          items:
+            type: object
+            required: [symbol, halted_at]
+            properties:
+              symbol:
+                type: string
+              halted_at:
+                type: string
+                format: date-time
     Dashboard:
       type: object
       required: [users, trading, wallet, risk, feed, series, partial]
@@ -3272,31 +3638,7 @@ components:
           description: The reference feed; null when market-data-service could not be asked.
           oneOf:
             - type: 'null'
-            - type: object
-              required: [state, received_at, followed, halted]
-              properties:
-                state:
-                  type: string
-                  enum: [OFF, OK, DELAYED, DOWN]
-                received_at:
-                  type: [string, 'null']
-                  format: date-time
-                followed:
-                  type: array
-                  items:
-                    type: string
-                halted:
-                  type: array
-                  description: Pairs halted because the feed was lost (market.halt_on_feed_loss).
-                  items:
-                    type: object
-                    required: [symbol, halted_at]
-                    properties:
-                      symbol:
-                        type: string
-                      halted_at:
-                        type: string
-                        format: date-time
+            - $ref: '#/components/schemas/FeedStatus'
         series:
           type: array
           description: One per UTC day, oldest first.
@@ -3351,16 +3693,90 @@ components:
         name:
           type: string
         role:
-          type: string
-          enum: [ADMIN, OPERATOR, FINANCE, AUDITOR]
+          $ref: '#/components/schemas/AdminRole'
         permissions:
           type: array
           items:
-            type: string
-            enum: [users.read, users.status, orders.cancel, instruments.read, instruments.write, flags.read, flags.write,
-              withdrawals.read, withdrawals.review, ledger.adjust.request, ledger.adjust.approve, audit.read, reports.read,
-              derivatives.read, derivatives.write, settings.write, users.notes, users.security, users.contacts, ledger.hold,
-              deposits.review]
+            $ref: '#/components/schemas/Permission'
+    AdminRole:
+      type: string
+      enum: [ADMIN, OPERATOR, FINANCE, AUDITOR]
+    Permission:
+      type: string
+      enum: [users.read, users.status, orders.cancel, instruments.read, instruments.write, flags.read, flags.write,
+        withdrawals.read, withdrawals.review, ledger.adjust.request, ledger.adjust.approve, audit.read, reports.read,
+        derivatives.read, derivatives.write, settings.write, users.notes, users.security, users.contacts, ledger.hold,
+        deposits.review, admins.manage]
+    RolePermissions:
+      type: object
+      required: [role, permissions]
+      properties:
+        role:
+          $ref: '#/components/schemas/AdminRole'
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Permission'
+    ManagedAdmin:
+      description: An administrator as the administrators page lists them.
+      allOf:
+        - $ref: '#/components/schemas/Admin'
+        - type: object
+          required: [status, failed_attempts, locked_until, last_login_at, created_at, sessions]
+          properties:
+            status:
+              type: string
+              enum: [ACTIVE, DISABLED]
+            failed_attempts:
+              type: integer
+              description: Failed sign-ins since the last success; five lock the account for 15 minutes.
+            locked_until:
+              type: [string, 'null']
+              format: date-time
+            last_login_at:
+              type: [string, 'null']
+              format: date-time
+            created_at:
+              type: string
+              format: date-time
+            sessions:
+              type: integer
+              description: Live sessions.
+    AdminCredentials:
+      type: object
+      description: |
+        Shown once and never kept in the clear: a creation answers with all
+        three and the administrator, a password reset with the password, an
+        authenticator reset with the secret and its URI.
+      required: [password, totp_secret, totp_uri]
+      properties:
+        admin:
+          $ref: '#/components/schemas/ManagedAdmin'
+        password:
+          type: [string, 'null']
+        totp_secret:
+          type: [string, 'null']
+          description: Base32, for typing into an authenticator app.
+        totp_uri:
+          type: [string, 'null']
+          description: The otpauth:// URI, for a QR code.
+    AdminSession:
+      type: object
+      required: [ip, user_agent, created_at, last_seen_at, expires_at]
+      properties:
+        ip:
+          type: string
+        user_agent:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
     Settings:
       type: object
       required: [two_person_approval, single_max_usdt, daily_max_usdt, withdrawal_max_usdt, daily_used_usdt, updated_by, updated_at]

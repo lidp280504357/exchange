@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { DangerAction, lastFour } from "../../kit/actions";
 import { EnumBadge } from "../../kit/enums";
 import { IdText, Num, TimeText, useTimeText, UserCell } from "../../kit/format";
-import { ListTable, PAGE_SIZE, useCursorList, type CursorList } from "../../kit/lists";
+import { ListTable, pageSize, useCursorList, type CursorList } from "../../kit/lists";
 import { todoKey } from "../../live";
 import { clean } from "../records/tables";
 
@@ -27,7 +27,7 @@ export function useReviewDeposits(view: ReviewView, q: ReviewQuery) {
         params: {
           query: {
             ...clean(q), attention: view === "attention" ? "true" : undefined, manual_pending: view === "manual" ? "true" : undefined, cursor,
-            limit: PAGE_SIZE,
+            limit: pageSize(),
           },
         },
       }),

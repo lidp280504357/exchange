@@ -193,6 +193,25 @@ func (r sessions) RevokeAll(ctx context.Context, adminID string, now time.Time) 
 	return nil
 }
 
+func (r sessions) Live(ctx context.Context, adminID string, now time.Time) ([]domain.Session, error) {
+	rows, err := r.q.Query(ctx, `SELECT token_hash, admin_id, ip, user_agent, created_at, last_seen_at, expires_at FROM admin_sessions
+		WHERE admin_id = $1 AND revoked_at IS NULL AND expires_at > $2 AND last_seen_at > $3 ORDER BY last_seen_at DESC LIMIT 50`,
+		adminID, now, now.Add(-domain.SessionIdle))
+	if err != nil {
+		return nil, fmt.Errorf("live sessions: %w", err)
+	}
+	defer rows.Close()
+	out := []domain.Session{}
+	for rows.Next() {
+		var s domain.Session
+		if err := rows.Scan(&s.TokenHash, &s.AdminID, &s.IP, &s.UserAgent, &s.CreatedAt, &s.LastSeenAt, &s.ExpiresAt); err != nil {
+			return nil, fmt.Errorf("live sessions: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
 type approvals repos
 
 const approvalColumns = `id, kind, payload, reason, status, requested_by, decided_by, result, created_at, decided_at, mode,

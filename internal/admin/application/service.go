@@ -710,6 +710,14 @@ func (s *Service) CandleReport(ctx context.Context, p Principal, symbol, interva
 func NewAdmin(ctx context.Context, store ports.Store, hasher *password.Hasher, box *secretbox.Box, email, name, role, pw string,
 	secret []byte, actor string, now time.Time,
 ) (domain.Admin, error) {
+	return createAdmin(ctx, store, hasher, box, email, name, role, pw, secret, actor, "new administrator", now)
+}
+
+// createAdmin creates an administrator, audited as admin.created with the
+// reason.
+func createAdmin(ctx context.Context, store ports.Store, hasher *password.Hasher, box *secretbox.Box, email, name, role, pw string,
+	secret []byte, actor, reason string, now time.Time,
+) (domain.Admin, error) {
 	if len(pw) < 12 {
 		return domain.Admin{}, apperr.Invalid("the password needs at least 12 characters")
 	}
@@ -733,7 +741,7 @@ func NewAdmin(ctx context.Context, store ports.Store, hasher *password.Hasher, b
 			return err
 		}
 		return r.Audit(ctx, &auditv1.AdminActionPerformed{
-			Target: "admin:" + a.ID, Action: "admin.created", Actor: actor, Reason: "new administrator",
+			Target: "admin:" + a.ID, Action: "admin.created", Actor: actor, Reason: reason,
 			Details: fmt.Sprintf(`{"email":%q,"role":%q}`, a.Email, a.Role),
 		}, actor)
 	})

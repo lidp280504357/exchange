@@ -80,6 +80,9 @@ type SessionRepo interface {
 	Revoke(ctx context.Context, hash []byte, now time.Time) error
 	// RevokeAll ends every session of an administrator.
 	RevokeAll(ctx context.Context, adminID string, now time.Time) error
+	// Live returns an administrator's sessions still live at now, the
+	// latest first.
+	Live(ctx context.Context, adminID string, now time.Time) ([]domain.Session, error)
 }
 
 // ApprovalRepo stores fund operations: two-person requests and
@@ -915,15 +918,22 @@ type Reconciler interface {
 	Reconciliation(ctx context.Context, failures int) (Reconciliation, error)
 }
 
-// ServiceHealth is a service's readiness as its ops endpoint answers.
+// ServiceHealth is a service's readiness as its ops endpoint answers;
+// with details also what its metrics say: its version, how far its Kafka
+// consumers lag and how many records they parked in a DLQ since it
+// started (nil without consumers).
 type ServiceHealth struct {
 	Service   string `json:"service"`
 	Ready     bool   `json:"ready"`
 	LatencyMS int64  `json:"latency_ms"`
 	Error     string `json:"error,omitempty"`
+	Version   string `json:"version,omitempty"`
+	KafkaLag  *int64 `json:"kafka_lag,omitempty"`
+	DLQ       *int64 `json:"dlq,omitempty"`
 }
 
 // Health probes every service's readiness.
 type Health interface {
-	Check(ctx context.Context) []ServiceHealth
+	// Check probes every service; details reads their metrics too.
+	Check(ctx context.Context, details bool) []ServiceHealth
 }

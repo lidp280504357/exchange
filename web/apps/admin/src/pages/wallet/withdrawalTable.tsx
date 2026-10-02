@@ -9,7 +9,7 @@ import { useConsoleSettings } from "../../live";
 import { DangerAction, lastFour } from "../../kit/actions";
 import { EnumBadge, useEnum } from "../../kit/enums";
 import { IdText, Num, TimeText, useTimeText, UserCell } from "../../kit/format";
-import { ListTable, PAGE_SIZE, useCursorList, type CursorList } from "../../kit/lists";
+import { ListTable, pageSize, useCursorList, type CursorList } from "../../kit/lists";
 import { clean } from "../records/tables";
 
 export type Withdrawal = AdminSchemas["Withdrawal"];
@@ -34,7 +34,7 @@ export function useWithdrawals(q: WithdrawalQuery) {
     return adminData(
       await adminApi.GET("/admin/v1/withdrawals", {
         params: {
-          query: { ...rest, held: held === "true" || held === "false" ? held : undefined, min_risk: risk, cursor, limit: PAGE_SIZE },
+          query: { ...rest, held: held === "true" || held === "false" ? held : undefined, min_risk: risk, cursor, limit: pageSize() },
         },
       }),
     );

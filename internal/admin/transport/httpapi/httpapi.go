@@ -6,6 +6,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -91,6 +92,15 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Post("/users/{id}/contract-orders/{order}/cancel", h.cancelContractOrder)
 			r.Get("/users/{id}/positions", h.userPositions)
 			r.Post("/users/{id}/positions/close", h.closePosition)
+			r.Get("/roles", h.roles)
+			r.Get("/admins", h.admins)
+			r.Post("/admins", h.createAdmin)
+			r.Post("/admins/{id}/status", h.adminStatus)
+			r.Post("/admins/{id}/role", h.adminRole)
+			r.Post("/admins/{id}/password-reset", h.adminPasswordReset)
+			r.Post("/admins/{id}/totp-reset", h.adminTOTPReset)
+			r.Get("/admins/{id}/sessions", h.adminSessions)
+			r.Post("/admins/{id}/sessions/revoke", h.revokeAdminSessions)
 			r.Get("/withdrawals/{id}", h.withdrawalDetail)
 			r.Post("/withdrawals/{id}/hold", h.holdWithdrawal)
 			r.Get("/deposits/review", h.depositReviews)
@@ -124,6 +134,7 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/approvals", h.approvals)
 			r.Post("/approvals/{id}/decide", h.decide)
 			r.Get("/audit-logs", h.auditLogs)
+			r.Get("/audit-logs/export", h.exportAuditLogs)
 			r.Get("/reports/trading", h.tradingReport)
 			r.Get("/reports/wallet", h.walletReport)
 			r.Get("/reports/candles", h.candleReport)
@@ -966,6 +977,49 @@ func (h *Handler) auditLogs(w http.ResponseWriter, r *http.Request) {
 	writePage(w, list, next)
 }
 
+// exportAuditLogs writes the audit entries matching the filters as CSV
+// (UTF-8 with a byte order mark, which spreadsheets need for Chinese), at
+// most application.MaxAuditExport rows; X-Truncated says more were left
+// out.
+func (h *Handler) exportAuditLogs(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	from, to, err := timeParams(q)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	rows, cut, err := h.Svc.ExportAuditLogs(r.Context(), principal(r), ports.AuditQuery{
+		Actor: q.Get("actor"), Target: q.Get("target"), EventType: q.Get("event_type"), From: from, To: to,
+	})
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="audit-`+time.Now().UTC().Format("20060102-150405")+`.csv"`)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Truncated", strconv.FormatBool(cut))
+	_, _ = w.Write([]byte("\ufeff"))
+	out := csv.NewWriter(w)
+	_ = out.Write([]string{"occurred_at", "event_type", "actor", "target", "action", "reason", "details", "event_id"})
+	for _, e := range rows {
+		_ = out.Write([]string{
+			httpx.FormatTime(e.OccurredAt), e.EventType, csvText(e.Actor), csvText(e.Target), csvText(e.Action), csvText(e.Reason),
+			csvText(e.Details), e.EventID,
+		})
+	}
+	out.Flush()
+}
+
+// csvText keeps a spreadsheet from reading typed text as a formula: a cell
+// starting with = + - @ or a control character gets a leading quote.
+func csvText(s string) string {
+	if s != "" && strings.ContainsRune("=+-@\t\r", rune(s[0])) {
+		return "'" + s
+	}
+	return s
+}
+
 func (h *Handler) tradingReport(w http.ResponseWriter, r *http.Request) {
 	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
 	list, err := h.Svc.TradingReport(r.Context(), principal(r), days)
@@ -1132,12 +1186,12 @@ func (h *Handler) house(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) health(w http.ResponseWriter, r *http.Request) {
-	list, err := h.Svc.Health(r.Context(), principal(r))
+	rep, err := h.Svc.Health(r.Context(), principal(r), r.URL.Query().Get("details") == "true")
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"services": list})
+	httpx.WriteJSON(w, http.StatusOK, rep)
 }
 
 func (h *Handler) reconciliation(w http.ResponseWriter, r *http.Request) {

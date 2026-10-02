@@ -6,7 +6,7 @@ import { lastFour } from "../../kit/actions";
 import { EnumBadge, EnumText } from "../../kit/enums";
 import { Num, TimeText, UserCell } from "../../kit/format";
 import { FundAction, type Approval } from "../../kit/funds";
-import { ListTable, PAGE_SIZE, useCursorList, type CursorList } from "../../kit/lists";
+import { ListTable, pageSize, useCursorList, type CursorList } from "../../kit/lists";
 
 const right: DataColumnMeta = { align: "right" };
 
@@ -15,7 +15,7 @@ export function useApprovals(status: string) {
   return useCursorList<Approval>(["admin", "approvals", status], async (cursor) =>
     adminData(
       await adminApi.GET("/admin/v1/approvals", {
-        params: { query: { status: (status || undefined) as Approval["status"] | undefined, cursor, limit: PAGE_SIZE } },
+        params: { query: { status: (status || undefined) as Approval["status"] | undefined, cursor, limit: pageSize() } },
       }),
     ),
   );

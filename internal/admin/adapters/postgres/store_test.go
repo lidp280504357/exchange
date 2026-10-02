@@ -186,6 +186,8 @@ type client struct {
 	t      *testing.T
 	srv    *httptest.Server
 	cookie *http.Cookie
+	// header is the last answer's.
+	header http.Header
 }
 
 func (c *client) do(method, path string, body any, csrf bool) (int, map[string]any) {
@@ -207,6 +209,7 @@ func (c *client) do(method, path string, body any, csrf bool) (int, map[string]a
 		c.t.Fatal(err)
 	}
 	defer res.Body.Close()
+	c.header = res.Header
 	for _, ck := range res.Cookies() {
 		if ck.Name == httpapi.CookieName {
 			c.cookie = ck
@@ -371,6 +374,42 @@ func TestConsole(t *testing.T) {
 		t.Fatalf("no tags: %d %v", status, body)
 	}
 
+	// The ADMIN creates an OPERATOR, who signs in with what came back once;
+	// its live session shows, and ends with the ADMIN's word.
+	status, body = boss.do(http.MethodPost, "/admin/v1/admins", map[string]string{"email": "ops@example.com", "name": "Ops", "role": "operator", "reason": "new hire"}, true)
+	pw, _ := body["password"].(string)
+	sec, _ := body["totp_secret"].(string)
+	created, _ := body["admin"].(map[string]any)
+	if status != http.StatusCreated || boss.header.Get("Cache-Control") != "no-store" || len(pw) < 20 || sec == "" || created["role"] != domain.RoleOperator {
+		t.Fatalf("create: %d %v", status, created)
+	}
+	opsID, _ := created["id"].(string)
+	opsSecret, err := totp.Decode(sec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops := &client{t: t, srv: srv}
+	if status, body := ops.do(http.MethodPost, "/admin/v1/login", map[string]string{"email": "ops@example.com", "password": pw, "totp_code": totp.Code(opsSecret, totp.Step(time.Now()))}, true); status != http.StatusOK {
+		t.Fatalf("the new administrator signs in: %d %v", status, body)
+	}
+	status, body = boss.do(http.MethodGet, "/admin/v1/admins/"+opsID+"/sessions", nil, false)
+	if live, _ := body["sessions"].([]any); status != http.StatusOK || len(live) != 1 {
+		t.Fatalf("its sessions: %d %v", status, body)
+	}
+	status, body = boss.do(http.MethodGet, "/admin/v1/admins", nil, false)
+	if list, _ := body["admins"].([]any); status != http.StatusOK || len(list) != 3 || !strings.Contains(fmt.Sprint(list), "sessions:1") {
+		t.Fatalf("the administrators: %d %v", status, body)
+	}
+	if status, body := fin.do(http.MethodGet, "/admin/v1/admins", nil, false); status != http.StatusForbidden {
+		t.Fatalf("finance lists the administrators: %d %v", status, body)
+	}
+	if status, _ := boss.do(http.MethodPost, "/admin/v1/admins/"+opsID+"/sessions/revoke", map[string]string{"reason": "laptop lost"}, true); status != http.StatusNoContent {
+		t.Fatalf("revoke: %d", status)
+	}
+	if status, _ := ops.do(http.MethodGet, "/admin/v1/me", nil, false); status != http.StatusUnauthorized {
+		t.Fatalf("me after the sessions ended: %d", status)
+	}
+
 	// The event stream counts what waits and ends with the session.
 	streamCtx, stop := context.WithCancel(ctx)
 	defer stop()
@@ -396,9 +435,10 @@ func TestConsole(t *testing.T) {
 		t.Fatal(err)
 	}
 	// created ×2, login ×2, login_failed, requested ×2, approved ×2, single-person requested and executed,
-	// settings changed, requested and withdrawn, notes ×2, tags ×2, disabled, logout
-	if n != 20 {
-		t.Fatalf("%d audit events in the outbox, want 20", n)
+	// settings changed, requested and withdrawn, notes ×2, tags ×2, the OPERATOR created, signed in and its
+	// sessions ended, disabled, logout
+	if n != 23 {
+		t.Fatalf("%d audit events in the outbox, want 23", n)
 	}
 	var admins string
 	if err := db.QueryRow(ctx, `SELECT string_agg(email || ':' || status || ':' || failed_attempts, ',' ORDER BY email) FROM admins`).Scan(&admins); err != nil {

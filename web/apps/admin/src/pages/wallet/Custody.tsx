@@ -9,7 +9,7 @@ import { DangerAction, lastFour } from "../../kit/actions";
 import { EnumBadge, useEnum } from "../../kit/enums";
 import { FilterBar, options, useFilters } from "../../kit/filters";
 import { IdText, Num, TimeText, useTimeText } from "../../kit/format";
-import { ListTable, PAGE_SIZE, useCursorList } from "../../kit/lists";
+import { ListTable, pageSize, useCursorList } from "../../kit/lists";
 import { Card, Page } from "../../kit/Page";
 import { clean } from "../records/tables";
 
@@ -193,7 +193,7 @@ type CallbackQuery = { result?: Callback["result"]; kind?: "DEPOSIT" | "WITHDRAW
 
 function useCallbacks(q: CallbackQuery) {
   return useCursorList<Callback>(["admin", "custody", "callbacks", q], async (cursor) =>
-    adminData(await adminApi.GET("/admin/v1/custody/callbacks", { params: { query: { ...clean(q), cursor, limit: PAGE_SIZE } } })),
+    adminData(await adminApi.GET("/admin/v1/custody/callbacks", { params: { query: { ...clean(q), cursor, limit: pageSize() } } })),
   );
 }
 

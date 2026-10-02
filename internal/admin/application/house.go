@@ -192,15 +192,33 @@ func housePair(hp ports.HousePair, prices ports.Prices) HousePair {
 
 func strp(s string) *string { return &s }
 
-// Health returns every service's readiness.
-func (s *Service) Health(ctx context.Context, p Principal) ([]ports.ServiceHealth, error) {
+// HealthReport is every service's readiness and, with details, the
+// reference feed's state.
+type HealthReport struct {
+	Services []ports.ServiceHealth `json:"services"`
+	// Feed is left out without details, or when market-data-service could
+	// not be asked.
+	Feed *ports.FeedStatus `json:"feed,omitempty"`
+}
+
+// Health returns every service's readiness; details adds each service's
+// version, Kafka lag and DLQ count, and the reference feed.
+func (s *Service) Health(ctx context.Context, p Principal, details bool) (HealthReport, error) {
 	if err := p.require(domain.PermReportsRead); err != nil {
-		return nil, err
+		return HealthReport{}, err
 	}
-	if s.Probe == nil {
-		return []ports.ServiceHealth{}, nil
+	out := HealthReport{Services: []ports.ServiceHealth{}}
+	if s.Probe != nil {
+		out.Services = s.Probe.Check(ctx, details)
 	}
-	return s.Probe.Check(ctx), nil
+	if details && s.Market != nil {
+		if feed, err := s.Market.Feed(ctx); err != nil {
+			s.Log.WarnContext(ctx, "health: feed status unavailable", "error", err)
+		} else {
+			out.Feed = &feed
+		}
+	}
+	return out, nil
 }
 
 // Reconciliation returns the ledger's latest invariant checks and the

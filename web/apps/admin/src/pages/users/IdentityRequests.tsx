@@ -7,7 +7,7 @@ import { DangerAction, lastFour } from "../../kit/actions";
 import { EnumBadge, EnumText, useEnum } from "../../kit/enums";
 import { ALL, FilterBar, useFilters } from "../../kit/filters";
 import { TimeText, UserCell } from "../../kit/format";
-import { ListTable, PAGE_SIZE, useCursorList } from "../../kit/lists";
+import { ListTable, pageSize, useCursorList } from "../../kit/lists";
 import { Page } from "../../kit/Page";
 import { todoKey } from "../../live";
 
@@ -31,7 +31,7 @@ export default function IdentityRequests({ admin }: { admin: Admin }) {
   const status = f.status === "ANY" ? undefined : ((f.status || "PENDING_REVIEW") as Status);
   const userId = f.user_id?.trim() || undefined;
   const list = useCursorList<Request>(["admin", "identity-requests", status ?? "ANY", userId ?? ""], async (cursor) =>
-    adminData(await adminApi.GET("/admin/v1/identity-requests", { params: { query: { status, user_id: userId, cursor, limit: PAGE_SIZE } } })),
+    adminData(await adminApi.GET("/admin/v1/identity-requests", { params: { query: { status, user_id: userId, cursor, limit: pageSize() } } })),
   );
   const decide = can(admin, "users.security");
   const [deciding, setDeciding] = useState<{ r: Request; approve: boolean } | null>(null);

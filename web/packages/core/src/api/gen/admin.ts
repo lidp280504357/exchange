@@ -82,6 +82,186 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every role with its permissions
+         * @description Any administrator reads them.
+         */
+        get: operations["listRoles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/admins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The administrators
+         * @description Every administrator, with their live sessions. Needs admins.manage.
+         */
+        get: operations["listAdmins"];
+        put?: never;
+        /**
+         * Create an administrator
+         * @description Answers with the administrator, a password and an authenticator
+         *     secret, shown this once: the answer is not cached (Cache-Control:
+         *     no-store), and neither is logged or audited. The new administrator
+         *     binds the secret in an authenticator app and signs in with both.
+         *     Audited as admin.created. Needs admins.manage.
+         */
+        post: operations["createAdmin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/admins/{id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Disable or enable an administrator
+         * @description Disabling ends their sessions at once; enabling also lifts a lock
+         *     after failed sign-ins. Nobody changes their own account here
+         *     (ADMIN_SELF), and an active ADMIN always remains
+         *     (ADMIN_LAST_ADMIN). Audited as admin.disabled or admin.enabled.
+         *     Needs admins.manage.
+         */
+        post: operations["setAdminStatus"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/admins/{id}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change an administrator's role
+         * @description Takes effect on their next request. Not one's own (ADMIN_SELF), nor
+         *     the last active ADMIN's (ADMIN_LAST_ADMIN). Audited as
+         *     admin.role_changed. Needs admins.manage.
+         */
+        post: operations["setAdminRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/admins/{id}/password-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Give an administrator a new password
+         * @description Answers with the new password, shown this once (no-store, never
+         *     logged or audited), and ends their sessions. Not one's own
+         *     (ADMIN_SELF). Audited as admin.password_reset. Needs admins.manage.
+         */
+        post: operations["resetAdminPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/admins/{id}/totp-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Give an administrator a new authenticator secret
+         * @description Answers with the new secret and its otpauth URI, shown this once
+         *     (no-store, never logged or audited); the old authenticator stops
+         *     working and their sessions end. Not one's own (ADMIN_SELF).
+         *     Audited as admin.totp_reset. Needs admins.manage.
+         */
+        post: operations["resetAdminTOTP"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/admins/{id}/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An administrator's live sessions
+         * @description At most 50, the latest first. Needs admins.manage.
+         */
+        get: operations["adminSessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/admins/{id}/sessions/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End every session of an administrator
+         * @description Not one's own (ADMIN_SELF; signing out ends one's session).
+         *     Audited as admin.sessions_revoked. Needs admins.manage.
+         */
+        post: operations["revokeAdminSessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/settings": {
         parameters: {
             query?: never;
@@ -1331,6 +1511,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/audit-logs/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The audit entries matching the filters, as CSV
+         * @description The search's filters, newest first, at most 10,000 rows; the header
+         *     X-Truncated is true when more were left out (narrow the time
+         *     range). UTF-8 with a byte order mark, so spreadsheets read Chinese;
+         *     columns occurred_at, event_type, actor, target, action, reason,
+         *     details, event_id (action, reason and details are the
+         *     administrator action's, or a configuration change's old and new
+         *     values). The export is itself audited as admin.audit.exported.
+         *     Needs audit.read.
+         */
+        get: operations["exportAuditLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/reports/trading": {
         parameters: {
             query?: never;
@@ -1656,7 +1863,11 @@ export interface paths {
         };
         /**
          * Every service's readiness
-         * @description Asks each service's ops endpoint (/readyz) within 2 seconds. Needs reports.read.
+         * @description Asks each service's ops endpoint (/readyz) within 2 seconds; with
+         *     details=true also reads its metrics (its version, its Kafka
+         *     consumers' lag and the records they parked in a DLQ since it
+         *     started) and the reference feed's state: the system health page.
+         *     Needs reports.read.
          */
         get: operations["getHealth"];
         put?: never;
@@ -1850,6 +2061,12 @@ export interface components {
             ready: boolean;
             latency_ms: number;
             error?: string;
+            /** @description With details; the commit the service was built from. */
+            version?: string;
+            /** @description With details, for a service with Kafka consumers; records behind, summed over its consumers. */
+            kafka_lag?: number;
+            /** @description With details, for a service with Kafka consumers; records parked in a DLQ since it started. */
+            dlq?: number;
         };
         ReconciliationRun: {
             /** @example JOURNAL_BALANCED */
@@ -1970,6 +2187,20 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        /** @description The reference feed (market-data-service). */
+        FeedStatus: {
+            /** @enum {string} */
+            state: "OFF" | "OK" | "DELAYED" | "DOWN";
+            /** Format: date-time */
+            received_at: string | null;
+            followed: string[];
+            /** @description Pairs halted because the feed was lost (market.halt_on_feed_loss). */
+            halted: {
+                symbol: string;
+                /** Format: date-time */
+                halted_at: string;
+            }[];
+        };
         Dashboard: {
             users: {
                 /** Format: int64 */
@@ -2004,19 +2235,7 @@ export interface components {
                 events_24h: number;
             };
             /** @description The reference feed; null when market-data-service could not be asked. */
-            feed: null | {
-                /** @enum {string} */
-                state: "OFF" | "OK" | "DELAYED" | "DOWN";
-                /** Format: date-time */
-                received_at: string | null;
-                followed: string[];
-                /** @description Pairs halted because the feed was lost (market.halt_on_feed_loss). */
-                halted: {
-                    symbol: string;
-                    /** Format: date-time */
-                    halted_at: string;
-                }[];
-            };
+            feed: null | components["schemas"]["FeedStatus"];
             /** @description One per UTC day, oldest first. */
             series: {
                 /** Format: date */
@@ -2044,9 +2263,54 @@ export interface components {
             id: string;
             email: string;
             name: string;
+            role: components["schemas"]["AdminRole"];
+            permissions: components["schemas"]["Permission"][];
+        };
+        /** @enum {string} */
+        AdminRole: "ADMIN" | "OPERATOR" | "FINANCE" | "AUDITOR";
+        /** @enum {string} */
+        Permission: "users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write" | "settings.write" | "users.notes" | "users.security" | "users.contacts" | "ledger.hold" | "deposits.review" | "admins.manage";
+        RolePermissions: {
+            role: components["schemas"]["AdminRole"];
+            permissions: components["schemas"]["Permission"][];
+        };
+        /** @description An administrator as the administrators page lists them. */
+        ManagedAdmin: components["schemas"]["Admin"] & {
             /** @enum {string} */
-            role: "ADMIN" | "OPERATOR" | "FINANCE" | "AUDITOR";
-            permissions: ("users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write" | "settings.write" | "users.notes" | "users.security" | "users.contacts" | "ledger.hold" | "deposits.review")[];
+            status: "ACTIVE" | "DISABLED";
+            /** @description Failed sign-ins since the last success; five lock the account for 15 minutes. */
+            failed_attempts: number;
+            /** Format: date-time */
+            locked_until: string | null;
+            /** Format: date-time */
+            last_login_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** @description Live sessions. */
+            sessions: number;
+        };
+        /**
+         * @description Shown once and never kept in the clear: a creation answers with all
+         *     three and the administrator, a password reset with the password, an
+         *     authenticator reset with the secret and its URI.
+         */
+        AdminCredentials: {
+            admin?: components["schemas"]["ManagedAdmin"];
+            password: string | null;
+            /** @description Base32, for typing into an authenticator app. */
+            totp_secret: string | null;
+            /** @description The otpauth:// URI, for a QR code. */
+            totp_uri: string | null;
+        };
+        AdminSession: {
+            ip: string;
+            user_agent: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            last_seen_at: string;
+            /** Format: date-time */
+            expires_at: string;
         };
         Settings: {
             /** @description Fund operations need a second administrator (the flag admin.two_person_approval). */
@@ -2984,6 +3248,7 @@ export interface components {
         /** @description Days back, today included. */
         Days: number;
         UserID: string;
+        AdminID: string;
         OrderID: string;
         Contract: string;
     };
@@ -3091,6 +3356,247 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Admin"];
                 };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The roles. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        roles: components["schemas"]["RolePermissions"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listAdmins: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The administrators. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        admins: components["schemas"]["ManagedAdmin"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: email */
+                    email: string;
+                    name: string;
+                    role: components["schemas"]["AdminRole"];
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The administrator and their credentials. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminCredentials"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setAdminStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AdminID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The administrator. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedAdmin"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setAdminRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AdminID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    role: components["schemas"]["AdminRole"];
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The administrator. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedAdmin"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    resetAdminPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AdminID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReasonRequest"];
+            };
+        };
+        responses: {
+            /** @description The new password. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminCredentials"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    resetAdminTOTP: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AdminID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReasonRequest"];
+            };
+        };
+        responses: {
+            /** @description The new secret. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminCredentials"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    adminSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AdminID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The sessions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sessions: components["schemas"]["AdminSession"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    revokeAdminSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AdminID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReasonRequest"];
+            };
+        };
+        responses: {
+            /** @description The sessions ended. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             default: components["responses"]["Error"];
         };
@@ -4787,6 +5293,37 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    exportAuditLogs: {
+        parameters: {
+            query?: {
+                actor?: string;
+                target?: string;
+                event_type?: string;
+                /** @description From this time on (RFC 3339). */
+                from?: components["parameters"]["From"];
+                /** @description Before this time (RFC 3339). */
+                to?: components["parameters"]["To"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The CSV file (Content-Disposition attachment). */
+            200: {
+                headers: {
+                    /** @description More entries matched than were exported. */
+                    "X-Truncated"?: "true" | "false";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     tradingReport: {
         parameters: {
             query?: {
@@ -5169,7 +5706,9 @@ export interface operations {
     };
     getHealth: {
         parameters: {
-            query?: never;
+            query?: {
+                details?: "true";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5184,6 +5723,8 @@ export interface operations {
                 content: {
                     "application/json": {
                         services: components["schemas"]["ServiceHealth"][];
+                        /** @description With details; left out when market-data-service could not be asked. */
+                        feed?: components["schemas"]["FeedStatus"];
                     };
                 };
             };

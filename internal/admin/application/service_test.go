@@ -230,6 +230,16 @@ func (r memSessions) RevokeAll(_ context.Context, adminID string, _ time.Time) e
 	return nil
 }
 
+func (r memSessions) Live(_ context.Context, adminID string, now time.Time) ([]domain.Session, error) {
+	out := []domain.Session{}
+	for h, s := range r.m.sessions {
+		if s.AdminID == adminID && !r.m.revoked[h] && s.Live(now) {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
 type memApprovals struct{ m *memStore }
 
 func (r memApprovals) Insert(_ context.Context, a domain.Approval) error {

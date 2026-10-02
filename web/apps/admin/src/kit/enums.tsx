@@ -34,7 +34,8 @@ export type EnumGroup =
   | "loginMethod"
   | "depositReason"
   | "depositSource"
-  | "depositResolution";
+  | "depositResolution"
+  | "adminStatus";
 
 /** useEnum returns a function that labels a code of a group (the code itself when unknown). */
 export function useEnum() {
@@ -61,6 +62,7 @@ const tones: Partial<Record<EnumGroup, Record<string, BadgeTone>>> = {
   depositReason: { BELOW_MINIMUM: "warn", ACCOUNT_CLOSED: "warn", NOT_ELIGIBLE: "warn", UNSUPPORTED_TOKEN: "danger" },
   depositSource: { AUTO: "neutral", MANUAL: "info" },
   depositResolution: { CREDITED: "success", DISMISSED: "neutral" },
+  adminStatus: { ACTIVE: "success", DISABLED: "neutral" },
   custodyStatus: { "0": "info", "1": "brand", "2": "danger", "3": "success", "4": "danger" },
   pairStatus: { PREPARE: "neutral", TRADING: "success", HALT: "warn", CANCEL_ONLY: "warn", DELISTED: "danger" },
   approvalStatus: { PENDING: "warn", EXECUTED: "success", REJECTED: "neutral", FAILED: "danger" },

@@ -7,7 +7,7 @@ import { useTranslation } from "react-i18next";
 import { DangerAction, lastFour } from "../../kit/actions";
 import { EnumBadge, EnumText } from "../../kit/enums";
 import { IdText, TimeText } from "../../kit/format";
-import { ListTable, PAGE_SIZE, useCursorList } from "../../kit/lists";
+import { ListTable, pageSize, useCursorList } from "../../kit/lists";
 import { Card } from "../../kit/Page";
 import { useSecurity } from "./data";
 
@@ -283,7 +283,7 @@ function Devices({ devices, loading }: { devices?: Device[]; loading: boolean })
 function Logins({ userId }: { userId: string }) {
   const { t } = useTranslation();
   const list = useCursorList<Login>(["admin", "user", userId, "logins"], async (cursor) =>
-    adminData(await adminApi.GET("/admin/v1/users/{id}/login-history", { params: { path: { id: userId }, query: { cursor, limit: PAGE_SIZE } } })),
+    adminData(await adminApi.GET("/admin/v1/users/{id}/login-history", { params: { path: { id: userId }, query: { cursor, limit: pageSize() } } })),
   );
   const columns = useMemo<ColumnDef<Login, unknown>[]>(
     () => [

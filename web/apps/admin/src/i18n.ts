@@ -1,6 +1,7 @@
 import { en } from "./messages/en";
 import { instrumentsEn, instrumentsZh } from "./messages/instruments";
 import { moneyEn, moneyZh } from "./messages/money";
+import { systemEn, systemZh } from "./messages/system";
 import { tradingEn, tradingZh } from "./messages/trading";
 import { usersEn, usersZh } from "./messages/users";
 import { walletEn, walletZh } from "./messages/wallet";
@@ -26,6 +27,6 @@ function merge(base: Tree, ...extras: Tree[]): Tree {
 const isTree = (v: unknown): v is Tree => typeof v === "object" && v !== null && !Array.isArray(v);
 
 export const adminMessages = {
-  "zh-CN": merge(zh, usersZh, walletZh, moneyZh, tradingZh, instrumentsZh),
-  en: merge(en, usersEn, walletEn, moneyEn, tradingEn, instrumentsEn),
+  "zh-CN": merge(zh, usersZh, walletZh, moneyZh, tradingZh, instrumentsZh, systemZh),
+  en: merge(en, usersEn, walletEn, moneyEn, tradingEn, instrumentsEn, systemEn),
 };

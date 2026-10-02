@@ -1,10 +1,14 @@
 package backends
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -126,8 +130,9 @@ type Health struct {
 	Targets []HealthTarget
 }
 
-// Check returns each target's readiness in the targets' order.
-func (h Health) Check(ctx context.Context) []ports.ServiceHealth {
+// Check returns each target's readiness in the targets' order; details
+// reads each one's metrics as well.
+func (h Health) Check(ctx context.Context, details bool) []ports.ServiceHealth {
 	out := make([]ports.ServiceHealth, len(h.Targets))
 	var wg sync.WaitGroup
 	for i, t := range h.Targets {
@@ -135,10 +140,87 @@ func (h Health) Check(ctx context.Context) []ports.ServiceHealth {
 		go func() {
 			defer wg.Done()
 			out[i] = h.probe(ctx, t)
+			if details && out[i].Error != "unreachable" && out[i].Error != "timeout" {
+				h.metrics(ctx, t, &out[i])
+			}
 		}()
 	}
 	wg.Wait()
 	return out
+}
+
+// metrics reads a service's version (exchange_build_info), its Kafka
+// consumers' lag (kafka_consumer_lag, summed) and the records they parked
+// in a DLQ since it started (kafka_consumer_records_total{result="dlq"}).
+func (h Health) metrics(ctx context.Context, t HealthTarget, res *ports.ServiceHealth) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.URL+"/metrics", nil)
+	if err != nil {
+		return
+	}
+	resp, err := h.Client.Do(req)
+	if err != nil {
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return
+	}
+	var lag, dlq int64
+	var consumers bool
+	lines := bufio.NewScanner(io.LimitReader(resp.Body, 8<<20))
+	lines.Buffer(make([]byte, 64<<10), 1<<20)
+	for lines.Scan() {
+		name, labels, value, ok := metricLine(lines.Text())
+		switch {
+		case !ok:
+		case name == "exchange_build_info":
+			res.Version = labels["version"]
+		case name == "kafka_consumer_lag":
+			consumers = true
+			lag += int64(value)
+		case name == "kafka_consumer_records_total":
+			consumers = true
+			if labels["result"] == "dlq" {
+				dlq += int64(value)
+			}
+		}
+	}
+	if consumers {
+		res.KafkaLag, res.DLQ = &lag, &dlq
+	}
+}
+
+// metricLine splits a line of the Prometheus text format: name{labels} value.
+func metricLine(line string) (string, map[string]string, float64, bool) {
+	if line == "" || line[0] == '#' {
+		return "", nil, 0, false
+	}
+	labels := map[string]string{}
+	name, rest := line, ""
+	if i := strings.IndexByte(line, '{'); i >= 0 {
+		j := strings.LastIndexByte(line, '}')
+		if j < i {
+			return "", nil, 0, false
+		}
+		name, rest = line[:i], strings.TrimSpace(line[j+1:])
+		for _, pair := range strings.Split(line[i+1:j], ",") {
+			k, v, found := strings.Cut(pair, "=")
+			if found {
+				labels[strings.TrimSpace(k)] = strings.Trim(strings.TrimSpace(v), `"`)
+			}
+		}
+	} else if k, v, found := strings.Cut(line, " "); found {
+		name, rest = k, v
+	}
+	fields := strings.Fields(rest)
+	if len(fields) == 0 {
+		return "", nil, 0, false
+	}
+	value, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil {
+		return "", nil, 0, false
+	}
+	return name, labels, value, true
 }
 
 func (h Health) probe(ctx context.Context, t HealthTarget) ports.ServiceHealth {

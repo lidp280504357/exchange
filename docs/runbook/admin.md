@@ -24,7 +24,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 
 ## 登录与会话
 
-- 没有注册入口：管理员由运维用 `exchangectl admin create` 在 admin-service 容器里创建（它有 `ADMIN_SECRET_KEY`）。
+- 没有注册入口：管理员由 ADMIN 在「系统 → 管理员与角色」页创建（C4，见下文）；没有 ADMIN 能登录时，运维用 `exchangectl admin create` 在 admin-service 容器里创建（它有 `ADMIN_SECRET_KEY`）。
 - 登录 = 邮箱 + 密码（Argon2id，至少 12 位）+ 身份验证器 6 位码（RFC 6238，前后一步误差，每个时间步只能用一次）。连续 5 次失败锁定 15 分钟；同一 IP 每分钟最多 10 次登录请求。未知邮箱与已知邮箱耗时相同。
 - **暂不校验验证码**（用户 2026-09-30 决定）：开关 `admin.login_without_totp` 打开时只凭邮箱与密码登录。
   - 验证码不要求也不校验；登录页通过 `GET /admin/v1/login-options`（`totp_required`）得知后隐藏验证码输入框（选项读到之前登录按钮等待，读不到时显示输入框）。
@@ -38,7 +38,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 
 | 角色 | 权限 |
 |---|---|
-| ADMIN | 全部，包括只有它有的 `settings.write`（后台设置：双人审批与单人限额） |
+| ADMIN | 全部，包括只有它有的 `settings.write`（后台设置：双人审批与单人限额）与 `admins.manage`（管理员：创建、改角色、停用与启用、重置口令与身份验证器、结束会话） |
 | OPERATOR | 读 + 改账户状态、撤销用户挂单（全部或单笔）、改交易对与合约状态、解除合约只减仓与强制平仓（`derivatives.write`）、切换功能开关（后台自己的 `admin.*` 开关除外）、备注与标签（`users.notes`）、账户安全操作与换绑审核（`users.security`）、查看完整联系方式（`users.contacts`）、风控冻结（`ledger.hold`） |
 | FINANCE | 读 + 提现审批与搁置、发起与审批手动调账（现货或合约账户）和保险基金注资、充值处置与补记（`deposits.review`）、备注与标签、查看完整联系方式、风控冻结 |
 | AUDITOR | 只读（用户（联系方式脱敏）、资产与交易对、合约（`derivatives.read`）、功能开关、提现、审计日志、报表） |
@@ -121,6 +121,17 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 - **与部署的关系**：后台改过的项记为来源 `CONSOLE`，之后部署同步文件时保留它（输出里有 `kept …`）；`exchangectl instruments apply --force` 让文件重新说了算。要长期保留的改动也应改进 `test.json`。
 - 与设计稿 §5 的差别：没有单独的 `POST/PUT /admin/v1/instruments/{assets,networks,pairs,contracts}` 与 `GET/PUT /admin/v1/fees`，都走配置文档的预览与应用（一条路径、同一套校验）；参考符号映射在交易对的编辑里。
 
+## 管理员、系统健康与审计导出（2026-10-02 设计 §4.6，C4a）
+
+- **管理员与角色**（`/admins`，`admins.manage`，只有 ADMIN）：列表显示角色、状态（停用、锁定到何时、连续失败次数）、最近登录、进行中的会话数。「新建管理员」填邮箱、姓名、角色与理由，确认词为角色的小写代码；成功后弹窗显示**一次性**的口令（24 位）与身份验证器密钥（base32 与二维码），关闭后无法再看。行内「操作」：修改角色（下一个请求起生效）、重置口令（结束对方全部会话）、重置身份验证器（旧的立即失效，会话结束）、查看会话（抽屉，可结束全部会话）、停用（会话立即结束）/启用（同时清除锁定与失败次数）。每项都要理由与确认词（ID 后 4 位），审计 `admin.created`、`admin.role_changed`、`admin.password_reset`、`admin.totp_reset`、`admin.sessions_revoked`、`admin.disabled`、`admin.enabled`，对象 `admin:<id>`。下方「角色权限」矩阵只读（来自 `GET /admin/v1/roles`，任何管理员可读）。
+  - 规则：不能在这里改自己的账号（403 `ADMIN_SELF`；退出登录结束自己的会话）；最后一位启用的 ADMIN 不能被停用或降级（409 `ADMIN_LAST_ADMIN`）。没有 ADMIN 能登录时仍用 `exchangectl admin create`。
+  - 口令与密钥只出现在创建或重置的那一次响应里（`Cache-Control: no-store`），不写日志、不进审计；服务端只存 Argon2id 哈希与用 `ADMIN_SECRET_KEY` 加密的 TOTP 密钥。
+  - 接口：`GET /admin/v1/admins`、`POST /admin/v1/admins`（201，`{admin, password, totp_secret, totp_uri}`）、`POST /admin/v1/admins/{id}/status`（`{enabled, reason}`）、`…/role`（`{role, reason}`）、`…/password-reset`、`…/totp-reset`（`{reason}`，返回新的口令或密钥）、`GET …/sessions`（最多 50 个进行中的会话）、`POST …/sessions/revoke`（204）。
+- **系统健康**（`/health`，`reports.read`）：`GET /admin/v1/health?details=true` 在就绪探测之外读各服务的 `/metrics`：版本（`exchange_build_info` 的 `version`，部署后应全部一致，不一致时标出几个版本）、Kafka 消费滞后（`kafka_consumer_lag` 求和，> 1000 标黄）、启动以来转入死信的条数（`kafka_consumer_records_total{result="dlq"}`，> 0 标红，用 `exchangectl dlq` 查看与重放），以及行情源状态（market-data 的 `/internal/market/feed`）；没有 Kafka 消费者的服务这两列为空。页面另有对账（每项检查最近一次）与托管方状态，每 15 秒刷新。概览的「服务状态」卡片有「详情」进入这一页。
+- **审计**（`/audit`）：「导出 CSV」由服务端按当前筛选导出（`GET /admin/v1/audit-logs/export`，最新的最多 10,000 条，超过时响应头 `X-Truncated: true`，页面提示缩小时间范围）；UTF-8 带 BOM，列为 `occurred_at,event_type,actor,target,action,reason,details,event_id`（配置变更的 `details` 为 `{"old","new"}`），以 `= + - @` 开头的文本前加单引号，防止表格软件当公式执行。导出本身记审计 `admin.audit.exported`（对象 `audit`，详情为筛选条件与行数）。点行打开详情：时间、操作人、对象、动作、理由、事件 ID，以及逐字段的变更表（配置变更比较前后值；`from/to`、`before/after` 与上架的 `changes` 逐项列出；未变的字段折叠），原始事件可展开。
+- **设置**：「本浏览器」里加了每页条数（20/50/100/200，存在本机 `admin.page_size`，之后打开的列表生效）。
+- 与设计稿 §5 的差别：没有 `GET /admin/v1/audit-logs/{id}`，详情直接用列表里的事件；管理员接口没有删除（停用即可，审计需要保留账号）。
+
 ## 功能
 
 - **分页**（阶段 4 B1）：所有列表接口统一用不透明游标分页，返回 `{items, next_cursor}`。`next_cursor` 原样作为下一页的 `cursor` 传回，最后一页为 null；`limit` 为 1–200，默认 50。审计日志与强平记录的 `limit` 最多 500，默认 100。按接口：
@@ -145,7 +156,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
   - 订单、成交、充值与概览的交易部分来自 ClickHouse，比服务晚几秒。
 - **B5 新增接口**：
   - `GET /admin/v1/house`：HOUSE 的账（ADR-0013、0015）。库存是账本 `MARKET_MAKER` 各资产余额，按 USDT 交易对的最新价估值（可充提资产在前，站内资产卖出后为负）；各交易对的成交来自读模型 `trades` 的 `house_side`（买入、卖出、付出与收到），盈亏 = 净持有 × 现价 + 净收入；合约仓位是 `HOUSE_USER_ID` 在 derivatives-service 的持仓（admin-service 从 `apps.env` 读 `HOUSE_USER_ID`）。读不到的部分记在 `partial`。
-  - `GET /admin/v1/health`：各服务运维端口 `/readyz` 的就绪状态与耗时（2 秒超时，并发）。目标默认是 compose 网络里的 17 个服务，可用 `HEALTH_TARGETS`（`名称=http://主机:端口,...`）覆盖。
+  - `GET /admin/v1/health`：各服务运维端口 `/readyz` 的就绪状态与耗时（2 秒超时，并发）。目标默认是 compose 网络里的 17 个服务，可用 `HEALTH_TARGETS`（`名称=http://主机:端口,...`）覆盖。C4a 起 `?details=true` 还读各服务的 `/metrics`（版本、Kafka 滞后、死信数）与行情源状态，见上文「系统健康」。
   - `GET /admin/v1/ledger/reconciliation`：账本对账每项检查的最近一次结果与最近 50 次不一致（各带前 10 条差异），经 ledger-service 新增的 gRPC `GetReconciliation` 读 `reconciliation_runs`。
   - `GET /admin/v1/ledger/system-balances?asset=`：全部系统科目余额（留空为全部资产）。
 - **提现审批**：按状态列出提现（默认 `PENDING_REVIEW`），显示风控分与命中规则；批准/拒绝需理由，审批人为管理员邮箱（超过 20,000 USDT 需两位不同审批人，规则在 wallet-service）。`exchangectl wallet approve|reject` 仍可用。可按网络筛选（`network`），托管网络的提现带 `custody`、托管方状态 `provider_status` 与交给托管方的时间 `submitted_at`。
@@ -183,15 +194,17 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 | HOUSE 流动性 | 库存估值（可充提/站内）、各交易对的买卖与盈亏、合约仓位，每 30 秒刷新 |
 | 风控与开关 | 全部功能开关（说明、规则摘要、最后修改人），开关切换要确认 |
 | 对账与系统科目 | 对账（每项检查最近一次结果与最近的不一致）、系统科目余额（资金调整与审批见上文的新页面） |
-| 审计 | 按操作人、对象、事件、时间筛选，导出 CSV，行点击看事件全文 |
+| 管理员与角色（C4a） | 管理员列表与操作（新建、改角色、重置口令与身份验证器、会话、停用与启用），角色权限矩阵；见上文 |
+| 审计 | 按操作人、对象、事件、时间筛选；服务端导出 CSV（C4a，最多 10,000 条）；行点击看详情与逐字段的变更 |
 | 报表 | 交易、充提、合约（图表与表格两种视图，近 7/30/90 天）与持仓量 |
+| 系统健康（C4a） | 各服务就绪、版本、Kafka 滞后与死信数，对账、行情源、托管方 |
 
 通用规范（设计稿 §10.2）：
 
-- 列表一律服务端游标分页，每页 50 条，滚到底自动加载下一页；筛选条件写在地址栏（可分享、后退可恢复），可另存为本机"视图"；文本筛选在停止输入 0.5 秒或回车后生效。
+- 列表一律服务端游标分页，每页默认 50 条（设置里可按本浏览器改），滚到底自动加载下一页；筛选条件写在地址栏（可分享、后退可恢复），可另存为本机"视图"；文本筛选在停止输入 0.5 秒或回车后生效。
 - 危险操作统一用确认框：显示对象、理由至少 10 个字（进审计）、手动输入确认词（ID 后 4 位、交易对代码或金额），结果用提示条告知，失败时附可复制的追踪 ID。
 - 枚举都有中文标签，悬停显示原始代码；金额按十进制字符串原样显示并加千分位；时间按设置里的时区。
-- 端到端：`web/e2e/admin-smoke.mjs`（`scripts/e2e/web.sh` 运行，每次建一个临时 ADMIN、结束停用）：登录、概览、用户页与各标签（资料与身份、安全、余额、风控……）、身份变更申请、搜索、订单与成交、充值（待处理、补记待回调、补记抽屉，不提交）与提现队列（带筛选）、交易对改状态的确认框（取消，不真的改）、合约、HOUSE、开关、对账、审计、报表、资金调整页（审批方式、表单、记录）、审批、设置、事件流、从账户菜单退出，所有 `/admin/v1` 响应按 `api/admin/admin.yaml` 校验。
+- 端到端：`web/e2e/admin-smoke.mjs`（`scripts/e2e/web.sh` 运行，每次建一个临时 ADMIN、结束停用）：登录、概览、用户页与各标签（资料与身份、安全、余额、风控……）、身份变更申请、搜索、订单与成交、充值（待处理、补记待回调、补记抽屉，不提交）与提现队列（带筛选）、交易对改状态的确认框（取消，不真的改）、合约、HOUSE、开关、对账、审计（一条的详情、CSV 导出）、报表、管理员与角色（新建表单打开后取消）、系统健康（版本、Kafka 滞后、对账、行情源）、资金调整页（审批方式、表单、记录）、审批、设置（含每页条数）、事件流、从账户菜单退出，所有 `/admin/v1` 响应按 `api/admin/admin.yaml` 校验。
 
 ## 运维
 
@@ -212,10 +225,10 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 ```
 
 - `ADMIN_SECRET_KEY` 在服务器 `/opt/exchange/infra/admin/admin.env`（目录 700、文件 600，属主 root，只注入 admin-service，不在 `apps.env`），2026-09-29 用 `openssl rand -base64 32` 生成，从未打印。本机开发的在 `.env`。
-- 锁定：等 15 分钟自动解锁；忘记密码或丢失 TOTP：停用后用新邮箱重建（没有重置入口，避免成为绕过 TOTP 的后门）。
+- 锁定：等 15 分钟自动解锁，或由 ADMIN 在「管理员与角色」页启用（同时清除锁定）；忘记密码或丢失 TOTP：另一位 ADMIN 在同一页重置（新的只显示一次，对方会话结束）。不能重置自己的；唯一的 ADMIN 丢失时，用 `exchangectl admin disable` 停用后以新邮箱 `admin create` 重建（命令行没有重置入口，避免成为绕过 TOTP 的后门）。
 - IP 白名单（可选）：在服务器建 `/opt/exchange/infra/nginx/snippets/admin-access.local.conf`，内容如 `allow 203.0.113.7; deny all;`，`task deploy` 或 `nginx -s reload` 后对 `admin.astras.vip` 整站生效（真实客户端 IP 由 Cloudflare real-ip 配置还原）。目前按用户决定不设。部署同步不会覆盖或删除这个文件。
 - 指标：运维端口 9094（`outbox_pending`、`http_server_*`）；Prometheus 任务 `admin-service`。
-- 端到端：`bash scripts/e2e/admin.sh`（对 `https://admin.astras.vip`，每次创建 4 个随机管理员、结束时停用；覆盖页面与安全头、旧地址的跳转、登录与 Cookie、角色、备注与标签、批量审核提现、冻结/解冻、交易对状态往返、撤单、开关往返、双人调账、设置的权限与校验、单人模式（ADMIN 直接 +2.5/−2.5 USDT，超过单笔限额的转审并撤回；双人模式时跳过）、待办与事件流、合约（状态、只减仓、合约状态往返、强平监控与记录、双人保险基金注资 1 USDT）、报表、用户页的估值余额、风控冻结与解冻（用户资金流水里看得到 `ADMIN_FREEZE`）、单笔撤单、合约账户调账（单人模式时）、强制平仓（用户市价买入 0.1 ETH-USDT-PERP，后台平掉后仓位为空；合约交易关闭时跳过）、充值处置与补记（用托管方替身 udun-mock：回调推迟 45 秒的 2 USDT 由 FINANCE 补记、用户余额 +2、同一交易号再补记被拒、晚到的回调记为已核对且不再入账、`exchangectl` 报告里不再列出；低于最小额的 0.5 USDT 入账给用户、0.25 USDT 驳回后不能再入账）、提现详情与搁置（对已完成的提现搁置得到 409）、安全/历史/风控与完整联系方式、换绑审核（用户换绑唯一的邮箱 → 后台通过 → 按新邮箱能查到）、重置身份验证器、全部会话退出（用户令牌立即失效）、临时密码（旧密码失效、临时密码可登录、审计里没有它）、审计查询（含充值处置的四个动作）、退出与停用）。
+- 端到端：`bash scripts/e2e/admin.sh`（对 `https://admin.astras.vip`，每次创建 4 个随机管理员、结束时停用；覆盖页面与安全头、旧地址的跳转、登录与 Cookie、角色、备注与标签、批量审核提现、冻结/解冻、交易对状态往返、撤单、开关往返、双人调账、设置的权限与校验、单人模式（ADMIN 直接 +2.5/−2.5 USDT，超过单笔限额的转审并撤回；双人模式时跳过）、待办与事件流、合约（状态、只减仓、合约状态往返、强平监控与记录、双人保险基金注资 1 USDT）、报表、用户页的估值余额、风控冻结与解冻（用户资金流水里看得到 `ADMIN_FREEZE`）、单笔撤单、合约账户调账（单人模式时）、强制平仓（用户市价买入 0.1 ETH-USDT-PERP，后台平掉后仓位为空；合约交易关闭时跳过）、充值处置与补记（用托管方替身 udun-mock：回调推迟 45 秒的 2 USDT 由 FINANCE 补记、用户余额 +2、同一交易号再补记被拒、晚到的回调记为已核对且不再入账、`exchangectl` 报告里不再列出；低于最小额的 0.5 USDT 入账给用户、0.25 USDT 驳回后不能再入账）、提现详情与搁置（对已完成的提现搁置得到 409）、安全/历史/风控与完整联系方式、换绑审核（用户换绑唯一的邮箱 → 后台通过 → 按新邮箱能查到）、重置身份验证器、全部会话退出（用户令牌立即失效）、临时密码（旧密码失效、临时密码可登录、审计里没有它）、后台建管理员（C4a：ADMIN 建 OPERATOR，响应 `no-store`，用一次性口令登录；改为 AUDITOR 后下一个请求即生效；重置口令与身份验证器都结束会话、新的可登录；结束会话；停用后不能登录、启用后可以；不能改自己的账号；口令与密钥不出现在任何输出与审计里）、系统健康（全部就绪且带版本，消费者的滞后与死信数，行情源）、审计查询（含充值处置的四个动作与管理员的七个动作）与 CSV 导出（BOM、表头、`X-Truncated: false`，导出本身被审计）、退出与停用）。
 - admin-service 连 derivatives-service 的内部地址：`DERIVATIVES_SERVICE_URL`（compose 里是 `http://derivatives-service:8095`）。
 
 ## 常见错误码
@@ -229,7 +242,9 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | `ADMIN_CSRF` | 写请求缺少 `X-Admin-CSRF: 1` |
 | `ADMIN_SELF_APPROVAL` | 不能批准自己的双人申请（可以撤回；单人模式下结果未知的操作可以自己完成） |
 | `ADMIN_APPROVAL_DECIDED` | 申请已处理 |
-| `ADMIN_EXISTS` | `admin create` 的邮箱已存在 |
+| `ADMIN_EXISTS` | 新建管理员（后台或 `admin create`）的邮箱已存在 |
+| `ADMIN_SELF` | 不能在后台修改自己的管理员账号 |
+| `ADMIN_LAST_ADMIN` | 最后一位启用的 ADMIN 不能被停用或降级 |
 | `ADMIN_REFERENCE_UNKNOWN` | 交易对的参考符号币安现货没有（详情 `symbol`、`reference_symbol`） |
 | `WALLET_DEPOSIT_KNOWN` | 补记的托管方交易号或（网络、哈希、地址）已有充值，详情 `deposit_id` |
 | `WALLET_DEPOSIT_NOT_RELEASABLE` | 只有记入 `UNCLAIMED_DEPOSIT`、有币种、回调没有不一致的待处理充值才能入账给用户 |

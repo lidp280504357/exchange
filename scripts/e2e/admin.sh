@@ -20,8 +20,11 @@
 # deposits that need a person (with the
 # custodian's stand-in: a deposit whose callback comes late, backfilled
 # and then confirmed by it; one below the minimum credited to the user,
-# another rejected), a withdrawal's review details and holds, the audit
-# trail and sign-out.
+# another rejected), a withdrawal's review details and holds, an
+# administrator created from the console (an OPERATOR signing in with the
+# password shown once, which no check prints; role, password,
+# authenticator, sessions, disable and enable), the system health with
+# details, the audit trail with its CSV export, and sign-out.
 #
 #   scripts/e2e/admin.sh
 set -euo pipefail
@@ -120,7 +123,7 @@ expect 200 - "the sign-in options need no session"
 TOTP_REQUIRED=$(jq -r .totp_required <<<"$BODY")
 login ADMIN
 expect 200 - "ADMIN signs in with password and code"
-check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 21" "with every permission"
+check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 22" "with every permission"
 cookie=$(grep -i '^set-cookie: admin_session=' "$WORK/ADMIN.headers")
 for attr in 'Path=/admin/' 'HttpOnly' 'Secure' 'SameSite=Strict'; do
   grep -qi "$attr" <<<"$cookie" || { echo "FAIL the session cookie lacks $attr: $cookie" >&2; exit 1; }
@@ -836,6 +839,100 @@ call POST /v1/auth/login/password "{\"identifier\":\"$NEW_EMAIL\",\"password\":\
 expect 200 - "the temporary password signs in with the new email"
 UAUTH=(-H "Authorization: Bearer $(jq -r .access_token <<<"$BODY")")
 
+echo "== administrators from the console"
+as OPERATOR GET /admin/v1/admins ""
+expect 403 ADMIN_FORBIDDEN "OPERATOR manages no administrator"
+as AUDITOR GET /admin/v1/roles ""
+expect 200 - "every administrator reads the roles"
+check '[.roles[].role] == ["ADMIN","OPERATOR","FINANCE","AUDITOR"] and (.roles[0].permissions | index("admins.manage")) != null and ([.roles[1:][].permissions[]] | index("admins.manage")) == null' \
+  "only ADMIN manages administrators"
+# creds keeps the password and authenticator secret an answer shows once
+# in PW_STAFF and SECRET_STAFF and scrubs them from BODY and the body
+# file, so no check below can print them.
+creds() {
+  local pw sec
+  pw=$(jq -r '.password // empty' <<<"$BODY" 2>/dev/null || true)
+  sec=$(jq -r '.totp_secret // empty' <<<"$BODY" 2>/dev/null || true)
+  [[ -n $pw ]] && PW_STAFF=$pw
+  [[ -n $sec ]] && SECRET_STAFF=$sec
+  BODY=$(jq -c 'if type == "object" then del(.password, .totp_secret, .totp_uri) else . end' <<<"$BODY" 2>/dev/null || echo '{}')
+  : >"$WORK/body"
+}
+EMAIL_STAFF="e2e-staff-$RUN@example.com" PW_STAFF="" SECRET_STAFF=""
+acall POST /admin/v1/admins "$(jq -nc --arg e "$EMAIL_STAFF" '{email: $e, name: "e2e staff", role: "OPERATOR", reason: "e2e hires an operator"}')" \
+  -b "$WORK/ADMIN.jar" "${CSRF[@]}" -D "$WORK/staff.headers"
+creds
+expect 201 - "ADMIN creates an OPERATOR"
+STAFF_ID=$(jq -r .admin.id <<<"$BODY")
+# shellcheck disable=SC2016 # expanded when the script ends
+at_exit "remote \"sudo docker compose \$COMPOSE_FILES exec -T admin-service /app/exchangectl admin disable $EMAIL_STAFF --reason 'e2e run over'\" >/dev/null"
+check '.admin.role == "OPERATOR" and .admin.status == "ACTIVE" and .admin.sessions == 0 and .admin.last_login_at == null' "active, never signed in"
+[[ ${#PW_STAFF} -ge 20 && ${#SECRET_STAFF} -ge 26 ]] || { echo "FAIL no password or authenticator secret came back" >&2; exit 1; }
+grep -qi '^cache-control: no-store' "$WORK/staff.headers" || { echo "FAIL the credentials may be cached" >&2; exit 1; }
+echo "ok   with a password and an authenticator secret, shown once (no-store)"
+acall POST /admin/v1/admins "$(jq -nc --arg e "$EMAIL_STAFF" '{email: $e, name: "again", role: "AUDITOR", reason: "e2e twice"}')" -b "$WORK/ADMIN.jar" "${CSRF[@]}"
+creds
+expect 409 ADMIN_EXISTS "an address is an administrator once"
+login STAFF
+expect 200 - "the new OPERATOR signs in with them"
+check ".admin.role == \"OPERATOR\" and .admin.email == \"$EMAIL_STAFF\"" "as OPERATOR"
+as ADMIN GET /admin/v1/admins ""
+expect 200 - "ADMIN lists the administrators"
+check "any(.admins[]; .id == \"$STAFF_ID\" and .sessions == 1 and .last_login_at != null)" "the new one with its session"
+as ADMIN GET "/admin/v1/admins/$STAFF_ID/sessions" ""
+expect 200 - "and its sessions"
+check '(.sessions | length) == 1 and .sessions[0].user_agent != ""' "one, with its device"
+as ADMIN GET /admin/v1/me ""
+ADMIN_ID=$(jq -r .id <<<"$BODY")
+as ADMIN POST "/admin/v1/admins/$ADMIN_ID/role" '{"role":"AUDITOR","reason":"e2e demotes itself"}'
+expect 403 ADMIN_SELF "nobody changes their own account"
+as STAFF POST "/admin/v1/admins/$ADMIN_ID/status" '{"enabled":false,"reason":"e2e takes over"}'
+expect 403 ADMIN_FORBIDDEN "an OPERATOR disables nobody"
+as ADMIN POST "/admin/v1/admins/$STAFF_ID/role" '{"role":"AUDITOR","reason":"e2e reads only"}'
+expect 200 - "ADMIN makes it an AUDITOR"
+as STAFF GET /admin/v1/me ""
+expect 200 - "its next request"
+check '.role == "AUDITOR" and (.permissions | index("flags.write")) == null' "is an AUDITOR's"
+as ADMIN POST "/admin/v1/admins/$STAFF_ID/password-reset" '{"reason":"e2e forgot it"}'
+creds
+expect 200 - "ADMIN resets its password"
+as STAFF GET /admin/v1/me ""
+expect 401 ADMIN_UNAUTHORIZED "which ends its sessions"
+login STAFF
+expect 200 - "the new password signs in"
+as ADMIN POST "/admin/v1/admins/$STAFF_ID/totp-reset" '{"reason":"e2e lost the phone"}'
+creds
+expect 200 - "ADMIN resets its authenticator"
+as STAFF GET /admin/v1/me ""
+expect 401 ADMIN_UNAUTHORIZED "which ends its sessions too"
+login STAFF
+expect 200 - "the new authenticator signs in"
+as ADMIN POST "/admin/v1/admins/$STAFF_ID/sessions/revoke" '{"reason":"e2e ends them"}'
+[[ $STATUS == 204 ]] || { echo "FAIL ending an administrator's sessions: $STATUS $BODY" >&2; exit 1; }
+echo "ok   ADMIN ends its sessions"
+as STAFF GET /admin/v1/me ""
+expect 401 ADMIN_UNAUTHORIZED "they are over"
+as ADMIN POST "/admin/v1/admins/$STAFF_ID/status" '{"enabled":false,"reason":"e2e lets it go"}'
+expect 200 - "ADMIN disables it"
+check '.status == "DISABLED"' "disabled"
+login STAFF
+expect 401 ADMIN_LOGIN_FAILED "a disabled administrator cannot sign in"
+as ADMIN POST "/admin/v1/admins/$STAFF_ID/status" '{"enabled":true,"reason":"e2e takes it back"}'
+expect 200 - "ADMIN enables it again"
+check '.status == "ACTIVE" and .failed_attempts == 0' "active, its failures forgotten"
+login STAFF
+expect 200 - "it signs in again"
+
+echo "== system health"
+as AUDITOR GET "/admin/v1/health?details=true" ""
+expect 200 - "AUDITOR reads every service's health with details"
+check '(.services | length) >= 15 and all(.services[]; .ready and (.version // "") != "")' "every service ready, with its version"
+check 'any(.services[]; .service == "ledger-service" and .kafka_lag != null and .dlq != null) and all(.services[]; .service != "signer" or .kafka_lag == null)' \
+  "the consumers' lag and DLQ count, for services with consumers"
+check '.feed.state | IN("OK", "DELAYED", "DOWN", "OFF")' "and the reference feed"
+as AUDITOR GET /admin/v1/health ""
+check 'all(.services[]; has("version") | not) and (has("feed") | not)' "without details, readiness alone"
+
 echo "== the audit trail"
 audited() { # audited ROLE QUERY JQ
   as "$1" GET "/admin/v1/audit-logs?$2" ""
@@ -860,6 +957,21 @@ if [[ -n ${BACKFILLED:-} ]]; then
   eventually 60 "the deposit decisions are audited on the account, by FINANCE" audited AUDITOR "target=user:$USER_ID" \
     "[.items[] | select(.actor == \"$EMAIL_FINANCE\") | .payload.action] | ((index(\"admin.deposits.backfill_executed\") != null or index(\"admin.deposits.backfill_requested\") != null) and index(\"wallet.deposit.backfilled\") != null and index(\"ledger.unclaimed_released\") != null and index(\"wallet.deposit.dismissed\") != null)"
 fi
+eventually 60 "the administrator's changes are audited, its credentials are not" audited AUDITOR "target=admin:$STAFF_ID" \
+  "([.items[].payload.action] | (index(\"admin.created\") != null and index(\"admin.role_changed\") != null and index(\"admin.password_reset\") != null and index(\"admin.totp_reset\") != null and index(\"admin.sessions_revoked\") != null and index(\"admin.disabled\") != null and index(\"admin.enabled\") != null)) and (tostring | (contains(\"$PW_STAFF\") or contains(\"$SECRET_STAFF\")) | not)"
+exported() {
+  acall GET "/admin/v1/audit-logs/export?target=admin:$STAFF_ID" "" -b "$WORK/AUDITOR.jar" -D "$WORK/export.headers"
+  [[ $STATUS == 200 ]] && grep -q 'admin.enabled' <<<"$BODY"
+}
+eventually 60 "AUDITOR exports them as CSV" exported
+grep -qi '^content-type: text/csv' "$WORK/export.headers" && grep -qi '^content-disposition: attachment; filename="audit-' "$WORK/export.headers" &&
+  grep -qi '^x-truncated: false' "$WORK/export.headers" || { echo "FAIL the export's headers:" >&2; cat "$WORK/export.headers" >&2; exit 1; }
+[[ $(head -c 3 "$WORK/body" | od -An -tx1 | tr -d ' \n') == efbbbf ]] &&
+  [[ $(head -1 "$WORK/body" | tail -c +4 | tr -d '\r') == "occurred_at,event_type,actor,target,action,reason,details,event_id" ]] ||
+  { echo "FAIL the export does not start with a byte order mark and its header row" >&2; exit 1; }
+echo "ok   a CSV file with a byte order mark, its header row, nothing left out"
+q_auditor="actor=$(jq -rn --arg e "$EMAIL_AUDITOR" '$e|@uri')"
+eventually 60 "the export itself is audited" audited ADMIN "$q_auditor" '[.items[].payload.action] | index("admin.audit.exported") != null'
 
 echo "== sign-out"
 as AUDITOR POST /admin/v1/logout ""

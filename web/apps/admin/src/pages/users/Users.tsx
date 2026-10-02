@@ -9,7 +9,7 @@ import { errorToast } from "../../kit/actions";
 import { EnumBadge, useEnum } from "../../kit/enums";
 import { dayEnd, dayStart, FilterBar, options, useFilters } from "../../kit/filters";
 import { IdText, TimeText, useOpenUser } from "../../kit/format";
-import { ListTable, PAGE_SIZE, useCursorList } from "../../kit/lists";
+import { ListTable, pageSize, useCursorList } from "../../kit/lists";
 import { Page } from "../../kit/Page";
 import { clean } from "../records/tables";
 import { TagChips } from "./NotesTags";
@@ -26,7 +26,7 @@ export default function Users() {
   const f = filters.values;
   const q = { status: f.status, region: f.region?.toUpperCase(), from: dayStart(f.from ?? ""), to: dayEnd(f.to ?? "") };
   const list = useCursorList<UserSummary>(["admin", "users", q], async (cursor) =>
-    adminData(await adminApi.GET("/admin/v1/users", { params: { query: { ...clean(q), status: (q.status || undefined) as never, cursor, limit: PAGE_SIZE } } })),
+    adminData(await adminApi.GET("/admin/v1/users", { params: { query: { ...clean(q), status: (q.status || undefined) as never, cursor, limit: pageSize() } } })),
   );
   const columns = useMemo<ColumnDef<UserSummary, unknown>[]>(
     () => [

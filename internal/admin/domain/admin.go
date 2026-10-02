@@ -66,6 +66,10 @@ const (
 	// an unclaimed one, dismisses one) and requests backfills of those
 	// whose callback was lost.
 	PermDepositsReview = "deposits.review"
+	// PermAdminsManage manages the administrators: creates them, changes
+	// their roles, disables and enables them, resets their passwords and
+	// authenticators, ends their sessions (ADMIN only).
+	PermAdminsManage = "admins.manage"
 )
 
 var reads = []string{
@@ -75,7 +79,7 @@ var reads = []string{
 var roles = map[string][]string{
 	RoleAdmin: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit,
 		PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermDerivativesEdit, PermSettingsEdit, PermUsersNotes,
-		PermUsersSecurity, PermUsersContacts, PermLedgerHold, PermDepositsReview),
+		PermUsersSecurity, PermUsersContacts, PermLedgerHold, PermDepositsReview, PermAdminsManage),
 	RoleOperator: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit, PermDerivativesEdit,
 		PermUsersNotes, PermUsersSecurity, PermUsersContacts, PermLedgerHold),
 	RoleFinance: append(slices.Clone(reads), PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermUsersNotes, PermUsersContacts,
@@ -85,6 +89,9 @@ var roles = map[string][]string{
 
 // ValidRole reports whether role exists.
 func ValidRole(role string) bool { _, ok := roles[role]; return ok }
+
+// Roles lists the roles, the strongest first.
+func Roles() []string { return []string{RoleAdmin, RoleOperator, RoleFinance, RoleAuditor} }
 
 // Permissions returns a role's permissions.
 func Permissions(role string) []string { return slices.Clone(roles[role]) }
@@ -115,6 +122,11 @@ var (
 	ErrForbidden    = apperr.New(apperr.KindForbidden, "ADMIN_FORBIDDEN", "your role does not allow this")
 	ErrSelfApproval = apperr.New(apperr.KindForbidden, "ADMIN_SELF_APPROVAL", "another administrator must approve your own request")
 	ErrNotPending   = apperr.New(apperr.KindConflict, "ADMIN_APPROVAL_DECIDED", "the request was already decided")
+	// ErrSelf refuses changing one's own account from the console
+	// (another administrator, or exchangectl, does it).
+	ErrSelf = apperr.New(apperr.KindForbidden, "ADMIN_SELF", "another administrator must change your own account")
+	// ErrLastAdmin refuses leaving the console without an active ADMIN.
+	ErrLastAdmin = apperr.New(apperr.KindConflict, "ADMIN_LAST_ADMIN", "at least one active ADMIN must remain")
 )
 
 // Admin is an administrator.

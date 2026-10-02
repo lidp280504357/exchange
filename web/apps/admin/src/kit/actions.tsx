@@ -9,8 +9,15 @@ import { useTranslation } from "react-i18next";
 // and a confirmation word typed by hand; the outcome is a toast, an error
 // with its trace ID to copy.
 
+/** FormError is a check of a dialog's own fields failing before any call; its message shows as it is. */
+export class FormError extends Error {}
+
 /** errorToast shows a failed call in Chinese with its trace ID. */
 export function errorToast(err: unknown, title?: ReactNode) {
+  if (err instanceof FormError) {
+    toast.error(err.message);
+    return;
+  }
   const trace = err instanceof ApiError && err.traceId ? err.traceId : undefined;
   toast.error(title ?? errorText(err), {
     description: title ? errorText(err) : trace ? `trace ${trace}` : undefined,

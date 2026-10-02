@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { EnumBadge, useEnum } from "../../kit/enums";
 import { ALL, FilterBar, options, useFilters } from "../../kit/filters";
 import { Num, TimeText, UserCell } from "../../kit/format";
-import { ListTable, PAGE_SIZE, useCursorList } from "../../kit/lists";
+import { ListTable, pageSize, useCursorList } from "../../kit/lists";
 import { Page } from "../../kit/Page";
 
 type Step = AdminSchemas["LiquidationStep"];
@@ -32,7 +32,7 @@ export default function Liquidations(_: { admin: Admin }) {
     days, kind: (f.kind || undefined) as never, symbol: f.symbol?.toUpperCase() || undefined, user_id: f.user_id || undefined,
   };
   const list = useCursorList<Step>(["admin", "derivatives", "liquidations", q], async (cursor) =>
-    adminData(await adminApi.GET("/admin/v1/derivatives/liquidations", { params: { query: { ...q, cursor, limit: PAGE_SIZE } } })),
+    adminData(await adminApi.GET("/admin/v1/derivatives/liquidations", { params: { query: { ...q, cursor, limit: pageSize() } } })),
   );
   const columns = useMemo<ColumnDef<Step, unknown>[]>(
     () => [

@@ -8,8 +8,10 @@
 // change is confirmed and canceled, never done; a pair's editor; the
 // listing wizard's preview, canceled), futures, every user's positions,
 // the liquidation log, HOUSE, the flags, the ledger's reconciliation, the
-// audit trail, the reports, the fund operations (approval mode, form,
-// records), the settings and the event stream; the search opens a user;
+// audit trail (an entry's detail, the CSV export), the reports, the
+// administrators (the roles' permissions; the creation form, canceled),
+// system health, the fund operations (approval mode, form, records), the
+// settings and the event stream; the search opens a user;
 // signing out from the account menu ends the session. Every admin API
 // response is checked against api/admin/admin.yaml.
 //
@@ -203,10 +205,43 @@ try {
   await waitText("分录借贷平衡");
   await go("/audit");
   await rows(1);
+  await page.click("main tbody tr");
+  await page.waitForSelector("[data-testid=audit-detail]");
+  await waitText("原始事件");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.querySelector("[data-testid=audit-detail]"));
+  const exported = await page.evaluate(async (actor) => {
+    const r = await fetch(`/admin/v1/audit-logs/export?actor=${encodeURIComponent(actor)}`);
+    const text = await r.text();
+    return { status: r.status, type: r.headers.get("Content-Type"), header: text.split("\n")[0].replace(/^\uFEFF/, "").trim() };
+  }, EMAIL);
+  if (exported.status !== 200 || !exported.type?.startsWith("text/csv") || exported.header !== "occurred_at,event_type,actor,target,action,reason,details,event_id") {
+    throw new Error(`audit export: ${JSON.stringify(exported)}`);
+  }
   await go("/reports");
   await page.waitForSelector("main svg[role=img]");
   await t.shot("4-reports");
-  ok("the ledger's reconciliation, the audit trail and the reports");
+  ok("the ledger's reconciliation, the audit trail with an entry's detail and its CSV export, and the reports");
+
+  // 9b. System: the administrators (this one marked, the roles' permissions),
+  // the creation form (canceled), every service's health with details.
+  await go("/admins");
+  await waitText(EMAIL);
+  await waitText("你自己");
+  await page.waitForSelector("[data-testid=role-matrix]");
+  await waitText("admins.manage");
+  await clickButton("新建管理员", "main");
+  await page.waitForSelector("#new-admin-email");
+  await clickButton("取消", "[role=dialog]");
+  await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
+  await go("/health");
+  await waitText("ledger-service");
+  await waitText("Kafka 滞后");
+  await waitText("对账");
+  await waitText("行情源");
+  await page.waitForFunction(() => /^[0-9a-f]{7}/.test([...document.querySelectorAll("main td")].map((td) => td.textContent).find((s) => /^[0-9a-f]{7}/.test(s)) ?? ""), { timeout: 20000 });
+  await t.shot("4b-health");
+  ok("the administrators with the roles' permissions and the creation form (canceled); system health with versions, Kafka lag, reconciliation and the feed");
 
   // 10. Fund operations: the approval mode with its limits, the form, the
   // records; the settings; the counts pushed on the event stream.
@@ -220,6 +255,7 @@ try {
   await go("/settings");
   await waitText("单笔上限");
   await waitText("每人 24 小时累计上限");
+  await waitText("每页条数");
   const stream = await page.evaluate(
     () =>
       new Promise((resolve) => {

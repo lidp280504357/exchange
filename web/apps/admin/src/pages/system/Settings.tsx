@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DangerAction } from "../../kit/actions";
 import { Num, TimeText } from "../../kit/format";
+import { PAGE_SIZES, pageSize, setPageSize } from "../../kit/lists";
 import { stagger } from "../../kit/motion";
 import { Card, Page } from "../../kit/Page";
 import { settingsKey, useConsoleSettings } from "../../live";
@@ -138,11 +139,12 @@ function pick(s: Record<Limit, string>): Record<Limit, string> {
   return { single_max_usdt: s.single_max_usdt, daily_max_usdt: s.daily_max_usdt, withdrawal_max_usdt: s.withdrawal_max_usdt };
 }
 
-/** Appearance is this browser's theme and language. */
+/** Appearance is this browser's theme, language and page size. */
 function Appearance() {
   const { t } = useTranslation();
   const theme = useTheme();
   const locale = useSettings((s) => s.locale);
+  const [size, setSize] = useState(pageSize);
   return (
     <div className="flex flex-wrap gap-8">
       <label className="flex flex-col gap-1.5 text-sm text-fg-2">
@@ -168,6 +170,19 @@ function Appearance() {
             { value: "en", label: "English" },
           ]}
         />
+      </label>
+      <label className="flex flex-col gap-1.5 text-sm text-fg-2">
+        {t("admin.settings.pageSize")}
+        <Segmented
+          size="md"
+          value={String(size)}
+          onValueChange={(v) => {
+            setPageSize(Number(v));
+            setSize(Number(v));
+          }}
+          items={PAGE_SIZES.map((n) => ({ value: String(n), label: String(n) }))}
+        />
+        <span className="text-xs text-fg-3">{t("admin.settings.pageSizeHint")}</span>
       </label>
     </div>
   );

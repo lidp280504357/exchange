@@ -5,12 +5,27 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 // The console's lists (design §10.2): the server pages with an opaque
-// cursor, 50 at a time, loaded as the page scrolls; lists do not poll
-// whole, a light probe of the newest record offers "new data" instead.
+// cursor, 50 at a time unless this browser chose otherwise (Settings),
+// loaded as the page scrolls; lists do not poll whole, a light probe of
+// the newest record offers "new data" instead.
 
 export type Page<T> = { items: T[]; next_cursor?: string | null };
 
-export const PAGE_SIZE = 50;
+/** The page sizes Settings offers (every list takes up to 200). */
+export const PAGE_SIZES = [20, 50, 100, 200] as const;
+
+const pageSizeKey = "admin.page_size";
+
+/** pageSize is the rows a list loads at a time: this browser's choice, 50 by default. */
+export function pageSize(): number {
+  const n = Number(globalThis.localStorage?.getItem(pageSizeKey));
+  return (PAGE_SIZES as readonly number[]).includes(n) ? n : 50;
+}
+
+/** setPageSize keeps this browser's page size; lists opened afterwards use it. */
+export function setPageSize(n: number) {
+  globalThis.localStorage?.setItem(pageSizeKey, String(n));
+}
 
 export type CursorList<T> = ReturnType<typeof useCursorList<T>>;
 
