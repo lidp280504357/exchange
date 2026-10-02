@@ -153,7 +153,15 @@ func (c *BatchConsumer) cycle() {
 			}
 			recs = append(recs, r)
 		})
-		if first.IsZero() && len(recs) > 0 {
+		if len(recs) == 0 {
+			// Nothing came (an error, the group rejoining): end the cycle so
+			// that AllowRebalance runs. Polling on with rebalances blocked
+			// never lets the group back in after the broker restarts
+			// (2026-10-02: every batch consumer stalled after Redpanda was
+			// recreated, the engines among them, until restarted).
+			return
+		}
+		if first.IsZero() {
 			first = time.Now()
 		}
 	}
