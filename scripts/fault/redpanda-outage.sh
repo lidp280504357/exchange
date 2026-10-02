@@ -8,9 +8,11 @@
 # consumers (the engines, market data's trades, analytics) must rejoin
 # their groups: their lag drops and a market order reaches the engine and
 # fills (on 2026-10-02 they stalled after Redpanda was recreated, until
-# restarted). Disrupts the test environment for a minute and a half;
-# always restarts Redpanda. Reaches the server with REMOTE (default: ssh
-# exchange).
+# restarted), and every service is ready again (a batch consumer out of
+# its group is not). The contracts lose their mark prices meanwhile and go
+# reduce-only; once the prices are back the drill lifts what it caused.
+# Disrupts the test environment for a minute and a half; always restarts
+# Redpanda. Reaches the server with REMOTE (default: ssh exchange).
 set -euo pipefail
 # One drill at a time on the server (scripts/ops/lock.sh); task fault holds the lock for all of them.
 [[ -n ${OPS_LOCK_HELD:-} ]] || exec "$(dirname "$0")/../ops/lock.sh" run --owner "fault $(basename "$0")" -- bash "$0" "$@"
@@ -27,6 +29,7 @@ before=$(dlq_total)
 echo "ok   $before dead letters before the outage"
 
 echo "== redpanda down"
+STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 compose "stop redpanda" >/dev/null
 DOWN=$(date +%s)
 register "$EMAIL" "$DEVICE" "e2e fault $RUN"
@@ -72,4 +75,17 @@ eventually 60 "it reaches the engine and fills" filled
 after=$(dlq_total)
 [[ "$after" == "$before" ]] || { echo "FAIL $((after - before)) new dead letters after the outage" >&2; exit 1; }
 echo "ok   no new dead letters"
+# ready SERVICE PORT: its /readyz, the batch consumers' checks included.
+ready() { compose "exec -T $1 wget -qO- http://127.0.0.1:$2/readyz" | grep -q '"status":"ready"'; }
+all_ready() { ready matching-engine 9089 && ready derivatives-engine 9096 && ready market-data-service 9090 && ready analytics-consumer 9087; }
+eventually 120 "the services with batch consumers are ready again" all_ready
+# The mark prices stopped with the broker: the contracts that went
+# reduce-only meanwhile are lifted once their mark price is fresh again.
+fresh_mark() { compose "exec -T market-data-service wget -qO- http://127.0.0.1:8090/v1/market/$1/mark-price" | grep -q '"degraded":false'; }
+degraded=$(exchangectl derivatives states | awk -v since="$STARTED" 'NR > 1 && $2 == "true" && $4 >= since {print $1}')
+for symbol in $degraded; do
+  eventually 120 "$symbol's mark price is back" fresh_mark "$symbol"
+  remote "sudo docker compose $COMPOSE_FILES exec -T -e EXCHANGECTL_ACTOR=fault-redpanda-outage derivatives-service /app/exchangectl derivatives resume $symbol" >/dev/null
+  echo "ok   $symbol went reduce-only during the outage; lifted now that its mark price is back"
+done
 echo "redpanda outage survived"
