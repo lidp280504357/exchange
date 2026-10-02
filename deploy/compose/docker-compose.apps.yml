@@ -437,8 +437,13 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}
+    # Replaying the WAL and catching up on the reference books after a long
+    # stop takes minutes, /readyz saying "starting" meanwhile: ten minutes
+    # before failed checks count (docs/runbook/matching.md).
     healthcheck:
       <<: *health
+      start_period: 10m
+      start_interval: 5s
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9089/readyz"]
 
   # The perpetual contracts' matching shard (implementation plan §7.3 task
@@ -459,6 +464,8 @@ services:
       redpanda: {condition: service_healthy}
     healthcheck:
       <<: *health
+      start_period: 10m
+      start_interval: 5s
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9096/readyz"]
 
   analytics-consumer:

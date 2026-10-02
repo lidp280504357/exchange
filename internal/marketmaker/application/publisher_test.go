@@ -261,6 +261,21 @@ func TestTheContractsShareTheRoom(t *testing.T) {
 	if rooms["BTC-USDT-PERP"] != [2]string{"0.51", "0.01"} || rooms["ETH-USDT-PERP"] != [2]string{"0.2", "0.2"} {
 		t.Fatalf("rooms %v", rooms)
 	}
+	// 60 left: a half is less than BTC's lot of 50, so BTC's share is one
+	// lot rather than nothing; ETH's lot is 2.50, its share the half.
+	account.Equity = d("2506")
+	now = now.Add(3 * time.Second)
+	p.refresh(ctx)
+	p.OnSnapshot(&marketv1.DepthSnapshot{Symbol: "BTC-USDT-PERP", Sequence: 2, Reference: true, Bids: levels("49999.9", "5"), Asks: levels("50000.1", "5")})
+	p.OnSnapshot(&marketv1.DepthSnapshot{Symbol: "ETH-USDT-PERP", Sequence: 2, Reference: true, Bids: levels("2499.99", "5"), Asks: levels("2500.01", "5")})
+	_ = p.publish(ctx, p.round())
+	_, books = rec.take(t)
+	for _, b := range books {
+		rooms[b.GetSymbol()] = [2]string{b.GetBuyRoom(), b.GetSellRoom()}
+	}
+	if rooms["BTC-USDT-PERP"] != [2]string{"0.501", "0.001"} || rooms["ETH-USDT-PERP"] != [2]string{"0.012", "0.012"} {
+		t.Fatalf("small room %v", rooms)
+	}
 }
 
 // blindSpecs cannot read the backed assets until told.

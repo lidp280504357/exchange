@@ -342,19 +342,24 @@ func (m *memStore) event(id string) domain.Event {
 }
 
 // fakePairs records the pair's and the contract's status changes; the
-// contract's next change fails with contractErr.
+// contract's next change fails with contractErr, and every change fails
+// while down is set.
 type fakePairs struct {
 	mu          sync.Mutex
 	trading     *fakeTrading
 	changes     []string
 	contracts   []string
 	perp        *fakeDerivatives
+	down        bool
 	contractErr error
 }
 
 func (f *fakePairs) SetContractStatus(_ context.Context, _, to, _, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.down {
+		return errors.New("instrument-service unavailable")
+	}
 	if err := f.contractErr; err != nil {
 		f.contractErr = nil
 		return err
@@ -371,6 +376,9 @@ func (f *fakePairs) SetContractStatus(_ context.Context, _, to, _, _ string) err
 func (f *fakePairs) SetPairStatus(_ context.Context, _, to, _, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.down {
+		return errors.New("instrument-service unavailable")
+	}
 	f.trading.mu.Lock()
 	defer f.trading.mu.Unlock()
 	if f.trading.pair.Status == to {
@@ -1300,6 +1308,24 @@ func TestAReanchorKeepsItsAnchor(t *testing.T) {
 	}
 }
 
+// Stored settings beyond a hard limit run at it (2efbf2e's limits hold
+// for what was stored before them); settings still wrong do not start.
+func TestStoredSettingsRunWithinTheHardLimits(t *testing.T) {
+	p := domain.DefaultParams()
+	p.OrdersPerSecond, p.DailyVolume = 500, 1e9
+	r := newRig(t, &memStore{params: &p, version: 3})
+	if st := r.sim.Status(); st.Params.OrdersPerSecond != domain.MaxOrdersPerSecond || st.Params.DailyVolume != domain.MaxDailyVolume {
+		t.Fatalf("effective %+v", st.Params)
+	}
+	bad := domain.DefaultParams()
+	bad.WBTC, bad.WETH = 0.9, 0.9
+	s := New(Config{Symbol: "ASTRA-USDT", Quote: "USDT"}, newFakeTrading(), &fakePrices{now: time.Now}, &fakePairs{trading: newFakeTrading()},
+		&memStore{params: &bad, version: 4}, &flagSet{on: true}, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	if err := s.Start(context.Background()); err == nil {
+		t.Fatal("weights adding up to 1.8 started")
+	}
+}
+
 // The heartbeat reports the target of the latest round, on the tick, and
 // nothing once no round started for 30 seconds; with no recent trade the
 // band's anchor is the pair's reference, as the trading service's.
@@ -1370,6 +1396,34 @@ func TestAHaltStopsThePerpetualToo(t *testing.T) {
 	r.rounds(4 * 10)
 	if !slices.Equal(r.pairs.contracts, []string{"HALT", "TRADING"}) || len(fd.orders("m1")) == 0 {
 		t.Fatalf("resumed: contract %v, %d perpetual orders", r.pairs.contracts, len(fd.orders("m1")))
+	}
+}
+
+// A halt whose first try failed (instrument-service unavailable) is made
+// within ten seconds while the event runs: the bots stopped, and the
+// heartbeat goes on, so nothing else would close the pair.
+func TestAHaltThatFailedIsMadeWhileTheEventRuns(t *testing.T) {
+	p := domain.DefaultParams()
+	p.DailyVolume, p.PerpDailyVolume = 0, 0
+	r, _ := perpRig(t, p)
+	r.rounds(20)
+	r.pairs.mu.Lock()
+	r.pairs.down = true
+	r.pairs.mu.Unlock()
+	r.create(t, domain.Event{Type: domain.EventHalt})
+	r.rounds(4 * 5)
+	r.pairs.mu.Lock()
+	failed := len(r.pairs.changes) == 0 && len(r.pairs.contracts) == 0
+	r.pairs.down = false
+	r.pairs.mu.Unlock()
+	if !failed {
+		t.Fatalf("halted while instrument-service was down: %v %v", r.pairs.changes, r.pairs.contracts)
+	}
+	r.rounds(4 * 11)
+	r.pairs.mu.Lock()
+	defer r.pairs.mu.Unlock()
+	if !slices.Equal(r.pairs.changes, []string{"HALT"}) || !slices.Equal(r.pairs.contracts, []string{"HALT"}) {
+		t.Fatalf("pair %v, contract %v", r.pairs.changes, r.pairs.contracts)
 	}
 }
 

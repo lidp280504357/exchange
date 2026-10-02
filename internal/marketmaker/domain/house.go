@@ -86,13 +86,19 @@ type Holdings map[string]decimal.Decimal
 // direction that grows what it limits:
 //
 //   - inventory: a backed asset keeps Safety's worth back (selling the
-//     base; buying spends the quote, which on ETH-BTC is BTC);
+//     base; buying spends the quote, which on ETH-BTC is BTC), and what is
+//     above it is shared by the books that spend it (shares: how many
+//     HOUSE offers on): between two reads of its holdings, fills on all of
+//     them cannot together spend more than it holds (review M1, ADR-0015);
 //   - the base asset: HOUSE's holding of it may be worth at most Symbol
 //     either way (every pair of that base shares it);
 //   - in total: everything but USDT together may be worth at most Total.
 //
 // Both are in whole lots; zero without a price for the base or the quote.
-func SpotRooms(spec Spec, h Holdings, prices map[string]decimal.Decimal, backed func(string) bool, caps Caps) (buy, sell decimal.Decimal) {
+func SpotRooms(spec Spec, h Holdings, prices map[string]decimal.Decimal, backed func(string) bool, shares func(string) int,
+	caps Caps,
+) (buy, sell decimal.Decimal) {
+	share := func(asset string) decimal.Decimal { return decimal.NewFromInt(int64(max(shares(asset), 1))) }
 	p, qp := prices[spec.Base], prices[spec.Quote]
 	if spec.Quote == Valuation {
 		qp = decimal.NewFromInt(1)
@@ -111,11 +117,11 @@ func SpotRooms(spec Spec, h Holdings, prices map[string]decimal.Decimal, backed 
 
 	sell = decimal.Min(positive(bal.Add(caps.Symbol.Div(p))), positive(bal).Add(totalRoom))
 	if backed(spec.Base) {
-		sell = decimal.Min(sell, positive(bal.Sub(caps.Safety.Div(p))))
+		sell = decimal.Min(sell, positive(bal.Sub(caps.Safety.Div(p))).Div(share(spec.Base)))
 	}
 	buy = decimal.Min(positive(caps.Symbol.Div(p).Sub(bal)), positive(bal.Neg()).Add(totalRoom))
 	if backed(spec.Quote) {
-		buy = decimal.Min(buy, positive(h[spec.Quote].Mul(qp).Sub(caps.Safety)).Div(p))
+		buy = decimal.Min(buy, positive(h[spec.Quote].Mul(qp).Sub(caps.Safety)).Div(p).Div(share(spec.Quote)))
 	}
 	return floor(buy, spec.LotSize), floor(sell, spec.LotSize)
 }

@@ -596,6 +596,11 @@ func TestCustodyCheck(t *testing.T) {
 	if len(checks) != 0 || !errors.Is(err, errNotCompared) || !strings.Contains(err.Error(), "smallest unit") {
 		t.Fatalf("smallest unit: %+v %v", checks, err)
 	}
+	// Nor is it a holding for the platform's own wallets' check, where it
+	// would hide their shortfall.
+	if held, err := h.cproc.Holdings(context.Background(), "USDT"); err == nil {
+		t.Fatalf("holdings in the smallest unit: %s", held)
+	}
 }
 
 func TestReplayCallback(t *testing.T) {
@@ -621,6 +626,36 @@ func TestReplayCallback(t *testing.T) {
 	}
 	if _, err := h.svc.ReplayCallback(ctx, cb.ID, "ops@example.com", "again please"); !apperr.Is(err, apperr.CodeConflict) {
 		t.Fatalf("an applied callback replayed: %v", err)
+	}
+}
+
+// A custodian that never answers the hand-overs (it times out) leaves the
+// withdrawal UNCERTAIN after 30 minutes of them: one may have reached it,
+// so nothing is released and the hand-overs stop; a person resolves it.
+func TestAWithdrawalTheCustodianNeverAnswersBecomesUncertain(t *testing.T) {
+	h := newCustodyHarness(t)
+	wd := h.requestCustody(t, "20")
+	h.custody.down = true
+	for range 3 {
+		_ = h.cproc.Round(context.Background())
+		h.now = h.now.Add(10 * time.Minute)
+	}
+	if got := h.store.wds[wd.ID]; got.ProviderStatus != domain.CustodySubmitted {
+		t.Fatalf("after 20 minutes: %+v", got)
+	}
+	h.now = h.now.Add(11 * time.Minute)
+	_ = h.cproc.Round(context.Background())
+	got := h.store.wds[wd.ID]
+	if got.Status != domain.WithdrawalSubmitted || got.ProviderStatus != domain.CustodyUncertain || got.UnfreezeJournal != "" ||
+		!strings.Contains(got.RejectReason, "no answer") {
+		t.Fatalf("after 31 minutes: %+v", got)
+	}
+	audits := len(h.store.audits)
+	if _, err := ResolveCustodyWithdrawal(context.Background(), h.store, wd.ID, true, "beef", "ops", "sent, says its console", h.now); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.store.audits) != audits+1 {
+		t.Fatalf("the --sent resolution is not audited: %d audits", len(h.store.audits))
 	}
 }
 

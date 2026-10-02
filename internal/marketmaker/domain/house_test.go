@@ -8,6 +8,9 @@ import (
 
 func d(s string) decimal.Decimal { return decimal.RequireFromString(s) }
 
+// alone: every book spends its assets alone.
+func alone(string) int { return 1 }
+
 var btc = Spec{Symbol: "BTC-USDT", Base: "BTC", Quote: "USDT", TickSize: d("0.1"), LotSize: d("0.0001")}
 
 func levels(pq ...string) []Level {
@@ -51,7 +54,7 @@ func TestSpotRoomsFollowInventoryAndExposure(t *testing.T) {
 	// 0.4 BTC (20,000) and 500,000 USDT: selling stops at the inventory
 	// less the safety margin, buying at the pair's 100,000.
 	h := Holdings{"BTC": d("0.4"), "USDT": d("500000")}
-	buy, sell := SpotRooms(btc, h, prices, backed, caps)
+	buy, sell := SpotRooms(btc, h, prices, backed, alone, caps)
 	if sell.String() != "0.38" || buy.String() != "1.6" {
 		t.Fatalf("buy %s sell %s", buy, sell)
 	}
@@ -59,18 +62,18 @@ func TestSpotRoomsFollowInventoryAndExposure(t *testing.T) {
 	// pair's cap only, buying back by the USDT it holds.
 	pepe := Spec{Symbol: "1000PEPE-USDT", Base: "PEPE", Quote: "USDT", TickSize: d("0.000001"), LotSize: d("1")}
 	h = Holdings{"PEPE": d("-9000000"), "USDT": d("5000")}
-	buy, sell = SpotRooms(pepe, h, prices, backed, caps)
+	buy, sell = SpotRooms(pepe, h, prices, backed, alone, caps)
 	if sell.String() != "1000000" || buy.String() != "400000" {
 		t.Fatalf("pepe buy %s sell %s", buy, sell)
 	}
 	// Near the total cap only the directions that shrink positions stay.
 	h = Holdings{"BTC": d("1.99"), "PEPE": d("-90000000"), "USDT": d("10000000")}
 	caps.Total = d("1000000")
-	buy, sell = SpotRooms(btc, h, prices, backed, caps)
+	buy, sell = SpotRooms(btc, h, prices, backed, alone, caps)
 	if buy.String() != "0.01" || sell.String() != "1.97" {
 		t.Fatalf("near the total cap: buy %s (what is left of it), sell %s (what it holds, less the safety)", buy, sell)
 	}
-	if b, s := SpotRooms(btc, h, map[string]decimal.Decimal{}, backed, caps); !b.IsZero() || !s.IsZero() {
+	if b, s := SpotRooms(btc, h, map[string]decimal.Decimal{}, backed, alone, caps); !b.IsZero() || !s.IsZero() {
 		t.Fatalf("no price, no room: %s %s", b, s)
 	}
 }
@@ -85,12 +88,12 @@ func TestSpotRoomsOnAPairQuotedInBTC(t *testing.T) {
 	h := Holdings{"ETH": d("7.4"), "BTC": d("0.24"), "USDT": d("500000")}
 	// Buying: 0.24 BTC is 20,160 USDT, 19,160 above the safety: 7.096 ETH.
 	// Selling: 7.4 ETH less the safety's 0.370 ETH.
-	buy, sell := SpotRooms(ethBTC, h, prices, backed, caps)
+	buy, sell := SpotRooms(ethBTC, h, prices, backed, alone, caps)
 	if buy.String() != "7.096" || sell.String() != "7.029" {
 		t.Fatalf("buy %s sell %s", buy, sell)
 	}
 	delete(prices, "BTC")
-	if b, s := SpotRooms(ethBTC, h, prices, backed, caps); !b.IsZero() || !s.IsZero() {
+	if b, s := SpotRooms(ethBTC, h, prices, backed, alone, caps); !b.IsZero() || !s.IsZero() {
 		t.Fatalf("no price for the quote, no room: %s %s", b, s)
 	}
 }
@@ -154,5 +157,20 @@ func TestContractRoomsKeepWithinHouseEquity(t *testing.T) {
 	// A zero ContractLeverage leaves no room.
 	if room = ContractRoom(ContractAccount{Equity: d("1000000")}, Caps{}); !room.IsZero() {
 		t.Fatalf("no leverage: room %s", room)
+	}
+}
+
+// The inventory a backed asset holds above the safety is shared by the
+// books that spend it: two books on BTC's 0.4 less 1,000 USDT's worth
+// each sell half.
+func TestSpotRoomsShareABackedAssetsInventory(t *testing.T) {
+	caps := Caps{Level: d("20000"), Symbol: d("100000"), Total: d("1000000"), Safety: d("1000")}
+	prices := map[string]decimal.Decimal{"BTC": d("50000"), "USDT": d("1")}
+	h := Holdings{"BTC": d("0.4"), "USDT": d("500000")}
+	backed := func(a string) bool { return a == "BTC" || a == "USDT" }
+	_, sell := SpotRooms(btc, h, prices, backed, alone, caps)
+	_, half := SpotRooms(btc, h, prices, backed, func(a string) int { return map[string]int{"BTC": 2}[a] }, caps)
+	if !sell.Equal(d("0.38")) || !half.Equal(d("0.19")) {
+		t.Fatalf("alone %s, shared by two %s", sell, half)
 	}
 }

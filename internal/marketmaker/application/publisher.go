@@ -298,22 +298,30 @@ func (p *Publisher) round() []outgoing {
 	houseFresh := !p.houseAt.IsZero() && now.Sub(p.houseAt) < houseStale
 	prices := p.prices(now)
 	usable := make([]bool, len(p.list))
-	offered := 0 // the contracts HOUSE offers
+	offered := 0                 // the contracts HOUSE offers
+	spenders := map[string]int{} // by asset, the spot books HOUSE offers that spend it
 	for i, spec := range p.list {
 		b := p.books[spec.Symbol]
 		_, priced := domain.LevelCap(spec, p.cfg.Caps, prices)
 		usable[i] = feed && houseFresh && b != nil && !b.gap && now.Sub(b.heard) < p.cfg.Stale && priced &&
 			p.flags.Enabled(flags.KeyHouseLiquidity, flags.Subject{Symbol: spec.Symbol})
-		if usable[i] && spec.Contract {
+		switch {
+		case !usable[i]:
+		case spec.Contract:
 			offered++
+		default: // selling the base, buying with the quote
+			spenders[spec.Base]++
+			spenders[spec.Quote]++
 		}
 	}
+	shares := func(asset string) int { return spenders[asset] }
 	// The contracts HOUSE offers share the room its positions may still
 	// grow by in equal parts: between two reads of its positions, fills on
 	// all of them cannot together take more than the room.
-	contractRoom := domain.ContractRoom(p.contracts, p.cfg.Caps)
+	totalRoom := domain.ContractRoom(p.contracts, p.cfg.Caps)
+	contractRoom := totalRoom
 	if offered > 1 {
-		contractRoom = contractRoom.Div(decimal.NewFromInt(int64(offered)))
+		contractRoom = totalRoom.Div(decimal.NewFromInt(int64(offered)))
 	}
 	var out []outgoing
 	for i, spec := range p.list {
@@ -326,10 +334,14 @@ func (p *Publisher) round() []outgoing {
 			var buy, sell decimal.Decimal
 			if spec.Contract {
 				pos, mid := p.contracts.Positions[spec.Symbol], midOf(b)
-				buy, sell = domain.ContractRooms(spec, pos, mid, contractRoom, p.cfg.Caps)
+				// A share below one lot would offer nothing on any contract
+				// while room is left: each may take a lot of it (at most a
+				// lot per contract beyond the room).
+				share := decimal.Max(contractRoom, decimal.Min(totalRoom, spec.LotSize.Mul(mid)))
+				buy, sell = domain.ContractRooms(spec, pos, mid, share, p.cfg.Caps)
 				p.exposure.WithLabelValues(spec.Symbol).Set(pos.Mul(mid).InexactFloat64())
 			} else {
-				buy, sell = domain.SpotRooms(spec, p.holdings, prices, p.backed, p.cfg.Caps)
+				buy, sell = domain.SpotRooms(spec, p.holdings, prices, p.backed, shares, p.cfg.Caps)
 				p.exposure.WithLabelValues(spec.Symbol).Set(p.holdings[spec.Base].Mul(prices[spec.Base]).InexactFloat64())
 			}
 			msg.Bids, msg.Asks = refLevels(bids), refLevels(asks)

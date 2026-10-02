@@ -55,4 +55,4 @@
 
 - 2026-10-02（`eb94cde`）：第 4 条改为——有真实充提的资产（账本里的 `HouseBacked`：USDT、BTC、ETH）的 `MARKET_MAKER` 不得低于 0：账本拒绝使它低于 0 的借方，那笔成交挂为 FAILED（`ledger_trades_failed_total` 与告警），HOUSE 的报价房间按持仓收紧；站内资产照旧可以为负。
 - 2026-10-02（审查 H1、L2）：贷方永远放行，已经低于 0 的账户能被补足；挂为 FAILED 的成交每分钟自动重试（ledger-service，不再只靠 `exchangectl ledger retry-trades`）；HOUSE 在挂起成交里应付的量（卖出的币、买入付的计价币）由 `GetSystemBalances` 的 `parked` 报给发布方，从它报价用的持仓里扣掉，直到重试结清。
-- 2026-10-02（审查 M4）："背书资产"只有一个定义：instrument-service 里有网络（可以充或提，开关开没开都算）的资产，账本（`domain.SetHouseBacked`，每 5 分钟读一次）与 market-maker（每 30 秒）都从这里读；读到之前一律当作背书资产，HOUSE 只卖手里有的。账本里写死的 `HouseBacked` 与 market-maker 的配置 `HOUSE_BACKED_ASSETS` 都取消了。第 4 条原文"背书资产的 HOUSE 余额不应为负、只告警"以上一条修订为准：账本拒绝使它低于 0 的借方。
+- 2026-10-02（审查 M4）："背书资产"只有一个定义：instrument-service 里有网络（可以充或提，开关开没开都算）的资产，账本（`domain.SetHouseBacked`）与 market-maker 都每 30 秒从这里读一次；读到之前一律当作背书资产，HOUSE 只卖手里有的。账本里写死的 `HouseBacked` 与 market-maker 的配置 `HOUSE_BACKED_ASSETS` 都取消了。第 4 条原文"背书资产的 HOUSE 余额不应为负、只告警"以上一条修订为准：账本拒绝使它低于 0 的借方。

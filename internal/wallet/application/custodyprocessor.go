@@ -41,10 +41,12 @@ type CustodyProcessor struct {
 	Contradictions prometheus.Counter
 	// CheckEvery paces the check (an hour), BalanceEvery the balances (5
 	// minutes); a withdrawal the custodian did not acknowledge is handed
-	// over again after ResubmitAfter (a minute).
-	CheckEvery    time.Duration
-	BalanceEvery  time.Duration
-	ResubmitAfter time.Duration
+	// over again after ResubmitAfter (a minute), until UncertainAfter (30
+	// minutes) after its first hand-over.
+	CheckEvery     time.Duration
+	BalanceEvery   time.Duration
+	ResubmitAfter  time.Duration
+	UncertainAfter time.Duration
 
 	lastCheck   time.Time
 	lastBalance time.Time
@@ -94,6 +96,9 @@ func NewCustodyProcessor(p CustodyProcessor, reg prometheus.Registerer) *Custody
 	}
 	if p.ResubmitAfter <= 0 {
 		p.ResubmitAfter = time.Minute
+	}
+	if p.UncertainAfter <= 0 {
+		p.UncertainAfter = 30 * time.Minute
 	}
 	return &p
 }
@@ -325,6 +330,14 @@ func (p *CustodyProcessor) resubmit(ctx context.Context, nets []domain.Network) 
 		if w.ProviderStatus != domain.CustodySubmitted || p.Now().Sub(w.SubmittedAt) < p.ResubmitAfter {
 			continue
 		}
+		// No answer to any hand-over for UncertainAfter (the custodian
+		// times out): one may have reached it, so the funds stay frozen and
+		// the hand-overs stop; a person checks its console and resolves it
+		// (custody-resolve), as after a refused retry.
+		if p.Now().Sub(w.SubmittedAt) >= p.UncertainAfter {
+			errs = append(errs, p.giveUp(ctx, w))
+			continue
+		}
 		net, ok := networkOf(nets, w.Asset, w.Network)
 		if !ok {
 			errs = append(errs, fmt.Errorf("withdrawal %s: no network %s for %s", w.ID, w.Network, w.Asset))
@@ -333,6 +346,22 @@ func (p *CustodyProcessor) resubmit(ctx context.Context, nets []domain.Network) 
 		errs = append(errs, p.handOver(ctx, w, net, true))
 	}
 	return errors.Join(errs...)
+}
+
+// giveUp marks a withdrawal the custodian never answered UNCERTAIN.
+func (p *CustodyProcessor) giveUp(ctx context.Context, w domain.Withdrawal) error {
+	return p.Store.Tx(ctx, func(r ports.Repos) error {
+		cur, err := r.Withdrawals().GetForUpdate(ctx, w.ID)
+		if err != nil || cur == nil || cur.ProviderStatus != domain.CustodySubmitted {
+			return err
+		}
+		if !cur.Uncertain(fmt.Sprintf("no answer from the custodian in %s of hand-overs", p.UncertainAfter), p.Now()) {
+			return nil
+		}
+		p.Log.ErrorContext(ctx, "the custodian never answered a withdrawal's hand-overs: left for its callback or a person",
+			"withdrawal_id", cur.ID, "since", cur.SubmittedAt)
+		return r.Withdrawals().Update(ctx, *cur)
+	})
 }
 
 // observe updates the gauges of the withdrawals with the custodian and of
@@ -414,7 +443,9 @@ func heldOf(coins []ports.CustodyCoin, nets []domain.Network, asset string, expe
 var errNotCompared = errors.New("not compared")
 
 // Holdings reports what the custodian holds of asset now, for the chain
-// check of the platform's own wallets.
+// check of the platform's own wallets: a balance beyond belief (in the
+// coin's smallest unit) is an error there too, not a holding that would
+// hide the wallets' shortfall.
 func (p *CustodyProcessor) Holdings(ctx context.Context, asset string) (decimal.Decimal, error) {
 	nets, err := p.networks(ctx)
 	if err != nil {
@@ -424,7 +455,11 @@ func (p *CustodyProcessor) Holdings(ctx context.Context, asset string) (decimal.
 	if err != nil {
 		return decimal.Zero, err
 	}
-	return heldOf(coins, nets, asset, decimal.Zero)
+	sys, err := p.Ledger.SystemBalances(ctx, asset)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	return heldOf(coins, nets, asset, sys[accountDepositPending].Add(sys[accountWithdrawalPending]).Neg())
 }
 
 // Check compares, for every asset the custodian serves, what it holds with

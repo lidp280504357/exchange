@@ -162,19 +162,15 @@ func loadBacked(ctx context.Context, a *app.App, assets *instruments.Client) err
 	return nil
 }
 
-// backedLoop reads the backed assets again every five minutes, every 30
-// seconds while they were never read.
+// backedLoop reads the backed assets again every 30 seconds, as often as
+// market-maker reads them: the two never disagree for long.
 func backedLoop(a *app.App, assets *instruments.Client) func(context.Context) error {
 	return func(ctx context.Context) error {
 		for {
-			wait := 5 * time.Minute
-			if _, known := domain.HouseBackedAssets(); !known {
-				wait = 30 * time.Second
-			}
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(wait):
+			case <-time.After(30 * time.Second):
 			}
 			if err := loadBacked(ctx, a, assets); err != nil && ctx.Err() == nil {
 				a.Logger().WarnContext(ctx, "HOUSE's backed assets not read", "error", err)

@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"math/rand/v2"
@@ -26,6 +27,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/marketsim/ports"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/flags"
+	"github.com/lidp280504357/exchange/internal/platform/svcsign"
 )
 
 // Config is the simulation's fixed setup.
@@ -130,7 +132,8 @@ type Sim struct {
 
 	perpPair      domain.Pair
 	perpPairAt    time.Time
-	perpMark      float64 // the contract's mark and index prices as last read
+	haltCheckAt   time.Time // when a running HALT event last checked the halt
+	perpMark      float64   // the contract's mark and index prices as last read
 	perpIndex     float64
 	perpMarkAt    time.Time
 	perpRunning   bool
@@ -194,6 +197,16 @@ func (s *Sim) Start(ctx context.Context) error {
 		if version, err = s.store.SaveSettings(ctx, p, ports.ParamChange{At: s.now(), Actor: "market-sim"}, nil); err != nil {
 			return err
 		}
+	}
+	// The hard limits hold for stored settings too: kept beyond one, they
+	// run at the limit (the stored row stays, the operators see the
+	// effective settings); settings that are still wrong do not run.
+	if clamped, changed := p.Clamp(); len(changed) > 0 {
+		s.log.WarnContext(ctx, "simulated market: stored settings beyond the hard limits run at them", "changed", changed, "version", version)
+		p = clamped
+	}
+	if err := p.Validate(); err != nil {
+		return fmt.Errorf("the stored settings (version %d): %w", version, err)
 	}
 	st, _, err := s.store.State(ctx)
 	if err != nil {
@@ -364,6 +377,7 @@ func (s *Sim) Round(ctx context.Context) {
 		if s.perpRunning {
 			s.stopPerp(ctx)
 		}
+		s.keepHalted(ctx, now)
 		return // the halt canceled the makers' orders; the pair waits
 	}
 	// The quotes stand within the price band around its anchor; beyond
@@ -840,7 +854,9 @@ func (s *Sim) UpdateParams(ctx context.Context, p domain.Params, actor, approved
 		return 0, ErrParamsNeedApproval.WithDetail("move", math.Round(change.Move*1e4)/1e4).
 			WithDetail("volume", math.Round(change.Volume*1e4)/1e4)
 	}
-	details, _ := json.Marshal(map[string]any{"from": s.params, "to": p, "approved_by": approvedBy, "move": change.Move, "volume": change.Volume})
+	details, _ := json.Marshal(map[string]any{
+		"from": s.params, "to": p, "approved_by": approvedBy, "move": change.Move, "volume": change.Volume, "signed_by": svcsign.KeyID(ctx),
+	})
 	version, err := s.store.SaveSettings(ctx, p, change, &ports.Audit{
 		Action: "market.sim.params_changed", Target: "sim:" + s.cfg.Symbol, Actor: actor, Reason: "settings", Details: string(details),
 	})

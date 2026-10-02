@@ -15,6 +15,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/marketsim/ports"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/flags"
+	"github.com/lidp280504357/exchange/internal/platform/svcsign"
 )
 
 // The operators' events (ASTRA design §6.2): the API creates and ends
@@ -97,6 +98,48 @@ func (s *Sim) startDue(ctx context.Context, now time.Time) {
 		}
 		s.persist(ctx, e, nil)
 		s.log.InfoContext(ctx, "simulated market event started", "event", e.ID, "type", e.Type, "target", s.model.State.P)
+	}
+}
+
+// haltRetry is how often a running HALT event checks that its pair and
+// the perpetual are halted.
+const haltRetry = 10 * time.Second
+
+// keepHalted halts again what a running HALT event finds trading: its
+// first try may have failed (instrument-service unavailable) and the
+// heartbeat goes on meanwhile, so market-data's guard would not step in
+// (review of 530ed59). To trade during the event, end it.
+func (s *Sim) keepHalted(ctx context.Context, now time.Time) {
+	if now.Sub(s.haltCheckAt) < haltRetry {
+		return
+	}
+	s.haltCheckAt = now
+	i := slices.IndexFunc(s.runningEvents(), func(e *domain.Event) bool { return e.Type == domain.EventHalt })
+	if i < 0 {
+		return
+	}
+	e := s.runningEvents()[i]
+	why := "simulated market event " + e.ID + ": " + e.Reason
+	if pair, err := s.trading.Pair(ctx, s.cfg.Symbol); err == nil && pair.Status == "TRADING" {
+		if err := s.pairs.SetPairStatus(ctx, s.cfg.Symbol, "HALT", "system:market-sim", why); err != nil {
+			s.m.errors.WithLabelValues("halt").Inc()
+			s.log.WarnContext(ctx, "simulated market: the halt event's pair still trades, not halted", "event", e.ID, "error", err)
+		} else {
+			s.log.WarnContext(ctx, "simulated market: the halt event's pair was trading; halted again", "event", e.ID)
+		}
+		s.pairAt = time.Time{}
+	}
+	if s.cfg.Perp == "" || s.Derivatives == nil {
+		return
+	}
+	if k, err := s.Derivatives.Contract(ctx, s.cfg.Perp); err == nil && k.Status == "TRADING" {
+		if err := s.pairs.SetContractStatus(ctx, s.cfg.Perp, "HALT", "system:market-sim", why); err != nil {
+			s.m.errors.WithLabelValues("halt").Inc()
+			s.log.WarnContext(ctx, "simulated market: the halt event's perpetual still trades, not halted", "event", e.ID, "error", err)
+		} else {
+			s.log.WarnContext(ctx, "simulated market: the halt event's perpetual was trading; halted again", "event", e.ID)
+		}
+		s.perpPairAt = time.Time{}
 	}
 }
 
@@ -284,7 +327,8 @@ func (s *Sim) CreateEvent(ctx context.Context, e domain.Event) (domain.Event, er
 	details, _ := json.Marshal(map[string]any{
 		"type": e.Type, "size": e.Size, "price": e.Price.String(), "mu": e.Mu, "factor": e.Factor,
 		"duration_s": int(e.Duration.Seconds()), "hold_s": int(e.Hold.Seconds()), "starts_at": e.StartsAt, "approved_by": e.ApprovedBy,
-		"target": p,
+		"signed_by": svcsign.KeyID(ctx),
+		"target":    p,
 	})
 	if err := s.store.SaveEvent(ctx, e, &ports.Audit{
 		Action: "market.sim.event_created", Target: "sim-event:" + e.ID, Actor: e.CreatedBy, Reason: e.Reason, Details: string(details),
@@ -339,7 +383,7 @@ func (s *Sim) EndEvent(ctx context.Context, id, actor, reason string) (domain.Ev
 	e.EndedAt, e.EndedBy = now, actor
 	if err := s.store.SaveEvent(ctx, *e, &ports.Audit{
 		Action: action, Target: "sim-event:" + e.ID, Actor: actor, Reason: reason,
-		Details: fmt.Sprintf(`{"type":%q,"target":%v}`, e.Type, s.model.State.P),
+		Details: fmt.Sprintf(`{"type":%q,"target":%v,"signed_by":%q}`, e.Type, s.model.State.P, svcsign.KeyID(ctx)),
 	}); err != nil {
 		return domain.Event{}, err
 	}

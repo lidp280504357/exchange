@@ -522,3 +522,18 @@ func TestRebase(t *testing.T) {
 		t.Fatalf("rebased at 1.5: %v %q", p, guard)
 	}
 }
+
+// Stored settings beyond the hard limits run at them; what was changed is
+// named.
+func TestClampBringsSettingsWithinTheHardLimits(t *testing.T) {
+	p := DefaultParams()
+	p.OrdersPerSecond, p.DailyVolume, p.Ceiling, p.MaxMinuteMove = 500, 1e9, 5e6, 0.2
+	got, changed := p.Clamp()
+	if err := got.Validate(); err != nil || len(changed) != 4 || got.OrdersPerSecond != MaxOrdersPerSecond ||
+		got.DailyVolume != MaxDailyVolume || got.Ceiling != HardCeiling || got.MaxMinuteMove != MaxMinuteMove {
+		t.Fatalf("%+v %v %v", got, changed, err)
+	}
+	if _, changed := DefaultParams().Clamp(); len(changed) != 0 {
+		t.Fatalf("the defaults changed: %v", changed)
+	}
+}

@@ -138,3 +138,31 @@ func (p Params) Validate() error {
 		"perp_daily_volume must be between 0 and %d, perp_bot_cap and perp_margin above 0 and at most %d", MaxPerpDailyVolume, MaxPerpBotCap)
 	return errors.Join(errs...)
 }
+
+// Clamp brings settings stored before a hard limit existed, or written
+// around the API, within the hard limits (review of 2efbf2e: Start loads
+// what is stored without UpdateParams' check) and names what it changed.
+// What still fails Validate after that is the caller's to refuse.
+func (p Params) Clamp() (Params, []string) {
+	var changed []string
+	clamp := func(name string, v *float64, lo, hi float64) {
+		if c := math.Max(lo, math.Min(hi, *v)); c != *v && !math.IsNaN(*v) {
+			changed = append(changed, fmt.Sprintf("%s %g -> %g", name, *v, c))
+			*v = c
+		}
+	}
+	clamp("floor", &p.Floor, HardFloor, HardCeiling)
+	clamp("ceiling", &p.Ceiling, HardFloor, HardCeiling)
+	clamp("p0", &p.P0, p.Floor, p.Ceiling)
+	clamp("max_minute_move", &p.MaxMinuteMove, 0, MaxMinuteMove)
+	clamp("orders_per_second", &p.OrdersPerSecond, 0, MaxOrdersPerSecond)
+	clamp("cancels_per_second", &p.CancelsPerSecond, 0, MaxCancelsPerSecond)
+	clamp("daily_volume", &p.DailyVolume, 0, MaxDailyVolume)
+	clamp("order_size", &p.OrderSize, 0, MaxOrderSize)
+	clamp("level_size", &p.LevelSize, 0, MaxOrderSize)
+	clamp("bot_usdt", &p.BotUSDT, 0, MaxBotUSDT)
+	clamp("perp_daily_volume", &p.PerpDailyVolume, 0, MaxPerpDailyVolume)
+	clamp("perp_bot_cap", &p.PerpBotCap, 0, MaxPerpBotCap)
+	clamp("perp_margin", &p.PerpMargin, 0, MaxPerpBotCap)
+	return p, changed
+}

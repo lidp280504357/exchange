@@ -299,6 +299,17 @@ tests:
               summary: "HOUSE's contract positions are worth 250000 USDT, more than HOUSE_CONTRACT_LEVERAGE times its contract equity: it only reduces them until the equity is topped up"
               runbook: docs/runbook/market-maker.md
 
+  # Not a number until market-maker has read HOUSE's contract account:
+  # not "equity gone".
+  - interval: 1m
+    input_series:
+      - series: 'market_house_contract_equity_usdt{job="market-maker", instance="b"}'
+        values: 'NaN NaN NaN NaN NaN'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: HouseContractEquityGone
+        exp_alerts: []
+
   - interval: 1m
     input_series:
       - series: 'market_house_contract_equity_usdt{job="market-maker", instance="a"}'
