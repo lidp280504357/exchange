@@ -579,8 +579,13 @@ as AUDITOR GET /admin/v1/instruments/config ""
 expect 200 - "the reference data as a config document"
 check '(.pairs | length) >= 50 and (.fee_schedules | map(.tier) | index("default")) != null and (.assets | map(.asset_code) | index("LINK")) != null' \
   "pairs, fee tiers and assets in the reference file's shape"
-# The pair's minimum order value alternates per run, so each run changes it.
-NOTIONAL=$(((RUN % 2) + 1))
+# The pair's minimum order value is the other of 0.0001 and 0.0002 than
+# it has now, so each run changes it (the run's parity collided half the
+# time).
+NOTIONAL=1
+if [[ $(jq '[.pairs[] | select(.symbol == "LINK-BTC") | .min_notional | tonumber == 0.0001] | any' <<<"$BODY") == true ]]; then
+  NOTIONAL=2
+fi
 link_pair() { # link_pair [REFERENCE]: LINK-BTC as a config document
   jq -nc --arg r "${1:-}" --arg n "0.000$NOTIONAL" '{pairs: [{symbol: "LINK-BTC", base_asset: "LINK", quote_asset: "BTC", tick_size: "0.0000001",
     lot_size: "0.1", min_quantity: "0.1", max_quantity: "100000", min_notional: $n, price_band: "0.1", fee_tier: "default", status: "PREPARE",
