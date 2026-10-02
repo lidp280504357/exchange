@@ -3204,6 +3204,35 @@ paths:
                     $ref: '#/components/schemas/NextCursor'
         default:
           $ref: '#/components/responses/Error'
+  /admin/v1/approvals/{id}/sim-preview:
+    get:
+      operationId: simApprovalPreview
+      summary: A simulated market's request measured now, for its decider
+      description: |
+        When the request lapses (a day after it was asked for, or when its
+        event was to start), the target price now, where the change would
+        take the price (a jump's or a target event's price, the settings'
+        new anchor; null for changes that move no price directly), that
+        move now beside the one market-sim measured when it was asked for,
+        and what the price would do to the perpetual (as /sim/impact; null
+        when not measured). Needs reports.read.
+      tags: [sim]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The request measured now.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimPreview'
+        default:
+          $ref: '#/components/responses/Error'
   /admin/v1/approvals/{id}/decide:
     post:
       operationId: decideApproval
@@ -3217,7 +3246,11 @@ paths:
         the journal, or FAILED when the ledger refuses (for instance
         LEDGER_ADJUSTMENT_DISABLED while the flag ledger.manual_adjustment
         is off). When the ledger cannot be reached the request stays
-        PENDING and can be approved again. Needs ledger.adjust.approve.
+        PENDING and can be approved again. Needs ledger.adjust.approve;
+        a simulated market's change (SIM_EVENT, SIM_PARAMS) needs
+        sim.control instead, and approving one that lapsed (a day after it
+        was asked for, or when its event was to start) fails it, result
+        "expired at <time>", nothing sent to market-sim.
       tags: [ledger]
       security:
         - session: []
@@ -4945,6 +4978,29 @@ components:
                 type: string
               maintenance_after:
                 type: string
+    SimPreview:
+      type: object
+      required: [expires_at, expired, target_price, expected_price, move, requested_move, impact]
+      properties:
+        expires_at:
+          type: string
+          format: date-time
+        expired:
+          type: boolean
+        target_price:
+          $ref: '#/components/schemas/NullableDecimal'
+        expected_price:
+          $ref: '#/components/schemas/NullableDecimal'
+        move:
+          type: [number, 'null']
+          description: expected_price ÷ target_price − 1, now.
+        requested_move:
+          type: [string, 'null']
+          description: The move market-sim measured when it was asked for.
+        impact:
+          oneOf:
+            - $ref: '#/components/schemas/SimImpact'
+            - type: 'null'
     SimHolding:
       type: object
       required: [amount, holders]

@@ -7,7 +7,7 @@ import { EnumBadge, EnumText } from "../../kit/enums";
 import { Num, TimeText, UserCell } from "../../kit/format";
 import { FundAction, type Approval } from "../../kit/funds";
 import { ListTable, pageSize, RowActions, useCursorList, type CursorList } from "../../kit/lists";
-import { MintShares, pct, useEventText, type SimEvent } from "../sim/common";
+import { MintShares, pct, SimRequestNow, useEventText, type SimEvent } from "../sim/common";
 
 const right: DataColumnMeta = { align: "right" };
 
@@ -126,7 +126,7 @@ function Payload({ a }: { a: Approval }) {
   );
 }
 
-/** Mode says who carries it out: its requester alone, or a second administrator (and why). */
+/** Mode says who carries it out: its requester alone, or a second administrator (and why); a lapsed simulated market's request says so. */
 export function Mode({ a }: { a: Approval }) {
   const { t } = useTranslation();
   if (a.mode === "SINGLE") return <Badge tone="info">{t("admin.funds.single")}</Badge>;
@@ -134,8 +134,22 @@ export function Mode({ a }: { a: Approval }) {
     <span className="inline-flex flex-col gap-0.5">
       <Badge tone="neutral">{t("admin.funds.twoPerson")}</Badge>
       {a.escalation && <span className="text-xs text-fg-3">{t(`admin.funds.escalationShort.${a.escalation}`)}</span>}
+      {a.status === "PENDING" && simLapsed(a) && <Badge tone="warn">{t("admin.sim.lapsedShort")}</Badge>}
     </span>
   );
+}
+
+/** simLapsed reports whether a simulated market's request lapsed: a day after it was asked for, or when its event was to start (C5.5 ④). */
+function simLapsed(a: Approval): boolean {
+  if (!simKind(a.kind)) return false;
+  let at = Date.parse(a.created_at) + 24 * 3600_000;
+  try {
+    const startsAt = (JSON.parse((a.payload as Record<string, string>).change ?? "{}") as { starts_at?: string }).starts_at;
+    if (startsAt) at = Math.min(at, Date.parse(startsAt));
+  } catch {
+    // Judged by its age alone.
+  }
+  return Date.now() >= at;
 }
 
 /**
@@ -171,7 +185,9 @@ function Decide({ admin, a }: { admin: Admin; a: Approval }) {
           target={target}
           confirmWord={lastFour(a.id)}
           run={run(true)}
-        />
+        >
+          {simKind(a.kind) && <SimRequestNow id={a.id} />}
+        </FundAction>
       )}
       <FundAction
         trigger={(open) => (

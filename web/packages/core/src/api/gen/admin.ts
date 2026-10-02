@@ -1951,6 +1951,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/approvals/{id}/sim-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A simulated market's request measured now, for its decider
+         * @description When the request lapses (a day after it was asked for, or when its
+         *     event was to start), the target price now, where the change would
+         *     take the price (a jump's or a target event's price, the settings'
+         *     new anchor; null for changes that move no price directly), that
+         *     move now beside the one market-sim measured when it was asked for,
+         *     and what the price would do to the perpetual (as /sim/impact; null
+         *     when not measured). Needs reports.read.
+         */
+        get: operations["simApprovalPreview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/approvals/{id}/decide": {
         parameters: {
             query?: never;
@@ -1970,7 +1996,11 @@ export interface paths {
          *     the journal, or FAILED when the ledger refuses (for instance
          *     LEDGER_ADJUSTMENT_DISABLED while the flag ledger.manual_adjustment
          *     is off). When the ledger cannot be reached the request stays
-         *     PENDING and can be approved again. Needs ledger.adjust.approve.
+         *     PENDING and can be approved again. Needs ledger.adjust.approve;
+         *     a simulated market's change (SIM_EVENT, SIM_PARAMS) needs
+         *     sim.control instead, and approving one that lapsed (a day after it
+         *     was asked for, or when its event was to start) fails it, result
+         *     "expired at <time>", nothing sent to market-sim.
          */
         post: operations["decideApproval"];
         delete?: never;
@@ -2954,6 +2984,18 @@ export interface components {
                 maintenance_before: string;
                 maintenance_after: string;
             }[];
+        };
+        SimPreview: {
+            /** Format: date-time */
+            expires_at: string;
+            expired: boolean;
+            target_price: components["schemas"]["NullableDecimal"];
+            expected_price: components["schemas"]["NullableDecimal"];
+            /** @description expected_price ÷ target_price − 1, now. */
+            move: number | null;
+            /** @description The move market-sim measured when it was asked for. */
+            requested_move: string | null;
+            impact: components["schemas"]["SimImpact"] | null;
         };
         SimHolding: {
             amount: components["schemas"]["Decimal"];
@@ -6952,6 +6994,29 @@ export interface operations {
                         items: components["schemas"]["Approval"][];
                         next_cursor: components["schemas"]["NextCursor"];
                     };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    simApprovalPreview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The request measured now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimPreview"];
                 };
             };
             default: components["responses"]["Error"];

@@ -470,9 +470,14 @@ func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, ap
 			return fmt.Errorf("approval %s: unknown kind %q", a.ID, a.Kind)
 		}
 		action := actions.rejected
-		if !approve {
+		switch {
+		case !approve:
 			a.Status, a.Result = domain.ApprovalRejected, strings.TrimSpace(reason)
-		} else {
+		case simKind(a.Kind) && !a.DecidedAt.Before(simExpiry(a)):
+			// Lapsed: nothing goes to market-sim (C5.5 ④).
+			action = actions.failed
+			a.Status, a.Result = domain.ApprovalFailed, "expired at "+simExpiry(a).UTC().Format(time.RFC3339)
+		default:
 			action = actions.approved
 			if err := s.execute(ctx, &a, p); err != nil {
 				return err

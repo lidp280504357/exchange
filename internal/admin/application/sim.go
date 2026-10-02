@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 
 	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
 	"github.com/lidp280504357/exchange/internal/admin/domain"
@@ -298,6 +299,135 @@ func (s *Service) requestSim(ctx context.Context, p Principal, kind string, chan
 		return SimResult{}, err
 	}
 	return SimResult{Approval: &a}, nil
+}
+
+// simApprovalTTL is how long a simulated market's change waits for its
+// second administrator (C5.5 ④).
+const simApprovalTTL = 24 * time.Hour
+
+// simExpiry is when a simulated market's request lapses: a day after it
+// was asked for, or when its event was to start if sooner. Approving it
+// later fails it, nothing sent to market-sim.
+func simExpiry(a domain.Approval) time.Time {
+	at := a.CreatedAt.Add(simApprovalTTL)
+	if a.Kind != domain.KindSimEvent {
+		return at
+	}
+	var e struct {
+		StartsAt string `json:"starts_at"`
+	}
+	if json.Unmarshal([]byte(a.Payload["change"]), &e) == nil && e.StartsAt != "" {
+		if t, err := time.Parse(time.RFC3339, e.StartsAt); err == nil && t.Before(at) {
+			at = t
+		}
+	}
+	return at
+}
+
+// SimPreview is a simulated market's request measured now, for the
+// administrator who decides it (C5.5 ④): when it lapses, the target now,
+// where the change would take the price (an event's jump or target, the
+// settings' anchor; nil when it moves no price directly), that move now
+// and the one market-sim measured when it was asked for, and what the
+// price would do to the perpetual.
+type SimPreview struct {
+	ExpiresAt     time.Time
+	Expired       bool
+	Target        *decimal.Decimal
+	Expected      *decimal.Decimal
+	Move          *float64
+	RequestedMove string
+	Impact        json.RawMessage
+}
+
+// SimApprovalPreview measures a pending simulated market's request now.
+func (s *Service) SimApprovalPreview(ctx context.Context, p Principal, id string) (SimPreview, error) {
+	if err := p.require(domain.PermReportsRead); err != nil {
+		return SimPreview{}, err
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		return SimPreview{}, apperr.NotFound("no such request")
+	}
+	a, err := s.Store.Read().Approvals().Get(ctx, id)
+	if err != nil {
+		return SimPreview{}, err
+	}
+	if a == nil || !simKind(a.Kind) {
+		return SimPreview{}, apperr.NotFound("no such simulated market request")
+	}
+	out := SimPreview{ExpiresAt: simExpiry(*a), RequestedMove: a.Payload["move"]}
+	out.Expired = !s.Now().Before(out.ExpiresAt)
+	raw, err := s.Sim.Status(ctx)
+	if err != nil {
+		return SimPreview{}, err
+	}
+	var st struct {
+		Perp   string             `json:"perp"`
+		Target *string            `json:"target_price"`
+		Params map[string]float64 `json:"params"`
+	}
+	if err := json.Unmarshal(raw, &st); err != nil || st.Target == nil {
+		return SimPreview{}, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "market-sim answered without its target")
+	}
+	target, err := decimal.NewFromString(*st.Target)
+	if err != nil || !target.IsPositive() {
+		return SimPreview{}, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "market-sim answered without its target")
+	}
+	out.Target = &target
+	expected := simExpected(*a, target, st.Params["p0"])
+	if expected == nil {
+		return out, nil
+	}
+	out.Expected = expected
+	move, _ := expected.Div(target).Sub(decimal.NewFromInt(1)).Round(4).Float64()
+	out.Move = &move
+	if st.Perp != "" {
+		if out.Impact, err = s.SimImpact(ctx, p, expected.Round(8).String()); err != nil {
+			s.Log.WarnContext(ctx, "sim preview: no impact", "approval_id", id, "error", err)
+			out.Impact = nil
+		}
+	}
+	return out, nil
+}
+
+// simExpected is where a request would take the price from target: a
+// jump's, a target event's price, the settings' new anchor (the target
+// moves with P0); nil for changes that move no price directly.
+func simExpected(a domain.Approval, target decimal.Decimal, p0 float64) *decimal.Decimal {
+	var change struct {
+		Type   string          `json:"type"`
+		Size   float64         `json:"size"`
+		Price  string          `json:"price"`
+		Params json.RawMessage `json:"params"`
+	}
+	if json.Unmarshal([]byte(a.Payload["change"]), &change) != nil {
+		return nil
+	}
+	var out decimal.Decimal
+	switch {
+	case a.Kind == domain.KindSimEvent && change.Type == "JUMP":
+		out = target.Mul(decimal.NewFromFloat(1 + change.Size))
+	case a.Kind == domain.KindSimEvent && change.Type == "TARGET":
+		px, err := decimal.NewFromString(change.Price)
+		if err != nil {
+			return nil
+		}
+		out = px
+	case a.Kind == domain.KindSimParams && p0 > 0:
+		var params struct {
+			P0 float64 `json:"p0"`
+		}
+		if json.Unmarshal(change.Params, &params) != nil || params.P0 <= 0 || params.P0 == p0 {
+			return nil
+		}
+		out = target.Mul(decimal.NewFromFloat(params.P0 / p0))
+	default:
+		return nil
+	}
+	if !out.IsPositive() {
+		return nil
+	}
+	return &out
 }
 
 // executeSim carries out an approved simulated market change in the

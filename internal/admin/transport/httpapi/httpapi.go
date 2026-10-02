@@ -147,6 +147,7 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Post("/sim/impact", h.simImpact)
 			r.Get("/sim/token", h.simToken)
 			r.Post("/sim/mint", h.simMint)
+			r.Get("/approvals/{id}/sim-preview", h.simPreview)
 			r.Get("/assets/{code}/profile", h.assetProfile)
 			r.Put("/assets/{code}/profile", h.updateAssetProfile)
 			r.Get("/instruments/changes", h.instrumentChanges)

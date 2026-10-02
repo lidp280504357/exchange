@@ -113,6 +113,41 @@ func (h *Handler) endSimEvent(w http.ResponseWriter, r *http.Request) {
 	writeRaw(w, raw)
 }
 
+// SimPreviewJSON is a simulated market's request measured now.
+type SimPreviewJSON struct {
+	ExpiresAt     string          `json:"expires_at"`
+	Expired       bool            `json:"expired"`
+	TargetPrice   *string         `json:"target_price"`
+	ExpectedPrice *string         `json:"expected_price"`
+	Move          *float64        `json:"move"`
+	RequestedMove *string         `json:"requested_move"`
+	Impact        json.RawMessage `json:"impact"`
+}
+
+func (h *Handler) simPreview(w http.ResponseWriter, r *http.Request) {
+	pv, err := h.Svc.SimApprovalPreview(r.Context(), principal(r), chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out := SimPreviewJSON{ExpiresAt: httpx.FormatTime(pv.ExpiresAt), Expired: pv.Expired, Move: pv.Move, Impact: pv.Impact}
+	if pv.Target != nil {
+		v := pv.Target.String()
+		out.TargetPrice = &v
+	}
+	if pv.Expected != nil {
+		v := pv.Expected.Round(8).String()
+		out.ExpectedPrice = &v
+	}
+	if pv.RequestedMove != "" {
+		out.RequestedMove = &pv.RequestedMove
+	}
+	if out.Impact == nil {
+		out.Impact = json.RawMessage("null")
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
 // SimTokenJSON is who holds the simulated market's coin.
 type SimTokenJSON struct {
 	Asset    string           `json:"asset"`

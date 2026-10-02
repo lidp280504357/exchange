@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { DangerAction, FormError } from "../../kit/actions";
 import { Card, Page } from "../../kit/Page";
-import { pct, price, simEventsKey, simKey, useSim, type SimEventType } from "./common";
+import { ImpactLines, pct, price, simEventsKey, simKey, useSim, type SimEventType } from "./common";
 
 // Price control (ASTRA design §6.1): the model's and the bots' settings,
 // and the price events. One operator moves the price by at most 30% at
@@ -250,23 +250,7 @@ function Impact({ price: at }: { price: number }) {
   let body: ReactNode;
   if (q.isPending) body = <Skeleton className="h-10 w-full" />;
   else if (q.isError) body = <span className="text-warn">{t("admin.sim.impactUnknown")}</span>;
-  else {
-    const i = q.data;
-    body = (
-      <span className="flex flex-col gap-0.5" data-testid="sim-impact">
-        <span>
-          {i.longs === null || i.shorts === null
-            ? t("admin.sim.impactOpen", { symbol: i.symbol, n: i.positions })
-            : t("admin.sim.impactPositions", { symbol: i.symbol, longs: i.longs, shorts: i.shorts })}
-        </span>
-        <span className={i.liquidated ? "text-danger" : "text-fg-2"}>
-          {t("admin.sim.impactLiquidated", { n: i.liquidated, notional: i.notional, accounts: i.accounts })}
-        </span>
-        {Number(i.insurance_cost) > 0 && <span className="text-danger">{t("admin.sim.impactShortfall", { amount: i.insurance_cost })}</span>}
-        {i.unmeasured > 0 && <span className="text-warn">{t("admin.sim.impactUnmeasured", { n: i.unmeasured })}</span>}
-      </span>
-    );
-  }
+  else body = <ImpactLines i={q.data} />;
   return (
     <span className="mt-1 rounded-1 border border-line-1 bg-bg-2 px-2 py-1.5 text-xs">
       <Badge tone="info">{t("admin.sim.impact")}</Badge> {body}

@@ -1,8 +1,8 @@
 import { adminApi, adminData, type AdminSchemas } from "@exchange/core/api/admin";
-import { Badge } from "@exchange/ui";
+import { Badge, Skeleton } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Num } from "../../kit/format";
+import { Num, TimeText } from "../../kit/format";
 
 // What the simulated market's pages share (ASTRA design §6, C5): the
 // state from market-sim (asked again every few seconds), its events and
@@ -12,6 +12,60 @@ export type SimStatus = AdminSchemas["SimStatus"];
 export type SimEvent = AdminSchemas["SimEvent"];
 export type SimBot = AdminSchemas["SimBot"];
 export type SimEventType = SimEvent["type"];
+export type SimImpact = AdminSchemas["SimImpact"];
+
+/** ImpactLines says what a price would do to the perpetual's positions (ASTRA design §6.3). */
+export function ImpactLines({ i }: { i: SimImpact }) {
+  const { t } = useTranslation();
+  return (
+    <span className="flex flex-col gap-0.5" data-testid="sim-impact">
+      <span>
+        {i.longs === null || i.shorts === null
+          ? t("admin.sim.impactOpen", { symbol: i.symbol, n: i.positions })
+          : t("admin.sim.impactPositions", { symbol: i.symbol, longs: i.longs, shorts: i.shorts })}
+      </span>
+      <span className={i.liquidated ? "text-danger" : "text-fg-2"}>
+        {t("admin.sim.impactLiquidated", { n: i.liquidated, notional: i.notional, accounts: i.accounts })}
+      </span>
+      {Number(i.insurance_cost) > 0 && <span className="text-danger">{t("admin.sim.impactShortfall", { amount: i.insurance_cost })}</span>}
+      {i.unmeasured > 0 && <span className="text-warn">{t("admin.sim.impactUnmeasured", { n: i.unmeasured })}</span>}
+    </span>
+  );
+}
+
+/**
+ * SimRequestNow measures a simulated market's request for the
+ * administrator deciding it (C5.5 ④): when it lapses, where it would take
+ * the price now beside the move measured when it was asked for, and what
+ * that would do to the perpetual.
+ */
+export function SimRequestNow({ id }: { id: string }) {
+  const { t } = useTranslation();
+  const q = useQuery({
+    queryKey: [...simKey, "preview", id],
+    queryFn: async () => adminData(await adminApi.GET("/admin/v1/approvals/{id}/sim-preview", { params: { path: { id } } })),
+  });
+  if (q.isPending) return <Skeleton className="h-16 w-full" />;
+  if (q.isError) return <p className="text-sm text-warn">{t("admin.sim.previewUnknown")}</p>;
+  const pv = q.data;
+  return (
+    <div className="flex flex-col gap-1.5 rounded-1 border border-line-1 bg-bg-2 px-3 py-2 text-xs" data-testid="sim-request-now">
+      <span className={pv.expired ? "font-medium text-danger" : "text-fg-2"}>
+        {t(pv.expired ? "admin.sim.lapsed" : "admin.sim.lapses")} <TimeText value={pv.expires_at} />
+      </span>
+      {pv.expected_price ? (
+        <span>
+          {t("admin.sim.nowMoves")} <span className="font-mono">{price(pv.target_price)} → {price(pv.expected_price)}</span>
+          {pv.move !== null && <span className="font-mono"> ({pct(pv.move, 1)})</span>}
+          {pv.requested_move && <span className="text-fg-3"> · {t("admin.sim.askedMove", { move: pct(Number(pv.requested_move), 1) })}</span>}
+        </span>
+      ) : (
+        <span className="text-fg-3">{t("admin.sim.noDirectMove")}</span>
+      )}
+      {pv.impact && <ImpactLines i={pv.impact} />}
+    </div>
+  );
+}
 
 export const simKey = ["admin", "sim"];
 export const simEventsKey = ["admin", "sim", "events"];

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -155,5 +156,71 @@ func TestTheSimulatedMarketFromTheConsole(t *testing.T) {
 	}
 	if q := h.derivatives.queries[len(h.derivatives.queries)-1]; q.Symbol != "ASTRA-USDT-PERP" || q.Limit != simPositionsMax {
 		t.Fatalf("positions asked %+v", q)
+	}
+}
+
+// pricedSim is market-sim with a target price and an anchor.
+type pricedSim struct{ fakeSim }
+
+func (s *pricedSim) Status(context.Context) (json.RawMessage, error) {
+	return json.RawMessage(`{"symbol":"ASTRA-USDT","perp":"ASTRA-USDT-PERP","target_price":"1.25","params":{"p0":1,"sigma":0.8},"bots":[]}`), nil
+}
+
+func TestASimRequestLapsesAndIsMeasuredAgainForItsDecider(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	sim := &pricedSim{}
+	h.svc.Sim, h.svc.SimBots = sim, sim
+	h.admin(t, "ops@example.com", domain.RoleOperator)
+	h.admin(t, "boss@example.com", domain.RoleAdmin)
+	ops, boss := h.login(t, "ops@example.com"), h.login(t, "boss@example.com")
+	size := 0.35
+	res, err := h.svc.CreateSimEvent(ctx, ops, SimEventInput{Type: "JUMP", Size: &size}, "a big push")
+	if err != nil || res.Approval == nil {
+		t.Fatalf("waits %+v %v", res, err)
+	}
+	a := *res.Approval
+
+	// Measured now for its decider: where it takes the price and the impact.
+	pv, err := h.svc.SimApprovalPreview(ctx, boss, a.ID)
+	if err != nil || pv.Expired || !pv.ExpiresAt.Equal(h.now.Add(24*time.Hour)) || pv.Target.String() != "1.25" ||
+		pv.Expected.String() != "1.6875" || *pv.Move != 0.35 || pv.RequestedMove != "0.35" || !strings.Contains(string(pv.Impact), `"liquidated":2`) {
+		t.Fatalf("preview %+v %v", pv, err)
+	}
+	if h.derivatives.tiers[len(h.derivatives.tiers)-1] != "ASTRA-USDT-PERP at 1.6875" {
+		t.Fatalf("the impact at the expected price %v", h.derivatives.tiers)
+	}
+
+	// A day later it lapses: approving it fails it, nothing sent.
+	h.now = h.now.Add(25 * time.Hour)
+	if pv, err := h.svc.SimApprovalPreview(ctx, boss, a.ID); err != nil || !pv.Expired {
+		t.Fatalf("lapsed %+v %v", pv, err)
+	}
+	done, err := h.svc.DecideApproval(ctx, boss, a.ID, true, "too late")
+	if err != nil || done.Status != domain.ApprovalFailed || !strings.HasPrefix(done.Result, "expired at ") || len(sim.events) != 0 {
+		t.Fatalf("lapsed request %+v %v %v", done, err, sim.events)
+	}
+
+	// An event lapses when it was to start, if sooner.
+	soon := h.now.Add(time.Hour).Format(time.RFC3339)
+	res, err = h.svc.CreateSimEvent(ctx, ops, SimEventInput{Type: "JUMP", Size: &size, StartsAt: soon}, "a big push in an hour")
+	if err != nil || res.Approval == nil || !simExpiry(*res.Approval).Equal(h.now.Add(time.Hour).Truncate(time.Second)) {
+		t.Fatalf("starts in an hour %+v %v", res, err)
+	}
+	h.now = h.now.Add(2 * time.Hour)
+	if done, err := h.svc.DecideApproval(ctx, boss, res.Approval.ID, true, "after it was due"); err != nil || done.Status != domain.ApprovalFailed {
+		t.Fatalf("due before it was decided %+v %v", done, err)
+	}
+
+	// The settings: the target moves with the anchor.
+	res, err = h.svc.UpdateSimParams(ctx, ops, json.RawMessage(`{"p0":3,"sigma":0.8}`), "triple the anchor")
+	if err != nil || res.Approval == nil {
+		t.Fatalf("settings wait %+v %v", res, err)
+	}
+	if pv, err := h.svc.SimApprovalPreview(ctx, boss, res.Approval.ID); err != nil || pv.Expected.String() != "3.75" || *pv.Move != 2 {
+		t.Fatalf("settings preview %+v %v", pv, err)
+	}
+	if _, err := h.svc.SimApprovalPreview(ctx, boss, uuid.NewString()); code(err) != apperr.CodeNotFound {
+		t.Fatalf("no such request: %v", err)
 	}
 }
