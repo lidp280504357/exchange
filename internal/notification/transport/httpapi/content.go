@@ -64,6 +64,10 @@ type summaryJSON struct {
 
 func summaryOf(a domain.Article, loc string) summaryJSON {
 	t, ok := a.Text(loc)
+	if strings.TrimSpace(t.Summary) == "" {
+		// A list carries no body: its summary, else the body's first paragraph.
+		t.Summary = domain.Excerpt(t.Body)
+	}
 	return summaryJSON{
 		Slug: a.Slug, Category: a.Category, Pinned: a.Pinned, Order: a.Order, Title: t.Title, Summary: t.Summary,
 		PublishedAt: httpx.FormatTime(a.PublishAt), Locale: t.Locale, Fallback: !ok, Version: a.Version,

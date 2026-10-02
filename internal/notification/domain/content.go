@@ -89,6 +89,39 @@ func (a Article) Text(locale string) (ArticleText, bool) {
 	return zh, false
 }
 
+// The Markdown a summary drops: the markers of a block that is not a
+// paragraph, links and images (their text stays) and emphasis.
+var (
+	notParagraph = regexp.MustCompile("^(#|>|\\||```|~~~|[-*+] |\\d+[.)] |(-{3,}|\\*{3,}|_{3,})$)")
+	mdLink       = regexp.MustCompile(`!?\[([^\]]*)\]\([^)]*\)`)
+	mdEmphasis   = regexp.MustCompile("\\*\\*|__|~~|`|\\*")
+	spaces       = regexp.MustCompile(`\s+`)
+)
+
+// excerptMax bounds a summary taken from the body, as the sites do.
+const excerptMax = 140
+
+// Excerpt is the first paragraph of a Markdown body as plain text, at most
+// 140 characters: an article's summary when none was written (the sites
+// take the same from a body they have).
+func Excerpt(body string) string {
+	for _, block := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n\n") {
+		block = strings.TrimSpace(block)
+		if block == "" || notParagraph.MatchString(block) {
+			continue
+		}
+		text := strings.TrimSpace(spaces.ReplaceAllString(mdEmphasis.ReplaceAllString(mdLink.ReplaceAllString(block, "$1"), ""), " "))
+		if text == "" {
+			continue
+		}
+		if r := []rune(text); len(r) > excerptMax {
+			text = strings.TrimSpace(string(r[:excerptMax-1])) + "…"
+		}
+		return text
+	}
+	return ""
+}
+
 // Visible reports whether the sites show the article at now.
 func (a Article) Visible(now time.Time) bool {
 	return a.Status == ArticlePublished && !a.PublishAt.After(now)
