@@ -49,7 +49,7 @@ bash /opt/exchange/src/deploy/server-update.sh          # 在服务器上直接�
 放令牌：
 1. 用户在 GitHub 的 Settings → Developer settings → Personal access tokens (classic) 建一个只勾 `read:packages` 的令牌。
 2. 在服务器上 `printf '%s' '<令牌>' | sudo docker login ghcr.io -u lidp280504357 --password-stdin`（只存在 `/root/.docker/config.json`，不进仓库、不打印）；`sudo docker pull ghcr.io/lidp280504357/exchange-app:main` 能拉下来即可。
-3. 额度：免费账户的私有包只有 500 MB 存储、每月 1 GB 流出（拉到 Actions 以外的机器都算），一个版本的二进制层约一两百 MB，按现在一天十来次部署，几天就会用完（用完后拉取失败，部署自动退回服务器构建）。仓库本身是公开的，镜像里没有密钥（都在服务器的 env 文件里），把包设为公开就没有这些限制；要不要改由用户决定。
+3. 额度：免费账户的私有包只有 500 MB 存储、每月 1 GB 流出（拉到 Actions 以外的机器都算），一个版本的二进制层约一两百 MB，按现在一天十来次部署，几天就会用完（用完后拉取失败，部署自动退回服务器构建）。仓库本身是公开的，镜像里没有密钥（都在服务器的 env 文件里），把包设为公开就没有这些限制。**用户决定（2026-10-03）**：维持免费层与私有包，额度用完就回退到服务器本地构建（拉取遇到 denied/429 同样快速回退，不重试）；本地构建前检查内存，可用内存不足时拒绝构建并提示升级服务器，由用户处理升级。
 
 部署会重启 market-data-service，合约的标记价断几秒就可能进入只减仓（`MARK_PRICE_STALE`、`INDEX_SOURCES`）：脚本在服务都起来后最多等三分钟，标记价恢复（`degraded` 为 false）就以 `deploy-<提交>` 的名义解除这次部署期间开始的只减仓。部署中途失败时，它的开始时间留在 `infra/deploy.started`，下一次走完的部署从那时算起一起解除，然后删掉这个文件（2026-10-02 一次失败的部署后 ASTRA-USDT-PERP 因此停在只减仓，下一次部署也没解除）。
 
