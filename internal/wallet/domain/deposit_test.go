@@ -66,7 +66,7 @@ func TestDepositDecisions(t *testing.T) {
 
 	odd := unclaimed()
 	odd.Source = SourceManual
-	if odd.MatchCallback("addr", "USDT", decimal.NewFromInt(1), now) || !odd.Attention() {
+	if odd.MatchCallback(odd.ProviderTxID, "addr", "USDT", decimal.NewFromInt(1), now) || !odd.Attention() {
 		t.Fatalf("a disagreeing callback needs a person: %+v", odd)
 	}
 	if err := odd.Release("j2", "ops", "credit it", now); err == nil {

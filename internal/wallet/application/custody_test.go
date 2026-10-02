@@ -330,8 +330,14 @@ func TestCustodyDepositCallbacks(t *testing.T) {
 	}
 
 	small := deposit
-	small.TradeID, small.Amount, small.RawAmount = "t2", d("0.5"), d("500000")
+	small.TradeID, small.TxHash, small.Amount, small.RawAmount = "t2", "abc2", d("0.5"), d("500000")
 	h.callback(t, small)
+	// The same transfer under another trade is not booked twice.
+	twice := deposit
+	twice.TradeID = "t1-again"
+	if cb := h.callback(t, twice); cb.Result != domain.CallbackUnmatched || len(h.store.deposits) != 2 {
+		t.Fatalf("the same transfer again: %+v", cb)
+	}
 	review := deposit
 	review.TradeID, review.Status, review.Word = "t3", 0, domain.CustodyReview
 	if cb := h.callback(t, review); cb.Result != domain.CallbackIgnored {

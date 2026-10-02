@@ -168,13 +168,17 @@ func (d *Deposit) Dismiss(actor, note string, now time.Time) error {
 }
 
 // MatchCallback compares a backfilled deposit with the custodian's own
-// callback that arrived later: the same address, asset and amount mark it
-// confirmed; anything else is recorded as a discrepancy for an
-// administrator, never corrected or booked again. It reports whether the
-// callback matched.
-func (d *Deposit) MatchCallback(address, asset string, amount decimal.Decimal, now time.Time) bool {
+// callback that arrived later (found by its trade, or by its transfer
+// when the backfill was entered with another trade): the same trade,
+// address, asset and amount mark it confirmed; anything else is recorded
+// as a discrepancy for an administrator, never corrected or booked again.
+// It reports whether the callback matched.
+func (d *Deposit) MatchCallback(trade, address, asset string, amount decimal.Decimal, now time.Time) bool {
 	d.CallbackAt = now
 	var diffs []string
+	if d.ProviderTxID != trade {
+		diffs = append(diffs, fmt.Sprintf("trade %s, entered %s", trade, d.ProviderTxID))
+	}
 	if !strings.EqualFold(d.Address, address) {
 		diffs = append(diffs, fmt.Sprintf("address %s, entered %s", address, d.Address))
 	}

@@ -127,6 +127,31 @@ func TestManualDepositsAndTheirLateCallbacks(t *testing.T) {
 	if _, err := h.svc.DismissDeposit(ctx, d3.ID, "ops@example.com", "again"); !apperr.Is(err, "WALLET_DEPOSIT_RESOLVED") {
 		t.Fatalf("dismissed twice: %v", err)
 	}
+
+	// A backfill entered with a wrong trade ID: the custodian's callback
+	// under the real one finds it by the transfer, books nothing again and
+	// leaves the trade for a person.
+	in4 := ManualDeposit{Network: tron, TradeID: "typo4", Address: addr.Address, TxHash: "tx-m4", Amount: d("5"), Actor: "ops@example.com"}
+	d4, err := h.svc.BookManualDeposit(ctx, in4, "callback lost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cb = h.callback(t, ports.CustodyTrade{
+		TradeID: "m4", Kind: domain.CallbackDeposit, Status: 3, Word: domain.CustodySuccess, Coin: usdtCoin, Address: strings.ToUpper(addr.Address),
+		Amount: d("5"), RawAmount: d("5000000"), TxHash: "TX-M4",
+	})
+	got = h.store.deposits[d4.ID]
+	if cb.Result != domain.CallbackDiscrepancy || !strings.Contains(got.Discrepancy, "trade UDUN:m4, entered UDUN:typo4") || len(h.store.deposits) != 3 {
+		t.Fatalf("a backfill under another trade %+v %+v", cb, got)
+	}
+	// Once matched, the same transfer under yet another trade is not booked.
+	cb = h.callback(t, ports.CustodyTrade{
+		TradeID: "m4-again", Kind: domain.CallbackDeposit, Status: 3, Word: domain.CustodySuccess, Coin: usdtCoin, Address: addr.Address,
+		Amount: d("5"), RawAmount: d("5000000"), TxHash: "tx-m4",
+	})
+	if cb.Result != domain.CallbackUnmatched || !strings.Contains(cb.Detail, "the transfer is deposit "+d4.ID) || len(h.store.deposits) != 3 {
+		t.Fatalf("the same transfer again %+v", cb)
+	}
 }
 
 func TestUnclaimedDepositsAreCreditedByHand(t *testing.T) {

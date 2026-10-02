@@ -272,15 +272,19 @@ func TestWalletSchema(t *testing.T) {
 	rejects(t, db, "unclaimed deposits end REJECTED", dep, uuid.New(), user, "ETH", tx, 10, true, "BELOW_MINIMUM", "CREDITED", uuid.New())
 	rejects(t, db, "known statuses only", dep, uuid.New(), user, "ETH", tx, 11, false, nil, "LOST", nil)
 
-	// A custodian's deposit is its trade: one transaction may pay several
-	// addresses, and its hash need not be EVM's.
+	// A custodian's deposit is its trade, and one transfer: one transaction
+	// may pay several addresses, its hash need not be EVM's, and the same
+	// transfer under a second trade (a backfill entered with a wrong trade
+	// ID and the custodian's callback) is refused whatever the case.
 	reported := `INSERT INTO deposits (id, user_id, asset, network, address, tx_hash, log_index, block_number, block_hash, amount,
 		raw_amount, required_confirmations, provider_tx_id, status, detected_at)
-		VALUES ($1, $2, 'BTC', 'BTC', 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq', $3, -1, 0, '', 0.01, 1000000, 0, $4, 'CONFIRMED', now())`
+		VALUES ($1, $2, 'BTC', 'BTC', $5, $3, -1, 0, '', 0.01, 1000000, 0, $4, 'CONFIRMED', now())`
 	btcTx := strings.Repeat("cd", 32)
-	accepts(t, db, reported, uuid.New(), user, btcTx, "trade-1")
-	accepts(t, db, reported, uuid.New(), user, btcTx, "trade-2")
-	rejects(t, db, "a trade is one deposit", reported, uuid.New(), user, strings.Repeat("ef", 32), "trade-1")
+	accepts(t, db, reported, uuid.New(), user, btcTx, "trade-1", "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq")
+	accepts(t, db, reported, uuid.New(), user, btcTx, "trade-2", "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh")
+	rejects(t, db, "a trade is one deposit", reported, uuid.New(), user, strings.Repeat("ef", 32), "trade-1", "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq")
+	rejects(t, db, "a transfer is one deposit, whatever its trade", reported, uuid.New(), user, strings.ToUpper(btcTx), "trade-3",
+		"BC1QAR0SRRR7XFKVY5L643LYDNW9RE59GTZZWF5MDQ")
 
 	wd := `INSERT INTO withdrawals (id, user_id, asset, network, address, amount, fee, status, required_confirmations, provider,
 		submitted_at, created_at, updated_at) VALUES ($1, $2, 'BTC', 'BTC', 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh', 0.01, 0.0001,

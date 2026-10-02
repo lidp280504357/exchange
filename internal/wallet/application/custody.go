@@ -274,6 +274,21 @@ func (s *Service) applyDeposit(ctx context.Context, r ports.Repos, provider stri
 		}
 		return "", "", err
 	}
+	// The same transfer under another trade ID: a backfill entered with a
+	// wrong one is matched by the transfer (and the trade differs, so a
+	// person looks); any other deposit of it is never booked twice.
+	if t.TxHash != "" {
+		same, err := r.Deposits().ByTransfer(ctx, net.Network, t.TxHash, t.Address)
+		if err != nil {
+			return "", "", err
+		}
+		if same != nil && same.Source == domain.SourceManual && same.CallbackAt.IsZero() {
+			return s.matchManual(ctx, r, provider, *same, t, now)
+		}
+		if same != nil {
+			return domain.CallbackUnmatched, fmt.Sprintf("the transfer is deposit %s already (%s)", same.ID, same.ProviderTxID), nil
+		}
+	}
 	if !t.RawAmount.IsPositive() {
 		return domain.CallbackIgnored, "nothing transferred", nil
 	}
@@ -318,7 +333,7 @@ func (s *Service) matchManual(ctx context.Context, r ports.Repos, provider strin
 	} else if ok {
 		asset, amount = net.Asset, t.Amount.Truncate(net.Decimals)
 	}
-	matched := d.MatchCallback(t.Address, asset, amount, now)
+	matched := d.MatchCallback(provider+":"+t.TradeID, t.Address, asset, amount, now)
 	if err := r.Deposits().Update(ctx, d); err != nil {
 		return "", "", err
 	}

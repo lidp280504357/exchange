@@ -56,7 +56,7 @@ func TestAdminStorage(t *testing.T) {
 	}
 
 	// The callback disagrees: a discrepancy, then dismissed.
-	if manual.MatchCallback(manual.Address, "USDT", decimal.NewFromInt(41), now) {
+	if manual.MatchCallback(manual.ProviderTxID, manual.Address, "USDT", decimal.NewFromInt(41), now) {
 		t.Fatal("41 is not 40")
 	}
 	if err := update(manual); err != nil {
