@@ -128,8 +128,10 @@ func (c memCallbacks) Attention(context.Context) (int, time.Time, error) {
 // ports.CustodyTrade, "bad:" before it for a wrong signature and "stale:"
 // for an old one.
 type fakeCustody struct {
-	// onCreate runs while an address is created (a concurrent request).
+	// onCreate runs while an address is created (a concurrent request),
+	// onSubmit while a withdrawal is handed over (a callback meanwhile).
 	onCreate  func()
+	onSubmit  func(id string)
 	created   int
 	submitted []string
 	refuse    bool
@@ -160,6 +162,9 @@ func (f *fakeCustody) Submit(_ context.Context, w domain.Withdrawal, _ domain.Ne
 		return domain.ErrCustodyRefused.WithDetail("reason", "code 4001: balance too low")
 	}
 	f.submitted = append(f.submitted, w.ID)
+	if f.onSubmit != nil {
+		f.onSubmit(w.ID)
+	}
 	return nil
 }
 
@@ -660,9 +665,23 @@ func TestCustodyRefusedRetriesWaitForTheCustodian(t *testing.T) {
 	if _, err := ResolveCustodyWithdrawal(context.Background(), h.store, unsent.ID, false, "", "ops", "", h.now); err == nil {
 		t.Fatal("resolved without a reason")
 	}
+	// Not while it is being handed over: a later handover the custodian
+	// accepts would send what was released.
+	cur := h.store.wds[unsent.ID]
+	cur.ProviderStatus = domain.CustodySubmitted
+	h.store.wds[unsent.ID] = cur
+	if _, err := ResolveCustodyWithdrawal(context.Background(), h.store, unsent.ID, false, "", "ops", "gone", h.now); !apperr.Is(err, "WALLET_CUSTODY_HANDOVER_PENDING") {
+		t.Fatalf("failed while handed over: %v", err)
+	}
+	cur.ProviderStatus = domain.CustodyUncertain
+	h.store.wds[unsent.ID] = cur
+	audits := len(h.store.audits)
 	got, err := ResolveCustodyWithdrawal(context.Background(), h.store, unsent.ID, false, "", "ops", "not in the custodian's records", h.now)
 	if err != nil || got.Status != domain.WithdrawalFailed || got.RejectReason != "CUSTODY_FAILED: resolved by ops: not in the custodian's records" {
 		t.Fatalf("resolved %+v %v", got, err)
+	}
+	if len(h.store.audits) != audits+1 {
+		t.Fatalf("%d audits, want one more than %d", len(h.store.audits), audits)
 	}
 	h.cround(t)
 	if got := h.store.wds[unsent.ID]; got.UnfreezeJournal == "" {
@@ -670,6 +689,25 @@ func TestCustodyRefusedRetriesWaitForTheCustodian(t *testing.T) {
 	}
 	if _, err := ResolveCustodyWithdrawal(context.Background(), h.store, unsent.ID, true, "beef", "ops", "again", h.now); err == nil {
 		t.Fatal("resolved twice")
+	}
+}
+
+// The custodian accepting a handover of a withdrawal that failed and was
+// released meanwhile (a callback while it was on its way) may still send
+// it: counted with the contradictions and logged, nothing reversed.
+func TestALateHandoverOfAFailedWithdrawalIsCounted(t *testing.T) {
+	h := newCustodyHarness(t)
+	contradictions := &countingCounter{}
+	h.cproc.Contradictions = contradictions
+	wd := h.requestCustody(t, "20")
+	h.custody.onSubmit = func(id string) {
+		cur := h.store.wds[id]
+		cur.Status, cur.ProviderStatus, cur.RejectReason = domain.WithdrawalFailed, domain.CustodyFailed, "CUSTODY_FAILED: callback"
+		h.store.wds[id] = cur
+	}
+	h.cround(t)
+	if got := h.store.wds[wd.ID]; got.Status != domain.WithdrawalFailed || contradictions.n != 1 {
+		t.Fatalf("%+v, %d contradictions", got, contradictions.n)
 	}
 }
 

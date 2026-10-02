@@ -442,6 +442,14 @@ func ResolveCustodyWithdrawal(ctx context.Context, store ports.Store, id string,
 		if sent {
 			word = domain.CustodySuccess
 		}
+		// Still being handed over (the processor hands it over again every
+		// minute until the custodian answers): called failed now, a later
+		// handover the custodian accepts would send funds already released.
+		if !sent && w.ProviderStatus == domain.CustodySubmitted {
+			return apperr.New(apperr.KindConflict, "WALLET_CUSTODY_HANDOVER_PENDING",
+				"the withdrawal is still being handed over to the custodian: wait for its answer (or for UNCERTAIN) before calling it failed")
+		}
+		from := w.ProviderStatus
 		if !w.Custodian(word, tx, now) {
 			return apperr.New(apperr.KindConflict, apperr.CodeConflict, "the withdrawal is "+w.Status+", not with the custodian")
 		}
@@ -449,6 +457,12 @@ func ResolveCustodyWithdrawal(ctx context.Context, store ports.Store, id string,
 			w.RejectReason = "CUSTODY_FAILED: resolved by " + actor + ": " + reason
 		}
 		if err := r.Withdrawals().Update(ctx, *w); err != nil {
+			return err
+		}
+		if err := r.Audit(ctx, &auditv1.AdminActionPerformed{
+			Target: "withdrawal:" + w.ID, Action: "wallet.custody.withdrawal.resolve", Actor: actor, Reason: reason,
+			Details: fmt.Sprintf(`{"provider":%q,"from":%q,"to":%q,"tx_hash":%q}`, w.Provider, from, word, tx),
+		}, actor); err != nil {
 			return err
 		}
 		out = *w

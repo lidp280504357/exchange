@@ -36,6 +36,9 @@ type CustodyProcessor struct {
 	// Elsewhere reports what the platform's own wallets hold of an asset
 	// now (nil: nothing).
 	Elsewhere ports.Holdings
+	// Contradictions counts what the custodian did against a finished
+	// withdrawal (the service's counter, shared).
+	Contradictions prometheus.Counter
 	// CheckEvery paces the check (an hour), BalanceEvery the balances (5
 	// minutes); a withdrawal the custodian did not acknowledge is handed
 	// over again after ResubmitAfter (a minute).
@@ -278,6 +281,15 @@ func (p *CustodyProcessor) handOver(ctx context.Context, w domain.Withdrawal, ne
 		}
 		if !refused {
 			if !cur.Custodian(domain.CustodyAccepted, "", p.Now()) {
+				if cur.Status == domain.WithdrawalFailed {
+					// Resolved as failed, its funds released, while this
+					// handover was on its way: the custodian may send it.
+					if p.Contradictions != nil {
+						p.Contradictions.Inc()
+					}
+					p.Log.ErrorContext(ctx, "the custodian accepted a withdrawal already failed and released: it may send it; check its console",
+						"withdrawal_id", cur.ID, "reason", cur.RejectReason)
+				}
 				return nil
 			}
 			p.Log.InfoContext(ctx, "withdrawal handed to the custodian", "withdrawal_id", cur.ID, "network", cur.Network)

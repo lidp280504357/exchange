@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -18,6 +19,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/ledger/adapters/postgres"
 	"github.com/lidp280504357/exchange/internal/ledger/adapters/users"
 	"github.com/lidp280504357/exchange/internal/ledger/application"
+	"github.com/lidp280504357/exchange/internal/ledger/domain"
 	"github.com/lidp280504357/exchange/internal/ledger/transport/consumer"
 	"github.com/lidp280504357/exchange/internal/ledger/transport/grpcapi"
 	"github.com/lidp280504357/exchange/internal/ledger/transport/httpapi"
@@ -96,9 +98,16 @@ func setup(ctx context.Context, a *app.App) error {
 		return err
 	}
 	store := postgres.NewStore(db, events)
+	assets := instruments.New(instrumentv1.NewInstrumentServiceClient(instrumentConn))
+	// The assets HOUSE must hold to sell, read before the trades settle;
+	// until they are every asset counts (ADR-0013).
+	if err := loadBacked(ctx, a, assets); err != nil {
+		a.Logger().WarnContext(ctx, "HOUSE's backed assets not read yet: every asset counts as backed until they are", "error", err)
+	}
+	a.Add("backed assets", app.Loop(backedLoop(a, assets)))
 	svc := &application.Service{
 		Store:          store,
-		Assets:         instruments.New(instrumentv1.NewInstrumentServiceClient(instrumentConn)),
+		Assets:         assets,
 		Eligibility:    users.New(userv1.NewUserServiceClient(userConn)),
 		Flags:          flagClient,
 		Log:            a.Logger(),
@@ -134,6 +143,44 @@ func setup(ctx context.Context, a *app.App) error {
 	r := a.NewRouter()
 	(&httpapi.Handler{Svc: svc}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
+}
+
+// loadBacked reads the assets HOUSE must hold to sell (those with a
+// network) into the ledger's rule.
+func loadBacked(ctx context.Context, a *app.App, assets *instruments.Client) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	list, err := assets.Backed(ctx)
+	if err != nil {
+		return err
+	}
+	before, known := domain.HouseBackedAssets()
+	domain.SetHouseBacked(list)
+	if now, _ := domain.HouseBackedAssets(); !known || !slices.Equal(before, now) {
+		a.Logger().InfoContext(ctx, "HOUSE's backed assets", "assets", now)
+	}
+	return nil
+}
+
+// backedLoop reads the backed assets again every five minutes, every 30
+// seconds while they were never read.
+func backedLoop(a *app.App, assets *instruments.Client) func(context.Context) error {
+	return func(ctx context.Context) error {
+		for {
+			wait := 5 * time.Minute
+			if _, known := domain.HouseBackedAssets(); !known {
+				wait = 30 * time.Second
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(wait):
+			}
+			if err := loadBacked(ctx, a, assets); err != nil && ctx.Err() == nil {
+				a.Logger().WarnContext(ctx, "HOUSE's backed assets not read", "error", err)
+			}
+		}
+	}
 }
 
 // retryLoop settles the trades parked as FAILED again every interval: the

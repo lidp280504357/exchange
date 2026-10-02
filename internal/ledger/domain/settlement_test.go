@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -188,8 +189,20 @@ func TestHouseTradesSettleOnMarketMaker(t *testing.T) {
 }
 
 // HOUSE may sell an internal asset it does not hold (it goes short), never
-// a backed one (ADR-0013): that trade is refused, to be parked.
+// a backed one (ADR-0013): that trade is refused, to be parked. Until the
+// backed assets are read every asset counts as backed.
 func TestHouseMayGoShortOnlyInInternalAssets(t *testing.T) {
+	houseBacked.Store(nil)
+	if !HouseBacked("SOL") || SystemAccount(AccountMarketMaker, "SOL").MayGoNegative() {
+		t.Fatal("an internal asset before the backed assets are read")
+	}
+	if _, known := HouseBackedAssets(); known {
+		t.Fatal("known before set")
+	}
+	SetHouseBacked([]string{"USDT", "ETH", "BTC"})
+	if got, known := HouseBackedAssets(); !known || !slices.Equal(got, []string{"BTC", "ETH", "USDT"}) {
+		t.Fatalf("backed %v %v", got, known)
+	}
 	for _, c := range []struct {
 		base string
 		ok   bool

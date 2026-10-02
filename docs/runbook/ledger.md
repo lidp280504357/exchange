@@ -71,7 +71,7 @@ ssh exchange sudo docker exec exchange-infra-ledger-service-1 /app/exchangectl l
 阶段 4 B4：用户与 HOUSE 的虚拟流动性成交（见 [market-maker.md](market-maker.md)）时，成交事件带 `house_side`（HOUSE 买或卖）。
 
 - 结算分录是 `HOUSE_TRADE_SETTLE`（键同样是 `trade:<成交ID>`）：用户一方与 `TRADE_SETTLE` 完全相同（从冻结付出、收进可用），HOUSE 一方记在系统科目 `MARKET_MAKER` 各资产的**可用**余额上，没有订单、冻结与手续费。用户的手续费与限价差额照常记 `TRADE_FEE`、`ORDER_UNFREEZE`。
-- `MARKET_MAKER` 可以为负：内部资产（除 USDT、BTC、ETH 外的站内币）没有真实库存，HOUSE 卖出后记负数。可充提资产（USDT、BTC、ETH）不得低于 0：使它低于 0 的借方被拒、那笔成交挂为 `FAILED`；贷方永远放行，已经低于 0（事故或规则变更前留下的）也能被补足，挂起的成交随后的自动重试结清（ADR-0013「修订」）。挂起成交里 HOUSE 应付的量由 `GetSystemBalances` 的 `parked` 报给 market-maker，从报价用的持仓里扣掉，免得重试结清前再卖一次。告警 `HouseInventoryNegative`。
+- `MARKET_MAKER` 可以为负：内部资产（instrument-service 里没有网络的站内币）没有真实库存，HOUSE 卖出后记负数。可充提资产（有网络的，现在是 USDT、BTC、ETH；ledger-service 启动时与之后每 5 分钟从 instrument-service 读，读到之前一律按可充提算，日志 `HOUSE's backed assets`）不得低于 0：使它低于 0 的借方被拒、那笔成交挂为 `FAILED`；贷方永远放行，已经低于 0（事故或规则变更前留下的）也能被补足，挂起的成交随后的自动重试结清（ADR-0013「修订」）。挂起成交里 HOUSE 应付的量由 `GetSystemBalances` 的 `parked` 报给 market-maker，从报价用的持仓里扣掉，免得重试结清前再卖一次。告警 `HouseInventoryNegative`。
 - 校验：HOUSE 买入时买方手续费与限价必须为 0，卖出时卖方手续费为 0；`ledger.trades.house_side` 记下 HOUSE 的方向。
 - 对账：不变量 5 的 `TRADE_SETTLE_MATCHES_TRADES` 把 `HOUSE_TRADE_SETTLE` 一起算。
 - HOUSE 的库存（模拟资金）从 `ADJUSTMENT` 调入 `MARKET_MAKER`（`MANUAL_ADJUSTMENT`，需要 `ledger.manual_adjustment`，同事务写审计事件 `house:MARKET_MAKER`）：

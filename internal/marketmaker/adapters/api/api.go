@@ -103,6 +103,27 @@ func (c *Client) Specs(ctx context.Context) ([]domain.Spec, error) {
 	return out, nil
 }
 
+// Backed lists the assets with a network to deposit or withdraw them on,
+// enabled or not.
+func (c *Client) Backed(ctx context.Context) ([]string, error) {
+	var body struct {
+		Assets []struct {
+			Code     string            `json:"asset_code"`
+			Networks []json.RawMessage `json:"networks"`
+		} `json:"assets"`
+	}
+	if err := c.get(ctx, c.Instrument+"/v1/market/assets", &body); err != nil {
+		return nil, fmt.Errorf("assets: %w", err)
+	}
+	var out []string
+	for _, a := range body.Assets {
+		if len(a.Networks) > 0 {
+			out = append(out, a.Code)
+		}
+	}
+	return out, nil
+}
+
 // Contracts returns HOUSE's FUTURES account: its net position on each
 // contract (long positive); what its positions are worth together, each
 // at its mark price (at its entry price before the contract's first mark

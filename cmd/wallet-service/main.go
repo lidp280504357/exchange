@@ -268,6 +268,7 @@ func setup(ctx context.Context, a *app.App) error {
 		svc.Custodians = map[string]ports.Custody{u.Provider(): u}
 		custodian = application.NewCustodyProcessor(application.CustodyProcessor{
 			Store: store, Ledger: ledgerClient, Networks: networks, Eligibility: userClient, Custody: u, Log: a.Logger(), Now: time.Now,
+			Contradictions: svc.Contradictions,
 		}, a.Metrics())
 		a.Add("custody processor", app.Loop(func(ctx context.Context) error {
 			return leased(ctx, a, db, "wallet-custody:"+u.Provider(), []step{{"custody operations", custodian.Round}}, cfg.CustodyInterval)

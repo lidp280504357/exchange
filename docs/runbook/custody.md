@@ -55,7 +55,7 @@ custody_callbacks（原文、验签、结果、次数）──> 充值：deposit
 - 成功或 4288（托管方已有）→ 托管方状态 `ACCEPTED`；
 - 首次提交被 4000–4999 的业务拒绝 → `FAILED`（原因 `CUSTODY_REFUSED: code …`），立即解冻；
 - 网络错误等结果未知 → 保持 `SUBMITTED`/`SUBMITTED`，1 分钟后重交（重复的 `businessId` 被托管方拒绝，所以重交无害）；
-- 重交时被 4288 以外的理由拒绝 → **不解冻**：托管方可能已经收下第一次（例如第一次超时但已受理，重交时余额已被它用掉，返回"余额不足"），这时解冻就是双花。提现保持 `SUBMITTED`，托管方状态记为 `UNCERTAIN`（原因 `UNCERTAIN: code …`），不再重交，只等托管方的 2/3/4 回调；告警 `CustodyWithdrawalsUncertain`。人工到托管方后台核实后用 `exchangectl wallet custody-resolve <提现ID> --sent --tx <哈希> --reason …`（已发出，处理器结算）或 `--failed --reason …`（没发出，处理器解冻）了结。
+- 重交时被 4288 以外的理由拒绝 → **不解冻**：托管方可能已经收下第一次（例如第一次超时但已受理，重交时余额已被它用掉，返回"余额不足"），这时解冻就是双花。提现保持 `SUBMITTED`，托管方状态记为 `UNCERTAIN`（原因 `UNCERTAIN: code …`），不再重交，只等托管方的 2/3/4 回调；告警 `CustodyWithdrawalsUncertain`。人工到托管方后台核实后用 `exchangectl wallet custody-resolve <提现ID> --sent --tx <哈希> --reason …`（已发出，处理器结算）或 `--failed --reason …`（没发出，处理器解冻）了结；两种都记审计 `wallet.custody.withdrawal.resolve`（前后状态、交易哈希）。托管方状态还是 `SUBMITTED`（处理器每分钟重交、还没有答复）时 `--failed` 被拒（`WALLET_CUSTODY_HANDOVER_PENDING`）：这时判失败并解冻，之后某次重交被托管方收下就是双付。万一托管方在提现已失败解冻后才收下一次交接（回调与重交赛跑），处理器记错误日志并计入 `wallet_custody_withdrawal_contradictions_total`（告警 `CustodyWithdrawalContradiction`），人工到托管方后台核对。
 
 回调 `status` 0/1 只更新托管方状态（`REVIEW`/`APPROVED`）；3 → `CONFIRMED`、记交易哈希，并立即结算 `WITHDRAW_SETTLE`（处理器兜底重试）；2 或 4 → `FAILED`（原因 `CUSTODY_REJECTED`、`CUSTODY_FAILED: <txId>`），处理器解冻。托管方结算前资金一直冻结在用户账户，失败时不需要冲正。回调里的 `fee`（托管方向平台收的费）记入 `chain_fees`，像自建模式的 gas 一样从 `GAS_SUPPLY` 入账；`fee` 按提现币种与 `decimals` 换算，以正式文档为准。**大于提现金额的 `fee` 不入账**（多半是另一种单位，例如代币提现按链的最小单位计的 gas；照记会在 `GAS_SUPPLY` 留下永远补不上的缺口），回调结果里注明，计数 `wallet_custody_fees_refused_total`，告警 `CustodyFeeRefused`。接真网关后每个币种的第一笔真实提现都要人工核对手续费的单位。
 

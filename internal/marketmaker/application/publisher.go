@@ -35,8 +35,6 @@ type Config struct {
 	// HouseUser is HOUSE's user ID on the trades (HOUSE_USER_ID).
 	HouseUser string
 	Caps      domain.Caps
-	// Backed are the assets HOUSE must hold to sell (ADR-0013).
-	Backed []string
 	// Levels is how many levels a side HOUSE offers.
 	Levels int
 	// Interval is how often books go out when they changed, Heartbeat how
@@ -58,7 +56,7 @@ func DefaultConfig() Config {
 			Level: decimal.NewFromInt(20000), Symbol: decimal.NewFromInt(100000), Total: decimal.NewFromInt(1000000),
 			Contract: decimal.NewFromInt(100000), Safety: decimal.NewFromInt(1000), ContractLeverage: decimal.NewFromInt(10),
 		},
-		Backed: []string{"USDT", "BTC", "ETH"}, Levels: 20,
+		Levels:   20,
 		Interval: 250 * time.Millisecond, Heartbeat: 2 * time.Second, Stale: 3 * time.Second,
 	}
 }
@@ -83,14 +81,17 @@ type Publisher struct {
 	log    *slog.Logger
 	now    func() time.Time
 
-	mu        sync.Mutex
-	books     map[string]*refBook
-	list      []domain.Spec
-	listAt    time.Time
-	holdings  domain.Holdings
-	contracts domain.ContractAccount
-	houseAt   time.Time
-	sent      map[string]sent
+	mu     sync.Mutex
+	books  map[string]*refBook
+	list   []domain.Spec
+	listAt time.Time
+	// The backed assets as last read, and when (zero: never).
+	backedList []string
+	backedAt   time.Time
+	holdings   domain.Holdings
+	contracts  domain.ContractAccount
+	houseAt    time.Time
+	sent       map[string]sent
 
 	inventory *prometheus.GaugeVec
 	exposure  *prometheus.GaugeVec
@@ -235,6 +236,16 @@ func (p *Publisher) refresh(ctx context.Context) {
 			p.list, p.listAt = list, p.now()
 			p.mu.Unlock()
 		}
+		if backed, err := p.specs.Backed(ctx); err != nil {
+			p.log.WarnContext(ctx, "house liquidity: the backed assets not read", "error", err)
+		} else {
+			p.mu.Lock()
+			if !slices.Equal(backed, p.backedList) {
+				p.log.InfoContext(ctx, "house liquidity: the backed assets", "assets", backed)
+			}
+			p.backedList, p.backedAt = backed, p.now()
+			p.mu.Unlock()
+		}
 	}
 	if houseDue {
 		// The holdings count what settled before the read began; the
@@ -248,16 +259,27 @@ func (p *Publisher) refresh(ctx context.Context) {
 		}
 		p.mu.Lock()
 		p.holdings, p.contracts, p.houseAt = holdings, contracts, readAt
+		backed := make(map[string]bool, len(holdings))
+		for asset := range holdings {
+			backed[asset] = p.backed(asset)
+		}
 		p.mu.Unlock()
 		for asset, amount := range holdings {
-			p.inventory.WithLabelValues(asset, fmt.Sprint(p.backed(asset))).Set(amount.InexactFloat64())
+			// An asset counts as backed until the backed assets are read:
+			// its series under the other label goes.
+			p.inventory.DeleteLabelValues(asset, fmt.Sprint(!backed[asset]))
+			p.inventory.WithLabelValues(asset, fmt.Sprint(backed[asset])).Set(amount.InexactFloat64())
 		}
 		p.equity.Set(contracts.Equity.InexactFloat64())
 		p.worth.Set(contracts.Exposure.InexactFloat64())
 	}
 }
 
-func (p *Publisher) backed(asset string) bool { return slices.Contains(p.cfg.Backed, asset) }
+// backed reports whether HOUSE must hold asset to sell it: every asset
+// must until the backed assets are read (ports.Specs.Backed).
+func (p *Publisher) backed(asset string) bool {
+	return p.backedAt.IsZero() || slices.Contains(p.backedList, asset)
+}
 
 // outgoing is a reference book to publish.
 type outgoing struct {

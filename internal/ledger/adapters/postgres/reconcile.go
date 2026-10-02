@@ -34,7 +34,7 @@ const (
 	CheckFundingBatches = "FUNDING_BATCHES_BALANCED"
 	// PNL_CLEARING moves only with realized profit and loss.
 	CheckPnLClearingEntries = "PNL_CLEARING_ONLY_PNL"
-	// HOUSE's inventory of a backed asset (domain.HouseBacked) is not below
+	// HOUSE's inventory of a backed asset (domain.HouseBackedAssets) is not below
 	// zero (ADR-0013); only internal assets may go short.
 	CheckHouseBackedNonNegative = "HOUSE_BACKED_NON_NEGATIVE"
 )
@@ -119,11 +119,13 @@ var checks = []struct {
 // checkArgs are the query arguments of the checks that take some.
 var checkArgs = map[string]func() []any{CheckHouseBackedNonNegative: houseBacked}
 
-// houseBacked lists domain.HouseBacked for the query.
+// houseBacked lists the backed assets for the query: none until they are
+// read (every asset counts as backed then, the internal ones below zero
+// included, which is no mismatch).
 func houseBacked() []any {
-	assets := make([]string, 0, len(domain.HouseBacked))
-	for a := range domain.HouseBacked {
-		assets = append(assets, a)
+	assets, _ := domain.HouseBackedAssets()
+	if assets == nil {
+		assets = []string{}
 	}
 	return []any{assets}
 }

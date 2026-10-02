@@ -7,8 +7,10 @@ import (
 	"cmp"
 	"crypto/sha256"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -119,10 +121,40 @@ func (k AccountKey) Validate() error {
 	return apperr.Invalid(fmt.Sprintf("invalid account %s/%s/%s", k.OwnerType, k.Type, k.Asset))
 }
 
-// HouseBacked are the assets HOUSE must hold to sell (ADR-0013): they can
-// be deposited and withdrawn, so its MARKET_MAKER account of them never goes
-// below zero. The internal assets it may sell short.
-var HouseBacked = map[string]bool{"USDT": true, "BTC": true, "ETH": true}
+// houseBacked are the assets HOUSE must hold to sell (ADR-0013), as
+// SetHouseBacked last set them; nil until then.
+var houseBacked atomic.Pointer[map[string]bool]
+
+// SetHouseBacked sets the assets HOUSE must hold to sell: those with a
+// network to deposit or withdraw them on (instrument-service's listing, the
+// one definition the market maker uses too), funds on a chain or with the
+// custodian, so that its MARKET_MAKER account of them never goes below
+// zero. The internal assets, without a network, it may sell short.
+func SetHouseBacked(assets []string) {
+	m := make(map[string]bool, len(assets))
+	for _, a := range assets {
+		m[a] = true
+	}
+	houseBacked.Store(&m)
+}
+
+// HouseBacked reports whether HOUSE must hold asset to sell it: every
+// asset does until SetHouseBacked, so that HOUSE then sells only what it
+// holds.
+func HouseBacked(asset string) bool {
+	m := houseBacked.Load()
+	return m == nil || (*m)[asset]
+}
+
+// HouseBackedAssets lists the backed assets as last set; false until
+// SetHouseBacked.
+func HouseBackedAssets() ([]string, bool) {
+	m := houseBacked.Load()
+	if m == nil {
+		return nil, false
+	}
+	return slices.Sorted(maps.Keys(*m)), true
+}
 
 // MayGoNegative reports whether the account is a counterparty allowed below
 // zero (invariant 3): DEPOSIT_PENDING, ADJUSTMENT and PNL_CLEARING, and
@@ -132,7 +164,7 @@ var HouseBacked = map[string]bool{"USDT": true, "BTC": true, "ETH": true}
 // so this is the last guard).
 func (k AccountKey) MayGoNegative() bool {
 	return k.Type == AccountDepositPending || k.Type == AccountAdjustment || k.Type == AccountPnLClearing ||
-		(k.Type == AccountMarketMaker && !HouseBacked[k.Asset])
+		(k.Type == AccountMarketMaker && !HouseBacked(k.Asset))
 }
 
 func (k AccountKey) String() string {

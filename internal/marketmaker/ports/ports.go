@@ -13,6 +13,10 @@ import (
 // are TRADING.
 type Specs interface {
 	Specs(ctx context.Context) ([]domain.Spec, error)
+	// Backed lists the assets HOUSE must hold to sell (ADR-0013): those
+	// with a network to deposit or withdraw them on, the ledger's
+	// definition too.
+	Backed(ctx context.Context) ([]string, error)
 }
 
 // House reads what HOUSE holds.

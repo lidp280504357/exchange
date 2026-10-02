@@ -40,3 +40,19 @@ func (c *Client) Decimals(ctx context.Context, asset string) (int32, error) {
 	c.mu.Unlock()
 	return d, nil
 }
+
+// Backed lists the assets with a network to deposit or withdraw them on,
+// enabled or not: the assets HOUSE must hold to sell (ADR-0013).
+func (c *Client) Backed(ctx context.Context) ([]string, error) {
+	resp, err := c.c.ListAssets(ctx, &instrumentv1.ListAssetsRequest{})
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, a := range resp.GetAssets() {
+		if len(a.GetNetworks()) > 0 {
+			out = append(out, a.GetAssetCode())
+		}
+	}
+	return out, nil
+}

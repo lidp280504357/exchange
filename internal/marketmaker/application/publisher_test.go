@@ -2,9 +2,11 @@ package application
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,6 +29,8 @@ func d(s string) decimal.Decimal { return decimal.RequireFromString(s) }
 type specList []domain.Spec
 
 func (s specList) Specs(context.Context) ([]domain.Spec, error) { return s, nil }
+
+func (specList) Backed(context.Context) ([]string, error) { return []string{"USDT", "BTC", "ETH"}, nil }
 
 type fakeHouse struct {
 	holdings  domain.Holdings
@@ -256,5 +260,47 @@ func TestTheContractsShareTheRoom(t *testing.T) {
 	// 500 each: 0.01 BTC beyond the short's 0.5 back, 0.2 ETH either way.
 	if rooms["BTC-USDT-PERP"] != [2]string{"0.51", "0.01"} || rooms["ETH-USDT-PERP"] != [2]string{"0.2", "0.2"} {
 		t.Fatalf("rooms %v", rooms)
+	}
+}
+
+// blindSpecs cannot read the backed assets until told.
+type blindSpecs struct {
+	specList
+	read *atomic.Bool
+}
+
+func (s blindSpecs) Backed(ctx context.Context) ([]string, error) {
+	if !s.read.Load() {
+		return nil, errors.New("instrument-service unavailable")
+	}
+	return s.specList.Backed(ctx)
+}
+
+// Until the backed assets are read HOUSE sells only what it holds, of
+// any asset; then it may sell an internal asset short (ADR-0013).
+func TestHouseSellsShortOnlyOnceItKnowsTheBackedAssets(t *testing.T) {
+	now := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
+	sol := domain.Spec{Symbol: "SOL-USDT", Base: "SOL", Quote: "USDT", TickSize: d("0.01"), LotSize: d("0.01")}
+	read := &atomic.Bool{}
+	account := domain.ContractAccount{Positions: map[string]decimal.Decimal{}}
+	rec := &records{}
+	cfg := DefaultConfig()
+	cfg.HouseUser = "house"
+	p := New(cfg, blindSpecs{specList{sol}, read}, fakeHouse{holdings: domain.Holdings{"USDT": d("500000")}, contracts: &account},
+		&onFlags{}, rec, event.NewFactory("market-maker", "test"), slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	p.now = func() time.Time { return now }
+	ctx := context.Background()
+	p.refresh(ctx)
+	p.OnSnapshot(&marketv1.DepthSnapshot{Symbol: "SOL-USDT", Sequence: 1, Reference: true, Bids: levels("150", "10"), Asks: levels("150.01", "10")})
+	_ = p.publish(ctx, p.round())
+	if _, books := rec.take(t); len(books) != 1 || books[0].GetSellRoom() != "0" {
+		t.Fatalf("not read: %v", books)
+	}
+	read.Store(true)
+	now = now.Add(time.Minute) // the specs are due again, and so is the heartbeat
+	p.refresh(ctx)
+	_ = p.publish(ctx, p.round())
+	if _, books := rec.take(t); len(books) != 1 || books[0].GetSellRoom() == "0" {
+		t.Fatalf("read: %v", books)
 	}
 }
