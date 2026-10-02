@@ -38,11 +38,12 @@ call() {
   fi
   # A failure to connect (curl 6, 7, 28 with the connect timeout, 35 in the
   # TLS handshake) happens before the request is sent, so it is retried:
-  # this machine's path to Cloudflare drops a connection now and then.
+  # this machine's path to Cloudflare drops a connection now and then, at
+  # times for half a minute (2026-10-02), hence six tries over about 35 s.
   # Any other network failure is reported, not silent: outside a condition
   # set -e then stops the script; inside eventually it retries.
   local attempt rc=0
-  for attempt in 1 2 3; do
+  for attempt in 1 2 3 4 5 6; do
     if STATUS=$(curl --connect-timeout 15 "${args[@]}" "$@"); then
       BODY=$(cat "$WORK/body")
       return 0
@@ -53,7 +54,7 @@ call() {
       6 | 7 | 28 | 35) printf 'curl %s %s: no connection (exit %s, attempt %s)\n' "$method" "$path" "$rc" "$attempt" >&2 ;;
       *) break ;;
     esac
-    sleep 2
+    sleep $((attempt < 3 ? 2 : 8))
   done
   printf 'curl %s %s failed (exit %s)\n' "$method" "$path" "$rc" >&2
   return 1
