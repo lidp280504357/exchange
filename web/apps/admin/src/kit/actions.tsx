@@ -40,7 +40,8 @@ export type DangerActionProps = {
   danger?: boolean;
   /** The call, with the reason given; its result goes to onDone. */
   run: (reason: string) => Promise<unknown>;
-  success: ReactNode;
+  /** The toast once it worked, or what to say of the call's result. */
+  success: ReactNode | ((result: unknown) => ReactNode);
   /** Lists to reload after it worked. */
   invalidate?: QueryKey[];
   onDone?: (result: unknown) => void;
@@ -73,7 +74,7 @@ export function DangerAction({
         onConfirm={async (reason) => {
           try {
             const result = await run(reason);
-            toast.success(success);
+            toast.success(typeof success === "function" ? success(result) : success);
             for (const key of invalidate ?? []) void qc.invalidateQueries({ queryKey: key });
             setOpen(false);
             onDone?.(result);

@@ -31,8 +31,12 @@
 # published, edited while shown, taken off) and an in-app message
 # delivered to the user and read, the reports over a period by week or
 # month with the users' activity and HOUSE's result, an asset's profile
-# edited and read by the sites, the audit trail with its CSV export, and
-# sign-out.
+# edited and read by the sites, the simulated market (its state, a price
+# event within one operator's share and one beyond it approved by a second
+# administrator, both starting tomorrow and canceled; settings changed and
+# put back, one beyond the share rejected; who holds the coin; a cent
+# minted for every bot; the bots' orders and trades), the audit trail with
+# its CSV export, and sign-out.
 #
 #   scripts/e2e/admin.sh
 set -euo pipefail
@@ -134,7 +138,7 @@ expect 200 - "the sign-in options need no session"
 TOTP_REQUIRED=$(jq -r .totp_required <<<"$BODY")
 login ADMIN
 expect 200 - "ADMIN signs in with password and code"
-check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 25" "with every permission"
+check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 26" "with every permission"
 cookie=$(grep -i '^set-cookie: admin_session=' "$WORK/ADMIN.headers")
 for attr in 'Path=/admin/' 'HttpOnly' 'Secure' 'SameSite=Strict'; do
   grep -qi "$attr" <<<"$cookie" || { echo "FAIL the session cookie lacks $attr: $cookie" >&2; exit 1; }
@@ -537,6 +541,116 @@ profiled() {
 eventually 50 "the sites read it within a minute" profiled
 as OPERATOR PUT /admin/v1/assets/LINK/profile "$(profile_body "$EN_BEFORE" "e2e puts the introduction back")"
 expect 200 - "and puts it back"
+
+echo "== the simulated market (ASTRA)"
+# Nothing here moves the live price: the events start tomorrow and are
+# canceled, the settings go back, the change beyond one operator's share is
+# rejected, the mint is a cent per bot.
+as AUDITOR GET /admin/v1/sim ""
+expect 200 - "every administrator reads the simulated market"
+check '(.symbol | test("^[A-Z0-9]+-USDT$")) and (.bots | length) >= 1 and (.params.p0 | type) == "number" and (.version | type) == "number"' \
+  "its pair, its bots, its settings and their version"
+SIM=$BODY
+SIM_PAIR=$(jq -r .symbol <<<"$SIM")
+BOTS=$(jq '.bots | length' <<<"$SIM")
+as AUDITOR GET "/admin/v1/sim/history?minutes=10" ""
+expect 200 - "the target and the last price"
+check '(.items | length) >= 1 and all(.items[]; .target_price | test("^[0-9.]+$"))' "over the last minutes"
+as AUDITOR POST /admin/v1/sim/impact "$(jq -nc --arg t "$(jq -r .target_price <<<"$SIM")" '{price: (($t | tonumber) * 0.9 * 10000 | floor / 10000 | tostring)}')"
+expect 200 - "what a 10% fall would do to the perpetual"
+check '(.longs | type) == "number" and (.shorts | type) == "number" and (.liquidated | type) == "number" and (.insurance_cost | test("^[0-9.]+$"))' \
+  "its longs and shorts, those liquidated, the insurance fund's share"
+TOMORROW=$(jq -nr 'now + 20 * 3600 | strftime("%Y-%m-%dT%H:%M:%SZ")')
+sim_event() { # sim_event SIZE REASON: a jump starting tomorrow
+  jq -nc --arg at "$TOMORROW" --argjson s "$1" --arg r "$2" '{type: "JUMP", size: $s, starts_at: $at, reason: $r}'
+}
+as FINANCE POST /admin/v1/sim/events "$(sim_event 0.02 "e2e: finance moves prices")"
+expect 403 ADMIN_FORBIDDEN "FINANCE moves no price"
+as OPERATOR POST /admin/v1/sim/events "$(sim_event 0.02 "e2e: a small jump tomorrow")"
+expect 201 - "OPERATOR schedules a 2% jump, within one operator's share"
+check ".event.status == \"SCHEDULED\" and .event.created_by == \"$EMAIL_OPERATOR\" and .event.approved_by == \"\"" "in the operator's name"
+SMALL_JUMP=$(jq -r .event.id <<<"$BODY")
+# shellcheck disable=SC2016 # expanded when the script ends
+at_exit 'as OPERATOR POST "/admin/v1/sim/events/$SMALL_JUMP/end" "{\"reason\":\"e2e cleanup\"}" >/dev/null'
+as OPERATOR POST "/admin/v1/sim/events/$SMALL_JUMP/end" '{"reason":"e2e: not needed after all"}'
+expect 200 - "and cancels it"
+check '.status == "CANCELED"' "before it starts"
+as OPERATOR POST /admin/v1/sim/events "$(sim_event 0.35 "e2e: a 35% jump tomorrow, to be canceled")"
+expect 202 - "a 35% jump is beyond one operator's share"
+check '.approval.kind == "SIM_EVENT" and .approval.status == "PENDING" and .approval.escalation == "SIM_SHARE" and .approval.payload.move == "0.35"' \
+  "it waits for a second administrator, with the move market-sim measured"
+BIG_JUMP=$(jq -r .approval.id <<<"$BODY")
+# shellcheck disable=SC2016 # expanded when the script ends
+at_exit 'as ADMIN POST "/admin/v1/approvals/$BIG_JUMP/decide" "{\"approve\":false,\"reason\":\"e2e cleanup\"}" >/dev/null'
+as OPERATOR POST "/admin/v1/approvals/$BIG_JUMP/decide" '{"approve":true,"reason":"e2e approves its own"}'
+expect 403 ADMIN_SELF_APPROVAL "not approved by the operator who asked"
+as FINANCE POST "/admin/v1/approvals/$BIG_JUMP/decide" '{"approve":true,"reason":"e2e: finance approves"}'
+expect 403 ADMIN_FORBIDDEN "nor by FINANCE"
+as ADMIN POST "/admin/v1/approvals/$BIG_JUMP/decide" '{"approve":true,"reason":"e2e: approved, to be canceled"}'
+expect 200 - "ADMIN approves it"
+check '.status == "EXECUTED" and (.result | startswith("event "))' "market-sim scheduled it"
+BIG_EVENT=$(jq -r '.result | ltrimstr("event ")' <<<"$BODY")
+# shellcheck disable=SC2016 # expanded when the script ends
+at_exit 'as OPERATOR POST "/admin/v1/sim/events/$BIG_EVENT/end" "{\"reason\":\"e2e cleanup\"}" >/dev/null'
+as AUDITOR GET "/admin/v1/sim/events?all=true&limit=20" ""
+check "[.items[] | select(.id == \"$BIG_EVENT\")][0] | .status == \"SCHEDULED\" and .created_by == \"$EMAIL_OPERATOR\" and .approved_by == \"$EMAIL_ADMIN\"" \
+  "in the operator's name, approved by the ADMIN"
+as OPERATOR POST "/admin/v1/sim/events/$BIG_EVENT/end" '{"reason":"e2e: the drill is over"}'
+expect 200 - "and canceled before it starts"
+SIM_PARAMS=$(jq -c .params <<<"$SIM")
+as AUDITOR PUT /admin/v1/sim/params "$(jq -c '{params: ., reason: "e2e reads only"}' <<<"$SIM_PARAMS")"
+expect 403 ADMIN_FORBIDDEN "AUDITOR changes no settings"
+# shellcheck disable=SC2016 # expanded when the script ends
+at_exit 'as OPERATOR PUT /admin/v1/sim/params "$(jq -c "{params: ., reason: \"e2e cleanup\"}" <<<"$SIM_PARAMS")" >/dev/null'
+as OPERATOR PUT /admin/v1/sim/params "$(jq -c '{params: (. + {sigma: (.sigma + 0.01)}), reason: "e2e: a little more volatility"}' <<<"$SIM_PARAMS")"
+expect 200 - "OPERATOR changes the volatility, within its share"
+check ".version > $(jq .version <<<"$SIM")" "a new version of the settings"
+as OPERATOR PUT /admin/v1/sim/params "$(jq -c '{params: ., reason: "e2e puts the volatility back"}' <<<"$SIM_PARAMS")"
+expect 200 - "and puts it back"
+as OPERATOR PUT /admin/v1/sim/params "$(jq -c '{params: (. + {p0: (.p0 * 1.5)}), reason: "e2e: an anchor 50% higher"}' <<<"$SIM_PARAMS")"
+expect 202 - "an anchor 50% higher is beyond one operator's share"
+check '.approval.kind == "SIM_PARAMS" and .approval.status == "PENDING"' "it waits for a second administrator"
+as ADMIN POST "/admin/v1/approvals/$(jq -r .approval.id <<<"$BODY")/decide" '{"approve":false,"reason":"e2e: no such move"}'
+expect 200 - "ADMIN rejects it"
+check '.status == "REJECTED"' "and nothing changes"
+as AUDITOR GET /admin/v1/sim/token ""
+expect 200 - "who holds the coin"
+check ".asset == \"${SIM_PAIR%-USDT}\" and .bots.holders == $BOTS and (.issued | tonumber) > 0 and (.top | length) >= 1" \
+  "every bot holds some; what was issued; the largest holders"
+check '((.bots.amount | tonumber) + (.users.amount | tonumber) + ([.platform[].amount | tonumber] | add // 0) - (.issued | tonumber) | fabs) < 0.001' \
+  "the bots, the users and the platform hold all that was issued"
+as OPERATOR POST /admin/v1/sim/mint '{"asset":"USDT","amount":"1","reason":"e2e: operators print no money"}'
+expect 403 ADMIN_FORBIDDEN "an OPERATOR mints nothing"
+as FINANCE POST /admin/v1/sim/mint "$(jq -nc --argjson n "$BOTS" '{asset: "USDT", amount: ($n / 100 | tostring), reason: "e2e: a cent for every bot"}')"
+expect 201 - "FINANCE mints a cent of USDT for every bot"
+check "(.payload.bots | fromjson | length) == $BOTS and all(.payload.bots | fromjson | .[]; .amount == \"0.01\")" "one share per bot"
+if [[ $TWO_PERSON == false ]]; then
+  check '.status == "EXECUTED" and .mode == "SINGLE" and (.journal_id | type) == "string"' "booked at once in single-person mode"
+else
+  as ADMIN POST "/admin/v1/approvals/$(jq -r .id <<<"$BODY")/decide" '{"approve":true,"reason":"e2e: a cent each"}'
+  expect 200 - "ADMIN approves it"
+fi
+check ".status == \"EXECUTED\" and (.result | startswith(\"$BOTS adjustments\"))" "one adjustment per bot"
+as FINANCE POST /admin/v1/sim/mint '{"asset":"USDT","amount":"200000","role":"MAKER","reason":"e2e: beyond the single limit"}'
+expect 201 - "200,000 USDT for the makers"
+check '.status == "PENDING" and .mode == "TWO_PERSON" and .payload.role == "MAKER"' "waits for a second administrator"
+BIG_MINT=$(jq -r .id <<<"$BODY")
+# shellcheck disable=SC2016 # expanded when the script ends
+at_exit 'as ADMIN POST "/admin/v1/approvals/$BIG_MINT/decide" "{\"approve\":false,\"reason\":\"e2e cleanup\"}" >/dev/null'
+as ADMIN POST "/admin/v1/approvals/$BIG_MINT/decide" '{"approve":false,"reason":"e2e: no such sum"}'
+expect 200 - "ADMIN rejects it"
+check '.status == "REJECTED"' "nothing booked"
+as AUDITOR GET "/admin/v1/orders?symbol=$SIM_PAIR&accounts=bots&limit=5" ""
+expect 200 - "the bots' orders"
+check '(.items | length) >= 1 and all(.items[]; .bot)' "only bots', each marked"
+as AUDITOR GET "/admin/v1/orders?accounts=users&limit=5" ""
+expect 200 - "everyone else's orders"
+check 'all(.items[]; .bot | not)' "no bot among them"
+as AUDITOR GET "/admin/v1/trades?symbol=$SIM_PAIR&accounts=bots&limit=5" ""
+expect 200 - "the trades between bots"
+check '(.items | length) >= 1 and all(.items[]; .buyer_bot and .seller_bot)' "both sides marked"
+as AUDITOR GET "/admin/v1/trades?accounts=robots" ""
+expect 400 COMMON_INVALID_ARGUMENT "bots or users, nothing else"
 
 echo "== paged lists and the overview"
 as AUDITOR GET "/admin/v1/users?limit=2" ""
@@ -1268,6 +1382,13 @@ eventually 60 "the in-app message is audited" audited AUDITOR "target=broadcast:
   "[.items[] | select(.actor == \"$EMAIL_OPERATOR\") | .payload.action] | index(\"admin.notices.sent\") != null"
 eventually 60 "the asset's profile changes are audited" audited AUDITOR "target=asset:LINK" \
   "[.items[] | select(.actor == \"$EMAIL_OPERATOR\") | .payload.action] | map(select(. == \"admin.instruments.profile_updated\")) | length >= 2"
+q_operator="actor=$(jq -rn --arg e "$EMAIL_OPERATOR" '$e|@uri')"
+eventually 60 "the simulated market's changes are audited, by the OPERATOR" audited AUDITOR "target=sim&$q_operator" \
+  '[.items[].payload.action] | (index("admin.sim.event_created") != null and index("admin.sim.event_ended") != null and index("admin.sim.event_requested") != null and index("admin.sim.params_changed") != null and index("admin.sim.params_requested") != null)'
+eventually 60 "their approval and rejection, by the ADMIN" audited AUDITOR "$q_admin&limit=200" \
+  '[.items[].payload.action] | (index("admin.sim.event_approved") != null and index("admin.sim.params_rejected") != null and index("admin.sim.mint_rejected") != null)'
+eventually 60 "the mints, by FINANCE" audited AUDITOR "target=sim&actor=$(jq -rn --arg e "$EMAIL_FINANCE" '$e|@uri')" \
+  '[.items[].payload.action] | index("admin.sim.mint_requested") != null'
 eventually 60 "the administrator's changes are audited, its credentials are not" audited AUDITOR "target=admin:$STAFF_ID" \
   "([.items[].payload.action] | (index(\"admin.created\") != null and index(\"admin.role_changed\") != null and index(\"admin.password_reset\") != null and index(\"admin.totp_reset\") != null and index(\"admin.sessions_revoked\") != null and index(\"admin.disabled\") != null and index(\"admin.enabled\") != null)) and (tostring | (contains(\"$PW_STAFF\") or contains(\"$SECRET_STAFF\")) | not)"
 exported() {

@@ -1,12 +1,17 @@
 import { can, type Admin, type Permission } from "@exchange/core/api/admin";
 import {
+  Activity,
   ArrowDownToLine,
   ArrowUpFromLine,
   BellRing,
   BookOpen,
   BookOpenText,
+  Bot,
+  CalendarClock,
   ChartColumn,
   ChartLine,
+  Gauge,
+  Gem,
   HeartPulse,
   Coins,
   Landmark,
@@ -29,9 +34,9 @@ import {
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 
 /** The sidebar's groups (design 2026-10-02 §3); a group with one section shows as that section. */
-export type GroupKey = "overview" | "users" | "funds" | "trading" | "markets" | "risk" | "ops" | "system";
+export type GroupKey = "overview" | "users" | "funds" | "trading" | "markets" | "sim" | "risk" | "ops" | "system";
 
-export const groups: GroupKey[] = ["overview", "users", "funds", "trading", "markets", "risk", "ops", "system"];
+export const groups: GroupKey[] = ["overview", "users", "funds", "trading", "markets", "sim", "risk", "ops", "system"];
 
 export type Section = {
   path: string;
@@ -72,6 +77,11 @@ export const sections: Section[] = [
   { path: "derivatives", key: "derivatives", group: "trading", perm: "derivatives.read", icon: ChartLine, page: lazy(() => import("./pages/Derivatives")) },
   { path: "house", key: "house", group: "trading", perm: "reports.read", icon: Warehouse, page: lazy(() => import("./pages/House")) },
   { path: "instruments", key: "instruments", group: "markets", perm: "instruments.read", icon: Coins, page: lazy(() => import("./pages/Instruments")) },
+  { path: "sim", key: "simOverview", group: "sim", perm: "reports.read", icon: Activity, page: lazy(() => import("./pages/sim/Overview")) },
+  { path: "sim/control", key: "simControl", group: "sim", perm: "reports.read", icon: Gauge, page: lazy(() => import("./pages/sim/Control")) },
+  { path: "sim/events", key: "simEvents", group: "sim", perm: "reports.read", icon: CalendarClock, page: lazy(() => import("./pages/sim/Events")) },
+  { path: "sim/bots", key: "simBots", group: "sim", perm: "reports.read", icon: Bot, page: lazy(() => import("./pages/sim/Bots")) },
+  { path: "sim/token", key: "simToken", group: "sim", perm: "reports.read", icon: Gem, page: lazy(() => import("./pages/sim/Token")) },
   { path: "risk", key: "risk", group: "risk", perm: "flags.read", icon: ShieldAlert, page: lazy(() => import("./pages/Flags")) },
   { path: "announcements", key: "announcements", group: "ops", icon: Megaphone, page: lazy(() => import("./pages/content/Announcements")) },
   { path: "help-articles", key: "helpArticles", group: "ops", icon: BookOpenText, page: lazy(() => import("./pages/content/HelpArticles")) },

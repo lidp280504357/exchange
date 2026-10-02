@@ -138,6 +138,15 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/broadcasts", h.broadcasts)
 			r.Post("/broadcasts", h.sendBroadcast)
 			r.Get("/broadcasts/{id}", h.broadcast)
+			r.Get("/sim", h.simStatus)
+			r.Get("/sim/history", h.simHistory)
+			r.Get("/sim/events", h.simEvents)
+			r.Post("/sim/events", h.createSimEvent)
+			r.Post("/sim/events/{id}/end", h.endSimEvent)
+			r.Put("/sim/params", h.updateSimParams)
+			r.Post("/sim/impact", h.simImpact)
+			r.Get("/sim/token", h.simToken)
+			r.Post("/sim/mint", h.simMint)
 			r.Get("/assets/{code}/profile", h.assetProfile)
 			r.Put("/assets/{code}/profile", h.updateAssetProfile)
 			r.Get("/instruments/changes", h.instrumentChanges)
@@ -490,7 +499,7 @@ func (h *Handler) orders(w http.ResponseWriter, r *http.Request) {
 	}
 	list, next, err := h.Svc.OrderList(r.Context(), principal(r), ports.OrderQuery{
 		UserID: q.Get("user_id"), OrderID: q.Get("order_id"), Symbol: q.Get("symbol"), Status: q.Get("status"), Side: q.Get("side"),
-		From: from, To: to, Cursor: q.Get("cursor"), Limit: intParam(q, "limit"),
+		From: from, To: to, Accounts: q.Get("accounts"), Cursor: q.Get("cursor"), Limit: intParam(q, "limit"),
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)
@@ -507,7 +516,8 @@ func (h *Handler) trades(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	list, next, err := h.Svc.TradeList(r.Context(), principal(r), ports.TradeQuery{
-		Symbol: q.Get("symbol"), UserID: q.Get("user_id"), From: from, To: to, Cursor: q.Get("cursor"), Limit: intParam(q, "limit"),
+		Symbol: q.Get("symbol"), UserID: q.Get("user_id"), From: from, To: to, Accounts: q.Get("accounts"), Cursor: q.Get("cursor"),
+		Limit: intParam(q, "limit"),
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)

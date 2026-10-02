@@ -8,9 +8,21 @@ import { downloadCsv } from "../../kit/lists";
 import { Page } from "../../kit/Page";
 import { OrdersTable, TradesTable, useOrders, useTrades } from "../records/tables";
 
-const KEYS = ["user_id", "order_id", "symbol", "status", "side", "from", "to"] as const;
+const KEYS = ["user_id", "order_id", "symbol", "status", "side", "accounts", "from", "to"] as const;
 
-/** Orders and trades (design §10.3): filters by user, pair, status and time; the loaded rows export as CSV. */
+/** The accounts filter: the simulated market's bots or everyone else (ASTRA design §8 item 6). */
+function useAccountsFilter() {
+  const { t } = useTranslation();
+  return {
+    key: "accounts",
+    label: t("admin.sim.accounts"),
+    kind: "select" as const,
+    options: options(t("admin.common.all"), ["users", "bots"], (c) => t(`admin.sim.accountsOf.${c}`)),
+    width: 110,
+  };
+}
+
+/** Orders and trades (design §10.3): filters by user, pair, status, the bots and time; the loaded rows export as CSV. */
 export default function Orders() {
   const { t } = useTranslation();
   const [params, setParams] = useSearchParams();
@@ -43,9 +55,10 @@ function OrderList() {
   const { t } = useTranslation();
   const label = useEnum();
   const filters = useFilters(KEYS);
+  const accounts = useAccountsFilter();
   const f = filters.values;
   const q = {
-    user_id: f.user_id, order_id: f.order_id, symbol: f.symbol?.toUpperCase(), status: f.status, side: f.side,
+    user_id: f.user_id, order_id: f.order_id, symbol: f.symbol?.toUpperCase(), status: f.status, side: f.side, accounts: f.accounts,
     from: dayStart(f.from ?? ""), to: dayEnd(f.to ?? ""),
   };
   const list = useOrders(q);
@@ -65,6 +78,7 @@ function OrderList() {
             options: options(t("admin.common.all"), ["NEW", "OPEN", "PARTIALLY_FILLED", "FILLED", "CANCELED", "REJECTED"], (c) => label("orderStatus", c)),
           },
           { key: "side", label: t("admin.common.side"), kind: "select", options: options(t("admin.common.all"), ["BUY", "SELL"], (c) => label("side", c)), width: 100 },
+          accounts,
           { key: "from", label: t("admin.common.from"), kind: "date" },
           { key: "to", label: t("admin.common.to"), kind: "date" },
         ]}
@@ -92,6 +106,7 @@ function OrderList() {
                   { header: "filled_quote", value: (o) => o.filled_quote },
                   { header: "status", value: (o) => o.status },
                   { header: "reason", value: (o) => o.reason },
+                  { header: "bot", value: (o) => String(o.bot) },
                 ],
                 list.rows,
               )
@@ -108,9 +123,10 @@ function OrderList() {
 
 function TradeList() {
   const { t } = useTranslation();
-  const filters = useFilters(["user_id", "symbol", "from", "to"]);
+  const filters = useFilters(["user_id", "symbol", "accounts", "from", "to"]);
+  const accounts = useAccountsFilter();
   const f = filters.values;
-  const q = { user_id: f.user_id, symbol: f.symbol?.toUpperCase(), from: dayStart(f.from ?? ""), to: dayEnd(f.to ?? "") };
+  const q = { user_id: f.user_id, symbol: f.symbol?.toUpperCase(), accounts: f.accounts, from: dayStart(f.from ?? ""), to: dayEnd(f.to ?? "") };
   const list = useTrades(q);
   return (
     <>
@@ -120,6 +136,7 @@ function TradeList() {
         defs={[
           { key: "user_id", label: t("admin.orders.userFilter"), kind: "text" },
           { key: "symbol", label: t("admin.common.symbol"), kind: "text", placeholder: "BTC-USDT", width: 130 },
+          accounts,
           { key: "from", label: t("admin.common.from"), kind: "date" },
           { key: "to", label: t("admin.common.to"), kind: "date" },
         ]}
@@ -146,6 +163,8 @@ function TradeList() {
                   { header: "buyer_fee", value: (x) => x.buyer_fee },
                   { header: "seller_fee", value: (x) => x.seller_fee },
                   { header: "house_side", value: (x) => x.house_side ?? "" },
+                  { header: "buyer_bot", value: (x) => String(x.buyer_bot) },
+                  { header: "seller_bot", value: (x) => String(x.seller_bot) },
                 ],
                 list.rows,
               )

@@ -15,6 +15,10 @@ import (
 // sums. They lag the services by a few seconds.
 type Records struct{ Conn driver.Conn }
 
+// botList is the bots' user IDs as an array argument: never empty, as an
+// empty array literal has no element type.
+func botList(bots []string) []string { return append([]string{""}, bots...) }
+
 func decimalPtr(d *decimal.Decimal) *string {
 	if d == nil {
 		return nil
@@ -33,11 +37,11 @@ func (r Records) Orders(ctx context.Context, q ports.OrderQuery) ([]ports.Order,
 	rows, err := r.Conn.Query(ctx, `SELECT toString(order_id), client_order_id, toString(user_id), symbol, side, type, time_in_force,
 		price, quantity, quote_amount, status, filled_quantity, filled_quote, reason, created_at, updated_at FROM orders_current
 		WHERE (? = '' OR toString(user_id) = ?) AND (? = '' OR symbol = ?) AND (? = '' OR status = ?) AND (? = '' OR side = ?)
-		AND (? = '' OR toString(order_id) = ?)
+		AND (? = '' OR toString(order_id) = ?) AND (? = '' OR has(?, toString(user_id)) = (? = 'bots'))
 		AND created_at >= `+ms+` AND created_at < `+ms+` AND (NOT ? OR (created_at, toString(order_id)) < (`+ms+`, ?))
 		ORDER BY created_at DESC, toString(order_id) DESC LIMIT ?`,
-		q.UserID, q.UserID, q.Symbol, q.Symbol, q.Status, q.Status, q.Side, q.Side, q.OrderID, q.OrderID, from, to, pc.on, pc.at.UnixMilli(),
-		pc.id, pc.limit+1)
+		q.UserID, q.UserID, q.Symbol, q.Symbol, q.Status, q.Status, q.Side, q.Side, q.OrderID, q.OrderID, q.Accounts, botList(q.Bots), q.Accounts,
+		from, to, pc.on, pc.at.UnixMilli(), pc.id, pc.limit+1)
 	if err != nil {
 		return nil, "", unavailable(err)
 	}
@@ -73,9 +77,11 @@ func (r Records) Trades(ctx context.Context, q ports.TradeQuery) ([]ports.Trade,
 		toString(buyer_user_id), toString(buyer_order_id), toString(seller_user_id), toString(seller_order_id), buyer_is_maker,
 		buyer_fee, seller_fee, executed_at, house_side FROM trades FINAL
 		WHERE (? = '' OR symbol = ?) AND (? = '' OR toString(buyer_user_id) = ? OR toString(seller_user_id) = ?)
+		AND (? = '' OR (has(?, toString(buyer_user_id)) AND has(?, toString(seller_user_id))) = (? = 'bots'))
 		AND executed_at >= `+ms+` AND executed_at < `+ms+` AND (NOT ? OR (executed_at, toString(trade_id)) < (`+ms+`, ?))
 		ORDER BY executed_at DESC, toString(trade_id) DESC LIMIT ?`,
-		q.Symbol, q.Symbol, q.UserID, q.UserID, q.UserID, from, to, pc.on, pc.at.UnixMilli(), pc.id, pc.limit+1)
+		q.Symbol, q.Symbol, q.UserID, q.UserID, q.UserID, q.Accounts, botList(q.Bots), botList(q.Bots), q.Accounts,
+		from, to, pc.on, pc.at.UnixMilli(), pc.id, pc.limit+1)
 	if err != nil {
 		return nil, "", unavailable(err)
 	}

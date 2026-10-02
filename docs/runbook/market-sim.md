@@ -123,9 +123,9 @@ sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T mar
 
 它把 `HTTP <状态>` 打到标准错误、答复打到标准输出，状态 300 以上时以 1 退出。
 
-后台（admin-service，另一个会话负责）按这个接口做"模拟市场"页面（设计 §6），用 `svcsign.Client{KeyID: "admin", Secret: SIM_ADMIN_API_SECRET}` 签名，`actor`、`approved_by` 按上面的契约由它填。
+后台（admin-service）按这个接口做了"模拟市场"五页（设计 §6，后台重构 C5，见 [admin.md](admin.md)「模拟市场」），用 `svcsign.Client{KeyID: "admin", Secret: SIM_ADMIN_API_SECRET}` 签名，`actor`、`approved_by` 按上面的契约由它填：超出单人份额的改动在后台存成审批，另一位有 `sim.control` 的管理员批准后才带着 `approved_by` 发过来。
 
-端到端 `scripts/e2e/astra.sh` 只用 `ops` 键：未签名 401、带 `approved_by` 403 `SIM_APPROVAL_NEEDS_ADMIN`、单人 35% 403，然后单人份额以内移动价格（2% 来回、带外 12% 来回、合约强平 4% 来回，合计约 35%）；前后一小时内已有移动价格的事件或参数改动时跳过这几段（再跑一次要隔一小时）。批准的路径由后台的端到端覆盖。
+端到端 `scripts/e2e/astra.sh` 只用 `ops` 键：未签名 401、带 `approved_by` 403 `SIM_APPROVAL_NEEDS_ADMIN`、单人 35% 403，然后单人份额以内移动价格（2% 来回、带外 12% 来回、合约强平 4% 来回，合计约 35%）；前后一小时内已有移动价格的事件或参数改动时跳过这几段（再跑一次要隔一小时）。批准的路径由后台的端到端覆盖（`admin.sh`：OPERATOR 申请明天开始的 35% 跳涨，ADMIN 批准，检查发起人与批准人后取消）。
 
 ## 运维
 
@@ -162,7 +162,6 @@ scripts/ops/astra.sh perp-on     # sim.perp
 
 ## 还没做（后续批次）
 
-- A3 的后台页面（概览、价格控制、事件日程、机器人集群，后台会话负责）、确认框里的强平影响估算（设计 §6.3：按目标价估算会被强平的仓位与保险基金承担额；后台已能读全部仓位，由 admin-service 算）、事件主题 `market.sim.events` 进 ClickHouse（概览先用 `/history` 与 `/stream`）。
+- 事件主题 `market.sim.events` 进 ClickHouse（后台概览用 `/history`）。A3 的后台页面已由后台 C5 完成，确认框里的强平影响估算用 derivatives-service 的 `/internal/derivatives/contracts/{symbol}/price-impact`。
 - A4：永续端到端里的资金费结算与 ADL（`astra.sh` 已有开平仓与事件触发的强平；资金费在测试服 08:00 UTC 那轮人工核对过）。
 - A5：验收记录写回设计文档（心跳停牌、两个演练与 ADR-0016 已做）。
-- 后台按 `bot` 标记过滤机器人的订单与成交：用户标签在 admin 的库里，需要后台会话提供写入方式。

@@ -48,12 +48,28 @@ var fundActions = map[string]struct{ requested, approved, rejected, executed, fa
 		"admin.deposits.backfill_requested", "admin.deposits.backfill_approved", "admin.deposits.backfill_rejected",
 		"admin.deposits.backfill_executed", "admin.deposits.backfill_failed",
 	},
+	domain.KindSimEvent: {
+		"admin.sim.event_requested", "admin.sim.event_approved", "admin.sim.event_rejected", "admin.sim.event_created", "admin.sim.event_failed",
+	},
+	domain.KindSimParams: {
+		"admin.sim.params_requested", "admin.sim.params_approved", "admin.sim.params_rejected", "admin.sim.params_changed",
+		"admin.sim.params_failed",
+	},
+	domain.KindSimMint: {
+		"admin.sim.mint_requested", "admin.sim.mint_approved", "admin.sim.mint_rejected", "admin.sim.mint_executed", "admin.sim.mint_failed",
+	},
 }
+
+// simKind reports whether an approval is a simulated market's change.
+func simKind(kind string) bool { return kind == domain.KindSimEvent || kind == domain.KindSimParams }
 
 // fundTarget is the audit target of an operation.
 func fundTarget(a domain.Approval) string {
-	if a.Kind == domain.KindInsuranceFund {
+	switch {
+	case a.Kind == domain.KindInsuranceFund:
 		return "insurance:" + a.Payload["asset"]
+	case simKind(a.Kind), a.Kind == domain.KindSimMint:
+		return simAuditTarget
 	}
 	return "user:" + a.Payload["user_id"]
 }
@@ -76,6 +92,10 @@ type FundRequest struct {
 	// Backfill is a deposit backfill's custodian trade (Kind
 	// DEPOSIT_BACKFILL): wallet-service finds the user and the asset.
 	Backfill *ports.ManualDeposit
+	// Shares are a mint's (SIM_MINT) amounts per bot, of the bots of Role
+	// ("" for every bot).
+	Shares []MintShare
+	Role   string
 	// Direct carries it out at once when single-person mode and its limits
 	// allow; without it a second administrator always decides.
 	Direct bool
@@ -114,6 +134,13 @@ func (in *FundRequest) validate() error {
 		}
 		if in.Asset == "" {
 			in.Asset = "USDT"
+		}
+	case domain.KindSimMint:
+		if !in.Amount.IsPositive() || in.Asset == "" {
+			return apperr.Invalid("a mint needs an asset and a positive amount")
+		}
+		if len(in.Shares) == 0 {
+			return ErrNoBots
 		}
 	case domain.KindDepositBackfill:
 		b := in.Backfill
@@ -205,6 +232,16 @@ func (s *Service) SubmitFunds(ctx context.Context, p Principal, in FundRequest) 
 		a.Payload["user_id"] = in.UserID
 		if in.AccountType != AccountSpot {
 			a.Payload["account_type"] = in.AccountType
+		}
+	}
+	if in.Kind == domain.KindSimMint {
+		shares, err := json.Marshal(in.Shares)
+		if err != nil {
+			return domain.Approval{}, err
+		}
+		a.Payload["bots"] = string(shares)
+		if in.Role != "" {
+			a.Payload["role"] = in.Role
 		}
 	}
 	if in.Reference != "" {
@@ -321,6 +358,13 @@ func accountOf(a domain.Approval) string {
 
 // fundDetails is an operation's audit detail.
 func fundDetails(a domain.Approval) string {
+	if simKind(a.Kind) {
+		d, _ := json.Marshal(map[string]any{
+			"approval_id": a.ID, "change": json.RawMessage(a.Payload["change"]), "move": a.Payload["move"], "mode": a.Mode,
+			"escalation": a.Escalation, "status": a.Status, "result": a.Result,
+		})
+		return string(d)
+	}
 	value := "null"
 	if a.ValueUSDT != nil {
 		value = fmt.Sprintf("%q", a.ValueUSDT.String())
@@ -332,6 +376,8 @@ func fundDetails(a domain.Approval) string {
 	case domain.KindDepositBackfill:
 		account = fmt.Sprintf(`"network":%q,"trade_id":%q,"tx_hash":%q,"address":%q,"custodian_checked":false,`,
 			a.Payload["network"], a.Payload["trade_id"], a.Payload["tx_hash"], a.Payload["address"])
+	case domain.KindSimMint:
+		account = fmt.Sprintf(`"role":%q,"bots":%s,`, a.Payload["role"], a.Payload["bots"])
 	}
 	return fmt.Sprintf(`{"approval_id":%q,%s"asset":%q,"amount":%q,"mode":%q,"escalation":%q,"value_usdt":%s,"status":%q,"result":%q}`,
 		a.ID, account, a.Payload["asset"], a.Payload["amount"], a.Mode, a.Escalation, value, a.Status, a.Result)
@@ -387,8 +433,10 @@ func (s *Service) Approvals(ctx context.Context, p Principal, status, cursor str
 // decider's own request. The row stays locked while the ledger books it,
 // so a second decision waits and then finds it decided.
 func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, approve bool, reason string) (domain.Approval, error) {
-	if err := p.require(domain.PermAdjustApprove); err != nil {
-		return domain.Approval{}, err
+	// A fund operation needs ledger.adjust.approve, a simulated market's
+	// change sim.control (checked once the request is read).
+	if p.require(domain.PermAdjustApprove) != nil && p.require(domain.PermSimControl) != nil {
+		return domain.Approval{}, p.require(domain.PermAdjustApprove)
 	}
 	if err := needReason(reason); err != nil {
 		return domain.Approval{}, err
@@ -404,6 +452,13 @@ func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, ap
 		}
 		if cur == nil {
 			return apperr.NotFound("no such request")
+		}
+		perm := domain.PermAdjustApprove
+		if simKind(cur.Kind) {
+			perm = domain.PermSimControl
+		}
+		if err := p.require(perm); err != nil {
+			return err
 		}
 		if err := cur.Decide(p.Admin.ID, approve); err != nil {
 			return err
@@ -446,6 +501,22 @@ func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, ap
 // ledger compares it; the decider's reason is in the audit trail). A
 // refusal marks it FAILED.
 func (s *Service) execute(ctx context.Context, a *domain.Approval, p Principal) error {
+	if simKind(a.Kind) {
+		result, err := s.executeSim(ctx, *a, p)
+		if err != nil {
+			var e *apperr.Error
+			if !errors.As(err, &e) || e.Kind == apperr.KindUnavailable || e.Kind == apperr.KindInternal {
+				return err
+			}
+			a.Status, a.Result = domain.ApprovalFailed, e.Code+": "+e.Message
+			return nil
+		}
+		a.Status, a.Result = domain.ApprovalExecuted, result
+		return nil
+	}
+	if a.Kind == domain.KindSimMint {
+		return s.mintBots(ctx, a, p)
+	}
 	amount, err := decimal.NewFromString(a.Payload["amount"])
 	if err != nil {
 		return err

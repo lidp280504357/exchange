@@ -390,7 +390,7 @@ export interface paths {
         };
         /**
          * Spot trades, newest first
-         * @description From the read model trades; user_id matches either side. Needs reports.read.
+         * @description From the read model trades; user_id matches either side. With accounts=bots only the trades between two bots, with accounts=users those with anyone else on a side (a user's trade with a bot is the users'). Needs reports.read.
          */
         get: operations["listTrades"];
         put?: never;
@@ -1515,6 +1515,196 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/sim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The simulated market of the platform coin, as market-sim renders it
+         * @description ASTRA design §6 (docs/runbook/market-sim.md): the target and the
+         *     last price, the settings and their version, the guards' counts,
+         *     the bots with their balances and errors, the running and queued
+         *     events, the price band (anchor, where the makers quote, whether
+         *     they walk toward a target beyond the band), the watchdog and the
+         *     perpetual. Needs reports.read.
+         */
+        get: operations["getSim"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/sim/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The target and the last price every 10 seconds */
+        get: operations["getSimHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/sim/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The price events running and queued, or the latest of every status */
+        get: operations["listSimEvents"];
+        put?: never;
+        /**
+         * Create a price event
+         * @description Needs sim.control and a reason. market-sim runs it (at once or at
+         *     starts_at, at most 24 hours ahead) in the administrator's name;
+         *     beyond one operator's share of price moves in an hour (30% at once,
+         *     50% an hour) it becomes a request for a second administrator with
+         *     sim.control (202, decided on the approvals), whose name market-sim
+         *     then receives as the approver. 403 SIM_EVENTS_OFF while the flag
+         *     sim.events is off; 400 beyond the hard caps.
+         */
+        post: operations["createSimEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/sim/events/{id}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a queued event or end a running one
+         * @description A HALT ends by resuming the pair and its perpetual. Needs sim.control.
+         */
+        post: operations["endSimEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/sim/params": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace the simulated market's settings
+         * @description Every field, as GET /admin/v1/sim shows them. Needs sim.control.
+         *     Changes that move the price or the turnover beyond one operator's
+         *     share become a request for a second administrator (202).
+         */
+        put: operations["updateSimParams"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/sim/impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What a mark price would do to the simulated market's perpetual
+         * @description ASTRA design §6.3: the open longs and shorts, the positions the
+         *     margin monitor would take over at that price that it does not now
+         *     (a cross account whole), their notional and accounts, and what they
+         *     lack beyond their margin (the insurance fund's estimated share);
+         *     HOUSE left out (derivatives-service's price impact). Changes
+         *     nothing. Needs reports.read.
+         */
+        post: operations["simImpact"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/sim/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Who holds the simulated market's coin
+         * @description The coin (the base of market-sim's pair, ASTRA) as the ledger's
+         *     lines hold it (the read model, a few seconds behind): the bots
+         *     (market-sim's list) and the other users with how many of each hold
+         *     some, the platform's system accounts, what manual adjustments
+         *     issued (the ADJUSTMENT account's debit) and the 20 largest holders.
+         *     Needs reports.read.
+         */
+        get: operations["getSimToken"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/sim/mint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * More of the coin or USDT for the bots
+         * @description A fund operation of kind SIM_MINT (ASTRA design §4; no transfers
+         *     between bots, the pool grows by audited adjustments): the amount
+         *     split evenly, to two decimal places, over the bots (of one role, or
+         *     every one), the first taking the rounding; one manual adjustment of
+         *     each bot's SPOT account, keyed by the operation and the bot.
+         *     Booked at once in single-person mode within the limits (EXECUTED,
+         *     or FAILED with the ledger's refusal), otherwise PENDING for a
+         *     second administrator with ledger.adjust.approve; COMMON_UNAVAILABLE
+         *     with the detail approval_id when the ledger does not answer. Needs
+         *     ledger.adjust.request.
+         */
+        post: operations["mintSimBots"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/assets/{code}/profile": {
         parameters: {
             query?: never;
@@ -2507,6 +2697,8 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+            /** @description A simulated market's bot placed it (false while market-sim does not answer). */
+            bot: boolean;
         };
         Trade: {
             /** Format: uuid */
@@ -2533,6 +2725,10 @@ export interface components {
              * @enum {string}
              */
             house_side?: "" | "BUY" | "SELL";
+            /** @description The buyer is a simulated market's bot (false while market-sim does not answer). */
+            buyer_bot: boolean;
+            /** @description The seller is a simulated market's bot. */
+            seller_bot: boolean;
         };
         Deposit: {
             /** Format: uuid */
@@ -2621,6 +2817,168 @@ export interface components {
         };
         /** @example 12.5 */
         Decimal: string;
+        /** @description The model's and the bots' settings by name (numbers; docs/runbook/market-sim.md「设置」). */
+        SimParams: {
+            [key: string]: number;
+        };
+        SimStatus: {
+            symbol: string;
+            enabled: boolean;
+            running: boolean;
+            target_price: string | null;
+            last_price: string | null;
+            references_fresh: boolean;
+            params: components["schemas"]["SimParams"];
+            version: number;
+            guards: {
+                [key: string]: number;
+            };
+            bots: components["schemas"]["SimBot"][];
+            events: components["schemas"]["SimEvent"][];
+            /** @description The perpetual on the coin; empty without one. */
+            perp: string;
+            perp_running: boolean;
+            anchor_price: string | null;
+            price_band: string;
+            quote_center: string | null;
+            walking: boolean;
+            /** @description The target's distance from the anchor in bands (within ±1 inside the band). */
+            band_distance: number | null;
+            /** Format: date-time */
+            last_trade_at: string | null;
+            watchdog: {
+                fired: number;
+                /** Format: date-time */
+                last_at: string | null;
+            };
+            /** Format: date-time */
+            at: string | null;
+        };
+        SimBot: {
+            user_id: string;
+            /** @enum {string} */
+            role: "MAKER" | "TAKER" | "TREND" | "EXECUTOR";
+            label: string;
+            enabled: boolean;
+            balances_known: boolean;
+            usdt: string;
+            coin: string;
+            perp_position: string;
+            futures_usdt: string;
+            error: string;
+            /** Format: date-time */
+            error_at: string | null;
+            /** Format: date-time */
+            retry_at: string | null;
+        };
+        SimEvent: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            type: "JUMP" | "TARGET" | "TREND" | "VOLATILITY" | "PAUSE" | "HALT" | "REANCHOR";
+            size: number;
+            price: string | null;
+            mu: number;
+            factor: number;
+            duration_seconds: number;
+            hold_seconds: number;
+            /** Format: date-time */
+            starts_at: string;
+            /** @enum {string} */
+            status: "SCHEDULED" | "RUNNING" | "DONE" | "CANCELED";
+            created_by: string;
+            approved_by: string;
+            reason: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            started_at: string | null;
+            /** Format: date-time */
+            ended_at: string | null;
+            from_price: string | null;
+            ended_by: string;
+        };
+        SimEventWrite: {
+            /** @enum {string} */
+            type: "JUMP" | "TARGET" | "TREND" | "VOLATILITY" | "PAUSE" | "HALT" | "REANCHOR";
+            /** @description JUMP's move (0.1 is +10%). */
+            size?: number;
+            /** @description TARGET's price. */
+            price?: string;
+            /** @description TREND's drift a day. */
+            mu?: number;
+            /** @description VOLATILITY's factor. */
+            factor?: number;
+            duration_seconds?: number;
+            hold_seconds?: number;
+            /** Format: date-time */
+            starts_at?: string;
+        };
+        SimSample: {
+            /** Format: date-time */
+            at: string;
+            target_price: string;
+            last_price: string | null;
+        };
+        /** @description derivatives-service's price impact (the margin monitor's rules at the target), with the sides open now. */
+        SimImpact: {
+            symbol: string;
+            target_price: components["schemas"]["Decimal"];
+            /** @description The open positions, HOUSE's apart. */
+            positions: number;
+            /** @description The open longs; null when the positions cannot all be read. */
+            longs: number | null;
+            shorts: number | null;
+            /** @description The positions the monitor would take over at the target that it does not now (a cross account whole). */
+            liquidated: number;
+            notional: components["schemas"]["Decimal"];
+            accounts: number;
+            /** @description What the liquidated lack beyond their margin at the target, for the insurance fund. */
+            insurance_cost: components["schemas"]["Decimal"];
+            /** @description The positions left out for want of a fresh mark price now. */
+            unmeasured: number;
+            /** @description The largest of the liquidated, 20 at most. */
+            examples: {
+                user_id: string;
+                symbol: string;
+                position_side: string;
+                cross: boolean;
+                notional: string;
+                margin_balance: string;
+                maintenance_before: string;
+                maintenance_after: string;
+            }[];
+        };
+        SimHolding: {
+            amount: components["schemas"]["Decimal"];
+            /** @description How many accounts hold some. */
+            holders: number;
+        };
+        SimToken: {
+            /** @example ASTRA */
+            asset: string;
+            /** @description The pair's last trade as market-sim reads it; null before the first. */
+            price: components["schemas"]["NullableDecimal"];
+            bots: components["schemas"]["SimHolding"];
+            /** @description Every other user (HOUSE included, when it holds the coin). */
+            users: components["schemas"]["SimHolding"];
+            /** @description The system accounts holding some (fees and the like), ADJUSTMENT apart. */
+            platform: {
+                /** @example FEE_REVENUE */
+                account_type: string;
+                amount: components["schemas"]["Decimal"];
+            }[];
+            /** @description What manual adjustments issued (the ADJUSTMENT account's debit); the bots, users and platform hold it all. */
+            issued: components["schemas"]["Decimal"];
+            /** @description The largest holders, largest first (20 at most). */
+            top: {
+                /** Format: uuid */
+                user_id: string;
+                amount: components["schemas"]["Decimal"];
+            }[];
+            /** Format: date-time */
+            at: string;
+        };
         AssetProfile: {
             /** @description Replaces the asset's name on the sites when set. */
             display_name: string;
@@ -2874,7 +3232,7 @@ export interface components {
         /** @enum {string} */
         AdminRole: "ADMIN" | "OPERATOR" | "FINANCE" | "AUDITOR";
         /** @enum {string} */
-        Permission: "users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write" | "settings.write" | "users.notes" | "users.security" | "users.contacts" | "ledger.hold" | "deposits.review" | "admins.manage" | "instruments.trading" | "content.write" | "notices.send";
+        Permission: "users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write" | "settings.write" | "users.notes" | "users.security" | "users.contacts" | "ledger.hold" | "deposits.review" | "admins.manage" | "instruments.trading" | "content.write" | "notices.send" | "sim.control";
         RolePermissions: {
             role: components["schemas"]["AdminRole"];
             permissions: components["schemas"]["Permission"][];
@@ -3505,11 +3863,15 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            kind: "LEDGER_ADJUSTMENT" | "INSURANCE_FUND" | "DEPOSIT_BACKFILL";
+            kind: "LEDGER_ADJUSTMENT" | "INSURANCE_FUND" | "DEPOSIT_BACKFILL" | "SIM_EVENT" | "SIM_PARAMS" | "SIM_MINT";
             /**
              * @description For LEDGER_ADJUSTMENT user_id, asset and amount, account_type FUTURES when not the SPOT account; for INSURANCE_FUND
              *     asset and amount; reference when given. For DEPOSIT_BACKFILL user_id, asset, amount, network, trade_id, address,
-             *     tx_hash and entered_by (the backfill's result names the deposit, its journal_id stays null).
+             *     tx_hash and entered_by (the backfill's result names the deposit, its journal_id stays null). For SIM_EVENT and
+             *     SIM_PARAMS change (the event or {params} as JSON), actor (the requester, market-sim's actor) and move (the price move
+             *     market-sim measured; volume for a turnover change); the result names the event or the settings' version. For
+             *     SIM_MINT asset, amount (in all), bots (each bot's share as JSON: [{user_id, label, amount}]) and role when only
+             *     one role's bots; its journal_id is the first bot's.
              */
             payload: {
                 [key: string]: string;
@@ -3540,11 +3902,12 @@ export interface components {
             /**
              * @description Why a two-person operation waits for a second administrator:
              *     asked for, two-person mode on, above the single-operation
-             *     limit, over the 24-hour limit, or of unknown worth; empty in
-             *     single-person mode.
+             *     limit, over the 24-hour limit, or of unknown worth, or a
+             *     simulated market's change beyond one operator's share; empty
+             *     in single-person mode.
              * @enum {string}
              */
-            escalation: "" | "REQUESTED" | "TWO_PERSON_MODE" | "SINGLE_LIMIT" | "DAILY_LIMIT" | "NO_PRICE";
+            escalation: "" | "REQUESTED" | "TWO_PERSON_MODE" | "SINGLE_LIMIT" | "DAILY_LIMIT" | "NO_PRICE" | "SIM_SHARE";
             journal_id: string | null;
         };
         AuditEntry: {
@@ -3875,6 +4238,8 @@ export interface components {
         /** @description Before this time (RFC 3339). */
         To: string;
         UserFilter: string;
+        /** @description Keeps the simulated market's bots (bots) or everyone else (users); all when absent. Needs market-sim's list of bots (503 COMMON_UNAVAILABLE without it); without the filter the rows are only marked, and stay unmarked while market-sim does not answer. */
+        Accounts: "bots" | "users";
         /** @description Days back, today included. */
         Days: number;
         /**
@@ -4382,6 +4747,8 @@ export interface operations {
                 symbol?: string;
                 status?: "NEW" | "OPEN" | "PARTIALLY_FILLED" | "FILLED" | "CANCELED" | "REJECTED";
                 side?: "BUY" | "SELL";
+                /** @description Keeps the simulated market's bots (bots) or everyone else (users); all when absent. Needs market-sim's list of bots (503 COMMON_UNAVAILABLE without it); without the filter the rows are only marked, and stay unmarked while market-sim does not answer. */
+                accounts?: components["parameters"]["Accounts"];
                 /** @description From this time on (RFC 3339). */
                 from?: components["parameters"]["From"];
                 /** @description Before this time (RFC 3339). */
@@ -4416,6 +4783,8 @@ export interface operations {
             query?: {
                 user_id?: components["parameters"]["UserFilter"];
                 symbol?: string;
+                /** @description Keeps the simulated market's bots (bots) or everyone else (users); all when absent. Needs market-sim's list of bots (503 COMMON_UNAVAILABLE without it); without the filter the rows are only marked, and stay unmarked while market-sim does not answer. */
+                accounts?: components["parameters"]["Accounts"];
                 /** @description From this time on (RFC 3339). */
                 from?: components["parameters"]["From"];
                 /** @description Before this time (RFC 3339). */
@@ -5984,6 +6353,271 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Broadcast"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSim: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimStatus"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSimHistory: {
+        parameters: {
+            query?: {
+                minutes?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The samples, oldest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["SimSample"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listSimEvents: {
+        parameters: {
+            query?: {
+                all?: boolean;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The events. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["SimEvent"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createSimEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SimEventWrite"] & components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description The event. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        event: components["schemas"]["SimEvent"];
+                    };
+                };
+            };
+            /** @description Beyond one operator's share; waiting for a second administrator. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        approval: components["schemas"]["Approval"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    endSimEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description The event, ended. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimEvent"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateSimParams: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    params: components["schemas"]["SimParams"];
+                } & components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description The settings' new version. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        version: number;
+                    };
+                };
+            };
+            /** @description Waiting for a second administrator. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        approval: components["schemas"]["Approval"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    simImpact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    price: components["schemas"]["Decimal"];
+                };
+            };
+        };
+        responses: {
+            /** @description The impact. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimImpact"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSimToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The holdings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimToken"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    mintSimBots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description The coin or USDT.
+                     * @example ASTRA
+                     */
+                    asset: string;
+                    /** @description In all, positive. */
+                    amount: components["schemas"]["Decimal"];
+                    /**
+                     * @description Only the bots of this role; every bot when absent.
+                     * @enum {string}
+                     */
+                    role?: "MAKER" | "TAKER" | "TREND" | "EXECUTOR";
+                    reason: string;
+                    reference?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The operation (payload bots lists each bot's share as JSON). */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Approval"];
                 };
             };
             default: components["responses"]["Error"];

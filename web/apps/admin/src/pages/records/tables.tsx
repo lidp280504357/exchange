@@ -17,7 +17,11 @@ export type AuditEntry = AdminSchemas["AuditEntry"];
 
 const right: DataColumnMeta = { align: "right" };
 
-export type OrderQuery = { user_id?: string; order_id?: string; symbol?: string; status?: string; side?: string; from?: string; to?: string };
+export type OrderQuery = {
+  user_id?: string; order_id?: string; symbol?: string; status?: string; side?: string; from?: string; to?: string;
+  /** The simulated market's bots ("bots") or everyone else ("users"). */
+  accounts?: string;
+};
 
 export function useOrders(q: OrderQuery) {
   return useCursorList<Order>(["admin", "orders", q], async (cursor) =>
@@ -28,6 +32,7 @@ export function useOrders(q: OrderQuery) {
             ...clean(q),
             status: (q.status || undefined) as Order["status"] as never,
             side: (q.side || undefined) as never,
+            accounts: (q.accounts || undefined) as never,
             cursor,
             limit: pageSize(),
           },
@@ -37,13 +42,32 @@ export function useOrders(q: OrderQuery) {
   );
 }
 
+/** BotMark marks a simulated market's bot next to its account. */
+export function BotMark({ bot }: { bot: boolean | undefined }) {
+  const { t } = useTranslation();
+  return bot ? <Badge tone="info">{t("admin.sim.bot")}</Badge> : null;
+}
+
 export function useOrderColumns(withUser = true): ColumnDef<Order, unknown>[] {
   const { t } = useTranslation();
   return useMemo(
     () => [
       { id: "created", header: t("admin.common.createdAt"), cell: ({ row }) => <TimeText value={row.original.created_at} /> },
       { id: "id", header: t("admin.orders.orderId"), cell: ({ row }) => <IdText value={row.original.order_id} /> },
-      ...(withUser ? [{ id: "user", header: t("admin.common.user"), cell: ({ row }) => <UserCell id={row.original.user_id} /> } as ColumnDef<Order, unknown>] : []),
+      ...(withUser
+        ? [
+            {
+              id: "user",
+              header: t("admin.common.user"),
+              cell: ({ row }) => (
+                <span className="inline-flex items-center gap-1.5">
+                  <UserCell id={row.original.user_id} />
+                  <BotMark bot={row.original.bot} />
+                </span>
+              ),
+            } as ColumnDef<Order, unknown>,
+          ]
+        : []),
       { accessorKey: "symbol", header: t("admin.common.symbol") },
       { id: "side", header: t("admin.common.side"), cell: ({ row }) => <EnumBadge group="side" code={row.original.side} /> },
       { id: "type", header: t("admin.orders.type"), cell: ({ row }) => <EnumText group="orderType" code={row.original.type} /> },
@@ -88,11 +112,15 @@ export function OrdersTable({
   return <ListTable list={list} columns={columns} getRowId={(o) => o.order_id} onRowClick={onRowClick} aria-label="orders" />;
 }
 
-export type TradeQuery = { user_id?: string; symbol?: string; from?: string; to?: string };
+export type TradeQuery = { user_id?: string; symbol?: string; from?: string; to?: string; accounts?: string };
 
 export function useTrades(q: TradeQuery) {
   return useCursorList<Trade>(["admin", "trades", q], async (cursor) =>
-    adminData(await adminApi.GET("/admin/v1/trades", { params: { query: { ...clean(q), cursor, limit: pageSize() } } })),
+    adminData(
+      await adminApi.GET("/admin/v1/trades", {
+        params: { query: { ...clean(q), accounts: (q.accounts || undefined) as never, cursor, limit: pageSize() } },
+      }),
+    ),
   );
 }
 
@@ -115,11 +143,16 @@ export function TradesTable({ list, onRowClick }: { list: CursorList<Trade>; onR
   return <ListTable list={list} columns={columns} getRowId={(x) => x.trade_id} onRowClick={onRowClick} aria-label="trades" />;
 }
 
-/** Party is a trade's buyer or seller: HOUSE's side shows as HOUSE. */
+/** Party is a trade's buyer or seller: HOUSE's side shows as HOUSE, a bot is marked. */
 function Party({ trade, side }: { trade: Trade; side: "BUY" | "SELL" }) {
   const { t } = useTranslation();
   if (trade.house_side === side) return <Badge tone="brand">{t("admin.orders.house")}</Badge>;
-  return <UserCell id={side === "BUY" ? trade.buyer_user_id : trade.seller_user_id} />;
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <UserCell id={side === "BUY" ? trade.buyer_user_id : trade.seller_user_id} />
+      <BotMark bot={side === "BUY" ? trade.buyer_bot : trade.seller_bot} />
+    </span>
+  );
 }
 
 export type DepositQuery = { user_id?: string; asset?: string; network?: string; status?: string; tx_hash?: string };

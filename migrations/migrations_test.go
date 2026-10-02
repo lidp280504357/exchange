@@ -335,6 +335,11 @@ func TestAdminSchema(t *testing.T) {
 		VALUES ($1, 'LEDGER_ADJUSTMENT', '{}', 'r', 'EXECUTED', $2, $2, now(), $3, 12.5)`
 	accepts(t, db, single, uuid.New(), a, "SINGLE")
 	rejects(t, db, "known modes only", single, uuid.New(), a, "ALONE")
+	kind := `INSERT INTO approvals (id, kind, payload, reason, status, requested_by, created_at) VALUES ($1, $2, '{}', 'r', 'PENDING', $3, now())`
+	for _, k := range []string{"INSURANCE_FUND", "DEPOSIT_BACKFILL", "SIM_EVENT", "SIM_PARAMS", "SIM_MINT"} {
+		accepts(t, db, kind, uuid.New(), k, a)
+	}
+	rejects(t, db, "known kinds only", kind, uuid.New(), "SIM_TRANSFER", a)
 
 	settings := `INSERT INTO settings (single_max_usdt, daily_max_usdt, withdrawal_max_usdt, updated_by, updated_at) VALUES ($1, $2, 1, 'x', now())`
 	rejects(t, db, "a day's limit covers one operation", settings, 100, 50)

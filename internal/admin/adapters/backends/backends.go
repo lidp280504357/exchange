@@ -547,6 +547,12 @@ func (d Derivatives) TierImpact(ctx context.Context, symbol string, tiers json.R
 	return out, nil
 }
 
+// PriceImpact measures a contract's open positions at a mark price.
+func (d Derivatives) PriceImpact(ctx context.Context, symbol, price string) (json.RawMessage, error) {
+	return d.do(ctx, http.MethodPost, d.Base+"/internal/derivatives/contracts/"+url.PathEscape(symbol)+"/price-impact",
+		map[string]string{"target_price": price}, nil)
+}
+
 // Flags implements ports.Flags on the shared config schema; a switch is
 // written with its ConfigChanged audit event in one transaction, published
 // by the config schema's outbox relay.

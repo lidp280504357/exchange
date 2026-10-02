@@ -472,13 +472,21 @@ func (d *fakeDerivatives) TierImpact(_ context.Context, symbol string, tiers jso
 	return ports.TierImpact{Symbol: symbol, Positions: 12, Liquidated: 3, Notional: "45000.00", Accounts: 2, Examples: json.RawMessage("[]")}, nil
 }
 
+func (d *fakeDerivatives) PriceImpact(_ context.Context, symbol, price string) (json.RawMessage, error) {
+	d.tiers = append(d.tiers, symbol+" at "+price)
+	return json.RawMessage(`{"symbol":"` + symbol + `","target_price":"` + price + `","positions":7,"liquidated":2,"notional":"900.00","accounts":1,` +
+		`"insurance_cost":"120.00","unmeasured":0,"examples":[]}`), nil
+}
+
 func (d *fakeDerivatives) Positions(context.Context, string) (json.RawMessage, error) {
 	return json.RawMessage(`[{"symbol":"BTC-USDT-PERP","position_side":"BOTH","quantity":"0.2"}]`), nil
 }
 
 func (d *fakeDerivatives) OpenPositions(_ context.Context, q ports.PositionQuery) (json.RawMessage, error) {
 	d.queries = append(d.queries, q)
-	return json.RawMessage(`{"positions":[{"user_id":"0192a000-0000-7000-8000-000000000001","symbol":"BTC-USDT-PERP"}],"truncated":false}`), nil
+	return json.RawMessage(`{"positions":[{"user_id":"0192a000-0000-7000-8000-000000000001","symbol":"BTC-USDT-PERP","quantity":"0.5"},` +
+		`{"user_id":"0192a000-0000-7000-8000-000000000002","symbol":"BTC-USDT-PERP","quantity":"-0.2"},` +
+		`{"user_id":"house","symbol":"BTC-USDT-PERP","quantity":"-3"}],"truncated":false}`), nil
 }
 
 func (d *fakeDerivatives) OpenOrders(context.Context, string) (json.RawMessage, error) {

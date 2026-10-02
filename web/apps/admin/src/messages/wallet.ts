@@ -4,7 +4,7 @@
 export const walletZh = {
   admin: {
     shell: { todo_deposits: "待处理的充值" },
-    funds: { approvalsHelp: "资金调整、保险基金注资与补记充值的全部记录；待处理的排在前面。" },
+    funds: { approvalsHelp: "资金调整、保险基金注资、补记充值、机器人增发与超出单人份额的模拟市场改动的全部记录；待处理的排在前面。" },
     batch: {
       selected: "已选 {{n}} 笔，折合 {{value}} USDT",
       selectLowRisk: "选中低风险（风控分 < {{max}}）",
@@ -126,7 +126,7 @@ export const walletZh = {
 export const walletEn = {
   admin: {
     shell: { todo_deposits: "Deposits to handle" },
-    funds: { approvalsHelp: "Every adjustment, insurance fund contribution and deposit backfill, those waiting first." },
+    funds: { approvalsHelp: "Every adjustment, insurance fund contribution, deposit backfill, mint for the bots and simulated market change beyond one operator's share, those waiting first." },
     batch: {
       selected: "{{n}} selected, worth {{value}} USDT",
       selectLowRisk: "Select the low-risk ones (score < {{max}})",

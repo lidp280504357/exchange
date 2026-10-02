@@ -10,8 +10,10 @@
 // the liquidation log, HOUSE, the flags, the ledger's reconciliation, the
 // audit trail (an entry's detail, the CSV export), the reports, the
 // administrators (the roles' permissions; the creation form, canceled),
-// system health, the fund operations (approval mode, form, records), the
-// settings and the event stream; the search opens a user;
+// system health, the operations pages, the simulated market (overview,
+// price control with an event's impact, never started; events, bots, the
+// coin's holders; the bots' orders), the fund operations (approval mode,
+// form, records), the settings and the event stream; the search opens a user;
 // signing out from the account menu ends the session. Every admin API
 // response is checked against api/admin/admin.yaml.
 //
@@ -286,6 +288,42 @@ try {
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
   ok("operations: the announcements with the editor's preview (closed unsaved), the help articles, the messages and their form (closed unsent)");
+
+  // 9d. The simulated market: the overview with its chart, price control
+  // with an event's impact (the confirmation closed, nothing started), the
+  // events, the bots and the coin's holders; the bots filter on orders.
+  await go("/sim");
+  await page.waitForSelector("[data-testid=sim-target]");
+  await page.waitForSelector("main svg[role=img]", { timeout: 30000 });
+  await t.shot("4d-sim");
+  await go("/sim/control");
+  await waitText("价格模型");
+  await page.$eval("#sim-size", (el) => el.select());
+  await page.type("#sim-size", "-5");
+  await page.click("[data-testid=sim-event-start]");
+  await page.waitForSelector("[data-testid=sim-impact]", { timeout: 20000 });
+  await t.shot("4e-sim-impact");
+  await clickButton("取消", "[role=dialog]");
+  await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
+  await go("/sim/events");
+  await waitText("排队与进行中");
+  await page.waitForFunction(() => !document.querySelector("main [aria-busy=true]"), { timeout: 20000 });
+  await noError("the events");
+  await go("/sim/bots");
+  await page.waitForSelector("[data-testid=sim-role-MAKER]");
+  await rows(1);
+  await waitText("sim.enabled");
+  await t.shot("4f-sim-bots");
+  await go("/sim/token");
+  await page.waitForSelector("[data-testid=sim-token-bots]", { timeout: 30000 });
+  await page.waitForSelector("[data-testid=asset-profile]");
+  await rows(1);
+  await t.shot("4g-sim-token");
+  await go("/orders?accounts=bots");
+  await rows(1);
+  await waitText("机器人");
+  await noError("the bots' orders");
+  ok("the simulated market: overview, price control with an event's impact (not started), events, bots, the coin's holders; the bots' orders");
 
   // 10. Fund operations: the approval mode with its limits, the form, the
   // records; the settings; the counts pushed on the event stream.

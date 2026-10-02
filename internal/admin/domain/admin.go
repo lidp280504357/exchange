@@ -80,6 +80,10 @@ const (
 	PermContentEdit = "content.write"
 	// PermNoticesSend sends in-app messages to users: one, a tag's, or all.
 	PermNoticesSend = "notices.send"
+	// PermSimControl runs the simulated market of the platform coin (ASTRA
+	// design §6): its price events and settings, within one operator's
+	// share; beyond it a second administrator with it approves.
+	PermSimControl = "sim.control"
 )
 
 var reads = []string{
@@ -90,9 +94,9 @@ var roles = map[string][]string{
 	RoleAdmin: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit,
 		PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermDerivativesEdit, PermSettingsEdit, PermUsersNotes,
 		PermUsersSecurity, PermUsersContacts, PermLedgerHold, PermDepositsReview, PermAdminsManage, PermInstrumentsTrading,
-		PermContentEdit, PermNoticesSend),
+		PermContentEdit, PermNoticesSend, PermSimControl),
 	RoleOperator: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit, PermDerivativesEdit,
-		PermUsersNotes, PermUsersSecurity, PermUsersContacts, PermLedgerHold, PermContentEdit, PermNoticesSend),
+		PermUsersNotes, PermUsersSecurity, PermUsersContacts, PermLedgerHold, PermContentEdit, PermNoticesSend, PermSimControl),
 	RoleFinance: append(slices.Clone(reads), PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermUsersNotes, PermUsersContacts,
 		PermLedgerHold, PermDepositsReview),
 	RoleAuditor: slices.Clone(reads),
@@ -231,6 +235,15 @@ const (
 	// KindDepositBackfill books a custodian deposit whose callback was
 	// lost (wallet-service, design 2026-10-02 §4.3).
 	KindDepositBackfill = "DEPOSIT_BACKFILL"
+	// KindSimEvent and KindSimParams are a simulated market's price event
+	// and settings beyond one operator's share (ASTRA design §6.2): the
+	// second administrator's approval goes to market-sim as approved_by.
+	KindSimEvent  = "SIM_EVENT"
+	KindSimParams = "SIM_PARAMS"
+	// KindSimMint is more of an asset for the simulated market's bots: one
+	// manual adjustment per bot, a fund operation like any other (ASTRA
+	// design §4: no transfers between bots; the pool grows this way).
+	KindSimMint = "SIM_MINT"
 
 	ApprovalPending  = "PENDING"
 	ApprovalExecuted = "EXECUTED"
@@ -253,6 +266,7 @@ const (
 	EscalationSingleMax = "SINGLE_LIMIT"    // worth more than one operation may be
 	EscalationDailyMax  = "DAILY_LIMIT"     // over the requester's 24-hour total
 	EscalationNoPrice   = "NO_PRICE"        // its worth in USDT is unknown
+	EscalationSimShare  = "SIM_SHARE"       // a price move beyond one operator's share (market-sim)
 )
 
 // Approval is a fund operation (§5.12: manual ledger adjustments and

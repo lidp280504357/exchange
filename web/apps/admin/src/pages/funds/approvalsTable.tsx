@@ -7,6 +7,7 @@ import { EnumBadge, EnumText } from "../../kit/enums";
 import { Num, TimeText, UserCell } from "../../kit/format";
 import { FundAction, type Approval } from "../../kit/funds";
 import { ListTable, pageSize, RowActions, useCursorList, type CursorList } from "../../kit/lists";
+import { MintShares, pct, useEventText, type SimEvent } from "../sim/common";
 
 const right: DataColumnMeta = { align: "right" };
 
@@ -81,8 +82,36 @@ export function ApprovalsTable({ admin, list }: { admin: Admin; list: CursorList
   return <ListTable list={list} columns={columns} getRowId={(a) => a.id} aria-label="fund operations" />;
 }
 
+/** simKind reports whether a request is a simulated market's change (C5). */
+const simKind = (kind: string) => kind === "SIM_EVENT" || kind === "SIM_PARAMS";
+
+/** SimChange says what a simulated market's request changes and how far market-sim measured it moving the price. */
+function SimChange({ a }: { a: Approval }) {
+  const { t } = useTranslation();
+  const eventText = useEventText();
+  const p = a.payload as Record<string, string>;
+  let what = t("admin.sim.settingsChange");
+  if (a.kind === "SIM_EVENT") {
+    try {
+      const e = JSON.parse(p.change ?? "{}") as Partial<SimEvent>;
+      what = eventText({ type: e.type ?? "JUMP", size: e.size ?? 0, price: e.price ?? null, mu: e.mu ?? 0, factor: e.factor ?? 0,
+        duration_seconds: e.duration_seconds ?? 0, hold_seconds: e.hold_seconds ?? 0 });
+    } catch {
+      what = p.change ?? "";
+    }
+  }
+  return (
+    <span className="flex flex-col">
+      <span>{what}</span>
+      {p.move && <span className="text-xs text-fg-3">{t("admin.sim.measuredMove", { move: pct(Number(p.move), 1) })}</span>}
+    </span>
+  );
+}
+
 function Payload({ a }: { a: Approval }) {
   const p = a.payload as Record<string, string>;
+  if (simKind(a.kind)) return <SimChange a={a} />;
+  if (a.kind === "SIM_MINT") return <MintShares payload={p} />;
   return (
     <span className="inline-flex items-center gap-2">
       {p.user_id && <UserCell id={p.user_id} />}
@@ -116,12 +145,13 @@ export function Mode({ a }: { a: Approval }) {
  */
 function Decide({ admin, a }: { admin: Admin; a: Approval }) {
   const { t } = useTranslation();
-  if (!can(admin, "ledger.adjust.approve")) return null;
+  if (!can(admin, simKind(a.kind) ? "sim.control" : "ledger.adjust.approve")) return null;
   const p = a.payload as Record<string, string>;
   const mine = a.requested_by === admin.id;
   const target = (
     <span className="inline-flex items-center gap-2">
-      <EnumText group="approvalKind" code={a.kind} /> <Num value={p.amount} unit={p.asset} signed />
+      <EnumText group="approvalKind" code={a.kind} />{" "}
+      {simKind(a.kind) ? <SimChange a={a} /> : a.kind === "SIM_MINT" ? <MintShares payload={p} full /> : <Num value={p.amount} unit={p.asset} signed />}
     </span>
   );
   const run = (approve: boolean) => async (reason: string) =>

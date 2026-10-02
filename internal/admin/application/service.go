@@ -74,8 +74,10 @@ type Service struct {
 	// in-app messages.
 	Content ports.Content
 	// SimBots names the simulated market's bots, left out of the users'
-	// figures; nil counts them.
+	// figures; nil counts them. Sim is market-sim's management API (the
+	// simulated market's pages).
 	SimBots ports.SimBots
+	Sim     ports.Sim
 	Log     *slog.Logger
 	Now     func() time.Time
 	// CloseWait is the pause between attempts to close a position while

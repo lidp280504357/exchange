@@ -44,6 +44,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/ratelimit"
 	"github.com/lidp280504357/exchange/internal/platform/redisx"
 	"github.com/lidp280504357/exchange/internal/platform/secretbox"
+	"github.com/lidp280504357/exchange/internal/platform/svcsign"
 	"github.com/lidp280504357/exchange/migrations"
 )
 
@@ -73,6 +74,10 @@ type settings struct {
 	// MarketSimURL is the simulated market of the platform coin
 	// (MARKET_SIM_URL); its bots stay out of the users' figures.
 	MarketSimURL string `koanf:"market_sim_url"`
+	// SimSecret signs the console's changes to the simulated market with
+	// the key "admin" (SIM_ADMIN_API_SECRET, in sim/admin.env only);
+	// without it the market is read-only here.
+	SimSecret string `koanf:"sim_admin_api_secret"`
 	// SecretKey seals the administrators' authenticator secrets
 	// (ADMIN_SECRET_KEY, base64 of 32 bytes; in apps.env only).
 	SecretKey string `koanf:"admin_secret_key"`
@@ -184,6 +189,15 @@ func setup(ctx context.Context, a *app.App) error {
 		clients[name] = conn
 	}
 	rest := backends.REST{Client: &http.Client{Timeout: 10 * time.Second}}
+	sim := backends.MarketSim{REST: rest, Base: cfg.MarketSimURL}
+	switch err := svcsign.CheckSecret(cfg.SimSecret); {
+	case cfg.SimSecret == "":
+		a.Logger().Warn("no SIM_ADMIN_API_SECRET: the simulated market is read-only in the console")
+	case err != nil:
+		return fmt.Errorf("SIM_ADMIN_API_SECRET: %w", err)
+	default:
+		sim.Signer = svcsign.Client{KeyID: "admin", Secret: []byte(cfg.SimSecret), HTTP: rest.Client}
+	}
 	ledgerClient := ledgerv1.NewLedgerServiceClient(clients["ledger"])
 	authClient := authv1.NewAuthServiceClient(clients["auth"])
 	users := backends.Users{Auth: authClient, User: userv1.NewUserServiceClient(clients["user"]), Ledger: ledgerClient}
@@ -216,7 +230,8 @@ func setup(ctx context.Context, a *app.App) error {
 		Probe:      backends.Health{Client: &http.Client{Timeout: 2 * time.Second}, Targets: targets},
 		Reconciler: backends.Ledger{C: ledgerClient},
 		Content:    backends.Notification{REST: rest, Base: cfg.NotificationURL},
-		SimBots:    backends.MarketSim{REST: rest, Base: cfg.MarketSimURL},
+		SimBots:    sim,
+		Sim:        sim,
 		Log:        a.Logger(),
 		Now:        time.Now,
 	}

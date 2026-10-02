@@ -36,7 +36,13 @@ export function Sidebar({ admin, collapsed, onToggle }: { admin: Admin; collapse
     withdrawals: todo?.withdrawals ?? 0, approvals: todo?.approvals ?? 0, identityRequests: todo?.identity_requests ?? 0,
     deposits: todo?.deposits ?? 0,
   };
-  const isActive = (s: Section) => (s.path === "" ? pathname === "/" : pathname === `/${s.path}` || pathname.startsWith(`/${s.path}/`));
+  // A section is active on its page and the pages under it, unless another
+  // section owns that page (/sim/control is not the overview at /sim).
+  const isActive = (s: Section) => {
+    if (s.path === "") return pathname === "/";
+    if (pathname === `/${s.path}`) return true;
+    return pathname.startsWith(`/${s.path}/`) && !sections.some((o) => o !== s && pathname.startsWith(`/${o.path}`) && o.path.startsWith(`${s.path}/`));
+  };
   const toggleGroup = (g: GroupKey) => {
     const next = new Set(closed);
     if (next.has(g)) next.delete(g);

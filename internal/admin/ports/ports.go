@@ -563,6 +563,10 @@ type Derivatives interface {
 	// TierImpact measures a contract's new risk ladder (the config
 	// document's risk_tiers) against its open positions, changing nothing.
 	TierImpact(ctx context.Context, symbol string, tiers json.RawMessage) (TierImpact, error)
+	// PriceImpact measures a contract's open positions at a mark price
+	// (those it would liquidate, their accounts, what the insurance fund
+	// would bear), changing nothing; the answer is its JSON.
+	PriceImpact(ctx context.Context, symbol, price string) (json.RawMessage, error)
 }
 
 // Content is notification-service's announcements, help articles and
@@ -894,6 +898,27 @@ type Reports interface {
 	// Liquidations returns a page of the liquidation steps, newest first,
 	// and the cursor of the next ("" on the last).
 	Liquidations(ctx context.Context, q LiquidationQuery) ([]LiquidationStep, string, error)
+	// Holdings sums who holds an asset from the ledger's lines: the bots
+	// (in bots) apart from the other users, the system accounts, and the
+	// top largest holders.
+	Holdings(ctx context.Context, asset string, bots []string, top int) (Holdings, error)
+}
+
+// Holder is a user's holding of an asset, in all its accounts.
+type Holder struct {
+	UserID string
+	Amount decimal.Decimal
+}
+
+// Holdings is how an asset is held (ClickHouse ledger_entries, a few
+// seconds behind the ledger): the users' and the bots' balances with how
+// many of each hold some, the system accounts' by type (ADJUSTMENT owes
+// what manual adjustments created) and the largest holders.
+type Holdings struct {
+	Users, Bots             decimal.Decimal
+	UserHolders, BotHolders uint64
+	System                  map[string]decimal.Decimal
+	Top                     []Holder
 }
 
 // LiquidationQuery selects liquidation steps of the last Days: of one
@@ -907,6 +932,13 @@ type LiquidationQuery struct {
 	Limit  int
 }
 
+// The accounts a list of orders or trades keeps (ASTRA design §8 item 6):
+// the simulated market's bots, or everyone else.
+const (
+	AccountsBots  = "bots"
+	AccountsUsers = "users"
+)
+
 // OrderQuery selects spot orders; empty fields match everything.
 type OrderQuery struct {
 	UserID  string
@@ -916,8 +948,12 @@ type OrderQuery struct {
 	Side    string
 	From    time.Time
 	To      time.Time
-	Cursor  string
-	Limit   int
+	// Accounts keeps the orders of the Bots (AccountsBots) or of everyone
+	// else (AccountsUsers); "" keeps all.
+	Accounts string
+	Bots     []string
+	Cursor   string
+	Limit    int
 }
 
 // Order is a spot order in its latest state (ClickHouse orders_current).
@@ -938,6 +974,8 @@ type Order struct {
 	Reason         string    `json:"reason"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+	// Bot marks a simulated market's bot's order.
+	Bot bool `json:"bot"`
 }
 
 // TradeQuery selects spot trades: a symbol, a user on either side, a time
@@ -947,8 +985,12 @@ type TradeQuery struct {
 	UserID string
 	From   time.Time
 	To     time.Time
-	Cursor string
-	Limit  int
+	// Accounts keeps the trades between two of the Bots (AccountsBots) or
+	// those with anyone else on a side (AccountsUsers); "" keeps all.
+	Accounts string
+	Bots     []string
+	Cursor   string
+	Limit    int
 }
 
 // Trade is a spot trade (ClickHouse trades).
@@ -970,6 +1012,9 @@ type Trade struct {
 	ExecutedAt    time.Time `json:"executed_at"`
 	// HouseSide is the side HOUSE took (ADR-0015), "" between users.
 	HouseSide string `json:"house_side"`
+	// BuyerBot and SellerBot mark the simulated market's bots.
+	BuyerBot  bool `json:"buyer_bot"`
+	SellerBot bool `json:"seller_bot"`
 }
 
 // DepositQuery selects deposits; empty fields match everything.
@@ -1069,6 +1114,31 @@ type HousePair struct {
 // users' figures leave out.
 type SimBots interface {
 	BotUsers(ctx context.Context) ([]string, error)
+}
+
+// Sim is market-sim's management API (the simulated market of the
+// platform coin, ASTRA design §5.1, docs/runbook/market-sim.md): reads as
+// it renders them; writes signed with the console's key, carrying the
+// administrator who asks and the one who approved (never taken from the
+// browser).
+type Sim interface {
+	SimBots
+	// Status is the market's state: target and last price, the band, the
+	// bots, the running events.
+	Status(ctx context.Context) (json.RawMessage, error)
+	// History is the target and last price every 10 seconds over the last
+	// minutes (at most a day).
+	History(ctx context.Context, minutes int) (json.RawMessage, error)
+	// Events lists the running and scheduled events, or with all the
+	// latest of every status.
+	Events(ctx context.Context, all bool, limit int) (json.RawMessage, error)
+	// CreateEvent creates a price event: event is its fields as market-sim
+	// takes them, without actor and approved_by.
+	CreateEvent(ctx context.Context, event map[string]any, actor, approvedBy string) (json.RawMessage, error)
+	// EndEvent cancels a scheduled event or ends a running one.
+	EndEvent(ctx context.Context, id, actor, reason string) (json.RawMessage, error)
+	// UpdateParams replaces the settings (every field).
+	UpdateParams(ctx context.Context, params json.RawMessage, actor, approvedBy string) (json.RawMessage, error)
 }
 
 // HouseTrades sums HOUSE's spot trades per pair (ClickHouse).

@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -56,7 +57,16 @@ func (s *Service) OrderList(ctx context.Context, p Principal, q ports.OrderQuery
 	}
 	q.Symbol, q.Status, q.Side = strings.ToUpper(q.Symbol), strings.ToUpper(q.Status), strings.ToUpper(q.Side)
 	q.Limit = pageLimit(q.Limit)
-	return s.Records.Orders(ctx, q)
+	bots, err := s.listBots(ctx, q.Accounts)
+	if err != nil {
+		return nil, "", err
+	}
+	q.Bots = slices.Collect(maps.Keys(bots))
+	list, next, err := s.Records.Orders(ctx, q)
+	for i := range list {
+		list[i].Bot = bots[list[i].UserID]
+	}
+	return list, next, err
 }
 
 // TradeList returns a page of spot trades from the read model, newest
@@ -70,7 +80,54 @@ func (s *Service) TradeList(ctx context.Context, p Principal, q ports.TradeQuery
 	}
 	q.Symbol = strings.ToUpper(q.Symbol)
 	q.Limit = pageLimit(q.Limit)
-	return s.Records.Trades(ctx, q)
+	bots, err := s.listBots(ctx, q.Accounts)
+	if err != nil {
+		return nil, "", err
+	}
+	q.Bots = slices.Collect(maps.Keys(bots))
+	list, next, err := s.Records.Trades(ctx, q)
+	for i := range list {
+		list[i].BuyerBot, list[i].SellerBot = bots[list[i].BuyerUserID], bots[list[i].SellerUserID]
+	}
+	return list, next, err
+}
+
+// botMarkWait bounds the wait for the bots when a list only marks them.
+const botMarkWait = 2 * time.Second
+
+// listBots returns the simulated market's bots for a list of orders or
+// trades: required to keep them (accounts bots) or leave them out
+// (users); otherwise only to mark them, and none while market-sim does not
+// answer.
+func (s *Service) listBots(ctx context.Context, accounts string) (map[string]bool, error) {
+	if accounts != "" && accounts != ports.AccountsBots && accounts != ports.AccountsUsers {
+		return nil, apperr.Invalid("accounts must be bots or users")
+	}
+	if s.SimBots == nil {
+		if accounts != "" {
+			return nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "the simulated market's bots are unknown here")
+		}
+		return nil, nil
+	}
+	wait := ctx
+	if accounts == "" {
+		var cancel context.CancelFunc
+		wait, cancel = context.WithTimeout(ctx, botMarkWait)
+		defer cancel()
+	}
+	list, err := s.SimBots.BotUsers(wait)
+	if err != nil {
+		if accounts != "" {
+			return nil, err
+		}
+		s.Log.DebugContext(ctx, "lists: the bots are unknown", "error", err)
+		return nil, nil
+	}
+	out := make(map[string]bool, len(list))
+	for _, id := range list {
+		out[id] = true
+	}
+	return out, nil
 }
 
 // DepositList returns a page of deposits from the read model, newest
