@@ -70,6 +70,11 @@ const (
 	// their roles, disables and enables them, resets their passwords and
 	// authenticators, ends their sessions (ADMIN only).
 	PermAdminsManage = "admins.manage"
+	// PermInstrumentsTrading changes the trading parameters: a pair's or
+	// contract's status, fee rates, risk ladders (and so leverage) and
+	// reference symbols; and approves, rejects or cancels such changes
+	// (ADMIN only, design 2026-10-02 §2 item 6).
+	PermInstrumentsTrading = "instruments.trading"
 )
 
 var reads = []string{
@@ -79,7 +84,7 @@ var reads = []string{
 var roles = map[string][]string{
 	RoleAdmin: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit,
 		PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermDerivativesEdit, PermSettingsEdit, PermUsersNotes,
-		PermUsersSecurity, PermUsersContacts, PermLedgerHold, PermDepositsReview, PermAdminsManage),
+		PermUsersSecurity, PermUsersContacts, PermLedgerHold, PermDepositsReview, PermAdminsManage, PermInstrumentsTrading),
 	RoleOperator: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit, PermDerivativesEdit,
 		PermUsersNotes, PermUsersSecurity, PermUsersContacts, PermLedgerHold),
 	RoleFinance: append(slices.Clone(reads), PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermUsersNotes, PermUsersContacts,
@@ -339,17 +344,30 @@ type Settings struct {
 	SingleMax     decimal.Decimal
 	DailyMax      decimal.Decimal
 	WithdrawalMax decimal.Decimal
-	UpdatedBy     string
-	UpdatedAt     time.Time
+	// ChangeDelay is how long a confirmed change of trading parameters
+	// waits before it takes effect (design 2026-10-02 §2 item 6).
+	ChangeDelay time.Duration
+	UpdatedBy   string
+	UpdatedAt   time.Time
 }
+
+// The bounds of Settings.ChangeDelay.
+const (
+	MinChangeDelay     = time.Minute
+	MaxChangeDelay     = 24 * time.Hour
+	DefaultChangeDelay = 5 * time.Minute
+)
 
 // DefaultSettings are the limits until an administrator changes them.
 func DefaultSettings() Settings {
-	return Settings{SingleMax: decimal.NewFromInt(100_000), DailyMax: decimal.NewFromInt(500_000), WithdrawalMax: decimal.NewFromInt(100_000)}
+	return Settings{
+		SingleMax: decimal.NewFromInt(100_000), DailyMax: decimal.NewFromInt(500_000), WithdrawalMax: decimal.NewFromInt(100_000),
+		ChangeDelay: DefaultChangeDelay,
+	}
 }
 
 // Validate checks the limits: positive, and a day's total no smaller than
-// one operation.
+// one operation; and the delay of trading parameters' changes.
 func (s Settings) Validate() error {
 	for _, v := range []decimal.Decimal{s.SingleMax, s.DailyMax, s.WithdrawalMax} {
 		if !v.IsPositive() {
@@ -358,6 +376,9 @@ func (s Settings) Validate() error {
 	}
 	if s.DailyMax.LessThan(s.SingleMax) {
 		return apperr.Invalid("the 24-hour limit must be at least the single-operation limit")
+	}
+	if s.ChangeDelay < MinChangeDelay || s.ChangeDelay > MaxChangeDelay || s.ChangeDelay%time.Second != 0 {
+		return apperr.Invalid("change_delay_seconds must be 60 to 86400")
 	}
 	return nil
 }

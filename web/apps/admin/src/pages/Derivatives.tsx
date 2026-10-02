@@ -75,7 +75,7 @@ function Contracts({ admin }: { admin: Admin }) {
         cell: ({ row }) => (
           <span className="flex items-center justify-end gap-1">
             {row.original.reduce_only && can(admin, "derivatives.write") && <Lift symbol={row.original.symbol} />}
-            {can(admin, "derivatives.write") && <StatusActions kind="contract" symbol={row.original.symbol} status={row.original.status} />}
+            {can(admin, "instruments.trading") && <StatusActions kind="contract" symbol={row.original.symbol} status={row.original.status} />}
           </span>
         ),
       },

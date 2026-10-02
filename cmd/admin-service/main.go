@@ -211,9 +211,29 @@ func setup(ctx context.Context, a *app.App) error {
 		Log:        a.Logger(),
 		Now:        time.Now,
 	}
+	a.Add("instrument changes", app.Loop(func(ctx context.Context) error { return applyDueChanges(ctx, svc, 5*time.Second) }))
 	r := a.NewRouter()
 	(&httpapi.Handler{Svc: svc, Limiter: ratelimit.New(rdb, "admin:rl:"), Secure: a.Config().Env != config.EnvLocal}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
+}
+
+// applyDueChanges applies the changes of trading parameters whose time
+// has come, every interval until ctx ends.
+func applyDueChanges(ctx context.Context, svc *application.Service, every time.Duration) error {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		if n, err := svc.ApplyDueChanges(ctx); err != nil && ctx.Err() == nil {
+			svc.Log.WarnContext(ctx, "instrument changes: round failed", "error", err)
+		} else if n > 0 {
+			svc.Log.InfoContext(ctx, "instrument changes settled", "count", n)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.C:
+		}
+	}
 }
 
 // configSchema opens the shared config schema, where flag switches are

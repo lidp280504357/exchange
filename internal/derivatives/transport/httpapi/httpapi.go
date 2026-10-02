@@ -536,6 +536,7 @@ func (h *Handler) InternalRoutes(r chi.Router) {
 	r.Get("/internal/derivatives/risk", h.risk)
 	r.Get("/internal/derivatives/positions", h.openPositions)
 	r.Post("/internal/derivatives/positions/close", h.adminClose)
+	r.Post("/internal/derivatives/contracts/{symbol}/tier-impact", h.tierImpact)
 }
 
 func (h *Handler) adminClose(w http.ResponseWriter, r *http.Request) {
@@ -642,6 +643,59 @@ func (h *Handler) openPositions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"positions": riskRows(list), "truncated": cut})
+}
+
+// tierImpact measures a new risk ladder against the contract's open
+// positions (the admin console's preview of a ladder change).
+func (h *Handler) tierImpact(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		RiskTiers []struct {
+			MaxNotional string `json:"max_notional"`
+			MaxLeverage int32  `json:"max_leverage"`
+			MMR         string `json:"mmr"`
+		} `json:"risk_tiers"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	tiers := make([]domain.RiskTier, 0, len(body.RiskTiers))
+	for _, t := range body.RiskTiers {
+		notional, err1 := decimal.NewFromString(t.MaxNotional)
+		mmr, err2 := decimal.NewFromString(t.MMR)
+		if err1 != nil || err2 != nil {
+			httpx.WriteError(w, r, apperr.Invalid("max_notional and mmr must be decimal strings"))
+			return
+		}
+		tiers = append(tiers, domain.RiskTier{MaxNotional: notional, MaxLeverage: t.MaxLeverage, MMR: mmr})
+	}
+	imp, err := h.Svc.TierImpact(r.Context(), strings.ToUpper(chi.URLParam(r, "symbol")), tiers)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	type exampleJSON struct {
+		UserID            string `json:"user_id"`
+		Symbol            string `json:"symbol"`
+		PositionSide      string `json:"position_side"`
+		Cross             bool   `json:"cross"`
+		Notional          string `json:"notional"`
+		MarginBalance     string `json:"margin_balance"`
+		MaintenanceBefore string `json:"maintenance_before"`
+		MaintenanceAfter  string `json:"maintenance_after"`
+	}
+	examples := make([]exampleJSON, 0, len(imp.Examples))
+	for _, e := range imp.Examples {
+		examples = append(examples, exampleJSON{
+			UserID: e.UserID, Symbol: e.Symbol, PositionSide: string(e.PositionSide), Cross: e.Cross, Notional: e.Notional.StringFixed(2),
+			MarginBalance: e.MarginBalance.StringFixed(2), MaintenanceBefore: e.MaintenanceBefore.StringFixed(2),
+			MaintenanceAfter: e.MaintenanceAfter.StringFixed(2),
+		})
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"symbol": imp.Symbol, "positions": imp.Positions, "liquidated": imp.Liquidated, "notional": imp.Notional.StringFixed(2),
+		"accounts": imp.Accounts, "warned": imp.Warned, "over_limit": imp.OverLimit, "unmeasured": imp.Unmeasured, "examples": examples,
+	})
 }
 
 type riskJSON struct {

@@ -487,6 +487,21 @@ func (d Derivatives) OpenPositions(ctx context.Context, q ports.PositionQuery) (
 	return d.do(ctx, http.MethodGet, d.Base+"/internal/derivatives/positions?"+v.Encode(), nil, nil)
 }
 
+// TierImpact measures a contract's new risk ladder against its open
+// positions.
+func (d Derivatives) TierImpact(ctx context.Context, symbol string, tiers json.RawMessage) (ports.TierImpact, error) {
+	raw, err := d.do(ctx, http.MethodPost, d.Base+"/internal/derivatives/contracts/"+url.PathEscape(symbol)+"/tier-impact",
+		map[string]json.RawMessage{"risk_tiers": tiers}, nil)
+	if err != nil {
+		return ports.TierImpact{}, err
+	}
+	var out ports.TierImpact
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return ports.TierImpact{}, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "derivatives-service answered badly")
+	}
+	return out, nil
+}
+
 // Flags implements ports.Flags on the shared config schema; a switch is
 // written with its ConfigChanged audit event in one transaction, published
 // by the config schema's outbox relay.

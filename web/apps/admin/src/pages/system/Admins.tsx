@@ -101,7 +101,7 @@ export default function Admins({ admin }: { admin: Admin }) {
               trigger={
                 <Button size="sm" variant="ghost" className="whitespace-nowrap" data-testid={`admin-actions-${a.email}`}>
                   {t("admin.common.actions")}
-                  <ChevronDown size={12} />
+                  <ChevronDown size={12} className="ml-1 inline-block align-middle" />
                 </Button>
               }
               items={items}

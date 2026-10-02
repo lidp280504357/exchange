@@ -127,7 +127,11 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/instruments/config", h.instrumentConfig)
 			r.Post("/instruments/preview", h.previewConfig)
 			r.Post("/instruments/apply", h.applyConfig)
-			r.Post("/instruments/pairs/{symbol}/status", h.pairStatus)
+			r.Post("/instruments/pairs/{symbol}/status/preview", h.previewStatus(domain.ChangePairStatus))
+			r.Post("/instruments/pairs/{symbol}/status", h.setStatus(domain.ChangePairStatus))
+			r.Get("/instruments/changes", h.instrumentChanges)
+			r.Post("/instruments/changes/{id}/decide", h.decideInstrumentChange)
+			r.Post("/instruments/changes/{id}/cancel", h.cancelInstrumentChange)
 			r.Get("/flags", h.flags)
 			r.Put("/flags/{key}", h.switchFlag)
 			r.Post("/ledger/adjustments", h.requestAdjustment)
@@ -141,7 +145,8 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/reports/derivatives", h.derivativesReport)
 			r.Get("/reports/open-interest", h.openInterest)
 			r.Get("/derivatives/contracts", h.derivativesContracts)
-			r.Post("/derivatives/contracts/{symbol}/status", h.contractStatus)
+			r.Post("/derivatives/contracts/{symbol}/status/preview", h.previewStatus(domain.ChangeContractStatus))
+			r.Post("/derivatives/contracts/{symbol}/status", h.setStatus(domain.ChangeContractStatus))
 			r.Post("/derivatives/contracts/{symbol}/lift-reduce-only", h.liftReduceOnly)
 			r.Get("/derivatives/risk", h.derivativesRisk)
 			r.Get("/derivatives/liquidations", h.liquidations)
@@ -646,23 +651,6 @@ func (h *Handler) instruments(w http.ResponseWriter, r *http.Request) {
 	writeRaw(w, raw)
 }
 
-func (h *Handler) pairStatus(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		To     string `json:"to"`
-		Reason string `json:"reason"`
-	}
-	if err := httpx.DecodeJSON(w, r, &body); err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	from, err := h.Svc.SetPairStatus(r.Context(), principal(r), chi.URLParam(r, "symbol"), strings.ToUpper(body.To), body.Reason)
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]string{"from": from, "to": strings.ToUpper(body.To)})
-}
-
 // instrumentConfig returns the reference data as a config document.
 func (h *Handler) instrumentConfig(w http.ResponseWriter, r *http.Request) {
 	raw, err := h.Svc.InstrumentConfig(r.Context(), principal(r))
@@ -676,6 +664,9 @@ func (h *Handler) instrumentConfig(w http.ResponseWriter, r *http.Request) {
 type configBody struct {
 	Config json.RawMessage `json:"config"`
 	Reason string          `json:"reason"`
+	// Confirmation is the preview's, for a document moving trading
+	// parameters.
+	Confirmation string `json:"confirmation"`
 }
 
 // previewConfig works out what a config document would change.
@@ -686,21 +677,6 @@ func (h *Handler) previewConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := h.Svc.PreviewConfig(r.Context(), principal(r), body.Config)
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	httpx.WriteJSON(w, http.StatusOK, res)
-}
-
-// applyConfig applies a config document.
-func (h *Handler) applyConfig(w http.ResponseWriter, r *http.Request) {
-	var body configBody
-	if err := httpx.DecodeJSON(w, r, &body); err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	res, err := h.Svc.ApplyConfig(r.Context(), principal(r), body.Config, body.Reason)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -853,6 +829,7 @@ type SettingsJSON struct {
 	SingleMax     string  `json:"single_max_usdt"`
 	DailyMax      string  `json:"daily_max_usdt"`
 	WithdrawalMax string  `json:"withdrawal_max_usdt"`
+	ChangeDelay   int64   `json:"change_delay_seconds"`
 	DailyUsed     string  `json:"daily_used_usdt"`
 	UpdatedBy     string  `json:"updated_by"`
 	UpdatedAt     *string `json:"updated_at"`
@@ -861,7 +838,7 @@ type SettingsJSON struct {
 func settingsJSON(v application.SettingsView) SettingsJSON {
 	out := SettingsJSON{
 		TwoPerson: v.TwoPerson, SingleMax: v.SingleMax.String(), DailyMax: v.DailyMax.String(), WithdrawalMax: v.WithdrawalMax.String(),
-		DailyUsed: v.Used.String(), UpdatedBy: v.UpdatedBy,
+		ChangeDelay: int64(v.ChangeDelay / time.Second), DailyUsed: v.Used.String(), UpdatedBy: v.UpdatedBy,
 	}
 	if !v.UpdatedAt.IsZero() {
 		s := httpx.FormatTime(v.UpdatedAt)
@@ -885,6 +862,7 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		SingleMax     *string `json:"single_max_usdt"`
 		DailyMax      *string `json:"daily_max_usdt"`
 		WithdrawalMax *string `json:"withdrawal_max_usdt"`
+		ChangeDelay   *int64  `json:"change_delay_seconds"`
 		Reason        string  `json:"reason"`
 	}
 	if err := httpx.DecodeJSON(w, r, &body); err != nil {
@@ -892,6 +870,10 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	patch := application.SettingsPatch{TwoPerson: body.TwoPerson, Reason: body.Reason}
+	if body.ChangeDelay != nil {
+		d := time.Duration(*body.ChangeDelay) * time.Second
+		patch.ChangeDelay = &d
+	}
 	for _, f := range []struct {
 		in   *string
 		out  **decimal.Decimal
@@ -1081,23 +1063,6 @@ func (h *Handler) derivativesContracts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeRaw(w, raw)
-}
-
-func (h *Handler) contractStatus(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		To     string `json:"to"`
-		Reason string `json:"reason"`
-	}
-	if err := httpx.DecodeJSON(w, r, &body); err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	from, err := h.Svc.SetContractStatus(r.Context(), principal(r), chi.URLParam(r, "symbol"), strings.ToUpper(body.To), body.Reason)
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]string{"from": from, "to": strings.ToUpper(body.To)})
 }
 
 func (h *Handler) liftReduceOnly(w http.ResponseWriter, r *http.Request) {

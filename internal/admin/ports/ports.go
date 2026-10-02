@@ -28,8 +28,28 @@ type Repos interface {
 	Settings() SettingsRepo
 	Notes() NoteRepo
 	Tags() TagRepo
+	Changes() ChangeRepo
 	// Audit queues an administrator's action on audit.events.
 	Audit(ctx context.Context, msg proto.Message, actor string) error
+}
+
+// ChangeRepo stores the changes of trading parameters (design 2026-10-02
+// §2 item 6).
+type ChangeRepo interface {
+	Create(ctx context.Context, c domain.InstrumentChange) error
+	// Get and GetForUpdate read a change with the emails of its
+	// administrators; nil when unknown.
+	Get(ctx context.Context, id string) (*domain.InstrumentChange, error)
+	GetForUpdate(ctx context.Context, id string) (*domain.InstrumentChange, error)
+	Update(ctx context.Context, c domain.InstrumentChange) error
+	// List returns changes, newest first, of a status when set, after the
+	// one created at afterTime with ID afterID (zero for the newest).
+	List(ctx context.Context, status string, afterTime time.Time, afterID string, limit int) ([]domain.InstrumentChange, error)
+	// Due locks the scheduled changes whose time has come, oldest first,
+	// skipping those another transaction holds.
+	Due(ctx context.Context, now time.Time, limit int) ([]domain.InstrumentChange, error)
+	// Open counts the changes waiting for approval or their time.
+	Open(ctx context.Context) (int, error)
 }
 
 // NoteRepo stores administrators' notes on accounts.
@@ -519,6 +539,30 @@ type Derivatives interface {
 	// of kind ADMIN (DERIV_CLOSE_PENDING while its closing orders are
 	// being canceled); clientOrderID makes it idempotent.
 	ClosePosition(ctx context.Context, userID, symbol, positionSide, clientOrderID string) (json.RawMessage, error)
+	// TierImpact measures a contract's new risk ladder (the config
+	// document's risk_tiers) against its open positions, changing nothing.
+	TierImpact(ctx context.Context, symbol string, tiers json.RawMessage) (TierImpact, error)
+}
+
+// TierImpact is what a new risk ladder would do to a contract's open
+// positions at the mark prices (derivatives-service measures it as its
+// margin monitor does; HOUSE aside).
+type TierImpact struct {
+	Symbol string `json:"symbol"`
+	// Positions counts the open positions; Liquidated those the monitor
+	// would take over that it does not now (a cross account whole), with
+	// their notional and their accounts.
+	Positions  int    `json:"positions"`
+	Liquidated int    `json:"liquidated"`
+	Notional   string `json:"notional"`
+	Accounts   int    `json:"accounts"`
+	// Warned are newly within 1.2 times their maintenance margin;
+	// OverLimit above the risk limit of their leverage; Unmeasured without
+	// a fresh mark price.
+	Warned     int             `json:"warned"`
+	OverLimit  int             `json:"over_limit"`
+	Unmeasured int             `json:"unmeasured"`
+	Examples   json.RawMessage `json:"examples"`
 }
 
 // PositionQuery selects open positions across users: a contract, a user,

@@ -38,6 +38,7 @@ sudo docker compose ... exec -T instrument-service /app/exchangectl instruments 
 - 交易对的新参考符号先经 market-data-service 的内部接口 `GET /internal/market/reference-symbols/{symbol}` 向币安核对（现货与 U 本位合约是否上架），币安现货没有的直接拒绝：写错的符号会让行情服务按批读取的全部交易对的参考行情失败。
 - 加了参考符号的新交易对或合约会让行情服务在一分钟内重连币安的全部参考行情流（约 20 秒参考盘口为空）；HOUSE 只给开关 `market.house_liquidity` 名单里的交易对报价，名单要另外改（功能开关或 `exchangectl flags set`）。预览会提示这两点。
 - 新交易对在服务里最多 5 秒（交易服务）到 30 秒（行情服务）后可用，不用重启；撮合引擎按需建盘口。
+- 交易参数（状态、费率、费率档、参考符号与倍数、合约的风险阶梯）在后台另有护栏（2026-10-02 设计 §2 第 6 条，C3c）：只有 ADMIN，确认预览给的令牌，等设置里的时间（默认 5 分钟）后才由 admin-service 写入，双人审批时还要另一位 ADMIN 批准；HOUSE 正在报价或作为指数的交易对不能清空参考符号。见 [admin.md](admin.md#交易参数的护栏2026-10-02-设计-2-第-6-条c3c)。instrument-service 本身不区分，`exchangectl instruments apply` 不经过它。
 
 ### 主流 50 币（阶段 4 B4，设计稿 §8.5，ADR-0013、ADR-0014）
 

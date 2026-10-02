@@ -8,7 +8,10 @@
 # the end. It checks sign-in (password + TOTP, one use per code, or the
 # password alone while the flag admin.login_without_totp is on; the
 # cookie's attributes, the CSRF header), roles, freezing and unfreezing
-# an account, cancelling its orders, a pair's status round trip, a flag
+# an account, cancelling its orders, the guard of trading parameters
+# (statuses, a reference symbol, a risk ladder's impact: an ADMIN confirms
+# the preview, the change waits its minute — the run sets the least delay
+# and puts it back — or is canceled; a halt at once), a flag
 # round trip, a two-person ledger adjustment, the settings and
 # single-person mode (adjustments booked alone, one above the limit
 # waiting and withdrawn), the counts and their event stream, the
@@ -126,7 +129,7 @@ expect 200 - "the sign-in options need no session"
 TOTP_REQUIRED=$(jq -r .totp_required <<<"$BODY")
 login ADMIN
 expect 200 - "ADMIN signs in with password and code"
-check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 22" "with every permission"
+check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 23" "with every permission"
 cookie=$(grep -i '^set-cookie: admin_session=' "$WORK/ADMIN.headers")
 for attr in 'Path=/admin/' 'HttpOnly' 'Secure' 'SameSite=Strict'; do
   grep -qi "$attr" <<<"$cookie" || { echo "FAIL the session cookie lacks $attr: $cookie" >&2; exit 1; }
@@ -231,19 +234,49 @@ refresh_user full
 call GET /v1/user/profile "" "${UAUTH[@]}"
 check '.status == "ACTIVE"' "ACTIVE again"
 
-echo "== a pair's status (ETH-BTC)"
-as OPERATOR POST /admin/v1/instruments/pairs/ETH-BTC/status '{"to":"HALT","reason":"e2e halt"}'
-expect 200 - "OPERATOR halts ETH-BTC"
-check '.from == "TRADING" and .to == "HALT"' "TRADING → HALT"
-# shellcheck disable=SC2016 # a safety net: the pair trades again whatever happens
-at_exit 'as OPERATOR POST /admin/v1/instruments/pairs/ETH-BTC/status "{\"to\":\"TRADING\",\"reason\":\"e2e cleanup\"}"'
-as OPERATOR POST /admin/v1/instruments/pairs/ETH-BTC/status '{"to":"PREPARE","reason":"e2e"}'
-expect 409 INSTRUMENT_STATUS_TRANSITION_INVALID "HALT cannot go back to PREPARE"
-as OPERATOR POST /admin/v1/instruments/pairs/ETH-BTC/status '{"to":"TRADING","reason":"e2e resume"}'
-expect 200 - "and resumes it"
+echo "== a pair's status (ETH-BTC): previewed, only by an ADMIN"
+# Statuses are trading parameters (design 2026-10-02 §2 item 6): an ADMIN
+# previews a move and confirms it with the preview's token; a halt takes
+# effect at once, anything else waits settings.change_delay_seconds. The
+# run halts and opens its own pair (LINK-BTC, below) and halts the
+# perpetual ETH-USDT-PERP; ETH-BTC, which other checks trade on, is only
+# previewed. The changes wait a minute (the least allowed) during the run.
+as AUDITOR GET /admin/v1/settings ""
+DELAY_BEFORE=$(jq -r .change_delay_seconds <<<"$BODY")
+TWO_PERSON=$(jq -r .two_person_approval <<<"$BODY")
+if [[ $DELAY_BEFORE != 60 ]]; then
+  as ADMIN PUT /admin/v1/settings '{"change_delay_seconds":60,"reason":"e2e changes wait a minute"}'
+  expect 200 - "the run's changes of trading parameters wait a minute"
+  at_exit "as ADMIN PUT /admin/v1/settings '{\"change_delay_seconds\":$DELAY_BEFORE,\"reason\":\"e2e cleanup\"}' >/dev/null"
+fi
+# confirm_status PATH TO REASON: an ADMIN previews a status move of the pair
+# or contract at PATH and confirms it with the preview's token.
+confirm_status() {
+  local token
+  as ADMIN POST "$1/status/preview" "{\"to\":\"$2\"}"
+  [[ $STATUS == 200 ]] || return 0
+  token=$(jq -r '.confirmation.token // ""' <<<"$BODY")
+  as ADMIN POST "$1/status" "$(jq -nc --arg to "$2" --arg r "$3" --arg c "$token" '{to: $to, reason: $r, confirmation: $c}')"
+}
+status_is() { # status_is SYMBOL STATUS: the reference data say so
+  as AUDITOR GET /admin/v1/instruments/config ""
+  [[ $STATUS == 200 ]] && jq -e --arg s "$1" --arg st "$2" '[.pairs[], .contracts[]] | map(select(.symbol == $s)) | .[0].status == $st' <<<"$BODY" >/dev/null
+}
+as OPERATOR POST /admin/v1/instruments/pairs/ETH-BTC/status/preview '{"to":"HALT"}'
+expect 403 ADMIN_FORBIDDEN "an OPERATOR moves no pair"
+as ADMIN POST /admin/v1/instruments/pairs/ETH-BTC/status/preview '{"to":"HALT"}'
+expect 200 - "ADMIN previews a halt"
+check '.from == "TRADING" and .to == "HALT" and .immediate == true and .confirmation == null' "at once, nothing to confirm"
+as ADMIN POST /admin/v1/instruments/pairs/ETH-BTC/status/preview '{"to":"CANCEL_ONLY"}'
+expect 200 - "and the way out"
+check ".immediate == false and .delay_seconds == 60 and (.confirmation.token | length) > 40 and .two_person == $TWO_PERSON" "waits a minute once confirmed"
+as ADMIN POST /admin/v1/instruments/pairs/ETH-BTC/status '{"to":"CANCEL_ONLY","reason":"e2e without the preview"}'
+expect 409 ADMIN_CONFIRMATION_REQUIRED "not without the preview's confirmation"
+as ADMIN POST /admin/v1/instruments/pairs/ETH-BTC/status/preview '{"to":"PREPARE"}'
+expect 409 INSTRUMENT_STATUS_TRANSITION_INVALID "TRADING cannot go back to PREPARE"
 as AUDITOR GET /admin/v1/instruments ""
 expect 200 - "instruments"
-check '(.pairs[] | select(.symbol == "ETH-BTC") | .status) == "TRADING" and (.assets | map(.asset_code) | index("ETH")) != null' "ETH-BTC trades again; assets are listed"
+check '(.pairs[] | select(.symbol == "ETH-BTC") | .status) == "TRADING" and (.assets | map(.asset_code) | index("ETH")) != null' "ETH-BTC still trades; assets are listed"
 
 echo "== cancel every order of the account"
 balance() {
@@ -373,14 +406,24 @@ as OPERATOR POST /admin/v1/derivatives/contracts/BTC-USDT-PERP/lift-reduce-only 
 expect 200 - "OPERATOR may lift it"
 check '.symbol == "BTC-USDT-PERP" and (.lifted | type) == "boolean"' "lifted says whether it was on"
 as OPERATOR POST /admin/v1/derivatives/contracts/ETH-USDT-PERP/status '{"to":"HALT","reason":"e2e halt"}'
-expect 200 - "OPERATOR halts ETH-USDT-PERP"
-check '.from == "TRADING" and .to == "HALT"' "TRADING → HALT"
-# shellcheck disable=SC2016 # a safety net: the contract trades again whatever happens
-at_exit 'as OPERATOR POST /admin/v1/derivatives/contracts/ETH-USDT-PERP/status "{\"to\":\"TRADING\",\"reason\":\"e2e cleanup\"}"'
-as OPERATOR POST /admin/v1/derivatives/contracts/ETH-USDT-PERP/status '{"to":"TRADING","reason":"e2e resume"}'
-expect 200 - "and resumes it"
+expect 403 ADMIN_FORBIDDEN "an OPERATOR halts no contract"
+PERP_RESUMED=""
+if [[ $TWO_PERSON == false ]]; then
+  as ADMIN POST /admin/v1/derivatives/contracts/ETH-USDT-PERP/status '{"to":"HALT","reason":"e2e halt"}'
+  expect 200 - "ADMIN halts ETH-USDT-PERP at once"
+  check '.from == "TRADING" and .to == "HALT" and .change == null' "TRADING → HALT"
+  # shellcheck disable=SC2016 # a safety net: the contract trades again a minute after whatever happens
+  at_exit 'status_is ETH-USDT-PERP HALT && confirm_status /admin/v1/derivatives/contracts/ETH-USDT-PERP TRADING "e2e cleanup" >/dev/null'
+  confirm_status /admin/v1/derivatives/contracts/ETH-USDT-PERP TRADING "e2e resume"
+  expect 202 - "and confirms its resume"
+  check '.from == "HALT" and .to == "TRADING" and .change.status == "SCHEDULED" and .change.kind == "CONTRACT_STATUS" and .change.target == "contract:ETH-USDT-PERP"' \
+    "which waits its minute"
+  PERP_RESUMED=$(jq -r .change.id <<<"$BODY")
+else
+  echo "skip a contract's halt and resume: two-person approval is on and this run has one ADMIN"
+fi
 as AUDITOR GET /admin/v1/instruments ""
-check '(.contracts[] | select(.symbol == "ETH-USDT-PERP") | .status) == "TRADING"' "the instruments list the contracts"
+check '[.contracts[].symbol] | index("ETH-USDT-PERP") != null' "the instruments list the contracts"
 as AUDITOR GET /admin/v1/derivatives/risk ""
 expect 200 - "positions near liquidation"
 check '.positions | type == "array"' "a list"
@@ -544,6 +587,13 @@ if [[ $TWO_PERSON == false ]]; then
 fi
 
 echo "== a force close"
+if [[ -n $PERP_RESUMED ]]; then
+  # The resume confirmed with the contracts above has had its minute; the
+  # console applies a change within 5 seconds of its time.
+  eventually 180 "ETH-USDT-PERP trades again once its resume took effect" status_is ETH-USDT-PERP TRADING
+  as AUDITOR GET "/admin/v1/instruments/changes?status=APPLIED&limit=20" ""
+  check "any(.items[]; .id == \"$PERP_RESUMED\" and .applied_at != null and .requested_by_email == \"$EMAIL_ADMIN\")" "the change applied, in its requester's name"
+fi
 call POST /v1/account/transfers '{"asset":"USDT","amount":"100","from_account_type":"SPOT","to_account_type":"FUTURES"}' \
   "${UAUTH[@]}" -H "Idempotency-Key: e2e-admin-perp-$RUN"
 expect 201 - "the user moves 100 USDT to FUTURES"
@@ -618,13 +668,70 @@ pair_listed() {
 }
 eventually 60 "the sites list LINK-BTC as changed" pair_listed
 LINK_STATUS=$(jq -r '.pairs[] | select(.symbol == "LINK-BTC") | .status' <<<"$BODY")
-if [[ $LINK_STATUS != TRADING ]]; then
+# shellcheck disable=SC2016 # expanded when the script ends
+at_exit 'as ADMIN POST /admin/v1/instruments/pairs/LINK-BTC/status "{\"to\":\"HALT\",\"reason\":\"e2e cleanup\"}" >/dev/null'
+LINK_OPENING=""
+if [[ $LINK_STATUS != TRADING && $TWO_PERSON == false ]]; then
   as OPERATOR POST /admin/v1/instruments/pairs/LINK-BTC/status '{"to":"TRADING","reason":"e2e opens LINK-BTC"}'
-  expect 200 - "and opens it for trading (from $LINK_STATUS)"
+  expect 403 ADMIN_FORBIDDEN "an OPERATOR opens no pair"
+  confirm_status /admin/v1/instruments/pairs/LINK-BTC TRADING "e2e opens LINK-BTC"
+  expect 202 - "ADMIN confirms LINK-BTC's opening (from $LINK_STATUS)"
+  check '.change.status == "SCHEDULED" and .change.kind == "PAIR_STATUS" and .change.effective_at != null' "it opens a minute later"
+  LINK_OPENING=$(jq -r .change.id <<<"$BODY")
 fi
-at_exit 'as OPERATOR POST /admin/v1/instruments/pairs/LINK-BTC/status "{\"to\":\"HALT\",\"reason\":\"e2e cleanup\"}" >/dev/null'
-link_order() { # 2 LINK at 0.0001 BTC: worth either minimum the run set (0.0001 or 0.0002)
-  call POST /v1/orders '{"symbol":"LINK-BTC","side":"BUY","type":"LIMIT","price":"0.0001","quantity":"2"}' "${UAUTH[@]}" -H "Idempotency-Key: e2e-admin-link-$RUN"
+
+echo "== trading parameters wait for an ADMIN's confirmation and their time"
+as AUDITOR GET /admin/v1/instruments/config ""
+CONFIG=$BODY
+as OPERATOR POST /admin/v1/instruments/preview "{\"config\":$(link_pair LINKBTC)}"
+expect 200 - "an OPERATOR previews a reference symbol for LINK-BTC"
+check '[.guard.params[] | select(.entity == "TRADING_PAIR" and .key == "LINK-BTC" and .field == "reference_symbol")] | length == 1 and .guard.confirmation == null' \
+  "a trading parameter, not the OPERATOR's to confirm"
+as OPERATOR POST /admin/v1/instruments/apply "{\"config\":$(link_pair LINKBTC),\"reason\":\"e2e follows Binance\"}"
+expect 403 ADMIN_FORBIDDEN "nor to apply"
+as ADMIN POST /admin/v1/instruments/apply "{\"config\":$(link_pair LINKBTC),\"reason\":\"e2e follows Binance\"}"
+expect 409 ADMIN_CONFIRMATION_REQUIRED "an ADMIN brings the preview's confirmation"
+as ADMIN POST /admin/v1/instruments/preview "{\"config\":$(link_pair LINKBTC)}"
+expect 200 - "ADMIN's preview"
+check ".guard.delay_seconds == 60 and (.guard.confirmation.token | length) > 40 and .guard.two_person == $TWO_PERSON" "confirmable for ten minutes"
+TOKEN=$(jq -r .guard.confirmation.token <<<"$BODY")
+as ADMIN POST /admin/v1/instruments/apply "$(jq -nc --argjson c "$(link_pair LINKBTC)" --arg t "$TOKEN" '{config: $c, reason: "e2e follows Binance", confirmation: $t}')"
+expect 202 - "confirmed, the change waits"
+check '.change.kind == "CONFIG" and (.change.status == "SCHEDULED" or .change.status == "PENDING_APPROVAL") and
+  .change.summary.params[0].field == "reference_symbol"' "recorded with what it moves"
+REF_CHANGE=$(jq -r .change.id <<<"$BODY")
+at_exit "as ADMIN POST /admin/v1/instruments/changes/$REF_CHANGE/cancel '{\"reason\":\"e2e cleanup\"}' >/dev/null"
+as ADMIN GET /admin/v1/todo ""
+check '.instrument_changes >= 1' "the console counts what waits"
+as OPERATOR POST "/admin/v1/instruments/changes/$REF_CHANGE/cancel" '{"reason":"e2e not mine"}'
+expect 403 ADMIN_FORBIDDEN "an OPERATOR cancels nothing"
+as ADMIN POST "/admin/v1/instruments/changes/$REF_CHANGE/cancel" '{"reason":"e2e changed its mind"}'
+expect 200 - "ADMIN cancels it before its time"
+check ".status == \"CANCELED\" and .closed_by_email == \"$EMAIL_ADMIN\"" "canceled, nothing applied"
+as ADMIN POST "/admin/v1/instruments/changes/$REF_CHANGE/cancel" '{"reason":"e2e again"}'
+expect 409 ADMIN_CHANGE_CLOSED "a change closes once"
+as AUDITOR GET "/admin/v1/instruments/changes?status=CANCELED&limit=10" ""
+expect 200 - "every administrator reads the changes"
+check "any(.items[]; .id == \"$REF_CHANGE\")" "the canceled one among them"
+LADDER=$(jq -c '{contracts: [.contracts[] | select(.symbol == "ETH-USDT-PERP") | del(.version, .status) | .risk_tiers = [{max_notional: "1000000", max_leverage: 20, mmr: "0.02"}]]}' <<<"$CONFIG")
+as ADMIN POST /admin/v1/instruments/preview "{\"config\":$LADDER}"
+expect 200 - "ADMIN previews a stricter ladder for ETH-USDT-PERP"
+check '([.guard.params[].field] | index("risk_tiers")) != null and .guard.impacts[0].symbol == "ETH-USDT-PERP" and
+  (.guard.impacts[0].liquidated | type) == "number" and (.guard.impacts[0].notional | test("^[0-9.]+$"))' "with the positions it would liquidate"
+BTCUSDT=$(jq -c '{pairs: [.pairs[] | select(.symbol == "BTC-USDT") | del(.version, .listed_at) | .reference_symbol = ""]}' <<<"$CONFIG")
+as OPERATOR POST /admin/v1/instruments/preview "{\"config\":$BTCUSDT}"
+expect 422 ADMIN_REFERENCE_IN_USE "BTC-USDT keeps its reference symbol (HOUSE quotes it, a perpetual's index follows it)"
+if [[ -n $LINK_OPENING ]]; then
+  eventually 180 "LINK-BTC opens once its change took effect" status_is LINK-BTC TRADING
+fi
+# 0.0003 BTC clears either minimum order value; each try has its own
+# idempotency key: the gateway replays a refused one
+# (the trading service sees a new status a moment after it changed).
+LINK_TRY=0
+link_order() {
+  LINK_TRY=$((LINK_TRY + 1))
+  call POST /v1/orders '{"symbol":"LINK-BTC","side":"BUY","type":"LIMIT","price":"0.0001","quantity":"3"}' "${UAUTH[@]}" \
+    -H "Idempotency-Key: e2e-admin-link-$RUN-$LINK_TRY"
   [[ $STATUS == 202 ]]
 }
 eventually 40 "the user rests a buy on LINK-BTC" link_order
@@ -640,6 +747,11 @@ link_canceled() {
   [[ $(jq -r .status <<<"$BODY") == CANCELED ]]
 }
 eventually 40 "and is canceled" link_canceled
+if [[ $TWO_PERSON == false ]]; then
+  as ADMIN POST /admin/v1/instruments/pairs/LINK-BTC/status '{"to":"HALT","reason":"e2e halts its pair"}'
+  expect 200 - "ADMIN halts LINK-BTC"
+  check '.from == "TRADING" and .to == "HALT" and .change == null' "at once: the brake does not wait"
+fi
 
 echo "== deposits that need a person (with the custodian's stand-in)"
 # mock ARGS... drives the custodian's stand-in on the server (udun-mock).
@@ -956,6 +1068,10 @@ eventually 60 "the flag switches are audited" audited AUDITOR "target=flag:marke
   "[.items[] | select(.actor == \"$EMAIL_OPERATOR\")] | length >= 2"
 eventually 60 "the console's reference data edits are audited" audited AUDITOR "target=instruments" \
   "[.items[] | select(.actor == \"$EMAIL_OPERATOR\") | .payload.action] | index(\"admin.instruments.applied\") != null"
+APPLIED_TOO='true'
+[[ -n ${LINK_OPENING}${PERP_RESUMED} ]] && APPLIED_TOO='index("admin.instruments.change_applied") != null'
+eventually 60 "the changes of trading parameters are audited: confirmed, canceled, applied" audited AUDITOR "$q_admin" \
+  "[.items[].payload.action] | index(\"admin.instruments.change_requested\") != null and index(\"admin.instruments.change_canceled\") != null and $APPLIED_TOO"
 if [[ -n ${BACKFILLED:-} ]]; then
   eventually 60 "the deposit decisions are audited on the account, by FINANCE" audited AUDITOR "target=user:$USER_ID" \
     "[.items[] | select(.actor == \"$EMAIL_FINANCE\") | .payload.action] | ((index(\"admin.deposits.backfill_executed\") != null or index(\"admin.deposits.backfill_requested\") != null) and index(\"wallet.deposit.backfilled\") != null and index(\"ledger.unclaimed_released\") != null and index(\"wallet.deposit.dismissed\") != null)"

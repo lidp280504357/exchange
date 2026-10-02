@@ -1,8 +1,22 @@
 import { DataTable, type DataTableProps } from "@exchange/ui";
 import { useInfiniteQuery, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+
+/**
+ * RowActions holds a row's buttons and the dialogs they open. A dialog is
+ * portaled, but React events bubble through the component tree: without
+ * this a clickable row would take its clicks, and the space typed into a
+ * reason (DataTable opens a row on Space and Enter).
+ */
+export function RowActions({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <span className={className} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      {children}
+    </span>
+  );
+}
 
 // The console's lists (design §10.2): the server pages with an opaque
 // cursor, 50 at a time unless this browser chose otherwise (Settings),

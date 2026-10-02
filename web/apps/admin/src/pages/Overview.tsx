@@ -2,7 +2,7 @@ import { errorText, formatAmount } from "@exchange/core";
 import { adminApi, adminData, can, type Admin } from "@exchange/core/api/admin";
 import { Badge, cn, CountUp, ErrorState, Segmented, Skeleton, TrendChart } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDownToLine, ArrowUpFromLine, ChevronRight, Stamp, UserCheck } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, CalendarClock, ChevronRight, Stamp, UserCheck } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
@@ -150,6 +150,10 @@ function Todo({ admin }: { admin: Admin }) {
     },
     { key: "identityRequests", to: "/identity-requests", icon: UserCheck, n: todo?.identity_requests, show: can(admin, "users.security") },
     { key: "deposits", to: "/deposits?view=attention", icon: ArrowDownToLine, n: todo?.deposits, show: can(admin, "deposits.review") },
+    {
+      key: "instrumentChanges", to: "/instruments?tab=changes", icon: CalendarClock, n: todo?.instrument_changes,
+      show: can(admin, "instruments.trading"),
+    },
   ].filter((x) => x.show);
   if (items.length === 0) return null;
   return (

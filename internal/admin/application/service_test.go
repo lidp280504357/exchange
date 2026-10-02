@@ -35,6 +35,7 @@ type memStore struct {
 	settings  *domain.Settings
 	notes     []domain.Note
 	tags      map[string][]string
+	changes   []domain.InstrumentChange
 	audits    []*auditv1.AdminActionPerformed
 }
 
@@ -43,6 +44,77 @@ func newMemStore() *memStore {
 		admins: map[string]domain.Admin{}, sessions: map[string]domain.Session{}, revoked: map[string]bool{},
 		approvals: map[string]domain.Approval{}, tags: map[string][]string{},
 	}
+}
+
+func (m *memStore) Changes() ports.ChangeRepo { return memChanges{m} }
+
+type memChanges struct{ m *memStore }
+
+// withEmails fills in the emails of a change's administrators.
+func (r memChanges) withEmails(c domain.InstrumentChange) domain.InstrumentChange {
+	c.RequestedByEmail, c.ApprovedByEmail, c.ClosedByEmail = r.m.admins[c.RequestedBy].Email, r.m.admins[c.ApprovedBy].Email,
+		r.m.admins[c.ClosedBy].Email
+	return c
+}
+
+func (r memChanges) Create(_ context.Context, c domain.InstrumentChange) error {
+	r.m.changes = append(r.m.changes, c)
+	return nil
+}
+
+func (r memChanges) Get(_ context.Context, id string) (*domain.InstrumentChange, error) {
+	for _, c := range r.m.changes {
+		if c.ID == id {
+			c = r.withEmails(c)
+			return &c, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r memChanges) GetForUpdate(ctx context.Context, id string) (*domain.InstrumentChange, error) {
+	return r.Get(ctx, id)
+}
+
+func (r memChanges) Update(_ context.Context, c domain.InstrumentChange) error {
+	for i := range r.m.changes {
+		if r.m.changes[i].ID == c.ID {
+			r.m.changes[i] = c
+		}
+	}
+	return nil
+}
+
+func (r memChanges) List(_ context.Context, status string, afterTime time.Time, afterID string, limit int) ([]domain.InstrumentChange, error) {
+	var out []domain.InstrumentChange
+	for i := len(r.m.changes) - 1; i >= 0; i-- {
+		c := r.m.changes[i]
+		after := afterID == "" || c.CreatedAt.Before(afterTime) || (c.CreatedAt.Equal(afterTime) && c.ID < afterID)
+		if (status == "" || c.Status == status) && after {
+			out = append(out, r.withEmails(c))
+		}
+	}
+	return out[:min(limit, len(out))], nil
+}
+
+func (r memChanges) Due(_ context.Context, now time.Time, limit int) ([]domain.InstrumentChange, error) {
+	var out []domain.InstrumentChange
+	for _, c := range r.m.changes {
+		if c.Status == domain.ChangeScheduled && !c.EffectiveAt.After(now) && len(out) < limit {
+			out = append(out, r.withEmails(c))
+		}
+	}
+	return out, nil
+}
+
+func (r memChanges) Open(context.Context) (int, error) {
+	n := 0
+	for _, c := range r.m.changes {
+		if c.Open() {
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (m *memStore) Notes() ports.NoteRepo { return memNotes{m} }
@@ -376,6 +448,17 @@ type fakeDerivatives struct {
 	closes   []string
 	canceled []string
 	queries  []ports.PositionQuery
+	// impactDown makes TierImpact fail; tiers records what it measured.
+	impactDown bool
+	tiers      []string
+}
+
+func (d *fakeDerivatives) TierImpact(_ context.Context, symbol string, tiers json.RawMessage) (ports.TierImpact, error) {
+	if d.impactDown {
+		return ports.TierImpact{}, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "derivatives-service is down")
+	}
+	d.tiers = append(d.tiers, symbol+" "+string(tiers))
+	return ports.TierImpact{Symbol: symbol, Positions: 12, Liquidated: 3, Notional: "45000.00", Accounts: 2, Examples: json.RawMessage("[]")}, nil
 }
 
 func (d *fakeDerivatives) Positions(context.Context, string) (json.RawMessage, error) {

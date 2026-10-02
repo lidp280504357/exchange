@@ -17,6 +17,9 @@ type Todo struct {
 	IdentityRequests int `json:"identity_requests"`
 	// Deposits waiting for a decision (with deposits.review).
 	Deposits int `json:"deposits"`
+	// InstrumentChanges are the changes of trading parameters waiting for
+	// a second ADMIN or their time (with instruments.trading).
+	InstrumentChanges int `json:"instrument_changes"`
 	// Partial names the counts that could not be read.
 	Partial []string `json:"partial"`
 }
@@ -71,6 +74,13 @@ func (s *Service) Todo(ctx context.Context, p Principal) (Todo, error) {
 			out.Partial = append(out.Partial, "deposits")
 		}
 		out.Deposits = len(page.Items)
+	}
+	if p.require(domain.PermInstrumentsTrading) == nil {
+		n, err := s.Store.Read().Changes().Open(ctx)
+		if err != nil {
+			return Todo{}, err
+		}
+		out.InstrumentChanges = n
 	}
 	return out, nil
 }

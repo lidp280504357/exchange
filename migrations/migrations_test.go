@@ -335,4 +335,18 @@ func TestAdminSchema(t *testing.T) {
 	accepts(t, db, tag, user, "VIP", a)
 	rejects(t, db, "a tag once per account", tag, user, "VIP", b)
 	rejects(t, db, "tags are upper case codes", tag, user, "vip", a)
+
+	rejects(t, db, "a change waits a minute to a day", `UPDATE settings SET change_delay_seconds = 30`)
+	accepts(t, db, `UPDATE settings SET change_delay_seconds = 60`)
+	change := `INSERT INTO instrument_changes (id, kind, target, payload, summary, reason, status, requested_by, approved_by, closed_by,
+		effective_at, created_at) VALUES ($1, 'CONFIG', 'instruments', '{}', '[]', 'r', $2, $3, $4, $5, $6, now())`
+	soon := time.Now().Add(5 * time.Minute)
+	accepts(t, db, change, uuid.New(), "SCHEDULED", a, nil, nil, soon)
+	accepts(t, db, change, uuid.New(), "PENDING_APPROVAL", a, nil, nil, nil)
+	accepts(t, db, change, uuid.New(), "SCHEDULED", a, b, nil, soon)
+	rejects(t, db, "no self-approval of a change", change, uuid.New(), "SCHEDULED", a, a, nil, soon)
+	rejects(t, db, "a scheduled change has its time", change, uuid.New(), "SCHEDULED", a, nil, nil, nil)
+	rejects(t, db, "a canceled change names who canceled it", change, uuid.New(), "CANCELED", a, nil, nil, nil)
+	accepts(t, db, change, uuid.New(), "CANCELED", a, nil, a, nil) // the requester withdraws it
+	rejects(t, db, "known statuses only", change, uuid.New(), "DONE", a, nil, nil, soon)
 }

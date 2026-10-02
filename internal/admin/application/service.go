@@ -458,21 +458,6 @@ func (s *Service) Instruments(ctx context.Context, p Principal) ([]byte, error) 
 	return s.Catalog.List(ctx)
 }
 
-// SetPairStatus moves a trading pair to another status.
-func (s *Service) SetPairStatus(ctx context.Context, p Principal, symbol, to, reason string) (string, error) {
-	if err := p.require(domain.PermInstrumentsEdit); err != nil {
-		return "", err
-	}
-	if err := needReason(reason); err != nil {
-		return "", err
-	}
-	from, err := s.Catalog.SetPairStatus(ctx, symbol, to, reason, p.Admin.Email)
-	if err != nil {
-		return "", err
-	}
-	return from, s.audit(ctx, p, "pair:"+symbol, "admin.instruments.pair_status", reason, fmt.Sprintf(`{"from":%q,"to":%q}`, from, to))
-}
-
 // FlagList returns the feature flags.
 func (s *Service) FlagList(ctx context.Context, p Principal) ([]ports.Flag, error) {
 	if err := p.require(domain.PermFlagsRead); err != nil {
@@ -514,23 +499,6 @@ func (s *Service) DerivativesContracts(ctx context.Context, p Principal) ([]byte
 		return nil, err
 	}
 	return s.Derivatives.Contracts(ctx)
-}
-
-// SetContractStatus moves a perpetual contract to another status;
-// instrument-service records the change.
-func (s *Service) SetContractStatus(ctx context.Context, p Principal, symbol, to, reason string) (string, error) {
-	if err := p.require(domain.PermInstrumentsEdit); err != nil {
-		return "", err
-	}
-	if err := needReason(reason); err != nil {
-		return "", err
-	}
-	from, err := s.Catalog.SetContractStatus(ctx, symbol, to, reason, p.Admin.Email)
-	if err != nil {
-		return "", err
-	}
-	return from, s.audit(ctx, p, "contract:"+strings.ToUpper(symbol), "admin.instruments.contract_status", reason,
-		fmt.Sprintf(`{"from":%q,"to":%q}`, from, to))
 }
 
 // LiftReduceOnly ends a contract's reduce-only (requirements §11.7: the

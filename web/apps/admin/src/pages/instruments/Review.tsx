@@ -1,66 +1,103 @@
-import { adminApi, adminData } from "@exchange/core/api/admin";
-import { Badge, ConfirmDialog, toast } from "@exchange/ui";
+import { adminApi, adminData, can } from "@exchange/core/api/admin";
+import { Badge, Button, ConfirmDialog, Dialog, toast } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { TriangleAlert } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { errorToast } from "../../kit/actions";
+import { useMe } from "../../session";
+import { changesKey, GuardNote, scheduledText, type ChangeGuard, type InstrumentChange } from "./changes";
 import { fieldDiffs, type ConfigChange, type ConfigPatch, type ConfigResult } from "./config";
 
-type Pending = { patch: ConfigPatch; result: ConfigResult; title: ReactNode; onApplied?: () => void };
+type Pending = { patch: ConfigPatch; result: ConfigResult; guard: ChangeGuard; title: ReactNode; onApplied?: () => void };
 
 /**
  * useReview previews a patch of the reference data and, when it changes
- * anything, asks to apply it: the changes field by field and the
- * console's notes, a reason and a confirmation word (the first item's
- * key). Nothing is applied before the confirmation.
+ * anything, asks to apply it: the changes field by field, the console's
+ * notes and, for trading parameters, what they are, what a new risk
+ * ladder would liquidate and how they take effect (design 2026-10-02 §2
+ * item 6); a reason and a confirmation word (the first item's key).
+ * Nothing is applied before the confirmation; trading parameters are
+ * confirmed with the preview's token and then wait.
  */
 export function useReview() {
   const { t } = useTranslation();
   const qc = useQueryClient();
+  const admin = useMe().data;
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState(false);
   const review = async (patch: ConfigPatch, title: ReactNode, onApplied?: () => void) => {
     setBusy(true);
     try {
-      const result = adminData(await adminApi.POST("/admin/v1/instruments/preview", { body: { config: patch } }));
+      const { guard, ...result } = adminData(await adminApi.POST("/admin/v1/instruments/preview", { body: { config: patch } }));
       if (result.changes.length === 0) {
         toast.info(t("admin.listing.nothing"));
         return;
       }
-      setPending({ patch, result, title, onApplied });
+      setPending({ patch, result, guard, title, onApplied });
     } catch (err) {
       errorToast(err);
     } finally {
       setBusy(false);
     }
   };
-  const dialog = pending && (
-    <ConfirmDialog
-      open
-      onOpenChange={(o) => !o && setPending(null)}
-      title={pending.title}
-      description={t("admin.listing.reviewHint")}
-      target={t("admin.listing.summary", { n: pending.result.changes.length, unchanged: pending.result.unchanged })}
-      confirmWord={pending.result.changes[0]?.key ?? ""}
-      confirmText={t("admin.listing.apply")}
-      danger={false}
-      onConfirm={async (reason) => {
-        try {
-          const res = adminData(await adminApi.POST("/admin/v1/instruments/apply", { body: { config: pending.patch, reason } }));
-          toast.success(t("admin.listing.applied", { n: res.changes.length }));
-          void qc.invalidateQueries({ queryKey: ["admin", "instruments"] });
-          void qc.invalidateQueries({ queryKey: ["admin", "derivatives"] });
-          pending.onApplied?.();
-          setPending(null);
-        } catch (err) {
-          errorToast(err);
-        }
-      }}
-    >
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ["admin", "instruments"] });
+    void qc.invalidateQueries({ queryKey: ["admin", "derivatives"] });
+    void qc.invalidateQueries({ queryKey: changesKey });
+    void qc.invalidateQueries({ queryKey: ["admin", "todo"] });
+  };
+  const guarded = (pending?.guard.params.length ?? 0) > 0;
+  const confirmable = !guarded || (!!pending?.guard.confirmation && can(admin, "instruments.trading"));
+  const body = pending && (
+    <div className="flex flex-col gap-3">
+      <GuardNote guard={pending.guard} canConfirm={can(admin, "instruments.trading")} />
       <Changes result={pending.result} />
-    </ConfirmDialog>
+    </div>
   );
+  const dialog =
+    pending &&
+    (confirmable ? (
+      <ConfirmDialog
+        open
+        onOpenChange={(o) => !o && setPending(null)}
+        title={pending.title}
+        description={t("admin.listing.reviewHint")}
+        target={t("admin.listing.summary", { n: pending.result.changes.length, unchanged: pending.result.unchanged })}
+        confirmWord={pending.result.changes[0]?.key ?? ""}
+        confirmText={t("admin.listing.apply")}
+        danger={guarded}
+        onConfirm={async (reason) => {
+          try {
+            const res = adminData(
+              await adminApi.POST("/admin/v1/instruments/apply", {
+                body: { config: pending.patch, reason, confirmation: pending.guard.confirmation?.token },
+              }),
+            );
+            const change = ("change" in res ? res.change : null) as InstrumentChange | null;
+            if (change) toast.success(scheduledText(t, change, pending.guard.delay_seconds));
+            else toast.success(t("admin.listing.applied", { n: res.changes.length }));
+            refresh();
+            pending.onApplied?.();
+            setPending(null);
+          } catch (err) {
+            errorToast(err);
+          }
+        }}
+      >
+        {body}
+      </ConfirmDialog>
+    ) : (
+      <Dialog
+        open
+        onOpenChange={(o) => !o && setPending(null)}
+        title={pending.title}
+        size="lg"
+        footer={<Button onClick={() => setPending(null)}>{t("admin.common.close")}</Button>}
+      >
+        {body}
+      </Dialog>
+    ));
   return { review, busy, dialog };
 }
 
@@ -112,3 +149,5 @@ function Change({ change }: { change: ConfigChange }) {
     </section>
   );
 }
+
+

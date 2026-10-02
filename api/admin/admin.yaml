@@ -20,7 +20,9 @@ info:
     other than GET must carry the header `X-Admin-CSRF: 1`.
 
     Roles grant permissions: ADMIN (everything, and alone the console's
-    settings and the administrators), OPERATOR (accounts, orders, trading pairs and contracts,
+    settings, the administrators and the trading parameters: statuses,
+    fee rates, risk ladders, reference symbols), OPERATOR (accounts,
+    orders, the rest of the reference data and new pairs and contracts,
     lifting a contract's reduce-only, feature flags other than the
     console's own), FINANCE (withdrawal reviews, ledger adjustments,
     insurance fund contributions), AUDITOR (read-only). Everyone may read,
@@ -448,8 +450,9 @@ paths:
       operationId: updateSettings
       summary: Change the console's settings
       description: |
-        Changes the fields given: the limits (audited as
-        admin.settings.changed) and two-person approval (switches the flag
+        Changes the fields given: the limits and the delay of trading
+        parameters' changes (audited as admin.settings.changed) and
+        two-person approval (switches the flag
         admin.two_person_approval, audited by the flags; the other
         instances follow within 5 seconds). The daily limit must cover the
         single-operation one. Needs settings.write (ADMIN).
@@ -473,6 +476,10 @@ paths:
                   $ref: '#/components/schemas/Decimal'
                 withdrawal_max_usdt:
                   $ref: '#/components/schemas/Decimal'
+                change_delay_seconds:
+                  type: integer
+                  minimum: 60
+                  maximum: 86400
                 reason:
                   type: string
                   minLength: 3
@@ -2094,8 +2101,18 @@ paths:
         statuses never change here (the status endpoints do that). A pair's
         new reference symbol must be listed on the reference market's spot
         market (ADMIN_REFERENCE_UNKNOWN otherwise: it would fail the
-        reference reads of every pair); `warnings` note what else follows.
-        Needs instruments.write.
+        reference reads of every pair); clearing the reference symbol of a
+        pair HOUSE quotes or a perpetual's index follows is refused
+        (ADMIN_REFERENCE_IN_USE); `warnings` note what else follows.
+
+        `guard` lists the trading parameters the document moves (fee rates,
+        a pair's fee tier, reference symbol and multiplier, a contract's
+        fee tier and risk ladder) with, for a ladder, the open positions it
+        would liquidate (derivatives-service measures them as its margin
+        monitor does). Such a document is applied only by an ADMIN bringing
+        back `guard.confirmation` (bound to them and to exactly these
+        changes, valid 10 minutes), and then waits (see apply). Needs
+        instruments.write.
       tags: [instruments]
       security:
         - session: []
@@ -2116,7 +2133,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConfigResult'
+                allOf:
+                  - $ref: '#/components/schemas/ConfigResult'
+                  - type: object
+                    required: [guard]
+                    properties:
+                      guard:
+                        $ref: '#/components/schemas/ChangeGuard'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/instruments/apply:
@@ -2130,6 +2153,16 @@ paths:
         reference-data file keeps what the console changed last (exchangectl
         instruments apply --force overrides). Audited
         (admin.instruments.applied). Needs instruments.write.
+
+        A document moving trading parameters (design 2026-10-02 §2 item 6)
+        needs instruments.trading (ADMIN) and the preview's confirmation
+        (ADMIN_CONFIRMATION_REQUIRED without it, with `reason` expired or
+        changed when it no longer holds): it answers 202 with the change,
+        which takes effect the settings' change_delay_seconds later, or,
+        while admin.two_person_approval is on, that long after a second
+        ADMIN approved it (POST /admin/v1/instruments/changes/{id}/decide);
+        audited as admin.instruments.change_requested. New items touch
+        nobody until opened and apply at once.
       tags: [instruments]
       security:
         - session: []
@@ -2147,13 +2180,171 @@ paths:
                 reason:
                   type: string
                   minLength: 3
+                confirmation:
+                  type: string
+                  description: The preview's guard.confirmation.token, for a document moving trading parameters.
       responses:
         '200':
           description: The changes made.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConfigResult'
+                allOf:
+                  - $ref: '#/components/schemas/ConfigResult'
+                  - type: object
+                    required: [change]
+                    properties:
+                      change:
+                        type: 'null'
+        '202':
+          description: The changes confirmed, waiting.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ConfigResult'
+                  - type: object
+                    required: [change]
+                    properties:
+                      change:
+                        $ref: '#/components/schemas/InstrumentChange'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/instruments/changes:
+    get:
+      operationId: listInstrumentChanges
+      summary: The changes of trading parameters, newest first
+      description: |
+        Waiting for a second ADMIN (PENDING_APPROVAL) or their time
+        (SCHEDULED), applied, canceled, rejected or failed (the target
+        moved since it was confirmed). Needs instruments.read.
+      tags: [instruments]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING_APPROVAL, SCHEDULED, APPLIED, CANCELED, REJECTED, FAILED]
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of changes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InstrumentChange'
+                  next_cursor:
+                    $ref: '#/components/schemas/NextCursor'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/instruments/changes/{id}/decide:
+    post:
+      operationId: decideInstrumentChange
+      summary: Approve or reject a change waiting for a second ADMIN
+      description: |
+        Approved, it takes effect change_delay_seconds later; not by its
+        requester (ADMIN_SELF_APPROVAL, who cancels instead);
+        ADMIN_CHANGE_CLOSED once decided. Audited as
+        admin.instruments.change_approved or change_rejected. Needs
+        instruments.trading.
+      tags: [instruments]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/ChangeID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve, reason]
+              properties:
+                approve:
+                  type: boolean
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: The change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstrumentChange'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/instruments/changes/{id}/cancel:
+    post:
+      operationId: cancelInstrumentChange
+      summary: Cancel a change before it takes effect
+      description: |
+        Any ADMIN, its requester included; ADMIN_CHANGE_CLOSED once it took
+        effect or was closed. Audited as admin.instruments.change_canceled.
+        Needs instruments.trading.
+      tags: [instruments]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/ChangeID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonRequest'
+      responses:
+        '200':
+          description: The change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstrumentChange'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/instruments/pairs/{symbol}/status/preview:
+    post:
+      operationId: previewPairStatus
+      summary: What moving a trading pair to another status does
+      description: |
+        A halt takes effect at once (`immediate`, the emergency brake);
+        anything else is a change of trading parameters: the answer carries
+        the confirmation POST .../status brings back, and how long the
+        change will wait. INSTRUMENT_STATUS_TRANSITION_INVALID for a move
+        the state machine forbids. Needs instruments.trading.
+      tags: [instruments]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/Symbol'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to]
+              properties:
+                to:
+                  type: string
+                  enum: [PREPARE, TRADING, HALT, CANCEL_ONLY, DELISTED]
+      responses:
+        '200':
+          description: The move.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusPreview'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/instruments/pairs/{symbol}/status:
@@ -2164,39 +2355,35 @@ paths:
         PREPARE → TRADING ⇄ HALT; TRADING or HALT → CANCEL_ONLY →
         DELISTED (CANCEL_ONLY is the way out: it cannot return to
         trading). Fails with INSTRUMENT_STATUS_TRANSITION_INVALID
-        otherwise. Needs instruments.write.
+        otherwise. A halt takes effect at once (200); any other move needs
+        the preview's confirmation (POST .../status/preview) and answers
+        202 with the change that waits (see POST
+        /admin/v1/instruments/apply). Needs instruments.trading (ADMIN).
       tags: [instruments]
       security:
         - session: []
           csrf: []
       parameters:
-        - name: symbol
-          in: path
-          required: true
-          schema:
-            type: string
-            examples: [BTC-USDT]
+        - $ref: '#/components/parameters/Symbol'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [to, reason]
-              properties:
-                to:
-                  type: string
-                  enum: [PREPARE, TRADING, HALT, CANCEL_ONLY, DELISTED]
-                reason:
-                  type: string
-                  minLength: 3
+              $ref: '#/components/schemas/StatusRequest'
       responses:
         '200':
-          description: The change.
+          description: Halted.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Transition'
+                $ref: '#/components/schemas/StatusResult'
+        '202':
+          description: The change confirmed, waiting.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResult'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/flags:
@@ -2664,8 +2851,42 @@ paths:
       summary: Move a perpetual contract to another status
       description: |
         The same transitions as trading pairs (PREPARE → TRADING ⇄ HALT;
-        TRADING or HALT → CANCEL_ONLY → DELISTED); instrument-service
-        records the change. Needs instruments.write.
+        TRADING or HALT → CANCEL_ONLY → DELISTED) and the same guard: a
+        halt at once (200), any other move confirmed from its preview and
+        waiting (202); instrument-service records it. Needs
+        instruments.trading (ADMIN).
+      tags: [derivatives, instruments]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/Contract'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatusRequest'
+      responses:
+        '200':
+          description: Halted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResult'
+        '202':
+          description: The change confirmed, waiting.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResult'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/derivatives/contracts/{symbol}/status/preview:
+    post:
+      operationId: previewContractStatus
+      summary: What moving a perpetual contract to another status does
+      description: As POST /admin/v1/instruments/pairs/{symbol}/status/preview. Needs instruments.trading.
       tags: [derivatives, instruments]
       security:
         - session: []
@@ -2678,21 +2899,18 @@ paths:
           application/json:
             schema:
               type: object
-              required: [to, reason]
+              required: [to]
               properties:
                 to:
                   type: string
                   enum: [PREPARE, TRADING, HALT, CANCEL_ONLY, DELISTED]
-                reason:
-                  type: string
-                  minLength: 3
       responses:
         '200':
-          description: The change.
+          description: The move.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Transition'
+                $ref: '#/components/schemas/StatusPreview'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/derivatives/contracts/{symbol}/lift-reduce-only:
@@ -3248,6 +3466,20 @@ components:
       schema:
         type: string
         examples: [BTC-USDT-PERP]
+    Symbol:
+      name: symbol
+      in: path
+      required: true
+      schema:
+        type: string
+        examples: [BTC-USDT]
+    ChangeID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   responses:
     Error:
       $ref: '../openapi/common.yaml#/components/responses/Error'
@@ -3681,6 +3913,235 @@ components:
           type: string
         to:
           type: string
+    StatusRequest:
+      type: object
+      required: [to, reason]
+      properties:
+        to:
+          type: string
+          enum: [PREPARE, TRADING, HALT, CANCEL_ONLY, DELISTED]
+        reason:
+          type: string
+          minLength: 3
+        confirmation:
+          type: string
+          description: The preview's confirmation.token; a halt needs none.
+    StatusResult:
+      type: object
+      required: [from, to, change]
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+        change:
+          description: The change waiting; null for a halt, done at once.
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/InstrumentChange'
+    Confirmation:
+      type: object
+      description: Binds the confirming call to the preview an ADMIN saw (sealed, valid 10 minutes).
+      required: [token, expires_at]
+      properties:
+        token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+    StatusPreview:
+      type: object
+      required: [symbol, from, to, immediate, confirmation, delay_seconds, two_person]
+      properties:
+        symbol:
+          type: string
+        from:
+          type: string
+        to:
+          type: string
+        immediate:
+          type: boolean
+          description: A halt, at once and without confirmation.
+        confirmation:
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/Confirmation'
+        delay_seconds:
+          type: integer
+          description: How long the change will wait once confirmed (or approved); 0 for a halt.
+        two_person:
+          type: boolean
+          description: A second ADMIN must approve it first (admin.two_person_approval).
+    ParamChange:
+      type: object
+      description: A trading parameter a change moves (JSON values as stored; null for none).
+      required: [entity, key, field, before, after]
+      properties:
+        entity:
+          type: string
+          enum: [FEE_SCHEDULE, TRADING_PAIR, CONTRACT]
+        key:
+          type: string
+        field:
+          type: string
+          enum: [maker_fee_rate, taker_fee_rate, fee_tier, reference_symbol, reference_multiplier, risk_tiers, status]
+        before: {}
+        after: {}
+    TierImpact:
+      type: object
+      description: |
+        What a contract's new risk ladder would do to its open positions at
+        the mark prices (HOUSE aside): positions the margin monitor would
+        take over that it does not now (a cross account whole) with their
+        notional and accounts, those newly warned, those above the risk
+        limit of their leverage (they stay but cannot grow), those without
+        a fresh mark price; the largest examples.
+      required: [symbol, positions, liquidated, notional, accounts, warned, over_limit, unmeasured, examples]
+      properties:
+        symbol:
+          type: string
+        positions:
+          type: integer
+        liquidated:
+          type: integer
+        notional:
+          $ref: '#/components/schemas/Decimal'
+        accounts:
+          type: integer
+        warned:
+          type: integer
+        over_limit:
+          type: integer
+        unmeasured:
+          type: integer
+        examples:
+          type: array
+          items:
+            type: object
+            required: [user_id, symbol, position_side, cross, notional, margin_balance, maintenance_before, maintenance_after]
+            properties:
+              user_id:
+                type: string
+                format: uuid
+              symbol:
+                type: string
+              position_side:
+                type: string
+              cross:
+                type: boolean
+              notional:
+                $ref: '#/components/schemas/Decimal'
+              margin_balance:
+                $ref: '#/components/schemas/Decimal'
+              maintenance_before:
+                $ref: '#/components/schemas/Decimal'
+              maintenance_after:
+                $ref: '#/components/schemas/Decimal'
+    ChangeGuard:
+      type: object
+      description: What a preview says of a document's trading parameters.
+      required: [params, impacts, confirmation, delay_seconds, two_person]
+      properties:
+        params:
+          type: array
+          description: The trading parameters it moves; none means it applies at once.
+          items:
+            $ref: '#/components/schemas/ParamChange'
+        impacts:
+          type: array
+          items:
+            $ref: '#/components/schemas/TierImpact'
+        confirmation:
+          description: Null without trading parameters, for a caller without instruments.trading, or while a ladder's impact cannot be measured (warning IMPACT_UNKNOWN).
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/Confirmation'
+        delay_seconds:
+          type: integer
+        two_person:
+          type: boolean
+    InstrumentChange:
+      type: object
+      description: A change of trading parameters an ADMIN confirmed (design 2026-10-02 §2 item 6).
+      required: [id, kind, target, status, reason, summary, requested_by, requested_by_email, approved_by_email, approved_at,
+        closed_by_email, closed_at, effective_at, applied_at, result, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [CONFIG, PAIR_STATUS, CONTRACT_STATUS]
+        target:
+          type: string
+          examples: [instruments, pair:BTC-USDT, contract:BTC-USDT-PERP]
+        status:
+          type: string
+          enum: [PENDING_APPROVAL, SCHEDULED, APPLIED, CANCELED, REJECTED, FAILED]
+        reason:
+          type: string
+        summary:
+          type: object
+          description: What the confirmation showed.
+          required: [params, impacts, items]
+          properties:
+            fingerprint:
+              type: string
+            from:
+              type: string
+              description: A status change's status when confirmed.
+            params:
+              type: array
+              items:
+                $ref: '#/components/schemas/ParamChange'
+            impacts:
+              type: array
+              items:
+                $ref: '#/components/schemas/TierImpact'
+            items:
+              type: array
+              description: A document's items, created or updated.
+              items:
+                type: object
+                required: [entity, key, action, version]
+                properties:
+                  entity:
+                    type: string
+                  key:
+                    type: string
+                  action:
+                    type: string
+                  version:
+                    type: integer
+        requested_by:
+          type: string
+          format: uuid
+        requested_by_email:
+          type: string
+        approved_by_email:
+          type: [string, 'null']
+        approved_at:
+          type: [string, 'null']
+          format: date-time
+        closed_by_email:
+          type: [string, 'null']
+          description: Who canceled or rejected it.
+        closed_at:
+          type: [string, 'null']
+          format: date-time
+        effective_at:
+          type: [string, 'null']
+          format: date-time
+          description: When it takes (or took) effect; null while it waits for approval or after it was closed unscheduled.
+        applied_at:
+          type: [string, 'null']
+          format: date-time
+        result:
+          type: string
+          description: What applying it did, or why it failed.
+        created_at:
+          type: string
+          format: date-time
     Admin:
       type: object
       required: [id, email, name, role, permissions]
@@ -3706,7 +4167,7 @@ components:
       enum: [users.read, users.status, orders.cancel, instruments.read, instruments.write, flags.read, flags.write,
         withdrawals.read, withdrawals.review, ledger.adjust.request, ledger.adjust.approve, audit.read, reports.read,
         derivatives.read, derivatives.write, settings.write, users.notes, users.security, users.contacts, ledger.hold,
-        deposits.review, admins.manage]
+        deposits.review, admins.manage, instruments.trading]
     RolePermissions:
       type: object
       required: [role, permissions]
@@ -3779,11 +4240,15 @@ components:
           format: date-time
     Settings:
       type: object
-      required: [two_person_approval, single_max_usdt, daily_max_usdt, withdrawal_max_usdt, daily_used_usdt, updated_by, updated_at]
+      required: [two_person_approval, single_max_usdt, daily_max_usdt, withdrawal_max_usdt, change_delay_seconds, daily_used_usdt, updated_by,
+        updated_at]
       properties:
         two_person_approval:
           type: boolean
           description: Fund operations need a second administrator (the flag admin.two_person_approval).
+        change_delay_seconds:
+          type: integer
+          description: How long a confirmed change of trading parameters waits before it takes effect (60 to 86400, 300 by default).
         single_max_usdt:
           description: In single-person mode, one fund operation is worth at most this much.
           $ref: '#/components/schemas/Decimal'
@@ -3804,8 +4269,11 @@ components:
           format: date-time
     Todo:
       type: object
-      required: [withdrawals, approvals, identity_requests, deposits, partial]
+      required: [withdrawals, approvals, identity_requests, deposits, instrument_changes, partial]
       properties:
+        instrument_changes:
+          type: integer
+          description: Changes of trading parameters waiting for a second ADMIN or their time (with instruments.trading).
         withdrawals:
           type: integer
           description: Withdrawals in review (with withdrawals.read; counted up to 200).
@@ -4657,13 +5125,14 @@ components:
             properties:
               code:
                 type: string
-                enum: [REFERENCE_UNCHECKED, HOUSE_NOT_LISTED, NO_INDEX_REFERENCE, NO_FUTURES, STREAMS_RECONNECT]
+                enum: [REFERENCE_UNCHECKED, HOUSE_NOT_LISTED, NO_INDEX_REFERENCE, NO_FUTURES, STREAMS_RECONNECT, IMPACT_UNKNOWN]
                 description: |
                   REFERENCE_UNCHECKED: the reference market could not be asked (detail: the symbol);
                   HOUSE_NOT_LISTED: HOUSE quotes it only once on the flag's symbol list (detail: the flag);
                   NO_INDEX_REFERENCE: the contract's index pair (detail) follows no reference market;
                   NO_FUTURES: no futures on the reference symbol (detail), so HOUSE gives the contract no book;
-                  STREAMS_RECONNECT: the reference streams reconnect, books empty for about 20 seconds.
+                  STREAMS_RECONNECT: the reference streams reconnect, books empty for about 20 seconds;
+                  IMPACT_UNKNOWN: a new risk ladder (symbol) could not be measured against the open positions, so it cannot be confirmed now.
               symbol:
                 type: string
               detail:

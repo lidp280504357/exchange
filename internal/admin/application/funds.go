@@ -538,7 +538,9 @@ type SettingsPatch struct {
 	SingleMax     *decimal.Decimal
 	DailyMax      *decimal.Decimal
 	WithdrawalMax *decimal.Decimal
-	Reason        string
+	// ChangeDelay is the wait of trading parameters' changes.
+	ChangeDelay *time.Duration
+	Reason      string
 }
 
 // UpdateSettings changes the console's settings: the limits with an audit
@@ -551,7 +553,7 @@ func (s *Service) UpdateSettings(ctx context.Context, p Principal, in SettingsPa
 	if err := needReason(in.Reason); err != nil {
 		return SettingsView{}, err
 	}
-	if in.SingleMax != nil || in.DailyMax != nil || in.WithdrawalMax != nil {
+	if in.SingleMax != nil || in.DailyMax != nil || in.WithdrawalMax != nil || in.ChangeDelay != nil {
 		err := s.Store.Tx(ctx, func(r ports.Repos) error {
 			before, err := s.settings(ctx, r)
 			if err != nil {
@@ -565,6 +567,9 @@ func (s *Service) UpdateSettings(ctx context.Context, p Principal, in SettingsPa
 				if f.in != nil {
 					*f.out = *f.in
 				}
+			}
+			if in.ChangeDelay != nil {
+				after.ChangeDelay = *in.ChangeDelay
 			}
 			if err := after.Validate(); err != nil {
 				return err
@@ -597,6 +602,6 @@ func (s *Service) UpdateSettings(ctx context.Context, p Principal, in SettingsPa
 }
 
 func limitsJSON(s domain.Settings) string {
-	return fmt.Sprintf(`{"single_max_usdt":%q,"daily_max_usdt":%q,"withdrawal_max_usdt":%q}`,
-		s.SingleMax.String(), s.DailyMax.String(), s.WithdrawalMax.String())
+	return fmt.Sprintf(`{"single_max_usdt":%q,"daily_max_usdt":%q,"withdrawal_max_usdt":%q,"change_delay_seconds":%d}`,
+		s.SingleMax.String(), s.DailyMax.String(), s.WithdrawalMax.String(), int64(s.ChangeDelay/time.Second))
 }

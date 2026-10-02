@@ -49,6 +49,7 @@ func (r repos) Approvals() ports.ApprovalRepo { return approvals(r) }
 func (r repos) Settings() ports.SettingsRepo  { return settings(r) }
 func (r repos) Notes() ports.NoteRepo         { return notes(r) }
 func (r repos) Tags() ports.TagRepo           { return tags(r) }
+func (r repos) Changes() ports.ChangeRepo     { return changes(r) }
 
 func (r repos) Audit(ctx context.Context, msg proto.Message, actor string) error {
 	env, err := r.events.New(ctx, msg, "actor", actor)
@@ -353,25 +354,148 @@ type settings repos
 
 func (r settings) Get(ctx context.Context) (*domain.Settings, error) {
 	var s domain.Settings
-	err := r.q.QueryRow(ctx, `SELECT single_max_usdt, daily_max_usdt, withdrawal_max_usdt, updated_by, updated_at FROM settings`).
-		Scan(&s.SingleMax, &s.DailyMax, &s.WithdrawalMax, &s.UpdatedBy, &s.UpdatedAt)
+	var delay int64
+	err := r.q.QueryRow(ctx, `SELECT single_max_usdt, daily_max_usdt, withdrawal_max_usdt, change_delay_seconds, updated_by, updated_at
+		FROM settings`).Scan(&s.SingleMax, &s.DailyMax, &s.WithdrawalMax, &delay, &s.UpdatedBy, &s.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get settings: %w", err)
 	}
+	s.ChangeDelay = time.Duration(delay) * time.Second
 	return &s, nil
 }
 
 func (r settings) Put(ctx context.Context, s domain.Settings) error {
-	_, err := r.q.Exec(ctx, `INSERT INTO settings (single_max_usdt, daily_max_usdt, withdrawal_max_usdt, updated_by, updated_at)
-		VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO UPDATE SET single_max_usdt = $1, daily_max_usdt = $2,
-		withdrawal_max_usdt = $3, updated_by = $4, updated_at = $5`, s.SingleMax, s.DailyMax, s.WithdrawalMax, s.UpdatedBy, s.UpdatedAt)
+	_, err := r.q.Exec(ctx, `INSERT INTO settings (single_max_usdt, daily_max_usdt, withdrawal_max_usdt, change_delay_seconds, updated_by,
+		updated_at) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (id) DO UPDATE SET single_max_usdt = $1, daily_max_usdt = $2,
+		withdrawal_max_usdt = $3, change_delay_seconds = $4, updated_by = $5, updated_at = $6`,
+		s.SingleMax, s.DailyMax, s.WithdrawalMax, int64(s.ChangeDelay/time.Second), s.UpdatedBy, s.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("put settings: %w", err)
 	}
 	return nil
+}
+
+type changes repos
+
+const changeColumns = `c.id, c.kind, c.target, c.payload, c.summary, c.reason, c.status, c.requested_by, coalesce(rq.email, ''),
+	c.approved_by, coalesce(ap.email, ''), c.approved_at, c.closed_by, coalesce(cl.email, ''), c.closed_at, c.effective_at,
+	c.applied_at, c.result, c.created_at`
+
+const changeFrom = ` FROM instrument_changes c LEFT JOIN admins rq ON rq.id = c.requested_by LEFT JOIN admins ap ON ap.id = c.approved_by
+	LEFT JOIN admins cl ON cl.id = c.closed_by`
+
+func scanChange(row pgx.Row) (domain.InstrumentChange, error) {
+	var c domain.InstrumentChange
+	var approvedBy, closedBy *uuid.UUID
+	var approvedAt, closedAt, effectiveAt, appliedAt *time.Time
+	err := row.Scan(&c.ID, &c.Kind, &c.Target, &c.Payload, &c.Summary, &c.Reason, &c.Status, &c.RequestedBy, &c.RequestedByEmail,
+		&approvedBy, &c.ApprovedByEmail, &approvedAt, &closedBy, &c.ClosedByEmail, &closedAt, &effectiveAt, &appliedAt, &c.Result,
+		&c.CreatedAt)
+	if approvedBy != nil {
+		c.ApprovedBy = approvedBy.String()
+	}
+	if closedBy != nil {
+		c.ClosedBy = closedBy.String()
+	}
+	c.ApprovedAt, c.ClosedAt, c.EffectiveAt, c.AppliedAt = at(approvedAt), at(closedAt), at(effectiveAt), at(appliedAt)
+	return c, err
+}
+
+func optUUID(id string) *string {
+	if id == "" {
+		return nil
+	}
+	return &id
+}
+
+func (r changes) Create(ctx context.Context, c domain.InstrumentChange) error {
+	_, err := r.q.Exec(ctx, `INSERT INTO instrument_changes (id, kind, target, payload, summary, reason, status, requested_by,
+		effective_at, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		c.ID, c.Kind, c.Target, c.Payload, c.Summary, c.Reason, c.Status, c.RequestedBy, stamp(c.EffectiveAt), c.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("create instrument change: %w", err)
+	}
+	return nil
+}
+
+func (r changes) get(ctx context.Context, id, lock string) (*domain.InstrumentChange, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return nil, nil
+	}
+	c, err := scanChange(r.q.QueryRow(ctx, `SELECT `+changeColumns+changeFrom+` WHERE c.id = $1`+lock, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get instrument change: %w", err)
+	}
+	return &c, nil
+}
+
+func (r changes) Get(ctx context.Context, id string) (*domain.InstrumentChange, error) {
+	return r.get(ctx, id, "")
+}
+
+func (r changes) GetForUpdate(ctx context.Context, id string) (*domain.InstrumentChange, error) {
+	return r.get(ctx, id, " FOR UPDATE OF c")
+}
+
+func (r changes) Update(ctx context.Context, c domain.InstrumentChange) error {
+	_, err := r.q.Exec(ctx, `UPDATE instrument_changes SET status = $2, approved_by = $3, approved_at = $4, closed_by = $5,
+		closed_at = $6, effective_at = $7, applied_at = $8, result = $9 WHERE id = $1`,
+		c.ID, c.Status, optUUID(c.ApprovedBy), stamp(c.ApprovedAt), optUUID(c.ClosedBy), stamp(c.ClosedAt), stamp(c.EffectiveAt),
+		stamp(c.AppliedAt), c.Result)
+	if err != nil {
+		return fmt.Errorf("update instrument change: %w", err)
+	}
+	return nil
+}
+
+func (r changes) List(ctx context.Context, status string, afterTime time.Time, afterID string, limit int) ([]domain.InstrumentChange, error) {
+	var after *time.Time
+	var afterUUID *uuid.UUID
+	if afterID != "" {
+		id, err := uuid.Parse(afterID)
+		if err != nil {
+			return nil, apperr.Invalid("bad cursor")
+		}
+		after, afterUUID = &afterTime, &id
+	}
+	rows, err := r.q.Query(ctx, `SELECT `+changeColumns+changeFrom+`
+		WHERE ($1 = '' OR c.status = $1) AND ($2::timestamptz IS NULL OR (c.created_at, c.id) < ($2, $3::uuid))
+		ORDER BY c.created_at DESC, c.id DESC LIMIT $4`, status, after, afterUUID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list instrument changes: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.InstrumentChange, error) { return scanChange(row) })
+	if err != nil {
+		return nil, fmt.Errorf("list instrument changes: %w", err)
+	}
+	return out, nil
+}
+
+func (r changes) Due(ctx context.Context, now time.Time, limit int) ([]domain.InstrumentChange, error) {
+	rows, err := r.q.Query(ctx, `SELECT `+changeColumns+changeFrom+`
+		WHERE c.status = 'SCHEDULED' AND c.effective_at <= $1 ORDER BY c.effective_at, c.id LIMIT $2 FOR UPDATE OF c SKIP LOCKED`, now, limit)
+	if err != nil {
+		return nil, fmt.Errorf("due instrument changes: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.InstrumentChange, error) { return scanChange(row) })
+	if err != nil {
+		return nil, fmt.Errorf("due instrument changes: %w", err)
+	}
+	return out, nil
+}
+
+func (r changes) Open(ctx context.Context) (int, error) {
+	var n int
+	if err := r.q.QueryRow(ctx, `SELECT count(*) FROM instrument_changes WHERE status IN ('PENDING_APPROVAL', 'SCHEDULED')`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count instrument changes: %w", err)
+	}
+	return n, nil
 }
 
 type notes repos

@@ -45,9 +45,15 @@ function Approvals({ settings, editable }: { settings: NonNullable<ReturnType<ty
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [draft, setDraft] = useState<Record<Limit, string>>(() => pick(settings));
-  useEffect(() => setDraft(pick(settings)), [settings]);
+  const [delay, setDelay] = useState(() => String(settings.change_delay_seconds));
+  useEffect(() => {
+    setDraft(pick(settings));
+    setDelay(String(settings.change_delay_seconds));
+  }, [settings]);
+  const delayOK = /^\d+$/.test(delay.trim()) && Number(delay) >= 60 && Number(delay) <= 86400;
+  const delayChanged = delay.trim() !== String(settings.change_delay_seconds);
   const changed = LIMITS.filter((k) => draft[k].trim() !== settings[k]);
-  const valid = LIMITS.every((k) => dec.isDecimal(draft[k].trim()) && dec.gt(draft[k].trim(), "0"));
+  const valid = LIMITS.every((k) => dec.isDecimal(draft[k].trim()) && dec.gt(draft[k].trim(), "0")) && delayOK;
   const put = async (body: Record<string, unknown>) => {
     const res = adminData(await adminApi.PUT("/admin/v1/settings", { body: body as never }));
     qc.setQueryData(settingsKey, res);
@@ -95,12 +101,25 @@ function Approvals({ settings, editable }: { settings: NonNullable<ReturnType<ty
               <span className="text-xs text-fg-3">{t(`admin.settings.${k}_hint`)}</span>
             </label>
           ))}
+          <label className="flex flex-col gap-1.5 text-sm text-fg-2">
+            {t("admin.changes.delay")}
+            <Input
+              id="change-delay"
+              value={delay}
+              onValueChange={setDelay}
+              inputMode="numeric"
+              unit="s"
+              disabled={!editable}
+              error={delayOK ? undefined : t("admin.changes.delayHint")}
+            />
+            <span className="text-xs text-fg-3">{t("admin.changes.delayHint")}</span>
+          </label>
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-fg-3">
           {editable && (
             <DangerAction
               trigger={(open) => (
-                <Button size="sm" disabled={!valid || changed.length === 0} onClick={open}>
+                <Button size="sm" disabled={!valid || (changed.length === 0 && !delayChanged)} onClick={open}>
                   {t("admin.common.save")}
                 </Button>
               )}
@@ -113,10 +132,21 @@ function Approvals({ settings, editable }: { settings: NonNullable<ReturnType<ty
                       {t(`admin.settings.${k}`)}: <Num value={settings[k]} /> → <Num value={draft[k].trim()} /> USDT
                     </span>
                   ))}
+                  {delayChanged && (
+                    <span>
+                      {t("admin.changes.delay")}: {settings.change_delay_seconds} → {delay.trim()}
+                    </span>
+                  )}
                 </span>
               }
               confirmWord="save"
-              run={(reason) => put({ ...Object.fromEntries(changed.map((k) => [k, draft[k].trim()])), reason })}
+              run={(reason) =>
+                put({
+                  ...Object.fromEntries(changed.map((k) => [k, draft[k].trim()])),
+                  ...(delayChanged ? { change_delay_seconds: Number(delay.trim()) } : {}),
+                  reason,
+                })
+              }
               success={t("admin.settings.saved")}
             />
           )}

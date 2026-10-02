@@ -93,10 +93,10 @@ func TestEditingTheReferenceData(t *testing.T) {
 		t.Fatalf("contract notes %v", res.Warnings)
 	}
 
-	if _, err := h.svc.ApplyConfig(ctx, ops, link, ""); code(err) != apperr.CodeInvalidArgument {
+	if _, _, err := h.svc.ApplyConfig(ctx, ops, link, "", ""); code(err) != apperr.CodeInvalidArgument {
 		t.Fatalf("no reason: %v", err)
 	}
-	if _, err := h.svc.ApplyConfig(ctx, ops, link, "list LINK against BTC"); err != nil {
+	if _, c, err := h.svc.ApplyConfig(ctx, ops, link, "list LINK against BTC", ""); err != nil || c != nil {
 		t.Fatal(err)
 	}
 	if catalog.applied[len(catalog.applied)-1] != "ops@example.com list LINK against BTC real" || !slices.Contains(h.actions(), "admin.instruments.applied") {

@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { DangerAction, lastFour } from "../../kit/actions";
 import { EnumBadge } from "../../kit/enums";
 import { IdText, Num, TimeText, useTimeText, UserCell } from "../../kit/format";
-import { ListTable, pageSize, useCursorList, type CursorList } from "../../kit/lists";
+import { ListTable, pageSize, RowActions, useCursorList, type CursorList } from "../../kit/lists";
 import { todoKey } from "../../live";
 import { clean } from "../records/tables";
 
@@ -105,9 +105,9 @@ export function ReviewDepositsTable({
               id: "actions",
               header: "",
               cell: ({ row }) => (
-                <span className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                <RowActions className="flex justify-end gap-1">
                   <Decisions d={row.original} size="sm" />
-                </span>
+                </RowActions>
               ),
             } as ColumnDef<ReviewDeposit, unknown>,
           ]

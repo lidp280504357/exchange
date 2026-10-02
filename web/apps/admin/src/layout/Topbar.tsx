@@ -81,6 +81,7 @@ function TodoBell({ admin }: { admin: Admin }) {
     { key: "approvals", to: "/approvals", n: todo?.approvals ?? 0, show: can(admin, "ledger.adjust.request") || can(admin, "ledger.adjust.approve") },
     { key: "identityRequests", to: "/identity-requests", n: todo?.identity_requests ?? 0, show: can(admin, "users.security") },
     { key: "deposits", to: "/deposits?view=attention", n: todo?.deposits ?? 0, show: can(admin, "deposits.review") },
+    { key: "instrumentChanges", to: "/instruments?tab=changes", n: todo?.instrument_changes ?? 0, show: can(admin, "instruments.trading") },
   ].filter((r) => r.show);
   const total = rows.reduce((n, r) => n + r.n, 0);
   return (

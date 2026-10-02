@@ -37,21 +37,55 @@ func (s *Service) InstrumentConfig(ctx context.Context, p Principal) (json.RawMe
 }
 
 // PreviewConfig works out what a config document would change, with the
-// console's notes, changing nothing.
-func (s *Service) PreviewConfig(ctx context.Context, p Principal, config json.RawMessage) (ports.ConfigResult, error) {
-	return s.applyConfig(ctx, p, config, "preview", true)
+// console's notes and the guard of its trading parameters (changes.go),
+// changing nothing.
+func (s *Service) PreviewConfig(ctx context.Context, p Principal, config json.RawMessage) (ConfigPreview, error) {
+	return s.previewConfig(ctx, p, config)
 }
 
 // ApplyConfig applies a config document (audited as
-// admin.instruments.applied with the items it changed).
-func (s *Service) ApplyConfig(ctx context.Context, p Principal, config json.RawMessage, reason string) (ports.ConfigResult, error) {
+// admin.instruments.applied with the items it changed). One that moves
+// trading parameters needs an ADMIN with the preview's confirmation, and
+// becomes a change that waits (changes.go): the second result.
+func (s *Service) ApplyConfig(ctx context.Context, p Principal, config json.RawMessage, reason, confirmation string) (
+	ports.ConfigResult, *domain.InstrumentChange, error,
+) {
 	if err := needReason(reason); err != nil {
-		return ports.ConfigResult{}, err
+		return ports.ConfigResult{}, nil, err
 	}
-	res, err := s.applyConfig(ctx, p, config, strings.TrimSpace(reason), false)
+	reason = strings.TrimSpace(reason)
+	prev, err := s.previewConfig(ctx, p, config)
 	if err != nil {
-		return ports.ConfigResult{}, err
+		return ports.ConfigResult{}, nil, err
 	}
+	if len(prev.Guard.Params) > 0 {
+		if err := p.require(domain.PermInstrumentsTrading); err != nil {
+			return ports.ConfigResult{}, nil, err
+		}
+		if err := s.confirmed(p, confirmation, domain.ChangeConfig, prev.fingerprint); err != nil {
+			return ports.ConfigResult{}, nil, err
+		}
+		c, err := s.request(ctx, p, domain.ChangeConfig, "instruments", config, changeSummary{
+			Fingerprint: prev.fingerprint, Params: prev.Guard.Params, Impacts: prev.Guard.Impacts, Items: items(prev.Changes),
+		}, reason)
+		if err != nil {
+			return ports.ConfigResult{}, nil, err
+		}
+		return prev.ConfigResult, &c, nil
+	}
+	res, err := s.applyConfig(ctx, p, config, reason, false)
+	if err != nil {
+		return ports.ConfigResult{}, nil, err
+	}
+	if pc := paramChanges(res.Changes); len(pc) > 0 {
+		// The stored items moved between the dry run and the apply.
+		s.Log.WarnContext(ctx, "instruments: trading parameters moved by a document applied at once", "params", len(pc))
+	}
+	return res, nil, s.auditApplied(ctx, p, res, reason)
+}
+
+// auditApplied records a document applied at once.
+func (s *Service) auditApplied(ctx context.Context, p Principal, res ports.ConfigResult, reason string) error {
 	type item struct {
 		Entity  string `json:"entity"`
 		Key     string `json:"key"`
@@ -63,7 +97,7 @@ func (s *Service) ApplyConfig(ctx context.Context, p Principal, config json.RawM
 		items = append(items, item{Entity: c.Entity, Key: c.Key, Action: c.Action, Version: c.Version})
 	}
 	details, _ := json.Marshal(map[string]any{"changes": items, "unchanged": res.Unchanged})
-	return res, s.audit(ctx, p, "instruments", "admin.instruments.applied", reason, string(details))
+	return s.audit(ctx, p, "instruments", "admin.instruments.applied", reason, string(details))
 }
 
 // referenced is what the checks read of a document.
@@ -121,6 +155,11 @@ func (s *Service) checkReferences(ctx context.Context, doc referenced) ([]ports.
 	for _, pair := range doc.Pairs {
 		ref := strings.ToUpper(strings.TrimSpace(pair.ReferenceSymbol))
 		if ref == "" {
+			if current.pairs[pair.Symbol] != "" {
+				if err := referenceInUse(pair.Symbol, house, current, doc); err != nil {
+					return nil, err
+				}
+			}
 			continue
 		}
 		if was, ok := current.pairs[pair.Symbol]; ok && was == ref {
@@ -179,6 +218,26 @@ func (s *Service) checkReferences(ctx context.Context, doc referenced) ([]ports.
 		note(ports.WarnStreamsReconnect, "", "")
 	}
 	return warnings, nil
+}
+
+// referenceInUse refuses clearing a pair's reference symbol while HOUSE
+// quotes the pair (design 2026-10-02 §2 item 6: its liquidity would stop)
+// or a perpetual's index follows it, stored or in the document.
+func referenceInUse(symbol string, house func(string) bool, current references, doc referenced) error {
+	if house(symbol) {
+		return ErrReferenceInUse.WithDetail("symbol", symbol).WithDetail("used_by", houseFlag)
+	}
+	for contract, index := range current.contracts {
+		if index == symbol {
+			return ErrReferenceInUse.WithDetail("symbol", symbol).WithDetail("used_by", contract)
+		}
+	}
+	for _, c := range doc.Contracts {
+		if c.IndexSymbol == symbol {
+			return ErrReferenceInUse.WithDetail("symbol", symbol).WithDetail("used_by", c.Symbol)
+		}
+	}
+	return nil
 }
 
 // references are the stored pairs' reference symbols and the contracts'

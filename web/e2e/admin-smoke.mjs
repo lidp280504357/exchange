@@ -159,6 +159,7 @@ try {
   await page.evaluate(() => [...document.querySelectorAll("[role=menuitem]")].find((e) => e.textContent.includes("交易中")).click());
   await page.waitForSelector("[role=dialog]");
   await waitText("SOL-BTC");
+  await waitText("分钟生效"); // the server's preview: opening a pair waits
   await t.shot("3-confirm");
   await clickButton("取消", "[role=dialog]");
   await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
@@ -176,7 +177,10 @@ try {
     await t.shot("3b-listing-preview");
     await clickButton("取消", "[role=dialog]");
   }
-  ok("assets and pairs: 50+ pairs, a status change waits for its confirmation (canceled); a pair's editor; the listing wizard's preview");
+  await go("/instruments?tab=changes");
+  await waitText("生效前任何管理员都可以取消");
+  await noError("the pending changes");
+  ok("assets and pairs: 50+ pairs, a status change previewed by the server waits for its confirmation (canceled); the pending changes; a pair's editor; the listing wizard's preview");
 
   // 8. Futures (every user's positions, the liquidation log), HOUSE, flags.
   await go("/derivatives");

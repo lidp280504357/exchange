@@ -85,6 +85,7 @@ export const instrumentsZh = {
         NO_INDEX_REFERENCE: "{{symbol}}：指数交易对 {{detail}} 不跟随参考行情，指数价由平台自己的成交决定",
         NO_FUTURES: "{{symbol}}：币安没有 {{detail}} 的合约，HOUSE 不会给它盘口",
         STREAMS_RECONNECT: "生效后一分钟内行情服务会重连币安的全部参考行情流，约 20 秒内参考盘口为空",
+        IMPACT_UNKNOWN: "{{symbol}}：暂时无法评估新风险阶梯对持仓的影响，现在不能确认这项修改",
       },
       fields: {
         symbol: "交易对", base_asset: "基础资产", quote_asset: "计价资产", tick_size: "价格步长", lot_size: "数量步长",
@@ -102,6 +103,62 @@ export const instrumentsZh = {
   },
   errors: {
     ADMIN_REFERENCE_UNKNOWN: "币安现货没有这个参考符号：写错的符号会让全部交易对的参考行情加载失败",
+    ADMIN_REFERENCE_IN_USE: "HOUSE 正在给这个交易对报价，或有永续合约的指数跟随它，参考符号不能清空",
+    ADMIN_CONFIRMATION_REQUIRED: "请重新预览：确认已过期，或这项修改与预览时不同",
+    ADMIN_CHANGE_CLOSED: "这项修改已经生效或已关闭",
+  },
+};
+
+// The changes of trading parameters (design 2026-10-02 §2 item 6, C3c).
+export const changesZh = {
+  admin: {
+    changes: {
+      tab: "待生效修改",
+      help: "交易对与合约的状态、费率、风险阶梯（杠杆）和参考符号只能由管理员（ADMIN）修改：确认预览后等待一段时间才生效（设置里可改），双人审批打开时还要另一位管理员批准；生效前任何管理员都可以取消。暂停（HALT）立即生效。",
+      params: "交易参数", paramsHint: "这些是交易参数：只有管理员可以确认，确认后 {{minutes}} 分钟生效，期间可以取消。",
+      paramsTwoPerson: "这些是交易参数：确认后还要另一位管理员批准，批准后 {{minutes}} 分钟生效。",
+      needAdmin: "包含交易参数的修改只能由管理员（ADMIN）确认。", impactUnknown: "暂时无法评估风险阶梯的影响，稍后再预览。",
+      impact: "{{symbol}}：按新阶梯 {{liquidated}} 个仓位会被强平（名义价值 {{notional}} USDT，{{accounts}} 个账户），另有 {{warned}} 个进入预警、{{over}} 个超出其杠杆的风险限额",
+      impactNone: "{{symbol}}：按新阶梯没有仓位会被强平（{{positions}} 个持仓，{{warned}} 个进入预警，{{over}} 个超出风险限额）",
+      unmeasured: "，{{n}} 个没有新鲜标记价未计入",
+      scheduled: "已排期：{{minutes}} 分钟后生效", pendingApproval: "已提交，等待另一位管理员批准",
+      immediate: "暂停立即生效", delayed: "确认后 {{minutes}} 分钟生效，期间可以取消", delayedTwoPerson: "确认后需另一位管理员批准，再过 {{minutes}} 分钟生效",
+      kind: { CONFIG: "参考数据", PAIR_STATUS: "交易对状态", CONTRACT_STATUS: "合约状态" },
+      status: { PENDING_APPROVAL: "待批准", SCHEDULED: "待生效", APPLIED: "已生效", CANCELED: "已取消", REJECTED: "已驳回", FAILED: "失败" },
+      what: "修改", requester: "提交人", effective: "生效时间", in: "{{time}} 后", approver: "批准人", result: "结果",
+      approve: "批准", reject: "驳回", cancel: "取消修改", approveTitle: "批准这项修改", rejectTitle: "驳回这项修改", cancelTitle: "取消这项修改",
+      approved: "已批准，到生效时间后执行", rejected: "已驳回", canceled: "已取消", none: "没有修改记录", filter: "状态",
+      delay: "交易参数修改的等待时间（秒）", delayHint: "确认（或批准）后多久生效，60–86400 秒",
+    },
+    shell: { todo_instrumentChanges: "待生效的交易参数修改" },
+    common: { close: "关闭" },
+  },
+};
+
+export const changesEn = {
+  admin: {
+    changes: {
+      tab: "Pending changes",
+      help: "Statuses, fee rates, risk ladders (leverage) and reference symbols of pairs and contracts change only by an ADMIN: confirmed from the preview, they take effect after a wait (see the settings) and, with two-person approval on, once a second ADMIN approves; any ADMIN may cancel them until then. A halt takes effect at once.",
+      params: "Trading parameters", paramsHint: "These are trading parameters: only an ADMIN confirms them; they take effect {{minutes}} minutes later and may be canceled until then.",
+      paramsTwoPerson: "These are trading parameters: once confirmed a second ADMIN approves them; they take effect {{minutes}} minutes after that.",
+      needAdmin: "A change of trading parameters is confirmed by an ADMIN only.", impactUnknown: "The ladder's impact cannot be measured right now; preview again later.",
+      impact: "{{symbol}}: under the new ladder {{liquidated}} positions would be liquidated ({{notional}} USDT notional, {{accounts}} accounts); {{warned}} more warned, {{over}} above their leverage's risk limit",
+      impactNone: "{{symbol}}: no position would be liquidated under the new ladder ({{positions}} open, {{warned}} warned, {{over}} above their risk limit)",
+      unmeasured: "; {{n}} without a fresh mark price left out",
+      scheduled: "Scheduled: takes effect in {{minutes}} minutes", pendingApproval: "Submitted; waiting for a second ADMIN",
+      immediate: "A halt takes effect at once", delayed: "Takes effect {{minutes}} minutes after you confirm; may be canceled until then",
+      delayedTwoPerson: "Once confirmed a second ADMIN approves it; it takes effect {{minutes}} minutes later",
+      kind: { CONFIG: "Reference data", PAIR_STATUS: "Pair status", CONTRACT_STATUS: "Contract status" },
+      status: { PENDING_APPROVAL: "To approve", SCHEDULED: "Scheduled", APPLIED: "Applied", CANCELED: "Canceled", REJECTED: "Rejected", FAILED: "Failed" },
+      what: "Change", requester: "Requested by", effective: "Takes effect", in: "in {{time}}", approver: "Approved by", result: "Result",
+      approve: "Approve", reject: "Reject", cancel: "Cancel the change", approveTitle: "Approve this change", rejectTitle: "Reject this change",
+      cancelTitle: "Cancel this change", approved: "Approved; it takes effect at its time", rejected: "Rejected", canceled: "Canceled",
+      none: "No changes yet", filter: "Status",
+      delay: "Wait of trading parameter changes (seconds)", delayHint: "How long after confirmation (or approval) they take effect, 60–86400 seconds",
+    },
+    shell: { todo_instrumentChanges: "Trading parameter changes pending" },
+    common: { close: "Close" },
   },
 };
 
@@ -188,6 +245,7 @@ export const instrumentsEn = {
         NO_INDEX_REFERENCE: "{{symbol}}: its index pair {{detail}} follows no reference market; the platform's own trades price the index",
         NO_FUTURES: "{{symbol}}: Binance has no futures on {{detail}}, so HOUSE gives it no book",
         STREAMS_RECONNECT: "Within a minute market-data-service reconnects every reference stream: reference books are empty for about 20 seconds",
+        IMPACT_UNKNOWN: "{{symbol}}: the new risk ladder cannot be measured against the positions right now, so the change cannot be confirmed",
       },
       fields: {
         symbol: "Symbol", base_asset: "Base asset", quote_asset: "Quote asset", tick_size: "Price step", lot_size: "Quantity step",
@@ -206,5 +264,8 @@ export const instrumentsEn = {
   },
   errors: {
     ADMIN_REFERENCE_UNKNOWN: "Binance has no such spot symbol: a wrong one would fail the reference data of every pair",
+    ADMIN_REFERENCE_IN_USE: "HOUSE quotes this pair or a perpetual's index follows it: its reference symbol stays",
+    ADMIN_CONFIRMATION_REQUIRED: "Preview again: the confirmation expired or the change is no longer what was previewed",
+    ADMIN_CHANGE_CLOSED: "This change already took effect or was closed",
   },
 };

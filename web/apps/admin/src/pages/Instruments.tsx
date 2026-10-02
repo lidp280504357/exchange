@@ -5,15 +5,18 @@ import { ChevronDown, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router";
-import { DangerAction } from "../kit/actions";
+import { DangerAction, errorToast } from "../kit/actions";
 import { EnumBadge, useEnum } from "../kit/enums";
 import { Num } from "../kit/format";
+import { RowActions } from "../kit/lists";
 import { Page } from "../kit/Page";
 import {
   feeRates, useInstrumentConfig, type AssetConfig, type ContractConfig, type FeeSchedule, type InstrumentConfig, type PairConfig,
 } from "./instruments/config";
 import { AssetDrawer, ContractDrawer, FeeDrawer, PairDrawer } from "./instruments/forms";
+import { changesKey, ChangesTab, moveNote, type StatusPreview } from "./instruments/changes";
 import { ListingWizard } from "./instruments/Wizard";
+import { useTodo } from "../live";
 
 type Status = PairConfig["status"];
 
@@ -27,7 +30,7 @@ export const NEXT: Record<Status, Status[]> = {
 };
 
 const right: DataColumnMeta = { align: "right" };
-const TABS = ["pairs", "assets", "contracts", "fees", "wizard"] as const;
+const TABS = ["pairs", "assets", "contracts", "fees", "wizard", "changes"] as const;
 type Tab = (typeof TABS)[number];
 
 /** What a drawer edits: an item, or a new one (null). */
@@ -65,8 +68,9 @@ export default function Instruments({ admin }: { admin: Admin }) {
   const cfg = data.data;
   const write = can(admin, "instruments.write");
   const match = (...s: (string | undefined)[]) => !q || s.some((x) => (x ?? "").toUpperCase().includes(q.trim().toUpperCase()));
+  const todo = useTodo();
   const add =
-    write && tab !== "wizard" ? (
+    write && tab !== "wizard" && tab !== "changes" ? (
       <Button
         size="sm"
         icon={<Plus size={14} />}
@@ -85,11 +89,12 @@ export default function Instruments({ admin }: { admin: Admin }) {
           { value: "contracts", label: t("admin.instruments.tabs.contracts"), count: cfg?.contracts.length },
           { value: "fees", label: t("admin.listing.tabs.fees"), count: cfg?.fee_schedules.length },
           ...(write ? [{ value: "wizard", label: t("admin.listing.tabs.wizard") }] : []),
+          { value: "changes", label: t("admin.changes.tab"), count: todo?.instrument_changes || undefined },
         ]}
         value={tab}
         onValueChange={setTab}
         extra={
-          tab !== "wizard" && (
+          tab !== "wizard" && tab !== "changes" && (
             <Input size="sm" value={q} onValueChange={setQ} placeholder={t("admin.common.search")} clearable onClear={() => setQ("")} containerClassName="w-56" />
           )
         }
@@ -104,6 +109,8 @@ export default function Instruments({ admin }: { admin: Admin }) {
         <Contracts admin={admin} cfg={cfg} rows={(cfg?.contracts ?? []).filter((c) => match(c.symbol))} onOpen={write ? (item) => setEditing({ kind: "contract", item }) : undefined} />
       ) : tab === "fees" ? (
         <Fees cfg={cfg} rows={(cfg?.fee_schedules ?? []).filter((f) => match(f.tier))} onOpen={write ? (item) => setEditing({ kind: "fee", item }) : undefined} />
+      ) : tab === "changes" ? (
+        <ChangesTab admin={admin} />
       ) : (
         <ListingWizard cfg={cfg} />
       )}
@@ -153,7 +160,7 @@ function Pairs({ admin, cfg, rows, onOpen }: { admin: Admin; cfg: InstrumentConf
           );
         },
       },
-      ...(can(admin, "instruments.write")
+      ...(can(admin, "instruments.trading")
         ? [{ id: "actions", header: "", cell: ({ row }) => <StatusActions kind="pair" symbol={row.original.symbol} status={row.original.status} /> } as ColumnDef<PairConfig, unknown>]
         : []),
     ],
@@ -211,7 +218,7 @@ function Contracts({
       { id: "lev", header: t("admin.instruments.maxLeverage"), meta: right, cell: ({ row }) => `${row.original.risk_tiers[0]?.max_leverage ?? "—"}x` },
       { id: "tiers", header: t("admin.listing.riskTiers"), meta: right, cell: ({ row }) => row.original.risk_tiers.length },
       { id: "funding", header: t("admin.instruments.funding"), cell: ({ row }) => t("admin.instruments.hours", { n: row.original.funding_interval_hours }) },
-      ...(can(admin, "derivatives.write")
+      ...(can(admin, "instruments.trading")
         ? [{ id: "actions", header: "", cell: ({ row }) => <StatusActions kind="contract" symbol={row.original.symbol} status={row.original.status} /> } as ColumnDef<ContractConfig, unknown>]
         : []),
     ],
@@ -241,43 +248,68 @@ function Fees({ cfg, rows, onOpen }: { cfg: InstrumentConfig | undefined; rows: 
   return <DataTable columns={columns} data={rows} getRowId={(f) => f.tier} loading={!cfg} density="compact" aria-label="fee tiers" onRowClick={onOpen} />;
 }
 
-/** StatusActions moves a pair or contract to a next status of its machine, with a confirmation. */
+/**
+ * StatusActions moves a pair or contract to a next status of its machine
+ * (ADMIN, design 2026-10-02 §2 item 6): the server's preview first, then
+ * the confirmation; a halt takes effect at once, any other move waits.
+ */
 export function StatusActions({ kind, symbol, status }: { kind: "pair" | "contract"; symbol: string; status: Status | undefined }) {
   const { t } = useTranslation();
   const label = useEnum();
-  const [to, setTo] = useState<Status | null>(null);
+  const [move, setMove] = useState<StatusPreview | null>(null);
   const next = status ? NEXT[status] : [];
   if (next.length === 0) return null;
-  const run = async (target: Status, reason: string) =>
-    kind === "pair"
-      ? adminData(await adminApi.POST("/admin/v1/instruments/pairs/{symbol}/status", { params: { path: { symbol } }, body: { to: target, reason } }))
-      : adminData(await adminApi.POST("/admin/v1/derivatives/contracts/{symbol}/status", { params: { path: { symbol } }, body: { to: target, reason } }));
+  const path = { params: { path: { symbol } } };
+  const preview = async (to: Status) => {
+    try {
+      setMove(
+        kind === "pair"
+          ? adminData(await adminApi.POST("/admin/v1/instruments/pairs/{symbol}/status/preview", { ...path, body: { to } }))
+          : adminData(await adminApi.POST("/admin/v1/derivatives/contracts/{symbol}/status/preview", { ...path, body: { to } })),
+      );
+    } catch (err) {
+      errorToast(err);
+    }
+  };
+  const run = async (p: StatusPreview, reason: string) => {
+    const body = { to: p.to as Status, reason, confirmation: p.confirmation?.token };
+    return kind === "pair"
+      ? adminData(await adminApi.POST("/admin/v1/instruments/pairs/{symbol}/status", { ...path, body }))
+      : adminData(await adminApi.POST("/admin/v1/derivatives/contracts/{symbol}/status", { ...path, body }));
+  };
   return (
-    <span onClick={(e) => e.stopPropagation()}>
+    <RowActions>
       <DropdownMenu
         trigger={
-          <Button size="sm" variant="ghost">
+          <Button size="sm" variant="ghost" className="whitespace-nowrap">
             {t("admin.common.actions")}
-            <ChevronDown size={12} />
+            <ChevronDown size={12} className="ml-1 inline-block align-middle" />
           </Button>
         }
-        items={next.map((s) => ({ key: s, label: t("admin.instruments.moveTo", { to: label("pairStatus", s) }), danger: s !== "TRADING", onSelect: () => setTo(s) }))}
+        items={next.map((s) => ({ key: s, label: t("admin.instruments.moveTo", { to: label("pairStatus", s) }), danger: s !== "TRADING", onSelect: () => void preview(s) }))}
       />
-      {to && (
+      {move && (
         <DangerAction
-          key={to}
+          key={move.to}
           open
-          onOpenChange={(o) => !o && setTo(null)}
-          danger={to !== "TRADING"}
-          title={t("admin.instruments.moveTitle", { symbol, to: label("pairStatus", to) })}
+          onOpenChange={(o) => !o && setMove(null)}
+          danger={move.to !== "TRADING"}
+          title={t("admin.instruments.moveTitle", { symbol, to: label("pairStatus", move.to) })}
+          description={moveNote(t, move)}
           target={<span className="font-mono">{symbol}</span>}
           confirmWord={symbol}
-          run={(reason) => run(to, reason)}
-          success={t("admin.instruments.moved", { symbol, from: label("pairStatus", status), to: label("pairStatus", to) })}
-          invalidate={[["admin", "instruments"], ["admin", "derivatives"]]}
-          onDone={() => setTo(null)}
+          run={(reason) => run(move, reason)}
+          success={
+            move.immediate
+              ? t("admin.instruments.moved", { symbol, from: label("pairStatus", move.from), to: label("pairStatus", move.to) })
+              : move.two_person
+                ? t("admin.changes.pendingApproval")
+                : t("admin.changes.scheduled", { minutes: Math.max(1, Math.round(move.delay_seconds / 60)) })
+          }
+          invalidate={[["admin", "instruments"], ["admin", "derivatives"], changesKey, ["admin", "todo"]]}
+          onDone={() => setMove(null)}
         />
       )}
-    </span>
+    </RowActions>
   );
 }

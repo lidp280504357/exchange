@@ -38,8 +38,8 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 
 | 角色 | 权限 |
 |---|---|
-| ADMIN | 全部，包括只有它有的 `settings.write`（后台设置：双人审批与单人限额）与 `admins.manage`（管理员：创建、改角色、停用与启用、重置口令与身份验证器、结束会话） |
-| OPERATOR | 读 + 改账户状态、撤销用户挂单（全部或单笔）、改交易对与合约状态、解除合约只减仓与强制平仓（`derivatives.write`）、切换功能开关（后台自己的 `admin.*` 开关除外）、备注与标签（`users.notes`）、账户安全操作与换绑审核（`users.security`）、查看完整联系方式（`users.contacts`）、风控冻结（`ledger.hold`） |
+| ADMIN | 全部，包括只有它有的 `settings.write`（后台设置：双人审批与单人限额）、`admins.manage`（管理员：创建、改角色、停用与启用、重置口令与身份验证器、结束会话）与 `instruments.trading`（交易参数：状态、费率、风险阶梯、参考符号，见下文「交易参数的护栏」） |
+| OPERATOR | 读 + 改账户状态、撤销用户挂单（全部或单笔）、编辑交易参数以外的参考数据与上架新交易对（`instruments.write`）、解除合约只减仓与强制平仓（`derivatives.write`）、切换功能开关（后台自己的 `admin.*` 开关除外）、备注与标签（`users.notes`）、账户安全操作与换绑审核（`users.security`）、查看完整联系方式（`users.contacts`）、风控冻结（`ledger.hold`） |
 | FINANCE | 读 + 提现审批与搁置、发起与审批手动调账（现货或合约账户）和保险基金注资、充值处置与补记（`deposits.review`）、备注与标签、查看完整联系方式、风控冻结 |
 | AUDITOR | 只读（用户（联系方式脱敏）、资产与交易对、合约（`derivatives.read`）、功能开关、提现、审计日志、报表） |
 
@@ -120,6 +120,20 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 - **核对与提示**：交易对的新参考符号先向币安核对，币安现货没有的拒绝（422 `ADMIN_REFERENCE_UNKNOWN`）。提示（`warnings`，按代码本地化）：`HOUSE_NOT_LISTED`（不在 `market.house_liquidity` 名单里，HOUSE 不报价）、`NO_FUTURES`（币安没有对应合约，HOUSE 不给合约盘口）、`NO_INDEX_REFERENCE`（合约的指数交易对不跟随参考行情）、`REFERENCE_UNCHECKED`（核对不了）、`STREAMS_RECONNECT`（行情服务会重连全部参考行情流，约 20 秒参考盘口为空）。
 - **与部署的关系**：后台改过的项记为来源 `CONSOLE`，之后部署同步文件时保留它（输出里有 `kept …`）；`exchangectl instruments apply --force` 让文件重新说了算。要长期保留的改动也应改进 `test.json`。
 - 与设计稿 §5 的差别：没有单独的 `POST/PUT /admin/v1/instruments/{assets,networks,pairs,contracts}` 与 `GET/PUT /admin/v1/fees`，都走配置文档的预览与应用（一条路径、同一套校验）；参考符号映射在交易对的编辑里。
+
+## 交易参数的护栏（2026-10-02 设计 §2 第 6 条，C3c）
+
+一次调用就能把费率改到 10%、让高杠杆仓位在几秒内被强平、或掐断 HOUSE 的流动性，所以这些"交易参数"的修改另有一套规则：
+
+- **哪些是交易参数**：交易对与合约的状态；费率档的 Maker/Taker 费率；交易对的费率档、参考符号与参考倍数；合约的费率档与风险阶梯（也就是各档的最高杠杆与维持保证金率）。新增的交易对、合约与费率档处于「准备中」或无人使用，不算（开放它是一次状态修改）。资产、网络与交易对的其它字段照旧由 OPERATOR 改、立即生效。
+- **只有 ADMIN**：新权限 `instruments.trading`（ADMIN 共 23 项权限）。OPERATOR 可以预览，确认按钮不可用（服务端 403）。
+- **服务端二次确认**：预览（`POST /admin/v1/instruments/preview`，或状态的 `POST …/status/preview`）返回 `confirmation`：用 `ADMIN_SECRET_KEY` 封装的令牌，绑定这位管理员与这次修改的全部变化（各项的修改前后与版本），10 分钟有效。提交时带回它；没有、过期（`reason: expired`）或预览后数据变了（`reason: changed`）都返回 409 `ADMIN_CONFIRMATION_REQUIRED`，页面会让人重新预览。
+- **延迟生效**：确认后记为一条「待生效修改」（表 `instrument_changes`），设置里的等待时间（`change_delay_seconds`，60–86400 秒，默认 300）之后由 admin-service 每 5 秒一轮执行，以提交人的名义写入 instrument-service；到点时再做一次空跑，与确认时不一致（期间有人改过同一项、状态已变）就记为失败（「请重新预览」），不会套用过时的整项。`admin.two_person_approval` 打开时先等另一位 ADMIN 批准（`POST /admin/v1/instruments/changes/{id}/decide`，不能批准自己的），批准后再等同样的时间。生效前任何 ADMIN 都可以取消（`…/cancel`）。审计：`admin.instruments.change_requested`、`change_approved`、`change_rejected`、`change_canceled`、`change_applied`、`change_failed`（对象为 `instruments`、`pair:<symbol>` 或 `contract:<symbol>`）。
+- **暂停是急刹车**：改为 HALT 不需要确认令牌、立即生效（仍只有 ADMIN）；恢复交易、只撤单、下线都按上面等待。
+- **风险阶梯的影响**：预览里列出按新阶梯会被强平的仓位数、名义价值与账户数，另有新进入预警、超出其杠杆风险限额的数量（derivatives-service 的 `POST /internal/derivatives/contracts/{symbol}/tier-impact`，按保证金监控的同一规则计算：逐仓看仓位，全仓看整个账户；HOUSE 不计）。算不出来时提示 `IMPACT_UNKNOWN`，不给确认令牌。
+- **参考符号**：HOUSE 正在报价（在 `market.house_liquidity` 的名单上）或有永续合约以它为指数的交易对，清空参考符号直接拒绝（422 `ADMIN_REFERENCE_IN_USE`，详情 `used_by`）。
+- **页面**：「资产与交易对」新增「待生效修改」标签（状态筛选、修改内容、提交人、生效时间与批准人、结果；ADMIN 可批准、驳回、取消），顶栏待办与概览也计数（`todo.instrument_changes`）。修改的预览里，交易参数单独列出，并说明多久后生效或需要谁批准；状态「操作」先向服务端预览再确认。设置页可改等待时间。
+- **运维**：`exchangectl instruments apply`（部署同步）与功能开关的自动暂停（行情断流、模拟市场心跳）不经过这里。
 
 ## 管理员、系统健康与审计导出（2026-10-02 设计 §4.6，C4a）
 
@@ -228,7 +242,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 - 锁定：等 15 分钟自动解锁，或由 ADMIN 在「管理员与角色」页启用（同时清除锁定）；忘记密码或丢失 TOTP：另一位 ADMIN 在同一页重置（新的只显示一次，对方会话结束）。不能重置自己的；唯一的 ADMIN 丢失时，用 `exchangectl admin disable` 停用后以新邮箱 `admin create` 重建（命令行没有重置入口，避免成为绕过 TOTP 的后门）。
 - IP 白名单（可选）：在服务器建 `/opt/exchange/infra/nginx/snippets/admin-access.local.conf`，内容如 `allow 203.0.113.7; deny all;`，`task deploy` 或 `nginx -s reload` 后对 `admin.astras.vip` 整站生效（真实客户端 IP 由 Cloudflare real-ip 配置还原）。目前按用户决定不设。部署同步不会覆盖或删除这个文件。
 - 指标：运维端口 9094（`outbox_pending`、`http_server_*`）；Prometheus 任务 `admin-service`。
-- 端到端：`bash scripts/e2e/admin.sh`（对 `https://admin.astras.vip`，每次创建 4 个随机管理员、结束时停用；覆盖页面与安全头、旧地址的跳转、登录与 Cookie、角色、备注与标签、批量审核提现、冻结/解冻、交易对状态往返、撤单、开关往返、双人调账、设置的权限与校验、单人模式（ADMIN 直接 +2.5/−2.5 USDT，超过单笔限额的转审并撤回；双人模式时跳过）、待办与事件流、合约（状态、只减仓、合约状态往返、强平监控与记录、双人保险基金注资 1 USDT）、报表、用户页的估值余额、风控冻结与解冻（用户资金流水里看得到 `ADMIN_FREEZE`）、单笔撤单、合约账户调账（单人模式时）、强制平仓（用户市价买入 0.1 ETH-USDT-PERP，后台平掉后仓位为空；合约交易关闭时跳过）、充值处置与补记（用托管方替身 udun-mock：回调推迟 45 秒的 2 USDT 由 FINANCE 补记、用户余额 +2、同一交易号再补记被拒、晚到的回调记为已核对且不再入账、`exchangectl` 报告里不再列出；低于最小额的 0.5 USDT 入账给用户、0.25 USDT 驳回后不能再入账）、提现详情与搁置（对已完成的提现搁置得到 409）、安全/历史/风控与完整联系方式、换绑审核（用户换绑唯一的邮箱 → 后台通过 → 按新邮箱能查到）、重置身份验证器、全部会话退出（用户令牌立即失效）、临时密码（旧密码失效、临时密码可登录、审计里没有它）、后台建管理员（C4a：ADMIN 建 OPERATOR，响应 `no-store`，用一次性口令登录；改为 AUDITOR 后下一个请求即生效；重置口令与身份验证器都结束会话、新的可登录；结束会话；停用后不能登录、启用后可以；不能改自己的账号；口令与密钥不出现在任何输出与审计里）、系统健康（全部就绪且带版本，消费者的滞后与死信数，行情源）、审计查询（含充值处置的四个动作与管理员的七个动作）与 CSV 导出（BOM、表头、`X-Truncated: false`，导出本身被审计）、退出与停用）。
+- 端到端：`bash scripts/e2e/admin.sh`（对 `https://admin.astras.vip`，每次创建 4 个随机管理员、结束时停用；覆盖页面与安全头、旧地址的跳转、登录与 Cookie、角色、备注与标签、批量审核提现、冻结/解冻、交易参数的护栏（C3c：等待时间临时设为 60 秒、结束时恢复；OPERATOR 不能改状态与参考符号；ETH-BTC 只预览暂停与只可撤单；没有确认令牌 409；LINK-BTC 的参考符号修改经 ADMIN 确认后排期再取消；ETH-USDT-PERP 立即暂停、确认的恢复一分钟后由后台执行；LINK-BTC 确认开放、一分钟后可下单、最后立即暂停；更严的风险阶梯预览列出影响；BTC-USDT 的参考符号不能清空）、撤单、开关往返、双人调账、设置的权限与校验、单人模式（ADMIN 直接 +2.5/−2.5 USDT，超过单笔限额的转审并撤回；双人模式时跳过）、待办与事件流、合约（状态、只减仓、强平监控与记录、双人保险基金注资 1 USDT）、报表、用户页的估值余额、风控冻结与解冻（用户资金流水里看得到 `ADMIN_FREEZE`）、单笔撤单、合约账户调账（单人模式时）、强制平仓（用户市价买入 0.1 ETH-USDT-PERP，后台平掉后仓位为空；合约交易关闭时跳过）、充值处置与补记（用托管方替身 udun-mock：回调推迟 45 秒的 2 USDT 由 FINANCE 补记、用户余额 +2、同一交易号再补记被拒、晚到的回调记为已核对且不再入账、`exchangectl` 报告里不再列出；低于最小额的 0.5 USDT 入账给用户、0.25 USDT 驳回后不能再入账）、提现详情与搁置（对已完成的提现搁置得到 409）、安全/历史/风控与完整联系方式、换绑审核（用户换绑唯一的邮箱 → 后台通过 → 按新邮箱能查到）、重置身份验证器、全部会话退出（用户令牌立即失效）、临时密码（旧密码失效、临时密码可登录、审计里没有它）、后台建管理员（C4a：ADMIN 建 OPERATOR，响应 `no-store`，用一次性口令登录；改为 AUDITOR 后下一个请求即生效；重置口令与身份验证器都结束会话、新的可登录；结束会话；停用后不能登录、启用后可以；不能改自己的账号；口令与密钥不出现在任何输出与审计里）、系统健康（全部就绪且带版本，消费者的滞后与死信数，行情源）、审计查询（含充值处置的四个动作与管理员的七个动作）与 CSV 导出（BOM、表头、`X-Truncated: false`，导出本身被审计）、退出与停用）。
 - admin-service 连 derivatives-service 的内部地址：`DERIVATIVES_SERVICE_URL`（compose 里是 `http://derivatives-service:8095`）。
 
 ## 常见错误码
@@ -246,6 +260,9 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | `ADMIN_SELF` | 不能在后台修改自己的管理员账号 |
 | `ADMIN_LAST_ADMIN` | 最后一位启用的 ADMIN 不能被停用或降级 |
 | `ADMIN_REFERENCE_UNKNOWN` | 交易对的参考符号币安现货没有（详情 `symbol`、`reference_symbol`） |
+| `ADMIN_REFERENCE_IN_USE` | HOUSE 正在报价或有永续合约以它为指数，交易对的参考符号不能清空（详情 `symbol`、`used_by`） |
+| `ADMIN_CONFIRMATION_REQUIRED` | 交易参数的修改要带预览给的确认令牌；`reason` 为 `expired`（超过 10 分钟）或 `changed`（预览后数据变了）时重新预览 |
+| `ADMIN_CHANGE_CLOSED` | 这项待生效修改已经生效、取消、驳回或失败 |
 | `WALLET_DEPOSIT_KNOWN` | 补记的托管方交易号或（网络、哈希、地址）已有充值，详情 `deposit_id` |
 | `WALLET_DEPOSIT_NOT_RELEASABLE` | 只有记入 `UNCLAIMED_DEPOSIT`、有币种、回调没有不一致的待处理充值才能入账给用户 |
 | `WALLET_DEPOSIT_RESOLVED` | 这笔充值已经处理过 |

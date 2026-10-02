@@ -279,8 +279,9 @@ export interface paths {
         get: operations["getSettings"];
         /**
          * Change the console's settings
-         * @description Changes the fields given: the limits (audited as
-         *     admin.settings.changed) and two-person approval (switches the flag
+         * @description Changes the fields given: the limits and the delay of trading
+         *     parameters' changes (audited as admin.settings.changed) and
+         *     two-person approval (switches the flag
          *     admin.two_person_approval, audited by the flags; the other
          *     instances follow within 5 seconds). The daily limit must cover the
          *     single-operation one. Needs settings.write (ADMIN).
@@ -1317,8 +1318,18 @@ export interface paths {
          *     statuses never change here (the status endpoints do that). A pair's
          *     new reference symbol must be listed on the reference market's spot
          *     market (ADMIN_REFERENCE_UNKNOWN otherwise: it would fail the
-         *     reference reads of every pair); `warnings` note what else follows.
-         *     Needs instruments.write.
+         *     reference reads of every pair); clearing the reference symbol of a
+         *     pair HOUSE quotes or a perpetual's index follows is refused
+         *     (ADMIN_REFERENCE_IN_USE); `warnings` note what else follows.
+         *
+         *     `guard` lists the trading parameters the document moves (fee rates,
+         *     a pair's fee tier, reference symbol and multiplier, a contract's
+         *     fee tier and risk ladder) with, for a ladder, the open positions it
+         *     would liquidate (derivatives-service measures them as its margin
+         *     monitor does). Such a document is applied only by an ADMIN bringing
+         *     back `guard.confirmation` (bound to them and to exactly these
+         *     changes, valid 10 minutes), and then waits (see apply). Needs
+         *     instruments.write.
          */
         post: operations["previewInstrumentConfig"];
         delete?: never;
@@ -1344,8 +1355,110 @@ export interface paths {
          *     reference-data file keeps what the console changed last (exchangectl
          *     instruments apply --force overrides). Audited
          *     (admin.instruments.applied). Needs instruments.write.
+         *
+         *     A document moving trading parameters (design 2026-10-02 §2 item 6)
+         *     needs instruments.trading (ADMIN) and the preview's confirmation
+         *     (ADMIN_CONFIRMATION_REQUIRED without it, with `reason` expired or
+         *     changed when it no longer holds): it answers 202 with the change,
+         *     which takes effect the settings' change_delay_seconds later, or,
+         *     while admin.two_person_approval is on, that long after a second
+         *     ADMIN approved it (POST /admin/v1/instruments/changes/{id}/decide);
+         *     audited as admin.instruments.change_requested. New items touch
+         *     nobody until opened and apply at once.
          */
         post: operations["applyInstrumentConfig"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/instruments/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The changes of trading parameters, newest first
+         * @description Waiting for a second ADMIN (PENDING_APPROVAL) or their time
+         *     (SCHEDULED), applied, canceled, rejected or failed (the target
+         *     moved since it was confirmed). Needs instruments.read.
+         */
+        get: operations["listInstrumentChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/instruments/changes/{id}/decide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve or reject a change waiting for a second ADMIN
+         * @description Approved, it takes effect change_delay_seconds later; not by its
+         *     requester (ADMIN_SELF_APPROVAL, who cancels instead);
+         *     ADMIN_CHANGE_CLOSED once decided. Audited as
+         *     admin.instruments.change_approved or change_rejected. Needs
+         *     instruments.trading.
+         */
+        post: operations["decideInstrumentChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/instruments/changes/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a change before it takes effect
+         * @description Any ADMIN, its requester included; ADMIN_CHANGE_CLOSED once it took
+         *     effect or was closed. Audited as admin.instruments.change_canceled.
+         *     Needs instruments.trading.
+         */
+        post: operations["cancelInstrumentChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/instruments/pairs/{symbol}/status/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What moving a trading pair to another status does
+         * @description A halt takes effect at once (`immediate`, the emergency brake);
+         *     anything else is a change of trading parameters: the answer carries
+         *     the confirmation POST .../status brings back, and how long the
+         *     change will wait. INSTRUMENT_STATUS_TRANSITION_INVALID for a move
+         *     the state machine forbids. Needs instruments.trading.
+         */
+        post: operations["previewPairStatus"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1366,7 +1479,10 @@ export interface paths {
          * @description PREPARE → TRADING ⇄ HALT; TRADING or HALT → CANCEL_ONLY →
          *     DELISTED (CANCEL_ONLY is the way out: it cannot return to
          *     trading). Fails with INSTRUMENT_STATUS_TRANSITION_INVALID
-         *     otherwise. Needs instruments.write.
+         *     otherwise. A halt takes effect at once (200); any other move needs
+         *     the preview's confirmation (POST .../status/preview) and answers
+         *     202 with the change that waits (see POST
+         *     /admin/v1/instruments/apply). Needs instruments.trading (ADMIN).
          */
         post: operations["setPairStatus"];
         delete?: never;
@@ -1682,10 +1798,32 @@ export interface paths {
         /**
          * Move a perpetual contract to another status
          * @description The same transitions as trading pairs (PREPARE → TRADING ⇄ HALT;
-         *     TRADING or HALT → CANCEL_ONLY → DELISTED); instrument-service
-         *     records the change. Needs instruments.write.
+         *     TRADING or HALT → CANCEL_ONLY → DELISTED) and the same guard: a
+         *     halt at once (200), any other move confirmed from its preview and
+         *     waiting (202); instrument-service records it. Needs
+         *     instruments.trading (ADMIN).
          */
         post: operations["setContractStatus"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/derivatives/contracts/{symbol}/status/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What moving a perpetual contract to another status does
+         * @description As POST /admin/v1/instruments/pairs/{symbol}/status/preview. Needs instruments.trading.
+         */
+        post: operations["previewContractStatus"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2258,6 +2396,138 @@ export interface components {
             from: string;
             to: string;
         };
+        StatusRequest: {
+            /** @enum {string} */
+            to: "PREPARE" | "TRADING" | "HALT" | "CANCEL_ONLY" | "DELISTED";
+            reason: string;
+            /** @description The preview's confirmation.token; a halt needs none. */
+            confirmation?: string;
+        };
+        StatusResult: {
+            from: string;
+            to: string;
+            /** @description The change waiting; null for a halt, done at once. */
+            change: null | components["schemas"]["InstrumentChange"];
+        };
+        /** @description Binds the confirming call to the preview an ADMIN saw (sealed, valid 10 minutes). */
+        Confirmation: {
+            token: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        StatusPreview: {
+            symbol: string;
+            from: string;
+            to: string;
+            /** @description A halt, at once and without confirmation. */
+            immediate: boolean;
+            confirmation: null | components["schemas"]["Confirmation"];
+            /** @description How long the change will wait once confirmed (or approved); 0 for a halt. */
+            delay_seconds: number;
+            /** @description A second ADMIN must approve it first (admin.two_person_approval). */
+            two_person: boolean;
+        };
+        /** @description A trading parameter a change moves (JSON values as stored; null for none). */
+        ParamChange: {
+            /** @enum {string} */
+            entity: "FEE_SCHEDULE" | "TRADING_PAIR" | "CONTRACT";
+            key: string;
+            /** @enum {string} */
+            field: "maker_fee_rate" | "taker_fee_rate" | "fee_tier" | "reference_symbol" | "reference_multiplier" | "risk_tiers" | "status";
+            before: unknown;
+            after: unknown;
+        };
+        /**
+         * @description What a contract's new risk ladder would do to its open positions at
+         *     the mark prices (HOUSE aside): positions the margin monitor would
+         *     take over that it does not now (a cross account whole) with their
+         *     notional and accounts, those newly warned, those above the risk
+         *     limit of their leverage (they stay but cannot grow), those without
+         *     a fresh mark price; the largest examples.
+         */
+        TierImpact: {
+            symbol: string;
+            positions: number;
+            liquidated: number;
+            notional: components["schemas"]["Decimal"];
+            accounts: number;
+            warned: number;
+            over_limit: number;
+            unmeasured: number;
+            examples: {
+                /** Format: uuid */
+                user_id: string;
+                symbol: string;
+                position_side: string;
+                cross: boolean;
+                notional: components["schemas"]["Decimal"];
+                margin_balance: components["schemas"]["Decimal"];
+                maintenance_before: components["schemas"]["Decimal"];
+                maintenance_after: components["schemas"]["Decimal"];
+            }[];
+        };
+        /** @description What a preview says of a document's trading parameters. */
+        ChangeGuard: {
+            /** @description The trading parameters it moves; none means it applies at once. */
+            params: components["schemas"]["ParamChange"][];
+            impacts: components["schemas"]["TierImpact"][];
+            /** @description Null without trading parameters, for a caller without instruments.trading, or while a ladder's impact cannot be measured (warning IMPACT_UNKNOWN). */
+            confirmation: null | components["schemas"]["Confirmation"];
+            delay_seconds: number;
+            two_person: boolean;
+        };
+        /** @description A change of trading parameters an ADMIN confirmed (design 2026-10-02 §2 item 6). */
+        InstrumentChange: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "CONFIG" | "PAIR_STATUS" | "CONTRACT_STATUS";
+            /**
+             * @example instruments
+             * @example pair:BTC-USDT
+             * @example contract:BTC-USDT-PERP
+             */
+            target: string;
+            /** @enum {string} */
+            status: "PENDING_APPROVAL" | "SCHEDULED" | "APPLIED" | "CANCELED" | "REJECTED" | "FAILED";
+            reason: string;
+            /** @description What the confirmation showed. */
+            summary: {
+                fingerprint?: string;
+                /** @description A status change's status when confirmed. */
+                from?: string;
+                params: components["schemas"]["ParamChange"][];
+                impacts: components["schemas"]["TierImpact"][];
+                /** @description A document's items, created or updated. */
+                items: {
+                    entity: string;
+                    key: string;
+                    action: string;
+                    version: number;
+                }[];
+            };
+            /** Format: uuid */
+            requested_by: string;
+            requested_by_email: string;
+            approved_by_email: string | null;
+            /** Format: date-time */
+            approved_at: string | null;
+            /** @description Who canceled or rejected it. */
+            closed_by_email: string | null;
+            /** Format: date-time */
+            closed_at: string | null;
+            /**
+             * Format: date-time
+             * @description When it takes (or took) effect; null while it waits for approval or after it was closed unscheduled.
+             */
+            effective_at: string | null;
+            /** Format: date-time */
+            applied_at: string | null;
+            /** @description What applying it did, or why it failed. */
+            result: string;
+            /** Format: date-time */
+            created_at: string;
+        };
         Admin: {
             /** Format: uuid */
             id: string;
@@ -2269,7 +2539,7 @@ export interface components {
         /** @enum {string} */
         AdminRole: "ADMIN" | "OPERATOR" | "FINANCE" | "AUDITOR";
         /** @enum {string} */
-        Permission: "users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write" | "settings.write" | "users.notes" | "users.security" | "users.contacts" | "ledger.hold" | "deposits.review" | "admins.manage";
+        Permission: "users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write" | "settings.write" | "users.notes" | "users.security" | "users.contacts" | "ledger.hold" | "deposits.review" | "admins.manage" | "instruments.trading";
         RolePermissions: {
             role: components["schemas"]["AdminRole"];
             permissions: components["schemas"]["Permission"][];
@@ -2315,6 +2585,8 @@ export interface components {
         Settings: {
             /** @description Fund operations need a second administrator (the flag admin.two_person_approval). */
             two_person_approval: boolean;
+            /** @description How long a confirmed change of trading parameters waits before it takes effect (60 to 86400, 300 by default). */
+            change_delay_seconds: number;
             /** @description In single-person mode, one fund operation is worth at most this much. */
             single_max_usdt: components["schemas"]["Decimal"];
             /** @description In single-person mode, an administrator's fund operations of the last 24 hours sum to at most this much. */
@@ -2329,6 +2601,8 @@ export interface components {
             updated_at: string | null;
         };
         Todo: {
+            /** @description Changes of trading parameters waiting for a second ADMIN or their time (with instruments.trading). */
+            instrument_changes: number;
             /** @description Withdrawals in review (with withdrawals.read; counted up to 200). */
             withdrawals: number;
             /** @description Fund operations waiting for a decision (with ledger.adjust.request or ledger.adjust.approve). */
@@ -2806,10 +3080,11 @@ export interface components {
                  *     HOUSE_NOT_LISTED: HOUSE quotes it only once on the flag's symbol list (detail: the flag);
                  *     NO_INDEX_REFERENCE: the contract's index pair (detail) follows no reference market;
                  *     NO_FUTURES: no futures on the reference symbol (detail), so HOUSE gives the contract no book;
-                 *     STREAMS_RECONNECT: the reference streams reconnect, books empty for about 20 seconds.
+                 *     STREAMS_RECONNECT: the reference streams reconnect, books empty for about 20 seconds;
+                 *     IMPACT_UNKNOWN: a new risk ladder (symbol) could not be measured against the open positions, so it cannot be confirmed now.
                  * @enum {string}
                  */
-                code: "REFERENCE_UNCHECKED" | "HOUSE_NOT_LISTED" | "NO_INDEX_REFERENCE" | "NO_FUTURES" | "STREAMS_RECONNECT";
+                code: "REFERENCE_UNCHECKED" | "HOUSE_NOT_LISTED" | "NO_INDEX_REFERENCE" | "NO_FUTURES" | "STREAMS_RECONNECT" | "IMPACT_UNKNOWN";
                 symbol: string;
                 detail: string;
             }[];
@@ -3251,6 +3526,8 @@ export interface components {
         AdminID: string;
         OrderID: string;
         Contract: string;
+        Symbol: string;
+        ChangeID: string;
     };
     requestBodies: never;
     headers: {
@@ -3636,6 +3913,7 @@ export interface operations {
                     single_max_usdt?: components["schemas"]["Decimal"];
                     daily_max_usdt?: components["schemas"]["Decimal"];
                     withdrawal_max_usdt?: components["schemas"]["Decimal"];
+                    change_delay_seconds?: number;
                     reason: string;
                 };
             };
@@ -5034,7 +5312,9 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ConfigResult"];
+                    "application/json": components["schemas"]["ConfigResult"] & {
+                        guard: components["schemas"]["ChangeGuard"];
+                    };
                 };
             };
             default: components["responses"]["Error"];
@@ -5052,6 +5332,8 @@ export interface operations {
                 "application/json": {
                     config: components["schemas"]["InstrumentConfigPatch"];
                     reason: string;
+                    /** @description The preview's guard.confirmation.token, for a document moving trading parameters. */
+                    confirmation?: string;
                 };
             };
         };
@@ -5062,26 +5344,67 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ConfigResult"];
+                    "application/json": components["schemas"]["ConfigResult"] & {
+                        change: null;
+                    };
+                };
+            };
+            /** @description The changes confirmed, waiting. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigResult"] & {
+                        change: components["schemas"]["InstrumentChange"];
+                    };
                 };
             };
             default: components["responses"]["Error"];
         };
     };
-    setPairStatus: {
+    listInstrumentChanges: {
+        parameters: {
+            query?: {
+                status?: "PENDING_APPROVAL" | "SCHEDULED" | "APPLIED" | "CANCELED" | "REJECTED" | "FAILED";
+                /** @description The previous page's next_cursor; omitted for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of changes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["InstrumentChange"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    decideInstrumentChange: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                symbol: string;
+                id: components["parameters"]["ChangeID"];
             };
             cookie?: never;
         };
         requestBody: {
             content: {
                 "application/json": {
-                    /** @enum {string} */
-                    to: "PREPARE" | "TRADING" | "HALT" | "CANCEL_ONLY" | "DELISTED";
+                    approve: boolean;
                     reason: string;
                 };
             };
@@ -5093,7 +5416,100 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Transition"];
+                    "application/json": components["schemas"]["InstrumentChange"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    cancelInstrumentChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["ChangeID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReasonRequest"];
+            };
+        };
+        responses: {
+            /** @description The change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstrumentChange"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    previewPairStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                symbol: components["parameters"]["Symbol"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    to: "PREPARE" | "TRADING" | "HALT" | "CANCEL_ONLY" | "DELISTED";
+                };
+            };
+        };
+        responses: {
+            /** @description The move. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusPreview"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setPairStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                symbol: components["parameters"]["Symbol"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StatusRequest"];
+            };
+        };
+        responses: {
+            /** @description Halted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResult"];
+                };
+            };
+            /** @description The change confirmed, waiting. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResult"];
                 };
             };
             default: components["responses"]["Error"];
@@ -5486,21 +5902,56 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    /** @enum {string} */
-                    to: "PREPARE" | "TRADING" | "HALT" | "CANCEL_ONLY" | "DELISTED";
-                    reason: string;
-                };
+                "application/json": components["schemas"]["StatusRequest"];
             };
         };
         responses: {
-            /** @description The change. */
+            /** @description Halted. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Transition"];
+                    "application/json": components["schemas"]["StatusResult"];
+                };
+            };
+            /** @description The change confirmed, waiting. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResult"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    previewContractStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                symbol: components["parameters"]["Contract"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    to: "PREPARE" | "TRADING" | "HALT" | "CANCEL_ONLY" | "DELISTED";
+                };
+            };
+        };
+        responses: {
+            /** @description The move. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusPreview"];
                 };
             };
             default: components["responses"]["Error"];

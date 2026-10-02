@@ -6,7 +6,7 @@ import { lastFour } from "../../kit/actions";
 import { EnumBadge, EnumText } from "../../kit/enums";
 import { Num, TimeText, UserCell } from "../../kit/format";
 import { FundAction, type Approval } from "../../kit/funds";
-import { ListTable, pageSize, useCursorList, type CursorList } from "../../kit/lists";
+import { ListTable, pageSize, RowActions, useCursorList, type CursorList } from "../../kit/lists";
 
 const right: DataColumnMeta = { align: "right" };
 
@@ -128,7 +128,7 @@ function Decide({ admin, a }: { admin: Admin; a: Approval }) {
     adminData(await adminApi.POST("/admin/v1/approvals/{id}/decide", { params: { path: { id: a.id } }, body: { approve, reason } }));
   const approve = !mine || a.mode === "SINGLE";
   return (
-    <span className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+    <RowActions className="flex justify-end gap-1">
       {approve && (
         <FundAction
           trigger={(open) => (
@@ -154,6 +154,6 @@ function Decide({ admin, a }: { admin: Admin; a: Approval }) {
         confirmWord={lastFour(a.id)}
         run={run(false)}
       />
-    </span>
+    </RowActions>
   );
 }
