@@ -166,6 +166,21 @@ groups:
           summary: "HOUSE's contract equity is {{ $value }} USDT: it is never liquidated, so its losses now come out of the insurance fund"
           runbook: docs/runbook/market-maker.md
 
+      - alert: MarketSimFailing
+        expr: sum by (job) (increase(market_sim_errors_total[10m])) > 100
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value }} of the simulated market's requests failed in 10 minutes: the platform coin's book may thin out"
+          runbook: docs/runbook/market-sim.md
+
+      - alert: MarketSimReferencesStale
+        expr: max by (job) (market_sim_running) == 1 and max by (job) (market_sim_references_fresh) == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "the simulated market has had no fresh BTC and ETH reference prices for 5 minutes: the platform coin's price no longer follows the market"
+          runbook: docs/runbook/market-sim.md
+
       - alert: HousePublishFailing
         expr: sum by (job) (increase(market_house_publish_failures_total[5m])) > 0
         labels: {severity: warning}

@@ -374,6 +374,29 @@ services:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9091/readyz"]
 
+  # The simulated market of the platform coin (ASTRA design §4): its bots
+  # are ordinary users trading ASTRA-USDT through the trading service and
+  # the ledger. One instance holds a database lease; sim.enabled switches
+  # the bots on. Management API on 8098 (internal only).
+  market-sim:
+    <<: *app
+    command: ["/app/market-sim"]
+    environment:
+      <<: *base-env
+      TRADING_SERVICE_URL: http://spot-trading-service:8088
+      LEDGER_SERVICE_URL: http://ledger-service:8085
+      MARKET_DATA_SERVICE_URL: http://market-data-service:8090
+      INSTRUMENT_SERVICE_URL: http://instrument-service:8084
+    depends_on:
+      postgres: {condition: service_healthy}
+      spot-trading-service: {condition: service_started}
+      ledger-service: {condition: service_started}
+      market-data-service: {condition: service_started}
+      instrument-service: {condition: service_started}
+    healthcheck:
+      <<: *health
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9098/readyz"]
+
   # One active engine (it holds a database lease); a second instance would
   # wait as a standby (ADR-0002). Reference books of 50 pairs (ADR-0015)
   # add up to ~200 WAL entries a second: keep two hours of WAL.

@@ -1,0 +1,364 @@
+package application
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/shopspring/decimal"
+
+	"github.com/lidp280504357/exchange/internal/marketsim/domain"
+	"github.com/lidp280504357/exchange/internal/marketsim/ports"
+	"github.com/lidp280504357/exchange/internal/platform/flags"
+)
+
+func d(s string) decimal.Decimal { return decimal.RequireFromString(s) }
+
+// fakeTrading is the platform as the bots see it: limit orders rest until
+// canceled, market orders are counted, balances are fixed.
+type fakeTrading struct {
+	mu       sync.Mutex
+	pair     domain.Pair
+	seq      int
+	open     map[string][]domain.Order // by user
+	markets  map[domain.Side]int
+	cancels  int
+	cancelAl map[string]int
+	balances map[string]map[string]decimal.Decimal
+}
+
+func newFakeTrading() *fakeTrading {
+	return &fakeTrading{
+		pair: domain.Pair{Symbol: "ASTRA-USDT", Tick: d("0.0001"), Lot: d("1"), MinQty: d("1"), MinNotional: d("5"), Trading: true},
+		open: map[string][]domain.Order{}, markets: map[domain.Side]int{}, cancelAl: map[string]int{},
+		balances: map[string]map[string]decimal.Decimal{},
+	}
+}
+
+func (f *fakeTrading) Pair(context.Context, string) (domain.Pair, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pair, nil
+}
+
+func (f *fakeTrading) Open(_ context.Context, user, _ string) ([]domain.Order, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]domain.Order(nil), f.open[user]...), nil
+}
+
+func (f *fakeTrading) Limit(_ context.Context, user, _ string, side domain.Side, price, qty decimal.Decimal) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !qty.IsPositive() {
+		return "", fmt.Errorf("quantity %s", qty)
+	}
+	f.seq++
+	id := fmt.Sprintf("o%d", f.seq)
+	f.open[user] = append(f.open[user], domain.Order{ID: id, Side: side, Price: price})
+	return id, nil
+}
+
+func (f *fakeTrading) Market(_ context.Context, _, _ string, side domain.Side, quote, qty decimal.Decimal) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if (side == domain.Buy && !quote.IsPositive()) || (side == domain.Sell && !qty.IsPositive()) {
+		return fmt.Errorf("market %s: quote %s qty %s", side, quote, qty)
+	}
+	f.markets[side]++
+	return nil
+}
+
+func (f *fakeTrading) Cancel(_ context.Context, user, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, o := range f.open[user] {
+		if o.ID == id {
+			f.open[user] = append(f.open[user][:i], f.open[user][i+1:]...)
+			f.cancels++
+			return nil
+		}
+	}
+	return nil
+}
+
+func (f *fakeTrading) CancelAll(_ context.Context, user, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cancelAl[user]++
+	delete(f.open, user)
+	return nil
+}
+
+func (f *fakeTrading) Balances(_ context.Context, user string) (map[string]decimal.Decimal, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if b, ok := f.balances[user]; ok {
+		return b, nil
+	}
+	return map[string]decimal.Decimal{"USDT": d("100000"), "ASTRA": d("40000000")}, nil
+}
+
+func (f *fakeTrading) orders(user string) []domain.Order {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]domain.Order(nil), f.open[user]...)
+}
+
+type fakePrices struct{ btc, eth decimal.Decimal }
+
+func (p *fakePrices) Reference(_ context.Context, symbol string) (decimal.Decimal, bool, error) {
+	if symbol == btcPair {
+		return p.btc, true, nil
+	}
+	return p.eth, true, nil
+}
+
+func (p *fakePrices) Last(context.Context, string) (decimal.Decimal, error) { return d("1.0001"), nil }
+
+type memStore struct {
+	bots    []ports.Bot
+	params  *domain.Params
+	version int64
+	state   *domain.State
+	saves   int
+	byWhom  string
+	mu      sync.Mutex
+}
+
+func (m *memStore) Bots(context.Context) ([]ports.Bot, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]ports.Bot(nil), m.bots...), nil
+}
+
+func (m *memStore) AddBot(_ context.Context, b ports.Bot) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.bots = append(m.bots, b)
+	return nil
+}
+
+func (m *memStore) Settings(context.Context) (domain.Params, int64, bool, error) {
+	if m.params == nil {
+		return domain.Params{}, 0, false, nil
+	}
+	return *m.params, m.version, true, nil
+}
+
+func (m *memStore) SaveSettings(_ context.Context, p domain.Params, actor string) (int64, error) {
+	m.params, m.byWhom = &p, actor
+	m.version++
+	return m.version, nil
+}
+
+func (m *memStore) State(context.Context) (domain.State, bool, error) {
+	if m.state == nil {
+		return domain.State{}, false, nil
+	}
+	return *m.state, true, nil
+}
+
+func (m *memStore) SaveState(_ context.Context, st domain.State) error {
+	m.state = &st
+	m.saves++
+	return nil
+}
+
+type flagSet struct{ on bool }
+
+func (f *flagSet) Enabled(key string, _ flags.Subject) bool {
+	return key == flags.KeySimEnabled && f.on
+}
+
+type rig struct {
+	sim     *Sim
+	trading *fakeTrading
+	store   *memStore
+	flags   *flagSet
+	now     time.Time
+}
+
+func newRig(t *testing.T, store *memStore) *rig {
+	t.Helper()
+	if store == nil {
+		store = &memStore{}
+	}
+	if len(store.bots) == 0 {
+		store.bots = []ports.Bot{
+			{UserID: "m1", Role: domain.RoleMaker, Label: "bot-01", Enabled: true},
+			{UserID: "m2", Role: domain.RoleMaker, Label: "bot-02", Enabled: true},
+			{UserID: "t1", Role: domain.RoleTaker, Label: "bot-03", Enabled: true},
+			{UserID: "r1", Role: domain.RoleTrend, Label: "bot-04", Enabled: true},
+		}
+	}
+	r := &rig{trading: newFakeTrading(), store: store, flags: &flagSet{on: true}, now: time.Date(2026, 10, 2, 14, 0, 0, 0, time.UTC)}
+	r.sim = New(Config{Symbol: "ASTRA-USDT", Quote: "USDT", Tick: 250 * time.Millisecond, Seed: 11}, r.trading,
+		&fakePrices{btc: d("60000"), eth: d("3000")}, store, r.flags, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	r.sim.now = func() time.Time { return r.now }
+	if err := r.sim.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func (r *rig) rounds(n int) {
+	for range n {
+		r.now = r.now.Add(250 * time.Millisecond)
+		r.sim.Round(context.Background())
+	}
+}
+
+func TestMakersQuoteLaddersAroundTheTarget(t *testing.T) {
+	r := newRig(t, nil)
+	r.rounds(40) // ten seconds: both makers have quoted, within the throttle
+	for _, m := range []string{"m1", "m2"} {
+		var bids, asks int
+		for _, o := range r.trading.orders(m) {
+			if o.Side == domain.Buy {
+				bids++
+				if o.Price.GreaterThanOrEqual(d("1")) {
+					t.Fatalf("%s bids at %s", m, o.Price)
+				}
+			} else {
+				asks++
+				if o.Price.LessThanOrEqual(d("1")) {
+					t.Fatalf("%s asks at %s", m, o.Price)
+				}
+			}
+		}
+		if bids != 8 || asks != 8 {
+			t.Fatalf("%s: %d bids, %d asks", m, bids, asks)
+		}
+	}
+	// The two makers stand on different phases of the grid.
+	if a, b := r.trading.orders("m1")[0].Price, r.trading.orders("m2")[0].Price; a.Equal(b) {
+		t.Fatalf("both makers quote %s", a)
+	}
+	// The defaults were saved on the first start, the state is saved.
+	if r.store.params == nil || r.store.byWhom != "market-sim" || r.store.saves == 0 {
+		t.Fatalf("settings %+v by %q, %d saves", r.store.params, r.store.byWhom, r.store.saves)
+	}
+}
+
+func TestTheThrottleHoldsOrdersBack(t *testing.T) {
+	p := domain.DefaultParams()
+	p.OrdersPerSecond, p.DailyVolume = 1, 0
+	r := newRig(t, &memStore{params: &p, version: 1})
+	r.rounds(40) // ten seconds at one order a second
+	n := len(r.trading.orders("m1")) + len(r.trading.orders("m2"))
+	if n < 5 || n > 11 {
+		t.Fatalf("%d orders in ten seconds at one a second", n)
+	}
+}
+
+func TestTakersTradeTheDaysTurnover(t *testing.T) {
+	p := domain.DefaultParams()
+	p.DailyVolume, p.OrderSize = 86_400*400*2, 400 // two orders a second
+	r := newRig(t, &memStore{params: &p, version: 1})
+	r.rounds(4 * 60)
+	got := r.trading.markets[domain.Buy] + r.trading.markets[domain.Sell]
+	if got < 120 || got > 360 {
+		t.Fatalf("%d market orders in a minute, want about 120 to 360 (two a second, by the hour's weight)", got)
+	}
+	if r.trading.markets[domain.Buy] == 0 || r.trading.markets[domain.Sell] == 0 {
+		t.Fatalf("one-sided: %v", r.trading.markets)
+	}
+}
+
+func TestSwitchingOffCancelsTheMakersOrders(t *testing.T) {
+	r := newRig(t, nil)
+	r.rounds(20)
+	if len(r.trading.orders("m1")) == 0 {
+		t.Fatal("no quotes")
+	}
+	r.flags.on = false
+	r.rounds(1)
+	if r.trading.cancelAl["m1"] != 1 || r.trading.cancelAl["m2"] != 1 || len(r.trading.orders("m1")) != 0 {
+		t.Fatalf("cancel all %v, left %v", r.trading.cancelAl, r.trading.orders("m1"))
+	}
+	if st := r.sim.Status(); st.Running || st.Enabled {
+		t.Fatalf("status %+v", st)
+	}
+	r.rounds(4)
+	if r.trading.cancelAl["m1"] != 1 {
+		t.Fatal("canceled again while off")
+	}
+	// A pair that stops trading does the same.
+	r.flags.on = true
+	r.rounds(20)
+	r.trading.mu.Lock()
+	r.trading.pair.Trading = false
+	r.trading.mu.Unlock()
+	r.now = r.now.Add(pairEvery)
+	r.rounds(1)
+	if r.trading.cancelAl["m1"] != 2 {
+		t.Fatalf("the pair halted: cancel all %v", r.trading.cancelAl)
+	}
+}
+
+func TestARestartGoesOnFromTheSavedState(t *testing.T) {
+	r := newRig(t, nil)
+	r.rounds(40)
+	// Run saves the state when it stops.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := r.sim.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	target := r.sim.Status().Target
+	again := newRig(t, r.store)
+	if got := again.sim.model.State.P; got != target {
+		t.Fatalf("restarted at %v, was %v", got, target)
+	}
+	// The makers adopt their resting orders instead of quoting anew.
+	again.trading = r.trading
+	again.sim.trading = r.trading
+	before := len(r.trading.orders("m1"))
+	again.now = r.now
+	again.rounds(8)
+	if after := len(r.trading.orders("m1")); after != before {
+		t.Fatalf("%d orders after the restart, were %d", after, before)
+	}
+}
+
+func TestUpdateParams(t *testing.T) {
+	r := newRig(t, nil)
+	p := domain.DefaultParams()
+	p.Spread = 0
+	if _, err := r.sim.UpdateParams(context.Background(), p, "ops"); err == nil {
+		t.Fatal("a spread of 0 passed")
+	}
+	p = domain.DefaultParams()
+	p.Levels = 3
+	v, err := r.sim.UpdateParams(context.Background(), p, "ops")
+	if err != nil || v != 2 || r.store.byWhom != "ops" {
+		t.Fatalf("version %d, %v, by %q", v, err, r.store.byWhom)
+	}
+	r.rounds(40)
+	if n := len(r.trading.orders("m1")); n != 6 {
+		t.Fatalf("%d orders with 3 levels a side", n)
+	}
+	if st := r.sim.Status(); st.Version != 2 || st.Params.Levels != 3 || len(st.Bots) != 4 {
+		t.Fatalf("status %+v", st)
+	}
+}
+
+func TestAddBot(t *testing.T) {
+	r := newRig(t, nil)
+	if err := r.sim.AddBot(context.Background(), ports.Bot{UserID: "x", Role: "BOSS", Label: "bot-09"}); err == nil {
+		t.Fatal("an unknown role passed")
+	}
+	if err := r.sim.AddBot(context.Background(), ports.Bot{UserID: "m3", Role: domain.RoleMaker, Label: "bot-05"}); err != nil {
+		t.Fatal(err)
+	}
+	r.now = r.now.Add(botsEvery)
+	r.rounds(40)
+	if len(r.trading.orders("m3")) == 0 {
+		t.Fatal("the new maker does not quote")
+	}
+}

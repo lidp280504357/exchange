@@ -308,3 +308,21 @@ tests:
             exp_annotations:
               summary: "3 custodian callbacks were refused in 15 minutes (signature, age or form): forged, or UDUN_API_KEY differs from the custodian's and deposits go uncredited"
               runbook: docs/runbook/custody.md
+
+  - interval: 1m
+    input_series:
+      - series: 'market_sim_running{job="market-sim", instance="s"}'
+        values: '1x10'
+      - series: 'market_sim_references_fresh{job="market-sim", instance="s"}'
+        values: '1 1 0x8'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: MarketSimReferencesStale
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: MarketSimReferencesStale
+        exp_alerts:
+          - exp_labels: {severity: warning, job: market-sim}
+            exp_annotations:
+              summary: "the simulated market has had no fresh BTC and ETH reference prices for 5 minutes: the platform coin's price no longer follows the market"
+              runbook: docs/runbook/market-sim.md

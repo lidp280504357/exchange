@@ -45,6 +45,15 @@ const (
 // 2026-10-02 §2).
 const KeyTwoPerson = "admin.two_person_approval"
 
+// The simulated market of the platform coin ASTRA (ASTRA design §5.2):
+// the bots trade at all, the operators' price events run, the bots trade
+// the perpetual too.
+const (
+	KeySimEnabled = "sim.enabled"
+	KeySimEvents  = "sim.events"
+	KeySimPerp    = "sim.perp"
+)
+
 // Known describes the known flags.
 var Known = map[string]string{
 	KeyRegistrationSMS:  "SMS as a registration and login channel (high-risk regions stay email-only)",
@@ -64,6 +73,9 @@ var Known = map[string]string{
 	KeyHouseLiquidity:   "HOUSE trades against orders at the reference market's book (virtual liquidity), per symbol; off leaves the platform's own book (ADR-0015)",
 	KeyInternalMatching: "Users' orders also trade with each other on pairs with HOUSE liquidity; off makes HOUSE the counterparty of every trade (ADR-0015)",
 	KeyTwoPerson:        "Admin console: manual adjustments, insurance fund contributions and withdrawals needing two reviewers take a second administrator; off lets one administrator carry them out within the console's single-person limits",
+	KeySimEnabled:       "The simulated market of the platform coin (market-sim): its bots quote and trade ASTRA-USDT around the model's price; off cancels their orders",
+	KeySimEvents:        "Operators' price events in the simulated market (jumps, targets, trends, pauses)",
+	KeySimPerp:          "The simulated market's bots also make the market on the platform coin's perpetual",
 }
 
 // List allows or denies values of one dimension. An empty Allow allows

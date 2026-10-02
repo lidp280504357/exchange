@@ -31,6 +31,7 @@
 | [derivatives.md](derivatives.md) | USDT 永续合约：设置、下单与保证金预留、成交结算、仓位、转出保护、只减仓、对账（不变量 6），`exchangectl derivatives` |
 | [market-data.md](market-data.md) | 平台行情：K 线、ticker、深度、最近成交，合约的指数价、标记价与资金费率，WebSocket 公共频道与 orders/fills 私有频道 |
 | [market-maker.md](market-maker.md) | 参考行情（币安公开数据，仅测试环境）与做市机器人：参数、撤单条件、测试服设置 |
+| [market-sim.md](market-sim.md) | 平台币 ASTRA 的模拟市场：价格模型、机器人角色、节流、设置与管理接口、`astra.sh seed/on/off/mint` |
 | [instruments.md](instruments.md) | 资产、网络、交易对、费率，`exchangectl instruments` |
 | [ledger.md](ledger.md) | 账本、划转、对账，`exchangectl ledger` |
 | [wallet.md](wallet.md) | 充值、signer 与 keystore、归集、提现审批与签名、链上对账，`exchangectl wallet` |

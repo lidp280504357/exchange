@@ -2,7 +2,7 @@
 
 实施计划 §9.2 要求每阶段交付"指标与告警清单、日志字段说明、trace 查询方法和回滚步骤"；需求 §12.2。现状：
 
-- **指标**：每个服务在运维端口（[server-deploy.md](server-deploy.md) 的 90xx）暴露 Prometheus `/metrics`。还没有采集端（Grafana Cloud 暂缓，[grafana-cloud.md](grafana-cloud.md)）；采集配置与告警规则已写好：`deploy/observability/prometheus.yml`（每个服务一个 job，告警按 `job` 区分服务）、`alerts.yml`（46 条），CI 用 promtool 校验语法并跑规则单测 `alerts_test.yml`。
+- **指标**：每个服务在运维端口（[server-deploy.md](server-deploy.md) 的 90xx）暴露 Prometheus `/metrics`。还没有采集端（Grafana Cloud 暂缓，[grafana-cloud.md](grafana-cloud.md)）；采集配置与告警规则已写好：`deploy/observability/prometheus.yml`（每个服务一个 job，告警按 `job` 区分服务）、`alerts.yml`（49 条），CI 用 promtool 校验语法并跑规则单测 `alerts_test.yml`。
 - **日志**：结构化，写 stdout，容器日志驱动 json-file（每容器 20 MB × 5 个文件）；测试服为 JSON，本机默认文本（`LOG_FORMAT` 可改）。
 - **追踪**：HTTP、gRPC、事件（信封里的 `traceparent`）全链路传递 W3C trace context，span 暂不导出；trace ID 出现在响应头 `X-Trace-Id`、错误体 `trace_id`、每条日志的 `trace_id`、ClickHouse `events.correlation_id`。
 

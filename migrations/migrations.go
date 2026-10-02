@@ -38,6 +38,8 @@ var (
 	admin embed.FS
 	//go:embed derivatives/*.sql
 	derivatives embed.FS
+	//go:embed marketsim/*.sql
+	marketsim embed.FS
 )
 
 // ClickHouse holds the analytics tables applied by analytics-consumer.
@@ -84,6 +86,9 @@ func Admin() fs.FS { return sub(admin, "admin") }
 
 // Derivatives holds derivatives-service's schema.
 func Derivatives() fs.FS { return sub(derivatives, "derivatives") }
+
+// MarketSim holds market-sim's schema (the simulated market of ASTRA).
+func MarketSim() fs.FS { return sub(marketsim, "marketsim") }
 
 func sub(fsys embed.FS, dir string) fs.FS {
 	s, err := fs.Sub(fsys, dir)
