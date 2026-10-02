@@ -271,3 +271,33 @@ export const instrumentsEn = {
     ADMIN_NEW_ITEM_NOT_PREPARE: "A new pair or contract is created in PREPARE and opened with a status change",
   },
 };
+
+// An asset's profile (ASTRA design §5.3, C4c).
+export const profileZh = {
+  admin: {
+    profile: {
+      title: "资料与图标", displayName: "显示名", displayNameHint: "2–32 个字符；留空则显示资产名称", sameAsName: "同资产名称",
+      description: "简介", descriptionZh: "中文简介", descriptionEn: "英文简介",
+      links: { website: "官网", explorer: "区块浏览器", whitepaper: "白皮书" },
+      noLogo: "无图标", upload: "上传图标", removeLogo: "移除图标", logoHint: "PNG、SVG 或 WebP，正方形，不超过 200 KB",
+      badType: "图标只能是 PNG、SVG 或 WebP", tooLarge: "图标不能超过 200 KB", notSquare: "图标要是正方形（现在 {{w}}×{{h}}）",
+      unreadable: "读不出这张图片", badLink: "链接要是 https:// 开头的网址",
+      saveTitle: "修改 {{code}} 的资料", saveHint: "三个站点 1 分钟内显示新的名称、简介与图标。确认词为资产代码的小写。", saved: "资料已更新",
+    },
+  },
+};
+
+export const profileEn = {
+  admin: {
+    profile: {
+      title: "Profile and logo", displayName: "Display name", displayNameHint: "2–32 characters; empty shows the asset's name",
+      sameAsName: "The asset's name", description: "Introduction", descriptionZh: "Introduction in Chinese", descriptionEn: "Introduction in English",
+      links: { website: "Website", explorer: "Explorer", whitepaper: "White paper" },
+      noLogo: "No logo", upload: "Upload a logo", removeLogo: "Remove the logo", logoHint: "PNG, SVG or WebP, square, at most 200 KB",
+      badType: "A logo is PNG, SVG or WebP", tooLarge: "A logo is at most 200 KB", notSquare: "A logo is square (this one is {{w}}×{{h}})",
+      unreadable: "This image cannot be read", badLink: "A link is an https:// address",
+      saveTitle: "Change {{code}}'s profile", saveHint: "The three sites show the new name, introduction and logo within a minute. Type the asset code in lower case to confirm.",
+      saved: "Profile updated",
+    },
+  },
+};

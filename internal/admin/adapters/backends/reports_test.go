@@ -29,6 +29,7 @@ func TestReports(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	today := now.Format(time.DateOnly)
+	midnight := now.Truncate(24 * time.Hour)
 	for _, q := range []string{
 		`INSERT INTO trades (trade_id, symbol, price, quantity, quote_quantity, sequence, executed_at) VALUES
 			(generateUUIDv4(), 'ETH-BTC', 0.03, 1, 0.03, 1, now64(3)), (generateUUIDv4(), 'ETH-BTC', 0.032, 2, 0.064, 2, now64(3)),
@@ -66,7 +67,8 @@ func TestReports(t *testing.T) {
 		}
 	}
 	r := backends.Reports{Conn: conn}
-	trading, err := r.Trading(ctx, 7)
+	week := ports.ReportRange{From: midnight.AddDate(0, 0, -6), To: midnight, Bucket: ports.BucketDay}
+	trading, err := r.Trading(ctx, week)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +89,7 @@ func TestReports(t *testing.T) {
 			t.Fatalf("unexpected %+v", d)
 		}
 	}
-	wallet, err := r.Wallet(ctx, 7)
+	wallet, err := r.Wallet(ctx, week)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +97,7 @@ func TestReports(t *testing.T) {
 		wallet[0].WithdrawalAmount != "0.0011" || wallet[0].WithdrawalFees != "0.0002" {
 		t.Fatalf("wallet report %+v", wallet)
 	}
-	perps, err := r.Derivatives(ctx, 7)
+	perps, err := r.Derivatives(ctx, week)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,5 +175,100 @@ func TestHousePairs(t *testing.T) {
 	if len(pairs) != 1 || pairs[0].Symbol != "SOL-USDT" || pairs[0].Trades != 2 || pairs[0].SoldBase != "2" || pairs[0].BoughtBase != "0.5" ||
 		pairs[0].GotQuote != "200" || pairs[0].PaidQuote != "49" || pairs[0].LastAt.IsZero() {
 		t.Fatalf("house pairs %+v", pairs)
+	}
+}
+
+func TestUsersAndHouseReports(t *testing.T) {
+	ctx := context.Background()
+	cfg := testenv.ClickHouse(t)
+	conn, err := chx.Open(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	db := chx.OpenDB(cfg)
+	defer db.Close()
+	if err := migrate.UpClickHouse(ctx, db, migrations.ClickHouse(), slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatal(err)
+	}
+	const (
+		house = "0192a000-0000-7000-8000-0000000000aa"
+		bot   = "0192a000-0000-7000-8000-0000000000bb"
+		u1    = "0192a000-0000-7000-8000-0000000000c1"
+		u2    = "0192a000-0000-7000-8000-0000000000c2"
+	)
+	for _, q := range []string{
+		// u1 registers and signs in twice today, the bot registers; u2
+		// registered 30 days ago.
+		`INSERT INTO events (event_id, event_type, topic, aggregate_type, aggregate_id, occurred_at, payload) VALUES
+			(generateUUIDv4(), 'auth.UserRegistered', 'auth.events', 'user', '` + u1 + `', now64(3), '{}'),
+			(generateUUIDv4(), 'auth.LoginSucceeded', 'auth.events', 'user', '` + u1 + `', now64(3), '{}'),
+			(generateUUIDv4(), 'auth.LoginSucceeded', 'auth.events', 'user', '` + u1 + `', now64(3), '{}'),
+			(generateUUIDv4(), 'auth.UserRegistered', 'auth.events', 'user', '` + bot + `', now64(3), '{}'),
+			(generateUUIDv4(), 'auth.UserRegistered', 'auth.events', 'user', '` + u2 + `', now64(3) - INTERVAL 30 DAY, '{}')`,
+		// HOUSE bought 1 BTC from u1 at 50,000 two days ago and sold u2 0.5
+		// at 51,000 today; the bot traded with itself at 52,000 last.
+		`INSERT INTO trades (trade_id, symbol, price, quantity, quote_quantity, sequence, buyer_user_id, seller_user_id, house_side,
+			executed_at) VALUES
+			(generateUUIDv4(), 'BTC-USDT', 50000, 1, 50000, 1, '` + house + `', '` + u1 + `', 'BUY', now64(3) - INTERVAL 2 DAY),
+			(generateUUIDv4(), 'BTC-USDT', 51000, 0.5, 25500, 2, '` + u2 + `', '` + house + `', 'SELL', now64(3) - INTERVAL 1 SECOND),
+			(generateUUIDv4(), 'BTC-USDT', 52000, 1, 52000, 3, '` + bot + `', '` + bot + `', '', now64(3))`,
+		`INSERT INTO derivatives_fills (trade_id, order_id, user_id, symbol, side, price, quantity, notional, fee, realized_pnl, executed_at) VALUES
+			(generateUUIDv4(), generateUUIDv4(), '` + house + `', 'BTC-USDT-PERP', 'SELL', 60000, 0.1, 6000, 0, 40, now64(3)),
+			(generateUUIDv4(), generateUUIDv4(), '` + u1 + `', 'BTC-USDT-PERP', 'BUY', 60000, 0.1, 6000, 3, 0, now64(3))`,
+		`INSERT INTO derivatives_funding (position_id, user_id, symbol, funding_time, amount, settled_at) VALUES
+			(generateUUIDv4(), '` + house + `', 'BTC-USDT-PERP', toStartOfHour(now()), -2.5, now64(3))`,
+		`INSERT INTO wallet_deposits (deposit_id, user_id, asset, amount, status, unclaimed, updated_at, version) VALUES
+			(generateUUIDv4(), '` + u2 + `', 'USDT', 10, 'CREDITED', false, now64(3), 1),
+			(generateUUIDv4(), '` + u2 + `', 'USDT', 5, 'CREDITED', false, now64(3), 1)`,
+	} {
+		if err := conn.Exec(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := backends.Reports{Conn: conn}
+	midnight := time.Now().UTC().Truncate(24 * time.Hour)
+	today := ports.ReportRange{From: midnight, To: midnight, Bucket: ports.BucketDay}
+	users, before, err := r.Users(ctx, today, []string{house, bot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// u1 registered, signed in and traded a contract; u2 traded spot and got
+	// two deposits; HOUSE and the bot are left out.
+	if before != 1 || len(users) != 1 || users[0] != (ports.UsersBucket{
+		Day: midnight.Format(time.DateOnly), Registered: 1, SignedIn: 1, Traders: 2, Depositors: 1,
+	}) {
+		t.Fatalf("users %+v before %d", users, before)
+	}
+	spot, err := r.HouseSpot(ctx, today)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spot) != 2 || !spot[0].BeforePeriod || spot[0].NetBase.String() != "1" || spot[0].NetQuote.String() != "-50000" ||
+		spot[0].Close.String() != "50000" || spot[1].BeforePeriod || spot[1].NetBase.String() != "-0.5" || spot[1].NetQuote.String() != "25500" ||
+		spot[1].Close.String() != "52000" || spot[1].QuoteAsset != "USDT" || !spot[1].Day.Equal(midnight) {
+		t.Fatalf("house spot %+v", spot)
+	}
+	contracts, err := r.HouseContracts(ctx, today, house)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contracts) != 1 || contracts[0].Realized.String() != "40" || contracts[0].Funding.String() != "-2.5" {
+		t.Fatalf("house contracts %+v", contracts)
+	}
+	month := ports.ReportRange{From: midnight.AddDate(0, 0, -2), To: midnight, Bucket: ports.BucketMonth}
+	trading, err := r.Trading(ctx, month)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trades := uint64(0)
+	for _, d := range trading {
+		if d.Day[8:] != "01" {
+			t.Fatalf("a month's row on %s", d.Day)
+		}
+		trades += d.Trades
+	}
+	if trades != 3 {
+		t.Fatalf("by month %+v", trading)
 	}
 }

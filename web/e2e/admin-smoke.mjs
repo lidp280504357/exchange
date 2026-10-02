@@ -180,7 +180,16 @@ try {
   await go("/instruments?tab=changes");
   await waitText("生效前任何管理员都可以取消");
   await noError("the pending changes");
-  ok("assets and pairs: 50+ pairs, a status change previewed by the server waits for its confirmation (canceled); the pending changes; a pair's editor; the listing wizard's preview");
+  // An asset's drawer with its profile and logo (C4c).
+  await go("/instruments?tab=assets");
+  await typeInto('main input[placeholder="搜索"]', "ASTRA");
+  await page.waitForFunction(() => document.querySelectorAll("main tbody tr").length === 1);
+  await t.clickLive("main tbody tr");
+  await page.waitForSelector("[data-testid=asset-profile]");
+  await waitText("资料与图标");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
+  ok("assets and pairs: 50+ pairs, a status change previewed by the server waits for its confirmation (canceled); the pending changes; a pair's editor; the listing wizard's preview; an asset's profile");
 
   // 8. Futures (every user's positions, the liquidation log), HOUSE, flags.
   await go("/derivatives");
@@ -225,7 +234,12 @@ try {
   await go("/reports");
   await page.waitForSelector("main svg[role=img]");
   await t.shot("4-reports");
-  ok("the ledger's reconciliation, the audit trail with an entry's detail and its CSV export, and the reports");
+  for (const tab of ["用户增长", "HOUSE 盈亏"]) {
+    await clickButton(tab, "main");
+    await page.waitForFunction((s) => document.querySelector("main h2")?.textContent === s && document.querySelector("main svg[role=img]"), { timeout: 20000 }, tab);
+  }
+  await noError("the users' and HOUSE's reports");
+  ok("the ledger's reconciliation, the audit trail with an entry's detail and its CSV export, and the reports (the users, HOUSE's result)");
 
   // 9b. System: the administrators (this one marked, the roles' permissions),
   // the creation form (canceled), every service's health with details.

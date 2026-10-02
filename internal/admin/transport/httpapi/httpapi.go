@@ -138,6 +138,8 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/broadcasts", h.broadcasts)
 			r.Post("/broadcasts", h.sendBroadcast)
 			r.Get("/broadcasts/{id}", h.broadcast)
+			r.Get("/assets/{code}/profile", h.assetProfile)
+			r.Put("/assets/{code}/profile", h.updateAssetProfile)
 			r.Get("/instruments/changes", h.instrumentChanges)
 			r.Post("/instruments/changes/{id}/decide", h.decideInstrumentChange)
 			r.Post("/instruments/changes/{id}/cancel", h.cancelInstrumentChange)
@@ -153,6 +155,8 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/reports/candles", h.candleReport)
 			r.Get("/reports/derivatives", h.derivativesReport)
 			r.Get("/reports/open-interest", h.openInterest)
+			r.Get("/reports/users", h.usersReport)
+			r.Get("/reports/house-pnl", h.housePnLReport)
 			r.Get("/derivatives/contracts", h.derivativesContracts)
 			r.Post("/derivatives/contracts/{symbol}/status/preview", h.previewStatus(domain.ChangeContractStatus))
 			r.Post("/derivatives/contracts/{symbol}/status", h.setStatus(domain.ChangeContractStatus))
@@ -1011,9 +1015,15 @@ func csvText(s string) string {
 	return s
 }
 
+// reportQuery reads a report's period: days, or from and to, and the bucket.
+func reportQuery(r *http.Request) application.ReportQuery {
+	q := r.URL.Query()
+	days, _ := strconv.Atoi(q.Get("days"))
+	return application.ReportQuery{Days: days, From: q.Get("from"), To: q.Get("to"), Bucket: q.Get("bucket")}
+}
+
 func (h *Handler) tradingReport(w http.ResponseWriter, r *http.Request) {
-	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
-	list, err := h.Svc.TradingReport(r.Context(), principal(r), days)
+	list, err := h.Svc.TradingReport(r.Context(), principal(r), reportQuery(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -1022,8 +1032,7 @@ func (h *Handler) tradingReport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) walletReport(w http.ResponseWriter, r *http.Request) {
-	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
-	list, err := h.Svc.WalletReport(r.Context(), principal(r), days)
+	list, err := h.Svc.WalletReport(r.Context(), principal(r), reportQuery(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -1047,13 +1056,30 @@ func (h *Handler) candleReport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) derivativesReport(w http.ResponseWriter, r *http.Request) {
-	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
-	list, err := h.Svc.DerivativesReport(r.Context(), principal(r), days)
+	list, err := h.Svc.DerivativesReport(r.Context(), principal(r), reportQuery(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": list})
+}
+
+func (h *Handler) usersReport(w http.ResponseWriter, r *http.Request) {
+	out, err := h.Svc.UsersReport(r.Context(), principal(r), reportQuery(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) housePnLReport(w http.ResponseWriter, r *http.Request) {
+	out, err := h.Svc.HousePnLReport(r.Context(), principal(r), reportQuery(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) openInterest(w http.ResponseWriter, r *http.Request) {

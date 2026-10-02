@@ -336,6 +336,7 @@ services:
       DERIVATIVES_SERVICE_URL: http://derivatives-service:8095
       MARKET_DATA_SERVICE_URL: http://market-data-service:8090
       NOTIFICATION_SERVICE_URL: http://notification-service:8083
+      MARKET_SIM_URL: http://market-sim:8098
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}

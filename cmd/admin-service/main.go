@@ -70,6 +70,9 @@ type settings struct {
 	// NotificationURL serves the announcements, help articles and in-app
 	// messages (NOTIFICATION_SERVICE_URL).
 	NotificationURL string `koanf:"notification_service_url"`
+	// MarketSimURL is the simulated market of the platform coin
+	// (MARKET_SIM_URL); its bots stay out of the users' figures.
+	MarketSimURL string `koanf:"market_sim_url"`
 	// SecretKey seals the administrators' authenticator secrets
 	// (ADMIN_SECRET_KEY, base64 of 32 bytes; in apps.env only).
 	SecretKey string `koanf:"admin_secret_key"`
@@ -128,7 +131,7 @@ func setup(ctx context.Context, a *app.App) error {
 		HTTPAddr: ":8093", Postgres: pg.DefaultConfig(), AuthAddr: "localhost:9181", UserAddr: "localhost:9182",
 		LedgerAddr: "localhost:9185", InstrumentAddr: "localhost:9184", RiskAddr: "localhost:9186", WalletURL: "http://localhost:8092",
 		TradingURL: "http://localhost:8088", DerivativesURL: "http://localhost:8095", MarketDataURL: "http://localhost:8090",
-		NotificationURL:         "http://localhost:8083",
+		NotificationURL: "http://localhost:8083", MarketSimURL: "http://localhost:8098",
 		PasswordHashConcurrency: 2, HealthTargets: defaultHealthTargets,
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
@@ -213,6 +216,7 @@ func setup(ctx context.Context, a *app.App) error {
 		Probe:      backends.Health{Client: &http.Client{Timeout: 2 * time.Second}, Targets: targets},
 		Reconciler: backends.Ledger{C: ledgerClient},
 		Content:    backends.Notification{REST: rest, Base: cfg.NotificationURL},
+		SimBots:    backends.MarketSim{REST: rest, Base: cfg.MarketSimURL},
 		Log:        a.Logger(),
 		Now:        time.Now,
 	}

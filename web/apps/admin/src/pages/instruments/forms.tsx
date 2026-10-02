@@ -7,6 +7,7 @@ import {
   isAmount, riskTierProblems, withoutVersion, type AssetConfig, type ContractConfig, type FeeSchedule, type InstrumentConfig,
   type NetworkConfig, type PairConfig, type RiskTier,
 } from "./config";
+import { AssetProfileSection } from "./profile";
 import { useReview } from "./Review";
 
 // The editors of the reference data (design 2026-10-02 §4.4, C3): a pair,
@@ -248,6 +249,7 @@ export function AssetDrawer({ cfg, asset, onClose }: { cfg: InstrumentConfig; as
           </section>
         )}
         {network && asset && <NetworkForm asset={asset} network={network === "new" ? null : network} onDone={() => setNetwork(null)} />}
+        {!creating && <AssetProfileSection code={code} />}
       </div>
       {dialog}
     </Drawer>

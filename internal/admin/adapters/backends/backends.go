@@ -261,6 +261,51 @@ func (i Instruments) Apply(ctx context.Context, config json.RawMessage, dryRun b
 	return out, nil
 }
 
+// AssetProfile returns an asset's profile.
+func (i Instruments) AssetProfile(ctx context.Context, code string) (json.RawMessage, error) {
+	resp, err := i.C.GetAsset(ctx, &instrumentv1.GetAssetRequest{AssetCode: strings.ToUpper(code)})
+	if err != nil {
+		return nil, err
+	}
+	return profileJSON(resp.GetAsset().GetProfile())
+}
+
+// UpdateAssetProfile replaces an asset's profile.
+func (i Instruments) UpdateAssetProfile(ctx context.Context, w ports.ProfileWrite) (json.RawMessage, error) {
+	resp, err := i.C.UpdateAssetProfile(ctx, &instrumentv1.UpdateAssetProfileRequest{
+		AssetCode: strings.ToUpper(w.Code), DisplayName: w.DisplayName, Description: w.Description, Links: w.Links, Logo: w.Logo,
+		LogoMime: w.LogoMIME, ClearLogo: w.ClearLogo, Actor: w.Actor, Reason: w.Reason,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return profileJSON(resp.GetProfile())
+}
+
+// profileJSON renders a profile as the console reads it (AssetProfile in
+// api/admin/admin.yaml): its maps never null, its version a number.
+func profileJSON(p *instrumentv1.AssetProfile) (json.RawMessage, error) {
+	v := struct {
+		DisplayName string            `json:"display_name"`
+		Description map[string]string `json:"description"`
+		Links       map[string]string `json:"links"`
+		LogoMIME    string            `json:"logo_mime"`
+		LogoSize    int32             `json:"logo_size"`
+		LogoURL     string            `json:"logo_url"`
+		Version     int64             `json:"version"`
+	}{
+		DisplayName: p.GetDisplayName(), Description: p.GetDescription(), Links: p.GetLinks(), LogoMIME: p.GetLogoMime(),
+		LogoSize: p.GetLogoSize(), LogoURL: p.GetLogoUrl(), Version: p.GetVersion(),
+	}
+	if v.Description == nil {
+		v.Description = map[string]string{}
+	}
+	if v.Links == nil {
+		v.Links = map[string]string{}
+	}
+	return json.Marshal(v)
+}
+
 // Listed reports whether the reference market lists a symbol on spot and
 // on futures.
 func (m Market) Listed(ctx context.Context, symbol string) (bool, bool, error) {
@@ -663,28 +708,31 @@ func (a Audit) Search(ctx context.Context, q ports.AuditQuery) ([]ports.AuditEnt
 // (migrations/clickhouse/00004_read_models.sql).
 type Reports struct{ Conn driver.Conn }
 
+// The report queries mark a column's bucket {day:column} and the period's
+// bounds on a column {range:column}; ranged fills them in (reports.go).
+
 const tradingReport = `SELECT day, symbol, trades, volume, quote_volume, orders, rejected FROM
 	(
-		SELECT toDate(executed_at) AS day, symbol, count() AS trades, sum(quantity) AS volume, sum(quote_quantity) AS quote_volume
-		FROM trades FINAL WHERE executed_at >= toDateTime64(today() - ?, 3, 'UTC') GROUP BY day, symbol
+		SELECT {day:executed_at} AS day, symbol, count() AS trades, sum(quantity) AS volume, sum(quote_quantity) AS quote_volume
+		FROM trades FINAL WHERE {range:executed_at} GROUP BY day, symbol
 	) AS t
 	FULL OUTER JOIN
 	(
-		SELECT toDate(occurred_at) AS day, symbol, countIf(status = 'NEW') AS orders, countIf(status = 'REJECTED') AS rejected
-		FROM order_updates FINAL WHERE occurred_at >= toDateTime64(today() - ?, 3, 'UTC') GROUP BY day, symbol
+		SELECT {day:occurred_at} AS day, symbol, countIf(status = 'NEW') AS orders, countIf(status = 'REJECTED') AS rejected
+		FROM order_updates FINAL WHERE {range:occurred_at} GROUP BY day, symbol
 	) AS o USING (day, symbol)
 	ORDER BY day DESC, symbol`
 
 const walletReport = `SELECT day, asset, deposits, deposit_amount, withdrawals, withdrawal_amount, withdrawal_fees FROM
 	(
-		SELECT toDate(updated_at) AS day, asset, count() AS deposits, sum(amount) AS deposit_amount
-		FROM wallet_deposits FINAL WHERE status = 'CREDITED' AND NOT unclaimed AND updated_at >= toDateTime64(today() - ?, 3, 'UTC')
+		SELECT {day:updated_at} AS day, asset, count() AS deposits, sum(amount) AS deposit_amount
+		FROM wallet_deposits FINAL WHERE status = 'CREDITED' AND NOT unclaimed AND {range:updated_at}
 		GROUP BY day, asset
 	) AS d
 	FULL OUTER JOIN
 	(
-		SELECT toDate(updated_at) AS day, asset, count() AS withdrawals, sum(amount) AS withdrawal_amount, sum(fee) AS withdrawal_fees
-		FROM wallet_withdrawals FINAL WHERE status = 'CONFIRMED' AND updated_at >= toDateTime64(today() - ?, 3, 'UTC')
+		SELECT {day:updated_at} AS day, asset, count() AS withdrawals, sum(amount) AS withdrawal_amount, sum(fee) AS withdrawal_fees
+		FROM wallet_withdrawals FINAL WHERE status = 'CONFIRMED' AND {range:updated_at}
 		GROUP BY day, asset
 	) AS w USING (day, asset)
 	ORDER BY day DESC, asset`
@@ -696,21 +744,21 @@ const walletReport = `SELECT day, asset, deposits, deposit_amount, withdrawals, 
 const derivativesReport = `SELECT day, symbol, fills, volume, notional, fees, realized_pnl, funding_paid, funding_received,
 		liquidations, adl, insurance_paid FROM
 	(
-		SELECT toDate(executed_at) AS day, symbol, count() AS fills, sumIf(quantity, side = 'BUY') AS volume,
+		SELECT {day:executed_at} AS day, symbol, count() AS fills, sumIf(quantity, side = 'BUY') AS volume,
 			sumIf(notional, side = 'BUY') AS notional, sum(fee) AS fees, sum(realized_pnl) AS realized_pnl
-		FROM derivatives_fills FINAL WHERE executed_at >= toDateTime64(today() - ?, 3, 'UTC') GROUP BY day, symbol
+		FROM derivatives_fills FINAL WHERE {range:executed_at} GROUP BY day, symbol
 	) AS f
 	FULL OUTER JOIN
 	(
-		SELECT toDate(funding_time) AS day, symbol, -sumIf(amount, amount < 0) AS funding_paid,
+		SELECT {day:funding_time} AS day, symbol, -sumIf(amount, amount < 0) AS funding_paid,
 			sumIf(amount, amount > 0) AS funding_received
-		FROM derivatives_funding FINAL WHERE funding_time >= toDateTime(today() - ?, 'UTC') GROUP BY day, symbol
+		FROM derivatives_funding FINAL WHERE {range:funding_time} GROUP BY day, symbol
 	) AS u USING (day, symbol)
 	FULL OUTER JOIN
 	(
-		SELECT toDate(occurred_at) AS day, symbol, countIf(kind = 'STARTED') AS liquidations, countIf(kind = 'ADL') AS adl,
+		SELECT {day:occurred_at} AS day, symbol, countIf(kind = 'STARTED') AS liquidations, countIf(kind = 'ADL') AS adl,
 			sumIf(insurance_paid, kind = 'FILLED') AS insurance_paid
-		FROM derivatives_liquidations FINAL WHERE symbol != '' AND occurred_at >= toDateTime64(today() - ?, 3, 'UTC')
+		FROM derivatives_liquidations FINAL WHERE symbol != '' AND {range:occurred_at}
 		GROUP BY day, symbol
 	) AS l USING (day, symbol)
 	ORDER BY day DESC, symbol`
@@ -719,10 +767,10 @@ func unavailable(err error) error {
 	return apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "the read models are unavailable")
 }
 
-// Trading returns trades and orders per symbol and day for the last days
-// (today included).
-func (r Reports) Trading(ctx context.Context, days int) ([]ports.TradingDay, error) {
-	rows, err := r.Conn.Query(ctx, tradingReport, days-1, days-1)
+// Trading returns trades and orders per symbol and bucket of the period.
+func (r Reports) Trading(ctx context.Context, rng ports.ReportRange) ([]ports.TradingDay, error) {
+	query, args := ranged(tradingReport, rng)
+	rows, err := r.Conn.Query(ctx, query, args...)
 	if err != nil {
 		return nil, unavailable(err)
 	}
@@ -745,9 +793,10 @@ func (r Reports) Trading(ctx context.Context, days int) ([]ports.TradingDay, err
 }
 
 // Wallet returns credited deposits and confirmed withdrawals per asset and
-// day for the last days.
-func (r Reports) Wallet(ctx context.Context, days int) ([]ports.WalletDay, error) {
-	rows, err := r.Conn.Query(ctx, walletReport, days-1, days-1)
+// bucket of the period.
+func (r Reports) Wallet(ctx context.Context, rng ports.ReportRange) ([]ports.WalletDay, error) {
+	query, args := ranged(walletReport, rng)
+	rows, err := r.Conn.Query(ctx, query, args...)
 	if err != nil {
 		return nil, unavailable(err)
 	}
@@ -795,9 +844,10 @@ func (r Reports) Candles(ctx context.Context, symbol string, seconds uint32, lim
 }
 
 // Derivatives returns each contract's trading, funding and liquidations
-// per day for the last days.
-func (r Reports) Derivatives(ctx context.Context, days int) ([]ports.DerivativesDay, error) {
-	rows, err := r.Conn.Query(ctx, derivativesReport, days-1, days-1, days-1)
+// per bucket of the period.
+func (r Reports) Derivatives(ctx context.Context, rng ports.ReportRange) ([]ports.DerivativesDay, error) {
+	query, args := ranged(derivativesReport, rng)
+	rows, err := r.Conn.Query(ctx, query, args...)
 	if err != nil {
 		return nil, unavailable(err)
 	}

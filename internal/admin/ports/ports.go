@@ -459,6 +459,25 @@ type Instruments interface {
 	// updates, statuses left alone, nothing deleted; dryRun changes
 	// nothing.
 	Apply(ctx context.Context, config json.RawMessage, dryRun bool, actor, reason string) (ConfigResult, error)
+	// AssetProfile returns an asset's profile (the name, introductions,
+	// links and logo the sites show, ASTRA design §5.3) as JSON.
+	AssetProfile(ctx context.Context, code string) (json.RawMessage, error)
+	// UpdateAssetProfile replaces an asset's profile and returns it.
+	UpdateAssetProfile(ctx context.Context, w ProfileWrite) (json.RawMessage, error)
+}
+
+// ProfileWrite is an asset's profile as the console writes it: Logo (with
+// LogoMIME) replaces the logo, ClearLogo removes it, neither keeps it.
+type ProfileWrite struct {
+	Code        string
+	DisplayName string
+	Description map[string]string
+	Links       map[string]string
+	Logo        []byte
+	LogoMIME    string
+	ClearLogo   bool
+	Actor       string
+	Reason      string
 }
 
 // ConfigResult is what applying a config document does.
@@ -801,13 +820,76 @@ type LiquidationStep struct {
 	OccurredAt        time.Time `json:"occurred_at"`
 }
 
+// The buckets a report sums its figures in (design 2026-10-02 §4.6).
+const (
+	BucketDay   = "day"
+	BucketWeek  = "week"
+	BucketMonth = "month"
+)
+
+// ReportRange is a report's period: whole UTC days from From to To (both
+// midnights, To included), summed per day, per week (from Monday) or per
+// month; a row's day is its bucket's first.
+type ReportRange struct {
+	From   time.Time
+	To     time.Time
+	Bucket string
+}
+
+// UsersBucket is the users' activity in one bucket: the accounts
+// registered, those who signed in, traded (spot or contracts) and got a
+// deposit credited, each counted once; Total is every account registered
+// by its end. HOUSE and the simulated market's bots are left out.
+type UsersBucket struct {
+	Day        string `json:"day"`
+	Registered uint64 `json:"registered"`
+	SignedIn   uint64 `json:"signed_in"`
+	Traders    uint64 `json:"traders"`
+	Depositors uint64 `json:"depositors"`
+	Total      uint64 `json:"total"`
+}
+
+// HouseSpotDay is HOUSE's spot trading on one pair and day (ADR-0015):
+// the base it bought less sold, the quote it got less paid, and the
+// pair's last price that day (any trade's, HOUSE's or not; empty without
+// one).
+type HouseSpotDay struct {
+	Day          time.Time
+	Symbol       string
+	QuoteAsset   string
+	NetBase      decimal.Decimal
+	NetQuote     decimal.Decimal
+	Close        decimal.Decimal
+	HasClose     bool
+	BeforePeriod bool
+}
+
+// HouseContractDay is HOUSE's result on the contracts on one day: the
+// realized results of its fills less their fees, and the funding it got
+// (negative when it paid).
+type HouseContractDay struct {
+	Day      time.Time
+	Realized decimal.Decimal
+	Funding  decimal.Decimal
+}
+
 // Reports reads the ClickHouse read models (trades, orders, wallet,
 // candles, contracts).
 type Reports interface {
-	Trading(ctx context.Context, days int) ([]TradingDay, error)
-	Wallet(ctx context.Context, days int) ([]WalletDay, error)
+	Trading(ctx context.Context, r ReportRange) ([]TradingDay, error)
+	Wallet(ctx context.Context, r ReportRange) ([]WalletDay, error)
 	Candles(ctx context.Context, symbol string, seconds uint32, limit int) ([]Candle, error)
-	Derivatives(ctx context.Context, days int) ([]DerivativesDay, error)
+	Derivatives(ctx context.Context, r ReportRange) ([]DerivativesDay, error)
+	// Users returns the users' activity per bucket, the accounts in
+	// exclude left out, and how many registered before the period.
+	Users(ctx context.Context, r ReportRange, exclude []string) ([]UsersBucket, uint64, error)
+	// HouseSpot returns HOUSE's spot trading per pair and day in the
+	// period, and per pair before it (BeforePeriod, its Day zero: the
+	// sums and the last price up to the period).
+	HouseSpot(ctx context.Context, r ReportRange) ([]HouseSpotDay, error)
+	// HouseContracts returns HOUSE's (houseUser's) contract results per
+	// day in the period.
+	HouseContracts(ctx context.Context, r ReportRange, houseUser string) ([]HouseContractDay, error)
 	OpenInterest(ctx context.Context) ([]OpenInterest, error)
 	// Liquidations returns a page of the liquidation steps, newest first,
 	// and the cursor of the next ("" on the last).
@@ -981,6 +1063,12 @@ type HousePair struct {
 	PaidQuote  string    `json:"paid_quote"`
 	GotQuote   string    `json:"got_quote"`
 	LastAt     time.Time `json:"last_at"`
+}
+
+// SimBots names the simulated market's bots (market-sim), which the
+// users' figures leave out.
+type SimBots interface {
+	BotUsers(ctx context.Context) ([]string, error)
 }
 
 // HouseTrades sums HOUSE's spot trades per pair (ClickHouse).

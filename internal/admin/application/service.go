@@ -73,6 +73,9 @@ type Service struct {
 	// Content is notification-service's announcements, help articles and
 	// in-app messages.
 	Content ports.Content
+	// SimBots names the simulated market's bots, left out of the users'
+	// figures; nil counts them.
+	SimBots ports.SimBots
 	Log     *slog.Logger
 	Now     func() time.Time
 	// CloseWait is the pause between attempts to close a position while
@@ -622,30 +625,33 @@ func reportDays(days int) int {
 	return min(days, 90)
 }
 
-// TradingReport returns trades and orders per symbol and day for the last
-// days (default 7, at most 90), from the ClickHouse read models.
-func (s *Service) TradingReport(ctx context.Context, p Principal, days int) ([]ports.TradingDay, error) {
-	if err := p.require(domain.PermReportsRead); err != nil {
+// TradingReport returns trades and orders per symbol and bucket of the
+// period, from the ClickHouse read models.
+func (s *Service) TradingReport(ctx context.Context, p Principal, q ReportQuery) ([]ports.TradingDay, error) {
+	rng, err := s.reportRange(p, q)
+	if err != nil {
 		return nil, err
 	}
-	return s.Reports.Trading(ctx, reportDays(days))
+	return s.Reports.Trading(ctx, rng)
 }
 
-// WalletReport returns deposits and withdrawals per asset and day.
-func (s *Service) WalletReport(ctx context.Context, p Principal, days int) ([]ports.WalletDay, error) {
-	if err := p.require(domain.PermReportsRead); err != nil {
+// WalletReport returns deposits and withdrawals per asset and bucket.
+func (s *Service) WalletReport(ctx context.Context, p Principal, q ReportQuery) ([]ports.WalletDay, error) {
+	rng, err := s.reportRange(p, q)
+	if err != nil {
 		return nil, err
 	}
-	return s.Reports.Wallet(ctx, reportDays(days))
+	return s.Reports.Wallet(ctx, rng)
 }
 
 // DerivativesReport returns each contract's fills, fees, results,
-// funding and liquidations per day for the last days.
-func (s *Service) DerivativesReport(ctx context.Context, p Principal, days int) ([]ports.DerivativesDay, error) {
-	if err := p.require(domain.PermReportsRead); err != nil {
+// funding and liquidations per bucket of the period.
+func (s *Service) DerivativesReport(ctx context.Context, p Principal, q ReportQuery) ([]ports.DerivativesDay, error) {
+	rng, err := s.reportRange(p, q)
+	if err != nil {
 		return nil, err
 	}
-	return s.Reports.Derivatives(ctx, reportDays(days))
+	return s.Reports.Derivatives(ctx, rng)
 }
 
 // OpenInterest returns each contract's open positions from the read

@@ -29,7 +29,9 @@
 # authenticator, sessions, disable and enable), the system health with
 # details, an announcement on both sites within a minute (scheduled,
 # published, edited while shown, taken off) and an in-app message
-# delivered to the user and read, the audit trail with its CSV export, and
+# delivered to the user and read, the reports over a period by week or
+# month with the users' activity and HOUSE's result, an asset's profile
+# edited and read by the sites, the audit trail with its CSV export, and
 # sign-out.
 #
 #   scripts/e2e/admin.sh
@@ -488,6 +490,53 @@ check '.items | type == "array" and all(.[]; (.notional | test("^[0-9.]+$")) and
 as AUDITOR GET /admin/v1/reports/open-interest ""
 expect 200 - "open interest"
 check '.items | type == "array" and all(.[]; .long == .short)' "long equals short per contract"
+TODAY=$(date -u +%Y-%m-%d)
+as AUDITOR GET "/admin/v1/reports/trading?from=$(jq -nr 'now - 40 * 86400 | strftime("%Y-%m-%d")')&to=$TODAY&bucket=month" ""
+expect 200 - "trading report between two dates, by month"
+check 'all(.items[]; .day | endswith("-01"))' "each month on its first day"
+as AUDITOR GET "/admin/v1/reports/wallet?days=7&bucket=year" ""
+expect 400 COMMON_INVALID_ARGUMENT "a bucket the reports do not offer"
+as AUDITOR GET "/admin/v1/reports/trading?from=$TODAY&to=2026-01-01" ""
+expect 400 COMMON_INVALID_ARGUMENT "a period that ends before it starts"
+# The run registered and signed its user in today; the bots and HOUSE are
+# left out.
+as AUDITOR GET "/admin/v1/reports/users?days=7" ""
+expect 200 - "the users' activity"
+check "(.items | length) == 7 and .partial == [] and .items[-1].day == \"$TODAY\" and .items[-1].registered >= 1 and .items[-1].signed_in >= 1" \
+  "a day each, today with this run's user, the bots known"
+check '[.items[].total] as $t | all(range(1; $t | length); $t[.] >= $t[. - 1])' "the running total never falls"
+as AUDITOR GET "/admin/v1/reports/house-pnl?days=14&bucket=week" ""
+expect 200 - "HOUSE's result by week"
+check '(.items | length) >= 2 and all(.items[]; (.day | strptime("%Y-%m-%d") | mktime | strftime("%u")) == "1" and (.total | test("^-?[0-9]+[.][0-9]{2}$")))' \
+  "each week from its Monday, in USDT"
+check '(.unpriced | type) == "array" and ((.items[-1].cumulative | tonumber) - ([.items[].total | tonumber] | add) | fabs) < 0.05' \
+  "the running sum adds up the buckets"
+
+echo "== an asset's profile (LINK)"
+as AUDITOR GET /admin/v1/assets/LINK/profile ""
+expect 200 - "every administrator reads an asset's profile"
+PROFILE=$BODY
+check '(.description | type) == "object" and (.links | type) == "object" and (.version | type) == "number"' "its text, links and version"
+profile_body() { # profile_body ENGLISH REASON: LINK's profile with another English introduction (none when empty)
+  jq -c --arg en "$1" --arg r "$2" \
+    '{display_name, links, reason: $r, description: (if $en == "" then .description | del(.en) else .description + {en: $en} end)}' <<<"$PROFILE"
+}
+EN_BEFORE=$(jq -r '.description.en // ""' <<<"$PROFILE")
+# shellcheck disable=SC2016 # expanded when the script ends
+at_exit 'as ADMIN PUT /admin/v1/assets/LINK/profile "$(profile_body "$EN_BEFORE" "e2e cleanup")" >/dev/null'
+as AUDITOR PUT /admin/v1/assets/LINK/profile "$(profile_body x "e2e reads only")"
+expect 403 ADMIN_FORBIDDEN "AUDITOR edits no profile"
+as OPERATOR PUT /admin/v1/assets/LINK/profile "$(profile_body "Chainlink connects contracts to the world's data (e2e $RUN)." "e2e edits the introduction")"
+expect 200 - "OPERATOR edits LINK's English introduction"
+check "(.version > $(jq .version <<<"$PROFILE")) and .logo_mime == $(jq .logo_mime <<<"$PROFILE") and .logo_size == $(jq .logo_size <<<"$PROFILE")" \
+  "a new version, the logo kept"
+profiled() {
+  call GET /v1/market/assets ""
+  [[ $STATUS == 200 ]] && jq -e --arg run "$RUN" '.assets[] | select(.asset_code == "LINK") | (.description.en // "") | contains($run)' <<<"$BODY" >/dev/null
+}
+eventually 50 "the sites read it within a minute" profiled
+as OPERATOR PUT /admin/v1/assets/LINK/profile "$(profile_body "$EN_BEFORE" "e2e puts the introduction back")"
+expect 200 - "and puts it back"
 
 echo "== paged lists and the overview"
 as AUDITOR GET "/admin/v1/users?limit=2" ""
@@ -1217,6 +1266,8 @@ eventually 60 "the announcement's changes are audited, by the OPERATOR" audited 
   "[.items[] | select(.actor == \"$EMAIL_OPERATOR\") | .payload.action] | (index(\"admin.content.published\") != null and index(\"admin.content.updated\") != null and index(\"admin.content.archived\") != null)"
 eventually 60 "the in-app message is audited" audited AUDITOR "target=broadcast:$BROADCAST_ID" \
   "[.items[] | select(.actor == \"$EMAIL_OPERATOR\") | .payload.action] | index(\"admin.notices.sent\") != null"
+eventually 60 "the asset's profile changes are audited" audited AUDITOR "target=asset:LINK" \
+  "[.items[] | select(.actor == \"$EMAIL_OPERATOR\") | .payload.action] | map(select(. == \"admin.instruments.profile_updated\")) | length >= 2"
 eventually 60 "the administrator's changes are audited, its credentials are not" audited AUDITOR "target=admin:$STAFF_ID" \
   "([.items[].payload.action] | (index(\"admin.created\") != null and index(\"admin.role_changed\") != null and index(\"admin.password_reset\") != null and index(\"admin.totp_reset\") != null and index(\"admin.sessions_revoked\") != null and index(\"admin.disabled\") != null and index(\"admin.enabled\") != null)) and (tostring | (contains(\"$PW_STAFF\") or contains(\"$SECRET_STAFF\")) | not)"
 exported() {

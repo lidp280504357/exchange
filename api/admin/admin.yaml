@@ -2512,6 +2512,61 @@ paths:
                 $ref: '#/components/schemas/Broadcast'
         default:
           $ref: '#/components/responses/Error'
+  /admin/v1/assets/{code}/profile:
+    parameters:
+      - name: code
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^[A-Za-z0-9]{2,10}$'
+    get:
+      operationId: getAssetProfile
+      summary: An asset's profile, as the sites show it
+      description: |
+        The name, introductions, links and logo the sites show for an
+        asset beyond its code (ASTRA design §5.3; instrument-service keeps
+        it). The logo is at logo_url, a path the console's domain also
+        serves. Needs instruments.read.
+      tags: [instruments]
+      responses:
+        '200':
+          description: The profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetProfile'
+        default:
+          $ref: '#/components/responses/Error'
+    put:
+      operationId: updateAssetProfile
+      summary: Replace an asset's profile
+      description: |
+        The text replaces the old (an empty display name shows the asset's
+        name); logo (base64, with logo_mime: PNG, SVG or WebP, square, at
+        most 200 KB; an SVG is rebuilt from an allow list of elements)
+        replaces the logo, clear_logo removes it, neither keeps it. The
+        sites show it within a minute: a new logo gets a new URL. Audited
+        as admin.instruments.profile_updated on asset:<code>, the logo by
+        its type and size. Needs instruments.write.
+      tags: [instruments]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/AssetProfileWrite'
+                - $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: The profile, its version moved on.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetProfile'
+        default:
+          $ref: '#/components/responses/Error'
   /admin/v1/instruments/changes:
     get:
       operationId: listInstrumentChanges
@@ -2981,13 +3036,16 @@ paths:
   /admin/v1/reports/trading:
     get:
       operationId: tradingReport
-      summary: Trades and orders per symbol and day (UTC), newest first
+      summary: Trades and orders per symbol and day, week or month (UTC), newest first
       description: |
         From the ClickHouse read models (trades, order_updates), which lag
         the services by a few seconds. Needs reports.read.
       tags: [reports]
       parameters:
         - $ref: '#/components/parameters/Days'
+        - $ref: '#/components/parameters/ReportFrom'
+        - $ref: '#/components/parameters/ReportTo'
+        - $ref: '#/components/parameters/ReportBucket'
       responses:
         '200':
           description: The days.
@@ -3006,7 +3064,7 @@ paths:
   /admin/v1/reports/wallet:
     get:
       operationId: walletReport
-      summary: Credited deposits and confirmed withdrawals per asset and day (UTC)
+      summary: Credited deposits and confirmed withdrawals per asset and day, week or month (UTC)
       description: |
         Deposits booked to users (not the unclaimed ones) by the day they
         were credited; withdrawals by the day they were confirmed. Needs
@@ -3014,6 +3072,9 @@ paths:
       tags: [reports]
       parameters:
         - $ref: '#/components/parameters/Days'
+        - $ref: '#/components/parameters/ReportFrom'
+        - $ref: '#/components/parameters/ReportTo'
+        - $ref: '#/components/parameters/ReportBucket'
       responses:
         '200':
           description: The days.
@@ -3073,7 +3134,7 @@ paths:
   /admin/v1/reports/derivatives:
     get:
       operationId: derivativesReport
-      summary: Each perpetual contract's trading, funding and liquidations per day (UTC)
+      summary: Each perpetual contract's trading, funding and liquidations per day, week or month (UTC)
       description: |
         From the ClickHouse contract read models (derivatives_fills,
         derivatives_funding, derivatives_liquidations): settled fills and
@@ -3084,6 +3145,9 @@ paths:
       tags: [reports, derivatives]
       parameters:
         - $ref: '#/components/parameters/Days'
+        - $ref: '#/components/parameters/ReportFrom'
+        - $ref: '#/components/parameters/ReportTo'
+        - $ref: '#/components/parameters/ReportBucket'
       responses:
         '200':
           description: The days.
@@ -3120,6 +3184,84 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/OpenInterest'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/reports/users:
+    get:
+      operationId: usersReport
+      summary: The users' activity per day, week or month (UTC), oldest first
+      description: |
+        Per bucket: the accounts registered and signed in (the auth
+        events), those trading (either side of a spot trade, or a
+        contract fill) and those with a deposit credited, each counted
+        once; total is every account registered by the bucket's end.
+        HOUSE and the simulated market's bots are left out (partial names
+        "bots" when market-sim could not say which they are). Every bucket
+        of the period comes, empty ones too. Needs reports.read.
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/Days'
+        - $ref: '#/components/parameters/ReportFrom'
+        - $ref: '#/components/parameters/ReportTo'
+        - $ref: '#/components/parameters/ReportBucket'
+      responses:
+        '200':
+          description: The buckets.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, partial]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/UsersBucket'
+                  partial:
+                    type: array
+                    items:
+                      type: string
+                      enum: [bots]
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/reports/house-pnl:
+    get:
+      operationId: housePnLReport
+      summary: HOUSE's result per day, week or month (UTC) in USDT, oldest first
+      description: |
+        Spot (ADR-0013, ADR-0015): HOUSE's trading valued day by day, the
+        quote it got less paid plus the base it holds from trading at each
+        pair's last price that day, in USDT at the last price of the quote
+        asset's USDT pair; spot_pnl is its change over the bucket and
+        spot_result its level since HOUSE began, at the bucket's end. A
+        pair without a price when one is needed is left out of every day
+        (unpriced). Contracts: the realized results of HOUSE's fills less
+        their fees, and the funding it got (negative when it paid). total
+        sums the three; cumulative runs over the period. Needs
+        reports.read.
+      tags: [reports]
+      parameters:
+        - $ref: '#/components/parameters/Days'
+        - $ref: '#/components/parameters/ReportFrom'
+        - $ref: '#/components/parameters/ReportTo'
+        - $ref: '#/components/parameters/ReportBucket'
+      responses:
+        '200':
+          description: The buckets.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, unpriced]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HousePnLBucket'
+                  unpriced:
+                    type: array
+                    items:
+                      type: string
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/derivatives/contracts:
@@ -3740,6 +3882,30 @@ components:
         minimum: 1
         maximum: 90
         default: 7
+    ReportFrom:
+      name: from
+      in: query
+      description: |
+        The period's first day (UTC), instead of days; to defaults to
+        today. At most a year by day, three years by week or month.
+      schema:
+        type: string
+        format: date
+    ReportTo:
+      name: to
+      in: query
+      description: The period's last day (UTC), included; needs from.
+      schema:
+        type: string
+        format: date
+    ReportBucket:
+      name: bucket
+      in: query
+      description: The rows' span; a row's day is its bucket's first (a week starts on Monday).
+      schema:
+        type: string
+        enum: [day, week, month]
+        default: day
     UserID:
       name: id
       in: path
@@ -4207,6 +4373,56 @@ components:
       type: string
       pattern: '^-?[0-9]+(\.[0-9]+)?$'
       examples: ['12.5']
+    AssetProfile:
+      type: object
+      required: [display_name, description, links, logo_mime, logo_size, logo_url, version]
+      properties:
+        display_name:
+          type: string
+          description: Replaces the asset's name on the sites when set.
+        description:
+          type: object
+          description: Introductions by language (zh-CN, en), up to 1,000 characters each.
+          additionalProperties:
+            type: string
+        links:
+          type: object
+          description: https URLs by kind (website, explorer, whitepaper).
+          additionalProperties:
+            type: string
+        logo_mime:
+          type: string
+          description: image/png, image/svg+xml or image/webp; empty without a logo.
+        logo_size:
+          type: integer
+        logo_url:
+          type: string
+          description: The logo's path with its version (/v1/market/assets/{code}/logo?v=...); empty without one.
+        version:
+          type: integer
+    AssetProfileWrite:
+      type: object
+      required: [display_name, description, links]
+      properties:
+        display_name:
+          type: string
+          maxLength: 32
+        description:
+          type: object
+          additionalProperties:
+            type: string
+        links:
+          type: object
+          additionalProperties:
+            type: string
+        logo:
+          type: string
+          description: A new logo, base64.
+        logo_mime:
+          type: string
+          enum: [image/png, image/svg+xml, image/webp]
+        clear_logo:
+          type: boolean
     Reason:
       type: object
       required: [reason]
@@ -5782,6 +5998,43 @@ components:
           format: date-time
         payload:
           description: The event as JSON.
+    UsersBucket:
+      type: object
+      required: [day, registered, signed_in, traders, depositors, total]
+      properties:
+        day:
+          type: string
+          format: date
+        registered:
+          type: integer
+        signed_in:
+          type: integer
+        traders:
+          type: integer
+        depositors:
+          type: integer
+        total:
+          type: integer
+          description: Every account registered by the bucket's end.
+    HousePnLBucket:
+      type: object
+      required: [day, spot_pnl, contracts_pnl, funding, total, cumulative, spot_result]
+      properties:
+        day:
+          type: string
+          format: date
+        spot_pnl:
+          $ref: '#/components/schemas/Decimal'
+        contracts_pnl:
+          $ref: '#/components/schemas/Decimal'
+        funding:
+          $ref: '#/components/schemas/Decimal'
+        total:
+          $ref: '#/components/schemas/Decimal'
+        cumulative:
+          $ref: '#/components/schemas/Decimal'
+        spot_result:
+          $ref: '#/components/schemas/Decimal'
     TradingDay:
       type: object
       required: [day, symbol, trades, volume, quote_volume, orders, rejected]

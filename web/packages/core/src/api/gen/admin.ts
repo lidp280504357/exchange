@@ -1515,6 +1515,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/assets/{code}/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * An asset's profile, as the sites show it
+         * @description The name, introductions, links and logo the sites show for an
+         *     asset beyond its code (ASTRA design §5.3; instrument-service keeps
+         *     it). The logo is at logo_url, a path the console's domain also
+         *     serves. Needs instruments.read.
+         */
+        get: operations["getAssetProfile"];
+        /**
+         * Replace an asset's profile
+         * @description The text replaces the old (an empty display name shows the asset's
+         *     name); logo (base64, with logo_mime: PNG, SVG or WebP, square, at
+         *     most 200 KB; an SVG is rebuilt from an allow list of elements)
+         *     replaces the logo, clear_logo removes it, neither keeps it. The
+         *     sites show it within a minute: a new logo gets a new URL. Audited
+         *     as admin.instruments.profile_updated on asset:<code>, the logo by
+         *     its type and size. Needs instruments.write.
+         */
+        put: operations["updateAssetProfile"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/instruments/changes": {
         parameters: {
             query?: never;
@@ -1804,7 +1839,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Trades and orders per symbol and day (UTC), newest first
+         * Trades and orders per symbol and day, week or month (UTC), newest first
          * @description From the ClickHouse read models (trades, order_updates), which lag
          *     the services by a few seconds. Needs reports.read.
          */
@@ -1825,7 +1860,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Credited deposits and confirmed withdrawals per asset and day (UTC)
+         * Credited deposits and confirmed withdrawals per asset and day, week or month (UTC)
          * @description Deposits booked to users (not the unclaimed ones) by the day they
          *     were credited; withdrawals by the day they were confirmed. Needs
          *     reports.read.
@@ -1867,7 +1902,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Each perpetual contract's trading, funding and liquidations per day (UTC)
+         * Each perpetual contract's trading, funding and liquidations per day, week or month (UTC)
          * @description From the ClickHouse contract read models (derivatives_fills,
          *     derivatives_funding, derivatives_liquidations): settled fills and
          *     their fees and results, the funding the positions paid and
@@ -1897,6 +1932,61 @@ export interface paths {
          *     seconds behind derivatives-service. Needs reports.read.
          */
         get: operations["openInterestReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/reports/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The users' activity per day, week or month (UTC), oldest first
+         * @description Per bucket: the accounts registered and signed in (the auth
+         *     events), those trading (either side of a spot trade, or a
+         *     contract fill) and those with a deposit credited, each counted
+         *     once; total is every account registered by the bucket's end.
+         *     HOUSE and the simulated market's bots are left out (partial names
+         *     "bots" when market-sim could not say which they are). Every bucket
+         *     of the period comes, empty ones too. Needs reports.read.
+         */
+        get: operations["usersReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/reports/house-pnl": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * HOUSE's result per day, week or month (UTC) in USDT, oldest first
+         * @description Spot (ADR-0013, ADR-0015): HOUSE's trading valued day by day, the
+         *     quote it got less paid plus the base it holds from trading at each
+         *     pair's last price that day, in USDT at the last price of the quote
+         *     asset's USDT pair; spot_pnl is its change over the bucket and
+         *     spot_result its level since HOUSE began, at the bucket's end. A
+         *     pair without a price when one is needed is left out of every day
+         *     (unpriced). Contracts: the realized results of HOUSE's fills less
+         *     their fees, and the funding it got (negative when it paid). total
+         *     sums the three; cumulative runs over the period. Needs
+         *     reports.read.
+         */
+        get: operations["housePnLReport"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2531,6 +2621,38 @@ export interface components {
         };
         /** @example 12.5 */
         Decimal: string;
+        AssetProfile: {
+            /** @description Replaces the asset's name on the sites when set. */
+            display_name: string;
+            /** @description Introductions by language (zh-CN, en), up to 1,000 characters each. */
+            description: {
+                [key: string]: string;
+            };
+            /** @description https URLs by kind (website, explorer, whitepaper). */
+            links: {
+                [key: string]: string;
+            };
+            /** @description image/png, image/svg+xml or image/webp; empty without a logo. */
+            logo_mime: string;
+            logo_size: number;
+            /** @description The logo's path with its version (/v1/market/assets/{code}/logo?v=...); empty without one. */
+            logo_url: string;
+            version: number;
+        };
+        AssetProfileWrite: {
+            display_name: string;
+            description: {
+                [key: string]: string;
+            };
+            links: {
+                [key: string]: string;
+            };
+            /** @description A new logo, base64. */
+            logo?: string;
+            /** @enum {string} */
+            logo_mime?: "image/png" | "image/svg+xml" | "image/webp";
+            clear_logo?: boolean;
+        };
         Reason: {
             reason: string;
         };
@@ -3437,6 +3559,26 @@ export interface components {
             /** @description The event as JSON. */
             payload: unknown;
         };
+        UsersBucket: {
+            /** Format: date */
+            day: string;
+            registered: number;
+            signed_in: number;
+            traders: number;
+            depositors: number;
+            /** @description Every account registered by the bucket's end. */
+            total: number;
+        };
+        HousePnLBucket: {
+            /** Format: date */
+            day: string;
+            spot_pnl: components["schemas"]["Decimal"];
+            contracts_pnl: components["schemas"]["Decimal"];
+            funding: components["schemas"]["Decimal"];
+            total: components["schemas"]["Decimal"];
+            cumulative: components["schemas"]["Decimal"];
+            spot_result: components["schemas"]["Decimal"];
+        };
         TradingDay: {
             /** Format: date */
             day: string;
@@ -3735,6 +3877,15 @@ export interface components {
         UserFilter: string;
         /** @description Days back, today included. */
         Days: number;
+        /**
+         * @description The period's first day (UTC), instead of days; to defaults to
+         *     today. At most a year by day, three years by week or month.
+         */
+        ReportFrom: string;
+        /** @description The period's last day (UTC), included; needs from. */
+        ReportTo: string;
+        /** @description The rows' span; a row's day is its bucket's first (a week starts on Monday). */
+        ReportBucket: "day" | "week" | "month";
         UserID: string;
         AdminID: string;
         OrderID: string;
@@ -5838,6 +5989,56 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getAssetProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The profile. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetProfile"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateAssetProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssetProfileWrite"] & components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description The profile, its version moved on. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetProfile"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     listInstrumentChanges: {
         parameters: {
             query?: {
@@ -6220,6 +6421,15 @@ export interface operations {
             query?: {
                 /** @description Days back, today included. */
                 days?: components["parameters"]["Days"];
+                /**
+                 * @description The period's first day (UTC), instead of days; to defaults to
+                 *     today. At most a year by day, three years by week or month.
+                 */
+                from?: components["parameters"]["ReportFrom"];
+                /** @description The period's last day (UTC), included; needs from. */
+                to?: components["parameters"]["ReportTo"];
+                /** @description The rows' span; a row's day is its bucket's first (a week starts on Monday). */
+                bucket?: components["parameters"]["ReportBucket"];
             };
             header?: never;
             path?: never;
@@ -6246,6 +6456,15 @@ export interface operations {
             query?: {
                 /** @description Days back, today included. */
                 days?: components["parameters"]["Days"];
+                /**
+                 * @description The period's first day (UTC), instead of days; to defaults to
+                 *     today. At most a year by day, three years by week or month.
+                 */
+                from?: components["parameters"]["ReportFrom"];
+                /** @description The period's last day (UTC), included; needs from. */
+                to?: components["parameters"]["ReportTo"];
+                /** @description The rows' span; a row's day is its bucket's first (a week starts on Monday). */
+                bucket?: components["parameters"]["ReportBucket"];
             };
             header?: never;
             path?: never;
@@ -6299,6 +6518,15 @@ export interface operations {
             query?: {
                 /** @description Days back, today included. */
                 days?: components["parameters"]["Days"];
+                /**
+                 * @description The period's first day (UTC), instead of days; to defaults to
+                 *     today. At most a year by day, three years by week or month.
+                 */
+                from?: components["parameters"]["ReportFrom"];
+                /** @description The period's last day (UTC), included; needs from. */
+                to?: components["parameters"]["ReportTo"];
+                /** @description The rows' span; a row's day is its bucket's first (a week starts on Monday). */
+                bucket?: components["parameters"]["ReportBucket"];
             };
             header?: never;
             path?: never;
@@ -6337,6 +6565,78 @@ export interface operations {
                 content: {
                     "application/json": {
                         items: components["schemas"]["OpenInterest"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    usersReport: {
+        parameters: {
+            query?: {
+                /** @description Days back, today included. */
+                days?: components["parameters"]["Days"];
+                /**
+                 * @description The period's first day (UTC), instead of days; to defaults to
+                 *     today. At most a year by day, three years by week or month.
+                 */
+                from?: components["parameters"]["ReportFrom"];
+                /** @description The period's last day (UTC), included; needs from. */
+                to?: components["parameters"]["ReportTo"];
+                /** @description The rows' span; a row's day is its bucket's first (a week starts on Monday). */
+                bucket?: components["parameters"]["ReportBucket"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The buckets. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["UsersBucket"][];
+                        partial: "bots"[];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    housePnLReport: {
+        parameters: {
+            query?: {
+                /** @description Days back, today included. */
+                days?: components["parameters"]["Days"];
+                /**
+                 * @description The period's first day (UTC), instead of days; to defaults to
+                 *     today. At most a year by day, three years by week or month.
+                 */
+                from?: components["parameters"]["ReportFrom"];
+                /** @description The period's last day (UTC), included; needs from. */
+                to?: components["parameters"]["ReportTo"];
+                /** @description The rows' span; a row's day is its bucket's first (a week starts on Monday). */
+                bucket?: components["parameters"]["ReportBucket"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The buckets. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["HousePnLBucket"][];
+                        unpriced: string[];
                     };
                 };
             };
