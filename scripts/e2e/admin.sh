@@ -87,9 +87,12 @@ for role in "${ROLES[@]}"; do
   email="e2e-$lower-$RUN@example.com"
   pw=$(password)
   sec=$(secret)
+  # A connection dropped after the account was made is retried by remote:
+  # the second try finds it there, with this run's secrets (the email is
+  # this run's).
   out=$(remote "sudo docker compose $COMPOSE_FILES exec -T admin-service /app/exchangectl admin create --email $email --name 'e2e $lower' --role $role --secrets-stdin" \
-    "$(printf '%s\n%s\n' "$pw" "$sec")")
-  grep -q "^created .* $email ($role)" <<<"$out" || { echo "FAIL admin create $role: $out" >&2; exit 1; }
+    "$(printf '%s\n%s\n' "$pw" "$sec")" 2>&1 || true)
+  grep -qE "^created .* $email \($role\)|ADMIN_EXISTS" <<<"$out" || { echo "FAIL admin create $role: $out" >&2; exit 1; }
   eval "EMAIL_$role=\$email PW_$role=\$pw SECRET_$role=\$sec"
   # shellcheck disable=SC2016 # expanded when the script ends
   at_exit "remote \"sudo docker compose \$COMPOSE_FILES exec -T admin-service /app/exchangectl admin disable $email --reason 'e2e run over'\" >/dev/null"
