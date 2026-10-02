@@ -95,6 +95,14 @@ type Bot struct {
 	Enabled bool
 }
 
+// Sample is the target and the last price (0: none yet) at a time, for the
+// operators' chart.
+type Sample struct {
+	At     time.Time
+	Target float64
+	Last   decimal.Decimal
+}
+
 // ParamChange is a change of the settings as the guards count it (ASTRA
 // design §6.2): when, by whom, approved by whom, and how far it moves the
 // price (a share) and the day's turnover (a logarithm).
@@ -141,6 +149,12 @@ type Store interface {
 	// SaveEvent stores an event (new or changed), with the audit record
 	// when there is one.
 	SaveEvent(ctx context.Context, e domain.Event, audit *Audit) error
+	// SaveSample keeps a sample of the target and the last price;
+	// Samples returns the ones since t, oldest first; PruneSamples drops
+	// the ones before t.
+	SaveSample(ctx context.Context, s Sample) error
+	Samples(ctx context.Context, t time.Time) ([]Sample, error)
+	PruneSamples(ctx context.Context, t time.Time) error
 	// State returns the model's saved state; false when there is none.
 	State(ctx context.Context) (domain.State, bool, error)
 	// SaveState stores the model's state.

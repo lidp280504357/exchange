@@ -41,12 +41,9 @@ var (
 )
 
 // Sample is the target and the last price at a time, for the operators'
-// chart.
-type Sample struct {
-	At     time.Time
-	Target float64
-	Last   decimal.Decimal
-}
+// chart; the store keeps a day of them, so that a restart does not wipe
+// the chart.
+type Sample = ports.Sample
 
 func (s *Sim) runningEvents() []*domain.Event {
 	var out []*domain.Event
@@ -183,14 +180,24 @@ func (s *Sim) execute(ctx context.Context, now time.Time, center float64) {
 }
 
 // sample keeps the target and the last price every sampleEvery, a day of
-// them.
-func (s *Sim) sample(now time.Time, p float64) {
+// them, in memory and in the store.
+func (s *Sim) sample(ctx context.Context, now time.Time, p float64) {
 	if n := len(s.samples); n > 0 && now.Sub(s.samples[n-1].At) < sampleEvery {
 		return
 	}
-	s.samples = append(s.samples, Sample{At: now, Target: p, Last: s.last})
+	x := Sample{At: now, Target: p, Last: s.last}
+	s.samples = append(s.samples, x)
 	if len(s.samples) > samplesKept {
 		s.samples = slices.Clone(s.samples[len(s.samples)-samplesKept:])
+	}
+	if err := s.store.SaveSample(ctx, x); err != nil {
+		s.m.errors.WithLabelValues("sample").Inc()
+	}
+	if now.Sub(s.prunedAt) >= time.Hour {
+		s.prunedAt = now
+		if err := s.store.PruneSamples(ctx, now.Add(-samplesKept*sampleEvery)); err != nil {
+			s.m.errors.WithLabelValues("sample").Inc()
+		}
 	}
 }
 

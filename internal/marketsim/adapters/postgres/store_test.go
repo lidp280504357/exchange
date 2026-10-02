@@ -69,6 +69,20 @@ func TestBotsSettingsAndState(t *testing.T) {
 		t.Fatalf("changes of the hour %+v %v", changes, err)
 	}
 
+	// Samples: a day for the chart, the older ones pruned.
+	for i, last := range []string{"0", "1.01", "1.02"} {
+		if err := store.SaveSample(ctx, ports.Sample{At: at.Add(time.Duration(i) * time.Hour), Target: 1 + float64(i)/100, Last: decimal.RequireFromString(last)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.PruneSamples(ctx, at.Add(30*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	samples, err := store.Samples(ctx, at)
+	if err != nil || len(samples) != 2 || samples[0].Target != 1.01 || !samples[1].Last.Equal(decimal.RequireFromString("1.02")) {
+		t.Fatalf("samples %+v %v", samples, err)
+	}
+
 	// State: the random source and the minute come back as saved.
 	m := domain.NewModel(domain.DefaultParams(), domain.State{}, 9)
 	m.Step(at, 60000, 3000, domain.Shape{})

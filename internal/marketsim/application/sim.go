@@ -100,6 +100,7 @@ type Sim struct {
 	movedAt   time.Time       // when an event last moved the price
 	executeAt time.Time       // the executors' next turn
 	samples   []Sample
+	prunedAt  time.Time
 
 	// The price band (band.go): the anchor as read lately, the last
 	// trade's time, where the makers quote and whether the quotes walk,
@@ -201,6 +202,10 @@ func (s *Sim) Start(ctx context.Context) error {
 	}
 	for i := range open {
 		s.events = append(s.events, &open[i])
+	}
+	// The chart goes on from the day before the restart.
+	if s.samples, err = s.store.Samples(ctx, s.now().Add(-samplesKept*sampleEvery)); err != nil {
+		return err
 	}
 	s.log.InfoContext(ctx, "simulated market loaded", "symbol", s.cfg.Symbol, "bots", len(s.bots), "settings_version", version,
 		"target", st.P)
@@ -324,7 +329,7 @@ func (s *Sim) Round(ctx context.Context) {
 			s.history = s.history[len(s.history)-keep:]
 		}
 	}
-	s.sample(now, p)
+	s.sample(ctx, now, p)
 	s.refreshAnchor(ctx, now)
 	s.watch(ctx, now, sh)
 	if sh.Halted {

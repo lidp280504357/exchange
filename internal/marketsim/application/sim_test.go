@@ -225,6 +225,7 @@ type memStore struct {
 	saves   int
 	byWhom  string
 	changes []ports.ParamChange
+	samples []ports.Sample
 	events  []domain.Event
 	audits  []ports.Audit
 	mu      sync.Mutex
@@ -354,6 +355,32 @@ func (f *fakePairs) SetPairStatus(_ context.Context, _, to, _, _ string) error {
 	f.trading.mu.Lock()
 	f.trading.pair.Trading = to == "TRADING"
 	f.trading.mu.Unlock()
+	return nil
+}
+
+func (m *memStore) SaveSample(_ context.Context, x ports.Sample) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.samples = append(m.samples, x)
+	return nil
+}
+
+func (m *memStore) Samples(_ context.Context, t time.Time) ([]ports.Sample, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []ports.Sample
+	for _, x := range m.samples {
+		if !x.At.Before(t) {
+			out = append(out, x)
+		}
+	}
+	return out, nil
+}
+
+func (m *memStore) PruneSamples(_ context.Context, t time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.samples = slices.DeleteFunc(m.samples, func(x ports.Sample) bool { return x.At.Before(t) })
 	return nil
 }
 
@@ -1288,5 +1315,19 @@ func TestSettingsChangesShareTheBudget(t *testing.T) {
 	q.DailyVolume = 3_000_000
 	if _, err := r.sim.UpdateParams(context.Background(), q, "ops", ""); err != nil {
 		t.Fatalf("the turnover 1.5 times alone: %v", err)
+	}
+}
+
+// The chart's samples outlive a restart: the store keeps them and a new
+// start loads the day before.
+func TestTheChartOutlivesARestart(t *testing.T) {
+	r := newRig(t, nil)
+	r.rounds(4 * 60) // a minute: six samples
+	if n := len(r.store.samples); n < 5 || n > 7 {
+		t.Fatalf("%d samples kept", n)
+	}
+	again := newRig(t, r.store)
+	if got := again.sim.History(r.now.Add(-time.Hour)); len(got) != len(r.store.samples) {
+		t.Fatalf("%d samples after the restart, %d kept", len(got), len(r.store.samples))
 	}
 }

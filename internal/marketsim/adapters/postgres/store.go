@@ -221,6 +221,40 @@ func (s *Store) SaveEvent(ctx context.Context, e domain.Event, audit *ports.Audi
 	return nil
 }
 
+// SaveSample keeps a sample of the target and the last price.
+func (s *Store) SaveSample(ctx context.Context, x ports.Sample) error {
+	if _, err := s.db.Exec(ctx, `INSERT INTO samples (at, target, last) VALUES ($1, $2, $3) ON CONFLICT (at) DO NOTHING`,
+		x.At, x.Target, x.Last); err != nil {
+		return fmt.Errorf("save sample: %w", err)
+	}
+	return nil
+}
+
+// Samples returns the samples since t, oldest first.
+func (s *Store) Samples(ctx context.Context, t time.Time) ([]ports.Sample, error) {
+	rows, err := s.db.Query(ctx, `SELECT at, target, last FROM samples WHERE at >= $1 ORDER BY at`, t)
+	if err != nil {
+		return nil, fmt.Errorf("samples: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (ports.Sample, error) {
+		var x ports.Sample
+		err := row.Scan(&x.At, &x.Target, &x.Last)
+		return x, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("samples: %w", err)
+	}
+	return out, nil
+}
+
+// PruneSamples drops the samples before t.
+func (s *Store) PruneSamples(ctx context.Context, t time.Time) error {
+	if _, err := s.db.Exec(ctx, `DELETE FROM samples WHERE at < $1`, t); err != nil {
+		return fmt.Errorf("prune samples: %w", err)
+	}
+	return nil
+}
+
 // State returns the model's saved state.
 func (s *Store) State(ctx context.Context) (domain.State, bool, error) {
 	var raw []byte
