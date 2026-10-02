@@ -39,7 +39,7 @@ func main() {
 func setup(ctx context.Context, a *app.App) error {
 	cfg := settings{
 		Postgres:         pg.DefaultConfig(),
-		ReconcileSchemas: []string{"auth", "users", "notify", "instrument", "ledger", "risk", "trading", "matching", "deriv_matching", "derivatives", "market", "wallet", "admin", "config"},
+		ReconcileSchemas: []string{"auth", "users", "notify", "instrument", "ledger", "risk", "trading", "matching", "deriv_matching", "derivatives", "market", "wallet", "admin", "marketsim", "config"},
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
