@@ -13,9 +13,12 @@ COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
 ARG VERSION=unknown
+# 并行编译与链接的包数（默认是 CPU 数 4）：测试服只有 7.8 GB，服务都在运行时再并行链接四个服务的二进制，
+# 内存与交换区吃紧（2026-10-02 几次整机变慢）；两路慢一些，峰值低一些
+ARG GO_BUILD_P=2
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    go build -trimpath -buildvcs=false \
+    go build -p ${GO_BUILD_P} -trimpath -buildvcs=false \
       -ldflags "-s -w -X github.com/lidp280504357/exchange/internal/platform/app.buildVersion=${VERSION}" \
       -o /out/ ./cmd/...
 
