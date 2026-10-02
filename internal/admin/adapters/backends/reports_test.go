@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/lidp280504357/exchange/internal/admin/adapters/backends"
+	"github.com/lidp280504357/exchange/internal/admin/ports"
 	"github.com/lidp280504357/exchange/internal/platform/chx"
 	"github.com/lidp280504357/exchange/internal/platform/migrate"
 	"github.com/lidp280504357/exchange/internal/platform/testenv"
@@ -51,7 +52,7 @@ func TestReports(t *testing.T) {
 			(generateUUIDv4(), generateUUIDv4(), 'BTC-USDT-PERP', toStartOfHour(now()), 2.5, now64(3))`,
 		`INSERT INTO derivatives_liquidations (event_id, kind, user_id, symbol, insurance_paid, occurred_at) VALUES
 			(generateUUIDv4(), 'STARTED', generateUUIDv4(), 'BTC-USDT-PERP', 0, now64(3)),
-			(generateUUIDv4(), 'FILLED', generateUUIDv4(), 'BTC-USDT-PERP', 100, now64(3)),
+			(generateUUIDv4(), 'FILLED', '0192a000-0000-7000-8000-0000000000b7', 'BTC-USDT-PERP', 100, now64(3)),
 			(generateUUIDv4(), 'ADL', generateUUIDv4(), 'BTC-USDT-PERP', 0, now64(3)),
 			(generateUUIDv4(), 'WARNING', generateUUIDv4(), '', 0, now64(3))`,
 		`INSERT INTO derivatives_positions (position_id, user_id, symbol, quantity, updated_at, version) VALUES
@@ -110,24 +111,31 @@ func TestReports(t *testing.T) {
 	if len(oi) != 1 || oi[0].Symbol != "BTC-USDT-PERP" || oi[0].Long != "0.7" || oi[0].Short != "0.7" || oi[0].Positions != 2 {
 		t.Fatalf("open interest %+v", oi)
 	}
-	steps, next, err := r.Liquidations(ctx, 7, "", "", 10)
+	steps, next, err := r.Liquidations(ctx, ports.LiquidationQuery{Days: 7, Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(steps) != 4 || next != "" {
 		t.Fatalf("liquidations %+v %q", steps, next)
 	}
-	firstTwo, next, err := r.Liquidations(ctx, 7, "", "", 2)
+	firstTwo, next, err := r.Liquidations(ctx, ports.LiquidationQuery{Days: 7, Limit: 2})
 	if err != nil || len(firstTwo) != 2 || next == "" {
 		t.Fatalf("first page %+v %q %v", firstTwo, next, err)
 	}
-	rest, last, err := r.Liquidations(ctx, 7, "", next, 2)
+	rest, last, err := r.Liquidations(ctx, ports.LiquidationQuery{Days: 7, Cursor: next, Limit: 2})
 	if err != nil || len(rest) != 2 || last != "" || rest[0].EventID == firstTwo[1].EventID {
 		t.Fatalf("second page %+v %q %v", rest, last, err)
 	}
-	filled, _, err := r.Liquidations(ctx, 7, "FILLED", "", 10)
+	filled, _, err := r.Liquidations(ctx, ports.LiquidationQuery{Days: 7, Kind: "FILLED", Limit: 10})
 	if err != nil || len(filled) != 1 || filled[0].InsurancePaid != "100" {
 		t.Fatalf("filled %+v %v", filled, err)
+	}
+	if btc, _, err := r.Liquidations(ctx, ports.LiquidationQuery{Days: 7, Symbol: "BTC-USDT-PERP", Limit: 10}); err != nil || len(btc) != 3 {
+		t.Fatalf("of a contract %+v %v", btc, err)
+	}
+	mine, _, err := r.Liquidations(ctx, ports.LiquidationQuery{Days: 7, UserID: "0192a000-0000-7000-8000-0000000000b7", Limit: 10})
+	if err != nil || len(mine) != 1 || mine[0].Kind != "FILLED" {
+		t.Fatalf("of a user %+v %v", mine, err)
 	}
 	candles, err := r.Candles(ctx, "ETH-BTC", 3600, 10)
 	if err != nil {

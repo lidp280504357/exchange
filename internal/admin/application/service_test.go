@@ -365,10 +365,16 @@ type fakeDerivatives struct {
 	pending  int
 	closes   []string
 	canceled []string
+	queries  []ports.PositionQuery
 }
 
 func (d *fakeDerivatives) Positions(context.Context, string) (json.RawMessage, error) {
 	return json.RawMessage(`[{"symbol":"BTC-USDT-PERP","position_side":"BOTH","quantity":"0.2"}]`), nil
+}
+
+func (d *fakeDerivatives) OpenPositions(_ context.Context, q ports.PositionQuery) (json.RawMessage, error) {
+	d.queries = append(d.queries, q)
+	return json.RawMessage(`{"positions":[{"user_id":"0192a000-0000-7000-8000-000000000001","symbol":"BTC-USDT-PERP"}],"truncated":false}`), nil
 }
 
 func (d *fakeDerivatives) OpenOrders(context.Context, string) (json.RawMessage, error) {
@@ -911,7 +917,29 @@ func TestLiftingReduceOnly(t *testing.T) {
 	if !slices.Contains(h.actions(), "admin.derivatives.reduce_only_lifted") {
 		t.Fatalf("audit %v", h.actions())
 	}
-	if _, _, err := h.svc.Liquidations(ctx, fin, 7, "sideways", "", 10); code(err) != apperr.CodeInvalidArgument {
+	if _, _, err := h.svc.Liquidations(ctx, fin, ports.LiquidationQuery{Days: 7, Kind: "sideways", Limit: 10}); code(err) != apperr.CodeInvalidArgument {
 		t.Fatalf("unknown kind: %v", err)
+	}
+	if _, _, err := h.svc.Liquidations(ctx, fin, ports.LiquidationQuery{UserID: "bob"}); code(err) != apperr.CodeInvalidArgument {
+		t.Fatalf("a user that is no UUID: %v", err)
+	}
+}
+
+func TestEveryUsersPositions(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.svc.HouseBook.User = "0192a000-0000-7000-8000-0000000000ff"
+	h.admin(t, "audit@example.com", domain.RoleAuditor)
+	auditor := h.login(t, "audit@example.com")
+	if _, err := h.svc.OpenPositions(ctx, auditor, ports.PositionQuery{UserID: "bob"}); code(err) != apperr.CodeInvalidArgument {
+		t.Fatalf("a user that is no UUID: %v", err)
+	}
+	page, err := h.svc.OpenPositions(ctx, auditor, ports.PositionQuery{Symbol: " btc-usdt-perp ", Watch: true, Limit: 10_000})
+	if err != nil || page.Truncated || page.HouseUserID == nil || *page.HouseUserID != h.svc.HouseBook.User ||
+		!bytes.Contains(page.Positions, []byte(`"BTC-USDT-PERP"`)) {
+		t.Fatalf("positions %+v %v", page, err)
+	}
+	if q := h.derivatives.queries[0]; q.Symbol != "BTC-USDT-PERP" || !q.Watch || q.Limit != positionsLimit {
+		t.Fatalf("asked %+v", q)
 	}
 }

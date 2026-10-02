@@ -1477,6 +1477,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/positions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every user's open contract positions, riskiest first
+         * @description From derivatives-service, valued at the mark price: highest margin
+         *     ratio (maintenance margin / margin balance) first, then the
+         *     largest. Cross positions are measured on their own; their
+         *     liquidation price is on the user's page. At most `limit` (500)
+         *     positions; `truncated` says there are more. Needs derivatives.read.
+         */
+        get: operations["listPositions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/derivatives/insurance-fund": {
         parameters: {
             query?: never;
@@ -4717,6 +4741,9 @@ export interface operations {
                 days?: components["parameters"]["Days"];
                 /** @description Empty for all. */
                 kind?: "WARNING" | "STARTED" | "FILLED" | "ADL";
+                /** @description One contract (BTC-USDT-PERP). */
+                symbol?: string;
+                user_id?: components["parameters"]["UserFilter"];
                 /** @description The previous page's next_cursor; omitted for the first page. */
                 cursor?: components["parameters"]["Cursor"];
                 limit?: number;
@@ -4736,6 +4763,38 @@ export interface operations {
                     "application/json": {
                         items: components["schemas"]["LiquidationStep"][];
                         next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listPositions: {
+        parameters: {
+            query?: {
+                symbol?: string;
+                user_id?: components["parameters"]["UserFilter"];
+                /** @description true for the positions under watch only (warned, taken over, margin ratio ≥ 0.5). */
+                watch?: "true";
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The positions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        positions: components["schemas"]["RiskPosition"][];
+                        truncated: boolean;
+                        /** @description HOUSE's account on the contracts (its positions are the counterparty of users'). */
+                        house_user_id: string | null;
                     };
                 };
             };

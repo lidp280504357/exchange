@@ -145,6 +145,8 @@ REST（经网关 `/v1/derivatives/*`，需登录）：
 | `GET /internal/derivatives/contracts` | 每个合约的状态、只减仓（原因、开始时间、上次谁解除）、标记价与是否新鲜、持仓量（多头总量）与持仓数 |
 | `POST /internal/derivatives/contracts/{symbol}/lift-reduce-only` | `{"actor": ...}` 解除只减仓，返回 `lifted` 表示原来是否只减仓 |
 | `GET /internal/derivatives/risk` | 被接管、已预警或保证金率（维持保证金 ÷（保证金 + 未实现盈亏））≥ 0.5 的仓位，风险高的在前；全仓仓位在这里按单个仓位计算 |
+| `GET /internal/derivatives/positions` | 全部用户的持仓（后台「仓位」页，2026-10-02 C3）：`symbol`、`user_id`、`watch=true`（只要上一行的风险仓位）、`limit`（默认 200，最多 1000）；按保证金率、再按开仓名义价值从大到小，`truncated` 表示被 `limit` 截断 |
+| `POST /internal/derivatives/positions/close` | 后台强制平仓（C2）：先撤平仓挂单，再以 `ADMIN` 类型的市价只减仓单平掉 |
 
 WebSocket 私有频道：`orders`（合约订单与现货订单同一频道，按 `symbol` 区分）、`fills`（合约成交带 `position_side`、`closed_quantity`、`realized_pnl`，手续费资产 USDT）、`positions`（`event` 为 OPEN、INCREASE、REDUCE、CLOSE、FLIP、MARGIN、FUNDING、LEVERAGE）、`risk`（`event` 为 WARNING、STARTED、LIQUIDATED、ADL）。
 

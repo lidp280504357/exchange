@@ -7,34 +7,33 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DangerAction } from "../kit/actions";
 import { EnumBadge } from "../kit/enums";
-import { Num, TimeText, UserCell } from "../kit/format";
+import { Num } from "../kit/format";
 import { FundAction } from "../kit/funds";
-import { ListTable, PAGE_SIZE, useCursorList } from "../kit/lists";
 import { Card, Page } from "../kit/Page";
 import { ModeBanner } from "./funds/ModeBanner";
 import { StatusActions } from "./Instruments";
 
 type ContractState = AdminSchemas["ContractState"];
-type RiskPosition = AdminSchemas["RiskPosition"];
-type Step = AdminSchemas["LiquidationStep"];
 
 const right: DataColumnMeta = { align: "right" };
 
-/** Futures (design §10.3): the contracts' states, the insurance fund, positions near liquidation and the liquidation log. */
+/**
+ * Futures (design §10.3): the contracts' states and the insurance fund.
+ * Every user's positions (those near liquidation among them) and the
+ * liquidation log have their own pages (2026-10-02 C3).
+ */
 export default function Derivatives({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
   const [tab, setTab] = useState("contracts");
   return (
     <Page title={t("admin.nav.derivatives")}>
       <Tabs
-        items={["contracts", "insurance", "risk", "liquidations"].map((k) => ({ value: k, label: t(`admin.derivatives.tabs.${k}`) }))}
+        items={["contracts", "insurance"].map((k) => ({ value: k, label: t(`admin.derivatives.tabs.${k}`) }))}
         value={tab}
         onValueChange={setTab}
       />
       {tab === "contracts" && <Contracts admin={admin} />}
       {tab === "insurance" && <Insurance admin={admin} />}
-      {tab === "risk" && <Risk />}
-      {tab === "liquidations" && <Liquidations />}
     </Page>
   );
 }
@@ -146,49 +145,4 @@ function Insurance({ admin }: { admin: Admin }) {
       )}
     </div>
   );
-}
-
-function Risk() {
-  const { t } = useTranslation();
-  const q = useQuery({
-    queryKey: ["admin", "derivatives", "risk"],
-    queryFn: async () => adminData(await adminApi.GET("/admin/v1/derivatives/risk")).positions,
-    refetchInterval: 15_000,
-  });
-  const columns = useMemo<ColumnDef<RiskPosition, unknown>[]>(
-    () => [
-      { id: "user", header: t("admin.common.user"), cell: ({ row }) => <UserCell id={row.original.user_id} /> },
-      { accessorKey: "symbol", header: t("admin.common.symbol") },
-      { id: "qty", header: t("admin.common.quantity"), meta: right, cell: ({ row }) => <Num value={row.original.quantity} signed /> },
-      { id: "entry", header: t("admin.common.price"), meta: right, cell: ({ row }) => <Num value={row.original.entry_price} /> },
-      { id: "mark", header: t("admin.derivatives.mark"), meta: right, cell: ({ row }) => <Num value={row.original.mark_price} /> },
-      { id: "liq", header: t("admin.derivatives.liqPrice"), meta: right, cell: ({ row }) => <Num value={row.original.liquidation_price} /> },
-      { id: "ratio", header: t("admin.derivatives.marginRatio"), meta: right, cell: ({ row }) => <Num value={row.original.margin_ratio} decimals={4} /> },
-      { id: "state", header: t("admin.common.status"), cell: ({ row }) => (row.original.liquidating ? <Badge tone="danger">{t("admin.enum.liquidationKind.STARTED")}</Badge> : row.original.warned_at ? <Badge tone="warn">{t("admin.enum.liquidationKind.WARNING")}</Badge> : null) },
-    ],
-    [t],
-  );
-  if (q.isError) return <ErrorState message={errorText(q.error)} onRetry={() => void q.refetch()} />;
-  return <DataTable columns={columns} data={q.data ?? []} getRowId={(p) => p.position_id} loading={q.isPending} density="compact" />;
-}
-
-function Liquidations() {
-  const { t } = useTranslation();
-  const list = useCursorList<Step>(["admin", "derivatives", "liquidations"], async (cursor) =>
-    adminData(await adminApi.GET("/admin/v1/derivatives/liquidations", { params: { query: { days: 30, cursor, limit: PAGE_SIZE } } })),
-  );
-  const columns = useMemo<ColumnDef<Step, unknown>[]>(
-    () => [
-      { id: "time", header: t("admin.common.time"), cell: ({ row }) => <TimeText value={row.original.occurred_at} /> },
-      { id: "kind", header: t("admin.derivatives.kind"), cell: ({ row }) => <EnumBadge group="liquidationKind" code={row.original.kind} /> },
-      { id: "user", header: t("admin.common.user"), cell: ({ row }) => <UserCell id={row.original.user_id} /> },
-      { accessorKey: "symbol", header: t("admin.common.symbol") },
-      { id: "price", header: t("admin.common.price"), meta: right, cell: ({ row }) => <Num value={row.original.price} /> },
-      { id: "qty", header: t("admin.common.quantity"), meta: right, cell: ({ row }) => <Num value={row.original.quantity} /> },
-      { id: "pnl", header: t("admin.reports.realizedPnl"), meta: right, cell: ({ row }) => <Num value={row.original.realized_pnl} signed /> },
-      { id: "ins", header: t("admin.derivatives.insurancePaid"), meta: right, cell: ({ row }) => <Num value={row.original.insurance_paid} /> },
-    ],
-    [t],
-  );
-  return <ListTable list={list} columns={columns} getRowId={(s) => s.event_id} />;
 }

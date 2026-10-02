@@ -605,18 +605,25 @@ var liquidationKinds = []string{"", "WARNING", "STARTED", "FILLED", "ADL"}
 // Liquidations returns a page of the liquidation steps of the last days
 // (default 7, at most 90), of one kind (WARNING, STARTED, FILLED, ADL)
 // or all, newest first; limit defaults to 100, at most 500.
-func (s *Service) Liquidations(ctx context.Context, p Principal, days int, kind, cursor string, limit int) ([]ports.LiquidationStep, string, error) {
+func (s *Service) Liquidations(ctx context.Context, p Principal, q ports.LiquidationQuery) ([]ports.LiquidationStep, string, error) {
 	if err := p.require(domain.PermDerivativesRead); err != nil {
 		return nil, "", err
 	}
-	kind = strings.ToUpper(strings.TrimSpace(kind))
-	if !slices.Contains(liquidationKinds, kind) {
+	q.Kind = strings.ToUpper(strings.TrimSpace(q.Kind))
+	if !slices.Contains(liquidationKinds, q.Kind) {
 		return nil, "", apperr.Invalid("kind must be WARNING, STARTED, FILLED or ADL")
 	}
-	if limit <= 0 || limit > 500 {
-		limit = 100
+	if q.UserID != "" {
+		if _, err := uuid.Parse(q.UserID); err != nil {
+			return nil, "", apperr.Invalid("user_id must be a UUID")
+		}
 	}
-	return s.Reports.Liquidations(ctx, reportDays(days), kind, cursor, limit)
+	q.Symbol = strings.ToUpper(strings.TrimSpace(q.Symbol))
+	if q.Limit <= 0 || q.Limit > 500 {
+		q.Limit = 100
+	}
+	q.Days = reportDays(q.Days)
+	return s.Reports.Liquidations(ctx, q)
 }
 
 // AuditLogs returns a page of the audit trail, newest first; limit

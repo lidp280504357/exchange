@@ -427,9 +427,28 @@ func (s *Service) Overview(ctx context.Context) ([]ContractOverview, error) {
 // / margin balance) of at least half, riskiest first. Cross positions are
 // measured on their own here.
 func (s *Service) RiskPositions(ctx context.Context) ([]PositionView, error) {
-	open, err := s.Store.Read().Positions().Open(ctx, "")
+	out, _, err := s.OpenPositions(ctx, PositionFilter{Watch: true})
+	return out, err
+}
+
+// PositionFilter selects open positions across users (the admin console):
+// of a contract, of a user, only those under watch; at most Limit of them
+// (0: all).
+type PositionFilter struct {
+	Symbol string
+	UserID string
+	Watch  bool
+	Limit  int
+}
+
+// OpenPositions lists every user's open positions valued at the mark
+// price, riskiest first (margin ratio, then entry notional), and reports
+// whether Limit cut the list. Cross positions are measured on their own
+// here; their liquidation price is the user's own view's (Positions).
+func (s *Service) OpenPositions(ctx context.Context, f PositionFilter) ([]PositionView, bool, error) {
+	open, err := s.Store.Read().Positions().Open(ctx, f.Symbol)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	type scored struct {
 		v     PositionView
@@ -438,9 +457,12 @@ func (s *Service) RiskPositions(ctx context.Context) ([]PositionView, error) {
 	var list []scored
 	half := decimal.RequireFromString("0.5")
 	for _, p := range open {
+		if f.UserID != "" && p.UserID != f.UserID {
+			continue
+		}
 		c, err := s.Instruments.Contract(ctx, p.Symbol)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		v := PositionView{Position: p}
 		ratio := decimal.Zero
@@ -455,14 +477,23 @@ func (s *Service) RiskPositions(ctx context.Context) ([]PositionView, error) {
 		if p.MarginMode == domain.Isolated {
 			v.LiquidationPrice = p.LiquidationPrice(c)
 		}
-		if p.Liquidating || !p.WarnedAt.IsZero() || ratio.GreaterThanOrEqual(half) {
+		if !f.Watch || p.Liquidating || !p.WarnedAt.IsZero() || ratio.GreaterThanOrEqual(half) {
 			list = append(list, scored{v: v, ratio: ratio})
 		}
 	}
-	slices.SortFunc(list, func(a, b scored) int { return b.ratio.Cmp(a.ratio) })
+	slices.SortFunc(list, func(a, b scored) int {
+		if c := b.ratio.Cmp(a.ratio); c != 0 {
+			return c
+		}
+		return b.v.EntryCost.Abs().Cmp(a.v.EntryCost.Abs())
+	})
+	cut := f.Limit > 0 && len(list) > f.Limit
+	if cut {
+		list = list[:f.Limit]
+	}
 	out := make([]PositionView, len(list))
 	for i, x := range list {
 		out[i] = x.v
 	}
-	return out, nil
+	return out, cut, nil
 }

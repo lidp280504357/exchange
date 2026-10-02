@@ -4,10 +4,12 @@
 // section: the overview with the services' health and HOUSE, users with a
 // user's page and its tabs (profile, security, risk …), the identity
 // requests, orders and trades, deposits (those to handle, the backfills,
-// the backfill form), the withdrawal queue, assets and pairs (a status change is confirmed and canceled,
-// never done), futures, HOUSE, the flags, the ledger's reconciliation, the
-// audit trail, the reports, the fund operations (approval mode, form,
-// records), the settings and the event stream; the search opens a user;
+// the backfill form), the withdrawal queue, assets and pairs (a status
+// change is confirmed and canceled, never done), futures, every user's
+// positions, the liquidation log, HOUSE, the flags, the ledger's
+// reconciliation, the audit trail, the reports, the fund operations
+// (approval mode, form, records), the settings and the event stream; the
+// search opens a user;
 // signing out from the account menu ends the session. Every admin API
 // response is checked against api/admin/admin.yaml.
 //
@@ -160,9 +162,17 @@ try {
   await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
   ok("assets and pairs: 50+ pairs, a status change waits for its confirmation (canceled)");
 
-  // 8. Futures, HOUSE, flags.
+  // 8. Futures (every user's positions, the liquidation log), HOUSE, flags.
   await go("/derivatives");
   await waitText("BTC-USDT-PERP");
+  await go("/positions");
+  await page.waitForSelector('main table[aria-label="positions"]');
+  await sleep(1000);
+  await noError("positions");
+  await go("/liquidations?days=7");
+  await page.waitForSelector('main table[aria-label="liquidations"]');
+  await sleep(1000);
+  await noError("liquidations");
   await go("/house");
   await waitText("各交易对");
   await rows(3);
@@ -171,7 +181,7 @@ try {
   await waitText("ETH-USDT-PERP");
   await go("/risk");
   await waitText("market.house_liquidity");
-  ok("futures, HOUSE's book with every contract's net position, and the flags");
+  ok("futures, every user's positions and the liquidation log, HOUSE's book with every contract's net position, and the flags");
 
   // 9. Ledger: the reconciliation; audit; reports.
   await go("/ledger");

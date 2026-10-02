@@ -902,6 +902,27 @@ func TestTheAdminOverviewAndRiskList(t *testing.T) {
 	if list, err := r.svc.RiskPositions(ctx); err != nil || len(list) != 0 {
 		t.Fatalf("risk list %+v %v", list, err)
 	}
+	// Every open position (the console's list), riskiest first.
+	all, cut, err := r.svc.OpenPositions(ctx, application.PositionFilter{})
+	if err != nil || cut || len(all) != 2 || all[0].UserID == all[1].UserID || !all[0].Mark.Equal(d("60000")) {
+		t.Fatalf("open positions %+v %v %v", all, cut, err)
+	}
+	ratio := func(v application.PositionView) decimal.Decimal {
+		return v.MaintenanceMargin.DivRound(v.Margin.Add(v.UnrealizedPnL), 8)
+	}
+	if ratio(all[0]).LessThan(ratio(all[1])) {
+		t.Fatalf("not riskiest first: %s then %s", ratio(all[0]), ratio(all[1]))
+	}
+	if mine, _, err := r.svc.OpenPositions(ctx, application.PositionFilter{UserID: alice, Symbol: perp.Symbol}); err != nil || len(mine) != 1 ||
+		mine[0].UserID != alice {
+		t.Fatalf("Alice's %+v %v", mine, err)
+	}
+	if one, cut, err := r.svc.OpenPositions(ctx, application.PositionFilter{Limit: 1}); err != nil || !cut || len(one) != 1 {
+		t.Fatalf("a page of one %+v %v %v", one, cut, err)
+	}
+	if none, _, err := r.svc.OpenPositions(ctx, application.PositionFilter{Symbol: "NOPE-USDT-PERP"}); err != nil || len(none) != 0 {
+		t.Fatalf("another contract %+v %v", none, err)
+	}
 	r.monitor(t, "59050") // warned
 	list, err := r.svc.RiskPositions(ctx)
 	if err != nil || len(list) != 1 || list[0].UserID != bob || list[0].WarnedAt.IsZero() || list[0].Liquidating ||

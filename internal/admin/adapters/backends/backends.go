@@ -426,6 +426,22 @@ func (d Derivatives) Risk(ctx context.Context) (json.RawMessage, error) {
 	return d.do(ctx, http.MethodGet, d.Base+"/internal/derivatives/risk", nil, nil)
 }
 
+// OpenPositions lists every user's open positions, riskiest first.
+func (d Derivatives) OpenPositions(ctx context.Context, q ports.PositionQuery) (json.RawMessage, error) {
+	v := url.Values{}
+	if q.Symbol != "" {
+		v.Set("symbol", q.Symbol)
+	}
+	if q.UserID != "" {
+		v.Set("user_id", q.UserID)
+	}
+	if q.Watch {
+		v.Set("watch", "true")
+	}
+	v.Set("limit", strconv.Itoa(q.Limit))
+	return d.do(ctx, http.MethodGet, d.Base+"/internal/derivatives/positions?"+v.Encode(), nil, nil)
+}
+
 // Flags implements ports.Flags on the shared config schema; a switch is
 // written with its ConfigChanged audit event in one transaction, published
 // by the config schema's outbox relay.
@@ -774,17 +790,19 @@ func (r Reports) OpenInterest(ctx context.Context) ([]ports.OpenInterest, error)
 
 // Liquidations returns a page of the liquidation steps of the last days,
 // newest first.
-func (r Reports) Liquidations(ctx context.Context, days int, kind, cursor string, limit int) ([]ports.LiquidationStep, string, error) {
-	pc, err := pageOf(cursor, limit)
+func (r Reports) Liquidations(ctx context.Context, q ports.LiquidationQuery) ([]ports.LiquidationStep, string, error) {
+	pc, err := pageOf(q.Cursor, q.Limit)
 	if err != nil {
 		return nil, "", err
 	}
 	rows, err := r.Conn.Query(ctx, `SELECT toString(event_id), kind, toString(user_id), symbol, position_side, cross_margin, adl, trade_id,
 		price, quantity, realized_pnl, insurance_paid, mark_price, bankruptcy_price, margin_balance, maintenance_margin, occurred_at
 		FROM derivatives_liquidations FINAL
-		WHERE occurred_at >= toDateTime64(today() - ?, 3, 'UTC') AND (? = '' OR kind = ?)
+		WHERE occurred_at >= toDateTime64(today() - ?, 3, 'UTC') AND (? = '' OR kind = ?) AND (? = '' OR symbol = ?)
+		AND (? = '' OR toString(user_id) = ?)
 		AND (NOT ? OR (occurred_at, toString(event_id)) < (`+ms+`, ?))
-		ORDER BY occurred_at DESC, toString(event_id) DESC LIMIT ?`, days-1, kind, kind, pc.on, pc.at.UnixMilli(), pc.id, pc.limit+1)
+		ORDER BY occurred_at DESC, toString(event_id) DESC LIMIT ?`, q.Days-1, q.Kind, q.Kind, q.Symbol, q.Symbol, q.UserID, q.UserID,
+		pc.on, pc.at.UnixMilli(), pc.id, pc.limit+1)
 	if err != nil {
 		return nil, "", unavailable(err)
 	}

@@ -528,11 +528,13 @@ func (h *Handler) cancelConditional(w http.ResponseWriter, r *http.Request) {
 // InternalRoutes serves the admin console (the gateway does not route
 // /internal): the contracts with their reduce-only state, mark price and
 // open interest; lifting reduce-only; the positions close to or in
-// liquidation; closing a user's position at the market.
+// liquidation; every user's open positions; closing a user's position at
+// the market.
 func (h *Handler) InternalRoutes(r chi.Router) {
 	r.Get("/internal/derivatives/contracts", h.overview)
 	r.Post("/internal/derivatives/contracts/{symbol}/lift-reduce-only", h.liftReduceOnly)
 	r.Get("/internal/derivatives/risk", h.risk)
+	r.Get("/internal/derivatives/positions", h.openPositions)
 	r.Post("/internal/derivatives/positions/close", h.adminClose)
 }
 
@@ -620,14 +622,40 @@ func (h *Handler) risk(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	type riskJSON struct {
-		positionJSON
-		UserID              string  `json:"user_id"`
-		Liquidating         bool    `json:"liquidating"`
-		LiquidationAttempts int     `json:"liquidation_attempts"`
-		WarnedAt            *string `json:"warned_at"`
-		MarginRatio         *string `json:"margin_ratio"`
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"positions": riskRows(list)})
+}
+
+// openPositions lists every user's open positions for the admin console,
+// riskiest first: symbol, user_id, watch=true (only those under watch),
+// limit (default 200, at most 1000).
+func (h *Handler) openPositions(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	if limit <= 0 || limit > 1000 {
+		limit = 200
 	}
+	list, cut, err := h.Svc.OpenPositions(r.Context(), application.PositionFilter{
+		Symbol: strings.ToUpper(q.Get("symbol")), UserID: q.Get("user_id"), Watch: q.Get("watch") == "true", Limit: limit,
+	})
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"positions": riskRows(list), "truncated": cut})
+}
+
+type riskJSON struct {
+	positionJSON
+	UserID              string  `json:"user_id"`
+	Liquidating         bool    `json:"liquidating"`
+	LiquidationAttempts int     `json:"liquidation_attempts"`
+	WarnedAt            *string `json:"warned_at"`
+	MarginRatio         *string `json:"margin_ratio"`
+}
+
+// riskRows renders positions across users with their liquidation state
+// and margin ratio.
+func riskRows(list []application.PositionView) []riskJSON {
 	out := make([]riskJSON, 0, len(list))
 	for _, v := range list {
 		row := riskJSON{positionJSON: toPositionJSON(v), UserID: v.UserID, Liquidating: v.Liquidating, LiquidationAttempts: v.LiquidationAttempts}
@@ -641,5 +669,5 @@ func (h *Handler) risk(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, row)
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"positions": out})
+	return out
 }

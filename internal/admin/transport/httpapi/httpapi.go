@@ -131,6 +131,7 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Post("/derivatives/contracts/{symbol}/lift-reduce-only", h.liftReduceOnly)
 			r.Get("/derivatives/risk", h.derivativesRisk)
 			r.Get("/derivatives/liquidations", h.liquidations)
+			r.Get("/positions", h.positions)
 			r.Get("/derivatives/insurance-fund", h.insuranceFund)
 			r.Get("/house", h.house)
 			r.Get("/health", h.health)
@@ -1022,12 +1023,29 @@ func (h *Handler) derivativesRisk(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) liquidations(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	list, next, err := h.Svc.Liquidations(r.Context(), principal(r), intParam(q, "days"), q.Get("kind"), q.Get("cursor"), intParam(q, "limit"))
+	list, next, err := h.Svc.Liquidations(r.Context(), principal(r), ports.LiquidationQuery{
+		Days: intParam(q, "days"), Kind: q.Get("kind"), Symbol: q.Get("symbol"), UserID: q.Get("user_id"), Cursor: q.Get("cursor"),
+		Limit: intParam(q, "limit"),
+	})
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
 	writePage(w, list, next)
+}
+
+// positions lists every user's open positions, riskiest first: symbol,
+// user_id, watch=true for those under watch, limit (at most 500).
+func (h *Handler) positions(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	page, err := h.Svc.OpenPositions(r.Context(), principal(r), ports.PositionQuery{
+		Symbol: q.Get("symbol"), UserID: q.Get("user_id"), Watch: q.Get("watch") == "true", Limit: intParam(q, "limit"),
+	})
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, page)
 }
 
 func (h *Handler) insuranceFund(w http.ResponseWriter, r *http.Request) {

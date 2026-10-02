@@ -440,6 +440,9 @@ type Derivatives interface {
 	LiftReduceOnly(ctx context.Context, symbol, actor string) (json.RawMessage, error)
 	// Risk returns the positions warned, taken over or close to it.
 	Risk(ctx context.Context) (json.RawMessage, error)
+	// OpenPositions returns every user's open positions, riskiest first:
+	// {positions, truncated}.
+	OpenPositions(ctx context.Context, q PositionQuery) (json.RawMessage, error)
 	// Positions returns a user's open positions as derivatives-service
 	// renders them.
 	Positions(ctx context.Context, userID string) (json.RawMessage, error)
@@ -452,6 +455,16 @@ type Derivatives interface {
 	// of kind ADMIN (DERIV_CLOSE_PENDING while its closing orders are
 	// being canceled); clientOrderID makes it idempotent.
 	ClosePosition(ctx context.Context, userID, symbol, positionSide, clientOrderID string) (json.RawMessage, error)
+}
+
+// PositionQuery selects open positions across users: a contract, a user,
+// only those under watch (warned, taken over, margin ratio ≥ 0.5), at
+// most Limit.
+type PositionQuery struct {
+	Symbol string
+	UserID string
+	Watch  bool
+	Limit  int
 }
 
 // Flag is a feature switch.
@@ -636,10 +649,20 @@ type Reports interface {
 	Candles(ctx context.Context, symbol string, seconds uint32, limit int) ([]Candle, error)
 	Derivatives(ctx context.Context, days int) ([]DerivativesDay, error)
 	OpenInterest(ctx context.Context) ([]OpenInterest, error)
-	// Liquidations returns a page of the liquidation steps of the last
-	// days, of one kind unless kind is empty, newest first, and the
-	// cursor of the next ("" on the last).
-	Liquidations(ctx context.Context, days int, kind, cursor string, limit int) ([]LiquidationStep, string, error)
+	// Liquidations returns a page of the liquidation steps, newest first,
+	// and the cursor of the next ("" on the last).
+	Liquidations(ctx context.Context, q LiquidationQuery) ([]LiquidationStep, string, error)
+}
+
+// LiquidationQuery selects liquidation steps of the last Days: of one
+// kind, contract or user unless empty.
+type LiquidationQuery struct {
+	Days   int
+	Kind   string
+	Symbol string
+	UserID string
+	Cursor string
+	Limit  int
 }
 
 // OrderQuery selects spot orders; empty fields match everything.

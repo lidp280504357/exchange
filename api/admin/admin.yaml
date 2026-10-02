@@ -2370,6 +2370,12 @@ paths:
           schema:
             type: string
             enum: [WARNING, STARTED, FILLED, ADL]
+        - name: symbol
+          in: query
+          description: One contract (BTC-USDT-PERP).
+          schema:
+            type: string
+        - $ref: '#/components/parameters/UserFilter'
         - $ref: '#/components/parameters/Cursor'
         - name: limit
           in: query
@@ -2393,6 +2399,56 @@ paths:
                       $ref: '#/components/schemas/LiquidationStep'
                   next_cursor:
                     $ref: '#/components/schemas/NextCursor'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/positions:
+    get:
+      operationId: listPositions
+      summary: Every user's open contract positions, riskiest first
+      description: |
+        From derivatives-service, valued at the mark price: highest margin
+        ratio (maintenance margin / margin balance) first, then the
+        largest. Cross positions are measured on their own; their
+        liquidation price is on the user's page. At most `limit` (500)
+        positions; `truncated` says there are more. Needs derivatives.read.
+      tags: [derivatives]
+      parameters:
+        - name: symbol
+          in: query
+          schema:
+            type: string
+        - $ref: '#/components/parameters/UserFilter'
+        - name: watch
+          in: query
+          description: true for the positions under watch only (warned, taken over, margin ratio ≥ 0.5).
+          schema:
+            type: string
+            enum: ['true']
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 500
+      responses:
+        '200':
+          description: The positions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [positions, truncated, house_user_id]
+                properties:
+                  positions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RiskPosition'
+                  truncated:
+                    type: boolean
+                  house_user_id:
+                    type: [string, 'null']
+                    description: HOUSE's account on the contracts (its positions are the counterparty of users').
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/derivatives/insurance-fund:

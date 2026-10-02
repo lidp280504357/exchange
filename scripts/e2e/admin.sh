@@ -380,6 +380,15 @@ expect 200 - "liquidation steps"
 check '.items | type == "array"' "a list"
 as AUDITOR GET "/admin/v1/derivatives/liquidations?kind=SIDEWAYS" ""
 expect 400 COMMON_INVALID_ARGUMENT "an unknown kind"
+as AUDITOR GET "/admin/v1/derivatives/liquidations?days=7&kind=FILLED&symbol=ETH-USDT-PERP" ""
+expect 200 - "liquidation steps of a kind and a contract"
+check 'all(.items[]; .kind == "FILLED" and .symbol == "ETH-USDT-PERP")' "only those"
+as AUDITOR GET "/admin/v1/derivatives/liquidations?user_id=bob" ""
+expect 400 COMMON_INVALID_ARGUMENT "a user that is no UUID"
+as AUDITOR GET "/admin/v1/positions?watch=true" ""
+expect 200 - "every user's positions at risk"
+check '(.positions | type) == "array" and (.truncated | type) == "boolean" and all(.positions[]; .margin_ratio == null or (.margin_ratio | tonumber) >= 0)' \
+  "a list, riskiest first"
 
 echo "== a two-person insurance fund contribution"
 as AUDITOR GET /admin/v1/derivatives/insurance-fund ""
@@ -541,6 +550,13 @@ else
     [[ $STATUS == 200 ]] && jq -e '.positions | length == 1 and .[0].quantity == "0.1"' <<<"$BODY" >/dev/null
   }
   eventually 40 "the console shows the long" user_long
+  as AUDITOR GET "/admin/v1/positions?user_id=$USER_ID&symbol=eth-usdt-perp" ""
+  expect 200 - "every user's positions, of this user"
+  check '(.positions | length) == 1 and .positions[0].quantity == "0.1" and .positions[0].mark_price != null and (.house_user_id | type) == "string"' \
+    "the long valued at the mark price; HOUSE's account named"
+  HOUSE_ID=$(jq -r .house_user_id <<<"$BODY")
+  as AUDITOR GET "/admin/v1/positions?user_id=$HOUSE_ID&symbol=ETH-USDT-PERP" ""
+  check '(.positions | length) >= 1' "HOUSE holds the other side"
   as FINANCE POST "/admin/v1/users/$USER_ID/positions/close" '{"symbol":"ETH-USDT-PERP","position_side":"BOTH","reason":"e2e force close"}'
   expect 403 ADMIN_FORBIDDEN "FINANCE closes no positions"
   as OPERATOR POST "/admin/v1/users/$USER_ID/positions/close" '{"symbol":"ETH-USDT-PERP","position_side":"BOTH","reason":"e2e force close"}'
