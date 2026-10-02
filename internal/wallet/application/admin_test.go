@@ -194,6 +194,32 @@ func TestUnclaimedDepositsAreCreditedByHand(t *testing.T) {
 	if !h.ledger.available["alice"].Equal(before.Add(d("0.5"))) {
 		t.Fatal("booked once")
 	}
+
+	// An unclaimed backfill whose callback disagrees is in doubt: the
+	// ledger is never asked to release it.
+	small := ManualDeposit{Network: tron, TradeID: "u2", Address: addr.Address, TxHash: "tx-u2", Amount: d("0.25"), Actor: "ops@example.com"}
+	b, err := h.svc.BookManualDeposit(ctx, small, "callback lost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.cround(t)
+	if err := h.svc.OnCredited(ctx, b.ID, "j-small"); err != nil {
+		t.Fatal(err)
+	}
+	h.callback(t, ports.CustodyTrade{
+		TradeID: "u2", Kind: domain.CallbackDeposit, Status: 3, Word: domain.CustodySuccess, Coin: usdtCoin, Address: addr.Address,
+		Amount: d("0.3"), RawAmount: d("300000"), TxHash: "tx-u2",
+	})
+	if got := h.store.deposits[b.ID]; got.Discrepancy == "" || !got.Unclaimed || got.JournalID == "" {
+		t.Fatalf("an unclaimed backfill in doubt %+v", got)
+	}
+	held := h.ledger.available["alice"]
+	if _, err := h.svc.CreditDeposit(ctx, b.ID, "ops@example.com", "credit it anyway"); !apperr.Is(err, "WALLET_DEPOSIT_NOT_RELEASABLE") {
+		t.Fatalf("a backfill in doubt is not credited: %v", err)
+	}
+	if !h.ledger.available["alice"].Equal(held) {
+		t.Fatal("the ledger released a deposit in doubt")
+	}
 }
 
 func TestWithdrawalHoldAndDetail(t *testing.T) {

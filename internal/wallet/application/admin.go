@@ -148,19 +148,16 @@ func (s *Service) CreditDeposit(ctx context.Context, id, actor, reason string) (
 	if err := needDecider(actor, reason); err != nil {
 		return domain.Deposit{}, err
 	}
-	d, err := s.AdminDeposit(ctx, id)
-	if err != nil {
-		return domain.Deposit{}, err
+	if _, err := uuid.Parse(id); err != nil {
+		return domain.Deposit{}, apperr.NotFound("no such deposit")
 	}
-	if d.Status != domain.StatusRejected || !d.Unclaimed || d.JournalID == "" || d.Resolution != "" {
-		return domain.Deposit{}, domain.ErrNotReleasable
-	}
-	journal, err := s.W.Ledger.ReleaseUnclaimed(ctx, d.ID, d.UserID, d.Asset, d.Amount, actor, strings.TrimSpace(reason))
-	if err != nil {
-		return domain.Deposit{}, err
-	}
+	// The deposit stays locked from its check to its record, the ledger's
+	// release in between: no dismissal or callback's discrepancy slips in
+	// after the check, so the funds never move for a deposit that is not
+	// released. The release is idempotent (deposit-release:<id>): when the
+	// record fails after it, the next attempt finds the same journal.
 	var out domain.Deposit
-	err = s.Store.Tx(ctx, func(r ports.Repos) error {
+	err := s.Store.Tx(ctx, func(r ports.Repos) error {
 		cur, err := r.Deposits().GetForUpdate(ctx, id)
 		if err != nil {
 			return err
@@ -168,9 +165,12 @@ func (s *Service) CreditDeposit(ctx context.Context, id, actor, reason string) (
 		if cur == nil {
 			return apperr.NotFound("no such deposit")
 		}
-		if cur.Resolution == domain.ResolutionCredited && cur.ReleaseJournalID == journal {
-			out = *cur // a repeat
-			return nil
+		if err := cur.Releasable(); err != nil {
+			return err
+		}
+		journal, err := s.W.Ledger.ReleaseUnclaimed(ctx, cur.ID, cur.UserID, cur.Asset, cur.Amount, actor, strings.TrimSpace(reason))
+		if err != nil {
+			return err
 		}
 		if err := cur.Release(journal, actor, strings.TrimSpace(reason), s.Now()); err != nil {
 			return err

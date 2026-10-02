@@ -144,13 +144,23 @@ func (d *Deposit) Attention() bool {
 	return d.Resolution == "" && (d.Status == StatusRejected || d.Discrepancy != "")
 }
 
-// Release records an administrator crediting an unclaimed deposit's
-// funds, booked to UNCLAIMED_DEPOSIT, to the user (journal is the
-// release's): it becomes CREDITED. A backfill the custodian's callback
-// disagreed with is not released: what it says is in doubt.
-func (d *Deposit) Release(journal, actor, note string, now time.Time) error {
+// Releasable reports whether an administrator may credit the deposit's
+// funds to the user: unclaimed, booked to UNCLAIMED_DEPOSIT, undecided,
+// and not a backfill the custodian's callback disagreed with (what it
+// says is in doubt).
+func (d *Deposit) Releasable() error {
 	if d.Status != StatusRejected || !d.Unclaimed || d.JournalID == "" || d.Resolution != "" || d.Discrepancy != "" {
 		return ErrNotReleasable
+	}
+	return nil
+}
+
+// Release records an administrator crediting an unclaimed deposit's
+// funds, booked to UNCLAIMED_DEPOSIT, to the user (journal is the
+// release's): it becomes CREDITED.
+func (d *Deposit) Release(journal, actor, note string, now time.Time) error {
+	if err := d.Releasable(); err != nil {
+		return err
 	}
 	d.Status, d.CreditedAt = StatusCredited, now
 	d.Resolution, d.ResolvedBy, d.ResolvedAt, d.ResolutionNote, d.ReleaseJournalID = ResolutionCredited, actor, now, note, journal
