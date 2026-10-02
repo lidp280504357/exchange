@@ -59,7 +59,7 @@ pull_app_image() {
   sudo grep -qs '"ghcr.io"' /root/.docker/config.json || return 1
   fresh=$(($(date +%s) - $(git log -1 --format=%ct HEAD) < 1200))
   until sudo docker image inspect "$image" >/dev/null 2>&1 || out=$(sudo docker pull -q "$image" 2>&1); do
-    if grep -qiE 'denied|unauthorized|429|too many requests' <<<"$out"; then
+    if grep -qiE 'denied|unauthorized|forbidden|429|too many requests|quota|rate limit' <<<"$out"; then
       echo "== ghcr.io 拒绝了拉取（令牌过期、没有 read:packages，或免费额度用完），改在服务器上构建"
       return 1
     fi
@@ -78,14 +78,16 @@ pull_app_image() {
   echo "== 用 Actions 构建的镜像 $image"
 }
 
-# ensure_build_memory 在服务器上构建（Go 镜像或前端）前确认可用内存（MemAvailable）够：不够就停止部署、提示升级
-# 服务器，不让构建把内存与交换区吃光（2026-10-02 两次整机无响应）。用户决定（2026-10-03）：GHCR 额度用完时回退
-# 到本地构建，内存不够就拒绝，升级由用户处理。BUILD_MIN_MEMORY_MB 可改门槛（默认 2000）。
+# ensure_build_memory 在服务器上构建（Go 镜像或前端）前确认内存够：可用内存（MemAvailable）不到 3000 MB，或交换区
+# 已用超过 1500 MB，就停止部署并提示升级服务器，不让构建把内存与交换区吃光（2026-10-02 两次整机无响应）。
+# 用户决定（2026-10-03）：GHCR 额度用完时回退到本地构建，内存不够就拒绝，升级由用户处理。
+# BUILD_MIN_MEMORY_MB、BUILD_MAX_SWAP_MB 可改门槛。
 ensure_build_memory() {
-  local avail need=${BUILD_MIN_MEMORY_MB:-2000}
+  local avail swap need=${BUILD_MIN_MEMORY_MB:-3000} most=${BUILD_MAX_SWAP_MB:-1500}
   avail=$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo)
-  if [ "$avail" -lt "$need" ]; then
-    echo "== 可用内存只有 ${avail} MB，在服务器上$1至少要 ${need} MB：停止部署。请升级服务器（或等 GitHub Actions 的镜像，见 docs/runbook/server-deploy.md）"
+  swap=$(awk '/^SwapTotal:/ {t = $2} /^SwapFree:/ {f = $2} END {print int((t - f) / 1024)}' /proc/meminfo)
+  if [ "$avail" -lt "$need" ] || [ "$swap" -gt "$most" ]; then
+    echo "== 内存不足，需要升级服务器：可用 ${avail} MB（至少 ${need}）、交换区已用 ${swap} MB（至多 ${most}），不在服务器上$1，停止部署"
     exit 1
   fi
 }

@@ -50,12 +50,13 @@ jobs:
             ${{ steps.meta.outputs.image }}:main
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      # Keep the last ten versions: storage of a private package counts
-      # against the account's quota. Needs the repository to have the
-      # package's Admin role (it does when this workflow created it).
+      # Keep the last five versions, enough to roll back: storage of a
+      # private package counts against the free tier's quota. Needs the
+      # repository to have the package's Admin role (it does when this
+      # workflow created it).
       - uses: actions/delete-package-versions@v5
         continue-on-error: true
         with:
           package-name: exchange-app
           package-type: container
-          min-versions-to-keep: 10
+          min-versions-to-keep: 5

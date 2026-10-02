@@ -54,13 +54,16 @@ func (s *Sim) refreshAnchor(ctx context.Context, now time.Time) {
 		return
 	}
 	s.anchorAt = now
-	s.anchorReads = slices.DeleteFunc(s.anchorReads, func(m domain.Mark) bool { return now.Sub(m.At) >= anchorWindow })
 	price, at, err := s.prices.LastTrade(ctx, s.cfg.Symbol)
 	if err != nil {
+		// The reads of before stay: without them the quotes would center
+		// on the bare target and the band would refuse their far levels
+		// while market data is out (the watchdog waits meanwhile, readAt).
 		s.m.errors.WithLabelValues("last_trade").Inc()
 		return
 	}
 	s.readAt = now
+	s.anchorReads = slices.DeleteFunc(s.anchorReads, func(m domain.Mark) bool { return now.Sub(m.At) >= anchorWindow })
 	if price.IsPositive() {
 		s.last, s.lastTradeAt = price, at
 		s.m.last.Set(price.InexactFloat64())

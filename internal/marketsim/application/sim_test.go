@@ -1117,11 +1117,14 @@ func TestTheWatchdogWaitsWithoutReadsOrTakers(t *testing.T) {
 	r := bandRig(t, nil)
 	r.prices.mu.Lock()
 	r.prices.frozen, r.prices.lastAt = true, r.now
+	r.prices.mu.Unlock()
+	r.rounds(8)
+	r.prices.mu.Lock()
 	r.prices.lastErr = errors.New("market-data-service unavailable")
 	r.prices.mu.Unlock()
 	r.rounds(4 * 4 * 60)
-	if st := r.sim.Status(); st.Deadlocks != 0 {
-		t.Fatalf("four minutes without reads: %+v", st)
+	if st := r.sim.Status(); st.Deadlocks != 0 || st.Anchor <= 0 {
+		t.Fatalf("four minutes without reads (the last anchor kept): deadlocks %d, anchor %v", st.Deadlocks, st.Anchor)
 	}
 	r.prices.mu.Lock()
 	r.prices.lastErr = nil
