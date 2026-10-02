@@ -1,0 +1,88 @@
+1000BONK	png	coingecko	67857	https://coin-images.coingecko.com/coins/images/28600/large/bonk.jpg?1696527587
+1000FLOKI	png	coingecko	39607	https://coin-images.coingecko.com/coins/images/16746/large/PNG_image.png?1696516318
+1000PEPE	png	coingecko	70818	https://coin-images.coingecko.com/coins/images/29850/large/pepe-token.jpeg?1696528776
+1000SHIB	png	coingecko	20522	https://coin-images.coingecko.com/coins/images/11939/large/shiba.png?1696511800
+1INCH	svg	icons	3524
+AAVE	svg	icons	718
+ADA	svg	icons	3875
+ALGO	svg	icons	488
+APE	svg	icons	26790
+APT	png	coingecko	9790	https://coin-images.coingecko.com/coins/images/26455/large/Aptos-Network-Profile-Picture_%281%29.png?1788259511
+AR	png	coingecko	34405	https://coin-images.coingecko.com/coins/images/4343/large/oRt6SiEN_400x400.jpg?1696504946
+ARB	png	coingecko	55966	https://coin-images.coingecko.com/coins/images/16547/large/arb.jpg?1721358242
+ATOM	svg	icons	1689
+AVAX	svg	icons	891
+AXS	png	coingecko	35480	https://coin-images.coingecko.com/coins/images/13029/large/axie_infinity_logo.png?1696512817
+BAT	svg	icons	237
+BCH	svg	icons	959
+BNB	svg	icons	505
+BTC	svg	icons	953
+CAKE	png	coingecko	16961	https://coin-images.coingecko.com/coins/images/12632/large/pancakeswap-cake-logo_%281%29.png?1696512440
+CFX	png	coingecko	7880	https://coin-images.coingecko.com/coins/images/13079/large/3vuYMbjN.png?1696512867
+CHZ	svg	icons	1081
+COMP	svg	icons	796
+CRV	svg	icons	729
+DASH	svg	icons	604
+DOGE	svg	icons	738
+DOT	svg	icons	893
+DYDX	png	coingecko	22952	https://coin-images.coingecko.com/coins/images/32594/large/dydx.png?1698673495
+EGLD	png	coingecko	11524	https://coin-images.coingecko.com/coins/images/12335/large/egld-token-logo.png?1696512162
+ENA	png	coingecko	17166	https://coin-images.coingecko.com/coins/images/36530/large/ethena.png?1711701436
+ENJ	svg	icons	966
+ENS	png	coingecko	29343	https://coin-images.coingecko.com/coins/images/19785/large/ENS.jpg?1727872989
+ETC	svg	icons	736
+ETH	svg	icons	525
+FET	png	coingecko	11259	https://coin-images.coingecko.com/coins/images/5681/large/ASI.png?1719827289
+FIL	svg	icons	994
+FLOW	png	coingecko	17205	https://coin-images.coingecko.com/coins/images/13446/large/5f6294c0c7a8cda55cb1c936_Flow_Wordmark.png?1696513210
+GALA	png	coingecko	16210	https://coin-images.coingecko.com/coins/images/12493/large/GALA_token_image_-_200PNG.png?1709725869
+GRT	svg	icons	617
+HBAR	png	coingecko	9196	https://coin-images.coingecko.com/coins/images/3688/large/hbar.png?1696504364
+HYPE	png	coingecko	40114	https://coin-images.coingecko.com/coins/images/50882/large/hyperliquid.jpg?1729431300
+ICP	svg	icons	1332
+IMX	png	coingecko	8493	https://coin-images.coingecko.com/coins/images/17233/large/immutableX-symbol-BLK-RGB.png?1696516787
+INJ	png	coingecko	11937	https://coin-images.coingecko.com/coins/images/12882/large/Other_200x200.png?1738782212
+IOTA	png	coingecko	30016	https://coin-images.coingecko.com/coins/images/692/large/IOTA_Thumbnail_%281%29.png?1743772896
+JTO	png	coingecko	50551	https://coin-images.coingecko.com/coins/images/33228/large/jto.png?1701137022
+JUP	png	coingecko	48602	https://coin-images.coingecko.com/coins/images/34188/large/jup.png?1704266489
+KAVA	png	coingecko	35477	https://coin-images.coingecko.com/coins/images/9761/large/kava.png?1696509822
+KSM	svg	icons	835
+LDO	png	coingecko	47943	https://coin-images.coingecko.com/coins/images/13573/large/Lido_DAO.png?1696513326
+LINK	svg	icons	380
+LTC	svg	icons	331
+MANA	svg	icons	917
+MINA	png	coingecko	103098	https://coin-images.coingecko.com/coins/images/15628/large/JM4_vQ34_400x400.png?1696515261
+NEAR	png	coingecko	24312	https://coin-images.coingecko.com/coins/images/10365/large/near.jpg?1696510367
+NEO	svg	icons	425
+ONDO	png	coingecko	22150	https://coin-images.coingecko.com/coins/images/26580/large/ONDO.png?1696525656
+OP	png	coingecko	12184	https://coin-images.coingecko.com/coins/images/25244/large/Token.png?1774456081
+PENDLE	png	coingecko	8157	https://coin-images.coingecko.com/coins/images/15069/large/Pendle_Logo_Normal-03.png?1696514728
+PENGU	png	coingecko	16955	https://coin-images.coingecko.com/coins/images/52622/large/PUDGY_PENGUINS_PENGU_PFP.png?1733809110
+PNUT	png	coingecko	74411	https://coin-images.coingecko.com/coins/images/51301/large/Peanut_the_Squirrel.png?1734941241
+POL	svg	icons	1016
+PYTH	png	coingecko	21640	https://coin-images.coingecko.com/coins/images/31924/large/pyth.png?1701245725
+QNT	svg	icons	879
+RENDER	png	coingecko	21613	https://coin-images.coingecko.com/coins/images/11636/large/rndr.png?1696511529
+RUNE	png	coingecko	28911	https://coin-images.coingecko.com/coins/images/6595/large/THORChain_RUNE_Token.png?1782452363
+SAND	svg	icons	317
+SEI	png	coingecko	20312	https://coin-images.coingecko.com/coins/images/28205/large/Sei_Logo_-_Transparent.png?1696527207
+SNX	svg	icons	939
+SOL	svg	icons	589
+STX	svg	icons	366
+SUI	png	coingecko	7770	https://coin-images.coingecko.com/coins/images/26375/large/sui-ocean-square.png?1727791290
+TAO	png	coingecko	4596	https://coin-images.coingecko.com/coins/images/28452/large/ARUsPeNQ_400x400.jpeg?1696527447
+THETA	svg	icons	422
+TIA	png	coingecko	64547	https://coin-images.coingecko.com/coins/images/31967/large/tia.jpg?1696530772
+TRUMP	png	coingecko	103672	https://coin-images.coingecko.com/coins/images/53746/large/trump.png?1737171561
+TRX	svg	icons	429
+UNI	svg	icons	4762
+USDT	svg	icons	648
+VET	svg	icons	416
+WIF	png	coingecko	66665	https://coin-images.coingecko.com/coins/images/33566/large/dogwifhat.jpg?1702499428
+WLD	png	coingecko	20784	https://coin-images.coingecko.com/coins/images/31069/large/worldcoin.jpeg?1696529903
+XLM	svg	icons	618
+XRP	svg	icons	399
+XTZ	svg	icons	1352
+YFI	svg	icons	931
+ZEC	svg	icons	565
+ZIL	svg	icons	468
