@@ -623,8 +623,8 @@ if [[ $LINK_STATUS != TRADING ]]; then
   expect 200 - "and opens it for trading (from $LINK_STATUS)"
 fi
 at_exit 'as OPERATOR POST /admin/v1/instruments/pairs/LINK-BTC/status "{\"to\":\"HALT\",\"reason\":\"e2e cleanup\"}" >/dev/null'
-link_order() {
-  call POST /v1/orders '{"symbol":"LINK-BTC","side":"BUY","type":"LIMIT","price":"0.0001","quantity":"1"}' "${UAUTH[@]}" -H "Idempotency-Key: e2e-admin-link-$RUN"
+link_order() { # 2 LINK at 0.0001 BTC: worth either minimum the run set (0.0001 or 0.0002)
+  call POST /v1/orders '{"symbol":"LINK-BTC","side":"BUY","type":"LIMIT","price":"0.0001","quantity":"2"}' "${UAUTH[@]}" -H "Idempotency-Key: e2e-admin-link-$RUN"
   [[ $STATUS == 202 ]]
 }
 eventually 40 "the user rests a buy on LINK-BTC" link_order
