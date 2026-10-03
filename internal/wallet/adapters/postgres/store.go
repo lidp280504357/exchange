@@ -301,14 +301,18 @@ func (r deposits) Insert(ctx context.Context, d domain.Deposit) error {
 	return nil
 }
 
+// Update stores what changed of a deposit. Its user changes only from
+// nobody (B7a: a deposit of nobody assigned to its user); a user's
+// deposit keeps its user whatever d says.
 func (r deposits) Update(ctx context.Context, d domain.Deposit) error {
 	_, err := r.q.Exec(ctx, `UPDATE deposits SET block_number = $2, block_hash = $3, confirmations = $4, unclaimed = $5,
 		reason = $6, status = $7, journal_id = $8, credit_requested_at = $9, confirmed_at = $10, credited_at = $11, callback_at = $12,
 		discrepancy = $13, resolution = $14, resolved_by = $15, resolved_at = $16, resolution_note = $17, release_journal_id = $18,
+		user_id = CASE WHEN user_id = $20::uuid THEN $19::uuid ELSE user_id END,
 		updated_at = now() WHERE id = $1`,
 		d.ID, int64(d.BlockNumber), d.BlockHash, int64(d.Confirmations), d.Unclaimed, text(d.Reason), d.Status, //nolint:gosec // block heights fit
 		text(d.JournalID), stamp(d.CreditRequested), stamp(d.ConfirmedAt), stamp(d.CreditedAt), stamp(d.CallbackAt), d.Discrepancy,
-		d.Resolution, d.ResolvedBy, stamp(d.ResolvedAt), d.ResolutionNote, text(d.ReleaseJournalID))
+		d.Resolution, d.ResolvedBy, stamp(d.ResolvedAt), d.ResolutionNote, text(d.ReleaseJournalID), d.UserID, domain.NoOwner)
 	if err != nil {
 		return fmt.Errorf("update deposit: %w", err)
 	}

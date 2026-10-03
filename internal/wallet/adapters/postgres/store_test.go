@@ -824,4 +824,23 @@ func TestCustodySwitchStorage(t *testing.T) {
 	if owner, err := read.Addresses().RetiredOwner(ctx, "TRON", "TNeverRetired"); err != nil || owner != "" {
 		t.Fatalf("no former owner %q %v", owner, err)
 	}
+	// Assigned to its user, the deposit keeps that user (the update stores
+	// it; found missing by admin.sh's case 21 on 2026-10-04); a user's
+	// deposit does not change hands.
+	assigned := nobody
+	assigned.UserID, assigned.Status, assigned.Resolution = alice, domain.StatusCredited, domain.ResolutionCredited
+	if err := store.Tx(ctx, func(r ports.Repos) error { return r.Deposits().Update(ctx, assigned) }); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := read.Deposits().Get(ctx, nobody.ID); err != nil || got == nil || got.UserID != alice || got.Status != domain.StatusCredited {
+		t.Fatalf("assigned %+v %v", got, err)
+	}
+	moved := assigned
+	moved.UserID = uuid.NewString()
+	if err := store.Tx(ctx, func(r ports.Repos) error { return r.Deposits().Update(ctx, moved) }); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := read.Deposits().Get(ctx, nobody.ID); err != nil || got == nil || got.UserID != alice {
+		t.Fatalf("a user's deposit changed hands %+v %v", got, err)
+	}
 }
