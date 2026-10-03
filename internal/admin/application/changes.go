@@ -188,6 +188,20 @@ func confirmationHash(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// confirmedBefore is the change p's confirmation token confirmed already:
+// brought again, even once the change took effect, it answers with that
+// change as it stands (C5.5 ⑩, ⑲).
+func (s *Service) confirmedBefore(ctx context.Context, p Principal, token string) (*domain.InstrumentChange, error) {
+	if token == "" {
+		return nil, nil
+	}
+	c, err := s.Store.Read().Changes().ByConfirmation(ctx, confirmationHash(token))
+	if err != nil || c == nil || c.RequestedBy != p.Admin.ID {
+		return nil, err
+	}
+	return c, nil
+}
+
 // confirmed checks that token is p's confirmation of exactly this change.
 func (s *Service) confirmed(p Principal, token, kind, fingerprint string) error {
 	sealed, err := base64.RawURLEncoding.DecodeString(token)
@@ -488,6 +502,14 @@ func (s *Service) setStatus(ctx context.Context, p Principal, kind, symbol, to, 
 		return StatusResult{}, err
 	}
 	reason = strings.TrimSpace(reason)
+	if done, err := s.confirmedBefore(ctx, p, token); err != nil || done != nil {
+		if err != nil {
+			return StatusResult{}, err
+		}
+		var pl struct{ From, To string }
+		_ = json.Unmarshal(done.Payload, &pl)
+		return StatusResult{From: pl.From, To: pl.To, Change: done}, nil
+	}
 	prev, err := s.PreviewStatus(ctx, p, kind, symbol, to)
 	if err != nil {
 		return StatusResult{}, err
@@ -651,18 +673,24 @@ const changeGiveUp = time.Hour
 // effect already, it is recorded as applied, as one applied whose record
 // failed is. A change that is no longer what was confirmed fails.
 func (s *Service) ApplyDueChanges(ctx context.Context) (int, error) {
-	var due []domain.InstrumentChange
+	type claimed struct {
+		c domain.InstrumentChange
+		// before: a round claimed it earlier and its outcome is unknown,
+		// so it counts as attempted whatever this round reaches (C5.5 ⑲).
+		before bool
+	}
+	var due []claimed
 	err := s.Store.Tx(ctx, func(r ports.Repos) error {
 		list, err := r.Changes().Due(ctx, s.Now(), dueBatch)
 		if err != nil {
 			return err
 		}
 		for _, c := range list {
-			c.Claim(s.Now())
+			fresh := c.Claim(s.Now())
 			if err := r.Changes().Update(ctx, c); err != nil {
 				return err
 			}
-			due = append(due, c)
+			due = append(due, claimed{c: c, before: !fresh})
 		}
 		return nil
 	})
@@ -670,8 +698,10 @@ func (s *Service) ApplyDueChanges(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	n := 0
-	for _, c := range due {
+	for _, x := range due {
+		c := x.c
 		result, attempted, err := s.applyChange(ctx, c)
+		attempted = attempted || x.before
 		if waits(err) && (attempted || s.Now().Sub(c.EffectiveAt) < changeGiveUp) {
 			s.Log.WarnContext(ctx, "instruments: change not applied yet", "change_id", c.ID, "attempted", attempted, "error", err)
 			if err := s.changeWaits(ctx, c.ID, !attempted, err.Error()); err != nil {

@@ -527,12 +527,36 @@ func TestTheConsoleWaitsOnNoServiceInATransaction(t *testing.T) {
 	if n, _ := h.svc.ApplyDueChanges(ctx); n != 0 {
 		t.Fatal("taken again within the claim's hold")
 	}
+	// Taken again with the service down: still claimed (its outcome is
+	// unknown), not canceled, not failed after an hour (C5.5 ⑲).
+	catalog.down = true
+	h.now = h.now.Add(domain.ClaimHold + changeGiveUp)
+	if n, err := h.svc.ApplyDueChanges(ctx); err != nil || n != 0 {
+		t.Fatalf("the service down: %d %v", n, err)
+	}
+	if got, _ := h.store.Changes().Get(ctx, res.Change.ID); got.Status != domain.ChangeScheduled || got.ApplyingAt.IsZero() {
+		t.Fatalf("kept claimed %+v", got)
+	}
+	if _, err := h.svc.CancelInstrumentChange(ctx, deputy, res.Change.ID, "too late"); code(err) != "ADMIN_CHANGE_APPLYING" {
+		t.Fatalf("canceled with the service down: %v", err)
+	}
+	catalog.down = false
 	h.now = h.now.Add(domain.ClaimHold)
 	if n, err := h.svc.ApplyDueChanges(ctx); err != nil || n != 1 {
 		t.Fatalf("found again: %d %v", n, err)
 	}
 	if got, _ := h.store.Changes().Get(ctx, res.Change.ID); got.Status != domain.ChangeApplied || !strings.HasSuffix(got.Result, inEffect) {
 		t.Fatalf("in effect already %+v", got)
+	}
+	// Its confirmation brought again once it took effect: the same
+	// change, as it stands (C5.5 ⑲); so a document's.
+	if again, err := h.svc.SetPairStatus(ctx, boss, "ETH-BTC", "TRADING", "resume", sp.Confirmation.Token); err != nil ||
+		again.Change == nil || again.Change.ID != res.Change.ID || again.Change.Status != domain.ChangeApplied {
+		t.Fatalf("a used confirmation, the change applied: %+v %v", again.Change, err)
+	}
+	if _, again, err := h.svc.ApplyConfig(ctx, boss, ladder, "stricter ladder", prev.Guard.Confirmation.Token); err != nil || again == nil ||
+		again.ID != first.ID || again.Status != domain.ChangeFailed {
+		t.Fatalf("a used confirmation, the change failed: %+v %v", again, err)
 	}
 
 	// Not applied for a moment: it waits, may be canceled, and fails after

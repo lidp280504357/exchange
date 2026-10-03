@@ -54,6 +54,9 @@ func (s *Service) ApplyConfig(ctx context.Context, p Principal, config json.RawM
 		return ports.ConfigResult{}, nil, err
 	}
 	reason = strings.TrimSpace(reason)
+	if done, err := s.confirmedBefore(ctx, p, confirmation); err != nil || done != nil {
+		return ports.ConfigResult{Changes: []ports.ConfigChange{}, Warnings: []ports.ConfigWarning{}}, done, err
+	}
 	prev, err := s.previewConfig(ctx, p, config)
 	if err != nil {
 		return ports.ConfigResult{}, nil, err
