@@ -154,3 +154,67 @@ func TestLedgerReleaseHold(t *testing.T) {
 		t.Fatalf("the order's 30 still frozen: %v\n%s", err, out)
 	}
 }
+
+// TestLedgerCustodyReset takes a stand-in custodian's simulated deposits out
+// of the expectation, records the journal for the wallet's custody check
+// once, and puts them back (the real gateway's integration, B1).
+func TestLedgerCustodyReset(t *testing.T) {
+	ctx := context.Background()
+	wallet := testenv.Postgres(t)
+	dbs := ledgerDBs{
+		ledger: testenv.Postgres(t), instrument: testenv.Postgres(t), config: testenv.Postgres(t),
+		open: func(string) (*pg.DB, error) { return wallet, nil },
+	}
+	seed, err := os.ReadFile("../../deploy/instruments/test.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := instrumentsWith(ctx, dbs.instrument, []string{"apply", "--file", "-", "--reason", "seed"}, bytes.NewReader(seed), &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) (string, error) {
+		var out bytes.Buffer
+		err := ledgerWith(ctx, dbs, args, &out)
+		return out.String(), err
+	}
+	if _, err := run("balances", uuid.NewString()); err != nil { // migrates the ledger
+		t.Fatal(err)
+	}
+	svc := &application.Service{
+		Store:  postgres.NewStore(dbs.ledger, event.NewFactory("exchangectl-test", "t")),
+		Assets: instrumentAssets{svc: &instrumentapp.Service{Store: instrumentpg.NewStore(dbs.instrument, nil)}},
+		Flags:  staticFlags{}, Now: time.Now,
+	}
+	// The stand-in reported 396.25 USDT deposited.
+	if _, err := svc.CreditDeposit(ctx, uuid.NewString(), domain.Deposit{
+		ID: uuid.NewString(), UserID: uuid.NewString(), Asset: "USDT", Amount: decimal.RequireFromString("396.25"), Network: "TRON", TxHash: "t1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reset := []string{"custody-reset", "--asset", "usdt", "--amount", "396.25", "--reason", "the stand-in replaced", "--key", "switch"}
+	if _, err := run(reset...); err == nil {
+		t.Fatal("a reset needs ledger.manual_adjustment")
+	}
+	if out, err := cli(t, dbs.config, "set", flags.KeyManualAdjustment, "--on", "--reason", "test"); err != nil {
+		t.Fatalf("flag: %v\n%s", err, out)
+	}
+	for _, replayed := range []string{"false", "true"} {
+		out, err := run(reset...)
+		if err != nil || !strings.Contains(out, "replayed "+replayed) || !strings.Contains(out, "simulated USDT at no custodian: 396.25") {
+			t.Fatalf("reset (replayed %s): %v\n%s", replayed, err, out)
+		}
+	}
+	if _, err := run("custody-reset", "--asset", "USDT", "--amount", "1", "--reason", "more", "--key", "more"); err == nil {
+		t.Fatal("reset below nothing")
+	}
+	if _, err := run("custody-reset", "--asset", "USDT", "--amount", "400", "--reason", "too much back", "--reverse"); err == nil {
+		t.Fatal("reversed more than was reset")
+	}
+	out, err := run("custody-reset", "--asset", "USDT", "--amount", "396.25", "--reason", "back to the stand-in", "--reverse")
+	if err != nil || !strings.Contains(out, "simulated USDT at no custodian: 0") {
+		t.Fatalf("reverse: %v\n%s", err, out)
+	}
+	if out, err = run("reconcile"); err != nil || !regexp.MustCompile(`ACCOUNT_MATCHES_LINES\s+0 mismatches`).MatchString(out) {
+		t.Fatalf("reconcile: %v\n%s", err, out)
+	}
+}

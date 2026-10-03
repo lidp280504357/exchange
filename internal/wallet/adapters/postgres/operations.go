@@ -300,8 +300,8 @@ type checks repos
 
 func (r checks) Insert(ctx context.Context, c domain.ChainCheck) error {
 	_, err := r.q.Exec(ctx, `INSERT INTO chain_checks (network, asset, chain, ledger, unbooked, elsewhere, in_flight, shortfall,
-		addresses, checked_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`, c.Network, c.Asset, c.Chain, c.Ledger, c.Unbooked,
-		c.Elsewhere, c.InFlight, c.Shortfall, c.Addresses, c.CheckedAt)
+		baseline, addresses, checked_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`, c.Network, c.Asset, c.Chain, c.Ledger,
+		c.Unbooked, c.Elsewhere, c.InFlight, c.Shortfall, c.Baseline, c.Addresses, c.CheckedAt)
 	if err != nil {
 		return fmt.Errorf("insert chain check: %w", err)
 	}
@@ -310,19 +310,47 @@ func (r checks) Insert(ctx context.Context, c domain.ChainCheck) error {
 
 func (r checks) Latest(ctx context.Context, network string) ([]domain.ChainCheck, error) {
 	rows, err := r.q.Query(ctx, `SELECT DISTINCT ON (network, asset) network, asset, chain, ledger, unbooked, elsewhere, in_flight,
-		shortfall, addresses, checked_at
+		shortfall, baseline, addresses, checked_at
 		FROM chain_checks WHERE $1 = '' OR network = $1 ORDER BY network, asset, checked_at DESC`, network)
 	if err != nil {
 		return nil, fmt.Errorf("list chain checks: %w", err)
 	}
 	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.ChainCheck, error) {
 		var c domain.ChainCheck
-		err := row.Scan(&c.Network, &c.Asset, &c.Chain, &c.Ledger, &c.Unbooked, &c.Elsewhere, &c.InFlight, &c.Shortfall, &c.Addresses,
-			&c.CheckedAt)
+		err := row.Scan(&c.Network, &c.Asset, &c.Chain, &c.Ledger, &c.Unbooked, &c.Elsewhere, &c.InFlight, &c.Shortfall, &c.Baseline,
+			&c.Addresses, &c.CheckedAt)
 		return c, err
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list chain checks: %w", err)
+	}
+	return out, nil
+}
+
+func (r checks) AddBaseline(ctx context.Context, b domain.CustodyBaseline) (bool, error) {
+	tag, err := r.q.Exec(ctx, `INSERT INTO custody_baselines (journal_id, provider, asset, amount, actor, reason, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (journal_id) DO NOTHING`, b.JournalID, b.Provider, b.Asset, b.Amount, b.Actor,
+		b.Reason, b.CreatedAt)
+	if err != nil {
+		return false, fmt.Errorf("record custody baseline: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func (r checks) Baselines(ctx context.Context, provider string) (map[string]decimal.Decimal, error) {
+	rows, err := r.q.Query(ctx, `SELECT asset, sum(amount) FROM custody_baselines WHERE provider = $1 GROUP BY asset`, provider)
+	if err != nil {
+		return nil, fmt.Errorf("sum custody baselines: %w", err)
+	}
+	out := map[string]decimal.Decimal{}
+	var asset string
+	var sum decimal.Decimal
+	_, err = pgx.ForEachRow(rows, []any{&asset, &sum}, func() error {
+		out[asset] = sum
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("sum custody baselines: %w", err)
 	}
 	return out, nil
 }

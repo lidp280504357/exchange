@@ -145,3 +145,67 @@ func suspendedAssets(ctx context.Context, r ports.Repos) (map[string]bool, error
 	}
 	return out, nil
 }
+
+// RetireDepositAddresses takes a custodian's deposit addresses out of use
+// when it is replaced (its stand-in's, which no chain knows; the real
+// gateway's integration, decision B2), with an audit event: users get a
+// new address from the custodian on their next request, withdrawals to a
+// retired one are refused. It returns how many per network.
+func RetireDepositAddresses(ctx context.Context, store ports.Store, provider, actor, reason string, now time.Time) (map[string]int, error) {
+	provider = strings.ToUpper(strings.TrimSpace(provider))
+	if provider == "" || strings.TrimSpace(actor) == "" || len(strings.TrimSpace(reason)) < 3 {
+		return nil, apperr.Invalid("a custodian, an actor and a reason are required")
+	}
+	out := map[string]int{}
+	err := store.Tx(ctx, func(r ports.Repos) error {
+		list, err := r.Addresses().Retire(ctx, provider, actor, reason, now)
+		if err != nil {
+			return err
+		}
+		for _, a := range list {
+			out[a.Network]++
+		}
+		return r.Audit(ctx, &auditv1.AdminActionPerformed{
+			Target: "custodian:" + provider, Action: "wallet.deposit_addresses.retire", Actor: actor, Reason: reason,
+			Details: fmt.Sprintf(`{"retired":%d}`, len(list)),
+		}, actor)
+	})
+	return out, err
+}
+
+// RestoreDepositAddresses puts a custodian's retired deposit addresses
+// back (a rollback of RetireDepositAddresses), with an audit event, except
+// where their user has another address on the network by now; it returns
+// how many came back and how many were left out.
+func RestoreDepositAddresses(ctx context.Context, store ports.Store, provider, actor, reason string) (int, int, error) {
+	provider = strings.ToUpper(strings.TrimSpace(provider))
+	if provider == "" || strings.TrimSpace(actor) == "" || len(strings.TrimSpace(reason)) < 3 {
+		return 0, 0, apperr.Invalid("a custodian, an actor and a reason are required")
+	}
+	var restored, left int
+	err := store.Tx(ctx, func(r ports.Repos) error {
+		var err error
+		if restored, left, err = r.Addresses().Restore(ctx, provider); err != nil {
+			return err
+		}
+		return r.Audit(ctx, &auditv1.AdminActionPerformed{
+			Target: "custodian:" + provider, Action: "wallet.deposit_addresses.restore", Actor: actor, Reason: reason,
+			Details: fmt.Sprintf(`{"restored":%d,"left_out":%d}`, restored, left),
+		}, actor)
+	})
+	return restored, left, err
+}
+
+// RecordCustodyBaseline keeps a custody reset's journal for the custody
+// check, which shows the simulated deposits taken out of the expectation
+// on a line of their own (decision B1); a repeat changes nothing.
+func RecordCustodyBaseline(ctx context.Context, store ports.Store, b domain.CustodyBaseline) error {
+	b.Provider, b.Asset = strings.ToUpper(b.Provider), strings.ToUpper(b.Asset)
+	if b.JournalID == "" || b.Provider == "" || b.Asset == "" || b.Amount.IsZero() {
+		return apperr.Invalid("a journal, a custodian, an asset and an amount are required")
+	}
+	return store.Tx(ctx, func(r ports.Repos) error {
+		_, err := r.Checks().AddBaseline(ctx, b)
+		return err
+	})
+}

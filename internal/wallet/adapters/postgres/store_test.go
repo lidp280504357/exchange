@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math/big"
 	"slices"
@@ -674,5 +675,71 @@ func TestCustodyStorage(t *testing.T) {
 		if !c.Shortfall.IsZero() {
 			t.Fatalf("both holders together hold what is expected: %+v", c)
 		}
+	}
+}
+
+// Switching a custodian (the real gateway's integration, B1 and B2): its
+// deposit addresses retired and restored where their user has none since;
+// custody resets kept per journal once and summed per asset.
+func TestCustodySwitchStorage(t *testing.T) {
+	store, ctx := newStore(t), context.Background()
+	read := store.Read()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	alice, bob := uuid.NewString(), uuid.NewString()
+	for i, u := range []string{alice, bob} {
+		a := domain.Address{UserID: u, Network: "TRON", Provider: domain.ProviderUdun, Address: fmt.Sprintf("TStandIn%026d", i), CreatedAt: now}
+		if err := read.Addresses().Insert(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gone, err := read.Addresses().Retire(ctx, domain.ProviderUdun, "ops", "the stand-in's", now)
+	if err != nil || len(gone) != 2 {
+		t.Fatalf("retired %+v %v", gone, err)
+	}
+	if a, err := read.Addresses().Get(ctx, alice, "TRON"); err != nil || a != nil {
+		t.Fatalf("still in use %+v %v", a, err)
+	}
+	if retired, err := read.Addresses().Retired(ctx, "TRON", strings.ToLower(gone[0].Address)); err != nil || !retired {
+		t.Fatalf("retired (any case) %v %v", retired, err)
+	}
+	// alice gets a new address; restoring brings back bob's only.
+	if err := read.Addresses().Insert(ctx, domain.Address{
+		UserID: alice, Network: "TRON", Provider: domain.ProviderUdun,
+		Address: "TRealGatewayAddress000000000000000", CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	restored, left, err := read.Addresses().Restore(ctx, domain.ProviderUdun)
+	if err != nil || restored != 1 || left != 1 {
+		t.Fatalf("restored %d, left %d: %v", restored, left, err)
+	}
+	if a, _ := read.Addresses().Get(ctx, bob, "TRON"); a == nil || a.Address != "TStandIn00000000000000000000000001" {
+		t.Fatalf("bob's back: %+v", a)
+	}
+	if a, _ := read.Addresses().Get(ctx, alice, "TRON"); a == nil || a.Address != "TRealGatewayAddress000000000000000" {
+		t.Fatalf("alice keeps her new one: %+v", a)
+	}
+
+	j1, j2 := uuid.NewString(), uuid.NewString()
+	for _, b := range []domain.CustodyBaseline{
+		{JournalID: j1, Provider: domain.ProviderUdun, Asset: "USDT", Amount: decimal.RequireFromString("396.25"), Actor: "ops", Reason: "switch", CreatedAt: now},
+		{JournalID: j1, Provider: domain.ProviderUdun, Asset: "USDT", Amount: decimal.RequireFromString("396.25"), Actor: "ops", Reason: "switch", CreatedAt: now},
+		{JournalID: j2, Provider: domain.ProviderUdun, Asset: "USDT", Amount: decimal.RequireFromString("-100"), Actor: "ops", Reason: "back", CreatedAt: now},
+	} {
+		if _, err := read.Checks().AddBaseline(ctx, b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sums, err := read.Checks().Baselines(ctx, domain.ProviderUdun)
+	if err != nil || !sums["USDT"].Equal(decimal.RequireFromString("296.25")) {
+		t.Fatalf("baselines %v %v", sums, err)
+	}
+	c := domain.NewChainCheck(domain.ProviderUdun, "USDT", decimal.Zero, decimal.Zero, decimal.Zero, 1, now)
+	c.Baseline = sums["USDT"]
+	if err := read.Checks().Insert(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	if latest, err := read.Checks().Latest(ctx, domain.ProviderUdun); err != nil || len(latest) != 1 || !latest[0].Baseline.Equal(c.Baseline) {
+		t.Fatalf("latest %+v %v", latest, err)
 	}
 }

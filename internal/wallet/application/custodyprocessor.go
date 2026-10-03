@@ -79,6 +79,9 @@ type CustodyProcessor struct {
 	stopped   *prometheus.GaugeVec
 }
 
+// checkRetry is when a check that failed is tried again.
+const checkRetry = time.Minute
+
 // NewCustodyProcessor registers the processor's metrics with reg.
 func NewCustodyProcessor(p CustodyProcessor, reg prometheus.Registerer) *CustodyProcessor {
 	labels := prometheus.Labels{"provider": p.Custody.Provider()}
@@ -185,8 +188,11 @@ func (p *CustodyProcessor) Round(ctx context.Context) error {
 	if now.Sub(p.lastCheck) >= p.CheckEvery || recheck {
 		p.recheckAt = time.Time{}
 		_, err := p.Check(ctx)
-		if err == nil || errors.Is(err, errNotCompared) {
+		switch {
+		case err == nil || errors.Is(err, errNotCompared):
 			p.lastCheck = now
+		default: // tried again in checkRetry, not every round while the custodian is away
+			p.lastCheck = now.Add(checkRetry - p.CheckEvery)
 		}
 		if err != nil {
 			errs = append(errs, fmt.Errorf("custody check: %w", err))
@@ -556,6 +562,12 @@ func (p *CustodyProcessor) Check(ctx context.Context) ([]domain.ChainCheck, erro
 			feesHeld[f.Asset] = feesHeld[f.Asset].Add(decimal.Min(f.Amount, n.WithdrawFee.Mul(decimal.NewFromInt(feeBound))))
 		}
 	}
+	// The simulated deposits a custody reset took out of the expectation:
+	// shown on their own line, apart from the shortfall.
+	baselines, err := r.Checks().Baselines(ctx, p.Custody.Provider())
+	if err != nil {
+		return nil, err
+	}
 	unbooked := map[string]decimal.Decimal{}
 	networksOf := map[string][]string{}
 	var assets []string
@@ -602,6 +614,7 @@ func (p *CustodyProcessor) Check(ctx context.Context) ([]domain.ChainCheck, erro
 		}
 		c := domain.NewChainCheck(p.Custody.Provider(), asset, held, expected, unbooked[asset], addresses, p.Now()).
 			Beside(elsewhere, flying[asset])
+		c.Baseline = baselines[asset]
 		if err := p.Store.Tx(ctx, func(r ports.Repos) error { return r.Checks().Insert(ctx, c) }); err != nil {
 			return out, err
 		}

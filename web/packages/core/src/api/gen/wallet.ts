@@ -475,11 +475,13 @@ export interface operations {
                         /**
                          * @description Why it is invalid: not an address of the network's kind,
                          *     a checksum mismatch (a typo), an address of another
-                         *     network (e.g. testnet), a missing memo, or the caller's
-                         *     own deposit address.
+                         *     network (e.g. testnet), a missing memo, the caller's
+                         *     own deposit address, or a deposit address taken out of
+                         *     use (the custodian's stand-in made it up: no chain
+                         *     knows it).
                          * @enum {string|null}
                          */
-                        reason: "ADDRESS_FORMAT" | "ADDRESS_CHECKSUM" | "ADDRESS_NETWORK" | "MEMO_REQUIRED" | "ADDRESS_OWN" | null;
+                        reason: "ADDRESS_FORMAT" | "ADDRESS_CHECKSUM" | "ADDRESS_NETWORK" | "MEMO_REQUIRED" | "ADDRESS_OWN" | "ADDRESS_RETIRED" | null;
                         /** @description Another user's deposit address; the withdrawal completes inside the platform with no fee. */
                         internal: boolean;
                     };

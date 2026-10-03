@@ -76,6 +76,10 @@ func (s *Service) custodyFee(ctx context.Context, r ports.Repos, provider string
 			return nil, "", err
 		}
 		if !ok {
+			// Kept in that coin, as the custodian's list names it: TRX taken
+			// for a TRC20 transfer is no USDT missing, so the custody check
+			// must not count it against USDT (review AF).
+			f.Asset, f.Amount = s.mainCoin(ctx, c, t)
 			return hold("its unit is the chain's own coin, which the platform holds with " + provider + " on no network")
 		}
 		f.Asset, f.Amount, net = chain.Asset, t.Fee.Shift(t.Decimals).Shift(-decimals), chain
@@ -130,6 +134,20 @@ func (s *Service) chainCoin(ctx context.Context, c ports.Custody, provider, coin
 		}
 	}
 	return net, decimals, true, nil
+}
+
+// mainCoin is the chain's own coin of a trade's coin as the custodian lists
+// it, and the trade's fee in it: its symbol and decimals when the list has
+// it, else its code and the fee as reported.
+func (s *Service) mainCoin(ctx context.Context, c ports.Custody, t ports.CustodyTrade) (string, decimal.Decimal) {
+	main, _, _ := strings.Cut(t.Coin, ":")
+	code := main + ":" + main
+	if c != nil {
+		if k, ok := s.coin(ctx, c, code); ok && k.Symbol != "" {
+			return k.Symbol, t.Fee.Shift(t.Decimals).Shift(-k.Decimals)
+		}
+	}
+	return code, t.Fee
 }
 
 // Custodied returns the decimals the ledger books an asset in when the

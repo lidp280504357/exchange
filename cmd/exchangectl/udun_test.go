@@ -41,7 +41,7 @@ func TestUdunProbe(t *testing.T) {
 		t.Setenv("UDUN_GATEWAY_URL", url)
 		t.Setenv("UDUN_MERCHANT_ID", "merchant-9")
 		t.Setenv("UDUN_API_KEY", key)
-		t.Setenv("UDUN_WALLET_ID", "wallet-9")
+		t.Setenv("UDUN_WALLET_ID", "wallet-12345678")
 		t.Setenv("UDUN_CALLBACK_URL", "https://astras.vip/v1/wallet/callbacks/udun")
 	}
 	setEnv(gw.URL)
@@ -53,7 +53,7 @@ func TestUdunProbe(t *testing.T) {
 		if err != nil {
 			out += err.Error()
 		}
-		for _, secret := range []string{key, "merchant-9", "wallet-9"} {
+		for _, secret := range []string{key, "merchant-9", "wallet-12345678"} {
 			if strings.Contains(out, secret) {
 				t.Fatalf("%v printed a secret: %s", args, out)
 			}
@@ -86,14 +86,14 @@ func TestUdunProbe(t *testing.T) {
 	}
 	n := len(bodies)
 	if out := must("create-address", "--main-coin", "195", "--alias", "probe-tron"); !strings.Contains(out, "Nothing created") ||
-		!strings.Contains(out, "UNMATCHED") || len(bodies) != n {
+		!strings.Contains(out, "UNMATCHED") || !strings.Contains(out, "wallet wall…78") || len(bodies) != n {
 		t.Fatalf("created without --yes: %s", out)
 	}
 	if out := must("create-address", "--main-coin", "195", "--alias", "probe-tron", "--yes"); !strings.Contains(out, "created TProbe1111") ||
 		!strings.Contains(out, `"coinType":"195"`) {
 		t.Fatal(out)
 	}
-	if b := bodies[len(bodies)-1]; !strings.Contains(b, `\"walletId\":\"wallet-9\"`) || !strings.Contains(b, "callbacks/udun") || strings.Contains(b, key) {
+	if b := bodies[len(bodies)-1]; !strings.Contains(b, `\"walletId\":\"wallet-12345678\"`) || !strings.Contains(b, "callbacks/udun") || strings.Contains(b, key) {
 		t.Fatalf("create-address body %s", b)
 	}
 	// A refusal shows the start of the answer, on one line.

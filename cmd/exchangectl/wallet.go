@@ -229,6 +229,33 @@ func walletWith(ctx context.Context, db, idb *pg.DB, args []string, out io.Write
 		return nil
 	case "withdrawals-suspended":
 		return printSuspensions(ctx, store, out)
+	case "retire-addresses", "restore-addresses":
+		provider := fs.String("provider", domain.ProviderUdun, "the custodian whose deposit addresses go out of use (or come back)")
+		reason := fs.String("reason", "", "why (required, goes to the audit log)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if args[0] == "retire-addresses" {
+			n, err := application.RetireDepositAddresses(ctx, store, *provider, actor(), *reason, time.Now())
+			if err != nil {
+				return err
+			}
+			total := 0
+			for network, k := range n {
+				fmt.Fprintf(out, "%s: %d retired\n", network, k)
+				total += k
+			}
+			fmt.Fprintf(out, "%d deposit addresses of %s retired: users get new ones on their next request, withdrawals to these are refused\n",
+				total, strings.ToUpper(*provider))
+			return nil
+		}
+		restored, left, err := application.RestoreDepositAddresses(ctx, store, *provider, actor(), *reason)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "%d deposit addresses of %s restored; %d left retired (their user has another on the network now)\n", restored,
+			strings.ToUpper(*provider), left)
+		return nil
 	case "withdrawals-suspend", "withdrawals-resume":
 		asset := fs.String("asset", "", "the asset, e.g. USDT")
 		reason := fs.String("reason", "", "why (required, goes to the audit log)")
@@ -248,6 +275,11 @@ func walletWith(ctx context.Context, db, idb *pg.DB, args []string, out io.Write
 		amount, err := decimal.NewFromString(*accept)
 		if err != nil {
 			return fmt.Errorf("--accept: %w", err)
+		}
+		forSet := false
+		fs.Visit(func(f *flag.Flag) { forSet = forSet || f.Name == "for" })
+		if forSet && !amount.IsPositive() {
+			return errors.New("--for is how long an accepted difference holds: give --accept too")
 		}
 		now := time.Now()
 		x, err := application.ResumeWithdrawals(ctx, store, application.Resume{
@@ -407,13 +439,19 @@ func printChecks(ctx context.Context, store *postgres.Store, network string, out
 		fmt.Fprintln(out, "no chain check yet")
 	} else {
 		w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "CHECKED\tASSET\tHELD\tELSEWHERE\tIN FLIGHT\tEXPECTED\tUNBOOKED FEES\tSHORTFALL\tADDRESSES")
+		fmt.Fprintln(w, "CHECKED\tASSET\tHELD\tELSEWHERE\tIN FLIGHT\tEXPECTED\tUNBOOKED FEES\tSHORTFALL\tADDRESSES\tSIMULATED")
+		baseline := false
 		for _, c := range list {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n", c.CheckedAt.UTC().Format(time.RFC3339), c.Asset, c.Chain, c.Elsewhere,
-				c.InFlight, c.Ledger, c.Unbooked, c.Shortfall, c.Addresses)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\n", c.CheckedAt.UTC().Format(time.RFC3339), c.Asset, c.Chain, c.Elsewhere,
+				c.InFlight, c.Ledger, c.Unbooked, c.Shortfall, c.Addresses, c.Baseline)
+			baseline = baseline || !c.Baseline.IsZero()
 		}
 		if err := w.Flush(); err != nil {
 			return err
+		}
+		if baseline {
+			fmt.Fprintln(out, "SIMULATED: deposits the custodian's stand-in reported, taken out of EXPECTED when the real gateway replaced it "+
+				"(ledger custody-reset): at no custodian")
 		}
 	}
 	if network == domain.ProviderUdun {

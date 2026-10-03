@@ -10,8 +10,9 @@
 #     custodian's retry and a replay change nothing; 0.5 USDT, below the
 #     minimum, goes to UNCLAIMED_DEPOSIT;
 #   - callbacks with a forged signature or a stale timestamp are refused
-#     and logged; one over the internet from an address the custodian
-#     does not use is refused by nginx before it reaches the platform;
+#     and logged; a forged one over the internet is refused too (by
+#     wallet-service's allow list while it has one, by its signature once
+#     the real gateway's callbacks come in from any address);
 #   - USDT's withdrawals suspended by an operator refuse a request
 #     (WALLET_WITHDRAW_SUSPENDED) until resumed (review B4);
 #   - with an authenticator app bound, 12 USDT go to a TRON address: in
@@ -28,7 +29,9 @@
 #     settled; the fee is held for a person, who books the 1.5 charged
 #     (exchangectl wallet custody-fee);
 #   - a reconciliation of the custodian finds nothing missing.
-# Needs wallet.withdraw on and ssh to the server; about five minutes.
+# Needs wallet.withdraw on and ssh to the server; about five minutes. Runs
+# only while wallet-service's UDUN custodian is the stand-in: against the
+# real gateway these checks would move real money (it says SKIP).
 #
 #   scripts/e2e/custody.sh
 set -euo pipefail
@@ -79,6 +82,14 @@ eventually_call() {
   exit 1
 }
 
+# The checks drive the stand-in and move what it holds: with the real
+# gateway behind UDUN they would move real money (docs/runbook/custody.md,
+# 真网关联调). Until the end to end has a custodian of its own, skip.
+if [[ $(remote "sudo grep -c '^UDUN_GATEWAY_URL=http://udun-mock' apps.env || true") != 1 ]]; then
+  echo "SKIP custody: wallet-service's UDUN gateway is not the stand-in udun-mock, these checks would move real money"
+  exit 0
+fi
+
 EMAIL="e2e-custody-$RUN@example.com"
 DEVICE="e2e-custody-$RUN"
 echo "== register $EMAIL"
@@ -128,9 +139,14 @@ echo "ok   stale and forged callbacks are refused"
 FORM="timestamp=$(date +%s)&nonce=123456&sign=0123456789abcdef0123456789abcdef&body=%7B%22tradeId%22%3A%22e2e-$RUN%22%7D"
 for path in udun UDUN Udun; do
   STATUS=$(curl -s -o "$WORK/body" -w '%{http_code}' -X POST "$BASE/v1/wallet/callbacks/$path" -H 'Content-Type: application/x-www-form-urlencoded' --data "$FORM")
-  [[ $STATUS == 403 ]] || { echo "FAIL a callback over the internet to /v1/wallet/callbacks/$path: HTTP $STATUS, want 403 from nginx" >&2; exit 1; }
+  # 403 from nginx's or wallet-service's allow list, 404 for a provider
+  # not in lower case, 401 for the signature once any address may call
+  case $STATUS in
+  401 | 403 | 404) ;;
+  *) echo "FAIL a forged callback over the internet to /v1/wallet/callbacks/$path: HTTP $STATUS, want it refused" >&2; exit 1 ;;
+  esac
 done
-echo "ok   a callback over the internet from an address not on the list stops at nginx (403), in any case"
+echo "ok   a forged callback over the internet is refused, in any case"
 LOGGED=$(pg "SELECT count(*) FROM wallet.custody_callbacks WHERE result = 'REJECTED' AND received_at > now() - interval '5 minutes'")
 ((LOGGED >= 2)) || { echo "FAIL $LOGGED refused callbacks logged, want 2" >&2; exit 1; }
 echo "ok   the refused callbacks are logged ($LOGGED)"

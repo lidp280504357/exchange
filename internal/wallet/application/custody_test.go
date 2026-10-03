@@ -946,7 +946,8 @@ func TestCustodyFeeUnits(t *testing.T) {
 		})
 	none := decimal.Zero
 	h.custody.coins = append(h.custody.coins, ports.CustodyCoin{Code: ethCoin, Decimals: 18, Balance: &none},
-		ports.CustodyCoin{Code: erc20, Decimals: 6, Token: true, Balance: &none})
+		ports.CustodyCoin{Code: erc20, Decimals: 6, Token: true, Balance: &none},
+		ports.CustodyCoin{Code: "195:195", Symbol: "TRX", Decimals: 6, Balance: &none})
 	unit := func(network, u string) {
 		t.Helper()
 		if err := SetCustodyFeeUnit(ctx, h.store, domain.FeeUnit{
@@ -1005,11 +1006,28 @@ func TestCustodyFeeUnits(t *testing.T) {
 	if f := h.store.fees["UDUN:w-5"]; f.Status != domain.FeeHeld || !strings.Contains(f.HoldReason, "no bound") {
 		t.Fatalf("no bound to compare with %+v", f)
 	}
-	// TRX is no coin the platform holds with the custodian: held.
+	// TRX is no coin the platform holds with the custodian: held, in TRX
+	// as the custodian lists it (review AF), so it explains nothing of a
+	// USDT shortfall.
 	unit(tron, domain.FeeUnitMain)
 	sent("w-4", tron, usdtCoin, 6, "13600000")
-	if f := h.store.fees["UDUN:w-4"]; f.Status != domain.FeeHeld || !strings.Contains(f.HoldReason, "on no network") {
+	if f := h.store.fees["UDUN:w-4"]; f.Status != domain.FeeHeld || !strings.Contains(f.HoldReason, "on no network") || f.Asset != "TRX" ||
+		!f.Amount.Equal(d("13.6")) {
 		t.Fatalf("a chain coin the platform does not hold %+v", f)
+	}
+}
+
+// A fee held in a chain coin the platform does not hold with the
+// custodian (TRX for TRC20) explains nothing of the token's shortfall
+// (review AF).
+func TestAFeeInAnUncustodiedCoinExplainsNothing(t *testing.T) {
+	h := newCustodyHarness(t)
+	h.store.fees["UDUN:trx-1"] = domain.ChainFee{
+		TxHash: "UDUN:trx-1", Network: tron, Asset: "TRX", Amount: d("13.6"), Purpose: domain.FeeWithdrawal, Status: domain.FeeHeld,
+	}
+	h.missing("3")
+	if _, err := h.cproc.Check(context.Background()); err != nil || h.suspects() != 1 {
+		t.Fatalf("TRX held explained USDT missing: %v %v", h.store.watches, err)
 	}
 }
 
@@ -1160,7 +1178,7 @@ func TestAShortfallExplainedOrGoneSuspendsNothing(t *testing.T) {
 func TestAnOperatorSuspendsWithdrawals(t *testing.T) {
 	h := newCustodyHarness(t)
 	ctx := context.Background()
-	known := func(_ context.Context, asset string) (bool, error) { return asset == "USDT", nil }
+	known := h.svc.Withdrawable // the networks the service reads: USDT and ETH here
 	if _, err := SuspendWithdrawals(ctx, h.store, known, "usdt", "ops", "the custodian reported an incident", h.now); err != nil {
 		t.Fatal(err)
 	}
@@ -1490,5 +1508,82 @@ func TestACallbackKeepsTheAddressesItCameFrom(t *testing.T) {
 	}
 	if got := h.store.callbacks[len(h.store.callbacks)-1]; got.SignatureOK || !slices.Equal(got.RemoteIPs, []string{"198.51.100.66"}) {
 		t.Fatalf("the refused one: %+v", got)
+	}
+}
+
+// Switching the custodian (the real gateway's integration, B2): its
+// stand-in's deposit addresses are retired, the user gets a new one from
+// the custodian, deposits to the old one find no owner and withdrawals to
+// it are refused; a rollback puts back those whose user has none since.
+func TestRetiredDepositAddresses(t *testing.T) {
+	h := newCustodyHarness(t)
+	ctx := context.Background()
+	old, _, err := h.svc.DepositAddress(ctx, "alice", "USDT", tron)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RetireDepositAddresses(ctx, h.store, "udun", "ops", "", h.now); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("no reason: %v", err)
+	}
+	n, err := RetireDepositAddresses(ctx, h.store, "udun", "ops", "the stand-in's addresses", h.now)
+	if err != nil || n[tron] != 1 || h.audited("wallet.deposit_addresses.retire") != 1 {
+		t.Fatalf("retired %v %v", n, err)
+	}
+	fresh, _, err := h.svc.DepositAddress(ctx, "alice", "USDT", tron) // the custodian's second address
+	if err != nil || fresh.Address == old.Address {
+		t.Fatalf("a new address after the retirement: %+v %v", fresh, err)
+	}
+	v, err := h.svc.ValidateAddress(ctx, "bob", "USDT", tron, old.Address, "")
+	if err != nil || v.Valid || v.Reason != domain.ReasonAddressRetired {
+		t.Fatalf("a retired address: %+v %v", v, err)
+	}
+	if _, err := h.svc.AddAddress(ctx, "bob", AddressInput{Network: tron, Address: old.Address, StepUp: h.stepUp("r1", 2, true)}); !apperr.Is(err, "WALLET_INVALID_ADDRESS") {
+		t.Fatalf("booked a retired address: %v", err)
+	}
+	// alice already has a new address: hers stays out; bob's comes back.
+	h.store.retired = append(h.store.retired, domain.RetiredAddress{
+		Network: tron, Address: "TBobsOldStandInAddress111111111111", UserID: "bob", Provider: domain.ProviderUdun, CreatedAt: h.now,
+	})
+	restored, left, err := RestoreDepositAddresses(ctx, h.store, "UDUN", "ops", "back to the stand-in")
+	if err != nil || restored != 1 || left != 1 || h.audited("wallet.deposit_addresses.restore") != 1 {
+		t.Fatalf("restored %d, left %d: %v", restored, left, err)
+	}
+	if a, _ := h.store.Read().Addresses().Get(ctx, "bob", tron); a == nil || a.Address != "TBobsOldStandInAddress111111111111" {
+		t.Fatalf("bob's address back: %+v", a)
+	}
+}
+
+// A withdrawal to an address booked before the stand-in's addresses were
+// retired is refused: real funds would go to an address no chain knows.
+func TestAWithdrawalToARetiredAddressIsRefused(t *testing.T) {
+	h := newCustodyHarness(t)
+	ctx := context.Background()
+	h.requestCustody(t, "20") // books PAYEE, cooled off
+	h.store.retired = append(h.store.retired, domain.RetiredAddress{
+		Network: tron, Address: payeeTRX, UserID: "carol", Provider: domain.ProviderUdun, CreatedAt: h.now,
+	})
+	_, err := h.svc.RequestWithdrawal(ctx, "alice", WithdrawalInput{
+		Asset: "USDT", Network: tron, Address: payeeTRX, Amount: d("20"), StepUp: h.stepUp("w-ret", 2, true),
+	})
+	if !apperr.Is(err, "WALLET_INVALID_ADDRESS") {
+		t.Fatalf("to a retired address: %v", err)
+	}
+}
+
+// The simulated deposits a custody reset took out of the expectation show
+// on the check's own line (decision B1), apart from the shortfall.
+func TestTheCustodyCheckShowsTheBaseline(t *testing.T) {
+	h := newCustodyHarness(t)
+	ctx := context.Background()
+	h.missing("0")
+	b := domain.CustodyBaseline{JournalID: "j-1", Provider: "udun", Asset: "usdt", Amount: d("396.25"), Actor: "ops", Reason: "switch", CreatedAt: h.now}
+	for range 2 { // a repeat changes nothing
+		if err := RecordCustodyBaseline(ctx, h.store, b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checks, err := h.cproc.Check(ctx)
+	if err != nil || len(checks) != 1 || !checks[0].Baseline.Equal(d("396.25")) || !checks[0].Shortfall.IsZero() {
+		t.Fatalf("checks %+v %v", checks, err)
 	}
 }

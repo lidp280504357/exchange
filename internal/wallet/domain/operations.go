@@ -161,8 +161,37 @@ type ChainCheck struct {
 	Elsewhere decimal.Decimal
 	InFlight  decimal.Decimal
 	Shortfall decimal.Decimal
+	// Baseline is the simulated deposits taken out of the expectation when
+	// the custodian replaced a stand-in (CustodyBaseline): at no custodian,
+	// shown apart; the shortfall does not count it.
+	Baseline  decimal.Decimal
 	Addresses int
 	CheckedAt time.Time
+}
+
+// CustodyBaseline is a journal that took simulated deposits out of what
+// the ledger expects a custodian to hold (exchangectl ledger
+// custody-reset), negative when it put them back.
+type CustodyBaseline struct {
+	JournalID string
+	Provider  string
+	Asset     string
+	Amount    decimal.Decimal
+	Actor     string
+	Reason    string
+	CreatedAt time.Time
+}
+
+// RetiredAddress is a custodian's deposit address taken out of use.
+type RetiredAddress struct {
+	Network   string
+	Address   string
+	UserID    string
+	Provider  string
+	CreatedAt time.Time
+	RetiredAt time.Time
+	RetiredBy string
+	Reason    string
 }
 
 // NewChainCheck computes the shortfall of a holder that is the asset's

@@ -81,6 +81,25 @@ func GasSupplyPosting(idemKey, asset string, amount decimal.Decimal, decimals in
 	}}, nil
 }
 
+// CustodyResetPosting takes simulated deposits out of what the ledger
+// expects the custodians to hold (DEPOSIT_PENDING up, ADJUSTMENT, the
+// counterpart of simulated money, down) when a stand-in gateway is
+// replaced by a real one: what the stand-in reported deposited is at no
+// custodian (the real gateway's integration, 2026-10-03). Reverse undoes
+// one. The wallet keeps the amounts apart for its custody check.
+func CustodyResetPosting(idemKey, asset string, amount decimal.Decimal, decimals int32, reverse bool, reason string) (Posting, error) {
+	if err := checkAmount(amount, decimals); err != nil {
+		return Posting{}, err
+	}
+	if reverse {
+		amount = amount.Neg()
+	}
+	return Posting{IdemKey: idemKey, EntryType: EntryManualAdjustment, Memo: reason, Lines: []Line{
+		{Account: SystemAccount(AccountDepositPending, asset), Amount: amount, Kind: Available},
+		{Account: SystemAccount(AccountAdjustment, asset), Amount: amount.Neg(), Kind: Available},
+	}}, nil
+}
+
 // FundingPosting books the platform's own transfer into its hot wallet as
 // a deposit to a system account (§11.4: DEPOSIT_CREDIT from
 // DEPOSIT_PENDING).

@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -110,6 +111,57 @@ func (s *Service) FundGasSupply(ctx context.Context, key, asset string, amount d
 			Target: "system:" + domain.AccountGasSupply, Action: "ledger.gas_supply", Actor: actor, Reason: reason,
 			Details: fmt.Sprintf(`{"asset":%q,"amount":%q,"from":%q,"journal_id":%q}`, asset, amount.String(), domain.AccountFeeRevenue,
 				res.JournalID),
+		}, "actor", actor)
+	})
+	return res, err
+}
+
+// ResetCustody takes amount of simulated deposits out of what the ledger
+// expects the custodians to hold, or puts it back (reverse), with an audit
+// event (CustodyResetPosting); the key makes a repeat harmless. An
+// operator's posting like the insurance fund's, it needs
+// ledger.manual_adjustment on (ADR-0005), and never takes the expectation
+// below zero.
+func (s *Service) ResetCustody(ctx context.Context, key, asset string, amount decimal.Decimal, reverse bool, actor, reason string) (Result, error) {
+	if !s.Flags.Enabled(flags.KeyManualAdjustment, flags.Subject{}) {
+		return Result{}, apperr.New(apperr.KindForbidden, "LEDGER_ADJUSTMENT_DISABLED", "manual adjustments are switched off (ledger.manual_adjustment)")
+	}
+	if err := requireKey(key); err != nil {
+		return Result{}, err
+	}
+	if strings.TrimSpace(actor) == "" || len(strings.TrimSpace(reason)) < 3 {
+		return Result{}, apperr.Invalid("an actor and a reason are required")
+	}
+	decimals, err := s.Assets.Decimals(ctx, asset)
+	if err != nil {
+		return Result{}, err
+	}
+	p, err := domain.CustodyResetPosting("custody-reset:"+key, asset, amount, decimals, reverse, reason)
+	if err != nil {
+		return Result{}, err
+	}
+	var res Result
+	err = s.Store.Tx(ctx, func(r ports.Repos) error {
+		pending, err := r.Accounts().Lock(ctx, []domain.AccountKey{domain.SystemAccount(domain.AccountDepositPending, asset)})
+		if err != nil {
+			return err
+		}
+		// DEPOSIT_PENDING is minus what the custodians hold for the
+		// platform: the reset cannot take that below nothing (a replay of
+		// one that did not is checked by its key below).
+		if !reverse && pending[0].Available.Add(amount).IsPositive() {
+			if prior, err := r.Journals().ByIdemKey(ctx, p.IdemKey); err != nil || prior == nil {
+				return errors.Join(err, apperr.Invalid(fmt.Sprintf("the custodians are expected to hold %s %s, less than %s",
+					pending[0].Available.Neg(), asset, amount)))
+			}
+		}
+		if res, err = s.post(ctx, r, p); err != nil || res.Replayed {
+			return err
+		}
+		return r.Emit(ctx, event.TopicAudit, &auditv1.AdminActionPerformed{
+			Target: "system:" + domain.AccountDepositPending, Action: "ledger.custody_reset", Actor: actor, Reason: reason,
+			Details: fmt.Sprintf(`{"asset":%q,"amount":%q,"reverse":%t,"to":%q,"journal_id":%q}`, asset, amount.String(), reverse,
+				domain.AccountAdjustment, res.JournalID),
 		}, "actor", actor)
 	})
 	return res, err

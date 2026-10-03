@@ -18,7 +18,7 @@
 export type AddressFormat = "EVM" | "TRON" | "BTC";
 
 /** Why an address is refused: the validate endpoint's reason codes. */
-export type AddressReason = "ADDRESS_FORMAT" | "ADDRESS_CHECKSUM" | "ADDRESS_NETWORK" | "MEMO_REQUIRED" | "ADDRESS_OWN";
+export type AddressReason = "ADDRESS_FORMAT" | "ADDRESS_CHECKSUM" | "ADDRESS_NETWORK" | "MEMO_REQUIRED" | "ADDRESS_OWN" | "ADDRESS_RETIRED";
 
 export type AddressCheck = {
   /** The address passed the local checks (the server still decides). */

@@ -144,6 +144,54 @@ func (r addresses) Owners(ctx context.Context, network string) (map[string]strin
 	return out, nil
 }
 
+func (r addresses) Retire(ctx context.Context, provider, actor, reason string, at time.Time) ([]domain.RetiredAddress, error) {
+	rows, err := r.q.Query(ctx, `WITH gone AS (
+			DELETE FROM deposit_addresses WHERE provider = $1 AND provider <> '' RETURNING user_id, network, address, provider, created_at)
+		INSERT INTO retired_deposit_addresses (network, address, user_id, provider, created_at, retired_at, retired_by, reason)
+		SELECT network, address, user_id, provider, created_at, $2, $3, $4 FROM gone
+		ON CONFLICT (network, address) DO UPDATE SET user_id = EXCLUDED.user_id, provider = EXCLUDED.provider,
+			created_at = EXCLUDED.created_at, retired_at = EXCLUDED.retired_at, retired_by = EXCLUDED.retired_by, reason = EXCLUDED.reason
+		RETURNING network, address, user_id, provider, created_at, retired_at, retired_by, reason`, provider, at, actor, reason)
+	if err != nil {
+		return nil, fmt.Errorf("retire deposit addresses: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.RetiredAddress, error) {
+		var a domain.RetiredAddress
+		err := row.Scan(&a.Network, &a.Address, &a.UserID, &a.Provider, &a.CreatedAt, &a.RetiredAt, &a.RetiredBy, &a.Reason)
+		return a, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("retire deposit addresses: %w", err)
+	}
+	return out, nil
+}
+
+func (r addresses) Restore(ctx context.Context, provider string) (int, int, error) {
+	var restored, left int
+	err := r.q.QueryRow(ctx, `WITH back AS (
+			INSERT INTO deposit_addresses (user_id, network, address, provider, created_at)
+			SELECT user_id, network, address, provider, created_at FROM retired_deposit_addresses WHERE provider = $1
+			ON CONFLICT DO NOTHING RETURNING network, address),
+		done AS (
+			DELETE FROM retired_deposit_addresses x USING back b WHERE x.network = b.network AND x.address = b.address RETURNING 1)
+		SELECT (SELECT count(*) FROM done), (SELECT count(*) FROM retired_deposit_addresses WHERE provider = $1) - (SELECT count(*) FROM done)`,
+		provider).Scan(&restored, &left)
+	if err != nil {
+		return 0, 0, fmt.Errorf("restore deposit addresses: %w", err)
+	}
+	return restored, left, nil
+}
+
+func (r addresses) Retired(ctx context.Context, network, address string) (bool, error) {
+	var n int
+	err := r.q.QueryRow(ctx, `SELECT count(*) FROM retired_deposit_addresses WHERE network = $1 AND lower(address) = lower($2)`,
+		network, address).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("find retired deposit address: %w", err)
+	}
+	return n > 0, nil
+}
+
 type deposits repos
 
 const depositColumns = `id, user_id, asset, network, address, contract, tx_hash, log_index, block_number, block_hash, amount,

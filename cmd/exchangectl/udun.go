@@ -93,7 +93,7 @@ func udunCmd(ctx context.Context, args []string, out io.Writer) error {
 		}
 		walletNote := "the merchant's default wallet"
 		if wallet != "" {
-			walletNote = "the wallet in UDUN_WALLET_ID"
+			walletNote = "wallet " + masked(wallet)
 		}
 		fmt.Fprintf(out, "a deposit address on main coin %d in %s, named %q, posting its deposits to %s.\n",
 			*mainCoin, walletNote, *alias, callback)
@@ -111,6 +111,15 @@ func udunCmd(ctx context.Context, args []string, out io.Writer) error {
 	default:
 		return fmt.Errorf("unknown udun command %q", args[0])
 	}
+}
+
+// masked shows the ends of an identifier, enough to tell it from another
+// in the custodian's console: 1234…ef.
+func masked(id string) string {
+	if len(id) <= 8 {
+		return strings.Repeat("*", len(id))
+	}
+	return id[:4] + "…" + id[len(id)-2:]
 }
 
 // udunEnv reads the gateway's settings from the environment, refusing

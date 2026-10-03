@@ -272,6 +272,67 @@ func (c memChecks) Latest(context.Context, string) ([]domain.ChainCheck, error) 
 	return c.m.checks, nil
 }
 
+func (c memChecks) AddBaseline(_ context.Context, b domain.CustodyBaseline) (bool, error) {
+	if slices.ContainsFunc(c.m.baselines, func(x domain.CustodyBaseline) bool { return x.JournalID == b.JournalID }) {
+		return false, nil
+	}
+	c.m.baselines = append(c.m.baselines, b)
+	return true, nil
+}
+
+func (c memChecks) Baselines(_ context.Context, provider string) (map[string]decimal.Decimal, error) {
+	out := map[string]decimal.Decimal{}
+	for _, b := range c.m.baselines {
+		if b.Provider == provider {
+			out[b.Asset] = out[b.Asset].Add(b.Amount)
+		}
+	}
+	return out, nil
+}
+
+func (a memAddresses) Retire(_ context.Context, provider, actor, reason string, at time.Time) ([]domain.RetiredAddress, error) {
+	var out []domain.RetiredAddress
+	for k, x := range a.m.addresses {
+		if x.Provider == provider && provider != "" {
+			r := domain.RetiredAddress{
+				Network: x.Network, Address: x.Address, UserID: x.UserID, Provider: x.Provider, CreatedAt: x.CreatedAt, RetiredAt: at,
+				RetiredBy: actor, Reason: reason,
+			}
+			a.m.retired, out = append(a.m.retired, r), append(out, r)
+			delete(a.m.addresses, k)
+		}
+	}
+	return out, nil
+}
+
+func (a memAddresses) Restore(_ context.Context, provider string) (int, int, error) {
+	restored, left := 0, 0
+	var keep []domain.RetiredAddress
+	for _, r := range a.m.retired {
+		if r.Provider != provider {
+			keep = append(keep, r)
+			continue
+		}
+		if _, taken := a.m.addresses[r.UserID+"|"+r.Network]; taken {
+			left++
+			keep = append(keep, r)
+			continue
+		}
+		a.m.addresses[r.UserID+"|"+r.Network] = domain.Address{
+			UserID: r.UserID, Network: r.Network, Address: r.Address, Provider: r.Provider, CreatedAt: r.CreatedAt,
+		}
+		restored++
+	}
+	a.m.retired = keep
+	return restored, left, nil
+}
+
+func (a memAddresses) Retired(_ context.Context, network, address string) (bool, error) {
+	return slices.ContainsFunc(a.m.retired, func(r domain.RetiredAddress) bool {
+		return r.Network == network && strings.EqualFold(r.Address, address)
+	}), nil
+}
+
 // fakeNode is the chain the processor talks to.
 type fakeNode struct {
 	head     uint64

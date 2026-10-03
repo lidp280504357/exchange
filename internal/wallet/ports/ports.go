@@ -62,6 +62,13 @@ type AddressRepo interface {
 	Insert(ctx context.Context, a domain.Address) error
 	// Owners maps the lower-case addresses of network to their users.
 	Owners(ctx context.Context, network string) (map[string]string, error)
+	// Retire takes a custodian's deposit addresses out of use, keeping
+	// them apart; Restore puts them back where their user has none on the
+	// network now (restored, left out). Retired reports whether an address
+	// of network is one.
+	Retire(ctx context.Context, provider, actor, reason string, at time.Time) ([]domain.RetiredAddress, error)
+	Restore(ctx context.Context, provider string) (int, int, error)
+	Retired(ctx context.Context, network, address string) (bool, error)
 	// List returns the addresses of network by index.
 	List(ctx context.Context, network string) ([]domain.Address, error)
 }
@@ -249,6 +256,10 @@ type CheckRepo interface {
 	// Latest returns the latest check of each asset of network (of every
 	// holder when network is empty).
 	Latest(ctx context.Context, network string) ([]domain.ChainCheck, error)
+	// AddBaseline records a custody reset's journal once (false when
+	// recorded already); Baselines sums them per asset for a provider.
+	AddBaseline(ctx context.Context, b domain.CustodyBaseline) (bool, error)
+	Baselines(ctx context.Context, provider string) (map[string]decimal.Decimal, error)
 }
 
 // DepositRepo stores deposits; (network, tx hash, log index) is unique.

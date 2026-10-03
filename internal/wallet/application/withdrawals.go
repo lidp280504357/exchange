@@ -185,6 +185,16 @@ func (s *Service) RequestWithdrawal(ctx context.Context, userID string, in Withd
 	if payee == userID {
 		return domain.Withdrawal{}, domain.ErrOwnAddress
 	}
+	if payee == "" {
+		// An address book entry made before the stand-in's addresses were
+		// retired: real funds would go to an address no chain knows.
+		if retired, err := r.Addresses().Retired(ctx, in.Network, in.Address); err != nil || retired {
+			if err == nil {
+				err = domain.ErrInvalidAddress.WithDetail("reason", domain.ReasonAddressRetired)
+			}
+			return domain.Withdrawal{}, err
+		}
+	}
 	fee := net.WithdrawFee
 	if payee != "" {
 		fee = decimal.Zero // internal transfers carry no chain fee (§11.6)

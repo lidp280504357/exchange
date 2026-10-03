@@ -24,6 +24,9 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/flags"
 	"github.com/lidp280504357/exchange/internal/platform/migrate"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
+	walletpg "github.com/lidp280504357/exchange/internal/wallet/adapters/postgres"
+	walletapp "github.com/lidp280504357/exchange/internal/wallet/application"
+	walletdomain "github.com/lidp280504357/exchange/internal/wallet/domain"
 	"github.com/lidp280504357/exchange/migrations"
 )
 
@@ -135,6 +138,8 @@ func ledgerWith(ctx context.Context, dbs ledgerDBs, args []string, out io.Writer
 		return ledgerHouseMargin(ctx, svc, args[1:], out)
 	case "gas-supply":
 		return ledgerGasSupply(ctx, svc, args[1:], out)
+	case "custody-reset":
+		return ledgerCustodyReset(ctx, svc, dbs, args[1:], out)
 	case "release-hold":
 		return ledgerReleaseHold(ctx, svc, dbs, args[1:], out)
 	default:
@@ -436,6 +441,79 @@ func ledgerSystem(ctx context.Context, svc *application.Service, asset string, o
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", a.Key.Type, a.Key.Asset, a.Available, a.Frozen)
 	}
 	return w.Flush()
+}
+
+// ledgerCustodyReset takes the simulated deposits a custodian's stand-in
+// reported out of what the ledger expects the custodians to hold, when the
+// real gateway replaces it (decision B1 of the real gateway's
+// integration): DEPOSIT_PENDING up, ADJUSTMENT down, audited; --reverse
+// puts them back. The wallet keeps each journal for its custody check,
+// which shows their sum on a line of its own. Repeat the --key to retry
+// safely, the wallet's record too.
+func ledgerCustodyReset(ctx context.Context, svc *application.Service, dbs ledgerDBs, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("ledger custody-reset", flag.ContinueOnError)
+	fs.SetOutput(out)
+	provider := fs.String("provider", walletdomain.ProviderUdun, "the custodian")
+	asset := fs.String("asset", "", "asset code, e.g. USDT")
+	amount := fs.String("amount", "", "decimal amount: the custodian's expected holding when it was replaced")
+	reverse := fs.Bool("reverse", false, "put a reset back (a rollback)")
+	reason := fs.String("reason", "", "why (required, goes to the audit log)")
+	key := fs.String("key", "", "idempotency key; repeat it to retry safely (default: a new one)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *asset == "" || *amount == "" || *reason == "" {
+		fs.Usage()
+		return errors.New("--asset, --amount and --reason are required")
+	}
+	d, err := decimal.NewFromString(*amount)
+	if err != nil {
+		return fmt.Errorf("amount: %w", err)
+	}
+	if *key == "" {
+		*key = uuid.NewString()
+	}
+	code, custodian := strings.ToUpper(*asset), strings.ToUpper(*provider)
+	wdb, err := dbs.open("wallet")
+	if err != nil {
+		return err
+	}
+	if err := migrate.UpPlatform(ctx, wdb, quiet); err != nil {
+		return err
+	}
+	if err := migrate.Up(ctx, wdb, migrations.Wallet(), quiet); err != nil {
+		return err
+	}
+	host, _ := os.Hostname()
+	wallet := walletpg.NewStore(wdb, event.NewFactory("exchangectl", host))
+	before, err := wallet.Read().Checks().Baselines(ctx, custodian)
+	if err != nil {
+		return err
+	}
+	if *reverse && d.GreaterThan(before[code]) {
+		return fmt.Errorf("only %s %s was reset for %s", before[code], code, custodian)
+	}
+	res, err := svc.ResetCustody(ctx, *key, code, d, *reverse, actor(), *reason)
+	if err != nil {
+		return err
+	}
+	signed := d
+	if *reverse {
+		signed = d.Neg()
+	}
+	if err := walletapp.RecordCustodyBaseline(ctx, wallet, walletdomain.CustodyBaseline{
+		JournalID: res.JournalID, Provider: custodian, Asset: code, Amount: signed, Actor: actor(), Reason: *reason, CreatedAt: time.Now(),
+	}); err != nil {
+		return fmt.Errorf("journal %s posted (key %s), not recorded for the custody check: run again with --key %s: %w", res.JournalID, *key,
+			*key, err)
+	}
+	after, err := wallet.Read().Checks().Baselines(ctx, custodian)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "journal %s (key %s, replayed %v); simulated %s at no custodian: %s\n", res.JournalID, *key, res.Replayed, code,
+		after[code])
+	return nil
 }
 
 // ledgerInsuranceFund seeds the insurance fund with simulated funds.

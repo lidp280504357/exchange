@@ -23,6 +23,7 @@ const (
 	ReasonAddressNetwork  = "ADDRESS_NETWORK"  // an address of another network, e.g. testnet on mainnet
 	ReasonMemoRequired    = "MEMO_REQUIRED"    // the network needs a memo or tag
 	ReasonAddressOwn      = "ADDRESS_OWN"      // the user's own deposit address
+	ReasonAddressRetired  = "ADDRESS_RETIRED"  // a retired deposit address of the custodian's stand-in, no chain's
 )
 
 // AddressCheck is the outcome of checking an address.

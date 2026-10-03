@@ -56,11 +56,18 @@ func (s *Service) ValidateAddress(ctx context.Context, userID, asset, network, a
 	if err != nil {
 		return AddressValidation{}, err
 	}
+	retired, err := s.Store.Read().Addresses().Retired(ctx, network, out.Normalized)
+	if err != nil {
+		return AddressValidation{}, err
+	}
 	switch owner := owners[strings.ToLower(out.Normalized)]; {
 	case owner == userID:
 		out.Valid, out.Normalized, out.Reason = false, "", domain.ReasonAddressOwn
 	case owner != "":
 		out.Internal = true
+	case retired:
+		// The custodian's stand-in made it up: no chain would deliver.
+		out.Valid, out.Normalized, out.Reason = false, "", domain.ReasonAddressRetired
 	case net.Custody():
 		// The custodian has the last word on its chains' addresses; when it
 		// cannot be asked, the form alone decides.

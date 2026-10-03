@@ -102,6 +102,10 @@ commands:
   ledger insurance-fund --amount X --reason TEXT [--asset USDT] [--key K]
                               add simulated funds to INSURANCE_FUND against ADJUSTMENT
                               (needs ledger.manual_adjustment; audited)
+  ledger custody-reset --asset A --amount X --reason TEXT [--reverse] [--provider UDUN] [--key K]
+                              take a stand-in custodian's simulated deposits out of what the custodians are expected
+                              to hold (DEPOSIT_PENDING up, ADJUSTMENT down; needs ledger.manual_adjustment; audited);
+                              the custody check shows them as SIMULATED
   ledger gas-supply --amount X --reason TEXT [--asset USDT] [--key K]
                               set fee revenue aside in GAS_SUPPLY, which the custodian's fees are booked from (audited)
   wallet sweep [--min X]      sweep deposit addresses holding at least X (default the minimum deposit) to the hot wallet
@@ -123,6 +127,9 @@ commands:
                               the assets whose withdrawals are suspended (funds missing on two custody checks, or an operator)
   wallet withdrawals-suspend|withdrawals-resume --asset A --reason TEXT
                               stop an asset's withdrawals (new requests refused, approved ones wait), or lift it (audited)
+  wallet retire-addresses|restore-addresses [--provider UDUN] --reason TEXT
+                              take a custodian's deposit addresses out of use when its stand-in is replaced
+                              (users get new ones; withdrawals to them are refused), or put them back (audited)
   wallet custody-fee-unit [--asset A --network N --unit SELF|MAIN|OUTSIDE --reason TEXT]
                               how the custodian counts its fee on a network, as confirmed (audited); without --unit, the list
   admin create --email E --name N --role R [--secrets-stdin]

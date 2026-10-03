@@ -71,6 +71,9 @@ type CheckJSON struct {
 	InFlight  string `json:"in_flight"`
 	Unbooked  string `json:"unbooked"`
 	Shortfall string `json:"shortfall"`
+	// Baseline: simulated deposits of the custodian's stand-in taken out
+	// of Expected when the real gateway replaced it, at no custodian.
+	Baseline  string `json:"baseline"`
 	Addresses int    `json:"addresses"`
 	CheckedAt string `json:"checked_at"`
 }
@@ -103,8 +106,8 @@ func (h *Handler) adminCustody(w http.ResponseWriter, r *http.Request) {
 	for _, c := range o.Checks {
 		checks = append(checks, CheckJSON{
 			Holder: c.Network, Asset: c.Asset, Held: c.Chain.String(), Expected: c.Ledger.String(), Elsewhere: c.Elsewhere.String(),
-			InFlight: c.InFlight.String(), Unbooked: c.Unbooked.String(), Shortfall: c.Shortfall.String(), Addresses: c.Addresses,
-			CheckedAt: httpx.FormatTime(c.CheckedAt),
+			InFlight: c.InFlight.String(), Unbooked: c.Unbooked.String(), Shortfall: c.Shortfall.String(), Baseline: c.Baseline.String(),
+			Addresses: c.Addresses, CheckedAt: httpx.FormatTime(c.CheckedAt),
 		})
 	}
 	value := decimal.Zero

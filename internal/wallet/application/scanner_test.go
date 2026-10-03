@@ -34,6 +34,8 @@ type memStore struct {
 	watches   map[string]domain.ShortfallWatch
 	fundings  map[string]domain.Funding
 	checks    []domain.ChainCheck
+	baselines []domain.CustodyBaseline
+	retired   []domain.RetiredAddress
 	book      map[string]domain.WithdrawAddress
 	wds       map[string]domain.Withdrawal
 	attempts  []domain.Attempt

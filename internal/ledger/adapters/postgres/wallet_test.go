@@ -79,4 +79,35 @@ func TestWalletJournals(t *testing.T) {
 			t.Errorf("reconcile %s: %v", r.Check, r.Mismatches)
 		}
 	}
+
+	// A stand-in custodian replaced (2026-10-03): its simulated deposits
+	// leave the expectation for ADJUSTMENT, never below nothing; a repeat
+	// of the key replays, a reverse puts them back.
+	pending := func() string {
+		t.Helper()
+		system, err := svc.SystemBalances(ctx, "USDT")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range system {
+			if a.Key.Type == domain.AccountDepositPending {
+				return a.Available.String()
+			}
+		}
+		return ""
+	}
+	if _, err := svc.ResetCustody(ctx, "too-much", "USDT", d("5"), false, "ops", "more than is expected"); err == nil {
+		t.Fatal("reset more than the custodians are expected to hold")
+	}
+	reset, err := svc.ResetCustody(ctx, "switch", "USDT", d("1.5"), false, "ops", "the stand-in's deposits")
+	if err != nil || pending() != "-0.5" {
+		t.Fatalf("reset %+v %v, DEPOSIT_PENDING %s", reset, err, pending())
+	}
+	if again, err := svc.ResetCustody(ctx, "switch", "USDT", d("1.5"), false, "ops", "the stand-in's deposits"); err != nil ||
+		!again.Replayed || again.JournalID != reset.JournalID || pending() != "-0.5" {
+		t.Fatalf("a repeat replays: %+v %v", again, err)
+	}
+	if _, err := svc.ResetCustody(ctx, "back", "USDT", d("1.5"), true, "ops", "back to the stand-in"); err != nil || pending() != "-2" {
+		t.Fatalf("reversed: %v, DEPOSIT_PENDING %s", err, pending())
+	}
 }

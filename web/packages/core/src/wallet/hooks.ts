@@ -68,7 +68,12 @@ export function useDepositAddress(asset: string, network: string) {
     queryKey: walletKeys.depositAddress(asset, network),
     queryFn: () => unwrap(walletApi.GET("/v1/wallet/deposit-address", { params: { query: { asset, network } } })),
     enabled: signedIn && asset !== "" && network !== "",
-    staleTime: Number.POSITIVE_INFINITY,
+    // Asked again now and then, never kept for good: a custodian's address
+    // can be retired (its stand-in replaced by the real gateway) and the
+    // old one must not stay on a page left open.
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+    refetchInterval: 60_000,
     retry: retryServerErrors,
   });
 }
@@ -130,7 +135,7 @@ export type AddressVerdict = {
   network: string;
   address_format: "EVM" | "TRON" | "BTC";
   normalized: string | null;
-  reason: "ADDRESS_FORMAT" | "ADDRESS_CHECKSUM" | "ADDRESS_NETWORK" | "MEMO_REQUIRED" | "ADDRESS_OWN" | null;
+  reason: "ADDRESS_FORMAT" | "ADDRESS_CHECKSUM" | "ADDRESS_NETWORK" | "MEMO_REQUIRED" | "ADDRESS_OWN" | "ADDRESS_RETIRED" | null;
   internal: boolean;
 };
 

@@ -85,6 +85,13 @@ func TestWalletCommandsQueue(t *testing.T) {
 	if err := walletWith(context.Background(), db, idb, []string{"withdrawals-suspend", "--asset", "USTD", "--reason", "a typo"}, &buf); err == nil {
 		t.Fatal("suspended an asset no network withdraws")
 	}
+	// A custodian's stand-in addresses retired and put back (B2).
+	if out := run("retire-addresses", "--reason", "the stand-in replaced"); !strings.Contains(out, "deposit addresses of UDUN retired") {
+		t.Fatal(out)
+	}
+	if out := run("restore-addresses", "--reason", "back to the stand-in"); !strings.Contains(out, "restored; 0 left retired") {
+		t.Fatal(out)
+	}
 	// Lifted with a difference accepted for two days (review of ebb8aaa, H2).
 	run("withdrawals-suspend", "--asset", "USDT", "--reason", "funds missing")
 	if out := run("withdrawals-resume", "--asset", "USDT", "--reason", "the custodian's rounding", "--accept", "2", "--for", "48h"); !strings.Contains(out, "do not count 2 USDT as missing until") {
@@ -95,6 +102,10 @@ func TestWalletCommandsQueue(t *testing.T) {
 	}
 	if err := walletWith(context.Background(), db, idb, []string{"withdrawals-resume", "--asset", "USDT", "--reason", "x", "--accept", "1", "--for", "200h"}, &buf); err == nil {
 		t.Fatal("accepted for longer than a week")
+	}
+	if err := walletWith(context.Background(), db, idb, []string{"withdrawals-resume", "--asset", "USDT", "--reason", "x", "--for", "2h"}, &buf); err == nil ||
+		!strings.Contains(err.Error(), "give --accept") {
+		t.Fatalf("--for alone: %v", err)
 	}
 	if err := walletWith(context.Background(), db, idb, []string{
 		"custody-fee", "0190a0b0-0000-7000-8000-000000000000", "--write-off",
