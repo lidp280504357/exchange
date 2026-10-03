@@ -771,6 +771,31 @@ expect 409 LEDGER_HOLD_RELEASED "a hold is released once"
 echo "ok   the frozen balance is back"
 as AUDITOR GET "/admin/v1/users/$USER_ID/holds" ""
 check "(.holds | length) == 1 and .holds[0].id == \"$HOLD\"" "the hold stays listed"
+# A hold the console cannot release (part of its freeze released
+# elsewhere): the operator releases the hold's own part of the frozen
+# balance, never another order's or withdrawal's (C5.5 ⑧, ⑯).
+KEY="e2e-hold-forced-$RUN"
+as FINANCE POST "/admin/v1/users/$USER_ID/holds" '{"asset":"USDT","amount":"0.7","reason":"e2e forced release check"}'
+expect 201 - "FINANCE holds 0.7 USDT"
+FORCED=$(jq -r .id <<<"$BODY")
+if out=$(exchangectl ledger release-hold --id "$FORCED" --amount 0.8 --reason "e2e more than the hold" 2>&1); then
+  echo "FAIL release-hold released more than the hold: $out" >&2
+  exit 1
+fi
+echo "ok   release-hold refuses more than the hold's part"
+out=$(exchangectl ledger release-hold --id "$FORCED" --reason "e2e operator release" 2>&1) || { echo "FAIL release-hold: $out" >&2; exit 1; }
+[[ $out == *"released: 0.7 of 0.7 USDT"* ]] || { echo "FAIL release-hold: $out" >&2; exit 1; }
+echo "ok   the operator releases it: all of it is the hold's"
+[[ $(spot_usdt frozen) == "$FROZEN_BEFORE" ]] || { echo "FAIL the forced release: $FROZEN_BEFORE -> $(spot_usdt frozen)" >&2; exit 1; }
+echo "ok   the frozen balance is back"
+as AUDITOR GET "/admin/v1/users/$USER_ID/holds" ""
+check "any(.holds[]; .id == \"$FORCED\" and .active == false)" "listed released"
+forced_audited() {
+  as AUDITOR GET "/admin/v1/audit-logs?target=user:$USER_ID" ""
+  [[ $STATUS == 200 ]] && jq -e --arg h "$FORCED" 'any(.items[]; .payload.action == "ledger.hold_released" and
+    (.payload.details | contains($h) and contains("\"forced\":true")))' <<<"$BODY" >/dev/null
+}
+eventually 60 "audited as forced" forced_audited
 
 call GET "/v1/market/ETH-BTC/depth?limit=5" ""
 LOW=$(jq -r '.bids[0][0] | tonumber * 0.9 * 100000 | floor / 100000 | tostring' <<<"$BODY")
@@ -858,6 +883,14 @@ else
   as AUDITOR GET "/admin/v1/positions?symbol=ETH-USDT-PERP&limit=5000" ""
   expect 200 - "a limit beyond the most is clamped"
   check "(.positions | length) <= 500 and (.positions | map(.user_id == \"$HOUSE_ID\") | . == sort)" "HOUSE's positions after every user's"
+  # What a debit of the FUTURES balance would leave of the cross margin,
+  # shown before a negative adjustment (C5.5 ⑧, ⑯).
+  as AUDITOR GET "/admin/v1/users/$USER_ID/futures-margin?debit=1" ""
+  expect 200 - "the user's cross margin"
+  check '.asset == "USDT" and .positions == 1 and (.unmeasured or (((.equity | tonumber) - (.equity_after | tonumber) - 1 | . * .) < 1e-12 and
+    (.maintenance | tonumber) > 0 and .state == "HEALTHY"))' "the long, healthy; a debit of 1 USDT leaves 1 less"
+  as AUDITOR GET "/admin/v1/users/$USER_ID/futures-margin?debit=-1" ""
+  expect 400 COMMON_INVALID_ARGUMENT "a debit is positive"
   as FINANCE POST "/admin/v1/users/$USER_ID/positions/close" '{"symbol":"ETH-USDT-PERP","position_side":"BOTH","reason":"e2e force close"}'
   expect 403 ADMIN_FORBIDDEN "FINANCE closes no positions"
   as OPERATOR POST "/admin/v1/users/$USER_ID/positions/close" '{"symbol":"ETH-USDT-PERP","position_side":"BOTH","reason":"e2e force close"}'

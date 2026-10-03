@@ -797,6 +797,11 @@ func TestACrossAccountIsLiquidatedTogether(t *testing.T) {
 	if p := r.position(t, alice); !p.Liquidating {
 		t.Fatalf("taken over %+v", p)
 	}
+	// The console's margin note before a debit: the liquidation engine has
+	// the account (C5.5 ⑯).
+	if m, err := r.svc.CrossMargin(ctx, alice, "USDT", decimal.Zero); err != nil || m.State != domain.MarginLiquidate || m.StateAfter != domain.MarginLiquidate {
+		t.Fatalf("a cross account taken over: %+v %v", m, err)
+	}
 	r.monitor(t, "61200")
 	liq, ok := r.liquidationOrder(t, alice)
 	if !ok || liq.Side != domain.Buy || !liq.Price.Equal(d("61506")) {

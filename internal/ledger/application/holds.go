@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -126,13 +127,17 @@ func (s *Service) ReleaseHold(ctx context.Context, id, actor, reason string) (do
 // ForceReleaseHold is the operators' way out of a hold that cannot be
 // released in full because part of its frozen amount was released
 // elsewhere (ReleaseHold failing with LEDGER_INSUFFICIENT_BALANCE): it
-// returns to the available balance what of the hold is still frozen (none
-// when nothing is), marks the hold released and audits it as
-// ledger.hold_released with "forced" and the amount released (exchangectl
-// ledger release-hold; C5.5 ⑧).
-func (s *Service) ForceReleaseHold(ctx context.Context, id, actor, reason string) (domain.Hold, decimal.Decimal, error) {
+// returns amount of it to the available balance (at most the hold and
+// what is frozen; zero only marks it), marks the hold released and
+// audits it as ledger.hold_released with "forced" and the amount
+// released. The account's frozen balance is shared with the user's orders
+// and withdrawals, so the caller works out how much of it is the hold's
+// (exchangectl ledger release-hold; C5.5 ⑧, ⑯).
+func (s *Service) ForceReleaseHold(ctx context.Context, id, actor, reason string, amount decimal.Decimal) (domain.Hold, error) {
+	if amount.IsNegative() {
+		return domain.Hold{}, apperr.Invalid("the amount released is not negative")
+	}
 	var out domain.Hold
-	released := decimal.Zero
 	err := s.Store.Tx(ctx, func(r ports.Repos) error {
 		h, err := r.Holds().GetForUpdate(ctx, id)
 		if err != nil {
@@ -144,20 +149,23 @@ func (s *Service) ForceReleaseHold(ctx context.Context, id, actor, reason string
 		if err := h.Release(actor, reason, s.Now()); err != nil {
 			return err
 		}
+		if amount.GreaterThan(h.Amount) {
+			return apperr.Invalid(fmt.Sprintf("the hold is %s: no more of it is released", h.Amount))
+		}
 		accs, err := r.Accounts().Lock(ctx, []domain.AccountKey{domain.UserAccount(h.UserID, h.AccountType, h.Asset)})
 		if err != nil {
 			return err
 		}
-		if len(accs) == 1 && accs[0].Frozen.IsPositive() {
-			released = decimal.Min(h.Amount, accs[0].Frozen)
+		if len(accs) != 1 || amount.GreaterThan(accs[0].Frozen) {
+			return domain.ErrInsufficientBalance
 		}
-		if released.IsPositive() {
+		if amount.IsPositive() {
 			decimals, err := s.Assets.Decimals(ctx, h.Asset)
 			if err != nil {
 				return err
 			}
 			part := *h
-			part.Amount = released
+			part.Amount = amount
 			p, err := domain.ReleasePosting(part, decimals)
 			if err != nil {
 				return err
@@ -173,14 +181,35 @@ func (s *Service) ForceReleaseHold(ctx context.Context, id, actor, reason string
 		}
 		out = *h
 		details, _ := json.Marshal(map[string]any{
-			"hold_id": h.ID, "account_type": h.AccountType, "asset": h.Asset, "amount": h.Amount.String(), "released": released.String(),
+			"hold_id": h.ID, "account_type": h.AccountType, "asset": h.Asset, "amount": h.Amount.String(), "released": amount.String(),
 			"forced": true,
 		})
 		return r.Emit(ctx, event.TopicAudit, &auditv1.AdminActionPerformed{
 			Target: "user:" + h.UserID, Action: "ledger.hold_released", Actor: h.ReleasedBy, Reason: h.ReleaseReason, Details: string(details),
 		}, "actor", h.ReleasedBy)
 	})
-	return out, released, err
+	return out, err
+}
+
+// Hold returns a hold with its account's balances (nil when unknown).
+func (s *Service) Hold(ctx context.Context, id string) (*domain.Hold, domain.Account, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return nil, domain.Account{}, apperr.Invalid("the hold ID is a UUID")
+	}
+	var h *domain.Hold
+	var acc domain.Account
+	err := s.Store.Tx(ctx, func(r ports.Repos) error {
+		var err error
+		if h, err = r.Holds().Get(ctx, id); err != nil || h == nil {
+			return err
+		}
+		accs, err := r.Accounts().Lock(ctx, []domain.AccountKey{domain.UserAccount(h.UserID, h.AccountType, h.Asset)})
+		if err == nil && len(accs) == 1 {
+			acc = accs[0]
+		}
+		return err
+	})
+	return h, acc, err
 }
 
 // Holds lists a user's holds, newest first (at most 200).

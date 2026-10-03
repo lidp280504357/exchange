@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DangerAction } from "../../kit/actions";
-import { closeOutcome } from "../users/money";
+import { closeOutcome, forceClose } from "../users/money";
 import { FilterBar, useFilters } from "../../kit/filters";
 import { Num, UserCell } from "../../kit/format";
 import { Page } from "../../kit/Page";
@@ -161,14 +161,7 @@ export default function Positions({ admin }: { admin: Admin }) {
             </span>
           }
           confirmWord={closing.symbol.split("-")[0] ?? closing.symbol}
-          run={async (reason, key) =>
-            adminData(
-              await adminApi.POST("/admin/v1/users/{id}/positions/close", {
-                params: { path: { id: closing.user_id }, header: { "Idempotency-Key": key } },
-                body: { symbol: closing.symbol, position_side: closing.position_side, reason },
-              }),
-            )
-          }
+          run={(reason, key) => forceClose(closing.user_id, closing, reason, key)}
           success={closeOutcome}
           invalidate={[["admin", "positions"], ["admin", "user", closing.user_id]]}
         />

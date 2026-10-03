@@ -12,10 +12,22 @@ import { useTranslation } from "react-i18next";
 /** FormError is a check of a dialog's own fields failing before any call; its message shows as it is. */
 export class FormError extends Error {}
 
+/**
+ * StillOpen is a call that worked but whose outcome is not final yet (a
+ * force close's order still filling): the dialog stays open with the same
+ * Idempotency-Key, so confirming again looks the outcome up instead of
+ * doing it again (C5.5 ⑯).
+ */
+export class StillOpen extends Error {}
+
 /** errorToast shows a failed call in Chinese with its trace ID. */
 export function errorToast(err: unknown, title?: ReactNode) {
   if (err instanceof FormError) {
     toast.error(err.message);
+    return;
+  }
+  if (err instanceof StillOpen) {
+    toast.info(err.message, { duration: 12000 });
     return;
   }
   const trace = err instanceof ApiError && err.traceId ? err.traceId : undefined;

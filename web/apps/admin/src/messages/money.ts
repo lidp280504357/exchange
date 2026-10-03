@@ -50,8 +50,9 @@ export const moneyZh = {
       noPositions: "没有持仓",
       closeTitle: "强制平掉这个仓位",
       closeHelp:
-        "先撤掉该用户在这个合约上的全部挂单（含开仓单，免得平仓后又成交开回去），再以市价全部平掉（订单类型 ADMIN），盈亏照常结算。盘口薄时可能只成交一部分，剩下的仓位要再平一次。正在强平的仓位交给强平引擎处理。",
+        "先撤掉该用户在这个合约上的全部挂单（含开仓单，免得平仓后又成交开回去；止盈止损单不撤，它们只会平仓），再以市价全部平掉（订单类型 ADMIN），盈亏照常结算。撤单与下平仓单之间用户仍可能再开仓，平完请再看一眼仓位。盘口薄时可能只成交一部分，剩下的仓位要再平一次。正在强平的仓位交给强平引擎处理。",
       closed: "已下平仓单",
+      closeOpen: "平仓单已下，还没成交完。再点一次「确认」会用同一个键查看结果（不会重复下单），结果会记进审计。",
       closedAll: "已全部平掉",
       closedPart: "只成交了 {{filled}} / {{quantity}}：剩下的仓位还在，请再平一次",
     },
@@ -125,8 +126,9 @@ export const moneyEn = {
       noPositions: "No positions",
       closeTitle: "Force close this position",
       closeHelp:
-        "Cancels every order the user rests on the contract (opening ones too, which would open it again), then closes it all at the market (order kind ADMIN); the result settles as usual. On a thin book it may fill in part: close the rest again. A position being liquidated is left to the liquidation engine.",
+        "Cancels every order the user rests on the contract (opening ones too, which would open it again; take-profit and stop-loss orders stay, they only close), then closes it all at the market (order kind ADMIN); the result settles as usual. The user may still open between the cancels and the close: look at the position again afterwards. On a thin book it may fill in part: close the rest again. A position being liquidated is left to the liquidation engine.",
       closed: "Closing order placed",
+      closeOpen: "The closing order is placed but not finished. Confirm again to look its outcome up under the same key (no second order); it goes to the audit trail.",
       closedAll: "Closed in full",
       closedPart: "Only {{filled}} of {{quantity}} filled: the rest of the position stays, close it again",
     },

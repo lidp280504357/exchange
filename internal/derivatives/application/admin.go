@@ -45,16 +45,6 @@ func (s *Service) CrossMargin(ctx context.Context, userID, asset string, debit d
 	if err != nil {
 		return CrossMargin{}, err
 	}
-	var cross []domain.Position
-	for _, p := range held {
-		if p.MarginMode == domain.Cross && !p.Qty.IsZero() {
-			cross = append(cross, p)
-		}
-	}
-	out.Positions = len(cross)
-	if len(cross) == 0 {
-		return out, nil
-	}
 	contracts, err := s.Instruments.Contracts(ctx)
 	if err != nil {
 		return CrossMargin{}, err
@@ -62,6 +52,32 @@ func (s *Service) CrossMargin(ctx context.Context, userID, asset string, debit d
 	byContract := make(map[string]domain.Contract, len(contracts))
 	for _, c := range contracts {
 		byContract[c.Symbol] = c
+	}
+	// As the margin monitor measures them: a delisted contract's positions
+	// are not, one under liquidation is the liquidation engine's (C5.5 ⑯).
+	var cross []domain.Position
+	liquidating := false
+	for _, p := range held {
+		if p.MarginMode != domain.Cross || p.Qty.IsZero() {
+			continue
+		}
+		c, ok := byContract[p.Symbol]
+		if ok && c.Status == "DELISTED" {
+			continue
+		}
+		if !ok {
+			out.Unmeasured = true
+		}
+		liquidating = liquidating || p.Liquidating
+		cross = append(cross, p)
+	}
+	out.Positions = len(cross)
+	if len(cross) == 0 || out.Unmeasured {
+		return out, nil
+	}
+	if liquidating {
+		out.State, out.StateAfter = domain.MarginLiquidate, domain.MarginLiquidate
+		return out, nil
 	}
 	marks := map[string]decimal.Decimal{}
 	for _, p := range cross {

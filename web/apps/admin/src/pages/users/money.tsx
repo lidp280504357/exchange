@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Lock } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { DangerAction, FormError, lastFour, type Notice } from "../../kit/actions";
+import { DangerAction, FormError, lastFour, StillOpen, type Notice } from "../../kit/actions";
 import { EnumBadge, EnumText } from "../../kit/enums";
 import { IdText, Num, TimeText } from "../../kit/format";
 import type { Approval } from "../../kit/funds";
@@ -92,6 +92,22 @@ export function BalancesTab({ admin, userId }: { admin: Admin; userId: string })
 }
 
 const holdKeys = (userId: string) => [userKey(userId, "balances"), userKey(userId, "holds"), ["admin", "user", userId], ["admin", "audit"]];
+
+/**
+ * forceClose closes a position at the market. The console waits a few
+ * seconds for the order to finish; one still filling keeps the dialog open
+ * with its key, so confirming again looks its outcome up (C5.5 ⑯).
+ */
+export async function forceClose(userId: string, p: { symbol: string; position_side: "BOTH" | "LONG" | "SHORT" }, reason: string, key: string) {
+  const o = adminData(
+    await adminApi.POST("/admin/v1/users/{id}/positions/close", {
+      params: { path: { id: userId }, header: { "Idempotency-Key": key } },
+      body: { symbol: p.symbol, position_side: p.position_side, reason },
+    }),
+  );
+  if (!["FILLED", "CANCELED", "EXPIRED", "REJECTED"].includes(o.status)) throw new StillOpen(i18n.t("admin.money.closeOpen"));
+  return o;
+}
 
 /** closeOutcome says what came of a force close: filled in full, in part (the rest of the position stays, C5.5 ⑧), or placed. */
 export function closeOutcome(result: unknown): string | Notice {
@@ -456,14 +472,7 @@ export function PositionsTab({ admin, userId }: { admin: Admin; userId: string }
             </span>
           }
           confirmWord={closing.symbol.split("-")[0] ?? closing.symbol}
-          run={async (reason, key) =>
-            adminData(
-              await adminApi.POST("/admin/v1/users/{id}/positions/close", {
-                params: { path: { id: userId }, header: { "Idempotency-Key": key } },
-                body: { symbol: closing.symbol, position_side: closing.position_side, reason },
-              }),
-            )
-          }
+          run={(reason, key) => forceClose(userId, closing, reason, key)}
           success={closeOutcome}
           invalidate={[userKey(userId, "positions"), userKey(userId, "contract-orders"), userKey(userId, "balances"), ["admin", "audit"]]}
         />

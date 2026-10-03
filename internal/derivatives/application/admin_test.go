@@ -107,4 +107,39 @@ func TestCrossMarginBeforeADebit(t *testing.T) {
 	if m, err := r.svc.CrossMargin(ctx, alice, "USDT", d("1")); err != nil || !m.Unmeasured {
 		t.Fatalf("a stale mark: %+v %v", m, err)
 	}
+	// As the margin monitor measures them (C5.5 ⑯): a delisted contract's
+	// positions are not, one whose contract is unknown cannot be.
+	r.book.Set(perp.Symbol, d("60000"), time.Now())
+	r.svc.Instruments = listed{status: "DELISTED"}
+	if m, err := r.svc.CrossMargin(ctx, alice, "USDT", d("1")); err != nil || m.Positions != 0 || m.Unmeasured {
+		t.Fatalf("a delisted contract: %+v %v", m, err)
+	}
+	r.svc.Instruments = listed{none: true}
+	if m, err := r.svc.CrossMargin(ctx, alice, "USDT", d("1")); err != nil || !m.Unmeasured || m.Positions != 1 {
+		t.Fatalf("an unknown contract: %+v %v", m, err)
+	}
+}
+
+// listed is the instruments with the contract in another status, or none.
+type listed struct {
+	status string
+	none   bool
+}
+
+func (l listed) Contract(ctx context.Context, symbol string) (domain.Contract, error) {
+	if l.none {
+		return domain.Contract{}, apperr.NotFound("no such contract")
+	}
+	c, err := instruments{}.Contract(ctx, symbol)
+	c.Status = l.status
+	return c, err
+}
+
+func (l listed) Contracts(context.Context) ([]domain.Contract, error) {
+	if l.none {
+		return nil, nil
+	}
+	c := perp
+	c.Status = l.status
+	return []domain.Contract{c}, nil
 }

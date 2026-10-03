@@ -187,7 +187,7 @@ export function AdjustForm({ userId, onUser, onDone }: { userId: string; onUser?
           void user.refetch();
         }}
       >
-        {account === "FUTURES" && direction === "debit" && amountOk && <CrossMarginNote userId={userId} debit={a} />}
+        {account === "FUTURES" && direction === "debit" && amountOk && asset.trim().toUpperCase() === "USDT" && <CrossMarginNote userId={userId} debit={a} />}
       </FundAction>
     </div>
   );
