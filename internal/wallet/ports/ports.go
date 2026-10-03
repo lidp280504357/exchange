@@ -224,6 +224,18 @@ type SuspensionRepo interface {
 	Put(ctx context.Context, s domain.Suspension) (bool, error)
 	// Delete lifts an asset's suspension; false when there was none.
 	Delete(ctx context.Context, asset string) (bool, error)
+	// Watch returns what the custody checks keep of an asset (zero values
+	// when nothing), Watches every asset with something kept.
+	Watch(ctx context.Context, asset string) (domain.ShortfallWatch, error)
+	Watches(ctx context.Context) ([]domain.ShortfallWatch, error)
+	// Suspect records that a check at now found funds missing unless an
+	// earlier one did, and returns when the first one did.
+	Suspect(ctx context.Context, asset string, now time.Time) (time.Time, error)
+	// Clear forgets a suspicion, and with accepted the accepted difference
+	// too.
+	Clear(ctx context.Context, asset string, accepted bool) error
+	// Accept records a difference a person accepted until a time.
+	Accept(ctx context.Context, asset string, amount decimal.Decimal, until time.Time, by string) error
 }
 
 // FundingRepo stores platform fundings, one per transaction.

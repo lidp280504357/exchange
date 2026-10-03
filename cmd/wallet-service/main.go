@@ -106,6 +106,29 @@ type settings struct {
 	UdunCallback    string        `koanf:"udun_callback_url"`
 	UdunCallbackIPs string        `koanf:"udun_callback_allowed_ips"`
 	CustodyInterval time.Duration `koanf:"wallet_custody_interval"`
+	// ShortfallStop is how much of an asset may be missing at the custody
+	// checks, beyond what explains it, before its withdrawals are
+	// suspended (WALLET_SHORTFALL_STOP, "USDT=1,BTC=0.0001"); an asset not
+	// named gets the smallest withdrawal fee of its custody networks.
+	ShortfallStop string `koanf:"wallet_shortfall_stop"`
+}
+
+// shortfallStops parses WALLET_SHORTFALL_STOP.
+func (s *settings) shortfallStops() (map[string]decimal.Decimal, error) {
+	out := map[string]decimal.Decimal{}
+	for _, f := range strings.Split(s.ShortfallStop, ",") {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		asset, amount, ok := strings.Cut(f, "=")
+		v, err := decimal.NewFromString(strings.TrimSpace(amount))
+		if !ok || strings.TrimSpace(asset) == "" || err != nil || v.IsNegative() {
+			return nil, fmt.Errorf("WALLET_SHORTFALL_STOP: %q is not ASSET=AMOUNT", f)
+		}
+		out[strings.ToUpper(strings.TrimSpace(asset))] = v
+	}
+	return out, nil
 }
 
 // minUdunKey is the shortest UDUN_API_KEY taken.
@@ -151,6 +174,9 @@ func (s *settings) Validate() error {
 	}
 	if !s.MaxFeeGwei.IsPositive() {
 		errs = append(errs, errors.New("WALLET_MAX_FEE_GWEI must be positive"))
+	}
+	if _, err := s.shortfallStops(); err != nil {
+		errs = append(errs, err)
 	}
 	if s.UdunURL != "" && (s.UdunMerchant == "" || s.UdunKey == "" || s.UdunCallback == "") {
 		errs = append(errs, errors.New("the custody wallet needs UDUN_MERCHANT_ID, UDUN_API_KEY and UDUN_CALLBACK_URL"))
@@ -266,9 +292,10 @@ func setup(ctx context.Context, a *app.App) error {
 			CallbackURL: cfg.UdunCallback, WalletID: cfg.UdunWallet,
 		}
 		svc.Custodians = map[string]ports.Custody{u.Provider(): u}
+		stops, _ := cfg.shortfallStops() // checked by Validate
 		custodian = application.NewCustodyProcessor(application.CustodyProcessor{
 			Store: store, Ledger: ledgerClient, Networks: networks, Eligibility: userClient, Custody: u, Log: a.Logger(), Now: time.Now,
-			Contradictions: svc.Contradictions,
+			Contradictions: svc.Contradictions, ShortfallStop: stops,
 		}, a.Metrics())
 		a.Add("custody processor", app.Loop(func(ctx context.Context) error {
 			return leased(ctx, a, db, "wallet-custody:"+u.Provider(), []step{{"custody operations", custodian.Round}}, cfg.CustodyInterval)

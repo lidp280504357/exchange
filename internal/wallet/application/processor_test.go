@@ -60,6 +60,53 @@ func (s memSuspensions) Delete(_ context.Context, asset string) (bool, error) {
 	return ok, nil
 }
 
+func (s memSuspensions) Watch(_ context.Context, asset string) (domain.ShortfallWatch, error) {
+	if w, ok := s.m.watches[asset]; ok {
+		return w, nil
+	}
+	return domain.ShortfallWatch{Asset: asset, Accepted: decimal.Zero}, nil
+}
+
+func (s memSuspensions) Watches(context.Context) ([]domain.ShortfallWatch, error) {
+	var out []domain.ShortfallWatch
+	for _, w := range s.m.watches {
+		if !w.SuspectSince.IsZero() || w.Accepted.IsPositive() {
+			out = append(out, w)
+		}
+	}
+	slices.SortFunc(out, func(a, b domain.ShortfallWatch) int { return strings.Compare(a.Asset, b.Asset) })
+	return out, nil
+}
+
+func (s memSuspensions) Suspect(ctx context.Context, asset string, now time.Time) (time.Time, error) {
+	w, _ := s.Watch(ctx, asset)
+	if w.SuspectSince.IsZero() {
+		w.SuspectSince = now
+		s.m.watches[asset] = w
+	}
+	return w.SuspectSince, nil
+}
+
+func (s memSuspensions) Clear(_ context.Context, asset string, accepted bool) error {
+	w, ok := s.m.watches[asset]
+	if !ok {
+		return nil
+	}
+	w.SuspectSince = time.Time{}
+	if accepted {
+		w.Accepted, w.AcceptedUntil, w.AcceptedBy = decimal.Zero, time.Time{}, ""
+	}
+	s.m.watches[asset] = w
+	return nil
+}
+
+func (s memSuspensions) Accept(ctx context.Context, asset string, amount decimal.Decimal, until time.Time, by string) error {
+	w, _ := s.Watch(ctx, asset)
+	w.Accepted, w.AcceptedUntil, w.AcceptedBy = amount, until, by
+	s.m.watches[asset] = w
+	return nil
+}
+
 func (a memAddresses) List(_ context.Context, network string) ([]domain.Address, error) {
 	var out []domain.Address
 	for _, x := range a.m.addresses {

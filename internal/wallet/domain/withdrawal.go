@@ -91,6 +91,31 @@ type Suspension struct {
 // SuspendedBySystem names the custody check as the suspender.
 const SuspendedBySystem = "system:custody-check"
 
+// ShortfallWatch is what the custody checks keep of an asset between
+// checks: since when funds are missing beyond its threshold (zero: not at
+// the last check), and a difference a person accepted when lifting a
+// suspension, which the checks do not count as missing until
+// AcceptedUntil (review of ebb8aaa, H2).
+type ShortfallWatch struct {
+	Asset         string
+	SuspectSince  time.Time
+	Accepted      decimal.Decimal
+	AcceptedUntil time.Time
+	AcceptedBy    string
+}
+
+// AcceptedAt is the difference accepted at now: zero once it lapsed.
+func (w ShortfallWatch) AcceptedAt(now time.Time) decimal.Decimal {
+	if !now.Before(w.AcceptedUntil) {
+		return decimal.Zero
+	}
+	return w.Accepted
+}
+
+// MaxAcceptFor is the longest a person may accept a difference for: a
+// standing one needs a correction in the ledger, not a longer acceptance.
+const MaxAcceptFor = 7 * 24 * time.Hour
+
 // Withdrawal is a request to send an asset out.
 type Withdrawal struct {
 	ID      string

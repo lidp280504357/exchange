@@ -115,23 +115,32 @@ exchangectl wallet custody-fee <提现ID> --write-off --reason "..."  # 不入�
 - 托管方没报某个币种的余额（或报的余额小数位多于该币种精度）时，这个资产这次不比较、报错（`not compared`），而不是当成 0 报一笔假短缺；某个币报的余额达到账本应有数按该币最小单位（托管方 `support-coins` 的 `decimals`）的一半以上时也不比较（多半是按最小单位报的，照比会遮住真正的短缺；按币种精度判断，小数位少的币也拦得住）。其他资产照常比较。没比较的资产 `wallet_custody_not_compared{asset}` 为 1（比较了为 0），持续 30 分钟告警 `CustodyNotCompared`：这期间它短不短缺没人知道。
 - 结果写 `chain_checks`（`network = UDUN`，多了 `elsewhere`、`in_flight` 两列），`exchangectl wallet checks --network UDUN` 或后台「托管方」页查看。
 
-### 短缺时自动停提（设计 §9，审查 B4，2026-10-03）
+### 短缺时自动停提（设计 §9，审查 B4，2026-10-03；ebb8aaa 审查修订）
 
-短缺里减去"结果未知的提现可能已拿走的"（交出去没回音的 `SUBMITTED` 与 `UNCERTAIN`，托管方可能已经发出）之后，还缺（大于 0）就是"说不清的短缺"：
+短缺里减去说得清的部分之后，还缺得比这个资产的门槛多，就是"说不清的短缺"。说得清的部分：
 
-- 第一次看到：只记下来，5 分钟后再对一次账（不等一小时）；中间人工 `reconcile` 不算数。
-- 5 分钟后还缺：**停掉这个资产的提现**——表 `withdrawal_suspensions` 写一行（缺多少、两次对账的时间），审计 `wallet.withdrawals.suspend`（操作人 `system:custody-check`）。用户新提这个资产直接被拒（422 `WALLET_WITHDRAW_SUSPENDED`，"该币种暂停提现，平台正在核对资金"），已批准的停在 `APPROVED` 不交给托管方（自建钱包也不签名），站内转账照常。指标 `wallet_withdrawals_suspended{asset}` 为 1，告警 `WalletWithdrawalsSuspended`（严重）。
+- 结果未知的提现可能已拿走的：交出去没回音的 `SUBMITTED` 与 `UNCERTAIN`，托管方可能已经发出；
+- 挂起等人工处理的手续费（`HELD`）：每笔都有自己的告警 `CustodyFeesHeld`，金额有上限（见上文）；
+- 人工解除停提时接受的差额，在接受期内（见下文）。
+
+门槛（ebb8aaa 审查 H1）：`WALLET_SHORTFALL_STOP`，如 `USDT=1,BTC=0.0001,ETH=0.001`（测试服 compose 里就是这组，大约是托管方手续费的粒度）；没写的资产取它托管网络里最小的提现手续费。托管方余额 0.000001 的舍入不会再停提。
+
+- 第一次看到：记进表 `shortfall_watch`（`suspect_since`，重启不丢），5 分钟后再对一次账（不等一小时；那次对账失败了，再过 5 分钟又对，不会拖到下一个整点）；中间人工 `reconcile` 不算数。
+- 5 分钟后还缺：**停掉这个资产的提现**——表 `withdrawal_suspensions` 写一行（缺多少、两次对账的时间），审计 `wallet.withdrawals.suspend`（操作人 `system:custody-check`）。用户新提这个资产直接被拒（422 `WALLET_WITHDRAW_SUSPENDED`，"该币种暂停提现，平台正在核对资金"），公开的 `GET /v1/wallet/networks` 里这个资产的网络 `withdraw_enabled` 为 false、`withdraw_suspended` 为 true（两个站的提现页显示"暂停提现，平台正在核对资金"）。已批准的停在 `APPROVED` 不交给托管方（自建钱包也不签名，但不挡后面的站内转账），按资产计数 `wallet_withdrawals_suspended_waiting{asset}`，等了 30 分钟告警 `WalletWithdrawalsWaitingOnSuspension`。充值、交易、站内转账照常。指标 `wallet_withdrawals_suspended{asset}` 为 1，告警 `WalletWithdrawalsSuspended`（严重）。
 - 第二次对账时已经不缺了：忘掉第一次，什么都不停。
 
-停了之后不会自己恢复：人工查清原因（挂起的手续费、迟到的回调、托管方的账单）后解除，或者明知要停时手工先停：
+停了之后不会自己恢复：人工查清原因（挂起的手续费、迟到的回调、托管方的账单）后解除，或者明知要停时手工先停（资产要有提现网络，拼错的资产名会被拒）：
 
 ```bash
 exchangectl wallet withdrawals-suspended
 exchangectl wallet withdrawals-resume --asset USDT --reason "托管方账单核对：挂起的 1.5 USDT 手续费已补记"
+exchangectl wallet withdrawals-resume --asset USDT --reason "托管方舍入差 2 USDT，账本更正单另走" --accept 2 --for 72h
 exchangectl wallet withdrawals-suspend --asset USDT --reason "托管方通报事故"
 ```
 
-两者都写审计（`wallet.withdrawals.resume` 带上停提的时间与原因）。挂起的手续费不算进未入账手续费，所以托管方真扣了却没人处理时也会让它停提：先处理手续费（见上文），再解除。
+解除后对账从头开始：还缺的话重新"第一次看到"，5 分钟后再停，不会立刻又停（ebb8aaa 审查 H2）。查清了但一时补不平的差额（比如托管方的舍入差，账本更正还在走流程），解除时用 `--accept` 接受下来、`--for` 定期限（最长 7 天，默认 24 小时）：期内对账只把超出接受额的部分当缺口，再多缺了照样停（停提原因里写明接受了多少、谁接受的）；到期自动失效，差额还在就重新停。长期的差额要在账本里更正，不要反复延长接受。`withdrawals-suspended` 同时列出正在观察的资产（第一次看到的时间、接受的差额与期限）。
+
+两者都写审计（`wallet.withdrawals.resume` 带上停提的时间、原因与接受的差额）。
 
 ## 测试服的模拟网关 udun-mock
 
@@ -164,7 +173,7 @@ sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T udu
 ## 指标与告警
 
 - `wallet_custody_up`、`wallet_custody_balance{coin}`（5 分钟）、`wallet_custody_held/expected/shortfall{asset}`（每次对账）、`wallet_custody_submitted`、`wallet_custody_submitted_oldest_seconds`、`wallet_custody_withdrawals_uncertain`、`wallet_custody_callbacks_attention`、`wallet_custody_deposits_held`、`wallet_custody_fees_unbooked`、`wallet_custody_fees_held`（等人工处理的手续费笔数）、`wallet_withdrawals_suspended{asset}`（该资产停提时为 1），常量标签 `provider`；`wallet_custody_fees_held_total`（挂起的手续费）、`wallet_custody_callbacks_rejected_total`（被拒的回调，记不记表都算）、`wallet_custody_deposit_discrepancies_total`（与补记不一致的回调）。
-- 告警（`deploy/observability/alerts.yml`）：`CustodyShortfall`（短缺 15 分钟，严重）、`CustodyNotCompared`（某资产 30 分钟没比较）、`CustodyUnreachable`（10 分钟）、`CustodyWithdrawalStuck`（`SUBMITTED` 超过 24 小时，人工到托管方后台核对）、`CustodyWithdrawalsUncertain`（重交被拒或 30 分钟无应答、托管方可能仍会发出，5 分钟，严重）、`CustodyCallbacksNeedAttention`（15 分钟）、`CustodyCallbacksRejected`（15 分钟内有回调被拒：伪造，或 `UDUN_API_KEY` 与托管方的不一致、充值进不来，审查 B6）、`WalletWithdrawalsSuspended`（某资产停提，严重；查清后 `exchangectl wallet withdrawals-resume`）、`CustodyFeesHeld`（有手续费等人工入账或核销）、`CustodyFeesUnbooked`（1 小时，`GAS_SUPPLY` 不够：`exchangectl ledger gas-supply`）、`CustodyDepositDiscrepancy`（回调与补记不一致，严重；在后台「充值 → 待处理」查明后驳回或调账）、`CustodyWithdrawalContradiction`（托管方的回调与已结束的提现矛盾，严重；`CustodyCallbacksNeedAttention` 也把 `DISCREPANCY` 计入）。
+- 告警（`deploy/observability/alerts.yml`）：`CustodyShortfall`（短缺 15 分钟，严重）、`CustodyNotCompared`（某资产 30 分钟没比较）、`CustodyUnreachable`（10 分钟）、`CustodyWithdrawalStuck`（`SUBMITTED` 超过 24 小时，人工到托管方后台核对）、`CustodyWithdrawalsUncertain`（重交被拒或 30 分钟无应答、托管方可能仍会发出，5 分钟，严重）、`CustodyCallbacksNeedAttention`（15 分钟）、`CustodyCallbacksRejected`（15 分钟内有回调被拒：伪造，或 `UDUN_API_KEY` 与托管方的不一致、充值进不来，审查 B6）、`WalletWithdrawalsSuspended`（某资产停提，严重；查清后 `exchangectl wallet withdrawals-resume`）、`WalletWithdrawalsWaitingOnSuspension`（已批准的提现因停提等了 30 分钟）、`CustodyFeesHeld`（有手续费等人工入账或核销）、`CustodyFeesUnbooked`（1 小时，`GAS_SUPPLY` 不够：`exchangectl ledger gas-supply`）、`CustodyDepositDiscrepancy`（回调与补记不一致，严重；在后台「充值 → 待处理」查明后驳回或调账）、`CustodyWithdrawalContradiction`（托管方的回调与已结束的提现矛盾，严重；`CustodyCallbacksNeedAttention` 也把 `DISCREPANCY` 计入）。
 
 ## 端到端
 

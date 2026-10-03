@@ -471,7 +471,7 @@ components:
     WalletNetwork:
       type: object
       required: [asset, network, display_name, chain, address_format, contract, confirmations, eta_minutes, min_deposit, min_withdraw,
-        withdraw_fee, memo_required, deposit_enabled, withdraw_enabled, explorer_tx_url, explorer_address_url]
+        withdraw_fee, memo_required, deposit_enabled, withdraw_enabled, withdraw_suspended, explorer_tx_url, explorer_address_url]
       properties:
         asset:
           type: string
@@ -506,6 +506,12 @@ components:
           type: boolean
         withdraw_enabled:
           type: boolean
+          description: The network takes withdrawals now; false while the asset's withdrawals are suspended.
+        withdraw_suspended:
+          type: boolean
+          description: >-
+            The asset's withdrawals are suspended while the platform checks its funds (requests fail with
+            WALLET_WITHDRAW_SUSPENDED); deposits go on.
         explorer_tx_url:
           type: [string, 'null']
           description: Explorer link of a transaction with a {tx} placeholder.

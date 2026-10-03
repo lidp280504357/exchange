@@ -204,12 +204,14 @@ type NetworkJSON struct {
 	MemoRequired       bool    `json:"memo_required"`
 	DepositEnabled     bool    `json:"deposit_enabled"`
 	WithdrawEnabled    bool    `json:"withdraw_enabled"`
+	WithdrawSuspended  bool    `json:"withdraw_suspended"`
 	ExplorerTxURL      *string `json:"explorer_tx_url"`
 	ExplorerAddressURL *string `json:"explorer_address_url"`
 }
 
-// NetworkJSONOf renders a network.
-func NetworkJSONOf(n domain.Network) NetworkJSON {
+// NetworkJSONOf renders a network; suspended: its asset's withdrawals are
+// suspended, so it takes none now.
+func NetworkJSONOf(n domain.Network, suspended bool) NetworkJSON {
 	name, format := n.DisplayName, n.AddressFormat
 	if name == "" {
 		name = n.Network
@@ -221,7 +223,8 @@ func NetworkJSONOf(n domain.Network) NetworkJSON {
 		Asset: n.Asset, Network: n.Network, DisplayName: name, Chain: n.Chain, AddressFormat: format, Contract: optional(n.Contract),
 		Confirmations: max(n.Confirmations, 1), ETAMinutes: n.ETAMinutes, MinDeposit: n.MinDeposit.String(),
 		MinWithdraw: n.MinWithdraw.String(), WithdrawFee: n.WithdrawFee.String(), MemoRequired: n.MemoRequired,
-		DepositEnabled: n.Enabled, WithdrawEnabled: n.WithdrawEnabled, ExplorerTxURL: optional(n.ExplorerTxURL),
+		DepositEnabled: n.Enabled, WithdrawEnabled: n.WithdrawEnabled && !suspended, WithdrawSuspended: suspended,
+		ExplorerTxURL:      optional(n.ExplorerTxURL),
 		ExplorerAddressURL: optional(n.ExplorerAddressURL),
 	}
 }
@@ -232,9 +235,14 @@ func (h *Handler) networks(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
+	suspended, err := h.Svc.WithdrawalsSuspended(r.Context())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
 	out := make([]NetworkJSON, 0, len(list))
 	for _, n := range list {
-		out = append(out, NetworkJSONOf(n))
+		out = append(out, NetworkJSONOf(n, suspended[n.Asset]))
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"networks": out})
 }

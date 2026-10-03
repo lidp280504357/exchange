@@ -312,6 +312,36 @@ func TestOperations(t *testing.T) {
 	if got, err := read.Suspensions().Get(ctx, "USDT"); err != nil || got != nil {
 		t.Fatalf("still suspended %+v %v", got, err)
 	}
+	// What the checks keep between checks (review of ebb8aaa): the first
+	// sighting stands, a clear forgets it, an acceptance has an end.
+	if w, err := read.Suspensions().Watch(ctx, "BTC"); err != nil || !w.SuspectSince.IsZero() || !w.Accepted.IsZero() {
+		t.Fatalf("nothing kept %+v %v", w, err)
+	}
+	if since, err := read.Suspensions().Suspect(ctx, "BTC", now); err != nil || !since.Equal(now) {
+		t.Fatalf("first sighting %v %v", since, err)
+	}
+	if since, err := read.Suspensions().Suspect(ctx, "BTC", now.Add(time.Hour)); err != nil || !since.Equal(now) {
+		t.Fatalf("the first sighting stands %v %v", since, err)
+	}
+	until := now.Add(24 * time.Hour)
+	if err := read.Suspensions().Accept(ctx, "BTC", decimal.RequireFromString("0.0003"), until, "ops"); err != nil {
+		t.Fatal(err)
+	}
+	if list, err := read.Suspensions().Watches(ctx); err != nil || len(list) != 1 || !list[0].AcceptedUntil.Equal(until) || list[0].AcceptedBy != "ops" {
+		t.Fatalf("watches %+v %v", list, err)
+	}
+	if err := read.Suspensions().Clear(ctx, "BTC", false); err != nil {
+		t.Fatal(err)
+	}
+	if w, err := read.Suspensions().Watch(ctx, "BTC"); err != nil || !w.SuspectSince.IsZero() || !w.Accepted.Equal(decimal.RequireFromString("0.0003")) {
+		t.Fatalf("cleared the suspicion only %+v %v", w, err)
+	}
+	if err := read.Suspensions().Clear(ctx, "BTC", true); err != nil {
+		t.Fatal(err)
+	}
+	if list, err := read.Suspensions().Watches(ctx); err != nil || len(list) != 0 {
+		t.Fatalf("nothing kept after a full clear %+v %v", list, err)
+	}
 	unit := domain.FeeUnit{Provider: "UDUN", Asset: "USDT", Network: "TRON", Unit: domain.FeeUnitSelf, ConfirmedBy: "ops", Reason: "tronscan", ConfirmedAt: now}
 	if got, err := read.ChainFees().Unit(ctx, "UDUN", "USDT", "TRON"); err != nil || got != nil {
 		t.Fatalf("no unit yet %+v %v", got, err)

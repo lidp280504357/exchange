@@ -228,40 +228,39 @@ func walletWith(ctx context.Context, db, idb *pg.DB, args []string, out io.Write
 			strings.ToUpper(u.Unit))
 		return nil
 	case "withdrawals-suspended":
-		list, err := store.Read().Suspensions().List(ctx)
-		if err != nil {
-			return err
-		}
-		if len(list) == 0 {
-			fmt.Fprintln(out, "no asset's withdrawals are suspended")
-			return nil
-		}
-		w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ASSET\tSINCE\tBY\tMISSING\tWHY")
-		for _, x := range list {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", x.Asset, x.SuspendedAt.UTC().Format(time.RFC3339), x.SuspendedBy, x.Shortfall, x.Reason)
-		}
-		return w.Flush()
+		return printSuspensions(ctx, store, out)
 	case "withdrawals-suspend", "withdrawals-resume":
 		asset := fs.String("asset", "", "the asset, e.g. USDT")
 		reason := fs.String("reason", "", "why (required, goes to the audit log)")
+		accept := fs.String("accept", "0", "resume: a difference you accept, which the custody checks do not count as missing for --for")
+		acceptFor := fs.Duration("for", 24*time.Hour, "resume: how long the accepted difference holds (at most 168h)")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
 		if args[0] == "withdrawals-suspend" {
-			x, err := application.SuspendWithdrawals(ctx, store, *asset, actor(), *reason, time.Now())
+			x, err := application.SuspendWithdrawals(ctx, store, withdrawable(instruments), *asset, actor(), *reason, time.Now())
 			if err != nil {
 				return err
 			}
 			fmt.Fprintf(out, "withdrawals of %s suspended: new requests are refused, approved ones wait\n", x.Asset)
 			return nil
 		}
-		x, err := application.ResumeWithdrawals(ctx, store, *asset, actor(), *reason)
+		amount, err := decimal.NewFromString(*accept)
+		if err != nil {
+			return fmt.Errorf("--accept: %w", err)
+		}
+		now := time.Now()
+		x, err := application.ResumeWithdrawals(ctx, store, application.Resume{
+			Asset: *asset, Actor: actor(), Reason: *reason, Accept: amount, AcceptFor: *acceptFor,
+		}, now)
 		if err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "withdrawals of %s resumed (suspended by %s at %s); approved ones go out within a round\n", x.Asset, x.SuspendedBy,
 			x.SuspendedAt.UTC().Format(time.RFC3339))
+		if amount.IsPositive() {
+			fmt.Fprintf(out, "the custody checks do not count %s %s as missing until %s\n", amount, x.Asset, now.Add(*acceptFor).UTC().Format(time.RFC3339))
+		}
 		return nil
 	case "commands":
 		limit := fs.Int("limit", 20, "how many")
@@ -295,6 +294,53 @@ func custodied(svc *instrumentapp.Service) application.Custodied {
 		v, err := svc.Asset(ctx, asset)
 		return v.Decimals, err == nil, err
 	}
+}
+
+// withdrawable reports whether an asset has a network to withdraw it on.
+func withdrawable(svc *instrumentapp.Service) application.Withdrawable {
+	return func(ctx context.Context, asset string) (bool, error) {
+		v, err := svc.Asset(ctx, asset)
+		if errors.Is(err, instrumentdomain.ErrNotFound) {
+			return false, nil
+		}
+		return err == nil && len(v.Networks) > 0, err
+	}
+}
+
+// printSuspensions lists the suspended assets, then what the custody
+// checks keep: a suspicion (funds missing at a check, suspended on the
+// next if still missing) or a difference a person accepted.
+func printSuspensions(ctx context.Context, store *postgres.Store, out io.Writer) error {
+	list, err := store.Read().Suspensions().List(ctx)
+	if err != nil {
+		return err
+	}
+	watches, err := store.Read().Suspensions().Watches(ctx)
+	if err != nil {
+		return err
+	}
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	if len(list) == 0 {
+		fmt.Fprintln(w, "no asset's withdrawals are suspended")
+	} else {
+		fmt.Fprintln(w, "ASSET\tSINCE\tBY\tMISSING\tWHY")
+		for _, x := range list {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", x.Asset, x.SuspendedAt.UTC().Format(time.RFC3339), x.SuspendedBy, x.Shortfall, x.Reason)
+		}
+	}
+	if len(watches) > 0 {
+		fmt.Fprintln(w, "\nWATCHED\tMISSING SINCE\tACCEPTED\tUNTIL\tBY")
+		stamp := func(t time.Time) string {
+			if t.IsZero() {
+				return "-"
+			}
+			return t.UTC().Format(time.RFC3339)
+		}
+		for _, x := range watches {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", x.Asset, stamp(x.SuspectSince), x.Accepted, stamp(x.AcceptedUntil), x.AcceptedBy)
+		}
+	}
+	return w.Flush()
 }
 
 // servedBy reports whether the custodian serves an asset's network.

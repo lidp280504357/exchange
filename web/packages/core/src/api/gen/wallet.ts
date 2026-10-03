@@ -243,7 +243,10 @@ export interface components {
             withdraw_fee: string;
             memo_required: boolean;
             deposit_enabled: boolean;
+            /** @description The network takes withdrawals now; false while the asset's withdrawals are suspended. */
             withdraw_enabled: boolean;
+            /** @description The asset's withdrawals are suspended while the platform checks its funds (requests fail with WALLET_WITHDRAW_SUSPENDED); deposits go on. */
+            withdraw_suspended: boolean;
             /** @description Explorer link of a transaction with a {tx} placeholder. */
             explorer_tx_url: string | null;
             /** @description Explorer link of an address with an {address} placeholder. */

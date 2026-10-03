@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/lidp280504357/exchange/internal/wallet/domain"
 	"github.com/lidp280504357/exchange/internal/wallet/ports"
@@ -378,4 +379,81 @@ func (r suspensions) Delete(ctx context.Context, asset string) (bool, error) {
 		return false, fmt.Errorf("delete suspension: %w", err)
 	}
 	return tag.RowsAffected() == 1, nil
+}
+
+const watchColumns = `asset, suspect_since, accepted, accepted_until, accepted_by`
+
+func scanWatch(row pgx.CollectableRow) (domain.ShortfallWatch, error) {
+	var w domain.ShortfallWatch
+	var since, until *time.Time
+	if err := row.Scan(&w.Asset, &since, &w.Accepted, &until, &w.AcceptedBy); err != nil {
+		return w, err
+	}
+	if since != nil {
+		w.SuspectSince = *since
+	}
+	if until != nil {
+		w.AcceptedUntil = *until
+	}
+	return w, nil
+}
+
+func (r suspensions) Watch(ctx context.Context, asset string) (domain.ShortfallWatch, error) {
+	rows, err := r.q.Query(ctx, `SELECT `+watchColumns+` FROM shortfall_watch WHERE asset = $1`, asset)
+	if err != nil {
+		return domain.ShortfallWatch{}, fmt.Errorf("get shortfall watch: %w", err)
+	}
+	w, err := pgx.CollectOneRow(rows, scanWatch)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ShortfallWatch{Asset: asset, Accepted: decimal.Zero}, nil
+	}
+	if err != nil {
+		return domain.ShortfallWatch{}, fmt.Errorf("get shortfall watch: %w", err)
+	}
+	return w, nil
+}
+
+func (r suspensions) Watches(ctx context.Context) ([]domain.ShortfallWatch, error) {
+	rows, err := r.q.Query(ctx, `SELECT `+watchColumns+` FROM shortfall_watch
+		WHERE suspect_since IS NOT NULL OR accepted > 0 ORDER BY asset`)
+	if err != nil {
+		return nil, fmt.Errorf("list shortfall watches: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, scanWatch)
+	if err != nil {
+		return nil, fmt.Errorf("list shortfall watches: %w", err)
+	}
+	return out, nil
+}
+
+func (r suspensions) Suspect(ctx context.Context, asset string, now time.Time) (time.Time, error) {
+	var since time.Time
+	err := r.q.QueryRow(ctx, `INSERT INTO shortfall_watch (asset, suspect_since) VALUES ($1, $2)
+		ON CONFLICT (asset) DO UPDATE SET suspect_since = COALESCE(shortfall_watch.suspect_since, EXCLUDED.suspect_since)
+		RETURNING suspect_since`, asset, now).Scan(&since)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("suspect shortfall: %w", err)
+	}
+	return since, nil
+}
+
+func (r suspensions) Clear(ctx context.Context, asset string, accepted bool) error {
+	q := `UPDATE shortfall_watch SET suspect_since = NULL WHERE asset = $1`
+	if accepted {
+		q = `UPDATE shortfall_watch SET suspect_since = NULL, accepted = 0, accepted_until = NULL, accepted_by = '' WHERE asset = $1`
+	}
+	if _, err := r.q.Exec(ctx, q, asset); err != nil {
+		return fmt.Errorf("clear shortfall watch: %w", err)
+	}
+	return nil
+}
+
+func (r suspensions) Accept(ctx context.Context, asset string, amount decimal.Decimal, until time.Time, by string) error {
+	_, err := r.q.Exec(ctx, `INSERT INTO shortfall_watch (asset, accepted, accepted_until, accepted_by) VALUES ($1, $2, $3, $4)
+		ON CONFLICT (asset) DO UPDATE SET accepted = EXCLUDED.accepted, accepted_until = EXCLUDED.accepted_until,
+		accepted_by = EXCLUDED.accepted_by`, asset, amount, until, by)
+	if err != nil {
+		return fmt.Errorf("accept shortfall: %w", err)
+	}
+	return nil
 }

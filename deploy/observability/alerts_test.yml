@@ -491,3 +491,19 @@ tests:
             exp_annotations:
               summary: "withdrawals of USDT are suspended (funds missing on two custody checks, or an operator): find the cause, then exchangectl wallet withdrawals-resume"
               runbook: docs/runbook/custody.md
+
+  - interval: 1m
+    input_series:
+      - series: 'wallet_withdrawals_suspended_waiting{job="wallet-service", provider="UDUN", asset="USDT"}'
+        values: '2x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: WalletWithdrawalsWaitingOnSuspension
+        exp_alerts: []
+      - eval_time: 31m
+        alertname: WalletWithdrawalsWaitingOnSuspension
+        exp_alerts:
+          - exp_labels: {severity: warning, asset: USDT}
+            exp_annotations:
+              summary: "2 approved withdrawals of USDT have waited 30 minutes on its suspension: users are waiting; lift it once the cause is found, or reject them"
+              runbook: docs/runbook/custody.md

@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
 
+	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/wallet/domain"
 	"github.com/lidp280504357/exchange/internal/wallet/ports"
@@ -1101,13 +1102,14 @@ func TestAShortfallOnTwoChecksSuspendsTheAssetsWithdrawals(t *testing.T) {
 	if got := h.store.wds[wd.ID]; got.Status != domain.WithdrawalApproved || len(h.custody.submitted) != 0 {
 		t.Fatalf("handed over while suspended: %+v", got)
 	}
-	if _, err := ResumeWithdrawals(ctx, h.store, "usdt", "ops", ""); !apperr.Is(err, apperr.CodeInvalidArgument) {
+	if _, err := ResumeWithdrawals(ctx, h.store, Resume{Asset: "usdt", Actor: "ops"}, h.now); !apperr.Is(err, apperr.CodeInvalidArgument) {
 		t.Fatalf("no reason: %v", err)
 	}
-	if lifted, err := ResumeWithdrawals(ctx, h.store, "usdt", "ops", "the custodian's statement explains it"); err != nil || lifted.Asset != "USDT" {
+	lifted, err := ResumeWithdrawals(ctx, h.store, Resume{Asset: "usdt", Actor: "ops", Reason: "the custodian's statement explains it"}, h.now)
+	if err != nil || lifted.Asset != "USDT" {
 		t.Fatalf("resumed %+v %v", lifted, err)
 	}
-	if _, err := ResumeWithdrawals(ctx, h.store, "USDT", "ops", "again"); !apperr.Is(err, apperr.CodeNotFound) {
+	if _, err := ResumeWithdrawals(ctx, h.store, Resume{Asset: "USDT", Actor: "ops", Reason: "again"}, h.now); !apperr.Is(err, apperr.CodeNotFound) {
 		t.Fatalf("resumed twice: %v", err)
 	}
 	h.cround(t)
@@ -1132,18 +1134,18 @@ func TestAShortfallExplainedOrGoneSuspendsNothing(t *testing.T) {
 	h.ledger.system[accountDepositPending] = d("-500")
 	held := d("470") // 30 missing: the unanswered withdrawal's
 	h.custody.coins = []ports.CustodyCoin{{Code: usdtCoin, Symbol: "USDT", Decimals: 6, Token: true, Balance: &held}}
-	if _, err := h.cproc.Check(ctx); err != nil || len(h.cproc.suspect) != 0 {
-		t.Fatalf("explained: %v %v", h.cproc.suspect, err)
+	if _, err := h.cproc.Check(ctx); err != nil || h.suspects() != 0 {
+		t.Fatalf("explained: %v %v", h.store.watches, err)
 	}
 	less := d("460") // 10 more: suspect, then back by the next check
 	h.custody.coins[0].Balance = &less
-	if _, err := h.cproc.Check(ctx); err != nil || len(h.cproc.suspect) != 1 {
-		t.Fatalf("suspect: %v %v", h.cproc.suspect, err)
+	if _, err := h.cproc.Check(ctx); err != nil || h.suspects() != 1 {
+		t.Fatalf("suspect: %v %v", h.store.watches, err)
 	}
 	h.custody.coins[0].Balance = &held
 	h.now = h.now.Add(5 * time.Minute)
-	if _, err := h.cproc.Check(ctx); err != nil || len(h.cproc.suspect) != 0 || len(h.store.suspended) != 0 {
-		t.Fatalf("gone: %v %v %v", h.cproc.suspect, h.store.suspended, err)
+	if _, err := h.cproc.Check(ctx); err != nil || h.suspects() != 0 || len(h.store.suspended) != 0 {
+		t.Fatalf("gone: %v %v %v", h.store.watches, h.store.suspended, err)
 	}
 }
 
@@ -1151,11 +1153,15 @@ func TestAShortfallExplainedOrGoneSuspendsNothing(t *testing.T) {
 func TestAnOperatorSuspendsWithdrawals(t *testing.T) {
 	h := newCustodyHarness(t)
 	ctx := context.Background()
-	if _, err := SuspendWithdrawals(ctx, h.store, "usdt", "ops", "the custodian reported an incident", h.now); err != nil {
+	known := func(_ context.Context, asset string) (bool, error) { return asset == "USDT", nil }
+	if _, err := SuspendWithdrawals(ctx, h.store, known, "usdt", "ops", "the custodian reported an incident", h.now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := SuspendWithdrawals(ctx, h.store, "USDT", "ops", "again", h.now); !apperr.Is(err, apperr.CodeConflict) {
+	if _, err := SuspendWithdrawals(ctx, h.store, known, "USDT", "ops", "again", h.now); !apperr.Is(err, apperr.CodeConflict) {
 		t.Fatalf("twice: %v", err)
+	}
+	if _, err := SuspendWithdrawals(ctx, h.store, known, "USTD", "ops", "a typo", h.now); !apperr.Is(err, apperr.CodeNotFound) {
+		t.Fatalf("an asset no network withdraws: %v", err)
 	}
 	if x := h.store.suspended["USDT"]; x.SuspendedBy != "ops" || h.audited("wallet.withdrawals.suspend") != 1 {
 		t.Fatalf("suspended %+v", x)
@@ -1181,4 +1187,227 @@ func (h *custodyHarness) gaugeOf(t *testing.T, name, asset string) float64 {
 		}
 	}
 	return 0
+}
+
+// suspects counts the assets the custody checks suspect of missing funds.
+func (h *custodyHarness) suspects() int {
+	n := 0
+	for _, w := range h.store.watches {
+		if !w.SuspectSince.IsZero() {
+			n++
+		}
+	}
+	return n
+}
+
+// missing sets what the custodian holds of USDT against 500 expected.
+func (h *custodyHarness) missing(amount string) {
+	h.cproc.Elsewhere = func(context.Context, string) (decimal.Decimal, error) { return decimal.Zero, nil }
+	h.ledger.system[accountDepositPending] = d("-500")
+	held := d("500").Sub(d(amount))
+	h.custody.coins = []ports.CustodyCoin{{Code: usdtCoin, Symbol: "USDT", Decimals: 6, Token: true, Balance: &held}}
+}
+
+// Review of ebb8aaa, H1: an asset's threshold is WALLET_SHORTFALL_STOP's,
+// else the smallest withdrawal fee of its custody networks (1 USDT here):
+// a custodian's rounding is not a loss.
+func TestAShortfallWithinTheStopSuspendsNothing(t *testing.T) {
+	h := newCustodyHarness(t)
+	ctx := context.Background()
+	h.missing("0.000001")
+	if _, err := h.cproc.Check(ctx); err != nil || h.suspects() != 0 {
+		t.Fatalf("a rounding: %v %v", h.store.watches, err)
+	}
+	h.missing("1")
+	if _, err := h.cproc.Check(ctx); err != nil || h.suspects() != 0 {
+		t.Fatalf("one fee's worth: %v %v", h.store.watches, err)
+	}
+	h.missing("1.5")
+	if _, err := h.cproc.Check(ctx); err != nil || h.suspects() != 1 {
+		t.Fatalf("beyond the fee: %v %v", h.store.watches, err)
+	}
+	h.cproc.ShortfallStop = map[string]decimal.Decimal{"USDT": d("2")}
+	if _, err := h.cproc.Check(ctx); err != nil || h.suspects() != 0 {
+		t.Fatalf("within the configured stop: %v %v", h.store.watches, err)
+	}
+}
+
+// Fees held for a person are each alerted on their own: they explain what
+// they took and suspend nothing.
+func TestHeldFeesExplainAShortfall(t *testing.T) {
+	h := newCustodyHarness(t)
+	ctx := context.Background()
+	h.store.fees["UDUN:fee-1"] = domain.ChainFee{
+		TxHash: "UDUN:fee-1", Network: tron, Asset: "USDT", Amount: d("3"), Purpose: domain.FeeWithdrawal, Status: domain.FeeHeld,
+	}
+	h.missing("3.5")
+	if _, err := h.cproc.Check(ctx); err != nil || h.suspects() != 0 {
+		t.Fatalf("held fee: %v %v", h.store.watches, err)
+	}
+	h.missing("4.5") // 1.5 beyond the held fee
+	if _, err := h.cproc.Check(ctx); err != nil || h.suspects() != 1 {
+		t.Fatalf("beyond the held fee: %v %v", h.store.watches, err)
+	}
+}
+
+// Review of ebb8aaa, H2: lifting a suspension starts the checks over, so a
+// standing difference suspends the asset again only on two checks; one a
+// person accepted for a while does not, unless more goes missing, and the
+// acceptance lapses.
+func TestAResumeStartsTheChecksOver(t *testing.T) {
+	h := newCustodyHarness(t)
+	ctx := context.Background()
+	h.missing("10")
+	suspendNow := func() {
+		t.Helper()
+		if _, err := h.cproc.Check(ctx); err != nil {
+			t.Fatal(err)
+		}
+		h.now = h.now.Add(5 * time.Minute)
+		h.cround(t)
+		if _, ok := h.store.suspended["USDT"]; !ok {
+			t.Fatalf("not suspended: %v", h.store.watches)
+		}
+	}
+	suspendNow()
+	if h.suspects() != 0 {
+		t.Fatalf("the suspension spends the suspicion: %v", h.store.watches)
+	}
+	if _, err := ResumeWithdrawals(ctx, h.store, Resume{Asset: "USDT", Actor: "ops", Reason: "looked at it"}, h.now); err != nil {
+		t.Fatal(err)
+	}
+	// Still missing an hour later: suspected anew, not suspended at once.
+	h.now = h.now.Add(time.Hour)
+	h.cround(t)
+	if _, ok := h.store.suspended["USDT"]; ok || h.suspects() != 1 {
+		t.Fatalf("suspended at once after a resume: %v %v", h.store.suspended, h.store.watches)
+	}
+	h.now = h.now.Add(5 * time.Minute)
+	h.cround(t)
+	if _, ok := h.store.suspended["USDT"]; !ok {
+		t.Fatal("still missing on two checks: suspended again")
+	}
+
+	for _, bad := range []Resume{
+		{Asset: "USDT", Actor: "ops", Reason: "accepted", Accept: d("-1"), AcceptFor: time.Hour},
+		{Asset: "USDT", Actor: "ops", Reason: "accepted", Accept: d("10")},
+		{Asset: "USDT", Actor: "ops", Reason: "accepted", Accept: d("10"), AcceptFor: domain.MaxAcceptFor + time.Hour},
+	} {
+		if _, err := ResumeWithdrawals(ctx, h.store, bad, h.now); !apperr.Is(err, apperr.CodeInvalidArgument) {
+			t.Fatalf("%+v: %v", bad, err)
+		}
+	}
+	accepted := Resume{Asset: "USDT", Actor: "ops", Reason: "the custodian's rounding, a ledger correction follows", Accept: d("10"), AcceptFor: 24 * time.Hour}
+	if _, err := ResumeWithdrawals(ctx, h.store, accepted, h.now); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := h.store.audits[len(h.store.audits)-1].(*auditv1.AdminActionPerformed); !strings.Contains(a.GetDetails(), `"accepted":"10"`) {
+		t.Fatalf("the acceptance is audited: %v", a)
+	}
+	for range 3 { // the accepted difference stays, hour after hour
+		h.now = h.now.Add(time.Hour)
+		h.cround(t)
+		h.now = h.now.Add(5 * time.Minute)
+		h.cround(t)
+	}
+	if _, ok := h.store.suspended["USDT"]; ok || h.suspects() != 0 {
+		t.Fatalf("an accepted difference suspended: %v %v", h.store.suspended, h.store.watches)
+	}
+	// More goes missing: what is beyond the accepted difference counts.
+	h.missing("15")
+	h.now = h.now.Add(time.Hour)
+	suspendNow()
+	if x := h.store.suspended["USDT"]; !x.Shortfall.Equal(d("15")) || !strings.Contains(x.Reason, "10 of it accepted by ops") {
+		t.Fatalf("suspended %+v", x)
+	}
+	// Lifted again, the acceptance lapses after its day.
+	if _, err := ResumeWithdrawals(ctx, h.store, Resume{Asset: "USDT", Actor: "ops", Reason: "found the other 5"}, h.now); err != nil {
+		t.Fatal(err)
+	}
+	h.missing("10")
+	h.now = h.now.Add(24 * time.Hour)
+	suspendNow()
+}
+
+// Review of ebb8aaa: a recheck the custodian did not answer comes again
+// RecheckAfter later, not with the hourly check.
+func TestAFailedRecheckComesAgainSoon(t *testing.T) {
+	h := newCustodyHarness(t)
+	ctx := context.Background()
+	h.missing("10")
+	h.cround(t) // the hourly check: a first sighting
+	if h.suspects() != 1 || h.cproc.recheckAt.IsZero() {
+		t.Fatalf("suspected: %v, recheck at %v", h.store.watches, h.cproc.recheckAt)
+	}
+	h.now = h.now.Add(5 * time.Minute)
+	h.custody.down = true
+	if err := h.cproc.Round(ctx); err == nil {
+		t.Fatal("the custodian is down")
+	}
+	if want := h.now.Add(5 * time.Minute); !h.cproc.recheckAt.Equal(want) {
+		t.Fatalf("recheck at %v, want %v", h.cproc.recheckAt, want)
+	}
+	h.custody.down = false
+	h.now = h.now.Add(5 * time.Minute)
+	h.cround(t)
+	if _, ok := h.store.suspended["USDT"]; !ok {
+		t.Fatal("decided ten minutes after the first sighting, not an hour")
+	}
+}
+
+// A restart keeps the suspicion (the store has it): the new processor's
+// first check decides.
+func TestARestartKeepsTheSuspicion(t *testing.T) {
+	h := newCustodyHarness(t)
+	h.missing("10")
+	h.cround(t)
+	again := NewCustodyProcessor(CustodyProcessor{
+		Store: h.store, Ledger: h.ledger, Networks: h.nets, Eligibility: h.elig, Custody: h.custody, Log: slog.New(slog.DiscardHandler),
+		Now: func() time.Time { return h.now }, Elsewhere: h.cproc.Elsewhere,
+	}, prometheus.NewRegistry())
+	h.now = h.now.Add(5 * time.Minute)
+	if err := again.Round(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := h.store.suspended["USDT"]; !ok {
+		t.Fatalf("the restarted processor forgot the first sighting: %v", h.store.watches)
+	}
+}
+
+// A suspension holds the asset's approved withdrawals on every network,
+// counted by asset; other work goes on.
+func TestASuspensionHoldsTheAssetOnEveryNetwork(t *testing.T) {
+	h := newCustodyHarness(t)
+	bsc := domain.Network{
+		Asset: "USDT", Network: "BSC", Chain: "bsc", Contract: "0x55d398326f99059ff775485246999027b3197955", Decimals: 18, Confirmations: 15,
+		MinDeposit: d("1"), Enabled: true, WithdrawEnabled: true, MinWithdraw: d("10"), WithdrawFee: d("0.5"), AddressFormat: domain.FormatEVM,
+		Provider: domain.ProviderUdun, ProviderCoin: "9006:0x55d398326f99059fF775485246999027B3197955",
+	}
+	h.nets.nets = append(h.nets.nets, bsc)
+	none := decimal.Zero
+	h.custody.coins = append(h.custody.coins, ports.CustodyCoin{Code: bsc.ProviderCoin, Symbol: "USDT", Decimals: 18, Token: true, Balance: &none})
+	onTron := h.requestCustody(t, "20")
+	onBSC := onTron
+	onBSC.ID, onBSC.Network, onBSC.Address = "wd-bsc", "BSC", "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359"
+	h.store.wds[onBSC.ID] = onBSC
+	for _, asset := range []string{"USDT", "BTC"} {
+		h.store.suspended[asset] = domain.Suspension{Asset: asset, Reason: "a test", SuspendedBy: "ops", SuspendedAt: h.now, Shortfall: decimal.Zero}
+	}
+	h.cround(t)
+	if h.gaugeOf(t, "wallet_withdrawals_suspended", "BTC") != 1 || h.gaugeOf(t, "wallet_withdrawals_suspended_waiting", "BTC") != 0 {
+		t.Fatal("BTC is suspended with nothing waiting")
+	}
+	for _, id := range []string{onTron.ID, onBSC.ID} {
+		if got := h.store.wds[id]; got.Status != domain.WithdrawalApproved {
+			t.Fatalf("%s handed over while suspended: %+v", got.Network, got)
+		}
+	}
+	if len(h.custody.submitted) != 0 || h.gaugeOf(t, "wallet_withdrawals_suspended_waiting", "USDT") != 2 {
+		t.Fatalf("submitted %v, waiting %v", h.custody.submitted, h.gaugeOf(t, "wallet_withdrawals_suspended_waiting", "USDT"))
+	}
+	delete(h.store.suspended, "USDT")
+	h.cround(t)
+	if len(h.custody.submitted) != 2 || h.gaugeOf(t, "wallet_withdrawals_suspended_waiting", "USDT") != 0 {
+		t.Fatalf("both go once lifted: %v", h.custody.submitted)
+	}
 }

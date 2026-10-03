@@ -6,7 +6,7 @@ import type { Deposit, Withdrawal, WithdrawAddress } from "./networks";
 const net = (asset: string, network: string, over: Partial<WalletNetwork> = {}): WalletNetwork => ({
   asset, network, display_name: network, chain: "1", address_format: "EVM", contract: null, confirmations: 12, eta_minutes: 3,
   min_deposit: "0.001", min_withdraw: "0.001", withdraw_fee: "0.0002", memo_required: false, deposit_enabled: true, withdraw_enabled: true,
-  explorer_tx_url: "https://sepolia.etherscan.io/tx/{tx}", explorer_address_url: "https://sepolia.etherscan.io/address/{address}", ...over,
+  withdraw_suspended: false, explorer_tx_url: "https://sepolia.etherscan.io/tx/{tx}", explorer_address_url: "https://sepolia.etherscan.io/address/{address}", ...over,
 });
 
 const list = [

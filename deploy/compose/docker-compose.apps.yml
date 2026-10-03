@@ -247,6 +247,9 @@ services:
       # without a fresh reference.
       WALLET_WHITELIST_COOLDOWN: 1m
       WALLET_FALLBACK_PRICES: ETH:3000,BTC:100000
+      # How much may be missing at the custody checks before an asset's
+      # withdrawals are suspended: about the custodian's fee granularity.
+      WALLET_SHORTFALL_STOP: USDT=1,BTC=0.0001,ETH=0.001
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}

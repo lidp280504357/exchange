@@ -162,7 +162,7 @@ export default function Withdraw() {
               >
                 {paused && (
                   <Notice tone="warn" className="mb-2">
-                    {t("mAssets.withdraw.pausedAll", { asset })}
+                    {t(list.some((n) => n.withdraw_suspended) ? "mAssets.withdraw.suspendedAll" : "mAssets.withdraw.pausedAll", { asset })}
                   </Notice>
                 )}
                 <NetworkCards

@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math/big"
 	"slices"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
 
@@ -546,5 +548,47 @@ func TestValidateAddress(t *testing.T) {
 	nets, err := w.svc.NetworksOf(ctx, "eth")
 	if err != nil || len(nets) != 1 || nets[0].Network != net {
 		t.Fatalf("networks %+v %v", nets, err)
+	}
+}
+
+// On the platform's own wallets a withdrawal of a suspended asset is passed
+// over and counted waiting, not left holding up the ones behind it: an
+// internal transfer after it completes (review of ebb8aaa).
+func TestASuspendedAssetDoesNotHoldUpTheHotWallet(t *testing.T) {
+	w := newWithdrawHarness(t)
+	ctx := context.Background()
+	payee := "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359"
+	bobs := w.address("bob")
+	for i, a := range []string{payee, bobs} {
+		if _, err := w.svc.AddAddress(ctx, "alice", AddressInput{Network: net, Address: a, StepUp: w.stepUp(fmt.Sprintf("a%d", i), 2, true)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.now = w.now.Add(2 * time.Minute)
+	var ids []string
+	for i, a := range []string{payee, bobs} {
+		wd, err := w.svc.RequestWithdrawal(ctx, "alice", WithdrawalInput{Asset: "ETH", Network: net, Address: a, Amount: d("0.1"), StepUp: w.stepUp(fmt.Sprintf("b%d", i), 2, true)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if wd.Status == domain.WithdrawalReview {
+			if _, err := ReviewWithdrawal(ctx, w.store, Review{ID: wd.ID, Reviewer: "ops-1", Reason: "fine", Approve: true}, w.now); err != nil {
+				t.Fatal(err)
+			}
+		}
+		ids = append(ids, wd.ID)
+		w.now = w.now.Add(time.Second)
+	}
+	w.store.suspended["ETH"] = domain.Suspension{Asset: "ETH", Reason: "a test", SuspendedBy: "ops", SuspendedAt: w.now, Shortfall: decimal.Zero}
+	w.round(t)
+	if s := w.store.wds[ids[0]]; s.Status != domain.WithdrawalApproved || len(w.signer.requests) != 0 {
+		t.Fatalf("sent while suspended: %+v", s)
+	}
+	if s := w.store.wds[ids[1]]; s.Status != domain.WithdrawalConfirmed {
+		t.Fatalf("the internal transfer behind it waited: %+v", s)
+	}
+	var m dto.Metric
+	if err := w.proc.waiting.Write(&m); err != nil || m.GetGauge().GetValue() != 1 {
+		t.Fatalf("waiting %v %v", m.GetGauge().GetValue(), err)
 	}
 }

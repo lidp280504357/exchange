@@ -202,8 +202,13 @@ at_exit "exchangectl wallet withdrawals-resume --asset USDT --reason 'end-to-end
 step_up
 call POST /v1/wallet/withdrawals "{\"asset\":\"USDT\",\"network\":\"TRON\",\"address\":\"$PAYEE\",\"amount\":\"12\"}" "${AUTH[@]}" -H "X-Step-Up-Token: $STEP"
 expect 422 WALLET_WITHDRAW_SUSPENDED "refused while USDT's withdrawals are suspended"
+call GET "/v1/wallet/networks?asset=USDT" "" "${AUTH[@]}"
+expect 200 - "networks while suspended"
+check '[.networks[] | select(.network == "TRON")][0] | .withdraw_suspended == true and .withdraw_enabled == false' "the sites see USDT's withdrawals suspended"
 exchangectl wallet withdrawals-resume --asset USDT --reason "end-to-end: resumed" >/dev/null
 echo "ok   resumed by an operator"
+call GET "/v1/wallet/networks?asset=USDT" "" "${AUTH[@]}"
+check '[.networks[] | select(.network == "TRON")][0] | .withdraw_suspended == false and .withdraw_enabled == true' "and open again"
 withdraw "$PAYEE" 12
 SENT_ID=$(jq -r .id <<<"$BODY")
 check '.status == "PENDING_REVIEW" and .custody == true and .fee == "1"' "in review, with the custodian's network"

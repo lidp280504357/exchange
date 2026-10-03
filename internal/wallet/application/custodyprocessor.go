@@ -47,17 +47,20 @@ type CustodyProcessor struct {
 	BalanceEvery   time.Duration
 	ResubmitAfter  time.Duration
 	UncertainAfter time.Duration
-	// An asset's withdrawals are suspended when more than ShortfallStop of
-	// it is missing beyond what withdrawals with an unknown outcome could
-	// explain, on two checks at least RecheckAfter (5 minutes) apart: a
-	// first sighting has the next check come then (design §9, review B4).
-	ShortfallStop decimal.Decimal
+	// An asset's withdrawals are suspended when more of it is missing than
+	// its ShortfallStop (WALLET_SHORTFALL_STOP; an asset not named there
+	// gets the smallest withdrawal fee of its networks with the custodian,
+	// the custodian's fee granularity at least) beyond what explains it:
+	// withdrawals with an unknown outcome, fees held for a person and a
+	// difference a person accepted. It takes two checks at least
+	// RecheckAfter (5 minutes) apart: a first sighting has the next check
+	// come then (design §9, review B4 and of ebb8aaa).
+	ShortfallStop map[string]decimal.Decimal
 	RecheckAfter  time.Duration
 
 	lastCheck   time.Time
 	lastBalance time.Time
 	recheckAt   time.Time
-	suspect     map[string]time.Time // assets missing funds at a check, since
 
 	up        prometheus.Gauge
 	balance   *prometheus.GaugeVec
@@ -73,6 +76,7 @@ type CustodyProcessor struct {
 	unbooked  prometheus.Gauge
 	feesHeld  prometheus.Gauge
 	suspended *prometheus.GaugeVec
+	stopped   *prometheus.GaugeVec
 }
 
 // NewCustodyProcessor registers the processor's metrics with reg.
@@ -98,8 +102,9 @@ func NewCustodyProcessor(p CustodyProcessor, reg prometheus.Registerer) *Custody
 	p.unbooked = gauge("wallet_custody_fees_unbooked", "The custodian's fees the ledger has not booked yet (GAS_SUPPLY short?).")
 	p.feesHeld = gauge("wallet_custody_fees_held", "The custodian's fees held for a person to book or write off (exchangectl wallet custody-fees).")
 	p.suspended = vec("wallet_withdrawals_suspended", "1 while an asset's withdrawals are suspended (funds missing, or an operator); a person lifts it.", "asset")
+	p.stopped = vec("wallet_withdrawals_suspended_waiting", "Approved withdrawals that wait because their asset's withdrawals are suspended.", "asset")
 	reg.MustRegister(p.up, p.balance, p.held, p.expected, p.shortfall, p.compared, p.submitted, p.oldest, p.attention, p.uncertain, p.waiting,
-		p.unbooked, p.feesHeld, p.suspended)
+		p.unbooked, p.feesHeld, p.suspended, p.stopped)
 	if p.CheckEvery <= 0 {
 		p.CheckEvery = time.Hour
 	}
@@ -115,7 +120,6 @@ func NewCustodyProcessor(p CustodyProcessor, reg prometheus.Registerer) *Custody
 	if p.RecheckAfter <= 0 {
 		p.RecheckAfter = 5 * time.Minute
 	}
-	p.suspect = map[string]time.Time{}
 	return &p
 }
 
@@ -152,9 +156,10 @@ func (p *CustodyProcessor) Round(ctx context.Context) error {
 	}
 	var errs []error
 	held, unbooked := 0, decimal.Zero
+	stopped := map[string]int{} // approved withdrawals of suspended assets, by asset
 	for _, n := range names(nets) {
 		o := netOps{Store: p.Store, Ledger: p.Ledger, Log: p.Log, Now: p.Now, Network: n}
-		errs = append(errs, o.recoverRequested(ctx), o.release(ctx), p.dispatch(ctx, o, nets), o.settle(ctx))
+		errs = append(errs, o.recoverRequested(ctx), o.release(ctx), p.dispatch(ctx, o, nets, stopped), o.settle(ctx))
 		waiting, err := requestCredits(ctx, p.Store, p.Eligibility, n, nets, p.Now)
 		held += waiting
 		left, ferr := o.bookFees(ctx)
@@ -163,6 +168,10 @@ func (p *CustodyProcessor) Round(ctx context.Context) error {
 	}
 	p.waiting.Set(float64(held))
 	p.unbooked.Set(unbooked.InexactFloat64())
+	p.stopped.Reset()
+	for asset, n := range stopped {
+		p.stopped.WithLabelValues(asset).Set(float64(n))
+	}
 	errs = append(errs, p.resubmit(ctx, nets), p.observe(ctx), p.commands(ctx))
 	now := p.Now()
 	if now.Sub(p.lastBalance) >= p.BalanceEvery {
@@ -172,7 +181,8 @@ func (p *CustodyProcessor) Round(ctx context.Context) error {
 			p.lastBalance = now
 		}
 	}
-	if now.Sub(p.lastCheck) >= p.CheckEvery || !p.recheckAt.IsZero() && !now.Before(p.recheckAt) {
+	recheck := !p.recheckAt.IsZero() && !now.Before(p.recheckAt)
+	if now.Sub(p.lastCheck) >= p.CheckEvery || recheck {
 		p.recheckAt = time.Time{}
 		_, err := p.Check(ctx)
 		if err == nil || errors.Is(err, errNotCompared) {
@@ -180,6 +190,9 @@ func (p *CustodyProcessor) Round(ctx context.Context) error {
 		}
 		if err != nil {
 			errs = append(errs, fmt.Errorf("custody check: %w", err))
+			if recheck && p.recheckAt.IsZero() {
+				p.recheckAt = now.Add(p.RecheckAfter) // still due: not an hour later
+			}
 		}
 	}
 	return errors.Join(errs...)
@@ -221,7 +234,7 @@ func (p *CustodyProcessor) commands(ctx context.Context) error {
 
 // dispatch hands the network's approved withdrawals to the custodian,
 // oldest first; internal ones complete in the ledger.
-func (p *CustodyProcessor) dispatch(ctx context.Context, o netOps, nets []domain.Network) error {
+func (p *CustodyProcessor) dispatch(ctx context.Context, o netOps, nets []domain.Network, waiting map[string]int) error {
 	list, err := p.Store.Read().Withdrawals().ByStatus(ctx, o.Network, domain.WithdrawalApproved)
 	if err != nil {
 		return err
@@ -238,6 +251,7 @@ func (p *CustodyProcessor) dispatch(ctx context.Context, o netOps, nets []domain
 			continue
 		}
 		if suspended[w.Asset] {
+			waiting[w.Asset]++
 			continue // waits APPROVED until a person lifts the suspension
 		}
 		if err := p.submit(ctx, w, nets); err != nil {
@@ -526,6 +540,16 @@ func (p *CustodyProcessor) Check(ctx context.Context) ([]domain.ChainCheck, erro
 		return nil, err
 	}
 	flying, unknown := inFlight(outstanding), unknownOutcome(outstanding)
+	held, err := r.ChainFees().Held(ctx)
+	if err != nil {
+		return nil, err
+	}
+	feesHeld := map[string]decimal.Decimal{} // the custodian's fees held for a person, by asset
+	for _, f := range held {
+		if strings.HasPrefix(f.TxHash, p.Custody.Provider()+":") {
+			feesHeld[f.Asset] = feesHeld[f.Asset].Add(f.Amount)
+		}
+	}
 	unbooked := map[string]decimal.Decimal{}
 	networksOf := map[string][]string{}
 	var assets []string
@@ -584,7 +608,7 @@ func (p *CustodyProcessor) Check(ctx context.Context) ([]domain.ChainCheck, erro
 				"held", c.Chain.String(), "elsewhere", c.Elsewhere.String(), "in_flight", c.InFlight.String(), "expected", c.Ledger.String(),
 				"unbooked", c.Unbooked.String(), "shortfall", c.Shortfall.String())
 		}
-		if err := p.watchShortfall(ctx, c, unknown[asset]); err != nil {
+		if err := p.watchShortfall(ctx, c, unknown[asset].Add(feesHeld[asset]), p.stopOf(asset, nets)); err != nil {
 			return out, err
 		}
 		out = append(out, c)
@@ -592,44 +616,76 @@ func (p *CustodyProcessor) Check(ctx context.Context) ([]domain.ChainCheck, erro
 	return out, errors.Join(skipped...)
 }
 
-// watchShortfall suspends an asset's withdrawals when more of it is
-// missing than ShortfallStop beyond what withdrawals with an unknown
-// outcome (handed over unanswered, UNCERTAIN) could explain, on two
-// checks at least RecheckAfter apart: a first sighting has the next check
-// come then, a later one that finds nothing missing forgets it (design §9,
-// review B4). A person lifts the suspension (ResumeWithdrawals).
-func (p *CustodyProcessor) watchShortfall(ctx context.Context, c domain.ChainCheck, unknown decimal.Decimal) error {
-	missing := c.Shortfall.Sub(unknown)
-	now := p.Now()
-	if !missing.GreaterThan(p.ShortfallStop) {
-		delete(p.suspect, c.Asset)
-		return nil
+// stopOf is how much of asset may be missing before its withdrawals stop:
+// ShortfallStop's, else the smallest withdrawal fee of its networks with
+// the custodian.
+func (p *CustodyProcessor) stopOf(asset string, nets []domain.Network) decimal.Decimal {
+	if stop, ok := p.ShortfallStop[asset]; ok {
+		return stop
 	}
-	since, seen := p.suspect[c.Asset]
-	if !seen {
-		p.suspect[c.Asset] = now
-		if at := now.Add(p.RecheckAfter); p.recheckAt.IsZero() || at.Before(p.recheckAt) {
-			p.recheckAt = at
+	stop := decimal.Zero
+	for _, n := range nets {
+		if n.Asset == asset && n.WithdrawFee.IsPositive() && (stop.IsZero() || n.WithdrawFee.LessThan(stop)) {
+			stop = n.WithdrawFee
 		}
-		p.Log.ErrorContext(ctx, "funds missing that nothing in flight explains: checked again, its withdrawals stop if still missing",
-			"asset", c.Asset, "missing", missing.String(), "check_again_in", p.RecheckAfter.String())
-		return nil
 	}
-	if now.Sub(since) < p.RecheckAfter {
-		return nil // an operator's check within the wait: the next one decides
+	return stop
+}
+
+// watchShortfall suspends an asset's withdrawals when more of it is
+// missing than stop beyond what explains it (explained: withdrawals with
+// an unknown outcome, handed over unanswered or UNCERTAIN, and the fees
+// held for a person, each alerted on its own; and a difference a person
+// accepted while it lasts) on two checks at least RecheckAfter apart. The
+// first sighting is kept in the store, so a restart keeps it and a person
+// lifting a suspension clears it, and has the check come again then; a
+// check that finds nothing missing forgets it (design §9, review B4 and of
+// ebb8aaa). A person lifts the suspension (ResumeWithdrawals).
+func (p *CustodyProcessor) watchShortfall(ctx context.Context, c domain.ChainCheck, explained, stop decimal.Decimal) error {
+	now := p.Now()
+	w, err := p.Store.Read().Suspensions().Watch(ctx, c.Asset)
+	if err != nil {
+		return err
 	}
-	x := domain.Suspension{
-		Asset: c.Asset, Shortfall: missing, SuspendedBy: domain.SuspendedBySystem, SuspendedAt: now,
-		Reason: fmt.Sprintf("the custody checks of %s and %s found %s %s missing that no withdrawal in flight explains", since.UTC().Format(time.RFC3339),
-			now.UTC().Format(time.RFC3339), missing, c.Asset),
+	missing := c.Shortfall.Sub(explained)
+	accepted := w.AcceptedAt(now)
+	if !missing.Sub(accepted).GreaterThan(stop) {
+		if w.SuspectSince.IsZero() {
+			return nil
+		}
+		return p.Store.Tx(ctx, func(r ports.Repos) error { return r.Suspensions().Clear(ctx, c.Asset, false) })
 	}
+	var since time.Time
+	if err := p.Store.Tx(ctx, func(r ports.Repos) error {
+		since, err = r.Suspensions().Suspect(ctx, c.Asset, now)
+		return err
+	}); err != nil {
+		return err
+	}
+	if due := since.Add(p.RecheckAfter); now.Before(due) {
+		if p.recheckAt.IsZero() || due.Before(p.recheckAt) {
+			p.recheckAt = due
+		}
+		if w.SuspectSince.IsZero() {
+			p.Log.ErrorContext(ctx, "funds missing that nothing explains: checked again, its withdrawals stop if still missing",
+				"asset", c.Asset, "missing", missing.String(), "accepted", accepted.String(), "stop", stop.String(),
+				"check_again_in", p.RecheckAfter.String())
+		}
+		return nil // the check at due decides
+	}
+	reason := fmt.Sprintf("the custody checks of %s and %s found %s %s missing that nothing in flight explains", since.UTC().Format(time.RFC3339),
+		now.UTC().Format(time.RFC3339), missing, c.Asset)
+	if accepted.IsPositive() {
+		reason += fmt.Sprintf(" (%s of it accepted by %s)", accepted, w.AcceptedBy)
+	}
+	x := domain.Suspension{Asset: c.Asset, Shortfall: missing, SuspendedBy: domain.SuspendedBySystem, SuspendedAt: now, Reason: reason}
 	done, err := suspend(ctx, p.Store, x)
 	if err != nil {
 		return err
 	}
 	if done {
 		p.Log.ErrorContext(ctx, "withdrawals suspended: funds missing on two checks; a person finds the cause and lifts it (exchangectl wallet withdrawals-resume)",
-			"asset", c.Asset, "missing", missing.String())
+			"asset", c.Asset, "missing", missing.String(), "accepted", accepted.String())
 	}
 	return nil
 }
