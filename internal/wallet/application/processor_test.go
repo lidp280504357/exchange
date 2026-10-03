@@ -116,11 +116,15 @@ func (f memFees) Unbooked(_ context.Context, network string) ([]domain.ChainFee,
 	}), nil
 }
 
-func (f memFees) MarkBooked(_ context.Context, tx, journal string) error {
-	x := f.m.fees[tx]
-	x.JournalID = journal
+func (f memFees) MarkBooked(_ context.Context, tx, journal string) (string, error) {
+	x, ok := f.m.fees[tx]
+	if !ok || x.JournalID != "" {
+		return "", nil
+	}
+	was := x.Status
+	x.JournalID, x.Status = journal, domain.FeeBookable
 	f.m.fees[tx] = x
-	return nil
+	return was, nil
 }
 
 func (f memFees) Held(context.Context) ([]domain.ChainFee, error) {
@@ -132,7 +136,8 @@ func (f memFees) OfReference(_ context.Context, reference string) ([]domain.Chai
 }
 
 func (f memFees) Resolve(_ context.Context, x domain.ChainFee) (bool, error) {
-	if cur, ok := f.m.fees[x.TxHash]; !ok || cur.Status != domain.FeeHeld {
+	cur, ok := f.m.fees[x.TxHash]
+	if !ok || cur.JournalID != "" || cur.Status == domain.FeeWrittenOff {
 		return false, nil
 	}
 	f.m.fees[x.TxHash] = x

@@ -177,7 +177,7 @@ func walletWith(ctx context.Context, db, idb *pg.DB, args []string, out io.Write
 			return errors.New("usage: wallet custody-fee <withdrawal_id> (--book [--asset A] [--amount X] | --write-off) --reason TEXT")
 		}
 		book := fs.Bool("book", false, "book it from GAS_SUPPLY: as reported, or in --asset and --amount as found charged")
-		writeOff := fs.Bool("write-off", false, "never book it (not taken from the coin balances, or reported in another unit)")
+		writeOff := fs.Bool("write-off", false, "never book it (not taken from the coin balances, reported in another unit, or waiting for GAS_SUPPLY with nothing to fund it)")
 		asset := fs.String("asset", "", "the asset the custodian took it in, when not the reported one")
 		amount := fs.String("amount", "", "what the custodian took, when not the reported amount")
 		reason := fs.String("reason", "", "how it was found out (required)")

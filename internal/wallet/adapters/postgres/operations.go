@@ -185,13 +185,21 @@ func (r chainFees) Unbooked(ctx context.Context, network string) ([]domain.Chain
 	return r.list(ctx, `network = $1 AND booked_at IS NULL AND status = 'BOOKABLE'`, network)
 }
 
-func (r chainFees) MarkBooked(ctx context.Context, txHash, journalID string) error {
-	_, err := r.q.Exec(ctx, `UPDATE chain_fees SET journal_id = $2, booked_at = now() WHERE tx_hash = $1 AND booked_at IS NULL`,
-		txHash, journalID)
+func (r chainFees) MarkBooked(ctx context.Context, txHash, journalID string) (string, error) {
+	rows, err := r.q.Query(ctx, `WITH prev AS (SELECT status FROM chain_fees WHERE tx_hash = $1 AND booked_at IS NULL FOR UPDATE)
+		UPDATE chain_fees c SET journal_id = $2, booked_at = now(), status = 'BOOKABLE' FROM prev WHERE c.tx_hash = $1
+		RETURNING prev.status`, txHash, journalID)
 	if err != nil {
-		return fmt.Errorf("mark chain fee booked: %w", err)
+		return "", fmt.Errorf("mark chain fee booked: %w", err)
 	}
-	return nil
+	was, err := pgx.CollectOneRow(rows, pgx.RowTo[string])
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("mark chain fee booked: %w", err)
+	}
+	return was, nil
 }
 
 func (r chainFees) Held(ctx context.Context) ([]domain.ChainFee, error) {
@@ -203,8 +211,9 @@ func (r chainFees) OfReference(ctx context.Context, reference string) ([]domain.
 }
 
 func (r chainFees) Resolve(ctx context.Context, f domain.ChainFee) (bool, error) {
-	tag, err := r.q.Exec(ctx, `UPDATE chain_fees SET status = $2, asset = $3, amount = $4, resolved_by = $5, resolution = $6, resolved_at = $7
-		WHERE tx_hash = $1 AND status = 'HELD'`, f.TxHash, f.Status, f.Asset, f.Amount, f.ResolvedBy, f.Resolution, f.ResolvedAt)
+	tag, err := r.q.Exec(ctx, `UPDATE chain_fees SET status = $2, asset = $3, amount = $4, hold_reason = $5, resolved_by = $6, resolution = $7,
+		resolved_at = $8 WHERE tx_hash = $1 AND booked_at IS NULL AND status IN ('HELD', 'BOOKABLE')`,
+		f.TxHash, f.Status, f.Asset, f.Amount, f.HoldReason, f.ResolvedBy, f.Resolution, f.ResolvedAt)
 	if err != nil {
 		return false, fmt.Errorf("resolve chain fee: %w", err)
 	}

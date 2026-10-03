@@ -394,8 +394,19 @@ func (o netOps) bookFees(ctx context.Context) (decimal.Decimal, error) {
 			failed = fmt.Errorf("book the fee of %s: %w", f.TxHash, err)
 			continue
 		}
-		if err := o.Store.Tx(ctx, func(r ports.Repos) error { return r.ChainFees().MarkBooked(ctx, f.TxHash, journal) }); err != nil {
+		var was string
+		if err := o.Store.Tx(ctx, func(r ports.Repos) error {
+			var err error
+			was, err = r.ChainFees().MarkBooked(ctx, f.TxHash, journal)
+			return err
+		}); err != nil {
 			return left, err
+		}
+		if was == domain.FeeWrittenOff {
+			// A person wrote it off while the ledger booked it: the
+			// journal stands, so does the fee; GAS_SUPPLY paid it.
+			o.Log.ErrorContext(ctx, "a fee written off meanwhile was booked by the ledger: it stands as booked", "fee", f.TxHash,
+				"journal_id", journal, "amount", f.Amount, "asset", f.Asset)
 		}
 	}
 	return left, failed

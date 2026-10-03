@@ -42,11 +42,11 @@ bash /opt/exchange/src/deploy/server-update.sh          # 在服务器上直接�
 
 脚本整个读进内存后才执行（`main` 函数），拉取新提交时跑的仍是旧版本；拉取改了脚本本身时，它 exec 新版本重来一遍（日志 `== 部署脚本有更新，改跑新版本`，运维锁随 fd 9 带过去），新加的步骤当次生效。这条逻辑是 2026-10-02 加的：在它之前的版本上部署，脚本里新加的步骤（例如生成新的密钥文件）要到下一次部署才跑，需要的文件得先在服务器上手工准备（530ed59 的 `sim/admin.env` 就是这样补的）。
 
-**镜像在 GitHub Actions 里构建**（2026-10-03 起，用户选私有镜像加服务器只读令牌）：每次推送 main，`.github/workflows/image.yml` 构建 `exchange-app` 并推到 `ghcr.io/lidp280504357/exchange-app:<完整提交号>`（另有 `:main`，只保留最近 5 个版本，够回滚、少占免费存储额度）；部署脚本登录过 ghcr.io 时拉这个镜像，没登录、没等到或拉取失败才在服务器上构建，所以令牌没放好之前一切照旧。本地已有这个版本就直接用；只有 20 分钟内的提交（刚推送，Actions 可能还在构建）才最多等 10 分钟，回滚到旧提交、版本已被清理、令牌被拒或免费额度用完（denied、429/toomanyrequests、quota 一类）都立刻改在服务器构建。在服务器上构建（Go 镜像或前端，仍是 `-p 2`）之前、动任何容器之前先看内存：可用内存（`MemAvailable`）不到 3000 MB 或交换区已用超过 1500 MB（`BUILD_MIN_MEMORY_MB`、`BUILD_MAX_SWAP_MB` 可改），就打印"内存不足，需要升级服务器"并停止部署（用户决定 2026-10-03，升级由用户处理），不让构建把内存与交换区吃光。拉下来打成 `exchange-app:latest` 后去掉 ghcr 的标签，部署后还会删掉两天没用的镜像，不然每次部署留下一整份（约 600 MB）。
+**镜像在 GitHub Actions 里构建**（2026-10-03 起，用户选私有镜像加服务器只读令牌）：每次推送 main，`.github/workflows/image.yml` 构建 `exchange-app` 并推到 `ghcr.io/lidp280504357/exchange-app:<完整提交号>`（另有 `:main`，只保留最近 5 个版本，够回滚、少占免费存储额度）；部署脚本登录过 ghcr.io 时拉这个镜像，没登录、没等到或拉取失败才在服务器上构建，所以令牌没放好之前一切照旧。本地已有这个版本就直接用；只有 20 分钟内的提交（刚推送，Actions 可能还在构建）才最多等 10 分钟，回滚到旧提交、版本已被清理、令牌被拒或免费额度用完（denied、429/toomanyrequests、quota 一类）都立刻改在服务器构建。在服务器上构建（Go 镜像或前端，仍是 `-p 2`）之前、动任何容器之前先看内存：可用内存（`MemAvailable`）至少 3000 MB，且最近 30 秒真正在换页的量（`vmstat` 的 si+so）不到每秒 1 MB（`BUILD_MIN_MEMORY_MB`、`BUILD_MAX_PAGING_KB` 可改），才放行；否则打印"内存不足，需要升级服务器"并停止部署（用户决定 2026-10-03，升级由用户处理），不让构建把内存与交换区吃光。交换区已用多少只打印、不判定（协调会话代用户定，2026-10-03，取代原来的"已用超过 1500 MB 就拒绝"）：Redpanda 预分配的内存里闲着的页会被换出去（约 800 MB），已用量一直涨，并不是内存不够；可用内存比交换区已用量多 3000 MB 以上时，检查前先 `swapoff -a && swapon -a` 把它们收回内存（几十秒、不停服务，失败不影响部署）。服务器 2026-10-03 起已登录 ghcr.io（只读令牌），应用镜像正常都是拉的，只有前端每次在服务器上构建。拉下来打成 `exchange-app:latest` 后去掉 ghcr 的标签，部署后还会删掉两天没用的镜像，不然每次部署留下一整份（约 600 MB）。
 
 部署只等站点离不开的服务就绪才往下走；`analytics-consumer`（依赖 ClickHouse）、`market-sim`、`udun-mock` 另等 3 分钟，没就绪只打印出来，不中止部署（以前 ClickHouse 一停，部署就卡在这里，nginx 热加载、解除只减仓与前端发布都不跑）。
 
-放令牌：
+放令牌（测试服 2026-10-03 已放好；换令牌时照做，令牌经 `remote_put_file` 传到 0600 的临时文件再 `--password-stdin`，不进任何命令行，用完粉碎）：
 1. 用户在 GitHub 的 Settings → Developer settings → Personal access tokens (classic) 建一个只勾 `read:packages` 的令牌。
 2. 在服务器上 `printf '%s' '<令牌>' | sudo docker login ghcr.io -u lidp280504357 --password-stdin`（只存在 `/root/.docker/config.json`，不进仓库、不打印）；`sudo docker pull ghcr.io/lidp280504357/exchange-app:main` 能拉下来即可。
 3. 额度：免费账户的私有包只有 500 MB 存储、每月 1 GB 流出（拉到 Actions 以外的机器都算），一个版本的二进制层约一两百 MB，按现在一天十来次部署，几天就会用完（用完后拉取失败，部署自动退回服务器构建）。仓库本身是公开的，镜像里没有密钥（都在服务器的 env 文件里），把包设为公开就没有这些限制。**用户决定（2026-10-03）**：维持免费层与私有包，额度用完就回退到服务器本地构建（拉取遇到 denied/429 同样快速回退，不重试）；本地构建前检查内存，可用内存不足时拒绝构建并提示升级服务器，由用户处理升级。
@@ -57,14 +57,13 @@ bash /opt/exchange/src/deploy/server-update.sh          # 在服务器上直接�
 
 脚本依次执行以下步骤：
 
-1. 拉代码并重置到目标版本。
-2. 把 `deploy/compose/` 同步到 `/opt/exchange/infra`。不碰 `.env`、`apps.env`、证书、Cloudflare IP 列表、`nginx/html/`、`nginx/admin/`、`nginx/sites/`、`udun-mock/`（托管钱包模拟网关的状态，属主 uid 10001，脚本在这里创建）；`signer/`、`admin/` 两个密钥目录不在仓库里，也不受影响。
-3. 幂等核对 Redpanda topic。
-4. 先把要发布的都准备好，再动任何容器（审查 2026-10-03）：把构建缓存删到 2 GB 以内，确认根分区至少还有 8 GB；拉 Actions 构建好的应用镜像 `exchange-app:latest`，拉不到才在服务器上构建；在 node 容器里对 `web/` 装一次依赖，构建 PC 站、手机站、管理后台与 Storybook（只写仓库里的 `dist`，[web.md](web.md)）。要在服务器上构建（镜像或前端）时先查一次内存，不够就停；磁盘不够、内存不够或构建失败都停在这一步，线上什么都没换（以前前端在容器换完之后才构建，内存正是最低的时候，被拒就留下新后端加旧站点），这次写下的 `deploy.started` 也删掉。所有应用服务共用这一个镜像，只构建一次（`docker compose build api-gateway`），之后 `up --no-build` 用它重建全部应用容器：按服务逐个构建会把同一镜像导出二十多次、每次解出全部二进制，2026-10-02 在导出时写满了磁盘。
-5. 先起 instrument-service，按 `deploy/instruments/test.json` 幂等同步参考数据（[instruments.md](instruments.md)，日志逐条列出改了的与因后台改过而保留的项），再 `up -d` 其余服务。其余服务启动时就要读交易对与参考行情映射，所以参考数据必须先到。
-6. 清理悬空镜像与两天没用的镜像，再把构建缓存删到 2 GB 以内。
-7. 校验并热加载 nginx 配置；解除部署期间开始的合约只减仓（见上文）。
-8. 把第 4 步构建好的站点发布到 `nginx/sites/*`。
+1. 拉代码并重置到目标版本；脚本本身变了就 exec 新版本重来（运维锁，以及"开始时间是不是这次写的"，一并带过去）。
+2. 先把要发布的都准备好，线上什么都不碰（审查 2026-10-03）：把构建缓存删到 2 GB 以内，确认根分区至少还有 8 GB；拉 Actions 构建好的应用镜像，拉不到才在服务器上构建（`docker build`，与 compose 的构建段相同），都只标成 `exchange-app:next`；在 node 容器里对 `web/` 装一次依赖，构建 PC 站、手机站、管理后台与 Storybook（只写仓库里的 `dist`，[web.md](web.md)）。要在服务器上构建（镜像或前端）时先查一次内存（见上文），不够就停。磁盘不够、内存不够或构建失败都停在这一步：配置、镜像标签、容器、站点都还是旧的，这次写下的 `deploy.started` 与 `exchange-app:next` 也删掉（以前这之前就同步了新配置、改了 `latest` 标签，被拒后谁 `compose up` 或重启 nginx 都会混用新旧版本）。所有应用服务共用这一个镜像，只构建一次：按服务逐个构建会把同一镜像导出二十多次、每次解出全部二进制，2026-10-02 在导出时写满了磁盘。
+3. 切换：把 `deploy/compose/` 同步到 `/opt/exchange/infra`（不碰 `.env`、`apps.env`、证书、Cloudflare IP 列表、`nginx/html/`、`nginx/admin/`、`nginx/sites/`、`udun-mock/`；`udun-mock/` 是托管钱包模拟网关的状态，属主 uid 10001，脚本在这里创建；`signer/`、`admin/` 两个密钥目录不在仓库里，也不受影响），幂等核对 Redpanda topic，把 `exchange-app:next` 打成 `exchange-app:latest`。
+4. 先起 instrument-service，按 `deploy/instruments/test.json` 幂等同步参考数据（[instruments.md](instruments.md)，日志逐条列出改了的与因后台改过而保留的项），再 `up -d --no-build` 其余服务。其余服务启动时就要读交易对与参考行情映射，所以参考数据必须先到。
+5. 清理悬空镜像与两天没用的镜像，再把构建缓存删到 2 GB 以内。
+6. 校验并热加载 nginx 配置，紧接着把第 2 步构建好的站点发布到 `nginx/sites/*`（不等下一步，免得新后端配旧站点好几分钟）。
+7. 解除部署期间开始的合约只减仓（见上文，最多等三分钟多）。
 
 ## 首次克隆（部署密钥加到 GitHub 之后）
 

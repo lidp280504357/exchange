@@ -114,8 +114,9 @@ type refBook struct {
 }
 
 type sent struct {
-	key string
-	at  time.Time
+	key      string
+	at       time.Time
+	contract bool
 }
 
 // New returns a publisher; register its metrics with reg.
@@ -201,6 +202,23 @@ func (p *Publisher) OnUpdate(u *marketv1.DepthUpdate) {
 	b.seq, b.heard, b.taken = u.GetSequence(), p.now(), u.GetTakenAt().AsTime()
 	b.bids = apply(b.bids, levelsOf(u.GetBids()), true)
 	b.asks = apply(b.asks, levelsOf(u.GetAsks()), false)
+}
+
+// OnStatus takes a pair's or contract's new status (instrument.events): one
+// that leaves TRADING is taken off the list at once, and its empty book
+// goes out in the next round rather than after the next read of the
+// specs, up to 30 s in which the engine could still fill resting orders
+// against HOUSE (requirements §761: HOUSE withdraws its quotes on HALT;
+// users' orders stay, §630); one that starts trading has the specs read
+// again in the next round.
+func (p *Publisher) OnStatus(symbol, to string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if to == "TRADING" {
+		p.listAt = time.Time{}
+		return
+	}
+	p.list = slices.DeleteFunc(slices.Clone(p.list), func(s domain.Spec) bool { return s.Symbol == symbol })
 }
 
 // Run publishes until ctx ends (an app.Loop body).
@@ -359,13 +377,30 @@ func (p *Publisher) round() []outgoing {
 		case key == last.key && now.Sub(last.at) < p.cfg.Heartbeat:
 			continue
 		}
-		p.sent[spec.Symbol] = sent{key: key, at: now}
+		p.sent[spec.Symbol] = sent{key: key, at: now, contract: spec.Contract}
 		active := 1.0
 		if empty {
 			active = 0
 		}
 		p.active.WithLabelValues(spec.Symbol).Set(active)
 		out = append(out, outgoing{contract: spec.Contract, msg: msg, empty: empty})
+	}
+	// A symbol no longer listed (not trading any more) gets one empty book:
+	// the engine must not keep filling against the last one.
+	listed := make(map[string]bool, len(p.list))
+	for _, spec := range p.list {
+		listed[spec.Symbol] = true
+	}
+	for symbol, last := range p.sent {
+		if listed[symbol] {
+			continue
+		}
+		msg := &orderv1.ReferenceBookUpdate{Symbol: symbol, HouseUserId: p.cfg.HouseUser}
+		if key := contentKey(msg); last.key != key {
+			p.sent[symbol] = sent{key: key, at: now, contract: last.contract}
+			p.active.WithLabelValues(symbol).Set(0)
+			out = append(out, outgoing{contract: last.contract, msg: msg, empty: true})
+		}
 	}
 	return out
 }

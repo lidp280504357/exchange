@@ -393,8 +393,9 @@ func (s *Sim) Round(ctx context.Context) {
 	s.center, s.walking = center, walking
 	s.m.walking.Set(map[bool]float64{false: 0, true: 1}[walking])
 	s.quote(ctx, now, center)
-	if !s.runs(domain.EventPause) { // a pause keeps the makers only
-		s.take(ctx, now, center, dt)
+	paused := s.runs(domain.EventPause) // a pause keeps the makers, and the quiet market's taker
+	s.take(ctx, now, center, dt, paused)
+	if !paused {
 		s.follow(ctx, now, center)
 	}
 	s.execute(ctx, now, center)
@@ -590,15 +591,23 @@ func (s *Sim) makerLean(b *bot) float64 {
 const quietTake = time.Minute
 
 // take sends the takers' market orders that arrived in dt, each by a taker
-// not waiting after a refusal; in a market quiet for quietTake, one now.
-func (s *Sim) take(ctx context.Context, now time.Time, p float64, dt time.Duration) {
+// not waiting after a refusal; in a market quiet for quietTake, one now
+// (stamped once it is placed: a throttled or refused one does not use up
+// the minute). Paused, only that one: the pause stops the takers, but a
+// pause of five minutes would leave the perpetual's index without a trade
+// (review of 82ba533); it trades at the makers' quotes around the held
+// price.
+func (s *Sim) take(ctx context.Context, now time.Time, p float64, dt time.Duration, paused bool) {
 	takers := s.botsOf(domain.RoleTaker)
 	if len(takers) == 0 {
 		return
 	}
 	rng := s.model.Rand()
-	daily := s.params.DailyVolume * (1 - domain.TrendShare) // the rest is the trend followers'
-	n := domain.Arrivals(rng, daily, s.params.OrderSize, dt, now)
+	n := 0
+	if !paused {
+		daily := s.params.DailyVolume * (1 - domain.TrendShare) // the rest is the trend followers'
+		n = domain.Arrivals(rng, daily, s.params.OrderSize, dt, now)
+	}
 	quiet := n == 0 && s.quiet(now)
 	if quiet {
 		n = 1
@@ -608,15 +617,15 @@ func (s *Sim) take(ctx context.Context, now time.Time, p float64, dt time.Durati
 		if b == nil {
 			continue
 		}
-		if quiet {
-			s.quietAt = now
-			s.m.quiet.Inc()
-		}
 		lean := 0.0
 		if b.known {
 			lean = domain.Lean(b.usdt.InexactFloat64(), s.params.BotUSDT)
 		}
-		s.market(ctx, now, b, domain.TakerSide(rng, s.params, lean), domain.Worth(rng, s.params.OrderSize, domain.OrderSpread), p)
+		placed := s.market(ctx, now, b, domain.TakerSide(rng, s.params, lean), domain.Worth(rng, s.params.OrderSize, domain.OrderSpread), p)
+		if quiet && placed {
+			s.quietAt = now
+			s.m.quiet.Inc()
+		}
 	}
 }
 
@@ -667,11 +676,12 @@ func pick(rng *rand.Rand, bots []*bot, now time.Time) *bot {
 }
 
 // market sends a market order worth about worth USDT: a buy spends it, a
-// sell sells its worth at the target.
-func (s *Sim) market(ctx context.Context, now time.Time, b *bot, side domain.Side, worth, p float64) {
+// sell sells its worth at the target. It reports whether the order was
+// placed.
+func (s *Sim) market(ctx context.Context, now time.Time, b *bot, side domain.Side, worth, p float64) bool {
 	if !s.orders.Take(now) {
 		s.m.throttled.WithLabelValues("order").Inc()
-		return
+		return false
 	}
 	var err error
 	if side == domain.Buy {
@@ -681,6 +691,7 @@ func (s *Sim) market(ctx context.Context, now time.Time, b *bot, side domain.Sid
 		err = s.trading.Market(ctx, b.UserID, s.cfg.Symbol, side, decimal.Zero, domain.Quantity(worth, decimal.NewFromFloat(p), s.pair))
 	}
 	s.placed(ctx, now, b, err, true)
+	return err == nil
 }
 
 // placed counts an order's result. One the platform refused gives its

@@ -843,7 +843,7 @@ func TestCustodyFeesHeldForAPerson(t *testing.T) {
 	}
 
 	// The person books the first as reported and the third as they found
-	// it charged; a write-off of the same fee then finds nothing held.
+	// it charged; booking one again finds nothing held.
 	resolve := func(r FeeResolution) (domain.ChainFee, error) {
 		r.Actor, r.Reason = "ops", "the custodian's statement"
 		return ResolveCustodyFee(ctx, h.store, custodied, r, h.now)
@@ -864,7 +864,7 @@ func TestCustodyFeesHeldForAPerson(t *testing.T) {
 	if _, err := resolve(FeeResolution{WithdrawalID: first.ID, Book: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := resolve(FeeResolution{WithdrawalID: first.ID}); !apperr.Is(err, apperr.CodeNotFound) {
+	if _, err := resolve(FeeResolution{WithdrawalID: first.ID, Book: true}); !apperr.Is(err, apperr.CodeNotFound) {
 		t.Fatalf("nothing held any more: %v", err)
 	}
 	if h.audited("wallet.custody.fee.book") != 2 {
@@ -877,6 +877,9 @@ func TestCustodyFeesHeldForAPerson(t *testing.T) {
 	if v := h.gauge(t, "wallet_custody_fees_held"); v != 0 {
 		t.Fatalf("%v fees held", v)
 	}
+	if _, err := resolve(FeeResolution{WithdrawalID: first.ID}); !apperr.Is(err, apperr.CodeNotFound) {
+		t.Fatalf("a booked fee written off: %v", err)
+	}
 
 	// A fee written off is never booked.
 	fourth := h.requestCustody(t, "20")
@@ -888,6 +891,30 @@ func TestCustodyFeesHeldForAPerson(t *testing.T) {
 	h.cround(t)
 	if f := h.store.fees["UDUN:w-4"]; f.JournalID != "" || h.audited("wallet.custody.fee.write_off") != 1 {
 		t.Fatalf("a written-off fee %+v", f)
+	}
+
+	// A fee within the bound that waits for GAS_SUPPLY may be written off
+	// too; should the ledger book it meanwhile, the booking stands.
+	h.ledger.system[accountGasSupply] = decimal.Zero
+	fifth := h.requestCustody(t, "20")
+	h.cround(t)
+	sent(fifth.ID, "w-5", "0.7")
+	if err := h.cproc.Round(ctx); err == nil || !strings.Contains(err.Error(), "LEDGER_INSUFFICIENT_BALANCE") {
+		t.Fatalf("GAS_SUPPLY short: %v", err)
+	}
+	if f := h.store.fees["UDUN:w-5"]; f.Status != domain.FeeBookable || f.JournalID != "" {
+		t.Fatalf("waiting for GAS_SUPPLY %+v", f)
+	}
+	if _, err := resolve(FeeResolution{WithdrawalID: fifth.ID, Book: true}); !apperr.Is(err, apperr.CodeNotFound) {
+		t.Fatalf("a bookable fee is booked as it comes, not by a person: %v", err)
+	}
+	f, err := resolve(FeeResolution{WithdrawalID: fifth.ID})
+	if err != nil || f.Status != domain.FeeWrittenOff || f.HoldReason == "" {
+		t.Fatalf("written off while waiting: %+v %v", f, err)
+	}
+	if was, err := h.store.ChainFees().MarkBooked(ctx, "UDUN:w-5", "j-late"); err != nil || was != domain.FeeWrittenOff ||
+		h.store.fees["UDUN:w-5"].Status != domain.FeeBookable {
+		t.Fatalf("the ledger booked it meanwhile: %s %v, %+v", was, err, h.store.fees["UDUN:w-5"])
 	}
 }
 

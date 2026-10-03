@@ -598,6 +598,48 @@ func TestAQuietMarketGetsATakersOrder(t *testing.T) {
 	}
 }
 
+// A pause stops the takers, but a market quiet for a minute still gets
+// its taker's order, so a long pause does not leave the perpetual's index
+// without a trade (review of 82ba533); one refused does not use up the
+// minute.
+func TestAPauseKeepsTheQuietMarketsTaker(t *testing.T) {
+	p := domain.DefaultParams()
+	p.DailyVolume = 86_400 * 400 * 4 // four orders a second unless paused
+	r := bandRig(t, &memStore{params: &p, version: 1, bots: []ports.Bot{
+		{UserID: "m1", Role: domain.RoleMaker, Label: "bot-01", Enabled: true},
+		{UserID: "m2", Role: domain.RoleMaker, Label: "bot-02", Enabled: true},
+		{UserID: "t1", Role: domain.RoleTaker, Label: "bot-03", Enabled: true},
+	}})
+	r.prices.mu.Lock()
+	r.prices.lastAt = r.now
+	r.prices.mu.Unlock()
+	markets := func() int {
+		r.trading.mu.Lock()
+		defer r.trading.mu.Unlock()
+		return r.trading.markets[domain.Buy] + r.trading.markets[domain.Sell]
+	}
+	r.rounds(8)
+	r.create(t, domain.Event{Type: domain.EventPause})
+	r.rounds(1)
+	before := markets()
+	r.rounds(4 * 50)
+	if n := markets() - before; n != 0 {
+		t.Fatalf("%d market orders in the pause's first quiet minute", n)
+	}
+	// Refused at first: the next round tries again, not a minute later.
+	r.trading.mu.Lock()
+	r.trading.refuse["t1"] = errors.New("refused")
+	r.trading.mu.Unlock()
+	r.rounds(4 * 15)
+	r.trading.mu.Lock()
+	delete(r.trading.refuse, "t1")
+	r.trading.mu.Unlock()
+	r.rounds(4 * 20) // within the bot's back-off, not a minute later
+	if n := markets() - before; n != 1 {
+		t.Fatalf("%d market orders in the pause, want the quiet market's one", n)
+	}
+}
+
 func TestSwitchingOffCancelsTheMakersOrders(t *testing.T) {
 	r := newRig(t, nil)
 	r.rounds(20)

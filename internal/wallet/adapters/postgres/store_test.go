@@ -216,8 +216,11 @@ func TestOperations(t *testing.T) {
 	if err != nil || len(fees) != 1 || fees[0].Amount.String() != "0.000042" {
 		t.Fatalf("unbooked fees %v %v", fees, err)
 	}
-	if err := read.ChainFees().MarkBooked(ctx, tx, uuid.NewString()); err != nil {
-		t.Fatal(err)
+	if was, err := read.ChainFees().MarkBooked(ctx, tx, uuid.NewString()); err != nil || was != domain.FeeBookable {
+		t.Fatalf("booked: %q %v", was, err)
+	}
+	if was, err := read.ChainFees().MarkBooked(ctx, tx, uuid.NewString()); err != nil || was != "" {
+		t.Fatalf("booked again: %q %v", was, err)
 	}
 	if fees, _ := read.ChainFees().Unbooked(ctx, net); len(fees) != 0 {
 		t.Fatal("booked fees are not listed")
@@ -243,15 +246,40 @@ func TestOperations(t *testing.T) {
 	if done, err := read.ChainFees().Resolve(ctx, held); err != nil || !done {
 		t.Fatalf("resolved %v %v", done, err)
 	}
-	if done, err := read.ChainFees().Resolve(ctx, held); err != nil || done {
-		t.Fatalf("resolved twice %v %v", done, err)
-	}
 	if fees, err := read.ChainFees().OfReference(ctx, "w-1"); err != nil || len(fees) != 1 || fees[0].Status != domain.FeeBookable ||
 		!fees[0].Amount.Equal(decimal.RequireFromString("1.5")) || fees[0].ResolvedBy != "ops" || fees[0].HoldReason != "above 5 USDT" {
 		t.Fatalf("of the withdrawal %+v %v", fees, err)
 	}
 	if fees, err := read.ChainFees().Unbooked(ctx, "TRON"); err != nil || len(fees) != 1 {
 		t.Fatalf("bookable once resolved: %v %v", fees, err)
+	}
+	// Booked, it takes no more decisions.
+	if _, err := read.ChainFees().MarkBooked(ctx, "UDUN:t-1", uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	if done, err := read.ChainFees().Resolve(ctx, held); err != nil || done {
+		t.Fatalf("resolved once booked %v %v", done, err)
+	}
+	// Written off while it waited to be booked, then booked by the ledger
+	// all the same: the booking stands.
+	waiting := domain.ChainFee{
+		TxHash: "UDUN:t-3", Network: "TRON", Asset: "USDT", Amount: decimal.RequireFromString("0.7"),
+		Purpose: domain.FeeWithdrawal, Reference: "w-3",
+	}
+	if err := read.ChainFees().Insert(ctx, waiting); err != nil {
+		t.Fatal(err)
+	}
+	waiting.Status, waiting.HoldReason, waiting.ResolvedBy, waiting.Resolution, waiting.ResolvedAt = domain.FeeWrittenOff,
+		"waited to be booked", "ops", "nothing to fund it", now
+	if done, err := read.ChainFees().Resolve(ctx, waiting); err != nil || !done {
+		t.Fatalf("written off while waiting: %v %v", done, err)
+	}
+	if was, err := read.ChainFees().MarkBooked(ctx, "UDUN:t-3", uuid.NewString()); err != nil || was != domain.FeeWrittenOff {
+		t.Fatalf("the ledger booked it meanwhile: %q %v", was, err)
+	}
+	if fees, err := read.ChainFees().OfReference(ctx, "w-3"); err != nil || len(fees) != 1 || fees[0].Status != domain.FeeBookable ||
+		fees[0].JournalID == "" {
+		t.Fatalf("the booking stands: %+v %v", fees, err)
 	}
 	// Written off without a time: refused by the table.
 	off := domain.ChainFee{

@@ -53,7 +53,7 @@ prune_build_cache() {
 }
 
 # pull_app_image 拉 GitHub Actions 为本提交构建的镜像（.github/workflows/image.yml，
-# ghcr.io/lidp280504357/exchange-app:<完整提交号>）并标成 exchange-app:latest；服务器要登录过 ghcr.io（只读令牌，
+# ghcr.io/lidp280504357/exchange-app:<完整提交号>）并标成 exchange-app:next（切换时才改成 latest）；服务器要登录过 ghcr.io（只读令牌，
 # 见 docs/runbook/server-deploy.md）。本地已有就直接用。提交是 20 分钟内的（刚推送，Actions 可能还在构建）时，
 # "还没有这个版本"最多等 10 分钟；更早的提交（回滚、image.yml 之前的、已被清掉的版本）与令牌被拒都不等。
 # 拉不到就返回非 0，由调用方在服务器上构建。打完标签就去掉 ghcr 的标签：否则 image prune 不删它，每次部署都留下
@@ -78,30 +78,57 @@ pull_app_image() {
     fi
     sleep 20
   done
-  sudo docker tag "$image" exchange-app:latest
+  sudo docker tag "$image" exchange-app:next
   sudo docker rmi "$image" >/dev/null
   echo "== 用 Actions 构建的镜像 $image"
+}
+
+# build_app_image 拉不到时在服务器上构建应用镜像（与 compose 里 x-app 的 build 段相同：仓库根目录为上下文、
+# deploy/docker/Dockerfile、VERSION=短提交号），标成 exchange-app:next。
+build_app_image() {
+  sudo docker build -f deploy/docker/Dockerfile --build-arg VERSION="$APP_VERSION" -t exchange-app:next .
 }
 
 # stop_before_changes 结束一次还没动过任何容器与站点的部署：这次写下的开始时间一并删掉，否则下一次部署会把这以后
 # 进入的只减仓当成部署造成的而解除（继承自上一次没走完的部署的开始时间保留）。
 stop_before_changes() {
   [ -n "${STARTED_HERE:-}" ] && rm -f "$INFRA/deploy.started"
+  sudo docker rmi exchange-app:next >/dev/null 2>&1 || true
   exit 1
 }
 
-# ensure_build_memory 在服务器上构建（Go 镜像或前端）前确认内存够：可用内存（MemAvailable）不到 3000 MB，或交换区
-# 已用超过 1500 MB，就停止部署并提示升级服务器，不让构建把内存与交换区吃光（2026-10-02 两次整机无响应）。
-# 用户决定（2026-10-03）：GHCR 额度用完时回退到本地构建，内存不够就拒绝，升级由用户处理。
-# BUILD_MIN_MEMORY_MB、BUILD_MAX_SWAP_MB 可改门槛。只在第 3 步动容器之前调用：拒绝时什么都还没换。
-ensure_build_memory() {
-  local avail swap need=${BUILD_MIN_MEMORY_MB:-3000} most=${BUILD_MAX_SWAP_MB:-1500}
+# read_memory 读可用内存（MemAvailable）与交换区已用量，单位 MB，写进 avail、swap。
+read_memory() {
   avail=$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo)
   swap=$(awk '/^SwapTotal:/ {t = $2} /^SwapFree:/ {f = $2} END {print int((t - f) / 1024)}' /proc/meminfo)
-  if [ "$avail" -lt "$need" ] || [ "$swap" -gt "$most" ]; then
-    echo "== 内存不足，需要升级服务器：可用 ${avail} MB（至少 ${need}）、交换区已用 ${swap} MB（至多 ${most}），不在服务器上$1，停止部署（什么都没换）"
+}
+
+# ensure_build_memory 在服务器上构建（Go 镜像或前端）前确认内存够，不让构建把内存与交换区吃光（2026-10-02 两次
+# 整机无响应）：可用内存至少 3000 MB，且最近 30 秒真正在换页的量（vmstat 的 si+so）不到每秒 1 MB，才放行；不够就
+# 停止部署并提示升级服务器（用户决定 2026-10-03：GHCR 不可用时回退到本地构建，内存不够就拒绝，升级由用户处理）。
+# 交换区已用多少只打印、不判定（协调会话代用户定，2026-10-03）：Redpanda 预分配的内存里闲着的页会被换出去，
+# 已用量一直涨（约 800 MB），并不是内存不够。可用内存比交换区已用量多 3000 MB 以上时，检查前先
+# swapoff -a && swapon -a 把换出去的页收回内存（几十秒、不停服务；失败不影响部署）。
+# BUILD_MIN_MEMORY_MB、BUILD_MAX_PAGING_KB 可改门槛。只在动容器之前调用：拒绝时什么都还没换。
+ensure_build_memory() {
+  local avail swap paging need=${BUILD_MIN_MEMORY_MB:-3000} most=${BUILD_MAX_PAGING_KB:-1024}
+  read_memory
+  if [ "$swap" -gt 0 ] && [ $((avail - swap)) -gt "$need" ]; then
+    if sudo swapoff -a && sudo swapon -a; then
+      echo "== 交换区里 ${swap} MB 已收回内存"
+    else
+      sudo swapon -a || true
+      echo "== 收回交换区失败（不影响部署）"
+    fi
+    read_memory
+  fi
+  # vmstat 的第二行是这 30 秒的平均（第一行是开机以来的），si、so 是第 7、8 列，KB/s
+  paging=$(vmstat 30 2 | tail -1 | awk '{print $7 + $8}')
+  if [ "$avail" -lt "$need" ] || [ "$paging" -ge "$most" ]; then
+    echo "== 内存不足，需要升级服务器：可用 ${avail} MB（至少 ${need}）、最近 30 秒换页 ${paging} KB/s（不到 ${most}），交换区已用 ${swap} MB；不在服务器上$1，停止部署（什么都没换）"
     stop_before_changes
   fi
+  echo "== 内存：可用 ${avail} MB，最近 30 秒换页 ${paging} KB/s，交换区已用 ${swap} MB"
 }
 
 # ensure_disk_space 在构建前确认磁盘还有余量：磁盘写满时 Docker 会丢掉运行中容器的网络端点
@@ -113,6 +140,29 @@ ensure_disk_space() {
     echo "== 磁盘只剩 ${free_gb} GB，停止部署：先清理（见 docs/runbook/server-deploy.md）再重试"
     stop_before_changes
   fi
+}
+
+# sync_infra 把基础设施与 nginx 配置以仓库为准同步到 infra 目录（不覆盖服务器上的 .env、证书和生成的 Cloudflare
+# IP 列表），连同运维脚本、托管钱包模拟网关的状态目录与 market-sim 的签名密钥。在检查与构建都通过之后才做：
+# 这之前被拒的部署不留下新配置（之后有人 compose up 或重启 nginx 就会混用新旧版本，审查 2026-10-03）。
+sync_infra() {
+  rsync -a --exclude '.env' --exclude 'apps.env' --exclude 'ssl/' --exclude '00-cloudflare-real-ip.conf' --exclude 'nginx/html/' \
+    --exclude 'nginx/admin/' --exclude 'nginx/sites/' --exclude 'udun-mock/' deploy/compose/ "$INFRA"/
+  cp deploy/redpanda/topics.sh "$INFRA/redpanda/topics.sh"
+  mkdir -p "$INFRA/backup" && cp deploy/backup/pg-backup.sh "$INFRA/backup/pg-backup.sh"
+  # 托管钱包模拟网关（ADR-0011）的状态目录，容器用户 uid 10001 可写（install -o 不认数字 uid，用 chown）
+  sudo mkdir -p "$INFRA/udun-mock" && sudo chown 10001:10001 "$INFRA/udun-mock" && sudo chmod 700 "$INFRA/udun-mock"
+  # market-sim 管理接口的签名密钥（ASTRA 设计 §6.2：审批人身份来自调用方凭据），每个调用方一把：
+  # sim/sim.env 的 SIM_API_SECRET 只给 market-sim（容器里的 exchangectl sim 用），sim/admin.env 的
+  # SIM_ADMIN_API_SECRET 给 market-sim 与 admin-service（只有它能填批准人）。第一次部署时生成，之后不变；值不打印
+  sudo mkdir -p "$INFRA/sim" && sudo chmod 700 "$INFRA/sim"
+  local pair
+  for pair in sim.env:SIM_API_SECRET admin.env:SIM_ADMIN_API_SECRET; do
+    if ! sudo test -s "$INFRA/sim/${pair%%:*}"; then
+      sudo sh -c "umask 077 && printf '%s=%s\n' '${pair#*:}' \"\$(openssl rand -hex 32)\" >'$INFRA/sim/${pair%%:*}'"
+      echo "== 已生成 sim/${pair%%:*}（${pair#*:}）"
+    fi
+  done
 }
 
 # build_web 构建前端（web/ 的 pnpm workspace，ADR-0012），只写仓库里的 dist 目录，发布（publish_web）在容器更新之后：
@@ -176,46 +226,26 @@ main() {
   git fetch --prune origin
   git checkout -q main
   git reset -q --hard "$REF"
-  # bash 已把本脚本旧版的 main 读进内存：拉取改了脚本时改跑新版本，新加的步骤这次就生效（fd 9 上的运维锁随 exec 带过去）
+  # bash 已把本脚本旧版的 main 读进内存：拉取改了脚本时改跑新版本，新加的步骤这次就生效（fd 9 上的运维锁随 exec 带过去；
+  # 开始时间是不是这次写的也带过去，否则新进程把它当成上一次没走完的部署的，被拒时留下它）
   if [ -z "${SERVER_UPDATE_REEXEC:-}" ] && [ "$before" != "$(git hash-object deploy/server-update.sh)" ]; then
     echo "== 部署脚本有更新，改跑新版本"
-    exec env SERVER_UPDATE_REEXEC=1 OPS_LOCK_HELD=1 bash "$SRC/deploy/server-update.sh" "$@"
+    exec env SERVER_UPDATE_REEXEC=1 OPS_LOCK_HELD=1 STARTED_HERE="${STARTED_HERE:-}" bash "$SRC/deploy/server-update.sh" "$@"
   fi
   APP_VERSION="$(git rev-parse --short HEAD)"
   echo "== 代码版本 $APP_VERSION：$(git log -1 --pretty=%s)"
 
-  # 1. 基础设施与 nginx 配置以仓库为准同步到 infra 目录；不覆盖服务器上的 .env、证书和生成的 Cloudflare IP 列表
-  rsync -a --exclude '.env' --exclude 'apps.env' --exclude 'ssl/' --exclude '00-cloudflare-real-ip.conf' --exclude 'nginx/html/' \
-    --exclude 'nginx/admin/' --exclude 'nginx/sites/' --exclude 'udun-mock/' deploy/compose/ "$INFRA"/
-  cp deploy/redpanda/topics.sh "$INFRA/redpanda/topics.sh"
-  mkdir -p "$INFRA/backup" && cp deploy/backup/pg-backup.sh "$INFRA/backup/pg-backup.sh"
-  # 托管钱包模拟网关（ADR-0011）的状态目录，容器用户 uid 10001 可写（install -o 不认数字 uid，用 chown）
-  sudo mkdir -p "$INFRA/udun-mock" && sudo chown 10001:10001 "$INFRA/udun-mock" && sudo chmod 700 "$INFRA/udun-mock"
-  # market-sim 管理接口的签名密钥（ASTRA 设计 §6.2：审批人身份来自调用方凭据），每个调用方一把：
-  # sim/sim.env 的 SIM_API_SECRET 只给 market-sim（容器里的 exchangectl sim 用），sim/admin.env 的
-  # SIM_ADMIN_API_SECRET 给 market-sim 与 admin-service（只有它能填批准人）。第一次部署时生成，之后不变；值不打印
-  sudo mkdir -p "$INFRA/sim" && sudo chmod 700 "$INFRA/sim"
-  for pair in sim.env:SIM_API_SECRET admin.env:SIM_ADMIN_API_SECRET; do
-    if ! sudo test -s "$INFRA/sim/${pair%%:*}"; then
-      sudo sh -c "umask 077 && printf '%s=%s\n' '${pair#*:}' \"\$(openssl rand -hex 32)\" >'$INFRA/sim/${pair%%:*}'"
-      echo "== 已生成 sim/${pair%%:*}（${pair#*:}）"
-    fi
-  done
-
-  # 2. Topic 幂等核对
-  bash "$INFRA/redpanda/topics.sh" >/dev/null && echo "== topic 核对完成"
-
-  # 3. 先把要发布的都准备好，再动容器：应用镜像（拉 Actions 构建好的，拉不到才在这里构建）与前端都在这一步之前做完，
-  #    内存不够或构建失败时停在这里，什么都还没换，不会留下新后端加旧站点（审查 2026-10-03）。
-  COMPOSE=(-f "$INFRA/docker-compose.yml")
-  local build_image="" web=""
+  # 1. 先把要发布的都准备好，线上什么都不碰：应用镜像拉 Actions 构建好的、拉不到才在这里构建（都标成
+  #    exchange-app:next），前端构建到仓库里的 dist。磁盘不够、内存不够或构建失败都停在这里，什么都没换：
+  #    不留下新后端加旧站点，也不留下新配置或新镜像标签（审查 2026-10-03）。
+  local apps="" build_image="" web=""
+  [ -f deploy/compose/docker-compose.apps.yml ] && apps=1
   [ -f web/pnpm-workspace.yaml ] && web=1
-  if [ -f "$INFRA/docker-compose.apps.yml" ]; then
-    COMPOSE+=(-f "$INFRA/docker-compose.apps.yml")
+  if [ -n "$apps" ]; then
     prune_build_cache
     ensure_disk_space
-    # 所有应用服务运行同一个镜像 exchange-app:latest，只构建一次（按服务逐个构建会把同一镜像导出二十多次、每次
-    # 解出全部二进制，2026-10-02 因此在构建中写满磁盘）；up 用 --no-build 直接用这个镜像重建容器。
+    # 所有应用服务运行同一个镜像，只构建一次（按服务逐个构建会把同一镜像导出二十多次、每次解出全部二进制，
+    # 2026-10-02 因此在构建中写满磁盘）；up 用 --no-build 直接用这个镜像重建容器。
     pull_app_image || build_image=1
   fi
   if [ -n "$build_image" ] && [ -n "$web" ]; then
@@ -224,16 +254,26 @@ main() {
     ensure_build_memory "构建$([ -n "$build_image" ] && echo 镜像 || echo 前端)"
   fi
   if [ -n "$build_image" ]; then
-    sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" build api-gateway || stop_before_changes
+    build_app_image || stop_before_changes
   fi
   if [ -n "$web" ]; then
     build_web || stop_before_changes
   fi
 
-  # 4. 更新容器：应用 compose 文件存在时用上面的镜像（版本号 = 当前提交），否则只更新基础设施。
+  # 2. 切换：配置同步到 infra 目录，Topic 幂等核对，准备好的镜像打成 exchange-app:latest
+  sync_infra
+  bash "$INFRA/redpanda/topics.sh" >/dev/null && echo "== topic 核对完成"
+  COMPOSE=(-f "$INFRA/docker-compose.yml")
+  if [ -n "$apps" ]; then
+    COMPOSE+=(-f "$INFRA/docker-compose.apps.yml")
+    sudo docker tag exchange-app:next exchange-app:latest
+    sudo docker rmi exchange-app:next >/dev/null
+  fi
+
+  # 3. 更新容器：应用 compose 文件存在时用上面的镜像（版本号 = 当前提交），否则只更新基础设施。
   #    先起 instrument-service 并同步参考数据（资产、网络、交易对、费率），再起其余服务：它们启动时就读交易对与
   #    参考行情映射（market-data 只跟随设了 reference_symbol 的交易对，映射晚到会让合约因没有标记价而降级）
-  if [ -f "$INFRA/docker-compose.apps.yml" ]; then
+  if [ -n "$apps" ]; then
     sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" up -d --no-build --wait --wait-timeout 300 instrument-service
     apply_instruments
     # 先全部起来，部署只等站点离不开的服务；ClickHouse 停着时 analytics-consumer 不就绪之类的（批量消费者的下游
@@ -254,13 +294,12 @@ main() {
   prune_build_cache
   # nginx 配置是挂载进容器的文件，内容变了 compose 不会重启它：校验后热加载（校验失败则部署失败，旧配置继续服务）
   sudo docker compose "${COMPOSE[@]}" exec -T nginx sh -c 'nginx -t -q && nginx -s reload' && echo "== nginx 配置已重新加载"
-  if [ -f "$INFRA/docker-compose.apps.yml" ]; then
-    lift_deploy_degradations "$DEPLOY_STARTED"
-  fi
-
-  # 5. 发布第 3 步构建好的前端
+  # 4. 发布第 1 步构建好的前端，紧跟新后端（解除只减仓最多要等近四分钟，站点不等它）
   if [ -n "$web" ]; then
     publish_web
+  fi
+  if [ -n "$apps" ]; then
+    lift_deploy_degradations "$DEPLOY_STARTED"
   fi
   echo "== 服务状态"
   sudo docker compose "${COMPOSE[@]}" ps --format 'table {{.Service}}\t{{.Status}}'

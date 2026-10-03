@@ -193,14 +193,17 @@ type ChainFeeRepo interface {
 	// Unbooked lists the network's fees the ledger has not booked yet and
 	// may (neither held for a person nor written off).
 	Unbooked(ctx context.Context, network string) ([]domain.ChainFee, error)
-	MarkBooked(ctx context.Context, txHash, journalID string) error
+	// MarkBooked records the ledger's journal of a fee and returns the
+	// status it had, "" when it was booked already. A fee written off
+	// while the ledger booked it is BOOKABLE again: the journal stands.
+	MarkBooked(ctx context.Context, txHash, journalID string) (string, error)
 	// Held lists the fees waiting for a person, oldest first.
 	Held(ctx context.Context) ([]domain.ChainFee, error)
 	// OfReference returns the fees of a withdrawal or sweep, oldest first.
 	OfReference(ctx context.Context, reference string) ([]domain.ChainFee, error)
-	// Resolve stores a person's decision on a held fee (its status,
-	// asset, amount and who decided why) if it is still held; false when
-	// it is not.
+	// Resolve stores a person's decision on a fee not booked yet (held,
+	// or waiting for GAS_SUPPLY): its status, asset, amount, hold reason
+	// and who decided why; false when it is booked or decided already.
 	Resolve(ctx context.Context, f domain.ChainFee) (bool, error)
 	// Unit returns the confirmed fee unit of a custodian's network, or nil.
 	Unit(ctx context.Context, provider, asset, network string) (*domain.FeeUnit, error)

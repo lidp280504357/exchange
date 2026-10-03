@@ -67,7 +67,6 @@ func (s *Service) custodyFee(ctx context.Context, r ports.Repos, provider string
 		return hold(fmt.Sprintf("nobody has confirmed how %s counts its fee on %s %s, a token (exchangectl wallet custody-fee-unit)",
 			provider, w.Asset, w.Network))
 	}
-	limit := decimal.Zero
 	switch unit {
 	case domain.FeeUnitOutside:
 		return nil, "; fee " + reported + " not booked: charged outside the coin balances (" + domain.FeeUnitOutside + ")", nil
@@ -80,24 +79,21 @@ func (s *Service) custodyFee(ctx context.Context, r ports.Repos, provider string
 			return hold("its unit is the chain's own coin, which the platform holds with " + provider + " on no network")
 		}
 		f.Asset, f.Amount, net = chain.Asset, t.Fee.Shift(t.Decimals).Shift(-decimals), chain
-	default:
-		limit = w.Amount
 	}
 	// Up to the asset's decimals the ledger books in: the custodian took
 	// the whole fee, a fraction more booked leaves no shortfall behind.
 	f.Amount = f.Amount.RoundCeil(net.Decimals)
-	if net.WithdrawFee.IsPositive() {
-		bound := net.WithdrawFee.Mul(decimal.NewFromInt(feeBound))
-		if limit.IsZero() || bound.LessThan(limit) {
-			limit = bound
-		}
+	if !net.WithdrawFee.IsPositive() {
+		// A network that charges users nothing: nothing tells a plausible
+		// fee from one in another unit (the amount sent alone allows one
+		// as large as itself).
+		return hold("no bound to compare it with: the network of " + f.Asset + " charges no withdrawal fee")
 	}
-	switch {
-	case !limit.IsPositive():
-		// A fee in the chain's coin whose network charges users nothing:
-		// nothing tells a plausible fee from one in another unit.
-		return hold("no bound to compare it with: the network of " + f.Asset + " has no withdrawal fee")
-	case f.Amount.GreaterThan(limit):
+	limit := net.WithdrawFee.Mul(decimal.NewFromInt(feeBound))
+	if unit != domain.FeeUnitMain && w.Amount.LessThan(limit) {
+		limit = w.Amount
+	}
+	if f.Amount.GreaterThan(limit) {
 		return hold(fmt.Sprintf("above %s %s, the lesser of the amount sent and %d times the network's withdrawal fee", limit, f.Asset,
 			feeBound))
 	}
@@ -145,7 +141,9 @@ type Custodied func(ctx context.Context, provider, asset, network string) (int32
 // FeeResolution is a person's decision on a custodian's fee held for them
 // (review ④): Book it from GAS_SUPPLY, in the Asset and Amount they found
 // the custodian charged (as reported when empty), or write it off (not
-// taken from the coin balances, or reported in another unit).
+// taken from the coin balances, or reported in another unit). A fee that
+// waits for GAS_SUPPLY may be written off too (nothing to fund it from);
+// should the ledger book it meanwhile, the booking stands.
 type FeeResolution struct {
 	WithdrawalID string
 	Book         bool
@@ -178,13 +176,18 @@ func ResolveCustodyFee(ctx context.Context, store ports.Store, custodied Custodi
 		if err != nil {
 			return err
 		}
-		i := slices.IndexFunc(fees, func(f domain.ChainFee) bool { return f.Status == domain.FeeHeld })
+		i := slices.IndexFunc(fees, func(f domain.ChainFee) bool {
+			return f.Status == domain.FeeHeld || f.Status == domain.FeeBookable && f.JournalID == "" && !d.Book
+		})
 		if i < 0 {
 			return apperr.NotFound("no fee of withdrawal " + w.ID + " waits for a person")
 		}
 		f := fees[i]
 		before := f
 		f.Status, f.ResolvedBy, f.Resolution, f.ResolvedAt = domain.FeeWrittenOff, d.Actor, d.Reason, now
+		if f.HoldReason == "" {
+			f.HoldReason = "waited to be booked (GAS_SUPPLY short)"
+		}
 		action := "wallet.custody.fee.write_off"
 		if d.Book {
 			f.Status, action = domain.FeeBookable, "wallet.custody.fee.book"

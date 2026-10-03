@@ -118,7 +118,10 @@ func setup(ctx context.Context, a *app.App) error {
 	}{ledger.Inventory{Client: ledgerv1.NewLedgerServiceClient(ledgerConn)}, client}
 	pub := application.New(conf, client, house, flagClient, prod, event.NewFactory(a.Name(), a.Config().InstanceID), a.Logger(), a.Metrics())
 	// Only the latest books matter: read the public depth from its end.
-	if err := bootstrap.Tail(ctx, a, cfg.Kafka, []string{event.TopicMarketDepth, event.TopicDerivMarketDepth}, consumer.Depth(pub)); err != nil {
+	// The public books, and pairs and contracts leaving trading (an empty
+	// book at once, not at the next read of the specs).
+	tail := []string{event.TopicMarketDepth, event.TopicDerivMarketDepth, event.TopicInstrument}
+	if err := bootstrap.Tail(ctx, a, cfg.Kafka, tail, consumer.Depth(pub)); err != nil {
 		return err
 	}
 	a.Add("house liquidity", app.Loop(pub.Run))

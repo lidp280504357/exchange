@@ -71,7 +71,7 @@ custody_callbacks（原文、验签、结果、次数）──> 充值：deposit
 
 确认用 `exchangectl wallet custody-fee-unit --asset USDT --network TRON --unit SELF --reason "第一笔真实提现在 tronscan 上核对过"`（不带 `--unit` 列出已确认的单位；写 `custody_fee_units` 并记审计 `wallet.custody.fee_unit`）。**代币的单位没人确认之前，它的每笔手续费都挂起**，不记账。
 
-确认了单位的手续费再看数额：超过"网络手续费（用户付的 `withdraw_fee`）× 5"与提现金额两者中较小的那个（`MAIN` 只看主币网络的 `withdraw_fee` × 5；那条网络的 `withdraw_fee` 是 0 时没有可比的上限，一律挂起）也挂起：错了单位的手续费通常差得远（按最小单位的 gas，或把 13.6 TRX 当成 13.6 USDT，而 TRC20 的网络手续费是 1 USDT）。入账金额按资产精度向上取整（托管方扣的是整笔，多记零头不会留下短缺）。
+确认了单位的手续费再看数额：超过"网络手续费（用户付的 `withdraw_fee`）× 5"与提现金额两者中较小的那个（`MAIN` 只看主币网络的 `withdraw_fee` × 5）也挂起；所看网络的 `withdraw_fee` 是 0 时没有可比的上限（只剩提现金额本身），一律挂起：错了单位的手续费通常差得远（按最小单位的 gas，或把 13.6 TRX 当成 13.6 USDT，而 TRC20 的网络手续费是 1 USDT）。入账金额按资产精度向上取整（托管方扣的是整笔，多记零头不会留下短缺）。
 
 挂起的手续费状态 `HELD`，写明原因（报的数额、原始整数与 `decimals`、为什么挂起），不入账，也**不算进对账的"未入账手续费"**（不遮住短缺：托管方真扣了的话，对账会报这笔短缺，直到人工处理）。计数 `wallet_custody_fees_held_total`，现有数 `wallet_custody_fees_held`，告警 `CustodyFeesHeld`。人工到托管方后台或区块浏览器核对后：
 
@@ -82,7 +82,7 @@ exchangectl wallet custody-fee <提现ID> --book --amount 1.5 [--asset ETH] --re
 exchangectl wallet custody-fee <提现ID> --write-off --reason "..."  # 不入账：没从对账的余额里扣，或单位报错、实际没收
 ```
 
-`--book` 的资产必须是平台在该托管方、这笔手续费的网络上持有的资产（提现资产本身，或同一网络上链的主币，如 ERC20 的网络 `ETH` 上的 ETH），数额不能超过资产精度；处理器下一轮入账。挂起的计数与错误日志在回调的事务提交之后才记，事务失败、托管方重发时不重复计。两种都记审计（`wallet.custody.fee.book`、`wallet.custody.fee.write_off`，含报的数额、入账的数额与挂起原因）。
+`--book` 的资产必须是平台在该托管方、这笔手续费的网络上持有的资产（提现资产本身，或同一网络上链的主币，如 ERC20 的网络 `ETH` 上的 ETH），数额不能超过资产精度；处理器下一轮入账。挂起的计数与错误日志在回调的事务提交之后才记，事务失败、托管方重发时不重复计。两种都记审计（`wallet.custody.fee.book`、`wallet.custody.fee.write_off`，含报的数额、入账的数额与挂起原因）。没挂起、只是在等 `GAS_SUPPLY` 的手续费（`CustodyFeesUnbooked`）也可以 `--write-off`，用于没有收入可以注资的时候；万一账本恰好在核销的同时入了账，以入账为准（状态回到 `BOOKABLE`，日志记一条），账本说了算。
 
 **`GAS_SUPPLY` 的钱从哪来**：托管模式下没有"平台转进热钱包"可以记（`wallet fund` 是自建钱包用的）；用户付的提现手续费（`FEE_REVENUE`）本来就在托管方的余额里，托管方的手续费就从这里出：`exchangectl ledger gas-supply --asset USDT --amount 20 --reason "..."` 把手续费收入挪到 `GAS_SUPPLY`（两边都不是钱包应有数，对账不变；不能超过 `FEE_REVENUE`；审计 `ledger.gas_supply`）。`GAS_SUPPLY` 不够时手续费等着（`wallet_custody_fees_unbooked`，对账算作未入账手续费），告警 `CustodyFeesUnbooked`。
 

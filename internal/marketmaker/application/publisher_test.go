@@ -203,6 +203,47 @@ func TestHouseStopsWhereItMustNotTrade(t *testing.T) {
 	}
 }
 
+// A pair or contract that leaves TRADING gets its empty book in the next
+// round (instrument.events), not after the next read of the specs; one that
+// trades again is offered once the specs are read again, at once
+// (requirements §761, D2 2026-10-03).
+func TestHouseLeavesAHaltedSymbolAtOnce(t *testing.T) {
+	p, rec, _, now := newRig(t)
+	ctx := context.Background()
+	p.OnSnapshot(&marketv1.DepthSnapshot{Symbol: "BTC-USDT", Sequence: 1, Reference: true, Bids: levels("50000", "1"), Asks: levels("50001", "1")})
+	p.OnSnapshot(&marketv1.DepthSnapshot{Symbol: "BTC-USDT-PERP", Sequence: 1, Reference: true, Bids: levels("49999.9", "5"), Asks: levels("50000.1", "5")})
+	_ = p.publish(ctx, p.round())
+	if _, books := rec.take(t); len(books) != 2 {
+		t.Fatalf("both offered: %v", books)
+	}
+	p.OnStatus("BTC-USDT", "HALT")
+	p.OnStatus("BTC-USDT-PERP", "HALT")
+	_ = p.publish(ctx, p.round())
+	topics, books := rec.take(t)
+	empty := map[string]string{}
+	for i, b := range books {
+		if len(b.GetBids())+len(b.GetAsks()) == 0 && b.GetHouseUserId() == "house" {
+			empty[b.GetSymbol()] = topics[i]
+		}
+	}
+	if len(books) != 2 || empty["BTC-USDT"] != event.TopicOrderReferences || empty["BTC-USDT-PERP"] != event.TopicDerivOrderReferences {
+		t.Fatalf("empty books on halt: %v on %v", books, topics)
+	}
+	*now = now.Add(5 * time.Second) // past the heartbeat: still nothing for them
+	_ = p.publish(ctx, p.round())
+	if _, books := rec.take(t); len(books) != 0 {
+		t.Fatalf("the empty books go once: %v", books)
+	}
+	p.OnStatus("BTC-USDT", "TRADING")
+	p.refresh(ctx)
+	p.OnSnapshot(&marketv1.DepthSnapshot{Symbol: "BTC-USDT", Sequence: 2, Reference: true, Bids: levels("50000", "1"), Asks: levels("50001", "1")})
+	p.OnSnapshot(&marketv1.DepthSnapshot{Symbol: "BTC-USDT-PERP", Sequence: 2, Reference: true, Bids: levels("49999.9", "5"), Asks: levels("50000.1", "5")})
+	_ = p.publish(ctx, p.round())
+	if _, books := rec.take(t); len(books) != 2 || len(books[0].GetBids())+len(books[1].GetBids()) == 0 {
+		t.Fatalf("offered again once trading (the specs read again): %v", books)
+	}
+}
+
 func TestContractsGoToTheirEngineWithTheirRooms(t *testing.T) {
 	p, rec, _, now := newRig(t)
 	ctx := context.Background()
