@@ -186,7 +186,22 @@ sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangec
 4. 先关 `wallet.withdraw`，小额充值每个"资产·网络"一笔、对账通过后再逐个开提现；回调日志保留全量。
 5. 去掉 compose 里的 `udun-mock`。
 
-### 协调会话批准记录（2026-10-03，代用户决定；用户次日复核）
+## 指标与告警
+
+- `wallet_custody_up`、`wallet_custody_balance{coin}`（5 分钟）、`wallet_custody_held/expected/shortfall{asset}`（每次对账）、`wallet_custody_submitted`、`wallet_custody_submitted_oldest_seconds`、`wallet_custody_withdrawals_uncertain`、`wallet_custody_callbacks_attention`、`wallet_custody_deposits_held`、`wallet_custody_fees_unbooked`、`wallet_custody_fees_held`（等人工处理的手续费笔数）、`wallet_withdrawals_suspended{asset}`（该资产停提时为 1）、`wallet_withdrawals_suspended_waiting{asset}`（因停提等着的已批准提现），常量标签 `provider`；`wallet_custody_fees_held_total`（挂起的手续费）、`wallet_custody_callbacks_rejected_total`（被拒的回调，记不记表都算）、`wallet_custody_deposit_discrepancies_total`（与补记不一致的回调）。
+- 告警（`deploy/observability/alerts.yml`）：`CustodyShortfall`（短缺 15 分钟，严重）、`CustodyNotCompared`（某资产 30 分钟没比较）、`CustodyUnreachable`（10 分钟）、`CustodyWithdrawalStuck`（`SUBMITTED` 超过 24 小时，人工到托管方后台核对）、`CustodyWithdrawalsUncertain`（重交被拒或 30 分钟无应答、托管方可能仍会发出，5 分钟，严重）、`CustodyCallbacksNeedAttention`（15 分钟）、`CustodyCallbacksRejected`（15 分钟内有回调被拒：伪造，或 `UDUN_API_KEY` 与托管方的不一致、充值进不来，审查 B6）、`WalletWithdrawalsSuspended`（某资产停提，严重；查清后 `exchangectl wallet withdrawals-resume`）、`WalletWithdrawalsWaitingOnSuspension`（已批准的提现因停提等了 30 分钟）、`CustodyFeesHeld`（有手续费等人工入账或核销）、`CustodyFeesUnbooked`（1 小时，`GAS_SUPPLY` 不够：`exchangectl ledger gas-supply`）、`CustodyDepositDiscrepancy`（回调与补记不一致，严重；在后台「充值 → 待处理」查明后驳回或调账）、`CustodyWithdrawalContradiction`（托管方的回调与已结束的提现矛盾，严重；`CustodyCallbacksNeedAttention` 也把 `DISCREPANCY` 计入）。
+
+## 端到端
+
+`scripts/e2e/custody.sh`：新用户拿 TRC20 与比特币地址；模拟网关报 30 USDT 到账（入账一次，重试与重放不重复），0.5 USDT 记未入账；伪造签名与过期回调被拒并记录；经公网发到 `https://astras.vip` 的回调（`udun`、`UDUN`、`Udun` 三种写法）在 nginx 就被拒（403），到不了平台；运营手工停掉 USDT 提现时新提现被拒（422 `WALLET_WITHDRAW_SUSPENDED`），解除后照常（自动停提要两次相隔 5 分钟的对账，端到端不等，由单元测试覆盖）；绑定身份验证器后 12 USDT 经审批交给托管方、`SUBMITTED` → `CONFIRMED` 带交易哈希并结算，托管方为它扣的 1.2 USDT 从 `GAS_SUPPLY` 入账（脚本先确认 TRC20 的手续费单位为 `SELF`，`GAS_SUPPLY` 不到 10 USDT 时从手续费收入挪 20）；10 USDT 发往失败地址 → `FAILED` 资金退回；模拟网关对第三个地址收下提现却丢了应答、重交时以余额不足拒绝、先报审核中、把实际扣的 1.5 USDT 报成 1500：提现停在 `UNCERTAIN`、资金冻结，之后回调到达照常发出并结算，手续费挂起不入账，`exchangectl wallet custody-fee --book --amount 1.5` 后入账；最后对账无短缺（托管方余额与账本都少了这两笔手续费）。浏览器冒烟测试的充值页同时取 Sepolia 与 TRC20 地址，后台冒烟测试打开「托管方」页与一条回调。
+
+## 已知局限
+
+- 公开文档没有提现查询与充值列表接口：提现以回调为准（`SUBMITTED` 超 24 小时告警），漏掉的充值回调靠托管方重试，再不行由管理员核对后补记（见上文「回调丢失时的补记」）。
+- 托管方没有测试环境：真网关的应答码、余额格式、`fee` 的币种以正式文档与小额联调为准；每个代币网络第一笔真实提现的手续费要对照区块浏览器确认单位（`custody-fee-unit`），确认前它的手续费一律挂起。
+- **接真网关前要定**（审查 2026-10-03）：TRC20、BEP20 的手续费若按主币（TRX、BNB）收，平台没有这两种资产的托管网络，也就没有它们的手续费收入给 `GAS_SUPPLY` 注资，`MAIN` 单位下这些手续费只会挂起、永远记不上账。二选一：确认托管方从另设的手续费账户扣（单位定为 `OUTSIDE`，不记账，平台在账外给托管方充 TRX/BNB）；或者把 TRX、BNB 加为托管资产（网络行），`GAS_SUPPLY` 由它们的手续费收入或一条平台注资路径补。ERC20 按 ETH 收时可以记账（ETH 有托管网络与手续费收入）。
+
+## 协调会话批准记录（2026-10-03，代用户决定；用户次日复核）
 
 编码会话 12:00 提交的联调计划与四个阻塞项，协调会话的决定如下（消息渠道不可靠时以本节为准）：
 
@@ -206,18 +221,3 @@ sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangec
 | B10 `expected=0` | 步骤 1 看清托管方的余额单位后再补；在此之前基线重置后的第一次对账由人工核对。 |
 | B7a 未匹配充值 | 进 `UNCLAIMED_DEPOSIT` 的待处理账户，须在放真实用户之前落地，不阻塞步骤 1–6。 |
 | 审查 AF Medium | `custodyfee.go:78` 附近：按主币计价、而平台未托管该主币的挂起手续费（如 TRC20 的 TRX）不得再按代币口径解释短缺（应为 0），步骤 5 之前改好并补测试。 |
-
-## 指标与告警
-
-- `wallet_custody_up`、`wallet_custody_balance{coin}`（5 分钟）、`wallet_custody_held/expected/shortfall{asset}`（每次对账）、`wallet_custody_submitted`、`wallet_custody_submitted_oldest_seconds`、`wallet_custody_withdrawals_uncertain`、`wallet_custody_callbacks_attention`、`wallet_custody_deposits_held`、`wallet_custody_fees_unbooked`、`wallet_custody_fees_held`（等人工处理的手续费笔数）、`wallet_withdrawals_suspended{asset}`（该资产停提时为 1）、`wallet_withdrawals_suspended_waiting{asset}`（因停提等着的已批准提现），常量标签 `provider`；`wallet_custody_fees_held_total`（挂起的手续费）、`wallet_custody_callbacks_rejected_total`（被拒的回调，记不记表都算）、`wallet_custody_deposit_discrepancies_total`（与补记不一致的回调）。
-- 告警（`deploy/observability/alerts.yml`）：`CustodyShortfall`（短缺 15 分钟，严重）、`CustodyNotCompared`（某资产 30 分钟没比较）、`CustodyUnreachable`（10 分钟）、`CustodyWithdrawalStuck`（`SUBMITTED` 超过 24 小时，人工到托管方后台核对）、`CustodyWithdrawalsUncertain`（重交被拒或 30 分钟无应答、托管方可能仍会发出，5 分钟，严重）、`CustodyCallbacksNeedAttention`（15 分钟）、`CustodyCallbacksRejected`（15 分钟内有回调被拒：伪造，或 `UDUN_API_KEY` 与托管方的不一致、充值进不来，审查 B6）、`WalletWithdrawalsSuspended`（某资产停提，严重；查清后 `exchangectl wallet withdrawals-resume`）、`WalletWithdrawalsWaitingOnSuspension`（已批准的提现因停提等了 30 分钟）、`CustodyFeesHeld`（有手续费等人工入账或核销）、`CustodyFeesUnbooked`（1 小时，`GAS_SUPPLY` 不够：`exchangectl ledger gas-supply`）、`CustodyDepositDiscrepancy`（回调与补记不一致，严重；在后台「充值 → 待处理」查明后驳回或调账）、`CustodyWithdrawalContradiction`（托管方的回调与已结束的提现矛盾，严重；`CustodyCallbacksNeedAttention` 也把 `DISCREPANCY` 计入）。
-
-## 端到端
-
-`scripts/e2e/custody.sh`：新用户拿 TRC20 与比特币地址；模拟网关报 30 USDT 到账（入账一次，重试与重放不重复），0.5 USDT 记未入账；伪造签名与过期回调被拒并记录；经公网发到 `https://astras.vip` 的回调（`udun`、`UDUN`、`Udun` 三种写法）在 nginx 就被拒（403），到不了平台；运营手工停掉 USDT 提现时新提现被拒（422 `WALLET_WITHDRAW_SUSPENDED`），解除后照常（自动停提要两次相隔 5 分钟的对账，端到端不等，由单元测试覆盖）；绑定身份验证器后 12 USDT 经审批交给托管方、`SUBMITTED` → `CONFIRMED` 带交易哈希并结算，托管方为它扣的 1.2 USDT 从 `GAS_SUPPLY` 入账（脚本先确认 TRC20 的手续费单位为 `SELF`，`GAS_SUPPLY` 不到 10 USDT 时从手续费收入挪 20）；10 USDT 发往失败地址 → `FAILED` 资金退回；模拟网关对第三个地址收下提现却丢了应答、重交时以余额不足拒绝、先报审核中、把实际扣的 1.5 USDT 报成 1500：提现停在 `UNCERTAIN`、资金冻结，之后回调到达照常发出并结算，手续费挂起不入账，`exchangectl wallet custody-fee --book --amount 1.5` 后入账；最后对账无短缺（托管方余额与账本都少了这两笔手续费）。浏览器冒烟测试的充值页同时取 Sepolia 与 TRC20 地址，后台冒烟测试打开「托管方」页与一条回调。
-
-## 已知局限
-
-- 公开文档没有提现查询与充值列表接口：提现以回调为准（`SUBMITTED` 超 24 小时告警），漏掉的充值回调靠托管方重试，再不行由管理员核对后补记（见上文「回调丢失时的补记」）。
-- 托管方没有测试环境：真网关的应答码、余额格式、`fee` 的币种以正式文档与小额联调为准；每个代币网络第一笔真实提现的手续费要对照区块浏览器确认单位（`custody-fee-unit`），确认前它的手续费一律挂起。
-- **接真网关前要定**（审查 2026-10-03）：TRC20、BEP20 的手续费若按主币（TRX、BNB）收，平台没有这两种资产的托管网络，也就没有它们的手续费收入给 `GAS_SUPPLY` 注资，`MAIN` 单位下这些手续费只会挂起、永远记不上账。二选一：确认托管方从另设的手续费账户扣（单位定为 `OUTSIDE`，不记账，平台在账外给托管方充 TRX/BNB）；或者把 TRX、BNB 加为托管资产（网络行），`GAS_SUPPLY` 由它们的手续费收入或一条平台注资路径补。ERC20 按 ETH 收时可以记账（ETH 有托管网络与手续费收入）。
