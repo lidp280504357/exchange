@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -147,12 +146,23 @@ func (s *Service) ResetCustody(ctx context.Context, key, asset string, amount de
 			return err
 		}
 		// DEPOSIT_PENDING is minus what the custodians hold for the
-		// platform: the reset cannot take that below nothing (a replay of
-		// one that did not is checked by its key below).
-		if !reverse && pending[0].Available.Add(amount).IsPositive() {
-			if prior, err := r.Journals().ByIdemKey(ctx, p.IdemKey); err != nil || prior == nil {
-				return errors.Join(err, apperr.Invalid(fmt.Sprintf("the custodians are expected to hold %s %s, less than %s",
-					pending[0].Available.Neg(), asset, amount)))
+		// platform: a reset cannot take that below nothing, and a reverse
+		// cannot put back more than the resets took (review AH); a replay
+		// of one that passed is told by its key.
+		prior, err := r.Journals().ByIdemKey(ctx, p.IdemKey)
+		if err != nil {
+			return err
+		}
+		if prior == nil && !reverse && pending[0].Available.Add(amount).IsPositive() {
+			return apperr.Invalid(fmt.Sprintf("the custodians are expected to hold %s %s, less than %s", pending[0].Available.Neg(), asset, amount))
+		}
+		if prior == nil && reverse {
+			taken, err := r.Journals().KeyedTotal(ctx, "custody-reset:", domain.SystemAccount(domain.AccountDepositPending, asset))
+			if err != nil {
+				return err
+			}
+			if amount.GreaterThan(taken) {
+				return apperr.Invalid(fmt.Sprintf("the resets took %s %s out of the expectation, less than %s", taken, asset, amount))
 			}
 		}
 		if res, err = s.post(ctx, r, p); err != nil || res.Replayed {

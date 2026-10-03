@@ -72,6 +72,8 @@ type AddressRepo interface {
 	// RetiredOwner is the user a retired address of network belonged to,
 	// "" when none.
 	RetiredOwner(ctx context.Context, network, address string) (string, error)
+	// OfProvider counts a custodian's deposit addresses in use and retired.
+	OfProvider(ctx context.Context, provider string) (inUse, retired int, err error)
 	// List returns the addresses of network by index.
 	List(ctx context.Context, network string) ([]domain.Address, error)
 }

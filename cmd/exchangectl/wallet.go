@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -232,8 +233,30 @@ func walletWith(ctx context.Context, db, idb *pg.DB, args []string, out io.Write
 	case "retire-addresses", "restore-addresses":
 		provider := fs.String("provider", domain.ProviderUdun, "the custodian whose deposit addresses go out of use (or come back)")
 		reason := fs.String("reason", "", "why (required, goes to the audit log)")
+		yes := fs.Bool("yes", false, "do it; without, only say what would be done")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
+		}
+		// Only the stand-in's addresses are made up: once the real gateway
+		// serves the custodian its addresses are real, and retiring them
+		// would leave real deposits to them unmatched (review AH).
+		if gw := os.Getenv("UDUN_GATEWAY_URL"); !standIn(gw) {
+			return fmt.Errorf("%s's gateway here (UDUN_GATEWAY_URL) is not the stand-in udun-mock: its deposit addresses are real, they stay "+
+				"(run this in wallet-service while it still talks to the stand-in)", strings.ToUpper(*provider))
+		}
+		inUse, retired, err := store.Read().Addresses().OfProvider(ctx, strings.ToUpper(*provider))
+		if err != nil {
+			return err
+		}
+		if !*yes {
+			if args[0] == "retire-addresses" {
+				fmt.Fprintf(out, "would retire the %d deposit addresses of %s in use (%d retired before); add --yes to do it\n", inUse,
+					strings.ToUpper(*provider), retired)
+			} else {
+				fmt.Fprintf(out, "would put back the %d retired deposit addresses of %s (%d in use now); add --yes to do it\n", retired,
+					strings.ToUpper(*provider), inUse)
+			}
+			return nil
 		}
 		if args[0] == "retire-addresses" {
 			n, err := application.RetireDepositAddresses(ctx, store, *provider, actor(), *reason, time.Now())
@@ -337,6 +360,13 @@ func withdrawable(svc *instrumentapp.Service) application.Withdrawable {
 		}
 		return err == nil && len(v.Networks) > 0, err
 	}
+}
+
+// standIn reports whether a custodian's gateway address is the test
+// environment's stand-in (the udun-mock container).
+func standIn(gateway string) bool {
+	u, err := url.Parse(strings.TrimSpace(gateway))
+	return err == nil && u.Hostname() == "udun-mock"
 }
 
 // printSuspensions lists the suspended assets, then what the custody

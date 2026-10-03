@@ -139,10 +139,11 @@ echo "ok   stale and forged callbacks are refused"
 FORM="timestamp=$(date +%s)&nonce=123456&sign=0123456789abcdef0123456789abcdef&body=%7B%22tradeId%22%3A%22e2e-$RUN%22%7D"
 for path in udun UDUN Udun; do
   STATUS=$(curl -s -o "$WORK/body" -w '%{http_code}' -X POST "$BASE/v1/wallet/callbacks/$path" -H 'Content-Type: application/x-www-form-urlencoded' --data "$FORM")
-  # 403 from nginx's or wallet-service's allow list, 404 for a provider
-  # not in lower case, 401 for the signature once any address may call
-  case $STATUS in
-  401 | 403 | 404) ;;
+  # 403 from nginx's or wallet-service's allow list, 401 for the signature
+  # once any address may call; a provider not in lower case is no route
+  # (404), which the lower-case one must never be (review AH)
+  case $path:$STATUS in
+  udun:401 | udun:403 | UDUN:403 | UDUN:404 | Udun:403 | Udun:404) ;;
   *) echo "FAIL a forged callback over the internet to /v1/wallet/callbacks/$path: HTTP $STATUS, want it refused" >&2; exit 1 ;;
   esac
 done

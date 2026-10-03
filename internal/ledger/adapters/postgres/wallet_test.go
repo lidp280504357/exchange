@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/lidp280504357/exchange/internal/ledger/domain"
+	"github.com/lidp280504357/exchange/internal/platform/apperr"
 )
 
 func TestWalletJournals(t *testing.T) {
@@ -107,7 +108,14 @@ func TestWalletJournals(t *testing.T) {
 		!again.Replayed || again.JournalID != reset.JournalID || pending() != "-0.5" {
 		t.Fatalf("a repeat replays: %+v %v", again, err)
 	}
+	// A reverse puts back at most what the resets took (review AH).
+	if _, err := svc.ResetCustody(ctx, "too-far-back", "USDT", d("2"), true, "ops", "more than was reset"); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("reversed more than was reset: %v", err)
+	}
 	if _, err := svc.ResetCustody(ctx, "back", "USDT", d("1.5"), true, "ops", "back to the stand-in"); err != nil || pending() != "-2" {
 		t.Fatalf("reversed: %v, DEPOSIT_PENDING %s", err, pending())
+	}
+	if again, err := svc.ResetCustody(ctx, "back", "USDT", d("1.5"), true, "ops", "back to the stand-in"); err != nil || !again.Replayed {
+		t.Fatalf("a reverse replayed: %+v %v", again, err)
 	}
 }

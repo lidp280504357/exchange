@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -525,6 +526,7 @@ func ledgerCustodyReset(ctx context.Context, svc *application.Service, dbs ledge
 	asset := fs.String("asset", "", "asset code, e.g. USDT")
 	amount := fs.String("amount", "", "decimal amount: the custodian's expected holding when it was replaced")
 	reverse := fs.Bool("reverse", false, "put a reset back (a rollback)")
+	force := fs.Bool("force", false, "reset more than the custodian's last check found it holding (or with no check yet)")
 	reason := fs.String("reason", "", "why (required, goes to the audit log)")
 	key := fs.String("key", "", "idempotency key; repeat it to retry safely (default: a new one)")
 	if err := fs.Parse(args); err != nil {
@@ -560,6 +562,24 @@ func ledgerCustodyReset(ctx context.Context, svc *application.Service, dbs ledge
 	}
 	if *reverse && d.GreaterThan(before[code]) {
 		return fmt.Errorf("only %s %s was reset for %s", before[code], code, custodian)
+	}
+	// More than the custodian holds would quietly lower the expectation
+	// below what it should hold, and the checks would miss funds missing
+	// (review AH): the stand-in's holding at its last check is the amount.
+	if !*reverse && !*force {
+		checks, err := wallet.Read().Checks().Latest(ctx, custodian)
+		if err != nil {
+			return err
+		}
+		i := slices.IndexFunc(checks, func(c walletdomain.ChainCheck) bool { return c.Asset == code })
+		switch {
+		case i < 0:
+			return fmt.Errorf("no check of %s at %s yet: run exchangectl wallet reconcile --network %s first, or --force", code, custodian,
+				custodian)
+		case d.GreaterThan(checks[i].Chain):
+			return fmt.Errorf("the check of %s found %s holding %s %s, less than %s: a reset of more hides funds missing (--force if meant)",
+				checks[i].CheckedAt.UTC().Format(time.RFC3339), custodian, checks[i].Chain, code, d)
+		}
 	}
 	res, err := svc.ResetCustody(ctx, *key, code, d, *reverse, actor(), *reason)
 	if err != nil {

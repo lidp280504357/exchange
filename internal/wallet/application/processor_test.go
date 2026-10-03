@@ -327,6 +327,21 @@ func (a memAddresses) Restore(_ context.Context, provider string) (int, int, err
 	return restored, left, nil
 }
 
+func (a memAddresses) OfProvider(_ context.Context, provider string) (int, int, error) {
+	inUse, retired := 0, 0
+	for _, x := range a.m.addresses {
+		if x.Provider == provider && provider != "" {
+			inUse++
+		}
+	}
+	for _, r := range a.m.retired {
+		if r.Provider == provider {
+			retired++
+		}
+	}
+	return inUse, retired, nil
+}
+
 func (a memAddresses) RetiredOwner(_ context.Context, network, address string) (string, error) {
 	for _, r := range a.m.retired {
 		if r.Network == network && strings.EqualFold(r.Address, address) {

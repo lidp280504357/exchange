@@ -23,6 +23,8 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/migrate"
 	"github.com/lidp280504357/exchange/internal/platform/pg"
 	"github.com/lidp280504357/exchange/internal/platform/testenv"
+	walletpg "github.com/lidp280504357/exchange/internal/wallet/adapters/postgres"
+	walletdomain "github.com/lidp280504357/exchange/internal/wallet/domain"
 	"github.com/lidp280504357/exchange/migrations"
 )
 
@@ -260,6 +262,19 @@ func TestLedgerCustodyReset(t *testing.T) {
 		t.Fatal(err)
 	}
 	reset := []string{"custody-reset", "--asset", "usdt", "--amount", "396.25", "--reason", "the stand-in replaced", "--key", "switch"}
+	if _, err := run(reset...); err == nil || !strings.Contains(err.Error(), "no check") {
+		t.Fatalf("a reset without a custody check: %v", err)
+	}
+	// The stand-in's holding at its last check bounds the reset (review AH).
+	check := walletdomain.NewChainCheck(walletdomain.ProviderUdun, "USDT", decimal.RequireFromString("396.25"),
+		decimal.RequireFromString("396.25"), decimal.Zero, 3, time.Now())
+	if err := walletpg.NewStore(wallet, event.NewFactory("exchangectl-test", "t")).Read().Checks().Insert(ctx, check); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run("custody-reset", "--asset", "USDT", "--amount", "400", "--reason", "more than held", "--key", "x"); err == nil ||
+		!strings.Contains(err.Error(), "hides funds missing") {
+		t.Fatalf("a reset beyond the holding: %v", err)
+	}
 	if _, err := run(reset...); err == nil {
 		t.Fatal("a reset needs ledger.manual_adjustment")
 	}

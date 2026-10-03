@@ -52,6 +52,9 @@ type JournalRepo interface {
 	// beforeID (0: newest), newest first, optionally of one asset and
 	// entry type.
 	Entries(ctx context.Context, ownerID, asset, entryType string, beforeID int64, limit int) ([]domain.Entry, error)
+	// KeyedTotal sums what the journals whose key starts with prefix moved
+	// on an account (a custody reset's DEPOSIT_PENDING, for one).
+	KeyedTotal(ctx context.Context, prefix string, account domain.AccountKey) (decimal.Decimal, error)
 }
 
 // TransferRepo stores account transfers.

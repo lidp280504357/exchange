@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lidp280504357/exchange/internal/ledger/domain"
@@ -110,6 +111,18 @@ func (r accounts) ByOwner(ctx context.Context, ownerID, accountType string) ([]d
 }
 
 type journals repos
+
+func (r journals) KeyedTotal(ctx context.Context, prefix string, account domain.AccountKey) (decimal.Decimal, error) {
+	var total decimal.Decimal
+	err := r.q.QueryRow(ctx, `SELECT coalesce(sum(l.amount), 0) FROM journal_lines l
+		JOIN accounts a ON a.id = l.account_id JOIN journals j ON j.id = l.journal_id
+		WHERE a.owner_type = $2 AND a.owner_id = $3 AND a.account_type = $4 AND a.asset = $5 AND starts_with(j.idem_key, $1)`,
+		prefix, account.OwnerType, account.OwnerID, account.Type, account.Asset).Scan(&total)
+	if err != nil {
+		return decimal.Zero, fmt.Errorf("sum keyed journals: %w", err)
+	}
+	return total, nil
+}
 
 func (r journals) ByIdemKey(ctx context.Context, key string) (*domain.Journal, error) {
 	var j domain.Journal

@@ -191,13 +191,15 @@ sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T udu
   exchangectl ledger custody-reset --asset USDT --amount <X> --reason "回退到模拟网关" --key back-usdt --reverse   # 回退
   ```
 
-  要开关 `ledger.manual_adjustment`，写审计 `ledger.custody_reset`；`DEPOSIT_PENDING` 不会因此变成正数（预期持有不能小于 0），回退不能超过已经重置的。每笔分录同时记进钱包库的 `custody_baselines`（同一个 `--key` 重跑不会重复记），对账（`exchangectl wallet checks --network UDUN`、后台「托管方」页）每个资产多一列 `SIMULATED`（后台接口 `baseline`）："模拟资金、不在托管方"，所以预期为 0 是写明的，不是凭空消失；它不计入短缺。用户的模拟余额不动。
+  要开关 `ledger.manual_adjustment`，写审计 `ledger.custody_reset`；`DEPOSIT_PENDING` 不会因此变成正数（预期持有不能小于 0），回退不能超过已经重置的（账本自己按 `custody-reset:` 分录的合计检查，审查 AH）。X 不能超过该托管方最近一次对账的 `HELD`（多出的部分会悄悄压低预期，以后真少了钱对账也看不出来）；还没有对账时先 `exchangectl wallet reconcile --network UDUN`，确实要超过时加 `--force`。每笔分录同时记进钱包库的 `custody_baselines`（同一个 `--key` 重跑不会重复记），对账（`exchangectl wallet checks --network UDUN`、后台「托管方」页）每个资产多一列 `SIMULATED`（后台接口 `baseline`）："模拟资金、不在托管方"，所以预期为 0 是写明的，不是凭空消失；它不计入短缺。用户的模拟余额不动。
 - **B2 模拟时期的充值地址**：`deposit_addresses` 里 `provider = UDUN` 的是模拟网关编的地址（2026-10-03：TRON 129 个、BTC 27 个），切换后有人往里打真钱就丢了。切换时移进 `retired_deposit_addresses`，用户下次申请拿到真地址；提现到这些地址（包括之前加进地址簿的）一律拒绝（`WALLET_INVALID_ADDRESS`，原因 `ADDRESS_RETIRED`）；回退时放回，期间已经拿到新地址的用户保留新的：
 
   ```bash
-  exchangectl wallet retire-addresses --provider UDUN --reason "模拟网关的地址，真链上不存在"
-  exchangectl wallet restore-addresses --provider UDUN --reason "回退到模拟网关"   # 回退
+  exchangectl wallet retire-addresses --provider UDUN --reason "模拟网关的地址，真链上不存在" --yes
+  exchangectl wallet restore-addresses --provider UDUN --reason "回退到模拟网关" --yes   # 回退
   ```
+
+  不带 `--yes` 只说要动多少个地址；两个命令都只在 `UDUN_GATEWAY_URL` 指向模拟网关 `udun-mock` 的地方运行（在仍连模拟网关的 wallet-service 容器里），接上真网关后它的地址是真的，命令拒绝（审查 AH：切换后误跑会把真地址退役，真充值就成了无主）。所以回退时先恢复 `apps.env` 并重启 wallet-service，再恢复地址。
 
   两者都写审计（`wallet.deposit_addresses.retire|restore`）。站点的充值地址都按接口取（`Cache-Control: no-store`，service worker 只缓存离线页，没有本地存储）；打开着的充值页每分钟、回到页面时重新取一次，旧地址最多再显示一分钟。
 - **B3 提现**：人人都有模拟 USDT，接上真网关后批出去的提现付的是真钱。切换时先手动暂停 USDT、BTC、ETH 的提现；用户测试的窗口里只解除要测的资产，所有托管提现进人工审核、只批用户自己那笔；窗口结束重新暂停。商户只放测试金额。

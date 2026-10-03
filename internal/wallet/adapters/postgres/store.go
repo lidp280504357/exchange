@@ -158,7 +158,7 @@ func (r addresses) Retire(ctx context.Context, provider, actor, reason string, a
 			DELETE FROM deposit_addresses WHERE provider = $1 AND provider <> '' RETURNING user_id, network, address, provider, created_at)
 		INSERT INTO retired_deposit_addresses (network, address, user_id, provider, created_at, retired_at, retired_by, reason)
 		SELECT network, address, user_id, provider, created_at, $2, $3, $4 FROM gone
-		ON CONFLICT (network, address) DO UPDATE SET user_id = EXCLUDED.user_id, provider = EXCLUDED.provider,
+		ON CONFLICT (network, lower(address)) DO UPDATE SET user_id = EXCLUDED.user_id, provider = EXCLUDED.provider,
 			created_at = EXCLUDED.created_at, retired_at = EXCLUDED.retired_at, retired_by = EXCLUDED.retired_by, reason = EXCLUDED.reason
 		RETURNING network, address, user_id, provider, created_at, retired_at, retired_by, reason`, provider, at, actor, reason)
 	if err != nil {
@@ -189,6 +189,16 @@ func (r addresses) Restore(ctx context.Context, provider string) (int, int, erro
 		return 0, 0, fmt.Errorf("restore deposit addresses: %w", err)
 	}
 	return restored, left, nil
+}
+
+func (r addresses) OfProvider(ctx context.Context, provider string) (int, int, error) {
+	var inUse, retired int
+	err := r.q.QueryRow(ctx, `SELECT (SELECT count(*) FROM deposit_addresses WHERE provider = $1 AND provider <> ''),
+		(SELECT count(*) FROM retired_deposit_addresses WHERE provider = $1)`, provider).Scan(&inUse, &retired)
+	if err != nil {
+		return 0, 0, fmt.Errorf("count a custodian's deposit addresses: %w", err)
+	}
+	return inUse, retired, nil
 }
 
 func (r addresses) RetiredOwner(ctx context.Context, network, address string) (string, error) {
