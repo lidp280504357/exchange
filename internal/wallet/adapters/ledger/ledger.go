@@ -39,13 +39,13 @@ func (c *Client) ReleaseUnclaimed(ctx context.Context, depositID, userID, asset 
 }
 
 // UnclaimedRelease returns the journal that released an unclaimed
-// deposit, if any.
-func (c *Client) UnclaimedRelease(ctx context.Context, depositID string) (string, error) {
+// deposit, if any, and the user it paid.
+func (c *Client) UnclaimedRelease(ctx context.Context, depositID string) (journalID, userID string, err error) {
 	resp, err := c.c.GetUnclaimedRelease(ctx, &ledgerv1.GetUnclaimedReleaseRequest{DepositId: depositID})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return resp.GetJournalId(), nil
+	return resp.GetJournalId(), resp.GetUserId(), nil
 }
 
 // CreditUnclaimed books a deposit to an address no user has to

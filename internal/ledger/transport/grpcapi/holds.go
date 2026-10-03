@@ -70,13 +70,13 @@ func (s *Server) CreditUnclaimed(ctx context.Context, req *ledgerv1.CreditUnclai
 }
 
 // GetUnclaimedRelease reports the journal that released an unclaimed
-// deposit, if any.
+// deposit, if any, and the user it paid.
 func (s *Server) GetUnclaimedRelease(ctx context.Context, req *ledgerv1.GetUnclaimedReleaseRequest) (*ledgerv1.GetUnclaimedReleaseResponse, error) {
-	journal, err := s.svc.UnclaimedRelease(ctx, req.GetDepositId())
+	journal, user, err := s.svc.UnclaimedRelease(ctx, req.GetDepositId())
 	if err != nil {
 		return nil, err
 	}
-	return &ledgerv1.GetUnclaimedReleaseResponse{JournalId: journal}, nil
+	return &ledgerv1.GetUnclaimedReleaseResponse{JournalId: journal, UserId: user}, nil
 }
 
 // ListHolds lists a user's holds.

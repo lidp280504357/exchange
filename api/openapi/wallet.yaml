@@ -590,7 +590,11 @@ components:
           description: Held in UNCLAIMED_DEPOSIT instead of the account.
         reason:
           type: [string, 'null']
-          enum: [BELOW_MINIMUM, ACCOUNT_CLOSED, NOT_ELIGIBLE, UNSUPPORTED_TOKEN, null]
+          enum: [BELOW_MINIMUM, ACCOUNT_CLOSED, NOT_ELIGIBLE, UNSUPPORTED_TOKEN, UNKNOWN_ADDRESS, null]
+          description: |
+            UNKNOWN_ADDRESS: sent to an address no account held (a retired
+            one, say); an administrator credited it to this account after
+            finding it is theirs.
         detected_at:
           type: string
           format: date-time

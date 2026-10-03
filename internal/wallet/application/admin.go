@@ -178,7 +178,7 @@ func (s *Service) CreditDeposit(ctx context.Context, id, actor, reason string) (
 			if cur.Status != domain.StatusRejected || !cur.Unclaimed || cur.JournalID == "" || cur.Resolution != "" {
 				return err
 			}
-			released, lerr := s.W.Ledger.UnclaimedRelease(ctx, cur.ID)
+			released, _, lerr := s.W.Ledger.UnclaimedRelease(ctx, cur.ID)
 			if lerr != nil {
 				return lerr
 			}
@@ -225,6 +225,14 @@ func (s *Service) CreditDeposit(ctx context.Context, id, actor, reason string) (
 var ErrReleasedUnrecorded = apperr.New(apperr.KindConflict, "WALLET_DEPOSIT_RELEASED",
 	"the ledger released this deposit to its user already: credit it again to record the release")
 
+// ErrReleasedToAnother refuses a deposit of nobody (B7a) the ledger
+// released already, in an assignment whose record failed after it, to
+// any user but the one it paid (details user_id and journal_id), and
+// refuses closing it: assigning it to that user records the release
+// (review AJ).
+var ErrReleasedToAnother = apperr.New(apperr.KindConflict, "WALLET_DEPOSIT_RELEASED",
+	"the ledger released this deposit to a user already: assign it to that user (user_id) to record the release")
+
 // DismissDeposit closes a deposit that waited for a decision without
 // moving funds (unclaimed funds stay in UNCLAIMED_DEPOSIT; a callback's
 // discrepancy is taken note of), audited as wallet.deposit.dismissed.
@@ -249,9 +257,12 @@ func (s *Service) DismissDeposit(ctx context.Context, id, actor, reason string) 
 		// credited again to record it, never closed (C5.5 ⑦, ⑮). Its row
 		// stays locked, so no release slips in.
 		if d.Unclaimed && d.JournalID != "" && d.Status != domain.StatusCredited {
-			journal, err := s.W.Ledger.UnclaimedRelease(ctx, d.ID)
+			journal, paid, err := s.W.Ledger.UnclaimedRelease(ctx, d.ID)
 			if err != nil {
 				return err
+			}
+			if journal != "" && d.UserID == domain.NoOwner {
+				return ErrReleasedToAnother.WithDetail("journal_id", journal).WithDetail("user_id", paid)
 			}
 			if journal != "" {
 				return ErrReleasedUnrecorded.WithDetail("journal_id", journal)

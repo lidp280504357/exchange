@@ -436,6 +436,8 @@ type fakeLedger struct {
 	available map[string]decimal.Decimal
 	frozen    map[string]decimal.Decimal
 	journals  map[string]string // key -> journal
+	released  map[string]string // unclaimed deposit -> the user its release paid
+	refused   map[string]bool   // deposits of nobody the ledger will not book
 	down      bool
 }
 
@@ -512,13 +514,24 @@ func (l *fakeLedger) SystemBalances(context.Context, string) (map[string]decimal
 }
 
 func (l *fakeLedger) ReleaseUnclaimed(_ context.Context, id, user, _ string, amount decimal.Decimal, _, _ string) (string, error) {
+	// As the ledger: the key's journal is the release to its first user.
+	if paid, ok := l.released[id]; ok && paid != user && !l.down {
+		return "", apperr.New(apperr.KindConflict, apperr.CodeIdempotencyConflict, "the idempotency key was used for a different request")
+	}
 	return l.once("deposit-release:"+id, func() error {
 		l.available[user] = l.available[user].Add(amount)
+		if l.released == nil {
+			l.released = map[string]string{}
+		}
+		l.released[id] = user
 		return nil
 	})
 }
 
 func (l *fakeLedger) CreditUnclaimed(_ context.Context, id, _ string, amount decimal.Decimal, _, _, _ string) (string, error) {
+	if l.refused[id] {
+		return "", apperr.New(apperr.KindInvalid, "LEDGER_AMOUNT_PRECISION", "the amount has too many decimals")
+	}
 	return l.once("deposit:"+id, func() error {
 		l.system[accountDepositPending] = l.system[accountDepositPending].Sub(amount)
 		l.system["UNCLAIMED_DEPOSIT"] = l.system["UNCLAIMED_DEPOSIT"].Add(amount)
@@ -526,11 +539,11 @@ func (l *fakeLedger) CreditUnclaimed(_ context.Context, id, _ string, amount dec
 	})
 }
 
-func (l *fakeLedger) UnclaimedRelease(_ context.Context, id string) (string, error) {
+func (l *fakeLedger) UnclaimedRelease(_ context.Context, id string) (string, string, error) {
 	if l.down {
-		return "", errors.New("ledger unreachable")
+		return "", "", errors.New("ledger unreachable")
 	}
-	return l.journals["deposit-release:"+id], nil
+	return l.journals["deposit-release:"+id], l.released[id], nil
 }
 
 func gwei(n int64) *big.Int { return new(big.Int).Mul(big.NewInt(n), big.NewInt(1_000_000_000)) }

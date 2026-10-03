@@ -394,6 +394,7 @@ func requestCredits(ctx context.Context, store ports.Store, eligibility ports.El
 		}
 	}
 	held := 0
+	var nobody []error
 	for _, d := range list {
 		if d.Resolution != "" {
 			continue // closed by an administrator: never credited
@@ -403,8 +404,12 @@ func requestCredits(ctx context.Context, store ports.Store, eligibility ports.El
 			continue
 		}
 		if d.UserID == domain.NoOwner {
+			// One the ledger will not book (refused for good, say) waits
+			// on its own, tried again each round and reported: the others'
+			// credits go on, as a user's deposit the ledger cannot book
+			// goes to its dead letters (review AJ).
 			if err := creditNobody(ctx, store, ledger, d, now); err != nil {
-				return held, fmt.Errorf("deposit %s of nobody: %w", d.ID, err)
+				nobody = append(nobody, fmt.Errorf("deposit %s of nobody: %w", d.ID, err))
 			}
 			continue
 		}
@@ -433,8 +438,8 @@ func requestCredits(ctx context.Context, store ports.Store, eligibility ports.El
 			return r.Emit(ctx, &walletv1.DepositConfirmed{Deposit: ToProto(*cur)}, cur.UserID)
 		})
 		if err != nil {
-			return held, fmt.Errorf("deposit %s: %w", d.ID, err)
+			return held, errors.Join(append(nobody, fmt.Errorf("deposit %s: %w", d.ID, err))...)
 		}
 	}
-	return held, nil
+	return held, errors.Join(nobody...)
 }

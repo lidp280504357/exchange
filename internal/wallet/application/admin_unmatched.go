@@ -18,10 +18,15 @@ import (
 // address no user has, booked to UNCLAIMED_DEPOSIT, B7a) to the user an
 // administrator found it belongs to, in one audited operation: the
 // deposit gets that owner and the ledger releases it to them
-// (ReleaseUnclaimed, keyed by the deposit: a repeat books nothing twice,
-// and naming another user then is refused). The user must be one who may
-// take deposits now. The console asks a second administrator above the
-// usual limit before it calls this.
+// (ReleaseUnclaimed, keyed by the deposit: a repeat books nothing twice).
+// The user must be one who may take deposits now. The console asks a
+// second administrator above the usual limit before it calls this.
+//
+// The ledger's release commits before the deposit's record: when the
+// record fails after it, the funds went to the user named then while the
+// deposit still has nobody (review AJ). Assigning it again to that user
+// records the release, whatever is checked of them now; naming another
+// user is refused with the one it paid (ErrReleasedToAnother).
 func (s *Service) AssignDeposit(ctx context.Context, id, userID, actor, reason string) (domain.Deposit, error) {
 	if err := needDecider(actor, reason); err != nil {
 		return domain.Deposit{}, err
@@ -33,15 +38,10 @@ func (s *Service) AssignDeposit(ctx context.Context, id, userID, actor, reason s
 		return domain.Deposit{}, apperr.Invalid("name the user, by ID, the deposit is credited to")
 	}
 	userID = strings.ToLower(userID)
-	allowed, code, err := s.Eligibility.Check(ctx, userID, FeatureDeposit)
-	if err != nil {
-		return domain.Deposit{}, err
-	}
-	if !allowed {
-		return domain.Deposit{}, apperr.New(apperr.KindForbidden, code, "the user may not take deposits now")
-	}
+	note := strings.TrimSpace(reason)
 	var out domain.Deposit
-	err = s.Store.Tx(ctx, func(r ports.Repos) error {
+	var recorded bool
+	err := s.Store.Tx(ctx, func(r ports.Repos) error {
 		cur, err := r.Deposits().GetForUpdate(ctx, id)
 		if err != nil {
 			return err
@@ -52,16 +52,38 @@ func (s *Service) AssignDeposit(ctx context.Context, id, userID, actor, reason s
 		if cur.UserID != domain.NoOwner {
 			return apperr.New(apperr.KindConflict, apperr.CodeConflict, "the deposit has its user: credit it as it is")
 		}
-		cur.UserID = userID
-		if err := cur.Releasable(); err != nil {
-			return err
-		}
-		journal, err := s.W.Ledger.ReleaseUnclaimed(ctx, cur.ID, userID, cur.Asset, cur.Amount, actor, strings.TrimSpace(reason))
+		// Asked under the deposit's lock: no other assignment releases it
+		// in between.
+		journal, paid, err := s.W.Ledger.UnclaimedRelease(ctx, cur.ID)
 		if err != nil {
 			return err
 		}
-		if err := cur.Release(journal, actor, strings.TrimSpace(reason), s.Now()); err != nil {
-			return err
+		switch {
+		case journal != "" && !strings.EqualFold(paid, userID):
+			return ErrReleasedToAnother.WithDetail("journal_id", journal).WithDetail("user_id", paid)
+		case journal != "":
+			cur.UserID, recorded = userID, true
+			if err := cur.RecordRelease(journal, actor, note, s.Now()); err != nil {
+				return err
+			}
+		default:
+			allowed, code, err := s.Eligibility.Check(ctx, userID, FeatureDeposit)
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				return apperr.New(apperr.KindForbidden, code, "the user may not take deposits now")
+			}
+			cur.UserID = userID
+			if err := cur.Releasable(); err != nil {
+				return err
+			}
+			if journal, err = s.W.Ledger.ReleaseUnclaimed(ctx, cur.ID, userID, cur.Asset, cur.Amount, actor, note); err != nil {
+				return err
+			}
+			if err := cur.Release(journal, actor, note, s.Now()); err != nil {
+				return err
+			}
 		}
 		out = *cur
 		if err := r.Deposits().Update(ctx, out); err != nil {
@@ -71,12 +93,14 @@ func (s *Service) AssignDeposit(ctx context.Context, id, userID, actor, reason s
 		if err != nil {
 			return err
 		}
-		details, _ := json.Marshal(map[string]string{
+		// release_recorded: the ledger released it in an earlier attempt
+		// (and audited that then); this one only records it.
+		details, _ := json.Marshal(map[string]any{
 			"deposit_id": out.ID, "asset": out.Asset, "amount": out.Amount.String(), "address": out.Address, "network": out.Network,
-			"journal_id": journal, "retired_owner": former,
+			"journal_id": journal, "retired_owner": former, "release_recorded": recorded,
 		})
 		if err := r.Audit(ctx, &auditv1.AdminActionPerformed{
-			Target: "user:" + userID, Action: "wallet.deposit.assigned", Actor: actor, Reason: strings.TrimSpace(reason),
+			Target: "user:" + userID, Action: "wallet.deposit.assigned", Actor: actor, Reason: note,
 			Details: string(details),
 		}, actor); err != nil {
 			return err

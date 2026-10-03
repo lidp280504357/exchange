@@ -2756,7 +2756,9 @@ func (x *GetUnclaimedReleaseRequest) GetDepositId() string {
 type GetUnclaimedReleaseResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The release's journal; empty when the deposit was not released.
-	JournalId     string `protobuf:"bytes,1,opt,name=journal_id,json=journalId,proto3" json:"journal_id,omitempty"`
+	JournalId string `protobuf:"bytes,1,opt,name=journal_id,json=journalId,proto3" json:"journal_id,omitempty"`
+	// The user the release paid; empty when the deposit was not released.
+	UserId        string `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2794,6 +2796,13 @@ func (*GetUnclaimedReleaseResponse) Descriptor() ([]byte, []int) {
 func (x *GetUnclaimedReleaseResponse) GetJournalId() string {
 	if x != nil {
 		return x.JournalId
+	}
+	return ""
+}
+
+func (x *GetUnclaimedReleaseResponse) GetUserId() string {
+	if x != nil {
+		return x.UserId
 	}
 	return ""
 }
@@ -3007,10 +3016,11 @@ const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
 	"\aposting\x18\x01 \x01(\v2\x1b.exchange.ledger.v1.PostingR\aposting\";\n" +
 	"\x1aGetUnclaimedReleaseRequest\x12\x1d\n" +
 	"\n" +
-	"deposit_id\x18\x01 \x01(\tR\tdepositId\"<\n" +
+	"deposit_id\x18\x01 \x01(\tR\tdepositId\"U\n" +
 	"\x1bGetUnclaimedReleaseResponse\x12\x1d\n" +
 	"\n" +
-	"journal_id\x18\x01 \x01(\tR\tjournalId2\x89\x0f\n" +
+	"journal_id\x18\x01 \x01(\tR\tjournalId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId2\x89\x0f\n" +
 	"\rLedgerService\x12O\n" +
 	"\x06Freeze\x12!.exchange.ledger.v1.FreezeRequest\x1a\".exchange.ledger.v1.FreezeResponse\x12U\n" +
 	"\bUnfreeze\x12#.exchange.ledger.v1.UnfreezeRequest\x1a$.exchange.ledger.v1.UnfreezeResponse\x12U\n" +

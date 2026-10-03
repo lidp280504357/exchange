@@ -91,7 +91,12 @@ function useDepositSteps(d: Deposit) {
 
 function depositFailure(d: Deposit, t: (key: string) => string): string | null {
   if (d.status === "ORPHANED") return t("mAssets.deposit.orphaned");
-  return d.reason ? t(`mAssets.deposit.reasons.${d.reason}`) : null;
+  return d.reason && d.status !== "CREDITED" ? t(`mAssets.deposit.reasons.${d.reason}`) : null;
+}
+
+/** depositNote says a credited deposit that first waited (its reason) was credited after a check. */
+function depositNote(d: Deposit, t: (key: string) => string): string | null {
+  return d.reason && d.status === "CREDITED" ? t("mAssets.deposit.reviewed") : null;
 }
 
 /**
@@ -141,6 +146,7 @@ function DepositCard({ d, network, decimals, onOpen }: { d: Deposit; network: Wa
   const { tl, steps } = useDepositSteps(d);
   const phase = depositPhase(d.status);
   const failure = depositFailure(d, t);
+  const note = depositNote(d, t);
   const now = steps[currentStep(steps)];
   return (
     <button
@@ -183,6 +189,7 @@ function DepositCard({ d, network, decimals, onOpen }: { d: Deposit; network: Wa
         />
       )}
       {failure && <span className="mt-2 block text-xs text-danger">{failure}</span>}
+      {note && <span className="mt-2 block text-xs text-fg-3">{note}</span>}
     </button>
   );
 }
@@ -203,6 +210,7 @@ function DepositDetail({ d, network, decimals }: { d: Deposit; network: WalletNe
   const { tl, steps } = useDepositSteps(d);
   const phase = depositPhase(d.status);
   const failure = depositFailure(d, t);
+  const note = depositNote(d, t);
   const stepItems: StepItem[] = steps.map((s) => ({ key: s.key, title: s.label, status: s.state, description: s.description }));
   return (
     <div className="flex flex-col gap-4 pt-1">
@@ -234,6 +242,7 @@ function DepositDetail({ d, network, decimals }: { d: Deposit; network: WalletNe
           {failure}
         </Notice>
       )}
+      {note && <Notice>{note}</Notice>}
       <KeyValue
         items={[
           { key: "network", label: t("mAssets.common.network"), value: network?.display_name ?? d.network },

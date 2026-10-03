@@ -53,7 +53,7 @@ custody_callbacks（原文、验签、结果、次数）──> 充值：deposit
 
 **没有主人的充值**（B7a，2026-10-03）：托管方报到账、币种能对上网络、但地址不属于任何用户（探测地址、退役的模拟地址）时，记一笔"无主"充值：`user_id` 是空 UUID（`00000000-0000-0000-0000-000000000000`，代码里的 `domain.NoOwner`）、`unclaimed`、原因 `UNKNOWN_ADDRESS`、`CONFIRMED`，回调记 `APPLIED`。处理器不发事件，直接调账本 gRPC `CreditUnclaimed` 记入 `UNCLAIMED_DEPOSIT`（`DEPOSIT_PENDING` → `UNCLAIMED_DEPOSIT`，键 `deposit:<充值ID>`，重试只会重放）：账本因此"预期托管方持有"这笔钱，对账不会把它当成多出来的。空 UUID 只由这条路写，凡是要用户的地方都不收：不发任何按用户的事件（存储层直接拒绝，通知服务与读模型都见不到它）、不查资格、后台"入账给用户"（`/credit`）拒绝（`WALLET_DEPOSIT_NO_OWNER`），账本的 `ReleaseUnclaimed` 也拒绝空 UUID。处理办法二选一：
 
-- 入账给查明的用户：`POST /internal/wallet/deposits/{id}/assign`，`{"user_id", "actor", "reason"}`（admin-service 调用；用户须当前可以充值），一次操作里把主人改成这个用户并 `ReleaseUnclaimed` 给他，审计 `wallet.deposit.assigned`（细节里带地址退役前的主人）与账本的 `ledger.unclaimed_released`，再给这个用户发 `DepositCredited`。重复调用不会重复入账，换一个用户会被账本的幂等检查拒绝。后台列表与详情（`GET /internal/wallet/deposits`、`/{id}`）对无主充值给出 `address_owner`：地址现在的主人，或退役前的主人（`address_owner_retired`），供判断参考。
+- 入账给查明的用户：`POST /internal/wallet/deposits/{id}/assign`，`{"user_id", "actor", "reason"}`（admin-service 调用；用户须当前可以充值），一次操作里把主人改成这个用户并 `ReleaseUnclaimed` 给他，审计 `wallet.deposit.assigned`（细节里带地址退役前的主人）与账本的 `ledger.unclaimed_released`，再给这个用户发 `DepositCredited`。重复调用不会重复入账。账本的放行先提交、钱包的记录后写：记录失败时钱已经付给当时选的用户、这笔仍是无主（审查 AJ）。之后先问账本（`GetUnclaimedRelease` 带收款用户）：已放行时只能分配给收款的那个用户，这次只把放行记下来（不再检查他现在能否充值，钱已经在他那里；审计细节 `"release_recorded": true`），换别人得到 409 `WALLET_DEPOSIT_RELEASED`（详情 `user_id` 与 `journal_id`），驳回也是同样的 409。站点上，入账后的这类充值显示"经人工核实后入账"（原因 `UNKNOWN_ADDRESS`，公开契约的充值原因多了这个值）。一笔无主充值账本不肯入账（例如被拒）时只有它自己等着、每轮重试并报错，同一网络其他充值照常入账。后台列表与详情（`GET /internal/wallet/deposits`、`/{id}`）对无主充值给出 `address_owner`：地址现在的主人，或退役前的主人（`address_owner_retired`），供判断参考。
 - 驳回（`/dismiss`，与其他待处理充值相同）：钱留在 `UNCLAIMED_DEPOSIT`、仍在托管方；若在托管方后台把钱退给了付款人，要另做账本更正，否则对账会发现托管方少了这笔。
 
 币种对不上任何网络的到账不记充值（没有资产可记），回调仍是 `UNMATCHED`、等人处理后重放。两种情况都计数 `wallet_deposits_unmatched_total{reason="unknown_address"|"unknown_coin"}`，一小时内有就告警 `CustodyDepositUnmatched`。
@@ -208,7 +208,13 @@ sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T udu
 
   不带 `--yes` 只说要动多少个地址；两个命令都只在 `UDUN_GATEWAY_URL` 指向模拟网关 `udun-mock` 的地方运行（在仍连模拟网关的 wallet-service 容器里），接上真网关后它的地址是真的，命令拒绝（审查 AH：切换后误跑会把真地址退役，真充值就成了无主）。所以回退时先恢复 `apps.env` 并重启 wallet-service，再恢复地址。
 
-  两者都写审计（`wallet.deposit_addresses.retire|restore`）。站点的充值地址都按接口取（`Cache-Control: no-store`，service worker 只缓存离线页，没有本地存储）；打开着的充值页每分钟、回到页面时重新取一次，旧地址最多再显示一分钟。
+  两者都写审计（`wallet.deposit_addresses.retire|restore`）。**退役、恢复与上面的 `custody-reset` 一律在 wallet-service 容器里运行**（审查 AJ）：退役与恢复按运行它的进程自己的 `UDUN_GATEWAY_URL` 判断是不是模拟网关，只有 wallet-service 容器的环境与正在运行的 wallet-service 一致；改了 `apps.env` 而没重启的其他容器还带着旧值，在那里跑会放过不该放过的：
+
+  ```bash
+  cd /opt/exchange/infra && sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T wallet-service /app/exchangectl wallet retire-addresses --provider UDUN --reason "..."
+  ```
+
+  站点的充值地址都按接口取（`Cache-Control: no-store`，service worker 只缓存离线页，没有本地存储）；打开着的充值页每分钟、回到页面时重新取一次，旧地址最多再显示一分钟。
 - **B3 提现**：人人都有模拟 USDT，接上真网关后批出去的提现付的是真钱。切换时先手动暂停 USDT、BTC、ETH 的提现；用户测试的窗口里只解除要测的资产，所有托管提现进人工审核、只批用户自己那笔；窗口结束重新暂停。商户只放测试金额。
 - **B4 端到端**：`custody.sh` 靠模拟网关（造充值、各种不守规矩、手续费、`UNCERTAIN`、对账），接真网关后会动真钱。选方案 A：wallet-service 同时接两个托管方，`UDUN`（真网关）管 USDT/BTC/ETH，`UDUNMOCK`（模拟网关）管只给端到端用的 `TUSD`；TUSD 对站点与市场完全不可见（不进资产列表与交易对，只有端到端账户能充提），provider 标签清楚。做好之前 `custody.sh` 在网络的托管方是真网关时拒绝运行。
 
@@ -258,7 +264,7 @@ sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangec
 | 1 只读 | `udun coins`、各链 `check-address`：核对币种编码（BSC 是否 9006）、小数位、是否代币、余额的单位，修 `deploy/instruments/test.json` 的 `provider_coin`。网关拒绝我们的 IP 时由协调会话请用户在优盾后台把 `3.107.113.199` 加白 | 无（只读） |
 | 2 探测地址 | 每条链（TRON、BSC、ETH、BTC）各建一个地址（`--alias probe-<链>`），用平台的地址校验核对格式；这些地址记在下面、**不要用**：往里充值只会记成 `UNMATCHED`，钱留在托管方 | 无（地址不用，没有状态） |
 | 3 开放回调 | `custody-callback-allow.conf` 改成 `allow all;` 并部署；仍连模拟网关时公网回调被 wallet-service 的来源名单挡住（403），切换后由签名把关（401） | 恢复 allow 文件后部署；优盾会重发回调 |
-| 4 切换（协调会话放行） | 运维锁内：暂停 USDT/BTC/ETH 提现（B3）→ 备份 `apps.env`，把 `udun-real.env` 的值并入 `UDUN_*`（`UDUN_CALLBACK_ALLOWED_IPS` 留空）→ 退役模拟地址（B2）→ 记基线对冲分录（B1）→ 重启 wallet-service → 核对 `wallet_custody_up` 为 1、各资产短缺不大于 0、测试账户在每条链拿到真地址 | 恢复 `apps.env` 备份并重启、恢复地址、记反向分录；其间发出的真地址在优盾那边仍有效，充值等切回后再处理 |
+| 4 切换（协调会话放行） | 运维锁内：暂停 USDT/BTC/ETH 提现（B3）→ 把 `provider = UDUN` 的充值地址导出到 `infra/backup/`，在仍连模拟网关的 wallet-service 容器里退役模拟地址（B2）→ 同一容器里先对账一次，以它的 `HELD` 为 X、固定 `--key` 记基线对冲分录（B1）→ 备份 `apps.env`，把 `udun-real.env` 的值并入 `UDUN_*`（`UDUN_CALLBACK_ALLOWED_IPS` 留空）→ 重启 wallet-service → 核对 `wallet_custody_up` 为 1、测试账户在 TRC20、比特币、以太坊拿到真地址；余额是 `null` 时各资产"不比较"，第一次对账由人工核对（B10） | 恢复 `apps.env` 备份并重启、恢复地址、记反向分录；其间发出的真地址在优盾那边仍有效，充值等切回后再处理 |
 | 5 主网小额（协调会话约用户） | 用户在站点拿 TRC20 地址充至少 12 USDT（最小提现 10 + 手续费 1），看回调（`remote_ips`）、入账与对账；只在窗口里解除 USDT，用户提 10 USDT 到自己的地址、管理员批准；按回调与 tronscan 核对手续费单位后 `custody-fee-unit`；窗口结束重新暂停；按 `remote_ips` 收紧回调来源；其他网络要不要测由用户定（各自要付链上手续费） | 重新暂停；卡住的提现走 `custody-resolve` |
 | 6 端到端 | 方案 A：`UDUNMOCK` 托管方 + `TUSD`，`custody.sh` 改用它 | `git revert` 后部署 |
 
@@ -268,6 +274,7 @@ sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangec
 - 2026-10-03 步骤 1：**被网关挡住**。`udun coins` 与 `udun check-address` 都返回 `code 4264`（应答的说明也只有 4264）。优盾公开的返回码表里没有 4264；它不是签名错（4162/4163）、商户不存在（4001）或账户被禁用（4169/4226/4261/4262），每个接口都一样，像是接口的 IP 白名单。服务器出口 IP 是 `3.107.113.199`。已请协调会话转用户在优盾后台加白（或问优盾 4264 的含义），之后重跑。
 - 2026-10-03 步骤 0 的第二部分（对账基线 `ledger custody-reset` 与 `SIMULATED` 列、退役与恢复模拟地址、提现拒绝退役地址、充值地址不再长期缓存、`custody.sh` 遇真网关跳过、审查 AF：按未托管的主币挂起的手续费记在该主币上、不解释代币的短缺）与步骤 3（nginx 回调路径 `allow all;`）已部署（0ffbcf1、915ab3a，钱包迁移 00011）；端到端 `custody.sh`、`web.sh`、`admin.sh` 通过。步骤 3 之后经公网伪造的回调到了 wallet-service，仍被它的来源名单（模拟网关的容器网段）以 403 `COMMON_FORBIDDEN` 挡住；切换后由签名把关。
 - 2026-10-03 晚 步骤 1、2 完成（用户把 `3.107.113.199` 加进了优盾的白名单）：币种、地址校验、余额 `null` 与三个探测地址见上文「商户的币种与探测地址」。随之改了配置（用户决定 USDT 先只走 TRC20）：`test.json` 的 BEP20 编码改成 `2510:…`，BEP20、ERC20 两个 USDT 网络充提都关、配置保留；对账不计托管方没有列出、且充提都关的网络的币种（否则真网关下 USDT 会因为没有 BEP20、ERC20 而一直"不比较"）；模拟网关改用 2510；`custody.sh` 改为检查只有 TRC20 开着。
+- 2026-10-03 晚 审查 AJ 的四项改完：无主充值分配的"账本已付、钱包没记上"按收款用户补记（账本 `GetUnclaimedRelease` 多返回 `user_id`）；一笔无主充值入账失败不再卡住整个网络的轮次；退役、恢复与基线重置写明在 wallet-service 容器里跑（步骤 4 的顺序改成先退役与重置、后并入 `apps.env`）；站点有了 `UNKNOWN_ADDRESS` 的文案，入账后的充值不再把原因显示成红色的"未入账"。
 
 ## 指标与告警
 

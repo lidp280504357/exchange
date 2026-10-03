@@ -37,15 +37,17 @@ func TestReleaseUnclaimed(t *testing.T) {
 	if got := unclaimed(); got != "0.8" {
 		t.Fatalf("unclaimed %s", got)
 	}
-	if j, err := svc.UnclaimedRelease(ctx, dep); err != nil || j != "" {
-		t.Fatalf("released before the release: %q %v", j, err)
+	if j, u, err := svc.UnclaimedRelease(ctx, dep); err != nil || j != "" || u != "" {
+		t.Fatalf("released before the release: %q %q %v", j, u, err)
 	}
 	res, err := svc.ReleaseUnclaimed(ctx, dep, user, "USDT", d("0.8"), "ops@example.com", "the user asked")
 	if err != nil || res.Replayed {
 		t.Fatalf("release %+v %v", res, err)
 	}
-	if j, err := svc.UnclaimedRelease(ctx, dep); err != nil || j != res.JournalID {
-		t.Fatalf("its release %q %v, want %s", j, err, res.JournalID)
+	// With the user it paid: a deposit of nobody's release is recorded for
+	// them (review AJ).
+	if j, u, err := svc.UnclaimedRelease(ctx, dep); err != nil || j != res.JournalID || u != user {
+		t.Fatalf("its release %q to %q %v, want %s to %s", j, u, err, res.JournalID, user)
 	}
 	if av, _ := usdt(t, svc, user, domain.AccountSpot); !av.Equal(d("0.8")) || unclaimed() != "0" {
 		t.Fatalf("after the release: user %s, unclaimed %s", av, unclaimed())

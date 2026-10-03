@@ -124,6 +124,19 @@ func (r journals) KeyedTotal(ctx context.Context, prefix string, account domain.
 	return total, nil
 }
 
+func (r journals) Payee(ctx context.Context, journalID string) (string, error) {
+	var user string
+	err := r.q.QueryRow(ctx, `SELECT a.owner_id FROM journal_lines l JOIN accounts a ON a.id = l.account_id
+		WHERE l.journal_id = $1::uuid AND a.owner_type = 'USER' AND l.amount > 0 ORDER BY l.id LIMIT 1`, journalID).Scan(&user)
+	if pg.IsNoRows(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("load a journal's payee: %w", err)
+	}
+	return user, nil
+}
+
 func (r journals) ByIdemKey(ctx context.Context, key string) (*domain.Journal, error) {
 	var j domain.Journal
 	var id uuid.UUID

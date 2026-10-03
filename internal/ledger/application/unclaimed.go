@@ -64,17 +64,22 @@ func (s *Service) ReleaseUnclaimed(ctx context.Context, depositID, userID, asset
 }
 
 // UnclaimedRelease returns the journal that released an unclaimed deposit
-// to its user ("" when it was not released): wallet-service does not
-// close a deposit whose release it failed to record (C5.5 ⑦).
-func (s *Service) UnclaimedRelease(ctx context.Context, depositID string) (string, error) {
+// and the user it paid ("" when it was not released): wallet-service does
+// not close a deposit whose release it failed to record (C5.5 ⑦), and
+// records one of a deposit of nobody for the user it went to (review AJ).
+func (s *Service) UnclaimedRelease(ctx context.Context, depositID string) (journal, user string, err error) {
 	if _, err := uuid.Parse(depositID); err != nil {
-		return "", apperr.Invalid("deposit_id must be a UUID")
+		return "", "", apperr.Invalid("deposit_id must be a UUID")
 	}
-	j, err := s.Store.Read().Journals().ByIdemKey(ctx, domain.ReleaseKey(depositID))
+	r := s.Store.Read()
+	j, err := r.Journals().ByIdemKey(ctx, domain.ReleaseKey(depositID))
 	if err != nil || j == nil {
-		return "", err
+		return "", "", err
 	}
-	return j.ID, nil
+	if user, err = r.Journals().Payee(ctx, j.ID); err != nil {
+		return "", "", err
+	}
+	return j.ID, user, nil
 }
 
 // CreditUnclaimed books a custodian's deposit to an address no user has to

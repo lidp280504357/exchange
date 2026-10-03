@@ -1734,3 +1734,105 @@ func TestADepositOfNobody(t *testing.T) {
 		t.Fatal("assigned twice")
 	}
 }
+
+// The ledger released a deposit of nobody to the user named, and the
+// record failed after it (review AJ): the deposit still has nobody while
+// the funds went to that user. Naming another user is refused, naming the
+// one paid; closing it is refused; assigning it to that user records the
+// release, even if they may not take deposits now, without a second one.
+func TestAnAssignmentWhoseRecordFailedIsRecordedForTheUserPaid(t *testing.T) {
+	h := newCustodyHarness(t)
+	ctx := context.Background()
+	const probe = "TWeptS7njqhCtHdDCSFGKA1ttrs6WXxLzj"
+	h.callback(t, ports.CustodyTrade{
+		TradeID: "nobody-2", Kind: domain.CallbackDeposit, Status: 3, Word: domain.CustodySuccess, Coin: usdtCoin, Address: probe,
+		Amount: d("15"), RawAmount: d("15000000"), TxHash: "0xprobe2", Block: 7,
+	})
+	h.cround(t)
+	var dep domain.Deposit
+	for _, x := range h.store.deposits {
+		dep = x
+	}
+	if dep.UserID != domain.NoOwner || dep.Status != domain.StatusRejected || dep.JournalID == "" {
+		t.Fatalf("booked to UNCLAIMED_DEPOSIT: %+v", dep)
+	}
+	h.store.take()
+	paid, other := uuid.NewString(), uuid.NewString()
+	journal, err := h.ledger.ReleaseUnclaimed(ctx, dep.ID, paid, "USDT", d("15"), "ops@example.com", "the first attempt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = h.svc.AssignDeposit(ctx, dep.ID, other, "ops@example.com", "someone else")
+	var e *apperr.Error
+	if !errors.As(err, &e) || e.Code != "WALLET_DEPOSIT_RELEASED" || e.Details["user_id"] != paid || e.Details["journal_id"] != journal {
+		t.Fatalf("assigned to another user: %v", err)
+	}
+	if _, err := h.svc.DismissDeposit(ctx, dep.ID, "ops@example.com", "close it"); !apperr.Is(err, "WALLET_DEPOSIT_RELEASED") {
+		t.Fatalf("closed: %v", err)
+	}
+	h.elig[paid] = "USER_FROZEN"
+	out, err := h.svc.AssignDeposit(ctx, dep.ID, paid, "ops@example.com", "retrying: the record failed")
+	if err != nil || out.UserID != paid || out.Status != domain.StatusCredited || out.ReleaseJournalID != journal ||
+		!h.ledger.available[paid].Equal(d("15")) || !h.ledger.available[other].IsZero() {
+		t.Fatalf("recorded %+v %v, ledger %v", out, err, h.ledger.available)
+	}
+	var recorded bool
+	for _, m := range h.store.audits {
+		if a, ok := m.(*auditv1.AdminActionPerformed); ok && a.GetAction() == "wallet.deposit.assigned" {
+			recorded = strings.Contains(a.GetDetails(), `"release_recorded":true`)
+		}
+	}
+	if !recorded {
+		t.Fatal("the assignment's audit does not say it recorded a release")
+	}
+	if got := types(h.store.take()); !slices.Equal(got, []string{"DepositCredited"}) {
+		t.Fatalf("announced to its user: %v", got)
+	}
+}
+
+// A deposit of nobody the ledger will not book waits on its own (review
+// AJ): the next deposit of nobody and a user's deposit on the network are
+// still booked and announced in the same round, which reports the one.
+func TestADepositOfNobodyTheLedgerRefusesWaitsAlone(t *testing.T) {
+	h := newCustodyHarness(t)
+	ctx := context.Background()
+	addr, _, err := h.svc.DepositAddress(ctx, "alice", "USDT", tron)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.store.take()
+	for i, to := range []string{"TWeptS7njqhCtHdDCSFGKA1ttrs6WXxLzj", "TPYmLv1FbHoxaPa8K9ktTz8yphYckvDJ9Q", addr.Address} {
+		h.callback(t, ports.CustodyTrade{
+			TradeID: fmt.Sprintf("t-%d", i), Kind: domain.CallbackDeposit, Status: 3, Word: domain.CustodySuccess, Coin: usdtCoin, Address: to,
+			Amount: d("15"), RawAmount: d("15000000"), TxHash: fmt.Sprintf("0xt%d", i), Block: 7,
+		})
+	}
+	var list []domain.Deposit
+	for _, x := range h.store.deposits {
+		list = append(list, x)
+	}
+	slices.SortFunc(list, func(a, b domain.Deposit) int { return strings.Compare(a.ID, b.ID) })
+	if len(list) != 3 || list[0].UserID != domain.NoOwner || list[1].UserID != domain.NoOwner || list[2].UserID != "alice" {
+		t.Fatalf("deposits %+v", list)
+	}
+	h.ledger.refused = map[string]bool{list[0].ID: true}
+	err = h.cproc.Round(ctx)
+	if err == nil || !strings.Contains(err.Error(), list[0].ID) {
+		t.Fatalf("the round reports the refused one: %v", err)
+	}
+	if got := h.store.deposits[list[0].ID]; !got.CreditRequested.IsZero() || got.JournalID != "" {
+		t.Fatalf("the refused one moved: %+v", got)
+	}
+	if got := h.store.deposits[list[1].ID]; got.JournalID == "" || !h.ledger.system["UNCLAIMED_DEPOSIT"].Equal(d("15")) {
+		t.Fatalf("the next deposit of nobody waits too: %+v", got)
+	}
+	if got := h.store.deposits[list[2].ID]; got.CreditRequested.IsZero() || !slices.Contains(types(h.store.take()), "DepositConfirmed") {
+		t.Fatalf("the user's deposit waits too: %+v", got)
+	}
+	// Booked once the ledger takes it.
+	h.ledger.refused = nil
+	h.cround(t)
+	if got := h.store.deposits[list[0].ID]; got.JournalID == "" || !h.ledger.system["UNCLAIMED_DEPOSIT"].Equal(d("30")) {
+		t.Fatalf("booked later: %+v", got)
+	}
+}

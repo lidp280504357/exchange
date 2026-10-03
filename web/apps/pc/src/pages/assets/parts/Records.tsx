@@ -133,7 +133,11 @@ function DepositItem({ d, network, decimals }: { d: Deposit; network: WalletNetw
         <TimeText value={s.at} format="monthDay" />
       ) : undefined,
   }));
-  const failure = d.status === "ORPHANED" ? t("pcAssets.deposit.orphaned") : d.reason ? t(`pcAssets.deposit.reasons.${d.reason}`) : null;
+  const credited = d.status === "CREDITED";
+  const failure =
+    d.status === "ORPHANED" ? t("pcAssets.deposit.orphaned") : d.reason && !credited ? t(`pcAssets.deposit.reasons.${d.reason}`) : null;
+  // A deposit that first waited (its reason) and was credited after a check.
+  const note = d.reason && credited ? t("pcAssets.deposit.reviewed") : null;
   return (
     <div data-testid="deposit-row" data-status={d.status} className="rounded-2 border border-line-1 bg-bg-2 p-3">
       <div className="flex items-center gap-3">
@@ -167,9 +171,9 @@ function DepositItem({ d, network, decimals }: { d: Deposit; network: WalletNetw
           aria-label={t("pcAssets.deposit.progress", tl.confirmations)}
         />
       )}
-      {(failure || d.tx_hash) && (
+      {(failure || note || d.tx_hash) && (
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
-          {failure ? <span className="text-danger">{failure}</span> : <span />}
+          {failure ? <span className="text-danger">{failure}</span> : note ? <span className="text-fg-3">{note}</span> : <span />}
           <TxLink network={network} hash={d.tx_hash} />
         </div>
       )}

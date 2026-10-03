@@ -418,4 +418,6 @@ message GetUnclaimedReleaseRequest {
 message GetUnclaimedReleaseResponse {
   // The release's journal; empty when the deposit was not released.
   string journal_id = 1;
+  // The user the release paid; empty when the deposit was not released.
+  string user_id = 2;
 }

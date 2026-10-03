@@ -298,8 +298,13 @@ export interface components {
             status: "DETECTED" | "CONFIRMING" | "CONFIRMED" | "CREDITED" | "ORPHANED" | "REJECTED";
             /** @description Held in UNCLAIMED_DEPOSIT instead of the account. */
             unclaimed: boolean;
-            /** @enum {string|null} */
-            reason: "BELOW_MINIMUM" | "ACCOUNT_CLOSED" | "NOT_ELIGIBLE" | "UNSUPPORTED_TOKEN" | null;
+            /**
+             * @description UNKNOWN_ADDRESS: sent to an address no account held (a retired
+             *     one, say); an administrator credited it to this account after
+             *     finding it is theirs.
+             * @enum {string|null}
+             */
+            reason: "BELOW_MINIMUM" | "ACCOUNT_CLOSED" | "NOT_ELIGIBLE" | "UNSUPPORTED_TOKEN" | "UNKNOWN_ADDRESS" | null;
             /** Format: date-time */
             detected_at: string;
             /** Format: date-time */

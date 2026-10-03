@@ -55,6 +55,9 @@ type JournalRepo interface {
 	// KeyedTotal sums what the journals whose key starts with prefix moved
 	// on an account (a custody reset's DEPOSIT_PENDING, for one).
 	KeyedTotal(ctx context.Context, prefix string, account domain.AccountKey) (decimal.Decimal, error)
+	// Payee returns the user whose account the journal paid ("" when it
+	// paid no user's).
+	Payee(ctx context.Context, journalID string) (string, error)
 }
 
 // TransferRepo stores account transfers.

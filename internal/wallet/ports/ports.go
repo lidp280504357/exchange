@@ -465,8 +465,8 @@ type Ledger interface {
 	// (actor); the deposit ID keys it.
 	ReleaseUnclaimed(ctx context.Context, depositID, userID, asset string, amount decimal.Decimal, actor, reason string) (journalID string, err error)
 	// UnclaimedRelease returns the journal that released an unclaimed
-	// deposit ("" when it was not released).
-	UnclaimedRelease(ctx context.Context, depositID string) (journalID string, err error)
+	// deposit and the user it paid ("" when it was not released).
+	UnclaimedRelease(ctx context.Context, depositID string) (journalID, userID string, err error)
 	// CreditUnclaimed books a deposit to an address no user has to
 	// UNCLAIMED_DEPOSIT (B7a); the deposit ID keys it.
 	CreditUnclaimed(ctx context.Context, depositID, asset string, amount decimal.Decimal, network, txHash, reason string) (journalID string, err error)
