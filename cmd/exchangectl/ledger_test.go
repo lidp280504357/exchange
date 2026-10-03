@@ -185,7 +185,7 @@ func TestLedgerReleaseHold(t *testing.T) {
 	for _, f := range []struct {
 		key    string
 		amount int64
-	}{{"order-pending", 20}, {"withdrawal-frozen", 15}, {"order-filled", 25}} {
+	}{{"order-pending", 20}, {"withdrawal-frozen", 15}, {"order-filled", 25}, {"order-improved", 26}} {
 		if _, err := svc.Freeze(ctx, f.key, domain.EntryOrderFreeze, busy, domain.AccountSpot, "USDT", decimal.NewFromInt(f.amount), f.key); err != nil {
 			t.Fatal(err)
 		}
@@ -204,6 +204,20 @@ func TestLedgerReleaseHold(t *testing.T) {
 		trade, uuid.NewString(), busy, now); err != nil {
 		t.Fatal(err)
 	}
+	// A limit buy at 26,000 filled at 25,000 keeps its 26 frozen until the
+	// ledger settles it and releases the 1 (C5.5 ㉒).
+	improved := uuid.NewString()
+	if _, err := trading.Exec(ctx, `INSERT INTO orders (id, user_id, client_order_id, symbol, side, type, time_in_force, stp, price, quantity,
+		status, frozen_asset, frozen_amount, freeze_state, maker_fee_rate, taker_fee_rate, base_decimals, quote_decimals, created_at, updated_at, released)
+		VALUES ($1, $2, 'improved', 'BTC-USDT', 'BUY', 'LIMIT', 'GTC', 'CANCEL_NEWEST', 26000, 0.001, 'FILLED', 'USDT', 26, 'FROZEN', 0, 0, 6, 2, $3, $3,
+		true)`, improved, busy, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := trading.Exec(ctx, `INSERT INTO fills (trade_id, order_id, user_id, symbol, side, maker, price, quantity, quote_quantity, fee_asset,
+		fee, sequence, executed_at) VALUES ($1, $2, $3, 'BTC-USDT', 'BUY', false, 25000, 0.001, 25, 'BTC', 0, 2, $4)`,
+		uuid.NewString(), improved, busy, now); err != nil {
+		t.Fatal(err)
+	}
 	wallet, err := open("wallet")
 	if err != nil {
 		t.Fatal(err)
@@ -214,13 +228,13 @@ func TestLedgerReleaseHold(t *testing.T) {
 		t.Fatal(err)
 	}
 	if out, err := run("release-hold", "--id", busyHold, "--reason", "cleared, 40 went elsewhere"); err == nil ||
-		!strings.Contains(err.Error(), "1 orders, 1 withdrawals and 1 trades") {
+		!strings.Contains(err.Error(), "1 orders, 1 withdrawals and 2 trades") {
 		t.Fatalf("in flight: %v\n%s", err, out)
 	}
-	// 120 frozen: 20 + 15 + 25 is theirs, 60 the hold's.
+	// 146 frozen: 20 + 15 + 25 + 26 is theirs, 60 the hold's.
 	out, err = run("release-hold", "--id", busyHold, "--force", "--reason", "cleared, 40 went elsewhere")
 	if err != nil || !strings.Contains(out, "spot orders 20 (1)") || !strings.Contains(out, "withdrawals 15 (1)") ||
-		!strings.Contains(out, "trades not settled 25 (1)") || !strings.Contains(out, "released: 60 of 100") {
+		!strings.Contains(out, "trades not settled 51 (2)") || !strings.Contains(out, "released: 60 of 100") {
 		t.Fatalf("forced: %v\n%s", err, out)
 	}
 }

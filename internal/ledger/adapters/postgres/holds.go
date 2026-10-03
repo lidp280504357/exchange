@@ -78,8 +78,13 @@ func (r holds) OthersActive(ctx context.Context, h domain.Hold) (decimal.Decimal
 }
 
 func (r holds) Release(ctx context.Context, h domain.Hold) error {
+	// A forced release of nothing only marks the hold: no journal (C5.5 ㉒).
+	var journal any
+	if h.ReleaseJournalID != "" {
+		journal = h.ReleaseJournalID
+	}
 	tag, err := r.q.Exec(ctx, `UPDATE holds SET released_at = $2, released_by = $3, release_reason = $4, release_journal_id = $5
-		WHERE id = $1 AND released_at IS NULL`, h.ID, h.ReleasedAt, h.ReleasedBy, h.ReleaseReason, h.ReleaseJournalID)
+		WHERE id = $1 AND released_at IS NULL`, h.ID, h.ReleasedAt, h.ReleasedBy, h.ReleaseReason, journal)
 	if err != nil {
 		return fmt.Errorf("release hold: %w", err)
 	}

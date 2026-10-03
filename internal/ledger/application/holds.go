@@ -163,7 +163,9 @@ func (s *Service) ForceReleaseHold(ctx context.Context, id, actor, reason string
 		if err != nil {
 			return err
 		}
-		if len(accs) != 1 || amount.GreaterThan(accs[0].Frozen.Sub(others)) {
+		// Nothing released (the hold only marked) fits whatever is frozen
+		// (C5.5 ㉒).
+		if len(accs) != 1 || (amount.IsPositive() && amount.GreaterThan(accs[0].Frozen.Sub(others))) {
 			return domain.ErrInsufficientBalance
 		}
 		if amount.IsPositive() {

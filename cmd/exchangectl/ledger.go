@@ -302,13 +302,18 @@ func otherFreezes(ctx context.Context, dbs ledgerDBs, h domain.Hold) (freezes, e
 }
 
 // unsettledTrades counts the user's trades of the last settleWindow that
-// spend the hold's asset (a buy's quote, a sell's base) and that the
-// ledger has not settled yet: trading released their orders, the ledger
-// still holds their part frozen until the trade.events consumer settles
-// them (C5.5 ⑳).
+// spend the hold's asset (a buy's quote at its limit, a sell's base) and
+// that the ledger has not settled yet: trading released their orders, the
+// ledger still holds their part frozen until the trade.events consumer
+// settles them (C5.5 ⑳). A trade stuck longer (in a DLQ) is not counted.
 func unsettledTrades(ctx context.Context, dbs ledgerDBs, trading *pg.DB, h domain.Hold, o *freezes) error {
-	rows, err := trading.Query(ctx, `SELECT trade_id::text, side, symbol, quantity, quote_quantity FROM fills
-		WHERE user_id = $1 AND executed_at > $2`, h.UserID, time.Now().Add(-settleWindow))
+	// A limit buy's fill holds its limit times the quantity frozen until
+	// the ledger settles it: the trade's amount, then the improvement
+	// released (trade-release:<id>) when the price was better (C5.5 ㉒).
+	rows, err := trading.Query(ctx, `SELECT f.trade_id::text, f.side, f.symbol, f.quantity,
+		CASE WHEN f.side = 'BUY' THEN greatest(f.quote_quantity, coalesce(o.price * f.quantity, 0)) ELSE f.quote_quantity END
+		FROM fills f LEFT JOIN orders o ON o.id = f.order_id
+		WHERE f.user_id = $1 AND f.executed_at > $2`, h.UserID, time.Now().Add(-settleWindow))
 	if err != nil {
 		return fmt.Errorf("trades: %w", err)
 	}

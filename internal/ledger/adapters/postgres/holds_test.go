@@ -224,6 +224,29 @@ func TestHoldsAndAccountAdjustments(t *testing.T) {
 	if av, fr := usdt(t, svc, user, domain.AccountSpot); !av.Equal(d("10000")) || !fr.IsZero() {
 		t.Fatalf("after both: %s/%s", av, fr)
 	}
+	// Other holds above the frozen balance: a release of nothing still
+	// marks the hold (C5.5 ㉒). 30 frozen, the other hold's 50.
+	third, fourth := uuid.NewString(), uuid.NewString()
+	for _, h := range []struct {
+		id     string
+		amount string
+	}{{third, "40"}, {fourth, "50"}} {
+		if _, err := svc.PlaceHold(ctx, h.id, user, "USDT", d(h.amount), "risk@example.com", "chargeback under review"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := svc.Unfreeze(ctx, "stray-3", domain.EntryOrderUnfreeze, user, domain.AccountSpot, "USDT", d("60"), "a stray unfreeze"); err != nil {
+		t.Fatal(err)
+	}
+	if marked, err := svc.ForceReleaseHold(ctx, third, "ops@example.com", "nothing of it left frozen", d("0"), nil); err != nil || marked.Active() {
+		t.Fatalf("marked released: %+v %v", marked, err)
+	}
+	if _, err := svc.ForceReleaseHold(ctx, fourth, "ops@example.com", "30 left of it", d("30"), nil); err != nil {
+		t.Fatalf("the other's 30: %v", err)
+	}
+	if av, fr := usdt(t, svc, user, domain.AccountSpot); !av.Equal(d("10000")) || !fr.IsZero() {
+		t.Fatalf("after the two: %s/%s", av, fr)
+	}
 
 	// The admin console adjusts the FUTURES account too.
 	res, err := svc.AdjustApproved(ctx, "approval:f1", user, domain.AccountFutures, "USDT", d("15"), "fin@example.com", "goodwill on fees")
