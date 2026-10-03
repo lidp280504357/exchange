@@ -151,7 +151,7 @@ expect 200 - "the sign-in options need no session"
 TOTP_REQUIRED=$(jq -r .totp_required <<<"$BODY")
 login ADMIN
 expect 200 - "ADMIN signs in with password and code"
-check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 26" "with every permission"
+check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 27" "with every permission"
 cookie=$(grep -i '^set-cookie: admin_session=' "$WORK/ADMIN.headers")
 for attr in 'Path=/admin/' 'HttpOnly' 'Secure' 'SameSite=Strict'; do
   grep -qi "$attr" <<<"$cookie" || { echo "FAIL the session cookie lacks $attr: $cookie" >&2; exit 1; }
@@ -1216,6 +1216,36 @@ else
   expect 403 ADMIN_FORBIDDEN "OPERATOR holds no withdrawal"
   as FINANCE POST "/admin/v1/withdrawals/$WD/hold" '{"hold":true,"note":"e2e hold"}'
   expect 409 WALLET_WITHDRAWAL_NOT_IN_REVIEW "only one in review is held"
+fi
+
+echo "== a suspended asset's withdrawals, resumed from the console"
+# What the custody checks do when funds go missing, done by hand on ETH
+# (exchangectl, as an operator would): the console lists it and only an
+# ADMIN resumes it, audited by wallet-service (C5.5 ⑯).
+as AUDITOR GET /admin/v1/withdrawals/suspensions ""
+expect 200 - "the suspended assets"
+if [[ $(jq '[.items[] | select(.asset == "ETH")] | length' <<<"$BODY") == 0 ]]; then
+  exchangectl wallet withdrawals-suspend --asset ETH --reason "e2e: the console resumes it" >/dev/null
+  # shellcheck disable=SC2016 # a safety net: ETH's withdrawals do not stay suspended after the run
+  at_exit 'exchangectl wallet withdrawals-resume --asset ETH --reason "e2e cleanup" >/dev/null 2>&1 || true'
+  as AUDITOR GET /admin/v1/withdrawals/suspensions ""
+  check 'any(.items[]; .asset == "ETH" and .reason == "e2e: the console resumes it" and .shortfall == "0")' "ETH listed, with its reason"
+  as FINANCE POST /admin/v1/withdrawals/suspensions/ETH/resume '{"reason":"e2e not mine to resume"}'
+  expect 403 ADMIN_FORBIDDEN "FINANCE resumes nothing"
+  as ADMIN POST /admin/v1/withdrawals/suspensions/ETH/resume '{"reason":"e2e the balance matches"}'
+  expect 200 - "ADMIN resumes ETH's withdrawals"
+  check '.asset == "ETH" and .reason == "e2e: the console resumes it"' "the suspension it lifted"
+  as ADMIN POST /admin/v1/withdrawals/suspensions/ETH/resume '{"reason":"e2e again"}'
+  expect 404 COMMON_NOT_FOUND "lifted once"
+  as AUDITOR GET /admin/v1/withdrawals/suspensions ""
+  check '[.items[] | select(.asset == "ETH")] | length == 0' "no longer listed"
+  resumed_audited() {
+    as AUDITOR GET "/admin/v1/audit-logs?target=asset:ETH" ""
+    [[ $STATUS == 200 ]] && jq -e --arg a "$EMAIL_ADMIN" 'any(.items[]; .payload.action == "wallet.withdrawals.resume" and .actor == $a)' <<<"$BODY" >/dev/null
+  }
+  eventually 60 "wallet-service audits the resume in the ADMIN's name" resumed_audited
+else
+  echo "skip the suspension: ETH's withdrawals are suspended already, for something else"
 fi
 
 echo "== the account's security, history and risk"

@@ -388,6 +388,18 @@ type WithdrawalQuery struct {
 	MinRisk  int
 }
 
+// Suspension is an asset whose withdrawals are suspended: new requests are
+// refused, approved ones wait until a person lifts it.
+type Suspension struct {
+	Asset string `json:"asset"`
+	// Shortfall is what the custody checks found missing (0 for an
+	// operator's suspension).
+	Shortfall   string    `json:"shortfall"`
+	Reason      string    `json:"reason"`
+	SuspendedBy string    `json:"suspended_by"`
+	SuspendedAt time.Time `json:"suspended_at"`
+}
+
 // DepositReviewQuery selects deposits in wallet-service: a user, a status, a
 // network, those waiting for a decision (Attention), the backfilled ones
 // without a callback yet (ManualPending), a page.
@@ -468,6 +480,12 @@ type Withdrawals interface {
 	Detail(ctx context.Context, id string) (json.RawMessage, error)
 	// Hold puts a withdrawal in review on hold with a note, or off hold.
 	Hold(ctx context.Context, id string, hold bool, reviewer, note string) (json.RawMessage, error)
+	// Suspensions lists the assets whose withdrawals are suspended (funds
+	// missing on two custody checks, or an operator); Resume lifts one
+	// for actor, as exchangectl wallet withdrawals-resume does (the
+	// wallet audits it).
+	Suspensions(ctx context.Context) ([]Suspension, error)
+	Resume(ctx context.Context, asset, actor, reason string) (Suspension, error)
 }
 
 // Instruments lists and changes reference data (instrument-service).

@@ -96,6 +96,14 @@ func (wallet) Replay(context.Context, string, string, string) (json.RawMessage, 
 	return json.RawMessage(`{}`), nil
 }
 
+func (wallet) Suspensions(context.Context) ([]ports.Suspension, error) {
+	return []ports.Suspension{}, nil
+}
+
+func (wallet) Resume(context.Context, string, string, string) (ports.Suspension, error) {
+	return ports.Suspension{}, nil
+}
+
 // deposits has no deposit waiting for a decision.
 type deposits struct{}
 

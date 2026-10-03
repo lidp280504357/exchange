@@ -37,6 +37,33 @@ func (h *Handler) holdWithdrawal(w http.ResponseWriter, r *http.Request) {
 	writeRaw(w, raw)
 }
 
+// withdrawalSuspensions lists the assets whose withdrawals are suspended.
+func (h *Handler) withdrawalSuspensions(w http.ResponseWriter, r *http.Request) {
+	list, err := h.Svc.WithdrawalSuspensions(r.Context(), principal(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": list})
+}
+
+// resumeWithdrawals lifts an asset's withdrawal suspension (ADMIN).
+func (h *Handler) resumeWithdrawals(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	x, err := h.Svc.ResumeWithdrawals(r.Context(), principal(r), chi.URLParam(r, "asset"), body.Reason)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, x)
+}
+
 // depositReviews pages through wallet-service's deposits: attention=true
 // for those waiting for a decision, manual_pending=true for the
 // backfilled ones without a callback yet.

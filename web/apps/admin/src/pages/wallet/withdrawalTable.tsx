@@ -7,6 +7,7 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useConsoleSettings } from "../../live";
 import { DangerAction, lastFour } from "../../kit/actions";
+import { SuspendedBadge, useSuspended } from "./suspensions";
 import { EnumBadge, useEnum } from "../../kit/enums";
 import { IdText, Num, TimeText, useTimeText, UserCell } from "../../kit/format";
 import { ListTable, pageSize, useCursorList, type CursorList } from "../../kit/lists";
@@ -64,6 +65,7 @@ export function WithdrawalsTable({
 }) {
   const { t } = useTranslation();
   const label = useEnum();
+  const suspended = useSuspended();
   const columns = useMemo<ColumnDef<Withdrawal, unknown>[]>(
     () => [
       { id: "time", header: t("admin.withdrawals.requested"), cell: ({ row }) => <TimeText value={row.original.created_at} /> },
@@ -102,11 +104,12 @@ export function WithdrawalsTable({
           <span className="inline-flex flex-wrap items-center gap-1">
             <EnumBadge group="withdrawalStatus" code={row.original.status} />
             <HeldBadge w={row.original} />
+            <SuspendedBadge status={row.original.status} asset={row.original.asset} suspended={suspended} />
           </span>
         ),
       },
     ],
-    [t, withUser, label],
+    [t, withUser, label, suspended],
   );
   return (
     <ListTable
@@ -149,6 +152,7 @@ export function WithdrawalDrawer({ admin, w: row, onClose }: { admin: Admin; w: 
   ];
   const current = steps.reduce((n, s, i) => (s.at ? i : n), 0);
   const reviewable = w.status === "PENDING_REVIEW" && can(admin, "withdrawals.review");
+  const suspension = useSuspended().get(w.asset);
   // Single-person mode: one approval completes a withdrawal within the limit.
   const settings = useConsoleSettings().data;
   const alone =
@@ -252,10 +256,16 @@ export function WithdrawalDrawer({ admin, w: row, onClose }: { admin: Admin; w: 
               target={target}
               confirmWord={lastFour(w.id)}
               run={review(true)}
-              success={t("admin.withdrawals.approved")}
+              success={(r) =>
+                // Approved all the same, a suspended asset's withdrawal waits for the lift (C5.5 ⑯).
+                (r as { suspended_at?: string } | null)?.suspended_at
+                  ? { info: t("admin.suspensions.approvedWaiting", { asset: w.asset }) }
+                  : t("admin.withdrawals.approved")
+              }
               invalidate={[["admin", "withdrawals"], ["admin", "todo"]]}
               onDone={onClose}
             >
+              {suspension && <p className="text-sm text-danger">{t("admin.suspensions.reviewNote", { asset: w.asset })}</p>}
               {alone ? (
                 w.approvals_required > 1 && <p className="text-sm text-info">{t("admin.withdrawals.alone", { max: settings?.withdrawal_max_usdt })}</p>
               ) : (

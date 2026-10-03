@@ -1933,7 +1933,10 @@ paths:
         old), needs two reviewers whatever the risk rules asked for: the
         approval counts and another administrator approves too. Rejecting
         releases the frozen amount. The same review again with its
-        Idempotency-Key answers with the withdrawal as it stands. Needs
+        Idempotency-Key answers with the withdrawal as it stands. A
+        withdrawal of an asset whose withdrawals are suspended is approved
+        all the same; the answer carries suspended_at and
+        suspension_reason: it waits until they are resumed. Needs
         withdrawals.review.
       tags: [withdrawals]
       security:
@@ -2034,6 +2037,69 @@ paths:
                           description: The error code of a failed one.
                         message:
                           type: string
+                        suspended:
+                          type: boolean
+                          description: Approved, it waits until its asset's withdrawals are resumed.
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/withdrawals/suspensions:
+    get:
+      operationId: listWithdrawalSuspensions
+      summary: The assets whose withdrawals are suspended
+      description: |
+        wallet-service suspends an asset's withdrawals when funds are
+        missing on two custody checks (or an operator does, exchangectl
+        wallet withdrawals-suspend): new requests are refused, approved
+        ones wait. Needs withdrawals.read.
+      tags: [withdrawals]
+      responses:
+        '200':
+          description: The suspended assets.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WithdrawalSuspension'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/withdrawals/suspensions/{asset}/resume:
+    post:
+      operationId: resumeWithdrawals
+      summary: Lift an asset's withdrawal suspension
+      description: |
+        Its approved withdrawals go out within a round, and the custody
+        checks start over (funds still missing suspend it again on two
+        checks). wallet-service audits it (wallet.withdrawals.resume) in
+        the ADMIN's name. COMMON_NOT_FOUND when it is not suspended.
+        Needs withdrawals.resume (ADMIN).
+      tags: [withdrawals]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - name: asset
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonRequest'
+      responses:
+        '200':
+          description: The suspension lifted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WithdrawalSuspension'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/withdrawals/{id}:
@@ -5601,7 +5667,7 @@ components:
       enum: [users.read, users.status, orders.cancel, instruments.read, instruments.write, flags.read, flags.write,
         withdrawals.read, withdrawals.review, ledger.adjust.request, ledger.adjust.approve, audit.read, reports.read,
         derivatives.read, derivatives.write, settings.write, users.notes, users.security, users.contacts, ledger.hold,
-        deposits.review, admins.manage, instruments.trading, content.write, notices.send, sim.control]
+        deposits.review, admins.manage, instruments.trading, content.write, notices.send, sim.control, withdrawals.resume]
     RolePermissions:
       type: object
       required: [role, permissions]
@@ -6194,6 +6260,34 @@ components:
           type: string
         hold_note:
           type: string
+        suspended_at:
+          type: string
+          format: date-time
+          description: >-
+            Only in a review's answer: the asset's withdrawals are suspended since then (funds missing on two custody
+            checks, or an operator), so an approved one waits until an ADMIN resumes them (C5.5 ⑯).
+        suspension_reason:
+          type: string
+          description: Only in a review's answer, with suspended_at.
+    WithdrawalSuspension:
+      type: object
+      description: An asset whose withdrawals are suspended (wallet-service, C5.5 ⑯).
+      required: [asset, shortfall, reason, suspended_by, suspended_at]
+      properties:
+        asset:
+          type: string
+          examples: [USDT]
+        shortfall:
+          $ref: '#/components/schemas/Decimal'
+          description: What the custody checks found missing (0 for an operator's suspension).
+        reason:
+          type: string
+        suspended_by:
+          type: string
+          description: wallet-service for the custody checks, else who suspended it.
+        suspended_at:
+          type: string
+          format: date-time
     WithdrawalDetail:
       type: object
       required: [withdrawal, address_book, used_today_usdt, used_month_usdt]

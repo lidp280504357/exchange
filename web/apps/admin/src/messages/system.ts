@@ -34,6 +34,7 @@ export const systemZh = {
       reports_read: "查看报表与概览", derivatives_read: "查看合约", derivatives_write: "管理合约", settings_write: "修改后台设置",
       users_notes: "备注与标签", users_security: "用户安全操作", users_contacts: "查看完整联系方式", ledger_hold: "冻结与解冻资产",
       deposits_review: "处理充值与补记", admins_manage: "管理管理员", instruments_trading: "修改交易参数（状态、费率、阶梯、参考符号）",
+      withdrawals_resume: "解除资产的提现暂停",
     },
     health: {
       help: "各服务的就绪状态、版本、Kafka 消费滞后与死信数，以及对账、托管方与行情源；每 15 秒刷新。",
@@ -94,6 +95,7 @@ export const systemEn = {
       settings_write: "Change the console's settings", users_notes: "Notes and tags", users_security: "Users' security",
       users_contacts: "Reveal contacts", ledger_hold: "Hold and release balances", deposits_review: "Handle deposits and backfills",
       admins_manage: "Manage administrators", instruments_trading: "Change trading parameters (statuses, fees, ladders, references)",
+      withdrawals_resume: "Resume an asset's suspended withdrawals",
     },
     health: {
       help: "Every service's readiness, version, Kafka consumer lag and DLQ count, with the reconciliation, the custodian and the reference feed; refreshed every 15 seconds.",

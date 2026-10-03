@@ -138,6 +138,8 @@ exchangectl wallet withdrawals-resume --asset USDT --reason "托管方舍入差 
 exchangectl wallet withdrawals-suspend --asset USDT --reason "托管方通报事故"
 ```
 
+后台（C5.5 ⑯）：「提现」页顶部显示暂停的资产，ADMIN 可以带理由解除（不带 `--accept`），与上面的 `withdrawals-resume` 同一套、同一条审计，见 [admin.md](admin.md)。
+
 解除后对账从头开始：还缺的话重新"第一次看到"，5 分钟后再停，不会立刻又停（ebb8aaa 审查 H2）。查清了但一时补不平的差额（比如托管方的舍入差，账本更正还在走流程），解除时用 `--accept` 接受下来、`--for` 定期限（最长 7 天，默认 24 小时）：期内对账只把超出接受额的部分当缺口，再多缺了照样停（停提原因里写明接受了多少、谁接受的）；对账自动停的，最多接受停提时记下的缺额（人工停的由操作人自己负责）；到期自动失效（下一次对账清掉），差额还在就重新停。长期的差额要在账本里更正，不要反复延长接受。`withdrawals-suspended` 同时列出正在观察的资产（第一次看到的时间、接受的差额与期限）。
 
 两者都写审计（`wallet.withdrawals.resume` 带上停提的时间、原因与接受的差额）。

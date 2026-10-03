@@ -648,6 +648,8 @@ type fakeWallet struct {
 	atLeast int
 	// withdrawals are the ones reviewed or set, by ID.
 	withdrawals map[string]reviewedWithdrawal
+	// suspended are the assets whose withdrawals are suspended.
+	suspended map[string]ports.Suspension
 }
 
 func (w *fakeWallet) List(context.Context, ports.WithdrawalQuery) (json.RawMessage, error) {
@@ -714,6 +716,24 @@ func (w *fakeWallet) detail(id string) reviewedWithdrawal {
 func (w *fakeWallet) Detail(_ context.Context, id string) (json.RawMessage, error) {
 	raw, _ := json.Marshal(w.detail(id))
 	return json.RawMessage(`{"withdrawal":` + string(raw) + `}`), nil
+}
+
+func (w *fakeWallet) Suspensions(context.Context) ([]ports.Suspension, error) {
+	out := []ports.Suspension{}
+	for _, x := range w.suspended {
+		out = append(out, x)
+	}
+	return out, nil
+}
+
+func (w *fakeWallet) Resume(_ context.Context, asset, actor, reason string) (ports.Suspension, error) {
+	x, ok := w.suspended[asset]
+	if !ok {
+		return ports.Suspension{}, apperr.NotFound("withdrawals of " + asset + " are not suspended")
+	}
+	delete(w.suspended, asset)
+	w.reviewed = append(w.reviewed, "resume "+asset+" "+actor+" "+reason)
+	return x, nil
 }
 
 func (w *fakeWallet) Hold(_ context.Context, id string, hold bool, reviewer, _ string) (json.RawMessage, error) {

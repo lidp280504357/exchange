@@ -84,6 +84,10 @@ const (
 	// design §6): its price events and settings, within one operator's
 	// share; beyond it a second administrator with it approves.
 	PermSimControl = "sim.control"
+	// PermWithdrawalsResume lifts an asset's withdrawal suspension (funds
+	// missing on the custody checks): its approved withdrawals go out
+	// (ADMIN only, C5.5 ⑯).
+	PermWithdrawalsResume = "withdrawals.resume"
 )
 
 var reads = []string{
@@ -94,7 +98,7 @@ var roles = map[string][]string{
 	RoleAdmin: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit,
 		PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermDerivativesEdit, PermSettingsEdit, PermUsersNotes,
 		PermUsersSecurity, PermUsersContacts, PermLedgerHold, PermDepositsReview, PermAdminsManage, PermInstrumentsTrading,
-		PermContentEdit, PermNoticesSend, PermSimControl),
+		PermContentEdit, PermNoticesSend, PermSimControl, PermWithdrawalsResume),
 	RoleOperator: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit, PermDerivativesEdit,
 		PermUsersNotes, PermUsersSecurity, PermUsersContacts, PermLedgerHold, PermContentEdit, PermNoticesSend, PermSimControl),
 	RoleFinance: append(slices.Clone(reads), PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermUsersNotes, PermUsersContacts,

@@ -105,6 +105,8 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Post("/admins/{id}/totp-reset", h.adminTOTPReset)
 			r.Get("/admins/{id}/sessions", h.adminSessions)
 			r.Post("/admins/{id}/sessions/revoke", h.revokeAdminSessions)
+			r.Get("/withdrawals/suspensions", h.withdrawalSuspensions)
+			r.Post("/withdrawals/suspensions/{asset}/resume", h.resumeWithdrawals)
 			r.Get("/withdrawals/{id}", h.withdrawalDetail)
 			r.Post("/withdrawals/{id}/hold", h.holdWithdrawal)
 			r.Get("/deposits/review", h.depositReviews)

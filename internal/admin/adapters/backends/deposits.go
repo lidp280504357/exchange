@@ -22,6 +22,35 @@ func (w Wallet) Hold(ctx context.Context, id string, hold bool, reviewer, note s
 		map[string]any{"hold": hold, "reviewer": reviewer, "note": note}, nil)
 }
 
+// Suspensions lists the assets whose withdrawals are suspended.
+func (w Wallet) Suspensions(ctx context.Context) ([]ports.Suspension, error) {
+	raw, err := w.do(ctx, http.MethodGet, w.Base+"/internal/wallet/suspensions", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Items []ports.Suspension `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil || out.Items == nil {
+		return nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "wallet-service answered badly")
+	}
+	return out.Items, nil
+}
+
+// Resume lifts an asset's suspension for actor.
+func (w Wallet) Resume(ctx context.Context, asset, actor, reason string) (ports.Suspension, error) {
+	raw, err := w.do(ctx, http.MethodPost, w.Base+"/internal/wallet/suspensions/"+url.PathEscape(asset)+"/resume",
+		map[string]any{"actor": actor, "reason": reason}, nil)
+	if err != nil {
+		return ports.Suspension{}, err
+	}
+	var out ports.Suspension
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return ports.Suspension{}, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "wallet-service answered badly")
+	}
+	return out, nil
+}
+
 // List returns a page of deposits; it implements ports.Deposits on the
 // Deposits view of the wallet.
 func (d WalletDeposits) List(ctx context.Context, q ports.DepositReviewQuery) (json.RawMessage, error) {

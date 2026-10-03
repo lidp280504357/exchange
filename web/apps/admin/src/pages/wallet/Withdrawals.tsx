@@ -10,6 +10,7 @@ import { ALL, FilterBar, useFilters } from "../../kit/filters";
 import { NewerBar, useNewer } from "../../kit/lists";
 import { Page } from "../../kit/Page";
 import { todoKey } from "../../live";
+import { SuspensionBanner } from "./suspensions";
 import { WithdrawalDrawer, WithdrawalsTable, useWithdrawals, type Withdrawal } from "./withdrawalTable";
 
 const STATUSES = [
@@ -52,6 +53,7 @@ export default function Withdrawals({ admin }: { admin: Admin }) {
   const chosen = list.rows.filter((w) => selection[w.id]);
   return (
     <Page title={t("admin.nav.withdrawals")}>
+      <SuspensionBanner admin={admin} />
       <FilterBar
         page="withdrawals"
         filters={filters}
@@ -128,7 +130,10 @@ function BatchBar({ chosen, onLowRisk, onClear, listKey }: { chosen: Withdrawal[
       );
       const failed = res.results.filter((r) => !r.ok);
       const ok = res.results.length - failed.length;
-      if (failed.length === 0) toast.success(t("admin.batch.done", { ok }));
+      // Approved, those of a suspended asset wait for the lift (C5.5 ⑯).
+      const waits = res.results.filter((r) => r.ok && r.suspended).length;
+      const waiting = waits > 0 ? t("admin.suspensions.batchWaiting", { n: waits }) : undefined;
+      if (failed.length === 0) toast.success(t("admin.batch.done", { ok }), { description: waiting, duration: waiting ? 10000 : undefined });
       else
         toast.error(t("admin.batch.partly", { ok, failed: failed.length }), {
           description: failed

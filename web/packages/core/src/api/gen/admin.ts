@@ -1219,7 +1219,10 @@ export interface paths {
          *     old), needs two reviewers whatever the risk rules asked for: the
          *     approval counts and another administrator approves too. Rejecting
          *     releases the frozen amount. The same review again with its
-         *     Idempotency-Key answers with the withdrawal as it stands. Needs
+         *     Idempotency-Key answers with the withdrawal as it stands. A
+         *     withdrawal of an asset whose withdrawals are suspended is approved
+         *     all the same; the answer carries suspended_at and
+         *     suspension_reason: it waits until they are resumed. Needs
          *     withdrawals.review.
          */
         post: operations["reviewWithdrawal"];
@@ -1249,6 +1252,53 @@ export interface paths {
          *     as they stand. Needs withdrawals.review.
          */
         post: operations["reviewWithdrawalBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/withdrawals/suspensions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The assets whose withdrawals are suspended
+         * @description wallet-service suspends an asset's withdrawals when funds are
+         *     missing on two custody checks (or an operator does, exchangectl
+         *     wallet withdrawals-suspend): new requests are refused, approved
+         *     ones wait. Needs withdrawals.read.
+         */
+        get: operations["listWithdrawalSuspensions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/withdrawals/suspensions/{asset}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Lift an asset's withdrawal suspension
+         * @description Its approved withdrawals go out within a round, and the custody
+         *     checks start over (funds still missing suspend it again on two
+         *     checks). wallet-service audits it (wallet.withdrawals.resume) in
+         *     the ADMIN's name. COMMON_NOT_FOUND when it is not suspended.
+         *     Needs withdrawals.resume (ADMIN).
+         */
+        post: operations["resumeWithdrawals"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3343,7 +3393,7 @@ export interface components {
         /** @enum {string} */
         AdminRole: "ADMIN" | "OPERATOR" | "FINANCE" | "AUDITOR";
         /** @enum {string} */
-        Permission: "users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write" | "settings.write" | "users.notes" | "users.security" | "users.contacts" | "ledger.hold" | "deposits.review" | "admins.manage" | "instruments.trading" | "content.write" | "notices.send" | "sim.control";
+        Permission: "users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write" | "settings.write" | "users.notes" | "users.security" | "users.contacts" | "ledger.hold" | "deposits.review" | "admins.manage" | "instruments.trading" | "content.write" | "notices.send" | "sim.control" | "withdrawals.resume";
         RolePermissions: {
             role: components["schemas"]["AdminRole"];
             permissions: components["schemas"]["Permission"][];
@@ -3693,6 +3743,25 @@ export interface components {
             held_at?: string | null;
             held_by?: string;
             hold_note?: string;
+            /**
+             * Format: date-time
+             * @description Only in a review's answer: the asset's withdrawals are suspended since then (funds missing on two custody checks, or an operator), so an approved one waits until an ADMIN resumes them (C5.5 ⑯).
+             */
+            suspended_at?: string;
+            /** @description Only in a review's answer, with suspended_at. */
+            suspension_reason?: string;
+        };
+        /** @description An asset whose withdrawals are suspended (wallet-service, C5.5 ⑯). */
+        WithdrawalSuspension: {
+            /** @example USDT */
+            asset: string;
+            /** @description What the custody checks found missing (0 for an operator's suspension). */
+            shortfall: components["schemas"]["Decimal"];
+            reason: string;
+            /** @description wallet-service for the custody checks, else who suspended it. */
+            suspended_by: string;
+            /** Format: date-time */
+            suspended_at: string;
         };
         WithdrawalDetail: {
             withdrawal: components["schemas"]["Withdrawal"];
@@ -6179,8 +6248,60 @@ export interface operations {
                             /** @description The error code of a failed one. */
                             code?: string;
                             message?: string;
+                            /** @description Approved, it waits until its asset's withdrawals are resumed. */
+                            suspended?: boolean;
                         }[];
                     };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listWithdrawalSuspensions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The suspended assets. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["WithdrawalSuspension"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    resumeWithdrawals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReasonRequest"];
+            };
+        };
+        responses: {
+            /** @description The suspension lifted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WithdrawalSuspension"];
                 };
             };
             default: components["responses"]["Error"];

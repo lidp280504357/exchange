@@ -370,7 +370,14 @@ func (s *Service) ReviewWithdrawal(ctx context.Context, p Principal, key, id str
 	if err != nil {
 		return nil, err
 	}
-	return s.review(ctx, p, id, approve, reason, limit, s.lazyValuer(ctx), !c.Fresh, false)
+	raw, err := s.review(ctx, p, id, approve, reason, limit, s.lazyValuer(ctx), !c.Fresh, false)
+	if err != nil || !approve {
+		return raw, err
+	}
+	// Approved all the same, a withdrawal of a suspended asset says it
+	// waits for the lift (C5.5 ⑯).
+	raw, _ = withSuspension(raw, s.suspendedAssets(ctx))
+	return raw, nil
 }
 
 // lazyValuer values amounts as worth does, reading the prices the first
@@ -488,6 +495,9 @@ type BatchResult struct {
 	Status  string `json:"status,omitempty"`
 	Code    string `json:"code,omitempty"`
 	Message string `json:"message,omitempty"`
+	// Suspended: approved, it waits until its asset's withdrawals are
+	// resumed (C5.5 ⑯).
+	Suspended bool `json:"suspended,omitempty"`
 }
 
 // ReviewBatch approves or rejects withdrawals one by one with one reason
@@ -514,6 +524,10 @@ func (s *Service) ReviewBatch(ctx context.Context, p Principal, key string, ids 
 		return nil, err
 	}
 	value := s.lazyValuer(ctx)
+	var suspended map[string]ports.Suspension
+	if approve {
+		suspended = s.suspendedAssets(ctx)
+	}
 	seen := map[string]bool{}
 	out := make([]BatchResult, 0, len(ids))
 	for _, id := range ids {
@@ -531,7 +545,8 @@ func (s *Service) ReviewBatch(ctx context.Context, p Principal, key string, ids 
 			Status string `json:"status"`
 		}
 		_ = json.Unmarshal(raw, &w)
-		out = append(out, BatchResult{ID: id, OK: true, Status: w.Status})
+		_, waits := withSuspension(raw, suspended)
+		out = append(out, BatchResult{ID: id, OK: true, Status: w.Status, Suspended: waits})
 	}
 	return out, nil
 }
