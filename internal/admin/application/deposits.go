@@ -83,6 +83,51 @@ func (s *Service) CreditDeposit(ctx context.Context, p Principal, key, id, reaso
 	return current, nil
 }
 
+// AssignDeposit credits a deposit of nobody (B7a: a custodian's deposit to
+// an address no user has) to the user the administrator names: a fund
+// operation (DEPOSIT_ASSIGN), carried out alone within the single-person
+// limits and otherwise decided by a second administrator; the same
+// request under its key returns it (C5.5 ㉑).
+func (s *Service) AssignDeposit(ctx context.Context, p Principal, key, depositID, userID, reason string) (domain.Approval, error) {
+	return s.SubmitFunds(ctx, p, FundRequest{
+		Kind: domain.KindDepositAssign, DepositID: depositID, UserID: userID, Reason: reason, Direct: true, Key: key,
+	})
+}
+
+// depositOfNobody is what a DEPOSIT_ASSIGN needs of its deposit.
+type depositOfNobody struct {
+	UserID       string          `json:"user_id"`
+	Asset        string          `json:"asset"`
+	Amount       decimal.Decimal `json:"amount"`
+	Network      string          `json:"network"`
+	Address      string          `json:"address"`
+	TxHash       string          `json:"tx_hash"`
+	Unclaimed    bool            `json:"unclaimed"`
+	Resolution   string          `json:"resolution"`
+	AddressOwner *string         `json:"address_owner"`
+}
+
+// ErrNotNobodys refuses to assign a deposit that is not one of nobody
+// waiting for a decision.
+var ErrNotNobodys = apperr.New(apperr.KindConflict, "ADMIN_DEPOSIT_NOT_UNOWNED",
+	"only a deposit of nobody (an address no user has) waiting for a decision is credited to a user")
+
+// depositOfNobody reads a deposit of nobody waiting for a decision.
+func (s *Service) depositOfNobody(ctx context.Context, id string) (depositOfNobody, error) {
+	raw, err := s.Deposits.Get(ctx, id)
+	if err != nil {
+		return depositOfNobody{}, err
+	}
+	var d depositOfNobody
+	if err := json.Unmarshal(raw, &d); err != nil {
+		return depositOfNobody{}, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "wallet-service answered badly")
+	}
+	if d.UserID != domain.NoOwner || !d.Unclaimed || d.Resolution != "" || d.Asset == "" || !d.Amount.IsPositive() {
+		return depositOfNobody{}, ErrNotNobodys
+	}
+	return d, nil
+}
+
 // DismissDeposit closes a deposit that waited for a decision without
 // moving funds (wallet-service audits it as wallet.deposit.dismissed).
 func (s *Service) DismissDeposit(ctx context.Context, p Principal, id, reason string) (json.RawMessage, error) {

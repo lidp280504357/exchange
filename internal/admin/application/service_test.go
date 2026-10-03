@@ -769,6 +769,12 @@ type fakeDeposits struct {
 	decided   []string
 	known     map[string]string // trade ID -> deposit ID
 	credited  map[string]string // deposit ID -> who credited it
+	// nobody are deposits of nobody (ID -> USDT amount); assigned the
+	// users they were credited to; loseAnswer makes the next assignment
+	// happen and its answer get lost.
+	nobody     map[string]string
+	assigned   map[string]string
+	loseAnswer bool
 }
 
 func (d *fakeDeposits) List(_ context.Context, q ports.DepositReviewQuery) (json.RawMessage, error) {
@@ -784,6 +790,15 @@ func (d *fakeDeposits) List(_ context.Context, q ports.DepositReviewQuery) (json
 }
 
 func (d *fakeDeposits) Get(_ context.Context, id string) (json.RawMessage, error) {
+	if amount, ok := d.nobody[id]; ok {
+		if user, ok := d.assigned[id]; ok {
+			return json.RawMessage(`{"id":"` + id + `","user_id":"` + user + `","asset":"USDT","amount":"` + amount +
+				`","unclaimed":false,"resolution":"CREDITED","release_journal_id":"release-` + id + `"}`), nil
+		}
+		return json.RawMessage(`{"id":"` + id + `","user_id":"` + domain.NoOwner + `","asset":"USDT","amount":"` + amount +
+			`","network":"TRON","address":"TRetired1","tx_hash":"0xfeed","unclaimed":true,"resolution":"","reason":"UNKNOWN_ADDRESS",` +
+			`"address_owner":"` + someUser + `","address_owner_retired":true,"release_journal_id":null}`), nil
+	}
 	if by, ok := d.credited[id]; ok {
 		return json.RawMessage(`{"id":"` + id + `","status":"CREDITED","resolution":"CREDITED","resolved_by":"` + by + `"}`), nil
 	}
@@ -799,6 +814,25 @@ func (d *fakeDeposits) Credit(ctx context.Context, id, actor, _ string) (json.Ra
 	}
 	d.credited[id] = actor
 	d.decided = append(d.decided, "credit "+id+" by "+actor)
+	return d.Get(ctx, id)
+}
+
+func (d *fakeDeposits) Assign(ctx context.Context, id, userID, actor, _ string) (json.RawMessage, error) {
+	if _, ok := d.nobody[id]; !ok {
+		return nil, apperr.New(apperr.KindConflict, apperr.CodeConflict, "the deposit has its user: credit it as it is")
+	}
+	if _, ok := d.assigned[id]; ok {
+		return nil, apperr.New(apperr.KindConflict, apperr.CodeConflict, "the deposit has its user: credit it as it is")
+	}
+	if d.assigned == nil {
+		d.assigned = map[string]string{}
+	}
+	d.assigned[id] = userID
+	d.decided = append(d.decided, "assign "+id+" to "+userID+" by "+actor)
+	if d.loseAnswer {
+		d.loseAnswer = false
+		return nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "wallet-service did not answer")
+	}
 	return d.Get(ctx, id)
 }
 

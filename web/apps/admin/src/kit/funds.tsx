@@ -7,7 +7,7 @@ import { settingsKey, todoKey } from "../live";
 import { errorToast, useOperationKey } from "./actions";
 
 // Fund operations (manual adjustments, insurance fund contributions,
-// deposit backfills) end
+// deposit backfills, deposits of nobody credited to a user) end
 // three ways: booked at once (single-person mode within the limits),
 // waiting for a second administrator, or refused by the ledger. The
 // administrator is told which, with the journal or the reason.

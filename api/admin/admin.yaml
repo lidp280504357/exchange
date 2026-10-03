@@ -1090,6 +1090,59 @@ paths:
                 $ref: '#/components/schemas/ReviewDeposit'
         default:
           $ref: '#/components/responses/Error'
+  /admin/v1/deposits/{id}/assign:
+    post:
+      operationId: assignDeposit
+      summary: Credit a deposit of nobody to a user
+      description: |
+        A deposit of nobody (user_id the nil UUID, reason UNKNOWN_ADDRESS:
+        the custodian reported a deposit to an address no user has, B7a)
+        waits in UNCLAIMED_DEPOSIT. This credits its own asset and amount
+        to the user named: a fund operation of kind DEPOSIT_ASSIGN, carried
+        out at once in single-person mode within the limits, else waiting
+        for a second administrator (C5.5 ㉑). wallet-service sets the owner
+        and releases it (audited as wallet.deposit.assigned and
+        ledger.unclaimed_released). Any other deposit is
+        ADMIN_DEPOSIT_NOT_UNOWNED; a user who may not take deposits is
+        refused by wallet-service. The same request under its
+        Idempotency-Key returns the operation, finishing one whose outcome
+        was unknown. Needs deposits.review.
+      tags: [withdrawals]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, reason]
+              properties:
+                user_id:
+                  type: string
+                  format: uuid
+                  description: The user it is credited to.
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '201':
+          description: The operation, EXECUTED with the release's journal, or PENDING with why it waits.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+        default:
+          $ref: '#/components/responses/Error'
   /admin/v1/deposits/{id}/reject:
     post:
       operationId: rejectDeposit
@@ -6597,7 +6650,8 @@ components:
           description: Booked to UNCLAIMED_DEPOSIT instead of the user.
         reason:
           type: [string, 'null']
-          enum: [BELOW_MINIMUM, ACCOUNT_CLOSED, NOT_ELIGIBLE, UNSUPPORTED_TOKEN, null]
+          enum: [BELOW_MINIMUM, ACCOUNT_CLOSED, NOT_ELIGIBLE, UNSUPPORTED_TOKEN, UNKNOWN_ADDRESS, null]
+          description: UNKNOWN_ADDRESS for a deposit of nobody (user_id the nil UUID, B7a).
         trade_id:
           type: [string, 'null']
           description: The custodian's trade (UDUN:<tradeId>).
@@ -6640,6 +6694,13 @@ components:
           type: string
         release_journal_id:
           type: [string, 'null']
+        address_owner:
+          type: [string, 'null']
+          description: >-
+            For a deposit of nobody, the user its address belongs to now, or belonged to before it was retired
+            (address_owner_retired): a hint for crediting it (POST /admin/v1/deposits/{id}/assign), never its owner.
+        address_owner_retired:
+          type: boolean
     InstrumentConfig:
       type: object
       description: The reference data in the shape of deploy/instruments/<env>.json.
@@ -7073,7 +7134,7 @@ components:
           format: uuid
         kind:
           type: string
-          enum: [LEDGER_ADJUSTMENT, INSURANCE_FUND, DEPOSIT_BACKFILL, SIM_EVENT, SIM_PARAMS, SIM_MINT]
+          enum: [LEDGER_ADJUSTMENT, INSURANCE_FUND, DEPOSIT_BACKFILL, SIM_EVENT, SIM_PARAMS, SIM_MINT, DEPOSIT_ASSIGN]
         payload:
           type: object
           description: |
@@ -7083,7 +7144,9 @@ components:
             SIM_PARAMS change (the event or {params} as JSON), actor (the requester, market-sim's actor) and move (the price move
             market-sim measured; volume for a turnover change); the result names the event or the settings' version. For
             SIM_MINT asset, amount (in all), bots (each bot's share as JSON: [{user_id, label, amount}]) and role when only
-            one role's bots; its journal_id is the first bot's.
+            one role's bots; its journal_id is the first bot's. For DEPOSIT_ASSIGN user_id (the user it is credited to),
+            deposit_id, asset, amount, network, address, tx_hash and address_owner when the address had one; its journal_id
+            is the release's.
           additionalProperties:
             type: string
         reason:

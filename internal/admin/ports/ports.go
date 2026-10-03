@@ -451,6 +451,10 @@ type Deposits interface {
 	// a deposit that waited for a decision.
 	Credit(ctx context.Context, id, actor, reason string) (json.RawMessage, error)
 	Dismiss(ctx context.Context, id, actor, reason string) (json.RawMessage, error)
+	// Assign credits a deposit of nobody (B7a) to userID: its owner set
+	// and its funds released from UNCLAIMED_DEPOSIT, audited by
+	// wallet-service; the same assignment again replays it.
+	Assign(ctx context.Context, id, userID, actor, reason string) (json.RawMessage, error)
 	// CheckManual checks a backfill without booking it; BookManual books
 	// it (the same backfill again returns its deposit).
 	CheckManual(ctx context.Context, m ManualDeposit) (ManualCheck, error)

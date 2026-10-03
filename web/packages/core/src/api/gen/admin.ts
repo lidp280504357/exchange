@@ -667,6 +667,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/deposits/{id}/assign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Credit a deposit of nobody to a user
+         * @description A deposit of nobody (user_id the nil UUID, reason UNKNOWN_ADDRESS:
+         *     the custodian reported a deposit to an address no user has, B7a)
+         *     waits in UNCLAIMED_DEPOSIT. This credits its own asset and amount
+         *     to the user named: a fund operation of kind DEPOSIT_ASSIGN, carried
+         *     out at once in single-person mode within the limits, else waiting
+         *     for a second administrator (C5.5 ㉑). wallet-service sets the owner
+         *     and releases it (audited as wallet.deposit.assigned and
+         *     ledger.unclaimed_released). Any other deposit is
+         *     ADMIN_DEPOSIT_NOT_UNOWNED; a user who may not take deposits is
+         *     refused by wallet-service. The same request under its
+         *     Idempotency-Key returns the operation, finishing one whose outcome
+         *     was unknown. Needs deposits.review.
+         */
+        post: operations["assignDeposit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/deposits/{id}/reject": {
         parameters: {
             query?: never;
@@ -3963,8 +3994,11 @@ export interface components {
             status: "DETECTED" | "CONFIRMING" | "CONFIRMED" | "CREDITED" | "ORPHANED" | "REJECTED";
             /** @description Booked to UNCLAIMED_DEPOSIT instead of the user. */
             unclaimed: boolean;
-            /** @enum {string|null} */
-            reason: "BELOW_MINIMUM" | "ACCOUNT_CLOSED" | "NOT_ELIGIBLE" | "UNSUPPORTED_TOKEN" | null;
+            /**
+             * @description UNKNOWN_ADDRESS for a deposit of nobody (user_id the nil UUID, B7a).
+             * @enum {string|null}
+             */
+            reason: "BELOW_MINIMUM" | "ACCOUNT_CLOSED" | "NOT_ELIGIBLE" | "UNSUPPORTED_TOKEN" | "UNKNOWN_ADDRESS" | null;
             /** @description The custodian's trade (UDUN:<tradeId>). */
             trade_id: string | null;
             confirmations: number;
@@ -3992,6 +4026,9 @@ export interface components {
             resolved_at: string | null;
             resolution_note: string;
             release_journal_id: string | null;
+            /** @description For a deposit of nobody, the user its address belongs to now, or belonged to before it was retired (address_owner_retired): a hint for crediting it (POST /admin/v1/deposits/{id}/assign), never its owner. */
+            address_owner?: string | null;
+            address_owner_retired?: boolean;
         };
         /** @description The reference data in the shape of deploy/instruments/<env>.json. */
         InstrumentConfig: {
@@ -4219,7 +4256,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            kind: "LEDGER_ADJUSTMENT" | "INSURANCE_FUND" | "DEPOSIT_BACKFILL" | "SIM_EVENT" | "SIM_PARAMS" | "SIM_MINT";
+            kind: "LEDGER_ADJUSTMENT" | "INSURANCE_FUND" | "DEPOSIT_BACKFILL" | "SIM_EVENT" | "SIM_PARAMS" | "SIM_MINT" | "DEPOSIT_ASSIGN";
             /**
              * @description For LEDGER_ADJUSTMENT user_id, asset and amount, account_type FUTURES when not the SPOT account; for INSURANCE_FUND
              *     asset and amount; reference when given. For DEPOSIT_BACKFILL user_id, asset, amount, network, trade_id, address,
@@ -4227,7 +4264,9 @@ export interface components {
              *     SIM_PARAMS change (the event or {params} as JSON), actor (the requester, market-sim's actor) and move (the price move
              *     market-sim measured; volume for a turnover change); the result names the event or the settings' version. For
              *     SIM_MINT asset, amount (in all), bots (each bot's share as JSON: [{user_id, label, amount}]) and role when only
-             *     one role's bots; its journal_id is the first bot's.
+             *     one role's bots; its journal_id is the first bot's. For DEPOSIT_ASSIGN user_id (the user it is credited to),
+             *     deposit_id, asset, amount, network, address, tx_hash and address_owner when the address had one; its journal_id
+             *     is the release's.
              */
             payload: {
                 [key: string]: string;
@@ -5547,6 +5586,49 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewDeposit"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    assignDeposit: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Every request that moves money carries one (C5.5 ⑥): the console makes a key per operation and sends it again with
+                 *     each retry. The first request with a key makes the operation (its approval, hold, closing order or message takes
+                 *     its ID from the key); the same request again answers with what it made, finishing a fund operation whose outcome
+                 *     was unknown; the key with another request fails with 409 COMMON_IDEMPOTENCY_CONFLICT. Keys are each
+                 *     administrator's own and kept 24 hours. Missing or longer than 128 characters: 400.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description The user it is credited to.
+                     */
+                    user_id: string;
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The operation, EXECUTED with the release's journal, or PENDING with why it waits. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Approval"];
                 };
             };
             default: components["responses"]["Error"];

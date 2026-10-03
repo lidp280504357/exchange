@@ -87,6 +87,12 @@ func (d WalletDeposits) Credit(ctx context.Context, id, actor, reason string) (j
 		map[string]string{"actor": actor, "reason": reason}, nil)
 }
 
+// Assign credits a deposit of nobody to userID (C5.5 ㉑).
+func (d WalletDeposits) Assign(ctx context.Context, id, userID, actor, reason string) (json.RawMessage, error) {
+	return d.do(ctx, http.MethodPost, d.Base+"/internal/wallet/deposits/"+url.PathEscape(id)+"/assign",
+		map[string]string{"user_id": userID, "actor": actor, "reason": reason}, nil)
+}
+
 // Dismiss closes a deposit that waited for a decision.
 func (d WalletDeposits) Dismiss(ctx context.Context, id, actor, reason string) (json.RawMessage, error) {
 	return d.do(ctx, http.MethodPost, d.Base+"/internal/wallet/deposits/"+url.PathEscape(id)+"/dismiss",

@@ -103,6 +103,25 @@ func (h *Handler) creditDeposit(w http.ResponseWriter, r *http.Request) {
 	writeRaw(w, raw)
 }
 
+// assignDeposit credits a deposit of nobody to the user named (C5.5 ㉑);
+// the answer is the operation, as a backfill's.
+func (h *Handler) assignDeposit(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		UserID string `json:"user_id"`
+		Reason string `json:"reason"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	a, err := h.Svc.AssignDeposit(r.Context(), principal(r), idemKey(r), chi.URLParam(r, "id"), body.UserID, body.Reason)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusCreated, approvalJSON(a))
+}
+
 func (h *Handler) rejectDeposit(w http.ResponseWriter, r *http.Request) {
 	var body reasonBody
 	if err := httpx.DecodeJSON(w, r, &body); err != nil {

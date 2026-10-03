@@ -123,6 +123,10 @@ func (deposits) Dismiss(context.Context, string, string, string) (json.RawMessag
 	return json.RawMessage(`{}`), nil
 }
 
+func (deposits) Assign(context.Context, string, string, string, string) (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}
+
 func (deposits) CheckManual(context.Context, ports.ManualDeposit) (ports.ManualCheck, error) {
 	return ports.ManualCheck{}, nil
 }

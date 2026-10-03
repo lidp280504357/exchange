@@ -130,6 +130,7 @@ function SimChange({ a }: { a: Approval }) {
 }
 
 function Payload({ a }: { a: Approval }) {
+  const { t } = useTranslation();
   const p = a.payload as Record<string, string>;
   if (simKind(a.kind)) return <SimChange a={a} />;
   if (a.kind === "SIM_MINT") return <MintShares payload={p} />;
@@ -141,6 +142,11 @@ function Payload({ a }: { a: Approval }) {
       {p.trade_id && (
         <span className="font-mono text-xs text-fg-3" title={p.tx_hash}>
           {p.network} · {p.trade_id}
+        </span>
+      )}
+      {a.kind === "DEPOSIT_ASSIGN" && p.deposit_id && (
+        <span className="font-mono text-xs text-fg-3" title={p.tx_hash}>
+          {p.network} · {t("admin.unowned.deposit", { id: p.deposit_id.slice(-8) })}
         </span>
       )}
     </span>

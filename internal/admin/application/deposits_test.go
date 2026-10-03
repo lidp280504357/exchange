@@ -70,6 +70,74 @@ func TestBackfillsGoThroughTheFundGuardrails(t *testing.T) {
 	}
 }
 
+// TestADepositOfNobodyIsCreditedToAUser: a deposit to an address no user
+// has (B7a) is credited to the user an administrator names, a fund
+// operation like a backfill: alone within the limits, else decided by a
+// second administrator; after a lost answer the same request finishes it
+// without booking it twice (C5.5 ㉑).
+func TestADepositOfNobodyIsCreditedToAUser(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.admin(t, "fin@example.com", domain.RoleFinance)
+	h.admin(t, "boss@example.com", domain.RoleAdmin)
+	h.admin(t, "ops@example.com", domain.RoleOperator)
+	fin, boss, ops := h.login(t, "fin@example.com"), h.login(t, "boss@example.com"), h.login(t, "ops@example.com")
+	small, large, lost := "0192a000-0000-7000-8000-0000000000e1", "0192a000-0000-7000-8000-0000000000e2", "0192a000-0000-7000-8000-0000000000e3"
+	owned := "0192a000-0000-7000-8000-0000000000d9"
+	h.deposits.nobody = map[string]string{small: "50", large: "200000", lost: "7"}
+
+	if _, err := h.svc.AssignDeposit(ctx, ops, "", small, someUser, "found its owner"); code(err) != "ADMIN_FORBIDDEN" {
+		t.Fatalf("an operator credits it: %v", err)
+	}
+	if _, err := h.svc.AssignDeposit(ctx, fin, "", small, domain.NoOwner, "found its owner"); code(err) != apperr.CodeInvalidArgument {
+		t.Fatalf("to nobody: %v", err)
+	}
+	if _, err := h.svc.AssignDeposit(ctx, fin, "", owned, someUser, "found its owner"); code(err) != "ADMIN_DEPOSIT_NOT_UNOWNED" {
+		t.Fatalf("a deposit with its user: %v", err)
+	}
+
+	// Within the single-person limit: credited at once, with the journal.
+	a, err := h.svc.AssignDeposit(ctx, fin, "k1", small, someUser, "the owner's ticket T-9")
+	if err != nil || a.Status != domain.ApprovalExecuted || a.Kind != domain.KindDepositAssign || a.JournalID != "release-"+small ||
+		a.Payload["user_id"] != someUser || a.Payload["deposit_id"] != small || a.Payload["address_owner"] != someUser ||
+		h.deposits.assigned[small] != someUser || a.ValueUSDT == nil || a.ValueUSDT.String() != "50" {
+		t.Fatalf("assigned %+v %v", a, err)
+	}
+	if again, err := h.svc.AssignDeposit(ctx, fin, "k1", small, someUser, "the owner's ticket T-9"); err != nil || again.ID != a.ID ||
+		len(h.deposits.decided) != 1 {
+		t.Fatalf("the same request again %+v %v %v", again, err, h.deposits.decided)
+	}
+	if len(h.ledger.calls) != 0 {
+		t.Fatal("wallet-service releases it, the console books nothing")
+	}
+
+	// Above the limit: a second administrator decides.
+	b, err := h.svc.AssignDeposit(ctx, fin, "k2", large, someUser, "large; the owner proved the transfer")
+	if err != nil || b.Status != domain.ApprovalPending || b.Escalation != domain.EscalationSingleMax || h.deposits.assigned[large] != "" {
+		t.Fatalf("large %+v %v", b, err)
+	}
+	if done, err := h.svc.DecideApproval(ctx, boss, b.ID, true, "checked the transfer"); err != nil || done.Status != domain.ApprovalExecuted ||
+		h.deposits.assigned[large] != someUser || done.JournalID != "release-"+large {
+		t.Fatalf("approved %+v %v", done, err)
+	}
+
+	// Credited, but the answer lost: the operation waits, attempted; the
+	// same request finds the deposit credited to this user and finishes.
+	h.deposits.loseAnswer = true
+	_, err = h.svc.AssignDeposit(ctx, fin, "k3", lost, someUser, "the owner's ticket T-11")
+	if apperr.From(err).Details["approval_id"] == nil {
+		t.Fatalf("an unknown outcome names its operation: %v", err)
+	}
+	c, err := h.svc.AssignDeposit(ctx, fin, "k3", lost, someUser, "the owner's ticket T-11")
+	if err != nil || c.Status != domain.ApprovalExecuted || c.JournalID != "release-"+lost || len(h.deposits.decided) != 3 {
+		t.Fatalf("finished %+v %v %v", c, err, h.deposits.decided)
+	}
+	if got := h.auditsOf("admin.deposits.assign_requested"); len(got) != 3 || !strings.Contains(got[0], `"deposit_id":"`+small+`"`) ||
+		!strings.Contains(got[0], `"address_owner":"`+someUser+`"`) {
+		t.Fatalf("the requests audited %v", got)
+	}
+}
+
 func TestDepositDecisionsAndWithdrawalHolds(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

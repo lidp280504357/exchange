@@ -63,6 +63,10 @@ var fundActions = map[string]struct{ requested, approved, rejected, executed, fa
 		"admin.sim.mint_requested", "admin.sim.mint_approved", "admin.sim.mint_rejected", "admin.sim.mint_executed", "admin.sim.mint_failed",
 		"admin.sim.mint_unfinished",
 	},
+	domain.KindDepositAssign: {
+		"admin.deposits.assign_requested", "admin.deposits.assign_approved", "admin.deposits.assign_rejected",
+		"admin.deposits.assign_executed", "admin.deposits.assign_failed", "admin.deposits.assign_unfinished",
+	},
 }
 
 // simKind reports whether an approval is a simulated market's change.
@@ -101,6 +105,9 @@ type FundRequest struct {
 	// ("" for every bot).
 	Shares []MintShare
 	Role   string
+	// DepositID is the deposit of nobody a DEPOSIT_ASSIGN credits to
+	// UserID; its asset and amount are the deposit's.
+	DepositID string
 	// Direct carries it out at once when single-person mode and its limits
 	// allow; without it a second administrator always decides.
 	Direct bool
@@ -114,7 +121,7 @@ type FundRequest struct {
 func (in *FundRequest) fingerprint() []byte {
 	fields := []string{
 		in.Kind, in.UserID, in.AccountType, in.Asset, in.Amount.String(), strings.TrimSpace(in.Reason), in.Reference, in.Role,
-		strconv.FormatBool(in.Direct),
+		strconv.FormatBool(in.Direct), in.DepositID,
 	}
 	if b := in.Backfill; b != nil {
 		fields = append(fields, b.Network, b.TradeID, b.Address, b.TxHash)
@@ -163,6 +170,14 @@ func (in *FundRequest) validate() error {
 		if len(in.Shares) == 0 {
 			return ErrNoBots
 		}
+	case domain.KindDepositAssign:
+		if _, err := uuid.Parse(in.DepositID); err != nil {
+			return apperr.NotFound("no such deposit")
+		}
+		if u, err := uuid.Parse(in.UserID); err != nil || u == uuid.Nil {
+			return apperr.Invalid("user_id must be the ID of the user the deposit is credited to")
+		}
+		in.UserID = strings.ToLower(in.UserID)
 	case domain.KindDepositBackfill:
 		b := in.Backfill
 		if b == nil || !b.Amount.IsPositive() {
@@ -223,7 +238,7 @@ func (s *Service) RequestInsuranceFunding(ctx context.Context, p Principal, asse
 // operation.
 func (s *Service) SubmitFunds(ctx context.Context, p Principal, in FundRequest) (domain.Approval, error) {
 	perm := domain.PermAdjustRequest
-	if in.Kind == domain.KindDepositBackfill {
+	if in.Kind == domain.KindDepositBackfill || in.Kind == domain.KindDepositAssign {
 		perm = domain.PermDepositsReview
 	}
 	if err := p.require(perm); err != nil {
@@ -254,6 +269,14 @@ func (s *Service) SubmitFunds(ctx context.Context, p Principal, in FundRequest) 
 		}
 		in.Asset = check.Asset
 	}
+	var nobody depositOfNobody
+	if in.Kind == domain.KindDepositAssign {
+		var err error
+		if nobody, err = s.depositOfNobody(ctx, in.DepositID); err != nil {
+			return domain.Approval{}, err
+		}
+		in.Asset, in.Amount = nobody.Asset, nobody.Amount
+	}
 	now := s.Now()
 	a := domain.Approval{
 		ID: c.Ref, Kind: in.Kind, Reason: strings.TrimSpace(in.Reason),
@@ -268,6 +291,13 @@ func (s *Service) SubmitFunds(ctx context.Context, p Principal, in FundRequest) 
 		a.Payload["user_id"] = in.UserID
 		if in.AccountType != AccountSpot {
 			a.Payload["account_type"] = in.AccountType
+		}
+	}
+	if in.Kind == domain.KindDepositAssign {
+		a.Payload["user_id"], a.Payload["deposit_id"] = in.UserID, in.DepositID
+		a.Payload["network"], a.Payload["address"], a.Payload["tx_hash"] = nobody.Network, nobody.Address, nobody.TxHash
+		if nobody.AddressOwner != nil {
+			a.Payload["address_owner"] = *nobody.AddressOwner
 		}
 	}
 	if in.Kind == domain.KindSimMint {
@@ -461,6 +491,9 @@ func fundDetails(a domain.Approval) string {
 	case domain.KindDepositBackfill:
 		account = fmt.Sprintf(`"network":%q,"trade_id":%q,"tx_hash":%q,"address":%q,"custodian_checked":false,`,
 			a.Payload["network"], a.Payload["trade_id"], a.Payload["tx_hash"], a.Payload["address"])
+	case domain.KindDepositAssign:
+		account = fmt.Sprintf(`"deposit_id":%q,"network":%q,"tx_hash":%q,"address":%q,"address_owner":%q,`,
+			a.Payload["deposit_id"], a.Payload["network"], a.Payload["tx_hash"], a.Payload["address"], a.Payload["address_owner"])
 	case domain.KindSimMint:
 		account = fmt.Sprintf(`"role":%q,"bots":%s,`, a.Payload["role"], a.Payload["bots"])
 	}
@@ -668,6 +701,8 @@ func (s *Service) execute(ctx context.Context, a *domain.Approval, p Principal) 
 		journal, err = s.Ledger.FundInsurance(ctx, key, a.Payload["asset"], amount, p.Admin.Email, note)
 	case domain.KindDepositBackfill:
 		deposit, err = s.backfill(ctx, *a)
+	case domain.KindDepositAssign:
+		journal, err = s.assign(ctx, *a, p)
 	default:
 		journal, err = s.Ledger.Adjust(ctx, key, a.Payload["user_id"], accountOf(*a), a.Payload["asset"], amount, p.Admin.Email, note)
 	}
@@ -706,6 +741,45 @@ func (s *Service) backfill(ctx context.Context, a domain.Approval) (string, erro
 		return "", apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "wallet-service answered badly")
 	}
 	return d.ID, nil
+}
+
+// assign credits an approved DEPOSIT_ASSIGN's deposit to its user in
+// wallet-service and returns the journal that released it. Again after a
+// lost answer: wallet-service refuses a deposit that has its user
+// (COMMON_CONFLICT), and the deposit, credited to this same user, says it
+// was done (the ledger's release depends on the deposit and the user
+// alone, so it was booked once).
+func (s *Service) assign(ctx context.Context, a domain.Approval, p Principal) (string, error) {
+	id, user := a.Payload["deposit_id"], a.Payload["user_id"]
+	raw, err := s.Deposits.Assign(ctx, id, user, p.Admin.Email, a.Reason)
+	if err != nil {
+		if apperr.From(err).Kind == apperr.KindConflict {
+			if cur, gerr := s.Deposits.Get(ctx, id); gerr == nil {
+				if journal, ok := assignedTo(cur, user); ok {
+					return journal, nil
+				}
+			}
+		}
+		return "", err
+	}
+	journal, ok := assignedTo(raw, user)
+	if !ok {
+		return "", apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "wallet-service answered badly")
+	}
+	return journal, nil
+}
+
+// assignedTo is the journal that released a deposit to user ("", false
+// when it was not released to them).
+func assignedTo(raw json.RawMessage, user string) (string, bool) {
+	var d struct {
+		UserID           string  `json:"user_id"`
+		ReleaseJournalID *string `json:"release_journal_id"`
+	}
+	if json.Unmarshal(raw, &d) != nil || !strings.EqualFold(d.UserID, user) || d.ReleaseJournalID == nil || *d.ReleaseJournalID == "" {
+		return "", false
+	}
+	return *d.ReleaseJournalID, true
 }
 
 // settings returns the console's settings, the defaults until changed.

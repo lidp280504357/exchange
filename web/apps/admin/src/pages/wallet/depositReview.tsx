@@ -1,24 +1,45 @@
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
-import { Badge, Button, Drawer, EmptyState, KeyValue, type ColumnDef, type DataColumnMeta } from "@exchange/ui";
-import { useMemo, type ReactNode } from "react";
+import { Badge, Button, Drawer, EmptyState, Input, KeyValue, type ColumnDef, type DataColumnMeta } from "@exchange/ui";
+import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { DangerAction, lastFour } from "../../kit/actions";
 import { EnumBadge } from "../../kit/enums";
 import { IdText, Num, TimeText, useTimeText, UserCell } from "../../kit/format";
+import { FundAction } from "../../kit/funds";
 import { ListTable, pageSize, RowActions, useCursorList, type CursorList } from "../../kit/lists";
 import { todoKey } from "../../live";
 import { clean } from "../records/tables";
 
 // The deposits that need a person (design 2026-10-02 §4.3), straight from
 // wallet-service: those booked to UNCLAIMED_DEPOSIT, unsupported tokens,
-// backfills a custodian callback disagreed with; and the backfills still
-// waiting for their callback.
+// backfills a custodian callback disagreed with, deposits of nobody (an
+// address no user has, B7a: credited to the user an administrator names,
+// C5.5 ㉑); and the backfills still waiting for their callback.
 
 export type ReviewDeposit = AdminSchemas["ReviewDeposit"];
 export type ReviewView = "attention" | "manual";
 export type ReviewQuery = { user_id?: string; network?: string };
 
 const right: DataColumnMeta = { align: "right" };
+/** NO_OWNER is wallet-service's owner of a deposit of nobody (B7a). */
+const NO_OWNER = "00000000-0000-0000-0000-000000000000";
+const uuidRE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** nobodys reports whether a deposit is one of nobody: its address belongs to no user. */
+const nobodys = (d: ReviewDeposit) => d.user_id === NO_OWNER;
+
+/** Owner is a deposit's user, or "nobody" for a deposit of nobody (never looked up as a user). */
+function Owner({ d }: { d: ReviewDeposit }) {
+  const { t } = useTranslation();
+  if (nobodys(d)) {
+    return (
+      <Badge tone="warn" title={t("admin.unowned.nobodyHint")}>
+        {t("admin.unowned.nobody")}
+      </Badge>
+    );
+  }
+  return <UserCell id={d.user_id} />;
+}
 
 export function useReviewDeposits(view: ReviewView, q: ReviewQuery) {
   return useCursorList<ReviewDeposit>(["admin", "deposits", "review", view, q], async (cursor) =>
@@ -85,7 +106,7 @@ export function ReviewDepositsTable({
   const columns = useMemo<ColumnDef<ReviewDeposit, unknown>[]>(
     () => [
       { id: "time", header: t("admin.depositReview.detected"), cell: ({ row }) => <TimeText value={row.original.detected_at} /> },
-      { id: "user", header: t("admin.common.user"), cell: ({ row }) => <UserCell id={row.original.user_id} /> },
+      { id: "user", header: t("admin.common.user"), cell: ({ row }) => <Owner d={row.original} /> },
       { id: "amount", header: t("admin.common.amount"), meta: right, cell: ({ row }) => <Amount d={row.original} /> },
       { accessorKey: "network", header: t("admin.common.network") },
       ...(view === "attention"
@@ -127,8 +148,12 @@ export function ReviewDepositsTable({
   );
 }
 
-/** creditable reports whether a deposit can go to its user: booked to UNCLAIMED_DEPOSIT in its own asset, undecided. */
-const creditable = (d: ReviewDeposit) => d.attention && d.unclaimed && !!d.asset && !!d.journal_id && !d.discrepancy;
+/** releasable reports whether a deposit's funds can leave UNCLAIMED_DEPOSIT: booked there in its own asset, undecided. */
+const releasable = (d: ReviewDeposit) => d.attention && d.unclaimed && !!d.asset && !!d.journal_id && !d.discrepancy;
+/** creditable reports whether a deposit can go to its user (one of nobody has none: it is assignable instead). */
+const creditable = (d: ReviewDeposit) => releasable(d) && !nobodys(d);
+/** assignable reports whether a deposit of nobody can be credited to a user an administrator names (C5.5 ㉑). */
+const assignable = (d: ReviewDeposit) => releasable(d) && nobodys(d);
 
 /**
  * Decisions are what can be done with a deposit that waits: credit it to
@@ -157,6 +182,7 @@ function Decisions({ d, size = "md", onDone }: { d: ReviewDeposit; size?: "sm" |
   const invalidate = [["admin", "deposits"], todoKey, ["admin", "user"]];
   return (
     <>
+      {assignable(d) && <Assign d={d} size={size} onDone={onDone} />}
       {creditable(d) && (
         <DangerAction
           trigger={(open) => (
@@ -194,6 +220,73 @@ function Decisions({ d, size = "md", onDone }: { d: ReviewDeposit; size?: "sm" |
   );
 }
 
+/**
+ * Assign credits a deposit of nobody to the user the administrator names: a
+ * fund operation (DEPOSIT_ASSIGN), done at once within the single-person
+ * limits, else waiting for a second administrator; the address's holder,
+ * now or before it was retired, is offered as a hint (C5.5 ㉑).
+ */
+function Assign({ d, size, onDone }: { d: ReviewDeposit; size: "sm" | "md"; onDone?: () => void }) {
+  const { t } = useTranslation();
+  const [user, setUser] = useState("");
+  const id = user.trim().toLowerCase();
+  const ok = uuidRE.test(id) && id !== NO_OWNER;
+  return (
+    <FundAction
+      trigger={(open) => (
+        <Button size={size} onClick={open} data-testid="deposit-assign">
+          {t("admin.unowned.assign")}
+        </Button>
+      )}
+      title={t("admin.unowned.assignTitle")}
+      description={t("admin.unowned.assignHint")}
+      target={
+        <span className="inline-flex flex-wrap items-center gap-2 text-sm">
+          <Amount d={d} />
+          <span className="text-fg-3">{d.network}</span>
+          <span className="font-mono text-xs">{ok ? id : "—"}</span>
+        </span>
+      }
+      confirmWord={ok ? lastFour(id) : "————"}
+      run={async (reason, key) =>
+        adminData(
+          await adminApi.POST("/admin/v1/deposits/{id}/assign", {
+            params: { path: { id: d.id }, header: { "Idempotency-Key": key } },
+            body: { user_id: id, reason },
+          }),
+        )
+      }
+      onDone={() => {
+        setUser("");
+        onDone?.();
+      }}
+    >
+      <div className="flex flex-col gap-1.5 text-sm text-fg-2">
+        <label className="flex flex-col gap-1.5" htmlFor={`assign-${d.id}`}>
+          {t("admin.unowned.userId")}
+        </label>
+        <Input
+          id={`assign-${d.id}`}
+          value={user}
+          onValueChange={setUser}
+          placeholder={t("admin.unowned.userHint")}
+          error={user && !ok ? t("admin.unowned.badUser") : undefined}
+          autoComplete="off"
+        />
+        {d.address_owner && (
+          <span className="flex flex-wrap items-center gap-2 text-xs text-fg-3">
+            {t(d.address_owner_retired ? "admin.unowned.ownerRetired" : "admin.unowned.owner")}
+            <span className="font-mono">{d.address_owner}</span>
+            <button type="button" className="text-info hover:underline" onClick={() => setUser(d.address_owner ?? "")}>
+              {t("admin.unowned.useOwner")}
+            </button>
+          </span>
+        )}
+      </div>
+    </FundAction>
+  );
+}
+
 /** ReviewDepositDrawer shows a deposit from wallet-service with its decision, or the decisions it waits for. */
 export function ReviewDepositDrawer({ admin, d, onClose }: { admin: Admin; d: ReviewDeposit; onClose: () => void }) {
   const { t } = useTranslation();
@@ -210,7 +303,22 @@ export function ReviewDepositDrawer({ admin, d, onClose }: { admin: Admin; d: Re
       <div className="flex flex-col gap-5">
         <KeyValue
           items={[
-            { label: t("admin.common.user"), value: <UserCell id={d.user_id} /> },
+            { label: t("admin.common.user"), value: <Owner d={d} /> },
+            ...(nobodys(d)
+              ? [
+                  {
+                    label: t(d.address_owner_retired ? "admin.unowned.ownerRetired" : "admin.unowned.owner"),
+                    value: d.address_owner ? (
+                      <span className="flex flex-col items-end gap-0.5">
+                        <UserCell id={d.address_owner} />
+                        <span className="text-xs text-fg-3">{t("admin.unowned.ownerHint")}</span>
+                      </span>
+                    ) : (
+                      t("admin.unowned.ownerNone")
+                    ),
+                  },
+                ]
+              : []),
             { label: t("admin.common.amount"), value: <Amount d={d} /> },
             { label: t("admin.common.network"), value: d.network },
             { label: t("admin.deposits.address"), value: <span className="font-mono text-xs">{d.address}</span>, copy: d.address },
@@ -249,7 +357,8 @@ export function ReviewDepositDrawer({ admin, d, onClose }: { admin: Admin; d: Re
         />
         {decide && (
           <div className="flex flex-col gap-2">
-            {!creditable(d) && (
+            {nobodys(d) && <p className="text-sm text-fg-3">{t("admin.unowned.nobodyHint")}</p>}
+            {!releasable(d) && (
               <p className="text-sm text-fg-3">{d.discrepancy ? t("admin.depositReview.noCreditDiscrepancy") : t("admin.depositReview.noCredit")}</p>
             )}
             <div className="flex gap-2">

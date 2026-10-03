@@ -23,7 +23,8 @@
 # deposits that need a person (with the
 # custodian's stand-in: a deposit whose callback comes late, backfilled
 # and then confirmed by it; one below the minimum credited to the user,
-# another rejected), a withdrawal's review details and holds, the user's
+# another rejected; a deposit to a probe address of nobody credited to
+# the user, C5.5 ㉑), a withdrawal's review details and holds, the user's
 # authenticator app bound and reset by the console (the reset recorded:
 # withdrawals wait for review for a day after it), an
 # administrator created from the console (C5.5 ⑪: a one-time setup link
@@ -1202,6 +1203,62 @@ else
     exit 1
   fi
   echo "ok   nor in exchangectl's custodian report"
+fi
+
+echo "== a deposit of nobody credited to a user (B7a, C5.5 21)"
+# The custodian's stand-in issues a probe address no user has and it
+# receives 1 USDT: a deposit of nobody, booked to UNCLAIMED_DEPOSIT until an
+# administrator names its user. Only with the stand-in: the real gateway
+# would move real money.
+NO_OWNER=00000000-0000-0000-0000-000000000000
+if [[ $(remote "sudo grep -c '^UDUN_GATEWAY_URL=http://udun-mock' apps.env || true") != 1 ]]; then
+  echo "skip a deposit of nobody: wallet-service's UDUN gateway is not the stand-in"
+else
+  PROBE=$(remote "sudo docker compose $COMPOSE_FILES exec -T wallet-service /app/exchangectl udun create-address --main-coin 195 --alias e2e-nobody-$RUN --yes" |
+    sed -n 's/^created \([^ ]*\) .*/\1/p')
+  [[ -n $PROBE ]] || { echo "FAIL the stand-in issued no probe address" >&2; exit 1; }
+  echo "ok   a probe address of nobody ($PROBE)"
+  mock deposit --address "$PROBE" --coin "$USDT_TRC20" --amount 1 >/dev/null
+  nobodys() { # the deposit of nobody to the probe waits for a decision; its ID goes to NOBODY
+    local id
+    as FINANCE GET "/admin/v1/deposits/review?attention=true&user_id=$NO_OWNER&limit=100" ""
+    id=$(jq -r --arg a "$PROBE" '[.items[] | select(.address == $a and .reason == "UNKNOWN_ADDRESS" and .unclaimed and .journal_id != null)][0].id // empty' <<<"$BODY")
+    [[ -n $id ]] && NOBODY=$id
+  }
+  eventually 120 "the deposit of nobody waits in UNCLAIMED_DEPOSIT" nobodys
+  as FINANCE GET "/admin/v1/deposits/$NOBODY" ""
+  check ".user_id == \"$NO_OWNER\" and .address_owner == null and .address_owner_retired == false" "nobody's, its address no user's"
+  as OPERATOR POST "/admin/v1/deposits/$NOBODY/assign" "{\"user_id\":\"$USER_ID\",\"reason\":\"e2e\"}"
+  expect 403 ADMIN_FORBIDDEN "OPERATOR credits it to nobody"
+  KEY=none
+  as FINANCE POST "/admin/v1/deposits/$NOBODY/assign" "{\"user_id\":\"$USER_ID\",\"reason\":\"e2e\"}"
+  expect 400 COMMON_INVALID_ARGUMENT "not without an Idempotency-Key"
+  as FINANCE POST "/admin/v1/deposits/$NOBODY/credit" '{"reason":"e2e credit it as it is"}'
+  expect 409 WALLET_DEPOSIT_NO_OWNER "it is not credited as it is: nobody owns it"
+  NOBODY_BEFORE=$(spot_usdt available)
+  ASSIGN=$(jq -nc --arg u "$USER_ID" '{user_id: $u, reason: "e2e the sender proved the transfer"}')
+  KEY="e2e-nobody-$RUN"
+  as FINANCE POST "/admin/v1/deposits/$NOBODY/assign" "$ASSIGN"
+  expect 201 - "FINANCE credits it to the user"
+  if [[ $(jq -r .status <<<"$BODY") == PENDING ]]; then
+    as ADMIN POST "/admin/v1/approvals/$(jq -r .id <<<"$BODY")/decide" '{"approve":true,"reason":"e2e second administrator"}'
+    expect 200 - "a second administrator approves it (two-person mode)"
+  fi
+  check ".kind == \"DEPOSIT_ASSIGN\" and .status == \"EXECUTED\" and .journal_id != null and .payload.deposit_id == \"$NOBODY\" and .payload.user_id == \"$USER_ID\"" \
+    "a fund operation, released with its journal"
+  ASSIGNED=$(jq -r .id <<<"$BODY")
+  KEY="e2e-nobody-$RUN"
+  as FINANCE POST "/admin/v1/deposits/$NOBODY/assign" "$ASSIGN"
+  expect 201 - "the same request again (a retry)"
+  check ".id == \"$ASSIGNED\" and .status == \"EXECUTED\"" "is the same operation"
+  as FINANCE POST "/admin/v1/deposits/$NOBODY/assign" "$(jq -c '.reason = "e2e once more"' <<<"$ASSIGN")"
+  expect 409 ADMIN_DEPOSIT_NOT_UNOWNED "credited once"
+  one_more() {
+    [[ $(jq -n --arg a "$(spot_usdt available)" --arg b "$NOBODY_BEFORE" '(($a | tonumber) - ($b | tonumber) - 1) | fabs < 0.0000001') == true ]]
+  }
+  eventually 60 "the user has 1 USDT more" one_more
+  as FINANCE GET "/admin/v1/deposits/$NOBODY" ""
+  check ".user_id == \"$USER_ID\" and .resolution == \"CREDITED\" and .release_journal_id != null and .attention == false" "the user's now, handled"
 fi
 
 echo "== a withdrawal's review details and holds"

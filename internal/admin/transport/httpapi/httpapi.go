@@ -119,6 +119,7 @@ func (h *Handler) Routes(r chi.Router) {
 			r.With(needKey).Post("/deposits/manual", h.backfill)
 			r.Get("/deposits/{id}", h.depositDetail)
 			r.With(needKey).Post("/deposits/{id}/credit", h.creditDeposit)
+			r.With(needKey).Post("/deposits/{id}/assign", h.assignDeposit)
 			r.Post("/deposits/{id}/reject", h.rejectDeposit)
 			r.With(needKey).Post("/users/{id}/adjustments", h.userAdjustment)
 			r.Get("/orders", h.orders)

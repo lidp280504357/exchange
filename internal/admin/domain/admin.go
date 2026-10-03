@@ -243,6 +243,10 @@ func (s *Session) Live(now time.Time) bool {
 	return now.Before(s.ExpiresAt) && now.Sub(s.LastSeenAt) < SessionIdle
 }
 
+// NoOwner is wallet-service's owner of a deposit of nobody (B7a): the
+// nil UUID, never a user's.
+const NoOwner = "00000000-0000-0000-0000-000000000000"
+
 // Approval kinds and statuses.
 const (
 	KindLedgerAdjustment = "LEDGER_ADJUSTMENT"
@@ -261,6 +265,11 @@ const (
 	// manual adjustment per bot, a fund operation like any other (ASTRA
 	// design §4: no transfers between bots; the pool grows this way).
 	KindSimMint = "SIM_MINT"
+	// KindDepositAssign credits a deposit of nobody (a custodian's deposit
+	// to an address no user has, B7a) to the user an administrator names:
+	// wallet-service sets its owner and releases it from UNCLAIMED_DEPOSIT
+	// (C5.5 ㉑).
+	KindDepositAssign = "DEPOSIT_ASSIGN"
 
 	ApprovalPending  = "PENDING"
 	ApprovalExecuted = "EXECUTED"
