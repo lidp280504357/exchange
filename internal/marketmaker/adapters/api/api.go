@@ -68,9 +68,9 @@ func (r instrumentRow) spec(contract bool) (domain.Spec, bool) {
 	return domain.Spec{Symbol: r.Symbol, Base: r.BaseAsset, Quote: r.QuoteAsset, TickSize: tick, LotSize: lot, Contract: contract}, true
 }
 
-// Specs lists the TRADING pairs that follow a reference market, and the
-// TRADING contracts whose index pair does (they follow the reference
-// market's perpetual of the same symbol).
+// Specs lists the pairs that follow a reference market, those not
+// TRADING marked Halted, and the TRADING contracts whose index pair does
+// (they follow the reference market's perpetual of the same symbol).
 func (c *Client) Specs(ctx context.Context) ([]domain.Spec, error) {
 	var pairs struct {
 		Pairs []instrumentRow `json:"pairs"`
@@ -91,7 +91,8 @@ func (c *Client) Specs(ctx context.Context) ([]domain.Spec, error) {
 			continue
 		}
 		followed[p.Symbol] = true
-		if s, ok := p.spec(false); ok && p.Status == "TRADING" {
+		if s, ok := p.spec(false); ok {
+			s.Halted = p.Status != "TRADING"
 			out = append(out, s)
 		}
 	}

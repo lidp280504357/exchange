@@ -38,6 +38,7 @@ dX   = −θ X dt + μ dt + σ dW          （θ 按小时，μ、σ 按天）
 | `HALT` | — | 撤掉做市商全部挂单，交易对置 `HALT`，永续（在交易时）一起置 `HALT`（经 instrument-service gRPC）；结束事件即恢复 `TRADING`（永续若仍是 `HALT` 也恢复），机器人重新报价 |
 | `REANCHOR` | — | `P0` 设为当前目标价，`BTC_0`、`ETH_0` 重新锚定，偏离与事件因子清零；新的 `P0` 写回设置（版本加一，审计 `market.sim.params_changed`，操作人为事件创建人），重启后从它继续 |
 
+- 超过 5 分钟的 `HALT`：停牌期间现货没有成交、做市商挂单也撤了，最后一笔成交 5 分钟后平台指数没有价格（`PlatformIndexAge`，见下文「永续」），永续标记价降级、10 秒后进入只减仓。结束事件后永续回到 `TRADING` 但**仍只减仓**：等机器人重新报价、标记价恢复（`/v1/market/ASTRA-USDT-PERP/mark-price` 的 `degraded` 为 false）后，在后台解除或 `exchangectl derivatives resume ASTRA-USDT-PERP`（见 [derivatives.md](derivatives.md)）。5 分钟以内的 `HALT` 不会这样。
 - `HALT` 事件运行期间每 10 秒检查一次交易对与永续，发现在交易（第一次停牌失败，或被人在后台恢复了）就再停：**要恢复交易请结束事件**（后台的事件页或 `exchangectl sim call`），不要在后台直接把交易对或合约改回 `TRADING`，否则 10 秒内又被停掉。交易对已停、只有永续那一下没停成时也照样补停（569a958 审查 H1）。
 - 同一时间只运行一个移动或固定价格的事件（`JUMP`、`TARGET`、`PAUSE`），后到的排队等前一个结束。事件移动价格时分钟守卫让路，并从事件价格重新开始计算，事件结束后照常限速。
 - 守卫（设计 §6.2，A3 审查后澄清）：一个运营单独一次最多让价格移动 30%，任何一小时内合计最多 50%，按生效时间（事件的 `starts_at`、参数改动的时刻）计，前后各一小时的都算；已取消的不算。各自的"幅度"：`JUMP` 是 `size`；`TARGET` 是目标价离当前目标价（开始后离起点）的距离；`TREND` 是 `mu` 在其时长内（最多一天，没有结束时间按一天）累计的漂移 `e^(mu×天数)−1`；`VOLATILITY` 是多出的一倍标准差 `sigma×|factor−1|×√天数`；参数改动见下文。超过时需要另一名运营批准（`approved_by`，不能是自己，只能由后台服务填，见下一条），否则 403 `SIM_EVENT_NEEDS_APPROVAL`（`details.move`）。即使批准，`JUMP` 最多 +100%（大于 −90%），`TARGET` 同样；事件最多提前 24 小时安排。

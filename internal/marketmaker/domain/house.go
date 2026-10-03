@@ -21,6 +21,9 @@ type Spec struct {
 	TickSize decimal.Decimal
 	LotSize  decimal.Decimal
 	Contract bool
+	// Halted: the pair is not TRADING; HOUSE does not quote it, but its
+	// reference market still prices its base asset.
+	Halted bool
 }
 
 // Valuation is the asset HOUSE's limits and prices are in.

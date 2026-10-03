@@ -108,22 +108,29 @@ read_memory() {
 # 停止部署并提示升级服务器（用户决定 2026-10-03：GHCR 不可用时回退到本地构建，内存不够就拒绝，升级由用户处理）。
 # 交换区已用多少只打印、不判定（协调会话代用户定，2026-10-03）：Redpanda 预分配的内存里闲着的页会被换出去，
 # 已用量一直涨（约 800 MB），并不是内存不够。可用内存比交换区已用量多 3000 MB 以上时，检查前先
-# swapoff -a && swapon -a 把换出去的页收回内存（几十秒、不停服务；失败不影响部署）。
+# swapoff -a 再按原设备 swapon，把换出去的页收回内存（几十秒、不停服务；失败不影响部署）。
 # BUILD_MIN_MEMORY_MB、BUILD_MAX_PAGING_KB 可改门槛。只在动容器之前调用：拒绝时什么都还没换。
 ensure_build_memory() {
   local avail swap paging need=${BUILD_MIN_MEMORY_MB:-3000} most=${BUILD_MAX_PAGING_KB:-1024}
   read_memory
   if [ "$swap" -gt 0 ] && [ $((avail - swap)) -gt "$need" ]; then
-    if sudo swapoff -a && sudo swapon -a; then
+    # 先记下在用的交换设备，收回后按设备名逐个打开，不依赖 /etc/fstab 里有没有它
+    local devices device
+    devices=$(awk 'NR > 1 {print $1}' /proc/swaps)
+    if sudo swapoff -a; then
+      for device in $devices; do sudo swapon "$device" || echo "== 交换区 $device 没能重新打开"; done
       echo "== 交换区里 ${swap} MB 已收回内存"
     else
-      sudo swapon -a || true
+      for device in $devices; do sudo swapon "$device" 2>/dev/null || true; done
       echo "== 收回交换区失败（不影响部署）"
     fi
+    echo "== 交换区：$(swapon --show --noheadings | tr -s ' ' | tr '\n' ';')"
     read_memory
   fi
-  # vmstat 的第二行是这 30 秒的平均（第一行是开机以来的），si、so 是第 7、8 列，KB/s
-  paging=$(vmstat 30 2 | tail -1 | awk '{print $7 + $8}')
+  # 最近 30 秒换入换出的页数（/proc/vmstat 的 pswpin、pswpout，4 KB 一页），折成 KB/s；不依赖 vmstat 命令
+  paging=$(awk '/^pswpin |^pswpout / {s += $2} END {print s}' /proc/vmstat)
+  sleep 30
+  paging=$(( ($(awk '/^pswpin |^pswpout / {s += $2} END {print s}' /proc/vmstat) - paging) * 4 / 30 ))
   if [ "$avail" -lt "$need" ] || [ "$paging" -ge "$most" ]; then
     echo "== 内存不足，需要升级服务器：可用 ${avail} MB（至少 ${need}）、最近 30 秒换页 ${paging} KB/s（不到 ${most}），交换区已用 ${swap} MB；不在服务器上$1，停止部署（什么都没换）"
     stop_before_changes

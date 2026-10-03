@@ -9,8 +9,8 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/flags"
 )
 
-// Specs lists the pairs and contracts that follow a reference market and
-// are TRADING.
+// Specs lists the pairs that follow a reference market (those not TRADING
+// Halted) and the TRADING contracts that do.
 type Specs interface {
 	Specs(ctx context.Context) ([]domain.Spec, error)
 	// Backed lists the assets HOUSE must hold to sell (ADR-0013): those

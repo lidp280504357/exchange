@@ -412,3 +412,108 @@ func TestHouseSellsShortOnlyOnceItKnowsTheBackedAssets(t *testing.T) {
 		t.Fatalf("read: %v", books)
 	}
 }
+
+// switchSpecs lists what the test sets, or fails while down, counting the
+// reads.
+type switchSpecs struct {
+	mu    sync.Mutex
+	list  []domain.Spec
+	down  bool
+	reads int
+}
+
+func (s *switchSpecs) Specs(context.Context) ([]domain.Spec, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reads++
+	if s.down {
+		return nil, errors.New("instrument-service unavailable")
+	}
+	return slices.Clone(s.list), nil
+}
+
+func (s *switchSpecs) Backed(context.Context) ([]string, error) {
+	return []string{"USDT", "BTC", "ETH"}, nil
+}
+
+// A pair quoted in BTC is valued through BTC-USDT: halted, that pair still
+// prices BTC from its reference market, so ETH-BTC keeps HOUSE (review of
+// 6fa3b68); a halted pair the specs list is priced but not quoted.
+func TestACrossPairKeepsItsPriceWhileItsQuotesPairHalts(t *testing.T) {
+	now := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
+	ethUSDT := domain.Spec{Symbol: "ETH-USDT", Base: "ETH", Quote: "USDT", TickSize: d("0.01"), LotSize: d("0.001")}
+	ethBTC := domain.Spec{Symbol: "ETH-BTC", Base: "ETH", Quote: "BTC", TickSize: d("0.00001"), LotSize: d("0.001")}
+	specs := &switchSpecs{list: []domain.Spec{btcSpec, ethUSDT, ethBTC}}
+	account := domain.ContractAccount{Positions: map[string]decimal.Decimal{}}
+	rec := &records{}
+	cfg := DefaultConfig()
+	cfg.HouseUser = "house"
+	p := New(cfg, specs, fakeHouse{holdings: domain.Holdings{"USDT": d("500000"), "BTC": d("10"), "ETH": d("100")}, contracts: &account},
+		&onFlags{}, rec, event.NewFactory("market-maker", "test"), slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	p.now = func() time.Time { return now }
+	ctx := context.Background()
+	offered := func(seq int64) map[string]bool {
+		t.Helper()
+		p.OnSnapshot(&marketv1.DepthSnapshot{Symbol: "BTC-USDT", Sequence: seq, Reference: true, Bids: levels("50000", "5"), Asks: levels("50001", "5")})
+		p.OnSnapshot(&marketv1.DepthSnapshot{Symbol: "ETH-USDT", Sequence: seq, Reference: true, Bids: levels("2500", "50"), Asks: levels("2500.01", "50")})
+		p.OnSnapshot(&marketv1.DepthSnapshot{Symbol: "ETH-BTC", Sequence: seq, Reference: true, Bids: levels("0.05", "50"), Asks: levels("0.05001", "50")})
+		if err := p.publish(ctx, p.round()); err != nil {
+			t.Fatal(err)
+		}
+		_, books := rec.take(t)
+		out := map[string]bool{}
+		for _, b := range books {
+			out[b.GetSymbol()] = len(b.GetBids())+len(b.GetAsks()) > 0
+		}
+		return out
+	}
+	p.refresh(ctx)
+	if got := offered(1); !got["BTC-USDT"] || !got["ETH-USDT"] || !got["ETH-BTC"] {
+		t.Fatalf("all three offered: %v", got)
+	}
+	p.OnStatus("BTC-USDT", "HALT")
+	now = now.Add(p.cfg.Heartbeat)
+	if got := offered(2); got["BTC-USDT"] || !got["ETH-BTC"] {
+		t.Fatalf("BTC-USDT halted, ETH-BTC still offered: %v", got)
+	}
+	// The specs read again list BTC-USDT halted: still a price, no quote.
+	specs.mu.Lock()
+	specs.list[0].Halted = true
+	specs.mu.Unlock()
+	now = now.Add(specsEvery)
+	p.refresh(ctx)
+	if got := offered(3); got["BTC-USDT"] || !got["ETH-BTC"] {
+		t.Fatalf("after the specs are read again: %v", got)
+	}
+}
+
+// While instrument-service is away the specs are read again every
+// specsRetry, not every round, and what was read last stays.
+func TestAFailedReadOfTheSpecsIsTriedAgainLater(t *testing.T) {
+	now := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
+	specs := &switchSpecs{list: []domain.Spec{btcSpec}}
+	account := domain.ContractAccount{Positions: map[string]decimal.Decimal{}}
+	cfg := DefaultConfig()
+	cfg.HouseUser = "house"
+	p := New(cfg, specs, fakeHouse{holdings: domain.Holdings{"USDT": d("500000")}, contracts: &account},
+		&onFlags{}, &records{}, event.NewFactory("market-maker", "test"), slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	p.now = func() time.Time { return now }
+	ctx := context.Background()
+	p.refresh(ctx)
+	specs.mu.Lock()
+	specs.down = true
+	specs.mu.Unlock()
+	p.OnStatus("ETH-USDT", "TRADING") // a pair starts trading: read again at once
+	for range 8 {                     // two seconds of rounds
+		p.refresh(ctx)
+		now = now.Add(p.cfg.Interval)
+	}
+	if specs.reads != 2 || len(p.list) != 1 {
+		t.Fatalf("%d reads, list %v", specs.reads, p.list)
+	}
+	now = now.Add(specsRetry)
+	p.refresh(ctx)
+	if specs.reads != 3 {
+		t.Fatalf("tried again after specsRetry: %d reads", specs.reads)
+	}
+}

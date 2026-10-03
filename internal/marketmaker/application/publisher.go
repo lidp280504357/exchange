@@ -61,9 +61,11 @@ func DefaultConfig() Config {
 	}
 }
 
-// Refresh intervals of what the publisher reads.
+// Refresh intervals of what the publisher reads; a failed read of the
+// specs is tried again after specsRetry.
 const (
 	specsEvery = 30 * time.Second
+	specsRetry = 5 * time.Second
 	houseEvery = time.Second
 	// houseStale is how old HOUSE's holdings may be before it stops
 	// offering (the rooms would be guesses).
@@ -81,9 +83,13 @@ type Publisher struct {
 	log    *slog.Logger
 	now    func() time.Time
 
-	mu     sync.Mutex
-	books  map[string]*refBook
+	mu    sync.Mutex
+	books map[string]*refBook
+	// list is what HOUSE quotes: the TRADING pairs and contracts; priced
+	// the base asset of every USDT pair followed, trading or not, whose
+	// reference market values it (ETH-BTC needs BTC while BTC-USDT halts).
 	list   []domain.Spec
+	priced map[string]string
 	listAt time.Time
 	// The backed assets as last read, and when (zero: never).
 	backedList []string
@@ -247,13 +253,14 @@ func (p *Publisher) refresh(ctx context.Context) {
 	p.mu.Unlock()
 	if specsDue {
 		list, err := p.specs.Specs(ctx)
+		p.mu.Lock()
 		if err != nil {
 			p.log.WarnContext(ctx, "house liquidity: pairs and contracts not read", "error", err)
+			p.listAt = p.now().Add(specsRetry - specsEvery) // not every round while instrument-service is away
 		} else {
-			p.mu.Lock()
-			p.list, p.listAt = list, p.now()
-			p.mu.Unlock()
+			p.list, p.priced, p.listAt = trading(list), usdtBases(list), p.now()
 		}
+		p.mu.Unlock()
 		if backed, err := p.specs.Backed(ctx); err != nil {
 			p.log.WarnContext(ctx, "house liquidity: the backed assets not read", "error", err)
 		} else {
@@ -405,17 +412,31 @@ func (p *Publisher) round() []outgoing {
 	return out
 }
 
-// prices is the USDT value of one unit of each asset: the mid of its
-// USDT pair's reference book; USDT itself is 1.
-func (p *Publisher) prices(now time.Time) map[string]decimal.Decimal {
-	out := map[string]decimal.Decimal{"USDT": decimal.NewFromInt(1)}
-	for _, spec := range p.list {
-		if spec.Contract || spec.Quote != "USDT" {
-			continue
+// trading is what HOUSE quotes of the specs.
+func trading(list []domain.Spec) []domain.Spec {
+	return slices.DeleteFunc(slices.Clone(list), func(s domain.Spec) bool { return s.Halted })
+}
+
+// usdtBases maps every spot USDT pair of the specs to its base asset.
+func usdtBases(list []domain.Spec) map[string]string {
+	out := map[string]string{}
+	for _, spec := range list {
+		if !spec.Contract && spec.Quote == domain.Valuation {
+			out[spec.Symbol] = spec.Base
 		}
-		if b := p.books[spec.Symbol]; b != nil && !b.gap && now.Sub(b.heard) < p.cfg.Stale {
+	}
+	return out
+}
+
+// prices is the USDT value of one unit of each asset: the mid of its
+// USDT pair's reference book, whatever the pair's status; USDT itself is
+// 1.
+func (p *Publisher) prices(now time.Time) map[string]decimal.Decimal {
+	out := map[string]decimal.Decimal{domain.Valuation: decimal.NewFromInt(1)}
+	for symbol, base := range p.priced {
+		if b := p.books[symbol]; b != nil && !b.gap && now.Sub(b.heard) < p.cfg.Stale {
 			if m := midOf(b); m.IsPositive() {
-				out[spec.Base] = m
+				out[base] = m
 			}
 		}
 	}
