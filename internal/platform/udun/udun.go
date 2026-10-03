@@ -288,7 +288,7 @@ func (c *Client) call(ctx context.Context, path string, body, out any) error {
 		return fmt.Errorf("udun %s: %w", path, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("udun %s: HTTP %d", path, resp.StatusCode)
+		return fmt.Errorf("udun %s: HTTP %d: %s", path, resp.StatusCode, snippet(answer))
 	}
 	var r struct {
 		Code    Text            `json:"code"`
@@ -296,7 +296,7 @@ func (c *Client) call(ctx context.Context, path string, body, out any) error {
 		Data    json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(answer, &r); err != nil {
-		return fmt.Errorf("udun %s: unreadable answer: %w", path, err)
+		return fmt.Errorf("udun %s: unreadable answer %s: %w", path, snippet(answer), err)
 	}
 	code, err := strconv.Atoi(string(r.Code))
 	if err != nil {
@@ -314,10 +314,23 @@ func (c *Client) call(ctx context.Context, path string, body, out any) error {
 	return nil
 }
 
-// Address is a deposit address the gateway created.
+// snippet is the start of an answer for an error: at most 300 bytes on
+// one line (an HTML error page, a proxy's refusal).
+func snippet(b []byte) string {
+	const most = 300
+	s := strings.ToValidUTF8(string(b), "")
+	if len(s) > most {
+		s = strings.ToValidUTF8(s[:most], "") + "…"
+	}
+	return strconv.Quote(strings.Join(strings.Fields(s), " "))
+}
+
+// Address is a deposit address the gateway created; Raw is the answer's
+// data as it came.
 type Address struct {
-	Address  string `json:"address"`
-	CoinType Text   `json:"coinType"`
+	Address  string          `json:"address"`
+	CoinType Text            `json:"coinType"`
+	Raw      json.RawMessage `json:"-"`
 }
 
 // CreateAddress asks for a new deposit address of the chain mainCoinType;
@@ -343,6 +356,7 @@ func (c *Client) CreateAddress(ctx context.Context, mainCoinType int, callURL, w
 	if a.Address == "" {
 		return Address{}, fmt.Errorf("udun %s: no address in %s", PathCreateAddress, data)
 	}
+	a.Raw = data
 	return a, nil
 }
 

@@ -95,18 +95,23 @@ func (u *Udun) Coins(ctx context.Context) ([]ports.CustodyCoin, error) {
 	}
 	out := make([]ports.CustodyCoin, 0, len(list))
 	for _, c := range list {
-		coin := ports.CustodyCoin{Code: c.Code(), Symbol: c.Symbol, Token: c.TokenStatus == "1"}
-		if d, err := strconv.ParseInt(string(c.Decimals), 10, 32); err == nil {
-			coin.Decimals = int32(d)
-		}
-		// A balance with more decimals than the coin has is not in coins;
-		// left out, it fails the check instead of skewing it.
-		if b, err := decimal.NewFromString(string(c.Balance)); err == nil && (coin.Decimals == 0 || b.Equal(b.Truncate(coin.Decimals))) {
-			coin.Balance = &b
-		}
-		out = append(out, coin)
+		out = append(out, CoinOf(c))
 	}
 	return out, nil
+}
+
+// CoinOf reads one of the gateway's coins as the platform takes it.
+func CoinOf(c udun.Coin) ports.CustodyCoin {
+	coin := ports.CustodyCoin{Code: c.Code(), Symbol: c.Symbol, Token: c.TokenStatus == "1"}
+	if d, err := strconv.ParseInt(string(c.Decimals), 10, 32); err == nil {
+		coin.Decimals = int32(d)
+	}
+	// A balance with more decimals than the coin has is not in coins;
+	// left out, it fails the check instead of skewing it.
+	if b, err := decimal.NewFromString(string(c.Balance)); err == nil && (coin.Decimals == 0 || b.Equal(b.Truncate(coin.Decimals))) {
+		coin.Balance = &b
+	}
+	return coin
 }
 
 // words is what a withdrawal's callback status means.

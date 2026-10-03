@@ -437,12 +437,14 @@ func (r suspensions) Suspect(ctx context.Context, asset string, now time.Time) (
 	return since, nil
 }
 
-func (r suspensions) Clear(ctx context.Context, asset string, accepted bool) error {
-	q := `UPDATE shortfall_watch SET suspect_since = NULL WHERE asset = $1`
-	if accepted {
-		q = `UPDATE shortfall_watch SET suspect_since = NULL, accepted = 0, accepted_until = NULL, accepted_by = '' WHERE asset = $1`
-	}
-	if _, err := r.q.Exec(ctx, q, asset); err != nil {
+func (r suspensions) Clear(ctx context.Context, asset string, suspicion, accepted bool) error {
+	_, err := r.q.Exec(ctx, `UPDATE shortfall_watch SET
+		suspect_since = CASE WHEN $2 THEN NULL ELSE suspect_since END,
+		accepted = CASE WHEN $3 THEN 0 ELSE accepted END,
+		accepted_until = CASE WHEN $3 THEN NULL ELSE accepted_until END,
+		accepted_by = CASE WHEN $3 THEN '' ELSE accepted_by END
+		WHERE asset = $1`, asset, suspicion, accepted)
+	if err != nil {
 		return fmt.Errorf("clear shortfall watch: %w", err)
 	}
 	return nil

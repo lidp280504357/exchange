@@ -24,7 +24,7 @@ func suspend(ctx context.Context, store ports.Store, x domain.Suspension) (bool,
 		if done, err = r.Suspensions().Put(ctx, x); err != nil {
 			return err
 		}
-		if err := r.Suspensions().Clear(ctx, x.Asset, false); err != nil || !done {
+		if err := r.Suspensions().Clear(ctx, x.Asset, true, false); err != nil || !done {
 			return err
 		}
 		return r.Audit(ctx, &auditv1.AdminActionPerformed{
@@ -97,10 +97,16 @@ func ResumeWithdrawals(ctx context.Context, store ports.Store, in Resume, now ti
 		if x == nil {
 			return apperr.NotFound("withdrawals of " + asset + " are not suspended")
 		}
+		// What the check that suspended the asset found missing bounds what
+		// may be accepted (review AB); an operator's suspension found
+		// nothing, the operator answers for what they accept.
+		if x.SuspendedBy == domain.SuspendedBySystem && in.Accept.GreaterThan(x.Shortfall) {
+			return apperr.Invalid(fmt.Sprintf("at most the %s found missing can be accepted", x.Shortfall))
+		}
 		if _, err := r.Suspensions().Delete(ctx, asset); err != nil {
 			return err
 		}
-		if err := r.Suspensions().Clear(ctx, asset, false); err != nil {
+		if err := r.Suspensions().Clear(ctx, asset, true, false); err != nil {
 			return err
 		}
 		accepted := ""

@@ -544,10 +544,16 @@ func (p *CustodyProcessor) Check(ctx context.Context) ([]domain.ChainCheck, erro
 	if err != nil {
 		return nil, err
 	}
-	feesHeld := map[string]decimal.Decimal{} // the custodian's fees held for a person, by asset
+	feesHeld := map[string]decimal.Decimal{} // what the custodian's fees held for a person explain, by asset
 	for _, f := range held {
-		if strings.HasPrefix(f.TxHash, p.Custody.Provider()+":") {
-			feesHeld[f.Asset] = feesHeld[f.Asset].Add(f.Amount)
+		if !strings.HasPrefix(f.TxHash, p.Custody.Provider()+":") {
+			continue
+		}
+		// A held fee is one beyond belief, in a unit nobody confirmed or
+		// without a bound: it explains at most feeBound times its network's
+		// withdrawal fee, not a loss as large as itself (review AB).
+		if n, ok := networkOf(nets, f.Asset, f.Network); ok {
+			feesHeld[f.Asset] = feesHeld[f.Asset].Add(decimal.Min(f.Amount, n.WithdrawFee.Mul(decimal.NewFromInt(feeBound))))
 		}
 	}
 	unbooked := map[string]decimal.Decimal{}
@@ -618,18 +624,28 @@ func (p *CustodyProcessor) Check(ctx context.Context) ([]domain.ChainCheck, erro
 
 // stopOf is how much of asset may be missing before its withdrawals stop:
 // ShortfallStop's, else the smallest withdrawal fee of its networks with
-// the custodian.
+// the custodian, or for networks charging none their smallest minimum
+// withdrawal or deposit (review AB: not 0, which a rounding passes).
 func (p *CustodyProcessor) stopOf(asset string, nets []domain.Network) decimal.Decimal {
 	if stop, ok := p.ShortfallStop[asset]; ok {
 		return stop
 	}
-	stop := decimal.Zero
-	for _, n := range nets {
-		if n.Asset == asset && n.WithdrawFee.IsPositive() && (stop.IsZero() || n.WithdrawFee.LessThan(stop)) {
-			stop = n.WithdrawFee
+	for _, of := range []func(domain.Network) decimal.Decimal{
+		func(n domain.Network) decimal.Decimal { return n.WithdrawFee },
+		func(n domain.Network) decimal.Decimal { return n.MinWithdraw },
+		func(n domain.Network) decimal.Decimal { return n.MinDeposit },
+	} {
+		stop := decimal.Zero
+		for _, n := range nets {
+			if v := of(n); n.Asset == asset && v.IsPositive() && (stop.IsZero() || v.LessThan(stop)) {
+				stop = v
+			}
+		}
+		if stop.IsPositive() {
+			return stop
 		}
 	}
-	return stop
+	return decimal.Zero
 }
 
 // watchShortfall suspends an asset's withdrawals when more of it is
@@ -649,11 +665,16 @@ func (p *CustodyProcessor) watchShortfall(ctx context.Context, c domain.ChainChe
 	}
 	missing := c.Shortfall.Sub(explained)
 	accepted := w.AcceptedAt(now)
+	if lapsed := w.Accepted.IsPositive() && accepted.IsZero(); lapsed {
+		if err := p.Store.Tx(ctx, func(r ports.Repos) error { return r.Suspensions().Clear(ctx, c.Asset, false, true) }); err != nil {
+			return err
+		}
+	}
 	if !missing.Sub(accepted).GreaterThan(stop) {
 		if w.SuspectSince.IsZero() {
 			return nil
 		}
-		return p.Store.Tx(ctx, func(r ports.Repos) error { return r.Suspensions().Clear(ctx, c.Asset, false) })
+		return p.Store.Tx(ctx, func(r ports.Repos) error { return r.Suspensions().Clear(ctx, c.Asset, true, false) })
 	}
 	var since time.Time
 	if err := p.Store.Tx(ctx, func(r ports.Repos) error {

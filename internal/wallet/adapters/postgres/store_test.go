@@ -331,13 +331,13 @@ func TestOperations(t *testing.T) {
 	if list, err := read.Suspensions().Watches(ctx); err != nil || len(list) != 1 || !list[0].AcceptedUntil.Equal(until) || list[0].AcceptedBy != "ops" {
 		t.Fatalf("watches %+v %v", list, err)
 	}
-	if err := read.Suspensions().Clear(ctx, "BTC", false); err != nil {
+	if err := read.Suspensions().Clear(ctx, "BTC", true, false); err != nil {
 		t.Fatal(err)
 	}
 	if w, err := read.Suspensions().Watch(ctx, "BTC"); err != nil || !w.SuspectSince.IsZero() || !w.Accepted.Equal(decimal.RequireFromString("0.0003")) {
 		t.Fatalf("cleared the suspicion only %+v %v", w, err)
 	}
-	if err := read.Suspensions().Clear(ctx, "BTC", true); err != nil {
+	if err := read.Suspensions().Clear(ctx, "BTC", false, true); err != nil {
 		t.Fatal(err)
 	}
 	if list, err := read.Suspensions().Watches(ctx); err != nil || len(list) != 0 {
@@ -627,6 +627,13 @@ func TestCustodyStorage(t *testing.T) {
 	}
 	if !slices.Equal(stored.RemoteIPs, []string{"203.0.113.10", "203.0.113.11"}) || stored.Attempts != 4 {
 		t.Fatalf("addresses %v after %d attempts", stored.RemoteIPs, stored.Attempts)
+	}
+	for i := range domain.MaxRemoteIPs - 1 { // the newest are kept
+		retry.RemoteIPs = []string{"198.51.100." + strconv.Itoa(i+1)}
+		receive(retry)
+	}
+	if len(stored.RemoteIPs) != domain.MaxRemoteIPs || stored.RemoteIPs[0] != "203.0.113.11" || stored.RemoteIPs[domain.MaxRemoteIPs-1] != "198.51.100.7" {
+		t.Fatalf("the newest %d: %v", domain.MaxRemoteIPs, stored.RemoteIPs)
 	}
 	for range 2 {
 		forged := domain.Callback{

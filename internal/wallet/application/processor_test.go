@@ -87,12 +87,14 @@ func (s memSuspensions) Suspect(ctx context.Context, asset string, now time.Time
 	return w.SuspectSince, nil
 }
 
-func (s memSuspensions) Clear(_ context.Context, asset string, accepted bool) error {
+func (s memSuspensions) Clear(_ context.Context, asset string, suspicion, accepted bool) error {
 	w, ok := s.m.watches[asset]
 	if !ok {
 		return nil
 	}
-	w.SuspectSince = time.Time{}
+	if suspicion {
+		w.SuspectSince = time.Time{}
+	}
 	if accepted {
 		w.Accepted, w.AcceptedUntil, w.AcceptedBy = decimal.Zero, time.Time{}, ""
 	}

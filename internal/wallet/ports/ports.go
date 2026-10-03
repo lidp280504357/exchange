@@ -231,9 +231,8 @@ type SuspensionRepo interface {
 	// Suspect records that a check at now found funds missing unless an
 	// earlier one did, and returns when the first one did.
 	Suspect(ctx context.Context, asset string, now time.Time) (time.Time, error)
-	// Clear forgets a suspicion, and with accepted the accepted difference
-	// too.
-	Clear(ctx context.Context, asset string, accepted bool) error
+	// Clear forgets a suspicion, an accepted difference, or both.
+	Clear(ctx context.Context, asset string, suspicion, accepted bool) error
 	// Accept records a difference a person accepted until a time.
 	Accept(ctx context.Context, asset string, amount decimal.Decimal, until time.Time, by string) error
 }

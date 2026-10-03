@@ -90,7 +90,7 @@ func NewProcessor(p Processor, reg prometheus.Registerer) *Processor {
 		Name: "wallet_sweeps_open", Help: "Broadcast sweeps waiting for their receipt.", ConstLabels: labels,
 	})
 	p.waiting = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "wallet_withdrawals_waiting", Help: "Approved withdrawals waiting for the hot wallet or for fees within the cap.", ConstLabels: labels,
+		Name: "wallet_withdrawals_waiting", Help: "Approved withdrawals waiting for the hot wallet, for fees within the cap or for their asset's suspension to be lifted.", ConstLabels: labels,
 	})
 	reg.MustRegister(p.chainGauge, p.ledgerGauge, p.shortfallGauge, p.hotGauge, p.unbookedGauge, p.openSweeps, p.waiting)
 	p.mu = new(sync.Mutex)

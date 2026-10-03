@@ -50,9 +50,10 @@ func (r callbacks) Receive(ctx context.Context, c domain.Callback) (domain.Callb
 	c.Raw = clip(strings.ToValidUTF8(strings.ReplaceAll(c.Raw, "\x00", ""), "\uFFFD"), 16384)
 	if c.SignatureOK {
 		// The custodian's retry of a callback it sent before: one more
-		// attempt, and its address kept if new (up to MaxRemoteIPs).
+		// attempt, and its address kept if new (the newest MaxRemoteIPs).
 		stored, err := scanCallback(r.q.QueryRow(ctx, `UPDATE custody_callbacks SET attempts = attempts + 1,
-			remote_ips = CASE WHEN remote_ips @> $4 OR cardinality(remote_ips) >= $5 THEN remote_ips ELSE remote_ips || $4 END
+			remote_ips = CASE WHEN remote_ips @> $4 THEN remote_ips
+				ELSE (remote_ips || $4)[greatest(1, cardinality(remote_ips || $4) - $5 + 1):] END
 			WHERE provider = $1 AND trade_id = $2 AND status IS NOT DISTINCT FROM $3 AND signature_ok
 			RETURNING `+callbackColumns, c.Provider, c.TradeID, status, remoteIPs(c), domain.MaxRemoteIPs))
 		switch {

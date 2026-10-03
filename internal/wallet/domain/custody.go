@@ -61,8 +61,8 @@ type Callback struct {
 	Attempts    int
 	ReceivedAt  time.Time
 	ProcessedAt time.Time
-	// RemoteIPs are the addresses its deliveries came from, the first
-	// first (at most MaxRemoteIPs); a new one is the address of this
+	// RemoteIPs are the addresses its deliveries came from, oldest first
+	// (the newest MaxRemoteIPs); a new one is the address of this
 	// delivery.
 	RemoteIPs []string
 }

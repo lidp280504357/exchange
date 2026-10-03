@@ -305,7 +305,7 @@ groups:
         for: 30m
         labels: {severity: warning}
         annotations:
-          summary: "{{ $value }} approved withdrawals on {{ $labels.network }} wait for the hot wallet or for fees within the cap"
+          summary: "{{ $value }} approved withdrawals on {{ $labels.network }} wait for the hot wallet, for fees within the cap or for their asset's suspension to be lifted"
           runbook: docs/runbook/wallet.md
 
       - alert: CustodyShortfall

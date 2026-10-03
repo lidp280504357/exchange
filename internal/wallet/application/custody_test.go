@@ -73,8 +73,8 @@ func (c memCallbacks) Receive(_ context.Context, x domain.Callback) (domain.Call
 			if y.SignatureOK && y.Provider == x.Provider && y.TradeID == x.TradeID && y.Status == x.Status {
 				c.m.callbacks[i].Attempts++
 				for _, ip := range x.RemoteIPs {
-					if !slices.Contains(y.RemoteIPs, ip) && len(c.m.callbacks[i].RemoteIPs) < domain.MaxRemoteIPs {
-						c.m.callbacks[i].RemoteIPs = append(c.m.callbacks[i].RemoteIPs, ip)
+					if ips := c.m.callbacks[i].RemoteIPs; !slices.Contains(ips, ip) {
+						c.m.callbacks[i].RemoteIPs = append(ips, ip)[max(0, len(ips)+1-domain.MaxRemoteIPs):]
 					}
 				}
 				return c.m.callbacks[i], false, nil
@@ -1255,6 +1255,32 @@ func TestHeldFeesExplainAShortfall(t *testing.T) {
 	if _, err := h.cproc.Check(ctx); err != nil || h.suspects() != 1 {
 		t.Fatalf("beyond the held fee: %v %v", h.store.watches, err)
 	}
+	// One held as beyond belief explains at most five times the network's
+	// fee, not a loss as large as itself (review AB): 3 + 5 of 50.
+	h.store.fees["UDUN:fee-2"] = domain.ChainFee{
+		TxHash: "UDUN:fee-2", Network: tron, Asset: "USDT", Amount: d("100"), Purpose: domain.FeeWithdrawal, Status: domain.FeeHeld,
+	}
+	h.missing("50")
+	h.now = h.now.Add(5 * time.Minute)
+	if _, err := h.cproc.Check(ctx); err != nil || len(h.store.suspended) != 1 || !h.store.suspended["USDT"].Shortfall.Equal(d("42")) {
+		t.Fatalf("a held fee hid a loss: %v %v", h.store.suspended, err)
+	}
+}
+
+// A network charging no withdrawal fee gives its smallest minimum
+// withdrawal as the threshold, not 0 (review AB).
+func TestAFeelessNetworksThresholdIsItsMinimum(t *testing.T) {
+	h := newCustodyHarness(t)
+	ctx := context.Background()
+	h.nets.nets[len(h.nets.nets)-1].WithdrawFee = decimal.Zero
+	h.missing("9")
+	if _, err := h.cproc.Check(ctx); err != nil || h.suspects() != 0 {
+		t.Fatalf("within the minimum withdrawal: %v %v", h.store.watches, err)
+	}
+	h.missing("11")
+	if _, err := h.cproc.Check(ctx); err != nil || h.suspects() != 1 {
+		t.Fatalf("beyond it: %v %v", h.store.watches, err)
+	}
 }
 
 // Review of ebb8aaa, H2: lifting a suspension starts the checks over, so a
@@ -1304,6 +1330,13 @@ func TestAResumeStartsTheChecksOver(t *testing.T) {
 			t.Fatalf("%+v: %v", bad, err)
 		}
 	}
+	tooMuch := Resume{Asset: "USDT", Actor: "ops", Reason: "more than was missing", Accept: d("11"), AcceptFor: time.Hour}
+	if _, err := ResumeWithdrawals(ctx, h.store, tooMuch, h.now); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("accepted more than the check found missing: %v", err)
+	}
+	if _, ok := h.store.suspended["USDT"]; !ok {
+		t.Fatal("a refused resume lifted the suspension")
+	}
 	accepted := Resume{Asset: "USDT", Actor: "ops", Reason: "the custodian's rounding, a ledger correction follows", Accept: d("10"), AcceptFor: 24 * time.Hour}
 	if _, err := ResumeWithdrawals(ctx, h.store, accepted, h.now); err != nil {
 		t.Fatal(err)
@@ -1334,6 +1367,9 @@ func TestAResumeStartsTheChecksOver(t *testing.T) {
 	h.missing("10")
 	h.now = h.now.Add(24 * time.Hour)
 	suspendNow()
+	if w := h.store.watches["USDT"]; !w.Accepted.IsZero() || !w.AcceptedUntil.IsZero() {
+		t.Fatalf("a lapsed acceptance is forgotten: %+v", w)
+	}
 }
 
 // Review of ebb8aaa: a recheck the custodian did not answer comes again
@@ -1440,6 +1476,14 @@ func TestACallbackKeepsTheAddressesItCameFrom(t *testing.T) {
 	cb := h.store.callbacks[len(h.store.callbacks)-1]
 	if cb.Attempts != 3 || !slices.Equal(cb.RemoteIPs, []string{"203.0.113.10", "203.0.113.11"}) {
 		t.Fatalf("kept %v after %d attempts", cb.RemoteIPs, cb.Attempts)
+	}
+	for i := range domain.MaxRemoteIPs { // the newest are kept
+		h.callbackFrom = fmt.Sprintf("198.51.100.%d", i+1)
+		h.callback(t, tr)
+	}
+	cb = h.store.callbacks[len(h.store.callbacks)-1]
+	if len(cb.RemoteIPs) != domain.MaxRemoteIPs || cb.RemoteIPs[0] != "198.51.100.1" || cb.RemoteIPs[domain.MaxRemoteIPs-1] != "198.51.100.8" {
+		t.Fatalf("the newest %d: %v", domain.MaxRemoteIPs, cb.RemoteIPs)
 	}
 	if _, err := h.svc.HandleCallback(ctx, domain.ProviderUdun, "", "198.51.100.66", []byte("bad:{}")); err == nil {
 		t.Fatal("a forged callback was taken")

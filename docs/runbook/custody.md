@@ -30,7 +30,7 @@ custody_callbacks（原文、验签、结果、次数）──> 充值：deposit
 | `UDUN_API_KEY` | 签名密钥（请求与回调共用），只在本地 `.env` 与服务器 `apps.env`；至少 32 个字符（128 位随机，例如 32 位十六进制），短了 wallet-service 不启动 |
 | `UDUN_WALLET_ID` | 可选，商户下的钱包 |
 | `UDUN_CALLBACK_URL` | 托管方回调地址：真网关用 `https://astras.vip/v1/wallet/callbacks/udun`；测试服模拟网关用 `http://api-gateway:8080/v1/wallet/callbacks/udun`（内网，经网关） |
-| `UDUN_CALLBACK_ALLOWED_IPS` | 托管方回调的出口 IP（逗号分隔，可写 CIDR）。测试服填容器网段 `172.18.0.0/16`（模拟网关在内网经网关回调）。**空即不限来源**（2026-10-03：优盾后台与文档都没有给出回调出口 IP）：只靠签名、时间戳（±5 分钟）与按"单号 + 状态"去重，启动时记 WARN；每条回调（被拒的也一样）把来源 IP 记进 `custody_callbacks.remote_ips`（同一条回调的重发来自新地址时追加，最多 8 个），真回调来过几笔后从这里取地址再收紧（见下文「换成真网关」）。公网这一层另由 nginx 把关：回调路径（`/v1/wallet/callbacks/` 下任何托管方、不分大小写，按解码后的地址匹配）每个来源每秒 10 个、可突发 50 个（超过 429，托管方会重发），只放行 `deploy/compose/nginx/snippets/custody-callback-allow.conf` 里的 `allow` 地址，文件里没有地址时全部 403（审查 B3），写 `allow all;` 即不限来源；wallet-service 只认小写的托管方名，`/v1/wallet/callbacks/UDUN` 这类写法 404 |
+| `UDUN_CALLBACK_ALLOWED_IPS` | 托管方回调的出口 IP（逗号分隔，可写 CIDR）。测试服填容器网段 `172.18.0.0/16`（模拟网关在内网经网关回调）。**空即不限来源**（2026-10-03：优盾后台与文档都没有给出回调出口 IP）：只靠签名、时间戳（±5 分钟）与按"单号 + 状态"去重，启动时记 WARN；每条回调（被拒的也一样）把来源 IP 记进 `custody_callbacks.remote_ips`（同一条回调的重发来自新地址时追加，保留最新的 8 个），真回调来过几笔后从这里取地址再收紧（见下文「换成真网关」）。公网这一层另由 nginx 把关：回调路径（`/v1/wallet/callbacks/` 下任何托管方、不分大小写，按解码后的地址匹配）每个来源每秒 10 个、可突发 50 个（超过 429，托管方会重发），只放行 `deploy/compose/nginx/snippets/custody-callback-allow.conf` 里的 `allow` 地址，文件里没有地址时全部 403（审查 B3），写 `allow all;` 即不限来源；wallet-service 只认小写的托管方名，`/v1/wallet/callbacks/UDUN` 这类写法 404 |
 | `WALLET_CUSTODY_INTERVAL` | 托管方处理周期，默认 5 秒 |
 
 网络在 `deploy/instruments/test.json`（`exchangectl instruments apply` 同步）：
@@ -120,10 +120,10 @@ exchangectl wallet custody-fee <提现ID> --write-off --reason "..."  # 不入�
 短缺里减去说得清的部分之后，还缺得比这个资产的门槛多，就是"说不清的短缺"。说得清的部分：
 
 - 结果未知的提现可能已拿走的：交出去没回音的 `SUBMITTED` 与 `UNCERTAIN`，托管方可能已经发出；
-- 挂起等人工处理的手续费（`HELD`）：每笔都有自己的告警 `CustodyFeesHeld`，金额有上限（见上文）；
+- 挂起等人工处理的手续费（`HELD`）：每笔都有自己的告警 `CustodyFeesHeld`；挂起的正是超出常理、单位没人确认或没有上限可比的那些，所以每笔最多只算它网络提现手续费的 5 倍（找不到网络的不算），不让一笔报错单位的手续费掩盖同样大的缺口（审查 AB）；
 - 人工解除停提时接受的差额，在接受期内（见下文）。
 
-门槛（ebb8aaa 审查 H1）：`WALLET_SHORTFALL_STOP`，如 `USDT=1,BTC=0.0001,ETH=0.001`（测试服 compose 里就是这组，大约是托管方手续费的粒度）；没写的资产取它托管网络里最小的提现手续费。托管方余额 0.000001 的舍入不会再停提。
+门槛（ebb8aaa 审查 H1）：`WALLET_SHORTFALL_STOP`，如 `USDT=1,BTC=0.0001,ETH=0.001`（测试服 compose 里就是这组，大约是托管方手续费的粒度）；没写的资产取它托管网络里最小的提现手续费，网络都不收手续费时取最小的最小提现数量、再没有就取最小的最小充值数量（审查 AB：不是 0）。托管方余额 0.000001 的舍入不会再停提。
 
 - 第一次看到：记进表 `shortfall_watch`（`suspect_since`，重启不丢），5 分钟后再对一次账（不等一小时；那次对账失败了，再过 5 分钟又对，不会拖到下一个整点）；中间人工 `reconcile` 不算数。
 - 5 分钟后还缺：**停掉这个资产的提现**——表 `withdrawal_suspensions` 写一行（缺多少、两次对账的时间），审计 `wallet.withdrawals.suspend`（操作人 `system:custody-check`）。用户新提这个资产直接被拒（422 `WALLET_WITHDRAW_SUSPENDED`，"该币种暂停提现，平台正在核对资金"），公开的 `GET /v1/wallet/networks` 里这个资产的网络 `withdraw_enabled` 为 false、`withdraw_suspended` 为 true（两个站的提现页显示"暂停提现，平台正在核对资金"）。已批准的停在 `APPROVED` 不交给托管方（自建钱包也不签名，但不挡后面的站内转账），按资产计数 `wallet_withdrawals_suspended_waiting{asset}`，等了 30 分钟告警 `WalletWithdrawalsWaitingOnSuspension`。充值、交易、站内转账照常。指标 `wallet_withdrawals_suspended{asset}` 为 1，告警 `WalletWithdrawalsSuspended`（严重）。
@@ -138,7 +138,7 @@ exchangectl wallet withdrawals-resume --asset USDT --reason "托管方舍入差 
 exchangectl wallet withdrawals-suspend --asset USDT --reason "托管方通报事故"
 ```
 
-解除后对账从头开始：还缺的话重新"第一次看到"，5 分钟后再停，不会立刻又停（ebb8aaa 审查 H2）。查清了但一时补不平的差额（比如托管方的舍入差，账本更正还在走流程），解除时用 `--accept` 接受下来、`--for` 定期限（最长 7 天，默认 24 小时）：期内对账只把超出接受额的部分当缺口，再多缺了照样停（停提原因里写明接受了多少、谁接受的）；到期自动失效，差额还在就重新停。长期的差额要在账本里更正，不要反复延长接受。`withdrawals-suspended` 同时列出正在观察的资产（第一次看到的时间、接受的差额与期限）。
+解除后对账从头开始：还缺的话重新"第一次看到"，5 分钟后再停，不会立刻又停（ebb8aaa 审查 H2）。查清了但一时补不平的差额（比如托管方的舍入差，账本更正还在走流程），解除时用 `--accept` 接受下来、`--for` 定期限（最长 7 天，默认 24 小时）：期内对账只把超出接受额的部分当缺口，再多缺了照样停（停提原因里写明接受了多少、谁接受的）；对账自动停的，最多接受停提时记下的缺额（人工停的由操作人自己负责）；到期自动失效（下一次对账清掉），差额还在就重新停。长期的差额要在账本里更正，不要反复延长接受。`withdrawals-suspended` 同时列出正在观察的资产（第一次看到的时间、接受的差额与期限）。
 
 两者都写审计（`wallet.withdrawals.resume` 带上停提的时间、原因与接受的差额）。
 
@@ -169,10 +169,10 @@ sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T udu
 ```bash
 cd /opt/exchange/infra && sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangectl udun coins
 sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangectl udun check-address --main-coin 195 --address <地址>
-sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangectl udun create-address --main-coin 195 --alias probe-tron
+sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangectl udun create-address --main-coin 195 --alias probe-tron --yes
 ```
 
-`coins` 列出商户的币种编码（`provider_coin` 就填这里的 `CODE`）、小数位、是否代币与余额；`create-address` 建的地址会把充值回调到 `UDUN_CALLBACK_URL`，没有对应用户，到账只会记成 `UNMATCHED`、钱留在托管方。密钥只从环境读，不打印。
+`coins` 列出商户的币种编码（`provider_coin` 就填这里的 `CODE`）、小数位、是否代币与余额，旁边是 wallet-service 读成的小数位与余额（读不成的余额是 `-`，对账时会报不比较）；`check-address`、`create-address` 必须写 `--main-coin`（195 TRON、60 以太坊、0 比特币，见 `coins` 的 `MAIN` 列）。`create-address` 先说明要建什么（链、钱包、名字、回调地址）：建的地址会把充值回调到 `UDUN_CALLBACK_URL`，没有对应用户，到账只会记成 `UNMATCHED`、钱留在托管方；不带 `--yes` 只说明不建，带了才建，并打印托管方的原始应答。设置值去掉首尾空白，带引号（`docker --env-file` 不去引号）、密钥不足 32 位、网关不是 https 的都直接拒绝；密钥、商户号与钱包号都不打印。
 
 1. 托管方后台登记回调地址 `https://astras.vip/v1/wallet/callbacks/udun`，把服务器出口 IP 加白名单。
 2. `apps.env` 改 `UDUN_GATEWAY_URL`、`UDUN_MERCHANT_ID`、`UDUN_API_KEY`、`UDUN_WALLET_ID`、`UDUN_CALLBACK_URL`；托管方给了回调出口地址时 `UDUN_CALLBACK_ALLOWED_IPS` 填它、`custody-callback-allow.conf` 加同样的 `allow` 行，没给时前者留空、后者写 `allow all;`（只靠签名），提交部署；重启 wallet-service。真回调来过几笔后查来源再收紧：
