@@ -541,8 +541,16 @@ func (s *Service) Approvals(ctx context.Context, p Principal, status, cursor str
 	}
 	limit = pageLimit(limit)
 	list, err := s.Store.Read().Approvals().List(ctx, status, at, id, limit+1)
-	if err != nil || len(list) <= limit {
-		return list, "", err
+	if err != nil {
+		return nil, "", err
+	}
+	now := s.Now()
+	for i := range list {
+		a := &list[i]
+		a.Lapsed = simKind(a.Kind) && a.Status == domain.ApprovalPending && !now.Before(simExpiry(*a))
+	}
+	if len(list) <= limit {
+		return list, "", nil
 	}
 	list = list[:limit]
 	last := list[limit-1]

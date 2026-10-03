@@ -4408,6 +4408,11 @@ export interface components {
              *     changes and before any attempt.
              */
             attempted_at: string | null;
+            /**
+             * @description In the list: a simulated market's pending request past its expiry (a day after it was asked for, or when its
+             *     event was to start) by the server's clock; approving it only marks it FAILED. False otherwise.
+             */
+            expired?: boolean;
         };
         CrossMargin: {
             /** @example USDT */

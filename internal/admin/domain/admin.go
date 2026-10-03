@@ -327,6 +327,9 @@ type Approval struct {
 	// The administrators' emails, for display (read only).
 	RequestedByEmail string
 	DecidedByEmail   string
+	// Lapsed reports, as read, that a simulated market's pending request is
+	// past its expiry by the server's clock (read only, review ⑭).
+	Lapsed bool
 }
 
 // ErrDepositAssignOpen refuses a second request to credit a deposit of

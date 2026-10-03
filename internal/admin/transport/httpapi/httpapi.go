@@ -798,13 +798,16 @@ type ApprovalJSON struct {
 	// AttemptedAt is when an attempt to carry it out began: pending with
 	// it, it may have booked (finish it, never reject it).
 	AttemptedAt *string `json:"attempted_at"`
+	// Expired: a simulated market's pending request past its expiry by
+	// the server's clock, in a list (review ⑭).
+	Expired bool `json:"expired"`
 }
 
 func approvalJSON(a domain.Approval) ApprovalJSON {
 	out := ApprovalJSON{
 		ID: a.ID, Kind: a.Kind, Payload: a.Payload, Reason: a.Reason, Status: a.Status, RequestedBy: a.RequestedBy,
 		RequestedByEmail: a.RequestedByEmail, Result: a.Result, CreatedAt: httpx.FormatTime(a.CreatedAt), Mode: a.Mode,
-		Escalation: a.Escalation,
+		Escalation: a.Escalation, Expired: a.Lapsed,
 	}
 	if out.Mode == "" {
 		out.Mode = domain.ModeTwoPerson

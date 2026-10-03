@@ -140,7 +140,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 - **资料与身份**：基本资料、身份（类型、脱敏值、验证与绑定时间）、已同意的条款与风险披露版本、状态变更时间线（user-service gRPC `GetUserHistory`）。
 - **安全**（auth-service 的 gRPC，见 [auth.md](auth.md#管理后台的安全操作grpcc2)）：身份验证器状态与重置、密码修改时间与登录锁定、生成临时密码、活跃会话（逐个或全部退出）、设备、登录记录（游标分页）。操作需 `users.security` 与理由，审计 `admin.users.totp_reset`、`admin.users.password_reset`、`admin.users.sessions_revoked`。
   - **临时密码**只显示一次（应答带 `Cache-Control: no-store`，不进日志与审计）：原密码失效、全部会话退出、登录锁定清除，用户收到密码重置邮件，24 小时内的提现转人工审核。通过可信渠道告知用户，并提醒用户登录后立即修改。用户站暂不强制"下次登录必须改密码"（见设计稿 §10 C2 的遗留）。
-  - 用户的身份验证器被后台重置或用户自己解绑后，24 小时内的提现转人工审核（C5.5 ⑤，auth `totp_changed_at`）。
+  - 用户的身份验证器被后台重置或用户自己解绑后，24 小时内的提现转人工审核（C5.5 ⑤，auth `totp_changed_at` 经 step-up 的安全上下文到钱包的风控 `SECURITY_CHANGE`）；用户收到的「已解绑身份验证器」通知与邮件写明这一点（⑭）。
 - **风控**：风控规则对该用户的评估（触发事件、分数、动作、是否执行、命中规则及说明；risk-service 只读 gRPC `ListAssessments`），并可转人工审核（`RISK_REVIEW`）或审核通过后恢复（同「改账户状态」，需 `users.status`）。
 - **余额与资金**：现货与合约账户每个资产的可用、冻结、合计与 USDT 估值（按该资产 USDT 交易对的最新价，没有价格的列出来、不计入总估值）；调整余额可选现货或合约账户（资金操作，见下文）。
   - **风控冻结**（`ledger.hold`，ADMIN、OPERATOR、FINANCE）：冻结现货可用余额的一部分或解冻，由账本记分录与审计（见 [ledger.md](ledger.md#接口)）。
@@ -322,7 +322,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
   - 确认框显示按目标价估算的永续影响：多空仓位数、会被强平的仓位数与名义、穿仓额（`POST /admin/v1/sim/impact`，derivatives-service 的 `/internal/derivatives/contracts/{symbol}/price-impact` 按强平监控的同一规则计算，不改任何东西）。
   - market-sim 管单人份额（单次 30%、任一小时合计 50%，按事件开始时间计；参数里 `p0`、`max_minute_move`、`floor`、`ceiling`、`daily_volume` 按影响计入）。超出时它返回 `SIM_EVENT_NEEDS_APPROVAL` / `SIM_PARAMS_NEED_APPROVAL`，后台把这次改动存成资金操作（`SIM_EVENT`、`SIM_PARAMS`，`escalation` 为 `SIM_SHARE`，`payload.move` 是 market-sim 估算的幅度），接口返回 202。
   - 另一位有 `sim.control` 的管理员在「审批」里批准后，admin-service 用自己的键（`admin`，`SIM_ADMIN_API_SECRET`，在服务器 `sim/admin.env`）签名调用 market-sim：`actor` 是申请人、`approved_by` 是批准人，两个名字都取自后台会话，不取自浏览器。批准人以当前登录的会话为准，不再要身份验证器。申请人不能批准自己的（`ADMIN_SELF_APPROVAL`）。
-  - 这类申请一天未决、或事件到了开始时间就过期：批准过期的只会记为失败（结果 `expired at <时间>`），不发给 market-sim；列表标「已过期」。批准框里有按现在的目标价重新测的幅度（与申请时 market-sim 的估算并列）和对永续的影响（`GET /admin/v1/approvals/{id}/sim-preview`；跳涨、目标价事件与锚定价修改能直接算出价格，其它只显示申请时的估算）。
+  - 这类申请一天未决、或事件到了开始时间就过期：批准过期的只会记为失败（结果 `expired at <时间>`），不发给 market-sim；列表按服务端时钟标「已过期」（审批列表的 `expired`，⑭）。开始时间已过的事件按"立即开始"处理（`starts_at` 去掉），申请因此一天后才过期，不会一建就过期（⑭）。批准框里有按现在的目标价重新测的幅度（与申请时 market-sim 的估算并列）和对永续的影响（`GET /admin/v1/approvals/{id}/sim-preview`；跳涨、目标价事件与锚定价修改能直接算出价格，其它只显示申请时的估算）。
   - 没有 `SIM_ADMIN_API_SECRET` 时 admin-service 启动时告警，模拟市场在后台只读。
 - **事件日程**（`/sim/events`）：排队、进行中与结束的事件，发起人与批准人；排队的可取消，进行中的可结束（结束停牌即恢复交易），都要理由（`POST /admin/v1/sim/events/{id}/end`）。
 - **机器人集群**（`/sim/bots`）：

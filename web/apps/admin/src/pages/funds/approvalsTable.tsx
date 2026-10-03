@@ -180,17 +180,13 @@ export function Mode({ a }: { a: Approval }) {
   );
 }
 
-/** simLapsed reports whether a simulated market's request lapsed: a day after it was asked for, or when its event was to start (C5.5 ④). */
+/**
+ * simLapsed reports whether a simulated market's request lapsed (a day
+ * after it was asked for, or when its event was to start, C5.5 ④), as the
+ * server judged it by its clock when it listed it (review ⑭).
+ */
 function simLapsed(a: Approval): boolean {
-  if (!simKind(a.kind)) return false;
-  let at = Date.parse(a.created_at) + 24 * 3600_000;
-  try {
-    const startsAt = (JSON.parse((a.payload as Record<string, string>).change ?? "{}") as { starts_at?: string }).starts_at;
-    if (startsAt) at = Math.min(at, Date.parse(startsAt));
-  } catch {
-    // Judged by its age alone.
-  }
-  return Date.now() >= at;
+  return simKind(a.kind) && a.expired === true;
 }
 
 /**

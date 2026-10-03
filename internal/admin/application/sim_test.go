@@ -212,6 +212,40 @@ func TestASimRequestLapsesAndIsMeasuredAgainForItsDecider(t *testing.T) {
 		t.Fatalf("due before it was decided %+v %v", done, err)
 	}
 
+	// A second before it lapses it is carried out; the list says which
+	// lapsed by the server's clock (review ⑭).
+	inTime, err := h.svc.CreateSimEvent(ctx, ops, SimEventInput{Type: "JUMP", Size: &size}, "a big push, decided in time")
+	if err != nil || inTime.Approval == nil {
+		t.Fatalf("waits %+v %v", inTime, err)
+	}
+	late, err := h.svc.CreateSimEvent(ctx, ops, SimEventInput{Type: "JUMP", Size: &size, StartsAt: h.now.Add(time.Hour).Format(time.RFC3339)},
+		"a big push in an hour, left undecided")
+	if err != nil || late.Approval == nil {
+		t.Fatalf("waits %+v %v", late, err)
+	}
+	h.now = h.now.Add(24*time.Hour - time.Second)
+	lapsed := map[string]bool{}
+	list, _, err := h.svc.Approvals(ctx, boss, domain.ApprovalPending, "", 50)
+	for _, x := range list {
+		lapsed[x.ID] = x.Lapsed
+	}
+	if err != nil || lapsed[inTime.Approval.ID] || !lapsed[late.Approval.ID] {
+		t.Fatalf("lapsed in the list %v %v", lapsed, err)
+	}
+	if done, err := h.svc.DecideApproval(ctx, boss, inTime.Approval.ID, true, "in time"); err != nil || done.Status != domain.ApprovalExecuted ||
+		len(sim.events) != 1 {
+		t.Fatalf("a second before it lapses %+v %v %v", done, err, sim.events)
+	}
+
+	// A start already past is now: the request lapses a day after it was
+	// asked for, not the moment it is made (review ⑭).
+	past, err := h.svc.CreateSimEvent(ctx, ops, SimEventInput{Type: "JUMP", Size: &size, StartsAt: h.now.Add(-time.Hour).Format(time.RFC3339)},
+		"a big push that was due an hour ago")
+	if err != nil || past.Approval == nil || !simExpiry(*past.Approval).Equal(h.now.Add(24*time.Hour)) ||
+		strings.Contains(past.Approval.Payload["change"], "starts_at") {
+		t.Fatalf("a past start %+v %v", past, err)
+	}
+
 	// The settings: the target moves with the anchor.
 	res, err = h.svc.UpdateSimParams(ctx, ops, json.RawMessage(`{"p0":3,"sigma":0.8}`), "triple the anchor")
 	if err != nil || res.Approval == nil {

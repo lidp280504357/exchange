@@ -34,6 +34,18 @@ func TestRenderNotice(t *testing.T) {
 	if !strings.Contains(body, "手机号") || !strings.Contains(body, "+65****7654") || !strings.Contains(body, "UTC") {
 		t.Fatalf("rebind body: %s", body)
 	}
+	// The authenticator removed: withdrawals are reviewed for a day after
+	// it (C5.5 ⑤), and the mail says so (review ⑭); binding one does not.
+	for lang, want := range map[string]string{"zh-CN": "24 小时内提现需人工审核", "en": "for 24 hours after it, withdrawals are reviewed"} {
+		_, body = RenderNotice(NoticeInput{Type: NoticeTOTPChanged, Language: lang, At: at, Data: map[string]string{"enabled": "false"}})
+		if !strings.Contains(body, want) {
+			t.Fatalf("%s removed: %s", lang, body)
+		}
+		_, body = RenderNotice(NoticeInput{Type: NoticeTOTPChanged, Language: lang, At: at, Data: map[string]string{"enabled": "true"}})
+		if strings.Contains(body, "24") {
+			t.Fatalf("%s bound: %s", lang, body)
+		}
+	}
 }
 
 func TestDepositNotices(t *testing.T) {

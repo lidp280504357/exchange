@@ -175,8 +175,15 @@ func (s *Service) CreateSimEvent(ctx context.Context, p Principal, in SimEventIn
 		return SimResult{}, apperr.Invalid("type must be JUMP, TARGET, TREND, VOLATILITY, PAUSE, HALT or REANCHOR")
 	}
 	if in.StartsAt != "" {
-		if _, err := time.Parse(time.RFC3339, in.StartsAt); err != nil {
+		at, err := time.Parse(time.RFC3339, in.StartsAt)
+		if err != nil {
 			return SimResult{}, apperr.Invalid("starts_at must be an RFC 3339 time")
+		}
+		// A start already past is now (market-sim takes it so): kept, it
+		// would make a request for approval lapse the moment it is made
+		// (review ⑭).
+		if !at.After(s.Now()) {
+			in.StartsAt = ""
 		}
 	}
 	event := simEventFields(in, strings.TrimSpace(reason))

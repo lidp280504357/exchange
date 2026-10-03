@@ -147,10 +147,10 @@ func RenderNotice(in NoticeInput) (title, body string) {
 			return "已绑定身份验证器", fmt.Sprintf("您的账户已于 %s 绑定身份验证器，之后的安全验证将使用它生成的验证码。如非本人操作，请立即联系客服。", when)
 		}
 		if en {
-			return "Authenticator app removed", fmt.Sprintf("The authenticator app was removed from your account at %s. "+
-				"If this was not you, contact support now.", when)
+			return "Authenticator app removed", fmt.Sprintf("The authenticator app was removed from your account at %s; "+
+				"for 24 hours after it, withdrawals are reviewed by staff. If this was not you, contact support now.", when)
 		}
-		return "已解绑身份验证器", fmt.Sprintf("您的账户已于 %s 解绑身份验证器。如非本人操作，请立即联系客服。", when)
+		return "已解绑身份验证器", fmt.Sprintf("您的账户已于 %s 解绑身份验证器，此后 24 小时内提现需人工审核。如非本人操作，请立即联系客服。", when)
 	case NoticeDepositCredited:
 		if en {
 			return "Deposit credited", fmt.Sprintf("%s %s from %s (transaction %s) was credited to your spot account at %s.",
