@@ -164,7 +164,15 @@ sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T udu
 
 ## 换成真网关
 
-联调计划（每步的回退）先交协调会话批准：测试商户在生产网关上，链上动作都是真的。
+联调计划（每步的回退）先交协调会话批准：测试商户在生产网关上，链上动作都是真的。商户的设置先放在服务器 `infra/udun-real.env`（0600，compose 不加载），不经 wallet-service、不碰数据库就能直接问网关：
+
+```bash
+cd /opt/exchange/infra && sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangectl udun coins
+sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangectl udun check-address --main-coin 195 --address <地址>
+sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangectl udun create-address --main-coin 195 --alias probe-tron
+```
+
+`coins` 列出商户的币种编码（`provider_coin` 就填这里的 `CODE`）、小数位、是否代币与余额；`create-address` 建的地址会把充值回调到 `UDUN_CALLBACK_URL`，没有对应用户，到账只会记成 `UNMATCHED`、钱留在托管方。密钥只从环境读，不打印。
 
 1. 托管方后台登记回调地址 `https://astras.vip/v1/wallet/callbacks/udun`，把服务器出口 IP 加白名单。
 2. `apps.env` 改 `UDUN_GATEWAY_URL`、`UDUN_MERCHANT_ID`、`UDUN_API_KEY`、`UDUN_WALLET_ID`、`UDUN_CALLBACK_URL`；托管方给了回调出口地址时 `UDUN_CALLBACK_ALLOWED_IPS` 填它、`custody-callback-allow.conf` 加同样的 `allow` 行，没给时前者留空、后者写 `allow all;`（只靠签名），提交部署；重启 wallet-service。真回调来过几笔后查来源再收紧：

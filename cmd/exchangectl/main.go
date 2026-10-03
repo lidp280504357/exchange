@@ -143,6 +143,12 @@ commands:
                               the newest funding rounds: rate, mark, positions, paid, received, insurance;
                               fails on a round stuck without its rate or receivers paid more than was collected
   derivatives reconcile       check invariant 6 now: long = short per contract, PNL_CLEARING + long cost − short cost = 0
+  udun coins                  a custodian's gateway, directly (UDUN_* from the environment, no database):
+                              the merchant's coins with code, decimals, token flag and balance
+  udun check-address --main-coin N --address A
+                              whether the gateway takes an address on a chain
+  udun create-address --main-coin N --alias NAME
+                              a new deposit address, posting its deposits to UDUN_CALLBACK_URL
   sim status                  market-sim's state (the platform coin's simulated market)
   sim call METHOD PATH [JSON] a request to market-sim's management API, its changes signed with
                               SIM_API_SECRET (run in the market-sim container); prints "HTTP <status>"
@@ -169,6 +175,9 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 {
 		fmt.Fprint(out, usage)
 		return errUsage
+	}
+	if args[0] == "udun" { // the gateway only: no database
+		return udunCmd(ctx, args[1:], out)
 	}
 	cfg := settings{Postgres: pg.DefaultConfig(), MarketSimURL: "http://127.0.0.1:8098"}
 	if err := config.Load(&cfg); err != nil {
