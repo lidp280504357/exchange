@@ -4,7 +4,9 @@
 // section: the overview with the services' health and HOUSE, users with a
 // user's page and its tabs (profile, security, risk …), the identity
 // requests, orders and trades, deposits (those to handle, the backfills,
-// the backfill form), the withdrawal queue, assets and pairs (a status
+// the backfill form), the withdrawal queue and a withdrawal's detail, the
+// custodians (the stand-in UDUNMOCK's page, its callbacks and the custody
+// fees), assets and pairs (a status
 // change is confirmed and canceled, never done; a pair's editor; the
 // listing wizard's preview, canceled), futures, every user's positions,
 // the liquidation log, HOUSE, the flags, the ledger's reconciliation, the
@@ -13,9 +15,10 @@
 // system health, the operations pages, the simulated market (overview,
 // price control with an event's impact, never started; events, bots, the
 // coin's holders; the bots' orders), the fund operations (approval mode,
-// form, records), the settings and the event stream; the search opens a user;
-// signing out from the account menu ends the session. Every admin API
-// response is checked against api/admin/admin.yaml.
+// form, records), the settings and the event stream, the account page; the
+// search opens a user; signing out from the account menu ends the session,
+// and the setup page without a link says so. Every admin API response is
+// checked against api/admin/admin.yaml.
 //
 //   ADMIN_EMAIL=... ADMIN_PASSWORD=... node admin-smoke.mjs
 //
@@ -135,21 +138,45 @@ try {
   await go("/withdrawals?held=false&min_risk=0");
   await sleep(1500);
   await noError("withdrawals");
-  ok("deposits (to handle, backfills, the backfill form) and the withdrawal queue with its filters");
+  // A withdrawal's detail: its address book record and the user's others.
+  await go("/withdrawals?status=ALL");
+  await rows(1);
+  await t.clickLive("main tbody tr");
+  await waitText("地址簿");
+  await waitText("该用户最近的提现");
+  await page.waitForFunction(() => getComputedStyle(document.querySelector("[role=dialog]")).transform === "none");
+  await t.shot("2b-withdrawal");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
+  ok("deposits (to handle, backfills, the backfill form), the withdrawal queue with its filters and a withdrawal's detail");
 
-  // 6b. The custodian: reachable, its coins, the reconciliation and the
-  // callback log, a callback's request as received.
+  // 6b. The custodians. UDUN's page loads whichever gateway it talks to
+  // (the stand-in until the real switch); the stand-in custodian UDUNMOCK
+  // (ADR-0017, the hidden test asset TUSD) in full: reachable, its coin, its
+  // own reconciliation row and callbacks, a callback's request as received
+  // with the addresses it came from; then the custodians' fees.
   await go("/custody");
+  await waitText("对账（不变量 4）");
+  await noError("UDUN's custody page");
+  await go("/custody?provider=UDUNMOCK");
+  await waitText("替身托管方 UDUNMOCK 只服务");
   await waitText("可访问");
-  await waitText("TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t".slice(0, 12));
+  await waitText("TQQCuyVcUEknTGyfSRKhcUuLZfEe93qWpy".slice(0, 12));
+  await waitText("托管方 · UDUNMOCK");
   await rows(1, 'main table[aria-label="custody callbacks"]');
   await t.clickLive('main table[aria-label="custody callbacks"] tbody tr');
   await page.waitForSelector("[role=dialog]");
   await waitText("原始请求");
+  await waitText("来源地址");
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
-  await t.shot("2b-custody");
-  ok("the custodian: reachable, coins, reconciliation and a callback as received");
+  await t.shot("2c-custody");
+  await waitText("托管方手续费");
+  await clickButton("全部", 'main [aria-label="状态"]');
+  await page.waitForSelector('main table[aria-label="custody fees"]');
+  await page.waitForFunction(() => !document.querySelector('main table[aria-label="custody fees"][aria-busy=true]'), { timeout: 20000 });
+  await noError("the custody fees");
+  ok("the custodians: UDUN's page; the stand-in UDUNMOCK reachable, its coin, reconciliation, a callback as received with its addresses; the fees");
 
   // 7. Pairs: 50 and more; a status change asks for a confirmation (canceled).
   await go("/instruments");
@@ -205,6 +232,8 @@ try {
   await sleep(1000);
   await noError("liquidations");
   await go("/house");
+  await waitText("近 30 日盈亏");
+  await waitText("敞口");
   await waitText("各交易对");
   await rows(3);
   // Every contract has a row, flat or not.
@@ -212,7 +241,8 @@ try {
   await waitText("ETH-USDT-PERP");
   await go("/risk");
   await waitText("market.house_liquidity");
-  ok("futures, every user's positions and the liquidation log, HOUSE's book with every contract's net position, and the flags");
+  await t.shot("3b-house");
+  ok("futures, every user's positions and the liquidation log, HOUSE (results, exposure, inventory, pairs, every contract's net position), and the flags");
 
   // 9. Ledger: the reconciliation; audit; reports.
   await go("/ledger");
@@ -359,12 +389,24 @@ try {
   await t.shot("5-settings");
   ok(`fund operations: the approval mode, the form and the records; the settings; the event stream (${JSON.stringify(stream)})`);
 
+  // 10b. The account page: one's own password and authenticator (nothing changed).
+  await go("/account");
+  await waitText("修改口令");
+  await waitText("身份验证器");
+  await noError("the account page");
+  ok("the account page");
+
   // 11. Sign out from the account menu.
   await page.click('header button[aria-label="账户菜单"]');
   await page.waitForFunction(() => [...document.querySelectorAll("[role=menuitem]")].some((e) => e.textContent.includes("退出")));
   await page.evaluate(() => [...document.querySelectorAll("[role=menuitem]")].find((e) => e.textContent.includes("退出")).click());
   await waitPath("/login");
   ok("signing out ends the session");
+
+  // 11b. The setup page without its link says the link is incomplete.
+  await go("/setup");
+  await waitText("链接不完整");
+  ok("the setup page without a link");
 } catch (e) {
   await t.fail(e);
 }
