@@ -679,6 +679,19 @@ func timeRange(from, to time.Time) (int64, int64) {
 // millisecond as a UTC DateTime64(3).
 const ms = "fromUnixTimestamp64Milli(toInt64(?), 'UTC')"
 
+// Count counts the entries matching q.
+func (a Audit) Count(ctx context.Context, q ports.AuditQuery) (int, error) {
+	from, to := timeRange(q.From, q.To)
+	var n uint64
+	if err := a.Conn.QueryRow(ctx, `SELECT count() FROM audit_logs FINAL
+		WHERE (? = '' OR actor_id = ?) AND (? = '' OR target = ?) AND (? = '' OR event_type = ?)
+		AND occurred_at >= `+ms+` AND occurred_at < `+ms,
+		q.Actor, q.Actor, q.Target, q.Target, q.EventType, q.EventType, from, to).Scan(&n); err != nil {
+		return 0, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "the audit trail is unavailable")
+	}
+	return int(n), nil
+}
+
 // Search returns a page of audit entries, newest first.
 func (a Audit) Search(ctx context.Context, q ports.AuditQuery) ([]ports.AuditEntry, string, error) {
 	pc, err := pageOf(q.Cursor, q.Limit)

@@ -82,6 +82,125 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/me/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change one's own password
+         * @description The current password proves it is them (ADMIN_PASSWORD_WRONG); the
+         *     new one has at least 12 characters. Their other sessions end.
+         *     Audited as admin.password_changed. Open to an administrator who
+         *     must change their password first (must_change_password); nothing
+         *     else is (ADMIN_PASSWORD_CHANGE_REQUIRED, C5.5 ⑪).
+         */
+        post: operations["changeOwnPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/me/totp/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A new authenticator for oneself, to bind
+         * @description The current password and, while sign-in asks for codes, the current
+         *     authenticator's code prove it is them (ADMIN_PASSWORD_WRONG,
+         *     ADMIN_TOTP_CODE_WRONG). Answers with a new secret and its otpauth
+         *     URI (no-store); the old authenticator signs in until POST
+         *     /admin/v1/me/totp binds the new one, within 10 minutes. This and
+         *     the other two of one's own credentials take 10 requests in 15
+         *     minutes per administrator (COMMON_RATE_LIMITED).
+         */
+        post: operations["startOwnTOTP"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/me/totp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bind the new authenticator with its code
+         * @description A wrong code is ADMIN_TOTP_CODE_WRONG; nothing waiting (or late)
+         *     COMMON_CONFLICT. Their other sessions end. Audited as
+         *     admin.totp_changed.
+         */
+        post: operations["confirmOwnTOTP"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/setup/inspect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What a one-time setup link sets up
+         * @description No session: the token is the proof (ADMIN_SETUP_INVALID when it is
+         *     unknown, used or expired). Answers with the account and, when the
+         *     link binds an authenticator, its secret and otpauth URI (no-store).
+         *     Throttled with the sign-in.
+         */
+        post: operations["inspectAdminSetup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set what a one-time setup link sets up
+         * @description The password (at least 12 characters) when the link sets one, the
+         *     authenticator's current code when it binds one
+         *     (ADMIN_TOTP_CODE_WRONG). The link is spent; the administrator then
+         *     signs in as usual. Audited as admin.setup_completed in their name,
+         *     with the address it came from. Throttled with the sign-in.
+         */
+        post: operations["completeAdminSetup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/roles": {
         parameters: {
             query?: never;
@@ -117,11 +236,13 @@ export interface paths {
         put?: never;
         /**
          * Create an administrator
-         * @description Answers with the administrator, a password and an authenticator
-         *     secret, shown this once: the answer is not cached (Cache-Control:
-         *     no-store), and neither is logged or audited. The new administrator
-         *     binds the secret in an authenticator app and signs in with both.
-         *     Audited as admin.created. Needs admins.manage.
+         * @description Answers with the administrator and a one-time setup link's token
+         *     (a day), shown this once: the answer is not cached (Cache-Control:
+         *     no-store), and the token is neither logged nor audited. Its holder
+         *     sets the password and binds the authenticator (POST
+         *     /admin/v1/setup): whoever created the account never knows what
+         *     signs it in (C5.5 ⑪). Audited as admin.created. Needs
+         *     admins.manage.
          */
         post: operations["createAdmin"];
         delete?: never;
@@ -186,9 +307,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Give an administrator a new password
-         * @description Answers with the new password, shown this once (no-store, never
-         *     logged or audited), and ends their sessions. Not one's own
+         * Reset an administrator's password
+         * @description The old password stops working and their sessions end; answers
+         *     with a one-time setup link's token (a day, no-store, never logged
+         *     or audited) whose holder sets a new one (C5.5 ⑪). Not one's own
          *     (ADMIN_SELF). Audited as admin.password_reset. Needs admins.manage.
          */
         post: operations["resetAdminPassword"];
@@ -208,11 +330,12 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Give an administrator a new authenticator secret
-         * @description Answers with the new secret and its otpauth URI, shown this once
-         *     (no-store, never logged or audited); the old authenticator stops
-         *     working and their sessions end. Not one's own (ADMIN_SELF).
-         *     Audited as admin.totp_reset. Needs admins.manage.
+         * Reset an administrator's authenticator
+         * @description The old authenticator stops working and their sessions end;
+         *     answers with a one-time setup link's token (a day, no-store, never
+         *     logged or audited) whose holder binds a new one (C5.5 ⑪). Not
+         *     one's own (ADMIN_SELF). Audited as admin.totp_reset. Needs
+         *     admins.manage.
          */
         post: operations["resetAdminTOTP"];
         delete?: never;
@@ -2149,8 +2272,10 @@ export interface paths {
          *     columns occurred_at, event_type, actor, target, action, reason,
          *     details, event_id (action, reason and details are the
          *     administrator action's, or a configuration change's old and new
-         *     values). The export is itself audited as admin.audit.exported.
-         *     Needs audit.read.
+         *     values). Written a page at a time (X-Truncated is known before
+         *     the rows, from a count). The export is itself audited as
+         *     admin.audit.exported. It has email and IP addresses: needs
+         *     audit.export (ADMIN, AUDITOR; C5.5 ⑪).
          */
         get: operations["exportAuditLogs"];
         put?: never;
@@ -3389,11 +3514,13 @@ export interface components {
             name: string;
             role: components["schemas"]["AdminRole"];
             permissions: components["schemas"]["Permission"][];
+            /** @description The password was generated for them (exchangectl admin create): only GET /admin/v1/me, POST /admin/v1/me/password and POST /admin/v1/logout are open until they change it (ADMIN_PASSWORD_CHANGE_REQUIRED, C5.5 ⑪). */
+            must_change_password: boolean;
         };
         /** @enum {string} */
         AdminRole: "ADMIN" | "OPERATOR" | "FINANCE" | "AUDITOR";
         /** @enum {string} */
-        Permission: "users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write" | "settings.write" | "users.notes" | "users.security" | "users.contacts" | "ledger.hold" | "deposits.review" | "admins.manage" | "instruments.trading" | "content.write" | "notices.send" | "sim.control" | "withdrawals.resume";
+        Permission: "users.read" | "users.status" | "orders.cancel" | "instruments.read" | "instruments.write" | "flags.read" | "flags.write" | "withdrawals.read" | "withdrawals.review" | "ledger.adjust.request" | "ledger.adjust.approve" | "audit.read" | "reports.read" | "derivatives.read" | "derivatives.write" | "settings.write" | "users.notes" | "users.security" | "users.contacts" | "ledger.hold" | "deposits.review" | "admins.manage" | "instruments.trading" | "content.write" | "notices.send" | "sim.control" | "withdrawals.resume" | "audit.export";
         RolePermissions: {
             role: components["schemas"]["AdminRole"];
             permissions: components["schemas"]["Permission"][];
@@ -3413,18 +3540,18 @@ export interface components {
             /** @description Live sessions. */
             sessions: number;
         };
-        /**
-         * @description Shown once and never kept in the clear: a creation answers with all
-         *     three and the administrator, a password reset with the password, an
-         *     authenticator reset with the secret and its URI.
-         */
-        AdminCredentials: {
+        /** @description A one-time setup link, shown once to whoever created or reset the account to hand over (C5.5 ⑪). */
+        AdminSetup: {
+            /** @description On a create, the new administrator. */
             admin?: components["schemas"]["ManagedAdmin"];
-            password: string | null;
-            /** @description Base32, for typing into an authenticator app. */
-            totp_secret: string | null;
-            /** @description The otpauth:// URI, for a QR code. */
-            totp_uri: string | null;
+            setup: {
+                /** @description The console's setup page takes it as /setup#token=... */
+                token: string;
+                /** @enum {string} */
+                kind: "CREATE" | "PASSWORD" | "TOTP";
+                /** Format: date-time */
+                expires_at: string;
+            };
         };
         AdminSession: {
             ip: string;
@@ -4598,6 +4725,153 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    changeOwnPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    current_password: string;
+                    new_password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Changed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    startOwnTOTP: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    current_password: string;
+                    /** @description The current authenticator's code; left out while admin.login_without_totp is on. */
+                    totp_code?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The new authenticator. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        totp_secret: string;
+                        totp_uri: string;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    confirmOwnTOTP: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    totp_code: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Bound. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    inspectAdminSetup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The setup. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        email: string;
+                        name: string;
+                        /** @enum {string} */
+                        kind: "CREATE" | "PASSWORD" | "TOTP";
+                        /** Format: date-time */
+                        expires_at: string;
+                        sets_password: boolean;
+                        totp_secret: string | null;
+                        totp_uri: string | null;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    completeAdminSetup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    token: string;
+                    password?: string;
+                    totp_code?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Set up. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     listRoles: {
         parameters: {
             query?: never;
@@ -4663,13 +4937,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The administrator and their credentials. */
+            /** @description The administrator and their setup link. */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AdminCredentials"];
+                    "application/json": components["schemas"]["AdminSetup"];
                 };
             };
             default: components["responses"]["Error"];
@@ -4750,13 +5024,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The new password. */
+            /** @description The setup link. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AdminCredentials"];
+                    "application/json": components["schemas"]["AdminSetup"];
                 };
             };
             default: components["responses"]["Error"];
@@ -4777,13 +5051,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The new secret. */
+            /** @description The setup link. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AdminCredentials"];
+                    "application/json": components["schemas"]["AdminSetup"];
                 };
             };
             default: components["responses"]["Error"];

@@ -1,9 +1,9 @@
 import { adminApi, can, type Admin } from "@exchange/core/api/admin";
 import { Avatar, Badge, cn, DropdownMenu, IconButton, Popover, Tooltip } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
-import { Bell, ChevronRight, LogOut, Moon, Sun } from "lucide-react";
+import { Bell, ChevronRight, KeyRound, LogOut, Moon, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { useConsoleSettings, useTodo } from "../live";
 import { setTheme, useTheme } from "../theme";
 import { CountBadge } from "./CountBadge";
@@ -18,6 +18,7 @@ export function Topbar({ admin }: { admin: Admin }) {
   const theme = useTheme();
   const settings = useConsoleSettings();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const logout = async () => {
     await adminApi.POST("/admin/v1/logout");
     qc.setQueryData(["admin", "me"], null);
@@ -57,6 +58,7 @@ export function Topbar({ admin }: { admin: Admin }) {
             { type: "label", key: "who", label: <span className="block max-w-56 truncate">{admin.email}</span> },
             { type: "label", key: "role", label: t(`admin.roles.${admin.role}`) },
             { type: "separator", key: "s1" },
+            { key: "account", label: t("admin.nav.account"), icon: <KeyRound size={14} />, onSelect: () => navigate("/account") },
             {
               key: "theme",
               label: t(theme === "dark" ? "admin.shell.light" : "admin.shell.dark"),

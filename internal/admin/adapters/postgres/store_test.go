@@ -276,12 +276,12 @@ func TestConsole(t *testing.T) {
 	for _, a := range []struct{ email, role string }{{"fin@example.com", domain.RoleFinance}, {"boss@example.com", domain.RoleAdmin}} {
 		secrets[a.email] = totp.NewSecret()
 		if _, err := application.NewAdmin(ctx, store, hasher, box, a.email, "Test", a.role, "a long password", secrets[a.email], "test",
-			time.Now()); err != nil {
+			false, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if _, err := application.NewAdmin(ctx, store, hasher, box, "FIN@example.com", "Dup", domain.RoleAuditor, "a long password",
-		totp.NewSecret(), "test", time.Now()); err == nil {
+		totp.NewSecret(), "test", false, time.Now()); err == nil {
 		t.Fatal("a second account with the same address (in another case) was created")
 	}
 	r := httpx.NewRouter(httpx.RouterOptions{Logger: log})
@@ -443,22 +443,30 @@ func TestConsole(t *testing.T) {
 		t.Fatalf("no tags: %d %v", status, body)
 	}
 
-	// The ADMIN creates an OPERATOR, who signs in with what came back once;
-	// its live session shows, and ends with the ADMIN's word.
+	// The ADMIN creates an OPERATOR, who sets up the account from the link
+	// that came back once (C5.5 ⑪) and signs in; its live session shows,
+	// and ends with the ADMIN's word.
 	status, body = boss.do(http.MethodPost, "/admin/v1/admins", map[string]string{"email": "ops@example.com", "name": "Ops", "role": "operator", "reason": "new hire"}, true)
-	pw, _ := body["password"].(string)
-	sec, _ := body["totp_secret"].(string)
+	link, _ := body["setup"].(map[string]any)
+	token, _ := link["token"].(string)
 	created, _ := body["admin"].(map[string]any)
-	if status != http.StatusCreated || boss.header.Get("Cache-Control") != "no-store" || len(pw) < 20 || sec == "" || created["role"] != domain.RoleOperator {
+	if status != http.StatusCreated || boss.header.Get("Cache-Control") != "no-store" || token == "" || created["role"] != domain.RoleOperator {
 		t.Fatalf("create: %d %v", status, created)
 	}
 	opsID, _ := created["id"].(string)
+	ops := &client{t: t, srv: srv}
+	_, body = ops.do(http.MethodPost, "/admin/v1/setup/inspect", map[string]string{"token": token}, true)
+	sec, _ := body["totp_secret"].(string)
 	opsSecret, err := totp.Decode(sec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ops := &client{t: t, srv: srv}
-	if status, body := ops.do(http.MethodPost, "/admin/v1/login", map[string]string{"email": "ops@example.com", "password": pw, "totp_code": totp.Code(opsSecret, totp.Step(time.Now()))}, true); status != http.StatusOK {
+	chosen := "the operator's own password"
+	setup := map[string]string{"token": token, "password": chosen, "totp_code": totp.Code(opsSecret, totp.Step(time.Now())-1)}
+	if status, body := ops.do(http.MethodPost, "/admin/v1/setup", setup, true); status != http.StatusNoContent {
+		t.Fatalf("set up: %d %v", status, body)
+	}
+	if status, body := ops.do(http.MethodPost, "/admin/v1/login", map[string]string{"email": "ops@example.com", "password": chosen, "totp_code": totp.Code(opsSecret, totp.Step(time.Now()))}, true); status != http.StatusOK {
 		t.Fatalf("the new administrator signs in: %d %v", status, body)
 	}
 	status, body = boss.do(http.MethodGet, "/admin/v1/admins/"+opsID+"/sessions", nil, false)
@@ -505,10 +513,10 @@ func TestConsole(t *testing.T) {
 	}
 	// created ×2, login ×2, login_failed, requested ×2, approved ×2, single-person requested and executed,
 	// settings changed, requested and withdrawn, the keyed one requested and executed, the unknown one
-	// requested, unfinished and approved, notes ×2, tags ×2, the OPERATOR created, signed in and its
-	// sessions ended, disabled, logout
-	if n != 28 {
-		t.Fatalf("%d audit events in the outbox, want 28", n)
+	// requested, unfinished and approved, notes ×2, tags ×2, the OPERATOR created, set up from its link,
+	// signed in and its sessions ended, disabled, logout
+	if n != 29 {
+		t.Fatalf("%d audit events in the outbox, want 29", n)
 	}
 	var admins string
 	if err := db.QueryRow(ctx, `SELECT string_agg(email || ':' || status || ':' || failed_attempts, ',' ORDER BY email) FROM admins`).Scan(&admins); err != nil {

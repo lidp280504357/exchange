@@ -373,4 +373,24 @@ func TestAdminSchema(t *testing.T) {
 	rejects(t, db, "a canceled change names who canceled it", change, uuid.New(), "CANCELED", a, nil, nil, nil)
 	accepts(t, db, change, uuid.New(), "CANCELED", a, nil, a, nil) // the requester withdraws it
 	rejects(t, db, "known statuses only", change, uuid.New(), "DONE", a, nil, nil, soon)
+
+	// One-time setup links (C5.5 ⑪).
+	var held bool
+	if err := db.QueryRow(context.Background(), `SELECT must_change_password FROM admins WHERE id = $1`, a).Scan(&held); err != nil || held {
+		t.Fatalf("not held to a password change by default: %v %v", held, err)
+	}
+	setup := `UPDATE admins SET setup_kind = $2, setup_hash = $3, setup_totp_sealed = $4, setup_expires_at = $5 WHERE id = $1`
+	later := time.Now().Add(24 * time.Hour)
+	accepts(t, db, setup, a, "CREATE", []byte{1}, []byte{9}, later)
+	rejects(t, db, "a token belongs to one administrator", setup, b, "PASSWORD", []byte{1}, nil, later)
+	accepts(t, db, setup, b, "PASSWORD", []byte{2}, nil, later)
+	rejects(t, db, "known setups only", setup, b, "EMAIL", []byte{3}, nil, later)
+	rejects(t, db, "a setup expires", setup, b, "PASSWORD", []byte{3}, nil, nil)
+	rejects(t, db, "a reset's link has a token", setup, b, "TOTP", nil, []byte{9}, later)
+	rejects(t, db, "one's own authenticator has none", setup, b, "SELF_TOTP", []byte{3}, []byte{9}, later)
+	rejects(t, db, "a password alone binds no authenticator", setup, b, "PASSWORD", []byte{3}, []byte{9}, later)
+	rejects(t, db, "an authenticator to bind", setup, b, "TOTP", []byte{3}, nil, later)
+	accepts(t, db, setup, b, "SELF_TOTP", nil, []byte{9}, later)
+	rejects(t, db, "no setup leaves nothing behind", setup, b, nil, nil, nil, later)
+	accepts(t, db, setup, b, nil, nil, nil, nil)
 }

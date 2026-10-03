@@ -1,4 +1,4 @@
-import { adminApi, adminData } from "@exchange/core/api/admin";
+import { adminApi, adminData, can, type Admin } from "@exchange/core/api/admin";
 import { Button, Drawer, toast } from "@exchange/ui";
 import { Download } from "lucide-react";
 import { useState } from "react";
@@ -13,10 +13,11 @@ import { AuditDetail } from "./system/auditDetail";
 /**
  * Audit (design §10.3, 2026-10-02 §4.6): the whole trail by actor, target,
  * event and time; the server exports what the filters match as CSV (at
- * most 10,000 entries, audited too), a row opens its detail with what
- * changed field by field.
+ * most 10,000 entries, audited too; it has email and IP addresses, so
+ * only ADMIN and AUDITOR export, C5.5 ⑪), a row opens its detail with
+ * what changed field by field.
  */
-export default function Audit() {
+export default function Audit({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
   const filters = useFilters(["actor", "target", "event_type", "from", "to"]);
   const f = filters.values;
@@ -57,17 +58,19 @@ export default function Audit() {
           { key: "to", label: t("admin.common.to"), kind: "date" },
         ]}
         extra={
-          <Button
-            size="sm"
-            variant="secondary"
-            icon={<Download size={14} />}
-            loading={exporting}
-            title={t("admin.audit.exportServerHint")}
-            onClick={() => void exportCsv()}
-            data-testid="audit-export"
-          >
-            {t("admin.audit.exportServer")}
-          </Button>
+          can(admin, "audit.export") && (
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<Download size={14} />}
+              loading={exporting}
+              title={t("admin.audit.exportServerHint")}
+              onClick={() => void exportCsv()}
+              data-testid="audit-export"
+            >
+              {t("admin.audit.exportServer")}
+            </Button>
+          )
         }
       />
       <AuditTable list={list} onRowClick={setOpen} />

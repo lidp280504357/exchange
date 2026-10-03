@@ -62,10 +62,15 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Use(h.csrf)
 		r.Get("/login-options", h.loginOptions)
 		r.Post("/login", h.login)
+		r.Post("/setup/inspect", h.inspectSetup)
+		r.Post("/setup", h.completeSetup)
 		r.Group(func(r chi.Router) {
-			r.Use(h.authenticate)
+			r.Use(h.authenticate, mustChange)
 			r.Post("/logout", h.logout)
 			r.Get("/me", h.me)
+			r.Post("/me/password", h.changeOwnPassword)
+			r.Post("/me/totp/start", h.startOwnTOTP)
+			r.Post("/me/totp", h.confirmOwnTOTP)
 			r.Get("/settings", h.settings)
 			r.Put("/settings", h.updateSettings)
 			r.Get("/todo", h.todo)
@@ -246,10 +251,15 @@ type AdminJSON struct {
 	Name        string   `json:"name"`
 	Role        string   `json:"role"`
 	Permissions []string `json:"permissions"`
+	// MustChangePassword: the password was generated for them; nothing
+	// else is open until they change it (C5.5 ⑪).
+	MustChangePassword bool `json:"must_change_password"`
 }
 
 func adminJSON(a domain.Admin) AdminJSON {
-	return AdminJSON{ID: a.ID, Email: a.Email, Name: a.Name, Role: a.Role, Permissions: domain.Permissions(a.Role)}
+	return AdminJSON{
+		ID: a.ID, Email: a.Email, Name: a.Name, Role: a.Role, Permissions: domain.Permissions(a.Role), MustChangePassword: a.MustChangePassword,
+	}
 }
 
 // loginOptions tells the sign-in page whether to ask for the
@@ -1025,27 +1035,38 @@ func (h *Handler) exportAuditLogs(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	rows, cut, err := h.Svc.ExportAuditLogs(r.Context(), principal(r), ports.AuditQuery{
-		Actor: q.Get("actor"), Target: q.Get("target"), EventType: q.Get("event_type"), From: from, To: to,
-	})
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="audit-`+time.Now().UTC().Format("20060102-150405")+`.csv"`)
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Truncated", strconv.FormatBool(cut))
-	_, _ = w.Write([]byte("\ufeff"))
+	// The rows go out a page at a time (C5.5 ⑪); once they started, a
+	// failure can only cut the file short, which the log says.
 	out := csv.NewWriter(w)
-	_ = out.Write([]string{"occurred_at", "event_type", "actor", "target", "action", "reason", "details", "event_id"})
-	for _, e := range rows {
-		_ = out.Write([]string{
+	started, written := false, 0
+	err = h.Svc.ExportAuditLogs(r.Context(), principal(r), ports.AuditQuery{
+		Actor: q.Get("actor"), Target: q.Get("target"), EventType: q.Get("event_type"), From: from, To: to,
+	}, func(cut bool) error {
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="audit-`+time.Now().UTC().Format("20060102-150405")+`.csv"`)
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Truncated", strconv.FormatBool(cut))
+		started = true
+		_, _ = w.Write([]byte("\ufeff"))
+		return out.Write([]string{"occurred_at", "event_type", "actor", "target", "action", "reason", "details", "event_id"})
+	}, func(e application.AuditRow) error {
+		written++
+		if written%500 == 0 {
+			out.Flush()
+		}
+		return out.Write([]string{
 			httpx.FormatTime(e.OccurredAt), e.EventType, csvText(e.Actor), csvText(e.Target), csvText(e.Action), csvText(e.Reason),
 			csvText(e.Details), e.EventID,
 		})
-	}
+	})
 	out.Flush()
+	if err != nil {
+		if !started {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		h.Svc.Log.WarnContext(r.Context(), "audit export cut short", "rows", written, "error", err)
+	}
 }
 
 // csvText keeps a spreadsheet from reading typed text as a formula: a cell

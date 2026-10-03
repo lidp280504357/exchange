@@ -95,7 +95,13 @@ type AdminRepo interface {
 	Get(ctx context.Context, id string) (*domain.Admin, error)
 	// GetForUpdate is Get with the row locked.
 	GetForUpdate(ctx context.Context, id string) (*domain.Admin, error)
+	// BySetupForUpdate returns the administrator a setup token's hash
+	// belongs to, the row locked, or nil.
+	BySetupForUpdate(ctx context.Context, hash []byte) (*domain.Admin, error)
 	List(ctx context.Context) ([]domain.Admin, error)
+	// LockRoster serializes, until the transaction ends, the changes that
+	// could leave no active ADMIN.
+	LockRoster(ctx context.Context) error
 }
 
 // SessionRepo stores sessions by token hash.
@@ -105,8 +111,10 @@ type SessionRepo interface {
 	Get(ctx context.Context, hash []byte) (*domain.Session, error)
 	Touch(ctx context.Context, hash []byte, now time.Time) error
 	Revoke(ctx context.Context, hash []byte, now time.Time) error
-	// RevokeAll ends every session of an administrator.
+	// RevokeAll ends every session of an administrator; RevokeOthers
+	// every one but keep (the one a change of their own came from).
 	RevokeAll(ctx context.Context, adminID string, now time.Time) error
+	RevokeOthers(ctx context.Context, adminID string, keep []byte, now time.Time) error
 	// Live returns an administrator's sessions still live at now, the
 	// latest first.
 	Live(ctx context.Context, adminID string, now time.Time) ([]domain.Session, error)
@@ -797,6 +805,8 @@ type AuditLog interface {
 	// Search returns a page of entries, newest first, and the cursor of
 	// the next ("" on the last).
 	Search(ctx context.Context, q AuditQuery) ([]AuditEntry, string, error)
+	// Count counts the entries matching q (its cursor and limit aside).
+	Count(ctx context.Context, q AuditQuery) (int, error)
 }
 
 // TradingDay is one symbol's trading on one day (UTC); amounts are

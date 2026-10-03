@@ -26,9 +26,11 @@
 # another rejected), a withdrawal's review details and holds, the user's
 # authenticator app bound and reset by the console (the reset recorded:
 # withdrawals wait for review for a day after it), an
-# administrator created from the console (an OPERATOR signing in with the
-# password shown once, which no check prints; role, password,
-# authenticator, sessions, disable and enable), the system health with
+# administrator created from the console (C5.5 ⑪: a one-time setup link
+# shown once, which no check prints, whose holder sets the password and
+# binds the authenticator without a session; an OPERATOR signing in with
+# them; role, password and authenticator resets each with its link, its
+# own password changed, sessions, disable and enable), the system health with
 # details, an announcement on both sites within a minute (scheduled,
 # published, edited while shown, taken off) and an in-app message
 # delivered to the user and read, the reports over a period by week or
@@ -151,7 +153,7 @@ expect 200 - "the sign-in options need no session"
 TOTP_REQUIRED=$(jq -r .totp_required <<<"$BODY")
 login ADMIN
 expect 200 - "ADMIN signs in with password and code"
-check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 27" "with every permission"
+check ".admin.role == \"ADMIN\" and (.admin.permissions | length) == 28" "with every permission"
 cookie=$(grep -i '^set-cookie: admin_session=' "$WORK/ADMIN.headers")
 for attr in 'Path=/admin/' 'HttpOnly' 'Secure' 'SameSite=Strict'; do
   grep -qi "$attr" <<<"$cookie" || { echo "FAIL the session cookie lacks $attr: $cookie" >&2; exit 1; }
@@ -1359,36 +1361,68 @@ as AUDITOR GET /admin/v1/roles ""
 expect 200 - "every administrator reads the roles"
 check '[.roles[].role] == ["ADMIN","OPERATOR","FINANCE","AUDITOR"] and (.roles[0].permissions | index("admins.manage")) != null and ([.roles[1:][].permissions[]] | index("admins.manage")) == null' \
   "only ADMIN manages administrators"
-# creds keeps the password and authenticator secret an answer shows once
-# in PW_STAFF and SECRET_STAFF and scrubs them from BODY and the body
-# file, so no check below can print them.
-creds() {
-  local pw sec
-  pw=$(jq -r '.password // empty' <<<"$BODY" 2>/dev/null || true)
-  sec=$(jq -r '.totp_secret // empty' <<<"$BODY" 2>/dev/null || true)
-  [[ -n $pw ]] && PW_STAFF=$pw
-  [[ -n $sec ]] && SECRET_STAFF=$sec
-  BODY=$(jq -c 'if type == "object" then del(.password, .totp_secret, .totp_uri) else . end' <<<"$BODY" 2>/dev/null || echo '{}')
+# link keeps the one-time setup token a create or a reset shows once in
+# LINK and scrubs it from BODY and the body file; inspect does the same
+# with the authenticator secret a link shows (SECRET_STAFF), so no check
+# below can print either (C5.5 ⑪).
+link() {
+  LINK=$(jq -r '.setup.token // empty' <<<"$BODY" 2>/dev/null || true)
+  BODY=$(jq -c 'if type == "object" and (.setup | type) == "object" then .setup |= del(.token) else . end' <<<"$BODY" 2>/dev/null || echo '{}')
   : >"$WORK/body"
 }
-EMAIL_STAFF="e2e-staff-$RUN@example.com" PW_STAFF="" SECRET_STAFF=""
+inspect() {
+  local sec
+  acall POST /admin/v1/setup/inspect "$(jq -nc --arg t "$LINK" '{token: $t}')" "${CSRF[@]}" -D "$WORK/inspect.headers"
+  sec=$(jq -r '.totp_secret // empty' <<<"$BODY" 2>/dev/null || true)
+  [[ -n $sec ]] && SECRET_STAFF=$sec
+  BODY=$(jq -c 'if type == "object" then (if .totp_secret then .totp_secret = "set" else . end) | del(.totp_uri) else . end' <<<"$BODY" 2>/dev/null || echo '{}')
+  : >"$WORK/body"
+}
+# setup_code is a code a setup spends leaving the next sign-in its own: the
+# step before this one (the server takes one step either way), not in the
+# last seconds of a step (the request could arrive in the next one).
+setup_code() {
+  (($(date +%s) % 30 < 25)) || sleep 6
+  totp "$SECRET_STAFF" -1
+}
+# complete sets up the link with what JSON adds to the token.
+complete() { acall POST /admin/v1/setup "$(jq -c --arg t "$LINK" '. + {token: $t}' <<<"$1")" "${CSRF[@]}"; }
+EMAIL_STAFF="e2e-staff-$RUN@example.com" PW_STAFF=$(password) SECRET_STAFF=$(secret) LINK=""
 acall POST /admin/v1/admins "$(jq -nc --arg e "$EMAIL_STAFF" '{email: $e, name: "e2e staff", role: "OPERATOR", reason: "e2e hires an operator"}')" \
   -b "$WORK/ADMIN.jar" "${CSRF[@]}" -D "$WORK/staff.headers"
-creds
+link
 expect 201 - "ADMIN creates an OPERATOR"
 STAFF_ID=$(jq -r .admin.id <<<"$BODY")
 # shellcheck disable=SC2016 # expanded when the script ends
 at_exit "remote \"sudo docker compose \$COMPOSE_FILES exec -T admin-service /app/exchangectl admin disable $EMAIL_STAFF --reason 'e2e run over'\" >/dev/null"
 check '.admin.role == "OPERATOR" and .admin.status == "ACTIVE" and .admin.sessions == 0 and .admin.last_login_at == null' "active, never signed in"
-[[ ${#PW_STAFF} -ge 20 && ${#SECRET_STAFF} -ge 26 ]] || { echo "FAIL no password or authenticator secret came back" >&2; exit 1; }
-grep -qi '^cache-control: no-store' "$WORK/staff.headers" || { echo "FAIL the credentials may be cached" >&2; exit 1; }
-echo "ok   with a password and an authenticator secret, shown once (no-store)"
+check '.setup.kind == "CREATE" and .setup.expires_at != null and (has("password") or has("totp_secret") | not)' \
+  "with a one-time setup link and no credentials"
+[[ ${#LINK} -ge 40 ]] || { echo "FAIL no setup link came back" >&2; exit 1; }
+grep -qi '^cache-control: no-store' "$WORK/staff.headers" || { echo "FAIL the setup link may be cached" >&2; exit 1; }
+echo "ok   shown once (no-store)"
 acall POST /admin/v1/admins "$(jq -nc --arg e "$EMAIL_STAFF" '{email: $e, name: "again", role: "AUDITOR", reason: "e2e twice"}')" -b "$WORK/ADMIN.jar" "${CSRF[@]}"
-creds
+link
 expect 409 ADMIN_EXISTS "an address is an administrator once"
 login STAFF
-expect 200 - "the new OPERATOR signs in with them"
-check ".admin.role == \"OPERATOR\" and .admin.email == \"$EMAIL_STAFF\"" "as OPERATOR"
+expect 401 ADMIN_LOGIN_FAILED "nobody signs in before the setup"
+inspect
+expect 200 - "the link opens without a session"
+check ".email == \"$EMAIL_STAFF\" and .kind == \"CREATE\" and .sets_password and .totp_secret == \"set\"" "for the password and an authenticator to bind"
+grep -qi '^cache-control: no-store' "$WORK/inspect.headers" || { echo "FAIL the authenticator secret may be cached" >&2; exit 1; }
+echo "ok   its secret not cached either"
+complete "$(jq -nc --arg c "$(setup_code)" '{password: "short", totp_code: $c}')"
+expect 400 COMMON_INVALID_ARGUMENT "a short password is refused"
+complete "$(jq -nc --arg p "$PW_STAFF" '{password: $p, totp_code: "000000"}')"
+expect 422 ADMIN_TOTP_CODE_WRONG "a wrong code too"
+complete "$(jq -nc --arg p "$PW_STAFF" --arg c "$(setup_code)" '{password: $p, totp_code: $c}')"
+[[ $STATUS == 204 ]] || { echo "FAIL the setup: $STATUS $BODY" >&2; exit 1; }
+echo "ok   its holder sets the password and binds the authenticator"
+inspect
+expect 404 ADMIN_SETUP_INVALID "the link is spent"
+login STAFF
+expect 200 - "the new OPERATOR signs in with what it set"
+check ".admin.role == \"OPERATOR\" and .admin.email == \"$EMAIL_STAFF\" and .admin.must_change_password == false" "as OPERATOR"
 as ADMIN GET /admin/v1/admins ""
 expect 200 - "ADMIN lists the administrators"
 check "any(.admins[]; .id == \"$STAFF_ID\" and .sessions == 1 and .last_login_at != null)" "the new one with its session"
@@ -1407,19 +1441,42 @@ as STAFF GET /admin/v1/me ""
 expect 200 - "its next request"
 check '.role == "AUDITOR" and (.permissions | index("flags.write")) == null' "is an AUDITOR's"
 as ADMIN POST "/admin/v1/admins/$STAFF_ID/password-reset" '{"reason":"e2e forgot it"}'
-creds
+link
 expect 200 - "ADMIN resets its password"
+check '.setup.kind == "PASSWORD" and (has("password") | not)' "a link, no password"
 as STAFF GET /admin/v1/me ""
 expect 401 ADMIN_UNAUTHORIZED "which ends its sessions"
 login STAFF
+expect 401 ADMIN_LOGIN_FAILED "and the old password"
+inspect
+check '.kind == "PASSWORD" and .sets_password and .totp_secret == null' "the link sets a password alone"
+PW_STAFF=$(password)
+complete "$(jq -nc --arg p "$PW_STAFF" '{password: $p}')"
+[[ $STATUS == 204 ]] || { echo "FAIL the new password: $STATUS $BODY" >&2; exit 1; }
+login STAFF
 expect 200 - "the new password signs in"
 as ADMIN POST "/admin/v1/admins/$STAFF_ID/totp-reset" '{"reason":"e2e lost the phone"}'
-creds
+link
 expect 200 - "ADMIN resets its authenticator"
+check '.setup.kind == "TOTP"' "a link to bind a new one"
 as STAFF GET /admin/v1/me ""
 expect 401 ADMIN_UNAUTHORIZED "which ends its sessions too"
+OLD_SECRET=$SECRET_STAFF
+inspect
+check '.kind == "TOTP" and (.sets_password | not) and .totp_secret == "set"' "the link binds an authenticator alone"
+[[ $SECRET_STAFF != "$OLD_SECRET" ]] || { echo "FAIL the same authenticator again" >&2; exit 1; }
+complete "$(jq -nc --arg c "$(setup_code)" '{totp_code: $c}')"
+[[ $STATUS == 204 ]] || { echo "FAIL the new authenticator: $STATUS $BODY" >&2; exit 1; }
 login STAFF
 expect 200 - "the new authenticator signs in"
+NEW_PW=$(password)
+as STAFF POST /admin/v1/me/password "$(jq -nc --arg n "$NEW_PW" '{current_password: "not the password", new_password: $n}')"
+expect 422 ADMIN_PASSWORD_WRONG "its own password changes with the current one only"
+as STAFF POST /admin/v1/me/password "$(jq -nc --arg c "$PW_STAFF" --arg n "$NEW_PW" '{current_password: $c, new_password: $n}')"
+[[ $STATUS == 204 ]] || { echo "FAIL its own password: $STATUS $BODY" >&2; exit 1; }
+PW_STAFF=$NEW_PW
+login STAFF
+expect 200 - "it changes its own password and signs in with it"
 as ADMIN POST "/admin/v1/admins/$STAFF_ID/sessions/revoke" '{"reason":"e2e ends them"}'
 [[ $STATUS == 204 ]] || { echo "FAIL ending an administrator's sessions: $STATUS $BODY" >&2; exit 1; }
 echo "ok   ADMIN ends its sessions"
@@ -1600,8 +1657,8 @@ eventually 60 "their approval and rejection, by the ADMIN" audited AUDITOR "$q_a
   '[.items[].payload.action] | (index("admin.sim.event_approved") != null and index("admin.sim.params_rejected") != null and index("admin.sim.mint_rejected") != null)'
 eventually 60 "the mints, by FINANCE" audited AUDITOR "target=sim&actor=$(jq -rn --arg e "$EMAIL_FINANCE" '$e|@uri')" \
   '[.items[].payload.action] | index("admin.sim.mint_requested") != null'
-eventually 60 "the administrator's changes are audited, its credentials are not" audited AUDITOR "target=admin:$STAFF_ID" \
-  "([.items[].payload.action] | (index(\"admin.created\") != null and index(\"admin.role_changed\") != null and index(\"admin.password_reset\") != null and index(\"admin.totp_reset\") != null and index(\"admin.sessions_revoked\") != null and index(\"admin.disabled\") != null and index(\"admin.enabled\") != null)) and (tostring | (contains(\"$PW_STAFF\") or contains(\"$SECRET_STAFF\")) | not)"
+eventually 60 "the administrator's changes are audited, its credentials and links are not" audited AUDITOR "target=admin:$STAFF_ID" \
+  "([.items[].payload.action] | (index(\"admin.created\") != null and index(\"admin.role_changed\") != null and index(\"admin.password_reset\") != null and index(\"admin.totp_reset\") != null and index(\"admin.sessions_revoked\") != null and index(\"admin.disabled\") != null and index(\"admin.enabled\") != null and index(\"admin.setup_completed\") != null and index(\"admin.password_changed\") != null)) and (tostring | (contains(\"$PW_STAFF\") or contains(\"$SECRET_STAFF\") or contains(\"$LINK\")) | not)"
 exported() {
   acall GET "/admin/v1/audit-logs/export?target=admin:$STAFF_ID" "" -b "$WORK/AUDITOR.jar" -D "$WORK/export.headers"
   [[ $STATUS == 200 ]] && grep -q 'admin.enabled' <<<"$BODY"

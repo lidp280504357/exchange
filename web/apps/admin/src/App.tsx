@@ -1,13 +1,28 @@
 import { errorText } from "@exchange/core";
 import { ErrorState, Spinner } from "@exchange/ui";
 import { lazy, Suspense } from "react";
-import { Navigate, Route, Routes } from "react-router";
+import { Navigate, Route, Routes, useLocation } from "react-router";
 import { useMe } from "./session";
 
 const Login = lazy(() => import("./pages/Login"));
+const Setup = lazy(() => import("./pages/Setup"));
 const SignedIn = lazy(() => import("./layout/SignedIn"));
 
 export function App() {
+  const { pathname } = useLocation();
+  // A one-time setup link opens without a session, whoever is signed in
+  // in this browser (C5.5 ⑪).
+  if (pathname === "/setup") {
+    return (
+      <Suspense fallback={null}>
+        <Setup />
+      </Suspense>
+    );
+  }
+  return <Console />;
+}
+
+function Console() {
   const me = useMe();
   if (me.isPending) {
     return (

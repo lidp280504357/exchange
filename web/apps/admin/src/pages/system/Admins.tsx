@@ -1,6 +1,6 @@
 import { adminApi, adminData, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
 import {
-  Badge, Button, CopyButton, DataTable, Dialog, Drawer, DropdownMenu, ErrorState, Input, QrCode, Select, Skeleton, type ColumnDef,
+  Badge, Button, CopyButton, DataTable, Dialog, Drawer, DropdownMenu, ErrorState, Input, Select, Skeleton, type ColumnDef,
   type DataColumnMeta, type MenuEntry,
 } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
@@ -9,12 +9,12 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DangerAction, FormError, lastFour } from "../../kit/actions";
 import { EnumBadge, useEnum } from "../../kit/enums";
-import { TimeText } from "../../kit/format";
+import { TimeText, useTimeText } from "../../kit/format";
 import { stagger } from "../../kit/motion";
 import { Card, Page } from "../../kit/Page";
 
 type Managed = AdminSchemas["ManagedAdmin"];
-type Credentials = AdminSchemas["AdminCredentials"];
+type Setup = AdminSchemas["AdminSetup"];
 type Role = AdminSchemas["AdminRole"];
 type Session = AdminSchemas["AdminSession"];
 type Kind = "disable" | "enable" | "role" | "password" | "totp";
@@ -28,9 +28,12 @@ const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  * Administrators and roles (design 2026-10-02 §4.6): the administrators
  * with their roles, sign-ins and sessions; an ADMIN creates them, changes
  * their roles, disables and enables them, resets their passwords and
- * authenticators and ends their sessions, each with a reason. A password
- * or authenticator secret shows once. Nobody changes their own account
- * here; the roles' permissions are shown read-only.
+ * authenticators and ends their sessions, each with a reason. A creation
+ * or a reset shows a one-time setup link once, to hand over: its holder
+ * sets the password or binds the authenticator, so whoever created or
+ * reset the account never learns what signs it in (C5.5 ⑪). Nobody
+ * changes their own account here (that is the account page); the roles'
+ * permissions are shown read-only.
  */
 export default function Admins({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
@@ -38,7 +41,7 @@ export default function Admins({ admin }: { admin: Admin }) {
   const q = useQuery({ queryKey: adminsKey, queryFn: async () => adminData(await adminApi.GET("/admin/v1/admins")).admins });
   const [creating, setCreating] = useState(false);
   const [action, setAction] = useState<{ kind: Kind; target: Managed } | null>(null);
-  const [shown, setShown] = useState<{ email: string; creds: Credentials } | null>(null);
+  const [shown, setShown] = useState<{ email: string; setup: Setup } | null>(null);
   const [sessionsOf, setSessionsOf] = useState<Managed | null>(null);
   const columns = useMemo<ColumnDef<Managed, unknown>[]>(
     () => [
@@ -135,24 +138,24 @@ export default function Admins({ admin }: { admin: Admin }) {
         />
       </Card>
       <RoleMatrix />
-      <CreateAdmin open={creating} onOpenChange={setCreating} onCreated={(c) => setShown({ email: c.admin?.email ?? "", creds: c })} />
+      <CreateAdmin open={creating} onOpenChange={setCreating} onCreated={(s) => setShown({ email: s.admin?.email ?? "", setup: s })} />
       {action && (
         <AdminAction
           key={`${action.kind}:${action.target.id}`}
           kind={action.kind}
           target={action.target}
           onClose={() => setAction(null)}
-          onCredentials={(creds) => setShown({ email: action.target.email, creds })}
+          onSetup={(setup) => setShown({ email: action.target.email, setup })}
         />
       )}
-      <CredentialsDialog shown={shown} onClose={() => setShown(null)} />
+      <SetupDialog shown={shown} onClose={() => setShown(null)} />
       {sessionsOf && <SessionsDrawer target={sessionsOf} onClose={() => setSessionsOf(null)} />}
     </Page>
   );
 }
 
 /** CreateAdmin asks for the address, the name and the role; the confirmation word is the role in lower case. */
-function CreateAdmin({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (o: boolean) => void; onCreated: (c: Credentials) => void }) {
+function CreateAdmin({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (o: boolean) => void; onCreated: (s: Setup) => void }) {
   const { t } = useTranslation();
   const label = useEnum();
   const [email, setEmail] = useState("");
@@ -186,7 +189,7 @@ function CreateAdmin({ open, onOpenChange, onCreated }: { open: boolean; onOpenC
       }}
       success={t("admin.admins.createdOk")}
       invalidate={[adminsKey]}
-      onDone={(r) => onCreated(r as Credentials)}
+      onDone={(r) => onCreated(r as Setup)}
     >
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1.5 text-sm text-fg-2">
@@ -218,8 +221,8 @@ function CreateAdmin({ open, onOpenChange, onCreated }: { open: boolean; onOpenC
   );
 }
 
-/** AdminAction confirms one change of another administrator; a reset hands its credentials on. */
-function AdminAction({ kind, target, onClose, onCredentials }: { kind: Kind; target: Managed; onClose: () => void; onCredentials: (c: Credentials) => void }) {
+/** AdminAction confirms one change of another administrator; a reset hands its setup link on. */
+function AdminAction({ kind, target, onClose, onSetup }: { kind: Kind; target: Managed; onClose: () => void; onSetup: (s: Setup) => void }) {
   const { t } = useTranslation();
   const label = useEnum();
   const [role, setRole] = useState<Role>(target.role);
@@ -263,7 +266,7 @@ function AdminAction({ kind, target, onClose, onCredentials }: { kind: Kind; tar
       invalidate={[adminsKey, ["admin", "admins", target.id, "sessions"]]}
       onDone={(r) => {
         onClose();
-        if (kind === "password" || kind === "totp") onCredentials(r as Credentials);
+        if (kind === "password" || kind === "totp") onSetup(r as Setup);
       }}
     >
       {kind === "role" && (
@@ -281,57 +284,47 @@ function AdminAction({ kind, target, onClose, onCredentials }: { kind: Kind; tar
   );
 }
 
-/** CredentialsDialog shows a password and an authenticator secret once; nothing keeps them. */
-function CredentialsDialog({ shown, onClose }: { shown: { email: string; creds: Credentials } | null; onClose: () => void }) {
+/**
+ * SetupDialog shows a one-time setup link once, to hand over through a
+ * safe channel; nothing keeps it here. Opened, it sets what it sets (a
+ * day, once); the password and the authenticator stay its holder's.
+ */
+function SetupDialog({ shown, onClose }: { shown: { email: string; setup: Setup } | null; onClose: () => void }) {
   const { t } = useTranslation();
-  const c = shown?.creds;
+  const time = useTimeText();
+  const s = shown?.setup.setup;
+  const link = s ? `${location.origin}/setup#token=${encodeURIComponent(s.token)}` : "";
   return (
     <Dialog
       open={shown !== null}
       onOpenChange={(o) => !o && onClose()}
-      title={t("admin.admins.credentialsTitle")}
-      description={t("admin.admins.credentialsOnce")}
+      title={t("admin.admins.setupTitle")}
+      description={t("admin.admins.setupOnce")}
       persistent
       footer={
         <Button variant="primary" onClick={onClose}>
-          {t("admin.admins.credentialsDone")}
+          {t("admin.admins.setupDone")}
         </Button>
       }
     >
-      {c && (
+      {s && (
         <div className="flex flex-col gap-4">
-          <div className="text-sm text-fg-2">{shown.email}</div>
-          {c.password && (
-            <Secret label={t("admin.admins.password")} value={c.password} testId="admin-password" />
-          )}
-          {c.totp_secret && (
-            <div className="flex flex-col gap-2">
-              <Secret label={t("admin.admins.totpSecret")} value={c.totp_secret} testId="admin-totp-secret" />
-              {c.totp_uri && (
-                <div className="flex items-center gap-4">
-                  <QrCode value={c.totp_uri} size={136} label={t("admin.admins.totpSecret")} />
-                  <p className="text-sm text-fg-3">{t("admin.admins.totpScan")}</p>
-                </div>
-              )}
+          <div className="text-sm text-fg-2">
+            {shown.email} · {t(`admin.admins.setupKind_${s.kind}`)}
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-fg-3">{t("admin.admins.setupLink")}</span>
+            <div className="flex items-center justify-between gap-3 rounded-2 border border-line-1 bg-bg-2 px-4 py-3">
+              <span className="select-all break-all font-mono text-sm" data-testid="admin-setup-link">
+                {link}
+              </span>
+              <CopyButton value={link} size={16} />
             </div>
-          )}
+          </div>
+          <p className="text-sm text-fg-3">{t("admin.admins.setupUntil", { time: time(s.expires_at, "datetime") })}</p>
         </div>
       )}
     </Dialog>
-  );
-}
-
-function Secret({ label, value, testId }: { label: string; value: string; testId: string }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-xs text-fg-3">{label}</span>
-      <div className="flex items-center justify-between gap-3 rounded-2 border border-line-1 bg-bg-2 px-4 py-3">
-        <span className="select-all break-all font-mono text-base tracking-wider" data-testid={testId}>
-          {value}
-        </span>
-        <CopyButton value={value} size={16} />
-      </div>
-    </div>
   );
 }
 

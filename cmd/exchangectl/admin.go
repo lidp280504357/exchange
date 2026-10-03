@@ -124,14 +124,15 @@ func adminCreate(ctx context.Context, store *postgres.Store, secretKey string, a
 		_, _ = rand.Read(raw)
 		pw, secret = base64.RawURLEncoding.EncodeToString(raw), totp.NewSecret()
 	}
+	// A generated password is changed at the first sign-in (C5.5 ⑪).
 	a, err := application.NewAdmin(ctx, store, password.NewHasher(1, password.DefaultCost), box, *email, *name, *role, pw, secret,
-		actor(), time.Now())
+		actor(), !*fromStdin, time.Now())
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "created %s %s (%s)\n", a.ID, a.Email, a.Role)
 	if !*fromStdin {
-		fmt.Fprintf(out, "password: %s\nauthenticator secret: %s\n%s\nshown once: nothing keeps them in the clear\n",
+		fmt.Fprintf(out, "password: %s\nauthenticator secret: %s\n%s\nshown once: nothing keeps them in the clear; the password is changed at the first sign-in\n",
 			pw, totp.Encode(secret), totp.URI("Exchange Admin", a.Email, secret))
 	}
 	return nil

@@ -14,6 +14,7 @@ import {
   Gem,
   HeartPulse,
   Coins,
+  KeyRound,
   Landmark,
   Layers,
   LayoutDashboard,
@@ -96,6 +97,8 @@ export const sections: Section[] = [
 /** Pages under a section that the sidebar does not list (a record's own page). */
 export const subpages: Section[] = [
   { path: "users/:id", key: "users", group: "users", perm: "users.read", icon: Users, page: lazy(() => import("./pages/users/UserPage")) },
+  // One's own password and authenticator, from the administrator's menu (C5.5 ⑪).
+  { path: "account", key: "account", group: "system", icon: KeyRound, page: lazy(() => import("./pages/system/Account")) },
 ];
 
 /** allowed reports whether an administrator may open a section. */

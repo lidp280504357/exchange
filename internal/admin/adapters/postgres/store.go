@@ -77,16 +77,27 @@ func stamp(t time.Time) *time.Time {
 type admins repos
 
 const adminColumns = `id, email, name, role, password_hash, totp_sealed, totp_last_step, status, failed_attempts, locked_until,
-	last_login_at, created_at`
+	last_login_at, created_at, setup_kind, setup_hash, setup_totp_sealed, setup_expires_at, must_change_password`
 
 func scanAdmin(row pgx.Row) (domain.Admin, error) {
 	var a domain.Admin
-	var locked, last *time.Time
+	var locked, last, setupExpires *time.Time
 	var failed int32
+	var setupKind *string
 	err := row.Scan(&a.ID, &a.Email, &a.Name, &a.Role, &a.PasswordHash, &a.TOTPSealed, &a.TOTPLastStep, &a.Status, &failed, &locked,
-		&last, &a.CreatedAt)
-	a.FailedAttempts, a.LockedUntil, a.LastLoginAt = int(failed), at(locked), at(last)
+		&last, &a.CreatedAt, &setupKind, &a.SetupHash, &a.SetupTOTPSealed, &setupExpires, &a.MustChangePassword)
+	a.FailedAttempts, a.LockedUntil, a.LastLoginAt, a.SetupExpiresAt = int(failed), at(locked), at(last), at(setupExpires)
+	if setupKind != nil {
+		a.SetupKind = *setupKind
+	}
 	return a, err
+}
+
+func optKind(kind string) *string {
+	if kind == "" {
+		return nil
+	}
+	return &kind
 }
 
 func (r admins) one(ctx context.Context, sql string, args ...any) (*domain.Admin, error) {
@@ -101,9 +112,11 @@ func (r admins) one(ctx context.Context, sql string, args ...any) (*domain.Admin
 }
 
 func (r admins) Insert(ctx context.Context, a domain.Admin) error {
-	_, err := r.q.Exec(ctx, `INSERT INTO admins (`+adminColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+	_, err := r.q.Exec(ctx, `INSERT INTO admins (`+adminColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+		$15, $16, $17)`,
 		a.ID, a.Email, a.Name, a.Role, a.PasswordHash, a.TOTPSealed, a.TOTPLastStep, a.Status, a.FailedAttempts,
-		stamp(a.LockedUntil), stamp(a.LastLoginAt), a.CreatedAt)
+		stamp(a.LockedUntil), stamp(a.LastLoginAt), a.CreatedAt, optKind(a.SetupKind), a.SetupHash, a.SetupTOTPSealed,
+		stamp(a.SetupExpiresAt), a.MustChangePassword)
 	if err != nil {
 		return fmt.Errorf("insert admin: %w", err)
 	}
@@ -112,9 +125,10 @@ func (r admins) Insert(ctx context.Context, a domain.Admin) error {
 
 func (r admins) Update(ctx context.Context, a domain.Admin) error {
 	_, err := r.q.Exec(ctx, `UPDATE admins SET name = $2, role = $3, password_hash = $4, totp_sealed = $5, totp_last_step = $6,
-		status = $7, failed_attempts = $8, locked_until = $9, last_login_at = $10, updated_at = now() WHERE id = $1`,
+		status = $7, failed_attempts = $8, locked_until = $9, last_login_at = $10, setup_kind = $11, setup_hash = $12,
+		setup_totp_sealed = $13, setup_expires_at = $14, must_change_password = $15, updated_at = now() WHERE id = $1`,
 		a.ID, a.Name, a.Role, a.PasswordHash, a.TOTPSealed, a.TOTPLastStep, a.Status, a.FailedAttempts, stamp(a.LockedUntil),
-		stamp(a.LastLoginAt))
+		stamp(a.LastLoginAt), optKind(a.SetupKind), a.SetupHash, a.SetupTOTPSealed, stamp(a.SetupExpiresAt), a.MustChangePassword)
 	if err != nil {
 		return fmt.Errorf("update admin: %w", err)
 	}
@@ -135,6 +149,21 @@ func (r admins) Get(ctx context.Context, id string) (*domain.Admin, error) {
 
 func (r admins) GetForUpdate(ctx context.Context, id string) (*domain.Admin, error) {
 	return r.one(ctx, `SELECT `+adminColumns+` FROM admins WHERE id = $1 FOR UPDATE`, id)
+}
+
+func (r admins) BySetupForUpdate(ctx context.Context, hash []byte) (*domain.Admin, error) {
+	return r.one(ctx, `SELECT `+adminColumns+` FROM admins WHERE setup_hash = $1 FOR UPDATE`, hash)
+}
+
+// lockRoster serializes the changes that could leave no active ADMIN
+// (C5.5 ⑪): a transaction-scoped advisory lock.
+const lockRoster = 7_331_001
+
+func (r admins) LockRoster(ctx context.Context) error {
+	if _, err := r.q.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(lockRoster)); err != nil {
+		return fmt.Errorf("lock the administrators: %w", err)
+	}
+	return nil
 }
 
 func (r admins) List(ctx context.Context) ([]domain.Admin, error) {
@@ -191,6 +220,14 @@ func (r sessions) Revoke(ctx context.Context, hash []byte, now time.Time) error 
 func (r sessions) RevokeAll(ctx context.Context, adminID string, now time.Time) error {
 	if _, err := r.q.Exec(ctx, `UPDATE admin_sessions SET revoked_at = $2 WHERE admin_id = $1 AND revoked_at IS NULL`, adminID, now); err != nil {
 		return fmt.Errorf("revoke sessions: %w", err)
+	}
+	return nil
+}
+
+func (r sessions) RevokeOthers(ctx context.Context, adminID string, keep []byte, now time.Time) error {
+	if _, err := r.q.Exec(ctx, `UPDATE admin_sessions SET revoked_at = $3 WHERE admin_id = $1 AND token_hash <> $2 AND revoked_at IS NULL`,
+		adminID, keep, now); err != nil {
+		return fmt.Errorf("revoke other sessions: %w", err)
 	}
 	return nil
 }

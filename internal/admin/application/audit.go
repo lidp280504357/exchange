@@ -21,31 +21,47 @@ type AuditRow struct {
 	Details string
 }
 
-// ExportAuditLogs returns the audit entries matching q, newest first, at
-// most MaxAuditExport of them, and whether more were left out; the
-// export itself is audited (admin.audit.exported) with its filters.
-func (s *Service) ExportAuditLogs(ctx context.Context, p Principal, q ports.AuditQuery) ([]AuditRow, bool, error) {
-	if err := p.require(domain.PermAuditRead); err != nil {
-		return nil, false, err
+// ExportAuditLogs streams the audit entries matching q, newest first, at
+// most MaxAuditExport of them, a page at a time (C5.5 ⑪): begin learns
+// first whether more are left out, so the answer can say it before its
+// rows, then each row goes to emit. The export itself is audited
+// (admin.audit.exported) with its filters and the rows it wrote. It has
+// email and IP addresses: ADMIN and AUDITOR only (audit.export).
+func (s *Service) ExportAuditLogs(ctx context.Context, p Principal, q ports.AuditQuery, begin func(cut bool) error,
+	emit func(AuditRow) error,
+) error {
+	if err := p.require(domain.PermAuditExport); err != nil {
+		return err
 	}
 	q.Cursor, q.Limit = "", 500
-	var out []AuditRow
-	for {
+	total, err := s.AuditLog.Count(ctx, q)
+	if err != nil {
+		return err
+	}
+	if err := begin(total > MaxAuditExport); err != nil {
+		return err
+	}
+	rows := 0
+	for rows < MaxAuditExport {
 		page, next, err := s.AuditLog.Search(ctx, q)
 		if err != nil {
-			return nil, false, err
+			return err
 		}
 		for _, e := range page {
-			if len(out) == MaxAuditExport {
-				return out, true, s.auditExport(ctx, p, q, len(out))
+			if rows == MaxAuditExport {
+				break
 			}
-			out = append(out, auditRow(e))
+			if err := emit(auditRow(e)); err != nil {
+				return err
+			}
+			rows++
 		}
 		if next == "" {
-			return out, false, s.auditExport(ctx, p, q, len(out))
+			break
 		}
 		q.Cursor = next
 	}
+	return s.auditExport(ctx, p, q, rows)
 }
 
 func (s *Service) auditExport(ctx context.Context, p Principal, q ports.AuditQuery, rows int) error {

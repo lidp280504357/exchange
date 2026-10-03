@@ -19,6 +19,8 @@ type pagedAudit struct {
 	queries []ports.AuditQuery
 }
 
+func (a *pagedAudit) Count(context.Context, ports.AuditQuery) (int, error) { return a.n, nil }
+
 func (a *pagedAudit) Search(_ context.Context, q ports.AuditQuery) ([]ports.AuditEntry, string, error) {
 	a.queries = append(a.queries, q)
 	from, _ := strconv.Atoi(q.Cursor)
@@ -49,7 +51,25 @@ func TestExportingTheAuditTrail(t *testing.T) {
 	src := &pagedAudit{n: 1203}
 	h.svc.AuditLog = src
 
-	rows, cut, err := h.svc.ExportAuditLogs(ctx, fin, ports.AuditQuery{Actor: "boss@example.com", Cursor: "77", Limit: 3})
+	h.admin(t, "audit@example.com", domain.RoleAuditor)
+	auditor := h.login(t, "audit@example.com")
+	export := func(p Principal, q ports.AuditQuery) ([]AuditRow, bool, error) {
+		var rows []AuditRow
+		var cut bool
+		err := h.svc.ExportAuditLogs(ctx, p, q, func(c bool) error {
+			cut = c
+			return nil
+		}, func(r AuditRow) error {
+			rows = append(rows, r)
+			return nil
+		})
+		return rows, cut, err
+	}
+	// Email and IP addresses: only ADMIN and AUDITOR export (C5.5 ⑪).
+	if _, _, err := export(fin, ports.AuditQuery{}); code(err) != "ADMIN_FORBIDDEN" {
+		t.Fatalf("FINANCE exports: %v", err)
+	}
+	rows, cut, err := export(auditor, ports.AuditQuery{Actor: "boss@example.com", Cursor: "77", Limit: 3})
 	if err != nil || cut || len(rows) != 1203 || len(src.queries) != 3 {
 		t.Fatalf("%d rows, cut %v, %d pages: %v", len(rows), cut, len(src.queries), err)
 	}
@@ -63,19 +83,19 @@ func TestExportingTheAuditTrail(t *testing.T) {
 		t.Fatalf("a configuration change %+v", r)
 	}
 	last := h.store.audits[len(h.store.audits)-1]
-	if last.GetAction() != "admin.audit.exported" || last.GetActor() != "fin@example.com" ||
+	if last.GetAction() != "admin.audit.exported" || last.GetActor() != "audit@example.com" ||
 		!strings.Contains(last.GetDetails(), `"rows":1203`) || !strings.Contains(last.GetDetails(), `"actor":"boss@example.com"`) {
 		t.Fatalf("the export is audited: %v", last)
 	}
 
 	src.n, src.queries = MaxAuditExport+1, nil
-	rows, cut, err = h.svc.ExportAuditLogs(ctx, boss, ports.AuditQuery{})
+	rows, cut, err = export(boss, ports.AuditQuery{})
 	if err != nil || !cut || len(rows) != MaxAuditExport {
 		t.Fatalf("over the bound: %d rows, cut %v: %v", len(rows), cut, err)
 	}
 
 	h.admin(t, "ops@example.com", domain.RoleOperator)
-	if _, _, err := h.svc.ExportAuditLogs(ctx, h.login(t, "ops@example.com"), ports.AuditQuery{}); err != nil {
-		t.Fatalf("every role reads the audit trail: %v", err)
+	if _, _, err := export(h.login(t, "ops@example.com"), ports.AuditQuery{}); code(err) != "ADMIN_FORBIDDEN" {
+		t.Fatalf("an OPERATOR exports: %v", err)
 	}
 }

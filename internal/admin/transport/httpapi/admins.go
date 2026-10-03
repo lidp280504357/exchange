@@ -5,7 +5,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/lidp280504357/exchange/internal/admin/application"
 	"github.com/lidp280504357/exchange/internal/admin/domain"
 	"github.com/lidp280504357/exchange/internal/platform/httpx"
 )
@@ -28,16 +27,6 @@ func managedAdminJSON(a domain.Admin, sessions int) ManagedAdminJSON {
 		AdminJSON: adminJSON(a), Status: a.Status, FailedAttempts: a.FailedAttempts, LockedUntil: optTime(a.LockedUntil),
 		LastLoginAt: optTime(a.LastLoginAt), CreatedAt: httpx.FormatTime(a.CreatedAt), Sessions: sessions,
 	}
-}
-
-// credentialsJSON is shown once: no cache keeps it, no log or audit has it.
-func writeCredentials(w http.ResponseWriter, status int, admin *ManagedAdminJSON, c application.Credentials) {
-	w.Header().Set("Cache-Control", "no-store")
-	out := map[string]any{"password": optText(c.Password), "totp_secret": optText(c.TOTPSecret), "totp_uri": optText(c.TOTPURI)}
-	if admin != nil {
-		out["admin"] = admin
-	}
-	httpx.WriteJSON(w, status, out)
 }
 
 func optText(s string) *string {
@@ -81,7 +70,7 @@ func (h *Handler) createAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view := managedAdminJSON(a, 0)
-	writeCredentials(w, http.StatusCreated, &view, c)
+	writeSetup(w, http.StatusCreated, &view, c)
 }
 
 func (h *Handler) adminStatus(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +118,7 @@ func (h *Handler) adminPasswordReset(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	writeCredentials(w, http.StatusOK, nil, c)
+	writeSetup(w, http.StatusOK, nil, c)
 }
 
 func (h *Handler) adminTOTPReset(w http.ResponseWriter, r *http.Request) {
@@ -143,7 +132,7 @@ func (h *Handler) adminTOTPReset(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	writeCredentials(w, http.StatusOK, nil, c)
+	writeSetup(w, http.StatusOK, nil, c)
 }
 
 func (h *Handler) adminSessions(w http.ResponseWriter, r *http.Request) {

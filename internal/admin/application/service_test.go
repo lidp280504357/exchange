@@ -311,6 +311,17 @@ func (r memAdmins) GetForUpdate(ctx context.Context, id string) (*domain.Admin, 
 	return r.Get(ctx, id)
 }
 
+func (r memAdmins) BySetupForUpdate(_ context.Context, hash []byte) (*domain.Admin, error) {
+	for _, a := range r.m.admins {
+		if len(a.SetupHash) > 0 && string(a.SetupHash) == string(hash) {
+			return &a, nil
+		}
+	}
+	return nil, nil
+}
+
+func (memAdmins) LockRoster(context.Context) error { return nil }
+
 func (r memAdmins) List(context.Context) ([]domain.Admin, error) {
 	var out []domain.Admin
 	for _, a := range r.m.admins {
@@ -349,6 +360,15 @@ func (r memSessions) Revoke(_ context.Context, hash []byte, _ time.Time) error {
 func (r memSessions) RevokeAll(_ context.Context, adminID string, _ time.Time) error {
 	for h, s := range r.m.sessions {
 		if s.AdminID == adminID {
+			r.m.revoked[h] = true
+		}
+	}
+	return nil
+}
+
+func (r memSessions) RevokeOthers(_ context.Context, adminID string, keep []byte, _ time.Time) error {
+	for h, s := range r.m.sessions {
+		if s.AdminID == adminID && h != string(keep) {
 			r.m.revoked[h] = true
 		}
 	}
@@ -869,7 +889,7 @@ const testPassword = "correct horse battery"
 func (h *harness) admin(t *testing.T, email, role string) {
 	t.Helper()
 	secret := totp.NewSecret()
-	a, err := NewAdmin(context.Background(), h.store, h.svc.Hasher, h.svc.Box, email, "Test", role, testPassword, secret, "cli:test", h.now)
+	a, err := NewAdmin(context.Background(), h.store, h.svc.Hasher, h.svc.Box, email, "Test", role, testPassword, secret, "cli:test", false, h.now)
 	if err != nil {
 		t.Fatal(err)
 	}

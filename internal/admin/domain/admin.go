@@ -88,6 +88,9 @@ const (
 	// missing on the custody checks): its approved withdrawals go out
 	// (ADMIN only, C5.5 ⑯).
 	PermWithdrawalsResume = "withdrawals.resume"
+	// PermAuditExport exports the audit trail as a spreadsheet, with its
+	// email addresses and IP addresses (ADMIN and AUDITOR, C5.5 ⑪).
+	PermAuditExport = "audit.export"
 )
 
 var reads = []string{
@@ -98,12 +101,12 @@ var roles = map[string][]string{
 	RoleAdmin: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit,
 		PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermDerivativesEdit, PermSettingsEdit, PermUsersNotes,
 		PermUsersSecurity, PermUsersContacts, PermLedgerHold, PermDepositsReview, PermAdminsManage, PermInstrumentsTrading,
-		PermContentEdit, PermNoticesSend, PermSimControl, PermWithdrawalsResume),
+		PermContentEdit, PermNoticesSend, PermSimControl, PermWithdrawalsResume, PermAuditExport),
 	RoleOperator: append(slices.Clone(reads), PermUsersStatus, PermOrdersCancel, PermInstrumentsEdit, PermFlagsEdit, PermDerivativesEdit,
 		PermUsersNotes, PermUsersSecurity, PermUsersContacts, PermLedgerHold, PermContentEdit, PermNoticesSend, PermSimControl),
 	RoleFinance: append(slices.Clone(reads), PermWithdrawalsEdit, PermAdjustRequest, PermAdjustApprove, PermUsersNotes, PermUsersContacts,
 		PermLedgerHold, PermDepositsReview),
-	RoleAuditor: slices.Clone(reads),
+	RoleAuditor: append(slices.Clone(reads), PermAuditExport),
 }
 
 // ValidRole reports whether role exists.
@@ -162,6 +165,16 @@ type Admin struct {
 	LockedUntil    time.Time
 	LastLoginAt    time.Time
 	CreatedAt      time.Time
+	// SetupKind, with SetupHash (of the one-time token), SetupTOTPSealed
+	// (the authenticator it binds) and SetupExpiresAt, is a setup waiting
+	// for the administrator (setup.go).
+	SetupKind       string
+	SetupHash       []byte
+	SetupTOTPSealed []byte
+	SetupExpiresAt  time.Time
+	// MustChangePassword holds an administrator whose password was
+	// generated for them (exchangectl admin create) until they change it.
+	MustChangePassword bool
 }
 
 // NewAdmin validates a new administrator; the caller sets the hash and

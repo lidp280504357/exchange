@@ -38,12 +38,12 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 
 | 角色 | 权限 |
 |---|---|
-| ADMIN | 全部（27 项），包括只有它有的 `settings.write`（后台设置：双人审批与单人限额）、`admins.manage`（管理员：创建、改角色、停用与启用、重置口令与身份验证器、结束会话）、`instruments.trading`（交易参数：状态、费率、风险阶梯、参考符号，见下文「交易参数的护栏」）与 `withdrawals.resume`（解除资产的提现暂停，C5.5 ⑯） |
+| ADMIN | 全部（28 项），包括只有它有的 `settings.write`（后台设置：双人审批与单人限额）、`admins.manage`（管理员：创建、改角色、停用与启用、重置口令与身份验证器（都只给一次性设置链接）、结束会话）、`instruments.trading`（交易参数：状态、费率、风险阶梯、参考符号，见下文「交易参数的护栏」）与 `withdrawals.resume`（解除资产的提现暂停，C5.5 ⑯） |
 | OPERATOR | 读 + 改账户状态、撤销用户挂单（全部或单笔）、编辑交易参数以外的参考数据与上架新交易对（`instruments.write`）、解除合约只减仓与强制平仓（`derivatives.write`）、切换功能开关（后台自己的 `admin.*` 开关除外）、备注与标签（`users.notes`）、账户安全操作与换绑审核（`users.security`）、查看完整联系方式（`users.contacts`）、风控冻结（`ledger.hold`）、公告与帮助（`content.write`）、站内信（`notices.send`）、模拟市场的价格事件与参数（`sim.control`，C5） |
 | FINANCE | 读 + 提现审批与搁置、发起与审批手动调账（现货或合约账户）和保险基金注资、充值处置与补记（`deposits.review`）、备注与标签、查看完整联系方式、风控冻结 |
-| AUDITOR | 只读（用户（联系方式脱敏）、资产与交易对、合约（`derivatives.read`）、功能开关、提现、审计日志、报表） |
+| AUDITOR | 只读（用户（联系方式脱敏）、资产与交易对、合约（`derivatives.read`）、功能开关、提现、审计日志、报表），外加导出审计日志（`audit.export`：CSV 里有邮箱与 IP，只有 ADMIN 与 AUDITOR 能导出，C5.5 ⑪） |
 
-越权返回 403 `ADMIN_FORBIDDEN`。前端按 `/admin/v1/me` 返回的权限列表显示菜单与按钮，但以服务端检查为准。`admin.*` 开关（`admin.login_without_totp`、`admin.two_person_approval`）在开关页也要 `settings.write`，运营不能借开关页关掉双人审批。
+越权返回 403 `ADMIN_FORBIDDEN`。每位管理员都能在右上角菜单的「账号与安全」（`/account`）改自己的口令与身份验证器，见下文「管理员、系统健康与审计导出」。前端按 `/admin/v1/me` 返回的权限列表显示菜单与按钮，但以服务端检查为准。`admin.*` 开关（`admin.login_without_totp`、`admin.two_person_approval`）在开关页也要 `settings.write`，运营不能借开关页关掉双人审批。
 
 ## 资金操作：单人与双人审批（2026-10-02 设计 C1）
 
@@ -162,12 +162,13 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 
 ## 管理员、系统健康与审计导出（2026-10-02 设计 §4.6，C4a）
 
-- **管理员与角色**（`/admins`，`admins.manage`，只有 ADMIN）：列表显示角色、状态（停用、锁定到何时、连续失败次数）、最近登录、进行中的会话数。「新建管理员」填邮箱、姓名、角色与理由，确认词为角色的小写代码；成功后弹窗显示**一次性**的口令（24 位）与身份验证器密钥（base32 与二维码），关闭后无法再看。行内「操作」：修改角色（下一个请求起生效）、重置口令（结束对方全部会话）、重置身份验证器（旧的立即失效，会话结束）、查看会话（抽屉，可结束全部会话）、停用（会话立即结束）/启用（同时清除锁定与失败次数）。每项都要理由与确认词（ID 后 4 位），审计 `admin.created`、`admin.role_changed`、`admin.password_reset`、`admin.totp_reset`、`admin.sessions_revoked`、`admin.disabled`、`admin.enabled`，对象 `admin:<id>`。下方「角色权限」矩阵只读（来自 `GET /admin/v1/roles`，任何管理员可读）。
-  - 规则：不能在这里改自己的账号（403 `ADMIN_SELF`；退出登录结束自己的会话）；最后一位启用的 ADMIN 不能被停用或降级（409 `ADMIN_LAST_ADMIN`）。没有 ADMIN 能登录时仍用 `exchangectl admin create`。
-  - 口令与密钥只出现在创建或重置的那一次响应里（`Cache-Control: no-store`），不写日志、不进审计；服务端只存 Argon2id 哈希与用 `ADMIN_SECRET_KEY` 加密的 TOTP 密钥。
-  - 接口：`GET /admin/v1/admins`、`POST /admin/v1/admins`（201，`{admin, password, totp_secret, totp_uri}`）、`POST /admin/v1/admins/{id}/status`（`{enabled, reason}`）、`…/role`（`{role, reason}`）、`…/password-reset`、`…/totp-reset`（`{reason}`，返回新的口令或密钥）、`GET …/sessions`（最多 50 个进行中的会话）、`POST …/sessions/revoke`（204）。
+- **管理员与角色**（`/admins`，`admins.manage`，只有 ADMIN）：列表显示角色、状态（停用、锁定到何时、连续失败次数）、最近登录、进行中的会话数。「新建管理员」填邮箱、姓名、角色与理由，确认词为角色的小写代码；成功后弹窗显示**一次性设置链接**（`https://admin.astras.vip/setup#token=…`，24 小时内有效、只能用一次），关闭后无法再看，经安全渠道交给本人（C5.5 ⑪）。行内「操作」：修改角色（下一个请求起生效）、重置口令（旧口令立即失效、结束对方全部会话，给设置链接）、重置身份验证器（旧的立即失效、会话结束，给设置链接）、查看会话（抽屉，可结束全部会话）、停用（会话立即结束）/启用（同时清除锁定与失败次数）。每项都要理由与确认词（ID 后 4 位），审计 `admin.created`、`admin.role_changed`、`admin.password_reset`、`admin.totp_reset`、`admin.sessions_revoked`、`admin.disabled`、`admin.enabled`，对象 `admin:<id>`。下方「角色权限」矩阵只读（来自 `GET /admin/v1/roles`，任何管理员可读）。
+  - 规则：不能在这里改自己的账号（403 `ADMIN_SELF`；退出登录结束自己的会话）；最后一位启用的 ADMIN 不能被停用或降级（409 `ADMIN_LAST_ADMIN`；检查与修改在同一个事务里，事务先取咨询锁 `pg_advisory_xact_lock(7331001)`，两位 ADMIN 同时互相降级也会留下一位，C5.5 ⑪）。没有 ADMIN 能登录时仍用 `exchangectl admin create`。
+  - **一次性设置链接**（C5.5 ⑪）：新建与重置都不再把口令或密钥交给操作的 ADMIN。链接里的令牌只在那一次响应里出现（`Cache-Control: no-store`），不写日志、不进审计，服务端只存它的 SHA-256；放在地址的 `#` 之后，不进任何服务器日志，页面读到后立即从地址栏去掉。本人打开 `/setup` 页（不用登录）：新建的链接设口令（至少 12 位，输两次）并绑定页面显示的身份验证器（二维码与密钥，输入当前 6 位码证明已绑好）；重置口令的只设口令（身份验证器不变）；重置身份验证器的只绑定（口令不变）。完成后链接作废，用新的口令与身份验证器登录。审计 `admin.setup_completed`（以本人名义，详情为种类与来源 IP）；新建与重置的审计详情有链接的种类与到期时间。链接没用就又重置时，新链接包含旧链接要设的部分（例如口令链接未用又重置身份验证器，新链接两样都设），不会留下谁都不知道的口令或密钥。服务端只存 Argon2id 哈希与用 `ADMIN_SECRET_KEY` 加密的 TOTP 密钥（等待绑定的另用一个附加数据加密）。
+  - **自己的口令与身份验证器**（「账号与安全」，`/account`）：改口令要当前口令，新口令至少 12 位；换身份验证器要当前口令，登录要验证码时（`admin.login_without_totp` 关闭）还要当前身份验证器的 6 位码，页面给出新的二维码与密钥，10 分钟内输入新码完成绑定，之前旧的仍可登录。两种修改都结束自己在其它设备上的会话，审计 `admin.password_changed`、`admin.totp_changed`。每位管理员 15 分钟最多 10 次（`COMMON_RATE_LIMITED`）。`exchangectl admin create` 生成的口令（交互方式，不带 `--secrets-stdin`）标记为必须修改：登录后只能看自己（`GET /admin/v1/me`）、改口令与退出，其它请求都是 403 `ADMIN_PASSWORD_CHANGE_REQUIRED`，后台只显示改口令的页面。
+  - 接口：`GET /admin/v1/admins`、`POST /admin/v1/admins`（201，`{admin, setup: {token, kind, expires_at}}`）、`POST /admin/v1/admins/{id}/status`（`{enabled, reason}`）、`…/role`（`{role, reason}`）、`…/password-reset`、`…/totp-reset`（`{reason}`，返回 `{setup}`）、`GET …/sessions`（最多 50 个进行中的会话）、`POST …/sessions/revoke`（204）；不用会话的 `POST /admin/v1/setup/inspect`（`{token}` → 账号、种类、到期时间与要绑定的密钥）与 `POST /admin/v1/setup`（`{token, password?, totp_code?}`，204），两者与登录共用每个 IP 每分钟 10 次的限制；自己的 `POST /admin/v1/me/password`（`{current_password, new_password}`）、`POST /admin/v1/me/totp/start`（`{current_password, totp_code?}` → `{totp_secret, totp_uri}`）、`POST /admin/v1/me/totp`（`{totp_code}`）。`/admin/v1/me` 带 `must_change_password`。
 - **系统健康**（`/health`，`reports.read`）：`GET /admin/v1/health?details=true` 在就绪探测之外读各服务的 `/metrics`：版本（`exchange_build_info` 的 `version`，部署后应全部一致，不一致时标出几个版本）、Kafka 消费滞后（`kafka_consumer_lag` 求和，> 1000 标黄）、启动以来转入死信的条数（`kafka_consumer_records_total{result="dlq"}`，> 0 标红，用 `exchangectl dlq` 查看与重放），以及行情源状态（market-data 的 `/internal/market/feed`）；没有 Kafka 消费者的服务这两列为空。页面另有对账（每项检查最近一次）与托管方状态，每 15 秒刷新。概览的「服务状态」卡片有「详情」进入这一页。
-- **审计**（`/audit`）：「导出 CSV」由服务端按当前筛选导出（`GET /admin/v1/audit-logs/export`，最新的最多 10,000 条，超过时响应头 `X-Truncated: true`，页面提示缩小时间范围）；UTF-8 带 BOM，列为 `occurred_at,event_type,actor,target,action,reason,details,event_id`（配置变更的 `details` 为 `{"old","new"}`），以 `= + - @` 开头的文本前加单引号，防止表格软件当公式执行。导出本身记审计 `admin.audit.exported`（对象 `audit`，详情为筛选条件与行数）。点行打开详情：时间、操作人、对象、动作、理由、事件 ID，以及逐字段的变更表（配置变更比较前后值；`from/to`、`before/after` 与上架的 `changes` 逐项列出；未变的字段折叠），原始事件可展开。
+- **审计**（`/audit`）：「导出 CSV」由服务端按当前筛选导出（`GET /admin/v1/audit-logs/export`，要 `audit.export`，只有 ADMIN 与 AUDITOR 有、其他角色看不到按钮；最新的最多 10,000 条，先按筛选计数、超过时响应头 `X-Truncated: true`，再一页页边查边写，不在内存里攒满（C5.5 ⑪），页面提示缩小时间范围）；UTF-8 带 BOM，列为 `occurred_at,event_type,actor,target,action,reason,details,event_id`（配置变更的 `details` 为 `{"old","new"}`），以 `= + - @` 开头的文本前加单引号，防止表格软件当公式执行。导出本身记审计 `admin.audit.exported`（对象 `audit`，详情为筛选条件与行数）。点行打开详情：时间、操作人、对象、动作、理由、事件 ID，以及逐字段的变更表（配置变更比较前后值；`from/to`、`before/after` 与上架的 `changes` 逐项列出；未变的字段折叠），原始事件可展开。
 - **设置**：「本浏览器」里加了每页条数（20/50/100/200，存在本机 `admin.page_size`，之后打开的列表生效）。
 - 与设计稿 §5 的差别：没有 `GET /admin/v1/audit-logs/{id}`，详情直接用列表里的事件；管理员接口没有删除（停用即可，审计需要保留账号）。
 
@@ -304,7 +305,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 
 ## 运维
 
-创建管理员（交互使用：不带 `--secrets-stdin` 时随机生成密码与 TOTP 密钥并只显示一次，把 otpauth 链接或密钥录入身份验证器 App）：
+创建管理员（交互使用：不带 `--secrets-stdin` 时随机生成密码与 TOTP 密钥并只显示一次，把 otpauth 链接或密钥录入身份验证器 App；这样生成的密码首次登录后必须先改掉，C5.5 ⑪。平时由 ADMIN 在后台新建，只给一次性设置链接）：
 
 ```bash
 ssh -t exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec admin-service /app/exchangectl admin create --email ops@example.com --name "Ops" --role ADMIN'
@@ -321,10 +322,10 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 ```
 
 - `ADMIN_SECRET_KEY` 在服务器 `/opt/exchange/infra/admin/admin.env`（目录 700、文件 600，属主 root，只注入 admin-service，不在 `apps.env`），2026-09-29 用 `openssl rand -base64 32` 生成，从未打印。本机开发的在 `.env`。
-- 锁定：等 15 分钟自动解锁，或由 ADMIN 在「管理员与角色」页启用（同时清除锁定）；忘记密码或丢失 TOTP：另一位 ADMIN 在同一页重置（新的只显示一次，对方会话结束）。不能重置自己的；唯一的 ADMIN 丢失时，用 `exchangectl admin disable` 停用后以新邮箱 `admin create` 重建（命令行没有重置入口，避免成为绕过 TOTP 的后门）。
+- 锁定：等 15 分钟自动解锁，或由 ADMIN 在「管理员与角色」页启用（同时清除锁定）；忘记密码或丢失 TOTP：另一位 ADMIN 在同一页重置（对方会话结束，得到一次性设置链接交给本人，本人自己设新的；C5.5 ⑪）。不能重置自己的；唯一的 ADMIN 丢失时，用 `exchangectl admin disable` 停用后以新邮箱 `admin create` 重建（命令行没有重置入口，避免成为绕过 TOTP 的后门）。
 - IP 白名单（可选）：在服务器建 `/opt/exchange/infra/nginx/snippets/admin-access.local.conf`，内容如 `allow 203.0.113.7; deny all;`，`task deploy` 或 `nginx -s reload` 后对 `admin.astras.vip` 整站生效（真实客户端 IP 由 Cloudflare real-ip 配置还原）。目前按用户决定不设。部署同步不会覆盖或删除这个文件。
 - 指标：运维端口 9094（`outbox_pending`、`http_server_*`）；Prometheus 任务 `admin-service`。
-- 端到端：`bash scripts/e2e/admin.sh`（对 `https://admin.astras.vip`，每次创建 4 个随机管理员、结束时停用；覆盖页面与安全头、旧地址的跳转、登录与 Cookie、角色、备注与标签、批量审核提现、冻结/解冻、交易参数的护栏（C3c：等待时间临时设为 60 秒、结束时恢复，测试服的下限是 60 秒；OPERATOR 不能改状态与参考倍数；ETH-BTC 只预览暂停（带挂单数）与只可撤单；没有确认令牌 409；LINK-BTC 的参考倍数修改经 ADMIN 确认后排期再取消，同一令牌再提交返回同一条修改；ETH-USDT-PERP 立即暂停、确认的恢复一分钟后由后台执行；LINK-BTC（C5.5 ⑩ 起跟随币安 LINKBTC、由 HOUSE 报价（第一次运行把它追加进 `market.house_liquidity` 的名单，名单其余不变），文档每次相同、只第一次创建；已有交易对写了别的状态时提示 `STATUS_IGNORED`）立即暂停、确认开放、一分钟后在币安买一价下 5% 挂单并撤掉，运行结束时仍在交易；更严的风险阶梯预览列出影响；BTC-USDT 的参考符号不能清空）、撤单、开关往返、双人调账、设置的权限与校验、单人模式（ADMIN 直接 +2.5/−2.5 USDT，超过单笔限额的转审并撤回；双人模式时跳过）、幂等键（不带键 400；同一键的调账、冻结、解冻与站内信各发两次只生效一次，站内信只审计一次、用户只收到一条；同一键换金额 409；决定者重复批准返回原操作）、待办与事件流、合约（状态、只减仓、强平监控与记录、双人保险基金注资 1 USDT）、报表、用户页的估值余额、风控冻结与解冻（用户资金流水里看得到 `ADMIN_FREEZE`；运维的 `exchangectl ledger release-hold` 超过冻结单的数量被拒、默认解冻冻结单的全部，审计带 `forced`）、单笔撤单、合约账户调账（单人模式时）、强制平仓（用户市价买入 0.1 ETH-USDT-PERP，HOUSE 的仓位排在用户之后，扣 1 USDT 前的全仓保证金预览（扣后权益少 1），后台平掉后仓位为空；合约交易关闭时跳过）、充值处置与补记（用托管方替身 udun-mock：回调推迟 45 秒的 2 USDT 由 FINANCE 补记、用户余额 +2、同一交易号再补记被拒、晚到的回调记为已核对且不再入账、`exchangectl` 报告里不再列出；低于最小额的 0.5 USDT 入账给用户、0.25 USDT 驳回后不能再入账）、提现详情与搁置（对已完成的提现搁置得到 409）、提现暂停（C5.5 ⑯：用 `exchangectl wallet withdrawals-suspend` 暂停 ETH，后台列出原因，FINANCE 不能解除，ADMIN 带理由解除，再解除得到 404，wallet-service 以 ADMIN 的名义审计）、安全/历史/风控与完整联系方式、换绑审核（用户换绑唯一的邮箱 → 后台通过 → 按新邮箱能查到）、重置身份验证器、全部会话退出（用户令牌立即失效）、临时密码（旧密码失效、临时密码可登录、审计里没有它）、后台建管理员（C4a：ADMIN 建 OPERATOR，响应 `no-store`，用一次性口令登录；改为 AUDITOR 后下一个请求即生效；重置口令与身份验证器都结束会话、新的可登录；结束会话；停用后不能登录、启用后可以；不能改自己的账号；口令与密钥不出现在任何输出与审计里）、系统健康（全部就绪且带版本，消费者的滞后与死信数，行情源）、审计查询（含充值处置的四个动作与管理员的七个动作）与 CSV 导出（BOM、表头、`X-Truncated: false`，导出本身被审计）、退出与停用）。
+- 端到端：`bash scripts/e2e/admin.sh`（对 `https://admin.astras.vip`，每次创建 4 个随机管理员、结束时停用；覆盖页面与安全头、旧地址的跳转、登录与 Cookie、角色、备注与标签、批量审核提现、冻结/解冻、交易参数的护栏（C3c：等待时间临时设为 60 秒、结束时恢复，测试服的下限是 60 秒；OPERATOR 不能改状态与参考倍数；ETH-BTC 只预览暂停（带挂单数）与只可撤单；没有确认令牌 409；LINK-BTC 的参考倍数修改经 ADMIN 确认后排期再取消，同一令牌再提交返回同一条修改；ETH-USDT-PERP 立即暂停、确认的恢复一分钟后由后台执行；LINK-BTC（C5.5 ⑩ 起跟随币安 LINKBTC、由 HOUSE 报价（第一次运行把它追加进 `market.house_liquidity` 的名单，名单其余不变），文档每次相同、只第一次创建；已有交易对写了别的状态时提示 `STATUS_IGNORED`）立即暂停、确认开放、一分钟后在币安买一价下 5% 挂单并撤掉，运行结束时仍在交易；更严的风险阶梯预览列出影响；BTC-USDT 的参考符号不能清空）、撤单、开关往返、双人调账、设置的权限与校验、单人模式（ADMIN 直接 +2.5/−2.5 USDT，超过单笔限额的转审并撤回；双人模式时跳过）、幂等键（不带键 400；同一键的调账、冻结、解冻与站内信各发两次只生效一次，站内信只审计一次、用户只收到一条；同一键换金额 409；决定者重复批准返回原操作）、待办与事件流、合约（状态、只减仓、强平监控与记录、双人保险基金注资 1 USDT）、报表、用户页的估值余额、风控冻结与解冻（用户资金流水里看得到 `ADMIN_FREEZE`；运维的 `exchangectl ledger release-hold` 超过冻结单的数量被拒、默认解冻冻结单的全部，审计带 `forced`）、单笔撤单、合约账户调账（单人模式时）、强制平仓（用户市价买入 0.1 ETH-USDT-PERP，HOUSE 的仓位排在用户之后，扣 1 USDT 前的全仓保证金预览（扣后权益少 1），后台平掉后仓位为空；合约交易关闭时跳过）、充值处置与补记（用托管方替身 udun-mock：回调推迟 45 秒的 2 USDT 由 FINANCE 补记、用户余额 +2、同一交易号再补记被拒、晚到的回调记为已核对且不再入账、`exchangectl` 报告里不再列出；低于最小额的 0.5 USDT 入账给用户、0.25 USDT 驳回后不能再入账）、提现详情与搁置（对已完成的提现搁置得到 409）、提现暂停（C5.5 ⑯：用 `exchangectl wallet withdrawals-suspend` 暂停 ETH，后台列出原因，FINANCE 不能解除，ADMIN 带理由解除，再解除得到 404，wallet-service 以 ADMIN 的名义审计）、安全/历史/风控与完整联系方式、换绑审核（用户换绑唯一的邮箱 → 后台通过 → 按新邮箱能查到）、重置身份验证器、全部会话退出（用户令牌立即失效）、临时密码（旧密码失效、临时密码可登录、审计里没有它）、后台建管理员（C4a、C5.5 ⑪：ADMIN 建 OPERATOR，响应 `no-store`、只有一次性设置链接；设置前登录不了；不带会话打开链接看到账号与要绑定的密钥，短口令与错的验证码被拒，设好后链接作废、用自己设的登录；改为 AUDITOR 后下一个请求即生效；重置口令与身份验证器都结束会话、旧的立即失效，各自的链接设好后可登录；自己改口令时错的当前口令被拒、改后用新的登录；结束会话；停用后不能登录、启用后可以；不能改自己的账号；链接、口令与密钥不出现在任何输出与审计里）、系统健康（全部就绪且带版本，消费者的滞后与死信数，行情源）、审计查询（含充值处置的四个动作与管理员的七个动作）与 CSV 导出（BOM、表头、`X-Truncated: false`，导出本身被审计）、退出与停用）。
 - admin-service 连 derivatives-service 的内部地址：`DERIVATIVES_SERVICE_URL`（compose 里是 `http://derivatives-service:8095`）。
 
 ## 常见错误码
@@ -343,6 +344,10 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | `ADMIN_EXISTS` | 新建管理员（后台或 `admin create`）的邮箱已存在 |
 | `ADMIN_SELF` | 不能在后台修改自己的管理员账号 |
 | `ADMIN_LAST_ADMIN` | 最后一位启用的 ADMIN 不能被停用或降级 |
+| `ADMIN_SETUP_INVALID` | 设置链接不存在、已经用过或已过期（24 小时）：请 ADMIN 重新重置 |
+| `ADMIN_PASSWORD_CHANGE_REQUIRED` | 命令行生成的口令要先改掉（`POST /admin/v1/me/password`） |
+| `ADMIN_PASSWORD_WRONG` | 改自己的口令或身份验证器时，当前口令不对 |
+| `ADMIN_TOTP_CODE_WRONG` | 设置链接或自己的身份验证器：验证码不对或已用过（核对手机时间） |
 | `ADMIN_REFERENCE_UNKNOWN` | 交易对的参考符号币安现货没有（详情 `symbol`、`reference_symbol`） |
 | `ADMIN_REFERENCE_IN_USE` | HOUSE 正在报价或有永续合约以它为指数，交易对的参考符号不能清空（详情 `symbol`、`used_by`） |
 | `ADMIN_CONFIRMATION_REQUIRED` | 交易参数的修改要带预览给的确认令牌；`reason` 为 `expired`（超过 10 分钟）或 `changed`（预览后数据变了）时重新预览 |

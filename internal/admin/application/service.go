@@ -821,17 +821,21 @@ func (s *Service) CandleReport(ctx context.Context, p Principal, symbol, interva
 }
 
 // NewAdmin creates an administrator (exchangectl admin create) with a
-// password and an authenticator secret; nobody else sees either.
+// password and an authenticator secret; nobody else sees either. One whose
+// password was generated for them (mustChange) changes it before anything
+// else (C5.5 ⑪).
 func NewAdmin(ctx context.Context, store ports.Store, hasher *password.Hasher, box *secretbox.Box, email, name, role, pw string,
-	secret []byte, actor string, now time.Time,
+	secret []byte, actor string, mustChange bool, now time.Time,
 ) (domain.Admin, error) {
-	return createAdmin(ctx, store, hasher, box, email, name, role, pw, secret, actor, "new administrator", now)
+	return createAdmin(ctx, store, hasher, box, email, name, role, pw, secret, actor, "new administrator", now, func(a *domain.Admin) {
+		a.MustChangePassword = mustChange
+	})
 }
 
 // createAdmin creates an administrator, audited as admin.created with the
-// reason.
+// reason; prepare finishes the account before it is stored.
 func createAdmin(ctx context.Context, store ports.Store, hasher *password.Hasher, box *secretbox.Box, email, name, role, pw string,
-	secret []byte, actor, reason string, now time.Time,
+	secret []byte, actor, reason string, now time.Time, prepare func(*domain.Admin),
 ) (domain.Admin, error) {
 	if len(pw) < 12 {
 		return domain.Admin{}, apperr.Invalid("the password needs at least 12 characters")
@@ -845,6 +849,7 @@ func createAdmin(ctx context.Context, store ports.Store, hasher *password.Hasher
 	}
 	a.PasswordHash = hasher.Hash(pw)
 	a.TOTPSealed = box.Seal(secret, []byte(a.ID))
+	prepare(&a)
 	return a, store.Tx(ctx, func(r ports.Repos) error {
 		if existing, err := r.Admins().ByEmail(ctx, a.Email); err != nil || existing != nil {
 			if existing != nil {
