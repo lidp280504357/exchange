@@ -64,6 +64,9 @@ type Service struct {
 	// Each custodian's coins, as last read (coin), by provider.
 	coinsMu sync.Mutex
 	coinsOf map[string]coinList
+	// Users' eligibility for TEST_ASSETS, as last asked (testAssets).
+	testAssetsMu sync.Mutex
+	testAssetsOf map[string]testAssetsAnswer
 }
 
 // coinList is a custodian's coins by code, read at At.

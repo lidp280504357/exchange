@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/lidp280504357/exchange/internal/wallet/domain"
 )
@@ -24,11 +25,7 @@ const FeatureTestAssets = "TEST_ASSETS"
 // TEST_ASSETS (ADR-0017).
 func (s *Service) NetworksFor(ctx context.Context, userID, asset string) ([]domain.Network, error) {
 	list, err := s.NetworksOf(ctx, asset)
-	if err != nil || !slices.ContainsFunc(list, func(n domain.Network) bool { return n.Hidden }) {
-		return list, err
-	}
-	allowed, _, err := s.Eligibility.Check(ctx, userID, FeatureTestAssets)
-	if err != nil || allowed {
+	if err != nil || !slices.ContainsFunc(list, func(n domain.Network) bool { return n.Hidden }) || s.testAssets(ctx, userID) {
 		return list, err
 	}
 	return slices.DeleteFunc(list, func(n domain.Network) bool { return n.Hidden }), nil
@@ -37,17 +34,48 @@ func (s *Service) NetworksFor(ctx context.Context, userID, asset string) ([]doma
 // visible refuses a hidden test asset's network to a user not eligible
 // for TEST_ASSETS as if it did not exist (ADR-0017).
 func (s *Service) visible(ctx context.Context, userID string, net domain.Network) error {
-	if !net.Hidden {
-		return nil
-	}
-	allowed, _, err := s.Eligibility.Check(ctx, userID, FeatureTestAssets)
-	if err != nil {
-		return err
-	}
-	if !allowed {
+	if net.Hidden && !s.testAssets(ctx, userID) {
 		return domain.ErrUnknownNetwork
 	}
 	return nil
+}
+
+// testAssetsKept is how long a user's eligibility for TEST_ASSETS is kept
+// (review AQ: every list of networks asked user-service).
+const testAssetsKept = time.Minute
+
+type testAssetsAnswer struct {
+	allowed bool
+	until   time.Time
+}
+
+// testAssets reports whether userID is eligible for TEST_ASSETS, as
+// user-service said in the last testAssetsKept. Not when it cannot say: the
+// hidden assets are then as if they did not exist, and the other networks
+// stay listed (review AQ: fail closed, a restart of user-service must not
+// fail everyone's networks).
+func (s *Service) testAssets(ctx context.Context, userID string) bool {
+	now := s.Now()
+	s.testAssetsMu.Lock()
+	a, ok := s.testAssetsOf[userID]
+	s.testAssetsMu.Unlock()
+	if ok && now.Before(a.until) {
+		return a.allowed
+	}
+	allowed, _, err := s.Eligibility.Check(ctx, userID, FeatureTestAssets)
+	if err != nil {
+		if s.Log != nil {
+			s.Log.WarnContext(ctx, "test assets: eligibility unknown, hidden", "user_id", userID, "error", err)
+		}
+		return false
+	}
+	s.testAssetsMu.Lock()
+	defer s.testAssetsMu.Unlock()
+	if s.testAssetsOf == nil || len(s.testAssetsOf) >= 10_000 {
+		s.testAssetsOf = map[string]testAssetsAnswer{} // the test accounts are few; anyone else's answer is cheap to ask again
+	}
+	s.testAssetsOf[userID] = testAssetsAnswer{allowed: allowed, until: now.Add(testAssetsKept)}
+	return allowed
 }
 
 // AddressValidation is the outcome of checking a withdrawal address.

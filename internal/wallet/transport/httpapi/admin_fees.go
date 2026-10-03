@@ -48,8 +48,8 @@ type CustodyFeeJSON struct {
 // CustodyFeeJSONOf renders a custodian's fee; its custodian, when not
 // given, from its key ("UDUNMOCK:<trade>").
 func CustodyFeeJSONOf(f domain.CustodyFee) CustodyFeeJSON {
-	if f.Provider == "" {
-		f.Provider, _, _ = strings.Cut(f.TxHash, ":")
+	if p, _, ok := strings.Cut(f.TxHash, ":"); f.Provider == "" && ok {
+		f.Provider = p
 	}
 	j := CustodyFeeJSON{
 		WithdrawalID: f.WithdrawalID, Provider: f.Provider, TxHash: f.TxHash, Asset: f.Asset, Network: f.Network, Amount: f.Amount.String(),

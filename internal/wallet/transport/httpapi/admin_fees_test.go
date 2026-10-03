@@ -16,10 +16,11 @@ import (
 )
 
 // The console's fee routes (review AL): a status other than the three is
-// refused, a withdrawal that is no UUID is not found, an amount that is
-// no number and a body that is no JSON are refused, all before anything
-// is read; a fee renders with its custodian, from its key when the list
-// did not give it.
+// refused, a custodian neither configured nor known is not found (review
+// AT, as for /custody), a withdrawal that is no UUID is not found, an
+// amount that is no number and a body that is no JSON are refused, all
+// before anything is read; a fee renders with its custodian, from its key
+// when the list did not give it (none from a key without one).
 func TestTheCustodyFeeRoutes(t *testing.T) {
 	r := chi.NewRouter()
 	(&Handler{Svc: &application.Service{}}).Routes(r)
@@ -37,6 +38,7 @@ func TestTheCustodyFeeRoutes(t *testing.T) {
 		code               string
 	}{
 		{http.MethodGet, "/internal/wallet/custody/fees?status=PAID", "", http.StatusBadRequest, ""},
+		{http.MethodGet, "/internal/wallet/custody/fees?provider=FOO", "", http.StatusNotFound, ""},
 		{http.MethodPost, "/internal/wallet/custody/fees/not-a-withdrawal/book", `{"actor":"ops","reason":"booked"}`, http.StatusNotFound, "WALLET_CUSTODY_FEE_NOT_FOUND"},
 		{http.MethodPost, "/internal/wallet/custody/fees/not-a-withdrawal/write-off", `{"actor":"ops","reason":"none"}`, http.StatusNotFound, "WALLET_CUSTODY_FEE_NOT_FOUND"},
 		{http.MethodPost, "/internal/wallet/custody/fees/01a101cc-60e3-747a-8d31-c4d6984cd769/book", `{"amount":"1,5","actor":"ops","reason":"x"}`, http.StatusBadRequest, ""},
@@ -57,5 +59,9 @@ func TestTheCustodyFeeRoutes(t *testing.T) {
 	f.Provider = domain.ProviderUdun
 	if j := CustodyFeeJSONOf(f); j.Provider != domain.ProviderUdun {
 		t.Fatalf("a fee with its custodian %+v", j)
+	}
+	f.Provider, f.TxHash = "", "0xabc"
+	if j := CustodyFeeJSONOf(f); j.Provider != "" {
+		t.Fatalf("a fee whose key names no custodian %+v", j)
 	}
 }

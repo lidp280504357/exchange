@@ -8,7 +8,8 @@
 # checked as with the real gateway.
 #   - UDUN's networks read as configured: USDT on TRC20 (BEP20 and ERC20
 #     listed, closed both ways), BTC and ETH on their chains; TUSD is in
-#     no public list, and on TRON-TEST for the test account (region AQ);
+#     no public list, and on TRON-TEST for the test account (region AQ),
+#     for no one else (a user of SG: not listed, its address not found);
 #   - a new user gets a TRON-TEST address from the custodian (the same one
 #     again);
 #   - the custodian reports 50 TUSD: credited once to the balance, the
@@ -117,6 +118,15 @@ check '[.networks[] | select(.asset == "TUSD")] | (length == 1 and .[0].network 
 call GET /v1/market/assets ""
 expect 200 - "the public assets"
 check '[.assets[] | select(.asset_code == "TUSD")] | length == 0' "TUSD in no public list"
+# Anyone else (region SG, not eligible for TEST_ASSETS) has no such network
+# (review AQ).
+register "e2e-custody-sg-$RUN@example.com" "e2e-custody-sg-$RUN" "e2e custody sg $RUN" SG
+SG=(-H "Authorization: Bearer $(jq -r .access_token <<<"$BODY")")
+call GET "/v1/wallet/networks" "" "${SG[@]}"
+expect 200 - "the networks for a user of SG"
+check '[.networks[] | select(.asset == "TUSD")] | length == 0' "no TUSD for a user of SG"
+call GET "/v1/wallet/deposit-address?asset=TUSD&network=TRON-TEST" "" "${SG[@]}"
+expect 404 WALLET_NETWORK_UNKNOWN "no TRON-TEST address for a user of SG"
 
 echo "== deposit addresses from the custodian"
 call GET "/v1/wallet/deposit-address?asset=TUSD&network=TRON-TEST" "" "${AUTH[@]}"

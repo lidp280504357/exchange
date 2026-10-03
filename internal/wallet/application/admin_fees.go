@@ -12,13 +12,17 @@ import (
 
 // CustodyFees pages through the custodians' withdrawal fees for the
 // console, newest first, as exchangectl wallet custody-fees lists the held
-// ones: of a custodian (UDUN, UDUNMOCK; "" any) and a status (HELD,
+// ones: of a custodian (UDUN, UDUNMOCK; "" any; one neither configured nor
+// known is not found, as by Custody: review AT) and a status (HELD,
 // BOOKABLE, WRITTEN_OFF; "" any), after a fee
 // (the cursor is its transaction; an unknown one is refused), at most
 // limit (default 50, at most 200). It returns the cursor of the next page,
 // "" at the end.
 func (s *Service) CustodyFees(ctx context.Context, provider, status, after string, limit int) ([]domain.CustodyFee, string, error) {
 	provider, status = strings.ToUpper(strings.TrimSpace(provider)), strings.ToUpper(strings.TrimSpace(status))
+	if provider != "" && !s.custodian(provider) {
+		return nil, "", apperr.NotFound("no such custodian")
+	}
 	switch status {
 	case "", domain.FeeHeld, domain.FeeBookable, domain.FeeWrittenOff:
 	default:

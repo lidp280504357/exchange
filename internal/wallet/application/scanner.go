@@ -458,6 +458,15 @@ func requestCredits(ctx context.Context, store ports.Store, eligibility ports.El
 	if err != nil {
 		return 0, err
 	}
+	// A deposit of nobody no longer waiting (booked, or closed by a person)
+	// leaves the retries even when the round below stops early (review AR).
+	var pending []string
+	for _, d := range list {
+		if d.UserID == domain.NoOwner && d.Resolution == "" {
+			pending = append(pending, d.ID)
+		}
+	}
+	retries.keep(network, pending)
 	enabled := make(map[string]bool, len(nets))
 	for _, n := range nets {
 		if n.Network == network {

@@ -1892,6 +1892,44 @@ func TestADepositOfNobodyTheLedgerRefusesWaitsAlone(t *testing.T) {
 	}
 }
 
+// A deposit of nobody a person closed leaves the retries even when the
+// round stops early, at a user's deposit it cannot ask user-service about
+// (review AR): the gauge does not keep reporting it.
+func TestAClosedDepositOfNobodyLeavesTheRetries(t *testing.T) {
+	h := newCustodyHarness(t)
+	ctx := context.Background()
+	addr, _, err := h.svc.DepositAddress(ctx, "alice", "USDT", tron)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deposit := func(i int, to string) {
+		h.callback(t, ports.CustodyTrade{
+			TradeID: fmt.Sprintf("t-%d", i), Kind: domain.CallbackDeposit, Status: 3, Word: domain.CustodySuccess, Coin: usdtCoin, Address: to,
+			Amount: d("15"), RawAmount: d("15000000"), TxHash: fmt.Sprintf("0xt%d", i), Block: 7,
+		})
+	}
+	deposit(0, "TWeptS7njqhCtHdDCSFGKA1ttrs6WXxLzj")
+	var nobody string
+	for id := range h.store.deposits {
+		nobody = id
+	}
+	h.ledger.refused = map[string]bool{nobody: true}
+	if err := h.cproc.Round(ctx); err == nil || h.cproc.nobody.waiting() != 1 {
+		t.Fatalf("refused: %v, %d waiting", err, h.cproc.nobody.waiting())
+	}
+	closed := h.store.deposits[nobody]
+	closed.Resolution = domain.ResolutionDismissed
+	h.store.deposits[nobody] = closed
+	deposit(1, addr.Address)
+	h.cproc.Eligibility = &flakyEligibility{elig: h.elig, down: true}
+	if err := h.cproc.Round(ctx); err == nil || !strings.Contains(err.Error(), "user-service unavailable") {
+		t.Fatalf("the round went on without user-service: %v", err)
+	}
+	if n := h.cproc.nobody.waiting(); n != 0 {
+		t.Fatalf("the closed deposit still waits: %d", n)
+	}
+}
+
 // A hidden test asset's network (ADR-0017) exists only for users eligible
 // for TEST_ASSETS: listed, given an address, checked and withdrawn to for
 // them; unknown to anyone else, whatever they ask.
@@ -1935,6 +1973,58 @@ func TestAHiddenTestAssetIsForTheTestAccountsOnly(t *testing.T) {
 	}
 	if _, err := h.svc.AddAddress(ctx, "bob", AddressInput{Network: "TRON-TEST", Address: payeeTRX}); !apperr.Is(err, "WALLET_NETWORK_UNKNOWN") {
 		t.Fatalf("another user's address book: %v", err)
+	}
+}
+
+// flakyEligibility asks elig unless down, counting the questions.
+type flakyEligibility struct {
+	elig  ports.Eligibility
+	down  bool
+	asked int
+}
+
+func (f *flakyEligibility) Check(ctx context.Context, userID, feature string) (bool, string, error) {
+	f.asked++
+	if f.down {
+		return false, "", errors.New("user-service unavailable")
+	}
+	return f.elig.Check(ctx, userID, feature)
+}
+
+// When user-service cannot say whether a user is eligible for TEST_ASSETS,
+// the hidden test asset is as if it did not exist and the other networks
+// stay listed (review AQ: a restart of user-service must not fail
+// everyone's networks); an answer is kept a minute.
+func TestTheTestAssetsFailClosed(t *testing.T) {
+	h := newCustodyHarness(t)
+	ctx := context.Background()
+	h.nets.nets = append(h.nets.nets, domain.Network{
+		Asset: "TUSD", Network: "TRON-TEST", Chain: "tron", Decimals: 6, Confirmations: 1, MinDeposit: d("1"), Enabled: true,
+		WithdrawEnabled: true, MinWithdraw: d("10"), WithdrawFee: d("5"), AddressFormat: domain.FormatTRON,
+		Provider: domain.ProviderUdun, ProviderCoin: "195:TQQCuyVcUEknTGyfSRKhcUuLZfEe93qWpy", Hidden: true,
+	})
+	flaky := &flakyEligibility{elig: h.elig, down: true}
+	h.svc.Eligibility = flaky
+	tusd := func(list []domain.Network) bool {
+		return slices.ContainsFunc(list, func(n domain.Network) bool { return n.Asset == "TUSD" })
+	}
+	if list, err := h.svc.NetworksFor(ctx, "alice", ""); err != nil || tusd(list) || len(list) == 0 {
+		t.Fatalf("networks while user-service is down: %+v %v", list, err)
+	}
+	if _, _, err := h.svc.DepositAddress(ctx, "alice", "TUSD", "TRON-TEST"); !apperr.Is(err, "WALLET_NETWORK_UNKNOWN") {
+		t.Fatalf("an address while user-service is down: %v", err)
+	}
+	flaky.down = false
+	if list, err := h.svc.NetworksFor(ctx, "alice", ""); err != nil || !tusd(list) {
+		t.Fatalf("networks once it answers: %+v %v", list, err)
+	}
+	asked := flaky.asked
+	if _, err := h.svc.NetworksFor(ctx, "alice", ""); err != nil || flaky.asked != asked {
+		t.Fatalf("asked again within the minute: %d questions, %v", flaky.asked-asked, err)
+	}
+	h.now = h.now.Add(61 * time.Second)
+	if _, err := h.svc.NetworksFor(ctx, "alice", ""); err != nil || flaky.asked != asked+1 {
+		t.Fatalf("not asked again after the minute: %d questions, %v", flaky.asked-asked, err)
 	}
 }
 

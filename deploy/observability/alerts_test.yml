@@ -510,6 +510,22 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'wallet_custody_deposits_unbookable{job="wallet-service", provider="UDUN"}'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CustodyDepositUnbookable
+        exp_alerts: []
+      - eval_time: 31m
+        alertname: CustodyDepositUnbookable
+        exp_alerts:
+          - exp_labels: {severity: warning, provider: UDUN}
+            exp_annotations:
+              summary: "UDUN: a deposit of nobody the ledger will not book to UNCLAIMED_DEPOSIT; it is tried again hourly at most, the error is in wallet-service's log (deposit ... of nobody)"
+              runbook: docs/runbook/custody.md
+
+  - interval: 1m
+    input_series:
       - series: 'wallet_withdrawals_suspended_waiting{job="wallet-service", provider="UDUN", asset="USDT"}'
         values: '2x40'
     alert_rule_test:

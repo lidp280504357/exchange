@@ -28,7 +28,7 @@
 | `sim.halt_on_loss` | 模拟市场 1 分钟没有心跳（market-sim 宕机或卡住）时，market-data-service 把交易对与它的永续置 `HALT`，心跳恢复 30 秒后放开（ASTRA 设计 §9；测试服打开，见 [market-sim.md](market-sim.md#心跳与停牌设计-9a5)） | 4 |
 | `market.flat_minutes` | 不跟随参考市场的交易对与合约（平台币 ASTRA-USDT、ASTRA-USDT-PERP）在下一笔成交被应用时，把与上一根 1m K 线之间没有成交的分钟存成平盘 K 线并发到 `market.candle.flats`（ClickHouse `candles_1m`），图表与读模型都连续（按交易对；默认关；测试服对这两个打开，见 [market-data.md](market-data.md#规则)） | 4 |
 | `risk.enforce` | 执行风控规则的动作（评分为 REVIEW 的 ACTIVE 账户置为 `RISK_REVIEW`）；关闭时只记分。测试服只对地区 `AQ` 打开（[risk.md](risk.md)） | 2 |
-| `wallet.test_assets` | 隐藏测试资产（ADR-0017，TUSD）的网络、充值地址、地址簿与提现只对这些规则放行的用户开放（资格 `TEST_ASSETS`），其他人一律当作没有这个网络（404）；关闭时谁都没有。测试服只对地区 `AQ` 打开：`exchangectl flags set wallet.test_assets --on --allow-regions AQ --reason "..."`，端到端用 `AQ` 注册（[custody.md](custody.md)） | 4 |
+| `wallet.test_assets` | 隐藏测试资产（ADR-0017，TUSD）的网络、充值地址、地址簿与提现只对这些规则放行的用户开放（资格 `TEST_ASSETS`），其他人一律当作没有这个网络（404）；关闭时谁都没有。wallet-service 按用户缓存资格结果 1 分钟（改开关后最多 1 分钟生效）；user-service 答不上来时按没有资格处理，隐藏网络不可见、其他网络照常列出（审查 AQ）。测试服只对地区 `AQ` 打开：`exchangectl flags set wallet.test_assets --on --allow-regions AQ --reason "..."`，端到端用 `AQ` 注册（[custody.md](custody.md)） | 4 |
 
 ## 规则维度
 
