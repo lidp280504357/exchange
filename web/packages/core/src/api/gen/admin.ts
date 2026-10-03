@@ -1119,6 +1119,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/users/{id}/futures-margin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An account's cross margin, and what a debit would leave of it
+         * @description The cross positions' equity and maintenance margin at the marks, as
+         *     derivatives-service's margin monitor measures them, and the equity
+         *     and state after a debit of the FUTURES balance (a negative
+         *     adjustment lowers the equity at once; LIQUIDATE means the next round
+         *     of the monitor takes the positions over). Unmeasured while a cross
+         *     position's contract has no fresh mark price. Needs users.read.
+         */
+        get: operations["getUserFuturesMargin"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/users/{id}/positions/close": {
         parameters: {
             query?: never;
@@ -1130,14 +1155,21 @@ export interface paths {
         put?: never;
         /**
          * Close a position at the market (force close)
-         * @description The closing orders resting on the position are canceled first;
-         *     once the engine confirmed (the console waits a few seconds, then
-         *     fails with DERIV_CLOSE_PENDING to try again), a market order of
-         *     kind ADMIN takes the whole position: reduce-only in one-way mode,
-         *     against its side in hedge mode. A position under liquidation is
-         *     left to the liquidation engine (DERIV_POSITION_LIQUIDATING). The
-         *     answer is the order. Audited as admin.derivatives.position_closed.
-         *     Needs derivatives.write.
+         * @description The user's orders resting on the contract are canceled first, all
+         *     of them (an opening order filled after the close would open the
+         *     position again); once the engine confirmed (the console waits a few
+         *     seconds, then fails with DERIV_CLOSE_PENDING to try again), a
+         *     market order of kind ADMIN takes the whole position: reduce-only in
+         *     one-way mode, against its side in hedge mode. A position under
+         *     liquidation is left to the liquidation engine
+         *     (DERIV_POSITION_LIQUIDATING); HOUSE's are not closed here
+         *     (DERIV_HOUSE_NOT_CLOSED). The answer is the order as last seen: the
+         *     console waits a few seconds for it to finish. On a thin book it may
+         *     fill in part (CANCELED with filled_quantity below quantity): the
+         *     rest of the position stays, look again and close it again. Audited
+         *     as admin.derivatives.position_close_requested with its key, and as
+         *     admin.derivatives.position_closed with what filled once the order is
+         *     final. Needs derivatives.write.
          */
         post: operations["closeUserPosition"];
         delete?: never;
@@ -3991,6 +4023,21 @@ export interface components {
              */
             attempted_at: string | null;
         };
+        CrossMargin: {
+            /** @example USDT */
+            asset: string;
+            /** @description The cross positions; with none there is nothing to liquidate. */
+            positions: number;
+            /** @description A cross position's contract has no fresh mark price; nothing else is measured. */
+            unmeasured: boolean;
+            equity: components["schemas"]["Decimal"];
+            maintenance: components["schemas"]["Decimal"];
+            /** @enum {string} */
+            state: "HEALTHY" | "WARNING" | "LIQUIDATE";
+            equity_after: components["schemas"]["Decimal"];
+            /** @enum {string} */
+            state_after: "HEALTHY" | "WARNING" | "LIQUIDATE";
+        };
         AuditEntry: {
             /** Format: uuid */
             event_id: string;
@@ -5911,6 +5958,32 @@ export interface operations {
                     "application/json": {
                         positions: components["schemas"]["UserPosition"][];
                     };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getUserFuturesMargin: {
+        parameters: {
+            query?: {
+                /** @description The debit to measure (positive; 0 by default). */
+                debit?: components["schemas"]["Decimal"];
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The cross margin. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrossMargin"];
                 };
             };
             default: components["responses"]["Error"];

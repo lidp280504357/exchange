@@ -186,7 +186,41 @@ export function AdjustForm({ userId, onUser, onDone }: { userId: string; onUser?
           setReference("");
           void user.refetch();
         }}
-      />
+      >
+        {account === "FUTURES" && direction === "debit" && amountOk && <CrossMarginNote userId={userId} debit={a} />}
+      </FundAction>
+    </div>
+  );
+}
+
+/**
+ * CrossMarginNote says what a debit of the FUTURES balance leaves of the
+ * user's cross margin: the equity drops at once, and the next round of the
+ * margin monitor may liquidate the cross positions (C5.5 ⑧).
+ */
+function CrossMarginNote({ userId, debit }: { userId: string; debit: string }) {
+  const { t } = useTranslation();
+  const q = useQuery({
+    queryKey: ["admin", "user", userId, "futures-margin", debit],
+    queryFn: async () =>
+      adminData(await adminApi.GET("/admin/v1/users/{id}/futures-margin", { params: { path: { id: userId }, query: { debit } } })),
+    retry: false,
+  });
+  if (q.isPending) return <Skeleton className="h-12 w-full" />;
+  if (q.isError) return <p className="text-sm text-warn">{t("admin.margin.unknown")}</p>;
+  const m = q.data;
+  if (m.positions === 0) return <p className="text-sm text-fg-3">{t("admin.margin.noCross")}</p>;
+  if (m.unmeasured) return <p className="text-sm text-warn">{t("admin.margin.unmeasured")}</p>;
+  const tone = m.state_after === "LIQUIDATE" ? "border-danger text-danger" : m.state_after === "WARNING" ? "border-warn text-warn" : "border-line-1 text-fg-2";
+  return (
+    <div className={`flex flex-col gap-1 rounded-2 border px-3 py-2 text-sm ${tone}`} data-testid="futures-margin">
+      <span className="flex flex-wrap items-center gap-x-2">
+        {t("admin.margin.equity")} <Num value={m.equity} unit={m.asset} /> → {t("admin.margin.after")} <Num value={m.equity_after} unit={m.asset} />
+        <span className="text-fg-3">
+          · {t("admin.margin.maintenance")} <Num value={m.maintenance} />
+        </span>
+      </span>
+      <span className="font-medium">{t(`admin.margin.state.${m.state_after}`)}</span>
     </div>
   );
 }

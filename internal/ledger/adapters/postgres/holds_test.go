@@ -130,6 +130,30 @@ func TestHoldsAndAccountAdjustments(t *testing.T) {
 		t.Fatalf("hold audits: %d", n)
 	}
 
+	// A hold whose frozen funds were partly released elsewhere cannot be
+	// released in full; the operators' forced release returns what is
+	// left (C5.5 ⑧).
+	stuck := uuid.NewString()
+	if _, err := svc.PlaceHold(ctx, stuck, user, "USDT", d("100"), "risk@example.com", "chargeback under review"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Unfreeze(ctx, "stray", domain.EntryOrderUnfreeze, user, domain.AccountSpot, "USDT", d("40"), "a stray unfreeze"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ReleaseHold(ctx, stuck, "ops@example.com", "cleared by the bank"); !apperr.Is(err, "LEDGER_INSUFFICIENT_BALANCE") {
+		t.Fatalf("a stuck hold released in full: %v", err)
+	}
+	forced, got, err := svc.ForceReleaseHold(ctx, stuck, "ops@example.com", "60 left frozen, released by hand")
+	if err != nil || !got.Equal(d("60")) || forced.Active() || forced.ReleaseJournalID == "" {
+		t.Fatalf("forced release: %+v %s %v", forced, got, err)
+	}
+	if av, fr := usdt(t, svc, user, domain.AccountSpot); !av.Equal(d("10000")) || !fr.IsZero() {
+		t.Fatalf("after the forced release: %s/%s", av, fr)
+	}
+	if _, _, err := svc.ForceReleaseHold(ctx, stuck, "ops@example.com", "again"); !apperr.Is(err, "LEDGER_HOLD_RELEASED") {
+		t.Fatalf("forced twice: %v", err)
+	}
+
 	// The admin console adjusts the FUTURES account too.
 	res, err := svc.AdjustApproved(ctx, "approval:f1", user, domain.AccountFutures, "USDT", d("15"), "fin@example.com", "goodwill on fees")
 	if err != nil || res.Replayed {

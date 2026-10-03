@@ -49,13 +49,30 @@ export const moneyZh = {
       forceClose: "强制平仓",
       noPositions: "没有持仓",
       closeTitle: "强制平掉这个仓位",
-      closeHelp: "先撤掉这个仓位上的平仓挂单，再以市价全部平掉（订单类型 ADMIN），盈亏照常结算。正在强平的仓位交给强平引擎处理。",
+      closeHelp:
+        "先撤掉该用户在这个合约上的全部挂单（含开仓单，免得平仓后又成交开回去），再以市价全部平掉（订单类型 ADMIN），盈亏照常结算。盘口薄时可能只成交一部分，剩下的仓位要再平一次。正在强平的仓位交给强平引擎处理。",
       closed: "已下平仓单",
+      closedAll: "已全部平掉",
+      closedPart: "只成交了 {{filled}} / {{quantity}}：剩下的仓位还在，请再平一次",
+    },
+    margin: {
+      equity: "全仓权益",
+      after: "调账后",
+      maintenance: "维持保证金",
+      state: {
+        HEALTHY: "调账后权益仍高于维持保证金",
+        WARNING: "调账后进入预警区间（权益不足维持保证金的 1.2 倍）",
+        LIQUIDATE: "调账后权益不高于维持保证金：下一轮风控会强平这些全仓仓位",
+      },
+      noCross: "该用户没有全仓仓位，扣减不会触发强平",
+      unmeasured: "有全仓仓位的合约暂时没有新鲜的标记价，无法估算扣减后的保证金",
+      unknown: "读不到合约保证金情况",
     },
   },
   errors: {
     LEDGER_HOLD_RELEASED: "这笔冻结已经解冻过",
-    DERIV_CLOSE_PENDING: "平仓挂单还在撤销中，请稍后再试",
+    DERIV_CLOSE_PENDING: "用户的挂单还在撤销中，请稍后再试",
+    DERIV_HOUSE_NOT_CLOSED: "HOUSE 的仓位不能在后台强平",
   },
 };
 
@@ -108,12 +125,28 @@ export const moneyEn = {
       noPositions: "No positions",
       closeTitle: "Force close this position",
       closeHelp:
-        "Cancels the closing orders resting on it, then closes it all at the market (order kind ADMIN); the result settles as usual. A position being liquidated is left to the liquidation engine.",
+        "Cancels every order the user rests on the contract (opening ones too, which would open it again), then closes it all at the market (order kind ADMIN); the result settles as usual. On a thin book it may fill in part: close the rest again. A position being liquidated is left to the liquidation engine.",
       closed: "Closing order placed",
+      closedAll: "Closed in full",
+      closedPart: "Only {{filled}} of {{quantity}} filled: the rest of the position stays, close it again",
+    },
+    margin: {
+      equity: "Cross equity",
+      after: "after",
+      maintenance: "Maintenance margin",
+      state: {
+        HEALTHY: "After it the equity stays above the maintenance margin",
+        WARNING: "After it the account is warned (equity below 1.2 times the maintenance margin)",
+        LIQUIDATE: "After it the equity is at or below the maintenance margin: the next round of the margin monitor liquidates these cross positions",
+      },
+      noCross: "No cross positions: the debit liquidates nothing",
+      unmeasured: "A cross position's contract has no fresh mark price: what the debit leaves cannot be measured",
+      unknown: "The futures margin could not be read",
     },
   },
   errors: {
     LEDGER_HOLD_RELEASED: "This hold was already released",
-    DERIV_CLOSE_PENDING: "The closing orders are still being canceled; try again in a moment",
+    DERIV_CLOSE_PENDING: "The user's orders are still being canceled; try again in a moment",
+    DERIV_HOUSE_NOT_CLOSED: "HOUSE's positions are not closed from the console",
   },
 };

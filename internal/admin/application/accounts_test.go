@@ -124,8 +124,25 @@ func TestOrderCancelsAndForceClose(t *testing.T) {
 	}
 
 	got := h.auditsOf("admin.derivatives.position_closed")
-	if len(got) != 1 || !strings.Contains(got[0], `"order_id":"0192a000-0000-7000-8000-0000000000c1"`) {
+	if len(got) != 1 || !strings.Contains(got[0], `"order_id":"0192a000-0000-7000-8000-0000000000c1"`) || !strings.Contains(got[0], `"complete":true`) {
 		t.Fatalf("close audit %v", got)
+	}
+	// The request is audited with its key, the outcome once the order is final (C5.5 ⑧).
+	if asked := h.auditsOf("admin.derivatives.position_close_requested"); len(asked) != 2 {
+		t.Fatalf("close requests audited %v", asked)
+	}
+	h.derivatives.outcome, h.derivatives.filled = "CANCELED", "0.05"
+	if _, err := h.svc.ClosePosition(ctx, ops, "", someUser, "BTC-USDT-PERP", "BOTH", "a thin book"); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.auditsOf("admin.derivatives.position_closed"); len(got) != 2 || !strings.Contains(got[1], `"filled_quantity":"0.05"`) ||
+		!strings.Contains(got[1], `"complete":false`) {
+		t.Fatalf("a close filled in part %v", got)
+	}
+	h.derivatives.outcome, h.derivatives.looks = "OPEN", 0
+	if raw, err := h.svc.ClosePosition(ctx, ops, "", someUser, "BTC-USDT-PERP", "BOTH", "the engine is slow"); err != nil || orderID(raw) == "" ||
+		len(h.auditsOf("admin.derivatives.position_closed")) != 2 || h.derivatives.looks != closeAttempts-1 {
+		t.Fatalf("an outcome not known yet: %s %v (looked %d times)", raw, err, h.derivatives.looks)
 	}
 	if got := h.auditsOf("admin.orders.canceled"); len(got) != 1 || !strings.Contains(got[0], order) {
 		t.Fatalf("cancel audit %v", got)
@@ -137,6 +154,18 @@ func TestFuturesAdjustments(t *testing.T) {
 	ctx := context.Background()
 	h.admin(t, "fin@example.com", domain.RoleFinance)
 	fin := h.login(t, "fin@example.com")
+
+	// Before a debit: what it would leave of the cross margin (C5.5 ⑧).
+	raw, err := h.svc.FuturesMargin(ctx, fin, someUser, decimal.NewFromInt(600))
+	if err != nil || !strings.Contains(string(raw), `"state_after":"LIQUIDATE"`) {
+		t.Fatalf("a debit that liquidates: %s %v", raw, err)
+	}
+	if _, err := h.svc.FuturesMargin(ctx, fin, someUser, decimal.NewFromInt(-1)); code(err) != apperr.CodeInvalidArgument {
+		t.Fatalf("a negative debit: %v", err)
+	}
+	if _, err := h.svc.FuturesMargin(ctx, fin, "nobody", decimal.NewFromInt(1)); code(err) != apperr.CodeNotFound {
+		t.Fatalf("a bad user: %v", err)
+	}
 
 	if _, err := h.svc.SubmitFunds(ctx, fin, FundRequest{
 		Kind: domain.KindLedgerAdjustment, UserID: someUser, AccountType: "MARGIN", Asset: "USDT", Amount: decimal.NewFromInt(5), Reason: "goodwill",

@@ -1768,19 +1768,54 @@ paths:
                       $ref: '#/components/schemas/UserPosition'
         default:
           $ref: '#/components/responses/Error'
+  /admin/v1/users/{id}/futures-margin:
+    get:
+      operationId: getUserFuturesMargin
+      summary: An account's cross margin, and what a debit would leave of it
+      description: |
+        The cross positions' equity and maintenance margin at the marks, as
+        derivatives-service's margin monitor measures them, and the equity
+        and state after a debit of the FUTURES balance (a negative
+        adjustment lowers the equity at once; LIQUIDATE means the next round
+        of the monitor takes the positions over). Unmeasured while a cross
+        position's contract has no fresh mark price. Needs users.read.
+      tags: [users, derivatives]
+      parameters:
+        - $ref: '#/components/parameters/UserID'
+        - name: debit
+          in: query
+          description: The debit to measure (positive; 0 by default).
+          schema:
+            $ref: '#/components/schemas/Decimal'
+      responses:
+        '200':
+          description: The cross margin.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CrossMargin'
+        default:
+          $ref: '#/components/responses/Error'
   /admin/v1/users/{id}/positions/close:
     post:
       operationId: closeUserPosition
       summary: Close a position at the market (force close)
       description: |
-        The closing orders resting on the position are canceled first;
-        once the engine confirmed (the console waits a few seconds, then
-        fails with DERIV_CLOSE_PENDING to try again), a market order of
-        kind ADMIN takes the whole position: reduce-only in one-way mode,
-        against its side in hedge mode. A position under liquidation is
-        left to the liquidation engine (DERIV_POSITION_LIQUIDATING). The
-        answer is the order. Audited as admin.derivatives.position_closed.
-        Needs derivatives.write.
+        The user's orders resting on the contract are canceled first, all
+        of them (an opening order filled after the close would open the
+        position again); once the engine confirmed (the console waits a few
+        seconds, then fails with DERIV_CLOSE_PENDING to try again), a
+        market order of kind ADMIN takes the whole position: reduce-only in
+        one-way mode, against its side in hedge mode. A position under
+        liquidation is left to the liquidation engine
+        (DERIV_POSITION_LIQUIDATING); HOUSE's are not closed here
+        (DERIV_HOUSE_NOT_CLOSED). The answer is the order as last seen: the
+        console waits a few seconds for it to finish. On a thin book it may
+        fill in part (CANCELED with filled_quantity below quantity): the
+        rest of the position stays, look again and close it again. Audited
+        as admin.derivatives.position_close_requested with its key, and as
+        admin.derivatives.position_closed with what filled once the order is
+        final. Needs derivatives.write.
       tags: [users, derivatives]
       security:
         - session: []
@@ -6729,6 +6764,31 @@ components:
             when approved). PENDING with it, the attempt did not finish and may have booked: it is finished (approved again:
             its ledger key makes that safe), never rejected (ADMIN_APPROVAL_ATTEMPTED). Null for the simulated market's
             changes and before any attempt.
+    CrossMargin:
+      type: object
+      required: [asset, positions, unmeasured, equity, maintenance, state, equity_after, state_after]
+      properties:
+        asset:
+          type: string
+          examples: [USDT]
+        positions:
+          type: integer
+          description: The cross positions; with none there is nothing to liquidate.
+        unmeasured:
+          type: boolean
+          description: A cross position's contract has no fresh mark price; nothing else is measured.
+        equity:
+          $ref: '#/components/schemas/Decimal'
+        maintenance:
+          $ref: '#/components/schemas/Decimal'
+        state:
+          type: string
+          enum: [HEALTHY, WARNING, LIQUIDATE]
+        equity_after:
+          $ref: '#/components/schemas/Decimal'
+        state_after:
+          type: string
+          enum: [HEALTHY, WARNING, LIQUIDATE]
     AuditEntry:
       type: object
       required: [event_id, event_type, actor, target, occurred_at, payload]

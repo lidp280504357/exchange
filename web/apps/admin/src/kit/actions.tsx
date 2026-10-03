@@ -57,6 +57,11 @@ export function useOperationKey() {
   );
 }
 
+/** Notice is an outcome told without the success tone: the call worked, but not all of it (a force close filled in part). */
+export type Notice = { info: ReactNode };
+
+const isNotice = (v: unknown): v is Notice => typeof v === "object" && v !== null && "info" in v;
+
 export type DangerActionProps = {
   /** Renders the button that opens the confirmation; leave it out to control open yourself. */
   trigger?: (open: () => void) => ReactNode;
@@ -71,8 +76,8 @@ export type DangerActionProps = {
   danger?: boolean;
   /** The call, with the reason given and the operation's Idempotency-Key; its result goes to onDone. */
   run: (reason: string, key: string) => Promise<unknown>;
-  /** The toast once it worked, or what to say of the call's result. */
-  success: ReactNode | ((result: unknown) => ReactNode);
+  /** The toast once it worked, or what to say of the call's result (a Notice when it worked only in part). */
+  success: ReactNode | ((result: unknown) => ReactNode | Notice);
   /** Lists to reload after it worked. */
   invalidate?: QueryKey[];
   onDone?: (result: unknown) => void;
@@ -107,7 +112,9 @@ export function DangerAction({
         onConfirm={async (reason) => {
           try {
             const result = await run(reason, op.get());
-            toast.success(typeof success === "function" ? success(result) : success);
+            const said = typeof success === "function" ? success(result) : success;
+            if (isNotice(said)) toast.info(said.info, { duration: 10000 });
+            else toast.success(said);
             for (const key of invalidate ?? []) void qc.invalidateQueries({ queryKey: key });
             setOpen(false);
             onDone?.(result);

@@ -536,6 +536,7 @@ func (h *Handler) InternalRoutes(r chi.Router) {
 	r.Get("/internal/derivatives/risk", h.risk)
 	r.Get("/internal/derivatives/positions", h.openPositions)
 	r.Post("/internal/derivatives/positions/close", h.adminClose)
+	r.Get("/internal/derivatives/users/{id}/cross-margin", h.crossMargin)
 	r.Post("/internal/derivatives/contracts/{symbol}/tier-impact", h.tierImpact)
 	r.Post("/internal/derivatives/contracts/{symbol}/price-impact", h.priceImpact)
 }
@@ -558,6 +559,34 @@ func (h *Handler) adminClose(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, toOrderJSON(o))
+}
+
+// marginStates names the margin states for the console.
+var marginStates = map[domain.MarginState]string{
+	domain.MarginHealthy: "HEALTHY", domain.MarginWarning: "WARNING", domain.MarginLiquidate: "LIQUIDATE",
+}
+
+// crossMargin measures a user's cross margin account and a debit of it
+// (?debit=, default 0) for the admin console's adjustment preview.
+func (h *Handler) crossMargin(w http.ResponseWriter, r *http.Request) {
+	debit := decimal.Zero
+	if v := r.URL.Query().Get("debit"); v != "" {
+		var err error
+		if debit, err = decimal.NewFromString(v); err != nil {
+			httpx.WriteError(w, r, apperr.Invalid("debit must be a decimal"))
+			return
+		}
+	}
+	m, err := h.Svc.CrossMargin(r.Context(), chi.URLParam(r, "id"), h.Asset, debit)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"asset": m.Asset, "positions": m.Positions, "unmeasured": m.Unmeasured, "equity": m.Equity.String(),
+		"maintenance": m.Maintenance.String(), "state": marginStates[m.State], "equity_after": m.EquityAfter.String(),
+		"state_after": marginStates[m.StateAfter],
+	})
 }
 
 func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {

@@ -147,7 +147,8 @@ REST（经网关 `/v1/derivatives/*`，需登录）：
 | `POST /internal/derivatives/contracts/{symbol}/lift-reduce-only` | `{"actor": ...}` 解除只减仓，返回 `lifted` 表示原来是否只减仓 |
 | `GET /internal/derivatives/risk` | 被接管、已预警或保证金率（维持保证金 ÷（保证金 + 未实现盈亏））≥ 0.5 的仓位，风险高的在前；全仓仓位在这里按单个仓位计算 |
 | `GET /internal/derivatives/positions` | 全部用户的持仓（后台「仓位」页，2026-10-02 C3）：`symbol`、`user_id`、`watch=true`（只要上一行的风险仓位）、`limit`（默认 200，最多 1000）；按保证金率、再按开仓名义价值从大到小，`truncated` 表示被 `limit` 截断 |
-| `POST /internal/derivatives/positions/close` | 后台强制平仓（C2）：先撤平仓挂单，再以 `ADMIN` 类型的市价只减仓单平掉 |
+| `POST /internal/derivatives/positions/close` | 后台强制平仓（C2）：先撤该用户在这个合约上的全部挂单，再以 `ADMIN` 类型的市价只减仓单平掉；HOUSE 不平 |
+| `GET /internal/derivatives/users/{id}/cross-margin?debit=` | 后台调账预览（C5.5 ⑧）：全仓权益、维持保证金与状态，以及扣减 `debit` 后的权益与状态（`HEALTHY`/`WARNING`/`LIQUIDATE`） |
 | `POST /internal/derivatives/contracts/{symbol}/tier-impact` | 新风险阶梯的影响（后台预览，2026-10-02 设计 §2 第 6 条）：`{risk_tiers}`，按保证金监控的规则（逐仓看仓位、全仓看整个账户，HOUSE 不计）算出会新被强平的仓位数、名义价值与账户数，新进入预警、超出杠杆风险限额、没有新鲜标记价的数量，以及最大的 20 个例子；阶梯不合法答 400，不改任何东西 |
 | `POST /internal/derivatives/contracts/{symbol}/price-impact` | 某个标记价的影响（后台"模拟市场"价格事件的确认框，ASTRA 设计 §6.3）：`{target_price}` → `positions`、`liquidated`（标记价到这里会新被强平的仓位数；全仓账户整个算进去）、`notional`（按目标价）、`accounts`、`insurance_cost`（按目标价平掉时逐仓保证金或全仓权益低于 0 的部分，即保险基金预计承担）、`unmeasured`（现在没有新鲜标记价、量不了的仓位）与最大的 20 个例子（保证金余额按目标价，维持保证金是现在与目标价两个）；与阶梯影响同一套保证金监控算法，HOUSE 不计，不改任何东西；目标价不是正数答 400 |
 
@@ -180,7 +181,7 @@ SELECT check_name, mismatches, details FROM derivatives.reconciliation_runs ORDE
 ## 管理后台与读模型
 
 - 管理后台「合约」页（[admin.md](admin.md#功能)）：合约状态与只减仓（解除需 `derivatives.write`，改状态需 `instruments.write`）、保险基金余额与 `PNL_CLEARING`、发起保险基金注资（双人审批，批准后账本 `FundInsurance` 以幂等键 `approval:<id>` 记 `INSURANCE_CONTRIBUTION`，需开关 `ledger.manual_adjustment`）、强平监控（每 5 秒刷新）、强平记录。报表页有合约日报与当前持仓量。
-- **强制平仓**（2026-10-02 设计 C2，用户页「仓位」标签，需 `derivatives.write`）：内部接口 `POST /internal/derivatives/positions/close`（`user_id`、`symbol`、`position_side`、`client_order_id`）。先对该仓位方向上仍在挂的平仓单请求撤单，只要还有没撤完的就答 409 `DERIV_CLOSE_PENDING`（后台每 0.7 秒重试，最多 8 次）；撤完后以市价单平掉整个仓位：订单类型 `ADMIN`（迁移 derivatives 00005），单向持仓为只减仓、双向持仓按方向平。同一个 `client_order_id` 重复调用返回同一笔订单。正在强平的仓位交给强平引擎（`DERIV_POSITION_LIQUIDATING`），没有仓位答 `DERIV_NO_POSITION`。后台记审计 `admin.derivatives.position_closed`；单笔撤合约委托记 `admin.derivatives.order_canceled`。
+- **强制平仓**（2026-10-02 设计 C2，用户页「仓位」标签，需 `derivatives.write`）：内部接口 `POST /internal/derivatives/positions/close`（`user_id`、`symbol`、`position_side`、`client_order_id`）。先对该用户在这个合约上的全部挂单请求撤单（C5.5 ⑧ 起包括开仓单：平仓后它成交会把仓位开回去），只要还有没撤完的就答 409 `DERIV_CLOSE_PENDING`（后台每 0.7 秒重试，最多 8 次）；撤完后以市价单平掉整个仓位：订单类型 `ADMIN`（迁移 derivatives 00005），单向持仓为只减仓、双向持仓按方向平。同一个 `client_order_id` 重复调用返回同一笔订单。正在强平的仓位交给强平引擎（`DERIV_POSITION_LIQUIDATING`），没有仓位答 `DERIV_NO_POSITION`，HOUSE 的仓位不平（`DERIV_HOUSE_NOT_CLOSED`：ADMIN 市价单会和 HOUSE 自己成交）。后台在请求时记审计 `admin.derivatives.position_close_requested`，订单结束后记 `admin.derivatives.position_closed`（成交数量与是否全部成交；盘口薄时可能只成交一部分，剩下的再平一次）；单笔撤合约委托记 `admin.derivatives.order_canceled`。
 - ClickHouse 读模型（`migrations/clickhouse/00005_derivatives_read_models.sql`，analytics-consumer 投影，见 [analytics.md](analytics.md)）：`derivatives_positions`（每个仓位的最新快照，按 `version` 取最新）、`derivatives_fills`（已记账的成交，每笔两边各一行，带名义价值）、`derivatives_funding`（每个仓位每次资金费）、`derivatives_liquidations`（WARNING、STARTED、FILLED、ADL 各步骤）。合约的订单与成交并入现货的 `orders`、`order_updates`、`trades`（按 `symbol` 区分），所以交易报表与 K 线也覆盖合约。
 
 ```sql

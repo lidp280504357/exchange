@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DangerAction } from "../../kit/actions";
+import { closeOutcome } from "../users/money";
 import { FilterBar, useFilters } from "../../kit/filters";
 import { Num, UserCell } from "../../kit/format";
 import { Page } from "../../kit/Page";
@@ -154,7 +155,7 @@ export default function Positions({ admin }: { admin: Admin }) {
               }),
             )
           }
-          success={t("admin.money.closed")}
+          success={closeOutcome}
           invalidate={[["admin", "positions"], ["admin", "user", closing.user_id]]}
         />
       )}

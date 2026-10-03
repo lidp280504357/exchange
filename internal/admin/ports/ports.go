@@ -577,9 +577,16 @@ type Derivatives interface {
 	// orders; the answer is the order.
 	CancelOrder(ctx context.Context, userID, orderID string) (json.RawMessage, error)
 	// ClosePosition closes a user's position at the market with an order
-	// of kind ADMIN (DERIV_CLOSE_PENDING while its closing orders are
-	// being canceled); clientOrderID makes it idempotent.
+	// of kind ADMIN (DERIV_CLOSE_PENDING while the user's orders on the
+	// contract are being canceled); clientOrderID makes it idempotent.
 	ClosePosition(ctx context.Context, userID, symbol, positionSide, clientOrderID string) (json.RawMessage, error)
+	// Order returns one of a user's contract orders as the user's API
+	// renders it.
+	Order(ctx context.Context, userID, orderID string) (json.RawMessage, error)
+	// CrossMargin measures a user's cross margin account and what a
+	// debit of its available balance would leave (equity, maintenance,
+	// states), as JSON.
+	CrossMargin(ctx context.Context, userID string, debit decimal.Decimal) (json.RawMessage, error)
 	// TierImpact measures a contract's new risk ladder (the config
 	// document's risk_tiers) against its open positions, changing nothing.
 	TierImpact(ctx context.Context, symbol string, tiers json.RawMessage) (TierImpact, error)

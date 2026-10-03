@@ -515,6 +515,29 @@ type fakeDerivatives struct {
 	// impactDown makes TierImpact fail; tiers records what it measured.
 	impactDown bool
 	tiers      []string
+	// outcome is how the closing order ends (FILLED unless set), seen
+	// after looks of Order.
+	outcome string
+	filled  string
+	looks   int
+}
+
+func (d *fakeDerivatives) CrossMargin(_ context.Context, _ string, debit decimal.Decimal) (json.RawMessage, error) {
+	state := "HEALTHY"
+	if debit.GreaterThan(decimal.NewFromInt(500)) {
+		state = "LIQUIDATE"
+	}
+	return json.RawMessage(`{"asset":"USDT","positions":1,"unmeasured":false,"equity":"1000","maintenance":"500","state":"HEALTHY",` +
+		`"equity_after":"` + decimal.NewFromInt(1000).Sub(debit).String() + `","state_after":"` + state + `"}`), nil
+}
+
+func (d *fakeDerivatives) Order(_ context.Context, _, id string) (json.RawMessage, error) {
+	d.looks++
+	status, filled := d.outcome, d.filled
+	if status == "" {
+		status, filled = "FILLED", "0.2"
+	}
+	return json.RawMessage(`{"order_id":"` + id + `","status":"` + status + `","quantity":"0.2","filled_quantity":"` + filled + `"}`), nil
 }
 
 func (d *fakeDerivatives) TierImpact(_ context.Context, symbol string, tiers json.RawMessage) (ports.TierImpact, error) {

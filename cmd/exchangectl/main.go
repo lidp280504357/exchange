@@ -17,6 +17,7 @@
 //	exchangectl instruments profile ASTRA --display-name Astra --logo astra.svg --reason "..."
 //	exchangectl ledger adjust --user <user_id> --asset USDT --amount 100 --reason "..." [--key K]
 //	exchangectl ledger balances <user_id>
+//	exchangectl ledger release-hold --id <hold_id> --reason "..."
 //	exchangectl ledger reconcile
 //	exchangectl ledger trades [--failed] [--limit N]
 //	exchangectl ledger retry-trades [--limit N]
@@ -89,6 +90,9 @@ commands:
   ledger house-margin --amount X --reason TEXT [--key K]
                               add USDT to HOUSE's futures account: an audited credit to its SPOT,
                               then a transfer to FUTURES (in an app container; needs ledger.manual_adjustment)
+  ledger release-hold --id H --reason TEXT
+                              release a console hold that cannot be released in full (part of its frozen
+                              amount went elsewhere): what is still frozen of it returns to available (audited)
   ledger reconcile            check the ledger invariants now
   ledger trades [--failed] [--limit N]
                               settled trades, newest first (--failed: the ones parked by a refusal)

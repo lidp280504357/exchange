@@ -118,6 +118,8 @@ func ledgerWith(ctx context.Context, dbs ledgerDBs, args []string, out io.Writer
 		return ledgerHouseMargin(ctx, svc, args[1:], out)
 	case "gas-supply":
 		return ledgerGasSupply(ctx, svc, args[1:], out)
+	case "release-hold":
+		return ledgerReleaseHold(ctx, svc, args[1:], out)
 	default:
 		return fmt.Errorf("unknown ledger command %q", args[0])
 	}
@@ -159,6 +161,30 @@ func ledgerAdjust(ctx context.Context, svc *application.Service, args []string, 
 		return err
 	}
 	fmt.Fprintf(out, "journal %s (key %s, replayed %v)\n", res.JournalID, *key, res.Replayed)
+	return nil
+}
+
+// ledgerReleaseHold releases a console hold that the console cannot: part
+// of its frozen amount was released elsewhere, so the full release fails
+// with LEDGER_INSUFFICIENT_BALANCE. What of it is still frozen returns to
+// the available balance, audited as forced (C5.5 ⑧).
+func ledgerReleaseHold(ctx context.Context, svc *application.Service, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("ledger release-hold", flag.ContinueOnError)
+	fs.SetOutput(out)
+	id := fs.String("id", "", "the hold's ID (the console's user page lists them)")
+	reason := fs.String("reason", "", "why (required, goes to the audit log)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *id == "" || *reason == "" {
+		fs.Usage()
+		return errors.New("--id and --reason are required")
+	}
+	h, released, err := svc.ForceReleaseHold(ctx, *id, actor(), *reason)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "hold %s released: %s of %s %s returned to available (journal %q)\n", h.ID, released, h.Amount, h.Asset, h.ReleaseJournalID)
 	return nil
 }
 

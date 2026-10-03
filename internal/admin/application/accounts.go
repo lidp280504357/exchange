@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
+	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
 	"github.com/lidp280504357/exchange/internal/admin/domain"
 	"github.com/lidp280504357/exchange/internal/admin/ports"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
@@ -245,6 +246,23 @@ func (s *Service) CancelContractOrder(ctx context.Context, p Principal, userID, 
 	return raw, s.audit(ctx, p, "user:"+userID, "admin.derivatives.order_canceled", reason, string(details))
 }
 
+// FuturesMargin measures a user's cross margin account and what a debit of
+// its FUTURES balance would leave: a negative adjustment lowers the equity
+// at once, and the next round of the margin monitor may liquidate it, so
+// the confirmation shows it (C5.5 ⑧).
+func (s *Service) FuturesMargin(ctx context.Context, p Principal, userID string, debit decimal.Decimal) (json.RawMessage, error) {
+	if err := p.require(domain.PermUsersRead); err != nil {
+		return nil, err
+	}
+	if err := needUser(userID); err != nil {
+		return nil, err
+	}
+	if debit.IsNegative() {
+		return nil, apperr.Invalid("the debit is a positive amount")
+	}
+	return s.Derivatives.CrossMargin(ctx, userID, debit)
+}
+
 // Positions returns a user's open contract positions.
 func (s *Service) Positions(ctx context.Context, p Principal, userID string) (json.RawMessage, error) {
 	if err := p.require(domain.PermUsersRead); err != nil {
@@ -257,14 +275,20 @@ func (s *Service) Positions(ctx context.Context, p Principal, userID string) (js
 }
 
 // closeAttempts and closeWait bound how long ClosePosition waits for the
-// engine to confirm the cancels of the position's closing orders.
+// engine to confirm the cancels of the user's orders on the contract, and
+// then for its order's outcome.
 const closeAttempts = 8
 
-// ClosePosition closes a user's position at the market (a reduce-only
-// market order of kind ADMIN, after the closing orders resting on it came
-// off), audited as admin.derivatives.position_closed. The order's client
-// ID comes from the request's key, so the same request again finds the
-// same order.
+// ClosePosition closes a user's position at the market: the user's
+// orders resting on the contract come off, then a reduce-only market
+// order of kind ADMIN takes the position. The request is audited as
+// admin.derivatives.position_close_requested with the claim of its key
+// (once, whatever the retries), its outcome as
+// admin.derivatives.position_closed once the order is final, with what
+// filled (C5.5 ⑧: on a thin book it may fill in part, the rest of the
+// position stays). The order's client ID comes from the request's key, so
+// the same request again finds the same order. The answer is the order as
+// last seen.
 func (s *Service) ClosePosition(ctx context.Context, p Principal, key, userID, symbol, side, reason string) (json.RawMessage, error) {
 	if err := p.require(domain.PermDerivativesEdit); err != nil {
 		return nil, err
@@ -279,7 +303,19 @@ func (s *Service) ClosePosition(ctx context.Context, p Principal, key, userID, s
 	if symbol == "" {
 		return nil, apperr.Invalid("the symbol is required")
 	}
-	c, err := s.claimKey(ctx, p, key, scopeClose, fingerprint(userID, symbol, side, strings.TrimSpace(reason)))
+	reason = strings.TrimSpace(reason)
+	var c claim
+	err := s.Store.Tx(ctx, func(r ports.Repos) error {
+		var err error
+		if c, err = s.claimIn(ctx, r, p, key, scopeClose, fingerprint(userID, symbol, side, reason)); err != nil || !c.Fresh {
+			return err
+		}
+		details, _ := json.Marshal(map[string]string{"symbol": symbol, "position_side": side, "client_order_id": c.Ref})
+		return r.Audit(ctx, &auditv1.AdminActionPerformed{
+			Target: "user:" + userID, Action: "admin.derivatives.position_close_requested", Actor: p.Admin.Email, Reason: reason,
+			Details: string(details),
+		}, p.Admin.Email)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -287,23 +323,72 @@ func (s *Service) ClosePosition(ctx context.Context, p Principal, key, userID, s
 	if wait <= 0 {
 		wait = 700 * time.Millisecond
 	}
-	client := c.Ref
+	pause := func() error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(wait):
+			return nil
+		}
+	}
 	var raw json.RawMessage
 	for attempt := 1; ; attempt++ {
 		var err error
-		raw, err = s.Derivatives.ClosePosition(ctx, userID, symbol, side, client)
+		raw, err = s.Derivatives.ClosePosition(ctx, userID, symbol, side, c.Ref)
 		if err == nil {
 			break
 		}
 		if apperr.From(err).Code != "DERIV_CLOSE_PENDING" || attempt >= closeAttempts {
 			return nil, err
 		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(wait):
+		if err := pause(); err != nil {
+			return nil, err
 		}
 	}
-	details, _ := json.Marshal(map[string]any{"symbol": symbol, "position_side": side, "order_id": orderID(raw), "repeated": !c.Fresh})
-	return raw, s.audit(ctx, p, "user:"+userID, "admin.derivatives.position_closed", reason, string(details))
+	// The market order is final within moments (filled, or what the book
+	// held filled and the rest canceled); until then its outcome is not
+	// audited.
+	id := orderID(raw)
+	for attempt := 1; ; attempt++ {
+		o := closeOrderOf(raw)
+		if o.final() {
+			details, _ := json.Marshal(map[string]any{
+				"symbol": symbol, "position_side": side, "order_id": id, "status": o.Status, "quantity": o.Quantity,
+				"filled_quantity": o.Filled, "complete": o.Status == "FILLED", "repeated": !c.Fresh,
+			})
+			return raw, s.audit(ctx, p, "user:"+userID, "admin.derivatives.position_closed", reason, string(details))
+		}
+		if attempt >= closeAttempts || id == "" {
+			return raw, nil
+		}
+		if err := pause(); err != nil {
+			return nil, err
+		}
+		if next, err := s.Derivatives.Order(ctx, userID, id); err == nil {
+			raw = next
+		}
+	}
+}
+
+// closeOrder is what ClosePosition reads of its order.
+type closeOrder struct {
+	Status   string `json:"status"`
+	Quantity string `json:"quantity"`
+	Filled   string `json:"filled_quantity"`
+}
+
+func closeOrderOf(raw json.RawMessage) closeOrder {
+	var o closeOrder
+	_ = json.Unmarshal(raw, &o)
+	return o
+}
+
+// final reports whether the order is done: filled, or ended with what it
+// filled.
+func (o closeOrder) final() bool {
+	switch o.Status {
+	case "FILLED", "CANCELED", "REJECTED", "EXPIRED":
+		return true
+	}
+	return false
 }

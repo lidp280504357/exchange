@@ -1,11 +1,11 @@
-import { dec, errorText } from "@exchange/core";
+import { dec, errorText, i18n } from "@exchange/core";
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
 import { Badge, Button, DataTable, ErrorState, Input, Select, type ColumnDef, type DataColumnMeta } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Lock } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { DangerAction, FormError, lastFour } from "../../kit/actions";
+import { DangerAction, FormError, lastFour, type Notice } from "../../kit/actions";
 import { EnumBadge, EnumText } from "../../kit/enums";
 import { IdText, Num, TimeText } from "../../kit/format";
 import type { Approval } from "../../kit/funds";
@@ -92,6 +92,15 @@ export function BalancesTab({ admin, userId }: { admin: Admin; userId: string })
 }
 
 const holdKeys = (userId: string) => [userKey(userId, "balances"), userKey(userId, "holds"), ["admin", "user", userId], ["admin", "audit"]];
+
+/** closeOutcome says what came of a force close: filled in full, in part (the rest of the position stays, C5.5 ⑧), or placed. */
+export function closeOutcome(result: unknown): string | Notice {
+  const o = (result ?? {}) as { status?: string; quantity?: string; filled_quantity?: string };
+  if (o.status === "FILLED") return i18n.t("admin.money.closedAll");
+  if ((o.status === "CANCELED" || o.status === "EXPIRED" || o.status === "REJECTED") && o.quantity && o.filled_quantity !== undefined)
+    return { info: i18n.t("admin.money.closedPart", { filled: o.filled_quantity, quantity: o.quantity }) };
+  return i18n.t("admin.money.closed");
+}
 
 /** Holds lists the holds on the user's SPOT balance; ledger.hold places and releases them. */
 function Holds({ admin, userId, balances }: { admin: Admin; userId: string; balances: Balance[] }) {
@@ -455,7 +464,7 @@ export function PositionsTab({ admin, userId }: { admin: Admin; userId: string }
               }),
             )
           }
-          success={t("admin.money.closed")}
+          success={closeOutcome}
           invalidate={[userKey(userId, "positions"), userKey(userId, "contract-orders"), userKey(userId, "balances"), ["admin", "audit"]]}
         />
       )}

@@ -94,7 +94,13 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 - **风控**：风控规则对该用户的评估（触发事件、分数、动作、是否执行、命中规则及说明；risk-service 新增只读 gRPC `ListAssessments`），并可转人工审核（`RISK_REVIEW`）或审核通过后恢复（同「改账户状态」，需 `users.status`）。
 - **余额与资金**：现货与合约账户每个资产的可用、冻结、合计与 USDT 估值（按该资产 USDT 交易对的最新价，没有价格的列出来、不计入总估值）；**风控冻结**（`ledger.hold`，ADMIN、OPERATOR、FINANCE）：冻结现货可用余额的一部分或解冻，由账本记分录与审计（见 [ledger.md](ledger.md#接口)）；调整余额可选现货或合约账户。
 - **订单**：现货订单（可单笔撤单，`orders.cancel`，审计 `admin.orders.canceled`）与合约当前委托（可单笔撤单，审计 `admin.derivatives.order_canceled`）。
-- **仓位**：合约持仓（开仓均价、标记价、预估强平价、未实现盈亏、保证金与模式），每 5 秒刷新；**强制平仓**（`derivatives.write`）先撤该仓位的平仓挂单，再以市价全部平掉，见 [derivatives.md](derivatives.md#管理后台与读模型)。
+- **仓位**：合约持仓（开仓均价、标记价、预估强平价、未实现盈亏、保证金与模式），每 5 秒刷新。
+  - **强制平仓**（`derivatives.write`）先撤该用户在这个合约上的全部挂单（含开仓单，免得平仓后又成交开回去），再以市价全部平掉，见 [derivatives.md](derivatives.md#管理后台与读模型)。
+    - 后台等这笔市价单结束（最多约 5 秒），提示是全部成交还是只成交一部分；盘口薄时剩下的仓位要再平一次。
+    - 审计两条（C5.5 ⑧）：`admin.derivatives.position_close_requested`（与幂等键一起写，每个请求一次）和 `admin.derivatives.position_closed`（订单结束后，带 `status`、`filled_quantity`、`complete`）。
+    - HOUSE 的仓位不能平（422 `DERIV_HOUSE_NOT_CLOSED`）。
+  - **合约账户的扣减**：确认框显示扣减后的全仓权益与维持保证金（`GET /admin/v1/users/{id}/futures-margin?debit=`，按 derivatives-service 风控的口径），会进入预警或会被强平时标红（C5.5 ⑧）。
+  - **卡住的风控冻结**：别处多解冻了这部分资金时，后台解冻会一直报 `LEDGER_INSUFFICIENT_BALANCE`。运维用 `exchangectl ledger release-hold --id <冻结单ID> --reason "..."` 解冻还冻结着的部分，审计 `ledger.hold_released` 带 `"forced": true` 与实际解冻数（C5.5 ⑧）。
 - 成交、充值、提现、**备注与标签**（`users.notes`；备注只增不改，审计 `admin.users.note_added`；标签为大写代码，整体替换，审计 `admin.users.tags_changed` 带前后值）、审计。
 - **身份变更申请**（`/identity-requests`，侧栏「用户」组）：只有一种身份的用户换绑邮箱或手机号要人工审核。默认列出待审核的，值脱敏；有 `users.security` 的可通过（身份改为新值并通知用户）或拒绝，需理由，审计 `admin.users.identity_request_decided`。
 - **批量审核提现**：`POST /admin/v1/withdrawals/review-batch` 一次最多 50 笔，用同一个理由逐笔处理、逐笔审计，各自返回结果；审核队列可勾选（一键选中低风险的）后一起批准或拒绝。提现详情列出该用户最近的提现与托管方回调。

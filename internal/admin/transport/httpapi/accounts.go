@@ -165,6 +165,24 @@ func (h *Handler) userPositions(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]json.RawMessage{"positions": raw})
 }
 
+// futuresMargin previews a debit of a user's FUTURES balance (?debit=).
+func (h *Handler) futuresMargin(w http.ResponseWriter, r *http.Request) {
+	debit := decimal.Zero
+	if v := r.URL.Query().Get("debit"); v != "" {
+		var err error
+		if debit, err = decimal.NewFromString(v); err != nil {
+			httpx.WriteError(w, r, apperr.Invalid("debit must be a decimal string"))
+			return
+		}
+	}
+	raw, err := h.Svc.FuturesMargin(r.Context(), principal(r), chi.URLParam(r, "id"), debit)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeRaw(w, raw)
+}
+
 func (h *Handler) closePosition(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Symbol       string `json:"symbol"`

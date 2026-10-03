@@ -94,6 +94,7 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/users/{id}/contract-orders", h.contractOrders)
 			r.Post("/users/{id}/contract-orders/{order}/cancel", h.cancelContractOrder)
 			r.Get("/users/{id}/positions", h.userPositions)
+			r.Get("/users/{id}/futures-margin", h.futuresMargin)
 			r.With(needKey).Post("/users/{id}/positions/close", h.closePosition)
 			r.Get("/roles", h.roles)
 			r.Get("/admins", h.admins)

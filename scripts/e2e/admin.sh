@@ -855,6 +855,7 @@ else
   as OPERATOR POST "/admin/v1/users/$USER_ID/positions/close" '{"symbol":"ETH-USDT-PERP","position_side":"BOTH","reason":"e2e force close"}'
   expect 200 - "OPERATOR closes it at the market"
   check '.type == "MARKET" and .reduce_only == true and .side == "SELL" and .quantity == "0.1"' "a reduce-only market sell of 0.1"
+  check '.status == "FILLED" and .filled_quantity == "0.1"' "the console waited for it: filled in full against HOUSE"
   user_flat() {
     as AUDITOR GET "/admin/v1/users/$USER_ID/positions" ""
     [[ $STATUS == 200 ]] && jq -e '.positions | length == 0' <<<"$BODY" >/dev/null
@@ -862,6 +863,14 @@ else
   eventually 40 "the position is closed" user_flat
   as OPERATOR POST "/admin/v1/users/$USER_ID/positions/close" '{"symbol":"ETH-USDT-PERP","position_side":"BOTH","reason":"e2e again"}'
   expect 422 DERIV_NO_POSITION "nothing left to close"
+  as OPERATOR POST "/admin/v1/users/$HOUSE_ID/positions/close" '{"symbol":"ETH-USDT-PERP","position_side":"BOTH","reason":"e2e HOUSE"}'
+  expect 422 DERIV_HOUSE_NOT_CLOSED "HOUSE's positions are not closed from the console"
+  closed_audited() {
+    as AUDITOR GET "/admin/v1/audit-logs?target=user:$USER_ID" ""
+    [[ $STATUS == 200 ]] && jq -e '[.items[].payload.action] | (index("admin.derivatives.position_close_requested") != null and
+      index("admin.derivatives.position_closed") != null)' <<<"$BODY" >/dev/null
+  }
+  eventually 60 "the close is audited when asked for and when it filled" closed_audited
 fi
 
 echo "== listing a pair from the console (LINK-BTC)"

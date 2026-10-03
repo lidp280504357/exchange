@@ -123,6 +123,66 @@ func (s *Service) ReleaseHold(ctx context.Context, id, actor, reason string) (do
 	return out, err
 }
 
+// ForceReleaseHold is the operators' way out of a hold that cannot be
+// released in full because part of its frozen amount was released
+// elsewhere (ReleaseHold failing with LEDGER_INSUFFICIENT_BALANCE): it
+// returns to the available balance what of the hold is still frozen (none
+// when nothing is), marks the hold released and audits it as
+// ledger.hold_released with "forced" and the amount released (exchangectl
+// ledger release-hold; C5.5 ⑧).
+func (s *Service) ForceReleaseHold(ctx context.Context, id, actor, reason string) (domain.Hold, decimal.Decimal, error) {
+	var out domain.Hold
+	released := decimal.Zero
+	err := s.Store.Tx(ctx, func(r ports.Repos) error {
+		h, err := r.Holds().GetForUpdate(ctx, id)
+		if err != nil {
+			return err
+		}
+		if h == nil {
+			return domain.ErrHoldNotFound
+		}
+		if err := h.Release(actor, reason, s.Now()); err != nil {
+			return err
+		}
+		accs, err := r.Accounts().Lock(ctx, []domain.AccountKey{domain.UserAccount(h.UserID, h.AccountType, h.Asset)})
+		if err != nil {
+			return err
+		}
+		if len(accs) == 1 && accs[0].Frozen.IsPositive() {
+			released = decimal.Min(h.Amount, accs[0].Frozen)
+		}
+		if released.IsPositive() {
+			decimals, err := s.Assets.Decimals(ctx, h.Asset)
+			if err != nil {
+				return err
+			}
+			part := *h
+			part.Amount = released
+			p, err := domain.ReleasePosting(part, decimals)
+			if err != nil {
+				return err
+			}
+			res, err := s.post(ctx, r, p)
+			if err != nil {
+				return err
+			}
+			h.ReleaseJournalID = res.JournalID
+		}
+		if err := r.Holds().Release(ctx, *h); err != nil {
+			return err
+		}
+		out = *h
+		details, _ := json.Marshal(map[string]any{
+			"hold_id": h.ID, "account_type": h.AccountType, "asset": h.Asset, "amount": h.Amount.String(), "released": released.String(),
+			"forced": true,
+		})
+		return r.Emit(ctx, event.TopicAudit, &auditv1.AdminActionPerformed{
+			Target: "user:" + h.UserID, Action: "ledger.hold_released", Actor: h.ReleasedBy, Reason: h.ReleaseReason, Details: string(details),
+		}, "actor", h.ReleasedBy)
+	})
+	return out, released, err
+}
+
 // Holds lists a user's holds, newest first (at most 200).
 func (s *Service) Holds(ctx context.Context, userID string, activeOnly bool) ([]domain.Hold, error) {
 	if _, err := uuid.Parse(userID); err != nil {
