@@ -54,11 +54,21 @@ export type FundActionProps = {
   /** The call, with the reason given and the operation's Idempotency-Key (the same for each retry until the outcome is known). */
   run: (reason: string, key: string) => Promise<Approval>;
   onDone?: (a: Approval) => void;
+  /** Keeps the confirm button off while what the dialog asks for is incomplete (review ㉕). */
+  disabled?: boolean;
   children?: ReactNode;
 };
 
+/**
+ * NO_WORD is the confirmation word of a disabled action: ConfirmDialog
+ * compares what is typed trimmed, so a blank word never matches.
+ */
+const NO_WORD = " ";
+
 /** FundAction confirms a fund operation (reason and confirmation word) and announces its outcome. */
-export function FundAction({ trigger, title, description, target, confirmWord, confirmText, danger, run, onDone, children }: FundActionProps) {
+export function FundAction({
+  trigger, title, description, target, confirmWord, confirmText, danger, run, onDone, disabled, children,
+}: FundActionProps) {
   const qc = useQueryClient();
   const op = useOperationKey();
   const [open, setOpenState] = useState(false);
@@ -75,10 +85,11 @@ export function FundAction({ trigger, title, description, target, confirmWord, c
         title={title}
         description={description}
         target={target}
-        confirmWord={confirmWord}
+        confirmWord={disabled ? NO_WORD : confirmWord}
         confirmText={confirmText}
         danger={danger}
         onConfirm={async (reason) => {
+          if (disabled) return;
           try {
             const a = await run(reason, op.get());
             announce(a);

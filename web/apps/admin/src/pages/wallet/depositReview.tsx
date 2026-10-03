@@ -167,7 +167,7 @@ function Decisions({ d, size = "md", onDone }: { d: ReviewDeposit; size?: "sm" |
     <span className="inline-flex flex-wrap items-center gap-2 text-sm">
       <Amount d={d} />
       <span className="text-fg-3">{d.network}</span>
-      <span className="font-mono text-xs">{d.user_id}</span>
+      {nobodys(d) ? <Owner d={d} /> : <span className="font-mono text-xs">{d.user_id}</span>}
     </span>
   );
   const decide = (credit: boolean) => async (reason: string, key: string) =>
@@ -247,7 +247,8 @@ function Assign({ d, size, onDone }: { d: ReviewDeposit; size: "sm" | "md"; onDo
           <span className="font-mono text-xs">{ok ? id : "—"}</span>
         </span>
       }
-      confirmWord={ok ? lastFour(id) : "————"}
+      confirmWord={lastFour(id)}
+      disabled={!ok}
       run={async (reason, key) =>
         adminData(
           await adminApi.POST("/admin/v1/deposits/{id}/assign", {

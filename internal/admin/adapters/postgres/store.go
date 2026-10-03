@@ -306,6 +306,9 @@ func (r approvals) Insert(ctx context.Context, a domain.Approval) error {
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 		a.ID, a.Kind, payload, a.Reason, a.Status, a.RequestedBy, nullable(a.DecidedBy), a.Result, a.CreatedAt, stamp(a.DecidedAt),
 		a.Mode, value, a.Escalation, a.JournalID, stamp(a.AttemptedAt))
+	if c, dup := pg.UniqueViolation(err); dup && c == "approvals_deposit_assign_live" {
+		return domain.ErrDepositAssignOpen
+	}
 	if err != nil {
 		return fmt.Errorf("insert approval: %w", err)
 	}

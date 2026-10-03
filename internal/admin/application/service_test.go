@@ -388,6 +388,15 @@ func (r memSessions) Live(_ context.Context, adminID string, now time.Time) ([]d
 type memApprovals struct{ m *memStore }
 
 func (r memApprovals) Insert(_ context.Context, a domain.Approval) error {
+	// The index approvals_deposit_assign_live (admin 00012).
+	live := func(x domain.Approval) bool {
+		return x.Kind == domain.KindDepositAssign && (x.Status == domain.ApprovalPending || x.Status == domain.ApprovalExecuted)
+	}
+	for _, x := range r.m.approvals {
+		if live(a) && live(x) && x.Payload["deposit_id"] == a.Payload["deposit_id"] {
+			return domain.ErrDepositAssignOpen
+		}
+	}
 	r.m.approvals[a.ID] = a
 	return nil
 }

@@ -618,8 +618,7 @@ func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, ap
 			return err
 		}
 		return r.Audit(ctx, &auditv1.AdminActionPerformed{
-			Target: "approval:" + a.ID, Action: action, Actor: p.Admin.Email, Reason: reason,
-			Details: fmt.Sprintf(`{"status":%q,"result":%q,"mode":%q}`, a.Status, a.Result, a.Mode),
+			Target: "approval:" + a.ID, Action: action, Actor: p.Admin.Email, Reason: reason, Details: decisionDetails(a),
 		}, p.Admin.Email)
 	})
 	switch {
@@ -655,6 +654,22 @@ func (s *Service) beginAttempt(ctx context.Context, p Principal, id string) erro
 		}
 		return r.Approvals().MarkAttempted(ctx, id, s.Now(), "")
 	})
+}
+
+// decisionDetails is a decision's audit detail: how it ended and its
+// journal, and for a deposit of nobody the deposit, the user it is
+// credited to and its address's holder (review ㉕).
+func decisionDetails(a domain.Approval) string {
+	d := map[string]string{"status": a.Status, "result": a.Result, "mode": a.Mode, "journal_id": a.JournalID}
+	if a.Kind == domain.KindDepositAssign {
+		for _, k := range []string{"deposit_id", "user_id", "former_holder", "address_owner"} {
+			if v := a.Payload[k]; v != "" {
+				d[k] = v
+			}
+		}
+	}
+	out, _ := json.Marshal(d)
+	return string(out)
 }
 
 // decidedAlike reports whether the decider took this decision already: a

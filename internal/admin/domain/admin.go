@@ -329,6 +329,11 @@ type Approval struct {
 	DecidedByEmail   string
 }
 
+// ErrDepositAssignOpen refuses a second request to credit a deposit of
+// nobody while one waits or once one was carried out (review ㉕).
+var ErrDepositAssignOpen = apperr.New(apperr.KindConflict, "ADMIN_DEPOSIT_ASSIGN_OPEN",
+	"another request to credit this deposit waits or was carried out: decide or withdraw it first")
+
 // ErrAttempted refuses rejecting an operation that may have booked.
 var ErrAttempted = apperr.New(apperr.KindConflict, "ADMIN_APPROVAL_ATTEMPTED",
 	"an attempt to carry it out did not finish and may have booked it: finish it instead")

@@ -1106,7 +1106,9 @@ paths:
         NOT_ADDRESS_HOLDER). wallet-service sets the owner
         and releases it (audited as wallet.deposit.assigned and
         ledger.unclaimed_released). Any other deposit is
-        ADMIN_DEPOSIT_NOT_UNOWNED; a user who may not take deposits is
+        ADMIN_DEPOSIT_NOT_UNOWNED; while another request for the deposit
+        waits or once one was carried out, ADMIN_DEPOSIT_ASSIGN_OPEN (one
+        live request per deposit); a user who may not take deposits is
         refused by wallet-service. The same request under its
         Idempotency-Key returns the operation, finishing one whose outcome
         was unknown. Needs deposits.review.

@@ -120,6 +120,10 @@ func TestADepositOfNobodyIsCreditedToAUser(t *testing.T) {
 	if err != nil || b.Status != domain.ApprovalPending || b.Escalation != domain.EscalationSingleMax || h.deposits.assigned[large] != "" {
 		t.Fatalf("large %+v %v", b, err)
 	}
+	// One live request per deposit (review ㉕): another waits for this one.
+	if _, err := h.svc.AssignDeposit(ctx, boss, "k2b", large, someUser, "the same deposit again"); code(err) != "ADMIN_DEPOSIT_ASSIGN_OPEN" {
+		t.Fatalf("a second request while one waits: %v", err)
+	}
 	if done, err := h.svc.DecideApproval(ctx, boss, b.ID, true, "checked the transfer"); err != nil || done.Status != domain.ApprovalExecuted ||
 		h.deposits.assigned[large] != someUser || done.JournalID != "release-"+large {
 		t.Fatalf("approved %+v %v", done, err)
@@ -139,10 +143,18 @@ func TestADepositOfNobodyIsCreditedToAUser(t *testing.T) {
 	// To a user other than its address's former holder: a second
 	// administrator decides, however small (the coordinator's 10-04
 	// decision); the trail names both.
-	d, err := h.svc.AssignDeposit(ctx, fin, "k4", other, stranger, "the sender's ticket T-12")
-	if err != nil || d.Status != domain.ApprovalPending || d.Escalation != domain.EscalationNotHolder || h.deposits.assigned[other] != "" ||
-		d.Payload["former_holder"] != someUser || d.Payload["user_id"] != stranger {
-		t.Fatalf("to another user %+v %v", d, err)
+	first, err := h.svc.AssignDeposit(ctx, fin, "k4", other, stranger, "the sender's ticket T-12")
+	if err != nil || first.Status != domain.ApprovalPending || first.Escalation != domain.EscalationNotHolder || h.deposits.assigned[other] != "" ||
+		first.Payload["former_holder"] != someUser || first.Payload["user_id"] != stranger {
+		t.Fatalf("to another user %+v %v", first, err)
+	}
+	// Rejected, it leaves the deposit to a new request.
+	if no, err := h.svc.DecideApproval(ctx, boss, first.ID, false, "ask the sender for the transfer"); err != nil || no.Status != domain.ApprovalRejected {
+		t.Fatalf("rejected %+v %v", no, err)
+	}
+	d, err := h.svc.AssignDeposit(ctx, fin, "k4b", other, stranger, "the sender's ticket T-12, with the transfer")
+	if err != nil || d.Status != domain.ApprovalPending || d.Escalation != domain.EscalationNotHolder {
+		t.Fatalf("asked again %+v %v", d, err)
 	}
 	if _, err := h.svc.DecideApproval(ctx, fin, d.ID, true, "mine"); code(err) != "ADMIN_SELF_APPROVAL" {
 		t.Fatalf("its requester approves it: %v", err)
@@ -158,12 +170,18 @@ func TestADepositOfNobodyIsCreditedToAUser(t *testing.T) {
 	}
 
 	got := h.auditsOf("admin.deposits.assign_requested")
-	if len(got) != 5 || !strings.Contains(got[0], `"deposit_id":"`+small+`"`) || !strings.Contains(got[0], `"former_holder":"`+someUser+`"`) {
+	if len(got) != 6 || !strings.Contains(got[0], `"deposit_id":"`+small+`"`) || !strings.Contains(got[0], `"former_holder":"`+someUser+`"`) {
 		t.Fatalf("the requests audited %v", got)
 	}
 	if !strings.Contains(got[3], `"user_id":"`+stranger+`","former_holder":"`+someUser+`"`) ||
 		!strings.Contains(got[3], `"escalation":"NOT_ADDRESS_HOLDER"`) {
 		t.Fatalf("a request for another user audited %s", got[3])
+	}
+	// The decisions name the deposit, the user and the journal (review ㉕).
+	approved := h.auditsOf("admin.deposits.assign_approved")
+	if len(approved) != 2 || !strings.Contains(approved[1], `"deposit_id":"`+other+`"`) || !strings.Contains(approved[1], `"user_id":"`+stranger+`"`) ||
+		!strings.Contains(approved[1], `"journal_id":"release-`+other+`"`) {
+		t.Fatalf("the approvals audited %v", approved)
 	}
 }
 

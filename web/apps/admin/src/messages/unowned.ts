@@ -32,6 +32,7 @@ export const unownedZh = {
   },
   errors: {
     ADMIN_DEPOSIT_NOT_UNOWNED: "只有等待处理的无主充值才能记给用户",
+    ADMIN_DEPOSIT_ASSIGN_OPEN: "这笔充值已有一个「记给用户」的申请在等待或已执行：先在「审批」里决定或撤回它",
     WALLET_DEPOSIT_NO_OWNER: "无主充值不能直接入账，请用「记给用户」",
   },
 };
@@ -70,6 +71,7 @@ export const unownedEn = {
   },
   errors: {
     ADMIN_DEPOSIT_NOT_UNOWNED: "Only a deposit of nobody waiting for a decision is credited to a user",
+    ADMIN_DEPOSIT_ASSIGN_OPEN: "A request to credit this deposit waits or was carried out: decide or withdraw it in Approvals first",
     WALLET_DEPOSIT_NO_OWNER: "A deposit of nobody is not credited as it is: use Credit to a user",
   },
 };

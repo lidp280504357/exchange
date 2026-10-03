@@ -1295,6 +1295,8 @@ else
   OTHER_ASSIGN=$(jq -r .id <<<"$BODY")
   as FINANCE POST "/admin/v1/approvals/$OTHER_ASSIGN/decide" '{"approve":true,"reason":"e2e my own"}'
   expect 403 ADMIN_SELF_APPROVAL "not by its requester"
+  as ADMIN POST "/admin/v1/deposits/$NOBODY2/assign" "$(jq -nc --arg u "$HOLDER" '{user_id: $u, reason: "e2e a second request for it"}')"
+  expect 409 ADMIN_DEPOSIT_ASSIGN_OPEN "one live request per deposit"
   as ADMIN POST "/admin/v1/approvals/$OTHER_ASSIGN/decide" '{"approve":true,"reason":"e2e checked the sender"}'
   expect 200 - "ADMIN approves it"
   check ".status == \"EXECUTED\" and .journal_id != null" "released with its journal"
