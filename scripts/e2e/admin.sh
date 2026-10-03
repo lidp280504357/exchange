@@ -1366,7 +1366,9 @@ check '[.roles[].role] == ["ADMIN","OPERATOR","FINANCE","AUDITOR"] and (.roles[0
 # with the authenticator secret a link shows (SECRET_STAFF), so no check
 # below can print either (C5.5 ⑪).
 link() {
-  LINK=$(jq -r '.setup.token // empty' <<<"$BODY" 2>/dev/null || true)
+  local tok
+  tok=$(jq -r '.setup.token // empty' <<<"$BODY" 2>/dev/null || true)
+  [[ -n $tok ]] && LINK=$tok # an answer without one (a refusal) keeps the last
   BODY=$(jq -c 'if type == "object" and (.setup | type) == "object" then .setup |= del(.token) else . end' <<<"$BODY" 2>/dev/null || echo '{}')
   : >"$WORK/body"
 }
