@@ -23,6 +23,9 @@ type docCatalog struct {
 	items map[string]map[string]map[string]any // entity → key → item
 	order []string
 	real  int
+	// down fails every call as a service down; lost moves a status but
+	// loses the answer.
+	down, lost bool
 }
 
 var entityKeys = map[string]struct{ section, key string }{
@@ -39,6 +42,9 @@ func newDocCatalog(t *testing.T, doc string) *docCatalog {
 }
 
 func (c *docCatalog) Export(context.Context) (json.RawMessage, error) {
+	if c.down {
+		return nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "instrument-service is down")
+	}
 	doc := map[string][]map[string]any{"fee_schedules": {}, "assets": {}, "pairs": {}, "contracts": {}}
 	for _, entity := range []string{"FEE_SCHEDULE", "TRADING_PAIR", "CONTRACT"} {
 		for _, key := range c.order {
@@ -108,6 +114,9 @@ func (c *docCatalog) setStatus(entity, symbol, to string) (string, error) {
 	}
 	from := it["status"].(string)
 	it["status"], it["version"] = to, it["version"].(float64)+1
+	if c.lost {
+		return "", apperr.New(apperr.KindInternal, apperr.CodeInternal, "the answer was lost")
+	}
 	return from, nil
 }
 
@@ -151,6 +160,7 @@ func changeRig(t *testing.T) (*harness, *docCatalog, Principal, Principal, Princ
 	h := newHarness(t)
 	catalog := newDocCatalog(t, seedDoc)
 	h.svc.Catalog, h.svc.Reference, h.svc.Flags, h.svc.Features = catalog, &fakeReference{}, &houseFlags{}, onFlags{}
+	h.svc.ChangeDelayFloor = time.Minute // as the test server's e2e runs
 	h.admin(t, "boss@example.com", domain.RoleAdmin)
 	h.admin(t, "deputy@example.com", domain.RoleAdmin)
 	h.admin(t, "ops@example.com", domain.RoleOperator)
@@ -407,6 +417,151 @@ func TestTheChangeDelaySetting(t *testing.T) {
 	res, err := h.svc.SetPairStatus(ctx, boss, "ETH-BTC", "CANCEL_ONLY", "winding down", prev.Confirmation.Token)
 	if err != nil || !res.Change.EffectiveAt.Equal(h.now.Add(two)) {
 		t.Fatalf("scheduled %+v %v", res.Change, err)
+	}
+	// Without a floor configured one ADMIN cannot cut the wait below ten
+	// minutes, and a shorter one stored waits ten minutes (C5.5 ⑩).
+	h.svc.ChangeDelayFloor = 0
+	if _, err := h.svc.UpdateSettings(ctx, boss, SettingsPatch{ChangeDelay: &two, Reason: "faster again"}); code(err) != apperr.CodeInvalidArgument {
+		t.Fatalf("2 minutes under the default floor: %v", err)
+	}
+	if v, err := h.svc.Settings(ctx, boss); err != nil || v.ChangeDelay != domain.DefaultChangeDelayFloor || v.DelayFloor != domain.DefaultChangeDelayFloor {
+		t.Fatalf("the wait in effect: %+v %v", v, err)
+	}
+	if prev, err := h.svc.PreviewStatus(ctx, boss, domain.ChangePairStatus, "LINK-USDT", "CANCEL_ONLY"); err != nil || prev.DelaySeconds != 600 {
+		t.Fatalf("preview under the floor %+v %v", prev, err)
+	}
+}
+
+// openRecords counts the orders resting on a symbol.
+type openRecords struct {
+	ports.Records
+	open int
+}
+
+func (r openRecords) OpenOrders(context.Context, string) (int, error) { return r.open, nil }
+
+// TestTheConsoleWaitsOnNoServiceInATransaction: what a preview could not
+// measure is not confirmed; a confirmation confirms one change; a change
+// is applied outside the console's transaction, and what was applied and
+// unrecorded, or not applied for a moment, is found again (C5.5 ⑩).
+func TestTheConsoleWaitsOnNoServiceInATransaction(t *testing.T) {
+	h, catalog, boss, deputy, ops := changeRig(t)
+	ctx := context.Background()
+	ladder := json.RawMessage(`{"contracts":[{"symbol":"BTC-USDT-PERP","index_symbol":"BTC-USDT","fee_tier":"default",
+		"risk_tiers":[{"max_notional":"50000","max_leverage":20,"mmr":"0.04"}]}]}`)
+
+	// An OPERATOR's preview measures nothing; an ADMIN's measured in part
+	// cannot be confirmed.
+	if prev, err := h.svc.PreviewConfig(ctx, ops, ladder); err != nil || len(prev.Guard.Impacts) != 0 || len(h.derivatives.tiers) != 0 {
+		t.Fatalf("the operator's preview %+v %v %v", prev.Guard, err, h.derivatives.tiers)
+	}
+	h.derivatives.unmeasured = 2
+	prev, err := h.svc.PreviewConfig(ctx, boss, ladder)
+	if err != nil || prev.Guard.Confirmation != nil || len(prev.Guard.Impacts) != 1 ||
+		!slices.Contains(prev.Warnings, ports.ConfigWarning{Code: WarnImpactUnmeasured, Symbol: "BTC-USDT-PERP", Detail: "2"}) {
+		t.Fatalf("measured in part %+v %+v %v", prev.Guard, prev.Warnings, err)
+	}
+	h.derivatives.unmeasured = 0
+
+	// One confirmation, one change: brought again, the same change.
+	prev, _ = h.svc.PreviewConfig(ctx, boss, ladder)
+	_, first, err := h.svc.ApplyConfig(ctx, boss, ladder, "stricter ladder", prev.Guard.Confirmation.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, again, err := h.svc.ApplyConfig(ctx, boss, ladder, "stricter ladder", prev.Guard.Confirmation.Token)
+	if err != nil || again.ID != first.ID || len(h.store.changes) != 1 || len(slices.DeleteFunc(h.actions(), func(a string) bool {
+		return a != "admin.instruments.change_requested"
+	})) != 1 {
+		t.Fatalf("a confirmation used twice: %+v %v (%d changes)", again, err, len(h.store.changes))
+	}
+
+	// Due, the ladder is measured again: not measurable, it waits and may
+	// be canceled; liquidating more than confirmed, it fails.
+	h.now = h.now.Add(5 * time.Minute)
+	h.derivatives.unmeasured = 1
+	if n, err := h.svc.ApplyDueChanges(ctx); err != nil || n != 0 {
+		t.Fatalf("unmeasured when due: %d %v", n, err)
+	}
+	if got, _ := h.store.Changes().Get(ctx, first.ID); got.Status != domain.ChangeScheduled || !got.ApplyingAt.IsZero() ||
+		!strings.Contains(got.Result, "cannot be measured") {
+		t.Fatalf("waits %+v", got)
+	}
+	h.derivatives.unmeasured, h.derivatives.more = 0, 1
+	if n, err := h.svc.ApplyDueChanges(ctx); err != nil || n != 1 {
+		t.Fatalf("grew: %d %v", n, err)
+	}
+	if got, _ := h.store.Changes().Get(ctx, first.ID); got.Status != domain.ChangeFailed || !strings.Contains(got.Result, "more positions") ||
+		catalog.real != 1 {
+		t.Fatalf("a ladder liquidating more %+v (applied %d)", got, catalog.real)
+	}
+
+	// The status preview counts the orders resting on the pair.
+	h.svc.Records = openRecords{open: 4}
+	if _, err := h.svc.SetPairStatus(ctx, boss, "ETH-BTC", "HALT", "a halt to resume", ""); err != nil {
+		t.Fatal(err)
+	}
+	sp, err := h.svc.PreviewStatus(ctx, boss, domain.ChangePairStatus, "ETH-BTC", "TRADING")
+	if err != nil || sp.OpenOrders == nil || *sp.OpenOrders != 4 {
+		t.Fatalf("open orders %+v %v", sp, err)
+	}
+	res, err := h.svc.SetPairStatus(ctx, boss, "ETH-BTC", "TRADING", "resume", sp.Confirmation.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, err := h.svc.SetPairStatus(ctx, boss, "ETH-BTC", "TRADING", "resume", sp.Confirmation.Token); err != nil || again.Change.ID != res.Change.ID {
+		t.Fatalf("a status confirmation used twice %+v %v", again.Change, err)
+	}
+
+	// Applied, its answer lost: it stays claimed (not canceled meanwhile),
+	// and a round after the claim's hold finds it in effect.
+	h.now = h.now.Add(5 * time.Minute)
+	catalog.lost = true
+	if n, err := h.svc.ApplyDueChanges(ctx); err != nil || n != 0 {
+		t.Fatalf("the answer lost: %d %v", n, err)
+	}
+	catalog.lost = false
+	if _, err := h.svc.CancelInstrumentChange(ctx, deputy, res.Change.ID, "too late"); code(err) != "ADMIN_CHANGE_APPLYING" {
+		t.Fatalf("canceled while applying: %v", err)
+	}
+	if n, _ := h.svc.ApplyDueChanges(ctx); n != 0 {
+		t.Fatal("taken again within the claim's hold")
+	}
+	h.now = h.now.Add(domain.ClaimHold)
+	if n, err := h.svc.ApplyDueChanges(ctx); err != nil || n != 1 {
+		t.Fatalf("found again: %d %v", n, err)
+	}
+	if got, _ := h.store.Changes().Get(ctx, res.Change.ID); got.Status != domain.ChangeApplied || !strings.HasSuffix(got.Result, inEffect) {
+		t.Fatalf("in effect already %+v", got)
+	}
+
+	// Not applied for a moment: it waits, may be canceled, and fails after
+	// an hour.
+	sp, _ = h.svc.PreviewStatus(ctx, boss, domain.ChangePairStatus, "LINK-USDT", "CANCEL_ONLY")
+	res, _ = h.svc.SetPairStatus(ctx, boss, "LINK-USDT", "CANCEL_ONLY", "winding down", sp.Confirmation.Token)
+	catalog.down = true
+	h.now = h.now.Add(5 * time.Minute)
+	if n, err := h.svc.ApplyDueChanges(ctx); err != nil || n != 0 {
+		t.Fatalf("down: %d %v", n, err)
+	}
+	if got, _ := h.store.Changes().Get(ctx, res.Change.ID); got.Status != domain.ChangeScheduled || !got.ApplyingAt.IsZero() {
+		t.Fatalf("waits, released %+v", got)
+	}
+	h.now = h.now.Add(changeGiveUp)
+	if n, err := h.svc.ApplyDueChanges(ctx); err != nil || n != 1 {
+		t.Fatalf("given up: %d %v", n, err)
+	}
+	if got, _ := h.store.Changes().Get(ctx, res.Change.ID); got.Status != domain.ChangeFailed {
+		t.Fatalf("failed after an hour %+v", got)
+	}
+	catalog.down = false
+
+	// A document never moves an existing item's status.
+	doc := json.RawMessage(`{"pairs":[{"symbol":"ETH-BTC","fee_tier":"default","reference_symbol":"ETHBTC","reference_multiplier":"1",
+		"status":"PREPARE"}]}`)
+	if prev, err := h.svc.PreviewConfig(ctx, ops, doc); err != nil ||
+		!slices.Contains(prev.Warnings, ports.ConfigWarning{Code: ports.WarnStatusIgnored, Symbol: "ETH-BTC", Detail: "PREPARE"}) {
+		t.Fatalf("status ignored %+v %v", prev.Warnings, err)
 	}
 }
 

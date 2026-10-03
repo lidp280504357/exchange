@@ -33,8 +33,10 @@ type InstrumentChangeJSON struct {
 	ClosedAt         *string         `json:"closed_at"`
 	EffectiveAt      *string         `json:"effective_at"`
 	AppliedAt        *string         `json:"applied_at"`
-	Result           string          `json:"result"`
-	CreatedAt        string          `json:"created_at"`
+	// ApplyingAt: an apply round has it, so it is not canceled (C5.5 ⑩).
+	ApplyingAt *string `json:"applying_at"`
+	Result     string  `json:"result"`
+	CreatedAt  string  `json:"created_at"`
 }
 
 func instrumentChangeJSON(c domain.InstrumentChange) InstrumentChangeJSON {
@@ -42,7 +44,7 @@ func instrumentChangeJSON(c domain.InstrumentChange) InstrumentChangeJSON {
 		ID: c.ID, Kind: c.Kind, Target: c.Target, Status: c.Status, Reason: c.Reason, Summary: c.Summary, RequestedBy: c.RequestedBy,
 		RequestedByEmail: c.RequestedByEmail, ApprovedByEmail: optText(c.ApprovedByEmail), ApprovedAt: optTime(c.ApprovedAt),
 		ClosedByEmail: optText(c.ClosedByEmail), ClosedAt: optTime(c.ClosedAt), EffectiveAt: optTime(c.EffectiveAt),
-		AppliedAt: optTime(c.AppliedAt), Result: c.Result, CreatedAt: httpx.FormatTime(c.CreatedAt),
+		AppliedAt: optTime(c.AppliedAt), ApplyingAt: optTime(c.ApplyingAt), Result: c.Result, CreatedAt: httpx.FormatTime(c.CreatedAt),
 	}
 }
 

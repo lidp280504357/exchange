@@ -721,6 +721,9 @@ type SettingsView struct {
 	TwoPerson bool
 	domain.Settings
 	Used decimal.Decimal
+	// DelayFloor is the least ChangeDelay may be set to; ChangeDelay is
+	// the wait in effect (never below it).
+	DelayFloor time.Duration
 }
 
 // Settings returns the console's settings; every administrator may read
@@ -735,7 +738,8 @@ func (s *Service) Settings(ctx context.Context, p Principal) (SettingsView, erro
 	if err != nil {
 		return SettingsView{}, err
 	}
-	return SettingsView{TwoPerson: s.TwoPerson(), Settings: set, Used: used}, nil
+	set.ChangeDelay = max(set.ChangeDelay, s.delayFloor())
+	return SettingsView{TwoPerson: s.TwoPerson(), Settings: set, Used: used, DelayFloor: s.delayFloor()}, nil
 }
 
 // SettingsPatch changes some settings; nil fields stay.
@@ -775,6 +779,9 @@ func (s *Service) UpdateSettings(ctx context.Context, p Principal, in SettingsPa
 				}
 			}
 			if in.ChangeDelay != nil {
+				if floor := s.delayFloor(); *in.ChangeDelay < floor {
+					return apperr.Invalid(fmt.Sprintf("change_delay_seconds must be at least %d", int64(floor/time.Second)))
+				}
 				after.ChangeDelay = *in.ChangeDelay
 			}
 			if err := after.Validate(); err != nil {

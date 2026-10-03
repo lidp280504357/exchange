@@ -14,6 +14,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/admin/ports"
 	"github.com/lidp280504357/exchange/internal/platform/event"
 	"github.com/lidp280504357/exchange/internal/platform/migrate"
+	"github.com/lidp280504357/exchange/internal/platform/pg"
 	"github.com/lidp280504357/exchange/internal/platform/testenv"
 	"github.com/lidp280504357/exchange/migrations"
 )
@@ -129,5 +130,42 @@ func TestInstrumentChanges(t *testing.T) {
 	pending.ApprovedBy = boss.ID
 	if err := changes.Update(ctx, pending); err == nil {
 		t.Fatal("a requester approved their own change")
+	}
+
+	// A confirmation confirms one change; a round's claim keeps other
+	// rounds off it for a while (C5.5 ⑩).
+	confirmed := domain.NewInstrumentChange(uuid.Must(uuid.NewV7()).String(), domain.ChangePairStatus, "pair:ETH-BTC",
+		json.RawMessage(`{"symbol":"ETH-BTC","from":"HALT","to":"TRADING"}`), summary, "resume", boss.ID, false, time.Minute, now)
+	confirmed.ConfirmationHash = "hash-1"
+	if err := changes.Create(ctx, confirmed); err != nil {
+		t.Fatal(err)
+	}
+	twice := confirmed
+	twice.ID = uuid.Must(uuid.NewV7()).String()
+	if _, dup := pg.UniqueViolation(changes.Create(ctx, twice)); !dup {
+		t.Fatal("a confirmation confirmed a second change")
+	}
+	if got, err := changes.ByConfirmation(ctx, "hash-1"); err != nil || got == nil || got.ID != confirmed.ID || got.ConfirmationHash != "hash-1" {
+		t.Fatalf("by its confirmation %+v %v", got, err)
+	}
+	if got, err := changes.ByConfirmation(ctx, "hash-2"); err != nil || got != nil {
+		t.Fatalf("an unknown confirmation %+v %v", got, err)
+	}
+	due := later.Add(time.Minute)
+	confirmed.Claim(due)
+	if err := changes.Update(ctx, confirmed); err != nil {
+		t.Fatal(err)
+	}
+	if list, err := changes.Due(ctx, due.Add(domain.ClaimHold/2), 10); err != nil || len(list) != 1 || list[0].ID != pending.ID {
+		t.Fatalf("claimed a moment ago %+v %v", list, err)
+	}
+	list, err = changes.Due(ctx, due.Add(domain.ClaimHold), 10)
+	if err != nil || len(list) != 2 {
+		t.Fatalf("a claim left %+v %v", list, err)
+	}
+	for _, c := range list {
+		if c.ID == confirmed.ID && !c.ApplyingAt.Equal(due) {
+			t.Fatalf("its claim %v", c.ApplyingAt)
+		}
 	}
 }

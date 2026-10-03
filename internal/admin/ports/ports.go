@@ -47,8 +47,12 @@ type ChangeRepo interface {
 	// one created at afterTime with ID afterID (zero for the newest).
 	List(ctx context.Context, status string, afterTime time.Time, afterID string, limit int) ([]domain.InstrumentChange, error)
 	// Due locks the scheduled changes whose time has come, oldest first,
-	// skipping those another transaction holds.
+	// skipping those another transaction holds and those a round claimed
+	// within domain.ClaimHold.
 	Due(ctx context.Context, now time.Time, limit int) ([]domain.InstrumentChange, error)
+	// ByConfirmation returns the change a preview's confirmation (its
+	// hash) confirmed; nil when none.
+	ByConfirmation(ctx context.Context, hash string) (*domain.InstrumentChange, error)
 	// Open counts the changes waiting for approval or their time.
 	Open(ctx context.Context) (int, error)
 }
@@ -526,6 +530,9 @@ const (
 	// WarnHouseNotListed: HOUSE quotes it only once it is on the
 	// market.house_liquidity flag's symbol list.
 	WarnHouseNotListed = "HOUSE_NOT_LISTED"
+	// NoteHouseQuotes: HOUSE will quote it on the reference market's book
+	// (it is on the flag's symbol list).
+	NoteHouseQuotes = "HOUSE_QUOTES"
 	// WarnNoIndexReference: the contract's index pair follows no
 	// reference market; the platform's own market prices it.
 	WarnNoIndexReference = "NO_INDEX_REFERENCE"
@@ -535,6 +542,10 @@ const (
 	// WarnStreamsReconnect: market-data-service reconnects every
 	// reference stream; reference books are empty for about 20 seconds.
 	WarnStreamsReconnect = "STREAMS_RECONNECT"
+	// WarnStatusIgnored: the document gives an existing pair or contract
+	// another status than it has; a document never moves one (a status
+	// change does), so it is left as it is (C5.5 ⑩).
+	WarnStatusIgnored = "STATUS_IGNORED"
 )
 
 // ConfigChange is an item a config document creates or updates: before
@@ -1105,6 +1116,9 @@ type Records interface {
 	Trades(ctx context.Context, q TradeQuery) ([]Trade, string, error)
 	Deposits(ctx context.Context, q DepositQuery) ([]Deposit, string, error)
 	Activity(ctx context.Context, days int) (Activity, error)
+	// OpenOrders counts the orders resting on a pair or contract (spot
+	// and contract orders share the read model).
+	OpenOrders(ctx context.Context, symbol string) (int, error)
 }
 
 // FeedStatus is market-data-service's reference feed state.

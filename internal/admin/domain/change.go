@@ -41,6 +41,9 @@ var (
 	// ErrChangeClosed refuses deciding a change that took effect or was
 	// canceled, rejected or failed.
 	ErrChangeClosed = apperr.New(apperr.KindConflict, "ADMIN_CHANGE_CLOSED", "the change was already applied or closed")
+	// ErrChangeApplying refuses canceling a change an apply round claimed:
+	// it may have taken effect already (C5.5 ⑩).
+	ErrChangeApplying = apperr.New(apperr.KindConflict, "ADMIN_CHANGE_APPLYING", "the change is being applied")
 )
 
 // InstrumentChange is a confirmed change of trading parameters.
@@ -71,6 +74,13 @@ type InstrumentChange struct {
 	// EffectiveAt is when a scheduled change takes effect.
 	EffectiveAt time.Time
 	AppliedAt   time.Time
+	// ApplyingAt is when an apply round claimed it: until its outcome is
+	// recorded it may have taken effect, so it is not canceled, and a
+	// round finding it claimed checks whether it did (C5.5 ⑩).
+	ApplyingAt time.Time
+	// ConfirmationHash identifies the preview's confirmation that
+	// confirmed it: a confirmation confirms one change.
+	ConfirmationHash string
 	// Result is why it failed, or what applying it reported.
 	Result    string
 	CreatedAt time.Time
@@ -121,13 +131,35 @@ func (c *InstrumentChange) Reject(by string, now time.Time) error {
 	return nil
 }
 
-// Cancel withdraws a change before it takes effect.
+// Cancel withdraws a change before it takes effect, unless an apply
+// round has it.
 func (c *InstrumentChange) Cancel(by string, now time.Time) error {
 	if !c.Open() {
 		return ErrChangeClosed
 	}
+	if !c.ApplyingAt.IsZero() {
+		return ErrChangeApplying
+	}
 	c.Status, c.ClosedBy, c.ClosedAt = ChangeCanceled, by, now
 	return nil
+}
+
+// ClaimHold is how long a round's claim keeps other rounds off a change:
+// one claimed longer ago was left by a round that stopped.
+const ClaimHold = time.Minute
+
+// Claim marks a due change as being applied by a round, now; false when a
+// round claimed it before and its outcome is unknown.
+func (c *InstrumentChange) Claim(now time.Time) bool {
+	fresh := c.ApplyingAt.IsZero()
+	c.ApplyingAt = now
+	return fresh
+}
+
+// Wait releases a claimed change that did not take effect this round
+// (a service down): it stays scheduled for the next, with why.
+func (c *InstrumentChange) Wait(result string) {
+	c.ApplyingAt, c.Result = time.Time{}, result
 }
 
 // Settle records how applying a scheduled change went.

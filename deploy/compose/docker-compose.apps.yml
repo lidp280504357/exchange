@@ -343,6 +343,9 @@ services:
       MARKET_DATA_SERVICE_URL: http://market-data-service:8090
       NOTIFICATION_SERVICE_URL: http://notification-service:8083
       MARKET_SIM_URL: http://market-sim:8098
+      # The test server only: the e2e's changes of trading parameters wait
+      # a minute; without it an ADMIN cannot set less than 10 minutes.
+      ADMIN_CHANGE_DELAY_FLOOR: 60s
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}

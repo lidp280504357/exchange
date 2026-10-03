@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"slices"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -56,6 +57,40 @@ type ImpactExample struct {
 
 const impactExamples = 20
 
+// impactAccounts and impactBudget bound the cross accounts an impact
+// measures one by one (a ledger call each) and for how long: the console
+// waits 10 seconds. The accounts left are counted unmeasured, so the
+// console does not confirm a partial measure (C5.5 ⑩). Variables for the
+// tests.
+var (
+	impactAccounts = 2000
+	impactBudget   = 8 * time.Second
+)
+
+// eachCross measures the cross accounts with positions on a contract
+// (cross: the user's positions on it) within impactAccounts and
+// impactBudget, returning the positions it could not measure.
+func eachCross(ctx context.Context, cross map[string]int, measure func(context.Context, string) error) (int, error) {
+	budget, cancel := context.WithTimeout(ctx, impactBudget)
+	defer cancel()
+	left, measured := 0, 0
+	for user, n := range cross {
+		if measured >= impactAccounts || budget.Err() != nil {
+			left += n
+			continue
+		}
+		measured++
+		if err := measure(budget, user); err != nil {
+			if budget.Err() != nil && ctx.Err() == nil {
+				left += n
+				continue
+			}
+			return 0, err
+		}
+	}
+	return left, nil
+}
+
 // TierImpact measures a risk ladder for symbol against its open positions
 // without changing anything; the ladder is checked as instrument-service
 // checks it (domain.ValidTiers).
@@ -76,7 +111,7 @@ func (s *Service) TierImpact(ctx context.Context, symbol string, tiers []domain.
 	}
 	m, fresh := s.Marks.Mark(c.Symbol)
 	users := map[string]bool{}
-	cross := map[string]bool{}
+	cross := map[string]int{}
 	for _, p := range open {
 		if s.HouseUser != "" && p.UserID == s.HouseUser {
 			continue
@@ -91,7 +126,7 @@ func (s *Service) TierImpact(ctx context.Context, symbol string, tiers []domain.
 			out.OverLimit++
 		}
 		if p.MarginMode == domain.Cross {
-			cross[p.UserID] = true
+			cross[p.UserID]++
 			continue
 		}
 		if p.Liquidating {
@@ -113,11 +148,13 @@ func (s *Service) TierImpact(ctx context.Context, symbol string, tiers []domain.
 			out.Warned++
 		}
 	}
-	for user := range cross {
-		if err := s.crossImpact(ctx, user, c, next, &out, users); err != nil {
-			return TierImpact{}, err
-		}
+	left, err := eachCross(ctx, cross, func(ctx context.Context, user string) error {
+		return s.crossImpact(ctx, user, c, next, &out, users)
+	})
+	if err != nil {
+		return TierImpact{}, err
 	}
+	out.Unmeasured += left
 	out.Accounts = len(users)
 	slices.SortFunc(out.Examples, func(a, b ImpactExample) int { return b.Notional.Cmp(a.Notional) })
 	if len(out.Examples) > impactExamples {
@@ -242,7 +279,7 @@ func (s *Service) PriceImpact(ctx context.Context, symbol string, target decimal
 	}
 	m, fresh := s.Marks.Mark(c.Symbol)
 	users := map[string]bool{}
-	cross := map[string]bool{}
+	cross := map[string]int{}
 	for _, p := range open {
 		if s.HouseUser != "" && p.UserID == s.HouseUser {
 			continue
@@ -253,7 +290,7 @@ func (s *Service) PriceImpact(ctx context.Context, symbol string, target decimal
 			continue
 		}
 		if p.MarginMode == domain.Cross {
-			cross[p.UserID] = true
+			cross[p.UserID]++
 			continue
 		}
 		if p.Liquidating {
@@ -274,11 +311,13 @@ func (s *Service) PriceImpact(ctx context.Context, symbol string, target decimal
 			MaintenanceBefore: before, MaintenanceAfter: after,
 		})
 	}
-	for user := range cross {
-		if err := s.crossPriceImpact(ctx, user, c, target, &out, users); err != nil {
-			return PriceImpact{}, err
-		}
+	left, err := eachCross(ctx, cross, func(ctx context.Context, user string) error {
+		return s.crossPriceImpact(ctx, user, c, target, &out, users)
+	})
+	if err != nil {
+		return PriceImpact{}, err
 	}
+	out.Unmeasured += left
 	out.Accounts = len(users)
 	slices.SortFunc(out.Examples, func(a, b ImpactExample) int { return b.Notional.Cmp(a.Notional) })
 	if len(out.Examples) > impactExamples {

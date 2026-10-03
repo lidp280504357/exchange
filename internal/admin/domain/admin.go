@@ -382,11 +382,15 @@ type Settings struct {
 	UpdatedAt   time.Time
 }
 
-// The bounds of Settings.ChangeDelay.
+// The bounds of Settings.ChangeDelay. DefaultChangeDelayFloor is the
+// least an ADMIN may set it to unless admin-service is configured with
+// another (C5.5 ⑩: one ADMIN alone must not cut the wait to a minute);
+// MinChangeDelay is the least any configuration allows.
 const (
-	MinChangeDelay     = time.Minute
-	MaxChangeDelay     = 24 * time.Hour
-	DefaultChangeDelay = 5 * time.Minute
+	MinChangeDelay          = time.Minute
+	MaxChangeDelay          = 24 * time.Hour
+	DefaultChangeDelay      = 5 * time.Minute
+	DefaultChangeDelayFloor = 10 * time.Minute
 )
 
 // DefaultSettings are the limits until an administrator changes them.

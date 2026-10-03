@@ -84,6 +84,9 @@ type Service struct {
 	// CloseWait is the pause between attempts to close a position while
 	// its closing orders are being canceled (700 ms when zero).
 	CloseWait time.Duration
+	// ChangeDelayFloor is the least the wait of trading parameters'
+	// changes may be set to (domain.DefaultChangeDelayFloor when zero).
+	ChangeDelayFloor time.Duration
 }
 
 // Principal is the administrator behind a request.

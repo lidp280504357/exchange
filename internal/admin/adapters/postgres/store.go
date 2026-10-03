@@ -421,7 +421,7 @@ type changes repos
 
 const changeColumns = `c.id, c.kind, c.target, c.payload, c.summary, c.reason, c.status, c.requested_by, coalesce(rq.email, ''),
 	c.approved_by, coalesce(ap.email, ''), c.approved_at, c.closed_by, coalesce(cl.email, ''), c.closed_at, c.effective_at,
-	c.applied_at, c.result, c.created_at`
+	c.applied_at, c.result, c.created_at, c.applying_at, coalesce(c.confirmation_hash, '')`
 
 const changeFrom = ` FROM instrument_changes c LEFT JOIN admins rq ON rq.id = c.requested_by LEFT JOIN admins ap ON ap.id = c.approved_by
 	LEFT JOIN admins cl ON cl.id = c.closed_by`
@@ -429,17 +429,18 @@ const changeFrom = ` FROM instrument_changes c LEFT JOIN admins rq ON rq.id = c.
 func scanChange(row pgx.Row) (domain.InstrumentChange, error) {
 	var c domain.InstrumentChange
 	var approvedBy, closedBy *uuid.UUID
-	var approvedAt, closedAt, effectiveAt, appliedAt *time.Time
+	var approvedAt, closedAt, effectiveAt, appliedAt, applyingAt *time.Time
 	err := row.Scan(&c.ID, &c.Kind, &c.Target, &c.Payload, &c.Summary, &c.Reason, &c.Status, &c.RequestedBy, &c.RequestedByEmail,
 		&approvedBy, &c.ApprovedByEmail, &approvedAt, &closedBy, &c.ClosedByEmail, &closedAt, &effectiveAt, &appliedAt, &c.Result,
-		&c.CreatedAt)
+		&c.CreatedAt, &applyingAt, &c.ConfirmationHash)
 	if approvedBy != nil {
 		c.ApprovedBy = approvedBy.String()
 	}
 	if closedBy != nil {
 		c.ClosedBy = closedBy.String()
 	}
-	c.ApprovedAt, c.ClosedAt, c.EffectiveAt, c.AppliedAt = at(approvedAt), at(closedAt), at(effectiveAt), at(appliedAt)
+	c.ApprovedAt, c.ClosedAt, c.EffectiveAt, c.AppliedAt, c.ApplyingAt = at(approvedAt), at(closedAt), at(effectiveAt), at(appliedAt),
+		at(applyingAt)
 	return c, err
 }
 
@@ -451,13 +452,28 @@ func optUUID(id string) *string {
 }
 
 func (r changes) Create(ctx context.Context, c domain.InstrumentChange) error {
+	var confirmation *string
+	if c.ConfirmationHash != "" {
+		confirmation = &c.ConfirmationHash
+	}
 	_, err := r.q.Exec(ctx, `INSERT INTO instrument_changes (id, kind, target, payload, summary, reason, status, requested_by,
-		effective_at, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-		c.ID, c.Kind, c.Target, c.Payload, c.Summary, c.Reason, c.Status, c.RequestedBy, stamp(c.EffectiveAt), c.CreatedAt)
+		effective_at, created_at, confirmation_hash) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		c.ID, c.Kind, c.Target, c.Payload, c.Summary, c.Reason, c.Status, c.RequestedBy, stamp(c.EffectiveAt), c.CreatedAt, confirmation)
 	if err != nil {
 		return fmt.Errorf("create instrument change: %w", err)
 	}
 	return nil
+}
+
+func (r changes) ByConfirmation(ctx context.Context, hash string) (*domain.InstrumentChange, error) {
+	c, err := scanChange(r.q.QueryRow(ctx, `SELECT `+changeColumns+changeFrom+` WHERE c.confirmation_hash = $1`, hash))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("instrument change by confirmation: %w", err)
+	}
+	return &c, nil
 }
 
 func (r changes) get(ctx context.Context, id, lock string) (*domain.InstrumentChange, error) {
@@ -484,9 +500,9 @@ func (r changes) GetForUpdate(ctx context.Context, id string) (*domain.Instrumen
 
 func (r changes) Update(ctx context.Context, c domain.InstrumentChange) error {
 	_, err := r.q.Exec(ctx, `UPDATE instrument_changes SET status = $2, approved_by = $3, approved_at = $4, closed_by = $5,
-		closed_at = $6, effective_at = $7, applied_at = $8, result = $9 WHERE id = $1`,
+		closed_at = $6, effective_at = $7, applied_at = $8, result = $9, applying_at = $10 WHERE id = $1`,
 		c.ID, c.Status, optUUID(c.ApprovedBy), stamp(c.ApprovedAt), optUUID(c.ClosedBy), stamp(c.ClosedAt), stamp(c.EffectiveAt),
-		stamp(c.AppliedAt), c.Result)
+		stamp(c.AppliedAt), c.Result, stamp(c.ApplyingAt))
 	if err != nil {
 		return fmt.Errorf("update instrument change: %w", err)
 	}
@@ -518,7 +534,8 @@ func (r changes) List(ctx context.Context, status string, afterTime time.Time, a
 
 func (r changes) Due(ctx context.Context, now time.Time, limit int) ([]domain.InstrumentChange, error) {
 	rows, err := r.q.Query(ctx, `SELECT `+changeColumns+changeFrom+`
-		WHERE c.status = 'SCHEDULED' AND c.effective_at <= $1 ORDER BY c.effective_at, c.id LIMIT $2 FOR UPDATE OF c SKIP LOCKED`, now, limit)
+		WHERE c.status = 'SCHEDULED' AND c.effective_at <= $1 AND (c.applying_at IS NULL OR c.applying_at <= $1 - $3 * interval '1 second')
+		ORDER BY c.effective_at, c.id LIMIT $2 FOR UPDATE OF c SKIP LOCKED`, now, limit, int64(domain.ClaimHold/time.Second))
 	if err != nil {
 		return nil, fmt.Errorf("due instrument changes: %w", err)
 	}

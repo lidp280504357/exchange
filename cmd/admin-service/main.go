@@ -91,6 +91,10 @@ type settings struct {
 	// (HEALTH_TARGETS, "name=http://host:port,..."; the compose network's
 	// by default).
 	HealthTargets []string `koanf:"health_targets"`
+	// ChangeDelayFloor is the least the wait of trading parameters'
+	// changes may be set to (ADMIN_CHANGE_DELAY_FLOOR, 10 minutes by
+	// default; the test server's e2e runs at a minute).
+	ChangeDelayFloor time.Duration `koanf:"admin_change_delay_floor"`
 }
 
 // defaultHealthTargets are the services' ops endpoints on the compose
@@ -227,13 +231,14 @@ func setup(ctx context.Context, a *app.App) error {
 			User: cfg.HouseUser, Prices: backends.Market{REST: rest, Base: cfg.MarketDataURL}, Trades: backends.Reports{Conn: ch},
 			Positions: backends.Derivatives{REST: rest, Base: cfg.DerivativesURL},
 		},
-		Probe:      backends.Health{Client: &http.Client{Timeout: 2 * time.Second}, Targets: targets},
-		Reconciler: backends.Ledger{C: ledgerClient},
-		Content:    backends.Notification{REST: rest, Base: cfg.NotificationURL},
-		SimBots:    sim,
-		Sim:        sim,
-		Log:        a.Logger(),
-		Now:        time.Now,
+		Probe:            backends.Health{Client: &http.Client{Timeout: 2 * time.Second}, Targets: targets},
+		ChangeDelayFloor: cfg.ChangeDelayFloor,
+		Reconciler:       backends.Ledger{C: ledgerClient},
+		Content:          backends.Notification{REST: rest, Base: cfg.NotificationURL},
+		SimBots:          sim,
+		Sim:              sim,
+		Log:              a.Logger(),
+		Now:              time.Now,
 	}
 	a.Add("instrument changes", app.Loop(func(ctx context.Context) error { return applyDueChanges(ctx, svc, 5*time.Second) }))
 	a.Add("idempotency keys", app.Loop(func(ctx context.Context) error { return purgeKeys(ctx, svc, time.Hour) }))

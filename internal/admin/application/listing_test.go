@@ -35,7 +35,7 @@ type fakeReference struct{ asked []string }
 
 func (r *fakeReference) Listed(_ context.Context, symbol string) (bool, bool, error) {
 	r.asked = append(r.asked, symbol)
-	return symbol == "BTCUSDT" || symbol == "LINKBTC" || symbol == "LINKUSDT", symbol == "BTCUSDT" || symbol == "LINKUSDT", nil
+	return symbol == "BTCUSDT" || symbol == "LINKBTC" || symbol == "LINKUSDT" || symbol == "BTCFDUSD", symbol == "BTCUSDT" || symbol == "LINKUSDT", nil
 }
 
 type houseFlags struct{ fakeFlags }
@@ -91,6 +91,11 @@ func TestEditingTheReferenceData(t *testing.T) {
 	if !slices.Contains(res.Warnings, ports.ConfigWarning{Code: ports.WarnNoIndexReference, Symbol: "LINK-BTC-PERP", Detail: "LINK-BTC"}) ||
 		!slices.Contains(res.Warnings, ports.ConfigWarning{Code: ports.WarnHouseNotListed, Symbol: "LINK-USDT-PERP", Detail: houseFlag}) {
 		t.Fatalf("contract notes %v", res.Warnings)
+	}
+	// A pair on HOUSE's list: it says HOUSE will quote it (C5.5 ⑩).
+	res, err = h.svc.PreviewConfig(ctx, ops, json.RawMessage(`{"pairs":[{"symbol":"BTC-USDT","reference_symbol":"BTCFDUSD"}]}`))
+	if err != nil || !slices.Contains(res.Warnings, ports.ConfigWarning{Code: ports.NoteHouseQuotes, Symbol: "BTC-USDT", Detail: houseFlag}) {
+		t.Fatalf("HOUSE quotes %v %v", res.Warnings, err)
 	}
 
 	if _, _, err := h.svc.ApplyConfig(ctx, ops, link, "", ""); code(err) != apperr.CodeInvalidArgument {

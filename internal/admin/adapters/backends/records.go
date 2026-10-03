@@ -66,6 +66,17 @@ func (r Records) Orders(ctx context.Context, q ports.OrderQuery) ([]ports.Order,
 	return out[:min(len(out), pc.limit)], next, nil
 }
 
+// OpenOrders counts the orders resting on a pair or contract: new, open
+// or partly filled (the read model has spot and contract orders alike).
+func (r Records) OpenOrders(ctx context.Context, symbol string) (int, error) {
+	var n uint64
+	if err := r.Conn.QueryRow(ctx, `SELECT count() FROM orders_current WHERE symbol = ? AND status IN ('NEW', 'OPEN', 'PARTIALLY_FILLED')`,
+		symbol).Scan(&n); err != nil {
+		return 0, unavailable(err)
+	}
+	return int(n), nil
+}
+
 // Trades returns a page of spot trades, newest first.
 func (r Records) Trades(ctx context.Context, q ports.TradeQuery) ([]ports.Trade, string, error) {
 	pc, err := pageOf(q.Cursor, q.Limit)

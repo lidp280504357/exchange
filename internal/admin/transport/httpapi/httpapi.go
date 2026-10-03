@@ -881,6 +881,7 @@ type SettingsJSON struct {
 	DailyMax      string  `json:"daily_max_usdt"`
 	WithdrawalMax string  `json:"withdrawal_max_usdt"`
 	ChangeDelay   int64   `json:"change_delay_seconds"`
+	DelayFloor    int64   `json:"change_delay_floor_seconds"`
 	DailyUsed     string  `json:"daily_used_usdt"`
 	UpdatedBy     string  `json:"updated_by"`
 	UpdatedAt     *string `json:"updated_at"`
@@ -889,7 +890,8 @@ type SettingsJSON struct {
 func settingsJSON(v application.SettingsView) SettingsJSON {
 	out := SettingsJSON{
 		TwoPerson: v.TwoPerson, SingleMax: v.SingleMax.String(), DailyMax: v.DailyMax.String(), WithdrawalMax: v.WithdrawalMax.String(),
-		ChangeDelay: int64(v.ChangeDelay / time.Second), DailyUsed: v.Used.String(), UpdatedBy: v.UpdatedBy,
+		ChangeDelay: int64(v.ChangeDelay / time.Second), DelayFloor: int64(v.DelayFloor / time.Second), DailyUsed: v.Used.String(),
+		UpdatedBy: v.UpdatedBy,
 	}
 	if !v.UpdatedAt.IsZero() {
 		s := httpx.FormatTime(v.UpdatedAt)

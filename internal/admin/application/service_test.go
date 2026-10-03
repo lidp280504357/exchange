@@ -131,11 +131,22 @@ func (r memChanges) List(_ context.Context, status string, afterTime time.Time, 
 func (r memChanges) Due(_ context.Context, now time.Time, limit int) ([]domain.InstrumentChange, error) {
 	var out []domain.InstrumentChange
 	for _, c := range r.m.changes {
-		if c.Status == domain.ChangeScheduled && !c.EffectiveAt.After(now) && len(out) < limit {
+		claimed := !c.ApplyingAt.IsZero() && c.ApplyingAt.After(now.Add(-domain.ClaimHold))
+		if c.Status == domain.ChangeScheduled && !c.EffectiveAt.After(now) && !claimed && len(out) < limit {
 			out = append(out, r.withEmails(c))
 		}
 	}
 	return out, nil
+}
+
+func (r memChanges) ByConfirmation(_ context.Context, hash string) (*domain.InstrumentChange, error) {
+	for _, c := range r.m.changes {
+		if c.ConfirmationHash == hash {
+			c = r.withEmails(c)
+			return &c, nil
+		}
+	}
+	return nil, nil
 }
 
 func (r memChanges) Open(context.Context) (int, error) {
@@ -512,9 +523,13 @@ type fakeDerivatives struct {
 	closes   []string
 	canceled []string
 	queries  []ports.PositionQuery
-	// impactDown makes TierImpact fail; tiers records what it measured.
+	// impactDown makes TierImpact fail; tiers records what it measured;
+	// unmeasured and more are positions it cannot measure and liquidates
+	// beyond the 3 it does.
 	impactDown bool
 	tiers      []string
+	unmeasured int
+	more       int
 	// outcome is how the closing order ends (FILLED unless set), seen
 	// after looks of Order.
 	outcome string
@@ -545,7 +560,10 @@ func (d *fakeDerivatives) TierImpact(_ context.Context, symbol string, tiers jso
 		return ports.TierImpact{}, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "derivatives-service is down")
 	}
 	d.tiers = append(d.tiers, symbol+" "+string(tiers))
-	return ports.TierImpact{Symbol: symbol, Positions: 12, Liquidated: 3, Notional: "45000.00", Accounts: 2, Examples: json.RawMessage("[]")}, nil
+	return ports.TierImpact{
+		Symbol: symbol, Positions: 12, Liquidated: 3 + d.more, Notional: "45000.00", Accounts: 2, Unmeasured: d.unmeasured,
+		Examples: json.RawMessage("[]"),
+	}, nil
 }
 
 func (d *fakeDerivatives) PriceImpact(_ context.Context, symbol, price string) (json.RawMessage, error) {

@@ -103,10 +103,14 @@ export function scheduledText(t: (k: string, o?: Record<string, unknown>) => str
   return c.status === "PENDING_APPROVAL" ? t("admin.changes.pendingApproval") : t("admin.changes.scheduled", { minutes: minutes(delaySeconds) });
 }
 
-/** moveNote says how a status move takes effect. */
+/** moveNote says how a status move takes effect, and what rests on the pair or contract (C5.5 ⑩). */
 export function moveNote(t: (k: string, o?: Record<string, unknown>) => string, p: StatusPreview) {
-  if (p.immediate) return t("admin.changes.immediate");
-  return t(p.two_person ? "admin.changes.delayedTwoPerson" : "admin.changes.delayed", { minutes: minutes(p.delay_seconds) });
+  const when = p.immediate
+    ? t("admin.changes.immediate")
+    : t(p.two_person ? "admin.changes.delayedTwoPerson" : "admin.changes.delayed", { minutes: minutes(p.delay_seconds) });
+  if (p.open_orders == null) return when;
+  const orders = t("admin.changes.openOrders", { n: p.open_orders });
+  return `${when}${orders}${p.to === "HALT" && p.open_orders > 0 ? t("admin.changes.openOrdersHalt") : ""}`;
 }
 
 /** ChangesTab lists the changes of trading parameters with what an ADMIN may do to them. */
@@ -124,11 +128,16 @@ export function ChangesTab({ admin }: { admin: Admin }) {
       { id: "time", header: t("admin.common.createdAt"), cell: ({ row }) => <TimeText value={row.original.created_at} style="datetime" /> },
       {
         id: "status", header: t("admin.common.status"),
-        cell: ({ row }) => (
-          <Badge tone={statusTone[row.original.status]} title={row.original.status}>
-            {t(`admin.changes.status.${row.original.status}`)}
-          </Badge>
-        ),
+        cell: ({ row }) =>
+          row.original.status === "SCHEDULED" && row.original.applying_at ? (
+            <Badge tone="warn" title={t("admin.changes.applyingHint")}>
+              {t("admin.changes.applying")}
+            </Badge>
+          ) : (
+            <Badge tone={statusTone[row.original.status]} title={row.original.status}>
+              {t(`admin.changes.status.${row.original.status}`)}
+            </Badge>
+          ),
       },
       {
         id: "what", header: t("admin.changes.what"),
@@ -166,7 +175,7 @@ export function ChangesTab({ admin }: { admin: Admin }) {
       {
         id: "result", header: t("admin.changes.result"),
         cell: ({ row: { original: c } }) => (
-          <span className="block max-w-[16rem] text-xs text-fg-2">
+          <span className="block max-w-[16rem] whitespace-normal break-words text-xs text-fg-2">
             {c.result || c.closed_by_email || ""}
           </span>
         ),
@@ -225,9 +234,11 @@ function ChangeActions({ admin, change }: { admin: Admin; change: InstrumentChan
           </Button>
         </>
       )}
-      <Button size="sm" variant="ghost" onClick={() => setAction("cancel")} data-testid={`cancel-change-${change.id}`}>
-        {t("admin.changes.cancel")}
-      </Button>
+      {!change.applying_at && (
+        <Button size="sm" variant="ghost" onClick={() => setAction("cancel")} data-testid={`cancel-change-${change.id}`}>
+          {t("admin.changes.cancel")}
+        </Button>
+      )}
       {action && (
         <DangerAction
           open

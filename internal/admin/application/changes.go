@@ -7,8 +7,8 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +19,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/admin/ports"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/pagecursor"
+	"github.com/lidp280504357/exchange/internal/platform/pg"
 )
 
 // Trading parameters (design 2026-10-02 §2 item 6): one call must not be
@@ -88,6 +89,10 @@ const (
 	// WarnImpactUnknown: derivatives-service could not measure a new
 	// ladder, so the change cannot be confirmed now.
 	WarnImpactUnknown = "IMPACT_UNKNOWN"
+	// WarnImpactUnmeasured: some of the contract's positions could not be
+	// measured (no fresh mark price, or too many cross accounts to measure
+	// in time), so the change cannot be confirmed now (C5.5 ⑩).
+	WarnImpactUnmeasured = "IMPACT_UNMEASURED"
 )
 
 // ErrReferenceInUse refuses clearing the reference symbol of a pair HOUSE
@@ -176,6 +181,13 @@ func (s *Service) confirmation(p Principal, kind, fingerprint string) *Confirmat
 	return &Confirmation{Token: base64.RawURLEncoding.EncodeToString(s.Box.Seal(raw, confirmAAD(p))), ExpiresAt: exp.UTC()}
 }
 
+// confirmationHash identifies a confirmation token: the change it
+// confirmed keeps it, so the token confirms one change (C5.5 ⑩).
+func confirmationHash(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
 // confirmed checks that token is p's confirmation of exactly this change.
 func (s *Service) confirmed(p Principal, token, kind, fingerprint string) error {
 	sealed, err := base64.RawURLEncoding.DecodeString(token)
@@ -198,13 +210,23 @@ func (s *Service) confirmed(p Principal, token, kind, fingerprint string) error 
 	return nil
 }
 
-// changeDelay is the settings' delay of trading parameters' changes.
+// changeDelay is the settings' delay of trading parameters' changes, at
+// least the floor.
 func (s *Service) changeDelay(ctx context.Context) (time.Duration, error) {
 	set, err := s.settings(ctx, s.Store.Read())
 	if err != nil {
 		return 0, err
 	}
-	return set.ChangeDelay, nil
+	return max(set.ChangeDelay, s.delayFloor()), nil
+}
+
+// delayFloor is the least a change of trading parameters waits
+// (ChangeDelayFloor, else domain.DefaultChangeDelayFloor).
+func (s *Service) delayFloor() time.Duration {
+	if s.ChangeDelayFloor > 0 {
+		return max(s.ChangeDelayFloor, domain.MinChangeDelay)
+	}
+	return domain.DefaultChangeDelayFloor
 }
 
 // previewConfig works out what a document changes and guards its trading
@@ -229,27 +251,43 @@ func (s *Service) previewConfig(ctx context.Context, p Principal, config json.Ra
 		return ConfigPreview{}, err
 	}
 	out.Guard.DelaySeconds, out.Guard.TwoPerson = int(delay/time.Second), s.TwoPerson()
+	// The impacts are measured for an ADMIN who may confirm them, no one
+	// else: each measures every cross account on the contract (C5.5 ⑩).
+	if p.require(domain.PermInstrumentsTrading) != nil {
+		return out, nil
+	}
 	measured := true
 	for _, pc := range out.Guard.Params {
 		if pc.Entity != "CONTRACT" || pc.Field != "risk_tiers" {
 			continue
 		}
-		var imp ports.TierImpact
-		if s.Derivatives != nil {
-			imp, err = s.Derivatives.TierImpact(ctx, pc.Key, pc.After)
-		}
-		if s.Derivatives == nil || err != nil {
+		imp, err := s.tierImpact(ctx, pc)
+		if err != nil {
 			s.Log.WarnContext(ctx, "instruments: tier impact unavailable", "symbol", pc.Key, "error", err)
 			out.Warnings = append(out.Warnings, ports.ConfigWarning{Code: WarnImpactUnknown, Symbol: pc.Key})
 			measured = false
 			continue
 		}
 		out.Guard.Impacts = append(out.Guard.Impacts, imp)
+		if imp.Unmeasured > 0 {
+			// A ladder measured against part of the positions is not
+			// confirmed: the rest might be the ones it liquidates.
+			out.Warnings = append(out.Warnings, ports.ConfigWarning{Code: WarnImpactUnmeasured, Symbol: pc.Key, Detail: strconv.Itoa(imp.Unmeasured)})
+			measured = false
+		}
 	}
-	if measured && p.require(domain.PermInstrumentsTrading) == nil {
+	if measured {
 		out.Guard.Confirmation = s.confirmation(p, domain.ChangeConfig, out.fingerprint)
 	}
 	return out, nil
+}
+
+// tierImpact measures a ladder change against the contract's positions.
+func (s *Service) tierImpact(ctx context.Context, pc ParamChange) (ports.TierImpact, error) {
+	if s.Derivatives == nil {
+		return ports.TierImpact{}, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "derivatives-service is not configured")
+	}
+	return s.Derivatives.TierImpact(ctx, pc.Key, pc.After)
 }
 
 // changeSummary is what a change's confirmation showed, kept with it.
@@ -278,9 +316,11 @@ func items(changes []ports.ConfigChange) []changeItem {
 }
 
 // request records a confirmed change: waiting for a second ADMIN or
-// scheduled, audited as admin.instruments.change_requested.
+// scheduled, audited as admin.instruments.change_requested. The
+// confirmation (token) confirms one change: brought again (a retry), it
+// answers with the change it confirmed (C5.5 ⑩).
 func (s *Service) request(ctx context.Context, p Principal, kind, target string, payload json.RawMessage, summary changeSummary,
-	reason string,
+	reason, token string,
 ) (domain.InstrumentChange, error) {
 	delay, err := s.changeDelay(ctx)
 	if err != nil {
@@ -289,7 +329,13 @@ func (s *Service) request(ctx context.Context, p Principal, kind, target string,
 	sum, _ := json.Marshal(summary)
 	c := domain.NewInstrumentChange(uuid.Must(uuid.NewV7()).String(), kind, target, payload, sum, reason, p.Admin.ID, s.TwoPerson(),
 		delay, s.Now())
+	c.ConfirmationHash = confirmationHash(token)
+	var prev *domain.InstrumentChange
 	err = s.Store.Tx(ctx, func(r ports.Repos) error {
+		var err error
+		if prev, err = r.Changes().ByConfirmation(ctx, c.ConfirmationHash); err != nil || prev != nil {
+			return err
+		}
 		if err := r.Changes().Create(ctx, c); err != nil {
 			return err
 		}
@@ -301,8 +347,21 @@ func (s *Service) request(ctx context.Context, p Principal, kind, target string,
 			Target: target, Action: "admin.instruments.change_requested", Actor: p.Admin.Email, Reason: reason, Details: string(details),
 		}, p.Admin.Email)
 	})
+	if _, dup := pg.UniqueViolation(err); dup {
+		// The same confirmation, concurrently: the change it confirmed.
+		prev, err = s.Store.Read().Changes().ByConfirmation(ctx, c.ConfirmationHash)
+		if err == nil && prev == nil {
+			err = domain.ErrConfirmationRequired
+		}
+	}
+	if err != nil {
+		return domain.InstrumentChange{}, err
+	}
+	if prev != nil {
+		return *prev, nil
+	}
 	c.RequestedByEmail = p.Admin.Email
-	return c, err
+	return c, nil
 }
 
 func stampOrNil(t time.Time) any {
@@ -329,6 +388,10 @@ type StatusPreview struct {
 	Confirmation *Confirmation `json:"confirmation"`
 	DelaySeconds int           `json:"delay_seconds"`
 	TwoPerson    bool          `json:"two_person"`
+	// OpenOrders counts the orders resting on it (the read model, seconds
+	// behind; nil when it cannot be read): a halt leaves them on the book,
+	// their owners may cancel them (C5.5 ⑩).
+	OpenOrders *int `json:"open_orders"`
 }
 
 // StatusResult is a status change done, or the change waiting.
@@ -387,6 +450,13 @@ func (s *Service) PreviewStatus(ctx context.Context, p Principal, kind, symbol, 
 			fmt.Sprintf("%s cannot move from %s to %s", symbol, from, to))
 	}
 	out := StatusPreview{Symbol: symbol, From: from, To: to, Immediate: to == statusHalt}
+	if s.Records != nil {
+		if n, err := s.Records.OpenOrders(ctx, symbol); err == nil {
+			out.OpenOrders = &n
+		} else {
+			s.Log.WarnContext(ctx, "instruments: count the open orders", "symbol", symbol, "error", err)
+		}
+	}
 	if out.Immediate {
 		return out, nil
 	}
@@ -441,7 +511,7 @@ func (s *Service) setStatus(ctx context.Context, p Principal, kind, symbol, to, 
 			Entity: map[string]string{domain.ChangePairStatus: "TRADING_PAIR", domain.ChangeContractStatus: "CONTRACT"}[kind], Key: symbol,
 			Field: "status", Before: json.RawMessage(fmt.Sprintf("%q", prev.From)), After: json.RawMessage(fmt.Sprintf("%q", to)),
 		}}, Impacts: []ports.TierImpact{}, Items: []changeItem{},
-	}, reason)
+	}, reason, token)
 	if err != nil {
 		return StatusResult{}, err
 	}
@@ -566,47 +636,113 @@ func (s *Service) changeOne(ctx context.Context, p Principal, id, reason, action
 // dueBatch bounds the changes applied in one round.
 const dueBatch = 5
 
+// changeGiveUp bounds how long a due change waits for a service it needs
+// before it fails, when nothing of it was applied yet.
+const changeGiveUp = time.Hour
+
 // ApplyDueChanges applies the scheduled changes whose time has come
 // (admin-service runs it every few seconds) and returns how many it
-// settled. A change that is no longer what was confirmed fails; one that
-// cannot be applied for a moment (a service down) waits for the next
-// round.
+// settled. Nothing waits on another service inside the console's
+// transaction (C5.5 ⑩): a round claims the due changes (applying_at,
+// which also stops their cancel), applies each, then records how it went.
+// A change that cannot be applied for a moment (a service down or in
+// error) waits for the next round; when the call that applies it was made
+// and its answer lost, it stays claimed and the next round checks it: in
+// effect already, it is recorded as applied, as one applied whose record
+// failed is. A change that is no longer what was confirmed fails.
 func (s *Service) ApplyDueChanges(ctx context.Context) (int, error) {
-	n := 0
+	var due []domain.InstrumentChange
 	err := s.Store.Tx(ctx, func(r ports.Repos) error {
-		due, err := r.Changes().Due(ctx, s.Now(), dueBatch)
+		list, err := r.Changes().Due(ctx, s.Now(), dueBatch)
 		if err != nil {
 			return err
 		}
-		for _, c := range due {
-			result, err := s.applyChange(ctx, c)
-			if err != nil && apperr.From(err).Kind == apperr.KindUnavailable {
-				s.Log.WarnContext(ctx, "instruments: change not applied yet", "change_id", c.ID, "error", err)
-				continue
-			}
-			applied := err == nil
-			if err != nil {
-				result = err.Error()
-			}
-			c.Settle(applied, result, s.Now())
+		for _, c := range list {
+			c.Claim(s.Now())
 			if err := r.Changes().Update(ctx, c); err != nil {
 				return err
 			}
-			action := "admin.instruments.change_applied"
-			if !applied {
-				action = "admin.instruments.change_failed"
-			}
-			details, _ := json.Marshal(map[string]any{"change_id": c.ID, "kind": c.Kind, "result": c.Result, "approved_by": c.ApprovedByEmail})
-			if err := r.Audit(ctx, &auditv1.AdminActionPerformed{
-				Target: c.Target, Action: action, Actor: c.RequestedByEmail, Reason: c.Reason, Details: string(details),
-			}, c.RequestedByEmail); err != nil {
-				return err
-			}
-			n++
+			due = append(due, c)
 		}
 		return nil
 	})
-	return n, err
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, c := range due {
+		result, attempted, err := s.applyChange(ctx, c)
+		if waits(err) && (attempted || s.Now().Sub(c.EffectiveAt) < changeGiveUp) {
+			s.Log.WarnContext(ctx, "instruments: change not applied yet", "change_id", c.ID, "attempted", attempted, "error", err)
+			if err := s.changeWaits(ctx, c.ID, !attempted, err.Error()); err != nil {
+				return n, err
+			}
+			continue
+		}
+		applied := err == nil
+		if err != nil {
+			result = err.Error()
+		}
+		if err := s.settleChange(ctx, c.ID, applied, result); err != nil {
+			if applied {
+				// In effect, unrecorded: the next round finds it claimed and
+				// in effect, and records it.
+				s.Log.ErrorContext(ctx, "instruments: change applied, unrecorded", "change_id", c.ID, "error", err)
+			}
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+// waits reports whether an apply's error is a moment's: a service down or
+// in error, whose outcome the next round finds out.
+func waits(err error) bool {
+	if err == nil {
+		return false
+	}
+	k := apperr.From(err).Kind
+	return k == apperr.KindUnavailable || k == apperr.KindInternal
+}
+
+// changeWaits records why a claimed change waits; release gives the claim
+// up (nothing of it was applied: it may be canceled again).
+func (s *Service) changeWaits(ctx context.Context, id string, release bool, why string) error {
+	return s.Store.Tx(ctx, func(r ports.Repos) error {
+		c, err := r.Changes().GetForUpdate(ctx, id)
+		if err != nil || c == nil || c.Status != domain.ChangeScheduled {
+			return err
+		}
+		if release {
+			c.Wait(why)
+		} else {
+			c.Result = "outcome unknown, checked next round: " + why
+		}
+		return r.Changes().Update(ctx, *c)
+	})
+}
+
+// settleChange records how applying a change went, with its audit event.
+func (s *Service) settleChange(ctx context.Context, id string, applied bool, result string) error {
+	return s.Store.Tx(ctx, func(r ports.Repos) error {
+		c, err := r.Changes().GetForUpdate(ctx, id)
+		if err != nil || c == nil || c.Status != domain.ChangeScheduled {
+			return err
+		}
+		c.Settle(applied, result, s.Now())
+		if err := r.Changes().Update(ctx, *c); err != nil {
+			return err
+		}
+		action := "admin.instruments.change_applied"
+		if !applied {
+			action = "admin.instruments.change_failed"
+		}
+		details, _ := json.Marshal(map[string]any{"change_id": c.ID, "kind": c.Kind, "result": c.Result, "approved_by": c.ApprovedByEmail})
+		return r.Audit(ctx, &auditv1.AdminActionPerformed{
+			Target: c.Target, Action: action, Actor: c.RequestedByEmail, Reason: c.Reason, Details: string(details),
+		}, c.RequestedByEmail)
+	})
 }
 
 // errNotConfirmed fails a change whose target moved since it was
@@ -614,49 +750,96 @@ func (s *Service) ApplyDueChanges(ctx context.Context) (int, error) {
 var errNotConfirmed = apperr.New(apperr.KindConflict, apperr.CodeConflict,
 	"the reference data changed since the change was confirmed; preview it again")
 
-// applyChange carries out a due change in the requester's name.
-func (s *Service) applyChange(ctx context.Context, c domain.InstrumentChange) (string, error) {
+// errImpactGrew fails a ladder change that would liquidate more
+// positions when due than its confirmation showed.
+var errImpactGrew = apperr.New(apperr.KindConflict, "ADMIN_IMPACT_GREW",
+	"the new risk ladder would liquidate more positions now than its confirmation showed; preview it again")
+
+// inEffect ends the result of a change found in effect already: a round
+// before applied it and its record failed, or something else did it.
+const inEffect = " (in effect already)"
+
+// applyChange carries out a due change in the requester's name; attempted
+// says the call that applies it was made, so with an error its outcome is
+// unknown. A change in effect already is applied; a ladder is measured
+// again first (C5.5 ⑩).
+func (s *Service) applyChange(ctx context.Context, c domain.InstrumentChange) (result string, attempted bool, err error) {
 	var sum changeSummary
 	if err := json.Unmarshal(c.Summary, &sum); err != nil {
-		return "", apperr.Invalid("the change's summary is unreadable")
+		return "", false, apperr.Invalid("the change's summary is unreadable")
 	}
 	switch c.Kind {
 	case domain.ChangePairStatus, domain.ChangeContractStatus:
 		var pl struct{ Symbol, From, To string }
 		if err := json.Unmarshal(c.Payload, &pl); err != nil {
-			return "", apperr.Invalid("the change's payload is unreadable")
+			return "", false, apperr.Invalid("the change's payload is unreadable")
 		}
+		done := fmt.Sprintf("%s: %s → %s", pl.Symbol, pl.From, pl.To)
 		cur, err := s.currentStatus(ctx, c.Kind, pl.Symbol)
-		if err != nil {
-			return "", err
-		}
-		if cur != pl.From {
-			return "", errNotConfirmed
+		switch {
+		case err != nil:
+			return "", false, err
+		case cur == pl.To:
+			return done + inEffect, false, nil
+		case cur != pl.From:
+			return "", false, errNotConfirmed
 		}
 		if _, err := s.moveStatus(ctx, c.Kind, pl.Symbol, pl.To, c.Reason, c.RequestedByEmail); err != nil {
-			return "", err
+			return "", true, err
 		}
-		return fmt.Sprintf("%s: %s → %s", pl.Symbol, pl.From, pl.To), nil
+		return done, true, nil
 	case domain.ChangeConfig:
 		var doc referenced
 		if err := json.Unmarshal(c.Payload, &doc); err != nil {
-			return "", apperr.Invalid("the change's document is unreadable")
+			return "", false, apperr.Invalid("the change's document is unreadable")
 		}
 		if _, err := s.checkReferences(ctx, doc); err != nil {
-			return "", err
+			return "", false, err
 		}
 		dry, err := s.Catalog.Apply(ctx, c.Payload, true, c.RequestedByEmail, c.Reason)
-		if err != nil {
-			return "", err
+		switch {
+		case err != nil:
+			return "", false, err
+		case len(dry.Changes) == 0:
+			return fmt.Sprintf("0 changed, %d unchanged", dry.Unchanged) + inEffect, false, nil
+		case fingerprintOf(dry.Changes) != sum.Fingerprint:
+			return "", false, errNotConfirmed
 		}
-		if fingerprintOf(dry.Changes) != sum.Fingerprint {
-			return "", errNotConfirmed
+		if err := s.measureAgain(ctx, sum); err != nil {
+			return "", false, err
 		}
 		res, err := s.Catalog.Apply(ctx, c.Payload, false, c.RequestedByEmail, c.Reason)
 		if err != nil {
-			return "", err
+			return "", true, err
 		}
-		return fmt.Sprintf("%d changed, %d unchanged", len(res.Changes), res.Unchanged), nil
+		return fmt.Sprintf("%d changed, %d unchanged", len(res.Changes), res.Unchanged), true, nil
 	}
-	return "", errors.New("unknown change kind " + c.Kind)
+	return "", false, apperr.Invalid("unknown change kind " + c.Kind)
+}
+
+// measureAgain measures a change's new ladders when it is due: one that
+// cannot be measured now waits, one that would liquidate more positions
+// than its confirmation showed fails.
+func (s *Service) measureAgain(ctx context.Context, sum changeSummary) error {
+	shown := map[string]int{}
+	for _, imp := range sum.Impacts {
+		shown[imp.Symbol] = imp.Liquidated
+	}
+	for _, pc := range sum.Params {
+		if pc.Entity != "CONTRACT" || pc.Field != "risk_tiers" {
+			continue
+		}
+		imp, err := s.tierImpact(ctx, pc)
+		if err != nil {
+			return apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "the new risk ladder cannot be measured now")
+		}
+		if imp.Unmeasured > 0 {
+			return apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable,
+				fmt.Sprintf("%s: %d positions cannot be measured now", pc.Key, imp.Unmeasured))
+		}
+		if imp.Liquidated > shown[pc.Key] {
+			return errImpactGrew.WithDetail("symbol", pc.Key).WithDetail("liquidated", imp.Liquidated).WithDetail("confirmed", shown[pc.Key])
+		}
+	}
+	return nil
 }

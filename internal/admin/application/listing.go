@@ -67,7 +67,7 @@ func (s *Service) ApplyConfig(ctx context.Context, p Principal, config json.RawM
 		}
 		c, err := s.request(ctx, p, domain.ChangeConfig, "instruments", config, changeSummary{
 			Fingerprint: prev.fingerprint, Params: prev.Guard.Params, Impacts: prev.Guard.Impacts, Items: items(prev.Changes),
-		}, reason)
+		}, reason, confirmation)
 		if err != nil {
 			return ports.ConfigResult{}, nil, err
 		}
@@ -105,10 +105,12 @@ type referenced struct {
 	Pairs []struct {
 		Symbol          string `json:"symbol"`
 		ReferenceSymbol string `json:"reference_symbol"`
+		Status          string `json:"status"`
 	} `json:"pairs"`
 	Contracts []struct {
 		Symbol      string `json:"symbol"`
 		IndexSymbol string `json:"index_symbol"`
+		Status      string `json:"status"`
 	} `json:"contracts"`
 }
 
@@ -146,9 +148,22 @@ func (s *Service) checkReferences(ctx context.Context, doc referenced) ([]ports.
 	if err != nil {
 		return nil, err
 	}
-	house := s.houseSymbols(ctx)
+	house, houseKnown := s.houseSymbols(ctx)
 	note := func(code, symbol, detail string) {
 		warnings = append(warnings, ports.ConfigWarning{Code: code, Symbol: symbol, Detail: detail})
+	}
+	// A document never moves an existing item's status (C5.5 ⑩).
+	ignored := func(symbol, given string, now map[string]string) {
+		given = strings.ToUpper(strings.TrimSpace(given))
+		if was, ok := now[symbol]; ok && given != "" && given != was {
+			note(ports.WarnStatusIgnored, symbol, given)
+		}
+	}
+	for _, pair := range doc.Pairs {
+		ignored(pair.Symbol, pair.Status, current.pairStatus)
+	}
+	for _, c := range doc.Contracts {
+		ignored(c.Symbol, c.Status, current.contractStatus)
 	}
 	futures := map[string]bool{}
 	reconnect := false
@@ -178,8 +193,11 @@ func (s *Service) checkReferences(ctx context.Context, doc referenced) ([]ports.
 		}
 		futures[ref] = fut
 		reconnect = true
-		if !house(pair.Symbol) {
+		switch {
+		case !house(pair.Symbol):
 			note(ports.WarnHouseNotListed, pair.Symbol, houseFlag)
+		case houseKnown:
+			note(ports.NoteHouseQuotes, pair.Symbol, houseFlag)
 		}
 	}
 	for _, c := range doc.Contracts {
@@ -210,8 +228,11 @@ func (s *Service) checkReferences(ctx context.Context, doc referenced) ([]ports.
 			note(ports.WarnNoFutures, c.Symbol, ref)
 		}
 		reconnect = true
-		if !house(c.Symbol) {
+		switch {
+		case !house(c.Symbol):
 			note(ports.WarnHouseNotListed, c.Symbol, houseFlag)
+		case houseKnown:
+			note(ports.NoteHouseQuotes, c.Symbol, houseFlag)
 		}
 	}
 	if reconnect {
@@ -241,10 +262,12 @@ func referenceInUse(symbol string, house func(string) bool, current references, 
 }
 
 // references are the stored pairs' reference symbols and the contracts'
-// index pairs.
+// index pairs, with their statuses.
 type references struct {
-	pairs     map[string]string
-	contracts map[string]string
+	pairs          map[string]string
+	contracts      map[string]string
+	pairStatus     map[string]string
+	contractStatus map[string]string
 }
 
 func (s *Service) currentReferences(ctx context.Context) (references, error) {
@@ -256,27 +279,27 @@ func (s *Service) currentReferences(ctx context.Context) (references, error) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return references{}, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "instrument-service answered badly")
 	}
-	out := references{pairs: map[string]string{}, contracts: map[string]string{}}
+	out := references{pairs: map[string]string{}, contracts: map[string]string{}, pairStatus: map[string]string{}, contractStatus: map[string]string{}}
 	for _, p := range doc.Pairs {
-		out.pairs[p.Symbol] = strings.ToUpper(p.ReferenceSymbol)
+		out.pairs[p.Symbol], out.pairStatus[p.Symbol] = strings.ToUpper(p.ReferenceSymbol), p.Status
 	}
 	for _, c := range doc.Contracts {
-		out.contracts[c.Symbol] = c.IndexSymbol
+		out.contracts[c.Symbol], out.contractStatus[c.Symbol] = c.IndexSymbol, c.Status
 	}
 	return out, nil
 }
 
 // houseSymbols tells whether HOUSE's flag would cover a symbol: on, and
-// its symbol rules permit it. Unknown when the flags cannot be read: then
-// everything counts as covered (no note).
-func (s *Service) houseSymbols(ctx context.Context) func(string) bool {
+// its symbol rules permit it; known is false when the flags cannot be
+// read: then everything counts as covered (no note either way).
+func (s *Service) houseSymbols(ctx context.Context) (house func(string) bool, known bool) {
 	all := func(string) bool { return true }
 	if s.Flags == nil {
-		return all
+		return all, false
 	}
 	list, err := s.Flags.List(ctx)
 	if err != nil {
-		return all
+		return all, false
 	}
 	for _, f := range list {
 		if f.Key != houseFlag {
@@ -298,7 +321,7 @@ func (s *Service) houseSymbols(ctx context.Context) func(string) bool {
 				return true
 			}
 			return !slices.Contains(l.Deny, symbol) && (len(l.Allow) == 0 || slices.Contains(l.Allow, symbol))
-		}
+		}, true
 	}
-	return func(string) bool { return false } // never set: off
+	return func(string) bool { return false }, true // never set: off
 }

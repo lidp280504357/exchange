@@ -262,8 +262,11 @@ echo "== a pair's status (ETH-BTC): previewed, only by an ADMIN"
 # effect at once, anything else waits settings.change_delay_seconds. The
 # run halts and opens its own pair (LINK-BTC, below) and halts the
 # perpetual ETH-USDT-PERP; ETH-BTC, which other checks trade on, is only
-# previewed. The changes wait a minute (the least allowed) during the run.
+# previewed. The changes wait a minute during the run: the least the test
+# server's admin-service allows (ADMIN_CHANGE_DELAY_FLOOR, 10 minutes
+# elsewhere, C5.5 ⑩).
 as AUDITOR GET /admin/v1/settings ""
+check '.change_delay_floor_seconds == 60' "the test server lets the changes wait a minute"
 DELAY_BEFORE=$(jq -r .change_delay_seconds <<<"$BODY")
 TWO_PERSON=$(jq -r .two_person_approval <<<"$BODY")
 if [[ $DELAY_BEFORE != 60 ]]; then
@@ -288,7 +291,8 @@ as OPERATOR POST /admin/v1/instruments/pairs/ETH-BTC/status/preview '{"to":"HALT
 expect 403 ADMIN_FORBIDDEN "an OPERATOR moves no pair"
 as ADMIN POST /admin/v1/instruments/pairs/ETH-BTC/status/preview '{"to":"HALT"}'
 expect 200 - "ADMIN previews a halt"
-check '.from == "TRADING" and .to == "HALT" and .immediate == true and .confirmation == null' "at once, nothing to confirm"
+check '.from == "TRADING" and .to == "HALT" and .immediate == true and .confirmation == null and (.open_orders | type) == "number"' \
+  "at once, nothing to confirm; the orders resting on it counted"
 as ADMIN POST /admin/v1/instruments/pairs/ETH-BTC/status/preview '{"to":"CANCEL_ONLY"}'
 expect 200 - "and the way out"
 check ".immediate == false and .delay_seconds == 60 and (.confirmation.token | length) > 40 and .two_person == $TWO_PERSON" "waits a minute once confirmed"
@@ -919,26 +923,35 @@ as AUDITOR GET /admin/v1/instruments/config ""
 expect 200 - "the reference data as a config document"
 check '(.pairs | length) >= 50 and (.fee_schedules | map(.tier) | index("default")) != null and (.assets | map(.asset_code) | index("LINK")) != null' \
   "pairs, fee tiers and assets in the reference file's shape"
-# The pair's minimum order value is the other of 0.0001 and 0.0002 than
-# it has now, so each run changes it (the run's parity collided half the
-# time).
-NOTIONAL=1
-if [[ $(jq '[.pairs[] | select(.symbol == "LINK-BTC") | .min_notional | tonumber == 0.0001] | any' <<<"$BODY") == true ]]; then
-  NOTIONAL=2
+# LINK-BTC is the run's own pair, listed once and kept (C5.5 ⑩): it
+# follows Binance's LINKBTC and HOUSE quotes it, its document is the same
+# from run to run, and each run halts it at once and confirms its opening,
+# so it trades again by the end.
+LINK_REF=$(jq -r '[.pairs[] | select(.symbol == "LINK-BTC") | .reference_symbol][0] // "none"' <<<"$BODY")
+LINK_NOW=$(jq -r '[.pairs[] | select(.symbol == "LINK-BTC") | .status][0] // "none"' <<<"$BODY")
+# HOUSE quotes every pair (the user's decision of 2026-10-02): LINK-BTC is
+# appended once to market.house_liquidity's symbols, the list kept (an
+# empty list already means every symbol).
+as OPERATOR GET /admin/v1/flags ""
+expect 200 - "the flags"
+HOUSE_ALLOW=$(jq -r '[.items[] | select(.key == "market.house_liquidity") | .rules.symbols.allow // [] | .[]] | join(",")' <<<"$BODY")
+if [[ -n $HOUSE_ALLOW && ,$HOUSE_ALLOW, != *,LINK-BTC,* ]]; then
+  exchangectl flags set market.house_liquidity --allow-symbols "$HOUSE_ALLOW,LINK-BTC" --reason "e2e: HOUSE quotes LINK-BTC like every pair (C5.5 ⑩)" >/dev/null
+  echo "ok   LINK-BTC joins HOUSE's symbols, the list kept"
 fi
-link_pair() { # link_pair [REFERENCE]: LINK-BTC as a config document
-  jq -nc --arg r "${1:-}" --arg n "0.000$NOTIONAL" '{pairs: [{symbol: "LINK-BTC", base_asset: "LINK", quote_asset: "BTC", tick_size: "0.0000001",
-    lot_size: "0.1", min_quantity: "0.1", max_quantity: "100000", min_notional: $n, price_band: "0.1", fee_tier: "default", status: "PREPARE",
-    reference_symbol: $r, reference_multiplier: "1"}]}'
+link_pair() { # link_pair [REFERENCE] [MULTIPLIER]: LINK-BTC as a config document
+  jq -nc --arg r "${1-LINKBTC}" --arg m "${2:-1}" '{pairs: [{symbol: "LINK-BTC", base_asset: "LINK", quote_asset: "BTC", tick_size: "0.0000001",
+    lot_size: "0.1", min_quantity: "0.1", max_quantity: "100000", min_notional: "0.0001", price_band: "0.1", fee_tier: "default", status: "PREPARE",
+    reference_symbol: $r, reference_multiplier: $m}]}'
+}
+link_follows() { # LINK-BTC follows Binance's LINKBTC
+  as AUDITOR GET /admin/v1/instruments/config ""
+  [[ $STATUS == 200 ]] && jq -e '.pairs[] | select(.symbol == "LINK-BTC" and .reference_symbol == "LINKBTC")' <<<"$BODY" >/dev/null
 }
 as AUDITOR POST /admin/v1/instruments/preview "{\"config\":$(link_pair)}"
 expect 403 ADMIN_FORBIDDEN "AUDITOR previews no change"
 as OPERATOR POST /admin/v1/instruments/preview "{\"config\":$(link_pair NOPECOINBTC)}"
 expect 422 ADMIN_REFERENCE_UNKNOWN "a reference symbol Binance does not list is refused"
-as OPERATOR POST /admin/v1/instruments/preview "{\"config\":$(link_pair LINKBTC)}"
-expect 200 - "a preview with Binance's LINKBTC"
-check '(.changes | length) == 1 and .changes[0].entity == "TRADING_PAIR" and .changes[0].after.reference_symbol == "LINKBTC" and
-  ([.warnings[].code] | index("HOUSE_NOT_LISTED") != null and index("STREAMS_RECONNECT") != null)' "checked, with HOUSE's list and the reconnect noted"
 # A new pair starts in PREPARE: one created trading would skip the guard of
 # its opening (LINK-ETH is never created).
 LINK_ETH=$(jq -nc '{pairs: [{symbol: "LINK-ETH", base_asset: "LINK", quote_asset: "ETH", tick_size: "0.000001", lot_size: "0.1",
@@ -946,52 +959,97 @@ LINK_ETH=$(jq -nc '{pairs: [{symbol: "LINK-ETH", base_asset: "LINK", quote_asset
   reference_symbol: "", reference_multiplier: "1"}]}')
 as ADMIN POST /admin/v1/instruments/preview "{\"config\":$LINK_ETH}"
 expect 422 ADMIN_NEW_ITEM_NOT_PREPARE "a pair created trading is refused, even to an ADMIN"
-as OPERATOR POST /admin/v1/instruments/apply "{\"config\":$(link_pair),\"reason\":\"e2e lists LINK-BTC\"}"
-expect 200 - "OPERATOR applies LINK-BTC (no reference: users trade with each other)"
-check "(.changes | length) == 1 and (.changes[0].action == \"CREATE\" or .changes[0].action == \"UPDATE\") and .changes[0].after.min_notional == \"0.000$NOTIONAL\"" \
-  "created or changed, versioned"
-as OPERATOR POST /admin/v1/instruments/apply "{\"config\":$(link_pair),\"reason\":\"e2e again\"}"
+case $LINK_REF in
+  none)
+    as OPERATOR POST /admin/v1/instruments/preview "{\"config\":$(link_pair)}"
+    expect 200 - "a preview of LINK-BTC with Binance's LINKBTC"
+    check '(.changes | length) == 1 and .changes[0].action == "CREATE" and .changes[0].after.reference_symbol == "LINKBTC" and
+      ([.warnings[].code] | index("HOUSE_QUOTES") != null and index("HOUSE_NOT_LISTED") == null and index("STREAMS_RECONNECT") != null)' \
+      "checked: HOUSE will quote it, the reference streams reconnect"
+    as OPERATOR POST /admin/v1/instruments/apply "{\"config\":$(link_pair),\"reason\":\"e2e lists LINK-BTC\"}"
+    expect 200 - "OPERATOR lists LINK-BTC at once (a new pair touches nobody)"
+    check '(.changes | length) == 1 and .changes[0].action == "CREATE" and .changes[0].after.status == "PREPARE"' "created in PREPARE, versioned"
+    LINK_REF=LINKBTC LINK_NOW=PREPARE
+    ;;
+  LINKBTC) ;;
+  *)
+    # Listed before it followed Binance: an ADMIN confirms its reference
+    # once, and the run waits for it before its status moves (a move
+    # changes the version the confirmation was bound to).
+    if [[ $TWO_PERSON == false ]]; then
+      as ADMIN POST /admin/v1/instruments/preview "{\"config\":$(link_pair)}"
+      expect 200 - "ADMIN previews LINK-BTC following Binance's LINKBTC"
+      check '([.warnings[].code] | index("HOUSE_QUOTES") != null and index("HOUSE_NOT_LISTED") == null and index("STREAMS_RECONNECT") != null)' \
+        "checked: HOUSE will quote it, the reference streams reconnect"
+      as ADMIN POST /admin/v1/instruments/apply "$(jq -nc --argjson c "$(link_pair)" --arg t "$(jq -r .guard.confirmation.token <<<"$BODY")" \
+        '{config: $c, reason: "e2e LINK-BTC follows Binance", confirmation: $t}')"
+      expect 202 - "and confirms it"
+      eventually 180 "LINK-BTC follows Binance's LINKBTC once its change took effect" link_follows
+      LINK_REF=LINKBTC
+    else
+      echo "skip LINK-BTC's reference: two-person approval is on and this run has one ADMIN"
+    fi
+    ;;
+esac
+as OPERATOR POST /admin/v1/instruments/apply "{\"config\":$(link_pair "$LINK_REF"),\"reason\":\"e2e again\"}"
 expect 200 - "the same document again"
 check '(.changes | length) == 0 and .unchanged == 1' "changes nothing"
+if [[ $LINK_NOW != PREPARE ]]; then
+  check '[.warnings[] | select(.code == "STATUS_IGNORED" and .symbol == "LINK-BTC")] | length == 1' "its PREPARE noted: a document moves no status"
+fi
 pair_listed() {
   call GET /v1/market/pairs ""
-  [[ $STATUS == 200 ]] && jq -e --arg n "0.000$NOTIONAL" '.pairs[] | select(.symbol == "LINK-BTC" and .min_notional == $n)' <<<"$BODY" >/dev/null
+  [[ $STATUS == 200 ]] && jq -e '.pairs[] | select(.symbol == "LINK-BTC" and .min_notional == "0.0001")' <<<"$BODY" >/dev/null
 }
-eventually 60 "the sites list LINK-BTC as changed" pair_listed
+eventually 60 "the sites list LINK-BTC" pair_listed
 LINK_STATUS=$(jq -r '.pairs[] | select(.symbol == "LINK-BTC") | .status' <<<"$BODY")
-# shellcheck disable=SC2016 # expanded when the script ends
-at_exit 'as ADMIN POST /admin/v1/instruments/pairs/LINK-BTC/status "{\"to\":\"HALT\",\"reason\":\"e2e cleanup\"}" >/dev/null'
+# shellcheck disable=SC2016 # a safety net: LINK-BTC trades again a minute after whatever happens
+at_exit 'status_is LINK-BTC HALT && confirm_status /admin/v1/instruments/pairs/LINK-BTC TRADING "e2e cleanup" >/dev/null'
 LINK_OPENING=""
-if [[ $LINK_STATUS != TRADING && $TWO_PERSON == false ]]; then
+if [[ $TWO_PERSON == false ]]; then
+  if [[ $LINK_STATUS == TRADING ]]; then
+    as ADMIN POST /admin/v1/instruments/pairs/LINK-BTC/status '{"to":"HALT","reason":"e2e halts its pair"}'
+    expect 200 - "ADMIN halts LINK-BTC"
+    check '.from == "TRADING" and .to == "HALT" and .change == null' "at once: the brake does not wait"
+    LINK_STATUS=HALT
+  fi
   as OPERATOR POST /admin/v1/instruments/pairs/LINK-BTC/status '{"to":"TRADING","reason":"e2e opens LINK-BTC"}'
   expect 403 ADMIN_FORBIDDEN "an OPERATOR opens no pair"
   confirm_status /admin/v1/instruments/pairs/LINK-BTC TRADING "e2e opens LINK-BTC"
   expect 202 - "ADMIN confirms LINK-BTC's opening (from $LINK_STATUS)"
   check '.change.status == "SCHEDULED" and .change.kind == "PAIR_STATUS" and .change.effective_at != null' "it opens a minute later"
   LINK_OPENING=$(jq -r .change.id <<<"$BODY")
+else
+  echo "skip LINK-BTC's halt and opening: two-person approval is on and this run has one ADMIN"
 fi
 
 echo "== trading parameters wait for an ADMIN's confirmation and their time"
 as AUDITOR GET /admin/v1/instruments/config ""
 CONFIG=$BODY
-as OPERATOR POST /admin/v1/instruments/preview "{\"config\":$(link_pair LINKBTC)}"
-expect 200 - "an OPERATOR previews a reference symbol for LINK-BTC"
-check '([.guard.params[] | select(.entity == "TRADING_PAIR" and .key == "LINK-BTC" and .field == "reference_symbol")] | length == 1) and .guard.confirmation == null' \
+# LINK-BTC's reference multiplier: a trading parameter, confirmed and then
+# canceled.
+MULTIPLIED=$(link_pair "$LINK_REF" 1.0001)
+as OPERATOR POST /admin/v1/instruments/preview "{\"config\":$MULTIPLIED}"
+expect 200 - "an OPERATOR previews LINK-BTC's reference multiplier"
+check '([.guard.params[] | select(.entity == "TRADING_PAIR" and .key == "LINK-BTC" and .field == "reference_multiplier")] | length == 1) and .guard.confirmation == null' \
   "a trading parameter, not the OPERATOR's to confirm"
-as OPERATOR POST /admin/v1/instruments/apply "{\"config\":$(link_pair LINKBTC),\"reason\":\"e2e follows Binance\"}"
+as OPERATOR POST /admin/v1/instruments/apply "{\"config\":$MULTIPLIED,\"reason\":\"e2e multiplier\"}"
 expect 403 ADMIN_FORBIDDEN "nor to apply"
-as ADMIN POST /admin/v1/instruments/apply "{\"config\":$(link_pair LINKBTC),\"reason\":\"e2e follows Binance\"}"
+as ADMIN POST /admin/v1/instruments/apply "{\"config\":$MULTIPLIED,\"reason\":\"e2e multiplier\"}"
 expect 409 ADMIN_CONFIRMATION_REQUIRED "an ADMIN brings the preview's confirmation"
-as ADMIN POST /admin/v1/instruments/preview "{\"config\":$(link_pair LINKBTC)}"
+as ADMIN POST /admin/v1/instruments/preview "{\"config\":$MULTIPLIED}"
 expect 200 - "ADMIN's preview"
 check ".guard.delay_seconds == 60 and (.guard.confirmation.token | length) > 40 and .guard.two_person == $TWO_PERSON" "confirmable for ten minutes"
 TOKEN=$(jq -r .guard.confirmation.token <<<"$BODY")
-as ADMIN POST /admin/v1/instruments/apply "$(jq -nc --argjson c "$(link_pair LINKBTC)" --arg t "$TOKEN" '{config: $c, reason: "e2e follows Binance", confirmation: $t}')"
+as ADMIN POST /admin/v1/instruments/apply "$(jq -nc --argjson c "$MULTIPLIED" --arg t "$TOKEN" '{config: $c, reason: "e2e multiplier", confirmation: $t}')"
 expect 202 - "confirmed, the change waits"
 check '.change.kind == "CONFIG" and (.change.status == "SCHEDULED" or .change.status == "PENDING_APPROVAL") and
-  .change.summary.params[0].field == "reference_symbol"' "recorded with what it moves"
+  .change.summary.params[0].field == "reference_multiplier"' "recorded with what it moves"
 REF_CHANGE=$(jq -r .change.id <<<"$BODY")
 at_exit "as ADMIN POST /admin/v1/instruments/changes/$REF_CHANGE/cancel '{\"reason\":\"e2e cleanup\"}' >/dev/null"
+as ADMIN POST /admin/v1/instruments/apply "$(jq -nc --argjson c "$MULTIPLIED" --arg t "$TOKEN" '{config: $c, reason: "e2e multiplier", confirmation: $t}')"
+expect 202 - "the same confirmation again (a retry)"
+check ".change.id == \"$REF_CHANGE\"" "confirms the one change it confirmed"
 as ADMIN GET /admin/v1/todo ""
 check '.instrument_changes >= 1' "the console counts what waits"
 as OPERATOR POST "/admin/v1/instruments/changes/$REF_CHANGE/cancel" '{"reason":"e2e not mine"}'
@@ -1015,17 +1073,20 @@ expect 422 ADMIN_REFERENCE_IN_USE "BTC-USDT keeps its reference symbol (HOUSE qu
 if [[ -n $LINK_OPENING ]]; then
   eventually 180 "LINK-BTC opens once its change took effect" status_is LINK-BTC TRADING
 fi
-# 0.0003 BTC clears either minimum order value; each try has its own
-# idempotency key: the gateway replays a refused one
-# (the trading service sees a new status a moment after it changed).
+# A buy 5% under the best bid (HOUSE's, on Binance's book) rests on the
+# book, within the price band; without a book, at 0.0001. Each try has its
+# own idempotency key: the gateway replays a refused one (the trading
+# service sees a new status a moment after it changed).
+call GET "/v1/market/LINK-BTC/depth?limit=5" ""
+LINK_PRICE=$(jq -r 'if (.bids | length) > 0 then (.bids[0][0] | tonumber * 0.95 * 10000000 | floor / 10000000 | tostring) else "0.0001" end' <<<"$BODY")
 LINK_TRY=0
 link_order() {
   LINK_TRY=$((LINK_TRY + 1))
-  call POST /v1/orders '{"symbol":"LINK-BTC","side":"BUY","type":"LIMIT","price":"0.0001","quantity":"3"}' "${UAUTH[@]}" \
+  call POST /v1/orders "{\"symbol\":\"LINK-BTC\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$LINK_PRICE\",\"quantity\":\"3\"}" "${UAUTH[@]}" \
     -H "Idempotency-Key: e2e-admin-link-$RUN-$LINK_TRY"
   [[ $STATUS == 202 ]]
 }
-eventually 40 "the user rests a buy on LINK-BTC" link_order
+eventually 40 "the user rests a buy on LINK-BTC at $LINK_PRICE" link_order
 LINK_ORDER=$(jq -r .order_id <<<"$BODY")
 link_open() {
   call GET "/v1/orders/$LINK_ORDER" "" "${UAUTH[@]}"
@@ -1037,12 +1098,7 @@ link_canceled() {
   call GET "/v1/orders/$LINK_ORDER" "" "${UAUTH[@]}"
   [[ $(jq -r .status <<<"$BODY") == CANCELED ]]
 }
-eventually 40 "and is canceled" link_canceled
-if [[ $TWO_PERSON == false ]]; then
-  as ADMIN POST /admin/v1/instruments/pairs/LINK-BTC/status '{"to":"HALT","reason":"e2e halts its pair"}'
-  expect 200 - "ADMIN halts LINK-BTC"
-  check '.from == "TRADING" and .to == "HALT" and .change == null' "at once: the brake does not wait"
-fi
+eventually 40 "and is canceled; LINK-BTC keeps trading" link_canceled
 
 echo "== deposits that need a person (with the custodian's stand-in)"
 # mock ARGS... drives the custodian's stand-in on the server (udun-mock).

@@ -1408,7 +1408,9 @@ export interface paths {
          *     needs instruments.trading (ADMIN) and the preview's confirmation
          *     (ADMIN_CONFIRMATION_REQUIRED without it, with `reason` expired or
          *     changed when it no longer holds): it answers 202 with the change,
-         *     which takes effect the settings' change_delay_seconds later, or,
+         *     the same change when the confirmation is brought again (one
+         *     confirmation confirms one change), which takes effect the settings'
+         *     change_delay_seconds later, or,
          *     while admin.two_person_approval is on, that long after a second
          *     ADMIN approved it (POST /admin/v1/instruments/changes/{id}/decide);
          *     audited as admin.instruments.change_requested. New items touch
@@ -1850,8 +1852,9 @@ export interface paths {
         /**
          * Cancel a change before it takes effect
          * @description Any ADMIN, its requester included; ADMIN_CHANGE_CLOSED once it took
-         *     effect or was closed. Audited as admin.instruments.change_canceled.
-         *     Needs instruments.trading.
+         *     effect or was closed, ADMIN_CHANGE_APPLYING while an apply round has
+         *     it. Audited as admin.instruments.change_canceled. Needs
+         *     instruments.trading.
          */
         post: operations["cancelInstrumentChange"];
         delete?: never;
@@ -3220,6 +3223,8 @@ export interface components {
             delay_seconds: number;
             /** @description A second ADMIN must approve it first (admin.two_person_approval). */
             two_person: boolean;
+            /** @description The orders resting on the pair or contract (the read model, seconds behind; null when it cannot be read). A halt leaves them on the book and their owners may cancel them. */
+            open_orders?: number | null;
         };
         /** @description A trading parameter a change moves (JSON values as stored; null for none). */
         ParamChange: {
@@ -3317,7 +3322,12 @@ export interface components {
             effective_at: string | null;
             /** Format: date-time */
             applied_at: string | null;
-            /** @description What applying it did, or why it failed. */
+            /**
+             * Format: date-time
+             * @description An apply round has it (C5.5 ⑩): until its outcome is recorded it may have taken effect, so it is not canceled (ADMIN_CHANGE_APPLYING). A round whose call was answered by no one leaves it claimed, and a later one finds it in effect (result ends with "(in effect already)") or applies it.
+             */
+            applying_at: string | null;
+            /** @description What applying it did, why it failed, or why it waits (a service down; ADMIN_IMPACT_GREW fails a ladder that would liquidate more positions when due than its confirmation showed). */
             result: string;
             /** Format: date-time */
             created_at: string;
@@ -3379,8 +3389,10 @@ export interface components {
         Settings: {
             /** @description Fund operations need a second administrator (the flag admin.two_person_approval). */
             two_person_approval: boolean;
-            /** @description How long a confirmed change of trading parameters waits before it takes effect (60 to 86400, 300 by default). */
+            /** @description How long a confirmed change of trading parameters waits before it takes effect (up to 86400, 300 by default), never below change_delay_floor_seconds. */
             change_delay_seconds: number;
+            /** @description The least change_delay_seconds may be set to: admin-service's ADMIN_CHANGE_DELAY_FLOOR, 600 by default (one ADMIN alone cannot cut the wait to a minute, C5.5 ⑩). */
+            change_delay_floor_seconds: number;
             /** @description In single-person mode, one fund operation is worth at most this much. */
             single_max_usdt: components["schemas"]["Decimal"];
             /** @description In single-person mode, an administrator's fund operations of the last 24 hours sum to at most this much. */
@@ -3877,13 +3889,18 @@ export interface components {
                 /**
                  * @description REFERENCE_UNCHECKED: the reference market could not be asked (detail: the symbol);
                  *     HOUSE_NOT_LISTED: HOUSE quotes it only once on the flag's symbol list (detail: the flag);
+                 *     HOUSE_QUOTES: HOUSE will quote it on the reference market's book (on the flag's symbol list, detail: the flag);
                  *     NO_INDEX_REFERENCE: the contract's index pair (detail) follows no reference market;
                  *     NO_FUTURES: no futures on the reference symbol (detail), so HOUSE gives the contract no book;
                  *     STREAMS_RECONNECT: the reference streams reconnect, books empty for about 20 seconds;
-                 *     IMPACT_UNKNOWN: a new risk ladder (symbol) could not be measured against the open positions, so it cannot be confirmed now.
+                 *     IMPACT_UNKNOWN: a new risk ladder (symbol) could not be measured against the open positions, so it cannot be confirmed now;
+                 *     IMPACT_UNMEASURED: some of the contract's positions (detail: how many) have no fresh mark price or were too many to
+                 *     measure in time, so the ladder cannot be confirmed now;
+                 *     STATUS_IGNORED: the document gives an existing pair or contract another status (detail) than it has: a document never
+                 *     moves one, a status change does.
                  * @enum {string}
                  */
-                code: "REFERENCE_UNCHECKED" | "HOUSE_NOT_LISTED" | "NO_INDEX_REFERENCE" | "NO_FUTURES" | "STREAMS_RECONNECT" | "IMPACT_UNKNOWN";
+                code: "REFERENCE_UNCHECKED" | "HOUSE_NOT_LISTED" | "HOUSE_QUOTES" | "NO_INDEX_REFERENCE" | "NO_FUTURES" | "STREAMS_RECONNECT" | "IMPACT_UNKNOWN" | "IMPACT_UNMEASURED" | "STATUS_IGNORED";
                 symbol: string;
                 detail: string;
             }[];
@@ -4788,6 +4805,7 @@ export interface operations {
                     single_max_usdt?: components["schemas"]["Decimal"];
                     daily_max_usdt?: components["schemas"]["Decimal"];
                     withdrawal_max_usdt?: components["schemas"]["Decimal"];
+                    /** @description At least change_delay_floor_seconds (COMMON_INVALID_ARGUMENT below it). */
                     change_delay_seconds?: number;
                     reason: string;
                 };

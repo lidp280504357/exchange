@@ -50,7 +50,8 @@ function Approvals({ settings, editable }: { settings: NonNullable<ReturnType<ty
     setDraft(pick(settings));
     setDelay(String(settings.change_delay_seconds));
   }, [settings]);
-  const delayOK = /^\d+$/.test(delay.trim()) && Number(delay) >= 60 && Number(delay) <= 86400;
+  const floor = settings.change_delay_floor_seconds;
+  const delayOK = /^\d+$/.test(delay.trim()) && Number(delay) >= floor && Number(delay) <= 86400;
   const delayChanged = delay.trim() !== String(settings.change_delay_seconds);
   const changed = LIMITS.filter((k) => draft[k].trim() !== settings[k]);
   const valid = LIMITS.every((k) => dec.isDecimal(draft[k].trim()) && dec.gt(draft[k].trim(), "0")) && delayOK;
@@ -110,9 +111,9 @@ function Approvals({ settings, editable }: { settings: NonNullable<ReturnType<ty
               inputMode="numeric"
               unit="s"
               disabled={!editable}
-              error={delayOK ? undefined : t("admin.changes.delayHint")}
+              error={delayOK ? undefined : t("admin.changes.delayHint", { floor })}
             />
-            <span className="text-xs text-fg-3">{t("admin.changes.delayHint")}</span>
+            <span className="text-xs text-fg-3">{t("admin.changes.delayHint", { floor })}</span>
           </label>
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-fg-3">
