@@ -21,6 +21,10 @@ type State struct {
 	At     time.Time `json:"at"`
 	Minute []Mark    `json:"minute,omitempty"`
 	RNG    []byte    `json:"rng,omitempty"`
+	// Noise is the model's own random source (its deviation's draws), apart
+	// from the bots': what the bots do, a spike's executors say, never
+	// changes the path (ASTRA design §6.2, 2026-10-04).
+	Noise []byte `json:"noise,omitempty"`
 }
 
 // Mark is a target price at a time.
@@ -52,22 +56,31 @@ const maxStep = 5 * time.Second
 // beta; X is an Ornstein–Uhlenbeck deviation of its own; E carries the
 // operators' events (none yet: E is 1).
 type Model struct {
-	Params Params
-	State  State
-	pcg    *rand.PCG
-	rng    *rand.Rand
+	Params   Params
+	State    State
+	pcg      *rand.PCG
+	rng      *rand.Rand
+	noisePCG *rand.PCG
+	noise    *rand.Rand
 }
 
-// NewModel goes on from st, its random source restored, or seeded with
-// seed when st has none (a first start).
+// NewModel goes on from st, its random sources restored, or seeded with
+// seed when st has none (a first start; the model's own source alone after
+// an upgrade that brought it).
 func NewModel(p Params, st State, seed uint64) *Model {
-	pcg := rand.NewPCG(seed, seed^0x9e3779b97f4a7c15)
-	if len(st.RNG) > 0 {
-		if err := pcg.UnmarshalBinary(st.RNG); err != nil {
-			pcg = rand.NewPCG(seed, seed^0x9e3779b97f4a7c15)
+	restore := func(saved []byte, a, b uint64) *rand.PCG {
+		pcg := rand.NewPCG(a, b)
+		if len(saved) > 0 {
+			if err := pcg.UnmarshalBinary(saved); err != nil {
+				pcg = rand.NewPCG(a, b)
+			}
 		}
+		return pcg
 	}
-	return &Model{Params: p, State: st, pcg: pcg, rng: rand.New(pcg)} //nolint:gosec // a simulation that repeats from its seed, no secret
+	pcg := restore(st.RNG, seed, seed^0x9e3779b97f4a7c15)
+	noise := restore(st.Noise, seed^0x94d049bb133111eb, seed^0xbf58476d1ce4e5b9)
+	//nolint:gosec // a simulation that repeats from its seed, no secret
+	return &Model{Params: p, State: st, pcg: pcg, rng: rand.New(pcg), noisePCG: noise, noise: rand.New(noise)}
 }
 
 // Rand is the model's random source, which the bots share so that a run
@@ -79,6 +92,7 @@ func (m *Model) Snapshot() State {
 	st := m.State
 	st.Minute = append([]Mark(nil), m.State.Minute...)
 	st.RNG, _ = m.pcg.MarshalBinary()
+	st.Noise, _ = m.noisePCG.MarshalBinary()
 	return st
 }
 
@@ -109,11 +123,15 @@ func (m *Model) Step(now time.Time, btc, eth float64, sh Shape) (float64, Guard)
 	if sh.Vol > 0 {
 		sigma *= sh.Vol
 	}
+	if sh.Closing {
+		sigma /= 4
+	}
 	if sh.LogE != nil {
 		st.LogE = *sh.LogE
 	}
+	st.LogE += sh.Guide*dt.Minutes() + sh.Push
 	hours, days := dt.Hours(), dt.Hours()/24
-	st.X += -p.Theta*st.X*hours + mu*days + sigma*math.Sqrt(days)*m.rng.NormFloat64()
+	st.X += -p.Theta*st.X*hours + mu*days + sigma*math.Sqrt(days)*m.noise.NormFloat64()
 
 	price := p.P0 * math.Exp(st.LogM+st.X+st.LogE)
 	if sh.Pin > 0 {

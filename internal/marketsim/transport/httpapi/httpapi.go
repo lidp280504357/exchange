@@ -12,10 +12,12 @@
 //	PUT  /internal/sim/params            new settings {"params": {...}, "actor": "...", "approved_by": "..."}
 //	POST /internal/sim/bots              a bot {"user_id", "role", "label"}
 //	GET  /internal/sim/events            the open events (?all=1: the latest, &limit=)
-//	POST /internal/sim/events            a price event (design §6.2)
+//	POST /internal/sim/events            a price event (design §6.2; a TARGET with its "spikes")
 //	POST /internal/sim/events/{id}/end   ends an event early {"actor", "reason"}
+//	GET  /internal/sim/events/{id}/plan  a threshold target's plan and where the price is against it
+//	GET  /internal/sim/target-preview    a threshold target's plan before it is made (?direction=&price=&duration_seconds=&starts_at=)
 //	GET  /internal/sim/history           the target and last price every 10 s (?minutes=, a day at most)
-//	GET  /internal/sim/stream            the same, every second, as server-sent events
+//	GET  /internal/sim/stream            the same, every second, as server-sent events, with the running target's plan
 package httpapi
 
 import (
@@ -25,6 +27,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -89,6 +92,8 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Get("/internal/sim/events", h.events)
 		r.Post("/internal/sim/events", h.createEvent)
 		r.Post("/internal/sim/events/{id}/end", h.endEvent)
+		r.Get("/internal/sim/events/{id}/plan", h.plan)
+		r.Get("/internal/sim/target-preview", h.preview)
 		r.Get("/internal/sim/history", h.history)
 		r.Get("/internal/sim/stream", h.stream)
 	})
@@ -151,6 +156,20 @@ type EventJSON struct {
 	EndedAt    *string `json:"ended_at"`
 	FromPrice  *string `json:"from_price"`
 	EndedBy    string  `json:"ended_by"`
+	// A threshold target's (ASTRA design §3, §6.2): its direction (ABOVE,
+	// BELOW), what follows its crossing (FOLLOW, HOLD), how it ended (HIT,
+	// MISSED, CANCELED; "" before), when it crossed, when its window ends
+	// and closes in, when its hold ends; a spike's width and its target.
+	Direction string      `json:"direction"`
+	Then      string      `json:"then"`
+	Result    string      `json:"result"`
+	CrossedAt *string     `json:"crossed_at"`
+	EndsAt    *string     `json:"ends_at"`
+	ClosingAt *string     `json:"closing_at"`
+	HoldUntil *string     `json:"hold_until"`
+	ParentID  *string     `json:"parent_id"`
+	WidthS    int         `json:"width_seconds"`
+	Spikes    []EventJSON `json:"spikes,omitempty"`
 }
 
 func eventJSON(e domain.Event) EventJSON {
@@ -158,7 +177,14 @@ func eventJSON(e domain.Event) EventJSON {
 		ID: e.ID, Type: string(e.Type), Size: e.Size, Mu: e.Mu, Factor: e.Factor, DurationS: int(e.Duration.Seconds()),
 		HoldS: int(e.Hold.Seconds()), StartsAt: httpx.FormatTime(e.StartsAt), Status: e.Status, CreatedBy: e.CreatedBy,
 		ApprovedBy: e.ApprovedBy, Reason: e.Reason, CreatedAt: httpx.FormatTime(e.CreatedAt), StartedAt: timeOrNil(e.StartedAt),
-		EndedAt: timeOrNil(e.EndedAt), EndedBy: e.EndedBy,
+		EndedAt: timeOrNil(e.EndedAt), EndedBy: e.EndedBy, Direction: e.Direction, Then: e.Then, Result: e.Result,
+		CrossedAt: timeOrNil(e.CrossedAt), WidthS: int(e.Width.Seconds()),
+	}
+	if e.Type == domain.EventTarget {
+		j.EndsAt, j.ClosingAt, j.HoldUntil = timeOrNil(e.EndsAt()), timeOrNil(e.ClosingAt()), timeOrNil(e.HoldUntil())
+	}
+	if e.ParentID != "" {
+		j.ParentID = &e.ParentID
 	}
 	if e.Price.IsPositive() {
 		v := e.Price.String()
@@ -308,17 +334,25 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Type       string  `json:"type"`
-		Size       float64 `json:"size"`
-		Price      string  `json:"price"`
-		Mu         float64 `json:"mu"`
-		Factor     float64 `json:"factor"`
-		DurationS  int     `json:"duration_seconds"`
-		HoldS      int     `json:"hold_seconds"`
-		StartsAt   string  `json:"starts_at"`
-		Actor      string  `json:"actor"`
-		ApprovedBy string  `json:"approved_by"`
-		Reason     string  `json:"reason"`
+		Type      string  `json:"type"`
+		Size      float64 `json:"size"`
+		Price     string  `json:"price"`
+		Mu        float64 `json:"mu"`
+		Factor    float64 `json:"factor"`
+		DurationS int     `json:"duration_seconds"`
+		HoldS     int     `json:"hold_seconds"`
+		StartsAt  string  `json:"starts_at"`
+		Direction string  `json:"direction"`
+		Then      string  `json:"then"`
+		WidthS    int     `json:"width_seconds"`
+		Spikes    []struct {
+			At     string  `json:"at"`
+			Size   float64 `json:"size"`
+			WidthS int     `json:"width_seconds"`
+		} `json:"spikes"`
+		Actor      string `json:"actor"`
+		ApprovedBy string `json:"approved_by"`
+		Reason     string `json:"reason"`
 	}
 	if err := httpx.DecodeJSON(w, r, &body); err != nil {
 		httpx.WriteError(w, r, err)
@@ -331,7 +365,17 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 	e := domain.Event{
 		Type: domain.EventType(body.Type), Size: body.Size, Mu: body.Mu, Factor: body.Factor,
 		Duration: time.Duration(body.DurationS) * time.Second, Hold: time.Duration(body.HoldS) * time.Second,
+		Direction: strings.ToUpper(body.Direction), Then: strings.ToUpper(body.Then), Width: time.Duration(body.WidthS) * time.Second,
 		CreatedBy: body.Actor, ApprovedBy: body.ApprovedBy, Reason: body.Reason,
+	}
+	spikes := make([]domain.Event, 0, len(body.Spikes))
+	for _, x := range body.Spikes {
+		at, err := time.Parse(time.RFC3339, x.At)
+		if err != nil {
+			httpx.WriteError(w, r, apperr.Invalid("a spike's at is an RFC 3339 time"))
+			return
+		}
+		spikes = append(spikes, domain.Event{StartsAt: at, Size: x.Size, Width: time.Duration(x.WidthS) * time.Second})
 	}
 	if body.Price != "" {
 		p, err := decimal.NewFromString(body.Price)
@@ -349,12 +393,118 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 		}
 		e.StartsAt = t
 	}
-	out, err := h.Sim.CreateEvent(r.Context(), e)
+	out, err := h.Sim.CreateEvent(r.Context(), e, spikes...)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusCreated, eventJSON(out))
+	j := eventJSON(out)
+	for _, x := range h.Sim.SpikesOf(out.ID) {
+		j.Spikes = append(j.Spikes, eventJSON(x))
+	}
+	httpx.WriteJSON(w, http.StatusCreated, j)
+}
+
+// PlanPointJSON is a target's planned price at a time and the band its
+// path keeps to.
+type PlanPointJSON struct {
+	At   string `json:"at"`
+	Plan string `json:"plan"`
+	Low  string `json:"low"`
+	High string `json:"high"`
+}
+
+func price(v float64) string { return decimal.NewFromFloat(v).Round(8).String() }
+
+func pointsJSON(points []domain.PlanPoint) []PlanPointJSON {
+	out := make([]PlanPointJSON, 0, len(points))
+	for _, p := range points {
+		out = append(out, PlanPointJSON{At: httpx.FormatTime(p.At), Plan: price(p.Plan), Low: price(p.Low), High: price(p.High)})
+	}
+	return out
+}
+
+// TargetNowJSON is where the target is against a running target's plan.
+type TargetNowJSON struct {
+	At        string  `json:"at"`
+	Target    string  `json:"target"`
+	Plan      string  `json:"plan"`
+	Low       string  `json:"low"`
+	High      string  `json:"high"`
+	Deviation float64 `json:"deviation"`
+	AtRisk    bool    `json:"at_risk"`
+	CrossedAt *string `json:"crossed_at"`
+	Result    string  `json:"result"`
+}
+
+// PlanJSON is a threshold target's plan (GET /internal/sim/events/{id}/plan).
+type PlanJSON struct {
+	EventID   string          `json:"event_id"`
+	Direction string          `json:"direction"`
+	Level     string          `json:"level"`
+	FromPrice string          `json:"from_price"`
+	StartsAt  string          `json:"starts_at"`
+	ClosingAt string          `json:"closing_at"`
+	EndsAt    string          `json:"ends_at"`
+	HoldUntil *string         `json:"hold_until"`
+	Status    string          `json:"status"`
+	Points    []PlanPointJSON `json:"points"`
+	Spikes    []EventJSON     `json:"spikes"`
+	Now       *TargetNowJSON  `json:"now"`
+}
+
+func planJSON(v application.TargetView) PlanJSON {
+	e := v.Event
+	out := PlanJSON{
+		EventID: e.ID, Direction: e.Direction, Level: e.Price.String(), FromPrice: price(v.From), StartsAt: httpx.FormatTime(e.Start()),
+		ClosingAt: httpx.FormatTime(e.ClosingAt()), EndsAt: httpx.FormatTime(e.EndsAt()), HoldUntil: timeOrNil(e.HoldUntil()),
+		Status: e.Status, Points: pointsJSON(v.Points), Spikes: []EventJSON{},
+	}
+	for _, x := range v.Spikes {
+		out.Spikes = append(out.Spikes, eventJSON(x))
+	}
+	if e.Status == domain.EventRunning && v.Now.Plan > 0 {
+		out.Now = &TargetNowJSON{
+			At: httpx.FormatTime(v.Now.At), Target: price(v.Target), Plan: price(v.Now.Plan), Low: price(v.Now.Low), High: price(v.Now.High),
+			Deviation: math.Round(v.Deviation*1e6) / 1e6, AtRisk: v.AtRisk, CrossedAt: timeOrNil(e.CrossedAt), Result: e.Result,
+		}
+	}
+	return out
+}
+
+func (h *Handler) plan(w http.ResponseWriter, r *http.Request) {
+	v, err := h.Sim.TargetPlan(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, planJSON(v))
+}
+
+func (h *Handler) preview(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	level, err := decimal.NewFromString(q.Get("price"))
+	if err != nil {
+		httpx.WriteError(w, r, apperr.Invalid("price is a decimal"))
+		return
+	}
+	seconds, _ := strconv.Atoi(q.Get("duration_seconds"))
+	var starts time.Time
+	if v := q.Get("starts_at"); v != "" {
+		if starts, err = time.Parse(time.RFC3339, v); err != nil {
+			httpx.WriteError(w, r, apperr.Invalid("starts_at is an RFC 3339 time"))
+			return
+		}
+	}
+	p, err := h.Sim.PreviewTarget(r.Context(), strings.ToUpper(q.Get("direction")), level, time.Duration(seconds)*time.Second, starts)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"direction": p.Event.Direction, "feasible": p.Feasible, "min_duration_seconds": int(p.MinDuration.Seconds()),
+		"move": math.Round(p.Move*1e4) / 1e4, "needs_approval": p.NeedsApproval, "points": pointsJSON(p.Points),
+	})
 }
 
 func (h *Handler) endEvent(w http.ResponseWriter, r *http.Request) {
@@ -403,8 +553,28 @@ func (h *Handler) history(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out})
 }
 
+// StreamJSON is a message of the stream: the target and the last price,
+// and the running threshold target against its plan (null when none).
+type StreamJSON struct {
+	SampleJSON
+	Target *StreamTargetJSON `json:"target"`
+}
+
+// StreamTargetJSON is the running threshold target on the stream.
+type StreamTargetJSON struct {
+	EventID   string  `json:"event_id"`
+	Plan      string  `json:"plan"`
+	Low       string  `json:"low"`
+	High      string  `json:"high"`
+	Deviation float64 `json:"deviation"`
+	AtRisk    bool    `json:"at_risk"`
+	Result    string  `json:"result"`
+	CrossedAt *string `json:"crossed_at"`
+	EndsAt    string  `json:"ends_at"`
+}
+
 // stream sends the target and the last price every second until the
-// client leaves.
+// client leaves, with the running threshold target's plan.
 func (h *Handler) stream(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -417,7 +587,15 @@ func (h *Handler) stream(w http.ResponseWriter, r *http.Request) {
 	defer tick.Stop()
 	for {
 		st := h.Sim.Status()
-		raw, _ := json.Marshal(sampleJSON(application.Sample{At: time.Now(), Target: st.Target, Last: st.Last}))
+		msg := StreamJSON{SampleJSON: sampleJSON(application.Sample{At: time.Now(), Target: st.Target, Last: st.Last})}
+		if v, ok := h.Sim.RunningTarget(); ok && v.Now.Plan > 0 {
+			msg.Target = &StreamTargetJSON{
+				EventID: v.Event.ID, Plan: price(v.Now.Plan), Low: price(v.Now.Low), High: price(v.Now.High),
+				Deviation: math.Round(v.Deviation*1e6) / 1e6, AtRisk: v.AtRisk, Result: v.Event.Result,
+				CrossedAt: timeOrNil(v.Event.CrossedAt), EndsAt: httpx.FormatTime(v.Event.EndsAt()),
+			}
+		}
+		raw, _ := json.Marshal(msg)
 		if _, err := fmt.Fprintf(w, "data: %s\n\n", raw); err != nil {
 			return
 		}

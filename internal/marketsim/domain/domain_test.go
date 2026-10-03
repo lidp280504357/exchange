@@ -317,27 +317,72 @@ func TestEventShapes(t *testing.T) {
 	// An instant jump: the factor at once, and it ends.
 	jump := started(EventJump, "1")
 	jump.Size = 0.1
-	sh, ended := ShapeOf([]*Event{jump}, t0)
+	sh, ended := ShapeOf([]*Event{jump}, t0, 1, 0.03)
 	if sh.LogE == nil || math.Abs(*sh.LogE-math.Log(1.1)) > 1e-12 || !sh.Moving || len(ended) != 1 {
 		t.Fatalf("instant jump: %+v %v", sh, ended)
 	}
 	// Over a minute: half of it at 30 seconds.
 	jump.Duration = time.Minute
-	sh, ended = ShapeOf([]*Event{jump}, t0.Add(30*time.Second))
+	sh, ended = ShapeOf([]*Event{jump}, t0.Add(30*time.Second), 1, 0.03)
 	if math.Abs(*sh.LogE-0.5*math.Log(1.1)) > 1e-12 || len(ended) != 0 {
 		t.Fatalf("half way: %v %v", *sh.LogE, ended)
 	}
-	// A target: an exponential path, then held, then done.
+	// A threshold target of 1.05 in 20 minutes from 1 (§3): the way spread
+	// over the minutes left, a third of the minute guard at most, in pairs
+	// of UTC minutes, one against it and one three times it; the last two
+	// minutes close in, straight, the guard's whole minute then; at the end
+	// of the window, not crossed, a last push; it never ends here.
 	target := started(EventTarget, "1")
-	target.Price, target.Duration, target.Hold = d("1.21"), time.Minute, 30*time.Second
-	if sh, _ = ShapeOf([]*Event{target}, t0.Add(30*time.Second)); math.Abs(sh.Pin-1.1) > 1e-12 {
-		t.Fatalf("half way to 1.21: %v", sh.Pin)
+	target.ID = "target-1"
+	target.Price, target.Duration, target.Direction, target.Then = d("1.05"), 20*time.Minute, Above, ThenFollow
+	way := math.Log(1.05) / 20
+	sh, ended = ShapeOf([]*Event{target}, t0, 1, 0.03)
+	if (math.Abs(sh.Guide-3*way) > 1e-12 && math.Abs(sh.Guide+way) > 1e-12) || sh.Closing || sh.Moving || len(ended) != 0 {
+		t.Fatalf("the guide at the start: %+v %v", sh, ended)
 	}
-	if sh, ended = ShapeOf([]*Event{target}, t0.Add(80*time.Second)); sh.Pin != 1.21 || len(ended) != 0 {
-		t.Fatalf("held: %v %v", sh.Pin, ended)
+	for m := 0; m < 16; m += 2 { // t0 is at an even minute
+		a, _ := ShapeOf([]*Event{target}, t0.Add(time.Duration(m)*time.Minute+30*time.Second), 1, 0.03)
+		b, _ := ShapeOf([]*Event{target}, t0.Add(time.Duration(m+1)*time.Minute+30*time.Second), 1, 0.03)
+		if (a.Guide < 0) == (b.Guide < 0) {
+			t.Fatalf("minutes %d and %d: %v %v", m, m+1, a.Guide, b.Guide)
+		}
 	}
-	if _, ended = ShapeOf([]*Event{target}, t0.Add(90*time.Second)); len(ended) != 1 {
-		t.Fatal("the hold did not end")
+	if sh, _ = ShapeOf([]*Event{target}, t0.Add(10*time.Minute), 0.9, 0.03); sh.Guide != 0.03 && sh.Guide != -0.01 {
+		t.Fatalf("far off, a third of the guard: %v", sh.Guide)
+	}
+	if sh, _ = ShapeOf([]*Event{target}, t0.Add(19*time.Minute), 1.04, 0.03); !sh.Closing || math.Abs(sh.Guide-(math.Log(1.05/1.04)+0.001)*2) > 1e-12 {
+		t.Fatalf("closing in, across within half the minute left: %+v", sh)
+	}
+	if sh, _ = ShapeOf([]*Event{target}, t0.Add(19*time.Minute), 1.02, 0.03); !sh.Closing || sh.Guide != 0.03 {
+		t.Fatalf("closing in, the whole minute guard: %+v", sh)
+	}
+	if sh, _ = ShapeOf([]*Event{target}, t0.Add(20*time.Minute), 0.9, 0.03); sh.Push != 0.03 || sh.Guide != 0 {
+		t.Fatalf("the last push: %+v", sh)
+	}
+	// Crossed and held for 5 minutes: pulled back only while back past
+	// the level; nothing once the hold is over.
+	target.Then, target.Hold, target.CrossedAt = ThenHold, 5*time.Minute, t0.Add(8*time.Minute)
+	if sh, _ = ShapeOf([]*Event{target}, t0.Add(9*time.Minute), 1.06, 0.03); sh.Guide != 0 {
+		t.Fatalf("held above: %v", sh.Guide)
+	}
+	if sh, _ = ShapeOf([]*Event{target}, t0.Add(9*time.Minute), 1.04, 0.03); sh.Guide != 0.01 {
+		t.Fatalf("back below the level: %v", sh.Guide)
+	}
+	if sh, _ = ShapeOf([]*Event{target}, t0.Add(14*time.Minute), 1.04, 0.03); sh.Guide != 0 {
+		t.Fatalf("after the hold: %v", sh.Guide)
+	}
+	// A spike of -4%, 20 seconds wide: at its tip after SpikeRise, half
+	// back 10 seconds later, gone and ended after.
+	spike := started(EventSpike, "1")
+	spike.Size, spike.Width = -0.04, 20*time.Second
+	if sh, _ = ShapeOf([]*Event{spike}, t0.Add(SpikeRise), 1, 0.03); sh.Spike != -0.04 {
+		t.Fatalf("the tip: %v", sh.Spike)
+	}
+	if sh, _ = ShapeOf([]*Event{spike}, t0.Add(SpikeRise+10*time.Second), 1, 0.03); math.Abs(sh.Spike+0.02) > 1e-12 {
+		t.Fatalf("half back: %v", sh.Spike)
+	}
+	if sh, ended = ShapeOf([]*Event{spike}, t0.Add(SpikeRise+20*time.Second), 1, 0.03); sh.Spike != 0 || len(ended) != 1 {
+		t.Fatalf("over: %v %v", sh.Spike, ended)
 	}
 	// A pause holds the price it started at; a trend and a volatility
 	// change the model's own; a halt halts until ended.
@@ -347,7 +392,7 @@ func TestEventShapes(t *testing.T) {
 	vol := started(EventVolatility, "1")
 	vol.Factor, vol.Duration = 3, time.Minute
 	halt := started(EventHalt, "1")
-	sh, ended = ShapeOf([]*Event{pause, trend, vol, halt}, t0.Add(2*time.Minute))
+	sh, ended = ShapeOf([]*Event{pause, trend, vol, halt}, t0.Add(2*time.Minute), 1, 0.03)
 	if sh.Pin != 0.97 || *sh.Mu != 0.2 || sh.Vol != 3 || !sh.Halted || len(ended) != 1 || ended[0] != vol {
 		t.Fatalf("shape %+v ended %v", sh, ended)
 	}
@@ -386,7 +431,8 @@ func TestMoves(t *testing.T) {
 		want float64
 	}{
 		{Event{Type: EventJump, Size: -0.2}, -0.2},
-		{Event{Type: EventTarget, Price: d("1.3")}, 0.3},
+		{Event{Type: EventSpike, Size: -0.04}, -0.04},
+		{Event{Type: EventTarget, Price: d("1.3")}, math.Log(1.3)},
 		{Event{Type: EventTarget, Price: d("1.3"), FromP: d("1.3")}, 0},
 		{Event{Type: EventTrend, Mu: 0.1}, math.Expm1(0.1)},                            // a day without an end
 		{Event{Type: EventTrend, Mu: 0.1, Duration: 12 * time.Hour}, math.Expm1(0.05)}, // half a day
@@ -416,15 +462,28 @@ func TestMoves(t *testing.T) {
 }
 
 func TestEventValidate(t *testing.T) {
-	ok := Event{Type: EventJump, Size: 0.1, CreatedBy: "ops", Reason: "test"}
-	if err := ok.Validate(); err != nil {
-		t.Fatal(err)
+	for _, ok := range []Event{
+		{Type: EventJump, Size: 0.1, CreatedBy: "ops", Reason: "test"},
+		{Type: EventTarget, Price: d("1.1"), Direction: Below, Then: ThenHold, Hold: time.Minute, Duration: time.Hour, CreatedBy: "ops", Reason: "test"},
+		{Type: EventSpike, Size: -0.1, Width: time.Minute, ParentID: "t", CreatedBy: "ops", Reason: "test"},
+	} {
+		if err := ok.Validate(); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for _, e := range []Event{
 		{Type: EventJump, Size: 0, CreatedBy: "ops", Reason: "test"},
 		{Type: EventJump, Size: 1.01, CreatedBy: "ops", ApprovedBy: "ops2", Reason: "beyond the hard cap"},
 		{Type: EventJump, Size: 0.1, Duration: 11 * time.Minute, CreatedBy: "ops", Reason: "test"},
 		{Type: EventTarget, CreatedBy: "ops", Reason: "test"},
+		{Type: EventTarget, Price: d("1.1"), Direction: "UP", Then: ThenFollow, Duration: time.Hour, CreatedBy: "ops", Reason: "test"},
+		{Type: EventTarget, Price: d("1.1"), Direction: Above, Then: ThenFollow, Duration: 30 * time.Second, CreatedBy: "ops", Reason: "too short"},
+		{Type: EventTarget, Price: d("1.1"), Direction: Above, Then: ThenHold, Duration: time.Hour, CreatedBy: "ops", Reason: "holds nothing"},
+		{Type: EventTarget, Price: d("1.1"), Direction: Above, Then: ThenFollow, Hold: time.Minute, Duration: time.Hour, CreatedBy: "ops", Reason: "test"},
+		{Type: EventSpike, Size: 0.11, Width: 20 * time.Second, CreatedBy: "ops", Reason: "beyond 10%"},
+		{Type: EventSpike, Size: 0.04, Width: 61 * time.Second, CreatedBy: "ops", Reason: "too wide"},
+		{Type: EventJump, Size: 0.1, Width: time.Second, CreatedBy: "ops", Reason: "a jump with a width"},
+		{Type: EventJump, Size: 0.1, Direction: Above, CreatedBy: "ops", Reason: "a jump with a direction"},
 		{Type: EventVolatility, Factor: 0, CreatedBy: "ops", Reason: "test"},
 		{Type: "BOOM", CreatedBy: "ops", Reason: "test"},
 		{Type: EventPause, Reason: "test"},
@@ -550,5 +609,37 @@ func TestClampBringsSettingsWithinTheHardLimits(t *testing.T) {
 	}
 	if _, changed := DefaultParams().Clamp(); len(changed) != 0 {
 		t.Fatalf("the defaults changed: %v", changed)
+	}
+}
+
+// The shortest window a target takes (§3): the way, a logarithm, over 0.6
+// of the minute guard a minute, in whole minutes, a minute at least; a
+// legacy target completed toward its level.
+func TestMinWindowAndInfer(t *testing.T) {
+	if got := MinWindow(1, 1.08, 0.03); got != 5*time.Minute { // ln 1.08 = 0.077 over 0.018 a minute: 4.3
+		t.Fatalf("+8%%: %v", got)
+	}
+	if got := MinWindow(1, 1.001, 0.03); got != time.Minute {
+		t.Fatalf("a short way: %v", got)
+	}
+	e := Event{Type: EventTarget, Price: d("0.9"), Hold: time.Minute}
+	e.Infer(1)
+	if e.Direction != Below || e.Then != ThenHold {
+		t.Fatalf("inferred %+v", e)
+	}
+	e = Event{Type: EventTarget, Price: d("1.2")}
+	e.Infer(1)
+	if e.Direction != Above || e.Then != ThenFollow {
+		t.Fatalf("inferred %+v", e)
+	}
+	// The closing window: the last tenth, a minute at least, never before
+	// the start.
+	e = Event{Type: EventTarget, StartsAt: t0, Duration: 30 * time.Minute}
+	if !e.ClosingAt().Equal(t0.Add(27*time.Minute)) || !e.EndsAt().Equal(t0.Add(30*time.Minute)) {
+		t.Fatalf("closing at %v", e.ClosingAt())
+	}
+	e.Duration = 5 * time.Minute
+	if !e.ClosingAt().Equal(t0.Add(4 * time.Minute)) {
+		t.Fatalf("a minute at least: %v", e.ClosingAt())
 	}
 }

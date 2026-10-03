@@ -8,14 +8,19 @@
 # canceled. With sim.events on, a change without a signature, an approver
 # named with exchangectl's key (only the admin console's service names
 # one) and a jump of 35% by one operator are refused; one of 2% moves the
-# target and a target event brings it back (A3), and a target 12% away,
-# beyond the price band, is reached by the quotes walking the band. With
-# the bots on ASTRA-USDT-PERP, the user opens a long against them and
-# closes it, and an operator's target 4% down liquidates a 50x long (A4).
-# With market.flat_minutes on, both have a candles_1m row in ClickHouse
-# for each of the ten minutes before the last two (flat when no trade).
-# The moves take about 35% of one operator's 50% an hour: with events in
-# the hour before, they are skipped. Skipped while ASTRA-USDT is not
+# target and another brings it back (A3), and a jump of 12%, beyond the
+# price band, is reached by the quotes walking the band. Threshold
+# targets and spikes (A6): a target too fast for its window is refused
+# with the shortest one; +2% in eight minutes is HIT, a quarter of its 1m
+# candles at least against it, no jump nor a spike in its closing window
+# meanwhile; -2% in three minutes is HIT; a spike of -4% reaches its tip
+# and comes back to the plan within half a percent. With the bots on
+# ASTRA-USDT-PERP, the user opens a long against them and closes it, and
+# an operator's jump 4% down liquidates a 50x long (A4). With
+# market.flat_minutes on, both have a candles_1m row in ClickHouse for
+# each of the ten minutes before the last two (flat when no trade). The
+# moves take about 45% of one operator's 50% an hour: with events in the
+# hour before, they are skipped. Skipped while ASTRA-USDT is not
 # trading or the bots are off (scripts/ops/astra.sh seed, open, on,
 # events-on, perp-open, perp-on).
 #
@@ -152,10 +157,11 @@ else
   [[ $SIM_STATUS == 403 && $(jq -r .code <<<"$SIM_BODY") == SIM_EVENT_NEEDS_APPROVAL ]] ||
     { echo "FAIL a jump of 35% alone: HTTP $SIM_STATUS $SIM_BODY" >&2; exit 1; }
   echo "ok   a jump of 35% needs a second operator (403 SIM_EVENT_NEEDS_APPROVAL)"
-  # The moves below (2% and back, 12% and back, 4% and back) take about
-  # 35% of the 50% one operator may move the price in any hour, counted
-  # with every event and settings change within an hour of now.
-  RECENT=$(pg "SELECT (SELECT count(*) FROM marketsim.events WHERE status <> 'CANCELED' AND type IN ('JUMP', 'TARGET', 'TREND', 'VOLATILITY') AND starts_at BETWEEN now() - interval '1 hour' AND now() + interval '1 hour') + (SELECT count(*) FROM marketsim.param_changes WHERE at > now() - interval '1 hour' AND (move <> 0 OR volume <> 0))")
+  # The moves below (2% and back, 12% and back, targets of 2% and back, a
+  # spike of 4%, 4% and back) take about 45% of the 50% one operator may
+  # move the price in any hour, counted with every event and settings
+  # change within an hour of now.
+  RECENT=$(pg "SELECT (SELECT count(*) FROM marketsim.events WHERE status <> 'CANCELED' AND type IN ('JUMP', 'TARGET', 'SPIKE', 'TREND', 'VOLATILITY') AND starts_at BETWEEN now() - interval '1 hour' AND now() + interval '1 hour') + (SELECT count(*) FROM marketsim.param_changes WHERE at > now() - interval '1 hour' AND (move <> 0 OR volume <> 0))")
   if (( RECENT > 0 )); then
     echo "skip: the price moves ($RECENT events or settings changes within the hour count toward one operator's 50%; they run again an hour after them)"
   else
@@ -167,6 +173,20 @@ solo() {
   simpost /internal/sim/events "$1"
   [[ $SIM_STATUS == 201 ]] || { echo "FAIL $2: HTTP $SIM_STATUS $SIM_BODY" >&2; exit 1; }
 }
+# refused JSON STATUS CODE WHAT: one operator's event, refused so.
+refused() {
+  simpost /internal/sim/events "$1"
+  [[ $SIM_STATUS == "$2" && $(jq -r .code <<<"$SIM_BODY") == "$3" ]] || { echo "FAIL $4: HTTP $SIM_STATUS $SIM_BODY" >&2; exit 1; }
+  echo "ok   $4 ($2 $3)"
+}
+# target_now: the simulation's target price; back_by SHARE PRICE: the
+# jump (a share, 4 decimals) that takes it to PRICE.
+target_now() { simget /internal/sim | jq -r .target_price; }
+back_by() { jq -rn --argjson to "$1" --argjson now "$(target_now)" '($to / $now - 1) * 10000 | round / 10000'; }
+# in_seconds N: the time N seconds from now (RFC 3339, UTC).
+in_seconds() { jq -rn --argjson n "$1" 'now + $n | floor | todateiso8601'; }
+# event_field ID FIELD: an event's field, as the latest events show it.
+event_field() { simget "/internal/sim/events?all=1&limit=50" | jq -r --arg id "$1" --arg f "$2" '.items[] | select(.id == $id) | .[$f] // ""'; }
 if [[ $MOVES == t ]]; then
   solo '{"type":"JUMP","size":0.02,"duration_seconds":10,"actor":"e2e-ops","reason":"e2e: a small jump"}' "a jump of 2%"
   JUMP=$(jq -r .id <<<"$SIM_BODY")
@@ -179,15 +199,15 @@ if [[ $MOVES == t ]]; then
   TO=$(simget /internal/sim | jq -r .target_price)
   [[ $(jq -n "$TO > $FROM * 1.01") == true ]] || { echo "FAIL the target went from $FROM to $TO" >&2; exit 1; }
   echo "ok   the target went from $FROM to $TO"
-  solo "{\"type\":\"TARGET\",\"price\":\"$FROM\",\"duration_seconds\":10,\"actor\":\"e2e-ops\",\"reason\":\"e2e: back\"}" "back to $FROM"
-  echo "ok   a target back to $FROM"
+  solo "{\"type\":\"JUMP\",\"size\":$(back_by "$FROM"),\"duration_seconds\":10,\"actor\":\"e2e-ops\",\"reason\":\"e2e: back\"}" "back to $FROM"
+  echo "ok   a jump back to $FROM"
   audited() { [[ $(pg "SELECT count(*) FROM marketsim.events WHERE created_by = 'e2e-ops' AND approved_by = '' AND created_at > now() - interval '5 minutes'") -ge 2 ]]; }
   eventually 20 "both events recorded" audited
 
   # The price band (10% around the last trade) must not lock the market
-  # (ASTRA design §4): a target 12% away, at once; without anyone's help
-  # the quotes walk the band there within three minutes, and back.
-  echo "== a target beyond the price band"
+  # (ASTRA design §4): a jump of 12%, at once; without anyone's help the
+  # quotes walk the band there within three minutes, and back.
+  echo "== a jump beyond the price band"
   # last_at PRICE: the simulation's last trade, and its book of 8 levels a side.
   last_at() {
     local st
@@ -196,13 +216,57 @@ if [[ $MOVES == t ]]; then
   }
   UP=$(jq -rn --argjson p "$FROM" '$p * 1.12 * 10000 | floor / 10000 | tostring')
   FIRED=$(simget /internal/sim | jq '.watchdog.fired')
-  solo "{\"type\":\"TARGET\",\"price\":\"$UP\",\"actor\":\"e2e-ops\",\"reason\":\"e2e: beyond the band\"}" "a target of $UP"
+  solo "{\"type\":\"JUMP\",\"size\":$(back_by "$UP"),\"actor\":\"e2e-ops\",\"reason\":\"e2e: beyond the band\"}" "a jump to $UP"
   eventually 180 "the market walked the band 12% up to $UP, with 8 levels a side" last_at "$UP"
-  solo "{\"type\":\"TARGET\",\"price\":\"$FROM\",\"actor\":\"e2e-ops\",\"reason\":\"e2e: back inside the band\"}" "back to $FROM"
+  solo "{\"type\":\"JUMP\",\"size\":$(back_by "$FROM"),\"actor\":\"e2e-ops\",\"reason\":\"e2e: back inside the band\"}" "back to $FROM"
   eventually 180 "and back down to $FROM" last_at "$FROM"
   [[ $(simget /internal/sim | jq '.watchdog.fired') == "$FIRED" ]] ||
     { echo "FAIL the watchdog had to unlock the market" >&2; exit 1; }
   echo "ok   the quotes walked the band; the watchdog stayed out of it"
+
+  # Threshold targets and spikes (A6; design §3, §6.2, §8.8): the price
+  # gets above or below a level by the end of a window, slowly and both
+  # ways; a spike moves the printed price for seconds, the plan unchanged.
+  echo "== threshold targets and a spike"
+  P=$(target_now)
+  refused "{\"type\":\"TARGET\",\"direction\":\"ABOVE\",\"price\":\"$(jq -rn --argjson p "$P" '$p * 1.2 * 10000 | ceil / 10000')\",\"duration_seconds\":120,\"actor\":\"e2e-ops\",\"reason\":\"e2e: too fast\"}" \
+    400 SIM_TARGET_INFEASIBLE "+20% in two minutes"
+  [[ $(jq -r .details.min_duration_seconds <<<"$SIM_BODY") -ge 600 ]] || { echo "FAIL the shortest window: $SIM_BODY" >&2; exit 1; }
+  echo "ok   the shortest window given: $(jq -r .details.min_duration_seconds <<<"$SIM_BODY") s"
+  LEVEL=$(jq -rn --argjson p "$P" '$p * 1.02 * 10000 | ceil / 10000')
+  solo "{\"type\":\"TARGET\",\"direction\":\"ABOVE\",\"price\":\"$LEVEL\",\"duration_seconds\":480,\"actor\":\"e2e-ops\",\"reason\":\"e2e: +2% in eight minutes\"}" "a target of $LEVEL"
+  TID=$(jq -r .id <<<"$SIM_BODY")
+  TSTART=$(jq -r .starts_at <<<"$SIM_BODY")
+  TCLOSE=$(jq -r .closing_at <<<"$SIM_BODY")
+  echo "ok   a target above $LEVEL in eight minutes from $P (closing in at $TCLOSE)"
+  refused '{"type":"JUMP","size":0.01,"actor":"e2e-ops","reason":"e2e: a jump over a target"}' 409 SIM_TARGET_RUNNING "a jump while it runs"
+  refused "{\"type\":\"SPIKE\",\"size\":0.01,\"starts_at\":\"$(jq -rn --arg t "$TCLOSE" '$t | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601 + 20 | todateiso8601')\",\"actor\":\"e2e-ops\",\"reason\":\"e2e: a spike while it closes in\"}" \
+    409 SIM_SPIKE_IN_CLOSING "a spike in its closing window"
+  hit() { [[ $(event_field "$1" result) == HIT ]]; }
+  eventually 1200 "HIT within its window" hit "$TID"
+  CROSSED=$(event_field "$TID" crossed_at)
+  # Both ways (§8.8): of its 1m candles from its first whole minute to
+  # its crossing, a quarter at least down.
+  call GET "/v1/market/$SYMBOL/candles?interval=1m&limit=15" ""
+  expect 200 - "its 1m candles"
+  WAYS=$(jq -r --arg from "$TSTART" --arg to "$CROSSED" '[.candles[] | select(.open_time > $from and .open_time < $to)]
+    | "\(length) \(map(select((.close | tonumber) < (.open | tonumber))) | length)"' <<<"$BODY")
+  read -r N DOWNS <<<"$WAYS"
+  (( N >= 4 && DOWNS * 4 >= N )) || { echo "FAIL $DOWNS of $N candles against the target" >&2; exit 1; }
+  echo "ok   crossed at $CROSSED: $DOWNS of its $N whole 1m candles went against it"
+  P=$(target_now)
+  LOW=$(jq -rn --argjson p "$P" '$p / 1.02 * 10000 | floor / 10000')
+  solo "{\"type\":\"TARGET\",\"direction\":\"BELOW\",\"price\":\"$LOW\",\"duration_seconds\":180,\"actor\":\"e2e-ops\",\"reason\":\"e2e: -2% in three minutes\"}" "a target of $LOW"
+  eventually 600 "below $LOW within three minutes: HIT" hit "$(jq -r .id <<<"$SIM_BODY")"
+  AT=$(in_seconds 15)
+  solo "{\"type\":\"SPIKE\",\"size\":-0.04,\"width_seconds\":20,\"starts_at\":\"$AT\",\"actor\":\"e2e-ops\",\"reason\":\"e2e: a spike\"}" "a spike of -4% at $AT"
+  # tip: the last trade at least 2.5% under the plan; on_plan: within half
+  # a percent of it.
+  tip() { [[ $(simget /internal/sim | jq '(.last_price | tonumber) <= (.target_price | tonumber) * 0.975') == true ]]; }
+  on_plan() { [[ $(simget /internal/sim | jq '((.last_price | tonumber) / (.target_price | tonumber) - 1 | fabs) <= 0.005') == true ]]; }
+  sleep 13
+  eventually 30 "the spike's tip" tip
+  eventually 120 "back on the plan, within half a percent" on_plan
 fi
 
 echo "== the perpetual (sim.perp)"
@@ -224,7 +288,7 @@ else
 
   # An operator's event liquidates a leveraged long (design §7, A4): 50x
   # isolated, 1500 ASTRA (about 30 USDT of margin, liquidated about 1.6%
-  # down); a target 4% down moves the spot pair, the index (its minute's
+  # down); a jump 4% down moves the spot pair, the index (its minute's
   # TWAP) and the mark follow, the position is taken over and closed by a
   # liquidation order against the bots. Then the target goes back.
   if [[ $MOVES == t ]]; then
@@ -238,7 +302,7 @@ else
     LIQ=$(jq -r '[.positions[] | select(.symbol == "ASTRA-USDT-PERP")][0].liquidation_price' <<<"$BODY")
     BACK=$(simget /internal/sim | jq -r .target_price)
     DOWN=$(jq -rn --argjson p "$BACK" '$p * 0.96 * 10000 | floor / 10000 | tostring')
-    solo "{\"type\":\"TARGET\",\"price\":\"$DOWN\",\"actor\":\"e2e-ops\",\"reason\":\"e2e: liquidate a long\"}" "a target of $DOWN"
+    solo "{\"type\":\"JUMP\",\"size\":$(back_by "$DOWN"),\"actor\":\"e2e-ops\",\"reason\":\"e2e: liquidate a long\"}" "a jump to $DOWN"
     echo "     the target goes from $BACK to $DOWN; the long's liquidation price is $LIQ"
     liquidated() {
       flat && call GET "/v1/derivatives/fills?symbol=ASTRA-USDT-PERP&limit=20" "" "${AUTH[@]}" &&
@@ -246,7 +310,7 @@ else
     }
     eventually 240 "the long is liquidated against the bots" liquidated
     check '[.items[] | select(.liquidation)] | all(.side == "SELL" and (.realized_pnl | tonumber) < 0)' "a liquidation sell at a loss"
-    solo "{\"type\":\"TARGET\",\"price\":\"$BACK\",\"actor\":\"e2e-ops\",\"reason\":\"e2e: back after the liquidation\"}" "back to $BACK"
+    solo "{\"type\":\"JUMP\",\"size\":$(back_by "$BACK"),\"actor\":\"e2e-ops\",\"reason\":\"e2e: back after the liquidation\"}" "back to $BACK"
     echo "ok   the target goes back to $BACK"
   fi
 fi

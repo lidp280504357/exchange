@@ -144,4 +144,41 @@ func TestBotsSettingsAndState(t *testing.T) {
 	if starting, err := store.EventsStarting(ctx, at, at.Add(time.Hour)); err != nil || len(starting) != 1 {
 		t.Fatalf("a canceled one counts: %+v %v", starting, err)
 	}
+
+	// A threshold target and its spike (A6), saved together: the target's
+	// direction, then, crossing and result, the spike's width and parent.
+	target := domain.Event{
+		ID: uuid.NewString(), Type: domain.EventTarget, Direction: domain.Below, Then: domain.ThenFollow, Price: decimal.RequireFromString("0.95"),
+		Duration: 10 * time.Minute, StartsAt: at.Add(2 * time.Hour), Status: domain.EventScheduled, CreatedBy: "ops", Reason: "a test", CreatedAt: at,
+	}
+	spike := domain.Event{
+		ID: uuid.NewString(), Type: domain.EventSpike, Size: -0.04, Width: 20 * time.Second, ParentID: target.ID,
+		StartsAt: at.Add(2*time.Hour + 3*time.Minute), Status: domain.EventScheduled, CreatedBy: "ops", Reason: "a test", CreatedAt: at,
+	}
+	if err := store.SaveEvents(ctx, []domain.Event{target, spike}, nil); err != nil {
+		t.Fatal(err)
+	}
+	target.Status, target.StartedAt, target.CrossedAt, target.Result = domain.EventRunning, at.Add(2*time.Hour), at.Add(2*time.Hour+9*time.Minute), domain.ResultHit
+	if err := store.SaveEvent(ctx, target, nil); err != nil {
+		t.Fatal(err)
+	}
+	open, err = store.Events(ctx, true, 0)
+	if err != nil || len(open) != 2 {
+		t.Fatalf("open %+v %v", open, err)
+	}
+	for _, x := range open {
+		switch x.ID {
+		case target.ID:
+			if x.Direction != domain.Below || x.Then != domain.ThenFollow || x.Result != domain.ResultHit || !x.CrossedAt.Equal(target.CrossedAt) ||
+				x.ParentID != "" || x.Width != 0 {
+				t.Fatalf("the target %+v", x)
+			}
+		case spike.ID:
+			if x.Type != domain.EventSpike || x.ParentID != target.ID || x.Width != 20*time.Second || x.Size != -0.04 {
+				t.Fatalf("the spike %+v", x)
+			}
+		default:
+			t.Fatalf("another event %+v", x)
+		}
+	}
 }

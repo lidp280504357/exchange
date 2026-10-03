@@ -24,14 +24,15 @@ dX   = −θ X dt + μ dt + σ dW          （θ 按小时，μ、σ 按天）
 - 模型用 float64（对数与高斯噪声），价格与数量出模型时按交易对的 tick 与 lot 转成 decimal。随机源可设种子（`SIM_SEED`），状态里存着随机源，测试可复现。
 - `E(t)` 是运营事件的因子（下一节），没有事件时保持上一个值（初始为 1）。
 
-## 价格事件（设计 §6.2，A3）
+## 价格事件（设计 §6.2，A3；阈值目标与插针 A6）
 
 开关 `sim.events`（按交易对，默认关）打开后，运营可以经管理接口建事件（立即或按 `starts_at` 定时），也可以提前结束：
 
 | 类型 | 参数 | 效果 |
 |---|---|---|
 | `JUMP` | `size`（0.1 即 +10%，大于 −0.9），`duration_seconds`（0 立即，最长 600） | 事件因子 `E` 在这段时间内（对数线性）乘上 `1+size`，之后保持 |
-| `TARGET` | `price`，`duration_seconds`，`hold_seconds` | 目标价沿指数路径走到 `price`，再固定 `hold_seconds`（0 不固定）；结束后模型从该价继续 |
+| `TARGET`（阈值目标，2026-10-04 起） | `direction`（`ABOVE`/`BELOW`，可省：按水平在当前目标价之上还是之下推断），`price`（水平 L），`duration_seconds`（窗口，至少 60），`then`（`FOLLOW` 默认 / `HOLD`），`hold_seconds`（`HOLD` 时必填，最长 24 小时），`spikes`（可选的插针子项） | 见下文「阈值目标」：到窗口结束时价格 ≥ L（或 ≤ L），缓慢、有涨有跌、仍跟随 BTC/ETH；越过即 `HIT`，`FOLLOW` 当场在该价重锚、之后照常走，`HOLD` 再把 L 当下限（上限）守 `hold_seconds` 后重锚 |
+| `SPIKE`（插针，A6） | `size`（相对计划价，单人 ±5%，批准 ±10%），`width_seconds`（默认 20，最长 60），`starts_at`（针的时刻） | 做市报价中心 3 秒内移到计划价 × (1+size)，再在 `width_seconds` 内线性收回；执行者此间每半秒左右推一次成交价。模型的计划不变（模型有自己的随机源，机器人怎么下单都不改路径） |
 | `TREND` | `mu`（每天），`duration_seconds`（0 直到结束） | 期间漂移改为 `mu` |
 | `VOLATILITY` | `factor`，`duration_seconds`（0 直到结束） | 期间波动率乘 `factor` |
 | `PAUSE` | `duration_seconds`（0 直到结束） | 目标价冻结；做市商照常报价，噪声与趋势交易者停止，只留成交间隔下限的那一笔（1 分钟无成交时，在做市商围绕冻结价的报价上成交）：否则 5 分钟以上的暂停会让永续指数没有成交可用、合约进入只减仓（82ba533 审查） |
@@ -40,16 +41,24 @@ dX   = −θ X dt + μ dt + σ dW          （θ 按小时，μ、σ 按天）
 
 - 超过 5 分钟的 `HALT`：停牌期间现货没有成交、做市商挂单也撤了，最后一笔成交 5 分钟后平台指数没有价格（`PlatformIndexAge`，见下文「永续」），永续标记价降级、10 秒后进入只减仓。结束事件后永续回到 `TRADING` 但**仍只减仓**：等机器人重新报价、标记价恢复（`/v1/market/ASTRA-USDT-PERP/mark-price` 的 `degraded` 为 false）后，在后台解除或 `exchangectl derivatives resume ASTRA-USDT-PERP`（见 [derivatives.md](derivatives.md)）。5 分钟以内的 `HALT` 不会这样。
 - `HALT` 事件运行期间每 10 秒检查一次交易对与永续，发现在交易（第一次停牌失败，或被人在后台恢复了）就再停：**要恢复交易请结束事件**（后台的事件页或 `exchangectl sim call`），不要在后台直接把交易对或合约改回 `TRADING`，否则 10 秒内又被停掉。交易对已停、只有永续那一下没停成时也照样补停（569a958 审查 H1）。
-- 同一时间只运行一个移动或固定价格的事件（`JUMP`、`TARGET`、`PAUSE`），后到的排队等前一个结束。事件移动价格时分钟守卫让路，并从事件价格重新开始计算，事件结束后照常限速。
-- 守卫（设计 §6.2，A3 审查后澄清）：一个运营单独一次最多让价格移动 30%，任何一小时内合计最多 50%，按生效时间（事件的 `starts_at`、参数改动的时刻）计，前后各一小时的都算；已取消的不算。各自的"幅度"：`JUMP` 是 `size`；`TARGET` 是目标价离当前目标价（开始后离起点）的距离；`TREND` 是 `mu` 在其时长内（最多一天，没有结束时间按一天）累计的漂移 `e^(mu×天数)−1`；`VOLATILITY` 是多出的一倍标准差 `sigma×|factor−1|×√天数`；参数改动见下文。超过时需要另一名运营批准（`approved_by`，不能是自己，只能由后台服务填，见下一条），否则 403 `SIM_EVENT_NEEDS_APPROVAL`（`details.move`）。即使批准，`JUMP` 最多 +100%（大于 −90%），`TARGET` 同样；事件最多提前 24 小时安排。
+- 同一时间只运行一个移动或固定价格的事件（`JUMP`、`TARGET`、`PAUSE`），后到的排队等前一个结束。`JUMP` 与 `PAUSE` 移动或冻结价格时分钟守卫让路，并从事件价格重新开始计算，事件结束后照常限速；`TARGET` 不让路（它本来就按守卫的速度设计）。`SPIKE` 不占这个位置，可以落在目标的窗口里。
+- **阈值目标**（设计 §3，A6）：
+  - 引导：每分钟把剩余路程 `ln(L/P)` 平摊到剩余分钟（最多 `max_minute_move` 的三分之一），加到事件因子上；分钟按 UTC 两两成对（与 K 线对齐），每对里随机一分钟反向（−1 倍）、另一分钟 3 倍，平均仍是这个速度——默认 σ（每天 2%，每分钟约 0.05%）本身给不出设计 §8.8 要求的"逆向 K 线至少四分之一"，所以由引导保证，噪声与 BTC/ETH 因子照常叠加。
+  - 收口：窗口最后 10%（至少 1 分钟）噪声缩到四分之一，瞄准水平之外 0.1%、按剩余时间的一半走，速度上限放宽到整个 `max_minute_move`，在结束前越过。
+  - 到期仍未越过：按 `max_minute_move` 补最后一步，结果 `MISSED`（告警 `MarketSimTargetMissed`）；进行中如果按 `max_minute_move` 也来不及（BTC/ETH 把价格推远了），`market_sim_target_at_risk` 为 1（告警 `MarketSimTargetAtRisk`），运维可取消或另建更长的。
+  - 结束：`HIT`、`MISSED` 与提前结束（越过前结束为 `CANCELED`，`HOLD` 期间结束仍是 `HIT`）都在当前价重锚，新的 `P0` 写回设置（审计 `market.sim.params_changed`，原因 `TARGET <id> <结果>`），并写审计 `market.sim.target_done`（方向、水平、结果、越过时刻）。看门狗结束的目标也记 `CANCELED`。
+  - 可行性：`|ln(L/P_now)| ≤ 0.6 × max_minute_move × 分钟数`，否则 400 `SIM_TARGET_INFEASIBLE`，`details.min_duration_seconds` 是最短窗口。旧式不带 `direction` 的目标照收（推断方向），但窗口太短同样被拒；瞬间到位的移动请用 `JUMP`。
+  - 目标在跑或排在某时刻时，那段时间（窗口加保持）里新建 `JUMP`、`TREND` 409 `SIM_TARGET_RUNNING`（先取消目标）。
+- **插针的限制**：单人 ±5%，批准 ±10%，超过 400；任意一小时最多 6 根（409 `SIM_SPIKES_PER_HOUR`）；不能落在任何进行中或排队目标的收口期（409 `SIM_SPIKE_IN_CLOSING`）；目标的子项必须在它的窗口里、收口之前，和目标一起建（全部成功或全部不建），目标被提前结束时排队的子项一起取消（自然结束不取消）。
+- 守卫（设计 §6.2，A3 审查后澄清）：一个运营单独一次最多让价格移动 30%，任何一小时内合计最多 50%，按生效时间（事件的 `starts_at`、参数改动的时刻）计，前后各一小时的都算；已取消的不算。各自的"幅度"：`JUMP` 与 `SPIKE` 是 `size`；`TARGET` 是计划移动 `|ln(L/当前目标价)|`（开始后离起点）；`TREND` 是 `mu` 在其时长内（最多一天，没有结束时间按一天）累计的漂移 `e^(mu×天数)−1`；`VOLATILITY` 是多出的一倍标准差 `sigma×|factor−1|×√天数`；参数改动见下文。超过时需要另一名运营批准（`approved_by`，不能是自己，只能由后台服务填，见下一条），否则 403 `SIM_EVENT_NEEDS_APPROVAL`（`details.move`）。即使批准，`JUMP` 最多 +100%（大于 −90%），`TARGET` 同样；事件最多提前 24 小时安排。
 - 参数改动走同一套守卫（`PUT /internal/sim/params`）：幅度 = `p0` 的变化比例 + 新的 `floor`/`ceiling` 迫使当前目标价移动的比例 + `max_minute_move` 调高的部分；另有成交额预算：`daily_volume` 的对数变化，一小时内合计不超过 ln 2（一个人最多翻倍或减半，停掉或从零开启按两倍计）。超过需第二人，否则 403 `SIM_PARAMS_NEED_APPROVAL`（`details.move`、`details.volume`）；`max_minute_move` 硬上限 5%/分。每次改动连同批准人、幅度存在 `marketsim.param_changes` 并进审计。`REANCHOR` 写回的 `P0` 不移动价格，幅度为 0。
 - 审批人身份来自调用方凭据（设计 §6.2，A3 复审后定的契约）：
   - 改动类请求（PUT、POST）必须签名（`internal/platform/svcsign`），每个调用方一把密钥：头 `X-Service-Signature: k=<键名>,t=<秒>,n=<随机数>,v1=<HMAC-SHA256(t\nn\n方法\n路径与查询\n正文)>`，5 分钟内有效，同一键名下的随机数只收一次（同一秒的两个相同请求也是两次）。未签名、键名不认识或签错 401 `SERVICE_UNSIGNED`。
   - 两把键：`ops`（`SIM_API_SECRET`，market-sim 容器里的 `exchangectl sim`）与 `admin`（`SIM_ADMIN_API_SECRET`，admin-service）。签名方担保正文里的 `actor`；**只有 `admin` 键能带 `approved_by`**，其它键带了 403 `SIM_APPROVAL_NEEDS_ADMIN`（在守卫之前拒绝，不论幅度）。
   - admin-service 的义务：`actor` 填当前会话的管理员，`approved_by` 填第二名在后台当场完成认证的管理员（不能是同一人），两者都不取自浏览器提交的字段；它们在正文里，随签名一起被覆盖，改一个字就验不过。这样单人份额以外的改动必须经过后台的双人流程，运维脚本只能做单人份额以内的事。
   - 密钥：测试服在 `/opt/exchange/infra/sim/sim.env`（`SIM_API_SECRET`，只挂给 market-sim）与 `sim/admin.env`（`SIM_ADMIN_API_SECRET`，挂给 market-sim 与 admin-service），部署脚本第一次运行时生成、不打印；本机在 `.env`。有服务器 root 的人本来就能读到两把键，守卫防的是后台里的单个管理员，不防服务器管理员。
-- 事件移动价格时（以及之后一分钟）、报价沿价格带走价时（下一节），事件执行者每 1–2 秒比较最近成交价与报价中心，差距超过半个价差就按方向下市价单（差得越远单子越大，最多 20 档），让成交价跟上。
-- 建事件、提前结束、改设置都写审计（`audit.events`：`market.sim.event_created`、`market.sim.event_canceled`、`market.sim.event_ended`、`market.sim.params_changed`，带参数与当时的目标价）。
+- 事件移动价格时（以及之后一分钟）、报价沿价格带走价时（下一节），事件执行者每 1–2 秒比较最近成交价与报价中心，差距超过半个价差就按方向下市价单（差得越远单子越大，最多 20 档），让成交价跟上；插针期间每 0.4–0.6 秒一次。
+- 建事件、提前结束、改设置都写审计（`audit.events`：`market.sim.event_created`（含 `direction`、`then`、`spikes`）、`market.sim.event_canceled`、`market.sim.event_ended`（含 `result`）、`market.sim.target_done`、`market.sim.params_changed`，带参数与当时的目标价）。
 
 ## 价格带不锁死市场（设计 §4）
 
@@ -107,11 +116,13 @@ market-sim 每 5 秒把目标价上报给 market-data-service（`PUT /internal/m
 | GET | `/internal/sim` | 状态：`symbol`、`enabled`、`running`、`target_price`、`last_price`（十进制字符串，可为 null）、`references_fresh`、`params`、`version`、`guards`（按守卫计数）、`bots`（`user_id`、`role`、`label`、`enabled`、`balances_known`、`usdt`、`coin`、`perp_position`、`futures_usdt`、`error`、`error_at`、`retry_at`（退避到何时，null 为不在退避））、价格带（`anchor_price` 锚点、`price_band`、`quote_center` 报价中心、`walking`、`band_distance` 目标价离锚点几个带宽（±1 以内在带内）、`last_trade_at`、`watchdog` 的 `fired` 与 `last_at`）、`perp`、`perp_running`、`at` |
 | PUT | `/internal/sim/params` | `{"params": {...全部字段...}, "actor": "操作人", "approved_by": "批准人（需要时）"}` → `{"version": n}`；不合法 400，超过单人份额 403 `SIM_PARAMS_NEED_APPROVAL` |
 | POST | `/internal/sim/bots` | `{"user_id", "role": "MAKER|TAKER|TREND|EXECUTOR", "label"}` → 204；同一用户再登记无变化，标签被别的用户占用返回 409；下一轮开始交易 |
-| GET | `/internal/sim/events` | 进行中与排队的事件；`?all=1&limit=50` 取最近的全部状态。每条：`id`、`type`、`size`、`price`、`mu`、`factor`、`duration_seconds`、`hold_seconds`、`starts_at`、`status`（`SCHEDULED`、`RUNNING`、`DONE`、`CANCELED`）、`created_by`、`approved_by`、`reason`、`created_at`、`started_at`、`ended_at`、`from_price`、`ended_by` |
-| POST | `/internal/sim/events` | `{"type", "size", "price", "mu", "factor", "duration_seconds", "hold_seconds", "starts_at"（RFC 3339，可省，最多 24 小时后）, "actor", "approved_by", "reason"}` → 201 事件；`sim.events` 关时 403 `SIM_EVENTS_OFF`，超过单人份额 403 `SIM_EVENT_NEEDS_APPROVAL`，参数不合法或超过硬上限 400 |
+| GET | `/internal/sim/events` | 进行中与排队的事件；`?all=1&limit=50` 取最近的全部状态。每条：`id`、`type`、`size`、`price`、`mu`、`factor`、`duration_seconds`、`hold_seconds`、`starts_at`、`status`（`SCHEDULED`、`RUNNING`、`DONE`、`CANCELED`）、`created_by`、`approved_by`、`reason`、`created_at`、`started_at`、`ended_at`、`from_price`、`ended_by`；A6 起另有 `direction`、`then`、`result`（`""`/`HIT`/`MISSED`/`CANCELED`）、`crossed_at`、`ends_at`、`closing_at`、`hold_until`（只有目标有）、`parent_id`、`width_seconds`（插针） |
+| POST | `/internal/sim/events` | `{"type", "size", "price", "mu", "factor", "duration_seconds", "hold_seconds", "starts_at"（RFC 3339，可省，最多 24 小时后）, "direction", "then", "width_seconds", "spikes": [{"at", "size", "width_seconds"}], "actor", "approved_by", "reason"}` → 201 事件（目标带 `spikes`：建好的子项）；`sim.events` 关时 403 `SIM_EVENTS_OFF`，超过单人份额 403 `SIM_EVENT_NEEDS_APPROVAL`，参数不合法或超过硬上限 400，目标窗口太短 400 `SIM_TARGET_INFEASIBLE`（`details.min_duration_seconds`），与目标冲突 409 `SIM_TARGET_RUNNING`、`SIM_SPIKE_IN_CLOSING`，插针过多 409 `SIM_SPIKES_PER_HOUR` |
+| GET | `/internal/sim/events/{id}/plan` | 目标的计划：`event_id`、`direction`、`level`、`from_price`、`starts_at`、`closing_at`、`ends_at`、`hold_until`、`status`、`points`（每分钟一个 `{at, plan, low, high}`：只按引导的平均路径与噪声加市场因子两倍标准差的包络）、`spikes`、`now`（进行中时 `{at, target, plan, low, high, deviation（ln(目标价/计划价)）, at_risk, crossed_at, result}`，否则 null）；不是目标或最近 200 条里没有 404 |
+| GET | `/internal/sim/target-preview` | `?direction=&price=&duration_seconds=&starts_at=`：按当前目标价预览 `{direction, feasible, min_duration_seconds, move, needs_approval, points}`（后台表单用，不签名） |
 | POST | `/internal/sim/events/{id}/end` | `{"actor", "reason"}` → 200 事件：排队的取消，进行中的就地结束（`HALT` 恢复交易：只动仍是 `HALT` 的交易对与永续，恢复到一半失败时再结束一次会接着做完）；已结束的 409 |
 | GET | `/internal/sim/history` | `?minutes=`（默认与最长一天）：每 10 秒一个点 `{at, target_price, last_price}`（也存在 `marketsim.samples`，保留一天，重启后接着画） |
-| GET | `/internal/sim/stream` | 同样的点每秒一个，server-sent events（`data: {...}`） |
+| GET | `/internal/sim/stream` | 同样的点每秒一个，server-sent events（`data: {...}`）；A6 起每条另有 `target`：没有进行中的目标时 null，否则 `{event_id, plan, low, high, deviation, at_risk, result, crossed_at, ends_at}` |
 
 `GET /internal/sim` 另有 `events`（进行中与排队的事件）。上表的 PUT、POST 都要签名（见「价格事件」的守卫一节）；GET 不用。建事件与改设置逐个处理（从读小时预算到写入），两名运营同时提交不会都钻过单人份额。
 
@@ -127,7 +138,7 @@ sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T mar
 
 后台（admin-service）按这个接口做了"模拟市场"五页（设计 §6，后台重构 C5，见 [admin.md](admin.md)「模拟市场」），用 `svcsign.Client{KeyID: "admin", Secret: SIM_ADMIN_API_SECRET}` 签名，`actor`、`approved_by` 按上面的契约由它填：超出单人份额的改动在后台存成审批，另一位有 `sim.control` 的管理员批准后才带着 `approved_by` 发过来。
 
-端到端 `scripts/e2e/astra.sh` 只用 `ops` 键：未签名 401、带 `approved_by` 403 `SIM_APPROVAL_NEEDS_ADMIN`、单人 35% 403，然后单人份额以内移动价格（2% 来回、带外 12% 来回、合约强平 4% 来回，合计约 35%）；前后一小时内已有移动价格的事件或参数改动时跳过这几段（再跑一次要隔一小时）。批准的路径由后台的端到端覆盖（`admin.sh`：OPERATOR 申请明天开始的 35% 跳涨，ADMIN 批准，检查发起人与批准人后取消）。
+端到端 `scripts/e2e/astra.sh` 只用 `ops` 键：未签名 401、带 `approved_by` 403 `SIM_APPROVAL_NEEDS_ADMIN`、单人 35% 403，然后单人份额以内移动价格（2% 来回、带外 12% 来回、A6：两分钟 +20% 被拒并给出最短窗口、8 分钟 +2% 的阈值目标 `HIT` 且窗口里至少四分之一的 1m K 线反向、期间跳涨与收口期插针被拒、3 分钟 −2% `HIT`、−4% 插针到针尖后回到计划 ±0.5% 以内，合约强平 4% 来回，合计约 45%）；前后一小时内已有移动价格的事件（含插针）或参数改动时跳过这几段（再跑一次要隔一小时）。批准的路径由后台的端到端覆盖（`admin.sh`：OPERATOR 申请明天开始的 35% 跳涨，ADMIN 批准，检查发起人与批准人后取消）。
 
 ## 运维
 
@@ -158,9 +169,9 @@ scripts/ops/astra.sh perp-on     # sim.perp
 
 ## 指标与告警
 
-`market_sim_target_price`、`market_sim_last_price`、`market_sim_running`、`market_sim_references_fresh`、`market_sim_walking`、`market_sim_inventory{asset}`、`market_sim_orders_total{role,result}`（placed、unfunded、out_of_band、failed；永续的角色带 `PERP_` 前缀）、`market_sim_cancels_total{role}`、`market_sim_guards_total{guard}`、`market_sim_throttled_total{kind}`、`market_sim_errors_total{op}`（含 `perp_last_trade`：读不到永续最近成交）、`market_sim_band_deadlocks_total`、`market_sim_quiet_takes_total`（现货冷清时的吃单）、`market_sim_perp_quiet_takes_total`（永续 45 秒无成交时的最小量吃单）。
+`market_sim_target_price`、`market_sim_last_price`、`market_sim_running`、`market_sim_references_fresh`、`market_sim_walking`、`market_sim_inventory{asset}`、`market_sim_orders_total{role,result}`（placed、unfunded、out_of_band、failed；永续的角色带 `PERP_` 前缀）、`market_sim_cancels_total{role}`、`market_sim_guards_total{guard}`、`market_sim_throttled_total{kind}`、`market_sim_errors_total{op}`（含 `perp_last_trade`：读不到永续最近成交）、`market_sim_band_deadlocks_total`、`market_sim_quiet_takes_total`（现货冷清时的吃单）、`market_sim_perp_quiet_takes_total`（永续 45 秒无成交时的最小量吃单）、`market_sim_target_at_risk`（进行中的目标按守卫速度也到不了时为 1）、`market_sim_targets_total{result}`（结束的目标：`HIT`、`MISSED`、`CANCELED`）。
 
-告警：`MarketSimFailing`（10 分钟失败超过 100 次）、`MarketSimReferencesStale`（运行中 5 分钟没有新鲜的 BTC/ETH 参考价）、`MarketSimBandDeadlock`（15 分钟内看门狗动过手：查 `GET /internal/sim` 的 `anchor_price`、`band_distance`、机器人的 `error` 与 `retry_at`，以及日志 `the market was locked`）。
+告警：`MarketSimFailing`（10 分钟失败超过 100 次）、`MarketSimReferencesStale`（运行中 5 分钟没有新鲜的 BTC/ETH 参考价）、`MarketSimBandDeadlock`（15 分钟内看门狗动过手：查 `GET /internal/sim` 的 `anchor_price`、`band_distance`、机器人的 `error` 与 `retry_at`，以及日志 `the market was locked`）、`MarketSimTargetAtRisk`（目标 1 分钟都处在来不及的状态：延长——取消后另建——或取消）、`MarketSimTargetMissed`（15 分钟内有目标 `MISSED`）。
 
 ## 还没做（后续批次）
 

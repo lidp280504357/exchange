@@ -396,6 +396,34 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'market_sim_target_at_risk{job="market-sim", instance="s"}'
+        values: '0 0 1 1 1'
+      - series: 'market_sim_targets_total{job="market-sim", instance="s", result="MISSED"}'
+        values: '0x5 1x10'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: MarketSimTargetAtRisk
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: MarketSimTargetAtRisk
+        exp_alerts:
+          - exp_labels: {severity: warning, job: market-sim}
+            exp_annotations:
+              summary: "the platform coin's threshold target cannot reach its level in time even at the minute guard's pace (BTC and ETH pushed the price away): lengthen it or cancel it, or it ends MISSED"
+              runbook: docs/runbook/market-sim.md
+      - eval_time: 4m
+        alertname: MarketSimTargetMissed
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: MarketSimTargetMissed
+        exp_alerts:
+          - exp_labels: {severity: warning, job: market-sim}
+            exp_annotations:
+              summary: "a threshold target of the platform coin ended MISSED: its window ended before the price crossed its level (a last push of the minute guard was made)"
+              runbook: docs/runbook/market-sim.md
+
+  - interval: 1m
+    input_series:
       - series: 'market_sim_heartbeat_age_seconds{job="market-data-service", instance="d", symbol="ASTRA-USDT"}'
         values: '5 5 5 70 130'
     alert_rule_test:

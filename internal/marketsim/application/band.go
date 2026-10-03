@@ -206,10 +206,17 @@ func (s *Sim) watch(ctx context.Context, now time.Time, sh domain.Shape) {
 			continue
 		}
 		e.Status, e.EndedAt, e.EndedBy = domain.EventDone, now, watchdogActor
+		if e.Type == domain.EventTarget && e.CrossedAt.IsZero() {
+			e.Result = domain.ResultCanceled
+		}
 		s.persist(ctx, e, &ports.Audit{
 			Action: "market.sim.event_ended", Target: "sim-event:" + e.ID, Actor: watchdogActor, Reason: "the market was locked: " + why,
-			Details: fmt.Sprintf(`{"type":%q,"target":%v,"anchor":%v}`, e.Type, target, anchor),
+			Details: fmt.Sprintf(`{"type":%q,"target":%v,"anchor":%v,"result":%q}`, e.Type, target, anchor, e.Result),
 		})
+		if e.Type == domain.EventTarget {
+			s.m.targets.WithLabelValues(e.Result).Inc()
+			s.cancelSpikes(ctx, e.ID, now, watchdogActor)
+		}
 		s.movedAt = now
 	}
 	s.events = slices.DeleteFunc(s.events, func(e *domain.Event) bool { return e.Status == domain.EventDone })

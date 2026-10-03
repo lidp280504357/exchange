@@ -70,12 +70,13 @@ func (s *Sim) startDue(ctx context.Context, now time.Time) {
 		if e.Moves() && slices.ContainsFunc(s.runningEvents(), func(r *domain.Event) bool { return r.Moves() }) {
 			continue
 		}
+		e.Infer(s.model.State.P) // a target made before A6
 		e.Status, e.StartedAt = domain.EventRunning, now
 		e.FromLogE, e.FromP = s.model.State.LogE, decimal.NewFromFloat(s.model.State.P)
 		switch e.Type {
 		case domain.EventReanchor:
 			s.model.Reanchor(s.btc, s.eth)
-			s.keepAnchor(ctx, e)
+			s.keepAnchor(ctx, e, "REANCHOR "+e.ID)
 		case domain.EventHalt:
 			s.stop(ctx)
 			why := "simulated market event " + e.ID + ": " + e.Reason
@@ -143,11 +144,12 @@ func (s *Sim) keepHalted(ctx context.Context, now time.Time) {
 	}
 }
 
-// finish ends the events that ran their course this step; the price p
-// they held (a pause, a target) is where the model goes on from.
+// finish ends the events that ran their course this step (a target's end
+// is watchTarget's); the price p a pause held is where the model goes on
+// from.
 func (s *Sim) finish(ctx context.Context, now time.Time, ended []*domain.Event, p float64) {
 	for _, e := range ended {
-		if e.Type == domain.EventPause || e.Type == domain.EventTarget {
+		if e.Type == domain.EventPause {
 			s.model.Hold(p)
 		}
 		e.Status, e.EndedAt = domain.EventDone, now
@@ -162,10 +164,10 @@ func (s *Sim) finish(ctx context.Context, now time.Time, ended []*domain.Event, 
 	})
 }
 
-// keepAnchor saves the new P0 of a re-anchoring in the settings: the
-// model's next start, and the operators' form, go on from it. It moves no
-// price: the target stays where it was.
-func (s *Sim) keepAnchor(ctx context.Context, e *domain.Event) {
+// keepAnchor saves the new P0 of a re-anchoring (an event's, why) in the
+// settings: the model's next start, and the operators' form, go on from
+// it. It moves no price: the target stays where it was.
+func (s *Sim) keepAnchor(ctx context.Context, e *domain.Event, why string) {
 	p := s.params
 	from := p.P0
 	p.P0 = s.model.Params.P0
@@ -173,7 +175,7 @@ func (s *Sim) keepAnchor(ctx context.Context, e *domain.Event) {
 	st := s.model.Snapshot()
 	change := ports.ParamChange{At: s.now(), Actor: e.CreatedBy, ApprovedBy: e.ApprovedBy, State: &st}
 	version, err := s.store.SaveSettings(ctx, p, change, &ports.Audit{
-		Action: "market.sim.params_changed", Target: "sim:" + s.cfg.Symbol, Actor: e.CreatedBy, Reason: "REANCHOR " + e.ID, Details: string(details),
+		Action: "market.sim.params_changed", Target: "sim:" + s.cfg.Symbol, Actor: e.CreatedBy, Reason: why, Details: string(details),
 	})
 	if err != nil {
 		s.m.errors.WithLabelValues("settings").Inc()
@@ -195,10 +197,14 @@ func (s *Sim) persist(ctx context.Context, e *domain.Event, audit *ports.Audit) 
 // band toward it: every second or two, a market order in the center's
 // direction when the last trade is off by more than half the spread,
 // larger the farther off. The trades move the band's anchor, and the
-// walk goes on from there.
-func (s *Sim) execute(ctx context.Context, now time.Time, center float64) {
+// walk goes on from there. While a spike runs (spiking) every half second
+// or so: its tip within a few seconds (§6.2).
+func (s *Sim) execute(ctx context.Context, now time.Time, center float64, spiking bool) {
 	moving := slices.ContainsFunc(s.runningEvents(), func(e *domain.Event) bool { return e.Type == domain.EventJump || e.Type == domain.EventTarget })
-	if (!moving && !s.walking && now.Sub(s.movedAt) > executeAfter) || now.Before(s.executeAt) {
+	if spiking {
+		s.spikedAt = now
+	}
+	if (!moving && !s.walking && now.Sub(s.movedAt) > executeAfter && now.Sub(s.spikedAt) > executeAfter) || now.Before(s.executeAt) {
 		return
 	}
 	executors := s.botsOf(domain.RoleExecutor)
@@ -207,6 +213,9 @@ func (s *Sim) execute(ctx context.Context, now time.Time, center float64) {
 	}
 	rng := s.model.Rand()
 	s.executeAt = now.Add(time.Second + time.Duration(rng.Int64N(int64(time.Second))))
+	if spiking {
+		s.executeAt = now.Add(400*time.Millisecond + time.Duration(rng.Int64N(int64(200*time.Millisecond))))
+	}
 	gap := center/s.last.InexactFloat64() - 1
 	if math.Abs(gap) <= s.params.Spread/2 {
 		return
@@ -288,61 +297,123 @@ func (b budget) spends(p, sigma float64) []domain.Spend {
 
 // CreateEvent schedules an operator's event, at once when it starts no
 // later than now, after the checks of §6.2: sim.events on, the event
-// valid and due within MaxLead, a target no farther than a jump may go,
-// and within one operator's share of the budget where it starts unless
-// another operator approved it.
-func (s *Sim) CreateEvent(ctx context.Context, e domain.Event) (domain.Event, error) {
+// valid and due within MaxLead; a threshold target no farther than a jump
+// may go and reachable slowly in its window; no jump or trend over a
+// target; a spike's limits; and within one operator's share of the budget
+// where each starts unless another operator approved it. A target's
+// spikes come with it (it is their parent), all or none.
+func (s *Sim) CreateEvent(ctx context.Context, e domain.Event, spikes ...domain.Event) (domain.Event, error) {
 	if !s.flags.Enabled(flags.KeySimEvents, flags.Subject{Symbol: s.cfg.Symbol}) {
 		return domain.Event{}, ErrEventsOff
+	}
+	if len(spikes) > 0 && e.Type != domain.EventTarget {
+		return domain.Event{}, apperr.Invalid("only a target comes with spikes")
 	}
 	s.ops.Lock()
 	defer s.ops.Unlock()
 	now := s.now()
-	e.ID, e.Status, e.CreatedAt = uuid.Must(uuid.NewV7()).String(), domain.EventScheduled, now
-	e.StartedAt, e.EndedAt, e.FromLogE, e.FromP, e.EndedBy = time.Time{}, time.Time{}, 0, decimal.Zero, ""
-	if e.StartsAt.Before(now) {
-		e.StartsAt = now
+	fresh := func(x *domain.Event) {
+		x.ID, x.Status, x.CreatedAt = uuid.Must(uuid.NewV7()).String(), domain.EventScheduled, now
+		x.StartedAt, x.EndedAt, x.FromLogE, x.FromP, x.EndedBy = time.Time{}, time.Time{}, 0, decimal.Zero, ""
+		x.CrossedAt, x.Result = time.Time{}, ""
+		if x.StartsAt.Before(now) {
+			x.StartsAt = now
+		}
+		if x.Type == domain.EventSpike && x.Width == 0 {
+			x.Width = domain.DefaultSpikeWidth
+		}
 	}
-	if err := e.Validate(); err != nil {
-		return domain.Event{}, apperr.Invalid(err.Error())
+	fresh(&e)
+	for i := range spikes {
+		x := &spikes[i]
+		x.Type, x.CreatedBy, x.ApprovedBy, x.Reason = domain.EventSpike, e.CreatedBy, e.ApprovedBy, e.Reason
+		fresh(x)
+		x.ParentID = e.ID
 	}
-	if e.StartsAt.After(now.Add(domain.MaxLead)) {
-		return domain.Event{}, apperr.Invalid("an event starts within 24 hours")
+	if e.Type != domain.EventTarget {
+		if err := e.Validate(); err != nil {
+			return domain.Event{}, apperr.Invalid(err.Error())
+		}
 	}
+	for _, x := range append([]domain.Event{e}, spikes...) {
+		if x.StartsAt.After(now.Add(domain.MaxLead)) {
+			return domain.Event{}, apperr.Invalid("an event starts within 24 hours")
+		}
+	}
+	// The budget where each starts: the event's, and each spike's.
 	spent, err := s.budget(ctx, e.StartsAt)
 	if err != nil {
 		return domain.Event{}, err
 	}
+	spikeSpent := make([]budget, len(spikes))
+	for i, x := range spikes {
+		if spikeSpent[i], err = s.budget(ctx, x.StartsAt); err != nil {
+			return domain.Event{}, err
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p := s.model.State.P
-	move := e.Move(p, s.params.Sigma)
-	if e.Type == domain.EventTarget && (move > domain.MaxJump || move <= -0.9) {
-		return domain.Event{}, apperr.Invalid("a target moves the price by at most +100% and by less than -90%")
+	switch e.Type {
+	case domain.EventTarget:
+		if err := s.checkTarget(&e, p); err != nil {
+			return domain.Event{}, err
+		}
+		if err := s.checkSpikes(ctx, spikes, &e); err != nil {
+			return domain.Event{}, err
+		}
+	case domain.EventJump, domain.EventTrend:
+		if s.targetOver(e.StartsAt) {
+			return domain.Event{}, ErrTargetRunning
+		}
+	case domain.EventSpike:
+		if err := s.checkSpikes(ctx, []domain.Event{e}, nil); err != nil {
+			return domain.Event{}, err
+		}
 	}
-	if domain.NeedsApproval(domain.Spend{At: e.StartsAt, Move: move}, spent.spends(p, s.params.Sigma)) &&
-		(e.ApprovedBy == "" || e.ApprovedBy == e.CreatedBy) {
+	approved := e.ApprovedBy != "" && e.ApprovedBy != e.CreatedBy
+	move := e.Move(p, s.params.Sigma)
+	mine := []domain.Spend{{At: e.StartsAt, Move: move}}
+	if domain.NeedsApproval(mine[0], spent.spends(p, s.params.Sigma)) && !approved {
 		return domain.Event{}, ErrNeedsApproval.WithDetail("move", math.Round(move*1e4)/1e4)
+	}
+	for i, x := range spikes {
+		spend := domain.Spend{At: x.StartsAt, Move: x.Size}
+		if domain.NeedsApproval(spend, append(spikeSpent[i].spends(p, s.params.Sigma), mine...)) && !approved {
+			return domain.Event{}, ErrNeedsApproval.WithDetail("move", math.Round(x.Size*1e4)/1e4).WithDetail("spike", i)
+		}
+		mine = append(mine, spend)
+	}
+	children := make([]map[string]any, 0, len(spikes))
+	for _, x := range spikes {
+		children = append(children, map[string]any{"id": x.ID, "starts_at": x.StartsAt, "size": x.Size, "width_s": int(x.Width.Seconds())})
 	}
 	details, _ := json.Marshal(map[string]any{
 		"type": e.Type, "size": e.Size, "price": e.Price.String(), "mu": e.Mu, "factor": e.Factor,
 		"duration_s": int(e.Duration.Seconds()), "hold_s": int(e.Hold.Seconds()), "starts_at": e.StartsAt, "approved_by": e.ApprovedBy,
+		"direction": e.Direction, "then": e.Then, "width_s": int(e.Width.Seconds()), "spikes": children,
 		"signed_by": svcsign.KeyID(ctx),
 		"target":    p,
 	})
-	if err := s.store.SaveEvent(ctx, e, &ports.Audit{
+	if err := s.store.SaveEvents(ctx, append([]domain.Event{e}, spikes...), &ports.Audit{
 		Action: "market.sim.event_created", Target: "sim-event:" + e.ID, Actor: e.CreatedBy, Reason: e.Reason, Details: string(details),
 	}); err != nil {
 		return domain.Event{}, err
 	}
 	s.events = append(s.events, &e)
-	s.log.InfoContext(ctx, "simulated market event created", "event", e.ID, "type", e.Type, "by", e.CreatedBy, "starts_at", e.StartsAt)
+	for i := range spikes {
+		s.events = append(s.events, &spikes[i])
+	}
+	s.log.InfoContext(ctx, "simulated market event created", "event", e.ID, "type", e.Type, "by", e.CreatedBy, "starts_at", e.StartsAt,
+		"spikes", len(spikes))
 	return e, nil
 }
 
 // EndEvent ends an event early for actor: a scheduled one is canceled, a
-// running one done where it stands (a held price is where the model goes
-// on from; a halted pair trades again).
+// running one done where it stands (a pause's price is where the model
+// goes on from; a target's too, re-anchored there, CANCELED unless it had
+// crossed; a halted pair trades again). A target's scheduled spikes are
+// canceled with it.
 func (s *Sim) EndEvent(ctx context.Context, id, actor, reason string) (domain.Event, error) {
 	if actor == "" || len(reason) < 3 {
 		return domain.Event{}, apperr.Invalid("the operator and a reason are required")
@@ -358,11 +429,20 @@ func (s *Sim) EndEvent(ctx context.Context, id, actor, reason string) (domain.Ev
 	action := "market.sim.event_canceled"
 	if e.Status == domain.EventScheduled {
 		e.Status = domain.EventCanceled
+		if e.Type == domain.EventTarget {
+			e.Result = domain.ResultCanceled
+		}
 	} else {
 		action = "market.sim.event_ended"
 		switch e.Type {
-		case domain.EventPause, domain.EventTarget:
+		case domain.EventPause:
 			s.model.Hold(s.model.State.P)
+		case domain.EventTarget:
+			if e.CrossedAt.IsZero() {
+				e.Result = domain.ResultCanceled
+			}
+			s.model.Reanchor(s.btc, s.eth)
+			s.keepAnchor(ctx, e, "TARGET "+e.ID+" ended")
 		case domain.EventHalt:
 			// Each resumes only what is still halted: ending the event
 			// again after the perpetual or the record failed goes on
@@ -383,11 +463,15 @@ func (s *Sim) EndEvent(ctx context.Context, id, actor, reason string) (domain.Ev
 	e.EndedAt, e.EndedBy = now, actor
 	if err := s.store.SaveEvent(ctx, *e, &ports.Audit{
 		Action: action, Target: "sim-event:" + e.ID, Actor: actor, Reason: reason,
-		Details: fmt.Sprintf(`{"type":%q,"target":%v,"signed_by":%q}`, e.Type, s.model.State.P, svcsign.KeyID(ctx)),
+		Details: fmt.Sprintf(`{"type":%q,"target":%v,"result":%q,"signed_by":%q}`, e.Type, s.model.State.P, e.Result, svcsign.KeyID(ctx)),
 	}); err != nil {
 		return domain.Event{}, err
 	}
-	s.events = slices.Delete(s.events, i, i+1)
+	if e.Type == domain.EventTarget {
+		s.m.targets.WithLabelValues(e.Result).Inc()
+		s.cancelSpikes(ctx, e.ID, now, actor)
+	}
+	s.events = slices.DeleteFunc(s.events, func(x *domain.Event) bool { return x == e })
 	return *e, nil
 }
 

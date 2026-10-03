@@ -101,10 +101,13 @@ type Sim struct {
 	guards    map[domain.Guard]int
 	events    []*domain.Event // scheduled and running
 	movedAt   time.Time       // when an event last moved the price
-	executeAt time.Time       // the executors' next turn
-	quietAt   time.Time       // a taker's last order in a quiet market (quietTake)
-	samples   []Sample
-	prunedAt  time.Time
+	spikedAt  time.Time       // when a spike last ran
+	// targetAtRisk is whether the running target was at risk last round.
+	targetAtRisk bool
+	executeAt    time.Time // the executors' next turn
+	quietAt      time.Time // a taker's last order in a quiet market (quietTake)
+	samples      []Sample
+	prunedAt     time.Time
 
 	// The price band (band.go): the anchor as read lately, the last
 	// trade's time, where the makers quote and whether the quotes walk,
@@ -236,6 +239,7 @@ func (s *Sim) Start(ctx context.Context) error {
 		return err
 	}
 	for i := range open {
+		open[i].Infer(st.P) // a target made before A6
 		s.events = append(s.events, &open[i])
 	}
 	// The chart goes on from the day before the restart.
@@ -372,9 +376,10 @@ func (s *Sim) Round(ctx context.Context) {
 	s.m.running.Set(1)
 	s.refreshRefs(ctx, now)
 	s.startDue(ctx, now)
-	sh, ended := domain.ShapeOf(s.runningEvents(), now)
+	sh, ended := domain.ShapeOf(s.runningEvents(), now, s.model.State.P, s.params.MaxMinuteMove)
 	p, guard := s.model.Step(now, s.btc, s.eth, sh)
 	s.finish(ctx, now, ended, p)
+	s.watchTarget(ctx, now, p)
 	s.m.target.Set(p)
 	if guard != domain.GuardNone {
 		s.guards[guard]++
@@ -397,8 +402,9 @@ func (s *Sim) Round(ctx context.Context) {
 		return // the halt canceled the makers' orders; the pair waits
 	}
 	// The quotes stand within the price band around its anchor; beyond
-	// it they walk toward the target (band.go).
-	center, walking := domain.QuoteCenter(p, s.anchors(), s.pair.Band)
+	// it they walk toward the target (band.go). A spike moves them, not
+	// the target.
+	center, walking := domain.QuoteCenter(p*(1+sh.Spike), s.anchors(), s.pair.Band)
 	s.center, s.walking = center, walking
 	s.m.walking.Set(map[bool]float64{false: 0, true: 1}[walking])
 	s.quote(ctx, now, center)
@@ -407,7 +413,7 @@ func (s *Sim) Round(ctx context.Context) {
 	if !paused {
 		s.follow(ctx, now, center)
 	}
-	s.execute(ctx, now, center)
+	s.execute(ctx, now, center, sh.Spike != 0)
 	s.perp(ctx, now, p, dt)
 	s.chores(ctx, now)
 }
@@ -956,6 +962,8 @@ type metrics struct {
 	cancels, guards, throttled       *prometheus.CounterVec
 	errors                           *prometheus.CounterVec
 	deadlocks, quiet, perpQuiet      prometheus.Counter
+	targetAtRisk                     prometheus.Gauge
+	targets                          *prometheus.CounterVec
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -998,7 +1006,14 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Help: "Takers' minimum orders on the perpetual sent because it had not traded for 45 seconds (its 1-minute candles stay whole).",
 		}),
 	}
+	m.targetAtRisk = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "market_sim_target_at_risk",
+		Help: "1 while the running threshold target cannot reach its level in time even at the minute guard's pace (BTC and ETH pushed the price away).",
+	})
+	m.targets = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "market_sim_targets_total", Help: "Threshold targets ended, by result (HIT, MISSED, CANCELED).",
+	}, []string{"result"})
 	reg.MustRegister(m.target, m.last, m.running, m.refsFresh, m.walking, m.inventory, m.orders, m.cancels, m.guards, m.throttled, m.errors,
-		m.deadlocks, m.quiet, m.perpQuiet)
+		m.deadlocks, m.quiet, m.perpQuiet, m.targetAtRisk, m.targets)
 	return m
 }

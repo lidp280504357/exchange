@@ -163,8 +163,10 @@ type Store interface {
 	// started) from from to to.
 	EventsStarting(ctx context.Context, from, to time.Time) ([]domain.Event, error)
 	// SaveEvent stores an event (new or changed), with the audit record
-	// when there is one.
+	// when there is one; SaveEvents several at once (a target and its
+	// spikes), all or none.
 	SaveEvent(ctx context.Context, e domain.Event, audit *Audit) error
+	SaveEvents(ctx context.Context, es []domain.Event, audit *Audit) error
 	// SaveSample keeps a sample of the target and the last price;
 	// Samples returns the ones since t, oldest first; PruneSamples drops
 	// the ones before t.

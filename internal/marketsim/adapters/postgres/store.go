@@ -156,22 +156,30 @@ func (s *Store) ParamChanges(ctx context.Context, from, to time.Time) ([]ports.P
 }
 
 const eventColumns = `id::text, type, size, price, mu, factor, duration_s, hold_s, starts_at, status, created_by, approved_by, reason,
-	created_at, started_at, ended_at, from_log_e, from_p, ended_by`
+	created_at, started_at, ended_at, from_log_e, from_p, ended_by, direction, then_mode, width_s, parent_id::text, crossed_at, result`
 
 func scanEvent(row pgx.Row) (domain.Event, error) {
 	var e domain.Event
 	var typ string
-	var duration, hold int
-	var started, ended *time.Time
+	var duration, hold, width int
+	var started, ended, crossed *time.Time
+	var parent *string
 	err := row.Scan(&e.ID, &typ, &e.Size, &e.Price, &e.Mu, &e.Factor, &duration, &hold, &e.StartsAt, &e.Status, &e.CreatedBy,
-		&e.ApprovedBy, &e.Reason, &e.CreatedAt, &started, &ended, &e.FromLogE, &e.FromP, &e.EndedBy)
+		&e.ApprovedBy, &e.Reason, &e.CreatedAt, &started, &ended, &e.FromLogE, &e.FromP, &e.EndedBy, &e.Direction, &e.Then, &width,
+		&parent, &crossed, &e.Result)
 	e.Type = domain.EventType(typ)
-	e.Duration, e.Hold = time.Duration(duration)*time.Second, time.Duration(hold)*time.Second
+	e.Duration, e.Hold, e.Width = time.Duration(duration)*time.Second, time.Duration(hold)*time.Second, time.Duration(width)*time.Second
 	if started != nil {
 		e.StartedAt = *started
 	}
 	if ended != nil {
 		e.EndedAt = *ended
+	}
+	if crossed != nil {
+		e.CrossedAt = *crossed
+	}
+	if parent != nil {
+		e.ParentID = *parent
 	}
 	return e, err
 }
@@ -207,26 +215,42 @@ func (s *Store) list(ctx context.Context, q string, args ...any) ([]domain.Event
 
 // SaveEvent stores a new event or its new course.
 func (s *Store) SaveEvent(ctx context.Context, e domain.Event, audit *ports.Audit) error {
+	return s.SaveEvents(ctx, []domain.Event{e}, audit)
+}
+
+// SaveEvents stores new events or their new courses in one transaction
+// (a target and its spikes), with one audit record.
+func (s *Store) SaveEvents(ctx context.Context, es []domain.Event, audit *ports.Audit) error {
 	stamp := func(t time.Time) *time.Time {
 		if t.IsZero() {
 			return nil
 		}
 		return &t
 	}
+	text := func(v string) *string {
+		if v == "" {
+			return nil
+		}
+		return &v
+	}
 	err := s.db.InTx(ctx, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO events (`+strings.ReplaceAll(eventColumns, "id::text", "id")+`)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-			ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, started_at = EXCLUDED.started_at, ended_at = EXCLUDED.ended_at,
-				from_log_e = EXCLUDED.from_log_e, from_p = EXCLUDED.from_p, ended_by = EXCLUDED.ended_by`,
-			e.ID, string(e.Type), e.Size, e.Price, e.Mu, e.Factor, int(e.Duration.Seconds()), int(e.Hold.Seconds()), e.StartsAt, e.Status,
-			e.CreatedBy, e.ApprovedBy, e.Reason, e.CreatedAt, stamp(e.StartedAt), stamp(e.EndedAt), e.FromLogE, e.FromP, e.EndedBy)
-		if err != nil {
-			return err
+		for _, e := range es {
+			_, err := tx.Exec(ctx, `INSERT INTO events (`+strings.NewReplacer("id::text", "id", "parent_id::text", "parent_id").Replace(eventColumns)+`)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+				ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, started_at = EXCLUDED.started_at, ended_at = EXCLUDED.ended_at,
+					from_log_e = EXCLUDED.from_log_e, from_p = EXCLUDED.from_p, ended_by = EXCLUDED.ended_by,
+					direction = EXCLUDED.direction, then_mode = EXCLUDED.then_mode, crossed_at = EXCLUDED.crossed_at, result = EXCLUDED.result`,
+				e.ID, string(e.Type), e.Size, e.Price, e.Mu, e.Factor, int(e.Duration.Seconds()), int(e.Hold.Seconds()), e.StartsAt, e.Status,
+				e.CreatedBy, e.ApprovedBy, e.Reason, e.CreatedAt, stamp(e.StartedAt), stamp(e.EndedAt), e.FromLogE, e.FromP, e.EndedBy,
+				e.Direction, e.Then, int(e.Width.Seconds()), text(e.ParentID), stamp(e.CrossedAt), e.Result)
+			if err != nil {
+				return fmt.Errorf("event %s: %w", e.ID, err)
+			}
 		}
 		return s.audit(ctx, tx, audit)
 	})
 	if err != nil {
-		return fmt.Errorf("save event %s: %w", e.ID, err)
+		return fmt.Errorf("save events: %w", err)
 	}
 	return nil
 }

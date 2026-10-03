@@ -325,13 +325,19 @@ func (m *memStore) EventsStarting(_ context.Context, from, to time.Time) ([]doma
 	return out, nil
 }
 
-func (m *memStore) SaveEvent(_ context.Context, e domain.Event, audit *ports.Audit) error {
+func (m *memStore) SaveEvent(ctx context.Context, e domain.Event, audit *ports.Audit) error {
+	return m.SaveEvents(ctx, []domain.Event{e}, audit)
+}
+
+func (m *memStore) SaveEvents(_ context.Context, es []domain.Event, audit *ports.Audit) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if i := slices.IndexFunc(m.events, func(x domain.Event) bool { return x.ID == e.ID }); i >= 0 {
-		m.events[i] = e
-	} else {
-		m.events = append(m.events, e)
+	for _, e := range es {
+		if i := slices.IndexFunc(m.events, func(x domain.Event) bool { return x.ID == e.ID }); i >= 0 {
+			m.events[i] = e
+		} else {
+			m.events = append(m.events, e)
+		}
 	}
 	if audit != nil {
 		m.audits = append(m.audits, *audit)
@@ -810,26 +816,6 @@ func TestEventsNeedTheSwitchAndBeyondLimitsASecondOperator(t *testing.T) {
 	}
 }
 
-func TestATargetIsReachedAndHeld(t *testing.T) {
-	r := newRig(t, nil)
-	r.rounds(4)
-	e := r.create(t, domain.Event{Type: domain.EventTarget, Price: d("1.2"), Duration: 10 * time.Second, Hold: 5 * time.Second})
-	r.rounds(4 * 11)
-	if p := r.sim.Status().Target; p != 1.2 {
-		t.Fatalf("arrived at %v", p)
-	}
-	if got := r.store.event(e.ID); got.Status != domain.EventRunning {
-		t.Fatalf("holding: %s", got.Status)
-	}
-	r.rounds(4 * 5)
-	if got := r.store.event(e.ID); got.Status != domain.EventDone {
-		t.Fatalf("after the hold: %s", got.Status)
-	}
-	if p := r.sim.Status().Target; p < 1.19 || p > 1.21 {
-		t.Fatalf("goes on from 1.2: %v", p)
-	}
-}
-
 func TestAPauseStopsTheTakers(t *testing.T) {
 	p := domain.DefaultParams()
 	p.DailyVolume = 86_400 * 400 * 4 // four orders a second
@@ -1140,7 +1126,7 @@ func executorStore() *memStore {
 func TestTheQuotesWalkTheBandToATargetBeyondIt(t *testing.T) {
 	r := bandRig(t, executorStore())
 	r.rounds(8)
-	r.create(t, domain.Event{Type: domain.EventTarget, Price: d("1.35"), Hold: time.Hour, ApprovedBy: "ops2"})
+	r.create(t, domain.Event{Type: domain.EventJump, Size: 0.35, ApprovedBy: "ops2"})
 	r.rounds(2)
 	if st := r.sim.Status(); !st.Walking || st.Center > 1.0001*1.1 || st.Band != 0.1 || st.Anchor != 1.0001 {
 		t.Fatalf("the quotes do not walk from the band's edge: %+v", st)
@@ -1177,8 +1163,8 @@ func TestTheQuotesWalkTheBandToATargetBeyondIt(t *testing.T) {
 }
 
 // Nothing trades for three minutes (the market orders go nowhere): the
-// watchdog ends the target that holds the price beyond the band and
-// rebases the model at the band's anchor. A pause is no lock.
+// watchdog ends the jump that takes the price beyond the band and rebases
+// the model at the band's anchor. A pause is no lock.
 func TestTheWatchdogRebasesALockedMarket(t *testing.T) {
 	r := bandRig(t, executorStore())
 	r.prices.mu.Lock()
@@ -1193,9 +1179,9 @@ func TestTheWatchdogRebasesALockedMarket(t *testing.T) {
 	if got := r.store.event(e.ID); got.Status != domain.EventDone {
 		t.Fatalf("the pause: %s", got.Status)
 	}
-	e = r.create(t, domain.Event{Type: domain.EventTarget, Price: d("1.35"), Hold: time.Hour, ApprovedBy: "ops2"})
+	e = r.create(t, domain.Event{Type: domain.EventJump, Size: 0.35, Duration: 5 * time.Minute, ApprovedBy: "ops2"})
 	r.rounds(4 * 170)
-	if st := r.sim.Status(); st.Deadlocks != 0 || st.Target != 1.35 {
+	if st := r.sim.Status(); st.Deadlocks != 0 || st.Target < 1.0001*1.1 {
 		t.Fatalf("before three minutes: %+v", st)
 	}
 	r.rounds(4 * 15)

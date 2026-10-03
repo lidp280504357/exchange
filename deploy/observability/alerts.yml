@@ -223,6 +223,21 @@ groups:
           summary: "the platform coin's market was locked (three minutes without a trade, or every level refused for the price band); market-sim rebased its price at the band's anchor"
           runbook: docs/runbook/market-sim.md
 
+      - alert: MarketSimTargetAtRisk
+        expr: max by (job) (market_sim_target_at_risk) > 0
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: "the platform coin's threshold target cannot reach its level in time even at the minute guard's pace (BTC and ETH pushed the price away): lengthen it or cancel it, or it ends MISSED"
+          runbook: docs/runbook/market-sim.md
+
+      - alert: MarketSimTargetMissed
+        expr: sum by (job) (increase(market_sim_targets_total{result="MISSED"}[15m])) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "a threshold target of the platform coin ended MISSED: its window ended before the price crossed its level (a last push of the minute guard was made)"
+          runbook: docs/runbook/market-sim.md
+
       - alert: HousePublishFailing
         expr: sum by (job) (increase(market_house_publish_failures_total[5m])) > 0
         labels: {severity: warning}
