@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
 import { App } from "./App";
 import { adminMessages } from "./i18n";
+import { preloadConsole } from "./preload";
 import { applyTheme } from "./theme";
 import "./index.css";
 
@@ -15,6 +16,8 @@ initI18n({ "zh-CN": { ...uiMessages["zh-CN"], ...adminMessages["zh-CN"] }, en: {
 applyTheme();
 useSettings.subscribe(applyTheme);
 const queryClient = createQueryClient();
+// The shell's and the page's chunks start with the session's check (C6).
+preloadConsole(location.pathname);
 
 const app = (
   <QueryClientProvider client={queryClient}>
