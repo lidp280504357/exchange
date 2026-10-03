@@ -265,12 +265,16 @@ func setup(ctx context.Context, a *app.App) error {
 			Name: "wallet_custody_deposit_discrepancies_total",
 			Help: "Custodian callbacks that disagree with a deposit an administrator backfilled; a person checks them.",
 		}),
+		Unmatched: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "wallet_deposits_unmatched_total",
+			Help: "Custodian deposits no user's address takes: unknown_address (booked to UNCLAIMED_DEPOSIT as a deposit of nobody) or unknown_coin (a coin no network uses, not booked); a person decides each.",
+		}, []string{"reason"}),
 	}
 	svc.Contradictions = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "wallet_custody_withdrawal_contradictions_total",
 		Help: "Custodian callbacks that deny what a finished withdrawal became (sent after it failed, failed after it was confirmed); nothing is reversed, a person checks.",
 	})
-	a.Metrics().MustRegister(svc.FeesHeld, svc.CallbacksRejected, svc.Discrepancies, svc.Contradictions)
+	a.Metrics().MustRegister(svc.FeesHeld, svc.CallbacksRejected, svc.Discrepancies, svc.Contradictions, svc.Unmatched)
 	if cfg.XPub != "" {
 		deriver, err := evm.NewDeriver(cfg.XPub)
 		if err != nil {

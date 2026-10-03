@@ -742,4 +742,28 @@ func TestCustodySwitchStorage(t *testing.T) {
 	if latest, err := read.Checks().Latest(ctx, domain.ProviderUdun); err != nil || len(latest) != 1 || !latest[0].Baseline.Equal(c.Baseline) {
 		t.Fatalf("latest %+v %v", latest, err)
 	}
+
+	// A deposit of nobody (B7a): stored with its reason, announced to no
+	// one; the retired address it came to names its former user.
+	nobody := domain.Deposit{
+		ID: uuid.Must(uuid.NewV7()).String(), UserID: domain.NoOwner, Asset: "USDT", Network: "TRON", Address: "TStandIn00000000000000000000000000",
+		TxHash: "probe1", LogIndex: domain.NativeLog, Amount: decimal.NewFromInt(15), RawAmount: decimal.NewFromInt(15_000_000),
+		Confirmations: 20, Required: 20, Status: domain.StatusConfirmed, Unclaimed: true, Reason: domain.ReasonUnknownAddress,
+		ProviderTxID: "UDUN:nobody-1", DetectedAt: now, ConfirmedAt: now,
+	}
+	if err := store.Tx(ctx, func(r ports.Repos) error { return r.Deposits().Insert(ctx, nobody) }); err != nil {
+		t.Fatal(err)
+	}
+	err = store.Tx(ctx, func(r ports.Repos) error {
+		return r.Emit(ctx, &walletv1.DepositDetected{Deposit: &walletv1.Deposit{DepositId: nobody.ID}}, domain.NoOwner)
+	})
+	if err == nil {
+		t.Fatal("an event of a deposit of nobody")
+	}
+	if owner, err := read.Addresses().RetiredOwner(ctx, "TRON", "tstandin00000000000000000000000000"); err != nil || owner != alice {
+		t.Fatalf("former owner %q %v", owner, err) // alice's stayed retired: she had a new one
+	}
+	if owner, err := read.Addresses().RetiredOwner(ctx, "TRON", "TNeverRetired"); err != nil || owner != "" {
+		t.Fatalf("no former owner %q %v", owner, err)
+	}
 }

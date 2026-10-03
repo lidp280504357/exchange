@@ -55,6 +55,11 @@ type Service struct {
 	// Discrepancies counts custodian callbacks that disagree with a deposit
 	// an administrator backfilled (matchManual); nil counts nothing.
 	Discrepancies prometheus.Counter
+	// Unmatched counts the custodian's deposits no user's address takes, by
+	// reason: unknown_address (booked to UNCLAIMED_DEPOSIT as a deposit of
+	// nobody, B7a) or unknown_coin (a coin no network uses: not booked);
+	// both need a person. nil counts nothing.
+	Unmatched *prometheus.CounterVec
 
 	// The custodian's coins, as last read (coin).
 	coinsMu sync.Mutex
@@ -159,6 +164,9 @@ func (s *Service) OnCredited(ctx context.Context, depositID, journalID string) e
 		}
 		if err := r.Deposits().Update(ctx, *d); err != nil {
 			return err
+		}
+		if d.UserID == domain.NoOwner {
+			return nil // a deposit of nobody is announced to no one (B7a)
 		}
 		return r.Emit(ctx, &walletv1.DepositCredited{Deposit: ToProto(*d), JournalId: journalID}, d.UserID)
 	})

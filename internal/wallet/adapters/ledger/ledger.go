@@ -48,6 +48,18 @@ func (c *Client) UnclaimedRelease(ctx context.Context, depositID string) (string
 	return resp.GetJournalId(), nil
 }
 
+// CreditUnclaimed books a deposit to an address no user has to
+// UNCLAIMED_DEPOSIT.
+func (c *Client) CreditUnclaimed(ctx context.Context, depositID, asset string, amount decimal.Decimal, network, txHash, reason string) (string, error) {
+	resp, err := c.c.CreditUnclaimed(ctx, &ledgerv1.CreditUnclaimedRequest{
+		DepositId: depositID, Asset: asset, Amount: amount.String(), Network: network, TxHash: txHash, Reason: reason,
+	})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetPosting().GetJournalId(), nil
+}
+
 // Fund books a platform funding to a system account.
 func (c *Client) Fund(ctx context.Context, key, accountType, asset string, amount decimal.Decimal, reference string) (string, error) {
 	resp, err := c.c.FundSystemAccount(ctx, &ledgerv1.FundSystemAccountRequest{

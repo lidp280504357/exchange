@@ -69,6 +69,9 @@ type AddressRepo interface {
 	Retire(ctx context.Context, provider, actor, reason string, at time.Time) ([]domain.RetiredAddress, error)
 	Restore(ctx context.Context, provider string) (int, int, error)
 	Retired(ctx context.Context, network, address string) (bool, error)
+	// RetiredOwner is the user a retired address of network belonged to,
+	// "" when none.
+	RetiredOwner(ctx context.Context, network, address string) (string, error)
 	// List returns the addresses of network by index.
 	List(ctx context.Context, network string) ([]domain.Address, error)
 }
@@ -458,6 +461,9 @@ type Ledger interface {
 	// UnclaimedRelease returns the journal that released an unclaimed
 	// deposit ("" when it was not released).
 	UnclaimedRelease(ctx context.Context, depositID string) (journalID string, err error)
+	// CreditUnclaimed books a deposit to an address no user has to
+	// UNCLAIMED_DEPOSIT (B7a); the deposit ID keys it.
+	CreditUnclaimed(ctx context.Context, depositID, asset string, amount decimal.Decimal, network, txHash, reason string) (journalID string, err error)
 }
 
 // CustodyCoin is one of the custodian's coins with what it holds of it.

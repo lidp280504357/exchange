@@ -26,6 +26,9 @@ func (r repos) Nonces() ports.NonceRepo                      { return nonces(r) 
 func (r repos) Prices() ports.PriceRepo                      { return prices(r) }
 
 func (r repos) EmitWithdrawal(ctx context.Context, msg proto.Message, userID string) error {
+	if userID == domain.NoOwner {
+		return errNoOwnerEvent
+	}
 	env, err := r.events.New(ctx, msg, "user", userID)
 	if err != nil {
 		return err

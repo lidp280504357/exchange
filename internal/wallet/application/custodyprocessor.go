@@ -163,7 +163,7 @@ func (p *CustodyProcessor) Round(ctx context.Context) error {
 	for _, n := range names(nets) {
 		o := netOps{Store: p.Store, Ledger: p.Ledger, Log: p.Log, Now: p.Now, Network: n}
 		errs = append(errs, o.recoverRequested(ctx), o.release(ctx), p.dispatch(ctx, o, nets, stopped), o.settle(ctx))
-		waiting, err := requestCredits(ctx, p.Store, p.Eligibility, n, nets, p.Now)
+		waiting, err := requestCredits(ctx, p.Store, p.Eligibility, p.Ledger, n, nets, p.Now)
 		held += waiting
 		left, ferr := o.bookFees(ctx)
 		unbooked = unbooked.Add(left)

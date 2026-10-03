@@ -327,6 +327,15 @@ func (a memAddresses) Restore(_ context.Context, provider string) (int, int, err
 	return restored, left, nil
 }
 
+func (a memAddresses) RetiredOwner(_ context.Context, network, address string) (string, error) {
+	for _, r := range a.m.retired {
+		if r.Network == network && strings.EqualFold(r.Address, address) {
+			return r.UserID, nil
+		}
+	}
+	return "", nil
+}
+
 func (a memAddresses) Retired(_ context.Context, network, address string) (bool, error) {
 	return slices.ContainsFunc(a.m.retired, func(r domain.RetiredAddress) bool {
 		return r.Network == network && strings.EqualFold(r.Address, address)
@@ -466,6 +475,14 @@ func (l *fakeLedger) SystemBalances(context.Context, string) (map[string]decimal
 func (l *fakeLedger) ReleaseUnclaimed(_ context.Context, id, user, _ string, amount decimal.Decimal, _, _ string) (string, error) {
 	return l.once("deposit-release:"+id, func() error {
 		l.available[user] = l.available[user].Add(amount)
+		return nil
+	})
+}
+
+func (l *fakeLedger) CreditUnclaimed(_ context.Context, id, _ string, amount decimal.Decimal, _, _, _ string) (string, error) {
+	return l.once("deposit:"+id, func() error {
+		l.system[accountDepositPending] = l.system[accountDepositPending].Sub(amount)
+		l.system["UNCLAIMED_DEPOSIT"] = l.system["UNCLAIMED_DEPOSIT"].Add(amount)
 		return nil
 	})
 }

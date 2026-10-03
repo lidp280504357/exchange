@@ -366,6 +366,13 @@ groups:
           summary: "withdrawals of {{ $labels.asset }} are suspended (funds missing on two custody checks, or an operator): find the cause, then exchangectl wallet withdrawals-resume"
           runbook: docs/runbook/custody.md
 
+      - alert: CustodyDepositUnmatched
+        expr: sum by (reason) (increase(wallet_deposits_unmatched_total[1h])) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "a custodian's deposit no user's address takes ({{ $labels.reason }}): unknown_address is booked to UNCLAIMED_DEPOSIT as a deposit of nobody, credit it to its user or dismiss it in the console; unknown_coin is not booked, find the coin's network"
+          runbook: docs/runbook/custody.md
+
       - alert: WalletWithdrawalsWaitingOnSuspension
         expr: max by (asset) (wallet_withdrawals_suspended_waiting) > 0
         for: 30m

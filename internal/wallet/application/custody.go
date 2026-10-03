@@ -170,7 +170,7 @@ func (s *Service) apply(ctx context.Context, c ports.Custody, cb domain.Callback
 			result, detail = domain.CallbackUnmatched, fmt.Sprintf("the callback counts %s in %d decimals, the custodian lists %d", t.Coin,
 				t.Decimals, want)
 		case t.Kind == domain.CallbackDeposit:
-			result, detail, err = s.applyDeposit(ctx, r, c.Provider(), t, now)
+			result, detail, err = s.applyDeposit(ctx, r, c.Provider(), t, now, &after)
 		case t.Kind == domain.CallbackWithdrawal:
 			result, detail, settle, err = s.applyWithdrawal(ctx, r, c.Provider(), t, now, &after)
 		default:
@@ -199,6 +199,16 @@ func (s *Service) apply(ctx context.Context, c ports.Custody, cb domain.Callback
 		s.settleOne(ctx, t.BusinessID)
 	}
 	return cb, nil
+}
+
+// unmatched counts and logs a deposit no user's address takes (B7a): a
+// person credits it to a user or dismisses it.
+func (s *Service) unmatched(ctx context.Context, reason string, t ports.CustodyTrade) {
+	if s.Unmatched != nil {
+		s.Unmatched.WithLabelValues(reason).Inc()
+	}
+	s.Log.WarnContext(ctx, "a custodian's deposit no user's address takes: a person credits it to a user or dismisses it",
+		"reason", reason, "trade_id", t.TradeID, "coin", t.Coin, "address", t.Address, "amount", t.Amount.String(), "tx_hash", t.TxHash)
 }
 
 // coinsEvery is how long the custodian's list of coins (their decimals)
@@ -253,7 +263,8 @@ func (s *Service) networkOfCoin(ctx context.Context, provider, coin string) (dom
 // the network's confirmations, for the processor to send to the ledger;
 // unclaimed below the minimum, rejected when nothing of it fits the
 // asset's decimals.
-func (s *Service) applyDeposit(ctx context.Context, r ports.Repos, provider string, t ports.CustodyTrade, now time.Time) (string, string, error) {
+func (s *Service) applyDeposit(ctx context.Context, r ports.Repos, provider string, t ports.CustodyTrade, now time.Time, after *[]func(),
+) (string, string, error) {
 	if t.Word != domain.CustodySuccess {
 		return domain.CallbackIgnored, fmt.Sprintf("status %d: credited when the custodian reports success", t.Status), nil
 	}
@@ -267,14 +278,20 @@ func (s *Service) applyDeposit(ctx context.Context, r ports.Repos, provider stri
 		return "", "", err
 	}
 	if !ok {
+		*after = append(*after, func() { s.unmatched(ctx, "unknown_coin", t) })
 		return domain.CallbackUnmatched, "no network uses the coin " + t.Coin, nil
 	}
 	owner, err := r.Addresses().Owner(ctx, net.Network, t.Address)
 	if err != nil {
 		return "", "", err
 	}
-	if owner == "" {
-		return domain.CallbackUnmatched, "no deposit address " + t.Address + " on " + net.Network, nil
+	// Money for an address no user has (a probe's, a retired stand-in's):
+	// booked to UNCLAIMED_DEPOSIT as a deposit of nobody, for an
+	// administrator to credit to a user or dismiss; announced to no one
+	// (B7a of the real gateway's integration).
+	nobody := owner == ""
+	if nobody {
+		owner = domain.NoOwner
 	}
 	key := provider + ":" + t.TradeID
 	if known, err := r.Deposits().ByProviderTx(ctx, key); err != nil || known != nil {
@@ -308,17 +325,26 @@ func (s *Service) applyDeposit(ctx context.Context, r ports.Repos, provider stri
 		Amount: t.Amount.Truncate(net.Decimals), RawAmount: t.RawAmount, Confirmations: required, Required: required,
 		Status: domain.StatusConfirmed, ProviderTxID: key, DetectedAt: now, ConfirmedAt: now,
 	}
-	if own, err := r.Addresses().Get(ctx, owner, net.Network); err == nil && own != nil {
+	if own, err := r.Addresses().Get(ctx, owner, net.Network); !nobody && err == nil && own != nil {
 		d.Address = own.Address
 	}
 	switch {
+	case d.Amount.IsZero() && nobody:
+		d.Status, d.Reason = domain.StatusRejected, domain.ReasonUnknownAddress
 	case d.Amount.IsZero():
 		d.Status, d.Reason = domain.StatusRejected, domain.ReasonBelowMinimum
+	case nobody:
+		d.Unclaimed, d.Reason = true, domain.ReasonUnknownAddress
 	case d.Amount.LessThan(net.MinDeposit):
 		d.Unclaimed, d.Reason = true, domain.ReasonBelowMinimum
 	}
 	if err := r.Deposits().Insert(ctx, d); err != nil {
 		return "", "", err
+	}
+	if nobody {
+		*after = append(*after, func() { s.unmatched(ctx, "unknown_address", t) })
+		return domain.CallbackApplied, fmt.Sprintf("deposit %s of nobody: %s %s to %s, an address no user has on %s, booked unclaimed (%s)",
+			d.ID, d.Amount, d.Asset, t.Address, net.Network, d.Reason), nil
 	}
 	if d.Status == domain.StatusRejected {
 		if err := r.Emit(ctx, &walletv1.DepositRejected{Deposit: ToProto(d)}, d.UserID); err != nil {

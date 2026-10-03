@@ -37,6 +37,7 @@ const (
 	LedgerService_ListHolds_FullMethodName           = "/exchange.ledger.v1.LedgerService/ListHolds"
 	LedgerService_ReleaseUnclaimed_FullMethodName    = "/exchange.ledger.v1.LedgerService/ReleaseUnclaimed"
 	LedgerService_GetUnclaimedRelease_FullMethodName = "/exchange.ledger.v1.LedgerService/GetUnclaimedRelease"
+	LedgerService_CreditUnclaimed_FullMethodName     = "/exchange.ledger.v1.LedgerService/CreditUnclaimed"
 )
 
 // LedgerServiceClient is the client API for LedgerService service.
@@ -120,6 +121,14 @@ type LedgerServiceClient interface {
 	// to its user (the journal of key deposit-release:<deposit_id>):
 	// wallet-service does not close one whose release it failed to record.
 	GetUnclaimedRelease(ctx context.Context, in *GetUnclaimedReleaseRequest, opts ...grpc.CallOption) (*GetUnclaimedReleaseResponse, error)
+	// CreditUnclaimed books a custodian's deposit to an address no user has
+	// (B7a of the real gateway's integration) to UNCLAIMED_DEPOSIT
+	// (DEPOSIT_CREDIT from DEPOSIT_PENDING, key deposit:<deposit_id>, so a
+	// retry replays): the ledger then expects what the custodian holds, and
+	// an administrator credits it to a user (ReleaseUnclaimed) or dismisses
+	// it. wallet-service calls it instead of announcing a deposit that has
+	// no user.
+	CreditUnclaimed(ctx context.Context, in *CreditUnclaimedRequest, opts ...grpc.CallOption) (*CreditUnclaimedResponse, error)
 }
 
 type ledgerServiceClient struct {
@@ -310,6 +319,16 @@ func (c *ledgerServiceClient) GetUnclaimedRelease(ctx context.Context, in *GetUn
 	return out, nil
 }
 
+func (c *ledgerServiceClient) CreditUnclaimed(ctx context.Context, in *CreditUnclaimedRequest, opts ...grpc.CallOption) (*CreditUnclaimedResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreditUnclaimedResponse)
+	err := c.cc.Invoke(ctx, LedgerService_CreditUnclaimed_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LedgerServiceServer is the server API for LedgerService service.
 // All implementations must embed UnimplementedLedgerServiceServer
 // for forward compatibility.
@@ -391,6 +410,14 @@ type LedgerServiceServer interface {
 	// to its user (the journal of key deposit-release:<deposit_id>):
 	// wallet-service does not close one whose release it failed to record.
 	GetUnclaimedRelease(context.Context, *GetUnclaimedReleaseRequest) (*GetUnclaimedReleaseResponse, error)
+	// CreditUnclaimed books a custodian's deposit to an address no user has
+	// (B7a of the real gateway's integration) to UNCLAIMED_DEPOSIT
+	// (DEPOSIT_CREDIT from DEPOSIT_PENDING, key deposit:<deposit_id>, so a
+	// retry replays): the ledger then expects what the custodian holds, and
+	// an administrator credits it to a user (ReleaseUnclaimed) or dismisses
+	// it. wallet-service calls it instead of announcing a deposit that has
+	// no user.
+	CreditUnclaimed(context.Context, *CreditUnclaimedRequest) (*CreditUnclaimedResponse, error)
 	mustEmbedUnimplementedLedgerServiceServer()
 }
 
@@ -454,6 +481,9 @@ func (UnimplementedLedgerServiceServer) ReleaseUnclaimed(context.Context, *Relea
 }
 func (UnimplementedLedgerServiceServer) GetUnclaimedRelease(context.Context, *GetUnclaimedReleaseRequest) (*GetUnclaimedReleaseResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetUnclaimedRelease not implemented")
+}
+func (UnimplementedLedgerServiceServer) CreditUnclaimed(context.Context, *CreditUnclaimedRequest) (*CreditUnclaimedResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreditUnclaimed not implemented")
 }
 func (UnimplementedLedgerServiceServer) mustEmbedUnimplementedLedgerServiceServer() {}
 func (UnimplementedLedgerServiceServer) testEmbeddedByValue()                       {}
@@ -800,6 +830,24 @@ func _LedgerService_GetUnclaimedRelease_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LedgerService_CreditUnclaimed_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreditUnclaimedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LedgerServiceServer).CreditUnclaimed(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LedgerService_CreditUnclaimed_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LedgerServiceServer).CreditUnclaimed(ctx, req.(*CreditUnclaimedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LedgerService_ServiceDesc is the grpc.ServiceDesc for LedgerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -878,6 +926,10 @@ var LedgerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetUnclaimedRelease",
 			Handler:    _LedgerService_GetUnclaimedRelease_Handler,
+		},
+		{
+			MethodName: "CreditUnclaimed",
+			Handler:    _LedgerService_CreditUnclaimed_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

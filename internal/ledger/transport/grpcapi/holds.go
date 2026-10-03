@@ -55,6 +55,20 @@ func (s *Server) ReleaseUnclaimed(ctx context.Context, req *ledgerv1.ReleaseUncl
 	return &ledgerv1.ReleaseUnclaimedResponse{Posting: posting(res)}, nil
 }
 
+// CreditUnclaimed books a deposit to an address no user has to
+// UNCLAIMED_DEPOSIT.
+func (s *Server) CreditUnclaimed(ctx context.Context, req *ledgerv1.CreditUnclaimedRequest) (*ledgerv1.CreditUnclaimedResponse, error) {
+	a, err := amount(req.GetAmount())
+	if err != nil {
+		return nil, err
+	}
+	res, err := s.svc.CreditUnclaimed(ctx, req.GetDepositId(), req.GetAsset(), a, req.GetNetwork(), req.GetTxHash(), req.GetReason())
+	if err != nil {
+		return nil, err
+	}
+	return &ledgerv1.CreditUnclaimedResponse{Posting: posting(res)}, nil
+}
+
 // GetUnclaimedRelease reports the journal that released an unclaimed
 // deposit, if any.
 func (s *Server) GetUnclaimedRelease(ctx context.Context, req *ledgerv1.GetUnclaimedReleaseRequest) (*ledgerv1.GetUnclaimedReleaseResponse, error) {

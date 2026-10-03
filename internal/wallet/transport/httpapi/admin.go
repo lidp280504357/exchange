@@ -28,6 +28,7 @@ func (h *Handler) adminRoutes(r chi.Router) {
 	r.Post("/internal/wallet/deposits/{id}/credit", h.adminCreditDeposit)
 	r.Post("/internal/wallet/deposits/{id}/dismiss", h.adminDismissDeposit)
 	h.suspensionRoutes(r)
+	h.unmatchedRoutes(r)
 }
 
 // AddressBookJSON is a withdrawal address in its user's address book.
@@ -101,6 +102,12 @@ type AdminDepositJSON struct {
 	ResolvedAt            *string `json:"resolved_at"`
 	ResolutionNote        string  `json:"resolution_note"`
 	ReleaseJournalID      *string `json:"release_journal_id"`
+	// For a deposit of nobody (user_id the nil UUID, reason
+	// UNKNOWN_ADDRESS): the user its address belongs to now, or belonged to
+	// before it was retired (address_owner_retired), a hint for crediting
+	// it (POST /internal/wallet/deposits/{id}/assign).
+	AddressOwner        *string `json:"address_owner"`
+	AddressOwnerRetired bool    `json:"address_owner_retired"`
 }
 
 func textOrNil(s string) *string {
@@ -147,7 +154,12 @@ func (h *Handler) adminDeposits(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]AdminDepositJSON, 0, len(list))
 	for _, d := range list {
-		out = append(out, AdminDepositJSONOf(d))
+		j := AdminDepositJSONOf(d)
+		if err := h.withOwner(r.Context(), &j, d); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		out = append(out, j)
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "next_cursor": textOrNil(next)})
 }
@@ -158,7 +170,12 @@ func (h *Handler) adminDeposit(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, AdminDepositJSONOf(d))
+	j := AdminDepositJSONOf(d)
+	if err := h.withOwner(r.Context(), &j, d); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, j)
 }
 
 type decisionBody struct {

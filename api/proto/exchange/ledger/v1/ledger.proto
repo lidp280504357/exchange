@@ -79,6 +79,14 @@ service LedgerService {
   // to its user (the journal of key deposit-release:<deposit_id>):
   // wallet-service does not close one whose release it failed to record.
   rpc GetUnclaimedRelease(GetUnclaimedReleaseRequest) returns (GetUnclaimedReleaseResponse);
+  // CreditUnclaimed books a custodian's deposit to an address no user has
+  // (B7a of the real gateway's integration) to UNCLAIMED_DEPOSIT
+  // (DEPOSIT_CREDIT from DEPOSIT_PENDING, key deposit:<deposit_id>, so a
+  // retry replays): the ledger then expects what the custodian holds, and
+  // an administrator credits it to a user (ReleaseUnclaimed) or dismisses
+  // it. wallet-service calls it instead of announcing a deposit that has
+  // no user.
+  rpc CreditUnclaimed(CreditUnclaimedRequest) returns (CreditUnclaimedResponse);
 }
 
 message FreezeRequest {
@@ -386,6 +394,20 @@ message ReleaseUnclaimedRequest {
 }
 
 message ReleaseUnclaimedResponse {
+  Posting posting = 1;
+}
+
+message CreditUnclaimedRequest {
+  string deposit_id = 1;
+  string asset = 2;
+  string amount = 3;
+  string network = 4;
+  string tx_hash = 5;
+  // Why it has no user, e.g. UNKNOWN_ADDRESS.
+  string reason = 6;
+}
+
+message CreditUnclaimedResponse {
   Posting posting = 1;
 }
 

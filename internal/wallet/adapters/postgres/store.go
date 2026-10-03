@@ -47,12 +47,21 @@ func (r repos) Deposits() ports.DepositRepo  { return deposits(r) }
 func (r repos) Blocks() ports.BlockRepo      { return blocks(r) }
 
 func (r repos) Emit(ctx context.Context, msg proto.Message, userID string) error {
+	if userID == domain.NoOwner {
+		// A deposit of nobody (B7a) is announced to no one: notification-
+		// service and the read models have no user to give it to.
+		return errNoOwnerEvent
+	}
 	env, err := r.events.New(ctx, msg, "user", userID)
 	if err != nil {
 		return err
 	}
 	return outbox.Add(ctx, r.q, event.TopicWalletDeposit, env)
 }
+
+// errNoOwnerEvent refuses an event keyed to NoOwner: a bug, as nothing
+// of a deposit of nobody is announced.
+var errNoOwnerEvent = errors.New("an event of the deposit of no user (NoOwner) refused")
 
 type addresses repos
 
@@ -180,6 +189,19 @@ func (r addresses) Restore(ctx context.Context, provider string) (int, int, erro
 		return 0, 0, fmt.Errorf("restore deposit addresses: %w", err)
 	}
 	return restored, left, nil
+}
+
+func (r addresses) RetiredOwner(ctx context.Context, network, address string) (string, error) {
+	var user string
+	err := r.q.QueryRow(ctx, `SELECT user_id FROM retired_deposit_addresses WHERE network = $1 AND lower(address) = lower($2)`,
+		network, address).Scan(&user)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("find retired deposit address: %w", err)
+	}
+	return user, nil
 }
 
 func (r addresses) Retired(ctx context.Context, network, address string) (bool, error) {

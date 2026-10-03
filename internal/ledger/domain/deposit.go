@@ -55,7 +55,11 @@ func DepositPosting(d Deposit) (Posting, error) {
 	}
 	to := UserAccount(d.UserID, AccountSpot, d.Asset)
 	memo := fmt.Sprintf("deposit %s %s", d.Network, d.TxHash)
-	if d.Unclaimed {
+	switch {
+	case d.Unclaimed && d.UserID == "":
+		to = SystemAccount(AccountUnclaimedDeposit, d.Asset)
+		memo = fmt.Sprintf("unclaimed deposit (%s) to an address no user has: %s %s", d.Reason, d.Network, d.TxHash)
+	case d.Unclaimed:
 		to = SystemAccount(AccountUnclaimedDeposit, d.Asset)
 		memo = fmt.Sprintf("unclaimed deposit (%s) of user %s: %s %s", d.Reason, d.UserID, d.Network, d.TxHash)
 	}

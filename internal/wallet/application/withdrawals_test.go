@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -26,7 +27,10 @@ func (m *memStore) Attempts() ports.AttemptRepo                  { return memAtt
 func (m *memStore) Nonces() ports.NonceRepo                      { return memNonces{m} }
 func (m *memStore) Prices() ports.PriceRepo                      { return memPrices{m} }
 
-func (m *memStore) EmitWithdrawal(_ context.Context, msg proto.Message, _ string) error {
+func (m *memStore) EmitWithdrawal(_ context.Context, msg proto.Message, userID string) error {
+	if userID == domain.NoOwner {
+		return errors.New("an event of the deposit of no user (NoOwner)")
+	}
 	m.wevents = append(m.wevents, msg)
 	return nil
 }

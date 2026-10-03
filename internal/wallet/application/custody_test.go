@@ -12,7 +12,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/shopspring/decimal"
 
 	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
@@ -353,8 +355,8 @@ func TestCustodyDepositCallbacks(t *testing.T) {
 	}
 	stranger := deposit
 	stranger.TradeID, stranger.Address = "t4", "TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj"
-	if cb := h.callback(t, stranger); cb.Result != domain.CallbackUnmatched {
-		t.Fatalf("a deposit to an address of nobody: %+v", cb)
+	if cb := h.callback(t, stranger); cb.Result != domain.CallbackApplied || !strings.Contains(cb.Detail, "of nobody") {
+		t.Fatalf("a deposit to an address of nobody (B7a): %+v", cb)
 	}
 	otherCoin := deposit
 	otherCoin.TradeID, otherCoin.Coin = "t5", "0:0"
@@ -367,7 +369,7 @@ func TestCustodyDepositCallbacks(t *testing.T) {
 			unclaimed++
 		}
 	}
-	if unclaimed != 1 || len(h.store.deposits) != 2 {
+	if unclaimed != 1 || len(h.store.deposits) != 3 {
 		t.Fatalf("%d deposits, %d unclaimed", len(h.store.deposits), unclaimed)
 	}
 
@@ -629,21 +631,33 @@ func TestCustodyCheck(t *testing.T) {
 func TestReplayCallback(t *testing.T) {
 	h := newCustodyHarness(t)
 	ctx := context.Background()
+	if _, _, err := h.svc.DepositAddress(ctx, "alice", "USDT", tron); err != nil {
+		t.Fatal(err)
+	}
+	h.store.take()
+	unmatched := prometheus.NewCounterVec(prometheus.CounterOpts{Name: "unmatched"}, []string{"reason"})
+	h.svc.Unmatched = unmatched
+	// No network uses the coin yet (its configuration was wrong): nothing
+	// is booked, the callback waits for a replay.
+	usdtTron := len(h.nets.nets) - 1
+	h.nets.nets[usdtTron].ProviderCoin = "195:TSomethingElse"
 	trade := ports.CustodyTrade{
 		TradeID: "t9", Kind: domain.CallbackDeposit, Status: 3, Word: domain.CustodySuccess, Coin: usdtCoin,
 		Address: "TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7", Amount: d("30"), RawAmount: d("30000000"),
 	}
 	cb := h.callback(t, trade)
-	if cb.Result != domain.CallbackUnmatched {
-		t.Fatalf("before the address exists: %+v", cb)
+	if cb.Result != domain.CallbackUnmatched || len(h.store.deposits) != 0 {
+		t.Fatalf("a coin no network uses: %+v", cb)
+	}
+	var m dto.Metric
+	if err := unmatched.WithLabelValues("unknown_coin").Write(&m); err != nil || m.GetCounter().GetValue() != 1 {
+		t.Fatalf("counted %v %v", m.GetCounter().GetValue(), err)
 	}
 	if _, err := h.svc.ReplayCallback(ctx, cb.ID, "ops@example.com", "no"); !apperr.Is(err, apperr.CodeInvalidArgument) {
 		t.Fatalf("a reason is required: %v", err)
 	}
-	if _, _, err := h.svc.DepositAddress(ctx, "alice", "USDT", tron); err != nil {
-		t.Fatal(err)
-	}
-	out, err := h.svc.ReplayCallback(ctx, cb.ID, "ops@example.com", "the address was assigned late")
+	h.nets.nets[usdtTron].ProviderCoin = usdtCoin
+	out, err := h.svc.ReplayCallback(ctx, cb.ID, "ops@example.com", "the network's coin was fixed")
 	if err != nil || out.Result != domain.CallbackApplied || len(h.store.deposits) != 1 || len(h.store.audits) != 1 {
 		t.Fatalf("replayed %+v %v (%d deposits)", out, err, len(h.store.deposits))
 	}
@@ -1585,5 +1599,87 @@ func TestTheCustodyCheckShowsTheBaseline(t *testing.T) {
 	checks, err := h.cproc.Check(ctx)
 	if err != nil || len(checks) != 1 || !checks[0].Baseline.Equal(d("396.25")) || !checks[0].Shortfall.IsZero() {
 		t.Fatalf("checks %+v %v", checks, err)
+	}
+}
+
+// B7a: a custodian's deposit to an address no user has is booked to
+// UNCLAIMED_DEPOSIT as a deposit of nobody (NoOwner) through the ledger
+// itself, announced to no one; the custody check expects it at the
+// custodian; it is credited only once an administrator names its user.
+func TestADepositOfNobody(t *testing.T) {
+	h := newCustodyHarness(t)
+	ctx := context.Background()
+	unmatched := prometheus.NewCounterVec(prometheus.CounterOpts{Name: "unmatched"}, []string{"reason"})
+	h.svc.Unmatched = unmatched
+	h.cproc.Elsewhere = func(context.Context, string) (decimal.Decimal, error) { return decimal.Zero, nil }
+	const probe = "TWeptS7njqhCtHdDCSFGKA1ttrs6WXxLzj" // no user's
+	h.store.retired = append(h.store.retired, domain.RetiredAddress{
+		Network: tron, Address: probe, UserID: "carol", Provider: domain.ProviderUdun, CreatedAt: h.now,
+	})
+	trade := ports.CustodyTrade{
+		TradeID: "nobody-1", Kind: domain.CallbackDeposit, Status: 3, Word: domain.CustodySuccess, Coin: usdtCoin, Address: probe,
+		Amount: d("15"), RawAmount: d("15000000"), TxHash: "0xprobe", Block: 7,
+	}
+	cb := h.callback(t, trade)
+	if cb.Result != domain.CallbackApplied || !strings.Contains(cb.Detail, "of nobody") {
+		t.Fatalf("booked %+v", cb)
+	}
+	var dep domain.Deposit
+	for _, x := range h.store.deposits {
+		dep = x
+	}
+	if dep.UserID != domain.NoOwner || !dep.Unclaimed || dep.Reason != domain.ReasonUnknownAddress || dep.Status != domain.StatusConfirmed {
+		t.Fatalf("deposit %+v", dep)
+	}
+	if again := h.callback(t, trade); again.Attempts != 2 || len(h.store.deposits) != 1 {
+		t.Fatalf("the custodian's retry %+v, %d deposits", again, len(h.store.deposits))
+	}
+	var m dto.Metric
+	if err := unmatched.WithLabelValues("unknown_address").Write(&m); err != nil || m.GetCounter().GetValue() != 1 {
+		t.Fatalf("counted %v %v", m.GetCounter().GetValue(), err)
+	}
+	// Booked by the processor through the ledger; the ledger's event then
+	// changes nothing; nothing is announced to anyone.
+	held := d("15")
+	h.custody.coins = []ports.CustodyCoin{{Code: usdtCoin, Symbol: "USDT", Decimals: 6, Token: true, Balance: &held}}
+	h.cround(t)
+	got := h.store.deposits[dep.ID]
+	if got.Status != domain.StatusRejected || got.JournalID == "" || !h.ledger.system["UNCLAIMED_DEPOSIT"].Equal(d("15")) {
+		t.Fatalf("booked to UNCLAIMED_DEPOSIT: %+v, ledger %v", got, h.ledger.system)
+	}
+	if err := h.svc.OnCredited(ctx, dep.ID, got.JournalID); err != nil {
+		t.Fatal(err)
+	}
+	if events := h.store.take(); len(events) != 0 {
+		t.Fatalf("announced %v", types(events))
+	}
+	// The custody check expects it at the custodian, which holds it.
+	if checks, err := h.cproc.Check(ctx); err != nil || len(checks) != 1 || !checks[0].Ledger.Equal(d("15")) || !checks[0].Shortfall.IsZero() {
+		t.Fatalf("checks %+v %v", checks, err)
+	}
+	// Not released as it is: someone names its user first.
+	if _, err := h.svc.CreditDeposit(ctx, dep.ID, "ops@example.com", "credit it"); !apperr.Is(err, "WALLET_DEPOSIT_NO_OWNER") {
+		t.Fatalf("released to nobody: %v", err)
+	}
+	for _, user := range []string{domain.NoOwner, "not-a-uuid", ""} {
+		if _, err := h.svc.AssignDeposit(ctx, dep.ID, user, "ops@example.com", "the sender's proof"); !apperr.Is(err, apperr.CodeInvalidArgument) {
+			t.Fatalf("assigned to %q: %v", user, err)
+		}
+	}
+	owner, retired, err := h.svc.AddressOwner(ctx, tron, probe)
+	if err != nil || owner != "carol" || !retired {
+		t.Fatalf("the address's former owner %q %v %v", owner, retired, err)
+	}
+	bob := uuid.NewString()
+	out, err := h.svc.AssignDeposit(ctx, dep.ID, bob, "ops@example.com", "the sender showed the transfer is theirs")
+	if err != nil || out.UserID != bob || out.Status != domain.StatusCredited || out.Resolution != domain.ResolutionCredited ||
+		!h.ledger.available[bob].Equal(d("15")) || h.audited("wallet.deposit.assigned") != 1 {
+		t.Fatalf("assigned %+v %v", out, err)
+	}
+	if got := types(h.store.take()); !slices.Equal(got, []string{"DepositCredited"}) {
+		t.Fatalf("announced to its user: %v", got)
+	}
+	if _, err := h.svc.AssignDeposit(ctx, dep.ID, bob, "ops@example.com", "again"); err == nil {
+		t.Fatal("assigned twice")
 	}
 }

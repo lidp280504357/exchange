@@ -35,7 +35,17 @@ const (
 	ReasonAccountClosed    = "ACCOUNT_CLOSED"
 	ReasonNotEligible      = "NOT_ELIGIBLE"
 	ReasonUnsupportedToken = "UNSUPPORTED_TOKEN"
+	// ReasonUnknownAddress: a custodian's deposit to an address no user
+	// has (a probe's, a retired stand-in's), owned by NoOwner (B7a).
+	ReasonUnknownAddress = "UNKNOWN_ADDRESS"
 )
+
+// NoOwner owns a custodian's deposit to an address no user has (B7a of the
+// real gateway's integration): booked to UNCLAIMED_DEPOSIT until an
+// administrator names the user it is credited to (or dismisses it). It is
+// the nil UUID, no user's ID; only that path writes it, and nothing that
+// needs a user takes it: no event, eligibility or release names it.
+const NoOwner = "00000000-0000-0000-0000-000000000000"
 
 // NativeLog marks a transfer of the chain's own coin (no token log).
 const NativeLog = -1
@@ -134,7 +144,9 @@ var (
 	ErrNotReleasable = apperr.New(apperr.KindConflict, "WALLET_DEPOSIT_NOT_RELEASABLE",
 		"only an unclaimed deposit booked to UNCLAIMED_DEPOSIT and not decided yet can be credited")
 	ErrResolved = apperr.New(apperr.KindConflict, "WALLET_DEPOSIT_RESOLVED", "the deposit needs no decision")
-	ErrKnown    = apperr.New(apperr.KindConflict, "WALLET_DEPOSIT_KNOWN", "this deposit is known already")
+	ErrNoOwner  = apperr.New(apperr.KindConflict, "WALLET_DEPOSIT_NO_OWNER",
+		"the deposit came to an address no user has: name the user it is credited to")
+	ErrKnown = apperr.New(apperr.KindConflict, "WALLET_DEPOSIT_KNOWN", "this deposit is known already")
 )
 
 // Attention reports whether the deposit waits for an administrator: it
@@ -151,6 +163,9 @@ func (d *Deposit) Attention() bool {
 func (d *Deposit) Releasable() error {
 	if d.Status != StatusRejected || !d.Unclaimed || d.JournalID == "" || d.Resolution != "" || d.Discrepancy != "" {
 		return ErrNotReleasable
+	}
+	if d.UserID == NoOwner {
+		return ErrNoOwner
 	}
 	return nil
 }

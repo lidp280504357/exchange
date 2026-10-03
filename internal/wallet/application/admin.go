@@ -166,6 +166,9 @@ func (s *Service) CreditDeposit(ctx context.Context, id, actor, reason string) (
 		if cur == nil {
 			return apperr.NotFound("no such deposit")
 		}
+		if cur.UserID == domain.NoOwner {
+			return domain.ErrNoOwner // AssignDeposit names its user first (B7a)
+		}
 		var journal string
 		recorded := false
 		if err := cur.Releasable(); err != nil {
@@ -265,9 +268,14 @@ func (s *Service) DismissDeposit(ctx context.Context, id, actor, reason string) 
 			"deposit_id": d.ID, "user_id": d.UserID, "asset": d.Asset, "amount": d.Amount.String(), "status": d.Status, "reason": d.Reason,
 			"discrepancy": d.Discrepancy,
 		})
-		// On the user, like the backfill and the ledger's release: the user's audit trail shows them all.
+		// On the user, like the backfill and the ledger's release: the user's audit trail shows them all;
+		// a deposit of nobody (B7a) on itself.
+		target := "user:" + d.UserID
+		if d.UserID == domain.NoOwner {
+			target = "deposit:" + d.ID
+		}
 		return r.Audit(ctx, &auditv1.AdminActionPerformed{
-			Target: "user:" + d.UserID, Action: "wallet.deposit.dismissed", Actor: actor, Reason: strings.TrimSpace(reason),
+			Target: target, Action: "wallet.deposit.dismissed", Actor: actor, Reason: strings.TrimSpace(reason),
 			Details: string(details),
 		}, actor)
 	})

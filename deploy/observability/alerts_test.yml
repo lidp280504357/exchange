@@ -494,6 +494,22 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'wallet_deposits_unmatched_total{job="wallet-service", reason="unknown_address"}'
+        values: '0 0 1 1 1'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: CustodyDepositUnmatched
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: CustodyDepositUnmatched
+        exp_alerts:
+          - exp_labels: {severity: warning, reason: unknown_address}
+            exp_annotations:
+              summary: "a custodian's deposit no user's address takes (unknown_address): unknown_address is booked to UNCLAIMED_DEPOSIT as a deposit of nobody, credit it to its user or dismiss it in the console; unknown_coin is not booked, find the coin's network"
+              runbook: docs/runbook/custody.md
+
+  - interval: 1m
+    input_series:
       - series: 'wallet_withdrawals_suspended_waiting{job="wallet-service", provider="UDUN", asset="USDT"}'
         values: '2x40'
     alert_rule_test:

@@ -69,6 +69,29 @@ func TestReleaseUnclaimed(t *testing.T) {
 	if n := count(t, db, `SELECT count(*) FROM outbox WHERE event_type = 'audit.AdminActionPerformed'`); n != 1 {
 		t.Fatalf("release audits: %d", n)
 	}
+
+	// A deposit to an address no user has (B7a): booked to
+	// UNCLAIMED_DEPOSIT without a user, a retry replays; it is released only
+	// to a user someone named, never to the nil UUID.
+	nobody := uuid.NewString()
+	booked, err := svc.CreditUnclaimed(ctx, nobody, "USDT", d("12"), "TRON", "t2", "UNKNOWN_ADDRESS")
+	if err != nil || booked.Replayed || unclaimed() != "12" {
+		t.Fatalf("credited %+v %v, unclaimed %s", booked, err, unclaimed())
+	}
+	if again, err := svc.CreditUnclaimed(ctx, nobody, "USDT", d("12"), "TRON", "t2", "UNKNOWN_ADDRESS"); err != nil || !again.Replayed ||
+		again.JournalID != booked.JournalID || unclaimed() != "12" {
+		t.Fatalf("a retry %+v %v", again, err)
+	}
+	if _, err := svc.ReleaseUnclaimed(ctx, nobody, uuid.Nil.String(), "USDT", d("12"), "ops@example.com", "to nobody"); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("released to the nil UUID: %v", err)
+	}
+	named := uuid.NewString()
+	if _, err := svc.ReleaseUnclaimed(ctx, nobody, named, "USDT", d("12"), "ops@example.com", "the sender showed it is theirs"); err != nil {
+		t.Fatal(err)
+	}
+	if av, _ := usdt(t, svc, named, domain.AccountSpot); !av.Equal(d("12")) || unclaimed() != "0" {
+		t.Fatalf("released: user %s, unclaimed %s", av, unclaimed())
+	}
 }
 
 func TestHoldsAndAccountAdjustments(t *testing.T) {

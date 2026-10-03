@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -346,7 +347,7 @@ func (s *Scanner) confirm(ctx context.Context, head uint64) error {
 // request sends confirmed deposits to the ledger (DepositConfirmed)
 // while their asset takes deposits; the others wait.
 func (s *Scanner) request(ctx context.Context, nets []domain.Network) error {
-	held, err := requestCredits(ctx, s.Store, s.Eligibility, s.Network, nets, s.Now)
+	held, err := requestCredits(ctx, s.Store, s.Eligibility, nil, s.Network, nets, s.Now) // its addresses all have a user
 	s.held.Set(float64(held))
 	return err
 }
@@ -356,8 +357,31 @@ func (s *Scanner) request(ctx context.Context, nets []domain.Network) error {
 // many wait. A closed account's deposit goes to UNCLAIMED_DEPOSIT (§5.4).
 // A backfill the custodian's callback disagreed with waits for a person,
 // who closes it (C5.5 ⑦).
-func requestCredits(ctx context.Context, store ports.Store, eligibility ports.Eligibility, network string, nets []domain.Network,
-	now func() time.Time,
+// creditNobody books a deposit of nobody to UNCLAIMED_DEPOSIT by asking the
+// ledger itself (B7a): announcing it, as the others are, would hand it to
+// services that need a user. The ledger's key (deposit:<id>) makes a retry
+// harmless; the deposit is marked once the journal is known, unless the
+// ledger's own event marked it first.
+func creditNobody(ctx context.Context, store ports.Store, ledger ports.Ledger, d domain.Deposit, now func() time.Time) error {
+	if ledger == nil {
+		return errors.New("no ledger to book a deposit of nobody")
+	}
+	journal, err := ledger.CreditUnclaimed(ctx, d.ID, d.Asset, d.Amount, d.Network, d.TxHash, d.Reason)
+	if err != nil {
+		return err
+	}
+	return store.Tx(ctx, func(r ports.Repos) error {
+		cur, err := r.Deposits().GetForUpdate(ctx, d.ID)
+		if err != nil || cur == nil || !cur.RequestCredit(cur.Reason, now()) {
+			return err
+		}
+		cur.Credit(journal, now())
+		return r.Deposits().Update(ctx, *cur)
+	})
+}
+
+func requestCredits(ctx context.Context, store ports.Store, eligibility ports.Eligibility, ledger ports.Ledger, network string,
+	nets []domain.Network, now func() time.Time,
 ) (int, error) {
 	list, err := store.Read().Deposits().Unrequested(ctx, network)
 	if err != nil {
@@ -376,6 +400,12 @@ func requestCredits(ctx context.Context, store ports.Store, eligibility ports.El
 		}
 		if !enabled[d.Asset] || d.Discrepancy != "" {
 			held++
+			continue
+		}
+		if d.UserID == domain.NoOwner {
+			if err := creditNobody(ctx, store, ledger, d, now); err != nil {
+				return held, fmt.Errorf("deposit %s of nobody: %w", d.ID, err)
+			}
 			continue
 		}
 		reason := d.Reason
