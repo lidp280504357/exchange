@@ -36,29 +36,32 @@ func (s *Service) TwoPerson() bool {
 	return s.Features != nil && s.Features.Enabled(flags.KeyTwoPerson, flags.Subject{})
 }
 
-// fundActions names the audit actions of each kind of fund operation.
-var fundActions = map[string]struct{ requested, approved, rejected, executed, failed string }{
+// fundActions names the audit actions of each kind of fund operation;
+// unfinished is an attempt to carry one out that did not finish (C5.5 ⑮).
+var fundActions = map[string]struct{ requested, approved, rejected, executed, failed, unfinished string }{
 	domain.KindLedgerAdjustment: {
 		"admin.ledger.adjustment_requested", "admin.ledger.adjustment_approved", "admin.ledger.adjustment_rejected",
-		"admin.ledger.adjustment_executed", "admin.ledger.adjustment_failed",
+		"admin.ledger.adjustment_executed", "admin.ledger.adjustment_failed", "admin.ledger.adjustment_unfinished",
 	},
 	domain.KindInsuranceFund: {
 		"admin.derivatives.insurance_requested", "admin.derivatives.insurance_approved", "admin.derivatives.insurance_rejected",
-		"admin.derivatives.insurance_executed", "admin.derivatives.insurance_failed",
+		"admin.derivatives.insurance_executed", "admin.derivatives.insurance_failed", "admin.derivatives.insurance_unfinished",
 	},
 	domain.KindDepositBackfill: {
 		"admin.deposits.backfill_requested", "admin.deposits.backfill_approved", "admin.deposits.backfill_rejected",
-		"admin.deposits.backfill_executed", "admin.deposits.backfill_failed",
+		"admin.deposits.backfill_executed", "admin.deposits.backfill_failed", "admin.deposits.backfill_unfinished",
 	},
 	domain.KindSimEvent: {
 		"admin.sim.event_requested", "admin.sim.event_approved", "admin.sim.event_rejected", "admin.sim.event_created", "admin.sim.event_failed",
+		"admin.sim.event_unfinished",
 	},
 	domain.KindSimParams: {
 		"admin.sim.params_requested", "admin.sim.params_approved", "admin.sim.params_rejected", "admin.sim.params_changed",
-		"admin.sim.params_failed",
+		"admin.sim.params_failed", "admin.sim.params_unfinished",
 	},
 	domain.KindSimMint: {
 		"admin.sim.mint_requested", "admin.sim.mint_approved", "admin.sim.mint_rejected", "admin.sim.mint_executed", "admin.sim.mint_failed",
+		"admin.sim.mint_unfinished",
 	},
 }
 
@@ -351,7 +354,7 @@ func (s *Service) again(ctx context.Context, p Principal, a domain.Approval) (do
 func (s *Service) carryOut(ctx context.Context, p Principal, a domain.Approval) (domain.Approval, error) {
 	actions := fundActions[a.Kind]
 	if err := s.execute(ctx, &a, p); err != nil {
-		return domain.Approval{}, s.unfinished(ctx, a, err)
+		return domain.Approval{}, s.unfinished(ctx, p, a, err)
 	}
 	return s.record(ctx, a, p, actions.executed, actions.failed)
 }
@@ -360,7 +363,7 @@ func (s *Service) carryOut(ctx context.Context, p Principal, a domain.Approval) 
 // finish: the operation stays pending, attempted, with how the attempt
 // ended, and the error names it (C5.5 ⑥). An error of unknown kind is an
 // unknown outcome.
-func (s *Service) unfinished(ctx context.Context, a domain.Approval, err error) error {
+func (s *Service) unfinished(ctx context.Context, p Principal, a domain.Approval, err error) error {
 	e := apperr.From(err)
 	if e.Kind == apperr.KindInternal {
 		e = apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "the outcome is unknown")
@@ -369,7 +372,17 @@ func (s *Service) unfinished(ctx context.Context, a domain.Approval, err error) 
 	if booked, ok := e.Details["booked"]; ok {
 		note = fmt.Sprintf("booked %v of %v; %v: %s", booked, e.Details["of"], e.Details["bot"], note)
 	}
-	if merr := s.Store.Tx(ctx, func(r ports.Repos) error { return r.Approvals().MarkAttempted(ctx, a.ID, s.Now(), note) }); merr != nil {
+	// Recorded and audited at once: until finished, the trail says it may have booked (C5.5 ⑮).
+	merr := s.Store.Tx(ctx, func(r ports.Repos) error {
+		if err := r.Approvals().MarkAttempted(ctx, a.ID, s.Now(), note); err != nil {
+			return err
+		}
+		return r.Audit(ctx, &auditv1.AdminActionPerformed{
+			Target: "approval:" + a.ID, Action: fundActions[a.Kind].unfinished, Actor: p.Admin.Email, Reason: a.Reason,
+			Details: fmt.Sprintf(`{"status":%q,"result":%q,"mode":%q}`, domain.ApprovalPending, note, a.Mode),
+		}, p.Admin.Email)
+	})
+	if merr != nil {
 		s.Log.WarnContext(ctx, "fund operation: record an unfinished attempt", "approval_id", a.ID, "error", merr)
 	}
 	return e.WithDetail("approval_id", a.ID)
@@ -580,7 +593,7 @@ func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, ap
 		}
 		return domain.Approval{}, err
 	case unknown != nil:
-		return domain.Approval{}, s.unfinished(ctx, a, unknown)
+		return domain.Approval{}, s.unfinished(ctx, p, a, unknown)
 	case repeated:
 		return a, nil
 	}

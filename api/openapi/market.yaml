@@ -794,6 +794,10 @@ components:
           type: string
           format: date-time
           description: When the reference source computed the ticker, or now for the platform's.
+        last_trade_at:
+          type: [string, 'null']
+          format: date-time
+          description: When the platform's own last trade was, how fresh last is; null for a reference ticker or before any trade.
     MarkPrice:
       type: object
       required: [symbol, index_symbol, mark_price, index_price, funding_rate, interest_rate, next_funding_time, degraded, updated_at]

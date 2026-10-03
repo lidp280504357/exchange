@@ -281,6 +281,19 @@ func TestUnclaimedDepositsAreCreditedByHand(t *testing.T) {
 	if !h.ledger.available["alice"].Equal(held) {
 		t.Fatal("the ledger released a deposit in doubt")
 	}
+	// Released before the doubt came, the release unrecorded: neither
+	// closed nor released again, but recorded (C5.5 ⑮).
+	if _, err := h.ledger.ReleaseUnclaimed(ctx, b.ID, "alice", "USDT", d("0.25"), "ops@example.com", "the first attempt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.DismissDeposit(ctx, b.ID, "fin@example.com", "stays unclaimed"); !apperr.Is(err, "WALLET_DEPOSIT_RELEASED") {
+		t.Fatalf("an in-doubt deposit the ledger released, closed: %v", err)
+	}
+	moved := h.ledger.available["alice"]
+	inDoubt, err := h.svc.CreditDeposit(ctx, b.ID, "fin@example.com", "recording the release")
+	if err != nil || inDoubt.Status != domain.StatusCredited || inDoubt.ReleaseJournalID == "" || !h.ledger.available["alice"].Equal(moved) {
+		t.Fatalf("its release recorded %+v %v", inDoubt, err)
+	}
 }
 
 func TestWithdrawalHoldAndDetail(t *testing.T) {
@@ -307,6 +320,16 @@ func TestWithdrawalHoldAndDetail(t *testing.T) {
 	det, err := h.svc.Detail(ctx, w.ID)
 	if err != nil || det.Address == nil || !det.UsedToday.IsPositive() || det.UsedMonth.LessThan(det.UsedToday) {
 		t.Fatalf("detail %+v %v", det, err)
+	}
+	// The console asks for two reviewers (C5.5 ⑮): one approval leaves it in review.
+	other := h.reviewable(t)
+	first, err := ReviewWithdrawal(ctx, h.store, Review{ID: other.ID, Reviewer: "fin@example.com", Reason: "fine", Approve: true, AtLeast: 2}, h.now)
+	if err != nil || first.Status != domain.WithdrawalReview || first.ApprovalsRequired != 2 {
+		t.Fatalf("raised to two reviewers %+v %v", first, err)
+	}
+	second, err := ReviewWithdrawal(ctx, h.store, Review{ID: other.ID, Reviewer: "boss@example.com", Reason: "fine too", Approve: true}, h.now)
+	if err != nil || second.Status != domain.WithdrawalApproved {
+		t.Fatalf("the second reviewer %+v %v", second, err)
 	}
 	// A review ends a hold (C5.5 ⑦).
 	if _, err := h.svc.HoldWithdrawal(ctx, w.ID, true, "ops@example.com", "calling the user again"); err != nil {

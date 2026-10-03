@@ -443,10 +443,14 @@ func (m Market) Feed(ctx context.Context) (ports.FeedStatus, error) {
 
 // Review approves or rejects a withdrawal; a positive soleMax lets this
 // approval complete one worth at most that much (single-person mode).
-func (w Wallet) Review(ctx context.Context, id string, approve bool, reviewer, reason string, soleMax decimal.Decimal) (json.RawMessage, error) {
+func (w Wallet) Review(ctx context.Context, id string, approve bool, reviewer, reason string, soleMax decimal.Decimal, atLeast int,
+) (json.RawMessage, error) {
 	body := map[string]any{"approve": approve, "reviewer": reviewer, "reason": reason}
 	if soleMax.IsPositive() {
 		body["sole_max_usdt"] = soleMax.String()
+	}
+	if atLeast > 0 {
+		body["approvals_at_least"] = atLeast
 	}
 	return w.do(ctx, http.MethodPost, w.Base+"/internal/wallet/withdrawals/"+url.PathEscape(id)+"/review", body, nil)
 }

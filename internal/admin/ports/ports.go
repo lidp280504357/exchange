@@ -449,8 +449,10 @@ type Withdrawals interface {
 	List(ctx context.Context, q WithdrawalQuery) (json.RawMessage, error)
 	// Review approves or rejects a withdrawal in review; a positive
 	// soleMax lets this approval complete one worth at most that much in
-	// USDT however many reviewers it needs (single-person mode).
-	Review(ctx context.Context, id string, approve bool, reviewer, reason string, soleMax decimal.Decimal) (json.RawMessage, error)
+	// USDT however many reviewers it needs (single-person mode), and a
+	// positive atLeast raises the reviewers it needs to that many.
+	Review(ctx context.Context, id string, approve bool, reviewer, reason string, soleMax decimal.Decimal, atLeast int) (json.RawMessage,
+		error)
 	// Custody describes the custodian: coins, checks, what is with it.
 	Custody(ctx context.Context) (json.RawMessage, error)
 	Callbacks(ctx context.Context, q CallbackQuery) (json.RawMessage, error)

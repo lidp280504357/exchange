@@ -133,16 +133,24 @@ func TestAnAttemptedOperationIsFinishedNeverRejected(t *testing.T) {
 	if a.Status != domain.ApprovalPending || a.AttemptedAt.IsZero() || a.Result != "COMMON_UNAVAILABLE: down" {
 		t.Fatalf("attempted: %+v", a)
 	}
+	// The unfinished attempt is audited at once (C5.5 ⑮).
+	if got := h.auditsOf("admin.ledger.adjustment_unfinished"); len(got) != 1 || !strings.Contains(got[0], "approval:"+asked.ID) {
+		t.Fatalf("unfinished audit %v", got)
+	}
 	for _, p := range []Principal{boss, fin} {
 		if _, err := h.svc.DecideApproval(ctx, p, asked.ID, false, "never mind"); code(err) != "ADMIN_APPROVAL_ATTEMPTED" {
 			t.Fatalf("rejected by %s: %v", p.Admin.Email, err)
 		}
 	}
+	// Another approver finishes it.
+	h.admin(t, "boss2@example.com", domain.RoleAdmin)
+	boss2 := h.login(t, "boss2@example.com")
 	h.ledger.err = nil
-	done, err := h.svc.DecideApproval(ctx, boss, asked.ID, true, "the ledger is back")
+	done, err := h.svc.DecideApproval(ctx, boss2, asked.ID, true, "the ledger is back")
 	if err != nil || done.Status != domain.ApprovalExecuted || done.JournalID != "journal-1" {
 		t.Fatalf("finished: %+v %v", done, err)
 	}
+	boss = boss2
 	// The decision repeated returns the operation as it left it, booking nothing more.
 	calls := len(h.ledger.calls)
 	if again, err := h.svc.DecideApproval(ctx, boss, asked.ID, true, "the ledger is back"); err != nil || again.Status != domain.ApprovalExecuted ||
@@ -161,6 +169,20 @@ func TestAnAttemptedOperationIsFinishedNeverRejected(t *testing.T) {
 		if r, err := h.svc.DecideApproval(ctx, boss, other.ID, false, "not owed"); err != nil || r.Status != domain.ApprovalRejected {
 			t.Fatalf("rejected: %+v %v", r, err)
 		}
+	}
+	// An attempted one the ledger then refuses for good: FAILED, nothing booked.
+	third, err := h.svc.RequestAdjustment(ctx, fin, Adjustment{UserID: someUser, Asset: "USDT", Amount: usdt(-4), Reason: "fee"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.ledger.err = apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "down")
+	if _, err := h.svc.DecideApproval(ctx, boss, third.ID, true, "checked"); approvalOf(t, err) != third.ID {
+		t.Fatal(err)
+	}
+	h.ledger.err = apperr.New(apperr.KindUnprocessable, "LEDGER_INSUFFICIENT_BALANCE", "not enough")
+	if failed, err := h.svc.DecideApproval(ctx, boss, third.ID, true, "checked again"); err != nil || failed.Status != domain.ApprovalFailed ||
+		!strings.HasPrefix(failed.Result, "LEDGER_INSUFFICIENT_BALANCE") {
+		t.Fatalf("refused on the retry: %+v %v", failed, err)
 	}
 }
 

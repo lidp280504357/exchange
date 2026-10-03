@@ -32,6 +32,10 @@ type Ticker struct {
 	// At is when a reference source computed the ticker; zero for the
 	// platform's own, computed on demand.
 	At time.Time
+	// LastTradeAt is when the platform's own last trade was (zero for a
+	// reference ticker, or before any trade): how fresh its Last is
+	// (C5.5 ⑮).
+	LastTradeAt time.Time
 }
 
 // WindowStart returns the open time of the window's first minute at now.

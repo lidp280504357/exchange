@@ -477,6 +477,11 @@ export interface components {
              * @description When the reference source computed the ticker, or now for the platform's.
              */
             updated_at: string;
+            /**
+             * Format: date-time
+             * @description When the platform's own last trade was, how fresh last is; null for a reference ticker or before any trade.
+             */
+            last_trade_at?: string | null;
         };
         MarkPrice: {
             symbol: string;

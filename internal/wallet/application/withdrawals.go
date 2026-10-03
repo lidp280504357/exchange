@@ -410,6 +410,9 @@ type Review struct {
 	// withdrawal worth at most that much in USDT (the admin console's
 	// single-person mode).
 	SoleMax decimal.Decimal
+	// AtLeast, when above the approvals the withdrawal needs, raises them
+	// (the admin console's single-person mode for one beyond SoleMax).
+	AtLeast int
 }
 
 // ReviewWithdrawal records a reviewer's approval or rejection (until the
@@ -434,6 +437,7 @@ func ReviewWithdrawal(ctx context.Context, store ports.Store, rv Review, now tim
 		action := "wallet.withdrawal.reject"
 		if rv.Approve {
 			action = "wallet.withdrawal.approve"
+			cur.RequireApprovals(rv.AtLeast)
 			done, err := cur.ApproveAlone(rv.Reviewer, rv.SoleMax, now)
 			if err != nil {
 				return err
@@ -459,8 +463,8 @@ func ReviewWithdrawal(ctx context.Context, store ports.Store, rv Review, now tim
 		}
 		return r.Audit(ctx, &auditv1.AdminActionPerformed{
 			Target: "withdrawal:" + w.ID, Action: action, Actor: rv.Reviewer, Reason: rv.Reason,
-			Details: fmt.Sprintf(`{"user_id":%q,"asset":%q,"amount":%q,"status":%q,"sole_max_usdt":%q}`, w.UserID, w.Asset,
-				w.Amount.String(), w.Status, rv.SoleMax.String()),
+			Details: fmt.Sprintf(`{"user_id":%q,"asset":%q,"amount":%q,"status":%q,"sole_max_usdt":%q,"approvals_required":%d}`, w.UserID,
+				w.Asset, w.Amount.String(), w.Status, rv.SoleMax.String(), w.ApprovalsRequired),
 		}, rv.Reviewer)
 	})
 	return w, err

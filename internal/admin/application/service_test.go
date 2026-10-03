@@ -626,6 +626,8 @@ type fakeWallet struct {
 	// pending is the review queue's length.
 	pending int
 	err     error
+	// atLeast is the last review's raise of the reviewers needed.
+	atLeast int
 	// withdrawals are the ones reviewed or set, by ID.
 	withdrawals map[string]reviewedWithdrawal
 }
@@ -658,8 +660,9 @@ func (w *fakeWallet) Replay(_ context.Context, _, actor, _ string) (json.RawMess
 	return json.RawMessage(`{}`), nil
 }
 
-func (w *fakeWallet) Review(_ context.Context, id string, approve bool, reviewer, reason string, soleMax decimal.Decimal) (json.RawMessage, error) {
-	w.reviewer, w.soleMax = reviewer, soleMax
+func (w *fakeWallet) Review(_ context.Context, id string, approve bool, reviewer, reason string, soleMax decimal.Decimal, atLeast int,
+) (json.RawMessage, error) {
+	w.reviewer, w.soleMax, w.atLeast = reviewer, soleMax, atLeast
 	w.reviewed = append(w.reviewed, id)
 	d := w.detail(id)
 	switch {

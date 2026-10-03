@@ -1928,10 +1928,12 @@ paths:
         20,000 USDT needs two distinct reviewers. In single-person mode
         one approval completes a withdrawal worth at most the settings'
         withdrawal_max_usdt both when it was requested and at the current
-        price (a price over a minute old counts as none: the approval
-        counts, not alone). Rejecting releases the frozen amount. The same
-        review again with its Idempotency-Key answers with the withdrawal
-        as the review left it. Needs withdrawals.review.
+        price; one worth more now, or of no fresh price (over a minute
+        old), needs two reviewers whatever the risk rules asked for: the
+        approval counts and another administrator approves too. Rejecting
+        releases the frozen amount. The same review again with its
+        Idempotency-Key answers with the withdrawal as it stands. Needs
+        withdrawals.review.
       tags: [withdrawals]
       security:
         - session: []

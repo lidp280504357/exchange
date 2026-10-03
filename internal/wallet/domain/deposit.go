@@ -167,6 +167,19 @@ func (d *Deposit) Release(journal, actor, note string, now time.Time) error {
 	return nil
 }
 
+// RecordRelease records a release of an unclaimed deposit the ledger made
+// already (journal) while the deposit was put in doubt since (a
+// discrepancy marked after it): the funds moved, so it is CREDITED, as
+// Release would have left it (C5.5 ⑮).
+func (d *Deposit) RecordRelease(journal, actor, note string, now time.Time) error {
+	if d.Status != StatusRejected || !d.Unclaimed || d.JournalID == "" || d.Resolution != "" || journal == "" {
+		return ErrNotReleasable
+	}
+	d.Status, d.CreditedAt = StatusCredited, now
+	d.Resolution, d.ResolvedBy, d.ResolvedAt, d.ResolutionNote, d.ReleaseJournalID = ResolutionCredited, actor, now, note, journal
+	return nil
+}
+
 // Dismiss records an administrator closing a deposit that waited for a
 // decision without moving funds.
 func (d *Deposit) Dismiss(actor, note string, now time.Time) error {

@@ -367,7 +367,23 @@ func (s *Service) ReviewWithdrawal(ctx context.Context, p Principal, key, id str
 	if err != nil {
 		return nil, err
 	}
-	return s.review(ctx, p, id, approve, reason, limit, s.valuer(ctx, priceMaxAge), !c.Fresh, false)
+	return s.review(ctx, p, id, approve, reason, limit, s.lazyValuer(ctx), !c.Fresh, false)
+}
+
+// lazyValuer values amounts as worth does, reading the prices the first
+// time one other than USDT is valued (a rejection, or two-person mode,
+// values nothing).
+func (s *Service) lazyValuer(ctx context.Context) func(string, decimal.Decimal) (decimal.Decimal, bool) {
+	var value func(string, decimal.Decimal) (decimal.Decimal, bool)
+	return func(asset string, amount decimal.Decimal) (decimal.Decimal, bool) {
+		if asset == "USDT" {
+			return amount.Abs(), true
+		}
+		if value == nil {
+			value = s.valuer(ctx, priceMaxAge)
+		}
+		return value(asset, amount.Abs())
+	}
 }
 
 // soleLimit is how much one approval may complete alone: the settings'
@@ -401,7 +417,7 @@ var ErrWithdrawalHeld = apperr.New(apperr.KindConflict, "ADMIN_WITHDRAWAL_HELD",
 func (s *Service) review(ctx context.Context, p Principal, id string, approve bool, reason string, limit decimal.Decimal,
 	value func(string, decimal.Decimal) (decimal.Decimal, bool), repeated, batch bool,
 ) ([]byte, error) {
-	soleMax := decimal.Zero
+	soleMax, atLeast := decimal.Zero, 0
 	if limit.IsPositive() || batch {
 		w, _, err := s.withdrawal(ctx, id)
 		if err != nil {
@@ -410,13 +426,19 @@ func (s *Service) review(ctx context.Context, p Principal, id string, approve bo
 		if batch && w.HeldAt != nil {
 			return nil, ErrWithdrawalHeld
 		}
-		if amount, err := decimal.NewFromString(w.Amount); err == nil && limit.IsPositive() {
-			if worth, ok := value(w.Asset, amount); ok && !worth.GreaterThan(limit) {
-				soleMax = limit
+		if limit.IsPositive() {
+			// Beyond what one approval may complete at the current price,
+			// or of no fresh price: two reviewers, whatever the risk rules
+			// asked for (C5.5 ⑮).
+			soleMax, atLeast = decimal.Zero, 2
+			if amount, err := decimal.NewFromString(w.Amount); err == nil {
+				if worth, ok := value(w.Asset, amount); ok && !worth.GreaterThan(limit) {
+					soleMax, atLeast = limit, 0
+				}
 			}
 		}
 	}
-	raw, err := s.Wallet.Review(ctx, id, approve, p.Admin.Email, reason, soleMax)
+	raw, err := s.Wallet.Review(ctx, id, approve, p.Admin.Email, reason, soleMax, atLeast)
 	if err == nil || !repeated || apperr.From(err).Kind != apperr.KindConflict {
 		return raw, err
 	}
@@ -488,7 +510,7 @@ func (s *Service) ReviewBatch(ctx context.Context, p Principal, key string, ids 
 	if err != nil {
 		return nil, err
 	}
-	value := s.valuer(ctx, priceMaxAge)
+	value := s.lazyValuer(ctx)
 	seen := map[string]bool{}
 	out := make([]BatchResult, 0, len(ids))
 	for _, id := range ids {

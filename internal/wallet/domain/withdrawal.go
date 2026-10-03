@@ -222,6 +222,16 @@ func (w *Withdrawal) ApproveAlone(reviewer string, limit decimal.Decimal, now ti
 	return w.Approve(reviewer, now)
 }
 
+// RequireApprovals raises the approvals a withdrawal in review needs to at
+// least n, never lowering them: the admin console in single-person mode
+// asks for 2 when it is worth more than an approval may complete alone at
+// the current price, or has no fresh price (C5.5 ⑮).
+func (w *Withdrawal) RequireApprovals(n int) {
+	if w.Status == WithdrawalReview && n > w.ApprovalsRequired {
+		w.ApprovalsRequired = n
+	}
+}
+
 // Reject refuses a withdrawal that is not being sent yet.
 func (w *Withdrawal) Reject(reason string, now time.Time) error {
 	if !w.Cancelable() {

@@ -307,7 +307,9 @@ func (s *Service) ticker(symbol string, now time.Time) domain.Ticker {
 			ask, _ = decimal.NewFromString(a[0].GetPrice())
 		}
 	}
-	return domain.ComputeTicker(symbol, st.minutes, st.before, st.last, bid, ask)
+	t := domain.ComputeTicker(symbol, st.minutes, st.before, st.last, bid, ask)
+	t.LastTradeAt = st.lastAt
+	return t
 }
 
 // Depth returns up to limit levels per side of the symbol's latest depth;

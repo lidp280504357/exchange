@@ -166,15 +166,32 @@ func (s *Service) CreditDeposit(ctx context.Context, id, actor, reason string) (
 		if cur == nil {
 			return apperr.NotFound("no such deposit")
 		}
+		var journal string
 		if err := cur.Releasable(); err != nil {
-			return err
-		}
-		journal, err := s.W.Ledger.ReleaseUnclaimed(ctx, cur.ID, cur.UserID, cur.Asset, cur.Amount, actor, strings.TrimSpace(reason))
-		if err != nil {
-			return err
-		}
-		if err := cur.Release(journal, actor, strings.TrimSpace(reason), s.Now()); err != nil {
-			return err
+			// Released by the ledger before, unrecorded, and in doubt since
+			// (a discrepancy marked after it): the funds moved, so the
+			// release is recorded; no new one is asked for (C5.5 ⑮).
+			if cur.Status != domain.StatusRejected || !cur.Unclaimed || cur.JournalID == "" || cur.Resolution != "" {
+				return err
+			}
+			released, lerr := s.W.Ledger.UnclaimedRelease(ctx, cur.ID)
+			if lerr != nil {
+				return lerr
+			}
+			if released == "" {
+				return err
+			}
+			journal = released
+			if err := cur.RecordRelease(journal, actor, strings.TrimSpace(reason), s.Now()); err != nil {
+				return err
+			}
+		} else {
+			if journal, err = s.W.Ledger.ReleaseUnclaimed(ctx, cur.ID, cur.UserID, cur.Asset, cur.Amount, actor, strings.TrimSpace(reason)); err != nil {
+				return err
+			}
+			if err := cur.Release(journal, actor, strings.TrimSpace(reason), s.Now()); err != nil {
+				return err
+			}
 		}
 		out = *cur
 		if err := r.Deposits().Update(ctx, out); err != nil {
@@ -210,9 +227,10 @@ func (s *Service) DismissDeposit(ctx context.Context, id, actor, reason string) 
 			return apperr.NotFound("no such deposit")
 		}
 		// The ledger may have released an unclaimed one whose release was
-		// not recorded here: it is credited again to record it, never
-		// closed (C5.5 ⑦). Its row stays locked, so no release slips in.
-		if d.Releasable() == nil {
+		// not recorded here (a discrepancy marked since too): it is
+		// credited again to record it, never closed (C5.5 ⑦, ⑮). Its row
+		// stays locked, so no release slips in.
+		if d.Unclaimed && d.JournalID != "" && d.Status != domain.StatusCredited {
 			journal, err := s.W.Ledger.UnclaimedRelease(ctx, d.ID)
 			if err != nil {
 				return err

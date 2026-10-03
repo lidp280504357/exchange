@@ -54,13 +54,14 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
   - 同一管理员 24 小时内单人操作合计（含结果未知的待处理项）不超过 `daily_max_usdt`（默认 500,000）；
   - 折合按该资产 USDT 交易对的最新价（market-data-service tickers），USDT 按 1；没有报价、或报价超过 60 秒没更新（参考行情停了）的不能单人执行（C5.5 ⑥）；
   - 超过任一限额、或没有报价时，自动转为待另一位管理员批准，`escalation` 写明原因（`SINGLE_LIMIT`、`DAILY_LIMIT`、`NO_PRICE`；双人模式下是 `TWO_PERSON_MODE`，明确要求审批的是 `REQUESTED`）。
-- **提现**：单人模式下，需两人审核的提现（> 20,000 USDT，wallet-service 规则）折合不超过 `withdrawal_max_usdt`（默认 100,000）时一人批准即完成（admin-service 把 `sole_max_usdt` 传给 wallet-service 的内部审核接口，wallet 审计里记 `sole_max_usdt`）。批准时 admin-service 还按当前价重算一次（同样 60 秒新鲜度）：申请时的估值与当前估值都不超过才传 `sole_max_usdt`，否则这次批准照常计数、不能单独完成（C5.5 ⑥）。
+- **提现**：单人模式下，需两人审核的提现（> 20,000 USDT，wallet-service 规则）折合不超过 `withdrawal_max_usdt`（默认 100,000）时一人批准即完成（admin-service 把 `sole_max_usdt` 传给 wallet-service 的内部审核接口，wallet 审计里记 `sole_max_usdt`）。批准时 admin-service 还按当前价重算一次（同样 60 秒新鲜度；平台自有交易对按最近一笔成交的时间算）：申请时的估值与当前估值都不超过才传 `sole_max_usdt`；超过、或没有新鲜报价时传 `approvals_at_least: 2`，wallet 把所需审核人数**提到** 2（风控原本只要 1 人的也一样），这次批准照常计数，要另一位管理员再批（C5.5 ⑥、⑮；wallet 审计记 `approvals_required`）。
 - **幂等键**（C5.5 ⑥）：所有动钱的请求必须带请求头 `Idempotency-Key`（≤ 128 字，缺了 400）：调账两条路由、保险基金注资、补记、增发、冻结与解冻、强制平仓、提现审核与批量审核、待处理充值入账、站内信。
   - 后台对话框每次打开生成一个键，结果未知（网络断、5xx、键冲突）时重试沿用，结果确定或关闭对话框后换新键。
   - 键归各管理员所有，存在 admin 库平台表 `idempotency_keys`（`scope` 为「管理员 ID + 动作」，`response` 是请求生成的 ID），保留 24 小时，admin-service 每小时清理一次。
   - 第一次请求按键生成 ID：审批记录、冻结 ID、平仓单的 `client_order_id`、站内信 ID 都取自它。同一请求再来，返回同一笔（审批记录原样返回，单人模式下结果未知的会被完成；冻结、平仓单、站内信由下游按 ID 去重；提现审核、解冻、入账已由本人做过的返回当前状态）；同一键换了内容返回 409 `COMMON_IDEMPOTENCY_CONFLICT`。
   - 站内信的审计 `admin.notices.sent` 与键在同一事务里先写，再交给 notification-service（它接受调用方给的 ID，同一 ID 再发返回原消息）。
-- **待核对**（C5.5 ⑥）：资金操作执行前先记 `attempted_at`（单人模式在建档时、双人模式在批准时）。执行没有结束（账本超时或无响应、增发记了一部分后被拒）的操作保持 `PENDING`，`result` 写这次尝试怎么结束的（增发为 `booked n of m; <机器人>: <错误码>: <消息>`），后台显示「待核对」。
+  - 除资金操作外，键在执行之前单独占用；重放返回的是对象**现在**的样子（例如站内信已是 `SENT`），不是第一次请求时的响应（C5.5 ⑮，可接受）。
+- **待核对**（C5.5 ⑥）：资金操作执行前先记 `attempted_at`（单人模式在建档时、双人模式在批准时）。执行没有结束（账本超时或无响应、增发记了一部分后被拒）的操作保持 `PENDING`，`result` 写这次尝试怎么结束的（增发为 `booked n of m; <机器人>: <错误码>: <消息>`），同时审计 `admin.<种类>_unfinished`（如 `admin.ledger.adjustment_unfinished`，C5.5 ⑮），后台显示「待核对」。批准时 `attempted_at` 在决定事务之前单独提交：之间出错会留下「待核对但其实没执行」的操作，完成它照样安全。
   - 它可能已经记账，所以只能完成（再次批准；幂等键 `approval:<id>` 保证不重复记账），不能拒绝或撤回（409 `ADMIN_APPROVAL_ATTEMPTED`）。
   - 增发不要另发一笔新的：完成这一笔只补剩下的机器人。
   - 模拟市场的事件与参数审批不记 `attempted_at`（它们可以结束或改回）。

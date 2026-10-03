@@ -78,7 +78,7 @@ func (wallet) List(context.Context, ports.WithdrawalQuery) (json.RawMessage, err
 	return json.RawMessage(`{"items":[],"next_cursor":null}`), nil
 }
 
-func (wallet) Review(context.Context, string, bool, string, string, decimal.Decimal) (json.RawMessage, error) {
+func (wallet) Review(context.Context, string, bool, string, string, decimal.Decimal, int) (json.RawMessage, error) {
 	return json.RawMessage(`{}`), nil
 }
 
@@ -497,10 +497,10 @@ func TestConsole(t *testing.T) {
 	}
 	// created ×2, login ×2, login_failed, requested ×2, approved ×2, single-person requested and executed,
 	// settings changed, requested and withdrawn, the keyed one requested and executed, the unknown one
-	// requested and approved, notes ×2, tags ×2, the OPERATOR created, signed in and its sessions ended,
-	// disabled, logout
-	if n != 27 {
-		t.Fatalf("%d audit events in the outbox, want 27", n)
+	// requested, unfinished and approved, notes ×2, tags ×2, the OPERATOR created, signed in and its
+	// sessions ended, disabled, logout
+	if n != 28 {
+		t.Fatalf("%d audit events in the outbox, want 28", n)
 	}
 	var admins string
 	if err := db.QueryRow(ctx, `SELECT string_agg(email || ':' || status || ':' || failed_attempts, ',' ORDER BY email) FROM admins`).Scan(&admins); err != nil {

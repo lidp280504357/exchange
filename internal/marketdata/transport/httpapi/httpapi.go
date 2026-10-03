@@ -235,6 +235,9 @@ type tickerJSON struct {
 	Bid         *string `json:"bid"`
 	Ask         *string `json:"ask"`
 	UpdatedAt   string  `json:"updated_at"`
+	// LastTradeAt is the platform's own last trade (null for a reference
+	// ticker): how fresh last is.
+	LastTradeAt *string `json:"last_trade_at"`
 }
 
 func optional(s string) *string {
@@ -257,6 +260,10 @@ func (h *Handler) tickerJSON(t domain.Ticker, ranks map[string]int32) tickerJSON
 		Low: optional(p.GetLow()), Volume: p.GetVolume(), QuoteVolume: p.GetQuoteVolume(), TradeCount: p.GetTradeCount(),
 		Change: optional(p.GetChange()), Bid: optional(p.GetBid()), Ask: optional(p.GetAsk()),
 		UpdatedAt: p.GetUpdatedAt().AsTime().UTC().Format(time.RFC3339Nano),
+	}
+	if t.At.IsZero() && !t.LastTradeAt.IsZero() {
+		last := t.LastTradeAt.UTC().Format(time.RFC3339Nano)
+		out.LastTradeAt = &last
 	}
 	if r := ranks[t.Symbol]; r > 0 {
 		out.Rank = &r

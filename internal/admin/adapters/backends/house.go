@@ -21,8 +21,8 @@ import (
 
 // Prices returns the last price of every listed symbol that has one
 // (market-data-service's tickers); a positive maxAge leaves out those
-// updated longer ago (a reference ticker is as of its source, the
-// platform's own as of the answer).
+// updated longer ago: a reference ticker is as of its source, the
+// platform's own as of its last trade (C5.5 ⑮).
 func (m Market) Prices(ctx context.Context, maxAge time.Duration) (ports.Prices, error) {
 	raw, err := m.do(ctx, http.MethodGet, m.Base+"/v1/market/tickers", nil, nil)
 	if err != nil {
@@ -30,9 +30,10 @@ func (m Market) Prices(ctx context.Context, maxAge time.Duration) (ports.Prices,
 	}
 	var body struct {
 		Tickers []struct {
-			Symbol    string    `json:"symbol"`
-			Last      *string   `json:"last"`
-			UpdatedAt time.Time `json:"updated_at"`
+			Symbol      string     `json:"symbol"`
+			Last        *string    `json:"last"`
+			UpdatedAt   time.Time  `json:"updated_at"`
+			LastTradeAt *time.Time `json:"last_trade_at"`
 		} `json:"tickers"`
 	}
 	if err := json.Unmarshal(raw, &body); err != nil {
@@ -44,7 +45,11 @@ func (m Market) Prices(ctx context.Context, maxAge time.Duration) (ports.Prices,
 	}
 	out := ports.Prices{}
 	for _, t := range body.Tickers {
-		if t.Last == nil || (maxAge > 0 && now.Sub(t.UpdatedAt) > maxAge) {
+		at := t.UpdatedAt
+		if t.LastTradeAt != nil {
+			at = *t.LastTradeAt
+		}
+		if t.Last == nil || (maxAge > 0 && now.Sub(at) > maxAge) {
 			continue
 		}
 		if p, err := decimal.NewFromString(*t.Last); err == nil && p.IsPositive() {

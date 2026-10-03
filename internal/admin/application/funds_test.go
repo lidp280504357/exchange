@@ -214,19 +214,24 @@ func TestWithdrawalReviewAlone(t *testing.T) {
 	if _, err := h.svc.ReviewWithdrawal(ctx, fin, "", "w2", false, "odd address"); err != nil || !h.wallet.soleMax.IsZero() {
 		t.Fatalf("a rejection: %v, sole max %s", err, h.wallet.soleMax)
 	}
-	// Worth more than the limit at the current price, or of no fresh price: the approval counts, not alone.
+	// Worth more than the limit at the current price, or of no fresh price: two reviewers, whatever the
+	// risk rules asked for (C5.5 ⑮).
 	h.wallet.withdrawals = map[string]reviewedWithdrawal{
 		"big":   {Asset: "BTC", Amount: "2", Status: "PENDING_REVIEW"},
 		"odd":   {Asset: "XYZ", Amount: "1", Status: "PENDING_REVIEW"},
 		"small": {Asset: "BTC", Amount: "1", Status: "PENDING_REVIEW"},
 	}
-	for id, sole := range map[string]string{"big": "0", "odd": "0", "small": "100000"} {
-		if _, err := h.svc.ReviewWithdrawal(ctx, fin, "", id, true, "looks fine"); err != nil || h.wallet.soleMax.String() != sole {
-			t.Fatalf("%s: %v, sole max %s", id, err, h.wallet.soleMax)
+	for id, want := range map[string]struct {
+		sole    string
+		atLeast int
+	}{"big": {"0", 2}, "odd": {"0", 2}, "small": {"100000", 0}} {
+		if _, err := h.svc.ReviewWithdrawal(ctx, fin, "", id, true, "looks fine"); err != nil || h.wallet.soleMax.String() != want.sole ||
+			h.wallet.atLeast != want.atLeast {
+			t.Fatalf("%s: %v, sole max %s, at least %d", id, err, h.wallet.soleMax, h.wallet.atLeast)
 		}
 	}
 	h.svc.Features = onFlags{flags.KeyTwoPerson: true}
-	if _, err := h.svc.ReviewWithdrawal(ctx, fin, "", "w3", true, "looks fine"); err != nil || !h.wallet.soleMax.IsZero() {
+	if _, err := h.svc.ReviewWithdrawal(ctx, fin, "", "w3", true, "looks fine"); err != nil || !h.wallet.soleMax.IsZero() || h.wallet.atLeast != 0 {
 		t.Fatalf("two-person mode: %v, sole max %s", err, h.wallet.soleMax)
 	}
 

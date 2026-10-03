@@ -156,13 +156,15 @@ func (h *Handler) adminWithdrawals(w http.ResponseWriter, r *http.Request) {
 
 // adminReview records a reviewer's decision; sole_max_usdt (the admin
 // console's single-person mode) lets an approval alone complete a
-// withdrawal worth at most that much.
+// withdrawal worth at most that much, approvals_at_least raises the
+// approvals it needs (one worth more than that now, or of no fresh price).
 func (h *Handler) adminReview(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Approve  bool   `json:"approve"`
 		Reviewer string `json:"reviewer"`
 		Reason   string `json:"reason"`
 		SoleMax  string `json:"sole_max_usdt"`
+		AtLeast  int    `json:"approvals_at_least"`
 	}
 	if err := httpx.DecodeJSON(w, r, &body); err != nil {
 		httpx.WriteError(w, r, err)
@@ -177,7 +179,7 @@ func (h *Handler) adminReview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	wd, err := application.ReviewWithdrawal(r.Context(), h.Svc.Store, application.Review{
-		ID: chi.URLParam(r, "id"), Reviewer: body.Reviewer, Reason: body.Reason, Approve: body.Approve, SoleMax: soleMax,
+		ID: chi.URLParam(r, "id"), Reviewer: body.Reviewer, Reason: body.Reason, Approve: body.Approve, SoleMax: soleMax, AtLeast: body.AtLeast,
 	}, h.Svc.Now())
 	if err != nil {
 		httpx.WriteError(w, r, err)
