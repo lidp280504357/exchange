@@ -127,10 +127,18 @@ ensure_build_memory() {
     echo "== 交换区：$(swapon --show --noheadings | tr -s ' ' | tr '\n' ';')"
     read_memory
   fi
-  # 最近 30 秒换入换出的页数（/proc/vmstat 的 pswpin、pswpout，4 KB 一页），折成 KB/s；不依赖 vmstat 命令
-  paging=$(awk '/^pswpin |^pswpout / {s += $2} END {print s}' /proc/vmstat)
-  sleep 30
-  paging=$(( ($(awk '/^pswpin |^pswpout / {s += $2} END {print s}' /proc/vmstat) - paging) * 4 / 30 ))
+  # 最近 30 秒换入换出的页数（/proc/vmstat 的 pswpin、pswpout，4 KB 一页），折成 KB/s；不依赖 vmstat 命令。
+  # 刚收回交换区、刚拉完镜像时内核会短暂换页（58bf6d8 的部署收回 635 MB 后量到 1872 KB/s）：最多量三次，有一次
+  # 低于门槛就放行，三次都高才是一直在换页
+  local window
+  for window in 1 2 3; do
+    paging=$(awk '/^pswpin |^pswpout / {s += $2} END {print s}' /proc/vmstat)
+    sleep 30
+    paging=$(( ($(awk '/^pswpin |^pswpout / {s += $2} END {print s}' /proc/vmstat) - paging) * 4 / 30 ))
+    [ "$paging" -lt "$most" ] && break
+    [ "$window" -lt 3 ] && echo "== 最近 30 秒换页 ${paging} KB/s，再量一次"
+  done
+  read_memory
   if [ "$avail" -lt "$need" ] || [ "$paging" -ge "$most" ]; then
     echo "== 内存不足，需要升级服务器：可用 ${avail} MB（至少 ${need}）、最近 30 秒换页 ${paging} KB/s（不到 ${most}），交换区已用 ${swap} MB；不在服务器上$1，停止部署（什么都没换）"
     stop_before_changes
