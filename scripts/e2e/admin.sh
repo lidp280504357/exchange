@@ -1206,59 +1206,106 @@ else
 fi
 
 echo "== a deposit of nobody credited to a user (B7a, C5.5 21)"
-# The custodian's stand-in issues a probe address no user has and it
-# receives 1 USDT: a deposit of nobody, booked to UNCLAIMED_DEPOSIT until an
-# administrator names its user. Only with the stand-in: the real gateway
-# would move real money.
+# Deposits of nobody come from the stand-in custodian UDUNMOCK (ADR-0017),
+# which serves only the hidden test asset: a user eligible for test assets
+# (registered in AQ) takes a deposit address on it, the stand-in's addresses
+# are retired, and two transfers to that address are booked to
+# UNCLAIMED_DEPOSIT as deposits of nobody, the user their address's former
+# holder. One is credited to the former holder (the usual limits; the test
+# asset has no price, so a second administrator may decide), the other to
+# another user: that one waits for a second administrator whatever its worth
+# (the coordinator's 10-04 decision). Skipped until the stand-in custodian
+# serves a network.
 NO_OWNER=00000000-0000-0000-0000-000000000000
-if [[ $(remote "sudo grep -c '^UDUN_GATEWAY_URL=http://udun-mock' apps.env || true") != 1 ]]; then
-  echo "skip a deposit of nobody: wallet-service's UDUN gateway is not the stand-in"
+as OPERATOR GET /admin/v1/instruments ""
+expect 200 - "the instruments"
+TEST_NET=$(jq -c 'first(.assets[] | .asset_code as $a | (.networks // [])[] | select(.provider == "UDUNMOCK") |
+  {asset: $a, network, coin: .provider_coin}) // empty' <<<"$BODY")
+if [[ -z $TEST_NET ]]; then
+  echo "skip a deposit of nobody: the stand-in custodian UDUNMOCK serves no network yet (ADR-0017)"
 else
-  PROBE=$(remote "sudo docker compose $COMPOSE_FILES exec -T wallet-service /app/exchangectl udun create-address --main-coin 195 --alias e2e-nobody-$RUN --yes" |
-    sed -n 's/^created \([^ ]*\) .*/\1/p')
-  [[ -n $PROBE ]] || { echo "FAIL the stand-in issued no probe address" >&2; exit 1; }
-  echo "ok   a probe address of nobody ($PROBE)"
-  mock deposit --address "$PROBE" --coin "$USDT_TRC20" --amount 1 >/dev/null
-  nobodys() { # the deposit of nobody to the probe waits for a decision; its ID goes to NOBODY
-    local id
+  T_ASSET=$(jq -r .asset <<<"$TEST_NET")
+  T_NETWORK=$(jq -r .network <<<"$TEST_NET")
+  T_COIN=$(jq -r .coin <<<"$TEST_NET")
+  register "e2e-admin-holder-$RUN@example.com" "e2e-admin-holder-$RUN" "e2e admin holder $RUN" AQ
+  HOLDER=$(jq -r .user_id <<<"$BODY")
+  HAUTH=(-H "Authorization: Bearer $(jq -r .access_token <<<"$BODY")")
+  call GET "/v1/wallet/deposit-address?asset=$T_ASSET&network=$T_NETWORK" "" "${HAUTH[@]}"
+  expect 200 - "a user eligible for test assets takes a $T_ASSET address on $T_NETWORK"
+  HOLD_ADDR=$(jq -r .address <<<"$BODY")
+  remote "sudo docker compose $COMPOSE_FILES exec -T wallet-service /app/exchangectl wallet retire-addresses --provider UDUNMOCK --reason 'e2e admin.sh: a retired address receives deposits of nobody' --yes" >/dev/null
+  echo "ok   the stand-in's deposit addresses retired"
+  mock deposit --address "$HOLD_ADDR" --coin "$T_COIN" --amount 1 >/dev/null
+  mock deposit --address "$HOLD_ADDR" --coin "$T_COIN" --amount 2 >/dev/null
+  nobodys() { # both deposits to the retired address wait for a decision: NOBODY1 (1) and NOBODY2 (2)
     as FINANCE GET "/admin/v1/deposits/review?attention=true&user_id=$NO_OWNER&limit=100" ""
-    id=$(jq -r --arg a "$PROBE" '[.items[] | select(.address == $a and .reason == "UNKNOWN_ADDRESS" and .unclaimed and .journal_id != null)][0].id // empty' <<<"$BODY")
-    [[ -n $id ]] && NOBODY=$id
+    of() { jq -r --arg a "$HOLD_ADDR" --argjson n "$1" '[.items[] | select(.address == $a and .reason == "UNKNOWN_ADDRESS" and .unclaimed and
+      .journal_id != null and (.amount | tonumber) == $n)][0].id // empty' <<<"$BODY"; }
+    NOBODY1=$(of 1)
+    NOBODY2=$(of 2)
+    [[ -n $NOBODY1 && -n $NOBODY2 ]]
   }
-  eventually 120 "the deposit of nobody waits in UNCLAIMED_DEPOSIT" nobodys
-  as FINANCE GET "/admin/v1/deposits/$NOBODY" ""
-  check ".user_id == \"$NO_OWNER\" and .address_owner == null and .address_owner_retired == false" "nobody's, its address no user's"
-  as OPERATOR POST "/admin/v1/deposits/$NOBODY/assign" "{\"user_id\":\"$USER_ID\",\"reason\":\"e2e\"}"
+  eventually 120 "two deposits of nobody wait in UNCLAIMED_DEPOSIT" nobodys
+  as FINANCE GET "/admin/v1/deposits/$NOBODY1" ""
+  check ".user_id == \"$NO_OWNER\" and .address_owner == \"$HOLDER\" and .address_owner_retired == true" \
+    "nobody's, the user its address's former holder"
+  as OPERATOR POST "/admin/v1/deposits/$NOBODY1/assign" "{\"user_id\":\"$HOLDER\",\"reason\":\"e2e\"}"
   expect 403 ADMIN_FORBIDDEN "OPERATOR credits it to nobody"
   KEY=none
-  as FINANCE POST "/admin/v1/deposits/$NOBODY/assign" "{\"user_id\":\"$USER_ID\",\"reason\":\"e2e\"}"
+  as FINANCE POST "/admin/v1/deposits/$NOBODY1/assign" "{\"user_id\":\"$HOLDER\",\"reason\":\"e2e\"}"
   expect 400 COMMON_INVALID_ARGUMENT "not without an Idempotency-Key"
-  as FINANCE POST "/admin/v1/deposits/$NOBODY/credit" '{"reason":"e2e credit it as it is"}'
+  as FINANCE POST "/admin/v1/deposits/$NOBODY1/credit" '{"reason":"e2e credit it as it is"}'
   expect 409 WALLET_DEPOSIT_NO_OWNER "it is not credited as it is: nobody owns it"
-  NOBODY_BEFORE=$(spot_usdt available)
-  ASSIGN=$(jq -nc --arg u "$USER_ID" '{user_id: $u, reason: "e2e the sender proved the transfer"}')
+
+  # To its former holder: the usual limits.
+  ASSIGN=$(jq -nc --arg u "$HOLDER" '{user_id: $u, reason: "e2e the former holder proved the transfer"}')
   KEY="e2e-nobody-$RUN"
-  as FINANCE POST "/admin/v1/deposits/$NOBODY/assign" "$ASSIGN"
-  expect 201 - "FINANCE credits it to the user"
+  as FINANCE POST "/admin/v1/deposits/$NOBODY1/assign" "$ASSIGN"
+  expect 201 - "FINANCE credits it to its former holder"
+  check ".kind == \"DEPOSIT_ASSIGN\" and .escalation != \"NOT_ADDRESS_HOLDER\" and .payload.former_holder == \"$HOLDER\" and
+    .payload.user_id == \"$HOLDER\"" "the usual limits for the former holder"
   if [[ $(jq -r .status <<<"$BODY") == PENDING ]]; then
     as ADMIN POST "/admin/v1/approvals/$(jq -r .id <<<"$BODY")/decide" '{"approve":true,"reason":"e2e second administrator"}'
-    expect 200 - "a second administrator approves it (two-person mode)"
+    expect 200 - "a second administrator approves it ($(jq -r .escalation <<<"$BODY"))"
   fi
-  check ".kind == \"DEPOSIT_ASSIGN\" and .status == \"EXECUTED\" and .journal_id != null and .payload.deposit_id == \"$NOBODY\" and .payload.user_id == \"$USER_ID\"" \
-    "a fund operation, released with its journal"
+  check ".status == \"EXECUTED\" and .journal_id != null and .payload.deposit_id == \"$NOBODY1\"" "a fund operation, released with its journal"
   ASSIGNED=$(jq -r .id <<<"$BODY")
   KEY="e2e-nobody-$RUN"
-  as FINANCE POST "/admin/v1/deposits/$NOBODY/assign" "$ASSIGN"
+  as FINANCE POST "/admin/v1/deposits/$NOBODY1/assign" "$ASSIGN"
   expect 201 - "the same request again (a retry)"
   check ".id == \"$ASSIGNED\" and .status == \"EXECUTED\"" "is the same operation"
-  as FINANCE POST "/admin/v1/deposits/$NOBODY/assign" "$(jq -c '.reason = "e2e once more"' <<<"$ASSIGN")"
+  as FINANCE POST "/admin/v1/deposits/$NOBODY1/assign" "$(jq -c '.reason = "e2e once more"' <<<"$ASSIGN")"
   expect 409 ADMIN_DEPOSIT_NOT_UNOWNED "credited once"
-  one_more() {
-    [[ $(jq -n --arg a "$(spot_usdt available)" --arg b "$NOBODY_BEFORE" '(($a | tonumber) - ($b | tonumber) - 1) | fabs < 0.0000001') == true ]]
+  as FINANCE GET "/admin/v1/deposits/$NOBODY1" ""
+  check ".user_id == \"$HOLDER\" and .resolution == \"CREDITED\" and .release_journal_id != null and .attention == false" \
+    "the former holder's now, handled"
+  holder_has() {
+    as AUDITOR GET "/admin/v1/users/$HOLDER/balances" ""
+    [[ $STATUS == 200 ]] && jq -e --arg a "$T_ASSET" 'any(.balances[]; .asset == $a and .account_type == "SPOT" and (.available | tonumber) == 1)' \
+      <<<"$BODY" >/dev/null
   }
-  eventually 60 "the user has 1 USDT more" one_more
-  as FINANCE GET "/admin/v1/deposits/$NOBODY" ""
-  check ".user_id == \"$USER_ID\" and .resolution == \"CREDITED\" and .release_journal_id != null and .attention == false" "the user's now, handled"
+  eventually 60 "the former holder has 1 $T_ASSET" holder_has
+
+  # To another user: a second administrator, whatever its worth.
+  KEY="e2e-nobody-other-$RUN"
+  as FINANCE POST "/admin/v1/deposits/$NOBODY2/assign" "$(jq -nc --arg u "$USER_ID" '{user_id: $u, reason: "e2e the sender proved the transfer"}')"
+  expect 201 - "FINANCE credits the other to another user"
+  check ".status == \"PENDING\" and .mode == \"TWO_PERSON\" and .escalation == \"NOT_ADDRESS_HOLDER\" and .payload.former_holder == \"$HOLDER\" and
+    .payload.user_id == \"$USER_ID\"" "it waits for a second administrator: not the address's holder"
+  OTHER_ASSIGN=$(jq -r .id <<<"$BODY")
+  as FINANCE POST "/admin/v1/approvals/$OTHER_ASSIGN/decide" '{"approve":true,"reason":"e2e my own"}'
+  expect 403 ADMIN_SELF_APPROVAL "not by its requester"
+  as ADMIN POST "/admin/v1/approvals/$OTHER_ASSIGN/decide" '{"approve":true,"reason":"e2e checked the sender"}'
+  expect 200 - "ADMIN approves it"
+  check ".status == \"EXECUTED\" and .journal_id != null" "released with its journal"
+  as FINANCE GET "/admin/v1/deposits/$NOBODY2" ""
+  check ".user_id == \"$USER_ID\" and .resolution == \"CREDITED\" and .attention == false" "the other user's now, handled"
+  other_audited() {
+    as AUDITOR GET "/admin/v1/audit-logs?target=user:$USER_ID" ""
+    [[ $STATUS == 200 ]] && jq -e --arg h "$HOLDER" --arg d "$NOBODY2" 'any(.items[]; .payload.action == "admin.deposits.assign_requested" and
+      (.payload.details | contains($d) and contains("\"former_holder\":\"" + $h + "\"") and contains("NOT_ADDRESS_HOLDER")))' <<<"$BODY" >/dev/null
+  }
+  eventually 60 "the request names the former holder in the trail" other_audited
 fi
 
 echo "== a withdrawal's review details and holds"

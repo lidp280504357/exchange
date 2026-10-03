@@ -282,6 +282,11 @@ function Assign({ d, size, onDone }: { d: ReviewDeposit; size: "sm" | "md"; onDo
             </button>
           </span>
         )}
+        {ok && d.address_owner && id !== d.address_owner.toLowerCase() && (
+          <span className="text-xs text-warn" data-testid="assign-not-holder">
+            {t("admin.unowned.notHolder")}
+          </span>
+        )}
       </div>
     </FundAction>
   );

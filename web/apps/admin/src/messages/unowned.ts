@@ -7,6 +7,10 @@ export const unownedZh = {
       approvalKind: { DEPOSIT_ASSIGN: "无主充值记给用户" },
       depositReason: { UNKNOWN_ADDRESS: "地址无人使用（无主）" },
     },
+    funds: {
+      escalation: { NOT_ADDRESS_HOLDER: "记给的用户不是地址的持有人（含退役前的），不论金额都需另一位管理员决定" },
+      escalationShort: { NOT_ADDRESS_HOLDER: "非地址持有人" },
+    },
     unowned: {
       nobody: "无主",
       nobodyHint: "托管方报到账、但这个地址现在不属于任何用户（探测地址、已退役的地址）。资金记在「待处理充值」，查明归属后记给用户，或驳回。",
@@ -22,6 +26,7 @@ export const unownedZh = {
       userHint: "要记给的用户（UUID）",
       badUser: "请输入用户 ID（UUID）",
       useOwner: "填入地址的持有人",
+      notHolder: "所选用户不是地址的持有人：不论金额，都要另一位管理员在「审批」里决定。",
       deposit: "无主充值 {{id}}",
     },
   },
@@ -36,6 +41,12 @@ export const unownedEn = {
     enum: {
       approvalKind: { DEPOSIT_ASSIGN: "Deposit of nobody to a user" },
       depositReason: { UNKNOWN_ADDRESS: "Address of nobody" },
+    },
+    funds: {
+      escalation: {
+        NOT_ADDRESS_HOLDER: "Credited to a user other than the address's holder (now or before it was retired): a second administrator decides, whatever its worth",
+      },
+      escalationShort: { NOT_ADDRESS_HOLDER: "Not the holder" },
     },
     unowned: {
       nobody: "Nobody",
@@ -53,6 +64,7 @@ export const unownedEn = {
       userHint: "The user it is credited to (a UUID)",
       badUser: "Enter a user ID (UUID)",
       useOwner: "Use the address's holder",
+      notHolder: "The user is not the address's holder: a second administrator decides in Approvals, whatever its worth.",
       deposit: "Deposit of nobody {{id}}",
     },
   },

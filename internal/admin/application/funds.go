@@ -296,9 +296,7 @@ func (s *Service) SubmitFunds(ctx context.Context, p Principal, in FundRequest) 
 	if in.Kind == domain.KindDepositAssign {
 		a.Payload["user_id"], a.Payload["deposit_id"] = in.UserID, in.DepositID
 		a.Payload["network"], a.Payload["address"], a.Payload["tx_hash"] = nobody.Network, nobody.Address, nobody.TxHash
-		if nobody.AddressOwner != nil {
-			a.Payload["address_owner"] = *nobody.AddressOwner
-		}
+		nobody.holderPayload(a.Payload)
 	}
 	if in.Kind == domain.KindSimMint {
 		shares, err := json.Marshal(in.Shares)
@@ -320,6 +318,8 @@ func (s *Service) SubmitFunds(ctx context.Context, p Principal, in FundRequest) 
 	switch {
 	case !in.Direct:
 		a.Escalation = domain.EscalationRequested
+	case in.Kind == domain.KindDepositAssign && nobody.notHolder(in.UserID):
+		a.Escalation = domain.EscalationNotHolder
 	case s.TwoPerson():
 		a.Escalation = domain.EscalationTwoPerson
 	case a.ValueUSDT == nil:
@@ -492,8 +492,9 @@ func fundDetails(a domain.Approval) string {
 		account = fmt.Sprintf(`"network":%q,"trade_id":%q,"tx_hash":%q,"address":%q,"custodian_checked":false,`,
 			a.Payload["network"], a.Payload["trade_id"], a.Payload["tx_hash"], a.Payload["address"])
 	case domain.KindDepositAssign:
-		account = fmt.Sprintf(`"deposit_id":%q,"network":%q,"tx_hash":%q,"address":%q,"address_owner":%q,`,
-			a.Payload["deposit_id"], a.Payload["network"], a.Payload["tx_hash"], a.Payload["address"], a.Payload["address_owner"])
+		account = fmt.Sprintf(`"deposit_id":%q,"user_id":%q,"former_holder":%q,"address_owner":%q,"network":%q,"tx_hash":%q,"address":%q,`,
+			a.Payload["deposit_id"], a.Payload["user_id"], a.Payload["former_holder"], a.Payload["address_owner"], a.Payload["network"],
+			a.Payload["tx_hash"], a.Payload["address"])
 	case domain.KindSimMint:
 		account = fmt.Sprintf(`"role":%q,"bots":%s,`, a.Payload["role"], a.Payload["bots"])
 	}

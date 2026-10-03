@@ -769,10 +769,12 @@ type fakeDeposits struct {
 	decided   []string
 	known     map[string]string // trade ID -> deposit ID
 	credited  map[string]string // deposit ID -> who credited it
-	// nobody are deposits of nobody (ID -> USDT amount); assigned the
-	// users they were credited to; loseAnswer makes the next assignment
-	// happen and its answer get lost.
+	// nobody are deposits of nobody (ID -> USDT amount), to an address
+	// retired from someUser unless probes holds them (an address no user
+	// ever had); assigned the users they were credited to; loseAnswer makes
+	// the next assignment happen and its answer get lost.
 	nobody     map[string]string
+	probes     map[string]bool
 	assigned   map[string]string
 	loseAnswer bool
 }
@@ -795,9 +797,13 @@ func (d *fakeDeposits) Get(_ context.Context, id string) (json.RawMessage, error
 			return json.RawMessage(`{"id":"` + id + `","user_id":"` + user + `","asset":"USDT","amount":"` + amount +
 				`","unclaimed":false,"resolution":"CREDITED","release_journal_id":"release-` + id + `"}`), nil
 		}
+		owner := `"address_owner":"` + someUser + `","address_owner_retired":true`
+		if d.probes[id] {
+			owner = `"address_owner":null,"address_owner_retired":false`
+		}
 		return json.RawMessage(`{"id":"` + id + `","user_id":"` + domain.NoOwner + `","asset":"USDT","amount":"` + amount +
 			`","network":"TRON","address":"TRetired1","tx_hash":"0xfeed","unclaimed":true,"resolution":"","reason":"UNKNOWN_ADDRESS",` +
-			`"address_owner":"` + someUser + `","address_owner_retired":true,"release_journal_id":null}`), nil
+			owner + `,"release_journal_id":null}`), nil
 	}
 	if by, ok := d.credited[id]; ok {
 		return json.RawMessage(`{"id":"` + id + `","status":"CREDITED","resolution":"CREDITED","resolved_by":"` + by + `"}`), nil

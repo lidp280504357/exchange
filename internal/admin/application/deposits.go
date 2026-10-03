@@ -96,15 +96,37 @@ func (s *Service) AssignDeposit(ctx context.Context, p Principal, key, depositID
 
 // depositOfNobody is what a DEPOSIT_ASSIGN needs of its deposit.
 type depositOfNobody struct {
-	UserID       string          `json:"user_id"`
-	Asset        string          `json:"asset"`
-	Amount       decimal.Decimal `json:"amount"`
-	Network      string          `json:"network"`
-	Address      string          `json:"address"`
-	TxHash       string          `json:"tx_hash"`
-	Unclaimed    bool            `json:"unclaimed"`
-	Resolution   string          `json:"resolution"`
-	AddressOwner *string         `json:"address_owner"`
+	UserID     string          `json:"user_id"`
+	Asset      string          `json:"asset"`
+	Amount     decimal.Decimal `json:"amount"`
+	Network    string          `json:"network"`
+	Address    string          `json:"address"`
+	TxHash     string          `json:"tx_hash"`
+	Unclaimed  bool            `json:"unclaimed"`
+	Resolution string          `json:"resolution"`
+	// AddressOwner is the user its address belongs to now, or belonged to
+	// before it was retired (AddressOwnerRetired).
+	AddressOwner        *string `json:"address_owner"`
+	AddressOwnerRetired bool    `json:"address_owner_retired"`
+}
+
+// notHolder reports whether its address has a holder, now or before it
+// was retired, other than user: then a second administrator decides
+// whatever its worth (C5.5 ㉑).
+func (d depositOfNobody) notHolder(user string) bool {
+	return d.AddressOwner != nil && *d.AddressOwner != "" && !strings.EqualFold(*d.AddressOwner, user)
+}
+
+// holderPayload records its address's holder in its operation: the
+// former holder of a retired address, or the one it has now.
+func (d depositOfNobody) holderPayload(p map[string]string) {
+	switch {
+	case d.AddressOwner == nil || *d.AddressOwner == "":
+	case d.AddressOwnerRetired:
+		p["former_holder"] = strings.ToLower(*d.AddressOwner)
+	default:
+		p["address_owner"] = strings.ToLower(*d.AddressOwner)
+	}
 }
 
 // ErrNotNobodys refuses to assign a deposit that is not one of nobody

@@ -293,6 +293,10 @@ const (
 	EscalationDailyMax  = "DAILY_LIMIT"     // over the requester's 24-hour total
 	EscalationNoPrice   = "NO_PRICE"        // its worth in USDT is unknown
 	EscalationSimShare  = "SIM_SHARE"       // a price move beyond one operator's share (market-sim)
+	// EscalationNotHolder: a deposit of nobody credited to a user other
+	// than its address's holder, now or before the address was retired,
+	// whatever its worth (C5.5 ㉑, the coordinator's 10-04 decision).
+	EscalationNotHolder = "NOT_ADDRESS_HOLDER"
 )
 
 // Approval is a fund operation (§5.12: manual ledger adjustments and

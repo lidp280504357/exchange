@@ -683,7 +683,10 @@ export interface paths {
          *     waits in UNCLAIMED_DEPOSIT. This credits its own asset and amount
          *     to the user named: a fund operation of kind DEPOSIT_ASSIGN, carried
          *     out at once in single-person mode within the limits, else waiting
-         *     for a second administrator (C5.5 ㉑). wallet-service sets the owner
+         *     for a second administrator (C5.5 ㉑). Credited to a user other than
+         *     the address's holder, now or before it was retired, it waits for a
+         *     second administrator whatever its worth (escalation
+         *     NOT_ADDRESS_HOLDER). wallet-service sets the owner
          *     and releases it (audited as wallet.deposit.assigned and
          *     ledger.unclaimed_released). Any other deposit is
          *     ADMIN_DEPOSIT_NOT_UNOWNED; a user who may not take deposits is
@@ -4265,8 +4268,8 @@ export interface components {
              *     market-sim measured; volume for a turnover change); the result names the event or the settings' version. For
              *     SIM_MINT asset, amount (in all), bots (each bot's share as JSON: [{user_id, label, amount}]) and role when only
              *     one role's bots; its journal_id is the first bot's. For DEPOSIT_ASSIGN user_id (the user it is credited to),
-             *     deposit_id, asset, amount, network, address, tx_hash and address_owner when the address had one; its journal_id
-             *     is the release's.
+             *     deposit_id, asset, amount, network, address, tx_hash, and former_holder (a retired address's holder) or
+             *     address_owner (its holder now) when it has one; its journal_id is the release's.
              */
             payload: {
                 [key: string]: string;
@@ -4301,11 +4304,12 @@ export interface components {
              * @description Why a two-person operation waits for a second administrator:
              *     asked for, two-person mode on, above the single-operation
              *     limit, over the 24-hour limit, or of unknown worth, or a
-             *     simulated market's change beyond one operator's share; empty
-             *     in single-person mode.
+             *     simulated market's change beyond one operator's share, or a
+             *     deposit of nobody credited to a user other than its address's
+             *     holder; empty in single-person mode.
              * @enum {string}
              */
-            escalation: "" | "REQUESTED" | "TWO_PERSON_MODE" | "SINGLE_LIMIT" | "DAILY_LIMIT" | "NO_PRICE" | "SIM_SHARE";
+            escalation: "" | "REQUESTED" | "TWO_PERSON_MODE" | "SINGLE_LIMIT" | "DAILY_LIMIT" | "NO_PRICE" | "SIM_SHARE" | "NOT_ADDRESS_HOLDER";
             journal_id: string | null;
             /**
              * Format: date-time

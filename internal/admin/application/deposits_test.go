@@ -83,8 +83,11 @@ func TestADepositOfNobodyIsCreditedToAUser(t *testing.T) {
 	h.admin(t, "ops@example.com", domain.RoleOperator)
 	fin, boss, ops := h.login(t, "fin@example.com"), h.login(t, "boss@example.com"), h.login(t, "ops@example.com")
 	small, large, lost := "0192a000-0000-7000-8000-0000000000e1", "0192a000-0000-7000-8000-0000000000e2", "0192a000-0000-7000-8000-0000000000e3"
+	other, probe := "0192a000-0000-7000-8000-0000000000e4", "0192a000-0000-7000-8000-0000000000e5"
 	owned := "0192a000-0000-7000-8000-0000000000d9"
-	h.deposits.nobody = map[string]string{small: "50", large: "200000", lost: "7"}
+	h.deposits.nobody = map[string]string{small: "50", large: "200000", lost: "7", other: "5", probe: "6"}
+	h.deposits.probes = map[string]bool{probe: true}
+	stranger := "0192a000-0000-7000-8000-00000000cafe"
 
 	if _, err := h.svc.AssignDeposit(ctx, ops, "", small, someUser, "found its owner"); code(err) != "ADMIN_FORBIDDEN" {
 		t.Fatalf("an operator credits it: %v", err)
@@ -96,10 +99,11 @@ func TestADepositOfNobodyIsCreditedToAUser(t *testing.T) {
 		t.Fatalf("a deposit with its user: %v", err)
 	}
 
-	// Within the single-person limit: credited at once, with the journal.
+	// To its address's former holder within the single-person limit:
+	// credited at once, with the journal.
 	a, err := h.svc.AssignDeposit(ctx, fin, "k1", small, someUser, "the owner's ticket T-9")
 	if err != nil || a.Status != domain.ApprovalExecuted || a.Kind != domain.KindDepositAssign || a.JournalID != "release-"+small ||
-		a.Payload["user_id"] != someUser || a.Payload["deposit_id"] != small || a.Payload["address_owner"] != someUser ||
+		a.Payload["user_id"] != someUser || a.Payload["deposit_id"] != small || a.Payload["former_holder"] != someUser ||
 		h.deposits.assigned[small] != someUser || a.ValueUSDT == nil || a.ValueUSDT.String() != "50" {
 		t.Fatalf("assigned %+v %v", a, err)
 	}
@@ -132,9 +136,34 @@ func TestADepositOfNobodyIsCreditedToAUser(t *testing.T) {
 	if err != nil || c.Status != domain.ApprovalExecuted || c.JournalID != "release-"+lost || len(h.deposits.decided) != 3 {
 		t.Fatalf("finished %+v %v %v", c, err, h.deposits.decided)
 	}
-	if got := h.auditsOf("admin.deposits.assign_requested"); len(got) != 3 || !strings.Contains(got[0], `"deposit_id":"`+small+`"`) ||
-		!strings.Contains(got[0], `"address_owner":"`+someUser+`"`) {
+	// To a user other than its address's former holder: a second
+	// administrator decides, however small (the coordinator's 10-04
+	// decision); the trail names both.
+	d, err := h.svc.AssignDeposit(ctx, fin, "k4", other, stranger, "the sender's ticket T-12")
+	if err != nil || d.Status != domain.ApprovalPending || d.Escalation != domain.EscalationNotHolder || h.deposits.assigned[other] != "" ||
+		d.Payload["former_holder"] != someUser || d.Payload["user_id"] != stranger {
+		t.Fatalf("to another user %+v %v", d, err)
+	}
+	if _, err := h.svc.DecideApproval(ctx, fin, d.ID, true, "mine"); code(err) != "ADMIN_SELF_APPROVAL" {
+		t.Fatalf("its requester approves it: %v", err)
+	}
+	if done, err := h.svc.DecideApproval(ctx, boss, d.ID, true, "the sender proved the transfer"); err != nil ||
+		done.Status != domain.ApprovalExecuted || h.deposits.assigned[other] != stranger {
+		t.Fatalf("approved %+v %v", done, err)
+	}
+	// An address no user ever had: the usual limits.
+	if e, err := h.svc.AssignDeposit(ctx, fin, "k5", probe, stranger, "the sender's ticket T-13"); err != nil ||
+		e.Status != domain.ApprovalExecuted || e.Payload["former_holder"] != "" || e.Payload["address_owner"] != "" {
+		t.Fatalf("a probe address's %+v %v", e, err)
+	}
+
+	got := h.auditsOf("admin.deposits.assign_requested")
+	if len(got) != 5 || !strings.Contains(got[0], `"deposit_id":"`+small+`"`) || !strings.Contains(got[0], `"former_holder":"`+someUser+`"`) {
 		t.Fatalf("the requests audited %v", got)
+	}
+	if !strings.Contains(got[3], `"user_id":"`+stranger+`","former_holder":"`+someUser+`"`) ||
+		!strings.Contains(got[3], `"escalation":"NOT_ADDRESS_HOLDER"`) {
+		t.Fatalf("a request for another user audited %s", got[3])
 	}
 }
 

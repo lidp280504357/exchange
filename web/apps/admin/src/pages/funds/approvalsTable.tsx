@@ -149,6 +149,20 @@ function Payload({ a }: { a: Approval }) {
           {p.network} · {t("admin.unowned.deposit", { id: p.deposit_id.slice(-8) })}
         </span>
       )}
+      {a.kind === "DEPOSIT_ASSIGN" && <Holder p={p} />}
+    </span>
+  );
+}
+
+/** Holder names a deposit of nobody's address holder when it is credited to someone else (C5.5 ㉑). */
+function Holder({ p }: { p: Record<string, string> }) {
+  const { t } = useTranslation();
+  const holder = p.former_holder || p.address_owner;
+  if (!holder || holder === p.user_id) return null;
+  return (
+    <span className="inline-flex items-center gap-1 text-xs text-warn" data-testid="approval-holder">
+      {t(p.former_holder ? "admin.unowned.ownerRetired" : "admin.unowned.owner")}
+      <UserCell id={holder} />
     </span>
   );
 }
