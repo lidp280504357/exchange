@@ -230,7 +230,7 @@ var ErrReleasedUnrecorded = apperr.New(apperr.KindConflict, "WALLET_DEPOSIT_RELE
 // any user but the one it paid (details user_id and journal_id), and
 // refuses closing it: assigning it to that user records the release
 // (review AJ).
-var ErrReleasedToAnother = apperr.New(apperr.KindConflict, "WALLET_DEPOSIT_RELEASED",
+var ErrReleasedToAnother = apperr.New(apperr.KindConflict, "WALLET_DEPOSIT_RELEASED_TO_USER",
 	"the ledger released this deposit to a user already: assign it to that user (user_id) to record the release")
 
 // DismissDeposit closes a deposit that waited for a decision without

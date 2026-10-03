@@ -15,6 +15,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	walletv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1"
+	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/event"
 	"github.com/lidp280504357/exchange/internal/platform/migrate"
 	"github.com/lidp280504357/exchange/internal/platform/testenv"
@@ -617,6 +618,14 @@ func TestCustodyStorage(t *testing.T) {
 	if held, err := read.ChainFees().Page(ctx, domain.FeeHeld, "", 5); err != nil || len(held) != 1 || held[0].HoldReason != "above 5 USDT" {
 		t.Fatalf("held %+v %v", held, err)
 	}
+	// With the withdrawal's custodian; a cursor no fee has is refused
+	// (review AL).
+	if page[0].Provider != w.Provider {
+		t.Fatalf("the fee's custodian %q, want %q", page[0].Provider, w.Provider)
+	}
+	if _, err := read.ChainFees().Page(ctx, "", "UDUN:no-such-fee", 5); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("an unknown cursor: %v", err)
+	}
 
 	amount := decimal.NewFromInt(100)
 	cb := domain.Callback{
@@ -684,6 +693,26 @@ func TestCustodyStorage(t *testing.T) {
 	}
 	if n, last, err := read.Callbacks().Attention(ctx, ""); err != nil || n != 0 || !last.Equal(now) {
 		t.Fatalf("attention %d %v %v", n, last, err)
+	}
+	// By custodian (ADR-0017): another's callbacks are not this one's.
+	mock := domain.Callback{
+		ID: uuid.Must(uuid.NewV7()).String(), Provider: domain.ProviderUdunMock, TradeID: "m-1", Status: 3, Raw: "y", SignatureOK: true,
+		Result: domain.CallbackUnmatched, Detail: "no such address", ReceivedAt: now,
+	}
+	receive(mock)
+	if page, err := read.Callbacks().Page(ctx, ports.CallbackFilter{Provider: domain.ProviderUdunMock, Limit: 10}); err != nil || len(page) != 1 ||
+		page[0].ID != mock.ID {
+		t.Fatalf("UDUNMOCK's callbacks %+v %v", page, err)
+	}
+	if page, err := read.Callbacks().Page(ctx, ports.CallbackFilter{Provider: domain.ProviderUdun, Limit: 50}); err != nil ||
+		slices.ContainsFunc(page, func(c domain.Callback) bool { return c.Provider != domain.ProviderUdun }) {
+		t.Fatalf("UDUN's callbacks %+v %v", page, err)
+	}
+	if n, _, err := read.Callbacks().Attention(ctx, domain.ProviderUdunMock); err != nil || n != 1 {
+		t.Fatalf("UDUNMOCK's attention %d %v", n, err)
+	}
+	if n, _, err := read.Callbacks().Attention(ctx, domain.ProviderUdun); err != nil || n != 0 {
+		t.Fatalf("UDUN's attention %d %v", n, err)
 	}
 
 	for _, c := range []domain.ChainCheck{

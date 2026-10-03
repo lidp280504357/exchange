@@ -61,6 +61,7 @@ type CustodyProcessor struct {
 	lastCheck   time.Time
 	lastBalance time.Time
 	recheckAt   time.Time
+	nobody      *nobodyRetries
 
 	up        prometheus.Gauge
 	balance   *prometheus.GaugeVec
@@ -77,6 +78,7 @@ type CustodyProcessor struct {
 	feesHeld  prometheus.Gauge
 	suspended *prometheus.GaugeVec
 	stopped   *prometheus.GaugeVec
+	refused   prometheus.Gauge
 }
 
 // checkRetry is when a check that failed is tried again.
@@ -106,8 +108,9 @@ func NewCustodyProcessor(p CustodyProcessor, reg prometheus.Registerer) *Custody
 	p.feesHeld = gauge("wallet_custody_fees_held", "The custodian's fees held for a person to book or write off (exchangectl wallet custody-fees).")
 	p.suspended = vec("wallet_withdrawals_suspended", "1 while an asset's withdrawals are suspended (funds missing, or an operator); a person lifts it.", "asset")
 	p.stopped = vec("wallet_withdrawals_suspended_waiting", "Approved withdrawals that wait because their asset's withdrawals are suspended.", "asset")
+	p.refused = gauge("wallet_custody_deposits_unbookable", "Deposits of nobody the ledger would not book to UNCLAIMED_DEPOSIT: each tried again after a minute, doubling up to an hour.")
 	reg.MustRegister(p.up, p.balance, p.held, p.expected, p.shortfall, p.compared, p.submitted, p.oldest, p.attention, p.uncertain, p.waiting,
-		p.unbooked, p.feesHeld, p.suspended, p.stopped)
+		p.unbooked, p.feesHeld, p.suspended, p.stopped, p.refused)
 	if p.CheckEvery <= 0 {
 		p.CheckEvery = time.Hour
 	}
@@ -123,6 +126,7 @@ func NewCustodyProcessor(p CustodyProcessor, reg prometheus.Registerer) *Custody
 	if p.RecheckAfter <= 0 {
 		p.RecheckAfter = 5 * time.Minute
 	}
+	p.nobody = &nobodyRetries{}
 	return &p
 }
 
@@ -163,13 +167,14 @@ func (p *CustodyProcessor) Round(ctx context.Context) error {
 	for _, n := range names(nets) {
 		o := netOps{Store: p.Store, Ledger: p.Ledger, Log: p.Log, Now: p.Now, Network: n}
 		errs = append(errs, o.recoverRequested(ctx), o.release(ctx), p.dispatch(ctx, o, nets, stopped), o.settle(ctx))
-		waiting, err := requestCredits(ctx, p.Store, p.Eligibility, p.Ledger, n, nets, p.Now)
+		waiting, err := requestCredits(ctx, p.Store, p.Eligibility, p.Ledger, n, nets, p.Now, p.nobody)
 		held += waiting
 		left, ferr := o.bookFees(ctx)
 		unbooked = unbooked.Add(left)
 		errs = append(errs, err, ferr)
 	}
 	p.waiting.Set(float64(held))
+	p.refused.Set(float64(p.nobody.waiting()))
 	p.unbooked.Set(unbooked.InexactFloat64())
 	p.stopped.Reset()
 	for asset, n := range stopped {
@@ -623,6 +628,11 @@ func (p *CustodyProcessor) Check(ctx context.Context) ([]domain.ChainCheck, erro
 		held, err := heldOf(coins, nets, asset, expected)
 		if err != nil {
 			p.compared.WithLabelValues(asset).Set(1)
+			// Its last figures would read as current (review AL): gone
+			// until it is compared again.
+			p.held.DeleteLabelValues(asset)
+			p.expected.DeleteLabelValues(asset)
+			p.shortfall.DeleteLabelValues(asset)
 			skipped = append(skipped, fmt.Errorf("%s %w: %w", asset, errNotCompared, err))
 			continue
 		}

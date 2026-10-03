@@ -606,10 +606,14 @@ type CustodyOverview struct {
 	LastAt    time.Time
 }
 
-// Custody describes the custodian provider for the admin console.
+// Custody describes the custodian provider for the admin console; one
+// neither configured nor known is not found (review AO).
 func (s *Service) Custody(ctx context.Context, provider string) (CustodyOverview, error) {
 	out := CustodyOverview{Provider: provider, Networks: map[string][]domain.Network{}}
 	c := s.Custodians[provider]
+	if c == nil && !s.custodian(provider) {
+		return out, apperr.NotFound("no such custodian")
+	}
 	out.Configured = c != nil
 	nets, err := s.Networks.ForAsset(ctx, "")
 	if err != nil {

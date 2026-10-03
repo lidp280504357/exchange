@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
+	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/wallet/domain"
 	"github.com/lidp280504357/exchange/internal/wallet/ports"
 )
@@ -159,9 +160,20 @@ func scanChainFee(row pgx.CollectableRow) (domain.ChainFee, error) {
 }
 
 func (r chainFees) Page(ctx context.Context, status, after string, limit int) ([]domain.CustodyFee, error) {
+	if after != "" {
+		var known bool
+		if err := r.q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM chain_fees WHERE tx_hash = $1)`, after).Scan(&known); err != nil {
+			return nil, fmt.Errorf("page custodian fees: %w", err)
+		}
+		if !known {
+			return nil, apperr.Invalid("unknown cursor")
+		}
+	}
+	// A withdrawal's fee names it by ID: joined on the withdrawals' key
+	// (the cast only for those).
 	rows, err := r.q.Query(ctx, `SELECT f.tx_hash, f.network, f.asset, f.amount, f.purpose, f.reference, f.journal_id, f.booked_at, f.status,
-			f.hold_reason, f.resolved_by, f.resolution, f.resolved_at, f.created_at, coalesce(u.unit, '')
-		FROM chain_fees f JOIN withdrawals w ON w.id::text = f.reference
+			f.hold_reason, f.resolved_by, f.resolution, f.resolved_at, f.created_at, w.provider, coalesce(u.unit, '')
+		FROM chain_fees f JOIN withdrawals w ON w.id = CASE WHEN f.purpose = 'WITHDRAWAL' THEN f.reference::uuid END
 		LEFT JOIN custody_fee_units u ON u.provider = w.provider AND u.asset = w.asset AND u.network = w.network
 		WHERE f.purpose = 'WITHDRAWAL' AND w.provider <> '' AND ($1 = '' OR f.status = $1)
 			AND ($2 = '' OR (f.created_at, f.tx_hash) < (SELECT created_at, tx_hash FROM chain_fees WHERE tx_hash = $2))
@@ -174,7 +186,7 @@ func (r chainFees) Page(ctx context.Context, status, after string, limit int) ([
 		var journal *string
 		var booked, resolved *time.Time
 		err := row.Scan(&f.TxHash, &f.Network, &f.Asset, &f.Amount, &f.Purpose, &f.Reference, &journal, &booked, &f.Status, &f.HoldReason,
-			&f.ResolvedBy, &f.Resolution, &resolved, &f.CreatedAt, &f.Unit)
+			&f.ResolvedBy, &f.Resolution, &resolved, &f.CreatedAt, &f.Provider, &f.Unit)
 		f.JournalID, f.BookedAt, f.ResolvedAt, f.WithdrawalID = str(journal), at(booked), at(resolved), f.Reference
 		return f, err
 	})

@@ -373,6 +373,14 @@ groups:
           summary: "a custodian's deposit no user's address takes ({{ $labels.reason }}): unknown_address is booked to UNCLAIMED_DEPOSIT as a deposit of nobody, credit it to its user or dismiss it in the console; unknown_coin is not booked, find the coin's network"
           runbook: docs/runbook/custody.md
 
+      - alert: CustodyDepositUnbookable
+        expr: max by (provider) (wallet_custody_deposits_unbookable) > 0
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.provider }}: a deposit of nobody the ledger will not book to UNCLAIMED_DEPOSIT; it is tried again hourly at most, the error is in wallet-service's log (deposit ... of nobody)"
+          runbook: docs/runbook/custody.md
+
       - alert: WalletWithdrawalsWaitingOnSuspension
         expr: max by (asset) (wallet_withdrawals_suspended_waiting) > 0
         for: 30m

@@ -13,8 +13,9 @@ import (
 // CustodyFees pages through the custodians' withdrawal fees for the
 // console, newest first, as exchangectl wallet custody-fees lists the held
 // ones: of a status (HELD, BOOKABLE, WRITTEN_OFF; "" any), after a fee
-// (the cursor is its transaction), at most limit (1 to 200, default 50).
-// It returns the cursor of the next page, "" at the end.
+// (the cursor is its transaction; an unknown one is refused), at most
+// limit (default 50, at most 200). It returns the cursor of the next page,
+// "" at the end.
 func (s *Service) CustodyFees(ctx context.Context, status, after string, limit int) ([]domain.CustodyFee, string, error) {
 	status = strings.ToUpper(strings.TrimSpace(status))
 	switch status {
@@ -22,8 +23,11 @@ func (s *Service) CustodyFees(ctx context.Context, status, after string, limit i
 	default:
 		return nil, "", apperr.Invalid("status is HELD, BOOKABLE or WRITTEN_OFF")
 	}
-	if limit <= 0 || limit > 200 {
+	switch {
+	case limit <= 0:
 		limit = 50
+	case limit > 200:
+		limit = 200
 	}
 	list, err := s.Store.Read().ChainFees().Page(ctx, status, after, limit+1)
 	if err != nil {
@@ -58,7 +62,7 @@ func (s *Service) Custodied(ctx context.Context, provider, asset, network string
 // conflict.
 func (s *Service) DecideCustodyFee(ctx context.Context, d FeeResolution) (domain.ChainFee, error) {
 	if _, err := uuid.Parse(d.WithdrawalID); err != nil {
-		return domain.ChainFee{}, apperr.NotFound("no such withdrawal with a custodian")
+		return domain.ChainFee{}, ErrFeeNotFound
 	}
 	return ResolveCustodyFee(ctx, s.Store, s.Custodied, d, s.Now())
 }

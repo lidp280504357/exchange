@@ -92,11 +92,13 @@ type ChainFee struct {
 }
 
 // CustodyFee is a custodian's fee for a withdrawal as the console lists
-// it: the fee, its withdrawal, and how the custodian counts its fee on the
-// withdrawal's network as a person confirmed it ("" when nobody did).
+// it: the fee, its withdrawal and the withdrawal's custodian, and how the
+// custodian counts its fee on the withdrawal's network as a person
+// confirmed it ("" when nobody did).
 type CustodyFee struct {
 	ChainFee
 	WithdrawalID string
+	Provider     string
 	Unit         string
 }
 

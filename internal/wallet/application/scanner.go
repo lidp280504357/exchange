@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -347,7 +348,7 @@ func (s *Scanner) confirm(ctx context.Context, head uint64) error {
 // request sends confirmed deposits to the ledger (DepositConfirmed)
 // while their asset takes deposits; the others wait.
 func (s *Scanner) request(ctx context.Context, nets []domain.Network) error {
-	held, err := requestCredits(ctx, s.Store, s.Eligibility, nil, s.Network, nets, s.Now) // its addresses all have a user
+	held, err := requestCredits(ctx, s.Store, s.Eligibility, nil, s.Network, nets, s.Now, nil) // its addresses all have a user
 	s.held.Set(float64(held))
 	return err
 }
@@ -380,8 +381,78 @@ func creditNobody(ctx context.Context, store ports.Store, ledger ports.Ledger, d
 	})
 }
 
+// nobodyRetries paces the deposits of nobody the ledger would not book
+// (review AL): one waits a minute, then twice as long after each failure,
+// up to an hour, so a deposit refused for good is tried and reported about
+// once an hour rather than every round. Kept in memory: after a restart
+// each is tried again at once.
+type nobodyRetries struct {
+	mu   sync.Mutex
+	next map[string]nobodyRetry
+}
+
+type nobodyRetry struct {
+	Network string
+	At      time.Time
+	Delay   time.Duration
+}
+
+const (
+	nobodyFirstRetry = time.Minute
+	nobodyLastRetry  = time.Hour
+)
+
+// due reports whether deposit id may be tried at now.
+func (n *nobodyRetries) due(id string, now time.Time) bool {
+	if n == nil {
+		return true
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	r, ok := n.next[id]
+	return !ok || !now.Before(r.At)
+}
+
+// failed has deposit id of network wait before its next try.
+func (n *nobodyRetries) failed(id, network string, now time.Time) {
+	if n == nil {
+		return
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.next == nil {
+		n.next = map[string]nobodyRetry{}
+	}
+	delay := nobodyFirstRetry
+	if r, ok := n.next[id]; ok {
+		delay = min(r.Delay*2, nobodyLastRetry)
+	}
+	n.next[id] = nobodyRetry{Network: network, At: now.Add(delay), Delay: delay}
+}
+
+// keep forgets network's deposits not in ids (booked, or closed by a
+// person).
+func (n *nobodyRetries) keep(network string, ids []string) {
+	if n == nil {
+		return
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	maps.DeleteFunc(n.next, func(id string, r nobodyRetry) bool { return r.Network == network && !slices.Contains(ids, id) })
+}
+
+// waiting counts the deposits of nobody that wait to be tried again.
+func (n *nobodyRetries) waiting() int {
+	if n == nil {
+		return 0
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return len(n.next)
+}
+
 func requestCredits(ctx context.Context, store ports.Store, eligibility ports.Eligibility, ledger ports.Ledger, network string,
-	nets []domain.Network, now func() time.Time,
+	nets []domain.Network, now func() time.Time, retries *nobodyRetries,
 ) (int, error) {
 	list, err := store.Read().Deposits().Unrequested(ctx, network)
 	if err != nil {
@@ -395,6 +466,7 @@ func requestCredits(ctx context.Context, store ports.Store, eligibility ports.El
 	}
 	held := 0
 	var nobody []error
+	var failing []string
 	for _, d := range list {
 		if d.Resolution != "" {
 			continue // closed by an administrator: never credited
@@ -405,10 +477,16 @@ func requestCredits(ctx context.Context, store ports.Store, eligibility ports.El
 		}
 		if d.UserID == domain.NoOwner {
 			// One the ledger will not book (refused for good, say) waits
-			// on its own, tried again each round and reported: the others'
+			// on its own, tried again later and reported then: the others'
 			// credits go on, as a user's deposit the ledger cannot book
-			// goes to its dead letters (review AJ).
+			// goes to its dead letters (reviews AJ, AL).
+			if !retries.due(d.ID, now()) {
+				failing = append(failing, d.ID)
+				continue
+			}
 			if err := creditNobody(ctx, store, ledger, d, now); err != nil {
+				retries.failed(d.ID, network, now())
+				failing = append(failing, d.ID)
 				nobody = append(nobody, fmt.Errorf("deposit %s of nobody: %w", d.ID, err))
 			}
 			continue
@@ -441,5 +519,6 @@ func requestCredits(ctx context.Context, store ports.Store, eligibility ports.El
 			return held, errors.Join(append(nobody, fmt.Errorf("deposit %s: %w", d.ID, err))...)
 		}
 	}
+	retries.keep(network, failing)
 	return held, errors.Join(nobody...)
 }

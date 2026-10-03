@@ -156,6 +156,19 @@ func (s *Service) mainCoin(ctx context.Context, c ports.Custody, t ports.Custody
 // false otherwise: a custodian's fee is booked only in such an asset.
 type Custodied func(ctx context.Context, provider, asset, network string) (int32, bool, error)
 
+// Errors of the decisions on the custodians' fees (review AL): no fee of
+// a custodian for the withdrawal (404), one that waits for no one (409:
+// booked, written off, or booked as it comes) and one another decision
+// took first (409).
+var (
+	ErrFeeNotFound = apperr.New(apperr.KindNotFound, "WALLET_CUSTODY_FEE_NOT_FOUND",
+		"no fee of a custodian for this withdrawal")
+	ErrFeeNotHeld = apperr.New(apperr.KindConflict, "WALLET_CUSTODY_FEE_NOT_HELD",
+		"the fee waits for no one: booked, written off, or booked as it comes")
+	ErrFeeChanged = apperr.New(apperr.KindConflict, "WALLET_CUSTODY_FEE_CHANGED",
+		"the fee was decided meanwhile")
+)
+
 // FeeResolution is a person's decision on a custodian's fee held for them
 // (review ④): Book it from GAS_SUPPLY, in the Asset and Amount they found
 // the custodian charged (as reported when empty), or write it off (not
@@ -188,7 +201,7 @@ func ResolveCustodyFee(ctx context.Context, store ports.Store, custodied Custodi
 			return err
 		}
 		if w == nil || w.Provider == "" {
-			return apperr.NotFound("no such withdrawal with a custodian")
+			return ErrFeeNotFound
 		}
 		fees, err := r.ChainFees().OfReference(ctx, w.ID)
 		if err != nil {
@@ -199,12 +212,11 @@ func ResolveCustodyFee(ctx context.Context, store ports.Store, custodied Custodi
 		})
 		switch {
 		case len(fees) == 0:
-			return apperr.NotFound("withdrawal " + w.ID + " has no custodian's fee")
+			return ErrFeeNotFound.WithDetail("withdrawal_id", w.ID)
 		case i < 0:
 			// Its fee is booked, written off, or booked as it comes: nothing
 			// waits for a person (the console's 409).
-			return apperr.New(apperr.KindConflict, apperr.CodeConflict, fmt.Sprintf("the fee of withdrawal %s waits for no one (%s)", w.ID,
-				fees[len(fees)-1].Status))
+			return ErrFeeNotHeld.WithDetail("withdrawal_id", w.ID).WithDetail("status", fees[len(fees)-1].Status)
 		}
 		f := fees[i]
 		before := f
@@ -235,7 +247,7 @@ func ResolveCustodyFee(ctx context.Context, store ports.Store, custodied Custodi
 		}
 		if done, err := r.ChainFees().Resolve(ctx, f); err != nil || !done {
 			if err == nil {
-				err = apperr.New(apperr.KindConflict, apperr.CodeConflict, "the fee is no longer held")
+				err = ErrFeeChanged.WithDetail("withdrawal_id", w.ID)
 			}
 			return err
 		}

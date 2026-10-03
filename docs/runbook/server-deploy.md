@@ -24,7 +24,7 @@
    - 功能开关：`ledger.welcome_credit`、`account.transfer`、`ledger.manual_adjustment`、`auth.sms`、`market.reference_feed`、`wallet.withdraw`、`derivatives.trading` 打开，`risk.enforce --allow-regions AQ`，`market.maker --allow-symbols BTC-USDT,BTC-USDT-PERP`（[feature-flags.md](feature-flags.md)）。
    - 交易对：参考数据文件新建的交易对是 `PREPARE`，`exchangectl instruments pair-status BTC-USDT --to TRADING`，ETH-BTC 同样（端到端在它上面成交）；ETH-USDT 保持 PREPARE。
    - 合约：参考行情打开前算不出标记价，合约 10 秒后自动进入只减仓（`INDEX_SOURCES`）；打开参考行情、确认标记价有了之后 `exchangectl derivatives resume <合约>` 解除。
-   - 托管钱包（[custody.md](custody.md)）：`apps.env` 加 `UDUN_GATEWAY_URL=http://udun-mock:8097`、`UDUN_CALLBACK_URL=http://api-gateway:8080/v1/wallet/callbacks/udun`、随机的 `UDUN_MERCHANT_ID` 与 `UDUN_API_KEY`（`openssl rand -hex 16`、`openssl rand -hex 32`，不打印），模拟网关与 wallet-service 共用。
+   - 托管钱包（[custody.md](custody.md)）：`apps.env` 加 `UDUN_GATEWAY_URL=http://udun-mock:8097`、`UDUN_CALLBACK_URL=http://api-gateway:8080/v1/wallet/callbacks/udun`、随机的 `UDUN_MERCHANT_ID` 与 `UDUN_API_KEY`（`openssl rand -hex 16`、`openssl rand -hex 32`，不打印），再加值完全相同的 `UDUNMOCK_MERCHANT_ID` 与 `UDUNMOCK_API_KEY`：模拟网关只读后两项（ADR-0017），wallet-service 的 `UDUN` 与 `UDUNMOCK` 两个托管方都连它，它只有一个商户，所以两对必须相同；缺了 `UDUNMOCK_*` 模拟网关起不来。
    - 做市账户：注册一个 `@example.com` 用户，`exchangectl ledger adjust` 注入 1 BTC 与 100000 USDT，`apps.env` 加 `MARKET_MAKER_USER_ID`、`MARKET_MAKER_USER_IDS` 后重建 spot-trading-service、derivatives-service、market-maker，再转 20000 USDT 到它的合约账户（[market-maker.md](market-maker.md)）。
    - 保险基金：`exchangectl ledger insurance-fund --amount 1000000 --key insurance-seed-1`。
    - 热钱包：用端到端发送方转一些 Sepolia ETH 到 signer 日志里的 `hot_wallet` 地址，`exchangectl wallet fund --tx <hash>` 记到 GAS_SUPPLY。

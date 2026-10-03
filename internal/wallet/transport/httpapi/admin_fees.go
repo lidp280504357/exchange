@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
@@ -24,6 +25,8 @@ func (h *Handler) feeRoutes(r chi.Router) {
 // CustodyFeeJSON is a custodian's withdrawal fee as the console sees it.
 type CustodyFeeJSON struct {
 	WithdrawalID string `json:"withdrawal_id"`
+	// Provider is the withdrawal's custodian (UDUN, UDUNMOCK).
+	Provider string `json:"provider"`
 	// TxHash keys the fee (the custodian and its trade); the list's cursor.
 	TxHash  string `json:"tx_hash"`
 	Asset   string `json:"asset"`
@@ -42,10 +45,15 @@ type CustodyFeeJSON struct {
 	Resolution   string  `json:"resolution"`
 }
 
-// CustodyFeeJSONOf renders a custodian's fee.
+// CustodyFeeJSONOf renders a custodian's fee; its custodian, when not
+// given, from its key ("UDUNMOCK:<trade>").
 func CustodyFeeJSONOf(f domain.CustodyFee) CustodyFeeJSON {
+	if f.Provider == "" {
+		f.Provider, _, _ = strings.Cut(f.TxHash, ":")
+	}
 	j := CustodyFeeJSON{
-		WithdrawalID: f.WithdrawalID, TxHash: f.TxHash, Asset: f.Asset, Network: f.Network, Amount: f.Amount.String(), Unit: textOrNil(f.Unit),
+		WithdrawalID: f.WithdrawalID, Provider: f.Provider, TxHash: f.TxHash, Asset: f.Asset, Network: f.Network, Amount: f.Amount.String(),
+		Unit:   textOrNil(f.Unit),
 		Status: f.Status, HoldReason: f.HoldReason, JournalID: textOrNil(f.JournalID), CreatedAt: httpx.FormatTime(f.CreatedAt),
 		BookedAt: timeOrNil(f.BookedAt), ResolvedBy: f.ResolvedBy, Resolution: f.Resolution,
 	}

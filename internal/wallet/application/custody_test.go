@@ -148,9 +148,15 @@ type fakeCustody struct {
 	down      bool
 	invalid   map[string]bool
 	coins     []ports.CustodyCoin
+	name      string // its provider, UDUN when empty
 }
 
-func (f *fakeCustody) Provider() string { return domain.ProviderUdun }
+func (f *fakeCustody) Provider() string {
+	if f.name != "" {
+		return f.name
+	}
+	return domain.ProviderUdun
+}
 
 func (f *fakeCustody) CreateAddress(context.Context, domain.Network, string) (string, error) {
 	if f.down {
@@ -910,10 +916,10 @@ func TestCustodyFeesHeldForAPerson(t *testing.T) {
 	if _, _, err := h.svc.CustodyFees(ctx, "GONE", "", 50); !apperr.Is(err, apperr.CodeInvalidArgument) {
 		t.Fatalf("an unknown status: %v", err)
 	}
-	if _, err := h.svc.DecideCustodyFee(ctx, FeeResolution{WithdrawalID: "not-a-withdrawal", Actor: "ops", Reason: "?!?"}); !apperr.Is(err, apperr.CodeNotFound) {
+	if _, err := h.svc.DecideCustodyFee(ctx, FeeResolution{WithdrawalID: "not-a-withdrawal", Actor: "ops", Reason: "?!?"}); !apperr.Is(err, "WALLET_CUSTODY_FEE_NOT_FOUND") {
 		t.Fatalf("an unknown withdrawal: %v", err)
 	}
-	if _, err := h.svc.DecideCustodyFee(ctx, FeeResolution{WithdrawalID: second.ID, Actor: "ops", Reason: "booked already"}); !apperr.Is(err, apperr.CodeConflict) {
+	if _, err := h.svc.DecideCustodyFee(ctx, FeeResolution{WithdrawalID: second.ID, Actor: "ops", Reason: "booked already"}); !apperr.Is(err, "WALLET_CUSTODY_FEE_NOT_HELD") {
 		t.Fatalf("a fee that waits for no one: %v", err)
 	}
 
@@ -939,7 +945,7 @@ func TestCustodyFeesHeldForAPerson(t *testing.T) {
 	if _, err := resolve(FeeResolution{WithdrawalID: first.ID, Book: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := resolve(FeeResolution{WithdrawalID: first.ID, Book: true}); !apperr.Is(err, apperr.CodeConflict) {
+	if _, err := resolve(FeeResolution{WithdrawalID: first.ID, Book: true}); !apperr.Is(err, "WALLET_CUSTODY_FEE_NOT_HELD") {
 		t.Fatalf("nothing held any more: %v", err)
 	}
 	if h.audited("wallet.custody.fee.book") != 2 {
@@ -952,7 +958,7 @@ func TestCustodyFeesHeldForAPerson(t *testing.T) {
 	if v := h.gauge(t, "wallet_custody_fees_held"); v != 0 {
 		t.Fatalf("%v fees held", v)
 	}
-	if _, err := resolve(FeeResolution{WithdrawalID: first.ID}); !apperr.Is(err, apperr.CodeConflict) {
+	if _, err := resolve(FeeResolution{WithdrawalID: first.ID}); !apperr.Is(err, "WALLET_CUSTODY_FEE_NOT_HELD") {
 		t.Fatalf("a booked fee written off: %v", err)
 	}
 
@@ -980,7 +986,7 @@ func TestCustodyFeesHeldForAPerson(t *testing.T) {
 	if f := h.store.fees["UDUN:w-5"]; f.Status != domain.FeeBookable || f.JournalID != "" {
 		t.Fatalf("waiting for GAS_SUPPLY %+v", f)
 	}
-	if _, err := resolve(FeeResolution{WithdrawalID: fifth.ID, Book: true}); !apperr.Is(err, apperr.CodeConflict) {
+	if _, err := resolve(FeeResolution{WithdrawalID: fifth.ID, Book: true}); !apperr.Is(err, "WALLET_CUSTODY_FEE_NOT_HELD") {
 		t.Fatalf("a bookable fee is booked as it comes, not by a person: %v", err)
 	}
 	f, err := resolve(FeeResolution{WithdrawalID: fifth.ID})
@@ -1777,10 +1783,10 @@ func TestAnAssignmentWhoseRecordFailedIsRecordedForTheUserPaid(t *testing.T) {
 	}
 	_, err = h.svc.AssignDeposit(ctx, dep.ID, other, "ops@example.com", "someone else")
 	var e *apperr.Error
-	if !errors.As(err, &e) || e.Code != "WALLET_DEPOSIT_RELEASED" || e.Details["user_id"] != paid || e.Details["journal_id"] != journal {
+	if !errors.As(err, &e) || e.Code != "WALLET_DEPOSIT_RELEASED_TO_USER" || e.Details["user_id"] != paid || e.Details["journal_id"] != journal {
 		t.Fatalf("assigned to another user: %v", err)
 	}
-	if _, err := h.svc.DismissDeposit(ctx, dep.ID, "ops@example.com", "close it"); !apperr.Is(err, "WALLET_DEPOSIT_RELEASED") {
+	if _, err := h.svc.DismissDeposit(ctx, dep.ID, "ops@example.com", "close it"); !apperr.Is(err, "WALLET_DEPOSIT_RELEASED_TO_USER") {
 		t.Fatalf("closed: %v", err)
 	}
 	h.elig[paid] = "USER_FROZEN"
@@ -1842,11 +1848,40 @@ func TestADepositOfNobodyTheLedgerRefusesWaitsAlone(t *testing.T) {
 	if got := h.store.deposits[list[2].ID]; got.CreditRequested.IsZero() || !slices.Contains(types(h.store.take()), "DepositConfirmed") {
 		t.Fatalf("the user's deposit waits too: %+v", got)
 	}
+	// Not every round (review AL): again after a minute, then after two.
+	unbookable := func() float64 {
+		t.Helper()
+		mfs, err := h.reg.Gather()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, mf := range mfs {
+			if mf.GetName() == "wallet_custody_deposits_unbookable" {
+				return mf.GetMetric()[0].GetGauge().GetValue()
+			}
+		}
+		return -1
+	}
+	_ = h.cproc.Round(ctx)
+	if h.ledger.tries[list[0].ID] != 1 || unbookable() != 1 {
+		t.Fatalf("tried again at once: %d tries, gauge %v", h.ledger.tries[list[0].ID], unbookable())
+	}
+	h.now = h.now.Add(time.Minute)
+	_ = h.cproc.Round(ctx)
+	h.now = h.now.Add(time.Minute)
+	_ = h.cproc.Round(ctx)
+	if h.ledger.tries[list[0].ID] != 2 {
+		t.Fatalf("%d tries after two minutes, want 2 (then two minutes apart)", h.ledger.tries[list[0].ID])
+	}
 	// Booked once the ledger takes it.
 	h.ledger.refused = nil
+	h.now = h.now.Add(time.Minute)
 	h.cround(t)
 	if got := h.store.deposits[list[0].ID]; got.JournalID == "" || !h.ledger.system["UNCLAIMED_DEPOSIT"].Equal(d("30")) {
 		t.Fatalf("booked later: %+v", got)
+	}
+	if unbookable() != 0 {
+		t.Fatalf("still counted after it was booked: %v", unbookable())
 	}
 }
 
@@ -1893,5 +1928,63 @@ func TestAHiddenTestAssetIsForTheTestAccountsOnly(t *testing.T) {
 	}
 	if _, err := h.svc.AddAddress(ctx, "bob", AddressInput{Network: "TRON-TEST", Address: payeeTRX}); !apperr.Is(err, "WALLET_NETWORK_UNKNOWN") {
 		t.Fatalf("another user's address book: %v", err)
+	}
+}
+
+// Two custodians side by side (ADR-0017, review AO): their processors'
+// gauges share a registry, each has its own coin list in the service's
+// cache, and the console shows each one's checks with the platform
+// wallets', not the other's; one asked for an asset it serves on no
+// network answers 0 without calling its gateway; a custodian neither
+// configured nor known is not found.
+func TestTwoCustodiansSideBySide(t *testing.T) {
+	h := newCustodyHarness(t)
+	ctx := context.Background()
+	held := d("7")
+	// The same code, other decimals: each custodian's list is its own.
+	mock := &fakeCustody{
+		name: domain.ProviderUdunMock, invalid: map[string]bool{},
+		coins: []ports.CustodyCoin{{Code: usdtCoin, Symbol: "TUSD", Decimals: 2, Token: true, Balance: &held}},
+	}
+	h.svc.Custodians[domain.ProviderUdunMock] = mock
+	second := NewCustodyProcessor(CustodyProcessor{
+		Store: h.store, Ledger: h.ledger, Networks: h.nets, Eligibility: h.elig, Custody: mock, Log: slog.New(slog.DiscardHandler),
+		Now: func() time.Time { return h.now },
+	}, h.reg)
+	if k, ok := h.svc.coin(ctx, h.custody, usdtCoin); !ok || k.Decimals != 6 {
+		t.Fatalf("UDUN's coin %+v %v", k, ok)
+	}
+	if k, ok := h.svc.coin(ctx, mock, usdtCoin); !ok || k.Decimals != 2 {
+		t.Fatalf("UDUNMOCK's coin %+v %v", k, ok)
+	}
+	mock.down = true
+	if got, err := second.Holdings(ctx, "USDT"); err != nil || !got.IsZero() {
+		t.Fatalf("UDUNMOCK's USDT, which it serves on no network: %s %v", got, err)
+	}
+	for _, holder := range []string{domain.ProviderUdun, domain.ProviderUdunMock, "ETH-SEPOLIA"} {
+		if err := h.store.Checks().Insert(ctx, domain.NewChainCheck(holder, "USDT", d("1"), d("1"), decimal.Zero, 0, h.now)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	holders := func(provider string) []string {
+		t.Helper()
+		o, err := h.svc.Custody(ctx, provider)
+		if err != nil {
+			t.Fatalf("%s: %v", provider, err)
+		}
+		var out []string
+		for _, c := range o.Checks {
+			out = append(out, c.Network)
+		}
+		return out
+	}
+	if got := holders(domain.ProviderUdun); !slices.Equal(got, []string{domain.ProviderUdun, "ETH-SEPOLIA"}) {
+		t.Fatalf("UDUN's page: %v", got)
+	}
+	if got := holders(domain.ProviderUdunMock); !slices.Equal(got, []string{domain.ProviderUdunMock, "ETH-SEPOLIA"}) {
+		t.Fatalf("UDUNMOCK's page: %v", got)
+	}
+	if _, err := h.svc.Custody(ctx, "FOO"); !apperr.Is(err, apperr.CodeNotFound) {
+		t.Fatalf("an unknown custodian: %v", err)
 	}
 }

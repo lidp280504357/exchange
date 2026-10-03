@@ -438,6 +438,7 @@ type fakeLedger struct {
 	journals  map[string]string // key -> journal
 	released  map[string]string // unclaimed deposit -> the user its release paid
 	refused   map[string]bool   // deposits of nobody the ledger will not book
+	tries     map[string]int    // CreditUnclaimed calls by deposit
 	down      bool
 }
 
@@ -529,6 +530,10 @@ func (l *fakeLedger) ReleaseUnclaimed(_ context.Context, id, user, _ string, amo
 }
 
 func (l *fakeLedger) CreditUnclaimed(_ context.Context, id, _ string, amount decimal.Decimal, _, _, _ string) (string, error) {
+	if l.tries == nil {
+		l.tries = map[string]int{}
+	}
+	l.tries[id]++
 	if l.refused[id] {
 		return "", apperr.New(apperr.KindInvalid, "LEDGER_AMOUNT_PRECISION", "the amount has too many decimals")
 	}
