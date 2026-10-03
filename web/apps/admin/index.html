@@ -8,7 +8,10 @@
     <title>Astras 管理后台</title>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- The splash paints with the HTML and its stylesheet, before the entry
+         has loaded; React replaces it. It looks as the console does while it
+         asks for the session (C6: the first paint waited for the entry). -->
+    <div id="root"><div class="grid min-h-dvh place-items-center bg-bg-0 text-fg-3"><span class="text-sm tracking-wide">Astras 管理后台</span></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
