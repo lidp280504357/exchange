@@ -252,15 +252,19 @@ withdraw "$QUIRKY" 11
 QUIRK_ID=$(jq -r .id <<<"$BODY")
 exchangectl wallet approve "$QUIRK_ID" --reviewer e2e-ops --reason "end-to-end test"
 eventually_call 60 "/v1/wallet/withdrawals/$QUIRK_ID" '.status == "SUBMITTED"' "handed over, its answer lost"
-# Hold back the callbacks the repeat (a minute later) releases.
-mock delay --seconds 45 >/dev/null
+# Hold back the callbacks the repeat (a minute later) releases, as long as
+# the checks below need, however slow the network: ending the delay sends
+# them at once.
+mock delay --seconds 600 >/dev/null
 eventually_pg 120 "SELECT status, provider_status, reject_reason LIKE 'UNCERTAIN%' FROM wallet.withdrawals WHERE id = '$QUIRK_ID'" \
   "SUBMITTED|UNCERTAIN|t" "the repeat refused for the balance: UNCERTAIN, nothing released"
 call GET "/v1/wallet/withdrawals/$QUIRK_ID" "" "${AUTH[@]}"
 check '.status == "SUBMITTED" and .reject_reason == null' "its user sees it with the custodian, not the custodian's words"
-mock delay --seconds 0 >/dev/null
 call GET /v1/account/balances "" "${AUTH[@]}"
 check '[.balances[] | select(.account_type == "SPOT" and .asset == "USDT")][0] | (.frozen | tonumber) == 12' "the 11 and the fee stay frozen"
+# Only now let the held-back callbacks through (2026-10-03: with a 45 s hold
+# a slow network let them in before the balance was read).
+mock delay --seconds 0 >/dev/null
 eventually_call 90 "/v1/wallet/withdrawals/$QUIRK_ID" '.status == "CONFIRMED" and .tx_hash != null' "the gateway's callbacks send it after all"
 DETAIL=$(pg "SELECT detail FROM wallet.custody_callbacks WHERE business_id = '$QUIRK_ID' AND status = 3 ORDER BY received_at DESC LIMIT 1")
 [[ $DETAIL == *"held for a person"* && $(fee_row "$QUIRK_ID") == "HELD|1500|USDT|f" ]] ||

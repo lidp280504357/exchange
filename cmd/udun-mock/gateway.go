@@ -637,7 +637,9 @@ func (g *gateway) mockOutcome(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"address": req.Address, "status": req.Status, "quirk": req.quirk})
 }
 
-// mockDelay holds callbacks back: {"seconds"}; 0 restores.
+// mockDelay holds callbacks back: {"seconds"}; 0 restores. A shorter
+// delay applies to the callbacks held back already too (0 sends them now),
+// so a test holds them as long as its checks need and then lets them go.
 func (g *gateway) mockDelay(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Seconds int `json:"seconds"`
@@ -648,6 +650,11 @@ func (g *gateway) mockDelay(w http.ResponseWriter, r *http.Request) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.st.Delay = time.Duration(max(req.Seconds, 0)) * time.Second
+	for _, c := range g.st.Pending {
+		if latest := g.now().Add(g.st.Delay); c.Due.After(latest) {
+			c.Due = latest
+		}
+	}
 	_ = g.saveLocked()
 	writeJSON(w, map[string]any{"delay_seconds": int(g.st.Delay.Seconds())})
 }

@@ -267,3 +267,52 @@ func TestGatewayQuirks(t *testing.T) {
 		t.Fatal("the quirks were not cleared")
 	}
 }
+
+// A delay holds callbacks back; a shorter one applies to those held
+// already, 0 sends them at the next flush (a test lets them go once its
+// checks are done).
+func TestADelayEndsForTheCallbacksItHeld(t *testing.T) {
+	rc := &receiver{}
+	wallet := httptest.NewServer(rc)
+	defer wallet.Close()
+	g, err := newGateway("m1", key, t.TempDir()+"/state.json", defaultCoins(), 10*time.Second, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := time.Now()
+	g.now = func() time.Time { return clock }
+	r := chi.NewRouter()
+	g.routes(r)
+	gw := httptest.NewServer(r)
+	defer gw.Close()
+	ctx := context.Background()
+	post := func(path, body string) {
+		t.Helper()
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, gw.URL+path, bytes.NewReader([]byte(body)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := gw.Client().Do(req)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: %v %v", path, resp, err)
+		}
+		_ = resp.Body.Close()
+	}
+	c := &udun.Client{BaseURL: gw.URL, MerchantID: "m1", Key: key, HTTP: gw.Client()}
+	a, err := c.CreateAddress(ctx, 195, wallet.URL, "", "u1:TRON")
+	if err != nil {
+		t.Fatal(err)
+	}
+	post("/mock/delay", `{"seconds":600}`)
+	post("/mock/deposit", `{"address":"`+a.Address+`","coin":"195:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t","amount":"5"}`)
+	clock = clock.Add(time.Minute)
+	g.flush(ctx)
+	if n := len(rc.trades); n != 0 {
+		t.Fatalf("%d callbacks while held", n)
+	}
+	post("/mock/delay", `{"seconds":0}`)
+	g.flush(ctx)
+	if n := len(rc.trades); n != 1 {
+		t.Fatalf("%d callbacks once the delay ended, want 1", n)
+	}
+}
