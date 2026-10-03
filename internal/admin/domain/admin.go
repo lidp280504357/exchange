@@ -289,10 +289,19 @@ type Approval struct {
 	// Escalation says why a two-person request waits ("" in single mode).
 	Escalation string
 	JournalID  string
+	// AttemptedAt is when an attempt to carry it out began (zero before
+	// any). Pending with it set, the attempt did not finish (the ledger did
+	// not answer, a mint was refused part way) and may have booked: it is
+	// finished, never rejected, and Result says how the last attempt ended.
+	AttemptedAt time.Time
 	// The administrators' emails, for display (read only).
 	RequestedByEmail string
 	DecidedByEmail   string
 }
+
+// ErrAttempted refuses rejecting an operation that may have booked.
+var ErrAttempted = apperr.New(apperr.KindConflict, "ADMIN_APPROVAL_ATTEMPTED",
+	"an attempt to carry it out did not finish and may have booked it: finish it instead")
 
 // Decide checks that decider may decide the request: another
 // administrator, except that the requester may finish a single-person
@@ -302,6 +311,8 @@ func (a *Approval) Decide(decider string, approve bool) error {
 	switch {
 	case a.Status != ApprovalPending:
 		return ErrNotPending
+	case !approve && !a.AttemptedAt.IsZero():
+		return ErrAttempted
 	case a.RequestedBy == decider && approve && a.Mode != ModeSingle:
 		return ErrSelfApproval
 	}

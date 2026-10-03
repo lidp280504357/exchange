@@ -59,23 +59,23 @@ func TestHoldsGoThroughTheLedger(t *testing.T) {
 	fin, auditor := h.login(t, "fin@example.com"), h.login(t, "audit@example.com")
 	other := "01929c3e-7f3a-7d7e-8a1b-000000000099"
 
-	if _, err := h.svc.PlaceHold(ctx, auditor, someUser, "USDT", decimal.NewFromInt(10), "chargeback"); code(err) != "ADMIN_FORBIDDEN" {
+	if _, err := h.svc.PlaceHold(ctx, auditor, "", someUser, "USDT", decimal.NewFromInt(10), "chargeback"); code(err) != "ADMIN_FORBIDDEN" {
 		t.Fatalf("an auditor holds funds: %v", err)
 	}
-	if _, err := h.svc.PlaceHold(ctx, fin, someUser, "USDT", decimal.NewFromInt(-1), "chargeback"); code(err) != apperr.CodeInvalidArgument {
+	if _, err := h.svc.PlaceHold(ctx, fin, "", someUser, "USDT", decimal.NewFromInt(-1), "chargeback"); code(err) != apperr.CodeInvalidArgument {
 		t.Fatalf("a negative hold: %v", err)
 	}
-	held, err := h.svc.PlaceHold(ctx, fin, someUser, " usdt ", decimal.NewFromInt(10), "chargeback under review")
+	held, err := h.svc.PlaceHold(ctx, fin, "", someUser, " usdt ", decimal.NewFromInt(10), "chargeback under review")
 	if err != nil || held.Asset != "USDT" || held.Actor != "fin@example.com" || held.ID == "" {
 		t.Fatalf("hold %+v %v", held, err)
 	}
 	if list, err := h.svc.Holds(ctx, auditor, someUser); err != nil || len(list) != 1 {
 		t.Fatalf("holds %+v %v", list, err)
 	}
-	if _, err := h.svc.ReleaseHold(ctx, fin, other, held.ID, "wrong user"); code(err) != apperr.CodeNotFound {
+	if _, err := h.svc.ReleaseHold(ctx, fin, "", other, held.ID, "wrong user"); code(err) != apperr.CodeNotFound {
 		t.Fatalf("another user's hold: %v", err)
 	}
-	released, err := h.svc.ReleaseHold(ctx, fin, someUser, held.ID, "cleared by the bank")
+	released, err := h.svc.ReleaseHold(ctx, fin, "", someUser, held.ID, "cleared by the bank")
 	if err != nil || released.ReleasedBy != "fin@example.com" {
 		t.Fatalf("release %+v %v", released, err)
 	}
@@ -103,11 +103,11 @@ func TestOrderCancelsAndForceClose(t *testing.T) {
 		t.Fatalf("contract cancel %v %v", h.derivatives.canceled, err)
 	}
 
-	if _, err := h.svc.ClosePosition(ctx, fin, someUser, "BTC-USDT-PERP", "BOTH", "margin call missed"); code(err) != "ADMIN_FORBIDDEN" {
+	if _, err := h.svc.ClosePosition(ctx, fin, "", someUser, "BTC-USDT-PERP", "BOTH", "margin call missed"); code(err) != "ADMIN_FORBIDDEN" {
 		t.Fatalf("finance closes: %v", err)
 	}
 	h.derivatives.pending = 2
-	raw, err := h.svc.ClosePosition(ctx, ops, someUser, "btc-usdt-perp", "both", "margin call missed")
+	raw, err := h.svc.ClosePosition(ctx, ops, "", someUser, "btc-usdt-perp", "both", "margin call missed")
 	if err != nil || orderID(raw) == "" || len(h.derivatives.closes) != 3 {
 		t.Fatalf("close after two pending answers: %s %v %v", raw, h.derivatives.closes, err)
 	}
@@ -119,7 +119,7 @@ func TestOrderCancelsAndForceClose(t *testing.T) {
 		}
 	}
 	h.derivatives.pending = closeAttempts
-	if _, err := h.svc.ClosePosition(ctx, ops, someUser, "BTC-USDT-PERP", "BOTH", "margin call missed"); code(err) != "DERIV_CLOSE_PENDING" {
+	if _, err := h.svc.ClosePosition(ctx, ops, "", someUser, "BTC-USDT-PERP", "BOTH", "margin call missed"); code(err) != "DERIV_CLOSE_PENDING" {
 		t.Fatalf("still pending after every attempt: %v", err)
 	}
 

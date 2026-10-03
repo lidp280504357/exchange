@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/notification/domain"
 	"github.com/lidp280504357/exchange/internal/notification/ports"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/lidp280504357/exchange/internal/platform/pg"
 )
 
 // Content serves the announcements and help articles (design 2026-10-02
@@ -163,6 +165,9 @@ type Broadcasts struct {
 
 // BroadcastInput is a message as the console sends it.
 type BroadcastInput struct {
+	// ID is the message's ID when the console chose it ("" for a new one):
+	// sending it again returns the message (C5.5 ⑥).
+	ID       string
 	Audience string
 	UserIDs  []string
 	Title    map[string]string
@@ -171,8 +176,23 @@ type BroadcastInput struct {
 	Email    bool
 }
 
-// Send records a broadcast; Run delivers it.
+// Send records a broadcast; Run delivers it. A message sent again under
+// its ID is returned as it is; another one under a known ID fails with
+// COMMON_IDEMPOTENCY_CONFLICT.
 func (b *Broadcasts) Send(ctx context.Context, in BroadcastInput, actor string) (domain.Broadcast, error) {
+	id := uuid.Must(uuid.NewV7()).String()
+	if in.ID != "" {
+		if _, err := uuid.Parse(in.ID); err != nil {
+			return domain.Broadcast{}, apperr.Invalid("id must be a UUID")
+		}
+		id = in.ID
+		if prev, err := b.sent(ctx, in, actor); err != nil || prev != nil {
+			if err != nil {
+				return domain.Broadcast{}, err
+			}
+			return *prev, nil
+		}
+	}
 	seen := map[string]bool{}
 	var users []string
 	for _, id := range in.UserIDs {
@@ -185,7 +205,7 @@ func (b *Broadcasts) Send(ctx context.Context, in BroadcastInput, actor string) 
 		}
 	}
 	br := domain.Broadcast{
-		ID: uuid.Must(uuid.NewV7()).String(), Audience: strings.ToUpper(in.Audience), UserIDs: users, Title: in.Title, Body: in.Body,
+		ID: id, Audience: strings.ToUpper(in.Audience), UserIDs: users, Title: in.Title, Body: in.Body,
 		Link: strings.TrimSpace(in.Link), Email: in.Email, Status: domain.BroadcastSending, CreatedBy: actor, CreatedAt: b.Now(),
 	}
 	if br.Audience == domain.AudienceAll {
@@ -195,9 +215,30 @@ func (b *Broadcasts) Send(ctx context.Context, in BroadcastInput, actor string) 
 		return domain.Broadcast{}, err
 	}
 	if err := b.Store.CreateBroadcast(ctx, br); err != nil {
+		if _, dup := pg.UniqueViolation(err); dup && in.ID != "" {
+			// The same message, concurrently, recorded first.
+			if prev, perr := b.sent(ctx, in, actor); perr == nil && prev != nil {
+				return *prev, nil
+			}
+		}
 		return domain.Broadcast{}, err
 	}
 	return br, nil
+}
+
+// sent returns the message recorded under the input's ID (nil when none),
+// or an idempotency conflict when it is another message.
+func (b *Broadcasts) sent(ctx context.Context, in BroadcastInput, actor string) (*domain.Broadcast, error) {
+	prev, err := b.Store.Broadcast(ctx, in.ID)
+	if err != nil || prev == nil {
+		return nil, err
+	}
+	same := prev.Audience == strings.ToUpper(in.Audience) && maps.Equal(prev.Title, in.Title) && maps.Equal(prev.Body, in.Body) &&
+		prev.Link == strings.TrimSpace(in.Link) && prev.Email == in.Email && prev.CreatedBy == actor
+	if !same {
+		return nil, apperr.New(apperr.KindConflict, apperr.CodeIdempotencyConflict, "another message has this ID")
+	}
+	return prev, nil
 }
 
 // Get returns a broadcast with its counts.

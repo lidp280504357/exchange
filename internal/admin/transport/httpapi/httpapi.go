@@ -22,6 +22,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/admin/ports"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/httpx"
+	"github.com/lidp280504357/exchange/internal/platform/idempotency"
 	"github.com/lidp280504357/exchange/internal/platform/ratelimit"
 )
 
@@ -29,6 +30,8 @@ import (
 const (
 	CookieName = "admin_session"
 	CSRFHeader = "X-Admin-CSRF"
+	// KeyHeader carries the Idempotency-Key of a request that moves money.
+	KeyHeader = "Idempotency-Key"
 )
 
 // RuleLogin throttles login attempts per client IP.
@@ -85,13 +88,13 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Post("/identity-requests/{id}/decide", h.decideIdentityRequest)
 			r.Get("/users/{id}/balances", h.balances)
 			r.Get("/users/{id}/holds", h.holds)
-			r.Post("/users/{id}/holds", h.placeHold)
-			r.Delete("/users/{id}/holds/{hold}", h.releaseHold)
+			r.With(needKey).Post("/users/{id}/holds", h.placeHold)
+			r.With(needKey).Delete("/users/{id}/holds/{hold}", h.releaseHold)
 			r.Post("/users/{id}/orders/{order}/cancel", h.cancelOrder)
 			r.Get("/users/{id}/contract-orders", h.contractOrders)
 			r.Post("/users/{id}/contract-orders/{order}/cancel", h.cancelContractOrder)
 			r.Get("/users/{id}/positions", h.userPositions)
-			r.Post("/users/{id}/positions/close", h.closePosition)
+			r.With(needKey).Post("/users/{id}/positions/close", h.closePosition)
 			r.Get("/roles", h.roles)
 			r.Get("/admins", h.admins)
 			r.Post("/admins", h.createAdmin)
@@ -105,11 +108,11 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Post("/withdrawals/{id}/hold", h.holdWithdrawal)
 			r.Get("/deposits/review", h.depositReviews)
 			r.Post("/deposits/manual/check", h.checkBackfill)
-			r.Post("/deposits/manual", h.backfill)
+			r.With(needKey).Post("/deposits/manual", h.backfill)
 			r.Get("/deposits/{id}", h.depositDetail)
-			r.Post("/deposits/{id}/credit", h.creditDeposit)
+			r.With(needKey).Post("/deposits/{id}/credit", h.creditDeposit)
 			r.Post("/deposits/{id}/reject", h.rejectDeposit)
-			r.Post("/users/{id}/adjustments", h.userAdjustment)
+			r.With(needKey).Post("/users/{id}/adjustments", h.userAdjustment)
 			r.Get("/orders", h.orders)
 			r.Get("/trades", h.trades)
 			r.Get("/deposits", h.deposits)
@@ -117,8 +120,8 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Post("/users/{id}/status", h.userStatus)
 			r.Post("/users/{id}/cancel-orders", h.cancelOrders)
 			r.Get("/withdrawals", h.withdrawals)
-			r.Post("/withdrawals/{id}/review", h.review)
-			r.Post("/withdrawals/review-batch", h.reviewBatch)
+			r.With(needKey).Post("/withdrawals/{id}/review", h.review)
+			r.With(needKey).Post("/withdrawals/review-batch", h.reviewBatch)
 			r.Get("/custody", h.custody)
 			r.Get("/custody/callbacks", h.custodyCallbacks)
 			r.Get("/custody/callbacks/{id}", h.custodyCallback)
@@ -136,7 +139,7 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Post("/articles/{id}/publish", h.publishArticle)
 			r.Post("/articles/{id}/archive", h.archiveArticle)
 			r.Get("/broadcasts", h.broadcasts)
-			r.Post("/broadcasts", h.sendBroadcast)
+			r.With(needKey).Post("/broadcasts", h.sendBroadcast)
 			r.Get("/broadcasts/{id}", h.broadcast)
 			r.Get("/sim", h.simStatus)
 			r.Get("/sim/history", h.simHistory)
@@ -146,7 +149,7 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Put("/sim/params", h.updateSimParams)
 			r.Post("/sim/impact", h.simImpact)
 			r.Get("/sim/token", h.simToken)
-			r.Post("/sim/mint", h.simMint)
+			r.With(needKey).Post("/sim/mint", h.simMint)
 			r.Get("/approvals/{id}/sim-preview", h.simPreview)
 			r.Get("/assets/{code}/profile", h.assetProfile)
 			r.Put("/assets/{code}/profile", h.updateAssetProfile)
@@ -155,7 +158,7 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Post("/instruments/changes/{id}/cancel", h.cancelInstrumentChange)
 			r.Get("/flags", h.flags)
 			r.Put("/flags/{key}", h.switchFlag)
-			r.Post("/ledger/adjustments", h.requestAdjustment)
+			r.With(needKey).Post("/ledger/adjustments", h.requestAdjustment)
 			r.Get("/approvals", h.approvals)
 			r.Post("/approvals/{id}/decide", h.decide)
 			r.Get("/audit-logs", h.auditLogs)
@@ -179,10 +182,26 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/health", h.health)
 			r.Get("/ledger/reconciliation", h.reconciliation)
 			r.Get("/ledger/system-balances", h.systemBalances)
-			r.Post("/derivatives/insurance-fund/contributions", h.requestInsuranceFunding)
+			r.With(needKey).Post("/derivatives/insurance-fund/contributions", h.requestInsuranceFunding)
 		})
 	})
 }
+
+// needKey requires an Idempotency-Key on a request that moves money
+// (C5.5 ⑥): the console makes one per operation and sends it again with
+// each retry, so a retry never does it twice.
+func needKey(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if k := idemKey(r); k == "" || len(k) > idempotency.MaxKeyLength {
+			httpx.WriteError(w, r, idempotency.ErrInvalidKey)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// idemKey is a request's Idempotency-Key.
+func idemKey(r *http.Request) string { return strings.TrimSpace(r.Header.Get(KeyHeader)) }
 
 func (h *Handler) csrf(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -594,7 +613,7 @@ func (h *Handler) review(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	raw, err := h.Svc.ReviewWithdrawal(r.Context(), principal(r), chi.URLParam(r, "id"), body.Approve, body.Reason)
+	raw, err := h.Svc.ReviewWithdrawal(r.Context(), principal(r), idemKey(r), chi.URLParam(r, "id"), body.Approve, body.Reason)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -612,7 +631,7 @@ func (h *Handler) reviewBatch(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	results, err := h.Svc.ReviewBatch(r.Context(), principal(r), body.IDs, body.Approve, body.Reason)
+	results, err := h.Svc.ReviewBatch(r.Context(), principal(r), idemKey(r), body.IDs, body.Approve, body.Reason)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -757,6 +776,9 @@ type ApprovalJSON struct {
 	ValueUSDT        *string           `json:"value_usdt"`
 	Escalation       string            `json:"escalation"`
 	JournalID        *string           `json:"journal_id"`
+	// AttemptedAt is when an attempt to carry it out began: pending with
+	// it, it may have booked (finish it, never reject it).
+	AttemptedAt *string `json:"attempted_at"`
 }
 
 func approvalJSON(a domain.Approval) ApprovalJSON {
@@ -785,6 +807,10 @@ func approvalJSON(a domain.Approval) ApprovalJSON {
 	if a.JournalID != "" {
 		out.JournalID = &a.JournalID
 	}
+	if !a.AttemptedAt.IsZero() {
+		s := httpx.FormatTime(a.AttemptedAt)
+		out.AttemptedAt = &s
+	}
 	return out
 }
 
@@ -808,7 +834,7 @@ func (h *Handler) submitFunds(w http.ResponseWriter, r *http.Request, kind strin
 	}
 	a, err := h.Svc.SubmitFunds(r.Context(), principal(r), application.FundRequest{
 		Kind: kind, UserID: body.UserID, AccountType: body.AccountType, Asset: body.Asset, Amount: amount, Reason: body.Reason,
-		Reference: body.Reference, Direct: body.Direct,
+		Reference: body.Reference, Direct: body.Direct, Key: idemKey(r),
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)

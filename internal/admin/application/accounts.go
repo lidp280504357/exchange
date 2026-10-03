@@ -37,13 +37,14 @@ type UserBalances struct {
 }
 
 // valuer returns a function valuing an amount of an asset in USDT at its
-// USDT pair's last price (false without one); prices are read once.
-func (s *Service) valuer(ctx context.Context) func(asset string, amount decimal.Decimal) (decimal.Decimal, bool) {
+// USDT pair's last price (false without one, or with one older than a
+// positive maxAge); prices are read once.
+func (s *Service) valuer(ctx context.Context, maxAge time.Duration) func(asset string, amount decimal.Decimal) (decimal.Decimal, bool) {
 	var prices ports.Prices
 	if s.Prices != nil {
 		var err error
-		if prices, err = s.Prices.Prices(ctx); err != nil {
-			s.Log.WarnContext(ctx, "balances: no prices", "error", err)
+		if prices, err = s.Prices.Prices(ctx, maxAge); err != nil {
+			s.Log.WarnContext(ctx, "no prices to value with", "error", err)
 		}
 	}
 	return func(asset string, amount decimal.Decimal) (decimal.Decimal, bool) {
@@ -70,7 +71,7 @@ func (s *Service) Balances(ctx context.Context, p Principal, userID string) (Use
 	if err != nil {
 		return UserBalances{}, err
 	}
-	value := s.valuer(ctx)
+	value := s.valuer(ctx, 0)
 	out := UserBalances{Balances: make([]BalanceRow, 0, len(list)), Unpriced: []string{}}
 	unpriced := map[string]bool{}
 	for _, b := range list {
@@ -121,8 +122,9 @@ func (s *Service) Holds(ctx context.Context, p Principal, userID string) ([]port
 }
 
 // PlaceHold freezes amount of a user's SPOT balance; the ledger books it
-// (ADMIN_FREEZE) and audits it as ledger.hold_placed.
-func (s *Service) PlaceHold(ctx context.Context, p Principal, userID, asset string, amount decimal.Decimal, reason string) (ports.Hold, error) {
+// (ADMIN_FREEZE) and audits it as ledger.hold_placed. The hold's ID comes
+// from the request's key, so the same request again finds the same hold.
+func (s *Service) PlaceHold(ctx context.Context, p Principal, key, userID, asset string, amount decimal.Decimal, reason string) (ports.Hold, error) {
 	if err := p.require(domain.PermLedgerHold); err != nil {
 		return ports.Hold{}, err
 	}
@@ -136,13 +138,19 @@ func (s *Service) PlaceHold(ctx context.Context, p Principal, userID, asset stri
 	if asset == "" || !amount.IsPositive() {
 		return ports.Hold{}, apperr.Invalid("an asset and a positive amount are required")
 	}
-	return s.Ledger.PlaceHold(ctx, uuid.Must(uuid.NewV7()).String(), userID, asset, amount, p.Admin.Email, strings.TrimSpace(reason))
+	reason = strings.TrimSpace(reason)
+	c, err := s.claimKey(ctx, p, key, scopeHold, fingerprint(userID, asset, amount.String(), reason))
+	if err != nil {
+		return ports.Hold{}, err
+	}
+	return s.Ledger.PlaceHold(ctx, c.Ref, userID, asset, amount, p.Admin.Email, reason)
 }
 
 // ReleaseHold returns one of a user's holds to their available balance;
 // the ledger books it (ADMIN_UNFREEZE) and audits it as
-// ledger.hold_released.
-func (s *Service) ReleaseHold(ctx context.Context, p Principal, userID, holdID, reason string) (ports.Hold, error) {
+// ledger.hold_released. The same request again with the same key answers
+// with the hold it released.
+func (s *Service) ReleaseHold(ctx context.Context, p Principal, key, userID, holdID, reason string) (ports.Hold, error) {
 	if err := p.require(domain.PermLedgerHold); err != nil {
 		return ports.Hold{}, err
 	}
@@ -152,14 +160,23 @@ func (s *Service) ReleaseHold(ctx context.Context, p Principal, userID, holdID, 
 	if err := needReason(reason); err != nil {
 		return ports.Hold{}, err
 	}
+	reason = strings.TrimSpace(reason)
+	c, err := s.claimKey(ctx, p, key, scopeRelease, fingerprint(userID, holdID, reason))
+	if err != nil {
+		return ports.Hold{}, err
+	}
 	holds, err := s.Ledger.Holds(ctx, userID, false)
 	if err != nil {
 		return ports.Hold{}, err
 	}
 	for _, h := range holds {
-		if h.ID == holdID {
-			return s.Ledger.ReleaseHold(ctx, holdID, p.Admin.Email, strings.TrimSpace(reason))
+		if h.ID != holdID {
+			continue
 		}
+		if !c.Fresh && !h.ReleasedAt.IsZero() && h.ReleasedBy == p.Admin.Email && h.ReleaseReason == reason {
+			return h, nil
+		}
+		return s.Ledger.ReleaseHold(ctx, holdID, p.Admin.Email, reason)
 	}
 	return ports.Hold{}, apperr.NotFound("no such hold")
 }
@@ -245,8 +262,10 @@ const closeAttempts = 8
 
 // ClosePosition closes a user's position at the market (a reduce-only
 // market order of kind ADMIN, after the closing orders resting on it came
-// off), audited as admin.derivatives.position_closed.
-func (s *Service) ClosePosition(ctx context.Context, p Principal, userID, symbol, side, reason string) (json.RawMessage, error) {
+// off), audited as admin.derivatives.position_closed. The order's client
+// ID comes from the request's key, so the same request again finds the
+// same order.
+func (s *Service) ClosePosition(ctx context.Context, p Principal, key, userID, symbol, side, reason string) (json.RawMessage, error) {
 	if err := p.require(domain.PermDerivativesEdit); err != nil {
 		return nil, err
 	}
@@ -260,11 +279,15 @@ func (s *Service) ClosePosition(ctx context.Context, p Principal, userID, symbol
 	if symbol == "" {
 		return nil, apperr.Invalid("the symbol is required")
 	}
+	c, err := s.claimKey(ctx, p, key, scopeClose, fingerprint(userID, symbol, side, strings.TrimSpace(reason)))
+	if err != nil {
+		return nil, err
+	}
 	wait := s.CloseWait
 	if wait <= 0 {
 		wait = 700 * time.Millisecond
 	}
-	client := uuid.Must(uuid.NewV7()).String()
+	client := c.Ref
 	var raw json.RawMessage
 	for attempt := 1; ; attempt++ {
 		var err error
@@ -281,6 +304,6 @@ func (s *Service) ClosePosition(ctx context.Context, p Principal, userID, symbol
 		case <-time.After(wait):
 		}
 	}
-	details, _ := json.Marshal(map[string]string{"symbol": symbol, "position_side": side, "order_id": orderID(raw)})
+	details, _ := json.Marshal(map[string]any{"symbol": symbol, "position_side": side, "order_id": orderID(raw), "repeated": !c.Fresh})
 	return raw, s.audit(ctx, p, "user:"+userID, "admin.derivatives.position_closed", reason, string(details))
 }

@@ -424,6 +424,8 @@ func (w Wallet) List(ctx context.Context, q ports.WithdrawalQuery) (json.RawMess
 type Market struct {
 	REST
 	Base string
+	// Now is the clock prices are aged by (time.Now when nil).
+	Now func() time.Time
 }
 
 // Feed returns the reference feed's state.

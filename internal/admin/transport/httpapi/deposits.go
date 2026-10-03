@@ -68,7 +68,7 @@ func (h *Handler) creditDeposit(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	raw, err := h.Svc.CreditDeposit(r.Context(), principal(r), chi.URLParam(r, "id"), body.Reason)
+	raw, err := h.Svc.CreditDeposit(r.Context(), principal(r), idemKey(r), chi.URLParam(r, "id"), body.Reason)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -144,7 +144,7 @@ func (h *Handler) backfill(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	a, err := h.Svc.Backfill(r.Context(), principal(r), m, body.Reason)
+	a, err := h.Svc.Backfill(r.Context(), principal(r), idemKey(r), m, body.Reason)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

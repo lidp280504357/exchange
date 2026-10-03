@@ -3,11 +3,13 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
 	"github.com/lidp280504357/exchange/internal/admin/domain"
 	"github.com/lidp280504357/exchange/internal/admin/ports"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
@@ -174,10 +176,14 @@ type BroadcastInput struct {
 	Body     map[string]string
 	Link     string
 	Email    bool
+	// Key is the request's Idempotency-Key ("" for none).
+	Key string
 }
 
 // SendBroadcast sends an in-app message; notification-service delivers it
-// in rounds. A tag's users are those tagged now.
+// in rounds. A tag's users are those tagged now. The message's ID comes
+// from the request's key and is audited before it is sent, so the same
+// request again sends nothing more and audits nothing more (C5.5 ⑥).
 func (s *Service) SendBroadcast(ctx context.Context, p Principal, in BroadcastInput, reason string) (json.RawMessage, error) {
 	if err := p.require(domain.PermNoticesSend); err != nil {
 		return nil, err
@@ -216,14 +222,24 @@ func (s *Service) SendBroadcast(ctx context.Context, p Principal, in BroadcastIn
 	default:
 		return nil, apperr.Invalid("audience must be ALL, USER or TAG")
 	}
-	raw, err := s.Content.SendBroadcast(ctx, w)
+	title, _ := json.Marshal(in.Title)
+	body, _ := json.Marshal(in.Body)
+	hash := fingerprint(strings.ToUpper(in.Audience), in.UserID, in.Tag, string(title), string(body), in.Link, strconv.FormatBool(in.Email),
+		strings.TrimSpace(reason))
+	err := s.Store.Tx(ctx, func(r ports.Repos) error {
+		c, err := s.claimIn(ctx, r, p, in.Key, scopeBroadcast, hash)
+		if err != nil || !c.Fresh {
+			w.ID = c.Ref
+			return err
+		}
+		w.ID = c.Ref
+		d, _ := json.Marshal(details)
+		return r.Audit(ctx, &auditv1.AdminActionPerformed{
+			Target: "broadcast:" + w.ID, Action: "admin.notices.sent", Actor: p.Admin.Email, Reason: strings.TrimSpace(reason), Details: string(d),
+		}, p.Admin.Email)
+	})
 	if err != nil {
 		return nil, err
 	}
-	var b struct {
-		ID string `json:"id"`
-	}
-	_ = json.Unmarshal(raw, &b)
-	d, _ := json.Marshal(details)
-	return raw, s.audit(ctx, p, "broadcast:"+b.ID, "admin.notices.sent", strings.TrimSpace(reason), string(d))
+	return s.Content.SendBroadcast(ctx, w)
 }

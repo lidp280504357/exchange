@@ -166,6 +166,13 @@ func TestAMintHasACapAndIsFinishedWhenPartlyBooked(t *testing.T) {
 	if err != nil || a == nil || a.Status != domain.ApprovalPending || a.Mode != domain.ModeSingle {
 		t.Fatalf("kept pending %+v %v", a, err)
 	}
+	// It says how far it got (C5.5 ⑭), and nobody rejects it: a new mint would book bot-01 twice.
+	if a.AttemptedAt.IsZero() || a.Result != "booked 1 of 3; bot-02: LEDGER_ACCOUNT_FROZEN: frozen" {
+		t.Fatalf("its progress %+v", a)
+	}
+	if _, err := h.svc.DecideApproval(ctx, boss, id, false, "start over"); code(err) != "ADMIN_APPROVAL_ATTEMPTED" {
+		t.Fatalf("withdrawn after booking a part: %v", err)
+	}
 	if used, err := h.store.Read().Approvals().SingleUsage(ctx, boss.Admin.ID, h.now.Add(-time.Hour)); err != nil || !used.Equal(decimal.NewFromInt(30)) {
 		t.Fatalf("counted in the day's single-person total: %s %v", used, err)
 	}

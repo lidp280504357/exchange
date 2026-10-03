@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Lock } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { DangerAction, lastFour } from "../../kit/actions";
+import { DangerAction, FormError, lastFour } from "../../kit/actions";
 import { EnumBadge, EnumText } from "../../kit/enums";
 import { IdText, Num, TimeText } from "../../kit/format";
 import type { Approval } from "../../kit/funds";
@@ -160,9 +160,12 @@ function Holds({ admin, userId, balances }: { admin: Admin; userId: string; bala
           title={t("admin.money.releaseTitle")}
           target={<Num value={releasing.amount} unit={releasing.asset} />}
           confirmWord={lastFour(releasing.id)}
-          run={async (reason) =>
+          run={async (reason, key) =>
             adminData(
-              await adminApi.DELETE("/admin/v1/users/{id}/holds/{hold}", { params: { path: { id: userId, hold: releasing.id } }, body: { reason } }),
+              await adminApi.DELETE("/admin/v1/users/{id}/holds/{hold}", {
+                params: { path: { id: userId, hold: releasing.id }, header: { "Idempotency-Key": key } },
+                body: { reason },
+              }),
             )
           }
           success={t("admin.money.released")}
@@ -193,10 +196,13 @@ function PlaceHold({ userId, balances }: { userId: string; balances: Balance[] }
       description={t("admin.money.placeHoldHelp")}
       target={<span className="font-mono text-xs">{userId}</span>}
       confirmWord={lastFour(userId)}
-      run={async (reason) => {
-        if (!ok || !chosen) throw new Error(t("admin.money.badHold"));
+      run={async (reason, key) => {
+        if (!ok || !chosen) throw new FormError(t("admin.money.badHold"));
         return adminData(
-          await adminApi.POST("/admin/v1/users/{id}/holds", { params: { path: { id: userId } }, body: { asset: chosen.asset, amount: a, reason } }),
+          await adminApi.POST("/admin/v1/users/{id}/holds", {
+            params: { path: { id: userId }, header: { "Idempotency-Key": key } },
+            body: { asset: chosen.asset, amount: a, reason },
+          }),
         );
       }}
       success={t("admin.money.held")}
@@ -441,10 +447,10 @@ export function PositionsTab({ admin, userId }: { admin: Admin; userId: string }
             </span>
           }
           confirmWord={closing.symbol.split("-")[0] ?? closing.symbol}
-          run={async (reason) =>
+          run={async (reason, key) =>
             adminData(
               await adminApi.POST("/admin/v1/users/{id}/positions/close", {
-                params: { path: { id: userId } },
+                params: { path: { id: userId }, header: { "Idempotency-Key": key } },
                 body: { symbol: closing.symbol, position_side: closing.position_side, reason },
               }),
             )

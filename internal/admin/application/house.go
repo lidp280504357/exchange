@@ -82,7 +82,7 @@ func (s *Service) House(ctx context.Context, p Principal) (House, error) {
 	prices := ports.Prices{}
 	if s.HouseBook.Prices != nil {
 		var err error
-		if prices, err = s.HouseBook.Prices.Prices(ctx); err != nil {
+		if prices, err = s.HouseBook.Prices.Prices(ctx, 0); err != nil {
 			partial("prices", err)
 			prices = ports.Prices{}
 		}

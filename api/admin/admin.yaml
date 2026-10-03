@@ -814,6 +814,8 @@ paths:
       security:
         - session: []
           csrf: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -874,6 +876,7 @@ paths:
         - session: []
           csrf: []
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - name: id
           in: path
           required: true
@@ -1148,6 +1151,7 @@ paths:
         - session: []
           csrf: []
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/UserID'
       requestBody:
         required: true
@@ -1591,6 +1595,7 @@ paths:
         - session: []
           csrf: []
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/UserID'
       requestBody:
         required: true
@@ -1631,6 +1636,7 @@ paths:
         - session: []
           csrf: []
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/UserID'
         - name: hold
           in: path
@@ -1776,6 +1782,7 @@ paths:
         - session: []
           csrf: []
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/UserID'
       requestBody:
         required: true
@@ -1879,13 +1886,19 @@ paths:
       summary: Approve or reject a withdrawal in review
       description: |
         The administrator's email is the reviewer; a withdrawal above
-        20,000 USDT needs two distinct reviewers. Rejecting releases the
-        frozen amount. Needs withdrawals.review.
+        20,000 USDT needs two distinct reviewers. In single-person mode
+        one approval completes a withdrawal worth at most the settings'
+        withdrawal_max_usdt both when it was requested and at the current
+        price (a price over a minute old counts as none: the approval
+        counts, not alone). Rejecting releases the frozen amount. The same
+        review again with its Idempotency-Key answers with the withdrawal
+        as the review left it. Needs withdrawals.review.
       tags: [withdrawals]
       security:
         - session: []
           csrf: []
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - name: id
           in: path
           required: true
@@ -1922,11 +1935,15 @@ paths:
         Each withdrawal is reviewed on its own as by POST
         /admin/v1/withdrawals/{id}/review (and audited by the wallet); one
         that fails (already decided, unknown) leaves the others decided and
-        says why. At most 50 at a time. Needs withdrawals.review.
+        says why. At most 50 at a time. The same batch again with its
+        Idempotency-Key answers for those it reviewed as they stand. Needs
+        withdrawals.review.
       tags: [withdrawals]
       security:
         - session: []
           csrf: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -2458,6 +2475,8 @@ paths:
       security:
         - session: []
           csrf: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -2791,6 +2810,8 @@ paths:
       security:
         - session: []
           csrf: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -3133,6 +3154,8 @@ paths:
       security:
         - session: []
           csrf: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -3241,12 +3264,17 @@ paths:
         Approving one's own request fails with ADMIN_SELF_APPROVAL, except
         a single-person operation whose outcome was unknown (its requester
         finishes it); rejecting one's own request withdraws it. A decided
-        one fails with ADMIN_APPROVAL_DECIDED. Approving books the
-        operation with the idempotency key approval:<id>: EXECUTED with
-        the journal, or FAILED when the ledger refuses (for instance
-        LEDGER_ADJUSTMENT_DISABLED while the flag ledger.manual_adjustment
-        is off). When the ledger cannot be reached the request stays
-        PENDING and can be approved again. Needs ledger.adjust.approve;
+        one fails with ADMIN_APPROVAL_DECIDED, unless the decider took the
+        same decision: then it answers with the operation as that decision
+        left it (a retry). Approving books the operation with the
+        idempotency key approval:<id>: EXECUTED with the journal, or FAILED
+        when the ledger refuses (for instance LEDGER_ADJUSTMENT_DISABLED
+        while the flag ledger.manual_adjustment is off). A fund operation
+        is marked attempted (attempted_at) before it is booked: when the
+        ledger cannot be reached it stays PENDING with how the attempt
+        ended in result, the error's details name it (approval_id), and it
+        can be approved again but no longer rejected
+        (ADMIN_APPROVAL_ATTEMPTED). Needs ledger.adjust.approve;
         a simulated market's change (SIM_EVENT, SIM_PARAMS) needs
         sim.control instead, and approving one that lapsed (a day after it
         was asked for, or when its event was to start) fails it, result
@@ -3898,6 +3926,8 @@ paths:
       security:
         - session: []
           csrf: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -4178,6 +4208,20 @@ components:
       name: X-Admin-CSRF
       description: The value "1" on every request other than GET; a cross-site form cannot set it.
   parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Every request that moves money carries one (C5.5 ⑥): the console makes a key per operation and sends it again with
+        each retry. The first request with a key makes the operation (its approval, hold, closing order or message takes
+        its ID from the key); the same request again answers with what it made, finishing a fund operation whose outcome
+        was unknown; the key with another request fails with 409 COMMON_IDEMPOTENCY_CONFLICT. Keys are each
+        administrator's own and kept 24 hours. Missing or longer than 128 characters: 400.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
     CallbackID:
       name: id
       in: path
@@ -6609,7 +6653,7 @@ components:
       type: object
       description: A fund operation (a manual adjustment, an insurance fund contribution or a deposit backfill).
       required: [id, kind, payload, reason, status, requested_by, requested_by_email, decided_by, decided_by_email, result, created_at,
-        decided_at, mode, value_usdt, escalation, journal_id]
+        decided_at, mode, value_usdt, escalation, journal_id, attempted_at]
       properties:
         id:
           type: string
@@ -6646,7 +6690,9 @@ components:
           type: [string, 'null']
         result:
           type: string
-          description: The journal once executed, the ledger's refusal, or the rejection reason.
+          description: |
+            The journal once executed, the ledger's refusal, or the rejection reason; while pending after an attempt
+            (attempted_at), how the last attempt ended (a mint: "booked n of m; <bot>: <code>: <message>").
         created_at:
           type: string
           format: date-time
@@ -6670,6 +6716,14 @@ components:
             in single-person mode.
         journal_id:
           type: [string, 'null']
+        attempted_at:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            When an attempt to carry out a fund operation began (a single-person operation when requested, a two-person one
+            when approved). PENDING with it, the attempt did not finish and may have booked: it is finished (approved again:
+            its ledger key makes that safe), never rejected (ADMIN_APPROVAL_ATTEMPTED). Null for the simulated market's
+            changes and before any attempt.
     AuditEntry:
       type: object
       required: [event_id, event_type, actor, target, occurred_at, payload]

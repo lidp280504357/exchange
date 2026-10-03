@@ -305,10 +305,11 @@ function MintForm({ st, coin }: { st: SimStatus; coin: string }) {
           </span>
         }
         confirmWord="mint"
-        run={async (reason) => {
+        run={async (reason, key) => {
           if (!amountOk) throw new FormError(t("admin.funds.invalidAmount"));
           return adminData(
             await adminApi.POST("/admin/v1/sim/mint", {
+              params: { header: { "Idempotency-Key": key } },
               body: {
                 asset, amount: a, reason, ...(role === "all" ? {} : { role: role as (typeof ROLES)[number] }),
                 ...(reference.trim() ? { reference: reference.trim() } : {}),

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
 	"github.com/lidp280504357/exchange/internal/admin/adapters/postgres"
@@ -20,6 +21,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/admin/domain"
 	"github.com/lidp280504357/exchange/internal/admin/ports"
 	"github.com/lidp280504357/exchange/internal/admin/transport/httpapi"
+	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/event"
 	"github.com/lidp280504357/exchange/internal/platform/httpx"
 	"github.com/lidp280504357/exchange/internal/platform/migrate"
@@ -30,10 +32,17 @@ import (
 	"github.com/lidp280504357/exchange/migrations"
 )
 
-type ledger struct{ keys []string }
+type ledger struct {
+	keys []string
+	// err answers the adjustments while set (the ledger down).
+	err error
+}
 
 func (l *ledger) Adjust(_ context.Context, key, _, _, _ string, _ decimal.Decimal, _, _ string) (string, error) {
 	l.keys = append(l.keys, key)
+	if l.err != nil {
+		return "", l.err
+	}
 	return "j1", nil
 }
 
@@ -188,6 +197,8 @@ type client struct {
 	cookie *http.Cookie
 	// header is the last answer's.
 	header http.Header
+	// key is the next write's Idempotency-Key (a new one when empty).
+	key string
 }
 
 func (c *client) do(method, path string, body any, csrf bool) (int, map[string]any) {
@@ -200,6 +211,14 @@ func (c *client) do(method, path string, body any, csrf bool) (int, map[string]a
 	req.Header.Set("Content-Type", "application/json")
 	if csrf {
 		req.Header.Set(httpapi.CSRFHeader, "1")
+	}
+	if method != http.MethodGet {
+		key := c.key
+		if key == "" {
+			key = uuid.NewString()
+		}
+		c.key = ""
+		req.Header.Set(httpapi.KeyHeader, key)
 	}
 	if c.cookie != nil {
 		req.AddCookie(c.cookie)
@@ -350,6 +369,48 @@ func TestConsole(t *testing.T) {
 	if status != http.StatusOK || body["status"] != domain.ApprovalRejected || body["decided_by_email"] != "boss@example.com" {
 		t.Fatalf("withdrawn: %d %v", status, body)
 	}
+	// A money route wants an Idempotency-Key; the same request with it is the same operation (C5.5 ⑥).
+	boss.key = " "
+	if status, body := boss.do(http.MethodPost, user, map[string]string{"asset": "USDT", "amount": "1", "reason": "goodwill"}, true); status != http.StatusBadRequest {
+		t.Fatalf("without a key: %d %v", status, body)
+	}
+	once := map[string]string{"asset": "USDT", "amount": "2", "reason": "goodwill"}
+	boss.key = "adjust-once"
+	status, body = boss.do(http.MethodPost, user, once, true)
+	first, _ := body["id"].(string)
+	boss.key = "adjust-once"
+	if again, body := boss.do(http.MethodPost, user, once, true); status != http.StatusCreated || again != http.StatusCreated || body["id"] != first ||
+		body["status"] != domain.ApprovalExecuted || len(led.keys) != 4 {
+		t.Fatalf("repeated: %d %d %v (ledger %v)", status, again, body, led.keys)
+	}
+	boss.key = "adjust-once"
+	if status, body := boss.do(http.MethodPost, user, map[string]string{"asset": "USDT", "amount": "3", "reason": "goodwill"}, true); status != http.StatusConflict ||
+		errCode(body) != "COMMON_IDEMPOTENCY_CONFLICT" {
+		t.Fatalf("the key with another amount: %d %v", status, body)
+	}
+	// The ledger does not answer: the operation stays pending, attempted, to be finished, never withdrawn.
+	led.err = apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "down")
+	status, body = boss.do(http.MethodPost, user, map[string]string{"asset": "USDT", "amount": "4", "reason": "goodwill"}, true)
+	details, _ := body["details"].(map[string]any)
+	stuck, _ := details["approval_id"].(string)
+	if status != http.StatusServiceUnavailable || stuck == "" {
+		t.Fatalf("unknown outcome: %d %v", status, body)
+	}
+	_, body = boss.do(http.MethodGet, "/admin/v1/approvals?status=PENDING", nil, false)
+	items, _ := body["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["id"] != stuck || items[0].(map[string]any)["attempted_at"] == nil ||
+		items[0].(map[string]any)["result"] != "COMMON_UNAVAILABLE: down" {
+		t.Fatalf("attempted: %v", body)
+	}
+	if status, body := boss.do(http.MethodPost, "/admin/v1/approvals/"+stuck+"/decide", map[string]any{"approve": false, "reason": "never mind"}, true); status != http.StatusConflict ||
+		errCode(body) != "ADMIN_APPROVAL_ATTEMPTED" {
+		t.Fatalf("withdrawn after an attempt: %d %v", status, body)
+	}
+	led.err = nil
+	status, body = boss.do(http.MethodPost, "/admin/v1/approvals/"+stuck+"/decide", map[string]any{"approve": true, "reason": "the ledger is back"}, true)
+	if status != http.StatusOK || body["status"] != domain.ApprovalExecuted || body["attempted_at"] == nil || len(led.keys) != 6 || led.keys[5] != "approval:"+stuck {
+		t.Fatalf("finished: %d %v (ledger %v)", status, body, led.keys)
+	}
 	// Notes and tags on an account.
 	account := "/admin/v1/users/01929c3e-7f3a-7d7e-8a1b-2c3d4e5f6a7b"
 	if status, body := boss.do(http.MethodPost, account+"/notes", map[string]string{"body": "called about a deposit"}, true); status != http.StatusCreated || body["admin_email"] != "boss@example.com" {
@@ -435,10 +496,11 @@ func TestConsole(t *testing.T) {
 		t.Fatal(err)
 	}
 	// created ×2, login ×2, login_failed, requested ×2, approved ×2, single-person requested and executed,
-	// settings changed, requested and withdrawn, notes ×2, tags ×2, the OPERATOR created, signed in and its
-	// sessions ended, disabled, logout
-	if n != 23 {
-		t.Fatalf("%d audit events in the outbox, want 23", n)
+	// settings changed, requested and withdrawn, the keyed one requested and executed, the unknown one
+	// requested and approved, notes ×2, tags ×2, the OPERATOR created, signed in and its sessions ended,
+	// disabled, logout
+	if n != 27 {
+		t.Fatalf("%d audit events in the outbox, want 27", n)
 	}
 	var admins string
 	if err := db.QueryRow(ctx, `SELECT string_agg(email || ':' || status || ':' || failed_attempts, ',' ORDER BY email) FROM admins`).Scan(&admins); err != nil {

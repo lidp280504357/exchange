@@ -46,7 +46,20 @@ export function ApprovalsTable({ admin, list }: { admin: Admin; list: CursorList
           </span>
         ),
       },
-      { id: "status", header: t("admin.common.status"), cell: ({ row }) => <EnumBadge group="approvalStatus" code={row.original.status} /> },
+      {
+        id: "status",
+        header: t("admin.common.status"),
+        cell: ({ row }) => (
+          <span className="inline-flex flex-col items-start gap-0.5">
+            <EnumBadge group="approvalStatus" code={row.original.status} />
+            {attempted(row.original) && (
+              <Badge tone="warn" title={t("admin.attempts.hint")}>
+                {t("admin.attempts.badge")}
+              </Badge>
+            )}
+          </span>
+        ),
+      },
       {
         id: "people",
         header: t("admin.funds.people"),
@@ -66,14 +79,19 @@ export function ApprovalsTable({ admin, list }: { admin: Admin; list: CursorList
         header: "",
         cell: ({ row }) => {
           const a = row.original;
-          if (a.status !== "PENDING") {
-            return a.result ? (
-              <span className="block max-w-48 truncate text-xs text-fg-3" title={a.result}>
-                {a.result}
-              </span>
-            ) : null;
-          }
-          return <Decide admin={admin} a={a} />;
+          const note = a.result ? (
+            <span className="block max-w-48 truncate text-xs text-fg-3" title={a.result}>
+              {a.result}
+            </span>
+          ) : null;
+          if (a.status !== "PENDING") return note;
+          // A pending operation's result is how its unfinished attempt ended (C5.5 ⑥).
+          return (
+            <span className="flex flex-col items-end gap-1">
+              <Decide admin={admin} a={a} />
+              {note}
+            </span>
+          );
         },
       },
     ],
@@ -84,6 +102,9 @@ export function ApprovalsTable({ admin, list }: { admin: Admin; list: CursorList
 
 /** simKind reports whether a request is a simulated market's change (C5). */
 const simKind = (kind: string) => kind === "SIM_EVENT" || kind === "SIM_PARAMS";
+
+/** attempted reports whether a pending operation's attempt did not finish: it may have booked, so it is finished, never rejected (C5.5 ⑥). */
+const attempted = (a: Approval) => a.status === "PENDING" && !!a.attempted_at;
 
 /** SimChange says what a simulated market's request changes and how far market-sim measured it moving the price. */
 function SimChange({ a }: { a: Approval }) {
@@ -155,13 +176,15 @@ function simLapsed(a: Approval): boolean {
 /**
  * Decide offers what the administrator may do with a pending operation:
  * approve or reject another's request; finish their own single-person
- * operation whose outcome was unknown; withdraw their own request.
+ * operation whose outcome was unknown; withdraw their own request. One
+ * whose attempt did not finish is only finished (C5.5 ⑥).
  */
 function Decide({ admin, a }: { admin: Admin; a: Approval }) {
   const { t } = useTranslation();
   if (!can(admin, simKind(a.kind) ? "sim.control" : "ledger.adjust.approve")) return null;
   const p = a.payload as Record<string, string>;
   const mine = a.requested_by === admin.id;
+  const finish = mine || attempted(a);
   const target = (
     <span className="inline-flex items-center gap-2">
       <EnumText group="approvalKind" code={a.kind} />{" "}
@@ -177,11 +200,12 @@ function Decide({ admin, a }: { admin: Admin; a: Approval }) {
         <FundAction
           trigger={(open) => (
             <Button size="sm" onClick={open}>
-              {mine ? t("admin.funds.finish") : t("admin.ledger.approve")}
+              {finish ? t("admin.funds.finish") : t("admin.ledger.approve")}
             </Button>
           )}
           danger={false}
-          title={mine ? t("admin.funds.finishTitle") : t("admin.ledger.approveTitle")}
+          title={finish ? t("admin.funds.finishTitle") : t("admin.ledger.approveTitle")}
+          description={attempted(a) ? t("admin.attempts.finishHelp") : undefined}
           target={target}
           confirmWord={lastFour(a.id)}
           run={run(true)}
@@ -189,17 +213,19 @@ function Decide({ admin, a }: { admin: Admin; a: Approval }) {
           {simKind(a.kind) && <SimRequestNow id={a.id} />}
         </FundAction>
       )}
-      <FundAction
-        trigger={(open) => (
-          <Button size="sm" variant="ghost" onClick={open}>
-            {mine ? t("admin.funds.withdraw") : t("admin.ledger.reject")}
-          </Button>
-        )}
-        title={mine ? t("admin.funds.withdrawTitle") : t("admin.ledger.rejectTitle")}
-        target={target}
-        confirmWord={lastFour(a.id)}
-        run={run(false)}
-      />
+      {!attempted(a) && (
+        <FundAction
+          trigger={(open) => (
+            <Button size="sm" variant="ghost" onClick={open}>
+              {mine ? t("admin.funds.withdraw") : t("admin.ledger.reject")}
+            </Button>
+          )}
+          title={mine ? t("admin.funds.withdrawTitle") : t("admin.ledger.rejectTitle")}
+          target={target}
+          confirmWord={lastFour(a.id)}
+          run={run(false)}
+        />
+      )}
     </RowActions>
   );
 }

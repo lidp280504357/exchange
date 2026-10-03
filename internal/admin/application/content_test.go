@@ -35,7 +35,7 @@ func (f *fakeContent) PublishArticle(_ context.Context, id string, version int, 
 
 func (f *fakeContent) SendBroadcast(_ context.Context, b ports.BroadcastWrite) (json.RawMessage, error) {
 	f.broadcasts = append(f.broadcasts, b)
-	return json.Marshal(map[string]any{"id": uuid.NewString(), "audience": b.Audience, "users": len(b.UserIDs), "status": "SENDING"})
+	return json.Marshal(map[string]any{"id": b.ID, "audience": b.Audience, "users": len(b.UserIDs), "status": "SENDING"})
 }
 
 func TestArticlesAndMessagesFromTheConsole(t *testing.T) {

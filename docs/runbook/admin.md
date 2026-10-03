@@ -52,14 +52,24 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 - **开关 `admin.two_person_approval`**（未设置即关闭）。打开：每笔都要另一位管理员批准（原流程）。关闭（单人模式，测试服现状，因为只有一位管理员）：有权限的管理员自己执行，但有护栏：
   - 单笔折合不超过 `single_max_usdt`（默认 100,000 USDT）；
   - 同一管理员 24 小时内单人操作合计（含结果未知的待处理项）不超过 `daily_max_usdt`（默认 500,000）；
-  - 折合按该资产 USDT 交易对的最新价（market-data-service tickers），USDT 按 1；没有报价的不能单人执行；
+  - 折合按该资产 USDT 交易对的最新价（market-data-service tickers），USDT 按 1；没有报价、或报价超过 60 秒没更新（参考行情停了）的不能单人执行（C5.5 ⑥）；
   - 超过任一限额、或没有报价时，自动转为待另一位管理员批准，`escalation` 写明原因（`SINGLE_LIMIT`、`DAILY_LIMIT`、`NO_PRICE`；双人模式下是 `TWO_PERSON_MODE`，明确要求审批的是 `REQUESTED`）。
-- **提现**：单人模式下，需两人审核的提现（> 20,000 USDT，wallet-service 规则）折合不超过 `withdrawal_max_usdt`（默认 100,000）时一人批准即完成（admin-service 把 `sole_max_usdt` 传给 wallet-service 的内部审核接口，wallet 审计里记 `sole_max_usdt`）。
+- **提现**：单人模式下，需两人审核的提现（> 20,000 USDT，wallet-service 规则）折合不超过 `withdrawal_max_usdt`（默认 100,000）时一人批准即完成（admin-service 把 `sole_max_usdt` 传给 wallet-service 的内部审核接口，wallet 审计里记 `sole_max_usdt`）。批准时 admin-service 还按当前价重算一次（同样 60 秒新鲜度）：申请时的估值与当前估值都不超过才传 `sole_max_usdt`，否则这次批准照常计数、不能单独完成（C5.5 ⑥）。
+- **幂等键**（C5.5 ⑥）：所有动钱的请求必须带请求头 `Idempotency-Key`（≤ 128 字，缺了 400）：调账两条路由、保险基金注资、补记、增发、冻结与解冻、强制平仓、提现审核与批量审核、待处理充值入账、站内信。
+  - 后台对话框每次打开生成一个键，结果未知（网络断、5xx、键冲突）时重试沿用，结果确定或关闭对话框后换新键。
+  - 键归各管理员所有，存在 admin 库平台表 `idempotency_keys`（`scope` 为「管理员 ID + 动作」，`response` 是请求生成的 ID），保留 24 小时，admin-service 每小时清理一次。
+  - 第一次请求按键生成 ID：审批记录、冻结 ID、平仓单的 `client_order_id`、站内信 ID 都取自它。同一请求再来，返回同一笔（审批记录原样返回，单人模式下结果未知的会被完成；冻结、平仓单、站内信由下游按 ID 去重；提现审核、解冻、入账已由本人做过的返回当前状态）；同一键换了内容返回 409 `COMMON_IDEMPOTENCY_CONFLICT`。
+  - 站内信的审计 `admin.notices.sent` 与键在同一事务里先写，再交给 notification-service（它接受调用方给的 ID，同一 ID 再发返回原消息）。
+- **待核对**（C5.5 ⑥）：资金操作执行前先记 `attempted_at`（单人模式在建档时、双人模式在批准时）。执行没有结束（账本超时或无响应、增发记了一部分后被拒）的操作保持 `PENDING`，`result` 写这次尝试怎么结束的（增发为 `booked n of m; <机器人>: <错误码>: <消息>`），后台显示「待核对」。
+  - 它可能已经记账，所以只能完成（再次批准；幂等键 `approval:<id>` 保证不重复记账），不能拒绝或撤回（409 `ADMIN_APPROVAL_ATTEMPTED`）。
+  - 增发不要另发一笔新的：完成这一笔只补剩下的机器人。
+  - 模拟市场的事件与参数审批不记 `attempted_at`（它们可以结束或改回）。
+  - 同一位管理员重复同一个决定（批准或拒绝）返回操作的当前状态，不再执行；相反的决定仍返回 `ADMIN_APPROVAL_DECIDED`。
 - **接口**：
   - `POST /admin/v1/users/{id}/adjustments`：用户页的调账，单人模式限额内立即记账（返回 `EXECUTED` 与 `journal_id`），否则返回 `PENDING`；
   - `POST /admin/v1/ledger/adjustments` 与 `POST /admin/v1/derivatives/insurance-fund/contributions`：不带 `direct` 时总是交给另一位管理员（原行为，端到端的双人流程用它），带 `"direct": true` 同上；
   - 可选 `reference`（工单号等，≤ 64 字）写进分录备注；
-  - 账本无响应时返回 `COMMON_UNAVAILABLE`，详情 `approval_id` 指向那笔留在 `PENDING` 的操作，申请人可在「审批」里点「完成」重试（`POST /admin/v1/approvals/{id}/decide`，单人模式的操作允许申请人自己完成），不会重复记账。
+  - 账本无响应时返回 `COMMON_UNAVAILABLE`，详情 `approval_id` 指向那笔留在 `PENDING`（待核对）的操作。申请人用同一个幂等键再提交一次，或在「审批」里点「完成」（`POST /admin/v1/approvals/{id}/decide`，单人模式的操作允许申请人自己完成），都不会重复记账。
 - **自己的申请**：不能自己批准双人申请（`ADMIN_SELF_APPROVAL`），但可以自己拒绝（撤回）。
 - **分录备注只取申请理由**（加 `[reference]`），不再拼审批理由：账本比对幂等请求时包括备注，重试换了理由会被当作冲突（修于 C1）。审批理由在审计里。
 - **设置**：`GET /admin/v1/settings`（所有管理员可读，含调用者 24 小时已用额 `daily_used_usdt`），`PUT /admin/v1/settings`（ADMIN，理由必填；限额审计 `admin.settings.changed`，双人开关经开关表审计 `flag:admin.two_person_approval`，本实例立即生效，其它 5 秒内）。也可以用 `exchangectl flags set admin.two_person_approval --on --reason "..."` 打开。
@@ -293,7 +303,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 - 锁定：等 15 分钟自动解锁，或由 ADMIN 在「管理员与角色」页启用（同时清除锁定）；忘记密码或丢失 TOTP：另一位 ADMIN 在同一页重置（新的只显示一次，对方会话结束）。不能重置自己的；唯一的 ADMIN 丢失时，用 `exchangectl admin disable` 停用后以新邮箱 `admin create` 重建（命令行没有重置入口，避免成为绕过 TOTP 的后门）。
 - IP 白名单（可选）：在服务器建 `/opt/exchange/infra/nginx/snippets/admin-access.local.conf`，内容如 `allow 203.0.113.7; deny all;`，`task deploy` 或 `nginx -s reload` 后对 `admin.astras.vip` 整站生效（真实客户端 IP 由 Cloudflare real-ip 配置还原）。目前按用户决定不设。部署同步不会覆盖或删除这个文件。
 - 指标：运维端口 9094（`outbox_pending`、`http_server_*`）；Prometheus 任务 `admin-service`。
-- 端到端：`bash scripts/e2e/admin.sh`（对 `https://admin.astras.vip`，每次创建 4 个随机管理员、结束时停用；覆盖页面与安全头、旧地址的跳转、登录与 Cookie、角色、备注与标签、批量审核提现、冻结/解冻、交易参数的护栏（C3c：等待时间临时设为 60 秒、结束时恢复；OPERATOR 不能改状态与参考符号；ETH-BTC 只预览暂停与只可撤单；没有确认令牌 409；LINK-BTC 的参考符号修改经 ADMIN 确认后排期再取消；ETH-USDT-PERP 立即暂停、确认的恢复一分钟后由后台执行；LINK-BTC 确认开放、一分钟后可下单、最后立即暂停；更严的风险阶梯预览列出影响；BTC-USDT 的参考符号不能清空）、撤单、开关往返、双人调账、设置的权限与校验、单人模式（ADMIN 直接 +2.5/−2.5 USDT，超过单笔限额的转审并撤回；双人模式时跳过）、待办与事件流、合约（状态、只减仓、强平监控与记录、双人保险基金注资 1 USDT）、报表、用户页的估值余额、风控冻结与解冻（用户资金流水里看得到 `ADMIN_FREEZE`）、单笔撤单、合约账户调账（单人模式时）、强制平仓（用户市价买入 0.1 ETH-USDT-PERP，后台平掉后仓位为空；合约交易关闭时跳过）、充值处置与补记（用托管方替身 udun-mock：回调推迟 45 秒的 2 USDT 由 FINANCE 补记、用户余额 +2、同一交易号再补记被拒、晚到的回调记为已核对且不再入账、`exchangectl` 报告里不再列出；低于最小额的 0.5 USDT 入账给用户、0.25 USDT 驳回后不能再入账）、提现详情与搁置（对已完成的提现搁置得到 409）、安全/历史/风控与完整联系方式、换绑审核（用户换绑唯一的邮箱 → 后台通过 → 按新邮箱能查到）、重置身份验证器、全部会话退出（用户令牌立即失效）、临时密码（旧密码失效、临时密码可登录、审计里没有它）、后台建管理员（C4a：ADMIN 建 OPERATOR，响应 `no-store`，用一次性口令登录；改为 AUDITOR 后下一个请求即生效；重置口令与身份验证器都结束会话、新的可登录；结束会话；停用后不能登录、启用后可以；不能改自己的账号；口令与密钥不出现在任何输出与审计里）、系统健康（全部就绪且带版本，消费者的滞后与死信数，行情源）、审计查询（含充值处置的四个动作与管理员的七个动作）与 CSV 导出（BOM、表头、`X-Truncated: false`，导出本身被审计）、退出与停用）。
+- 端到端：`bash scripts/e2e/admin.sh`（对 `https://admin.astras.vip`，每次创建 4 个随机管理员、结束时停用；覆盖页面与安全头、旧地址的跳转、登录与 Cookie、角色、备注与标签、批量审核提现、冻结/解冻、交易参数的护栏（C3c：等待时间临时设为 60 秒、结束时恢复；OPERATOR 不能改状态与参考符号；ETH-BTC 只预览暂停与只可撤单；没有确认令牌 409；LINK-BTC 的参考符号修改经 ADMIN 确认后排期再取消；ETH-USDT-PERP 立即暂停、确认的恢复一分钟后由后台执行；LINK-BTC 确认开放、一分钟后可下单、最后立即暂停；更严的风险阶梯预览列出影响；BTC-USDT 的参考符号不能清空）、撤单、开关往返、双人调账、设置的权限与校验、单人模式（ADMIN 直接 +2.5/−2.5 USDT，超过单笔限额的转审并撤回；双人模式时跳过）、幂等键（不带键 400；同一键的调账、冻结、解冻与站内信各发两次只生效一次，站内信只审计一次、用户只收到一条；同一键换金额 409；决定者重复批准返回原操作）、待办与事件流、合约（状态、只减仓、强平监控与记录、双人保险基金注资 1 USDT）、报表、用户页的估值余额、风控冻结与解冻（用户资金流水里看得到 `ADMIN_FREEZE`）、单笔撤单、合约账户调账（单人模式时）、强制平仓（用户市价买入 0.1 ETH-USDT-PERP，后台平掉后仓位为空；合约交易关闭时跳过）、充值处置与补记（用托管方替身 udun-mock：回调推迟 45 秒的 2 USDT 由 FINANCE 补记、用户余额 +2、同一交易号再补记被拒、晚到的回调记为已核对且不再入账、`exchangectl` 报告里不再列出；低于最小额的 0.5 USDT 入账给用户、0.25 USDT 驳回后不能再入账）、提现详情与搁置（对已完成的提现搁置得到 409）、安全/历史/风控与完整联系方式、换绑审核（用户换绑唯一的邮箱 → 后台通过 → 按新邮箱能查到）、重置身份验证器、全部会话退出（用户令牌立即失效）、临时密码（旧密码失效、临时密码可登录、审计里没有它）、后台建管理员（C4a：ADMIN 建 OPERATOR，响应 `no-store`，用一次性口令登录；改为 AUDITOR 后下一个请求即生效；重置口令与身份验证器都结束会话、新的可登录；结束会话；停用后不能登录、启用后可以；不能改自己的账号；口令与密钥不出现在任何输出与审计里）、系统健康（全部就绪且带版本，消费者的滞后与死信数，行情源）、审计查询（含充值处置的四个动作与管理员的七个动作）与 CSV 导出（BOM、表头、`X-Truncated: false`，导出本身被审计）、退出与停用）。
 - admin-service 连 derivatives-service 的内部地址：`DERIVATIVES_SERVICE_URL`（compose 里是 `http://derivatives-service:8095`）。
 
 ## 常见错误码
@@ -306,7 +316,9 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | `ADMIN_FORBIDDEN` | 角色没有该权限 |
 | `ADMIN_CSRF` | 写请求缺少 `X-Admin-CSRF: 1` |
 | `ADMIN_SELF_APPROVAL` | 不能批准自己的双人申请（可以撤回；单人模式下结果未知的操作可以自己完成） |
-| `ADMIN_APPROVAL_DECIDED` | 申请已处理 |
+| `ADMIN_APPROVAL_DECIDED` | 申请已处理（同一位管理员重复同一个决定时返回操作本身，不报这个错） |
+| `ADMIN_APPROVAL_ATTEMPTED` | 这笔资金操作的执行没有结束、可能已经记账（待核对）：只能完成，不能拒绝或撤回 |
+| `COMMON_IDEMPOTENCY_CONFLICT` | 同一个 `Idempotency-Key` 用于另一个请求（内容不同）；先在「审批」核对结果未知的那笔，新的操作换新键 |
 | `ADMIN_EXISTS` | 新建管理员（后台或 `admin create`）的邮箱已存在 |
 | `ADMIN_SELF` | 不能在后台修改自己的管理员账号 |
 | `ADMIN_LAST_ADMIN` | 最后一位启用的 ADMIN 不能被停用或降级 |

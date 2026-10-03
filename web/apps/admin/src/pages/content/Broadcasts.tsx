@@ -167,7 +167,7 @@ function Compose({ onClose, onSent }: { onClose: () => void; onSent: (b: Broadca
     ) : (
       <span className="font-mono">{tag || "—"}</span>
     );
-  const send = async (reason: string) => {
+  const send = async (reason: string, key: string) => {
     const uid = userId.trim();
     if (audience === "USER" && !uuidRE.test(uid)) throw new FormError(t("admin.broadcasts.badUser"));
     if (audience === "TAG" && !tagRE.test(tag)) throw new FormError(t("admin.broadcasts.badTag"));
@@ -178,6 +178,7 @@ function Compose({ onClose, onSent }: { onClose: () => void; onSent: (b: Broadca
     const enBody = body.en.trim() ? { en: body.en.trim() } : {};
     return adminData(
       await adminApi.POST("/admin/v1/broadcasts", {
+        params: { header: { "Idempotency-Key": key } },
         body: {
           audience,
           ...(audience === "USER" ? { user_id: uid } : {}),

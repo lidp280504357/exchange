@@ -150,6 +150,7 @@ func (h *Handler) sendBroadcast(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, err := h.Svc.SendBroadcast(r.Context(), principal(r), application.BroadcastInput{
 		Audience: body.Audience, UserID: body.UserID, Tag: body.Tag, Title: body.Title, Body: body.Body, Link: body.Link, Email: body.Email,
+		Key: idemKey(r),
 	}, body.Reason)
 	if err != nil {
 		httpx.WriteError(w, r, err)

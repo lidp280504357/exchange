@@ -29,6 +29,7 @@ type Repos interface {
 	Notes() NoteRepo
 	Tags() TagRepo
 	Changes() ChangeRepo
+	Keys() IdempotencyRepo
 	// Audit queues an administrator's action on audit.events.
 	Audit(ctx context.Context, msg proto.Message, actor string) error
 }
@@ -125,6 +126,22 @@ type ApprovalRepo interface {
 	SingleUsage(ctx context.Context, adminID string, since time.Time) (decimal.Decimal, error)
 	// CountPending counts the requests waiting for a decision.
 	CountPending(ctx context.Context) (int, error)
+	// MarkAttempted records that an attempt to carry a pending one out
+	// began (it keeps the first time); a note says how the last attempt
+	// ended when it did not finish ("" keeps the note).
+	MarkAttempted(ctx context.Context, id string, at time.Time, note string) error
+}
+
+// IdempotencyRepo keeps the administrators' Idempotency-Keys of requests
+// that move money (the platform's idempotency_keys table).
+type IdempotencyRepo interface {
+	// Claim records the ID of what a request makes under scope and key
+	// with the request's fingerprint, unless the key is known: then it
+	// returns the first request's fingerprint and ID (claimed false).
+	Claim(ctx context.Context, scope, key string, hash []byte, ref string, now time.Time) (storedHash []byte, storedRef string, claimed bool,
+		err error)
+	// Purge deletes the keys claimed before cutoff.
+	Purge(ctx context.Context, cutoff time.Time) (int64, error)
 }
 
 // User is an account as the console shows it.
@@ -611,8 +628,10 @@ type ArticleText struct {
 	Body    string `json:"body"`
 }
 
-// BroadcastWrite is an in-app message to some users (their IDs) or all.
+// BroadcastWrite is an in-app message to some users (their IDs) or all,
+// under the ID the console chose (sending it again returns it).
 type BroadcastWrite struct {
+	ID       string            `json:"id"`
 	Audience string            `json:"audience"`
 	UserIDs  []string          `json:"user_ids"`
 	Title    map[string]string `json:"title"`
@@ -1096,9 +1115,11 @@ type Market interface {
 // tickers), by symbol.
 type Prices map[string]decimal.Decimal
 
-// MarketPrices reads the last prices of every listed symbol.
+// MarketPrices reads the last prices of every listed symbol; a positive
+// maxAge leaves out those not updated within it (a reference feed that
+// stopped).
 type MarketPrices interface {
-	Prices(ctx context.Context) (Prices, error)
+	Prices(ctx context.Context, maxAge time.Duration) (Prices, error)
 }
 
 // HousePair is HOUSE's spot trading on one pair in the trades read model

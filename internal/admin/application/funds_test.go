@@ -116,8 +116,13 @@ func TestSingleOperationWithAnUnknownOutcome(t *testing.T) {
 		t.Fatalf("unknown outcome: %v", err)
 	}
 	id, _ := e.Details["approval_id"].(string)
-	if a := h.store.approvals[id]; a.Status != domain.ApprovalPending || a.Mode != domain.ModeSingle {
-		t.Fatalf("left pending: %+v", a)
+	if a := h.store.approvals[id]; a.Status != domain.ApprovalPending || a.Mode != domain.ModeSingle || a.AttemptedAt.IsZero() ||
+		a.Result != "COMMON_UNAVAILABLE: down" {
+		t.Fatalf("left pending, attempted: %+v", a)
+	}
+	// It may have booked: withdrawing it is refused (C5.5 ⑥).
+	if _, err := h.svc.DecideApproval(ctx, boss, id, false, "never mind"); code(err) != "ADMIN_APPROVAL_ATTEMPTED" {
+		t.Fatalf("withdrawn: %v", err)
 	}
 	// Its requester finishes it; the journal's memo is the same both times (the ledger compares it).
 	h.ledger.err = nil
@@ -200,18 +205,52 @@ func TestSettings(t *testing.T) {
 func TestWithdrawalReviewAlone(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	h.svc.Features = onFlags{}
+	h.svc.Features, h.svc.Prices = onFlags{}, fakePrices{"BTC-USDT": decimal.NewFromInt(60_000)}
 	h.admin(t, "fin@example.com", domain.RoleFinance)
 	fin := h.login(t, "fin@example.com")
-	if _, err := h.svc.ReviewWithdrawal(ctx, fin, "w1", true, "looks fine"); err != nil || h.wallet.soleMax.String() != "100000" {
+	if _, err := h.svc.ReviewWithdrawal(ctx, fin, "", "w1", true, "looks fine"); err != nil || h.wallet.soleMax.String() != "100000" {
 		t.Fatalf("single-person mode: %v, sole max %s", err, h.wallet.soleMax)
 	}
-	if _, err := h.svc.ReviewWithdrawal(ctx, fin, "w1", false, "odd address"); err != nil || !h.wallet.soleMax.IsZero() {
+	if _, err := h.svc.ReviewWithdrawal(ctx, fin, "", "w2", false, "odd address"); err != nil || !h.wallet.soleMax.IsZero() {
 		t.Fatalf("a rejection: %v, sole max %s", err, h.wallet.soleMax)
 	}
+	// Worth more than the limit at the current price, or of no fresh price: the approval counts, not alone.
+	h.wallet.withdrawals = map[string]reviewedWithdrawal{
+		"big":   {Asset: "BTC", Amount: "2", Status: "PENDING_REVIEW"},
+		"odd":   {Asset: "XYZ", Amount: "1", Status: "PENDING_REVIEW"},
+		"small": {Asset: "BTC", Amount: "1", Status: "PENDING_REVIEW"},
+	}
+	for id, sole := range map[string]string{"big": "0", "odd": "0", "small": "100000"} {
+		if _, err := h.svc.ReviewWithdrawal(ctx, fin, "", id, true, "looks fine"); err != nil || h.wallet.soleMax.String() != sole {
+			t.Fatalf("%s: %v, sole max %s", id, err, h.wallet.soleMax)
+		}
+	}
 	h.svc.Features = onFlags{flags.KeyTwoPerson: true}
-	if _, err := h.svc.ReviewWithdrawal(ctx, fin, "w1", true, "looks fine"); err != nil || !h.wallet.soleMax.IsZero() {
+	if _, err := h.svc.ReviewWithdrawal(ctx, fin, "", "w3", true, "looks fine"); err != nil || !h.wallet.soleMax.IsZero() {
 		t.Fatalf("two-person mode: %v, sole max %s", err, h.wallet.soleMax)
+	}
+
+	// The same review again with its key answers with the withdrawal as it left it; without the key the
+	// wallet refuses a second approval by the same reviewer; the key with another review is refused.
+	first, err := h.svc.ReviewWithdrawal(ctx, fin, "review-w4", "w4", true, "looks fine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := h.svc.ReviewWithdrawal(ctx, fin, "review-w4", "w4", true, "looks fine")
+	if err != nil || string(again) != string(first) {
+		t.Fatalf("repeated: %s %v (first %s)", again, err, first)
+	}
+	if _, err := h.svc.ReviewWithdrawal(ctx, fin, "", "w4", true, "looks fine"); code(err) != apperr.CodeConflict {
+		t.Fatalf("approved twice: %v", err)
+	}
+	if _, err := h.svc.ReviewWithdrawal(ctx, fin, "review-w4", "w5", true, "looks fine"); code(err) != apperr.CodeIdempotencyConflict {
+		t.Fatalf("the key with another withdrawal: %v", err)
+	}
+	if _, err := h.svc.ReviewWithdrawal(ctx, fin, "reject-w6", "w6", false, "odd address"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := h.svc.ReviewWithdrawal(ctx, fin, "reject-w6", "w6", false, "odd address"); err != nil || !strings.Contains(string(got), "REJECTED") {
+		t.Fatalf("a rejection repeated: %s %v", got, err)
 	}
 }
 
@@ -221,13 +260,13 @@ func TestReviewBatch(t *testing.T) {
 	h.admin(t, "fin@example.com", domain.RoleFinance)
 	h.admin(t, "ops@example.com", domain.RoleOperator)
 	fin, ops := h.login(t, "fin@example.com"), h.login(t, "ops@example.com")
-	if _, err := h.svc.ReviewBatch(ctx, ops, []string{"w1"}, true, "low risk batch"); code(err) != "ADMIN_FORBIDDEN" {
+	if _, err := h.svc.ReviewBatch(ctx, ops, "", []string{"w1"}, true, "low risk batch"); code(err) != "ADMIN_FORBIDDEN" {
 		t.Fatalf("an operator reviews: %v", err)
 	}
-	if _, err := h.svc.ReviewBatch(ctx, fin, nil, true, "low risk batch"); code(err) != apperr.CodeInvalidArgument {
+	if _, err := h.svc.ReviewBatch(ctx, fin, "", nil, true, "low risk batch"); code(err) != apperr.CodeInvalidArgument {
 		t.Fatalf("an empty batch: %v", err)
 	}
-	got, err := h.svc.ReviewBatch(ctx, fin, []string{"w1", "busy", "w2", "w1"}, true, "low risk batch")
+	got, err := h.svc.ReviewBatch(ctx, fin, "", []string{"w1", "busy", "w2", "w1"}, true, "low risk batch")
 	if err != nil || len(got) != 3 || !got[0].OK || got[0].Status != "APPROVED" || got[1].OK || got[1].Code != apperr.CodeConflict || !got[2].OK {
 		t.Fatalf("batch %+v %v", got, err)
 	}

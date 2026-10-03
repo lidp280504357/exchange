@@ -325,4 +325,23 @@ func TestBroadcastsReachEveryoneOnceInTheirLanguage(t *testing.T) {
 	if err != nil || len(list) != 1 || list[0].ID != br.ID || next == "" {
 		t.Fatalf("list %+v %q %v", list, next, err)
 	}
+
+	// Under the console's ID: sent again it is the same message; another message under it is refused.
+	keyed := msg
+	keyed.ID = uuid.Must(uuid.NewV7()).String()
+	first, err := b.Send(ctx, keyed, "ops@example.com")
+	if err != nil || first.ID != keyed.ID {
+		t.Fatalf("under its ID %+v %v", first, err)
+	}
+	if again, err := b.Send(ctx, keyed, "ops@example.com"); err != nil || again.ID != keyed.ID || len(b.Store.(*memBroadcasts).list) != 3 {
+		t.Fatalf("sent again %+v %v", again, err)
+	}
+	other := keyed
+	other.Link = "/markets"
+	if _, err := b.Send(ctx, other, "ops@example.com"); !apperr.Is(err, apperr.CodeIdempotencyConflict) {
+		t.Fatalf("another message under the ID: %v", err)
+	}
+	if _, err := b.Send(ctx, BroadcastInput{ID: "nope", Audience: "ALL", Title: msg.Title, Body: msg.Body}, "ops@example.com"); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("a bad ID: %v", err)
+	}
 }

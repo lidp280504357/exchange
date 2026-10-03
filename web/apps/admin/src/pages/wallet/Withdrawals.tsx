@@ -4,7 +4,7 @@ import { Button, ConfirmDialog, toast, type RowSelectionState } from "@exchange/
 import { useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { errorToast } from "../../kit/actions";
+import { errorToast, useOperationKey } from "../../kit/actions";
 import { useEnum } from "../../kit/enums";
 import { ALL, FilterBar, useFilters } from "../../kit/filters";
 import { NewerBar, useNewer } from "../../kit/lists";
@@ -111,12 +111,20 @@ export default function Withdrawals({ admin }: { admin: Admin }) {
 function BatchBar({ chosen, onLowRisk, onClear, listKey }: { chosen: Withdrawal[]; onLowRisk: () => void; onClear: () => void; listKey: QueryKey }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const [approve, setApprove] = useState<boolean | null>(null);
+  const op = useOperationKey();
+  const [approve, setApproveState] = useState<boolean | null>(null);
+  const setApprove = (a: boolean | null) => {
+    if (a === null) op.reset();
+    setApproveState(a);
+  };
   const value = chosen.reduce((sum, w) => (w.value_usdt && dec.isDecimal(w.value_usdt) ? dec.add(sum, w.value_usdt) : sum), "0");
   const run = async (reason: string) => {
     try {
       const res = adminData(
-        await adminApi.POST("/admin/v1/withdrawals/review-batch", { body: { ids: chosen.map((w) => w.id), approve: approve === true, reason } }),
+        await adminApi.POST("/admin/v1/withdrawals/review-batch", {
+          params: { header: { "Idempotency-Key": op.get() } },
+          body: { ids: chosen.map((w) => w.id), approve: approve === true, reason },
+        }),
       );
       const failed = res.results.filter((r) => !r.ok);
       const ok = res.results.length - failed.length;
@@ -129,6 +137,7 @@ function BatchBar({ chosen, onLowRisk, onClear, listKey }: { chosen: Withdrawal[
       setApprove(null);
       onClear();
     } catch (err) {
+      op.failed(err);
       errorToast(err);
     } finally {
       void qc.invalidateQueries({ queryKey: listKey });

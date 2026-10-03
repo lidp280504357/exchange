@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -37,7 +38,9 @@ func (houseCatalog) List(context.Context) (json.RawMessage, error) {
 
 type housePrices ports.Prices
 
-func (p housePrices) Prices(context.Context) (ports.Prices, error) { return ports.Prices(p), nil }
+func (p housePrices) Prices(context.Context, time.Duration) (ports.Prices, error) {
+	return ports.Prices(p), nil
+}
 
 type houseTrades []ports.HousePair
 

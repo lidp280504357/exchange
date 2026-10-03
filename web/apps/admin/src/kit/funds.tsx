@@ -4,7 +4,7 @@ import { ConfirmDialog, toast } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { settingsKey, todoKey } from "../live";
-import { errorToast } from "./actions";
+import { errorToast, useOperationKey } from "./actions";
 
 // Fund operations (manual adjustments, insurance fund contributions,
 // deposit backfills) end
@@ -51,7 +51,8 @@ export type FundActionProps = {
   confirmWord: string;
   confirmText?: ReactNode;
   danger?: boolean;
-  run: (reason: string) => Promise<Approval>;
+  /** The call, with the reason given and the operation's Idempotency-Key (the same for each retry until the outcome is known). */
+  run: (reason: string, key: string) => Promise<Approval>;
   onDone?: (a: Approval) => void;
   children?: ReactNode;
 };
@@ -59,7 +60,12 @@ export type FundActionProps = {
 /** FundAction confirms a fund operation (reason and confirmation word) and announces its outcome. */
 export function FundAction({ trigger, title, description, target, confirmWord, confirmText, danger, run, onDone, children }: FundActionProps) {
   const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
+  const op = useOperationKey();
+  const [open, setOpenState] = useState(false);
+  const setOpen = (o: boolean) => {
+    if (!o) op.reset();
+    setOpenState(o);
+  };
   return (
     <>
       {trigger(() => setOpen(true))}
@@ -74,11 +80,12 @@ export function FundAction({ trigger, title, description, target, confirmWord, c
         danger={danger}
         onConfirm={async (reason) => {
           try {
-            const a = await run(reason);
+            const a = await run(reason, op.get());
             announce(a);
             setOpen(false);
             onDone?.(a);
           } catch (err) {
+            op.failed(err);
             fundError(err);
           } finally {
             for (const key of [["admin", "approvals"], todoKey, settingsKey, ["admin", "user"], ["admin", "derivatives"], ["admin", "deposits"]]) {

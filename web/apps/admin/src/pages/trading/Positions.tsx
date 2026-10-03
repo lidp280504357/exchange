@@ -146,10 +146,10 @@ export default function Positions({ admin }: { admin: Admin }) {
             </span>
           }
           confirmWord={closing.symbol.split("-")[0] ?? closing.symbol}
-          run={async (reason) =>
+          run={async (reason, key) =>
             adminData(
               await adminApi.POST("/admin/v1/users/{id}/positions/close", {
-                params: { path: { id: closing.user_id } },
+                params: { path: { id: closing.user_id }, header: { "Idempotency-Key": key } },
                 body: { symbol: closing.symbol, position_side: closing.position_side, reason },
               }),
             )

@@ -20,24 +20,31 @@ import (
 )
 
 // Prices returns the last price of every listed symbol that has one
-// (market-data-service's tickers).
-func (m Market) Prices(ctx context.Context) (ports.Prices, error) {
+// (market-data-service's tickers); a positive maxAge leaves out those
+// updated longer ago (a reference ticker is as of its source, the
+// platform's own as of the answer).
+func (m Market) Prices(ctx context.Context, maxAge time.Duration) (ports.Prices, error) {
 	raw, err := m.do(ctx, http.MethodGet, m.Base+"/v1/market/tickers", nil, nil)
 	if err != nil {
 		return nil, err
 	}
 	var body struct {
 		Tickers []struct {
-			Symbol string  `json:"symbol"`
-			Last   *string `json:"last"`
+			Symbol    string    `json:"symbol"`
+			Last      *string   `json:"last"`
+			UpdatedAt time.Time `json:"updated_at"`
 		} `json:"tickers"`
 	}
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return nil, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "market-data answered badly")
 	}
+	now := time.Now()
+	if m.Now != nil {
+		now = m.Now()
+	}
 	out := ports.Prices{}
 	for _, t := range body.Tickers {
-		if t.Last == nil {
+		if t.Last == nil || (maxAge > 0 && now.Sub(t.UpdatedAt) > maxAge) {
 			continue
 		}
 		if p, err := decimal.NewFromString(*t.Last); err == nil && p.IsPositive() {

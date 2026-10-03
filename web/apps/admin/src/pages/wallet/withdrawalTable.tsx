@@ -153,8 +153,13 @@ export function WithdrawalDrawer({ admin, w: row, onClose }: { admin: Admin; w: 
   const settings = useConsoleSettings().data;
   const alone =
     !!settings && !settings.two_person_approval && !!w.value_usdt && dec.isDecimal(w.value_usdt) && dec.lte(w.value_usdt, settings.withdrawal_max_usdt);
-  const review = (approve: boolean) => async (reason: string) =>
-    adminData(await adminApi.POST("/admin/v1/withdrawals/{id}/review", { params: { path: { id: w.id } }, body: { approve, reason } }));
+  const review = (approve: boolean) => async (reason: string, key: string) =>
+    adminData(
+      await adminApi.POST("/admin/v1/withdrawals/{id}/review", {
+        params: { path: { id: w.id }, header: { "Idempotency-Key": key } },
+        body: { approve, reason },
+      }),
+    );
   const hold = (on: boolean) => async (note: string) =>
     adminData(await adminApi.POST("/admin/v1/withdrawals/{id}/hold", { params: { path: { id: w.id } }, body: { hold: on, note } }));
   const held = !!w.held_at;

@@ -229,7 +229,7 @@ func (h *Handler) simMint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a, err := h.Svc.MintSimBots(r.Context(), principal(r), application.SimMintInput{
-		Asset: body.Asset, Amount: amount, Role: body.Role, Reason: body.Reason, Reference: body.Reference,
+		Asset: body.Asset, Amount: amount, Role: body.Role, Reason: body.Reason, Reference: body.Reference, Key: idemKey(r),
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)

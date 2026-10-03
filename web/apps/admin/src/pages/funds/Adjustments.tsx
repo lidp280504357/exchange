@@ -169,10 +169,10 @@ export function AdjustForm({ userId, onUser, onDone }: { userId: string; onUser?
           </span>
         }
         confirmWord={lastFour(userId)}
-        run={async (reason) =>
+        run={async (reason, key) =>
           adminData(
             await adminApi.POST("/admin/v1/users/{id}/adjustments", {
-              params: { path: { id: userId } },
+              params: { path: { id: userId }, header: { "Idempotency-Key": key } },
               body: {
                 account_type: account, asset: asset.trim().toUpperCase(), amount: signed, reason,
                 ...(reference.trim() ? { reference: reference.trim() } : {}),

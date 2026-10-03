@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -348,23 +349,98 @@ func pageLimit(n int) int {
 // ReviewWithdrawal approves or rejects a withdrawal in review; the wallet
 // records it with this administrator as the reviewer and audits it. In
 // single-person mode one approval completes a withdrawal worth at most
-// the settings' WithdrawalMax, however many reviewers it needs.
-func (s *Service) ReviewWithdrawal(ctx context.Context, p Principal, id string, approve bool, reason string) ([]byte, error) {
+// the settings' WithdrawalMax at the current price, however many
+// reviewers it needs. The same request again with the same key answers
+// with the withdrawal as the review left it.
+func (s *Service) ReviewWithdrawal(ctx context.Context, p Principal, key, id string, approve bool, reason string) ([]byte, error) {
 	if err := p.require(domain.PermWithdrawalsEdit); err != nil {
 		return nil, err
 	}
 	if err := needReason(reason); err != nil {
 		return nil, err
 	}
-	var soleMax decimal.Decimal
-	if approve && !s.TwoPerson() {
-		set, err := s.settings(ctx, s.Store.Read())
+	c, err := s.claimKey(ctx, p, key, scopeReview, fingerprint(id, strconv.FormatBool(approve), strings.TrimSpace(reason)))
+	if err != nil {
+		return nil, err
+	}
+	limit, err := s.soleLimit(ctx, approve)
+	if err != nil {
+		return nil, err
+	}
+	return s.review(ctx, p, id, approve, reason, limit, s.valuer(ctx, priceMaxAge), !c.Fresh)
+}
+
+// soleLimit is how much one approval may complete alone: the settings'
+// WithdrawalMax in single-person mode, nothing otherwise.
+func (s *Service) soleLimit(ctx context.Context, approve bool) (decimal.Decimal, error) {
+	if !approve || s.TwoPerson() {
+		return decimal.Zero, nil
+	}
+	set, err := s.settings(ctx, s.Store.Read())
+	return set.WithdrawalMax, err
+}
+
+// reviewedWithdrawal is what a review needs of a withdrawal.
+type reviewedWithdrawal struct {
+	Asset        string   `json:"asset"`
+	Amount       string   `json:"amount"`
+	Status       string   `json:"status"`
+	Approvals    []string `json:"approvals"`
+	RejectReason *string  `json:"reject_reason"`
+}
+
+// review reviews one withdrawal. An approval completes it alone only
+// within limit at the current price (no fresh price: not alone), as the
+// worth the wallet compares is the request's (C5.5 ⑥). A repeated request
+// whose first one took effect answers with the withdrawal as it stands.
+func (s *Service) review(ctx context.Context, p Principal, id string, approve bool, reason string, limit decimal.Decimal,
+	value func(string, decimal.Decimal) (decimal.Decimal, bool), repeated bool,
+) ([]byte, error) {
+	soleMax := decimal.Zero
+	if limit.IsPositive() {
+		w, _, err := s.withdrawal(ctx, id)
 		if err != nil {
 			return nil, err
 		}
-		soleMax = set.WithdrawalMax
+		if amount, err := decimal.NewFromString(w.Amount); err == nil {
+			if worth, ok := value(w.Asset, amount); ok && !worth.GreaterThan(limit) {
+				soleMax = limit
+			}
+		}
 	}
-	return s.Wallet.Review(ctx, id, approve, p.Admin.Email, reason, soleMax)
+	raw, err := s.Wallet.Review(ctx, id, approve, p.Admin.Email, reason, soleMax)
+	if err == nil || !repeated || apperr.From(err).Kind != apperr.KindConflict {
+		return raw, err
+	}
+	w, current, gerr := s.withdrawal(ctx, id)
+	if gerr != nil {
+		return nil, err
+	}
+	took := slices.Contains(w.Approvals, p.Admin.Email)
+	if !approve {
+		took = w.Status == "REJECTED" && w.RejectReason != nil && *w.RejectReason == "REVIEW: "+strings.TrimSpace(reason)
+	}
+	if !took {
+		return nil, err
+	}
+	return current, nil
+}
+
+// withdrawal reads a withdrawal through its detail, also as the wallet
+// renders it.
+func (s *Service) withdrawal(ctx context.Context, id string) (reviewedWithdrawal, json.RawMessage, error) {
+	raw, err := s.Wallet.Detail(ctx, id)
+	if err != nil {
+		return reviewedWithdrawal{}, nil, err
+	}
+	var d struct {
+		Withdrawal json.RawMessage `json:"withdrawal"`
+	}
+	var w reviewedWithdrawal
+	if err := json.Unmarshal(raw, &d); err != nil || json.Unmarshal(d.Withdrawal, &w) != nil {
+		return reviewedWithdrawal{}, nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "wallet-service answered badly")
+	}
+	return w, d.Withdrawal, nil
 }
 
 // MaxBatch bounds a batch review.
@@ -382,8 +458,9 @@ type BatchResult struct {
 
 // ReviewBatch approves or rejects withdrawals one by one with one reason
 // (each reviewed, and audited by the wallet, on its own); a failure leaves
-// the others decided.
-func (s *Service) ReviewBatch(ctx context.Context, p Principal, ids []string, approve bool, reason string) ([]BatchResult, error) {
+// the others decided. The same batch again with the same key answers for
+// the withdrawals it reviewed as they stand.
+func (s *Service) ReviewBatch(ctx context.Context, p Principal, key string, ids []string, approve bool, reason string) ([]BatchResult, error) {
 	if err := p.require(domain.PermWithdrawalsEdit); err != nil {
 		return nil, err
 	}
@@ -393,6 +470,15 @@ func (s *Service) ReviewBatch(ctx context.Context, p Principal, ids []string, ap
 	if len(ids) == 0 || len(ids) > MaxBatch {
 		return nil, apperr.Invalid(fmt.Sprintf("a batch has 1 to %d withdrawals", MaxBatch))
 	}
+	c, err := s.claimKey(ctx, p, key, scopeBatch, fingerprint(append([]string{strconv.FormatBool(approve), strings.TrimSpace(reason)}, ids...)...))
+	if err != nil {
+		return nil, err
+	}
+	limit, err := s.soleLimit(ctx, approve)
+	if err != nil {
+		return nil, err
+	}
+	value := s.valuer(ctx, priceMaxAge)
 	seen := map[string]bool{}
 	out := make([]BatchResult, 0, len(ids))
 	for _, id := range ids {
@@ -400,7 +486,7 @@ func (s *Service) ReviewBatch(ctx context.Context, p Principal, ids []string, ap
 			continue
 		}
 		seen[id] = true
-		raw, err := s.ReviewWithdrawal(ctx, p, id, approve, reason)
+		raw, err := s.review(ctx, p, id, approve, reason, limit, value, !c.Fresh)
 		if err != nil {
 			e := apperr.From(err)
 			out = append(out, BatchResult{ID: id, Code: e.Code, Message: e.Message})

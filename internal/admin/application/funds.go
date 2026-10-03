@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/flags"
 	"github.com/lidp280504357/exchange/internal/platform/pagecursor"
+	"github.com/lidp280504357/exchange/internal/platform/pg"
 )
 
 // Fund operations (requirements §5.12, design 2026-10-02 §2): manual
@@ -99,6 +101,22 @@ type FundRequest struct {
 	// Direct carries it out at once when single-person mode and its limits
 	// allow; without it a second administrator always decides.
 	Direct bool
+	// Key is the request's Idempotency-Key ("" for none): the same request
+	// again returns its operation, finishing one whose attempt did not.
+	Key string
+}
+
+// fingerprint identifies a request as the administrator made it (a
+// mint's shares come from the bots of the moment, so they are left out).
+func (in *FundRequest) fingerprint() []byte {
+	fields := []string{
+		in.Kind, in.UserID, in.AccountType, in.Asset, in.Amount.String(), strings.TrimSpace(in.Reason), in.Reference, in.Role,
+		strconv.FormatBool(in.Direct),
+	}
+	if b := in.Backfill; b != nil {
+		fields = append(fields, b.Network, b.TradeID, b.Address, b.TxHash)
+	}
+	return fingerprint(fields...)
 }
 
 func (in *FundRequest) validate() error {
@@ -196,8 +214,10 @@ func (s *Service) RequestInsuranceFunding(ctx context.Context, p Principal, asse
 // the limits when asked to (Direct), and otherwise records it for a second
 // administrator. The answer is the operation: EXECUTED with its journal,
 // FAILED with the ledger's refusal, or PENDING with the reason it waits.
-// When the ledger does not answer, the operation stays PENDING (single
-// mode: its requester may finish it later) and the error names it.
+// When the ledger does not answer, the operation stays PENDING, attempted
+// (single mode: its requester finishes it later, or repeats the request)
+// and the error names it. The same request with the same key returns its
+// operation.
 func (s *Service) SubmitFunds(ctx context.Context, p Principal, in FundRequest) (domain.Approval, error) {
 	perm := domain.PermAdjustRequest
 	if in.Kind == domain.KindDepositBackfill {
@@ -208,6 +228,19 @@ func (s *Service) SubmitFunds(ctx context.Context, p Principal, in FundRequest) 
 	}
 	if err := in.validate(); err != nil {
 		return domain.Approval{}, err
+	}
+	c, err := s.claimKey(ctx, p, in.Key, scopeFunds, in.fingerprint())
+	if err != nil {
+		return domain.Approval{}, err
+	}
+	if !c.Fresh {
+		// Made already, unless the first request stopped before it was recorded.
+		if a, err := s.Store.Read().Approvals().Get(ctx, c.Ref); err != nil || a != nil {
+			if err != nil {
+				return domain.Approval{}, err
+			}
+			return s.again(ctx, p, *a)
+		}
 	}
 	var check ports.ManualCheck
 	if in.Kind == domain.KindDepositBackfill {
@@ -220,7 +253,7 @@ func (s *Service) SubmitFunds(ctx context.Context, p Principal, in FundRequest) 
 	}
 	now := s.Now()
 	a := domain.Approval{
-		ID: uuid.Must(uuid.NewV7()).String(), Kind: in.Kind, Reason: strings.TrimSpace(in.Reason),
+		ID: c.Ref, Kind: in.Kind, Reason: strings.TrimSpace(in.Reason),
 		Payload: map[string]string{"asset": in.Asset, "amount": in.Amount.String()},
 		Status:  domain.ApprovalPending, RequestedBy: p.Admin.ID, CreatedAt: now, Mode: domain.ModeTwoPerson,
 		RequestedByEmail: p.Admin.Email,
@@ -268,7 +301,7 @@ func (s *Service) SubmitFunds(ctx context.Context, p Principal, in FundRequest) 
 		}
 	}
 	actions := fundActions[in.Kind]
-	err := s.Store.Tx(ctx, func(r ports.Repos) error {
+	err = s.Store.Tx(ctx, func(r ports.Repos) error {
 		if a.Escalation == "" {
 			// One operation at a time per administrator, so two cannot both fit the day's limit.
 			if _, err := r.Admins().GetForUpdate(ctx, p.Admin.ID); err != nil {
@@ -281,7 +314,8 @@ func (s *Service) SubmitFunds(ctx context.Context, p Principal, in FundRequest) 
 			if used.Add(*a.ValueUSDT).GreaterThan(limits.DailyMax) {
 				a.Escalation = domain.EscalationDailyMax
 			} else {
-				a.Mode = domain.ModeSingle
+				// Carried out at once: attempted from now on, as it may book before its outcome is known.
+				a.Mode, a.AttemptedAt = domain.ModeSingle, now
 			}
 		}
 		if err := r.Approvals().Insert(ctx, a); err != nil {
@@ -291,17 +325,54 @@ func (s *Service) SubmitFunds(ctx context.Context, p Principal, in FundRequest) 
 			Target: fundTarget(a), Action: actions.requested, Actor: p.Admin.Email, Reason: a.Reason, Details: fundDetails(a),
 		}, p.Admin.Email)
 	})
+	if _, dup := pg.UniqueViolation(err); dup {
+		// The same request, concurrently, recorded it first.
+		if cur, gerr := s.Store.Read().Approvals().Get(ctx, a.ID); gerr == nil && cur != nil {
+			return s.again(ctx, p, *cur)
+		}
+	}
 	if err != nil || a.Mode != domain.ModeSingle {
 		return a, err
 	}
+	return s.carryOut(ctx, p, a)
+}
+
+// again answers a repeated request with its operation: a single-person
+// operation whose attempt did not finish is finished (its requester's own
+// key, so its requester), the others are returned as they stand.
+func (s *Service) again(ctx context.Context, p Principal, a domain.Approval) (domain.Approval, error) {
+	if a.Status == domain.ApprovalPending && a.Mode == domain.ModeSingle && a.RequestedBy == p.Admin.ID && !a.AttemptedAt.IsZero() {
+		return s.carryOut(ctx, p, a)
+	}
+	return a, nil
+}
+
+// carryOut carries out a single-person operation and records its outcome.
+func (s *Service) carryOut(ctx context.Context, p Principal, a domain.Approval) (domain.Approval, error) {
+	actions := fundActions[a.Kind]
 	if err := s.execute(ctx, &a, p); err != nil {
-		var e *apperr.Error
-		if errors.As(err, &e) {
-			err = e.WithDetail("approval_id", a.ID)
-		}
-		return domain.Approval{}, err
+		return domain.Approval{}, s.unfinished(ctx, a, err)
 	}
 	return s.record(ctx, a, p, actions.executed, actions.failed)
+}
+
+// unfinished records an attempt to carry out a fund operation that did not
+// finish: the operation stays pending, attempted, with how the attempt
+// ended, and the error names it (C5.5 ⑥). An error of unknown kind is an
+// unknown outcome.
+func (s *Service) unfinished(ctx context.Context, a domain.Approval, err error) error {
+	e := apperr.From(err)
+	if e.Kind == apperr.KindInternal {
+		e = apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "the outcome is unknown")
+	}
+	note := e.Code + ": " + e.Message
+	if booked, ok := e.Details["booked"]; ok {
+		note = fmt.Sprintf("booked %v of %v; %v: %s", booked, e.Details["of"], e.Details["bot"], note)
+	}
+	if merr := s.Store.Tx(ctx, func(r ports.Repos) error { return r.Approvals().MarkAttempted(ctx, a.ID, s.Now(), note) }); merr != nil {
+		s.Log.WarnContext(ctx, "fund operation: record an unfinished attempt", "approval_id", a.ID, "error", merr)
+	}
+	return e.WithDetail("approval_id", a.ID)
 }
 
 // record stores the outcome of a single-person operation with its audit
@@ -383,26 +454,18 @@ func fundDetails(a domain.Approval) string {
 		a.ID, account, a.Payload["asset"], a.Payload["amount"], a.Mode, a.Escalation, value, a.Status, a.Result)
 }
 
+// priceMaxAge is how fresh a price values an operation against the
+// single-person limits: an older one counts as none, so a second
+// administrator decides (C5.5 ⑥).
+const priceMaxAge = time.Minute
+
 // worth values an amount of an asset in USDT at its USDT pair's last
-// price; false without one.
+// price; false without a fresh one.
 func (s *Service) worth(ctx context.Context, asset string, amount decimal.Decimal) (decimal.Decimal, bool) {
-	amount = amount.Abs()
 	if asset == "USDT" {
-		return amount, true
+		return amount.Abs(), true
 	}
-	if s.Prices == nil {
-		return decimal.Zero, false
-	}
-	prices, err := s.Prices.Prices(ctx)
-	if err != nil {
-		s.Log.WarnContext(ctx, "fund operation: no prices", "error", err)
-		return decimal.Zero, false
-	}
-	px, ok := prices[asset+"-USDT"]
-	if !ok {
-		return decimal.Zero, false
-	}
-	return amount.Mul(px).Round(2), true
+	return s.valuer(ctx, priceMaxAge)(asset, amount.Abs())
 }
 
 // Approvals returns a page of fund operations in a status ("": all),
@@ -431,7 +494,10 @@ func (s *Service) Approvals(ctx context.Context, p Principal, status, cursor str
 // operation: another administrator's request, the decider's own
 // single-person operation whose outcome was unknown, or (rejecting) the
 // decider's own request. The row stays locked while the ledger books it,
-// so a second decision waits and then finds it decided.
+// so a second decision waits and then finds it decided. A fund operation
+// is marked attempted before it is carried out; when the outcome is
+// unknown it stays pending, to be finished, never rejected (C5.5 ⑥). The
+// decider's decision repeated returns the operation as it left it.
 func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, approve bool, reason string) (domain.Approval, error) {
 	// A fund operation needs ledger.adjust.approve, a simulated market's
 	// change sim.control (checked once the request is read).
@@ -444,7 +510,14 @@ func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, ap
 	if _, err := uuid.Parse(id); err != nil {
 		return domain.Approval{}, apperr.NotFound("no such request")
 	}
+	if approve {
+		if err := s.beginAttempt(ctx, p, id); err != nil {
+			return domain.Approval{}, err
+		}
+	}
 	var a domain.Approval
+	var unknown error
+	repeated := false
 	err := s.Store.Tx(ctx, func(r ports.Repos) error {
 		cur, err := r.Approvals().GetForUpdate(ctx, id)
 		if err != nil {
@@ -459,6 +532,10 @@ func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, ap
 		}
 		if err := p.require(perm); err != nil {
 			return err
+		}
+		if decidedAlike(*cur, p.Admin.ID, approve) {
+			a, repeated = *cur, true
+			return nil
 		}
 		if err := cur.Decide(p.Admin.ID, approve); err != nil {
 			return err
@@ -480,7 +557,11 @@ func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, ap
 		default:
 			action = actions.approved
 			if err := s.execute(ctx, &a, p); err != nil {
-				return err
+				if simKind(a.Kind) {
+					return err // a simulated market's change stays as it was
+				}
+				unknown = err // still pending, attempted since beginAttempt
+				return nil
 			}
 		}
 		if err := r.Approvals().Update(ctx, a); err != nil {
@@ -491,13 +572,48 @@ func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, ap
 			Details: fmt.Sprintf(`{"status":%q,"result":%q,"mode":%q}`, a.Status, a.Result, a.Mode),
 		}, p.Admin.Email)
 	})
-	if err != nil {
+	switch {
+	case err != nil:
+		var e *apperr.Error
+		if errors.As(err, &e) && (e.Kind == apperr.KindUnavailable || e.Kind == apperr.KindInternal) {
+			return domain.Approval{}, e.WithDetail("approval_id", id)
+		}
 		return domain.Approval{}, err
+	case unknown != nil:
+		return domain.Approval{}, s.unfinished(ctx, a, unknown)
+	case repeated:
+		return a, nil
 	}
 	if got, err := s.Store.Read().Approvals().Get(ctx, a.ID); err == nil && got != nil {
 		return *got, nil
 	}
 	return a, nil
+}
+
+// beginAttempt marks a pending fund operation attempted before its
+// decider carries it out, when the decision would: the attempt may book
+// before its outcome is known, and from then on the operation is
+// finished, never rejected (C5.5 ⑥). The decision itself checks again.
+func (s *Service) beginAttempt(ctx context.Context, p Principal, id string) error {
+	return s.Store.Tx(ctx, func(r ports.Repos) error {
+		cur, err := r.Approvals().GetForUpdate(ctx, id)
+		if err != nil || cur == nil || simKind(cur.Kind) || !cur.AttemptedAt.IsZero() {
+			return err
+		}
+		if p.require(domain.PermAdjustApprove) != nil || cur.Decide(p.Admin.ID, true) != nil {
+			return nil
+		}
+		return r.Approvals().MarkAttempted(ctx, id, s.Now(), "")
+	})
+}
+
+// decidedAlike reports whether the decider took this decision already: a
+// repeated request finds the operation as the decision left it.
+func decidedAlike(a domain.Approval, decider string, approve bool) bool {
+	if a.Status == domain.ApprovalPending || a.DecidedBy != decider {
+		return false
+	}
+	return approve == (a.Status != domain.ApprovalRejected)
 }
 
 // execute books an operation. An error means the outcome is unknown: it

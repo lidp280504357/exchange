@@ -50,6 +50,7 @@ func (r repos) Settings() ports.SettingsRepo  { return settings(r) }
 func (r repos) Notes() ports.NoteRepo         { return notes(r) }
 func (r repos) Tags() ports.TagRepo           { return tags(r) }
 func (r repos) Changes() ports.ChangeRepo     { return changes(r) }
+func (r repos) Keys() ports.IdempotencyRepo   { return keys(r) }
 
 func (r repos) Audit(ctx context.Context, msg proto.Message, actor string) error {
 	env, err := r.events.New(ctx, msg, "actor", actor)
@@ -216,22 +217,22 @@ func (r sessions) Live(ctx context.Context, adminID string, now time.Time) ([]do
 type approvals repos
 
 const approvalColumns = `id, kind, payload, reason, status, requested_by, decided_by, result, created_at, decided_at, mode,
-	value_usdt, escalation, journal_id`
+	value_usdt, escalation, journal_id, attempted_at`
 
 // approvalSelect reads approvals with their administrators' emails.
 const approvalSelect = `SELECT a.id, a.kind, a.payload, a.reason, a.status, a.requested_by, a.decided_by, a.result, a.created_at,
-	a.decided_at, a.mode, a.value_usdt, a.escalation, a.journal_id, coalesce(r.email, ''), coalesce(d.email, '')
+	a.decided_at, a.mode, a.value_usdt, a.escalation, a.journal_id, a.attempted_at, coalesce(r.email, ''), coalesce(d.email, '')
 	FROM approvals a LEFT JOIN admins r ON r.id = a.requested_by LEFT JOIN admins d ON d.id = a.decided_by`
 
 func scanApproval(row pgx.Row, emails bool) (domain.Approval, error) {
 	var a domain.Approval
 	var payload []byte
 	var decidedBy *string
-	var decided *time.Time
+	var decided, attempted *time.Time
 	var value decimal.NullDecimal
 	dest := []any{
 		&a.ID, &a.Kind, &payload, &a.Reason, &a.Status, &a.RequestedBy, &decidedBy, &a.Result, &a.CreatedAt, &decided, &a.Mode, &value,
-		&a.Escalation, &a.JournalID,
+		&a.Escalation, &a.JournalID, &attempted,
 	}
 	if emails {
 		dest = append(dest, &a.RequestedByEmail, &a.DecidedByEmail)
@@ -248,7 +249,7 @@ func scanApproval(row pgx.Row, emails bool) (domain.Approval, error) {
 	if value.Valid {
 		a.ValueUSDT = &value.Decimal
 	}
-	a.DecidedAt = at(decided)
+	a.DecidedAt, a.AttemptedAt = at(decided), at(attempted)
 	return a, nil
 }
 
@@ -265,9 +266,9 @@ func (r approvals) Insert(ctx context.Context, a domain.Approval) error {
 		value = decimal.NullDecimal{Decimal: *a.ValueUSDT, Valid: true}
 	}
 	_, err = r.q.Exec(ctx, `INSERT INTO approvals (`+approvalColumns+`)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 		a.ID, a.Kind, payload, a.Reason, a.Status, a.RequestedBy, nullable(a.DecidedBy), a.Result, a.CreatedAt, stamp(a.DecidedAt),
-		a.Mode, value, a.Escalation, a.JournalID)
+		a.Mode, value, a.Escalation, a.JournalID, stamp(a.AttemptedAt))
 	if err != nil {
 		return fmt.Errorf("insert approval: %w", err)
 	}
@@ -288,6 +289,44 @@ func (r approvals) Update(ctx context.Context, a domain.Approval) error {
 		return fmt.Errorf("update approval: %w", err)
 	}
 	return nil
+}
+
+func (r approvals) MarkAttempted(ctx context.Context, id string, at time.Time, note string) error {
+	_, err := r.q.Exec(ctx, `UPDATE approvals SET attempted_at = coalesce(attempted_at, $2),
+		result = CASE WHEN $3 = '' THEN result ELSE $3 END WHERE id = $1 AND status = 'PENDING'`, id, at, note)
+	if err != nil {
+		return fmt.Errorf("mark approval attempted: %w", err)
+	}
+	return nil
+}
+
+// keys keeps the Idempotency-Keys in the platform's idempotency_keys
+// table: the ID of what a request made is its response.
+type keys repos
+
+func (r keys) Claim(ctx context.Context, scope, key string, hash []byte, ref string, now time.Time) ([]byte, string, bool, error) {
+	tag, err := r.q.Exec(ctx, `INSERT INTO idempotency_keys (scope, key, request_hash, response, created_at)
+		VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`, scope, key, hash, []byte(ref), now)
+	if err != nil {
+		return nil, "", false, fmt.Errorf("claim idempotency key: %w", err)
+	}
+	if tag.RowsAffected() == 1 {
+		return hash, ref, true, nil
+	}
+	var stored, first []byte
+	if err := r.q.QueryRow(ctx, `SELECT request_hash, coalesce(response, '') FROM idempotency_keys WHERE scope = $1 AND key = $2`, scope, key).
+		Scan(&stored, &first); err != nil {
+		return nil, "", false, fmt.Errorf("read idempotency key: %w", err)
+	}
+	return stored, string(first), false, nil
+}
+
+func (r keys) Purge(ctx context.Context, cutoff time.Time) (int64, error) {
+	tag, err := r.q.Exec(ctx, `DELETE FROM idempotency_keys WHERE created_at < $1`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("purge idempotency keys: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 func (r approvals) one(ctx context.Context, emails bool, sql string, args ...any) (*domain.Approval, error) {

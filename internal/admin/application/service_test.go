@@ -37,13 +37,44 @@ type memStore struct {
 	tags      map[string][]string
 	changes   []domain.InstrumentChange
 	audits    []*auditv1.AdminActionPerformed
+	keys      map[string]memKey
+}
+
+// memKey is a claimed Idempotency-Key.
+type memKey struct {
+	hash []byte
+	ref  string
+	at   time.Time
 }
 
 func newMemStore() *memStore {
 	return &memStore{
 		admins: map[string]domain.Admin{}, sessions: map[string]domain.Session{}, revoked: map[string]bool{},
-		approvals: map[string]domain.Approval{}, tags: map[string][]string{},
+		approvals: map[string]domain.Approval{}, tags: map[string][]string{}, keys: map[string]memKey{},
 	}
+}
+
+func (m *memStore) Keys() ports.IdempotencyRepo { return memKeys{m} }
+
+type memKeys struct{ m *memStore }
+
+func (r memKeys) Claim(_ context.Context, scope, key string, hash []byte, ref string, now time.Time) ([]byte, string, bool, error) {
+	if k, ok := r.m.keys[scope+"\x00"+key]; ok {
+		return k.hash, k.ref, false, nil
+	}
+	r.m.keys[scope+"\x00"+key] = memKey{hash: hash, ref: ref, at: now}
+	return hash, ref, true, nil
+}
+
+func (r memKeys) Purge(_ context.Context, cutoff time.Time) (int64, error) {
+	var n int64
+	for id, k := range r.m.keys {
+		if k.at.Before(cutoff) {
+			delete(r.m.keys, id)
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (m *memStore) Changes() ports.ChangeRepo { return memChanges{m} }
@@ -346,6 +377,21 @@ func (r memApprovals) Get(ctx context.Context, id string) (*domain.Approval, err
 	return r.GetForUpdate(ctx, id)
 }
 
+func (r memApprovals) MarkAttempted(_ context.Context, id string, at time.Time, note string) error {
+	a, ok := r.m.approvals[id]
+	if !ok || a.Status != domain.ApprovalPending {
+		return nil
+	}
+	if a.AttemptedAt.IsZero() {
+		a.AttemptedAt = at
+	}
+	if note != "" {
+		a.Result = note
+	}
+	r.m.approvals[id] = a
+	return nil
+}
+
 func (r memApprovals) SingleUsage(_ context.Context, adminID string, since time.Time) (decimal.Decimal, error) {
 	sum := decimal.Zero
 	for _, a := range r.m.approvals {
@@ -408,6 +454,11 @@ func (l *fakeLedger) Adjust(_ context.Context, key, userID, account, asset strin
 func (l *fakeLedger) PlaceHold(_ context.Context, id, userID, asset string, amount decimal.Decimal, actor, reason string) (ports.Hold, error) {
 	if l.err != nil {
 		return ports.Hold{}, l.err
+	}
+	for _, h := range l.holds {
+		if h.ID == id { // the ledger returns a repeated hold
+			return h, nil
+		}
 	}
 	h := ports.Hold{ID: id, UserID: userID, AccountType: "SPOT", Asset: asset, Amount: amount.String(), Reason: reason, Actor: actor}
 	l.holds = append(l.holds, h)
@@ -552,6 +603,8 @@ type fakeWallet struct {
 	// pending is the review queue's length.
 	pending int
 	err     error
+	// withdrawals are the ones reviewed or set, by ID.
+	withdrawals map[string]reviewedWithdrawal
 }
 
 func (w *fakeWallet) List(context.Context, ports.WithdrawalQuery) (json.RawMessage, error) {
@@ -582,20 +635,41 @@ func (w *fakeWallet) Replay(_ context.Context, _, actor, _ string) (json.RawMess
 	return json.RawMessage(`{}`), nil
 }
 
-func (w *fakeWallet) Review(_ context.Context, id string, approve bool, reviewer, _ string, soleMax decimal.Decimal) (json.RawMessage, error) {
+func (w *fakeWallet) Review(_ context.Context, id string, approve bool, reviewer, reason string, soleMax decimal.Decimal) (json.RawMessage, error) {
 	w.reviewer, w.soleMax = reviewer, soleMax
 	w.reviewed = append(w.reviewed, id)
-	if id == "busy" {
+	d := w.detail(id)
+	switch {
+	case id == "busy" || d.Status != "PENDING_REVIEW":
 		return nil, apperr.New(apperr.KindConflict, apperr.CodeConflict, "the withdrawal is APPROVED, not waiting for review")
+	case approve && slices.Contains(d.Approvals, reviewer):
+		return nil, apperr.New(apperr.KindConflict, apperr.CodeConflict, "each approval must come from another reviewer")
+	case approve:
+		d.Approvals, d.Status = append(d.Approvals, reviewer), "APPROVED"
+	default:
+		reject := "REVIEW: " + reason
+		d.Status, d.RejectReason = "REJECTED", &reject
 	}
-	if approve {
-		return json.RawMessage(`{"status":"APPROVED"}`), nil
+	w.withdrawals[id] = d
+	raw, _ := json.Marshal(d)
+	return raw, nil
+}
+
+// detail is a withdrawal as the wallet keeps it: one of 100 USDT in review
+// unless set.
+func (w *fakeWallet) detail(id string) reviewedWithdrawal {
+	if w.withdrawals == nil {
+		w.withdrawals = map[string]reviewedWithdrawal{}
 	}
-	return json.RawMessage(`{"status":"REJECTED"}`), nil
+	if d, ok := w.withdrawals[id]; ok {
+		return d
+	}
+	return reviewedWithdrawal{Asset: "USDT", Amount: "100", Status: "PENDING_REVIEW", Approvals: []string{}}
 }
 
 func (w *fakeWallet) Detail(_ context.Context, id string) (json.RawMessage, error) {
-	return json.RawMessage(`{"withdrawal":{"id":"` + id + `"}}`), nil
+	raw, _ := json.Marshal(w.detail(id))
+	return json.RawMessage(`{"withdrawal":` + string(raw) + `}`), nil
 }
 
 func (w *fakeWallet) Hold(_ context.Context, id string, hold bool, reviewer, _ string) (json.RawMessage, error) {
@@ -610,6 +684,7 @@ type fakeDeposits struct {
 	booked    []ports.ManualDeposit
 	decided   []string
 	known     map[string]string // trade ID -> deposit ID
+	credited  map[string]string // deposit ID -> who credited it
 }
 
 func (d *fakeDeposits) List(_ context.Context, q ports.DepositReviewQuery) (json.RawMessage, error) {
@@ -625,12 +700,22 @@ func (d *fakeDeposits) List(_ context.Context, q ports.DepositReviewQuery) (json
 }
 
 func (d *fakeDeposits) Get(_ context.Context, id string) (json.RawMessage, error) {
+	if by, ok := d.credited[id]; ok {
+		return json.RawMessage(`{"id":"` + id + `","status":"CREDITED","resolution":"CREDITED","resolved_by":"` + by + `"}`), nil
+	}
 	return json.RawMessage(`{"id":"` + id + `"}`), nil
 }
 
-func (d *fakeDeposits) Credit(_ context.Context, id, actor, _ string) (json.RawMessage, error) {
+func (d *fakeDeposits) Credit(ctx context.Context, id, actor, _ string) (json.RawMessage, error) {
+	if _, ok := d.credited[id]; ok {
+		return nil, apperr.New(apperr.KindConflict, "WALLET_DEPOSIT_NOT_RELEASABLE", "credited already")
+	}
+	if d.credited == nil {
+		d.credited = map[string]string{}
+	}
+	d.credited[id] = actor
 	d.decided = append(d.decided, "credit "+id+" by "+actor)
-	return json.RawMessage(`{"id":"` + id + `","status":"CREDITED"}`), nil
+	return d.Get(ctx, id)
 }
 
 func (d *fakeDeposits) Dismiss(_ context.Context, id, actor, _ string) (json.RawMessage, error) {
@@ -661,7 +746,9 @@ func (d *fakeDeposits) BookManual(_ context.Context, m ports.ManualDeposit, _ st
 // fakePrices are the last prices of the USDT pairs.
 type fakePrices ports.Prices
 
-func (p fakePrices) Prices(context.Context) (ports.Prices, error) { return ports.Prices(p), nil }
+func (p fakePrices) Prices(context.Context, time.Duration) (ports.Prices, error) {
+	return ports.Prices(p), nil
+}
 
 type harness struct {
 	svc         *Service
@@ -877,10 +964,10 @@ func TestRoles(t *testing.T) {
 	if _, err := h.svc.FlagList(ctx, auditor); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.svc.ReviewWithdrawal(ctx, ops, "w1", true, "looks fine"); code(err) != "ADMIN_FORBIDDEN" {
+	if _, err := h.svc.ReviewWithdrawal(ctx, ops, "", "w1", true, "looks fine"); code(err) != "ADMIN_FORBIDDEN" {
 		t.Fatalf("operator reviews a withdrawal: %v", err)
 	}
-	if _, err := h.svc.ReviewWithdrawal(ctx, fin, "w1", true, "looks fine"); err != nil || h.wallet.reviewer != "fin@example.com" {
+	if _, err := h.svc.ReviewWithdrawal(ctx, fin, "", "w1", true, "looks fine"); err != nil || h.wallet.reviewer != "fin@example.com" {
 		t.Fatalf("finance reviews: %v, reviewer %q", err, h.wallet.reviewer)
 	}
 	if _, err := h.svc.SwitchFlag(ctx, ops, "wallet.withdraw", false, "no"); err == nil {

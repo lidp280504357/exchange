@@ -97,7 +97,7 @@ func (h *Handler) placeHold(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apperr.Invalid("amount must be a decimal string"))
 		return
 	}
-	x, err := h.Svc.PlaceHold(r.Context(), principal(r), chi.URLParam(r, "id"), body.Asset, amount, body.Reason)
+	x, err := h.Svc.PlaceHold(r.Context(), principal(r), idemKey(r), chi.URLParam(r, "id"), body.Asset, amount, body.Reason)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -111,7 +111,7 @@ func (h *Handler) releaseHold(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	x, err := h.Svc.ReleaseHold(r.Context(), principal(r), chi.URLParam(r, "id"), chi.URLParam(r, "hold"), body.Reason)
+	x, err := h.Svc.ReleaseHold(r.Context(), principal(r), idemKey(r), chi.URLParam(r, "id"), chi.URLParam(r, "hold"), body.Reason)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -175,7 +175,7 @@ func (h *Handler) closePosition(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	raw, err := h.Svc.ClosePosition(r.Context(), principal(r), chi.URLParam(r, "id"), body.Symbol, body.PositionSide, body.Reason)
+	raw, err := h.Svc.ClosePosition(r.Context(), principal(r), idemKey(r), chi.URLParam(r, "id"), body.Symbol, body.PositionSide, body.Reason)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

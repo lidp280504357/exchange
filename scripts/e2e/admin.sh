@@ -38,7 +38,10 @@
 # administrator, both starting tomorrow and canceled; settings changed and
 # put back, one beyond the share rejected; who holds the coin; a cent
 # minted for every bot; the bots' orders and trades), the audit trail with
-# its CSV export, and sign-out.
+# its CSV export, and sign-out. Every request that moves money carries an
+# Idempotency-Key (C5.5 ⑥): an adjustment, a hold, its release and the
+# in-app message are sent twice under theirs and made once, another
+# request under a key is refused, and one without is too.
 #
 #   scripts/e2e/admin.sh
 set -euo pipefail
@@ -128,10 +131,18 @@ login() {
   acall POST /admin/v1/login "$(jq -nc --arg e "$email" --arg p "$pw" --arg c "$code" '{email: $e, password: $p, totp_code: $c}')" \
     "${CSRF[@]}" -c "$jar" -D "$WORK/$role.headers"
 }
-as() { # as ROLE METHOD PATH JSON: a call with the role's session
-  local role=$1
+# KEY is the next write's Idempotency-Key, which every request that moves
+# money carries (C5.5 ⑥): a new one unless set; none with KEY=none.
+KEY=
+as() { # as ROLE METHOD PATH JSON: a call with the role's session (a write with an Idempotency-Key)
+  local role=$1 key=${KEY:-e2e-$(password)}
   shift
-  acall "$1" "$2" "$3" -b "$WORK/$role.jar" "${CSRF[@]}"
+  KEY=
+  if [[ $1 == GET || $key == none ]]; then
+    acall "$1" "$2" "$3" -b "$WORK/$role.jar" "${CSRF[@]}"
+  else
+    acall "$1" "$2" "$3" -b "$WORK/$role.jar" "${CSRF[@]}" -H "Idempotency-Key: $key"
+  fi
 }
 
 echo "== sign-in"
@@ -386,6 +397,29 @@ if [[ $TWO_PERSON == false ]]; then
   expect 201 - "and takes it back"
   check '.status == "EXECUTED" and .mode == "SINGLE"' "booked"
   eventually 20 "the balance is back" plus 0
+  KEY=none
+  as ADMIN POST "/admin/v1/users/$USER_ID/adjustments" '{"asset":"USDT","amount":"1","reason":"e2e without a key"}'
+  expect 400 COMMON_INVALID_ARGUMENT "a request that moves money wants an Idempotency-Key"
+  KEY="e2e-once-$RUN"
+  as ADMIN POST "/admin/v1/users/$USER_ID/adjustments" '{"asset":"USDT","amount":"1.25","reason":"e2e keyed credit"}'
+  expect 201 - "ADMIN credits 1.25 USDT under a key"
+  ONCE=$(jq -r .id <<<"$BODY")
+  KEY="e2e-once-$RUN"
+  as ADMIN POST "/admin/v1/users/$USER_ID/adjustments" '{"asset":"USDT","amount":"1.25","reason":"e2e keyed credit"}'
+  expect 201 - "the same request again (a retry)"
+  check ".id == \"$ONCE\" and .status == \"EXECUTED\"" "answers with the same operation"
+  KEY="e2e-once-$RUN"
+  as ADMIN POST "/admin/v1/users/$USER_ID/adjustments" '{"asset":"USDT","amount":"2","reason":"e2e keyed credit"}'
+  expect 409 COMMON_IDEMPOTENCY_CONFLICT "the key with another amount is refused"
+  eventually 20 "the user has 1.25 USDT more, once" plus 1.25
+  as ADMIN POST "/admin/v1/approvals/$ONCE/decide" '{"approve":true,"reason":"e2e a decision repeated"}'
+  expect 200 - "its decider's approval again (a retry)"
+  check ".id == \"$ONCE\" and .status == \"EXECUTED\"" "answers with it as it stands, booking nothing more"
+  as ADMIN POST "/admin/v1/approvals/$ONCE/decide" '{"approve":false,"reason":"e2e the other decision"}'
+  expect 409 ADMIN_APPROVAL_DECIDED "the other decision is refused"
+  as ADMIN POST "/admin/v1/users/$USER_ID/adjustments" '{"asset":"USDT","amount":"-1.25","reason":"e2e keyed reversal"}'
+  expect 201 - "and takes it back"
+  eventually 20 "the balance is back again" plus 0
   as ADMIN POST "/admin/v1/users/$USER_ID/adjustments" '{"asset":"USDT","amount":"100000000","reason":"e2e above the limit"}'
   expect 201 - "an adjustment above the single-operation limit"
   check '.status == "PENDING" and .mode == "TWO_PERSON" and .escalation == "SINGLE_LIMIT"' "waits for a second administrator"
@@ -704,19 +738,29 @@ spot_usdt() { # spot_usdt FIELD: the user's SPOT USDT available or frozen
 FROZEN_BEFORE=$(spot_usdt frozen)
 as AUDITOR POST "/admin/v1/users/$USER_ID/holds" '{"asset":"USDT","amount":"1.5","reason":"e2e"}'
 expect 403 ADMIN_FORBIDDEN "AUDITOR holds nothing"
+KEY="e2e-hold-$RUN"
 as FINANCE POST "/admin/v1/users/$USER_ID/holds" '{"asset":"USDT","amount":"1.5","reason":"e2e chargeback check"}'
 expect 201 - "FINANCE holds 1.5 USDT"
 check ".active == true and .amount == \"1.5\" and .actor == \"$EMAIL_FINANCE\"" "an active hold by FINANCE"
 HOLD=$(jq -r .id <<<"$BODY")
+KEY="e2e-hold-$RUN"
+as FINANCE POST "/admin/v1/users/$USER_ID/holds" '{"asset":"USDT","amount":"1.5","reason":"e2e chargeback check"}'
+expect 201 - "the same hold again (a retry)"
+check ".id == \"$HOLD\"" "is the same hold"
 [[ $(jq -n --arg a "$(spot_usdt frozen)" --arg b "$FROZEN_BEFORE" '($a | tonumber) - ($b | tonumber) == 1.5') == true ]] ||
   { echo "FAIL the hold is frozen: $FROZEN_BEFORE -> $(spot_usdt frozen)" >&2; exit 1; }
 echo "ok   1.5 USDT more frozen"
 call GET "/v1/account/ledger?asset=USDT&type=ADMIN_FREEZE" "" "${UAUTH[@]}"
 expect 200 - "the user's fund flow"
 check '(.items | length) == 2 and all(.items[]; .entry_type == "ADMIN_FREEZE")' "shows the hold (available to frozen)"
+KEY="e2e-release-$RUN"
 as FINANCE DELETE "/admin/v1/users/$USER_ID/holds/$HOLD" '{"reason":"e2e cleared"}'
 expect 200 - "and releases it"
 check '.active == false and .released_by != "" and .release_journal_id != null' "released"
+KEY="e2e-release-$RUN"
+as FINANCE DELETE "/admin/v1/users/$USER_ID/holds/$HOLD" '{"reason":"e2e cleared"}'
+expect 200 - "the same release again (a retry)"
+check ".id == \"$HOLD\" and .active == false" "answers with the released hold"
 as FINANCE DELETE "/admin/v1/users/$USER_ID/holds/$HOLD" '{"reason":"e2e again"}'
 expect 409 LEDGER_HOLD_RELEASED "a hold is released once"
 [[ $(spot_usdt frozen) == "$FROZEN_BEFORE" ]] || { echo "FAIL the release: $FROZEN_BEFORE -> $(spot_usdt frozen)" >&2; exit 1; }
@@ -1344,18 +1388,25 @@ as OPERATOR POST /admin/v1/broadcasts "{\"audience\":\"TAG\",\"tag\":\"E2E_NOBOD
 expect 422 ADMIN_TAG_EMPTY "a tag nobody has reaches nobody"
 as OPERATOR POST /admin/v1/broadcasts "{\"audience\":\"USER\",\"user_id\":\"$USER_ID\",\"title\":{\"zh-CN\":\"外链\"},\"body\":{\"zh-CN\":\"外链\"},\"link\":\"//evil.example\",\"reason\":\"e2e leads off the sites\"}"
 expect 400 COMMON_INVALID_ARGUMENT "a link off the sites is refused"
-as OPERATOR POST /admin/v1/broadcasts "$(jq -nc --arg u "$USER_ID" --arg run "$RUN" '{audience: "USER", user_id: $u,
+MESSAGE=$(jq -nc --arg u "$USER_ID" --arg run "$RUN" '{audience: "USER", user_id: $u,
   title: {"zh-CN": ("端到端消息 " + $run), en: ("E2E message " + $run)}, body: {"zh-CN": "请查看资产。", en: "Have a look at your assets."},
-  link: "/assets", email: false, reason: "e2e writes to its user"}')"
+  link: "/assets", email: false, reason: "e2e writes to its user"}')
+KEY="e2e-message-$RUN"
+as OPERATOR POST /admin/v1/broadcasts "$MESSAGE"
 expect 201 - "OPERATOR writes to the user"
 check '.audience == "USERS" and .users == 1 and .link == "/assets" and (.status | IN("SENDING", "SENT"))' "one user, being delivered"
 BROADCAST_ID=$(jq -r .id <<<"$BODY")
+KEY="e2e-message-$RUN"
+as OPERATOR POST /admin/v1/broadcasts "$MESSAGE"
+expect 201 - "the same message again (a retry)"
+check ".id == \"$BROADCAST_ID\"" "is the same message"
 received() {
   call GET "/v1/notifications?limit=20" "" "${UAUTH[@]}"
   [[ $STATUS == 200 ]] && jq -e --arg b "$BROADCAST_ID" --arg r "$RUN" \
     'any(.items[]; .type == "BROADCAST" and .data.broadcast_id == $b and .data.link == "/assets" and (.title | endswith($r)) and .read == false)' <<<"$BODY" >/dev/null
 }
 eventually 60 "the user finds it in their notifications, unread" received
+check "[.items[] | select(.data.broadcast_id == \"$BROADCAST_ID\")] | length == 1" "once, though sent twice"
 NOTICE_ID=$(jq -r --arg b "$BROADCAST_ID" '[.items[] | select(.data.broadcast_id == $b)][0].id' <<<"$BODY")
 call POST /v1/notifications/read "{\"ids\":[\"$NOTICE_ID\"]}" "${UAUTH[@]}"
 expect 200 - "the user reads it"
@@ -1398,8 +1449,8 @@ if [[ -n ${BACKFILLED:-} ]]; then
 fi
 eventually 60 "the announcement's changes are audited, by the OPERATOR" audited AUDITOR "target=announcement:$SLUG" \
   "[.items[] | select(.actor == \"$EMAIL_OPERATOR\") | .payload.action] | (index(\"admin.content.published\") != null and index(\"admin.content.updated\") != null and index(\"admin.content.archived\") != null)"
-eventually 60 "the in-app message is audited" audited AUDITOR "target=broadcast:$BROADCAST_ID" \
-  "[.items[] | select(.actor == \"$EMAIL_OPERATOR\") | .payload.action] | index(\"admin.notices.sent\") != null"
+eventually 60 "the in-app message is audited, once" audited AUDITOR "target=broadcast:$BROADCAST_ID" \
+  "[.items[] | select(.actor == \"$EMAIL_OPERATOR\" and .payload.action == \"admin.notices.sent\")] | length == 1"
 eventually 60 "the asset's profile changes are audited" audited AUDITOR "target=asset:LINK" \
   "[.items[] | select(.actor == \"$EMAIL_OPERATOR\") | .payload.action] | map(select(. == \"admin.instruments.profile_updated\")) | length >= 2"
 q_operator="actor=$(jq -rn --arg e "$EMAIL_OPERATOR" '$e|@uri')"

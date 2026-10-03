@@ -142,7 +142,9 @@ export function BackfillDrawer({ onClose }: { onClose: () => void }) {
             </span>
           }
           confirmWord={lastFour(body.trade_id)}
-          run={async (reason) => adminData(await adminApi.POST("/admin/v1/deposits/manual", { body: { ...body, reason } }))}
+          run={async (reason, key) =>
+            adminData(await adminApi.POST("/admin/v1/deposits/manual", { params: { header: { "Idempotency-Key": key } }, body: { ...body, reason } }))
+          }
           onDone={(a) => {
             setLast(a);
             setEntry(blank);

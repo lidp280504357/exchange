@@ -28,15 +28,15 @@ func TestBackfillsGoThroughTheFundGuardrails(t *testing.T) {
 	h.admin(t, "ops@example.com", domain.RoleOperator)
 	fin, boss, ops := h.login(t, "fin@example.com"), h.login(t, "boss@example.com"), h.login(t, "ops@example.com")
 
-	if _, err := h.svc.Backfill(ctx, ops, backfillOfTrade("t1", "40"), "callback lost"); code(err) != "ADMIN_FORBIDDEN" {
+	if _, err := h.svc.Backfill(ctx, ops, "", backfillOfTrade("t1", "40"), "callback lost"); code(err) != "ADMIN_FORBIDDEN" {
 		t.Fatalf("an operator backfills: %v", err)
 	}
-	if _, err := h.svc.Backfill(ctx, fin, ports.ManualDeposit{Network: "TRON", Amount: decimal.NewFromInt(1)}, "callback lost"); code(err) != apperr.CodeInvalidArgument {
+	if _, err := h.svc.Backfill(ctx, fin, "", ports.ManualDeposit{Network: "TRON", Amount: decimal.NewFromInt(1)}, "callback lost"); code(err) != apperr.CodeInvalidArgument {
 		t.Fatalf("no trade: %v", err)
 	}
 	bad := backfillOfTrade("t0", "1")
 	bad.Address = "nobody"
-	if _, err := h.svc.Backfill(ctx, fin, bad, "callback lost"); code(err) != apperr.CodeInvalidArgument {
+	if _, err := h.svc.Backfill(ctx, fin, "", bad, "callback lost"); code(err) != apperr.CodeInvalidArgument {
 		t.Fatalf("wallet-service's check: %v", err)
 	}
 	check, err := h.svc.CheckBackfill(ctx, fin, backfillOfTrade("t1", "40"))
@@ -45,7 +45,7 @@ func TestBackfillsGoThroughTheFundGuardrails(t *testing.T) {
 	}
 
 	// Within the single-person limit: booked at once, entered by FINANCE.
-	a, err := h.svc.Backfill(ctx, fin, backfillOfTrade("t1", "40"), "callback lost; seen in the console")
+	a, err := h.svc.Backfill(ctx, fin, "", backfillOfTrade("t1", "40"), "callback lost; seen in the console")
 	if err != nil || a.Status != domain.ApprovalExecuted || a.Kind != domain.KindDepositBackfill || !strings.HasPrefix(a.Result, "deposit ") ||
 		a.Payload["user_id"] != someUser || a.Payload["entered_by"] != "fin@example.com" || len(h.deposits.booked) != 1 {
 		t.Fatalf("backfill %+v %v", a, err)
@@ -56,7 +56,7 @@ func TestBackfillsGoThroughTheFundGuardrails(t *testing.T) {
 
 	// Above the limit: a second administrator approves; the deposit is
 	// still entered by the one who typed it.
-	big, err := h.svc.Backfill(ctx, fin, backfillOfTrade("t2", "200000"), "callback lost, large")
+	big, err := h.svc.Backfill(ctx, fin, "", backfillOfTrade("t2", "200000"), "callback lost, large")
 	if err != nil || big.Status != domain.ApprovalPending || big.Escalation != domain.EscalationSingleMax || len(h.deposits.booked) != 1 {
 		t.Fatalf("large backfill %+v %v", big, err)
 	}
@@ -78,13 +78,13 @@ func TestDepositDecisionsAndWithdrawalHolds(t *testing.T) {
 	fin, auditor := h.login(t, "fin@example.com"), h.login(t, "audit@example.com")
 	dep := "0192a000-0000-7000-8000-0000000000d9"
 
-	if _, err := h.svc.CreditDeposit(ctx, auditor, dep, "the user's"); code(err) != "ADMIN_FORBIDDEN" {
+	if _, err := h.svc.CreditDeposit(ctx, auditor, "", dep, "the user's"); code(err) != "ADMIN_FORBIDDEN" {
 		t.Fatalf("an auditor credits: %v", err)
 	}
-	if _, err := h.svc.CreditDeposit(ctx, fin, dep, ""); code(err) != apperr.CodeInvalidArgument {
+	if _, err := h.svc.CreditDeposit(ctx, fin, "", dep, ""); code(err) != apperr.CodeInvalidArgument {
 		t.Fatalf("no reason: %v", err)
 	}
-	if _, err := h.svc.CreditDeposit(ctx, fin, dep, "below the minimum, waived"); err != nil {
+	if _, err := h.svc.CreditDeposit(ctx, fin, "", dep, "below the minimum, waived"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.svc.DismissDeposit(ctx, fin, dep, "a wrong token, refunded off-platform"); err != nil {

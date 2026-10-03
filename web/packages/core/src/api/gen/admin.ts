@@ -1176,8 +1176,13 @@ export interface paths {
         /**
          * Approve or reject a withdrawal in review
          * @description The administrator's email is the reviewer; a withdrawal above
-         *     20,000 USDT needs two distinct reviewers. Rejecting releases the
-         *     frozen amount. Needs withdrawals.review.
+         *     20,000 USDT needs two distinct reviewers. In single-person mode
+         *     one approval completes a withdrawal worth at most the settings'
+         *     withdrawal_max_usdt both when it was requested and at the current
+         *     price (a price over a minute old counts as none: the approval
+         *     counts, not alone). Rejecting releases the frozen amount. The same
+         *     review again with its Idempotency-Key answers with the withdrawal
+         *     as the review left it. Needs withdrawals.review.
          */
         post: operations["reviewWithdrawal"];
         delete?: never;
@@ -1200,7 +1205,9 @@ export interface paths {
          * @description Each withdrawal is reviewed on its own as by POST
          *     /admin/v1/withdrawals/{id}/review (and audited by the wallet); one
          *     that fails (already decided, unknown) leaves the others decided and
-         *     says why. At most 50 at a time. Needs withdrawals.review.
+         *     says why. At most 50 at a time. The same batch again with its
+         *     Idempotency-Key answers for those it reviewed as they stand. Needs
+         *     withdrawals.review.
          */
         post: operations["reviewWithdrawalBatch"];
         delete?: never;
@@ -1991,12 +1998,17 @@ export interface paths {
          * @description Approving one's own request fails with ADMIN_SELF_APPROVAL, except
          *     a single-person operation whose outcome was unknown (its requester
          *     finishes it); rejecting one's own request withdraws it. A decided
-         *     one fails with ADMIN_APPROVAL_DECIDED. Approving books the
-         *     operation with the idempotency key approval:<id>: EXECUTED with
-         *     the journal, or FAILED when the ledger refuses (for instance
-         *     LEDGER_ADJUSTMENT_DISABLED while the flag ledger.manual_adjustment
-         *     is off). When the ledger cannot be reached the request stays
-         *     PENDING and can be approved again. Needs ledger.adjust.approve;
+         *     one fails with ADMIN_APPROVAL_DECIDED, unless the decider took the
+         *     same decision: then it answers with the operation as that decision
+         *     left it (a retry). Approving books the operation with the
+         *     idempotency key approval:<id>: EXECUTED with the journal, or FAILED
+         *     when the ledger refuses (for instance LEDGER_ADJUSTMENT_DISABLED
+         *     while the flag ledger.manual_adjustment is off). A fund operation
+         *     is marked attempted (attempted_at) before it is booked: when the
+         *     ledger cannot be reached it stays PENDING with how the attempt
+         *     ended in result, the error's details name it (approval_id), and it
+         *     can be approved again but no longer rejected
+         *     (ADMIN_APPROVAL_ATTEMPTED). Needs ledger.adjust.approve;
          *     a simulated market's change (SIM_EVENT, SIM_PARAMS) needs
          *     sim.control instead, and approving one that lapsed (a day after it
          *     was asked for, or when its event was to start) fails it, result
@@ -3940,7 +3952,10 @@ export interface components {
             requested_by_email: string;
             decided_by: string | null;
             decided_by_email: string | null;
-            /** @description The journal once executed, the ledger's refusal, or the rejection reason. */
+            /**
+             * @description The journal once executed, the ledger's refusal, or the rejection reason; while pending after an attempt
+             *     (attempted_at), how the last attempt ended (a mint: "booked n of m; <bot>: <code>: <message>").
+             */
             result: string;
             /** Format: date-time */
             created_at: string;
@@ -3962,6 +3977,14 @@ export interface components {
              */
             escalation: "" | "REQUESTED" | "TWO_PERSON_MODE" | "SINGLE_LIMIT" | "DAILY_LIMIT" | "NO_PRICE" | "SIM_SHARE";
             journal_id: string | null;
+            /**
+             * Format: date-time
+             * @description When an attempt to carry out a fund operation began (a single-person operation when requested, a two-person one
+             *     when approved). PENDING with it, the attempt did not finish and may have booked: it is finished (approved again:
+             *     its ledger key makes that safe), never rejected (ADMIN_APPROVAL_ATTEMPTED). Null for the simulated market's
+             *     changes and before any attempt.
+             */
+            attempted_at: string | null;
         };
         AuditEntry: {
             /** Format: uuid */
@@ -4282,6 +4305,14 @@ export interface components {
         };
     };
     parameters: {
+        /**
+         * @description Every request that moves money carries one (C5.5 ⑥): the console makes a key per operation and sends it again with
+         *     each retry. The first request with a key makes the operation (its approval, hold, closing order or message takes
+         *     its ID from the key); the same request again answers with what it made, finishing a fund operation whose outcome
+         *     was unknown; the key with another request fails with 409 COMMON_IDEMPOTENCY_CONFLICT. Keys are each
+         *     administrator's own and kept 24 hours. Missing or longer than 128 characters: 400.
+         */
+        IdempotencyKey: string;
         CallbackID: string;
         /** @description The previous page's next_cursor; omitted for the first page. */
         Cursor: string;
@@ -4970,7 +5001,16 @@ export interface operations {
     backfillDeposit: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /**
+                 * @description Every request that moves money carries one (C5.5 ⑥): the console makes a key per operation and sends it again with
+                 *     each retry. The first request with a key makes the operation (its approval, hold, closing order or message takes
+                 *     its ID from the key); the same request again answers with what it made, finishing a fund operation whose outcome
+                 *     was unknown; the key with another request fails with 409 COMMON_IDEMPOTENCY_CONFLICT. Keys are each
+                 *     administrator's own and kept 24 hours. Missing or longer than 128 characters: 400.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -5020,7 +5060,16 @@ export interface operations {
     creditDeposit: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /**
+                 * @description Every request that moves money carries one (C5.5 ⑥): the console makes a key per operation and sends it again with
+                 *     each retry. The first request with a key makes the operation (its approval, hold, closing order or message takes
+                 *     its ID from the key); the same request again answers with what it made, finishing a fund operation whose outcome
+                 *     was unknown; the key with another request fails with 409 COMMON_IDEMPOTENCY_CONFLICT. Keys are each
+                 *     administrator's own and kept 24 hours. Missing or longer than 128 characters: 400.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -5267,7 +5316,16 @@ export interface operations {
     adjustUserBalance: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /**
+                 * @description Every request that moves money carries one (C5.5 ⑥): the console makes a key per operation and sends it again with
+                 *     each retry. The first request with a key makes the operation (its approval, hold, closing order or message takes
+                 *     its ID from the key); the same request again answers with what it made, finishing a fund operation whose outcome
+                 *     was unknown; the key with another request fails with 409 COMMON_IDEMPOTENCY_CONFLICT. Keys are each
+                 *     administrator's own and kept 24 hours. Missing or longer than 128 characters: 400.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: components["parameters"]["UserID"];
             };
@@ -5670,7 +5728,16 @@ export interface operations {
     placeUserHold: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /**
+                 * @description Every request that moves money carries one (C5.5 ⑥): the console makes a key per operation and sends it again with
+                 *     each retry. The first request with a key makes the operation (its approval, hold, closing order or message takes
+                 *     its ID from the key); the same request again answers with what it made, finishing a fund operation whose outcome
+                 *     was unknown; the key with another request fails with 409 COMMON_IDEMPOTENCY_CONFLICT. Keys are each
+                 *     administrator's own and kept 24 hours. Missing or longer than 128 characters: 400.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: components["parameters"]["UserID"];
             };
@@ -5703,7 +5770,16 @@ export interface operations {
     releaseUserHold: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /**
+                 * @description Every request that moves money carries one (C5.5 ⑥): the console makes a key per operation and sends it again with
+                 *     each retry. The first request with a key makes the operation (its approval, hold, closing order or message takes
+                 *     its ID from the key); the same request again answers with what it made, finishing a fund operation whose outcome
+                 *     was unknown; the key with another request fails with 409 COMMON_IDEMPOTENCY_CONFLICT. Keys are each
+                 *     administrator's own and kept 24 hours. Missing or longer than 128 characters: 400.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: components["parameters"]["UserID"];
                 hold: string;
@@ -5838,7 +5914,16 @@ export interface operations {
     closeUserPosition: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /**
+                 * @description Every request that moves money carries one (C5.5 ⑥): the console makes a key per operation and sends it again with
+                 *     each retry. The first request with a key makes the operation (its approval, hold, closing order or message takes
+                 *     its ID from the key); the same request again answers with what it made, finishing a fund operation whose outcome
+                 *     was unknown; the key with another request fails with 409 COMMON_IDEMPOTENCY_CONFLICT. Keys are each
+                 *     administrator's own and kept 24 hours. Missing or longer than 128 characters: 400.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: components["parameters"]["UserID"];
             };
@@ -5912,7 +5997,16 @@ export interface operations {
     reviewWithdrawal: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /**
+                 * @description Every request that moves money carries one (C5.5 ⑥): the console makes a key per operation and sends it again with
+                 *     each retry. The first request with a key makes the operation (its approval, hold, closing order or message takes
+                 *     its ID from the key); the same request again answers with what it made, finishing a fund operation whose outcome
+                 *     was unknown; the key with another request fails with 409 COMMON_IDEMPOTENCY_CONFLICT. Keys are each
+                 *     administrator's own and kept 24 hours. Missing or longer than 128 characters: 400.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
             path: {
                 id: string;
             };
@@ -5942,7 +6036,16 @@ export interface operations {
     reviewWithdrawalBatch: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /**
+                 * @description Every request that moves money carries one (C5.5 ⑥): the console makes a key per operation and sends it again with
+                 *     each retry. The first request with a key makes the operation (its approval, hold, closing order or message takes
+                 *     its ID from the key); the same request again answers with what it made, finishing a fund operation whose outcome
+                 *     was unknown; the key with another request fails with 409 COMMON_IDEMPOTENCY_CONFLICT. Keys are each
+                 *     administrator's own and kept 24 hours. Missing or longer than 128 characters: 400.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -6350,7 +6453,16 @@ export interface operations {
     sendBroadcast: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /**
+                 * @description Every request that moves money carries one (C5.5 ⑥): the console makes a key per operation and sends it again with
+                 *     each retry. The first request with a key makes the operation (its approval, hold, closing order or message takes
+                 *     its ID from the key); the same request again answers with what it made, finishing a fund operation whose outcome
+                 *     was unknown; the key with another request fails with 409 COMMON_IDEMPOTENCY_CONFLICT. Keys are each
+                 *     administrator's own and kept 24 hours. Missing or longer than 128 characters: 400.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -6639,7 +6751,16 @@ export interface operations {
     mintSimBots: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /**
+                 * @description Every request that moves money carries one (C5.5 ⑥): the console makes a key per operation and sends it again with
+                 *     each retry. The first request with a key makes the operation (its approval, hold, closing order or message takes
+                 *     its ID from the key); the same request again answers with what it made, finishing a fund operation whose outcome
+                 *     was unknown; the key with another request fails with 409 COMMON_IDEMPOTENCY_CONFLICT. Keys are each
+                 *     administrator's own and kept 24 hours. Missing or longer than 128 characters: 400.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -6934,7 +7055,16 @@ export interface operations {
     requestAdjustment: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /**
+                 * @description Every request that moves money carries one (C5.5 ⑥): the console makes a key per operation and sends it again with
+                 *     each retry. The first request with a key makes the operation (its approval, hold, closing order or message takes
+                 *     its ID from the key); the same request again answers with what it made, finishing a fund operation whose outcome
+                 *     was unknown; the key with another request fails with 409 COMMON_IDEMPOTENCY_CONFLICT. Keys are each
+                 *     administrator's own and kept 24 hours. Missing or longer than 128 characters: 400.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -7588,7 +7718,16 @@ export interface operations {
     requestInsuranceFunding: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /**
+                 * @description Every request that moves money carries one (C5.5 ⑥): the console makes a key per operation and sends it again with
+                 *     each retry. The first request with a key makes the operation (its approval, hold, closing order or message takes
+                 *     its ID from the key); the same request again answers with what it made, finishing a fund operation whose outcome
+                 *     was unknown; the key with another request fails with 409 COMMON_IDEMPOTENCY_CONFLICT. Keys are each
+                 *     administrator's own and kept 24 hours. Missing or longer than 128 characters: 400.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };

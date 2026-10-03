@@ -347,6 +347,7 @@ func (h *Content) broadcast(w http.ResponseWriter, r *http.Request) {
 
 func (h *Content) sendBroadcast(w http.ResponseWriter, r *http.Request) {
 	var body struct {
+		ID       string            `json:"id"`
 		Audience string            `json:"audience"`
 		UserIDs  []string          `json:"user_ids"`
 		Title    map[string]string `json:"title"`
@@ -364,7 +365,7 @@ func (h *Content) sendBroadcast(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b, err := h.Broadcasts.Send(r.Context(), application.BroadcastInput{
-		Audience: body.Audience, UserIDs: body.UserIDs, Title: body.Title, Body: body.Body, Link: body.Link, Email: body.Email,
+		ID: body.ID, Audience: body.Audience, UserIDs: body.UserIDs, Title: body.Title, Body: body.Body, Link: body.Link, Email: body.Email,
 	}, body.Actor)
 	if err != nil {
 		httpx.WriteError(w, r, err)

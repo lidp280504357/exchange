@@ -57,12 +57,30 @@ func (s *Service) depositDecision(p Principal, id, reason string) error {
 
 // CreditDeposit gives an unclaimed deposit's funds, booked to
 // UNCLAIMED_DEPOSIT, to its user: the same asset and amount (the ledger
-// audits it as ledger.unclaimed_released).
-func (s *Service) CreditDeposit(ctx context.Context, p Principal, id, reason string) (json.RawMessage, error) {
+// audits it as ledger.unclaimed_released). The same request again with
+// the same key answers with the deposit it credited.
+func (s *Service) CreditDeposit(ctx context.Context, p Principal, key, id, reason string) (json.RawMessage, error) {
 	if err := s.depositDecision(p, id, reason); err != nil {
 		return nil, err
 	}
-	return s.Deposits.Credit(ctx, id, p.Admin.Email, strings.TrimSpace(reason))
+	reason = strings.TrimSpace(reason)
+	c, err := s.claimKey(ctx, p, key, scopeCredit, fingerprint(id, reason))
+	if err != nil {
+		return nil, err
+	}
+	raw, err := s.Deposits.Credit(ctx, id, p.Admin.Email, reason)
+	if err == nil || c.Fresh || apperr.From(err).Kind != apperr.KindConflict {
+		return raw, err
+	}
+	current, gerr := s.Deposits.Get(ctx, id)
+	var d struct {
+		Resolution string `json:"resolution"`
+		ResolvedBy string `json:"resolved_by"`
+	}
+	if gerr != nil || json.Unmarshal(current, &d) != nil || d.Resolution != "CREDITED" || d.ResolvedBy != p.Admin.Email {
+		return nil, err
+	}
+	return current, nil
 }
 
 // DismissDeposit closes a deposit that waited for a decision without
@@ -108,8 +126,8 @@ func (s *Service) CheckBackfill(ctx context.Context, p Principal, b ports.Manual
 // fund operations' guardrails: in single-person mode within the limits at
 // once, otherwise a second administrator approves it (design 2026-10-02
 // §4.3; the custodian could not be asked).
-func (s *Service) Backfill(ctx context.Context, p Principal, b ports.ManualDeposit, reason string) (domain.Approval, error) {
-	return s.SubmitFunds(ctx, p, FundRequest{Kind: domain.KindDepositBackfill, Backfill: &b, Reason: reason, Direct: true})
+func (s *Service) Backfill(ctx context.Context, p Principal, key string, b ports.ManualDeposit, reason string) (domain.Approval, error) {
+	return s.SubmitFunds(ctx, p, FundRequest{Kind: domain.KindDepositBackfill, Backfill: &b, Reason: reason, Direct: true, Key: key})
 }
 
 // WithdrawalDetail returns a withdrawal with its address-book entry and

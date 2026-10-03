@@ -135,8 +135,13 @@ function Insurance({ admin }: { admin: Admin }) {
               title={t("admin.derivatives.contributeTitle")}
               target={<Num value={amount} unit="USDT" />}
               confirmWord={amount}
-              run={async (reason) =>
-                adminData(await adminApi.POST("/admin/v1/derivatives/insurance-fund/contributions", { body: { asset: "USDT", amount, reason, direct: true } }))
+              run={async (reason, key) =>
+                adminData(
+                  await adminApi.POST("/admin/v1/derivatives/insurance-fund/contributions", {
+                    params: { header: { "Idempotency-Key": key } },
+                    body: { asset: "USDT", amount, reason, direct: true },
+                  }),
+                )
               }
               onDone={() => setAmount("")}
             />

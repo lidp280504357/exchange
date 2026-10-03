@@ -102,6 +102,8 @@ type SimMintInput struct {
 	Reason string
 	// Reference is an optional ticket kept with it.
 	Reference string
+	// Key is the request's Idempotency-Key ("" for none).
+	Key string
 }
 
 // MintShare is one bot's part of a mint.
@@ -170,7 +172,7 @@ func (s *Service) MintSimBots(ctx context.Context, p Principal, in SimMintInput)
 	}
 	return s.SubmitFunds(ctx, p, FundRequest{
 		Kind: domain.KindSimMint, Asset: asset, Amount: in.Amount, Reason: in.Reason, Reference: in.Reference, Shares: shares, Role: role,
-		Direct: true,
+		Direct: true, Key: in.Key,
 	})
 }
 

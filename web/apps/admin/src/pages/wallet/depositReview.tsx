@@ -145,12 +145,15 @@ function Decisions({ d, size = "md", onDone }: { d: ReviewDeposit; size?: "sm" |
       <span className="font-mono text-xs">{d.user_id}</span>
     </span>
   );
-  const decide = (credit: boolean) => async (reason: string) => {
-    const path = { params: { path: { id: d.id } }, body: { reason } };
-    return adminData(
-      credit ? await adminApi.POST("/admin/v1/deposits/{id}/credit", path) : await adminApi.POST("/admin/v1/deposits/{id}/reject", path),
+  const decide = (credit: boolean) => async (reason: string, key: string) =>
+    adminData(
+      credit
+        ? await adminApi.POST("/admin/v1/deposits/{id}/credit", {
+            params: { path: { id: d.id }, header: { "Idempotency-Key": key } },
+            body: { reason },
+          })
+        : await adminApi.POST("/admin/v1/deposits/{id}/reject", { params: { path: { id: d.id } }, body: { reason } }),
     );
-  };
   const invalidate = [["admin", "deposits"], todoKey, ["admin", "user"]];
   return (
     <>
