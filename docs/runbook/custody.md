@@ -115,7 +115,7 @@ exchangectl wallet custody-fee <提现ID> --write-off --reason "..."  # 不入�
 
 后台「托管方」页可以重放 `FAILED`、`UNMATCHED`、`RECEIVED` 的回调（重新验签但不查时间，写审计 `wallet.custody.callback.replay`）。
 
-**回调丢失时的补记**（2026-10-02 管理后台设计 §4.3）：网关没有按交易号查询的接口，托管方重试也放弃时，管理员先在优盾商户后台或区块浏览器核对到账，再在后台「充值 → 补记充值」录入网络、交易号、地址、哈希与数量。系统核对：网络由托管方服务、地址属于该网络上的用户、`UDUN:<tradeId>` 与（网络、哈希、地址）都没出现过、数量符合资产精度；按资金操作的护栏执行（单人模式限额内立即，否则第二位管理员批准），之后与回调一样记 `CONFIRMED`（来源 `MANUAL`、录入人），由处理器交账本入账。真回调晚到时按交易号找到这笔补记：一致记 `APPLIED`（`callback_at`），不一致记 `DISCREPANCY`（计数 `wallet_custody_deposit_discrepancies_total`，告警 `CustodyDepositDiscrepancy`）。`DISCREPANCY` 是回调的终态：托管方重发同一回调只回 `success`，不会改写成 `IGNORED`；回调先于处理器到达时，这笔补记不再交账本入账，等人处理（C5.5 ⑦）。还没等到回调的补记在 `exchangectl wallet reconcile --network UDUN`（或 `checks`）的报告里单列——托管方余额里没有对应到账，就是录错了。操作见 [admin.md](admin.md#充值处置与补记2026-10-02-设计-43c2c)。
+**回调丢失时的补记**（2026-10-02 管理后台设计 §4.3）：网关没有按交易号查询的接口，托管方重试也放弃时，管理员先在优盾商户后台或区块浏览器核对到账，再在后台「充值 → 补记充值」录入网络、交易号、地址、哈希与数量。系统核对：网络由托管方服务、地址属于该网络上的用户、`UDUN:<tradeId>` 与（网络、哈希、地址）都没出现过、数量符合资产精度；按资金操作的护栏执行（单人模式限额内立即，否则第二位管理员批准），之后与回调一样记 `CONFIRMED`（来源 `MANUAL`、录入人），由处理器交账本入账。真回调晚到时按交易号找到这笔补记：一致记 `APPLIED`（`callback_at`），不一致记 `DISCREPANCY`（计数 `wallet_custody_deposit_discrepancies_total`，告警 `CustodyDepositDiscrepancy`）。`DISCREPANCY` 是回调的终态：托管方重发同一回调只回 `success`，不会改写成 `IGNORED`；回调先于处理器到达时，这笔补记不再交账本入账，等人处理（C5.5 ⑦）。还没等到回调的补记在 `exchangectl wallet reconcile --network UDUN`（或 `checks`）的报告里单列——托管方余额里没有对应到账，就是录错了。操作见 [admin.md](admin.md#充值处置与补记)。
 
 ## 对账（不变量 4 的托管版）
 

@@ -167,7 +167,7 @@ nginx（`deploy/compose/nginx/conf.d/astras.vip.conf` 与 `snippets/site-{pc,m,a
   - `/docs/` 与 `/storybook/`；
   - PC 站浏览器冒烟测试 `web/e2e/pc-smoke.mjs`（workspace 包 `@exchange/e2e`，headless Chrome，中文界面）：表单注册（人机验证用环境的旁路令牌，验证码读开发收件箱）→ 资产页欢迎资金 → 退出再登录（错误密码就地提示、`?next=` 回跳）→ 行情搜索 → 现货终端挂限价单并撤单 → 划转到合约并在资金流水出现 → 充值地址 → 合约终端 → 通知、设备、帮助 → 语言切换 → 退出；页面脚本错误即失败，所有 API 响应按 OpenAPI 契约校验。本机对开发服务器跑：`APP=http://localhost:5173 node web/e2e/pc-smoke.mjs`（`SHOTS=目录` 保存截图）；
   - 手机站浏览器冒烟测试 `web/e2e/m-smoke.mjs`（390 × 844、触屏、iPhone UA，nginx 因此不分流到 PC 站）：表单注册 → 资产 tab 欢迎资金 → 在"我的"里退出（确认面板）再登录 → 行情搜索 → 现货终端从下单面板挂限价单（下单确认）并撤单 → 划转与流水 → 充值地址 → 合约终端 → 通知、设备、帮助 → 语言切换 → 退出；检查同 PC。本机：`APP=http://localhost:5174 node web/e2e/m-smoke.mjs`；
-  - 管理后台浏览器冒烟测试 `web/e2e/admin-smoke.mjs`（阶段 4 B5，1440 × 900）：`web.sh` 经 ssh 建一个临时 ADMIN（随机密码从标准输入传入、不打印，结束时停用），登录后走遍全部页面，见 [admin.md](admin.md#后台页面阶段-4-b5设计稿-10)；`/admin/v1` 的响应按 `api/admin/admin.yaml` 校验。本机：`ADMIN_EMAIL=… ADMIN_PASSWORD=… APP=http://localhost:5180 node web/e2e/admin-smoke.mjs`（开发服务器第一次打开会预构建依赖并刷新页面，等它就绪再跑）；
+  - 管理后台浏览器冒烟测试 `web/e2e/admin-smoke.mjs`（阶段 4 B5，1440 × 900）：`web.sh` 经 ssh 建一个临时 ADMIN（随机密码从标准输入传入、不打印，结束时停用），登录后走遍全部页面，见 [admin.md](admin.md#页面一览)；`/admin/v1` 的响应按 `api/admin/admin.yaml` 校验。本机：`ADMIN_EMAIL=… ADMIN_PASSWORD=… APP=http://localhost:5180 node web/e2e/admin-smoke.mjs`（开发服务器第一次打开会预构建依赖并刷新页面，等它就绪再跑）；
   - 三个冒烟测试共用 `web/e2e/lib.mjs`（Chrome、旁路令牌、开发收件箱、契约校验、按可见文字找按钮）。面板有滑入动画，测试等它停稳（`sheetOpen`）再点，关闭后等遮罩消失再点页面。
 - 运行时性能（阶段 4 B7）：`task web:perf`（`web/e2e/perf.mjs`，headless Chrome，对已部署的站点，BTC-USDT 每秒约 10 条深度消息）测量 Lighthouse 管不到的 §12.1 预算：
   - 终端页一分钟推流里的主线程长任务（> 50 ms）；

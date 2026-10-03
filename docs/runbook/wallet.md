@@ -101,7 +101,7 @@ ssh exchange sudo docker exec exchange-infra-wallet-service-1 /app/exchangectl w
 
   同一审核人不能重复批准；被拒绝、撤销或上链前失败的提现由处理器解冻（`WITHDRAW_UNFREEZE`，键 `withdraw-release:<id>`）。
 
-  管理后台还可以把待审批的提现**搁置**（带备注，`held_at`/`held_by`/`hold_note`，审计 `wallet.withdrawal.hold`/`unhold`；批准或拒绝时自动取消）并查看审核详情（地址簿记录、今日与本月已提）。这些是 wallet-service 只给后台用的内部接口 `/internal/wallet/withdrawals/{id}`、`…/{id}/hold`，与充值处置的 `/internal/wallet/deposits…` 一起（网关不路由 `/internal`），见 [admin.md](admin.md#提现审核详情筛选与搁置2026-10-02-设计-42c2c)。
+  管理后台还可以把待审批的提现**搁置**（带备注，`held_at`/`held_by`/`hold_note`，审计 `wallet.withdrawal.hold`/`unhold`；批准或拒绝时自动取消）并查看审核详情（地址簿记录、今日与本月已提）。这些是 wallet-service 只给后台用的内部接口 `/internal/wallet/withdrawals/{id}`、`…/{id}/hold`，与充值处置的 `/internal/wallet/deposits…` 一起（网关不路由 `/internal`），见 [admin.md](admin.md#提现审核)。
 - **发送**（处理器，按创建顺序逐笔）：链上手续费上限（`WALLET_MAX_FEE_GWEI`，默认 100）以内、热钱包够付金额 + gas 时才发送，否则停在 APPROVED（`wallet_withdrawals_waiting`、告警 WalletWithdrawalsWaiting），并且挡住后面的提现，保证 nonce 连续。nonce 取"库里记录的下一个"与"节点 pending 计数"的较大者，签名成功后才占用，签名失败不会留下空洞。状态先置 SIGNING（此后不可撤销）→ 签名服务签名 → 先落库（`withdrawal_attempts`）再广播 → 账本 `WITHDRAW_SETTLE`（§11.6：广播成功即扣减；键 `withdraw-settle:<id>`，失败会重试）。
 - **确认与替换**：任一尝试的回执出现即开始计确认数，满网络确认数（Sepolia 12）为 CONFIRMED，实际 gas 记入 `chain_fees` 由账本记 `GAS_SUPPLY → WITHDRAWAL_PENDING`。10 分钟（`WALLET_REPLACE_AFTER`）未上链则用同一 nonce、费用提高 25%（或市场价，取高者，不超过上限）签发替换交易，所有尝试的 tx_hash 都保留；节点丢失的交易一分钟后重发。签名服务拒签（如超过它的每日限额）或链上执行失败的提现置为 FAILED 并告警，需人工处理（上链前失败的会自动解冻）。
 - **站内地址**：收款地址是平台其他用户的充值地址时手续费为 0；批准后账本记 `INTERNAL_TRANSFER`（付款方冻结 → 收款方可用），提现直接 CONFIRMED，收款方生成一条 `kind = INTERNAL` 的充值记录（`tx_hash` 为 `internal:<提现 ID>`），双方都有通知。
@@ -149,7 +149,7 @@ SELECT asset, available FROM ledger.accounts WHERE account_type = 'UNCLAIMED_DEP
 ```
 
 - 重扫一段区块（例如漏扫怀疑）：停 wallet-service，`UPDATE wallet.scan_cursors SET block = <起点-1>` 并删掉 `wallet.scanned_blocks` 中更高的块，再启动。已记录的充值不会重复（唯一键），ORPHANED 的会复活。
-- 未入账资金的处置（2026-10-02 C2c）：管理后台「充值 → 待处理」把已记入 `UNCLAIMED_DEPOSIT` 的充值按原币种、原数量入账给用户（账本 `ReleaseUnclaimed`，分录 `DEPOSIT_CREDIT`，充值变 `CREDITED`），或驳回（只标记已处理，资金留在 `UNCLAIMED_DEPOSIT`）；未支持的代币没有记账，只能驳回，要补偿走调账。见 [admin.md](admin.md#充值处置与补记2026-10-02-设计-43c2c)。不要手工改 `wallet.deposits` 或调账。
+- 未入账资金的处置（2026-10-02 C2c）：管理后台「充值 → 待处理」把已记入 `UNCLAIMED_DEPOSIT` 的充值按原币种、原数量入账给用户（账本 `ReleaseUnclaimed`，分录 `DEPOSIT_CREDIT`，充值变 `CREDITED`），或驳回（只标记已处理，资金留在 `UNCLAIMED_DEPOSIT`）；未支持的代币没有记账，只能驳回，要补偿走调账。见 [admin.md](admin.md#充值处置与补记)。不要手工改 `wallet.deposits` 或调账。
 - 切换节点：改 apps.env 的 URL 后重启 wallet-service；扫描从游标继续。
 
 ## 端到端

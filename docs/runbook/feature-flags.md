@@ -16,7 +16,7 @@
 | `market.reference_ticker` | 最新价、24h 统计、买一卖一显示参考行情（币安）的 ticker（按交易对；合约用指数交易对；测试服打开，ADR-0010，见 [market-data.md](market-data.md#参考-tickermarketreference_ticker)） | 4 |
 | `market.halt_on_feed_loss` | 币安行情中断 5 分钟时暂停跟随它的交易对，恢复 30 秒后放开（测试服打开，见 [market-data.md](market-data.md#行情中断保护markethalt_on_feed_loss)） | 4 |
 | `admin.login_without_totp` | 管理后台只凭邮箱与密码登录，不要求也不校验身份验证器验证码（用户 2026-09-30 决定暂不启用验证码；测试服打开，见 [admin.md](admin.md#登录与会话)） | 4 |
-| `admin.two_person_approval` | 管理后台的资金操作（调账、保险基金注资、需两人审核的提现）要另一位管理员批准；关闭（单人模式）时一位管理员在限额内直接执行，超过限额仍需两人（测试服关闭；后台「设置」可改，只有 ADMIN；见 [admin.md](admin.md#资金操作单人与双人审批2026-10-02-设计-c1)） | 4 |
+| `admin.two_person_approval` | 管理后台的资金操作（调账、保险基金注资、需两人审核的提现）要另一位管理员批准；关闭（单人模式）时一位管理员在限额内直接执行，超过限额仍需两人（测试服关闭；后台「设置」可改，只有 ADMIN；见 [admin.md](admin.md#资金操作单人与双人审批)） | 4 |
 | `market.reference_feed` | 接入参考行情（币安公开数据，仅测试环境）：参考价、K 线、ticker、盘口，指数价与标记价都依赖它（测试服打开，见 [market-data.md](market-data.md)） | 2 |
 | `market.reference_depth` | 公共盘口与成交显示参考市场（币安）的而不是平台的（按交易对；测试服对全部跟随的交易对打开，见 [market-data.md](market-data.md#参考盘口与成交marketreference_depth阶段-4-b4)） | 4 |
 | `market.house_liquidity` | HOUSE 按参考盘口当对手方（虚拟流动性，按交易对/合约；测试服允许 `deploy/instruments/test.json` 的全部交易对与合约：所有交易都与 HOUSE 成交，用户决定 2026-10-02，`scripts/ops/house.sh flags`，见 [market-maker.md](market-maker.md)） | 4 |

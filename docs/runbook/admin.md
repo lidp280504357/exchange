@@ -1,6 +1,6 @@
 # 管理后台（admin-service 与 web/apps/admin）
 
-实施计划 §6.3 任务 11，需求 §5.12（RBAC、双人审批、操作审计、提现审批、交易对管理、功能开关、用户处置）、§5.14。
+实施计划 §6.3 任务 11，需求 §5.12（RBAC、双人审批、操作审计、提现审批、交易对管理、功能开关、用户处置）、§5.14；2026-10-02 起按 [设计-管理后台重构](../设计-管理后台重构-2026-10-02.md) 重做（批次 C1–C6）。本文按后台侧栏的分组组织（C6 重写）：先是组成、登录、角色与各页通用的规则，再按「概览 · 用户 · 资金 · 交易 · 市场 · 模拟市场 · 风控 · 运营 · 系统」逐页说明内容、接口、权限、审计与规则，最后是运维、测试与错误码。各条后面括号里的批次号（C1、C5.5 ⑥ 等）指引入它的批次，验收记录在设计稿 §10。
 
 ## 组成
 
@@ -8,23 +8,25 @@
 浏览器 https://admin.astras.vip/ ──nginx──> 静态文件（web/apps/admin 构建产物，/opt/exchange/infra/nginx/sites/admin）
                      /admin/v1/* ──nginx──> admin-service:8093（不经用户网关）
 https://astras.vip/admin/* ──301──> https://admin.astras.vip/*（旧后台的地址，阶段 4 B5 起）
-admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）、user-service（改账户状态）、
-                        ledger-service（余额、手动调账、保险基金注资与系统账户余额）、
-                        instrument-service（资产、交易对与合约，改交易对与合约状态）
-              ──内部 REST──> wallet-service（提现列表与审批）、spot-trading-service（撤销用户全部挂单）、
-                             derivatives-service（合约状态与只减仓、强平监控）
+admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、账户安全）、user-service（账户与状态）、
+                        ledger-service（余额、资金操作、风控冻结、系统科目与对账）、
+                        instrument-service（资产、交易对与合约的配置与状态）、risk-service（风控评估）
+              ──内部 REST──> wallet-service（提现、充值处置、托管方）、spot-trading-service（撤单）、
+                             derivatives-service（合约、仓位、强平）、notification-service（文章与站内信）、
+                             market-sim（模拟市场）、market-data-service（行情源状态）
               ──config schema──> 功能开关（与 exchangectl flags 同一张表，变更与审计事件同一事务）
-              ──ClickHouse audit_logs──> 审计查询
-              ──admin schema──> 管理员、会话、双人审批申请；自己的 outbox 发 audit.events
+              ──ClickHouse──> 审计查询、订单/成交/充值读模型、报表
+              ──admin schema──> 管理员、会话、资金操作、待生效修改、设置、幂等键；自己的 outbox 发 audit.events
 ```
 
-- 服务：admin-service，HTTP 8093（nginx 转发 `/admin/v1/`），运维 9094，schema `admin`（`admins`、`admin_sessions`、`approvals`、`settings`）。契约 `api/admin/admin.yaml`（不进公开 API 文档）。
-- 前端：`https://admin.astras.vip`（`web/apps/admin`，浅色主题，阶段 4 B5 重做完成，见下文「后台页面」）。整站包含 `snippets/admin-access*.conf`，可以挂访问限制，见 [web.md](web.md)；用户 2026-09-30 决定暂不做访问限制，服务器上没有这个文件。阶段 2 的旧后台 `web/admin`（`https://astras.vip/admin/`）已删除，旧地址 301 到新后台的同一路径。本机 `task web:dev -- admin`（http://localhost:5180），`/admin/v1` 代理到测试服。
-- 与需求的差异：需求要求独立域名与网关、仅办公网/VPN 访问。学习项目只有一个域名，改为同域名的 `/admin/` 路径 + 独立服务（不经用户网关）+ 强制 TOTP；会话 Cookie 限定 `Path=/admin/`，与用户站的 Cookie 互不可见。阶段 4 起后台有了独立域名 `admin.astras.vip`；访问限制与 TOTP 目前按用户决定暂缓（见下文）。
+- 服务：admin-service，HTTP 8093（nginx 转发 `/admin/v1/`），运维 9094，schema `admin`（`admins`、`admin_sessions`、`approvals`、`settings`、`instrument_changes`、平台表 `idempotency_keys`）。契约 `api/admin/admin.yaml`（不进公开 API 文档；改完 `task web:types`）。
+- 前端：`https://admin.astras.vip`（`web/apps/admin`，浅色主题）。整站包含 `snippets/admin-access*.conf`，可以挂访问限制，见 [web.md](web.md)；用户 2026-09-30 决定暂不做访问限制，服务器上没有这个文件。阶段 2 的旧后台 `web/admin`（`https://astras.vip/admin/`）已删除，旧地址 301 到新后台的同一路径。本机 `task web:dev -- admin`（http://localhost:5180），`/admin/v1` 代理到测试服。
+- 与需求的差异：需求要求独立域名与网关、仅办公网/VPN 访问。学习项目先用同域名的 `/admin/` 路径 + 独立服务（不经用户网关）+ 强制 TOTP；会话 Cookie 限定 `Path=/admin/`，与用户站的 Cookie 互不可见。阶段 4 起后台有了独立域名 `admin.astras.vip`；访问限制与 TOTP 目前按用户决定暂缓（见下文）。
+- 请求体大小：后台 API 一般限 64 KB（nginx），文章与资产资料的接口放宽到 512 KB（长正文、base64 图标）。
 
 ## 登录与会话
 
-- 没有注册入口：管理员由 ADMIN 在「系统 → 管理员与角色」页创建（C4，见下文）；没有 ADMIN 能登录时，运维用 `exchangectl admin create` 在 admin-service 容器里创建（它有 `ADMIN_SECRET_KEY`）。
+- 没有注册入口：管理员由 ADMIN 在「系统 → 管理员与角色」新建（见下文「管理员与角色」）；没有 ADMIN 能登录时，运维用 `exchangectl admin create` 在 admin-service 容器里创建（它有 `ADMIN_SECRET_KEY`，见「运维」）。
 - 登录 = 邮箱 + 密码（Argon2id，至少 12 位）+ 身份验证器 6 位码（RFC 6238，前后一步误差，每个时间步只能用一次）。连续 5 次失败锁定 15 分钟；同一 IP 每分钟最多 10 次登录请求。未知邮箱与已知邮箱耗时相同。
 - **暂不校验验证码**（用户 2026-09-30 决定）：开关 `admin.login_without_totp` 打开时只凭邮箱与密码登录。
   - 验证码不要求也不校验；登录页通过 `GET /admin/v1/login-options`（`totp_required`）得知后隐藏验证码输入框（选项读到之前登录按钮等待，读不到时显示输入框）。
@@ -33,285 +35,386 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 - 会话：随机令牌只存 SHA-256；Cookie `admin_session`，HttpOnly、Secure、SameSite=Strict、Path=/admin/；8 小时到期，1 小时无请求失效；退出或停用管理员时服务端撤销。
 - CSRF：除 GET 外每个请求必须带 `X-Admin-CSRF: 1`（跨站表单无法设置自定义头；Cookie 又是 SameSite=Strict）。
 - TOTP 密钥用 `ADMIN_SECRET_KEY`（AES-256-GCM，附加数据为管理员 ID）加密存放；换掉这个密钥会让所有管理员的 TOTP 失效，只能重建账号。
+- **一次性设置链接**（C5.5 ⑪）：新建管理员与重置口令或身份验证器都不把口令或密钥交给操作的 ADMIN，只给一条设置链接（`https://admin.astras.vip/setup#token=…`，24 小时内有效、只能用一次）。
+  - 链接里的令牌只在那一次响应里出现（`Cache-Control: no-store`），不写日志、不进审计，服务端只存它的 SHA-256；放在地址的 `#` 之后，不进任何服务器日志，页面读到后立即从地址栏去掉。
+  - 本人打开 `/setup` 页（不用登录）：新建的链接设口令（至少 12 位，输两次）并绑定页面显示的身份验证器（二维码与密钥，输入当前 6 位码证明已绑好）；重置口令的只设口令（身份验证器不变）；重置身份验证器的只绑定（口令不变）。完成后链接作废，用新的口令与身份验证器登录。
+  - 审计 `admin.setup_completed`（以本人名义，详情为种类与来源 IP）；新建与重置的审计详情有链接的种类与到期时间。
+  - 链接没用就又重置时，新链接包含旧链接要设的部分（例如口令链接未用又重置身份验证器，新链接两样都设），不会留下谁都不知道的口令或密钥。服务端只存 Argon2id 哈希与用 `ADMIN_SECRET_KEY` 加密的 TOTP 密钥（等待绑定的另用一个附加数据加密）。
+  - 接口（不用会话，与登录共用每个 IP 每分钟 10 次的限制）：`POST /admin/v1/setup/inspect`（`{token}` → 账号、种类、到期时间与要绑定的密钥）、`POST /admin/v1/setup`（`{token, password?, totp_code?}`，204）。
+  - 威胁行（协调会话代用户决定）：取"可追溯而非阻止"——设置链接加审计；"决策人的口令或验证器来自请求人签发的链接且未自行更换时不得作第二人"记为后续行 ⑪b，等真有多名管理员时再做。
+- **自己的口令与身份验证器**（右上角菜单「账号与安全」，`/account`，C5.5 ⑪）：
+  - 改口令要当前口令，新口令至少 12 位；换身份验证器要当前口令，登录要验证码时（`admin.login_without_totp` 关闭）还要当前身份验证器的 6 位码（测试服开着这个开关，只凭口令就能换绑，C5.5 ㉒），页面给出新的二维码与密钥，10 分钟内输入新码完成绑定，之前旧的仍可登录。
+  - 两种修改都结束自己在其它设备上的会话，审计 `admin.password_changed`、`admin.totp_changed`。每位管理员 15 分钟最多 10 次（`COMMON_RATE_LIMITED`）。
+  - `exchangectl admin create` 交互生成的口令（不带 `--secrets-stdin`）标记为必须修改：登录后只能看自己（`GET /admin/v1/me`，带 `must_change_password`）、改口令与退出，其它请求都是 403 `ADMIN_PASSWORD_CHANGE_REQUIRED`，后台只显示改口令的页面。
+  - 接口：`POST /admin/v1/me/password`（`{current_password, new_password}`）、`POST /admin/v1/me/totp/start`（`{current_password, totp_code?}` → `{totp_secret, totp_uri}`）、`POST /admin/v1/me/totp`（`{totp_code}`）。
 
 ## 角色与权限
 
 | 角色 | 权限 |
 |---|---|
-| ADMIN | 全部（28 项），包括只有它有的 `settings.write`（后台设置：双人审批与单人限额）、`admins.manage`（管理员：创建、改角色、停用与启用、重置口令与身份验证器（都只给一次性设置链接）、结束会话）、`instruments.trading`（交易参数：状态、费率、风险阶梯、参考符号，见下文「交易参数的护栏」）与 `withdrawals.resume`（解除资产的提现暂停，C5.5 ⑯） |
+| ADMIN | 全部（28 项），包括只有它有的 `settings.write`（后台设置：双人审批与单人限额）、`admins.manage`（管理员：创建、改角色、停用与启用、重置口令与身份验证器（都只给一次性设置链接）、结束会话）、`instruments.trading`（交易参数：状态、费率、风险阶梯、参考符号，见「交易参数的护栏」）与 `withdrawals.resume`（解除资产的提现暂停，C5.5 ⑯） |
 | OPERATOR | 读 + 改账户状态、撤销用户挂单（全部或单笔）、编辑交易参数以外的参考数据与上架新交易对（`instruments.write`）、解除合约只减仓与强制平仓（`derivatives.write`）、切换功能开关（后台自己的 `admin.*` 开关除外）、备注与标签（`users.notes`）、账户安全操作与换绑审核（`users.security`）、查看完整联系方式（`users.contacts`）、风控冻结（`ledger.hold`）、公告与帮助（`content.write`）、站内信（`notices.send`）、模拟市场的价格事件与参数（`sim.control`，C5） |
-| FINANCE | 读 + 提现审批与搁置、发起与审批手动调账（现货或合约账户）和保险基金注资、充值处置与补记（`deposits.review`）、备注与标签、查看完整联系方式、风控冻结 |
+| FINANCE | 读 + 提现审批与搁置、发起与审批资金操作（手动调账（现货或合约账户）、保险基金注资、增发、托管方手续费的入账与核销）、充值处置、补记与无主充值记给用户（`deposits.review`）、备注与标签、查看完整联系方式、风控冻结 |
 | AUDITOR | 只读（用户（联系方式脱敏）、资产与交易对、合约（`derivatives.read`）、功能开关、提现、审计日志、报表），外加导出审计日志（`audit.export`：CSV 里有邮箱与 IP，只有 ADMIN 与 AUDITOR 能导出，C5.5 ⑪） |
 
-越权返回 403 `ADMIN_FORBIDDEN`。每位管理员都能在右上角菜单的「账号与安全」（`/account`）改自己的口令与身份验证器，见下文「管理员、系统健康与审计导出」。前端按 `/admin/v1/me` 返回的权限列表显示菜单与按钮，但以服务端检查为准。`admin.*` 开关（`admin.login_without_totp`、`admin.two_person_approval`）在开关页也要 `settings.write`，运营不能借开关页关掉双人审批。
+- 越权返回 403 `ADMIN_FORBIDDEN`。前端按 `/admin/v1/me` 返回的权限列表显示菜单与按钮，但以服务端检查为准。`GET /admin/v1/roles`（任何管理员可读）给出角色与权限的矩阵。
+- `admin.*` 开关（`admin.login_without_totp`、`admin.two_person_approval`）在开关页也要 `settings.write`，运营不能借开关页关掉双人审批。
 
-## 资金操作：单人与双人审批（2026-10-02 设计 C1）
+## 各页通用的规则
 
-资金操作 = 手动调账（`MANUAL_ADJUSTMENT`，对手方 `ADJUSTMENT`）、保险基金注资（`INSURANCE_CONTRIBUTION`）、补记充值（`DEPOSIT_BACKFILL`，C2c）与无主充值记给用户（`DEPOSIT_ASSIGN`，C5.5 ㉑；两者见下文「充值处置与补记」）。每笔都是 `approvals` 表的一行（`mode` 为 `SINGLE` 或 `TWO_PERSON`），账本以幂等键 `approval:<id>` 只记一次（补记由 wallet-service 按托管方交易号只记一次）。
+- **外壳**（设计 §3、§6，C1 起）：浅色为主，顶栏菜单与「设置 → 外观」可切深色（存在本机 `admin.theme`；深色复用用户站令牌）。侧栏是 `data-theme="dark"` 的深色岛，按「概览 · 用户 · 资金 · 交易 · 市场 · 模拟市场 · 风控 · 运营 · 系统」分组折叠（记在本机），没有权限的项隐藏，可收成图标栏。
+  - 顶栏：环境标识、审批方式（单人/双人，点开设置）、全局搜索（⌘K / Ctrl+K；用户 ID、邮箱、手机号打开用户页，订单号进入订单列表，交易哈希进入充值列表）、待办铃铛、主题、账户菜单（邮箱、角色、账号与安全、主题、退出）。
+  - 动效：登录页左半屏网格与两团漂移光斑、字标描边绘制，表单淡入上移、输入框聚焦底线从中间展开、登录中进度条、成功打勾；验证码 6 格输入（粘贴自动填满）。进入控制台侧栏滑入、卡片间隔 40 ms 淡入；切换页面内容区淡入上移 160 ms；概览数字滚动、趋势图从左向右描画 600 ms、异常服务的状态点呼吸；提示条从右下滑入、成功打勾（设计 §6 写的是右上，放右上会盖住抽屉的按钮，C4b 改到右下，见设计稿 §0）。只动 transform/opacity（字标与对勾的描边除外），`prefers-reduced-motion` 时全部关闭。
+- **列表**（设计 §10.2，阶段 4 B1 起）：所有列表接口统一用不透明游标分页，返回 `{items, next_cursor}`；`next_cursor` 原样作为下一页的 `cursor` 传回，最后一页为 null；`limit` 为 1–200，默认 50（审计日志与强平记录最多 500，默认 100）。页面每页条数可在「设置」里按本浏览器改（20/50/100/200，存在本机 `admin.page_size`），滚到底自动加载下一页；筛选条件写在地址栏（可分享、后退可恢复），可另存为本机"视图"；文本筛选在停止输入 0.5 秒或回车后生效。
+- **确认框**：危险操作统一用确认框——显示对象、理由至少 10 个字（进审计）、手动输入确认词（ID 后 4 位、交易对代码、资产代码或金额），结果用提示条告知，失败时附可复制的追踪 ID。确认词只在页面上核对（服务端靠权限、幂等键、限额与双人升级把关，㉔ 评审接受）；对话框里要填的东西不完整时（例如用户 ID 不是 UUID、金额不是正数）确认按钮不可用（㉕）。
+- **显示**：枚举都有中文标签，悬停显示原始代码；金额按十进制字符串原样显示并加千分位；时间按设置里的时区。
+- **幂等键**（C5.5 ⑥）：所有动钱的请求必须带请求头 `Idempotency-Key`（≤ 128 字，缺了 400）：调账两条路由、保险基金注资、补记、无主充值记给用户、增发、冻结与解冻、强制平仓、提现审核与批量审核、待处理充值入账、站内信。
+  - 后台对话框每次打开生成一个键，结果未知（网络断、5xx、键冲突）时重试沿用，结果确定或关闭对话框后换新键。
+  - 键归各管理员所有，存在 admin 库平台表 `idempotency_keys`（`scope` 为「管理员 ID + 动作」，`response` 是请求生成的 ID），保留 24 小时，admin-service 每小时清理一次。
+  - 第一次请求按键生成 ID：资金操作、冻结 ID、平仓单的 `client_order_id`、站内信 ID 都取自它。同一请求再来，返回同一笔（资金操作原样返回，单人模式下结果未知的会被完成；冻结、平仓单、站内信由下游按 ID 去重；提现审核、解冻、入账已由本人做过的返回当前状态）；同一键换了内容返回 409 `COMMON_IDEMPOTENCY_CONFLICT`。
+  - 站内信的审计 `admin.notices.sent` 与键在同一事务里先写，再交给 notification-service（它接受调用方给的 ID，同一 ID 再发返回原消息）。
+  - 除资金操作外，键在执行之前单独占用；重放返回的是对象**现在**的样子（例如站内信已是 `SENT`），不是第一次请求时的响应（C5.5 ⑮，可接受）。
+  - 不带幂等键的写操作靠状态防重：托管方手续费的入账与核销（处理过的再处理得到 409）、提现暂停的解除（已解除得到 404）。
+- **待办与实时推送**（C1）：
+  - `GET /admin/v1/todo`：`withdrawals` 待审核提现（最多数到 200）、`approvals` 待处理的资金操作、`identity_requests` 待审核的换绑申请（有 `users.security` 才数，最多数到 200，C2）、`deposits` 等人处理的充值（有 `deposits.review` 才数，最多数到 200，C2c）与 `instrument_changes` 待生效的交易参数修改（C3c），按角色返回（没有权限的为 0），读不到的记在 `partial`。
+  - `GET /admin/v1/events`：Server-Sent Events。连上即发一次 `todo`，之后每 10 秒检查、变了才发；20 秒没有事件发一行注释保活（nginx 读超时 60 秒、Cloudflare 100 秒）；会话结束（退出、过期、停用）时发 `signed_out` 并关闭。流本身不算请求，不会让会话保持活跃。响应头 `X-Accel-Buffering: no` 让 nginx 不缓冲；服务端对这条连接取消读写超时。
+  - 前端只开一条流，写进 Query 缓存；流断开时每 15 秒轮询 `/todo`。侧栏角标与顶栏铃铛来自它，数字增加时弹跳；铃铛与概览的各项进入对应列表。
+- **读模型的时效**：订单、成交、充值、审计、报表与概览的交易部分来自 ClickHouse，比服务晚几秒。
 
-- **开关 `admin.two_person_approval`**（未设置即关闭）。打开：每笔都要另一位管理员批准（原流程）。关闭（单人模式，测试服现状，因为只有一位管理员）：有权限的管理员自己执行，但有护栏：
+## 页面一览
+
+| 分组 | 页面 | 内容 |
+|---|---|---|
+| 概览 | 概览 `/` | 待办（待审提现、待处理资金操作、身份变更申请、待处理充值、待生效修改）、24 小时指标（数字滚动，可点进对应列表）、近 7/30 天成交与新增用户图、17 个服务的就绪状态与耗时、HOUSE 库存估值与盈亏、托管方状态（可访问、短缺、待处理回调、处理中的提现） |
+| 用户 | 用户 `/users`、用户页 `/users/<id>` | 按 ID/邮箱/手机号查找，按状态、地区、注册时间筛选，列表带标签；用户页见「用户页」 |
+| 用户 | 身份变更申请 `/identity-requests` | 待审核的换绑（值脱敏），通过或拒绝 |
+| 资金 | 充值 `/deposits` | 三个视图：全部（按用户、资产、网络、状态、交易哈希筛选）、待处理（入账给用户、驳回、无主充值记给用户）、补记待回调；「补记充值」抽屉 |
+| 资金 | 提现审核 `/withdrawals` | 默认待审批队列（旧到新），可切换状态，按折合金额区间、风控分、是否搁置、网络筛选；详情抽屉（进度、地址簿记录、今日与本月已提、风控、审批人、托管方回调），批准/拒绝/搁置，批量审核；暂停的资产有横幅；有新的待审批提现时出现"有新数据"条，不整表轮询 |
+| 资金 | 托管方 `/custody` | 优盾与替身两个托管方（页头切换）：状态与处理中的提现、币种与余额、对账、回调日志（筛选、原始请求、来源地址、重放）、托管方手续费（入账、核销） |
+| 资金 | 资金调整 `/adjustments` | 审批方式与 24 小时已用额、查找用户、方向/账户/资产/数量/关联单号；单人模式下立即记账并显示分录号与两条分录，或显示待审原因；最近的资金操作 |
+| 资金 | 审批 `/approvals` | 资金操作（默认待处理），方式与转审原因、申请人与审批人；批准、拒绝、完成（待核对的）、撤回（自己的） |
+| 资金 | 对账与系统科目 `/ledger` | 每项对账检查的最近一次结果与最近的不一致；系统科目余额 |
+| 交易 | 订单与成交 `/orders` | 两个标签；按用户、订单号、交易对、状态、方向、账户（用户或机器人）、时间筛选；HOUSE 一方显示为 HOUSE，机器人标出；导出已加载的行为 CSV |
+| 交易 | 仓位 `/positions` | 全部用户的合约持仓（风险最高的在前，HOUSE 在最后），风险仓位筛选，强制平仓 |
+| 交易 | 强平记录 `/liquidations` | 强平引擎的每一步，按环节、合约、用户、近 1/7/30/90 天筛选 |
+| 交易 | 合约与保险基金 `/derivatives` | 合约状态、只减仓与解除、标记价、持仓量；保险基金与注资 |
+| 交易 | HOUSE 敞口 `/house` | 合计、近 30 日盈亏、敞口、库存、各交易对、各合约净头寸（C6 重做） |
+| 市场 | 资产与交易对 `/instruments` | 交易对、资产（含网络与资料）、合约（含风险阶梯）、费率档、上架向导、待生效修改六个标签，可搜索；先预览再生效 |
+| 模拟市场 | 概览、价格控制、事件日程、机器人集群、代币信息 `/sim/*` | 见「模拟市场」 |
+| 风控 | 功能开关 `/risk` | 全部功能开关（说明、规则摘要、最后修改人），切换要确认 |
+| 运营 | 公告 `/announcements`、帮助中心 `/help-articles` | 文章列表、中英文编辑器与预览、发布（立即或定时）与下线；站点自带文章可复制来编辑 |
+| 运营 | 站内信 `/broadcasts` | 发过的消息（对象、已收到、已读、失败轮次）、详情、继续发送与发送表单 |
+| 系统 | 管理员与角色 `/admins` | 管理员列表与操作、角色权限矩阵 |
+| 系统 | 审计 `/audit` | 按操作人、对象、事件、时间筛选；行详情与逐字段的变更；服务端导出 CSV |
+| 系统 | 报表 `/reports` | 交易、充提、合约、用户增长、HOUSE 盈亏、持仓量 |
+| 系统 | 系统健康 `/health` | 各服务就绪、版本、Kafka 滞后与死信，对账、行情源、托管方 |
+| 系统 | 设置 `/settings` | 双人审批与限额、交易参数的等待时间（ADMIN 可改）；本浏览器的外观、语言与每页条数 |
+| 账户菜单 | 账号与安全 `/account` | 改自己的口令与身份验证器 |
+
+## 概览
+
+- `GET /admin/v1/dashboard?days=7`（`reports.read`）：
+  - 账户总数与 24 小时新增；
+  - 24 小时成交笔数、活跃交易用户、按报价资产的成交额；
+  - 待确认充值与待审核提现；
+  - 24 小时风控事件；
+  - 行情连接状态与因断流暂停的交易对（market-data 的 `/internal/market/feed`）；
+  - 按日的新增用户、成交笔数与 USDT 成交额。
+
+  哪一部分读不到就留空，并记在 `partial` 里。
+- 页面另读待办（`/todo`）、服务健康（`/health`）、HOUSE（`/house`）与托管方（`/custody`）；「服务状态」卡片有「详情」进入「系统健康」。
+
+## 用户
+
+### 用户列表与查找
+
+- `GET /admin/v1/users`：账户，新到旧，可按状态、地区、注册时间过滤，数据来自 user-service 的 `ListUsers`；列表带标签。
+- 查找 `GET /admin/v1/users/lookup?q=`：按用户 ID、邮箱或手机号（`+` 开头的 E.164）找到账户；全局搜索也用它。
+- 改账户状态（`users.status`；状态机见需求附录 B，原因为大写代码，例如 `SUSPICIOUS_LOGIN`、`REVIEW_CLEARED`；user-service 记审计，操作者为管理员邮箱）；强制撤销用户全部挂单（`orders.cancel`，撮合引擎异步完成）。
+
+### 用户页
+
+用户有自己的页面 `/users/<id>`（C2；原抽屉的地址 `?user=<id>` 跳到这里）：左侧是账户摘要与处置，右侧是标签页。
+
+- **摘要**：UID、邮箱与手机号（脱敏；有 `users.contacts` 的可点「显示完整」，每次都审计 `admin.users.contacts_revealed`，只记显示了哪几种、不记值；离开页面即丢弃）、状态与标签、注册与最近登录、风险评分（风控规则最近一次命中的分数与动作）。
+- **资料与身份**：基本资料、身份（类型、脱敏值、验证与绑定时间）、已同意的条款与风险披露版本、状态变更时间线（user-service gRPC `GetUserHistory`）。
+- **安全**（auth-service 的 gRPC，见 [auth.md](auth.md#管理后台的安全操作grpcc2)）：身份验证器状态与重置、密码修改时间与登录锁定、生成临时密码、活跃会话（逐个或全部退出）、设备、登录记录（游标分页）。操作需 `users.security` 与理由，审计 `admin.users.totp_reset`、`admin.users.password_reset`、`admin.users.sessions_revoked`。
+  - **临时密码**只显示一次（应答带 `Cache-Control: no-store`，不进日志与审计）：原密码失效、全部会话退出、登录锁定清除，用户收到密码重置邮件，24 小时内的提现转人工审核。通过可信渠道告知用户，并提醒用户登录后立即修改。用户站暂不强制"下次登录必须改密码"（见设计稿 §10 C2 的遗留）。
+  - 用户的身份验证器被后台重置或用户自己解绑后，24 小时内的提现转人工审核（C5.5 ⑤，auth `totp_changed_at`）。
+- **风控**：风控规则对该用户的评估（触发事件、分数、动作、是否执行、命中规则及说明；risk-service 只读 gRPC `ListAssessments`），并可转人工审核（`RISK_REVIEW`）或审核通过后恢复（同「改账户状态」，需 `users.status`）。
+- **余额与资金**：现货与合约账户每个资产的可用、冻结、合计与 USDT 估值（按该资产 USDT 交易对的最新价，没有价格的列出来、不计入总估值）；调整余额可选现货或合约账户（资金操作，见下文）。
+  - **风控冻结**（`ledger.hold`，ADMIN、OPERATOR、FINANCE）：冻结现货可用余额的一部分或解冻，由账本记分录与审计（见 [ledger.md](ledger.md#接口)）。
+  - **卡住的风控冻结**：别处多解冻了这部分资金时，后台解冻会一直报 `LEDGER_INSUFFICIENT_BALANCE`。运维用 `exchangectl ledger release-hold --id <冻结单ID> --reason "..."` 解冻冻结余额里属于这张冻结单的部分（扣掉其它冻结单、活动订单、待处理提现与 24 小时内还没结算的成交所占的冻结；有未结算成交时要加 `--force`；`--amount` 只能更少，见 [ledger.md](ledger.md)），审计 `ledger.hold_released` 带 `"forced": true` 与实际解冻数（C5.5 ⑧、⑯、⑳、㉒）。
+  - **合约账户的扣减**：确认框显示扣减后的全仓权益与维持保证金（`GET /admin/v1/users/{id}/futures-margin?debit=`，按 derivatives-service 风控的口径），会进入预警或会被强平时标红（C5.5 ⑧）。
+- **订单**：现货订单（可单笔撤单，`orders.cancel`，审计 `admin.orders.canceled`）与合约当前委托（可单笔撤单，审计 `admin.derivatives.order_canceled`）。
+- **仓位**：合约持仓（开仓均价、标记价、预估强平价、未实现盈亏、保证金与模式），每 5 秒刷新。
+  - **强制平仓**（`derivatives.write`）先撤该用户在这个合约上的全部挂单（含开仓单，免得平仓后又成交开回去；止盈止损单不撤，它们只会平仓），再以市价全部平掉，见 [derivatives.md](derivatives.md#管理后台与读模型)。撤单与下平仓单之间不锁用户，用户仍可能再开仓，平完再看一眼仓位。
+  - 后台最多等约 5 秒看平仓单结束，提示是全部成交还是只成交一部分（盘口薄时剩下的仓位要再平一次）。还没结束时对话框留着（同一个幂等键），提示"已下单、未成交完"，再点确认会查到同一笔订单并记审计 `admin.derivatives.position_closed`（C5.5 ⑯）；改了理由再确认也一样（键不绑理由，C5.5 ⑱）。这只在对话框没关、24 小时内有效：关了对话框或过了 24 小时再平，是新的一笔 ADMIN 单，第一笔的 `position_closed` 不会补写（协调会话决定接受）；要追溯它，用请求审计 `admin.derivatives.position_close_requested` 里的 `client_order_id` 在合约订单里查。
+  - 审计两条（C5.5 ⑧）：`admin.derivatives.position_close_requested`（与幂等键一起写，每个请求一次）和 `admin.derivatives.position_closed`（订单结束后，带 `status`、`filled_quantity`、`complete`）。
+  - HOUSE 的仓位不能平（422 `DERIV_HOUSE_NOT_CLOSED`）。
+- 成交、充值、提现、**备注与标签**（`users.notes`；备注只增不改，审计 `admin.users.note_added`；标签为大写代码，整体替换，审计 `admin.users.tags_changed` 带前后值）、审计。
+- **接口**：`GET /admin/v1/users/{id}`、`/notes`（GET、POST）、`PUT …/tags`、`GET …/security`、`POST …/contacts/reveal`、`GET …/login-history`、`POST …/sessions/revoke`、`POST …/totp-reset`、`POST …/password-reset`、`GET …/history`、`GET …/risk`、`GET …/balances`、`GET/POST …/holds`、`DELETE …/holds/{hold}`、`POST …/orders/{order}/cancel`、`GET …/contract-orders`、`POST …/contract-orders/{order}/cancel`、`GET …/positions`、`POST …/positions/close`、`GET …/futures-margin`。与设计稿 §5 的差别：强制平仓按（用户、合约、持仓方向）指定仓位，不用仓位 ID（平仓后再开会换 ID）；解冻用 `DELETE …/holds/{hold}` 带理由的请求体。
+
+### 身份变更申请
+
+`/identity-requests`（侧栏「用户」组，C2）：只有一种身份的用户换绑邮箱或手机号要人工审核（auth-service 的 `auth.identity_rebind_requests`，见 [auth.md](auth.md)）。默认列出待审核的，值脱敏；有 `users.security` 的可通过（身份改为新值并通知用户）或拒绝，需理由，审计 `admin.users.identity_request_decided`。接口 `GET /admin/v1/identity-requests`、`POST /admin/v1/identity-requests/{id}/decide`。
+
+## 资金
+
+### 资金操作：单人与双人审批
+
+资金操作（C1 起）= 手动调账（`LEDGER_ADJUSTMENT`：分录 `MANUAL_ADJUSTMENT`，对手方 `ADJUSTMENT`；现货或合约账户）、保险基金注资（`INSURANCE_FUND`：`INSURANCE_CONTRIBUTION`）、补记充值（`DEPOSIT_BACKFILL`，C2c）、无主充值记给用户（`DEPOSIT_ASSIGN`，C5.5 ㉑；这两种见「充值处置与补记」）、模拟市场的增发（`SIM_MINT`）与超出单人份额的价格事件与参数（`SIM_EVENT`、`SIM_PARAMS`，见「模拟市场」）。每笔都是 `approvals` 表的一行（`mode` 为 `SINGLE` 或 `TWO_PERSON`），账本以幂等键 `approval:<id>` 只记一次（补记由 wallet-service 按托管方交易号只记一次，记给用户由账本按充值与用户只放行一次）。
+
+- **开关 `admin.two_person_approval`**（未设置即关闭）。打开：每笔都要另一位管理员批准。关闭（单人模式，测试服现状，因为只有一位管理员）：有权限的管理员自己执行，但有护栏：
   - 单笔折合不超过 `single_max_usdt`（默认 100,000 USDT）；
   - 同一管理员 24 小时内单人操作合计（含结果未知的待处理项）不超过 `daily_max_usdt`（默认 500,000）；
   - 折合按该资产 USDT 交易对的最新价（market-data-service tickers），USDT 按 1；没有报价、或报价超过 60 秒没更新（参考行情停了）的不能单人执行（C5.5 ⑥）；
-  - 超过任一限额、或没有报价时，自动转为待另一位管理员批准，`escalation` 写明原因（`SINGLE_LIMIT`、`DAILY_LIMIT`、`NO_PRICE`；双人模式下是 `TWO_PERSON_MODE`，明确要求审批的是 `REQUESTED`）。
+  - 超过任一限额、或没有报价时，自动转为待另一位管理员批准，`escalation` 写明原因：`SINGLE_LIMIT`、`DAILY_LIMIT`、`NO_PRICE`；双人模式下是 `TWO_PERSON_MODE`，明确要求审批的是 `REQUESTED`，模拟市场超出单人份额的是 `SIM_SHARE`，无主充值记给地址持有人以外的用户是 `NOT_ADDRESS_HOLDER`（不论金额，㉑）。
   - 三个限额各自最多是默认值的 10 倍（单笔 1,000,000、24 小时 5,000,000、提现 1,000,000 USDT），一次修改不能把护栏整个拿掉（C1 评审）。
-  - 调账页的资产从参考数据的资产列表里选（读不到列表时才手填），减币的确认词是金额本身，加币是用户 ID 后 4 位（确认词只在页面上核对，与其它确认框一样；服务端靠幂等键、限额与双人升级把关，㉔ 评审接受）；资金操作的审计详情单列 `journal_id`，前后余额以账本分录为准（C1 评审）。
   - 开关 `admin.two_person_approval` 只按全局判断：给它配了按维度的规则时，后台按"关闭"处理，不要给它配规则。双人模式打开后，申请人仍可完成自己那笔"结果未知"的单人操作——那是重放账本可能已经记过的一笔，不是新的执行。
-- **提现**：单人模式下，需两人审核的提现（> 20,000 USDT，wallet-service 规则）折合不超过 `withdrawal_max_usdt`（默认 100,000）时一人批准即完成（admin-service 把 `sole_max_usdt` 传给 wallet-service 的内部审核接口，wallet 审计里记 `sole_max_usdt`）。批准时 admin-service 还按当前价重算一次（同样 60 秒新鲜度；平台自有交易对按最近一笔成交的时间算）：申请时的估值与当前估值都不超过才传 `sole_max_usdt`；超过、或没有新鲜报价时传 `approvals_at_least: 2`，wallet 把所需审核人数**提到** 2（风控原本只要 1 人的也一样），这次批准照常计数，要另一位管理员再批（C5.5 ⑥、⑮；wallet 审计记 `approvals_required`；`approvals_at_least` 最多算 2，传多了也只要两人，⑰）。所以行情接口不可用、或报价超过 60 秒没更新时，单人模式下所有非 USDT 的提现都要两人审核；只有一个管理员的测试服可用 `exchangectl wallet approve <id> --reviewer <另一个名字> --reason "..."`（见 [wallet.md](wallet.md)）以另一审核人身份批完，审计里记的是命令行给的名字。
-- **幂等键**（C5.5 ⑥）：所有动钱的请求必须带请求头 `Idempotency-Key`（≤ 128 字，缺了 400）：调账两条路由、保险基金注资、补记、增发、冻结与解冻、强制平仓、提现审核与批量审核、待处理充值入账、站内信。
-  - 后台对话框每次打开生成一个键，结果未知（网络断、5xx、键冲突）时重试沿用，结果确定或关闭对话框后换新键。
-  - 键归各管理员所有，存在 admin 库平台表 `idempotency_keys`（`scope` 为「管理员 ID + 动作」，`response` 是请求生成的 ID），保留 24 小时，admin-service 每小时清理一次。
-  - 第一次请求按键生成 ID：审批记录、冻结 ID、平仓单的 `client_order_id`、站内信 ID 都取自它。同一请求再来，返回同一笔（审批记录原样返回，单人模式下结果未知的会被完成；冻结、平仓单、站内信由下游按 ID 去重；提现审核、解冻、入账已由本人做过的返回当前状态）；同一键换了内容返回 409 `COMMON_IDEMPOTENCY_CONFLICT`。
-  - 站内信的审计 `admin.notices.sent` 与键在同一事务里先写，再交给 notification-service（它接受调用方给的 ID，同一 ID 再发返回原消息）。
-  - 除资金操作外，键在执行之前单独占用；重放返回的是对象**现在**的样子（例如站内信已是 `SENT`），不是第一次请求时的响应（C5.5 ⑮，可接受）。
-- **待核对**（C5.5 ⑥）：资金操作执行前先记 `attempted_at`（单人模式在建档时、双人模式在批准时）。执行没有结束（账本超时或无响应、增发记了一部分后被拒）的操作保持 `PENDING`，`result` 写这次尝试怎么结束的（增发为 `booked n of m; <机器人>: <错误码>: <消息>`），同时审计 `admin.<种类>_unfinished`（如 `admin.ledger.adjustment_unfinished`，C5.5 ⑮），后台显示「待核对」。批准时 `attempted_at` 在决定事务之前单独提交：之间出错会留下「待核对但其实没执行」的操作，完成它照样安全。
+- **待核对**（C5.5 ⑥）：资金操作执行前先记 `attempted_at`（单人模式在建档时、双人模式在批准时）。执行没有结束（账本或钱包超时、无响应，增发记了一部分后被拒）的操作保持 `PENDING`，`result` 写这次尝试怎么结束的（增发为 `booked n of m; <机器人>: <错误码>: <消息>`），同时审计 `admin.<种类>_unfinished`（如 `admin.ledger.adjustment_unfinished`，C5.5 ⑮），后台显示「待核对」。批准时 `attempted_at` 在决定事务之前单独提交：之间出错会留下「待核对但其实没执行」的操作，完成它照样安全。
   - 它可能已经记账，所以只能完成（再次批准；幂等键 `approval:<id>` 保证不重复记账），不能拒绝或撤回（409 `ADMIN_APPROVAL_ATTEMPTED`）。
   - 增发不要另发一笔新的：完成这一笔只补剩下的机器人。
   - 模拟市场的事件与参数审批不记 `attempted_at`（它们可以结束或改回）。
-  - 同一位管理员重复同一个决定（批准或拒绝）返回操作的当前状态，不再执行；相反的决定仍返回 `ADMIN_APPROVAL_DECIDED`。
-- **接口**：
-  - `POST /admin/v1/users/{id}/adjustments`：用户页的调账，单人模式限额内立即记账（返回 `EXECUTED` 与 `journal_id`），否则返回 `PENDING`；
-  - `POST /admin/v1/ledger/adjustments` 与 `POST /admin/v1/derivatives/insurance-fund/contributions`：不带 `direct` 时总是交给另一位管理员（原行为，端到端的双人流程用它），带 `"direct": true` 同上；
-  - 可选 `reference`（工单号等，≤ 64 字）写进分录备注；
-  - 账本无响应时返回 `COMMON_UNAVAILABLE`，详情 `approval_id` 指向那笔留在 `PENDING`（待核对）的操作。申请人用同一个幂等键再提交一次，或在「审批」里点「完成」（`POST /admin/v1/approvals/{id}/decide`，单人模式的操作允许申请人自己完成），都不会重复记账。
+  - 同一位管理员重复同一个决定（批准或拒绝）返回操作的当前状态，不再执行；相反的决定仍返回 `ADMIN_APPROVAL_DECIDED`。审批期间申请行加锁，两人同时处理时后到者得到 `ADMIN_APPROVAL_DECIDED`。
 - **自己的申请**：不能自己批准双人申请（`ADMIN_SELF_APPROVAL`），但可以自己拒绝（撤回）。
-- **分录备注只取申请理由**（加 `[reference]`），不再拼审批理由：账本比对幂等请求时包括备注，重试换了理由会被当作冲突（修于 C1）。审批理由在审计里。
-- **设置**：`GET /admin/v1/settings`（所有管理员可读，含调用者 24 小时已用额 `daily_used_usdt`），`PUT /admin/v1/settings`（ADMIN，理由必填；限额审计 `admin.settings.changed`，双人开关经开关表审计 `flag:admin.two_person_approval`，本实例立即生效，其它 5 秒内）。也可以用 `exchangectl flags set admin.two_person_approval --on --reason "..."` 打开。
-- **审计动作**：`admin.ledger.adjustment_requested/executed/failed/approved/rejected`、`admin.derivatives.insurance_requested/executed/failed/approved/rejected`、`admin.deposits.backfill_requested/executed/failed/approved/rejected`，详情含 `mode`、`escalation`、`value_usdt`（补记还有网络、交易号、哈希、地址与 `"custodian_checked":false`）。
+- **账本拒绝**（例如开关 `ledger.manual_adjustment` 关闭）时操作记为 `FAILED`；账本无响应时保持 `PENDING`（待核对），可再次批准或由申请人完成。
+- **分录备注只取申请理由**（加 `[reference]`），不再拼审批理由：账本比对幂等请求时包括备注，重试换了理由会被当作冲突（修于 C1）。审批理由在审计里。资金操作的审计详情单列 `journal_id`，前后余额以账本分录为准（C1 评审）。
+- **接口**：
+  - `POST /admin/v1/users/{id}/adjustments`：用户页与「资金调整」页的调账，单人模式限额内立即记账（返回 `EXECUTED` 与 `journal_id`），否则返回 `PENDING`；
+  - `POST /admin/v1/ledger/adjustments` 与 `POST /admin/v1/derivatives/insurance-fund/contributions`：不带 `direct` 时总是交给另一位管理员（端到端的双人流程用它），带 `"direct": true` 同上；
+  - 可选 `reference`（工单号等，≤ 64 字）写进分录备注；
+  - `GET /admin/v1/approvals`（`status` 筛选，游标分页）、`POST /admin/v1/approvals/{id}/decide`（`{approve, reason}`；单人模式的操作允许申请人自己完成）；
+  - 账本无响应时返回 `COMMON_UNAVAILABLE`，详情 `approval_id` 指向那笔留在 `PENDING`（待核对）的操作。申请人用同一个幂等键再提交一次，或在「审批」里点「完成」，都不会重复记账。
+- **审计动作**：`admin.ledger.adjustment_requested/executed/failed/approved/rejected/unfinished`、`admin.derivatives.insurance_*`、`admin.deposits.backfill_*`、`admin.deposits.assign_*`、`admin.sim.mint_*`（以及 `admin.sim.event_*`、`admin.sim.params_*`）。申请与执行的详情含 `mode`、`escalation`、`value_usdt`、`journal_id`（补记还有网络、交易号、哈希、地址与 `"custodian_checked":false`；记给用户还有充值 ID、所选的 `user_id` 与地址的持有人）；决定的审计带 `status`、`result`、`mode` 与 `journal_id`，记给用户的另带充值 ID、所选用户与持有人（㉕）。
+- **页面**：「资金调整」（`/adjustments`：审批方式与 24 小时已用额、查找用户、方向/账户/资产/数量/关联单号；资产从参考数据的资产列表里选（读不到列表时才手填）；减币的确认词是金额本身，加币是用户 ID 后 4 位；单人模式下立即记账并显示分录号与两条分录，或显示待审原因；最近的资金操作）与「审批」（`/approvals`：默认待处理，显示方式与转审原因、申请人与审批人邮箱；待核对的标出；自己的单人操作可「完成」，自己的申请可「撤回」；模拟市场的申请显示变化与测得的幅度、过期标「已过期」；记给用户的申请在记给的不是地址持有人时标出持有人）。
+- 设置（双人开关与三个限额）见「系统 → 设置」。
 
-## 待办与实时推送（C1）
+### 充值处置与补记
 
-- `GET /admin/v1/todo`：待审核提现（最多数到 200）与待处理的资金操作数，按角色返回（没有权限的为 0），读不到的记在 `partial`。
-- `GET /admin/v1/events`：Server-Sent Events。连上即发一次 `todo`，之后每 10 秒检查、变了才发；20 秒没有事件发一行注释保活（nginx 读超时 60 秒、Cloudflare 100 秒）；会话结束（退出、过期、停用）时发 `signed_out` 并关闭。流本身不算请求，不会让会话保持活跃。响应头 `X-Accel-Buffering: no` 让 nginx 不缓冲；服务端对这条连接取消读写超时。
-- 前端只开一条流，写进 Query 缓存；流断开时每 15 秒轮询 `/todo`。
-- C2 起多一项 `identity_requests`：待审核的换绑申请（有 `users.security` 才数，最多数到 200；auth-service 读不到时记在 `partial`）。
-- C2c 起多一项 `deposits`：等人处理的充值（有 `deposits.review` 才数，最多数到 200；wallet-service 读不到时记在 `partial`）。铃铛与概览的这一项进入充值页的「待处理」。
+充值页有三个视图：全部充值（读模型 `GET /admin/v1/deposits`，按检测先后新到旧，可按用户、资产、网络、状态、交易哈希（`tx_hash`，不分大小写）筛选）、**待处理**（`?view=attention`）、**补记待回调**（`?view=manual`）；后两个直接读 wallet-service（`GET /admin/v1/deposits/review?attention=true|manual_pending=true`，`withdrawals.read`），详情 `GET /admin/v1/deposits/{id}`。处置、补记与记给用户要 `deposits.review`（ADMIN、FINANCE）。（C2c 起）
 
-## 用户页（2026-10-02 设计 C2）
-
-用户有自己的页面 `/users/<id>`（原抽屉的地址 `?user=<id>` 跳到这里）：左侧是账户摘要与处置，右侧是标签页。
-
-- **摘要**：UID、邮箱与手机号（脱敏；有 `users.contacts` 的可点「显示完整」，每次都审计 `admin.users.contacts_revealed`，只记显示了哪几种、不记值；离开页面即丢弃）、状态与标签、注册与最近登录、风险评分（风控规则最近一次命中的分数与动作）。
-- **资料与身份**：基本资料、身份（类型、脱敏值、验证与绑定时间）、已同意的条款与风险披露版本、状态变更时间线（user-service 新增 gRPC `GetUserHistory`）。
-- **安全**（auth-service 新增的 gRPC，见 [auth.md](auth.md#管理后台的安全操作grpcc2)）：身份验证器状态与重置、密码修改时间与登录锁定、生成临时密码、活跃会话（逐个或全部退出）、设备、登录记录（游标分页）。操作需 `users.security` 与理由，审计 `admin.users.totp_reset`、`admin.users.password_reset`、`admin.users.sessions_revoked`。
-  - **临时密码**只显示一次（应答带 `Cache-Control: no-store`，不进日志与审计）：原密码失效、全部会话退出、登录锁定清除，用户收到密码重置邮件，24 小时内的提现转人工审核。通过可信渠道告知用户，并提醒用户登录后立即修改。用户站暂不强制"下次登录必须改密码"（见设计稿 §10 C2 的遗留）。
-- **风控**：风控规则对该用户的评估（触发事件、分数、动作、是否执行、命中规则及说明；risk-service 新增只读 gRPC `ListAssessments`），并可转人工审核（`RISK_REVIEW`）或审核通过后恢复（同「改账户状态」，需 `users.status`）。
-- **余额与资金**：现货与合约账户每个资产的可用、冻结、合计与 USDT 估值（按该资产 USDT 交易对的最新价，没有价格的列出来、不计入总估值）；**风控冻结**（`ledger.hold`，ADMIN、OPERATOR、FINANCE）：冻结现货可用余额的一部分或解冻，由账本记分录与审计（见 [ledger.md](ledger.md#接口)）；调整余额可选现货或合约账户。
-- **订单**：现货订单（可单笔撤单，`orders.cancel`，审计 `admin.orders.canceled`）与合约当前委托（可单笔撤单，审计 `admin.derivatives.order_canceled`）。
-- **仓位**：合约持仓（开仓均价、标记价、预估强平价、未实现盈亏、保证金与模式），每 5 秒刷新。
-  - **强制平仓**（`derivatives.write`）先撤该用户在这个合约上的全部挂单（含开仓单，免得平仓后又成交开回去；止盈止损单不撤，它们只会平仓），再以市价全部平掉，见 [derivatives.md](derivatives.md#管理后台与读模型)。撤单与下平仓单之间不锁用户，用户仍可能再开仓，平完再看一眼仓位。后台最多等约 5 秒看平仓单结束：还没结束时对话框留着（同一个幂等键），提示"已下单、未成交完"，再点确认会查到同一笔订单并记审计 `admin.derivatives.position_closed`（C5.5 ⑯）；改了理由再确认也一样（键不绑理由，C5.5 ⑱）。这只在对话框没关、24 小时内有效：关了对话框或过了 24 小时再平，是新的一笔 ADMIN 单，第一笔的 `position_closed` 不会补写（协调会话决定接受）；要追溯它，用请求审计 `admin.derivatives.position_close_requested` 里的 `client_order_id` 在合约订单里查。
-    - 后台等这笔市价单结束（最多约 5 秒），提示是全部成交还是只成交一部分；盘口薄时剩下的仓位要再平一次。
-    - 审计两条（C5.5 ⑧）：`admin.derivatives.position_close_requested`（与幂等键一起写，每个请求一次）和 `admin.derivatives.position_closed`（订单结束后，带 `status`、`filled_quantity`、`complete`）。
-    - HOUSE 的仓位不能平（422 `DERIV_HOUSE_NOT_CLOSED`）。
-  - **合约账户的扣减**：确认框显示扣减后的全仓权益与维持保证金（`GET /admin/v1/users/{id}/futures-margin?debit=`，按 derivatives-service 风控的口径），会进入预警或会被强平时标红（C5.5 ⑧）。
-  - **卡住的风控冻结**：别处多解冻了这部分资金时，后台解冻会一直报 `LEDGER_INSUFFICIENT_BALANCE`。运维用 `exchangectl ledger release-hold --id <冻结单ID> --reason "..."` 解冻冻结余额里属于这张冻结单的部分（扣掉其它冻结单、活动订单与待处理提现的冻结；`--amount` 只能更少，见 [ledger.md](ledger.md)），审计 `ledger.hold_released` 带 `"forced": true` 与实际解冻数（C5.5 ⑧、⑯）。
-- 成交、充值、提现、**备注与标签**（`users.notes`；备注只增不改，审计 `admin.users.note_added`；标签为大写代码，整体替换，审计 `admin.users.tags_changed` 带前后值）、审计。
-- **身份变更申请**（`/identity-requests`，侧栏「用户」组）：只有一种身份的用户换绑邮箱或手机号要人工审核。默认列出待审核的，值脱敏；有 `users.security` 的可通过（身份改为新值并通知用户）或拒绝，需理由，审计 `admin.users.identity_request_decided`。
-- **批量审核提现**：`POST /admin/v1/withdrawals/review-batch` 一次最多 50 笔，用同一个理由逐笔处理、逐笔审计，各自返回结果；审核队列可勾选（一键选中低风险的）后一起批准或拒绝。提现详情列出该用户最近的提现与托管方回调。
-
-接口：`GET /admin/v1/users/{id}`、`/notes`（GET、POST）、`PUT …/tags`、`GET …/security`、`POST …/contacts/reveal`、`GET …/login-history`、`POST …/sessions/revoke`、`POST …/totp-reset`、`POST …/password-reset`、`GET …/history`、`GET …/risk`、`GET /admin/v1/identity-requests`、`POST /admin/v1/identity-requests/{id}/decide`、`GET …/balances`、`GET/POST …/holds`、`DELETE …/holds/{hold}`、`POST …/orders/{order}/cancel`、`GET …/contract-orders`、`POST …/contract-orders/{order}/cancel`、`GET …/positions`、`POST …/positions/close`（契约 `api/admin/admin.yaml`）。与设计稿 §5 的差别：强制平仓按（用户、合约、持仓方向）指定仓位（`POST /admin/v1/users/{id}/positions/close`），不用仓位 ID（平仓后再开会换 ID）；解冻用 `DELETE …/holds/{hold}` 带理由的请求体。
-
-## 提现审核：详情、筛选与搁置（2026-10-02 设计 §4.2，C2c）
-
-- **筛选**：`GET /admin/v1/withdrawals` 多了 `held=true|false`（是否搁置；只算待审批的，已决的不再列为搁置，C5.5 ⑦）、`min_value_usdt`、`max_value_usdt`（折合金额区间）、`min_risk`（风控分下限）。
-- **详情** `GET /admin/v1/withdrawals/{id}`（`withdrawals.read`）：提现本身、地址在用户地址簿里的记录（标签、添加时间、冷却期结束时间；已删除为 null）、用户今日与本月已提折合（UTC，含审批中与处理中，不含被拒与已撤销）。页面上地址在提现前 72 小时内加入的标「新地址」（同风控规则 `NEW_ADDRESS`），冷却期未过的标「冷却中」。用户限额取决于提现时 step-up 带的身份数与是否绑定身份验证器，钱包不保存，所以只显示已提金额，不显示占用比例。
-- **搁置** `POST /admin/v1/withdrawals/{id}/hold`（`withdrawals.review`，`{"hold": true, "note": "..."}`，取消时 `hold: false`）：只限待审批的提现（否则 409 `WALLET_WITHDRAWAL_NOT_IN_REVIEW`）；搁置的仍在队列里，列表标「已搁置」并带备注、搁置人与时间，批准或拒绝时自动取消。批量审核跳过搁置的提现（该条结果 `ADMIN_WITHDRAWAL_HELD`，要单独审核），「选中低风险」也不选它们（C5.5 ⑦）。wallet-service 审计 `wallet.withdrawal.hold`、`wallet.withdrawal.unhold`（操作者为管理员邮箱）。
-
-## 充值处置与补记（2026-10-02 设计 §4.3，C2c）
-
-充值页有三个视图：全部充值（读模型）、**待处理**（`?view=attention`）、**补记待回调**（`?view=manual`）；后两个直接读 wallet-service（`GET /admin/v1/deposits/review?attention=true|manual_pending=true`，`withdrawals.read`），详情 `GET /admin/v1/deposits/{id}`。处置与补记要 `deposits.review`（ADMIN、FINANCE）。
-
-- **待处理的充值**：低于最小充值额、账户已关闭或不符合资格的（已记在系统科目 `UNCLAIMED_DEPOSIT`）、未支持的代币（没有记账）、补记后托管方回调与录入不一致的（`discrepancy`）。
-  - **入账给用户** `POST /admin/v1/deposits/{id}/credit`（理由）：只限已记入 `UNCLAIMED_DEPOSIT` 的，按原币种、原数量由账本 `ReleaseUnclaimed` 转给用户现货账户（分录 `DEPOSIT_CREDIT`，幂等键 `deposit-release:<id>`，账本审计 `ledger.unclaimed_released`），充值变为 `CREDITED`、记下放行分录。不能改数量；未支持的代币与回调不一致的补记不能入账（409 `WALLET_DEPOSIT_NOT_RELEASABLE`），要补偿另做资金调整。理由只进审计，不进分录：账本已放行、钱包没记上时，换个理由再点「入账」也只是记下原来的放行（C5.5 ⑦）。
+- **待处理的充值**：低于最小充值额、账户已关闭或不符合资格的（已记在系统科目 `UNCLAIMED_DEPOSIT`）、未支持的代币（没有记账）、补记后托管方回调与录入不一致的（`discrepancy`）、无主充值（见下）。
+  - **入账给用户** `POST /admin/v1/deposits/{id}/credit`（理由，带 `Idempotency-Key`）：只限已记入 `UNCLAIMED_DEPOSIT` 的，按原币种、原数量由账本 `ReleaseUnclaimed` 转给用户现货账户（分录 `DEPOSIT_CREDIT`，幂等键 `deposit-release:<id>`，账本审计 `ledger.unclaimed_released`），充值变为 `CREDITED`、记下放行分录。不能改数量；未支持的代币与回调不一致的补记不能入账（409 `WALLET_DEPOSIT_NOT_RELEASABLE`），要补偿另做资金调整。理由只进审计，不进分录：账本已放行、钱包没记上时，换个理由再点「入账」也只是记下原来的放行（C5.5 ⑦）。
   - **驳回** `POST /admin/v1/deposits/{id}/reject`（理由）：只标记为已处理（`resolution = DISMISSED`），不动资金，wallet-service 审计 `wallet.deposit.dismissed`。处理过的再处理得到 `WALLET_DEPOSIT_RESOLVED`。账本已经放行、但钱包没记上的不能驳回（409 `WALLET_DEPOSIT_RELEASED`，详情 `journal_id`；钱包驳回前按 `deposit-release:<id>` 问账本 `GetUnclaimedRelease`），再点「入账」把放行记下来（C5.5 ⑦），不会再放行一次；记下来的那次 wallet-service 审计 `wallet.deposit.release_recorded`（带账本的 `journal_id`；放行本身由账本审计，C5.5 ⑰）。
 - **无主充值**（B7a，C5.5 ㉑）：托管方报到账、但地址不属于任何用户（探测地址、退役的地址）的充值，`user_id` 是空 UUID、原因 `UNKNOWN_ADDRESS`，记在 `UNCLAIMED_DEPOSIT`，在「待处理」里用户一栏显示「无主」（不按用户去查）。详情列出地址现在或退役前的持有人（`address_owner`、`address_owner_retired`），只作参考：持有人不一定是付款人，先核实转账。
-  - **记给用户** `POST /admin/v1/deposits/{id}/assign`（`{user_id, reason}`，带 `Idempotency-Key`，要 `deposits.review`）：一笔资金操作（`DEPOSIT_ASSIGN`，迁移 admin 00011），护栏与调账相同——单人模式不超过单笔限额时立即执行，超过限额、无报价或双人模式时等另一位管理员批准（`ledger.adjust.approve`）。地址现在或退役前有持有人、而记给的不是这个持有人时，不论金额都等另一位管理员（升级原因 `NOT_ADDRESS_HOLDER`，协调会话 10-04 的决定）；操作与审计记下原持有人 `former_holder`（退役的地址）或现持有人 `address_owner` 与所选的 `user_id`，弹窗与审批列表都提示。执行时 wallet-service 把持有人设为这个用户、由账本 `ReleaseUnclaimed` 按原币种原数量转入其现货账户（审计 `wallet.deposit.assigned`、`ledger.unclaimed_released`），操作带放行分录的 `journal_id`；后台审计 `admin.deposits.assign_requested/approved/executed/…`，详情有充值 ID、地址与当时的持有人提示。确认词为用户 ID 的后 4 位。不是等待处理的无主充值返回 409 `ADMIN_DEPOSIT_NOT_UNOWNED`；同一笔充值已有等待中（含结果未知）或已执行的申请时，新的申请返回 409 `ADMIN_DEPOSIT_ASSIGN_OPEN`（迁移 admin 00012 的部分唯一索引，一笔充值同时只有一个有效申请，两个操作不会共用一次放行，㉕）；驳回或撤回后可重新申请。决定的审计（`assign_approved` 等）也带充值 ID、所选用户、原持有人与分录号。用户现在不能充值时由 wallet-service 拒绝。
+  - **记给用户** `POST /admin/v1/deposits/{id}/assign`（`{user_id, reason}`，带 `Idempotency-Key`，要 `deposits.review`）：一笔资金操作（`DEPOSIT_ASSIGN`，迁移 admin 00011），护栏与调账相同——单人模式不超过单笔限额时立即执行，超过限额、无报价或双人模式时等另一位管理员批准（`ledger.adjust.approve`）。
+  - 地址现在或退役前有持有人、而记给的不是这个持有人时，不论金额都等另一位管理员（升级原因 `NOT_ADDRESS_HOLDER`，协调会话 10-04 的决定）；操作与审计记下原持有人 `former_holder`（退役的地址）或现持有人 `address_owner` 与所选的 `user_id`，弹窗与审批列表都提示。
+  - 执行时 wallet-service 把持有人设为这个用户、由账本 `ReleaseUnclaimed` 按原币种原数量转入其现货账户（审计 `wallet.deposit.assigned`、`ledger.unclaimed_released`），操作带放行分录的 `journal_id`；后台审计 `admin.deposits.assign_requested/approved/executed/…`。确认词为用户 ID 的后 4 位；用户 ID 不是 UUID 时确认按钮不可用。
+  - 一笔充值同时只有一个有效申请：已有等待中（含结果未知）或已执行的申请时，新的申请返回 409 `ADMIN_DEPOSIT_ASSIGN_OPEN`（迁移 admin 00012 的部分唯一索引，两个操作不会共用一次放行、重复计入限额，㉕）；驳回或撤回后可重新申请。不是等待处理的无主充值返回 409 `ADMIN_DEPOSIT_NOT_UNOWNED`；用户现在不能充值时由 wallet-service 拒绝。
   - 结果未知（例如 wallet-service 已放行、答复丢了）时操作停在「待核对」，同一请求（同一键）再来：wallet-service 对已有持有人的充值答 409，后台读这笔充值，已记给同一用户就按已完成记录，不会再放行一次（账本的放行只取决于充值与用户）。
   - 无主充值不能直接「入账给用户」（409 `WALLET_DEPOSIT_NO_OWNER`）；也可以照常驳回。
 - **补记充值**（托管方已到账、回调丢失）：优盾网关没有按交易号查询的接口，系统无法向托管方核对。管理员先在优盾商户后台或区块浏览器核对，再在充值页「补记充值」录入网络、托管方交易号（tradeId）、充值地址、交易哈希与数量：
   - `POST /admin/v1/deposits/manual/check` 只核对不记账：网络由托管方服务、地址是该网络上某个用户的充值地址、`UDUN:<tradeId>` 与（网络、哈希、地址）都没出现过（否则 409 `WALLET_DEPOSIT_KNOWN`，详情带已有充值的 ID）、数量不超过资产精度；返回入账用户、资产、是否低于最小额与折合 USDT。
-  - `POST /admin/v1/deposits/manual`（再带理由）是一笔资金操作（`DEPOSIT_BACKFILL`），护栏与调账相同：单人模式限额内立即补记（`EXECUTED`，`result` 为 `deposit <id>`），超过限额、无报价或双人模式时等另一位管理员批准。确认框明示「托管方未核对」。
+  - `POST /admin/v1/deposits/manual`（再带理由与 `Idempotency-Key`）是一笔资金操作（`DEPOSIT_BACKFILL`），护栏与调账相同：单人模式限额内立即补记（`EXECUTED`，`result` 为 `deposit <id>`），超过限额、无报价或双人模式时等另一位管理员批准。确认框明示「托管方未核对」。
   - 补记走与回调相同的路径：充值记为 `CONFIRMED`、来源 `MANUAL`、录入人为申请人，由处理器交账本入账（低于最小额同样进 `UNCLAIMED_DEPOSIT`），wallet-service 审计 `wallet.deposit.backfilled`。同一笔补记同时提交两次，后到的撞唯一索引后按「同一补记再来」返回先到的那笔充值，第二笔资金操作也就完结（C5.5 ⑦）。
-  - 托管方的回调晚到时按交易号找到这笔补记：地址、资产、数量一致即记「已核对」（回调日志 `APPLIED`，不再入账）；不一致时不更正、不再入账，回调日志记 `DISCREPANCY`、充值转为待处理并告警（`wallet_custody_deposit_discrepancies_total`，告警 `CustodyDepositDiscrepancy`）。查明后驳回或另做资金调整。
-    - 回调比处理器先到时，这笔补记不再交账本入账，等人处理（C5.5 ⑦）。
-    - 托管方重发同一回调，`DISCREPANCY` 保持不变（已是终态，不会被改写成 `IGNORED`）。
+  - 托管方的回调晚到时按交易号找到这笔补记：地址、资产、数量一致即记「已核对」（回调日志 `APPLIED`，不再入账）；不一致时不更正、不再入账，回调日志记 `DISCREPANCY`、充值转为待处理并告警（`wallet_custody_deposit_discrepancies_total`，告警 `CustodyDepositDiscrepancy`）。查明后驳回或另做资金调整。回调比处理器先到时，这笔补记不再交账本入账，等人处理（C5.5 ⑦）；托管方重发同一回调，`DISCREPANCY` 保持不变（已是终态，不会被改写成 `IGNORED`）。
   - 「补记待回调」列出还没等到回调的补记；`exchangectl wallet reconcile --network UDUN`（或 `checks --network UDUN`）的报告在对账表后单列它们——托管方余额里没有对应的到账，就是录错了。
 
-## 资产与交易对的编辑（C3）
+### 提现审核
 
-「资产与交易对」页按 `deploy/instruments/test.json` 的格式读写参考数据（instrument-service 的 `ExportConfig`/`ApplyConfig`，见 [instruments.md](instruments.md#管理后台编辑2026-10-02-设计-44c3)）。需要 `instruments.write`（ADMIN、OPERATOR）。
+- **列表** `GET /admin/v1/withdrawals`：按 `status`（`ALL` 为全部；默认 `PENDING_REVIEW`）、`user_id`、`asset`、`network`、`held=true|false`（是否搁置；只算待审批的，已决的不再列为搁置，C5.5 ⑦）、`min_value_usdt`/`max_value_usdt`（折合金额区间）、`min_risk`（风控分下限）过滤。审核队列默认从旧到新，其余状态从新到旧，`order=asc|desc` 可改。托管网络的提现带 `custody`、托管方状态 `provider_status` 与交给托管方的时间 `submitted_at`。显示风控分与命中规则。
+- **审核**：批准/拒绝需理由（`withdrawals.review`，带 `Idempotency-Key`），审批人为管理员邮箱；超过 20,000 USDT 需两位不同审批人（规则在 wallet-service）。`exchangectl wallet approve|reject` 仍可用。
+  - **单人模式下的提现**：需两人审核的提现折合不超过 `withdrawal_max_usdt`（默认 100,000）时一人批准即完成（admin-service 把 `sole_max_usdt` 传给 wallet-service 的内部审核接口，wallet 审计里记 `sole_max_usdt`）。批准时 admin-service 还按当前价重算一次（同样 60 秒新鲜度；平台自有交易对按最近一笔成交的时间算）：申请时的估值与当前估值都不超过才传 `sole_max_usdt`；超过、或没有新鲜报价时传 `approvals_at_least: 2`，wallet 把所需审核人数**提到** 2（风控原本只要 1 人的也一样），这次批准照常计数，要另一位管理员再批（C5.5 ⑥、⑮；wallet 审计记 `approvals_required`；`approvals_at_least` 最多算 2，⑰）。所以行情接口不可用、或报价超过 60 秒没更新时，单人模式下所有非 USDT 的提现都要两人审核；只有一个管理员的测试服可用 `exchangectl wallet approve <id> --reviewer <另一个名字> --reason "..."`（见 [wallet.md](wallet.md)）以另一审核人身份批完，审计里记的是命令行给的名字。
+  - **批量审核** `POST /admin/v1/withdrawals/review-batch`：一次最多 50 笔，用同一个理由逐笔处理、逐笔审计，各自返回结果；审核队列可勾选（一键选中低风险的）后一起批准或拒绝。批量审核跳过搁置的提现（该条结果 `ADMIN_WITHDRAWAL_HELD`，要单独审核），「选中低风险」也不选它们（C5.5 ⑦）。
+- **详情** `GET /admin/v1/withdrawals/{id}`（`withdrawals.read`，C2c）：提现本身、地址在用户地址簿里的记录（标签、添加时间、冷却期结束时间；已删除为 null）、用户今日与本月已提折合（UTC，含审批中与处理中，不含被拒与已撤销）、该用户最近的提现与托管方回调。页面上地址在提现前 72 小时内加入的标「新地址」（同风控规则 `NEW_ADDRESS`），冷却期未过的标「冷却中」。用户限额取决于提现时 step-up 带的身份数与是否绑定身份验证器，钱包不保存，所以只显示已提金额，不显示占用比例。
+- **搁置** `POST /admin/v1/withdrawals/{id}/hold`（`withdrawals.review`，`{"hold": true, "note": "..."}`，取消时 `hold: false`）：只限待审批的提现（否则 409 `WALLET_WITHDRAWAL_NOT_IN_REVIEW`）；搁置的仍在队列里，列表标「已搁置」并带备注、搁置人与时间，批准或拒绝时自动取消。wallet-service 审计 `wallet.withdrawal.hold`、`wallet.withdrawal.unhold`（操作者为管理员邮箱）。
+- **提现暂停**（C5.5 ⑯）：托管核对两次都短缺时，wallet-service 自动暂停该资产的提现，见 [custody.md](custody.md)。
+  - 「提现」页顶部每个暂停的资产一条红色横幅：原因、开始时间与操作人、短缺数量。列表里等待解除的已批准提现标「暂停等待」。
+  - 这种资产的提现照常批准，不拒绝。批准的响应带 `suspended_at` 与 `suspension_reason`，后台提示「已批准；该资产提现暂停中，解除后才发出」；批量审核的结果带 `suspended`。
+  - ADMIN（`withdrawals.resume`）在横幅上「解除暂停」，要理由与确认词（资产代码），与 `exchangectl wallet withdrawals-resume` 同一套：已批准的提现一轮内发出，托管核对重新开始，wallet-service 审计 `wallet.withdrawals.resume`（操作者为管理员邮箱）。
+  - 接口：`GET /admin/v1/withdrawals/suspensions`（`withdrawals.read`）、`POST /admin/v1/withdrawals/suspensions/{asset}/resume`（不在暂停中答 404）；wallet-service 的内部接口为 `GET /internal/wallet/suspensions` 与 `POST …/{asset}/suspend|resume`。
+  - 后台不提供手动暂停与 `--accept`，这两样仍用 CLI。解除不带幂等键：已经解除后再点得到 404，就是已经解除了；钱包的暂停列表读不到时，批准的响应里不带暂停提示（日志 `withdrawals: read the suspensions`）（C5.5 ⑲，接受）。
 
-- **页面**：交易对、资产（含网络）、合约（含风险阶梯）、费率档四个列表，点行编辑，右上角新增；「上架向导」粘贴交易对的 CSV（第一行表头）或一份 JSON 配置文档。每次修改都先**预览**：逐项列出新增或修改、改了哪些字段（旧值划掉、新值）、后台的提示，填理由并输入第一项的代码后才生效。新交易对与合约处于「准备中」，确认无误后用列表里的「操作」开放。
-- **接口**：`GET /admin/v1/instruments/config`（配置文档，`instruments.read`）、`POST /admin/v1/instruments/preview`（`{config}`，只算变化）、`POST /admin/v1/instruments/apply`（`{config, reason}`，审计 `admin.instruments.applied`，对象 `instruments`，详情为每项的实体、代码、动作与版本）。文档里每项整体替换（漏写的字段变空，所以页面总是从导出的整项开始改），状态不在这里改，不删除。
+### 托管方
+
+`/custody`（阶段 4 B6，C6；[custody.md](custody.md)）。读要 `withdrawals.read`。
+
+- **两个托管方**（C6，ADR-0017）：页头的切换在优盾 `UDUN` 与替身 `UDUNMOCK`（只服务端到端用的隐藏测试资产 TUSD）之间换，地址栏带 `?provider=UDUNMOCK`，标题随之变化。`GET /admin/v1/custody?provider=`、`GET /admin/v1/custody/callbacks?provider=` 只给这个托管方自己的核对与回调（另加平台自建钱包的核对）；不带时为 `UDUN`。
+- **概况与币种**：托管方状态（可访问、未配置、读不到及原因）、处理中的提现（数量、折合、最早的时间，可跳到提现列表）、待处理回调数与最近回调；托管方的币种与余额、使用它的网络。
+- **对账**（不变量 4，每个持有方与资产最近一次）：持有、其它持有方、在途提现、未入账手续费、账本应有、短缺；持有方显示「托管方 · 名字」或「自建钱包 · 网络」。切换真网关后出现「替身基线」一列（`baseline`：切换时从账本应有里扣除的替身模拟充值，不在任何托管方），全为 0 时不显示。
+- **回调日志**：按结果（`result`）、类型（`kind`）、交易/提现 ID、哈希或地址（`q`）筛选（游标分页）；详情 `GET /admin/v1/custody/callbacks/{id}` 有原始请求（签名打码）与来源地址（`remote_ips`，最近 8 个）。验签通过且 `FAILED`、`UNMATCHED`、`RECEIVED` 的回调可以重放：`POST /admin/v1/custody/callbacks/{id}/replay`（理由，需 `withdrawals.review`，wallet-service 写审计 `wallet.custody.callback.replay`）。
+- **托管方手续费**（C6，审查 ④ 的后台）：同页下方「托管方手续费」，`GET /admin/v1/custody/fees?status=HELD|BOOKABLE|WRITTEN_OFF`（默认先看待人工处理）。
+  - 计费方式确认过的按报告从 `GAS_SUPPLY` 入账（`BOOKABLE`；`GAS_SUPPLY` 不足时分录为空、显示「等待 GAS_SUPPLY」）；未确认或看起来不对的为 `HELD`。
+  - 有 `ledger.adjust.approve` 的管理员处理 `HELD`：「入账」`POST /admin/v1/custody/fees/{withdrawal_id}/book`（`{asset?, amount?, reason}`：留空按报告，填写则按实扣；平台须在该网络的托管方持有这个币种、小数位不超过其精度，否则 400，请核销；处理器一轮内记账）或「核销」`POST …/write-off`（`{reason}`，不记账；也用于等待 `GAS_SUPPLY` 的那笔）。确认词为提现 ID 后 4 位。
+  - 与 `exchangectl wallet custody-fee` 走同一条路径，wallet-service 以管理员邮箱审计 `wallet.custody.fee.book` / `wallet.custody.fee.write_off`；已处理的再处理得到 409，不会重复入账。
+
+### 对账与系统科目
+
+- `GET /admin/v1/ledger/reconciliation`：账本对账每项检查的最近一次结果与最近 50 次不一致（各带前 10 条差异），经 ledger-service gRPC `GetReconciliation` 读 `reconciliation_runs`。
+- `GET /admin/v1/ledger/system-balances?asset=`：全部系统科目余额（留空为全部资产）。
+- 页面 `/ledger` 两个标签：对账、系统科目。
+
+## 交易
+
+### 订单与成交
+
+- `GET /admin/v1/orders`：现货订单的最新状态，读模型 `orders_current`，可按用户、订单号（全局搜索用）、交易对、状态、方向、账户、时间过滤。交易服务受理前就拒绝的订单没有方向与类型（`side` 为空）。
+- `GET /admin/v1/trades`：现货成交，`user_id` 匹配买卖任一方；`house_side` 是 HOUSE 一方的方向，用户之间成交为空。
+- **机器人筛选**（C5）：`?accounts=bots|users`。订单按下单账户；成交 `bots` 是两边都是机器人，`users` 是至少一边不是（用户与机器人之间的成交算用户的）。每行带 `bot`（成交为 `buyer_bot`、`seller_bot`）。筛选要 market-sim 的机器人名单，读不到时 503；不筛选时只是不标记。
+- 页面两个标签，HOUSE 一方显示为 HOUSE，机器人标出；可导出已加载的行为 CSV。
+
+### 仓位与强平记录
+
+- **仓位**（`/positions`，C3）：全部用户的合约持仓，按保证金率（维持保证金 ÷ 保证金余额）从高到低、每 5 秒刷新。「风险仓位」只看被预警（含全仓账户被预警）、被接管或保证金率 ≥ 50% 的，不含 HOUSE（C5.5 ⑨）；可按合约、用户筛选。HOUSE 的仓位排在最后并标出（它的单按最高杠杆记保证金，零盈亏时保证金率约 50%，不排后会占满"最危险"；它是用户的对手方，不能在这里平）；标记价不新鲜的行在标记价下标「标记价过期」（C5.5 ⑨）；其余可强制平仓（`derivatives.write`，同用户页）。接口 `GET /admin/v1/positions`（最多 500 个，`truncated` 表示还有更多；derivatives-service 的内部接口 `/internal/derivatives/positions`）。
+- **强平记录**（`/liquidations`，C3）：强平引擎的每一步（预警、接管、强平成交、自动减仓），按环节（WARNING/STARTED/FILLED/ADL/ENDED）、合约、用户、近 1/7/30/90 天筛选（读模型；`limit` 最多 500）。
+
+### 合约与保险基金
+
+`/derivatives`（阶段 3 任务 10，见 [derivatives.md](derivatives.md#管理后台与读模型)）：
+
+- 每个永续合约的状态、只减仓（原因与时间、谁解除的）、标记价是否新鲜、持仓量与持仓数。
+- 解除只减仓（`derivatives.write`，标记价恢复后才可操作，审计 `admin.derivatives.reduce_only_lifted`）；改合约状态（交易参数，只有 ADMIN，见「交易参数的护栏」；暂停立即生效）。
+- 保险基金余额与 `PNL_CLEARING`；注资（资金操作 `INSURANCE_FUND`，金额为正；单人模式限额内立即记账，否则另一位管理员批准；批准后账本 `FundInsurance` 以幂等键 `approval:<id>` 记 `INSURANCE_CONTRIBUTION`（对手方 `ADJUSTMENT`），需开关 `ledger.manual_adjustment`），审计 `admin.derivatives.insurance_*`。
+- 强平监控与强平记录 C3 起各有一页（见上）。
+
+### HOUSE 敞口
+
+`/house`（阶段 4 B5，C6 重做）。
+
+- `GET /admin/v1/house`：HOUSE 的账（ADR-0013、0015）。库存是账本 `MARKET_MAKER` 各资产余额，按 USDT 交易对的最新价估值（可充提资产在前，站内资产卖出后为负）；各交易对的成交来自读模型 `trades` 的 `house_side`（买入、卖出、付出与收到），盈亏 = 净持有 × 现价 + 净收入；合约仓位是 `HOUSE_USER_ID` 在 derivatives-service 的持仓（admin-service 从 `apps.env` 读 `HOUSE_USER_ID`）。读不到的部分记在 `partial`。
+- 页面（每 30 秒刷新）：四个合计（库存估值与资产数、可充提、站内（可为负）、按现价的交易盈亏与有成交的交易对数）；「近 30 日盈亏」（报表 `house-pnl` 按日：现货、合约、资金费的柱子与累计线，缺价格的交易对列出）；「敞口」（库存按现价折成 USDT、绝对值最大的 10 个，向右为持有、向左为卖出后为负，可充提的标点）；「库存」（按估值大小排序，按全部/可充提/站内与代码筛选，没有价格的标出）；「各交易对」（按盈亏大小排序，按代码筛选）；「各合约净头寸」（每个合约都列，无仓位为 0，方向多/空/无仓位，有仓位的在前，显示几个合约有仓位）。
+
+## 市场
+
+### 资产与交易对的编辑
+
+「资产与交易对」页按 `deploy/instruments/test.json` 的格式读写参考数据（instrument-service 的 `ExportConfig`/`ApplyConfig`，见 [instruments.md](instruments.md#管理后台编辑2026-10-02-设计-44c3)）。需要 `instruments.write`（ADMIN、OPERATOR；交易参数另见下一节）。（C3）
+
+- **页面**：交易对（参考市场与倍数、步长、费率）、资产（充提开关、网络、资料）、合约（风险阶梯）、费率档四个列表，可搜索，点行编辑，右上角新增；「上架向导」粘贴交易对的 CSV（第一行表头）或一份 JSON 配置文档；「待生效修改」见下一节。每次修改都先**预览**：逐项列出新增或修改、改了哪些字段（旧值划掉、新值）、后台的提示，填理由并输入第一项的代码后才生效。新交易对与合约处于「准备中」，确认无误后用列表里的「操作」开放。交易对与合约按状态机改状态（`TRADING ⇄ HALT`，`CANCEL_ONLY` 之后只能下线，不可恢复交易）。
+- **接口**：`GET /admin/v1/instruments`（资产、交易对与合约的现状，`instruments.read`）、`GET /admin/v1/instruments/config`（配置文档）、`POST /admin/v1/instruments/preview`（`{config}`，只算变化）、`POST /admin/v1/instruments/apply`（`{config, reason, confirmation?}`，审计 `admin.instruments.applied`，对象 `instruments`，详情为每项的实体、代码、动作与版本）。文档里每项整体替换（漏写的字段变空，所以页面总是从导出的整项开始改），状态不在这里改，不删除。
 - **核对与提示**：交易对的新参考符号先向币安核对，币安现货没有的拒绝（422 `ADMIN_REFERENCE_UNKNOWN`）。提示（`warnings`，按代码本地化）：`HOUSE_NOT_LISTED`（不在 `market.house_liquidity` 名单里，HOUSE 不报价）、`HOUSE_QUOTES`（在名单上，生效后 HOUSE 按币安盘口报价，C5.5 ⑩）、`STATUS_IGNORED`（文档给已有交易对或合约写了别的状态，不生效）、`NO_FUTURES`（币安没有对应合约，HOUSE 不给合约盘口）、`NO_INDEX_REFERENCE`（合约的指数交易对不跟随参考行情）、`REFERENCE_UNCHECKED`（核对不了）、`STREAMS_RECONNECT`（行情服务会重连全部参考行情流，约 20 秒参考盘口为空）。
 - **与部署的关系**：后台改过的项记为来源 `CONSOLE`，之后部署同步文件时保留它（输出里有 `kept …`）；`exchangectl instruments apply --force` 让文件重新说了算。要长期保留的改动也应改进 `test.json`。
 - 与设计稿 §5 的差别：没有单独的 `POST/PUT /admin/v1/instruments/{assets,networks,pairs,contracts}` 与 `GET/PUT /admin/v1/fees`，都走配置文档的预览与应用（一条路径、同一套校验）；参考符号映射在交易对的编辑里。
 
-## 交易参数的护栏（2026-10-02 设计 §2 第 6 条，C3c）
+### 交易参数的护栏
 
-一次调用就能把费率改到 10%、让高杠杆仓位在几秒内被强平、或掐断 HOUSE 的流动性，所以这些"交易参数"的修改另有一套规则：
+（设计 §2 第 6 条，C3c）一次调用就能把费率改到 10%、让高杠杆仓位在几秒内被强平、或掐断 HOUSE 的流动性，所以这些"交易参数"的修改另有一套规则：
 
 - **哪些是交易参数**：交易对与合约的状态；费率档的 Maker/Taker 费率；交易对的费率档、参考符号与参考倍数；合约的费率档与风险阶梯（也就是各档的最高杠杆与维持保证金率）。新增的交易对、合约与费率档处于「准备中」或无人使用，不算（开放它是一次状态修改）；所以后台新建的交易对与合约只能是「准备中」，文档里写了别的状态直接拒绝（422 `ADMIN_NEW_ITEM_NOT_PREPARE`，部署同步的 `exchangectl instruments apply` 不受限）。资产、网络与交易对的其它字段照旧由 OPERATOR 改、立即生效。
-- **只有 ADMIN**：新权限 `instruments.trading`（ADMIN 当时共 23 项权限；C4b 加了 `content.write`、`notices.send`，共 25 项）。OPERATOR 可以预览，确认按钮不可用（服务端 403）。
-- **服务端二次确认**：预览（`POST /admin/v1/instruments/preview`，或状态的 `POST …/status/preview`）返回 `confirmation`：用 `ADMIN_SECRET_KEY` 封装的令牌，绑定这位管理员与这次修改的全部变化（各项的修改前后与版本），10 分钟有效。提交时带回它；没有、过期（`reason: expired`）或预览后数据变了（`reason: changed`）都返回 409 `ADMIN_CONFIRMATION_REQUIRED`，页面会让人重新预览。一个令牌只确认一次修改（C5.5 ⑩，修改行记着令牌的哈希 `confirmation_hash`，迁移 admin 00009）：同一令牌再提交（例如网络重试）返回它当初确认的那条修改，不会再建一条；那条修改已经生效、失败或取消了也一样，按它现在的样子返回（C5.5 ⑲）。
+- **只有 ADMIN**：权限 `instruments.trading`。OPERATOR 可以预览，确认按钮不可用（服务端 403）。
+- **服务端二次确认**：预览（`POST /admin/v1/instruments/preview`，或状态的 `POST /admin/v1/instruments/pairs/{symbol}/status/preview`、`POST /admin/v1/derivatives/contracts/{symbol}/status/preview`）返回 `confirmation`：用 `ADMIN_SECRET_KEY` 封装的令牌，绑定这位管理员与这次修改的全部变化（各项的修改前后与版本），10 分钟有效。提交时带回它；没有、过期（`reason: expired`）或预览后数据变了（`reason: changed`）都返回 409 `ADMIN_CONFIRMATION_REQUIRED`，页面会让人重新预览。一个令牌只确认一次修改（C5.5 ⑩，修改行记着令牌的哈希 `confirmation_hash`，迁移 admin 00009）：同一令牌再提交（例如网络重试）返回它当初确认的那条修改，不会再建一条；那条修改已经生效、失败或取消了也一样，按它现在的样子返回（C5.5 ⑲）。
 - **延迟生效**：确认后记为一条「待生效修改」（表 `instrument_changes`），设置里的等待时间（`change_delay_seconds`，默认 300 秒，最多 86400）之后由 admin-service 每 5 秒一轮执行，以提交人的名义写入 instrument-service；到点时再做一次空跑，与确认时不一致（期间有人改过同一项、状态已变）就记为失败（「请重新预览」），不会套用过时的整项。
   - **等待时间的下限**（C5.5 ⑩）：一位 ADMIN 不能把等待时间改到下限以下。下限由 admin-service 的配置 `ADMIN_CHANGE_DELAY_FLOOR` 决定，默认 10 分钟；测试服 compose 里设 60 秒，供 e2e 用。存着的值低于下限时，按下限等待。设置接口返回 `change_delay_floor_seconds`，设置页按它校验。
   - **执行不在后台的事务里**（C5.5 ⑩）：每一轮先认领到点的修改（`applying_at`），再调用 instrument-service，最后单独记结果与审计。认领期间这条修改不能取消（409 `ADMIN_CHANGE_APPLYING`，列表上标「正在生效」）。
-  - 服务暂时不可用或出错（含 gRPC Internal/Unknown）时，修改留到下一轮，结果栏写原因。还没调用就失败的，放开认领（可以取消），等满 1 小时仍不行就记为失败。已经调用、但答复丢了的，保持认领；1 分钟后另一轮核对：已经生效就记为已生效，结果带「(in effect already)」；还没生效就照常执行。记结果失败时（日志 `instruments: change applied, unrecorded`），下一轮同样这样核对。
+  - 服务暂时不可用或出错（含 gRPC Internal/Unknown）时，修改留到下一轮，结果栏写原因。还没调用就失败的，放开认领（可以取消），等满 1 小时仍不行就记为失败。已经调用、但答复丢了的，保持认领；1 分钟后另一轮核对：已经生效就记为已生效，结果带「(in effect already)」；还没生效就照常执行。记结果失败时（日志 `instruments: change applied, unrecorded`），下一轮同样这样核对。认领后答复丢了的，之后各轮即使服务不可用也一直保持认领，不能取消，也不会因满 1 小时记为失败，直到核对出结果（C5.5 ⑲）。`Due` 跳过一分钟内认领的修改；现在只有一个 admin-service 实例、各轮串行，多实例且一轮超过一分钟时可能重选，到那时再改。
   - 风险阶梯到点时再量一次影响：量不了（没有新鲜标记价、服务不可用）就等下一轮；会被强平的仓位比确认时多，就记为失败（`ADMIN_IMPACT_GREW`），请重新预览。按个数严格比较，不看名义价值、没有容差：等待期间标记价一动、多一个账户会被强平就失败，行情波动时收紧阶梯可能要反复预览（协调会话决定先按规格保留，C5.5 ⑲）。
-  - 认领中的修改：一轮认领后答复丢了，之后各轮即使服务不可用也一直保持认领，不能取消，也不会因满 1 小时记为失败，直到核对出结果（C5.5 ⑲）。`Due` 跳过一分钟内认领的修改；现在只有一个 admin-service 实例、各轮串行，多实例且一轮超过一分钟时可能重选，到那时再改。`admin.two_person_approval` 打开时先等另一位 ADMIN 批准（`POST /admin/v1/instruments/changes/{id}/decide`，不能批准自己的），批准后再等同样的时间。生效前任何 ADMIN 都可以取消（`…/cancel`）。审计：`admin.instruments.change_requested`、`change_approved`、`change_rejected`、`change_canceled`、`change_applied`、`change_failed`（对象为 `instruments`、`pair:<symbol>` 或 `contract:<symbol>`）。
-- **暂停是急刹车**：改为 HALT 不需要确认令牌、立即生效（仍只有 ADMIN）；恢复交易、只撤单、下线都按上面等待。暂停只拒绝新单，不撤用户挂单（需求：HALT 允许撤单）；HOUSE 收到 `instrument.events` 后立即撤出它的参考簿（编码会话）。状态预览里带这个交易对或合约现有的挂单数 `open_orders`（读模型 `orders_current`，几秒前，现货与合约同一张表；读不到为 null），确认框里显示。
+  - `admin.two_person_approval` 打开时先等另一位 ADMIN 批准（`POST /admin/v1/instruments/changes/{id}/decide`，不能批准自己的），批准后再等同样的时间。生效前任何 ADMIN 都可以取消（`…/cancel`）。审计：`admin.instruments.change_requested`、`change_approved`、`change_rejected`、`change_canceled`、`change_applied`、`change_failed`（对象为 `instruments`、`pair:<symbol>` 或 `contract:<symbol>`）。
+- **暂停是急刹车**：改为 HALT 不需要确认令牌、立即生效（仍只有 ADMIN；审计 `admin.instruments.pair_status` 或 `admin.instruments.contract_status`，详情 `{from, to}`，合约服务约一分钟内按新状态处理）；恢复交易、只撤单、下线都按上面等待。暂停只拒绝新单，不撤用户挂单（需求：HALT 允许撤单）；HOUSE 收到 `instrument.events` 后立即撤出它的参考簿。状态预览里带这个交易对或合约现有的挂单数 `open_orders`（读模型 `orders_current`，几秒前，现货与合约同一张表；读不到为 null），确认框里显示。模拟市场的币对或永续正被进行中的停牌事件暂停时，恢复交易的确认框提示：交易对与永续会在 10 秒内被再次暂停，要先在「事件日程」结束那个事件（预览时读 `GET /admin/v1/sim`，只在确有进行中的 HALT 事件时提示，㉔）。
 - **风险阶梯的影响**：预览里列出按新阶梯会被强平的仓位数、名义价值与账户数，另有新进入预警、超出其杠杆风险限额的数量（derivatives-service 的 `POST /internal/derivatives/contracts/{symbol}/tier-impact`，按保证金监控的同一规则计算：逐仓看仓位，全仓看整个账户；HOUSE 不计）。算不出来时提示 `IMPACT_UNKNOWN`，有仓位没量到（没有新鲜标记价，或全仓账户太多：derivatives-service 最多量 2000 个、8 秒，剩下的计为未测量）时提示 `IMPACT_UNMEASURED`（详情为个数），两种都不给确认令牌（C5.5 ⑩）。影响只给能确认的 ADMIN 算，OPERATOR 的预览不算。
 - **文档里的状态不生效**：文档给已有交易对或合约写了和现状不同的 `status`，预览与应用都提示 `STATUS_IGNORED`（详情为文档里的状态）；状态只能经「状态修改」改变（C5.5 ⑩）。
 - **参考符号**：HOUSE 正在报价（在 `market.house_liquidity` 的名单上）或有永续合约以它为指数的交易对，清空参考符号直接拒绝（422 `ADMIN_REFERENCE_IN_USE`，详情 `used_by`）。
-- **页面**：「资产与交易对」新增「待生效修改」标签（状态筛选、修改内容、提交人、生效时间与批准人、结果；ADMIN 可批准、驳回、取消），顶栏待办与概览也计数（`todo.instrument_changes`）。修改的预览里，交易参数单独列出，并说明多久后生效或需要谁批准；状态「操作」先向服务端预览再确认。设置页可改等待时间。
+- **页面**：「资产与交易对」的「待生效修改」标签（状态筛选、修改内容、提交人、生效时间与批准人、结果；ADMIN 可批准、驳回、取消），顶栏待办与概览也计数（`todo.instrument_changes`）。修改的预览里，交易参数单独列出，并说明多久后生效或需要谁批准；状态「操作」先向服务端预览再确认。接口 `GET /admin/v1/instruments/changes`、`POST /admin/v1/instruments/pairs/{symbol}/status`、`POST /admin/v1/derivatives/contracts/{symbol}/status`。
 - **运维**：`exchangectl instruments apply`（部署同步）与功能开关的自动暂停（行情断流、模拟市场心跳）不经过这里。
 
-## 管理员、系统健康与审计导出（2026-10-02 设计 §4.6，C4a）
+### 资产资料与图标
 
-- **管理员与角色**（`/admins`，`admins.manage`，只有 ADMIN）：列表显示角色、状态（停用、锁定到何时、连续失败次数）、最近登录、进行中的会话数。「新建管理员」填邮箱、姓名、角色与理由，确认词为角色的小写代码；成功后弹窗显示**一次性设置链接**（`https://admin.astras.vip/setup#token=…`，24 小时内有效、只能用一次），关闭后无法再看，经安全渠道交给本人（C5.5 ⑪）。行内「操作」：修改角色（下一个请求起生效）、重置口令（旧口令立即失效、结束对方全部会话，给设置链接）、重置身份验证器（旧的立即失效、会话结束，给设置链接）、查看会话（抽屉，可结束全部会话）、停用（会话立即结束）/启用（同时清除锁定与失败次数）。每项都要理由与确认词（ID 后 4 位），审计 `admin.created`、`admin.role_changed`、`admin.password_reset`、`admin.totp_reset`、`admin.sessions_revoked`、`admin.disabled`、`admin.enabled`，对象 `admin:<id>`。下方「角色权限」矩阵只读（来自 `GET /admin/v1/roles`，任何管理员可读）。
-  - 规则：不能在这里改自己的账号（403 `ADMIN_SELF`；退出登录结束自己的会话）；最后一位启用的 ADMIN 不能被停用或降级（409 `ADMIN_LAST_ADMIN`；检查与修改在同一个事务里，事务先取咨询锁 `pg_advisory_xact_lock(7331001)`，两位 ADMIN 同时互相降级也会留下一位，C5.5 ⑪）。没有 ADMIN 能登录时仍用 `exchangectl admin create`。
-  - **一次性设置链接**（C5.5 ⑪）：新建与重置都不再把口令或密钥交给操作的 ADMIN。链接里的令牌只在那一次响应里出现（`Cache-Control: no-store`），不写日志、不进审计，服务端只存它的 SHA-256；放在地址的 `#` 之后，不进任何服务器日志，页面读到后立即从地址栏去掉。本人打开 `/setup` 页（不用登录）：新建的链接设口令（至少 12 位，输两次）并绑定页面显示的身份验证器（二维码与密钥，输入当前 6 位码证明已绑好）；重置口令的只设口令（身份验证器不变）；重置身份验证器的只绑定（口令不变）。完成后链接作废，用新的口令与身份验证器登录。审计 `admin.setup_completed`（以本人名义，详情为种类与来源 IP）；新建与重置的审计详情有链接的种类与到期时间。链接没用就又重置时，新链接包含旧链接要设的部分（例如口令链接未用又重置身份验证器，新链接两样都设），不会留下谁都不知道的口令或密钥。服务端只存 Argon2id 哈希与用 `ADMIN_SECRET_KEY` 加密的 TOTP 密钥（等待绑定的另用一个附加数据加密）。
-  - **自己的口令与身份验证器**（「账号与安全」，`/account`）：改口令要当前口令，新口令至少 12 位；换身份验证器要当前口令，登录要验证码时（`admin.login_without_totp` 关闭）还要当前身份验证器的 6 位码（测试服开着这个开关，只凭口令就能换绑，C5.5 ㉒），页面给出新的二维码与密钥，10 分钟内输入新码完成绑定，之前旧的仍可登录。两种修改都结束自己在其它设备上的会话，审计 `admin.password_changed`、`admin.totp_changed`。每位管理员 15 分钟最多 10 次（`COMMON_RATE_LIMITED`）。`exchangectl admin create` 生成的口令（交互方式，不带 `--secrets-stdin`）标记为必须修改：登录后只能看自己（`GET /admin/v1/me`）、改口令与退出，其它请求都是 403 `ADMIN_PASSWORD_CHANGE_REQUIRED`，后台只显示改口令的页面。
-  - 接口：`GET /admin/v1/admins`、`POST /admin/v1/admins`（201，`{admin, setup: {token, kind, expires_at}}`）、`POST /admin/v1/admins/{id}/status`（`{enabled, reason}`）、`…/role`（`{role, reason}`）、`…/password-reset`、`…/totp-reset`（`{reason}`，返回 `{setup}`）、`GET …/sessions`（最多 50 个进行中的会话）、`POST …/sessions/revoke`（204）；不用会话的 `POST /admin/v1/setup/inspect`（`{token}` → 账号、种类、到期时间与要绑定的密钥）与 `POST /admin/v1/setup`（`{token, password?, totp_code?}`，204），两者与登录共用每个 IP 每分钟 10 次的限制；自己的 `POST /admin/v1/me/password`（`{current_password, new_password}`）、`POST /admin/v1/me/totp/start`（`{current_password, totp_code?}` → `{totp_secret, totp_uri}`）、`POST /admin/v1/me/totp`（`{totp_code}`）。`/admin/v1/me` 带 `must_change_password`。
-- **系统健康**（`/health`，`reports.read`）：`GET /admin/v1/health?details=true` 在就绪探测之外读各服务的 `/metrics`：版本（`exchange_build_info` 的 `version`，部署后应全部一致，不一致时标出几个版本）、Kafka 消费滞后（`kafka_consumer_lag` 求和，> 1000 标黄）、启动以来转入死信的条数（`kafka_consumer_records_total{result="dlq"}`，> 0 标红，用 `exchangectl dlq` 查看与重放），以及行情源状态（market-data 的 `/internal/market/feed`）；没有 Kafka 消费者的服务这两列为空。页面另有对账（每项检查最近一次）与托管方状态，每 15 秒刷新。概览的「服务状态」卡片有「详情」进入这一页。
-- **审计**（`/audit`）：「导出 CSV」由服务端按当前筛选导出（`GET /admin/v1/audit-logs/export`，要 `audit.export`，只有 ADMIN 与 AUDITOR 有、其他角色看不到按钮；最新的最多 10,000 条，先按筛选计数、超过时响应头 `X-Truncated: true`，再一页页边查边写，不在内存里攒满（C5.5 ⑪），页面提示缩小时间范围）；UTF-8 带 BOM，列为 `occurred_at,event_type,actor,target,action,reason,details,event_id`（配置变更的 `details` 为 `{"old","new"}`），以 `= + - @` 开头的文本前加单引号，防止表格软件当公式执行。导出本身记审计 `admin.audit.exported`（对象 `audit`，详情为筛选条件与行数）。点行打开详情：时间、操作人、对象、动作、理由、事件 ID，以及逐字段的变更表（配置变更比较前后值；`from/to`、`before/after` 与上架的 `changes` 逐项列出；未变的字段折叠），原始事件可展开。
-- **设置**：「本浏览器」里加了每页条数（20/50/100/200，存在本机 `admin.page_size`，之后打开的列表生效）。
-- 与设计稿 §5 的差别：没有 `GET /admin/v1/audit-logs/{id}`，详情直接用列表里的事件；管理员接口没有删除（停用即可，审计需要保留账号）。
+资产与交易对 → 资产 → 打开一个资产，「资料与图标」（C4c）：显示名（2–32 字符，留空用资产名称）、中英文简介（各 1,000 字以内）、链接（官网、区块浏览器、白皮书，https）与图标（PNG、SVG 或 WebP，正方形，200 KB 以内；页面先检查类型、大小与正方形并预览，instrument-service 再查一遍，SVG 按白名单重建）。保存要理由，确认词为资产代码的小写；审计 `admin.instruments.profile_updated`，对象 `asset:<代码>`，图标只记类型与大小。接口 `GET/PUT /admin/v1/assets/{code}/profile`（读要 `instruments.read`，改要 `instruments.write`）。新图标有新的地址（`/v1/market/assets/{code}/logo?v=<版本>`），三个站点 1 分钟内显示；后台域名也转发这个地址（nginx `site-admin.conf`），在后台的 CSP 下同源显示。
 
-## 报表与资产资料（2026-10-02 设计 §4.6，C4c）
+## 模拟市场
 
-- **时间范围**：交易、充提、合约、用户与 HOUSE 报表都接受 `days`（近 N 天，最多 90）或 `from`/`to`（UTC 日期，含两端，`to` 默认今天），以及 `bucket=day|week|month`（周从周一起；一行的 `day` 是它所在区间的第一天）。按日最长一年，按周或按月最长三年；`bucket` 不对、开始晚于结束、结束晚于今天都是 400。
-- **用户增长**（`GET /admin/v1/reports/users`）：每个区间的注册数与登录人数（auth 事件）、交易人数（现货任一方或合约成交）、充值到账人数，各自按人去重；`total` 是区间结束时的累计注册数。HOUSE 与模拟市场的机器人不计（机器人名单读 market-sim 的 `GET /internal/sim`，`MARKET_SIM_URL`；读不到时 `partial` 含 `bots`，页面提示数字包含机器人）。每个区间都有一行，没有数据的也是 0。
-- **HOUSE 盈亏**（`GET /admin/v1/reports/house-pnl`，USDT）：
-  - 现货按天估值：每个交易对上 HOUSE 收到减付出的计价资产，加上它因交易持有的基础资产按当天最后成交价计；非 USDT 计价的交易对按其计价资产的 USDT 交易对当天收盘折算。`spot_pnl` 是区间内的变化，`spot_result` 是开始以来到区间结束时的累计结果（与 HOUSE 页的交易盈亏同口径）。需要价格时没有价格的交易对整段不计，列在 `unpriced`。
-  - 合约：HOUSE 用户（`HOUSE_USER_ID`）成交的已实现盈亏减手续费（`contracts_pnl`），以及它收到的资金费（`funding`，付出为负）；未实现盈亏不计。
-  - `total` 是三项之和，`cumulative` 是期间内的累计。图表的柱子可以向下（亏损），零线标出。
-- **资产资料**（资产与交易对 → 资产 → 打开一个资产，「资料与图标」）：显示名（2–32 字符，留空用资产名称）、中英文简介（各 1,000 字以内）、链接（官网、区块浏览器、白皮书，https）与图标（PNG、SVG 或 WebP，正方形，200 KB 以内；页面先检查类型、大小与正方形并预览，instrument-service 再查一遍，SVG 按白名单重建）。保存要理由，确认词为资产代码的小写；审计 `admin.instruments.profile_updated`，对象 `asset:<代码>`，图标只记类型与大小。接口 `GET/PUT /admin/v1/assets/{code}/profile`（读要 `instruments.read`，改要 `instruments.write`）。新图标有新的地址（`/v1/market/assets/{code}/logo?v=<版本>`），三个站点 1 分钟内显示；后台域名也转发这个地址（nginx `site-admin.conf`），在后台的 CSP 下同源显示。
-- **请求体大小**：后台 API 一般限 64 KB（nginx），文章与资产资料的接口放宽到 512 KB（长正文、base64 图标）。
+（ASTRA 设计 §6，C5）侧栏「模拟市场」五页，接 market-sim 的内部接口（`MARKET_SIM_URL`，见 [market-sim.md](market-sim.md)）。所有管理员可看（`reports.read`）；价格事件与参数要 `sim.control`（ADMIN、OPERATOR）。
 
-## 模拟市场（ASTRA 设计 §6，2026-10-02 设计 C5）
-
-侧栏「模拟市场」五页，接 market-sim 的内部接口（`MARKET_SIM_URL`，见 [market-sim.md](market-sim.md)）。所有管理员可看（`reports.read`）；价格事件与参数要 `sim.control`（ADMIN、OPERATOR）。
-
-- **概览**（`/sim`）：目标价与最近成交价、价格带（锚点、报价中心、走价中、离锚点几个带宽）、集群状态（开关、运行、参考价、永续、看门狗）、机器人库存与永续净仓位、近 24 小时目标价与成交价曲线（`GET /admin/v1/sim/history`，每 10 秒一个点），进行中的事件有横幅。
-- **价格控制**（`/sim/control`）：七种事件（瞬时涨跌、目标价、趋势、波动率、暂停、停牌、重新锚定）与全部参数。
+- **概览**（`/sim`，`GET /admin/v1/sim`）：目标价与最近成交价、价格带（锚点、报价中心、走价中、离锚点几个带宽）、集群状态（开关、运行、参考价、永续、看门狗）、机器人库存与永续净仓位、近 24 小时目标价与成交价曲线（`GET /admin/v1/sim/history`，每 10 秒一个点），进行中的事件有横幅。
+- **价格控制**（`/sim/control`）：七种事件（瞬时涨跌、目标价、趋势、波动率、暂停、停牌、重新锚定）与全部参数（`POST /admin/v1/sim/events`、`PUT /admin/v1/sim/params`）。
   - 确认框显示按目标价估算的永续影响：多空仓位数、会被强平的仓位数与名义、穿仓额（`POST /admin/v1/sim/impact`，derivatives-service 的 `/internal/derivatives/contracts/{symbol}/price-impact` 按强平监控的同一规则计算，不改任何东西）。
-  - market-sim 管单人份额（单次 30%、任一小时合计 50%，按事件开始时间计；参数里 `p0`、`max_minute_move`、`floor`、`ceiling`、`daily_volume` 按影响计入）。超出时它返回 `SIM_EVENT_NEEDS_APPROVAL` / `SIM_PARAMS_NEED_APPROVAL`，后台把这次改动存成审批（`SIM_EVENT`、`SIM_PARAMS`，`escalation` 为 `SIM_SHARE`，`payload.move` 是 market-sim 估算的幅度），接口返回 202。
+  - market-sim 管单人份额（单次 30%、任一小时合计 50%，按事件开始时间计；参数里 `p0`、`max_minute_move`、`floor`、`ceiling`、`daily_volume` 按影响计入）。超出时它返回 `SIM_EVENT_NEEDS_APPROVAL` / `SIM_PARAMS_NEED_APPROVAL`，后台把这次改动存成资金操作（`SIM_EVENT`、`SIM_PARAMS`，`escalation` 为 `SIM_SHARE`，`payload.move` 是 market-sim 估算的幅度），接口返回 202。
   - 另一位有 `sim.control` 的管理员在「审批」里批准后，admin-service 用自己的键（`admin`，`SIM_ADMIN_API_SECRET`，在服务器 `sim/admin.env`）签名调用 market-sim：`actor` 是申请人、`approved_by` 是批准人，两个名字都取自后台会话，不取自浏览器。批准人以当前登录的会话为准，不再要身份验证器。申请人不能批准自己的（`ADMIN_SELF_APPROVAL`）。
   - 这类申请一天未决、或事件到了开始时间就过期：批准过期的只会记为失败（结果 `expired at <时间>`），不发给 market-sim；列表标「已过期」。批准框里有按现在的目标价重新测的幅度（与申请时 market-sim 的估算并列）和对永续的影响（`GET /admin/v1/approvals/{id}/sim-preview`；跳涨、目标价事件与锚定价修改能直接算出价格，其它只显示申请时的估算）。
   - 没有 `SIM_ADMIN_API_SECRET` 时 admin-service 启动时告警，模拟市场在后台只读。
-- **事件日程**（`/sim/events`）：排队、进行中与结束的事件，发起人与批准人；排队的可取消，进行中的可结束（结束停牌即恢复交易），都要理由。
+- **事件日程**（`/sim/events`）：排队、进行中与结束的事件，发起人与批准人；排队的可取消，进行中的可结束（结束停牌即恢复交易），都要理由（`POST /admin/v1/sim/events/{id}/end`）。
 - **机器人集群**（`/sim/bots`）：
   - 集群开关：`sim.enabled`、`sim.perp`、`sim.events`、`sim.halt_on_loss`，经功能开关接口切换（`flags.write`，规则保留）。market-sim 没有单个机器人的启停接口，开关作用于整个集群。
   - 各角色的数量与库存合计、每个机器人的余额、永续仓位、最近一次被拒与重试时间，可按角色与"只看被拒"筛选；参数只读，到价格控制修改。
   - 单个机器人的余额用「资金调整」修改（行上的「调整余额」带上它的用户 ID）。机器人之间不划转（用户 2026-10-03 决定），要挪就做两笔调整。
   - **补充库存**：资金操作 `SIM_MINT`（`POST /admin/v1/sim/mint`，要 `ledger.adjust.request`；批准要 `ledger.adjust.approve`）。总数平均分给全部或某个角色的机器人（两位小数，余数给第一个），每个机器人一笔现货账户的人工调整，幂等键 `approval:<id>:<用户>`，重试只补没记上的；单人模式的限额与双人模式同其它资金操作，折合按币的 USDT 交易对最新价。单次最多 10,000,000 个币或 1,000,000 USDT，谁批准都不能越过（422 `ADMIN_SIM_MINT_CAP`）。第一个机器人就被拒时记为失败；记上几个之后被拒时保持待处理（计入申请人的 24 小时累计，错误的详情有 `approval_id`、`bot`、`booked`、`of`），排除原因后在「审批」里完成，幂等键只补剩下的。`payload.bots` 是每个机器人的份额（JSON）。审计 `admin.sim.mint_requested/executed/failed/approved/rejected`，对象 `sim`；账本另记每笔 `ledger.manual_adjustment`。运维脚本 `scripts/ops/astra.sh mint` 仍可用（不经审批）。
 - **代币信息**（`/sim/token`）：币的资料（与资产抽屉里的同一编辑器，要 `instruments.write`），以及持有分布（`GET /admin/v1/sim/token`）：发行总量（`ADJUSTMENT` 账户的借方）、市值（按最近成交价）、机器人与用户各自持有多少、多少个账户持有、平台账户（手续费等）与最大的 20 个持有者。数据来自 ClickHouse 的账本流水（`ledger_entries FINAL`），晚几秒；机器人名单来自 market-sim。
-- **订单与成交的机器人筛选**：`GET /admin/v1/orders|trades?accounts=bots|users`。订单按下单账户；成交 `bots` 是两边都是机器人，`users` 是至少一边不是（用户与机器人之间的成交算用户的）。每行带 `bot`（成交为 `buyer_bot`、`seller_bot`）。筛选要 market-sim 的机器人名单，读不到时 503；不筛选时只是不标记。
 - **审计**：对象 `sim`，动作 `admin.sim.event_created/event_ended/params_changed`，审批的 `admin.sim.event_requested/approved/rejected/failed`、`admin.sim.params_*`、`admin.sim.mint_*`；market-sim 自己另记 `market.sim.*`（含 `approved_by`）。
-- **端到端**：`admin.sh` 的「the simulated market」一节不改动线上价格：两个事件都排在明天并取消（其中 35% 的那个由 OPERATOR 申请、ADMIN 批准，检查 market-sim 记下的发起人与批准人），参数改了再改回，超出份额的参数改动被拒绝，每个机器人增发 0.01 USDT，20 万 USDT 的增发被拒绝。
 
-## 运营：公告、帮助与站内信（2026-10-02 设计 §4.5，C4b）
+## 风控
 
-- **存放**：notification-service（迁移 notify 00002：`articles`、`article_texts`、`broadcasts`）。admin-service 经它的内部接口 `/internal/notification/{articles,broadcasts}` 读写（`NOTIFICATION_SERVICE_URL`），检查权限、要理由并审计；notification-service 把后台管理员记为修改人。
-- **公告与帮助**（`/announcements`、`/help-articles`；任何管理员可读，写要 `content.write`，ADMIN 与 OPERATOR 有）：
-  - 一篇文章 = 栏目、slug（小写字母、数字、连字符，同栏目唯一，`NOTIFY_ARTICLE_EXISTS`）、分类、置顶（公告）、排序（帮助）与中英文本（中文必填；英文可选，没有英文时英文用户看中文）。正文是 Markdown，编辑器可切「预览」，按站点的排版显示，站内链接指向用户站。
-  - 状态：草稿 → 发布（立即，或填一个时间定时发布）→ 下线（可再发布）。每次保存带读到的版本，期间别人改过返回 409 `COMMON_CONFLICT`（重新打开再改）。审计 `admin.content.created`、`updated`、`published`、`archived`，对象 `announcement:<slug>` 或 `help:<slug>`。
-  - 站点读取：公开接口 `GET /v1/announcements[/{slug}]`、`GET /v1/help[/{slug}]`（`?locale=en`，`Cache-Control: public, max-age=15`）。列表分页（`limit` 默认 20、最多 100，`cursor` 用上一页的 `next_cursor`），只回摘要：没写摘要的从正文前 4,000 个字符里取第一段，列表从不读整篇正文（C5.5 ⑫）；两个站点读第一页 100 篇，更早的仍可凭链接打开。两个站点把接口里的文章叠加在仓库自带的 Markdown 之上，同 slug 以接口为准；页面数据 30 秒内视为新鲜、45 秒重取一次，所以发布、修改、下线都在 1 分钟内到达两端。接口不可用时只显示自带文章。
-  - 下线的文章：列表接口的 `withdrawn` 带上它的 slug，单篇返回 404 `NOTIFY_ARTICLE_WITHDRAWN`，站点因此连同同 slug 的自带文章一起隐藏（未发布的草稿不影响自带文章）。
-  - 页面下方「站点自带的文章」列出还没被后台接管的仓库文件，「复制到后台编辑」把中英文本带进编辑器，保存为草稿、发布后替换原文件。
-- **站内信**（`/broadcasts`；任何管理员可读，发送要 `notices.send`，ADMIN 与 OPERATOR 有）：
-  - 对象：单个用户（用户 ID，确认词为 ID 后 4 位）、按标签（带这个标签的账户，最多 10,000 个，没有账户带它返回 422 `ADMIN_TAG_EMPTY`；确认词为标签的小写）、全体用户（确认词 `all`）。中文标题与正文必填，英文可选；跳转路径只能是站内路径（如 `/assets`，`//` 开头的拒绝）；可勾选同时发邮件。
-  - 送达：notification-service 分批写进每位用户的通知（类型 `BROADCAST`，实时推送到 `notifications` 频道），见 `accounts.md`「用户通知」。列表与详情显示对象人数、已收到、已读与完成时间，发送中每几秒刷新。发出后不能撤回。审计 `admin.notices.sent`，对象 `broadcast:<id>`。
-  - 失败（C5.5 ⑫）：某条消息的一轮出错（例如 user-service 不可用）只影响它自己，其它消息照常送达；它下一轮等 3 秒、6 秒……翻倍，最多 10 分钟，连续 10 轮（约半小时）失败后标为「发送失败」（`FAILED`）。列表标出「已连续失败 n 轮」，详情显示最近一次的错误与下一轮时间；排除原因后有 `notices.send` 的管理员在详情里「继续发送」（理由，确认词为 ID 后 4 位），从中断处接着发，已收到的用户不会再收到。审计 `admin.notices.resumed` 在请求 notification-service 之前写；对方拒绝（例如已不是 `FAILED`）时另记 `admin.notices.resume_failed` 与错误（C5.5 ㉓）。
-- **接口**：`GET/POST /admin/v1/articles`（`?section=ANNOUNCEMENT|HELP`）、`GET/PUT /admin/v1/articles/{id}`、`POST …/{id}/publish`（`{version, publish_at?, reason}`）、`POST …/{id}/archive`；`GET/POST /admin/v1/broadcasts`、`GET /admin/v1/broadcasts/{id}`（带 `failures`、`last_error`、`retry_at`）、`POST /admin/v1/broadcasts/{id}/resume`（`{reason}`，只有 `FAILED` 的能继续，其它 409 `COMMON_CONFLICT`）。
-- **端到端**：`admin.sh` 用固定 slug `e2e-console` 的公告（文章不删除，第一次运行新建，以后改写）：定时发布前站点看不到，立即发布后 PC 站与手机站的接口 1 分钟内列出，发布中修改 1 分钟内更新，旧版本的修改被拒，下线后从列表消失、slug 进 `withdrawn`；给本次的测试用户发一条站内信，用户在通知里看到并读过后，后台显示已收到 1、已读 1；列表一页一页给、只有摘要，坏游标 400；这条消息没有失败的轮次，「继续发送」只对 `FAILED` 的有效（409），AUDITOR 不能（C5.5 ⑫）。
+### 功能开关
 
-## 功能
+`/risk`：列出全部已知开关（从未设置的显示为关闭、版本 0；说明、规则摘要、最后修改人），切换启用状态要理由与确认（`flags.write`；`GET /admin/v1/flags`、`PUT /admin/v1/flags/{key}`，审计对象 `flag:<key>`，含前后值）。地区、账户状态、白名单等规则保持不变（改规则用 `exchangectl flags set`，见 [feature-flags.md](feature-flags.md)）。服务 5 秒内生效。`admin.*` 开关要 `settings.write`（见「角色与权限」）。
 
-- **分页**（阶段 4 B1）：所有列表接口统一用不透明游标分页，返回 `{items, next_cursor}`。`next_cursor` 原样作为下一页的 `cursor` 传回，最后一页为 null；`limit` 为 1–200，默认 50。审计日志与强平记录的 `limit` 最多 500，默认 100。按接口：
-  - 提现 `/admin/v1/withdrawals`：可按 `status`（`ALL` 为全部）、`user_id`、`asset` 过滤。审核队列 `PENDING_REVIEW` 默认从旧到新，其余状态从新到旧，`order=asc|desc` 可改。
-  - 双人审批 `/admin/v1/approvals`。
-  - 审计日志：可按 `actor`、`target`、`event_type`、`from`、`to` 过滤。
-  - 强平记录。
-- **列表与概览**（阶段 4 B1，B5 接入后台页面）：
-  - `GET /admin/v1/users`：账户，新到旧，可按状态、地区、注册时间过滤，数据来自 user-service 的 `ListUsers`。
-  - `GET /admin/v1/orders`：现货订单的最新状态，读模型 `orders_current`，可按用户、订单号（B5，全局搜索用）、交易对、状态、方向、时间过滤。交易服务受理前就拒绝的订单没有方向与类型（`side` 为空）。
-  - `GET /admin/v1/trades`：现货成交，`user_id` 匹配买卖任一方；`house_side`（B5）是 HOUSE 一方的方向，用户之间成交为空。
-  - `GET /admin/v1/deposits`：充值的最新状态，按检测先后，新到旧；可按交易哈希（`tx_hash`，不分大小写，B5）过滤。
-  - `GET /admin/v1/dashboard?days=7`：概览，内容为：
-    - 账户总数与 24 小时新增；
-    - 24 小时成交笔数、活跃交易用户、按报价资产的成交额；
-    - 待确认充值与待审核提现；
-    - 24 小时风控事件；
-    - 行情连接状态与因断流暂停的交易对（market-data 的 `/internal/market/feed`）；
-    - 按日的新增用户、成交笔数与 USDT 成交额。
+## 运营
 
-    哪一部分读不到就留空，并记在 `partial` 里。
-  - 订单、成交、充值与概览的交易部分来自 ClickHouse，比服务晚几秒。
-- **B5 新增接口**：
-  - `GET /admin/v1/house`：HOUSE 的账（ADR-0013、0015）。库存是账本 `MARKET_MAKER` 各资产余额，按 USDT 交易对的最新价估值（可充提资产在前，站内资产卖出后为负）；各交易对的成交来自读模型 `trades` 的 `house_side`（买入、卖出、付出与收到），盈亏 = 净持有 × 现价 + 净收入；合约仓位是 `HOUSE_USER_ID` 在 derivatives-service 的持仓（admin-service 从 `apps.env` 读 `HOUSE_USER_ID`）。读不到的部分记在 `partial`。
-  - `GET /admin/v1/health`：各服务运维端口 `/readyz` 的就绪状态与耗时（2 秒超时，并发）。目标默认是 compose 网络里的 17 个服务，可用 `HEALTH_TARGETS`（`名称=http://主机:端口,...`）覆盖。C4a 起 `?details=true` 还读各服务的 `/metrics`（版本、Kafka 滞后、死信数）与行情源状态，见上文「系统健康」。
-  - `GET /admin/v1/ledger/reconciliation`：账本对账每项检查的最近一次结果与最近 50 次不一致（各带前 10 条差异），经 ledger-service 新增的 gRPC `GetReconciliation` 读 `reconciliation_runs`。
-  - `GET /admin/v1/ledger/system-balances?asset=`：全部系统科目余额（留空为全部资产）。
-- **提现审批**：按状态列出提现（默认 `PENDING_REVIEW`），显示风控分与命中规则；批准/拒绝需理由，审批人为管理员邮箱（超过 20,000 USDT 需两位不同审批人，规则在 wallet-service）。`exchangectl wallet approve|reject` 仍可用。
-- **提现暂停**（C5.5 ⑯ 起后台可见）：托管核对两次都短缺时，wallet-service 自动暂停该资产的提现，见 [custody.md](custody.md)。
-  - 「提现」页顶部每个暂停的资产一条红色横幅：原因、开始时间与操作人、短缺数量。列表里等待解除的已批准提现标「暂停等待」。
-  - 这种资产的提现照常批准，不拒绝。批准的响应带 `suspended_at` 与 `suspension_reason`，后台提示「已批准；该资产提现暂停中，解除后才发出」；批量审核的结果带 `suspended`。
-  - ADMIN（`withdrawals.resume`）在横幅上「解除暂停」，要理由与确认词（资产代码），与 `exchangectl wallet withdrawals-resume` 同一套：已批准的提现一轮内发出，托管核对重新开始，wallet-service 审计 `wallet.withdrawals.resume`（操作者为管理员邮箱）。
-  - 接口：`GET /admin/v1/withdrawals/suspensions`（`withdrawals.read`）、`POST /admin/v1/withdrawals/suspensions/{asset}/resume`（不在暂停中答 404）；wallet-service 的内部接口为 `GET /internal/wallet/suspensions` 与 `POST …/{asset}/suspend|resume`。
-  - 后台不提供手动暂停与 `--accept`，这两样仍用 CLI。解除不带幂等键：已经解除后再点得到 404，就是已经解除了；钱包的暂停列表读不到时，批准的响应里不带暂停提示（日志 `withdrawals: read the suspensions`）（C5.5 ⑲，接受）。可按网络筛选（`network`），托管网络的提现带 `custody`、托管方状态 `provider_status` 与交给托管方的时间 `submitted_at`。
-- **托管方**（阶段 4 B6，[custody.md](custody.md)）：`GET /admin/v1/custody`（托管方币种与余额、使用它的网络、每个持有方与资产最近一次对账、托管方处理中的提现、待处理回调数）、`GET /admin/v1/custody/callbacks`（`result`、`kind`、`q` 按交易/提现 ID、哈希或地址；游标分页）、`GET /admin/v1/custody/callbacks/{id}`（含原始请求）、`POST /admin/v1/custody/callbacks/{id}/replay`（理由；只限验签通过且 `FAILED`、`UNMATCHED`、`RECEIVED` 的回调，需 `withdrawals.review`，wallet-service 写审计 `wallet.custody.callback.replay`）。
-  - **两个托管方**（C6，ADR-0017）：页头的切换在优盾 `UDUN` 与替身 `UDUNMOCK`（只服务端到端用的隐藏测试资产 TUSD）之间换，地址栏带 `?provider=UDUNMOCK`；`GET /admin/v1/custody?provider=`、`GET /admin/v1/custody/callbacks?provider=` 只给这个托管方自己的核对与回调（另加平台自建钱包的核对）。对账表的持有方显示「托管方 · 名字」或「自建钱包 · 网络」；切换真网关后出现「替身基线」一列（`baseline`：切换时从账本应有里扣除的替身模拟充值，不在任何托管方），全为 0 时不显示。回调详情列出来源地址（`remote_ips`，最近 8 个）。
-  - **托管方手续费**（C6，审查 ④ 的后台）：同页下方「托管方手续费」，`GET /admin/v1/custody/fees?status=HELD|BOOKABLE|WRITTEN_OFF`（`withdrawals.read`，默认先看待人工处理）。计费方式确认过的按报告从 `GAS_SUPPLY` 入账（`BOOKABLE`；`GAS_SUPPLY` 不足时分录为空、显示「等待 GAS_SUPPLY」）；未确认或看起来不对的为 `HELD`，由有 `ledger.adjust.approve` 的管理员处理：「入账」`POST /admin/v1/custody/fees/{withdrawal_id}/book`（`{asset?, amount?, reason}`：留空按报告，填写则按实扣；平台须在该网络的托管方持有这个币种、小数位不超过其精度，否则 400，请核销；处理器一轮内记账）或「核销」`POST …/write-off`（`{reason}`，不记账；也用于等待 `GAS_SUPPLY` 的那笔）。确认词为提现 ID 后 4 位。与 `exchangectl wallet custody-fee` 走同一条路径，wallet-service 以管理员邮箱审计 `wallet.custody.fee.book` / `wallet.custody.fee.write_off`；已处理的再处理得到 409，不会重复入账。
-- **用户**：按用户 ID、邮箱或手机号（`+` 开头的 E.164）查找，显示状态与余额；改账户状态（状态机见附录 B，原因为大写代码，例如 `SUSPICIOUS_LOGIN`、`REVIEW_CLEARED`）；强制撤销全部挂单（撮合引擎异步完成）。
-- **资产与交易对**：列出资产、网络、交易对、合约与费率档；交易对状态是单交易对紧急开关（`TRADING ⇄ HALT`，`CANCEL_ONLY` 之后只能下线，不可恢复交易）。C3 起可以在后台新增与编辑（见下节）；部署时同步 `deploy/instruments/test.json` 不会覆盖后台最后改过的项。
-- **功能开关**：列出全部已知开关（从未设置的显示为关闭、版本 0），切换启用状态并写理由；地区、账户状态、白名单等规则保持不变（改规则用 `exchangectl flags set`）。服务 5 秒内生效。
-- **合约**（阶段 3 任务 10，见 [derivatives.md](derivatives.md#管理后台与读模型)）：每个永续合约的状态、只减仓（原因与时间）、标记价是否新鲜、持仓量；解除只减仓（标记价恢复后才可操作，审计 `admin.derivatives.reduce_only_lifted`）；改合约状态（与交易对同一状态机，instrument-service 记录，审计 `admin.instruments.contract_status`，合约服务约一分钟内按新状态处理）；保险基金余额与 `PNL_CLEARING`；发起保险基金注资（双人审批，类型 `INSURANCE_FUND`）；强平监控（被接管、已预警、保证金率 ≥ 0.5 的仓位，每 5 秒刷新）；强平记录（读模型，可按 WARNING/STARTED/FILLED/ADL 过滤）。
-- **双人审批**（原「调账审批」；单人模式见上文「资金操作」）：FINANCE/ADMIN 发起给用户现货账户加（正数）或扣（负数）某资产，另一位有审批权限的管理员批准后，由 ledger-service 以幂等键 `approval:<id>` 记 `MANUAL_ADJUSTMENT` 分录（对手方 `ADJUSTMENT` 系统账户）。自己不能批准自己的申请（可以撤回）；账本拒绝（例如开关 `ledger.manual_adjustment` 关闭）则申请变为 `FAILED`；账本无响应则保持 `PENDING`，可再次批准（幂等键保证不重复记账）。审批期间申请行加锁，两人同时处理时后到者得到 `ADMIN_APPROVAL_DECIDED`。保险基金注资申请（`INSURANCE_FUND`，金额为正）走同一流程，批准后账本 `FundInsurance` 以同样的幂等键记 `INSURANCE_CONTRIBUTION`（对手方 `ADJUSTMENT`），审计 `admin.derivatives.insurance_requested/approved/rejected`。
-- **报表**（任务 12，所有角色可读）：来自 ClickHouse 读模型（[analytics.md](analytics.md)），按交易对与 UTC 日的成交笔数、成交量、成交额、受理与被拒订单（含合约）；按资产与日的入账充值（不含未认领）与完成提现（金额、手续费）；任意交易对 1m/5m/15m/1h/4h/1d K 线；按合约与日的成交（双边笔数、成交量与成交额按买方算一次、手续费、已实现盈亏）、资金费付出与收到、强平数、ADL 数、保险基金垫付；当前各合约持仓量（多头、空头、持仓数）。数据比服务晚几秒。
-- **审计日志**：按操作者（管理员邮箱、`cli:<用户名>`）或对象（`user:<id>`、`pair:<symbol>`、`contract:<symbol>`、`insurance:<asset>`、`flag:<key>`、`approval:<id>`、`admin:<id>`、`withdrawal:<id>`；充值的补记、入账与驳回记在 `user:<id>` 上）查询 ClickHouse `audit_logs`，写入后几秒可查。后台的每个动作都有审计事件：登录/登录失败/退出、账户状态（user-service 记，操作者为管理员邮箱）、撤单、交易对状态、开关（含前后值）、调账申请/批准/驳回、提现审批（wallet-service 记）。
+（C4b）存放在 notification-service（迁移 notify 00002：`articles`、`article_texts`、`broadcasts`；00003、00004 加了群发的轮次、邮件队列与留存）。admin-service 经它的内部接口 `/internal/notification/{articles,broadcasts}` 读写（`NOTIFICATION_SERVICE_URL`），检查权限、要理由并审计；notification-service 把后台管理员记为修改人。
 
-## 后台页面（阶段 4 B5，设计稿 §10；2026-10-02 重构 C1 起）
+### 公告与帮助
 
-`web/apps/admin`。C1 起的外壳（设计 2026-10-02 §3、§6）：
+`/announcements`、`/help-articles`；任何管理员可读，写要 `content.write`（ADMIN 与 OPERATOR）。
 
-- 浅色为主，顶栏菜单与「设置 → 外观」可切深色（存在本机 `admin.theme`；深色复用用户站令牌）。侧栏是 `data-theme="dark"` 的深色岛，按「概览 · 用户 · 资金 · 交易 · 市场 · 模拟市场 · 风控 · 运营 · 系统」分组折叠（记在本机），没有权限的项隐藏，可收成图标栏。
-- 角标与顶栏铃铛来自事件流（`/admin/v1/events`），数字增加时弹跳。
-- 顶栏：环境标识、审批方式（单人/双人，点开设置）、全局搜索（⌘K / Ctrl+K；用户 ID、邮箱、手机号打开用户抽屉，订单号进入订单列表，交易哈希进入充值列表）、待办、主题、账户菜单（邮箱、角色、主题、退出）。
-- 动效：登录页左半屏网格与两团漂移光斑、字标描边绘制，表单淡入上移、输入框聚焦底线从中间展开、登录中进度条、成功打勾；验证码 6 格输入（粘贴自动填满）。进入控制台侧栏滑入、卡片间隔 40 ms 淡入；切换页面内容区淡入上移 160 ms；概览数字滚动、趋势图从左向右描画 600 ms、异常服务的状态点呼吸；提示从右上滑入、成功打勾。只动 transform/opacity（字标与对勾的描边除外），`prefers-reduced-motion` 时全部关闭。
-- 新页面：资金 → 资金调整（`/adjustments`：审批方式与 24 小时已用额、查找用户、方向/资产/数量/关联单号，单人模式下立即记账并显示分录号与两条分录，或显示待审原因；最近的资金操作）、资金 → 审批（`/approvals`：默认待处理，显示方式与转审原因、申请人与审批人邮箱；自己的单人操作可「完成」，自己的申请可「撤回」）、系统 → 设置（`/settings`：双人审批开关与三个限额，ADMIN 可改、其他人只读；本机主题与语言）。原「账本」页只留对账与系统科目。
+- 一篇文章 = 栏目、slug（小写字母、数字、连字符，同栏目唯一，`NOTIFY_ARTICLE_EXISTS`）、分类、置顶（公告）、排序（帮助）与中英文本（中文必填；英文可选，没有英文时英文用户看中文）。正文是 Markdown，编辑器可切「预览」，按站点的排版显示，站内链接指向用户站。
+- 状态：草稿 → 发布（立即，或填一个时间定时发布）→ 下线（可再发布）。每次保存带读到的版本，期间别人改过返回 409 `COMMON_CONFLICT`（重新打开再改）。审计 `admin.content.created`、`updated`、`published`、`archived`，对象 `announcement:<slug>` 或 `help:<slug>`。
+- 站点读取：公开接口 `GET /v1/announcements[/{slug}]`、`GET /v1/help[/{slug}]`（`?locale=en`，`Cache-Control: public, max-age=15`）。列表分页（`limit` 默认 20、最多 100，`cursor` 用上一页的 `next_cursor`），只回摘要：没写摘要的从正文前 4,000 个字符里取第一段，列表从不读整篇正文（C5.5 ⑫）；两个站点读第一页 100 篇，更早的仍可凭链接打开。两个站点把接口里的文章叠加在仓库自带的 Markdown 之上，同 slug 以接口为准（与设计 §4.5"替代仓库内 Markdown"的偏差，见设计稿 §0）；页面数据 30 秒内视为新鲜、45 秒重取一次，所以发布、修改、下线都在 1 分钟内到达两端。接口不可用时只显示自带文章。
+- 下线的文章：列表接口的 `withdrawn` 带上它的 slug，单篇返回 404 `NOTIFY_ARTICLE_WITHDRAWN`，站点因此连同同 slug 的自带文章一起隐藏（未发布的草稿不影响自带文章）。
+- 页面下方「站点自带的文章」列出还没被后台接管的仓库文件，「复制到后台编辑」把中英文本带进编辑器，保存为草稿、发布后替换原文件。
+- 接口：`GET/POST /admin/v1/articles`（`?section=ANNOUNCEMENT|HELP`）、`GET/PUT /admin/v1/articles/{id}`、`POST …/{id}/publish`（`{version, publish_at?, reason}`）、`POST …/{id}/archive`。
 
-| 页面 | 内容 |
-|---|---|
-| 概览 | 待办（待审提现、待处理资金操作、身份变更申请、待处理充值）、24 小时指标（数字滚动，可点进对应列表）、近 7/30 天成交与新增用户图、17 个服务的就绪状态与耗时、HOUSE 库存估值与盈亏、托管方状态（可访问、短缺、待处理回调、处理中的提现） |
-| 用户 | 按 ID/邮箱/手机号查找，按状态、地区、注册时间筛选，列表带标签；行点击进入用户页（见上文「用户页」）；身份变更申请 |
-| 订单与成交 | 两个标签；按用户、订单号、交易对、状态、方向、账户（用户或机器人，C5）、时间筛选；HOUSE 一方显示为 HOUSE，机器人标出；导出已加载的行为 CSV |
-| 充值 | 三个标签：全部（按用户、资产、网络、状态、交易哈希筛选）、待处理（入账给用户、驳回）、补记待回调；「补记充值」抽屉（先校验、再走资金操作审批，明示托管方未核对） |
-| 提现审批 | 默认待审批队列（旧到新），可切换状态，按折合金额区间、风控分、是否搁置筛选；行点击打开详情：进度、地址簿记录（新地址、冷却中）、今日与本月已提、风控分与命中规则、审批人、批准/拒绝/搁置（带备注）；可勾选批量审核；有新的待审批提现时出现"有新数据"条，不整表轮询 |
-| 托管方 | 托管方状态与处理中的提现（可跳到提现列表）、币种与余额、对账（持有、其它持有方、在途、未入账手续费、应有、短缺）、回调日志（筛选、原始请求、重放） |
-| 资产与交易对 | 交易对（参考市场与倍数、步长、费率）、资产（充提开关、网络）、合约（风险阶梯）、费率档、上架向导五个标签，可搜索；点行编辑、新增，先预览逐项变化再生效（C3）；交易对与合约按状态机改状态 |
-| 仓位（C3） | 全部用户的合约持仓，按保证金率（维持保证金 ÷ 保证金余额）从高到低、每 5 秒刷新；「风险仓位」只看被预警（含全仓账户被预警）、被接管或保证金率 ≥ 50% 的，不含 HOUSE；可按合约、用户筛选；HOUSE 的仓位排在最后并标出（用户的对手方，不能在这里平）；标记价不新鲜的行在标记价下标「标记价过期」（C5.5 ⑨）；其余可强制平仓（`derivatives.write`）。接口 `GET /admin/v1/positions`（最多 500 个，`truncated` 表示还有更多；derivatives-service 的内部接口 `/internal/derivatives/positions`） |
-| 强平记录（C3） | 强平引擎的每一步（预警、接管、强平成交、自动减仓），按环节、合约、用户、近 1/7/30/90 天筛选（读模型） |
-| 合约与保险基金 | 合约状态、只减仓与解除、标记价、持仓量；保险基金与注资（按审批方式：单人模式限额内立即记账）。风险仓位与强平记录 C3 起各有一页 |
-| HOUSE 流动性 | 库存估值（可充提/站内）、各交易对的买卖与盈亏、合约仓位，每 30 秒刷新 |
-| 模拟市场（C5） | 概览、价格控制、事件日程、机器人集群、代币信息五页；见上文「模拟市场」 |
-| 风控与开关 | 全部功能开关（说明、规则摘要、最后修改人），开关切换要确认 |
-| 公告、帮助中心（C4b） | 文章列表（状态、发布时间、修改人，已显示的可跳到站点）、中英文编辑器与预览、发布（立即或定时）与下线；站点自带文章可复制来编辑；见上文 |
-| 站内信（C4b） | 发过的消息（对象、已收到、已读）、详情与发送表单；见上文 |
-| 对账与系统科目 | 对账（每项检查最近一次结果与最近的不一致）、系统科目余额（资金调整与审批见上文的新页面） |
-| 管理员与角色（C4a） | 管理员列表与操作（新建、改角色、重置口令与身份验证器、会话、停用与启用），角色权限矩阵；见上文 |
-| 审计 | 按操作人、对象、事件、时间筛选；服务端导出 CSV（C4a，最多 10,000 条）；行点击看详情与逐字段的变更 |
-| 报表 | 交易、充提、合约、用户增长、HOUSE 盈亏（图表与表格两种视图，切换标签时保持；近 7/30/90 天或自定日期，按日、周或月汇总；C4c）与持仓量 |
-| 系统健康（C4a） | 各服务就绪、版本、Kafka 滞后与死信数，对账、行情源、托管方 |
+### 站内信
 
-通用规范（设计稿 §10.2）：
+`/broadcasts`；任何管理员可读，发送要 `notices.send`（ADMIN 与 OPERATOR）。
 
-- 列表一律服务端游标分页，每页默认 50 条（设置里可按本浏览器改），滚到底自动加载下一页；筛选条件写在地址栏（可分享、后退可恢复），可另存为本机"视图"；文本筛选在停止输入 0.5 秒或回车后生效。
-- 危险操作统一用确认框：显示对象、理由至少 10 个字（进审计）、手动输入确认词（ID 后 4 位、交易对代码或金额），结果用提示条告知，失败时附可复制的追踪 ID。
-- 枚举都有中文标签，悬停显示原始代码；金额按十进制字符串原样显示并加千分位；时间按设置里的时区。
-- 端到端：`web/e2e/admin-smoke.mjs`（`scripts/e2e/web.sh` 运行，每次建一个临时 ADMIN、结束停用）：登录、概览、用户页与各标签（资料与身份、安全、余额、风控……）、身份变更申请、搜索、订单与成交、充值（待处理、补记待回调、补记抽屉，不提交）与提现队列（带筛选）、交易对改状态的确认框（取消，不真的改）、资产的资料与图标、合约、HOUSE、开关、对账、审计（一条的详情、CSV 导出）、报表（含用户增长与 HOUSE 盈亏）、管理员与角色（新建表单打开后取消）、系统健康（版本、Kafka 滞后、对账、行情源）、公告编辑器的预览（不保存）、帮助中心、站内信与发送表单（不发送）、模拟市场五页（价格控制的确认框显示影响后取消，不发起事件）与机器人的订单、资金调整页（审批方式、表单、记录）、审批、设置（含每页条数）、事件流、从账户菜单退出，所有 `/admin/v1` 响应按 `api/admin/admin.yaml` 校验。
+- 对象：单个用户（用户 ID，确认词为 ID 后 4 位）、按标签（带这个标签的账户，最多 10,000 个，没有账户带它返回 422 `ADMIN_TAG_EMPTY`；确认词为标签的小写）、全体用户（确认词 `all`）。中文标题与正文必填，英文可选；跳转路径只能是站内路径（如 `/assets`，`//` 与反斜杠开头的拒绝）；可勾选同时发邮件。带 `Idempotency-Key`（消息 ID 取自它）。
+- 送达：notification-service 分批写进每位用户的通知（类型 `BROADCAST`，实时推送到 `notifications` 频道），见 [accounts.md](accounts.md)「用户通知」。列表与详情显示对象人数、已收到、已读与完成时间，发送中每几秒刷新。发出后不能撤回。审计 `admin.notices.sent`，对象 `broadcast:<id>`。
+- 失败（C5.5 ⑫）：某条消息的一轮出错（例如 user-service 不可用）只影响它自己，其它消息照常送达；它下一轮等 3 秒、6 秒……翻倍，最多 10 分钟，连续 10 轮（约半小时）失败后标为「发送失败」（`FAILED`）。列表标出「已连续失败 n 轮」，详情显示最近一次的错误与下一轮时间；排除原因后有 `notices.send` 的管理员在详情里「继续发送」（理由，确认词为 ID 后 4 位），从中断处接着发，已收到的用户不会再收到。审计 `admin.notices.resumed` 在请求 notification-service 之前写；对方拒绝（例如已不是 `FAILED`）时另记 `admin.notices.resume_failed` 与错误（C5.5 ㉓）。
+- 邮件排队（C5.5 ⑫、㉓）：勾选了邮件的，每位用户一封进 `deliveries` 队列，按轮次重试（1、5、15、60 分钟，第 5 轮失败记 `FAILED`），超过 24 小时放弃；发出的不再重发。
+- 留存（C5.5 ⑫）：通知与群发保留 180 天、投递记录 90 天，每批 5,000 行清理；配置的天数不能低于 7 天（notification-service 启动时校验）。
+- 接口：`GET/POST /admin/v1/broadcasts`、`GET /admin/v1/broadcasts/{id}`（带 `failures`、`last_error`、`retry_at`）、`POST /admin/v1/broadcasts/{id}/resume`（`{reason}`，只有 `FAILED` 的能继续，其它 409 `COMMON_CONFLICT`）。
+
+## 系统
+
+### 管理员与角色
+
+`/admins`（`admins.manage`，只有 ADMIN；C4a）：
+
+- 列表显示角色、状态（停用、锁定到何时、连续失败次数）、最近登录、进行中的会话数。
+- 「新建管理员」填邮箱、姓名、角色与理由，确认词为角色的小写代码；成功后弹窗显示**一次性设置链接**（见「登录与会话」），关闭后无法再看，经安全渠道交给本人。
+- 行内「操作」：修改角色（下一个请求起生效）、重置口令（旧口令立即失效、结束对方全部会话，给设置链接）、重置身份验证器（旧的立即失效、会话结束，给设置链接）、查看会话（抽屉，可结束全部会话）、停用（会话立即结束）/启用（同时清除锁定与失败次数）。每项都要理由与确认词（ID 后 4 位），审计 `admin.created`、`admin.role_changed`、`admin.password_reset`、`admin.totp_reset`、`admin.sessions_revoked`、`admin.disabled`、`admin.enabled`，对象 `admin:<id>`。
+- 下方「角色权限」矩阵只读（来自 `GET /admin/v1/roles`）。
+- 规则：不能在这里改自己的账号（403 `ADMIN_SELF`；退出登录结束自己的会话，口令与身份验证器在「账号与安全」改）；最后一位启用的 ADMIN 不能被停用或降级（409 `ADMIN_LAST_ADMIN`；检查与修改在同一个事务里，事务先取咨询锁 `pg_advisory_xact_lock(7331001)`，两位 ADMIN 同时互相降级也会留下一位，C5.5 ⑪）。没有 ADMIN 能登录时仍用 `exchangectl admin create`。
+- 接口：`GET /admin/v1/admins`、`POST /admin/v1/admins`（201，`{admin, setup: {token, kind, expires_at}}`）、`POST /admin/v1/admins/{id}/status`（`{enabled, reason}`）、`…/role`（`{role, reason}`）、`…/password-reset`、`…/totp-reset`（`{reason}`，返回 `{setup}`）、`GET …/sessions`（最多 50 个进行中的会话）、`POST …/sessions/revoke`（204）。
+- 与设计稿 §5 的差别：管理员接口没有删除（停用即可，审计需要保留账号）。
+
+### 系统健康
+
+`/health`（`reports.read`，C4a）：
+
+- `GET /admin/v1/health`：各服务运维端口 `/readyz` 的就绪状态与耗时（2 秒超时，并发）。目标默认是 compose 网络里的 17 个服务，可用 `HEALTH_TARGETS`（`名称=http://主机:端口,...`）覆盖。
+- `?details=true` 还读各服务的 `/metrics`：版本（`exchange_build_info` 的 `version`，部署后应全部一致，不一致时标出几个版本）、Kafka 消费滞后（`kafka_consumer_lag` 求和，> 1000 标黄）、启动以来转入死信的条数（`kafka_consumer_records_total{result="dlq"}`，> 0 标红，用 `exchangectl dlq` 查看与重放），以及行情源状态（market-data 的 `/internal/market/feed`）；没有 Kafka 消费者的服务这两列为空。
+- 页面另有对账（每项检查最近一次）与托管方状态，每 15 秒刷新。
+
+### 审计
+
+`/audit`：
+
+- `GET /admin/v1/audit-logs`：按操作者（`actor`：管理员邮箱、`cli:<用户名>`）、对象（`target`：`user:<id>`、`pair:<symbol>`、`contract:<symbol>`、`asset:<代码>`、`insurance:<asset>`、`flag:<key>`、`approval:<id>`、`admin:<id>`、`withdrawal:<id>`、`broadcast:<id>`、`announcement:<slug>`、`sim`、`instruments`；充值的补记、入账、驳回与记给用户记在 `user:<id>` 上）、`event_type`、`from`、`to` 查询 ClickHouse `audit_logs`，写入后几秒可查；`limit` 最多 500。后台的每个动作都有审计事件（登录/登录失败/退出、账户状态（user-service 记，操作者为管理员邮箱）、撤单、交易参数、开关（含前后值）、资金操作、提现审批与充值处置（wallet-service 记）……，各节已列出）。
+- 点行打开详情：时间、操作人、对象、动作、理由、事件 ID，以及逐字段的变更表（配置变更比较前后值；`from/to`、`before/after` 与上架的 `changes` 逐项列出；未变的字段折叠），原始事件可展开。
+- **导出 CSV**：服务端按当前筛选导出（`GET /admin/v1/audit-logs/export`，要 `audit.export`，只有 ADMIN 与 AUDITOR 有、其他角色看不到按钮）。最新的最多 10,000 条，先按筛选计数、超过时响应头 `X-Truncated: true`，再一页页边查边写，不在内存里攒满（C5.5 ⑪），页面提示缩小时间范围。UTF-8 带 BOM，列为 `occurred_at,event_type,actor,target,action,reason,details,event_id`（配置变更的 `details` 为 `{"old","new"}`），以 `= + - @` 开头的文本前加单引号，防止表格软件当公式执行。导出本身记审计 `admin.audit.exported`（对象 `audit`，详情为筛选条件与行数）。
+- 与设计稿 §5 的差别：没有 `GET /admin/v1/audit-logs/{id}`，详情直接用列表里的事件。
+
+### 报表
+
+`/reports`（任务 12 起，所有角色可读，`reports.read`）：来自 ClickHouse 读模型（[analytics.md](analytics.md)），比服务晚几秒。图表与表格两种视图（切换标签时保持），近 7/30/90 天或自定日期，按日、周或月汇总（C4c）。
+
+- **时间范围**：交易、充提、合约、用户与 HOUSE 报表都接受 `days`（近 N 天，最多 90）或 `from`/`to`（UTC 日期，含两端，`to` 默认今天），以及 `bucket=day|week|month`（周从周一起；一行的 `day` 是它所在区间的第一天）。按日最长一年，按周或按月最长三年；`bucket` 不对、开始晚于结束、结束晚于今天都是 400。
+- **交易**：按交易对与 UTC 日的成交笔数、成交量、成交额、受理与被拒订单（含合约）；任意交易对 1m/5m/15m/1h/4h/1d K 线。
+- **充提**：按资产与日的入账充值（不含未认领）与完成提现（金额、手续费）。
+- **合约**：按合约与日的成交（双边笔数、成交量与成交额按买方算一次、手续费、已实现盈亏）、资金费付出与收到、强平数、ADL 数、保险基金垫付；当前各合约持仓量（多头、空头、持仓数）。
+- **用户增长**（`GET /admin/v1/reports/users`）：每个区间的注册数与登录人数（auth 事件）、交易人数（现货任一方或合约成交）、充值到账人数，各自按人去重；`total` 是区间结束时的累计注册数。HOUSE 与模拟市场的机器人不计（机器人名单读 market-sim 的 `GET /internal/sim`，`MARKET_SIM_URL`；读不到时 `partial` 含 `bots`，页面提示数字包含机器人）。每个区间都有一行，没有数据的也是 0。
+- **HOUSE 盈亏**（`GET /admin/v1/reports/house-pnl`，USDT）：
+  - 现货按天估值：每个交易对上 HOUSE 收到减付出的计价资产，加上它因交易持有的基础资产按当天最后成交价计；非 USDT 计价的交易对按其计价资产的 USDT 交易对当天收盘折算。`spot_pnl` 是区间内的变化，`spot_result` 是开始以来到区间结束时的累计结果（与 HOUSE 页的交易盈亏同口径）。需要价格时没有价格的交易对整段不计，列在 `unpriced`。
+  - 合约：HOUSE 用户（`HOUSE_USER_ID`）成交的已实现盈亏减手续费（`contracts_pnl`），以及它收到的资金费（`funding`，付出为负）；未实现盈亏不计。
+  - `total` 是三项之和，`cumulative` 是期间内的累计。图表的柱子可以向下（亏损），零线标出。HOUSE 页的「近 30 日盈亏」用同一个报表。
+
+### 设置
+
+`/settings`：
+
+- **资金操作的审批**：双人审批开关与三个限额（单笔、24 小时、提现），见「资金操作」。`GET /admin/v1/settings`（所有管理员可读，含调用者 24 小时已用额 `daily_used_usdt`），`PUT /admin/v1/settings`（ADMIN，理由必填；限额审计 `admin.settings.changed`，双人开关经开关表审计 `flag:admin.two_person_approval`，本实例立即生效，其它 5 秒内）。也可以用 `exchangectl flags set admin.two_person_approval --on --reason "..."` 打开。三个限额各自最多是默认值的 10 倍。
+- **交易参数的等待时间**：`change_delay_seconds`（不低于 `change_delay_floor_seconds`），见「交易参数的护栏」。
+- **本浏览器**：外观（浅色、深色）、语言、每页条数（20/50/100/200）。其他人只读。
 
 ## 运维
 
@@ -334,9 +437,27 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 - `ADMIN_SECRET_KEY` 在服务器 `/opt/exchange/infra/admin/admin.env`（目录 700、文件 600，属主 root，只注入 admin-service，不在 `apps.env`），2026-09-29 用 `openssl rand -base64 32` 生成，从未打印。本机开发的在 `.env`。
 - 锁定：等 15 分钟自动解锁，或由 ADMIN 在「管理员与角色」页启用（同时清除锁定）；忘记密码或丢失 TOTP：另一位 ADMIN 在同一页重置（对方会话结束，得到一次性设置链接交给本人，本人自己设新的；C5.5 ⑪）。不能重置自己的；唯一的 ADMIN 丢失时，用 `exchangectl admin disable` 停用后以新邮箱 `admin create` 重建（命令行没有重置入口，避免成为绕过 TOTP 的后门）。
 - IP 白名单（可选）：在服务器建 `/opt/exchange/infra/nginx/snippets/admin-access.local.conf`，内容如 `allow 203.0.113.7; deny all;`，`task deploy` 或 `nginx -s reload` 后对 `admin.astras.vip` 整站生效（真实客户端 IP 由 Cloudflare real-ip 配置还原）。目前按用户决定不设。部署同步不会覆盖或删除这个文件。
+- 服务地址（compose）：`DERIVATIVES_SERVICE_URL`（`http://derivatives-service:8095`）、`NOTIFICATION_SERVICE_URL`、`MARKET_SIM_URL` 等；`HOUSE_USER_ID` 从 `apps.env` 读；`ADMIN_CHANGE_DELAY_FLOOR`（测试服 60 秒）；`SIM_ADMIN_API_SECRET` 在 `sim/admin.env`。
 - 指标：运维端口 9094（`outbox_pending`、`http_server_*`）；Prometheus 任务 `admin-service`。
-- 端到端：`bash scripts/e2e/admin.sh`（对 `https://admin.astras.vip`，每次创建 4 个随机管理员、结束时停用；覆盖页面与安全头、旧地址的跳转、登录与 Cookie、角色、备注与标签、批量审核提现、冻结/解冻、交易参数的护栏（C3c：等待时间临时设为 60 秒、结束时恢复，测试服的下限是 60 秒；OPERATOR 不能改状态与参考倍数；ETH-BTC 只预览暂停（带挂单数）与只可撤单；没有确认令牌 409；LINK-BTC 的参考倍数修改经 ADMIN 确认后排期再取消，同一令牌再提交返回同一条修改；ETH-USDT-PERP 立即暂停、确认的恢复一分钟后由后台执行；LINK-BTC（C5.5 ⑩ 起跟随币安 LINKBTC、由 HOUSE 报价（第一次运行把它追加进 `market.house_liquidity` 的名单，名单其余不变），文档每次相同、只第一次创建；已有交易对写了别的状态时提示 `STATUS_IGNORED`）立即暂停、确认开放、一分钟后在币安买一价下 5% 挂单并撤掉，运行结束时仍在交易；更严的风险阶梯预览列出影响；BTC-USDT 的参考符号不能清空）、撤单、开关往返、双人调账、设置的权限与校验、单人模式（ADMIN 直接 +2.5/−2.5 USDT，超过单笔限额的转审并撤回；双人模式时跳过）、幂等键（不带键 400；同一键的调账、冻结、解冻与站内信各发两次只生效一次，站内信只审计一次、用户只收到一条；同一键换金额 409；决定者重复批准返回原操作）、待办与事件流、合约（状态、只减仓、强平监控与记录、双人保险基金注资 1 USDT）、报表、用户页的估值余额、风控冻结与解冻（用户资金流水里看得到 `ADMIN_FREEZE`；运维的 `exchangectl ledger release-hold` 超过冻结单的数量被拒、默认解冻冻结单的全部，审计带 `forced`）、单笔撤单、合约账户调账（单人模式时）、强制平仓（用户市价买入 0.1 ETH-USDT-PERP，HOUSE 的仓位排在用户之后，扣 1 USDT 前的全仓保证金预览（扣后权益少 1），后台平掉后仓位为空；合约交易关闭时跳过）、充值处置与补记（用托管方替身 udun-mock：回调推迟 600 秒（补记的检查做完即恢复）的 2 USDT 由 FINANCE 补记、用户余额 +2、同一交易号再补记被拒、晚到的回调记为已核对且不再入账、`exchangectl` 报告里不再列出；低于最小额的 0.5 USDT 入账给用户、0.25 USDT 驳回后不能再入账；补记的检查做完才放出扣住的回调——56e491b 起替身对已扣住的回调也按新设的延迟）、无主充值（C5.5 ㉑：在替身托管方 `UDUNMOCK` 的隐藏测试资产上——一个 AQ 用户取充值地址、`exchangectl wallet retire-addresses --provider UDUNMOCK` 退役替身的地址后向它打入 1 与 2 个，两笔都是无主、原持有人是这个用户；OPERATOR 不能记、不带键 400、直接入账 409；FINANCE 把 1 记给原持有人（按常规限额，测试资产没有报价时由 ADMIN 批准），同一键再来是同一笔操作，再记一次 409，原持有人多 1；把 2 记给另一个用户时不论金额都等第二人（`NOT_ADDRESS_HOLDER`），申请人自己批不了，ADMIN 批准后入账，审计带原持有人；`UDUNMOCK` 还没有网络时跳过）、提现详情与搁置（对已完成的提现搁置得到 409）、提现暂停（C5.5 ⑯：用 `exchangectl wallet withdrawals-suspend` 暂停 ETH，后台列出原因，FINANCE 不能解除，ADMIN 带理由解除，再解除得到 404，wallet-service 以 ADMIN 的名义审计）、安全/历史/风控与完整联系方式、换绑审核（用户换绑唯一的邮箱 → 后台通过 → 按新邮箱能查到）、重置身份验证器、全部会话退出（用户令牌立即失效）、临时密码（旧密码失效、临时密码可登录、审计里没有它）、后台建管理员（C4a、C5.5 ⑪：ADMIN 建 OPERATOR，响应 `no-store`、只有一次性设置链接；设置前登录不了；不带会话打开链接看到账号与要绑定的密钥，短口令与错的验证码被拒，设好后链接作废、用自己设的登录；改为 AUDITOR 后下一个请求即生效；重置口令与身份验证器都结束会话、旧的立即失效，各自的链接设好后可登录；自己改口令时错的当前口令被拒、改后用新的登录；结束会话；停用后不能登录、启用后可以；不能改自己的账号；链接、口令与密钥不出现在任何输出与审计里）、系统健康（全部就绪且带版本，消费者的滞后与死信数，行情源）、审计查询（含充值处置的四个动作与管理员的七个动作）与 CSV 导出（BOM、表头、`X-Truncated: false`，导出本身被审计）、退出与停用）。
-- admin-service 连 derivatives-service 的内部地址：`DERIVATIVES_SERVICE_URL`（compose 里是 `http://derivatives-service:8095`）。
+
+## 测试
+
+- **单元与集成测试**：`internal/admin/...`（应用层用内存仓库与各服务的假实现；`adapters/postgres` 的集成测试连测试服 `exchange_test` 库，`task test:integration`）；迁移 `migrations/admin` 由 `./migrations/` 的集成测试逐个上下回滚。
+- **端到端** `bash scripts/e2e/admin.sh`（对 `https://admin.astras.vip`，每次创建 4 个随机管理员、结束时停用）。覆盖：
+  - 页面与安全头、旧地址的跳转、登录与 Cookie、角色、备注与标签、批量审核提现、冻结/解冻、撤单、开关往返、待办与事件流、报表、资产资料与其审计、分页列表与概览、用户页的估值余额、单笔撤单。
+  - 交易参数的护栏（C3c：等待时间临时设为 60 秒、结束时恢复，测试服的下限是 60 秒；OPERATOR 不能改状态与参考倍数；ETH-BTC 只预览暂停（带挂单数）与只可撤单；没有确认令牌 409；LINK-BTC 的参考倍数修改经 ADMIN 确认后排期再取消，同一令牌再提交返回同一条修改；ETH-USDT-PERP 立即暂停、确认的恢复一分钟后由后台执行；LINK-BTC（C5.5 ⑩ 起跟随币安 LINKBTC、由 HOUSE 报价（第一次运行把它追加进 `market.house_liquidity` 的名单，名单其余不变），文档每次相同、只第一次创建；已有交易对写了别的状态时提示 `STATUS_IGNORED`）立即暂停、确认开放、一分钟后在币安买一价下 5% 挂单并撤掉，运行结束时仍在交易；更严的风险阶梯预览列出影响；BTC-USDT 的参考符号不能清空）。
+  - 资金操作：双人调账、设置的权限与校验、单人模式（ADMIN 直接 +2.5/−2.5 USDT，超过单笔限额的转审并撤回；双人模式时跳过）、幂等键（不带键 400；同一键的调账、冻结、解冻与站内信各发两次只生效一次，站内信只审计一次、用户只收到一条；同一键换金额 409；决定者重复批准返回原操作）、合约（状态、只减仓、强平监控与记录、双人保险基金注资 1 USDT）、风控冻结与解冻（用户资金流水里看得到 `ADMIN_FREEZE`；运维的 `exchangectl ledger release-hold` 超过冻结单的数量被拒、默认解冻冻结单的全部，审计带 `forced`）、合约账户调账（单人模式时）、强制平仓（用户市价买入 0.1 ETH-USDT-PERP，HOUSE 的仓位排在用户之后，扣 1 USDT 前的全仓保证金预览（扣后权益少 1），后台平掉后仓位为空；合约交易关闭时跳过）。
+  - 充值处置与补记（用托管方替身 udun-mock：回调推迟 600 秒的 2 USDT 由 FINANCE 补记、用户余额 +2、同一交易号再补记被拒、晚到的回调记为已核对且不再入账、`exchangectl` 报告里不再列出；低于最小额的 0.5 USDT 入账给用户、0.25 USDT 驳回后不能再入账；补记的检查做完才把延迟改回 0、放出扣住的回调——56e491b 起替身对已扣住的回调也按新设的延迟）。
+  - 无主充值（C5.5 ㉑，在替身托管方 `UDUNMOCK` 的隐藏测试资产上）：一个 AQ 用户取充值地址、`exchangectl wallet retire-addresses --provider UDUNMOCK` 退役替身的地址后向它打入 1 与 2 个，两笔都是无主、原持有人是这个用户；OPERATOR 不能记、不带键 400、直接入账 409；FINANCE 把 1 记给原持有人（按常规限额，测试资产没有报价时由 ADMIN 批准），同一键再来是同一笔操作，再记一次 409，原持有人多 1；把 2 记给另一个用户时不论金额都等第二人（`NOT_ADDRESS_HOLDER`），申请人自己批不了，同一笔充值的第二个申请 409 `ADMIN_DEPOSIT_ASSIGN_OPEN`，ADMIN 批准后入账，审计带原持有人；`UDUNMOCK` 还没有网络时跳过。
+  - 提现详情与搁置（对已完成的提现搁置得到 409）、提现暂停（C5.5 ⑯：用 `exchangectl wallet withdrawals-suspend` 暂停 ETH，后台列出原因，FINANCE 不能解除，ADMIN 带理由解除，再解除得到 404，wallet-service 以 ADMIN 的名义审计）。
+  - 用户的安全/历史/风控与完整联系方式、换绑审核（用户换绑唯一的邮箱 → 后台通过 → 按新邮箱能查到）、重置身份验证器、全部会话退出（用户令牌立即失效）、临时密码（旧密码失效、临时密码可登录、审计里没有它）。
+  - 后台建管理员（C4a、C5.5 ⑪：ADMIN 建 OPERATOR，响应 `no-store`、只有一次性设置链接；设置前登录不了；不带会话打开链接看到账号与要绑定的密钥，短口令与错的验证码被拒，设好后链接作废、用自己设的登录；改为 AUDITOR 后下一个请求即生效；重置口令与身份验证器都结束会话、旧的立即失效，各自的链接设好后可登录；自己改口令时错的当前口令被拒、改后用新的登录；结束会话；停用后不能登录、启用后可以；不能改自己的账号；链接、口令与密钥不出现在任何输出与审计里）。
+  - 模拟市场（不改动线上价格：两个事件都排在明天并取消，其中 35% 的那个由 OPERATOR 申请、ADMIN 批准，检查 market-sim 记下的发起人与批准人；参数改了再改回，超出份额的参数改动被拒绝；每个机器人增发 0.01 USDT，20 万 USDT 的增发被拒绝）。
+  - 运营：固定 slug `e2e-console` 的公告（文章不删除，第一次运行新建，以后改写）——定时发布前站点看不到，立即发布后 PC 站与手机站的接口 1 分钟内列出，发布中修改 1 分钟内更新，旧版本的修改被拒，下线后从列表消失、slug 进 `withdrawn`；给本次的测试用户发一条站内信，用户在通知里看到并读过后，后台显示已收到 1、已读 1；列表一页一页给、只有摘要，坏游标 400；这条消息没有失败的轮次，「继续发送」只对 `FAILED` 的有效（409），AUDITOR 不能（C5.5 ⑫）。
+  - 系统健康（全部就绪且带版本，消费者的滞后与死信数，行情源）、审计查询（含充值处置的四个动作与管理员的七个动作）与 CSV 导出（BOM、表头、`X-Truncated: false`，导出本身被审计）、退出与停用。
+- **浏览器冒烟** `web/e2e/admin-smoke.mjs`（`scripts/e2e/web.sh` 运行，每次建一个临时 ADMIN、结束停用；1440 × 900）：登录、概览、用户页与各标签、身份变更申请、搜索、订单与成交、充值（待处理、补记待回调、补记抽屉，不提交）、提现队列（带筛选）与一笔提现的详情（地址簿、该用户最近的提现）、托管方（优盾的页面能打开，不论连着哪个网关；替身 `UDUNMOCK`：可访问、TUSD 币种、它的对账行、一条回调的原始请求与来源地址、托管方手续费，C6 起按协调会话 ⑤ 离开优盾）、交易对改状态的确认框（取消，不真的改）、资产的资料与图标、合约、仓位、强平记录、HOUSE（近 30 日盈亏、敞口、各交易对、各合约净头寸）、开关、对账、审计（一条的详情、CSV 导出）、报表（含用户增长与 HOUSE 盈亏）、管理员与角色（新建表单打开后取消）、系统健康、公告编辑器的预览（不保存）、帮助中心、站内信与发送表单（不发送）、模拟市场五页（价格控制的确认框显示影响后取消，不发起事件）与机器人的订单、资金调整页、审批、设置（含每页条数）、事件流、账号与安全（不修改）、从账户菜单退出、不带链接的设置页；所有 `/admin/v1` 响应按 `api/admin/admin.yaml` 校验。本机：`ADMIN_EMAIL=… ADMIN_PASSWORD=… APP=http://localhost:5180 node web/e2e/admin-smoke.mjs`。
+- **Lighthouse**：`task web:lighthouse` 跑登录页（`web/lighthouse/admin.json`，性能 ≥ 90）与登录后的页面（`web/lighthouse/console.sh`：经 ssh 建一个临时 ADMIN（口令与密钥从标准输入传入、不打印），会话以请求头文件交给 Lighthouse，结束时退出并停用；设计 §6 要求性能 ≥ 85）。报告在 `.lighthouseci/`。
+- **视觉检查**：各批次的页面在本机开发服务器上用契约样例数据截图核对（脚本不入库，结果写在设计稿 §10 的验收记录里）。
 
 ## 常见错误码
 
@@ -364,10 +485,11 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | `ADMIN_CHANGE_CLOSED` | 这项待生效修改已经生效、取消、驳回或失败 |
 | `ADMIN_CHANGE_APPLYING` | 这项修改已被执行的一轮认领（可能已经生效），不能取消；稍后看它的结果 |
 | `ADMIN_IMPACT_GREW` | 风险阶梯到点时再量，会被强平的仓位比确认时多（详情 `symbol`、`liquidated`、`confirmed`）；这条修改记为失败，重新预览 |
+| `ADMIN_NEW_ITEM_NOT_PREPARE` | 后台新建的交易对或合约写了「准备中」以外的状态（详情 `symbol`、`status`）；先建再经状态修改开放 |
+| `ADMIN_SIM_MINT_CAP` | 增发超过单次上限（10,000,000 个币或 1,000,000 USDT），谁批准都不行 |
 | `ADMIN_TAG_EMPTY` | 按标签发的站内信：没有账户带这个标签 |
 | `NOTIFY_ARTICLE_EXISTS` | 同一栏目已有这个 slug 的文章（notification-service 返回，后台原样转出） |
 | `NOTIFY_ARTICLE_WITHDRAWN` | 公开接口：文章已下线（站点不再用同 slug 的自带文章顶替） |
-| `ADMIN_NEW_ITEM_NOT_PREPARE` | 后台新建的交易对或合约写了「准备中」以外的状态（详情 `symbol`、`status`）；先建再经状态修改开放 |
 | `WALLET_DEPOSIT_KNOWN` | 补记的托管方交易号或（网络、哈希、地址）已有充值，详情 `deposit_id` |
 | `WALLET_DEPOSIT_NOT_RELEASABLE` | 只有记入 `UNCLAIMED_DEPOSIT`、有币种、回调没有不一致的待处理充值才能入账给用户 |
 | `WALLET_DEPOSIT_NO_OWNER` | 无主充值不能直接入账，用「记给用户」（C5.5 ㉑） |
@@ -377,3 +499,4 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | `WALLET_DEPOSIT_RELEASED` | 账本已经把这笔待处理充值放行给用户、钱包没记上：不能驳回，再「入账」一次把放行记下（详情 `journal_id`） |
 | `ADMIN_WITHDRAWAL_HELD` | 批量审核跳过了搁置中的提现，要单独审核 |
 | `WALLET_WITHDRAWAL_NOT_IN_REVIEW` | 只有待审批的提现可以搁置 |
+| `DERIV_HOUSE_NOT_CLOSED` | HOUSE 的仓位不能强制平仓 |

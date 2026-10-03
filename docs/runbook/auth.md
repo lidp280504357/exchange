@@ -72,7 +72,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo sed -i "/^JWT_SIGNING_KEY=/d;/^JWT_
 
 ## 换绑审核
 
-只有一种身份的账户换绑会写 `auth.identity_rebind_requests`（`PENDING_REVIEW`），由管理后台「身份变更申请」页处理（2026-10-02 设计 C2，见 [admin.md](admin.md#用户页2026-10-02-设计-c2)）：通过时身份改为新值并发 `auth.IdentityRebound`（用户收到通知），拒绝只记结果；处理人（管理员邮箱）与理由记在 `decided_by`、`decision_reason`（迁移 auth 00004）。新值已被其他账户占用时通过失败（`AUTH_IDENTITY_TAKEN`）。
+只有一种身份的账户换绑会写 `auth.identity_rebind_requests`（`PENDING_REVIEW`），由管理后台「身份变更申请」页处理（2026-10-02 设计 C2，见 [admin.md](admin.md#身份变更申请)）：通过时身份改为新值并发 `auth.IdentityRebound`（用户收到通知），拒绝只记结果；处理人（管理员邮箱）与理由记在 `decided_by`、`decision_reason`（迁移 auth 00004）。新值已被其他账户占用时通过失败（`AUTH_IDENTITY_TAKEN`）。
 
 ## 管理后台的安全操作（gRPC，C2）
 
