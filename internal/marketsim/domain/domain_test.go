@@ -207,6 +207,21 @@ func TestArrivalsMakeTheDaysTurnover(t *testing.T) {
 	}
 }
 
+// A quiet market's order traded ahead of the takers' budget comes off
+// their next orders (coordinator 2026-10-04: counted in the budget).
+func TestRepay(t *testing.T) {
+	for _, c := range []struct{ worth, debt, left, owed float64 }{
+		{400, 0, 400, 0},   // nothing owed
+		{400, 5, 395, 0},   // a quiet order of 5 comes off
+		{400, 900, 0, 500}, // the order goes to the debt
+		{400, 397, 0, 0},   // 3 left: not worth an order
+	} {
+		if left, owed := Repay(c.worth, c.debt, 5); left != c.left || owed != c.owed {
+			t.Fatalf("Repay(%v, %v) = %v, %v", c.worth, c.debt, left, owed)
+		}
+	}
+}
+
 func TestTakerSideAndLean(t *testing.T) {
 	rng := rand.New(rand.NewPCG(5, 6)) //nolint:gosec // a repeatable test
 	count := func(lean float64) int {

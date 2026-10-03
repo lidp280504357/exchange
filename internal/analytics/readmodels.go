@@ -197,8 +197,8 @@ func (m *readModels) add(d kafka.Delivery) error {
 
 // addFlat stores a minute market-data-service made flat (no trade in it,
 // coordinator 2026-10-04) as its candles_1m row, updated at the minute's
-// start: a candle computed from trades of that minute (one that came
-// late) is always newer and replaces it.
+// start: a candle computed from trades of that minute (one an engine whose
+// clock was behind stamped in it) is always newer and replaces it.
 func (m *readModels) addFlat(c *marketv1.Candle) error {
 	if c.GetInterval() != "1m" || c.GetTradeCount() != 0 || c.GetSymbol() == "" || c.GetOpenTime() == nil {
 		return fmt.Errorf("%w: not a flat minute: %s %s", errMalformed, c.GetSymbol(), c.GetInterval())

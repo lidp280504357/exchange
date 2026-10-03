@@ -28,11 +28,12 @@ import (
 
 // perpCheckEvery is how often the bots' positions and margins are read
 // (often enough that the makers' fills between two reads take a position
-// little beyond PerpBotCap), markEvery the mark price and the perpetual's
-// last trade.
+// little beyond PerpBotCap), markEvery the mark price, perpTradeEvery the
+// perpetual's last trade (for perpQuietTake).
 const (
 	perpCheckEvery = 10 * time.Second
 	markEvery      = time.Second
+	perpTradeEvery = 5 * time.Second
 )
 
 // perpQuietTake is how long the perpetual goes without a trade before a
@@ -42,7 +43,10 @@ const (
 // while paused (the design's §0 of 10-03: no orders in a pause or a halt;
 // the perpetual's index is the spot pair's, whose own quiet taker keeps
 // it). The order is the takers' (PERP_TAKER), at the market: it fills
-// within the contract's band around the mark price.
+// within the contract's band around the mark price. It counts in
+// perp_daily_volume (the same decision): its worth is taken off the
+// takers' next orders (domain.Repay), owed at most an hour of the budget
+// (a budget below what the quiet orders alone trade cannot be kept).
 const perpQuietTake = 45 * time.Second
 
 // perpBot is what the simulation knows of a bot on the perpetual.
@@ -103,6 +107,9 @@ func (s *Sim) perp(ctx context.Context, now time.Time, p float64, dt time.Durati
 		} else if mark.IsPositive() {
 			s.perpMark, s.perpIndex = mark.InexactFloat64(), index.InexactFloat64()
 		}
+	}
+	if s.perpTradeReadAt.IsZero() || now.Sub(s.perpTradeReadAt) >= perpTradeEvery {
+		s.perpTradeReadAt = now
 		if _, at, err := s.prices.LastTrade(ctx, s.cfg.Perp); err != nil {
 			s.m.errors.WithLabelValues("perp_last_trade").Inc()
 		} else if !at.IsZero() {
@@ -179,6 +186,7 @@ func (s *Sim) takeQuietPerp(ctx context.Context, now time.Time, p float64) {
 		return
 	}
 	s.perpQuietAt = now
+	s.perpQuietDebt = math.Min(s.perpQuietDebt+qty.InexactFloat64()*p, s.params.PerpDailyVolume/24)
 	s.m.perpQuiet.Inc()
 	if side == domain.Buy {
 		pb.position = pb.position.Add(qty)
@@ -316,8 +324,9 @@ func (s *Sim) requotePerp(ctx context.Context, now time.Time, b *bot, pb *perpBo
 }
 
 // takePerp sends the takers' market orders on the perpetual that arrived
-// in dt; a taker at its cap only reduces, one waiting after a refusal
-// sits the order out. It returns how many arrived.
+// in dt, less what the quiet orders traded ahead of the budget; a taker at
+// its cap only reduces, one waiting after a refusal sits the order out. It
+// returns how many arrived.
 func (s *Sim) takePerp(ctx context.Context, now time.Time, p float64, dt time.Duration) int {
 	takers := s.botsOf(domain.RoleTaker)
 	if len(takers) == 0 || s.params.PerpDailyVolume <= 0 {
@@ -338,7 +347,13 @@ func (s *Sim) takePerp(ctx context.Context, now time.Time, p float64, dt time.Du
 				side = domain.Buy
 			}
 		}
-		qty := domain.Quantity(domain.Worth(rng, s.params.OrderSize, domain.OrderSpread), decimal.NewFromFloat(p), s.perpPair)
+		worth, owed := domain.Repay(domain.Worth(rng, s.params.OrderSize, domain.OrderSpread), s.perpQuietDebt,
+			s.perpPair.MinNotional.InexactFloat64())
+		if worth == 0 {
+			s.perpQuietDebt = owed // the order went to the quiet ones
+			continue
+		}
+		qty := domain.Quantity(worth, decimal.NewFromFloat(p), s.perpPair)
 		if reduce {
 			qty = decimal.Min(qty, pb.position.Abs())
 		}
@@ -352,6 +367,7 @@ func (s *Sim) takePerp(ctx context.Context, now time.Time, p float64, dt time.Du
 		err := s.Derivatives.MarketContract(ctx, b.UserID, s.cfg.Perp, side, qty, reduce)
 		s.placedPerp(ctx, now, b, pb, err, true)
 		if err == nil {
+			s.perpQuietDebt = owed
 			if side == domain.Buy {
 				pb.position = pb.position.Add(qty)
 			} else {

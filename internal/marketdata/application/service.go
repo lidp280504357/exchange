@@ -47,6 +47,8 @@ type Service struct {
 	// dirty means memory may be ahead of the store (a failed write): the
 	// state is reloaded before the next batch, which Kafka redelivers.
 	dirty bool
+	// flats decides the flat minutes (flats.go); none without.
+	flats FlatPolicy
 }
 
 type symbolState struct {
@@ -149,8 +151,9 @@ func (s *Service) state(symbol string) *symbolState {
 
 // OnTrades applies trades in the order given (each symbol's in sequence
 // order, as its partition delivers them) and stores the result in one
-// transaction. Trades at or below a symbol's applied sequence are skipped;
-// it returns the others, which nothing had seen before.
+// transaction, with the flat minutes they show (flats.go). Trades at or
+// below a symbol's applied sequence are skipped; it returns the others,
+// which nothing had seen before.
 func (s *Service) OnTrades(ctx context.Context, trades []domain.Trade) ([]domain.Trade, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -165,13 +168,16 @@ func (s *Service) OnTrades(ctx context.Context, trades []domain.Trade) ([]domain
 		open     time.Time
 	}
 	touched := map[key]domain.Candle{}
+	touch := func(c domain.Candle) { touched[key{c.Symbol, c.Interval, c.OpenTime}] = c }
 	var fresh []domain.Trade
+	var flats []domain.Candle
 	changed := map[string]*symbolState{}
 	for _, t := range trades {
 		st := s.state(t.Symbol)
 		if t.Sequence <= st.seq {
 			continue
 		}
+		flats = append(flats, s.fillFlats(st, t.Symbol, t.At, touch)...)
 		for _, i := range domain.Intervals {
 			start := i.Start(t.At)
 			c, ok := st.current[i]
@@ -183,7 +189,7 @@ func (s *Service) OnTrades(ctx context.Context, trades []domain.Trade) ([]domain
 			c.Add(t.Price, t.Quantity, t.Quote)
 			st.current[i] = c
 			st.updated[i] = true
-			touched[key{t.Symbol, i, c.OpenTime}] = c
+			touch(c)
 			if i == domain.Minute1 {
 				if n := len(st.minutes); n > 0 && st.minutes[n-1].OpenTime.Equal(c.OpenTime) {
 					st.minutes[n-1] = c
@@ -219,11 +225,19 @@ func (s *Service) OnTrades(ctx context.Context, trades []domain.Trade) ([]domain
 				return err
 			}
 		}
+		for _, c := range flats {
+			if err := s.flats.Emit(ctx, r, c); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	if err != nil {
 		s.dirty = true
 		return nil, err
+	}
+	if len(flats) > 0 {
+		s.flats.Stored(len(flats))
 	}
 	return fresh, nil
 }

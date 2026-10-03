@@ -3,6 +3,9 @@ package application
 import (
 	"context"
 	"log/slog"
+	"maps"
+	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -16,132 +19,104 @@ import (
 
 // Flat minutes (coordinator 2026-10-04: the platform coin's 1-minute
 // candles broke up wherever a minute had no trade). For a symbol whose
-// chart is the platform's own trades (no reference market shown), a minute
-// that ended without a trade becomes a stored candle of its own: open,
-// high, low and close the previous close, no volume and no trades. Every
-// longer interval takes it as a trade of nothing at that price, as rolling
-// up the one-minute candles does in ClickHouse's candles(): its open is
-// that price when its first minute was flat, and its high and low count
-// it. The publisher then closes the flat minute like any other, and an
-// event on market.candle.flats has analytics store it in candles_1m.
+// chart is the platform's own trades (no reference market follows it)
+// with market.flat_minutes on, the minutes without a trade before one of
+// its trades become stored candles of their own when that trade is
+// applied: open, high, low and close the previous close, no volume and no
+// trades. Every longer interval takes each as a trade of nothing at that
+// price, as rolling up the one-minute candles does in ClickHouse's
+// candles(): one whose first minute was flat opens at the previous close,
+// and its high and low count it.
+//
+// Made from the trades, never from the clock (review AU): a minute is
+// known to have had no trade only once a later trade of the symbol is
+// applied, the symbol's trades coming in sequence order. A trade consumer
+// behind by any time makes the same flats, only later, and ClickHouse gets
+// each on market.candle.flats through the outbox, in the transaction that
+// stores it. Until the next trade the WebSocket shows the quiet minutes as
+// running flat candles (the publisher's) and REST fills them in reading.
 const (
-	// FlatGrace is how long after a minute ends its flat waits for a late
-	// trade: one stamped in the minute but arriving after its flat counts
-	// in the next minute here (candles never reopen) and in its own in
-	// ClickHouse, where the trade's candle replaces the flat.
-	FlatGrace = 10 * time.Second
-	// FlatCatchUp is how far back flats are made, after a restart say:
-	// forward only, never the history before they existed.
+	// FlatCatchUp is how far back a trade fills: after a longer quiet
+	// spell, the minutes before it stay gaps (read as flat, not stored).
 	FlatCatchUp = time.Hour
+	// FlatDecideEvery is how often the symbols getting flat minutes are
+	// decided again.
+	FlatDecideEvery = 10 * time.Second
 )
 
-// FlatMinutes stores a flat one-minute candle for every minute that ended
-// FlatGrace or more before now without a trade, for the symbols platform
-// says chart the platform's trades, with each longer interval taking it
-// in; emit queues each flat's event in the same transaction. It returns
-// the flat minutes stored. A symbol that never traded has none.
-func (s *Service) FlatMinutes(ctx context.Context, now time.Time, platform func(symbol string) bool,
-	emit func(ctx context.Context, r ports.Repos, c domain.Candle) error,
-) ([]domain.Candle, error) {
+// FlatPolicy is what the service needs to store flat minutes: whether a
+// symbol gets them (asked under the service's lock: no I/O), the event of
+// one (queued in the trades' transaction), and how many were stored (once
+// it committed).
+type FlatPolicy interface {
+	Own(symbol string) bool
+	Emit(ctx context.Context, r ports.Repos, c domain.Candle) error
+	Stored(n int)
+}
+
+// StoreFlats has the service store flat minutes as p decides, from the
+// next trades it applies.
+func (s *Service) StoreFlats(p FlatPolicy) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.dirty {
-		if err := s.load(ctx); err != nil {
-			return nil, err
-		}
-	}
-	end := domain.Minute1.Start(now.Add(-FlatGrace)) // minutes opening before it have ended FlatGrace ago
-	earliest := domain.Minute1.Start(now.Add(-FlatCatchUp))
-	var flats, touched []domain.Candle
-	for symbol, st := range s.symbols {
-		last, ok := st.current[domain.Minute1]
-		if !ok || !platform(symbol) {
-			continue
-		}
-		price := last.Close
-		for m := domain.Minute1.Next(last.OpenTime); m.Before(end); m = domain.Minute1.Next(m) {
-			if m.Before(earliest) {
-				m = earliest
-			}
-			for _, i := range domain.Intervals {
-				start := i.Start(m)
-				c, ok := st.current[i]
-				if !ok || start.After(c.OpenTime) {
-					c = domain.Candle{Symbol: symbol, Interval: i, OpenTime: start}
-				}
-				c.AddFlat(price)
-				st.current[i] = c
-				st.updated[i] = true
-				if i == domain.Minute1 {
-					st.minutes = append(st.minutes, c)
-					flats = append(flats, c)
-				}
-				touched = append(touched, c)
-			}
-		}
-	}
-	if len(flats) == 0 {
-		return nil, nil
-	}
-	// The same candle of a longer interval, taken in by several minutes,
-	// is stored as it ended up.
-	latest := map[domain.Interval]map[string]map[time.Time]domain.Candle{}
-	for _, c := range touched {
-		if latest[c.Interval] == nil {
-			latest[c.Interval] = map[string]map[time.Time]domain.Candle{}
-		}
-		if latest[c.Interval][c.Symbol] == nil {
-			latest[c.Interval][c.Symbol] = map[time.Time]domain.Candle{}
-		}
-		latest[c.Interval][c.Symbol][c.OpenTime] = c
-	}
-	var candles []domain.Candle
-	for _, bySymbol := range latest {
-		for _, byOpen := range bySymbol {
-			for _, c := range byOpen {
-				candles = append(candles, c)
-			}
-		}
-	}
-	err := s.store.Tx(ctx, func(r ports.Repos) error {
-		if err := r.Candles().Upsert(ctx, candles); err != nil {
-			return err
-		}
-		for _, c := range flats {
-			if err := emit(ctx, r, c); err != nil {
-				return err
-			}
-		}
+	s.flats = p
+}
+
+// fillFlats folds the minutes without a trade between the symbol's last
+// one-minute candle and the minute of its trade at at into every interval,
+// at the last close, and returns the one-minute ones; touch is given every
+// candle changed. The caller holds mu.
+func (s *Service) fillFlats(st *symbolState, symbol string, at time.Time, touch func(domain.Candle)) []domain.Candle {
+	last, ok := st.current[domain.Minute1]
+	if !ok || s.flats == nil || !s.flats.Own(symbol) {
 		return nil
-	})
-	if err != nil {
-		s.dirty = true
-		return nil, err
 	}
-	return flats, nil
+	upTo := domain.Minute1.Start(at)
+	earliest := upTo.Add(-FlatCatchUp)
+	var out []domain.Candle
+	for m := domain.Minute1.Next(last.OpenTime); m.Before(upTo); m = domain.Minute1.Next(m) {
+		if m.Before(earliest) {
+			m = earliest
+		}
+		for _, i := range domain.Intervals {
+			start := i.Start(m)
+			c, ok := st.current[i]
+			if !ok || start.After(c.OpenTime) {
+				c = domain.Candle{Symbol: symbol, Interval: i, OpenTime: start}
+			}
+			c.AddFlat(last.Close)
+			st.current[i] = c
+			touch(c)
+			if i == domain.Minute1 {
+				st.minutes = append(st.minutes, c)
+				out = append(out, c)
+			}
+		}
+	}
+	return out
 }
 
-// FlatRunner stores the flat minutes every second and queues their
-// events on market.candle.flats (analytics writes them to candles_1m), for
-// the symbols no reference market follows while market.flat_minutes is on
-// for them.
-type FlatRunner struct {
-	svc      *Service
-	events   *event.Factory
-	platform func(ctx context.Context, symbol string) bool
-	flags    *flags.Client
-	log      *slog.Logger
-	made     prometheus.Counter
+// FlatMinutes is the flat minutes' policy: the listed pairs and contracts
+// no reference market follows while market.flat_minutes is on for them,
+// decided every FlatDecideEvery away from the trades; each flat's
+// CandleClosed goes on market.candle.flats (analytics writes it to
+// candles_1m).
+type FlatMinutes struct {
+	symbols func(ctx context.Context) []string
+	flags   Flags
+	events  *event.Factory
+	log     *slog.Logger
+	made    prometheus.Counter
+	own     atomic.Pointer[map[string]bool]
 }
 
-// NewFlatRunner registers its metric with reg; platform says whether a
-// symbol's chart is the platform's trades (no reference market follows
-// it).
-func NewFlatRunner(svc *Service, events *event.Factory, platform func(ctx context.Context, symbol string) bool, fl *flags.Client,
-	log *slog.Logger, reg prometheus.Registerer,
-) *FlatRunner {
-	f := &FlatRunner{
-		svc: svc, events: events, platform: platform, flags: fl, log: log,
+// NewFlatMinutes registers its metric with reg; symbols lists the pairs
+// and contracts no reference market follows.
+func NewFlatMinutes(symbols func(ctx context.Context) []string, fl Flags, events *event.Factory, log *slog.Logger,
+	reg prometheus.Registerer,
+) *FlatMinutes {
+	f := &FlatMinutes{
+		symbols: symbols, flags: fl, events: events, log: log,
 		made: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "market_flat_minutes_total",
 			Help: "One-minute candles stored flat (no trade in the minute) for the symbols charting the platform's own trades.",
@@ -151,9 +126,22 @@ func NewFlatRunner(svc *Service, events *event.Factory, platform func(ctx contex
 	return f
 }
 
-// Run stores the flat minutes every second until ctx ends.
-func (f *FlatRunner) Run(ctx context.Context) error {
-	t := time.NewTicker(time.Second)
+// Decide decides again which symbols get flat minutes.
+func (f *FlatMinutes) Decide(ctx context.Context) {
+	own := map[string]bool{}
+	for _, symbol := range f.symbols(ctx) {
+		if f.flags.Enabled(flags.KeyFlatMinutes, flags.Subject{Symbol: symbol}) {
+			own[symbol] = true
+		}
+	}
+	if old := f.own.Swap(&own); old == nil || !maps.Equal(*old, own) {
+		f.log.InfoContext(ctx, "flat minutes: symbols decided", "symbols", slices.Sorted(maps.Keys(own)))
+	}
+}
+
+// Run decides every FlatDecideEvery until ctx ends.
+func (f *FlatMinutes) Run(ctx context.Context) error {
+	t := time.NewTicker(FlatDecideEvery)
 	defer t.Stop()
 	for {
 		select {
@@ -161,21 +149,18 @@ func (f *FlatRunner) Run(ctx context.Context) error {
 			return nil
 		case <-t.C:
 		}
-		// Decided before the service's lock: the listing may be read.
-		own := map[string]bool{}
-		for _, symbol := range f.svc.symbolNames() {
-			own[symbol] = f.platform(ctx, symbol) && f.flags.Enabled(flags.KeyFlatMinutes, flags.Subject{Symbol: symbol})
-		}
-		flats, err := f.svc.FlatMinutes(ctx, f.svc.now(), func(symbol string) bool { return own[symbol] }, f.emit)
-		if err != nil {
-			f.log.WarnContext(ctx, "flat minutes not stored: tried again in a second", "error", err)
-			continue
-		}
-		f.made.Add(float64(len(flats)))
+		f.Decide(ctx)
 	}
 }
 
-func (f *FlatRunner) emit(ctx context.Context, r ports.Repos, c domain.Candle) error {
+// Own reports whether symbol gets flat minutes, as last decided.
+func (f *FlatMinutes) Own(symbol string) bool {
+	own := f.own.Load()
+	return own != nil && (*own)[symbol]
+}
+
+// Emit queues the flat minute's CandleClosed on market.candle.flats.
+func (f *FlatMinutes) Emit(ctx context.Context, r ports.Repos, c domain.Candle) error {
 	env, err := f.events.New(ctx, &marketv1.CandleClosed{Candle: candleProto(c, true)}, "symbol", c.Symbol)
 	if err != nil {
 		return err
@@ -183,13 +168,5 @@ func (f *FlatRunner) emit(ctx context.Context, r ports.Repos, c domain.Candle) e
 	return r.Emit(ctx, event.TopicMarketCandleFlats, env)
 }
 
-// symbolNames lists the symbols the service has a state of.
-func (s *Service) symbolNames() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]string, 0, len(s.symbols))
-	for symbol := range s.symbols {
-		out = append(out, symbol)
-	}
-	return out
-}
+// Stored counts the flat minutes stored.
+func (f *FlatMinutes) Stored(n int) { f.made.Add(float64(n)) }

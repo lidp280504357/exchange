@@ -184,6 +184,22 @@ func Arrivals(rng *rand.Rand, daily, orderSize float64, dt time.Duration, now ti
 	return poisson(rng, perSecond*dt.Seconds())
 }
 
+// Repay takes debt, turnover a quiet market's order traded ahead of the
+// takers' budget, off an arriving order's worth: the worth left to trade,
+// zero when the arrival is used up (a remainder below least is not worth
+// an order), and the debt left. The day's turnover stays the budget.
+func Repay(worth, debt, least float64) (left, owed float64) {
+	switch {
+	case debt <= 0:
+		return worth, 0
+	case worth <= debt:
+		return 0, debt - worth
+	case worth-debt < least:
+		return 0, 0
+	}
+	return worth - debt, 0
+}
+
 // poisson draws a Poisson count with mean lambda (Knuth; lambda is small).
 func poisson(rng *rand.Rand, lambda float64) int {
 	if lambda <= 0 {

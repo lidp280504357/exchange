@@ -1703,6 +1703,10 @@ func TestAQuietPerpetualGetsTheMinimumOrder(t *testing.T) {
 	if user == "" || user[0] != 't' || (qty != "5" && qty != "6") || reduce {
 		t.Fatalf("the quiet order %q", got[0])
 	}
+	// Owed to the takers' budget, at most an hour of it.
+	if r.sim.perpQuietDebt != p.PerpDailyVolume/24 {
+		t.Fatalf("owed %v", r.sim.perpQuietDebt)
+	}
 	r.rounds(4 * 40)
 	if n := len(markets()); n != 1 {
 		t.Fatalf("again within 45 seconds: %d orders", n)
@@ -1717,13 +1721,15 @@ func TestAQuietPerpetualGetsTheMinimumOrder(t *testing.T) {
 	if n := len(markets()); n != 2 {
 		t.Fatalf("paused: %d orders", n)
 	}
-	if _, err := r.sim.EndEvent(context.Background(), pause.ID, "ops", "resume"); err != nil {
-		t.Fatal(err)
-	}
-	// Trading on its own, it gets none.
+	// Trading on its own (its last trade read every perpTradeEvery), it
+	// gets none.
 	r.prices.mu.Lock()
 	r.prices.lastAtOf = nil
 	r.prices.mu.Unlock()
+	r.rounds(4 * 6)
+	if _, err := r.sim.EndEvent(context.Background(), pause.ID, "ops", "resume"); err != nil {
+		t.Fatal(err)
+	}
 	r.rounds(4 * 60)
 	if n := len(markets()); n != 2 {
 		t.Fatalf("a perpetual that trades: %d orders", n)

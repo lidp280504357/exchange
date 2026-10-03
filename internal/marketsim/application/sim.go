@@ -141,11 +141,15 @@ type Sim struct {
 	perpTurn      int
 	perpBots      map[string]*perpBot
 	perpCheckedAt time.Time
-	// The perpetual's last trade as last read, when the bots started on it
-	// and its last quiet order (perpQuietTake).
-	perpTradeAt   time.Time
-	perpWatchFrom time.Time
-	perpQuietAt   time.Time
+	// The perpetual's last trade as last read (perpTradeEvery), when the
+	// bots started on it and its last quiet order (perpQuietTake).
+	perpTradeAt     time.Time
+	perpTradeReadAt time.Time
+	perpWatchFrom   time.Time
+	perpQuietAt     time.Time
+	// perpQuietDebt is what the quiet orders traded on the perpetual ahead
+	// of perp_daily_volume, in USDT, taken off the takers' next orders.
+	perpQuietDebt float64
 }
 
 // bot is a bot account as the simulation runs it.

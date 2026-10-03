@@ -134,6 +134,14 @@ func setup(ctx context.Context, a *app.App) error {
 	src := binance.New(cfg.BinanceREST, cfg.BinanceStream, &http.Client{Timeout: 15 * time.Second}).
 		WithFutures(cfg.BinanceFuturesREST, cfg.BinanceFuturesStream)
 	refs := application.NewReferenceMap(listed, a.Logger())
+	// A minute without a trade of a symbol no reference market follows is
+	// stored flat when its next trade is applied (coordinator 2026-10-04),
+	// while market.flat_minutes is on for it: decided before the trades
+	// are read, then every few seconds.
+	flats := application.NewFlatMinutes(refs.Unreferenced, flagClient, events, a.Logger(), a.Metrics())
+	flats.Decide(ctx)
+	svc.StoreFlats(flats)
+	a.Add("flat minutes", app.Loop(flats.Run))
 	books := application.NewBooks(src, refs, flagClient, prod, events, a.Logger(), a.Metrics())
 	a.Add("reference books", app.Loop(books.Run))
 	a.Add("public books", app.Loop(books.Push))
@@ -161,11 +169,6 @@ func setup(ctx context.Context, a *app.App) error {
 	tickers := application.NewTickers(svc, feed, refs, flagClient, listed)
 	pusher.Use(refKlines.Push)
 	pusher.Use(tickers.Push)
-	// A minute without a trade of a symbol no reference market follows is
-	// stored flat (coordinator 2026-10-04), while market.flat_minutes is
-	// on for it.
-	flats := application.NewFlatRunner(svc, events, refs.Unreferenced, flagClient, a.Logger(), a.Metrics())
-	a.Add("flat minutes", app.Loop(flats.Run))
 	guard := application.NewFeedGuard(feed, listed, store, flagClient, a.Logger(), a.Metrics())
 	a.Add("feed guard", app.Loop(guard.Run))
 	sourceWeights, _ := weights(cfg.IndexSourceWeights) // validated

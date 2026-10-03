@@ -12,6 +12,8 @@
 # beyond the price band, is reached by the quotes walking the band. With
 # the bots on ASTRA-USDT-PERP, the user opens a long against them and
 # closes it, and an operator's target 4% down liquidates a 50x long (A4).
+# With market.flat_minutes on, both have a candles_1m row in ClickHouse
+# for each of the ten minutes before the last two (flat when no trade).
 # The moves take about 35% of one operator's 50% an hour: with events in
 # the hour before, they are skipped. Skipped while ASTRA-USDT is not
 # trading or the bots are off (scripts/ops/astra.sh seed, open, on,
@@ -248,4 +250,19 @@ else
     echo "ok   the target goes back to $BACK"
   fi
 fi
+echo "== flat minutes in ClickHouse (market.flat_minutes)"
+# continuous SYMBOL: a candles_1m row for each of the ten minutes before
+# the last two of its latest (whose flats may still be on their way).
+continuous() {
+  [[ $(ch "WITH (SELECT max(open_time) FROM candles_1m WHERE symbol = '$1') AS last
+    SELECT count(DISTINCT open_time) FROM candles_1m
+    WHERE symbol = '$1' AND open_time BETWEEN last - INTERVAL 11 MINUTE AND last - INTERVAL 2 MINUTE") == 10 ]]
+}
+for S in ASTRA-USDT ASTRA-USDT-PERP; do
+  if [[ $(pg "SELECT enabled AND coalesce(rules->'symbols'->'allow' ? '$S', true) FROM config.flags WHERE key = 'market.flat_minutes'") != t ]]; then
+    echo "skip: market.flat_minutes is off for $S"
+    continue
+  fi
+  eventually 120 "$S: a 1m candle in ClickHouse for each of ten minutes, flat when nothing traded" continuous "$S"
+done
 echo "all platform coin checks passed"

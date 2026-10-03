@@ -129,16 +129,26 @@ func (r *ReferenceMap) Get(ctx context.Context) map[string]ports.Reference {
 	return m
 }
 
-// Unreferenced reports whether symbol is a listed pair or contract no
-// reference market follows (the platform coin's and its perpetual): its
-// chart is the platform's own trades. False while the listing was never
-// read (review AU).
-func (r *ReferenceMap) Unreferenced(ctx context.Context, symbol string) bool {
+// Unreferenced lists the listed pairs and contracts no reference market
+// follows (the platform coin's and its perpetual): their charts are the
+// platform's own trades. None while the listing was never read (review
+// AU).
+func (r *ReferenceMap) Unreferenced(ctx context.Context) []string {
 	m := r.Get(ctx)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	_, followed := m[symbol]
-	return m != nil && (r.pairs[symbol] || r.contracts[symbol]) && !followed
+	if m == nil {
+		return nil
+	}
+	var out []string
+	for _, listed := range []map[string]bool{r.pairs, r.contracts} {
+		for symbol := range listed {
+			if _, followed := m[symbol]; !followed {
+				out = append(out, symbol)
+			}
+		}
+	}
+	return out
 }
 
 // Unfollowed reports whether symbol is a listed pair that no reference
