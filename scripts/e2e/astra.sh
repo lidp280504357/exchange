@@ -70,6 +70,14 @@ DEVICE="e2e-astra-$RUN"
 echo "== register $EMAIL"
 register "$EMAIL" "$DEVICE" "e2e astra $RUN"
 AUTH=(-H "Authorization: Bearer $(jq -r .access_token <<<"$BODY")")
+REFRESH=$(jq -r .refresh_token <<<"$BODY")
+# fresh_auth takes a new access token: the price events outlast one.
+fresh_auth() {
+  call POST /v1/auth/token/refresh "{\"refresh_token\":\"$REFRESH\",\"device_id\":\"$DEVICE\"}" "${APP[@]}"
+  expect 200 - "a fresh access token"
+  REFRESH=$(jq -r .refresh_token <<<"$BODY")
+  AUTH=(-H "Authorization: Bearer $(jq -r .access_token <<<"$BODY")")
+}
 # shellcheck disable=SC2016 # expanded when the script ends
 at_exit 'call DELETE "/v1/orders?symbol=ASTRA-USDT" "" "${AUTH[@]}"'
 balance() { # balance ASSET prints "available frozen" of the SPOT account
@@ -273,6 +281,7 @@ if [[ $MOVES == t ]]; then
 fi
 
 echo "== the perpetual (sim.perp)"
+fresh_auth
 call GET /v1/market/contracts/ASTRA-USDT-PERP ""
 if [[ $STATUS != 200 || $(jq -r .status <<<"$BODY") != TRADING || $(jq -r .perp_running <<<"$(simget /internal/sim)") != true ]]; then
   echo "skip: ASTRA-USDT-PERP is not trading or the bots are not on it (scripts/ops/astra.sh perp-open, perp-on)"
