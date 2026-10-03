@@ -105,14 +105,15 @@ export function scheduledText(t: (k: string, o?: Record<string, unknown>) => str
 
 /**
  * moveNote says how a status move takes effect, and what rests on the pair
- * or contract (C5.5 ⑩); resuming a halt warns that a running HALT event of
- * the simulated market halts it again within 10 seconds (end the event).
+ * or contract (C5.5 ⑩); resuming a halt that a running HALT event of the
+ * simulated market holds (simHalt) warns that it is halted again within 10
+ * seconds (end the event; review ㉔).
  */
-export function moveNote(t: (k: string, o?: Record<string, unknown>) => string, p: StatusPreview) {
+export function moveNote(t: (k: string, o?: Record<string, unknown>) => string, p: StatusPreview, simHalt = false) {
   const when = p.immediate
     ? t("admin.changes.immediate")
     : t(p.two_person ? "admin.changes.delayedTwoPerson" : "admin.changes.delayed", { minutes: minutes(p.delay_seconds) });
-  const sim = p.from === "HALT" && p.to === "TRADING" ? t("admin.changes.simHalt") : "";
+  const sim = simHalt && p.from === "HALT" && p.to === "TRADING" ? t("admin.changes.simHalt") : "";
   if (p.open_orders == null) return `${when}${sim}`;
   const orders = t("admin.changes.openOrders", { n: p.open_orders });
   return `${when}${orders}${p.to === "HALT" && p.open_orders > 0 ? t("admin.changes.openOrdersHalt") : ""}${sim}`;

@@ -249,6 +249,20 @@ function Fees({ cfg, rows, onOpen }: { cfg: InstrumentConfig | undefined; rows: 
 }
 
 /**
+ * haltedBySim reports whether a running HALT event of the simulated market
+ * holds symbol (its coin's pair or perpetual): resumed, it is halted again
+ * (review ㉔). Without an answer from market-sim, no warning.
+ */
+async function haltedBySim(symbol: string): Promise<boolean> {
+  try {
+    const sim = adminData(await adminApi.GET("/admin/v1/sim"));
+    return (sim.symbol === symbol || sim.perp === symbol) && sim.events.some((e) => e.type === "HALT" && e.status === "RUNNING");
+  } catch {
+    return false;
+  }
+}
+
+/**
  * StatusActions moves a pair or contract to a next status of its machine
  * (ADMIN, design 2026-10-02 §2 item 6): the server's preview first, then
  * the confirmation; a halt takes effect at once, any other move waits.
@@ -257,11 +271,13 @@ export function StatusActions({ kind, symbol, status }: { kind: "pair" | "contra
   const { t } = useTranslation();
   const label = useEnum();
   const [move, setMove] = useState<StatusPreview | null>(null);
+  const [simHalt, setSimHalt] = useState(false);
   const next = status ? NEXT[status] : [];
   if (next.length === 0) return null;
   const path = { params: { path: { symbol } } };
   const preview = async (to: Status) => {
     try {
+      setSimHalt(status === "HALT" && to === "TRADING" && (await haltedBySim(symbol)));
       setMove(
         kind === "pair"
           ? adminData(await adminApi.POST("/admin/v1/instruments/pairs/{symbol}/status/preview", { ...path, body: { to } }))
@@ -295,7 +311,7 @@ export function StatusActions({ kind, symbol, status }: { kind: "pair" | "contra
           onOpenChange={(o) => !o && setMove(null)}
           danger={move.to !== "TRADING"}
           title={t("admin.instruments.moveTitle", { symbol, to: label("pairStatus", move.to) })}
-          description={moveNote(t, move)}
+          description={moveNote(t, move, simHalt)}
           target={<span className="font-mono">{symbol}</span>}
           confirmWord={symbol}
           run={(reason) => run(move, reason)}
