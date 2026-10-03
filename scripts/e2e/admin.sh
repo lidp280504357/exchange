@@ -1032,7 +1032,7 @@ as AUDITOR GET /admin/v1/instruments/config ""
 CONFIG=$BODY
 # LINK-BTC's reference multiplier: a trading parameter, confirmed and then
 # canceled.
-MULTIPLIED=$(link_pair "$LINK_REF" 1.0001)
+MULTIPLIED=$(link_pair "$LINK_REF" 10) # a power of ten, as instrument-service wants
 as OPERATOR POST /admin/v1/instruments/preview "{\"config\":$MULTIPLIED}"
 expect 200 - "an OPERATOR previews LINK-BTC's reference multiplier"
 check '([.guard.params[] | select(.entity == "TRADING_PAIR" and .key == "LINK-BTC" and .field == "reference_multiplier")] | length == 1) and .guard.confirmation == null' \
