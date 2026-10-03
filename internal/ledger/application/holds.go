@@ -157,7 +157,13 @@ func (s *Service) ForceReleaseHold(ctx context.Context, id, actor, reason string
 		if err != nil {
 			return err
 		}
-		if len(accs) != 1 || amount.GreaterThan(accs[0].Frozen) {
+		// The user's other holds keep their part of the frozen balance
+		// whatever the caller worked out (C5.5 ⑳).
+		others, err := r.Holds().OthersActive(ctx, *h)
+		if err != nil {
+			return err
+		}
+		if len(accs) != 1 || amount.GreaterThan(accs[0].Frozen.Sub(others)) {
 			return domain.ErrInsufficientBalance
 		}
 		if amount.IsPositive() {

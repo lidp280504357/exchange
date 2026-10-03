@@ -96,6 +96,9 @@ type HoldRepo interface {
 	Release(ctx context.Context, h domain.Hold) error
 	// OfUser returns a user's holds, newest first.
 	OfUser(ctx context.Context, userID string, activeOnly bool, limit int) ([]domain.Hold, error)
+	// OthersActive is what h's user's other active holds on h's account
+	// and asset add up to.
+	OthersActive(ctx context.Context, h domain.Hold) (decimal.Decimal, error)
 }
 
 // Assets tells the precision of an asset (instrument-service); unknown

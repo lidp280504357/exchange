@@ -153,6 +153,74 @@ func TestLedgerReleaseHold(t *testing.T) {
 	if out, err = run("balances", user); err != nil || !strings.Contains(out, "30") {
 		t.Fatalf("the order's 30 still frozen: %v\n%s", err, out)
 	}
+
+	// Nothing in flight: no --force needed (C5.5 ⑳).
+	quiet, quietHold := uuid.NewString(), uuid.NewString()
+	if _, err := svc.CreditDeposit(ctx, uuid.NewString(), domain.Deposit{
+		ID: uuid.NewString(), UserID: quiet, Asset: "USDT", Amount: decimal.NewFromInt(1000), Network: "TRON", TxHash: "t2",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.PlaceHold(ctx, quietHold, quiet, "USDT", decimal.NewFromInt(100), "risk@example.com", "chargeback under review"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run("release-hold", "--id", quietHold, "--amount", "10", "--reason", "nothing else is frozen"); err != nil ||
+		!strings.Contains(out, "released: 10 of 100") || !strings.Contains(out, "(0)") {
+		t.Fatalf("nothing in flight: %v\n%s", err, out)
+	}
+
+	// A pending order, a frozen withdrawal and a trade the ledger has not
+	// settled each keep their part, and want --force (C5.5 ⑳).
+	busy, busyHold, trade := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if _, err := svc.CreditDeposit(ctx, uuid.NewString(), domain.Deposit{
+		ID: uuid.NewString(), UserID: busy, Asset: "USDT", Amount: decimal.NewFromInt(1000), Network: "TRON", TxHash: "t3",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.PlaceHold(ctx, busyHold, busy, "USDT", decimal.NewFromInt(100), "risk@example.com", "chargeback under review"); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []struct {
+		key    string
+		amount int64
+	}{{"order-pending", 20}, {"withdrawal-frozen", 15}, {"order-filled", 25}} {
+		if _, err := svc.Freeze(ctx, f.key, domain.EntryOrderFreeze, busy, domain.AccountSpot, "USDT", decimal.NewFromInt(f.amount), f.key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := svc.Unfreeze(ctx, "stray-busy", domain.EntryOrderUnfreeze, busy, domain.AccountSpot, "USDT", decimal.NewFromInt(40), "a stray unfreeze"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := trading.Exec(ctx, `INSERT INTO orders (id, user_id, client_order_id, symbol, side, type, time_in_force, stp, price, quantity,
+		status, frozen_asset, frozen_amount, freeze_state, maker_fee_rate, taker_fee_rate, base_decimals, quote_decimals, created_at, updated_at)
+		VALUES ($1, $2, 'pending', 'BTC-USDT', 'BUY', 'LIMIT', 'GTC', 'CANCEL_NEWEST', 20000, 0.001, 'NEW', 'USDT', 20, 'PENDING', 0, 0, 6, 2, $3, $3)`,
+		uuid.NewString(), busy, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := trading.Exec(ctx, `INSERT INTO fills (trade_id, order_id, user_id, symbol, side, maker, price, quantity, quote_quantity, fee_asset,
+		fee, sequence, executed_at) VALUES ($1, $2, $3, 'BTC-USDT', 'BUY', false, 25000, 0.001, 25, 'BTC', 0, 1, $4)`,
+		trade, uuid.NewString(), busy, now); err != nil {
+		t.Fatal(err)
+	}
+	wallet, err := open("wallet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wallet.Exec(ctx, `INSERT INTO withdrawals (id, user_id, asset, network, address, amount, fee, status, required_confirmations,
+		freeze_journal_id, created_at, updated_at) VALUES ($1, $2, 'USDT', 'TRON', 'TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj', 14, 1, 'PENDING_REVIEW', 20,
+		$3, $4, $4)`, uuid.NewString(), busy, uuid.NewString(), now); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run("release-hold", "--id", busyHold, "--reason", "cleared, 40 went elsewhere"); err == nil ||
+		!strings.Contains(err.Error(), "1 orders, 1 withdrawals and 1 trades") {
+		t.Fatalf("in flight: %v\n%s", err, out)
+	}
+	// 120 frozen: 20 + 15 + 25 is theirs, 60 the hold's.
+	out, err = run("release-hold", "--id", busyHold, "--force", "--reason", "cleared, 40 went elsewhere")
+	if err != nil || !strings.Contains(out, "spot orders 20 (1)") || !strings.Contains(out, "withdrawals 15 (1)") ||
+		!strings.Contains(out, "trades not settled 25 (1)") || !strings.Contains(out, "released: 60 of 100") {
+		t.Fatalf("forced: %v\n%s", err, out)
+	}
 }
 
 // TestLedgerCustodyReset takes a stand-in custodian's simulated deposits out

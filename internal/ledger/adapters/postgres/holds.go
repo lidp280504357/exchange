@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 
 	"github.com/lidp280504357/exchange/internal/ledger/domain"
 	"github.com/lidp280504357/exchange/internal/ledger/ports"
@@ -64,6 +65,16 @@ func (r holds) Insert(ctx context.Context, h domain.Hold) error {
 		return fmt.Errorf("insert hold: %w", err)
 	}
 	return nil
+}
+
+func (r holds) OthersActive(ctx context.Context, h domain.Hold) (decimal.Decimal, error) {
+	var sum decimal.Decimal
+	if err := r.q.QueryRow(ctx, `SELECT coalesce(sum(amount), 0) FROM holds
+		WHERE user_id = $1 AND account_type = $2 AND asset = $3 AND released_at IS NULL AND id <> $4`,
+		h.UserID, h.AccountType, h.Asset, h.ID).Scan(&sum); err != nil {
+		return decimal.Zero, fmt.Errorf("other holds: %w", err)
+	}
+	return sum, nil
 }
 
 func (r holds) Release(ctx context.Context, h domain.Hold) error {

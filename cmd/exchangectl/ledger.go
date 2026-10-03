@@ -218,15 +218,17 @@ func ledgerReleaseHold(ctx context.Context, svc *application.Service, dbs ledger
 	if err != nil {
 		return err
 	}
-	most := decimal.Min(h.Amount, decimal.Max(acc.Frozen.Sub(o.holds).Sub(o.orders).Sub(o.withdrawals), decimal.Zero))
-	fmt.Fprintf(out, "%s %s frozen: %s; other holds %s, spot orders %s (%d), withdrawals %s (%d); the hold's (%s) at most %s\n",
-		h.AccountType, h.Asset, acc.Frozen, o.holds, o.orders, o.inOrders, o.withdrawals, o.inWithdrawals, h.Amount, most)
-	// Orders and withdrawals in flight move the frozen balance meanwhile
-	// (a freeze the ledger made and trading has not marked, a fill not
-	// settled yet): counted whole they only lower the cap, and an
-	// operator says so with --force (C5.5 ⑱).
-	if (o.inOrders > 0 || o.inWithdrawals > 0) && !*force {
-		return fmt.Errorf("the user has %d orders and %d withdrawals in flight on %s: cancel them first, or --force", o.inOrders, o.inWithdrawals, h.Asset)
+	most := decimal.Min(h.Amount, decimal.Max(acc.Frozen.Sub(o.holds).Sub(o.orders).Sub(o.withdrawals).Sub(o.unsettled), decimal.Zero))
+	fmt.Fprintf(out, "%s %s frozen: %s; other holds %s, spot orders %s (%d), withdrawals %s (%d), trades not settled %s (%d); "+
+		"the hold's (%s) at most %s\n", h.AccountType, h.Asset, acc.Frozen, o.holds, o.orders, o.inOrders, o.withdrawals, o.inWithdrawals,
+		o.unsettled, o.inTrades, h.Amount, most)
+	// Orders, withdrawals and trades in flight move the frozen balance
+	// meanwhile (a freeze the ledger made and trading has not marked, a
+	// fill the ledger has not settled): counted whole they only lower the
+	// cap, and an operator says so with --force (C5.5 ⑱, ⑳).
+	if (o.inOrders > 0 || o.inWithdrawals > 0 || o.inTrades > 0) && !*force {
+		return fmt.Errorf("the user has %d orders, %d withdrawals and %d trades not settled in flight on %s: cancel them, let the ledger "+
+			"settle the trades (exchangectl ledger trades --failed, exchangectl dlq), or --force", o.inOrders, o.inWithdrawals, o.inTrades, h.Asset)
 	}
 	release := most
 	if *amount != "" {
@@ -239,7 +241,9 @@ func ledgerReleaseHold(ctx context.Context, svc *application.Service, dbs ledger
 	}
 	released, err := svc.ForceReleaseHold(ctx, *id, actor(), *reason, release, map[string]string{
 		"frozen": acc.Frozen.String(), "other_holds": o.holds.String(), "orders": o.orders.String(), "withdrawals": o.withdrawals.String(),
-		"most": most.String(), "forced_in_flight": strconv.FormatBool(o.inOrders > 0 || o.inWithdrawals > 0),
+		"trades_not_settled": o.unsettled.String(), "most": most.String(), "orders_in_flight": strconv.Itoa(o.inOrders),
+		"withdrawals_in_flight": strconv.Itoa(o.inWithdrawals), "trades_in_flight": strconv.Itoa(o.inTrades),
+		"forced_in_flight": strconv.FormatBool(o.inOrders > 0 || o.inWithdrawals > 0 || o.inTrades > 0),
 	})
 	if err != nil {
 		return err
@@ -253,9 +257,13 @@ func ledgerReleaseHold(ctx context.Context, svc *application.Service, dbs ledger
 // active holds, the spot orders' freezes and the withdrawals frozen and
 // not yet settled or released, with how many orders and withdrawals.
 type freezes struct {
-	holds, orders, withdrawals decimal.Decimal
-	inOrders, inWithdrawals    int
+	holds, orders, withdrawals, unsettled decimal.Decimal
+	inOrders, inWithdrawals, inTrades     int
 }
+
+// settleWindow is how far back release-hold looks for the user's trades
+// the ledger has not settled.
+const settleWindow = 24 * time.Hour
 
 // otherFreezes sums what else the user's frozen balance of the hold's
 // asset holds. A spot order counts whole while not released, pending
@@ -289,7 +297,67 @@ func otherFreezes(ctx context.Context, dbs ledgerDBs, h domain.Hold) (freezes, e
 		h.UserID, h.Asset).Scan(&o.withdrawals, &o.inWithdrawals); err != nil {
 		return o, fmt.Errorf("withdrawals: %w", err)
 	}
-	return o, nil
+	return o, unsettledTrades(ctx, dbs, trading, h, &o)
+}
+
+// unsettledTrades counts the user's trades of the last settleWindow that
+// spend the hold's asset (a buy's quote, a sell's base) and that the
+// ledger has not settled yet: trading released their orders, the ledger
+// still holds their part frozen until the trade.events consumer settles
+// them (C5.5 ⑳).
+func unsettledTrades(ctx context.Context, dbs ledgerDBs, trading *pg.DB, h domain.Hold, o *freezes) error {
+	rows, err := trading.Query(ctx, `SELECT trade_id::text, side, symbol, quantity, quote_quantity FROM fills
+		WHERE user_id = $1 AND executed_at > $2`, h.UserID, time.Now().Add(-settleWindow))
+	if err != nil {
+		return fmt.Errorf("trades: %w", err)
+	}
+	spent := map[string]decimal.Decimal{}
+	for rows.Next() {
+		var id, side, symbol string
+		var qty, quote decimal.Decimal
+		if err := rows.Scan(&id, &side, &symbol, &qty, &quote); err != nil {
+			rows.Close()
+			return fmt.Errorf("trades: %w", err)
+		}
+		base, quoted, _ := strings.Cut(symbol, "-")
+		switch {
+		case side == "BUY" && quoted == h.Asset:
+			spent["trade:"+id] = spent["trade:"+id].Add(quote)
+		case side == "SELL" && base == h.Asset:
+			spent["trade:"+id] = spent["trade:"+id].Add(qty)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("trades: %w", err)
+	}
+	if len(spent) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(spent))
+	for k := range spent {
+		keys = append(keys, k)
+	}
+	settled, err := dbs.ledger.Query(ctx, `SELECT idem_key FROM journals WHERE idem_key = ANY($1)`, keys)
+	if err != nil {
+		return fmt.Errorf("settled trades: %w", err)
+	}
+	for settled.Next() {
+		var k string
+		if err := settled.Scan(&k); err != nil {
+			settled.Close()
+			return fmt.Errorf("settled trades: %w", err)
+		}
+		delete(spent, k)
+	}
+	settled.Close()
+	if err := settled.Err(); err != nil {
+		return fmt.Errorf("settled trades: %w", err)
+	}
+	for _, v := range spent {
+		o.unsettled, o.inTrades = o.unsettled.Add(v), o.inTrades+1
+	}
+	return nil
 }
 
 // houseOnly lets the operator move HOUSE's funds between its accounts:

@@ -175,6 +175,33 @@ func TestHoldsAndAccountAdjustments(t *testing.T) {
 		t.Fatalf("the order's own release: %v", err)
 	}
 
+	// Another hold keeps its part whatever the caller worked out (C5.5 ⑳):
+	// 70 frozen, 50 of it the second hold's.
+	first, second := uuid.NewString(), uuid.NewString()
+	for _, h := range []struct {
+		id     string
+		amount string
+	}{{first, "40"}, {second, "50"}} {
+		if _, err := svc.PlaceHold(ctx, h.id, user, "USDT", d(h.amount), "risk@example.com", "chargeback under review"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := svc.Unfreeze(ctx, "stray-2", domain.EntryOrderUnfreeze, user, domain.AccountSpot, "USDT", d("20"), "a stray unfreeze"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ForceReleaseHold(ctx, first, "ops@example.com", "the other hold's too", d("21"), nil); !apperr.Is(err, "LEDGER_INSUFFICIENT_BALANCE") {
+		t.Fatalf("released the other hold's part: %v", err)
+	}
+	if _, err := svc.ForceReleaseHold(ctx, first, "ops@example.com", "20 left of it", d("20"), nil); err != nil {
+		t.Fatalf("the hold's 20: %v", err)
+	}
+	if _, err := svc.ReleaseHold(ctx, second, "ops@example.com", "cleared by the bank"); err != nil {
+		t.Fatalf("the other hold released in full: %v", err)
+	}
+	if av, fr := usdt(t, svc, user, domain.AccountSpot); !av.Equal(d("10000")) || !fr.IsZero() {
+		t.Fatalf("after both: %s/%s", av, fr)
+	}
+
 	// The admin console adjusts the FUTURES account too.
 	res, err := svc.AdjustApproved(ctx, "approval:f1", user, domain.AccountFutures, "USDT", d("15"), "fin@example.com", "goodwill on fees")
 	if err != nil || res.Replayed {
