@@ -186,6 +186,26 @@ build_web() {
       && { { pnpm -r --workspace-concurrency=1 --filter "./apps/*" build && pnpm --filter @exchange/ui build-storybook; } >/tmp/build.log 2>&1 || { cat /tmp/build.log; exit 1; }; }'
 }
 
+# check_nginx 在动任何东西之前校验仓库里的 nginx 新配置：用正在运行的 nginx 镜像、在它的 compose 网络里，
+# 配上服务器上的证书与生成的 Cloudflare 地址段跑 nginx -t。不通过就停止部署、什么都没换（以前是容器换完才在
+# 热加载时发现，新后端配旧站点，审查 2026-10-03）。nginx 还没起过（新服务器）就跳过，由热加载那一步把关。
+check_nginx() {
+  local dir image network
+  image=$(sudo docker inspect -f '{{.Config.Image}}' exchange-infra-nginx-1 2>/dev/null) || return 0
+  network=$(sudo docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' exchange-infra-nginx-1 | awk '{print $1}')
+  dir=$(mktemp -d)
+  cp -r deploy/compose/nginx/conf.d deploy/compose/nginx/snippets deploy/compose/nginx/nginx.conf "$dir"/
+  sudo cat "$INFRA/nginx/conf.d/00-cloudflare-real-ip.conf" >"$dir/conf.d/00-cloudflare-real-ip.conf" 2>/dev/null || true
+  if ! sudo docker run --rm --network "$network" -v "$dir/nginx.conf:/etc/nginx/nginx.conf:ro" -v "$dir/conf.d:/etc/nginx/conf.d:ro" \
+    -v "$dir/snippets:/etc/nginx/snippets:ro" -v "$INFRA/nginx/ssl:/etc/nginx/ssl:ro" --entrypoint nginx "$image" -t -q; then
+    rm -rf "$dir"
+    echo "== nginx 新配置校验失败，停止部署（什么都没换）"
+    stop_before_changes
+  fi
+  rm -rf "$dir"
+  echo "== nginx 新配置校验通过"
+}
+
 # publish_web 把 build_web 构建好的站点换进 nginx 的静态目录。
 publish_web() {
   sudo mkdir -p "$INFRA/nginx/sites"
@@ -266,6 +286,7 @@ main() {
   if [ -n "$web" ]; then
     build_web || stop_before_changes
   fi
+  check_nginx
 
   # 2. 切换：配置同步到 infra 目录，Topic 幂等核对，准备好的镜像打成 exchange-app:latest
   sync_infra

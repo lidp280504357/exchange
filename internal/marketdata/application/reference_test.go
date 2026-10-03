@@ -119,13 +119,17 @@ func TestReferenceFeed(t *testing.T) {
 	if got := src.streamed(0); len(got) != 1 || got[0] != "BTC-USDT" {
 		t.Fatalf("followed %v: only the pairs with a reference market", got)
 	}
-	latest, fresh := f.Latest("BTC-USDT")
-	if !fresh || !latest.Price.Equal(d("83921")) || latest.Source != "fake" {
-		t.Fatalf("latest %+v fresh %v", latest, fresh)
-	}
-	if tk, ok := f.Ticker("BTC-USDT"); !ok || !tk.Last.Equal(d("83921")) {
-		t.Fatalf("ticker %+v %v", tk, ok)
-	}
+	// Each connection sends its candle (83920) before its ticker (83921):
+	// the second one's candle may just have come in (review 2026-10-03:
+	// asserting at once saw 83920 now and then).
+	eventually(t, "the stream's last price", func() bool {
+		latest, fresh := f.Latest("BTC-USDT")
+		return fresh && latest.Price.Equal(d("83921")) && latest.Source == "fake"
+	})
+	eventually(t, "the stream's ticker", func() bool {
+		tk, ok := f.Ticker("BTC-USDT")
+		return ok && tk.Last.Equal(d("83921"))
+	})
 	if last, _ := store.Read().References().Latest(ctx, "fake", "BTC-USDT"); last == nil || !last.Close.Equal(d("83920")) {
 		t.Fatalf("stored %+v", last)
 	}

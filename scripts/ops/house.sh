@@ -12,10 +12,11 @@
 #                               Idempotent.
 #   scripts/ops/house.sh flags  public books and charts from Binance everywhere
 #                               (market.reference_depth, market.reference_kline)
-#                               and HOUSE on every pair and contract of
-#                               deploy/instruments/test.json
-#                               (market.house_liquidity): every order trades
-#                               against HOUSE (user decision 2026-10-02;
+#                               and HOUSE on every pair listed now that follows
+#                               a reference market (deploy/instruments and the
+#                               console's listings alike) and the contracts on
+#                               them (market.house_liquidity): every order
+#                               trades against HOUSE (user decision 2026-10-02;
 #                               market.internal_matching stays off).
 #   scripts/ops/house.sh open   the USDT pairs of deploy/instruments/test.json
 #                               that follow Binance and are still PREPARE
@@ -27,6 +28,7 @@ set -euo pipefail
 
 INFRA=/opt/exchange/infra
 DATA="$(dirname "$0")/../../deploy/instruments/test.json"
+API="${API:-https://astras.vip}"
 COMPOSE="sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml"
 
 # ctl SERVICE ARGS... runs exchangectl in a service's container.
@@ -55,10 +57,15 @@ seed)
   done
   ;;
 flags)
-  # Pairs with their own market (the platform coin), and the contracts on
-  # them, have no HOUSE.
-  allow="$(jq -r '[.pairs[] | select(.reference_symbol != null) | .symbol] as $followed |
-    [$followed[], (.contracts[] | select(.index_symbol as $i | $followed | index($i)) | .symbol)] | join(",")' "$DATA")"
+  # The pairs as listed now, not test.json: one listed from the console
+  # (LINK-BTC) keeps HOUSE when it follows a reference market. Pairs with
+  # their own market (the platform coin), and the contracts on them, have
+  # no HOUSE.
+  pairs="$(curl -fsS "$API/v1/market/pairs")"
+  contracts="$(curl -fsS "$API/v1/market/contracts")"
+  allow="$(jq -rn --argjson p "$pairs" --argjson c "$contracts" '[$p.pairs[] | select((.reference_symbol // "") != "") | .symbol] as $followed |
+    [$followed[], ($c.contracts[] | select(.index_symbol as $i | $followed | index($i)) | .symbol)] | join(",")')"
+  [ -n "$allow" ] || { echo "no followed pair listed: nothing changed" >&2; exit 1; }
   ctl user-service flags set market.reference_depth --on --reason "Binance books on every followed symbol (ADR-0010)"
   ctl user-service flags set market.reference_kline --on --deny-symbols "" --reason "Binance charts on every pair, ETH-BTC included"
   ctl user-service flags set market.house_liquidity --on --allow-symbols "$allow" --reason "every order trades against HOUSE (ADR-0015, 2026-10-02)"

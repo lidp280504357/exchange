@@ -58,7 +58,8 @@
 #    现货库存 5,000,000 USDT、11.74 BTC、370.4 ETH（BTC、ETH 各约 100 万 USDT，单资产上限的一半，买卖两个方向各留约 100 万）；
 #    合约保证金 2,000,000 USDT（exchangectl ledger house-margin：记到 HOUSE 现货再划转到 FUTURES）
 scripts/ops/house.sh seed
-# 3. 开关：公共盘口与 K 线都是币安的，HOUSE 为 test.json 的全部交易对与合约报价
+# 3. 开关：公共盘口与 K 线都是币安的，HOUSE 为现在上架的、跟随参考市场的全部交易对（test.json 的与后台上架的一样）
+#    及其上的合约报价；名单从线上 /v1/market/pairs、/v1/market/contracts 读（API=… 可换环境）
 scripts/ops/house.sh flags
 # 4. 开放交易：把 test.json 里仍是 PREPARE 的 USDT 交易对改为 TRADING
 scripts/ops/house.sh open
