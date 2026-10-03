@@ -36,12 +36,14 @@ const SAFE_SCHEMES = new Set(["http", "https", "mailto"]);
 /**
  * safeHref returns a link destination that is safe to render, or null:
  * http(s), mailto, site paths ("/help/deposit"), anchors ("#fees") and
- * relative paths. Other schemes (javascript:, data:, vbscript: ...) and
- * anything with whitespace or control characters are refused.
+ * relative paths. Other schemes (javascript:, data:, vbscript: ...),
+ * anything with whitespace or control characters, and any backslash are
+ * refused: browsers read a backslash as a slash, so "\\evil.com" is
+ * "//evil.com", another site (C5.5 ⑫).
  */
 export function safeHref(raw: string): string | null {
   const href = raw.trim();
-  if (href === "" || /[\u0000- \u007f-\u009f]/.test(href)) return null;
+  if (href === "" || /[\u0000- \u007f-\u009f\\]/.test(href)) return null;
   const scheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(href);
   if (scheme) return SAFE_SCHEMES.has(scheme[1]!.toLowerCase()) ? href : null;
   // A colon before any slash, "?" or "#" would be read as a scheme.

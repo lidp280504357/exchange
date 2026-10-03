@@ -97,11 +97,14 @@ paths:
       description: |
         Written and published in the admin console (design 2026-10-02
         §4.5); a scheduled one shows from its time. Public. Cached for 15
-        seconds: the sites show a new one within a minute.
+        seconds: the sites show a new one within a minute. A page at a
+        time, summaries only (C5.5 ⑫).
       tags: [content]
       security: []
       parameters:
         - $ref: '#/components/parameters/Locale'
+        - $ref: '#/components/parameters/ListLimit'
+        - $ref: '#/components/parameters/ListCursor'
       responses:
         '200':
           description: The announcements.
@@ -134,11 +137,14 @@ paths:
   /v1/help:
     get:
       operationId: listHelpArticles
-      summary: The published help articles
+      summary: The published help articles, by category and order
+      description: A page at a time, summaries only (C5.5 ⑫).
       tags: [content]
       security: []
       parameters:
         - $ref: '#/components/parameters/Locale'
+        - $ref: '#/components/parameters/ListLimit'
+        - $ref: '#/components/parameters/ListCursor'
       responses:
         '200':
           description: The help articles.
@@ -199,6 +205,20 @@ components:
       schema:
         type: string
         pattern: '^[a-z0-9][a-z0-9-]{0,63}$'
+    ListLimit:
+      name: limit
+      in: query
+      description: Articles on a page (20 when absent, at most 100).
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+    ListCursor:
+      name: cursor
+      in: query
+      description: The previous page's next_cursor; COMMON_INVALID_ARGUMENT when it is not one.
+      schema:
+        type: string
   schemas:
     ArticleSummary:
       type: object
@@ -232,12 +252,16 @@ components:
           description: Grows with every change; the sites may cache by it.
     ArticleList:
       type: object
-      required: [items, withdrawn]
+      required: [items, withdrawn, next_cursor]
       properties:
         items:
           type: array
+          description: A page of summaries; a list never carries the bodies.
           items:
             $ref: '#/components/schemas/ArticleSummary'
+        next_cursor:
+          type: [string, 'null']
+          description: The next page's cursor; null after the last.
         withdrawn:
           type: array
           description: Slugs of articles taken off; the sites hide their bundled file of such a slug too.

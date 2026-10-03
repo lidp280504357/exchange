@@ -12,7 +12,9 @@ import { Card, Page } from "../../kit/Page";
 // Operators' in-app messages (design 2026-10-02 §4.5): to everyone, one
 // user or the accounts with a tag, in Chinese and maybe English, with a
 // path on the sites to open and maybe an email; delivered in rounds, each
-// with how many have it and how many read it.
+// with how many have it and how many read it. A message whose rounds keep
+// failing waits longer each time and, after ten, is FAILED until an
+// operator resumes it (C5.5 ⑫).
 
 type Broadcast = AdminSchemas["Broadcast"];
 type Audience = "ALL" | "USER" | "TAG";
@@ -26,6 +28,7 @@ const linkRE = /^\/([A-Za-z0-9_\-.][A-Za-z0-9/_\-?=&.%]{0,199})?$/;
 const TAGS = ["VIP", "TEST", "SUSPICIOUS"];
 
 const readShare = (b: Broadcast) => (b.recipients > 0 ? Math.round((b.read / b.recipients) * 100) : 0);
+const statusTone = { SENT: "success", SENDING: "info", FAILED: "danger" } as const;
 
 export default function Broadcasts({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
@@ -63,9 +66,12 @@ export default function Broadcasts({ admin }: { admin: Admin }) {
       {
         id: "status", header: t("admin.common.status"),
         cell: ({ row: { original: b } }) => (
-          <Badge tone={b.status === "SENT" ? "success" : "info"} dot={b.status === "SENDING"}>
-            {t(`admin.broadcasts.status.${b.status}`)}
-          </Badge>
+          <span className="flex flex-col items-start gap-0.5">
+            <Badge tone={statusTone[b.status]} dot={b.status === "SENDING"}>
+              {t(`admin.broadcasts.status.${b.status}`)}
+            </Badge>
+            {b.status === "SENDING" && b.failures > 0 && <span className="text-xs text-warn">{t("admin.broadcasts.retrying", { n: b.failures })}</span>}
+          </span>
         ),
       },
       { id: "recipients", header: t("admin.broadcasts.recipients"), meta: right, cell: ({ row }) => <span className="tabular-nums">{row.original.recipients}</span> },
@@ -97,13 +103,17 @@ export default function Broadcasts({ admin }: { admin: Admin }) {
         <ListTable list={list} columns={columns} getRowId={(b) => b.id} onRowClick={setOpen} empty={t("admin.broadcasts.none")} aria-label={t("admin.nav.broadcasts")} />
       </Card>
       {composing && <Compose onClose={() => setComposing(false)} onSent={(b) => setOpen(b)} />}
-      {open && <BroadcastDrawer id={open.id} initial={open} onClose={() => setOpen(null)} />}
+      {open && <BroadcastDrawer admin={admin} id={open.id} initial={open} onClose={() => setOpen(null)} />}
     </Page>
   );
 }
 
-/** BroadcastDrawer shows a message in both languages with its delivery, asked again while it is sent. */
-function BroadcastDrawer({ id, initial, onClose }: { id: string; initial: Broadcast; onClose: () => void }) {
+/**
+ * BroadcastDrawer shows a message in both languages with its delivery,
+ * asked again while it is sent; a FAILED one shows why and is resumed
+ * with a reason.
+ */
+function BroadcastDrawer({ admin, id, initial, onClose }: { admin: Admin; id: string; initial: Broadcast; onClose: () => void }) {
   const { t } = useTranslation();
   const q = useQuery({
     queryKey: [...broadcastsKey, id],
@@ -113,8 +123,49 @@ function BroadcastDrawer({ id, initial, onClose }: { id: string; initial: Broadc
   });
   const b = q.data;
   return (
-    <Drawer open onOpenChange={(o) => !o && onClose()} title={b.title["zh-CN"]} description={t(`admin.broadcasts.status.${b.status}`)} width={640}>
+    <Drawer
+      open
+      onOpenChange={(o) => !o && onClose()}
+      title={b.title["zh-CN"]}
+      description={t(`admin.broadcasts.status.${b.status}`)}
+      width={640}
+      actions={
+        b.status === "FAILED" &&
+        can(admin, "notices.send") && (
+          <DangerAction
+            trigger={(open) => (
+              <Button size="sm" onClick={open} data-testid="broadcast-resume">
+                {t("admin.broadcasts.resume")}
+              </Button>
+            )}
+            danger={false}
+            title={t("admin.broadcasts.resumeTitle")}
+            description={t("admin.broadcasts.resumeDesc")}
+            target={<span>{b.title["zh-CN"]}</span>}
+            confirmWord={lastFour(b.id)}
+            run={async (reason) =>
+              adminData(await adminApi.POST("/admin/v1/broadcasts/{id}/resume", { params: { path: { id: b.id } }, body: { reason } }))
+            }
+            success={t("admin.broadcasts.resumed")}
+            invalidate={[broadcastsKey]}
+          />
+        )
+      }
+    >
       <div className="flex flex-col gap-4">
+        {(b.status === "FAILED" || b.failures > 0) && (
+          <div role="status" className="rounded-2 border border-danger/40 bg-danger/5 px-4 py-3 text-sm">
+            <div className="font-medium text-danger">
+              {t(b.status === "FAILED" ? "admin.broadcasts.failedHint" : "admin.broadcasts.retryHint", { n: b.failures })}
+            </div>
+            {b.last_error && <div className="mt-1 break-all font-mono text-xs text-fg-2">{b.last_error}</div>}
+            {b.status === "SENDING" && b.retry_at && (
+              <div className="mt-1 text-xs text-fg-3">
+                {t("admin.broadcasts.retryAt")} <TimeText value={b.retry_at} />
+              </div>
+            )}
+          </div>
+        )}
         <KeyValue
           items={[
             { label: t("admin.broadcasts.audience"), value: b.audience === "ALL" ? t("admin.broadcasts.everyone") : t("admin.broadcasts.users", { n: b.users }) },

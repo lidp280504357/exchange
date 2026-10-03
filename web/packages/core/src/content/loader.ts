@@ -143,9 +143,14 @@ export function fromPublished(section: ContentSection, s: PublishedSummary, body
 
 type Published = { articles: Article[]; withdrawn: ReadonlySet<string> };
 
-/** fetchPublished returns the console's articles and the slugs it took off (their files are hidden too). */
+/**
+ * fetchPublished returns the console's articles and the slugs it took off
+ * (their files are hidden too). The lists read the first page, the newest
+ * 100 announcements and the first 100 help articles; an older one is still
+ * reached by its link (C5.5 ⑫).
+ */
 async function fetchPublished(section: ContentSection, locale: ContentLocale): Promise<Published> {
-  const query = { params: { query: { locale } } };
+  const query = { params: { query: { locale, limit: 100 } } };
   const page =
     section === "announcements"
       ? await unwrap(notificationApi.GET("/v1/announcements", query))

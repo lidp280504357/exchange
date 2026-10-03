@@ -2,6 +2,8 @@ package application
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
 	"strconv"
@@ -24,12 +26,34 @@ type Content struct {
 	Now   func() time.Time
 }
 
-// Published returns a section's articles the sites show now.
-func (c *Content) Published(ctx context.Context, section string) ([]domain.Article, error) {
+// maxPublishedOffset bounds how deep the sites page.
+const maxPublishedOffset = 10_000
+
+// Published returns a page of the articles the sites show now (at most
+// limit, 20 when zero, 100 at most) from cursor ("" for the first) and the
+// next page's cursor ("" after the last). The texts carry the head of
+// their bodies only, for the summaries (C5.5 ⑫).
+func (c *Content) Published(ctx context.Context, section, cursor string, limit int) ([]domain.Article, string, error) {
 	if !domain.ValidSection(section) {
-		return nil, apperr.NotFound("no such section")
+		return nil, "", apperr.NotFound("no such section")
 	}
-	return c.Store.Articles(ctx, section, c.Now())
+	if limit <= 0 {
+		limit = 20
+	}
+	limit = min(limit, 100)
+	offset := 0
+	if cursor != "" {
+		n, err := strconv.Atoi(cursor)
+		if err != nil || n < 0 || n > maxPublishedOffset {
+			return nil, "", apperr.Invalid("invalid cursor")
+		}
+		offset = n
+	}
+	list, err := c.Store.PublishedPage(ctx, section, c.Now(), offset, limit+1)
+	if err != nil || len(list) <= limit {
+		return list, "", err
+	}
+	return list[:limit], strconv.Itoa(offset + limit), nil
 }
 
 // Withdrawn returns the slugs of a section's articles taken off: the
@@ -271,22 +295,64 @@ func (b *Broadcasts) List(ctx context.Context, cursor string, limit int) ([]doma
 	return list, list[limit-1].ID, nil
 }
 
-// Round delivers the next batch of every broadcast still sending; it
-// returns how many notices it created.
+// Round delivers the next batch of every broadcast whose round is due; it
+// returns how many notices it created. A broadcast's failed round does not
+// hold the others up: it waits domain.RoundBackoff before its next and,
+// after domain.MaxRoundFailures in a row, is FAILED until an operator
+// resumes it (C5.5 ⑫); the errors are returned together.
 func (b *Broadcasts) Round(ctx context.Context) (int, error) {
-	sending, err := b.Store.Sending(ctx)
+	sending, err := b.Store.Sending(ctx, b.Now())
 	if err != nil {
 		return 0, err
 	}
 	total := 0
+	var errs []error
 	for _, br := range sending {
 		n, err := b.round(ctx, br)
 		total += n
-		if err != nil {
-			return total, err
+		if err == nil {
+			continue
+		}
+		if ctx.Err() != nil {
+			return total, ctx.Err()
+		}
+		errs = append(errs, fmt.Errorf("broadcast %s: %w", br.ID, err))
+		if ferr := b.failed(ctx, br, err); ferr != nil {
+			errs = append(errs, ferr)
 		}
 	}
-	return total, nil
+	return total, errors.Join(errs...)
+}
+
+// failed records br's failed round.
+func (b *Broadcasts) failed(ctx context.Context, br domain.Broadcast, err error) error {
+	n := br.Failures + 1
+	msg := err.Error()
+	if r := []rune(msg); len(r) > 300 {
+		msg = string(r[:300])
+	}
+	stop := n >= domain.MaxRoundFailures
+	if stop {
+		b.Log.ErrorContext(ctx, "broadcast failed: it waits for an operator to resume it", "broadcast_id", br.ID, "failures", n, "error", err)
+	}
+	return b.Store.FailRound(ctx, br.ID, n, msg, b.Now().Add(domain.RoundBackoff(n)), stop)
+}
+
+// Resume sends a FAILED broadcast again from where it stopped (the
+// console's operator, audited there).
+func (b *Broadcasts) Resume(ctx context.Context, id string) (domain.Broadcast, error) {
+	ok, err := b.Store.Resume(ctx, id)
+	if err != nil {
+		return domain.Broadcast{}, err
+	}
+	br, err := b.Get(ctx, id)
+	if err != nil {
+		return domain.Broadcast{}, err
+	}
+	if !ok {
+		return domain.Broadcast{}, apperr.New(apperr.KindConflict, apperr.CodeConflict, "only a FAILED broadcast is resumed")
+	}
+	return br, nil
 }
 
 func (b *Broadcasts) batch() int {
@@ -344,15 +410,26 @@ func (b *Broadcasts) deliver(ctx context.Context, br domain.Broadcast, userID st
 		ID: uuid.Must(uuid.NewV7()).String(), UserID: userID, Type: domain.NoticeBroadcast, Title: title, Body: body, Data: data,
 		CreatedAt: b.Now(),
 	}
+	// The mail waits in the deliveries table, queued with the notice
+	// (MailQueue sends it): a round never waits for a provider, and a
+	// failure to read the contacts fails the round before anything is
+	// stored (C5.5 ⑫).
+	var mail *domain.Delivery
+	if br.Email {
+		contacts, err := b.Notices.Recipients.Contacts(ctx, userID)
+		if err != nil {
+			return false, err
+		}
+		if to := contact(contacts); to != nil {
+			d := mailDelivery(notice, *to)
+			mail = &d
+		}
+	}
 	// The inbox entry is the broadcast's and the user's: a round run twice
 	// gives nobody the message twice.
 	key := uuid.NewSHA1(uuid.MustParse(br.ID), []byte(userID)).String()
-	created, err := b.Notices.Store.CreateNotice(ctx, BroadcastConsumer, key, notice)
-	if err != nil {
+	if _, err := b.Notices.Store.CreateNotice(ctx, BroadcastConsumer, key, notice, mail); err != nil {
 		return false, err
-	}
-	if created && br.Email {
-		b.Notices.mail(ctx, notice, r)
 	}
 	return true, nil // reached, now or by a round that was not recorded
 }

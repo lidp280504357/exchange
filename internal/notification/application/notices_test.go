@@ -20,9 +20,11 @@ type memNotices struct {
 	mu      sync.Mutex
 	handled map[string]bool
 	notices []domain.Notice
+	// queue takes the mails queued with the notices (nil: none expected).
+	queue *memQueue
 }
 
-func (s *memNotices) CreateNotice(_ context.Context, consumer, eventID string, n domain.Notice) (bool, error) {
+func (s *memNotices) CreateNotice(_ context.Context, consumer, eventID string, n domain.Notice, mail *domain.Delivery) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.handled[consumer+eventID] {
@@ -30,7 +32,21 @@ func (s *memNotices) CreateNotice(_ context.Context, consumer, eventID string, n
 	}
 	s.handled[consumer+eventID] = true
 	s.notices = append(s.notices, n)
+	if mail != nil {
+		s.queue.add(*mail, n.CreatedAt)
+	}
 	return true, nil
+}
+
+func (s *memNotices) Notice(_ context.Context, id string) (*domain.Notice, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, x := range s.notices {
+		if x.ID == id {
+			return &x, nil
+		}
+	}
+	return nil, nil
 }
 
 func (s *memNotices) ListNotices(_ context.Context, userID, beforeID string, limit int) ([]domain.Notice, error) {

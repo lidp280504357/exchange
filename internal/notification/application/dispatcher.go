@@ -107,6 +107,22 @@ func (d *Dispatcher) Deliver(ctx context.Context, del domain.Delivery, m domain.
 	return domain.StatusFailedRetrying, nil
 }
 
+// SendOnce tries m on each of its channel's providers once, recording each
+// attempt, and leaves retrying to its caller (MailQueue, C5.5 ⑫).
+func (d *Dispatcher) SendOnce(ctx context.Context, del domain.Delivery, m domain.Message) error {
+	chain := d.routes.For(m)
+	if len(chain) == 0 {
+		return &domain.SendError{Class: domain.FailureRejected, Err: domain.ErrProviderUnavailable}
+	}
+	var err error
+	for _, p := range chain {
+		if err = d.try(ctx, del, m, p); err == nil {
+			return nil
+		}
+	}
+	return err
+}
+
 // continueFrom walks the remaining attempts, starting with provider index
 // pi at attempt number attempt (0 is the provider's first try).
 func (d *Dispatcher) continueFrom(del domain.Delivery, m domain.Message, chain []ports.Provider, pi, attempt int, class domain.FailureClass) {

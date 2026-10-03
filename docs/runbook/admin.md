@@ -211,14 +211,15 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 - **公告与帮助**（`/announcements`、`/help-articles`；任何管理员可读，写要 `content.write`，ADMIN 与 OPERATOR 有）：
   - 一篇文章 = 栏目、slug（小写字母、数字、连字符，同栏目唯一，`NOTIFY_ARTICLE_EXISTS`）、分类、置顶（公告）、排序（帮助）与中英文本（中文必填；英文可选，没有英文时英文用户看中文）。正文是 Markdown，编辑器可切「预览」，按站点的排版显示，站内链接指向用户站。
   - 状态：草稿 → 发布（立即，或填一个时间定时发布）→ 下线（可再发布）。每次保存带读到的版本，期间别人改过返回 409 `COMMON_CONFLICT`（重新打开再改）。审计 `admin.content.created`、`updated`、`published`、`archived`，对象 `announcement:<slug>` 或 `help:<slug>`。
-  - 站点读取：公开接口 `GET /v1/announcements[/{slug}]`、`GET /v1/help[/{slug}]`（`?locale=en`，`Cache-Control: public, max-age=15`）。两个站点把接口里的文章叠加在仓库自带的 Markdown 之上，同 slug 以接口为准；页面数据 30 秒内视为新鲜、45 秒重取一次，所以发布、修改、下线都在 1 分钟内到达两端。接口不可用时只显示自带文章。
+  - 站点读取：公开接口 `GET /v1/announcements[/{slug}]`、`GET /v1/help[/{slug}]`（`?locale=en`，`Cache-Control: public, max-age=15`）。列表分页（`limit` 默认 20、最多 100，`cursor` 用上一页的 `next_cursor`），只回摘要：没写摘要的从正文前 4,000 个字符里取第一段，列表从不读整篇正文（C5.5 ⑫）；两个站点读第一页 100 篇，更早的仍可凭链接打开。两个站点把接口里的文章叠加在仓库自带的 Markdown 之上，同 slug 以接口为准；页面数据 30 秒内视为新鲜、45 秒重取一次，所以发布、修改、下线都在 1 分钟内到达两端。接口不可用时只显示自带文章。
   - 下线的文章：列表接口的 `withdrawn` 带上它的 slug，单篇返回 404 `NOTIFY_ARTICLE_WITHDRAWN`，站点因此连同同 slug 的自带文章一起隐藏（未发布的草稿不影响自带文章）。
   - 页面下方「站点自带的文章」列出还没被后台接管的仓库文件，「复制到后台编辑」把中英文本带进编辑器，保存为草稿、发布后替换原文件。
 - **站内信**（`/broadcasts`；任何管理员可读，发送要 `notices.send`，ADMIN 与 OPERATOR 有）：
   - 对象：单个用户（用户 ID，确认词为 ID 后 4 位）、按标签（带这个标签的账户，最多 10,000 个，没有账户带它返回 422 `ADMIN_TAG_EMPTY`；确认词为标签的小写）、全体用户（确认词 `all`）。中文标题与正文必填，英文可选；跳转路径只能是站内路径（如 `/assets`，`//` 开头的拒绝）；可勾选同时发邮件。
   - 送达：notification-service 分批写进每位用户的通知（类型 `BROADCAST`，实时推送到 `notifications` 频道），见 `accounts.md`「用户通知」。列表与详情显示对象人数、已收到、已读与完成时间，发送中每几秒刷新。发出后不能撤回。审计 `admin.notices.sent`，对象 `broadcast:<id>`。
-- **接口**：`GET/POST /admin/v1/articles`（`?section=ANNOUNCEMENT|HELP`）、`GET/PUT /admin/v1/articles/{id}`、`POST …/{id}/publish`（`{version, publish_at?, reason}`）、`POST …/{id}/archive`；`GET/POST /admin/v1/broadcasts`、`GET /admin/v1/broadcasts/{id}`。
-- **端到端**：`admin.sh` 用固定 slug `e2e-console` 的公告（文章不删除，第一次运行新建，以后改写）：定时发布前站点看不到，立即发布后 PC 站与手机站的接口 1 分钟内列出，发布中修改 1 分钟内更新，旧版本的修改被拒，下线后从列表消失、slug 进 `withdrawn`；给本次的测试用户发一条站内信，用户在通知里看到并读过后，后台显示已收到 1、已读 1。
+  - 失败（C5.5 ⑫）：某条消息的一轮出错（例如 user-service 不可用）只影响它自己，其它消息照常送达；它下一轮等 3 秒、6 秒……翻倍，最多 10 分钟，连续 10 轮（约半小时）失败后标为「发送失败」（`FAILED`）。列表标出「已连续失败 n 轮」，详情显示最近一次的错误与下一轮时间；排除原因后有 `notices.send` 的管理员在详情里「继续发送」（理由，确认词为 ID 后 4 位），从中断处接着发，已收到的用户不会再收到。审计 `admin.notices.resumed`。
+- **接口**：`GET/POST /admin/v1/articles`（`?section=ANNOUNCEMENT|HELP`）、`GET/PUT /admin/v1/articles/{id}`、`POST …/{id}/publish`（`{version, publish_at?, reason}`）、`POST …/{id}/archive`；`GET/POST /admin/v1/broadcasts`、`GET /admin/v1/broadcasts/{id}`（带 `failures`、`last_error`、`retry_at`）、`POST /admin/v1/broadcasts/{id}/resume`（`{reason}`，只有 `FAILED` 的能继续，其它 409 `COMMON_CONFLICT`）。
+- **端到端**：`admin.sh` 用固定 slug `e2e-console` 的公告（文章不删除，第一次运行新建，以后改写）：定时发布前站点看不到，立即发布后 PC 站与手机站的接口 1 分钟内列出，发布中修改 1 分钟内更新，旧版本的修改被拒，下线后从列表消失、slug 进 `withdrawn`；给本次的测试用户发一条站内信，用户在通知里看到并读过后，后台显示已收到 1、已读 1；列表一页一页给、只有摘要，坏游标 400；这条消息没有失败的轮次，「继续发送」只对 `FAILED` 的有效（409），AUDITOR 不能（C5.5 ⑫）。
 
 ## 功能
 

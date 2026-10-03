@@ -66,7 +66,7 @@ func (s *Store) FailDelivery(ctx context.Context, d domain.Delivery, class domai
 		return err
 	}
 	return s.db.InTx(ctx, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE deliveries SET status = 'FAILED', failure_class = $2, updated_at = now()
+		if _, err := tx.Exec(ctx, `UPDATE deliveries SET status = 'FAILED', failure_class = $2, next_attempt_at = NULL, updated_at = now()
 			WHERE id = $1`, d.ID, string(class)); err != nil {
 			return fmt.Errorf("fail delivery: %w", err)
 		}
@@ -76,7 +76,7 @@ func (s *Store) FailDelivery(ctx context.Context, d domain.Delivery, class domai
 
 // CreateNotice stores n with its NotificationCreated event, once per
 // consumed event.
-func (s *Store) CreateNotice(ctx context.Context, consumer, eventID string, n domain.Notice) (bool, error) {
+func (s *Store) CreateNotice(ctx context.Context, consumer, eventID string, n domain.Notice, mail *domain.Delivery) (bool, error) {
 	env, err := s.events.New(ctx, &notificationv1.NotificationCreated{
 		NotificationId: n.ID, UserId: n.UserID, Type: n.Type, Title: n.Title, Body: n.Body,
 	}, "user", n.UserID)
@@ -91,6 +91,13 @@ func (s *Store) CreateNotice(ctx context.Context, consumer, eventID string, n do
 		if _, err := tx.Exec(ctx, `INSERT INTO notifications (id, user_id, type, title, body, data, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7)`, n.ID, n.UserID, n.Type, n.Title, n.Body, data, n.CreatedAt); err != nil {
 			return fmt.Errorf("create notice: %w", err)
+		}
+		if mail != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO deliveries (id, kind, channel, template, target_mask, user_id, next_attempt_at)
+				VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (id) DO NOTHING`,
+				mail.ID, string(mail.Kind), string(mail.Channel), mail.Template, mail.TargetMask, mail.UserID, n.CreatedAt); err != nil {
+				return fmt.Errorf("queue notice mail: %w", err)
+			}
 		}
 		return outbox.Add(ctx, tx, event.TopicNotification, env)
 	})

@@ -652,6 +652,9 @@ type Content interface {
 	Broadcasts(ctx context.Context, cursor string, limit int) (json.RawMessage, error)
 	Broadcast(ctx context.Context, id string) (json.RawMessage, error)
 	SendBroadcast(ctx context.Context, b BroadcastWrite) (json.RawMessage, error)
+	// ResumeBroadcast sends a FAILED message again from where it stopped
+	// (C5.5 ⑫).
+	ResumeBroadcast(ctx context.Context, id, actor string) (json.RawMessage, error)
 }
 
 // ArticleWrite is an article as the console writes it.

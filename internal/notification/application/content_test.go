@@ -34,6 +34,13 @@ func (s *memContent) Articles(_ context.Context, section string, visibleAt time.
 	return out, nil
 }
 
+func (s *memContent) PublishedPage(ctx context.Context, section string, at time.Time, offset, limit int) ([]domain.Article, error) {
+	list, _ := s.Articles(ctx, section, at)
+	slices.SortStableFunc(list, func(a, b domain.Article) int { return b.PublishAt.Compare(a.PublishAt) })
+	list = list[min(offset, len(list)):]
+	return list[:min(limit, len(list))], nil
+}
+
 func (s *memContent) Withdrawn(_ context.Context, section string) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -115,7 +122,7 @@ func TestArticlesArePublishedForTheSites(t *testing.T) {
 			t.Fatalf("%+v: %v", bad, err)
 		}
 	}
-	if list, err := c.Published(ctx, domain.SectionAnnouncement); err != nil || len(list) != 0 {
+	if list, _, err := c.Published(ctx, domain.SectionAnnouncement, "", 0); err != nil || len(list) != 0 {
 		t.Fatalf("a draft is not shown: %+v %v", list, err)
 	}
 	// Scheduled an hour ahead: shown from then on.
@@ -150,7 +157,7 @@ func TestArticlesArePublishedForTheSites(t *testing.T) {
 	if a, err = c.Archive(ctx, a.ID, a.Version, "ops@example.com"); err != nil || a.Status != domain.ArticleArchived {
 		t.Fatalf("archived %+v %v", a, err)
 	}
-	if list, _ := c.Published(ctx, domain.SectionAnnouncement); len(list) != 0 {
+	if list, _, _ := c.Published(ctx, domain.SectionAnnouncement, "", 0); len(list) != 0 {
 		t.Fatal("an archived article is shown")
 	}
 	// Taken off: the sites hide their own file of the slug too.
@@ -200,12 +207,12 @@ func (s *memBroadcasts) Broadcasts(_ context.Context, beforeID string, limit int
 	return out, nil
 }
 
-func (s *memBroadcasts) Sending(context.Context) ([]domain.Broadcast, error) {
+func (s *memBroadcasts) Sending(_ context.Context, now time.Time) ([]domain.Broadcast, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []domain.Broadcast
 	for _, b := range s.list {
-		if b.Status == domain.BroadcastSending {
+		if b.Status == domain.BroadcastSending && !b.RetryAt.After(now) {
 			out = append(out, b)
 		}
 	}
@@ -218,12 +225,39 @@ func (s *memBroadcasts) Advance(_ context.Context, id, cursor string, recipients
 	for i := range s.list {
 		if s.list[i].ID == id {
 			s.list[i].Cursor, s.list[i].Recipients, s.list[i].Status = cursor, recipients, domain.BroadcastSending
+			s.list[i].Failures, s.list[i].LastError, s.list[i].RetryAt = 0, "", time.Time{}
 			if done {
 				s.list[i].Status, s.list[i].FinishedAt = domain.BroadcastSent, at
 			}
 		}
 	}
 	return nil
+}
+
+func (s *memBroadcasts) FailRound(_ context.Context, id string, failures int, lastError string, retryAt time.Time, failed bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.list {
+		if s.list[i].ID == id && s.list[i].Status == domain.BroadcastSending {
+			s.list[i].Failures, s.list[i].LastError, s.list[i].RetryAt = failures, lastError, retryAt
+			if failed {
+				s.list[i].Status = domain.BroadcastFailed
+			}
+		}
+	}
+	return nil
+}
+
+func (s *memBroadcasts) Resume(_ context.Context, id string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.list {
+		if s.list[i].ID == id && s.list[i].Status == domain.BroadcastFailed {
+			s.list[i].Status, s.list[i].Failures, s.list[i].LastError, s.list[i].RetryAt = domain.BroadcastSending, 0, "", time.Time{}
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // directory pages through users two at a time.
@@ -244,8 +278,10 @@ func (d directory) UserIDs(_ context.Context, cursor string, limit int) ([]strin
 
 func TestBroadcastsReachEveryoneOnceInTheirLanguage(t *testing.T) {
 	mail := &scriptedProvider{name: "mail"}
-	d := NewDispatcher(Routes{Email: []ports.Provider{mail}}, newMemDeliveries(), slog.New(slog.DiscardHandler), prometheus.NewRegistry())
-	notices := &memNotices{handled: map[string]bool{}}
+	deliveries := newMemDeliveries()
+	d := NewDispatcher(Routes{Email: []ports.Provider{mail}}, deliveries, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	queue := newMemQueue(deliveries)
+	notices := &memNotices{handled: map[string]bool{}, queue: queue}
 	people := map[string]ports.Recipient{}
 	contacts := map[string][]ports.Contact{}
 	var users []string
@@ -275,6 +311,7 @@ func TestBroadcastsReachEveryoneOnceInTheirLanguage(t *testing.T) {
 		{Audience: "ALL", Title: msg.Title, Body: msg.Body, Link: "https://evil.example.com"},
 		{Audience: "ALL", Title: msg.Title, Body: msg.Body, Link: "//evil.example.com"},
 		{Audience: "USERS", UserIDs: []string{"bob"}, Title: msg.Title, Body: msg.Body},
+		{Audience: "ALL", Title: msg.Title, Body: map[string]string{"zh-CN": "x", "fr": "y"}},
 	} {
 		if _, err := b.Send(ctx, bad, "ops@example.com"); !apperr.Is(err, apperr.CodeInvalidArgument) {
 			t.Fatalf("%+v: %v", bad, err)
@@ -318,8 +355,13 @@ func TestBroadcastsReachEveryoneOnceInTheirLanguage(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ = b.Get(ctx, br.ID)
-	if got.Status != domain.BroadcastSent || got.Recipients != 2 || len(notices.notices) != 7 || mail.count() != 2 || !strings.Contains(mail.sent[0].Text, "今晚维护一小时。") {
-		t.Fatalf("named once each %+v (%d notices, %d mails)", got, len(notices.notices), mail.count())
+	if got.Status != domain.BroadcastSent || got.Recipients != 2 || len(notices.notices) != 7 || mail.count() != 0 || queue.waiting() != 2 {
+		t.Fatalf("named once each, their mails queued %+v (%d notices, %d mails, %d queued)", got, len(notices.notices), mail.count(), queue.waiting())
+	}
+	// The queue sends them (C5.5 ⑫).
+	q := &MailQueue{Queue: queue, Notices: notices, Recipients: n.Recipients, Dispatcher: d, Log: slog.New(slog.DiscardHandler), Now: time.Now}
+	if sent, err := q.Round(ctx); err != nil || sent != 2 || mail.count() != 2 || !strings.Contains(mail.sent[0].Text, "今晚维护一小时。") || queue.waiting() != 0 {
+		t.Fatalf("mailed %d %v (%d mails, %d queued)", sent, err, mail.count(), queue.waiting())
 	}
 	list, next, err := b.List(ctx, "", 1)
 	if err != nil || len(list) != 1 || list[0].ID != br.ID || next == "" {

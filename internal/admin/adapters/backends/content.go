@@ -71,3 +71,8 @@ func (n Notification) Broadcast(ctx context.Context, id string) (json.RawMessage
 func (n Notification) SendBroadcast(ctx context.Context, b ports.BroadcastWrite) (json.RawMessage, error) {
 	return n.do(ctx, http.MethodPost, n.Base+"/internal/notification/broadcasts", b, nil)
 }
+
+// ResumeBroadcast sends a FAILED message again from where it stopped.
+func (n Notification) ResumeBroadcast(ctx context.Context, id, actor string) (json.RawMessage, error) {
+	return n.do(ctx, http.MethodPost, n.Base+"/internal/notification/broadcasts/"+url.PathEscape(id)+"/resume", map[string]string{"actor": actor}, nil)
+}

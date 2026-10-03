@@ -156,6 +156,26 @@ func (s *Service) Broadcast(ctx context.Context, _ Principal, id string) (json.R
 	return s.Content.Broadcast(ctx, id)
 }
 
+// ResumeBroadcast sends a FAILED in-app message again from where it
+// stopped: its rounds failed ten times in a row (C5.5 ⑫). Audited as
+// admin.notices.resumed.
+func (s *Service) ResumeBroadcast(ctx context.Context, p Principal, id, reason string) (json.RawMessage, error) {
+	if err := p.require(domain.PermNoticesSend); err != nil {
+		return nil, err
+	}
+	if err := needReason(reason); err != nil {
+		return nil, err
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		return nil, apperr.NotFound("no such message")
+	}
+	raw, err := s.Content.ResumeBroadcast(ctx, id, p.Admin.Email)
+	if err != nil {
+		return nil, err
+	}
+	return raw, s.audit(ctx, p, "broadcast:"+id, "admin.notices.resumed", strings.TrimSpace(reason), "{}")
+}
+
 // Audiences of an in-app message as the console names them.
 const (
 	AudienceAll  = "ALL"

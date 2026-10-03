@@ -2837,6 +2837,38 @@ paths:
                 $ref: '#/components/schemas/Broadcast'
         default:
           $ref: '#/components/responses/Error'
+  /admin/v1/broadcasts/{id}/resume:
+    post:
+      operationId: resumeBroadcast
+      summary: Send a FAILED in-app message again from where it stopped
+      description: |
+        A message whose rounds failed ten times in a row (about half an
+        hour, the error in last_error) waits for this; the other messages
+        went on meanwhile (C5.5 ⑫). Anything but FAILED is COMMON_CONFLICT.
+        Audited as admin.notices.resumed. Needs notices.send.
+      tags: [content]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonRequest'
+      responses:
+        '200':
+          description: The message, sending again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Broadcast'
+        default:
+          $ref: '#/components/responses/Error'
   /admin/v1/sim:
     get:
       operationId: getSim
@@ -5553,7 +5585,8 @@ components:
             $ref: '#/components/schemas/ArticleText'
     Broadcast:
       type: object
-      required: [id, audience, users, title, body, link, email, status, recipients, read, created_by, created_at, finished_at]
+      required: [id, audience, users, title, body, link, email, status, recipients, read, created_by, created_at, finished_at, failures,
+        last_error, retry_at]
       properties:
         id:
           type: string
@@ -5575,7 +5608,8 @@ components:
           type: boolean
         status:
           type: string
-          enum: [SENDING, SENT]
+          enum: [SENDING, SENT, FAILED]
+          description: FAILED after ten failed rounds in a row; an operator resumes it (C5.5 ⑫).
         recipients:
           type: integer
           description: Users who have it.
@@ -5590,6 +5624,16 @@ components:
         finished_at:
           type: [string, 'null']
           format: date-time
+        failures:
+          type: integer
+          description: Rounds failed in a row (each waits longer, 3 seconds doubling to 10 minutes).
+        last_error:
+          type: string
+          description: The last failed round's error; empty after a round that worked.
+        retry_at:
+          type: [string, 'null']
+          format: date-time
+          description: When the next round may run after a failure.
     StatusRequest:
       type: object
       required: [to, reason]

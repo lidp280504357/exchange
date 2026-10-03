@@ -46,7 +46,8 @@ export interface paths {
          * The published announcements, pinned first then newest
          * @description Written and published in the admin console (design 2026-10-02
          *     §4.5); a scheduled one shows from its time. Public. Cached for 15
-         *     seconds: the sites show a new one within a minute.
+         *     seconds: the sites show a new one within a minute. A page at a
+         *     time, summaries only (C5.5 ⑫).
          */
         get: operations["listAnnouncements"];
         put?: never;
@@ -81,7 +82,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The published help articles */
+        /**
+         * The published help articles, by category and order
+         * @description A page at a time, summaries only (C5.5 ⑫).
+         */
         get: operations["listHelpArticles"];
         put?: never;
         post?: never;
@@ -131,7 +135,10 @@ export interface components {
             version: number;
         };
         ArticleList: {
+            /** @description A page of summaries; a list never carries the bodies. */
             items: components["schemas"]["ArticleSummary"][];
+            /** @description The next page's cursor; null after the last. */
+            next_cursor: string | null;
             /** @description Slugs of articles taken off; the sites hide their bundled file of such a slug too. */
             withdrawn: string[];
         };
@@ -198,6 +205,10 @@ export interface components {
         /** @description en for English; Chinese otherwise. An article without English comes in Chinese (fallback true). */
         Locale: "zh-CN" | "en";
         Slug: string;
+        /** @description Articles on a page (20 when absent, at most 100). */
+        ListLimit: number;
+        /** @description The previous page's next_cursor; COMMON_INVALID_ARGUMENT when it is not one. */
+        ListCursor: string;
     };
     requestBodies: never;
     headers: {
@@ -271,6 +282,10 @@ export interface operations {
             query?: {
                 /** @description en for English; Chinese otherwise. An article without English comes in Chinese (fallback true). */
                 locale?: components["parameters"]["Locale"];
+                /** @description Articles on a page (20 when absent, at most 100). */
+                limit?: components["parameters"]["ListLimit"];
+                /** @description The previous page's next_cursor; COMMON_INVALID_ARGUMENT when it is not one. */
+                cursor?: components["parameters"]["ListCursor"];
             };
             header?: never;
             path?: never;
@@ -322,6 +337,10 @@ export interface operations {
             query?: {
                 /** @description en for English; Chinese otherwise. An article without English comes in Chinese (fallback true). */
                 locale?: components["parameters"]["Locale"];
+                /** @description Articles on a page (20 when absent, at most 100). */
+                limit?: components["parameters"]["ListLimit"];
+                /** @description The previous page's next_cursor; COMMON_INVALID_ARGUMENT when it is not one. */
+                cursor?: components["parameters"]["ListCursor"];
             };
             header?: never;
             path?: never;

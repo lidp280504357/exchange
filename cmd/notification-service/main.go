@@ -43,6 +43,13 @@ type settings struct {
 	// (USER_GRPC_ADDR, AUTH_GRPC_ADDR).
 	UserAddr string `koanf:"user_grpc_addr"`
 	AuthAddr string `koanf:"auth_grpc_addr"`
+	// How long in-app notices (and the broadcasts that made them) and
+	// delivery records are kept (NOTICE_RETENTION, DELIVERY_RETENTION;
+	// 180 and 90 days when zero), and how many queued mails go out each
+	// second (NOTICE_MAIL_RATE, 2 when zero; C5.5 ⑫).
+	NoticeRetention   time.Duration `koanf:"notice_retention"`
+	DeliveryRetention time.Duration `koanf:"delivery_retention"`
+	MailRate          int           `koanf:"notice_mail_rate"`
 }
 
 func (s *settings) Validate() error {
@@ -125,6 +132,38 @@ func setup(ctx context.Context, a *app.App) error {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-time.After(3 * time.Second):
+			}
+		}
+	}))
+	// A broadcast's mails, queued with its notices, go out at the
+	// providers' pace and are tried again later (C5.5 ⑫).
+	queue := &application.MailQueue{
+		Queue: store, Notices: store, Recipients: people, Dispatcher: dispatcher, Log: a.Logger(), Now: time.Now, PerRound: cfg.MailRate,
+	}
+	a.Add("mail queue", app.Loop(func(ctx context.Context) error {
+		for {
+			if _, err := queue.Round(ctx); err != nil && ctx.Err() == nil {
+				a.Logger().WarnContext(ctx, "mail queue round failed", "error", err)
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Second):
+			}
+		}
+	}))
+	retention := &application.Retention{Store: store, NoticeKeep: cfg.NoticeRetention, DeliveryKeep: cfg.DeliveryRetention, Now: time.Now}
+	a.Add("retention", app.Loop(func(ctx context.Context) error {
+		for {
+			if n, b, d, err := retention.Purge(ctx); err != nil && ctx.Err() == nil {
+				a.Logger().WarnContext(ctx, "retention failed", "error", err)
+			} else if n+b+d > 0 {
+				a.Logger().InfoContext(ctx, "retention deleted old rows", "notices", n, "broadcasts", b, "deliveries", d)
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Hour):
 			}
 		}
 	}))

@@ -37,6 +37,7 @@ func (h *Content) Routes(r chi.Router) {
 	r.Get("/internal/notification/broadcasts", h.broadcasts)
 	r.Post("/internal/notification/broadcasts", h.sendBroadcast)
 	r.Get("/internal/notification/broadcasts/{id}", h.broadcast)
+	r.Post("/internal/notification/broadcasts/{id}/resume", h.resumeBroadcast)
 }
 
 // locale is the sites' language: en, else Chinese.
@@ -79,7 +80,8 @@ const contentCache = "public, max-age=15"
 
 func (h *Content) published(section string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		list, err := h.Svc.Published(r.Context(), section)
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		list, next, err := h.Svc.Published(r.Context(), section, r.URL.Query().Get("cursor"), limit)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -94,8 +96,12 @@ func (h *Content) published(section string) http.HandlerFunc {
 		for _, a := range list {
 			out = append(out, summaryOf(a, loc))
 		}
+		var nextCursor *string
+		if next != "" {
+			nextCursor = &next
+		}
 		w.Header().Set("Cache-Control", contentCache)
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "withdrawn": withdrawn})
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": out, "withdrawn": withdrawn, "next_cursor": nextCursor})
 	}
 }
 
@@ -304,18 +310,48 @@ type broadcastJSON struct {
 	CreatedBy  string            `json:"created_by"`
 	CreatedAt  string            `json:"created_at"`
 	FinishedAt *string           `json:"finished_at"`
+	// Failures counts the rounds failed in a row, LastError the last one's
+	// error; RetryAt is when the next round may run (C5.5 ⑫).
+	Failures  int     `json:"failures"`
+	LastError string  `json:"last_error"`
+	RetryAt   *string `json:"retry_at"`
 }
 
 func broadcastOf(b domain.Broadcast) broadcastJSON {
 	out := broadcastJSON{
 		ID: b.ID, Audience: b.Audience, Users: len(b.UserIDs), Title: b.Title, Body: b.Body, Link: b.Link, Email: b.Email, Status: b.Status,
 		Recipients: b.Recipients, Read: b.Read, CreatedBy: b.CreatedBy, CreatedAt: httpx.FormatTime(b.CreatedAt),
+		Failures: b.Failures, LastError: b.LastError,
 	}
 	if !b.FinishedAt.IsZero() {
 		at := httpx.FormatTime(b.FinishedAt)
 		out.FinishedAt = &at
 	}
+	if !b.RetryAt.IsZero() {
+		at := httpx.FormatTime(b.RetryAt)
+		out.RetryAt = &at
+	}
 	return out
+}
+
+func (h *Content) resumeBroadcast(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Actor string `json:"actor"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if err := needActor(body.Actor); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	b, err := h.Broadcasts.Resume(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, broadcastOf(b))
 }
 
 func (h *Content) broadcasts(w http.ResponseWriter, r *http.Request) {

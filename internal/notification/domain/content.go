@@ -175,7 +175,21 @@ const (
 const (
 	BroadcastSending = "SENDING"
 	BroadcastSent    = "SENT"
+	// BroadcastFailed is a broadcast whose rounds failed MaxRoundFailures
+	// times in a row: it waits for an operator to resume it (C5.5 ⑫).
+	BroadcastFailed = "FAILED"
 )
+
+// MaxRoundFailures is how many rounds of a broadcast fail in a row before
+// it is FAILED: with RoundBackoff, about half an hour.
+const MaxRoundFailures = 10
+
+// RoundBackoff is how long a broadcast waits after its n-th failed round
+// in a row: 3 seconds, doubling, at most 10 minutes. The other broadcasts
+// go on meanwhile.
+func RoundBackoff(n int) time.Duration {
+	return min(3*time.Second<<min(max(n-1, 0), 8), 10*time.Minute)
+}
 
 // NoticeBroadcast is the type of an operator's in-app message.
 const NoticeBroadcast = "BROADCAST"
@@ -199,6 +213,11 @@ type Broadcast struct {
 	Status     string
 	Cursor     string
 	Recipients int
+	// Failures counts the rounds failed in a row, the last one's error in
+	// LastError; RetryAt is when the next round may run (zero: now).
+	Failures  int
+	LastError string
+	RetryAt   time.Time
 	// Read counts the recipients who read it (computed).
 	Read       int
 	CreatedBy  string
@@ -229,9 +248,11 @@ func (b Broadcast) Validate() error {
 			return apperr.Invalid("a title has at most 100 characters, a body 2,000")
 		}
 	}
-	for l := range b.Title {
-		if l != LocaleZH && l != LocaleEN {
-			return apperr.Invalid("locale must be zh-CN or en")
+	for _, texts := range []map[string]string{b.Title, b.Body} {
+		for l := range texts {
+			if l != LocaleZH && l != LocaleEN {
+				return apperr.Invalid("locale must be zh-CN or en")
+			}
 		}
 	}
 	return nil

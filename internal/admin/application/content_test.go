@@ -21,6 +21,7 @@ type fakeContent struct {
 	articles   []ports.ArticleWrite
 	published  []string
 	broadcasts []ports.BroadcastWrite
+	resumed    []string
 }
 
 func (f *fakeContent) CreateArticle(_ context.Context, a ports.ArticleWrite) (json.RawMessage, error) {
@@ -31,6 +32,11 @@ func (f *fakeContent) CreateArticle(_ context.Context, a ports.ArticleWrite) (js
 func (f *fakeContent) PublishArticle(_ context.Context, id string, version int, _ *time.Time, actor string) (json.RawMessage, error) {
 	f.published = append(f.published, id+" "+actor)
 	return json.Marshal(map[string]any{"id": id, "section": "ANNOUNCEMENT", "slug": "maintenance", "status": "PUBLISHED", "version": version + 1})
+}
+
+func (f *fakeContent) ResumeBroadcast(_ context.Context, id, actor string) (json.RawMessage, error) {
+	f.resumed = append(f.resumed, id+" "+actor)
+	return json.Marshal(map[string]any{"id": id, "status": "SENDING", "failures": 0})
 }
 
 func (f *fakeContent) SendBroadcast(_ context.Context, b ports.BroadcastWrite) (json.RawMessage, error) {
@@ -109,5 +115,24 @@ func TestArticlesAndMessagesFromTheConsole(t *testing.T) {
 	if got := h.store.audits[len(h.store.audits)-1]; got.GetAction() != "admin.notices.sent" || !strings.HasPrefix(got.GetTarget(), "broadcast:") ||
 		!strings.Contains(got.GetDetails(), `"audience":"ALL"`) {
 		t.Fatalf("audited %v", got)
+	}
+
+	// A FAILED message is resumed with a reason (C5.5 ⑫).
+	failed := uuid.NewString()
+	if _, err := h.svc.ResumeBroadcast(ctx, fin, failed, "user-service is back"); code(err) != "ADMIN_FORBIDDEN" {
+		t.Fatalf("FINANCE resumes nothing: %v", err)
+	}
+	if _, err := h.svc.ResumeBroadcast(ctx, ops, failed, ""); code(err) != apperr.CodeInvalidArgument {
+		t.Fatalf("no reason: %v", err)
+	}
+	if _, err := h.svc.ResumeBroadcast(ctx, ops, "nope", "user-service is back"); code(err) != apperr.CodeNotFound {
+		t.Fatalf("a bad ID: %v", err)
+	}
+	if _, err := h.svc.ResumeBroadcast(ctx, ops, failed, "user-service is back"); err != nil || len(content.resumed) != 1 ||
+		content.resumed[0] != failed+" ops@example.com" {
+		t.Fatalf("resumed %v %v", content.resumed, err)
+	}
+	if got := h.store.audits[len(h.store.audits)-1]; got.GetAction() != "admin.notices.resumed" || got.GetTarget() != "broadcast:"+failed {
+		t.Fatalf("the resume audited %v", got)
 	}
 }

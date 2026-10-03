@@ -58,12 +58,32 @@ func (n *Notices) Notify(ctx context.Context, e Event) error {
 	notice := domain.Notice{
 		ID: uuid.Must(uuid.NewV7()).String(), UserID: e.UserID, Type: e.Type, Title: title, Body: body, Data: e.Data, CreatedAt: n.Now(),
 	}
-	created, err := n.Store.CreateNotice(ctx, Consumer, e.ID, notice)
+	created, err := n.Store.CreateNotice(ctx, Consumer, e.ID, notice, nil)
 	if err != nil || !created || !e.Mail {
 		return err
 	}
 	n.mail(ctx, notice, r)
 	return nil
+}
+
+// contact is where a notice's mail goes: the user's email, or phone when
+// there is none; nil for neither.
+func contact(contacts []ports.Contact) *ports.Contact {
+	var to *ports.Contact
+	for i := range contacts {
+		if to == nil || contacts[i].Channel == domain.ChannelEmail {
+			to = &contacts[i]
+		}
+	}
+	return to
+}
+
+// mailDelivery is the delivery of a notice's mail to to.
+func mailDelivery(notice domain.Notice, to ports.Contact) domain.Delivery {
+	return domain.Delivery{
+		ID: notice.ID, Kind: domain.KindNotice, Channel: to.Channel, Template: "notice." + strings.ToLower(notice.Type),
+		TargetMask: pii.MaskIdentifier(to.Value), UserID: notice.UserID,
+	}
 }
 
 // mail sends the notice to the user's email, or phone when there is none.
@@ -73,22 +93,13 @@ func (n *Notices) mail(ctx context.Context, notice domain.Notice, r ports.Recipi
 		n.Log.WarnContext(ctx, "notice mail skipped: contacts unavailable", "notice_id", notice.ID, "error", err)
 		return
 	}
-	var to *ports.Contact
-	for i := range contacts {
-		if to == nil || contacts[i].Channel == domain.ChannelEmail {
-			to = &contacts[i]
-		}
-	}
+	to := contact(contacts)
 	if to == nil {
 		return
 	}
 	m := domain.NoticeMail(to.Channel, to.Value, notice.Title, notice.Body, r.AntiPhishingCode, r.Language)
 	m.IdempotencyKey = notice.ID
-	del := domain.Delivery{
-		ID: notice.ID, Kind: domain.KindNotice, Channel: to.Channel, Template: "notice." + strings.ToLower(notice.Type),
-		TargetMask: pii.MaskIdentifier(to.Value), UserID: notice.UserID,
-	}
-	if _, err := n.Dispatcher.Deliver(ctx, del, m); err != nil {
+	if _, err := n.Dispatcher.Deliver(ctx, mailDelivery(notice, *to), m); err != nil {
 		n.Log.WarnContext(ctx, "notice mail failed", "notice_id", notice.ID, "error", err)
 	}
 }

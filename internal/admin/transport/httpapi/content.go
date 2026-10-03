@@ -133,6 +133,22 @@ func (h *Handler) broadcast(w http.ResponseWriter, r *http.Request) {
 	writeRaw(w, raw)
 }
 
+func (h *Handler) resumeBroadcast(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	raw, err := h.Svc.ResumeBroadcast(r.Context(), principal(r), chi.URLParam(r, "id"), body.Reason)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeRaw(w, raw)
+}
+
 func (h *Handler) sendBroadcast(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Audience string            `json:"audience"`

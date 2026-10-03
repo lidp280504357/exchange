@@ -1548,7 +1548,7 @@ ART_V=$(jq -r .version <<<"$BODY")
 listed() { # listed SITE TITLE: the site's API lists the e2e announcement in English with TITLE
   local user_base=$BASE rc=0
   BASE=$1
-  call GET "/v1/announcements?locale=en" "" -D "$WORK/announcements.headers" || rc=$?
+  call GET "/v1/announcements?locale=en&limit=100" "" -D "$WORK/announcements.headers" || rc=$?
   BASE=$user_base
   [[ $rc == 0 && $STATUS == 200 ]] && jq -e --arg s "$SLUG" --arg t "$2" 'any(.items[]; .slug == $s and .title == $t and .fallback == false)' <<<"$BODY" >/dev/null
 }
@@ -1579,6 +1579,11 @@ expect 404 NOTIFY_ARTICLE_WITHDRAWN "the article says it was taken off (no bundl
 call GET "/v1/help?locale=en" ""
 expect 200 - "the help articles are public too"
 check '(.items | type) == "array" and (.withdrawn | type) == "array"' "a list and the slugs taken off"
+call GET "/v1/announcements?limit=1" ""
+expect 200 - "the lists come a page at a time (C5.5 12)"
+check '(.items | length) <= 1 and has("next_cursor") and all(.items[]; has("body") | not)' "summaries only, with the next page's cursor"
+call GET "/v1/announcements?cursor=nope" ""
+expect 400 COMMON_INVALID_ARGUMENT "a cursor that is not one is refused"
 
 echo "== an operator's in-app message"
 as AUDITOR POST /admin/v1/broadcasts '{"audience":"ALL","title":{"zh-CN":"不发"},"body":{"zh-CN":"不发"},"reason":"e2e sends nothing"}'
@@ -1614,6 +1619,11 @@ counted() {
   [[ $STATUS == 200 ]] && jq -e '.status == "SENT" and .recipients == 1 and .read == 1 and .finished_at != null' <<<"$BODY" >/dev/null
 }
 eventually 60 "the console counts it delivered and read" counted
+check '.failures == 0 and .last_error == "" and .retry_at == null' "no round failed (C5.5 12)"
+as OPERATOR POST "/admin/v1/broadcasts/$BROADCAST_ID/resume" '{"reason":"e2e resumes a message delivered"}'
+expect 409 COMMON_CONFLICT "only a FAILED message is resumed"
+as AUDITOR POST "/admin/v1/broadcasts/$BROADCAST_ID/resume" '{"reason":"e2e resumes nothing"}'
+expect 403 ADMIN_FORBIDDEN "AUDITOR resumes nothing"
 as AUDITOR GET "/admin/v1/broadcasts?limit=5" ""
 expect 200 - "every administrator reads the messages sent"
 check "any(.items[]; .id == \"$BROADCAST_ID\")" "this one among the newest"

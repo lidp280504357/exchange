@@ -1736,6 +1736,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/broadcasts/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a FAILED in-app message again from where it stopped
+         * @description A message whose rounds failed ten times in a row (about half an
+         *     hour, the error in last_error) waits for this; the other messages
+         *     went on meanwhile (C5.5 ⑫). Anything but FAILED is COMMON_CONFLICT.
+         *     Audited as admin.notices.resumed. Needs notices.send.
+         */
+        post: operations["resumeBroadcast"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/sim": {
         parameters: {
             query?: never;
@@ -3356,8 +3379,11 @@ export interface components {
             body: components["schemas"]["LocalizedText"];
             link: string;
             email: boolean;
-            /** @enum {string} */
-            status: "SENDING" | "SENT";
+            /**
+             * @description FAILED after ten failed rounds in a row; an operator resumes it (C5.5 ⑫).
+             * @enum {string}
+             */
+            status: "SENDING" | "SENT" | "FAILED";
             /** @description Users who have it. */
             recipients: number;
             /** @description Of them, those who read it. */
@@ -3367,6 +3393,15 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             finished_at: string | null;
+            /** @description Rounds failed in a row (each waits longer, 3 seconds doubling to 10 minutes). */
+            failures: number;
+            /** @description The last failed round's error; empty after a round that worked. */
+            last_error: string;
+            /**
+             * Format: date-time
+             * @description When the next round may run after a failure.
+             */
+            retry_at: string | null;
         };
         StatusRequest: {
             /** @enum {string} */
@@ -7012,6 +7047,33 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description The message. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Broadcast"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    resumeBroadcast: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReasonRequest"];
+            };
+        };
+        responses: {
+            /** @description The message, sending again. */
             200: {
                 headers: {
                     [name: string]: unknown;

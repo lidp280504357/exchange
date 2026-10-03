@@ -31,8 +31,9 @@ type DeliveryStore interface {
 type NoticeStore interface {
 	// CreateNotice stores n and queues NotificationCreated in one
 	// transaction, unless consumer already handled eventID; it reports
-	// whether it stored n.
-	CreateNotice(ctx context.Context, consumer, eventID string, n domain.Notice) (bool, error)
+	// whether it stored n. A mail, when given, is queued in the same
+	// transaction, due at n's creation (MailQueue, C5.5 ⑫).
+	CreateNotice(ctx context.Context, consumer, eventID string, n domain.Notice, mail *domain.Delivery) (bool, error)
 	// ListNotices returns up to limit notices older than beforeID (""
 	// for the newest), newest first.
 	ListNotices(ctx context.Context, userID, beforeID string, limit int) ([]domain.Notice, error)
@@ -40,6 +41,32 @@ type NoticeStore interface {
 	// MarkRead marks the given notices, or all when ids is empty, and
 	// returns how many changed.
 	MarkRead(ctx context.Context, userID string, ids []string) (int64, error)
+	// Notice reads one by its ID; nil when unknown (or deleted).
+	Notice(ctx context.Context, id string) (*domain.Notice, error)
+}
+
+// MailQueue keeps the mails sent later (a broadcast's, C5.5 ⑫) in the
+// deliveries table; NoticeStore.CreateNotice queues them.
+type MailQueue interface {
+	// TakeDue returns up to limit queued deliveries due by now, oldest
+	// first, each held from the other takers until lease is over.
+	TakeDue(ctx context.Context, now time.Time, lease time.Duration, limit int) ([]domain.Delivery, error)
+	// Retry makes a queued delivery due again at at.
+	Retry(ctx context.Context, id string, at time.Time) error
+	// Settle ends a queued delivery's wait (sent, or failed for good).
+	Settle(ctx context.Context, id string) error
+}
+
+// RetentionStore deletes what is past its keep (C5.5 ⑫).
+type RetentionStore interface {
+	// PurgeNotices deletes up to limit notices created before before.
+	PurgeNotices(ctx context.Context, before time.Time, limit int) (int64, error)
+	// PurgeBroadcasts deletes the broadcasts created before before that
+	// are not sending.
+	PurgeBroadcasts(ctx context.Context, before time.Time) (int64, error)
+	// PurgeDeliveries deletes up to limit delivery records created before
+	// before that wait for nothing.
+	PurgeDeliveries(ctx context.Context, before time.Time, limit int) (int64, error)
 }
 
 // Recipient is what messages to a user need to know.
@@ -77,6 +104,10 @@ type ContentStore interface {
 	// Articles returns a section's articles with their texts; with
 	// visibleAt set only those published by then.
 	Articles(ctx context.Context, section string, visibleAt time.Time) ([]domain.Article, error)
+	// PublishedPage returns limit of a section's articles published by at,
+	// from offset in the sites' order; their texts carry the body's first
+	// HeadLength characters only, enough for a summary (C5.5 ⑫).
+	PublishedPage(ctx context.Context, section string, at time.Time, offset, limit int) ([]domain.Article, error)
 	// Withdrawn returns the slugs of a section's archived articles.
 	Withdrawn(ctx context.Context, section string) ([]string, error)
 	// Article and ArticleByID read one with its texts; nil when unknown.
@@ -99,9 +130,20 @@ type BroadcastStore interface {
 	// Broadcasts pages through them, newest first, before beforeID ("" for
 	// the newest), with their read counts.
 	Broadcasts(ctx context.Context, beforeID string, limit int) ([]domain.Broadcast, error)
-	// Sending returns the broadcasts still sending, oldest first.
-	Sending(ctx context.Context) ([]domain.Broadcast, error)
+	// Sending returns up to ten broadcasts still sending whose next round
+	// is due at now, oldest first.
+	Sending(ctx context.Context, now time.Time) ([]domain.Broadcast, error)
 	// Advance records a round: the cursor, the recipients reached, and
-	// whether it is done.
+	// whether it is done; the failures in a row start over.
 	Advance(ctx context.Context, id, cursor string, recipients int, done bool, at time.Time) error
+	// FailRound records a failed round: the failures in a row, the error,
+	// when the next may run, and FAILED when failed.
+	FailRound(ctx context.Context, id string, failures int, lastError string, retryAt time.Time, failed bool) error
+	// Resume sends a FAILED broadcast again from where it stopped; false
+	// when it is not FAILED (or unknown).
+	Resume(ctx context.Context, id string) (bool, error)
 }
+
+// HeadLength is how much of an article's body a list reads, for its
+// summary (domain.Excerpt).
+const HeadLength = 4000

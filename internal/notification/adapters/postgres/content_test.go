@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/notification/adapters/postgres"
 	"github.com/lidp280504357/exchange/internal/notification/application"
 	"github.com/lidp280504357/exchange/internal/notification/domain"
+	"github.com/lidp280504357/exchange/internal/notification/ports"
 	"github.com/lidp280504357/exchange/internal/notification/transport/httpapi"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 	"github.com/lidp280504357/exchange/internal/platform/event"
@@ -65,6 +67,24 @@ func TestArticlesAndBroadcasts(t *testing.T) {
 	if help, err := store.Articles(ctx, domain.SectionHelp, now); err != nil || len(help) != 0 {
 		t.Fatalf("help %+v %v", help, err)
 	}
+	// The sites' pages read the head of each body only (C5.5 ⑫).
+	long := article("long-read", false, now.Add(-30*time.Hour), domain.ArticlePublished)
+	long.Texts = long.Texts[:1]
+	long.Texts[0].Summary, long.Texts[0].Body = "", strings.Repeat("x", 5000)
+	if err := store.CreateArticle(ctx, long); err != nil {
+		t.Fatal(err)
+	}
+	page, err := store.PublishedPage(ctx, domain.SectionAnnouncement, now, 0, 2)
+	if err != nil || len(page) != 2 || page[0].Slug != "pinned" || page[1].Slug != "fresh" {
+		t.Fatalf("the first page %+v %v", page, err)
+	}
+	page, err = store.PublishedPage(ctx, domain.SectionAnnouncement, now, 2, 5)
+	if err != nil || len(page) != 2 || page[0].Slug != "long-read" || page[1].Slug != "old-news" {
+		t.Fatalf("the next page %+v %v", page, err)
+	}
+	if text, _ := page[0].Text(domain.LocaleZH); len(text.Body) != ports.HeadLength {
+		t.Fatalf("the body's head only: %d", len(text.Body))
+	}
 	// An update replaces the texts and needs the version it read.
 	fresh.Texts, fresh.Version = fresh.Texts[:1], 2
 	if err := store.UpdateArticle(ctx, fresh, 1); err != nil {
@@ -101,8 +121,20 @@ func TestArticlesAndBroadcasts(t *testing.T) {
 	}
 	status, body, header := get("/v1/announcements?locale=en")
 	items, _ := body["items"].([]any)
-	if status != http.StatusOK || len(items) != 3 || header.Get("Cache-Control") != "public, max-age=15" {
+	if status != http.StatusOK || len(items) != 4 || header.Get("Cache-Control") != "public, max-age=15" || body["next_cursor"] != nil {
 		t.Fatalf("list %d %v %v", status, body, header)
+	}
+	if status, body, _ := get("/v1/announcements?limit=3"); status != http.StatusOK || len(body["items"].([]any)) != 3 || body["next_cursor"] != "3" {
+		t.Fatalf("a page of three %d %v", status, body)
+	}
+	if status, body, _ := get("/v1/announcements?limit=3&cursor=3"); status != http.StatusOK || len(body["items"].([]any)) != 1 || body["next_cursor"] != nil {
+		t.Fatalf("the last page %d %v", status, body)
+	}
+	if status, _, _ := get("/v1/announcements?cursor=x"); status != http.StatusBadRequest {
+		t.Fatalf("a bad cursor %d", status)
+	}
+	if long := items[2].(map[string]any); long["slug"] != "long-read" || len([]rune(long["summary"].(string))) != 140 {
+		t.Fatalf("a summary from the body's head %v", long)
 	}
 	if withdrawn, _ := body["withdrawn"].([]any); len(withdrawn) != 1 || withdrawn[0] != "gone" {
 		t.Fatalf("the slugs taken off %v", body["withdrawn"])
@@ -135,17 +167,57 @@ func TestArticlesAndBroadcasts(t *testing.T) {
 	if err := store.CreateBroadcast(ctx, b); err != nil {
 		t.Fatal(err)
 	}
-	if sending, err := store.Sending(ctx); err != nil || len(sending) != 1 || len(sending[0].UserIDs) != 2 || sending[0].Title["zh-CN"] != "通知" {
+	if sending, err := store.Sending(ctx, now); err != nil || len(sending) != 1 || len(sending[0].UserIDs) != 2 || sending[0].Title["zh-CN"] != "通知" {
 		t.Fatalf("sending %+v %v", sending, err)
 	}
-	for _, u := range users {
+	// A failed round waits; the broadcast's next round is due after it.
+	if err := store.FailRound(ctx, b.ID, 1, "user-service unavailable", now.Add(time.Minute), false); err != nil {
+		t.Fatal(err)
+	}
+	if sending, err := store.Sending(ctx, now); err != nil || len(sending) != 0 {
+		t.Fatalf("not due yet %+v %v", sending, err)
+	}
+	sending, err := store.Sending(ctx, now.Add(2*time.Minute))
+	if err != nil || len(sending) != 1 || sending[0].Failures != 1 || sending[0].LastError != "user-service unavailable" || sending[0].RetryAt.IsZero() {
+		t.Fatalf("due again %+v %v", sending, err)
+	}
+	// Each user's notice, the first one mailed: its mail waits in the queue.
+	var mailed domain.Notice
+	for i, u := range users {
 		n := domain.Notice{
 			ID: uuid.Must(uuid.NewV7()).String(), UserID: u, Type: domain.NoticeBroadcast, Title: "通知", Body: "正文",
 			Data: map[string]string{"broadcast_id": b.ID}, CreatedAt: now,
 		}
-		if _, err := store.CreateNotice(ctx, application.BroadcastConsumer, uuid.NewString(), n); err != nil {
+		var mail *domain.Delivery
+		if i == 0 {
+			mailed = n
+			mail = &domain.Delivery{ID: n.ID, Kind: domain.KindNotice, Channel: domain.ChannelEmail, Template: "notice.broadcast", TargetMask: "u***@example.com", UserID: u}
+		}
+		if _, err := store.CreateNotice(ctx, application.BroadcastConsumer, uuid.NewString(), n, mail); err != nil {
 			t.Fatal(err)
 		}
+	}
+	due, err := store.TakeDue(ctx, now, 5*time.Minute, 10)
+	if err != nil || len(due) != 1 || due[0].ID != mailed.ID || due[0].Attempts != 0 || due[0].Channel != domain.ChannelEmail {
+		t.Fatalf("the queued mail %+v %v", due, err)
+	}
+	if again, err := store.TakeDue(ctx, now.Add(time.Minute), 5*time.Minute, 10); err != nil || len(again) != 0 {
+		t.Fatalf("held while it is sent %+v %v", again, err)
+	}
+	if err := store.Retry(ctx, mailed.ID, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := store.TakeDue(ctx, now.Add(2*time.Minute), 5*time.Minute, 10); err != nil || len(again) != 1 {
+		t.Fatalf("due again %+v %v", again, err)
+	}
+	if err := store.Settle(ctx, mailed.ID); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := store.TakeDue(ctx, now.Add(time.Hour), 5*time.Minute, 10); err != nil || len(again) != 0 {
+		t.Fatalf("settled %+v %v", again, err)
+	}
+	if got, err := store.Notice(ctx, mailed.ID); err != nil || got == nil || got.UserID != users[0] || got.Data["broadcast_id"] != b.ID {
+		t.Fatalf("the notice by its ID %+v %v", got, err)
 	}
 	if _, err := store.MarkRead(ctx, users[0], nil); err != nil {
 		t.Fatal(err)
@@ -159,5 +231,46 @@ func TestArticlesAndBroadcasts(t *testing.T) {
 	}
 	if list, err := store.Broadcasts(ctx, "", 10); err != nil || len(list) != 1 || list[0].Read != 1 {
 		t.Fatalf("list %+v %v", list, err)
+	}
+	if got.Failures != 0 || got.LastError != "" || !got.RetryAt.IsZero() {
+		t.Fatalf("a round starts the failures over %+v", got)
+	}
+
+	// Failing for good, a broadcast waits for an operator.
+	stuck := b
+	stuck.ID = uuid.Must(uuid.NewV7()).String()
+	if err := store.CreateBroadcast(ctx, stuck); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := store.Resume(ctx, stuck.ID); err != nil || ok {
+		t.Fatalf("only a FAILED one resumes: %v %v", ok, err)
+	}
+	if err := store.FailRound(ctx, stuck.ID, domain.MaxRoundFailures, "down", now, true); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := store.Broadcast(ctx, stuck.ID); err != nil || got.Status != domain.BroadcastFailed || got.Failures != domain.MaxRoundFailures {
+		t.Fatalf("failed %+v %v", got, err)
+	}
+	if ok, err := store.Resume(ctx, stuck.ID); err != nil || !ok {
+		t.Fatalf("resumed: %v %v", ok, err)
+	}
+	if got, err := store.Broadcast(ctx, stuck.ID); err != nil || got.Status != domain.BroadcastSending || got.Failures != 0 || got.LastError != "" {
+		t.Fatalf("sending again %+v %v", got, err)
+	}
+
+	// Retention: past their keep, notices, broadcasts not sending and
+	// delivery records waiting for nothing go.
+	cutoff := now.Add(time.Second)
+	if n, err := store.PurgeNotices(ctx, cutoff, 1); err != nil || n != 1 {
+		t.Fatalf("a batch of one notice: %d %v", n, err)
+	}
+	if n, err := store.PurgeNotices(ctx, cutoff, 100); err != nil || n != 1 {
+		t.Fatalf("the other notice: %d %v", n, err)
+	}
+	if n, err := store.PurgeBroadcasts(ctx, cutoff); err != nil || n != 1 {
+		t.Fatalf("the sent broadcast, not the sending one: %d %v", n, err)
+	}
+	if n, err := store.PurgeDeliveries(ctx, time.Now().Add(time.Minute), 100); err != nil || n != 1 {
+		t.Fatalf("the settled mail: %d %v", n, err)
 	}
 }

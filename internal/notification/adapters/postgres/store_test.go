@@ -106,12 +106,12 @@ func TestNotices(t *testing.T) {
 			Data: map[string]string{"i": string(rune('0' + i))}, CreatedAt: time.Now(),
 		}
 		ids, events = append(ids, n.ID), append(events, uuid.NewString())
-		if created, err := store.CreateNotice(ctx, "notification-service", events[i], n); err != nil || !created {
+		if created, err := store.CreateNotice(ctx, "notification-service", events[i], n, nil); err != nil || !created {
 			t.Fatalf("create: %v %v", created, err)
 		}
 	}
 	dup := domain.Notice{ID: uuid.Must(uuid.NewV7()).String(), UserID: user, Type: domain.NoticeWelcome, CreatedAt: time.Now()}
-	if created, err := store.CreateNotice(ctx, "notification-service", events[0], dup); err != nil || created {
+	if created, err := store.CreateNotice(ctx, "notification-service", events[0], dup, nil); err != nil || created {
 		t.Fatalf("redelivery: %v %v", created, err)
 	}
 

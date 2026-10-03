@@ -77,6 +77,12 @@ describe("safeHref", () => {
       expect(safeHref(bad)).toBeNull();
     }
   });
+
+  it("refuses a backslash, which browsers read as a slash to another site", () => {
+    for (const bad of ["\\\\evil.com", "\\evil.com", "/\\evil.com", "\\/evil.com", "help\\deposit"]) {
+      expect(safeHref(bad)).toBeNull();
+    }
+  });
 });
 
 describe("parseMarkdown", () => {

@@ -149,6 +149,7 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/broadcasts", h.broadcasts)
 			r.With(needKey).Post("/broadcasts", h.sendBroadcast)
 			r.Get("/broadcasts/{id}", h.broadcast)
+			r.Post("/broadcasts/{id}/resume", h.resumeBroadcast)
 			r.Get("/sim", h.simStatus)
 			r.Get("/sim/history", h.simHistory)
 			r.Get("/sim/events", h.simEvents)
