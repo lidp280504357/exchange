@@ -1124,12 +1124,13 @@ else
     [[ $(jq -n --arg a "$(spot_usdt available)" --arg b "$SPOT_BEFORE" --arg d "$1" \
       '(($a | tonumber) - ($b | tonumber) - ($d | tonumber)) | fabs < 0.0000001') == true ]]
   }
-  # The custodian receives 2 USDT and its callback is held back 45 s: lost, for now.
+  # The custodian receives 2 USDT and its callback is held back: lost, for now. A shorter
+  # delay applies to the callbacks udun-mock holds already (56e491b), so the hold lasts
+  # until the backfill's checks are done and ends then: the late callback comes at once.
   at_exit "mock delay --seconds 0 >/dev/null"
-  mock delay --seconds 45 >/dev/null
+  mock delay --seconds 600 >/dev/null
   read -r TRADE TX < <(mock deposit --address "$ADDR" --coin "$USDT_TRC20" --amount 2 | jq -r '"\(.trade_id) \(.tx_id)"')
-  mock delay --seconds 0 >/dev/null
-  echo "     the custodian received 2 USDT (trade $TRADE); its callback is late"
+  echo "     the custodian received 2 USDT (trade $TRADE); its callback is held back"
   BACKFILL=$(jq -nc --arg a "$ADDR" --arg t "$TRADE" --arg h "$TX" '{network: "TRON", trade_id: $t, address: $a, tx_hash: $h, amount: "2"}')
   as OPERATOR POST /admin/v1/deposits/manual/check "$BACKFILL"
   expect 403 ADMIN_FORBIDDEN "OPERATOR backfills nothing"
@@ -1154,6 +1155,7 @@ else
     "this one, by FINANCE, no callback yet"
   as FINANCE POST /admin/v1/deposits/manual "$(jq -c '.reason = "e2e: the same trade again"' <<<"$BACKFILL")"
   expect 409 WALLET_DEPOSIT_KNOWN "the same trade is not booked twice"
+  mock delay --seconds 0 >/dev/null # the late callback goes at the stand-in's next flush
 
   # Below the minimum (1 USDT): booked to UNCLAIMED_DEPOSIT, waiting for a decision.
   mock deposit --address "$ADDR" --coin "$USDT_TRC20" --amount 0.5 >/dev/null
