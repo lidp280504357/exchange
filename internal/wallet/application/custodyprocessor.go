@@ -476,17 +476,29 @@ func (p *CustodyProcessor) coins(ctx context.Context) ([]ports.CustodyCoin, erro
 // expected, what the ledger expects every holder of the asset to hold, a
 // coin's balance of half of that in the coin's smallest unit or more is
 // not believed: it is in that unit rather than in coins, and compared as
-// it is it would hide any shortfall.
+// it is it would hide any shortfall. A coin the custodian does not list
+// whose networks are all closed both ways is left out (USDT on BEP20 and
+// ERC20 while the merchant's wallet has it on TRON only): nothing of it
+// can be there, and leaving it out can only show a shortfall, never hide
+// one.
 func heldOf(coins []ports.CustodyCoin, nets []domain.Network, asset string, expected decimal.Decimal) (decimal.Decimal, error) {
 	var codes []string
+	open := map[string]bool{}
 	for _, n := range nets {
-		if n.Asset == asset && !slices.Contains(codes, n.ProviderCoin) {
+		if n.Asset != asset {
+			continue
+		}
+		if !slices.Contains(codes, n.ProviderCoin) {
 			codes = append(codes, n.ProviderCoin)
 		}
+		open[n.ProviderCoin] = open[n.ProviderCoin] || n.Enabled || n.WithdrawEnabled
 	}
 	held := decimal.Zero
 	for _, code := range codes {
 		i := slices.IndexFunc(coins, func(c ports.CustodyCoin) bool { return c.Code == code })
+		if i < 0 && !open[code] {
+			continue
+		}
 		if i < 0 || coins[i].Balance == nil {
 			// Taken as zero it would look like a shortfall of all of it.
 			return decimal.Zero, fmt.Errorf("the custodian reported no balance of %s (%s)", asset, code)

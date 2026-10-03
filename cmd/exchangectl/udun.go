@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -47,6 +49,7 @@ func udunCmd(ctx context.Context, args []string, out io.Writer) error {
 	address := fs.String("address", "", "check-address: the address to check")
 	alias := fs.String("alias", "", "create-address: its name in the custodian's console")
 	yes := fs.Bool("yes", false, "create-address: create it; without, only say what would be created")
+	raw := fs.Bool("raw", false, "coins: also print the gateway's answer as it came")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -55,7 +58,15 @@ func udunCmd(ctx context.Context, args []string, out io.Writer) error {
 	}
 	switch args[0] {
 	case "coins":
-		coins, err := c.SupportCoins(ctx, true)
+		coins, data, err := c.SupportCoinsRaw(ctx, true)
+		if *raw && len(data) > 0 {
+			var b bytes.Buffer
+			if json.Indent(&b, data, "", "  ") != nil {
+				b.Reset()
+				b.Write(data)
+			}
+			fmt.Fprintf(out, "%s\n\n", b.Bytes())
+		}
 		if err != nil {
 			return err
 		}
@@ -97,7 +108,8 @@ func udunCmd(ctx context.Context, args []string, out io.Writer) error {
 		}
 		fmt.Fprintf(out, "a deposit address on main coin %d in %s, named %q, posting its deposits to %s.\n",
 			*mainCoin, walletNote, *alias, callback)
-		fmt.Fprintln(out, "No user owns it: a deposit there is recorded UNMATCHED, credits no one and stays with the custodian.")
+		fmt.Fprintln(out, "No user owns it: a deposit there credits no one and stays with the custodian; wallet-service on this gateway"+
+			" books it unclaimed as a deposit of nobody (UNKNOWN_ADDRESS) for a person to assign or dismiss.")
 		if !*yes {
 			fmt.Fprintln(out, "Nothing created: add --yes to create it.")
 			return nil

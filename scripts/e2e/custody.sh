@@ -3,7 +3,9 @@
 # the test environment's stand-in for the custodian's gateway (udun-mock,
 # driven over ssh). wallet-service's Udun adapter runs unchanged: requests
 # and callbacks are signed and checked as with the real gateway.
-#   - USDT moves on TRC20, BEP20 and ERC20, BTC and ETH on their chains;
+#   - USDT moves on TRC20 (BEP20 and ERC20 stay listed, closed both ways:
+#     the custodian's wallet has USDT on TRON only for now), BTC and ETH
+#     on their chains;
 #   - a new user gets a TRC20 address from the custodian (the same one
 #     again) and a Bitcoin one;
 #   - the custodian reports 30 USDT: credited once to the balance, the
@@ -100,8 +102,9 @@ AUTH=(-H "Authorization: Bearer $TOKEN")
 echo "== networks"
 call GET "/v1/wallet/networks?asset=USDT" "" "${AUTH[@]}"
 expect 200 - "USDT's networks"
-check '[.networks[] | select(.deposit_enabled and .withdraw_enabled) | .display_name] | sort == ["BEP20", "ERC20", "TRC20"]' \
-  "TRC20, BEP20 and ERC20, open both ways"
+check '([.networks[] | select(.deposit_enabled and .withdraw_enabled) | .display_name] == ["TRC20"])
+  and ([.networks[] | select((.deposit_enabled or .withdraw_enabled) | not) | .display_name] | sort == ["BEP20", "ERC20"])' \
+  "TRC20 open both ways; BEP20 and ERC20 listed, closed"
 call GET "/v1/wallet/networks" "" "${AUTH[@]}"
 check '([.networks[] | select(.asset == "BTC" and .network == "BTC" and .address_format == "BTC")] | length == 1)
   and ([.networks[] | select(.asset == "ETH") | .network] | sort == ["ETH", "ETH-SEPOLIA"])' "BTC on Bitcoin, ETH on Ethereum and Sepolia"

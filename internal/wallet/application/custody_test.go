@@ -628,6 +628,34 @@ func TestCustodyCheck(t *testing.T) {
 	}
 }
 
+// USDT on TRON only (the user's decision of 2026-10-03): the custodian
+// lists no BEP20 USDT, whose network stays configured but closed both
+// ways. The coin is left out rather than the asset not compared; opened
+// again while the custodian still lists no such coin, the asset is not
+// compared.
+func TestACoinOfAClosedNetworkTheCustodianDoesNotListIsLeftOut(t *testing.T) {
+	h := newCustodyHarness(t)
+	h.nets.nets = append(h.nets.nets, domain.Network{
+		Asset: "USDT", Network: "BSC", Chain: "56", Contract: "0x55d398326f99059fF775485246999027B3197955", Decimals: 18,
+		MinDeposit: d("1"), MinWithdraw: d("10"), WithdrawFee: d("0.5"), AddressFormat: domain.FormatEVM,
+		Provider: domain.ProviderUdun, ProviderCoin: "2510:0x55d398326f99059fF775485246999027B3197955",
+	})
+	h.ledger.system[accountDepositPending] = d("-30")
+	held := d("30")
+	h.custody.coins[0].Balance = &held
+	checks, err := h.cproc.Check(context.Background())
+	if err != nil || len(checks) != 1 || !checks[0].Chain.Equal(held) || !checks[0].Shortfall.IsZero() {
+		t.Fatalf("checks %+v %v", checks, err)
+	}
+	if got, err := h.cproc.Holdings(context.Background(), "USDT"); err != nil || !got.Equal(held) {
+		t.Fatalf("holdings %s %v", got, err)
+	}
+	h.nets.nets[len(h.nets.nets)-1].Enabled = true
+	if checks, err := h.cproc.Check(context.Background()); len(checks) != 0 || !errors.Is(err, errNotCompared) || !strings.Contains(err.Error(), "2510:") {
+		t.Fatalf("an open network's coin unlisted: %+v %v", checks, err)
+	}
+}
+
 func TestReplayCallback(t *testing.T) {
 	h := newCustodyHarness(t)
 	ctx := context.Background()
@@ -1479,7 +1507,7 @@ func TestASuspensionHoldsTheAssetOnEveryNetwork(t *testing.T) {
 	bsc := domain.Network{
 		Asset: "USDT", Network: "BSC", Chain: "bsc", Contract: "0x55d398326f99059ff775485246999027b3197955", Decimals: 18, Confirmations: 15,
 		MinDeposit: d("1"), Enabled: true, WithdrawEnabled: true, MinWithdraw: d("10"), WithdrawFee: d("0.5"), AddressFormat: domain.FormatEVM,
-		Provider: domain.ProviderUdun, ProviderCoin: "9006:0x55d398326f99059fF775485246999027B3197955",
+		Provider: domain.ProviderUdun, ProviderCoin: "2510:0x55d398326f99059fF775485246999027B3197955",
 	}
 	h.nets.nets = append(h.nets.nets, bsc)
 	none := decimal.Zero

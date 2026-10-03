@@ -39,7 +39,7 @@ func (c coin) mainSymbol() string {
 		return "BTC"
 	case chainTRON:
 		return "TRX"
-	case "9006":
+	case chainBSC:
 		return "BNB"
 	}
 	return "ETH"
@@ -136,7 +136,7 @@ type gateway struct {
 func defaultCoins() []coin {
 	return []coin{
 		{Symbol: "USDT", MainCoinType: chainTRON, CoinType: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", Decimals: 6},
-		{Symbol: "USDT", MainCoinType: "9006", CoinType: "0x55d398326f99059fF775485246999027B3197955", Decimals: 18},
+		{Symbol: "USDT", MainCoinType: chainBSC, CoinType: "0x55d398326f99059fF775485246999027B3197955", Decimals: 18},
 		{Symbol: "USDT", MainCoinType: "60", CoinType: "0xdAC17F958D2ee523a2206206994597C13D831ec7", Decimals: 6},
 		{Symbol: "BTC", MainCoinType: chainBTC, CoinType: chainBTC, Decimals: 8},
 		{Symbol: "ETH", MainCoinType: "60", CoinType: "60", Decimals: 18},
@@ -179,7 +179,19 @@ func newGateway(merchant, key, path string, coins []coin, step time.Duration, lo
 			return nil, err
 		}
 	}
-	// Configured coins are added; balances of known ones are kept.
+	// Configured coins are added; balances of known ones are kept. A coin
+	// no longer configured goes once it holds nothing (BEP20 USDT moved
+	// from main coin 9006 to the real gateway's 2510); one still holding
+	// something stays listed, so no balance vanishes.
+	kept := g.st.Coins[:0]
+	for _, c := range g.st.Coins {
+		if c.Balance.IsZero() && !slices.ContainsFunc(coins, func(x coin) bool { return x.code() == c.code() }) {
+			log.Info("a coin no longer configured and holding nothing is dropped", "coin", c.code())
+			continue
+		}
+		kept = append(kept, c)
+	}
+	g.st.Coins = kept
 	for _, c := range coins {
 		if !slices.ContainsFunc(g.st.Coins, func(x coin) bool { return x.code() == c.code() }) {
 			g.st.Coins = append(g.st.Coins, c)

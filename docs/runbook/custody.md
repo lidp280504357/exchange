@@ -35,17 +35,17 @@ custody_callbacks（原文、验签、结果、次数）──> 充值：deposit
 
 网络在 `deploy/instruments/test.json`（`exchangectl instruments apply` 同步）：
 
-| 资产 | 网络 | 显示名 | provider_coin | 确认数 | 最小充 | 最小提 | 手续费 |
-|---|---|---|---|---|---|---|---|
-| USDT | TRON | TRC20 | `195:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t` | 20 | 1 | 10 | 1 |
-| USDT | BSC | BEP20 | `9006:0x55d398326f99059fF775485246999027B3197955` | 15 | 1 | 10 | 0.5 |
-| USDT | ETH | ERC20 | `60:0xdAC17F958D2ee523a2206206994597C13D831ec7` | 12 | 5 | 20 | 5 |
-| BTC | BTC | Bitcoin | `0:0` | 2 | 0.0001 | 0.001 | 0.0002 |
-| ETH | ETH | Ethereum | `60:60` | 12 | 0.002 | 0.005 | 0.001 |
+| 资产 | 网络 | 显示名 | provider_coin | 确认数 | 最小充 | 最小提 | 手续费 | 充提 |
+|---|---|---|---|---|---|---|---|---|
+| USDT | TRON | TRC20 | `195:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t` | 20 | 1 | 10 | 1 | 开 |
+| USDT | BSC | BEP20 | `2510:0x55d398326f99059fF775485246999027B3197955` | 15 | 1 | 10 | 0.5 | 关 |
+| USDT | ETH | ERC20 | `60:0xdAC17F958D2ee523a2206206994597C13D831ec7` | 12 | 5 | 20 | 5 | 关 |
+| BTC | BTC | Bitcoin | `0:0` | 2 | 0.0001 | 0.001 | 0.0002 | 开 |
+| ETH | ETH | Ethereum | `60:60` | 12 | 0.002 | 0.005 | 0.001 | 开 |
 
 同一网络的资产共用一个地址（每用户每网络一个，托管方按主链生成）：USDT-ERC20 与 ETH 都在网络 `ETH`。ETH 另有自建的 `ETH-SEPOLIA`。
 
-**BSC 的主链编码 9006 未经托管方确认**（公开资料没有，取自 SLIP-44）。拿到商户号后在后台「托管方」页看托管方返回的币种（`support-coins` 原样列出），按它改 `provider_coin` 再部署。
+**USDT 先只走 TRC20**（用户 2026-10-03 决定）：优盾商户的钱包只有 TRON 上的 USDT，BEP20、ERC20 两个网络保留配置、充提都关（站点照常列出，显示暂停）；以后在优盾后台加了币种，按 `udun coins` 核对编码后在 `test.json` 打开再部署。托管方没有列出、且充提都关的网络，对账时不计它的币种（那里不可能有钱，不计只会显出短缺、不会掩盖短缺）；网络开着而托管方没列出时，该资产照旧"不比较"并告警。BSC 的主链编码是托管方 `support-coins` 列出的 `2510`（2026-10-03 实测，原先按 SLIP-44 猜的 9006 不对），模拟网关同样改用 2510，旧编码下余额为 0 的币种在它重启时去掉。
 
 ## 流程
 
@@ -222,7 +222,33 @@ sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangec
 sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangectl udun create-address --main-coin 195 --alias probe-tron --yes
 ```
 
-`coins` 列出商户的币种编码（`provider_coin` 就填这里的 `CODE`）、小数位、是否代币与余额，旁边是 wallet-service 读成的小数位与余额（读不成的余额是 `-`，对账时会报不比较）；`check-address`、`create-address` 必须写 `--main-coin`（195 TRON、60 以太坊、0 比特币，见 `coins` 的 `MAIN` 列）。`create-address` 先说明要建什么（链、钱包、名字、回调地址）：建的地址会把充值回调到 `UDUN_CALLBACK_URL`，没有对应用户，到账只会记成 `UNMATCHED`、钱留在托管方；不带 `--yes` 只说明不建，带了才建，并打印托管方的原始应答。设置值去掉首尾空白，带引号（`docker --env-file` 不去引号）、密钥不足 32 位、网关不是 https 的都直接拒绝；密钥与商户号不打印，钱包号只露头尾。
+`coins` 列出商户的币种编码（`provider_coin` 就填这里的 `CODE`）、小数位、是否代币与余额，旁边是 wallet-service 读成的小数位与余额（读不成的余额是 `-`，对账时会报不比较）；加 `--raw` 先原样打印网关应答的 `data`。`check-address`、`create-address` 必须写 `--main-coin`（195 TRON、60 以太坊、0 比特币、2510 BSC，见 `coins` 的 `MAIN` 列）。`create-address` 先说明要建什么（链、钱包、名字、回调地址）：建的地址会把充值回调到 `UDUN_CALLBACK_URL`，没有对应用户，钱留在托管方；wallet-service 接上这个网关后，到账记成无主充值（`UNKNOWN_ADDRESS`，进 `UNCLAIMED_DEPOSIT`，等人在后台入账给查明的用户或驳回，见上文「没有主人的充值」），接模拟网关时它的回调被来源名单挡住（403）、优盾会重发；不带 `--yes` 只说明不建，带了才建，并打印托管方的原始应答。设置值去掉首尾空白，带引号（`docker --env-file` 不去引号）、密钥不足 32 位、网关不是 https 的都直接拒绝；密钥与商户号不打印，钱包号只露头尾。
+
+### 商户的币种与探测地址（步骤 1、2，2026-10-03 实测）
+
+`udun coins --raw`（`support-coins`）：
+
+| CODE（`provider_coin`） | 币种（`coinName`） | 主链 | 代币 | 小数位 | 余额 | 平台用途 |
+|---|---|---|---|---|---|---|
+| `0:0` | BTC（Bitcoin） | BTC | 否 | 8 | `null` | BTC 托管 |
+| `60:60` | ETH（Ethereum） | ETH | 否 | 18 | `null` | ETH 托管 |
+| `195:195` | TRX（TRON） | TRX | 否 | 6 | `null` | 只作 TRC20 的燃料，不是平台资产 |
+| `195:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t` | USDT（USDT-TRC20） | TRX | 是 | 6 | `null` | USDT 托管（TRC20） |
+| `2510:2510` | BNB（BNB-BSC） | BNB | 否 | 18 | `null` | 只作燃料，不是平台资产 |
+
+- 应答的字段与官方文档一致：`decimals`、`mainCoinType`、`coinType` 是字符串，`tokenStatus` 是数字（0 主币、1 代币），另有 `logo`、`coinName`。BEP20 USDT（`2510:0x55d3…7955`）与 ERC20 USDT（`60:0xdAC1…1ec7`）不在商户的币种里（所以这两个网络关着）。
+- **余额**：每个币种都是 `"balance": null`。换请求写法结果一样：`showBalance` 为 `true`、`false` 或字符串 `"true"`，商户号写成字符串或数字，带不带 `walletId`。所以不是平台漏读了字段（字段名就是 `balance`），而是网关写了 `null`；官方文档示例里的余额是字符串 `"0"`。最可能是钱包从没收过钱、没有余额记录，但第一笔真钱到账（步骤 5）之前分不清"空钱包"与"不给余额"。wallet-service 把 `null` 读成"没有余额"，该资产不比较，不当作 0（B10）：接上真网关后 USDT、BTC、ETH 的对账都是"不比较"，30 分钟后告警 `CustodyNotCompared`，直到余额出现；步骤 5 到账后再看余额是不是变成数字、是币还是最小单位，B10 的修正等这一步。
+- `check-address`：TRON（195）的 `TR7N…Lj6t` 有效，改掉末位无效，以太坊格式的地址无效；以太坊（60）的 `0xdAC1…1ec7` 有效，少一位无效，全小写和大小写混合但校验和错的都算有效（网关不查 EIP-55 校验和；平台自己的校验拒绝校验和错的地址）；比特币（0）的 `bc1q…`、taproot `bc1p…`、旧式 `1A1z…` 有效，改掉末位无效，测试网 `tb1…` 无效（只认主网）；BSC（2510）的 `0x55d3…7955` 有效。
+
+探测地址（步骤 2，每条链一个，`create-address --yes`）。**不要用、不要往里充值**：它们不属于任何用户，钱留在托管方，接上真网关后到账记成无主充值。三个地址都通过了平台的地址校验（`domain.CheckAddress`）与网关的 `check-address`：
+
+| 链 | 名字（alias） | 地址 |
+|---|---|---|
+| TRON（195） | `probe-tron` | `TPYmLv1FbHoxaPa8K9ktTz8yphYckvDJ9Q` |
+| 比特币（0） | `probe-btc` | `bc1qd40zw4h0tm6j4w84a2d9aeaq8jnesvjw5hgujz`（P2WPKH） |
+| 以太坊（60） | `probe-eth` | `0x7db4734f19f55a2ece0ea87c09df6a44fc463d8c` |
+
+以太坊地址是全小写给的（没有 EIP-55 校验和）。平台按地址查找一律不分大小写（`lower(address)`），回调能对上；用户看到的是托管方给的原样。
 
 ### 步骤与回退
 
@@ -241,6 +267,7 @@ sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangec
 - 2026-10-03 步骤 0 的第一部分已部署（43956f5、5804b6e、14d2412、462db60、a26989e、58bf6d8、6ee3673；完整端到端通过）：停提阈值、解除后从头对账、回调来源语义与 `remote_ips`、nginx 限速、直接问网关的命令。
 - 2026-10-03 步骤 1：**被网关挡住**。`udun coins` 与 `udun check-address` 都返回 `code 4264`（应答的说明也只有 4264）。优盾公开的返回码表里没有 4264；它不是签名错（4162/4163）、商户不存在（4001）或账户被禁用（4169/4226/4261/4262），每个接口都一样，像是接口的 IP 白名单。服务器出口 IP 是 `3.107.113.199`。已请协调会话转用户在优盾后台加白（或问优盾 4264 的含义），之后重跑。
 - 2026-10-03 步骤 0 的第二部分（对账基线 `ledger custody-reset` 与 `SIMULATED` 列、退役与恢复模拟地址、提现拒绝退役地址、充值地址不再长期缓存、`custody.sh` 遇真网关跳过、审查 AF：按未托管的主币挂起的手续费记在该主币上、不解释代币的短缺）与步骤 3（nginx 回调路径 `allow all;`）已部署（0ffbcf1、915ab3a，钱包迁移 00011）；端到端 `custody.sh`、`web.sh`、`admin.sh` 通过。步骤 3 之后经公网伪造的回调到了 wallet-service，仍被它的来源名单（模拟网关的容器网段）以 403 `COMMON_FORBIDDEN` 挡住；切换后由签名把关。
+- 2026-10-03 晚 步骤 1、2 完成（用户把 `3.107.113.199` 加进了优盾的白名单）：币种、地址校验、余额 `null` 与三个探测地址见上文「商户的币种与探测地址」。随之改了配置（用户决定 USDT 先只走 TRC20）：`test.json` 的 BEP20 编码改成 `2510:…`，BEP20、ERC20 两个 USDT 网络充提都关、配置保留；对账不计托管方没有列出、且充提都关的网络的币种（否则真网关下 USDT 会因为没有 BEP20、ERC20 而一直"不比较"）；模拟网关改用 2510；`custody.sh` 改为检查只有 TRC20 开着。
 
 ## 指标与告警
 

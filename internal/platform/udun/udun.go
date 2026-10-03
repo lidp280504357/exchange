@@ -408,9 +408,25 @@ func (c Coin) Code() string { return string(c.MainCoinType) + ":" + string(c.Coi
 
 // SupportCoins lists the merchant's coins, with balances when asked.
 func (c *Client) SupportCoins(ctx context.Context, showBalance bool) ([]Coin, error) {
+	coins, _, err := c.SupportCoinsRaw(ctx, showBalance)
+	return coins, err
+}
+
+// SupportCoinsRaw is SupportCoins with the answer's data as it came, for
+// finding out what a gateway writes.
+func (c *Client) SupportCoinsRaw(ctx context.Context, showBalance bool) ([]Coin, json.RawMessage, error) {
+	var raw json.RawMessage
+	if err := c.call(ctx, PathSupportCoins, map[string]any{"merchantId": c.MerchantID, "showBalance": showBalance}, &raw); err != nil {
+		return nil, nil, err
+	}
+	if len(raw) == 0 {
+		return nil, raw, nil
+	}
 	var out []Coin
-	err := c.call(ctx, PathSupportCoins, map[string]any{"merchantId": c.MerchantID, "showBalance": showBalance}, &out)
-	return out, err
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, raw, fmt.Errorf("udun %s: unreadable data: %w", PathSupportCoins, err)
+	}
+	return out, raw, nil
 }
 
 // SplitCoin splits a network's provider coin "mainCoinType:coinType".

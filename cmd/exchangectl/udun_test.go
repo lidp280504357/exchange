@@ -26,7 +26,10 @@ func TestUdunProbe(t *testing.T) {
 				`{"name":"Tether USD","symbol":"USDT","mainCoinType":"195","coinType":"TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t","decimals":"6",`+
 				`"tokenStatus":1,"mainSymbol":"TRX","balance":"12.5"},`+
 				`{"name":"Bitcoin","symbol":"BTC","mainCoinType":"0","coinType":"0","decimals":"8","tokenStatus":0,"mainSymbol":"BTC",`+
-				`"balance":"0.123456789"}]}`)
+				`"balance":"0.123456789"},`+
+				// The real gateway's answer for an empty wallet (2026-10-03).
+				`{"name":"Ethereum","symbol":"ETH","mainCoinType":"60","coinType":"60","decimals":"18","tokenStatus":0,"mainSymbol":"ETH",`+
+				`"balance":null}]}`)
 		case "/mch/check/address":
 			_, _ = io.WriteString(w, `{"code":4165,"message":"invalid address"}`)
 		case "/mch/address/create":
@@ -77,6 +80,15 @@ func TestUdunProbe(t *testing.T) {
 		if strings.HasPrefix(line, "0:0") && (!strings.Contains(line, "0.123456789") || !strings.HasSuffix(strings.TrimSpace(line), " -")) {
 			t.Fatalf("BTC as read: %q", line)
 		}
+		// A null balance is no balance, not 0.
+		if strings.HasPrefix(line, "60:60") && !strings.HasSuffix(strings.TrimSpace(line), " -") {
+			t.Fatalf("ETH as read: %q", line)
+		}
+	}
+	// --raw shows the answer's data as it came, then the table.
+	if out := must("coins", "--raw"); !strings.Contains(out, `"balance": null`) || !strings.Contains(out, `"balance": "12.5"`) ||
+		!strings.Contains(out, "READ AS BALANCE") {
+		t.Fatal(out)
 	}
 	if _, err := probe("check-address", "--address", "Tbad"); err == nil {
 		t.Fatal("checked without --main-coin")
@@ -86,7 +98,7 @@ func TestUdunProbe(t *testing.T) {
 	}
 	n := len(bodies)
 	if out := must("create-address", "--main-coin", "195", "--alias", "probe-tron"); !strings.Contains(out, "Nothing created") ||
-		!strings.Contains(out, "UNMATCHED") || !strings.Contains(out, "wallet wall…78") || len(bodies) != n {
+		!strings.Contains(out, "UNKNOWN_ADDRESS") || !strings.Contains(out, "wallet wall…78") || len(bodies) != n {
 		t.Fatalf("created without --yes: %s", out)
 	}
 	if out := must("create-address", "--main-coin", "195", "--alias", "probe-tron", "--yes"); !strings.Contains(out, "created TProbe1111") ||

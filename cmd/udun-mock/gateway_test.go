@@ -316,3 +316,35 @@ func TestADelayEndsForTheCallbacksItHeld(t *testing.T) {
 		t.Fatalf("%d callbacks once the delay ended, want 1", n)
 	}
 }
+
+// A saved coin no longer configured goes once it holds nothing: BEP20 USDT
+// under the old main coin 9006 leaves when the real gateway's 2510 comes
+// in; one still holding something stays with its balance.
+func TestACoinNoLongerConfiguredGoesWhenEmpty(t *testing.T) {
+	path := t.TempDir() + "/state.json"
+	old, err := newGateway("m1", key, path, defaultCoins(), 0, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const bep20 = "0x55d398326f99059fF775485246999027B3197955"
+	old.st.Coins = append(old.st.Coins,
+		coin{Symbol: "USDT", MainCoinType: "9006", CoinType: bep20, Decimals: 18},
+		coin{Symbol: "DAI", MainCoinType: "60", CoinType: "0x6B175474E89094C44Da98b954EedeAC495271d0F", Decimals: 18, Balance: decimal.RequireFromString("3")})
+	if err := old.saveLocked(); err != nil {
+		t.Fatal(err)
+	}
+	g, err := newGateway("m1", key, path, defaultCoins(), 0, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	codes := map[string]string{}
+	for _, c := range g.st.Coins {
+		codes[c.code()] = c.Balance.String()
+	}
+	if _, ok := codes["9006:"+bep20]; ok {
+		t.Fatalf("the empty coin of 9006 stays: %v", codes)
+	}
+	if codes["2510:"+bep20] != "0" || codes["60:0x6B175474E89094C44Da98b954EedeAC495271d0F"] != "3" || len(codes) != len(defaultCoins())+1 {
+		t.Fatalf("coins %v", codes)
+	}
+}

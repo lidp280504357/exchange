@@ -12,10 +12,12 @@ import (
 )
 
 // Chains by Udun's main coin type: Bitcoin, TRON; everything else is
-// taken for an EVM chain (Ethereum 60, BNB Smart Chain 9006, ...).
+// taken for an EVM chain (Ethereum 60, BNB Smart Chain 2510, ...). The
+// codes are the real gateway's (support-coins, 2026-10-03).
 const (
 	chainBTC  = "0"
 	chainTRON = "195"
+	chainBSC  = "2510"
 )
 
 func random(n int) []byte {
