@@ -1519,6 +1519,24 @@ setup_code() {
   (($(date +%s) % 30 < 25)) || sleep 6
   totp "$SECRET_STAFF" -1
 }
+# paced runs a sign-in, a setup link's inspection or a setup: they share
+# the console's limit of 10 a minute from one address (C5.5 ⑪), and this
+# section makes more than that, so the tenth within a minute waits for the
+# window to pass (a faster network hit 429 here).
+PACED=()
+paced() {
+  local now t kept=()
+  now=$(date +%s)
+  for t in ${PACED[@]+"${PACED[@]}"}; do
+    ((now - t < 61)) && kept+=("$t")
+  done
+  PACED=(${kept[@]+"${kept[@]}"})
+  if ((${#PACED[@]} >= 9)); then
+    sleep $((61 - (now - PACED[0])))
+  fi
+  PACED+=("$(date +%s)")
+  "$@"
+}
 # complete sets up the link with what JSON adds to the token.
 complete() { acall POST /admin/v1/setup "$(jq -c --arg t "$LINK" '. + {token: $t}' <<<"$1")" "${CSRF[@]}"; }
 EMAIL_STAFF="e2e-staff-$RUN@example.com" PW_STAFF=$(password) SECRET_STAFF=$(secret) LINK=""
@@ -1538,23 +1556,25 @@ echo "ok   shown once (no-store)"
 acall POST /admin/v1/admins "$(jq -nc --arg e "$EMAIL_STAFF" '{email: $e, name: "again", role: "AUDITOR", reason: "e2e twice"}')" -b "$WORK/ADMIN.jar" "${CSRF[@]}"
 link
 expect 409 ADMIN_EXISTS "an address is an administrator once"
-login STAFF
+paced login STAFF
 expect 401 ADMIN_LOGIN_FAILED "nobody signs in before the setup"
-inspect
+paced inspect
 expect 200 - "the link opens without a session"
 check ".email == \"$EMAIL_STAFF\" and .kind == \"CREATE\" and .sets_password and .totp_secret == \"set\"" "for the password and an authenticator to bind"
 grep -qi '^cache-control: no-store' "$WORK/inspect.headers" || { echo "FAIL the authenticator secret may be cached" >&2; exit 1; }
 echo "ok   its secret not cached either"
+paced : # the slot first: the code is computed after any wait
 complete "$(jq -nc --arg c "$(setup_code)" '{password: "short", totp_code: $c}')"
 expect 400 COMMON_INVALID_ARGUMENT "a short password is refused"
-complete "$(jq -nc --arg p "$PW_STAFF" '{password: $p, totp_code: "000000"}')"
+paced complete "$(jq -nc --arg p "$PW_STAFF" '{password: $p, totp_code: "000000"}')"
 expect 422 ADMIN_TOTP_CODE_WRONG "a wrong code too"
+paced : # the slot first: the code is computed after any wait
 complete "$(jq -nc --arg p "$PW_STAFF" --arg c "$(setup_code)" '{password: $p, totp_code: $c}')"
 [[ $STATUS == 204 ]] || { echo "FAIL the setup: $STATUS $BODY" >&2; exit 1; }
 echo "ok   its holder sets the password and binds the authenticator"
-inspect
+paced inspect
 expect 404 ADMIN_SETUP_INVALID "the link is spent"
-login STAFF
+paced login STAFF
 expect 200 - "the new OPERATOR signs in with what it set"
 check ".admin.role == \"OPERATOR\" and .admin.email == \"$EMAIL_STAFF\" and .admin.must_change_password == false" "as OPERATOR"
 as ADMIN GET /admin/v1/admins ""
@@ -1580,14 +1600,14 @@ expect 200 - "ADMIN resets its password"
 check '.setup.kind == "PASSWORD" and (has("password") | not)' "a link, no password"
 as STAFF GET /admin/v1/me ""
 expect 401 ADMIN_UNAUTHORIZED "which ends its sessions"
-login STAFF
+paced login STAFF
 expect 401 ADMIN_LOGIN_FAILED "and the old password"
-inspect
+paced inspect
 check '.kind == "PASSWORD" and .sets_password and .totp_secret == null' "the link sets a password alone"
 PW_STAFF=$(password)
-complete "$(jq -nc --arg p "$PW_STAFF" '{password: $p}')"
+paced complete "$(jq -nc --arg p "$PW_STAFF" '{password: $p}')"
 [[ $STATUS == 204 ]] || { echo "FAIL the new password: $STATUS $BODY" >&2; exit 1; }
-login STAFF
+paced login STAFF
 expect 200 - "the new password signs in"
 as ADMIN POST "/admin/v1/admins/$STAFF_ID/totp-reset" '{"reason":"e2e lost the phone"}'
 link
@@ -1596,12 +1616,13 @@ check '.setup.kind == "TOTP"' "a link to bind a new one"
 as STAFF GET /admin/v1/me ""
 expect 401 ADMIN_UNAUTHORIZED "which ends its sessions too"
 OLD_SECRET=$SECRET_STAFF
-inspect
+paced inspect
 check '.kind == "TOTP" and (.sets_password | not) and .totp_secret == "set"' "the link binds an authenticator alone"
 [[ $SECRET_STAFF != "$OLD_SECRET" ]] || { echo "FAIL the same authenticator again" >&2; exit 1; }
+paced : # the slot first: the code is computed after any wait
 complete "$(jq -nc --arg c "$(setup_code)" '{totp_code: $c}')"
 [[ $STATUS == 204 ]] || { echo "FAIL the new authenticator: $STATUS $BODY" >&2; exit 1; }
-login STAFF
+paced login STAFF
 expect 200 - "the new authenticator signs in"
 NEW_PW=$(password)
 as STAFF POST /admin/v1/me/password "$(jq -nc --arg n "$NEW_PW" '{current_password: "not the password", new_password: $n}')"
@@ -1609,7 +1630,7 @@ expect 422 ADMIN_PASSWORD_WRONG "its own password changes with the current one o
 as STAFF POST /admin/v1/me/password "$(jq -nc --arg c "$PW_STAFF" --arg n "$NEW_PW" '{current_password: $c, new_password: $n}')"
 [[ $STATUS == 204 ]] || { echo "FAIL its own password: $STATUS $BODY" >&2; exit 1; }
 PW_STAFF=$NEW_PW
-login STAFF
+paced login STAFF
 expect 200 - "it changes its own password and signs in with it"
 as ADMIN POST "/admin/v1/admins/$STAFF_ID/sessions/revoke" '{"reason":"e2e ends them"}'
 [[ $STATUS == 204 ]] || { echo "FAIL ending an administrator's sessions: $STATUS $BODY" >&2; exit 1; }
@@ -1619,12 +1640,12 @@ expect 401 ADMIN_UNAUTHORIZED "they are over"
 as ADMIN POST "/admin/v1/admins/$STAFF_ID/status" '{"enabled":false,"reason":"e2e lets it go"}'
 expect 200 - "ADMIN disables it"
 check '.status == "DISABLED"' "disabled"
-login STAFF
+paced login STAFF
 expect 401 ADMIN_LOGIN_FAILED "a disabled administrator cannot sign in"
 as ADMIN POST "/admin/v1/admins/$STAFF_ID/status" '{"enabled":true,"reason":"e2e takes it back"}'
 expect 200 - "ADMIN enables it again"
 check '.status == "ACTIVE" and .failed_attempts == 0' "active, its failures forgotten"
-login STAFF
+paced login STAFF
 expect 200 - "it signs in again"
 
 echo "== system health"
