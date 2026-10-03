@@ -25,10 +25,10 @@ import (
 // does not route them).
 type Handler struct {
 	Svc *application.Service
-	// CallbackFrom lists the addresses the custodian calls back from
-	// (UDUN_CALLBACK_ALLOWED_IPS); empty lets any address try, the
-	// signature being the check.
-	CallbackFrom []netip.Prefix
+	// CallbackFrom lists, by provider, the addresses its custodian calls
+	// back from (UDUN_CALLBACK_ALLOWED_IPS, UDUNMOCK_CALLBACK_ALLOWED_IPS);
+	// none lets any address try, the signature being the check.
+	CallbackFrom map[string][]netip.Prefix
 }
 
 // Routes mounts the endpoints on r.

@@ -32,6 +32,7 @@ custody_callbacks（原文、验签、结果、次数）──> 充值：deposit
 | `UDUN_CALLBACK_URL` | 托管方回调地址：真网关用 `https://astras.vip/v1/wallet/callbacks/udun`；测试服模拟网关用 `http://api-gateway:8080/v1/wallet/callbacks/udun`（内网，经网关） |
 | `UDUN_CALLBACK_ALLOWED_IPS` | 托管方回调的出口 IP（逗号分隔，可写 CIDR）。测试服填容器网段 `172.18.0.0/16`（模拟网关在内网经网关回调）。**空即不限来源**（2026-10-03：优盾后台与文档都没有给出回调出口 IP）：只靠签名、时间戳（±5 分钟）与按"单号 + 状态"去重，启动时记 WARN；每条回调（被拒的也一样）把来源 IP 记进 `custody_callbacks.remote_ips`（同一条回调的重发来自新地址时追加，保留最新的 8 个），真回调来过几笔后从这里取地址再收紧（见下文「换成真网关」）。公网这一层另由 nginx 把关：回调路径（`/v1/wallet/callbacks/` 下任何托管方、不分大小写，按解码后的地址匹配）每个来源每秒 10 个、可突发 50 个（超过 429，托管方会重发），只放行 `deploy/compose/nginx/snippets/custody-callback-allow.conf` 里的 `allow` 地址，文件里没有地址时全部 403（审查 B3），写 `allow all;` 即不限来源；wallet-service 只认小写的托管方名，`/v1/wallet/callbacks/UDUN` 这类写法 404 |
 | `WALLET_CUSTODY_INTERVAL` | 托管方处理周期，默认 5 秒 |
+| `UDUNMOCK_*` | 模拟网关的第二个商户 `UDUNMOCK`（ADR-0017，只在测试服）：同上六项（`UDUNMOCK_GATEWAY_URL`、`UDUNMOCK_MERCHANT_ID`、`UDUNMOCK_API_KEY`、`UDUNMOCK_WALLET_ID`、`UDUNMOCK_CALLBACK_URL`、`UDUNMOCK_CALLBACK_ALLOWED_IPS`），只服务端到端用的隐藏测试资产，`UDUN` 换成真网关后端到端照常在它上面跑。网关、回调地址与来源写在 compose 里（`http://udun-mock:8097`、`http://api-gateway:8080/v1/wallet/callbacks/udunmock`、容器网段），商户号与密钥在 `apps.env`。模拟网关只读 `UDUNMOCK_MERCHANT_ID`、`UDUNMOCK_API_KEY`，不读 `UDUN_*`：切换后 `UDUN_*` 是真商户的，模拟网关拿它签的回调会被当成真网关的 |
 
 网络在 `deploy/instruments/test.json`（`exchangectl instruments apply` 同步）：
 

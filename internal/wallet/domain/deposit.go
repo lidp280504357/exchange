@@ -64,9 +64,14 @@ var (
 	ErrNotConfigured    = apperr.New(apperr.KindUnavailable, "WALLET_UNAVAILABLE", "deposit addresses are not available yet")
 )
 
-// ProviderUdun is the Udun custody wallet (instrument-service's network
-// provider).
-const ProviderUdun = "UDUN"
+// Providers of custody networks (instrument-service's network provider):
+// the Udun custody wallet, and on the test server a second merchant of its
+// stand-in gateway that serves only the hidden test asset of the end-to-end
+// tests, so they go on when UDUN is the real gateway (ADR-0017).
+const (
+	ProviderUdun     = "UDUN"
+	ProviderUdunMock = "UDUNMOCK"
+)
 
 // Address is a user's deposit address on a network: derived at Index, or
 // created by Provider.

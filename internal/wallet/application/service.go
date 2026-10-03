@@ -61,10 +61,15 @@ type Service struct {
 	// both need a person. nil counts nothing.
 	Unmatched *prometheus.CounterVec
 
-	// The custodian's coins, as last read (coin).
+	// Each custodian's coins, as last read (coin), by provider.
 	coinsMu sync.Mutex
-	coinsAt time.Time
-	coinsOf map[string]ports.CustodyCoin
+	coinsOf map[string]coinList
+}
+
+// coinList is a custodian's coins by code, read at At.
+type coinList struct {
+	At    time.Time
+	Coins map[string]ports.CustodyCoin
 }
 
 // DepositAddress returns the user's deposit address for an asset on a

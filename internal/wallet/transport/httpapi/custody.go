@@ -21,18 +21,21 @@ import (
 // callback takes a custodian's callback (ADR-0011): recorded and applied,
 // it is answered with the reply the custodian expects; anything else
 // makes the custodian try again. The provider is named in lower case
-// only, the one path the edge proxy guards. With CallbackFrom only those
-// addresses are taken; without, any (the signature, its age and the
-// trade's status decide), and the address is kept with the callback.
+// only, the one path the edge proxy guards. With addresses in
+// CallbackFrom for the provider only those are taken; without, any (the
+// signature, its age and the trade's status decide), and the address is
+// kept with the callback.
 func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
-	if p := chi.URLParam(r, "provider"); p != strings.ToLower(p) {
+	p := chi.URLParam(r, "provider")
+	if p != strings.ToLower(p) {
 		httpx.WriteError(w, r, apperr.NotFound("no such callback"))
 		return
 	}
+	provider := strings.ToUpper(p)
 	from := httpx.ClientIPFrom(r.Context())
-	if len(h.CallbackFrom) > 0 {
+	if allowed := h.CallbackFrom[provider]; len(allowed) > 0 {
 		ip, err := netip.ParseAddr(from)
-		if err != nil || !slices.ContainsFunc(h.CallbackFrom, func(p netip.Prefix) bool { return p.Contains(ip.Unmap()) }) {
+		if err != nil || !slices.ContainsFunc(allowed, func(p netip.Prefix) bool { return p.Contains(ip.Unmap()) }) {
 			httpx.WriteError(w, r, apperr.Forbidden("callbacks come from the custodian's addresses only"))
 			return
 		}
@@ -42,7 +45,6 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apperr.Invalid("the callback could not be read"))
 		return
 	}
-	provider := strings.ToUpper(chi.URLParam(r, "provider"))
 	if _, err := h.Svc.HandleCallback(r.Context(), provider, r.Header.Get("Content-Type"), from, raw); err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -174,8 +176,8 @@ func (h *Handler) adminCallbacks(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	list, next, err := h.Svc.Callbacks(r.Context(), ports.CallbackFilter{
-		Result: strings.ToUpper(q.Get("result")), Kind: strings.ToUpper(q.Get("kind")), Query: strings.TrimSpace(q.Get("q")),
-		After: q.Get("cursor"), Limit: limit,
+		Provider: strings.ToUpper(q.Get("provider")), Result: strings.ToUpper(q.Get("result")), Kind: strings.ToUpper(q.Get("kind")),
+		Query: strings.TrimSpace(q.Get("q")), After: q.Get("cursor"), Limit: limit,
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)

@@ -19,6 +19,9 @@ import (
 // Udun implements ports.Custody. Its gateway posts the callbacks of the
 // addresses and withdrawals created here to CallbackURL.
 type Udun struct {
+	// Name is the provider it serves (domain.ProviderUdun when empty; the
+	// test server's stand-in serves domain.ProviderUdunMock too, ADR-0017).
+	Name        string
 	Client      *udun.Client
 	CallbackURL string
 	// WalletID picks one of the merchant's wallets; empty for the default.
@@ -27,8 +30,13 @@ type Udun struct {
 
 var _ ports.Custody = (*Udun)(nil)
 
-// Provider is domain.ProviderUdun.
-func (u *Udun) Provider() string { return domain.ProviderUdun }
+// Provider is the provider it serves.
+func (u *Udun) Provider() string {
+	if u.Name != "" {
+		return u.Name
+	}
+	return domain.ProviderUdun
+}
 
 func mainCoin(net domain.Network) (string, string, error) {
 	main, coin, err := udun.SplitCoin(net.ProviderCoin)

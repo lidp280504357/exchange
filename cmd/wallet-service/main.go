@@ -42,6 +42,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/wallet/adapters/signer"
 	"github.com/lidp280504357/exchange/internal/wallet/adapters/users"
 	"github.com/lidp280504357/exchange/internal/wallet/application"
+	"github.com/lidp280504357/exchange/internal/wallet/domain"
 	"github.com/lidp280504357/exchange/internal/wallet/ports"
 	"github.com/lidp280504357/exchange/internal/wallet/transport/consumer"
 	"github.com/lidp280504357/exchange/internal/wallet/transport/httpapi"
@@ -109,6 +110,16 @@ type settings struct {
 	UdunCallback    string        `koanf:"udun_callback_url"`
 	UdunCallbackIPs string        `koanf:"udun_callback_allowed_ips"`
 	CustodyInterval time.Duration `koanf:"wallet_custody_interval"`
+	// The stand-in gateway's second merchant (ADR-0017), the same settings
+	// under UDUNMOCK_*: it serves only the hidden test asset of the
+	// end-to-end tests, so they go on when UDUN is the real gateway. Test
+	// server only; unset elsewhere.
+	UdunMockURL         string `koanf:"udunmock_gateway_url"`
+	UdunMockMerchant    string `koanf:"udunmock_merchant_id"`
+	UdunMockKey         string `koanf:"udunmock_api_key"`
+	UdunMockWallet      string `koanf:"udunmock_wallet_id"`
+	UdunMockCallback    string `koanf:"udunmock_callback_url"`
+	UdunMockCallbackIPs string `koanf:"udunmock_callback_allowed_ips"`
 	// ShortfallStop is how much of an asset may be missing at the custody
 	// checks, beyond what explains it, before its withdrawals are
 	// suspended (WALLET_SHORTFALL_STOP, "USDT=1,BTC=0.0001"); an asset not
@@ -137,10 +148,32 @@ func (s *settings) shortfallStops() (map[string]decimal.Decimal, error) {
 // minUdunKey is the shortest UDUN_API_KEY taken.
 const minUdunKey = 32
 
-// callbackFrom parses UDUN_CALLBACK_ALLOWED_IPS.
-func (s *settings) callbackFrom() ([]netip.Prefix, error) {
+// custodian is one custody wallet's settings, read under its variables'
+// prefix.
+type custodian struct {
+	Provider, Prefix                                  string
+	URL, Merchant, Key, Wallet, Callback, CallbackIPs string
+}
+
+// custodians are the custody wallets' settings, configured or not: UDUN,
+// and the stand-in's UDUNMOCK.
+func (s *settings) custodians() []custodian {
+	return []custodian{
+		{
+			Provider: domain.ProviderUdun, Prefix: "UDUN_", URL: s.UdunURL, Merchant: s.UdunMerchant, Key: s.UdunKey, Wallet: s.UdunWallet,
+			Callback: s.UdunCallback, CallbackIPs: s.UdunCallbackIPs,
+		},
+		{
+			Provider: domain.ProviderUdunMock, Prefix: "UDUNMOCK_", URL: s.UdunMockURL, Merchant: s.UdunMockMerchant, Key: s.UdunMockKey,
+			Wallet: s.UdunMockWallet, Callback: s.UdunMockCallback, CallbackIPs: s.UdunMockCallbackIPs,
+		},
+	}
+}
+
+// callbackFrom parses its <PREFIX>CALLBACK_ALLOWED_IPS.
+func (c custodian) callbackFrom() ([]netip.Prefix, error) {
 	var out []netip.Prefix
-	for _, f := range strings.Split(s.UdunCallbackIPs, ",") {
+	for _, f := range strings.Split(c.CallbackIPs, ",") {
 		f = strings.TrimSpace(f)
 		if f == "" {
 			continue
@@ -148,18 +181,35 @@ func (s *settings) callbackFrom() ([]netip.Prefix, error) {
 		if !strings.Contains(f, "/") {
 			a, err := netip.ParseAddr(f)
 			if err != nil {
-				return nil, fmt.Errorf("UDUN_CALLBACK_ALLOWED_IPS: %w", err)
+				return nil, fmt.Errorf("%sCALLBACK_ALLOWED_IPS: %w", c.Prefix, err)
 			}
 			out = append(out, netip.PrefixFrom(a, a.BitLen()))
 			continue
 		}
 		p, err := netip.ParsePrefix(f)
 		if err != nil {
-			return nil, fmt.Errorf("UDUN_CALLBACK_ALLOWED_IPS: %w", err)
+			return nil, fmt.Errorf("%sCALLBACK_ALLOWED_IPS: %w", c.Prefix, err)
 		}
 		out = append(out, p)
 	}
 	return out, nil
+}
+
+// validate checks a custody wallet's settings.
+func (c custodian) validate() []error {
+	var errs []error
+	if c.URL != "" && (c.Merchant == "" || c.Key == "" || c.Callback == "") {
+		errs = append(errs, fmt.Errorf("the custody wallet needs %[1]sMERCHANT_ID, %[1]sAPI_KEY and %[1]sCALLBACK_URL", c.Prefix))
+	}
+	// The key signs requests and callbacks: a short one could be guessed
+	// offline from a signed message (128 bits at least, as 32 hex digits).
+	if c.Key != "" && len(c.Key) < minUdunKey {
+		errs = append(errs, fmt.Errorf("%sAPI_KEY must have at least %d characters", c.Prefix, minUdunKey))
+	}
+	if _, err := c.callbackFrom(); err != nil {
+		errs = append(errs, err)
+	}
+	return errs
 }
 
 func (s *settings) Validate() error {
@@ -181,16 +231,8 @@ func (s *settings) Validate() error {
 	if _, err := s.shortfallStops(); err != nil {
 		errs = append(errs, err)
 	}
-	if s.UdunURL != "" && (s.UdunMerchant == "" || s.UdunKey == "" || s.UdunCallback == "") {
-		errs = append(errs, errors.New("the custody wallet needs UDUN_MERCHANT_ID, UDUN_API_KEY and UDUN_CALLBACK_URL"))
-	}
-	// The key signs requests and callbacks: a short one could be guessed
-	// offline from a signed message (128 bits at least, as 32 hex digits).
-	if s.UdunKey != "" && len(s.UdunKey) < minUdunKey {
-		errs = append(errs, fmt.Errorf("UDUN_API_KEY must have at least %d characters", minUdunKey))
-	}
-	if _, err := s.callbackFrom(); err != nil {
-		errs = append(errs, err)
+	for _, c := range s.custodians() {
+		errs = append(errs, c.validate()...)
 	}
 	return errors.Join(append(errs, s.Postgres.Validate(), s.Kafka.Validate())...)
 }
@@ -287,26 +329,41 @@ func setup(ctx context.Context, a *app.App) error {
 	if err := bootstrap.Consumer(ctx, a, cfg.Kafka, consumer.Group, []string{event.TopicLedger}, consumer.Ledger(svc)); err != nil {
 		return err
 	}
-	var custodian *application.CustodyProcessor
-	if cfg.UdunURL != "" {
-		u := &custody.Udun{
-			Client: &udun.Client{
-				BaseURL: cfg.UdunURL, MerchantID: cfg.UdunMerchant, Key: cfg.UdunKey, HTTP: &http.Client{Timeout: 15 * time.Second},
-			},
-			CallbackURL: cfg.UdunCallback, WalletID: cfg.UdunWallet,
+	// Each custody wallet configured gets its processor (its own lease and
+	// gauges, marked with its provider) and its callbacks' allow list.
+	var custodians []*application.CustodyProcessor
+	callbackFrom := map[string][]netip.Prefix{}
+	svc.Custodians = map[string]ports.Custody{}
+	stops, _ := cfg.shortfallStops() // checked by Validate
+	for _, c := range cfg.custodians() {
+		if c.URL == "" {
+			if c.Provider == domain.ProviderUdun {
+				a.Logger().Warn("UDUN_GATEWAY_URL is not set: the custody wallet's networks take no deposits or withdrawals")
+			}
+			continue
 		}
-		svc.Custodians = map[string]ports.Custody{u.Provider(): u}
-		stops, _ := cfg.shortfallStops() // checked by Validate
-		custodian = application.NewCustodyProcessor(application.CustodyProcessor{
+		u := &custody.Udun{
+			Name:        c.Provider,
+			Client:      &udun.Client{BaseURL: c.URL, MerchantID: c.Merchant, Key: c.Key, HTTP: &http.Client{Timeout: 15 * time.Second}},
+			CallbackURL: c.Callback, WalletID: c.Wallet,
+		}
+		svc.Custodians[c.Provider] = u
+		p := application.NewCustodyProcessor(application.CustodyProcessor{
 			Store: store, Ledger: ledgerClient, Networks: networks, Eligibility: userClient, Custody: u, Log: a.Logger(), Now: time.Now,
 			Contradictions: svc.Contradictions, ShortfallStop: stops,
 		}, a.Metrics())
-		a.Add("custody processor", app.Loop(func(ctx context.Context) error {
-			return leased(ctx, a, db, "wallet-custody:"+u.Provider(), []step{{"custody operations", custodian.Round}}, cfg.CustodyInterval)
+		custodians = append(custodians, p)
+		a.Add("custody processor "+c.Provider, app.Loop(func(ctx context.Context) error {
+			return leased(ctx, a, db, "wallet-custody:"+c.Provider, []step{{"custody operations", p.Round}}, cfg.CustodyInterval)
 		}))
-	} else {
-		a.Logger().Warn("UDUN_GATEWAY_URL is not set: the custody wallet's networks take no deposits or withdrawals")
+		from, _ := c.callbackFrom() // checked by Validate
+		callbackFrom[c.Provider] = from
+		if len(from) == 0 {
+			a.Logger().Warn(c.Prefix+"CALLBACK_ALLOWED_IPS is not set: callbacks are taken from any address on their signature, age and status alone; "+
+				"the addresses they come from are kept with them (custody_callbacks.remote_ips) for the allow list", "provider", c.Provider)
+		}
 	}
+	setElsewhere(custodians, nil)
 	if cfg.RPCURL != "" {
 		client, err := evm.NewClient(cfg.RPCURL, nil)
 		if err != nil {
@@ -328,11 +385,13 @@ func setup(ctx context.Context, a *app.App) error {
 				Networks: networks, Log: a.Logger(), Now: time.Now, Network: cfg.Network, ChainID: cfg.ChainID,
 				MaxFee: maxFee, ReplaceAfter: cfg.ReplaceAfter,
 			}, a.Metrics())
-			// Each side's check counts what the other holds of the asset.
-			if custodian != nil {
-				processor.Elsewhere = custodian.Holdings
-				custodian.Elsewhere = processor.Holdings
+			// Each side's check counts what the others hold of the asset.
+			var held []ports.Holdings
+			for _, c := range custodians {
+				held = append(held, c.Holdings)
 			}
+			processor.Elsewhere = holdingsOf(held...)
+			setElsewhere(custodians, processor.Holdings)
 			steps = append(steps, step{"wallet operations", processor.Round})
 		} else {
 			a.Logger().Warn("SIGNER_GRPC_ADDR is not set: no withdrawals are sent, no sweeps, no chain checks")
@@ -343,17 +402,42 @@ func setup(ctx context.Context, a *app.App) error {
 	} else {
 		a.Logger().Warn("no RPC endpoint: deposits are not scanned")
 	}
-	callbackFrom, err := cfg.callbackFrom()
-	if err != nil {
-		return err
-	}
-	if cfg.UdunURL != "" && len(callbackFrom) == 0 {
-		a.Logger().Warn("UDUN_CALLBACK_ALLOWED_IPS is not set: callbacks are taken from any address on their signature, age and status alone; " +
-			"the addresses they come from are kept with them (custody_callbacks.remote_ips) for the allow list")
-	}
 	r := a.NewRouter()
 	(&httpapi.Handler{Svc: svc, CallbackFrom: callbackFrom}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
+}
+
+// setElsewhere has each custodian's check count what the other custodians
+// and, when they run, the platform's own wallets hold of an asset
+// (invariant 4 is per asset, across every holder).
+func setElsewhere(custodians []*application.CustodyProcessor, wallets ports.Holdings) {
+	for i, p := range custodians {
+		var hs []ports.Holdings
+		if wallets != nil {
+			hs = append(hs, wallets)
+		}
+		for j, q := range custodians {
+			if j != i {
+				hs = append(hs, q.Holdings)
+			}
+		}
+		p.Elsewhere = holdingsOf(hs...)
+	}
+}
+
+// holdingsOf sums what the holders hold of an asset.
+func holdingsOf(hs ...ports.Holdings) ports.Holdings {
+	return func(ctx context.Context, asset string) (decimal.Decimal, error) {
+		total := decimal.Zero
+		for _, h := range hs {
+			v, err := h(ctx, asset)
+			if err != nil {
+				return decimal.Zero, err
+			}
+			total = total.Add(v)
+		}
+		return total, nil
+	}
 }
 
 // step is a part of a processing round.

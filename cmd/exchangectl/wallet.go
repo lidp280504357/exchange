@@ -203,6 +203,7 @@ func walletWith(ctx context.Context, db, idb *pg.DB, args []string, out io.Write
 		fmt.Fprintf(out, "%s: %s %s %s; a booked fee is booked within a round\n", f.TxHash, f.Status, f.Amount, f.Asset)
 		return nil
 	case "custody-fee-unit":
+		provider := fs.String("provider", domain.ProviderUdun, "the custodian: UDUN, or the stand-in's UDUNMOCK (ADR-0017)")
 		asset := fs.String("asset", "", "the network's asset, e.g. USDT")
 		unit := fs.String("unit", "", "SELF (in the asset, as documented), MAIN (in the chain's own coin) or OUTSIDE (not in the coin balances)")
 		reason := fs.String("reason", "", "how it was confirmed, e.g. against the first real withdrawal on the block explorer (required)")
@@ -213,8 +214,8 @@ func walletWith(ctx context.Context, db, idb *pg.DB, args []string, out io.Write
 			return printFeeUnits(ctx, store, out)
 		}
 		u := domain.FeeUnit{
-			Provider: domain.ProviderUdun, Asset: strings.ToUpper(*asset), Network: strings.ToUpper(*network), Unit: *unit, ConfirmedBy: actor(),
-			Reason: *reason, ConfirmedAt: time.Now(),
+			Provider: strings.ToUpper(*provider), Asset: strings.ToUpper(*asset), Network: strings.ToUpper(*network), Unit: *unit,
+			ConfirmedBy: actor(), Reason: *reason, ConfirmedAt: time.Now(),
 		}
 		if ok, err := servedBy(ctx, instruments, u.Provider, u.Asset, u.Network); err != nil || !ok {
 			if err == nil {
@@ -239,10 +240,12 @@ func walletWith(ctx context.Context, db, idb *pg.DB, args []string, out io.Write
 		}
 		// Only the stand-in's addresses are made up: once the real gateway
 		// serves the custodian its addresses are real, and retiring them
-		// would leave real deposits to them unmatched (review AH).
-		if gw := os.Getenv("UDUN_GATEWAY_URL"); !standIn(gw) {
-			return fmt.Errorf("%s's gateway here (UDUN_GATEWAY_URL) is not the stand-in udun-mock: its deposit addresses are real, they stay "+
-				"(run this in wallet-service while it still talks to the stand-in)", strings.ToUpper(*provider))
+		// would leave real deposits to them unmatched (review AH). The
+		// custodian's gateway is in <PROVIDER>_GATEWAY_URL.
+		gateway := strings.ToUpper(*provider) + "_GATEWAY_URL"
+		if gw := os.Getenv(gateway); !standIn(gw) {
+			return fmt.Errorf("%s's gateway here (%s) is not the stand-in udun-mock: its deposit addresses are real, they stay "+
+				"(run this in wallet-service while it still talks to the stand-in)", strings.ToUpper(*provider), gateway)
 		}
 		inUse, retired, err := store.Read().Addresses().OfProvider(ctx, strings.ToUpper(*provider))
 		if err != nil {
@@ -484,7 +487,7 @@ func printChecks(ctx context.Context, store *postgres.Store, network string, out
 				"(ledger custody-reset): at no custodian")
 		}
 	}
-	if network == domain.ProviderUdun {
+	if network == domain.ProviderUdun || network == domain.ProviderUdunMock {
 		return printBackfills(ctx, store, out)
 	}
 	return nil

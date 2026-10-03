@@ -94,11 +94,12 @@ type WithdrawAddressRepo interface {
 // match everything. Query matches a trade ID, withdrawal ID, transaction
 // hash or address.
 type CallbackFilter struct {
-	Result string
-	Kind   string
-	Query  string
-	After  string
-	Limit  int
+	Provider string
+	Result   string
+	Kind     string
+	Query    string
+	After    string
+	Limit    int
 }
 
 // CallbackRepo keeps the custodian's callbacks.
@@ -114,9 +115,10 @@ type CallbackRepo interface {
 	// Page returns up to f.Limit callbacks matching f, newest first,
 	// after the one with ID f.After.
 	Page(ctx context.Context, f CallbackFilter) ([]domain.Callback, error)
-	// Attention counts the verified callbacks that failed or found
-	// nothing to apply to, and returns when the last one arrived.
-	Attention(ctx context.Context) (int, time.Time, error)
+	// Attention counts the provider's verified callbacks that failed or
+	// found nothing to apply to, and returns when its last one arrived;
+	// every provider's for "".
+	Attention(ctx context.Context, provider string) (int, time.Time, error)
 	// RejectedSince counts the refused callbacks kept since t.
 	RejectedSince(ctx context.Context, t time.Time) (int, error)
 }

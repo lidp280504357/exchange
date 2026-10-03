@@ -106,8 +106,10 @@ func (c memCallbacks) Get(_ context.Context, id string) (*domain.Callback, error
 	return nil, nil
 }
 
-func (c memCallbacks) Page(context.Context, ports.CallbackFilter) ([]domain.Callback, error) {
-	out := slices.Clone(c.m.callbacks)
+func (c memCallbacks) Page(_ context.Context, f ports.CallbackFilter) ([]domain.Callback, error) {
+	out := slices.DeleteFunc(slices.Clone(c.m.callbacks), func(y domain.Callback) bool {
+		return f.Provider != "" && y.Provider != f.Provider
+	})
 	slices.Reverse(out)
 	return out, nil
 }
@@ -122,10 +124,10 @@ func (c memCallbacks) RejectedSince(_ context.Context, t time.Time) (int, error)
 	return n, nil
 }
 
-func (c memCallbacks) Attention(context.Context) (int, time.Time, error) {
+func (c memCallbacks) Attention(_ context.Context, provider string) (int, time.Time, error) {
 	n := 0
 	for _, y := range c.m.callbacks {
-		if y.SignatureOK && (y.Result == domain.CallbackFailed || y.Result == domain.CallbackUnmatched) {
+		if (provider == "" || y.Provider == provider) && y.SignatureOK && (y.Result == domain.CallbackFailed || y.Result == domain.CallbackUnmatched) {
 			n++
 		}
 	}
@@ -1509,19 +1511,30 @@ func TestASuspensionHoldsTheAssetOnEveryNetwork(t *testing.T) {
 		MinDeposit: d("1"), Enabled: true, WithdrawEnabled: true, MinWithdraw: d("10"), WithdrawFee: d("0.5"), AddressFormat: domain.FormatEVM,
 		Provider: domain.ProviderUdun, ProviderCoin: "2510:0x55d398326f99059fF775485246999027B3197955",
 	}
-	h.nets.nets = append(h.nets.nets, bsc)
+	btc := domain.Network{
+		Asset: "BTC", Network: "BTC", Chain: "bitcoin", Decimals: 8, Confirmations: 2, MinDeposit: d("0.0001"), Enabled: true,
+		WithdrawEnabled: true, MinWithdraw: d("0.001"), WithdrawFee: d("0.0002"), AddressFormat: domain.FormatBTC,
+		Provider: domain.ProviderUdun, ProviderCoin: "0:0",
+	}
+	h.nets.nets = append(h.nets.nets, bsc, btc)
 	none := decimal.Zero
-	h.custody.coins = append(h.custody.coins, ports.CustodyCoin{Code: bsc.ProviderCoin, Symbol: "USDT", Decimals: 18, Token: true, Balance: &none})
+	h.custody.coins = append(h.custody.coins, ports.CustodyCoin{Code: bsc.ProviderCoin, Symbol: "USDT", Decimals: 18, Token: true, Balance: &none},
+		ports.CustodyCoin{Code: btc.ProviderCoin, Symbol: "BTC", Decimals: 8, Balance: &none})
 	onTron := h.requestCustody(t, "20")
 	onBSC := onTron
 	onBSC.ID, onBSC.Network, onBSC.Address = "wd-bsc", "BSC", "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359"
 	h.store.wds[onBSC.ID] = onBSC
-	for _, asset := range []string{"USDT", "BTC"} {
+	// TUSD is another custodian's (ADR-0017): its suspension is reported
+	// there, not here.
+	for _, asset := range []string{"USDT", "BTC", "TUSD"} {
 		h.store.suspended[asset] = domain.Suspension{Asset: asset, Reason: "a test", SuspendedBy: "ops", SuspendedAt: h.now, Shortfall: decimal.Zero}
 	}
 	h.cround(t)
 	if h.gaugeOf(t, "wallet_withdrawals_suspended", "BTC") != 1 || h.gaugeOf(t, "wallet_withdrawals_suspended_waiting", "BTC") != 0 {
 		t.Fatal("BTC is suspended with nothing waiting")
+	}
+	if h.gaugeOf(t, "wallet_withdrawals_suspended", "TUSD") != 0 {
+		t.Fatal("another custodian's asset reported here")
 	}
 	for _, id := range []string{onTron.ID, onBSC.ID} {
 		if got := h.store.wds[id]; got.Status != domain.WithdrawalApproved {

@@ -225,23 +225,28 @@ func (s *Service) coinDecimals(ctx context.Context, c ports.Custody, coin string
 
 // coin is the custodian's listing of a coin (support-coins, read again
 // every coinsEvery), false when it is not listed or the list cannot be
-// read.
+// read. Each custodian's list is its own: two serve different coins.
 func (s *Service) coin(ctx context.Context, c ports.Custody, coin string) (ports.CustodyCoin, bool) {
 	s.coinsMu.Lock()
 	defer s.coinsMu.Unlock()
-	if s.coinsAt.IsZero() || s.Now().Sub(s.coinsAt) >= coinsEvery {
+	cur := s.coinsOf[c.Provider()]
+	if cur.At.IsZero() || s.Now().Sub(cur.At) >= coinsEvery {
 		list, err := c.Coins(ctx)
 		if err != nil {
-			s.Log.WarnContext(ctx, "the custodian's coins not read: callbacks taken at their own decimals", "error", err)
+			s.Log.WarnContext(ctx, "the custodian's coins not read: callbacks taken at their own decimals",
+				"provider", c.Provider(), "error", err)
 		} else {
-			s.coinsOf = make(map[string]ports.CustodyCoin, len(list))
+			cur = coinList{At: s.Now(), Coins: make(map[string]ports.CustodyCoin, len(list))}
 			for _, k := range list {
-				s.coinsOf[k.Code] = k
+				cur.Coins[k.Code] = k
 			}
-			s.coinsAt = s.Now()
+			if s.coinsOf == nil {
+				s.coinsOf = map[string]coinList{}
+			}
+			s.coinsOf[c.Provider()] = cur
 		}
 	}
-	k, ok := s.coinsOf[coin]
+	k, ok := cur.Coins[coin]
 	return k, ok
 }
 
@@ -621,14 +626,28 @@ func (s *Service) Custody(ctx context.Context, provider string) (CustodyOverview
 		}
 	}
 	r := s.Store.Read()
-	if out.Checks, err = r.Checks().Latest(ctx, ""); err != nil {
+	checks, err := r.Checks().Latest(ctx, "")
+	if err != nil {
 		return out, err
+	}
+	// Its own and the platform's wallets', not another custodian's.
+	for _, c := range checks {
+		if c.Network == provider || !s.custodian(c.Network) {
+			out.Checks = append(out.Checks, c)
+		}
 	}
 	if out.Submitted, err = r.Withdrawals().Submitted(ctx, provider); err != nil {
 		return out, err
 	}
-	out.Attention, out.LastAt, err = r.Callbacks().Attention(ctx)
+	out.Attention, out.LastAt, err = r.Callbacks().Attention(ctx, provider)
 	return out, err
+}
+
+// custodian reports whether a check's holder is a custodian rather than a
+// network of the platform's own wallets.
+func (s *Service) custodian(holder string) bool {
+	_, ok := s.Custodians[holder]
+	return ok || holder == domain.ProviderUdun || holder == domain.ProviderUdunMock
 }
 
 // Callbacks returns a page of the custodian's callbacks, newest first,

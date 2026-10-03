@@ -429,7 +429,7 @@ func (p *CustodyProcessor) observe(ctx context.Context) error {
 		oldest = p.Now().Sub(list[0].SubmittedAt).Seconds()
 	}
 	p.oldest.Set(oldest)
-	n, _, err := r.Callbacks().Attention(ctx)
+	n, _, err := r.Callbacks().Attention(ctx, p.Custody.Provider())
 	if err != nil {
 		return err
 	}
@@ -449,9 +449,16 @@ func (p *CustodyProcessor) observe(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// The assets it serves: another custodian reports its own.
+	nets, err := p.networks(ctx)
+	if err != nil {
+		return err
+	}
 	p.suspended.Reset()
 	for _, x := range stopped {
-		p.suspended.WithLabelValues(x.Asset).Set(1)
+		if slices.ContainsFunc(nets, func(n domain.Network) bool { return n.Asset == x.Asset }) {
+			p.suspended.WithLabelValues(x.Asset).Set(1)
+		}
 	}
 	return nil
 }
@@ -525,6 +532,11 @@ func (p *CustodyProcessor) Holdings(ctx context.Context, asset string) (decimal.
 	nets, err := p.networks(ctx)
 	if err != nil {
 		return decimal.Zero, err
+	}
+	// An asset it serves on no network: nothing, without asking its
+	// gateway (another custodian's check must not wait on it).
+	if !slices.ContainsFunc(nets, func(n domain.Network) bool { return n.Asset == asset }) {
+		return decimal.Zero, nil
 	}
 	coins, err := p.Custody.Coins(ctx)
 	if err != nil {

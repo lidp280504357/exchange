@@ -12,8 +12,9 @@
 //	udun-mock state
 //
 // serve answers the gateway's API at UDUN_MOCK_ADDR (:8097) for the
-// merchant UDUN_MERCHANT_ID with the key UDUN_API_KEY (the same as
-// wallet-service's), with the coins of UDUN_MOCK_COINS
+// merchant UDUNMOCK_MERCHANT_ID with the key UDUNMOCK_API_KEY (the same as
+// wallet-service's UDUNMOCK custodian, and its UDUN one while that points
+// here; ADR-0017), with the coins of UDUN_MOCK_COINS
 // (SYMBOL:MAIN:COIN:DECIMALS,...; the test environment's by default) and
 // its state in UDUN_MOCK_STATE (/data/state.json; empty for none). A
 // withdrawal is approved after UDUN_MOCK_STEP (2 s) and sent after
@@ -46,17 +47,20 @@ import (
 )
 
 type settings struct {
-	Addr     string        `koanf:"udun_mock_addr"`
-	State    string        `koanf:"udun_mock_state"`
-	Coins    string        `koanf:"udun_mock_coins"`
-	Step     time.Duration `koanf:"udun_mock_step"`
-	Merchant string        `koanf:"udun_merchant_id"`
-	Key      string        `koanf:"udun_api_key"`
+	Addr  string        `koanf:"udun_mock_addr"`
+	State string        `koanf:"udun_mock_state"`
+	Coins string        `koanf:"udun_mock_coins"`
+	Step  time.Duration `koanf:"udun_mock_step"`
+	// Its own names, never UDUN_*: once UDUN is the real gateway those hold
+	// the real merchant's key, and callbacks the mock signed with it would
+	// pass for the real gateway's.
+	Merchant string `koanf:"udunmock_merchant_id"`
+	Key      string `koanf:"udunmock_api_key"`
 }
 
 func (s *settings) Validate() error {
 	if s.Merchant == "" || s.Key == "" {
-		return errors.New("UDUN_MERCHANT_ID and UDUN_API_KEY are required")
+		return errors.New("UDUNMOCK_MERCHANT_ID and UDUNMOCK_API_KEY are required")
 	}
 	_, err := parseCoins(s.Coins)
 	return err

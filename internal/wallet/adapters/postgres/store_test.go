@@ -682,7 +682,7 @@ func TestCustodyStorage(t *testing.T) {
 		page[0].Status != 3 || page[0].SignatureOK {
 		t.Fatalf("refused, newest first %+v %v", page, err)
 	}
-	if n, last, err := read.Callbacks().Attention(ctx); err != nil || n != 0 || !last.Equal(now) {
+	if n, last, err := read.Callbacks().Attention(ctx, ""); err != nil || n != 0 || !last.Equal(now) {
 		t.Fatalf("attention %d %v %v", n, last, err)
 	}
 

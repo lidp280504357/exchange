@@ -43,4 +43,23 @@ func TestCustodySettings(t *testing.T) {
 	if msg := errOf(settings{MaxFeeGwei: decimal.NewFromInt(100)}); strings.Contains(msg, "UDUN_") {
 		t.Fatalf("no gateway: %s", msg)
 	}
+	// The stand-in's second merchant (ADR-0017) is checked as one, under
+	// its own names.
+	s = base()
+	s.UdunMockURL, s.UdunMockMerchant, s.UdunMockKey = "http://udun-mock:8097", "m", "short-key"
+	if msg := errOf(s); !strings.Contains(msg, "UDUNMOCK_MERCHANT_ID, UDUNMOCK_API_KEY and UDUNMOCK_CALLBACK_URL") ||
+		!strings.Contains(msg, "UDUNMOCK_API_KEY must have at least 32") || strings.Contains(msg, "UDUN_API_KEY") {
+		t.Fatalf("the stand-in's merchant: %s", msg)
+	}
+	s.UdunMockKey, s.UdunMockCallback = strings.Repeat("b2", 16), "http://api-gateway:8080/v1/wallet/callbacks/udunmock"
+	s.UdunMockCallbackIPs = "172.18.0.0/16"
+	if msg := errOf(s); strings.Contains(msg, "UDUN") {
+		t.Fatalf("both configured: %s", msg)
+	}
+	if got := s.custodians(); len(got) != 2 || got[0].Provider != "UDUN" || got[1].Provider != "UDUNMOCK" || got[1].URL != s.UdunMockURL {
+		t.Fatalf("custodians %+v", got)
+	}
+	if from, err := s.custodians()[1].callbackFrom(); err != nil || len(from) != 1 || from[0].String() != "172.18.0.0/16" {
+		t.Fatalf("the stand-in's allow list %v %v", from, err)
+	}
 }

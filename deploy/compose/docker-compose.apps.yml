@@ -250,6 +250,13 @@ services:
       # How much may be missing at the custody checks before an asset's
       # withdrawals are suspended: about the custodian's fee granularity.
       WALLET_SHORTFALL_STOP: USDT=1,BTC=0.0001,ETH=0.001
+      # The stand-in's second merchant (ADR-0017): only the end-to-end
+      # tests' hidden asset, on udun-mock whatever UDUN points at. Its
+      # merchant and key (UDUNMOCK_MERCHANT_ID, UDUNMOCK_API_KEY) are in
+      # apps.env.
+      UDUNMOCK_GATEWAY_URL: http://udun-mock:8097
+      UDUNMOCK_CALLBACK_URL: http://api-gateway:8080/v1/wallet/callbacks/udunmock
+      UDUNMOCK_CALLBACK_ALLOWED_IPS: 172.18.0.0/16
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}
@@ -265,11 +272,12 @@ services:
 
   # The test environment's stand-in for the Udun custody wallet's gateway
   # (ADR-0011, docs/runbook/custody.md): wallet-service reaches it at
-  # UDUN_GATEWAY_URL=http://udun-mock:8097 and it calls back through the
-  # gateway (UDUN_CALLBACK_URL). It shares UDUN_MERCHANT_ID and
-  # UDUN_API_KEY with wallet-service through apps.env and keeps its
-  # addresses, balances and pending callbacks in ./udun-mock (owner uid
-  # 10001). Drop it once apps.env points at the real gateway.
+  # UDUN_GATEWAY_URL=http://udun-mock:8097 until UDUN is the real gateway,
+  # and as its second merchant UDUNMOCK always (ADR-0017); it calls back
+  # through the gateway (the address and withdrawal's callback URL). It
+  # takes UDUNMOCK_MERCHANT_ID and UDUNMOCK_API_KEY from apps.env (never
+  # UDUN_*) and keeps its addresses, balances and pending callbacks in
+  # ./udun-mock (owner uid 10001).
   udun-mock:
     <<: *app
     command: ["/app/udun-mock", "serve"]

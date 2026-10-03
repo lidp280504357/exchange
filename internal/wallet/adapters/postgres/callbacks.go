@@ -120,7 +120,8 @@ func (r callbacks) Page(ctx context.Context, f ports.CallbackFilter) ([]domain.C
 	rows, err := r.q.Query(ctx, `SELECT `+callbackColumns+` FROM custody_callbacks
 		WHERE ($1 = '' OR result = $1) AND ($2 = '' OR kind = $2)
 		AND ($3 = '' OR trade_id = $3 OR business_id = $3 OR lower(tx_hash) = lower($3) OR lower(address) = lower($3))
-		AND ($4::uuid IS NULL OR id < $4) ORDER BY id DESC LIMIT $5`, f.Result, f.Kind, f.Query, after, f.Limit)
+		AND ($4::uuid IS NULL OR id < $4) AND ($6 = '' OR provider = $6) ORDER BY id DESC LIMIT $5`,
+		f.Result, f.Kind, f.Query, after, f.Limit, f.Provider)
 	if err != nil {
 		return nil, fmt.Errorf("list callbacks: %w", err)
 	}
@@ -147,11 +148,11 @@ func clip(s string, n int) string {
 	return strings.ToValidUTF8(s[:n], "")
 }
 
-func (r callbacks) Attention(ctx context.Context) (int, time.Time, error) {
+func (r callbacks) Attention(ctx context.Context, provider string) (int, time.Time, error) {
 	var n int
 	var last *time.Time
 	err := r.q.QueryRow(ctx, `SELECT count(*) FILTER (WHERE signature_ok AND result IN ('FAILED', 'UNMATCHED', 'DISCREPANCY')), max(received_at)
-		FROM custody_callbacks`).Scan(&n, &last)
+		FROM custody_callbacks WHERE $1 = '' OR provider = $1`, provider).Scan(&n, &last)
 	if err != nil {
 		return 0, time.Time{}, fmt.Errorf("count callbacks: %w", err)
 	}
