@@ -1,8 +1,13 @@
 import type { Admin } from "@exchange/core/api/admin";
+import { lazy } from "react";
 import { Navigate, Route, Routes } from "react-router";
-import MustChange from "../pages/system/MustChange";
 import { allowed, sections, subpages } from "../sections";
 import { ConsoleShell } from "./ConsoleShell";
+
+// Loaded only for an administrator who must change a generated password:
+// its forms and the authenticator's QR code stay out of the shell's chunk
+// (C6, the overview's Lighthouse score).
+const MustChange = lazy(() => import("../pages/system/MustChange"));
 
 /**
  * SignedIn is the console behind the sign-in, loaded once signed in (the
