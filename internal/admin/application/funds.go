@@ -354,7 +354,7 @@ func (s *Service) again(ctx context.Context, p Principal, a domain.Approval) (do
 func (s *Service) carryOut(ctx context.Context, p Principal, a domain.Approval) (domain.Approval, error) {
 	actions := fundActions[a.Kind]
 	if err := s.execute(ctx, &a, p); err != nil {
-		return domain.Approval{}, s.unfinished(ctx, p, a, err)
+		return domain.Approval{}, s.unfinished(ctx, p, a, a.Reason, err)
 	}
 	return s.record(ctx, a, p, actions.executed, actions.failed)
 }
@@ -362,8 +362,9 @@ func (s *Service) carryOut(ctx context.Context, p Principal, a domain.Approval) 
 // unfinished records an attempt to carry out a fund operation that did not
 // finish: the operation stays pending, attempted, with how the attempt
 // ended, and the error names it (C5.5 ⑥). An error of unknown kind is an
-// unknown outcome.
-func (s *Service) unfinished(ctx context.Context, p Principal, a domain.Approval, err error) error {
+// unknown outcome. reason is the attempt's: the requester's in
+// single-person mode, the decider's otherwise (C5.5 ⑰).
+func (s *Service) unfinished(ctx context.Context, p Principal, a domain.Approval, reason string, err error) error {
 	e := apperr.From(err)
 	if e.Kind == apperr.KindInternal {
 		e = apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "the outcome is unknown")
@@ -378,7 +379,7 @@ func (s *Service) unfinished(ctx context.Context, p Principal, a domain.Approval
 			return err
 		}
 		return r.Audit(ctx, &auditv1.AdminActionPerformed{
-			Target: "approval:" + a.ID, Action: fundActions[a.Kind].unfinished, Actor: p.Admin.Email, Reason: a.Reason,
+			Target: "approval:" + a.ID, Action: fundActions[a.Kind].unfinished, Actor: p.Admin.Email, Reason: reason,
 			Details: fmt.Sprintf(`{"status":%q,"result":%q,"mode":%q}`, domain.ApprovalPending, note, a.Mode),
 		}, p.Admin.Email)
 	})
@@ -593,7 +594,7 @@ func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, ap
 		}
 		return domain.Approval{}, err
 	case unknown != nil:
-		return domain.Approval{}, s.unfinished(ctx, p, a, unknown)
+		return domain.Approval{}, s.unfinished(ctx, p, a, strings.TrimSpace(reason), unknown)
 	case repeated:
 		return a, nil
 	}

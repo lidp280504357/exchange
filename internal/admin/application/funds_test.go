@@ -205,14 +205,17 @@ func TestSettings(t *testing.T) {
 func TestWithdrawalReviewAlone(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	h.svc.Features, h.svc.Prices = onFlags{}, fakePrices{"BTC-USDT": decimal.NewFromInt(60_000)}
+	prices := &countingPrices{fakePrices: fakePrices{"BTC-USDT": decimal.NewFromInt(60_000)}}
+	h.svc.Features, h.svc.Prices = onFlags{}, prices
 	h.admin(t, "fin@example.com", domain.RoleFinance)
 	fin := h.login(t, "fin@example.com")
 	if _, err := h.svc.ReviewWithdrawal(ctx, fin, "", "w1", true, "looks fine"); err != nil || h.wallet.soleMax.String() != "100000" {
 		t.Fatalf("single-person mode: %v, sole max %s", err, h.wallet.soleMax)
 	}
-	if _, err := h.svc.ReviewWithdrawal(ctx, fin, "", "w2", false, "odd address"); err != nil || !h.wallet.soleMax.IsZero() {
-		t.Fatalf("a rejection: %v, sole max %s", err, h.wallet.soleMax)
+	// A rejection values nothing: no prices are read (C5.5 ⑮, ⑰).
+	reads := prices.reads
+	if _, err := h.svc.ReviewWithdrawal(ctx, fin, "", "w2", false, "odd address"); err != nil || !h.wallet.soleMax.IsZero() || prices.reads != reads {
+		t.Fatalf("a rejection: %v, sole max %s, prices read %d times", err, h.wallet.soleMax, prices.reads-reads)
 	}
 	// Worth more than the limit at the current price, or of no fresh price: two reviewers, whatever the
 	// risk rules asked for (C5.5 ⑮).
@@ -225,14 +228,17 @@ func TestWithdrawalReviewAlone(t *testing.T) {
 		sole    string
 		atLeast int
 	}{"big": {"0", 2}, "odd": {"0", 2}, "small": {"100000", 0}} {
+		reads := prices.reads
 		if _, err := h.svc.ReviewWithdrawal(ctx, fin, "", id, true, "looks fine"); err != nil || h.wallet.soleMax.String() != want.sole ||
-			h.wallet.atLeast != want.atLeast {
-			t.Fatalf("%s: %v, sole max %s, at least %d", id, err, h.wallet.soleMax, h.wallet.atLeast)
+			h.wallet.atLeast != want.atLeast || prices.reads != reads+1 {
+			t.Fatalf("%s: %v, sole max %s, at least %d, prices read %d times", id, err, h.wallet.soleMax, h.wallet.atLeast, prices.reads-reads)
 		}
 	}
 	h.svc.Features = onFlags{flags.KeyTwoPerson: true}
-	if _, err := h.svc.ReviewWithdrawal(ctx, fin, "", "w3", true, "looks fine"); err != nil || !h.wallet.soleMax.IsZero() || h.wallet.atLeast != 0 {
-		t.Fatalf("two-person mode: %v, sole max %s", err, h.wallet.soleMax)
+	reads = prices.reads
+	if _, err := h.svc.ReviewWithdrawal(ctx, fin, "", "w3", true, "looks fine"); err != nil || !h.wallet.soleMax.IsZero() || h.wallet.atLeast != 0 ||
+		prices.reads != reads {
+		t.Fatalf("two-person mode: %v, sole max %s, prices read %d times", err, h.wallet.soleMax, prices.reads-reads)
 	}
 
 	// The same review again with its key answers with the withdrawal as it left it; without the key the

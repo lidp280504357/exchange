@@ -247,11 +247,18 @@ func (w *Withdrawal) ApproveAlone(reviewer string, limit decimal.Decimal, now ti
 	return w.Approve(reviewer, now)
 }
 
+// MaxApprovalsRaised bounds what RequireApprovals raises to: two
+// reviewers is all the console asks for, and a larger number sent by
+// mistake would keep the withdrawal in review for good (C5.5 ⑰).
+const MaxApprovalsRaised = 2
+
 // RequireApprovals raises the approvals a withdrawal in review needs to at
-// least n, never lowering them: the admin console in single-person mode
-// asks for 2 when it is worth more than an approval may complete alone at
-// the current price, or has no fresh price (C5.5 ⑮).
+// least n (at most MaxApprovalsRaised), never lowering them: the admin
+// console in single-person mode asks for 2 when it is worth more than an
+// approval may complete alone at the current price, or has no fresh price
+// (C5.5 ⑮).
 func (w *Withdrawal) RequireApprovals(n int) {
+	n = min(n, MaxApprovalsRaised)
 	if w.Status == WithdrawalReview && n > w.ApprovalsRequired {
 		w.ApprovalsRequired = n
 	}

@@ -133,8 +133,9 @@ func TestAnAttemptedOperationIsFinishedNeverRejected(t *testing.T) {
 	if a.Status != domain.ApprovalPending || a.AttemptedAt.IsZero() || a.Result != "COMMON_UNAVAILABLE: down" {
 		t.Fatalf("attempted: %+v", a)
 	}
-	// The unfinished attempt is audited at once (C5.5 ⑮).
-	if got := h.auditsOf("admin.ledger.adjustment_unfinished"); len(got) != 1 || !strings.Contains(got[0], "approval:"+asked.ID) {
+	// The unfinished attempt is audited at once (C5.5 ⑮), with the
+	// decider's reason (⑰).
+	if got := h.auditsOf("admin.ledger.adjustment_unfinished"); len(got) != 1 || !strings.Contains(got[0], "approval:"+asked.ID+" checked the ticket ") {
 		t.Fatalf("unfinished audit %v", got)
 	}
 	for _, p := range []Principal{boss, fin} {

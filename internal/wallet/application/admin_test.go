@@ -294,6 +294,9 @@ func TestUnclaimedDepositsAreCreditedByHand(t *testing.T) {
 	if err != nil || inDoubt.Status != domain.StatusCredited || inDoubt.ReleaseJournalID == "" || !h.ledger.available["alice"].Equal(moved) {
 		t.Fatalf("its release recorded %+v %v", inDoubt, err)
 	}
+	if n := h.audited("wallet.deposit.release_recorded"); n != 1 {
+		t.Fatalf("the recorded release audited %d times", n)
+	}
 }
 
 func TestWithdrawalHoldAndDetail(t *testing.T) {
@@ -321,9 +324,10 @@ func TestWithdrawalHoldAndDetail(t *testing.T) {
 	if err != nil || det.Address == nil || !det.UsedToday.IsPositive() || det.UsedMonth.LessThan(det.UsedToday) {
 		t.Fatalf("detail %+v %v", det, err)
 	}
-	// The console asks for two reviewers (C5.5 ⑮): one approval leaves it in review.
+	// The console asks for two reviewers (C5.5 ⑮): one approval leaves it in review; more than
+	// two asked by mistake are two (⑰).
 	other := h.reviewable(t)
-	first, err := ReviewWithdrawal(ctx, h.store, Review{ID: other.ID, Reviewer: "fin@example.com", Reason: "fine", Approve: true, AtLeast: 2}, h.now)
+	first, err := ReviewWithdrawal(ctx, h.store, Review{ID: other.ID, Reviewer: "fin@example.com", Reason: "fine", Approve: true, AtLeast: 1000}, h.now)
 	if err != nil || first.Status != domain.WithdrawalReview || first.ApprovalsRequired != 2 {
 		t.Fatalf("raised to two reviewers %+v %v", first, err)
 	}

@@ -776,6 +776,18 @@ func (p fakePrices) Prices(context.Context, time.Duration) (ports.Prices, error)
 	return ports.Prices(p), nil
 }
 
+// countingPrices counts the reads of the prices: a review that values
+// nothing reads none (C5.5 ⑮, ⑰).
+type countingPrices struct {
+	fakePrices
+	reads int
+}
+
+func (p *countingPrices) Prices(ctx context.Context, maxAge time.Duration) (ports.Prices, error) {
+	p.reads++
+	return p.fakePrices.Prices(ctx, maxAge)
+}
+
 type harness struct {
 	svc         *Service
 	store       *memStore

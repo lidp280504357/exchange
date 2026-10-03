@@ -54,7 +54,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
   - 同一管理员 24 小时内单人操作合计（含结果未知的待处理项）不超过 `daily_max_usdt`（默认 500,000）；
   - 折合按该资产 USDT 交易对的最新价（market-data-service tickers），USDT 按 1；没有报价、或报价超过 60 秒没更新（参考行情停了）的不能单人执行（C5.5 ⑥）；
   - 超过任一限额、或没有报价时，自动转为待另一位管理员批准，`escalation` 写明原因（`SINGLE_LIMIT`、`DAILY_LIMIT`、`NO_PRICE`；双人模式下是 `TWO_PERSON_MODE`，明确要求审批的是 `REQUESTED`）。
-- **提现**：单人模式下，需两人审核的提现（> 20,000 USDT，wallet-service 规则）折合不超过 `withdrawal_max_usdt`（默认 100,000）时一人批准即完成（admin-service 把 `sole_max_usdt` 传给 wallet-service 的内部审核接口，wallet 审计里记 `sole_max_usdt`）。批准时 admin-service 还按当前价重算一次（同样 60 秒新鲜度；平台自有交易对按最近一笔成交的时间算）：申请时的估值与当前估值都不超过才传 `sole_max_usdt`；超过、或没有新鲜报价时传 `approvals_at_least: 2`，wallet 把所需审核人数**提到** 2（风控原本只要 1 人的也一样），这次批准照常计数，要另一位管理员再批（C5.5 ⑥、⑮；wallet 审计记 `approvals_required`）。
+- **提现**：单人模式下，需两人审核的提现（> 20,000 USDT，wallet-service 规则）折合不超过 `withdrawal_max_usdt`（默认 100,000）时一人批准即完成（admin-service 把 `sole_max_usdt` 传给 wallet-service 的内部审核接口，wallet 审计里记 `sole_max_usdt`）。批准时 admin-service 还按当前价重算一次（同样 60 秒新鲜度；平台自有交易对按最近一笔成交的时间算）：申请时的估值与当前估值都不超过才传 `sole_max_usdt`；超过、或没有新鲜报价时传 `approvals_at_least: 2`，wallet 把所需审核人数**提到** 2（风控原本只要 1 人的也一样），这次批准照常计数，要另一位管理员再批（C5.5 ⑥、⑮；wallet 审计记 `approvals_required`；`approvals_at_least` 最多算 2，传多了也只要两人，⑰）。所以行情接口不可用、或报价超过 60 秒没更新时，单人模式下所有非 USDT 的提现都要两人审核；只有一个管理员的测试服可用 `exchangectl wallet approve <id> --reviewer <另一个名字> --reason "..."`（见 [wallet.md](wallet.md)）以另一审核人身份批完，审计里记的是命令行给的名字。
 - **幂等键**（C5.5 ⑥）：所有动钱的请求必须带请求头 `Idempotency-Key`（≤ 128 字，缺了 400）：调账两条路由、保险基金注资、补记、增发、冻结与解冻、强制平仓、提现审核与批量审核、待处理充值入账、站内信。
   - 后台对话框每次打开生成一个键，结果未知（网络断、5xx、键冲突）时重试沿用，结果确定或关闭对话框后换新键。
   - 键归各管理员所有，存在 admin 库平台表 `idempotency_keys`（`scope` 为「管理员 ID + 动作」，`response` 是请求生成的 ID），保留 24 小时，admin-service 每小时清理一次。
@@ -120,7 +120,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 
 - **待处理的充值**：低于最小充值额、账户已关闭或不符合资格的（已记在系统科目 `UNCLAIMED_DEPOSIT`）、未支持的代币（没有记账）、补记后托管方回调与录入不一致的（`discrepancy`）。
   - **入账给用户** `POST /admin/v1/deposits/{id}/credit`（理由）：只限已记入 `UNCLAIMED_DEPOSIT` 的，按原币种、原数量由账本 `ReleaseUnclaimed` 转给用户现货账户（分录 `DEPOSIT_CREDIT`，幂等键 `deposit-release:<id>`，账本审计 `ledger.unclaimed_released`），充值变为 `CREDITED`、记下放行分录。不能改数量；未支持的代币与回调不一致的补记不能入账（409 `WALLET_DEPOSIT_NOT_RELEASABLE`），要补偿另做资金调整。理由只进审计，不进分录：账本已放行、钱包没记上时，换个理由再点「入账」也只是记下原来的放行（C5.5 ⑦）。
-  - **驳回** `POST /admin/v1/deposits/{id}/reject`（理由）：只标记为已处理（`resolution = DISMISSED`），不动资金，wallet-service 审计 `wallet.deposit.dismissed`。处理过的再处理得到 `WALLET_DEPOSIT_RESOLVED`。账本已经放行、但钱包没记上的不能驳回（409 `WALLET_DEPOSIT_RELEASED`，详情 `journal_id`；钱包驳回前按 `deposit-release:<id>` 问账本 `GetUnclaimedRelease`），再点「入账」把放行记下来（C5.5 ⑦）。
+  - **驳回** `POST /admin/v1/deposits/{id}/reject`（理由）：只标记为已处理（`resolution = DISMISSED`），不动资金，wallet-service 审计 `wallet.deposit.dismissed`。处理过的再处理得到 `WALLET_DEPOSIT_RESOLVED`。账本已经放行、但钱包没记上的不能驳回（409 `WALLET_DEPOSIT_RELEASED`，详情 `journal_id`；钱包驳回前按 `deposit-release:<id>` 问账本 `GetUnclaimedRelease`），再点「入账」把放行记下来（C5.5 ⑦），不会再放行一次；记下来的那次 wallet-service 审计 `wallet.deposit.release_recorded`（带账本的 `journal_id`；放行本身由账本审计，C5.5 ⑰）。
 - **补记充值**（托管方已到账、回调丢失）：优盾网关没有按交易号查询的接口，系统无法向托管方核对。管理员先在优盾商户后台或区块浏览器核对，再在充值页「补记充值」录入网络、托管方交易号（tradeId）、充值地址、交易哈希与数量：
   - `POST /admin/v1/deposits/manual/check` 只核对不记账：网络由托管方服务、地址是该网络上某个用户的充值地址、`UDUN:<tradeId>` 与（网络、哈希、地址）都没出现过（否则 409 `WALLET_DEPOSIT_KNOWN`，详情带已有充值的 ID）、数量不超过资产精度；返回入账用户、资产、是否低于最小额与折合 USDT。
   - `POST /admin/v1/deposits/manual`（再带理由）是一笔资金操作（`DEPOSIT_BACKFILL`），护栏与调账相同：单人模式限额内立即补记（`EXECUTED`，`result` 为 `deposit <id>`），超过限额、无报价或双人模式时等另一位管理员批准。确认框明示「托管方未核对」。

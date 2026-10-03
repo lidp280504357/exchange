@@ -167,6 +167,7 @@ func (s *Service) CreditDeposit(ctx context.Context, id, actor, reason string) (
 			return apperr.NotFound("no such deposit")
 		}
 		var journal string
+		recorded := false
 		if err := cur.Releasable(); err != nil {
 			// Released by the ledger before, unrecorded, and in doubt since
 			// (a discrepancy marked after it): the funds moved, so the
@@ -181,7 +182,7 @@ func (s *Service) CreditDeposit(ctx context.Context, id, actor, reason string) (
 			if released == "" {
 				return err
 			}
-			journal = released
+			journal, recorded = released, true
 			if err := cur.RecordRelease(journal, actor, strings.TrimSpace(reason), s.Now()); err != nil {
 				return err
 			}
@@ -196,6 +197,20 @@ func (s *Service) CreditDeposit(ctx context.Context, id, actor, reason string) (
 		out = *cur
 		if err := r.Deposits().Update(ctx, out); err != nil {
 			return err
+		}
+		if recorded {
+			// The ledger audited its release when it made it; this records
+			// who found it unrecorded and closed the deposit (C5.5 ⑰).
+			details, _ := json.Marshal(map[string]string{
+				"deposit_id": out.ID, "user_id": out.UserID, "asset": out.Asset, "amount": out.Amount.String(), "journal_id": journal,
+				"discrepancy": out.Discrepancy,
+			})
+			if err := r.Audit(ctx, &auditv1.AdminActionPerformed{
+				Target: "user:" + out.UserID, Action: "wallet.deposit.release_recorded", Actor: actor, Reason: strings.TrimSpace(reason),
+				Details: string(details),
+			}, actor); err != nil {
+				return err
+			}
 		}
 		return r.Emit(ctx, &walletv1.DepositCredited{Deposit: ToProto(out), JournalId: journal}, out.UserID)
 	})
