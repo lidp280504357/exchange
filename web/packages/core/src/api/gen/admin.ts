@@ -720,8 +720,11 @@ export interface paths {
          *     sent to the ledger). An unclaimed deposit the ledger released
          *     already, its release not recorded, is not closed: 409
          *     WALLET_DEPOSIT_RELEASED (details journal_id); crediting it again
-         *     records the release. Audited by the wallet
-         *     (wallet.deposit.dismissed). Needs deposits.review.
+         *     records the release. A deposit of nobody the ledger released to a
+         *     user already is not closed either: 409
+         *     WALLET_DEPOSIT_RELEASED_TO_USER (details user_id, journal_id);
+         *     assigning it to that user records the release. Audited by the
+         *     wallet (wallet.deposit.dismissed). Needs deposits.review.
          */
         post: operations["rejectDeposit"];
         delete?: never;
@@ -2913,8 +2916,8 @@ export interface paths {
          * @description A custodian's fee on a withdrawal is booked from GAS_SUPPLY as it
          *     comes (BOOKABLE; journal_id null while GAS_SUPPLY is short), or
          *     held for a person (HELD: its unit on the network is not confirmed,
-         *     or it looks wrong) who books or writes it off (C6). Needs
-         *     withdrawals.read.
+         *     or it looks wrong) who books or writes it off (C6). One
+         *     custodian's when `provider` is given. Needs withdrawals.read.
          */
         get: operations["listCustodyFees"];
         put?: never;
@@ -2942,9 +2945,15 @@ export interface paths {
          *     off). wallet-service records the decision and audits it as
          *     wallet.custody.fee.book with the administrator as the actor, as
          *     exchangectl wallet custody-fee does; its processor books it within
-         *     a round. A fee that waits for no one (booked, written off) is 409;
-         *     a withdrawal without a custodian's fee 404. Needs
-         *     ledger.adjust.approve.
+         *     a round. As charged is at most 5 times what was reported: by
+         *     amount in the reported asset, by worth in USDT at the last prices
+         *     in another (422 ADMIN_FEE_ABOVE_REPORTED; ADMIN_FEE_UNPRICED when
+         *     one of the two has no fresh price): more is booked with exchangectl
+         *     wallet custody-fee (review ㉖). A fee that waits for no one
+         *     (booked, written off) is 409 WALLET_CUSTODY_FEE_NOT_HELD (details
+         *     status), one another decision took first 409
+         *     WALLET_CUSTODY_FEE_CHANGED; a withdrawal without a custodian's fee
+         *     404 WALLET_CUSTODY_FEE_NOT_FOUND. Needs ledger.adjust.approve.
          */
         post: operations["bookCustodyFee"];
         delete?: never;
@@ -2967,8 +2976,9 @@ export interface paths {
          * @description For a fee not taken from the coin balances the platform holds, or
          *     reported in another unit: nothing is booked. Also a BOOKABLE one
          *     still waiting for GAS_SUPPLY. Audited by wallet-service as
-         *     wallet.custody.fee.write_off. 409 when it waits for no one. Needs
-         *     ledger.adjust.approve.
+         *     wallet.custody.fee.write_off. 409 WALLET_CUSTODY_FEE_NOT_HELD or
+         *     _CHANGED when it waits for no one, 404 WALLET_CUSTODY_FEE_NOT_FOUND
+         *     without a fee. Needs ledger.adjust.approve.
          */
         post: operations["writeOffCustodyFee"];
         delete?: never;
@@ -8748,6 +8758,8 @@ export interface operations {
     listCustodyFees: {
         parameters: {
             query?: {
+                /** @description The custodian (UDUN, UDUNMOCK); every custodian's when empty. */
+                provider?: "UDUN" | "UDUNMOCK";
                 /** @description One status; every status when empty. */
                 status?: "HELD" | "BOOKABLE" | "WRITTEN_OFF";
                 /** @description The previous page's next_cursor; omitted for the first page. */

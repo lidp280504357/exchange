@@ -679,10 +679,13 @@ type fakeWallet struct {
 	withdrawals map[string]reviewedWithdrawal
 	// suspended are the assets whose withdrawals are suspended.
 	suspended map[string]ports.Suspension
-	// provider and callbacks are the custodian last asked about; fees the
-	// fee decisions made ("book <id> <asset> <amount> by <actor>").
-	provider, callbacks string
-	fees                []string
+	// provider, callbacks and feesOf are the custodian last asked about;
+	// fees the fee decisions made ("book <id> <asset> <amount> by
+	// <actor>"); held the fees held for a person (withdrawal ID -> its
+	// reported asset and amount).
+	provider, callbacks, feesOf string
+	fees                        []string
+	held                        map[string][2]string
 }
 
 func (w *fakeWallet) List(context.Context, ports.WithdrawalQuery) (json.RawMessage, error) {
@@ -707,7 +710,14 @@ func (w *fakeWallet) Callbacks(_ context.Context, q ports.CallbackQuery) (json.R
 }
 
 func (w *fakeWallet) Fees(_ context.Context, q ports.FeeQuery) (json.RawMessage, error) {
-	return json.RawMessage(`{"items":[],"next_cursor":null,"status":"` + q.Status + `"}`), nil
+	w.feesOf = q.Provider
+	items := []string{}
+	if q.Status == "" || q.Status == "HELD" {
+		for id, f := range w.held {
+			items = append(items, `{"withdrawal_id":"`+id+`","asset":"`+f[0]+`","amount":"`+f[1]+`","status":"HELD"}`)
+		}
+	}
+	return json.RawMessage(`{"items":[` + strings.Join(items, ",") + `],"next_cursor":null}`), nil
 }
 
 func (w *fakeWallet) BookFee(_ context.Context, b ports.FeeBooking) (json.RawMessage, error) {

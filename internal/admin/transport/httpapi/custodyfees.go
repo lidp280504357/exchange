@@ -14,7 +14,9 @@ import (
 // custodyFees pages through the custodians' withdrawal fees (C6).
 func (h *Handler) custodyFees(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	raw, err := h.Svc.CustodyFees(r.Context(), principal(r), ports.FeeQuery{Status: q.Get("status"), Cursor: q.Get("cursor"), Limit: intParam(q, "limit")})
+	raw, err := h.Svc.CustodyFees(r.Context(), principal(r), ports.FeeQuery{
+		Provider: q.Get("provider"), Status: q.Get("status"), Cursor: q.Get("cursor"), Limit: intParam(q, "limit"),
+	})
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

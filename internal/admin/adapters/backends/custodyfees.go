@@ -13,7 +13,7 @@ import (
 // Fees returns a page of the custodians' withdrawal fees (C6).
 func (w Wallet) Fees(ctx context.Context, q ports.FeeQuery) (json.RawMessage, error) {
 	v := url.Values{}
-	for k, x := range map[string]string{"status": q.Status, "cursor": q.Cursor} {
+	for k, x := range map[string]string{"provider": q.Provider, "status": q.Status, "cursor": q.Cursor} {
 		if x != "" {
 			v.Set(k, x)
 		}

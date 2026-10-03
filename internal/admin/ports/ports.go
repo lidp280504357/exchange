@@ -473,12 +473,13 @@ type CallbackQuery struct {
 	Limit    int
 }
 
-// FeeQuery selects the custodians' withdrawal fees: a status (HELD,
-// BOOKABLE, WRITTEN_OFF; any when empty), a page.
+// FeeQuery selects the custodians' withdrawal fees: a custodian (any when
+// empty), a status (HELD, BOOKABLE, WRITTEN_OFF; any when empty), a page.
 type FeeQuery struct {
-	Status string
-	Cursor string
-	Limit  int
+	Provider string
+	Status   string
+	Cursor   string
+	Limit    int
 }
 
 // FeeBooking is an administrator's decision to book a custodian's fee

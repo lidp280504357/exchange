@@ -33,7 +33,7 @@ export const custodyZh = {
       waitingGas: "等待 GAS_SUPPLY",
       book: "入账",
       bookTitle: "把这笔手续费从 GAS_SUPPLY 入账",
-      bookHint: "按托管方报告的币种与数量入账；实际扣的不同时填写实扣的币种与数量（平台须在这个网络的托管方持有该币种，小数位不超过其精度，否则请核销）。处理器一轮内记账。确认词为提现 ID 的后 4 位。",
+      bookHint: "按托管方报告的币种与数量入账；实际扣的不同时填写实扣的币种与数量（平台须在这个网络的托管方持有该币种，小数位不超过其精度，否则请核销）。实扣最多是报告的 5 倍（同币种按数量，换币种按现价折 USDT），更多的用 exchangectl wallet custody-fee。处理器一轮内记账。确认词为提现 ID 的后 4 位。",
       asset: "实扣币种",
       assetHint: "留空即按报告的 {{asset}}",
       amount: "实扣数量",
@@ -47,6 +47,13 @@ export const custodyZh = {
       empty: "没有手续费",
       emptyHeld: "没有待人工处理的手续费",
     },
+  },
+  errors: {
+    WALLET_CUSTODY_FEE_NOT_FOUND: "这笔提现没有托管方手续费",
+    WALLET_CUSTODY_FEE_NOT_HELD: "这笔手续费不在等人处理：已入账、已核销或已按报告入账",
+    WALLET_CUSTODY_FEE_CHANGED: "这笔手续费刚被另一个决定处理了，列表已刷新",
+    ADMIN_FEE_ABOVE_REPORTED: "实扣超过报告的 5 倍（换币种时按现价折 USDT）：请核对；确实更多时用 exchangectl wallet custody-fee 入账",
+    ADMIN_FEE_UNPRICED: "换了币种的实扣要按 USDT 比较，但有一边没有新鲜报价：请用 exchangectl wallet custody-fee 入账",
   },
 };
 
@@ -81,7 +88,7 @@ export const custodyEn = {
       waitingGas: "Waits for GAS_SUPPLY",
       book: "Book",
       bookTitle: "Book this fee from GAS_SUPPLY",
-      bookHint: "In the asset and amount the custodian reported; when it charged otherwise, enter what it charged (the platform must hold that asset with the custodian on this network, in at most its decimals; else write it off). The processor books it within a round. The confirmation word is the withdrawal ID's last 4 characters.",
+      bookHint: "In the asset and amount the custodian reported; when it charged otherwise, enter what it charged (the platform must hold that asset with the custodian on this network, in at most its decimals; else write it off). As charged is at most 5 times what was reported (by amount in its asset, in USDT at the last prices in another); book more with exchangectl wallet custody-fee. The processor books it within a round. The confirmation word is the withdrawal ID's last 4 characters.",
       asset: "Asset charged",
       assetHint: "Empty: the reported {{asset}}",
       amount: "Amount charged",
@@ -95,5 +102,13 @@ export const custodyEn = {
       empty: "No fees",
       emptyHeld: "No fees held for a person",
     },
+  },
+  errors: {
+    WALLET_CUSTODY_FEE_NOT_FOUND: "This withdrawal has no custodian's fee",
+    WALLET_CUSTODY_FEE_NOT_HELD: "This fee waits for no one: booked, written off, or booked as reported",
+    WALLET_CUSTODY_FEE_CHANGED: "Another decision took this fee meanwhile; the list is reloaded",
+    ADMIN_FEE_ABOVE_REPORTED:
+      "As charged is more than 5 times what was reported (in USDT at the last prices for another asset): check it; if it really is, book it with exchangectl wallet custody-fee",
+    ADMIN_FEE_UNPRICED: "As charged in another asset is compared in USDT, and one of the two has no fresh price: book it with exchangectl wallet custody-fee",
   },
 };

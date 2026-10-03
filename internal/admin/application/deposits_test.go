@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -83,9 +84,9 @@ func TestADepositOfNobodyIsCreditedToAUser(t *testing.T) {
 	h.admin(t, "ops@example.com", domain.RoleOperator)
 	fin, boss, ops := h.login(t, "fin@example.com"), h.login(t, "boss@example.com"), h.login(t, "ops@example.com")
 	small, large, lost := "0192a000-0000-7000-8000-0000000000e1", "0192a000-0000-7000-8000-0000000000e2", "0192a000-0000-7000-8000-0000000000e3"
-	other, probe := "0192a000-0000-7000-8000-0000000000e4", "0192a000-0000-7000-8000-0000000000e5"
+	other, probe, spelled := "0192a000-0000-7000-8000-0000000000e4", "0192a000-0000-7000-8000-0000000000e5", "0192a000-0000-7000-8000-0000000000e6"
 	owned := "0192a000-0000-7000-8000-0000000000d9"
-	h.deposits.nobody = map[string]string{small: "50", large: "200000", lost: "7", other: "5", probe: "6"}
+	h.deposits.nobody = map[string]string{small: "50", large: "200000", lost: "7", other: "5", probe: "6", spelled: "3"}
 	h.deposits.probes = map[string]bool{probe: true}
 	stranger := "0192a000-0000-7000-8000-00000000cafe"
 
@@ -120,9 +121,12 @@ func TestADepositOfNobodyIsCreditedToAUser(t *testing.T) {
 	if err != nil || b.Status != domain.ApprovalPending || b.Escalation != domain.EscalationSingleMax || h.deposits.assigned[large] != "" {
 		t.Fatalf("large %+v %v", b, err)
 	}
-	// One live request per deposit (review ㉕): another waits for this one.
-	if _, err := h.svc.AssignDeposit(ctx, boss, "k2b", large, someUser, "the same deposit again"); code(err) != "ADMIN_DEPOSIT_ASSIGN_OPEN" {
-		t.Fatalf("a second request while one waits: %v", err)
+	// One live request per deposit (review ㉕): another waits for this one,
+	// however its ID is spelled (review ㉖).
+	for i, spelling := range []string{large, strings.ToUpper(large), "{" + large + "}", "urn:uuid:" + large, strings.ReplaceAll(large, "-", "")} {
+		if _, err := h.svc.AssignDeposit(ctx, boss, fmt.Sprintf("k2b-%d", i), spelling, someUser, "the same deposit again"); code(err) != "ADMIN_DEPOSIT_ASSIGN_OPEN" {
+			t.Fatalf("a second request (%s) while one waits: %v", spelling, err)
+		}
 	}
 	if done, err := h.svc.DecideApproval(ctx, boss, b.ID, true, "checked the transfer"); err != nil || done.Status != domain.ApprovalExecuted ||
 		h.deposits.assigned[large] != someUser || done.JournalID != "release-"+large {
@@ -168,9 +172,16 @@ func TestADepositOfNobodyIsCreditedToAUser(t *testing.T) {
 		e.Status != domain.ApprovalExecuted || e.Payload["former_holder"] != "" || e.Payload["address_owner"] != "" {
 		t.Fatalf("a probe address's %+v %v", e, err)
 	}
+	// The former holder spelled otherwise is still the holder: the usual
+	// limits, the IDs recorded in their canonical form (review ㉖).
+	f, err := h.svc.AssignDeposit(ctx, fin, "k6", strings.ToUpper(spelled), "{"+strings.ToUpper(someUser)+"}", "the owner's ticket T-14")
+	if err != nil || f.Status != domain.ApprovalExecuted || f.Escalation != "" || f.Payload["user_id"] != someUser || f.Payload["deposit_id"] != spelled ||
+		h.deposits.assigned[spelled] != someUser {
+		t.Fatalf("spelled otherwise %+v %v", f, err)
+	}
 
 	got := h.auditsOf("admin.deposits.assign_requested")
-	if len(got) != 6 || !strings.Contains(got[0], `"deposit_id":"`+small+`"`) || !strings.Contains(got[0], `"former_holder":"`+someUser+`"`) {
+	if len(got) != 7 || !strings.Contains(got[0], `"deposit_id":"`+small+`"`) || !strings.Contains(got[0], `"former_holder":"`+someUser+`"`) {
 		t.Fatalf("the requests audited %v", got)
 	}
 	if !strings.Contains(got[3], `"user_id":"`+stranger+`","former_holder":"`+someUser+`"`) ||

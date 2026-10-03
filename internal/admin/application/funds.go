@@ -146,9 +146,11 @@ func (in *FundRequest) validate() error {
 		if in.Asset == "" {
 			return apperr.Invalid("the asset is required")
 		}
-		if _, err := uuid.Parse(in.UserID); err != nil {
+		u, err := uuid.Parse(in.UserID)
+		if err != nil {
 			return apperr.Invalid("user_id must be a UUID")
 		}
+		in.UserID = u.String()
 		switch in.AccountType = strings.ToUpper(strings.TrimSpace(in.AccountType)); in.AccountType {
 		case "":
 			in.AccountType = AccountSpot
@@ -171,13 +173,20 @@ func (in *FundRequest) validate() error {
 			return ErrNoBots
 		}
 	case domain.KindDepositAssign:
-		if _, err := uuid.Parse(in.DepositID); err != nil {
+		// Canonical forms (uuid.Parse also takes upper case, braces,
+		// urn:uuid: and bare hex): one spelling per deposit and user, so the
+		// key's fingerprint, the holder rule and the index of one live
+		// request per deposit see the same IDs (review ㉖).
+		d, err := uuid.Parse(in.DepositID)
+		if err != nil {
 			return apperr.NotFound("no such deposit")
 		}
-		if u, err := uuid.Parse(in.UserID); err != nil || u == uuid.Nil {
+		in.DepositID = d.String()
+		u, err := uuid.Parse(in.UserID)
+		if err != nil || u == uuid.Nil {
 			return apperr.Invalid("user_id must be the ID of the user the deposit is credited to")
 		}
-		in.UserID = strings.ToLower(in.UserID)
+		in.UserID = u.String()
 	case domain.KindDepositBackfill:
 		b := in.Backfill
 		if b == nil || !b.Amount.IsPositive() {

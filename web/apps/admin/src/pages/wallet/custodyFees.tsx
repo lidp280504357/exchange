@@ -1,5 +1,6 @@
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
 import { Button, EmptyState, Input, Segmented, type ColumnDef, type DataColumnMeta } from "@exchange/ui";
+import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DangerAction, lastFour } from "../../kit/actions";
@@ -20,18 +21,19 @@ const held = (f: Fee) => f.status === "HELD";
 const waitsForGas = (f: Fee) => f.status === "BOOKABLE" && !f.journal_id;
 
 /**
- * CustodyFees lists what the custodians charge on withdrawals (C6): those
+ * CustodyFees lists what a custodian charges on withdrawals (C6): those
  * held for a person first. An administrator who approves adjustments books
- * one from GAS_SUPPLY (as reported, or as charged) or writes it off, as
- * exchangectl wallet custody-fee does; wallet-service audits each.
+ * one from GAS_SUPPLY (as reported, or as charged within 5 times that) or
+ * writes it off, as exchangectl wallet custody-fee does; wallet-service
+ * audits each.
  */
-export function CustodyFees({ admin }: { admin: Admin }) {
+export function CustodyFees({ admin, provider }: { admin: Admin; provider: "UDUN" | "UDUNMOCK" }) {
   const { t } = useTranslation();
   const [status, setStatus] = useState<Status | "ALL">("HELD");
-  const list = useCursorList<Fee>(["admin", "custody", "fees", status], async (cursor) =>
+  const list = useCursorList<Fee>(["admin", "custody", "fees", provider, status], async (cursor) =>
     adminData(
       await adminApi.GET("/admin/v1/custody/fees", {
-        params: { query: { status: status === "ALL" ? undefined : status, cursor, limit: pageSize() } },
+        params: { query: { provider, status: status === "ALL" ? undefined : status, cursor, limit: pageSize() } },
       }),
     ),
   );
@@ -139,6 +141,22 @@ export function CustodyFees({ admin }: { admin: Admin }) {
 
 const invalidate = [["admin", "custody"]];
 
+/**
+ * useDecision runs a decision on a fee and reloads the fees whatever came
+ * of it: a 409 means another decision (or a lost answer's first try) took
+ * it already, and the row should show so (review ㉖).
+ */
+function useDecision() {
+  const qc = useQueryClient();
+  return async <T,>(call: () => Promise<T>): Promise<T> => {
+    try {
+      return await call();
+    } finally {
+      void qc.invalidateQueries({ queryKey: ["admin", "custody"] });
+    }
+  };
+}
+
 /** FeeTarget names a fee in its dialogs. */
 function FeeTarget({ f }: { f: Fee }) {
   return (
@@ -153,6 +171,7 @@ function FeeTarget({ f }: { f: Fee }) {
 /** BookFee books a held fee from GAS_SUPPLY, as reported or in the asset and amount found charged. */
 function BookFee({ f }: { f: Fee }) {
   const { t } = useTranslation();
+  const decision = useDecision();
   const [asset, setAsset] = useState("");
   const [amount, setAmount] = useState("");
   const a = asset.trim().toUpperCase();
@@ -171,12 +190,14 @@ function BookFee({ f }: { f: Fee }) {
       target={<FeeTarget f={f} />}
       confirmWord={lastFour(f.withdrawal_id)}
       disabled={!amountOk}
-      run={async (reason) =>
-        adminData(
-          await adminApi.POST("/admin/v1/custody/fees/{withdrawal_id}/book", {
-            params: { path: { withdrawal_id: f.withdrawal_id } },
-            body: { reason, ...(a ? { asset: a } : {}), ...(n ? { amount: n } : {}) },
-          }),
+      run={(reason) =>
+        decision(async () =>
+          adminData(
+            await adminApi.POST("/admin/v1/custody/fees/{withdrawal_id}/book", {
+              params: { path: { withdrawal_id: f.withdrawal_id } },
+              body: { reason, ...(a ? { asset: a } : {}), ...(n ? { amount: n } : {}) },
+            }),
+          ),
         )
       }
       success={t("admin.custodyFees.booked")}
@@ -210,6 +231,7 @@ function BookFee({ f }: { f: Fee }) {
 /** WriteOffFee writes off a held fee, or one still waiting for GAS_SUPPLY. */
 function WriteOffFee({ f }: { f: Fee }) {
   const { t } = useTranslation();
+  const decision = useDecision();
   return (
     <DangerAction
       trigger={(open) => (
@@ -221,12 +243,14 @@ function WriteOffFee({ f }: { f: Fee }) {
       description={t("admin.custodyFees.writeOffHint")}
       target={<FeeTarget f={f} />}
       confirmWord={lastFour(f.withdrawal_id)}
-      run={async (reason) =>
-        adminData(
-          await adminApi.POST("/admin/v1/custody/fees/{withdrawal_id}/write-off", {
-            params: { path: { withdrawal_id: f.withdrawal_id } },
-            body: { reason },
-          }),
+      run={(reason) =>
+        decision(async () =>
+          adminData(
+            await adminApi.POST("/admin/v1/custody/fees/{withdrawal_id}/write-off", {
+              params: { path: { withdrawal_id: f.withdrawal_id } },
+              body: { reason },
+            }),
+          ),
         )
       }
       success={t("admin.custodyFees.writtenOff")}

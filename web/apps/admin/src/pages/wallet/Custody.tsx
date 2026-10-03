@@ -89,7 +89,7 @@ export default function Custody({ admin }: { admin: Admin }) {
         <Callbacks admin={admin} provider={provider} />
       </Card>
       <Card title={t("admin.custodyFees.title")}>
-        <CustodyFees admin={admin} />
+        <CustodyFees admin={admin} provider={provider} />
       </Card>
     </Page>
   );

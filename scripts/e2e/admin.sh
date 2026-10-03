@@ -1310,6 +1310,30 @@ else
   eventually 60 "the request names the former holder in the trail" other_audited
 fi
 
+echo "== the custodians' fees (C6)"
+# What the custodians charge on withdrawals, held for a person or booked as
+# reported; deciding one moves GAS_SUPPLY (ledger.adjust.approve).
+as AUDITOR GET "/admin/v1/custody/fees?provider=UDUNMOCK&status=HELD" ""
+expect 200 - "AUDITOR reads the stand-in's held fees"
+check "all(.items[]; .provider == \"UDUNMOCK\" and .status == \"HELD\")" "the stand-in's, held"
+as AUDITOR GET "/admin/v1/custody/fees?status=PAID" ""
+expect 400 COMMON_INVALID_ARGUMENT "an unknown status"
+NO_FEE=$(uuidgen | tr '[:upper:]' '[:lower:]')
+as OPERATOR POST "/admin/v1/custody/fees/$NO_FEE/book" '{"reason":"e2e"}'
+expect 403 ADMIN_FORBIDDEN "OPERATOR books no fee"
+as FINANCE POST "/admin/v1/custody/fees/$NO_FEE/book" '{"reason":""}'
+expect 400 COMMON_INVALID_ARGUMENT "not without a reason"
+as FINANCE POST "/admin/v1/custody/fees/$NO_FEE/write-off" '{"reason":"e2e no such fee"}'
+expect 404 WALLET_CUSTODY_FEE_NOT_FOUND "a withdrawal without a custodian's fee"
+as AUDITOR GET "/admin/v1/custody/fees?status=BOOKABLE&limit=200" ""
+BOOKED_FEE=$(jq -r '[.items[] | select(.journal_id != null)][0].withdrawal_id // empty' <<<"$BODY")
+if [[ -n $BOOKED_FEE ]]; then
+  as FINANCE POST "/admin/v1/custody/fees/$BOOKED_FEE/write-off" '{"reason":"e2e write off a booked fee"}'
+  expect 409 WALLET_CUSTODY_FEE_NOT_HELD "a fee booked already waits for no one"
+else
+  echo "skip a booked fee: none booked yet"
+fi
+
 echo "== a withdrawal's review details and holds"
 as FINANCE GET "/admin/v1/withdrawals?held=false&min_risk=0&min_value_usdt=0&max_value_usdt=1000000" ""
 expect 200 - "the queue filters by hold, risk and worth"

@@ -201,7 +201,8 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
   - **记给用户** `POST /admin/v1/deposits/{id}/assign`（`{user_id, reason}`，带 `Idempotency-Key`，要 `deposits.review`）：一笔资金操作（`DEPOSIT_ASSIGN`，迁移 admin 00011），护栏与调账相同——单人模式不超过单笔限额时立即执行，超过限额、无报价或双人模式时等另一位管理员批准（`ledger.adjust.approve`）。
   - 地址现在或退役前有持有人、而记给的不是这个持有人时，不论金额都等另一位管理员（升级原因 `NOT_ADDRESS_HOLDER`，协调会话 10-04 的决定）；操作与审计记下原持有人 `former_holder`（退役的地址）或现持有人 `address_owner` 与所选的 `user_id`，弹窗与审批列表都提示。
   - 执行时 wallet-service 把持有人设为这个用户、由账本 `ReleaseUnclaimed` 按原币种原数量转入其现货账户（审计 `wallet.deposit.assigned`、`ledger.unclaimed_released`），操作带放行分录的 `journal_id`；后台审计 `admin.deposits.assign_requested/approved/executed/…`。确认词为用户 ID 的后 4 位；用户 ID 不是 UUID 时确认按钮不可用。
-  - 一笔充值同时只有一个有效申请：已有等待中（含结果未知）或已执行的申请时，新的申请返回 409 `ADMIN_DEPOSIT_ASSIGN_OPEN`（迁移 admin 00012 的部分唯一索引，两个操作不会共用一次放行、重复计入限额，㉕）；驳回或撤回后可重新申请。不是等待处理的无主充值返回 409 `ADMIN_DEPOSIT_NOT_UNOWNED`；用户现在不能充值时由 wallet-service 拒绝。
+  - 一笔充值同时只有一个有效申请：已有等待中（含结果未知）或已执行的申请时，新的申请返回 409 `ADMIN_DEPOSIT_ASSIGN_OPEN`（迁移 admin 00012 的部分唯一索引，两个操作不会共用一次放行、重复计入限额，㉕）；驳回或撤回后可重新申请。充值 ID 与用户 ID 先转成标准写法（小写、带连字符）再记录与比较：大写、花括号、`urn:uuid:` 或不带连字符的写法都指同一笔充值、同一位用户（㉖）。
+  - 账本已把这笔无主充值放给某位用户、钱包还没记上时，驳回与记给别人都得到 409 `WALLET_DEPOSIT_RELEASED_TO_USER`（详情 `user_id`、`journal_id`）：记给详情里的这位用户即补上记录，不会再放行。不是等待处理的无主充值返回 409 `ADMIN_DEPOSIT_NOT_UNOWNED`；用户现在不能充值时由 wallet-service 拒绝。
   - 结果未知（例如 wallet-service 已放行、答复丢了）时操作停在「待核对」，同一请求（同一键）再来：wallet-service 对已有持有人的充值答 409，后台读这笔充值，已记给同一用户就按已完成记录，不会再放行一次（账本的放行只取决于充值与用户）。
   - 无主充值不能直接「入账给用户」（409 `WALLET_DEPOSIT_NO_OWNER`）；也可以照常驳回。
 - **补记充值**（托管方已到账、回调丢失）：优盾网关没有按交易号查询的接口，系统无法向托管方核对。管理员先在优盾商户后台或区块浏览器核对，再在充值页「补记充值」录入网络、托管方交易号（tradeId）、充值地址、交易哈希与数量：
@@ -234,10 +235,11 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 - **概况与币种**：托管方状态（可访问、未配置、读不到及原因）、处理中的提现（数量、折合、最早的时间，可跳到提现列表）、待处理回调数与最近回调；托管方的币种与余额、使用它的网络。
 - **对账**（不变量 4，每个持有方与资产最近一次）：持有、其它持有方、在途提现、未入账手续费、账本应有、短缺；持有方显示「托管方 · 名字」或「自建钱包 · 网络」。切换真网关后出现「替身基线」一列（`baseline`：切换时从账本应有里扣除的替身模拟充值，不在任何托管方），全为 0 时不显示。
 - **回调日志**：按结果（`result`）、类型（`kind`）、交易/提现 ID、哈希或地址（`q`）筛选（游标分页）；详情 `GET /admin/v1/custody/callbacks/{id}` 有原始请求（签名打码）与来源地址（`remote_ips`，最近 8 个）。验签通过且 `FAILED`、`UNMATCHED`、`RECEIVED` 的回调可以重放：`POST /admin/v1/custody/callbacks/{id}/replay`（理由，需 `withdrawals.review`，wallet-service 写审计 `wallet.custody.callback.replay`）。
-- **托管方手续费**（C6，审查 ④ 的后台）：同页下方「托管方手续费」，`GET /admin/v1/custody/fees?status=HELD|BOOKABLE|WRITTEN_OFF`（默认先看待人工处理）。
+- **托管方手续费**（C6，审查 ④ 的后台）：同页下方「托管方手续费」，只列页头所选托管方的，`GET /admin/v1/custody/fees?provider=&status=HELD|BOOKABLE|WRITTEN_OFF`（不带 `provider` 为全部托管方；默认先看待人工处理）。
   - 计费方式确认过的按报告从 `GAS_SUPPLY` 入账（`BOOKABLE`；`GAS_SUPPLY` 不足时分录为空、显示「等待 GAS_SUPPLY」）；未确认或看起来不对的为 `HELD`。
   - 有 `ledger.adjust.approve` 的管理员处理 `HELD`：「入账」`POST /admin/v1/custody/fees/{withdrawal_id}/book`（`{asset?, amount?, reason}`：留空按报告，填写则按实扣；平台须在该网络的托管方持有这个币种、小数位不超过其精度，否则 400，请核销；处理器一轮内记账）或「核销」`POST …/write-off`（`{reason}`，不记账；也用于等待 `GAS_SUPPLY` 的那笔）。确认词为提现 ID 后 4 位。
-  - 与 `exchangectl wallet custody-fee` 走同一条路径，wallet-service 以管理员邮箱审计 `wallet.custody.fee.book` / `wallet.custody.fee.write_off`；已处理的再处理得到 409，不会重复入账。
+  - 按实扣入账最多是报告的 5 倍：同币种按数量，换了币种按现价折 USDT 比较（422 `ADMIN_FEE_ABOVE_REPORTED`；有一边没有新鲜报价时 422 `ADMIN_FEE_UNPRICED`），更多的由运维用 `exchangectl wallet custody-fee` 入账（一位管理员不能单独从 `GAS_SUPPLY` 记任意数额，㉖）。
+  - 与 `exchangectl wallet custody-fee` 走同一条路径，wallet-service 以管理员邮箱审计 `wallet.custody.fee.book` / `wallet.custody.fee.write_off`。不带幂等键：已处理的再处理得到 409 `WALLET_CUSTODY_FEE_NOT_HELD`（详情 `status`），刚被另一个决定处理的 409 `WALLET_CUSTODY_FEE_CHANGED`，不会重复入账；没有手续费的提现 404 `WALLET_CUSTODY_FEE_NOT_FOUND`。决定无论成败都刷新列表（答复丢了再点得到 409 时，行也会显示已处理，㉖）。
 
 ### 对账与系统科目
 
@@ -449,6 +451,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
   - 资金操作：双人调账、设置的权限与校验、单人模式（ADMIN 直接 +2.5/−2.5 USDT，超过单笔限额的转审并撤回；双人模式时跳过）、幂等键（不带键 400；同一键的调账、冻结、解冻与站内信各发两次只生效一次，站内信只审计一次、用户只收到一条；同一键换金额 409；决定者重复批准返回原操作）、合约（状态、只减仓、强平监控与记录、双人保险基金注资 1 USDT）、风控冻结与解冻（用户资金流水里看得到 `ADMIN_FREEZE`；运维的 `exchangectl ledger release-hold` 超过冻结单的数量被拒、默认解冻冻结单的全部，审计带 `forced`）、合约账户调账（单人模式时）、强制平仓（用户市价买入 0.1 ETH-USDT-PERP，HOUSE 的仓位排在用户之后，扣 1 USDT 前的全仓保证金预览（扣后权益少 1），后台平掉后仓位为空；合约交易关闭时跳过）。
   - 充值处置与补记（用托管方替身 udun-mock：回调推迟 600 秒的 2 USDT 由 FINANCE 补记、用户余额 +2、同一交易号再补记被拒、晚到的回调记为已核对且不再入账、`exchangectl` 报告里不再列出；低于最小额的 0.5 USDT 入账给用户、0.25 USDT 驳回后不能再入账；补记的检查做完才把延迟改回 0、放出扣住的回调——56e491b 起替身对已扣住的回调也按新设的延迟）。
   - 无主充值（C5.5 ㉑，在替身托管方 `UDUNMOCK` 的隐藏测试资产上）：一个 AQ 用户取充值地址、`exchangectl wallet retire-addresses --provider UDUNMOCK` 退役替身的地址后向它打入 1 与 2 个，两笔都是无主、原持有人是这个用户；OPERATOR 不能记、不带键 400、直接入账 409；FINANCE 把 1 记给原持有人（按常规限额，测试资产没有报价时由 ADMIN 批准），同一键再来是同一笔操作，再记一次 409，原持有人多 1；把 2 记给另一个用户时不论金额都等第二人（`NOT_ADDRESS_HOLDER`），申请人自己批不了，同一笔充值的第二个申请 409 `ADMIN_DEPOSIT_ASSIGN_OPEN`，ADMIN 批准后入账，审计带原持有人；`UDUNMOCK` 还没有网络时跳过。
+  - 托管方手续费（C6：AUDITOR 读替身的待处理手续费、只有 `UDUNMOCK` 的；未知状态 400；OPERATOR 不能处理、没有理由 400、没有手续费的提现 404 `WALLET_CUSTODY_FEE_NOT_FOUND`；已入账的不能核销，409 `WALLET_CUSTODY_FEE_NOT_HELD`）。
   - 提现详情与搁置（对已完成的提现搁置得到 409）、提现暂停（C5.5 ⑯：用 `exchangectl wallet withdrawals-suspend` 暂停 ETH，后台列出原因，FINANCE 不能解除，ADMIN 带理由解除，再解除得到 404，wallet-service 以 ADMIN 的名义审计）。
   - 用户的安全/历史/风控与完整联系方式、换绑审核（用户换绑唯一的邮箱 → 后台通过 → 按新邮箱能查到）、重置身份验证器、全部会话退出（用户令牌立即失效）、临时密码（旧密码失效、临时密码可登录、审计里没有它）。
   - 后台建管理员（C4a、C5.5 ⑪：ADMIN 建 OPERATOR，响应 `no-store`、只有一次性设置链接；设置前登录不了；不带会话打开链接看到账号与要绑定的密钥，短口令与错的验证码被拒，设好后链接作废、用自己设的登录；改为 AUDITOR 后下一个请求即生效；重置口令与身份验证器都结束会话、旧的立即失效，各自的链接设好后可登录；自己改口令时错的当前口令被拒、改后用新的登录；结束会话；停用后不能登录、启用后可以；不能改自己的账号；链接、口令与密钥不出现在任何输出与审计里）。
@@ -497,6 +500,12 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | `ADMIN_DEPOSIT_ASSIGN_OPEN` | 这笔无主充值已有等待中或已执行的「记给用户」申请，先决定或撤回它（㉕） |
 | `WALLET_DEPOSIT_RESOLVED` | 这笔充值已经处理过 |
 | `WALLET_DEPOSIT_RELEASED` | 账本已经把这笔待处理充值放行给用户、钱包没记上：不能驳回，再「入账」一次把放行记下（详情 `journal_id`） |
+| `WALLET_DEPOSIT_RELEASED_TO_USER` | 账本已把这笔无主充值放给一位用户、钱包没记上：记给详情里的 `user_id` 即补上记录 |
+| `WALLET_CUSTODY_FEE_NOT_FOUND` | 这笔提现没有托管方手续费 |
+| `WALLET_CUSTODY_FEE_NOT_HELD` | 这笔手续费不在等人处理（已入账、已核销或按报告入账；详情 `status`） |
+| `WALLET_CUSTODY_FEE_CHANGED` | 这笔手续费刚被另一个决定处理了 |
+| `ADMIN_FEE_ABOVE_REPORTED` | 按实扣入账超过报告的 5 倍（换币种按现价折 USDT）；确实更多时用 `exchangectl wallet custody-fee` |
+| `ADMIN_FEE_UNPRICED` | 换了币种的实扣要按 USDT 比较，有一边没有新鲜报价；用 `exchangectl wallet custody-fee` |
 | `ADMIN_WITHDRAWAL_HELD` | 批量审核跳过了搁置中的提现，要单独审核 |
 | `WALLET_WITHDRAWAL_NOT_IN_REVIEW` | 只有待审批的提现可以搁置 |
 | `DERIV_HOUSE_NOT_CLOSED` | HOUSE 的仓位不能强制平仓 |
