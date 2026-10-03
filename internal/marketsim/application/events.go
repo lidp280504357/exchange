@@ -330,7 +330,12 @@ func (s *Sim) CreateEvent(ctx context.Context, e domain.Event, spikes ...domain.
 		fresh(x)
 		x.ParentID = e.ID
 	}
-	if e.Type != domain.EventTarget {
+	if e.Type != domain.EventTarget || (e.Direction == "" && e.Duration < domain.MinTargetWindow) {
+		if e.Type == domain.EventTarget {
+			s.mu.Lock()
+			legacyJump(&e, s.model.State.P)
+			s.mu.Unlock()
+		}
 		if err := e.Validate(); err != nil {
 			return domain.Event{}, apperr.Invalid(err.Error())
 		}

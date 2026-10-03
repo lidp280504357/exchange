@@ -297,3 +297,30 @@ func TestTargetsHitAcrossSeeds(t *testing.T) {
 		t.Fatalf("a quarter of the minutes against the target in %d of %d", quarter, seeds)
 	}
 }
+
+// Review AW: a spike reaches at most as far as the quotes may go into the
+// price band (10% × 0.7 here), whoever approved it; a target of the form
+// before A6 (no direction, no window) is the jump it meant; one with a
+// direction and too short a window is told the shortest.
+func TestALegacyTargetJumpsAndASpikeStaysInTheBand(t *testing.T) {
+	r := bandRig(t, nil)
+	r.rounds(8)
+	ctx := context.Background()
+	_, err := r.sim.CreateEvent(ctx, domain.Event{Type: domain.EventSpike, Size: -0.08, ApprovedBy: "ops2", CreatedBy: "ops", Reason: "test"})
+	if !apperrIs(err, "SIM_SPIKE_BEYOND_BAND") || !detailIs(err, "max", 0.07) {
+		t.Fatalf("a spike of 8%% in a band of 10%%: %v", err)
+	}
+	p := r.sim.Status().Target
+	e := r.create(t, domain.Event{Type: domain.EventTarget, Price: d("1.02"), Duration: 10 * time.Second})
+	if e.Type != domain.EventJump || math.Abs(e.Size-(1.02/p-1)) > 1e-6 || e.Duration != 10*time.Second {
+		t.Fatalf("a legacy target: %+v (target %v)", e, p)
+	}
+	r.rounds(4 * 11)
+	least := int(domain.MinWindow(r.sim.Status().Target, 1.04, 0.03).Seconds())
+	_, err = r.sim.CreateEvent(ctx, domain.Event{
+		Type: domain.EventTarget, Direction: domain.Above, Price: d("1.04"), Duration: 30 * time.Second, CreatedBy: "ops", Reason: "test",
+	})
+	if !apperrIs(err, "SIM_TARGET_INFEASIBLE") || !detailIs(err, "min_duration_seconds", least) || least < 60 {
+		t.Fatalf("a target of thirty seconds: %v", err)
+	}
+}

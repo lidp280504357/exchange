@@ -27,6 +27,8 @@ var (
 		"at most 6 spikes start in any hour")
 	ErrSpikeInClosing = apperr.New(apperr.KindConflict, "SIM_SPIKE_IN_CLOSING",
 		"a spike may not start while a target closes in on its level (the last 10% of its window)")
+	ErrSpikeBeyondBand = apperr.New(apperr.KindInvalid, "SIM_SPIKE_BEYOND_BAND",
+		"a spike reaches at most as far as the quotes may go into the price band (details.max)")
 )
 
 // openTargets are the scheduled and running threshold targets.
@@ -50,19 +52,34 @@ func (s *Sim) targetOver(t time.Time) bool {
 
 // checkTarget completes and checks a new threshold target against the
 // target p: its direction and then, the hard cap, and a window long
-// enough to get there slowly (§3).
+// enough to get there slowly (§3), the shortest one told when it is not.
 func (s *Sim) checkTarget(e *domain.Event, p float64) error {
 	e.Infer(p)
+	least := domain.MinWindow(p, e.Price.InexactFloat64(), s.params.MaxMinuteMove)
+	if e.Duration < domain.MinTargetWindow && e.Price.IsPositive() {
+		return ErrTargetInfeasible.WithDetail("min_duration_seconds", int(least.Seconds()))
+	}
 	if err := e.Validate(); err != nil {
 		return apperr.Invalid(err.Error())
 	}
 	if l := e.Price.InexactFloat64(); p > 0 && (l/p-1 > domain.MaxJump || l/p-1 <= -0.9) {
 		return apperr.Invalid("a target moves the price by at most +100% and by less than -90%")
 	}
-	if least := domain.MinWindow(p, e.Price.InexactFloat64(), s.params.MaxMinuteMove); e.Duration < least {
+	if e.Duration < least {
 		return ErrTargetInfeasible.WithDetail("min_duration_seconds", int(least.Seconds()))
 	}
 	return nil
+}
+
+// legacyJump makes a target of the form before A6 (no direction, a way
+// shorter than a target's window) the jump it meant: to its price over its
+// duration, at once when none (coordinator 2026-10-04 06:20).
+func legacyJump(e *domain.Event, p float64) bool {
+	if e.Type != domain.EventTarget || e.Direction != "" || e.Duration >= domain.MinTargetWindow || p <= 0 || !e.Price.IsPositive() {
+		return false
+	}
+	e.Type, e.Size, e.Price, e.Hold, e.Then = domain.EventJump, math.Round((e.Price.InexactFloat64()/p-1)*1e6)/1e6, decimal.Zero, 0, ""
+	return true
 }
 
 // checkSpikes checks spikes starting when they say, a target's when parent
@@ -79,6 +96,9 @@ func (s *Sim) checkSpikes(ctx context.Context, spikes []domain.Event, parent *do
 		x := &spikes[i]
 		if err := x.Validate(); err != nil {
 			return apperr.Invalid(err.Error())
+		}
+		if band := s.pair.Band; band > 0 && math.Abs(x.Size) > band*domain.BandReach+1e-12 {
+			return ErrSpikeBeyondBand.WithDetail("max", math.Round(band*domain.BandReach*1e4)/1e4) // review AW
 		}
 		if math.Abs(x.Size) > domain.SoloSpike && (x.ApprovedBy == "" || x.ApprovedBy == x.CreatedBy) {
 			return ErrNeedsApproval.WithDetail("move", x.Size)
@@ -349,7 +369,7 @@ func (s *Sim) TargetPlan(ctx context.Context, id string) (TargetView, error) {
 	defer s.mu.Unlock()
 	v := s.view(recent[j], s.now())
 	for _, x := range recent {
-		if x.ParentID == id {
+		if x.ParentID == id && !slices.ContainsFunc(v.Spikes, func(o domain.Event) bool { return o.ID == x.ID }) {
 			v.Spikes = append(v.Spikes, x)
 		}
 	}

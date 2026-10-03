@@ -201,6 +201,7 @@ func (s *Sim) watch(ctx context.Context, now time.Time, sh domain.Shape) {
 		why = "the price band refused every level the makers placed for three minutes"
 	}
 	target, anchor := s.model.State.P, s.anchor()
+	var ended *domain.Event // a target, re-anchored where the watchdog leaves the price (review AW)
 	for _, e := range s.runningEvents() {
 		if e.Type != domain.EventJump && e.Type != domain.EventTarget {
 			continue
@@ -216,12 +217,17 @@ func (s *Sim) watch(ctx context.Context, now time.Time, sh domain.Shape) {
 		if e.Type == domain.EventTarget {
 			s.m.targets.WithLabelValues(e.Result).Inc()
 			s.cancelSpikes(ctx, e.ID, now, watchdogActor)
+			ended = e
 		}
 		s.movedAt = now
 	}
 	s.events = slices.DeleteFunc(s.events, func(e *domain.Event) bool { return e.Status == domain.EventDone })
 	if anchor > 0 {
 		s.model.Rebase(anchor)
+		if ended != nil {
+			s.model.Reanchor(s.btc, s.eth)
+			s.keepAnchor(ctx, ended, "TARGET "+ended.ID+" ended by the watchdog")
+		}
 		s.save(ctx) // a restart goes on from the anchor, not from the lock
 	}
 	s.watchFrom, s.refusedSince = now, time.Time{}

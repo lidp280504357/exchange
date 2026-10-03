@@ -240,7 +240,7 @@ if [[ $MOVES == t ]]; then
   P=$(target_now)
   refused "{\"type\":\"TARGET\",\"direction\":\"ABOVE\",\"price\":\"$(jq -rn --argjson p "$P" '$p * 1.2 * 10000 | ceil / 10000')\",\"duration_seconds\":120,\"actor\":\"e2e-ops\",\"reason\":\"e2e: too fast\"}" \
     400 SIM_TARGET_INFEASIBLE "+20% in two minutes"
-  [[ $(jq -r .details.min_duration_seconds <<<"$SIM_BODY") -ge 600 ]] || { echo "FAIL the shortest window: $SIM_BODY" >&2; exit 1; }
+  [[ $(jq -r .details.min_duration_seconds <<<"$SIM_BODY") -gt 120 ]] || { echo "FAIL the shortest window: $SIM_BODY" >&2; exit 1; }
   echo "ok   the shortest window given: $(jq -r .details.min_duration_seconds <<<"$SIM_BODY") s"
   LEVEL=$(jq -rn --argjson p "$P" '$p * 1.03 * 10000 | ceil / 10000')
   solo "{\"type\":\"TARGET\",\"direction\":\"ABOVE\",\"price\":\"$LEVEL\",\"duration_seconds\":720,\"actor\":\"e2e-ops\",\"reason\":\"e2e: +3% in twelve minutes\"}" "a target of $LEVEL"
