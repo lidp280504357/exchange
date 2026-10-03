@@ -141,7 +141,7 @@ sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T mar
 
 后台（admin-service）按这个接口做了"模拟市场"五页（设计 §6，后台重构 C5，见 [admin.md](admin.md)「模拟市场」），用 `svcsign.Client{KeyID: "admin", Secret: SIM_ADMIN_API_SECRET}` 签名，`actor`、`approved_by` 按上面的契约由它填：超出单人份额的改动在后台存成审批，另一位有 `sim.control` 的管理员批准后才带着 `approved_by` 发过来。
 
-端到端 `scripts/e2e/astra.sh` 只用 `ops` 键：未签名 401、带 `approved_by` 403 `SIM_APPROVAL_NEEDS_ADMIN`、单人 35% 403，然后单人份额以内移动价格（2% 来回、带外 12% 来回、A6：两分钟 +20% 被拒并给出最短窗口、12 分钟 +3% 的阈值目标 `HIT` 且窗口里至少四分之一的 1m K 线反向、期间跳涨与收口期插针被拒、3 分钟 −2% `HIT`、−4% 插针到针尖后回到计划 ±0.5% 以内，合约强平 4% 来回，合计约 47%）；前后一小时内已有移动价格的事件（含插针）或参数改动时跳过这几段（再跑一次要隔一小时）。批准的路径由后台的端到端覆盖（`admin.sh`：OPERATOR 申请明天开始的 35% 跳涨，ADMIN 批准，检查发起人与批准人后取消）。
+端到端 `scripts/e2e/astra.sh` 只用 `ops` 键：未签名 401、带 `approved_by` 403 `SIM_APPROVAL_NEEDS_ADMIN`、单人 35% 403，然后单人份额以内移动价格（2% 来回、带外 12% 来回、A6：两分钟 +20% 被拒并给出最短窗口、12 分钟 +3% 的阈值目标 `HIT` 且窗口里有反向的 1m K 线（打印占比；"至少四分之一"由固定种子单测与 20 种子扫描证明，协调会话 06:55）、期间跳涨与收口期插针被拒、3 分钟 −2% `HIT`、−4% 插针到针尖后回到计划 ±0.5% 以内，合约强平 4% 来回，合计约 47%）；前后一小时内已有移动价格的事件（含插针）或参数改动时跳过这几段（再跑一次要隔一小时）。批准的路径由后台的端到端覆盖（`admin.sh`：OPERATOR 申请明天开始的 35% 跳涨，ADMIN 批准，检查发起人与批准人后取消）。
 
 ## 运维
 

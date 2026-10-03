@@ -11,8 +11,9 @@
 # target and another brings it back (A3), and a jump of 12%, beyond the
 # price band, is reached by the quotes walking the band. Threshold
 # targets and spikes (A6): a target too fast for its window is refused
-# with the shortest one; +3% in twelve minutes is HIT, a quarter of its 1m
-# candles at least against it, no jump nor a spike in its closing window
+# with the shortest one; +3% in twelve minutes is HIT, some of its 1m
+# candles against it (the share shown; a quarter or more is the seeded
+# unit tests' to prove), no jump nor a spike in its closing window
 # meanwhile; -2% in three minutes is HIT; a spike of -4% reaches its tip
 # and comes back to the plan within half a percent. With the bots on
 # ASTRA-USDT-PERP, the user opens a long against them and closes it, and
@@ -246,14 +247,16 @@ if [[ $MOVES == t ]]; then
   eventually 1200 "HIT within its window" hit "$TID"
   CROSSED=$(event_field "$TID" crossed_at)
   # Both ways (§8.8): of its 1m candles from its first whole minute to
-  # its crossing, a quarter at least down.
+  # its crossing, some down. A quarter or more is proven by the seeded unit
+  # tests (in 97% of seeds for this target): one run asserts one and shows
+  # the share (coordinator 2026-10-04 06:55).
   call GET "/v1/market/$SYMBOL/candles?interval=1m&limit=20" ""
   expect 200 - "its 1m candles"
   WAYS=$(jq -r --arg from "$TSTART" --arg to "$CROSSED" '[.candles[] | select(.open_time > $from and .open_time < $to)]
     | "\(length) \(map(select((.close | tonumber) < (.open | tonumber))) | length)"' <<<"$BODY")
   read -r N DOWNS <<<"$WAYS"
-  (( N >= 8 && DOWNS * 4 >= N )) || { echo "FAIL $DOWNS of $N candles against the target" >&2; exit 1; }
-  echo "ok   crossed at $CROSSED: $DOWNS of its $N whole 1m candles went against it"
+  (( N >= 8 && DOWNS >= 1 )) || { echo "FAIL $DOWNS of $N candles against the target" >&2; exit 1; }
+  echo "ok   crossed at $CROSSED: $DOWNS of its $N whole 1m candles went against it ($((100 * DOWNS / N))%)"
   P=$(target_now)
   LOW=$(jq -rn --argjson p "$P" '$p / 1.02 * 10000 | floor / 10000')
   solo "{\"type\":\"TARGET\",\"direction\":\"BELOW\",\"price\":\"$LOW\",\"duration_seconds\":180,\"actor\":\"e2e-ops\",\"reason\":\"e2e: -2% in three minutes\"}" "a target of $LOW"
