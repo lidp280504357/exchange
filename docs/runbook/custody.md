@@ -164,9 +164,41 @@ sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T udu
 
 `deposit` 模拟一笔到账（地址必须是模拟网关生成的），`outcome` 设置发往某地址的提现结局（2 拒绝、3 成功、4 链上失败），以及模拟网关在途中怎么"不守规矩"（审查 B7，让 B1/B2 的路径都能走到）：`--fee N` 回调里带按币种最小单位计的手续费、`--charge N` 发出时从该币余额里另扣的手续费（同样按最小单位；与 `--fee` 相同就是如实报，不同就是报错了单位，审查 ④）、`--review` 先报审核中（status 0）再报通过、`--lose-answer` 收下第一次提交但回 502（回调等它重交后才发）、`--repeat-code C` 重复的 `businessId` 用 C 拒绝而不是 4288（像先查余额的网关那样，因为第一次已用掉余额而回"余额不足"）；只写 `--status` 即清掉这些设置。`delay` 让回调延后（故障演练），`replay` 重发一条已送达的回调（`--age` 签成若干秒前、`--forge` 用错误密钥签）。**不要删 state.json**：模拟网关余额与账本对不上，对账会一直报短缺。
 
-## 换成真网关
+## 真网关联调（2026-10-03 起）
 
-联调计划（每步的回退）先交协调会话批准：测试商户在生产网关上，链上动作都是真的。商户的设置先放在服务器 `infra/udun-real.env`（0600，compose 不加载），不经 wallet-service、不碰数据库就能直接问网关：
+优盾给的是**生产网关上的测试商户**（正式上线会换）：没有沙箱，链上动作都是真的。商户的设置在本地 `.env` 与服务器 `infra/udun-real.env`（0600，compose 不加载），切换时才并入 `apps.env`；密钥、商户号、钱包号与网关地址不进仓库、文档、日志与消息。
+
+计划由协调会话 2026-10-03 批准：步骤 0–3 先做（都不动钱）；步骤 4 等 1–3 的结果报协调会话放行；步骤 5 由协调会话与用户约时间；步骤 6 在 5 之后。每一步做完把结果报协调会话，并记在下面的「进展」里。
+
+### 决定
+
+- **回调来源**：优盾后台与文档都没给回调出口 IP。`UDUN_CALLBACK_ALLOWED_IPS` 为空即不按来源过滤（启动时 WARN），只靠签名、±5 分钟时间戳与按"单号 + 状态"去重；nginx 回调路径 `allow all;`，每个来源每秒 10 个、突发 50 个；每条回调的来源记进 `custody_callbacks.remote_ips`，真回调跑过几笔后从这里取地址收紧（两处同时改）：
+
+  ```sql
+  SELECT ip, count(*) FROM custody_callbacks, unnest(remote_ips) AS ip WHERE signature_ok GROUP BY ip ORDER BY 2 DESC;
+  ```
+- **B1 账本基线**：模拟网关的充值让账本"预期托管方持有"若干 USDT（2026-10-03 下午 483.55，端到端每跑一次 `custody.sh` 都会变），真商户上是 0，一切换就是短缺、5 分钟后停提。切换时按资产记一笔审计过的对冲分录 `DEPOSIT_PENDING +X / ADJUSTMENT −X`（X 取切换当刻 `exchangectl wallet checks --network UDUN` 的 `HELD`，即模拟网关持有的；`ELSEWHERE` 是自建钱包的，不动）：
+
+  ```bash
+  exchangectl ledger custody-reset --asset USDT --amount <X> --reason "模拟网关换成真网关：模拟充值不在任何托管方" --key switch-usdt
+  exchangectl ledger custody-reset --asset USDT --amount <X> --reason "回退到模拟网关" --key back-usdt --reverse   # 回退
+  ```
+
+  要开关 `ledger.manual_adjustment`，写审计 `ledger.custody_reset`；`DEPOSIT_PENDING` 不会因此变成正数（预期持有不能小于 0），回退不能超过已经重置的。每笔分录同时记进钱包库的 `custody_baselines`（同一个 `--key` 重跑不会重复记），对账（`exchangectl wallet checks --network UDUN`、后台「托管方」页）每个资产多一列 `SIMULATED`（后台接口 `baseline`）："模拟资金、不在托管方"，所以预期为 0 是写明的，不是凭空消失；它不计入短缺。用户的模拟余额不动。
+- **B2 模拟时期的充值地址**：`deposit_addresses` 里 `provider = UDUN` 的是模拟网关编的地址（2026-10-03：TRON 129 个、BTC 27 个），切换后有人往里打真钱就丢了。切换时移进 `retired_deposit_addresses`，用户下次申请拿到真地址；提现到这些地址（包括之前加进地址簿的）一律拒绝（`WALLET_INVALID_ADDRESS`，原因 `ADDRESS_RETIRED`）；回退时放回，期间已经拿到新地址的用户保留新的：
+
+  ```bash
+  exchangectl wallet retire-addresses --provider UDUN --reason "模拟网关的地址，真链上不存在"
+  exchangectl wallet restore-addresses --provider UDUN --reason "回退到模拟网关"   # 回退
+  ```
+
+  两者都写审计（`wallet.deposit_addresses.retire|restore`）。站点的充值地址都按接口取（`Cache-Control: no-store`，service worker 只缓存离线页，没有本地存储）；打开着的充值页每分钟、回到页面时重新取一次，旧地址最多再显示一分钟。
+- **B3 提现**：人人都有模拟 USDT，接上真网关后批出去的提现付的是真钱。切换时先手动暂停 USDT、BTC、ETH 的提现；用户测试的窗口里只解除要测的资产，所有托管提现进人工审核、只批用户自己那笔；窗口结束重新暂停。商户只放测试金额。
+- **B4 端到端**：`custody.sh` 靠模拟网关（造充值、各种不守规矩、手续费、`UNCERTAIN`、对账），接真网关后会动真钱。选方案 A：wallet-service 同时接两个托管方，`UDUN`（真网关）管 USDT/BTC/ETH，`UDUNMOCK`（模拟网关）管只给端到端用的 `TUSD`；TUSD 对站点与市场完全不可见（不进资产列表与交易对，只有端到端账户能充提），provider 标签清楚。做好之前 `custody.sh` 在网络的托管方是真网关时拒绝运行。
+
+### 直接问网关
+
+不经 wallet-service、不碰数据库（步骤 1、2 用）：
 
 ```bash
 cd /opt/exchange/infra && sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangectl udun coins
@@ -174,17 +206,25 @@ sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangec
 sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangectl udun create-address --main-coin 195 --alias probe-tron --yes
 ```
 
-`coins` 列出商户的币种编码（`provider_coin` 就填这里的 `CODE`）、小数位、是否代币与余额，旁边是 wallet-service 读成的小数位与余额（读不成的余额是 `-`，对账时会报不比较）；`check-address`、`create-address` 必须写 `--main-coin`（195 TRON、60 以太坊、0 比特币，见 `coins` 的 `MAIN` 列）。`create-address` 先说明要建什么（链、钱包、名字、回调地址）：建的地址会把充值回调到 `UDUN_CALLBACK_URL`，没有对应用户，到账只会记成 `UNMATCHED`、钱留在托管方；不带 `--yes` 只说明不建，带了才建，并打印托管方的原始应答。设置值去掉首尾空白，带引号（`docker --env-file` 不去引号）、密钥不足 32 位、网关不是 https 的都直接拒绝；密钥、商户号与钱包号都不打印。
+`coins` 列出商户的币种编码（`provider_coin` 就填这里的 `CODE`）、小数位、是否代币与余额，旁边是 wallet-service 读成的小数位与余额（读不成的余额是 `-`，对账时会报不比较）；`check-address`、`create-address` 必须写 `--main-coin`（195 TRON、60 以太坊、0 比特币，见 `coins` 的 `MAIN` 列）。`create-address` 先说明要建什么（链、钱包、名字、回调地址）：建的地址会把充值回调到 `UDUN_CALLBACK_URL`，没有对应用户，到账只会记成 `UNMATCHED`、钱留在托管方；不带 `--yes` 只说明不建，带了才建，并打印托管方的原始应答。设置值去掉首尾空白，带引号（`docker --env-file` 不去引号）、密钥不足 32 位、网关不是 https 的都直接拒绝；密钥与商户号不打印，钱包号只露头尾。
 
-1. 托管方后台登记回调地址 `https://astras.vip/v1/wallet/callbacks/udun`，把服务器出口 IP 加白名单。
-2. `apps.env` 改 `UDUN_GATEWAY_URL`、`UDUN_MERCHANT_ID`、`UDUN_API_KEY`、`UDUN_WALLET_ID`、`UDUN_CALLBACK_URL`；托管方给了回调出口地址时 `UDUN_CALLBACK_ALLOWED_IPS` 填它、`custody-callback-allow.conf` 加同样的 `allow` 行，没给时前者留空、后者写 `allow all;`（只靠签名），提交部署；重启 wallet-service。真回调来过几笔后查来源再收紧：
+### 步骤与回退
 
-   ```sql
-   SELECT ip, count(*) FROM custody_callbacks, unnest(remote_ips) AS ip WHERE signature_ok GROUP BY ip ORDER BY 2 DESC;
-   ```
-3. 后台「托管方」页核对托管方返回的币种编码，改 `deploy/instruments/<环境>.json` 的 `provider_coin`。
-4. 先关 `wallet.withdraw`，小额充值每个"资产·网络"一笔、对账通过后再逐个开提现；回调日志保留全量。
-5. 去掉 compose 里的 `udun-mock`。
+| 步骤 | 做什么 | 回退 |
+|---|---|---|
+| 0 代码 | 停提的阈值与"解除后从头对账"、回调来源语义（空即不过滤）与 `remote_ips`、nginx 限速、直接问网关的命令、对账基线与退役地址的工具、`custody.sh` 遇真网关拒绝运行；仍连模拟网关部署 | `git revert` 后部署 |
+| 1 只读 | `udun coins`、各链 `check-address`：核对币种编码（BSC 是否 9006）、小数位、是否代币、余额的单位，修 `deploy/instruments/test.json` 的 `provider_coin`。网关拒绝我们的 IP 时由协调会话请用户在优盾后台把 `3.107.113.199` 加白 | 无（只读） |
+| 2 探测地址 | 每条链（TRON、BSC、ETH、BTC）各建一个地址（`--alias probe-<链>`），用平台的地址校验核对格式；这些地址记在下面、**不要用**：往里充值只会记成 `UNMATCHED`，钱留在托管方 | 无（地址不用，没有状态） |
+| 3 开放回调 | `custody-callback-allow.conf` 改成 `allow all;` 并部署；仍连模拟网关时公网回调被 wallet-service 的来源名单挡住（403），切换后由签名把关（401） | 恢复 allow 文件后部署；优盾会重发回调 |
+| 4 切换（协调会话放行） | 运维锁内：暂停 USDT/BTC/ETH 提现（B3）→ 备份 `apps.env`，把 `udun-real.env` 的值并入 `UDUN_*`（`UDUN_CALLBACK_ALLOWED_IPS` 留空）→ 退役模拟地址（B2）→ 记基线对冲分录（B1）→ 重启 wallet-service → 核对 `wallet_custody_up` 为 1、各资产短缺不大于 0、测试账户在每条链拿到真地址 | 恢复 `apps.env` 备份并重启、恢复地址、记反向分录；其间发出的真地址在优盾那边仍有效，充值等切回后再处理 |
+| 5 主网小额（协调会话约用户） | 用户在站点拿 TRC20 地址充至少 12 USDT（最小提现 10 + 手续费 1），看回调（`remote_ips`）、入账与对账；只在窗口里解除 USDT，用户提 10 USDT 到自己的地址、管理员批准；按回调与 tronscan 核对手续费单位后 `custody-fee-unit`；窗口结束重新暂停；按 `remote_ips` 收紧回调来源；其他网络要不要测由用户定（各自要付链上手续费） | 重新暂停；卡住的提现走 `custody-resolve` |
+| 6 端到端 | 方案 A：`UDUNMOCK` 托管方 + `TUSD`，`custody.sh` 改用它 | `git revert` 后部署 |
+
+### 进展
+
+- 2026-10-03 步骤 0 的第一部分已部署（43956f5、5804b6e、14d2412、462db60、a26989e、58bf6d8、6ee3673；完整端到端通过）：停提阈值、解除后从头对账、回调来源语义与 `remote_ips`、nginx 限速、直接问网关的命令。
+- 2026-10-03 步骤 1：**被网关挡住**。`udun coins` 与 `udun check-address` 都返回 `code 4264`（应答的说明也只有 4264）。优盾公开的返回码表里没有 4264；它不是签名错（4162/4163）、商户不存在（4001）或账户被禁用（4169/4226/4261/4262），每个接口都一样，像是接口的 IP 白名单。服务器出口 IP 是 `3.107.113.199`。已请协调会话转用户在优盾后台加白（或问优盾 4264 的含义），之后重跑。
+- 2026-10-03 步骤 0 的第二部分（对账基线 `ledger custody-reset` 与 `SIMULATED` 列、退役与恢复模拟地址、提现拒绝退役地址、充值地址不再长期缓存、`custody.sh` 遇真网关跳过）与步骤 3（nginx 回调路径 `allow all;`）随下一次部署上线。
 
 ## 指标与告警
 
@@ -193,7 +233,9 @@ sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangec
 
 ## 端到端
 
-`scripts/e2e/custody.sh`：新用户拿 TRC20 与比特币地址；模拟网关报 30 USDT 到账（入账一次，重试与重放不重复），0.5 USDT 记未入账；伪造签名与过期回调被拒并记录；经公网发到 `https://astras.vip` 的回调（`udun`、`UDUN`、`Udun` 三种写法）在 nginx 就被拒（403），到不了平台；运营手工停掉 USDT 提现时新提现被拒（422 `WALLET_WITHDRAW_SUSPENDED`），解除后照常（自动停提要两次相隔 5 分钟的对账，端到端不等，由单元测试覆盖）；绑定身份验证器后 12 USDT 经审批交给托管方、`SUBMITTED` → `CONFIRMED` 带交易哈希并结算，托管方为它扣的 1.2 USDT 从 `GAS_SUPPLY` 入账（脚本先确认 TRC20 的手续费单位为 `SELF`，`GAS_SUPPLY` 不到 10 USDT 时从手续费收入挪 20）；10 USDT 发往失败地址 → `FAILED` 资金退回；模拟网关对第三个地址收下提现却丢了应答、重交时以余额不足拒绝、先报审核中、把实际扣的 1.5 USDT 报成 1500：提现停在 `UNCERTAIN`、资金冻结，之后回调到达照常发出并结算，手续费挂起不入账，`exchangectl wallet custody-fee --book --amount 1.5` 后入账；最后对账无短缺（托管方余额与账本都少了这两笔手续费）。浏览器冒烟测试的充值页同时取 Sepolia 与 TRC20 地址，后台冒烟测试打开「托管方」页与一条回调。
+`scripts/e2e/custody.sh`：新用户拿 TRC20 与比特币地址；模拟网关报 30 USDT 到账（入账一次，重试与重放不重复），0.5 USDT 记未入账；伪造签名与过期回调被拒并记录；经公网发到 `https://astras.vip` 的伪造回调（`udun`、`UDUN`、`Udun` 三种写法）都被拒（步骤 3 起 nginx 不再按来源挡：接模拟网关时是 wallet-service 的来源名单 403，大写写法 404，接真网关后验签 401）；运营手工停掉 USDT 提现时新提现被拒（422 `WALLET_WITHDRAW_SUSPENDED`），解除后照常（自动停提要两次相隔 5 分钟的对账，端到端不等，由单元测试覆盖）；绑定身份验证器后 12 USDT 经审批交给托管方、`SUBMITTED` → `CONFIRMED` 带交易哈希并结算，托管方为它扣的 1.2 USDT 从 `GAS_SUPPLY` 入账（脚本先确认 TRC20 的手续费单位为 `SELF`，`GAS_SUPPLY` 不到 10 USDT 时从手续费收入挪 20）；10 USDT 发往失败地址 → `FAILED` 资金退回；模拟网关对第三个地址收下提现却丢了应答、重交时以余额不足拒绝、先报审核中、把实际扣的 1.5 USDT 报成 1500：提现停在 `UNCERTAIN`、资金冻结，之后回调到达照常发出并结算，手续费挂起不入账，`exchangectl wallet custody-fee --book --amount 1.5` 后入账；最后对账无短缺（托管方余额与账本都少了这两笔手续费）。浏览器冒烟测试的充值页同时取 Sepolia 与 TRC20 地址，后台冒烟测试打开「托管方」页与一条回调。
+
+`custody.sh` 只在 wallet-service 的 `UDUN` 网关是模拟网关（`apps.env` 的 `UDUN_GATEWAY_URL` 指向 `udun-mock`）时运行；接上真网关后它打印 `SKIP custody` 并以 0 退出，不会动真钱，直到端到端有自己的托管方（真网关联调的步骤 6，方案 A）。
 
 ## 已知局限
 
