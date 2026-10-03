@@ -258,11 +258,14 @@ continuous() {
     SELECT count(DISTINCT open_time) FROM candles_1m
     WHERE symbol = '$1' AND open_time BETWEEN last - INTERVAL 11 MINUTE AND last - INTERVAL 2 MINUTE") == 10 ]]
 }
+# The minutes before the switch was turned on may have gaps (forward only):
+# twelve minutes after, the ten checked are all after it (review AV).
 for S in ASTRA-USDT ASTRA-USDT-PERP; do
-  if [[ $(pg "SELECT enabled AND coalesce(rules->'symbols'->'allow' ? '$S', true) FROM config.flags WHERE key = 'market.flat_minutes'") != t ]]; then
-    echo "skip: market.flat_minutes is off for $S"
-    continue
-  fi
-  eventually 120 "$S: a 1m candle in ClickHouse for each of ten minutes, flat when nothing traded" continuous "$S"
+  case $(pg "SELECT CASE WHEN NOT (enabled AND coalesce(rules->'symbols'->'allow' ? '$S', true)) THEN 'off'
+    WHEN updated_at > now() - interval '12 minutes' THEN 'recent' ELSE 'on' END FROM config.flags WHERE key = 'market.flat_minutes'") in
+  on) eventually 120 "$S: a 1m candle in ClickHouse for each of ten minutes, flat when nothing traded" continuous "$S" ;;
+  recent) echo "skip: market.flat_minutes changed less than 12 minutes ago ($S)" ;;
+  *) echo "skip: market.flat_minutes is off for $S" ;;
+  esac
 done
 echo "all platform coin checks passed"

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -60,4 +62,46 @@ func TestPlatformReference(t *testing.T) {
 	if _, ok := pr.Price(ctx, "BTC-USDT"); ok {
 		t.Fatal("a followed pair took the platform's price")
 	}
+}
+
+// The symbols charting the platform's own trades: the listed pairs without
+// a reference market and the contracts whose index pair has none; not
+// known while the listing was never read, the last one read when it cannot
+// be read again (reviews AU, AV).
+func TestUnreferenced(t *testing.T) {
+	ctx := context.Background()
+	list := newListing([]ports.Pair{
+		{Symbol: "BTC-USDT", Base: "BTC", Quote: "USDT", Status: "TRADING", Reference: ref("BTC-USDT", "BTCUSDT")},
+		{Symbol: "ASTRA-USDT", Base: "ASTRA", Quote: "USDT", Status: "TRADING"},
+	}, []ports.Contract{{Symbol: "ASTRA-USDT-PERP", IndexSymbol: "ASTRA-USDT"}, {Symbol: "BTC-USDT-PERP", IndexSymbol: "BTC-USDT"}})
+	off := &atomic.Bool{}
+	off.Store(true)
+	refs := NewReferenceMap(flakyListing{listing: list, off: off}, slog.New(slog.DiscardHandler))
+	if got, ok := refs.Unreferenced(ctx); ok || got != nil {
+		t.Fatalf("before the listing was read: %v %v", got, ok)
+	}
+	off.Store(false)
+	got, ok := refs.Unreferenced(ctx)
+	slices.Sort(got)
+	if !ok || !slices.Equal(got, []string{"ASTRA-USDT", "ASTRA-USDT-PERP"}) {
+		t.Fatalf("unreferenced %v %v", got, ok)
+	}
+	off.Store(true)
+	refs.now = func() time.Time { return time.Now().Add(time.Hour) } // the cached listing is stale
+	if again, ok := refs.Unreferenced(ctx); !ok || len(again) != 2 {
+		t.Fatalf("the last listing while it cannot be read: %v %v", again, ok)
+	}
+}
+
+// flakyListing cannot list the pairs while off is set.
+type flakyListing struct {
+	listing
+	off *atomic.Bool
+}
+
+func (l flakyListing) Pairs(ctx context.Context) ([]ports.Pair, error) {
+	if l.off.Load() {
+		return nil, errListingDown
+	}
+	return l.listing.Pairs(ctx)
 }

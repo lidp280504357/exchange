@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"maps"
 	"slices"
@@ -44,15 +45,22 @@ const (
 	FlatDecideEvery = 10 * time.Second
 )
 
-// FlatPolicy is what the service needs to store flat minutes: whether a
-// symbol gets them (asked under the service's lock: no I/O), the event of
-// one (queued in the trades' transaction), and how many were stored (once
-// it committed).
+// FlatPolicy is what the service needs to store flat minutes: whether it
+// is known yet which symbols get them and whether a symbol does (asked
+// under the service's lock: no I/O), the event of one (queued in the
+// trades' transaction), and how many were stored (once it committed).
 type FlatPolicy interface {
+	Decided() bool
 	Own(symbol string) bool
 	Emit(ctx context.Context, r ports.Repos, c domain.Candle) error
 	Stored(n int)
 }
+
+// ErrFlatsUndecided holds the trades back while it is not known which
+// symbols get flat minutes (the listing not read since the start, review
+// AV): applied without, their quiet minutes would never be stored. The
+// batch is tried again.
+var ErrFlatsUndecided = errors.New("flat minutes: the symbols that get them are not known before the listing is read; the trades wait")
 
 // StoreFlats has the service store flat minutes as p decides, from the
 // next trades it applies.
@@ -102,7 +110,7 @@ func (s *Service) fillFlats(st *symbolState, symbol string, at time.Time, touch 
 // CandleClosed goes on market.candle.flats (analytics writes it to
 // candles_1m).
 type FlatMinutes struct {
-	symbols func(ctx context.Context) []string
+	symbols func(ctx context.Context) ([]string, bool)
 	flags   Flags
 	events  *event.Factory
 	log     *slog.Logger
@@ -111,8 +119,8 @@ type FlatMinutes struct {
 }
 
 // NewFlatMinutes registers its metric with reg; symbols lists the pairs
-// and contracts no reference market follows.
-func NewFlatMinutes(symbols func(ctx context.Context) []string, fl Flags, events *event.Factory, log *slog.Logger,
+// and contracts no reference market follows, false while it cannot tell.
+func NewFlatMinutes(symbols func(ctx context.Context) ([]string, bool), fl Flags, events *event.Factory, log *slog.Logger,
 	reg prometheus.Registerer,
 ) *FlatMinutes {
 	f := &FlatMinutes{
@@ -126,10 +134,18 @@ func NewFlatMinutes(symbols func(ctx context.Context) []string, fl Flags, events
 	return f
 }
 
-// Decide decides again which symbols get flat minutes.
+// Decide decides again which symbols get flat minutes; not before the
+// listing was read.
 func (f *FlatMinutes) Decide(ctx context.Context) {
+	symbols, ok := f.symbols(ctx)
+	if !ok {
+		if !f.Decided() {
+			f.log.WarnContext(ctx, "flat minutes: the listing not read yet; the trades wait for it")
+		}
+		return
+	}
 	own := map[string]bool{}
-	for _, symbol := range f.symbols(ctx) {
+	for _, symbol := range symbols {
 		if f.flags.Enabled(flags.KeyFlatMinutes, flags.Subject{Symbol: symbol}) {
 			own[symbol] = true
 		}
@@ -152,6 +168,9 @@ func (f *FlatMinutes) Run(ctx context.Context) error {
 		f.Decide(ctx)
 	}
 }
+
+// Decided reports whether it was decided which symbols get flat minutes.
+func (f *FlatMinutes) Decided() bool { return f.own.Load() != nil }
 
 // Own reports whether symbol gets flat minutes, as last decided.
 func (f *FlatMinutes) Own(symbol string) bool {

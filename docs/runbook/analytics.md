@@ -17,7 +17,7 @@
 | `wallet_deposits` | 每笔充值的最新快照（状态、确认数、是否未认领、入账 journal） | `wallet.deposit.events`（地址分配事件除外） |
 | `wallet_withdrawals` | 每笔提现的最新快照（状态、手续费、交易哈希、风控原因） | `wallet.withdrawal.events` |
 | `candles_1m` | 一分钟 K 线（开高低收、成交量、成交额、笔数） | 每批带成交的分钟由 `trades FINAL` 重新计算，最新一次计算生效；图表用平台自己成交的品种（ASTRA-USDT、ASTRA-USDT-PERP），没有成交的分钟由 `market.candle.flats` 的平盘分钟写入（开关 `market.flat_minutes` 打开时，下一笔成交被市场服务应用时才发出，最新成交之后的分钟暂缺；笔数 0，`updated_at` 是分钟开始，那一分钟有成交时被成交算出的行覆盖；2026-10-04 起只向前，见 [market-data.md](market-data.md)） |
-| `candles(symbol, seconds)`（参数化视图） | 任意周期 K 线，按 epoch（UTC）对齐 | `candles_1m` |
+| `candles(symbol, seconds)`（参数化视图） | 任意周期 K 线，按 epoch（UTC）对齐；平盘分钟（笔数 0）照样参与汇总：区间以平盘分钟开头时开盘价是上一收盘价，高低价算上它，与市场服务存的更长周期一致 | `candles_1m` |
 | `derivatives_positions` | 每个合约仓位的最新快照（数量带符号、开仓均价与成本、保证金、模式、杠杆、已实现盈亏、资金费），`version` 取最大；平仓后再开沿用同一 `position_id` | 带 `Position` 的仓位与强平事件（`derivatives.position.events`、`derivatives.liquidation.events`） |
 | `derivatives_fills` | 合约成交记账后的每一边（方向、仓位方向、maker、价格、数量、名义价值、平仓数量、手续费、已实现盈亏、是否强平） | `derivatives.FillSettled` |
 | `derivatives_funding` | 每个仓位每次资金费（费率、结算标记价、金额：正为收到、负为付出） | `derivatives.FundingPaid` |

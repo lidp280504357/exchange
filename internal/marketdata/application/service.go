@@ -157,6 +157,9 @@ func (s *Service) state(symbol string) *symbolState {
 func (s *Service) OnTrades(ctx context.Context, trades []domain.Trade) ([]domain.Trade, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.flats != nil && !s.flats.Decided() {
+		return nil, ErrFlatsUndecided
+	}
 	if s.dirty {
 		if err := s.load(ctx); err != nil {
 			return nil, err

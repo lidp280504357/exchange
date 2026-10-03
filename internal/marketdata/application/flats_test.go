@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"maps"
 	"slices"
@@ -26,11 +27,11 @@ func (f flatFlags) Enabled(key string, s flags.Subject) bool {
 }
 
 // newFlats has s store the flat minutes of the symbols of unreferenced
-// that on has the switch on for.
+// that on has the switch on for; nil unreferenced is a listing not read.
 func newFlats(t *testing.T, s *Service, unreferenced *[]string, on flatFlags) *FlatMinutes {
 	t.Helper()
-	f := NewFlatMinutes(func(context.Context) []string { return *unreferenced }, on, event.NewFactory("market-data-service", "test"),
-		slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	f := NewFlatMinutes(func(context.Context) ([]string, bool) { return *unreferenced, *unreferenced != nil }, on,
+		event.NewFactory("market-data-service", "test"), slog.New(slog.DiscardHandler), prometheus.NewRegistry())
 	f.Decide(context.Background())
 	s.StoreFlats(f)
 	return f
@@ -236,5 +237,39 @@ func TestFlatMinutesOnlyWhereDecided(t *testing.T) {
 	}
 	if got := flatEvents(t, store); len(got) != 0 {
 		t.Fatalf("with the switch off %v", got)
+	}
+}
+
+// Until it is known which symbols get flat minutes (the listing not read
+// since the start, review AV) the trades wait, nothing applied: a backlog
+// applied without would never get its quiet minutes. Once decided, the
+// same batch stores them.
+func TestTheTradesWaitForTheFlatSymbols(t *testing.T) {
+	ctx := context.Background()
+	store := newMemStore()
+	now := at("2026-09-30T10:01:30Z")
+	s := newService(t, store, &now)
+	var unreferenced []string
+	f := newFlats(t, s, &unreferenced, flatFlags{"BTC-USDT": true})
+	batch := []domain.Trade{trade(1, "70000", "0.1", "2026-09-30T10:01:10Z"), trade(2, "70100", "0.1", "2026-09-30T10:03:10Z")}
+	if _, err := s.OnTrades(ctx, batch); !errors.Is(err, ErrFlatsUndecided) || f.Decided() {
+		t.Fatalf("applied before the listing was read: %v", err)
+	}
+	if len(store.trades) != 0 || len(store.candles) != 0 {
+		t.Fatalf("stored %d trades, %d candles", len(store.trades), len(store.candles))
+	}
+	unreferenced = []string{"BTC-USDT"}
+	f.Decide(ctx)
+	if _, err := s.OnTrades(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+	if got := flatEvents(t, store); !slices.Equal(got, []string{"BTC-USDT 10:02 70000"}) {
+		t.Fatalf("events %v", got)
+	}
+	// Decided once, a listing that cannot be read again keeps the decision.
+	unreferenced = nil
+	f.Decide(ctx)
+	if !f.Decided() || !f.Own("BTC-USDT") {
+		t.Fatal("the decision was lost")
 	}
 }
