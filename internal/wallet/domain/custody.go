@@ -61,7 +61,14 @@ type Callback struct {
 	Attempts    int
 	ReceivedAt  time.Time
 	ProcessedAt time.Time
+	// RemoteIPs are the addresses its deliveries came from, the first
+	// first (at most MaxRemoteIPs); a new one is the address of this
+	// delivery.
+	RemoteIPs []string
 }
+
+// MaxRemoteIPs is how many addresses a callback keeps of its deliveries.
+const MaxRemoteIPs = 8
 
 // Settled reports whether nothing is left to do with the callback: a
 // discrepancy with a backfill is too, as a person decides on the deposit

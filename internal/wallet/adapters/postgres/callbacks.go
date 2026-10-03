@@ -21,7 +21,7 @@ func (r repos) Callbacks() ports.CallbackRepo { return callbacks(r) }
 type callbacks repos
 
 const callbackColumns = `id, provider, trade_id, kind, status, business_id, coin, address, amount, tx_hash, raw, signature_ok, result,
-	detail, attempts, received_at, processed_at`
+	detail, attempts, received_at, processed_at, remote_ips`
 
 func scanCallback(row pgx.Row) (domain.Callback, error) {
 	var c domain.Callback
@@ -29,7 +29,7 @@ func scanCallback(row pgx.Row) (domain.Callback, error) {
 	var amount *decimal.Decimal
 	var processed *time.Time
 	err := row.Scan(&c.ID, &c.Provider, &c.TradeID, &c.Kind, &status, &c.BusinessID, &c.Coin, &c.Address, &amount, &c.TxHash, &c.Raw,
-		&c.SignatureOK, &c.Result, &c.Detail, &c.Attempts, &c.ReceivedAt, &processed)
+		&c.SignatureOK, &c.Result, &c.Detail, &c.Attempts, &c.ReceivedAt, &processed, &c.RemoteIPs)
 	if err != nil {
 		return domain.Callback{}, err
 	}
@@ -49,10 +49,12 @@ func (r callbacks) Receive(ctx context.Context, c domain.Callback) (domain.Callb
 	// already is, so a replay verifies it again), cut on a character.
 	c.Raw = clip(strings.ToValidUTF8(strings.ReplaceAll(c.Raw, "\x00", ""), "\uFFFD"), 16384)
 	if c.SignatureOK {
-		// The custodian's retry of a callback it sent before: one more attempt.
-		stored, err := scanCallback(r.q.QueryRow(ctx, `UPDATE custody_callbacks SET attempts = attempts + 1
+		// The custodian's retry of a callback it sent before: one more
+		// attempt, and its address kept if new (up to MaxRemoteIPs).
+		stored, err := scanCallback(r.q.QueryRow(ctx, `UPDATE custody_callbacks SET attempts = attempts + 1,
+			remote_ips = CASE WHEN remote_ips @> $4 OR cardinality(remote_ips) >= $5 THEN remote_ips ELSE remote_ips || $4 END
 			WHERE provider = $1 AND trade_id = $2 AND status IS NOT DISTINCT FROM $3 AND signature_ok
-			RETURNING `+callbackColumns, c.Provider, c.TradeID, status))
+			RETURNING `+callbackColumns, c.Provider, c.TradeID, status, remoteIPs(c), domain.MaxRemoteIPs))
 		switch {
 		case err == nil:
 			return stored, false, nil
@@ -61,14 +63,26 @@ func (r callbacks) Receive(ctx context.Context, c domain.Callback) (domain.Callb
 		}
 	}
 	_, err := r.q.Exec(ctx, `INSERT INTO custody_callbacks (`+callbackColumns+`)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 1, $15, $16)`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 1, $15, $16, $17)`,
 		c.ID, c.Provider, c.TradeID, c.Kind, status, c.BusinessID, c.Coin, c.Address, c.Amount, c.TxHash, c.Raw, c.SignatureOK, c.Result,
-		c.Detail, c.ReceivedAt, stamp(c.ProcessedAt))
+		c.Detail, c.ReceivedAt, stamp(c.ProcessedAt), remoteIPs(c))
 	if err != nil {
 		return domain.Callback{}, false, fmt.Errorf("record callback: %w", err)
 	}
-	c.Attempts = 1
+	c.Attempts, c.RemoteIPs = 1, remoteIPs(c)
 	return c, true, nil
+}
+
+// remoteIPs is what a new callback keeps of its addresses: never NULL,
+// at most MaxRemoteIPs.
+func remoteIPs(c domain.Callback) []string {
+	out := make([]string, 0, len(c.RemoteIPs))
+	for _, ip := range c.RemoteIPs {
+		if ip != "" && len(out) < domain.MaxRemoteIPs {
+			out = append(out, ip)
+		}
+	}
+	return out
 }
 
 func (r callbacks) Finish(ctx context.Context, id, result, detail string, at time.Time) error {

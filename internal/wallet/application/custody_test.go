@@ -72,6 +72,11 @@ func (c memCallbacks) Receive(_ context.Context, x domain.Callback) (domain.Call
 		for i, y := range c.m.callbacks {
 			if y.SignatureOK && y.Provider == x.Provider && y.TradeID == x.TradeID && y.Status == x.Status {
 				c.m.callbacks[i].Attempts++
+				for _, ip := range x.RemoteIPs {
+					if !slices.Contains(y.RemoteIPs, ip) && len(c.m.callbacks[i].RemoteIPs) < domain.MaxRemoteIPs {
+						c.m.callbacks[i].RemoteIPs = append(c.m.callbacks[i].RemoteIPs, ip)
+					}
+				}
 				return c.m.callbacks[i], false, nil
 			}
 		}
@@ -209,6 +214,8 @@ type custodyHarness struct {
 	custody *fakeCustody
 	cproc   *CustodyProcessor
 	reg     *prometheus.Registry
+	// callbackFrom is the address the custodian's callbacks come from.
+	callbackFrom string
 }
 
 func newCustodyHarness(t *testing.T) *custodyHarness {
@@ -224,7 +231,7 @@ func newCustodyHarness(t *testing.T) *custodyHarness {
 	none := decimal.Zero
 	c := &fakeCustody{invalid: map[string]bool{}, coins: []ports.CustodyCoin{{Code: usdtCoin, Symbol: "USDT", Decimals: 6, Token: true, Balance: &none}}}
 	w.svc.Custodians = map[string]ports.Custody{domain.ProviderUdun: c}
-	h := &custodyHarness{withdrawHarness: w, custody: c, reg: prometheus.NewRegistry()}
+	h := &custodyHarness{withdrawHarness: w, custody: c, reg: prometheus.NewRegistry(), callbackFrom: "203.0.113.10"}
 	h.cproc = NewCustodyProcessor(CustodyProcessor{
 		Store: w.store, Ledger: w.ledger, Networks: w.nets, Eligibility: w.elig, Custody: c, Log: slog.New(slog.DiscardHandler),
 		Now: func() time.Time { return w.now },
@@ -245,7 +252,7 @@ func (h *custodyHarness) callback(t *testing.T, tr ports.CustodyTrade) domain.Ca
 	if err != nil {
 		t.Fatal(err)
 	}
-	cb, err := h.svc.HandleCallback(context.Background(), domain.ProviderUdun, "application/json", raw)
+	cb, err := h.svc.HandleCallback(context.Background(), domain.ProviderUdun, "application/json", h.callbackFrom, raw)
 	if err != nil {
 		t.Fatalf("callback %s: %v", tr.TradeID, err)
 	}
@@ -365,7 +372,7 @@ func TestCustodyDepositCallbacks(t *testing.T) {
 	}
 
 	for raw, code := range map[string]string{"bad:{}": "WALLET_CALLBACK_SIGNATURE", "stale:{}": "WALLET_CALLBACK_STALE", "[": "WALLET_CALLBACK_MALFORMED"} {
-		if _, err := h.svc.HandleCallback(ctx, domain.ProviderUdun, "", []byte(raw)); !apperr.Is(err, code) {
+		if _, err := h.svc.HandleCallback(ctx, domain.ProviderUdun, "", "198.51.100.9", []byte(raw)); !apperr.Is(err, code) {
 			t.Errorf("%s: %v, want %s", raw, err, code)
 		}
 	}
@@ -378,7 +385,7 @@ func TestCustodyDepositCallbacks(t *testing.T) {
 	if rejected != 3 {
 		t.Fatalf("%d refused callbacks logged", rejected)
 	}
-	if _, err := h.svc.HandleCallback(ctx, "OTHER", "", []byte("{}")); !apperr.Is(err, apperr.CodeNotFound) {
+	if _, err := h.svc.HandleCallback(ctx, "OTHER", "", "", []byte("{}")); !apperr.Is(err, apperr.CodeNotFound) {
 		t.Fatalf("an unknown custodian: %v", err)
 	}
 }
@@ -1038,7 +1045,7 @@ func TestRefusedCallbacksAreCountedAndKeptWithinLimits(t *testing.T) {
 	h.svc.CallbacksRejected = refused
 	long := "bad:" + strings.Repeat("é", 3000) // 6,000 bytes
 	for range rejectedPerHour + 20 {
-		if _, err := h.svc.HandleCallback(ctx, domain.ProviderUdun, "", []byte(long)); !apperr.Is(err, "WALLET_CALLBACK_SIGNATURE") {
+		if _, err := h.svc.HandleCallback(ctx, domain.ProviderUdun, "", "", []byte(long)); !apperr.Is(err, "WALLET_CALLBACK_SIGNATURE") {
 			t.Fatal(err)
 		}
 	}
@@ -1050,7 +1057,7 @@ func TestRefusedCallbacksAreCountedAndKeptWithinLimits(t *testing.T) {
 	}
 	// An hour later there is room again.
 	h.now = h.now.Add(time.Hour + time.Second)
-	if _, err := h.svc.HandleCallback(ctx, domain.ProviderUdun, "", []byte("bad:{}")); err == nil || len(h.store.callbacks) != rejectedPerHour+1 {
+	if _, err := h.svc.HandleCallback(ctx, domain.ProviderUdun, "", "", []byte("bad:{}")); err == nil || len(h.store.callbacks) != rejectedPerHour+1 {
 		t.Fatalf("an hour later: %v, kept %d", err, len(h.store.callbacks))
 	}
 }
@@ -1409,5 +1416,35 @@ func TestASuspensionHoldsTheAssetOnEveryNetwork(t *testing.T) {
 	h.cround(t)
 	if len(h.custody.submitted) != 2 || h.gaugeOf(t, "wallet_withdrawals_suspended_waiting", "USDT") != 0 {
 		t.Fatalf("both go once lifted: %v", h.custody.submitted)
+	}
+}
+
+// The addresses a callback's deliveries come from are kept with it (the
+// allow list is drawn from them, 2026-10-03): a retry from another adds
+// it, at most MaxRemoteIPs; a refused callback keeps its own.
+func TestACallbackKeepsTheAddressesItCameFrom(t *testing.T) {
+	h := newCustodyHarness(t)
+	ctx := context.Background()
+	a, _, err := h.svc.DepositAddress(ctx, "alice", "USDT", tron)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := ports.CustodyTrade{
+		TradeID: "dep-ip", Kind: domain.CallbackDeposit, Status: 3, Word: domain.CustodySuccess, Coin: usdtCoin, Address: a.Address,
+		Amount: d("5"), RawAmount: d("5000000"), TxHash: "0xip", Block: 99,
+	}
+	h.callback(t, tr)
+	h.callbackFrom = "203.0.113.11"
+	h.callback(t, tr)
+	h.callback(t, tr) // the same address again: kept once
+	cb := h.store.callbacks[len(h.store.callbacks)-1]
+	if cb.Attempts != 3 || !slices.Equal(cb.RemoteIPs, []string{"203.0.113.10", "203.0.113.11"}) {
+		t.Fatalf("kept %v after %d attempts", cb.RemoteIPs, cb.Attempts)
+	}
+	if _, err := h.svc.HandleCallback(ctx, domain.ProviderUdun, "", "198.51.100.66", []byte("bad:{}")); err == nil {
+		t.Fatal("a forged callback was taken")
+	}
+	if got := h.store.callbacks[len(h.store.callbacks)-1]; got.SignatureOK || !slices.Equal(got.RemoteIPs, []string{"198.51.100.66"}) {
+		t.Fatalf("the refused one: %+v", got)
 	}
 }

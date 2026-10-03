@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"math/big"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -591,7 +592,7 @@ func TestCustodyStorage(t *testing.T) {
 	cb := domain.Callback{
 		ID: uuid.Must(uuid.NewV7()).String(), Provider: domain.ProviderUdun, TradeID: "w-1", Kind: domain.CallbackWithdrawal, Status: 3,
 		BusinessID: w.ID, Coin: "195:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", Amount: &amount, TxHash: "f00d", Raw: "timestamp=1&body=x",
-		SignatureOK: true, Result: domain.CallbackReceived, ReceivedAt: now,
+		SignatureOK: true, Result: domain.CallbackReceived, ReceivedAt: now, RemoteIPs: []string{"203.0.113.10"},
 	}
 	var stored domain.Callback
 	var fresh bool
@@ -613,10 +614,19 @@ func TestCustodyStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	retry := cb
-	retry.ID = uuid.Must(uuid.NewV7()).String()
+	retry.ID, retry.RemoteIPs = uuid.Must(uuid.NewV7()).String(), []string{"203.0.113.11"}
 	receive(retry)
 	if fresh || stored.ID != cb.ID || stored.Attempts != 2 || stored.Result != domain.CallbackApplied || !stored.Amount.Equal(amount) {
 		t.Fatalf("the custodian's retry %+v %v", stored, fresh)
+	}
+	// Its addresses (2026-10-03): a new one is added, a known one or none
+	// changes nothing.
+	for _, ips := range [][]string{{"203.0.113.10"}, nil} {
+		retry.RemoteIPs = ips
+		receive(retry)
+	}
+	if !slices.Equal(stored.RemoteIPs, []string{"203.0.113.10", "203.0.113.11"}) || stored.Attempts != 4 {
+		t.Fatalf("addresses %v after %d attempts", stored.RemoteIPs, stored.Attempts)
 	}
 	for range 2 {
 		forged := domain.Callback{

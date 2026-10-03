@@ -30,7 +30,7 @@ custody_callbacks（原文、验签、结果、次数）──> 充值：deposit
 | `UDUN_API_KEY` | 签名密钥（请求与回调共用），只在本地 `.env` 与服务器 `apps.env`；至少 32 个字符（128 位随机，例如 32 位十六进制），短了 wallet-service 不启动 |
 | `UDUN_WALLET_ID` | 可选，商户下的钱包 |
 | `UDUN_CALLBACK_URL` | 托管方回调地址：真网关用 `https://astras.vip/v1/wallet/callbacks/udun`；测试服模拟网关用 `http://api-gateway:8080/v1/wallet/callbacks/udun`（内网，经网关） |
-| `UDUN_CALLBACK_ALLOWED_IPS` | 配了网关就必填（否则 wallet-service 不启动）：托管方回调的出口 IP（逗号分隔，可写 CIDR）。测试服填容器网段 `172.18.0.0/16`（模拟网关在内网经网关回调）。公网这一层另由 nginx 把关：回调路径（`/v1/wallet/callbacks/` 下任何托管方、不分大小写，按解码后的地址匹配）只放行 `deploy/compose/nginx/snippets/custody-callback-allow.conf` 里的 `allow` 地址，文件里没有地址时全部 403（审查 B3）；wallet-service 只认小写的托管方名，`/v1/wallet/callbacks/UDUN` 这类写法 404 |
+| `UDUN_CALLBACK_ALLOWED_IPS` | 托管方回调的出口 IP（逗号分隔，可写 CIDR）。测试服填容器网段 `172.18.0.0/16`（模拟网关在内网经网关回调）。**空即不限来源**（2026-10-03：优盾后台与文档都没有给出回调出口 IP）：只靠签名、时间戳（±5 分钟）与按"单号 + 状态"去重，启动时记 WARN；每条回调（被拒的也一样）把来源 IP 记进 `custody_callbacks.remote_ips`（同一条回调的重发来自新地址时追加，最多 8 个），真回调来过几笔后从这里取地址再收紧（见下文「换成真网关」）。公网这一层另由 nginx 把关：回调路径（`/v1/wallet/callbacks/` 下任何托管方、不分大小写，按解码后的地址匹配）每个来源每秒 10 个、可突发 50 个（超过 429，托管方会重发），只放行 `deploy/compose/nginx/snippets/custody-callback-allow.conf` 里的 `allow` 地址，文件里没有地址时全部 403（审查 B3），写 `allow all;` 即不限来源；wallet-service 只认小写的托管方名，`/v1/wallet/callbacks/UDUN` 这类写法 404 |
 | `WALLET_CUSTODY_INTERVAL` | 托管方处理周期，默认 5 秒 |
 
 网络在 `deploy/instruments/test.json`（`exchangectl instruments apply` 同步）：
@@ -164,15 +164,21 @@ sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T udu
 
 ## 换成真网关
 
+联调计划（每步的回退）先交协调会话批准：测试商户在生产网关上，链上动作都是真的。
+
 1. 托管方后台登记回调地址 `https://astras.vip/v1/wallet/callbacks/udun`，把服务器出口 IP 加白名单。
-2. `apps.env` 改 `UDUN_GATEWAY_URL`、`UDUN_MERCHANT_ID`、`UDUN_API_KEY`、`UDUN_CALLBACK_URL`，`UDUN_CALLBACK_ALLOWED_IPS` 改成托管方的回调出口地址；`deploy/compose/nginx/snippets/custody-callback-allow.conf` 加同样的 `allow` 行并提交部署；重启 wallet-service。
+2. `apps.env` 改 `UDUN_GATEWAY_URL`、`UDUN_MERCHANT_ID`、`UDUN_API_KEY`、`UDUN_WALLET_ID`、`UDUN_CALLBACK_URL`；托管方给了回调出口地址时 `UDUN_CALLBACK_ALLOWED_IPS` 填它、`custody-callback-allow.conf` 加同样的 `allow` 行，没给时前者留空、后者写 `allow all;`（只靠签名），提交部署；重启 wallet-service。真回调来过几笔后查来源再收紧：
+
+   ```sql
+   SELECT ip, count(*) FROM custody_callbacks, unnest(remote_ips) AS ip WHERE signature_ok GROUP BY ip ORDER BY 2 DESC;
+   ```
 3. 后台「托管方」页核对托管方返回的币种编码，改 `deploy/instruments/<环境>.json` 的 `provider_coin`。
 4. 先关 `wallet.withdraw`，小额充值每个"资产·网络"一笔、对账通过后再逐个开提现；回调日志保留全量。
 5. 去掉 compose 里的 `udun-mock`。
 
 ## 指标与告警
 
-- `wallet_custody_up`、`wallet_custody_balance{coin}`（5 分钟）、`wallet_custody_held/expected/shortfall{asset}`（每次对账）、`wallet_custody_submitted`、`wallet_custody_submitted_oldest_seconds`、`wallet_custody_withdrawals_uncertain`、`wallet_custody_callbacks_attention`、`wallet_custody_deposits_held`、`wallet_custody_fees_unbooked`、`wallet_custody_fees_held`（等人工处理的手续费笔数）、`wallet_withdrawals_suspended{asset}`（该资产停提时为 1），常量标签 `provider`；`wallet_custody_fees_held_total`（挂起的手续费）、`wallet_custody_callbacks_rejected_total`（被拒的回调，记不记表都算）、`wallet_custody_deposit_discrepancies_total`（与补记不一致的回调）。
+- `wallet_custody_up`、`wallet_custody_balance{coin}`（5 分钟）、`wallet_custody_held/expected/shortfall{asset}`（每次对账）、`wallet_custody_submitted`、`wallet_custody_submitted_oldest_seconds`、`wallet_custody_withdrawals_uncertain`、`wallet_custody_callbacks_attention`、`wallet_custody_deposits_held`、`wallet_custody_fees_unbooked`、`wallet_custody_fees_held`（等人工处理的手续费笔数）、`wallet_withdrawals_suspended{asset}`（该资产停提时为 1）、`wallet_withdrawals_suspended_waiting{asset}`（因停提等着的已批准提现），常量标签 `provider`；`wallet_custody_fees_held_total`（挂起的手续费）、`wallet_custody_callbacks_rejected_total`（被拒的回调，记不记表都算）、`wallet_custody_deposit_discrepancies_total`（与补记不一致的回调）。
 - 告警（`deploy/observability/alerts.yml`）：`CustodyShortfall`（短缺 15 分钟，严重）、`CustodyNotCompared`（某资产 30 分钟没比较）、`CustodyUnreachable`（10 分钟）、`CustodyWithdrawalStuck`（`SUBMITTED` 超过 24 小时，人工到托管方后台核对）、`CustodyWithdrawalsUncertain`（重交被拒或 30 分钟无应答、托管方可能仍会发出，5 分钟，严重）、`CustodyCallbacksNeedAttention`（15 分钟）、`CustodyCallbacksRejected`（15 分钟内有回调被拒：伪造，或 `UDUN_API_KEY` 与托管方的不一致、充值进不来，审查 B6）、`WalletWithdrawalsSuspended`（某资产停提，严重；查清后 `exchangectl wallet withdrawals-resume`）、`WalletWithdrawalsWaitingOnSuspension`（已批准的提现因停提等了 30 分钟）、`CustodyFeesHeld`（有手续费等人工入账或核销）、`CustodyFeesUnbooked`（1 小时，`GAS_SUPPLY` 不够：`exchangectl ledger gas-supply`）、`CustodyDepositDiscrepancy`（回调与补记不一致，严重；在后台「充值 → 待处理」查明后驳回或调账）、`CustodyWithdrawalContradiction`（托管方的回调与已结束的提现矛盾，严重；`CustodyCallbacksNeedAttention` 也把 `DISCREPANCY` 计入）。
 
 ## 端到端

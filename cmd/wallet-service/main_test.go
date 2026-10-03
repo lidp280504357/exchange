@@ -7,8 +7,9 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// A custodian's gateway takes the addresses its callbacks come from and a
-// key long enough not to be guessed (review B3, B7).
+// A custodian's gateway takes a key long enough not to be guessed (review
+// B3, B7) and the addresses its callbacks come from, if any are known
+// (the real gateway publishes none: empty takes any, 2026-10-03).
 func TestCustodySettings(t *testing.T) {
 	base := func() settings {
 		return settings{
@@ -23,8 +24,8 @@ func TestCustodySettings(t *testing.T) {
 		return ""
 	}
 	s := base()
-	if msg := errOf(s); !strings.Contains(msg, "UDUN_CALLBACK_ALLOWED_IPS") {
-		t.Fatalf("no allowed addresses: %s", msg)
+	if msg := errOf(s); strings.Contains(msg, "UDUN_") {
+		t.Fatalf("no allowed addresses: any, %s", msg)
 	}
 	s.UdunCallbackIPs = "203.0.113.7, 198.51.100.0/24"
 	if msg := errOf(s); strings.Contains(msg, "UDUN_") {

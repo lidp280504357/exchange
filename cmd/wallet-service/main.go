@@ -95,9 +95,12 @@ type settings struct {
 	// callbacks (UDUN_API_KEY, never logged), the wallet to use
 	// (UDUN_WALLET_ID, empty for the default), where it calls back
 	// (UDUN_CALLBACK_URL) and from which addresses
-	// (UDUN_CALLBACK_ALLOWED_IPS, comma-separated IPs or CIDRs; required
-	// with a gateway: the mock's network on the test server). Without a
-	// gateway its networks take no deposits or withdrawals. CustodyInterval paces the custodian's processor
+	// (UDUN_CALLBACK_ALLOWED_IPS, comma-separated IPs or CIDRs: the mock's
+	// network on the test server; empty takes callbacks from any address
+	// on their signature, age and status alone, with a warning, as the
+	// real gateway publishes none: the addresses seen are kept with each
+	// callback). Without a gateway its networks take no deposits or
+	// withdrawals. CustodyInterval paces the custodian's processor
 	// (WALLET_CUSTODY_INTERVAL).
 	UdunURL         string        `koanf:"udun_gateway_url"`
 	UdunMerchant    string        `koanf:"udun_merchant_id"`
@@ -180,9 +183,6 @@ func (s *settings) Validate() error {
 	}
 	if s.UdunURL != "" && (s.UdunMerchant == "" || s.UdunKey == "" || s.UdunCallback == "") {
 		errs = append(errs, errors.New("the custody wallet needs UDUN_MERCHANT_ID, UDUN_API_KEY and UDUN_CALLBACK_URL"))
-	}
-	if s.UdunURL != "" && strings.TrimSpace(s.UdunCallbackIPs) == "" {
-		errs = append(errs, errors.New("the custody wallet needs UDUN_CALLBACK_ALLOWED_IPS: the addresses its callbacks come from"))
 	}
 	// The key signs requests and callbacks: a short one could be guessed
 	// offline from a signed message (128 bits at least, as 32 hex digits).
@@ -342,6 +342,10 @@ func setup(ctx context.Context, a *app.App) error {
 	callbackFrom, err := cfg.callbackFrom()
 	if err != nil {
 		return err
+	}
+	if cfg.UdunURL != "" && len(callbackFrom) == 0 {
+		a.Logger().Warn("UDUN_CALLBACK_ALLOWED_IPS is not set: callbacks are taken from any address on their signature, age and status alone; " +
+			"the addresses they come from are kept with them (custody_callbacks.remote_ips) for the allow list")
 	}
 	r := a.NewRouter()
 	(&httpapi.Handler{Svc: svc, CallbackFrom: callbackFrom}).Routes(r)

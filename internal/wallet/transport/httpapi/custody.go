@@ -21,14 +21,17 @@ import (
 // callback takes a custodian's callback (ADR-0011): recorded and applied,
 // it is answered with the reply the custodian expects; anything else
 // makes the custodian try again. The provider is named in lower case
-// only, the one path the edge proxy guards.
+// only, the one path the edge proxy guards. With CallbackFrom only those
+// addresses are taken; without, any (the signature, its age and the
+// trade's status decide), and the address is kept with the callback.
 func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	if p := chi.URLParam(r, "provider"); p != strings.ToLower(p) {
 		httpx.WriteError(w, r, apperr.NotFound("no such callback"))
 		return
 	}
+	from := httpx.ClientIPFrom(r.Context())
 	if len(h.CallbackFrom) > 0 {
-		ip, err := netip.ParseAddr(httpx.ClientIPFrom(r.Context()))
+		ip, err := netip.ParseAddr(from)
 		if err != nil || !slices.ContainsFunc(h.CallbackFrom, func(p netip.Prefix) bool { return p.Contains(ip.Unmap()) }) {
 			httpx.WriteError(w, r, apperr.Forbidden("callbacks come from the custodian's addresses only"))
 			return
@@ -40,7 +43,7 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	provider := strings.ToUpper(chi.URLParam(r, "provider"))
-	if _, err := h.Svc.HandleCallback(r.Context(), provider, r.Header.Get("Content-Type"), raw); err != nil {
+	if _, err := h.Svc.HandleCallback(r.Context(), provider, r.Header.Get("Content-Type"), from, raw); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
@@ -121,30 +124,34 @@ func (h *Handler) adminCustody(w http.ResponseWriter, r *http.Request) {
 
 // CallbackJSON is a custodian's callback as the admin console shows it.
 type CallbackJSON struct {
-	ID          string  `json:"id"`
-	Provider    string  `json:"provider"`
-	TradeID     string  `json:"trade_id"`
-	Kind        string  `json:"kind"`
-	Status      *int    `json:"status"`
-	BusinessID  string  `json:"business_id"`
-	Coin        string  `json:"coin"`
-	Address     string  `json:"address"`
-	Amount      *string `json:"amount"`
-	TxHash      string  `json:"tx_hash"`
-	SignatureOK bool    `json:"signature_ok"`
-	Result      string  `json:"result"`
-	Detail      string  `json:"detail"`
-	Attempts    int     `json:"attempts"`
-	ReceivedAt  string  `json:"received_at"`
-	ProcessedAt *string `json:"processed_at"`
-	Raw         *string `json:"raw,omitempty"`
+	ID          string   `json:"id"`
+	Provider    string   `json:"provider"`
+	TradeID     string   `json:"trade_id"`
+	Kind        string   `json:"kind"`
+	Status      *int     `json:"status"`
+	BusinessID  string   `json:"business_id"`
+	Coin        string   `json:"coin"`
+	Address     string   `json:"address"`
+	Amount      *string  `json:"amount"`
+	TxHash      string   `json:"tx_hash"`
+	SignatureOK bool     `json:"signature_ok"`
+	Result      string   `json:"result"`
+	Detail      string   `json:"detail"`
+	Attempts    int      `json:"attempts"`
+	ReceivedAt  string   `json:"received_at"`
+	ProcessedAt *string  `json:"processed_at"`
+	RemoteIPs   []string `json:"remote_ips"`
+	Raw         *string  `json:"raw,omitempty"`
 }
 
 func callbackJSON(c domain.Callback, raw bool) CallbackJSON {
 	j := CallbackJSON{
 		ID: c.ID, Provider: c.Provider, TradeID: c.TradeID, Kind: c.Kind, BusinessID: c.BusinessID, Coin: c.Coin, Address: c.Address,
 		TxHash: c.TxHash, SignatureOK: c.SignatureOK, Result: c.Result, Detail: c.Detail, Attempts: c.Attempts,
-		ReceivedAt: httpx.FormatTime(c.ReceivedAt), ProcessedAt: timeOrNil(c.ProcessedAt),
+		ReceivedAt: httpx.FormatTime(c.ReceivedAt), ProcessedAt: timeOrNil(c.ProcessedAt), RemoteIPs: c.RemoteIPs,
+	}
+	if j.RemoteIPs == nil {
+		j.RemoteIPs = []string{}
 	}
 	if c.Status >= 0 {
 		j.Status = &c.Status

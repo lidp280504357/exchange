@@ -68,8 +68,9 @@ func (s *Service) custodyAddress(ctx context.Context, userID string, net domain.
 // count as attempts and change nothing more), one that fails its
 // signature or age check is logged and refused. A callback that cannot
 // be applied now is recorded FAILED and its error returned, for the
-// custodian to try again.
-func (s *Service) HandleCallback(ctx context.Context, provider, contentType string, raw []byte) (domain.Callback, error) {
+// custodian to try again. remoteIP, where the delivery came from, is kept
+// with it (the allow list is drawn from these).
+func (s *Service) HandleCallback(ctx context.Context, provider, contentType, remoteIP string, raw []byte) (domain.Callback, error) {
 	c := s.Custodians[provider]
 	if c == nil {
 		return domain.Callback{}, apperr.NotFound("no such custodian")
@@ -81,6 +82,9 @@ func (s *Service) HandleCallback(ctx context.Context, provider, contentType stri
 	}
 	t, perr := c.Parse(contentType, raw, now, window)
 	cb := callbackOf(provider, t, string(raw), now)
+	if remoteIP != "" {
+		cb.RemoteIPs = []string{remoteIP}
+	}
 	if perr != nil {
 		if s.CallbacksRejected != nil {
 			s.CallbacksRejected.Inc()
@@ -89,7 +93,7 @@ func (s *Service) HandleCallback(ctx context.Context, provider, contentType stri
 		if err := s.keepRejected(ctx, cb); err != nil {
 			return domain.Callback{}, errors.Join(perr, err)
 		}
-		s.Log.WarnContext(ctx, "custodian callback refused", "provider", provider, "error", perr)
+		s.Log.WarnContext(ctx, "custodian callback refused", "provider", provider, "remote_ip", remoteIP, "error", perr)
 		return cb, perr
 	}
 	cb.SignatureOK = true
