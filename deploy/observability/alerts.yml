@@ -359,6 +359,13 @@ groups:
           summary: "{{ $value }} withdrawals with {{ $labels.provider }} have an unknown outcome (a retry refused, or 30 minutes of hand-overs unanswered); their funds stay frozen until its callback, or ask it and run exchangectl wallet custody-resolve"
           runbook: docs/runbook/custody.md
 
+      - alert: WalletWithdrawalsSuspended
+        expr: max by (asset) (wallet_withdrawals_suspended) > 0
+        labels: {severity: critical}
+        annotations:
+          summary: "withdrawals of {{ $labels.asset }} are suspended (funds missing on two custody checks, or an operator): find the cause, then exchangectl wallet withdrawals-resume"
+          runbook: docs/runbook/custody.md
+
       - alert: CustodyFeesHeld
         expr: max by (provider) (wallet_custody_fees_held) > 0
         labels: {severity: warning}

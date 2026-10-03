@@ -115,6 +115,10 @@ commands:
   wallet custody-fees         the custodian's fees held for a person, and why
   wallet custody-fee <withdrawal_id> (--book [--asset A] [--amount X] | --write-off) --reason TEXT
                               book a held fee from GAS_SUPPLY (as reported, or as found charged) or write it off (audited)
+  wallet withdrawals-suspended
+                              the assets whose withdrawals are suspended (funds missing on two custody checks, or an operator)
+  wallet withdrawals-suspend|withdrawals-resume --asset A --reason TEXT
+                              stop an asset's withdrawals (new requests refused, approved ones wait), or lift it (audited)
   wallet custody-fee-unit [--asset A --network N --unit SELF|MAIN|OUTSIDE --reason TEXT]
                               how the custodian counts its fee on a network, as confirmed (audited); without --unit, the list
   admin create --email E --name N --role R [--secrets-stdin]

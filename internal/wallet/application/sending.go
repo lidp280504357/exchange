@@ -77,10 +77,15 @@ func (o netOps) release(ctx context.Context) error {
 }
 
 // dispatch sends the approved withdrawals, oldest first. One that waits
-// (fee above the cap, hot wallet short) holds up the ones behind it, which
-// keeps the hot wallet's nonces in order.
+// (fee above the cap, hot wallet short, its asset's withdrawals suspended)
+// holds up the ones behind it, which keeps the hot wallet's nonces in
+// order.
 func (p *Processor) dispatch(ctx context.Context, native domain.Network) error {
 	list, err := p.Store.Read().Withdrawals().ByStatus(ctx, p.Network, domain.WithdrawalApproved)
+	if err != nil {
+		return err
+	}
+	suspended, err := suspendedAssets(ctx, p.Store.Read())
 	if err != nil {
 		return err
 	}
@@ -92,6 +97,10 @@ func (p *Processor) dispatch(ctx context.Context, native domain.Network) error {
 				return err
 			}
 			continue
+		}
+		if suspended[w.Asset] {
+			waiting = len(list) - i
+			return nil
 		}
 		sent, err := p.send(ctx, w, native)
 		if err != nil {

@@ -69,7 +69,27 @@ var (
 	ErrNotCancelable  = apperr.New(apperr.KindConflict, "WALLET_WITHDRAWAL_NOT_CANCELABLE", "the withdrawal is already being sent")
 	ErrOwnAddress     = apperr.New(apperr.KindUnprocessable, "WALLET_OWN_ADDRESS", "this is your own deposit address")
 	ErrWithdrawClosed = apperr.New(apperr.KindUnprocessable, "WALLET_NETWORK_DISABLED", "withdrawals of this asset on this network are closed")
+	// ErrWithdrawSuspended refuses a withdrawal of an asset whose
+	// withdrawals are suspended (Suspension).
+	ErrWithdrawSuspended = apperr.New(apperr.KindUnprocessable, "WALLET_WITHDRAW_SUSPENDED",
+		"withdrawals of this asset are paused while the platform checks its funds")
 )
+
+// Suspension stops an asset's withdrawals (design 2026-09-30 §9, review
+// B4): the custody check found funds missing that no withdrawal with an
+// unknown outcome explains, on two checks minutes apart
+// (SuspendedBySystem), or an operator suspended them. New requests are
+// refused and approved withdrawals wait; a person lifts it.
+type Suspension struct {
+	Asset       string
+	Shortfall   decimal.Decimal
+	Reason      string
+	SuspendedBy string
+	SuspendedAt time.Time
+}
+
+// SuspendedBySystem names the custody check as the suspender.
+const SuspendedBySystem = "system:custody-check"
 
 // Withdrawal is a request to send an asset out.
 type Withdrawal struct {

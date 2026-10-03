@@ -19,6 +19,8 @@ func (r repos) ChainFees() ports.ChainFeeRepo { return chainFees(r) }
 func (r repos) Fundings() ports.FundingRepo   { return fundings(r) }
 func (r repos) Checks() ports.CheckRepo       { return checks(r) }
 
+func (r repos) Suspensions() ports.SuspensionRepo { return suspensions(r) }
+
 func (r addresses) List(ctx context.Context, network string) ([]domain.Address, error) {
 	rows, err := r.q.Query(ctx, `SELECT user_id, network, derivation_index, address, created_at FROM deposit_addresses
 		WHERE network = $1 ORDER BY derivation_index`, network)
@@ -322,4 +324,58 @@ func (r checks) Latest(ctx context.Context, network string) ([]domain.ChainCheck
 		return nil, fmt.Errorf("list chain checks: %w", err)
 	}
 	return out, nil
+}
+
+type suspensions repos
+
+const suspensionColumns = `asset, shortfall, reason, suspended_by, suspended_at`
+
+func scanSuspension(row pgx.CollectableRow) (domain.Suspension, error) {
+	var x domain.Suspension
+	err := row.Scan(&x.Asset, &x.Shortfall, &x.Reason, &x.SuspendedBy, &x.SuspendedAt)
+	return x, err
+}
+
+func (r suspensions) Get(ctx context.Context, asset string) (*domain.Suspension, error) {
+	rows, err := r.q.Query(ctx, `SELECT `+suspensionColumns+` FROM withdrawal_suspensions WHERE asset = $1`, asset)
+	if err != nil {
+		return nil, fmt.Errorf("get suspension: %w", err)
+	}
+	x, err := pgx.CollectOneRow(rows, scanSuspension)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get suspension: %w", err)
+	}
+	return &x, nil
+}
+
+func (r suspensions) List(ctx context.Context) ([]domain.Suspension, error) {
+	rows, err := r.q.Query(ctx, `SELECT `+suspensionColumns+` FROM withdrawal_suspensions ORDER BY asset`)
+	if err != nil {
+		return nil, fmt.Errorf("list suspensions: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, scanSuspension)
+	if err != nil {
+		return nil, fmt.Errorf("list suspensions: %w", err)
+	}
+	return out, nil
+}
+
+func (r suspensions) Put(ctx context.Context, x domain.Suspension) (bool, error) {
+	tag, err := r.q.Exec(ctx, `INSERT INTO withdrawal_suspensions (`+suspensionColumns+`) VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (asset) DO NOTHING`, x.Asset, x.Shortfall, x.Reason, x.SuspendedBy, x.SuspendedAt)
+	if err != nil {
+		return false, fmt.Errorf("put suspension: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func (r suspensions) Delete(ctx context.Context, asset string) (bool, error) {
+	tag, err := r.q.Exec(ctx, `DELETE FROM withdrawal_suspensions WHERE asset = $1`, asset)
+	if err != nil {
+		return false, fmt.Errorf("delete suspension: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
 }

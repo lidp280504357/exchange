@@ -12,6 +12,8 @@
 #   - callbacks with a forged signature or a stale timestamp are refused
 #     and logged; one over the internet from an address the custodian
 #     does not use is refused by nginx before it reaches the platform;
+#   - USDT's withdrawals suspended by an operator refuse a request
+#     (WALLET_WITHDRAW_SUSPENDED) until resumed (review B4);
 #   - with an authenticator app bound, 12 USDT go to a TRON address: in
 #     review, approved (exchangectl), handed to the custodian (SUBMITTED),
 #     sent (CONFIRMED with its transaction) and settled; the custodian
@@ -193,6 +195,15 @@ withdraw() { # withdraw ADDRESS AMOUNT
   call POST /v1/wallet/withdrawals "{\"asset\":\"USDT\",\"network\":\"TRON\",\"address\":\"$1\",\"amount\":\"$2\"}" "${AUTH[@]}" -H "X-Step-Up-Token: $STEP"
   expect 201 - "$2 USDT to $1 requested"
 }
+# An asset's withdrawals suspended (review B4; the custody check does it
+# on funds missing twice, here an operator): refused, then resumed.
+exchangectl wallet withdrawals-suspend --asset USDT --reason "end-to-end: refused while suspended" >/dev/null
+at_exit "exchangectl wallet withdrawals-resume --asset USDT --reason 'end-to-end: cleanup' >/dev/null 2>&1"
+step_up
+call POST /v1/wallet/withdrawals "{\"asset\":\"USDT\",\"network\":\"TRON\",\"address\":\"$PAYEE\",\"amount\":\"12\"}" "${AUTH[@]}" -H "X-Step-Up-Token: $STEP"
+expect 422 WALLET_WITHDRAW_SUSPENDED "refused while USDT's withdrawals are suspended"
+exchangectl wallet withdrawals-resume --asset USDT --reason "end-to-end: resumed" >/dev/null
+echo "ok   resumed by an operator"
 withdraw "$PAYEE" 12
 SENT_ID=$(jq -r .id <<<"$BODY")
 check '.status == "PENDING_REVIEW" and .custody == true and .fee == "1"' "in review, with the custodian's network"

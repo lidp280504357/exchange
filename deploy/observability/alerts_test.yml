@@ -475,3 +475,19 @@ tests:
       - eval_time: 8m
         alertname: CustodyWithdrawalsUncertain
         exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'wallet_withdrawals_suspended{job="wallet-service", provider="UDUN", asset="USDT"}'
+        values: '0 1 1'
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: WalletWithdrawalsSuspended
+        exp_alerts: []
+      - eval_time: 1m
+        alertname: WalletWithdrawalsSuspended
+        exp_alerts:
+          - exp_labels: {severity: critical, asset: USDT}
+            exp_annotations:
+              summary: "withdrawals of USDT are suspended (funds missing on two custody checks, or an operator): find the cause, then exchangectl wallet withdrawals-resume"
+              runbook: docs/runbook/custody.md

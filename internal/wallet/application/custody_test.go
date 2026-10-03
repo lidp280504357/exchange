@@ -1053,3 +1053,132 @@ func TestRefusedCallbacksAreCountedAndKeptWithinLimits(t *testing.T) {
 		t.Fatalf("an hour later: %v, kept %d", err, len(h.store.callbacks))
 	}
 }
+
+// Review B4 (design §9): funds missing that no withdrawal with an unknown
+// outcome explains, on two checks five minutes apart, suspend the asset's
+// withdrawals: new requests are refused and approved ones wait, until a
+// person lifts it.
+func TestAShortfallOnTwoChecksSuspendsTheAssetsWithdrawals(t *testing.T) {
+	h := newCustodyHarness(t)
+	ctx := context.Background()
+	h.cproc.Elsewhere = func(context.Context, string) (decimal.Decimal, error) { return decimal.Zero, nil }
+	h.ledger.system[accountDepositPending] = d("-500")
+	held := d("490") // 10 missing
+	h.custody.coins = []ports.CustodyCoin{{Code: usdtCoin, Symbol: "USDT", Decimals: 6, Token: true, Balance: &held}}
+	if _, err := h.cproc.Check(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.store.suspended) != 0 || h.cproc.recheckAt.IsZero() {
+		t.Fatalf("a first sighting suspends nothing, it checks again: %v, recheck at %v", h.store.suspended, h.cproc.recheckAt)
+	}
+	// An operator's check within the five minutes decides nothing.
+	h.now = h.now.Add(time.Minute)
+	if _, err := h.cproc.Check(ctx); err != nil || len(h.store.suspended) != 0 {
+		t.Fatalf("too soon: %v %v", h.store.suspended, err)
+	}
+	h.now = h.now.Add(4 * time.Minute)
+	h.cround(t) // the check comes again now, not in an hour
+	x, ok := h.store.suspended["USDT"]
+	if !ok || x.SuspendedBy != domain.SuspendedBySystem || !x.Shortfall.Equal(d("10")) || h.audited("wallet.withdrawals.suspend") != 1 {
+		t.Fatalf("suspended %+v (%v)", x, ok)
+	}
+	h.cround(t)
+	if v := h.gaugeOf(t, "wallet_withdrawals_suspended", "USDT"); v != 1 {
+		t.Fatalf("gauge %v", v)
+	}
+
+	// New requests are refused; one approved before waits.
+	h.custody.coins[0].Balance = &held
+	if _, err := h.svc.RequestWithdrawal(ctx, "alice", WithdrawalInput{
+		Asset: "USDT", Network: tron, Address: payeeTRX, Amount: d("20"), StepUp: h.stepUp("w-sus", 2, true),
+	}); !apperr.Is(err, "WALLET_WITHDRAW_SUSPENDED") {
+		t.Fatalf("a request while suspended: %v", err)
+	}
+	delete(h.store.suspended, "USDT")
+	wd := h.requestCustody(t, "20")
+	h.store.suspended["USDT"] = x
+	h.cround(t)
+	if got := h.store.wds[wd.ID]; got.Status != domain.WithdrawalApproved || len(h.custody.submitted) != 0 {
+		t.Fatalf("handed over while suspended: %+v", got)
+	}
+	if _, err := ResumeWithdrawals(ctx, h.store, "usdt", "ops", ""); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("no reason: %v", err)
+	}
+	if lifted, err := ResumeWithdrawals(ctx, h.store, "usdt", "ops", "the custodian's statement explains it"); err != nil || lifted.Asset != "USDT" {
+		t.Fatalf("resumed %+v %v", lifted, err)
+	}
+	if _, err := ResumeWithdrawals(ctx, h.store, "USDT", "ops", "again"); !apperr.Is(err, apperr.CodeNotFound) {
+		t.Fatalf("resumed twice: %v", err)
+	}
+	h.cround(t)
+	if got := h.store.wds[wd.ID]; got.Status != domain.WithdrawalSubmitted || h.audited("wallet.withdrawals.resume") != 1 {
+		t.Fatalf("handed over once resumed: %+v", got)
+	}
+}
+
+// What a withdrawal with an unknown outcome may have taken explains a
+// shortfall that large; one that is gone by the next check is forgotten.
+func TestAShortfallExplainedOrGoneSuspendsNothing(t *testing.T) {
+	h := newCustodyHarness(t)
+	ctx := context.Background()
+	h.cproc.Elsewhere = func(context.Context, string) (decimal.Decimal, error) { return decimal.Zero, nil }
+	wd := h.requestCustody(t, "30")
+	h.custody.down = true
+	_ = h.cproc.Round(ctx) // handed over without an answer: SUBMITTED
+	h.custody.down = false
+	if got := h.store.wds[wd.ID]; got.ProviderStatus != domain.CustodySubmitted {
+		t.Fatalf("not unanswered: %+v", got)
+	}
+	h.ledger.system[accountDepositPending] = d("-500")
+	held := d("470") // 30 missing: the unanswered withdrawal's
+	h.custody.coins = []ports.CustodyCoin{{Code: usdtCoin, Symbol: "USDT", Decimals: 6, Token: true, Balance: &held}}
+	if _, err := h.cproc.Check(ctx); err != nil || len(h.cproc.suspect) != 0 {
+		t.Fatalf("explained: %v %v", h.cproc.suspect, err)
+	}
+	less := d("460") // 10 more: suspect, then back by the next check
+	h.custody.coins[0].Balance = &less
+	if _, err := h.cproc.Check(ctx); err != nil || len(h.cproc.suspect) != 1 {
+		t.Fatalf("suspect: %v %v", h.cproc.suspect, err)
+	}
+	h.custody.coins[0].Balance = &held
+	h.now = h.now.Add(5 * time.Minute)
+	if _, err := h.cproc.Check(ctx); err != nil || len(h.cproc.suspect) != 0 || len(h.store.suspended) != 0 {
+		t.Fatalf("gone: %v %v %v", h.cproc.suspect, h.store.suspended, err)
+	}
+}
+
+// An operator may suspend an asset's withdrawals by hand, once.
+func TestAnOperatorSuspendsWithdrawals(t *testing.T) {
+	h := newCustodyHarness(t)
+	ctx := context.Background()
+	if _, err := SuspendWithdrawals(ctx, h.store, "usdt", "ops", "the custodian reported an incident", h.now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SuspendWithdrawals(ctx, h.store, "USDT", "ops", "again", h.now); !apperr.Is(err, apperr.CodeConflict) {
+		t.Fatalf("twice: %v", err)
+	}
+	if x := h.store.suspended["USDT"]; x.SuspendedBy != "ops" || h.audited("wallet.withdrawals.suspend") != 1 {
+		t.Fatalf("suspended %+v", x)
+	}
+}
+
+func (h *custodyHarness) gaugeOf(t *testing.T, name, asset string) float64 {
+	t.Helper()
+	mfs, err := h.reg.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mf := range mfs {
+		if mf.GetName() != name {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			for _, l := range m.GetLabel() {
+				if l.GetName() == "asset" && l.GetValue() == asset {
+					return m.GetGauge().GetValue()
+				}
+			}
+		}
+	}
+	return 0
+}

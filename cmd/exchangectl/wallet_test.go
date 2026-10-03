@@ -66,6 +66,22 @@ func TestWalletCommandsQueue(t *testing.T) {
 	if out := run("custody-fee-unit"); !strings.Contains(out, "SELF") || !strings.Contains(out, "the first withdrawal") {
 		t.Fatal(out)
 	}
+	// An asset's withdrawals suspended and resumed by hand (review B4).
+	if out := run("withdrawals-suspended"); !strings.Contains(out, "no asset's withdrawals are suspended") {
+		t.Fatal(out)
+	}
+	if out := run("withdrawals-suspend", "--asset", "usdt", "--reason", "the custodian's incident"); !strings.Contains(out, "withdrawals of USDT suspended") {
+		t.Fatal(out)
+	}
+	if out := run("withdrawals-suspended"); !strings.Contains(out, "USDT") || !strings.Contains(out, "the custodian's incident") {
+		t.Fatal(out)
+	}
+	if out := run("withdrawals-resume", "--asset", "USDT", "--reason", "it is over"); !strings.Contains(out, "withdrawals of USDT resumed") {
+		t.Fatal(out)
+	}
+	if err := walletWith(context.Background(), db, idb, []string{"withdrawals-resume", "--asset", "USDT", "--reason", "again"}, &buf); err == nil {
+		t.Fatal("resumed twice")
+	}
 	if err := walletWith(context.Background(), db, idb, []string{
 		"custody-fee", "0190a0b0-0000-7000-8000-000000000000", "--write-off",
 		"--reason", "nothing",

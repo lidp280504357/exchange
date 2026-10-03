@@ -289,6 +289,29 @@ func TestOperations(t *testing.T) {
 	if err := read.ChainFees().Insert(ctx, off); err == nil {
 		t.Fatal("a written-off fee without its decision")
 	}
+	// An asset's withdrawals suspended once, then lifted (review B4).
+	sus := domain.Suspension{
+		Asset: "USDT", Shortfall: decimal.RequireFromString("10"), Reason: "missing on two checks", SuspendedBy: domain.SuspendedBySystem,
+		SuspendedAt: now,
+	}
+	if done, err := read.Suspensions().Put(ctx, sus); err != nil || !done {
+		t.Fatalf("suspended %v %v", done, err)
+	}
+	if done, err := read.Suspensions().Put(ctx, sus); err != nil || done {
+		t.Fatalf("suspended twice %v %v", done, err)
+	}
+	if got, err := read.Suspensions().Get(ctx, "USDT"); err != nil || got == nil || !got.Shortfall.Equal(decimal.RequireFromString("10")) {
+		t.Fatalf("get %+v %v", got, err)
+	}
+	if list, err := read.Suspensions().List(ctx); err != nil || len(list) != 1 {
+		t.Fatalf("list %+v %v", list, err)
+	}
+	if done, err := read.Suspensions().Delete(ctx, "USDT"); err != nil || !done {
+		t.Fatalf("lifted %v %v", done, err)
+	}
+	if got, err := read.Suspensions().Get(ctx, "USDT"); err != nil || got != nil {
+		t.Fatalf("still suspended %+v %v", got, err)
+	}
 	unit := domain.FeeUnit{Provider: "UDUN", Asset: "USDT", Network: "TRON", Unit: domain.FeeUnitSelf, ConfirmedBy: "ops", Reason: "tronscan", ConfirmedAt: now}
 	if got, err := read.ChainFees().Unit(ctx, "UDUN", "USDT", "TRON"); err != nil || got != nil {
 		t.Fatalf("no unit yet %+v %v", got, err)

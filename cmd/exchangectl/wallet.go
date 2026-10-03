@@ -227,6 +227,42 @@ func walletWith(ctx context.Context, db, idb *pg.DB, args []string, out io.Write
 		fmt.Fprintf(out, "%s counts its fee on %s %s as %s; fees held before stay held (wallet custody-fees)\n", u.Provider, u.Asset, u.Network,
 			strings.ToUpper(u.Unit))
 		return nil
+	case "withdrawals-suspended":
+		list, err := store.Read().Suspensions().List(ctx)
+		if err != nil {
+			return err
+		}
+		if len(list) == 0 {
+			fmt.Fprintln(out, "no asset's withdrawals are suspended")
+			return nil
+		}
+		w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "ASSET\tSINCE\tBY\tMISSING\tWHY")
+		for _, x := range list {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", x.Asset, x.SuspendedAt.UTC().Format(time.RFC3339), x.SuspendedBy, x.Shortfall, x.Reason)
+		}
+		return w.Flush()
+	case "withdrawals-suspend", "withdrawals-resume":
+		asset := fs.String("asset", "", "the asset, e.g. USDT")
+		reason := fs.String("reason", "", "why (required, goes to the audit log)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if args[0] == "withdrawals-suspend" {
+			x, err := application.SuspendWithdrawals(ctx, store, *asset, actor(), *reason, time.Now())
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "withdrawals of %s suspended: new requests are refused, approved ones wait\n", x.Asset)
+			return nil
+		}
+		x, err := application.ResumeWithdrawals(ctx, store, *asset, actor(), *reason)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "withdrawals of %s resumed (suspended by %s at %s); approved ones go out within a round\n", x.Asset, x.SuspendedBy,
+			x.SuspendedAt.UTC().Format(time.RFC3339))
+		return nil
 	case "commands":
 		limit := fs.Int("limit", 20, "how many")
 		if err := fs.Parse(args[1:]); err != nil {

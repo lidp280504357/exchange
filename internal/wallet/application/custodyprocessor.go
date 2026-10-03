@@ -47,9 +47,17 @@ type CustodyProcessor struct {
 	BalanceEvery   time.Duration
 	ResubmitAfter  time.Duration
 	UncertainAfter time.Duration
+	// An asset's withdrawals are suspended when more than ShortfallStop of
+	// it is missing beyond what withdrawals with an unknown outcome could
+	// explain, on two checks at least RecheckAfter (5 minutes) apart: a
+	// first sighting has the next check come then (design §9, review B4).
+	ShortfallStop decimal.Decimal
+	RecheckAfter  time.Duration
 
 	lastCheck   time.Time
 	lastBalance time.Time
+	recheckAt   time.Time
+	suspect     map[string]time.Time // assets missing funds at a check, since
 
 	up        prometheus.Gauge
 	balance   *prometheus.GaugeVec
@@ -64,6 +72,7 @@ type CustodyProcessor struct {
 	waiting   prometheus.Gauge
 	unbooked  prometheus.Gauge
 	feesHeld  prometheus.Gauge
+	suspended *prometheus.GaugeVec
 }
 
 // NewCustodyProcessor registers the processor's metrics with reg.
@@ -88,8 +97,9 @@ func NewCustodyProcessor(p CustodyProcessor, reg prometheus.Registerer) *Custody
 	p.waiting = gauge("wallet_custody_deposits_held", "Deposits the custodian confirmed that wait because their asset takes no deposits.")
 	p.unbooked = gauge("wallet_custody_fees_unbooked", "The custodian's fees the ledger has not booked yet (GAS_SUPPLY short?).")
 	p.feesHeld = gauge("wallet_custody_fees_held", "The custodian's fees held for a person to book or write off (exchangectl wallet custody-fees).")
+	p.suspended = vec("wallet_withdrawals_suspended", "1 while an asset's withdrawals are suspended (funds missing, or an operator); a person lifts it.", "asset")
 	reg.MustRegister(p.up, p.balance, p.held, p.expected, p.shortfall, p.compared, p.submitted, p.oldest, p.attention, p.uncertain, p.waiting,
-		p.unbooked, p.feesHeld)
+		p.unbooked, p.feesHeld, p.suspended)
 	if p.CheckEvery <= 0 {
 		p.CheckEvery = time.Hour
 	}
@@ -102,6 +112,10 @@ func NewCustodyProcessor(p CustodyProcessor, reg prometheus.Registerer) *Custody
 	if p.UncertainAfter <= 0 {
 		p.UncertainAfter = 30 * time.Minute
 	}
+	if p.RecheckAfter <= 0 {
+		p.RecheckAfter = 5 * time.Minute
+	}
+	p.suspect = map[string]time.Time{}
 	return &p
 }
 
@@ -158,7 +172,8 @@ func (p *CustodyProcessor) Round(ctx context.Context) error {
 			p.lastBalance = now
 		}
 	}
-	if now.Sub(p.lastCheck) >= p.CheckEvery {
+	if now.Sub(p.lastCheck) >= p.CheckEvery || !p.recheckAt.IsZero() && !now.Before(p.recheckAt) {
+		p.recheckAt = time.Time{}
 		_, err := p.Check(ctx)
 		if err == nil || errors.Is(err, errNotCompared) {
 			p.lastCheck = now
@@ -211,12 +226,19 @@ func (p *CustodyProcessor) dispatch(ctx context.Context, o netOps, nets []domain
 	if err != nil {
 		return err
 	}
+	suspended, err := suspendedAssets(ctx, p.Store.Read())
+	if err != nil {
+		return err
+	}
 	for _, w := range list {
 		if w.InternalUserID != "" {
 			if err := o.transferInternal(ctx, w); err != nil {
 				return err
 			}
 			continue
+		}
+		if suspended[w.Asset] {
+			continue // waits APPROVED until a person lifts the suspension
 		}
 		if err := p.submit(ctx, w, nets); err != nil {
 			return err
@@ -403,6 +425,14 @@ func (p *CustodyProcessor) observe(ctx context.Context) error {
 		}
 	}
 	p.feesHeld.Set(float64(held))
+	stopped, err := r.Suspensions().List(ctx)
+	if err != nil {
+		return err
+	}
+	p.suspended.Reset()
+	for _, x := range stopped {
+		p.suspended.WithLabelValues(x.Asset).Set(1)
+	}
 	return nil
 }
 
@@ -495,7 +525,7 @@ func (p *CustodyProcessor) Check(ctx context.Context) ([]domain.ChainCheck, erro
 	if err != nil {
 		return nil, err
 	}
-	flying := inFlight(outstanding)
+	flying, unknown := inFlight(outstanding), unknownOutcome(outstanding)
 	unbooked := map[string]decimal.Decimal{}
 	networksOf := map[string][]string{}
 	var assets []string
@@ -554,7 +584,52 @@ func (p *CustodyProcessor) Check(ctx context.Context) ([]domain.ChainCheck, erro
 				"held", c.Chain.String(), "elsewhere", c.Elsewhere.String(), "in_flight", c.InFlight.String(), "expected", c.Ledger.String(),
 				"unbooked", c.Unbooked.String(), "shortfall", c.Shortfall.String())
 		}
+		if err := p.watchShortfall(ctx, c, unknown[asset]); err != nil {
+			return out, err
+		}
 		out = append(out, c)
 	}
 	return out, errors.Join(skipped...)
+}
+
+// watchShortfall suspends an asset's withdrawals when more of it is
+// missing than ShortfallStop beyond what withdrawals with an unknown
+// outcome (handed over unanswered, UNCERTAIN) could explain, on two
+// checks at least RecheckAfter apart: a first sighting has the next check
+// come then, a later one that finds nothing missing forgets it (design §9,
+// review B4). A person lifts the suspension (ResumeWithdrawals).
+func (p *CustodyProcessor) watchShortfall(ctx context.Context, c domain.ChainCheck, unknown decimal.Decimal) error {
+	missing := c.Shortfall.Sub(unknown)
+	now := p.Now()
+	if !missing.GreaterThan(p.ShortfallStop) {
+		delete(p.suspect, c.Asset)
+		return nil
+	}
+	since, seen := p.suspect[c.Asset]
+	if !seen {
+		p.suspect[c.Asset] = now
+		if at := now.Add(p.RecheckAfter); p.recheckAt.IsZero() || at.Before(p.recheckAt) {
+			p.recheckAt = at
+		}
+		p.Log.ErrorContext(ctx, "funds missing that nothing in flight explains: checked again, its withdrawals stop if still missing",
+			"asset", c.Asset, "missing", missing.String(), "check_again_in", p.RecheckAfter.String())
+		return nil
+	}
+	if now.Sub(since) < p.RecheckAfter {
+		return nil // an operator's check within the wait: the next one decides
+	}
+	x := domain.Suspension{
+		Asset: c.Asset, Shortfall: missing, SuspendedBy: domain.SuspendedBySystem, SuspendedAt: now,
+		Reason: fmt.Sprintf("the custody checks of %s and %s found %s %s missing that no withdrawal in flight explains", since.UTC().Format(time.RFC3339),
+			now.UTC().Format(time.RFC3339), missing, c.Asset),
+	}
+	done, err := suspend(ctx, p.Store, x)
+	if err != nil {
+		return err
+	}
+	if done {
+		p.Log.ErrorContext(ctx, "withdrawals suspended: funds missing on two checks; a person finds the cause and lifts it (exchangectl wallet withdrawals-resume)",
+			"asset", c.Asset, "missing", missing.String())
+	}
+	return nil
 }

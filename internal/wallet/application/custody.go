@@ -643,6 +643,19 @@ func (s *Service) Callback(ctx context.Context, id string) (domain.Callback, err
 // (it still expects them held). One handed over without an answer yet, or
 // uncertain, is not counted: the custodian may not hold it, and counting
 // it would hide a shortfall as large.
+// unknownOutcome is what of each asset the withdrawals with an unknown
+// outcome may have taken from the custodian: handed over unanswered
+// (SUBMITTED) or UNCERTAIN.
+func unknownOutcome(list []domain.Withdrawal) map[string]decimal.Decimal {
+	out := map[string]decimal.Decimal{}
+	for _, w := range list {
+		if w.ProviderStatus == domain.CustodySubmitted || w.ProviderStatus == domain.CustodyUncertain {
+			out[w.Asset] = out[w.Asset].Add(w.Amount)
+		}
+	}
+	return out
+}
+
 func inFlight(list []domain.Withdrawal) map[string]decimal.Decimal {
 	out := map[string]decimal.Decimal{}
 	for _, w := range list {

@@ -30,6 +30,7 @@ type memStore struct {
 	sweeps    map[string]domain.Sweep
 	fees      map[string]domain.ChainFee
 	units     map[string]domain.FeeUnit
+	suspended map[string]domain.Suspension
 	fundings  map[string]domain.Funding
 	checks    []domain.ChainCheck
 	book      map[string]domain.WithdrawAddress
@@ -48,8 +49,9 @@ type memStore struct {
 func newMemStore() *memStore {
 	return &memStore{
 		addresses: map[string]domain.Address{}, deposits: map[string]domain.Deposit{}, hashes: map[uint64]string{},
-		sweeps: map[string]domain.Sweep{}, fees: map[string]domain.ChainFee{}, units: map[string]domain.FeeUnit{}, fundings: map[string]domain.Funding{},
-		book: map[string]domain.WithdrawAddress{}, wds: map[string]domain.Withdrawal{}, nonce: map[string]uint64{},
+		sweeps: map[string]domain.Sweep{}, fees: map[string]domain.ChainFee{}, units: map[string]domain.FeeUnit{}, suspended: map[string]domain.Suspension{},
+		fundings: map[string]domain.Funding{},
+		book:     map[string]domain.WithdrawAddress{}, wds: map[string]domain.Withdrawal{}, nonce: map[string]uint64{},
 		prices: map[string]decimal.Decimal{},
 	}
 }

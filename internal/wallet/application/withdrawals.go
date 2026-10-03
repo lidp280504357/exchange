@@ -151,6 +151,12 @@ func (s *Service) RequestWithdrawal(ctx context.Context, userID string, in Withd
 	case in.Amount.LessThan(net.MinWithdraw):
 		return domain.Withdrawal{}, domain.ErrBelowMinimum.WithDetail("min_withdraw", net.MinWithdraw.String())
 	}
+	if x, err := s.Store.Read().Suspensions().Get(ctx, net.Asset); err != nil || x != nil {
+		if err == nil {
+			err = domain.ErrWithdrawSuspended
+		}
+		return domain.Withdrawal{}, err
+	}
 	allowed, reason, err := s.Eligibility.Check(ctx, userID, FeatureWithdraw)
 	if err != nil {
 		return domain.Withdrawal{}, err

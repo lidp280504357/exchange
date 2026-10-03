@@ -26,6 +26,40 @@ func (m *memStore) ChainFees() ports.ChainFeeRepo { return memFees{m} }
 func (m *memStore) Fundings() ports.FundingRepo   { return memFundings{m} }
 func (m *memStore) Checks() ports.CheckRepo       { return memChecks{m} }
 
+func (m *memStore) Suspensions() ports.SuspensionRepo { return memSuspensions{m} }
+
+type memSuspensions struct{ m *memStore }
+
+func (s memSuspensions) Get(_ context.Context, asset string) (*domain.Suspension, error) {
+	if x, ok := s.m.suspended[asset]; ok {
+		return &x, nil
+	}
+	return nil, nil
+}
+
+func (s memSuspensions) List(context.Context) ([]domain.Suspension, error) {
+	var out []domain.Suspension
+	for _, x := range s.m.suspended {
+		out = append(out, x)
+	}
+	slices.SortFunc(out, func(a, b domain.Suspension) int { return strings.Compare(a.Asset, b.Asset) })
+	return out, nil
+}
+
+func (s memSuspensions) Put(_ context.Context, x domain.Suspension) (bool, error) {
+	if _, ok := s.m.suspended[x.Asset]; ok {
+		return false, nil
+	}
+	s.m.suspended[x.Asset] = x
+	return true, nil
+}
+
+func (s memSuspensions) Delete(_ context.Context, asset string) (bool, error) {
+	_, ok := s.m.suspended[asset]
+	delete(s.m.suspended, asset)
+	return ok, nil
+}
+
 func (a memAddresses) List(_ context.Context, network string) ([]domain.Address, error) {
 	var out []domain.Address
 	for _, x := range a.m.addresses {

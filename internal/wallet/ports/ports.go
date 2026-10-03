@@ -36,6 +36,7 @@ type Repos interface {
 	Nonces() NonceRepo
 	Prices() PriceRepo
 	Callbacks() CallbackRepo
+	Suspensions() SuspensionRepo
 	// Emit queues a wallet.deposit.events event keyed by the user.
 	Emit(ctx context.Context, msg proto.Message, userID string) error
 	// EmitWithdrawal queues a wallet.withdrawal.events event keyed by the
@@ -211,6 +212,18 @@ type ChainFeeRepo interface {
 	PutUnit(ctx context.Context, u domain.FeeUnit) error
 	// Units lists the confirmed fee units.
 	Units(ctx context.Context) ([]domain.FeeUnit, error)
+}
+
+// SuspensionRepo stores the assets whose withdrawals are suspended.
+type SuspensionRepo interface {
+	// Get returns an asset's suspension, or nil.
+	Get(ctx context.Context, asset string) (*domain.Suspension, error)
+	List(ctx context.Context) ([]domain.Suspension, error)
+	// Put suspends an asset's withdrawals; false when they are suspended
+	// already (the first suspension stands).
+	Put(ctx context.Context, s domain.Suspension) (bool, error)
+	// Delete lifts an asset's suspension; false when there was none.
+	Delete(ctx context.Context, asset string) (bool, error)
 }
 
 // FundingRepo stores platform fundings, one per transaction.
