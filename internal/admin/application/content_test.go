@@ -22,6 +22,7 @@ type fakeContent struct {
 	published  []string
 	broadcasts []ports.BroadcastWrite
 	resumed    []string
+	resumeErr  error
 }
 
 func (f *fakeContent) CreateArticle(_ context.Context, a ports.ArticleWrite) (json.RawMessage, error) {
@@ -35,6 +36,9 @@ func (f *fakeContent) PublishArticle(_ context.Context, id string, version int, 
 }
 
 func (f *fakeContent) ResumeBroadcast(_ context.Context, id, actor string) (json.RawMessage, error) {
+	if f.resumeErr != nil {
+		return nil, f.resumeErr
+	}
 	f.resumed = append(f.resumed, id+" "+actor)
 	return json.Marshal(map[string]any{"id": id, "status": "SENDING", "failures": 0})
 }
@@ -134,5 +138,15 @@ func TestArticlesAndMessagesFromTheConsole(t *testing.T) {
 	}
 	if got := h.store.audits[len(h.store.audits)-1]; got.GetAction() != "admin.notices.resumed" || got.GetTarget() != "broadcast:"+failed {
 		t.Fatalf("the resume audited %v", got)
+	}
+	// Audited before it is asked; a refusal is audited too (C5.5 ㉓).
+	content.resumeErr = apperr.New(apperr.KindConflict, apperr.CodeConflict, "only a FAILED broadcast is resumed")
+	if _, err := h.svc.ResumeBroadcast(ctx, ops, failed, "user-service is back again"); code(err) != apperr.CodeConflict {
+		t.Fatalf("refused: %v", err)
+	}
+	n := len(h.store.audits)
+	if h.store.audits[n-2].GetAction() != "admin.notices.resumed" || h.store.audits[n-1].GetAction() != "admin.notices.resume_failed" ||
+		!strings.Contains(h.store.audits[n-1].GetDetails(), "only a FAILED broadcast") {
+		t.Fatalf("the refusal audited %v %v", h.store.audits[n-2], h.store.audits[n-1])
 	}
 }

@@ -207,8 +207,8 @@ func TestArticlesAndBroadcasts(t *testing.T) {
 	if err := store.Retry(ctx, mailed.ID, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if again, err := store.TakeDue(ctx, now.Add(2*time.Minute), 5*time.Minute, 10); err != nil || len(again) != 1 {
-		t.Fatalf("due again %+v %v", again, err)
+	if again, err := store.TakeDue(ctx, now.Add(2*time.Minute), 5*time.Minute, 10); err != nil || len(again) != 1 || again[0].Rounds != 1 {
+		t.Fatalf("due again, a round failed (C5.5 ㉓) %+v %v", again, err)
 	}
 	if err := store.Settle(ctx, mailed.ID); err != nil {
 		t.Fatal(err)
@@ -218,6 +218,17 @@ func TestArticlesAndBroadcasts(t *testing.T) {
 	}
 	if got, err := store.Notice(ctx, mailed.ID); err != nil || got == nil || got.UserID != users[0] || got.Data["broadcast_id"] != b.ID {
 		t.Fatalf("the notice by its ID %+v %v", got, err)
+	}
+	// A queued mail the provider took is never taken again, even before it
+	// is settled (C5.5 ㉓).
+	if err := store.Retry(ctx, mailed.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordAttempt(ctx, mailed.ID, domain.StatusSent, "mock", "", "m-1"); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := store.TakeDue(ctx, now.Add(time.Hour), 5*time.Minute, 10); err != nil || len(again) != 0 {
+		t.Fatalf("sent, not taken again %+v %v", again, err)
 	}
 	if _, err := store.MarkRead(ctx, users[0], nil); err != nil {
 		t.Fatal(err)
@@ -267,7 +278,7 @@ func TestArticlesAndBroadcasts(t *testing.T) {
 	if n, err := store.PurgeNotices(ctx, cutoff, 100); err != nil || n != 1 {
 		t.Fatalf("the other notice: %d %v", n, err)
 	}
-	if n, err := store.PurgeBroadcasts(ctx, cutoff); err != nil || n != 1 {
+	if n, err := store.PurgeBroadcasts(ctx, cutoff, 100); err != nil || n != 1 {
 		t.Fatalf("the sent broadcast, not the sending one: %d %v", n, err)
 	}
 	if n, err := store.PurgeDeliveries(ctx, time.Now().Add(time.Minute), 100); err != nil || n != 1 {

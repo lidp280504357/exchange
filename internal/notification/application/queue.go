@@ -15,7 +15,9 @@ import (
 // C5.5 ⑫).
 
 // Queued mails are tried again after these waits; after the last one a
-// mail is FAILED (its DeliveryFailed event is the dead letter).
+// mail is FAILED (its DeliveryFailed event is the dead letter). The wait
+// follows the mail's failed rounds (Delivery.Rounds), not its attempts,
+// which count every provider of the channel (C5.5 ㉓).
 var queueRetries = []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute, time.Hour}
 
 // queueLease holds a taken mail from another round while it is sent;
@@ -74,8 +76,7 @@ func (q *MailQueue) send(ctx context.Context, d domain.Delivery) (bool, error) {
 			return true, q.Queue.Settle(ctx, d.ID)
 		}
 	}
-	// Each round makes at least one attempt: its count bounds the rounds.
-	round := min(d.Attempts, len(queueRetries))
+	round := min(d.Rounds, len(queueRetries))
 	if !retryable(err) || round >= len(queueRetries) || q.Now().Sub(d.CreatedAt) > queueGiveUp {
 		q.Dispatcher.fail(d, domain.ClassOf(err))
 		return false, q.Queue.Settle(ctx, d.ID)
@@ -120,6 +121,9 @@ func (q *MailQueue) message(ctx context.Context, d domain.Delivery) (domain.Mess
 	return domain.Message{}, gone("the user has no address on the channel any more")
 }
 
+// MinRetention is the least keep a configuration may set (C5.5 ㉓).
+const MinRetention = 7 * 24 * time.Hour
+
 // Retention deletes what is past its keep, a batch at a time: in-app
 // notices and the broadcasts that made them after NoticeKeep (180 days
 // when zero), delivery records after DeliveryKeep (90 days when zero).
@@ -154,8 +158,15 @@ func (r *Retention) Purge(ctx context.Context) (notices, broadcasts, deliveries 
 			break
 		}
 	}
-	if broadcasts, err = r.Store.PurgeBroadcasts(ctx, now.Add(-notice)); err != nil {
-		return notices, broadcasts, 0, err
+	for {
+		n, err := r.Store.PurgeBroadcasts(ctx, now.Add(-notice), retentionBatch)
+		broadcasts += n
+		if err != nil || n < retentionBatch {
+			if err != nil {
+				return notices, broadcasts, 0, err
+			}
+			break
+		}
 	}
 	for {
 		n, err := r.Store.PurgeDeliveries(ctx, now.Add(-delivery), retentionBatch)

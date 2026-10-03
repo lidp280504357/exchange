@@ -61,8 +61,8 @@ notification-service 以消费组 `notification-service` 读 `auth.events` 与 `
 | `UserStatusChanged` | `STATUS_CHANGED` | 是 |
 
 - 后台发的站内信（类型 `BROADCAST`，2026-10-02 后台设计 C4b）不来自事件：管理员在「运营 → 站内信」发给单个用户、带某个标签的账户（最多 10,000 个）或全体用户，notification-service 每 3 秒一轮、每轮每条消息 100 人分批送达（表 `notify.broadcasts`，`cursor` 记进度，`inbox` 按消息与用户去重，同一人不会收到两次），用户语言没有英文时用中文；`data` 带 `broadcast_id` 与可选的站内路径 `link`，勾了「同时发邮件」时按下面的邮件规则投递。送达与已读人数在后台的消息详情里。一条消息的一轮出错只影响它自己：等待时间 3 秒起翻倍、最多 10 分钟，连续 10 轮失败标为 `FAILED`，由后台「继续发送」（迁移 notify 00003 的 `failures`、`last_error`、`retry_at`，C5.5 ⑫）。
-- 后台消息的邮件不在送达的那一轮里发：通知与一行 `QUEUED` 的投递记录（`notify.deliveries.next_attempt_at`）在同一事务写入，邮件队列每秒发 `NOTICE_MAIL_RATE` 封（默认 2，照顾服务商的限速），发送时才读用户的地址（不存明文）；失败的过 1、5、15、60 分钟再试，再失败、没有地址了或超过一天就标 `FAILED`，发 `DeliveryFailed` 事件（C5.5 ⑫）。账户事件的邮件仍当场发。
-- 留存（C5.5 ⑫）：notification-service 每小时删除超过 `NOTICE_RETENTION`（默认 180 天）的站内信与不在发送中的后台消息、超过 `DELIVERY_RETENTION`（默认 90 天）且不在队列里的投递记录，每次 5,000 行一批。谁发过什么消息仍在审计里。
+- 后台消息的邮件不在送达的那一轮里发：通知与一行 `QUEUED` 的投递记录（`notify.deliveries.next_attempt_at`）在同一事务写入，邮件队列每秒发 `NOTICE_MAIL_RATE` 封（默认 2，照顾服务商的限速），发送时才读用户的地址（不存明文）；失败的过 1、5、15、60 分钟再试（按失败的轮次 `deliveries.rounds` 算，迁移 notify 00004；不按服务商的尝试次数——一个渠道有两家服务商时每轮记两次——也不按入队后过了多久——队列积压几小时的邮件第一次失败就会被判到期），再失败、没有地址了或超过一天就标 `FAILED`，发 `DeliveryFailed` 事件（C5.5 ⑫、㉓）。服务商收下的那一刻（记为 `SENT`）同一条语句就把它移出队列，进程在那之后崩溃也不会重发（C5.5 ㉓）。账户事件的邮件仍当场发。
+- 留存（C5.5 ⑫）：notification-service 每小时删除超过 `NOTICE_RETENTION`（默认 180 天）的站内信与不在发送中的后台消息（`FAILED` 的也删：半年后不会再继续发送）、超过 `DELIVERY_RETENTION`（默认 90 天）且不在队列里的投递记录，每次 5,000 行一批。两个期限都不能短于 7 天，配短了服务拒绝启动（C5.5 ㉓）。谁发过什么消息仍在审计里。
 - 文案按用户语言（zh-CN / en）与时区渲染；数据里只有掩码后的 IP、身份。
 - 邮件发到用户邮箱，没有邮箱才发短信（短信只含标题，不带链接）；投递走与验证码相同的服务商链、重试与熔断，结果记在 `notify.deliveries`（`kind = NOTICE`，模板名 `notice.<类型>`）。账户事件的邮件是尽力而为：取联系人或投递失败只记日志，站内信不受影响（后台消息的邮件见上一条，经队列）。
 - 用户不存在（主档查不到）的事件直接丢弃并记警告；user-service 不可用时事件按 1s/5s/30s/5m 重试后进 `.dlq`。

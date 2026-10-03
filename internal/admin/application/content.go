@@ -158,7 +158,9 @@ func (s *Service) Broadcast(ctx context.Context, _ Principal, id string) (json.R
 
 // ResumeBroadcast sends a FAILED in-app message again from where it
 // stopped: its rounds failed ten times in a row (C5.5 ⑫). Audited as
-// admin.notices.resumed.
+// admin.notices.resumed before notification-service is asked, as a
+// message is sent (C5.5 ㉓); a refusal is audited too
+// (admin.notices.resume_failed), so no resume goes unrecorded.
 func (s *Service) ResumeBroadcast(ctx context.Context, p Principal, id, reason string) (json.RawMessage, error) {
 	if err := p.require(domain.PermNoticesSend); err != nil {
 		return nil, err
@@ -169,11 +171,19 @@ func (s *Service) ResumeBroadcast(ctx context.Context, p Principal, id, reason s
 	if _, err := uuid.Parse(id); err != nil {
 		return nil, apperr.NotFound("no such message")
 	}
-	raw, err := s.Content.ResumeBroadcast(ctx, id, p.Admin.Email)
-	if err != nil {
+	reason = strings.TrimSpace(reason)
+	if err := s.audit(ctx, p, "broadcast:"+id, "admin.notices.resumed", reason, "{}"); err != nil {
 		return nil, err
 	}
-	return raw, s.audit(ctx, p, "broadcast:"+id, "admin.notices.resumed", strings.TrimSpace(reason), "{}")
+	raw, err := s.Content.ResumeBroadcast(ctx, id, p.Admin.Email)
+	if err != nil {
+		d, _ := json.Marshal(map[string]string{"error": err.Error()})
+		if aerr := s.audit(ctx, p, "broadcast:"+id, "admin.notices.resume_failed", reason, string(d)); aerr != nil {
+			s.Log.ErrorContext(ctx, "the failed resume is not audited", "broadcast_id", id, "error", aerr)
+		}
+		return nil, err
+	}
+	return raw, nil
 }
 
 // Audiences of an in-app message as the console names them.

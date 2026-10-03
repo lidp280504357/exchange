@@ -102,8 +102,10 @@ type Delivery struct {
 	TargetMask string
 	UserID     string
 	CreatedAt  time.Time
-	// Attempts counts the provider attempts so far (a queued delivery's).
+	// Attempts counts the provider attempts so far (a queued delivery's);
+	// Rounds the queue's rounds that failed (C5.5 ㉓).
 	Attempts int
+	Rounds   int
 }
 
 // ErrProviderUnavailable is returned when no provider accepts the message

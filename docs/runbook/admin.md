@@ -220,7 +220,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 - **站内信**（`/broadcasts`；任何管理员可读，发送要 `notices.send`，ADMIN 与 OPERATOR 有）：
   - 对象：单个用户（用户 ID，确认词为 ID 后 4 位）、按标签（带这个标签的账户，最多 10,000 个，没有账户带它返回 422 `ADMIN_TAG_EMPTY`；确认词为标签的小写）、全体用户（确认词 `all`）。中文标题与正文必填，英文可选；跳转路径只能是站内路径（如 `/assets`，`//` 开头的拒绝）；可勾选同时发邮件。
   - 送达：notification-service 分批写进每位用户的通知（类型 `BROADCAST`，实时推送到 `notifications` 频道），见 `accounts.md`「用户通知」。列表与详情显示对象人数、已收到、已读与完成时间，发送中每几秒刷新。发出后不能撤回。审计 `admin.notices.sent`，对象 `broadcast:<id>`。
-  - 失败（C5.5 ⑫）：某条消息的一轮出错（例如 user-service 不可用）只影响它自己，其它消息照常送达；它下一轮等 3 秒、6 秒……翻倍，最多 10 分钟，连续 10 轮（约半小时）失败后标为「发送失败」（`FAILED`）。列表标出「已连续失败 n 轮」，详情显示最近一次的错误与下一轮时间；排除原因后有 `notices.send` 的管理员在详情里「继续发送」（理由，确认词为 ID 后 4 位），从中断处接着发，已收到的用户不会再收到。审计 `admin.notices.resumed`。
+  - 失败（C5.5 ⑫）：某条消息的一轮出错（例如 user-service 不可用）只影响它自己，其它消息照常送达；它下一轮等 3 秒、6 秒……翻倍，最多 10 分钟，连续 10 轮（约半小时）失败后标为「发送失败」（`FAILED`）。列表标出「已连续失败 n 轮」，详情显示最近一次的错误与下一轮时间；排除原因后有 `notices.send` 的管理员在详情里「继续发送」（理由，确认词为 ID 后 4 位），从中断处接着发，已收到的用户不会再收到。审计 `admin.notices.resumed` 在请求 notification-service 之前写；对方拒绝（例如已不是 `FAILED`）时另记 `admin.notices.resume_failed` 与错误（C5.5 ㉓）。
 - **接口**：`GET/POST /admin/v1/articles`（`?section=ANNOUNCEMENT|HELP`）、`GET/PUT /admin/v1/articles/{id}`、`POST …/{id}/publish`（`{version, publish_at?, reason}`）、`POST …/{id}/archive`；`GET/POST /admin/v1/broadcasts`、`GET /admin/v1/broadcasts/{id}`（带 `failures`、`last_error`、`retry_at`）、`POST /admin/v1/broadcasts/{id}/resume`（`{reason}`，只有 `FAILED` 的能继续，其它 409 `COMMON_CONFLICT`）。
 - **端到端**：`admin.sh` 用固定 slug `e2e-console` 的公告（文章不删除，第一次运行新建，以后改写）：定时发布前站点看不到，立即发布后 PC 站与手机站的接口 1 分钟内列出，发布中修改 1 分钟内更新，旧版本的修改被拒，下线后从列表消失、slug 进 `withdrawn`；给本次的测试用户发一条站内信，用户在通知里看到并读过后，后台显示已收到 1、已读 1；列表一页一页给、只有摘要，坏游标 400；这条消息没有失败的轮次，「继续发送」只对 `FAILED` 的有效（409），AUDITOR 不能（C5.5 ⑫）。
 

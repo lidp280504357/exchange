@@ -20,9 +20,10 @@ import (
 // returns them.
 func (s *Store) TakeDue(ctx context.Context, now time.Time, lease time.Duration, limit int) ([]domain.Delivery, error) {
 	rows, err := s.db.Query(ctx, `UPDATE deliveries d SET next_attempt_at = $2 FROM (
-			SELECT id FROM deliveries WHERE next_attempt_at <= $1 ORDER BY next_attempt_at LIMIT $3 FOR UPDATE SKIP LOCKED
+			SELECT id FROM deliveries WHERE next_attempt_at <= $1 AND status NOT IN ('SENT', 'FAILED')
+			ORDER BY next_attempt_at LIMIT $3 FOR UPDATE SKIP LOCKED
 		) due WHERE d.id = due.id
-		RETURNING d.id, d.kind, d.channel, d.template, d.target_mask, d.user_id, d.created_at, d.attempts`,
+		RETURNING d.id, d.kind, d.channel, d.template, d.target_mask, d.user_id, d.created_at, d.attempts, d.rounds`,
 		now, now.Add(lease), limit)
 	if err != nil {
 		return nil, fmt.Errorf("due deliveries: %w", err)
@@ -34,7 +35,7 @@ func (s *Store) TakeDue(ctx context.Context, now time.Time, lease time.Duration,
 		var id uuid.UUID
 		var user *uuid.UUID
 		var kind, channel string
-		if err := rows.Scan(&id, &kind, &channel, &d.Template, &d.TargetMask, &user, &d.CreatedAt, &d.Attempts); err != nil {
+		if err := rows.Scan(&id, &kind, &channel, &d.Template, &d.TargetMask, &user, &d.CreatedAt, &d.Attempts, &d.Rounds); err != nil {
 			return nil, fmt.Errorf("due deliveries: %w", err)
 		}
 		d.ID, d.Kind, d.Channel = id.String(), domain.Kind(kind), domain.Channel(channel)
@@ -46,9 +47,10 @@ func (s *Store) TakeDue(ctx context.Context, now time.Time, lease time.Duration,
 	return out, rows.Err()
 }
 
-// Retry makes a queued delivery due again at at.
+// Retry makes a queued delivery due again at at, a failed round more.
 func (s *Store) Retry(ctx context.Context, id string, at time.Time) error {
-	if _, err := s.db.Exec(ctx, `UPDATE deliveries SET next_attempt_at = $2, updated_at = now() WHERE id = $1`, id, at); err != nil {
+	if _, err := s.db.Exec(ctx, `UPDATE deliveries SET next_attempt_at = $2, rounds = rounds + 1, updated_at = now() WHERE id = $1`,
+		id, at); err != nil {
 		return fmt.Errorf("retry delivery: %w", err)
 	}
 	return nil
@@ -99,10 +101,12 @@ func (s *Store) PurgeNotices(ctx context.Context, before time.Time, limit int) (
 	return tag.RowsAffected(), nil
 }
 
-// PurgeBroadcasts deletes the broadcasts created before before that are
-// not sending.
-func (s *Store) PurgeBroadcasts(ctx context.Context, before time.Time) (int64, error) {
-	tag, err := s.db.Exec(ctx, `DELETE FROM broadcasts WHERE created_at < $1 AND status <> 'SENDING'`, before)
+// PurgeBroadcasts deletes up to limit broadcasts created before before
+// that are not sending (FAILED ones too: half a year on, nobody resumes
+// them).
+func (s *Store) PurgeBroadcasts(ctx context.Context, before time.Time, limit int) (int64, error) {
+	tag, err := s.db.Exec(ctx, `DELETE FROM broadcasts WHERE id IN (
+		SELECT id FROM broadcasts WHERE created_at < $1 AND status <> 'SENDING' LIMIT $2)`, before, limit)
 	if err != nil {
 		return 0, fmt.Errorf("purge broadcasts: %w", err)
 	}

@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
@@ -53,7 +54,14 @@ type settings struct {
 }
 
 func (s *settings) Validate() error {
-	return errors.Join(s.Postgres.Validate(), s.Kafka.Validate())
+	var keep error
+	for name, d := range map[string]time.Duration{"NOTICE_RETENTION": s.NoticeRetention, "DELIVERY_RETENTION": s.DeliveryRetention} {
+		// A short keep would delete the inbox on the next round (C5.5 ㉓).
+		if d != 0 && d < application.MinRetention {
+			keep = errors.Join(keep, fmt.Errorf("%s must be at least %s (or unset)", name, application.MinRetention))
+		}
+	}
+	return errors.Join(s.Postgres.Validate(), s.Kafka.Validate(), keep)
 }
 
 func main() {

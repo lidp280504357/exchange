@@ -20,14 +20,15 @@ import (
 // memQueue is the deliveries table's queue; the attempts come from the
 // dispatcher's records.
 type memQueue struct {
-	mu   sync.Mutex
-	del  *memDeliveries
-	rows map[string]domain.Delivery
-	due  map[string]time.Time
+	mu     sync.Mutex
+	del    *memDeliveries
+	rows   map[string]domain.Delivery
+	due    map[string]time.Time
+	rounds map[string]int
 }
 
 func newMemQueue(del *memDeliveries) *memQueue {
-	return &memQueue{del: del, rows: map[string]domain.Delivery{}, due: map[string]time.Time{}}
+	return &memQueue{del: del, rows: map[string]domain.Delivery{}, due: map[string]time.Time{}, rounds: map[string]int{}}
 }
 
 func (q *memQueue) add(d domain.Delivery, at time.Time) {
@@ -54,6 +55,7 @@ func (q *memQueue) TakeDue(_ context.Context, now time.Time, lease time.Duration
 		if len(out) < limit && !at.After(now) {
 			d := q.rows[id]
 			_, _, d.Attempts, _ = q.del.get(id)
+			d.Rounds = q.rounds[id]
 			out = append(out, d)
 			q.due[id] = now.Add(lease)
 		}
@@ -65,6 +67,7 @@ func (q *memQueue) Retry(_ context.Context, id string, at time.Time) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.due[id] = at
+	q.rounds[id]++
 	return nil
 }
 
@@ -287,9 +290,11 @@ func (m *memRetention) PurgeNotices(_ context.Context, before time.Time, limit i
 	return int64(n), nil
 }
 
-func (m *memRetention) PurgeBroadcasts(_ context.Context, before time.Time) (int64, error) {
+func (m *memRetention) PurgeBroadcasts(_ context.Context, before time.Time, limit int) (int64, error) {
 	m.cutoffs = append(m.cutoffs, before)
-	return m.broadcasts, nil
+	n := min(m.broadcasts, int64(limit))
+	m.broadcasts -= n
+	return n, nil
 }
 
 func (m *memRetention) PurgeDeliveries(_ context.Context, before time.Time, _ int) (int64, error) {
@@ -299,14 +304,63 @@ func (m *memRetention) PurgeDeliveries(_ context.Context, before time.Time, _ in
 
 func TestRetentionDeletesInBatches(t *testing.T) {
 	now := time.Date(2026, 10, 3, 10, 0, 0, 0, time.UTC)
-	store := &memRetention{notices: 2*retentionBatch + 7, broadcasts: 2}
+	store := &memRetention{notices: 2*retentionBatch + 7, broadcasts: retentionBatch + 2}
 	r := &Retention{Store: store, Now: func() time.Time { return now }}
 	notices, broadcasts, deliveries, err := r.Purge(context.Background())
-	if err != nil || notices != 2*retentionBatch+7 || broadcasts != 2 || deliveries != 3 {
+	if err != nil || notices != 2*retentionBatch+7 || broadcasts != retentionBatch+2 || deliveries != 3 {
 		t.Fatalf("deleted %d %d %d %v", notices, broadcasts, deliveries, err)
 	}
+	// Three batches of notices, two of broadcasts (C5.5 ㉓), one of deliveries.
 	keep, records := now.Add(-180*24*time.Hour), now.Add(-90*24*time.Hour)
-	if len(store.cutoffs) != 5 || !store.cutoffs[0].Equal(keep) || !store.cutoffs[3].Equal(keep) || !store.cutoffs[4].Equal(records) {
+	if len(store.cutoffs) != 6 || !store.cutoffs[0].Equal(keep) || !store.cutoffs[4].Equal(keep) || !store.cutoffs[5].Equal(records) {
 		t.Fatalf("the cutoffs %v", store.cutoffs)
+	}
+}
+
+// TestQueuedMailRoundsNotAttempts: with two providers each round makes two
+// attempts, and the mail still waits 1, 5, 15 and 60 minutes before it
+// fails; a mail that waited in a backed-up queue for hours gets its rounds
+// too (C5.5 ㉓).
+func TestQueuedMailRoundsNotAttempts(t *testing.T) {
+	queuedAt := time.Date(2026, 10, 3, 10, 0, 0, 0, time.UTC)
+	now := queuedAt.Add(3 * time.Hour) // the queue was backed up
+	errs := func() []error {
+		var out []error
+		for range 2 * (len(queueRetries) + 1) {
+			out = append(out, timeout)
+		}
+		return out
+	}
+	first, second := &scriptedProvider{name: "first", errs: errs()}, &scriptedProvider{name: "second", errs: errs()}
+	deliveries := newMemDeliveries()
+	d := NewDispatcher(Routes{Email: []ports.Provider{first, second}}, deliveries, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	queue := newMemQueue(deliveries)
+	notices := &memNotices{handled: map[string]bool{}, queue: queue}
+	user := uuid.Must(uuid.NewV7()).String()
+	people := fakeRecipients{
+		recipients: map[string]ports.Recipient{user: {Language: "en"}},
+		contacts:   map[string][]ports.Contact{user: {{Channel: domain.ChannelEmail, Value: "user@example.com"}}},
+	}
+	q := &MailQueue{Queue: queue, Notices: notices, Recipients: people, Dispatcher: d, Log: slog.New(slog.DiscardHandler), Now: func() time.Time { return now }}
+	ctx := context.Background()
+	notice := domain.Notice{ID: uuid.Must(uuid.NewV7()).String(), UserID: user, Type: domain.NoticeBroadcast, Title: "Hi", Body: "There", CreatedAt: queuedAt}
+	del := mailDelivery(notice, ports.Contact{Channel: domain.ChannelEmail, Value: "user@example.com"})
+	if _, err := notices.CreateNotice(ctx, BroadcastConsumer, notice.ID, notice, &del); err != nil {
+		t.Fatal(err)
+	}
+	for i, wait := range queueRetries {
+		if _, err := q.Round(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if status, _, attempts, _ := deliveries.get(notice.ID); status != domain.StatusFailedRetrying || attempts != 2*(i+1) || queue.waiting() != 1 {
+			t.Fatalf("round %d: %s after %d attempts, %d queued", i+1, status, attempts, queue.waiting())
+		}
+		now = now.Add(wait)
+	}
+	if _, err := q.Round(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if status, _, attempts, _ := deliveries.get(notice.ID); status != domain.StatusFailed || attempts != 2*(len(queueRetries)+1) || queue.waiting() != 0 {
+		t.Fatalf("failed after the last round: %s %d", status, attempts)
 	}
 }

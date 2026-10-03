@@ -51,7 +51,8 @@ type MailQueue interface {
 	// TakeDue returns up to limit queued deliveries due by now, oldest
 	// first, each held from the other takers until lease is over.
 	TakeDue(ctx context.Context, now time.Time, lease time.Duration, limit int) ([]domain.Delivery, error)
-	// Retry makes a queued delivery due again at at.
+	// Retry makes a queued delivery due again at at, counting a failed
+	// round (Delivery.Rounds).
 	Retry(ctx context.Context, id string, at time.Time) error
 	// Settle ends a queued delivery's wait (sent, or failed for good).
 	Settle(ctx context.Context, id string) error
@@ -61,9 +62,9 @@ type MailQueue interface {
 type RetentionStore interface {
 	// PurgeNotices deletes up to limit notices created before before.
 	PurgeNotices(ctx context.Context, before time.Time, limit int) (int64, error)
-	// PurgeBroadcasts deletes the broadcasts created before before that
-	// are not sending.
-	PurgeBroadcasts(ctx context.Context, before time.Time) (int64, error)
+	// PurgeBroadcasts deletes up to limit broadcasts created before before
+	// that are not sending.
+	PurgeBroadcasts(ctx context.Context, before time.Time, limit int) (int64, error)
 	// PurgeDeliveries deletes up to limit delivery records created before
 	// before that wait for nothing.
 	PurgeDeliveries(ctx context.Context, before time.Time, limit int) (int64, error)

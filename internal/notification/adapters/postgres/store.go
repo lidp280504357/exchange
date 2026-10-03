@@ -44,8 +44,11 @@ func (s *Store) CreateDelivery(ctx context.Context, d domain.Delivery) error {
 
 // RecordAttempt stores one provider attempt.
 func (s *Store) RecordAttempt(ctx context.Context, id string, status domain.Status, provider string, class domain.FailureClass, providerMessageID string) error {
+	// A sent delivery waits for nothing more, in the same statement: a queued
+	// mail the provider took is never taken again (C5.5 ㉓).
 	_, err := s.db.Exec(ctx, `UPDATE deliveries SET status = $2, provider = $3, attempts = attempts + 1,
 		failure_class = $4, provider_message_id = CASE WHEN $5 = '' THEN provider_message_id ELSE $5 END,
+		next_attempt_at = CASE WHEN $2 = 'SENT' THEN NULL ELSE next_attempt_at END,
 		updated_at = now() WHERE id = $1`, id, string(status), provider, string(class), providerMessageID)
 	if err != nil {
 		return fmt.Errorf("record attempt: %w", err)
