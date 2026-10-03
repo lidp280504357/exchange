@@ -1334,6 +1334,38 @@ else
   echo "skip a booked fee: none booked yet"
 fi
 
+# Two fees held for a person on the stand-in (lib/held-fees.sh: 999 TUSD
+# reported, nothing taken): one booked as charged, within 5 times what was
+# reported (review 26), the other written off; wallet-service audits both
+# in FINANCE's name.
+# shellcheck source=lib/held-fees.sh
+source "$(dirname "$0")/lib/held-fees.sh"
+held_fees 2
+FEE_BOOK=${HELD_FEES[0]}
+FEE_OFF=${HELD_FEES[1]}
+held_listed() {
+  as AUDITOR GET "/admin/v1/custody/fees?provider=UDUNMOCK&status=HELD&limit=200" ""
+  [[ $STATUS == 200 ]] && jq -e --arg a "$FEE_BOOK" --arg b "$FEE_OFF" '([.items[] | select(.withdrawal_id == $a or .withdrawal_id == $b) |
+    select(.asset == "TUSD" and (.amount | tonumber) == 999 and .provider == "UDUNMOCK")] | length) == 2' <<<"$BODY" >/dev/null
+}
+eventually 60 "both held for a person, 999 TUSD reported" held_listed
+as FINANCE POST "/admin/v1/custody/fees/$FEE_BOOK/book" '{"asset":"TUSD","amount":"5000","reason":"e2e above five times"}'
+expect 422 ADMIN_FEE_ABOVE_REPORTED "not more than 5 times what was reported"
+as FINANCE POST "/admin/v1/custody/fees/$FEE_BOOK/book" '{"amount":"1","reason":"e2e found charged 1 TUSD"}'
+expect 200 - "FINANCE books one as charged"
+check ".status == \"BOOKABLE\" and .asset == \"TUSD\" and (.amount | tonumber) == 1 and .resolved_by == \"$EMAIL_FINANCE\"" "1 TUSD from GAS_SUPPLY, by FINANCE"
+as FINANCE POST "/admin/v1/custody/fees/$FEE_BOOK/book" '{"reason":"e2e book it again"}'
+expect 409 WALLET_CUSTODY_FEE_NOT_HELD "booked once"
+as FINANCE POST "/admin/v1/custody/fees/$FEE_OFF/write-off" '{"reason":"e2e the custodian took nothing"}'
+expect 200 - "FINANCE writes the other off"
+check ".status == \"WRITTEN_OFF\" and .written_off_at != null and .resolved_by == \"$EMAIL_FINANCE\"" "written off, by FINANCE"
+fees_audited() {
+  as AUDITOR GET "/admin/v1/audit-logs?target=withdrawal:$FEE_OFF" ""
+  [[ $STATUS == 200 ]] && jq -e --arg e "$EMAIL_FINANCE" 'any(.items[]; .payload.action == "wallet.custody.fee.write_off" and .actor == $e)' \
+    <<<"$BODY" >/dev/null
+}
+eventually 60 "wallet-service audits the decision in FINANCE's name" fees_audited
+
 echo "== a withdrawal's review details and holds"
 as FINANCE GET "/admin/v1/withdrawals?held=false&min_risk=0&min_value_usdt=0&max_value_usdt=1000000" ""
 expect 200 - "the queue filters by hold, risk and worth"
