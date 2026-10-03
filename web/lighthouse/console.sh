@@ -20,7 +20,7 @@ source scripts/e2e/lib/common.sh
 source scripts/e2e/lib/remote.sh
 ADMIN_BASE="${ADMIN_BASE:-https://admin.astras.vip}"
 PAGES=("$@")
-((${#PAGES[@]})) || PAGES=(/ /users /orders /withdrawals /approvals /instruments /sim /reports /audit)
+((${#PAGES[@]})) || PAGES=(/ /users /orders /withdrawals /approvals /custody /instruments /house /sim /reports /audit)
 MIN_SCORE="${MIN_SCORE:-0.85}"
 OUT=.lighthouseci/console
 mkdir -p "$OUT"

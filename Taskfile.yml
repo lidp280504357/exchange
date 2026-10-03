@@ -140,7 +140,7 @@ tasks:
       - pnpm test
 
   web:lighthouse:
-    desc: 对部署后的 PC 站三页、手机站四页（含「我的」）、后台登录页与登录后的九页跑 Lighthouse（设计 §12.1 与后台设计 §6 的性能预算；需要本机 Chrome，后台页面用 ssh 建临时管理员；报告在 .lighthouseci/）
+    desc: 对部署后的 PC 站三页、手机站四页（含「我的」）、后台登录页与登录后的十一页跑 Lighthouse（设计 §12.1 与后台设计 §6 的性能预算；需要本机 Chrome，后台页面用 ssh 建临时管理员；报告在 .lighthouseci/）
     dir: web/lighthouse
     cmds:
       - pnpm dlx @lhci/cli@0.15 autorun --config=pc.json || true
