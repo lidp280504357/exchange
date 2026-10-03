@@ -479,7 +479,11 @@ as AUDITOR GET "/admin/v1/derivatives/liquidations?kind=SIDEWAYS" ""
 expect 400 COMMON_INVALID_ARGUMENT "an unknown kind"
 as AUDITOR GET "/admin/v1/derivatives/liquidations?days=7&kind=FILLED&symbol=ETH-USDT-PERP" ""
 expect 200 - "liquidation steps of a kind and a contract"
-check 'all(.items[]; .kind == "FILLED" and .symbol == "ETH-USDT-PERP")' "only those"
+if [[ $(jq '.items | length' <<<"$BODY") -gt 0 ]]; then
+  check 'all(.items[]; .kind == "FILLED" and .symbol == "ETH-USDT-PERP")' "only those"
+else
+  echo "skip only those: no ETH-USDT-PERP liquidation filled in the last 7 days to tell the filter by"
+fi
 as AUDITOR GET "/admin/v1/derivatives/liquidations?user_id=bob" ""
 expect 400 COMMON_INVALID_ARGUMENT "a user that is no UUID"
 as AUDITOR GET "/admin/v1/positions?watch=true" ""
@@ -849,7 +853,11 @@ else
     "the long valued at the mark price; HOUSE's account named"
   HOUSE_ID=$(jq -r .house_user_id <<<"$BODY")
   as AUDITOR GET "/admin/v1/positions?user_id=$HOUSE_ID&symbol=ETH-USDT-PERP" ""
+  expect 200 - "HOUSE's positions"
   check '(.positions | length) >= 1' "HOUSE holds the other side"
+  as AUDITOR GET "/admin/v1/positions?symbol=ETH-USDT-PERP&limit=5000" ""
+  expect 200 - "a limit beyond the most is clamped"
+  check "(.positions | length) <= 500 and (.positions | map(.user_id == \"$HOUSE_ID\") | . == sort)" "HOUSE's positions after every user's"
   as FINANCE POST "/admin/v1/users/$USER_ID/positions/close" '{"symbol":"ETH-USDT-PERP","position_side":"BOTH","reason":"e2e force close"}'
   expect 403 ADMIN_FORBIDDEN "FINANCE closes no positions"
   as OPERATOR POST "/admin/v1/users/$USER_ID/positions/close" '{"symbol":"ETH-USDT-PERP","position_side":"BOTH","reason":"e2e force close"}'

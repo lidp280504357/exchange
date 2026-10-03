@@ -146,7 +146,7 @@ REST（经网关 `/v1/derivatives/*`，需登录）：
 | `GET /internal/derivatives/contracts` | 每个合约的状态、只减仓（原因、开始时间、上次谁解除）、标记价与是否新鲜、持仓量（多头总量）与持仓数 |
 | `POST /internal/derivatives/contracts/{symbol}/lift-reduce-only` | `{"actor": ...}` 解除只减仓，返回 `lifted` 表示原来是否只减仓 |
 | `GET /internal/derivatives/risk` | 被接管、已预警或保证金率（维持保证金 ÷（保证金 + 未实现盈亏））≥ 0.5 的仓位，风险高的在前；全仓仓位在这里按单个仓位计算 |
-| `GET /internal/derivatives/positions` | 全部用户的持仓（后台「仓位」页，2026-10-02 C3）：`symbol`、`user_id`、`watch=true`（只要上一行的风险仓位）、`limit`（默认 200，最多 1000）；按保证金率、再按开仓名义价值从大到小，`truncated` 表示被 `limit` 截断 |
+| `GET /internal/derivatives/positions` | 全部用户的持仓（后台「仓位」页，2026-10-02 C3）：`symbol`、`user_id`（按用户只读这个用户的仓位）、`watch=true`（只要上一行的风险仓位，另加全仓账户被预警的全仓仓位；不含 HOUSE）、`limit`（默认 200，超过 1000 按 1000）；按保证金率、再按开仓名义价值从大到小，HOUSE 的仓位排在最后（HOUSE 的单按最高杠杆记保证金，零盈亏时保证金率就约 50%，不排后会占满"最危险"），`truncated` 表示被 `limit` 截断；每行带 `mark_fresh`，标记价不新鲜时盈亏与保证金率停在上一个标记价（C5.5 ⑨） |
 | `POST /internal/derivatives/positions/close` | 后台强制平仓（C2）：先撤该用户在这个合约上的全部挂单，再以 `ADMIN` 类型的市价只减仓单平掉；HOUSE 不平 |
 | `GET /internal/derivatives/users/{id}/cross-margin?debit=` | 后台调账预览（C5.5 ⑧）：全仓权益、维持保证金与状态，以及扣减 `debit` 后的权益与状态（`HEALTHY`/`WARNING`/`LIQUIDATE`） |
 | `POST /internal/derivatives/contracts/{symbol}/tier-impact` | 新风险阶梯的影响（后台预览，2026-10-02 设计 §2 第 6 条）：`{risk_tiers}`，按保证金监控的规则（逐仓看仓位、全仓看整个账户，HOUSE 不计）算出会新被强平的仓位数、名义价值与账户数，新进入预警、超出杠杆风险限额、没有新鲜标记价的数量，以及最大的 20 个例子；阶梯不合法答 400，不改任何东西 |

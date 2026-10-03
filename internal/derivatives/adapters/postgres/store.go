@@ -658,6 +658,24 @@ func (r cross) WarnedAt(ctx context.Context, userID string) (time.Time, error) {
 	return *at, nil
 }
 
+func (r cross) Warned(ctx context.Context) (map[string]time.Time, error) {
+	rows, err := r.q.Query(ctx, `SELECT user_id::text, warned_at FROM cross_accounts WHERE warned_at IS NOT NULL`)
+	if err != nil {
+		return nil, fmt.Errorf("list warned cross accounts: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]time.Time{}
+	for rows.Next() {
+		var user string
+		var at time.Time
+		if err := rows.Scan(&user, &at); err != nil {
+			return nil, fmt.Errorf("scan warned cross account: %w", err)
+		}
+		out[user] = at
+	}
+	return out, rows.Err()
+}
+
 func (r cross) SetWarnedAt(ctx context.Context, userID string, at time.Time) error {
 	if _, err := r.q.Exec(ctx, `INSERT INTO cross_accounts (user_id, warned_at) VALUES ($1, $2)
 		ON CONFLICT (user_id) DO UPDATE SET warned_at = $2, updated_at = now()`, userID, nullTime(at)); err != nil {

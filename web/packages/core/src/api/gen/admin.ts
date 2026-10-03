@@ -2415,9 +2415,11 @@ export interface paths {
          * Every user's open contract positions, riskiest first
          * @description From derivatives-service, valued at the mark price: highest margin
          *     ratio (maintenance margin / margin balance) first, then the
-         *     largest. Cross positions are measured on their own; their
-         *     liquidation price is on the user's page. At most `limit` (500)
-         *     positions; `truncated` says there are more. Needs derivatives.read.
+         *     largest; HOUSE's positions come last. Cross positions are measured
+         *     on their own; their liquidation price is on the user's page, and
+         *     they count as warned when their cross account is. mark_fresh says
+         *     whether the mark price is fresh. At most `limit` (500) positions;
+         *     `truncated` says there are more. Needs derivatives.read.
          */
         get: operations["listPositions"];
         put?: never;
@@ -4182,10 +4184,15 @@ export interface components {
             /** @description Taken over by the liquidation engine. */
             liquidating: boolean;
             liquidation_attempts: number;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the position was warned; a cross position's is its account's (the margin monitor warns the cross account).
+             */
             warned_at: string | null;
             /** @description Maintenance margin / (margin + unrealized result); null without a mark price or once the margin is gone. */
             margin_ratio: components["schemas"]["NullableDecimal"];
+            /** @description False while the mark price is older than the margin monitor accepts; the figures stand still until it moves. */
+            mark_fresh: boolean;
         };
         LiquidationStep: {
             /** Format: uuid */
@@ -7745,7 +7752,7 @@ export interface operations {
             query?: {
                 symbol?: string;
                 user_id?: components["parameters"]["UserFilter"];
-                /** @description true for the positions under watch only (warned, taken over, margin ratio ≥ 0.5). */
+                /** @description true for the positions under watch only (warned, their cross account warned, taken over, margin ratio ≥ 0.5); never HOUSE's. */
                 watch?: "true";
                 limit?: number;
             };

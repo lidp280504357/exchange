@@ -65,7 +65,21 @@ export default function Positions({ admin }: { admin: Admin }) {
       },
       { id: "qty", header: t("admin.common.quantity"), meta: right, cell: ({ row }) => <Num value={dec.abs(row.original.quantity)} /> },
       { id: "entry", header: t("admin.money.entry"), meta: right, cell: ({ row }) => <Num value={row.original.entry_price} /> },
-      { id: "mark", header: t("admin.money.mark"), meta: right, cell: ({ row }) => <Num value={row.original.mark_price} /> },
+      {
+        id: "mark",
+        header: t("admin.money.mark"),
+        meta: right,
+        cell: ({ row }) =>
+          row.original.mark_fresh ? (
+            <Num value={row.original.mark_price} />
+          ) : (
+            // A stale mark: the figures of the row stand still until it moves again (C5.5 ⑨).
+            <span className="inline-flex flex-col items-end" title={t("admin.positions.markStaleHint")}>
+              <Num value={row.original.mark_price} />
+              <Badge tone="warn">{t("admin.positions.markStale")}</Badge>
+            </span>
+          ),
+      },
       { id: "upnl", header: t("admin.money.upnl"), meta: right, cell: ({ row }) => <Num value={row.original.unrealized_pnl} signed /> },
       {
         id: "margin", header: t("admin.money.margin"), meta: right,

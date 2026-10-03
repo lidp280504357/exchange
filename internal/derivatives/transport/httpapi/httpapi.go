@@ -662,8 +662,11 @@ func (h *Handler) risk(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) openPositions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
-	if limit <= 0 || limit > 1000 {
+	switch {
+	case limit <= 0:
 		limit = 200
+	case limit > 1000:
+		limit = 1000 // at most, not back to the default (C5.5 ⑨)
 	}
 	list, cut, err := h.Svc.OpenPositions(r.Context(), application.PositionFilter{
 		Symbol: strings.ToUpper(q.Get("symbol")), UserID: q.Get("user_id"), Watch: q.Get("watch") == "true", Limit: limit,
@@ -735,6 +738,9 @@ type riskJSON struct {
 	LiquidationAttempts int     `json:"liquidation_attempts"`
 	WarnedAt            *string `json:"warned_at"`
 	MarginRatio         *string `json:"margin_ratio"`
+	// MarkFresh is false while the mark price is stale: the figures stand
+	// still until it moves again.
+	MarkFresh bool `json:"mark_fresh"`
 }
 
 // riskRows renders positions across users with their liquidation state
@@ -742,7 +748,10 @@ type riskJSON struct {
 func riskRows(list []application.PositionView) []riskJSON {
 	out := make([]riskJSON, 0, len(list))
 	for _, v := range list {
-		row := riskJSON{positionJSON: toPositionJSON(v), UserID: v.UserID, Liquidating: v.Liquidating, LiquidationAttempts: v.LiquidationAttempts}
+		row := riskJSON{
+			positionJSON: toPositionJSON(v), UserID: v.UserID, Liquidating: v.Liquidating, LiquidationAttempts: v.LiquidationAttempts,
+			MarkFresh: v.MarkFresh,
+		}
 		if !v.WarnedAt.IsZero() {
 			at := stamp(v.WarnedAt)
 			row.WarnedAt = &at

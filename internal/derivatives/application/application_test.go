@@ -923,6 +923,29 @@ func TestTheAdminOverviewAndRiskList(t *testing.T) {
 	if none, _, err := r.svc.OpenPositions(ctx, application.PositionFilter{Symbol: "NOPE-USDT-PERP"}); err != nil || len(none) != 0 {
 		t.Fatalf("another contract %+v %v", none, err)
 	}
+	if !all[0].MarkFresh || !all[1].MarkFresh {
+		t.Fatalf("fresh marks %+v", all)
+	}
+	// C5.5 ⑨: HOUSE comes last and is never under watch; a cross account's
+	// warning counts for its cross positions; a stale mark is said.
+	r.svc.HouseUser = bob
+	if list, _, err := r.svc.OpenPositions(ctx, application.PositionFilter{}); err != nil || len(list) != 2 || list[1].UserID != bob {
+		t.Fatalf("HOUSE last %+v %v", list, err)
+	}
+	if err := r.store.Read().Cross().SetWarnedAt(ctx, alice, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if list, err := r.svc.RiskPositions(ctx); err != nil || len(list) != 1 || list[0].UserID != alice || list[0].WarnedAt.IsZero() {
+		t.Fatalf("the warned cross account %+v %v", list, err)
+	}
+	if err := r.store.Read().Cross().SetWarnedAt(ctx, alice, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	r.svc.HouseUser = ""
+	r.book.Set(perp.Symbol, d("60000"), time.Now().Add(-time.Hour))
+	if list, _, err := r.svc.OpenPositions(ctx, application.PositionFilter{}); err != nil || list[0].MarkFresh {
+		t.Fatalf("a stale mark %+v %v", list, err)
+	}
 	r.monitor(t, "59050") // warned
 	list, err := r.svc.RiskPositions(ctx)
 	if err != nil || len(list) != 1 || list[0].UserID != bob || list[0].WarnedAt.IsZero() || list[0].Liquidating ||

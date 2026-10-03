@@ -157,6 +157,9 @@ type CrossRepo interface {
 	// it is not.
 	WarnedAt(ctx context.Context, userID string) (time.Time, error)
 	SetWarnedAt(ctx context.Context, userID string, at time.Time) error
+	// Warned returns the users whose cross account is warned now, with
+	// when.
+	Warned(ctx context.Context) (map[string]time.Time, error)
 }
 
 // RunRepo records the reconciliation runs.

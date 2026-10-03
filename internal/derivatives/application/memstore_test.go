@@ -463,6 +463,16 @@ func (r memCross) SetWarnedAt(_ context.Context, userID string, at time.Time) er
 	return nil
 }
 
+func (r memCross) Warned(context.Context) (map[string]time.Time, error) {
+	out := map[string]time.Time{}
+	for user, at := range r.st.warned {
+		if !at.IsZero() {
+			out[user] = at
+		}
+	}
+	return out, nil
+}
+
 type memConds memRepos
 
 func (r memConds) Insert(_ context.Context, c domain.Conditional) error {

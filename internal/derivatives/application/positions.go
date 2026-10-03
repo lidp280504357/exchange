@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -27,6 +28,9 @@ type PositionView struct {
 	// own; a cross position's against the whole cross account, the other
 	// positions at their marks. Zero when there is none.
 	LiquidationPrice decimal.Decimal
+	// MarkFresh is false while the mark price is older than the margin
+	// monitor accepts: the figures above stand still (C5.5 ⑨).
+	MarkFresh bool
 }
 
 // Positions returns the user's open positions, of one contract when
@@ -445,19 +449,40 @@ type PositionFilter struct {
 // price, riskiest first (margin ratio, then entry notional), and reports
 // whether Limit cut the list. Cross positions are measured on their own
 // here; their liquidation price is the user's own view's (Positions).
+// Under watch, a cross position counts as warned when its account is (the
+// margin monitor warns the cross account, not its positions), and HOUSE's
+// positions are left out (the monitor never liquidates them); otherwise
+// they come last (C5.5 ⑨). One user's positions are read as theirs.
 func (s *Service) OpenPositions(ctx context.Context, f PositionFilter) ([]PositionView, bool, error) {
-	open, err := s.Store.Read().Positions().Open(ctx, f.Symbol)
+	var open []domain.Position
+	var err error
+	if f.UserID != "" {
+		open, err = s.Store.Read().Positions().OfUser(ctx, f.UserID, f.Symbol)
+	} else {
+		open, err = s.Store.Read().Positions().Open(ctx, f.Symbol)
+	}
 	if err != nil {
 		return nil, false, err
+	}
+	warned := map[string]time.Time{}
+	if f.Watch {
+		if warned, err = s.Store.Read().Cross().Warned(ctx); err != nil {
+			return nil, false, err
+		}
 	}
 	type scored struct {
 		v     PositionView
 		ratio decimal.Decimal
+		house bool
 	}
 	var list []scored
 	half := decimal.RequireFromString("0.5")
 	for _, p := range open {
-		if f.UserID != "" && p.UserID != f.UserID {
+		if p.Qty.IsZero() {
+			continue
+		}
+		house := s.HouseUser != "" && p.UserID == s.HouseUser
+		if house && f.Watch {
 			continue
 		}
 		c, err := s.Instruments.Contract(ctx, p.Symbol)
@@ -465,8 +490,13 @@ func (s *Service) OpenPositions(ctx context.Context, f PositionFilter) ([]Positi
 			return nil, false, err
 		}
 		v := PositionView{Position: p}
+		if at, ok := warned[p.UserID]; ok && p.MarginMode == domain.Cross && v.WarnedAt.IsZero() {
+			v.WarnedAt = at
+		}
 		ratio := decimal.Zero
-		if m, _ := s.Marks.Mark(p.Symbol); m.Price.IsPositive() {
+		m, fresh := s.Marks.Mark(p.Symbol)
+		v.MarkFresh = fresh
+		if m.Price.IsPositive() {
 			v.Mark, v.UnrealizedPnL, v.MaintenanceMargin = m.Price, p.UnrealizedPnL(m.Price), p.MaintenanceMargin(c, m.Price)
 			if balance := p.Margin.Add(v.UnrealizedPnL); balance.IsPositive() {
 				ratio = v.MaintenanceMargin.DivRound(balance, 8)
@@ -477,11 +507,17 @@ func (s *Service) OpenPositions(ctx context.Context, f PositionFilter) ([]Positi
 		if p.MarginMode == domain.Isolated {
 			v.LiquidationPrice = p.LiquidationPrice(c)
 		}
-		if !f.Watch || p.Liquidating || !p.WarnedAt.IsZero() || ratio.GreaterThanOrEqual(half) {
-			list = append(list, scored{v: v, ratio: ratio})
+		if !f.Watch || v.Liquidating || !v.WarnedAt.IsZero() || ratio.GreaterThanOrEqual(half) {
+			list = append(list, scored{v: v, ratio: ratio, house: house})
 		}
 	}
 	slices.SortFunc(list, func(a, b scored) int {
+		if a.house != b.house {
+			if a.house {
+				return 1
+			}
+			return -1
+		}
 		if c := b.ratio.Cmp(a.ratio); c != 0 {
 			return c
 		}
