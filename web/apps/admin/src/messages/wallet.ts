@@ -110,6 +110,7 @@ export const walletZh = {
     enum: {
       approvalKind: { DEPOSIT_BACKFILL: "补记充值" },
       callbackResult: { DISCREPANCY: "与补记不符" },
+      providerStatus: { UNCERTAIN: "结果未知，等回调或人工核实" },
       depositReason: { BELOW_MINIMUM: "低于最小充值额", ACCOUNT_CLOSED: "账户已关闭", NOT_ELIGIBLE: "不符合资格", UNSUPPORTED_TOKEN: "未支持的代币" },
       depositSource: { AUTO: "自动", MANUAL: "补记" },
       depositResolution: { CREDITED: "已入账", DISMISSED: "已驳回" },
@@ -248,6 +249,7 @@ export const walletEn = {
     enum: {
       approvalKind: { DEPOSIT_BACKFILL: "Deposit backfill" },
       callbackResult: { DISCREPANCY: "Disagrees with a backfill" },
+      providerStatus: { UNCERTAIN: "Outcome unknown" },
       depositReason: { BELOW_MINIMUM: "Below the minimum", ACCOUNT_CLOSED: "Account closed", NOT_ELIGIBLE: "Not eligible", UNSUPPORTED_TOKEN: "Unsupported token" },
       depositSource: { AUTO: "Automatic", MANUAL: "Backfill" },
       depositResolution: { CREDITED: "Credited", DISMISSED: "Rejected" },

@@ -103,14 +103,19 @@ export function scheduledText(t: (k: string, o?: Record<string, unknown>) => str
   return c.status === "PENDING_APPROVAL" ? t("admin.changes.pendingApproval") : t("admin.changes.scheduled", { minutes: minutes(delaySeconds) });
 }
 
-/** moveNote says how a status move takes effect, and what rests on the pair or contract (C5.5 ⑩). */
+/**
+ * moveNote says how a status move takes effect, and what rests on the pair
+ * or contract (C5.5 ⑩); resuming a halt warns that a running HALT event of
+ * the simulated market halts it again within 10 seconds (end the event).
+ */
 export function moveNote(t: (k: string, o?: Record<string, unknown>) => string, p: StatusPreview) {
   const when = p.immediate
     ? t("admin.changes.immediate")
     : t(p.two_person ? "admin.changes.delayedTwoPerson" : "admin.changes.delayed", { minutes: minutes(p.delay_seconds) });
-  if (p.open_orders == null) return when;
+  const sim = p.from === "HALT" && p.to === "TRADING" ? t("admin.changes.simHalt") : "";
+  if (p.open_orders == null) return `${when}${sim}`;
   const orders = t("admin.changes.openOrders", { n: p.open_orders });
-  return `${when}${orders}${p.to === "HALT" && p.open_orders > 0 ? t("admin.changes.openOrdersHalt") : ""}`;
+  return `${when}${orders}${p.to === "HALT" && p.open_orders > 0 ? t("admin.changes.openOrdersHalt") : ""}${sim}`;
 }
 
 /** ChangesTab lists the changes of trading parameters with what an ADMIN may do to them. */

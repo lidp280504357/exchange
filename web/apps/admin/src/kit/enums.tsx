@@ -55,6 +55,9 @@ const tones: Partial<Record<EnumGroup, Record<string, BadgeTone>>> = {
   },
   providerStatus: {
     SUBMITTED: "warn", ACCEPTED: "info", REVIEW: "info", APPROVED: "brand", REJECTED: "danger", SUCCESS: "success", FAILED: "danger",
+    // A re-hand-over refused, or 30 minutes without an answer: a person
+    // resolves it (exchangectl wallet custody-resolve).
+    UNCERTAIN: "danger",
   },
   callbackResult: {
     RECEIVED: "info", APPLIED: "success", IGNORED: "neutral", UNMATCHED: "warn", REJECTED: "danger", FAILED: "danger", DISCREPANCY: "danger",
