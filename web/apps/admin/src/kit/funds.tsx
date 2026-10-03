@@ -4,7 +4,7 @@ import { ConfirmDialog, toast } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { settingsKey, todoKey } from "../live";
-import { errorToast, useOperationKey } from "./actions";
+import { errorToast, NO_WORD, useOperationKey } from "./actions";
 
 // Fund operations (manual adjustments, insurance fund contributions,
 // deposit backfills, deposits of nobody credited to a user) end
@@ -58,12 +58,6 @@ export type FundActionProps = {
   disabled?: boolean;
   children?: ReactNode;
 };
-
-/**
- * NO_WORD is the confirmation word of a disabled action: ConfirmDialog
- * compares what is typed trimmed, so a blank word never matches.
- */
-const NO_WORD = " ";
 
 /** FundAction confirms a fund operation (reason and confirmation word) and announces its outcome. */
 export function FundAction({

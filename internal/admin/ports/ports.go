@@ -461,14 +461,35 @@ type Deposits interface {
 	BookManual(ctx context.Context, m ManualDeposit, reason string) (json.RawMessage, error)
 }
 
-// CallbackQuery selects the custodian's callbacks: an outcome, a kind, a
-// trade/withdrawal ID, transaction hash or address, a page.
+// CallbackQuery selects the custodians' callbacks: a custodian (any when
+// empty), an outcome, a kind, a trade/withdrawal ID, transaction hash or
+// address, a page.
 type CallbackQuery struct {
-	Result string
-	Kind   string
-	Query  string
+	Provider string
+	Result   string
+	Kind     string
+	Query    string
+	Cursor   string
+	Limit    int
+}
+
+// FeeQuery selects the custodians' withdrawal fees: a status (HELD,
+// BOOKABLE, WRITTEN_OFF; any when empty), a page.
+type FeeQuery struct {
+	Status string
 	Cursor string
 	Limit  int
+}
+
+// FeeBooking is an administrator's decision to book a custodian's fee
+// held for a person: as reported (Asset empty, Amount zero) or in the
+// asset and amount found charged.
+type FeeBooking struct {
+	WithdrawalID string
+	Asset        string
+	Amount       decimal.Decimal
+	Actor        string
+	Reason       string
 }
 
 // Withdrawals lists and reviews withdrawals and shows the custody wallet
@@ -481,12 +502,21 @@ type Withdrawals interface {
 	// positive atLeast raises the reviewers it needs to that many.
 	Review(ctx context.Context, id string, approve bool, reviewer, reason string, soleMax decimal.Decimal, atLeast int) (json.RawMessage,
 		error)
-	// Custody describes the custodian: coins, checks, what is with it.
-	Custody(ctx context.Context) (json.RawMessage, error)
+	// Custody describes a custodian (provider; wallet-service's default,
+	// UDUN, when empty): coins, checks, what is with it.
+	Custody(ctx context.Context, provider string) (json.RawMessage, error)
 	Callbacks(ctx context.Context, q CallbackQuery) (json.RawMessage, error)
 	Callback(ctx context.Context, id string) (json.RawMessage, error)
 	// Replay applies a stored callback again for actor.
 	Replay(ctx context.Context, id, actor, reason string) (json.RawMessage, error)
+	// Fees pages through the custodians' withdrawal fees, newest first.
+	Fees(ctx context.Context, q FeeQuery) (json.RawMessage, error)
+	// BookFee books a fee held for a person from GAS_SUPPLY; WriteOffFee
+	// writes one off. wallet-service audits both for the actor, as
+	// exchangectl wallet custody-fee does; a fee that waits for no one is
+	// a conflict.
+	BookFee(ctx context.Context, b FeeBooking) (json.RawMessage, error)
+	WriteOffFee(ctx context.Context, withdrawalID, actor, reason string) (json.RawMessage, error)
 	// Detail returns a withdrawal with its address-book entry and its
 	// user's withdrawals' worth today and this month.
 	Detail(ctx context.Context, id string) (json.RawMessage, error)

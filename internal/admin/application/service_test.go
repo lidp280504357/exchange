@@ -679,6 +679,10 @@ type fakeWallet struct {
 	withdrawals map[string]reviewedWithdrawal
 	// suspended are the assets whose withdrawals are suspended.
 	suspended map[string]ports.Suspension
+	// provider and callbacks are the custodian last asked about; fees the
+	// fee decisions made ("book <id> <asset> <amount> by <actor>").
+	provider, callbacks string
+	fees                []string
 }
 
 func (w *fakeWallet) List(context.Context, ports.WithdrawalQuery) (json.RawMessage, error) {
@@ -692,12 +696,28 @@ func (w *fakeWallet) List(context.Context, ports.WithdrawalQuery) (json.RawMessa
 	return json.RawMessage(`{"items":[` + strings.Join(items, ",") + `]}`), nil
 }
 
-func (w *fakeWallet) Custody(context.Context) (json.RawMessage, error) {
+func (w *fakeWallet) Custody(_ context.Context, provider string) (json.RawMessage, error) {
+	w.provider = provider
 	return json.RawMessage(`{}`), nil
 }
 
-func (w *fakeWallet) Callbacks(context.Context, ports.CallbackQuery) (json.RawMessage, error) {
+func (w *fakeWallet) Callbacks(_ context.Context, q ports.CallbackQuery) (json.RawMessage, error) {
+	w.callbacks = q.Provider
 	return json.RawMessage(`{"items":[]}`), nil
+}
+
+func (w *fakeWallet) Fees(_ context.Context, q ports.FeeQuery) (json.RawMessage, error) {
+	return json.RawMessage(`{"items":[],"next_cursor":null,"status":"` + q.Status + `"}`), nil
+}
+
+func (w *fakeWallet) BookFee(_ context.Context, b ports.FeeBooking) (json.RawMessage, error) {
+	w.fees = append(w.fees, "book "+b.WithdrawalID+" "+b.Asset+" "+b.Amount.String()+" by "+b.Actor)
+	return json.RawMessage(`{"status":"BOOKABLE"}`), nil
+}
+
+func (w *fakeWallet) WriteOffFee(_ context.Context, id, actor, _ string) (json.RawMessage, error) {
+	w.fees = append(w.fees, "write-off "+id+" by "+actor)
+	return json.RawMessage(`{"status":"WRITTEN_OFF"}`), nil
 }
 
 func (w *fakeWallet) Callback(context.Context, string) (json.RawMessage, error) {

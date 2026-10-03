@@ -455,15 +455,19 @@ func (w Wallet) Review(ctx context.Context, id string, approve bool, reviewer, r
 	return w.do(ctx, http.MethodPost, w.Base+"/internal/wallet/withdrawals/"+url.PathEscape(id)+"/review", body, nil)
 }
 
-// Custody describes the custodian.
-func (w Wallet) Custody(ctx context.Context) (json.RawMessage, error) {
-	return w.do(ctx, http.MethodGet, w.Base+"/internal/wallet/custody", nil, nil)
+// Custody describes a custodian.
+func (w Wallet) Custody(ctx context.Context, provider string) (json.RawMessage, error) {
+	path := "/internal/wallet/custody"
+	if provider != "" {
+		path += "?provider=" + url.QueryEscape(provider)
+	}
+	return w.do(ctx, http.MethodGet, w.Base+path, nil, nil)
 }
 
-// Callbacks returns a page of the custodian's callbacks.
+// Callbacks returns a page of the custodians' callbacks.
 func (w Wallet) Callbacks(ctx context.Context, q ports.CallbackQuery) (json.RawMessage, error) {
 	v := url.Values{}
-	for k, x := range map[string]string{"result": q.Result, "kind": q.Kind, "q": q.Query, "cursor": q.Cursor} {
+	for k, x := range map[string]string{"provider": q.Provider, "result": q.Result, "kind": q.Kind, "q": q.Query, "cursor": q.Cursor} {
 		if x != "" {
 			v.Set(k, x)
 		}

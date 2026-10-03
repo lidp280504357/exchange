@@ -135,6 +135,9 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/custody/callbacks", h.custodyCallbacks)
 			r.Get("/custody/callbacks/{id}", h.custodyCallback)
 			r.Post("/custody/callbacks/{id}/replay", h.replayCallback)
+			r.Get("/custody/fees", h.custodyFees)
+			r.Post("/custody/fees/{withdrawal}/book", h.bookCustodyFee)
+			r.Post("/custody/fees/{withdrawal}/write-off", h.writeOffCustodyFee)
 			r.Get("/instruments", h.instruments)
 			r.Get("/instruments/config", h.instrumentConfig)
 			r.Post("/instruments/preview", h.previewConfig)
@@ -655,7 +658,7 @@ func (h *Handler) reviewBatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) custody(w http.ResponseWriter, r *http.Request) {
-	raw, err := h.Svc.Custody(r.Context(), principal(r))
+	raw, err := h.Svc.Custody(r.Context(), principal(r), r.URL.Query().Get("provider"))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -666,7 +669,8 @@ func (h *Handler) custody(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) custodyCallbacks(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	raw, err := h.Svc.CustodyCallbacks(r.Context(), principal(r), ports.CallbackQuery{
-		Result: q.Get("result"), Kind: q.Get("kind"), Query: q.Get("q"), Cursor: q.Get("cursor"), Limit: intParam(q, "limit"),
+		Provider: q.Get("provider"), Result: q.Get("result"), Kind: q.Get("kind"), Query: q.Get("q"), Cursor: q.Get("cursor"),
+		Limit: intParam(q, "limit"),
 	})
 	if err != nil {
 		httpx.WriteError(w, r, err)

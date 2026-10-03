@@ -82,10 +82,24 @@ func (wallet) Review(context.Context, string, bool, string, string, decimal.Deci
 	return json.RawMessage(`{}`), nil
 }
 
-func (wallet) Custody(context.Context) (json.RawMessage, error) { return json.RawMessage(`{}`), nil }
+func (wallet) Custody(context.Context, string) (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}
 
 func (wallet) Callbacks(context.Context, ports.CallbackQuery) (json.RawMessage, error) {
 	return json.RawMessage(`{"items":[]}`), nil
+}
+
+func (wallet) Fees(context.Context, ports.FeeQuery) (json.RawMessage, error) {
+	return json.RawMessage(`{"items":[],"next_cursor":null}`), nil
+}
+
+func (wallet) BookFee(context.Context, ports.FeeBooking) (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
+}
+
+func (wallet) WriteOffFee(context.Context, string, string, string) (json.RawMessage, error) {
+	return json.RawMessage(`{}`), nil
 }
 
 func (wallet) Callback(context.Context, string) (json.RawMessage, error) {

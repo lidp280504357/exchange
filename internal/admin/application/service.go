@@ -551,17 +551,26 @@ func (s *Service) ReviewBatch(ctx context.Context, p Principal, key string, ids 
 	return out, nil
 }
 
-// Custody describes the custody wallet (ADR-0011).
-func (s *Service) Custody(ctx context.Context, p Principal) ([]byte, error) {
+// Custody describes a custodian (ADR-0011; UDUN when provider is empty,
+// UDUNMOCK the stand-in of ADR-0017).
+func (s *Service) Custody(ctx context.Context, p Principal, provider string) ([]byte, error) {
 	if err := p.require(domain.PermWithdrawalsRead); err != nil {
 		return nil, err
 	}
-	return s.Wallet.Custody(ctx)
+	provider, err := custodian(provider)
+	if err != nil {
+		return nil, err
+	}
+	return s.Wallet.Custody(ctx, provider)
 }
 
-// CustodyCallbacks returns a page of the custodian's callbacks.
+// CustodyCallbacks returns a page of the custodians' callbacks.
 func (s *Service) CustodyCallbacks(ctx context.Context, p Principal, q ports.CallbackQuery) ([]byte, error) {
 	if err := p.require(domain.PermWithdrawalsRead); err != nil {
+		return nil, err
+	}
+	var err error
+	if q.Provider, err = custodian(q.Provider); err != nil {
 		return nil, err
 	}
 	q.Result, q.Kind, q.Limit = strings.ToUpper(q.Result), strings.ToUpper(q.Kind), pageLimit(q.Limit)

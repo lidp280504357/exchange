@@ -2826,7 +2826,8 @@ export interface paths {
          *     out, unbooked fees, shortfall); the withdrawals with the custodian;
          *     and how many callbacks need a person. Without a configured
          *     custodian `configured` is false; an unreachable one leaves `coins`
-         *     empty and says why in `error`. Needs withdrawals.read.
+         *     empty and says why in `error`. One custodian at a time (`provider`;
+         *     its own checks and the platform wallets'). Needs withdrawals.read.
          */
         get: operations["getCustody"];
         put?: never;
@@ -2845,8 +2846,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * The custodian's callbacks, newest first
-         * @description Every callback as received, with its signature check and outcome. Needs withdrawals.read.
+         * The custodians' callbacks, newest first
+         * @description Every callback as received, with its signature check and outcome; one custodian's when `provider` is given. Needs withdrawals.read.
          */
         get: operations["listCustodyCallbacks"];
         put?: never;
@@ -2894,6 +2895,82 @@ export interface paths {
          *     Audited. Needs withdrawals.review.
          */
         post: operations["replayCustodyCallback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/custody/fees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The custodians' withdrawal fees, newest first
+         * @description A custodian's fee on a withdrawal is booked from GAS_SUPPLY as it
+         *     comes (BOOKABLE; journal_id null while GAS_SUPPLY is short), or
+         *     held for a person (HELD: its unit on the network is not confirmed,
+         *     or it looks wrong) who books or writes it off (C6). Needs
+         *     withdrawals.read.
+         */
+        get: operations["listCustodyFees"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/custody/fees/{withdrawal_id}/book": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Book a held fee from GAS_SUPPLY
+         * @description As the custodian reported it, or in the asset and amount found
+         *     charged (the platform must hold that asset with the custodian on
+         *     the withdrawal's network, at most its decimals; else 400: write it
+         *     off). wallet-service records the decision and audits it as
+         *     wallet.custody.fee.book with the administrator as the actor, as
+         *     exchangectl wallet custody-fee does; its processor books it within
+         *     a round. A fee that waits for no one (booked, written off) is 409;
+         *     a withdrawal without a custodian's fee 404. Needs
+         *     ledger.adjust.approve.
+         */
+        post: operations["bookCustodyFee"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/custody/fees/{withdrawal_id}/write-off": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write a held fee off
+         * @description For a fee not taken from the coin balances the platform holds, or
+         *     reported in another unit: nothing is booked. Also a BOOKABLE one
+         *     still waiting for GAS_SUPPLY. Audited by wallet-service as
+         *     wallet.custody.fee.write_off. 409 when it waits for no one. Needs
+         *     ledger.adjust.approve.
+         */
+        post: operations["writeOffCustodyFee"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4594,7 +4671,7 @@ export interface components {
          *     miss funds.
          */
         ChainCheck: {
-            /** @description UDUN for the custodian, the network (e.g. ETH-SEPOLIA) for the platform's own wallets. */
+            /** @description The custodian (UDUN, UDUNMOCK), or the network (e.g. ETH-SEPOLIA) for the platform's own wallets. */
             holder: string;
             asset: string;
             held: components["schemas"]["Decimal"];
@@ -4603,9 +4680,45 @@ export interface components {
             in_flight: components["schemas"]["Decimal"];
             unbooked: components["schemas"]["Decimal"];
             shortfall: components["schemas"]["Decimal"];
+            /**
+             * @description Simulated deposits of the custodian's stand-in, taken out of
+             *     expected when the real gateway replaced it: they are at no
+             *     custodian (zero before the switch).
+             */
+            baseline?: components["schemas"]["Decimal"];
             addresses: number;
             /** Format: date-time */
             checked_at: string;
+        };
+        CustodyFee: {
+            /** Format: uuid */
+            withdrawal_id: string;
+            /** @description The custodian that charged it. */
+            provider?: string;
+            /** @description The custodian and its trade, which key the fee. */
+            tx_hash: string;
+            asset: string;
+            network: string;
+            amount: components["schemas"]["Decimal"];
+            /**
+             * @description How the custodian counts its fee on the network, as a person confirmed it; null while nobody did.
+             * @enum {string|null}
+             */
+            unit: "SELF" | "MAIN" | "OUTSIDE" | null;
+            /** @enum {string} */
+            status: "HELD" | "BOOKABLE" | "WRITTEN_OFF";
+            hold_reason: string;
+            journal_id: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            booked_at: string | null;
+            /** Format: date-time */
+            written_off_at: string | null;
+            /** @description Who booked or wrote it off (an administrator's email, or exchangectl's operator). */
+            resolved_by: string;
+            /** @description Their reason. */
+            resolution: string;
         };
         CustodyCallback: {
             /** Format: uuid */
@@ -4631,6 +4744,8 @@ export interface components {
             received_at: string;
             /** Format: date-time */
             processed_at: string | null;
+            /** @description The addresses it came from, the latest 8 (a repeat from a new address is added). */
+            remote_ips?: string[];
             /** @description The request as received (one callback only). */
             raw?: string;
         };
@@ -4669,6 +4784,8 @@ export interface components {
          *     administrator's own and kept 24 hours. Missing or longer than 128 characters: 400.
          */
         IdempotencyKey: string;
+        /** @description The withdrawal the custodian charged the fee on. */
+        FeeWithdrawalID: string;
         CallbackID: string;
         /** @description The previous page's next_cursor; omitted for the first page. */
         Cursor: string;
@@ -8515,7 +8632,13 @@ export interface operations {
     };
     getCustody: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description The custodian: UDUN (the default) or UDUNMOCK, the stand-in that
+                 *     serves only the hidden test asset (ADR-0017).
+                 */
+                provider?: "UDUN" | "UDUNMOCK";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8537,6 +8660,11 @@ export interface operations {
     listCustodyCallbacks: {
         parameters: {
             query?: {
+                /**
+                 * @description The custodian: UDUN (the default) or UDUNMOCK, the stand-in that
+                 *     serves only the hidden test asset (ADR-0017).
+                 */
+                provider?: "UDUN" | "UDUNMOCK";
                 /** @description One outcome; every outcome when empty. */
                 result?: "RECEIVED" | "APPLIED" | "IGNORED" | "UNMATCHED" | "REJECTED" | "FAILED" | "DISCREPANCY";
                 kind?: "DEPOSIT" | "WITHDRAWAL";
@@ -8612,6 +8740,97 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CustodyCallback"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listCustodyFees: {
+        parameters: {
+            query?: {
+                /** @description One status; every status when empty. */
+                status?: "HELD" | "BOOKABLE" | "WRITTEN_OFF";
+                /** @description The previous page's next_cursor; omitted for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of fees. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["CustodyFee"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    bookCustodyFee: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The withdrawal the custodian charged the fee on. */
+                withdrawal_id: components["parameters"]["FeeWithdrawalID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The asset it was charged in; the reported one when absent. */
+                    asset?: string;
+                    amount?: components["schemas"]["Decimal"];
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The fee as decided. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustodyFee"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    writeOffCustodyFee: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The withdrawal the custodian charged the fee on. */
+                withdrawal_id: components["parameters"]["FeeWithdrawalID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description The fee as decided. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustodyFee"];
                 };
             };
             default: components["responses"]["Error"];

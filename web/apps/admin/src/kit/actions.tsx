@@ -93,12 +93,20 @@ export type DangerActionProps = {
   /** Lists to reload after it worked. */
   invalidate?: QueryKey[];
   onDone?: (result: unknown) => void;
+  /** Keeps the confirm button off while what the dialog asks for is incomplete. */
+  disabled?: boolean;
   children?: ReactNode;
 };
 
+/**
+ * NO_WORD is the confirmation word of a disabled action: ConfirmDialog
+ * compares what is typed trimmed, so a blank word never matches.
+ */
+export const NO_WORD = " ";
+
 export function DangerAction({
   trigger, open: controlled, onOpenChange, title, description, target, confirmWord, confirmText, danger = true, run, success, invalidate, onDone,
-  children,
+  disabled, children,
 }: DangerActionProps) {
   const qc = useQueryClient();
   const op = useOperationKey();
@@ -118,10 +126,11 @@ export function DangerAction({
         title={title}
         description={description}
         target={target}
-        confirmWord={confirmWord}
+        confirmWord={disabled ? NO_WORD : confirmWord}
         confirmText={confirmText}
         danger={danger}
         onConfirm={async (reason) => {
+          if (disabled) return;
           try {
             const result = await run(reason, op.get());
             const said = typeof success === "function" ? success(result) : success;

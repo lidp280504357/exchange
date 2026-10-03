@@ -4493,8 +4493,18 @@ paths:
         out, unbooked fees, shortfall); the withdrawals with the custodian;
         and how many callbacks need a person. Without a configured
         custodian `configured` is false; an unreachable one leaves `coins`
-        empty and says why in `error`. Needs withdrawals.read.
+        empty and says why in `error`. One custodian at a time (`provider`;
+        its own checks and the platform wallets'). Needs withdrawals.read.
       tags: [custody]
+      parameters:
+        - name: provider
+          in: query
+          description: |
+            The custodian: UDUN (the default) or UDUNMOCK, the stand-in that
+            serves only the hidden test asset (ADR-0017).
+          schema:
+            type: string
+            enum: [UDUN, UDUNMOCK]
       responses:
         '200':
           description: The custody wallet.
@@ -4507,10 +4517,18 @@ paths:
   /admin/v1/custody/callbacks:
     get:
       operationId: listCustodyCallbacks
-      summary: The custodian's callbacks, newest first
-      description: Every callback as received, with its signature check and outcome. Needs withdrawals.read.
+      summary: The custodians' callbacks, newest first
+      description: Every callback as received, with its signature check and outcome; one custodian's when `provider` is given. Needs withdrawals.read.
       tags: [custody]
       parameters:
+        - name: provider
+          in: query
+          description: |
+            The custodian: UDUN (the default) or UDUNMOCK, the stand-in that
+            serves only the hidden test asset (ADR-0017).
+          schema:
+            type: string
+            enum: [UDUN, UDUNMOCK]
         - name: result
           in: query
           description: One outcome; every outcome when empty.
@@ -4593,6 +4611,119 @@ paths:
                 $ref: '#/components/schemas/CustodyCallback'
         default:
           $ref: '#/components/responses/Error'
+  /admin/v1/custody/fees:
+    get:
+      operationId: listCustodyFees
+      summary: The custodians' withdrawal fees, newest first
+      description: |
+        A custodian's fee on a withdrawal is booked from GAS_SUPPLY as it
+        comes (BOOKABLE; journal_id null while GAS_SUPPLY is short), or
+        held for a person (HELD: its unit on the network is not confirmed,
+        or it looks wrong) who books or writes it off (C6). Needs
+        withdrawals.read.
+      tags: [custody]
+      parameters:
+        - name: status
+          in: query
+          description: One status; every status when empty.
+          schema:
+            type: string
+            enum: [HELD, BOOKABLE, WRITTEN_OFF]
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of fees.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CustodyFee'
+                  next_cursor:
+                    $ref: '#/components/schemas/NextCursor'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/custody/fees/{withdrawal_id}/book:
+    post:
+      operationId: bookCustodyFee
+      summary: Book a held fee from GAS_SUPPLY
+      description: |
+        As the custodian reported it, or in the asset and amount found
+        charged (the platform must hold that asset with the custodian on
+        the withdrawal's network, at most its decimals; else 400: write it
+        off). wallet-service records the decision and audits it as
+        wallet.custody.fee.book with the administrator as the actor, as
+        exchangectl wallet custody-fee does; its processor books it within
+        a round. A fee that waits for no one (booked, written off) is 409;
+        a withdrawal without a custodian's fee 404. Needs
+        ledger.adjust.approve.
+      tags: [custody]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/FeeWithdrawalID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                asset:
+                  type: string
+                  description: The asset it was charged in; the reported one when absent.
+                amount:
+                  $ref: '#/components/schemas/Decimal'
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: The fee as decided.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustodyFee'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/custody/fees/{withdrawal_id}/write-off:
+    post:
+      operationId: writeOffCustodyFee
+      summary: Write a held fee off
+      description: |
+        For a fee not taken from the coin balances the platform holds, or
+        reported in another unit: nothing is booked. Also a BOOKABLE one
+        still waiting for GAS_SUPPLY. Audited by wallet-service as
+        wallet.custody.fee.write_off. 409 when it waits for no one. Needs
+        ledger.adjust.approve.
+      tags: [custody]
+      security:
+        - session: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/FeeWithdrawalID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: The fee as decided.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustodyFee'
+        default:
+          $ref: '#/components/responses/Error'
 components:
   securitySchemes:
     session:
@@ -4619,6 +4750,14 @@ components:
         type: string
         minLength: 1
         maxLength: 128
+    FeeWithdrawalID:
+      name: withdrawal_id
+      in: path
+      required: true
+      description: The withdrawal the custodian charged the fee on.
+      schema:
+        type: string
+        format: uuid
     CallbackID:
       name: id
       in: path
@@ -7687,7 +7826,7 @@ components:
       properties:
         holder:
           type: string
-          description: UDUN for the custodian, the network (e.g. ETH-SEPOLIA) for the platform's own wallets.
+          description: The custodian (UDUN, UDUNMOCK), or the network (e.g. ETH-SEPOLIA) for the platform's own wallets.
         asset:
           type: string
         held:
@@ -7702,11 +7841,63 @@ components:
           $ref: '#/components/schemas/Decimal'
         shortfall:
           $ref: '#/components/schemas/Decimal'
+        baseline:
+          description: |
+            Simulated deposits of the custodian's stand-in, taken out of
+            expected when the real gateway replaced it: they are at no
+            custodian (zero before the switch).
+          $ref: '#/components/schemas/Decimal'
         addresses:
           type: integer
         checked_at:
           type: string
           format: date-time
+    CustodyFee:
+      type: object
+      required: [withdrawal_id, tx_hash, asset, network, amount, unit, status, hold_reason, journal_id, created_at, booked_at,
+        written_off_at, resolved_by, resolution]
+      properties:
+        withdrawal_id:
+          type: string
+          format: uuid
+        provider:
+          type: string
+          description: The custodian that charged it.
+        tx_hash:
+          type: string
+          description: The custodian and its trade, which key the fee.
+        asset:
+          type: string
+        network:
+          type: string
+        amount:
+          $ref: '#/components/schemas/Decimal'
+        unit:
+          type: [string, 'null']
+          enum: [SELF, MAIN, OUTSIDE, null]
+          description: How the custodian counts its fee on the network, as a person confirmed it; null while nobody did.
+        status:
+          type: string
+          enum: [HELD, BOOKABLE, WRITTEN_OFF]
+        hold_reason:
+          type: string
+        journal_id:
+          type: [string, 'null']
+        created_at:
+          type: string
+          format: date-time
+        booked_at:
+          type: [string, 'null']
+          format: date-time
+        written_off_at:
+          type: [string, 'null']
+          format: date-time
+        resolved_by:
+          type: string
+          description: Who booked or wrote it off (an administrator's email, or exchangectl's operator).
+        resolution:
+          type: string
+          description: Their reason.
     CustodyCallback:
       type: object
       required: [id, provider, trade_id, kind, status, business_id, coin, address, amount, tx_hash, signature_ok, result, detail,
@@ -7753,6 +7944,11 @@ components:
         processed_at:
           type: [string, 'null']
           format: date-time
+        remote_ips:
+          type: array
+          description: The addresses it came from, the latest 8 (a repeat from a new address is added).
+          items:
+            type: string
         raw:
           type: string
           description: The request as received (one callback only).
