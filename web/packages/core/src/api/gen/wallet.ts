@@ -147,7 +147,9 @@ export interface paths {
         /**
          * Request a withdrawal
          * @description Needs a step-up. Fails with WALLET_NETWORK_DISABLED,
-         *     WALLET_INVALID_ADDRESS, WALLET_ADDRESS_NOT_WHITELISTED,
+         *     WALLET_WITHDRAW_SUSPENDED (the asset's withdrawals are paused while
+         *     the platform checks its funds), WALLET_INVALID_ADDRESS,
+         *     WALLET_ADDRESS_NOT_WHITELISTED,
          *     WALLET_ADDRESS_COOLDOWN (details.usable_at), WALLET_BELOW_MINIMUM,
          *     WALLET_AMOUNT_PRECISION, WALLET_LIMIT_EXCEEDED (details: the limits
          *     and what was used), WALLET_OWN_ADDRESS, AUTH_STEP_UP_REQUIRED and the
