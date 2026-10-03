@@ -186,6 +186,27 @@ sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangec
 4. 先关 `wallet.withdraw`，小额充值每个"资产·网络"一笔、对账通过后再逐个开提现；回调日志保留全量。
 5. 去掉 compose 里的 `udun-mock`。
 
+### 协调会话批准记录（2026-10-03，代用户决定；用户次日复核）
+
+编码会话 12:00 提交的联调计划与四个阻塞项，协调会话的决定如下（消息渠道不可靠时以本节为准）：
+
+| 项 | 决定 |
+|---|---|
+| 步骤 0 代码 | 已完成并部署（`5804b6e`、`14d2412`、`462db60`、`a26989e`）。 |
+| 步骤 1 只读探测（`udun coins`、`check-address`） | **批准**。网关拒绝本机 IP 时由用户在优盾后台把 `3.107.113.199` 加白名单。把 `coins` 的币种编码、小数位与余额单位写进本文。 |
+| 步骤 2 探测地址（`create-address --yes`） | **批准**，每条链最多一个；这些地址不给用户，到账只会 `UNMATCHED`。 |
+| 步骤 3 开回调路径 | **批准**：`custody-callback-allow.conf` 写 `allow all;`，`UDUN_CALLBACK_ALLOWED_IPS` 留空，靠签名与 `limit_req`，`remote_ips` 记来源；几笔真回调后收紧。 |
+| 步骤 4 切换 `apps.env` 到真网关 | **须协调会话按 1–3 的结果再放行**；在运维锁内做，备好回退（原 `apps.env` 与模拟地址备份）。 |
+| 步骤 5 主网小额测试 | 与用户一起：TRC20 充值 ≥ 12 USDT，再提现 10 USDT；按回调与 tronscan 确认手续费单位；之后收紧回调 IP。用户需先在优盾钱包备好 TRX 作 TRC20 的燃料。 |
+| 步骤 6 端到端 | 方案 A：UDUN 真网关只带 USDT/BTC/ETH，`udun-mock` 改带一个隐藏的、仅端到端用的 TUSD，`custody.sh` 改在 TUSD 上跑。 |
+| B1 账本基线 | 模拟期充值在账本里的"应在托管方"余额，用 `exchangectl ledger custody-reset`（`manual_adjustment` 之后）记每资产一组 `DEPOSIT_PENDING +X / ADJUSTMENT −X` 的冲销分录，带审计、可逆；对账页注明"模拟资金不在托管方"。 |
+| B2 模拟期 UDUN 地址 | 先备份（表导出留在服务器 `infra/backup/`），再退役；用户下次取地址拿真地址。 |
+| B3 模拟余额 | 切换后 USDT/BTC/ETH 提现暂停（`wallet withdrawals-suspend`），仅用户测试窗口放开，且窗口内托管提现全部人工审核。 |
+| B15 TRX/BNB 燃料 | TRC20、BEP20 的手续费单位定为 `OUTSIDE`（托管方从商户钱包的 TRX/BNB 扣，平台不记账、账外充值），BTC、ETH 为 `SELF`；以步骤 5 的链上记录确认后再 `custody-fee-unit`。 |
+| B10 `expected=0` | 步骤 1 看清托管方的余额单位后再补；在此之前基线重置后的第一次对账由人工核对。 |
+| B7a 未匹配充值 | 进 `UNCLAIMED_DEPOSIT` 的待处理账户，须在放真实用户之前落地，不阻塞步骤 1–6。 |
+| 审查 AF Medium | `custodyfee.go:78` 附近：按主币计价、而平台未托管该主币的挂起手续费（如 TRC20 的 TRX）不得再按代币口径解释短缺（应为 0），步骤 5 之前改好并补测试。 |
+
 ## 指标与告警
 
 - `wallet_custody_up`、`wallet_custody_balance{coin}`（5 分钟）、`wallet_custody_held/expected/shortfall{asset}`（每次对账）、`wallet_custody_submitted`、`wallet_custody_submitted_oldest_seconds`、`wallet_custody_withdrawals_uncertain`、`wallet_custody_callbacks_attention`、`wallet_custody_deposits_held`、`wallet_custody_fees_unbooked`、`wallet_custody_fees_held`（等人工处理的手续费笔数）、`wallet_withdrawals_suspended{asset}`（该资产停提时为 1）、`wallet_withdrawals_suspended_waiting{asset}`（因停提等着的已批准提现），常量标签 `provider`；`wallet_custody_fees_held_total`（挂起的手续费）、`wallet_custody_callbacks_rejected_total`（被拒的回调，记不记表都算）、`wallet_custody_deposit_discrepancies_total`（与补记不一致的回调）。
