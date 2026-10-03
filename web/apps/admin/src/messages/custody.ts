@@ -54,6 +54,7 @@ export const custodyZh = {
     WALLET_CUSTODY_FEE_CHANGED: "这笔手续费刚被另一个决定处理了，列表已刷新",
     ADMIN_FEE_ABOVE_REPORTED: "实扣超过报告的 5 倍（换币种时按现价折 USDT）：请核对；确实更多时用 exchangectl wallet custody-fee 入账",
     ADMIN_FEE_UNPRICED: "换了币种的实扣要按 USDT 比较，但有一边没有新鲜报价：请用 exchangectl wallet custody-fee 入账",
+    ADMIN_FEE_NOT_HELD: "只有等人处理的手续费才能按实扣入账（这笔不在其中）",
   },
 };
 
@@ -110,5 +111,6 @@ export const custodyEn = {
     ADMIN_FEE_ABOVE_REPORTED:
       "As charged is more than 5 times what was reported (in USDT at the last prices for another asset): check it; if it really is, book it with exchangectl wallet custody-fee",
     ADMIN_FEE_UNPRICED: "As charged in another asset is compared in USDT, and one of the two has no fresh price: book it with exchangectl wallet custody-fee",
+    ADMIN_FEE_NOT_HELD: "Only a fee held for a person is booked as charged; this one is not",
   },
 };

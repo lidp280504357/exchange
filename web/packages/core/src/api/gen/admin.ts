@@ -2949,7 +2949,8 @@ export interface paths {
          *     amount in the reported asset, by worth in USDT at the last prices
          *     in another (422 ADMIN_FEE_ABOVE_REPORTED; ADMIN_FEE_UNPRICED when
          *     one of the two has no fresh price): more is booked with exchangectl
-         *     wallet custody-fee (review ㉖). A fee that waits for no one
+         *     wallet custody-fee (review ㉖). As charged, a fee not among the
+         *     held ones is refused (409 ADMIN_FEE_NOT_HELD, review ㉗). A fee that waits for no one
          *     (booked, written off) is 409 WALLET_CUSTODY_FEE_NOT_HELD (details
          *     status), one another decision took first 409
          *     WALLET_CUSTODY_FEE_CHANGED; a withdrawal without a custodian's fee

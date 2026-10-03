@@ -90,13 +90,22 @@ var (
 		"a fee in another asset than reported is compared in USDT, and one of the two has no fresh price: book it with exchangectl wallet custody-fee")
 )
 
+// ErrFeeNotHeld refuses booking as found charged a fee not among those
+// held for a person: without what was reported there is no bound to
+// check (review ㉗).
+var ErrFeeNotHeld = apperr.New(apperr.KindConflict, "ADMIN_FEE_NOT_HELD",
+	"only a fee held for a person is booked as found charged")
+
 // withinReported checks a fee booked as found charged against what the
-// custodian reported (feeBound). A withdrawal whose fee is not held is
-// left to wallet-service, which says why it cannot be booked.
+// custodian reported (feeBound). One not found among the fees held for a
+// person is refused: the check fails closed (review ㉗).
 func (s *Service) withinReported(ctx context.Context, b ports.FeeBooking) error {
 	f, err := s.heldFee(ctx, b.WithdrawalID)
-	if err != nil || f == nil {
+	if err != nil {
 		return err
+	}
+	if f == nil {
+		return ErrFeeNotHeld.WithDetail("withdrawal_id", b.WithdrawalID)
 	}
 	asset, amount := f.Asset, f.Amount
 	if b.Asset != "" {

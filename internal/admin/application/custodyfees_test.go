@@ -75,6 +75,12 @@ func TestCustodiansAndTheirFees(t *testing.T) {
 	if err := book(fin, w, "ETH", "0.001", "found charged in ETH"); code(err) != "ADMIN_FEE_UNPRICED" {
 		t.Fatalf("an asset without a price: %v", err)
 	}
+	// A fee not among the held ones has no reported amount to bound: as
+	// charged, refused (review ㉗); as reported, wallet-service decides.
+	unheld := "0192a000-0000-7000-8000-0000000000f2"
+	if err := book(fin, unheld, "", "1", "found charged 1"); code(err) != "ADMIN_FEE_NOT_HELD" {
+		t.Fatalf("an unheld fee as charged: %v", err)
+	}
 	if err := book(fin, w, "", "7.5", "found charged 7.5"); err != nil {
 		t.Fatal(err)
 	}

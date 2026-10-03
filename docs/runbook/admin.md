@@ -238,7 +238,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 - **托管方手续费**（C6，审查 ④ 的后台）：同页下方「托管方手续费」，只列页头所选托管方的，`GET /admin/v1/custody/fees?provider=&status=HELD|BOOKABLE|WRITTEN_OFF`（不带 `provider` 为全部托管方；默认先看待人工处理）。
   - 计费方式确认过的按报告从 `GAS_SUPPLY` 入账（`BOOKABLE`；`GAS_SUPPLY` 不足时分录为空、显示「等待 GAS_SUPPLY」）；未确认或看起来不对的为 `HELD`。
   - 有 `ledger.adjust.approve` 的管理员处理 `HELD`：「入账」`POST /admin/v1/custody/fees/{withdrawal_id}/book`（`{asset?, amount?, reason}`：留空按报告，填写则按实扣；平台须在该网络的托管方持有这个币种、小数位不超过其精度，否则 400，请核销；处理器一轮内记账）或「核销」`POST …/write-off`（`{reason}`，不记账；也用于等待 `GAS_SUPPLY` 的那笔）。确认词为提现 ID 后 4 位。
-  - 按实扣入账最多是报告的 5 倍：同币种按数量，换了币种按现价折 USDT 比较（422 `ADMIN_FEE_ABOVE_REPORTED`；有一边没有新鲜报价时 422 `ADMIN_FEE_UNPRICED`），更多的由运维用 `exchangectl wallet custody-fee` 入账（一位管理员不能单独从 `GAS_SUPPLY` 记任意数额，㉖）。
+  - 按实扣入账最多是报告的 5 倍：同币种按数量，换了币种按现价折 USDT 比较（422 `ADMIN_FEE_ABOVE_REPORTED`；有一边没有新鲜报价时 422 `ADMIN_FEE_UNPRICED`），更多的由运维用 `exchangectl wallet custody-fee` 入账（一位管理员不能单独从 `GAS_SUPPLY` 记任意数额，㉖）。报告的数额从钱包的待处理列表里找，找不到这笔时按实扣入账一律拒绝（409 `ADMIN_FEE_NOT_HELD`，㉗）。
   - 与 `exchangectl wallet custody-fee` 走同一条路径，wallet-service 以管理员邮箱审计 `wallet.custody.fee.book` / `wallet.custody.fee.write_off`。不带幂等键：已处理的再处理得到 409 `WALLET_CUSTODY_FEE_NOT_HELD`（详情 `status`），刚被另一个决定处理的 409 `WALLET_CUSTODY_FEE_CHANGED`，不会重复入账；没有手续费的提现 404 `WALLET_CUSTODY_FEE_NOT_FOUND`。决定无论成败都刷新列表（答复丢了再点得到 409 时，行也会显示已处理，㉖）。
 
 ### 对账与系统科目
@@ -506,6 +506,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | `WALLET_CUSTODY_FEE_CHANGED` | 这笔手续费刚被另一个决定处理了 |
 | `ADMIN_FEE_ABOVE_REPORTED` | 按实扣入账超过报告的 5 倍（换币种按现价折 USDT）；确实更多时用 `exchangectl wallet custody-fee` |
 | `ADMIN_FEE_UNPRICED` | 换了币种的实扣要按 USDT 比较，有一边没有新鲜报价；用 `exchangectl wallet custody-fee` |
+| `ADMIN_FEE_NOT_HELD` | 只有等人处理的手续费才能按实扣入账 |
 | `ADMIN_WITHDRAWAL_HELD` | 批量审核跳过了搁置中的提现，要单独审核 |
 | `WALLET_WITHDRAWAL_NOT_IN_REVIEW` | 只有待审批的提现可以搁置 |
 | `DERIV_HOUSE_NOT_CLOSED` | HOUSE 的仓位不能强制平仓 |
