@@ -45,9 +45,13 @@ func TestNewStatusChange(t *testing.T) {
 func TestEligibility(t *testing.T) {
 	on := flags.Flag{Enabled: true}
 	noUS := flags.Flag{Enabled: true, Rules: flags.Rules{Regions: &flags.List{Deny: []string{"US"}}}}
+	// The hidden test assets (ADR-0017): the end-to-end accounts' region
+	// only, as on the test server.
+	onlyAQ := flags.Flag{Enabled: true, Rules: flags.Rules{Regions: &flags.List{Allow: []string{"AQ"}}}}
 	table := map[string]flags.Flag{
 		flags.KeyTransfer:    on,
 		flags.KeyDerivatives: noUS,
+		flags.KeyTestAssets:  onlyAQ,
 		// wallet.withdraw is missing: off.
 	}
 	lookup := func(k string) (flags.Flag, bool) { f, ok := table[k]; return f, ok }
@@ -72,6 +76,9 @@ func TestEligibility(t *testing.T) {
 		{user(StatusFrozen, "SG"), FeatureSpotTrade, false, ReasonFrozen},
 		{user(StatusClosed, "SG"), FeatureDeposit, false, ReasonClosed},
 		{user("WEIRD", "SG"), FeatureSpotTrade, false, ReasonNotEligible},
+		{user(StatusActive, "AQ"), FeatureTestAssets, true, ""},
+		{user(StatusActive, "SG"), FeatureTestAssets, false, ReasonRegion},
+		{user(StatusFrozen, "AQ"), FeatureTestAssets, false, ReasonFrozen},
 	} {
 		allowed, reason := Eligibility(tc.u, tc.feature, "", "", lookup)
 		if allowed != tc.allowed || reason != tc.reason {
@@ -80,6 +87,14 @@ func TestEligibility(t *testing.T) {
 	}
 	if _, err := ParseFeature("MINING"); err == nil {
 		t.Fatal("unknown feature accepted")
+	}
+	if f, err := ParseFeature(FeatureTestAssets); err != nil || f != "TEST_ASSETS" {
+		t.Fatalf("TEST_ASSETS: %q %v", f, err)
+	}
+	// Off, or missing, it opens nothing.
+	delete(table, flags.KeyTestAssets)
+	if allowed, _ := Eligibility(user(StatusActive, "AQ"), FeatureTestAssets, "", "", lookup); allowed {
+		t.Fatal("the test assets without their switch")
 	}
 }
 

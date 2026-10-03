@@ -263,6 +263,11 @@ func (s *Service) applyAsset(ctx context.Context, r ports.Repos, a AssetConfig, 
 		// Stored amounts and pair steps depend on it.
 		return apperr.Invalid(fmt.Sprintf("asset %s: decimals cannot change once set", a.Code))
 	}
+	if cur != nil && cur.Hidden != a.Hidden {
+		if err := hideable(ctx, r, a.Asset); err != nil {
+			return err
+		}
+	}
 	keep := false
 	if cur != nil && !cur.Same(a.Asset) {
 		if keep, err = kept(ctx, r, o, "ASSET", a.Code, cur.Version, *cur, res); err != nil {
@@ -320,6 +325,44 @@ func (s *Service) applyAsset(ctx context.Context, r ports.Repos, a AssetConfig, 
 		}
 		if err := r.Emit(ctx, &instrumentv1.NetworkUpserted{Network: ToProtoNetwork(saved), Actor: o.Actor, Reason: o.Reason}, "asset", saved.AssetCode); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// hideable refuses hiding an asset that has pairs or contracts, and
+// showing one the stand-in custodian serves (ADR-0017): a hidden test
+// asset has neither, and only hidden ones are the stand-in's.
+func hideable(ctx context.Context, r ports.Repos, a domain.Asset) error {
+	if !a.Hidden {
+		nets, err := r.Networks().List(ctx)
+		if err != nil {
+			return err
+		}
+		for _, n := range nets {
+			if n.AssetCode == a.Code && n.Provider == domain.ProviderUdunMock {
+				return apperr.Invalid(fmt.Sprintf("asset %s: network %s is served by %s, which serves hidden test assets only",
+					a.Code, n.Network, domain.ProviderUdunMock))
+			}
+		}
+		return nil
+	}
+	pairs, err := r.Pairs().List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, p := range pairs {
+		if p.BaseAsset == a.Code || p.QuoteAsset == a.Code {
+			return apperr.Invalid(fmt.Sprintf("asset %s: pair %s trades it; a hidden test asset has no pairs", a.Code, p.Symbol))
+		}
+	}
+	contracts, err := r.Contracts().List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, c := range contracts {
+		if c.BaseAsset == a.Code || c.QuoteAsset == a.Code {
+			return apperr.Invalid(fmt.Sprintf("asset %s: contract %s trades it; a hidden test asset has no contracts", a.Code, c.Symbol))
 		}
 	}
 	return nil

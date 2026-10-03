@@ -45,6 +45,11 @@ const (
 // 2026-10-02 §2).
 const KeyTwoPerson = "admin.two_person_approval"
 
+// KeyTestAssets opens the hidden test assets' deposits and withdrawals
+// (ADR-0017) to the users its rules allow: on the test server the
+// end-to-end tests' accounts, region AQ.
+const KeyTestAssets = "wallet.test_assets"
+
 // The simulated market of the platform coin ASTRA (ASTRA design §5.2):
 // the bots trade at all, the operators' price events run, the bots trade
 // the perpetual too.
@@ -77,6 +82,7 @@ var Known = map[string]string{
 	KeyHouseLiquidity:   "HOUSE trades against orders at the reference market's book (virtual liquidity), per symbol; off leaves the platform's own book (ADR-0015)",
 	KeyInternalMatching: "Users' orders also trade with each other on pairs with HOUSE liquidity; off makes HOUSE the counterparty of every trade (ADR-0015)",
 	KeyTwoPerson:        "Admin console: manual adjustments, insurance fund contributions and withdrawals needing two reviewers take a second administrator; off lets one administrator carry them out within the console's single-person limits",
+	KeyTestAssets:       "Deposits and withdrawals of the hidden test assets (ADR-0017) for the users these rules allow: the end-to-end tests' accounts (region AQ on the test server); off, nobody's",
 	KeySimEnabled:       "The simulated market of the platform coin (market-sim): its bots quote and trade ASTRA-USDT around the model's price; off cancels their orders",
 	KeySimEvents:        "Operators' price events in the simulated market (jumps, targets, trends, pauses)",
 	KeySimPerp:          "The simulated market's bots also make the market on the platform coin's perpetual",

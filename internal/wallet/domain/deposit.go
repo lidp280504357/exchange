@@ -342,6 +342,9 @@ type Network struct {
 	// asset there ("mainCoinType:coinType").
 	Provider     string
 	ProviderCoin string
+	// Hidden: the asset is a hidden test asset (ADR-0017); its networks are
+	// only for users eligible for TEST_ASSETS, unknown to anyone else.
+	Hidden bool
 }
 
 // Custody reports whether a custodian serves the network.

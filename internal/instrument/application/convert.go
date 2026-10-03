@@ -12,7 +12,7 @@ func ToProtoAsset(a domain.Asset, networks []domain.Network) *instrumentv1.Asset
 	out := &instrumentv1.Asset{
 		AssetCode: a.Code, Name: a.Name, Decimals: a.Decimals, DepositEnabled: a.DepositEnabled,
 		WithdrawEnabled: a.WithdrawEnabled, TradingEnabled: a.TradingEnabled, RiskRestricted: a.RiskRestricted, Version: a.Version,
-		Rank: a.Rank, Categories: a.Categories,
+		Rank: a.Rank, Categories: a.Categories, Hidden: a.Hidden,
 	}
 	for _, n := range networks {
 		out.Networks = append(out.Networks, ToProtoNetwork(n))

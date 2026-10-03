@@ -89,6 +89,10 @@ message Asset {
   // Sector tags in lower case, e.g. layer-1, defi, meme.
   repeated string categories = 11;
   AssetProfile profile = 12;
+  // A test asset (ADR-0017): in no public list, without pairs or
+  // contracts; its deposits and withdrawals are open only to users
+  // eligible for TEST_ASSETS.
+  bool hidden = 13;
 }
 
 // AssetProfile is what the sites show of an asset beyond its code.
@@ -140,7 +144,8 @@ message Network {
   string explorer_address_url = 17;
   // Who moves the network's funds (ADR-0011): empty for the platform's
   // own wallets (the signer and the block scanner), UDUN for the custody
-  // wallet.
+  // wallet, UDUNMOCK for the test server's stand-in that serves hidden
+  // test assets only (ADR-0017).
   string provider = 18;
   // The custodian's code of the coin, "mainCoinType:coinType" for UDUN
   // (e.g. 195:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t); empty without one.

@@ -80,6 +80,9 @@ func (s *Service) DepositAddress(ctx context.Context, userID, asset, network str
 	if err != nil {
 		return domain.Address{}, domain.Network{}, err
 	}
+	if err := s.visible(ctx, userID, net); err != nil {
+		return domain.Address{}, domain.Network{}, err
+	}
 	if !net.Enabled {
 		return domain.Address{}, net, domain.ErrDepositsDisabled
 	}

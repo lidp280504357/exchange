@@ -230,7 +230,7 @@ func NetworkJSONOf(n domain.Network, suspended bool) NetworkJSON {
 }
 
 func (h *Handler) networks(w http.ResponseWriter, r *http.Request) {
-	list, err := h.Svc.NetworksOf(r.Context(), r.URL.Query().Get("asset"))
+	list, err := h.Svc.NetworksFor(r.Context(), httpx.UserID(r), r.URL.Query().Get("asset"))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

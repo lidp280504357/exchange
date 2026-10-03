@@ -92,7 +92,9 @@ message GetUserResponse {
 
 message CheckEligibilityRequest {
   string user_id = 1;
-  // SPOT_TRADE, DERIVATIVES_TRADE, DEPOSIT, WITHDRAW or TRANSFER.
+  // SPOT_TRADE, DERIVATIVES_TRADE, DEPOSIT, WITHDRAW, TRANSFER, or
+  // TEST_ASSETS (the hidden test assets' deposits and withdrawals,
+  // ADR-0017).
   string feature = 2;
   // Optional dimensions for feature flags.
   string asset = 3;

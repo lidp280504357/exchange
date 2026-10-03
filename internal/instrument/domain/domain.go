@@ -70,7 +70,12 @@ type Asset struct {
 	// are sector tags. Both only sort and filter the market lists.
 	Rank       int32    `json:"rank,omitempty"`
 	Categories []string `json:"categories,omitempty"`
-	Version    int64    `json:"version,omitempty"`
+	// Hidden marks a test asset (ADR-0017): in no public list, without
+	// pairs or contracts, its deposits and withdrawals open only to users
+	// eligible for TEST_ASSETS. The stand-in custodian UDUNMOCK serves only
+	// such assets.
+	Hidden  bool  `json:"hidden,omitempty"`
+	Version int64 `json:"version,omitempty"`
 }
 
 // Validate checks the asset on its own.
@@ -100,7 +105,7 @@ func (a Asset) Same(other Asset) bool {
 	return a.Code == other.Code && a.Name == other.Name && a.Decimals == other.Decimals &&
 		a.DepositEnabled == other.DepositEnabled && a.WithdrawEnabled == other.WithdrawEnabled &&
 		a.TradingEnabled == other.TradingEnabled && a.RiskRestricted == other.RiskRestricted &&
-		a.Rank == other.Rank && slices.Equal(a.Categories, other.Categories)
+		a.Rank == other.Rank && slices.Equal(a.Categories, other.Categories) && a.Hidden == other.Hidden
 }
 
 // Address formats of networks.
@@ -110,9 +115,14 @@ const (
 	FormatBTC  = "BTC"  // bech32/bech32m or Base58Check
 )
 
-// ProviderUdun is the Udun custody wallet (ADR-0011); a network without a
-// provider is served by the platform's own wallets.
-const ProviderUdun = "UDUN"
+// Providers of networks: the Udun custody wallet (ADR-0011), and the
+// test server's stand-in gateway's second merchant, which serves only
+// hidden test assets (ADR-0017); a network without a provider is served by
+// the platform's own wallets.
+const (
+	ProviderUdun     = "UDUN"
+	ProviderUdunMock = "UDUNMOCK"
+)
 
 // udunCoinRE is Udun's coin code: the chain's number and the coin's
 // (a number for a chain's coin, the contract for a token).
@@ -167,11 +177,13 @@ func (n Network) Validate(asset Asset) error {
 		return apperr.Invalid(fmt.Sprintf("network %s: explorer_tx_url must be an https URL with {tx}", name))
 	case !explorerLink(n.ExplorerAddressURL, "{address}"):
 		return apperr.Invalid(fmt.Sprintf("network %s: explorer_address_url must be an https URL with {address}", name))
-	case n.Provider != "" && n.Provider != ProviderUdun:
-		return apperr.Invalid(fmt.Sprintf("network %s: provider must be empty or %s", name, ProviderUdun))
+	case n.Provider != "" && n.Provider != ProviderUdun && n.Provider != ProviderUdunMock:
+		return apperr.Invalid(fmt.Sprintf("network %s: provider must be empty, %s or %s", name, ProviderUdun, ProviderUdunMock))
+	case n.Provider == ProviderUdunMock && !asset.Hidden:
+		return apperr.Invalid(fmt.Sprintf("network %s: %s serves hidden test assets only", name, ProviderUdunMock))
 	case (n.Provider == "") != (n.ProviderCoin == ""):
 		return apperr.Invalid(fmt.Sprintf("network %s: provider and provider_coin go together", name))
-	case n.Provider == ProviderUdun && !udunCoinRE.MatchString(n.ProviderCoin):
+	case n.Provider != "" && !udunCoinRE.MatchString(n.ProviderCoin):
 		return apperr.Invalid(fmt.Sprintf("network %s: provider_coin must be mainCoinType:coinType", name))
 	}
 	for field, v := range map[string]decimal.Decimal{"min_deposit": n.MinDeposit, "min_withdraw": n.MinWithdraw, "withdraw_fee": n.WithdrawFee} {

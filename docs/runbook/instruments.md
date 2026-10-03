@@ -7,8 +7,8 @@
 | 对象 | 关键字段 | 约束 |
 |---|---|---|
 | 费率档 `fee_schedules` | tier、maker/taker 费率 | 费率 ≥ 0 且 < 10%；默认档 `default` 为 0.1% / 0.1% |
-| 资产 `assets` | 代码、名称、`decimals`、可充/可提/可交易、风险开关；`rank`（市值排名，0 为无）、`categories`（板块标签，如 `layer-1`、`defi`、`meme`，最多 8 个） | 代码 2–10 位大写字母数字；`decimals` 0–18，**设置后不可改**；标签 2–24 位小写字母数字或 `-`，不重复 |
-| 网络 `networks` | 资产 × 链、合约地址、确认数、最小充/提、提现手续费、Memo；`display_name`（用户看到的名字，如 TRC20、ERC20）、`address_format`（`EVM`/`TRON`/`BTC`，缺省 EVM）、`eta_minutes`（通常到账分钟数）、`explorer_tx_url`/`explorer_address_url`（带 `{tx}`/`{address}` 占位的 https 链接） | 金额精度不超过资产 `decimals` |
+| 资产 `assets` | 代码、名称、`decimals`、可充/可提/可交易、风险开关；`rank`（市值排名，0 为无）、`categories`（板块标签，如 `layer-1`、`defi`、`meme`，最多 8 个）；`hidden`（隐藏测试资产，ADR-0017，迁移 00007：不进 `/v1/market/assets` 与图标接口，充提只对具备 `TEST_ASSETS` 资格的用户开放，内部 gRPC 照常列出；测试服只有端到端用的 TUSD） | 代码 2–10 位大写字母数字；`decimals` 0–18，**设置后不可改**；标签 2–24 位小写字母数字或 `-`，不重复；隐藏资产没有交易对与合约，有交易对或合约的资产不能设为隐藏 |
+| 网络 `networks` | 资产 × 链、合约地址、确认数、最小充/提、提现手续费、Memo；`display_name`（用户看到的名字，如 TRC20、ERC20）、`address_format`（`EVM`/`TRON`/`BTC`，缺省 EVM）、`eta_minutes`（通常到账分钟数）、`explorer_tx_url`/`explorer_address_url`（带 `{tx}`/`{address}` 占位的 https 链接）；`provider`/`provider_coin`（托管方与它的币种编码：空为平台自建钱包，`UDUN` 为优盾，`UDUNMOCK` 为测试服模拟网关的第二个商户，见 [custody.md](custody.md)） | 金额精度不超过资产 `decimals`；`UDUNMOCK` 只能配给隐藏资产，配了它的资产不能取消隐藏 |
 | 交易对 `trading_pairs` | tick/lot、最小/最大数量、最小名义金额、价格保护带、费率档、状态；`reference_symbol`（跟随的币安符号，空表示不跟随）、`reference_multiplier`（价格倍数，缺省 1）、`listed_at`（上架时间，缺省为创建时刻，文件里不写就保持） | tick 精度 ≤ 报价资产，lot 精度 ≤ 基础资产；tick × lot 的精度 ≤ 报价资产（成交额、冻结额因此总是精确值，2026-09-28 起 BTC-USDT 的 lot 改为 0.0001、ETH-BTC 改为 0.001）；最小/最大数量是 lot 的整数倍；保护带 (0, 1]；倍数是 1 到 10^9 之间 10 的整数次幂 |
 | 永续合约 `contracts`（阶段 3） | 代号 `BASE-QUOTE-PERP`、指数所用现货市场、tick/lot、数量与名义金额限制、限价偏离标记价的保护带、风险限额阶梯（每档最大名义价值、最高杠杆、维持保证金率）、资金费间隔/利率/上限、冲击名义金额、费率档、状态 | 同交易对的精度规则；阶梯按名义价值递增、杠杆不升、维持保证金率不降且低于 1/杠杆（否则开仓即强平）；资金费间隔 1/4/8 小时；状态机与交易对相同，状态只能经 `contract-status` 改 |
 

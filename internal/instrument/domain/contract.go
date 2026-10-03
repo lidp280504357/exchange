@@ -92,6 +92,8 @@ func (c Contract) Validate(base, quote Asset) error {
 		return apperr.Invalid(fmt.Sprintf("contract %s: the symbol must name its base and quote assets", c.Symbol))
 	case c.IndexSymbol != c.BaseAsset+"-"+c.QuoteAsset:
 		return apperr.Invalid(fmt.Sprintf("contract %s: index_symbol must be %s-%s", c.Symbol, c.BaseAsset, c.QuoteAsset))
+	case base.Hidden || quote.Hidden:
+		return apperr.Invalid(fmt.Sprintf("contract %s: a hidden test asset has no contracts (ADR-0017)", c.Symbol))
 	case !base.TradingEnabled || !quote.TradingEnabled:
 		return apperr.Invalid(fmt.Sprintf("contract %s: both assets must be enabled for trading", c.Symbol))
 	case !c.TickSize.IsPositive() || !FitsScale(c.TickSize, quote.Decimals):

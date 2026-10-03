@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -183,5 +184,44 @@ func TestAssetNetworkFee(t *testing.T) {
 	}
 	if (FeeSchedule{Tier: "default", MakerFeeRate: d("0.0010"), TakerFeeRate: d("0.001")}).Same(FeeSchedule{Tier: "default", MakerFeeRate: d("0.001"), TakerFeeRate: d("0.001")}) != true {
 		t.Error("equal decimals with different scales are the same")
+	}
+}
+
+// A hidden test asset (ADR-0017) is the stand-in custodian's only kind of
+// asset and has no pairs or contracts.
+func TestHiddenTestAssets(t *testing.T) {
+	tusd := Asset{Code: "TUSD", Name: "Test USD", Decimals: 6, DepositEnabled: true, WithdrawEnabled: true, Hidden: true}
+	if err := tusd.Validate(); err != nil {
+		t.Fatalf("a hidden asset: %v", err)
+	}
+	shown := tusd
+	shown.Hidden = false
+	if tusd.Same(shown) {
+		t.Error("hidden is configuration")
+	}
+	n := Network{
+		AssetCode: "TUSD", Network: "TRON-TEST", Chain: "tron", AddressFormat: FormatTRON, Confirmations: 1, MinDeposit: d("1"),
+		MinWithdraw: d("10"), WithdrawFee: d("5"), Provider: ProviderUdunMock, ProviderCoin: "195:TTestUSD1111111111111111111111111",
+	}
+	if err := n.Validate(tusd); err != nil {
+		t.Errorf("the stand-in's network of a hidden asset: %v", err)
+	}
+	if err := n.Validate(shown); err == nil || !strings.Contains(err.Error(), "hidden test assets only") {
+		t.Errorf("the stand-in's network of a listed asset: %v", err)
+	}
+	bad := n
+	bad.ProviderCoin = "TRON:TUSD"
+	if bad.Validate(tusd) == nil {
+		t.Error("the stand-in's coin format")
+	}
+	p := pair()
+	p.Symbol, p.BaseAsset = "TUSD-USDT", "TUSD"
+	if err := p.Validate(tusd, usdt); err == nil || !strings.Contains(err.Error(), "no pairs") {
+		t.Errorf("a pair of a hidden asset: %v", err)
+	}
+	c := perp()
+	c.Symbol, c.BaseAsset, c.IndexSymbol = "TUSD-USDT-PERP", "TUSD", "TUSD-USDT"
+	if err := c.Validate(tusd, usdt); err == nil || !strings.Contains(err.Error(), "no contracts") {
+		t.Errorf("a contract of a hidden asset: %v", err)
 	}
 }

@@ -92,7 +92,8 @@
     {"asset_code":"DASH","categories":["payments","pow"],"decimals":6,"deposit_enabled":false,"name":"Dash","networks":[],"rank":87,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
     {"asset_code":"BAT","categories":["payments"],"decimals":6,"deposit_enabled":false,"name":"Basic Attention Token","networks":[],"rank":88,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
     {"asset_code":"ENJ","categories":["gaming","nft"],"decimals":6,"deposit_enabled":false,"name":"Enjin Coin","networks":[],"rank":89,"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
-    {"asset_code":"ASTRA","categories":["exchange"],"decimals":8,"deposit_enabled":false,"name":"Astra","networks":[],"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false}
+    {"asset_code":"ASTRA","categories":["exchange"],"decimals":8,"deposit_enabled":false,"name":"Astra","networks":[],"risk_restricted":false,"trading_enabled":true,"withdraw_enabled":false},
+    {"asset_code":"TUSD","categories":[],"decimals":6,"deposit_enabled":true,"hidden":true,"name":"Test USD (end-to-end tests)","networks":[{"address_format":"TRON","chain":"tron","confirmations":1,"contract_address":"TQQCuyVcUEknTGyfSRKhcUuLZfEe93qWpy","deposit_enabled":true,"display_name":"TRC20 (test)","eta_minutes":1,"memo_required":false,"min_deposit":"1","min_withdraw":"10","network":"TRON-TEST","provider":"UDUNMOCK","provider_coin":"195:TQQCuyVcUEknTGyfSRKhcUuLZfEe93qWpy","withdraw_enabled":true,"withdraw_fee":"5"}],"rank":0,"risk_restricted":false,"trading_enabled":false,"withdraw_enabled":true}
   ],
   "pairs": [
     {"base_asset":"BTC","fee_tier":"default","lot_size":"0.0001","max_quantity":"11.9283","min_notional":"5","min_quantity":"0.0001","price_band":"0.1","quote_asset":"USDT","reference_symbol":"BTCUSDT","status":"PREPARE","symbol":"BTC-USDT","tick_size":"0.01"},

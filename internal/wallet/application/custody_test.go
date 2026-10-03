@@ -1849,3 +1849,49 @@ func TestADepositOfNobodyTheLedgerRefusesWaitsAlone(t *testing.T) {
 		t.Fatalf("booked later: %+v", got)
 	}
 }
+
+// A hidden test asset's network (ADR-0017) exists only for users eligible
+// for TEST_ASSETS: listed, given an address, checked and withdrawn to for
+// them; unknown to anyone else, whatever they ask.
+func TestAHiddenTestAssetIsForTheTestAccountsOnly(t *testing.T) {
+	h := newCustodyHarness(t)
+	ctx := context.Background()
+	const coin = "195:TQQCuyVcUEknTGyfSRKhcUuLZfEe93qWpy"
+	h.nets.nets = append(h.nets.nets, domain.Network{
+		Asset: "TUSD", Network: "TRON-TEST", Chain: "tron", Decimals: 6, Confirmations: 1, MinDeposit: d("1"), Enabled: true,
+		WithdrawEnabled: true, MinWithdraw: d("10"), WithdrawFee: d("5"), AddressFormat: domain.FormatTRON,
+		Provider: domain.ProviderUdun, ProviderCoin: coin, Hidden: true,
+	})
+	h.elig["bob/"+FeatureTestAssets] = "USER_REGION_NOT_ALLOWED"
+	tusd := func(list []domain.Network) bool {
+		return slices.ContainsFunc(list, func(n domain.Network) bool { return n.Asset == "TUSD" })
+	}
+	if list, err := h.svc.NetworksFor(ctx, "alice", ""); err != nil || !tusd(list) {
+		t.Fatalf("an eligible user's networks: %v", err)
+	}
+	if list, err := h.svc.NetworksFor(ctx, "bob", ""); err != nil || tusd(list) || len(list) == 0 {
+		t.Fatalf("another user's networks: %+v %v", list, err)
+	}
+	if list, err := h.svc.NetworksFor(ctx, "bob", "TUSD"); err != nil || len(list) != 0 {
+		t.Fatalf("another user asking for TUSD: %+v %v", list, err)
+	}
+	if a, _, err := h.svc.DepositAddress(ctx, "alice", "TUSD", "TRON-TEST"); err != nil || a.Address == "" {
+		t.Fatalf("an eligible user's address: %+v %v", a, err)
+	}
+	if _, _, err := h.svc.DepositAddress(ctx, "bob", "TUSD", "TRON-TEST"); !apperr.Is(err, "WALLET_NETWORK_UNKNOWN") {
+		t.Fatalf("another user's address: %v", err)
+	}
+	if _, err := h.svc.ValidateAddress(ctx, "bob", "", "TRON-TEST", payeeTRX, ""); !apperr.Is(err, "WALLET_NETWORK_UNKNOWN") {
+		t.Fatalf("another user's address check: %v", err)
+	}
+	if v, err := h.svc.ValidateAddress(ctx, "alice", "TUSD", "TRON-TEST", payeeTRX, ""); err != nil || !v.Valid {
+		t.Fatalf("an eligible user's address check: %+v %v", v, err)
+	}
+	_, err := h.svc.RequestWithdrawal(ctx, "bob", WithdrawalInput{Asset: "TUSD", Network: "TRON-TEST", Address: payeeTRX, Amount: d("20")})
+	if !apperr.Is(err, "WALLET_NETWORK_UNKNOWN") {
+		t.Fatalf("another user's withdrawal: %v", err)
+	}
+	if _, err := h.svc.AddAddress(ctx, "bob", AddressInput{Network: "TRON-TEST", Address: payeeTRX}); !apperr.Is(err, "WALLET_NETWORK_UNKNOWN") {
+		t.Fatalf("another user's address book: %v", err)
+	}
+}

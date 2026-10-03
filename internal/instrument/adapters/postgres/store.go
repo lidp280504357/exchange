@@ -144,12 +144,12 @@ func (r fees) Save(ctx context.Context, f domain.FeeSchedule) (domain.FeeSchedul
 type assets repos
 
 const assetColumns = `asset_code, name, decimals, deposit_enabled, withdraw_enabled, trading_enabled, risk_restricted, rank,
-	categories, version`
+	categories, hidden, version`
 
 func scanAsset(row pgx.Row) (domain.Asset, error) {
 	var a domain.Asset
 	err := row.Scan(&a.Code, &a.Name, &a.Decimals, &a.DepositEnabled, &a.WithdrawEnabled, &a.TradingEnabled, &a.RiskRestricted,
-		&a.Rank, &a.Categories, &a.Version)
+		&a.Rank, &a.Categories, &a.Hidden, &a.Version)
 	return a, err
 }
 
@@ -168,14 +168,14 @@ func (r assets) Save(ctx context.Context, a domain.Asset) (domain.Asset, error) 
 		categories = []string{}
 	}
 	return scanAsset(r.q.QueryRow(ctx, `INSERT INTO assets (asset_code, name, decimals, deposit_enabled, withdraw_enabled,
-		trading_enabled, risk_restricted, rank, categories) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		trading_enabled, risk_restricted, rank, categories, hidden) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (asset_code) DO UPDATE SET name = EXCLUDED.name, decimals = EXCLUDED.decimals,
 		deposit_enabled = EXCLUDED.deposit_enabled, withdraw_enabled = EXCLUDED.withdraw_enabled,
 		trading_enabled = EXCLUDED.trading_enabled, risk_restricted = EXCLUDED.risk_restricted,
-		rank = EXCLUDED.rank, categories = EXCLUDED.categories,
+		rank = EXCLUDED.rank, categories = EXCLUDED.categories, hidden = EXCLUDED.hidden,
 		version = assets.version + 1, updated_at = now()
 		RETURNING `+assetColumns, a.Code, a.Name, a.Decimals, a.DepositEnabled, a.WithdrawEnabled, a.TradingEnabled, a.RiskRestricted,
-		a.Rank, categories))
+		a.Rank, categories, a.Hidden))
 }
 
 type profiles repos

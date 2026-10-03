@@ -43,6 +43,7 @@ custody_callbacks（原文、验签、结果、次数）──> 充值：deposit
 | USDT | ETH | ERC20 | `60:0xdAC17F958D2ee523a2206206994597C13D831ec7` | 12 | 5 | 20 | 5 | 关 |
 | BTC | BTC | Bitcoin | `0:0` | 2 | 0.0001 | 0.001 | 0.0002 | 开 |
 | ETH | ETH | Ethereum | `60:60` | 12 | 0.002 | 0.005 | 0.001 | 开 |
+| TUSD（隐藏，`UDUNMOCK`） | TRON-TEST | TRC20 (test) | `195:TQQCuyVcUEknTGyfSRKhcUuLZfEe93qWpy` | 1 | 1 | 10 | 5 | 开，只对 `TEST_ASSETS` |
 
 同一网络的资产共用一个地址（每用户每网络一个，托管方按主链生成）：USDT-ERC20 与 ETH 都在网络 `ETH`。ETH 另有自建的 `ETH-SEPOLIA`。
 
@@ -277,6 +278,16 @@ sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangec
 - 2026-10-03 晚 步骤 1、2 完成（用户把 `3.107.113.199` 加进了优盾的白名单）：币种、地址校验、余额 `null` 与三个探测地址见上文「商户的币种与探测地址」。随之改了配置（用户决定 USDT 先只走 TRC20）：`test.json` 的 BEP20 编码改成 `2510:…`，BEP20、ERC20 两个 USDT 网络充提都关、配置保留；对账不计托管方没有列出、且充提都关的网络的币种（否则真网关下 USDT 会因为没有 BEP20、ERC20 而一直"不比较"）；模拟网关改用 2510；`custody.sh` 改为检查只有 TRC20 开着。
 - 2026-10-03 晚 审查 AJ 的四项改完：无主充值分配的"账本已付、钱包没记上"按收款用户补记（账本 `GetUnclaimedRelease` 多返回 `user_id`）；一笔无主充值入账失败不再卡住整个网络的轮次；退役、恢复与基线重置写明在 wallet-service 容器里跑（步骤 4 的顺序改成先退役与重置、后并入 `apps.env`）；站点有了 `UNKNOWN_ADDRESS` 的文案，入账后的充值不再把原因显示成红色的"未入账"。
 
+## 端到端的托管方 UDUNMOCK 与测试资产 TUSD（方案 A，ADR-0017）
+
+真网关切换后 `UDUN` 不能再让端到端造充值、丢应答，所以端到端有自己的托管方：模拟网关的第二个商户 `UDUNMOCK`（设置见上文「配置」的 `UDUNMOCK_*`）与只给它用的隐藏资产 TUSD（网络 `TRON-TEST`，见上表）。
+
+- wallet-service 为每个配置了的托管方各起一个处理器（租约 `wallet-custody:<托管方>`，指标常量标签 `provider`）、各有回调来源名单与币种缓存；对账按资产覆盖全部持有方，另一个托管方持有的算"别处持有"。后台接口 `/internal/wallet/custody?provider=UDUNMOCK`、`/internal/wallet/custody/callbacks?provider=UDUNMOCK` 分开看；`exchangectl wallet reconcile --network UDUNMOCK`、`checks --network UDUNMOCK`、`custody-fee-unit --provider UDUNMOCK`。
+- `UDUNMOCK` 的回调只在容器网络里经 api-gateway 回到 `/v1/wallet/callbacks/udunmock`；nginx 对公网的这条路径一律 403，wallet-service 再按 `UDUNMOCK_CALLBACK_ALLOWED_IPS`（容器网段）把关。
+- TUSD 不进任何公开列表，充提只对 `TEST_ASSETS` 资格（开关 `wallet.test_assets`，测试服只对地区 `AQ`）的用户开放，其他人一律 404 `WALLET_NETWORK_UNKNOWN`；端到端用 `AQ` 注册。它没有行情，提现限额按 `WALLET_FALLBACK_PRICES` 的 `TUSD:1` 折算；停提阈值 `WALLET_SHORTFALL_STOP` 的 `TUSD=1`。
+- 托管方对 TUSD 收的手续费（模拟网关的单位按 `SELF` 确认）从 `GAS_SUPPLY` 出，`GAS_SUPPLY` 只能由 TUSD 自己的手续费收入补：`custody.sh` 在第一笔提现结算后把手续费收入挪过去（每笔 5 TUSD，托管方每轮约收 2.7）。
+- 切换真网关时只改 `UDUN_*`；模拟网关只认 `UDUNMOCK_MERCHANT_ID`、`UDUNMOCK_API_KEY`，不读 `UDUN_*`，`UDUNMOCK` 照常指向它。
+
 ## 指标与告警
 
 - `wallet_custody_up`、`wallet_custody_balance{coin}`（5 分钟）、`wallet_custody_held/expected/shortfall{asset}`（每次对账）、`wallet_custody_submitted`、`wallet_custody_submitted_oldest_seconds`、`wallet_custody_withdrawals_uncertain`、`wallet_custody_callbacks_attention`、`wallet_custody_deposits_held`、`wallet_custody_fees_unbooked`、`wallet_custody_fees_held`（等人工处理的手续费笔数）、`wallet_withdrawals_suspended{asset}`（该资产停提时为 1）、`wallet_withdrawals_suspended_waiting{asset}`（因停提等着的已批准提现），常量标签 `provider`；`wallet_custody_fees_held_total`（挂起的手续费）、`wallet_custody_callbacks_rejected_total`（被拒的回调，记不记表都算）、`wallet_custody_deposit_discrepancies_total`（与补记不一致的回调）、`wallet_deposits_unmatched_total{reason}`（地址不属于任何用户或币种对不上网络的到账，B7a）。
@@ -284,9 +295,9 @@ sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangec
 
 ## 端到端
 
-`scripts/e2e/custody.sh`：新用户拿 TRC20 与比特币地址；模拟网关报 30 USDT 到账（入账一次，重试与重放不重复），0.5 USDT 记未入账；伪造签名与过期回调被拒并记录；经公网发到 `https://astras.vip` 的伪造回调（`udun`、`UDUN`、`Udun` 三种写法）都被拒（步骤 3 起 nginx 不再按来源挡：接模拟网关时是 wallet-service 的来源名单 403，大写写法 404，接真网关后验签 401）；运营手工停掉 USDT 提现时新提现被拒（422 `WALLET_WITHDRAW_SUSPENDED`），解除后照常（自动停提要两次相隔 5 分钟的对账，端到端不等，由单元测试覆盖）；绑定身份验证器后 12 USDT 经审批交给托管方、`SUBMITTED` → `CONFIRMED` 带交易哈希并结算，托管方为它扣的 1.2 USDT 从 `GAS_SUPPLY` 入账（脚本先确认 TRC20 的手续费单位为 `SELF`，`GAS_SUPPLY` 不到 10 USDT 时从手续费收入挪 20）；10 USDT 发往失败地址 → `FAILED` 资金退回；模拟网关对第三个地址收下提现却丢了应答、重交时以余额不足拒绝、先报审核中、把实际扣的 1.5 USDT 报成 1500：提现停在 `UNCERTAIN`、资金冻结，之后回调到达照常发出并结算，手续费挂起不入账，`exchangectl wallet custody-fee --book --amount 1.5` 后入账；最后对账无短缺（托管方余额与账本都少了这两笔手续费）。浏览器冒烟测试的充值页同时取 Sepolia 与 TRC20 地址，后台冒烟测试打开「托管方」页与一条回调。
+`scripts/e2e/custody.sh`（2026-10-04 起在 `UDUNMOCK` 与 TUSD 上跑，ADR-0017，见上一节）：用地区 `AQ` 注册的新用户看到 `UDUN` 的网络配置（USDT 只开 TRC20、BTC、ETH）与 `TRON-TEST` 上的 TUSD，公开资产列表里没有 TUSD；拿 `TRON-TEST` 地址；模拟网关报 50 TUSD 到账（入账一次，重试与重放不重复），0.5 TUSD 记未入账；伪造签名与过期回调被拒并记录；经公网发到 `https://astras.vip` 的伪造回调都被拒（`udun`：接模拟网关时 wallet-service 的来源名单 403、接真网关后验签 401，`UDUN`、`Udun` 404；`udunmock`、`UDUNMOCK` 由 nginx 403）；运营手工停掉 TUSD 提现时新提现被拒（422 `WALLET_WITHDRAW_SUSPENDED`），解除后照常（自动停提要两次相隔 5 分钟的对账，端到端不等，由单元测试覆盖）；绑定身份验证器后 12 TUSD 经审批交给托管方、`SUBMITTED` → `CONFIRMED` 带交易哈希并结算，托管方为它扣的 1.2 TUSD 从 `GAS_SUPPLY` 入账（脚本先确认 `TRON-TEST` 的手续费单位为 `SELF`，`GAS_SUPPLY` 不到 10 时从 TUSD 的手续费收入挪，至多 20；第一次运行要等这笔提现的 5 TUSD 手续费进了收入）；10 TUSD 发往失败地址 → `FAILED` 资金退回；模拟网关对第三个地址收下提现却丢了应答、重交时以余额不足拒绝、先报审核中、把实际扣的 1.5 TUSD 报成 1500：提现停在 `UNCERTAIN`、资金冻结，之后回调到达照常发出并结算，手续费挂起不入账（高于发出的 11 与 5 倍手续费 25 中较小者），`exchangectl wallet custody-fee --book --amount 1.5` 后入账；最后 `UDUNMOCK` 对账无短缺。故障演练 `custody-callbacks.sh` 同样只用 `UDUNMOCK` 与 TUSD。浏览器冒烟测试的充值页只取 Sepolia 地址（不再向托管方要地址），后台冒烟测试读 `UDUNMOCK` 的「托管方」页与回调（后台会话）。
 
-`custody.sh` 只在 wallet-service 的 `UDUN` 网关是模拟网关（`apps.env` 的 `UDUN_GATEWAY_URL` 指向 `udun-mock`）时运行；接上真网关后它打印 `SKIP custody` 并以 0 退出，不会动真钱，直到端到端有自己的托管方（真网关联调的步骤 6，方案 A）。
+两个脚本只在 wallet-service 的 `UDUNMOCK` 托管方是模拟网关（容器环境 `UDUNMOCK_GATEWAY_URL` 指向 `udun-mock`）时运行，否则打印 `SKIP` 并以 0 退出；`UDUN` 换成真网关不影响它们，它们也不碰 `UDUN` 的钱（只读它的网络配置、向它的回调路径发伪造回调看是否被拒）。要开关 `wallet.test_assets` 对地区 `AQ` 打开。
 
 ## 已知局限
 

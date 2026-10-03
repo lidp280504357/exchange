@@ -138,6 +138,9 @@ func (s *Service) RequestWithdrawal(ctx context.Context, userID string, in Withd
 	if err != nil {
 		return domain.Withdrawal{}, err
 	}
+	if err := s.visible(ctx, userID, net); err != nil {
+		return domain.Withdrawal{}, err
+	}
 	check := domain.CheckAddress(net, in.Address, "")
 	switch {
 	case !net.WithdrawEnabled || (net.Contract != "" && !net.Custody()):

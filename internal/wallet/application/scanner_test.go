@@ -309,9 +309,14 @@ func (f *fakeNetworks) ForAsset(_ context.Context, asset string) ([]domain.Netwo
 	return out, nil
 }
 
-type fakeEligibility map[string]string // user -> refusal code
+// fakeEligibility refuses a user every feature ("user" -> code) or one
+// ("user/FEATURE" -> code).
+type fakeEligibility map[string]string
 
-func (f fakeEligibility) Check(_ context.Context, userID, _ string) (bool, string, error) {
+func (f fakeEligibility) Check(_ context.Context, userID, feature string) (bool, string, error) {
+	if code, refused := f[userID+"/"+feature]; refused {
+		return false, code, nil
+	}
 	code, refused := f[userID]
 	return !refused, code, nil
 }

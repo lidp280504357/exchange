@@ -14,6 +14,9 @@ const (
 	FeatureDeposit          = "DEPOSIT"
 	FeatureWithdraw         = "WITHDRAW"
 	FeatureTransfer         = "TRANSFER"
+	// FeatureTestAssets opens the hidden test assets' deposits and
+	// withdrawals (ADR-0017): the end-to-end tests' accounts only.
+	FeatureTestAssets = "TEST_ASSETS"
 )
 
 // Reason codes of a refusal (appendix C).
@@ -31,6 +34,7 @@ var featureFlags = map[string]string{
 	FeatureDerivativesTrade: flags.KeyDerivatives,
 	FeatureWithdraw:         flags.KeyWithdraw,
 	FeatureTransfer:         flags.KeyTransfer,
+	FeatureTestAssets:       flags.KeyTestAssets,
 }
 
 // statusAllows is the impact matrix of §5.4 for the features that have an
@@ -39,6 +43,7 @@ var featureFlags = map[string]string{
 var statusAllows = map[string]map[string]bool{
 	StatusActive: {
 		FeatureSpotTrade: true, FeatureDerivativesTrade: true, FeatureDeposit: true, FeatureWithdraw: true, FeatureTransfer: true,
+		FeatureTestAssets: true,
 	},
 	StatusRiskReview: {FeatureSpotTrade: true, FeatureDeposit: true},
 	StatusFrozen:     {FeatureDeposit: true},
@@ -54,7 +59,7 @@ var statusReasons = map[string]string{
 // ParseFeature accepts one of the feature names.
 func ParseFeature(s string) (string, error) {
 	switch s {
-	case FeatureSpotTrade, FeatureDerivativesTrade, FeatureDeposit, FeatureWithdraw, FeatureTransfer:
+	case FeatureSpotTrade, FeatureDerivativesTrade, FeatureDeposit, FeatureWithdraw, FeatureTransfer, FeatureTestAssets:
 		return s, nil
 	}
 	return "", apperr.Invalid(fmt.Sprintf("unknown feature %q", s))

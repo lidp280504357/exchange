@@ -110,10 +110,17 @@ func (s *Service) Profiles(ctx context.Context) (map[string]domain.AssetProfile,
 	return out, nil
 }
 
-// Logo returns an asset's logo and its profile version; ErrNotFound
-// without a logo.
+// Logo returns an asset's logo and its profile version for the sites;
+// ErrNotFound without a logo, and for a hidden test asset (ADR-0017).
 func (s *Service) Logo(ctx context.Context, code string) (domain.Logo, int64, error) {
-	l, version, err := s.Store.Read().Profiles().Logo(ctx, code)
+	r := s.Store.Read()
+	if a, err := r.Assets().Get(ctx, code); err != nil || a == nil || a.Hidden {
+		if err == nil {
+			err = domain.ErrNotFound
+		}
+		return domain.Logo{}, 0, err
+	}
+	l, version, err := r.Profiles().Logo(ctx, code)
 	if err != nil {
 		return domain.Logo{}, 0, err
 	}

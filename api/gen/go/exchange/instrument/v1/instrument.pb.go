@@ -329,8 +329,12 @@ type Asset struct {
 	// Market-cap rank at listing; 0 when unranked.
 	Rank int32 `protobuf:"varint,10,opt,name=rank,proto3" json:"rank,omitempty"`
 	// Sector tags in lower case, e.g. layer-1, defi, meme.
-	Categories    []string      `protobuf:"bytes,11,rep,name=categories,proto3" json:"categories,omitempty"`
-	Profile       *AssetProfile `protobuf:"bytes,12,opt,name=profile,proto3" json:"profile,omitempty"`
+	Categories []string      `protobuf:"bytes,11,rep,name=categories,proto3" json:"categories,omitempty"`
+	Profile    *AssetProfile `protobuf:"bytes,12,opt,name=profile,proto3" json:"profile,omitempty"`
+	// A test asset (ADR-0017): in no public list, without pairs or
+	// contracts; its deposits and withdrawals are open only to users
+	// eligible for TEST_ASSETS.
+	Hidden        bool `protobuf:"varint,13,opt,name=hidden,proto3" json:"hidden,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -447,6 +451,13 @@ func (x *Asset) GetProfile() *AssetProfile {
 		return x.Profile
 	}
 	return nil
+}
+
+func (x *Asset) GetHidden() bool {
+	if x != nil {
+		return x.Hidden
+	}
+	return false
 }
 
 // AssetProfile is what the sites show of an asset beyond its code.
@@ -581,7 +592,8 @@ type Network struct {
 	ExplorerAddressUrl string `protobuf:"bytes,17,opt,name=explorer_address_url,json=explorerAddressUrl,proto3" json:"explorer_address_url,omitempty"`
 	// Who moves the network's funds (ADR-0011): empty for the platform's
 	// own wallets (the signer and the block scanner), UDUN for the custody
-	// wallet.
+	// wallet, UDUNMOCK for the test server's stand-in that serves hidden
+	// test assets only (ADR-0017).
 	Provider string `protobuf:"bytes,18,opt,name=provider,proto3" json:"provider,omitempty"`
 	// The custodian's code of the coin, "mainCoinType:coinType" for UDUN
 	// (e.g. 195:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t); empty without one.
@@ -2195,7 +2207,7 @@ const file_exchange_instrument_v1_instrument_proto_rawDesc = "" +
 	"after_json\x18\x06 \x01(\fR\tafterJson\"s\n" +
 	"\x13ApplyConfigResponse\x12>\n" +
 	"\achanges\x18\x01 \x03(\v2$.exchange.instrument.v1.ConfigChangeR\achanges\x12\x1c\n" +
-	"\tunchanged\x18\x02 \x01(\x05R\tunchanged\"\xc7\x03\n" +
+	"\tunchanged\x18\x02 \x01(\x05R\tunchanged\"\xdf\x03\n" +
 	"\x05Asset\x12\x1d\n" +
 	"\n" +
 	"asset_code\x18\x01 \x01(\tR\tassetCode\x12\x12\n" +
@@ -2212,7 +2224,8 @@ const file_exchange_instrument_v1_instrument_proto_rawDesc = "" +
 	"\n" +
 	"categories\x18\v \x03(\tR\n" +
 	"categories\x12>\n" +
-	"\aprofile\x18\f \x01(\v2$.exchange.instrument.v1.AssetProfileR\aprofile\"\xba\x03\n" +
+	"\aprofile\x18\f \x01(\v2$.exchange.instrument.v1.AssetProfileR\aprofile\x12\x16\n" +
+	"\x06hidden\x18\r \x01(\bR\x06hidden\"\xba\x03\n" +
 	"\fAssetProfile\x12!\n" +
 	"\fdisplay_name\x18\x01 \x01(\tR\vdisplayName\x12W\n" +
 	"\vdescription\x18\x02 \x03(\v25.exchange.instrument.v1.AssetProfile.DescriptionEntryR\vdescription\x12E\n" +

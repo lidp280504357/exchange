@@ -16,7 +16,8 @@ import (
 // gen-top50.go) must pass what apply checks, without a database: every
 // asset valid, every pair valid against its assets, the internal assets
 // without deposits or withdrawals (ADR-0013), 1000x coins mapped
-// (ADR-0014).
+// (ADR-0014), the hidden test asset TUSD only on the stand-in custodian
+// and without pairs (ADR-0017).
 func TestTheDeployedReferenceDataIsValid(t *testing.T) {
 	raw, err := os.ReadFile("../../../deploy/instruments/test.json")
 	if err != nil {
@@ -33,10 +34,26 @@ func TestTheDeployedReferenceDataIsValid(t *testing.T) {
 		if err := a.Validate(); err != nil {
 			t.Fatalf("asset %s: %v", a.Code, err)
 		}
-		if a.Code != "USDT" && a.Code != "BTC" && a.Code != "ETH" && (a.DepositEnabled || a.WithdrawEnabled || len(a.Networks) > 0) {
+		for _, n := range a.Networks {
+			n.AssetCode = a.Code
+			if err := n.Validate(a.Asset); err != nil {
+				t.Errorf("network %s/%s: %v", a.Code, n.Network, err)
+			}
+			if a.Hidden != (n.Provider == domain.ProviderUdunMock) {
+				t.Errorf("network %s/%s: the stand-in custodian serves the hidden test asset alone", a.Code, n.Network)
+			}
+		}
+		switch {
+		case a.Hidden && a.Code != "TUSD":
+			t.Errorf("hidden asset %s: TUSD is the end-to-end tests' only one", a.Code)
+		case a.Hidden:
+		case a.Code != "USDT" && a.Code != "BTC" && a.Code != "ETH" && (a.DepositEnabled || a.WithdrawEnabled || len(a.Networks) > 0):
 			t.Errorf("internal asset %s has deposits, withdrawals or networks", a.Code)
 		}
 		assets[a.Code] = a.Asset
+	}
+	if !assets["TUSD"].Hidden {
+		t.Error("TUSD, the end-to-end tests' hidden asset, is missing")
 	}
 	usdt, seen := 0, map[string]bool{}
 	for _, p := range cfg.Pairs {

@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/lidp280504357/exchange/internal/wallet/domain"
@@ -12,6 +13,41 @@ import (
 // withdrawal pages show of them.
 func (s *Service) NetworksOf(ctx context.Context, asset string) ([]domain.Network, error) {
 	return s.Networks.ForAsset(ctx, strings.ToUpper(asset))
+}
+
+// FeatureTestAssets is the eligibility a hidden test asset's networks need
+// (ADR-0017).
+const FeatureTestAssets = "TEST_ASSETS"
+
+// NetworksFor lists an asset's networks (every asset's for "") as a user
+// may see them: a hidden test asset's only to one eligible for
+// TEST_ASSETS (ADR-0017).
+func (s *Service) NetworksFor(ctx context.Context, userID, asset string) ([]domain.Network, error) {
+	list, err := s.NetworksOf(ctx, asset)
+	if err != nil || !slices.ContainsFunc(list, func(n domain.Network) bool { return n.Hidden }) {
+		return list, err
+	}
+	allowed, _, err := s.Eligibility.Check(ctx, userID, FeatureTestAssets)
+	if err != nil || allowed {
+		return list, err
+	}
+	return slices.DeleteFunc(list, func(n domain.Network) bool { return n.Hidden }), nil
+}
+
+// visible refuses a hidden test asset's network to a user not eligible
+// for TEST_ASSETS as if it did not exist (ADR-0017).
+func (s *Service) visible(ctx context.Context, userID string, net domain.Network) error {
+	if !net.Hidden {
+		return nil
+	}
+	allowed, _, err := s.Eligibility.Check(ctx, userID, FeatureTestAssets)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return domain.ErrUnknownNetwork
+	}
+	return nil
 }
 
 // AddressValidation is the outcome of checking a withdrawal address.
@@ -47,6 +83,9 @@ func (s *Service) ValidateAddress(ctx context.Context, userID, asset, network, a
 			return AddressValidation{}, domain.ErrUnknownNetwork
 		}
 		net = nets[0]
+	}
+	if err := s.visible(ctx, userID, net); err != nil {
+		return AddressValidation{}, err
 	}
 	out := AddressValidation{AddressCheck: domain.CheckAddress(net, address, memo), Network: net}
 	if !out.Valid {

@@ -160,6 +160,9 @@ func (h *Handler) assets(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]assetJSON, 0, len(list))
 	for _, a := range list {
+		if a.Hidden {
+			continue // a test asset (ADR-0017): in no public list
+		}
 		aj := assetJSON{
 			AssetCode: a.Code, Name: a.Name, Decimals: a.Decimals, Rank: rank(a.Rank), Categories: categories(a.Categories),
 			DepositEnabled: a.DepositEnabled, WithdrawEnabled: a.WithdrawEnabled, TradingEnabled: a.TradingEnabled,

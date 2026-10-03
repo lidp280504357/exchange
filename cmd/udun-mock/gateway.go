@@ -132,10 +132,15 @@ type gateway struct {
 	st state
 }
 
+// coinTUSD is the hidden test asset of the end-to-end tests (ADR-0017), a
+// made-up TRC20 token of the stand-in's merchant UDUNMOCK.
+const coinTUSD = "TQQCuyVcUEknTGyfSRKhcUuLZfEe93qWpy"
+
 // defaultCoins mirror the custody networks of deploy/instruments/test.json.
 func defaultCoins() []coin {
 	return []coin{
 		{Symbol: "USDT", MainCoinType: chainTRON, CoinType: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", Decimals: 6},
+		{Symbol: "TUSD", MainCoinType: chainTRON, CoinType: coinTUSD, Decimals: 6},
 		{Symbol: "USDT", MainCoinType: chainBSC, CoinType: "0x55d398326f99059fF775485246999027B3197955", Decimals: 18},
 		{Symbol: "USDT", MainCoinType: "60", CoinType: "0xdAC17F958D2ee523a2206206994597C13D831ec7", Decimals: 6},
 		{Symbol: "BTC", MainCoinType: chainBTC, CoinType: chainBTC, Decimals: 8},

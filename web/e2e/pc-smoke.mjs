@@ -135,8 +135,9 @@ try {
   await waitText("账户划转");
   ok("a transfer of 12.34 USDT to futures completes and shows in the ledger");
 
-  // 6. Deposit addresses: ETH on Sepolia (the platform's own wallet) and
-  // USDT on TRC20 (the custodian's, ADR-0011).
+  // 6. The deposit address: ETH on Sepolia, derived by the platform's own
+  // wallet. A custodian's address would come from UDUN, which may be the
+  // real gateway: custody.sh covers that path on the stand-in (ADR-0017).
   const depositAddress = async (query, pattern, what) => {
     await go(`/assets/deposit?${query}`);
     await page.waitForSelector('[data-testid="deposit-address"]', { visible: true, timeout: 20000 });
@@ -145,7 +146,6 @@ try {
     ok(`the deposit page gives ${what} (${address.slice(0, 8)}…)`);
   };
   await depositAddress("asset=ETH&network=ETH-SEPOLIA", "^0x[0-9a-fA-F]{40}$", "an ETH address on Sepolia");
-  await depositAddress("asset=USDT&network=TRON", "^T[1-9A-HJ-NP-Za-km-z]{33}$", "a TRC20 address from the custodian");
 
   // 7. The futures terminal: mark price and funding.
   await go("/futures/BTC-USDT-PERP");

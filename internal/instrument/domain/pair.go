@@ -97,6 +97,8 @@ func (p TradingPair) Validate(base, quote Asset) error {
 		return apperr.Invalid(fmt.Sprintf("pair %s: the symbol must name its base and quote assets", p.Symbol))
 	case p.BaseAsset == p.QuoteAsset:
 		return apperr.Invalid(fmt.Sprintf("pair %s: base and quote must differ", p.Symbol))
+	case base.Hidden || quote.Hidden:
+		return apperr.Invalid(fmt.Sprintf("pair %s: a hidden test asset has no pairs (ADR-0017)", p.Symbol))
 	case !base.TradingEnabled || !quote.TradingEnabled:
 		return apperr.Invalid(fmt.Sprintf("pair %s: both assets must be enabled for trading", p.Symbol))
 	case !p.TickSize.IsPositive() || !FitsScale(p.TickSize, quote.Decimals):

@@ -68,7 +68,7 @@ func (c *Client) all(ctx context.Context) ([]domain.Network, error) {
 				WithdrawEnabled: a.GetWithdrawEnabled() && n.GetWithdrawEnabled(), MinWithdraw: amounts[1], WithdrawFee: amounts[2],
 				MemoRequired: n.GetMemoRequired(), DisplayName: n.GetDisplayName(), AddressFormat: n.GetAddressFormat(),
 				ETAMinutes: n.GetEtaMinutes(), ExplorerTxURL: n.GetExplorerTxUrl(), ExplorerAddressURL: n.GetExplorerAddressUrl(),
-				Provider: n.GetProvider(), ProviderCoin: n.GetProviderCoin(),
+				Provider: n.GetProvider(), ProviderCoin: n.GetProviderCoin(), Hidden: a.GetHidden(),
 			})
 		}
 	}
