@@ -864,6 +864,29 @@ func TestCustodyFeesHeldForAPerson(t *testing.T) {
 		t.Fatalf("%v fees held", v)
 	}
 
+	// The console lists them, held ones alone, a page at a time, and
+	// decides through the service as the CLI does.
+	all, next, err := h.svc.CustodyFees(ctx, "", "", 2)
+	if err != nil || len(all) != 2 || next == "" {
+		t.Fatalf("a page of two: %+v %q %v", all, next, err)
+	}
+	rest, end, err := h.svc.CustodyFees(ctx, "", next, 2)
+	if err != nil || len(rest) != 1 || end != "" || rest[0].TxHash == all[0].TxHash || rest[0].TxHash == all[1].TxHash {
+		t.Fatalf("the rest: %+v %q %v", rest, end, err)
+	}
+	if heldNow, _, err := h.svc.CustodyFees(ctx, "held", "", 50); err != nil || len(heldNow) != 2 || heldNow[0].WithdrawalID == "" {
+		t.Fatalf("held: %+v %v", heldNow, err)
+	}
+	if _, _, err := h.svc.CustodyFees(ctx, "GONE", "", 50); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("an unknown status: %v", err)
+	}
+	if _, err := h.svc.DecideCustodyFee(ctx, FeeResolution{WithdrawalID: "not-a-withdrawal", Actor: "ops", Reason: "?!?"}); !apperr.Is(err, apperr.CodeNotFound) {
+		t.Fatalf("an unknown withdrawal: %v", err)
+	}
+	if _, err := h.svc.DecideCustodyFee(ctx, FeeResolution{WithdrawalID: second.ID, Actor: "ops", Reason: "booked already"}); !apperr.Is(err, apperr.CodeConflict) {
+		t.Fatalf("a fee that waits for no one: %v", err)
+	}
+
 	// The person books the first as reported and the third as they found
 	// it charged; booking one again finds nothing held.
 	resolve := func(r FeeResolution) (domain.ChainFee, error) {
@@ -886,7 +909,7 @@ func TestCustodyFeesHeldForAPerson(t *testing.T) {
 	if _, err := resolve(FeeResolution{WithdrawalID: first.ID, Book: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := resolve(FeeResolution{WithdrawalID: first.ID, Book: true}); !apperr.Is(err, apperr.CodeNotFound) {
+	if _, err := resolve(FeeResolution{WithdrawalID: first.ID, Book: true}); !apperr.Is(err, apperr.CodeConflict) {
 		t.Fatalf("nothing held any more: %v", err)
 	}
 	if h.audited("wallet.custody.fee.book") != 2 {
@@ -899,7 +922,7 @@ func TestCustodyFeesHeldForAPerson(t *testing.T) {
 	if v := h.gauge(t, "wallet_custody_fees_held"); v != 0 {
 		t.Fatalf("%v fees held", v)
 	}
-	if _, err := resolve(FeeResolution{WithdrawalID: first.ID}); !apperr.Is(err, apperr.CodeNotFound) {
+	if _, err := resolve(FeeResolution{WithdrawalID: first.ID}); !apperr.Is(err, apperr.CodeConflict) {
 		t.Fatalf("a booked fee written off: %v", err)
 	}
 
@@ -927,7 +950,7 @@ func TestCustodyFeesHeldForAPerson(t *testing.T) {
 	if f := h.store.fees["UDUN:w-5"]; f.Status != domain.FeeBookable || f.JournalID != "" {
 		t.Fatalf("waiting for GAS_SUPPLY %+v", f)
 	}
-	if _, err := resolve(FeeResolution{WithdrawalID: fifth.ID, Book: true}); !apperr.Is(err, apperr.CodeNotFound) {
+	if _, err := resolve(FeeResolution{WithdrawalID: fifth.ID, Book: true}); !apperr.Is(err, apperr.CodeConflict) {
 		t.Fatalf("a bookable fee is booked as it comes, not by a person: %v", err)
 	}
 	f, err := resolve(FeeResolution{WithdrawalID: fifth.ID})

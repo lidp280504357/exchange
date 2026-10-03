@@ -1,6 +1,7 @@
 package application
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -245,6 +246,29 @@ func (f memFees) Units(context.Context) ([]domain.FeeUnit, error) {
 		out = append(out, u)
 	}
 	return out, nil
+}
+
+func (f memFees) Page(_ context.Context, status, after string, limit int) ([]domain.CustodyFee, error) {
+	var out []domain.CustodyFee
+	for _, x := range f.m.fees {
+		w, ok := f.m.wds[x.Reference]
+		if x.Purpose != domain.FeeWithdrawal || !ok || w.Provider == "" || status != "" && x.Status != status {
+			continue
+		}
+		unit := ""
+		if u, ok := f.m.units[w.Provider+"|"+w.Asset+"|"+w.Network]; ok {
+			unit = u.Unit
+		}
+		out = append(out, domain.CustodyFee{ChainFee: x, WithdrawalID: x.Reference, Unit: unit})
+	}
+	slices.SortFunc(out, func(a, b domain.CustodyFee) int {
+		return cmp.Or(b.CreatedAt.Compare(a.CreatedAt), strings.Compare(b.TxHash, a.TxHash))
+	})
+	if after != "" {
+		i := slices.IndexFunc(out, func(x domain.CustodyFee) bool { return x.TxHash == after })
+		out = out[i+1:]
+	}
+	return out[:min(limit, len(out))], nil
 }
 
 type memFundings struct{ m *memStore }

@@ -91,6 +91,13 @@ exchangectl wallet custody-fee <提现ID> --write-off --reason "..."  # 不入�
 
 `--book` 的资产必须是平台在该托管方、这笔手续费的网络上持有的资产（提现资产本身，或同一网络上链的主币，如 ERC20 的网络 `ETH` 上的 ETH），数额不能超过资产精度；处理器下一轮入账。挂起的计数与错误日志在回调的事务提交之后才记，事务失败、托管方重发时不重复计。两种都记审计（`wallet.custody.fee.book`、`wallet.custody.fee.write_off`，含报的数额、入账的数额与挂起原因）。没挂起、只是在等 `GAS_SUPPLY` 的手续费（`CustodyFeesUnbooked`）也可以 `--write-off`，用于没有收入可以注资的时候；万一账本恰好在核销的同时入了账，以入账为准（状态回到 `BOOKABLE`，日志记一条），账本说了算。
 
+后台用的内部接口（2026-10-03，与命令行同一套判断与审计，`actor` 为管理员邮箱；网关不转发 `/internal`）：
+
+- `GET /internal/wallet/custody/fees?status=HELD|BOOKABLE|WRITTEN_OFF&cursor=&limit=`：托管方的提现手续费，最新的在前（`limit` 默认 50、最多 200；不写 `status` 即全部）。返回 `{"items": [...], "next_cursor": "<tx_hash>" | null}`，每项 `{"withdrawal_id", "tx_hash"（托管方与成交号，游标用它）, "asset", "network", "amount", "unit"（该网络上确认过的单位 SELF/MAIN/OUTSIDE，没人确认是 null）, "status", "hold_reason", "journal_id", "created_at", "booked_at", "written_off_at", "resolved_by", "resolution"}`。
+- `POST /internal/wallet/custody/fees/{withdrawal_id}/book`，`{"asset"?, "amount"?, "actor", "reason"}`：按报的入账，或按查到实际扣的资产与数额入账（`amount` 为十进制字符串）。
+- `POST /internal/wallet/custody/fees/{withdrawal_id}/write-off`，`{"actor", "reason"}`：核销。
+- 两个写接口都返回这笔手续费（同上的一项）；提现不存在或没有托管方的手续费 404，手续费不在等人处理（已入账、已核销、或照常等着入账却要按人工入账）409，参数不对 400。
+
 **`GAS_SUPPLY` 的钱从哪来**：托管模式下没有"平台转进热钱包"可以记（`wallet fund` 是自建钱包用的）；用户付的提现手续费（`FEE_REVENUE`）本来就在托管方的余额里，托管方的手续费就从这里出：`exchangectl ledger gas-supply --asset USDT --amount 20 --reason "..."` 把手续费收入挪到 `GAS_SUPPLY`（两边都不是钱包应有数，对账不变；不能超过 `FEE_REVENUE`；审计 `ledger.gas_supply`）。`GAS_SUPPLY` 不够时手续费等着（`wallet_custody_fees_unbooked`，对账算作未入账手续费），告警 `CustodyFeesUnbooked`。
 
 **回调**：先把原文（最多 16 KiB）、验签与时间检查结果记入 `custody_callbacks`，验签通过的同一（provider, tradeId, status）只记一行，托管方重试只加 `attempts`；再在一个事务里应用并记结果。验签失败、超出时间窗或格式不对的回调都计入 `wallet_custody_callbacks_rejected_total`，但每小时最多记 100 条、每条原文截到 2 KiB，免得伪造的回调灌满表（审查 B3）；后台看到的原文里 `sign` 打了码（审查 B7）：

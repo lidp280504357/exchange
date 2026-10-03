@@ -588,6 +588,35 @@ func TestCustodyStorage(t *testing.T) {
 	if list, err := read.Withdrawals().Unsettled(ctx, tron); err != nil || len(list) != 1 {
 		t.Fatalf("to settle %v %v", list, err)
 	}
+	// The console's page of the custodians' fees: the withdrawal's, with
+	// the unit a person confirmed for its network.
+	for _, fee := range []domain.ChainFee{ // inserted one after the other: page-2 is the newer
+		{TxHash: "UDUN:page-1", Network: tron, Asset: "USDT", Amount: decimal.NewFromInt(1), Purpose: domain.FeeWithdrawal, Reference: w.ID},
+		{
+			TxHash: "UDUN:page-2", Network: tron, Asset: "USDT", Amount: decimal.NewFromInt(1500), Purpose: domain.FeeWithdrawal, Reference: w.ID,
+			Status: domain.FeeHeld, HoldReason: "above 5 USDT",
+		},
+	} {
+		if err := read.ChainFees().Insert(ctx, fee); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := read.ChainFees().PutUnit(ctx, domain.FeeUnit{
+		Provider: domain.ProviderUdun, Asset: "USDT", Network: tron, Unit: domain.FeeUnitSelf,
+		ConfirmedBy: "ops", Reason: "tronscan", ConfirmedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := read.ChainFees().Page(ctx, "", "", 1)
+	if err != nil || len(page) != 1 || page[0].TxHash != "UDUN:page-2" || page[0].WithdrawalID != w.ID || page[0].Unit != domain.FeeUnitSelf {
+		t.Fatalf("the newest fee %+v %v", page, err)
+	}
+	if more, err := read.ChainFees().Page(ctx, "", "UDUN:page-2", 5); err != nil || len(more) != 1 || more[0].TxHash != "UDUN:page-1" {
+		t.Fatalf("after it %+v %v", more, err)
+	}
+	if held, err := read.ChainFees().Page(ctx, domain.FeeHeld, "", 5); err != nil || len(held) != 1 || held[0].HoldReason != "above 5 USDT" {
+		t.Fatalf("held %+v %v", held, err)
+	}
 
 	amount := decimal.NewFromInt(100)
 	cb := domain.Callback{

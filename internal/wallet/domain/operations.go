@@ -91,6 +91,15 @@ type ChainFee struct {
 	CreatedAt  time.Time
 }
 
+// CustodyFee is a custodian's fee for a withdrawal as the console lists
+// it: the fee, its withdrawal, and how the custodian counts its fee on the
+// withdrawal's network as a person confirmed it ("" when nobody did).
+type CustodyFee struct {
+	ChainFee
+	WithdrawalID string
+	Unit         string
+}
+
 // What becomes of a fee.
 const (
 	FeeBookable   = "BOOKABLE"

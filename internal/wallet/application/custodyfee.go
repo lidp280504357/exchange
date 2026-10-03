@@ -197,8 +197,14 @@ func ResolveCustodyFee(ctx context.Context, store ports.Store, custodied Custodi
 		i := slices.IndexFunc(fees, func(f domain.ChainFee) bool {
 			return f.Status == domain.FeeHeld || f.Status == domain.FeeBookable && f.JournalID == "" && !d.Book
 		})
-		if i < 0 {
-			return apperr.NotFound("no fee of withdrawal " + w.ID + " waits for a person")
+		switch {
+		case len(fees) == 0:
+			return apperr.NotFound("withdrawal " + w.ID + " has no custodian's fee")
+		case i < 0:
+			// Its fee is booked, written off, or booked as it comes: nothing
+			// waits for a person (the console's 409).
+			return apperr.New(apperr.KindConflict, apperr.CodeConflict, fmt.Sprintf("the fee of withdrawal %s waits for no one (%s)", w.ID,
+				fees[len(fees)-1].Status))
 		}
 		f := fees[i]
 		before := f

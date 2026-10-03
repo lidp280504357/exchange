@@ -29,6 +29,7 @@ func (h *Handler) adminRoutes(r chi.Router) {
 	r.Post("/internal/wallet/deposits/{id}/dismiss", h.adminDismissDeposit)
 	h.suspensionRoutes(r)
 	h.unmatchedRoutes(r)
+	h.feeRoutes(r)
 }
 
 // AddressBookJSON is a withdrawal address in its user's address book.
