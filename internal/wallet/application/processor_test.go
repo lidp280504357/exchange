@@ -248,18 +248,19 @@ func (f memFees) Units(context.Context) ([]domain.FeeUnit, error) {
 	return out, nil
 }
 
-func (f memFees) Page(_ context.Context, status, after string, limit int) ([]domain.CustodyFee, error) {
+func (f memFees) Page(_ context.Context, provider, status, after string, limit int) ([]domain.CustodyFee, error) {
 	var out []domain.CustodyFee
 	for _, x := range f.m.fees {
 		w, ok := f.m.wds[x.Reference]
-		if x.Purpose != domain.FeeWithdrawal || !ok || w.Provider == "" || status != "" && x.Status != status {
+		if x.Purpose != domain.FeeWithdrawal || !ok || w.Provider == "" || status != "" && x.Status != status ||
+			provider != "" && w.Provider != provider {
 			continue
 		}
 		unit := ""
 		if u, ok := f.m.units[w.Provider+"|"+w.Asset+"|"+w.Network]; ok {
 			unit = u.Unit
 		}
-		out = append(out, domain.CustodyFee{ChainFee: x, WithdrawalID: x.Reference, Unit: unit})
+		out = append(out, domain.CustodyFee{ChainFee: x, WithdrawalID: x.Reference, Provider: w.Provider, Unit: unit})
 	}
 	slices.SortFunc(out, func(a, b domain.CustodyFee) int {
 		return cmp.Or(b.CreatedAt.Compare(a.CreatedAt), strings.Compare(b.TxHash, a.TxHash))

@@ -902,18 +902,25 @@ func TestCustodyFeesHeldForAPerson(t *testing.T) {
 
 	// The console lists them, held ones alone, a page at a time, and
 	// decides through the service as the CLI does.
-	all, next, err := h.svc.CustodyFees(ctx, "", "", 2)
+	all, next, err := h.svc.CustodyFees(ctx, "", "", "", 2)
 	if err != nil || len(all) != 2 || next == "" {
 		t.Fatalf("a page of two: %+v %q %v", all, next, err)
 	}
-	rest, end, err := h.svc.CustodyFees(ctx, "", next, 2)
+	rest, end, err := h.svc.CustodyFees(ctx, "", "", next, 2)
 	if err != nil || len(rest) != 1 || end != "" || rest[0].TxHash == all[0].TxHash || rest[0].TxHash == all[1].TxHash {
 		t.Fatalf("the rest: %+v %q %v", rest, end, err)
 	}
-	if heldNow, _, err := h.svc.CustodyFees(ctx, "held", "", 50); err != nil || len(heldNow) != 2 || heldNow[0].WithdrawalID == "" {
+	if heldNow, _, err := h.svc.CustodyFees(ctx, "", "held", "", 50); err != nil || len(heldNow) != 2 || heldNow[0].WithdrawalID == "" {
 		t.Fatalf("held: %+v %v", heldNow, err)
 	}
-	if _, _, err := h.svc.CustodyFees(ctx, "GONE", "", 50); !apperr.Is(err, apperr.CodeInvalidArgument) {
+	// By custodian: the console shows one at a time.
+	if mine, _, err := h.svc.CustodyFees(ctx, "udun", "", "", 50); err != nil || len(mine) != 3 || mine[0].Provider != domain.ProviderUdun {
+		t.Fatalf("UDUN's fees: %+v %v", mine, err)
+	}
+	if theirs, _, err := h.svc.CustodyFees(ctx, domain.ProviderUdunMock, "", "", 50); err != nil || len(theirs) != 0 {
+		t.Fatalf("UDUNMOCK's fees: %+v %v", theirs, err)
+	}
+	if _, _, err := h.svc.CustodyFees(ctx, "", "GONE", "", 50); !apperr.Is(err, apperr.CodeInvalidArgument) {
 		t.Fatalf("an unknown status: %v", err)
 	}
 	if _, err := h.svc.DecideCustodyFee(ctx, FeeResolution{WithdrawalID: "not-a-withdrawal", Actor: "ops", Reason: "?!?"}); !apperr.Is(err, "WALLET_CUSTODY_FEE_NOT_FOUND") {

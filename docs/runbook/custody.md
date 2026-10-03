@@ -95,7 +95,7 @@ exchangectl wallet custody-fee <提现ID> --write-off --reason "..."  # 不入�
 
 后台用的内部接口（2026-10-03，与命令行同一套判断与审计，`actor` 为管理员邮箱；网关不转发 `/internal`）：
 
-- `GET /internal/wallet/custody/fees?status=HELD|BOOKABLE|WRITTEN_OFF&cursor=&limit=`：托管方的提现手续费，最新的在前（`limit` 默认 50，超过 200 按 200；不写 `status` 即全部；不认识的游标 400）。返回 `{"items": [...], "next_cursor": "<tx_hash>" | null}`，每项 `{"withdrawal_id", "provider"（提现的托管方 UDUN/UDUNMOCK）, "tx_hash"（托管方与成交号，游标用它）, "asset", "network", "amount", "unit"（该网络上确认过的单位 SELF/MAIN/OUTSIDE，没人确认是 null）, "status", "hold_reason", "journal_id", "created_at", "booked_at", "written_off_at", "resolved_by", "resolution"}`。
+- `GET /internal/wallet/custody/fees?provider=UDUN|UDUNMOCK&status=HELD|BOOKABLE|WRITTEN_OFF&cursor=&limit=`：托管方的提现手续费，最新的在前（`limit` 默认 50，超过 200 按 200；不写 `provider`、`status` 即全部；不认识的游标 400）。返回 `{"items": [...], "next_cursor": "<tx_hash>" | null}`，每项 `{"withdrawal_id", "provider"（提现的托管方 UDUN/UDUNMOCK）, "tx_hash"（托管方与成交号，游标用它）, "asset", "network", "amount", "unit"（该网络上确认过的单位 SELF/MAIN/OUTSIDE，没人确认是 null）, "status", "hold_reason", "journal_id", "created_at", "booked_at", "written_off_at", "resolved_by", "resolution"}`。
 - `POST /internal/wallet/custody/fees/{withdrawal_id}/book`，`{"asset"?, "amount"?, "actor", "reason"}`：按报的入账，或按查到实际扣的资产与数额入账（`amount` 为十进制字符串）。
 - `POST /internal/wallet/custody/fees/{withdrawal_id}/write-off`，`{"actor", "reason"}`：核销。
 - 两个写接口都返回这笔手续费（同上的一项）；提现不存在或没有托管方的手续费 404 `WALLET_CUSTODY_FEE_NOT_FOUND`，手续费不在等人处理（已入账、已核销、或照常等着入账却要按人工入账）409 `WALLET_CUSTODY_FEE_NOT_HELD`（详情 `status`），刚被另一个决定抢先 409 `WALLET_CUSTODY_FEE_CHANGED`，参数不对 400（审查 AL）。

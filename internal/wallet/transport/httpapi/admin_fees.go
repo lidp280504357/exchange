@@ -63,13 +63,13 @@ func CustodyFeeJSONOf(f domain.CustodyFee) CustodyFeeJSON {
 	return j
 }
 
-// adminCustodyFees pages through the fees, newest first: status (HELD,
-// BOOKABLE, WRITTEN_OFF; any when absent), cursor, limit (at most 200,
-// default 50).
+// adminCustodyFees pages through the fees, newest first: provider (UDUN,
+// UDUNMOCK; any when absent), status (HELD, BOOKABLE, WRITTEN_OFF; any when
+// absent), cursor, limit (at most 200, default 50).
 func (h *Handler) adminCustodyFees(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
-	list, next, err := h.Svc.CustodyFees(r.Context(), q.Get("status"), q.Get("cursor"), limit)
+	list, next, err := h.Svc.CustodyFees(r.Context(), q.Get("provider"), q.Get("status"), q.Get("cursor"), limit)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

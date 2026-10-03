@@ -120,7 +120,7 @@ func TestWalletCommandsQueue(t *testing.T) {
 	if err := walletWith(context.Background(), db, idb, []string{
 		"custody-fee", "0190a0b0-0000-7000-8000-000000000000", "--write-off",
 		"--reason", "nothing",
-	}, &buf); err == nil || !strings.Contains(err.Error(), "no such withdrawal") {
+	}, &buf); err == nil || !strings.Contains(err.Error(), "WALLET_CUSTODY_FEE_NOT_FOUND") {
 		t.Fatalf("no such withdrawal: %v", err)
 	}
 }

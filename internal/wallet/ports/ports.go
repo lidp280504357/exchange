@@ -226,10 +226,10 @@ type ChainFeeRepo interface {
 	PutUnit(ctx context.Context, u domain.FeeUnit) error
 	// Units lists the confirmed fee units.
 	Units(ctx context.Context) ([]domain.FeeUnit, error)
-	// Page lists the custodians' withdrawal fees, newest first, of a status
-	// ("" any), after the fee whose transaction is after ("" from the
-	// newest), at most limit.
-	Page(ctx context.Context, status, after string, limit int) ([]domain.CustodyFee, error)
+	// Page lists the custodians' withdrawal fees, newest first, of a
+	// custodian and a status ("" any), after the fee whose transaction is
+	// after ("" from the newest), at most limit.
+	Page(ctx context.Context, provider, status, after string, limit int) ([]domain.CustodyFee, error)
 }
 
 // SuspensionRepo stores the assets whose withdrawals are suspended.

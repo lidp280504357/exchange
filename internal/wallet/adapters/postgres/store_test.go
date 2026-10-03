@@ -608,14 +608,14 @@ func TestCustodyStorage(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	page, err := read.ChainFees().Page(ctx, "", "", 1)
+	page, err := read.ChainFees().Page(ctx, "", "", "", 1)
 	if err != nil || len(page) != 1 || page[0].TxHash != "UDUN:page-2" || page[0].WithdrawalID != w.ID || page[0].Unit != domain.FeeUnitSelf {
 		t.Fatalf("the newest fee %+v %v", page, err)
 	}
-	if more, err := read.ChainFees().Page(ctx, "", "UDUN:page-2", 5); err != nil || len(more) != 1 || more[0].TxHash != "UDUN:page-1" {
+	if more, err := read.ChainFees().Page(ctx, "", "", "UDUN:page-2", 5); err != nil || len(more) != 1 || more[0].TxHash != "UDUN:page-1" {
 		t.Fatalf("after it %+v %v", more, err)
 	}
-	if held, err := read.ChainFees().Page(ctx, domain.FeeHeld, "", 5); err != nil || len(held) != 1 || held[0].HoldReason != "above 5 USDT" {
+	if held, err := read.ChainFees().Page(ctx, "", domain.FeeHeld, "", 5); err != nil || len(held) != 1 || held[0].HoldReason != "above 5 USDT" {
 		t.Fatalf("held %+v %v", held, err)
 	}
 	// With the withdrawal's custodian; a cursor no fee has is refused
@@ -623,7 +623,10 @@ func TestCustodyStorage(t *testing.T) {
 	if page[0].Provider != w.Provider {
 		t.Fatalf("the fee's custodian %q, want %q", page[0].Provider, w.Provider)
 	}
-	if _, err := read.ChainFees().Page(ctx, "", "UDUN:no-such-fee", 5); !apperr.Is(err, apperr.CodeInvalidArgument) {
+	if other, err := read.ChainFees().Page(ctx, domain.ProviderUdunMock, "", "", 5); err != nil || len(other) != 0 {
+		t.Fatalf("another custodian's fees %+v %v", other, err)
+	}
+	if _, err := read.ChainFees().Page(ctx, "", "", "UDUN:no-such-fee", 5); !apperr.Is(err, apperr.CodeInvalidArgument) {
 		t.Fatalf("an unknown cursor: %v", err)
 	}
 
@@ -829,6 +832,7 @@ func TestCustodySwitchStorage(t *testing.T) {
 	// deposit does not change hands.
 	assigned := nobody
 	assigned.UserID, assigned.Status, assigned.Resolution = alice, domain.StatusCredited, domain.ResolutionCredited
+	assigned.JournalID, assigned.ReleaseJournalID = uuid.NewString(), uuid.NewString()
 	if err := store.Tx(ctx, func(r ports.Repos) error { return r.Deposits().Update(ctx, assigned) }); err != nil {
 		t.Fatal(err)
 	}

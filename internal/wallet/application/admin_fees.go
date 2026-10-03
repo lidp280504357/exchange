@@ -12,12 +12,13 @@ import (
 
 // CustodyFees pages through the custodians' withdrawal fees for the
 // console, newest first, as exchangectl wallet custody-fees lists the held
-// ones: of a status (HELD, BOOKABLE, WRITTEN_OFF; "" any), after a fee
+// ones: of a custodian (UDUN, UDUNMOCK; "" any) and a status (HELD,
+// BOOKABLE, WRITTEN_OFF; "" any), after a fee
 // (the cursor is its transaction; an unknown one is refused), at most
 // limit (default 50, at most 200). It returns the cursor of the next page,
 // "" at the end.
-func (s *Service) CustodyFees(ctx context.Context, status, after string, limit int) ([]domain.CustodyFee, string, error) {
-	status = strings.ToUpper(strings.TrimSpace(status))
+func (s *Service) CustodyFees(ctx context.Context, provider, status, after string, limit int) ([]domain.CustodyFee, string, error) {
+	provider, status = strings.ToUpper(strings.TrimSpace(provider)), strings.ToUpper(strings.TrimSpace(status))
 	switch status {
 	case "", domain.FeeHeld, domain.FeeBookable, domain.FeeWrittenOff:
 	default:
@@ -29,7 +30,7 @@ func (s *Service) CustodyFees(ctx context.Context, status, after string, limit i
 	case limit > 200:
 		limit = 200
 	}
-	list, err := s.Store.Read().ChainFees().Page(ctx, status, after, limit+1)
+	list, err := s.Store.Read().ChainFees().Page(ctx, provider, status, after, limit+1)
 	if err != nil {
 		return nil, "", err
 	}
