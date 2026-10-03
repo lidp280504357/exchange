@@ -49,6 +49,10 @@ func TestOneAdministratorAdjustsAloneWithinTheLimits(t *testing.T) {
 	if got := h.actions(); !slices.Contains(got, "admin.ledger.adjustment_requested") || !slices.Contains(got, "admin.ledger.adjustment_executed") {
 		t.Fatalf("audit %v", got)
 	}
+	if got := h.store.audits[len(h.store.audits)-1]; got.GetAction() != "admin.ledger.adjustment_executed" ||
+		!strings.Contains(got.GetDetails(), `"journal_id":"journal-1"`) {
+		t.Fatalf("the journal on its own in the audit: %v", got)
+	}
 	// A debit is worth its absolute value; BTC at its USDT pair's last price.
 	if b := h.adjust(t, boss, "BTC", decimal.RequireFromString("-1")); b.Status != domain.ApprovalExecuted || b.ValueUSDT.String() != "60000" {
 		t.Fatalf("a BTC debit: %+v", b)

@@ -106,4 +106,19 @@ func TestSettings(t *testing.T) {
 	if s.Validate() == nil {
 		t.Fatal("a zero limit")
 	}
+	// At most ten times the defaults: one PUT does not lift the guard.
+	s = DefaultSettings()
+	s.SingleMax, s.DailyMax, s.WithdrawalMax = decimal.NewFromInt(1_000_000), decimal.NewFromInt(5_000_000), decimal.NewFromInt(1_000_000)
+	if err := s.Validate(); err != nil {
+		t.Fatalf("ten times the defaults: %v", err)
+	}
+	s.DailyMax = decimal.RequireFromString("5000000.01")
+	if s.Validate() == nil {
+		t.Fatal("above ten times the default")
+	}
+	s = DefaultSettings()
+	s.SingleMax = decimal.RequireFromString("1e30")
+	if s.Validate() == nil {
+		t.Fatal("1e30")
+	}
 }

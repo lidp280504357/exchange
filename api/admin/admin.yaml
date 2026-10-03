@@ -646,7 +646,9 @@ paths:
         two-person approval (switches the flag
         admin.two_person_approval, audited by the flags; the other
         instances follow within 5 seconds). The daily limit must cover the
-        single-operation one. Needs settings.write (ADMIN).
+        single-operation one, and each limit is at most ten times its
+        default (single 1,000,000, 24 hours 5,000,000, withdrawal
+        1,000,000 USDT). Needs settings.write (ADMIN).
       tags: [session]
       security:
         - session: []

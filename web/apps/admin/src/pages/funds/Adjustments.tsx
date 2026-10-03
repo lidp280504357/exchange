@@ -1,6 +1,6 @@
 import { ApiError, dec } from "@exchange/core";
 import { adminApi, adminData, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
-import { Badge, Button, Input, Segmented, Skeleton } from "@exchange/ui";
+import { Badge, Button, Input, Segmented, Select, Skeleton } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Search } from "lucide-react";
 import { useState } from "react";
@@ -14,6 +14,7 @@ import { FundAction, type Approval } from "../../kit/funds";
 import { stagger } from "../../kit/motion";
 import { Card, Page } from "../../kit/Page";
 import { useConsoleSettings } from "../../live";
+import { useInstrumentConfig } from "../instruments/config";
 import { ApprovalsTable, useApprovals } from "./approvalsTable";
 import { ModeBanner } from "./ModeBanner";
 
@@ -59,6 +60,10 @@ export function AdjustForm({ userId, onUser, onDone }: { userId: string; onUser?
   const [direction, setDirection] = useState<"credit" | "debit">("credit");
   const [account, setAccount] = useState<Account>("SPOT");
   const [asset, setAsset] = useState("USDT");
+  // The assets the reference data knows: a misspelt one cannot become a
+  // FAILED request (the C1 review). Typed in only while they cannot be read.
+  const config = useInstrumentConfig();
+  const assets = config.data?.assets.map((x) => x.asset_code).sort() ?? [];
   const [amount, setAmount] = useState("");
   const [reference, setReference] = useState("");
   const user = useQuery({
@@ -130,7 +135,16 @@ export function AdjustForm({ userId, onUser, onDone }: { userId: string; onUser?
         </label>
         <label className="flex flex-col gap-1.5 text-sm text-fg-2">
           {t("admin.common.asset")}
-          <Input value={asset} onValueChange={(v) => setAsset(v.toUpperCase())} placeholder="USDT" aria-label={t("admin.common.asset")} />
+          {config.isError ? (
+            <Input value={asset} onValueChange={(v) => setAsset(v.toUpperCase())} placeholder="USDT" aria-label={t("admin.common.asset")} />
+          ) : (
+            <Select
+              value={asset}
+              onValueChange={setAsset}
+              options={(assets.length > 0 ? assets : ["USDT"]).map((code) => ({ value: code, label: code }))}
+              aria-label={t("admin.common.asset")}
+            />
+          )}
         </label>
         <label className="flex flex-col gap-1.5 text-sm text-fg-2">
           {t("admin.common.amount")}
@@ -168,7 +182,9 @@ export function AdjustForm({ userId, onUser, onDone }: { userId: string; onUser?
             <Num value={signed} unit={asset.trim().toUpperCase()} signed />
           </span>
         }
-        confirmWord={lastFour(userId)}
+        // A debit is confirmed by typing its amount (design §2), a credit by
+        // the user ID's last four.
+        confirmWord={direction === "debit" ? a : lastFour(userId)}
         run={async (reason, key) =>
           adminData(
             await adminApi.POST("/admin/v1/users/{id}/adjustments", {

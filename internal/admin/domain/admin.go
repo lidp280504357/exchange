@@ -418,12 +418,21 @@ func DefaultSettings() Settings {
 	}
 }
 
-// Validate checks the limits: positive, and a day's total no smaller than
-// one operation; and the delay of trading parameters' changes.
+// maxSettingsFactor bounds each limit at ten times its default: one PUT
+// must not lift the guard altogether (the C1 review).
+const maxSettingsFactor = 10
+
+// Validate checks the limits: positive, at most ten times their defaults,
+// and a day's total no smaller than one operation; and the delay of
+// trading parameters' changes.
 func (s Settings) Validate() error {
-	for _, v := range []decimal.Decimal{s.SingleMax, s.DailyMax, s.WithdrawalMax} {
-		if !v.IsPositive() {
+	def, factor := DefaultSettings(), decimal.NewFromInt(maxSettingsFactor)
+	for _, l := range []struct{ v, def decimal.Decimal }{{s.SingleMax, def.SingleMax}, {s.DailyMax, def.DailyMax}, {s.WithdrawalMax, def.WithdrawalMax}} {
+		if !l.v.IsPositive() {
 			return apperr.Invalid("the limits must be positive")
+		}
+		if l.v.GreaterThan(l.def.Mul(factor)) {
+			return apperr.Invalid("a limit is at most ten times its default (single 1,000,000, 24 hours 5,000,000, withdrawal 1,000,000 USDT)")
 		}
 	}
 	if s.DailyMax.LessThan(s.SingleMax) {

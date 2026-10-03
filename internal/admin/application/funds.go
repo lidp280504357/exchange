@@ -464,8 +464,10 @@ func fundDetails(a domain.Approval) string {
 	case domain.KindSimMint:
 		account = fmt.Sprintf(`"role":%q,"bots":%s,`, a.Payload["role"], a.Payload["bots"])
 	}
-	return fmt.Sprintf(`{"approval_id":%q,%s"asset":%q,"amount":%q,"mode":%q,"escalation":%q,"value_usdt":%s,"status":%q,"result":%q}`,
-		a.ID, account, a.Payload["asset"], a.Payload["amount"], a.Mode, a.Escalation, value, a.Status, a.Result)
+	// The journal on its own (the C1 review): the balances before and
+	// after are the ledger journal's.
+	return fmt.Sprintf(`{"approval_id":%q,%s"asset":%q,"amount":%q,"mode":%q,"escalation":%q,"value_usdt":%s,"status":%q,"result":%q,"journal_id":%q}`,
+		a.ID, account, a.Payload["asset"], a.Payload["amount"], a.Mode, a.Escalation, value, a.Status, a.Result, a.JournalID)
 }
 
 // priceMaxAge is how fresh a price values an operation against the

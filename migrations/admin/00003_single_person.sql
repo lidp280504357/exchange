@@ -31,6 +31,10 @@ CREATE TABLE settings (
 );
 
 -- +goose Down
+-- Loses data: every single-person operation (and every request its
+-- requester withdrew) is deleted, since the old constraint forbids a
+-- request decided by its requester; their audit events stay. approvals_check
+-- is the name Postgres gave the unnamed constraint of 00001 (the C1 review).
 DROP TABLE settings;
 DROP INDEX approvals_single_idx;
 DELETE FROM approvals WHERE decided_by = requested_by;
