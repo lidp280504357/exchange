@@ -102,8 +102,10 @@ type Sim struct {
 	events    []*domain.Event // scheduled and running
 	movedAt   time.Time       // when an event last moved the price
 	spikedAt  time.Time       // when a spike last ran
-	// targetAtRisk is whether the running target was at risk last round.
+	// targetAtRisk is whether the running target was at risk last round;
+	// breath counts its minutes its way (breathe).
 	targetAtRisk bool
+	breath       breath
 	executeAt    time.Time // the executors' next turn
 	quietAt      time.Time // a taker's last order in a quiet market (quietTake)
 	samples      []Sample
@@ -376,6 +378,7 @@ func (s *Sim) Round(ctx context.Context) {
 	s.m.running.Set(1)
 	s.refreshRefs(ctx, now)
 	s.startDue(ctx, now)
+	s.breathe(now)
 	sh, ended := domain.ShapeOf(s.runningEvents(), now, s.model.State.P, s.params.MaxMinuteMove)
 	p, guard := s.model.Step(now, s.btc, s.eth, sh)
 	s.finish(ctx, now, ended, p)

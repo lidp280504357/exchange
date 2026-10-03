@@ -11,7 +11,7 @@
 # target and another brings it back (A3), and a jump of 12%, beyond the
 # price band, is reached by the quotes walking the band. Threshold
 # targets and spikes (A6): a target too fast for its window is refused
-# with the shortest one; +2% in eight minutes is HIT, a quarter of its 1m
+# with the shortest one; +3% in twelve minutes is HIT, a quarter of its 1m
 # candles at least against it, no jump nor a spike in its closing window
 # meanwhile; -2% in three minutes is HIT; a spike of -4% reaches its tip
 # and comes back to the plan within half a percent. With the bots on
@@ -19,7 +19,7 @@
 # an operator's jump 4% down liquidates a 50x long (A4). With
 # market.flat_minutes on, both have a candles_1m row in ClickHouse for
 # each of the ten minutes before the last two (flat when no trade). The
-# moves take about 45% of one operator's 50% an hour: with events in the
+# moves take about 47% of one operator's 50% an hour: with events in the
 # hour before, they are skipped. Skipped while ASTRA-USDT is not
 # trading or the bots are off (scripts/ops/astra.sh seed, open, on,
 # events-on, perp-open, perp-on).
@@ -157,8 +157,8 @@ else
   [[ $SIM_STATUS == 403 && $(jq -r .code <<<"$SIM_BODY") == SIM_EVENT_NEEDS_APPROVAL ]] ||
     { echo "FAIL a jump of 35% alone: HTTP $SIM_STATUS $SIM_BODY" >&2; exit 1; }
   echo "ok   a jump of 35% needs a second operator (403 SIM_EVENT_NEEDS_APPROVAL)"
-  # The moves below (2% and back, 12% and back, targets of 2% and back, a
-  # spike of 4%, 4% and back) take about 45% of the 50% one operator may
+  # The moves below (2% and back, 12% and back, targets of 3% and 2%, a
+  # spike of 4%, 4% and back) take about 47% of the 50% one operator may
   # move the price in any hour, counted with every event and settings
   # change within an hour of now.
   RECENT=$(pg "SELECT (SELECT count(*) FROM marketsim.events WHERE status <> 'CANCELED' AND type IN ('JUMP', 'TARGET', 'SPIKE', 'TREND', 'VOLATILITY') AND starts_at BETWEEN now() - interval '1 hour' AND now() + interval '1 hour') + (SELECT count(*) FROM marketsim.param_changes WHERE at > now() - interval '1 hour' AND (move <> 0 OR volume <> 0))")
@@ -233,12 +233,12 @@ if [[ $MOVES == t ]]; then
     400 SIM_TARGET_INFEASIBLE "+20% in two minutes"
   [[ $(jq -r .details.min_duration_seconds <<<"$SIM_BODY") -ge 600 ]] || { echo "FAIL the shortest window: $SIM_BODY" >&2; exit 1; }
   echo "ok   the shortest window given: $(jq -r .details.min_duration_seconds <<<"$SIM_BODY") s"
-  LEVEL=$(jq -rn --argjson p "$P" '$p * 1.02 * 10000 | ceil / 10000')
-  solo "{\"type\":\"TARGET\",\"direction\":\"ABOVE\",\"price\":\"$LEVEL\",\"duration_seconds\":480,\"actor\":\"e2e-ops\",\"reason\":\"e2e: +2% in eight minutes\"}" "a target of $LEVEL"
+  LEVEL=$(jq -rn --argjson p "$P" '$p * 1.03 * 10000 | ceil / 10000')
+  solo "{\"type\":\"TARGET\",\"direction\":\"ABOVE\",\"price\":\"$LEVEL\",\"duration_seconds\":720,\"actor\":\"e2e-ops\",\"reason\":\"e2e: +3% in twelve minutes\"}" "a target of $LEVEL"
   TID=$(jq -r .id <<<"$SIM_BODY")
   TSTART=$(jq -r .starts_at <<<"$SIM_BODY")
   TCLOSE=$(jq -r .closing_at <<<"$SIM_BODY")
-  echo "ok   a target above $LEVEL in eight minutes from $P (closing in at $TCLOSE)"
+  echo "ok   a target above $LEVEL in twelve minutes from $P (closing in at $TCLOSE)"
   refused '{"type":"JUMP","size":0.01,"actor":"e2e-ops","reason":"e2e: a jump over a target"}' 409 SIM_TARGET_RUNNING "a jump while it runs"
   refused "{\"type\":\"SPIKE\",\"size\":0.01,\"starts_at\":\"$(jq -rn --arg t "$TCLOSE" '$t | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601 + 20 | todateiso8601')\",\"actor\":\"e2e-ops\",\"reason\":\"e2e: a spike while it closes in\"}" \
     409 SIM_SPIKE_IN_CLOSING "a spike in its closing window"
@@ -247,12 +247,12 @@ if [[ $MOVES == t ]]; then
   CROSSED=$(event_field "$TID" crossed_at)
   # Both ways (§8.8): of its 1m candles from its first whole minute to
   # its crossing, a quarter at least down.
-  call GET "/v1/market/$SYMBOL/candles?interval=1m&limit=15" ""
+  call GET "/v1/market/$SYMBOL/candles?interval=1m&limit=20" ""
   expect 200 - "its 1m candles"
   WAYS=$(jq -r --arg from "$TSTART" --arg to "$CROSSED" '[.candles[] | select(.open_time > $from and .open_time < $to)]
     | "\(length) \(map(select((.close | tonumber) < (.open | tonumber))) | length)"' <<<"$BODY")
   read -r N DOWNS <<<"$WAYS"
-  (( N >= 4 && DOWNS * 4 >= N )) || { echo "FAIL $DOWNS of $N candles against the target" >&2; exit 1; }
+  (( N >= 8 && DOWNS * 4 >= N )) || { echo "FAIL $DOWNS of $N candles against the target" >&2; exit 1; }
   echo "ok   crossed at $CROSSED: $DOWNS of its $N whole 1m candles went against it"
   P=$(target_now)
   LOW=$(jq -rn --argjson p "$P" '$p / 1.02 * 10000 | floor / 10000')

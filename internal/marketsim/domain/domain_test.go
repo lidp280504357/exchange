@@ -328,27 +328,26 @@ func TestEventShapes(t *testing.T) {
 		t.Fatalf("half way: %v %v", *sh.LogE, ended)
 	}
 	// A threshold target of 1.05 in 20 minutes from 1 (§3): the way spread
-	// over the minutes left, a third of the minute guard at most, in pairs
-	// of UTC minutes, one against it and one three times it; the last two
-	// minutes close in, straight, the guard's whole minute then; at the end
+	// over the minutes left, a third of the minute guard at most, the noise
+	// 2.5 times the pace (less behind its plan, half the guard at most); in
+	// a breather minute the pace against it, the model's noise alone; the
+	// last two minutes close in, the guard's whole minute then; at the end
 	// of the window, not crossed, a last push; it never ends here.
 	target := started(EventTarget, "1")
-	target.ID = "target-1"
 	target.Price, target.Duration, target.Direction, target.Then = d("1.05"), 20*time.Minute, Above, ThenFollow
 	way := math.Log(1.05) / 20
 	sh, ended = ShapeOf([]*Event{target}, t0, 1, 0.03)
-	if (math.Abs(sh.Guide-3*way) > 1e-12 && math.Abs(sh.Guide+way) > 1e-12) || sh.Closing || sh.Moving || len(ended) != 0 {
+	if math.Abs(sh.Guide-way) > 1e-12 || math.Abs(sh.Noise-way/0.4) > 1e-12 || sh.Closing || sh.Moving || len(ended) != 0 {
 		t.Fatalf("the guide at the start: %+v %v", sh, ended)
 	}
-	for m := 0; m < 16; m += 2 { // t0 is at an even minute
-		a, _ := ShapeOf([]*Event{target}, t0.Add(time.Duration(m)*time.Minute+30*time.Second), 1, 0.03)
-		b, _ := ShapeOf([]*Event{target}, t0.Add(time.Duration(m+1)*time.Minute+30*time.Second), 1, 0.03)
-		if (a.Guide < 0) == (b.Guide < 0) {
-			t.Fatalf("minutes %d and %d: %v %v", m, m+1, a.Guide, b.Guide)
-		}
+	target.Breather = t0.Add(time.Minute).Unix() / 60
+	if sh, _ = ShapeOf([]*Event{target}, t0.Add(90*time.Second), 1, 0.03); math.Abs(sh.Guide+math.Log(1.05)/18.5) > 1e-12 || sh.Noise != 0 {
+		t.Fatalf("a breather: %+v", sh)
 	}
-	if sh, _ = ShapeOf([]*Event{target}, t0.Add(10*time.Minute), 0.9, 0.03); sh.Guide != 0.03 && sh.Guide != -0.01 {
-		t.Fatalf("far off, a third of the guard: %v", sh.Guide)
+	planned, behind := math.Log(1.05)/20, math.Log(1.05/0.9)/10
+	if sh, _ = ShapeOf([]*Event{target}, t0.Add(10*time.Minute), 0.9, 0.03); sh.Guide != 0.01 ||
+		math.Abs(sh.Noise-planned/0.4*planned/behind) > 1e-12 {
+		t.Fatalf("far behind: a third of the guard, little noise: %+v", sh)
 	}
 	if sh, _ = ShapeOf([]*Event{target}, t0.Add(19*time.Minute), 1.04, 0.03); !sh.Closing || math.Abs(sh.Guide-(math.Log(1.05/1.04)+0.001)*2) > 1e-12 {
 		t.Fatalf("closing in, across within half the minute left: %+v", sh)

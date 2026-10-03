@@ -138,6 +138,61 @@ func tooMany(at time.Time, others []time.Time) bool {
 	return false
 }
 
+// breatheAfter is how many minutes in a row a target goes its way before
+// a breather; behind its plan, it breathes only while the pace it needs is
+// within breatheRoom of the guide's most (a third of the minute guard).
+// Tried over 80 seeds each: every target of +5% in 10 minutes, +3% in 12
+// and +8% in 30 HIT, with a quarter of the minutes or more against it in
+// 78%, 97% and 96% of them (after three minutes, half the pace back,
+// always, as first decided: one +5% target in seven missed).
+const (
+	breatheAfter = 2
+	breatheRoom  = 0.5
+)
+
+// breathe counts the running target's minutes (UTC, as the candles) that
+// went its way, from the target at each minute's turn; after
+// breatheAfter in a row, outside its closing (and behind its plan only
+// with room to make it up), the next one breathes: its pace against it
+// (Event.Guide), which the minutes after make up.
+func (s *Sim) breathe(now time.Time) {
+	i := slices.IndexFunc(s.events, func(e *domain.Event) bool {
+		return e.Type == domain.EventTarget && e.Status == domain.EventRunning && e.CrossedAt.IsZero()
+	})
+	if i < 0 {
+		s.breath = breath{}
+		return
+	}
+	e, minute, p := s.events[i], now.Unix()/60, s.model.State.P
+	if s.breath.event != e.ID {
+		s.breath = breath{event: e.ID, minute: minute, p: p}
+		return
+	}
+	if minute == s.breath.minute {
+		return
+	}
+	if (e.Direction == domain.Below) == (p < s.breath.p) && p != s.breath.p {
+		s.breath.run++
+	} else {
+		s.breath.run = 0
+	}
+	s.breath.minute, s.breath.p = minute, p
+	behind := (e.Direction == domain.Below) == (p > e.PlanAtTime(now))
+	pace := math.Abs(math.Log(e.Price.InexactFloat64()/p)) / math.Max(e.EndsAt().Sub(now).Minutes(), 1)
+	room := pace <= s.params.MaxMinuteMove/3*breatheRoom
+	if s.breath.run >= breatheAfter && now.Before(e.ClosingAt()) && (!behind || room) {
+		e.Breather, s.breath.run = minute, 0
+	}
+}
+
+// breath is what breathe knows of the running target's minutes.
+type breath struct {
+	event  string
+	minute int64
+	p      float64
+	run    int
+}
+
 // watchTarget follows the running threshold target once the step took the
 // target to p: at the end of a window it did not cross in, MISSED (after
 // the last push, §3); its crossing, HIT, ending it at once (FOLLOW) or

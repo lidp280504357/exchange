@@ -3,7 +3,6 @@ package domain
 import (
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"math"
 	"time"
 
@@ -131,6 +130,10 @@ type Event struct {
 	// A target's crossing of its level and how it ended.
 	CrossedAt time.Time
 	Result    string
+	// Breather is the UTC minute (Unix seconds / 60) a running target
+	// breathes in: against its way (Guide), after three minutes its way.
+	// Kept in memory only.
+	Breather int64
 }
 
 // Start is when the event started, or is to start.
@@ -386,57 +389,82 @@ func (e *Event) Infer(p float64) {
 }
 
 // Guide is a target's pull at now on the price p (§3), a logarithm a
-// minute: before its crossing, the way to the level spread over the
-// minutes left, at most a third of the minute guard maxMinute, in pairs of
-// minutes (UTC, as the candles), one of each pair against the way (minus
-// it) and the other three times it: the way's pace on average, and a 1m
-// candle in two against the target, which the noise alone (σ a day, 0.05%
-// a minute) would not give (§8.8: a quarter at least); while it closes in,
-// the way a little past the level within half the time left, at up to the
-// whole minute guard, the noise a quarter; at the end
-// of a window it did not cross in, a last push of the minute guard's size
-// at most; after its crossing, held, a third of the minute guard back
-// while the price is back past the level.
-func (e Event) Guide(now time.Time, p, maxMinute float64) (guide float64, closing bool, push float64) {
+// minute, and the noise the minute gets at least (a standard deviation a
+// minute): before its crossing, the way to the level spread over the
+// minutes left (its pace), at most a third of the minute guard maxMinute,
+// with noise of 2.5 times the pace (at most the plan's pace from its start,
+// less behind it, at most half the guard), so that about a third of the
+// minutes go against it (coordinator 2026-10-04 06:20); in a breather
+// minute (the application's, Breather) its pace against it with the
+// model's noise alone: a minute against it for sure, which the minutes
+// after make up. While it closes in, the way a little
+// past the level within half the time left, at up to the whole minute
+// guard, the noise a quarter of the model's; at the end of a window it did
+// not cross in, a last push of the minute guard's size at most; after its
+// crossing, held, a third of the minute guard back while the price is
+// back past the level.
+func (e Event) Guide(now time.Time, p, maxMinute float64) (guide float64, closing bool, push, noise float64) {
 	l := e.Price.InexactFloat64()
 	if p <= 0 || l <= 0 || maxMinute <= 0 {
-		return 0, false, 0
+		return 0, false, 0, 0
 	}
 	g, c := math.Log(l/p), maxMinute/3
 	switch {
 	case !e.CrossedAt.IsZero():
 		if e.Then == ThenHold && now.Before(e.HoldUntil()) && !e.Crossed(p) {
-			return math.Copysign(c, g), false, 0
+			return math.Copysign(c, g), false, 0, 0
 		}
-		return 0, false, 0
+		return 0, false, 0, 0
 	case !now.Before(e.EndsAt()):
-		return 0, false, clamp(g, maxMinute)
+		return 0, false, clamp(g, maxMinute), 0
 	case !now.Before(e.ClosingAt()):
 		// Aimed a little past the level within half the time left (a way
 		// that would arrive just at the end crosses or not as the noise
 		// says): across before the end.
 		over := math.Copysign(closingOvershoot, g)
-		return clamp((g+over)/math.Max(e.EndsAt().Sub(now).Minutes()/2, 1.0/60), maxMinute), true, 0
+		return clamp((g+over)/math.Max(e.EndsAt().Sub(now).Minutes()/2, 1.0/60), maxMinute), true, 0, 0
 	}
-	way := clamp(g/math.Max(e.EndsAt().Sub(now).Minutes(), 1), c)
-	if e.againstAt(now) {
-		return -way, false, 0
+	pace := g / math.Max(e.EndsAt().Sub(now).Minutes(), 1)
+	// The noise follows the pace down, not up past the plan's: a target
+	// behind its plan with more noise would only fall further behind.
+	planned := math.Abs(pace)
+	if from := e.FromP.InexactFloat64(); from > 0 && e.Duration > 0 {
+		planned = math.Abs(math.Log(l/from)) / e.Duration.Minutes()
 	}
-	return 3 * way, false, 0
+	// Behind its plan (a pace above the plan's) the noise shrinks as the
+	// pace grows: more noise there would only put it further behind
+	// (seeds tried: with the noise at 2.5 times the pace throughout, one
+	// +5%-in-ten-minutes target in seven missed).
+	noise = math.Min(math.Abs(pace), planned) / targetNoise
+	if behind := math.Abs(pace); behind > planned {
+		noise *= planned / behind
+	}
+	way, noise := clamp(pace, c), math.Min(noise, maxMinute/2)
+	if now.Unix()/60 == e.Breather {
+		return -way, false, 0, 0
+	}
+	return way, false, 0, noise
 }
 
-// closingOvershoot is how far past its level a target closing in aims.
-const closingOvershoot = 0.001
-
-// againstAt reports whether the minute (UTC) of now is the one of its pair
-// that goes against a target's way: one of the two, drawn from the
-// target and the pair, so that a restart draws the same.
-func (e Event) againstAt(now time.Time) bool {
-	minute := now.Unix() / 60
-	h := fnv.New32a()
-	_, _ = fmt.Fprintf(h, "%s/%d", e.ID, minute/2)
-	return int64(h.Sum32()%2) == minute%2
+// PlanAtTime is where a target's plan has the price at now, from the
+// price at its start (log-linear to the level by the end), 0 before it
+// started.
+func (e Event) PlanAtTime(now time.Time) float64 {
+	from, l := e.FromP.InexactFloat64(), e.Price.InexactFloat64()
+	if from <= 0 || l <= 0 || e.Duration <= 0 {
+		return 0
+	}
+	f := math.Min(math.Max(now.Sub(e.Start()).Seconds()/e.Duration.Seconds(), 0), 1)
+	return math.Exp(math.Log(from) + math.Log(l/from)*f)
 }
+
+// closingOvershoot is how far past its level a target closing in aims; a
+// target's noise is its pace over targetNoise (2.5 times it: about a
+// minute in three against it).
+const (
+	closingOvershoot = 0.001
+	targetNoise      = 0.4
+)
 
 func clamp(x, limit float64) float64 { return math.Max(-limit, math.Min(limit, x)) }
 
@@ -449,9 +477,11 @@ type Shape struct {
 	// LogE, when set, is the event factor's logarithm now.
 	LogE *float64
 	// Guide, a logarithm a minute, moves the event factor toward a
-	// target's level; Closing quarters the noise while a target closes in;
-	// Push moves the event factor once (a target's last step).
+	// target's level; Noise is the least noise a minute meanwhile (a
+	// standard deviation); Closing quarters the noise while a target
+	// closes in; Push moves the event factor once (a target's last step).
 	Guide   float64
+	Noise   float64
 	Closing bool
 	Push    float64
 	// Spike is the share of the planned price the running spikes add to
@@ -487,7 +517,7 @@ func ShapeOf(running []*Event, now time.Time, p, maxMinute float64) (sh Shape, e
 				ended = append(ended, e)
 			}
 		case EventTarget:
-			sh.Guide, sh.Closing, sh.Push = e.Guide(now, p, maxMinute)
+			sh.Guide, sh.Closing, sh.Push, sh.Noise = e.Guide(now, p, maxMinute)
 		case EventSpike:
 			sh.Spike += e.SpikeAt(now)
 			if elapsed >= SpikeRise+e.Width {

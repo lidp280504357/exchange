@@ -21,11 +21,10 @@ type PlanPoint struct {
 // Plan is a threshold target's plan from the price from at its start
 // (§3): the guide's way alone, minute by minute (spread over the minutes
 // left, a third of the minute guard at most, all of it while it closes
-// in), which is where the guide's pairs of minutes, the noise and the
-// market leave the price on average; around it the band their volatility
-// makes (the noise a quarter while it closes in) and the two minutes'
-// ways a pair of minutes strays by. A point a minute, the window's start
-// and end included.
+// in), which is where the noise and the market leave the price on
+// average; around it the band their volatility makes (the noise 2.5 times
+// the pace at least, a quarter of the model's while it closes in). A point
+// a minute, the window's start and end included.
 func Plan(e Event, from float64, p Params) []PlanPoint {
 	if from <= 0 || !e.Price.IsPositive() || e.Duration <= 0 {
 		return nil
@@ -34,6 +33,7 @@ func Plan(e Event, from float64, p Params) []PlanPoint {
 	noise := p.Sigma / math.Sqrt(24*60)
 	market := planMarketVol * p.Beta / math.Sqrt(24*60)
 	x, variance := math.Log(from), 0.0
+	planned := math.Abs(level-x) / e.Duration.Minutes()
 	out := []PlanPoint{{At: start, Plan: from, Low: from, High: from}}
 	for at := start; at.Before(end); {
 		next := at.Add(time.Minute)
@@ -41,7 +41,8 @@ func Plan(e Event, from float64, p Params) []PlanPoint {
 			next = end
 		}
 		minutes := next.Sub(at).Minutes()
-		way, sd := clamp((level-x)/math.Max(end.Sub(at).Minutes(), 1), p.MaxMinuteMove/3), noise
+		pace := (level - x) / math.Max(end.Sub(at).Minutes(), 1)
+		way, sd := clamp(pace, p.MaxMinuteMove/3), math.Max(noise, math.Min(math.Min(math.Abs(pace), planned)/targetNoise, p.MaxMinuteMove/2))
 		if !at.Before(e.ClosingAt()) {
 			// Closing in: across, a little past the level, at up to the
 			// whole minute guard.
@@ -50,7 +51,7 @@ func Plan(e Event, from float64, p Params) []PlanPoint {
 		}
 		x += way * minutes
 		variance += (sd*sd + market*market) * minutes
-		band := 2*math.Sqrt(variance) + 2*math.Abs(way)
+		band := 2 * math.Sqrt(variance)
 		out = append(out, PlanPoint{At: next, Plan: math.Exp(x), Low: math.Exp(x - band), High: math.Exp(x + band)})
 		at = next
 	}

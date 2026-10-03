@@ -475,6 +475,12 @@ type rig struct {
 
 func newRig(t *testing.T, store *memStore) *rig {
 	t.Helper()
+	return newSeededRig(t, store, 11)
+}
+
+// newSeededRig is newRig with the model's random sources seeded with seed.
+func newSeededRig(t *testing.T, store *memStore, seed uint64) *rig {
+	t.Helper()
 	if store == nil {
 		store = &memStore{}
 	}
@@ -489,7 +495,7 @@ func newRig(t *testing.T, store *memStore) *rig {
 	r := &rig{trading: newFakeTrading(), store: store, flags: &flagSet{on: true, events: true}, now: time.Date(2026, 10, 2, 14, 0, 0, 0, time.UTC)}
 	r.pairs = &fakePairs{trading: r.trading}
 	r.prices = &fakePrices{btc: d("60000"), eth: d("3000"), last: d("1.0001"), now: func() time.Time { return r.now }}
-	r.sim = New(Config{Symbol: "ASTRA-USDT", Quote: "USDT", Tick: 250 * time.Millisecond, Seed: 11}, r.trading,
+	r.sim = New(Config{Symbol: "ASTRA-USDT", Quote: "USDT", Tick: 250 * time.Millisecond, Seed: seed}, r.trading,
 		r.prices, r.pairs, store, r.flags, slog.New(slog.DiscardHandler), prometheus.NewRegistry())
 	r.sim.now = func() time.Time { return r.now }
 	if err := r.sim.Start(context.Background()); err != nil {

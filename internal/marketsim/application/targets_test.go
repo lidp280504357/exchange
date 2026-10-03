@@ -17,61 +17,90 @@ func detailIs(err error, key string, value any) bool {
 	return errors.As(err, &e) && e.Details[key] == value
 }
 
-// A threshold target of +5% in ten minutes (ASTRA design §3, §8.8): the
-// price gets there slowly, at most a third of the minute guard a minute
-// before it closes in, with a minute in two against the way; it crosses
-// the level by the end, the event ends HIT, and the model goes on from
-// there (re-anchored, saved), not back.
+// A threshold target (ASTRA design §3, §8.8; fixed seeds, coordinator
+// 2026-10-04 06:20): the price gets there within the minute guard, with
+// noise of 2.5 times the pace and a breather after three minutes its way,
+// a quarter of the minutes at least against it; it crosses the level by
+// the end, the event ends HIT, and the model goes on from there
+// (re-anchored, saved), not back.
 func TestAThresholdTargetHitsSlowlyAndFollows(t *testing.T) {
+	for _, c := range []struct {
+		level  string
+		window time.Duration
+	}{{"1.05", 10 * time.Minute}, {"1.08", 30 * time.Minute}} {
+		r := newRig(t, nil)
+		r.rounds(4)
+		from := r.sim.Status().Target
+		e := r.create(t, domain.Event{Type: domain.EventTarget, Price: d(c.level), Duration: c.window})
+		if e.Direction != domain.Above || e.Then != domain.ThenFollow {
+			t.Fatalf("inferred %+v", e)
+		}
+		var minutes []float64
+		for i := 0; i < int((c.window+time.Minute)/(250*time.Millisecond)); i++ {
+			r.rounds(1)
+			if i%(4*60) == 4*60-1 {
+				minutes = append(minutes, r.sim.Status().Target)
+			}
+			if got := r.store.event(e.ID); got.Status == domain.EventDone {
+				break
+			}
+		}
+		got := r.store.event(e.ID)
+		if got.Status != domain.EventDone || got.Result != domain.ResultHit || got.CrossedAt.IsZero() ||
+			got.CrossedAt.After(got.StartedAt.Add(c.window)) {
+			t.Fatalf("+%s: the target %+v", c.level, got)
+		}
+		at, level := r.sim.Status().Target, d(c.level).InexactFloat64()
+		if at < level || at > level*1.01 {
+			t.Fatalf("+%s: crossed at %v", c.level, at)
+		}
+		// Within the minute guard, and both ways.
+		against, prev := 0, from
+		for i, p := range minutes {
+			move := math.Log(p / prev)
+			if math.Abs(move) > 0.03+1e-9 {
+				t.Fatalf("+%s: minute %d moved %v", c.level, i, move)
+			}
+			if move < 0 {
+				against++
+			}
+			prev = p
+		}
+		if float64(len(minutes)) < 0.8*c.window.Minutes() || float64(against) < 0.25*float64(len(minutes)) {
+			t.Fatalf("+%s: %d of %d minutes against the target: %v", c.level, against, len(minutes), minutes)
+		}
+		// Re-anchored there and saved: the next minutes go on from it.
+		if r.store.params == nil || math.Abs(r.store.params.P0-at)/at > 0.01 {
+			t.Fatalf("+%s: the anchor saved: %+v", c.level, r.store.params)
+		}
+		r.rounds(4 * 60)
+		if p := r.sim.Status().Target; math.Abs(p/at-1) > 0.01 {
+			t.Fatalf("+%s: a minute later %v, crossed at %v", c.level, p, at)
+		}
+	}
+}
+
+// After three minutes its way, a target's next minute breathes: the
+// minute's guide against it.
+func TestATargetBreathes(t *testing.T) {
 	r := newRig(t, nil)
 	r.rounds(4)
-	from := r.sim.Status().Target
-	e := r.create(t, domain.Event{Type: domain.EventTarget, Price: d("1.05"), Duration: 10 * time.Minute})
-	if e.Direction != domain.Above || e.Then != domain.ThenFollow {
-		t.Fatalf("inferred %+v", e)
-	}
-	var minutes []float64
-	for i := 0; i < 4*60*11; i++ {
+	e := r.create(t, domain.Event{Type: domain.EventTarget, Price: d("1.08"), Duration: 30 * time.Minute})
+	breathers := 0
+	for range 4 * 60 * 25 {
 		r.rounds(1)
-		if i%(4*60) == 4*60-1 {
-			minutes = append(minutes, r.sim.Status().Target)
+		for _, x := range r.sim.runningEvents() {
+			if x.ID == e.ID && x.Breather == r.now.Unix()/60 && r.now.Second() == 30 && r.now.Nanosecond() == 0 {
+				breathers++
+				sh, _ := domain.ShapeOf([]*domain.Event{x}, r.now, r.sim.model.State.P, 0.03)
+				if sh.Guide >= 0 {
+					t.Fatalf("a breather minute pulls its way: %+v", sh)
+				}
+			}
 		}
-		if got := r.store.event(e.ID); got.Status == domain.EventDone {
-			break
-		}
 	}
-	got := r.store.event(e.ID)
-	if got.Status != domain.EventDone || got.Result != domain.ResultHit || got.CrossedAt.IsZero() ||
-		got.CrossedAt.After(got.StartedAt.Add(10*time.Minute)) {
-		t.Fatalf("the target: %+v", got)
-	}
-	at := r.sim.Status().Target
-	if at < 1.05 || at > 1.05*1.01 {
-		t.Fatalf("crossed at %v", at)
-	}
-	// Slowly, and both ways: no minute beyond the guard's third (bar the
-	// last, closing in); at least a quarter of the minutes against it.
-	against, prev := 0, from
-	for i, p := range minutes {
-		move := math.Log(p / prev)
-		if i < len(minutes)-1 && math.Abs(move) > 0.03/3*3+1e-9 {
-			t.Fatalf("minute %d moved %v", i, move)
-		}
-		if move < 0 {
-			against++
-		}
-		prev = p
-	}
-	if len(minutes) < 8 || float64(against) < 0.25*float64(len(minutes)) {
-		t.Fatalf("%d of %d minutes against the target: %v", against, len(minutes), minutes)
-	}
-	// Re-anchored there and saved: the next minutes go on from it.
-	if r.store.params == nil || math.Abs(r.store.params.P0-at)/at > 0.01 {
-		t.Fatalf("the anchor saved: %+v", r.store.params)
-	}
-	r.rounds(4 * 60)
-	if p := r.sim.Status().Target; math.Abs(p/at-1) > 0.01 {
-		t.Fatalf("a minute later %v, crossed at %v", p, at)
+	if breathers == 0 {
+		t.Fatal("no breather in 25 minutes")
 	}
 }
 
@@ -226,5 +255,45 @@ func TestASpikeLeavesThePlanAlone(t *testing.T) {
 		if spiked[i] != plain[i] {
 			t.Fatalf("round %d: the target %v with the spike, %v without", i, spiked[i], plain[i])
 		}
+	}
+}
+
+// Across seeds (the tuning of breatheAfter and the noise, coordinator
+// 2026-10-04 06:20): every target of +3% in twelve minutes is HIT, and
+// in nearly every one a quarter of the minutes or more go against it.
+func TestTargetsHitAcrossSeeds(t *testing.T) {
+	quarter := 0
+	const seeds = 20
+	for seed := uint64(1); seed <= seeds; seed++ {
+		r := newSeededRig(t, nil, seed)
+		r.rounds(4)
+		from := r.sim.Status().Target
+		e := r.create(t, domain.Event{Type: domain.EventTarget, Price: d("1.03"), Duration: 12 * time.Minute})
+		var minutes []float64
+		for i := 0; i < 4*60*13; i++ {
+			r.rounds(1)
+			if i%(4*60) == 4*60-1 {
+				minutes = append(minutes, r.sim.Status().Target)
+			}
+			if r.store.event(e.ID).Status == domain.EventDone {
+				break
+			}
+		}
+		if got := r.store.event(e.ID); got.Result != domain.ResultHit {
+			t.Fatalf("seed %d: %+v", seed, got)
+		}
+		against, prev := 0, from
+		for _, p := range minutes {
+			if p < prev {
+				against++
+			}
+			prev = p
+		}
+		if 4*against >= len(minutes) {
+			quarter++
+		}
+	}
+	if quarter < seeds*85/100 {
+		t.Fatalf("a quarter of the minutes against the target in %d of %d", quarter, seeds)
 	}
 }

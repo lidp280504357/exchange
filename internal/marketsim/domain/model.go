@@ -123,6 +123,9 @@ func (m *Model) Step(now time.Time, btc, eth float64, sh Shape) (float64, Guard)
 	if sh.Vol > 0 {
 		sigma *= sh.Vol
 	}
+	if floor := sh.Noise * math.Sqrt(24*60); floor > sigma { // a minute's to a day's
+		sigma = floor
+	}
 	if sh.Closing {
 		sigma /= 4
 	}
