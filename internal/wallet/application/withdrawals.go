@@ -445,6 +445,8 @@ func ReviewWithdrawal(ctx context.Context, store ports.Store, rv Review, now tim
 				return err
 			}
 		}
+		// A review ends a hold: the reviewer looked into it (C5.5 ⑦).
+		cur.Unhold(now)
 		w = *cur
 		if err := r.Withdrawals().Update(ctx, w); err != nil {
 			return err

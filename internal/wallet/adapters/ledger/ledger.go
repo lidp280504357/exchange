@@ -38,6 +38,16 @@ func (c *Client) ReleaseUnclaimed(ctx context.Context, depositID, userID, asset 
 	return resp.GetPosting().GetJournalId(), nil
 }
 
+// UnclaimedRelease returns the journal that released an unclaimed
+// deposit, if any.
+func (c *Client) UnclaimedRelease(ctx context.Context, depositID string) (string, error) {
+	resp, err := c.c.GetUnclaimedRelease(ctx, &ledgerv1.GetUnclaimedReleaseRequest{DepositId: depositID})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetJournalId(), nil
+}
+
 // Fund books a platform funding to a system account.
 func (c *Client) Fund(ctx context.Context, key, accountType, asset string, amount decimal.Decimal, reference string) (string, error) {
 	resp, err := c.c.FundSystemAccount(ctx, &ledgerv1.FundSystemAccountRequest{

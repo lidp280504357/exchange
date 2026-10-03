@@ -417,6 +417,9 @@ type Ledger interface {
 	// UNCLAIMED_DEPOSIT, to its user (DEPOSIT_CREDIT) for an administrator
 	// (actor); the deposit ID keys it.
 	ReleaseUnclaimed(ctx context.Context, depositID, userID, asset string, amount decimal.Decimal, actor, reason string) (journalID string, err error)
+	// UnclaimedRelease returns the journal that released an unclaimed
+	// deposit ("" when it was not released).
+	UnclaimedRelease(ctx context.Context, depositID string) (journalID string, err error)
 }
 
 // CustodyCoin is one of the custodian's coins with what it holds of it.
@@ -490,8 +493,8 @@ type WithdrawalFilter struct {
 	// Oldest lists oldest first (the review queue), else newest first.
 	Oldest bool
 	Limit  int
-	// Held is "true" for the withdrawals on hold, "false" for the others,
-	// "" for both.
+	// Held is "true" for the withdrawals on hold (in review), "false" for
+	// the others, "" for both.
 	Held string
 	// MinValue and MaxValue bound the worth in USDT (zero: unbounded);
 	// MinRisk the risk score.

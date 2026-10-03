@@ -12,6 +12,7 @@ import (
 	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
 	walletv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/lidp280504357/exchange/internal/platform/pg"
 	"github.com/lidp280504357/exchange/internal/wallet/domain"
 	"github.com/lidp280504357/exchange/internal/wallet/ports"
 )
@@ -184,6 +185,11 @@ func (s *Service) CreditDeposit(ctx context.Context, id, actor, reason string) (
 	return out, err
 }
 
+// ErrReleasedUnrecorded refuses closing an unclaimed deposit the ledger
+// released already: crediting it again records the release.
+var ErrReleasedUnrecorded = apperr.New(apperr.KindConflict, "WALLET_DEPOSIT_RELEASED",
+	"the ledger released this deposit to its user already: credit it again to record the release")
+
 // DismissDeposit closes a deposit that waited for a decision without
 // moving funds (unclaimed funds stay in UNCLAIMED_DEPOSIT; a callback's
 // discrepancy is taken note of), audited as wallet.deposit.dismissed.
@@ -202,6 +208,18 @@ func (s *Service) DismissDeposit(ctx context.Context, id, actor, reason string) 
 		}
 		if d == nil {
 			return apperr.NotFound("no such deposit")
+		}
+		// The ledger may have released an unclaimed one whose release was
+		// not recorded here: it is credited again to record it, never
+		// closed (C5.5 ⑦). Its row stays locked, so no release slips in.
+		if d.Releasable() == nil {
+			journal, err := s.W.Ledger.UnclaimedRelease(ctx, d.ID)
+			if err != nil {
+				return err
+			}
+			if journal != "" {
+				return ErrReleasedUnrecorded.WithDetail("journal_id", journal)
+			}
 		}
 		if err := d.Dismiss(actor, strings.TrimSpace(reason), s.Now()); err != nil {
 			return err
@@ -314,11 +332,21 @@ func (s *Service) manualDeposit(ctx context.Context, r ports.Repos, in ManualDep
 // processor (to UNCLAIMED_DEPOSIT below the minimum), source MANUAL with
 // the administrator; audited as wallet.deposit.backfilled. When the
 // custodian's callback comes later it only confirms it (or records a
-// discrepancy). Repeating the same backfill returns its deposit.
+// discrepancy). Repeating the same backfill returns its deposit, also when
+// the repeat ran at the same time and lost the race to the unique index
+// (C5.5 ⑦: the console's second operation is then booked, not stuck).
 func (s *Service) BookManualDeposit(ctx context.Context, in ManualDeposit, reason string) (domain.Deposit, error) {
 	if err := needDecider(in.Actor, reason); err != nil {
 		return domain.Deposit{}, err
 	}
+	out, err := s.bookManual(ctx, in, reason)
+	if _, dup := pg.UniqueViolation(err); dup {
+		return s.bookManual(ctx, in, reason)
+	}
+	return out, err
+}
+
+func (s *Service) bookManual(ctx context.Context, in ManualDeposit, reason string) (domain.Deposit, error) {
 	var out domain.Deposit
 	err := s.Store.Tx(ctx, func(r ports.Repos) error {
 		d, err := s.manualDeposit(ctx, r, in, s.Now())

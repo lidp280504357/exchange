@@ -321,6 +321,13 @@ func (l *fakeLedger) ReleaseUnclaimed(_ context.Context, id, user, _ string, amo
 	})
 }
 
+func (l *fakeLedger) UnclaimedRelease(_ context.Context, id string) (string, error) {
+	if l.down {
+		return "", errors.New("ledger unreachable")
+	}
+	return l.journals["deposit-release:"+id], nil
+}
+
 func gwei(n int64) *big.Int { return new(big.Int).Mul(big.NewInt(n), big.NewInt(1_000_000_000)) }
 
 func TestProcessorSweepsFundsAndChecks(t *testing.T) {

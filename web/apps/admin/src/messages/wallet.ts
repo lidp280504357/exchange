@@ -120,6 +120,8 @@ export const walletZh = {
     WALLET_DEPOSIT_RESOLVED: "这笔充值已经处理过",
     WALLET_DEPOSIT_KNOWN: "这笔充值已经存在（同一托管方交易号或同一笔转账）",
     WALLET_WITHDRAWAL_NOT_IN_REVIEW: "只有待审批的提现可以搁置",
+    WALLET_DEPOSIT_RELEASED: "账本已经把这笔充值放行给用户，只是没记上：请再点一次「入账」把放行记下来，不能驳回",
+    ADMIN_WITHDRAWAL_HELD: "这笔提现正在搁置：请单独审核，批量审核会跳过它",
   },
 };
 
@@ -242,5 +244,7 @@ export const walletEn = {
     WALLET_DEPOSIT_RESOLVED: "This deposit was handled already",
     WALLET_DEPOSIT_KNOWN: "This deposit exists already (the same custodian trade or the same transfer)",
     WALLET_WITHDRAWAL_NOT_IN_REVIEW: "Only a withdrawal in review can be put on hold",
+    WALLET_DEPOSIT_RELEASED: "The ledger released this deposit to its user, but it was not recorded: credit it again to record it; it cannot be rejected",
+    ADMIN_WITHDRAWAL_HELD: "This withdrawal is on hold: review it on its own; a batch skips it",
   },
 };

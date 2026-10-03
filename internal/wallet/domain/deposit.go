@@ -253,9 +253,11 @@ func (d *Deposit) Seen(n uint64, hash string) bool {
 
 // RequestCredit marks the deposit as sent to the ledger, unclaimed for
 // reason when not empty. It reports false unless the deposit is
-// CONFIRMED and was not sent yet.
+// CONFIRMED and was not sent yet; a backfill the custodian's callback
+// disagreed with, or one an administrator closed, waits for a person
+// (C5.5 ⑦).
 func (d *Deposit) RequestCredit(reason string, now time.Time) bool {
-	if d.Status != StatusConfirmed || !d.CreditRequested.IsZero() {
+	if d.Status != StatusConfirmed || !d.CreditRequested.IsZero() || d.Discrepancy != "" || d.Resolution != "" {
 		return false
 	}
 	if reason != "" {

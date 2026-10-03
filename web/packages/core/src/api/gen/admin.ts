@@ -555,7 +555,11 @@ export interface paths {
          * Close a deposit waiting for a decision without moving funds
          * @description Marks it handled with the reason (resolution DISMISSED): an
          *     unclaimed deposit stays in UNCLAIMED_DEPOSIT, a disagreeing
-         *     callback stays unbooked. Audited by the wallet
+         *     callback stays unbooked (a backfill it disagreed with is never
+         *     sent to the ledger). An unclaimed deposit the ledger released
+         *     already, its release not recorded, is not closed: 409
+         *     WALLET_DEPOSIT_RELEASED (details journal_id); crediting it again
+         *     records the release. Audited by the wallet
          *     (wallet.deposit.dismissed). Needs deposits.review.
          */
         post: operations["rejectDeposit"];
@@ -1205,9 +1209,10 @@ export interface paths {
          * @description Each withdrawal is reviewed on its own as by POST
          *     /admin/v1/withdrawals/{id}/review (and audited by the wallet); one
          *     that fails (already decided, unknown) leaves the others decided and
-         *     says why. At most 50 at a time. The same batch again with its
-         *     Idempotency-Key answers for those it reviewed as they stand. Needs
-         *     withdrawals.review.
+         *     says why. One on hold is left out (ADMIN_WITHDRAWAL_HELD: its
+         *     reviewer decides it on its own). At most 50 at a time. The same
+         *     batch again with its Idempotency-Key answers for those it reviewed
+         *     as they stand. Needs withdrawals.review.
          */
         post: operations["reviewWithdrawalBatch"];
         delete?: never;
@@ -5963,7 +5968,7 @@ export interface operations {
                 /** @description One network, e.g. TRON or ETH-SEPOLIA; every network when empty. */
                 network?: string;
                 order?: "asc" | "desc";
-                /** @description true for the withdrawals on hold, false for the others. */
+                /** @description true for the withdrawals on hold (in review), false for the others. */
                 held?: "true" | "false";
                 min_value_usdt?: components["schemas"]["Decimal"];
                 max_value_usdt?: components["schemas"]["Decimal"];

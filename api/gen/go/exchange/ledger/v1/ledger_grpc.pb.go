@@ -19,23 +19,24 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	LedgerService_Freeze_FullMethodName            = "/exchange.ledger.v1.LedgerService/Freeze"
-	LedgerService_Unfreeze_FullMethodName          = "/exchange.ledger.v1.LedgerService/Unfreeze"
-	LedgerService_Transfer_FullMethodName          = "/exchange.ledger.v1.LedgerService/Transfer"
-	LedgerService_GetBalances_FullMethodName       = "/exchange.ledger.v1.LedgerService/GetBalances"
-	LedgerService_SettleWithdrawal_FullMethodName  = "/exchange.ledger.v1.LedgerService/SettleWithdrawal"
-	LedgerService_TransferInternal_FullMethodName  = "/exchange.ledger.v1.LedgerService/TransferInternal"
-	LedgerService_BookChainFee_FullMethodName      = "/exchange.ledger.v1.LedgerService/BookChainFee"
-	LedgerService_FundSystemAccount_FullMethodName = "/exchange.ledger.v1.LedgerService/FundSystemAccount"
-	LedgerService_GetSystemBalances_FullMethodName = "/exchange.ledger.v1.LedgerService/GetSystemBalances"
-	LedgerService_Adjust_FullMethodName            = "/exchange.ledger.v1.LedgerService/Adjust"
-	LedgerService_SettleFutures_FullMethodName     = "/exchange.ledger.v1.LedgerService/SettleFutures"
-	LedgerService_FundInsurance_FullMethodName     = "/exchange.ledger.v1.LedgerService/FundInsurance"
-	LedgerService_GetReconciliation_FullMethodName = "/exchange.ledger.v1.LedgerService/GetReconciliation"
-	LedgerService_PlaceHold_FullMethodName         = "/exchange.ledger.v1.LedgerService/PlaceHold"
-	LedgerService_ReleaseHold_FullMethodName       = "/exchange.ledger.v1.LedgerService/ReleaseHold"
-	LedgerService_ListHolds_FullMethodName         = "/exchange.ledger.v1.LedgerService/ListHolds"
-	LedgerService_ReleaseUnclaimed_FullMethodName  = "/exchange.ledger.v1.LedgerService/ReleaseUnclaimed"
+	LedgerService_Freeze_FullMethodName              = "/exchange.ledger.v1.LedgerService/Freeze"
+	LedgerService_Unfreeze_FullMethodName            = "/exchange.ledger.v1.LedgerService/Unfreeze"
+	LedgerService_Transfer_FullMethodName            = "/exchange.ledger.v1.LedgerService/Transfer"
+	LedgerService_GetBalances_FullMethodName         = "/exchange.ledger.v1.LedgerService/GetBalances"
+	LedgerService_SettleWithdrawal_FullMethodName    = "/exchange.ledger.v1.LedgerService/SettleWithdrawal"
+	LedgerService_TransferInternal_FullMethodName    = "/exchange.ledger.v1.LedgerService/TransferInternal"
+	LedgerService_BookChainFee_FullMethodName        = "/exchange.ledger.v1.LedgerService/BookChainFee"
+	LedgerService_FundSystemAccount_FullMethodName   = "/exchange.ledger.v1.LedgerService/FundSystemAccount"
+	LedgerService_GetSystemBalances_FullMethodName   = "/exchange.ledger.v1.LedgerService/GetSystemBalances"
+	LedgerService_Adjust_FullMethodName              = "/exchange.ledger.v1.LedgerService/Adjust"
+	LedgerService_SettleFutures_FullMethodName       = "/exchange.ledger.v1.LedgerService/SettleFutures"
+	LedgerService_FundInsurance_FullMethodName       = "/exchange.ledger.v1.LedgerService/FundInsurance"
+	LedgerService_GetReconciliation_FullMethodName   = "/exchange.ledger.v1.LedgerService/GetReconciliation"
+	LedgerService_PlaceHold_FullMethodName           = "/exchange.ledger.v1.LedgerService/PlaceHold"
+	LedgerService_ReleaseHold_FullMethodName         = "/exchange.ledger.v1.LedgerService/ReleaseHold"
+	LedgerService_ListHolds_FullMethodName           = "/exchange.ledger.v1.LedgerService/ListHolds"
+	LedgerService_ReleaseUnclaimed_FullMethodName    = "/exchange.ledger.v1.LedgerService/ReleaseUnclaimed"
+	LedgerService_GetUnclaimedRelease_FullMethodName = "/exchange.ledger.v1.LedgerService/GetUnclaimedRelease"
 )
 
 // LedgerServiceClient is the client API for LedgerService service.
@@ -115,6 +116,10 @@ type LedgerServiceClient interface {
 	// amount (DEPOSIT_CREDIT, key deposit-release:<deposit_id>), with an
 	// audit event. wallet-service calls it.
 	ReleaseUnclaimed(ctx context.Context, in *ReleaseUnclaimedRequest, opts ...grpc.CallOption) (*ReleaseUnclaimedResponse, error)
+	// GetUnclaimedRelease reports whether an unclaimed deposit was released
+	// to its user (the journal of key deposit-release:<deposit_id>):
+	// wallet-service does not close one whose release it failed to record.
+	GetUnclaimedRelease(ctx context.Context, in *GetUnclaimedReleaseRequest, opts ...grpc.CallOption) (*GetUnclaimedReleaseResponse, error)
 }
 
 type ledgerServiceClient struct {
@@ -295,6 +300,16 @@ func (c *ledgerServiceClient) ReleaseUnclaimed(ctx context.Context, in *ReleaseU
 	return out, nil
 }
 
+func (c *ledgerServiceClient) GetUnclaimedRelease(ctx context.Context, in *GetUnclaimedReleaseRequest, opts ...grpc.CallOption) (*GetUnclaimedReleaseResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetUnclaimedReleaseResponse)
+	err := c.cc.Invoke(ctx, LedgerService_GetUnclaimedRelease_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LedgerServiceServer is the server API for LedgerService service.
 // All implementations must embed UnimplementedLedgerServiceServer
 // for forward compatibility.
@@ -372,6 +387,10 @@ type LedgerServiceServer interface {
 	// amount (DEPOSIT_CREDIT, key deposit-release:<deposit_id>), with an
 	// audit event. wallet-service calls it.
 	ReleaseUnclaimed(context.Context, *ReleaseUnclaimedRequest) (*ReleaseUnclaimedResponse, error)
+	// GetUnclaimedRelease reports whether an unclaimed deposit was released
+	// to its user (the journal of key deposit-release:<deposit_id>):
+	// wallet-service does not close one whose release it failed to record.
+	GetUnclaimedRelease(context.Context, *GetUnclaimedReleaseRequest) (*GetUnclaimedReleaseResponse, error)
 	mustEmbedUnimplementedLedgerServiceServer()
 }
 
@@ -432,6 +451,9 @@ func (UnimplementedLedgerServiceServer) ListHolds(context.Context, *ListHoldsReq
 }
 func (UnimplementedLedgerServiceServer) ReleaseUnclaimed(context.Context, *ReleaseUnclaimedRequest) (*ReleaseUnclaimedResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReleaseUnclaimed not implemented")
+}
+func (UnimplementedLedgerServiceServer) GetUnclaimedRelease(context.Context, *GetUnclaimedReleaseRequest) (*GetUnclaimedReleaseResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetUnclaimedRelease not implemented")
 }
 func (UnimplementedLedgerServiceServer) mustEmbedUnimplementedLedgerServiceServer() {}
 func (UnimplementedLedgerServiceServer) testEmbeddedByValue()                       {}
@@ -760,6 +782,24 @@ func _LedgerService_ReleaseUnclaimed_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LedgerService_GetUnclaimedRelease_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetUnclaimedReleaseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LedgerServiceServer).GetUnclaimedRelease(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LedgerService_GetUnclaimedRelease_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LedgerServiceServer).GetUnclaimedRelease(ctx, req.(*GetUnclaimedReleaseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LedgerService_ServiceDesc is the grpc.ServiceDesc for LedgerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -834,6 +874,10 @@ var LedgerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReleaseUnclaimed",
 			Handler:    _LedgerService_ReleaseUnclaimed_Handler,
+		},
+		{
+			MethodName: "GetUnclaimedRelease",
+			Handler:    _LedgerService_GetUnclaimedRelease_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

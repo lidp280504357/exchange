@@ -75,6 +75,10 @@ service LedgerService {
   // amount (DEPOSIT_CREDIT, key deposit-release:<deposit_id>), with an
   // audit event. wallet-service calls it.
   rpc ReleaseUnclaimed(ReleaseUnclaimedRequest) returns (ReleaseUnclaimedResponse);
+  // GetUnclaimedRelease reports whether an unclaimed deposit was released
+  // to its user (the journal of key deposit-release:<deposit_id>):
+  // wallet-service does not close one whose release it failed to record.
+  rpc GetUnclaimedRelease(GetUnclaimedReleaseRequest) returns (GetUnclaimedReleaseResponse);
 }
 
 message FreezeRequest {
@@ -383,4 +387,13 @@ message ReleaseUnclaimedRequest {
 
 message ReleaseUnclaimedResponse {
   Posting posting = 1;
+}
+
+message GetUnclaimedReleaseRequest {
+  string deposit_id = 1;
+}
+
+message GetUnclaimedReleaseResponse {
+  // The release's journal; empty when the deposit was not released.
+  string journal_id = 1;
 }

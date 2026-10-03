@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/prometheus/client_golang/prometheus"
 
 	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
@@ -76,6 +78,21 @@ func TestManualDepositsAndTheirLateCallbacks(t *testing.T) {
 	if _, err := h.svc.BookManualDeposit(ctx, other, "again"); !apperr.Is(err, "WALLET_DEPOSIT_KNOWN") {
 		t.Fatalf("a known transfer: %v", err)
 	}
+	// The same backfill twice at once: the one that loses the race to the
+	// unique index finds the winner's deposit (C5.5 ⑦).
+	raced := ManualDeposit{Network: tron, TradeID: "m5", Address: addr.Address, TxHash: "tx-m5", Amount: d("3"), Actor: "ops@example.com"}
+	var winner domain.Deposit
+	h.store.race = func(x domain.Deposit) error {
+		winner = x
+		winner.ID = uuid.Must(uuid.NewV7()).String()
+		h.store.deposits[winner.ID] = winner
+		return &pgconn.PgError{Code: "23505", ConstraintName: "deposits_provider_tx_id_key"}
+	}
+	lost, err := h.svc.BookManualDeposit(ctx, raced, "callback lost, entered twice")
+	if err != nil || lost.ID != winner.ID {
+		t.Fatalf("the race's loser %+v %v (winner %s)", lost, err, winner.ID)
+	}
+	delete(h.store.deposits, winner.ID)
 	if h.audited("wallet.deposit.backfilled") != 1 {
 		t.Fatal("the backfill is audited once")
 	}
@@ -116,6 +133,20 @@ func TestManualDepositsAndTheirLateCallbacks(t *testing.T) {
 	}
 	if list, _, _ := h.svc.AdminDeposits(ctx, ports.DepositFilter{Attention: true}); len(list) != 1 || list[0].ID != d3.ID {
 		t.Fatalf("attention %+v", list)
+	}
+	// The custodian's retry keeps the mark, and the processor does not
+	// credit the backfill: a person decides (C5.5 ⑦).
+	resent := h.callback(t, ports.CustodyTrade{
+		TradeID: "m3", Kind: domain.CallbackDeposit, Status: 3, Word: domain.CustodySuccess, Coin: usdtCoin, Address: addr.Address,
+		Amount: d("100"), RawAmount: d("100000000"), TxHash: "tx-m3",
+	})
+	if resent.Result != domain.CallbackDiscrepancy {
+		t.Fatalf("the callback again %+v", resent)
+	}
+	h.store.take()
+	h.cround(t)
+	if got := h.store.deposits[d3.ID]; !got.CreditRequested.IsZero() || slices.Contains(types(h.store.take()), "DepositConfirmed") {
+		t.Fatalf("a disagreed backfill sent to the ledger %+v", got)
 	}
 	if _, err := h.svc.CreditDeposit(ctx, d3.ID, "ops@example.com", "not unclaimed"); !apperr.Is(err, "WALLET_DEPOSIT_NOT_RELEASABLE") {
 		t.Fatalf("a discrepancy is not credited: %v", err)
@@ -195,6 +226,36 @@ func TestUnclaimedDepositsAreCreditedByHand(t *testing.T) {
 		t.Fatal("booked once")
 	}
 
+	// The ledger released one but its record here failed: it is not
+	// closed, and crediting it again (in other words) records the release
+	// without booking it twice (C5.5 ⑦).
+	h.callback(t, ports.CustodyTrade{
+		TradeID: "u3", Kind: domain.CallbackDeposit, Status: 3, Word: domain.CustodySuccess, Coin: usdtCoin, Address: addr.Address,
+		Amount: d("0.4"), RawAmount: d("400000"), TxHash: "tx-u3",
+	})
+	var lost domain.Deposit
+	for _, x := range h.store.deposits {
+		if x.TxHash == "tx-u3" {
+			lost = x
+		}
+	}
+	h.cround(t)
+	if err := h.svc.OnCredited(ctx, lost.ID, "j-lost"); err != nil {
+		t.Fatal(err)
+	}
+	released, err := h.ledger.ReleaseUnclaimed(ctx, lost.ID, "alice", "USDT", d("0.4"), "ops@example.com", "the first attempt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.DismissDeposit(ctx, lost.ID, "fin@example.com", "stays unclaimed"); !apperr.Is(err, "WALLET_DEPOSIT_RELEASED") {
+		t.Fatalf("closed after the ledger released it: %v", err)
+	}
+	after := h.ledger.available["alice"]
+	recorded, err := h.svc.CreditDeposit(ctx, lost.ID, "fin@example.com", "recording the release")
+	if err != nil || recorded.ReleaseJournalID != released || !h.ledger.available["alice"].Equal(after) {
+		t.Fatalf("the release recorded %+v %v", recorded, err)
+	}
+
 	// An unclaimed backfill whose callback disagrees is in doubt: the
 	// ledger is never asked to release it.
 	small := ManualDeposit{Network: tron, TradeID: "u2", Address: addr.Address, TxHash: "tx-u2", Amount: d("0.25"), Actor: "ops@example.com"}
@@ -247,8 +308,13 @@ func TestWithdrawalHoldAndDetail(t *testing.T) {
 	if err != nil || det.Address == nil || !det.UsedToday.IsPositive() || det.UsedMonth.LessThan(det.UsedToday) {
 		t.Fatalf("detail %+v %v", det, err)
 	}
-	if _, err := ReviewWithdrawal(ctx, h.store, Review{ID: w.ID, Reviewer: "ops@example.com", Reason: "fine"}, h.now); err != nil {
+	// A review ends a hold (C5.5 ⑦).
+	if _, err := h.svc.HoldWithdrawal(ctx, w.ID, true, "ops@example.com", "calling the user again"); err != nil {
 		t.Fatal(err)
+	}
+	rejected, err := ReviewWithdrawal(ctx, h.store, Review{ID: w.ID, Reviewer: "ops@example.com", Reason: "fine"}, h.now)
+	if err != nil || !rejected.HeldAt.IsZero() || rejected.HoldNote != "" {
+		t.Fatalf("reviewed while held %+v %v", rejected, err)
 	}
 	if _, err := h.svc.HoldWithdrawal(ctx, w.ID, true, "ops@example.com", "too late"); !apperr.Is(err, "WALLET_WITHDRAWAL_NOT_IN_REVIEW") {
 		t.Fatalf("a rejected one: %v", err)

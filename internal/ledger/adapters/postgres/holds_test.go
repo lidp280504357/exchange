@@ -36,9 +36,15 @@ func TestReleaseUnclaimed(t *testing.T) {
 	if got := unclaimed(); got != "0.8" {
 		t.Fatalf("unclaimed %s", got)
 	}
+	if j, err := svc.UnclaimedRelease(ctx, dep); err != nil || j != "" {
+		t.Fatalf("released before the release: %q %v", j, err)
+	}
 	res, err := svc.ReleaseUnclaimed(ctx, dep, user, "USDT", d("0.8"), "ops@example.com", "the user asked")
 	if err != nil || res.Replayed {
 		t.Fatalf("release %+v %v", res, err)
+	}
+	if j, err := svc.UnclaimedRelease(ctx, dep); err != nil || j != res.JournalID {
+		t.Fatalf("its release %q %v, want %s", j, err, res.JournalID)
 	}
 	if av, _ := usdt(t, svc, user, domain.AccountSpot); !av.Equal(d("0.8")) || unclaimed() != "0" {
 		t.Fatalf("after the release: user %s, unclaimed %s", av, unclaimed())
@@ -46,6 +52,11 @@ func TestReleaseUnclaimed(t *testing.T) {
 	again, err := svc.ReleaseUnclaimed(ctx, dep, user, "USDT", d("0.8"), "ops@example.com", "the user asked")
 	if err != nil || !again.Replayed || again.JournalID != res.JournalID {
 		t.Fatalf("repeated %+v %v", again, err)
+	}
+	// A retry in other words, by another administrator, is the same release (C5.5 ⑦).
+	reworded, err := svc.ReleaseUnclaimed(ctx, dep, user, "USDT", d("0.8"), "fin@example.com", "retrying: the record failed")
+	if err != nil || !reworded.Replayed || reworded.JournalID != res.JournalID {
+		t.Fatalf("repeated in other words %+v %v", reworded, err)
 	}
 	other := uuid.NewString()
 	if _, err := svc.ReleaseUnclaimed(ctx, other, user, "USDT", d("0.1"), "ops@example.com", "nothing is unclaimed"); !apperr.Is(err, "LEDGER_INSUFFICIENT_BALANCE") {

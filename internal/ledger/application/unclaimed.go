@@ -20,7 +20,10 @@ import (
 // UNCLAIMED_DEPOSIT pays the user's SPOT account the deposit's own asset
 // and amount (DEPOSIT_CREDIT, key deposit-release:<id>), audited as
 // ledger.unclaimed_released with the administrator as the actor.
-// wallet-service calls it; repeating it returns the first journal.
+// wallet-service calls it; repeating it returns the first journal, whoever
+// repeats it and with whatever reason: the reason is the audit event's,
+// not the journal's (C5.5 ⑦), so a retry with other words is not a
+// conflict.
 func (s *Service) ReleaseUnclaimed(ctx context.Context, depositID, userID, asset string, amount decimal.Decimal, actor, reason string) (Result, error) {
 	if _, err := uuid.Parse(depositID); err != nil {
 		return Result{}, apperr.Invalid("deposit_id must be a UUID")
@@ -32,7 +35,7 @@ func (s *Service) ReleaseUnclaimed(ctx context.Context, depositID, userID, asset
 		return Result{}, apperr.Invalid("an actor and a reason are required")
 	}
 	p, err := domain.ReleasePostingOf(domain.Deposit{ID: depositID, UserID: userID, Asset: asset, Amount: amount},
-		"unclaimed deposit "+depositID+" released: "+strings.TrimSpace(reason))
+		"unclaimed deposit "+depositID+" released")
 	if err != nil {
 		return Result{}, err
 	}
@@ -56,4 +59,18 @@ func (s *Service) ReleaseUnclaimed(ctx context.Context, depositID, userID, asset
 		return s.replay(ctx, s.Store.Read(), p)
 	}
 	return res, err
+}
+
+// UnclaimedRelease returns the journal that released an unclaimed deposit
+// to its user ("" when it was not released): wallet-service does not
+// close a deposit whose release it failed to record (C5.5 ⑦).
+func (s *Service) UnclaimedRelease(ctx context.Context, depositID string) (string, error) {
+	if _, err := uuid.Parse(depositID); err != nil {
+		return "", apperr.Invalid("deposit_id must be a UUID")
+	}
+	j, err := s.Store.Read().Journals().ByIdemKey(ctx, domain.ReleaseKey(depositID))
+	if err != nil || j == nil {
+		return "", err
+	}
+	return j.ID, nil
 }

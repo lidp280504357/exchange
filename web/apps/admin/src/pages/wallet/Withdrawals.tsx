@@ -90,7 +90,7 @@ export default function Withdrawals({ admin }: { admin: Admin }) {
       {batch && list.rows.length > 0 && (
         <BatchBar
           chosen={chosen}
-          onLowRisk={() => setSelection(Object.fromEntries(list.rows.filter((w) => (w.risk_score ?? 0) < LOW_RISK).map((w) => [w.id, true])))}
+          onLowRisk={() => setSelection(Object.fromEntries(list.rows.filter((w) => (w.risk_score ?? 0) < LOW_RISK && !w.held_at).map((w) => [w.id, true])))}
           onClear={() => setSelection({})}
           listKey={list.key}
         />
@@ -131,7 +131,14 @@ function BatchBar({ chosen, onLowRisk, onClear, listKey }: { chosen: Withdrawal[
       if (failed.length === 0) toast.success(t("admin.batch.done", { ok }));
       else
         toast.error(t("admin.batch.partly", { ok, failed: failed.length }), {
-          description: failed.map((r) => i18n.t("admin.batch.failedLine", { id: r.id.slice(-8), message: r.message ?? r.code })).join("\n"),
+          description: failed
+            .map((r) =>
+              i18n.t("admin.batch.failedLine", {
+                id: r.id.slice(-8),
+                message: r.code && i18n.exists(`errors.${r.code}`) ? i18n.t(`errors.${r.code}`) : (r.message ?? r.code),
+              }),
+            )
+            .join("\n"),
           duration: 12000,
         });
       setApprove(null);

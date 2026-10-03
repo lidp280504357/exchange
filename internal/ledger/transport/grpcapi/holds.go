@@ -55,6 +55,16 @@ func (s *Server) ReleaseUnclaimed(ctx context.Context, req *ledgerv1.ReleaseUncl
 	return &ledgerv1.ReleaseUnclaimedResponse{Posting: posting(res)}, nil
 }
 
+// GetUnclaimedRelease reports the journal that released an unclaimed
+// deposit, if any.
+func (s *Server) GetUnclaimedRelease(ctx context.Context, req *ledgerv1.GetUnclaimedReleaseRequest) (*ledgerv1.GetUnclaimedReleaseResponse, error) {
+	journal, err := s.svc.UnclaimedRelease(ctx, req.GetDepositId())
+	if err != nil {
+		return nil, err
+	}
+	return &ledgerv1.GetUnclaimedReleaseResponse{JournalId: journal}, nil
+}
+
 // ListHolds lists a user's holds.
 func (s *Server) ListHolds(ctx context.Context, req *ledgerv1.ListHoldsRequest) (*ledgerv1.ListHoldsResponse, error) {
 	list, err := s.svc.Holds(ctx, req.GetUserId(), req.GetActiveOnly())

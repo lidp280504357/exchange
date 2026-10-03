@@ -259,7 +259,7 @@ func (r withdrawals) Page(ctx context.Context, network string, f ports.Withdrawa
 	}
 	return r.list(ctx, `SELECT `+withdrawalColumns+` FROM withdrawals WHERE ($1 = '' OR network = $1) AND ($2 = '' OR status = $2)
 		AND ($3::uuid IS NULL OR user_id = $3) AND ($4 = '' OR asset = $4) AND ($5::uuid IS NULL OR id `+cmp+` $5)
-		AND ($7 = '' OR (held_at IS NOT NULL) = ($7 = 'true')) AND ($8::numeric IS NULL OR value_usdt >= $8)
+		AND ($7 = '' OR (held_at IS NOT NULL AND status = 'PENDING_REVIEW') = ($7 = 'true')) AND ($8::numeric IS NULL OR value_usdt >= $8)
 		AND ($9::numeric IS NULL OR value_usdt <= $9) AND risk_score >= $10
 		ORDER BY id `+order+` LIMIT $6`, network, f.Status, user, f.Asset, after, f.Limit, f.Held, minValue, maxValue, f.MinRisk)
 }

@@ -103,22 +103,24 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 
 ## 提现审核：详情、筛选与搁置（2026-10-02 设计 §4.2，C2c）
 
-- **筛选**：`GET /admin/v1/withdrawals` 多了 `held=true|false`（是否搁置）、`min_value_usdt`、`max_value_usdt`（折合金额区间）、`min_risk`（风控分下限）。
+- **筛选**：`GET /admin/v1/withdrawals` 多了 `held=true|false`（是否搁置；只算待审批的，已决的不再列为搁置，C5.5 ⑦）、`min_value_usdt`、`max_value_usdt`（折合金额区间）、`min_risk`（风控分下限）。
 - **详情** `GET /admin/v1/withdrawals/{id}`（`withdrawals.read`）：提现本身、地址在用户地址簿里的记录（标签、添加时间、冷却期结束时间；已删除为 null）、用户今日与本月已提折合（UTC，含审批中与处理中，不含被拒与已撤销）。页面上地址在提现前 72 小时内加入的标「新地址」（同风控规则 `NEW_ADDRESS`），冷却期未过的标「冷却中」。用户限额取决于提现时 step-up 带的身份数与是否绑定身份验证器，钱包不保存，所以只显示已提金额，不显示占用比例。
-- **搁置** `POST /admin/v1/withdrawals/{id}/hold`（`withdrawals.review`，`{"hold": true, "note": "..."}`，取消时 `hold: false`）：只限待审批的提现（否则 409 `WALLET_WITHDRAWAL_NOT_IN_REVIEW`）；搁置的仍在队列里，列表标「已搁置」并带备注、搁置人与时间，批准或拒绝时自动取消。wallet-service 审计 `wallet.withdrawal.hold`、`wallet.withdrawal.unhold`（操作者为管理员邮箱）。
+- **搁置** `POST /admin/v1/withdrawals/{id}/hold`（`withdrawals.review`，`{"hold": true, "note": "..."}`，取消时 `hold: false`）：只限待审批的提现（否则 409 `WALLET_WITHDRAWAL_NOT_IN_REVIEW`）；搁置的仍在队列里，列表标「已搁置」并带备注、搁置人与时间，批准或拒绝时自动取消。批量审核跳过搁置的提现（该条结果 `ADMIN_WITHDRAWAL_HELD`，要单独审核），「选中低风险」也不选它们（C5.5 ⑦）。wallet-service 审计 `wallet.withdrawal.hold`、`wallet.withdrawal.unhold`（操作者为管理员邮箱）。
 
 ## 充值处置与补记（2026-10-02 设计 §4.3，C2c）
 
 充值页有三个视图：全部充值（读模型）、**待处理**（`?view=attention`）、**补记待回调**（`?view=manual`）；后两个直接读 wallet-service（`GET /admin/v1/deposits/review?attention=true|manual_pending=true`，`withdrawals.read`），详情 `GET /admin/v1/deposits/{id}`。处置与补记要 `deposits.review`（ADMIN、FINANCE）。
 
 - **待处理的充值**：低于最小充值额、账户已关闭或不符合资格的（已记在系统科目 `UNCLAIMED_DEPOSIT`）、未支持的代币（没有记账）、补记后托管方回调与录入不一致的（`discrepancy`）。
-  - **入账给用户** `POST /admin/v1/deposits/{id}/credit`（理由）：只限已记入 `UNCLAIMED_DEPOSIT` 的，按原币种、原数量由账本 `ReleaseUnclaimed` 转给用户现货账户（分录 `DEPOSIT_CREDIT`，幂等键 `deposit-release:<id>`，账本审计 `ledger.unclaimed_released`），充值变为 `CREDITED`、记下放行分录。不能改数量；未支持的代币与回调不一致的补记不能入账（409 `WALLET_DEPOSIT_NOT_RELEASABLE`），要补偿另做资金调整。
-  - **驳回** `POST /admin/v1/deposits/{id}/reject`（理由）：只标记为已处理（`resolution = DISMISSED`），不动资金，wallet-service 审计 `wallet.deposit.dismissed`。处理过的再处理得到 `WALLET_DEPOSIT_RESOLVED`。
+  - **入账给用户** `POST /admin/v1/deposits/{id}/credit`（理由）：只限已记入 `UNCLAIMED_DEPOSIT` 的，按原币种、原数量由账本 `ReleaseUnclaimed` 转给用户现货账户（分录 `DEPOSIT_CREDIT`，幂等键 `deposit-release:<id>`，账本审计 `ledger.unclaimed_released`），充值变为 `CREDITED`、记下放行分录。不能改数量；未支持的代币与回调不一致的补记不能入账（409 `WALLET_DEPOSIT_NOT_RELEASABLE`），要补偿另做资金调整。理由只进审计，不进分录：账本已放行、钱包没记上时，换个理由再点「入账」也只是记下原来的放行（C5.5 ⑦）。
+  - **驳回** `POST /admin/v1/deposits/{id}/reject`（理由）：只标记为已处理（`resolution = DISMISSED`），不动资金，wallet-service 审计 `wallet.deposit.dismissed`。处理过的再处理得到 `WALLET_DEPOSIT_RESOLVED`。账本已经放行、但钱包没记上的不能驳回（409 `WALLET_DEPOSIT_RELEASED`，详情 `journal_id`；钱包驳回前按 `deposit-release:<id>` 问账本 `GetUnclaimedRelease`），再点「入账」把放行记下来（C5.5 ⑦）。
 - **补记充值**（托管方已到账、回调丢失）：优盾网关没有按交易号查询的接口，系统无法向托管方核对。管理员先在优盾商户后台或区块浏览器核对，再在充值页「补记充值」录入网络、托管方交易号（tradeId）、充值地址、交易哈希与数量：
   - `POST /admin/v1/deposits/manual/check` 只核对不记账：网络由托管方服务、地址是该网络上某个用户的充值地址、`UDUN:<tradeId>` 与（网络、哈希、地址）都没出现过（否则 409 `WALLET_DEPOSIT_KNOWN`，详情带已有充值的 ID）、数量不超过资产精度；返回入账用户、资产、是否低于最小额与折合 USDT。
   - `POST /admin/v1/deposits/manual`（再带理由）是一笔资金操作（`DEPOSIT_BACKFILL`），护栏与调账相同：单人模式限额内立即补记（`EXECUTED`，`result` 为 `deposit <id>`），超过限额、无报价或双人模式时等另一位管理员批准。确认框明示「托管方未核对」。
-  - 补记走与回调相同的路径：充值记为 `CONFIRMED`、来源 `MANUAL`、录入人为申请人，由处理器交账本入账（低于最小额同样进 `UNCLAIMED_DEPOSIT`），wallet-service 审计 `wallet.deposit.backfilled`。
+  - 补记走与回调相同的路径：充值记为 `CONFIRMED`、来源 `MANUAL`、录入人为申请人，由处理器交账本入账（低于最小额同样进 `UNCLAIMED_DEPOSIT`），wallet-service 审计 `wallet.deposit.backfilled`。同一笔补记同时提交两次，后到的撞唯一索引后按「同一补记再来」返回先到的那笔充值，第二笔资金操作也就完结（C5.5 ⑦）。
   - 托管方的回调晚到时按交易号找到这笔补记：地址、资产、数量一致即记「已核对」（回调日志 `APPLIED`，不再入账）；不一致时不更正、不再入账，回调日志记 `DISCREPANCY`、充值转为待处理并告警（`wallet_custody_deposit_discrepancies_total`，告警 `CustodyDepositDiscrepancy`）。查明后驳回或另做资金调整。
+    - 回调比处理器先到时，这笔补记不再交账本入账，等人处理（C5.5 ⑦）。
+    - 托管方重发同一回调，`DISCREPANCY` 保持不变（已是终态，不会被改写成 `IGNORED`）。
   - 「补记待回调」列出还没等到回调的补记；`exchangectl wallet reconcile --network UDUN`（或 `checks --network UDUN`）的报告在对账表后单列它们——托管方余额里没有对应的到账，就是录错了。
 
 ## 资产与交易对的编辑（C3）
@@ -333,4 +335,6 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | `WALLET_DEPOSIT_KNOWN` | 补记的托管方交易号或（网络、哈希、地址）已有充值，详情 `deposit_id` |
 | `WALLET_DEPOSIT_NOT_RELEASABLE` | 只有记入 `UNCLAIMED_DEPOSIT`、有币种、回调没有不一致的待处理充值才能入账给用户 |
 | `WALLET_DEPOSIT_RESOLVED` | 这笔充值已经处理过 |
+| `WALLET_DEPOSIT_RELEASED` | 账本已经把这笔待处理充值放行给用户、钱包没记上：不能驳回，再「入账」一次把放行记下（详情 `journal_id`） |
+| `ADMIN_WITHDRAWAL_HELD` | 批量审核跳过了搁置中的提现，要单独审核 |
 | `WALLET_WITHDRAWAL_NOT_IN_REVIEW` | 只有待审批的提现可以搁置 |

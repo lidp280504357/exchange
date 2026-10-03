@@ -2580,6 +2580,95 @@ func (x *ReleaseUnclaimedResponse) GetPosting() *Posting {
 	return nil
 }
 
+type GetUnclaimedReleaseRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DepositId     string                 `protobuf:"bytes,1,opt,name=deposit_id,json=depositId,proto3" json:"deposit_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetUnclaimedReleaseRequest) Reset() {
+	*x = GetUnclaimedReleaseRequest{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetUnclaimedReleaseRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetUnclaimedReleaseRequest) ProtoMessage() {}
+
+func (x *GetUnclaimedReleaseRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetUnclaimedReleaseRequest.ProtoReflect.Descriptor instead.
+func (*GetUnclaimedReleaseRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *GetUnclaimedReleaseRequest) GetDepositId() string {
+	if x != nil {
+		return x.DepositId
+	}
+	return ""
+}
+
+type GetUnclaimedReleaseResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The release's journal; empty when the deposit was not released.
+	JournalId     string `protobuf:"bytes,1,opt,name=journal_id,json=journalId,proto3" json:"journal_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetUnclaimedReleaseResponse) Reset() {
+	*x = GetUnclaimedReleaseResponse{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetUnclaimedReleaseResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetUnclaimedReleaseResponse) ProtoMessage() {}
+
+func (x *GetUnclaimedReleaseResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetUnclaimedReleaseResponse.ProtoReflect.Descriptor instead.
+func (*GetUnclaimedReleaseResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *GetUnclaimedReleaseResponse) GetJournalId() string {
+	if x != nil {
+		return x.JournalId
+	}
+	return ""
+}
+
 var File_exchange_ledger_v1_ledger_proto protoreflect.FileDescriptor
 
 const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
@@ -2776,7 +2865,13 @@ const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
 	"\x05actor\x18\x05 \x01(\tR\x05actor\x12\x16\n" +
 	"\x06reason\x18\x06 \x01(\tR\x06reason\"Q\n" +
 	"\x18ReleaseUnclaimedResponse\x125\n" +
-	"\aposting\x18\x01 \x01(\v2\x1b.exchange.ledger.v1.PostingR\aposting2\xa5\r\n" +
+	"\aposting\x18\x01 \x01(\v2\x1b.exchange.ledger.v1.PostingR\aposting\";\n" +
+	"\x1aGetUnclaimedReleaseRequest\x12\x1d\n" +
+	"\n" +
+	"deposit_id\x18\x01 \x01(\tR\tdepositId\"<\n" +
+	"\x1bGetUnclaimedReleaseResponse\x12\x1d\n" +
+	"\n" +
+	"journal_id\x18\x01 \x01(\tR\tjournalId2\x9d\x0e\n" +
 	"\rLedgerService\x12O\n" +
 	"\x06Freeze\x12!.exchange.ledger.v1.FreezeRequest\x1a\".exchange.ledger.v1.FreezeResponse\x12U\n" +
 	"\bUnfreeze\x12#.exchange.ledger.v1.UnfreezeRequest\x1a$.exchange.ledger.v1.UnfreezeResponse\x12U\n" +
@@ -2794,7 +2889,8 @@ const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
 	"\tPlaceHold\x12$.exchange.ledger.v1.PlaceHoldRequest\x1a%.exchange.ledger.v1.PlaceHoldResponse\x12^\n" +
 	"\vReleaseHold\x12&.exchange.ledger.v1.ReleaseHoldRequest\x1a'.exchange.ledger.v1.ReleaseHoldResponse\x12X\n" +
 	"\tListHolds\x12$.exchange.ledger.v1.ListHoldsRequest\x1a%.exchange.ledger.v1.ListHoldsResponse\x12m\n" +
-	"\x10ReleaseUnclaimed\x12+.exchange.ledger.v1.ReleaseUnclaimedRequest\x1a,.exchange.ledger.v1.ReleaseUnclaimedResponseB\xd9\x01\n" +
+	"\x10ReleaseUnclaimed\x12+.exchange.ledger.v1.ReleaseUnclaimedRequest\x1a,.exchange.ledger.v1.ReleaseUnclaimedResponse\x12v\n" +
+	"\x13GetUnclaimedRelease\x12..exchange.ledger.v1.GetUnclaimedReleaseRequest\x1a/.exchange.ledger.v1.GetUnclaimedReleaseResponseB\xd9\x01\n" +
 	"\x16com.exchange.ledger.v1B\vLedgerProtoP\x01ZHgithub.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1;ledgerv1\xa2\x02\x03ELX\xaa\x02\x12Exchange.Ledger.V1\xca\x02\x12Exchange\\Ledger\\V1\xe2\x02\x1eExchange\\Ledger\\V1\\GPBMetadata\xea\x02\x14Exchange::Ledger::V1b\x06proto3"
 
 var (
@@ -2809,48 +2905,50 @@ func file_exchange_ledger_v1_ledger_proto_rawDescGZIP() []byte {
 	return file_exchange_ledger_v1_ledger_proto_rawDescData
 }
 
-var file_exchange_ledger_v1_ledger_proto_msgTypes = make([]protoimpl.MessageInfo, 40)
+var file_exchange_ledger_v1_ledger_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
 var file_exchange_ledger_v1_ledger_proto_goTypes = []any{
-	(*FreezeRequest)(nil),             // 0: exchange.ledger.v1.FreezeRequest
-	(*UnfreezeRequest)(nil),           // 1: exchange.ledger.v1.UnfreezeRequest
-	(*TransferRequest)(nil),           // 2: exchange.ledger.v1.TransferRequest
-	(*Posting)(nil),                   // 3: exchange.ledger.v1.Posting
-	(*FreezeResponse)(nil),            // 4: exchange.ledger.v1.FreezeResponse
-	(*UnfreezeResponse)(nil),          // 5: exchange.ledger.v1.UnfreezeResponse
-	(*TransferResponse)(nil),          // 6: exchange.ledger.v1.TransferResponse
-	(*Balance)(nil),                   // 7: exchange.ledger.v1.Balance
-	(*GetBalancesRequest)(nil),        // 8: exchange.ledger.v1.GetBalancesRequest
-	(*GetBalancesResponse)(nil),       // 9: exchange.ledger.v1.GetBalancesResponse
-	(*SettleWithdrawalRequest)(nil),   // 10: exchange.ledger.v1.SettleWithdrawalRequest
-	(*SettleWithdrawalResponse)(nil),  // 11: exchange.ledger.v1.SettleWithdrawalResponse
-	(*TransferInternalRequest)(nil),   // 12: exchange.ledger.v1.TransferInternalRequest
-	(*TransferInternalResponse)(nil),  // 13: exchange.ledger.v1.TransferInternalResponse
-	(*BookChainFeeRequest)(nil),       // 14: exchange.ledger.v1.BookChainFeeRequest
-	(*BookChainFeeResponse)(nil),      // 15: exchange.ledger.v1.BookChainFeeResponse
-	(*FundSystemAccountRequest)(nil),  // 16: exchange.ledger.v1.FundSystemAccountRequest
-	(*FundSystemAccountResponse)(nil), // 17: exchange.ledger.v1.FundSystemAccountResponse
-	(*GetSystemBalancesRequest)(nil),  // 18: exchange.ledger.v1.GetSystemBalancesRequest
-	(*GetSystemBalancesResponse)(nil), // 19: exchange.ledger.v1.GetSystemBalancesResponse
-	(*AdjustRequest)(nil),             // 20: exchange.ledger.v1.AdjustRequest
-	(*AdjustResponse)(nil),            // 21: exchange.ledger.v1.AdjustResponse
-	(*FuturesMove)(nil),               // 22: exchange.ledger.v1.FuturesMove
-	(*SettleFuturesRequest)(nil),      // 23: exchange.ledger.v1.SettleFuturesRequest
-	(*FuturesOutcome)(nil),            // 24: exchange.ledger.v1.FuturesOutcome
-	(*SettleFuturesResponse)(nil),     // 25: exchange.ledger.v1.SettleFuturesResponse
-	(*FundInsuranceRequest)(nil),      // 26: exchange.ledger.v1.FundInsuranceRequest
-	(*FundInsuranceResponse)(nil),     // 27: exchange.ledger.v1.FundInsuranceResponse
-	(*GetReconciliationRequest)(nil),  // 28: exchange.ledger.v1.GetReconciliationRequest
-	(*ReconciliationRun)(nil),         // 29: exchange.ledger.v1.ReconciliationRun
-	(*GetReconciliationResponse)(nil), // 30: exchange.ledger.v1.GetReconciliationResponse
-	(*Hold)(nil),                      // 31: exchange.ledger.v1.Hold
-	(*PlaceHoldRequest)(nil),          // 32: exchange.ledger.v1.PlaceHoldRequest
-	(*PlaceHoldResponse)(nil),         // 33: exchange.ledger.v1.PlaceHoldResponse
-	(*ReleaseHoldRequest)(nil),        // 34: exchange.ledger.v1.ReleaseHoldRequest
-	(*ReleaseHoldResponse)(nil),       // 35: exchange.ledger.v1.ReleaseHoldResponse
-	(*ListHoldsRequest)(nil),          // 36: exchange.ledger.v1.ListHoldsRequest
-	(*ListHoldsResponse)(nil),         // 37: exchange.ledger.v1.ListHoldsResponse
-	(*ReleaseUnclaimedRequest)(nil),   // 38: exchange.ledger.v1.ReleaseUnclaimedRequest
-	(*ReleaseUnclaimedResponse)(nil),  // 39: exchange.ledger.v1.ReleaseUnclaimedResponse
+	(*FreezeRequest)(nil),               // 0: exchange.ledger.v1.FreezeRequest
+	(*UnfreezeRequest)(nil),             // 1: exchange.ledger.v1.UnfreezeRequest
+	(*TransferRequest)(nil),             // 2: exchange.ledger.v1.TransferRequest
+	(*Posting)(nil),                     // 3: exchange.ledger.v1.Posting
+	(*FreezeResponse)(nil),              // 4: exchange.ledger.v1.FreezeResponse
+	(*UnfreezeResponse)(nil),            // 5: exchange.ledger.v1.UnfreezeResponse
+	(*TransferResponse)(nil),            // 6: exchange.ledger.v1.TransferResponse
+	(*Balance)(nil),                     // 7: exchange.ledger.v1.Balance
+	(*GetBalancesRequest)(nil),          // 8: exchange.ledger.v1.GetBalancesRequest
+	(*GetBalancesResponse)(nil),         // 9: exchange.ledger.v1.GetBalancesResponse
+	(*SettleWithdrawalRequest)(nil),     // 10: exchange.ledger.v1.SettleWithdrawalRequest
+	(*SettleWithdrawalResponse)(nil),    // 11: exchange.ledger.v1.SettleWithdrawalResponse
+	(*TransferInternalRequest)(nil),     // 12: exchange.ledger.v1.TransferInternalRequest
+	(*TransferInternalResponse)(nil),    // 13: exchange.ledger.v1.TransferInternalResponse
+	(*BookChainFeeRequest)(nil),         // 14: exchange.ledger.v1.BookChainFeeRequest
+	(*BookChainFeeResponse)(nil),        // 15: exchange.ledger.v1.BookChainFeeResponse
+	(*FundSystemAccountRequest)(nil),    // 16: exchange.ledger.v1.FundSystemAccountRequest
+	(*FundSystemAccountResponse)(nil),   // 17: exchange.ledger.v1.FundSystemAccountResponse
+	(*GetSystemBalancesRequest)(nil),    // 18: exchange.ledger.v1.GetSystemBalancesRequest
+	(*GetSystemBalancesResponse)(nil),   // 19: exchange.ledger.v1.GetSystemBalancesResponse
+	(*AdjustRequest)(nil),               // 20: exchange.ledger.v1.AdjustRequest
+	(*AdjustResponse)(nil),              // 21: exchange.ledger.v1.AdjustResponse
+	(*FuturesMove)(nil),                 // 22: exchange.ledger.v1.FuturesMove
+	(*SettleFuturesRequest)(nil),        // 23: exchange.ledger.v1.SettleFuturesRequest
+	(*FuturesOutcome)(nil),              // 24: exchange.ledger.v1.FuturesOutcome
+	(*SettleFuturesResponse)(nil),       // 25: exchange.ledger.v1.SettleFuturesResponse
+	(*FundInsuranceRequest)(nil),        // 26: exchange.ledger.v1.FundInsuranceRequest
+	(*FundInsuranceResponse)(nil),       // 27: exchange.ledger.v1.FundInsuranceResponse
+	(*GetReconciliationRequest)(nil),    // 28: exchange.ledger.v1.GetReconciliationRequest
+	(*ReconciliationRun)(nil),           // 29: exchange.ledger.v1.ReconciliationRun
+	(*GetReconciliationResponse)(nil),   // 30: exchange.ledger.v1.GetReconciliationResponse
+	(*Hold)(nil),                        // 31: exchange.ledger.v1.Hold
+	(*PlaceHoldRequest)(nil),            // 32: exchange.ledger.v1.PlaceHoldRequest
+	(*PlaceHoldResponse)(nil),           // 33: exchange.ledger.v1.PlaceHoldResponse
+	(*ReleaseHoldRequest)(nil),          // 34: exchange.ledger.v1.ReleaseHoldRequest
+	(*ReleaseHoldResponse)(nil),         // 35: exchange.ledger.v1.ReleaseHoldResponse
+	(*ListHoldsRequest)(nil),            // 36: exchange.ledger.v1.ListHoldsRequest
+	(*ListHoldsResponse)(nil),           // 37: exchange.ledger.v1.ListHoldsResponse
+	(*ReleaseUnclaimedRequest)(nil),     // 38: exchange.ledger.v1.ReleaseUnclaimedRequest
+	(*ReleaseUnclaimedResponse)(nil),    // 39: exchange.ledger.v1.ReleaseUnclaimedResponse
+	(*GetUnclaimedReleaseRequest)(nil),  // 40: exchange.ledger.v1.GetUnclaimedReleaseRequest
+	(*GetUnclaimedReleaseResponse)(nil), // 41: exchange.ledger.v1.GetUnclaimedReleaseResponse
 }
 var file_exchange_ledger_v1_ledger_proto_depIdxs = []int32{
 	3,  // 0: exchange.ledger.v1.FreezeResponse.posting:type_name -> exchange.ledger.v1.Posting
@@ -2889,25 +2987,27 @@ var file_exchange_ledger_v1_ledger_proto_depIdxs = []int32{
 	34, // 33: exchange.ledger.v1.LedgerService.ReleaseHold:input_type -> exchange.ledger.v1.ReleaseHoldRequest
 	36, // 34: exchange.ledger.v1.LedgerService.ListHolds:input_type -> exchange.ledger.v1.ListHoldsRequest
 	38, // 35: exchange.ledger.v1.LedgerService.ReleaseUnclaimed:input_type -> exchange.ledger.v1.ReleaseUnclaimedRequest
-	4,  // 36: exchange.ledger.v1.LedgerService.Freeze:output_type -> exchange.ledger.v1.FreezeResponse
-	5,  // 37: exchange.ledger.v1.LedgerService.Unfreeze:output_type -> exchange.ledger.v1.UnfreezeResponse
-	6,  // 38: exchange.ledger.v1.LedgerService.Transfer:output_type -> exchange.ledger.v1.TransferResponse
-	9,  // 39: exchange.ledger.v1.LedgerService.GetBalances:output_type -> exchange.ledger.v1.GetBalancesResponse
-	11, // 40: exchange.ledger.v1.LedgerService.SettleWithdrawal:output_type -> exchange.ledger.v1.SettleWithdrawalResponse
-	13, // 41: exchange.ledger.v1.LedgerService.TransferInternal:output_type -> exchange.ledger.v1.TransferInternalResponse
-	15, // 42: exchange.ledger.v1.LedgerService.BookChainFee:output_type -> exchange.ledger.v1.BookChainFeeResponse
-	17, // 43: exchange.ledger.v1.LedgerService.FundSystemAccount:output_type -> exchange.ledger.v1.FundSystemAccountResponse
-	19, // 44: exchange.ledger.v1.LedgerService.GetSystemBalances:output_type -> exchange.ledger.v1.GetSystemBalancesResponse
-	21, // 45: exchange.ledger.v1.LedgerService.Adjust:output_type -> exchange.ledger.v1.AdjustResponse
-	25, // 46: exchange.ledger.v1.LedgerService.SettleFutures:output_type -> exchange.ledger.v1.SettleFuturesResponse
-	27, // 47: exchange.ledger.v1.LedgerService.FundInsurance:output_type -> exchange.ledger.v1.FundInsuranceResponse
-	30, // 48: exchange.ledger.v1.LedgerService.GetReconciliation:output_type -> exchange.ledger.v1.GetReconciliationResponse
-	33, // 49: exchange.ledger.v1.LedgerService.PlaceHold:output_type -> exchange.ledger.v1.PlaceHoldResponse
-	35, // 50: exchange.ledger.v1.LedgerService.ReleaseHold:output_type -> exchange.ledger.v1.ReleaseHoldResponse
-	37, // 51: exchange.ledger.v1.LedgerService.ListHolds:output_type -> exchange.ledger.v1.ListHoldsResponse
-	39, // 52: exchange.ledger.v1.LedgerService.ReleaseUnclaimed:output_type -> exchange.ledger.v1.ReleaseUnclaimedResponse
-	36, // [36:53] is the sub-list for method output_type
-	19, // [19:36] is the sub-list for method input_type
+	40, // 36: exchange.ledger.v1.LedgerService.GetUnclaimedRelease:input_type -> exchange.ledger.v1.GetUnclaimedReleaseRequest
+	4,  // 37: exchange.ledger.v1.LedgerService.Freeze:output_type -> exchange.ledger.v1.FreezeResponse
+	5,  // 38: exchange.ledger.v1.LedgerService.Unfreeze:output_type -> exchange.ledger.v1.UnfreezeResponse
+	6,  // 39: exchange.ledger.v1.LedgerService.Transfer:output_type -> exchange.ledger.v1.TransferResponse
+	9,  // 40: exchange.ledger.v1.LedgerService.GetBalances:output_type -> exchange.ledger.v1.GetBalancesResponse
+	11, // 41: exchange.ledger.v1.LedgerService.SettleWithdrawal:output_type -> exchange.ledger.v1.SettleWithdrawalResponse
+	13, // 42: exchange.ledger.v1.LedgerService.TransferInternal:output_type -> exchange.ledger.v1.TransferInternalResponse
+	15, // 43: exchange.ledger.v1.LedgerService.BookChainFee:output_type -> exchange.ledger.v1.BookChainFeeResponse
+	17, // 44: exchange.ledger.v1.LedgerService.FundSystemAccount:output_type -> exchange.ledger.v1.FundSystemAccountResponse
+	19, // 45: exchange.ledger.v1.LedgerService.GetSystemBalances:output_type -> exchange.ledger.v1.GetSystemBalancesResponse
+	21, // 46: exchange.ledger.v1.LedgerService.Adjust:output_type -> exchange.ledger.v1.AdjustResponse
+	25, // 47: exchange.ledger.v1.LedgerService.SettleFutures:output_type -> exchange.ledger.v1.SettleFuturesResponse
+	27, // 48: exchange.ledger.v1.LedgerService.FundInsurance:output_type -> exchange.ledger.v1.FundInsuranceResponse
+	30, // 49: exchange.ledger.v1.LedgerService.GetReconciliation:output_type -> exchange.ledger.v1.GetReconciliationResponse
+	33, // 50: exchange.ledger.v1.LedgerService.PlaceHold:output_type -> exchange.ledger.v1.PlaceHoldResponse
+	35, // 51: exchange.ledger.v1.LedgerService.ReleaseHold:output_type -> exchange.ledger.v1.ReleaseHoldResponse
+	37, // 52: exchange.ledger.v1.LedgerService.ListHolds:output_type -> exchange.ledger.v1.ListHoldsResponse
+	39, // 53: exchange.ledger.v1.LedgerService.ReleaseUnclaimed:output_type -> exchange.ledger.v1.ReleaseUnclaimedResponse
+	41, // 54: exchange.ledger.v1.LedgerService.GetUnclaimedRelease:output_type -> exchange.ledger.v1.GetUnclaimedReleaseResponse
+	37, // [37:55] is the sub-list for method output_type
+	19, // [19:37] is the sub-list for method input_type
 	19, // [19:19] is the sub-list for extension type_name
 	19, // [19:19] is the sub-list for extension extendee
 	0,  // [0:19] is the sub-list for field type_name
@@ -2924,7 +3024,7 @@ func file_exchange_ledger_v1_ledger_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_ledger_v1_ledger_proto_rawDesc), len(file_exchange_ledger_v1_ledger_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   40,
+			NumMessages:   42,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

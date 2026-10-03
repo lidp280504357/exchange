@@ -40,6 +40,9 @@ type memStore struct {
 	wevents   []proto.Message
 	audits    []proto.Message
 	callbacks []domain.Callback
+	// race, when set, runs before the next deposit is inserted and may
+	// refuse it (a concurrent request that won the unique index).
+	race func(x domain.Deposit) error
 }
 
 func newMemStore() *memStore {
@@ -100,6 +103,12 @@ func (a memAddresses) Owners(_ context.Context, network string) (map[string]stri
 type memDeposits struct{ m *memStore }
 
 func (d memDeposits) Insert(_ context.Context, x domain.Deposit) error {
+	if race := d.m.race; race != nil {
+		d.m.race = nil
+		if err := race(x); err != nil {
+			return err
+		}
+	}
 	d.m.deposits[x.ID] = x
 	return nil
 }

@@ -354,6 +354,8 @@ func (s *Scanner) request(ctx context.Context, nets []domain.Network) error {
 // requestCredits sends the network's confirmed deposits to the ledger
 // (DepositConfirmed) while their asset takes deposits, and returns how
 // many wait. A closed account's deposit goes to UNCLAIMED_DEPOSIT (§5.4).
+// A backfill the custodian's callback disagreed with waits for a person,
+// who closes it (C5.5 ⑦).
 func requestCredits(ctx context.Context, store ports.Store, eligibility ports.Eligibility, network string, nets []domain.Network,
 	now func() time.Time,
 ) (int, error) {
@@ -369,7 +371,10 @@ func requestCredits(ctx context.Context, store ports.Store, eligibility ports.El
 	}
 	held := 0
 	for _, d := range list {
-		if !enabled[d.Asset] {
+		if d.Resolution != "" {
+			continue // closed by an administrator: never credited
+		}
+		if !enabled[d.Asset] || d.Discrepancy != "" {
 			held++
 			continue
 		}

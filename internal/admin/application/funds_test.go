@@ -266,10 +266,14 @@ func TestReviewBatch(t *testing.T) {
 	if _, err := h.svc.ReviewBatch(ctx, fin, "", nil, true, "low risk batch"); code(err) != apperr.CodeInvalidArgument {
 		t.Fatalf("an empty batch: %v", err)
 	}
-	got, err := h.svc.ReviewBatch(ctx, fin, "", []string{"w1", "busy", "w2", "w1"}, true, "low risk batch")
-	if err != nil || len(got) != 3 || !got[0].OK || got[0].Status != "APPROVED" || got[1].OK || got[1].Code != apperr.CodeConflict || !got[2].OK {
+	held := "2026-10-03T00:00:00Z"
+	h.wallet.withdrawals = map[string]reviewedWithdrawal{"held": {Asset: "USDT", Amount: "100", Status: "PENDING_REVIEW", HeldAt: &held}}
+	got, err := h.svc.ReviewBatch(ctx, fin, "", []string{"w1", "busy", "w2", "held", "w1"}, true, "low risk batch")
+	if err != nil || len(got) != 4 || !got[0].OK || got[0].Status != "APPROVED" || got[1].OK || got[1].Code != apperr.CodeConflict || !got[2].OK ||
+		got[3].OK || got[3].Code != "ADMIN_WITHDRAWAL_HELD" {
 		t.Fatalf("batch %+v %v", got, err)
 	}
+	// Each once; the one on hold is left for its reviewer (C5.5 ⑦).
 	if !slices.Equal(h.wallet.reviewed, []string{"w1", "busy", "w2"}) {
 		t.Fatalf("reviewed %v: each once", h.wallet.reviewed)
 	}

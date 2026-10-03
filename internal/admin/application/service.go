@@ -367,7 +367,7 @@ func (s *Service) ReviewWithdrawal(ctx context.Context, p Principal, key, id str
 	if err != nil {
 		return nil, err
 	}
-	return s.review(ctx, p, id, approve, reason, limit, s.valuer(ctx, priceMaxAge), !c.Fresh)
+	return s.review(ctx, p, id, approve, reason, limit, s.valuer(ctx, priceMaxAge), !c.Fresh, false)
 }
 
 // soleLimit is how much one approval may complete alone: the settings'
@@ -387,22 +387,30 @@ type reviewedWithdrawal struct {
 	Status       string   `json:"status"`
 	Approvals    []string `json:"approvals"`
 	RejectReason *string  `json:"reject_reason"`
+	HeldAt       *string  `json:"held_at"`
 }
+
+// ErrWithdrawalHeld keeps a withdrawal on hold out of a batch review: a
+// reviewer is looking into it, so it is reviewed on its own (C5.5 ⑦).
+var ErrWithdrawalHeld = apperr.New(apperr.KindConflict, "ADMIN_WITHDRAWAL_HELD", "the withdrawal is on hold: review it on its own")
 
 // review reviews one withdrawal. An approval completes it alone only
 // within limit at the current price (no fresh price: not alone), as the
 // worth the wallet compares is the request's (C5.5 ⑥). A repeated request
 // whose first one took effect answers with the withdrawal as it stands.
 func (s *Service) review(ctx context.Context, p Principal, id string, approve bool, reason string, limit decimal.Decimal,
-	value func(string, decimal.Decimal) (decimal.Decimal, bool), repeated bool,
+	value func(string, decimal.Decimal) (decimal.Decimal, bool), repeated, batch bool,
 ) ([]byte, error) {
 	soleMax := decimal.Zero
-	if limit.IsPositive() {
+	if limit.IsPositive() || batch {
 		w, _, err := s.withdrawal(ctx, id)
 		if err != nil {
 			return nil, err
 		}
-		if amount, err := decimal.NewFromString(w.Amount); err == nil {
+		if batch && w.HeldAt != nil {
+			return nil, ErrWithdrawalHeld
+		}
+		if amount, err := decimal.NewFromString(w.Amount); err == nil && limit.IsPositive() {
 			if worth, ok := value(w.Asset, amount); ok && !worth.GreaterThan(limit) {
 				soleMax = limit
 			}
@@ -418,7 +426,8 @@ func (s *Service) review(ctx context.Context, p Principal, id string, approve bo
 	}
 	took := slices.Contains(w.Approvals, p.Admin.Email)
 	if !approve {
-		took = w.Status == "REJECTED" && w.RejectReason != nil && *w.RejectReason == "REVIEW: "+strings.TrimSpace(reason)
+		took = w.Status == "REJECTED" && w.RejectReason != nil &&
+			strings.TrimSpace(strings.TrimPrefix(*w.RejectReason, "REVIEW: ")) == strings.TrimSpace(reason)
 	}
 	if !took {
 		return nil, err
@@ -458,8 +467,9 @@ type BatchResult struct {
 
 // ReviewBatch approves or rejects withdrawals one by one with one reason
 // (each reviewed, and audited by the wallet, on its own); a failure leaves
-// the others decided. The same batch again with the same key answers for
-// the withdrawals it reviewed as they stand.
+// the others decided, and one on hold is left out (ADMIN_WITHDRAWAL_HELD:
+// it is reviewed on its own). The same batch again with the same key
+// answers for the withdrawals it reviewed as they stand.
 func (s *Service) ReviewBatch(ctx context.Context, p Principal, key string, ids []string, approve bool, reason string) ([]BatchResult, error) {
 	if err := p.require(domain.PermWithdrawalsEdit); err != nil {
 		return nil, err
@@ -486,7 +496,7 @@ func (s *Service) ReviewBatch(ctx context.Context, p Principal, key string, ids 
 			continue
 		}
 		seen[id] = true
-		raw, err := s.review(ctx, p, id, approve, reason, limit, value, !c.Fresh)
+		raw, err := s.review(ctx, p, id, approve, reason, limit, value, !c.Fresh, true)
 		if err != nil {
 			e := apperr.From(err)
 			out = append(out, BatchResult{ID: id, Code: e.Code, Message: e.Message})

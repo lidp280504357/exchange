@@ -63,7 +63,10 @@ type Callback struct {
 	ProcessedAt time.Time
 }
 
-// Settled reports whether nothing is left to do with the callback.
+// Settled reports whether nothing is left to do with the callback: a
+// discrepancy with a backfill is too, as a person decides on the deposit
+// (the custodian's retries must not turn it into "already deposit",
+// C5.5 ⑦).
 func (c *Callback) Settled() bool {
-	return c.Result == CallbackApplied || c.Result == CallbackIgnored || c.Result == CallbackRejected
+	return c.Result == CallbackApplied || c.Result == CallbackIgnored || c.Result == CallbackRejected || c.Result == CallbackDiscrepancy
 }

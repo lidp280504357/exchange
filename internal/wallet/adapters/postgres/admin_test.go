@@ -131,4 +131,14 @@ func TestAdminStorage(t *testing.T) {
 			t.Fatalf("held %+v", page[0])
 		}
 	}
+	// Out of review (a hold left over), it is no longer listed as held (C5.5 ⑦).
+	if err := w.Reject("REVIEW: odd address", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Tx(ctx, func(r ports.Repos) error { return r.Withdrawals().Update(ctx, w) }); err != nil {
+		t.Fatal(err)
+	}
+	if page, err := read.Withdrawals().Page(ctx, "", ports.WithdrawalFilter{Held: "true", Limit: 10}); err != nil || len(page) != 0 {
+		t.Fatalf("a decided withdrawal listed as held: %d %v", len(page), err)
+	}
 }
