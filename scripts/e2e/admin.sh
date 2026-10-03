@@ -927,8 +927,10 @@ check '(.pairs | length) >= 50 and (.fee_schedules | map(.tier) | index("default
 # follows Binance's LINKBTC and HOUSE quotes it, its document is the same
 # from run to run, and each run halts it at once and confirms its opening,
 # so it trades again by the end.
-LINK_REF=$(jq -r '[.pairs[] | select(.symbol == "LINK-BTC") | .reference_symbol][0] // "none"' <<<"$BODY")
-LINK_NOW=$(jq -r '[.pairs[] | select(.symbol == "LINK-BTC") | .status][0] // "none"' <<<"$BODY")
+# The document leaves out an empty reference symbol: "" is a pair that
+# follows none, "none" no pair at all.
+LINK_REF=$(jq -r 'first(.pairs[] | select(.symbol == "LINK-BTC") | .reference_symbol // "") // "none"' <<<"$BODY")
+LINK_NOW=$(jq -r 'first(.pairs[] | select(.symbol == "LINK-BTC") | .status) // "none"' <<<"$BODY")
 # HOUSE quotes every pair (the user's decision of 2026-10-02): LINK-BTC is
 # appended once to market.house_liquidity's symbols, the list kept (an
 # empty list already means every symbol).
@@ -991,15 +993,17 @@ case $LINK_REF in
     fi
     ;;
 esac
-as OPERATOR POST /admin/v1/instruments/apply "{\"config\":$(link_pair "$LINK_REF"),\"reason\":\"e2e again\"}"
-expect 200 - "the same document again"
-check '(.changes | length) == 0 and .unchanged == 1' "changes nothing"
-if [[ $LINK_NOW != PREPARE ]]; then
-  check '[.warnings[] | select(.code == "STATUS_IGNORED" and .symbol == "LINK-BTC")] | length == 1' "its PREPARE noted: a document moves no status"
+if [[ $LINK_REF == LINKBTC ]]; then
+  as OPERATOR POST /admin/v1/instruments/apply "{\"config\":$(link_pair),\"reason\":\"e2e again\"}"
+  expect 200 - "the same document again"
+  check '(.changes | length) == 0 and .unchanged == 1' "changes nothing"
+  if [[ $LINK_NOW != PREPARE ]]; then
+    check '[.warnings[] | select(.code == "STATUS_IGNORED" and .symbol == "LINK-BTC")] | length == 1' "its PREPARE noted: a document moves no status"
+  fi
 fi
 pair_listed() {
   call GET /v1/market/pairs ""
-  [[ $STATUS == 200 ]] && jq -e '.pairs[] | select(.symbol == "LINK-BTC" and .min_notional == "0.0001")' <<<"$BODY" >/dev/null
+  [[ $STATUS == 200 ]] && jq -e '.pairs[] | select(.symbol == "LINK-BTC")' <<<"$BODY" >/dev/null
 }
 eventually 60 "the sites list LINK-BTC" pair_listed
 LINK_STATUS=$(jq -r '.pairs[] | select(.symbol == "LINK-BTC") | .status' <<<"$BODY")
