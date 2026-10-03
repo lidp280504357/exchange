@@ -263,3 +263,4 @@ sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangec
 | B10 `expected=0` | 步骤 1 看清托管方的余额单位后再补；在此之前基线重置后的第一次对账由人工核对。 |
 | B7a 未匹配充值 | 进 `UNCLAIMED_DEPOSIT` 的待处理账户，须在放真实用户之前落地，不阻塞步骤 1–6。 |
 | 审查 AF Medium | `custodyfee.go:78` 附近：按主币计价、而平台未托管该主币的挂起手续费（如 TRC20 的 TRX）不得再按代币口径解释短缺（应为 0），步骤 5 之前改好并补测试。 |
+| B7a 设计（18:30） | **批准**编码会话的方案：无主充值行（`NoOwner` 哨兵只由此路径写入，`UNKNOWN_ADDRESS`，`CONFIRMED`，按 provider_tx_id 幂等），经既有未认领路径记入 `UNCLAIMED_DEPOSIT`（分录键确定），不发 DepositDetected/DepositConfirmed。条件：凡期待用户的地方都拒绝 `NoOwner`（ReleaseUnclaimed 到 NoOwner、资格与风控查询），并有单测证明哨兵到不了 notification；对账把 `UNCLAIMED_DEPOSIT` 计入"应在托管方"；指标 `wallet_deposits_unmatched_total` 与告警 `CustodyDepositUnmatched` 连"没有资产可记"的币一起算；钱包提供一个内部接口（新文件）一次完成"设持有人 + ReleaseUnclaimed"并审计，后台页由后台会话做（后台待办 ㉑）；迁移 00012 前先 fetch origin/main。不采用只记账不建行的替代。 |
