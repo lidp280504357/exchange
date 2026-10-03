@@ -173,6 +173,9 @@ type fakePrices struct {
 	reported       []decimal.Decimal
 	now            func() time.Time
 	lastErr        error // the last trade cannot be read
+	// lastAtOf is a symbol's own last trade time (the perpetual's), when
+	// set; lastAt serves the others.
+	lastAtOf map[string]time.Time
 }
 
 func (p *fakePrices) Reference(_ context.Context, symbol string) (decimal.Decimal, bool, error) {
@@ -187,11 +190,14 @@ func (p *fakePrices) Reference(_ context.Context, symbol string) (decimal.Decima
 	return p.ref, p.ref.IsPositive(), nil
 }
 
-func (p *fakePrices) LastTrade(context.Context, string) (decimal.Decimal, time.Time, error) {
+func (p *fakePrices) LastTrade(_ context.Context, symbol string) (decimal.Decimal, time.Time, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.lastErr != nil {
 		return decimal.Zero, time.Time{}, p.lastErr
+	}
+	if at, ok := p.lastAtOf[symbol]; ok {
+		return p.last, at, nil
 	}
 	at := p.lastAt
 	if at.IsZero() {
@@ -1660,5 +1666,57 @@ func TestTheChartOutlivesARestart(t *testing.T) {
 	again := newRig(t, r.store)
 	if got := again.sim.History(r.now.Add(-time.Hour)); len(got) != len(r.store.samples) {
 		t.Fatalf("%d samples after the restart, %d kept", len(got), len(r.store.samples))
+	}
+}
+
+// A perpetual quiet for 45 seconds gets a taker's order of the contract's
+// minimum, paused or not (coordinator 2026-10-04: its 1-minute candles
+// broke up), once per quiet spell: the next waits 45 seconds more; a
+// perpetual that trades gets none.
+func TestAQuietPerpetualGetsTheMinimumOrder(t *testing.T) {
+	p := domain.DefaultParams()
+	p.DailyVolume, p.PerpDailyVolume = 0, 1 // its takers' own flow: next to nothing
+	r, fd := perpRig(t, p)
+	r.prices.mu.Lock()
+	r.prices.lastAtOf = map[string]time.Time{"ASTRA-USDT-PERP": r.now.Add(-10 * time.Minute)}
+	r.prices.mu.Unlock()
+	markets := func() []string {
+		fd.mu.Lock()
+		defer fd.mu.Unlock()
+		return slices.Clone(fd.markets)
+	}
+	r.rounds(4 * 40)
+	if got := markets(); len(got) != 0 {
+		t.Fatalf("before 45 seconds: %v", got)
+	}
+	r.rounds(4 * 6)
+	got := markets()
+	if len(got) != 1 {
+		t.Fatalf("after 45 seconds: %v", got)
+	}
+	var user, side, qty string
+	var reduce bool
+	if _, err := fmt.Sscanf(got[0], "%s %s %s %v", &user, &side, &qty, &reduce); err != nil {
+		t.Fatal(err)
+	}
+	// The minimum notional of 5 at a price near 1, in whole lots.
+	if user == "" || user[0] != 't' || (qty != "5" && qty != "6") || reduce {
+		t.Fatalf("the quiet order %q", got[0])
+	}
+	r.rounds(4 * 40)
+	if n := len(markets()); n != 1 {
+		t.Fatalf("again within 45 seconds: %d orders", n)
+	}
+	r.rounds(4 * 6)
+	if n := len(markets()); n != 2 {
+		t.Fatalf("the next quiet spell: %d orders", n)
+	}
+	// Trading on its own, it gets none.
+	r.prices.mu.Lock()
+	r.prices.lastAtOf = nil
+	r.prices.mu.Unlock()
+	r.rounds(4 * 60)
+	if n := len(markets()); n != 2 {
+		t.Fatalf("a perpetual that trades: %d orders", n)
 	}
 }

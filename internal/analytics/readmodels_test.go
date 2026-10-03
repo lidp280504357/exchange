@@ -15,6 +15,7 @@ import (
 
 	derivativesv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/derivatives/v1"
 	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
+	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
 	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
 	tradev1 "github.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1"
 	walletv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1"
@@ -240,4 +241,33 @@ func rawOf(t *testing.T, msg proto.Message) string {
 		t.Fatal(err)
 	}
 	return base64.StdEncoding.EncodeToString(b)
+}
+
+// A minute market-data-service made flat (coordinator 2026-10-04) becomes
+// its candles_1m row, updated at the minute's start so that a candle
+// computed from trades of that minute replaces it; anything but a flat
+// minute on that topic is refused.
+func TestAFlatMinuteBecomesItsCandleRow(t *testing.T) {
+	open := time.Date(2026, 10, 4, 3, 1, 0, 0, time.UTC)
+	flat := &marketv1.Candle{
+		Symbol: "ASTRA-USDT-PERP", Interval: "1m", OpenTime: timestamppb.New(open), Open: "0.9123", High: "0.9123", Low: "0.9123",
+		Close: "0.9123", Volume: "0", QuoteVolume: "0", Closed: true,
+	}
+	var m readModels
+	if err := m.add(delivery(t, event.TopicMarketCandleFlats, &marketv1.CandleClosed{Candle: flat}, open.Add(70*time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.flats) != 1 {
+		t.Fatalf("rows %v", m.flats)
+	}
+	row := m.flats[0]
+	if row[0] != "ASTRA-USDT-PERP" || row[1] != open || !row[2].(decimal.Decimal).Equal(decimal.RequireFromString("0.9123")) ||
+		!row[6].(decimal.Decimal).IsZero() || row[8] != uint32(0) || row[9] != open {
+		t.Fatalf("the row %v", row)
+	}
+	traded := proto.Clone(flat).(*marketv1.Candle)
+	traded.TradeCount = 3
+	if err := m.add(delivery(t, event.TopicMarketCandleFlats, &marketv1.CandleClosed{Candle: traded}, open)); !errors.Is(err, errMalformed) {
+		t.Fatalf("a minute with trades: %v", err)
+	}
 }

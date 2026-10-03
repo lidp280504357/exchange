@@ -89,16 +89,27 @@ type Candle struct {
 	Trades      int64
 }
 
-// Add folds a trade into the candle: the first sets the open.
+// Add folds a trade into the candle: the first sets the open, unless a
+// flat minute opened it already (AddFlat).
 func (c *Candle) Add(price, quantity, quote decimal.Decimal) {
-	if c.Trades == 0 {
-		c.Open, c.High, c.Low = price, price, price
-	} else {
-		c.High, c.Low = decimal.Max(c.High, price), decimal.Min(c.Low, price)
-	}
-	c.Close = price
+	c.price(price)
 	c.Volume, c.QuoteVolume = c.Volume.Add(quantity), c.QuoteVolume.Add(quote)
 	c.Trades++
+}
+
+// AddFlat folds in a minute without trades at price, the previous close:
+// it opens the candle at it when nothing did, and counts in its high and
+// low, without volume or a trade, as rolling up the one-minute candles
+// with their flat ones would (coordinator 2026-10-04).
+func (c *Candle) AddFlat(price decimal.Decimal) { c.price(price) }
+
+func (c *Candle) price(p decimal.Decimal) {
+	if c.Trades == 0 && c.Open.IsZero() {
+		c.Open, c.High, c.Low = p, p, p
+	} else {
+		c.High, c.Low = decimal.Max(c.High, p), decimal.Min(c.Low, p)
+	}
+	c.Close = p
 }
 
 // Closed reports whether the candle's interval has ended at now.

@@ -87,7 +87,7 @@ market-sim 每 5 秒把目标价上报给 market-data-service（`PUT /internal/m
 ## 永续 ASTRA-USDT-PERP（设计 §5.2，A4）
 
 - 规格在 `deploy/instruments/test.json`（`PREPARE`；风险阶梯按 125 倍表、名义上限缩小 10 倍：5,000 USDT 以内 125 倍……10,000,000 以内 2 倍）。指数价来自平台自己的 ASTRA-USDT（引擎盘口中间价，见 [market-data.md](market-data.md)），标记价与资金费沿用通用规则。HOUSE 不为它报价，它的订单互相成交（[derivatives.md](derivatives.md)）。
-- 开关 `sim.perp`（按合约，默认关）打开、且合约 `TRADING` 时：做市商在永续上同样以目标价为中心挂梯子（每轮一个做市商重报），噪声交易者按 `perp_daily_volume`（默认每天 1,000,000 USDT）的泊松流下市价单；每个机器人的仓位价值超过 `perp_bot_cap`（默认 20,000 USDT）后只做减仓方向（做市商撤掉加仓一侧，噪声交易者下只减仓的单）。机器人之间的多空在池内相互抵消。
+- 开关 `sim.perp`（按合约，默认关）打开、且合约 `TRADING` 时：做市商在永续上同样以目标价为中心挂梯子（每轮一个做市商重报），噪声交易者按 `perp_daily_volume`（默认每天 1,000,000 USDT）的泊松流下市价单，永续 45 秒没有成交时（从机器人开始做永续算起；`PAUSE` 期间也一样）由一个吃单者立刻下一笔合约最小量的市价单（最小名义金额按 lot 向上取整，市价单的保护价让它只在标记价的价格带内成交；计数 `market_sim_perp_quiet_takes_total`，订单计入 `PERP_TAKER`，下单成功后再等 45 秒；协调会话 2026-10-04 代用户决定：此前约五分之一的分钟没有成交，1 分钟 K 线断续，现货的同类保证见上表 TAKER）；每个机器人的仓位价值超过 `perp_bot_cap`（默认 20,000 USDT）后只做减仓方向（做市商撤掉加仓一侧，噪声交易者下只减仓的单）。机器人之间的多空在池内相互抵消。
 - 保证金：每 10 秒读一次每个机器人的仓位与 FUTURES 可用余额（两次之间的做市成交最多让仓位略超 `perp_bot_cap`），余额低于 `perp_margin`（默认 30,000）的一半时从它的现货 USDT 划转补足（`POST /v1/account/transfers`，幂等键按这 10 秒）。
 - 关掉 `sim.perp`、关掉 `sim.enabled` 或 `HALT` 事件时撤掉做市商在永续上的挂单。`GET /internal/sim` 有 `perp`、`perp_running`，每个机器人有 `perp_position`、`futures_usdt`。
 - 启用：`scripts/ops/astra.sh perp-open`（合约置 `TRADING`）、`astra.sh perp-on`。
@@ -158,7 +158,7 @@ scripts/ops/astra.sh perp-on     # sim.perp
 
 ## 指标与告警
 
-`market_sim_target_price`、`market_sim_last_price`、`market_sim_running`、`market_sim_references_fresh`、`market_sim_walking`、`market_sim_inventory{asset}`、`market_sim_orders_total{role,result}`（placed、unfunded、out_of_band、failed；永续的角色带 `PERP_` 前缀）、`market_sim_cancels_total{role}`、`market_sim_guards_total{guard}`、`market_sim_throttled_total{kind}`、`market_sim_errors_total{op}`、`market_sim_band_deadlocks_total`。
+`market_sim_target_price`、`market_sim_last_price`、`market_sim_running`、`market_sim_references_fresh`、`market_sim_walking`、`market_sim_inventory{asset}`、`market_sim_orders_total{role,result}`（placed、unfunded、out_of_band、failed；永续的角色带 `PERP_` 前缀）、`market_sim_cancels_total{role}`、`market_sim_guards_total{guard}`、`market_sim_throttled_total{kind}`、`market_sim_errors_total{op}`（含 `perp_last_trade`：读不到永续最近成交）、`market_sim_band_deadlocks_total`、`market_sim_quiet_takes_total`（现货冷清时的吃单）、`market_sim_perp_quiet_takes_total`（永续 45 秒无成交时的最小量吃单）。
 
 告警：`MarketSimFailing`（10 分钟失败超过 100 次）、`MarketSimReferencesStale`（运行中 5 分钟没有新鲜的 BTC/ETH 参考价）、`MarketSimBandDeadlock`（15 分钟内看门狗动过手：查 `GET /internal/sim` 的 `anchor_price`、`band_distance`、机器人的 `error` 与 `retry_at`，以及日志 `the market was locked`）。
 

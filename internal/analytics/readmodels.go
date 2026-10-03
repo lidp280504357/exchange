@@ -18,6 +18,7 @@ import (
 
 	derivativesv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/derivatives/v1"
 	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
+	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
 	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
 	tradev1 "github.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1"
 	walletv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1"
@@ -32,10 +33,12 @@ import (
 // join them; positions, fills, funding and liquidations of contracts
 // have tables of their own (§7.3 task 10, 00005_derivatives_read_models.sql).
 
-// ReadModelTopics feed the read models.
+// ReadModelTopics feed the read models (the flat minutes too: kept in
+// events, a backfill writes them again).
 var ReadModelTopics = []string{
 	event.TopicOrder, event.TopicTrade, event.TopicWalletDeposit, event.TopicWalletWithdrawal,
 	event.TopicDerivOrder, event.TopicDerivTrade, event.TopicDerivPosition, event.TopicDerivLiquidation,
+	event.TopicMarketCandleFlats,
 }
 
 const (
@@ -59,6 +62,7 @@ const (
 	insertLiquidations = `INSERT INTO derivatives_liquidations (event_id, kind, user_id, symbol, position_side, cross_margin, adl,
 		trade_id, price, quantity, realized_pnl, insurance_paid, mark_price, bankruptcy_price, margin_balance, maintenance_margin,
 		occurred_at)`
+	insertFlats = `INSERT INTO candles_1m (symbol, open_time, open, high, low, close, volume, quote_volume, trades, updated_at)`
 	// refreshCandles rewrites the one-minute candles of a symbol between
 	// two minutes from all its trades there.
 	refreshCandles = `INSERT INTO candles_1m (symbol, open_time, open, high, low, close, volume, quote_volume, trades, updated_at)
@@ -149,6 +153,7 @@ type span struct{ from, to time.Time }
 type readModels struct {
 	trades, orders, updates, deposits, withdrawals [][]any
 	positions, fills, funding, liquidations        [][]any
+	flats                                          [][]any
 	touched                                        map[string]span
 }
 
@@ -157,7 +162,7 @@ type readModels struct {
 func (m *readModels) add(d kafka.Delivery) error {
 	switch d.Topic {
 	case event.TopicTrade, event.TopicOrder, event.TopicWalletDeposit, event.TopicWalletWithdrawal, event.TopicDerivOrder,
-		event.TopicDerivTrade, event.TopicDerivPosition, event.TopicDerivLiquidation:
+		event.TopicDerivTrade, event.TopicDerivPosition, event.TopicDerivLiquidation, event.TopicMarketCandleFlats:
 	default:
 		return nil
 	}
@@ -173,6 +178,8 @@ func (m *readModels) add(d kafka.Delivery) error {
 	switch e := msg.(type) {
 	case *tradev1.TradeExecuted:
 		return m.addTrade(e, at)
+	case *marketv1.CandleClosed:
+		return m.addFlat(e.GetCandle())
 	case *orderv1.OrderAccepted, *orderv1.OrderRejected, *orderv1.OrderOpened, *orderv1.OrderPartiallyFilled, *orderv1.OrderFilled,
 		*orderv1.OrderCanceled:
 		return m.addOrderEvent(e, env.GetEventId(), at)
@@ -185,6 +192,29 @@ func (m *readModels) add(d kafka.Delivery) error {
 	case interface{ GetWithdrawal() *walletv1.Withdrawal }:
 		return m.addWithdrawal(e.GetWithdrawal(), at)
 	}
+	return nil
+}
+
+// addFlat stores a minute market-data-service made flat (no trade in it,
+// coordinator 2026-10-04) as its candles_1m row, updated at the minute's
+// start: a candle computed from trades of that minute (one that came
+// late) is always newer and replaces it.
+func (m *readModels) addFlat(c *marketv1.Candle) error {
+	if c.GetInterval() != "1m" || c.GetTradeCount() != 0 || c.GetSymbol() == "" || c.GetOpenTime() == nil {
+		return fmt.Errorf("%w: not a flat minute: %s %s", errMalformed, c.GetSymbol(), c.GetInterval())
+	}
+	var prices [4]decimal.Decimal
+	for i, s := range []string{c.GetOpen(), c.GetHigh(), c.GetLow(), c.GetClose()} {
+		p, err := amount(s)
+		if err != nil {
+			return err
+		}
+		prices[i] = p
+	}
+	open := c.GetOpenTime().AsTime().UTC()
+	m.flats = append(m.flats, []any{
+		c.GetSymbol(), open, prices[0], prices[1], prices[2], prices[3], decimal.Zero, decimal.Zero, uint32(0), open,
+	})
 	return nil
 }
 
@@ -509,6 +539,7 @@ func (in *Ingestor) storeReadModels(ctx context.Context, batch []kafka.Delivery)
 		{insertDerivFills, m.fills},
 		{insertFunding, m.funding},
 		{insertLiquidations, m.liquidations},
+		{insertFlats, m.flats},
 	} {
 		if err := in.insert(ctx, t.insert, t.rows); err != nil {
 			return err

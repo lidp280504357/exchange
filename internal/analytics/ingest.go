@@ -40,6 +40,7 @@ var Topics = []string{
 	event.TopicDerivTrade,
 	event.TopicDerivPosition,
 	event.TopicDerivLiquidation,
+	event.TopicMarketCandleFlats,
 }
 
 // Ingestor writes event batches into the events table.

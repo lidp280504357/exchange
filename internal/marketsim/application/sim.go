@@ -141,6 +141,11 @@ type Sim struct {
 	perpTurn      int
 	perpBots      map[string]*perpBot
 	perpCheckedAt time.Time
+	// The perpetual's last trade as last read, when the bots started on it
+	// and its last quiet order (perpQuietTake).
+	perpTradeAt   time.Time
+	perpWatchFrom time.Time
+	perpQuietAt   time.Time
 }
 
 // bot is a bot account as the simulation runs it.
@@ -946,7 +951,7 @@ type metrics struct {
 	orders                           *prometheus.CounterVec
 	cancels, guards, throttled       *prometheus.CounterVec
 	errors                           *prometheus.CounterVec
-	deadlocks, quiet                 prometheus.Counter
+	deadlocks, quiet, perpQuiet      prometheus.Counter
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -984,8 +989,12 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Name: "market_sim_quiet_takes_total",
 			Help: "Takers' orders sent because nothing had traded for a minute (the perpetual's index needs a trade within five).",
 		}),
+		perpQuiet: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "market_sim_perp_quiet_takes_total",
+			Help: "Takers' minimum orders on the perpetual sent because it had not traded for 45 seconds (its 1-minute candles stay whole).",
+		}),
 	}
 	reg.MustRegister(m.target, m.last, m.running, m.refsFresh, m.walking, m.inventory, m.orders, m.cancels, m.guards, m.throttled, m.errors,
-		m.deadlocks, m.quiet)
+		m.deadlocks, m.quiet, m.perpQuiet)
 	return m
 }

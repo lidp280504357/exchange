@@ -19,12 +19,13 @@ derivatives-engine ──derivatives.market.depth.internal / derivatives.trade.e
 
 - 公共盘口与成交由 market-data-service 统一发布（ADR-0015）：显示参考市场的交易对发币安的盘口与成交（见下文「参考盘口与成交」），其余交易对转发引擎自己的深度（`*.depth.internal`）与平台成交。
 - 深度与成交主题都是派生状态：从内存直接发，不走 outbox，丢一份由下一份补上；只保留 1 小时，没有 retry/dlq，不进 ClickHouse。市场服务、网关与 market-maker 都从主题末尾读（`kafka.Tail`，不提交位移），启动后最多 10 秒拿到全部订单簿。
-- `market.candle.events` 同样由市场服务直接发布，也不进 ClickHouse。
+- `market.candle.events` 同样由市场服务直接发布，也不进 ClickHouse。平盘分钟（见下文「规则」）另经 outbox 发到业务主题 `market.candle.flats`（保留 7 天，有 retry/dlq），analytics 把它写进 `candles_1m`。
 - 市场服务的消费组 `market-data` 读 `trade.events`：按交易对的 sequence 幂等（已应用的跳过），一批成交在一个事务里写 K 线、最近成交和进度；写库失败则内存状态作废，重新从库加载后重投。库里的数据都能从 `trade.events` 重建。
 
 ## 规则
 
 - K 线周期 `1m 3m 5m 15m 30m 1h 2h 4h 6h 12h 1d 1w 1M`，UTC 对齐，周从周一开始。只存有成交的区间；查询时无成交区间用上一根收盘价补平（成交量 0），第一笔成交之前的区间不返回。
+- **平盘分钟**（协调会话 2026-10-04 代用户决定：ASTRA 的 1 分钟 K 线断续）：图表用平台自己成交的品种（没有显示参考市场 K 线的交易对与合约，测试服即 ASTRA-USDT 与 ASTRA-USDT-PERP；`market.reference_kline` 对某个跟随币安的交易对关掉时它也算），一分钟结束 10 秒（`FlatGrace`，等迟到的成交）后仍没有成交，就存一根平盘的 1m K 线：开高低收都是上一根收盘价，成交量与笔数 0（"flat minute runner"，每秒一次，指标 `market_flat_minutes_total`）。更长的周期把它当作一笔量为 0、价格为上一收盘价的成交：以平盘分钟开头的 5m/15m… 开盘价就是上一收盘价，高低价算上它，与 ClickHouse `candles()` 由 1m 汇总的结果一致。推送照常：这根平盘分钟像有成交的一样推一次 `CandleClosed`；同一事务里经 outbox 发 `CandleClosed` 到 `market.candle.flats`，analytics 把它写进 `candles_1m`（`updated_at` 取分钟开始，那一分钟真有成交时由成交算出的行覆盖它）。只向前生效：重启后最多补最近 1 小时（`FlatCatchUp`），之前的历史不回填（查询照旧补平）；从没成交过的品种没有。迟于 `FlatGrace` 才到的成交在这里计入下一分钟（K 线不重开），在 ClickHouse 计入它自己的分钟。
 - 当前 K 线变化时每 500 ms 推 `CandleUpdated`；区间结束时推一次 `CandleClosed`，新区间在有成交前推一根平盘 K 线。ticker 变化时推 `TickerUpdated`，没变化也每 15 秒重推一次（`TickerHeartbeat`）：网关从 `market.candle.events` 的末尾读，没有参考市场替它推送的冷清交易对（如 ASTRA-USDT）否则要等下一笔成交才出现在 `tickers` 频道里。
 - 24 小时 ticker 按分钟计算：窗口是当前分钟加前 1439 分钟；`open` 是窗口前最后一笔成交价（之前没有成交时取窗口内第一笔），`change = (last − open) / open`（小数，8 位）；窗口内没有成交时 `last` 沿用上一笔、成交量 0；从未成交的交易对价格为 null。
 - 最新成交价同时是下单价格带与市价保护价的锚点：交易服务从自己的 `fills` 取（缓存 1 秒），5 分钟内没有成交时用内网参考价 `GET /internal/market/{symbol}/reference`（顺序见 [trading.md](trading.md)）。不跟随参考市场的交易对（平台币 ASTRA-USDT）的"参考价"是平台自己的市场（`source: platform`）：与它的永续指数同一算法的价格（见下文"指数价"），没有时盘口中价（买一、卖一各值 100 以上），再没有时 market-sim 30 秒内上报的目标价（`source: simulation`）；market-sim 每 5 秒经 `PUT /internal/market/{symbol}/simulated-price`（`{"price": "…"}`，204；只接受已上市、不跟随参考市场的交易对，否则 409 `MARKET_NOT_SIMULATED`）上报，这也是它的心跳：开关 `sim.halt_on_loss` 打开时，1 分钟没有心跳的交易对与它的永续由本服务置 `HALT`，记在 `market.sim_halts`，心跳恢复 30 秒后放开（`SimGuard`，见 [market-sim.md](market-sim.md#心跳与停牌设计-9a5)）。这样交易对很久没有成交、盘口又空时，价格带不会锁在一笔旧成交上（ASTRA 设计 §4，见 [market-sim.md](market-sim.md#价格带不锁死市场设计-4)）。参考行情（币安公开数据，仅测试环境）见下文，HOUSE 虚拟流动性见 [market-maker.md](market-maker.md)；端到端脚本 `marketdata.sh` 在不跟随参考市场的 ETH-BTC 上成交。

@@ -58,6 +58,10 @@ const (
 	TopicMarketTrades = "market.trades"
 	// TopicMarketCandle carries candles and tickers from market-data-service.
 	TopicMarketCandle = "market.candle.events"
+	// TopicMarketCandleFlats carries the one-minute candles market-data-service
+	// stored flat (a minute without a trade of a symbol charting the
+	// platform's trades), through its outbox, for analytics' candles_1m.
+	TopicMarketCandleFlats = "market.candle.flats"
 	// The perpetual contracts' matching shard (implementation plan §7.3
 	// task 2): the same engine with its own commands, reference books,
 	// order and trade events and depth, keyed by symbol.

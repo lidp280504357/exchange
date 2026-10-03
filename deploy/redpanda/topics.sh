@@ -47,6 +47,7 @@ BUSINESS=(
   "derivatives.position.events 3"
   "derivatives.liquidation.events 1"
   "market.candle.events 3"
+  "market.candle.flats 3"
   "risk.events 1"
   "audit.events 1"
   "notification.events 1"
