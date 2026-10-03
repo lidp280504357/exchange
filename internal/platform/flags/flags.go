@@ -45,6 +45,11 @@ const (
 // 2026-10-02 §2).
 const KeyTwoPerson = "admin.two_person_approval"
 
+// KeyFlatMinutes has market-data-service store a flat one-minute candle
+// for each minute without a trade of a symbol no reference market
+// follows (the platform coin's), per symbol (coordinator 2026-10-04).
+const KeyFlatMinutes = "market.flat_minutes"
+
 // KeyTestAssets opens the hidden test assets' deposits and withdrawals
 // (ADR-0017) to the users its rules allow: on the test server the
 // end-to-end tests' accounts, region AQ.
@@ -82,6 +87,7 @@ var Known = map[string]string{
 	KeyHouseLiquidity:   "HOUSE trades against orders at the reference market's book (virtual liquidity), per symbol; off leaves the platform's own book (ADR-0015)",
 	KeyInternalMatching: "Users' orders also trade with each other on pairs with HOUSE liquidity; off makes HOUSE the counterparty of every trade (ADR-0015)",
 	KeyTwoPerson:        "Admin console: manual adjustments, insurance fund contributions and withdrawals needing two reviewers take a second administrator; off lets one administrator carry them out within the console's single-person limits",
+	KeyFlatMinutes:      "Store a flat one-minute candle (the previous close, no volume) for each minute without a trade, per symbol no reference market follows (the platform coin and its perpetual), for the chart and ClickHouse",
 	KeyTestAssets:       "Deposits and withdrawals of the hidden test assets (ADR-0017) for the users these rules allow: the end-to-end tests' accounts (region AQ on the test server); off, nobody's",
 	KeySimEnabled:       "The simulated market of the platform coin (market-sim): its bots quote and trade ASTRA-USDT around the model's price; off cancels their orders",
 	KeySimEvents:        "Operators' price events in the simulated market (jumps, targets, trends, pauses)",

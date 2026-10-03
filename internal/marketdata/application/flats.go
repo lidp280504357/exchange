@@ -11,6 +11,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/marketdata/domain"
 	"github.com/lidp280504357/exchange/internal/marketdata/ports"
 	"github.com/lidp280504357/exchange/internal/platform/event"
+	"github.com/lidp280504357/exchange/internal/platform/flags"
 )
 
 // Flat minutes (coordinator 2026-10-04: the platform coin's 1-minute
@@ -121,22 +122,26 @@ func (s *Service) FlatMinutes(ctx context.Context, now time.Time, platform func(
 }
 
 // FlatRunner stores the flat minutes every second and queues their
-// events on market.candle.flats (analytics writes them to candles_1m).
+// events on market.candle.flats (analytics writes them to candles_1m), for
+// the symbols no reference market follows while market.flat_minutes is on
+// for them.
 type FlatRunner struct {
 	svc      *Service
 	events   *event.Factory
 	platform func(ctx context.Context, symbol string) bool
+	flags    *flags.Client
 	log      *slog.Logger
 	made     prometheus.Counter
 }
 
 // NewFlatRunner registers its metric with reg; platform says whether a
-// symbol's chart is the platform's trades (no reference market shown).
-func NewFlatRunner(svc *Service, events *event.Factory, platform func(ctx context.Context, symbol string) bool, log *slog.Logger,
-	reg prometheus.Registerer,
+// symbol's chart is the platform's trades (no reference market follows
+// it).
+func NewFlatRunner(svc *Service, events *event.Factory, platform func(ctx context.Context, symbol string) bool, fl *flags.Client,
+	log *slog.Logger, reg prometheus.Registerer,
 ) *FlatRunner {
 	f := &FlatRunner{
-		svc: svc, events: events, platform: platform, log: log,
+		svc: svc, events: events, platform: platform, flags: fl, log: log,
 		made: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "market_flat_minutes_total",
 			Help: "One-minute candles stored flat (no trade in the minute) for the symbols charting the platform's own trades.",
@@ -156,7 +161,12 @@ func (f *FlatRunner) Run(ctx context.Context) error {
 			return nil
 		case <-t.C:
 		}
-		flats, err := f.svc.FlatMinutes(ctx, f.svc.now(), func(symbol string) bool { return f.platform(ctx, symbol) }, f.emit)
+		// Decided before the service's lock: the listing may be read.
+		own := map[string]bool{}
+		for _, symbol := range f.svc.symbolNames() {
+			own[symbol] = f.platform(ctx, symbol) && f.flags.Enabled(flags.KeyFlatMinutes, flags.Subject{Symbol: symbol})
+		}
+		flats, err := f.svc.FlatMinutes(ctx, f.svc.now(), func(symbol string) bool { return own[symbol] }, f.emit)
 		if err != nil {
 			f.log.WarnContext(ctx, "flat minutes not stored: tried again in a second", "error", err)
 			continue
@@ -171,4 +181,15 @@ func (f *FlatRunner) emit(ctx context.Context, r ports.Repos, c domain.Candle) e
 		return err
 	}
 	return r.Emit(ctx, event.TopicMarketCandleFlats, env)
+}
+
+// symbolNames lists the symbols the service has a state of.
+func (s *Service) symbolNames() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.symbols))
+	for symbol := range s.symbols {
+		out = append(out, symbol)
+	}
+	return out
 }

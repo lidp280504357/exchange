@@ -1670,9 +1670,9 @@ func TestTheChartOutlivesARestart(t *testing.T) {
 }
 
 // A perpetual quiet for 45 seconds gets a taker's order of the contract's
-// minimum, paused or not (coordinator 2026-10-04: its 1-minute candles
-// broke up), once per quiet spell: the next waits 45 seconds more; a
-// perpetual that trades gets none.
+// minimum (coordinator 2026-10-04: its 1-minute candles broke up), once
+// per quiet spell: the next waits 45 seconds more; a perpetual that trades
+// gets none, nor one paused (review AU).
 func TestAQuietPerpetualGetsTheMinimumOrder(t *testing.T) {
 	p := domain.DefaultParams()
 	p.DailyVolume, p.PerpDailyVolume = 0, 1 // its takers' own flow: next to nothing
@@ -1710,6 +1710,15 @@ func TestAQuietPerpetualGetsTheMinimumOrder(t *testing.T) {
 	r.rounds(4 * 6)
 	if n := len(markets()); n != 2 {
 		t.Fatalf("the next quiet spell: %d orders", n)
+	}
+	// Paused, none however quiet.
+	pause := r.create(t, domain.Event{Type: domain.EventPause})
+	r.rounds(4 * 60)
+	if n := len(markets()); n != 2 {
+		t.Fatalf("paused: %d orders", n)
+	}
+	if _, err := r.sim.EndEvent(context.Background(), pause.ID, "ops", "resume"); err != nil {
+		t.Fatal(err)
 	}
 	// Trading on its own, it gets none.
 	r.prices.mu.Lock()

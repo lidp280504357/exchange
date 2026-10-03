@@ -78,10 +78,11 @@ type ReferenceMap struct {
 	log         *slog.Logger
 	now         func() time.Time
 
-	mu    sync.Mutex
-	m     map[string]ports.Reference
-	pairs map[string]bool // the listed pairs
-	at    time.Time
+	mu        sync.Mutex
+	m         map[string]ports.Reference
+	pairs     map[string]bool // the listed pairs
+	contracts map[string]bool // the listed contracts
+	at        time.Time
 }
 
 // NewReferenceMap reads the mapping from instruments.
@@ -109,7 +110,7 @@ func (r *ReferenceMap) Get(ctx context.Context) map[string]ports.Reference {
 		r.log.WarnContext(ctx, "reference mapping: contracts unavailable", "error", err)
 		return stale
 	}
-	m, listed := map[string]ports.Reference{}, map[string]bool{}
+	m, listed, perps := map[string]ports.Reference{}, map[string]bool{}, map[string]bool{}
 	for _, p := range pairs {
 		listed[p.Symbol] = true
 		if p.Reference.Remote != "" {
@@ -117,14 +118,27 @@ func (r *ReferenceMap) Get(ctx context.Context) map[string]ports.Reference {
 		}
 	}
 	for _, c := range contracts {
+		perps[c.Symbol] = true
 		if ref, ok := m[c.IndexSymbol]; ok {
 			m[c.Symbol] = ref
 		}
 	}
 	r.mu.Lock()
-	r.m, r.pairs, r.at = m, listed, r.now()
+	r.m, r.pairs, r.contracts, r.at = m, listed, perps, r.now()
 	r.mu.Unlock()
 	return m
+}
+
+// Unreferenced reports whether symbol is a listed pair or contract no
+// reference market follows (the platform coin's and its perpetual): its
+// chart is the platform's own trades. False while the listing was never
+// read (review AU).
+func (r *ReferenceMap) Unreferenced(ctx context.Context, symbol string) bool {
+	m := r.Get(ctx)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, followed := m[symbol]
+	return m != nil && (r.pairs[symbol] || r.contracts[symbol]) && !followed
 }
 
 // Unfollowed reports whether symbol is a listed pair that no reference

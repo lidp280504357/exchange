@@ -161,12 +161,10 @@ func setup(ctx context.Context, a *app.App) error {
 	tickers := application.NewTickers(svc, feed, refs, flagClient, listed)
 	pusher.Use(refKlines.Push)
 	pusher.Use(tickers.Push)
-	// A minute without a trade of a symbol charting our own trades is
-	// stored flat (coordinator 2026-10-04).
-	flats := application.NewFlatRunner(svc, events, func(ctx context.Context, symbol string) bool {
-		_, served := refKlines.Serves(ctx, symbol)
-		return !served
-	}, a.Logger(), a.Metrics())
+	// A minute without a trade of a symbol no reference market follows is
+	// stored flat (coordinator 2026-10-04), while market.flat_minutes is
+	// on for it.
+	flats := application.NewFlatRunner(svc, events, refs.Unreferenced, flagClient, a.Logger(), a.Metrics())
 	a.Add("flat minutes", app.Loop(flats.Run))
 	guard := application.NewFeedGuard(feed, listed, store, flagClient, a.Logger(), a.Metrics())
 	a.Add("feed guard", app.Loop(guard.Run))

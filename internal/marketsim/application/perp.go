@@ -36,11 +36,13 @@ const (
 )
 
 // perpQuietTake is how long the perpetual goes without a trade before a
-// taker trades the contract's minimum anyway, paused or not, as the pair's
-// takers do after quietTake (coordinator 2026-10-04: about a fifth of the
-// perpetual's minutes had no trade and its 1-minute candles broke up). The
-// order is the takers' (PERP_TAKER), at the market: it fills within the
-// contract's band around the mark price.
+// taker trades the contract's minimum anyway, as the pair's takers do
+// after quietTake (coordinator 2026-10-04: about a fifth of the
+// perpetual's minutes had no trade and its 1-minute candles broke up); not
+// while paused (the design's §0 of 10-03: no orders in a pause or a halt;
+// the perpetual's index is the spot pair's, whose own quiet taker keeps
+// it). The order is the takers' (PERP_TAKER), at the market: it fills
+// within the contract's band around the mark price.
 const perpQuietTake = 45 * time.Second
 
 // perpBot is what the simulation knows of a bot on the perpetual.
@@ -115,11 +117,10 @@ func (s *Sim) perp(ctx context.Context, now time.Time, p float64, dt time.Durati
 		}
 	}
 	s.quotePerp(ctx, now, center)
-	arrived := 0
-	if !s.runs(domain.EventPause) {
-		arrived = s.takePerp(ctx, now, center, dt)
+	if s.runs(domain.EventPause) {
+		return
 	}
-	if arrived == 0 && s.quietPerp(now) {
+	if s.takePerp(ctx, now, center, dt) == 0 && s.quietPerp(now) {
 		s.takeQuietPerp(ctx, now, center)
 	}
 }
