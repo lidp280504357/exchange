@@ -138,11 +138,16 @@ func TestLedgerReleaseHold(t *testing.T) {
 		uuid.NewString(), user, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := run("release-hold", "--id", hold, "--amount", "61", "--reason", "more than its part"); err == nil {
+	// The live order moves the frozen balance meanwhile: not without
+	// --force (C5.5 ⑱).
+	if out, err := run("release-hold", "--id", hold, "--reason", "cleared, 40 went elsewhere"); err == nil || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("an order in flight: %v\n%s", err, out)
+	}
+	if _, err := run("release-hold", "--id", hold, "--amount", "61", "--force", "--reason", "more than its part"); err == nil {
 		t.Fatal("released more than the hold's part")
 	}
-	out, err := run("release-hold", "--id", hold, "--reason", "cleared, 40 went elsewhere")
-	if err != nil || !strings.Contains(out, "spot orders 30") || !strings.Contains(out, "at most 60") || !strings.Contains(out, "released: 60 of 100") {
+	out, err := run("release-hold", "--id", hold, "--force", "--reason", "cleared, 40 went elsewhere")
+	if err != nil || !strings.Contains(out, "spot orders 30 (1)") || !strings.Contains(out, "at most 60") || !strings.Contains(out, "released: 60 of 100") {
 		t.Fatalf("release-hold: %v\n%s", err, out)
 	}
 	if out, err = run("balances", user); err != nil || !strings.Contains(out, "30") {

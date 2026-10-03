@@ -132,8 +132,9 @@ func (s *Service) ReleaseHold(ctx context.Context, id, actor, reason string) (do
 // audits it as ledger.hold_released with "forced" and the amount
 // released. The account's frozen balance is shared with the user's orders
 // and withdrawals, so the caller works out how much of it is the hold's
-// (exchangectl ledger release-hold; C5.5 ⑧, ⑯).
-func (s *Service) ForceReleaseHold(ctx context.Context, id, actor, reason string, amount decimal.Decimal) (domain.Hold, error) {
+// (exchangectl ledger release-hold; C5.5 ⑧, ⑯) and says how (basis, kept in
+// the audit event: the frozen balance and what else it held, ⑱).
+func (s *Service) ForceReleaseHold(ctx context.Context, id, actor, reason string, amount decimal.Decimal, basis map[string]string) (domain.Hold, error) {
 	if amount.IsNegative() {
 		return domain.Hold{}, apperr.Invalid("the amount released is not negative")
 	}
@@ -182,7 +183,7 @@ func (s *Service) ForceReleaseHold(ctx context.Context, id, actor, reason string
 		out = *h
 		details, _ := json.Marshal(map[string]any{
 			"hold_id": h.ID, "account_type": h.AccountType, "asset": h.Asset, "amount": h.Amount.String(), "released": amount.String(),
-			"forced": true,
+			"forced": true, "frozen_at_release": accs[0].Frozen.String(), "cap": basis,
 		})
 		return r.Emit(ctx, event.TopicAudit, &auditv1.AdminActionPerformed{
 			Target: "user:" + h.UserID, Action: "ledger.hold_released", Actor: h.ReleasedBy, Reason: h.ReleaseReason, Details: string(details),

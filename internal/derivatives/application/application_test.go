@@ -943,6 +943,10 @@ func TestTheAdminOverviewAndRiskList(t *testing.T) {
 	if list, err := r.svc.RiskPositions(ctx); err != nil || len(list) != 1 || list[0].UserID != alice || list[0].WarnedAt.IsZero() {
 		t.Fatalf("the warned cross account %+v %v", list, err)
 	}
+	// ... in the view of every position too (⑱).
+	if list, _, err := r.svc.OpenPositions(ctx, application.PositionFilter{UserID: alice}); err != nil || len(list) != 1 || list[0].WarnedAt.IsZero() {
+		t.Fatalf("every position, the account warned %+v %v", list, err)
+	}
 	if err := r.store.Read().Cross().SetWarnedAt(ctx, alice, time.Time{}); err != nil {
 		t.Fatal(err)
 	}

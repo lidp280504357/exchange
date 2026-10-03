@@ -1,6 +1,7 @@
 package postgres_test
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"time"
@@ -150,18 +151,24 @@ func TestHoldsAndAccountAdjustments(t *testing.T) {
 	if h, acc, err := svc.Hold(ctx, stuck); err != nil || h == nil || !acc.Frozen.Equal(d("90")) {
 		t.Fatalf("the hold and its account: %+v %+v %v", h, acc, err)
 	}
-	if _, err := svc.ForceReleaseHold(ctx, stuck, "ops@example.com", "more than the hold", d("101")); !apperr.Is(err, apperr.CodeInvalidArgument) {
+	if _, err := svc.ForceReleaseHold(ctx, stuck, "ops@example.com", "more than the hold", d("101"), nil); !apperr.Is(err, apperr.CodeInvalidArgument) {
 		t.Fatalf("more than the hold: %v", err)
 	}
 	// 90 frozen, 30 of it the live order's: the hold's 60.
-	forced, err := svc.ForceReleaseHold(ctx, stuck, "ops@example.com", "60 left frozen, released by hand", d("60"))
+	forced, err := svc.ForceReleaseHold(ctx, stuck, "ops@example.com", "60 left frozen, released by hand", d("60"), map[string]string{"most": "60"})
 	if err != nil || forced.Active() || forced.ReleaseJournalID == "" {
 		t.Fatalf("forced release: %+v %v", forced, err)
 	}
 	if av, fr := usdt(t, svc, user, domain.AccountSpot); !av.Equal(d("9970")) || !fr.Equal(d("30")) {
 		t.Fatalf("after the forced release, the order's 30 still frozen: %s/%s", av, fr)
 	}
-	if _, err := svc.ForceReleaseHold(ctx, stuck, "ops@example.com", "again", d("1")); !apperr.Is(err, "LEDGER_HOLD_RELEASED") {
+	// Its audit keeps how the cap was worked out (C5.5 ⑱).
+	var envelope []byte
+	if err := db.QueryRow(ctx, `SELECT envelope FROM outbox WHERE event_type = 'audit.AdminActionPerformed' ORDER BY id DESC LIMIT 1`).Scan(&envelope); err != nil ||
+		!bytes.Contains(envelope, []byte(`"cap":{"most":"60"}`)) || !bytes.Contains(envelope, []byte(`"frozen_at_release":"90"`)) {
+		t.Fatalf("the forced release's audit %q %v", envelope, err)
+	}
+	if _, err := svc.ForceReleaseHold(ctx, stuck, "ops@example.com", "again", d("1"), nil); !apperr.Is(err, "LEDGER_HOLD_RELEASED") {
 		t.Fatalf("forced twice: %v", err)
 	}
 	if _, err := svc.Unfreeze(ctx, "order-live-canceled", domain.EntryOrderUnfreeze, user, domain.AccountSpot, "USDT", d("30"), "the order canceled"); err != nil {

@@ -96,7 +96,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户）�
 - **余额与资金**：现货与合约账户每个资产的可用、冻结、合计与 USDT 估值（按该资产 USDT 交易对的最新价，没有价格的列出来、不计入总估值）；**风控冻结**（`ledger.hold`，ADMIN、OPERATOR、FINANCE）：冻结现货可用余额的一部分或解冻，由账本记分录与审计（见 [ledger.md](ledger.md#接口)）；调整余额可选现货或合约账户。
 - **订单**：现货订单（可单笔撤单，`orders.cancel`，审计 `admin.orders.canceled`）与合约当前委托（可单笔撤单，审计 `admin.derivatives.order_canceled`）。
 - **仓位**：合约持仓（开仓均价、标记价、预估强平价、未实现盈亏、保证金与模式），每 5 秒刷新。
-  - **强制平仓**（`derivatives.write`）先撤该用户在这个合约上的全部挂单（含开仓单，免得平仓后又成交开回去；止盈止损单不撤，它们只会平仓），再以市价全部平掉，见 [derivatives.md](derivatives.md#管理后台与读模型)。撤单与下平仓单之间不锁用户，用户仍可能再开仓，平完再看一眼仓位。后台最多等约 5 秒看平仓单结束：还没结束时对话框留着（同一个幂等键），提示"已下单、未成交完"，再点确认会查到同一笔订单并记审计 `admin.derivatives.position_closed`（C5.5 ⑯）。
+  - **强制平仓**（`derivatives.write`）先撤该用户在这个合约上的全部挂单（含开仓单，免得平仓后又成交开回去；止盈止损单不撤，它们只会平仓），再以市价全部平掉，见 [derivatives.md](derivatives.md#管理后台与读模型)。撤单与下平仓单之间不锁用户，用户仍可能再开仓，平完再看一眼仓位。后台最多等约 5 秒看平仓单结束：还没结束时对话框留着（同一个幂等键），提示"已下单、未成交完"，再点确认会查到同一笔订单并记审计 `admin.derivatives.position_closed`（C5.5 ⑯）；改了理由再确认也一样（键不绑理由，C5.5 ⑱）。这只在对话框没关、24 小时内有效：关了对话框或过了 24 小时再平，是新的一笔 ADMIN 单，第一笔的 `position_closed` 不会补写（协调会话决定接受）；要追溯它，用请求审计 `admin.derivatives.position_close_requested` 里的 `client_order_id` 在合约订单里查。
     - 后台等这笔市价单结束（最多约 5 秒），提示是全部成交还是只成交一部分；盘口薄时剩下的仓位要再平一次。
     - 审计两条（C5.5 ⑧）：`admin.derivatives.position_close_requested`（与幂等键一起写，每个请求一次）和 `admin.derivatives.position_closed`（订单结束后，带 `status`、`filled_quantity`、`complete`）。
     - HOUSE 的仓位不能平（422 `DERIV_HOUSE_NOT_CLOSED`）。

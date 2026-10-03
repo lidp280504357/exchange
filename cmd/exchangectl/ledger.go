@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -193,6 +194,7 @@ func ledgerReleaseHold(ctx context.Context, svc *application.Service, dbs ledger
 	id := fs.String("id", "", "the hold's ID (the console's user page lists them)")
 	amount := fs.String("amount", "", "how much to release (default: what of the frozen balance is the hold's)")
 	reason := fs.String("reason", "", "why (required, goes to the audit log)")
+	force := fs.Bool("force", false, "release while the user has orders or withdrawals in flight (their freezes counted whole)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -207,13 +209,20 @@ func ledgerReleaseHold(ctx context.Context, svc *application.Service, dbs ledger
 	if h == nil {
 		return errors.New("no such hold")
 	}
-	holds, orders, withdrawals, err := otherFreezes(ctx, dbs, *h)
+	o, err := otherFreezes(ctx, dbs, *h)
 	if err != nil {
 		return err
 	}
-	most := decimal.Min(h.Amount, decimal.Max(acc.Frozen.Sub(holds).Sub(orders).Sub(withdrawals), decimal.Zero))
-	fmt.Fprintf(out, "%s %s frozen: %s; other holds %s, spot orders %s, withdrawals %s; the hold's (%s) at most %s\n",
-		h.AccountType, h.Asset, acc.Frozen, holds, orders, withdrawals, h.Amount, most)
+	most := decimal.Min(h.Amount, decimal.Max(acc.Frozen.Sub(o.holds).Sub(o.orders).Sub(o.withdrawals), decimal.Zero))
+	fmt.Fprintf(out, "%s %s frozen: %s; other holds %s, spot orders %s (%d), withdrawals %s (%d); the hold's (%s) at most %s\n",
+		h.AccountType, h.Asset, acc.Frozen, o.holds, o.orders, o.inOrders, o.withdrawals, o.inWithdrawals, h.Amount, most)
+	// Orders and withdrawals in flight move the frozen balance meanwhile
+	// (a freeze the ledger made and trading has not marked, a fill not
+	// settled yet): counted whole they only lower the cap, and an
+	// operator says so with --force (C5.5 ⑱).
+	if (o.inOrders > 0 || o.inWithdrawals > 0) && !*force {
+		return fmt.Errorf("the user has %d orders and %d withdrawals in flight on %s: cancel them first, or --force", o.inOrders, o.inWithdrawals, h.Asset)
+	}
 	release := most
 	if *amount != "" {
 		if release, err = decimal.NewFromString(*amount); err != nil {
@@ -223,7 +232,10 @@ func ledgerReleaseHold(ctx context.Context, svc *application.Service, dbs ledger
 			return fmt.Errorf("--amount %s: at most %s of the frozen balance is the hold's", release, most)
 		}
 	}
-	released, err := svc.ForceReleaseHold(ctx, *id, actor(), *reason, release)
+	released, err := svc.ForceReleaseHold(ctx, *id, actor(), *reason, release, map[string]string{
+		"frozen": acc.Frozen.String(), "other_holds": o.holds.String(), "orders": o.orders.String(), "withdrawals": o.withdrawals.String(),
+		"most": most.String(), "forced_in_flight": strconv.FormatBool(o.inOrders > 0 || o.inWithdrawals > 0),
+	})
 	if err != nil {
 		return err
 	}
@@ -232,40 +244,47 @@ func ledgerReleaseHold(ctx context.Context, svc *application.Service, dbs ledger
 	return nil
 }
 
+// freezes is what else a hold's frozen balance holds: the user's other
+// active holds, the spot orders' freezes and the withdrawals frozen and
+// not yet settled or released, with how many orders and withdrawals.
+type freezes struct {
+	holds, orders, withdrawals decimal.Decimal
+	inOrders, inWithdrawals    int
+}
+
 // otherFreezes sums what else the user's frozen balance of the hold's
-// asset holds: the other active holds, the spot orders' unused freezes
-// (domain.Order.Unused of spot-trading: a sell its base, a market buy its
-// quote, a limit buy its limit price per unit filled) and the withdrawals
-// frozen and not yet settled or released.
-func otherFreezes(ctx context.Context, dbs ledgerDBs, h domain.Hold) (holds, orders, withdrawals decimal.Decimal, err error) {
-	if err = dbs.ledger.QueryRow(ctx, `SELECT coalesce(sum(amount), 0) FROM holds
+// asset holds. A spot order counts whole while not released, pending
+// (the ledger froze it, trading has not marked it) or frozen, fills
+// included: the ledger frees a fill's part only once it settles (C5.5 ⑱).
+func otherFreezes(ctx context.Context, dbs ledgerDBs, h domain.Hold) (freezes, error) {
+	var o freezes
+	if err := dbs.ledger.QueryRow(ctx, `SELECT coalesce(sum(amount), 0) FROM holds
 		WHERE user_id = $1 AND account_type = $2 AND asset = $3 AND released_at IS NULL AND id <> $4`,
-		h.UserID, h.AccountType, h.Asset, h.ID).Scan(&holds); err != nil {
-		return holds, orders, withdrawals, fmt.Errorf("other holds: %w", err)
+		h.UserID, h.AccountType, h.Asset, h.ID).Scan(&o.holds); err != nil {
+		return o, fmt.Errorf("other holds: %w", err)
 	}
 	if h.AccountType != domain.AccountSpot {
-		return holds, orders, withdrawals, nil
+		return o, nil
 	}
 	trading, err := dbs.open("trading")
 	if err != nil {
-		return holds, orders, withdrawals, err
+		return o, err
 	}
-	if err = trading.QueryRow(ctx, `SELECT coalesce(sum(greatest(frozen_amount - CASE WHEN side = 'SELL' THEN filled_quantity
-			WHEN type = 'MARKET' THEN filled_quote ELSE price * filled_quantity END, 0)), 0)
-		FROM orders WHERE user_id = $1 AND frozen_asset = $2 AND freeze_state = 'FROZEN' AND released = false`,
-		h.UserID, h.Asset).Scan(&orders); err != nil {
-		return holds, orders, withdrawals, fmt.Errorf("spot orders: %w", err)
+	if err := trading.QueryRow(ctx, `SELECT coalesce(sum(frozen_amount), 0), count(*) FROM orders
+		WHERE user_id = $1 AND frozen_asset = $2 AND freeze_state IN ('PENDING', 'FROZEN') AND released = false`,
+		h.UserID, h.Asset).Scan(&o.orders, &o.inOrders); err != nil {
+		return o, fmt.Errorf("spot orders: %w", err)
 	}
 	wallet, err := dbs.open("wallet")
 	if err != nil {
-		return holds, orders, withdrawals, err
+		return o, err
 	}
-	if err = wallet.QueryRow(ctx, `SELECT coalesce(sum(amount + fee), 0) FROM withdrawals
+	if err := wallet.QueryRow(ctx, `SELECT coalesce(sum(amount + fee), 0), count(*) FROM withdrawals
 		WHERE user_id = $1 AND asset = $2 AND freeze_journal_id IS NOT NULL AND settle_journal_id IS NULL AND unfreeze_journal_id IS NULL`,
-		h.UserID, h.Asset).Scan(&withdrawals); err != nil {
-		return holds, orders, withdrawals, fmt.Errorf("withdrawals: %w", err)
+		h.UserID, h.Asset).Scan(&o.withdrawals, &o.inWithdrawals); err != nil {
+		return o, fmt.Errorf("withdrawals: %w", err)
 	}
-	return holds, orders, withdrawals, nil
+	return o, nil
 }
 
 // houseOnly lets the operator move HOUSE's funds between its accounts:

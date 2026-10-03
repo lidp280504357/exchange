@@ -144,6 +144,17 @@ func TestOrderCancelsAndForceClose(t *testing.T) {
 		len(h.auditsOf("admin.derivatives.position_closed")) != 2 || h.derivatives.looks != closeAttempts-1 {
 		t.Fatalf("an outcome not known yet: %s %v (looked %d times)", raw, err, h.derivatives.looks)
 	}
+	// Confirmed again under its key with other words, it looks the same
+	// close up instead of failing on the key (C5.5 ⑱).
+	h.derivatives.outcome = ""
+	first, err := h.svc.ClosePosition(ctx, ops, "close-key", someUser, "BTC-USDT-PERP", "BOTH", "the engine is slow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, err := h.svc.ClosePosition(ctx, ops, "close-key", someUser, "BTC-USDT-PERP", "BOTH", "the engine is slow, again"); err != nil ||
+		orderID(again) != orderID(first) {
+		t.Fatalf("the same key, other words: %s %v (first %s)", again, err, first)
+	}
 	if got := h.auditsOf("admin.orders.canceled"); len(got) != 1 || !strings.Contains(got[0], order) {
 		t.Fatalf("cancel audit %v", got)
 	}

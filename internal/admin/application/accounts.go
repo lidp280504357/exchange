@@ -307,7 +307,9 @@ func (s *Service) ClosePosition(ctx context.Context, p Principal, key, userID, s
 	var c claim
 	err := s.Store.Tx(ctx, func(r ports.Repos) error {
 		var err error
-		if c, err = s.claimIn(ctx, r, p, key, scopeClose, fingerprint(userID, symbol, side, reason)); err != nil || !c.Fresh {
+		// The reason is not bound: confirming again with other words looks
+		// the same close up (C5.5 ⑱).
+		if c, err = s.claimIn(ctx, r, p, key, scopeClose, fingerprint(userID, symbol, side)); err != nil || !c.Fresh {
 			return err
 		}
 		details, _ := json.Marshal(map[string]string{"symbol": symbol, "position_side": side, "client_order_id": c.Ref})

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -464,11 +463,11 @@ func (s *Service) OpenPositions(ctx context.Context, f PositionFilter) ([]Positi
 	if err != nil {
 		return nil, false, err
 	}
-	warned := map[string]time.Time{}
-	if f.Watch {
-		if warned, err = s.Store.Read().Cross().Warned(ctx); err != nil {
-			return nil, false, err
-		}
+	// A cross account's warning is its cross positions', in every view
+	// (C5.5 ⑨, ⑱).
+	warned, err := s.Store.Read().Cross().Warned(ctx)
+	if err != nil {
+		return nil, false, err
 	}
 	type scored struct {
 		v     PositionView
