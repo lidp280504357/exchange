@@ -42,13 +42,39 @@ const pages: Record<string, () => Promise<unknown>> = {
   account: () => import("./pages/system/Account"),
 };
 
+/** pageOf is the chunk loader of the page at path ("users/<id>" is the user's page). */
+function pageOf(path: string): (() => Promise<unknown>) | undefined {
+  const [first = "", second] = path.replace(/^\/+|\/+$/g, "").split("/");
+  return (second && pages[`${first}/${second}`]) || (first === "users" && second ? () => import("./pages/users/UserPage") : pages[first]);
+}
+
+const fail = () => undefined; // the page's own import reports a failure
+
 /** preloadConsole starts the chunks a signed-in visit to pathname needs; nothing for the sign-in and setup pages. */
 export function preloadConsole(pathname: string) {
-  const path = pathname.replace(/^\/+|\/+$/g, "");
-  if (/^(login|setup)(\/|$)/.test(path)) return;
-  const fail = () => undefined; // the page's own import reports a failure
+  if (/^\/*(login|setup)(\/|$)/.test(pathname)) return;
   void import("./layout/SignedIn").catch(fail);
-  const [first = "", second] = path.split("/");
-  const load = (second && pages[`${first}/${second}`]) || (first === "users" && second ? () => import("./pages/users/UserPage") : pages[first]);
-  void load?.().catch(fail);
+  void pageOf(pathname)?.().catch(fail);
+}
+
+/** prefetchPage starts the chunk of the page at path: a sidebar link pointed at or focused (A40). */
+export function prefetchPage(path: string) {
+  void pageOf(path)?.().catch(fail);
+}
+
+/**
+ * prefetchPages loads the chunks of the pages at paths one after another
+ * while the browser has nothing else to do (A40): a section opened later
+ * finds its page loaded. Not when the browser asks to save data.
+ */
+export function prefetchPages(paths: readonly string[]) {
+  if ((navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData) return;
+  const idle = (next: () => void) => (typeof requestIdleCallback === "function" ? requestIdleCallback(next, { timeout: 5000 }) : setTimeout(next, 200));
+  const queue = [...paths];
+  const next = () => {
+    const path = queue.shift();
+    if (path === undefined) return;
+    void (pageOf(path)?.() ?? Promise.resolve()).catch(fail).finally(() => idle(next));
+  };
+  idle(next);
 }

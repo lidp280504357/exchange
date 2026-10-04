@@ -2,10 +2,11 @@ import type { Admin } from "@exchange/core/api/admin";
 import { cn } from "@exchange/ui";
 import { ChevronDown, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { motion } from "motion/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink, useLocation } from "react-router";
 import { useTodo } from "../live";
+import { prefetchPage, prefetchPages } from "../preload";
 import { allowed, groups, sections, type GroupKey, type Section } from "../sections";
 import { Mark } from "./Brand";
 import { CountBadge } from "./CountBadge";
@@ -25,6 +26,8 @@ function loadClosed(): Set<GroupKey> {
  * (a group folds like an accordion and remembers it), the active one
  * marked in the brand colour, and the counts waiting on the review queues.
  * It slides in once when the console opens; collapsed it keeps the icons.
+ * A section's page loads before it is opened: when its link is pointed
+ * at or focused, and all of them while the browser is idle (A40).
  */
 export function Sidebar({ admin, collapsed, onToggle }: { admin: Admin; collapsed: boolean; onToggle: () => void }) {
   const { t } = useTranslation();
@@ -32,6 +35,8 @@ export function Sidebar({ admin, collapsed, onToggle }: { admin: Admin; collapse
   const todo = useTodo();
   const [closed, setClosed] = useState(loadClosed);
   const visible = sections.filter((s) => allowed(admin, s));
+  const paths = visible.map((s) => s.path).join(" ");
+  useEffect(() => prefetchPages(paths.split(" ")), [paths]);
   const counts: Record<string, number> = {
     withdrawals: todo?.withdrawals ?? 0, approvals: todo?.approvals ?? 0, identityRequests: todo?.identity_requests ?? 0,
     deposits: todo?.deposits ?? 0,
@@ -120,6 +125,8 @@ function Item({ s, collapsed, count, active, index = 0 }: { s: Section; collapse
       to={`/${s.path}`}
       end={s.path === ""}
       title={collapsed ? label : undefined}
+      onPointerEnter={() => prefetchPage(s.path)}
+      onFocus={() => prefetchPage(s.path)}
       style={{ "--i": index } as React.CSSProperties}
       className={cn(
         "stagger relative flex h-9 items-center gap-3 rounded-2 px-3 text-sm transition-colors",

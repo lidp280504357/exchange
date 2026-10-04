@@ -2,9 +2,12 @@ import { errorText } from "@exchange/core";
 import { ErrorState, Spinner } from "@exchange/ui";
 import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router";
+import Login from "./pages/Login";
 import { useMe } from "./session";
 
-const Login = lazy(() => import("./pages/Login"));
+// The sign-in page is in the entry's chunk (A40: one file for a visitor,
+// and what it shares with the pages stays out of their "kit"); the setup
+// page and the signed-in console load when needed.
 const Setup = lazy(() => import("./pages/Setup"));
 const SignedIn = lazy(() => import("./layout/SignedIn"));
 
@@ -14,7 +17,7 @@ export function App() {
   // in this browser (C5.5 ⑪).
   if (pathname === "/setup") {
     return (
-      <Suspense fallback={null}>
+      <Suspense fallback={<Loading />}>
         <Setup />
       </Suspense>
     );
@@ -29,18 +32,21 @@ function ToLogin() {
   return <Navigate to={`/login${next}`} replace />;
 }
 
+/** Loading fills the window while the session is asked for and the signed-in console's chunks arrive. */
+function Loading() {
+  return (
+    <div className="grid min-h-dvh place-items-center text-fg-3">
+      <Spinner size={24} />
+    </div>
+  );
+}
+
 function Console() {
   const me = useMe();
-  if (me.isPending) {
-    return (
-      <div className="grid min-h-dvh place-items-center text-fg-3">
-        <Spinner size={24} />
-      </div>
-    );
-  }
+  if (me.isPending) return <Loading />;
   if (me.isError) return <ErrorState message={errorText(me.error)} onRetry={() => void me.refetch()} />;
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<Loading />}>
       {me.data ? (
         <SignedIn admin={me.data} />
       ) : (

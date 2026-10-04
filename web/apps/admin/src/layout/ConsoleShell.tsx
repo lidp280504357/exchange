@@ -1,6 +1,7 @@
 import type { Admin } from "@exchange/core/api/admin";
 import { Suspense, useState } from "react";
 import { Navigate, Outlet, useLocation, useSearchParams } from "react-router";
+import { PageSkeleton } from "../kit/PageSkeleton";
 import { useTodoStream } from "../live";
 import { Offline } from "./Offline";
 import { Sidebar } from "./Sidebar";
@@ -10,8 +11,10 @@ import { Topbar } from "./Topbar";
 /**
  * ConsoleShell (design 2026-10-02 §3, §6): the dark sidebar with its
  * groups and the counts waiting (pushed by the event stream), the top bar,
- * the strip that says the network is gone, and the page, which rises in on every change of section. The address
- * ?user=<id> of the former user drawer leads to the user's page.
+ * the strip that says the network is gone, and the page, which rises in on
+ * every change of section, its skeleton standing in while its chunk loads
+ * (A40). The address ?user=<id> of the former user drawer leads to the
+ * user's page.
  */
 export function ConsoleShell({ admin }: { admin: Admin }) {
   const { pathname } = useLocation();
@@ -32,7 +35,7 @@ export function ConsoleShell({ admin }: { admin: Admin }) {
         <Offline />
         <main className="min-w-0 flex-1 p-6">
           <div key={pathname} className="animate-rise">
-            <Suspense fallback={null}>
+            <Suspense fallback={<PageSkeleton />}>
               <Outlet />
             </Suspense>
           </div>

@@ -17,8 +17,10 @@
 // coin's holders; the bots' orders), the fund operations (approval mode,
 // form, records), the settings and the event stream, the account page; the
 // search opens a user; signing out from the account menu ends the session,
-// and the setup page without a link says so. Every admin API response is
-// checked against api/admin/admin.yaml.
+// and the setup page without a link says so. A section first opened from
+// the sidebar fetches its own chunk alone and shows a skeleton while that
+// chunk is late (A40). Every admin API response is checked against
+// api/admin/admin.yaml.
 //
 //   ADMIN_EMAIL=... ADMIN_PASSWORD=... node admin-smoke.mjs
 //
@@ -36,6 +38,24 @@ if (!EMAIL || !PASSWORD) {
 
 const t = await start({ app: APP, api: APP, name: "admin", device: { viewport: { width: 1440, height: 900 } }, apiPrefix: "/admin/v1/" });
 const { page, go, waitText, waitPath, clickButton, typeInto } = t;
+
+// Step 2b holds the audit page's chunk back from the start (the sidebar
+// prefetches the pages when the browser is idle) until it has seen the
+// page's skeleton; every other request goes on at once. Interception turns
+// the browser's cache off: it ends with step 2b.
+const AUDIT_CHUNK = /\/assets\/Audit-[\w-]+\.js$/;
+let heldChunk = null;
+let chunkFree = false;
+const hold = (r) => {
+  if (r.isInterceptResolutionHandled()) return;
+  if (!chunkFree && AUDIT_CHUNK.test(new URL(r.url()).pathname)) {
+    heldChunk = r;
+    return;
+  }
+  void r.continue();
+};
+await page.setRequestInterception(true);
+page.on("request", hold);
 
 /** rows waits for at least n rows in the page's (first) table body. */
 const rows = (n, scope = "main") =>
@@ -64,6 +84,44 @@ try {
   await page.waitForSelector("main svg[role=img]");
   await t.shot("1-overview");
   ok(`the overview: figures, trend chart, ${health}, HOUSE`);
+
+  // 2b. A section first opened from the sidebar (A40): while its chunk is
+  // late the content area shows the page's skeleton, never nothing; and its
+  // chunk needs no file the signed-in shell has not loaded (the shared code
+  // is the shell's "kit"): one file at most, none once prefetched.
+  await page.click('aside a[href="/audit"]');
+  await page.waitForSelector('main [data-testid="page-skeleton"]', { visible: true, timeout: 10000 });
+  await t.shot("1b-skeleton");
+  chunkFree = true;
+  await heldChunk?.continue();
+  await page.waitForFunction(
+    () => document.querySelector("main h1")?.innerText.includes("审计日志") && !document.querySelector('main [data-testid="page-skeleton"]'),
+    { timeout: 30000 },
+  );
+  const files = await page.evaluate(async () => {
+    // The files a chunk imports statically, followed to the end.
+    const follow = async (roots) => {
+      const seen = new Set();
+      const queue = [...roots];
+      while (queue.length) {
+        const path = queue.pop();
+        if (!path || seen.has(path)) continue;
+        seen.add(path);
+        const src = await (await fetch(path)).text();
+        for (const m of src.matchAll(/(?:import|from)\s*["']\.\/([\w.-]+\.js)["']/g)) queue.push(`/assets/${m[1]}`);
+      }
+      return seen;
+    };
+    const loaded = performance.getEntriesByType("resource").map((e) => new URL(e.name).pathname);
+    const entry = document.querySelector("script[type=module][src]")?.getAttribute("src");
+    const shell = await follow([entry, loaded.find((p) => /^\/assets\/SignedIn-[\w-]+\.js$/.test(p))]);
+    const audit = loaded.find((p) => /^\/assets\/Audit-[\w-]+\.js$/.test(p));
+    return { audit, extra: [...(await follow([audit]))].filter((p) => p !== audit && !shell.has(p)) };
+  });
+  if (!files.audit || files.extra.length) throw new Error(`the audit page needs files beyond its chunk ${files.audit}: ${files.extra.join(", ")}`);
+  page.off("request", hold);
+  await page.setRequestInterception(false);
+  ok("a section first opened from the sidebar shows its skeleton while its chunk is late and needs that one file alone");
 
   // 3. Users: the list; a row opens the user's page with its tabs.
   await go("/users");
