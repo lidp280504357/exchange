@@ -6,7 +6,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 // shown, not from zero, with a guide and the values under the pointer.
 // SVG sized to its container, like TrendChart.
 
-export type PriceLine = { key: string; label: string; className: string; dotClassName: string };
+/**
+ * PriceLine is one line: dashed for a bound (a plan's band, a level), dots
+ * for marks at single points (a target's spikes) instead of a line.
+ */
+export type PriceLine = { key: string; label: string; className: string; dotClassName: string; dashed?: boolean; dots?: boolean };
 export type PricePoint = { at: number; label: string; values: Record<string, number | null> };
 
 const PAD = { top: 12, right: 64, bottom: 24, left: 12 };
@@ -85,9 +89,20 @@ export function PriceLines({
             );
           })}
           {hover !== null && <line x1={x(hover)} x2={x(hover)} y1={PAD.top} y2={PAD.top + innerH} className="stroke-line-2" />}
-          {lines.map((l) => (
-            <path key={l.key} d={path(l.key)} fill="none" strokeWidth={1.75} className={l.className} />
-          ))}
+          {lines.map((l) =>
+            l.dots ? (
+              <g key={l.key} className={l.className}>
+                {data.map((p, i) => {
+                  const v = p.values[l.key];
+                  return v === null || v === undefined || !Number.isFinite(v) ? null : (
+                    <circle key={p.at} cx={x(i)} cy={y(v)} r={3.5} fill="none" strokeWidth={1.75} />
+                  );
+                })}
+              </g>
+            ) : (
+              <path key={l.key} d={path(l.key)} fill="none" strokeWidth={l.dashed ? 1.25 : 1.75} strokeDasharray={l.dashed ? "4 3" : undefined} className={l.className} />
+            ),
+          )}
           {data.map((d, i) =>
             i % every === 0 ? (
               <text key={d.at} x={x(i)} y={height - 6} textAnchor="middle" className="fill-fg-3 text-[10px]">
@@ -105,6 +120,7 @@ export function PriceLines({
           <div className="mb-1 font-medium text-fg-1">{data[hover].label}</div>
           {lines.map((l) => {
             const v = data[hover]!.values[l.key];
+            if (l.dots && (v === null || v === undefined)) return null;
             return (
               <div key={l.key} className="flex items-center gap-2 text-fg-2">
                 <span className={cn("size-2 rounded-full", l.dotClassName)} />

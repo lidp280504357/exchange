@@ -159,6 +159,8 @@ func (h *Handler) Routes(r chi.Router) {
 			r.Get("/sim/events", h.simEvents)
 			r.Post("/sim/events", h.createSimEvent)
 			r.Post("/sim/events/{id}/end", h.endSimEvent)
+			r.Get("/sim/events/{id}/plan", h.simPlan)
+			r.Get("/sim/target-preview", h.simTargetPreview)
 			r.Put("/sim/params", h.updateSimParams)
 			r.Post("/sim/impact", h.simImpact)
 			r.Get("/sim/token", h.simToken)

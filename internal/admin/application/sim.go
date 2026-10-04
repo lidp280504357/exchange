@@ -27,7 +27,7 @@ import (
 
 // Event types market-sim runs.
 var simEventTypes = map[string]bool{
-	"JUMP": true, "TARGET": true, "TREND": true, "VOLATILITY": true, "PAUSE": true, "HALT": true, "REANCHOR": true,
+	"JUMP": true, "TARGET": true, "TREND": true, "VOLATILITY": true, "PAUSE": true, "HALT": true, "REANCHOR": true, "SPIKE": true,
 }
 
 // The guards' refusals that a second administrator lifts.
@@ -52,6 +52,22 @@ type SimEventInput struct {
 	DurationSeconds int      `json:"duration_seconds,omitempty"`
 	HoldSeconds     int      `json:"hold_seconds,omitempty"`
 	StartsAt        string   `json:"starts_at,omitempty"`
+	// A threshold target (ASTRA A6): the level's side (ABOVE, BELOW;
+	// inferred when empty), what follows the crossing (FOLLOW, HOLD with
+	// HoldSeconds) and the spikes it plans.
+	Direction string     `json:"direction,omitempty"`
+	Then      string     `json:"then,omitempty"`
+	Spikes    []SimSpike `json:"spikes,omitempty"`
+	// WidthSeconds is a spike's width (SPIKE; 20 when absent).
+	WidthSeconds int `json:"width_seconds,omitempty"`
+}
+
+// SimSpike is a spike a threshold target plans: when, how far from the
+// planned price (a share, e.g. -0.04) and how wide.
+type SimSpike struct {
+	At           string  `json:"at"`
+	Size         float64 `json:"size"`
+	WidthSeconds int     `json:"width_seconds,omitempty"`
 }
 
 // SimResult is a change done (Event, or Version for the settings) or one
@@ -172,8 +188,15 @@ func (s *Service) CreateSimEvent(ctx context.Context, p Principal, in SimEventIn
 	}
 	in.Type = strings.ToUpper(strings.TrimSpace(in.Type))
 	if !simEventTypes[in.Type] {
-		return SimResult{}, apperr.Invalid("type must be JUMP, TARGET, TREND, VOLATILITY, PAUSE, HALT or REANCHOR")
+		return SimResult{}, apperr.Invalid("type must be JUMP, TARGET, TREND, VOLATILITY, PAUSE, HALT, REANCHOR or SPIKE")
 	}
+	if err := in.checkTarget(s.Now()); err != nil {
+		return SimResult{}, err
+	}
+	// asked is a start already past as the operator gave it: the event
+	// starts now, and the audit and the request keep what was asked
+	// (review 28).
+	var asked string
 	if in.StartsAt != "" {
 		at, err := time.Parse(time.RFC3339, in.StartsAt)
 		if err != nil {
@@ -183,18 +206,22 @@ func (s *Service) CreateSimEvent(ctx context.Context, p Principal, in SimEventIn
 		// would make a request for approval lapse the moment it is made
 		// (review ⑭).
 		if !at.After(s.Now()) {
-			in.StartsAt = ""
+			asked, in.StartsAt = at.UTC().Format(time.RFC3339), ""
 		}
 	}
 	event := simEventFields(in, strings.TrimSpace(reason))
 	raw, err := s.Sim.CreateEvent(ctx, event, p.Admin.Email, "")
 	if apperr.Is(err, simEventNeedsApproval) {
-		return s.requestSim(ctx, p, domain.KindSimEvent, event, err, reason)
+		return s.requestSim(ctx, p, domain.KindSimEvent, event, err, reason, map[string]string{"asked_starts_at": asked})
 	}
 	if err != nil {
 		return SimResult{}, err
 	}
-	details, _ := json.Marshal(map[string]any{"event": raw})
+	audit := map[string]any{"event": raw}
+	if asked != "" {
+		audit["asked_starts_at"] = asked
+	}
+	details, _ := json.Marshal(audit)
 	return SimResult{Event: raw}, s.audit(ctx, p, simAuditTarget, "admin.sim.event_created", strings.TrimSpace(reason), string(details))
 }
 
@@ -221,6 +248,18 @@ func simEventFields(in SimEventInput, reason string) map[string]any {
 	}
 	if in.StartsAt != "" {
 		out["starts_at"] = in.StartsAt
+	}
+	if in.Direction != "" {
+		out["direction"] = in.Direction
+	}
+	if in.Then != "" {
+		out["then"] = in.Then
+	}
+	if len(in.Spikes) > 0 {
+		out["spikes"] = in.Spikes
+	}
+	if in.WidthSeconds > 0 {
+		out["width_seconds"] = in.WidthSeconds
 	}
 	return out
 }
@@ -260,7 +299,7 @@ func (s *Service) UpdateSimParams(ctx context.Context, p Principal, params json.
 	}
 	raw, err := s.Sim.UpdateParams(ctx, params, p.Admin.Email, "")
 	if apperr.Is(err, simParamsNeedApproval) {
-		return s.requestSim(ctx, p, domain.KindSimParams, map[string]any{"params": params}, err, reason)
+		return s.requestSim(ctx, p, domain.KindSimParams, map[string]any{"params": params}, err, reason, nil)
 	}
 	if err != nil {
 		return SimResult{}, err
@@ -274,13 +313,21 @@ func (s *Service) UpdateSimParams(ctx context.Context, p Principal, params json.
 }
 
 // requestSim keeps a change market-sim refused for want of a second
-// administrator as a request for one, with the move it measured.
-func (s *Service) requestSim(ctx context.Context, p Principal, kind string, change map[string]any, refusal error, reason string) (SimResult, error) {
+// administrator as a request for one, with the move it measured and what
+// else the request keeps (extra, its empty values left out).
+func (s *Service) requestSim(ctx context.Context, p Principal, kind string, change map[string]any, refusal error, reason string,
+	extra map[string]string,
+) (SimResult, error) {
 	body, err := json.Marshal(change)
 	if err != nil {
 		return SimResult{}, err
 	}
 	payload := map[string]string{"change": string(body), "actor": p.Admin.Email}
+	for k, v := range extra {
+		if v != "" {
+			payload[k] = v
+		}
+	}
 	if e := apperr.From(refusal); e != nil {
 		for _, k := range []string{"move", "volume"} {
 			if v, ok := e.Details[k]; ok {
@@ -313,8 +360,9 @@ func (s *Service) requestSim(ctx context.Context, p Principal, kind string, chan
 const simApprovalTTL = 24 * time.Hour
 
 // simExpiry is when a simulated market's request lapses: a day after it
-// was asked for, or when its event was to start if sooner. Approving it
-// later fails it, nothing sent to market-sim.
+// was asked for, or when its event was to start if sooner, or a target's
+// first spike (A6: market-sim refuses a target whose spikes are past).
+// Approving it later fails it, nothing sent to market-sim.
 func simExpiry(a domain.Approval) time.Time {
 	at := a.CreatedAt.Add(simApprovalTTL)
 	if a.Kind != domain.KindSimEvent {
@@ -322,9 +370,19 @@ func simExpiry(a domain.Approval) time.Time {
 	}
 	var e struct {
 		StartsAt string `json:"starts_at"`
+		Spikes   []struct {
+			At string `json:"at"`
+		} `json:"spikes"`
 	}
-	if json.Unmarshal([]byte(a.Payload["change"]), &e) == nil && e.StartsAt != "" {
-		if t, err := time.Parse(time.RFC3339, e.StartsAt); err == nil && t.Before(at) {
+	if json.Unmarshal([]byte(a.Payload["change"]), &e) != nil {
+		return at
+	}
+	times := []string{e.StartsAt}
+	for _, sp := range e.Spikes {
+		times = append(times, sp.At)
+	}
+	for _, v := range times {
+		if t, err := time.Parse(time.RFC3339, v); err == nil && t.Before(at) {
 			at = t
 		}
 	}
@@ -389,7 +447,7 @@ func (s *Service) SimApprovalPreview(ctx context.Context, p Principal, id string
 	move, _ := expected.Div(target).Sub(decimal.NewFromInt(1)).Round(4).Float64()
 	out.Move = &move
 	if st.Perp != "" {
-		if out.Impact, err = s.SimImpact(ctx, p, expected.Round(8).String()); err != nil {
+		if out.Impact, err = s.SimImpact(ctx, p, simMarkAt(*a, target, *expected).Round(8).String()); err != nil {
 			s.Log.WarnContext(ctx, "sim preview: no impact", "approval_id", id, "error", err)
 			out.Impact = nil
 		}
@@ -398,8 +456,8 @@ func (s *Service) SimApprovalPreview(ctx context.Context, p Principal, id string
 }
 
 // simExpected is where a request would take the price from target: a
-// jump's, a target event's price, the settings' new anchor (the target
-// moves with P0); nil for changes that move no price directly.
+// jump's, a spike's tip, a target event's price, the settings' new anchor
+// (the target moves with P0); nil for changes that move no price directly.
 func simExpected(a domain.Approval, target decimal.Decimal, p0 float64) *decimal.Decimal {
 	var change struct {
 		Type   string          `json:"type"`
@@ -412,7 +470,7 @@ func simExpected(a domain.Approval, target decimal.Decimal, p0 float64) *decimal
 	}
 	var out decimal.Decimal
 	switch {
-	case a.Kind == domain.KindSimEvent && change.Type == "JUMP":
+	case a.Kind == domain.KindSimEvent && (change.Type == "JUMP" || change.Type == "SPIKE"):
 		out = target.Mul(decimal.NewFromFloat(1 + change.Size))
 	case a.Kind == domain.KindSimEvent && change.Type == "TARGET":
 		px, err := decimal.NewFromString(change.Price)

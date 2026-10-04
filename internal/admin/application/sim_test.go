@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/lidp280504357/exchange/internal/admin/domain"
+	"github.com/lidp280504357/exchange/internal/admin/ports"
 	"github.com/lidp280504357/exchange/internal/platform/apperr"
 )
 
@@ -19,6 +20,21 @@ type fakeSim struct {
 	events  []string
 	params  []string
 	version int64
+	// last is the last event asked for as market-sim takes it; plan and
+	// preview the threshold target reads (A6).
+	last    map[string]any
+	plan    string
+	preview ports.SimTargetQuery
+}
+
+func (f *fakeSim) Plan(_ context.Context, id string) (json.RawMessage, error) {
+	f.plan = id
+	return json.RawMessage(`{"event_id":"` + id + `","points":[]}`), nil
+}
+
+func (f *fakeSim) TargetPreview(_ context.Context, q ports.SimTargetQuery) (json.RawMessage, error) {
+	f.preview = q
+	return json.RawMessage(`{"feasible":true,"min_duration_seconds":120,"move":0.08,"needs_approval":false,"points":[]}`), nil
 }
 
 func (f *fakeSim) BotUsers(context.Context) ([]string, error) { return []string{"bot-1"}, nil }
@@ -39,6 +55,7 @@ func (f *fakeSim) CreateEvent(_ context.Context, event map[string]any, actor, ap
 	if size, _ := event["size"].(float64); size > 0.3 && approvedBy == "" {
 		return nil, apperr.New(apperr.KindForbidden, "SIM_EVENT_NEEDS_APPROVAL", "beyond one operator's share").WithDetail("move", size)
 	}
+	f.last = event
 	f.events = append(f.events, event["type"].(string)+" by "+actor+" approved by "+approvedBy)
 	return json.Marshal(map[string]any{"id": uuid.NewString(), "type": event["type"], "status": "RUNNING"})
 }
@@ -238,12 +255,24 @@ func TestASimRequestLapsesAndIsMeasuredAgainForItsDecider(t *testing.T) {
 	}
 
 	// A start already past is now: the request lapses a day after it was
-	// asked for, not the moment it is made (review ⑭).
-	past, err := h.svc.CreateSimEvent(ctx, ops, SimEventInput{Type: "JUMP", Size: &size, StartsAt: h.now.Add(-time.Hour).Format(time.RFC3339)},
-		"a big push that was due an hour ago")
+	// asked for, not the moment it is made (review ⑭); the request keeps
+	// the start that was asked (review 28).
+	hourAgo := h.now.Add(-time.Hour).UTC().Format(time.RFC3339)
+	past, err := h.svc.CreateSimEvent(ctx, ops, SimEventInput{Type: "JUMP", Size: &size, StartsAt: hourAgo}, "a big push that was due an hour ago")
 	if err != nil || past.Approval == nil || !simExpiry(*past.Approval).Equal(h.now.Add(24*time.Hour)) ||
-		strings.Contains(past.Approval.Payload["change"], "starts_at") {
+		strings.Contains(past.Approval.Payload["change"], "starts_at") || past.Approval.Payload["asked_starts_at"] != hourAgo {
 		t.Fatalf("a past start %+v %v", past, err)
+	}
+	// Within one's share, done at once: the audit keeps it.
+	small := 0.02
+	if _, err := h.svc.CreateSimEvent(ctx, ops, SimEventInput{Type: "JUMP", Size: &small, StartsAt: hourAgo}, "a small push due an hour ago"); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.auditsOf("admin.sim.event_created"); len(got) == 0 || !strings.Contains(got[len(got)-1], `"asked_starts_at":"`+hourAgo+`"`) {
+		t.Fatalf("the audit of a past start %v", got)
+	}
+	if !strings.Contains(sim.events[len(sim.events)-1], "JUMP by ops@example.com") {
+		t.Fatalf("done at once %v", sim.events)
 	}
 
 	// The settings: the target moves with the anchor.

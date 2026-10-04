@@ -644,6 +644,49 @@ check "[.items[] | select(.id == \"$BIG_EVENT\")][0] | .status == \"SCHEDULED\" 
   "in the operator's name, approved by the ADMIN"
 as OPERATOR POST "/admin/v1/sim/events/$BIG_EVENT/end" '{"reason":"e2e: the drill is over"}'
 expect 200 - "and canceled before it starts"
+# A threshold target (ASTRA A6), tomorrow like the jumps: the form's
+# preview, the target with a spike and its plan, what market-sim refuses
+# around it, and canceling it with its spike.
+SIM_LEVEL=$(jq -r '.target_price | tonumber * 1.03 * 10000 | floor / 10000 | tostring' <<<"$SIM")
+as AUDITOR GET "/admin/v1/sim/target-preview?price=$SIM_LEVEL&duration_seconds=1800&starts_at=$TOMORROW" ""
+expect 200 - "the form previews a target 3% above within 30 minutes"
+check '.feasible == true and .direction == "ABOVE" and .needs_approval == false and (.points | length) >= 30 and (.points[0].plan | tostring | test("^[0-9.]+$"))' \
+  "reachable, above, within one operator's share, planned minute by minute"
+as AUDITOR GET "/admin/v1/sim/target-preview?price=$(jq -r '.target_price | tonumber * 1.2 * 10000 | floor / 10000 | tostring' <<<"$SIM")&duration_seconds=60" ""
+expect 200 - "and one 20% above within a minute"
+check '.feasible == false and .min_duration_seconds > 60' "not reachable: the shortest window it needs"
+as AUDITOR GET "/admin/v1/sim/target-preview?price=0&duration_seconds=600" ""
+expect 400 COMMON_INVALID_ARGUMENT "the level is a positive price"
+SPIKE_AT=$(jq -nr --arg t "$TOMORROW" '$t | fromdateiso8601 + 600 | strftime("%Y-%m-%dT%H:%M:%SZ")')
+as OPERATOR POST /admin/v1/sim/events "$(jq -nc --arg p "$SIM_LEVEL" --arg at "$TOMORROW" --arg sp "$SPIKE_AT" \
+  '{type: "TARGET", price: $p, duration_seconds: 1800, direction: "ABOVE", then: "HOLD", hold_seconds: 300, starts_at: $at,
+    spikes: [{at: $sp, size: -0.02, width_seconds: 20}], reason: "e2e: a +3% target tomorrow with a spike, to be canceled"}')"
+expect 201 - "OPERATOR schedules a +3% target tomorrow, held 5 minutes once crossed, with a spike"
+check '.event.type == "TARGET" and .event.direction == "ABOVE" and .event.then == "HOLD" and .event.hold_seconds == 300 and .event.status == "SCHEDULED" and
+  (.event.spikes | length) == 1 and .event.spikes[0].parent_id == .event.id and .event.spikes[0].size == -0.02 and .event.spikes[0].width_seconds == 20' \
+  "its side, its hold and its spike, made with it"
+TARGET_EVENT=$(jq -r .event.id <<<"$BODY")
+# shellcheck disable=SC2016 # expanded when the script ends
+at_exit 'as OPERATOR POST "/admin/v1/sim/events/$TARGET_EVENT/end" "{\"reason\":\"e2e cleanup\"}" >/dev/null'
+as AUDITOR GET "/admin/v1/sim/events/$TARGET_EVENT/plan" ""
+expect 200 - "every administrator reads its plan"
+check ".event_id == \"$TARGET_EVENT\" and .direction == \"ABOVE\" and (.points | length) >= 30 and (.spikes | length) == 1 and .now == null" \
+  "minute by minute with its spike, not running yet"
+as AUDITOR GET /admin/v1/sim/events/not-an-event/plan ""
+expect 404 COMMON_NOT_FOUND "no plan for what is not an event"
+as OPERATOR POST /admin/v1/sim/events "$(jq -nc --arg t "$TOMORROW" '{type: "JUMP", size: 0.01,
+  starts_at: ($t | fromdateiso8601 + 300 | strftime("%Y-%m-%dT%H:%M:%SZ")), reason: "e2e: a jump within the target"}')"
+expect 409 SIM_TARGET_RUNNING "no jump within the target's window"
+as OPERATOR POST /admin/v1/sim/events "$(jq -nc --arg t "$TOMORROW" '{type: "SPIKE", size: 0.01, width_seconds: 10,
+  starts_at: ($t | fromdateiso8601 + 1700 | strftime("%Y-%m-%dT%H:%M:%SZ")), reason: "e2e: a spike as the target closes in"}')"
+expect 409 SIM_SPIKE_IN_CLOSING "no spike in its closing window"
+as OPERATOR POST /admin/v1/sim/events '{"type":"JUMP","size":0.01,"direction":"ABOVE","reason":"e2e: a jump with a side"}'
+expect 400 COMMON_INVALID_ARGUMENT "a side belongs to a target"
+as OPERATOR POST "/admin/v1/sim/events/$TARGET_EVENT/end" '{"reason":"e2e: the target drill is over"}'
+expect 200 - "and the target is canceled before it starts"
+as AUDITOR GET "/admin/v1/sim/events?all=true&limit=50" ""
+check "([.items[] | select(.id == \"$TARGET_EVENT\")][0].status == \"CANCELED\") and ([.items[] | select(.parent_id == \"$TARGET_EVENT\")][0].status == \"CANCELED\")" \
+  "its spike with it"
 SIM_PARAMS=$(jq -c .params <<<"$SIM")
 as AUDITOR PUT /admin/v1/sim/params "$(jq -c '{params: ., reason: "e2e reads only"}' <<<"$SIM_PARAMS")"
 expect 403 ADMIN_FORBIDDEN "AUDITOR changes no settings"
@@ -688,6 +731,12 @@ at_exit 'as ADMIN POST "/admin/v1/approvals/$BIG_MINT/decide" "{\"approve\":fals
 as ADMIN POST "/admin/v1/approvals/$BIG_MINT/decide" '{"approve":false,"reason":"e2e: no such sum"}'
 expect 200 - "ADMIN rejects it"
 check '.status == "REJECTED"' "nothing booked"
+# One mint's cap holds whoever would approve it (review ⑭ (e) 3).
+as FINANCE POST /admin/v1/sim/mint "$(jq -nc --arg c "${SIM_PAIR%-USDT}" '{asset: $c, amount: "10000001", reason: "e2e: beyond the cap of one mint"}')"
+expect 422 ADMIN_SIM_MINT_CAP "no mint of more than 10,000,000 coins"
+check '.details.max == "10000000"' "the cap in the answer"
+as FINANCE POST /admin/v1/sim/mint '{"asset":"USDT","amount":"1000000.01","reason":"e2e: beyond the cap of one mint"}'
+expect 422 ADMIN_SIM_MINT_CAP "nor of more than 1,000,000 USDT"
 as AUDITOR GET "/admin/v1/orders?symbol=$SIM_PAIR&accounts=bots&limit=5" ""
 expect 200 - "the bots' orders"
 check '(.items | length) >= 1 and all(.items[]; .bot)' "only bots', each marked"
@@ -1337,34 +1386,38 @@ fi
 # Two fees held for a person on the stand-in (lib/held-fees.sh: 999 TUSD
 # reported, nothing taken): one booked as charged, within 5 times what was
 # reported (review 26), the other written off; wallet-service audits both
-# in FINANCE's name.
+# in FINANCE's name. Skipped unless UDUNMOCK is the stand-in (review 28).
 # shellcheck source=lib/held-fees.sh
 source "$(dirname "$0")/lib/held-fees.sh"
-held_fees 2
-FEE_BOOK=${HELD_FEES[0]}
-FEE_OFF=${HELD_FEES[1]}
-held_listed() {
-  as AUDITOR GET "/admin/v1/custody/fees?provider=UDUNMOCK&status=HELD&limit=200" ""
-  [[ $STATUS == 200 ]] && jq -e --arg a "$FEE_BOOK" --arg b "$FEE_OFF" '([.items[] | select(.withdrawal_id == $a or .withdrawal_id == $b) |
-    select(.asset == "TUSD" and (.amount | tonumber) == 999 and .provider == "UDUNMOCK")] | length) == 2' <<<"$BODY" >/dev/null
-}
-eventually 60 "both held for a person, 999 TUSD reported" held_listed
-as FINANCE POST "/admin/v1/custody/fees/$FEE_BOOK/book" '{"asset":"TUSD","amount":"5000","reason":"e2e above five times"}'
-expect 422 ADMIN_FEE_ABOVE_REPORTED "not more than 5 times what was reported"
-as FINANCE POST "/admin/v1/custody/fees/$FEE_BOOK/book" '{"amount":"1","reason":"e2e found charged 1 TUSD"}'
-expect 200 - "FINANCE books one as charged"
-check ".status == \"BOOKABLE\" and .asset == \"TUSD\" and (.amount | tonumber) == 1 and .resolved_by == \"$EMAIL_FINANCE\"" "1 TUSD from GAS_SUPPLY, by FINANCE"
-as FINANCE POST "/admin/v1/custody/fees/$FEE_BOOK/book" '{"reason":"e2e book it again"}'
-expect 409 WALLET_CUSTODY_FEE_NOT_HELD "booked once"
-as FINANCE POST "/admin/v1/custody/fees/$FEE_OFF/write-off" '{"reason":"e2e the custodian took nothing"}'
-expect 200 - "FINANCE writes the other off"
-check ".status == \"WRITTEN_OFF\" and .written_off_at != null and .resolved_by == \"$EMAIL_FINANCE\"" "written off, by FINANCE"
-fees_audited() {
-  as AUDITOR GET "/admin/v1/audit-logs?target=withdrawal:$FEE_OFF" ""
-  [[ $STATUS == 200 ]] && jq -e --arg e "$EMAIL_FINANCE" 'any(.items[]; .payload.action == "wallet.custody.fee.write_off" and .actor == $e)' \
-    <<<"$BODY" >/dev/null
-}
-eventually 60 "wallet-service audits the decision in FINANCE's name" fees_audited
+if ! held_standin; then
+  echo "skip the held fees: wallet-service's UDUNMOCK custodian is not the stand-in udun-mock"
+else
+  held_fees 2
+  FEE_BOOK=${HELD_FEES[0]}
+  FEE_OFF=${HELD_FEES[1]}
+  held_listed() {
+    as AUDITOR GET "/admin/v1/custody/fees?provider=UDUNMOCK&status=HELD&limit=200" ""
+    [[ $STATUS == 200 ]] && jq -e --arg a "$FEE_BOOK" --arg b "$FEE_OFF" '([.items[] | select(.withdrawal_id == $a or .withdrawal_id == $b) |
+      select(.asset == "TUSD" and (.amount | tonumber) == 999 and .provider == "UDUNMOCK")] | length) == 2' <<<"$BODY" >/dev/null
+  }
+  eventually 60 "both held for a person, 999 TUSD reported" held_listed
+  as FINANCE POST "/admin/v1/custody/fees/$FEE_BOOK/book" '{"asset":"TUSD","amount":"5000","reason":"e2e above five times"}'
+  expect 422 ADMIN_FEE_ABOVE_REPORTED "not more than 5 times what was reported"
+  as FINANCE POST "/admin/v1/custody/fees/$FEE_BOOK/book" '{"amount":"1","reason":"e2e found charged 1 TUSD"}'
+  expect 200 - "FINANCE books one as charged"
+  check ".status == \"BOOKABLE\" and .asset == \"TUSD\" and (.amount | tonumber) == 1 and .resolved_by == \"$EMAIL_FINANCE\"" "1 TUSD from GAS_SUPPLY, by FINANCE"
+  as FINANCE POST "/admin/v1/custody/fees/$FEE_BOOK/book" '{"reason":"e2e book it again"}'
+  expect 409 WALLET_CUSTODY_FEE_NOT_HELD "booked once"
+  as FINANCE POST "/admin/v1/custody/fees/$FEE_OFF/write-off" '{"reason":"e2e the custodian took nothing"}'
+  expect 200 - "FINANCE writes the other off"
+  check ".status == \"WRITTEN_OFF\" and .written_off_at != null and .resolved_by == \"$EMAIL_FINANCE\"" "written off, by FINANCE"
+  fee_audited() { # fee_audited WITHDRAWAL ACTION
+    as AUDITOR GET "/admin/v1/audit-logs?target=withdrawal:$1" ""
+    [[ $STATUS == 200 ]] && jq -e --arg e "$EMAIL_FINANCE" --arg a "$2" 'any(.items[]; .payload.action == $a and .actor == $e)' <<<"$BODY" >/dev/null
+  }
+  eventually 60 "wallet-service audits the booking in FINANCE's name" fee_audited "$FEE_BOOK" wallet.custody.fee.book
+  eventually 60 "and the write-off" fee_audited "$FEE_OFF" wallet.custody.fee.write_off
+fi
 
 echo "== a withdrawal's review details and holds"
 as FINANCE GET "/admin/v1/withdrawals?held=false&min_risk=0&min_value_usdt=0&max_value_usdt=1000000" ""

@@ -1889,6 +1889,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/sim/events/{id}/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A threshold target's plan and where the market is against it
+         * @description ASTRA A6: a TARGET's envelope minute by minute (the planned price
+         *     with its band), its spikes, and now: the target price, the planned
+         *     one, the deviation ln(target/plan), whether the target is at risk
+         *     of missing the level, when it crossed and how it ended (HIT,
+         *     MISSED, CANCELED). market-sim's answer as it is. Needs
+         *     reports.read.
+         */
+        get: operations["getSimPlan"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/sim/target-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whether a threshold target is feasible, and its envelope, before it is asked for
+         * @description ASTRA A6, for the price control's form: from the current target,
+         *     whether the level is reachable within the window (the shortest
+         *     window that is, min_duration_seconds), the move it plans, whether
+         *     it is beyond one operator's share (a second administrator approves
+         *     it), and the planned envelope. Needs reports.read.
+         */
+        get: operations["previewSimTarget"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/sim/params": {
         parameters: {
             query?: never;
@@ -3291,7 +3340,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            type: "JUMP" | "TARGET" | "TREND" | "VOLATILITY" | "PAUSE" | "HALT" | "REANCHOR";
+            type: "JUMP" | "TARGET" | "TREND" | "VOLATILITY" | "PAUSE" | "HALT" | "REANCHOR" | "SPIKE";
             size: number;
             price: string | null;
             mu: number;
@@ -3313,22 +3362,119 @@ export interface components {
             ended_at: string | null;
             from_price: string | null;
             ended_by: string;
+            /** @description A TARGET's side of its level (ABOVE, BELOW; ASTRA A6); empty or null otherwise. */
+            direction?: string | null;
+            /** @description What a TARGET does once crossed (FOLLOW, HOLD). */
+            then?: string | null;
+            /** @description How a TARGET ended (HIT, MISSED, CANCELED); empty while running. */
+            result?: string | null;
+            /** Format: date-time */
+            crossed_at?: string | null;
+            /** Format: date-time */
+            ends_at?: string | null;
+            /**
+             * Format: date-time
+             * @description When a TARGET's closing window starts (its last 10%, at least a minute); no spike starts in it.
+             */
+            closing_at?: string | null;
+            /** Format: date-time */
+            hold_until?: string | null;
+            /** @description A SPIKE's TARGET. */
+            parent_id?: string | null;
+            /** @description A SPIKE's width. */
+            width_seconds?: number | null;
+            /** @description A TARGET's spikes, made with it (in the answer to its creation only). */
+            spikes?: components["schemas"]["SimEvent"][];
         };
         SimEventWrite: {
             /** @enum {string} */
-            type: "JUMP" | "TARGET" | "TREND" | "VOLATILITY" | "PAUSE" | "HALT" | "REANCHOR";
-            /** @description JUMP's move (0.1 is +10%). */
+            type: "JUMP" | "TARGET" | "TREND" | "VOLATILITY" | "PAUSE" | "HALT" | "REANCHOR" | "SPIKE";
+            /** @description JUMP's move (0.1 is +10%); a SPIKE's, a share of the planned price (at most 0.05 alone, 0.10 approved). */
             size?: number;
-            /** @description TARGET's price. */
+            /** @description TARGET's level. */
             price?: string;
             /** @description TREND's drift a day. */
             mu?: number;
             /** @description VOLATILITY's factor. */
             factor?: number;
             duration_seconds?: number;
+            /** @description A TARGET held this long at its level once crossed (then HOLD; at most a day). */
             hold_seconds?: number;
             /** Format: date-time */
             starts_at?: string;
+            /**
+             * @description A TARGET's side of its level (ASTRA A6); inferred from the current target when absent.
+             * @enum {string}
+             */
+            direction?: "ABOVE" | "BELOW";
+            /**
+             * @description What a TARGET does once crossed; FOLLOW when absent.
+             * @enum {string}
+             */
+            then?: "FOLLOW" | "HOLD";
+            /** @description Spikes a TARGET plans, each becoming its own SPIKE event (all or nothing). */
+            spikes?: components["schemas"]["SimSpikeWrite"][];
+            /** @description A SPIKE's width; 20 when absent. */
+            width_seconds?: number;
+        };
+        SimSpikeWrite: {
+            /** Format: date-time */
+            at: string;
+            /** @description A share of the planned price, e.g. -0.04. */
+            size: number;
+            width_seconds?: number;
+        };
+        SimPlanPoint: {
+            /** Format: date-time */
+            at: string;
+            plan: string | number;
+            low: string | number;
+            high: string | number;
+        };
+        SimPlan: {
+            event_id: string;
+            direction?: string | null;
+            level?: string | number | null;
+            from_price?: string | number | null;
+            /** Format: date-time */
+            starts_at?: string | null;
+            /** Format: date-time */
+            closing_at?: string | null;
+            /** Format: date-time */
+            ends_at?: string | null;
+            /** Format: date-time */
+            hold_until?: string | null;
+            /** @description The target's status (SCHEDULED, RUNNING, DONE, CANCELED). */
+            status?: string | null;
+            points: components["schemas"]["SimPlanPoint"][];
+            spikes?: components["schemas"]["SimEvent"][];
+            /** @description Where the target is against the plan, while it runs. */
+            now?: {
+                /** Format: date-time */
+                at?: string;
+                target?: string | number | null;
+                plan?: string | number | null;
+                low?: string | number | null;
+                high?: string | number | null;
+                /** @description ln(target/plan). */
+                deviation?: number | null;
+                at_risk?: boolean;
+                /** Format: date-time */
+                crossed_at?: string | null;
+                result?: string | null;
+            } | null;
+        };
+        SimTargetPreview: {
+            /** @description The side of the level, as asked or inferred from the current target (ABOVE, BELOW). */
+            direction?: string | null;
+            feasible: boolean;
+            /** @description The shortest window in which the level is reachable from the current target. */
+            min_duration_seconds: number;
+            /** @description The planned move, |ln(level/current target)|. */
+            move: number;
+            /** @description Beyond one operator's share (30% alone, 50% an hour): a second administrator approves it. */
+            needs_approval: boolean;
+            points: components["schemas"]["SimPlanPoint"][];
         };
         SimSample: {
             /** Format: date-time */
@@ -7440,6 +7586,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SimEvent"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSimPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The plan. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimPlan"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    previewSimTarget: {
+        parameters: {
+            query: {
+                /** @description The level. */
+                price: string;
+                /** @description The window, at most a day (market-sim's longest). */
+                duration_seconds: number;
+                /** @description ABOVE or BELOW; inferred from the current target when absent. */
+                direction?: "ABOVE" | "BELOW";
+                /** @description When it starts; now when absent. */
+                starts_at?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The preview. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimTargetPreview"];
                 };
             };
             default: components["responses"]["Error"];

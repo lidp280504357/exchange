@@ -80,6 +80,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
   - `GET /admin/v1/events`：Server-Sent Events。连上即发一次 `todo`，之后每 10 秒检查、变了才发；20 秒没有事件发一行注释保活（nginx 读超时 60 秒、Cloudflare 100 秒）；会话结束（退出、过期、停用）时发 `signed_out` 并关闭。流本身不算请求，不会让会话保持活跃。响应头 `X-Accel-Buffering: no` 让 nginx 不缓冲；服务端对这条连接取消读写超时。
   - 前端只开一条流，写进 Query 缓存；流断开时每 15 秒轮询 `/todo`。侧栏角标与顶栏铃铛来自它，数字增加时弹跳；铃铛与概览的各项进入对应列表。
 - **读模型的时效**：订单、成交、充值、审计、报表与概览的交易部分来自 ClickHouse，比服务晚几秒。
+- **首屏**（C6，Lighthouse）：后台的 CSP（`default-src 'self'`）不许内联脚本，所以不能像用户站那样由 index.html 按地址预加载页面块（`web/scripts/route-preload.mjs`）。改为入口模块一开始就调用 `preloadConsole`（`src/preload.ts`），在问 `/admin/v1/me` 的同时开始下载登录后外壳与当前页面的块；新页面要在那里的表里加一行。index.html 的 `#root` 里有一个静态启动画面（只用主题令牌类），入口加载完之前就能画出。不要往 index.html 加内联脚本：浏览器会拒绝执行，冒烟测试会因控制台的 CSP 错误失败。回滚时不要停在 `8a796c8`（它试过内联预加载，被 CSP 挡住）；`167407d` 起是入口模块预加载（复审 ㉘）。
 
 ## 页面一览
 
@@ -238,7 +239,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 - **托管方手续费**（C6，审查 ④ 的后台）：同页下方「托管方手续费」，只列页头所选托管方的，`GET /admin/v1/custody/fees?provider=&status=HELD|BOOKABLE|WRITTEN_OFF`（不带 `provider` 为全部托管方；默认先看待人工处理）。
   - 计费方式确认过的按报告从 `GAS_SUPPLY` 入账（`BOOKABLE`；`GAS_SUPPLY` 不足时分录为空、显示「等待 GAS_SUPPLY」）；未确认或看起来不对的为 `HELD`。
   - 有 `ledger.adjust.approve` 的管理员处理 `HELD`：「入账」`POST /admin/v1/custody/fees/{withdrawal_id}/book`（`{asset?, amount?, reason}`：留空按报告，填写则按实扣；平台须在该网络的托管方持有这个币种、小数位不超过其精度，否则 400，请核销；处理器一轮内记账）或「核销」`POST …/write-off`（`{reason}`，不记账；也用于等待 `GAS_SUPPLY` 的那笔）。确认词为提现 ID 后 4 位。
-  - 按实扣入账最多是报告的 5 倍：同币种按数量，换了币种按现价折 USDT 比较（422 `ADMIN_FEE_ABOVE_REPORTED`；有一边没有新鲜报价时 422 `ADMIN_FEE_UNPRICED`），更多的由运维用 `exchangectl wallet custody-fee` 入账（一位管理员不能单独从 `GAS_SUPPLY` 记任意数额，㉖）。报告的数额从钱包的待处理列表里找，找不到这笔时按实扣入账一律拒绝（409 `ADMIN_FEE_NOT_HELD`，㉗）。
+  - 按实扣入账最多是报告的 5 倍：同币种按数量，换了币种按现价折 USDT 比较（422 `ADMIN_FEE_ABOVE_REPORTED`；有一边没有新鲜报价时 422 `ADMIN_FEE_UNPRICED`），更多的由运维用 `exchangectl wallet custody-fee` 入账（一位管理员不能单独从 `GAS_SUPPLY` 记任意数额，㉖）。报告的数额从钱包的待处理列表里找，找不到这笔时按实扣入账一律拒绝（409 `ADMIN_FEE_NOT_HELD`，㉗）。列表按托管方每页 200 条最多翻 50 页：待处理的超过 10,000 笔、或翻页期间有人处理了前面的，可能误报 `ADMIN_FEE_NOT_HELD`，重试即可；钱包有按提现查一笔的接口后改用（复审 ㉘，待办）。
   - 与 `exchangectl wallet custody-fee` 走同一条路径，wallet-service 以管理员邮箱审计 `wallet.custody.fee.book` / `wallet.custody.fee.write_off`。不带幂等键：已处理的再处理得到 409 `WALLET_CUSTODY_FEE_NOT_HELD`（详情 `status`），刚被另一个决定处理的 409 `WALLET_CUSTODY_FEE_CHANGED`，不会重复入账；没有手续费的提现 404 `WALLET_CUSTODY_FEE_NOT_FOUND`。决定无论成败都刷新列表（答复丢了再点得到 409 时，行也会显示已处理，㉖）。
 
 ### 对账与系统科目
@@ -317,14 +318,20 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 
 （ASTRA 设计 §6，C5）侧栏「模拟市场」五页，接 market-sim 的内部接口（`MARKET_SIM_URL`，见 [market-sim.md](market-sim.md)）。所有管理员可看（`reports.read`）；价格事件与参数要 `sim.control`（ADMIN、OPERATOR）。
 
-- **概览**（`/sim`，`GET /admin/v1/sim`）：目标价与最近成交价、价格带（锚点、报价中心、走价中、离锚点几个带宽）、集群状态（开关、运行、参考价、永续、看门狗）、机器人库存与永续净仓位、近 24 小时目标价与成交价曲线（`GET /admin/v1/sim/history`，每 10 秒一个点），进行中的事件有横幅。
-- **价格控制**（`/sim/control`）：七种事件（瞬时涨跌、目标价、趋势、波动率、暂停、停牌、重新锚定）与全部参数（`POST /admin/v1/sim/events`、`PUT /admin/v1/sim/params`）。
+- **概览**（`/sim`，`GET /admin/v1/sim`）：目标价与最近成交价、价格带（锚点、报价中心、走价中、离锚点几个带宽）、集群状态（开关、运行、参考价、永续、看门狗）、机器人库存与永续净仓位、近 24 小时目标价与成交价曲线（`GET /admin/v1/sim/history`，每 10 秒一个点），进行中的事件有横幅（进行中的阈值目标另显示相对计划的偏离、是否可能到不了）。
+- **价格控制**（`/sim/control`）：八种事件（瞬时涨跌、目标价、插针、趋势、波动率、暂停、停牌、重新锚定）与全部参数（`POST /admin/v1/sim/events`、`PUT /admin/v1/sim/params`）。
   - 确认框显示按目标价估算的永续影响：多空仓位数、会被强平的仓位数与名义、穿仓额（`POST /admin/v1/sim/impact`，derivatives-service 的 `/internal/derivatives/contracts/{symbol}/price-impact` 按强平监控的同一规则计算，不改任何东西）。
+  - **阈值目标与插针**（ASTRA 设计 §3、§6.2，A6；规则由 market-sim 定，见 [market-sim.md](market-sim.md)「价格事件」）：
+    - 目标价是「N 分钟内到 ≥/≤ X」的表单：方向（自动按水平在当前目标价之上还是之下推断）、水平、分钟数（1–1440）、越过之后（跟随市场，或在水平上保持若干分钟），以及插针列表（开始后第几分钟、幅度 %、宽度秒）。插针的分钟数在提交时换成绝对时刻（开始时间加分钟数），必须在收口期之前（窗口最后 10%，至少 1 分钟，表单上写明从第几分钟起）。
+    - 表单下方是计划预览（`GET /admin/v1/sim/target-preview?price=&duration_seconds=&direction=&starts_at=`，`reports.read`，原样转 market-sim）：能否按时到达（到不了时给出最短分钟数）、从当前目标价起的幅度、是否超出单人份额，以及每分钟的计划价与上下限、水平和插针的位置。
+    - 后台自己的检查（其余交给 market-sim）：方向只能 `ABOVE`/`BELOW`、`then` 只能 `FOLLOW`/`HOLD`，它们与插针列表只属于目标价；插针幅度非零且不超过 ±10%、宽度不超过 60 秒、时刻在将来（最多 50 个）；预览的窗口 60 秒到一天。market-sim 的 `SIM_TARGET_INFEASIBLE`（`details.min_duration_seconds`）与 `SIM_SPIKE_BEYOND_BAND`（`details.max`）在提示里带上这个数。
+    - 插针的确认框按标记价估算强平：标记价跟随指数，指数是现货 60 秒 TWAP 与盘口中价的平均（中价在最近成交 1% 以内时，market-data-service 的 `PlatformPrice`），所以针尖时标记价约移动插针幅度的一半（`max((1 + 1.5/60)/2, (1.5 + 宽度/2)/60)`，宽度 20 秒时 51%），影响按那个价格算。设计稿写的是"按 TWAP 估算"（只按 TWAP 宽 20 秒的针只有约 19%），A4 审查后指数加入了中价，后台按实际规则估算。带插针的目标另列出各插针处（从当前目标价与水平中较不利的一侧起算）的影响。
+    - 有进行中或排队的目标时，页面顶部有横幅：目标的文字、计划包络与实际目标价、成交价（`GET /admin/v1/sim/events/{id}/plan` 每 5 秒、`/history` 每 15 秒）、相对计划的偏离（`ln(目标价/计划价)` 折成百分比）与"可能到不了"（market-sim 的 `at_risk`），可直接结束（越过前结束记为已取消，排队的插针一起取消）。目标在跑时新建跳涨或趋势会被 market-sim 拒绝（409 `SIM_TARGET_RUNNING`）。
   - market-sim 管单人份额（单次 30%、任一小时合计 50%，按事件开始时间计；参数里 `p0`、`max_minute_move`、`floor`、`ceiling`、`daily_volume` 按影响计入）。超出时它返回 `SIM_EVENT_NEEDS_APPROVAL` / `SIM_PARAMS_NEED_APPROVAL`，后台把这次改动存成资金操作（`SIM_EVENT`、`SIM_PARAMS`，`escalation` 为 `SIM_SHARE`，`payload.move` 是 market-sim 估算的幅度），接口返回 202。
   - 另一位有 `sim.control` 的管理员在「审批」里批准后，admin-service 用自己的键（`admin`，`SIM_ADMIN_API_SECRET`，在服务器 `sim/admin.env`）签名调用 market-sim：`actor` 是申请人、`approved_by` 是批准人，两个名字都取自后台会话，不取自浏览器。批准人以当前登录的会话为准，不再要身份验证器。申请人不能批准自己的（`ADMIN_SELF_APPROVAL`）。
-  - 这类申请一天未决、或事件到了开始时间就过期：批准过期的只会记为失败（结果 `expired at <时间>`），不发给 market-sim；列表按服务端时钟标「已过期」（审批列表的 `expired`，⑭）。开始时间已过的事件按"立即开始"处理（`starts_at` 去掉），申请因此一天后才过期，不会一建就过期（⑭）。批准框里有按现在的目标价重新测的幅度（与申请时 market-sim 的估算并列）和对永续的影响（`GET /admin/v1/approvals/{id}/sim-preview`；跳涨、目标价事件与锚定价修改能直接算出价格，其它只显示申请时的估算）。
+  - 这类申请一天未决、或事件到了开始时间、或目标的第一个插针到了时间就过期（market-sim 不收已过时刻的插针，A6）：批准过期的只会记为失败（结果 `expired at <时间>`），不发给 market-sim；列表按服务端时钟标「已过期」（审批列表的 `expired`，⑭）。开始时间已过的事件按"立即开始"处理（`starts_at` 去掉），申请因此一天后才过期，不会一建就过期（⑭）；原填的时间记在审计详情与申请的 `payload.asked_starts_at` 里（㉘）。批准框里有按现在的目标价重新测的幅度（与申请时 market-sim 的估算并列）和对永续的影响（`GET /admin/v1/approvals/{id}/sim-preview`；跳涨、插针（针尖，影响按上面的标记价估算）、目标价事件与锚定价修改能直接算出价格，其它只显示申请时的估算），目标的插针逐个列出。
   - 没有 `SIM_ADMIN_API_SECRET` 时 admin-service 启动时告警，模拟市场在后台只读。
-- **事件日程**（`/sim/events`）：排队、进行中与结束的事件，发起人与批准人；排队的可取消，进行中的可结束（结束停牌即恢复交易），都要理由（`POST /admin/v1/sim/events/{id}/end`）。
+- **事件日程**（`/sim/events`）：排队、进行中与结束的事件，发起人与批准人；排队的可取消，进行中的可结束（结束停牌即恢复交易），都要理由（`POST /admin/v1/sim/events/{id}/end`）。目标价事件显示结果（已达到 `HIT`、未达到 `MISSED`、已取消 `CANCELED`）、越过时刻与到期时刻，「计划」打开抽屉看计划包络与实际走势（结束的也能看，market-sim 只留最近 200 个事件）；目标的插针标出属于哪个目标。
 - **机器人集群**（`/sim/bots`）：
   - 集群开关：`sim.enabled`、`sim.perp`、`sim.events`、`sim.halt_on_loss`，经功能开关接口切换（`flags.write`，规则保留）。market-sim 没有单个机器人的启停接口，开关作用于整个集群。
   - 各角色的数量与库存合计、每个机器人的余额、永续仓位、最近一次被拒与重试时间，可按角色与"只看被拒"筛选；参数只读，到价格控制修改。
@@ -459,7 +466,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
   - 运营：固定 slug `e2e-console` 的公告（文章不删除，第一次运行新建，以后改写）——定时发布前站点看不到，立即发布后 PC 站与手机站的接口 1 分钟内列出，发布中修改 1 分钟内更新，旧版本的修改被拒，下线后从列表消失、slug 进 `withdrawn`；给本次的测试用户发一条站内信，用户在通知里看到并读过后，后台显示已收到 1、已读 1；列表一页一页给、只有摘要，坏游标 400；这条消息没有失败的轮次，「继续发送」只对 `FAILED` 的有效（409），AUDITOR 不能（C5.5 ⑫）。
   - 系统健康（全部就绪且带版本，消费者的滞后与死信数，行情源）、审计查询（含充值处置的四个动作与管理员的七个动作）与 CSV 导出（BOM、表头、`X-Truncated: false`，导出本身被审计）、退出与停用。
 - **浏览器冒烟** `web/e2e/admin-smoke.mjs`（`scripts/e2e/web.sh` 运行，每次建一个临时 ADMIN、结束停用；1440 × 900）：登录、概览、用户页与各标签、身份变更申请、搜索、订单与成交、充值（待处理、补记待回调、补记抽屉，不提交）、提现队列（带筛选）与一笔提现的详情（地址簿、该用户最近的提现）、托管方（优盾的页面能打开，不论连着哪个网关；替身 `UDUNMOCK`：可访问、TUSD 币种、它的对账行、一条回调的原始请求与来源地址、托管方手续费，C6 起按协调会话 ⑤ 离开优盾）、交易对改状态的确认框（取消，不真的改）、资产的资料与图标、合约、仓位、强平记录、HOUSE（近 30 日盈亏、敞口、各交易对、各合约净头寸）、开关、对账、审计（一条的详情、CSV 导出）、报表（含用户增长与 HOUSE 盈亏）、管理员与角色（新建表单打开后取消）、系统健康、公告编辑器的预览（不保存）、帮助中心、站内信与发送表单（不发送）、模拟市场五页（价格控制的确认框显示影响后取消，不发起事件）与机器人的订单、资金调整页、审批、设置（含每页条数）、事件流、账号与安全（不修改）、从账户菜单退出、不带链接的设置页；所有 `/admin/v1` 响应按 `api/admin/admin.yaml` 校验。本机：`ADMIN_EMAIL=… ADMIN_PASSWORD=… APP=http://localhost:5180 node web/e2e/admin-smoke.mjs`。
-- **Lighthouse**：`task web:lighthouse` 跑登录页（`web/lighthouse/admin.json`，性能 ≥ 90）与登录后的页面（`web/lighthouse/console.sh`：经 ssh 建一个临时 ADMIN（口令与密钥从标准输入传入、不打印），会话以请求头文件交给 Lighthouse，结束时退出并停用；设计 §6 要求性能 ≥ 85）。报告在 `.lighthouseci/`。
+- **Lighthouse**：`task web:lighthouse` 跑登录页（`web/lighthouse/admin.json`，性能 ≥ 90）与登录后的页面（`web/lighthouse/console.sh`：经 ssh 建一个临时 ADMIN（口令与密钥从标准输入传入、不打印），会话以请求头文件交给 Lighthouse，结束时退出并停用；设计 §6 要求性能 ≥ 85；C6 收尾时登录后的十一页为 90–95，见上文「首屏」）。报告在 `.lighthouseci/`。
 - **视觉检查**：各批次的页面在本机开发服务器上用契约样例数据截图核对（脚本不入库，结果写在设计稿 §10 的验收记录里）。
 
 ## 常见错误码

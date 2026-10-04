@@ -1,17 +1,24 @@
+import { ApiError } from "@exchange/core";
 import { adminApi, adminData, can, type Admin } from "@exchange/core/api/admin";
 import { Badge, Button, ErrorState, Input, Skeleton } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
-import { DangerAction, FormError } from "../../kit/actions";
+import { DangerAction, FormError, useAdminT } from "../../kit/actions";
+import { TimeText } from "../../kit/format";
 import { Card, Page } from "../../kit/Page";
-import { ImpactLines, pct, price, simEventsKey, simKey, useSim, type SimEventType } from "./common";
+import { EndEvent, ImpactLines, minutes, pct, price, simEventsKey, simKey, useEventText, useSim, type SimEvent, type SimEventType } from "./common";
+import {
+  newTarget, SOLO_SPIKE, SPIKE_WIDTH, spikeMarkShare, spikePrices, TargetFields, TargetPlan, TargetPreview, targetBody, tryCheck, type TargetDraft,
+} from "./target";
 
 // Price control (ASTRA design §6.1): the model's and the bots' settings,
 // and the price events. One operator moves the price by at most 30% at
 // once and 50% in any hour (market-sim measures it); beyond, the change
 // waits on the approvals for a second administrator with sim.control.
+// A threshold target ("within N minutes, at or above X", A6) has its own
+// form with its plan previewed, and a banner while one runs.
 
 /** The settings by group, in the order they read. */
 const GROUPS: { key: string; fields: string[] }[] = [
@@ -32,6 +39,7 @@ export default function SimControl({ admin }: { admin: Admin }) {
   if (q.isError) return <ErrorState message={String(q.error)} onRetry={() => void q.refetch()} />;
   return (
     <Page title={t("admin.nav.simControl")} help={t("admin.sim.controlHelp")}>
+      {q.data && <TargetBanner events={q.data.events} control={control} />}
       <Card title={t("admin.sim.events")} extra={<span className="text-xs text-fg-3">{t("admin.sim.share")}</span>}>
         {q.data ? <Launcher target={Number(q.data.target_price ?? 0)} perp={q.data.perp} control={control} /> : <Skeleton className="h-40 w-full" />}
       </Card>
@@ -123,11 +131,12 @@ function Params({ current, version, control }: { current: Record<string, number>
   );
 }
 
-/** EventSpec is what each event asks for. */
-type Field = "size" | "price" | "mu" | "factor" | "duration" | "hold";
+/** EventSpec is what each event asks for; a threshold target has its own form (target.tsx). */
+type Field = "size" | "mu" | "factor" | "duration" | "width";
 const SPECS: { type: SimEventType; fields: Field[] }[] = [
   { type: "JUMP", fields: ["size", "duration"] },
-  { type: "TARGET", fields: ["price", "duration", "hold"] },
+  { type: "TARGET", fields: [] },
+  { type: "SPIKE", fields: ["size", "width"] },
   { type: "TREND", fields: ["mu", "duration"] },
   { type: "VOLATILITY", fields: ["factor", "duration"] },
   { type: "PAUSE", fields: ["duration"] },
@@ -135,34 +144,67 @@ const SPECS: { type: SimEventType; fields: Field[] }[] = [
   { type: "REANCHOR", fields: [] },
 ];
 
+/** utc is a datetime-local value as an RFC 3339 time in UTC, "" when blank. */
+function utc(local: string): string {
+  if (!local) return "";
+  const at = new Date(local);
+  return Number.isNaN(at.getTime()) ? "" : at.toISOString().replace(/\.\d+Z$/, "Z");
+}
+
 function Launcher({ target, perp, control }: { target: number; perp: string; control: boolean }) {
   const { t } = useTranslation();
+  const at = useAdminT();
   const [type, setType] = useState<SimEventType>("JUMP");
-  const [v, setV] = useState<Record<Field, string>>({ size: "5", price: "", mu: "10", factor: "2", duration: "60", hold: "0" });
+  const [v, setV] = useState<Record<Field, string>>({ size: "5", mu: "10", factor: "2", duration: "60", width: String(SPIKE_WIDTH) });
+  const [draft, setDraft] = useState<TargetDraft>(newTarget);
   const [startsAt, setStartsAt] = useState("");
   const spec = SPECS.find((s) => s.type === type)!;
   const submitted = useSubmitted();
+  const eventText = useEventText();
   const num = (f: Field) => Number(v[f]);
-  // Where the price would be: a jump from the target, or the target event's price.
-  const expected = type === "JUMP" ? target * (1 + num("size") / 100) : type === "TARGET" ? num("price") : null;
-  const body = () => {
+  const checked = type === "TARGET" ? tryCheck(draft, at) : null;
+  // Where the price would be: a jump from the target, a spike's tip, the level of a target.
+  const expected = type === "JUMP" || type === "SPIKE" ? target * (1 + num("size") / 100) : checked ? Number(checked.level) : null;
+  const body = (): Record<string, unknown> => {
+    if (startsAt && !utc(startsAt)) throw new FormError(t("admin.sim.badTime"));
+    if (type === "TARGET") {
+      const out = targetBody(draft, startsAt ? new Date(startsAt) : new Date(), at);
+      return startsAt ? { ...out, starts_at: utc(startsAt) } : out;
+    }
     const out: Record<string, unknown> = { type };
     for (const f of spec.fields) {
       if (v[f].trim() === "" || !Number.isFinite(num(f))) throw new FormError(t("admin.sim.badNumber", { field: t(`admin.sim.fields.${f}`) }));
     }
     if (spec.fields.includes("size")) out.size = num("size") / 100;
-    if (spec.fields.includes("price")) out.price = v.price.trim();
     if (spec.fields.includes("mu")) out.mu = Math.log(1 + num("mu") / 100);
     if (spec.fields.includes("factor")) out.factor = num("factor");
     if (spec.fields.includes("duration")) out.duration_seconds = Math.round(num("duration"));
-    if (spec.fields.includes("hold")) out.hold_seconds = Math.round(num("hold"));
-    if (startsAt) {
-      const at = new Date(startsAt);
-      if (Number.isNaN(at.getTime())) throw new FormError(t("admin.sim.badTime"));
-      out.starts_at = at.toISOString().replace(/\.\d+Z$/, "Z");
-    }
+    if (spec.fields.includes("width")) out.width_seconds = Math.round(num("width"));
+    if (startsAt) out.starts_at = utc(startsAt);
     return out;
   };
+  const create = async (reason: string) => {
+    try {
+      return adminData(await adminApi.POST("/admin/v1/sim/events", { body: { ...(body() as { type: SimEventType }), reason } }));
+    } catch (err) {
+      // market-sim's bounds, said with the number it gave: the shortest
+      // window a target reaches its level in, the largest spike the price
+      // band lets the quotes reach.
+      const detail = (code: string, key: string) => (err instanceof ApiError && err.code === code ? Number(err.details[key]) : NaN);
+      const least = detail("SIM_TARGET_INFEASIBLE", "min_duration_seconds");
+      if (Number.isFinite(least) && least > 0) throw new FormError(t("admin.simTarget.infeasible", { min: minutes(least) }));
+      const most = detail("SIM_SPIKE_BEYOND_BAND", "max");
+      if (Number.isFinite(most) && most > 0) throw new FormError(t("admin.simTarget.beyondBand", { max: pct(most, 1).replace("+", "") }));
+      throw err;
+    }
+  };
+  // The confirmation says what it does (a target's own words and spikes) and what it does to the perpetual.
+  const what = type === "TARGET" && checked ? eventText({ type, size: 0, price: checked.level, mu: 0, factor: 0, duration_seconds: checked.window, hold_seconds: checked.hold,
+    direction: draft.direction === "AUTO" ? null : draft.direction, spikes: checked.spikes }) : t(`admin.sim.types.${type}`);
+  // A spike's liquidations are measured where the mark goes, about half of it (spikeMarkShare).
+  const marks = type === "SPIKE" && expected !== null ? [target * (1 + (num("size") / 100) * spikeMarkShare(num("width")))] : checked && target > 0 ? spikePrices(checked, target) : [];
+  const shares = type === "SPIKE" ? [spikeMarkShare(num("width"))] : (checked?.spikes ?? []).map((s) => spikeMarkShare(s.width));
+  const share = shares.length ? pct(Math.max(...shares), 0).replace("+", "") : null;
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap gap-1.5" role="tablist" aria-label={t("admin.sim.eventType")}>
@@ -173,6 +215,7 @@ function Launcher({ target, perp, control }: { target: number; perp: string; con
             role="tab"
             aria-selected={type === s.type}
             onClick={() => setType(s.type)}
+            data-testid={`sim-type-${s.type}`}
             className={
               type === s.type
                 ? "rounded-2 border border-brand bg-brand-soft px-3 py-1.5 text-sm text-fg-1"
@@ -184,6 +227,7 @@ function Launcher({ target, perp, control }: { target: number; perp: string; con
         ))}
       </div>
       <p className="text-sm text-fg-3">{t(`admin.sim.typeHelp.${type}`)}</p>
+      {type === "TARGET" && <TargetFields draft={draft} onChange={setDraft} />}
       <div className="flex flex-wrap items-end gap-3">
         {spec.fields.map((f) => (
           <label key={f} className="flex w-40 flex-col gap-1.5 text-sm text-fg-2">
@@ -208,25 +252,38 @@ function Launcher({ target, perp, control }: { target: number; perp: string; con
                 {t("admin.sim.start")}
               </Button>
             )}
-            danger={type === "HALT" || (expected !== null && Math.abs(expected / target - 1) > 0.1)}
+            danger={
+              type === "HALT" ||
+              (type === "SPIKE" && Math.abs(num("size") / 100) > SOLO_SPIKE) ||
+              (expected !== null && target > 0 && Math.abs(expected / target - 1) > 0.1)
+            }
             title={t("admin.sim.startTitle", { type: t(`admin.sim.types.${type}`) })}
             description={t(`admin.sim.typeHelp.${type}`)}
             target={
               <span className="flex flex-col gap-1">
                 <span>
-                  {t(`admin.sim.types.${type}`)}
-                  {expected !== null && target > 0 && (
+                  {what}
+                  {expected !== null && expected > 0 && target > 0 && (
                     <span className="font-mono">
                       {" "}
                       {price(target)} → {price(expected)} ({pct(expected / target - 1)})
                     </span>
                   )}
                 </span>
-                {expected !== null && expected > 0 && perp && <Impact price={expected} />}
+                {checked?.spikes.map((s, i) => (
+                  <span key={i} className="text-xs text-fg-2">
+                    {t("admin.simTarget.spikeLine", { n: i + 1, m: minutes(s.offset), size: pct(s.size, 1), s: s.width })}
+                  </span>
+                ))}
+                {perp && type !== "SPIKE" && expected !== null && expected > 0 && (
+                  <Impact price={expected} label={type === "TARGET" ? t("admin.simTarget.impactLevel") : undefined} />
+                )}
+                {perp && marks.filter((p) => p > 0).map((p) => <Impact key={p} price={p} label={t("admin.simTarget.impactSpike", { price: price(p) })} />)}
+                {share && <span className="text-xs text-fg-3">{t("admin.simTarget.markNote", { share })}</span>}
               </span>
             }
             confirmWord={type.toLowerCase()}
-            run={async (reason) => adminData(await adminApi.POST("/admin/v1/sim/events", { body: { ...(body() as { type: SimEventType }), reason } }))}
+            run={create}
             success={submitted(t("admin.sim.started"))}
             invalidate={[simKey, simEventsKey]}
           />
@@ -235,12 +292,44 @@ function Launcher({ target, perp, control }: { target: number; perp: string; con
           {t("admin.sim.toApprovals")}
         </Link>
       </div>
+      {type === "TARGET" && <TargetPreview draft={draft} startsAt={utc(startsAt)} target={target} />}
     </div>
   );
 }
 
-/** Impact shows what a price would do to the perpetual's positions (ASTRA design §6.3). */
-function Impact({ price: at }: { price: number }) {
+/**
+ * TargetBanner is the running threshold target over the price control (A6):
+ * where it is against its plan, its plan beside where the price went, and
+ * ending it; the queued ones under it.
+ */
+function TargetBanner({ events, control }: { events: SimEvent[]; control: boolean }) {
+  const { t } = useTranslation();
+  const eventText = useEventText();
+  const targets = events.filter((e) => e.type === "TARGET" && (e.status === "RUNNING" || e.status === "SCHEDULED"));
+  if (!targets.length) return null;
+  const running = targets.find((e) => e.status === "RUNNING");
+  return (
+    <div className="flex flex-col gap-3 rounded-2 border border-brand bg-brand-soft px-4 py-3" data-testid="sim-target-banner">
+      {targets.map((e) => (
+        <div key={e.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-fg-1">
+          <Badge tone={e.status === "RUNNING" ? "brand" : "info"} dot={e.status === "RUNNING"}>
+            {t(e.status === "RUNNING" ? "admin.simTarget.running" : "admin.simTarget.queued")}
+          </Badge>
+          <span className="font-medium">{eventText(e)}</span>
+          {e.status === "SCHEDULED" && <span className="text-xs text-fg-2">{t("admin.sim.begins")} <TimeText value={e.starts_at} style="datetimeSeconds" /></span>}
+          <span className="ml-auto flex items-center gap-2">
+            <Link to="/sim/events" className="text-xs text-info hover:underline">{t("admin.simTarget.toEvents")}</Link>
+            {control && <EndEvent e={e} text={eventText(e)} />}
+          </span>
+        </div>
+      ))}
+      {running && <TargetPlan id={running.id} live height={200} />}
+    </div>
+  );
+}
+
+/** Impact shows what a price would do to the perpetual's positions (ASTRA design §6.3); label says which price. */
+function Impact({ price: at, label }: { price: number; label?: ReactNode }) {
   const { t } = useTranslation();
   const p = at.toFixed(8).replace(/0+$/, "").replace(/\.$/, "");
   const q = useQuery({
@@ -253,7 +342,7 @@ function Impact({ price: at }: { price: number }) {
   else body = <ImpactLines i={q.data} />;
   return (
     <span className="mt-1 rounded-1 border border-line-1 bg-bg-2 px-2 py-1.5 text-xs">
-      <Badge tone="info">{t("admin.sim.impact")}</Badge> {body}
+      <Badge tone="info">{t("admin.sim.impact")}</Badge> {label && <span className="text-fg-2">{label}</span>} {body}
     </span>
   );
 }

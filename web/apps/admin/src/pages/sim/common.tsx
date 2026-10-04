@@ -1,7 +1,8 @@
 import { adminApi, adminData, type AdminSchemas } from "@exchange/core/api/admin";
-import { Badge, Skeleton } from "@exchange/ui";
+import { Badge, Button, Skeleton } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { DangerAction, lastFour } from "../../kit/actions";
 import { Num, TimeText } from "../../kit/format";
 
 // What the simulated market's pages share (ASTRA design §6, C5): the
@@ -97,6 +98,32 @@ export function EventStatus({ e }: { e: SimEvent }) {
 }
 
 /**
+ * EndEvent ends a running event or cancels a queued one, as text says it
+ * (a HALT ends by resuming trading; a target ended before its crossing is
+ * CANCELED, its queued spikes with it).
+ */
+export function EndEvent({ e, text }: { e: SimEvent; text: string }) {
+  const { t } = useTranslation();
+  const running = e.status === "RUNNING";
+  return (
+    <DangerAction
+      trigger={(open) => (
+        <Button size="sm" variant={running ? "danger" : "secondary"} onClick={open} data-testid={`sim-end-${e.id}`}>
+          {t(running ? "admin.sim.end" : "admin.sim.cancel")}
+        </Button>
+      )}
+      title={t(running ? "admin.sim.endTitle" : "admin.sim.cancelTitle")}
+      description={e.type === "HALT" ? t("admin.sim.endHalt") : e.type === "TARGET" ? t("admin.simTarget.endTarget") : undefined}
+      target={text}
+      confirmWord={lastFour(e.id)}
+      run={async (reason) => adminData(await adminApi.POST("/admin/v1/sim/events/{id}/end", { params: { path: { id: e.id } }, body: { reason } }))}
+      success={t("admin.sim.ended")}
+      invalidate={[simEventsKey, simKey]}
+    />
+  );
+}
+
+/**
  * MintShares says what a mint for the bots (a SIM_MINT fund operation)
  * books: the total and how many bots of which role share it; full lists
  * each bot's share.
@@ -130,16 +157,35 @@ export function MintShares({ payload: p, full }: { payload: Record<string, strin
   );
 }
 
+/** minutes says seconds in minutes, with a decimal when not whole. */
+export const minutes = (s: number) => (s % 60 === 0 ? String(s / 60) : (s / 60).toFixed(1));
+
+/**
+ * EventFields are what an event's text reads, of an event or of a request
+ * for one: a threshold target's side, what follows its crossing and its
+ * spikes, a spike's width (A6).
+ */
+export type EventFields = Pick<SimEvent, "type" | "size" | "price" | "mu" | "factor" | "duration_seconds" | "hold_seconds"> &
+  Partial<Pick<SimEvent, "direction" | "then" | "width_seconds">> & { spikes?: unknown[] | null };
+
 /** useEventText says what an event does: its type and its own numbers. */
 export function useEventText() {
   const { t } = useTranslation();
-  return (e: Pick<SimEvent, "type" | "size" | "price" | "mu" | "factor" | "duration_seconds" | "hold_seconds">) => {
+  return (e: EventFields) => {
     const over = e.duration_seconds > 0 ? t("admin.sim.over", { s: e.duration_seconds }) : "";
     switch (e.type) {
       case "JUMP":
         return `${t("admin.sim.types.JUMP")} ${pct(e.size, 1)}${over || ` · ${t("admin.sim.atOnce")}`}`;
-      case "TARGET":
-        return `${t("admin.sim.types.TARGET")} ${price(e.price)}${over}${e.hold_seconds > 0 ? ` · ${t("admin.sim.hold", { s: e.hold_seconds })}` : ""}`;
+      case "TARGET": {
+        // A threshold target: its side of the level, its window in minutes, its hold and spikes.
+        const side = e.direction === "ABOVE" ? "≥ " : e.direction === "BELOW" ? "≤ " : "";
+        const within = e.duration_seconds > 0 ? ` · ${t("admin.simTarget.within", { m: minutes(e.duration_seconds) })}` : "";
+        const held = e.hold_seconds > 0 ? ` · ${t("admin.simTarget.holdSummary", { m: minutes(e.hold_seconds) })}` : "";
+        const spikes = e.spikes?.length ? ` · ${t("admin.simTarget.spikesCount", { n: e.spikes.length })}` : "";
+        return `${t("admin.sim.types.TARGET")} ${side}${price(e.price)}${within}${held}${spikes}`;
+      }
+      case "SPIKE":
+        return `${t("admin.sim.types.SPIKE")} ${pct(e.size, 1)} · ${t("admin.simTarget.wide", { s: e.width_seconds || 20 })}`;
       case "TREND":
         return `${t("admin.sim.types.TREND")} ${dailyPct(e.mu)}/${t("admin.sim.day")}${over}`;
       case "VOLATILITY":

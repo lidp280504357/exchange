@@ -106,17 +106,29 @@ const simKind = (kind: string) => kind === "SIM_EVENT" || kind === "SIM_PARAMS";
 /** attempted reports whether a pending operation's attempt did not finish: it may have booked, so it is finished, never rejected (C5.5 ⑥). */
 const attempted = (a: Approval) => a.status === "PENDING" && !!a.attempted_at;
 
-/** SimChange says what a simulated market's request changes and how far market-sim measured it moving the price. */
-function SimChange({ a }: { a: Approval }) {
+/** A requested spike of a threshold target (A6), as the request keeps it. */
+type RequestedSpike = { at: string; size: number; width_seconds?: number };
+
+/**
+ * SimChange says what a simulated market's request changes and how far
+ * market-sim measured it moving the price; full lists a target's spikes
+ * for its decider and says where a spike's liquidations are measured.
+ */
+function SimChange({ a, full }: { a: Approval; full?: boolean }) {
   const { t } = useTranslation();
   const eventText = useEventText();
   const p = a.payload as Record<string, string>;
   let what = t("admin.sim.settingsChange");
+  let spikes: RequestedSpike[] = [];
+  let spike = false;
   if (a.kind === "SIM_EVENT") {
     try {
-      const e = JSON.parse(p.change ?? "{}") as Partial<SimEvent>;
+      const e = JSON.parse(p.change ?? "{}") as Partial<Omit<SimEvent, "spikes">> & { spikes?: RequestedSpike[] };
       what = eventText({ type: e.type ?? "JUMP", size: e.size ?? 0, price: e.price ?? null, mu: e.mu ?? 0, factor: e.factor ?? 0,
-        duration_seconds: e.duration_seconds ?? 0, hold_seconds: e.hold_seconds ?? 0 });
+        duration_seconds: e.duration_seconds ?? 0, hold_seconds: e.hold_seconds ?? 0, direction: e.direction, then: e.then,
+        width_seconds: e.width_seconds, spikes: e.spikes });
+      spikes = e.spikes ?? [];
+      spike = e.type === "SPIKE";
     } catch {
       what = p.change ?? "";
     }
@@ -125,6 +137,13 @@ function SimChange({ a }: { a: Approval }) {
     <span className="flex flex-col">
       <span>{what}</span>
       {p.move && <span className="text-xs text-fg-3">{t("admin.sim.measuredMove", { move: pct(Number(p.move), 1) })}</span>}
+      {full &&
+        spikes.map((s, i) => (
+          <span key={i} className="text-xs text-fg-2">
+            #{i + 1} <TimeText value={s.at} style="datetimeSeconds" /> · {pct(s.size, 1)} · {t("admin.simTarget.wide", { s: s.width_seconds || 20 })}
+          </span>
+        ))}
+      {full && spike && <span className="text-xs text-fg-3">{t("admin.simTarget.markNoteRequest")}</span>}
     </span>
   );
 }
@@ -204,7 +223,7 @@ function Decide({ admin, a }: { admin: Admin; a: Approval }) {
   const target = (
     <span className="inline-flex items-center gap-2">
       <EnumText group="approvalKind" code={a.kind} />{" "}
-      {simKind(a.kind) ? <SimChange a={a} /> : a.kind === "SIM_MINT" ? <MintShares payload={p} full /> : <Num value={p.amount} unit={p.asset} signed />}
+      {simKind(a.kind) ? <SimChange a={a} full /> : a.kind === "SIM_MINT" ? <MintShares payload={p} full /> : <Num value={p.amount} unit={p.asset} signed />}
     </span>
   );
   const run = (approve: boolean) => async (reason: string) =>

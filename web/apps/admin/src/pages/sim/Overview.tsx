@@ -8,6 +8,7 @@ import { Num, TimeText, useTimeText } from "../../kit/format";
 import { Card, Page } from "../../kit/Page";
 import { PriceLines, type PricePoint } from "../../kit/PriceLines";
 import { pct, price, simKey, useEventText, useSim } from "./common";
+import { TargetNowOf } from "./target";
 
 const MAX_POINTS = 360;
 
@@ -46,6 +47,7 @@ export default function SimOverview(_: { admin: Admin }) {
   if (q.isError) return <ErrorState message={String(q.error)} onRetry={() => void q.refetch()} />;
   const st = q.data;
   const running = (st?.events ?? []).filter((e) => e.status === "RUNNING");
+  const target = running.find((e) => e.type === "TARGET");
   const bots = st?.bots ?? [];
   const sum = (f: (b: (typeof bots)[number]) => string) => bots.reduce((a, b) => a + (Number(f(b)) || 0), 0);
   const gap = st?.target_price && st.last_price ? Number(st.last_price) / Number(st.target_price) - 1 : null;
@@ -57,6 +59,7 @@ export default function SimOverview(_: { admin: Admin }) {
             {t("admin.sim.eventRunning")}
           </Badge>
           {running.map((e) => eventText(e)).join(" · ")}
+          {target && <TargetNowOf id={target.id} />}
         </Link>
       )}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

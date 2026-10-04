@@ -1252,6 +1252,23 @@ type Sim interface {
 	EndEvent(ctx context.Context, id, actor, reason string) (json.RawMessage, error)
 	// UpdateParams replaces the settings (every field).
 	UpdateParams(ctx context.Context, params json.RawMessage, actor, approvedBy string) (json.RawMessage, error)
+	// Plan is a threshold target's plan (ASTRA A6): its envelope minute
+	// by minute, its spikes and where the market is against it now.
+	Plan(ctx context.Context, id string) (json.RawMessage, error)
+	// TargetPreview says whether a threshold target is feasible from the
+	// current target, the shortest window that is, the move it plans and
+	// whether a second administrator must approve it, with its envelope.
+	TargetPreview(ctx context.Context, q SimTargetQuery) (json.RawMessage, error)
+}
+
+// SimTargetQuery is a threshold target to preview: a direction (ABOVE,
+// BELOW; inferred when empty), a level, a window, a start (now when
+// empty).
+type SimTargetQuery struct {
+	Direction       string
+	Price           string
+	DurationSeconds int
+	StartsAt        string
 }
 
 // HouseTrades sums HOUSE's spot trades per pair (ClickHouse).

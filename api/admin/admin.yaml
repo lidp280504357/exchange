@@ -3084,6 +3084,81 @@ paths:
                 $ref: '#/components/schemas/SimEvent'
         default:
           $ref: '#/components/responses/Error'
+  /admin/v1/sim/events/{id}/plan:
+    get:
+      operationId: getSimPlan
+      summary: A threshold target's plan and where the market is against it
+      description: |
+        ASTRA A6: a TARGET's envelope minute by minute (the planned price
+        with its band), its spikes, and now: the target price, the planned
+        one, the deviation ln(target/plan), whether the target is at risk
+        of missing the level, when it crossed and how it ended (HIT,
+        MISSED, CANCELED). market-sim's answer as it is. Needs
+        reports.read.
+      tags: [sim]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The plan.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimPlan'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/sim/target-preview:
+    get:
+      operationId: previewSimTarget
+      summary: Whether a threshold target is feasible, and its envelope, before it is asked for
+      description: |
+        ASTRA A6, for the price control's form: from the current target,
+        whether the level is reachable within the window (the shortest
+        window that is, min_duration_seconds), the move it plans, whether
+        it is beyond one operator's share (a second administrator approves
+        it), and the planned envelope. Needs reports.read.
+      tags: [sim]
+      parameters:
+        - name: price
+          in: query
+          required: true
+          description: The level.
+          schema:
+            type: string
+        - name: duration_seconds
+          in: query
+          required: true
+          description: The window, at most a day (market-sim's longest).
+          schema:
+            type: integer
+            minimum: 60
+            maximum: 86400
+        - name: direction
+          in: query
+          description: ABOVE or BELOW; inferred from the current target when absent.
+          schema:
+            type: string
+            enum: [ABOVE, BELOW]
+        - name: starts_at
+          in: query
+          description: When it starts; now when absent.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: The preview.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimTargetPreview'
+        default:
+          $ref: '#/components/responses/Error'
   /admin/v1/sim/params:
     put:
       operationId: updateSimParams
@@ -5445,7 +5520,7 @@ components:
           format: uuid
         type:
           type: string
-          enum: [JUMP, TARGET, TREND, VOLATILITY, PAUSE, HALT, REANCHOR]
+          enum: [JUMP, TARGET, TREND, VOLATILITY, PAUSE, HALT, REANCHOR, SPIKE]
         size:
           type: number
         price:
@@ -5483,19 +5558,52 @@ components:
           type: [string, 'null']
         ended_by:
           type: string
+        direction:
+          type: [string, 'null']
+          description: A TARGET's side of its level (ABOVE, BELOW; ASTRA A6); empty or null otherwise.
+        then:
+          type: [string, 'null']
+          description: What a TARGET does once crossed (FOLLOW, HOLD).
+        result:
+          type: [string, 'null']
+          description: How a TARGET ended (HIT, MISSED, CANCELED); empty while running.
+        crossed_at:
+          type: [string, 'null']
+          format: date-time
+        ends_at:
+          type: [string, 'null']
+          format: date-time
+        closing_at:
+          type: [string, 'null']
+          format: date-time
+          description: When a TARGET's closing window starts (its last 10%, at least a minute); no spike starts in it.
+        hold_until:
+          type: [string, 'null']
+          format: date-time
+        parent_id:
+          type: [string, 'null']
+          description: A SPIKE's TARGET.
+        width_seconds:
+          type: [integer, 'null']
+          description: A SPIKE's width.
+        spikes:
+          type: array
+          description: A TARGET's spikes, made with it (in the answer to its creation only).
+          items:
+            $ref: '#/components/schemas/SimEvent'
     SimEventWrite:
       type: object
       required: [type]
       properties:
         type:
           type: string
-          enum: [JUMP, TARGET, TREND, VOLATILITY, PAUSE, HALT, REANCHOR]
+          enum: [JUMP, TARGET, TREND, VOLATILITY, PAUSE, HALT, REANCHOR, SPIKE]
         size:
           type: number
-          description: JUMP's move (0.1 is +10%).
+          description: JUMP's move (0.1 is +10%); a SPIKE's, a share of the planned price (at most 0.05 alone, 0.10 approved).
         price:
           type: string
-          description: TARGET's price.
+          description: TARGET's level.
         mu:
           type: number
           description: TREND's drift a day.
@@ -5508,9 +5616,137 @@ components:
         hold_seconds:
           type: integer
           minimum: 0
+          description: A TARGET held this long at its level once crossed (then HOLD; at most a day).
         starts_at:
           type: string
           format: date-time
+        direction:
+          type: string
+          enum: [ABOVE, BELOW]
+          description: A TARGET's side of its level (ASTRA A6); inferred from the current target when absent.
+        then:
+          type: string
+          enum: [FOLLOW, HOLD]
+          description: What a TARGET does once crossed; FOLLOW when absent.
+        spikes:
+          type: array
+          description: Spikes a TARGET plans, each becoming its own SPIKE event (all or nothing).
+          items:
+            $ref: '#/components/schemas/SimSpikeWrite'
+        width_seconds:
+          type: integer
+          minimum: 1
+          maximum: 60
+          description: A SPIKE's width; 20 when absent.
+    SimSpikeWrite:
+      type: object
+      required: [at, size]
+      properties:
+        at:
+          type: string
+          format: date-time
+        size:
+          type: number
+          description: A share of the planned price, e.g. -0.04.
+        width_seconds:
+          type: integer
+          minimum: 1
+          maximum: 60
+    SimPlanPoint:
+      type: object
+      required: [at, plan, low, high]
+      properties:
+        at:
+          type: string
+          format: date-time
+        plan:
+          type: [string, number]
+        low:
+          type: [string, number]
+        high:
+          type: [string, number]
+    SimPlan:
+      type: object
+      required: [event_id, points]
+      properties:
+        event_id:
+          type: string
+        direction:
+          type: [string, 'null']
+        level:
+          type: [string, number, 'null']
+        from_price:
+          type: [string, number, 'null']
+        starts_at:
+          type: [string, 'null']
+          format: date-time
+        closing_at:
+          type: [string, 'null']
+          format: date-time
+        ends_at:
+          type: [string, 'null']
+          format: date-time
+        hold_until:
+          type: [string, 'null']
+          format: date-time
+        status:
+          type: [string, 'null']
+          description: The target's status (SCHEDULED, RUNNING, DONE, CANCELED).
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimPlanPoint'
+        spikes:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimEvent'
+        now:
+          type: [object, 'null']
+          description: Where the target is against the plan, while it runs.
+          properties:
+            at:
+              type: string
+              format: date-time
+            target:
+              type: [string, number, 'null']
+            plan:
+              type: [string, number, 'null']
+            low:
+              type: [string, number, 'null']
+            high:
+              type: [string, number, 'null']
+            deviation:
+              type: [number, 'null']
+              description: ln(target/plan).
+            at_risk:
+              type: boolean
+            crossed_at:
+              type: [string, 'null']
+              format: date-time
+            result:
+              type: [string, 'null']
+    SimTargetPreview:
+      type: object
+      required: [feasible, min_duration_seconds, move, needs_approval, points]
+      properties:
+        direction:
+          type: [string, 'null']
+          description: The side of the level, as asked or inferred from the current target (ABOVE, BELOW).
+        feasible:
+          type: boolean
+        min_duration_seconds:
+          type: integer
+          description: The shortest window in which the level is reachable from the current target.
+        move:
+          type: number
+          description: The planned move, |ln(level/current target)|.
+        needs_approval:
+          type: boolean
+          description: "Beyond one operator's share (30% alone, 50% an hour): a second administrator approves it."
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimPlanPoint'
     SimSample:
       type: object
       required: [at, target_price, last_price]

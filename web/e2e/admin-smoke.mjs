@@ -326,6 +326,7 @@ try {
   await page.waitForSelector("[data-testid=sim-target]");
   await page.waitForSelector("main svg[role=img]", { timeout: 30000 });
   await t.shot("4d-sim");
+  const simTarget = Number(await page.$eval("[data-testid=sim-target]", (el) => el.textContent));
   await go("/sim/control");
   await waitText("价格模型");
   await page.$eval("#sim-size", (el) => el.select());
@@ -335,6 +336,14 @@ try {
   await t.shot("4e-sim-impact");
   await clickButton("取消", "[role=dialog]");
   await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
+  // The threshold target's form (A6): 3% above the target within the
+  // default 30 minutes, previewed reachable with its envelope; nothing
+  // asked for.
+  await page.click("[data-testid=sim-type-TARGET]");
+  await page.type("#sim-target-level", (Math.floor(simTarget * 1.03 * 10000) / 10000).toFixed(4));
+  await page.waitForSelector("[data-testid=sim-target-preview] svg[role=img]", { timeout: 20000 });
+  await waitText("能按时到达");
+  await t.shot("4e-sim-target");
   await go("/sim/events");
   await waitText("排队与进行中");
   await page.waitForFunction(() => !document.querySelector("main [aria-busy=true]"), { timeout: 20000 });
@@ -353,7 +362,7 @@ try {
   await rows(1);
   await waitText("机器人");
   await noError("the bots' orders");
-  ok("the simulated market: overview, price control with an event's impact (not started), events, bots, the coin's holders; the bots' orders");
+  ok("the simulated market: overview, price control with an event's impact (not started) and a target's preview, events, bots, the coin's holders; the bots' orders");
 
   // 10. Fund operations: the approval mode with its limits, the form, the
   // records; the settings; the counts pushed on the event stream.
