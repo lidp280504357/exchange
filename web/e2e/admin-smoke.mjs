@@ -374,7 +374,7 @@ try {
   await page.click('[data-testid="fixed-edit-home-hero"]');
   await waitText("副标题");
   await page.waitForFunction(() => document.querySelector("#article-title-zh-CN")?.value.length > 0, { timeout: 10000 });
-  const forMode = await page.evaluate(() => document.querySelector('[role=dialog] [role=group][aria-label="适用模式"] [data-state="on"]')?.innerText.trim());
+  const forMode = await page.evaluate(() => document.querySelector('[role=dialog] [role=radiogroup][aria-label="适用模式"] [aria-checked="true"]')?.innerText.trim());
   if (forMode !== "正式模式" && forMode !== "通用") throw new Error(`the hero's live column opens an editor for "${forMode}"`);
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => !document.querySelector("[role=dialog]"), { timeout: 10000 });

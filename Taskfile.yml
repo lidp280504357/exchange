@@ -91,7 +91,7 @@ tasks:
       - bash scripts/dev.sh
 
   e2e:
-    desc: 对已部署的非生产环境跑端到端检查（默认 https://astras.vip，BASE=... 可改；读 .env 的 CAPTCHA_BYPASS_TOKEN；约 35 分钟，其中 webflows.sh 的检查清单流程约 20 分钟；持运维锁，见 scripts/ops/lock.sh）
+    desc: 对已部署的非生产环境跑端到端检查（默认 https://astras.vip，BASE=... 可改；读 .env 的 CAPTCHA_BYPASS_TOKEN；约 30 分钟，其中 webflows.sh 的检查清单流程约 15 分钟；持运维锁，见 scripts/ops/lock.sh）
     cmds:
       - scripts/ops/lock.sh run --owner "task e2e" -- bash -c 'for f in scripts/e2e/*.sh; do bash "$f" || exit 1; done'
 

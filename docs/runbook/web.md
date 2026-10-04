@@ -200,7 +200,7 @@ nginx（`deploy/compose/nginx/conf.d/astras.vip.conf` 与 `snippets/site-{pc,m,a
   - 设计系统里 1000 行虚拟表格（Storybook `data-datatable--virtual-1000`）滚动 3 秒的帧率；
   - `node web/e2e/perf.mjs memory`：PC 终端页 30 分钟（`MINUTES`）的 JS 堆增长（前后各强制一次 GC）。
   未达预算时退出码非 0；`BUDGET=warn` 只报告。结果记在 `docs/阶段4验收报告.md`。
-- 检查清单流程（2026-10-04）：`scripts/e2e/webflows.sh [pc] [m] [admin]`（`task e2e` 里排在 `web.sh` 之后；单独运行先持运维锁：`scripts/ops/lock.sh run -- bash scripts/e2e/webflows.sh pc m admin`）把 [ui-checklist.md](ui-checklist.md) 能稳定判断的项在 headless Chrome 里逐项走一遍，每站约 6–7 分钟（网络慢时到 12 分钟）。逐项对应与结果见 `docs/阶段4验收报告.md` §8.1。
+- 检查清单流程（2026-10-04）：`scripts/e2e/webflows.sh [pc] [m] [admin]`（`task e2e` 里排在 `web.sh` 之后；单独运行先持运维锁：`scripts/ops/lock.sh run -- bash scripts/e2e/webflows.sh pc m admin`）把 [ui-checklist.md](ui-checklist.md) 能稳定判断的项在 headless Chrome 里逐项走一遍，每站约 4–6 分钟（网络慢时到 12 分钟）。逐项对应与结果见 `docs/阶段4验收报告.md` §8.1。
   - 脚本：`web/e2e/pc-flows.mjs`、`m-flows.mjs`、`admin-flows.mjs`，公共部分 `flows-lib.mjs`（建在 `lib.mjs` 的 Chrome 之上）。每一步以清单编号命名（`3`、`P4`、`M1`、`A2`），在自己的标签页（独立的浏览器上下文，各自的设备、时区、减少动效等媒体特性）里跑；只等事件与状态，不靠定时等待。
   - 输出 `ok|FAIL 编号 说明 (秒)`，每站一行汇总；失败的步骤把每个标签页的截图与日志（错误、地址、控制台、页面错误、失败请求）写到 `FLOWS_OUT`（默认 `~/.cache/exchange-e2e/flows/<run>`），打印路径后继续下一步；每站的结果另存 `<站点>-summary.json`。`FLOWS_ONLY=3,P4` 只跑这几项（准备步骤 `—` 总会跑）。
   - 后台流程经 ssh 建一个临时 ADMIN 与一个临时 AUDITOR（随机口令与密钥从标准输入传入、不打印），结束时停用；危险操作只打开、填写后取消，最后核对审计里 ADMIN 只有登录与退出。
