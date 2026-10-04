@@ -56,29 +56,32 @@
 
   /* Identity colours: letter icons of coins and avatars without a logo
      (CoinIcon picks one per symbol, or the coin profile's palette name).
-     Mid tones that carry white text on both themes. */
-  --id-orange: #f7931a;
-  --id-amber: #d4a017;
-  --id-lime: #65a30d;
-  --id-emerald: #059669;
-  --id-teal: #26a17b;
-  --id-cyan: #0891b2;
-  --id-sky: #0284c7;
+     Tones that carry white text on both themes: white on each is at least
+     4.70 : 1 (ui-checklist item 3; orange, amber, lime, emerald, teal,
+     cyan, sky and indigo were 2.30-4.10 and are a shade darker now). */
+  --id-orange: #b45309;
+  --id-amber: #a16207;
+  --id-lime: #4d7c0f;
+  --id-emerald: #047857;
+  --id-teal: #0f766e;
+  --id-cyan: #0e7490;
+  --id-sky: #0369a1;
   --id-blue: #2563eb;
-  --id-indigo: #627eea;
+  --id-indigo: #4f63d2;
   --id-violet: #7c3aed;
   --id-fuchsia: #c026d3;
   --id-rose: #e11d48;
 
   /* Indicator lines of the charts (MA 7/25/99, EMA 12/26), read at run
      time by CandleChart; their legends are text in the same colours, so
-     MA25 and MA99 take lighter shades than the identity colours: 5.25 and
-     6.55 : 1 on bg-1 (were 3.85 and 4.43). */
+     they are lighter than the identity colours: MA25 and MA99 5.25 and
+     6.55 : 1 on bg-1 (were 3.85 and 4.43), EMA 12 and 26 the former lime
+     and orange. */
   --chart-1: var(--brand);
   --chart-2: #d946ef;
   --chart-3: #0ea5e9;
-  --chart-4: var(--id-lime);
-  --chart-5: var(--id-orange);
+  --chart-4: #65a30d;
+  --chart-5: #f7931a;
 
   --r-1: 4px;
   --r-2: 8px;
