@@ -249,7 +249,7 @@ export function AssetDrawer({ cfg, asset, onClose }: { cfg: InstrumentConfig; as
           </section>
         )}
         {network && asset && <NetworkForm asset={asset} network={network === "new" ? null : network} onDone={() => setNetwork(null)} />}
-        {!creating && <AssetProfileSection code={code} />}
+        {!creating && <AssetProfileSection code={code} writable />}
       </div>
       {dialog}
     </Drawer>

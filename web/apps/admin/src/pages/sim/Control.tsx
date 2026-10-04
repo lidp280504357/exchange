@@ -9,6 +9,7 @@ import { DangerAction, FormError, useAdminT } from "../../kit/actions";
 import { TimeText } from "../../kit/format";
 import { Card, Page } from "../../kit/Page";
 import { EndEvent, ImpactLines, minutes, pct, price, simEventsKey, simKey, useEventText, useSim, type SimEvent, type SimEventType } from "./common";
+import { ReadOnly } from "../../kit/ReadOnly";
 import {
   MAX_LEAD, newTarget, SOLO_SPIKE, SPIKE_WIDTH, spikeMarkShare, spikePrices, TargetFields, TargetPlan, TargetPreview, targetBody, tryCheck,
   type TargetDraft,
@@ -40,6 +41,7 @@ export default function SimControl({ admin }: { admin: Admin }) {
   if (q.isError) return <ErrorState message={String(q.error)} onRetry={() => void q.refetch()} />;
   return (
     <Page title={t("admin.nav.simControl")} help={t("admin.sim.controlHelp")}>
+      <ReadOnly admin={admin} perm="sim.control" />
       {q.data && <TargetBanner events={q.data.events} control={control} />}
       <Card title={t("admin.sim.events")} extra={<span className="text-xs text-fg-3">{t("admin.sim.share")}</span>}>
         {q.data ? <Launcher target={Number(q.data.target_price ?? 0)} perp={q.data.perp} control={control} /> : <Skeleton className="h-40 w-full" />}

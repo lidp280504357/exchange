@@ -22,6 +22,13 @@ export function App() {
   return <Console />;
 }
 
+/** ToLogin sends a visitor to sign in, keeping where they were going (?next=) for after. */
+function ToLogin() {
+  const { pathname, search } = useLocation();
+  const next = pathname === "/" && !search ? "" : `?next=${encodeURIComponent(pathname + search)}`;
+  return <Navigate to={`/login${next}`} replace />;
+}
+
 function Console() {
   const me = useMe();
   if (me.isPending) {
@@ -39,7 +46,7 @@ function Console() {
       ) : (
         <Routes>
           <Route path="/login" element={<Login />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
+          <Route path="*" element={<ToLogin />} />
         </Routes>
       )}
     </Suspense>

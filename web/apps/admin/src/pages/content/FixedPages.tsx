@@ -10,6 +10,7 @@ import { TimeText } from "../../kit/format";
 import { RowActions } from "../../kit/lists";
 import { Card, Page } from "../../kit/Page";
 import { ArticleEditor, articleBody, articlesKey, FILES, seedOf, shown, SITE, StatusBadge, type Article, type Draft } from "./articles";
+import { ReadOnly } from "../../kit/ReadOnly";
 
 // The fixed pages (design 2026-10-04 §4.4): the legal and information
 // pages and the home page's hero have fixed addresses, and the sites bundle
@@ -165,6 +166,7 @@ export default function FixedPages({ admin }: { admin: Admin }) {
   const error = legal.error ?? home.error;
   return (
     <Page title={t("admin.nav.fixedPages")} help={t("admin.pages.help")}>
+      <ReadOnly admin={admin} perm="content.write" />
       <Card className="stagger">
         <DataTable
           columns={columns}
@@ -179,6 +181,7 @@ export default function FixedPages({ admin }: { admin: Admin }) {
       </Card>
       {editing && (
         <ArticleEditor
+          admin={admin}
           key={editing.article?.id ?? `new:${editing.slug}`}
           section={editing.section}
           article={editing.article}

@@ -5,8 +5,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { Check } from "../kit/Check";
+import { nextPath } from "../next";
 import { CodeInput } from "./login/CodeInput";
 import { BrandPanel, Field } from "./login/parts";
 
@@ -22,6 +23,7 @@ export default function Login() {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const { search } = useLocation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -41,10 +43,11 @@ export default function Login() {
       adminData(await adminApi.POST("/admin/v1/login", { body: askCode ? { email, password, totp_code: code } : { email, password } })),
     onSuccess: (res) => {
       setDone(true);
-      // The check is drawn before the console takes over.
+      // The check is drawn before the console takes over, at the page the
+      // visitor was sent here from.
       const open = (admin: Admin) => {
         qc.setQueryData(["admin", "me"], admin);
-        navigate("/", { replace: true });
+        navigate(nextPath(search), { replace: true });
       };
       if (matchMedia("(prefers-reduced-motion: reduce)").matches) open(res.admin);
       else setTimeout(() => open(res.admin), 480);

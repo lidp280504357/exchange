@@ -32,8 +32,8 @@ async function readLogo(file: File, t: (k: string, o?: Record<string, unknown>) 
   return { data, mime, preview };
 }
 
-/** AssetProfileSection shows an asset's profile in its drawer and edits it. */
-export function AssetProfileSection({ code }: { code: string }) {
+/** AssetProfileSection shows an asset's profile in its drawer and, with writable (instruments.write), edits it. */
+export function AssetProfileSection({ code, writable }: { code: string; writable: boolean }) {
   const { t } = useTranslation();
   const q = useQuery({
     queryKey: profileKey(code),
@@ -70,7 +70,7 @@ export function AssetProfileSection({ code }: { code: string }) {
       <div className="flex items-center gap-2">
         <h3 className="flex-1 text-sm font-semibold">{t("admin.profile.title")}</h3>
         <span className="font-mono text-xs text-fg-3">v{p.version}</span>
-        {!draft && (
+        {!draft && writable && (
           <Button size="sm" variant="secondary" onClick={() => setDraft(draftOf(p))}>
             {t("admin.listing.edit")}
           </Button>

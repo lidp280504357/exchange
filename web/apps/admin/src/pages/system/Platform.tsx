@@ -9,6 +9,7 @@ import { DangerAction, FormError } from "../../kit/actions";
 import { readSquareImage, type ChosenImage, type ImageMime } from "../../kit/image";
 import { Card, Page } from "../../kit/Page";
 import { launchKey } from "./Launch";
+import { ReadOnly } from "../../kit/ReadOnly";
 
 // The platform's settings (design 2026-10-04 §4.1, §4.2, §5; D2): the
 // profile the sites show (name, colours, footer, contact, learning banner,
@@ -62,6 +63,7 @@ export default function Platform({ admin }: { admin: Admin }) {
   if (q.isError) return <ErrorState message={String(q.error)} onRetry={() => void q.refetch()} />;
   return (
     <Page title={t("admin.nav.platform")} help={t("admin.platform.help")}>
+      <ReadOnly admin={admin} perm="settings.write" />
       {q.data ? <ProfileForm key={q.data.version} profile={q.data} edit={edit} /> : <Skeleton className="h-96 w-full" />}
       {q.data && <Images profile={q.data} edit={edit} />}
       <Welcome edit={edit} />

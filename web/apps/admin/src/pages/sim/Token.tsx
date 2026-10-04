@@ -1,5 +1,5 @@
 import { dec, errorText } from "@exchange/core";
-import { adminApi, adminData, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
+import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
 import { Badge, DataTable, ErrorState, Skeleton, type ColumnDef, type DataColumnMeta } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
@@ -28,7 +28,7 @@ function share(part: string, whole: string) {
   return `${p.toFixed(2)}%`;
 }
 
-export default function SimTokenPage(_: { admin: Admin }) {
+export default function SimTokenPage({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
   const sim = useSim(15_000);
   const q = useQuery({
@@ -93,7 +93,7 @@ export default function SimTokenPage(_: { admin: Admin }) {
           />
         </Card>
         <Card title={t("admin.sim.profile")} className="stagger" style={stagger(6)}>
-          {tok ? <AssetProfileSection code={tok.asset} /> : <Skeleton className="h-40 w-full" />}
+          {tok ? <AssetProfileSection code={tok.asset} writable={can(admin, "instruments.write")} /> : <Skeleton className="h-40 w-full" />}
         </Card>
       </div>
     </Page>

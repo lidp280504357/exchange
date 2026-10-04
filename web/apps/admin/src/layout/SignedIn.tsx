@@ -1,6 +1,7 @@
 import type { Admin } from "@exchange/core/api/admin";
 import { lazy } from "react";
-import { Navigate, Route, Routes } from "react-router";
+import { Navigate, Route, Routes, useLocation } from "react-router";
+import { nextPath } from "../next";
 import { allowed, sections, subpages } from "../sections";
 import { ConsoleShell } from "./ConsoleShell";
 
@@ -24,9 +25,15 @@ export default function SignedIn({ admin }: { admin: Admin }) {
           .map((s) => (
             <Route key={s.path} index={s.path === ""} path={s.path || undefined} element={<s.page admin={admin} />} />
           ))}
-        <Route path="/login" element={<Navigate to="/" replace />} />
+        <Route path="/login" element={<Signed />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
   );
+}
+
+/** Signed sends a signed-in administrator from the sign-in page to where it was to lead. */
+function Signed() {
+  const { search } = useLocation();
+  return <Navigate to={nextPath(search)} replace />;
 }

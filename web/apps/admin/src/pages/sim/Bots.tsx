@@ -13,6 +13,7 @@ import { FundAction, type Approval } from "../../kit/funds";
 import { stagger } from "../../kit/motion";
 import { Card, Page } from "../../kit/Page";
 import { MintShares, pct, useSim, type SimBot, type SimStatus } from "./common";
+import { ReadOnly } from "../../kit/ReadOnly";
 
 // The bots (ASTRA design §6.1): the cluster's switches (the flags
 // sim.enabled, sim.perp, sim.events, sim.halt_on_loss), each bot's
@@ -75,6 +76,7 @@ export default function SimBots({ admin }: { admin: Admin }) {
   if (q.isError) return <ErrorState message={errorText(q.error)} onRetry={() => void q.refetch()} />;
   return (
     <Page title={t("admin.nav.simBots")} help={t("admin.sim.botsHelp")}>
+      <ReadOnly admin={admin} perm="flags.write" />
       <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
         <Card title={t("admin.sim.switches")} className="stagger">
           <Switches admin={admin} />

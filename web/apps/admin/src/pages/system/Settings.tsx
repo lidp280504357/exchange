@@ -11,6 +11,7 @@ import { stagger } from "../../kit/motion";
 import { Card, Page } from "../../kit/Page";
 import { settingsKey, useConsoleSettings } from "../../live";
 import { setTheme, useTheme } from "../../theme";
+import { ReadOnly } from "../../kit/ReadOnly";
 
 const LIMITS = ["single_max_usdt", "daily_max_usdt", "withdrawal_max_usdt"] as const;
 type Limit = (typeof LIMITS)[number];
@@ -27,6 +28,7 @@ export default function Settings({ admin }: { admin: Admin }) {
   const editable = can(admin, "settings.write");
   return (
     <Page title={t("admin.nav.settings")} help={t("admin.settings.help")}>
+      <ReadOnly admin={admin} perm="settings.write" />
       {q.isError ? (
         <ErrorState message={String(q.error)} onRetry={() => void q.refetch()} />
       ) : (

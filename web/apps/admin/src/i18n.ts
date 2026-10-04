@@ -1,3 +1,4 @@
+import { accessEn, accessZh } from "./messages/access";
 import { accountEn, accountZh } from "./messages/account";
 import { attemptsEn, attemptsZh } from "./messages/attempts";
 import { contentEn, contentZh } from "./messages/content";
@@ -40,10 +41,10 @@ const isTree = (v: unknown): v is Tree => typeof v === "object" && v !== null &&
 export const adminMessages = {
   "zh-CN": merge(
     zh, usersZh, walletZh, moneyZh, tradingZh, instrumentsZh, systemZh, changesZh, contentZh, reportsZh, profileZh, simZh, attemptsZh, accountZh,
-    unownedZh, custodyZh, houseZh, simTargetZh, platformZh, pagesZh,
+    unownedZh, custodyZh, houseZh, simTargetZh, platformZh, pagesZh, accessZh,
   ),
   en: merge(
     en, usersEn, walletEn, moneyEn, tradingEn, instrumentsEn, systemEn, changesEn, contentEn, reportsEn, profileEn, simEn, attemptsEn, accountEn,
-    unownedEn, custodyEn, houseEn, simTargetEn, platformEn, pagesEn,
+    unownedEn, custodyEn, houseEn, simTargetEn, platformEn, pagesEn, accessEn,
   ),
 };

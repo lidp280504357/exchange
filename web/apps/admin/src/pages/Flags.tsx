@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next";
 import { DangerAction } from "../kit/actions";
 import { TimeText } from "../kit/format";
 import { Page } from "../kit/Page";
+import { ReadOnly } from "../kit/ReadOnly";
 
 type Flag = AdminSchemas["Flag"];
 
@@ -57,6 +58,7 @@ export default function Flags({ admin }: { admin: Admin }) {
   const shown = (flags.data ?? []).filter((f) => !q || f.key.includes(q.trim()) || f.description?.includes(q.trim()));
   return (
     <Page title={t("admin.risk.flags")} help={t("admin.risk.rulesHint")} actions={<Input size="sm" value={q} onValueChange={setQ} placeholder={t("admin.common.search")} containerClassName="w-56" clearable onClear={() => setQ("")} />}>
+      <ReadOnly admin={admin} perm="flags.write" />
       {flags.isError ? (
         <ErrorState message={errorText(flags.error)} onRetry={() => void flags.refetch()} />
       ) : (

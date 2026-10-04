@@ -7,6 +7,7 @@ import { Copy, ExternalLink, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DangerAction, FormError } from "../../kit/actions";
+import { ReadOnly } from "../../kit/ReadOnly";
 import { TimeText } from "../../kit/format";
 import { RowActions } from "../../kit/lists";
 import { Card, Page } from "../../kit/Page";
@@ -186,6 +187,7 @@ export function ArticlesPage({ admin, section }: { admin: Admin; section: ListSe
       {q.isSuccess && <BundledFiles section={section} known={known} write={write} onCopy={(seed) => setEditing({ article: null, seed })} />}
       {editing && (
         <ArticleEditor
+          admin={admin}
           key={editing.article?.id ?? `new:${editing.seed?.slug ?? ""}`}
           section={section}
           article={editing.article}
@@ -285,8 +287,9 @@ function draftOf(section: Section, a: Article | null): Draft {
  * subtitle.
  */
 export function ArticleEditor({
-  section, article, seed, write, onClose, onSaved,
+  admin, section, article, seed, write, onClose, onSaved,
 }: {
+  admin: Admin;
   section: Section;
   article: Article | null;
   seed?: Draft;
@@ -380,6 +383,7 @@ export function ArticleEditor({
       }
     >
       <div className="flex flex-col gap-4">
+        <ReadOnly admin={admin} perm="content.write" />
         {fixed ? (
           <p className="text-xs text-fg-3">{t(section === "HOME" ? "admin.pages.heroHint" : "admin.pages.legalHint", { slug: d.slug })}</p>
         ) : (
