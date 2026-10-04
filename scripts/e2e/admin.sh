@@ -1774,9 +1774,13 @@ else
     fi
   }
   at_exit restore_platform_name
-  as ADMIN PUT /admin/v1/platform/profile "$(platform_write "E2E $RUN" "$PV" "e2e: a rename, put back at once")"
+  # No run of six digits in the name: messages carry it (notification-service
+  # keeps it for 10 minutes) and the e2e reads a code as a message's first
+  # six digits.
+  RENAMED="E2E Exchange $((RUN % 10000))"
+  as ADMIN PUT /admin/v1/platform/profile "$(platform_write "$RENAMED" "$PV" "e2e: a rename, put back at once")"
   expect 200 - "ADMIN renames the platform"
-  check ".name == \"E2E $RUN\" and .version == $((PV + 1)) and .updated_by == \"$EMAIL_ADMIN\"" "saved at the next version, by the ADMIN"
+  check ".name == \"$RENAMED\" and .version == $((PV + 1)) and .updated_by == \"$EMAIL_ADMIN\"" "saved at the next version, by the ADMIN"
   as ADMIN PUT /admin/v1/platform/profile "$(platform_write "E2E stale" "$PV" "e2e: a stale version")"
   expect 409 INSTRUMENT_PLATFORM_CHANGED "a save over a version since changed is refused"
   as ADMIN PUT /admin/v1/platform/profile "$(platform_write "$PNAME" "$((PV + 1))" "e2e: the name put back")"
