@@ -93,6 +93,12 @@ func TestRegistrationGateAndPlatformRoutes(t *testing.T) {
 	if s, _ := call(http.MethodPost, "/v1/auth/otp/request", login); s != http.StatusNoContent || seenBody != login {
 		t.Fatalf("a LOGIN code: %d, the upstream read %q", s, seenBody)
 	}
+	// A dotted İ upper-cases to "REGİSTER": no REGISTER for auth-service
+	// either (it refuses the scene), so the gate passes it on (review BG).
+	dotted := `{"scene":"regİster","channel":"EMAIL","identifier":"a@example.com"}`
+	if s, _ := call(http.MethodPost, "/v1/auth/otp/request", dotted); s != http.StatusNoContent || seenBody != dotted {
+		t.Fatalf("a dotted İ: %d, the upstream read %q", s, seenBody)
+	}
 	if s, _ := call(http.MethodPost, "/v1/auth/login/password", "{}"); s != http.StatusNoContent {
 		t.Fatalf("sign-in stays open: %d", s)
 	}

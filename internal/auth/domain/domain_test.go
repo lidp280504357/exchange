@@ -55,6 +55,12 @@ func TestParseSceneAndChannel(t *testing.T) {
 	if _, err := ParseScene("HACK"); err == nil {
 		t.Fatal("unknown scene")
 	}
+	// A dotted İ upper-cases to "REGİSTER", which is no scene: the gateway's
+	// closed-registration gate lets such a request through on that account
+	// (review BG).
+	if _, err := ParseScene("regİster"); err == nil {
+		t.Fatal(`"regİster" is a scene`)
+	}
 	if c, err := ParseChannel("sms"); err != nil || c != ChannelSMS || c.Kind() != "PHONE" {
 		t.Fatalf("channel: %v %v", c, err)
 	}

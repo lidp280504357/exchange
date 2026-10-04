@@ -157,12 +157,21 @@ export function DataTable<T>({
           onCheckedChange={(c) => table.toggleAllRowsSelected(c)}
         />
       ),
+      // Compact rows (32 px) are lower than the box's 44 px touch ring, which
+      // would reach into the next rows' boxes: there the ring goes and the
+      // whole cell takes the tap instead (review BG).
       cell: ({ row }) => (
-        <Checkbox aria-label={t("ui.selectRow")} checked={row.getIsSelected()} disabled={!row.getCanSelect()} onCheckedChange={(c) => row.toggleSelected(c)} />
+        <Checkbox
+          aria-label={t("ui.selectRow")}
+          checked={row.getIsSelected()}
+          disabled={!row.getCanSelect()}
+          onCheckedChange={(c) => row.toggleSelected(c)}
+          className={density === "compact" ? "after:hidden" : undefined}
+        />
       ),
     };
     return [select, ...columns];
-  }, [selectable, columns, t]);
+  }, [selectable, columns, t, density]);
 
   const table = useReactTable({
     data,
@@ -223,8 +232,9 @@ export function DataTable<T>({
     return () => io.disconnect();
   }, [virtual, onEndReached, areaHeight, reachEnd]);
 
-  // Titles on cut cells: measured after each render (new rows, new values)
-  // and when the table's width changes, at most once a frame.
+  // Titles on cut cells: measured when the rows shown, their values or the
+  // columns change and when the table's width does, at most once a frame
+  // (not on every render: a hover or a selection changes no text).
   const titleFrame = useRef(0);
   const retitle = useCallback(() => {
     cancelAnimationFrame(titleFrame.current);
@@ -232,9 +242,8 @@ export function DataTable<T>({
       if (tableRef.current) titleCutCells(tableRef.current);
     });
   }, []);
-  useEffect(() => {
-    retitle();
-  });
+  const firstShown = items[0]?.index ?? 0;
+  useEffect(() => retitle(), [retitle, data, allColumns, density, firstShown, lastIndex]);
   useEffect(() => {
     const table = tableRef.current;
     if (!table || typeof ResizeObserver === "undefined") return;
@@ -442,7 +451,15 @@ function DataRowImpl<T>({ row, index, selected, active, extraClass, clickable, o
           <td
             key={cell.id}
             style={widthStyle(m)}
-            onClick={isSelect ? (e) => e.stopPropagation() : undefined}
+            onClick={
+              isSelect
+                ? (e) => {
+                    e.stopPropagation();
+                    // A tap beside the box toggles it too.
+                    if (e.target === e.currentTarget && row.getCanSelect()) row.toggleSelected();
+                  }
+                : undefined
+            }
             className={cn("overflow-hidden text-ellipsis whitespace-nowrap text-fg-1 tabular-nums", pad, ALIGN[m.align ?? "left"], m.className)}
           >
             {flexRender(cell.column.columnDef.cell, cell.getContext())}

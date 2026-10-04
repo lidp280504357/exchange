@@ -52,6 +52,16 @@ describe("DataTable", () => {
     expect(rowOf("ord-a")?.getAttribute("data-state")).toBeNull();
   });
 
+  it("toggles a compact row's selection from a tap beside its box", () => {
+    const onSel = vi.fn();
+    render(<DataTable columns={columns} data={data} getRowId={(r) => r.id} selectable density="compact" onRowSelectionChange={onSel} />);
+    const cell = rowOf("ord-a")?.querySelector("td");
+    if (!cell) throw new Error("no cell");
+    expect(cell.querySelector('[role="checkbox"]')?.className).toContain("after:hidden");
+    fireEvent.click(cell);
+    expect(onSel).toHaveBeenLastCalledWith({ "ord-a": true });
+  });
+
   it("sorts decimal strings as numbers", () => {
     render(<DataTable columns={columns} data={data} getRowId={(r) => r.id} />);
     fireEvent.click(screen.getByRole("button", { name: /Amount/ }));
@@ -90,6 +100,7 @@ describe("DataTable", () => {
         cell: ({ row }) => (
           <span className="flex">
             <span className="truncate">{row.original.name} adjustment</span>
+            <span>FUTURES</span>
           </span>
         ),
       },
@@ -108,6 +119,7 @@ describe("DataTable", () => {
     widths(label?.querySelector(".truncate"), 90, 60);
     titleCutCells(table);
     expect(name?.getAttribute("title")).toBe("Alpha");
+    // The cut label's text, not the badge beside it (review BG).
     expect(label?.getAttribute("title")).toBe("Alpha adjustment");
     expect(amount?.hasAttribute("title")).toBe(false);
     expect(rowOf("ord-b")?.querySelector("td[title]")).toBeNull();

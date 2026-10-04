@@ -8,13 +8,17 @@ const CLIPPING = ".truncate, .text-ellipsis, [class*='line-clamp-']";
 /** The cells whose title titleCutCells set (and may take back). */
 const titled = new WeakSet<HTMLElement>();
 
-/** isCut says whether the cell, or an element in it, cuts its text short. */
-function isCut(cell: HTMLElement): boolean {
-  if (cell.scrollWidth > cell.clientWidth + 1) return true;
-  for (const el of cell.querySelectorAll<HTMLElement>(CLIPPING)) {
-    if (el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1) return true;
-  }
-  return false;
+/**
+ * cutText is the text a cell cuts short: the whole cell's when the cell
+ * itself does, else that of the elements in it that do (a cut label beside
+ * a badge titles the label, not the badge); null when nothing is cut.
+ */
+function cutText(cell: HTMLElement): string | null {
+  if (cell.scrollWidth > cell.clientWidth + 1) return cell.innerText;
+  const cut = [...cell.querySelectorAll<HTMLElement>(CLIPPING)].filter(
+    (el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1,
+  );
+  return cut.length > 0 ? cut.map((el) => el.innerText).join(" ") : null;
 }
 
 /**
@@ -25,9 +29,9 @@ function isCut(cell: HTMLElement): boolean {
  */
 export function titleCutCells(table: HTMLTableElement): void {
   const cells = [...table.querySelectorAll<HTMLTableCellElement>(":scope > tbody > tr > td")];
-  const cut = cells.map(isCut);
+  const cut = cells.map(cutText);
   cells.forEach((cell, i) => {
-    const text = cut[i] ? cell.innerText.replace(/\s+/g, " ").trim() : "";
+    const text = (cut[i] ?? "").replace(/\s+/g, " ").trim();
     if (text) {
       if (cell.title !== text) cell.title = text;
       titled.add(cell);

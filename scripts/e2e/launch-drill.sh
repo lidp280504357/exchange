@@ -43,9 +43,8 @@ START=$SECONDS
 
 # The items the drill sets through the console; the checklist's others are
 # the deployment's or the test server's (its switches by the user's
-# decisions: sign-in without an authenticator, the hidden test asset). The
-# test mode's item was learning_mode until the console's D4 (test_mode).
-CONSOLE_ITEMS="welcome_credits learning_mode test_mode registration brand domain coin_profile legal"
+# decisions: sign-in without an authenticator, the hidden test asset).
+CONSOLE_ITEMS="welcome_credits test_mode registration brand domain coin_profile legal"
 
 # --- the console's API --------------------------------------------------
 CSRF=(-H 'X-Admin-CSRF: 1')
@@ -107,6 +106,24 @@ call POST /admin/v1/login "$(jq -nc --arg e "$EMAIL" --arg p "$PW" --arg c "$(no
 BASE=$BASE_USER
 expect 200 - "signed in to the console"
 
+# What a run cut short before its restore left behind, the images it
+# uploaded and the pages it published, is listed here and removed before
+# this run reads the platform: else the next run would take them for the
+# operators' own and keep them (review BG).
+LEFT="${XDG_CACHE_HOME:-$HOME/.cache}/exchange-e2e/launch-drill-left"
+mkdir -p "$(dirname "$LEFT")"
+if [[ -s $LEFT ]]; then
+  while read -r what id; do
+    case $what in
+      image) internal DELETE instrument-service 8084 "/internal/platform/images/$id" \
+        '{"actor":"e2e:launch-drill","reason":"launch drill: an image a cut-short run left"}' ;;
+      page) pg "DELETE FROM notify.articles WHERE id = '$id'" >/dev/null ;;
+    esac
+  done <"$LEFT"
+  echo "ok   removed what a cut-short run left: $(tr '\n' ' ' <"$LEFT")"
+fi
+: >"$LEFT"
+
 echo "== the test setup, to go back to"
 acall GET /admin/v1/platform/profile ""
 expect 200 - "the platform's profile"
@@ -131,9 +148,10 @@ back_to_testing() {
     brand_color, footer, contact, social, default_locale, test_mode, registration, expected_version: $cur.version, actor: "e2e:launch-drill",
     reason: "launch drill: back to the test setup"}' <<<"$ORIG")"
   [[ $STATUS == 200 ]] || echo "warning: the profile was not put back ($STATUS $BODY)" >&2
-  local kind
+  local kind clean=1
   for kind in ${UPLOADED[@]+"${UPLOADED[@]}"}; do
     internal DELETE instrument-service 8084 "/internal/platform/images/$kind" '{"actor":"e2e:launch-drill","reason":"launch drill: the built-in image again"}'
+    [[ $STATUS == 2* ]] || { echo "warning: the drill's $kind was not removed ($STATUS)" >&2; clean=0; }
   done
   internal GET ledger-service 8085 /internal/ledger/settings/welcome-credits
   internal PUT ledger-service 8085 /internal/ledger/settings/welcome-credits \
@@ -141,8 +159,10 @@ back_to_testing() {
   [[ $STATUS == 200 ]] || echo "warning: the welcome credits were not put back ($STATUS $BODY)" >&2
   if ((${#CREATED[@]} > 0)); then
     pg "DELETE FROM notify.articles WHERE id IN ($(printf "'%s'," "${CREATED[@]}" | sed 's/,$//'))" >/dev/null ||
-      echo "warning: the drill's pages were not deleted" >&2
+      { echo "warning: the drill's pages were not deleted" >&2; clean=0; }
   fi
+  # Removed: the next run has nothing to clear up.
+  [[ $clean == 0 ]] || : >"$LEFT"
 }
 at_exit back_to_testing
 
@@ -177,6 +197,7 @@ for kind in logo_dark favicon; do
     '{data: $d, mime: "image/svg+xml", reason: "launch drill: our own image"}')"
   expect 200 - "$kind uploaded"
   UPLOADED+=("$kind")
+  echo "image $kind" >>"$LEFT"
 done
 
 echo "== go live: the legal pages and the home hero, published from the defaults"
@@ -195,6 +216,7 @@ publish_default() { # publish_default SECTION DIR SLUG
   expect 201 - "$section/$slug from its default"
   a=$BODY
   CREATED+=("$(jq -r .id <<<"$a")")
+  echo "page $(jq -r .id <<<"$a")" >>"$LEFT"
   [[ $slug != terms ]] || TERMS_OURS=1
   acall POST "/admin/v1/articles/$(jq -r .id <<<"$a")/publish" "$(jq -c '{version, reason: "launch drill: publish the default"}' <<<"$a")"
   expect 200 - "published"
