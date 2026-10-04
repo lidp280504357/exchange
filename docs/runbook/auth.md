@@ -61,6 +61,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo sed -i "/^JWT_SIGNING_KEY=/d;/^JWT_
 - 绑定：`POST /v1/auth/totp/setup`（需 step-up）返回 base32 密钥与 `otpauth://` 链接，此时为 PENDING；`POST /v1/auth/totp/confirm` 用应用生成的 6 位验证码确认后 ACTIVE，发 `auth.TotpEnabled`（用户收到安全通知与邮件）。重复 setup 会替换待确认的密钥；已绑定时返回 `AUTH_TOTP_ENABLED`。
 - 使用：已绑定后 `POST /v1/auth/step-up` 只接受 `totp_code`，邮件或短信验证码票据返回 403 `AUTH_TOTP_REQUIRED`。算法 RFC 6238（HMAC-SHA1、30 秒、6 位），允许前后各一个时间步的误差；每个时间步只能用一次（`last_step`），重放返回 `AUTH_TOTP_INVALID`。
 - 解绑：`DELETE /v1/auth/totp`，需要用 TOTP 完成的 step-up，发 `auth.TotpDisabled`。解绑（以及后台重置已绑定的）记 `credentials.totp_changed_at`（迁移 auth 00005），step-up 的安全上下文带上它（`totp_changed_at`）：之后 24 小时内的提现转人工审核（风控 `SECURITY_CHANGE`）。
+- 绑定时间：安全上下文带 `totp_activated_at`（`totp_credentials.activated_at`），钱包据此在绑定后 24 小时内仍按基础额度计（见 [wallet.md](wallet.md)）。钱包的额度查询经 gRPC `GetSecurityContext` 读同一份上下文：不经 step-up、不消耗或签发令牌、不记设备；格式正确但不存在的用户得到零上下文（0 个身份、未绑定）而不是 NotFound——用户 ID 来自网关校验过的令牌，所以无害（评审 BA）。
 - 存储：`auth.totp_credentials`，密钥用 `TOTP_SECRET_KEY` 加密后存放。
 - 丢失身份验证器：目前没有恢复码，由管理后台（任务 11）人工核验后解绑。
 
