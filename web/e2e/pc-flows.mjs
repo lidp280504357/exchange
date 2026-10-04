@@ -11,7 +11,10 @@
 // Faults are staged by answering one request: offline (Chrome's network
 // emulation), an expired access token, a degraded mark price. Steps that
 // fail leave screenshots and a log (flows-lib.mjs).
-import { api, contrastIssues, desktop, flows, longAnimations, overflowX, PHONE_IOS, register, scrollThrough, stage, truncatedWithoutHint, wsWatch } from "./flows-lib.mjs";
+import {
+  api, cancelOrders, colorsOf, contrastIssues, desktop, flows, fmtTime, longAnimations, overflowX, PHONE_IOS, register, scrollThrough, siteCookieDomain,
+  spotAvailable, stage, truncatedWithoutHint, wsWatch,
+} from "./flows-lib.mjs";
 
 const APP = (process.env.APP ?? "https://astras.vip").replace(/\/$/, "");
 const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://astras.vip" : APP);
@@ -57,30 +60,6 @@ async function signedInTab(name, width = 1280, extra = {}) {
 
 const notFound = (tab) => tab.page.evaluate(() => /页面不存在|没有交易对/.test(document.body.innerText));
 
-/** colorsOf returns the computed colours of the first few elements of each class. */
-const colorsOf = (tab, classes) =>
-  tab.page.evaluate((cls) => {
-    const out = {};
-    for (const c of cls) {
-      // A figure fading between two colours (a price's 150 ms change) is neither.
-      out[c] = [...document.querySelectorAll(`.${c}`)]
-        .filter((el) => el.getBoundingClientRect().width > 0 && !el.getAnimations().some((a) => a.playState === "running"))
-        .slice(0, 5)
-        .map((el) => getComputedStyle(el)[c.startsWith("bg-") ? "backgroundColor" : "color"]);
-    }
-    return out;
-  }, classes);
-
-/** fmt formats an ISO time as the site does (YYYY-MM-DD HH:mm:ss) in zone. */
-function fmt(iso, zone) {
-  const p = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })
-      .formatToParts(new Date(iso))
-      .map((x) => [x.type, x.value]),
-  );
-  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
-}
-
 /** focusShown reports whether the focused element (or the field box around it) shows a focus indicator. */
 const focusShown = (tab) =>
   tab.page.evaluate(() => {
@@ -125,7 +104,18 @@ async function limitBuy(tab, { confirm }) {
 
 // --- the account -----------------------------------------------------------
 
-await f.step("—", "an account over the API (the welcome funds)", () => register(API, f.bypass, user.email, user.password), { fatal: true });
+await f.step(
+  "—",
+  "an account over the API (the welcome funds)",
+  async () => {
+    const { accessToken } = await register(API, f.bypass, user.email, user.password);
+    user.usdt = Number(await spotAvailable(API, accessToken, "USDT"));
+  },
+  { fatal: true },
+);
+// P2 and P6 place a limit buy of 0.0002 BTC: they need the welcome funds
+// (0 when the platform gives none, as at launch) and say so without them.
+const NO_FUNDS = () => (user.usdt >= 50 ? "" : `the account has ${user.usdt} USDT: the platform gives no welcome funds`);
 
 // --- P1: sign-in by keyboard -----------------------------------------------
 
@@ -520,7 +510,7 @@ await f.step("11", "changing the time zone in settings changes the times in tabl
   };
   await nav(A, "/assets/history");
   const before = await firstTime();
-  if (before.text !== fmt(before.iso, "Asia/Singapore")) throw new Error(`in the browser's zone ${before.iso} shows "${before.text}", not "${fmt(before.iso, "Asia/Singapore")}"`);
+  if (before.text !== fmtTime(before.iso, "Asia/Singapore")) throw new Error(`in the browser's zone ${before.iso} shows "${before.text}", not "${fmtTime(before.iso, "Asia/Singapore")}"`);
   await nav(A, "/account/settings");
   await A.page.click('button[aria-label="时区"]');
   await A.page.waitForSelector('input[aria-label="搜索时区或城市"]', { visible: true });
@@ -530,12 +520,12 @@ await f.step("11", "changing the time zone in settings changes the times in tabl
   await A.page.waitForFunction(() => JSON.parse(localStorage.getItem("exchange.settings") ?? "{}").state?.timeZone === "America/New_York", { timeout: 5000 });
   await nav(A, "/assets/history");
   const after = await firstTime();
-  if (after.text !== fmt(after.iso, "America/New_York")) throw new Error(`in New York ${after.iso} shows "${after.text}", not "${fmt(after.iso, "America/New_York")}"`);
+  if (after.text !== fmtTime(after.iso, "America/New_York")) throw new Error(`in New York ${after.iso} shows "${after.text}", not "${fmtTime(after.iso, "America/New_York")}"`);
   if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(after.text)) throw new Error(`format: "${after.text}"`);
   await nav(A, "/account/sessions");
   await A.page.waitForFunction(() => document.querySelector("main time[datetime]"), { timeout: 20000 });
   const sessions = await A.page.$$eval("main time[datetime]", (els) => els.map((el) => ({ iso: el.getAttribute("datetime"), text: el.innerText.trim(), title: el.title })));
-  const wrong = sessions.filter((s) => /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s.text) && s.text !== fmt(s.iso, "America/New_York"));
+  const wrong = sessions.filter((s) => /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s.text) && s.text !== fmtTime(s.iso, "America/New_York"));
   if (wrong.length) throw new Error(`device times not in the zone: ${JSON.stringify(wrong.slice(0, 3))}`);
   await nav(A, "/account/settings");
   await A.page.evaluate(() => {
@@ -606,7 +596,17 @@ await f.step("12", "figures right-aligned in tabular digits, with thousands sepa
 
 // --- P2: ordering by keyboard -----------------------------------------------------------------
 
-await f.step("P2", "keyboard order: / opens the pair search, arrows and Enter pick, B and S switch side, Enter submits, Esc closes", async () => {
+const P2 = "keyboard order: / opens the pair search, arrows and Enter pick, B and S switch side, Enter submits, Esc closes";
+if (NO_FUNDS()) f.skip("P2", P2, NO_FUNDS());
+else await f.step("P2", P2, async () => {
+  try {
+    await keyboardOrder();
+  } finally {
+    await cancelOrders(API, user);
+  }
+});
+
+async function keyboardOrder() {
   await nav(A, "/trade/BTC-USDT");
   await lastPrice(A);
   await blur(A);
@@ -641,7 +641,7 @@ await f.step("P2", "keyboard order: / opens the pair search, arrows and Enter pi
   await openOrders(A, 1);
   await A.clickButton("撤单");
   await openOrders(A, 0);
-});
+}
 
 // --- P3: ⌘K ------------------------------------------------------------------------------------
 
@@ -762,7 +762,17 @@ await f.step("P5", "the panel height, depth chart, interval, indicators and book
 
 // --- P6: no confirmation when turned off; insufficient balance offers a deposit ----------------------------
 
-await f.step("P6", "the order confirmation can be turned off in settings; more than the balance shows the error and a 充值 entry", async () => {
+const P6 = "the order confirmation can be turned off in settings; more than the balance shows the error and a 充值 entry";
+if (NO_FUNDS()) f.skip("P6", P6, NO_FUNDS());
+else await f.step("P6", P6, async () => {
+  try {
+    await orderWithoutConfirmation();
+  } finally {
+    await cancelOrders(API, user);
+  }
+});
+
+async function orderWithoutConfirmation() {
   await nav(A, "/account/settings");
   const sw = 'button[role=switch][aria-checked]';
   await A.page.waitForSelector(sw, { visible: true });
@@ -790,7 +800,7 @@ await f.step("P6", "the order confirmation can be turned off in settings; more t
     s.state.confirmOrders = true;
     localStorage.setItem("exchange.settings", JSON.stringify(s));
   });
-});
+}
 
 // --- P7: futures: degraded mark price, funding countdown, high leverage ------------------------------------
 
@@ -840,8 +850,9 @@ await f.step("P7", "futures: a degraded mark price shows the reduce-only banner;
 
 // --- P8: the site preference ----------------------------------------------------------------------------------
 
-await f.step("P8", "切换到手机版 keeps this computer on m.astras.vip; a phone that chose the PC site is not sent back", async () => {
-  if (APP.startsWith("http://localhost")) return f.skip("P8", "the site preference", "needs the deployed sites' nginx");
+const P8 = "切换到手机版 keeps this computer on m.astras.vip; a phone that chose the PC site is not sent back";
+if (APP.startsWith("http://localhost")) f.skip("P8", P8, "needs the deployed sites' nginx");
+else await f.step("P8", P8, async () => {
   const S = await f.open({ name: "switch", device: desktop(1280) });
   try {
     await S.go("/");
@@ -859,7 +870,7 @@ await f.step("P8", "切换到手机版 keeps this computer on m.astras.vip; a ph
   const P = await f.open({ name: "phone", device: PHONE_IOS });
   try {
     await P.page.goto(M_APP + "/markets", { waitUntil: "domcontentloaded" });
-    await P.context.setCookie({ name: "site_pref", value: "pc", domain: ".astras.vip", path: "/" });
+    await P.context.setCookie({ name: "site_pref", value: "pc", domain: siteCookieDomain(APP), path: "/" });
     await P.page.goto(APP + "/markets", { waitUntil: "domcontentloaded" });
     if (new URL(P.page.url()).origin !== APP) throw new Error(`a phone with site_pref=pc was sent to ${P.page.url()}`);
   } finally {

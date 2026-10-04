@@ -49,9 +49,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /**
  * flows starts Chrome for a site and returns the runner: open(...) gives a
  * tab (its own browser context, so its own cookies and session), step(...)
- * runs a checklist step, done() prints the summary and exits.
+ * runs a checklist step, done() prints the summary and exits. streams is
+ * how many requests a page keeps open for good (the console's event
+ * stream), which waiting for a quiet network leaves aside.
  */
-export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
+export async function flows({ site, app, api, apiPrefix = "/v1/", streams = 0 }) {
   mkdirSync(OUT, { recursive: true });
   console.log(`flows ${site}: failures go to ${OUT}`);
   // lib.mjs finds Chrome (or skips the run without it) and launches it the
@@ -74,11 +76,36 @@ export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
    * page errors and failed requests, and checks every API response against
    * the contracts (except the ones a step staged).
    */
-  async function open({ name, device, settings = {}, media = [], timezone = "Asia/Singapore", persistent = false }) {
+  async function open(opts) {
     // persistent: the browser's own profile instead of an off-the-record one
     // (Chrome installs no web app from an off-the-record window).
+    const { name, persistent = false } = opts;
     const context = persistent ? browser.defaultBrowserContext() : await browser.createBrowserContext();
-    const page = await context.newPage();
+    const tab = { name, context, console: [], errors: [], failed: [], staged: new Set() };
+    await attach(tab, await context.newPage(), opts);
+    // Closed inside a step, a tab stays until the step's evidence is taken.
+    tab.close = async () => {
+      if (inStep) {
+        tab.closing = true;
+        return;
+      }
+      tabs.delete(tab);
+      await (persistent ? tab.page.close() : context.close()).catch(() => {});
+    };
+    // renew gives the tab a fresh page in the same context (signed in as
+    // before) and closes the old one, which a step that ran over its
+    // budget may still be working on.
+    tab.renew = async () => {
+      const old = tab.page;
+      await attach(tab, await context.newPage(), opts);
+      await old.close().catch(() => {});
+    };
+    tabs.add(tab);
+    return tab;
+  }
+
+  /** attach sets page up for the tab (device, time zone, media features, settings) and makes it the tab's page. */
+  async function attach(tab, page, { device, settings = {}, media = [], timezone = "Asia/Singapore" }) {
     await page.setViewport(device.viewport);
     if (device.userAgent) await page.setUserAgent(device.userAgent);
     await page.emulateTimezone(timezone);
@@ -100,7 +127,6 @@ export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
       bypass,
       settings,
     );
-    const tab = { name, page, context, console: [], errors: [], failed: [], staged: new Set() };
     page.on("console", (m) => {
       tab.console.push(`${new Date().toISOString()} ${m.type()} ${m.text()}`);
       if (tab.console.length > 300) tab.console.shift();
@@ -129,18 +155,8 @@ export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
       const problem = contracts.check(req.method(), path, r.status(), body);
       if (problem) violations.add(problem);
     });
-    Object.assign(tab, helpers(page, app));
-    // Closed inside a step, a tab stays until the step's evidence is taken.
-    tab.close = async () => {
-      if (inStep) {
-        tab.closing = true;
-        return;
-      }
-      tabs.delete(tab);
-      await (persistent ? page.close() : context.close()).catch(() => {});
-    };
-    tabs.add(tab);
-    return tab;
+    tab.page = page;
+    Object.assign(tab, helpers(page, app, streams));
   }
 
   /**
@@ -157,12 +173,16 @@ export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
     const marks = new Map([...tabs].map((tb) => [tb, tb.errors.length]));
     let error = null;
     let timer;
+    let late = false;
     inStep = true;
     try {
       await Promise.race([
         fn(),
         new Promise((_, reject) => {
-          timer = setTimeout(() => reject(new Error(`step over its ${timeout / 1000} s budget`)), timeout);
+          timer = setTimeout(() => {
+            late = true;
+            reject(new Error(`step over its ${timeout / 1000} s budget`));
+          }, timeout);
         }),
       ]);
       const unexpected = [...tabs].flatMap((tb) => tb.errors.slice(marks.get(tb) ?? 0).filter((e) => !allowErrors.some((re) => re.test(e))));
@@ -198,6 +218,11 @@ export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
     results.push({ item, name, ok: false, ms, error: error.message.split("\n")[0] });
     console.log(`FAIL ${item.padEnd(4)} ${name}: ${error.message}\n     evidence: ${base}.log and ${base}-*.png`);
     await closeClosing();
+    if (late) {
+      // The step may still be working: its own tabs close, the tabs later
+      // steps share start again on fresh pages.
+      for (const tb of [...tabs]) await (marks.has(tb) ? tb.renew() : tb.close()).catch(() => {});
+    }
     if (fatal) await done();
     return false;
   }
@@ -227,7 +252,7 @@ export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
 }
 
 /** helpers are the lib.mjs helpers for any page: finding things the way a user does, by their visible text. */
-export function helpers(page, app) {
+export function helpers(page, app, streams = 0) {
   const h = {
     // A live page (prices streaming, lists polling) may never go idle:
     // loaded, then quiet for half a second at most 20 s.
@@ -270,13 +295,35 @@ export function helpers(page, app) {
         const tick = (left) => (left ? requestAnimationFrame(() => tick(left - 1)) : done());
         tick(n);
       }), count),
-    /** settled waits for the network to be quiet for 500 ms (WebSocket traffic aside). */
-    settled: (timeout = 20000) => page.waitForNetworkIdle({ idleTime: 500, timeout }).catch(() => {}),
+    /** settled waits for the network to be quiet for 500 ms (WebSocket traffic and the page's open streams aside). */
+    settled: (timeout = 20000) => page.waitForNetworkIdle({ idleTime: 500, timeout, concurrency: streams }).catch(() => {}),
   };
   return h;
 }
 
 // --- Calls to the API from Node (the flows' own accounts) ------------------
+
+/** signInApi signs the flows' account in over the API: an access token. */
+export async function signInApi(base, who) {
+  const res = await api(base, "POST", "/v1/auth/login/password", { identifier: who.email, password: who.password, device_id: `flows-${Date.now()}` });
+  if (res.status !== 200) throw new Error(`login/password: ${res.status} ${JSON.stringify(res.body)}`);
+  return res.body.access_token;
+}
+
+/** spotAvailable is what the account has available of asset on its spot account ("0" without any). */
+export async function spotAvailable(base, token, asset) {
+  const res = await api(base, "GET", "/v1/account/balances?account_type=SPOT", undefined, { Authorization: `Bearer ${token}` });
+  if (res.status !== 200) throw new Error(`balances: ${res.status} ${JSON.stringify(res.body)}`);
+  return res.body.balances.find((b) => b.asset === asset)?.available ?? "0";
+}
+
+/** cancelOrders cancels every active spot order of the account: a step that placed one leaves none behind. */
+export async function cancelOrders(base, who) {
+  const token = await signInApi(base, who);
+  const res = await api(base, "DELETE", "/v1/orders", undefined, { Authorization: `Bearer ${token}` });
+  if (res.status !== 202) throw new Error(`cancel orders: ${res.status} ${JSON.stringify(res.body)}`);
+  return res.body.requested;
+}
 
 /** api calls the user API: {status, body}. */
 export async function api(base, method, path, body, headers = {}) {
@@ -341,6 +388,32 @@ export async function register(base, bypass, email, password) {
 }
 
 // --- Checks evaluated in the page ------------------------------------------
+
+/** siteCookieDomain is the domain the sites share their cookies on (".astras.vip" for https://m.astras.vip). */
+export const siteCookieDomain = (app) => `.${new URL(app).hostname.split(".").slice(-2).join(".")}`;
+
+/** fmtTime formats an ISO time as the sites do (YYYY-MM-DD HH:mm:ss) in zone. */
+export function fmtTime(iso, zone) {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })
+      .formatToParts(new Date(iso))
+      .map((x) => [x.type, x.value]),
+  );
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
+}
+
+/** colorsOf returns the computed colours of the first few elements of each class, leaving out those fading between two colours. */
+export const colorsOf = (tab, classes) =>
+  tab.page.evaluate((cls) => {
+    const out = {};
+    for (const c of cls) {
+      out[c] = [...document.querySelectorAll(`.${c}`)]
+        .filter((el) => el.getBoundingClientRect().width > 0 && !el.getAnimations().some((a) => a.playState === "running"))
+        .slice(0, 5)
+        .map((el) => getComputedStyle(el)[c.startsWith("bg-") ? "backgroundColor" : "color"]);
+    }
+    return out;
+  }, classes);
 
 /**
  * scrollThrough scrolls the page to its end a screen at a time, letting

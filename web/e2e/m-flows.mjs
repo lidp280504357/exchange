@@ -13,7 +13,8 @@
 // (flows-lib.mjs); real devices, iOS autofill and how a gesture feels stay
 // on the manual list.
 import {
-  code, contrastIssues, flows, inboxCount, longAnimations, overflowX, PHONE_ANDROID, PHONE_IOS, phone, register, scrollThrough, stage, textAligned, truncatedWithoutHint, wsWatch,
+  code, colorsOf, contrastIssues, flows, fmtTime, inboxCount, longAnimations, overflowX, PHONE_ANDROID, PHONE_IOS, phone, register, scrollThrough, siteCookieDomain,
+  stage, textAligned, truncatedWithoutHint, wsWatch,
 } from "./flows-lib.mjs";
 
 const APP = (process.env.APP ?? "https://m.astras.vip").replace(/\/$/, "");
@@ -82,28 +83,6 @@ const center = (tab, selector) =>
     const r = el.getBoundingClientRect();
     return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height };
   });
-
-const colorsOf = (tab, classes) =>
-  tab.page.evaluate((cls) => {
-    const out = {};
-    for (const c of cls) {
-      // A figure fading between two colours (a price's 150 ms change) is neither.
-      out[c] = [...document.querySelectorAll(`.${c}`)]
-        .filter((el) => el.getBoundingClientRect().width > 0 && !el.getAnimations().some((a) => a.playState === "running"))
-        .slice(0, 5)
-        .map((el) => getComputedStyle(el)[c.startsWith("bg-") ? "backgroundColor" : "color"]);
-    }
-    return out;
-  }, classes);
-
-function fmt(iso, zone) {
-  const p = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })
-      .formatToParts(new Date(iso))
-      .map((x) => [x.type, x.value]),
-  );
-  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
-}
 
 const fieldError = (tab, selector) =>
   tab.page.evaluate((sel) => {
@@ -455,7 +434,7 @@ await f.step("11", "changing the time zone in settings changes the times shown (
   await nav(A, "/account/sessions");
   const before = (await times()).filter((x) => /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(x.text));
   if (!before.length) throw new Error("no full times on the devices page");
-  for (const x of before) if (x.text !== fmt(x.iso, "Asia/Singapore")) throw new Error(`in the browser's zone ${x.iso} shows "${x.text}"`);
+  for (const x of before) if (x.text !== fmtTime(x.iso, "Asia/Singapore")) throw new Error(`in the browser's zone ${x.iso} shows "${x.text}"`);
   await nav(A, "/account/settings");
   await A.page.click('button[aria-haspopup="dialog"][aria-label^="时区"]');
   await sheet(A);
@@ -466,7 +445,7 @@ await f.step("11", "changing the time zone in settings changes the times shown (
   await A.page.waitForFunction(() => JSON.parse(localStorage.getItem("exchange.settings") ?? "{}").state?.timeZone === "America/New_York", { timeout: 5000 });
   await nav(A, "/account/sessions");
   const after = (await times()).filter((x) => /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(x.text));
-  for (const x of after) if (x.text !== fmt(x.iso, "America/New_York")) throw new Error(`in New York ${x.iso} shows "${x.text}"`);
+  for (const x of after) if (x.text !== fmtTime(x.iso, "America/New_York")) throw new Error(`in New York ${x.iso} shows "${x.text}"`);
   await A.page.evaluate(() => {
     const s = JSON.parse(localStorage.getItem("exchange.settings"));
     s.state.timeZone = "";
@@ -618,7 +597,7 @@ await f.step("M4", "the site installs (manifest, service worker, no installabili
     // The worker's own requests carry the browser's desktop user agent, not
     // the emulated phone's: a phone that chose this site (site_pref=m), so
     // nginx does not send its /offline.html to the PC site.
-    if (!APP.startsWith("http://localhost")) await P.page.setCookie({ name: "site_pref", value: "m", domain: ".astras.vip", path: "/" });
+    if (!APP.startsWith("http://localhost")) await P.page.setCookie({ name: "site_pref", value: "m", domain: siteCookieDomain(APP), path: "/" });
     await P.go("/");
     const manifest = await P.page.$eval('link[rel="manifest"]', (l) => l.href);
     const m = await (await fetch(manifest)).json();
@@ -726,8 +705,9 @@ for (const [name, device] of [["iPhone", PHONE_IOS], ["Android", PHONE_ANDROID]]
 
 // --- P8 from this side: the PC site on a phone that chose it ------------------------------------------------------
 
-await f.step("P8", "切换到电脑版 on a phone keeps it on the PC site", async () => {
-  if (APP.startsWith("http://localhost")) return f.skip("P8", "the site preference", "needs the deployed sites' nginx");
+const P8 = "切换到电脑版 on a phone keeps it on the PC site";
+if (APP.startsWith("http://localhost")) f.skip("P8", P8, "needs the deployed sites' nginx");
+else await f.step("P8", P8, async () => {
   const S = await f.open({ name: "switch", device: phone(390) });
   try {
     await S.go("/me");

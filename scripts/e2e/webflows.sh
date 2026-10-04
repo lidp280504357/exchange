@@ -6,7 +6,8 @@
 # throwaway AUDITOR made over ssh, disabled when the script ends). The
 # name sorts after web.sh, so task e2e runs the flows after the smokes.
 # A failed step leaves screenshots and a log under FLOWS_OUT (printed);
-# every site runs even when an earlier one failed. Skipped without Chrome.
+# every site runs even when an earlier one failed. Skipped without Chrome
+# (before any administrator is made).
 #
 #   scripts/e2e/webflows.sh [pc] [m] [admin]
 set -euo pipefail
@@ -20,6 +21,22 @@ export FLOWS_OUT CAPTCHA_BYPASS_TOKEN="$BYPASS"
 FLOWS="$(dirname "$0")/../../web/e2e"
 sites=("$@")
 [[ ${#sites[@]} -gt 0 ]] || sites=(pc m admin)
+
+# Without Chrome nothing runs (lib.mjs looks in the same places): say so
+# before making the console's throwaway administrators for nothing.
+chrome=${CHROME:-}
+if [[ -z $chrome ]]; then
+  for c in "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" /usr/bin/google-chrome /usr/bin/chromium /usr/bin/chromium-browser; do
+    if [[ -x $c ]]; then
+      chrome=$c
+      break
+    fi
+  done
+fi
+if [[ -z $chrome ]]; then
+  echo "SKIP the checklist flows: no Chrome found (set CHROME)"
+  exit 0
+fi
 
 # make_admin ROLE creates a throwaway administrator (random password and
 # authenticator secret on stdin, never printed), disabled when the script

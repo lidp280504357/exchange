@@ -21,7 +21,8 @@ if (!ADMIN.email || !ADMIN.password || !AUDITOR.email || !AUDITOR.password) {
   process.exit(0);
 }
 
-const f = await flows({ site: "admin", app: APP, api: APP, apiPrefix: "/admin/v1/" });
+// The event stream (/admin/v1/events) stays open: a quiet network leaves it aside.
+const f = await flows({ site: "admin", app: APP, api: APP, apiPrefix: "/admin/v1/", streams: 1 });
 const began = new Date(Date.now() - 60_000).toISOString();
 const WIDTHS = [1024, 1280, 1920];
 
@@ -36,20 +37,49 @@ async function nav(tab, path) {
   await tab.settled();
 }
 
-/** signIn signs in with the password alone (admin.login_without_totp) and waits for the console at next. */
+/**
+ * signIn signs in with the password alone (admin.login_without_totp) and
+ * waits for the console at next. The console takes 10 sign-ins a minute
+ * from an address (scripts before this one may have used some): a 429
+ * waits the minute out, once.
+ */
 async function signIn(tab, who, next = "/") {
-  await tab.go(next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`);
-  await tab.page.waitForFunction(() => document.querySelector("form button[type=submit]")?.disabled === false, { timeout: 20000 });
-  await tab.typeInto('input[autocomplete="username"]', who.email);
-  await tab.typeInto('input[autocomplete="current-password"]', who.password);
-  await tab.page.keyboard.press("Enter");
+  for (let attempt = 0; ; attempt++) {
+    await tab.go(next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`);
+    await tab.page.waitForFunction(() => document.querySelector("form button[type=submit]")?.disabled === false, { timeout: 20000 });
+    await tab.typeInto('input[autocomplete="username"]', who.email);
+    await tab.typeInto('input[autocomplete="current-password"]', who.password);
+    const answer = tab.page.waitForResponse((r) => new URL(r.url()).pathname === "/admin/v1/login" && r.request().method() === "POST", { timeout: 30000 });
+    await tab.page.keyboard.press("Enter");
+    if ((await answer).status() !== 429 || attempt > 0) break;
+    await new Promise((r) => setTimeout(r, 61_000));
+  }
   await tab.page.waitForFunction((p) => location.pathname + location.search === p, { timeout: 30000 }, next);
   await tab.page.waitForSelector("aside a[href]", { timeout: 20000 });
+}
+
+/**
+ * signedInAs opens a tab in the session of the tab that signed in (its
+ * cookies carried over) at path, without signing in again.
+ */
+async function signedInAs(from, opts, path = "/") {
+  const tab = await f.open(opts);
+  const cookies = (await from.context.cookies()).map(({ name, value, domain, path: p, expires, httpOnly, secure, sameSite }) => ({ name, value, domain, path: p, expires, httpOnly, secure, sameSite }));
+  await tab.context.setCookie(...cookies);
+  await tab.go(path);
+  await tab.page.waitForSelector("aside a[href]", { timeout: 30000 });
+  return tab;
 }
 
 /** rows waits for the main table to hold rows (not its empty state) and to be done loading. */
 const rows = (tab, n = 1) =>
   tab.page.waitForFunction((k) => document.querySelectorAll("main tbody tr[data-row-id]").length >= k && !document.querySelector("main table[aria-busy=true]"), { timeout: 30000 }, n);
+
+/** loaded waits for the page in main to be loaded: its title, and nothing still loading (a skeleton, a busy table). */
+const loaded = (tab) =>
+  tab.page
+    .waitForFunction(() => document.querySelector("main h1") && !document.querySelector("main [aria-busy=true], main .animate-shimmer"), { timeout: 30000 })
+    .catch(() => {});
 
 /** dialog is the open confirmation (the one with a reason). */
 const DIALOG = '[role=dialog]:has(textarea[id$="-reason"])';
@@ -136,12 +166,16 @@ await f.step(
     const problems = [];
     await Promise.all(
       WIDTHS.map(async (w) => {
-        const tab = await f.open({ name: `w${w}`, device: desktop(w) });
+        const out = await f.open({ name: `w${w}-out`, device: desktop(w) });
         try {
-          await tab.go("/login");
-          await scrollThrough(tab, 3);
-          for (const o of await overflowX(tab.page)) problems.push(`${w} /login: ${o}`);
-          await signIn(tab, ADMIN);
+          await out.go("/login");
+          await scrollThrough(out, 3);
+          for (const o of await overflowX(out.page)) problems.push(`${w} /login: ${o}`);
+        } finally {
+          await out.close();
+        }
+        const tab = await signedInAs(A, { name: `w${w}`, device: desktop(w) });
+        try {
           for (const p of paths) {
             await nav(tab, p);
             await scrollThrough(tab, 3);
@@ -189,9 +223,8 @@ await f.step("3", "text contrast at least 4.5:1 (3:1 for large text), in the lig
 // --- 5: reduced motion ------------------------------------------------------------------------
 
 await f.step("5", "with reduced motion, page changes, list entrances and drawers do not animate", async () => {
-  const R = await f.open({ name: "reduced", device: desktop(1440), media: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+  const R = await signedInAs(AU, { name: "reduced", device: desktop(1440), media: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   try {
-    await signIn(R, AUDITOR);
     const found = [];
     for (const p of ["/users", "/audit", "/launch"]) {
       await R.page.evaluate((path) => {
@@ -218,9 +251,8 @@ await f.step(
   "6",
   "offline shows 网络不可用 at once; a list asked for offline loads by itself back online, without a reload",
   async () => {
-    const O = await f.open({ name: "offline", device: desktop(1280) });
+    const O = await signedInAs(AU, { name: "offline", device: desktop(1280) }, "/users");
     try {
-      await signIn(O, AUDITOR, "/users");
       await rows(O);
       await O.page.evaluate(() => {
         window.__flowsMarker = "kept";
@@ -272,9 +304,8 @@ await f.step("8", "form errors sit under their fields: the adjustment's amount, 
 // --- 10: truncated text --------------------------------------------------------------------------
 
 await f.step("10", "text cut short in the lists (IDs, emails, addresses) can be read whole: a title, a tooltip or a copy button", async () => {
-  const N = await f.open({ name: "narrow", device: desktop(1024) });
+  const N = await signedInAs(AU, { name: "narrow", device: desktop(1024) });
   try {
-    await signIn(N, AUDITOR);
     const found = [];
     for (const p of ["/users", "/audit", "/withdrawals?status=ALL", "/orders", "/deposits"]) {
       await nav(N, p);
@@ -443,6 +474,7 @@ await f.step("A3", "for an AUDITOR, actions are hidden, or disabled with the per
     ["/sim/token", ["编辑"]],
   ]) {
     await nav(AU, p);
+    await loaded(AU);
     const shown = await AU.page.evaluate((ls) => [...document.querySelectorAll("main button")].filter((b) => ls.includes(b.innerText.trim())).map((b) => b.innerText.trim()), labels);
     if (shown.length) problems.push(`${p}: ${shown.join(", ")} offered`);
   }
@@ -458,6 +490,7 @@ await f.step("A3", "for an AUDITOR, actions are hidden, or disabled with the per
   for (const p of ["/risk", "/settings", "/platform", "/sim/control", "/sim/bots", "/pages"]) {
     await nav(AU, p);
     await AU.page.waitForSelector("main h1", { timeout: 15000 });
+    await loaded(AU);
     const view = await AU.page.evaluate(() => {
       const off = [...document.querySelectorAll("main button:disabled, main input:disabled, main textarea:disabled, main [aria-disabled=true]")].filter((el) => el.getBoundingClientRect().width > 0).length;
       const note = document.querySelector('main [data-testid="read-only"]');
