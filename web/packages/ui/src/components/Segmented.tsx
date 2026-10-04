@@ -32,11 +32,13 @@ export type SegmentedProps = {
   "aria-label"?: string;
 };
 
+// The large size is the 44 px touch target (h-11 is 38.5 px under the 14 px
+// root); the medium one grows to it on touch screens.
 const sizes: Record<SegmentedSize, string> = {
   xs: "h-6 px-2 text-xs gap-1",
   sm: "h-7 px-3 text-sm gap-1.5",
-  md: "h-9 px-4 text-base gap-2",
-  lg: "h-11 px-5 text-md gap-2",
+  md: "h-9 px-4 text-base gap-2 pointer-coarse:min-h-tap",
+  lg: "h-tap px-5 text-md gap-2",
 };
 
 export const thumbSpring = { type: "spring", stiffness: 520, damping: 42 } as const;

@@ -37,7 +37,8 @@ export function Checkbox({
       aria-invalid={invalid || undefined}
       onCheckedChange={(c) => onCheckedChange?.(c === true)}
       className={cn(
-        "grid size-4 shrink-0 place-items-center rounded-1 border bg-bg-2 text-brand-fg transition-colors duration-[var(--t-fast)]",
+        // hit-area: a 44 px touch target on touch screens, the look unchanged.
+        "hit-area grid size-4 shrink-0 place-items-center rounded-1 border bg-bg-2 text-brand-fg transition-colors duration-[var(--t-fast)]",
         "data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=indeterminate]:border-brand data-[state=indeterminate]:bg-brand",
         "disabled:cursor-not-allowed disabled:opacity-50",
         invalid ? "border-danger" : "border-line-2 hover:border-fg-3",

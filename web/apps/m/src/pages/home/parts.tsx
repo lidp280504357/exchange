@@ -37,12 +37,15 @@ export function statusTone(status: string): "info" | "warn" | "danger" | "neutra
 export function MarketName({ row, size = 28, hideName }: { row: MarketRow; size?: number; hideName?: boolean }) {
   const { t } = useTranslation();
   const nameOf = useCoinName();
+  const code = row.kind === "perp" ? `${row.base}${row.quote}` : row.base;
   return (
     <div className="flex min-w-0 items-center gap-2.5">
       <CoinIcon symbol={row.base} size={size} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap">
-          <span className="min-w-0 truncate font-medium text-fg-1">{row.kind === "perp" ? `${row.base}${row.quote}` : row.base}</span>
+          <span className="min-w-0 truncate font-medium text-fg-1" title={code}>
+            {code}
+          </span>
           {row.kind === "spot" ? (
             <span className="shrink-0 text-xs text-fg-3">/{row.quote}</span>
           ) : (
@@ -50,13 +53,14 @@ export function MarketName({ row, size = 28, hideName }: { row: MarketRow; size?
               {t("mMarkets.perp")}
             </Tag>
           )}
-          {row.status !== "TRADING" && (
-            <Badge tone={statusTone(row.status)}>
-              {enumLabel(row.status)}
-            </Badge>
-          )}
         </div>
-        {!hideName && <div className="truncate text-xs text-fg-3">{nameOf(row)}</div>}
+        {/* A status sits on the second line: on the first it left a 360 px screen "S… /BTC 即将上线". */}
+        {(!hideName || row.status !== "TRADING") && (
+          <div className="flex min-w-0 items-center gap-1">
+            {row.status !== "TRADING" && <Badge tone={statusTone(row.status)}>{enumLabel(row.status)}</Badge>}
+            {!hideName && <span className="min-w-0 truncate text-xs text-fg-3">{nameOf(row)}</span>}
+          </div>
+        )}
       </div>
     </div>
   );

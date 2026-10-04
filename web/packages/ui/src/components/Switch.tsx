@@ -41,7 +41,8 @@ export function Switch({
       disabled={disabled}
       aria-label={ariaLabel}
       className={cn(
-        "relative inline-flex shrink-0 cursor-pointer items-center rounded-full bg-bg-3 p-0.5 transition-colors duration-[var(--t-base)]",
+        // hit-area: a 44 px touch target on touch screens, the look unchanged.
+        "hit-area relative inline-flex shrink-0 cursor-pointer items-center rounded-full bg-bg-3 p-0.5 transition-colors duration-[var(--t-base)]",
         "data-[state=checked]:bg-brand disabled:cursor-not-allowed disabled:opacity-50",
         s.root,
         !label && className,

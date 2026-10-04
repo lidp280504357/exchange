@@ -97,7 +97,7 @@ export function IdentityCard() {
             type="button"
             onClick={() => void copy()}
             aria-label={`${t("mAccount.me.copyUid")}: ${userId}`}
-            className="-ml-1 inline-flex min-h-9 items-center gap-1.5 rounded-2 px-1 text-sm text-fg-3 transition-colors active:text-fg-1"
+            className="-my-1.5 -ml-1 inline-flex min-h-tap items-center gap-1.5 rounded-2 px-1 text-sm text-fg-3 transition-colors active:text-fg-1"
           >
             {t("mAccount.uid")}
             <span className="text-fg-2 tabular-nums">{shortId(userId)}</span>
