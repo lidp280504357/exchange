@@ -24,22 +24,32 @@ type Branding struct {
 	Profile ports.PlatformName
 	Now     func() time.Time
 
-	mu     sync.Mutex
-	name   string
-	readAt time.Time
+	mu      sync.Mutex
+	name    string
+	readAt  time.Time
+	reading bool
 }
 
-// Name returns the exchange's name, "" for the default.
+// Name returns the exchange's name, "" for the default. One caller reads
+// the profile when the name is due; the others meanwhile go on with the
+// name they have rather than wait for it (review BD).
 func (b *Branding) Name(ctx context.Context) string {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	now := b.Now()
-	if !b.readAt.IsZero() && now.Sub(b.readAt) < brandTTL {
+	if b.reading || (!b.readAt.IsZero() && now.Sub(b.readAt) < brandTTL) {
+		defer b.mu.Unlock()
 		return b.name
 	}
+	b.reading = true
+	b.mu.Unlock()
+
 	ctx, cancel := context.WithTimeout(ctx, brandWait)
 	defer cancel()
 	name, err := b.Profile.PlatformName(ctx)
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.reading = false
 	if err != nil || name == "" {
 		b.readAt = now.Add(brandRetry - brandTTL)
 		return b.name

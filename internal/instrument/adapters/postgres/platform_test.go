@@ -1,8 +1,11 @@
 package postgres_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -129,7 +132,22 @@ func TestPlatformProfile(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &manifest); err != nil || len(manifest.Icons) != 5 || manifest.Icons[0].Src != "/icon-192.png" {
 		t.Fatalf("the built-in icons %s", w.Body)
 	}
-	if n := count(t, db, `SELECT count(*) FROM config_history WHERE entity = 'PLATFORM_PROFILE' AND source = 'PROFILE'`); n != 3 {
+	// A small PNG favicon alone keeps the site's own large icons, or the site
+	// could not be installed (review BD).
+	var small bytes.Buffer
+	if err := png.Encode(&small, image.NewRGBA(image.Rect(0, 0, 32, 32))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := plat.SetImage(ctx, domain.ImageFavicon, &domain.Logo{Data: small.Bytes(), MIME: domain.LogoPNG}, "admin:ops@example.com", "a small icon"); err != nil {
+		t.Fatal(err)
+	}
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequestWithContext(ctx, http.MethodGet, "/manifest.webmanifest", nil))
+	if err := json.Unmarshal(w.Body.Bytes(), &manifest); err != nil || len(manifest.Icons) != 3 || manifest.Icons[0].Sizes != "32x32" ||
+		manifest.Icons[1].Src != "/icon-192.png" || manifest.Icons[2].Src != "/icon-512.png" {
+		t.Fatalf("a small favicon %s", w.Body)
+	}
+	if n := count(t, db, `SELECT count(*) FROM config_history WHERE entity = 'PLATFORM_PROFILE' AND source = 'PROFILE'`); n != 4 {
 		t.Fatalf("%d history rows", n)
 	}
 }

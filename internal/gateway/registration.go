@@ -86,7 +86,8 @@ func (g *Registration) read(ctx context.Context) error {
 }
 
 // Middleware refuses the sign-up requests while sign-ups are closed: a
-// code request is let through unless its scene is REGISTER.
+// code request is let through when it is not for REGISTER (review BD:
+// read as auth-service reads it).
 func (g *Registration) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !g.Closed() || r.Method != http.MethodPost {
@@ -101,16 +102,22 @@ func (g *Registration) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// registerCode reads a code request's scene and puts the body back for the
-// upstream; a body too large to read whole goes through unread.
+// registerCode reads a code request's scene, as auth-service does (upper
+// case, spaces trimmed), and puts the body back for the upstream. A body
+// it cannot read whole (above peekLimit; auth-service takes up to 1 MiB) or
+// as JSON counts as a REGISTER code: while sign-ups are closed the gate
+// lets through only what it can tell is not one (review BD).
 func registerCode(r *http.Request) bool {
 	buf, err := io.ReadAll(io.LimitReader(r.Body, peekLimit+1))
 	r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(buf), r.Body))
 	if err != nil || len(buf) > peekLimit {
-		return false
+		return true
 	}
 	var body struct {
 		Scene string `json:"scene"`
 	}
-	return json.Unmarshal(buf, &body) == nil && body.Scene == "REGISTER"
+	if json.Unmarshal(buf, &body) != nil {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(body.Scene), "REGISTER")
 }

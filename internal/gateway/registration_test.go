@@ -77,6 +77,17 @@ func TestRegistrationGateAndPlatformRoutes(t *testing.T) {
 	if s, code := call(http.MethodPost, "/v1/auth/otp/request", register); s != http.StatusForbidden || code != "AUTH_REGISTRATION_CLOSED" {
 		t.Fatalf("a REGISTER code: %d %s", s, code)
 	}
+	// As auth-service reads the scene: a lower-case or padded REGISTER is one
+	// (review BD); a body the gate cannot read counts as one.
+	for name, body := range map[string]string{
+		"a lower-case scene":  `{"scene":" register ","channel":"EMAIL","identifier":"a@example.com"}`,
+		"a body above 64 KiB": `{"scene":"LOGIN","channel":"EMAIL","identifier":"a@example.com","pad":"` + strings.Repeat("x", peekLimit) + `"}`,
+		"a body not JSON":     `scene=REGISTER`,
+	} {
+		if s, code := call(http.MethodPost, "/v1/auth/otp/request", body); s != http.StatusForbidden || code != "AUTH_REGISTRATION_CLOSED" {
+			t.Fatalf("%s: %d %s", name, s, code)
+		}
+	}
 	login := `{"scene":"LOGIN","channel":"EMAIL","identifier":"a@example.com"}`
 	if s, _ := call(http.MethodPost, "/v1/auth/otp/request", login); s != http.StatusNoContent || seenBody != login {
 		t.Fatalf("a LOGIN code: %d, the upstream read %q", s, seenBody)

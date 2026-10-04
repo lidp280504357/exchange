@@ -66,7 +66,7 @@ import { daySparkRoot } from "./spark";
 // The mobile home tab (design §7.2): a sign-up card for visitors, or the
 // total value (the eye hides it) with the four shortcuts; the latest
 // announcements to swipe through; the top coins as cards with their
-// 24-hour line; the gainers and losers; why Astras. Prices come from the
+// 24-hour line; the gainers and losers; why us. Prices come from the
 // one tickers subscription; pulling the page down reloads what the server
 // sent.
 

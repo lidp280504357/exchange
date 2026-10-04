@@ -196,9 +196,15 @@ var builtInIcons = []manifestIcon{
 	{Src: "/icon.svg", Sizes: "any", Type: "image/svg+xml", Purpose: "any"},
 }
 
+// appIconSize is the least an install prompt takes (192 px); an SVG serves
+// any size.
+const appIconSize = 192
+
 // manifest serves the mobile site's web app manifest from the profile:
-// the uploaded favicon and apple-touch-icon as its icons, else the site's
-// own.
+// the uploaded favicon and apple-touch-icon, and the marks that make an app
+// icon (an SVG, or 192 px and more), as its icons; the site's own without
+// any. With none of 192 px or more the site's own large icons stay too, or
+// the site could not be installed (review BD).
 func (h *Handler) manifest(w http.ResponseWriter, r *http.Request) {
 	p, err := h.Platform.Profile(r.Context())
 	if err != nil {
@@ -206,19 +212,28 @@ func (h *Handler) manifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	icons := []manifestIcon{}
-	for _, kind := range []string{domain.ImageFavicon, domain.ImageAppleTouchIcon} {
+	large := false
+	for _, kind := range []string{domain.ImageFavicon, domain.ImageAppleTouchIcon, domain.ImageLogoDark, domain.ImageLogoLight} {
 		img, ok := p.Images[kind]
 		if !ok {
 			continue
 		}
+		big := img.MIME == domain.LogoSVG || img.Width >= appIconSize
+		if (kind == domain.ImageLogoDark || kind == domain.ImageLogoLight) && !big {
+			continue
+		}
+		large = large || big
 		sizes := fmt.Sprintf("%dx%d", img.Width, img.Width)
 		if img.MIME == domain.LogoSVG {
 			sizes = "any"
 		}
 		icons = append(icons, manifestIcon{Src: application.PlatformImageURL(p, kind), Sizes: sizes, Type: img.MIME, Purpose: "any"})
 	}
-	if len(icons) == 0 {
+	switch {
+	case len(icons) == 0:
 		icons = builtInIcons
+	case !large:
+		icons = append(icons, builtInIcons[:2]...)
 	}
 	description := p.Name
 	if p.Learning.Enabled {

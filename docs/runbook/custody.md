@@ -283,7 +283,7 @@ sudo docker run --rm --env-file udun-real.env exchange-app:latest /app/exchangec
 
 真网关切换后 `UDUN` 不能再让端到端造充值、丢应答，所以端到端有自己的托管方：模拟网关的第二个商户 `UDUNMOCK`（设置见上文「配置」的 `UDUNMOCK_*`）与只给它用的隐藏资产 TUSD（网络 `TRON-TEST`，见上表）。
 
-- wallet-service 为每个配置了的托管方各起一个处理器（租约 `wallet-custody:<托管方>`，指标常量标签 `provider`）、各有回调来源名单与币种缓存；对账按资产覆盖全部持有方，另一个托管方持有的算"别处持有"。后台接口 `/internal/wallet/custody?provider=UDUNMOCK`、`/internal/wallet/custody/callbacks?provider=UDUNMOCK` 分开看；`exchangectl wallet reconcile --network UDUNMOCK`、`checks --network UDUNMOCK`、`custody-fee-unit --provider UDUNMOCK`。
+- wallet-service 为每个配置了的托管方各起一个处理器（租约 `wallet-custody:<托管方>`，指标常量标签 `provider`）、各有回调来源名单与币种缓存；对账按资产覆盖全部持有方，另一个托管方持有的算"别处持有"。后台接口 `/internal/wallet/custody?provider=UDUNMOCK`、`/internal/wallet/custody/callbacks?provider=UDUNMOCK` 分开看（`/internal/wallet/custody` 带 `gateway_host`：托管方网关地址的主机名，不含协议、路径与查询，没配置时为空；后台「上线检查清单」据此区分模拟网关 `udun-mock` 与真网关，2026-10-04 设计 §4.6）；`exchangectl wallet reconcile --network UDUNMOCK`、`checks --network UDUNMOCK`、`custody-fee-unit --provider UDUNMOCK`。
 - `UDUNMOCK` 的回调只在容器网络里经 api-gateway 回到 `/v1/wallet/callbacks/udunmock`；nginx 对公网的这条路径一律 403，wallet-service 再按 `UDUNMOCK_CALLBACK_ALLOWED_IPS`（容器网段）把关。
 - TUSD 不进任何公开列表，充提只对 `TEST_ASSETS` 资格（开关 `wallet.test_assets`，测试服只对地区 `AQ`）的用户开放，其他人一律 404 `WALLET_NETWORK_UNKNOWN`；端到端用 `AQ` 注册。它没有行情，提现限额按 `WALLET_FALLBACK_PRICES` 的 `TUSD:1` 折算；停提阈值 `WALLET_SHORTFALL_STOP` 的 `TUSD=1`。
 - 托管方对 TUSD 收的手续费（模拟网关的单位按 `SELF` 确认）从 `GAS_SUPPLY` 出，`GAS_SUPPLY` 只能由 TUSD 自己的手续费收入补：`custody.sh` 在第一笔提现结算后把手续费收入挪过去（每笔 5 TUSD，托管方每轮约收 2.7）。
