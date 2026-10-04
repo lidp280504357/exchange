@@ -81,6 +81,7 @@ func TestRegistrationGateAndPlatformRoutes(t *testing.T) {
 	// (review BD); a body the gate cannot read counts as one.
 	for name, body := range map[string]string{
 		"a lower-case scene":  `{"scene":" register ","channel":"EMAIL","identifier":"a@example.com"}`,
+		"a dotless ı":         `{"scene":"regıster","channel":"EMAIL","identifier":"a@example.com"}`,
 		"a body above 64 KiB": `{"scene":"LOGIN","channel":"EMAIL","identifier":"a@example.com","pad":"` + strings.Repeat("x", peekLimit) + `"}`,
 		"a body not JSON":     `scene=REGISTER`,
 	} {

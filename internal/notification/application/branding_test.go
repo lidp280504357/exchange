@@ -13,10 +13,16 @@ type fakeName struct {
 	reads int
 	// hold, when set, keeps a read waiting until it is closed.
 	hold chan struct{}
+	// boom makes the next read panic.
+	boom bool
 }
 
 func (f *fakeName) PlatformName(context.Context) (string, error) {
 	f.reads++
+	if f.boom {
+		f.boom = false
+		panic("the profile client broke")
+	}
 	if f.hold != nil {
 		<-f.hold
 	}
@@ -75,6 +81,17 @@ func TestBrandingName(t *testing.T) {
 	close(src.hold)
 	if got := <-done; got != "Later" || src.reads != 4 {
 		t.Fatalf("the read %q after %d reads", got, src.reads)
+	}
+
+	// A read that panics leaves the next caller free to read (review BF).
+	now = now.Add(11 * time.Minute)
+	src.hold, src.boom = nil, true
+	func() {
+		defer func() { _ = recover() }()
+		b.Name(ctx)
+	}()
+	if got := b.Name(ctx); got != "Later" || src.reads != 6 {
+		t.Fatalf("after a panic %q after %d reads", got, src.reads)
 	}
 
 	// Never read: the default (empty).

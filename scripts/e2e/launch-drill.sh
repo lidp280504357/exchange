@@ -19,11 +19,21 @@
 #
 #   scripts/e2e/launch-drill.sh
 set -euo pipefail
+# It changes what every visitor sees: one run at a time on the server, as
+# the fault drills (task e2e holds the lock for all the scripts).
+[[ -n ${OPS_LOCK_HELD:-} ]] || exec "$(dirname "$0")/../ops/lock.sh" run --owner "e2e $(basename "$0")" -- bash "$0" "$@"
 
 # shellcheck source=lib/common.sh
 source "$(dirname "$0")/lib/common.sh"
 # shellcheck source=lib/remote.sh
 source "$(dirname "$0")/lib/remote.sh"
+
+# Only on the test server: its stand-in custodian (ADR-0017), which no
+# live deployment has, says so (as custody.sh checks).
+if [[ $(remote "sudo docker compose $COMPOSE_FILES exec -T wallet-service printenv UDUNMOCK_GATEWAY_URL </dev/null || true") != http://udun-mock:* ]]; then
+  echo "SKIP launch drill: no stand-in custodian, so not the test server"
+  exit 0
+fi
 ADMIN_BASE="${ADMIN_BASE:-https://admin.astras.vip}"
 M_BASE="${M_BASE:-https://m.astras.vip}"
 CONTENT="$(dirname "$0")/../../web/packages/core/content"
@@ -103,6 +113,7 @@ expect 200 - "the welcome credits"
 ORIG_CREDITS=$(jq -c .credits <<<"$BODY")
 printf 'ok   %s, learning mode %s, credits %s\n' "$(jq -r .name <<<"$ORIG")" "$(jq -r .learning_mode.enabled <<<"$ORIG")" "$ORIG_CREDITS"
 CREATED=()
+UPLOADED=()
 
 # back_to_learning puts the learning setup back through the services'
 # internal endpoints: the profile, its images, the credits; the pages the
@@ -118,10 +129,8 @@ back_to_learning() {
     reason: "launch drill: back to the learning setup"}' <<<"$ORIG")"
   [[ $STATUS == 200 ]] || echo "warning: the profile was not put back ($STATUS $BODY)" >&2
   local kind
-  for kind in logo_light logo_dark favicon; do
-    if [[ $(jq -r ".images.$kind // \"\"" <<<"$ORIG") == "" ]]; then
-      internal DELETE instrument-service 8084 "/internal/platform/images/$kind" '{"actor":"e2e:launch-drill","reason":"launch drill: the built-in image again"}'
-    fi
+  for kind in ${UPLOADED[@]+"${UPLOADED[@]}"}; do
+    internal DELETE instrument-service 8084 "/internal/platform/images/$kind" '{"actor":"e2e:launch-drill","reason":"launch drill: the built-in image again"}'
   done
   internal GET ledger-service 8085 /internal/ledger/settings/welcome-credits
   internal PUT ledger-service 8085 /internal/ledger/settings/welcome-credits \
@@ -138,7 +147,7 @@ echo "== go live: no welcome credits, and a fresh account gets nothing"
 acall PUT /admin/v1/platform/welcome-credits "$(jq -c '{credits: [], expected_version: .version, reason: "launch drill: no welcome credits"}' <<<"$BODY")"
 expect 200 - "the welcome credits cleared by one ADMIN (lowering)"
 # Before any renaming: the code's mail carries the name notification-service read.
-USER_EMAIL="e2e-drill-$RUN@example.com"
+USER_EMAIL="e2e-drill-user-$RUN@example.com"
 register "$USER_EMAIL" "e2e-drill-$RUN" "e2e launch drill $RUN"
 AUTH=(-H "Authorization: Bearer $(jq -r .access_token <<<"$BODY")")
 sleep 12
@@ -154,10 +163,17 @@ acall PUT /admin/v1/platform/profile "$(jq -c --arg n "$NAME" '{name: $n, short_
   expected_version: .version, reason: "launch drill: the platform as it goes live"}' <<<"$BODY")"
 expect 200 - "renamed to $NAME, domain astras.vip, banner off, sign-ups open"
 MARK='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" rx="6" fill="#0f766e"/><path d="M6 12h12M12 6v12" stroke="#fff" stroke-width="3"/></svg>'
+# An image the platform has already stays: the drill uploads only what is
+# missing and removes only what it uploaded (review BF).
 for kind in logo_dark favicon; do
+  if [[ $(jq -r ".images.$kind // \"\"" <<<"$ORIG") != "" ]]; then
+    echo "ok   $kind: the platform's own already"
+    continue
+  fi
   acall PUT "/admin/v1/platform/images/$kind" "$(jq -nc --arg d "$(printf '%s' "$MARK" | base64 | tr -d '\n')" \
     '{data: $d, mime: "image/svg+xml", reason: "launch drill: our own image"}')"
   expect 200 - "$kind uploaded"
+  UPLOADED+=("$kind")
 done
 
 echo "== go live: the legal pages and the home hero, published from the defaults"
@@ -176,6 +192,7 @@ publish_default() { # publish_default SECTION DIR SLUG
   expect 201 - "$section/$slug from its default"
   a=$BODY
   CREATED+=("$(jq -r .id <<<"$a")")
+  [[ $slug != terms ]] || TERMS_OURS=1
   acall POST "/admin/v1/articles/$(jq -r .id <<<"$a")/publish" "$(jq -c '{version, reason: "launch drill: publish the default"}' <<<"$a")"
   expect 200 - "published"
 }
@@ -220,7 +237,8 @@ no_credits() { call GET /v1/platform/profile "" && [[ $(jq -c .welcome_credits <
 eventually 150 "the profile promises no credits" no_credits
 call GET /v1/legal/terms ""
 expect 200 - "the terms are the console's"
-check '.title == "用户协议"' "the terms' title"
+# The bundled draft's title, when the drill published it (an operator's may differ).
+[[ -z ${TERMS_OURS:-} ]] || check '.title == "用户协议"' "the terms' title"
 for site in pc m; do
   SITE=$site BRAND=$NAME FAVICON=1 LEARNING=0 BANNER="$(jq -r '.learning_mode.text["zh-CN"]' <<<"$ORIG")" LAUNCH=1 CAPTCHA_BYPASS_TOKEN="$BYPASS" \
     node "$(dirname "$0")/../../web/e2e/branding.mjs"
@@ -236,6 +254,8 @@ eventually 20 "the name and the banner are back ($(jq -r .name <<<"$ORIG"), lear
 internal GET ledger-service 8085 /internal/ledger/settings/welcome-credits
 [[ $(jq -c .credits <<<"$BODY") == "$ORIG_CREDITS" ]] || { echo "FAIL the credits are $(jq -c .credits <<<"$BODY")" >&2; exit 1; }
 echo "ok   the welcome credits are back: $ORIG_CREDITS"
-bundled() { call GET /v1/legal/terms "" && [[ $STATUS == 404 ]]; }
-eventually 40 "the terms are the bundled draft again" bundled
+if [[ -n ${TERMS_OURS:-} ]]; then
+  bundled() { call GET /v1/legal/terms "" && [[ $STATUS == 404 ]]; }
+  eventually 40 "the terms are the bundled draft again" bundled
+fi
 echo "launch drill passed in $((SECONDS - START)) s"

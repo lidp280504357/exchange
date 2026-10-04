@@ -119,5 +119,7 @@ func registerCode(r *http.Request) bool {
 	if json.Unmarshal(buf, &body) != nil {
 		return true
 	}
-	return strings.EqualFold(strings.TrimSpace(body.Scene), "REGISTER")
+	// Exactly auth-service's ParseScene: upper case after trimming (review
+	// BF: EqualFold lets "regıster", with a dotless ı, through).
+	return strings.ToUpper(strings.TrimSpace(body.Scene)) == "REGISTER"
 }

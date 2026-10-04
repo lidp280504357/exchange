@@ -43,10 +43,7 @@ func (b *Branding) Name(ctx context.Context) string {
 	b.reading = true
 	b.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(ctx, brandWait)
-	defer cancel()
-	name, err := b.Profile.PlatformName(ctx)
-
+	name, err := b.read(ctx)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.reading = false
@@ -56,4 +53,23 @@ func (b *Branding) Name(ctx context.Context) string {
 	}
 	b.name, b.readAt = name, now
 	return name
+}
+
+// read asks the profile for the name. Should the read panic, the next
+// caller may read again (review BF); otherwise Name clears reading as it
+// keeps the name.
+func (b *Branding) read(ctx context.Context) (string, error) {
+	returned := false
+	defer func() {
+		if !returned {
+			b.mu.Lock()
+			b.reading = false
+			b.mu.Unlock()
+		}
+	}()
+	ctx, cancel := context.WithTimeout(ctx, brandWait)
+	defer cancel()
+	name, err := b.Profile.PlatformName(ctx)
+	returned = true
+	return name, err
 }

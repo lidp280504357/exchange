@@ -16,11 +16,21 @@
 #
 #   scripts/e2e/branding.sh
 set -euo pipefail
+# It changes what every visitor sees: one run at a time on the server, as
+# the fault drills (task e2e holds the lock for all the scripts).
+[[ -n ${OPS_LOCK_HELD:-} ]] || exec "$(dirname "$0")/../ops/lock.sh" run --owner "e2e $(basename "$0")" -- bash "$0" "$@"
 
 # shellcheck source=lib/common.sh
 source "$(dirname "$0")/lib/common.sh"
 # shellcheck source=lib/remote.sh
 source "$(dirname "$0")/lib/remote.sh"
+
+# Only on the test server: its stand-in custodian (ADR-0017), which no
+# live deployment has, says so (as custody.sh checks).
+if [[ $(remote "sudo docker compose $COMPOSE_FILES exec -T wallet-service printenv UDUNMOCK_GATEWAY_URL </dev/null || true") != http://udun-mock:* ]]; then
+  echo "SKIP branding: no stand-in custodian, so not the test server"
+  exit 0
+fi
 M_BASE="${M_BASE:-https://m.astras.vip}"
 ADMIN_BASE="${ADMIN_BASE:-https://admin.astras.vip}"
 ACTOR="e2e:branding"
