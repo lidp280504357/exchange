@@ -28,7 +28,7 @@ export default {
         overviewHint: "24 小时涨跌与成交额，实时更新",
         moreSoon: "更多交易对即将上线",
         moreSoonHint: "当前排行只统计交易中的 USDT 交易对",
-        whyTitle: "为什么选择 Astras",
+        whyTitle: "为什么选择 {{brand}}",
         whyHint: "从行情到下单，从充值到合约，每一步都清晰可见",
         why: {
           wallet: { title: "多链充提", desc: "按网络充值与提现，页面列出确认数、最小额与预计到账时间；测试环境目前开放 Sepolia 测试网 ETH。" },
@@ -41,9 +41,15 @@ export default {
           security: { title: "安全", desc: "余额只由账本分录改变，私钥在独立的签名服务；提现需要安全验证、地址簿冷却与风控审核。" },
         },
         stepsTitle: "三步开始",
-        stepsHint: "注册即得模拟资金，零风险体验现货与合约交易",
+        stepsHint: "注册、充值、交易，几分钟即可开始",
+        stepsHintCredits: "注册即得 {{credits}}，体验现货与合约交易",
         steps: {
-          register: { title: "注册账户", desc: "邮箱注册并设置密码，账户自动获得 10,000 USDT 等模拟资金。", action: "立即注册" },
+          register: {
+            title: "注册账户",
+            desc: "邮箱注册并设置密码，几分钟即可开通账户。",
+            descCredits: "邮箱注册并设置密码，账户自动获得 {{credits}}。",
+            action: "立即注册",
+          },
           deposit: { title: "充值", desc: "选择币种和网络，把测试网资产转入你的专属地址，达到确认数后自动到账。", action: "去充值" },
           trade: { title: "开始交易", desc: "限价、市价与永续合约，实时盘口与 K 线，成交即时推送。", action: "去交易" },
         },
@@ -52,7 +58,8 @@ export default {
         newsAll: "全部公告",
         newsEmpty: "暂无公告",
         ctaTitle: "准备好开始了吗？",
-        ctaDesc: "创建账户，用模拟资金体验完整的交易流程。",
+        ctaDesc: "创建账户，体验完整的交易流程。",
+        ctaDescCredits: "创建账户，用 {{credits}} 体验完整的交易流程。",
       },
       markets: {
         subtitle: "现货与永续合约的实时行情，点击任意一行进入交易",
@@ -159,7 +166,7 @@ export default {
         overviewHint: "24-hour moves and turnover, updated live",
         moreSoon: "More pairs are coming",
         moreSoonHint: "The boards count trading USDT pairs only",
-        whyTitle: "Why Astras",
+        whyTitle: "Why {{brand}}",
         whyHint: "From prices to orders, deposits to futures, every step in plain sight",
         why: {
           wallet: {
@@ -178,9 +185,15 @@ export default {
           },
         },
         stepsTitle: "Start in three steps",
-        stepsHint: "Sign up for simulated funds and try spot and futures without risk",
+        stepsHint: "Sign up, deposit and trade in minutes",
+        stepsHintCredits: "Sign up for {{credits}} and try spot and futures",
         steps: {
-          register: { title: "Sign up", desc: "Sign up with your email and a password; the account gets 10,000 USDT and more in simulated funds.", action: "Sign up" },
+          register: {
+            title: "Sign up",
+            desc: "Sign up with your email and a password; the account opens in minutes.",
+            descCredits: "Sign up with your email and a password; the account gets {{credits}}.",
+            action: "Sign up",
+          },
           deposit: { title: "Deposit", desc: "Pick a coin and a network, send test-network assets to your own address, and it is credited after the confirmations.", action: "Deposit" },
           trade: { title: "Trade", desc: "Limit, market and perpetual futures orders with a live order book, candles and instant fills.", action: "Trade" },
         },
@@ -189,7 +202,8 @@ export default {
         newsAll: "All announcements",
         newsEmpty: "No announcements yet",
         ctaTitle: "Ready to start?",
-        ctaDesc: "Create an account and try the whole trading flow with simulated funds.",
+        ctaDesc: "Create an account and try the whole trading flow.",
+        ctaDescCredits: "Create an account and try the whole trading flow with {{credits}}.",
       },
       markets: {
         subtitle: "Live prices of spot pairs and perpetual futures; click a row to trade",

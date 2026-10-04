@@ -10,7 +10,11 @@ import { excerpt, parseMarkdown, type MarkdownDoc } from "./markdown";
 // page loads only its own file, a list loads the files of one language.
 // A missing English file falls back to the Chinese one.
 
-export type ContentSection = "announcements" | "help";
+export type ContentSection = "announcements" | "help" | "legal" | "home";
+
+/** The legal and information pages (design 2026-10-04 §4.4), bundled as drafts the console may replace. */
+export const LEGAL_SLUGS = ["terms", "privacy", "risk", "fees", "about", "contact"] as const;
+export type LegalSlug = (typeof LEGAL_SLUGS)[number];
 export type ContentLocale = "zh-CN" | "en";
 
 export const CONTENT_FALLBACK: ContentLocale = "zh-CN";
@@ -23,6 +27,8 @@ type Loader = () => Promise<string>;
 const files: Record<ContentSection, Record<string, Loader>> = {
   announcements: import.meta.glob<string>("../../content/announcements/*.md", { query: "?raw", import: "default" }),
   help: import.meta.glob<string>("../../content/help/*.md", { query: "?raw", import: "default" }),
+  legal: import.meta.glob<string>("../../content/legal/*.md", { query: "?raw", import: "default" }),
+  home: import.meta.glob<string>("../../content/home/*.md", { query: "?raw", import: "default" }),
 };
 
 const FILE = /\/([a-z0-9][a-z0-9-]*)\.(zh-CN|en)\.md$/;
@@ -47,7 +53,14 @@ export function indexFiles<T>(paths: Record<string, T>): Map<string, Map<Content
 const indexes: Record<ContentSection, Map<string, Map<ContentLocale, Loader>>> = {
   announcements: indexFiles(files.announcements),
   help: indexFiles(files.help),
+  legal: indexFiles(files.legal),
+  home: indexFiles(files.home),
 };
+
+/** defaultCategory is a section's category when a file or article names none. */
+function defaultCategory(section: ContentSection): string {
+  return section === "help" ? "faq" : section === "announcements" ? "notice" : "";
+}
 
 /** pickLocale chooses the file to show: the language asked for, else the fallback. */
 export function pickLocale<T>(byLocale: Map<ContentLocale, T> | undefined, locale: ContentLocale): { locale: ContentLocale; value: T } | null {
@@ -89,7 +102,7 @@ export function toArticle(section: ContentSection, slug: string, locale: Content
     title: frontString(data, "title", slug),
     date: frontString(data, "date"),
     pinned: frontBool(data, "pinned"),
-    category: frontString(data, "category", section === "help" ? "faq" : "notice"),
+    category: frontString(data, "category", defaultCategory(section)),
     order: frontNumber(data, "order", 0),
     summary: frontString(data, "summary") || excerpt(doc.blocks),
     doc,
@@ -106,6 +119,12 @@ export async function loadBundledArticle(section: ContentSection, slug: string, 
   const picked = pickLocale(indexes[section].get(slug), locale);
   if (!picked) return null;
   return toArticle(section, slug, picked.locale, picked.locale !== locale, await picked.value());
+}
+
+/** bundledFile returns a bundled file as written in a language, null when there is none in it. */
+export async function bundledFile(section: ContentSection, slug: string, locale: ContentLocale): Promise<string | null> {
+  const load = indexes[section].get(slug)?.get(locale);
+  return load ? load() : null;
 }
 
 /** bundledSource returns a file as written, its article and Markdown body (the console copies it to edit); null when there is none in the language. */
@@ -134,7 +153,7 @@ export function fromPublished(section: ContentSection, s: PublishedSummary, body
     title: s.title,
     date: s.published_at.slice(0, 10),
     pinned: s.pinned,
-    category: s.category || (section === "help" ? "faq" : "notice"),
+    category: s.category || defaultCategory(section),
     order: s.order,
     summary: s.summary || excerpt(doc.blocks),
     doc,
@@ -151,10 +170,12 @@ type Published = { articles: Article[]; withdrawn: ReadonlySet<string> };
  */
 async function fetchPublished(section: ContentSection, locale: ContentLocale): Promise<Published> {
   const query = { params: { query: { locale, limit: 100 } } };
-  const page =
-    section === "announcements"
-      ? await unwrap(notificationApi.GET("/v1/announcements", query))
-      : await unwrap(notificationApi.GET("/v1/help", query));
+  const page = await {
+    announcements: () => unwrap(notificationApi.GET("/v1/announcements", query)),
+    help: () => unwrap(notificationApi.GET("/v1/help", query)),
+    legal: () => unwrap(notificationApi.GET("/v1/legal", query)),
+    home: () => unwrap(notificationApi.GET("/v1/home", query)),
+  }[section]();
   return { articles: page.items.map((s) => fromPublished(section, s)), withdrawn: new Set(page.withdrawn ?? []) };
 }
 
@@ -163,17 +184,30 @@ const WITHDRAWN = "withdrawn";
 
 /** fetchPublishedArticle returns the console's article, null when it published none with this slug. */
 async function fetchPublishedArticle(section: ContentSection, slug: string, locale: ContentLocale): Promise<Article | typeof WITHDRAWN | null> {
-  const query = { params: { path: { slug }, query: { locale } } };
   try {
-    const a =
-      section === "announcements"
-        ? await unwrap(notificationApi.GET("/v1/announcements/{slug}", query))
-        : await unwrap(notificationApi.GET("/v1/help/{slug}", query));
+    const a = await fetchOne(section, slug, locale);
     return fromPublished(section, a, a.body);
   } catch (err) {
     if (err instanceof ApiError && err.code === "NOTIFY_ARTICLE_WITHDRAWN") return WITHDRAWN;
     if (err instanceof ApiError && err.status === 404) return null;
     throw err;
+  }
+}
+
+/** fetchOne asks the API for a section's article; the fixed sections only for their own slugs. */
+export function fetchOne(section: ContentSection, slug: string, locale: ContentLocale) {
+  const query = { params: { path: { slug }, query: { locale } } };
+  switch (section) {
+    case "announcements":
+      return unwrap(notificationApi.GET("/v1/announcements/{slug}", query));
+    case "help":
+      return unwrap(notificationApi.GET("/v1/help/{slug}", query));
+    case "legal":
+      if (!(LEGAL_SLUGS as readonly string[]).includes(slug)) return Promise.reject(new ApiError(404, "COMMON_NOT_FOUND", "no such page"));
+      return unwrap(notificationApi.GET("/v1/legal/{slug}", { params: { path: { slug: slug as LegalSlug }, query: { locale } } }));
+    case "home":
+      if (slug !== "home-hero") return Promise.reject(new ApiError(404, "COMMON_NOT_FOUND", "no such block"));
+      return unwrap(notificationApi.GET("/v1/home/{slug}", { params: { path: { slug: "home-hero" }, query: { locale } } }));
   }
 }
 

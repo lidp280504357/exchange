@@ -6,6 +6,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, NavLink, Outlet, useLocation } from "react-router";
 import { useScrollTop } from "../components/useScrollTop";
+import { BrandMark, LearningStrip } from "./Brand";
 import { useHeader } from "./header";
 import { StatusStrip } from "./StatusStrip";
 
@@ -76,7 +77,7 @@ function TopBar() {
   return (
     <header className="sticky top-0 z-[var(--z-sticky)] bg-bg-0/95 pt-[env(safe-area-inset-top)] backdrop-blur">
       <div className="flex h-11 items-center justify-between gap-2 px-4">
-        <div className="min-w-0 flex-1 truncate">{header?.title ?? <span className="font-semibold tracking-wide text-fg-1">ASTRAS</span>}</div>
+        <div className="min-w-0 flex-1 truncate">{header?.title ?? <BrandMark />}</div>
         <div className="flex items-center">
           {header?.right ?? (
             <>
@@ -101,6 +102,7 @@ function TopBar() {
           )}
         </div>
       </div>
+      <LearningStrip />
       <StatusStrip />
     </header>
   );

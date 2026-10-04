@@ -23,7 +23,7 @@ var ErrRegistrationClosed = apperr.New(apperr.KindForbidden, "AUTH_REGISTRATION_
 // registrationEvery is how often the gate reads the platform profile.
 const registrationEvery = 15 * time.Second
 
-// peekLimit bounds the part of a code request read for its purpose.
+// peekLimit bounds the part of a code request read for its scene.
 const peekLimit = 64 << 10
 
 // Registration closes sign-ups while the platform profile's registration
@@ -86,7 +86,7 @@ func (g *Registration) read(ctx context.Context) error {
 }
 
 // Middleware refuses the sign-up requests while sign-ups are closed: a
-// code request is let through unless its purpose is REGISTER.
+// code request is let through unless its scene is REGISTER.
 func (g *Registration) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !g.Closed() || r.Method != http.MethodPost {
@@ -101,8 +101,8 @@ func (g *Registration) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// registerCode reads a code request's purpose and puts the body back for
-// the upstream; a body too large to read whole goes through unread.
+// registerCode reads a code request's scene and puts the body back for the
+// upstream; a body too large to read whole goes through unread.
 func registerCode(r *http.Request) bool {
 	buf, err := io.ReadAll(io.LimitReader(r.Body, peekLimit+1))
 	r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(buf), r.Body))
@@ -110,7 +110,7 @@ func registerCode(r *http.Request) bool {
 		return false
 	}
 	var body struct {
-		Purpose string `json:"purpose"`
+		Scene string `json:"scene"`
 	}
-	return json.Unmarshal(buf, &body) == nil && body.Purpose == "REGISTER"
+	return json.Unmarshal(buf, &body) == nil && body.Scene == "REGISTER"
 }

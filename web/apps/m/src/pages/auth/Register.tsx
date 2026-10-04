@@ -5,6 +5,7 @@ import { passwordChecks } from "@exchange/core/auth/password";
 import {
   browserRegion, initialRegisterState, REGIONS, register, registerReducer, regionName, termsFrom, termsKey, useTerms, type RegisterAction,
 } from "@exchange/core/auth/register";
+import { registrationOpen, textOf, useBranding, useWelcomeCredits } from "@exchange/core/platform/index";
 import { browserTimeZone } from "@exchange/core/user/preferences";
 import {
   Button, Checkbox, Controller, Form, FormError, FormField, FormSubmit, Input, Segmented, Skeleton, Spinner, cn, setServerError, toast,
@@ -43,6 +44,8 @@ export default function Register() {
   const restoring = useSession(selectRestoring);
   const locale = useSettings((s) => s.locale);
   const terms = useTerms();
+  const profile = useBranding();
+  const credits = useWelcomeCredits();
   const [state, dispatch] = useReducer(registerReducer, initialRegisterState);
   const [kind, setKind] = useState<IdentityKind>("EMAIL");
   const [verifyError, setVerifyError] = useState<unknown>(null);
@@ -83,7 +86,10 @@ export default function Register() {
       });
       completing.current = true;
       signIn(tokens);
-      toast.success(t("mAuth.welcomeTitle"), { description: t("mAuth.welcomeBody"), duration: 6000 });
+      toast.success(t("mAuth.welcomeTitle"), {
+        description: credits ? t("mAuth.welcomeBodyCredits", { credits }) : t("mAuth.welcomeBody"),
+        duration: 6000,
+      });
       navigate(routes.assets, { replace: true });
     } catch (e) {
       act({ type: "failed", error: e });
@@ -130,6 +136,17 @@ export default function Register() {
       <TextLink to={routes.login}>{t("nav.login")}</TextLink>
     </>
   );
+
+  // Sign-ups closed in the platform profile (design 2026-10-04 §4.3): its text instead of the form.
+  if (!registrationOpen(profile) && state.step === "form") {
+    return (
+      <AuthScreen key="closed" title={t("mAuth.registerTitle")} footer={footer}>
+        <p role="status" className="rounded-3 bg-bg-1 p-4 text-sm leading-relaxed text-fg-2">
+          {textOf(profile.registration.closed_text, locale) || t("errors.AUTH_REGISTRATION_CLOSED")}
+        </p>
+      </AuthScreen>
+    );
+  }
 
   if (state.step === "submitting") {
     return (
@@ -188,7 +205,12 @@ export default function Register() {
   }
 
   return (
-    <AuthScreen key="form" title={t("mAuth.registerTitle")} subtitle={t("mAuth.registerSubtitle")} footer={footer}>
+    <AuthScreen
+      key="form"
+      title={t("mAuth.registerTitle")}
+      subtitle={credits ? t("mAuth.registerSubtitleCredits", { credits }) : t("mAuth.registerSubtitle")}
+      footer={footer}
+    >
       <Form form={form} onSubmit={onContinue} aria-label={t("mAuth.registerTitle")}>
         <Segmented
           block

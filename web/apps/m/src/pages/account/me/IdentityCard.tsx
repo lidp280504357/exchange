@@ -1,4 +1,5 @@
 import { enumLabel, errorText, routes, selectUserId, useSession, useTotpStatus } from "@exchange/core";
+import { useBranding } from "@exchange/core/platform/index";
 import { useProfile } from "@exchange/core/user/profile";
 import { securitySummary, useBoundIdentities, type SecurityLevel } from "@exchange/core/user/security";
 import { Avatar, Badge, Skeleton, copyText, listItem, toast, type BadgeTone } from "@exchange/ui";
@@ -27,6 +28,7 @@ export function IdentityCard() {
   const ids = useBoundIdentities();
   const profile = useProfile();
   const totp = useTotpStatus();
+  const learning = useBranding().learning_mode.enabled;
   const identity = primaryIdentity(ids.data);
   const status = profile.data?.status;
   const level =
@@ -122,7 +124,7 @@ export function IdentityCard() {
             {t("mAccount.me.securityTag", { level: t(`mAccount.security.levels.${level}`) })}
           </Badge>
         )}
-        <Badge tone="brand">{t("mAccount.me.simulated")}</Badge>
+        {learning && <Badge tone="brand">{t("mAccount.me.simulated")}</Badge>}
       </div>
     </motion.section>
   );

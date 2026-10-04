@@ -5,6 +5,7 @@ import { passwordChecks } from "@exchange/core/auth/password";
 import {
   browserRegion, initialRegisterState, REGIONS, register, registerReducer, regionName, termsFrom, termsKey, useTerms, type RegisterAction,
 } from "@exchange/core/auth/register";
+import { registrationOpen, textOf, useBranding, useWelcomeCredits } from "@exchange/core/platform/index";
 import { browserTimeZone } from "@exchange/core/user/preferences";
 import {
   Button, Checkbox, Combobox, Controller, Form, FormError, FormField, FormSubmit, Input, Segmented, Skeleton, Spinner, setServerError, toast,
@@ -40,6 +41,8 @@ export default function Register() {
   const restoring = useSession(selectRestoring);
   const locale = useSettings((s) => s.locale);
   const terms = useTerms();
+  const profile = useBranding();
+  const credits = useWelcomeCredits();
   const [state, dispatch] = useReducer(registerReducer, initialRegisterState);
   const [kind, setKind] = useState<IdentityKind>("EMAIL");
   const [verifyError, setVerifyError] = useState<unknown>(null);
@@ -80,7 +83,10 @@ export default function Register() {
       });
       completing.current = true;
       signIn(tokens);
-      toast.success(t("pcAuth.welcomeTitle"), { description: t("pcAuth.welcomeBody"), duration: 6000 });
+      toast.success(t("pcAuth.welcomeTitle"), {
+        description: credits ? t("pcAuth.welcomeBodyCredits", { credits }) : t("pcAuth.welcomeBody"),
+        duration: 6000,
+      });
       navigate(routes.assets, { replace: true });
     } catch (e) {
       act({ type: "failed", error: e });
@@ -129,6 +135,17 @@ export default function Register() {
       </Link>
     </p>
   );
+
+  // Sign-ups closed in the platform profile (design 2026-10-04 §4.3): its text instead of the form.
+  if (!registrationOpen(profile) && state.step === "form") {
+    return (
+      <AuthCard key="closed" icon={<UserPlus size={22} />} title={t("pcAuth.registerTitle")} footer={footer}>
+        <p role="status" className="rounded-3 border border-line-1 bg-bg-1 p-4 text-sm leading-relaxed text-fg-2">
+          {textOf(profile.registration.closed_text, locale) || t("errors.AUTH_REGISTRATION_CLOSED")}
+        </p>
+      </AuthCard>
+    );
+  }
 
   if (state.step === "submitting") {
     return (
@@ -186,7 +203,13 @@ export default function Register() {
   }
 
   return (
-    <AuthCard key="form" icon={<UserPlus size={22} />} title={t("pcAuth.registerTitle")} subtitle={t("pcAuth.registerSubtitle")} footer={footer}>
+    <AuthCard
+      key="form"
+      icon={<UserPlus size={22} />}
+      title={t("pcAuth.registerTitle")}
+      subtitle={credits ? t("pcAuth.registerSubtitleCredits", { credits }) : t("pcAuth.registerSubtitle")}
+      footer={footer}
+    >
       <Form form={form} onSubmit={onContinue} aria-label={t("pcAuth.registerTitle")}>
         <Segmented
           block

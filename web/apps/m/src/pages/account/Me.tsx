@@ -1,10 +1,11 @@
 import { errorText, routes, selectRestoring, selectSignedIn, signOut, switchSite, useSession } from "@exchange/core";
+import { useBrandText } from "@exchange/core/platform/index";
 import { useTerminalPrefs } from "@exchange/core/trading/prefs";
 import { useUnreadNotifications } from "@exchange/core/user/notifications";
 import { toast } from "@exchange/ui";
 import {
-  Bell, ClipboardList, History, Info, LifeBuoy, ListChecks, LogOut, Megaphone, Monitor, MonitorSmartphone, ReceiptText, ShieldCheck,
-  SlidersHorizontal, Star,
+  Bell, ClipboardList, FileText, History, Info, LifeBuoy, ListChecks, LogOut, Megaphone, Monitor, MonitorSmartphone, ReceiptText,
+  ShieldCheck, SlidersHorizontal, Star,
 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -39,6 +40,7 @@ export default function Me() {
   const recent = useTerminalPrefs((s) => s.recent);
   const [confirm, setConfirm] = useState(false);
   const [about, setAbout] = useState(false);
+  const copyright = useBrandText((p) => p.footer.copyright);
   const [busy, setBusy] = useState(false);
   usePageHeader(
     { title: <span className="text-md font-semibold text-fg-1">{t("nav.me")}</span>, right: <HeaderActions signedIn={signedIn} /> },
@@ -123,6 +125,7 @@ export default function Me() {
       <Section title={t("mAccount.me.groups.support")}>
         <Group index={7}>
           <NavRow icon={<LifeBuoy size={18} />} label={t("nav.help")} to={routes.help} />
+          <NavRow icon={<FileText size={18} />} label={t("footer.legal")} to={routes.legal("terms")} />
           <NavRow icon={<Info size={18} />} label={t("mAccount.me.about.title")} onClick={() => setAbout(true)} />
         </Group>
       </Section>
@@ -139,7 +142,7 @@ export default function Me() {
         </Group>
       )}
 
-      <p className="px-1 pt-2 text-center text-xs text-fg-3">{t("footer.copyright")}</p>
+      <p className="px-1 pt-2 text-center text-xs text-fg-3">{copyright || t("footer.copyright")}</p>
 
       <ConfirmSheet
         open={confirm}

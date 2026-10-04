@@ -1,5 +1,6 @@
 import { createQueryClient, initI18n, LiveProvider, MarketStore, qk, type Locale, type TickerData, type WsClient } from "@exchange/core";
 import { contentKeys, loadArticle, loadArticles } from "@exchange/core/content/index";
+import { DEFAULT_PROFILE } from "@exchange/core/platform/index";
 import { uiMessages } from "@exchange/ui";
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -86,6 +87,8 @@ async function seed() {
   // with no sign-in hint on the device the home page shows the sign-up card.
   Object.defineProperty(globalThis, "localStorage", { value: memoryStorage(), configurable: true, writable: true });
   qc = createQueryClient();
+  // The platform profile with welcome credits (design 2026-10-04 §4.2): the sign-up card promises them.
+  qc.setQueryData(qk.platform, { ...DEFAULT_PROFILE, welcome_credits: [{ asset: "USDT", amount: "10000" }] });
   qc.setQueryData(qk.pairs, { pairs: [pair("BTC-USDT"), pair("ETH-BTC", { reference_symbol: null, price_decimals: 5 }), pair("ETH-USDT", { status: "PREPARE" })] });
   qc.setQueryData(qk.contracts, { contracts: [contract("BTC-USDT-PERP", "BTC-USDT"), contract("ETH-USDT-PERP", "ETH-USDT")] });
   qc.setQueryData(qk.tickers, { tickers });
@@ -132,7 +135,7 @@ export function describePages(locale: Locale) {
 
     it("home", () => {
       const html = render("/", "/", <Home />);
-      expect(html).toContain(en ? "Sign up for simulated funds" : "注册即领模拟资金");
+      expect(html).toContain(en ? "Sign up for 10,000 USDT" : "注册即领 10,000 USDT");
       expect(html).toContain("BTC/USDT");
       expect(html).toContain("85,226.01");
       // The gainers board (BTC-USDT is the one trading USDT pair).

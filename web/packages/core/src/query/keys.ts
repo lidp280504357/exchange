@@ -10,6 +10,8 @@ export const qk = {
   depth: (symbol: string) => ["market", "depth", symbol] as const,
   trades: (symbol: string) => ["market", "trades", symbol] as const,
   markPrice: (symbol: string) => ["market", "mark-price", symbol] as const,
+  /** The platform profile (name, images, banner, registration), public. */
+  platform: ["platform", "profile"] as const,
 
   profile: ["user", "profile"] as const,
   favorites: ["user", "favorites"] as const,

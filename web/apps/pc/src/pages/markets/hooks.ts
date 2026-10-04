@@ -1,17 +1,19 @@
+import { useBranding } from "@exchange/core/platform/index";
 import { useEffect, useSyncExternalStore } from "react";
 
 // Small page helpers shared by the markets and content pages.
 
 /** usePageTitle names the browser tab while the page is open. */
 export function usePageTitle(title: string | undefined): void {
+  const brand = useBranding().name;
   useEffect(() => {
     if (!title) return;
     const before = document.title;
-    document.title = `${title} · Astras`;
+    document.title = `${title} · ${brand}`;
     return () => {
       document.title = before;
     };
-  }, [title]);
+  }, [title, brand]);
 }
 
 /** useMediaQuery follows a CSS media query (wide layouts at 1280 px and up). */

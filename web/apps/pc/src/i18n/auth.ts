@@ -18,7 +18,7 @@ export default {
       channel: "接收方式",
 
       siteCheck: "请确认你访问的是",
-      securityNote: "Astras 不会以任何理由索要你的密码或验证码，请勿泄露给他人。",
+      securityNote: "{{brand}} 不会以任何理由索要你的密码或验证码，请勿泄露给他人。",
       simulated: "测试环境 · 所有资金均为模拟",
       email: "邮箱",
       phone: "手机号",
@@ -46,7 +46,7 @@ export default {
       noCodeHint: "若该账户不存在，你将不会收到验证码。",
 
       loginTitle: "欢迎回来",
-      loginSubtitle: "登录你的 Astras 账户，继续交易",
+      loginSubtitle: "登录你的 {{brand}} 账户，继续交易",
       tabPassword: "密码登录",
       tabCode: "验证码登录",
       forgot: "忘记密码？",
@@ -64,7 +64,8 @@ export default {
       challengeExpired: "登录验证已过期，请重新输入密码登录。",
 
       registerTitle: "创建账户",
-      registerSubtitle: "注册即得 10,000 USDT 模拟资金，体验现货与永续合约交易。",
+      registerSubtitle: "创建账户，体验现货与永续合约交易。",
+      registerSubtitleCredits: "注册即得 {{credits}}，体验现货与永续合约交易。",
       signUpWith: "注册方式",
       newPassword: "设置密码",
       newPasswordPlaceholder: "至少 10 个字符",
@@ -88,8 +89,9 @@ export default {
       editForm: "返回修改",
       createAccount: "创建账户",
       creating: "正在创建账户…",
-      welcomeTitle: "注册成功，欢迎加入 Astras",
-      welcomeBody: "已为你发放 10,000 USDT 模拟资金，开始体验吧。",
+      welcomeTitle: "注册成功，欢迎加入 {{brand}}",
+      welcomeBody: "账户已开通，开始体验吧。",
+      welcomeBodyCredits: "已为你发放 {{credits}}，开始体验吧。",
 
       rule: {
         length: "10–128 个字符",
@@ -131,7 +133,7 @@ export default {
       channel: "Send to",
 
       siteCheck: "Make sure you are on",
-      securityNote: "Astras will never ask for your password or codes. Do not share them with anyone.",
+      securityNote: "{{brand}} will never ask for your password or codes. Do not share them with anyone.",
       simulated: "Test environment · every balance is simulated",
       email: "Email",
       phone: "Phone",
@@ -159,7 +161,7 @@ export default {
       noCodeHint: "No code arrives if there is no such account.",
 
       loginTitle: "Welcome back",
-      loginSubtitle: "Sign in to your Astras account to keep trading",
+      loginSubtitle: "Sign in to your {{brand}} account to keep trading",
       tabPassword: "Password",
       tabCode: "Code",
       forgot: "Forgot password?",
@@ -177,7 +179,8 @@ export default {
       challengeExpired: "The sign-in check expired. Sign in with your password again.",
 
       registerTitle: "Create your account",
-      registerSubtitle: "Sign up and get 10,000 USDT of simulated funds to try spot and perpetual trading.",
+      registerSubtitle: "Open an account to try spot and perpetual trading.",
+      registerSubtitleCredits: "Sign up and get {{credits}} to try spot and perpetual trading.",
       signUpWith: "Sign up with",
       newPassword: "Password",
       newPasswordPlaceholder: "At least 10 characters",
@@ -201,8 +204,9 @@ export default {
       editForm: "Edit details",
       createAccount: "Create account",
       creating: "Creating your account…",
-      welcomeTitle: "Welcome to Astras",
-      welcomeBody: "10,000 USDT of simulated funds are in your account. Enjoy!",
+      welcomeTitle: "Welcome to {{brand}}",
+      welcomeBody: "Your account is ready. Enjoy!",
+      welcomeBodyCredits: "{{credits}} are in your account. Enjoy!",
 
       rule: {
         length: "10 to 128 characters",

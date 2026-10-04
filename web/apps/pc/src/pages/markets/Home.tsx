@@ -14,7 +14,7 @@ import {
   usePairs,
   type TickerData,
 } from "@exchange/core";
-import { latestArticles, useArticles } from "@exchange/core/content/index";
+import { latestArticles, useArticles, useHero } from "@exchange/core/content/index";
 import {
   compactParts,
   headline,
@@ -25,6 +25,7 @@ import {
   type MarketRow,
   type TickerOf,
 } from "@exchange/core/markets/index";
+import { useWelcomeCredits } from "@exchange/core/platform/index";
 import {
   Badge,
   Button,
@@ -65,7 +66,7 @@ import { Link } from "react-router";
 import { MarketName, SparkCell, marketLabel, tradePath, useCoinName } from "./parts";
 
 // Home (design §6.2): the hero with the headline figures and a live card,
-// the top coins scrolling by, the three market boards, why Astras, three
+// the top coins scrolling by, the three market boards, why us, three
 // steps to start and the latest announcements. Every price comes from the
 // one tickers subscription (at most one render per frame); nothing needs
 // a session.
@@ -115,6 +116,9 @@ function useRollIn(value: string | null | undefined): string | null | undefined 
 function Hero({ rows, loading, error, onRetry, tickerOf }: WithError) {
   const { t } = useTranslation();
   const signedIn = useSession(selectSignedIn);
+  // The console's home-hero (design 2026-10-04 §4.4), else the bundled draft, else these strings.
+  const hero = useHero().data;
+  const cta = hero?.cta ?? { text: t("pc.start"), href: routes.register };
   return (
     <section className="relative overflow-hidden border-b border-line-1">
       <div
@@ -135,8 +139,8 @@ function Hero({ rows, loading, error, onRetry, tickerOf }: WithError) {
           <Badge tone="brand" size="md" dot>
             {t("pcMarkets.home.badge")}
           </Badge>
-          <h1 className="max-w-2xl text-2xl font-semibold leading-tight text-fg-1 xl:text-[44px]">{t("pc.heroTitle")}</h1>
-          <p className="max-w-xl text-md leading-relaxed text-fg-2">{t("pc.heroSubtitle")}</p>
+          <h1 className="max-w-2xl text-2xl font-semibold leading-tight text-fg-1 xl:text-[44px]">{hero?.title || t("pc.heroTitle")}</h1>
+          <p className="max-w-xl text-md leading-relaxed text-fg-2">{hero ? hero.subtitle : t("pc.heroSubtitle")}</p>
           <div className="flex flex-wrap gap-3">
             {signedIn ? (
               <>
@@ -150,7 +154,7 @@ function Hero({ rows, loading, error, onRetry, tickerOf }: WithError) {
             ) : (
               <>
                 <Button asChild size="lg" icon={<UserPlus size={18} />}>
-                  <Link to={routes.register}>{t("pc.start")}</Link>
+                  {cta.href.startsWith("/") ? <Link to={cta.href}>{cta.text}</Link> : <a href={cta.href}>{cta.text}</a>}
                 </Button>
                 <Button asChild size="lg" variant="secondary" icon={<CandlestickChart size={18} />}>
                   <Link to={routes.trade(DEFAULT_SYMBOL)}>{t("pc.trade")}</Link>
@@ -453,6 +457,7 @@ const Why = memo(function Why({ rows }: { rows: MarketRow[] }) {
 const Steps = memo(function Steps() {
   const { t } = useTranslation();
   const signedIn = useSession(selectSignedIn);
+  const credits = useWelcomeCredits();
   const steps = [
     { id: "register", icon: <UserPlus size={20} />, to: routes.register, done: signedIn },
     { id: "deposit", icon: <Wallet size={20} />, to: routes.deposit, done: false },
@@ -460,7 +465,10 @@ const Steps = memo(function Steps() {
   ];
   return (
     <section className="mx-auto max-w-[1440px] px-6 pt-20">
-      <SectionTitle title={t("pcMarkets.home.stepsTitle")} hint={t("pcMarkets.home.stepsHint")} />
+      <SectionTitle
+        title={t("pcMarkets.home.stepsTitle")}
+        hint={credits ? t("pcMarkets.home.stepsHintCredits", { credits }) : t("pcMarkets.home.stepsHint")}
+      />
       <ol className="relative mt-8 grid grid-cols-3 gap-6">
         <span aria-hidden className="absolute left-[16.6%] right-[16.6%] top-6 h-px bg-[linear-gradient(to_right,var(--line-2)_50%,transparent_50%)] bg-[size:8px_1px]" />
         {steps.map((s, i) => (
@@ -483,7 +491,9 @@ const Steps = memo(function Steps() {
             </span>
             <span className="mt-3 text-xs font-medium tracking-wide text-fg-3">{`0${i + 1}`}</span>
             <h3 className="mt-1 text-md font-semibold text-fg-1">{t(`pcMarkets.home.steps.${s.id}.title`)}</h3>
-            <p className="mt-2 max-w-xs text-sm leading-relaxed text-fg-3">{t(`pcMarkets.home.steps.${s.id}.desc`)}</p>
+            <p className="mt-2 max-w-xs text-sm leading-relaxed text-fg-3">
+              {s.id === "register" && credits ? t("pcMarkets.home.steps.register.descCredits", { credits }) : t(`pcMarkets.home.steps.${s.id}.desc`)}
+            </p>
             {s.done ? (
               <Badge tone="success" size="md" className="mt-4" icon={<Check size={12} />}>
                 {t("pcMarkets.home.stepDone")}
@@ -562,6 +572,7 @@ const News = memo(function News() {
 const Cta = memo(function Cta() {
   const { t } = useTranslation();
   const signedIn = useSession(selectSignedIn);
+  const credits = useWelcomeCredits();
   return (
     <section className="mx-auto max-w-[1440px] px-6 py-20">
       <div className="relative overflow-hidden rounded-3 border border-line-2 bg-bg-1 px-10 py-12">
@@ -569,7 +580,7 @@ const Cta = memo(function Cta() {
         <div className="relative flex items-center justify-between gap-8">
           <div className="min-w-0">
             <h2 className="text-xl font-semibold text-fg-1">{t("pcMarkets.home.ctaTitle")}</h2>
-            <p className="mt-2 text-fg-2">{t("pcMarkets.home.ctaDesc")}</p>
+            <p className="mt-2 text-fg-2">{credits ? t("pcMarkets.home.ctaDescCredits", { credits }) : t("pcMarkets.home.ctaDesc")}</p>
           </div>
           <div className="flex shrink-0 gap-3">
             <Button asChild size="lg">

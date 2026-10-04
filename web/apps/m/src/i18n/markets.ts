@@ -14,8 +14,9 @@ export default {
       favoriteLoading: "自选正在加载，请稍候",
       home: {
         badge: "测试环境 · 资金为模拟",
-        welcomeTitle: "注册即领模拟资金",
-        welcomeDesc: "零风险体验现货与永续合约，行情实时跟随主流市场。",
+        welcomeTitle: "注册账户，开始交易",
+        welcomeTitleCredits: "注册即领 {{credits}}",
+        welcomeDesc: "体验现货与永续合约，行情实时跟随主流市场。",
         register: "注册",
         login: "登录",
         totalValue: "总资产估值",
@@ -32,7 +33,7 @@ export default {
         boardsEmptyHint: "排行只统计交易中的 USDT 交易对",
         news: "最新公告",
         newsEmpty: "暂无公告",
-        whyTitle: "为什么选择 Astras",
+        whyTitle: "为什么选择 {{brand}}",
         why: {
           wallet: { title: "多链充提", desc: "按网络充值与提现，确认数与到账时间一目了然" },
           futures: { title: "永续合约", desc: "USDT 永续合约，最高 {{leverage}} 倍杠杆", descAny: "USDT 永续合约" },
@@ -128,8 +129,9 @@ export default {
       favoriteLoading: "Favorites are still loading",
       home: {
         badge: "Test environment · simulated funds",
-        welcomeTitle: "Sign up for simulated funds",
-        welcomeDesc: "Try spot and perpetual futures without risk, with prices that follow the major markets live.",
+        welcomeTitle: "Open an account and start trading",
+        welcomeTitleCredits: "Sign up for {{credits}}",
+        welcomeDesc: "Try spot and perpetual futures, with prices that follow the major markets live.",
         register: "Sign up",
         login: "Sign in",
         totalValue: "Total value",
@@ -146,7 +148,7 @@ export default {
         boardsEmptyHint: "The boards count trading USDT pairs only",
         news: "Announcements",
         newsEmpty: "No announcements yet",
-        whyTitle: "Why Astras",
+        whyTitle: "Why {{brand}}",
         why: {
           wallet: { title: "Deposits by network", desc: "Confirmations and usual times shown for every network" },
           futures: { title: "Perpetual futures", desc: "USDT perpetuals with up to {{leverage}}x leverage", descAny: "USDT perpetuals" },

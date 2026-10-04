@@ -7,6 +7,7 @@ import type { paths as DerivativesPaths } from "./gen/derivatives";
 import type { paths as GatewayPaths } from "./gen/gateway";
 import type { paths as MarketPaths } from "./gen/market";
 import type { paths as NotificationPaths } from "./gen/notification";
+import type { paths as PlatformPaths } from "./gen/platform";
 import type { paths as TradingPaths } from "./gen/trading";
 import type { paths as UserPaths } from "./gen/user";
 import type { paths as WalletPaths } from "./gen/wallet";
@@ -102,6 +103,7 @@ export const gatewayApi = createClient<GatewayPaths>(options);
 export const tradingApi = createClient<TradingPaths>(options);
 export const walletApi = createClient<WalletPaths>(options);
 export const derivativesApi = createClient<DerivativesPaths>(options);
+export const platformApi = createClient<PlatformPaths>(options);
 
 /**
  * unwrap turns an openapi-fetch result into data or a thrown ApiError;

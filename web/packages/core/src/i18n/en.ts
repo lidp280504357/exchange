@@ -2,7 +2,7 @@
 // words, states, enum labels (codes) and error messages by stable code
 // (requirements appendix C). Page strings live in each app.
 export const en = {
-  app: { name: "Astras", tagline: "A learning exchange (test environment, simulated funds)" },
+  app: { name: "{{brand}}", tagline: "A digital asset exchange" },
   nav: {
     home: "Home", markets: "Markets", spot: "Spot", futures: "Futures", assets: "Assets", overview: "Overview", deposit: "Deposit",
     withdraw: "Withdraw", transfer: "Transfer", history: "History", announcements: "Announcements", help: "Help center",
@@ -12,8 +12,10 @@ export const en = {
   },
   footer: {
     products: "Products", support: "Support", about: "About", toMobile: "Mobile site", toPC: "Desktop site",
-    copyright: "© 2026 Astras · a learning project with simulated funds",
-    risk: "Digital asset prices swing widely. This is a test environment for learning; every balance is simulated.",
+    copyright: "© 2026 {{brand}}",
+    risk: "Digital asset prices swing widely and trading can lose you money. Decide with care.",
+    legal: "Terms and policies", terms: "Terms of service", privacy: "Privacy policy", riskDisclosure: "Risk disclosure", fees: "Fees",
+    aboutUs: "About us", contact: "Contact us", follow: "Follow us",
   },
   common: {
     loading: "Loading…", empty: "Nothing here", retry: "Retry", error: "Something went wrong", confirm: "Confirm", cancel: "Cancel",
@@ -59,6 +61,7 @@ export const en = {
     AUTH_OTP_INVALID: "Wrong code", AUTH_OTP_EXPIRED: "The code expired, request a new one", AUTH_OTP_ATTEMPTS_EXCEEDED: "Too many wrong codes, request a new one",
     AUTH_OTP_RESEND_TOO_SOON: "Please wait before requesting another code", AUTH_TICKET_INVALID: "The verification expired, request a new code",
     AUTH_CHANNEL_UNAVAILABLE: "SMS is unavailable, use email", AUTH_TERMS_OUTDATED: "The terms changed: reload and accept them again",
+    AUTH_REGISTRATION_CLOSED: "Sign-ups are closed for now",
     AUTH_IDENTITY_TAKEN: "That email or phone is taken", AUTH_IDENTITY_KIND_BOUND: "One of that kind is bound already: change it instead",
     NOTIFY_PROVIDER_UNAVAILABLE: "Codes cannot be sent right now, please try again later", AUTH_STEP_UP_REQUIRED: "Complete the security check first", AUTH_SESSION_REVOKED: "Signed out, please sign in again",
     AUTH_LOGIN_CHALLENGE_INVALID: "The sign-in check expired, sign in again", USER_CLOSED: "The account is closed", USER_FROZEN: "The account is frozen and read-only",

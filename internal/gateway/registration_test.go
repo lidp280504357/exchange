@@ -60,7 +60,7 @@ func TestRegistrationGateAndPlatformRoutes(t *testing.T) {
 		}
 	}
 
-	register := `{"purpose":"REGISTER","channel":"EMAIL","target":"a@example.com"}`
+	register := `{"scene":"REGISTER","channel":"EMAIL","identifier":"a@example.com"}`
 	if err := gate.read(context.Background()); err != nil || gate.Closed() {
 		t.Fatalf("open: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestRegistrationGateAndPlatformRoutes(t *testing.T) {
 	if s, code := call(http.MethodPost, "/v1/auth/otp/request", register); s != http.StatusForbidden || code != "AUTH_REGISTRATION_CLOSED" {
 		t.Fatalf("a REGISTER code: %d %s", s, code)
 	}
-	login := `{"purpose":"LOGIN","channel":"EMAIL","target":"a@example.com"}`
+	login := `{"scene":"LOGIN","channel":"EMAIL","identifier":"a@example.com"}`
 	if s, _ := call(http.MethodPost, "/v1/auth/otp/request", login); s != http.StatusNoContent || seenBody != login {
 		t.Fatalf("a LOGIN code: %d, the upstream read %q", s, seenBody)
 	}

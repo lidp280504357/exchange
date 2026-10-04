@@ -2,6 +2,7 @@ import {
   enumLabel, errorText, formatCompact, formatPercent, formatPrice, pairName, useSettings, useTicker, useTickerSeed, type Pair,
 } from "@exchange/core";
 import { useFavorites } from "@exchange/core/markets/favorites";
+import { brandName, useBranding } from "@exchange/core/platform/index";
 import { Badge, PriceText, Tooltip, cn, toast } from "@exchange/ui";
 import { TriangleAlert } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
@@ -27,11 +28,12 @@ export function SpotTickerBar({ pair, onPick, extra }: { pair: Pair; onPick: (sy
   const stale = tk?.updated_at ? Date.now() - Date.parse(tk.updated_at) > STALE_MS : false;
   const down = tk?.change?.startsWith("-");
 
+  const brand = useBranding().name;
   useEffect(() => {
     const price = tk?.last ? formatPrice(tk.last, pair.price_decimals) : "";
-    document.title = `${price ? `${price} | ` : ""}${pair.base_asset}/${pair.quote_asset} | Astras`;
-  }, [tk?.last, pair]);
-  useEffect(() => () => void (document.title = "Astras"), []);
+    document.title = `${price ? `${price} | ` : ""}${pair.base_asset}/${pair.quote_asset} | ${brand}`;
+  }, [tk?.last, pair, brand]);
+  useEffect(() => () => void (document.title = brandName()), []);
 
   return (
     <div className="flex h-14 shrink-0 items-center gap-6 bg-bg-1 px-3">

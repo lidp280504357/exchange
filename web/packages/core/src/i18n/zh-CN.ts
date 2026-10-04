@@ -2,7 +2,7 @@
 // words, states, enum labels (codes) and error messages by stable code
 // (requirements appendix C). Page strings live in each app.
 export const zhCN = {
-  app: { name: "Astras", tagline: "学习用虚拟资产交易所（测试环境，资金为模拟）" },
+  app: { name: "{{brand}}", tagline: "数字资产交易平台" },
   nav: {
     home: "首页", markets: "行情", spot: "现货交易", futures: "合约", assets: "资产", overview: "资产总览", deposit: "充值",
     withdraw: "提现", transfer: "划转", history: "资金流水", announcements: "公告", help: "帮助中心", search: "搜索币种",
@@ -11,7 +11,9 @@ export const zhCN = {
   },
   footer: {
     products: "产品", support: "支持", about: "关于", toMobile: "切换到手机版", toPC: "切换到电脑版",
-    copyright: "© 2026 Astras · 学习项目，资金为模拟", risk: "数字资产价格波动大，本站为学习用途的测试环境，所有资金均为模拟。",
+    copyright: "© 2026 {{brand}}", risk: "数字资产价格波动大，交易可能导致本金损失，请谨慎决策。",
+    legal: "条款与政策", terms: "用户协议", privacy: "隐私政策", riskDisclosure: "风险提示", fees: "费率说明", aboutUs: "关于我们",
+    contact: "联系我们", follow: "关注我们",
   },
   common: {
     loading: "加载中…", empty: "暂无数据", retry: "重试", error: "出错了", confirm: "确认", cancel: "取消", save: "保存",
@@ -56,6 +58,7 @@ export const zhCN = {
     AUTH_OTP_INVALID: "验证码不正确", AUTH_OTP_EXPIRED: "验证码已过期，请重新获取", AUTH_OTP_ATTEMPTS_EXCEEDED: "错误次数过多，请重新获取验证码",
     AUTH_OTP_RESEND_TOO_SOON: "发送太频繁，请稍后再试", AUTH_TICKET_INVALID: "验证已失效，请重新获取验证码",
     AUTH_CHANNEL_UNAVAILABLE: "短信暂不可用，请用邮箱", AUTH_TERMS_OUTDATED: "条款已更新，请刷新页面后重新同意",
+    AUTH_REGISTRATION_CLOSED: "暂未开放注册",
     AUTH_IDENTITY_TAKEN: "该邮箱或手机号已被使用", AUTH_IDENTITY_KIND_BOUND: "已绑定同类身份，请使用换绑",
     NOTIFY_PROVIDER_UNAVAILABLE: "验证码发送服务暂时不可用，请稍后再试", AUTH_STEP_UP_REQUIRED: "需要先完成安全验证", AUTH_SESSION_REVOKED: "登录已失效，请重新登录",
     AUTH_LOGIN_CHALLENGE_INVALID: "登录验证已失效，请重新登录", USER_CLOSED: "账户已注销", USER_FROZEN: "账户已冻结，只能查看",

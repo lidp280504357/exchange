@@ -1,4 +1,5 @@
 import { routes } from "@exchange/core";
+import { useBranding, useWelcomeCredits } from "@exchange/core/platform/index";
 import { Button, durations, ease, listItem } from "@exchange/ui";
 import { BadgeCheck, CandlestickChart, Gift, Layers } from "lucide-react";
 import { motion } from "motion/react";
@@ -18,6 +19,10 @@ const PERKS = [
  */
 export function WelcomeCard() {
   const { t } = useTranslation();
+  const name = useBranding().name;
+  const credits = useWelcomeCredits();
+  // The welcome credits' perk only while there are any (design 2026-10-04 §4.2).
+  const perks = PERKS.filter((p) => p.key !== "funds" || credits);
   return (
     <motion.section
       variants={listItem}
@@ -46,12 +51,12 @@ export function WelcomeCard() {
           letterSpacing="4"
           style={{ fontFamily: "var(--font-sans)" }}
         >
-          ASTRAS
+          {name.toUpperCase()}
         </text>
       </svg>
       <p className="mt-2 text-md font-semibold text-fg-1">{t("mAccount.me.slogan")}</p>
       <ul className="mt-4 flex flex-col gap-2.5">
-        {PERKS.map((p, i) => (
+        {perks.map((p, i) => (
           <motion.li
             key={p.key}
             initial={{ opacity: 0, x: -12 }}
@@ -60,8 +65,8 @@ export function WelcomeCard() {
             className="flex items-center gap-2.5 text-sm text-fg-2"
           >
             <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand-soft text-brand">{p.icon}</span>
-            {t(`mAccount.me.perks.${p.key}`)}
-            {i === 0 && <BadgeCheck size={14} className="text-success" aria-hidden />}
+            {p.key === "funds" ? t("mAccount.me.perks.funds", { credits }) : t(`mAccount.me.perks.${p.key}`)}
+            {p.key === "funds" && <BadgeCheck size={14} className="text-success" aria-hidden />}
           </motion.li>
         ))}
       </ul>

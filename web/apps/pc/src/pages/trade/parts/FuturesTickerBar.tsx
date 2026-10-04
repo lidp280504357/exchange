@@ -1,5 +1,6 @@
 import { dec, enumLabel, errorText, formatCompact, formatPercent, formatPrice, useMarkPrice, useSettings, useTicker, useTickerSeed, type Contract } from "@exchange/core";
 import { useFavorites } from "@exchange/core/markets/favorites";
+import { brandName, useBranding } from "@exchange/core/platform/index";
 import { Badge, FundingCountdown, PriceText, cn, toast } from "@exchange/ui";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
@@ -24,11 +25,12 @@ export function FuturesTickerBar({ contract, onPick }: { contract: Contract; onP
   const dir = useDirection(tk?.last);
   const down = tk?.change?.startsWith("-");
 
+  const brand = useBranding().name;
   useEffect(() => {
     const price = tk?.last ? formatPrice(tk.last, decimals) : "";
-    document.title = `${price ? `${price} | ` : ""}${contract.base_asset}${contract.quote_asset} ${t("pcTrade.perpetual")} | Astras`;
-  }, [tk?.last, contract, decimals, t]);
-  useEffect(() => () => void (document.title = "Astras"), []);
+    document.title = `${price ? `${price} | ` : ""}${contract.base_asset}${contract.quote_asset} ${t("pcTrade.perpetual")} | ${brand}`;
+  }, [tk?.last, contract, decimals, t, brand]);
+  useEffect(() => () => void (document.title = brandName()), []);
 
   return (
     <div className="flex h-14 shrink-0 items-center gap-6 overflow-x-auto bg-bg-1 px-3 [scrollbar-width:none]">

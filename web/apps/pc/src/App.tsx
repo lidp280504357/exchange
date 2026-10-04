@@ -1,4 +1,5 @@
 import { DEFAULT_CONTRACT, DEFAULT_SYMBOL, routes, useAssetProfiles, usePrivateSync } from "@exchange/core";
+import { useBrandingEffects } from "@exchange/core/platform/index";
 import type { QueryClient } from "@tanstack/react-query";
 import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router";
@@ -32,6 +33,8 @@ function route(r: PageRoute) {
 export function App({ queryClient }: { queryClient: QueryClient }) {
   usePrivateSync(queryClient);
   useAssetProfiles();
+  // The platform profile's name, icons and colours (design 2026-10-04 §4.1).
+  useBrandingEffects();
   return (
     <Suspense fallback={<PageSkeleton />}>
       <Routes>

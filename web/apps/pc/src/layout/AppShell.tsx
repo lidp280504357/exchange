@@ -1,5 +1,6 @@
 import { Outlet, useLocation } from "react-router";
 import { Footer } from "./Footer";
+import { LearningBanner } from "./LearningBanner";
 import { StatusBanner } from "./StatusBanner";
 import { TopNav } from "./TopNav";
 
@@ -13,6 +14,7 @@ export function AppShell() {
   return (
     <div className="flex min-h-dvh min-w-[1024px] flex-col bg-bg-0">
       <TopNav />
+      <LearningBanner />
       <StatusBanner />
       <main key={pathname} className="flex-1 animate-fade-up">
         <Outlet />

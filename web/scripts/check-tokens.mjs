@@ -9,7 +9,13 @@ import { fileURLToPath } from "node:url";
 const web = join(dirname(fileURLToPath(import.meta.url)), "..");
 const roots = ["packages", "apps"].map((d) => join(web, d));
 const skipDirs = new Set(["node_modules", "dist", "storybook-static", "gen"]);
-const allowColours = new Set(["packages/ui/src/styles/tokens.css"]);
+// The platform profile's built-in colours are data the console may change
+// (design 2026-10-04 §4.1), written into --brand at run time.
+const allowColours = new Set([
+  "packages/ui/src/styles/tokens.css",
+  "packages/core/src/platform/profile.ts",
+  "packages/core/src/platform/profile.test.ts",
+]);
 
 const colour = /(?<![\w&])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\b|\brgba?\(|\bhsla?\(/;
 const toLocale = /\.toLocale(?:String|DateString|TimeString)\(/;

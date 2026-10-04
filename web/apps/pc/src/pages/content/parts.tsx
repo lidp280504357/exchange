@@ -1,5 +1,6 @@
 import { routes } from "@exchange/core";
 import { Markdown, type ArticleMeta, type LinkProps, type MarkdownDoc, type TocItem } from "@exchange/core/content/index";
+import { useBrandText, useBranding } from "@exchange/core/platform/index";
 import { cn } from "@exchange/ui";
 import { ExternalLink, FlaskConical } from "lucide-react";
 import { useReducedMotion } from "motion/react";
@@ -77,13 +78,20 @@ export function Prose({ doc, className }: { doc: MarkdownDoc; className?: string
   );
 }
 
-/** SimNotice: every content page says the funds are simulated. */
+/**
+ * SimNotice: while the platform's learning mode is on (design 2026-10-04
+ * §4.3), every content page says the funds are simulated, in the profile's
+ * words; off, nothing.
+ */
 export function SimNotice({ className }: { className?: string }) {
   const { t } = useTranslation();
+  const on = useBranding().learning_mode.enabled;
+  const text = useBrandText((p) => p.learning_mode.text);
+  if (!on) return null;
   return (
     <div role="note" className={cn("flex items-center gap-2 rounded-2 border border-warn/30 bg-warn/10 px-4 py-2.5 text-sm text-warn", className)}>
       <FlaskConical size={16} className="shrink-0" />
-      {t("pcContent.simNotice")}
+      {text || t("pcContent.simNotice")}
     </div>
   );
 }

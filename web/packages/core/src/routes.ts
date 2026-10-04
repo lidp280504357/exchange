@@ -21,6 +21,8 @@ export const routes = {
   announcement: (slug = ":slug") => `/announcements/${slug}`,
   help: "/help",
   helpArticle: (slug = ":slug") => `/help/${slug}`,
+  /** The legal and information pages (design 2026-10-04 §4.4): terms, privacy, risk, fees, about, contact. */
+  legal: (slug = ":slug") => `/legal/${slug}`,
   login: "/login",
   register: "/register",
   reset: "/reset",

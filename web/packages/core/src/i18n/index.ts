@@ -2,6 +2,7 @@ import i18n, { type Resource } from "i18next";
 import { initReactI18next } from "react-i18next";
 import { ApiError } from "../api/errors";
 import { formatAmount } from "../format/number";
+import { DEFAULT_BRAND } from "../platform/profile";
 import { useSettings, type Locale } from "../settings/store";
 import { en } from "./en";
 import { zhCN } from "./zh-CN";
@@ -26,10 +27,23 @@ export function initI18n(extra: { "zh-CN"?: Record<string, unknown>; en?: Record
     resources,
     lng: useSettings.getState().locale,
     fallbackLng: "zh-CN",
-    interpolation: { escapeValue: false },
+    // {{brand}} is the exchange's name in every string (design 2026-10-04
+    // §4.1): the built-in one until the platform profile is read.
+    interpolation: { escapeValue: false, defaultVariables: { brand: DEFAULT_BRAND } },
     returnNull: false,
   });
   return i18n;
+}
+
+/**
+ * setBrandVariable sets the {{brand}} of every string to the platform
+ * profile's name and re-renders the translated text when it changed.
+ */
+export function setBrandVariable(name: string): void {
+  const vars = i18n.options.interpolation?.defaultVariables;
+  if (!vars || vars.brand === name) return;
+  vars.brand = name;
+  if (i18n.isInitialized) void i18n.changeLanguage(i18n.language);
 }
 
 function deepMerge(base: Record<string, unknown>, extra: Record<string, unknown>): Record<string, unknown> {

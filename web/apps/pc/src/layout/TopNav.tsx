@@ -1,6 +1,7 @@
 import {
   DEFAULT_CONTRACT, DEFAULT_SYMBOL, isContract, routes, selectSignedIn, setLocale, signOut, useContracts, useSession, useSettings, useTerminalPrefs,
 } from "@exchange/core";
+import { useBranding } from "@exchange/core/platform/index";
 import { useUnreadNotifications } from "@exchange/core/user/notifications";
 import { Button, cn } from "@exchange/ui";
 import { Bell, ChevronDown, Globe, UserRound } from "lucide-react";
@@ -25,10 +26,11 @@ export function TopNav() {
   const recentSpot = recent.filter((s) => !isContract(s)).slice(0, 5);
   const recentFutures = recent.filter(isContract);
   const contracts = useContracts();
+  const brand = useBranding().name;
   return (
     <header className="sticky top-0 z-[var(--z-sticky)] h-14 border-b border-line-1 bg-bg-0/95 backdrop-blur">
       <div className="mx-auto flex h-full max-w-[1920px] items-center gap-6 px-6">
-        <Link to={routes.home} className="flex items-center gap-2" aria-label="Astras">
+        <Link to={routes.home} className="flex items-center gap-2" aria-label={brand}>
           <Logo />
         </Link>
         <nav className="flex h-full items-center gap-1 text-base">

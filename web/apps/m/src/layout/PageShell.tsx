@@ -3,6 +3,7 @@ import { ChevronLeft } from "lucide-react";
 import { Outlet, useLocation, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useScrollTop } from "../components/useScrollTop";
+import { LearningStrip } from "./Brand";
 import { useHeader } from "./header";
 import { StatusStrip } from "./StatusStrip";
 
@@ -32,6 +33,7 @@ export function PageShell() {
           <div className="min-w-0 truncate text-center text-md font-semibold text-fg-1">{header?.title}</div>
           <div className="flex min-w-11 items-center justify-end gap-1 pr-1">{header?.right}</div>
         </div>
+        <LearningStrip />
         <StatusStrip />
       </header>
       <main key={location.pathname} className="flex-1 animate-fade-up">

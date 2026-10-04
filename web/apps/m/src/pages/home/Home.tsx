@@ -16,8 +16,9 @@ import {
 } from "@exchange/core";
 import { useBalances } from "@exchange/core/assets/hooks";
 import { convertValue, referencePrice, valuePortfolio } from "@exchange/core/assets/valuation";
-import { useArticles } from "@exchange/core/content/index";
+import { useArticles, useHero } from "@exchange/core/content/index";
 import { marqueeRows, rankOverview, useMarketRows, useMarketTickers, type MarketRow, type TickerOf } from "@exchange/core/markets/index";
+import { useBranding, useWelcomeCredits } from "@exchange/core/platform/index";
 import {
   Badge,
   Button,
@@ -119,6 +120,10 @@ function Top({ tickers }: { tickers: ReadonlyMap<string, TickerData> }) {
 
 function Welcome() {
   const { t } = useTranslation();
+  const learning = useBranding().learning_mode.enabled;
+  const credits = useWelcomeCredits();
+  // The console's home-hero (design 2026-10-04 §4.4), else the bundled draft.
+  const hero = useHero().data;
   return (
     <motion.section
       variants={listItem}
@@ -130,11 +135,15 @@ function Welcome() {
       <div aria-hidden className="pointer-events-none absolute -right-12 -top-16 size-44 animate-float rounded-full bg-brand-soft blur-2xl" />
       <div aria-hidden className="pointer-events-none absolute -bottom-24 -left-12 size-44 animate-float rounded-full bg-glow blur-2xl [animation-delay:-7s]" />
       <div className="relative">
-        <Badge tone="brand" dot>
-          {t("mMarkets.home.badge")}
-        </Badge>
-        <h2 className="mt-3 text-lg font-semibold leading-snug text-fg-1">{t("mMarkets.home.welcomeTitle")}</h2>
-        <p className="mt-1.5 text-sm leading-relaxed text-fg-2">{t("mMarkets.home.welcomeDesc")}</p>
+        {learning && (
+          <Badge tone="brand" dot className="mb-3">
+            {t("mMarkets.home.badge")}
+          </Badge>
+        )}
+        <h2 className="text-lg font-semibold leading-snug text-fg-1">
+          {credits ? t("mMarkets.home.welcomeTitleCredits", { credits }) : hero?.title || t("mMarkets.home.welcomeTitle")}
+        </h2>
+        <p className="mt-1.5 text-sm leading-relaxed text-fg-2">{hero?.subtitle || t("mMarkets.home.welcomeDesc")}</p>
         <div className="mt-5 grid grid-cols-2 gap-3">
           <Button asChild size="lg" icon={<UserPlus size={18} />}>
             <Link to={routes.register}>{t("mMarkets.home.register")}</Link>

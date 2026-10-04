@@ -113,6 +113,15 @@ task web:lighthouse         # 对部署后的两站各三页跑 Lighthouse（性
 - **金额**：一律用十进制字符串，运算用 `dec`（BigInt 定点），显示用 `formatPrice`（交易对精度）与 `formatAmount`（资产精度，向下截断）。`dec.toNumber` 只用于画图。
 - **时间**：`formatTime` 按用户设置的时区（默认浏览器时区），图表与表格一致。
 - **枚举**：`enumLabel` 从 i18n 取，缺翻译时显示可读兜底并在开发模式告警。
+- **平台资料**（设计 2026-10-04 §4.1，`@exchange/core/platform/index`）：两个用户站在根组件调 `useBrandingEffects()`，启动时与之后每分钟读 `GET /v1/platform/profile`，改名、换图不需要重新构建。
+  - 读到之后：页面标题、favicon 与 apple-touch-icon、`theme-color`、CSS 的 `--brand`（`--brand-soft` 跟着变，`--brand-fg` 按亮度取深色或白色）都改成资料里的；所有文案里的 `{{brand}}` 换成资料的名称（i18next 的 `defaultVariables`）。
+  - 顶栏标志用资料的深色背景标志（没有就用浅色的，再没有用自带的）。页脚的版权、合规文案、联系方式与社交链接也取自资料。
+  - 学习模式开着时，三个外壳顶部显示资料的横幅文案，内容页的模拟资金提示也跟着它，关了就都不显示。
+  - 注册方式为 `CLOSED` 时，注册页显示资料里的关闭提示，不显示表单。
+  - 「注册即送」文案用资料的 `welcome_credits`（`useWelcomeCredits()`，如「10,000 USDT、0.1 BTC」），清单为空时改用不提赠送的文案。
+  - 接口读不到时用 `DEFAULT_PROFILE`：自带的名称、图标与颜色，不显示横幅、不承诺赠送、注册开放。页面不会白屏。
+- **法律页与首页横幅**（设计 §4.4）：`/legal/:slug`（terms、privacy、risk、fees、about、contact），PC 站页脚与手机站「我的 → 条款与政策」进入。默认稿在 `web/packages/core/content/legal/`，首页横幅的默认稿是 `content/home/home-hero.*.md`。后台发布的覆盖稿优先，撤回的不显示。
+  - 首页横幅：标题、副标题（文章摘要），正文里第一个 Markdown 链接是按钮（`useHero()`）。手机站的欢迎卡在有赠送时仍以赠送为标题。
 
 ## 部署
 

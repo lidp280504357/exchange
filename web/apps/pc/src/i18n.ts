@@ -10,7 +10,7 @@ const base: Messages = {
   "zh-CN": {
     pc: {
       heroTitle: "交易全球主流数字资产",
-      heroSubtitle: "现货与永续合约，一个账户、实时行情、毫秒级撮合。测试环境，所有资金均为模拟。",
+      heroSubtitle: "现货与永续合约，一个账户、实时行情、毫秒级撮合。",
       start: "立即注册",
       trade: "开始交易",
       overview: "市场概览",
@@ -21,7 +21,7 @@ const base: Messages = {
   en: {
     pc: {
       heroTitle: "Trade the world's leading digital assets",
-      heroSubtitle: "Spot and perpetual futures in one account, live markets, millisecond matching. A test environment: every balance is simulated.",
+      heroSubtitle: "Spot and perpetual futures in one account, live markets, millisecond matching.",
       start: "Sign up",
       trade: "Start trading",
       overview: "Market overview",

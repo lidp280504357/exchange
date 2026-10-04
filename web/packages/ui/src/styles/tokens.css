@@ -17,7 +17,8 @@
   --line-2: #2f3742;
   --brand: #f0b90b;
   --brand-fg: #0b0e11;
-  --brand-soft: #f0b90b26;
+  /* Follows --brand, which the platform profile may set (design 2026-10-04 §4.1). */
+  --brand-soft: color-mix(in srgb, var(--brand) 15%, transparent);
   --green: #0ecb81;
   --red: #f6465d;
   --up: var(--green);
@@ -92,7 +93,7 @@
   --fg-3: #9ca3af;
   --line-1: #e5e7eb;
   --line-2: #d1d5db;
-  --brand-soft: #f0b90b33;
+  --brand-soft: color-mix(in srgb, var(--brand) 20%, transparent);
   --overlay: #11182766;
   --shadow: 0 8px 24px #1118271f;
   color-scheme: light;

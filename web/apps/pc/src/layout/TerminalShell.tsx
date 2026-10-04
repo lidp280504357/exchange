@@ -1,4 +1,5 @@
 import { Outlet } from "react-router";
+import { LearningBanner } from "./LearningBanner";
 import { StatusBanner } from "./StatusBanner";
 import { TopNav } from "./TopNav";
 
@@ -11,6 +12,7 @@ export function TerminalShell() {
   return (
     <div className="flex h-dvh min-h-[760px] min-w-[1024px] flex-col bg-bg-0">
       <TopNav />
+      <LearningBanner />
       <StatusBanner />
       <main className="flex min-h-0 flex-1 flex-col">
         <Outlet />
