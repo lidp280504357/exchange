@@ -17,23 +17,26 @@ import { Card, Page } from "../../kit/Page";
 // published ones within a minute; one replaces the sites' own file of its
 // slug, and taking it off hides that file too.
 
-type Article = AdminSchemas["ContentArticle"];
-type Text = AdminSchemas["ArticleText"];
-/** The sections this page lists (the fixed LEGAL and HOME pages have their own view). */
-type Section = Extract<Article["section"], "ANNOUNCEMENT" | "HELP">;
+export type Article = AdminSchemas["ContentArticle"];
+export type Text = AdminSchemas["ArticleText"];
+export type Section = Article["section"];
+/** The sections this page lists (the fixed LEGAL and HOME pages have their own view, FixedPages). */
+type ListSection = Extract<Section, "ANNOUNCEMENT" | "HELP">;
 type Locale = Text["locale"];
 
 const LOCALES: Locale[] = ["zh-CN", "en"];
-const CATEGORIES: Record<Section, string[]> = {
+const CATEGORIES: Record<ListSection, string[]> = {
   ANNOUNCEMENT: ["notice", "product", "security"],
   HELP: ["account", "funds", "trading", "futures", "faq"],
 };
-const FILES: Record<Section, ContentSection> = { ANNOUNCEMENT: "announcements", HELP: "help" };
+export const FILES: Record<Section, ContentSection> = { ANNOUNCEMENT: "announcements", HELP: "help", LEGAL: "legal", HOME: "home" };
+/** fixedSection reports whether a section has a fixed set of slugs, each the sites bundle a draft of. */
+export const fixedSection = (s: Section): s is "LEGAL" | "HOME" => s === "LEGAL" || s === "HOME";
 /** The user site: the console's domain without its admin. prefix. */
-const SITE = (globalThis.location?.origin ?? "").replace("://admin.", "://");
+export const SITE = (globalThis.location?.origin ?? "").replace("://admin.", "://");
 const slugRE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
-const articlesKey = (section: Section) => ["admin", "articles", section];
+export const articlesKey = (section: Section) => ["admin", "articles", section];
 
 /** The typography of the preview, as the sites render articles. */
 const PROSE = cn(
@@ -62,12 +65,36 @@ function previewLink({ href, title, children }: LinkProps) {
 const title = (a: Article) => a.texts.find((t) => t.locale === "zh-CN")?.title ?? a.texts[0]?.title ?? a.slug;
 
 /** shown reports whether the sites show an article now. */
-const shown = (a: Article) => a.status === "PUBLISHED" && (!a.publish_at || new Date(a.publish_at) <= new Date());
+export const shown = (a: Article) => a.status === "PUBLISHED" && (!a.publish_at || new Date(a.publish_at) <= new Date());
 
-type Draft = { slug: string; category: string; pinned: boolean; order: string; texts: Record<Locale, Text> };
+export type Draft = { slug: string; category: string; pinned: boolean; order: string; texts: Record<Locale, Text> };
+
+type Source = NonNullable<Awaited<ReturnType<typeof bundledSource>>>;
+
+/** seedOf is the draft of a bundled file, in Chinese and (when there is one) English. */
+export function seedOf(slug: string, zh: Source, en: Source | null): Draft {
+  const text = (s: Source): Text => ({ locale: s.locale, title: s.title, summary: s.summary, body: s.body.trim() });
+  return {
+    slug, category: zh.category, pinned: zh.pinned, order: String(zh.order),
+    texts: { "zh-CN": text(zh), en: en ? text(en) : { locale: "en", title: "", summary: "", body: "" } },
+  };
+}
+
+/** articleBody is a draft as the API takes it, the English text only when written; it throws a FormError on what is missing. */
+export function articleBody(d: Draft, t: (key: string) => string) {
+  if (!slugRE.test(d.slug)) throw new FormError(t("admin.content.badSlug"));
+  const zh = d.texts["zh-CN"];
+  if (!zh.title.trim() || !zh.body.trim()) throw new FormError(t("admin.content.needChinese"));
+  const en = d.texts.en;
+  const texts = [zh, ...(en.title.trim() || en.body.trim() ? [en] : [])];
+  if (texts.some((x) => !x.title.trim() || !x.body.trim())) throw new FormError(t("admin.content.needBoth"));
+  const order = Number(d.order);
+  if (!Number.isInteger(order)) throw new FormError(t("admin.content.badOrder"));
+  return { slug: d.slug, category: d.category, pinned: d.pinned, order, texts };
+}
 
 /** ArticlesPage lists a section's articles and the sites' own files, and opens the editor. */
-export function ArticlesPage({ admin, section }: { admin: Admin; section: Section }) {
+export function ArticlesPage({ admin, section }: { admin: Admin; section: ListSection }) {
   const { t } = useTranslation();
   const q = useQuery({
     queryKey: articlesKey(section),
@@ -172,7 +199,7 @@ export function ArticlesPage({ admin, section }: { admin: Admin; section: Sectio
   );
 }
 
-function StatusBadge({ a }: { a: Article }) {
+export function StatusBadge({ a }: { a: Article }) {
   const { t } = useTranslation();
   if (a.status === "PUBLISHED" && !shown(a)) return <Badge tone="info">{t("admin.content.scheduled")}</Badge>;
   const tone = { DRAFT: "neutral", PUBLISHED: "success", ARCHIVED: "warn" } as const;
@@ -186,7 +213,7 @@ type Bundled = { slug: string; title: string; category: string; date: string; se
  * article here has taken over: copied, one becomes a draft whose
  * publication replaces the file.
  */
-function BundledFiles({ section, known, write, onCopy }: { section: Section; known: Set<string>; write: boolean; onCopy: (seed: Draft) => void }) {
+function BundledFiles({ section, known, write, onCopy }: { section: ListSection; known: Set<string>; write: boolean; onCopy: (seed: Draft) => void }) {
   const { t } = useTranslation();
   const files = useQuery({
     queryKey: ["admin", "bundled-articles", section],
@@ -196,14 +223,7 @@ function BundledFiles({ section, known, write, onCopy }: { section: Section; kno
         listSlugs(FILES[section]).map(async (slug): Promise<Bundled | null> => {
           const [zh, en] = await Promise.all([bundledSource(FILES[section], slug, "zh-CN"), bundledSource(FILES[section], slug, "en")]);
           if (!zh) return null;
-          const text = (s: NonNullable<typeof zh>): Text => ({ locale: s.locale, title: s.title, summary: s.summary, body: s.body.trim() });
-          return {
-            slug, title: zh.title, category: zh.category, date: zh.date,
-            seed: {
-              slug, category: zh.category, pinned: zh.pinned, order: String(zh.order),
-              texts: { "zh-CN": text(zh), en: en ? text(en) : { locale: "en", title: "", summary: "", body: "" } },
-            },
-          };
+          return { slug, title: zh.title, category: zh.category, date: zh.date, seed: seedOf(slug, zh, en) };
         }),
       ),
   });
@@ -248,7 +268,7 @@ function draftOf(section: Section, a: Article | null): Draft {
   const empty = (locale: Locale): Text => ({ locale, title: "", summary: "", body: "" });
   return {
     slug: a?.slug ?? "",
-    category: a?.category ?? CATEGORIES[section][0]!,
+    category: a?.category ?? (fixedSection(section) ? "" : CATEGORIES[section][0]!),
     pinned: a?.pinned ?? false,
     order: String(a?.order ?? 0),
     texts: {
@@ -258,8 +278,13 @@ function draftOf(section: Section, a: Article | null): Draft {
   };
 }
 
-/** ArticleEditor writes an article in both languages with a live preview, and publishes it or takes it off. */
-function ArticleEditor({
+/**
+ * ArticleEditor writes an article in both languages with a live preview,
+ * and publishes it or takes it off. A fixed section's article keeps its
+ * slug and has no category, pin or order; the home hero's summary is its
+ * subtitle.
+ */
+export function ArticleEditor({
   section, article, seed, write, onClose, onSaved,
 }: {
   section: Section;
@@ -275,34 +300,26 @@ function ArticleEditor({
   const [view, setView] = useState("edit");
   const [publishing, setPublishing] = useState(false);
   const [at, setAt] = useState("");
+  const fixed = fixedSection(section);
   const text = d.texts[locale];
   const setText = (patch: Partial<Text>) => setD({ ...d, texts: { ...d.texts, [locale]: { ...text, ...patch } } });
-  const body = () => {
-    if (!slugRE.test(d.slug)) throw new FormError(t("admin.content.badSlug"));
-    const zh = d.texts["zh-CN"];
-    if (!zh.title.trim() || !zh.body.trim()) throw new FormError(t("admin.content.needChinese"));
-    const en = d.texts.en;
-    const texts = [zh, ...(en.title.trim() || en.body.trim() ? [en] : [])];
-    if (texts.some((x) => !x.title.trim() || !x.body.trim())) throw new FormError(t("admin.content.needBoth"));
-    const order = Number(d.order);
-    if (!Number.isInteger(order)) throw new FormError(t("admin.content.badOrder"));
-    return { slug: d.slug, category: d.category, pinned: d.pinned, order, texts };
-  };
   const save = async (reason: string) => {
     const res = article
-      ? adminData(await adminApi.PUT("/admin/v1/articles/{id}", { params: { path: { id: article.id } }, body: { ...body(), version: article.version, reason } }))
-      : adminData(await adminApi.POST("/admin/v1/articles", { body: { ...body(), section, reason } }));
+      ? adminData(await adminApi.PUT("/admin/v1/articles/{id}", { params: { path: { id: article.id } }, body: { ...articleBody(d, t), version: article.version, reason } }))
+      : adminData(await adminApi.POST("/admin/v1/articles", { body: { ...articleBody(d, t), section, reason } }));
     onSaved(res);
     return res;
   };
   const live = article !== null && shown(article);
-  const kind = section === "ANNOUNCEMENT" ? "admin.content.newAnnouncement" : "admin.content.newHelp";
+  const heading = fixed
+    ? t("admin.pages.editTitle", { page: t(`admin.pages.names.${d.slug}`, { defaultValue: d.slug }) })
+    : t(section === "ANNOUNCEMENT" ? "admin.content.newAnnouncement" : "admin.content.newHelp");
   return (
     <Drawer
       open
       onOpenChange={(o) => !o && onClose()}
       width={920}
-      title={article ? title(article) : t(kind)}
+      title={article && !fixed ? title(article) : heading}
       description={
         article ? (
           <span className="flex items-center gap-2">
@@ -345,7 +362,7 @@ function ArticleEditor({
                 </Button>
               )}
               title={t("admin.content.archiveTitle")}
-              description={t("admin.content.archiveHint")}
+              description={t(section === "LEGAL" ? "admin.pages.archiveHint" : section === "HOME" ? "admin.pages.archiveHeroHint" : "admin.content.archiveHint")}
               target={<span className="font-mono">{article.slug}</span>}
               confirmWord={article.slug}
               run={async (reason) => {
@@ -363,40 +380,44 @@ function ArticleEditor({
       }
     >
       <div className="flex flex-col gap-4">
-        <div className="grid gap-3 sm:grid-cols-[1fr_12rem_auto]">
-          <label className="flex flex-col gap-1.5 text-sm text-fg-2">
-            {t("admin.content.slug")}
-            <Input
-              id="article-slug"
-              value={d.slug}
-              onValueChange={(v) => setD({ ...d, slug: v.toLowerCase() })}
-              disabled={!write}
-              autoComplete="off"
-              error={d.slug && !slugRE.test(d.slug) ? t("admin.content.badSlug") : undefined}
-              hint={!article && t("admin.content.slugHint")}
-            />
-          </label>
-          <label className="flex flex-col gap-1.5 text-sm text-fg-2">
-            {t("admin.content.category")}
-            <Select
-              aria-label={t("admin.content.category")}
-              value={d.category}
-              disabled={!write}
-              onValueChange={(v) => setD({ ...d, category: v })}
-              options={[...new Set([...CATEGORIES[section], d.category])].map((c) => ({ value: c, label: t(`admin.content.categories.${c}`, { defaultValue: c }) }))}
-            />
-          </label>
-          {section === "ANNOUNCEMENT" ? (
-            <div className="flex h-10 items-center self-end">
-              <Switch checked={d.pinned} disabled={!write} onCheckedChange={(v) => setD({ ...d, pinned: v })} label={t("admin.content.pinned")} />
-            </div>
-          ) : (
-            <label className="flex w-28 flex-col gap-1.5 text-sm text-fg-2">
-              {t("admin.content.order")}
-              <Input value={d.order} inputMode="numeric" disabled={!write} onValueChange={(v) => setD({ ...d, order: v })} />
+        {fixed ? (
+          <p className="text-xs text-fg-3">{t(section === "HOME" ? "admin.pages.heroHint" : "admin.pages.legalHint", { slug: d.slug })}</p>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-[1fr_12rem_auto]">
+            <label className="flex flex-col gap-1.5 text-sm text-fg-2">
+              {t("admin.content.slug")}
+              <Input
+                id="article-slug"
+                value={d.slug}
+                onValueChange={(v) => setD({ ...d, slug: v.toLowerCase() })}
+                disabled={!write}
+                autoComplete="off"
+                error={d.slug && !slugRE.test(d.slug) ? t("admin.content.badSlug") : undefined}
+                hint={!article && t("admin.content.slugHint")}
+              />
             </label>
-          )}
-        </div>
+            <label className="flex flex-col gap-1.5 text-sm text-fg-2">
+              {t("admin.content.category")}
+              <Select
+                aria-label={t("admin.content.category")}
+                value={d.category}
+                disabled={!write}
+                onValueChange={(v) => setD({ ...d, category: v })}
+                options={[...new Set([...CATEGORIES[section], d.category])].map((c) => ({ value: c, label: t(`admin.content.categories.${c}`, { defaultValue: c }) }))}
+              />
+            </label>
+            {section === "ANNOUNCEMENT" ? (
+              <div className="flex h-10 items-center self-end">
+                <Switch checked={d.pinned} disabled={!write} onCheckedChange={(v) => setD({ ...d, pinned: v })} label={t("admin.content.pinned")} />
+              </div>
+            ) : (
+              <label className="flex w-28 flex-col gap-1.5 text-sm text-fg-2">
+                {t("admin.content.order")}
+                <Input value={d.order} inputMode="numeric" disabled={!write} onValueChange={(v) => setD({ ...d, order: v })} />
+              </label>
+            )}
+          </div>
+        )}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Segmented
             size="sm"
@@ -424,8 +445,14 @@ function ArticleEditor({
               <Input id={`article-title-${locale}`} value={text.title} disabled={!write} maxLength={200} onValueChange={(v) => setText({ title: v })} />
             </label>
             <label className="flex flex-col gap-1.5 text-sm text-fg-2">
-              {t("admin.content.summary")}
-              <Input value={text.summary} disabled={!write} maxLength={500} placeholder={t("admin.content.summaryHint")} onValueChange={(v) => setText({ summary: v })} />
+              {t(section === "HOME" ? "admin.pages.subtitle" : "admin.content.summary")}
+              <Input
+                value={text.summary}
+                disabled={!write}
+                maxLength={500}
+                placeholder={t(section === "HOME" ? "admin.pages.subtitleHint" : "admin.content.summaryHint")}
+                onValueChange={(v) => setText({ summary: v })}
+              />
             </label>
             <label className="flex flex-col gap-1.5 text-sm text-fg-2">
               {t("admin.content.body")}

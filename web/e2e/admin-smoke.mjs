@@ -301,6 +301,22 @@ try {
   await waitText("注册赠送");
   await page.waitForFunction(() => /平台资料|读不到/.test(document.querySelector("main")?.innerText ?? ""), { timeout: 20000 });
   ok("the launch checklist with its verdict, and the platform settings");
+  // The fixed pages: the six legal pages and the home hero, each with what
+  // the sites show; the hero's editor opens from its default (closed unsaved).
+  await go("/pages");
+  await page.waitForFunction(
+    () => {
+      const shown = [...document.querySelectorAll("[data-testid^=fixed-][data-onsite]")].map((el) => el.getAttribute("data-onsite"));
+      return shown.length === 7 && shown.every((s) => s !== "none");
+    },
+    { timeout: 20000 },
+  );
+  await page.click('[data-testid="fixed-edit-home-hero"]');
+  await waitText("副标题");
+  await page.waitForFunction(() => document.querySelector("#article-title-zh-CN")?.value.length > 0, { timeout: 10000 });
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.querySelector("[role=dialog]"), { timeout: 10000 });
+  ok("the fixed pages: the legal pages and the home hero with what the sites show, the hero's editor from its default");
 
   // 9c. Operations: the announcements, the editor with its preview (closed
   // unsaved), the help articles, the messages and their form (closed unsent).

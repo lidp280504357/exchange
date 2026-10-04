@@ -30,6 +30,7 @@ const pages: Record<string, () => Promise<unknown>> = {
   risk: () => import("./pages/Flags"),
   announcements: () => import("./pages/content/Announcements"),
   "help-articles": () => import("./pages/content/HelpArticles"),
+  pages: () => import("./pages/content/FixedPages"),
   broadcasts: () => import("./pages/content/Broadcasts"),
   admins: () => import("./pages/system/Admins"),
   audit: () => import("./pages/Audit"),

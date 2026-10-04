@@ -1776,7 +1776,7 @@ else
   at_exit restore_platform_name
   as ADMIN PUT /admin/v1/platform/profile "$(platform_write "E2E $RUN" "$PV" "e2e: a rename, put back at once")"
   expect 200 - "ADMIN renames the platform"
-  check ".name == \"E2E $RUN\" and .version == $((PV + 1)) and .updated_by == \"admin:$EMAIL_ADMIN\"" "saved at the next version, by the ADMIN"
+  check ".name == \"E2E $RUN\" and .version == $((PV + 1)) and .updated_by == \"$EMAIL_ADMIN\"" "saved at the next version, by the ADMIN"
   as ADMIN PUT /admin/v1/platform/profile "$(platform_write "E2E stale" "$PV" "e2e: a stale version")"
   expect 409 INSTRUMENT_PLATFORM_CHANGED "a save over a version since changed is refused"
   as ADMIN PUT /admin/v1/platform/profile "$(platform_write "$PNAME" "$((PV + 1))" "e2e: the name put back")"
@@ -1815,6 +1815,12 @@ else
   check ".version == $WV" "the welcome credits did not change"
   PLATFORM_DONE=1
 fi
+# The fixed pages (/pages): the legal pages are listed; a slug outside the
+# six is refused, so nothing is written.
+as AUDITOR GET "/admin/v1/articles?section=LEGAL" ""
+expect 200 - "every administrator reads the legal pages"
+as OPERATOR POST /admin/v1/articles '{"section":"LEGAL","slug":"e2e-not-fixed","category":"","pinned":false,"order":0,"texts":[{"locale":"zh-CN","title":"e2e","summary":"","body":"e2e"}],"reason":"e2e: a legal page outside the six"}'
+expect 400 COMMON_INVALID_ARGUMENT "a legal page is one of the six fixed slugs"
 
 echo "== an announcement on both sites within a minute"
 # One announcement with a fixed slug (articles are never deleted): written
