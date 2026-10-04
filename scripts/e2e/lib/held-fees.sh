@@ -8,9 +8,12 @@
 # of the 10 sent and 5 times the network's fee of 5), each fee is held,
 # and no balance moves, so the reconciliation finds no shortfall (a fee
 # then booked leaves a small surplus at the stand-in, never a shortfall).
-# Source it after lib/common.sh and lib/remote.sh; about two minutes.
+# Source it after lib/common.sh and lib/remote.sh; about two minutes. It
+# fails at once unless wallet-service's UDUNMOCK custodian is the stand-in
+# udun-mock (held_standin tells first, for a caller that skips instead).
 #
 #   source "$(dirname "$0")/lib/held-fees.sh"
+#   held_standin || { echo "SKIP: UDUNMOCK is not the stand-in"; exit 0; }
 #   held_fees 2
 #   echo "${HELD_FEES[@]}"
 
@@ -18,6 +21,12 @@
 # outcome for an address holds for everyone sending to it.
 HELD_PAYEE=TT8ZMouf3kkdTWh61n4WNTdR3QntPoj4Kv
 HELD_COIN="195:TQQCuyVcUEknTGyfSRKhcUuLZfEe93qWpy"
+
+# held_standin reports whether wallet-service's UDUNMOCK custodian is the
+# stand-in udun-mock (review AX: never a real gateway).
+held_standin() {
+  [[ $(remote "sudo docker compose $COMPOSE_FILES exec -T wallet-service printenv UDUNMOCK_GATEWAY_URL </dev/null || true") == http://udun-mock:* ]]
+}
 
 held_mock() {
   local args
@@ -29,6 +38,7 @@ held_fees() {
   local n=$1 email device token secret last step addr id i
   local -a auth
   HELD_FEES=()
+  held_standin || { echo "FAIL held_fees: wallet-service's UDUNMOCK custodian is not the stand-in udun-mock" >&2; exit 1; }
   email="e2e-held-fees-$RUN@example.com"
   device="e2e-held-fees-$RUN"
   echo "== $n custodian's fees held for a person ($email)"
