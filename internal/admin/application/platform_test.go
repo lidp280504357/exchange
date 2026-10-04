@@ -17,10 +17,22 @@ import (
 // fakePlatform answers as instrument-service's profile and ledger-service's
 // welcome credits do: a stale version is refused.
 type fakePlatform struct {
-	profile map[string]any
-	credits []ports.WelcomeCredit
-	version int64
-	sets    []string
+	profile   map[string]any
+	credits   []ports.WelcomeCredit
+	version   int64
+	updatedBy string
+	sets      []string
+	// lose sets the credits but loses the answer, once.
+	lose bool
+}
+
+// creditCatalog lists the assets the welcome credits may name, with their
+// decimals.
+type creditCatalog struct{ ports.Instruments }
+
+func (creditCatalog) List(context.Context) (json.RawMessage, error) {
+	return json.RawMessage(`{"assets":[{"asset_code":"USDT","decimals":6},{"asset_code":"BTC","decimals":8},{"asset_code":"ETH","decimals":8},` +
+		`{"asset_code":"DOGE","decimals":8}],"pairs":[]}`), nil
 }
 
 func newFakePlatform() *fakePlatform {
@@ -69,15 +81,19 @@ func (f *fakePlatform) DeleteImage(_ context.Context, kind, _, _ string) (json.R
 }
 
 func (f *fakePlatform) WelcomeCredits(context.Context) (json.RawMessage, error) {
-	return json.Marshal(map[string]any{"credits": f.credits, "flag_enabled": true, "version": f.version})
+	return json.Marshal(map[string]any{"credits": f.credits, "flag_enabled": true, "version": f.version, "updated_by": f.updatedBy})
 }
 
 func (f *fakePlatform) SetWelcomeCredits(_ context.Context, credits []ports.WelcomeCredit, expected int64, actor, reason string) (json.RawMessage, error) {
 	if expected != f.version {
 		return nil, apperr.New(apperr.KindConflict, "LEDGER_SETTINGS_CHANGED", "changed")
 	}
-	f.credits, f.version = credits, f.version+1
+	f.credits, f.version, f.updatedBy = credits, f.version+1, actor
 	f.sets = append(f.sets, actor+": "+reason)
+	if f.lose {
+		f.lose = false
+		return nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "the answer was lost")
+	}
 	return f.WelcomeCredits(context.Background())
 }
 
@@ -154,7 +170,7 @@ func TestWelcomeCredits(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	pl := newFakePlatform()
-	h.svc.Platform, h.svc.Prices = pl, fakePrices{"BTC-USDT": decimal.NewFromInt(60_000)}
+	h.svc.Platform, h.svc.Prices, h.svc.Catalog = pl, fakePrices{"BTC-USDT": decimal.NewFromInt(60_000)}, creditCatalog{}
 	h.admin(t, "boss@example.com", domain.RoleAdmin)
 	h.admin(t, "second@example.com", domain.RoleAdmin)
 	h.admin(t, "finance@example.com", domain.RoleFinance)
@@ -172,9 +188,13 @@ func TestWelcomeCredits(t *testing.T) {
 		t.Fatalf("a stale version: %v", err)
 	}
 	for name, bad := range map[string][]ports.WelcomeCredit{
-		"twice":    {credit("USDT", "1"), credit("usdt", "2")},
-		"negative": {credit("USDT", "-1")},
-		"no asset": {credit(" ", "1")},
+		"twice":      {credit("USDT", "1"), credit("usdt", "2")},
+		"negative":   {credit("USDT", "-1")},
+		"no asset":   {credit(" ", "1")},
+		"one letter": {credit("X", "1")},
+		// Raises held to the ledger's rules before a second ADMIN sees them.
+		"unknown asset":     {credit("USDT", "5000"), credit("NOPE", "1")},
+		"too many decimals": {credit("USDT", "5000.1234567")},
 	} {
 		if _, err := h.svc.SetWelcomeCredits(ctx, boss, bad, 2, "a bad list"); code(err) != apperr.CodeInvalidArgument {
 			t.Fatalf("%s: %v", name, err)
@@ -223,5 +243,42 @@ func TestWelcomeCredits(t *testing.T) {
 	done, err = h.svc.DecideApproval(ctx, second, res.Approval.ID, true, "too late")
 	if err != nil || done.Status != domain.ApprovalFailed || !strings.HasPrefix(done.Result, "LEDGER_SETTINGS_CHANGED") || pl.credits[1].Amount.String() != "1000" {
 		t.Fatalf("a stale request %+v %v", done, err)
+	}
+
+	// The ledger set a raise but its answer was lost: the request stays
+	// pending; approved again, the ledger's 409 is the earlier attempt's
+	// work, found at the next version with these credits by this actor
+	// (review ㉚).
+	res, err = h.svc.SetWelcomeCredits(ctx, boss, []ports.WelcomeCredit{credit("USDT", "1500"), credit("BTC", "0.01")}, pl.version, "a bit more")
+	if err != nil || res.Approval == nil {
+		t.Fatalf("a raise %+v %v", res, err)
+	}
+	pl.lose = true
+	if _, err := h.svc.DecideApproval(ctx, second, res.Approval.ID, true, "agreed, a bit more"); err == nil {
+		t.Fatal("a lost answer decided the request")
+	}
+	if got := h.store.approvals[res.Approval.ID]; got.Status != domain.ApprovalPending || pl.credits[1].Amount.String() != "1500" {
+		t.Fatalf("after the lost answer %+v %+v", got, pl.credits)
+	}
+	done, err = h.svc.DecideApproval(ctx, second, res.Approval.ID, true, "agreed again")
+	if err != nil || done.Status != domain.ApprovalExecuted || done.Result != "welcome credits version 5 (set by an earlier attempt)" || len(pl.sets) != 4 {
+		t.Fatalf("approved again %+v %v %v", done, err, pl.sets)
+	}
+
+	// Not decided within a day, a raise lapses: listed as expired, and
+	// approving it fails it and sets nothing.
+	res, err = h.svc.SetWelcomeCredits(ctx, boss, []ports.WelcomeCredit{credit("USDT", "2000"), credit("BTC", "0.01")}, pl.version, "more, later")
+	if err != nil || res.Approval == nil {
+		t.Fatalf("a raise %+v %v", res, err)
+	}
+	h.now = h.now.Add(welcomeApprovalTTL)
+	list, _, err := h.svc.Approvals(ctx, boss, domain.ApprovalPending, "", 10)
+	if err != nil || len(list) != 1 || !list[0].Lapsed {
+		t.Fatalf("listed %+v %v", list, err)
+	}
+	version := pl.version
+	done, err = h.svc.DecideApproval(ctx, second, res.Approval.ID, true, "a day late")
+	if err != nil || done.Status != domain.ApprovalFailed || !strings.HasPrefix(done.Result, "expired at ") || pl.version != version {
+		t.Fatalf("a lapsed raise %+v %v", done, err)
 	}
 }

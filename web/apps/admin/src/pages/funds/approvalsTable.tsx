@@ -213,7 +213,7 @@ function Holder({ p }: { p: Record<string, string> }) {
   );
 }
 
-/** Mode says who carries it out: its requester alone, or a second administrator (and why); a lapsed simulated market's request says so. */
+/** Mode says who carries it out: its requester alone, or a second administrator (and why); a lapsed request says so. */
 export function Mode({ a }: { a: Approval }) {
   const { t } = useTranslation();
   if (a.mode === "SINGLE") return <Badge tone="info">{t("admin.funds.single")}</Badge>;
@@ -221,18 +221,19 @@ export function Mode({ a }: { a: Approval }) {
     <span className="inline-flex flex-col gap-0.5">
       <Badge tone="neutral">{t("admin.funds.twoPerson")}</Badge>
       {a.escalation && <span className="text-xs text-fg-3">{t(`admin.funds.escalationShort.${a.escalation}`)}</span>}
-      {a.status === "PENDING" && simLapsed(a) && <Badge tone="warn">{t("admin.sim.lapsedShort")}</Badge>}
+      {a.status === "PENDING" && lapsed(a) && <Badge tone="warn">{t("admin.sim.lapsedShort")}</Badge>}
     </span>
   );
 }
 
 /**
- * simLapsed reports whether a simulated market's request lapsed (a day
- * after it was asked for, or when its event was to start, C5.5 ④), as the
- * server judged it by its clock when it listed it (review ⑭).
+ * lapsed reports whether a request that lapses did: a simulated market's
+ * (a day after it was asked for, or when its event was to start, C5.5 ④)
+ * or a welcome credits raise (a day after, review ㉚), as the server judged
+ * it by its clock when it listed it (review ⑭).
  */
-function simLapsed(a: Approval): boolean {
-  return simKind(a.kind) && a.expired === true;
+function lapsed(a: Approval): boolean {
+  return (simKind(a.kind) || a.kind === "WELCOME_CREDIT") && a.expired === true;
 }
 
 /**

@@ -417,8 +417,9 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 - **图片**：浅色与深色背景的 logo、favicon、Apple 触摸图标。`PUT/DELETE /admin/v1/platform/images/{kind}`（`logo_light`、`logo_dark`、`favicon`、`apple_touch_icon`）：正方形、最大 200 KB；logo 收 PNG、SVG、WebP，favicon 收 PNG、SVG，触摸图标只收 PNG 且至少 180 px（instrument-service 再查一遍，SVG 按允许名单重建）。上传前在确认框里预览；删除后恢复内置图片。审计 `admin.platform.image_updated`（类型、大小、SHA-256，不含内容）与 `admin.platform.image_removed`。图片地址带版本，nginx 让 admin.<域名> 同源代理 `/v1/platform/images/*`（后台的 CSP 不放第三方图片）。
 - **注册赠送**（ledger-service 的设置，经 `LEDGER_SERVICE_URL` 的 `/internal/ledger/settings/welcome-credits`；页面标「上线应为 0」）：新账户注册时得到的资金列表（资产与数额），总闸开关 `ledger.welcome_credit` 也开着才发。`PUT /admin/v1/platform/welcome-credits` 带 `expected_version`（过期 409 `LEDGER_SETTINGS_CHANGED`）：
   - 降低或清空（数额 0 即不发，`[]` 全部不发）立即生效（200），审计 `admin.platform.welcome_changed`（新旧列表）；账本另记 `ledger.settings.welcome_credits`。
-  - 提高任何一项、或从 0 变为非零，一律等另一位 ADMIN 批准（202，资金操作 `WELCOME_CREDIT`，模式 TWO_PERSON，`escalation` 为 `WELCOME_RAISE`，单人模式也一样）。提高部分按各资产 USDT 交易对的新鲜价格折算合计，每次最多 10,000 USDT，谁批准都不能越过（422 `ADMIN_WELCOME_RAISE_CAP`）；没有新鲜价格的资产不能提高（422 `ADMIN_WELCOME_UNPRICED`）。
-  - 批准要 `settings.write`（ADMIN），不能批准自己的；批准时按申请时的版本设置，期间赠送被改过则这次申请失败（结果 `LEDGER_SETTINGS_CHANGED: …`），不会覆盖别人的修改。申请人可以撤回。这类申请不记 `attempted_at`（重复设置会被版本拒绝），不计入单人模式的 24 小时累计。审计 `admin.platform.welcome_requested/approved/rejected/changed/failed`，对象 `platform`，详情有新旧列表、版本与折算金额。
+  - 提高任何一项、或从 0 变为非零，一律等另一位 ADMIN 批准（202，资金操作 `WELCOME_CREDIT`，模式 TWO_PERSON，`escalation` 为 `WELCOME_RAISE`，单人模式也一样）。提高部分按各资产 USDT 交易对的新鲜价格折算合计，每次最多 10,000 USDT，谁批准都不能越过（422 `ADMIN_WELCOME_RAISE_CAP`）；没有新鲜价格的资产不能提高（422 `ADMIN_WELCOME_UNPRICED`）。申请前按账本的规则先查一遍（资产代码 2–12 位大写字母与数字、资产存在、数额不超过资产的小数位，否则 400），不会等到批准时才失败（复审 ㉚）。
+  - 批准要 `settings.write`（ADMIN），不能批准自己的；批准时按申请时的版本设置，期间赠送被改过则这次申请失败（结果 `LEDGER_SETTINGS_CHANGED: …`），不会覆盖别人的修改。申请人可以撤回。申请一天内有效（折算用的是申请时的价格），过期后列表标「已过期」，批准只会记为失败（`expired at …`），不设置任何东西（复审 ㉚）。这类申请不记 `attempted_at`（重复设置会被版本拒绝），不计入单人模式的 24 小时累计。审计 `admin.platform.welcome_requested/approved/rejected/changed/failed`，对象 `platform`，详情有新旧列表、版本与折算金额。
+  - 账本的应答丢失时（已设置、但后台没收到回复）申请仍是待批；再次批准时账本按版本返回 409，后台随即重读设置：版本正好是申请时的下一版、列表与申请一致、修改人是申请人，就是上一次的设置，记为已执行（结果带 `set by an earlier attempt`），否则记为失败（复审 ㉚）。
 
 ### 上线检查清单
 
@@ -434,12 +435,13 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 | 测试资产资格 `test_assets` | 开关 `wallet.test_assets` | 关（带地区规则也算开） | 功能开关 |
 | 托管方 `custodian` | wallet-service `/internal/wallet/custody` 的 `configured` 与 `gateway_host`（UDUN） | 已配置且不是 `udun-mock`；没有 `gateway_host` 字段时待接入 | 上线手册 |
 | 提现总闸 `withdraw` | 开关 `wallet.withdraw` | 开 | 功能开关 |
-| 品牌 `brand` | 平台资料 | 名称、至少一张 logo、favicon 已上传 | 平台设置 |
+| 品牌 `brand` | 平台资料 | 名称不是初始的 `Astras`、至少一张 logo、favicon 已上传 | 平台设置 |
 | 平台币资料 `coin_profile` | 模拟市场的币（默认 ASTRA）的资产资料 | 名称与 logo 已设置 | 代币信息 |
-| 法律页 `legal` | 内容 LEGAL 分区 | `terms`、`privacy`、`risk` 有已发布的覆盖稿（「以默认稿发布」也算）；分区没上线时待接入 | 固定页面 |
-| 第三方 `third_party` | 各服务的 `exchange_config_present` | 人机验证、邮件、链服务都为是；没有服务上报时待接入 | 上线手册 |
+| 法律页 `legal` | 内容 LEGAL 分区 | `terms`、`privacy`、`risk` 有已生效的覆盖稿（已发布且不是定时到以后；「以默认稿发布」也算）；分区没上线时待接入 | 固定页面 |
+| 第三方 `third_party` | 各服务的 `exchange_config_present` | 人机验证、邮件、链服务都为是；有一项上报为否即未达标，有一项没人上报（那个服务的指标读不到）为读不到；没有服务上报时待接入 | 上线手册 |
 | 管理员 `admins` | 后台名册 | 至少 2 名启用的 ADMIN，全部绑定身份验证器 | 管理员与角色 |
 | 域名 `domain` | 平台资料的 `domain` 与访问后台用的主机名（nginx 转来的 Host） | 后台在 admin.<资料里的域名> | 平台设置 |
+| HOUSE 报价与资金 `house` | 开关 `market.house_liquidity` 与 HOUSE 库存（MARKET_MAKER 账户） | 开，且每个组成交易对的背书资产（有充值或提现的资产，如 USDT、BTC、ETH；没有交易对的托管方测试资产不算）余额大于 0（复审 ㉚ 补的第 15 项，设计 §3 E 行） | HOUSE 敞口 |
 
 ### 审计
 
@@ -511,7 +513,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
   - 后台建管理员（C4a、C5.5 ⑪：ADMIN 建 OPERATOR，响应 `no-store`、只有一次性设置链接；设置前登录不了；不带会话打开链接看到账号与要绑定的密钥，短口令与错的验证码被拒，设好后链接作废、用自己设的登录；改为 AUDITOR 后下一个请求即生效；重置口令与身份验证器都结束会话、旧的立即失效，各自的链接设好后可登录；自己改口令时错的当前口令被拒、改后用新的登录；结束会话；停用后不能登录、启用后可以；不能改自己的账号；链接、口令与密钥不出现在任何输出与审计里）。
   - 模拟市场（不改动线上价格：两个事件都排在明天并取消，其中 35% 的那个由 OPERATOR 申请、ADMIN 批准，检查 market-sim 记下的发起人与批准人；参数改了再改回，超出份额的参数改动被拒绝；每个机器人增发 0.01 USDT，20 万 USDT 的增发被拒绝）。
   - 运营：固定 slug `e2e-console` 的公告（文章不删除，第一次运行新建，以后改写）——定时发布前站点看不到，立即发布后 PC 站与手机站的接口 1 分钟内列出，发布中修改 1 分钟内更新，旧版本的修改被拒，下线后从列表消失、slug 进 `withdrawn`；给本次的测试用户发一条站内信，用户在通知里看到并读过后，后台显示已收到 1、已读 1；列表一页一页给、只有摘要，坏游标 400；这条消息没有失败的轮次，「继续发送」只对 `FAILED` 的有效（409），AUDITOR 不能（C5.5 ⑫）。
-  - 平台设置与上线检查清单（D2）：清单 14 项、测试服未就绪（后台免验证码登录与测试资产开着）；OPERATOR 改不了平台资料，ADMIN 改名为 `E2E Exchange <运行编号末 4 位>` 后按读到的版本改回（旧版本 409，运行中断时退出钩子改回；名称里不放 6 位以上的数字：邮件带着平台名称、notification-service 缓存 10 分钟，而 e2e 取验证码取邮件里第一个 6 位数）；注册赠送：提高超过 10,000 USDT 422、旧版本 409、提高 1 USDT 进入 `WELCOME_CREDIT` 审批（申请人与 FINANCE 批不了），ADMIN 撤回后版本不变；审计里有改名与申请；LEGAL 栏目可读，六个固定 slug 以外的被拒（400，什么都不写）。
+  - 平台设置与上线检查清单（D2）：清单 15 项、测试服未就绪（后台免验证码登录与测试资产开着）；OPERATOR 改不了平台资料，ADMIN 改名为 `E2E Exchange <运行编号末 4 位>` 后按读到的版本改回（旧版本 409，运行中断时退出钩子改回；名称里不放 6 位以上的数字：邮件带着平台名称、notification-service 缓存 10 分钟，而 e2e 取验证码取邮件里第一个 6 位数）；注册赠送：提高超过 10,000 USDT 422、旧版本 409、提高 1 USDT 进入 `WELCOME_CREDIT` 审批（申请人与 FINANCE 批不了），ADMIN 撤回后版本不变；审计里有改名与申请；LEGAL 栏目可读，六个固定 slug 以外的被拒（400，什么都不写）。
   - 系统健康（全部就绪且带版本，消费者的滞后与死信数，行情源）、审计查询（含充值处置的四个动作与管理员的七个动作）与 CSV 导出（BOM、表头、`X-Truncated: false`，导出本身被审计）、退出与停用。
 - **浏览器冒烟** `web/e2e/admin-smoke.mjs`（`scripts/e2e/web.sh` 运行，每次建一个临时 ADMIN、结束停用；1440 × 900）：登录、概览、用户页与各标签、身份变更申请、搜索、订单与成交、充值（待处理、补记待回调、补记抽屉，不提交）、提现队列（带筛选）与一笔提现的详情（地址簿、该用户最近的提现）、托管方（优盾的页面能打开，不论连着哪个网关；替身 `UDUNMOCK`：可访问、TUSD 币种、它的对账行、一条回调的原始请求与来源地址、托管方手续费，C6 起按协调会话 ⑤ 离开优盾）、交易对改状态的确认框（取消，不真的改）、资产的资料与图标、合约、仓位、强平记录、HOUSE（近 30 日盈亏、敞口、各交易对、各合约净头寸）、开关、对账、审计（一条的详情、CSV 导出）、报表（含用户增长与 HOUSE 盈亏）、管理员与角色（新建表单打开后取消）、系统健康、上线检查清单（结论与各项状态）、平台设置、固定页面（七行各自的站点显示，首页横幅的编辑器从默认稿打开、不保存）、公告编辑器的预览（不保存）、帮助中心、站内信与发送表单（不发送）、模拟市场五页（价格控制的确认框显示影响后取消，不发起事件）与机器人的订单、资金调整页、审批、设置（含每页条数）、事件流、账号与安全（不修改）、从账户菜单退出、不带链接的设置页；所有 `/admin/v1` 响应按 `api/admin/admin.yaml` 校验。本机：`ADMIN_EMAIL=… ADMIN_PASSWORD=… APP=http://localhost:5180 node web/e2e/admin-smoke.mjs`。
 - **Lighthouse**：`task web:lighthouse` 跑登录页（`web/lighthouse/admin.json`，性能 ≥ 90）与登录后的页面（`web/lighthouse/console.sh`：经 ssh 建一个临时 ADMIN（口令与密钥从标准输入传入、不打印），会话以请求头文件交给 Lighthouse，结束时退出并停用；设计 §6 要求性能 ≥ 85；C6 收尾时登录后的十一页为 90–95，见上文「首屏」）。报告在 `.lighthouseci/`。

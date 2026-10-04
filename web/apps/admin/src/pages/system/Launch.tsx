@@ -5,7 +5,7 @@ import { CircleCheck, TriangleAlert } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
-import { TimeText } from "../../kit/format";
+import { Num, TimeText } from "../../kit/format";
 import { Card, Page } from "../../kit/Page";
 
 // The launch checklist (design 2026-10-04 §4.6, D2): what of the
@@ -24,7 +24,7 @@ const tone: Record<Status, "success" | "danger" | "neutral" | "warn"> = { OK: "s
 const FIX: Record<Key, string | null> = {
   welcome_credits: "/platform#welcome", learning_mode: "/platform", registration: "/platform", admin_totp: "/risk", two_person: "/risk",
   test_assets: "/risk", custodian: null, withdraw: "/risk", brand: "/platform", coin_profile: "/sim/token", legal: "/pages",
-  third_party: null, admins: "/admins", domain: "/platform",
+  third_party: null, admins: "/admins", domain: "/platform", house: "/house",
 };
 
 export const launchKey = ["admin", "launch-checklist"];
@@ -119,7 +119,8 @@ export default function Launch() {
 function Current({ item: { key, value: v, status } }: { item: Item }) {
   const { t } = useTranslation();
   if (status === "PENDING") return <span className="text-sm text-fg-3">{t("admin.launch.pending")}</span>;
-  if (status === "UNKNOWN") return <span className="text-sm text-warn">{t("admin.launch.unknown")}</span>;
+  // An unknown third party still shows what the other services reported.
+  if (status === "UNKNOWN" && key !== "third_party") return <span className="text-sm text-warn">{t("admin.launch.unknown")}</span>;
   const on = (b: unknown) => t(b ? "admin.launch.on" : "admin.launch.off");
   const yes = (b: unknown) => (b === true ? "✓" : b === false ? "✗" : "?");
   let body: ReactNode;
@@ -155,7 +156,12 @@ function Current({ item: { key, value: v, status } }: { item: Item }) {
       body = v.gateway_host ? <span className="font-mono">{String(v.gateway_host)}</span> : t("admin.launch.notConfigured");
       break;
     case "brand":
-      body = t("admin.launch.brandNow", { name: String(v.name ?? ""), logo: yes(v.logo), favicon: yes(v.favicon) });
+      body = (
+        <>
+          {t("admin.launch.brandNow", { name: String(v.name ?? ""), logo: yes(v.logo), favicon: yes(v.favicon) })}
+          {v.default_name === true && <span className="text-danger"> · {t("admin.launch.defaultName")}</span>}
+        </>
+      );
       break;
     case "coin_profile":
       body = t("admin.launch.coinNow", { asset: String(v.asset ?? ""), name: String(v.display_name ?? ""), logo: yes(v.logo) });
@@ -181,6 +187,24 @@ function Current({ item: { key, value: v, status } }: { item: Item }) {
     case "domain":
       body = t("admin.launch.domainNow", { domain: String(v.domain || "—"), host: String(v.console_host ?? "") });
       break;
+    case "house": {
+      const backed = Object.entries((v.backed as Record<string, string> | undefined) ?? {});
+      body = (
+        <>
+          <span className="font-mono text-xs text-fg-3">{String(v.flag)}</span> {on(v.enabled)}
+          <span className="text-fg-3"> · </span>
+          {backed.length
+            ? backed.map(([asset, balance], i) => (
+                <span key={asset} className={Number(balance) > 0 ? undefined : "text-danger"}>
+                  {i > 0 && " · "}
+                  <Num value={balance} unit={asset} />
+                </span>
+              ))
+            : t("admin.launch.noBacked")}
+        </>
+      );
+      break;
+    }
   }
   return <span className="text-sm text-fg-1">{body}</span>;
 }

@@ -1746,8 +1746,10 @@ check 'all(.services[]; has("version") | not) and (has("feed") | not)' "without 
 echo "== the platform's settings and the launch checklist (design 2026-10-04, D2)"
 as AUDITOR GET /admin/v1/launch-checklist ""
 expect 200 - "every administrator reads the launch checklist"
-check '(.items | length) == 14 and ([.items[].key] | unique | length) == 14 and all(.items[]; .status | IN("OK", "FAIL", "PENDING", "UNKNOWN"))' \
-  "fourteen items, each with its state"
+check '(.items | length) == 15 and ([.items[].key] | unique | length) == 15 and all(.items[]; .status | IN("OK", "FAIL", "PENDING", "UNKNOWN"))' \
+  "fifteen items, each with its state"
+check '.items[] | select(.key == "house") | .value.flag == "market.house_liquidity" and (.value.backed | has("USDT"))' \
+  "HOUSE's item reads its flag and its inventory of the backed assets"
 check '.ready == false and ([.items[] | select(.key == "admin_totp" or .key == "test_assets")] | all(.status == "FAIL"))' \
   "the test server is not ready: the console's sign-in without the code and the test assets are on"
 as AUDITOR GET /admin/v1/platform/profile ""

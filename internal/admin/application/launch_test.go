@@ -39,6 +39,30 @@ func (c *launchCatalog) AssetProfile(_ context.Context, code string) (json.RawMe
 	return json.Marshal(map[string]any{"display_name": code, "logo_url": c.logo, "version": 2})
 }
 
+// List has three backed assets in pairs, a backed one in none (the
+// custodian's test asset) and an internal one.
+func (c *launchCatalog) List(context.Context) (json.RawMessage, error) {
+	return json.RawMessage(`{"assets":[
+		{"asset_code":"USDT","deposit_enabled":true,"withdraw_enabled":true},{"asset_code":"BTC","deposit_enabled":true,"withdraw_enabled":true},
+		{"asset_code":"ETH","deposit_enabled":false,"withdraw_enabled":true},{"asset_code":"TUSD","deposit_enabled":true,"withdraw_enabled":true},
+		{"asset_code":"ASTRA","deposit_enabled":false,"withdraw_enabled":false}],
+		"pairs":[{"base_asset":"BTC","quote_asset":"USDT"},{"base_asset":"ETH","quote_asset":"USDT"},{"base_asset":"ASTRA","quote_asset":"USDT"}]}`), nil
+}
+
+// launchLedger holds HOUSE's inventory (MARKET_MAKER).
+type launchLedger struct {
+	*fakeLedger
+	house map[string]string
+}
+
+func (l *launchLedger) SystemBalances(context.Context, string) ([]ports.Balance, error) {
+	out := []ports.Balance{{AccountType: "FEE_REVENUE", Asset: "USDT", Available: "7"}}
+	for asset, v := range l.house {
+		out = append(out, ports.Balance{AccountType: "MARKET_MAKER", Asset: asset, Available: v})
+	}
+	return out, nil
+}
+
 // launchContent answers the legal pages, or has none yet (D1).
 type launchContent struct {
 	ports.Content
@@ -82,13 +106,15 @@ func TestLaunchChecklist(t *testing.T) {
 		{Key: "wallet.test_assets", Enabled: true, Rules: json.RawMessage(`{"regions":{"only":["AQ"]}}`)},
 		{Key: "wallet.withdraw", Enabled: true},
 		{Key: "ledger.welcome_credit", Enabled: true},
+		{Key: "market.house_liquidity", Enabled: true},
 	}}
 	wallet := &launchWallet{custody: `{"provider":"UDUN","configured":true}`}
 	catalog := &launchCatalog{}
 	content := &launchContent{}
 	probe := &launchProbe{present: map[string]bool{"turnstile": true, "mail": false}}
 	pl := newFakePlatform()
-	h.svc.Flags, h.svc.Wallet, h.svc.Catalog, h.svc.Content, h.svc.Probe, h.svc.Platform = flags, wallet, catalog, content, probe, pl
+	ledger := &launchLedger{fakeLedger: h.ledger, house: map[string]string{"USDT": "2000000", "BTC": "0"}}
+	h.svc.Flags, h.svc.Wallet, h.svc.Catalog, h.svc.Content, h.svc.Probe, h.svc.Platform, h.svc.Ledger = flags, wallet, catalog, content, probe, pl, ledger
 
 	// The test server: the learning setup.
 	c, err := h.svc.LaunchChecklist(ctx, auditor, "admin.astras.vip")
@@ -98,7 +124,7 @@ func TestLaunchChecklist(t *testing.T) {
 	want := map[string]string{
 		"welcome_credits": LaunchFail, "learning_mode": LaunchFail, "registration": LaunchOK, "admin_totp": LaunchFail, "two_person": LaunchOK,
 		"test_assets": LaunchFail, "custodian": LaunchPending, "withdraw": LaunchOK, "brand": LaunchFail, "coin_profile": LaunchFail,
-		"legal": LaunchPending, "third_party": LaunchFail, "admins": LaunchFail, "domain": LaunchOK,
+		"legal": LaunchPending, "third_party": LaunchFail, "admins": LaunchFail, "domain": LaunchOK, "house": LaunchFail,
 	}
 	got := launchStatuses(c)
 	for key, status := range want {
@@ -111,6 +137,11 @@ func TestLaunchChecklist(t *testing.T) {
 	}
 	if v := c.Items[slicesIndex(c, "admins")].Value; v["active_admins"] != 1 {
 		t.Fatalf("the administrators %+v", v)
+	}
+	// HOUSE holds no BTC and no ETH (no balance at all); the test asset of
+	// no pair is not asked for.
+	if v := c.Items[slicesIndex(c, "house")].Value["backed"].(map[string]string); len(v) != 3 || v["BTC"] != "0" || v["ETH"] != "0" || v["USDT"] != "2000000" {
+		t.Fatalf("HOUSE %+v", v)
 	}
 	// The stand-in custodian is red, an unknown host waits.
 	wallet.custody = `{"provider":"UDUN","configured":true,"gateway_host":"udun-mock"}`
@@ -125,6 +156,7 @@ func TestLaunchChecklist(t *testing.T) {
 		{Key: "wallet.test_assets"},
 		{Key: "wallet.withdraw", Enabled: true},
 		{Key: "ledger.welcome_credit", Enabled: true},
+		{Key: "market.house_liquidity", Enabled: true},
 	}
 	wallet.custody = `{"provider":"UDUN","configured":true,"gateway_host":"sig10.udun.io"}`
 	catalog.logo = "/v1/market/assets/ASTRA/logo?v=2"
@@ -134,10 +166,33 @@ func TestLaunchChecklist(t *testing.T) {
 	pl.credits = nil
 	pl.profile["learning_mode"] = map[string]any{"enabled": false}
 	pl.profile["images"] = map[string]any{"logo_light": "/v1/platform/images/logo_light?v=5", "logo_dark": nil, "favicon": "/v1/platform/images/favicon?v=5"}
+	ledger.house = map[string]string{"USDT": "2000000", "BTC": "20", "ETH": "500"}
 	h.admin(t, "second@example.com", domain.RoleAdmin)
+	// Still the seeded name: the brand is not the platform's own yet.
+	if c, _ := h.svc.LaunchChecklist(ctx, auditor, "admin.astras.vip"); launchStatuses(c)["brand"] != LaunchFail || c.Ready {
+		t.Fatalf("the seeded name %v", launchStatuses(c))
+	}
+	pl.profile["name"] = "Nova"
 	c, err = h.svc.LaunchChecklist(ctx, auditor, "admin.astras.vip:443")
 	if err != nil || !c.Ready {
 		t.Fatalf("set for a launch %v %v", launchStatuses(c), err)
+	}
+
+	// A legal page published for later is not in effect yet.
+	content.legal = `{"articles":[{"slug":"terms","status":"PUBLISHED","publish_at":"2026-10-30T00:00:00Z"},{"slug":"privacy","status":"PUBLISHED"},` +
+		`{"slug":"risk","status":"PUBLISHED"}]}`
+	if c, _ := h.svc.LaunchChecklist(ctx, auditor, "admin.astras.vip"); launchStatuses(c)["legal"] != LaunchFail {
+		t.Fatalf("a scheduled page %v", launchStatuses(c))
+	}
+	// A third party no service reported (its metrics did not answer) is unknown, not unset.
+	probe.present = map[string]bool{"turnstile": true, "mail": true}
+	if c, _ := h.svc.LaunchChecklist(ctx, auditor, "admin.astras.vip"); launchStatuses(c)["third_party"] != LaunchUnknown {
+		t.Fatalf("an unreported third party %v", launchStatuses(c))
+	}
+	// HOUSE not quoting.
+	flags.list[5] = ports.Flag{Key: "market.house_liquidity"}
+	if c, _ := h.svc.LaunchChecklist(ctx, auditor, "admin.astras.vip"); launchStatuses(c)["house"] != LaunchFail {
+		t.Fatalf("HOUSE off %v", launchStatuses(c))
 	}
 
 	// A console reached at another host than the profile's domain.

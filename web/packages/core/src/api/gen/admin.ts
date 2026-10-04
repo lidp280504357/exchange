@@ -2131,9 +2131,15 @@ export interface paths {
          *     WELCOME_CREDIT request (escalation WELCOME_RAISE). A raise is
          *     worth at most 10,000 USDT a change (422 ADMIN_WELCOME_RAISE_CAP,
          *     whoever approves), priced at the USDT pairs' fresh prices (422
-         *     ADMIN_WELCOME_UNPRICED without one). expected_version is the
-         *     version read: 409 LEDGER_SETTINGS_CHANGED when it moved, then and
-         *     when the request is approved (it fails).
+         *     ADMIN_WELCOME_UNPRICED without one), and held to the ledger's
+         *     rules first (400 for an asset code other than 2-12 capitals and
+         *     digits, an asset not listed, more decimals than the asset has).
+         *     expected_version is the version read: 409 LEDGER_SETTINGS_CHANGED
+         *     when it moved, then and when the request is approved (it fails;
+         *     unless the ledger holds the very change at the next version, set
+         *     by its requester, by an attempt whose answer was lost: then it is
+         *     EXECUTED). The request lapses a day after it was asked for:
+         *     approving it then only fails it ("expired at <time>").
          */
         put: operations["setWelcomeCredits"];
         post?: never;
@@ -2157,7 +2163,9 @@ export interface paths {
          *     when every item is OK. It changes nothing and covers what the
          *     console can change and see; the deployment side is the launch
          *     handbook's. PENDING: its source is not there yet; UNKNOWN: its
-         *     source did not answer. Every administrator reads it.
+         *     source did not answer. The 14 items of §4.6 and house (review ㉚:
+         *     market.house_liquidity on, HOUSE holding every backed asset a
+         *     pair is made of). Every administrator reads it.
          */
         get: operations["getLaunchChecklist"];
         put?: never;
@@ -2463,7 +2471,9 @@ export interface paths {
          *     a simulated market's change (SIM_EVENT, SIM_PARAMS) needs
          *     sim.control instead, and approving one that lapsed (a day after it
          *     was asked for, or when its event was to start) fails it, result
-         *     "expired at <time>", nothing sent to market-sim.
+         *     "expired at <time>", nothing sent to market-sim. A welcome credits
+         *     raise (WELCOME_CREDIT) needs settings.write and lapses a day after
+         *     it was asked for, the same way.
          */
         post: operations["decideApproval"];
         delete?: never;
@@ -3838,7 +3848,7 @@ export interface components {
         };
         LaunchItem: {
             /** @enum {string} */
-            key: "welcome_credits" | "learning_mode" | "registration" | "admin_totp" | "two_person" | "test_assets" | "custodian" | "withdraw" | "brand" | "coin_profile" | "legal" | "third_party" | "admins" | "domain";
+            key: "welcome_credits" | "learning_mode" | "registration" | "admin_totp" | "two_person" | "test_assets" | "custodian" | "withdraw" | "brand" | "coin_profile" | "legal" | "third_party" | "admins" | "domain" | "house";
             /** @enum {string} */
             status: "OK" | "FAIL" | "PENDING" | "UNKNOWN";
             /** @description What it is now, by item (a flag's enabled and rules, the credits, the custodian's gateway host, the administrators...). */
@@ -4825,7 +4835,8 @@ export interface components {
             attempted_at: string | null;
             /**
              * @description In the list: a simulated market's pending request past its expiry (a day after it was asked for, or when its
-             *     event was to start) by the server's clock; approving it only marks it FAILED. False otherwise.
+             *     event was to start), or a welcome credits raise's (a day after), by the server's clock; approving it only marks
+             *     it FAILED. False otherwise.
              */
             expired?: boolean;
         };

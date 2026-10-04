@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/skill/exchange/internal/admin/domain"
 	"github.com/skill/exchange/internal/admin/ports"
 	"github.com/skill/exchange/internal/platform/flags"
@@ -27,11 +29,16 @@ const (
 	LaunchUnknown = "UNKNOWN"
 )
 
-// The launch items in the order the design lists them.
+// The launch items in the order the design lists them, then HOUSE's
+// (review ㉚: design §3 row E).
 var launchKeys = []string{
 	"welcome_credits", "learning_mode", "registration", "admin_totp", "two_person", "test_assets", "custodian", "withdraw",
-	"brand", "coin_profile", "legal", "third_party", "admins", "domain",
+	"brand", "coin_profile", "legal", "third_party", "admins", "domain", "house",
 }
+
+// launchDefaultName is the name the platform is seeded with (migration
+// instrument 00008): a launch names its own (design §4.6).
+const launchDefaultName = "Astras"
 
 // The legal pages a launch needs published (the others may stay bundled).
 var launchLegal = []string{"terms", "privacy", "risk"}
@@ -126,6 +133,11 @@ func (s *Service) LaunchChecklist(ctx context.Context, p Principal, host string)
 	put("legal")(s.launchLegal(ctx))
 	put("third_party")(s.launchThirdParties(ctx))
 	put("admins")(s.launchAdmins(ctx))
+	if err != nil {
+		set("house", LaunchUnknown, map[string]any{"flag": flags.KeyHouseLiquidity})
+	} else {
+		put("house")(s.launchHouse(ctx, flagged[flags.KeyHouseLiquidity]))
+	}
 
 	out := LaunchChecklist{Ready: true, CheckedAt: s.Now()}
 	for _, key := range launchKeys {
@@ -213,12 +225,14 @@ func launchRegistration(pr *launchProfileView) (string, map[string]any) {
 }
 
 // launchBrand: the name, a logo and the favicon are the platform's own
-// (uploaded, not the built-in images).
+// (a name other than the seeded one, uploaded images, not the built-in).
 func launchBrand(pr *launchProfileView) (string, map[string]any) {
+	name := strings.TrimSpace(pr.Name)
 	value := map[string]any{
-		"name": pr.Name, "logo": pr.Images.LogoLight != nil || pr.Images.LogoDark != nil, "favicon": pr.Images.Favicon != nil,
+		"name": pr.Name, "default_name": name == launchDefaultName,
+		"logo": pr.Images.LogoLight != nil || pr.Images.LogoDark != nil, "favicon": pr.Images.Favicon != nil,
 	}
-	if strings.TrimSpace(pr.Name) == "" || (pr.Images.LogoLight == nil && pr.Images.LogoDark == nil) || pr.Images.Favicon == nil {
+	if name == "" || name == launchDefaultName || (pr.Images.LogoLight == nil && pr.Images.LogoDark == nil) || pr.Images.Favicon == nil {
 		return LaunchFail, value
 	}
 	return LaunchOK, value
@@ -314,16 +328,21 @@ func (s *Service) launchLegal(ctx context.Context) (string, map[string]any) {
 	}
 	var body struct {
 		Articles []struct {
-			Slug   string `json:"slug"`
-			Status string `json:"status"`
+			Slug      string     `json:"slug"`
+			Status    string     `json:"status"`
+			PublishAt *time.Time `json:"publish_at"`
 		} `json:"articles"`
 	}
 	if json.Unmarshal(raw, &body) != nil {
 		return LaunchUnknown, nil
 	}
+	// In effect: published, and not scheduled for later (the sites show the
+	// bundled draft until then; review ㉚).
+	now := s.Now()
 	published := []string{}
 	for _, a := range body.Articles {
-		if a.Status == "PUBLISHED" && slices.Contains(launchLegal, a.Slug) && !slices.Contains(published, a.Slug) {
+		live := a.Status == "PUBLISHED" && (a.PublishAt == nil || !a.PublishAt.After(now))
+		if live && slices.Contains(launchLegal, a.Slug) && !slices.Contains(published, a.Slug) {
 			published = append(published, a.Slug)
 		}
 	}
@@ -357,8 +376,10 @@ func (s *Service) launchThirdParties(ctx context.Context) (string, map[string]an
 	if len(present) == 0 {
 		return LaunchPending, nil
 	}
+	// One reported unset fails the item; one not reported (its service's
+	// metrics did not answer) leaves it unknown (review ㉚).
 	value := map[string]any{}
-	status := LaunchOK
+	unset, unreported := false, false
 	for _, item := range launchThirdParties {
 		ok, reported := present[item]
 		if reported {
@@ -366,11 +387,77 @@ func (s *Service) launchThirdParties(ctx context.Context) (string, map[string]an
 		} else {
 			value[item] = nil
 		}
-		if !ok {
-			status = LaunchFail
+		unset = unset || (reported && !ok)
+		unreported = unreported || !reported
+	}
+	switch {
+	case unset:
+		return LaunchFail, value
+	case unreported:
+		return LaunchUnknown, value
+	}
+	return LaunchOK, value
+}
+
+// launchHouse: HOUSE quotes (market.house_liquidity on) and holds some of
+// every backed asset it trades, which it must hold to sell (ADR-0013):
+// the assets with deposits or withdrawals that a pair is made of, as the
+// HOUSE page counts them (review ㉚: design §3 row E).
+func (s *Service) launchHouse(ctx context.Context, f ports.Flag) (string, map[string]any) {
+	value := map[string]any{"flag": flags.KeyHouseLiquidity, "enabled": f.Enabled}
+	if s.Catalog == nil || s.Ledger == nil {
+		return LaunchUnknown, value
+	}
+	raw, err := s.Catalog.List(ctx)
+	if err != nil {
+		s.Log.WarnContext(ctx, "launch checklist: the assets are unknown", "error", err)
+		return LaunchUnknown, value
+	}
+	var cat struct {
+		Assets []struct {
+			Code     string `json:"asset_code"`
+			Deposit  bool   `json:"deposit_enabled"`
+			Withdraw bool   `json:"withdraw_enabled"`
+		} `json:"assets"`
+		Pairs []struct {
+			Base  string `json:"base_asset"`
+			Quote string `json:"quote_asset"`
+		} `json:"pairs"`
+	}
+	if json.Unmarshal(raw, &cat) != nil {
+		return LaunchUnknown, value
+	}
+	traded := map[string]bool{}
+	for _, p := range cat.Pairs {
+		traded[p.Base], traded[p.Quote] = true, true
+	}
+	backed := map[string]string{}
+	for _, a := range cat.Assets {
+		if (a.Deposit || a.Withdraw) && traded[a.Code] {
+			backed[a.Code] = "0"
 		}
 	}
-	return status, value
+	list, err := s.Ledger.SystemBalances(ctx, "")
+	if err != nil {
+		s.Log.WarnContext(ctx, "launch checklist: HOUSE's inventory is unknown", "error", err)
+		return LaunchUnknown, value
+	}
+	for _, b := range list {
+		if _, ok := backed[b.Asset]; ok && b.AccountType == accountMarketMaker {
+			backed[b.Asset] = b.Available
+		}
+	}
+	value["backed"] = backed
+	empty := false
+	for _, v := range backed {
+		if b, err := decimal.NewFromString(v); err != nil || !b.IsPositive() {
+			empty = true
+		}
+	}
+	if !f.Enabled || len(backed) == 0 || empty {
+		return LaunchFail, value
+	}
+	return LaunchOK, value
 }
 
 // launchAdmins: at least two active ADMINs, every one with an

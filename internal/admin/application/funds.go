@@ -566,7 +566,7 @@ func (s *Service) Approvals(ctx context.Context, p Principal, status, cursor str
 	now := s.Now()
 	for i := range list {
 		a := &list[i]
-		a.Lapsed = simKind(a.Kind) && a.Status == domain.ApprovalPending && !now.Before(simExpiry(*a))
+		a.Lapsed = a.Status == domain.ApprovalPending && lapsedAt(*a, now)
 	}
 	if len(list) <= limit {
 		return list, "", nil
@@ -639,10 +639,11 @@ func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, ap
 		switch {
 		case !approve:
 			a.Status, a.Result = domain.ApprovalRejected, strings.TrimSpace(reason)
-		case simKind(a.Kind) && !a.DecidedAt.Before(simExpiry(a)):
-			// Lapsed: nothing goes to market-sim (C5.5 ④).
+		case lapsedAt(a, a.DecidedAt):
+			// Lapsed: nothing goes to market-sim (C5.5 ④) or the ledger (review ㉚).
 			action = actions.failed
-			a.Status, a.Result = domain.ApprovalFailed, "expired at "+simExpiry(a).UTC().Format(time.RFC3339)
+			expiry, _ := approvalExpiry(a)
+			a.Status, a.Result = domain.ApprovalFailed, "expired at "+expiry.UTC().Format(time.RFC3339)
 		default:
 			action = actions.approved
 			if err := s.execute(ctx, &a, p); err != nil {

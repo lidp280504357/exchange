@@ -7,9 +7,12 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -202,8 +205,9 @@ type WelcomeResult struct {
 
 // welcomeSetting is the ledger's welcome credits as the console reads them.
 type welcomeSetting struct {
-	Credits []ports.WelcomeCredit `json:"credits"`
-	Version int64                 `json:"version"`
+	Credits   []ports.WelcomeCredit `json:"credits"`
+	Version   int64                 `json:"version"`
+	UpdatedBy string                `json:"updated_by"`
 }
 
 // SetWelcomeCredits replaces the welcome credits as of expectedVersion
@@ -243,6 +247,9 @@ func (s *Service) SetWelcomeCredits(ctx context.Context, p Principal, credits []
 		details, _ := json.Marshal(map[string]any{"old": cur.Credits, "new": credits, "version": versionOf(out)})
 		return WelcomeResult{Setting: out}, s.audit(ctx, p, platformTarget, "admin.platform.welcome_changed", strings.TrimSpace(reason), string(details))
 	}
+	if err := s.checkCreditAssets(ctx, credits); err != nil {
+		return WelcomeResult{}, err
+	}
 	worth := decimal.Zero
 	for _, r := range raises {
 		v, ok := s.worth(ctx, r.Asset, r.Amount)
@@ -261,6 +268,10 @@ func (s *Service) SetWelcomeCredits(ctx context.Context, p Principal, credits []
 	return WelcomeResult{Approval: &a}, nil
 }
 
+// creditAssetRE is an asset code as the ledger takes one in the welcome
+// credits.
+var creditAssetRE = regexp.MustCompile(`^[A-Z0-9]{2,12}$`)
+
 // normalizeCredits checks and orders a list of welcome credits: assets in
 // capitals, each once, at most 10; an amount of 0 is the asset not given.
 func normalizeCredits(in []ports.WelcomeCredit) ([]ports.WelcomeCredit, error) {
@@ -268,8 +279,8 @@ func normalizeCredits(in []ports.WelcomeCredit) ([]ports.WelcomeCredit, error) {
 	seen := map[string]bool{}
 	for _, c := range in {
 		asset := strings.ToUpper(strings.TrimSpace(c.Asset))
-		if asset == "" || len(asset) > 16 {
-			return nil, apperr.Invalid("a welcome credit names its asset")
+		if !creditAssetRE.MatchString(asset) {
+			return nil, apperr.Invalid("a welcome credit names its asset: 2 to 12 capitals and digits")
 		}
 		if seen[asset] {
 			return nil, apperr.Invalid("an asset is given once: " + asset)
@@ -288,6 +299,40 @@ func normalizeCredits(in []ports.WelcomeCredit) ([]ports.WelcomeCredit, error) {
 	}
 	slices.SortFunc(out, func(a, b ports.WelcomeCredit) int { return strings.Compare(a.Asset, b.Asset) })
 	return out, nil
+}
+
+// checkCreditAssets holds a raise to the ledger's rules before a second
+// ADMIN sees it: every asset listed, each amount within its asset's
+// decimals; otherwise the approval would only fail when carried out
+// (review ㉚). A lowering goes to the ledger at once, which checks it.
+func (s *Service) checkCreditAssets(ctx context.Context, credits []ports.WelcomeCredit) error {
+	raw, err := s.Catalog.List(ctx)
+	if err != nil {
+		return err
+	}
+	var cat struct {
+		Assets []struct {
+			Code     string `json:"asset_code"`
+			Decimals int32  `json:"decimals"`
+		} `json:"assets"`
+	}
+	if err := json.Unmarshal(raw, &cat); err != nil {
+		return apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "the asset list came in another shape")
+	}
+	decimals := map[string]int32{}
+	for _, a := range cat.Assets {
+		decimals[a.Code] = a.Decimals
+	}
+	for _, c := range credits {
+		d, ok := decimals[c.Asset]
+		if !ok {
+			return apperr.Invalid("no asset " + c.Asset)
+		}
+		if !c.Amount.Equal(c.Amount.Truncate(d)) {
+			return apperr.Invalid(fmt.Sprintf("%s has %d decimals", c.Asset, d))
+		}
+	}
+	return nil
 }
 
 // welcomeRaises are the assets a new list gives more of than the current
@@ -349,8 +394,57 @@ func (s *Service) executeWelcome(ctx context.Context, a domain.Approval, p Princ
 		return "", err
 	}
 	out, err := s.Platform.SetWelcomeCredits(ctx, credits, version, a.Payload["actor"], a.Reason+" (approved by "+p.Admin.Email+")")
+	if apperr.Is(err, "LEDGER_SETTINGS_CHANGED") {
+		// An earlier attempt whose answer was lost may have set them: the
+		// ledger at the next version, holding these credits, set by this
+		// request's actor, is that attempt (review ㉚).
+		if raw, rerr := s.Platform.WelcomeCredits(ctx); rerr == nil {
+			var cur welcomeSetting
+			if json.Unmarshal(raw, &cur) == nil && cur.Version == version+1 && cur.UpdatedBy == a.Payload["actor"] && sameCredits(cur.Credits, credits) {
+				return "welcome credits version " + strconv.FormatInt(cur.Version, 10) + " (set by an earlier attempt)", nil
+			}
+		}
+	}
 	if err != nil {
 		return "", err
 	}
 	return "welcome credits version " + strconv.FormatInt(versionOf(out), 10), nil
+}
+
+// sameCredits reports whether two lists give the same, whatever their
+// order and however their amounts are written.
+func sameCredits(a, b []ports.WelcomeCredit) bool {
+	x, errA := normalizeCredits(a)
+	y, errB := normalizeCredits(b)
+	if errA != nil || errB != nil || len(x) != len(y) {
+		return false
+	}
+	for i := range x {
+		if x[i].Asset != y[i].Asset || !x[i].Amount.Equal(y[i].Amount) {
+			return false
+		}
+	}
+	return true
+}
+
+// welcomeApprovalTTL: a raise is decided within a day of its request, while
+// the prices it was valued at still hold (review ㉚).
+const welcomeApprovalTTL = 24 * time.Hour
+
+// approvalExpiry is when a pending request lapses: a simulated market's
+// (simExpiry) and a welcome credits raise do; ok is false for the others.
+func approvalExpiry(a domain.Approval) (at time.Time, ok bool) {
+	switch {
+	case simKind(a.Kind):
+		return simExpiry(a), true
+	case a.Kind == domain.KindWelcomeCredit:
+		return a.CreatedAt.Add(welcomeApprovalTTL), true
+	}
+	return time.Time{}, false
+}
+
+// lapsedAt reports whether a request that lapses has lapsed by t.
+func lapsedAt(a domain.Approval, t time.Time) bool {
+	at, ok := approvalExpiry(a)
+	return ok && !t.Before(at)
 }

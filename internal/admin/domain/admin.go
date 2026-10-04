@@ -335,8 +335,9 @@ type Approval struct {
 	// The administrators' emails, for display (read only).
 	RequestedByEmail string
 	DecidedByEmail   string
-	// Lapsed reports, as read, that a simulated market's pending request is
-	// past its expiry by the server's clock (read only, review ⑭).
+	// Lapsed reports, as read, that a pending request that lapses (a
+	// simulated market's, a welcome credits raise) is past its expiry by the
+	// server's clock (read only, reviews ⑭ and ㉚).
 	Lapsed bool
 }
 

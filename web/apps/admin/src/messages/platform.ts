@@ -16,6 +16,7 @@ const items = {
     third_party: { name: "第三方", source: "各服务的配置探针", required: "人机验证、邮件、链服务都已配置" },
     admins: { name: "管理员", source: "后台名册", required: "≥ 2 名已激活 ADMIN，全部绑定验证器" },
     domain: { name: "域名", source: "平台资料与后台地址", required: "后台在 admin.<资料里的域名>" },
+    house: { name: "HOUSE 报价与资金", source: "开关 market.house_liquidity 与 HOUSE 库存", required: "开，且每个有交易对的背书资产余额大于 0" },
   },
   en: {
     welcome_credits: { name: "Welcome credits", source: "Ledger setting", required: "All 0 (none given)" },
@@ -32,6 +33,7 @@ const items = {
     third_party: { name: "Third parties", source: "The services' configuration probes", required: "Human check, mail and chain provider configured" },
     admins: { name: "Administrators", source: "Console roster", required: "≥ 2 active ADMINs, all with an authenticator" },
     domain: { name: "Domain", source: "Platform profile and console address", required: "The console at admin.<the profile's domain>" },
+    house: { name: "HOUSE quotes and funds", source: "Flag market.house_liquidity and HOUSE's inventory", required: "On, and a positive balance of every backed asset a pair is made of" },
   },
 };
 
@@ -139,6 +141,8 @@ export const platformZh = {
       adminsNow: "已激活 ADMIN {{n}} 名",
       withoutTotp: "未绑定验证器：{{emails}}",
       domainNow: "资料：{{domain}} · 后台：{{host}}",
+      defaultName: "仍是默认名称",
+      noBacked: "没有背书资产",
       items: items.zh,
     },
   },
@@ -254,6 +258,8 @@ export const platformEn = {
       adminsNow: "{{n}} active ADMINs",
       withoutTotp: "No authenticator: {{emails}}",
       domainNow: "Profile: {{domain}} · console: {{host}}",
+      defaultName: "still the default name",
+      noBacked: "No backed assets",
       items: items.en,
     },
   },
