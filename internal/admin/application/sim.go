@@ -208,6 +208,9 @@ func (s *Service) CreateSimEvent(ctx context.Context, p Principal, in SimEventIn
 		if !at.After(s.Now()) {
 			asked, in.StartsAt = at.UTC().Format(time.RFC3339), ""
 		}
+		if at.After(s.Now().Add(maxLead)) {
+			return SimResult{}, ErrSimTooFarAhead
+		}
 	}
 	event := simEventFields(in, strings.TrimSpace(reason))
 	raw, err := s.Sim.CreateEvent(ctx, event, p.Admin.Email, "")
@@ -394,7 +397,9 @@ func simExpiry(a domain.Approval) time.Time {
 // where the change would take the price (an event's jump or target, the
 // settings' anchor; nil when it moves no price directly), that move now
 // and the one market-sim measured when it was asked for, and what the
-// price would do to the perpetual.
+// price would do to the perpetual; for a target with spikes, also what
+// its worst spike each way would (review 29, as the creator's
+// confirmation shows it).
 type SimPreview struct {
 	ExpiresAt     time.Time
 	Expired       bool
@@ -403,6 +408,14 @@ type SimPreview struct {
 	Move          *float64
 	RequestedMove string
 	Impact        json.RawMessage
+	SpikeImpacts  []SimSpikeImpact
+}
+
+// SimSpikeImpact is what a target's spike would do to the perpetual: at
+// Price, where the mark goes at its tip (spikeMarkShare).
+type SimSpikeImpact struct {
+	Price  decimal.Decimal
+	Impact json.RawMessage
 }
 
 // SimApprovalPreview measures a pending simulated market's request now.
@@ -450,6 +463,14 @@ func (s *Service) SimApprovalPreview(ctx context.Context, p Principal, id string
 		if out.Impact, err = s.SimImpact(ctx, p, simMarkAt(*a, target, *expected).Round(8).String()); err != nil {
 			s.Log.WarnContext(ctx, "sim preview: no impact", "approval_id", id, "error", err)
 			out.Impact = nil
+		}
+		for _, at := range simSpikeMarks(*a, target) {
+			raw, err := s.SimImpact(ctx, p, at.Round(8).String())
+			if err != nil {
+				s.Log.WarnContext(ctx, "sim preview: no spike impact", "approval_id", id, "error", err)
+				continue
+			}
+			out.SpikeImpacts = append(out.SpikeImpacts, SimSpikeImpact{Price: at, Impact: raw})
 		}
 	}
 	return out, nil

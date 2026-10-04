@@ -115,13 +115,21 @@ func (h *Handler) endSimEvent(w http.ResponseWriter, r *http.Request) {
 
 // SimPreviewJSON is a simulated market's request measured now.
 type SimPreviewJSON struct {
-	ExpiresAt     string          `json:"expires_at"`
-	Expired       bool            `json:"expired"`
-	TargetPrice   *string         `json:"target_price"`
-	ExpectedPrice *string         `json:"expected_price"`
-	Move          *float64        `json:"move"`
-	RequestedMove *string         `json:"requested_move"`
-	Impact        json.RawMessage `json:"impact"`
+	ExpiresAt     string               `json:"expires_at"`
+	Expired       bool                 `json:"expired"`
+	TargetPrice   *string              `json:"target_price"`
+	ExpectedPrice *string              `json:"expected_price"`
+	Move          *float64             `json:"move"`
+	RequestedMove *string              `json:"requested_move"`
+	Impact        json.RawMessage      `json:"impact"`
+	SpikeImpacts  []SimSpikeImpactJSON `json:"spike_impacts"`
+}
+
+// SimSpikeImpactJSON is what a target's worst spike one way would do to
+// the perpetual, at the mark's price at its tip.
+type SimSpikeImpactJSON struct {
+	Price  string          `json:"price"`
+	Impact json.RawMessage `json:"impact"`
 }
 
 func (h *Handler) simPreview(w http.ResponseWriter, r *http.Request) {
@@ -130,7 +138,10 @@ func (h *Handler) simPreview(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	out := SimPreviewJSON{ExpiresAt: httpx.FormatTime(pv.ExpiresAt), Expired: pv.Expired, Move: pv.Move, Impact: pv.Impact}
+	out := SimPreviewJSON{ExpiresAt: httpx.FormatTime(pv.ExpiresAt), Expired: pv.Expired, Move: pv.Move, Impact: pv.Impact, SpikeImpacts: []SimSpikeImpactJSON{}}
+	for _, x := range pv.SpikeImpacts {
+		out.SpikeImpacts = append(out.SpikeImpacts, SimSpikeImpactJSON{Price: x.Price.Round(8).String(), Impact: x.Impact})
+	}
 	if pv.Target != nil {
 		v := pv.Target.String()
 		out.TargetPrice = &v

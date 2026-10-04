@@ -263,16 +263,35 @@ function chartPoints(
   return out;
 }
 
-/** TargetPreview is a draft's plan from market-sim before it is asked for: whether it is reachable in time, the move, the envelope. */
-export function TargetPreview({ draft, startsAt, target }: { draft: TargetDraft; startsAt: string; target: number }) {
+/** MAX_LEAD is how far ahead an event may start, in ms (market-sim's MaxLead). */
+export const MAX_LEAD = 24 * 3600 * 1000;
+
+/**
+ * TargetPreview is a draft's plan from market-sim before it is asked for:
+ * whether it is reachable in time, the move, the envelope. onClock gets
+ * how far the server's clock is ahead of this browser's, in ms, from each
+ * answer's `now` (review 29: the spikes' times are the server's).
+ */
+export function TargetPreview({
+  draft, startsAt, target, onClock,
+}: {
+  draft: TargetDraft;
+  startsAt: string;
+  target: number;
+  onClock?: (skew: number) => void;
+}) {
   const { t } = useTranslation();
   const at = useAdminT();
   const time = useTimeText();
+  const [skew, setSkew] = useState(0);
+  const tooFar = startsAt !== "" && Date.parse(startsAt) > Date.now() + skew + MAX_LEAD;
   // The preview depends on the level, the window, the side and the start;
   // the spikes are only drawn on it.
   const c = tryCheck({ ...draft, spikes: [] }, at);
   const asked = useDebounced(
-    c ? JSON.stringify({ price: c.level, duration_seconds: c.window, ...(draft.direction !== "AUTO" ? { direction: draft.direction } : {}), ...(startsAt ? { starts_at: startsAt } : {}) }) : "",
+    c && !tooFar
+      ? JSON.stringify({ price: c.level, duration_seconds: c.window, ...(draft.direction !== "AUTO" ? { direction: draft.direction } : {}), ...(startsAt ? { starts_at: startsAt } : {}) })
+      : "",
     400,
   );
   const q = useQuery({
@@ -282,6 +301,13 @@ export function TargetPreview({ draft, startsAt, target }: { draft: TargetDraft;
     enabled: asked !== "",
     staleTime: 10_000,
   });
+  // The server's clock against this browser's, from when each answer came.
+  useEffect(() => {
+    if (!q.data?.now) return;
+    const s = Date.parse(q.data.now) - q.dataUpdatedAt;
+    setSkew(s);
+    onClock?.(s);
+  }, [q.data, q.dataUpdatedAt, onClock]);
   const lines = useChartLines();
   const spikes = JSON.stringify(tryCheck(draft, at)?.spikes ?? []);
   const level = c?.level;
@@ -292,6 +318,7 @@ export function TargetPreview({ draft, startsAt, target }: { draft: TargetDraft;
     return chartPoints(q.data.points, Number(level), marks, (v) => time(v, "time"));
   }, [q.data, level, spikes, time]);
   if (!c) return <p className="text-xs text-fg-3">{t("admin.simTarget.previewWaits")}</p>;
+  if (tooFar) return <p className="text-sm text-warn" data-testid="sim-target-too-far">{t("admin.simTarget.tooFar")}</p>;
   if (q.isPending) return <Skeleton className="h-48 w-full" />;
   if (q.isError) return <p className="text-sm text-warn">{t("admin.simTarget.previewUnknown")}</p>;
   const pv = q.data;

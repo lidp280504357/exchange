@@ -39,6 +39,7 @@ export const simTargetZh = {
       closingFrom: "收口期从第 {{m}} 分钟起，插针不能落在其中",
       preview: "计划",
       previewWaits: "填好水平与分钟数后显示计划。",
+      tooFar: "开始时间最多提前 24 小时",
       previewUnknown: "读不到计划（market-sim 不可用？）",
       previewHint:
         "按当前目标价计算。两条细虚线是计划允许的上下限（引导路径加噪声与 BTC/ETH 因子两倍标准差），另一条虚线是水平，圆点是插针；收口期（最后 10%，至少 1 分钟）价格必须越过水平。",
@@ -88,6 +89,7 @@ export const simTargetZh = {
     SIM_SPIKE_IN_CLOSING: "插针不能落在目标的收口期内",
     SIM_TARGET_RUNNING: "有目标正在进行或已排期：先结束它，再做瞬时涨跌或趋势",
     SIM_SPIKE_BEYOND_BAND: "插针超出价格带能让报价到达的范围：把幅度调小",
+    ADMIN_SIM_TOO_FAR_AHEAD: "事件最多提前 24 小时安排",
   },
 };
 
@@ -127,6 +129,7 @@ export const simTargetEn = {
       closingFrom: "Closing in from minute {{m}}: no spike there",
       preview: "Plan",
       previewWaits: "The plan shows once the level and the minutes are in.",
+      tooFar: "An event starts at most 24 hours ahead",
       previewUnknown: "The plan could not be read (market-sim down?)",
       previewHint:
         "From the current target. The two thin dashed lines bound the plan (the guided path plus two standard deviations of the noise and the BTC/ETH factor), the other dashed line is the level, the circles are spikes; in the closing window (the last 10%, a minute at least) the price must cross the level.",
@@ -176,5 +179,6 @@ export const simTargetEn = {
     SIM_SPIKE_IN_CLOSING: "A spike may not start in a target's closing window",
     SIM_TARGET_RUNNING: "A target runs or is scheduled: end it before a jump or a trend",
     SIM_SPIKE_BEYOND_BAND: "The spike goes beyond what the price band lets the quotes reach: make it smaller",
+    ADMIN_SIM_TOO_FAR_AHEAD: "An event is scheduled at most 24 hours ahead",
   },
 };

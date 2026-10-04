@@ -3146,7 +3146,7 @@ paths:
             enum: [ABOVE, BELOW]
         - name: starts_at
           in: query
-          description: When it starts; now when absent.
+          description: When it starts, at most 24 hours ahead (else 400 ADMIN_SIM_TOO_FAR_AHEAD); now when absent.
           schema:
             type: string
             format: date-time
@@ -5620,6 +5620,7 @@ components:
         starts_at:
           type: string
           format: date-time
+          description: At most 24 hours ahead (else 400 ADMIN_SIM_TOO_FAR_AHEAD); a time already past is now, kept in the audit and the request as asked_starts_at.
         direction:
           type: string
           enum: [ABOVE, BELOW]
@@ -5729,6 +5730,10 @@ components:
       type: object
       required: [feasible, min_duration_seconds, move, needs_approval, points]
       properties:
+        now:
+          type: string
+          format: date-time
+          description: The server's time, which the form takes its spikes' times from (review 29; a browser's clock may be off).
         direction:
           type: [string, 'null']
           description: The side of the level, as asked or inferred from the current target (ABOVE, BELOW).
@@ -5834,6 +5839,21 @@ components:
           oneOf:
             - $ref: '#/components/schemas/SimImpact'
             - type: 'null'
+        spike_impacts:
+          type: array
+          description: |
+            A target's spikes (A6, review 29): what its worst spike each way
+            would do to the perpetual, measured where the mark goes at the
+            tip (about half the spike, from the lower of the target now and
+            the level down, from the higher up). Empty for anything else.
+          items:
+            type: object
+            required: [price, impact]
+            properties:
+              price:
+                $ref: '#/components/schemas/Decimal'
+              impact:
+                $ref: '#/components/schemas/SimImpact'
     SimHolding:
       type: object
       required: [amount, holders]

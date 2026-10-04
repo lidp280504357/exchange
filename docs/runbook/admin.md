@@ -322,14 +322,14 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 - **价格控制**（`/sim/control`）：八种事件（瞬时涨跌、目标价、插针、趋势、波动率、暂停、停牌、重新锚定）与全部参数（`POST /admin/v1/sim/events`、`PUT /admin/v1/sim/params`）。
   - 确认框显示按目标价估算的永续影响：多空仓位数、会被强平的仓位数与名义、穿仓额（`POST /admin/v1/sim/impact`，derivatives-service 的 `/internal/derivatives/contracts/{symbol}/price-impact` 按强平监控的同一规则计算，不改任何东西）。
   - **阈值目标与插针**（ASTRA 设计 §3、§6.2，A6；规则由 market-sim 定，见 [market-sim.md](market-sim.md)「价格事件」）：
-    - 目标价是「N 分钟内到 ≥/≤ X」的表单：方向（自动按水平在当前目标价之上还是之下推断）、水平、分钟数（1–1440）、越过之后（跟随市场，或在水平上保持若干分钟），以及插针列表（开始后第几分钟、幅度 %、宽度秒）。插针的分钟数在提交时换成绝对时刻（开始时间加分钟数），必须在收口期之前（窗口最后 10%，至少 1 分钟，表单上写明从第几分钟起）。
+    - 目标价是「N 分钟内到 ≥/≤ X」的表单：方向（自动按水平在当前目标价之上还是之下推断）、水平、分钟数（1–1440）、越过之后（跟随市场，或在水平上保持若干分钟），以及插针列表（开始后第几分钟、幅度 %、宽度秒）。插针的分钟数在提交时换成绝对时刻（开始时间加分钟数），必须在收口期之前（窗口最后 10%，至少 1 分钟，表单上写明从第几分钟起）。没填开始时间时以服务端的时间为准：预览的应答带服务端的 `now`，表单据此算出与浏览器时钟的差（㉙；浏览器慢了会被拒、快了会比显示的晚触发）。事件最多提前 24 小时安排：预览与创建都拒绝更远的开始时间（400 `ADMIN_SIM_TOO_FAR_AHEAD`，表单先就地提示）。
     - 表单下方是计划预览（`GET /admin/v1/sim/target-preview?price=&duration_seconds=&direction=&starts_at=`，`reports.read`，原样转 market-sim）：能否按时到达（到不了时给出最短分钟数）、从当前目标价起的幅度、是否超出单人份额，以及每分钟的计划价与上下限、水平和插针的位置。
     - 后台自己的检查（其余交给 market-sim）：方向只能 `ABOVE`/`BELOW`、`then` 只能 `FOLLOW`/`HOLD`，它们与插针列表只属于目标价；插针幅度非零且不超过 ±10%、宽度不超过 60 秒、时刻在将来（最多 50 个）；预览的窗口 60 秒到一天。market-sim 的 `SIM_TARGET_INFEASIBLE`（`details.min_duration_seconds`）与 `SIM_SPIKE_BEYOND_BAND`（`details.max`）在提示里带上这个数。
     - 插针的确认框按标记价估算强平：标记价跟随指数，指数是现货 60 秒 TWAP 与盘口中价的平均（中价在最近成交 1% 以内时，market-data-service 的 `PlatformPrice`），所以针尖时标记价约移动插针幅度的一半（`max((1 + 1.5/60)/2, (1.5 + 宽度/2)/60)`，宽度 20 秒时 51%），影响按那个价格算。设计稿写的是"按 TWAP 估算"（只按 TWAP 宽 20 秒的针只有约 19%），A4 审查后指数加入了中价，后台按实际规则估算。带插针的目标另列出各插针处（从当前目标价与水平中较不利的一侧起算）的影响。
     - 有进行中或排队的目标时，页面顶部有横幅：目标的文字、计划包络与实际目标价、成交价（`GET /admin/v1/sim/events/{id}/plan` 每 5 秒、`/history` 每 15 秒）、相对计划的偏离（`ln(目标价/计划价)` 折成百分比）与"可能到不了"（market-sim 的 `at_risk`），可直接结束（越过前结束记为已取消，排队的插针一起取消）。目标在跑时新建跳涨或趋势会被 market-sim 拒绝（409 `SIM_TARGET_RUNNING`）。
   - market-sim 管单人份额（单次 30%、任一小时合计 50%，按事件开始时间计；参数里 `p0`、`max_minute_move`、`floor`、`ceiling`、`daily_volume` 按影响计入）。超出时它返回 `SIM_EVENT_NEEDS_APPROVAL` / `SIM_PARAMS_NEED_APPROVAL`，后台把这次改动存成资金操作（`SIM_EVENT`、`SIM_PARAMS`，`escalation` 为 `SIM_SHARE`，`payload.move` 是 market-sim 估算的幅度），接口返回 202。
   - 另一位有 `sim.control` 的管理员在「审批」里批准后，admin-service 用自己的键（`admin`，`SIM_ADMIN_API_SECRET`，在服务器 `sim/admin.env`）签名调用 market-sim：`actor` 是申请人、`approved_by` 是批准人，两个名字都取自后台会话，不取自浏览器。批准人以当前登录的会话为准，不再要身份验证器。申请人不能批准自己的（`ADMIN_SELF_APPROVAL`）。
-  - 这类申请一天未决、或事件到了开始时间、或目标的第一个插针到了时间就过期（market-sim 不收已过时刻的插针，A6）：批准过期的只会记为失败（结果 `expired at <时间>`），不发给 market-sim；列表按服务端时钟标「已过期」（审批列表的 `expired`，⑭）。开始时间已过的事件按"立即开始"处理（`starts_at` 去掉），申请因此一天后才过期，不会一建就过期（⑭）；原填的时间记在审计详情与申请的 `payload.asked_starts_at` 里（㉘）。批准框里有按现在的目标价重新测的幅度（与申请时 market-sim 的估算并列）和对永续的影响（`GET /admin/v1/approvals/{id}/sim-preview`；跳涨、插针（针尖，影响按上面的标记价估算）、目标价事件与锚定价修改能直接算出价格，其它只显示申请时的估算），目标的插针逐个列出。
+  - 这类申请一天未决、或事件到了开始时间、或目标的第一个插针到了时间就过期（market-sim 不收已过时刻的插针，A6）：批准过期的只会记为失败（结果 `expired at <时间>`），不发给 market-sim；列表按服务端时钟标「已过期」（审批列表的 `expired`，⑭）。开始时间已过的事件按"立即开始"处理（`starts_at` 去掉），申请因此一天后才过期，不会一建就过期（⑭）；原填的时间记在审计详情与申请的 `payload.asked_starts_at` 里（㉘）。批准框里有按现在的目标价重新测的幅度（与申请时 market-sim 的估算并列）和对永续的影响（`GET /admin/v1/approvals/{id}/sim-preview`；跳涨、插针（针尖，影响按上面的标记价估算）、目标价事件与锚定价修改能直接算出价格，其它只显示申请时的估算），目标的插针逐个列出；带插针的目标另按两个方向最深的插针算出标记价与影响（`spike_impacts`，与创建者确认框的算法相同，㉙）。
   - 没有 `SIM_ADMIN_API_SECRET` 时 admin-service 启动时告警，模拟市场在后台只读。
 - **事件日程**（`/sim/events`）：排队、进行中与结束的事件，发起人与批准人；排队的可取消，进行中的可结束（结束停牌即恢复交易），都要理由（`POST /admin/v1/sim/events/{id}/end`）。目标价事件显示结果（已达到 `HIT`、未达到 `MISSED`、已取消 `CANCELED`）、越过时刻与到期时刻，「计划」打开抽屉看计划包络与实际走势（结束的也能看，market-sim 只留最近 200 个事件）；目标的插针标出属于哪个目标。
 - **机器人集群**（`/sim/bots`）：
@@ -497,6 +497,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | `ADMIN_IMPACT_GREW` | 风险阶梯到点时再量，会被强平的仓位比确认时多（详情 `symbol`、`liquidated`、`confirmed`）；这条修改记为失败，重新预览 |
 | `ADMIN_NEW_ITEM_NOT_PREPARE` | 后台新建的交易对或合约写了「准备中」以外的状态（详情 `symbol`、`status`）；先建再经状态修改开放 |
 | `ADMIN_SIM_MINT_CAP` | 增发超过单次上限（10,000,000 个币或 1,000,000 USDT），谁批准都不行 |
+| `ADMIN_SIM_TOO_FAR_AHEAD` | 价格事件（或目标的预览）的开始时间超过 24 小时之后（market-sim 的 MaxLead） |
 | `ADMIN_TAG_EMPTY` | 按标签发的站内信：没有账户带这个标签 |
 | `NOTIFY_ARTICLE_EXISTS` | 同一栏目已有这个 slug 的文章（notification-service 返回，后台原样转出） |
 | `NOTIFY_ARTICLE_WITHDRAWN` | 公开接口：文章已下线（站点不再用同 slug 的自带文章顶替） |

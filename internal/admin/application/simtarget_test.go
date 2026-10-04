@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/skill/exchange/internal/admin/domain"
 	"github.com/skill/exchange/internal/admin/ports"
 	"github.com/skill/exchange/internal/platform/apperr"
@@ -73,8 +75,25 @@ func TestThresholdTargetsAndSpikes(t *testing.T) {
 		t.Fatalf("not an event's ID: %v", err)
 	}
 	q := ports.SimTargetQuery{Direction: "below", Price: "0.500", DurationSeconds: 600, StartsAt: in1h}
-	if _, err := h.svc.SimTargetPreview(ctx, auditor, q); err != nil || sim.preview.Direction != "BELOW" || sim.preview.Price != "0.5" {
+	raw, err := h.svc.SimTargetPreview(ctx, auditor, q)
+	if err != nil || sim.preview.Direction != "BELOW" || sim.preview.Price != "0.5" {
 		t.Fatalf("the preview %v %+v", err, sim.preview)
+	}
+	// With the server's time, which the form takes its spikes' times from (review 29).
+	var preview struct {
+		Now      time.Time `json:"now"`
+		Feasible bool      `json:"feasible"`
+	}
+	if err := json.Unmarshal(raw, &preview); err != nil || !preview.Now.Equal(h.now) || !preview.Feasible {
+		t.Fatalf("the preview's now %s %v", raw, err)
+	}
+	// A day ahead at most, the preview as creating (review 29).
+	later := h.now.Add(25 * time.Hour).Format(time.RFC3339)
+	if _, err := h.svc.SimTargetPreview(ctx, auditor, ports.SimTargetQuery{Price: "0.5", DurationSeconds: 600, StartsAt: later}); code(err) != "ADMIN_SIM_TOO_FAR_AHEAD" {
+		t.Fatalf("a preview a day and more ahead: %v", err)
+	}
+	if _, err := h.svc.CreateSimEvent(ctx, ops, SimEventInput{Type: "JUMP", Size: ptr(0.01), StartsAt: later}, "a jump too far ahead"); code(err) != "ADMIN_SIM_TOO_FAR_AHEAD" {
+		t.Fatalf("an event a day and more ahead: %v", err)
 	}
 	for name, bad := range map[string]ports.SimTargetQuery{
 		"no price":     {Price: "", DurationSeconds: 600},
@@ -129,22 +148,44 @@ func TestSpikesWaitingForASecondAdministrator(t *testing.T) {
 		t.Fatalf("a wide spike's share without the middle: %v", share)
 	}
 
-	// A target with a spike in an hour lapses then, not in a day.
+	// A target with spikes in an hour and later lapses at the first, not in a day.
 	in1h := h.now.Add(time.Hour).Format(time.RFC3339)
-	target := SimEventInput{Type: "TARGET", Price: "2", DurationSeconds: 3 * 3600, Direction: "ABOVE", Then: "FOLLOW", Spikes: []SimSpike{{At: in1h, Size: 0.04}}}
-	res, err = h.svc.CreateSimEvent(ctx, ops, target, "a target with a spike")
+	in2h := h.now.Add(2 * time.Hour).Format(time.RFC3339)
+	target := SimEventInput{
+		Type: "TARGET", Price: "2", DurationSeconds: 3 * 3600, Direction: "ABOVE", Then: "FOLLOW",
+		Spikes: []SimSpike{{At: in1h, Size: 0.04}, {At: in2h, Size: -0.06, WidthSeconds: 30}, {At: in2h, Size: -0.02}},
+	}
+	res, err = h.svc.CreateSimEvent(ctx, ops, target, "a target with spikes")
 	if err != nil || res.Approval == nil || !simExpiry(*res.Approval).Equal(h.now.Add(time.Hour).Truncate(time.Second)) {
-		t.Fatalf("lapses at its spike %+v %v", res, err)
+		t.Fatalf("lapses at its first spike %+v %v", res, err)
+	}
+	// Its decider sees the level's impact and its worst spike each way at
+	// the mark (review 29): up from the level, 2 x (1 + 0.04 x 0.5125);
+	// down from the target now, 1.25 x (1 - 0.06 x 0.5125).
+	calls := len(h.derivatives.tiers)
+	pv, err = h.svc.SimApprovalPreview(ctx, boss, res.Approval.ID)
+	if err != nil || pv.Expected.String() != "2" || len(pv.SpikeImpacts) != 2 ||
+		pv.SpikeImpacts[0].Price.Round(8).String() != "1.2115625" || pv.SpikeImpacts[1].Price.Round(8).String() != "2.041" {
+		t.Fatalf("a target's spikes for its decider %+v %v", pv, err)
+	}
+	if got := h.derivatives.tiers[calls:]; len(got) != 3 || got[0] != "ASTRA-USDT-PERP at 2" || got[1] != "ASTRA-USDT-PERP at 1.2115625" ||
+		got[2] != "ASTRA-USDT-PERP at 2.041" {
+		t.Fatalf("measured at %v", got)
 	}
 	// Decided in time, its spikes go with it.
 	h.now = h.now.Add(30 * time.Minute)
 	done, err := h.svc.DecideApproval(ctx, boss, res.Approval.ID, true, "in time for its spike")
 	spikes, _ := sim.last["spikes"].([]any)
-	if err != nil || done.Status != domain.ApprovalExecuted || len(spikes) != 1 || sim.last["direction"] != "ABOVE" {
+	if err != nil || done.Status != domain.ApprovalExecuted || len(spikes) != 3 || sim.last["direction"] != "ABOVE" {
 		t.Fatalf("carried out %+v %v %+v", done, err, sim.last)
 	}
 	if sp, _ := spikes[0].(map[string]any); sp["at"] != in1h || sp["size"] != 0.04 {
 		t.Fatalf("its spike %+v", spikes[0])
+	}
+	// Anything but a target has no spikes to measure.
+	if marks := simSpikeMarks(domain.Approval{Kind: domain.KindSimEvent, Payload: map[string]string{"change": `{"type":"JUMP","size":0.4}`}},
+		decimal.NewFromFloat(1.25)); marks != nil {
+		t.Fatalf("a jump's spikes %v", marks)
 	}
 }
 

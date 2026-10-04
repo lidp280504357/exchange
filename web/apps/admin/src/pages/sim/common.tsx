@@ -64,6 +64,13 @@ export function SimRequestNow({ id }: { id: string }) {
         <span className="text-fg-3">{t("admin.sim.noDirectMove")}</span>
       )}
       {pv.impact && <ImpactLines i={pv.impact} />}
+      {pv.spike_impacts?.map((s) => (
+        <span key={s.price} className="flex flex-col gap-0.5 border-t border-line-1 pt-1.5" data-testid="sim-request-spike">
+          <span className="text-fg-2">{t("admin.simTarget.impactSpike", { price: price(s.price) })}</span>
+          <ImpactLines i={s.impact} />
+        </span>
+      ))}
+      {!!pv.spike_impacts?.length && <span className="text-fg-3">{t("admin.simTarget.markNoteRequest")}</span>}
     </div>
   );
 }

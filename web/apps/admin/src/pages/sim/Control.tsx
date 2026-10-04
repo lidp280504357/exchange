@@ -2,7 +2,7 @@ import { ApiError } from "@exchange/core";
 import { adminApi, adminData, can, type Admin } from "@exchange/core/api/admin";
 import { Badge, Button, ErrorState, Input, Skeleton } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { DangerAction, FormError, useAdminT } from "../../kit/actions";
@@ -10,7 +10,8 @@ import { TimeText } from "../../kit/format";
 import { Card, Page } from "../../kit/Page";
 import { EndEvent, ImpactLines, minutes, pct, price, simEventsKey, simKey, useEventText, useSim, type SimEvent, type SimEventType } from "./common";
 import {
-  newTarget, SOLO_SPIKE, SPIKE_WIDTH, spikeMarkShare, spikePrices, TargetFields, TargetPlan, TargetPreview, targetBody, tryCheck, type TargetDraft,
+  MAX_LEAD, newTarget, SOLO_SPIKE, SPIKE_WIDTH, spikeMarkShare, spikePrices, TargetFields, TargetPlan, TargetPreview, targetBody, tryCheck,
+  type TargetDraft,
 } from "./target";
 
 // Price control (ASTRA design §6.1): the model's and the bots' settings,
@@ -158,6 +159,13 @@ function Launcher({ target, perp, control }: { target: number; perp: string; con
   const [v, setV] = useState<Record<Field, string>>({ size: "5", mu: "10", factor: "2", duration: "60", width: String(SPIKE_WIDTH) });
   const [draft, setDraft] = useState<TargetDraft>(newTarget);
   const [startsAt, setStartsAt] = useState("");
+  // How far the server's clock is ahead of this browser's (the target
+  // preview's `now`): a target's spikes are timed by the server (review 29).
+  const skew = useRef(0);
+  const onClock = useCallback((s: number) => {
+    skew.current = s;
+  }, []);
+  const serverNow = () => Date.now() + skew.current;
   const spec = SPECS.find((s) => s.type === type)!;
   const submitted = useSubmitted();
   const eventText = useEventText();
@@ -167,8 +175,9 @@ function Launcher({ target, perp, control }: { target: number; perp: string; con
   const expected = type === "JUMP" || type === "SPIKE" ? target * (1 + num("size") / 100) : checked ? Number(checked.level) : null;
   const body = (): Record<string, unknown> => {
     if (startsAt && !utc(startsAt)) throw new FormError(t("admin.sim.badTime"));
+    if (startsAt && new Date(startsAt).getTime() > serverNow() + MAX_LEAD) throw new FormError(t("admin.simTarget.tooFar"));
     if (type === "TARGET") {
-      const out = targetBody(draft, startsAt ? new Date(startsAt) : new Date(), at);
+      const out = targetBody(draft, startsAt ? new Date(startsAt) : new Date(serverNow()), at);
       return startsAt ? { ...out, starts_at: utc(startsAt) } : out;
     }
     const out: Record<string, unknown> = { type };
@@ -292,7 +301,7 @@ function Launcher({ target, perp, control }: { target: number; perp: string; con
           {t("admin.sim.toApprovals")}
         </Link>
       </div>
-      {type === "TARGET" && <TargetPreview draft={draft} startsAt={utc(startsAt)} target={target} />}
+      {type === "TARGET" && <TargetPreview draft={draft} startsAt={utc(startsAt)} target={target} onClock={onClock} />}
     </div>
   );
 }

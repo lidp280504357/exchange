@@ -3400,7 +3400,10 @@ export interface components {
             duration_seconds?: number;
             /** @description A TARGET held this long at its level once crossed (then HOLD; at most a day). */
             hold_seconds?: number;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description At most 24 hours ahead (else 400 ADMIN_SIM_TOO_FAR_AHEAD); a time already past is now, kept in the audit and the request as asked_starts_at.
+             */
             starts_at?: string;
             /**
              * @description A TARGET's side of its level (ASTRA A6); inferred from the current target when absent.
@@ -3465,6 +3468,11 @@ export interface components {
             } | null;
         };
         SimTargetPreview: {
+            /**
+             * Format: date-time
+             * @description The server's time, which the form takes its spikes' times from (review 29; a browser's clock may be off).
+             */
+            now?: string;
             /** @description The side of the level, as asked or inferred from the current target (ABOVE, BELOW). */
             direction?: string | null;
             feasible: boolean;
@@ -3522,6 +3530,16 @@ export interface components {
             /** @description The move market-sim measured when it was asked for. */
             requested_move: string | null;
             impact: components["schemas"]["SimImpact"] | null;
+            /**
+             * @description A target's spikes (A6, review 29): what its worst spike each way
+             *     would do to the perpetual, measured where the mark goes at the
+             *     tip (about half the spike, from the lower of the target now and
+             *     the level down, from the higher up). Empty for anything else.
+             */
+            spike_impacts?: {
+                price: components["schemas"]["Decimal"];
+                impact: components["schemas"]["SimImpact"];
+            }[];
         };
         SimHolding: {
             amount: components["schemas"]["Decimal"];
@@ -7623,7 +7641,7 @@ export interface operations {
                 duration_seconds: number;
                 /** @description ABOVE or BELOW; inferred from the current target when absent. */
                 direction?: "ABOVE" | "BELOW";
-                /** @description When it starts; now when absent. */
+                /** @description When it starts, at most 24 hours ahead (else 400 ADMIN_SIM_TOO_FAR_AHEAD); now when absent. */
                 starts_at?: string;
             };
             header?: never;
