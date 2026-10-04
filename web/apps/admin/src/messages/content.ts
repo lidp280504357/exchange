@@ -10,6 +10,10 @@ export const contentZh = {
       newAnnouncement: "新建公告", newHelp: "新建帮助文章", none: "还没有文章",
       title: "标题", summary: "摘要", body: "正文（Markdown）", slug: "slug（网址）", category: "分类", pinned: "置顶", order: "排序",
       publishAt: "发布时间", updated: "最近修改", status: { DRAFT: "草稿", PUBLISHED: "已发布", ARCHIVED: "已下线" }, scheduled: "定时发布",
+      modes: {
+        label: "适用模式", BOTH: "通用", TEST: "测试模式", FORMAL: "正式模式",
+        hint: "测试模式下站点只出「测试模式」与「通用」的稿，正式模式只出「正式模式」与「通用」的稿，平台切换模式即自动换稿。同一地址可以并存一篇测试稿与一篇正式稿，或只有一篇通用稿。正文里 :::test 与 ::: 之间的段落只在测试模式显示，:::formal 与 ::: 之间的只在正式模式显示。",
+      },
       categories: {
         notice: "通知", product: "产品", security: "安全", account: "账户", funds: "充提与资产", trading: "现货交易", futures: "合约", faq: "常见问题",
       },
@@ -51,7 +55,7 @@ export const contentZh = {
   },
   errors: {
     ADMIN_TAG_EMPTY: "没有账户带这个标签",
-    NOTIFY_ARTICLE_EXISTS: "这个栏目已有同 slug 的文章",
+    NOTIFY_ARTICLE_EXISTS: "这个地址在所选模式下已有文章：一篇测试稿与一篇正式稿可以并存，通用稿与两者都冲突",
   },
 };
 
@@ -64,6 +68,10 @@ export const contentEn = {
       newAnnouncement: "New announcement", newHelp: "New help article", none: "No articles yet",
       title: "Title", summary: "Summary", body: "Body (Markdown)", slug: "Slug (address)", category: "Category", pinned: "Pinned", order: "Order",
       publishAt: "Published", updated: "Last change", status: { DRAFT: "Draft", PUBLISHED: "Published", ARCHIVED: "Taken off" }, scheduled: "Scheduled",
+      modes: {
+        label: "For", BOTH: "Both modes", TEST: "Test mode", FORMAL: "Live",
+        hint: "In test mode the sites show the pages for test mode and for both; live, those for live and for both: switching the exchange's mode switches the pages. An address holds a test and a live page side by side, or one for both. In a body, what stands between :::test and ::: shows in test mode only, between :::formal and ::: live only.",
+      },
       categories: {
         notice: "Notice", product: "Product", security: "Security", account: "Account", funds: "Funds", trading: "Spot trading", futures: "Futures",
         faq: "FAQ",
@@ -110,6 +118,6 @@ export const contentEn = {
   },
   errors: {
     ADMIN_TAG_EMPTY: "No account has this tag",
-    NOTIFY_ARTICLE_EXISTS: "The section has an article with this slug",
+    NOTIFY_ARTICLE_EXISTS: "This address has an article for the chosen mode already: a test and a live one may stand side by side, one for both modes with neither",
   },
 };

@@ -15,7 +15,7 @@ import (
 )
 
 // The launch checklist (design 2026-10-04 §4.6, D2): what of the
-// learning setup is still on, read-only, each item with what it is now
+// test setup is still on, read-only, each item with what it is now
 // and whether it is what a launch needs. It changes nothing; every role
 // reads it. It covers what the console can change and see; the deployment
 // side is the launch handbook's (D3).
@@ -32,7 +32,7 @@ const (
 // The launch items in the order the design lists them, then HOUSE's
 // (review ㉚: design §3 row E).
 var launchKeys = []string{
-	"welcome_credits", "learning_mode", "registration", "admin_totp", "two_person", "test_assets", "custodian", "withdraw",
+	"welcome_credits", "test_mode", "registration", "admin_totp", "two_person", "test_assets", "custodian", "withdraw",
 	"brand", "coin_profile", "legal", "third_party", "admins", "domain", "house",
 }
 
@@ -118,11 +118,11 @@ func (s *Service) LaunchChecklist(ctx context.Context, p Principal, host string)
 	put("welcome_credits")(s.launchWelcome(ctx, flagged[flags.KeyWelcomeCredit].Enabled))
 	profile, profileStatus := s.launchProfile(ctx)
 	if profile == nil {
-		for _, key := range []string{"learning_mode", "registration", "brand", "domain"} {
+		for _, key := range []string{"test_mode", "registration", "brand", "domain"} {
 			set(key, profileStatus, nil)
 		}
 	} else {
-		put("learning_mode")(launchLearning(profile))
+		put("test_mode")(launchTestMode(profile))
 		put("registration")(launchRegistration(profile))
 		put("brand")(launchBrand(profile))
 		put("domain")(launchDomain(profile, host))
@@ -178,9 +178,10 @@ func (s *Service) launchWelcome(ctx context.Context, master bool) (string, map[s
 type launchProfileView struct {
 	Name         string `json:"name"`
 	Domain       string `json:"domain"`
-	LearningMode struct {
+	TestMode     struct {
 		Enabled bool `json:"enabled"`
-	} `json:"learning_mode"`
+		Banner  bool `json:"banner"`
+	} `json:"test_mode"`
 	Registration struct {
 		Status string `json:"status"`
 	} `json:"registration"`
@@ -209,10 +210,11 @@ func (s *Service) launchProfile(ctx context.Context) (*launchProfileView, string
 	return &v, LaunchOK
 }
 
-// launchLearning: the learning banner is off.
-func launchLearning(pr *launchProfileView) (string, map[string]any) {
-	value := map[string]any{"enabled": pr.LearningMode.Enabled}
-	if pr.LearningMode.Enabled {
+// launchTestMode: the exchange is out of test mode (live; the banner
+// goes with it).
+func launchTestMode(pr *launchProfileView) (string, map[string]any) {
+	value := map[string]any{"enabled": pr.TestMode.Enabled, "banner": pr.TestMode.Banner}
+	if pr.TestMode.Enabled {
 		return LaunchFail, value
 	}
 	return LaunchOK, value
@@ -315,9 +317,9 @@ func (s *Service) launchCoin(ctx context.Context) (string, map[string]any) {
 }
 
 // launchLegal: the terms, the privacy policy and the risk notice are
-// published as the platform's own (an override; "publish the default"
-// counts). The LEGAL section is D1's; until notification-service has it
-// the item waits.
+// published as the platform's own for the live mode (an override for
+// FORMAL or BOTH; "publish the default" counts). The LEGAL section is
+// D1's; until notification-service has it the item waits.
 func (s *Service) launchLegal(ctx context.Context) (string, map[string]any) {
 	if s.Content == nil {
 		return LaunchUnknown, nil
@@ -330,6 +332,7 @@ func (s *Service) launchLegal(ctx context.Context) (string, map[string]any) {
 	var body struct {
 		Articles []struct {
 			Slug      string     `json:"slug"`
+			Modes     string     `json:"modes"`
 			Status    string     `json:"status"`
 			PublishAt *time.Time `json:"publish_at"`
 		} `json:"articles"`
@@ -337,12 +340,14 @@ func (s *Service) launchLegal(ctx context.Context) (string, map[string]any) {
 	if json.Unmarshal(raw, &body) != nil {
 		return LaunchUnknown, nil
 	}
-	// In effect: published, and not scheduled for later (the sites show the
-	// bundled draft until then; review ㉚).
+	// In effect when live: published, not scheduled for later (the sites
+	// show the bundled draft until then; review ㉚), and for the live mode
+	// (FORMAL or BOTH; a test-mode page leaves the bundled draft live,
+	// design §4.4).
 	now := s.Now()
 	published := []string{}
 	for _, a := range body.Articles {
-		live := a.Status == "PUBLISHED" && (a.PublishAt == nil || !a.PublishAt.After(now))
+		live := a.Status == "PUBLISHED" && (a.PublishAt == nil || !a.PublishAt.After(now)) && a.Modes != "TEST"
 		if live && slices.Contains(launchLegal, a.Slug) && !slices.Contains(published, a.Slug) {
 			published = append(published, a.Slug)
 		}

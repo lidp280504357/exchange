@@ -2,7 +2,7 @@ import { adminApi, adminData, can, type Admin } from "@exchange/core/api/admin";
 import { bundledSource, LEGAL_SLUGS } from "@exchange/core/content/loader";
 import { Badge, Button, DataTable, type ColumnDef } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink, FileCheck2, Pencil, Undo2 } from "lucide-react";
+import { ExternalLink, FileCheck2, Pencil, Plus, Undo2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DangerAction } from "../../kit/actions";
@@ -14,23 +14,32 @@ import { ReadOnly } from "../../kit/ReadOnly";
 
 // The fixed pages (design 2026-10-04 §4.4): the legal and information
 // pages and the home page's hero have fixed addresses, and the sites bundle
-// a draft of each. An article published here replaces the draft; taking it
-// off hides a legal page (and the draft with it) and gives the home page
-// its built-in text; "publish the default" publishes the bundled draft as
-// it is, which is what the launch checklist asks of terms, privacy and risk.
+// a draft of each. The exchange shows other pages in test mode than live
+// (an article is for TEST, FORMAL or BOTH), so each page has a column per
+// mode: what the sites show in it, and its article. An article published
+// replaces the draft in its modes; taking it off hides a legal page (and
+// the draft with it) there and gives the home page its built-in text;
+// "publish the default" publishes the bundled draft as it is for the live
+// exchange, which is what the launch checklist asks of terms, privacy and
+// risk.
 
 type Fixed = "LEGAL" | "HOME";
+type Mode = "TEST" | "FORMAL";
+const MODES: Mode[] = ["TEST", "FORMAL"];
 const PAGES: { section: Fixed; slug: string }[] = [...LEGAL_SLUGS.map((slug) => ({ section: "LEGAL" as const, slug })), { section: "HOME", slug: "home-hero" }];
-/** The pages the launch checklist wants published (its legal item). */
+/** The pages the launch checklist wants published for the live exchange (its legal item). */
 const REQUIRED = new Set(["terms", "privacy", "risk"]);
 
-type Row = { section: Fixed; slug: string; article: Article | null; seed: Draft };
+type Row = { section: Fixed; slug: string; articles: Article[]; seed: Draft };
 
-/** What the sites show now: the console's article, the bundled draft (also while one is scheduled), or none. */
+/** forMode is the article the sites use for the page in mode: the one for that mode, else the one for both. */
+const forMode = (r: Row, mode: Mode) => r.articles.find((a) => a.modes === mode) ?? r.articles.find((a) => a.modes === "BOTH") ?? null;
+
+/** What the sites show in a mode: the console's article, the bundled draft (also while one is scheduled), or none. */
 type OnSite = "override" | "scheduled" | "bundled" | "hidden" | "builtin" | "none";
 
-function onSite(r: Row, bundled: boolean): OnSite {
-  const a = r.article;
+function onSite(r: Row, mode: Mode, bundled: boolean): OnSite {
+  const a = forMode(r, mode);
   if (a?.status === "ARCHIVED") return r.section === "HOME" ? "builtin" : "hidden";
   if (a && shown(a)) return "override";
   if (a?.status === "PUBLISHED") return "scheduled";
@@ -42,11 +51,11 @@ const TONE: Record<OnSite, "success" | "info" | "neutral" | "warn" | "danger"> =
 };
 
 const empty = (slug: string): Draft => ({
-  slug, category: "", pinned: false, order: "0",
+  slug, modes: "BOTH", category: "", pinned: false, order: "0",
   texts: { "zh-CN": { locale: "zh-CN", title: "", summary: "", body: "" }, en: { locale: "en", title: "", summary: "", body: "" } },
 });
 
-/** FixedPages lists the legal pages and the home hero with what the sites show of each, and edits, publishes or takes them off. */
+/** FixedPages lists the legal pages and the home hero with what the sites show of each in test mode and live, and edits, publishes or takes them off. */
 export default function FixedPages({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
   const write = can(admin, "content.write");
@@ -78,86 +87,85 @@ export default function FixedPages({ admin }: { admin: Admin }) {
     const articles = [...(legal.data ?? []), ...(home.data ?? [])];
     return PAGES.map(({ section, slug }) => ({
       section, slug,
-      article: articles.find((a) => a.section === section && a.slug === slug) ?? null,
+      articles: articles.filter((a) => a.section === section && a.slug === slug),
       seed: drafts.data?.get(slug) ?? empty(slug),
     }));
   }, [legal.data, home.data, drafts.data]);
-  const [editing, setEditing] = useState<Row | null>(null);
+  const [editing, setEditing] = useState<{ row: Row; mode: Mode; article: Article | null } | null>(null);
 
   const columns = useMemo<ColumnDef<Row, unknown>[]>(() => {
     const bundled = (r: Row) => drafts.data?.has(r.slug) ?? false;
+    const modeColumn = (mode: Mode): ColumnDef<Row, unknown> => ({
+      id: mode, header: t(`admin.content.modes.${mode}`),
+      cell: ({ row: { original: r } }) => {
+        const s = onSite(r, mode, bundled(r));
+        const a = forMode(r, mode);
+        const id = mode === "TEST" ? `test-${r.slug}` : r.slug;
+        return (
+          <span className="flex flex-col items-start gap-1.5" data-testid={`fixed-${mode.toLowerCase()}-${r.slug}`} data-onsite={s}>
+            <Badge tone={TONE[s]}>{t(`admin.pages.shows.${s}`)}</Badge>
+            {a ? (
+              <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-3">
+                <StatusBadge a={a} />
+                <span className="font-mono">v{a.version}</span>
+                {a.modes === "BOTH" && <span>{t("admin.pages.forBoth")}</span>}
+                <TimeText value={a.updated_at} style="datetime" />
+              </span>
+            ) : (
+              <span className="text-xs text-fg-3">{t("admin.pages.noArticle")}</span>
+            )}
+            <RowActions>
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={a ? <Pencil size={12} /> : <Plus size={12} />}
+                onClick={() => setEditing({ row: r, mode, article: a })}
+                disabled={!a && !write}
+                data-testid={`fixed-edit-${id}`}
+              >
+                {t(a ? (write ? "admin.pages.edit" : "admin.pages.read") : "admin.pages.write")}
+              </Button>
+              {write && mode === "FORMAL" && bundled(r) && a?.status !== "PUBLISHED" && <PublishDefault row={r} article={a} />}
+              {write && a?.status === "PUBLISHED" && <TakeOff row={r} article={a} id={id} />}
+            </RowActions>
+          </span>
+        );
+      },
+    });
     return [
       {
         id: "page", header: t("admin.pages.page"),
         cell: ({ row: { original: r } }) => (
-          <span className="flex flex-col" data-testid={`fixed-${r.slug}`} data-onsite={onSite(r, bundled(r))}>
+          <span className="flex flex-col" data-testid={`fixed-${r.slug}`} data-onsite={onSite(r, "FORMAL", bundled(r))}>
             <span className="font-medium text-fg-1">{t(`admin.pages.names.${r.slug}`)}</span>
             <span className="font-mono text-xs text-fg-3">{r.section === "HOME" ? "/ · home-hero" : `/legal/${r.slug}`}</span>
           </span>
         ),
       },
+      ...MODES.map(modeColumn),
       {
-        id: "onSite", header: t("admin.pages.onSite"),
+        id: "launch", header: t("admin.pages.launch"),
         cell: ({ row: { original: r } }) => {
-          const s = onSite(r, bundled(r));
-          return <Badge tone={TONE[s]}>{t(`admin.pages.shows.${s}`)}</Badge>;
+          if (!REQUIRED.has(r.slug)) return <span className="text-fg-3">—</span>;
+          const live = forMode(r, "FORMAL");
+          return live && shown(live) ? (
+            <Badge tone="success">{t("admin.pages.requiredOk")}</Badge>
+          ) : (
+            <Badge tone="danger">{t("admin.pages.requiredMissing")}</Badge>
+          );
         },
       },
       {
-        id: "article", header: t("admin.pages.article"),
-        cell: ({ row: { original: r } }) =>
-          r.article ? (
-            <span className="flex items-center gap-2">
-              <StatusBadge a={r.article} />
-              <span className="font-mono text-xs text-fg-3">v{r.article.version}</span>
-            </span>
-          ) : (
-            <span className="text-xs text-fg-3">{t("admin.pages.noArticle")}</span>
-          ),
-      },
-      {
-        id: "launch", header: t("admin.pages.launch"),
-        cell: ({ row: { original: r } }) =>
-          REQUIRED.has(r.slug) ? (
-            r.article?.status === "PUBLISHED" ? (
-              <Badge tone="success">{t("admin.pages.requiredOk")}</Badge>
-            ) : (
-              <Badge tone="danger">{t("admin.pages.requiredMissing")}</Badge>
-            )
-          ) : (
-            <span className="text-fg-3">—</span>
-          ),
-      },
-      {
-        id: "updated", header: t("admin.pages.updated"),
-        cell: ({ row: { original: r } }) =>
-          r.article ? (
-            <span className="flex flex-col text-xs">
-              <TimeText value={r.article.updated_at} style="datetime" />
-              <span className="text-fg-3">{r.article.updated_by}</span>
-            </span>
-          ) : (
-            <span className="text-fg-3">—</span>
-          ),
-      },
-      {
-        id: "actions", header: "", meta: { align: "right" },
+        id: "site", header: "", meta: { align: "right" },
         cell: ({ row: { original: r } }) => (
-          <RowActions>
-            <Button size="sm" variant="ghost" icon={<Pencil size={12} />} onClick={() => setEditing(r)} data-testid={`fixed-edit-${r.slug}`}>
-              {t(write ? "admin.pages.edit" : "admin.pages.read")}
-            </Button>
-            {write && bundled(r) && r.article?.status !== "PUBLISHED" && <PublishDefault row={r} />}
-            {write && r.article?.status === "PUBLISHED" && <TakeOff row={r} article={r.article} />}
-            <a
-              className="inline-flex items-center gap-1 text-xs text-info-strong hover:underline"
-              href={r.section === "HOME" ? `${SITE}/` : `${SITE}/legal/${r.slug}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {t("admin.pages.view")} <ExternalLink size={12} className="inline-block align-middle" />
-            </a>
-          </RowActions>
+          <a
+            className="inline-flex items-center gap-1 text-xs text-info-strong hover:underline"
+            href={r.section === "HOME" ? `${SITE}/` : `${SITE}/legal/${r.slug}`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {t("admin.pages.view")} <ExternalLink size={12} className="inline-block align-middle" />
+          </a>
         ),
       },
     ];
@@ -182,10 +190,10 @@ export default function FixedPages({ admin }: { admin: Admin }) {
       {editing && (
         <ArticleEditor
           admin={admin}
-          key={editing.article?.id ?? `new:${editing.slug}`}
-          section={editing.section}
+          key={editing.article?.id ?? `new:${editing.mode}:${editing.row.slug}`}
+          section={editing.row.section}
           article={editing.article}
-          seed={editing.article ? undefined : editing.seed}
+          seed={editing.article ? undefined : { ...editing.row.seed, modes: editing.mode }}
           write={write}
           onClose={() => setEditing(null)}
           onSaved={(a) => setEditing({ ...editing, article: a })}
@@ -196,11 +204,11 @@ export default function FixedPages({ admin }: { admin: Admin }) {
 }
 
 /**
- * PublishDefault publishes the bundled draft (both languages) as the page's
- * article: a new one, or the existing draft or taken-off article rewritten
- * with it; then publishes it.
+ * PublishDefault publishes the bundled draft (both languages) as the live
+ * exchange's page: a new article for FORMAL, or the page's live article
+ * (a draft, or taken off) rewritten with it for FORMAL; then publishes it.
  */
-function PublishDefault({ row }: { row: Row }) {
+function PublishDefault({ row, article }: { row: Row; article: Article | null }) {
   const { t } = useTranslation();
   const page = t(`admin.pages.names.${row.slug}`);
   return (
@@ -215,15 +223,19 @@ function PublishDefault({ row }: { row: Row }) {
       description={
         <span className="flex flex-col gap-1">
           <span>{t("admin.pages.publishDefaultHint")}</span>
-          {row.article && <span className="text-warn-strong">{t("admin.pages.publishDefaultReplace", { status: t(`admin.content.status.${row.article.status}`) })}</span>}
+          {article && (
+            <span className="text-warn-strong">
+              {t(article.modes === "BOTH" ? "admin.pages.publishDefaultBoth" : "admin.pages.publishDefaultReplace", { status: t(`admin.content.status.${article.status}`) })}
+            </span>
+          )}
         </span>
       }
       target={<span className="font-mono">{row.slug}</span>}
       confirmWord={row.slug}
       run={async (reason) => {
-        const body = articleBody(row.seed, t);
-        const a = row.article
-          ? adminData(await adminApi.PUT("/admin/v1/articles/{id}", { params: { path: { id: row.article.id } }, body: { ...body, version: row.article.version, reason } }))
+        const body = articleBody({ ...row.seed, modes: "FORMAL" }, t);
+        const a = article
+          ? adminData(await adminApi.PUT("/admin/v1/articles/{id}", { params: { path: { id: article.id } }, body: { ...body, version: article.version, reason } }))
           : adminData(await adminApi.POST("/admin/v1/articles", { body: { ...body, section: row.section, reason } }));
         return adminData(await adminApi.POST("/admin/v1/articles/{id}/publish", { params: { path: { id: a.id } }, body: { version: a.version, reason } }));
       }}
@@ -233,18 +245,23 @@ function PublishDefault({ row }: { row: Row }) {
   );
 }
 
-/** TakeOff archives the page's published article: a legal page leaves the sites, the hero goes back to the sites' own text. */
-function TakeOff({ row, article }: { row: Row; article: Article }) {
+/** TakeOff archives a published page: a legal page leaves the sites in the article's modes, the hero goes back to the sites' own text. */
+function TakeOff({ row, article, id }: { row: Row; article: Article; id: string }) {
   const { t } = useTranslation();
   return (
     <DangerAction
       trigger={(open) => (
-        <Button size="sm" variant="ghost" icon={<Undo2 size={12} />} onClick={open} data-testid={`fixed-archive-${row.slug}`}>
+        <Button size="sm" variant="ghost" icon={<Undo2 size={12} />} onClick={open} data-testid={`fixed-archive-${id}`}>
           {t("admin.pages.archive")}
         </Button>
       )}
       title={t("admin.pages.archiveTitle", { page: t(`admin.pages.names.${row.slug}`) })}
-      description={t(row.section === "HOME" ? "admin.pages.archiveHeroHint" : "admin.pages.archiveHint")}
+      description={
+        <span className="flex flex-col gap-1">
+          <span>{t(row.section === "HOME" ? "admin.pages.archiveHeroHint" : "admin.pages.archiveHint")}</span>
+          {article.modes === "BOTH" && <span className="text-warn-strong">{t("admin.pages.archiveBoth")}</span>}
+        </span>
+      }
       target={<span className="font-mono">{row.slug}</span>}
       confirmWord={row.slug}
       run={async (reason) =>

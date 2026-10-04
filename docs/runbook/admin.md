@@ -114,14 +114,14 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 | 模拟市场 | 概览、价格控制、事件日程、机器人集群、代币信息 `/sim/*` | 见「模拟市场」 |
 | 风控 | 功能开关 `/risk` | 全部功能开关（说明、规则摘要、最后修改人），切换要确认 |
 | 运营 | 公告 `/announcements`、帮助中心 `/help-articles` | 文章列表、中英文编辑器与预览、发布（立即或定时）与下线；站点自带文章可复制来编辑 |
-| 运营 | 固定页面 `/pages` | 六个法律页与首页横幅：站点现在显示覆盖稿还是默认稿，编辑、以默认稿发布、撤回 |
+| 运营 | 固定页面 `/pages` | 六个法律页与首页横幅：测试模式与正式模式下站点各显示覆盖稿还是默认稿，编辑、以默认稿发布、撤回 |
 | 运营 | 站内信 `/broadcasts` | 发过的消息（对象、已收到、已读、失败轮次）、详情、继续发送与发送表单 |
 | 系统 | 管理员与角色 `/admins` | 管理员列表与操作、角色权限矩阵 |
 | 系统 | 审计 `/audit` | 按操作人、对象、事件、时间筛选；行详情与逐字段的变更；服务端导出 CSV |
 | 系统 | 报表 `/reports` | 交易、充提、合约、用户增长、HOUSE 盈亏、持仓量 |
 | 系统 | 系统健康 `/health` | 各服务就绪、版本、Kafka 滞后与死信，对账、行情源、托管方 |
-| 系统 | 平台设置 `/platform` | 平台资料（品牌、域名、颜色、页脚、联系方式、学习横幅、注册方式）、图片上传、注册赠送（提高需第二人） |
-| 系统 | 上线检查清单 `/launch` | 学习环境的开关与资料逐项对照上线要求，全部达标显示「可上线」；只读 |
+| 系统 | 平台设置 `/platform` | 平台资料（品牌、域名、颜色、页脚、联系方式、测试模式与横幅、注册方式）、图片上传、注册赠送（提高需第二人） |
+| 系统 | 上线检查清单 `/launch` | 测试环境的开关与资料逐项对照上线要求，全部达标显示「可上线」；只读 |
 | 系统 | 设置 `/settings` | 双人审批与限额、交易参数的等待时间（ADMIN 可改）；本浏览器的外观、语言与每页条数 |
 | 账户菜单 | 账号与安全 `/account` | 改自己的口令与身份验证器 |
 
@@ -367,8 +367,9 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 
 `/announcements`、`/help-articles`；任何管理员可读，写要 `content.write`（ADMIN 与 OPERATOR）。
 
-- 一篇文章 = 栏目、slug（小写字母、数字、连字符，同栏目唯一，`NOTIFY_ARTICLE_EXISTS`）、分类、置顶（公告）、排序（帮助）与中英文本（中文必填；英文可选，没有英文时英文用户看中文）。正文是 Markdown，编辑器可切「预览」，按站点的排版显示，站内链接指向用户站。
-- 状态：草稿 → 发布（立即，或填一个时间定时发布）→ 下线（可再发布）。每次保存带读到的版本，期间别人改过返回 409 `COMMON_CONFLICT`（重新打开再改）。审计 `admin.content.created`、`updated`、`published`、`archived`，对象 `announcement:<slug>` 或 `help:<slug>`。
+- 一篇文章 = 栏目、slug（小写字母、数字、连字符）、适用模式、分类、置顶（公告）、排序（帮助）与中英文本（中文必填；英文可选，没有英文时英文用户看中文）。
+- 适用模式（设计 2026-10-04 §4.4，D4）：`TEST`（测试模式）、`FORMAL`（正式模式）或 `BOTH`（通用，新建时的默认；修改时不填保持原样）。平台资料的测试模式开着时站点只出 TEST 与 BOTH 的文章，关掉后只出 FORMAL 与 BOTH，切换模式即自动换稿。同一栏目的一个 slug 可以并存一篇 TEST 与一篇 FORMAL，或只有一篇 BOTH，重叠的返回 409 `NOTIFY_ARTICLE_EXISTS`。编辑器顶部选模式，列表里测试稿与正式稿带标记。正文里 `:::test` 与 `:::` 之间的段落只在测试模式显示，`:::formal` 与 `:::` 之间的只在正式模式显示（站点渲染时过滤，服务端原样保存）。正文是 Markdown，编辑器可切「预览」，按站点的排版显示，站内链接指向用户站。
+- 状态：草稿 → 发布（立即，或填一个时间定时发布）→ 下线（可再发布）。每次保存带读到的版本，期间别人改过返回 409 `COMMON_CONFLICT`（重新打开再改）。审计 `admin.content.created`、`updated`、`published`、`archived`，对象 `announcement:<slug>` 或 `help:<slug>`，详情带 `modes`（同一 slug 可有测试稿与正式稿）。
 - 站点读取：公开接口 `GET /v1/announcements[/{slug}]`、`GET /v1/help[/{slug}]`（`?locale=en`，`Cache-Control: public, max-age=15`）。列表分页（`limit` 默认 20、最多 100，`cursor` 用上一页的 `next_cursor`），只回摘要：没写摘要的从正文前 4,000 个字符里取第一段，列表从不读整篇正文（C5.5 ⑫）；两个站点读第一页 100 篇，更早的仍可凭链接打开。两个站点把接口里的文章叠加在仓库自带的 Markdown 之上，同 slug 以接口为准（与设计 §4.5"替代仓库内 Markdown"的偏差，见设计稿 §0）；页面数据 30 秒内视为新鲜、45 秒重取一次，所以发布、修改、下线都在 1 分钟内到达两端。接口不可用时只显示自带文章。
 - 下线的文章：列表接口的 `withdrawn` 带上它的 slug，单篇返回 404 `NOTIFY_ARTICLE_WITHDRAWN`，站点因此连同同 slug 的自带文章一起隐藏（未发布的草稿不影响自带文章）。
 - 页面下方「站点自带的文章」列出还没被后台接管的仓库文件，「复制到后台编辑」把中英文本带进编辑器，保存为草稿、发布后替换原文件。
@@ -378,10 +379,10 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 
 `/pages`（设计 2026-10-04 §4.4，D2）；任何管理员可读，写要 `content.write`。栏目 `LEGAL` 只有 `terms`、`privacy`、`risk`、`fees`、`about`、`contact` 六个 slug（站点地址 `/legal/<slug>`），`HOME` 只有 `home-hero`（首页横幅：标题、副标题即摘要，按钮取正文里第一个 Markdown 链接，只认站内路径或 https 地址）；别的 slug 被 notification-service 拒绝（400）。站点自带每一页的中英文默认稿（`web/packages/core/content/{legal,home}/`）。
 
-- 每一行显示站点现在显示什么：覆盖稿（已发布且已到时间）、默认稿（没有覆盖稿、只有草稿，或覆盖稿定时发布、未到时间）、不显示（法律页的覆盖稿被撤回，默认稿也隐藏）、站点内置文字（首页横幅被撤回，用站点代码里的文字），以及覆盖稿的状态与版本、最近修改人。
-- 「编辑」：有覆盖稿时打开它，没有时从默认稿复制一份；slug 固定，没有分类、置顶与排序。保存是草稿，发布（立即或定时）后才替换默认稿。
-- 「以默认稿发布」：把默认稿（中英）原样发布为覆盖稿；已有草稿或已撤回的覆盖稿时先用默认稿改写再发布（确认框写明会替换）。上线检查清单的「法律页」= 用户协议、隐私政策、风险提示都有已发布的覆盖稿，这一步就是为它准备的（协调会话决定 ②，不引入新状态）。
-- 「撤回」= 下线覆盖稿：法律页从站点消失（默认稿一并隐藏），首页横幅改用站点内置文字；要恢复就再发布或以默认稿发布。审计与公告、帮助相同（`admin.content.*`，对象 `legal:<slug>`、`home:<slug>`）。
+- 每一页两栏（D4）：测试模式与正式模式下站点各显示什么——覆盖稿（已发布且已到时间）、默认稿（没有覆盖稿、只有草稿，或覆盖稿定时发布、未到时间）、不显示（法律页的覆盖稿被撤回，默认稿也隐藏）、站点内置文字（首页横幅被撤回，用站点代码里的文字），以及用的是哪篇覆盖稿：那种模式的稿，没有时用通用稿（标「通用稿」），与它的状态、版本、最近修改时间。
+- 「编辑」：那一栏有覆盖稿时打开它（通用稿两栏都会打开同一篇），没有时「新建」从默认稿复制一份、模式预设为这一栏；slug 固定，没有分类、置顶与排序。保存是草稿，发布（立即或定时）后才在它的模式下替换默认稿。
+- 「以默认稿发布」（正式模式一栏）：把默认稿（中英）原样发布为正式模式的覆盖稿；已有正式稿（草稿或已撤回）时先用默认稿改写再发布；已有的是通用稿时，它改为只用于正式模式并换成默认稿（测试模式下站点改显示默认稿），确认框写明。上线检查清单的「法律页」= 用户协议、隐私政策、风险提示在正式模式下都有已生效的覆盖稿（FORMAL 或 BOTH），这一步就是为它准备的（协调会话决定 ②，不引入新状态）。
+- 「撤回」= 下线那一栏的覆盖稿：法律页在它的模式下从站点消失（默认稿一并隐藏），首页横幅改用站点内置文字；撤回通用稿两种模式都受影响（确认框写明）；要恢复就再发布或以默认稿发布。审计与公告、帮助相同（`admin.content.*`，对象 `legal:<slug>`、`home:<slug>`，详情带 `modes`）。
 
 ### 站内信
 
@@ -421,7 +422,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 
 `/platform`（读：所有角色，`reports.read`；改：`settings.write`，只有 ADMIN；设计 2026-10-04 §4.1、§4.2、§5，D2）：
 
-- **平台资料**（instrument-service 的 `platform_profile`，经 `INSTRUMENT_SERVICE_URL` 的 `/internal/platform/profile`）：交易所名称与简称、域名（PC 站主机名，手机站 m.<域名>、后台 admin.<域名>）、浏览器主题色与品牌主色、默认语言、学习横幅（开关与中英文文字）、注册方式（开放/关闭与关闭时的中英文文字）、页脚版权与备案合规文字（中英文）、联系邮箱、客服链接、社交链接（最多 10 个，https）。`GET/PUT /admin/v1/platform/profile`：保存整体替换（图片与注册赠送除外），带读到的 `expected_version`，期间有人保存过 409 `INSTRUMENT_PLATFORM_CHANGED`；三端 1 分钟内显示，不重新构建。单人即可，审计 `admin.platform.updated`（对象 `platform`，详情 `changes` 为改动字段的前后值与新版本）。
+- **平台资料**（instrument-service 的 `platform_profile`，经 `INSTRUMENT_SERVICE_URL` 的 `/internal/platform/profile`）：交易所名称与简称、域名（PC 站主机名，手机站 m.<域名>、后台 admin.<域名>）、浏览器主题色与品牌主色、默认语言、测试模式（开关；开着时三端顶部是否显示横幅与横幅的中英文文字，开着且显示横幅时文字必填；D4 起取代学习横幅 `learning_mode`）、注册方式（开放/关闭与关闭时的中英文文字）、页脚版权与备案合规文字（中英文）、联系邮箱、客服链接、社交链接（最多 10 个，https）。`GET/PUT /admin/v1/platform/profile`：保存整体替换（图片与注册赠送除外），带读到的 `expected_version`，期间有人保存过 409 `INSTRUMENT_PLATFORM_CHANGED`；三端 1 分钟内显示，不重新构建。单人即可，审计 `admin.platform.updated`（对象 `platform`，详情 `changes` 为改动字段的前后值与新版本）。
 - **图片**：浅色与深色背景的 logo、favicon、Apple 触摸图标。`PUT/DELETE /admin/v1/platform/images/{kind}`（`logo_light`、`logo_dark`、`favicon`、`apple_touch_icon`）：正方形、最大 200 KB；logo 收 PNG、SVG、WebP，favicon 收 PNG、SVG，触摸图标只收 PNG 且至少 180 px（instrument-service 再查一遍，SVG 按允许名单重建）。上传前在确认框里预览；删除后恢复内置图片。审计 `admin.platform.image_updated`（类型、大小、SHA-256，不含内容）与 `admin.platform.image_removed`。图片地址带版本，nginx 让 admin.<域名> 同源代理 `/v1/platform/images/*`（后台的 CSP 不放第三方图片）。
 - **注册赠送**（ledger-service 的设置，经 `LEDGER_SERVICE_URL` 的 `/internal/ledger/settings/welcome-credits`；页面标「上线应为 0」）：新账户注册时得到的资金列表（资产与数额），总闸开关 `ledger.welcome_credit` 也开着才发。`PUT /admin/v1/platform/welcome-credits` 带 `expected_version`（过期 409 `LEDGER_SETTINGS_CHANGED`）：
   - 降低或清空（数额 0 即不发，`[]` 全部不发）立即生效（200），审计 `admin.platform.welcome_changed`（新旧列表）；账本另记 `ledger.settings.welcome_credits`。
@@ -436,7 +437,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 | 项 | 来源 | 上线应为 | 去修改 |
 |---|---|---|---|
 | 注册赠送 `welcome_credits` | 账本设置（并显示总闸） | 全部为 0 | 平台设置 |
-| 学习横幅 `learning_mode` | 平台资料 | 关 | 平台设置 |
+| 测试模式 `test_mode` | 平台资料 | 关（正式模式） | 平台设置 |
 | 注册方式 `registration` | 平台资料 | 开放或按运营决定（只显示，不影响可上线） | 平台设置 |
 | 后台登录需验证码 `admin_totp` | 开关 `admin.login_without_totp` | 关 | 功能开关 |
 | 双人审批 `two_person` | 开关 `admin.two_person_approval` | 开 | 功能开关 |
@@ -445,7 +446,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 | 提现总闸 `withdraw` | 开关 `wallet.withdraw` | 开 | 功能开关 |
 | 品牌 `brand` | 平台资料 | 名称不是初始的 `Astras`、至少一张 logo、favicon 已上传 | 平台设置 |
 | 平台币资料 `coin_profile` | 模拟市场的币（默认 ASTRA）的资产资料 | 名称与 logo 已设置 | 代币信息 |
-| 法律页 `legal` | 内容 LEGAL 分区 | `terms`、`privacy`、`risk` 有已生效的覆盖稿（已发布且不是定时到以后；「以默认稿发布」也算）；分区没上线时待接入 | 固定页面 |
+| 法律页 `legal` | 内容 LEGAL 分区 | `terms`、`privacy`、`risk` 在正式模式下有已生效的覆盖稿（FORMAL 或 BOTH，已发布且不是定时到以后；「以默认稿发布」也算；只有测试稿不算）；分区没上线时待接入 | 固定页面 |
 | 第三方 `third_party` | 各服务的 `exchange_config_present` | 人机验证、邮件、链服务都为是；有一项上报为否即未达标，有一项没人上报（那个服务的指标读不到）为读不到；没有服务上报时待接入 | 上线手册 |
 | 管理员 `admins` | 后台名册 | 至少 2 名启用的 ADMIN，全部绑定身份验证器 | 管理员与角色 |
 | 域名 `domain` | 平台资料的 `domain` 与访问后台用的主机名（nginx 转来的 Host） | 后台在 admin.<资料里的域名> | 平台设置 |
@@ -562,7 +563,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | `INSTRUMENT_PLATFORM_CHANGED` | 保存平台资料时版本已过期（期间有人保存过），刷新后再改 |
 | `LEDGER_SETTINGS_CHANGED` | 修改注册赠送时版本已过期；批准时遇到它，申请记为失败 |
 | `ADMIN_TAG_EMPTY` | 按标签发的站内信：没有账户带这个标签 |
-| `NOTIFY_ARTICLE_EXISTS` | 同一栏目已有这个 slug 的文章（notification-service 返回，后台原样转出） |
+| `NOTIFY_ARTICLE_EXISTS` | 同一栏目的这个 slug 在所选模式下已有文章（测试稿与正式稿可以并存，通用稿与两者都冲突；notification-service 返回，后台原样转出） |
 | `NOTIFY_ARTICLE_WITHDRAWN` | 公开接口：文章已下线（站点不再用同 slug 的自带文章顶替） |
 | `WALLET_DEPOSIT_KNOWN` | 补记的托管方交易号或（网络、哈希、地址）已有充值，详情 `deposit_id` |
 | `WALLET_DEPOSIT_NOT_RELEASABLE` | 只有记入 `UNCLAIMED_DEPOSIT`、有币种、回调没有不一致的待处理充值才能入账给用户 |

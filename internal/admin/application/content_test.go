@@ -27,7 +27,7 @@ type fakeContent struct {
 
 func (f *fakeContent) CreateArticle(_ context.Context, a ports.ArticleWrite) (json.RawMessage, error) {
 	f.articles = append(f.articles, a)
-	return json.Marshal(map[string]any{"id": uuid.NewString(), "section": a.Section, "slug": a.Slug, "status": "DRAFT", "version": 1})
+	return json.Marshal(map[string]any{"id": uuid.NewString(), "section": a.Section, "slug": a.Slug, "modes": a.Modes, "status": "DRAFT", "version": 1})
 }
 
 func (f *fakeContent) PublishArticle(_ context.Context, id string, version int, _ *time.Time, actor string) (json.RawMessage, error) {
@@ -64,11 +64,18 @@ func TestArticlesAndMessagesFromTheConsole(t *testing.T) {
 	if _, err := h.svc.CreateArticle(ctx, ops, ports.ArticleWrite{Section: "blog", Slug: "x", Texts: text}, "tonight"); code(err) != apperr.CodeInvalidArgument {
 		t.Fatalf("an unknown section: %v", err)
 	}
-	if _, err := h.svc.CreateArticle(ctx, ops, ports.ArticleWrite{Section: "announcements", Slug: "maintenance", Texts: text}, "tonight's maintenance"); err != nil {
+	// A page for one of the exchange's modes: TEST, FORMAL or BOTH (design 2026-10-04 §4.4).
+	if _, err := h.svc.CreateArticle(ctx, ops, ports.ArticleWrite{Section: "announcements", Slug: "maintenance", Modes: "LIVE", Texts: text}, "tonight"); code(err) != apperr.CodeInvalidArgument {
+		t.Fatalf("an unknown mode: %v", err)
+	}
+	if _, err := h.svc.CreateArticle(ctx, ops, ports.ArticleWrite{Section: "announcements", Slug: "maintenance", Modes: "TEST", Texts: text}, "tonight's maintenance"); err != nil {
 		t.Fatal(err)
 	}
-	if a := content.articles[0]; a.Section != "ANNOUNCEMENT" || a.Actor != "ops@example.com" {
+	if a := content.articles[0]; a.Section != "ANNOUNCEMENT" || a.Actor != "ops@example.com" || a.Modes != "TEST" {
 		t.Fatalf("written %+v", a)
+	}
+	if last := h.store.audits[len(h.store.audits)-1]; last.GetTarget() != "announcement:maintenance" || !strings.Contains(last.GetDetails(), `"modes":"TEST"`) {
+		t.Fatalf("audited %v", last)
 	}
 	id := uuid.NewString()
 	if _, err := h.svc.PublishArticle(ctx, ops, id, 1, nil, "publish it"); err != nil || content.published[0] != id+" ops@example.com" {

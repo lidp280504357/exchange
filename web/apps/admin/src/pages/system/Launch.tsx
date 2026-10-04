@@ -22,7 +22,7 @@ const tone: Record<Status, "success" | "danger" | "neutral" | "warn"> = { OK: "s
 
 /** Where each item is changed: a page of the console, or the launch handbook. */
 const FIX: Record<Key, string | null> = {
-  welcome_credits: "/platform#welcome", learning_mode: "/platform", registration: "/platform", admin_totp: "/risk", two_person: "/risk",
+  welcome_credits: "/platform#welcome", test_mode: "/platform", registration: "/platform", admin_totp: "/risk", two_person: "/risk",
   test_assets: "/risk", custodian: null, withdraw: "/risk", brand: "/platform", coin_profile: "/sim/token", legal: "/pages",
   third_party: null, admins: "/admins", domain: "/platform", house: "/house",
 };
@@ -135,8 +135,13 @@ function Current({ item: { key, value: v, status } }: { item: Item }) {
       );
       break;
     }
-    case "learning_mode":
-      body = on(v.enabled);
+    case "test_mode":
+      body = (
+        <>
+          {on(v.enabled)}
+          {v.enabled ? <span className="text-fg-3"> · {t("admin.launch.banner", { on: on(v.banner) })}</span> : null}
+        </>
+      );
       break;
     case "registration":
       body = t(`admin.launch.registration.${String(v.status)}`);

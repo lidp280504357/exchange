@@ -694,8 +694,11 @@ type Content interface {
 
 // ArticleWrite is an article as the console writes it.
 type ArticleWrite struct {
-	Section  string        `json:"section,omitempty"`
-	Slug     string        `json:"slug"`
+	Section string `json:"section,omitempty"`
+	Slug    string `json:"slug"`
+	// Modes is TEST, FORMAL or BOTH (design 2026-10-04 §4.4): left out, a
+	// draft is for both modes and an edit keeps the article's own.
+	Modes    string        `json:"modes,omitempty"`
 	Category string        `json:"category"`
 	Pinned   bool          `json:"pinned"`
 	Order    int           `json:"order"`

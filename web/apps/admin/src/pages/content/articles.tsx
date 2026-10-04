@@ -68,15 +68,19 @@ const title = (a: Article) => a.texts.find((t) => t.locale === "zh-CN")?.title ?
 /** shown reports whether the sites show an article now. */
 export const shown = (a: Article) => a.status === "PUBLISHED" && (!a.publish_at || new Date(a.publish_at) <= new Date());
 
-export type Draft = { slug: string; category: string; pinned: boolean; order: string; texts: Record<Locale, Text> };
+/** An article's modes: for test mode, for the live exchange, or both (design 2026-10-04 §4.4). */
+export type Modes = Article["modes"];
+export const MODES: Modes[] = ["BOTH", "TEST", "FORMAL"];
+
+export type Draft = { slug: string; modes: Modes; category: string; pinned: boolean; order: string; texts: Record<Locale, Text> };
 
 type Source = NonNullable<Awaited<ReturnType<typeof bundledSource>>>;
 
-/** seedOf is the draft of a bundled file, in Chinese and (when there is one) English. */
-export function seedOf(slug: string, zh: Source, en: Source | null): Draft {
+/** seedOf is the draft of a bundled file, in Chinese and (when there is one) English, for modes. */
+export function seedOf(slug: string, zh: Source, en: Source | null, modes: Modes = "BOTH"): Draft {
   const text = (s: Source): Text => ({ locale: s.locale, title: s.title, summary: s.summary, body: s.body.trim() });
   return {
-    slug, category: zh.category, pinned: zh.pinned, order: String(zh.order),
+    slug, modes, category: zh.category, pinned: zh.pinned, order: String(zh.order),
     texts: { "zh-CN": text(zh), en: en ? text(en) : { locale: "en", title: "", summary: "", body: "" } },
   };
 }
@@ -91,7 +95,7 @@ export function articleBody(d: Draft, t: (key: string) => string) {
   if (texts.some((x) => !x.title.trim() || !x.body.trim())) throw new FormError(t("admin.content.needBoth"));
   const order = Number(d.order);
   if (!Number.isInteger(order)) throw new FormError(t("admin.content.badOrder"));
-  return { slug: d.slug, category: d.category, pinned: d.pinned, order, texts };
+  return { slug: d.slug, modes: d.modes, category: d.category, pinned: d.pinned, order, texts };
 }
 
 /** ArticlesPage lists a section's articles and the sites' own files, and opens the editor. */
@@ -112,6 +116,7 @@ export function ArticlesPage({ admin, section }: { admin: Admin; section: ListSe
           <span className="flex flex-col">
             <span className="flex items-center gap-1.5 font-medium text-fg-1">
               {a.pinned && <Badge tone="brand">{t("admin.content.pinned")}</Badge>}
+              <ModesBadge modes={a.modes} />
               {title(a)}
             </span>
             <span className="font-mono text-xs text-fg-3">
@@ -201,6 +206,13 @@ export function ArticlesPage({ admin, section }: { admin: Admin; section: ListSe
   );
 }
 
+/** ModesBadge marks an article for one of the exchange's modes (nothing for both). */
+export function ModesBadge({ modes }: { modes: Modes }) {
+  const { t } = useTranslation();
+  if (modes === "BOTH") return null;
+  return <Badge tone={modes === "TEST" ? "warn" : "info"}>{t(`admin.content.modes.${modes}`)}</Badge>;
+}
+
 export function StatusBadge({ a }: { a: Article }) {
   const { t } = useTranslation();
   if (a.status === "PUBLISHED" && !shown(a)) return <Badge tone="info">{t("admin.content.scheduled")}</Badge>;
@@ -270,6 +282,7 @@ function draftOf(section: Section, a: Article | null): Draft {
   const empty = (locale: Locale): Text => ({ locale, title: "", summary: "", body: "" });
   return {
     slug: a?.slug ?? "",
+    modes: a?.modes ?? "BOTH",
     category: a?.category ?? (fixedSection(section) ? "" : CATEGORIES[section][0]!),
     pinned: a?.pinned ?? false,
     order: String(a?.order ?? 0),
@@ -384,6 +397,18 @@ export function ArticleEditor({
     >
       <div className="flex flex-col gap-4">
         <ReadOnly admin={admin} perm="content.write" />
+        <div className="flex flex-col gap-1.5">
+          <span className="text-sm text-fg-2">{t("admin.content.modes.label")}</span>
+          <Segmented
+            size="sm"
+            value={d.modes}
+            disabled={!write}
+            onValueChange={(v) => setD({ ...d, modes: v as Modes })}
+            items={MODES.map((m) => ({ value: m, label: t(`admin.content.modes.${m}`) }))}
+            aria-label={t("admin.content.modes.label")}
+          />
+          <p className="text-xs text-fg-3">{t("admin.content.modes.hint")}</p>
+        </div>
         {fixed ? (
           <p className="text-xs text-fg-3">{t(section === "HOME" ? "admin.pages.heroHint" : "admin.pages.legalHint", { slug: d.slug })}</p>
         ) : (

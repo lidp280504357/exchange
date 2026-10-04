@@ -2636,9 +2636,10 @@ paths:
       summary: Write a draft
       description: |
         Chinese (zh-CN) title and Markdown body required, English
-        optional; the slug is unique in its section
-        (NOTIFY_ARTICLE_EXISTS). Audited as admin.content.created on
-        <section>:<slug>. Needs content.write.
+        optional. A slug holds one article per mode in its section: a TEST
+        and a FORMAL one side by side, or one for BOTH; another that
+        overlaps is NOTIFY_ARTICLE_EXISTS (409). Audited as
+        admin.content.created on <section>:<slug>. Needs content.write.
       tags: [content]
       security:
         - session: []
@@ -3323,8 +3324,8 @@ paths:
       summary: The platform's profile, as the sites show it
       description: |
         Design 2026-10-04 §4.1 (D2): the name, logos, colours, footer,
-        contact, learning banner, registration and the welcome credits the
-        sites read, with who last changed it. instrument-service keeps it;
+        contact, test mode (and its banner), registration and the welcome
+        credits the sites read, with who last changed it. instrument-service keeps it;
         the welcome credits are the ledger's (changed with
         /admin/v1/platform/welcome-credits). Every administrator reads it.
       tags: [platform]
@@ -3512,7 +3513,7 @@ paths:
   /admin/v1/launch-checklist:
     get:
       operationId: getLaunchChecklist
-      summary: What of the learning setup is still on (read-only)
+      summary: What of the test setup is still on (read-only)
       description: |
         Design 2026-10-04 §4.6 (D2): each item from its source now, with
         what it is (value) and whether it is what a launch needs. ready
@@ -6221,7 +6222,7 @@ components:
     PlatformProfileAdmin:
       description: The platform's profile (as api/openapi/platform.yaml's PlatformProfile) and who last changed it.
       type: object
-      required: [name, short_name, domain, theme_color, brand_color, images, footer, contact, social, default_locale, learning_mode, registration,
+      required: [name, short_name, domain, theme_color, brand_color, images, footer, contact, social, default_locale, test_mode, registration,
         welcome_credits, version, updated_at, updated_by]
       properties:
         name:
@@ -6276,12 +6277,19 @@ components:
         default_locale:
           type: string
           enum: [zh-CN, en]
-        learning_mode:
+        test_mode:
           type: object
-          required: [enabled, text]
+          description: >-
+            The exchange in test mode (the learning mode until 2026-10-04; off when live, design §4.3). While enabled the
+            sites show the content marked TEST or BOTH (FORMAL or BOTH when off), "测试模式" badges and, when banner is
+            true, text in a banner at the top. text is required only while enabled and banner.
+          required: [enabled, banner, text]
           properties:
             enabled:
               type: boolean
+            banner:
+              type: boolean
+              description: Show the banner while test mode is on.
             text:
               $ref: '#/components/schemas/PlatformTexts'
         registration:
@@ -6315,7 +6323,7 @@ components:
           description: The actor of the last change ("admin:<email>", "system:migration").
     PlatformProfileWrite:
       type: object
-      required: [name, short_name, domain, theme_color, brand_color, footer, contact, social, default_locale, learning_mode, registration,
+      required: [name, short_name, domain, theme_color, brand_color, footer, contact, social, default_locale, test_mode, registration,
         expected_version]
       properties:
         name:
@@ -6369,12 +6377,19 @@ components:
         default_locale:
           type: string
           enum: [zh-CN, en]
-        learning_mode:
+        test_mode:
           type: object
-          required: [enabled, text]
+          description: >-
+            The exchange in test mode (the learning mode until 2026-10-04; off when live, design §4.3). While enabled the
+            sites show the content marked TEST or BOTH (FORMAL or BOTH when off), "测试模式" badges and, when banner is
+            true, text in a banner at the top. text is required only while enabled and banner.
+          required: [enabled, banner, text]
           properties:
             enabled:
               type: boolean
+            banner:
+              type: boolean
+              description: Show the banner while test mode is on.
             text:
               $ref: '#/components/schemas/PlatformTexts'
         registration:
@@ -6395,7 +6410,7 @@ components:
       properties:
         key:
           type: string
-          enum: [welcome_credits, learning_mode, registration, admin_totp, two_person, test_assets, custodian, withdraw, brand, coin_profile, legal,
+          enum: [welcome_credits, test_mode, registration, admin_totp, two_person, test_assets, custodian, withdraw, brand, coin_profile, legal,
             third_party, admins, domain, house]
         status:
           type: string
@@ -6465,6 +6480,8 @@ components:
         slug:
           type: string
           pattern: '^[a-z0-9][a-z0-9-]{0,63}$'
+        modes:
+          $ref: '#/components/schemas/ArticleModes'
         category:
           type: string
           description: Announcements notice or product; help account, funds, trading, futures or faq (others allowed).
@@ -6476,9 +6493,16 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ArticleText'
+    ArticleModes:
+      type: string
+      enum: [TEST, FORMAL, BOTH]
+      description: >-
+        Which of the exchange's modes the article is for (design 2026-10-04 §4.4): the sites show TEST and BOTH in
+        test mode, FORMAL and BOTH when live. BOTH when a draft leaves it out; an edit without it keeps the article's
+        own. A body may also hold :::test … ::: and :::formal … ::: blocks, which the sites show in that mode only.
     ContentArticle:
       type: object
-      required: [id, section, slug, category, pinned, order, status, publish_at, version, updated_by, created_at, updated_at, texts]
+      required: [id, section, slug, modes, category, pinned, order, status, publish_at, version, updated_by, created_at, updated_at, texts]
       properties:
         id:
           type: string
@@ -6488,6 +6512,8 @@ components:
           enum: [ANNOUNCEMENT, HELP, LEGAL, HOME]
         slug:
           type: string
+        modes:
+          $ref: '#/components/schemas/ArticleModes'
         category:
           type: string
         pinned:

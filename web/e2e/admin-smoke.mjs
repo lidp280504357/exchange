@@ -362,19 +362,23 @@ try {
   // The fixed pages: the six legal pages and the home hero, each with what
   // the sites show; the hero's editor opens from its default (closed unsaved).
   await go("/pages");
+  // Each page in test mode and live (design 2026-10-04 §4.4): what the sites show in each.
   await page.waitForFunction(
-    () => {
-      const shown = [...document.querySelectorAll("[data-testid^=fixed-][data-onsite]")].map((el) => el.getAttribute("data-onsite"));
-      return shown.length === 7 && shown.every((s) => s !== "none");
-    },
+    () =>
+      ["test", "formal"].every((m) => {
+        const shown = [...document.querySelectorAll(`[data-testid^=fixed-${m}-][data-onsite]`)].map((el) => el.getAttribute("data-onsite"));
+        return shown.length === 7 && shown.every((s) => s !== "none");
+      }),
     { timeout: 20000 },
   );
   await page.click('[data-testid="fixed-edit-home-hero"]');
   await waitText("副标题");
   await page.waitForFunction(() => document.querySelector("#article-title-zh-CN")?.value.length > 0, { timeout: 10000 });
+  const forMode = await page.evaluate(() => document.querySelector('[role=dialog] [role=group][aria-label="适用模式"] [data-state="on"]')?.innerText.trim());
+  if (forMode !== "正式模式" && forMode !== "通用") throw new Error(`the hero's live column opens an editor for "${forMode}"`);
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => !document.querySelector("[role=dialog]"), { timeout: 10000 });
-  ok("the fixed pages: the legal pages and the home hero with what the sites show, the hero's editor from its default");
+  ok(`the fixed pages: the legal pages and the home hero with what the sites show in test mode and live, the hero's live editor (${forMode})`);
 
   // 9c. Operations: the announcements, the editor with its preview (closed
   // unsaved), the help articles, the messages and their form (closed unsent).

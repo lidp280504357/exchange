@@ -36,6 +36,7 @@ func (h *Handler) article(w http.ResponseWriter, r *http.Request) {
 type articleBody struct {
 	Section  string              `json:"section"`
 	Slug     string              `json:"slug"`
+	Modes    string              `json:"modes"`
 	Category string              `json:"category"`
 	Pinned   bool                `json:"pinned"`
 	Order    int                 `json:"order"`
@@ -46,7 +47,7 @@ type articleBody struct {
 
 func (b articleBody) write() ports.ArticleWrite {
 	return ports.ArticleWrite{
-		Section: b.Section, Slug: b.Slug, Category: b.Category, Pinned: b.Pinned, Order: b.Order, Texts: b.Texts, Version: b.Version,
+		Section: b.Section, Slug: b.Slug, Modes: b.Modes, Category: b.Category, Pinned: b.Pinned, Order: b.Order, Texts: b.Texts, Version: b.Version,
 	}
 }
 

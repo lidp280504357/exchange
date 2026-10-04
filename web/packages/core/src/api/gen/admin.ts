@@ -1655,9 +1655,10 @@ export interface paths {
         /**
          * Write a draft
          * @description Chinese (zh-CN) title and Markdown body required, English
-         *     optional; the slug is unique in its section
-         *     (NOTIFY_ARTICLE_EXISTS). Audited as admin.content.created on
-         *     <section>:<slug>. Needs content.write.
+         *     optional. A slug holds one article per mode in its section: a TEST
+         *     and a FORMAL one side by side, or one for BOTH; another that
+         *     overlaps is NOTIFY_ARTICLE_EXISTS (409). Audited as
+         *     admin.content.created on <section>:<slug>. Needs content.write.
          */
         post: operations["createArticle"];
         delete?: never;
@@ -2055,8 +2056,8 @@ export interface paths {
         /**
          * The platform's profile, as the sites show it
          * @description Design 2026-10-04 §4.1 (D2): the name, logos, colours, footer,
-         *     contact, learning banner, registration and the welcome credits the
-         *     sites read, with who last changed it. instrument-service keeps it;
+         *     contact, test mode (and its banner), registration and the welcome
+         *     credits the sites read, with who last changed it. instrument-service keeps it;
          *     the welcome credits are the ledger's (changed with
          *     /admin/v1/platform/welcome-credits). Every administrator reads it.
          */
@@ -2162,7 +2163,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * What of the learning setup is still on (read-only)
+         * What of the test setup is still on (read-only)
          * @description Design 2026-10-04 §4.6 (D2): each item from its source now, with
          *     what it is (value) and whether it is what a launch needs. ready
          *     when every item is OK. It changes nothing and covers what the
@@ -3793,8 +3794,11 @@ export interface components {
             }[];
             /** @enum {string} */
             default_locale: "zh-CN" | "en";
-            learning_mode: {
+            /** @description The exchange in test mode (the learning mode until 2026-10-04; off when live, design §4.3). While enabled the sites show the content marked TEST or BOTH (FORMAL or BOTH when off), "测试模式" badges and, when banner is true, text in a banner at the top. text is required only while enabled and banner. */
+            test_mode: {
                 enabled: boolean;
+                /** @description Show the banner while test mode is on. */
+                banner: boolean;
                 text: components["schemas"]["PlatformTexts"];
             };
             registration: {
@@ -3839,8 +3843,11 @@ export interface components {
             }[];
             /** @enum {string} */
             default_locale: "zh-CN" | "en";
-            learning_mode: {
+            /** @description The exchange in test mode (the learning mode until 2026-10-04; off when live, design §4.3). While enabled the sites show the content marked TEST or BOTH (FORMAL or BOTH when off), "测试模式" badges and, when banner is true, text in a banner at the top. text is required only while enabled and banner. */
+            test_mode: {
                 enabled: boolean;
+                /** @description Show the banner while test mode is on. */
+                banner: boolean;
                 text: components["schemas"]["PlatformTexts"];
             };
             registration: {
@@ -3853,7 +3860,7 @@ export interface components {
         };
         LaunchItem: {
             /** @enum {string} */
-            key: "welcome_credits" | "learning_mode" | "registration" | "admin_totp" | "two_person" | "test_assets" | "custodian" | "withdraw" | "brand" | "coin_profile" | "legal" | "third_party" | "admins" | "domain" | "house";
+            key: "welcome_credits" | "test_mode" | "registration" | "admin_totp" | "two_person" | "test_assets" | "custodian" | "withdraw" | "brand" | "coin_profile" | "legal" | "third_party" | "admins" | "domain" | "house";
             /** @enum {string} */
             status: "OK" | "FAIL" | "PENDING" | "UNKNOWN";
             /** @description What it is now, by item (a flag's enabled and rules, the credits, the custodian's gateway host, the administrators...). */
@@ -3890,18 +3897,25 @@ export interface components {
         };
         ArticleWrite: {
             slug: string;
+            modes?: components["schemas"]["ArticleModes"];
             /** @description Announcements notice or product; help account, funds, trading, futures or faq (others allowed). */
             category: string;
             pinned: boolean;
             order: number;
             texts: components["schemas"]["ArticleText"][];
         };
+        /**
+         * @description Which of the exchange's modes the article is for (design 2026-10-04 §4.4): the sites show TEST and BOTH in test mode, FORMAL and BOTH when live. BOTH when a draft leaves it out; an edit without it keeps the article's own. A body may also hold :::test … ::: and :::formal … ::: blocks, which the sites show in that mode only.
+         * @enum {string}
+         */
+        ArticleModes: "TEST" | "FORMAL" | "BOTH";
         ContentArticle: {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
             section: "ANNOUNCEMENT" | "HELP" | "LEGAL" | "HOME";
             slug: string;
+            modes: components["schemas"]["ArticleModes"];
             category: string;
             pinned: boolean;
             order: number;

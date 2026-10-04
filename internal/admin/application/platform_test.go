@@ -40,7 +40,7 @@ func newFakePlatform() *fakePlatform {
 	return &fakePlatform{
 		profile: map[string]any{
 			"name": "Astras", "short_name": "Astras", "domain": "astras.vip", "version": float64(4),
-			"learning_mode": map[string]any{"enabled": true}, "registration": map[string]any{"status": "OPEN"},
+			"test_mode": map[string]any{"enabled": true, "banner": true}, "registration": map[string]any{"status": "OPEN"},
 			"images": map[string]any{"logo_light": nil, "logo_dark": nil, "favicon": nil, "apple_touch_icon": nil},
 		},
 		credits: []ports.WelcomeCredit{{Asset: "BTC", Amount: decimal.RequireFromString("0.1")}, {Asset: "USDT", Amount: decimal.NewFromInt(10_000)}},
@@ -134,7 +134,7 @@ func TestPlatformProfile(t *testing.T) {
 	}
 	got := h.auditsOf("admin.platform.updated")
 	if len(got) != 1 || !strings.Contains(got[0], `"name":{"new":"Nova","old":"Astras"}`) || !strings.Contains(got[0], `"version":5`) ||
-		strings.Contains(got[0], `"learning_mode"`) {
+		strings.Contains(got[0], `"test_mode"`) {
 		t.Fatalf("audited %v", got)
 	}
 	if _, err := h.svc.UpdatePlatformProfile(ctx, boss, write, "rename it again"); code(err) != "INSTRUMENT_PLATFORM_CHANGED" {

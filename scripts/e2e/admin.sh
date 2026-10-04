@@ -1752,6 +1752,8 @@ check '.items[] | select(.key == "house") | .value.flag == "market.house_liquidi
   "HOUSE's item reads its flag and its inventory of the backed assets"
 check '.ready == false and ([.items[] | select(.key == "admin_totp" or .key == "test_assets")] | all(.status == "FAIL"))' \
   "the test server is not ready: the console's sign-in without the code and the test assets are on"
+check '.items[] | select(.key == "test_mode") | .status == "FAIL" and .value.enabled == true and (.value.banner | type) == "boolean"' \
+  "and it is in test mode (design 2026-10-04 §4.3)"
 as AUDITOR GET /admin/v1/platform/profile ""
 PLATFORM_DONE=""
 if [[ $STATUS == 404 ]]; then
@@ -1763,7 +1765,7 @@ else
   PNAME=$(jq -r .name <<<"$PROFILE")
   platform_write() { # platform_write NAME VERSION REASON: the profile read, renamed
     jq -c --arg n "$1" --argjson v "$2" --arg r "$3" \
-      '{name: $n, short_name, domain, theme_color, brand_color, footer, contact, social, default_locale, learning_mode, registration,
+      '{name: $n, short_name, domain, theme_color, brand_color, footer, contact, social, default_locale, test_mode, registration,
         expected_version: $v, reason: $r}' <<<"$PROFILE"
   }
   as OPERATOR PUT /admin/v1/platform/profile "$(platform_write "e2e rename" "$PV" "e2e: operators rename nothing")"
@@ -1854,11 +1856,16 @@ else
   expect 200 - "OPERATOR rewrites the e2e announcement"
 fi
 ART_ID=$(jq -r .id <<<"$BODY") ART_V=$(jq -r .version <<<"$BODY")
+check '.modes == "BOTH"' "for both of the exchange's modes, the draft naming none"
 # shellcheck disable=SC2016 # expanded when the script ends
 at_exit 'as ADMIN GET "/admin/v1/articles/$ART_ID" "" && [[ $(jq -r .status <<<"$BODY") == PUBLISHED ]] &&
   as ADMIN POST "/admin/v1/articles/$ART_ID/archive" "{\"version\":$(jq .version <<<"$BODY"),\"reason\":\"e2e cleanup\"}" >/dev/null'
 as OPERATOR POST /admin/v1/articles "$(announcement again | jq -c '. + {section: "ANNOUNCEMENT", reason: "e2e writes it twice"}')"
 expect 409 NOTIFY_ARTICLE_EXISTS "a slug is taken once in a section"
+as OPERATOR POST /admin/v1/articles "$(announcement again | jq -c '. + {section: "ANNOUNCEMENT", modes: "TEST", reason: "e2e writes a test-mode page beside it"}')"
+expect 409 NOTIFY_ARTICLE_EXISTS "a test-mode page overlaps the one for both modes"
+as OPERATOR POST /admin/v1/articles "$(announcement again | jq -c '. + {section: "ANNOUNCEMENT", modes: "LIVE", reason: "e2e names no such mode"}')"
+expect 400 COMMON_INVALID_ARGUMENT "a mode is TEST, FORMAL or BOTH"
 as OPERATOR POST "/admin/v1/articles/$ART_ID/publish" "$(jq -nc --argjson v "$ART_V" '{version: $v, publish_at: (now + 3600 | todate), reason: "e2e schedules it an hour ahead"}')"
 expect 200 - "OPERATOR schedules it an hour ahead"
 check '.status == "PUBLISHED" and (.publish_at | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) > now' "published from a time to come"

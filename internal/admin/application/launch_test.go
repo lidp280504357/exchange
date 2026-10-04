@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/skill/exchange/internal/admin/domain"
@@ -91,7 +92,7 @@ func launchStatuses(c LaunchChecklist) map[string]string {
 	return out
 }
 
-// TestLaunchChecklist reads each item from its source: the learning setup
+// TestLaunchChecklist reads each item from its source: the test setup
 // of the test server is red item by item; set as a launch needs it, every
 // item is green and the platform ready.
 func TestLaunchChecklist(t *testing.T) {
@@ -116,13 +117,13 @@ func TestLaunchChecklist(t *testing.T) {
 	ledger := &launchLedger{fakeLedger: h.ledger, house: map[string]string{"USDT": "2000000", "BTC": "0"}}
 	h.svc.Flags, h.svc.Wallet, h.svc.Catalog, h.svc.Content, h.svc.Probe, h.svc.Platform, h.svc.Ledger = flags, wallet, catalog, content, probe, pl, ledger
 
-	// The test server: the learning setup.
+	// The test server: the test setup.
 	c, err := h.svc.LaunchChecklist(ctx, auditor, "admin.astras.vip")
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]string{
-		"welcome_credits": LaunchFail, "learning_mode": LaunchFail, "registration": LaunchOK, "admin_totp": LaunchFail, "two_person": LaunchOK,
+		"welcome_credits": LaunchFail, "test_mode": LaunchFail, "registration": LaunchOK, "admin_totp": LaunchFail, "two_person": LaunchOK,
 		"test_assets": LaunchFail, "custodian": LaunchPending, "withdraw": LaunchOK, "brand": LaunchFail, "coin_profile": LaunchFail,
 		"legal": LaunchPending, "third_party": LaunchFail, "admins": LaunchFail, "domain": LaunchOK, "house": LaunchFail,
 	}
@@ -133,7 +134,7 @@ func TestLaunchChecklist(t *testing.T) {
 		}
 	}
 	if c.Ready || len(c.Items) != len(launchKeys) || c.Items[0].Key != "welcome_credits" {
-		t.Fatalf("the learning setup %+v", c)
+		t.Fatalf("the test setup %+v", c)
 	}
 	if v := c.Items[slicesIndex(c, "admins")].Value; v["active_admins"] != 1 {
 		t.Fatalf("the administrators %+v", v)
@@ -164,7 +165,7 @@ func TestLaunchChecklist(t *testing.T) {
 		`{"slug":"fees","status":"DRAFT"}]}`
 	probe.present = map[string]bool{"turnstile": true, "mail": true, "alchemy": true}
 	pl.credits = nil
-	pl.profile["learning_mode"] = map[string]any{"enabled": false}
+	pl.profile["test_mode"] = map[string]any{"enabled": false, "banner": true}
 	pl.profile["images"] = map[string]any{"logo_light": "/v1/platform/images/logo_light?v=5", "logo_dark": nil, "favicon": "/v1/platform/images/favicon?v=5"}
 	ledger.house = map[string]string{"USDT": "2000000", "BTC": "20", "ETH": "500"}
 	h.admin(t, "second@example.com", domain.RoleAdmin)
@@ -181,6 +182,13 @@ func TestLaunchChecklist(t *testing.T) {
 		t.Fatalf("set for a launch %v %v", launchStatuses(c), err)
 	}
 
+	// A legal page for test mode alone leaves the bundled draft live.
+	content.legal = `{"articles":[{"slug":"terms","modes":"TEST","status":"PUBLISHED"},{"slug":"privacy","modes":"FORMAL","status":"PUBLISHED"},` +
+		`{"slug":"risk","modes":"BOTH","status":"PUBLISHED"}]}`
+	if c, _ := h.svc.LaunchChecklist(ctx, auditor, "admin.astras.vip"); launchStatuses(c)["legal"] != LaunchFail ||
+		fmt.Sprint(c.Items[slicesIndex(c, "legal")].Value["missing"]) != "[terms]" {
+		t.Fatalf("a test-mode page %v %v", launchStatuses(c), c.Items[slicesIndex(c, "legal")].Value)
+	}
 	// A legal page published for later is not in effect yet.
 	content.legal = `{"articles":[{"slug":"terms","status":"PUBLISHED","publish_at":"2026-10-30T00:00:00Z"},{"slug":"privacy","status":"PUBLISHED"},` +
 		`{"slug":"risk","status":"PUBLISHED"}]}`

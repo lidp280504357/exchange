@@ -12,8 +12,8 @@ import { launchKey } from "./Launch";
 import { ReadOnly } from "../../kit/ReadOnly";
 
 // The platform's settings (design 2026-10-04 §4.1, §4.2, §5; D2): the
-// profile the sites show (name, colours, footer, contact, learning banner,
-// registration; one ADMIN, saved at once, the sites follow within a
+// profile the sites show (name, colours, footer, contact, test mode and
+// its banner, registration; one ADMIN, saved at once, the sites follow within a
 // minute without a build), its images, and the welcome credits: lowering
 // them applies at once, raising them waits for a second ADMIN.
 
@@ -46,7 +46,7 @@ const draftOf = (p: Profile): Draft => ({
   contact: { email: p.contact.email, support_url: p.contact.support_url ?? null },
   social: p.social.map((s) => ({ kind: s.kind as SocialKind, url: s.url })),
   default_locale: p.default_locale,
-  learning_mode: { enabled: p.learning_mode.enabled, text: { ...p.learning_mode.text } },
+  test_mode: { enabled: p.test_mode.enabled, banner: p.test_mode.banner, text: { ...p.test_mode.text } },
   registration: { status: p.registration.status, closed_text: { ...p.registration.closed_text } },
 });
 
@@ -186,14 +186,26 @@ function ProfileForm({ profile, edit }: { profile: Profile; edit: boolean }) {
           </FormField>
         </fieldset>
         <fieldset className="flex flex-col gap-3">
-          <legend className="mb-1 text-sm font-semibold text-fg-1">{t("admin.platform.learning")}</legend>
+          <legend className="mb-1 text-sm font-semibold text-fg-1">{t("admin.platform.testMode")}</legend>
           <Switch
-            checked={d.learning_mode.enabled}
+            checked={d.test_mode.enabled}
             disabled={off}
-            onCheckedChange={(v) => set({ learning_mode: { ...d.learning_mode, enabled: v } })}
-            label={t("admin.platform.learningOn")}
+            onCheckedChange={(v) => set({ test_mode: { ...d.test_mode, enabled: v } })}
+            label={t("admin.platform.testModeOn")}
           />
-          <TextsField label={t("admin.platform.learningText")} value={d.learning_mode.text} disabled={off} onChange={(v) => set({ learning_mode: { ...d.learning_mode, text: v } })} />
+          <p className="-mt-1 text-xs text-fg-3">{t("admin.platform.testModeHint")}</p>
+          <Switch
+            checked={d.test_mode.banner}
+            disabled={off || !d.test_mode.enabled}
+            onCheckedChange={(v) => set({ test_mode: { ...d.test_mode, banner: v } })}
+            label={t("admin.platform.testBanner")}
+          />
+          <TextsField
+            label={t("admin.platform.testText")}
+            value={d.test_mode.text}
+            disabled={off || !d.test_mode.enabled || !d.test_mode.banner}
+            onChange={(v) => set({ test_mode: { ...d.test_mode, text: v } })}
+          />
           <FormField label={t("admin.platform.registration")}>
             <Segmented
               size="sm"

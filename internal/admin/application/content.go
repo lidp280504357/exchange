@@ -53,19 +53,30 @@ func (s *Service) Article(ctx context.Context, _ Principal, id string) (json.Raw
 	return s.Content.Article(ctx, id)
 }
 
-// auditArticle records a change of an article on <section>:<slug>.
+// auditArticle records a change of an article on <section>:<slug> (a slug
+// may hold a test and a live page: the detail says which).
 func (s *Service) auditArticle(ctx context.Context, p Principal, raw json.RawMessage, action, reason string) error {
 	var a struct {
 		ID        string  `json:"id"`
 		Section   string  `json:"section"`
 		Slug      string  `json:"slug"`
+		Modes     string  `json:"modes"`
 		Status    string  `json:"status"`
 		Version   int     `json:"version"`
 		PublishAt *string `json:"publish_at"`
 	}
 	_ = json.Unmarshal(raw, &a)
-	d, _ := json.Marshal(map[string]any{"id": a.ID, "status": a.Status, "version": a.Version, "publish_at": a.PublishAt})
+	d, _ := json.Marshal(map[string]any{"id": a.ID, "modes": a.Modes, "status": a.Status, "version": a.Version, "publish_at": a.PublishAt})
 	return s.audit(ctx, p, strings.ToLower(a.Section)+":"+a.Slug, action, reason, string(d))
+}
+
+// articleModes checks an article's modes: TEST, FORMAL or BOTH, or left
+// out (BOTH for a draft, the article's own for an edit).
+func articleModes(m string) error {
+	if m != "" && m != "TEST" && m != "FORMAL" && m != "BOTH" {
+		return apperr.Invalid("modes is TEST, FORMAL or BOTH")
+	}
+	return nil
 }
 
 // CreateArticle writes a draft.
@@ -78,6 +89,9 @@ func (s *Service) CreateArticle(ctx context.Context, p Principal, a ports.Articl
 	}
 	sec, err := section(a.Section)
 	if err != nil {
+		return nil, err
+	}
+	if err := articleModes(a.Modes); err != nil {
 		return nil, err
 	}
 	a.Section, a.Actor = sec, p.Admin.Email
@@ -98,6 +112,9 @@ func (s *Service) UpdateArticle(ctx context.Context, p Principal, id string, a p
 	}
 	if _, err := uuid.Parse(id); err != nil {
 		return nil, apperr.NotFound("no such article")
+	}
+	if err := articleModes(a.Modes); err != nil {
+		return nil, err
 	}
 	a.Section, a.Actor = "", p.Admin.Email
 	raw, err := s.Content.UpdateArticle(ctx, id, a)
