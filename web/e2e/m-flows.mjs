@@ -87,8 +87,9 @@ const colorsOf = (tab, classes) =>
   tab.page.evaluate((cls) => {
     const out = {};
     for (const c of cls) {
+      // A figure fading between two colours (a price's 150 ms change) is neither.
       out[c] = [...document.querySelectorAll(`.${c}`)]
-        .filter((el) => el.getBoundingClientRect().width > 0)
+        .filter((el) => el.getBoundingClientRect().width > 0 && !el.getAnimations().some((a) => a.playState === "running"))
         .slice(0, 5)
         .map((el) => getComputedStyle(el)[c.startsWith("bg-") ? "backgroundColor" : "color"]);
     }

@@ -62,8 +62,9 @@ const colorsOf = (tab, classes) =>
   tab.page.evaluate((cls) => {
     const out = {};
     for (const c of cls) {
+      // A figure fading between two colours (a price's 150 ms change) is neither.
       out[c] = [...document.querySelectorAll(`.${c}`)]
-        .filter((el) => el.getBoundingClientRect().width > 0)
+        .filter((el) => el.getBoundingClientRect().width > 0 && !el.getAnimations().some((a) => a.playState === "running"))
         .slice(0, 5)
         .map((el) => getComputedStyle(el)[c.startsWith("bg-") ? "backgroundColor" : "color"]);
     }
@@ -698,9 +699,12 @@ await f.step("P4", "a click on the book fills the price, Shift+click the cumulat
     await B.page.click('button[aria-label="切换交易对"]');
     await B.page.waitForSelector('input[aria-label="搜索币种"]', { visible: true });
     await B.page.type('input[aria-label="搜索币种"]', "ETH");
-    // Enter takes the first match: wait for the list to have caught up with the typing.
-    await B.page.waitForFunction(() => /^ETH/.test(document.querySelector('[role=listbox][aria-label="切换交易对"] [role=option]')?.innerText.trim() ?? ""), { timeout: 10000 });
-    await B.page.keyboard.press("Enter");
+    // The list ranks names too (Ethena comes first): pick ETH/USDT itself.
+    const eth = await B.page.waitForFunction(
+      () => [...document.querySelectorAll('[role=listbox][aria-label="切换交易对"] [role=option]')].find((o) => o.innerText.trim().startsWith("ETH/USDT")) ?? null,
+      { timeout: 10000 },
+    );
+    await eth.asElement().click();
     await B.page.waitForFunction(() => location.pathname.startsWith("/trade/ETH"), { timeout: 10000 });
     const frames = ws.frames;
     await ws.until((w) => w.frames > frames + 3, "prices of the new pair arrive");
