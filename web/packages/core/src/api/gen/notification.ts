@@ -112,10 +112,99 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/legal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The published legal and information pages
+         * @description The console's versions of the fixed pages (design 2026-10-04 §4.4):
+         *     terms, privacy, risk, fees, about, contact. A page the console did
+         *     not publish shows the sites' bundled draft; a withdrawn one shows
+         *     nothing.
+         */
+        get: operations["listLegalPages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/legal/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A published legal or information page */
+        get: operations["getLegalPage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/home": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The published blocks of the home page
+         * @description Today one, home-hero: the title is the hero's title, the summary its
+         *     subtitle, and the body's first Markdown link its button
+         *     ([text](/path or https URL)).
+         */
+        get: operations["listHomeBlocks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/home/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A published block of the home page */
+        get: operations["getHomeBlock"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * @description The fixed legal and information pages (design 2026-10-04 §4.4).
+         * @enum {string}
+         */
+        LegalSlug: "terms" | "privacy" | "risk" | "fees" | "about" | "contact";
+        /**
+         * @description The home page's blocks (design 2026-10-04 §4.4).
+         * @enum {string}
+         */
+        HomeSlug: "home-hero";
         ArticleSummary: {
             slug: string;
             /** @description Announcements notice, product or another; help account, funds, trading, futures, faq or another. */
@@ -375,6 +464,116 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description The article with its Markdown body. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Article"];
+                };
+            };
+            404: components["responses"]["ArticleNotFound"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listLegalPages: {
+        parameters: {
+            query?: {
+                /** @description en for English; Chinese otherwise. An article without English comes in Chinese (fallback true). */
+                locale?: components["parameters"]["Locale"];
+                /** @description Articles on a page (20 when absent, at most 100). */
+                limit?: components["parameters"]["ListLimit"];
+                /** @description The previous page's next_cursor; COMMON_INVALID_ARGUMENT when it is not one. */
+                cursor?: components["parameters"]["ListCursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The pages. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArticleList"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getLegalPage: {
+        parameters: {
+            query?: {
+                /** @description en for English; Chinese otherwise. An article without English comes in Chinese (fallback true). */
+                locale?: components["parameters"]["Locale"];
+            };
+            header?: never;
+            path: {
+                slug: components["schemas"]["LegalSlug"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page with its Markdown body. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Article"];
+                };
+            };
+            404: components["responses"]["ArticleNotFound"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listHomeBlocks: {
+        parameters: {
+            query?: {
+                /** @description en for English; Chinese otherwise. An article without English comes in Chinese (fallback true). */
+                locale?: components["parameters"]["Locale"];
+                /** @description Articles on a page (20 when absent, at most 100). */
+                limit?: components["parameters"]["ListLimit"];
+                /** @description The previous page's next_cursor; COMMON_INVALID_ARGUMENT when it is not one. */
+                cursor?: components["parameters"]["ListCursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The blocks. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArticleList"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getHomeBlock: {
+        parameters: {
+            query?: {
+                /** @description en for English; Chinese otherwise. An article without English comes in Chinese (fallback true). */
+                locale?: components["parameters"]["Locale"];
+            };
+            header?: never;
+            path: {
+                slug: components["schemas"]["HomeSlug"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The block with its Markdown body. */
             200: {
                 headers: {
                     [name: string]: unknown;

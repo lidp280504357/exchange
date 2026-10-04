@@ -1,0 +1,249 @@
+openapi: 3.1.0
+info:
+  title: Exchange platform API
+  version: 0.1.0
+  description: |
+    The platform's profile, no sign-in (design 2026-10-04 §4.1): the
+    exchange's name, logos, colours, footer, contact, learning-mode
+    banner, registration and the welcome credits, as operators set them
+    in the admin console. The sites read it at start and every minute and
+    fall back to their built-in defaults while it cannot be read, so going
+    live is a change of settings, not a build. instrument-service keeps
+    the profile; the welcome credits are the ledger's (ledger-service
+    applies them), shown here as it read them within the last minute.
+servers:
+  - url: https://astras.vip
+tags:
+  - name: platform
+paths:
+  /v1/platform/profile:
+    get:
+      operationId: getPlatformProfile
+      summary: The platform's profile
+      description: >-
+        Cacheable for a minute. The ETag is the profile's version: with If-None-Match the answer is 304
+        while it has not changed.
+      tags: [platform]
+      security: []
+      parameters:
+        - name: If-None-Match
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The profile.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformProfile'
+        '304':
+          description: Not changed since the ETag sent.
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/platform/images/{kind}:
+    get:
+      operationId: getPlatformImage
+      summary: One of the platform's images
+      description: >-
+        PNG, SVG (cleaned on upload) or WebP, square. Asked for with the current profile version (v,
+        as the profile's image URLs carry it) it is cached for a year; with another version, for a
+        minute. 404 while none is uploaded: the sites show their built-in image.
+      tags: [platform]
+      security: []
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/PlatformImageKind'
+        - name: v
+          in: query
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: The image.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/svg+xml:
+              schema:
+                type: string
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /manifest.webmanifest:
+    get:
+      operationId: getWebManifest
+      summary: The mobile site's web app manifest
+      description: >-
+        Built from the profile (name, short name, theme colour, the uploaded icons, else the built-in
+        ones); m.astras.vip serves it at the same path as before. Cacheable for a minute.
+      tags: [platform]
+      security: []
+      responses:
+        '200':
+          description: The manifest.
+          content:
+            application/manifest+json:
+              schema:
+                type: object
+                additionalProperties: true
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+components:
+  schemas:
+    PlatformImageKind:
+      type: string
+      enum: [logo_light, logo_dark, favicon, apple_touch_icon]
+    Texts:
+      description: A text by language; zh-CN is the fallback of a language without one.
+      type: object
+      required: [zh-CN, en]
+      properties:
+        zh-CN:
+          type: string
+        en:
+          type: string
+    WelcomeCredit:
+      type: object
+      required: [asset, amount]
+      properties:
+        asset:
+          type: string
+          examples: [USDT]
+        amount:
+          type: string
+          description: Decimal string, greater than 0.
+          examples: ['10000']
+    PlatformProfile:
+      type: object
+      required:
+        - name
+        - short_name
+        - domain
+        - theme_color
+        - brand_color
+        - images
+        - footer
+        - contact
+        - social
+        - default_locale
+        - learning_mode
+        - registration
+        - welcome_credits
+        - version
+        - updated_at
+      properties:
+        name:
+          type: string
+          description: The exchange's name, 2-32 characters.
+          examples: [Astras]
+        short_name:
+          type: string
+          description: Where space is short (the home screen), 2-12 characters.
+        domain:
+          type: string
+          description: The PC site's host name (the mobile site is m.<domain>, the console admin.<domain>); empty until set.
+          examples: [astras.vip]
+        theme_color:
+          type: string
+          description: '#rrggbb, the theme colour of the browser (meta theme-color, the manifest).'
+          pattern: '^#[0-9a-f]{6}$'
+        brand_color:
+          type: string
+          description: '#rrggbb, the brand colour of buttons and highlights (CSS --brand).'
+          pattern: '^#[0-9a-f]{6}$'
+        images:
+          type: object
+          description: Each image's URL with the profile version, null while none is uploaded (the built-in one shows).
+          required: [logo_light, logo_dark, favicon, apple_touch_icon]
+          properties:
+            logo_light:
+              description: The mark next to the name on a light background.
+              type: [string, 'null']
+            logo_dark:
+              description: The mark on a dark background.
+              type: [string, 'null']
+            favicon:
+              type: [string, 'null']
+            apple_touch_icon:
+              type: [string, 'null']
+        footer:
+          type: object
+          required: [copyright, compliance]
+          properties:
+            copyright:
+              $ref: '#/components/schemas/Texts'
+            compliance:
+              description: Registration or compliance lines; empty for none.
+              allOf:
+                - $ref: '#/components/schemas/Texts'
+        contact:
+          type: object
+          required: [email, support_url]
+          properties:
+            email:
+              type: string
+              description: Empty for none.
+            support_url:
+              type: [string, 'null']
+              description: An https URL.
+        social:
+          type: array
+          maxItems: 10
+          items:
+            type: object
+            required: [kind, url]
+            properties:
+              kind:
+                type: string
+                enum: [x, telegram, discord, youtube, facebook, instagram, linkedin, reddit, medium, github, tiktok, weibo]
+              url:
+                type: string
+                description: An https URL.
+        default_locale:
+          type: string
+          enum: [zh-CN, en]
+        learning_mode:
+          type: object
+          description: While enabled the sites show the text in a banner at the top (off when live).
+          required: [enabled, text]
+          properties:
+            enabled:
+              type: boolean
+            text:
+              $ref: '#/components/schemas/Texts'
+        registration:
+          type: object
+          description: CLOSED refuses sign-ups (403 AUTH_REGISTRATION_CLOSED) and the sign-up pages show closed_text.
+          required: [status, closed_text]
+          properties:
+            status:
+              type: string
+              enum: [OPEN, CLOSED]
+            closed_text:
+              $ref: '#/components/schemas/Texts'
+        welcome_credits:
+          type: array
+          description: What a new account gets (the ledger's setting, read within the last minute); empty for nothing.
+          items:
+            $ref: '#/components/schemas/WelcomeCredit'
+        version:
+          type: integer
+          format: int64
+          description: Goes up with every change; the ETag and the image URLs carry it.
+        updated_at:
+          type: string
+          format: date-time

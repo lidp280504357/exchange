@@ -18,7 +18,9 @@ export interface paths {
          *     available only where the auth.sms feature flag allows it.
          *     Quotas: one code per target every 60 s, 5 per hour and 10 per day;
          *     20 per hour per IP; 10 per hour per device. STEP_UP, BIND_IDENTITY,
-         *     REBIND_IDENTITY and WITHDRAW_CONFIRM need the access token.
+         *     REBIND_IDENTITY and WITHDRAW_CONFIRM need the access token. While
+         *     the platform's registration is CLOSED (GET /v1/platform/profile),
+         *     REGISTER is refused with 403 AUTH_REGISTRATION_CLOSED.
          */
         post: operations["requestOtp"];
         delete?: never;
@@ -81,7 +83,9 @@ export interface paths {
          *     contain the email or phone number (AUTH_PASSWORD_WEAK). Outdated
          *     document versions fail with AUTH_TERMS_OUTDATED, whose details
          *     carry the current ones. The region comes from the phone number, or
-         *     from `country` for email registrations.
+         *     from `country` for email registrations. While the platform's
+         *     registration is CLOSED (GET /v1/platform/profile) the answer is 403
+         *     AUTH_REGISTRATION_CLOSED.
          */
         post: operations["register"];
         delete?: never;

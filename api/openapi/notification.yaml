@@ -174,6 +174,101 @@ paths:
           $ref: '#/components/responses/ArticleNotFound'
         default:
           $ref: './common.yaml#/components/responses/Error'
+  /v1/legal:
+    get:
+      operationId: listLegalPages
+      summary: The published legal and information pages
+      description: |
+        The console's versions of the fixed pages (design 2026-10-04 §4.4):
+        terms, privacy, risk, fees, about, contact. A page the console did
+        not publish shows the sites' bundled draft; a withdrawn one shows
+        nothing.
+      tags: [content]
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Locale'
+        - $ref: '#/components/parameters/ListLimit'
+        - $ref: '#/components/parameters/ListCursor'
+      responses:
+        '200':
+          description: The pages.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArticleList'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/legal/{slug}:
+    get:
+      operationId: getLegalPage
+      summary: A published legal or information page
+      tags: [content]
+      security: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/LegalSlug'
+        - $ref: '#/components/parameters/Locale'
+      responses:
+        '200':
+          description: The page with its Markdown body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Article'
+        '404':
+          $ref: '#/components/responses/ArticleNotFound'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/home:
+    get:
+      operationId: listHomeBlocks
+      summary: The published blocks of the home page
+      description: |
+        Today one, home-hero: the title is the hero's title, the summary its
+        subtitle, and the body's first Markdown link its button
+        ([text](/path or https URL)).
+      tags: [content]
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Locale'
+        - $ref: '#/components/parameters/ListLimit'
+        - $ref: '#/components/parameters/ListCursor'
+      responses:
+        '200':
+          description: The blocks.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArticleList'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/home/{slug}:
+    get:
+      operationId: getHomeBlock
+      summary: A published block of the home page
+      tags: [content]
+      security: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/HomeSlug'
+        - $ref: '#/components/parameters/Locale'
+      responses:
+        '200':
+          description: The block with its Markdown body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Article'
+        '404':
+          $ref: '#/components/responses/ArticleNotFound'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
 components:
   securitySchemes:
     bearer:
@@ -220,6 +315,14 @@ components:
       schema:
         type: string
   schemas:
+    LegalSlug:
+      type: string
+      description: The fixed legal and information pages (design 2026-10-04 §4.4).
+      enum: [terms, privacy, risk, fees, about, contact]
+    HomeSlug:
+      type: string
+      description: The home page's blocks (design 2026-10-04 §4.4).
+      enum: [home-hero]
     ArticleSummary:
       type: object
       required: [slug, category, pinned, order, title, summary, published_at, locale, fallback, version]
