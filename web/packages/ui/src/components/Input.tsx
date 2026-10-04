@@ -85,6 +85,9 @@ export function Input({
           invalid ? "border-danger focus-within:border-danger focus-within:ring-danger" : "border-line-1 hover:border-line-2",
           disabled && "cursor-not-allowed opacity-50",
           s.box,
+          // A large field is a 44 px touch target on touch screens (the
+          // 14 px root makes h-12 42 px, the field inside it 40).
+          size === "lg" && "pointer-coarse:h-auto",
           boxClassName,
         )}
       >
@@ -104,6 +107,7 @@ export function Input({
             "h-full min-w-0 flex-1 bg-transparent text-fg-1 outline-none placeholder:text-fg-3 focus-visible:outline-none disabled:cursor-not-allowed",
             s.text,
             s.pad,
+            size === "lg" && "pointer-coarse:min-h-tap",
             className,
           )}
         />

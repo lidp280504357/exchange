@@ -117,11 +117,11 @@ export function useFavoriteToggle() {
 /** SectionHead is a home section's title with an optional "all" link (a 44 px target). */
 export function SectionHead({ title, to, more, extra }: { title: ReactNode; to?: string; more?: string; extra?: ReactNode }) {
   return (
-    <div className="flex min-h-11 items-center justify-between gap-2">
+    <div className="flex min-h-tap items-center justify-between gap-2">
       <h2 className="min-w-0 truncate text-md font-semibold text-fg-1">{title}</h2>
       {extra}
       {to && more && (
-        <Link to={to} className="-mr-2 flex h-11 shrink-0 items-center gap-0.5 rounded-2 px-2 text-sm text-fg-3 transition-colors active:text-fg-1">
+        <Link to={to} className="-mr-2 flex h-tap shrink-0 items-center gap-0.5 rounded-2 px-2 text-sm text-fg-3 transition-colors active:text-fg-1">
           {more}
           <ChevronRight size={16} />
         </Link>

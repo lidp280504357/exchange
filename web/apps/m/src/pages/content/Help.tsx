@@ -142,7 +142,7 @@ export default function Help() {
           prefix={<Search size={18} className="text-fg-3" />}
           suffix={
             query ? (
-              <button type="button" aria-label={t("ui.clear")} onClick={() => changeQuery("")} className="grid size-11 place-items-center rounded-2 text-fg-3 active:text-fg-1">
+              <button type="button" aria-label={t("ui.clear")} onClick={() => changeQuery("")} className="grid size-tap place-items-center rounded-2 text-fg-3 active:text-fg-1">
                 <X size={16} />
               </button>
             ) : undefined

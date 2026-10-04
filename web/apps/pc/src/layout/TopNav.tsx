@@ -153,7 +153,7 @@ function NotificationBell() {
     >
       <Bell size={18} />
       {unread > 0 && (
-        <span className="absolute right-1 top-1 grid h-4 min-w-4 animate-pop-in place-items-center rounded-full bg-danger px-1 text-[10px] font-semibold leading-none text-white">
+        <span className="absolute right-1 top-1 grid h-4 min-w-4 animate-pop-in place-items-center rounded-full bg-danger px-1 text-[10px] font-semibold leading-none text-black">
           {unread > 99 ? "99+" : unread}
         </span>
       )}

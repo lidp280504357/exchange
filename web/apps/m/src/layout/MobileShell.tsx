@@ -76,23 +76,23 @@ function TopBar() {
   const unread = useUnreadNotifications();
   return (
     <header className="sticky top-0 z-[var(--z-sticky)] bg-bg-0/95 pt-[env(safe-area-inset-top)] backdrop-blur">
-      <div className="flex h-11 items-center justify-between gap-2 px-4">
+      <div className="flex h-tap items-center justify-between gap-2 px-4">
         <div className="min-w-0 flex-1 truncate">{header?.title ?? <BrandMark />}</div>
         <div className="flex items-center">
           {header?.right ?? (
             <>
-              <Link to={routes.markets} aria-label={t("nav.search")} className="grid size-11 place-items-center text-fg-2">
+              <Link to={routes.markets} aria-label={t("nav.search")} className="grid size-tap place-items-center text-fg-2">
                 <Search size={20} />
               </Link>
               {signedIn && (
                 <Link
                   to={routes.notifications}
                   aria-label={unread > 0 ? `${t("nav.notifications")} (${unread})` : t("nav.notifications")}
-                  className="relative grid size-11 place-items-center text-fg-2"
+                  className="relative grid size-tap place-items-center text-fg-2"
                 >
                   <Bell size={20} />
                   {unread > 0 && (
-                    <span className="absolute right-1.5 top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-danger px-1 text-[10px] font-semibold leading-none text-white">
+                    <span className="absolute right-1.5 top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-danger px-1 text-[10px] font-semibold leading-none text-black">
                       {unread > 99 ? "99+" : unread}
                     </span>
                   )}

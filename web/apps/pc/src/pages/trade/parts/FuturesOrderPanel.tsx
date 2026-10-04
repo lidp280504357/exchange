@@ -9,6 +9,7 @@ import { ArrowRightLeft } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router";
+import { ORDER_FORM_ID } from "./EmptyList";
 
 type Action = { side: "BUY" | "SELL"; positionSide: "BOTH" | "LONG" | "SHORT"; reduceOnly: boolean; label: string };
 
@@ -193,7 +194,7 @@ export function FuturesOrderPanel({
   }
 
   return (
-    <div className={cn("flex flex-col gap-3 bg-bg-1 p-3", className)}>
+    <div id={ORDER_FORM_ID} className={cn("flex flex-col gap-3 bg-bg-1 p-3", className)}>
       <div className="flex items-center gap-2">
         <Segmented
           size="sm"

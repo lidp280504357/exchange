@@ -1,8 +1,10 @@
 import type { Transition, Variants } from "motion/react";
 
 // Motion presets (design §5.3). Only transform and opacity move, so no
-// animation triggers layout; prefers-reduced-motion is honored by motion's
-// MotionConfig reducedMotion="user" in each app.
+// animation triggers layout. Each app's MotionConfig honors
+// prefers-reduced-motion: reducedMotion="user" stops the movement, and
+// skipAnimations={prefersReducedMotion()} the fades and staggered entrances
+// that "user" alone keeps.
 
 export const ease = [0.2, 0.8, 0.2, 1] as const;
 
@@ -37,3 +39,8 @@ export const pop: Variants = {
 
 /** Buttons press to 0.98. */
 export const press = { scale: 0.98 } as const;
+
+/** prefersReducedMotion says whether the device asks for reduced motion (read once, at start-up). */
+export function prefersReducedMotion(): boolean {
+  return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+}

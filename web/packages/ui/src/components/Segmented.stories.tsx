@@ -40,8 +40,8 @@ export const BuySell: Story = {
           onValueChange={setV}
           aria-label="Side"
           items={[
-            { value: "BUY", label: "买入", thumbClassName: "bg-up", activeClassName: "text-white" },
-            { value: "SELL", label: "卖出", thumbClassName: "bg-down", activeClassName: "text-white" },
+            { value: "BUY", label: "买入", thumbClassName: "bg-up", activeClassName: "text-black" },
+            { value: "SELL", label: "卖出", thumbClassName: "bg-down", activeClassName: "text-black" },
           ]}
         />
       </div>

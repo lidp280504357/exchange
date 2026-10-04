@@ -20,12 +20,14 @@ import { Skeleton } from "../components/Skeleton";
 import { Spinner } from "../components/Spinner";
 import { EmptyState, ErrorState } from "../components/States";
 import { cn } from "../lib/cn";
+import { titleCutCells } from "./cutTitles";
 
 // The table of every list (design §10.2): rows keyed by record ID (never
 // by position, the old console's bug A1), sortable headers, loading /
 // empty / error states, optional selection, and virtual scrolling that
 // keeps a thousand rows at 60 fps. Columns are TanStack column
-// definitions; `meta` (DataColumnMeta) aligns and sizes them.
+// definitions; `meta` (DataColumnMeta) aligns and sizes them. A cell that
+// cuts its text short carries the whole text as a title.
 
 /** Per-column layout, set as `meta` on a column definition. */
 export type DataColumnMeta = {
@@ -179,6 +181,7 @@ export function DataTable<T>({
   const colCount = table.getVisibleLeafColumns().length;
   const rowHeight = ROW_HEIGHT[density];
   const scrollRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const areaHeight = height ?? (virtual ? 480 : undefined);
 
@@ -220,6 +223,29 @@ export function DataTable<T>({
     return () => io.disconnect();
   }, [virtual, onEndReached, areaHeight, reachEnd]);
 
+  // Titles on cut cells: measured after each render (new rows, new values)
+  // and when the table's width changes, at most once a frame.
+  const titleFrame = useRef(0);
+  const retitle = useCallback(() => {
+    cancelAnimationFrame(titleFrame.current);
+    titleFrame.current = requestAnimationFrame(() => {
+      if (tableRef.current) titleCutCells(tableRef.current);
+    });
+  }, []);
+  useEffect(() => {
+    retitle();
+  });
+  useEffect(() => {
+    const table = tableRef.current;
+    if (!table || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(retitle);
+    ro.observe(table);
+    return () => {
+      ro.disconnect();
+      cancelAnimationFrame(titleFrame.current);
+    };
+  }, [retitle]);
+
   const clickRef = useRef(onRowClick);
   clickRef.current = onRowClick;
   const handleRowClick = useCallback((row: T) => clickRef.current?.(row), []);
@@ -241,7 +267,7 @@ export function DataTable<T>({
         className={cn("w-full", pageSticky ? "overflow-x-clip" : "overflow-x-auto", areaHeight !== undefined && "overflow-y-auto overscroll-contain")}
         style={areaHeight !== undefined ? { height: areaHeight } : undefined}
       >
-        <table aria-label={ariaLabel} aria-busy={loading || undefined} className={cn("w-full border-collapse", virtual && "table-fixed")}>
+        <table ref={tableRef} aria-label={ariaLabel} aria-busy={loading || undefined} className={cn("w-full border-collapse", virtual && "table-fixed")}>
           <thead>
             {table.getHeaderGroups().map((group) => (
               <tr key={group.id}>

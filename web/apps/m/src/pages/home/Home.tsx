@@ -198,12 +198,12 @@ function AssetCard({ tickers }: { tickers: ReadonlyMap<string, TickerData> }) {
               aria-pressed={hidden}
               aria-label={hidden ? t("mMarkets.home.showAmounts") : t("mMarkets.home.hideAmounts")}
               onClick={() => set({ hideAmounts: !hidden })}
-              className="grid size-11 shrink-0 place-items-center rounded-full text-fg-3 transition-colors active:bg-bg-2 active:text-fg-1"
+              className="grid size-tap shrink-0 place-items-center rounded-full text-fg-3 transition-colors active:bg-bg-2 active:text-fg-1"
             >
               {hidden ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
           </div>
-          <Link to={routes.assets} className="-mr-2 flex h-11 shrink-0 items-center gap-0.5 px-2 text-sm text-fg-3 transition-colors active:text-fg-1">
+          <Link to={routes.assets} className="-mr-2 flex h-tap shrink-0 items-center gap-0.5 px-2 text-sm text-fg-3 transition-colors active:text-fg-1">
             {t("mMarkets.home.myAssets")}
             <ChevronRight size={16} />
           </Link>
@@ -222,7 +222,7 @@ function AssetCard({ tickers }: { tickers: ReadonlyMap<string, TickerData> }) {
               <span className="text-sm text-fg-3">USDT</span>
             </div>
             {empty ? (
-              <Link to={routes.deposit} className="-mb-2.5 inline-flex min-h-11 items-center gap-0.5 text-sm text-brand">
+              <Link to={routes.deposit} className="-mb-2.5 inline-flex min-h-tap items-center gap-0.5 text-sm text-brand">
                 {t("mMarkets.home.noBalance")}
                 <ChevronRight size={14} />
               </Link>
@@ -512,7 +512,7 @@ function Boards({ rows, loading, error, onRetry, tickerOf }: Section) {
           onValueChange={(v) => setBoard(v as Board)}
           className="-ml-1"
         />
-        <Link to={boardPath(board)} className="-mr-2 flex h-11 shrink-0 items-center gap-0.5 px-2 text-sm text-fg-3 transition-colors active:text-fg-1">
+        <Link to={boardPath(board)} className="-mr-2 flex h-tap shrink-0 items-center gap-0.5 px-2 text-sm text-fg-3 transition-colors active:text-fg-1">
           {t("mMarkets.viewAll")}
           <ChevronRight size={16} />
         </Link>

@@ -25,7 +25,7 @@ export function HeaderActions({ signedIn }: { signedIn: boolean }) {
   const { t } = useTranslation();
   const unread = useUnreadNotifications();
   const rises = useRises(unread);
-  const button = "relative grid size-11 place-items-center rounded-full text-fg-2 transition-colors active:bg-bg-2 active:text-fg-1";
+  const button = "relative grid size-tap place-items-center rounded-full text-fg-2 transition-colors active:bg-bg-2 active:text-fg-1";
   return (
     <div className="-mr-2 flex items-center">
       {signedIn && (
@@ -42,7 +42,7 @@ export function HeaderActions({ signedIn }: { signedIn: boolean }) {
               initial={{ scale: 0.4 }}
               animate={{ scale: 1 }}
               transition={{ type: "spring", stiffness: 520, damping: 16 }}
-              className="absolute right-1 top-1.5 min-w-4 rounded-full bg-danger px-1 text-center text-[10px] font-semibold leading-4 text-white tabular-nums"
+              className="absolute right-1 top-1.5 min-w-4 rounded-full bg-danger px-1 text-center text-[10px] font-semibold leading-4 text-black tabular-nums"
             >
               {countBadge(unread)}
             </motion.span>

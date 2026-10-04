@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Dialog as RDialog } from "radix-ui";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -23,10 +23,14 @@ export type DrawerProps = {
 /**
  * Drawer is the console's detail panel (design §10.2): it slides in from
  * the right over a light overlay, on Radix Dialog (focus trap, Esc, focus
- * return), with a fixed header and a scrolling body.
+ * return), with a fixed header and a scrolling body. With reduced motion it
+ * appears and goes at once: no slide, and no fade of the overlay either.
  */
 export function Drawer({ open, onOpenChange, title, description, actions, children, width = 640, className }: DrawerProps) {
   const { t } = useTranslation();
+  const reduced = useReducedMotion();
+  const enter = reduced ? 0 : durations.base;
+  const leave = reduced ? 0 : durations.fast;
   return (
     <RDialog.Root open={open} onOpenChange={onOpenChange}>
       <AnimatePresence>
@@ -36,15 +40,15 @@ export function Drawer({ open, onOpenChange, title, description, actions, childr
               <motion.div
                 className="fixed inset-0 z-[var(--z-dialog)] bg-overlay"
                 initial={{ opacity: 0 }}
-                animate={{ opacity: 1, transition: { duration: durations.base } }}
-                exit={{ opacity: 0, transition: { duration: durations.fast } }}
+                animate={{ opacity: 1, transition: { duration: enter } }}
+                exit={{ opacity: 0, transition: { duration: leave } }}
               />
             </RDialog.Overlay>
             <RDialog.Content asChild forceMount {...(description ? {} : { "aria-describedby": undefined })}>
               <motion.div
                 initial={{ x: "100%" }}
-                animate={{ x: 0, transition: { duration: durations.base, ease: [0.2, 0, 0, 1] } }}
-                exit={{ x: "100%", transition: { duration: durations.fast } }}
+                animate={{ x: 0, transition: { duration: enter, ease: [0.2, 0, 0, 1] } }}
+                exit={{ x: "100%", transition: { duration: leave } }}
                 style={{ width: `min(${width}px, 100vw)` }}
                 className={cn(
                   "fixed inset-y-0 right-0 z-[var(--z-dialog)] flex flex-col border-l border-line-1 bg-bg-1 text-fg-1 shadow-pop outline-none",

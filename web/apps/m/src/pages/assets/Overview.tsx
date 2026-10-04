@@ -126,7 +126,7 @@ function TotalCard({
           onClick={() => set({ hideAmounts: !hidden })}
           aria-pressed={hidden}
           aria-label={hidden ? t("mAssets.overview.showAmounts") : t("mAssets.overview.hideAmounts")}
-          className="-my-2 grid size-11 place-items-center text-fg-3 active:text-fg-1"
+          className="-my-2 grid size-tap place-items-center text-fg-3 active:text-fg-1"
         >
           {hidden ? <EyeOff size={16} /> : <Eye size={16} />}
         </button>
@@ -192,7 +192,7 @@ function AccountTile({
 }: { icon: ReactNode; label: string; value: string; share: string | null; loading: boolean; onClick: () => void }) {
   const { t } = useTranslation();
   return (
-    <button type="button" onClick={onClick} className={cn("flex min-h-11 min-w-0 flex-col gap-1 rounded-2 bg-bg-2 p-3 text-left", PRESS)}>
+    <button type="button" onClick={onClick} className={cn("flex min-h-tap min-w-0 flex-col gap-1 rounded-2 bg-bg-2 p-3 text-left", PRESS)}>
       <span className="flex items-center gap-1.5 text-xs text-fg-3">
         <span className="text-brand">{icon}</span>
         <span className="truncate">{label}</span>
@@ -279,7 +279,7 @@ function AssetList({
           enterKeyHint="search"
           autoComplete="off"
         />
-        <label className="flex min-h-11 items-center justify-between gap-3 text-sm text-fg-2">
+        <label className="flex min-h-tap items-center justify-between gap-3 text-sm text-fg-2">
           <span className="flex flex-col">
             {t("mAssets.overview.hideSmall")}
             <span className="text-xs text-fg-3">{t("mAssets.overview.hideSmallHint")}</span>
@@ -302,7 +302,7 @@ function AssetList({
             action={
               <Button
                 variant="secondary"
-                className="h-11"
+                className="h-tap"
                 onClick={() => {
                   setQuery("");
                   set({ hideSmallBalances: false });
@@ -318,7 +318,7 @@ function AssetList({
             title={t("mAssets.overview.empty")}
             description={t("mAssets.overview.emptyHint")}
             action={
-              <Button asChild className="h-11">
+              <Button asChild className="h-tap">
                 <Link to={routes.deposit}>{t("nav.deposit")}</Link>
               </Button>
             }
@@ -387,7 +387,7 @@ function FuturesSummary({ query }: { query: ReturnType<typeof useFuturesAccount>
           <span className="min-w-0 flex-1">
             {t("mAssets.overview.futuresUnavailable")} · {errorText(query.error)}
           </span>
-          <Button variant="secondary" className="h-11" onClick={() => void query.refetch()}>
+          <Button variant="secondary" className="h-tap" onClick={() => void query.refetch()}>
             {t("common.retry")}
           </Button>
         </div>
@@ -404,7 +404,7 @@ function FuturesSummary({ query }: { query: ReturnType<typeof useFuturesAccount>
           </Figure>
         </div>
       )}
-      <Link to={links.futures("USDT")} className="mt-1 flex min-h-11 items-center justify-center gap-1 text-sm font-medium text-brand">
+      <Link to={links.futures("USDT")} className="mt-1 flex min-h-tap items-center justify-center gap-1 text-sm font-medium text-brand">
         <ChartCandlestick size={14} />
         {t("mAssets.overview.openFutures")}
       </Link>

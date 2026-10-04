@@ -68,7 +68,12 @@ export function AssetsCard({ index }: { index: number }) {
           <span className="text-sm text-fg-3">USDT</span>
         </div>
         <div className="mt-0.5 flex h-6 items-center justify-between gap-3 text-sm tabular-nums">
-          <span className="truncate text-fg-3">{inBtc && <Hidden hidden={hidden}>{t("mAccount.me.assets.approxBtc", { value: formatAmount(inBtc, 8) })}</Hidden>}</span>
+          <span
+            className="truncate text-fg-3"
+            title={inBtc ? (hidden ? HIDDEN_AMOUNT : t("mAccount.me.assets.approxBtc", { value: formatAmount(inBtc, 8) })) : undefined}
+          >
+            {inBtc && <Hidden hidden={hidden}>{t("mAccount.me.assets.approxBtc", { value: formatAmount(inBtc, 8) })}</Hidden>}
+          </span>
           <span className="flex shrink-0 items-center gap-1" title={t("mAccount.me.assets.dayHint")}>
             <span className="text-fg-3">{t("mAccount.me.assets.day")}</span>
             <Hidden hidden={hidden} className={cn("font-medium", TONE[dir])}>
@@ -139,12 +144,12 @@ export function AssetsCard({ index }: { index: number }) {
             aria-pressed={hidden}
             aria-label={hidden ? t("mAccount.me.assets.show") : t("mAccount.me.assets.hide")}
             onClick={() => set({ hideAmounts: !hidden })}
-            className="grid size-11 shrink-0 place-items-center rounded-full text-fg-3 transition-colors active:bg-bg-2 active:text-fg-1"
+            className="grid size-tap shrink-0 place-items-center rounded-full text-fg-3 transition-colors active:bg-bg-2 active:text-fg-1"
           >
             {hidden ? <EyeOff size={16} /> : <Eye size={16} />}
           </button>
         </div>
-        <Link to={routes.assets} className="-mr-2 flex h-11 shrink-0 items-center gap-0.5 px-2 text-sm text-fg-3 transition-colors active:text-fg-1">
+        <Link to={routes.assets} className="-mr-2 flex h-tap shrink-0 items-center gap-0.5 px-2 text-sm text-fg-3 transition-colors active:text-fg-1">
           {t("nav.assets")}
           <ChevronRight size={16} aria-hidden />
         </Link>

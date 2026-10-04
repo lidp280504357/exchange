@@ -134,7 +134,7 @@ function ArticleBody({ article: a, list, listPath }: { article: ArticleData; lis
               </li>
             ))}
           </ul>
-          <Link to={listPath} className="mt-1 inline-flex h-11 items-center gap-1 text-sm text-brand">
+          <Link to={listPath} className="mt-1 inline-flex h-tap items-center gap-1 text-sm text-brand">
             {help ? t("mContent.help.back") : t("mContent.announcements.back")}
             <ArrowRight size={14} />
           </Link>

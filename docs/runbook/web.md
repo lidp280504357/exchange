@@ -30,6 +30,8 @@
 - `web/packages/ui`：设计系统，内容如下：
   - 令牌：`src/styles/tokens.css`。只有这个文件写颜色值；深色是用户站，`data-theme="light"` 是后台，`data-updown="red-up"` 对调涨跌色。
   - Tailwind 主题：`src/styles/theme.css`。默认调色板已去掉，只能用语义类名，如 `bg-bg-1`、`text-up`。
+    - 文字的对比度（WCAG 4.5:1）：浅色页面上的涨跌、品牌与状态文字用 `text-*-strong`（浅色主题加深，深色主题就是原色）；落在 15% 淡底上的涨、跌、信息、危险文字用 `text-*-soft-fg`（向正文色挪 30%，`Badge` 的 soft 样式用它）；涨、跌、危险的实色底上用黑字（`Badge` 的 solid、买卖与危险按钮、未读数）。
+    - 触控尺寸：`--tap`（44 px）映射成 `size-tap`、`h-tap`、`min-h-tap`、`min-w-tap`、`w-tap`。根字号是 14 px，`size-11` 之类的 rem 尺寸只有 38.5 px，要 44 px 时用这组。
   - 组件与 Storybook 故事，动效预设在 `src/lib/motion.ts`。
 
 应用之间不互相 import；取数、推送、格式化、校验、i18n 与组件都放共享包。
@@ -79,7 +81,7 @@
   - `PillBar`：分类胶囊。
   - 长按切换自选。
 - 敏感操作：`features/auth/StepUp.tsx` 的 `useStepUp()` 在面板里完成 step-up；面板里再要 step-up 时叠在上面。
-- 触控目标不小于 44 px：页面里直接做大。共享组件里的小图标按钮（清除、复制、重试、面板关闭）用 `hit-area` 工具类（`packages/ui/src/styles/theme.css`），在触屏上给出 44 px 的点击区，外观不变。
+- 触控目标不小于 44 px：页面里直接做大，尺寸用 `size-tap`、`h-tap`、`min-h-tap`，不用 `size-11`、`h-12`（14 px 根字号下只有 38.5、42 px）。共享组件在触屏上（Tailwind 的 `pointer-coarse:`）自己放大：中号与大号按钮、大号输入框、页签、K 线工具栏的周期与指标按钮。共享组件里的小图标按钮（清除、复制、重试、面板关闭）用 `hit-area` 工具类（`packages/ui/src/styles/theme.css`），在触屏上给出 44 px 的点击区，外观不变；`hit-area` 会被横向滚动的容器裁掉，那里要真的做大。
 - 离线：`public/sw.js` 只缓存 `offline.html`，导航请求断网时显示"网络不可用"页；构建产物由 nginx 的 `immutable` 缓存负责，不进 service worker。
 - 文案：外壳的在 `src/i18n.ts`（命名空间 `m`），各区域的在 `src/i18n/<区域>.ts`（`mAuth`、`mTrade`、`mAssets`、`mAccount`、`mMarkets`、`mContent`），随页面加载。
 
@@ -122,6 +124,12 @@ task web:lighthouse         # 对部署后的两站各三页跑 Lighthouse（性
   - 接口读不到时用 `DEFAULT_PROFILE`：自带的名称、图标与颜色，不显示横幅、不承诺赠送、注册开放。页面不会白屏。
 - **法律页与首页横幅**（设计 §4.4）：`/legal/:slug`（terms、privacy、risk、fees、about、contact），PC 站页脚与手机站「我的 → 条款与政策」进入。默认稿在 `web/packages/core/content/legal/`，首页横幅的默认稿是 `content/home/home-hero.*.md`。后台发布的覆盖稿优先，撤回的不显示。
   - 首页横幅：标题、副标题（文章摘要），正文里第一个 Markdown 链接是按钮（`useHero()`）。手机站的欢迎卡在有赠送时仍以赠送为标题。
+
+## 无障碍与状态
+
+- 减少动效：系统开了"减少动态效果"时，两个用户站的 `MotionConfig` 带 `skipAnimations={prefersReducedMotion()}`（`packages/ui/src/lib/motion.ts`），motion 的淡入、错开入场一并跳过（只设 `reducedMotion="user"` 时不透明度动画仍在）；全局 CSS 把动画与过渡的时长和延迟都清零（`packages/ui/src/styles/index.css`），`Drawer`、`Sheet` 也各自用 `useReducedMotion`。
+- 截断文字：`DataTable` 的单元格被省略号截断时（单元格自己，或里面的 `.truncate`、`.text-ellipsis`、多行截断元素），自动带上整段文字的 `title`，放得下时再去掉（`packages/ui/src/data/cutTitles.ts`，每次渲染与宽度变化后测量）。表格之外的截断文字由页面自己给 `title`；`TimeText` 的 `titled` 让绝对时间也带完整时间的提示。
+- 空状态：插图、标题、一句说明这里会出现什么、一个下一步（`EmptyState` 的 `title`、`description`、`action`）。交易终端的委托、成交、仓位列表用各站的 `pages/trade/parts/EmptyList.tsx`：PC 站的下一步把光标放进下单表单，手机站的打开下单面板，合约仓位另有"划转"。
 
 ## 部署
 

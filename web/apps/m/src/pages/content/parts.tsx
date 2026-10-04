@@ -111,7 +111,7 @@ export function Toc({ items, className }: { items: readonly TocItem[]; className
   if (items.length < 2) return null;
   return (
     <details className={cn("group rounded-3 border border-line-1 bg-bg-1", className)}>
-      <summary className="flex h-12 cursor-pointer list-none items-center justify-between px-4 text-sm font-medium text-fg-1 [&::-webkit-details-marker]:hidden">
+      <summary className="flex h-tap cursor-pointer list-none items-center justify-between px-4 text-sm font-medium text-fg-1 [&::-webkit-details-marker]:hidden">
         {t("mContent.article.toc")}
         <ChevronDown size={16} className="text-fg-3 transition-transform duration-[var(--t-fast)] group-open:rotate-180" />
       </summary>
@@ -125,7 +125,7 @@ export function Toc({ items, className }: { items: readonly TocItem[]; className
                   e.preventDefault();
                   scrollToHeading(i.id, !reduced);
                 }}
-                className={cn("flex min-h-11 items-center pr-4 text-sm leading-snug transition-colors active:text-brand", i.depth === 3 ? "pl-8 text-fg-3" : "pl-4 text-fg-2")}
+                className={cn("flex min-h-tap items-center pr-4 text-sm leading-snug transition-colors active:text-brand", i.depth === 3 ? "pl-8 text-fg-3" : "pl-4 text-fg-2")}
               >
                 {i.text}
               </a>

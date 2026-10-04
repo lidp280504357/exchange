@@ -90,7 +90,7 @@ export function CoinList({
                 <li key={it.value} className="flex min-h-14 items-center gap-3 rounded-2 bg-bg-2 pl-3">
                   <CoinRowContent asset={it.value} name={it.description ?? it.value} trailing={<span className="text-xs text-fg-3">{t("mAssets.common.onlyInternal")}</span>} />
                   {trade ? (
-                    <Link to={trade} className="flex min-h-11 shrink-0 items-center gap-1 px-3 text-sm font-medium text-brand">
+                    <Link to={trade} className="flex min-h-tap shrink-0 items-center gap-1 px-3 text-sm font-medium text-brand">
                       {t("mAssets.common.goTrade")}
                       <ArrowRight size={14} />
                     </Link>
@@ -122,7 +122,7 @@ export function CoinList({
             <li className="flex flex-col items-center gap-2 py-6 text-center text-sm text-fg-3">
               {q ? t("mAssets.common.noMatch") : t("mAssets.common.noneOpen")}
               {q && (
-                <Button variant="secondary" className="h-11" onClick={() => setQuery("")}>
+                <Button variant="secondary" className="h-tap" onClick={() => setQuery("")}>
                   {t("mAssets.common.clearSearch")}
                 </Button>
               )}
@@ -149,7 +149,7 @@ export function InternalOnly({ asset, name, trade }: { asset: string; name: stri
         </p>
       </div>
       {trade && (
-        <Button asChild className="h-11 shrink-0">
+        <Button asChild className="h-tap shrink-0">
           <Link to={trade}>{t("mAssets.common.goTrade")}</Link>
         </Button>
       )}

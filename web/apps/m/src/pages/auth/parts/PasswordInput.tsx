@@ -40,7 +40,7 @@ export function PasswordInput({ onKeyDown, onKeyUp, onBlur, size = "lg", ...prop
             onClick={() => setShown((s) => !s)}
             aria-label={shown ? t("mAuth.hidePassword") : t("mAuth.showPassword")}
             aria-pressed={shown}
-            className="grid size-11 place-items-center rounded-2 text-fg-3 transition-colors active:text-fg-1"
+            className="grid size-tap place-items-center rounded-2 text-fg-3 transition-colors active:text-fg-1"
           >
             {shown ? <EyeOff size={18} /> : <Eye size={18} />}
           </button>

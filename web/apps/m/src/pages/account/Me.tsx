@@ -104,7 +104,7 @@ export default function Me() {
               trailing={
                 unread > 0 && (
                   <>
-                    <span aria-hidden className="min-w-5 rounded-full bg-danger px-1.5 text-center text-xs font-semibold leading-5 text-white tabular-nums">
+                    <span aria-hidden className="min-w-5 rounded-full bg-danger px-1.5 text-center text-xs font-semibold leading-5 text-black tabular-nums">
                       {countBadge(unread)}
                     </span>
                     <span className="sr-only">{t("mAccount.me.unread", { count: unread })}</span>

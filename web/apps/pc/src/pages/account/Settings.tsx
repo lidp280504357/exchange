@@ -173,7 +173,8 @@ const CANDLES: [number, number, number, number][] = [
 
 const fill: Record<Tone, string> = { up: "fill-up", down: "fill-down" };
 const stroke: Record<Tone, string> = { up: "stroke-up", down: "stroke-down" };
-const text: Record<Tone, string> = { up: "text-up", down: "text-down" };
+// The preview sits on the chosen card's brand tint: soft-fg shades read there.
+const text: Record<Tone, string> = { up: "text-up-soft-fg", down: "text-down-soft-fg" };
 
 /** CandlePreview draws an option's rises and falls in the colours it would use (updown.ts). */
 function CandlePreview({ option, current, name }: { option: UpDown; current: UpDown; name: string }) {

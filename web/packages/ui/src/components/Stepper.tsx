@@ -36,7 +36,7 @@ const dotClass: Record<StepStatus, string> = {
   done: "border-brand bg-brand text-brand-fg",
   current: "border-brand bg-brand-soft text-brand",
   upcoming: "border-line-2 bg-bg-2 text-fg-3",
-  error: "border-danger bg-danger text-white",
+  error: "border-danger bg-danger text-black",
 };
 
 /**

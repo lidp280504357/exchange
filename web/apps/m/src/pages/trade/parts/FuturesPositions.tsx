@@ -1,11 +1,13 @@
 import {
   adjustPositionMargin, closeableQuantity, dec, enumLabel, errorText, formatAmount, formatPrice, liveFigures, newIdempotencyKey, placeConditionalOrder,
-  placeContractOrder, useConditionalOrders, useContracts, useMarkPrice, usePositions, useTicker, type ConditionalOrder, type ContractPosition,
+  placeContractOrder, routes, useConditionalOrders, useContracts, useMarkPrice, usePositions, useTicker, type ConditionalOrder, type ContractPosition,
 } from "@exchange/core";
-import { Button, Dialog, EmptyState, ErrorState, NumberInput, PositionCard, Segmented, Sheet, Skeleton, TpSlDialog, toast, type TpSlValues } from "@exchange/ui";
+import { Button, Dialog, ErrorState, NumberInput, PositionCard, Segmented, Sheet, Skeleton, TpSlDialog, toast, type TpSlValues } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
+import { EmptyList } from "./EmptyList";
 
 type Specs = Map<string, { price: number; qty: number }>;
 const label = (symbol: string) => symbol.replace(/-PERP$/, "").replace("-", "");
@@ -13,8 +15,9 @@ const label = (symbol: string) => symbol.replace(/-PERP$/, "").replace("-", "");
 /**
  * FuturesPositions: the caller's positions as cards (design §7.2) with
  * market close, take-profit/stop-loss and, for isolated ones, margin.
+ * Without one it offers the order sheet (onTrade) and a transfer.
  */
-export function FuturesPositions({ symbol }: { symbol: string }) {
+export function FuturesPositions({ symbol, onTrade }: { symbol: string; onTrade?: () => void }) {
   const { t } = useTranslation();
   const q = usePositions("");
   const tpsl = useConditionalOrders("");
@@ -27,7 +30,26 @@ export function FuturesPositions({ symbol }: { symbol: string }) {
   if (q.error) return <ErrorState compact message={errorText(q.error)} onRetry={() => void q.refetch()} />;
   // This contract's positions first.
   const list = [...(q.data?.positions ?? [])].sort((a, b) => Number(b.symbol === symbol) - Number(a.symbol === symbol));
-  if (list.length === 0) return <EmptyState compact title={t("mTrade.noPositions")} />;
+  if (list.length === 0) {
+    return (
+      <EmptyList
+        title={t("mTrade.noPositions")}
+        hint={t("mTrade.noPositionsHint")}
+        action={
+          <div className="flex gap-2">
+            {onTrade && (
+              <Button size="sm" className="hit-area" onClick={onTrade}>
+                {t("mTrade.openPosition")}
+              </Button>
+            )}
+            <Button asChild size="sm" variant="secondary" className="hit-area">
+              <Link to={routes.transfer}>{t("nav.transfer")}</Link>
+            </Button>
+          </div>
+        }
+      />
+    );
+  }
   return (
     <div className="flex flex-col gap-3 p-4">
       {list.map((p) => (

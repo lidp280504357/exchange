@@ -6,9 +6,10 @@ import { Button, EmptyState, ErrorState, Skeleton, Tabs, TimeText, cn, toast } f
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
+import { EmptyList } from "./EmptyList";
 
-/** FuturesOrders: the contract's open orders (cancel) and history as cards (design §7.2). */
-export function FuturesOrders({ contract }: { contract: Contract }) {
+/** FuturesOrders: the contract's open orders (cancel) and history as cards (design §7.2); an empty list offers the order sheet (onTrade). */
+export function FuturesOrders({ contract, onTrade }: { contract: Contract; onTrade?: () => void }) {
   const { t } = useTranslation();
   const signedIn = useSession(selectSignedIn);
   const [tab, setTab] = useState("open");
@@ -38,7 +39,7 @@ export function FuturesOrders({ contract }: { contract: Contract }) {
           { value: "history", label: t("mTrade.history") },
         ]}
       />
-      {tab === "open" ? <OpenList contract={contract} query={open} /> : <HistoryList contract={contract} />}
+      {tab === "open" ? <OpenList contract={contract} query={open} onTrade={onTrade} /> : <HistoryList contract={contract} onTrade={onTrade} />}
     </div>
   );
 }
@@ -80,13 +81,13 @@ function Card({ o, contract, action }: { o: ContractOrder; contract: Contract; a
   );
 }
 
-function OpenList({ contract, query }: { contract: Contract; query: ReturnType<typeof useContractOpenOrders> }) {
+function OpenList({ contract, query, onTrade }: { contract: Contract; query: ReturnType<typeof useContractOpenOrders>; onTrade?: () => void }) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState<string | null>(null);
   if (query.isPending) return <Skeleton className="m-4 h-20 rounded-3" />;
   if (query.error) return <ErrorState compact message={errorText(query.error)} onRetry={() => void query.refetch()} />;
   const items = query.data?.items ?? [];
-  if (items.length === 0) return <EmptyState compact title={t("mTrade.noOpenOrders")} />;
+  if (items.length === 0) return <EmptyList title={t("mTrade.noOpenOrders")} hint={t("mTrade.noOpenOrdersHint")} onTrade={onTrade} />;
   const cancel = async (o: ContractOrder) => {
     setBusy(o.order_id);
     try {
@@ -115,13 +116,13 @@ function OpenList({ contract, query }: { contract: Contract; query: ReturnType<t
   );
 }
 
-function HistoryList({ contract }: { contract: Contract }) {
+function HistoryList({ contract, onTrade }: { contract: Contract; onTrade?: () => void }) {
   const { t } = useTranslation();
   const q = useContractOrderHistory(contract.symbol);
   if (q.isPending) return <Skeleton className="m-4 h-20 rounded-3" />;
   if (q.error) return <ErrorState compact message={errorText(q.error)} onRetry={() => void q.refetch()} />;
   const items = (q.data?.pages ?? []).flatMap((p) => p.items).filter((o) => !isActive(o.status));
-  if (items.length === 0) return <EmptyState compact title={t("mTrade.noHistory")} />;
+  if (items.length === 0) return <EmptyList title={t("mTrade.noHistory")} hint={t("mTrade.noHistoryHint")} onTrade={onTrade} />;
   return (
     <div className="flex flex-col gap-2 p-4">
       {items.map((o) => (

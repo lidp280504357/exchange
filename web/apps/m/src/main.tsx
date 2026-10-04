@@ -1,5 +1,5 @@
 import { applySettings, createLive, createQueryClient, initI18n, LiveProvider, reportVitals, restoreSession, useSettings } from "@exchange/core";
-import { uiMessages } from "@exchange/ui";
+import { prefersReducedMotion, uiMessages } from "@exchange/ui";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { MotionConfig } from "motion/react";
 import { StrictMode } from "react";
@@ -20,7 +20,7 @@ reportVitals("m");
 const app = (
   <QueryClientProvider client={queryClient}>
     <LiveProvider ws={live.ws} market={live.market}>
-      <MotionConfig reducedMotion="user">
+      <MotionConfig reducedMotion="user" skipAnimations={prefersReducedMotion()}>
         <BrowserRouter>
           <App queryClient={queryClient} />
         </BrowserRouter>

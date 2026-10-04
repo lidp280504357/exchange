@@ -300,7 +300,7 @@ function RegionField({ control, value, onChange, locale }: { control: FieldContr
         aria-haspopup="dialog"
         onClick={() => setOpen(true)}
         className={cn(
-          "flex h-12 w-full items-center gap-3 rounded-2 border bg-bg-2 px-4 text-left text-md transition-colors active:bg-bg-3",
+          "flex h-tap w-full items-center gap-3 rounded-2 border bg-bg-2 px-4 text-left text-md transition-colors active:bg-bg-3",
           control["aria-invalid"] ? "border-danger" : "border-line-1",
         )}
       >
@@ -326,7 +326,7 @@ function RegionField({ control, value, onChange, locale }: { control: FieldContr
 function TermsField({ form, terms }: { form: UseFormReturn<Values>; terms: ReturnType<typeof useTerms> }) {
   const { t } = useTranslation();
   const id = useId();
-  if (terms.isPending) return <Skeleton className="h-11 w-full" />;
+  if (terms.isPending) return <Skeleton className="h-tap w-full" />;
   if (terms.isError) {
     return (
       <div role="alert" className="flex items-center justify-between gap-2 rounded-2 border border-danger/40 bg-danger/10 pl-3 pr-1 text-sm text-danger">
@@ -346,7 +346,7 @@ function TermsField({ form, terms }: { form: UseFormReturn<Values>; terms: Retur
       render={({ field, fieldState }) => (
         <div className="flex flex-col gap-1">
           {/* The whole row is the target: the label forwards taps to the box. */}
-          <label htmlFor={id} className="flex min-h-11 cursor-pointer items-start gap-3 py-1">
+          <label htmlFor={id} className="flex min-h-tap cursor-pointer items-start gap-3 py-1">
             <span className="flex h-5 items-center">
               <Checkbox id={id} checked={field.value} onCheckedChange={field.onChange} invalid={Boolean(fieldState.error)} />
             </span>

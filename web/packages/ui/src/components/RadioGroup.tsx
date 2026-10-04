@@ -63,7 +63,8 @@ export function RadioGroup({
           >
             {dot}
             <span className="text-sm font-medium text-fg-1">{o.label}</span>
-            {o.description && <span className="text-xs text-fg-3">{o.description}</span>}
+            {/* fg-2: a checked card's brand tint takes fg-3 under 4.5:1. */}
+            {o.description && <span className="text-xs text-fg-2">{o.description}</span>}
           </label>
         ) : (
           <div key={o.value} className="flex items-start gap-2">

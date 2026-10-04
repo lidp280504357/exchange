@@ -65,7 +65,7 @@ export function OtpStep({ target, onTicket, sentTo, confirmLabel }: OtpStepProps
                 type="button"
                 disabled={otp.wait > 0 || !captcha || otp.busy !== ""}
                 onClick={() => void send()}
-                className="-my-2 min-h-11 whitespace-nowrap px-2 text-sm text-brand disabled:text-fg-3"
+                className="-my-2 min-h-tap whitespace-nowrap px-2 text-sm text-brand disabled:text-fg-3"
               >
                 {otp.wait > 0 ? t("mAuth.resendIn", { seconds: otp.wait }) : t("mAuth.resend")}
               </button>

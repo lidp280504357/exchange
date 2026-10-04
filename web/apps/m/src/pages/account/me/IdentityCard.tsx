@@ -87,7 +87,7 @@ export function IdentityCard() {
                 type="button"
                 aria-label={`${t("common.retry")}: ${errorText(ids.error)}`}
                 onClick={() => void ids.refetch()}
-                className="-my-2 grid size-11 shrink-0 place-items-center text-danger"
+                className="-my-2 grid size-tap shrink-0 place-items-center text-danger"
               >
                 <RotateCcw size={16} />
               </button>
@@ -106,7 +106,7 @@ export function IdentityCard() {
         </div>
         <Link
           to={routes.settings}
-          className="-mr-2 -mt-1.5 flex h-11 shrink-0 items-center gap-0.5 px-2 text-xs text-fg-3 transition-colors active:text-fg-1"
+          className="-mr-2 -mt-1.5 flex h-tap shrink-0 items-center gap-0.5 px-2 text-xs text-fg-3 transition-colors active:text-fg-1"
         >
           {t("mAccount.me.editProfile")}
           <ChevronRight size={14} aria-hidden />

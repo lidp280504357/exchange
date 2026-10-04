@@ -13,6 +13,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
+import { EmptyList, focusOrderForm } from "./EmptyList";
 
 export type FuturesTab = "positions" | "open" | "tpsl" | "history" | "fills" | "funding";
 
@@ -152,7 +153,24 @@ function Positions({
   const { t } = useTranslation();
   const list = query.data?.positions ?? [];
   if (query.isPending) return <p className="p-6 text-center text-sm text-fg-3">{t("common.loading")}</p>;
-  if (list.length === 0) return <EmptyState compact title={t("pcTrade.noPositions")} />;
+  if (list.length === 0) {
+    return (
+      <EmptyList
+        title={t("pcTrade.noPositions")}
+        hint={t("pcTrade.noPositionsHint")}
+        action={
+          <div className="flex gap-2">
+            <Button size="sm" onClick={focusOrderForm}>
+              {t("pcTrade.openPosition")}
+            </Button>
+            <Button asChild size="sm" variant="secondary">
+              <Link to={routes.transfer}>{t("nav.transfer")}</Link>
+            </Button>
+          </div>
+        }
+      />
+    );
+  }
   return (
     <div className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-3 overflow-y-auto p-3" style={{ maxHeight: height }}>
       {list.map((p) => (
@@ -345,7 +363,7 @@ function OpenOrders({ query, specs, height }: { query: ReturnType<typeof useCont
   );
   return (
     <DataTable columns={columns} data={query.data?.items ?? []} getRowId={(o) => o.order_id} loading={query.isPending} error={query.error}
-      onRetry={() => void query.refetch()} density="compact" height={height} virtual stickyHeader empty={<EmptyState compact title={t("pcTrade.noOpenOrders")} />} />
+      onRetry={() => void query.refetch()} density="compact" height={height} virtual stickyHeader empty={<EmptyList title={t("pcTrade.noOpenOrders")} hint={t("pcTrade.noOpenOrdersHint")} />} />
   );
 }
 
@@ -379,7 +397,7 @@ function TpSlOrders({ query, specs, height }: { query: ReturnType<typeof useCond
   );
   return (
     <DataTable columns={columns} data={query.data?.items ?? []} getRowId={(c) => c.conditional_id} loading={query.isPending} error={query.error}
-      onRetry={() => void query.refetch()} density="compact" height={height} virtual stickyHeader empty={<EmptyState compact title={t("pcTrade.noTpsl")} />} />
+      onRetry={() => void query.refetch()} density="compact" height={height} virtual stickyHeader empty={<EmptyList title={t("pcTrade.noTpsl")} hint={t("pcTrade.noTpslHint")} />} />
   );
 }
 
@@ -410,7 +428,7 @@ function History({ symbol, specs, height, enabled }: { symbol: string; specs: Sp
   return (
     <DataTable columns={columns} data={rows} getRowId={(o) => o.order_id} loading={q.isPending} error={q.error} onRetry={() => void q.refetch()}
       density="compact" height={height} virtual stickyHeader onEndReached={() => q.hasNextPage && !q.isFetchingNextPage && void q.fetchNextPage()}
-      loadingMore={q.isFetchingNextPage} hasMore={q.hasNextPage} empty={<EmptyState compact title={t("pcTrade.noHistory")} />} />
+      loadingMore={q.isFetchingNextPage} hasMore={q.hasNextPage} empty={<EmptyList title={t("pcTrade.noHistory")} hint={t("pcTrade.noHistoryHint")} />} />
   );
 }
 
@@ -443,7 +461,7 @@ function Fills({ symbol, specs, height, enabled }: { symbol: string; specs: Spec
     <DataTable columns={columns} data={rows} getRowId={(f) => `${f.trade_id}:${f.order_id}`} loading={q.isPending} error={q.error}
       onRetry={() => void q.refetch()} density="compact" height={height} virtual stickyHeader
       onEndReached={() => q.hasNextPage && !q.isFetchingNextPage && void q.fetchNextPage()} loadingMore={q.isFetchingNextPage} hasMore={q.hasNextPage}
-      empty={<EmptyState compact title={t("pcTrade.noFills")} />} />
+      empty={<EmptyList title={t("pcTrade.noFills")} hint={t("pcTrade.noFillsHint")} />} />
   );
 }
 
@@ -468,6 +486,6 @@ function Funding({ symbol, specs, height, enabled }: { symbol: string; specs: Sp
     <DataTable columns={columns} data={rows} getRowId={(f) => `${f.symbol}:${f.funding_time}:${f.position_side}`} loading={q.isPending} error={q.error}
       onRetry={() => void q.refetch()} density="compact" height={height} virtual stickyHeader
       onEndReached={() => q.hasNextPage && !q.isFetchingNextPage && void q.fetchNextPage()} loadingMore={q.isFetchingNextPage} hasMore={q.hasNextPage}
-      empty={<EmptyState compact title={t("pcTrade.noFunding")} />} />
+      empty={<EmptyList title={t("pcTrade.noFunding")} hint={t("pcTrade.noFundingHint")} />} />
   );
 }

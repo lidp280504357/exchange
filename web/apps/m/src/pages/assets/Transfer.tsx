@@ -145,7 +145,7 @@ export default function Transfer() {
                 id={control.id}
                 aria-haspopup="dialog"
                 onClick={() => setPicking(true)}
-                className={cn("flex min-h-12 w-full items-center gap-3 rounded-2 border border-line-1 bg-bg-2 px-3 text-left", PRESS)}
+                className={cn("flex min-h-tap w-full items-center gap-3 rounded-2 border border-line-1 bg-bg-2 px-3 text-left", PRESS)}
               >
                 <CoinIcon symbol={asset} size={24} />
                 <span className="font-medium text-fg-1">{asset}</span>
@@ -186,7 +186,7 @@ export default function Transfer() {
             <Notice tone="danger" role="alert">
               <span className="flex flex-wrap items-center justify-between gap-2">
                 {errorText(balances.error)}
-                <Button type="button" variant="secondary" className="h-11" onClick={() => void balances.refetch()}>
+                <Button type="button" variant="secondary" className="h-tap" onClick={() => void balances.refetch()}>
                   {t("common.retry")}
                 </Button>
               </span>
@@ -256,7 +256,7 @@ function Direction({
         aria-label={t("mAssets.transfer.swap")}
         animate={{ rotate: turns * 180 }}
         transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 300, damping: 22 }}
-        className="grid size-11 shrink-0 place-items-center rounded-full border border-line-2 bg-bg-1 text-brand active:bg-bg-3"
+        className="grid size-tap shrink-0 place-items-center rounded-full border border-line-2 bg-bg-1 text-brand active:bg-bg-3"
       >
         <ArrowUpDown size={18} />
       </motion.button>

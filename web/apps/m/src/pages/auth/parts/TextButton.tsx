@@ -9,7 +9,7 @@ type Tone = "brand" | "muted" | "danger";
 
 const tones: Record<Tone, string> = { brand: "text-brand", muted: "text-fg-2", danger: "text-danger" };
 
-const base = "inline-flex min-h-11 shrink-0 items-center gap-1 text-sm font-medium transition-opacity active:opacity-60 disabled:opacity-50";
+const base = "inline-flex min-h-tap shrink-0 items-center gap-1 text-sm font-medium transition-opacity active:opacity-60 disabled:opacity-50";
 
 /** TextLink is an in-site link that reads as text. */
 export function TextLink({

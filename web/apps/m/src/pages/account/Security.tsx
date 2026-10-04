@@ -335,7 +335,7 @@ function Summary({
               key={k}
               type="button"
               onClick={() => onSuggest(k)}
-              className="inline-flex h-11 items-center gap-1 rounded-full border border-line-2 px-4 text-sm text-fg-2 transition-colors active:border-brand active:text-brand"
+              className="inline-flex h-tap items-center gap-1 rounded-full border border-line-2 px-4 text-sm text-fg-2 transition-colors active:border-brand active:text-brand"
             >
               {t(`mAccount.security.suggest.${k}`)}
               <ChevronRight size={14} aria-hidden />

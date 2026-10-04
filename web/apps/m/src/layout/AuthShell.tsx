@@ -12,9 +12,9 @@ export function AuthShell() {
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden bg-bg-0 px-5 pb-[calc(24px+env(safe-area-inset-bottom))] pt-[env(safe-area-inset-top)]">
       <div className="pointer-events-none absolute -right-24 -top-24 size-72 rounded-full bg-brand-soft blur-3xl" />
-      <div className="relative flex h-11 items-center justify-between">
+      <div className="relative flex h-tap items-center justify-between">
         <BrandMark />
-        <Link to={routes.home} aria-label={t("common.close")} className="grid size-11 place-items-center text-fg-2">
+        <Link to={routes.home} aria-label={t("common.close")} className="grid size-tap place-items-center text-fg-2">
           <X size={22} />
         </Link>
       </div>

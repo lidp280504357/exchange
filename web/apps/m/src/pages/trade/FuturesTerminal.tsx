@@ -54,7 +54,7 @@ export default function FuturesTerminal() {
   usePageHeader(
     {
       title: contract ? (
-        <button type="button" onClick={() => setPairOpen(true)} className="flex min-h-11 items-center gap-1.5">
+        <button type="button" onClick={() => setPairOpen(true)} className="flex min-h-tap items-center gap-1.5">
           <span className="text-md font-semibold text-fg-1">
             {contract.base_asset}
             {contract.quote_asset}
@@ -66,7 +66,7 @@ export default function FuturesTerminal() {
       ) : undefined,
       right: contract ? (
         <div className="flex">
-          <Link to={routes.coin(contract.base_asset)} aria-label={t("mTrade.coinInfo")} className="grid size-11 place-items-center text-fg-3">
+          <Link to={routes.coin(contract.base_asset)} aria-label={t("mTrade.coinInfo")} className="grid size-tap place-items-center text-fg-3">
             <Info size={20} />
           </Link>
           <button
@@ -74,7 +74,7 @@ export default function FuturesTerminal() {
             aria-pressed={fav.has(contract.symbol)}
             aria-label={fav.has(contract.symbol) ? t("common.unfavorite") : t("common.favorite")}
             onClick={() => void fav.toggle(contract.symbol).catch((e: unknown) => toast.error(errorText(e)))}
-            className={cn("grid size-11 place-items-center", fav.has(contract.symbol) ? "text-brand" : "text-fg-3")}
+            className={cn("grid size-tap place-items-center", fav.has(contract.symbol) ? "text-brand" : "text-fg-3")}
           >
             <Star size={20} className={cn(fav.has(contract.symbol) && "fill-current")} />
           </button>
@@ -86,6 +86,10 @@ export default function FuturesTerminal() {
 
   const onPick = useCallback((price: string, quantity?: string) => {
     setFill({ price, quantity });
+    setSheet(true);
+  }, []);
+  const trade = useCallback(() => {
+    setFill(null);
     setSheet(true);
   }, []);
 
@@ -135,11 +139,11 @@ export default function FuturesTerminal() {
             content: <BookTab contract={contract} priceDecimals={pd} qtyDecimals={qd} markPrice={mark?.mark_price} onPick={onPick} />,
           },
           { value: "trades", label: t("mTrade.trades"), content: <TradesTab contract={contract} priceDecimals={pd} qtyDecimals={qd} /> },
-          { value: "positions", label: t("mTrade.positions"), count: mine, content: <FuturesPositions symbol={contract.symbol} /> },
+          { value: "positions", label: t("mTrade.positions"), count: mine, content: <FuturesPositions symbol={contract.symbol} onTrade={trade} /> },
         ]}
       />
       <div className="mt-2 border-t border-line-1">
-        <FuturesOrders contract={contract} />
+        <FuturesOrders contract={contract} onTrade={trade} />
       </div>
       <div className="fixed inset-x-0 bottom-[calc(56px+env(safe-area-inset-bottom))] z-[var(--z-sticky)] grid grid-cols-2 gap-2 border-t border-line-1 bg-bg-0/95 px-4 py-2 backdrop-blur">
         <Button size="lg" variant="buy" onClick={() => (setFill(null), setSheet(true))}>

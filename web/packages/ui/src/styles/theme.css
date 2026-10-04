@@ -19,6 +19,23 @@
   --color-brand-soft: var(--brand-soft);
   --color-up: var(--up);
   --color-down: var(--down);
+  /* Text-only shades (tokens.css): the tones as text on a light page,
+     darker there; on the dark theme the tones themselves. */
+  --color-up-strong: var(--up-strong);
+  --color-down-strong: var(--down-strong);
+  --color-brand-strong: var(--brand-strong);
+  --color-success-strong: var(--success-strong);
+  --color-danger-strong: var(--danger-strong);
+  --color-info-strong: var(--info-strong);
+  --color-warn-strong: var(--warn-strong);
+  /* Text on a soft (15%) fill of its tone, for the tones that need more
+     than their strong shade there: moved 30% toward the text colour. On
+     the dark theme red and blue on their tint read 4.1-4.4:1, these
+     5.0-5.3:1; on the light theme they come out darker still. */
+  --color-up-soft-fg: color-mix(in srgb, var(--up-strong) 70%, var(--fg-1));
+  --color-down-soft-fg: color-mix(in srgb, var(--down-strong) 70%, var(--fg-1));
+  --color-info-soft-fg: color-mix(in srgb, var(--info-strong) 70%, var(--fg-1));
+  --color-danger-soft-fg: color-mix(in srgb, var(--danger-strong) 70%, var(--fg-1));
   --color-info: var(--info);
   --color-warn: var(--warn);
   --color-danger: var(--danger);
@@ -46,6 +63,10 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+
+  /* size-tap, h-tap, min-h-tap, min-w-tap: the 44 px touch target, in px
+     (with the 14 px root a rem size such as size-11 is 38.5 px). */
+  --spacing-tap: var(--tap);
 
   --radius-1: var(--r-1);
   --radius-2: var(--r-2);

@@ -212,8 +212,8 @@ export function OrderForm({
           onValueChange={(v) => onSideChange(v as OrderSide)}
           aria-label={`${t("common.buy")} / ${t("common.sell")}`}
           items={[
-            { value: "BUY", label: t("common.buy"), thumbClassName: "bg-up", activeClassName: "text-white" },
-            { value: "SELL", label: t("common.sell"), thumbClassName: "bg-down", activeClassName: "text-white" },
+            { value: "BUY", label: t("common.buy"), thumbClassName: "bg-up", activeClassName: "text-black" },
+            { value: "SELL", label: t("common.sell"), thumbClassName: "bg-down", activeClassName: "text-black" },
           ]}
         />
       )}

@@ -188,14 +188,14 @@ function DeviceCard({ session: s, index, onAction }: { session: DeviceSession; i
           <dl className="mt-3 grid grid-cols-2 gap-3 rounded-2 bg-bg-2 px-3 py-2 text-xs">
             <div className="min-w-0">
               <dt className="text-fg-3">{t("mAccount.sessions.lastActive")}</dt>
-              <dd className="mt-0.5 truncate text-fg-1">
-                <TimeText value={s.last_seen_at} relative />
+              <dd className="mt-0.5 min-w-0 text-fg-1">
+                <TimeText value={s.last_seen_at} relative className="block truncate" />
               </dd>
             </div>
             <div className="min-w-0">
               <dt className="text-fg-3">{t("mAccount.sessions.firstLogin")}</dt>
-              <dd className="mt-0.5 truncate text-fg-1">
-                <TimeText value={s.created_at} format="datetime" />
+              <dd className="mt-0.5 min-w-0 text-fg-1">
+                <TimeText value={s.created_at} format="datetime" titled className="block truncate" />
               </dd>
             </div>
           </dl>
@@ -204,7 +204,7 @@ function DeviceCard({ session: s, index, onAction }: { session: DeviceSession; i
       <button
         type="button"
         onClick={onAction}
-        className="flex h-11 w-full items-center justify-center gap-1.5 border-t border-line-1 text-sm font-medium text-danger transition-colors active:bg-bg-2"
+        className="flex h-tap w-full items-center justify-center gap-1.5 border-t border-line-1 text-sm font-medium text-danger transition-colors active:bg-bg-2"
       >
         <LogOut size={14} aria-hidden />
         {s.current ? t("mAccount.sessions.signOutHere") : t("mAccount.sessions.revoke")}

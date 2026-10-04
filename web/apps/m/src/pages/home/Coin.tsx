@@ -324,7 +324,7 @@ function About({ profile }: { profile: ProfileStats | undefined }) {
                 href={l.href}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex h-11 items-center gap-1.5 rounded-2 border border-line-2 px-3 text-sm text-fg-2 transition-colors active:border-brand active:text-brand"
+                className="flex h-tap items-center gap-1.5 rounded-2 border border-line-2 px-3 text-sm text-fg-2 transition-colors active:border-brand active:text-brand"
               >
                 {l.icon}
                 {l.label}

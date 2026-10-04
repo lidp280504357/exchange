@@ -59,7 +59,7 @@ function TxLink({ network, hash }: { network: WalletNetwork | undefined; hash: s
   return (
     <span className="-my-2.5 inline-flex items-center">
       {url ? (
-        <a href={url} target="_blank" rel="noreferrer noopener" className="inline-flex min-h-11 items-center gap-1 text-fg-2 active:text-brand">
+        <a href={url} target="_blank" rel="noreferrer noopener" className="inline-flex min-h-tap items-center gap-1 text-fg-2 active:text-brand">
           <span className="font-mono text-xs">{shortAddress(hash, 10, 6)}</span>
           <ExternalLink size={12} />
           <span className="sr-only">{t("mAssets.common.viewTx")}</span>

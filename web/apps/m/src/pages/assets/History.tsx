@@ -136,7 +136,7 @@ export default function History() {
           title={t("mAssets.history.emptyFiltered")}
           description={t("mAssets.history.emptyFilteredHint")}
           action={
-            <Button variant="secondary" className="h-11" onClick={reset}>
+            <Button variant="secondary" className="h-tap" onClick={reset}>
               {t("mAssets.history.reset")}
             </Button>
           }
@@ -147,7 +147,7 @@ export default function History() {
           title={t("mAssets.history.empty")}
           description={t("mAssets.history.emptyHint")}
           action={
-            <Button asChild className="h-11">
+            <Button asChild className="h-tap">
               <Link to={routes.deposit}>{t("nav.deposit")}</Link>
             </Button>
           }
@@ -222,7 +222,7 @@ function FilterButton({ count, label, onClick }: { count: number; label: string;
       onClick={onClick}
       aria-haspopup="dialog"
       aria-label={count > 0 ? `${label} (${count})` : label}
-      className="relative grid size-11 place-items-center text-fg-1 active:text-brand"
+      className="relative grid size-tap place-items-center text-fg-1 active:text-brand"
     >
       <SlidersHorizontal size={20} />
       {count > 0 && (
@@ -238,7 +238,7 @@ function FilterButton({ count, label, onClick }: { count: number; label: string;
 function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
   const { t } = useTranslation();
   return (
-    <button type="button" onClick={onRemove} aria-label={t("mAssets.history.removeFilter", { name: label })} className="flex h-11 items-center">
+    <button type="button" onClick={onRemove} aria-label={t("mAssets.history.removeFilter", { name: label })} className="flex h-tap items-center">
       <span className="flex h-8 items-center gap-1 rounded-full border border-line-2 bg-bg-1 pl-3 pr-2 text-xs text-fg-1">
         {label}
         <X size={12} className="text-fg-3" />
@@ -361,7 +361,7 @@ function Chips({ options, value, onChange, label }: { options: { value: string; 
             aria-checked={on}
             onClick={() => onChange(o.value)}
             className={cn(
-              "min-h-11 rounded-full border px-4 text-sm transition-colors duration-[var(--t-fast)]",
+              "min-h-tap rounded-full border px-4 text-sm transition-colors duration-[var(--t-fast)]",
               on ? "border-brand bg-brand-soft text-brand" : "border-line-1 bg-bg-2 text-fg-2 active:bg-bg-3",
             )}
           >
@@ -424,7 +424,7 @@ function FilterSheet({
             type="button"
             onClick={() => setCoinOpen(true)}
             aria-haspopup="dialog"
-            className={cn("flex min-h-12 w-full items-center gap-3 rounded-2 border border-line-1 bg-bg-2 px-3 text-left", PRESS)}
+            className={cn("flex min-h-tap w-full items-center gap-3 rounded-2 border border-line-1 bg-bg-2 px-3 text-left", PRESS)}
           >
             {draft.asset ? (
               <>

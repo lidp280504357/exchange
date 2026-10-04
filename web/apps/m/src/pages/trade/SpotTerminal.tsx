@@ -50,7 +50,7 @@ export default function SpotTerminal() {
   usePageHeader(
     {
       title: pair ? (
-        <button type="button" onClick={() => setPairOpen(true)} className="flex min-h-11 items-center gap-1.5">
+        <button type="button" onClick={() => setPairOpen(true)} className="flex min-h-tap items-center gap-1.5">
           <span className="text-md font-semibold text-fg-1">
             {pair.base_asset}
             <span className="text-fg-3">/{pair.quote_asset}</span>
@@ -61,7 +61,7 @@ export default function SpotTerminal() {
       ) : undefined,
       right: pair ? (
         <div className="flex">
-          <Link to={routes.coin(pair.base_asset)} aria-label={t("mTrade.coinInfo")} className="grid size-11 place-items-center text-fg-3">
+          <Link to={routes.coin(pair.base_asset)} aria-label={t("mTrade.coinInfo")} className="grid size-tap place-items-center text-fg-3">
             <Info size={20} />
           </Link>
           <button
@@ -69,7 +69,7 @@ export default function SpotTerminal() {
             aria-pressed={fav.has(pair.symbol)}
             aria-label={fav.has(pair.symbol) ? t("common.unfavorite") : t("common.favorite")}
             onClick={() => void fav.toggle(pair.symbol).catch((e: unknown) => toast.error(errorText(e)))}
-            className={cn("grid size-11 place-items-center", fav.has(pair.symbol) ? "text-brand" : "text-fg-3")}
+            className={cn("grid size-tap place-items-center", fav.has(pair.symbol) ? "text-brand" : "text-fg-3")}
           >
             <Star size={20} className={cn(fav.has(pair.symbol) && "fill-current")} />
           </button>
@@ -133,7 +133,7 @@ export default function SpotTerminal() {
         ]}
       />
       <div className="mt-2 border-t border-line-1">
-        <SpotOrders pair={pair} />
+        <SpotOrders pair={pair} onTrade={() => (setFill(null), setSheet("BUY"))} />
       </div>
       <div className="fixed inset-x-0 bottom-[calc(56px+env(safe-area-inset-bottom))] z-[var(--z-sticky)] grid grid-cols-2 gap-2 border-t border-line-1 bg-bg-0/95 px-4 py-2 backdrop-blur">
         <Button size="lg" variant="buy" onClick={() => (setFill(null), setSheet("BUY"))}>

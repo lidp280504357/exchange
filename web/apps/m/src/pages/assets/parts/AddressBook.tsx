@@ -147,7 +147,7 @@ export function AddressBookSheet({
       ) : (
         <div className="flex flex-col gap-3 pt-1">
           {entries.length > 0 && (
-            <button type="button" onClick={() => onMode("list")} className="-ml-1 flex min-h-11 items-center gap-1 self-start pr-2 text-sm text-fg-2">
+            <button type="button" onClick={() => onMode("list")} className="-ml-1 flex min-h-tap items-center gap-1 self-start pr-2 text-sm text-fg-2">
               <ArrowLeft size={16} />
               {t("mAssets.withdraw.backToBook")}
             </button>
@@ -221,7 +221,7 @@ function BookList({
         title={t("mAssets.withdraw.bookEmpty", { network: network.display_name })}
         description={t("mAssets.withdraw.bookEmptyHint")}
         action={
-          <Button className="h-11" icon={<Plus size={16} />} onClick={onAdd}>
+          <Button className="h-tap" icon={<Plus size={16} />} onClick={onAdd}>
             {t("mAssets.withdraw.addNew")}
           </Button>
         }
@@ -296,7 +296,7 @@ function BookList({
                   aria-expanded={confirmId === e.id}
                   disabled={removing === e.id}
                   onClick={() => setConfirmId((c) => (c === e.id ? null : e.id))}
-                  className="grid size-11 shrink-0 place-items-center text-fg-3 active:text-danger disabled:opacity-50"
+                  className="grid size-tap shrink-0 place-items-center text-fg-3 active:text-danger disabled:opacity-50"
                 >
                   <Trash2 size={16} />
                 </button>
@@ -305,10 +305,10 @@ function BookList({
                 <div className="flex flex-wrap items-center gap-2 border-t border-line-1 px-3 py-2 animate-fade-in">
                   <span className="min-w-0 flex-1 text-sm text-fg-1">{t("mAssets.withdraw.removeConfirm")}</span>
                   <span className="flex shrink-0 gap-2">
-                    <Button variant="secondary" className="h-11" disabled={removing === e.id} onClick={() => setConfirmId(null)}>
+                    <Button variant="secondary" className="h-tap" disabled={removing === e.id} onClick={() => setConfirmId(null)}>
                       {t("common.cancel")}
                     </Button>
-                    <Button variant="danger" className="h-11" loading={removing === e.id} onClick={() => void remove(e.id)}>
+                    <Button variant="danger" className="h-tap" loading={removing === e.id} onClick={() => void remove(e.id)}>
                       {t("mAssets.withdraw.remove")}
                     </Button>
                   </span>

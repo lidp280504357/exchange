@@ -68,6 +68,10 @@ export type CandleChartProps = {
   className?: string;
 };
 
+// The toolbar's buttons are 44 px touch targets on touch screens (a ring
+// around them would be cut off by the scrolling toolbar).
+const TOUCH = "pointer-coarse:min-h-tap pointer-coarse:min-w-tap";
+
 const LINE_CLASS = ["text-chart-1", "text-chart-2", "text-chart-3", "text-chart-4", "text-chart-5"];
 const DEFAULT_MA = [7, 25, 99];
 const DEFAULT_EMA = [12, 26];
@@ -412,7 +416,7 @@ export function CandleChart({
       )}
     >
       {toolbar && (
-        <div className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-line-1 px-2 text-xs [scrollbar-width:none]">
+        <div className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-line-1 px-2 text-xs [scrollbar-width:none] pointer-coarse:h-auto">
           {intervals && intervals.length > 0 && (
             <div role="group" aria-label={t("ui.chart.interval")} className="flex items-center gap-0.5">
               {intervals.map((i) => (
@@ -421,7 +425,7 @@ export function CandleChart({
                   type="button"
                   aria-pressed={i === interval}
                   onClick={() => onIntervalChange?.(i)}
-                  className={cn("h-6 rounded-1 px-2 whitespace-nowrap transition-colors", i === interval ? "bg-bg-3 text-fg-1" : "text-fg-3 hover:text-fg-1")}
+                  className={cn("h-6 rounded-1 px-2 whitespace-nowrap transition-colors", TOUCH, i === interval ? "bg-bg-3 text-fg-1" : "text-fg-3 hover:text-fg-1")}
                 >
                   {intervalLabel(i)}
                 </button>
@@ -436,14 +440,14 @@ export function CandleChart({
                 type="button"
                 aria-pressed={shown.includes(i)}
                 onClick={() => toggleIndicator(i)}
-                className={cn("h-6 rounded-1 px-2 transition-colors", shown.includes(i) ? "text-brand" : "text-fg-3 hover:text-fg-1")}
+                className={cn("h-6 rounded-1 px-2 transition-colors", TOUCH, shown.includes(i) ? "text-brand" : "text-fg-3 hover:text-fg-1")}
               >
                 {i}
               </button>
             ))}
           </div>
           <IconButton
-            className="ml-auto"
+            className="ml-auto pointer-coarse:size-tap"
             size="xs"
             icon={isFull ? <Minimize2 /> : <Maximize2 />}
             label={isFull ? t("ui.chart.exitFullscreen") : t("ui.chart.fullscreen")}

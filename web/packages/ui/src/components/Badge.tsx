@@ -21,15 +21,20 @@ export type BadgeProps = {
 };
 
 // Literal class names per tone and variant (the Tailwind scanner needs them).
+// Solid fills carry black text: white reads at 2.1-3.8:1 on the rise, fall
+// and danger fills, black at 5.6:1 and more (the fills are the same on both
+// themes). Soft and outline text takes the tones' strong shades (darker on
+// the light theme); on soft fills rise, fall, info and danger take their
+// soft-fg shades (theme.css), which also read on the dark theme's tints.
 const tones: Record<BadgeTone, Record<BadgeVariant, string>> = {
   neutral: { soft: "bg-bg-3 text-fg-2", solid: "bg-fg-3 text-bg-0", outline: "border-line-2 text-fg-2" },
-  brand: { soft: "bg-brand-soft text-brand", solid: "bg-brand text-brand-fg", outline: "border-brand text-brand" },
-  up: { soft: "bg-up/15 text-up", solid: "bg-up text-white", outline: "border-up text-up" },
-  down: { soft: "bg-down/15 text-down", solid: "bg-down text-white", outline: "border-down text-down" },
-  info: { soft: "bg-info/15 text-info", solid: "bg-info text-white", outline: "border-info text-info" },
-  warn: { soft: "bg-warn/15 text-warn", solid: "bg-warn text-black", outline: "border-warn text-warn" },
-  danger: { soft: "bg-danger/15 text-danger", solid: "bg-danger text-white", outline: "border-danger text-danger" },
-  success: { soft: "bg-success/15 text-success", solid: "bg-success text-white", outline: "border-success text-success" },
+  brand: { soft: "bg-brand-soft text-brand-strong", solid: "bg-brand text-brand-fg", outline: "border-brand text-brand-strong" },
+  up: { soft: "bg-up/15 text-up-soft-fg", solid: "bg-up text-black", outline: "border-up text-up-strong" },
+  down: { soft: "bg-down/15 text-down-soft-fg", solid: "bg-down text-black", outline: "border-down text-down-strong" },
+  info: { soft: "bg-info/15 text-info-soft-fg", solid: "bg-info text-black", outline: "border-info text-info-strong" },
+  warn: { soft: "bg-warn/15 text-warn-strong", solid: "bg-warn text-black", outline: "border-warn text-warn-strong" },
+  danger: { soft: "bg-danger/15 text-danger-soft-fg", solid: "bg-danger text-black", outline: "border-danger text-danger-strong" },
+  success: { soft: "bg-success/15 text-success-strong", solid: "bg-success text-black", outline: "border-success text-success-strong" },
 };
 
 const dots: Record<BadgeTone, string> = {

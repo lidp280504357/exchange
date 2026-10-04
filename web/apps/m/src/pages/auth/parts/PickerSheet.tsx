@@ -77,7 +77,7 @@ function PickerBody({
           prefix={<Search size={18} />}
           suffix={
             query ? (
-              <button type="button" aria-label={t("ui.clear")} onClick={() => setQuery("")} className="grid size-11 place-items-center text-fg-3">
+              <button type="button" aria-label={t("ui.clear")} onClick={() => setQuery("")} className="grid size-tap place-items-center text-fg-3">
                 <X size={16} />
               </button>
             ) : undefined
@@ -98,7 +98,7 @@ function PickerBody({
                   aria-selected={on}
                   onClick={() => onChoose(item.value)}
                   className={cn(
-                    "flex min-h-12 w-full items-center gap-3 rounded-2 px-3 py-2 text-left transition-colors active:bg-bg-2",
+                    "flex min-h-tap w-full items-center gap-3 rounded-2 px-3 py-2 text-left transition-colors active:bg-bg-2",
                     on && "bg-brand-soft",
                   )}
                 >

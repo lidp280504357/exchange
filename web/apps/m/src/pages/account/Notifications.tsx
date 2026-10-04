@@ -74,7 +74,7 @@ export default function Notifications() {
           title={t("mAccount.notices.markAll")}
           disabled={unread === 0 || marking}
           onClick={() => void markAll()}
-          className="grid size-11 place-items-center text-fg-2 transition-opacity active:opacity-60 disabled:text-fg-3 disabled:opacity-50"
+          className="grid size-tap place-items-center text-fg-2 transition-opacity active:opacity-60 disabled:text-fg-3 disabled:opacity-50"
         >
           {marking ? <Spinner size={18} /> : <CheckCheck size={20} />}
         </button>

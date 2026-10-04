@@ -71,6 +71,9 @@ export function Tabs({
                   "relative isolate inline-flex shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap font-medium outline-none transition-colors duration-[var(--t-fast)]",
                   "focus-visible:ring-1 focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-50",
                   sizes[variant][size],
+                  // 44 px touch targets on touch screens (WCAG 2.5.5); a ring
+                  // around the tab would be cut off by the scrolling list.
+                  "pointer-coarse:min-h-tap pointer-coarse:min-w-tap",
                   !underline && "rounded-full",
                   block && "flex-1",
                   on ? (underline ? "text-fg-1" : "text-brand") : "text-fg-3 hover:text-fg-1",

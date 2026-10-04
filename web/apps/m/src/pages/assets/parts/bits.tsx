@@ -12,7 +12,7 @@ import { useTranslation } from "react-i18next";
 export const PRESS = "transition-transform duration-[var(--t-fast)] ease-out active:scale-[0.98]";
 
 /** Gives the shared ErrorState's retry button a 44 px touch target. */
-export const RETRY = "[&_button]:h-11 [&_button]:px-5";
+export const RETRY = "[&_button]:h-tap [&_button]:px-5";
 
 /** Only the first screen of a list animates in (design §5.3: 20 ms apart, at most 12 rows). */
 export const STAGGERED = 12;
@@ -46,7 +46,7 @@ export function Section({
   return (
     <section id={id} className={cn("rounded-3 bg-bg-1", className)}>
       {head && (
-        <div className="flex min-h-11 items-center justify-between gap-3 px-4 pt-1">
+        <div className="flex min-h-tap items-center justify-between gap-3 px-4 pt-1">
           {title ? <h2 className="text-md font-semibold text-fg-1">{title}</h2> : <span />}
           {extra ? <div className="flex items-center">{extra}</div> : null}
         </div>
@@ -63,7 +63,7 @@ export function TextButton({ className, children, type = "button", ...rest }: Bu
       type={type}
       {...rest}
       className={cn(
-        "inline-flex min-h-11 shrink-0 items-center justify-center px-3 text-sm font-medium text-brand transition-opacity active:opacity-70 disabled:opacity-40",
+        "inline-flex min-h-tap shrink-0 items-center justify-center px-3 text-sm font-medium text-brand transition-opacity active:opacity-70 disabled:opacity-40",
         className,
       )}
     >
@@ -89,7 +89,7 @@ export function CopyIcon({ value, label, className }: { value: string; label?: s
       type="button"
       onClick={() => void copy()}
       aria-label={done ? t("common.copied") : (label ?? t("common.copy"))}
-      className={cn("grid size-11 shrink-0 place-items-center rounded-2 text-fg-3 active:bg-bg-2", done && "text-success", className)}
+      className={cn("grid size-tap shrink-0 place-items-center rounded-2 text-fg-3 active:bg-bg-2", done && "text-success", className)}
     >
       {done ? <Check size={16} className="animate-fade-in" /> : <Copy size={16} />}
       <span aria-live="polite" className="sr-only">

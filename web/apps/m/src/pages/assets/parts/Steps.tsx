@@ -44,7 +44,7 @@ export function StepBlock({
       >
         {state === "done" ? <Check size={14} strokeWidth={3} /> : n}
       </span>
-      <div className="flex min-h-11 items-center justify-between gap-2">
+      <div className="flex min-h-tap items-center justify-between gap-2">
         <h2 className={cn("text-md font-medium", state === "locked" ? "text-fg-3" : "text-fg-1")}>
           <span className="sr-only">{t("mAssets.common.step", { n })} </span>
           {title}

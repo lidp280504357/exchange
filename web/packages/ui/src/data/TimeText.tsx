@@ -9,6 +9,8 @@ export type TimeTextProps = {
   format?: TimeStyle;
   /** "3 分钟前" instead of a clock time; the full time shows on hover. */
   relative?: boolean;
+  /** The full time on hover for an absolute time too, where a narrow place may cut it short. */
+  titled?: boolean;
   className?: string;
 };
 
@@ -26,11 +28,12 @@ function isoOf(value: TimeInput): string | undefined {
  * clock in tables, charts and notices). Relative times follow one shared
  * 30-second ticker, not a timer per instance.
  */
-export function TimeText({ value, format = "datetime", relative, className }: TimeTextProps) {
+export function TimeText({ value, format = "datetime", relative, titled, className }: TimeTextProps) {
   const { locale, timeZone } = useFormatContext();
   const absolute = formatTime(value, relative ? "datetimeSeconds" : format, locale, timeZone);
+  const full = relative || titled ? formatTime(value, "datetimeSeconds", locale, timeZone) : undefined;
   return (
-    <time dateTime={isoOf(value)} title={relative ? absolute : undefined} className={cn("tabular-nums", className)}>
+    <time dateTime={isoOf(value)} title={full} className={cn("tabular-nums", className)}>
       {relative ? <RelativeTime value={value} locale={locale} /> : absolute}
     </time>
   );

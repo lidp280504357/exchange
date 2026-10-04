@@ -9,6 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
+import { EmptyList } from "./EmptyList";
 import { spotAvailable, useSpotBalances } from "./SpotOrderPanel";
 
 export type OrdersTab = "open" | "history" | "fills" | "assets";
@@ -193,7 +194,7 @@ function OpenOrders({ pairs, query, height }: { pairs: PairMap; query: ReturnTyp
       height={height}
       virtual
       stickyHeader
-      empty={<EmptyState compact title={t("pcTrade.noOpenOrders")} />}
+      empty={<EmptyList title={t("pcTrade.noOpenOrders")} hint={t("pcTrade.noOpenOrdersHint")} />}
     />
   );
 }
@@ -244,7 +245,7 @@ function History({ pairs, symbol, height, enabled }: { pairs: PairMap; symbol: s
       onEndReached={() => q.hasNextPage && !q.isFetchingNextPage && void q.fetchNextPage()}
       loadingMore={q.isFetchingNextPage}
       hasMore={q.hasNextPage}
-      empty={<EmptyState compact title={t("pcTrade.noHistory")} />}
+      empty={<EmptyList title={t("pcTrade.noHistory")} hint={t("pcTrade.noHistoryHint")} />}
     />
   );
 }
@@ -283,7 +284,7 @@ function Fills({ pairs, symbol, height, enabled }: { pairs: PairMap; symbol: str
       onEndReached={() => q.hasNextPage && !q.isFetchingNextPage && void q.fetchNextPage()}
       loadingMore={q.isFetchingNextPage}
       hasMore={q.hasNextPage}
-      empty={<EmptyState compact title={t("pcTrade.noFills")} />}
+      empty={<EmptyList title={t("pcTrade.noFills")} hint={t("pcTrade.noFillsHint")} />}
     />
   );
 }
@@ -324,7 +325,17 @@ function Assets({ height }: { height: number }) {
       density="compact"
       height={height}
       stickyHeader
-      empty={<EmptyState compact title={t("pcTrade.noAssets")} action={<Button asChild size="sm"><Link to={routes.deposit}>{t("nav.deposit")}</Link></Button>} />}
+      empty={
+        <EmptyList
+          title={t("pcTrade.noAssets")}
+          hint={t("pcTrade.noAssetsHint")}
+          action={
+            <Button asChild size="sm">
+              <Link to={routes.deposit}>{t("nav.deposit")}</Link>
+            </Button>
+          }
+        />
+      }
     />
   );
 }

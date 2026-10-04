@@ -55,7 +55,7 @@ export function PillBar({ items, value, onValueChange, block, className, "aria-l
             type="button"
             aria-pressed={on}
             onClick={() => onValueChange(it.value)}
-            className={cn("group relative flex h-11 shrink-0 items-center justify-center outline-none", block && "flex-1")}
+            className={cn("group relative flex h-tap shrink-0 items-center justify-center outline-none", block && "flex-1")}
           >
             <span
               className={cn(

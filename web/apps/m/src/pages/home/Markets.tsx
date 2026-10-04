@@ -236,7 +236,7 @@ export default function Markets() {
               prefix={<Search size={18} className="text-fg-3" />}
               suffix={
                 query ? (
-                  <button type="button" aria-label={t("ui.clear")} onClick={() => changeQuery("")} className="grid size-11 place-items-center rounded-2 text-fg-3 active:text-fg-1">
+                  <button type="button" aria-label={t("ui.clear")} onClick={() => changeQuery("")} className="grid size-tap place-items-center rounded-2 text-fg-3 active:text-fg-1">
                     <X size={16} />
                   </button>
                 ) : undefined
@@ -246,7 +246,7 @@ export default function Markets() {
 
           <div className="sticky top-[calc(44px+env(safe-area-inset-top))] z-[var(--z-sticky)] mt-1 flex items-center border-b border-line-1 bg-bg-0/95 backdrop-blur">
             {loading ? (
-              <div className="flex h-11 min-w-0 flex-1 items-center gap-2 overflow-hidden px-4">
+              <div className="flex h-tap min-w-0 flex-1 items-center gap-2 overflow-hidden px-4">
                 {[0, 1, 2, 3].map((i) => (
                   <Skeleton key={i} className="h-8 w-14 shrink-0 rounded-full" />
                 ))}
@@ -259,7 +259,7 @@ export default function Markets() {
               aria-haspopup="dialog"
               aria-label={t("mMarkets.markets.sort")}
               onClick={() => setSortOpen(true)}
-              className={cn("grid h-11 w-12 shrink-0 place-items-center border-l border-line-1 transition-colors", sort ? "text-brand" : "text-fg-2 active:text-fg-1")}
+              className={cn("grid h-tap w-12 shrink-0 place-items-center border-l border-line-1 transition-colors", sort ? "text-brand" : "text-fg-2 active:text-fg-1")}
             >
               <ArrowDownUp size={18} />
             </button>
@@ -301,7 +301,7 @@ const MarketLine = memo(function MarketLine({ row, ticker, fav, onStar, onPress 
         active={fav}
         onToggle={() => onStar(row.symbol)}
         label={fav ? t("mMarkets.favoriteRemove") : t("mMarkets.favoriteAdd")}
-        className="h-16 w-11"
+        className="h-16 w-tap"
       />
       <Link
         to={tradePath(row)}
@@ -355,7 +355,7 @@ function SortSheet({ open, onOpenChange, current, onPick }: { open: boolean; onO
               aria-checked={on}
               onClick={() => onPick(o.sort)}
               className={cn(
-                "flex h-12 items-center justify-between gap-3 rounded-2 px-3 text-left text-base transition-colors active:bg-bg-2",
+                "flex h-tap items-center justify-between gap-3 rounded-2 px-3 text-left text-base transition-colors active:bg-bg-2",
                 on ? "font-medium text-brand" : "text-fg-1",
               )}
             >

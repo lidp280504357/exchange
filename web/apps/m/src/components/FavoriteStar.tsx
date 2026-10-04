@@ -41,8 +41,8 @@ export function FavoriteStar({ active, onToggle, label, size = 18, disabled, box
         onToggle();
       }}
       className={cn(
-        "relative grid min-h-11 min-w-11 shrink-0 place-items-center transition-[color,transform,border-color] duration-[var(--t-fast)] active:scale-90 disabled:opacity-50",
-        boxed && "size-11 rounded-2 border border-line-2",
+        "relative grid min-h-tap min-w-tap shrink-0 place-items-center transition-[color,transform,border-color] duration-[var(--t-fast)] active:scale-90 disabled:opacity-50",
+        boxed && "size-tap rounded-2 border border-line-2",
         active ? "text-brand" : "text-fg-3",
         className,
       )}

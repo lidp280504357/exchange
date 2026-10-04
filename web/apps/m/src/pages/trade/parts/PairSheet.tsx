@@ -81,7 +81,7 @@ export function PairSheet({
                 aria-pressed={fav}
                 aria-label={fav ? t("common.unfavorite") : t("common.favorite")}
                 onClick={() => void favorites.toggle(r.symbol).catch((e: unknown) => toast.error(errorText(e)))}
-                className={cn("grid size-11 shrink-0 place-items-center", fav ? "text-brand" : "text-fg-3")}
+                className={cn("grid size-tap shrink-0 place-items-center", fav ? "text-brand" : "text-fg-3")}
               >
                 <Star size={16} className={cn(fav && "fill-current")} />
               </button>

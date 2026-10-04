@@ -8,14 +8,16 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router";
 import { ordersTabOf } from "../../account/me/logic";
+import { EmptyList } from "./EmptyList";
 
 /**
  * SpotOrders: the caller's orders of this pair under the terminal as cards
  * (design §7.2): open orders with cancel, history and fills. The pushes
  * keep them current. ?orders=open|history|fills (the "me" shortcuts)
- * opens a tab and scrolls the orders into view.
+ * opens a tab and scrolls the orders into view. An empty list offers the
+ * order sheet (onTrade).
  */
-export function SpotOrders({ pair }: { pair: Pair }) {
+export function SpotOrders({ pair, onTrade }: { pair: Pair; onTrade?: () => void }) {
   const { t } = useTranslation();
   const signedIn = useSession(selectSignedIn);
   const [params] = useSearchParams();
@@ -52,9 +54,9 @@ export function SpotOrders({ pair }: { pair: Pair }) {
           { value: "fills", label: t("mTrade.fills") },
         ]}
       />
-      {tab === "open" && <OpenList pair={pair} query={open} />}
-      {tab === "history" && <HistoryList pair={pair} />}
-      {tab === "fills" && <FillList pair={pair} />}
+      {tab === "open" && <OpenList pair={pair} query={open} onTrade={onTrade} />}
+      {tab === "history" && <HistoryList pair={pair} onTrade={onTrade} />}
+      {tab === "fills" && <FillList pair={pair} onTrade={onTrade} />}
     </div>
   );
 }
@@ -104,14 +106,14 @@ function OrderCard({ o, pair, action }: { o: Order; pair: Pair; action?: ReactNo
   );
 }
 
-function OpenList({ pair, query }: { pair: Pair; query: ReturnType<typeof useOpenOrders> }) {
+function OpenList({ pair, query, onTrade }: { pair: Pair; query: ReturnType<typeof useOpenOrders>; onTrade?: () => void }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
   if (query.isPending) return <Loading />;
   if (query.error) return <ErrorState compact message={errorText(query.error)} onRetry={() => void query.refetch()} />;
   const items = query.data?.items ?? [];
-  if (items.length === 0) return <EmptyState compact title={t("mTrade.noOpenOrders")} />;
+  if (items.length === 0) return <EmptyList title={t("mTrade.noOpenOrders")} hint={t("mTrade.noOpenOrdersHint")} onTrade={onTrade} />;
   const cancel = async (o: Order) => {
     setBusy(o.order_id);
     try {
@@ -140,13 +142,13 @@ function OpenList({ pair, query }: { pair: Pair; query: ReturnType<typeof useOpe
   );
 }
 
-function HistoryList({ pair }: { pair: Pair }) {
+function HistoryList({ pair, onTrade }: { pair: Pair; onTrade?: () => void }) {
   const { t } = useTranslation();
   const q = useOrderHistory(pair.symbol);
   if (q.isPending) return <Loading />;
   if (q.error) return <ErrorState compact message={errorText(q.error)} onRetry={() => void q.refetch()} />;
   const items = (q.data?.pages ?? []).flatMap((p) => p.items).filter((o) => !isActive(o.status));
-  if (items.length === 0) return <EmptyState compact title={t("mTrade.noHistory")} />;
+  if (items.length === 0) return <EmptyList title={t("mTrade.noHistory")} hint={t("mTrade.noHistoryHint")} onTrade={onTrade} />;
   return (
     <div className="flex flex-col gap-2 p-4">
       {items.map((o) => (
@@ -161,13 +163,13 @@ function HistoryList({ pair }: { pair: Pair }) {
   );
 }
 
-function FillList({ pair }: { pair: Pair }) {
+function FillList({ pair, onTrade }: { pair: Pair; onTrade?: () => void }) {
   const { t } = useTranslation();
   const q = useFills(pair.symbol);
   if (q.isPending) return <Loading />;
   if (q.error) return <ErrorState compact message={errorText(q.error)} onRetry={() => void q.refetch()} />;
   const items: Fill[] = (q.data?.pages ?? []).flatMap((p) => p.items);
-  if (items.length === 0) return <EmptyState compact title={t("mTrade.noFills")} />;
+  if (items.length === 0) return <EmptyList title={t("mTrade.noFills")} hint={t("mTrade.noFillsHint")} onTrade={onTrade} />;
   return (
     <div className="flex flex-col gap-2 p-4">
       {items.map((f) => (

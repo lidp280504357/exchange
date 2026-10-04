@@ -18,19 +18,24 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   asChild?: boolean;
 };
 
+// The rise, fall and danger fills carry black text: white reads at 2.1,
+// 3.5 and 3.8:1 on them, black at 9.9, 6.0 and 5.6:1.
 const variants: Record<ButtonVariant, string> = {
   primary: "bg-brand text-brand-fg hover:brightness-110",
   secondary: "bg-bg-3 text-fg-1 hover:bg-line-2",
   ghost: "bg-transparent text-fg-2 hover:bg-bg-2 hover:text-fg-1",
-  danger: "bg-danger text-white hover:brightness-110",
-  buy: "bg-up text-white hover:brightness-110",
-  sell: "bg-down text-white hover:brightness-110",
+  danger: "bg-danger text-black hover:brightness-110",
+  buy: "bg-up text-black hover:brightness-110",
+  sell: "bg-down text-black hover:brightness-110",
 };
 
+// On touch screens the medium and large buttons are 44 px touch targets
+// (the 14 px root makes h-12 42 px); a small one takes hit-area where it
+// needs one.
 const sizes: Record<ButtonSize, string> = {
   sm: "h-8 px-3 text-sm gap-1.5 rounded-1",
-  md: "h-10 px-4 text-base gap-2 rounded-2",
-  lg: "h-12 px-6 text-md gap-2 rounded-2",
+  md: "h-10 px-4 text-base gap-2 rounded-2 pointer-coarse:min-h-tap",
+  lg: "h-12 px-6 text-md gap-2 rounded-2 pointer-coarse:min-h-tap",
 };
 
 /**

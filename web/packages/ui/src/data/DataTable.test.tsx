@@ -3,6 +3,7 @@ import { ApiError } from "@exchange/core";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { describe, expect, it, vi } from "vitest";
+import { titleCutCells } from "./cutTitles";
 import { DataTable, sortDecimal } from "./DataTable";
 
 type Row = { id: string; name: string; amount: string };
@@ -78,5 +79,42 @@ describe("DataTable", () => {
 
     rerender(<DataTable columns={columns} data={[]} getRowId={(r: Row) => r.id} empty={<span>No orders yet</span>} />);
     expect(screen.getByText("No orders yet")).toBeTruthy();
+  });
+
+  it("titles the cells that cut their text short, and takes the title back when they no longer do", () => {
+    const labelled: ColumnDef<Row, any>[] = [
+      ...columns,
+      {
+        id: "label",
+        header: "Label",
+        cell: ({ row }) => (
+          <span className="flex">
+            <span className="truncate">{row.original.name} adjustment</span>
+          </span>
+        ),
+      },
+    ];
+    const { container } = render(<DataTable columns={labelled} data={data} getRowId={(r) => r.id} />);
+    const table = container.querySelector("table");
+    if (!table) throw new Error("no table");
+    // happy-dom lays nothing out: give the elements their widths.
+    const widths = (el: Element | null | undefined, scroll: number, client: number) => {
+      if (!el) throw new Error("no element");
+      Object.defineProperty(el, "scrollWidth", { configurable: true, get: () => scroll });
+      Object.defineProperty(el, "clientWidth", { configurable: true, get: () => client });
+    };
+    const [name, amount, label] = Array.from(rowOf("ord-a")?.querySelectorAll("td") ?? []);
+    widths(name, 120, 80);
+    widths(label?.querySelector(".truncate"), 90, 60);
+    titleCutCells(table);
+    expect(name?.getAttribute("title")).toBe("Alpha");
+    expect(label?.getAttribute("title")).toBe("Alpha adjustment");
+    expect(amount?.hasAttribute("title")).toBe(false);
+    expect(rowOf("ord-b")?.querySelector("td[title]")).toBeNull();
+
+    widths(name, 80, 80);
+    titleCutCells(table);
+    expect(name?.hasAttribute("title")).toBe(false);
+    expect(label?.getAttribute("title")).toBe("Alpha adjustment");
   });
 });

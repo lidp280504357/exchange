@@ -7,6 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router";
+import { ORDER_FORM_ID } from "./EmptyList";
 
 type Balance = { account_type: string; asset: string; available: string };
 
@@ -113,7 +114,7 @@ export function SpotOrderPanel({ pair, side, onSideChange, fill, onPlaced, class
   };
 
   return (
-    <div className={className}>
+    <div id={ORDER_FORM_ID} className={className}>
       <OrderForm
         side={side}
         onSideChange={onSideChange}

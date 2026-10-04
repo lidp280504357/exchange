@@ -36,13 +36,17 @@
   }
 }
 
+/* Delays too: a staggered entrance (a table's rows, 20 ms apart) would
+   otherwise still wait its turn and then jump in. */
 @media (prefers-reduced-motion: reduce) {
   *,
   ::before,
   ::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
     scroll-behavior: auto !important;
   }
 }

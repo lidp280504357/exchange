@@ -171,7 +171,7 @@ function AddressPanel({ asset, network, decimals }: { asset: string; network: Wa
           href={explorer}
           target="_blank"
           rel="noreferrer noopener"
-          className="-my-1 flex min-h-11 items-center justify-center gap-1.5 text-sm text-fg-2 active:text-brand"
+          className="-my-1 flex min-h-tap items-center justify-center gap-1.5 text-sm text-fg-2 active:text-brand"
         >
           <ExternalLink size={14} />
           {t("mAssets.deposit.viewAddress")}

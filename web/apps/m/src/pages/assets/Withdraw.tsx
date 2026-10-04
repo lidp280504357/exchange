@@ -105,7 +105,7 @@ export default function Withdraw() {
           <Notice tone="danger" role="alert">
             <span className="flex flex-wrap items-center justify-between gap-2">
               {errorText(balances.error)}
-              <Button variant="secondary" className="h-11" onClick={() => void balances.refetch()}>
+              <Button variant="secondary" className="h-tap" onClick={() => void balances.refetch()}>
                 {t("common.retry")}
               </Button>
             </span>

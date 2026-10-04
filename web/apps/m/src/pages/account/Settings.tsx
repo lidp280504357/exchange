@@ -131,7 +131,7 @@ function TimeZoneRow() {
           setOpened(true);
           setOpen(true);
         }}
-        className="flex h-12 w-full items-center gap-3 rounded-2 border border-line-1 bg-bg-2 px-4 text-left transition-colors active:bg-bg-3"
+        className="flex h-tap w-full items-center gap-3 rounded-2 border border-line-1 bg-bg-2 px-4 text-left transition-colors active:bg-bg-3"
       >
         <span className="min-w-0 flex-1 truncate text-md text-fg-1">{zone ? zoneLabel(zone) : follow}</span>
         <span className="shrink-0 text-xs text-fg-3 tabular-nums">{zoneOffset(zone || browser)}</span>
@@ -170,7 +170,8 @@ const CANDLES: [number, number, number, number][] = [
 
 const fill: Record<Tone, string> = { up: "fill-up", down: "fill-down" };
 const stroke: Record<Tone, string> = { up: "stroke-up", down: "stroke-down" };
-const text: Record<Tone, string> = { up: "text-up", down: "text-down" };
+// The preview sits on the chosen card's brand tint: soft-fg shades read there.
+const text: Record<Tone, string> = { up: "text-up-soft-fg", down: "text-down-soft-fg" };
 
 /** CandlePreview draws an option's rises and falls in the colours it would use (updown.ts). */
 function CandlePreview({ option, current, name }: { option: UpDown; current: UpDown; name: string }) {

@@ -38,7 +38,7 @@ export function NewsStrip({ index }: { index: number }) {
     return () => clearInterval(id);
   }, [reduced, held, list.length]);
 
-  if (q.isPending) return <Skeleton className="h-12 w-full rounded-3" />;
+  if (q.isPending) return <Skeleton className="h-tap w-full rounded-3" />;
   if (q.isError || list.length === 0) return null;
   const onScroll = () => {
     const el = scroller.current;
@@ -71,7 +71,7 @@ export function NewsStrip({ index }: { index: number }) {
               key={a.slug}
               to={routes.announcement(a.slug)}
               aria-label={fresh ? `${t("mAccount.me.news.new")} ${a.title}` : undefined}
-              className="flex h-12 w-full shrink-0 snap-start items-center gap-2 pl-1 pr-2"
+              className="flex h-tap w-full shrink-0 snap-start items-center gap-2 pl-1 pr-2"
             >
               {fresh && <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-danger" />}
               <span className="min-w-0 flex-1 truncate text-sm text-fg-1">{a.title}</span>
