@@ -33,8 +33,8 @@ func TestLegalAndHomeSections(t *testing.T) {
 			{Locale: domain.LocaleZH, Title: "交易，从这里开始", Summary: "副标题", Body: "[立即注册](/register)"},
 		}},
 	} {
-		a.ID, a.Status, a.PublishAt, a.Version, a.UpdatedBy, a.CreatedAt, a.UpdatedAt =
-			uuid.Must(uuid.NewV7()).String(), domain.ArticlePublished, now.Add(-time.Minute), 1, "ops@example.com", now, now
+		a.ID, a.Modes, a.Status, a.PublishAt, a.Version, a.UpdatedBy, a.CreatedAt, a.UpdatedAt =
+			uuid.Must(uuid.NewV7()).String(), domain.ModeBoth, domain.ArticlePublished, now.Add(-time.Minute), 1, "ops@example.com", now, now
 		if err := a.Validate(); err != nil {
 			t.Fatal(err)
 		}
@@ -43,7 +43,7 @@ func TestLegalAndHomeSections(t *testing.T) {
 		}
 	}
 
-	content := &application.Content{Store: store, Now: func() time.Time { return now }}
+	content := &application.Content{Store: store, Mode: &application.Mode{Profile: liveMode{}, Now: time.Now}, Now: func() time.Time { return now }}
 	r := httpx.NewRouter(httpx.RouterOptions{Logger: slog.New(slog.DiscardHandler)})
 	(&httpapi.Content{Svc: content, Broadcasts: &application.Broadcasts{Store: store, Now: time.Now}}).Routes(r)
 	get := func(path string) (int, map[string]any) {
