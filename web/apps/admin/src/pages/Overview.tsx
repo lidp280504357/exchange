@@ -1,5 +1,6 @@
-import { errorText, formatAmount } from "@exchange/core";
+import { errorText, formatAmount, useSettings } from "@exchange/core";
 import { adminApi, adminData, can, type Admin } from "@exchange/core/api/admin";
+import { compactParts } from "@exchange/core/markets/stats";
 import { Badge, cn, CountUp, ErrorState, Segmented, Skeleton, TrendChart } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowDownToLine, ArrowUpFromLine, CalendarClock, ChevronRight, Stamp, UserCheck } from "lucide-react";
@@ -23,6 +24,7 @@ import { CustodySummary } from "./system/status";
  */
 export default function Overview({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
+  const locale = useSettings((s) => s.locale);
   const [days, setDays] = useState("7");
   const q = useQuery({
     queryKey: ["admin", "dashboard", days],
@@ -31,12 +33,17 @@ export default function Overview({ admin }: { admin: Admin }) {
   });
   if (q.isError) return <ErrorState message={errorText(q.error)} onRetry={() => void q.refetch()} />;
   const d = q.data;
-  // USDT first, the other quote assets on a line of their own.
+  // USDT first, in 万 / M once large (a card is 112 px wide at 1024 px),
+  // the exact amounts on hover; the other quote assets on a line of their
+  // own. The figure's box is positioned: CountUp's visually hidden copy is
+  // clipped with it instead of widening the page.
   const turnovers = [...(d?.trading.turnover_24h ?? [])].sort((a, b) => (a.quote_asset === "USDT" ? -1 : b.quote_asset === "USDT" ? 1 : 0));
-  const turnover = turnovers.length ? (
-    <span className="flex flex-col">
-      <span>
-        <CountUp value={turnovers[0]!.amount} decimals={2} /> <span className="text-sm font-normal text-fg-3">{turnovers[0]!.quote_asset}</span>
+  const head = turnovers.length ? compactParts(turnovers[0]!.amount, locale, 1) : undefined;
+  const turnover = head ? (
+    <span className="flex flex-col" title={turnovers.map((x, i) => `${formatAmount(x.amount, i ? 6 : 2)} ${x.quote_asset}`).join("\n")}>
+      <span className="flex flex-wrap items-baseline gap-x-1">
+        <CountUp value={head.suffix ? head.value : turnovers[0]!.amount} decimals={head.suffix ? 1 : 2} suffix={head.suffix} />
+        <span className="text-sm font-normal text-fg-3">{turnovers[0]!.quote_asset}</span>
       </span>
       {turnovers.slice(1).map((x) => (
         <span key={x.quote_asset} className="text-xs font-normal text-fg-3">
@@ -72,7 +79,9 @@ export default function Overview({ admin }: { admin: Admin }) {
               {q.isPending ? (
                 <Skeleton className="mt-2 h-6 w-24" />
               ) : (
-                <div className="mt-1.5 truncate font-mono text-xl font-semibold tabular-nums text-fg-1">{s.value ?? "—"}</div>
+                <div className="relative mt-1.5 truncate font-mono text-xl font-semibold tabular-nums text-fg-1" title={typeof s.value === "string" ? s.value : undefined}>
+                  {s.value ?? "—"}
+                </div>
               )}
             </>
           );
@@ -80,7 +89,7 @@ export default function Overview({ admin }: { admin: Admin }) {
             <div
               key={s.key}
               style={stagger(i)}
-              className={cn("card stagger p-4", s.to && "transition-[transform,border-color] duration-[var(--t-fast)] hover:-translate-y-0.5 hover:border-brand")}
+              className={cn("card stagger min-w-0 p-4", s.to && "transition-[transform,border-color] duration-[var(--t-fast)] hover:-translate-y-0.5 hover:border-brand")}
             >
               {s.to ? (
                 <Link to={s.to} className="block">
