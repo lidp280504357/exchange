@@ -434,6 +434,13 @@ type StepUps interface {
 	Consume(ctx context.Context, userID, token string) (StepUp, error)
 }
 
+// Securities reads a user's security context without a step-up and
+// without a device (auth-service): the limits in effect before a
+// withdrawal.
+type Securities interface {
+	Security(ctx context.Context, userID string) (StepUp, error)
+}
+
 // Profiles reads accounts (user-service).
 type Profiles interface {
 	// Created returns when the account was created.

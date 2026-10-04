@@ -22,6 +22,7 @@ const (
 	AuthService_GetContacts_FullMethodName           = "/exchange.auth.v1.AuthService/GetContacts"
 	AuthService_ConsumeStepUp_FullMethodName         = "/exchange.auth.v1.AuthService/ConsumeStepUp"
 	AuthService_FindUser_FullMethodName              = "/exchange.auth.v1.AuthService/FindUser"
+	AuthService_GetSecurityContext_FullMethodName    = "/exchange.auth.v1.AuthService/GetSecurityContext"
 	AuthService_GetSecurity_FullMethodName           = "/exchange.auth.v1.AuthService/GetSecurity"
 	AuthService_ListLoginHistory_FullMethodName      = "/exchange.auth.v1.AuthService/ListLoginHistory"
 	AuthService_RevokeSessions_FullMethodName        = "/exchange.auth.v1.AuthService/RevokeSessions"
@@ -49,6 +50,10 @@ type AuthServiceClient interface {
 	// FindUser returns the user an email address or phone number (E.164)
 	// belongs to, for the admin console; unknown ones fail with NOT_FOUND.
 	FindUser(ctx context.Context, in *FindUserRequest, opts ...grpc.CallOption) (*FindUserResponse, error)
+	// GetSecurityContext returns a user's security context without a
+	// step-up and without a device (the wallet's limits in effect, shown
+	// before a withdrawal).
+	GetSecurityContext(ctx context.Context, in *GetSecurityContextRequest, opts ...grpc.CallOption) (*GetSecurityContextResponse, error)
 	// GetSecurity returns a user's identities, authenticator, password and
 	// lock, live sessions (addresses masked) and devices.
 	GetSecurity(ctx context.Context, in *GetSecurityRequest, opts ...grpc.CallOption) (*GetSecurityResponse, error)
@@ -105,6 +110,16 @@ func (c *authServiceClient) FindUser(ctx context.Context, in *FindUserRequest, o
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(FindUserResponse)
 	err := c.cc.Invoke(ctx, AuthService_FindUser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) GetSecurityContext(ctx context.Context, in *GetSecurityContextRequest, opts ...grpc.CallOption) (*GetSecurityContextResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSecurityContextResponse)
+	err := c.cc.Invoke(ctx, AuthService_GetSecurityContext_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -199,6 +214,10 @@ type AuthServiceServer interface {
 	// FindUser returns the user an email address or phone number (E.164)
 	// belongs to, for the admin console; unknown ones fail with NOT_FOUND.
 	FindUser(context.Context, *FindUserRequest) (*FindUserResponse, error)
+	// GetSecurityContext returns a user's security context without a
+	// step-up and without a device (the wallet's limits in effect, shown
+	// before a withdrawal).
+	GetSecurityContext(context.Context, *GetSecurityContextRequest) (*GetSecurityContextResponse, error)
 	// GetSecurity returns a user's identities, authenticator, password and
 	// lock, live sessions (addresses masked) and devices.
 	GetSecurity(context.Context, *GetSecurityRequest) (*GetSecurityResponse, error)
@@ -239,6 +258,9 @@ func (UnimplementedAuthServiceServer) ConsumeStepUp(context.Context, *ConsumeSte
 }
 func (UnimplementedAuthServiceServer) FindUser(context.Context, *FindUserRequest) (*FindUserResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method FindUser not implemented")
+}
+func (UnimplementedAuthServiceServer) GetSecurityContext(context.Context, *GetSecurityContextRequest) (*GetSecurityContextResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetSecurityContext not implemented")
 }
 func (UnimplementedAuthServiceServer) GetSecurity(context.Context, *GetSecurityRequest) (*GetSecurityResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetSecurity not implemented")
@@ -332,6 +354,24 @@ func _AuthService_FindUser_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AuthServiceServer).FindUser(ctx, req.(*FindUserRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_GetSecurityContext_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSecurityContextRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).GetSecurityContext(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_GetSecurityContext_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).GetSecurityContext(ctx, req.(*GetSecurityContextRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -480,6 +520,10 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "FindUser",
 			Handler:    _AuthService_FindUser_Handler,
+		},
+		{
+			MethodName: "GetSecurityContext",
+			Handler:    _AuthService_GetSecurityContext_Handler,
 		},
 		{
 			MethodName: "GetSecurity",

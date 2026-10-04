@@ -74,8 +74,19 @@ func TestAuthenticatorApps(t *testing.T) {
 		t.Fatal(err)
 	}
 	step, sec, err := a.acc.ConsumeStepUp(ctx, tok.UserID, su)
-	if err != nil || step.SessionID != tok.SessionID || step.Channel != domain.ChannelTOTP || !sec.TOTPEnabled || sec.Identities != 1 {
+	if err != nil || step.SessionID != tok.SessionID || step.Channel != domain.ChannelTOTP || !sec.TOTPEnabled || sec.Identities != 1 ||
+		!sec.TOTPActivatedAt.Equal(a.now.Add(-domain.TOTPPeriod)) {
 		t.Fatalf("consume: %+v %+v %v", step, sec, err)
+	}
+	// The same context without a step-up, for the wallet's limits in
+	// effect (variant B of 2026-10-04: they wait a day after the app's
+	// activation).
+	if got, err := a.acc.SecurityContext(ctx, tok.UserID); err != nil || !got.TOTPEnabled || !got.TOTPActivatedAt.Equal(sec.TOTPActivatedAt) ||
+		got.Identities != 1 || got.DeviceID != "" {
+		t.Fatalf("the context without a step-up: %+v %v", got, err)
+	}
+	if _, err := a.acc.SecurityContext(ctx, "not-a-user"); err == nil {
+		t.Fatal("a context of nobody")
 	}
 	_, _, err = a.acc.SetupTOTP(ctx, tok.UserID, a.totpStepUp(t, tok, secret))
 	wantCode(t, err, "AUTH_TOTP_ENABLED")

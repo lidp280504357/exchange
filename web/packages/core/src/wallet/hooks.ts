@@ -23,6 +23,7 @@ export const walletKeys = {
   withdrawals: qk.withdrawals,
   addressBook: ["wallet", "withdraw-addresses"] as const,
   addressCheck: (network: string, asset: string, address: string) => ["wallet", "address-check", network, asset, address] as const,
+  limits: qk.withdrawLimits,
 };
 
 /**
@@ -51,6 +52,22 @@ export function useWalletNetworks(asset = "") {
     queryKey: walletKeys.networks(asset),
     queryFn: () => unwrap(walletApi.GET("/v1/wallet/networks", { params: { query: { asset: asset || undefined } } })),
     select: (r) => r.networks,
+    enabled: signedIn,
+    staleTime: 60_000,
+    retry: retryServerErrors,
+  });
+}
+
+/**
+ * useWithdrawLimits reads the caller's withdrawal limits in effect, their
+ * use and when an authenticator app still settling raises them: the pages
+ * show the numbers and the hours from here, not from their copy.
+ */
+export function useWithdrawLimits() {
+  const signedIn = useSession(selectSignedIn);
+  return useQuery({
+    queryKey: walletKeys.limits,
+    queryFn: () => unwrap(walletApi.GET("/v1/wallet/limits")),
     enabled: signedIn,
     staleTime: 60_000,
     retry: retryServerErrors,

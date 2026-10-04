@@ -4,6 +4,7 @@ import type { components } from "../api/gen/auth";
 import { channelOf, kindOfMask, type IdentityKind } from "../auth/identity";
 import type { OtpChannel } from "../auth/otp";
 import { stepUpHeaders, totpKey } from "../auth/stepup";
+import { qk } from "../query/keys";
 import { deviceId, selectSignedIn, useSession } from "../session/store";
 import type { Notice } from "./notifications";
 
@@ -145,9 +146,9 @@ export async function disableTotp(stepUpToken: string): Promise<void> {
   await unwrap(authApi.DELETE("/v1/auth/totp", { params: { header: stepUpHeaders(stepUpToken) } }));
 }
 
-/** refreshTotp refetches the binding state after a change. */
-export function refreshTotp(qc: QueryClient): Promise<void> {
-  return qc.invalidateQueries({ queryKey: totpKey });
+/** refreshTotp refetches the binding state after a change, and the withdrawal limits it moves. */
+export async function refreshTotp(qc: QueryClient): Promise<void> {
+  await Promise.all([qc.invalidateQueries({ queryKey: totpKey }), qc.invalidateQueries({ queryKey: qk.withdrawLimits })]);
 }
 
 /** groupSecret splits a base32 secret in fours for reading aloud and typing ("JBSW Y3DP ..."). */

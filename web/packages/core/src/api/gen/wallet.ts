@@ -25,6 +25,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/wallet/limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller's withdrawal limits in effect
+         * @description The daily and monthly limits in USDT the next withdrawal is checked
+         *     against, what is used of them (today and this month, UTC), and the
+         *     full limits: both identities (email and phone) and an authenticator
+         *     app give them, the app only once it has been bound for
+         *     totp_settling_hours (24); until then full_limits_at says when.
+         *     The pages read the numbers and the hours from here.
+         */
+        get: operations["getWithdrawLimits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/wallet/withdraw-addresses/validate": {
         parameters: {
             query?: never;
@@ -222,6 +247,37 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        WithdrawLimits: {
+            /**
+             * @description USDT a day, in effect now.
+             * @example 400
+             */
+            daily_limit: string;
+            /** @example 4000 */
+            monthly_limit: string;
+            used_today: string;
+            used_this_month: string;
+            /**
+             * @description USDT a day with both identities and a settled authenticator app.
+             * @example 2000
+             */
+            full_daily_limit: string;
+            /** @example 20000 */
+            full_monthly_limit: string;
+            /** @description Verified identities (email, phone). */
+            identities: number;
+            totp_enabled: boolean;
+            /**
+             * @description How long a newly bound authenticator app waits before it raises the limits.
+             * @example 24
+             */
+            totp_settling_hours: number;
+            /**
+             * Format: date-time
+             * @description When the full limits come while an authenticator app bound with both identities settles; null otherwise.
+             */
+            full_limits_at: string | null;
+        };
         WalletNetwork: {
             asset: string;
             /** @example ETH-SEPOLIA */
@@ -440,6 +496,27 @@ export interface operations {
                     "application/json": {
                         networks: components["schemas"]["WalletNetwork"][];
                     };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getWithdrawLimits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The limits. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WithdrawLimits"];
                 };
             };
             default: components["responses"]["Error"];

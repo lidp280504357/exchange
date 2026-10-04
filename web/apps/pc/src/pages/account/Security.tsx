@@ -1,10 +1,12 @@
-import { enumLabel, errorText, routes, useSettings, useTotpStatus } from "@exchange/core";
+import { enumLabel, errorText, formatDecimal, formatTime, routes, timeZoneOf, useSettings, useTotpStatus } from "@exchange/core";
 import { regionName } from "@exchange/core/auth/register";
 import { maskCode, useProfile } from "@exchange/core/user/profile";
 import {
   disableTotp, refreshTotp, securitySummary, setupTotp, useBoundIdentities, type SecurityFactors, type SecurityLevel, type TotpSetup,
 } from "@exchange/core/user/security";
 import { useSessions } from "@exchange/core/user/sessions";
+import { useWithdrawLimits } from "@exchange/core/wallet/hooks";
+import type { WithdrawLimits } from "@exchange/core/wallet/networks";
 import { Badge, Button, CopyButton, Dialog, IconButton, Progress, Skeleton, TimeText, cn, toast } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -41,6 +43,7 @@ export default function Security() {
   const stepUp = useStepUp();
   const profile = useProfile();
   const totp = useTotpStatus();
+  const limits = useWithdrawLimits();
   const ids = useBoundIdentities();
   const sessions = useSessions();
   const [open, setOpen] = useState<Open>(null);
@@ -105,7 +108,12 @@ export default function Security() {
             index={0}
             icon={<ShieldEllipsis size={20} />}
             title={t("pcAccount.security.totp.title")}
-            desc={t("pcAccount.security.totp.desc")}
+            desc={
+              <>
+                {t("pcAccount.security.totp.desc")}
+                <TotpLimitsHint limits={limits.data} />
+              </>
+            }
             loading={totp.isPending}
             error={totp.error}
             onRetry={() => void totp.refetch()}
@@ -366,4 +374,30 @@ function LinkButton({ to, children }: { to: string; children: ReactNode }) {
       </Link>
     </Button>
   );
+}
+
+/**
+ * TotpLimitsHint says how an authenticator app raises the withdrawal limits: when it will, while one bound
+ * within the settling time waits, or after how long one would. The numbers and the hours come from GET
+ * /v1/wallet/limits, never from the copy.
+ */
+function TotpLimitsHint({ limits }: { limits?: WithdrawLimits }) {
+  const { t } = useTranslation();
+  const locale = useSettings((s) => s.locale);
+  const zone = useSettings((s) => timeZoneOf(s));
+  if (!limits) return null;
+  const params = {
+    hours: limits.totp_settling_hours,
+    daily: formatDecimal(limits.full_daily_limit, { decimals: 0 }),
+    monthly: formatDecimal(limits.full_monthly_limit, { decimals: 0 }),
+  };
+  if (limits.full_limits_at) {
+    return (
+      <span className="mt-1 block">
+        {t("pcAccount.security.totp.limitsSoon", { ...params, time: formatTime(limits.full_limits_at, "datetime", locale, zone) })}
+      </span>
+    );
+  }
+  if (!limits.totp_enabled) return <span className="mt-1 block">{t("pcAccount.security.totp.limitsAfterBind", params)}</span>;
+  return null;
 }

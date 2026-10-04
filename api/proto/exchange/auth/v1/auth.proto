@@ -18,6 +18,10 @@ service AuthService {
   // FindUser returns the user an email address or phone number (E.164)
   // belongs to, for the admin console; unknown ones fail with NOT_FOUND.
   rpc FindUser(FindUserRequest) returns (FindUserResponse);
+  // GetSecurityContext returns a user's security context without a
+  // step-up and without a device (the wallet's limits in effect, shown
+  // before a withdrawal).
+  rpc GetSecurityContext(GetSecurityContextRequest) returns (GetSecurityContextResponse);
 
   // The admin console's view of and actions on an account's security
   // (design 2026-10-02 §4.1); the console checks the administrator's role
@@ -246,6 +250,14 @@ message SecurityContext {
   // is. The wallet's full limits wait a day after it (variant B of
   // 2026-10-04).
   google.protobuf.Timestamp totp_activated_at = 8;
+}
+
+message GetSecurityContextRequest {
+  string user_id = 1;
+}
+
+message GetSecurityContextResponse {
+  SecurityContext security = 1;
 }
 
 message FindUserRequest {

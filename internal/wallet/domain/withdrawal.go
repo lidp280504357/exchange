@@ -518,12 +518,18 @@ const TOTPSettling = 24 * time.Hour
 // a day and 20,000 a month, anyone else 20% of that. An app whose
 // activation is not known (activated zero) counts.
 func LimitsFor(identities int, totp bool, activated, now time.Time) Limits {
-	full := Limits{Daily: decimal.NewFromInt(2000), Monthly: decimal.NewFromInt(20000)}
+	full := FullLimits()
 	if identities >= 2 && totp && FullLimitsAt(identities, totp, activated, now).IsZero() {
 		return full
 	}
 	share := decimal.RequireFromString("0.2")
 	return Limits{Daily: full.Daily.Mul(share), Monthly: full.Monthly.Mul(share)}
+}
+
+// FullLimits are the limits with both identities and a settled
+// authenticator app.
+func FullLimits() Limits {
+	return Limits{Daily: decimal.NewFromInt(2000), Monthly: decimal.NewFromInt(20000)}
 }
 
 // FullLimitsAt is when a user with both identities whose authenticator app

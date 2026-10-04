@@ -11,6 +11,7 @@ export type DepositAddress = components["schemas"]["DepositAddress"];
 export type Deposit = components["schemas"]["Deposit"];
 export type Withdrawal = components["schemas"]["Withdrawal"];
 export type WithdrawAddress = components["schemas"]["WithdrawAddress"];
+export type WithdrawLimits = components["schemas"]["WithdrawLimits"];
 
 export type Purpose = "deposit" | "withdraw";
 

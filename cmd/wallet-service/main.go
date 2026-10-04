@@ -288,10 +288,11 @@ func setup(ctx context.Context, a *app.App) error {
 	networks := instruments.New(instrumentv1.NewInstrumentServiceClient(instrumentConn), 10*time.Second)
 	userClient := users.New(userv1.NewUserServiceClient(userConn))
 	ledgerClient := ledger.New(ledgerv1.NewLedgerServiceClient(ledgerConn))
+	authClient := auth.New(authv1.NewAuthServiceClient(authConn))
 	svc := &application.Service{
 		Store: store, Networks: networks, Eligibility: userClient, Log: a.Logger(), Now: time.Now,
 		W: application.Withdrawals{
-			StepUps: auth.New(authv1.NewAuthServiceClient(authConn)), Profiles: userClient, Ledger: ledgerClient,
+			StepUps: authClient, Securities: authClient, Profiles: userClient, Ledger: ledgerClient,
 			Prices:   &prices.Client{Base: cfg.MarketURL, Client: &http.Client{Timeout: 5 * time.Second}, Fallback: fallback},
 			Cooldown: cfg.WhitelistCooldown,
 		},

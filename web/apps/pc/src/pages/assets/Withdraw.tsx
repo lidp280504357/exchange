@@ -760,7 +760,15 @@ function LimitBars({ details }: { details: Record<string, unknown> }) {
         );
       })}
       {value && <p className="text-xs text-fg-2">{t("pcAssets.withdraw.limitThis", { value: formatDecimal(value, { decimals: 2 }) })}</p>}
-      {raises && <p className="text-xs text-fg-2">{t("pcAssets.withdraw.limitRaises", { time: formatTime(raises, "datetime", locale, zone) })}</p>}
+      {raises && str("full_daily_limit") && str("full_monthly_limit") && (
+        <p className="text-xs text-fg-2">
+          {t("pcAssets.withdraw.limitRaises", {
+            time: formatTime(raises, "datetime", locale, zone),
+            daily: formatDecimal(str("full_daily_limit"), { decimals: 0 }),
+            monthly: formatDecimal(str("full_monthly_limit"), { decimals: 0 }),
+          })}
+        </p>
+      )}
     </div>
   );
 }

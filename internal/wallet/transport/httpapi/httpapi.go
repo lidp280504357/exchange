@@ -54,6 +54,7 @@ func (h *Handler) Routes(r chi.Router) {
 		r.Get("/v1/wallet/withdrawals", h.listWithdrawals)
 		r.Get("/v1/wallet/withdrawals/{id}", h.getWithdrawal)
 		r.Delete("/v1/wallet/withdrawals/{id}", h.cancelWithdrawal)
+		r.Get("/v1/wallet/limits", h.limits)
 	})
 	r.Post("/v1/wallet/callbacks/{provider}", h.callback)
 	r.Get("/internal/wallet/withdrawals", h.adminWithdrawals)
@@ -245,6 +246,39 @@ func (h *Handler) networks(w http.ResponseWriter, r *http.Request) {
 		out = append(out, NetworkJSONOf(n, suspended[n.Asset]))
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"networks": out})
+}
+
+// LimitsJSON is the caller's withdrawal limits in effect and their use
+// (USDT, decimal strings).
+type LimitsJSON struct {
+	DailyLimit       string  `json:"daily_limit"`
+	MonthlyLimit     string  `json:"monthly_limit"`
+	UsedToday        string  `json:"used_today"`
+	UsedThisMonth    string  `json:"used_this_month"`
+	FullDailyLimit   string  `json:"full_daily_limit"`
+	FullMonthlyLimit string  `json:"full_monthly_limit"`
+	Identities       int     `json:"identities"`
+	TOTPEnabled      bool    `json:"totp_enabled"`
+	SettlingHours    int     `json:"totp_settling_hours"`
+	FullLimitsAt     *string `json:"full_limits_at"`
+}
+
+func (h *Handler) limits(w http.ResponseWriter, r *http.Request) {
+	v, err := h.Svc.Limits(r.Context(), httpx.UserID(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out := LimitsJSON{
+		DailyLimit: v.Limits.Daily.String(), MonthlyLimit: v.Limits.Monthly.String(), UsedToday: v.UsedToday.String(),
+		UsedThisMonth: v.UsedThisMonth.String(), FullDailyLimit: v.Full.Daily.String(), FullMonthlyLimit: v.Full.Monthly.String(),
+		Identities: v.Identities, TOTPEnabled: v.TOTP, SettlingHours: int(v.Settling.Hours()),
+	}
+	if !v.FullAt.IsZero() {
+		at := httpx.FormatTime(v.FullAt)
+		out.FullLimitsAt = &at
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) validateAddress(w http.ResponseWriter, r *http.Request) {

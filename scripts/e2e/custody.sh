@@ -105,6 +105,13 @@ TOKEN=$(jq -r .access_token <<<"$BODY")
 AUTH=(-H "Authorization: Bearer $TOKEN")
 
 echo "== networks"
+# The limits in effect (GET /v1/wallet/limits): one identity, no app, the
+# base 20%; the full ones and the app's day of settling as the pages show.
+call GET /v1/wallet/limits "" "${AUTH[@]}"
+expect 200 - "the limits in effect"
+check '.daily_limit == "400" and .monthly_limit == "4000" and .full_daily_limit == "2000" and .full_monthly_limit == "20000"
+  and .identities == 1 and (.totp_enabled | not) and .totp_settling_hours == 24 and .full_limits_at == null and .used_today == "0"' \
+  "the base limits of one identity without an app"
 call GET "/v1/wallet/networks?asset=USDT" "" "${AUTH[@]}"
 expect 200 - "USDT's networks"
 check '([.networks[] | select(.deposit_enabled and .withdraw_enabled) | .display_name] == ["TRC20"])

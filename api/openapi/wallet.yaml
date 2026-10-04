@@ -80,6 +80,27 @@ paths:
                       $ref: '#/components/schemas/WalletNetwork'
         default:
           $ref: './common.yaml#/components/responses/Error'
+  /v1/wallet/limits:
+    get:
+      operationId: getWithdrawLimits
+      summary: The caller's withdrawal limits in effect
+      description: |
+        The daily and monthly limits in USDT the next withdrawal is checked
+        against, what is used of them (today and this month, UTC), and the
+        full limits: both identities (email and phone) and an authenticator
+        app give them, the app only once it has been bound for
+        totp_settling_hours (24); until then full_limits_at says when.
+        The pages read the numbers and the hours from here.
+      tags: [withdrawals]
+      responses:
+        '200':
+          description: The limits.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WithdrawLimits'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
   /v1/wallet/withdraw-addresses/validate:
     post:
       operationId: validateWithdrawAddress
@@ -472,6 +493,42 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    WithdrawLimits:
+      type: object
+      required: [daily_limit, monthly_limit, used_today, used_this_month, full_daily_limit, full_monthly_limit, identities, totp_enabled,
+        totp_settling_hours, full_limits_at]
+      properties:
+        daily_limit:
+          type: string
+          description: USDT a day, in effect now.
+          examples: ['400']
+        monthly_limit:
+          type: string
+          examples: ['4000']
+        used_today:
+          type: string
+        used_this_month:
+          type: string
+        full_daily_limit:
+          type: string
+          description: USDT a day with both identities and a settled authenticator app.
+          examples: ['2000']
+        full_monthly_limit:
+          type: string
+          examples: ['20000']
+        identities:
+          type: integer
+          description: Verified identities (email, phone).
+        totp_enabled:
+          type: boolean
+        totp_settling_hours:
+          type: integer
+          description: How long a newly bound authenticator app waits before it raises the limits.
+          examples: [24]
+        full_limits_at:
+          type: [string, 'null']
+          format: date-time
+          description: When the full limits come while an authenticator app bound with both identities settles; null otherwise.
     WalletNetwork:
       type: object
       required: [asset, network, display_name, chain, address_format, contract, confirmations, eta_minutes, min_deposit, min_withdraw,

@@ -247,6 +247,15 @@ func (s *AccountService) ConsumeStepUp(ctx context.Context, userID, token string
 	return *su, sec, nil
 }
 
+// SecurityContext returns a user's security context without a step-up
+// and without a device (the wallet's limits in effect).
+func (s *AccountService) SecurityContext(ctx context.Context, userID string) (domain.SecurityContext, error) {
+	if _, err := uuid.Parse(userID); err != nil {
+		return domain.SecurityContext{}, apperr.NotFound("no such user")
+	}
+	return s.Store.Read().Security().Context(ctx, userID, uuid.Nil.String())
+}
+
 // FindUser returns the user an email address or phone number belongs to.
 func (s *AccountService) FindUser(ctx context.Context, identifier string) (string, error) {
 	ch := domain.ChannelEmail

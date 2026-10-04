@@ -51,11 +51,24 @@ func (s *Server) ConsumeStepUp(ctx context.Context, req *authv1.ConsumeStepUpReq
 	if err != nil {
 		return nil, err
 	}
-	return &authv1.ConsumeStepUpResponse{SessionId: su.SessionID, Channel: string(su.Channel), Security: &authv1.SecurityContext{
+	return &authv1.ConsumeStepUpResponse{SessionId: su.SessionID, Channel: string(su.Channel), Security: securityProto(sec)}, nil
+}
+
+// GetSecurityContext returns a user's security context without a step-up.
+func (s *Server) GetSecurityContext(ctx context.Context, req *authv1.GetSecurityContextRequest) (*authv1.GetSecurityContextResponse, error) {
+	sec, err := s.accounts.SecurityContext(ctx, req.GetUserId())
+	if err != nil {
+		return nil, err
+	}
+	return &authv1.GetSecurityContextResponse{Security: securityProto(sec)}, nil
+}
+
+func securityProto(sec domain.SecurityContext) *authv1.SecurityContext {
+	return &authv1.SecurityContext{
 		Identities: int32(sec.Identities), TotpEnabled: sec.TOTPEnabled, DeviceId: sec.DeviceID, //nolint:gosec // a handful
 		DeviceFirstSeenAt: stamp(sec.DeviceFirstSeenAt), IdentityChangedAt: stamp(sec.IdentityChangedAt),
 		PasswordChangedAt: stamp(sec.PasswordChangedAt), TotpChangedAt: stamp(sec.TOTPChangedAt), TotpActivatedAt: stamp(sec.TOTPActivatedAt),
-	}}, nil
+	}
 }
 
 // FindUser looks a user up by email address or phone number.

@@ -23,6 +23,7 @@ export const qk = {
   allFills: ["fills"] as const,
   notifications: ["notifications"] as const,
   deposits: ["wallet", "deposits"] as const,
+  withdrawLimits: ["wallet", "limits"] as const,
   withdrawals: ["wallet", "withdrawals"] as const,
   networks: (asset: string) => ["wallet", "networks", asset] as const,
   positions: ["derivatives", "positions"] as const,

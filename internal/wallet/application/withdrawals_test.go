@@ -308,13 +308,34 @@ func TestANewAuthenticatorWaitsADayForTheLimits(t *testing.T) {
 	_, err := w.svc.RequestWithdrawal(ctx, "alice", req)
 	var e *apperr.Error
 	if !errors.As(err, &e) || e.Code != "WALLET_LIMIT_EXCEEDED" || e.Details["daily_limit"] != "400" ||
-		e.Details["full_limits_at"] != w.now.Add(-time.Second).Add(24*time.Hour).UTC().Format(time.RFC3339) {
+		e.Details["full_limits_at"] != w.now.Add(-time.Second).Add(24*time.Hour).UTC().Format(time.RFC3339) ||
+		e.Details["full_daily_limit"] != "2000" || e.Details["full_monthly_limit"] != "20000" {
 		t.Fatalf("a second after binding the app: %v %+v", err, e)
+	}
+	// The limits in effect, before any withdrawal (GET /v1/wallet/limits).
+	activated := w.now.Add(-time.Hour)
+	w.svc.W.Securities = fakeSecurities{"alice": {Identities: 2, TOTPEnabled: true, TOTPActivated: activated}}
+	v, err := w.svc.Limits(ctx, "alice")
+	if err != nil || v.Limits.Daily.String() != "400" || v.Full.Daily.String() != "2000" || !v.FullAt.Equal(activated.Add(24*time.Hour)) ||
+		v.Settling != 24*time.Hour || !v.UsedToday.IsZero() || v.Identities != 2 || !v.TOTP {
+		t.Fatalf("the limits while the app settles: %+v %v", v, err)
 	}
 	req.StepUp = bound("s3", w.now.Add(-24*time.Hour-time.Second))
 	if _, err := w.svc.RequestWithdrawal(ctx, "alice", req); err != nil {
 		t.Fatalf("a day and a second after binding the app: %v", err)
 	}
+	w.svc.W.Securities = fakeSecurities{"alice": {Identities: 2, TOTPEnabled: true, TOTPActivated: w.now.Add(-48 * time.Hour)}}
+	if v, err := w.svc.Limits(ctx, "alice"); err != nil || v.Limits.Daily.String() != "2000" || !v.FullAt.IsZero() ||
+		v.UsedToday.String() != "500" {
+		t.Fatalf("the limits a day on, with the withdrawal: %+v %v", v, err)
+	}
+}
+
+// fakeSecurities answers each user's security context.
+type fakeSecurities map[string]ports.StepUp
+
+func (f fakeSecurities) Security(_ context.Context, userID string) (ports.StepUp, error) {
+	return f[userID], nil
 }
 
 func TestWithdrawalToChain(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"github.com/lidp280504357/exchange/internal/wallet/ports"
 )
 
-// Client implements ports.StepUps.
+// Client implements ports.StepUps and ports.Securities.
 type Client struct{ c authv1.AuthServiceClient }
 
 // New wraps an AuthService client.
@@ -20,10 +20,22 @@ func (c *Client) Consume(ctx context.Context, userID, token string) (ports.StepU
 	if err != nil {
 		return ports.StepUp{}, err
 	}
-	sec := resp.GetSecurity()
-	su := ports.StepUp{
-		Channel: resp.GetChannel(), DeviceID: sec.GetDeviceId(), Identities: int(sec.GetIdentities()), TOTPEnabled: sec.GetTotpEnabled(),
+	su := stepUp(resp.GetSecurity())
+	su.Channel = resp.GetChannel()
+	return su, nil
+}
+
+// Security reads the user's security context without a step-up.
+func (c *Client) Security(ctx context.Context, userID string) (ports.StepUp, error) {
+	resp, err := c.c.GetSecurityContext(ctx, &authv1.GetSecurityContextRequest{UserId: userID})
+	if err != nil {
+		return ports.StepUp{}, err
 	}
+	return stepUp(resp.GetSecurity()), nil
+}
+
+func stepUp(sec *authv1.SecurityContext) ports.StepUp {
+	su := ports.StepUp{DeviceID: sec.GetDeviceId(), Identities: int(sec.GetIdentities()), TOTPEnabled: sec.GetTotpEnabled()}
 	if t := sec.GetDeviceFirstSeenAt(); t != nil {
 		su.DeviceFirstSeen = t.AsTime()
 	}
@@ -39,5 +51,5 @@ func (c *Client) Consume(ctx context.Context, userID, token string) (ports.StepU
 	if t := sec.GetTotpActivatedAt(); t != nil {
 		su.TOTPActivated = t.AsTime()
 	}
-	return su, nil
+	return su
 }

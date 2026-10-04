@@ -24,10 +24,13 @@ const FeatureWithdraw = "WITHDRAW"
 // Withdrawals are the wallet's withdrawal dependencies and settings
 // (§5.10, §11.6).
 type Withdrawals struct {
-	StepUps  ports.StepUps
-	Profiles ports.Profiles
-	Prices   ports.Prices
-	Ledger   ports.Ledger
+	StepUps ports.StepUps
+	// Securities reads the security context for the limits in effect
+	// (Limits); nil answers without it, as if no app were bound.
+	Securities ports.Securities
+	Profiles   ports.Profiles
+	Prices     ports.Prices
+	Ledger     ports.Ledger
 	// Cooldown is the cooling-off period of a new address (24 hours).
 	Cooldown time.Duration
 }
@@ -216,12 +219,7 @@ func (s *Service) RequestWithdrawal(ctx context.Context, userID string, in Withd
 		return domain.Withdrawal{}, err
 	}
 	limits := domain.LimitsFor(su.Identities, su.TOTPEnabled, su.TOTPActivated, now)
-	today, err := r.Withdrawals().ValueSince(ctx, userID, now.UTC().Truncate(24*time.Hour))
-	if err != nil {
-		return domain.Withdrawal{}, err
-	}
-	y, m, _ := now.UTC().Date()
-	month, err := r.Withdrawals().ValueSince(ctx, userID, time.Date(y, m, 1, 0, 0, 0, 0, time.UTC))
+	today, month, err := used(ctx, r, userID, now)
 	if err != nil {
 		return domain.Withdrawal{}, err
 	}
@@ -230,7 +228,9 @@ func (s *Service) RequestWithdrawal(ctx context.Context, userID string, in Withd
 			WithDetail("monthly_limit", limits.Monthly.String()).WithDetail("used_today", today.String()).
 			WithDetail("used_this_month", month.String()).WithDetail("value_usdt", value.String())
 		if at := domain.FullLimitsAt(su.Identities, su.TOTPEnabled, su.TOTPActivated, now); !at.IsZero() {
-			e = e.WithDetail("full_limits_at", at.UTC().Format(time.RFC3339)) // the authenticator app settling
+			full := domain.FullLimits() // the authenticator app settling
+			e = e.WithDetail("full_limits_at", at.UTC().Format(time.RFC3339)).WithDetail("full_daily_limit", full.Daily.String()).
+				WithDetail("full_monthly_limit", full.Monthly.String())
 		}
 		return domain.Withdrawal{}, e
 	}
@@ -255,6 +255,54 @@ func (s *Service) RequestWithdrawal(ctx context.Context, userID string, in Withd
 		return domain.Withdrawal{}, err
 	}
 	return FreezeWithdrawal(ctx, s.Store, s.W.Ledger, w.ID, s.Now)
+}
+
+// used is what userID withdrew today and this month (UTC), in USDT.
+func used(ctx context.Context, r ports.Repos, userID string, now time.Time) (today, month decimal.Decimal, err error) {
+	if today, err = r.Withdrawals().ValueSince(ctx, userID, now.UTC().Truncate(24*time.Hour)); err != nil {
+		return decimal.Zero, decimal.Zero, err
+	}
+	y, m, _ := now.UTC().Date()
+	if month, err = r.Withdrawals().ValueSince(ctx, userID, time.Date(y, m, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		return decimal.Zero, decimal.Zero, err
+	}
+	return today, month, nil
+}
+
+// LimitsView is a user's withdrawal limits in effect (§11.6; an
+// authenticator app counting a day after its activation, variant B of
+// 2026-10-04) and their use, for the pages before a withdrawal: the
+// numbers and the day come from here, never from the pages' copy.
+type LimitsView struct {
+	Limits, Full             domain.Limits
+	UsedToday, UsedThisMonth decimal.Decimal
+	Identities               int
+	TOTP                     bool
+	// Settling is how long a newly bound app waits; FullAt when the full
+	// limits come while one does (zero otherwise).
+	Settling time.Duration
+	FullAt   time.Time
+}
+
+// Limits returns userID's withdrawal limits in effect and their use.
+func (s *Service) Limits(ctx context.Context, userID string) (LimitsView, error) {
+	now := s.Now()
+	var su ports.StepUp
+	if s.W.Securities != nil {
+		var err error
+		if su, err = s.W.Securities.Security(ctx, userID); err != nil {
+			return LimitsView{}, err
+		}
+	}
+	today, month, err := used(ctx, s.Store.Read(), userID, now)
+	if err != nil {
+		return LimitsView{}, err
+	}
+	return LimitsView{
+		Limits: domain.LimitsFor(su.Identities, su.TOTPEnabled, su.TOTPActivated, now), Full: domain.FullLimits(),
+		UsedToday: today, UsedThisMonth: month, Identities: su.Identities, TOTP: su.TOTPEnabled, Settling: domain.TOTPSettling,
+		FullAt: domain.FullLimitsAt(su.Identities, su.TOTPEnabled, su.TOTPActivated, now),
+	}, nil
 }
 
 // FreezeWithdrawal freezes a REQUESTED withdrawal's funds and applies its

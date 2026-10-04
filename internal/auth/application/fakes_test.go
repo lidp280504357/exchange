@@ -135,6 +135,9 @@ func (r memSecurity) Context(_ context.Context, userID, sessionID string) (domai
 	}
 	t, ok := r.s.totps[userID]
 	c.TOTPEnabled = ok && t.Status == domain.TOTPActive
+	if c.TOTPEnabled {
+		c.TOTPActivatedAt = t.ActivatedAt
+	}
 	c.TOTPChangedAt = r.s.credentials[userID].TOTPChangedAt
 	return c, nil
 }
