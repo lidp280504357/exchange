@@ -49,11 +49,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /**
  * flows starts Chrome for a site and returns the runner: open(...) gives a
  * tab (its own browser context, so its own cookies and session), step(...)
- * runs a checklist step, done() prints the summary and exits. streams is
- * how many requests a page keeps open for good (the console's event
- * stream), which waiting for a quiet network leaves aside.
+ * runs a checklist step, done() prints the summary and exits.
  */
-export async function flows({ site, app, api, apiPrefix = "/v1/", streams = 0 }) {
+export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
   mkdirSync(OUT, { recursive: true });
   console.log(`flows ${site}: failures go to ${OUT}`);
   // lib.mjs finds Chrome (or skips the run without it) and launches it the
@@ -135,7 +133,16 @@ export async function flows({ site, app, api, apiPrefix = "/v1/", streams = 0 })
       }
     });
     page.on("pageerror", (e) => tab.errors.push("pageerror: " + e.message));
+    // The requests in flight, for settled(): an event stream or a WebSocket
+    // never ends, so they are left out; a redirect replaces its hop.
+    const inflight = new Set();
+    page.on("request", (r) => {
+      for (const hop of r.redirectChain()) inflight.delete(hop);
+      if (r.resourceType() !== "eventsource" && r.resourceType() !== "websocket") inflight.add(r);
+    });
+    page.on("requestfinished", (r) => inflight.delete(r));
     page.on("requestfailed", (r) => {
+      inflight.delete(r);
       tab.failed.push(`${r.method()} ${r.url()} ${r.failure()?.errorText ?? ""}`);
       if (tab.failed.length > 100) tab.failed.shift();
     });
@@ -156,7 +163,7 @@ export async function flows({ site, app, api, apiPrefix = "/v1/", streams = 0 })
       if (problem) violations.add(problem);
     });
     tab.page = page;
-    Object.assign(tab, helpers(page, app, streams));
+    Object.assign(tab, helpers(page, app, inflight));
   }
 
   /**
@@ -252,7 +259,7 @@ export async function flows({ site, app, api, apiPrefix = "/v1/", streams = 0 })
 }
 
 /** helpers are the lib.mjs helpers for any page: finding things the way a user does, by their visible text. */
-export function helpers(page, app, streams = 0) {
+export function helpers(page, app, inflight = null) {
   const h = {
     // A live page (prices streaming, lists polling) may never go idle:
     // loaded, then quiet for half a second at most 20 s.
@@ -295,8 +302,23 @@ export function helpers(page, app, streams = 0) {
         const tick = (left) => (left ? requestAnimationFrame(() => tick(left - 1)) : done());
         tick(n);
       }), count),
-    /** settled waits for the network to be quiet for 500 ms (WebSocket traffic and the page's open streams aside). */
-    settled: (timeout = 20000) => page.waitForNetworkIdle({ idleTime: 500, timeout, concurrency: streams }).catch(() => {}),
+    /**
+     * settled waits for the page's requests to be done for 500 ms (event
+     * streams and WebSockets aside), timeout at most; FLOWS_DEBUG=1 prints
+     * what was still in flight then.
+     */
+    settled: async (timeout = 20000) => {
+      if (!inflight) return page.waitForNetworkIdle({ idleTime: 500, timeout }).catch(() => {});
+      const end = Date.now() + timeout;
+      let quiet = 0;
+      while (Date.now() < end) {
+        if (inflight.size) quiet = 0;
+        else if (!quiet) quiet = Date.now();
+        else if (Date.now() - quiet >= 500) return;
+        await sleep(50);
+      }
+      if (process.env.FLOWS_DEBUG) console.log(`     settled: in flight after ${timeout} ms: ${[...inflight].map((r) => `${r.resourceType()} ${r.url()}`).join(", ")}`);
+    },
   };
   return h;
 }

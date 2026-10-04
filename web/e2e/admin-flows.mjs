@@ -21,8 +21,7 @@ if (!ADMIN.email || !ADMIN.password || !AUDITOR.email || !AUDITOR.password) {
   process.exit(0);
 }
 
-// The event stream (/admin/v1/events) stays open: a quiet network leaves it aside.
-const f = await flows({ site: "admin", app: APP, api: APP, apiPrefix: "/admin/v1/", streams: 1 });
+const f = await flows({ site: "admin", app: APP, api: APP, apiPrefix: "/admin/v1/" });
 const began = new Date(Date.now() - 60_000).toISOString();
 const WIDTHS = [1024, 1280, 1920];
 
