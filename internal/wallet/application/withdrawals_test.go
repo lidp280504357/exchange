@@ -309,7 +309,7 @@ func TestANewAuthenticatorWaitsADayForTheLimits(t *testing.T) {
 	var e *apperr.Error
 	if !errors.As(err, &e) || e.Code != "WALLET_LIMIT_EXCEEDED" || e.Details["daily_limit"] != "400" ||
 		e.Details["full_limits_at"] != w.now.Add(-time.Second).Add(24*time.Hour).UTC().Format(time.RFC3339) ||
-		e.Details["full_daily_limit"] != "2000" || e.Details["full_monthly_limit"] != "20000" {
+		e.Details["full_daily_limit"] != "2000" || e.Details["full_monthly_limit"] != "20000" || e.Details["totp_settling_hours"] != 24 {
 		t.Fatalf("a second after binding the app: %v %+v", err, e)
 	}
 	// The limits in effect, before any withdrawal (GET /v1/wallet/limits).

@@ -495,6 +495,7 @@ function LimitBars({ details }: { details: Record<string, unknown> }) {
   const zone = useSettings((s) => timeZoneOf(s));
   const str = (k: string) => (typeof details[k] === "string" && dec.isDecimal(details[k] as string) ? (details[k] as string) : null);
   const raises = typeof details.full_limits_at === "string" ? details.full_limits_at : null;
+  const hours = typeof details.totp_settling_hours === "number" ? details.totp_settling_hours : null;
   const bars = [
     { key: "daily", label: t("mAssets.withdraw.limitDaily"), used: str("used_today"), limit: str("daily_limit") },
     { key: "monthly", label: t("mAssets.withdraw.limitMonthly"), used: str("used_this_month"), limit: str("monthly_limit") },
@@ -517,9 +518,10 @@ function LimitBars({ details }: { details: Record<string, unknown> }) {
         />
       ))}
       {value && <p className="text-xs text-fg-2">{t("mAssets.withdraw.limitThis", { value: formatDecimal(value, { decimals: 2 }) })}</p>}
-      {raises && str("full_daily_limit") && str("full_monthly_limit") && (
+      {raises && hours !== null && str("full_daily_limit") && str("full_monthly_limit") && (
         <p className="text-xs text-fg-2">
           {t("mAssets.withdraw.limitRaises", {
+            hours,
             time: formatTime(raises, "datetime", locale, zone),
             daily: formatDecimal(str("full_daily_limit"), { decimals: 0 }),
             monthly: formatDecimal(str("full_monthly_limit"), { decimals: 0 }),

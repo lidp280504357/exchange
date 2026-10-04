@@ -230,7 +230,7 @@ func (s *Service) RequestWithdrawal(ctx context.Context, userID string, in Withd
 		if at := domain.FullLimitsAt(su.Identities, su.TOTPEnabled, su.TOTPActivated, now); !at.IsZero() {
 			full := domain.FullLimits() // the authenticator app settling
 			e = e.WithDetail("full_limits_at", at.UTC().Format(time.RFC3339)).WithDetail("full_daily_limit", full.Daily.String()).
-				WithDetail("full_monthly_limit", full.Monthly.String())
+				WithDetail("full_monthly_limit", full.Monthly.String()).WithDetail("totp_settling_hours", int(domain.TOTPSettling.Hours()))
 		}
 		return domain.Withdrawal{}, e
 	}

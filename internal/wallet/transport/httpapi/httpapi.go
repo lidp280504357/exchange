@@ -269,6 +269,12 @@ func (h *Handler) limits(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
+	httpx.WriteJSON(w, http.StatusOK, LimitsJSONOf(v))
+}
+
+// LimitsJSONOf renders a user's limits: full_limits_at only while an
+// authenticator app settles.
+func LimitsJSONOf(v application.LimitsView) LimitsJSON {
 	out := LimitsJSON{
 		DailyLimit: v.Limits.Daily.String(), MonthlyLimit: v.Limits.Monthly.String(), UsedToday: v.UsedToday.String(),
 		UsedThisMonth: v.UsedThisMonth.String(), FullDailyLimit: v.Full.Daily.String(), FullMonthlyLimit: v.Full.Monthly.String(),
@@ -278,7 +284,7 @@ func (h *Handler) limits(w http.ResponseWriter, r *http.Request) {
 		at := httpx.FormatTime(v.FullAt)
 		out.FullLimitsAt = &at
 	}
-	httpx.WriteJSON(w, http.StatusOK, out)
+	return out
 }
 
 func (h *Handler) validateAddress(w http.ResponseWriter, r *http.Request) {
