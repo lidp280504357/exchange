@@ -13,7 +13,9 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
                         instrument-service（资产、交易对与合约的配置与状态）、risk-service（风控评估）
               ──内部 REST──> wallet-service（提现、充值处置、托管方）、spot-trading-service（撤单）、
                              derivatives-service（合约、仓位、强平）、notification-service（文章与站内信）、
-                             market-sim（模拟市场）、market-data-service（行情源状态）
+                             market-sim（模拟市场）、market-data-service（行情源状态）、
+                             instrument-service（平台资料与图片，INSTRUMENT_SERVICE_URL）、
+                             ledger-service（注册赠送，LEDGER_SERVICE_URL）
               ──config schema──> 功能开关（与 exchangectl flags 同一张表，变更与审计事件同一事务）
               ──ClickHouse──> 审计查询、订单/成交/充值读模型、报表
               ──admin schema──> 管理员、会话、资金操作、待生效修改、设置、幂等键；自己的 outbox 发 audit.events
@@ -109,6 +111,8 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 | 系统 | 审计 `/audit` | 按操作人、对象、事件、时间筛选；行详情与逐字段的变更；服务端导出 CSV |
 | 系统 | 报表 `/reports` | 交易、充提、合约、用户增长、HOUSE 盈亏、持仓量 |
 | 系统 | 系统健康 `/health` | 各服务就绪、版本、Kafka 滞后与死信，对账、行情源、托管方 |
+| 系统 | 平台设置 `/platform` | 平台资料（品牌、域名、颜色、页脚、联系方式、学习横幅、注册方式）、图片上传、注册赠送（提高需第二人） |
+| 系统 | 上线检查清单 `/launch` | 学习环境的开关与资料逐项对照上线要求，全部达标显示「可上线」；只读 |
 | 系统 | 设置 `/settings` | 双人审批与限额、交易参数的等待时间（ADMIN 可改）；本浏览器的外观、语言与每页条数 |
 | 账户菜单 | 账号与安全 `/account` | 改自己的口令与身份验证器 |
 
@@ -164,7 +168,7 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 
 ### 资金操作：单人与双人审批
 
-资金操作（C1 起）= 手动调账（`LEDGER_ADJUSTMENT`：分录 `MANUAL_ADJUSTMENT`，对手方 `ADJUSTMENT`；现货或合约账户）、保险基金注资（`INSURANCE_FUND`：`INSURANCE_CONTRIBUTION`）、补记充值（`DEPOSIT_BACKFILL`，C2c）、无主充值记给用户（`DEPOSIT_ASSIGN`，C5.5 ㉑；这两种见「充值处置与补记」）、模拟市场的增发（`SIM_MINT`）与超出单人份额的价格事件与参数（`SIM_EVENT`、`SIM_PARAMS`，见「模拟市场」）。每笔都是 `approvals` 表的一行（`mode` 为 `SINGLE` 或 `TWO_PERSON`），账本以幂等键 `approval:<id>` 只记一次（补记由 wallet-service 按托管方交易号只记一次，记给用户由账本按充值与用户只放行一次）。
+资金操作（C1 起）= 手动调账（`LEDGER_ADJUSTMENT`：分录 `MANUAL_ADJUSTMENT`，对手方 `ADJUSTMENT`；现货或合约账户）、保险基金注资（`INSURANCE_FUND`：`INSURANCE_CONTRIBUTION`）、补记充值（`DEPOSIT_BACKFILL`，C2c）、无主充值记给用户（`DEPOSIT_ASSIGN`，C5.5 ㉑；这两种见「充值处置与补记」）、模拟市场的增发（`SIM_MINT`）与超出单人份额的价格事件与参数（`SIM_EVENT`、`SIM_PARAMS`，见「模拟市场」），以及提高注册赠送（`WELCOME_CREDIT`，D2，总要第二位 ADMIN，见「平台设置」）。每笔都是 `approvals` 表的一行（`mode` 为 `SINGLE` 或 `TWO_PERSON`），账本以幂等键 `approval:<id>` 只记一次（补记由 wallet-service 按托管方交易号只记一次，记给用户由账本按充值与用户只放行一次）。
 
 - **开关 `admin.two_person_approval`**（未设置即关闭）。打开：每笔都要另一位管理员批准。关闭（单人模式，测试服现状，因为只有一位管理员）：有权限的管理员自己执行，但有护栏：
   - 单笔折合不超过 `single_max_usdt`（默认 100,000 USDT）；
@@ -393,6 +397,39 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 - `GET /admin/v1/health`：各服务运维端口 `/readyz` 的就绪状态与耗时（2 秒超时，并发）。目标默认是 compose 网络里的 17 个服务，可用 `HEALTH_TARGETS`（`名称=http://主机:端口,...`）覆盖。
 - `?details=true` 还读各服务的 `/metrics`：版本（`exchange_build_info` 的 `version`，部署后应全部一致，不一致时标出几个版本）、Kafka 消费滞后（`kafka_consumer_lag` 求和，> 1000 标黄）、启动以来转入死信的条数（`kafka_consumer_records_total{result="dlq"}`，> 0 标红，用 `exchangectl dlq` 查看与重放），以及行情源状态（market-data 的 `/internal/market/feed`）；没有 Kafka 消费者的服务这两列为空。
 - 页面另有对账（每项检查最近一次）与托管方状态，每 15 秒刷新。
+- 带 details 时还读 `exchange_config_present{item}`（各服务用到的第三方是否已配置：auth 的 `turnstile`、notification 的 `mail`、wallet 的 `alchemy`，只有是/否，不含值），供「上线检查清单」用（`config_present`）。
+
+### 平台设置
+
+`/platform`（读：所有角色，`reports.read`；改：`settings.write`，只有 ADMIN；设计 2026-10-04 §4.1、§4.2、§5，D2）：
+
+- **平台资料**（instrument-service 的 `platform_profile`，经 `INSTRUMENT_SERVICE_URL` 的 `/internal/platform/profile`）：交易所名称与简称、域名（PC 站主机名，手机站 m.<域名>、后台 admin.<域名>）、浏览器主题色与品牌主色、默认语言、学习横幅（开关与中英文文字）、注册方式（开放/关闭与关闭时的中英文文字）、页脚版权与备案合规文字（中英文）、联系邮箱、客服链接、社交链接（最多 10 个，https）。`GET/PUT /admin/v1/platform/profile`：保存整体替换（图片与注册赠送除外），带读到的 `expected_version`，期间有人保存过 409 `INSTRUMENT_PLATFORM_CHANGED`；三端 1 分钟内显示，不重新构建。单人即可，审计 `admin.platform.updated`（对象 `platform`，详情 `changes` 为改动字段的前后值与新版本）。
+- **图片**：浅色与深色背景的 logo、favicon、Apple 触摸图标。`PUT/DELETE /admin/v1/platform/images/{kind}`（`logo_light`、`logo_dark`、`favicon`、`apple_touch_icon`）：正方形、最大 200 KB；logo 收 PNG、SVG、WebP，favicon 收 PNG、SVG，触摸图标只收 PNG 且至少 180 px（instrument-service 再查一遍，SVG 按允许名单重建）。上传前在确认框里预览；删除后恢复内置图片。审计 `admin.platform.image_updated`（类型、大小、SHA-256，不含内容）与 `admin.platform.image_removed`。图片地址带版本，nginx 让 admin.<域名> 同源代理 `/v1/platform/images/*`（后台的 CSP 不放第三方图片）。
+- **注册赠送**（ledger-service 的设置，经 `LEDGER_SERVICE_URL` 的 `/internal/ledger/settings/welcome-credits`；页面标「上线应为 0」）：新账户注册时得到的资金列表（资产与数额），总闸开关 `ledger.welcome_credit` 也开着才发。`PUT /admin/v1/platform/welcome-credits` 带 `expected_version`（过期 409 `LEDGER_SETTINGS_CHANGED`）：
+  - 降低或清空（数额 0 即不发，`[]` 全部不发）立即生效（200），审计 `admin.platform.welcome_changed`（新旧列表）；账本另记 `ledger.settings.welcome_credits`。
+  - 提高任何一项、或从 0 变为非零，一律等另一位 ADMIN 批准（202，资金操作 `WELCOME_CREDIT`，模式 TWO_PERSON，`escalation` 为 `WELCOME_RAISE`，单人模式也一样）。提高部分按各资产 USDT 交易对的新鲜价格折算合计，每次最多 10,000 USDT，谁批准都不能越过（422 `ADMIN_WELCOME_RAISE_CAP`）；没有新鲜价格的资产不能提高（422 `ADMIN_WELCOME_UNPRICED`）。
+  - 批准要 `settings.write`（ADMIN），不能批准自己的；批准时按申请时的版本设置，期间赠送被改过则这次申请失败（结果 `LEDGER_SETTINGS_CHANGED: …`），不会覆盖别人的修改。申请人可以撤回。这类申请不记 `attempted_at`（重复设置会被版本拒绝），不计入单人模式的 24 小时累计。审计 `admin.platform.welcome_requested/approved/rejected/changed/failed`，对象 `platform`，详情有新旧列表、版本与折算金额。
+
+### 上线检查清单
+
+`/launch`（所有角色可看，`reports.read`；设计 2026-10-04 §4.6，D2）：只读，不改任何值，每 30 秒刷新。`GET /admin/v1/launch-checklist` 逐项从来源读取当前值，状态为达标 `OK`、未达标 `FAIL`、待接入 `PENDING`（来源尚未上线）或读不到 `UNKNOWN`（来源没有应答），全部 `OK` 时 `ready` 为真、页面显示「可上线」，否则列出未达标的项。只覆盖后台能改和能看的项，部署侧（域名、TLS、密钥、第三方账号）见上线手册。
+
+| 项 | 来源 | 上线应为 | 去修改 |
+|---|---|---|---|
+| 注册赠送 `welcome_credits` | 账本设置（并显示总闸） | 全部为 0 | 平台设置 |
+| 学习横幅 `learning_mode` | 平台资料 | 关 | 平台设置 |
+| 注册方式 `registration` | 平台资料 | 开放或按运营决定（只显示，不影响可上线） | 平台设置 |
+| 后台登录需验证码 `admin_totp` | 开关 `admin.login_without_totp` | 关 | 功能开关 |
+| 双人审批 `two_person` | 开关 `admin.two_person_approval` | 开 | 功能开关 |
+| 测试资产资格 `test_assets` | 开关 `wallet.test_assets` | 关（带地区规则也算开） | 功能开关 |
+| 托管方 `custodian` | wallet-service `/internal/wallet/custody` 的 `configured` 与 `gateway_host`（UDUN） | 已配置且不是 `udun-mock`；没有 `gateway_host` 字段时待接入 | 上线手册 |
+| 提现总闸 `withdraw` | 开关 `wallet.withdraw` | 开 | 功能开关 |
+| 品牌 `brand` | 平台资料 | 名称、至少一张 logo、favicon 已上传 | 平台设置 |
+| 平台币资料 `coin_profile` | 模拟市场的币（默认 ASTRA）的资产资料 | 名称与 logo 已设置 | 代币信息 |
+| 法律页 `legal` | 内容 LEGAL 分区 | `terms`、`privacy`、`risk` 有已发布的覆盖稿（「以默认稿发布」也算）；分区没上线时待接入 | 固定页面 |
+| 第三方 `third_party` | 各服务的 `exchange_config_present` | 人机验证、邮件、链服务都为是；没有服务上报时待接入 | 上线手册 |
+| 管理员 `admins` | 后台名册 | 至少 2 名启用的 ADMIN，全部绑定身份验证器 | 管理员与角色 |
+| 域名 `domain` | 平台资料的 `domain` 与访问后台用的主机名（nginx 转来的 Host） | 后台在 admin.<资料里的域名> | 平台设置 |
 
 ### 审计
 
@@ -498,6 +535,10 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | `ADMIN_NEW_ITEM_NOT_PREPARE` | 后台新建的交易对或合约写了「准备中」以外的状态（详情 `symbol`、`status`）；先建再经状态修改开放 |
 | `ADMIN_SIM_MINT_CAP` | 增发超过单次上限（10,000,000 个币或 1,000,000 USDT），谁批准都不行 |
 | `ADMIN_SIM_TOO_FAR_AHEAD` | 价格事件（或目标的预览）的开始时间超过 24 小时之后（market-sim 的 MaxLead） |
+| `ADMIN_WELCOME_RAISE_CAP` | 一次提高注册赠送超过 10,000 USDT 等值，谁批准都不行 |
+| `ADMIN_WELCOME_UNPRICED` | 要提高的资产没有新鲜的 USDT 价格，无法折算 |
+| `INSTRUMENT_PLATFORM_CHANGED` | 保存平台资料时版本已过期（期间有人保存过），刷新后再改 |
+| `LEDGER_SETTINGS_CHANGED` | 修改注册赠送时版本已过期；批准时遇到它，申请记为失败 |
 | `ADMIN_TAG_EMPTY` | 按标签发的站内信：没有账户带这个标签 |
 | `NOTIFY_ARTICLE_EXISTS` | 同一栏目已有这个 slug 的文章（notification-service 返回，后台原样转出） |
 | `NOTIFY_ARTICLE_WITHDRAWN` | 公开接口：文章已下线（站点不再用同 slug 的自带文章顶替） |

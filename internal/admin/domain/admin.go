@@ -270,6 +270,10 @@ const (
 	// wallet-service sets its owner and releases it from UNCLAIMED_DEPOSIT
 	// (C5.5 ㉑).
 	KindDepositAssign = "DEPOSIT_ASSIGN"
+	// KindWelcomeCredit raises what a new account gets (the ledger's
+	// welcome credits, design 2026-10-04 §4.2): always a second ADMIN's,
+	// at most WelcomeRaiseCap in USDT a change (D2).
+	KindWelcomeCredit = "WELCOME_CREDIT"
 
 	ApprovalPending  = "PENDING"
 	ApprovalExecuted = "EXECUTED"
@@ -297,6 +301,10 @@ const (
 	// than its address's holder, now or before the address was retired,
 	// whatever its worth (C5.5 ㉑, the coordinator's 10-04 decision).
 	EscalationNotHolder = "NOT_ADDRESS_HOLDER"
+	// EscalationWelcomeRaise: more for every new account (the welcome
+	// credits raised, or from nothing to something), whatever the mode
+	// (design 2026-10-04 §5).
+	EscalationWelcomeRaise = "WELCOME_RAISE"
 )
 
 // Approval is a fund operation (§5.12: manual ledger adjustments and

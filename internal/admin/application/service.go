@@ -74,6 +74,9 @@ type Service struct {
 	// Content is notification-service's announcements, help articles and
 	// in-app messages.
 	Content ports.Content
+	// Platform is the platform's profile and the welcome credits (design
+	// 2026-10-04, D2); nil leaves those pages and checklist items unread.
+	Platform ports.Platform
 	// SimBots names the simulated market's bots, left out of the users'
 	// figures; nil counts them. Sim is market-sim's management API (the
 	// simulated market's pages).

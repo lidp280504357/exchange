@@ -5,6 +5,7 @@ import { ImageUp, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DangerAction, FormError } from "../../kit/actions";
+import { readSquareImage, type ImageMime } from "../../kit/image";
 
 // An asset's profile (ASTRA design §5.3, C4c): the name, introductions,
 // links and logo the sites show for it. instrument-service checks the
@@ -12,7 +13,7 @@ import { DangerAction, FormError } from "../../kit/actions";
 // and versions it, so the sites pick up a new logo within a minute.
 
 type Profile = AdminSchemas["AssetProfile"];
-type Mime = "image/png" | "image/svg+xml" | "image/webp";
+type Mime = ImageMime;
 
 const MIMES: Mime[] = ["image/png", "image/svg+xml", "image/webp"];
 const MAX_LOGO = 200 * 1024;
@@ -27,23 +28,8 @@ const draftOf = (p: Profile): Draft => ({
 
 /** readLogo checks a chosen file as instrument-service will (type, size, square) and reads it. */
 async function readLogo(file: File, t: (k: string, o?: Record<string, unknown>) => string): Promise<NonNullable<Draft["logo"]>> {
-  if (!MIMES.includes(file.type as Mime)) throw new FormError(t("admin.profile.badType"));
-  if (file.size > MAX_LOGO) throw new FormError(t("admin.profile.tooLarge"));
-  const preview = await new Promise<string>((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result));
-    r.onerror = () => reject(new FormError(t("admin.profile.unreadable")));
-    r.readAsDataURL(file);
-  });
-  if (file.type !== "image/svg+xml") {
-    const img = new Image();
-    img.src = preview;
-    await img.decode().catch(() => {
-      throw new FormError(t("admin.profile.unreadable"));
-    });
-    if (img.naturalWidth !== img.naturalHeight) throw new FormError(t("admin.profile.notSquare", { w: img.naturalWidth, h: img.naturalHeight }));
-  }
-  return { data: preview.slice(preview.indexOf(",") + 1), mime: file.type as Mime, preview };
+  const { data, mime, preview } = await readSquareImage(file, { mimes: MIMES, maxBytes: MAX_LOGO }, t);
+  return { data, mime, preview };
 }
 
 /** AssetProfileSection shows an asset's profile in its drawer and edits it. */

@@ -292,6 +292,15 @@ try {
   await page.waitForFunction(() => /^[0-9a-f]{7}/.test([...document.querySelectorAll("main td")].map((td) => td.textContent).find((s) => /^[0-9a-f]{7}/.test(s)) ?? ""), { timeout: 20000 });
   await t.shot("4b-health");
   ok("the administrators with the roles' permissions and the creation form (canceled); system health with versions, Kafka lag, reconciliation and the feed");
+  // The launch checklist and the platform settings (design 2026-10-04, D2), read only.
+  await go("/launch");
+  await page.waitForSelector("[data-testid=launch-verdict]");
+  await page.waitForSelector("[data-testid=launch-admin_totp]");
+  await t.shot("4b-launch");
+  await go("/platform");
+  await waitText("注册赠送");
+  await page.waitForFunction(() => /平台资料|读不到/.test(document.querySelector("main")?.innerText ?? ""), { timeout: 20000 });
+  ok("the launch checklist with its verdict, and the platform settings");
 
   // 9c. Operations: the announcements, the editor with its preview (closed
   // unsaved), the help articles, the messages and their form (closed unsent).

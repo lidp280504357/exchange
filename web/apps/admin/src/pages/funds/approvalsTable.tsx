@@ -148,11 +148,38 @@ function SimChange({ a, full }: { a: Approval; full?: boolean }) {
   );
 }
 
+/**
+ * WelcomeChange says what a WELCOME_CREDIT request sets the welcome
+ * credits to and from, and what its raise is worth (design 2026-10-04
+ * §4.2).
+ */
+function WelcomeChange({ a }: { a: Approval }) {
+  const { t } = useTranslation();
+  const p = a.payload as Record<string, string>;
+  const list = (raw?: string) => {
+    try {
+      const credits = JSON.parse(raw ?? "[]") as { asset: string; amount: string }[];
+      return credits.length ? credits.map((c) => `${c.amount} ${c.asset}`).join(" · ") : t("admin.launch.nothing");
+    } catch {
+      return raw ?? "";
+    }
+  };
+  return (
+    <span className="flex flex-col" data-testid="welcome-change">
+      <span className="font-mono text-xs">
+        {list(p.previous)} → {list(p.credits)}
+      </span>
+      <span className="text-xs text-fg-3">{t("admin.platform.raiseWorth", { usdt: p.raise_usdt })}</span>
+    </span>
+  );
+}
+
 function Payload({ a }: { a: Approval }) {
   const { t } = useTranslation();
   const p = a.payload as Record<string, string>;
   if (simKind(a.kind)) return <SimChange a={a} />;
   if (a.kind === "SIM_MINT") return <MintShares payload={p} />;
+  if (a.kind === "WELCOME_CREDIT") return <WelcomeChange a={a} />;
   return (
     <span className="inline-flex items-center gap-2">
       {p.user_id && <UserCell id={p.user_id} />}
@@ -216,14 +243,22 @@ function simLapsed(a: Approval): boolean {
  */
 function Decide({ admin, a }: { admin: Admin; a: Approval }) {
   const { t } = useTranslation();
-  if (!can(admin, simKind(a.kind) ? "sim.control" : "ledger.adjust.approve")) return null;
+  if (!can(admin, simKind(a.kind) ? "sim.control" : a.kind === "WELCOME_CREDIT" ? "settings.write" : "ledger.adjust.approve")) return null;
   const p = a.payload as Record<string, string>;
   const mine = a.requested_by === admin.id;
   const finish = mine || attempted(a);
   const target = (
     <span className="inline-flex items-center gap-2">
       <EnumText group="approvalKind" code={a.kind} />{" "}
-      {simKind(a.kind) ? <SimChange a={a} full /> : a.kind === "SIM_MINT" ? <MintShares payload={p} full /> : <Num value={p.amount} unit={p.asset} signed />}
+      {simKind(a.kind) ? (
+        <SimChange a={a} full />
+      ) : a.kind === "SIM_MINT" ? (
+        <MintShares payload={p} full />
+      ) : a.kind === "WELCOME_CREDIT" ? (
+        <WelcomeChange a={a} />
+      ) : (
+        <Num value={p.amount} unit={p.asset} signed />
+      )}
     </span>
   );
   const run = (approve: boolean) => async (reason: string) =>

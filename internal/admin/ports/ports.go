@@ -1314,6 +1314,33 @@ type ServiceHealth struct {
 	Version   string `json:"version,omitempty"`
 	KafkaLag  *int64 `json:"kafka_lag,omitempty"`
 	DLQ       *int64 `json:"dlq,omitempty"`
+	// ConfigPresent is whether the third parties the service uses are
+	// configured, as it reports them (exchange_config_present{item}, the
+	// launch checklist's; never their values).
+	ConfigPresent map[string]bool `json:"config_present,omitempty"`
+}
+
+// Platform is the platform's profile (instrument-service) and the welcome
+// credits (ledger-service), design 2026-10-04 §4.1–4.2; the answers pass
+// through as the services render them.
+type Platform interface {
+	Profile(ctx context.Context) (json.RawMessage, error)
+	// UpdateProfile replaces the profile but its images and the welcome
+	// credits: write carries expected_version, a stale one is refused.
+	UpdateProfile(ctx context.Context, write json.RawMessage, actor, reason string) (json.RawMessage, error)
+	// PutImage uploads one of the images (kind: logo_light, logo_dark,
+	// favicon, apple_touch_icon), data in base64; DeleteImage removes it.
+	PutImage(ctx context.Context, kind, data, mime, actor, reason string) (json.RawMessage, error)
+	DeleteImage(ctx context.Context, kind, actor, reason string) (json.RawMessage, error)
+	WelcomeCredits(ctx context.Context) (json.RawMessage, error)
+	// SetWelcomeCredits replaces the welcome credits as of expectedVersion.
+	SetWelcomeCredits(ctx context.Context, credits []WelcomeCredit, expectedVersion int64, actor, reason string) (json.RawMessage, error)
+}
+
+// WelcomeCredit is what a new account gets of an asset.
+type WelcomeCredit struct {
+	Asset  string          `json:"asset"`
+	Amount decimal.Decimal `json:"amount"`
 }
 
 // Health probes every service's readiness.

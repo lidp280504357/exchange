@@ -162,8 +162,9 @@ func (h Health) Check(ctx context.Context, details bool) []ports.ServiceHealth {
 }
 
 // metrics reads a service's version (exchange_build_info), its Kafka
-// consumers' lag (kafka_consumer_lag, summed) and the records they parked
-// in a DLQ since it started (kafka_consumer_records_total{result="dlq"}).
+// consumers' lag (kafka_consumer_lag, summed), the records they parked
+// in a DLQ since it started (kafka_consumer_records_total{result="dlq"})
+// and whether its third parties are configured (exchange_config_present).
 func (h Health) metrics(ctx context.Context, t HealthTarget, res *ports.ServiceHealth) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.URL+"/metrics", nil)
 	if err != nil {
@@ -195,6 +196,11 @@ func (h Health) metrics(ctx context.Context, t HealthTarget, res *ports.ServiceH
 			if labels["result"] == "dlq" {
 				dlq += int64(value)
 			}
+		case name == "exchange_config_present" && labels["item"] != "":
+			if res.ConfigPresent == nil {
+				res.ConfigPresent = map[string]bool{}
+			}
+			res.ConfigPresent[labels["item"]] = value == 1
 		}
 	}
 	if consumers {

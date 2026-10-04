@@ -2045,6 +2045,129 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/platform/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The platform's profile, as the sites show it
+         * @description Design 2026-10-04 §4.1 (D2): the name, logos, colours, footer,
+         *     contact, learning banner, registration and the welcome credits the
+         *     sites read, with who last changed it. instrument-service keeps it;
+         *     the welcome credits are the ledger's (changed with
+         *     /admin/v1/platform/welcome-credits). Every administrator reads it.
+         */
+        get: operations["getPlatformProfile"];
+        /**
+         * Replace the platform's profile (all but the images and the welcome credits)
+         * @description expected_version is the version read: 409
+         *     INSTRUMENT_PLATFORM_CHANGED when someone saved in between. The
+         *     sites show the change within a minute, without a build. One ADMIN
+         *     (settings.write) alone; audited as admin.platform.updated with the
+         *     fields that changed, before and after (design §5).
+         */
+        put: operations["updatePlatformProfile"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/platform/images/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kind: "logo_light" | "logo_dark" | "favicon" | "apple_touch_icon";
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Upload one of the platform's images
+         * @description Square, at most 200 KB; PNG, SVG (rebuilt from an allow list) or
+         *     WebP for the logos, PNG or SVG for the favicon, PNG of at least
+         *     180 px for the apple-touch-icon (instrument-service checks them).
+         *     Its URL changes with the version, so no cache serves the old one.
+         *     settings.write; audited as admin.platform.image_updated with its
+         *     type, size and SHA-256, never its bytes.
+         */
+        put: operations["uploadPlatformImage"];
+        post?: never;
+        /**
+         * Remove an uploaded image (the built-in one shows again)
+         * @description settings.write; audited as admin.platform.image_removed.
+         */
+        delete: operations["deletePlatformImage"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/platform/welcome-credits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What a new account gets (the ledger's setting)
+         * @description The welcome credits (design 2026-10-04 §4.2) and the master switch
+         *     ledger.welcome_credit: a new account gets them while both say so.
+         *     A launch sets them to nothing. Every administrator reads them.
+         */
+        get: operations["getWelcomeCredits"];
+        /**
+         * Change the welcome credits
+         * @description settings.write. Lowering or clearing (an amount of 0 or [] is
+         *     nothing) applies at once: 200 with the setting, audited as
+         *     admin.platform.welcome_changed (old, new). Raising any asset, or
+         *     from nothing to something, waits for a second ADMIN: 202 with a
+         *     WELCOME_CREDIT request (escalation WELCOME_RAISE). A raise is
+         *     worth at most 10,000 USDT a change (422 ADMIN_WELCOME_RAISE_CAP,
+         *     whoever approves), priced at the USDT pairs' fresh prices (422
+         *     ADMIN_WELCOME_UNPRICED without one). expected_version is the
+         *     version read: 409 LEDGER_SETTINGS_CHANGED when it moved, then and
+         *     when the request is approved (it fails).
+         */
+        put: operations["setWelcomeCredits"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/launch-checklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What of the learning setup is still on (read-only)
+         * @description Design 2026-10-04 §4.6 (D2): each item from its source now, with
+         *     what it is (value) and whether it is what a launch needs. ready
+         *     when every item is OK. It changes nothing and covers what the
+         *     console can change and see; the deployment side is the launch
+         *     handbook's. PENDING: its source is not there yet; UNKNOWN: its
+         *     source did not answer. Every administrator reads it.
+         */
+        get: operations["getLaunchChecklist"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/v1/assets/{code}/profile": {
         parameters: {
             query?: never;
@@ -3092,6 +3215,10 @@ export interface components {
             kafka_lag?: number;
             /** @description With details, for a service with Kafka consumers; records parked in a DLQ since it started. */
             dlq?: number;
+            /** @description With details, whether the third parties the service uses are configured (exchange_config_present{item}), never their values. */
+            config_present?: {
+                [key: string]: boolean;
+            };
         };
         ReconciliationRun: {
             /** @example JOURNAL_BALANCED */
@@ -3603,6 +3730,129 @@ export interface components {
             logo_mime?: "image/png" | "image/svg+xml" | "image/webp";
             clear_logo?: boolean;
         };
+        /** @description A text by language; zh-CN stands in for a language without one. */
+        PlatformTexts: {
+            "zh-CN": string;
+            en: string;
+        };
+        WelcomeCredit: {
+            asset: string;
+            amount: components["schemas"]["Decimal"];
+        };
+        WelcomeCreditsSetting: {
+            credits: components["schemas"]["WelcomeCredit"][];
+            /** @description ledger.welcome_credit, the master switch (both must hold for a grant). */
+            flag_enabled: boolean;
+            /** Format: int64 */
+            version: number;
+            /** @description "system:WELCOME_FUNDS" for the first value taken from the environment. */
+            updated_by: string;
+            /** Format: date-time */
+            updated_at: string | null;
+        };
+        /** @description The platform's profile (as api/openapi/platform.yaml's PlatformProfile) and who last changed it. */
+        PlatformProfileAdmin: {
+            name: string;
+            short_name: string;
+            /** @description The PC site's host name (the mobile site m.<domain>, the console admin.<domain>); empty until set. */
+            domain: string;
+            theme_color: string;
+            brand_color: string;
+            images: {
+                logo_light: string | null;
+                logo_dark: string | null;
+                favicon: string | null;
+                apple_touch_icon: string | null;
+            };
+            footer: {
+                copyright: components["schemas"]["PlatformTexts"];
+                compliance: components["schemas"]["PlatformTexts"];
+            };
+            contact: {
+                email: string;
+                support_url: string | null;
+            };
+            social: {
+                kind: string;
+                url: string;
+            }[];
+            /** @enum {string} */
+            default_locale: "zh-CN" | "en";
+            learning_mode: {
+                enabled: boolean;
+                text: components["schemas"]["PlatformTexts"];
+            };
+            registration: {
+                /** @enum {string} */
+                status: "OPEN" | "CLOSED";
+                closed_text: components["schemas"]["PlatformTexts"];
+            };
+            /** @description The ledger's, read within the last minute (change them at /admin/v1/platform/welcome-credits). */
+            welcome_credits: {
+                asset: string;
+                amount: string;
+            }[];
+            /** Format: int64 */
+            version: number;
+            /** Format: date-time */
+            updated_at: string;
+            /** @description The actor of the last change ("admin:<email>", "system:migration"). */
+            updated_by: string;
+        };
+        PlatformProfileWrite: {
+            name: string;
+            short_name: string;
+            /** @description The PC site's host name (a.b, lower case, at most 253), or empty. */
+            domain: string;
+            theme_color: string;
+            brand_color: string;
+            footer: {
+                copyright: components["schemas"]["PlatformTexts"];
+                compliance: components["schemas"]["PlatformTexts"];
+            };
+            contact: {
+                /** @description An e-mail address, or empty. */
+                email: string;
+                /** @description An https URL of at most 300 characters. */
+                support_url: string | null;
+            };
+            social: {
+                /** @enum {string} */
+                kind: "x" | "telegram" | "discord" | "youtube" | "facebook" | "instagram" | "linkedin" | "reddit" | "medium" | "github" | "tiktok" | "weibo";
+                /** @description An https URL of at most 300 characters. */
+                url: string;
+            }[];
+            /** @enum {string} */
+            default_locale: "zh-CN" | "en";
+            learning_mode: {
+                enabled: boolean;
+                text: components["schemas"]["PlatformTexts"];
+            };
+            registration: {
+                /** @enum {string} */
+                status: "OPEN" | "CLOSED";
+                closed_text: components["schemas"]["PlatformTexts"];
+            };
+            /** Format: int64 */
+            expected_version: number;
+        };
+        LaunchItem: {
+            /** @enum {string} */
+            key: "welcome_credits" | "learning_mode" | "registration" | "admin_totp" | "two_person" | "test_assets" | "custodian" | "withdraw" | "brand" | "coin_profile" | "legal" | "third_party" | "admins" | "domain";
+            /** @enum {string} */
+            status: "OK" | "FAIL" | "PENDING" | "UNKNOWN";
+            /** @description What it is now, by item (a flag's enabled and rules, the credits, the custodian's gateway host, the administrators...). */
+            value: {
+                [key: string]: unknown;
+            };
+        };
+        LaunchChecklist: {
+            /** @description Every item is OK. */
+            ready: boolean;
+            items: components["schemas"]["LaunchItem"][];
+            /** Format: date-time */
+            checked_at: string;
+        };
         Reason: {
             reason: string;
         };
@@ -3635,7 +3885,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            section: "ANNOUNCEMENT" | "HELP";
+            section: "ANNOUNCEMENT" | "HELP" | "LEGAL" | "HOME";
             slug: string;
             category: string;
             pinned: boolean;
@@ -4513,7 +4763,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            kind: "LEDGER_ADJUSTMENT" | "INSURANCE_FUND" | "DEPOSIT_BACKFILL" | "SIM_EVENT" | "SIM_PARAMS" | "SIM_MINT" | "DEPOSIT_ASSIGN";
+            kind: "LEDGER_ADJUSTMENT" | "INSURANCE_FUND" | "DEPOSIT_BACKFILL" | "SIM_EVENT" | "SIM_PARAMS" | "SIM_MINT" | "DEPOSIT_ASSIGN" | "WELCOME_CREDIT";
             /**
              * @description For LEDGER_ADJUSTMENT user_id, asset and amount, account_type FUTURES when not the SPOT account; for INSURANCE_FUND
              *     asset and amount; reference when given. For DEPOSIT_BACKFILL user_id, asset, amount, network, trade_id, address,
@@ -4563,7 +4813,7 @@ export interface components {
              *     holder; empty in single-person mode.
              * @enum {string}
              */
-            escalation: "" | "REQUESTED" | "TWO_PERSON_MODE" | "SINGLE_LIMIT" | "DAILY_LIMIT" | "NO_PRICE" | "SIM_SHARE" | "NOT_ADDRESS_HOLDER";
+            escalation: "" | "REQUESTED" | "TWO_PERSON_MODE" | "SINGLE_LIMIT" | "DAILY_LIMIT" | "NO_PRICE" | "SIM_SHARE" | "NOT_ADDRESS_HOLDER" | "WELCOME_RAISE";
             journal_id: string | null;
             /**
              * Format: date-time
@@ -7178,7 +7428,7 @@ export interface operations {
     listArticles: {
         parameters: {
             query: {
-                section: "ANNOUNCEMENT" | "HELP";
+                section: "ANNOUNCEMENT" | "HELP" | "LEGAL" | "HOME";
             };
             header?: never;
             path?: never;
@@ -7211,7 +7461,7 @@ export interface operations {
             content: {
                 "application/json": components["schemas"]["ArticleWrite"] & {
                     /** @enum {string} */
-                    section: "ANNOUNCEMENT" | "HELP";
+                    section: "ANNOUNCEMENT" | "HELP" | "LEGAL" | "HOME";
                     reason: string;
                 };
             };
@@ -7794,6 +8044,193 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Approval"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getPlatformProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The profile. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformProfileAdmin"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updatePlatformProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlatformProfileWrite"] & components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description The profile as saved. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformProfileAdmin"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    uploadPlatformImage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kind: "logo_light" | "logo_dark" | "favicon" | "apple_touch_icon";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The image, base64. */
+                    data: string;
+                    /** @enum {string} */
+                    mime: "image/png" | "image/svg+xml" | "image/webp";
+                } & components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description The profile with the image's new URL. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformProfileAdmin"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    deletePlatformImage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kind: "logo_light" | "logo_dark" | "favicon" | "apple_touch_icon";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description The profile without the image. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformProfileAdmin"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getWelcomeCredits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The setting. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WelcomeCreditsSetting"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setWelcomeCredits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    credits: components["schemas"]["WelcomeCredit"][];
+                    /** Format: int64 */
+                    expected_version: number;
+                } & components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description Lowered or cleared, at once. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WelcomeCreditsSetting"];
+                };
+            };
+            /** @description A raise waits for a second ADMIN. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        approval: components["schemas"]["Approval"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getLaunchChecklist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The checklist. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LaunchChecklist"];
                 };
             };
             default: components["responses"]["Error"];

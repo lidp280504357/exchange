@@ -21,14 +21,19 @@ import (
 // messages to one user, a tag's users or everyone (notices.send, audited
 // on broadcast:<id>). Every administrator reads them.
 
-// sections maps the console's names of the sections to the service's.
-var sections = map[string]string{"ANNOUNCEMENT": "ANNOUNCEMENT", "ANNOUNCEMENTS": "ANNOUNCEMENT", "HELP": "HELP"}
+// sections maps the console's names of the sections to the service's;
+// LEGAL (terms, privacy, risk, fees, about, contact) and HOME (home-hero)
+// are the fixed pages a launch overrides (design 2026-10-04 §4.4), their
+// slugs checked by notification-service.
+var sections = map[string]string{
+	"ANNOUNCEMENT": "ANNOUNCEMENT", "ANNOUNCEMENTS": "ANNOUNCEMENT", "HELP": "HELP", "LEGAL": "LEGAL", "HOME": "HOME",
+}
 
 func section(s string) (string, error) {
 	if v, ok := sections[strings.ToUpper(strings.TrimSpace(s))]; ok {
 		return v, nil
 	}
-	return "", apperr.Invalid("section must be ANNOUNCEMENT or HELP")
+	return "", apperr.Invalid("section must be ANNOUNCEMENT, HELP, LEGAL or HOME")
 }
 
 // Articles returns a section's articles in every status.

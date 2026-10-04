@@ -35,6 +35,8 @@ const pages: Record<string, () => Promise<unknown>> = {
   audit: () => import("./pages/Audit"),
   reports: () => import("./pages/Reports"),
   health: () => import("./pages/system/Health"),
+  platform: () => import("./pages/system/Platform"),
+  launch: () => import("./pages/system/Launch"),
   settings: () => import("./pages/system/Settings"),
   account: () => import("./pages/system/Account"),
 };

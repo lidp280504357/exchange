@@ -74,6 +74,12 @@ type settings struct {
 	// MarketSimURL is the simulated market of the platform coin
 	// (MARKET_SIM_URL); its bots stay out of the users' figures.
 	MarketSimURL string `koanf:"market_sim_url"`
+	// InstrumentURL and LedgerURL are instrument-service's and
+	// ledger-service's REST APIs (INSTRUMENT_SERVICE_URL,
+	// LEDGER_SERVICE_URL): the platform's profile and the welcome credits
+	// (design 2026-10-04, D2).
+	InstrumentURL string `koanf:"instrument_service_url"`
+	LedgerURL     string `koanf:"ledger_service_url"`
 	// SimSecret signs the console's changes to the simulated market with
 	// the key "admin" (SIM_ADMIN_API_SECRET, in sim/admin.env only);
 	// without it the market is read-only here.
@@ -140,8 +146,8 @@ func setup(ctx context.Context, a *app.App) error {
 		HTTPAddr: ":8093", Postgres: pg.DefaultConfig(), AuthAddr: "localhost:9181", UserAddr: "localhost:9182",
 		LedgerAddr: "localhost:9185", InstrumentAddr: "localhost:9184", RiskAddr: "localhost:9186", WalletURL: "http://localhost:8092",
 		TradingURL: "http://localhost:8088", DerivativesURL: "http://localhost:8095", MarketDataURL: "http://localhost:8090",
-		NotificationURL: "http://localhost:8083", MarketSimURL: "http://localhost:8098",
-		PasswordHashConcurrency: 2, HealthTargets: defaultHealthTargets,
+		NotificationURL: "http://localhost:8083", MarketSimURL: "http://localhost:8098", InstrumentURL: "http://localhost:8084",
+		LedgerURL: "http://localhost:8085", PasswordHashConcurrency: 2, HealthTargets: defaultHealthTargets,
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -235,6 +241,7 @@ func setup(ctx context.Context, a *app.App) error {
 		ChangeDelayFloor: cfg.ChangeDelayFloor,
 		Reconciler:       backends.Ledger{C: ledgerClient},
 		Content:          backends.Notification{REST: rest, Base: cfg.NotificationURL},
+		Platform:         backends.Platform{REST: rest, Instruments: cfg.InstrumentURL, Ledger: cfg.LedgerURL},
 		SimBots:          sim,
 		Sim:              sim,
 		Log:              a.Logger(),

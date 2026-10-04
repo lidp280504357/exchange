@@ -1743,6 +1743,79 @@ check '.feed.state | IN("OK", "DELAYED", "DOWN", "OFF")' "and the reference feed
 as AUDITOR GET /admin/v1/health ""
 check 'all(.services[]; has("version") | not) and (has("feed") | not)' "without details, readiness alone"
 
+echo "== the platform's settings and the launch checklist (design 2026-10-04, D2)"
+as AUDITOR GET /admin/v1/launch-checklist ""
+expect 200 - "every administrator reads the launch checklist"
+check '(.items | length) == 14 and ([.items[].key] | unique | length) == 14 and all(.items[]; .status | IN("OK", "FAIL", "PENDING", "UNKNOWN"))' \
+  "fourteen items, each with its state"
+check '.ready == false and ([.items[] | select(.key == "admin_totp" or .key == "test_assets")] | all(.status == "FAIL"))' \
+  "the test server is not ready: the console's sign-in without the code and the test assets are on"
+as AUDITOR GET /admin/v1/platform/profile ""
+PLATFORM_DONE=""
+if [[ $STATUS == 404 ]]; then
+  echo "skip the platform's profile and the welcome credits: instrument-service serves no platform profile yet (D1)"
+else
+  expect 200 - "every administrator reads the platform's profile"
+  PROFILE=$BODY
+  PV=$(jq .version <<<"$PROFILE")
+  PNAME=$(jq -r .name <<<"$PROFILE")
+  platform_write() { # platform_write NAME VERSION REASON: the profile read, renamed
+    jq -c --arg n "$1" --argjson v "$2" --arg r "$3" \
+      '{name: $n, short_name, domain, theme_color, brand_color, footer, contact, social, default_locale, learning_mode, registration,
+        expected_version: $v, reason: $r}' <<<"$PROFILE"
+  }
+  as OPERATOR PUT /admin/v1/platform/profile "$(platform_write "e2e rename" "$PV" "e2e: operators rename nothing")"
+  expect 403 ADMIN_FORBIDDEN "only an ADMIN changes the platform's profile"
+  # The name goes back if the run stops before it puts it back itself.
+  restore_platform_name() {
+    as ADMIN GET /admin/v1/platform/profile "" >/dev/null
+    if [[ $(jq -r .name <<<"$BODY") != "$PNAME" ]]; then
+      as ADMIN PUT /admin/v1/platform/profile "$(platform_write "$PNAME" "$(jq .version <<<"$BODY")" "e2e cleanup")" >/dev/null
+    fi
+  }
+  at_exit restore_platform_name
+  as ADMIN PUT /admin/v1/platform/profile "$(platform_write "E2E $RUN" "$PV" "e2e: a rename, put back at once")"
+  expect 200 - "ADMIN renames the platform"
+  check ".name == \"E2E $RUN\" and .version == $((PV + 1)) and .updated_by == \"admin:$EMAIL_ADMIN\"" "saved at the next version, by the ADMIN"
+  as ADMIN PUT /admin/v1/platform/profile "$(platform_write "E2E stale" "$PV" "e2e: a stale version")"
+  expect 409 INSTRUMENT_PLATFORM_CHANGED "a save over a version since changed is refused"
+  as ADMIN PUT /admin/v1/platform/profile "$(platform_write "$PNAME" "$((PV + 1))" "e2e: the name put back")"
+  expect 200 - "and the name is put back"
+  check ".name == \"$PNAME\"" "as it was"
+
+  as AUDITOR GET /admin/v1/platform/welcome-credits ""
+  expect 200 - "every administrator reads the welcome credits"
+  WC=$BODY
+  WV=$(jq .version <<<"$WC")
+  welcome_raise() { # welcome_raise EXTRA REASON: the credits read with EXTRA more USDT
+    jq -c --arg x "$1" --argjson v "$WV" --arg r "$2" '{
+      credits: ([.credits[] | if .asset == "USDT" then .amount = ((.amount | tonumber) + ($x | tonumber) | tostring) else . end]
+        + (if any(.credits[]; .asset == "USDT") then [] else [{asset: "USDT", amount: $x}] end)),
+      expected_version: $v, reason: $r}' <<<"$WC"
+  }
+  as ADMIN PUT /admin/v1/platform/welcome-credits "$(welcome_raise 20001 "e2e: beyond the cap")"
+  expect 422 ADMIN_WELCOME_RAISE_CAP "a raise is worth 10,000 USDT at most, whoever would approve it"
+  as ADMIN PUT /admin/v1/platform/welcome-credits "$(jq -c --argjson v "$((WV + 7))" '{credits, expected_version: $v, reason: "e2e: a stale version"}' <<<"$WC")"
+  expect 409 LEDGER_SETTINGS_CHANGED "a change over a version since changed is refused"
+  as ADMIN PUT /admin/v1/platform/welcome-credits "$(welcome_raise 1 "e2e: one USDT more, withdrawn")"
+  expect 202 - "a raise waits for a second ADMIN"
+  check '.approval.kind == "WELCOME_CREDIT" and .approval.escalation == "WELCOME_RAISE" and .approval.status == "PENDING" and .approval.payload.raise_usdt == "1"' \
+    "a WELCOME_CREDIT request, worth 1 USDT"
+  WELCOME_RAISE=$(jq -r .approval.id <<<"$BODY")
+  # shellcheck disable=SC2016 # expanded when the script ends
+  at_exit 'as ADMIN POST "/admin/v1/approvals/$WELCOME_RAISE/decide" "{\"approve\":false,\"reason\":\"e2e cleanup\"}" >/dev/null'
+  as ADMIN POST "/admin/v1/approvals/$WELCOME_RAISE/decide" '{"approve":true,"reason":"e2e approves its own"}'
+  expect 403 ADMIN_SELF_APPROVAL "not approved by the ADMIN who asked"
+  as FINANCE POST "/admin/v1/approvals/$WELCOME_RAISE/decide" '{"approve":true,"reason":"e2e: finance approves"}'
+  expect 403 ADMIN_FORBIDDEN "nor by FINANCE"
+  as ADMIN POST "/admin/v1/approvals/$WELCOME_RAISE/decide" '{"approve":false,"reason":"e2e: withdrawn"}'
+  expect 200 - "the ADMIN withdraws it"
+  check '.status == "REJECTED"' "withdrawn"
+  as AUDITOR GET /admin/v1/platform/welcome-credits ""
+  check ".version == $WV" "the welcome credits did not change"
+  PLATFORM_DONE=1
+fi
+
 echo "== an announcement on both sites within a minute"
 # One announcement with a fixed slug (articles are never deleted): written
 # by the first run, edited by the next ones; each run schedules it,
@@ -1898,6 +1971,10 @@ eventually 60 "the announcement's changes are audited, by the OPERATOR" audited 
   "[.items[] | select(.actor == \"$EMAIL_OPERATOR\") | .payload.action] | (index(\"admin.content.published\") != null and index(\"admin.content.updated\") != null and index(\"admin.content.archived\") != null)"
 eventually 60 "the in-app message is audited, once" audited AUDITOR "target=broadcast:$BROADCAST_ID" \
   "[.items[] | select(.actor == \"$EMAIL_OPERATOR\" and .payload.action == \"admin.notices.sent\")] | length == 1"
+if [[ -n $PLATFORM_DONE ]]; then
+  eventually 60 "the platform's changes are audited, by the ADMIN: the rename and the request" audited AUDITOR "target=platform" \
+    "[.items[] | select(.actor == \"$EMAIL_ADMIN\") | .payload.action] | (index(\"admin.platform.updated\") != null and index(\"admin.platform.welcome_requested\") != null)"
+fi
 eventually 60 "the asset's profile changes are audited" audited AUDITOR "target=asset:LINK" \
   "[.items[] | select(.actor == \"$EMAIL_OPERATOR\") | .payload.action] | map(select(. == \"admin.instruments.profile_updated\")) | length >= 2"
 q_operator="actor=$(jq -rn --arg e "$EMAIL_OPERATOR" '$e|@uri')"

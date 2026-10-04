@@ -19,7 +19,8 @@ import { Card, Page } from "../../kit/Page";
 
 type Article = AdminSchemas["ContentArticle"];
 type Text = AdminSchemas["ArticleText"];
-type Section = Article["section"];
+/** The sections this page lists (the fixed LEGAL and HOME pages have their own view). */
+type Section = Extract<Article["section"], "ANNOUNCEMENT" | "HELP">;
 type Locale = Text["locale"];
 
 const LOCALES: Locale[] = ["zh-CN", "en"];

@@ -65,6 +65,7 @@ tags:
   - name: content
   - name: custody
   - name: sim
+  - name: platform
 paths:
   /admin/v1/login-options:
     get:
@@ -2614,7 +2615,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [ANNOUNCEMENT, HELP]
+            enum: [ANNOUNCEMENT, HELP, LEGAL, HOME]
       responses:
         '200':
           description: The articles.
@@ -2654,7 +2655,7 @@ paths:
                   properties:
                     section:
                       type: string
-                      enum: [ANNOUNCEMENT, HELP]
+                      enum: [ANNOUNCEMENT, HELP, LEGAL, HOME]
                     reason:
                       type: string
                       minLength: 3
@@ -3314,6 +3315,208 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Approval'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/platform/profile:
+    get:
+      operationId: getPlatformProfile
+      summary: The platform's profile, as the sites show it
+      description: |
+        Design 2026-10-04 §4.1 (D2): the name, logos, colours, footer,
+        contact, learning banner, registration and the welcome credits the
+        sites read, with who last changed it. instrument-service keeps it;
+        the welcome credits are the ledger's (changed with
+        /admin/v1/platform/welcome-credits). Every administrator reads it.
+      tags: [platform]
+      responses:
+        '200':
+          description: The profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformProfileAdmin'
+        default:
+          $ref: '#/components/responses/Error'
+    put:
+      operationId: updatePlatformProfile
+      summary: Replace the platform's profile (all but the images and the welcome credits)
+      description: |
+        expected_version is the version read: 409
+        INSTRUMENT_PLATFORM_CHANGED when someone saved in between. The
+        sites show the change within a minute, without a build. One ADMIN
+        (settings.write) alone; audited as admin.platform.updated with the
+        fields that changed, before and after (design §5).
+      tags: [platform]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/PlatformProfileWrite'
+                - $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: The profile as saved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformProfileAdmin'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/platform/images/{kind}:
+    parameters:
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [logo_light, logo_dark, favicon, apple_touch_icon]
+    put:
+      operationId: uploadPlatformImage
+      summary: Upload one of the platform's images
+      description: |
+        Square, at most 200 KB; PNG, SVG (rebuilt from an allow list) or
+        WebP for the logos, PNG or SVG for the favicon, PNG of at least
+        180 px for the apple-touch-icon (instrument-service checks them).
+        Its URL changes with the version, so no cache serves the old one.
+        settings.write; audited as admin.platform.image_updated with its
+        type, size and SHA-256, never its bytes.
+      tags: [platform]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - type: object
+                  required: [data, mime]
+                  properties:
+                    data:
+                      type: string
+                      description: The image, base64.
+                    mime:
+                      type: string
+                      enum: [image/png, image/svg+xml, image/webp]
+                - $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: The profile with the image's new URL.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformProfileAdmin'
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      operationId: deletePlatformImage
+      summary: Remove an uploaded image (the built-in one shows again)
+      description: settings.write; audited as admin.platform.image_removed.
+      tags: [platform]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: The profile without the image.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformProfileAdmin'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/platform/welcome-credits:
+    get:
+      operationId: getWelcomeCredits
+      summary: What a new account gets (the ledger's setting)
+      description: |
+        The welcome credits (design 2026-10-04 §4.2) and the master switch
+        ledger.welcome_credit: a new account gets them while both say so.
+        A launch sets them to nothing. Every administrator reads them.
+      tags: [platform]
+      responses:
+        '200':
+          description: The setting.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WelcomeCreditsSetting'
+        default:
+          $ref: '#/components/responses/Error'
+    put:
+      operationId: setWelcomeCredits
+      summary: Change the welcome credits
+      description: |
+        settings.write. Lowering or clearing (an amount of 0 or [] is
+        nothing) applies at once: 200 with the setting, audited as
+        admin.platform.welcome_changed (old, new). Raising any asset, or
+        from nothing to something, waits for a second ADMIN: 202 with a
+        WELCOME_CREDIT request (escalation WELCOME_RAISE). A raise is
+        worth at most 10,000 USDT a change (422 ADMIN_WELCOME_RAISE_CAP,
+        whoever approves), priced at the USDT pairs' fresh prices (422
+        ADMIN_WELCOME_UNPRICED without one). expected_version is the
+        version read: 409 LEDGER_SETTINGS_CHANGED when it moved, then and
+        when the request is approved (it fails).
+      tags: [platform]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - type: object
+                  required: [credits, expected_version]
+                  properties:
+                    credits:
+                      type: array
+                      maxItems: 10
+                      items:
+                        $ref: '#/components/schemas/WelcomeCredit'
+                    expected_version:
+                      type: integer
+                      format: int64
+                - $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: Lowered or cleared, at once.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WelcomeCreditsSetting'
+        '202':
+          description: A raise waits for a second ADMIN.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [approval]
+                properties:
+                  approval:
+                    $ref: '#/components/schemas/Approval'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/launch-checklist:
+    get:
+      operationId: getLaunchChecklist
+      summary: What of the learning setup is still on (read-only)
+      description: |
+        Design 2026-10-04 §4.6 (D2): each item from its source now, with
+        what it is (value) and whether it is what a launch needs. ready
+        when every item is OK. It changes nothing and covers what the
+        console can change and see; the deployment side is the launch
+        handbook's. PENDING: its source is not there yet; UNKNOWN: its
+        source did not answer. Every administrator reads it.
+      tags: [platform]
+      responses:
+        '200':
+          description: The checklist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LaunchChecklist'
         default:
           $ref: '#/components/responses/Error'
   /admin/v1/assets/{code}/profile:
@@ -5094,6 +5297,11 @@ components:
         dlq:
           type: integer
           description: With details, for a service with Kafka consumers; records parked in a DLQ since it started.
+        config_present:
+          type: object
+          additionalProperties:
+            type: boolean
+          description: With details, whether the third parties the service uses are configured (exchange_config_present{item}), never their values.
     ReconciliationRun:
       type: object
       required: [check, started_at, mismatches, details]
@@ -5958,6 +6166,243 @@ components:
           enum: [image/png, image/svg+xml, image/webp]
         clear_logo:
           type: boolean
+    PlatformTexts:
+      description: A text by language; zh-CN stands in for a language without one.
+      type: object
+      required: [zh-CN, en]
+      properties:
+        zh-CN:
+          type: string
+        en:
+          type: string
+    WelcomeCredit:
+      type: object
+      required: [asset, amount]
+      properties:
+        asset:
+          type: string
+        amount:
+          $ref: '#/components/schemas/Decimal'
+    WelcomeCreditsSetting:
+      type: object
+      required: [credits, flag_enabled, version, updated_by, updated_at]
+      properties:
+        credits:
+          type: array
+          items:
+            $ref: '#/components/schemas/WelcomeCredit'
+        flag_enabled:
+          type: boolean
+          description: ledger.welcome_credit, the master switch (both must hold for a grant).
+        version:
+          type: integer
+          format: int64
+        updated_by:
+          type: string
+          description: '"system:WELCOME_FUNDS" for the first value taken from the environment.'
+        updated_at:
+          type: [string, 'null']
+          format: date-time
+    PlatformProfileAdmin:
+      description: The platform's profile (as api/openapi/platform.yaml's PlatformProfile) and who last changed it.
+      type: object
+      required: [name, short_name, domain, theme_color, brand_color, images, footer, contact, social, default_locale, learning_mode, registration,
+        welcome_credits, version, updated_at, updated_by]
+      properties:
+        name:
+          type: string
+        short_name:
+          type: string
+        domain:
+          type: string
+          description: The PC site's host name (the mobile site m.<domain>, the console admin.<domain>); empty until set.
+        theme_color:
+          type: string
+        brand_color:
+          type: string
+        images:
+          type: object
+          required: [logo_light, logo_dark, favicon, apple_touch_icon]
+          properties:
+            logo_light:
+              type: [string, 'null']
+            logo_dark:
+              type: [string, 'null']
+            favicon:
+              type: [string, 'null']
+            apple_touch_icon:
+              type: [string, 'null']
+        footer:
+          type: object
+          required: [copyright, compliance]
+          properties:
+            copyright:
+              $ref: '#/components/schemas/PlatformTexts'
+            compliance:
+              $ref: '#/components/schemas/PlatformTexts'
+        contact:
+          type: object
+          required: [email, support_url]
+          properties:
+            email:
+              type: string
+            support_url:
+              type: [string, 'null']
+        social:
+          type: array
+          items:
+            type: object
+            required: [kind, url]
+            properties:
+              kind:
+                type: string
+              url:
+                type: string
+        default_locale:
+          type: string
+          enum: [zh-CN, en]
+        learning_mode:
+          type: object
+          required: [enabled, text]
+          properties:
+            enabled:
+              type: boolean
+            text:
+              $ref: '#/components/schemas/PlatformTexts'
+        registration:
+          type: object
+          required: [status, closed_text]
+          properties:
+            status:
+              type: string
+              enum: [OPEN, CLOSED]
+            closed_text:
+              $ref: '#/components/schemas/PlatformTexts'
+        welcome_credits:
+          type: array
+          description: The ledger's, read within the last minute (change them at /admin/v1/platform/welcome-credits).
+          items:
+            type: object
+            required: [asset, amount]
+            properties:
+              asset:
+                type: string
+              amount:
+                type: string
+        version:
+          type: integer
+          format: int64
+        updated_at:
+          type: string
+          format: date-time
+        updated_by:
+          type: string
+          description: The actor of the last change ("admin:<email>", "system:migration").
+    PlatformProfileWrite:
+      type: object
+      required: [name, short_name, domain, theme_color, brand_color, footer, contact, social, default_locale, learning_mode, registration,
+        expected_version]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 32
+        short_name:
+          type: string
+          minLength: 2
+          maxLength: 12
+        domain:
+          type: string
+          description: The PC site's host name (a.b, lower case, at most 253), or empty.
+        theme_color:
+          type: string
+          pattern: '^#[0-9a-f]{6}$'
+        brand_color:
+          type: string
+          pattern: '^#[0-9a-f]{6}$'
+        footer:
+          type: object
+          required: [copyright, compliance]
+          properties:
+            copyright:
+              $ref: '#/components/schemas/PlatformTexts'
+            compliance:
+              $ref: '#/components/schemas/PlatformTexts'
+        contact:
+          type: object
+          required: [email, support_url]
+          properties:
+            email:
+              type: string
+              description: An e-mail address, or empty.
+            support_url:
+              type: [string, 'null']
+              description: An https URL of at most 300 characters.
+        social:
+          type: array
+          maxItems: 10
+          items:
+            type: object
+            required: [kind, url]
+            properties:
+              kind:
+                type: string
+                enum: [x, telegram, discord, youtube, facebook, instagram, linkedin, reddit, medium, github, tiktok, weibo]
+              url:
+                type: string
+                description: An https URL of at most 300 characters.
+        default_locale:
+          type: string
+          enum: [zh-CN, en]
+        learning_mode:
+          type: object
+          required: [enabled, text]
+          properties:
+            enabled:
+              type: boolean
+            text:
+              $ref: '#/components/schemas/PlatformTexts'
+        registration:
+          type: object
+          required: [status, closed_text]
+          properties:
+            status:
+              type: string
+              enum: [OPEN, CLOSED]
+            closed_text:
+              $ref: '#/components/schemas/PlatformTexts'
+        expected_version:
+          type: integer
+          format: int64
+    LaunchItem:
+      type: object
+      required: [key, status, value]
+      properties:
+        key:
+          type: string
+          enum: [welcome_credits, learning_mode, registration, admin_totp, two_person, test_assets, custodian, withdraw, brand, coin_profile, legal,
+            third_party, admins, domain]
+        status:
+          type: string
+          enum: [OK, FAIL, PENDING, UNKNOWN]
+        value:
+          type: object
+          additionalProperties: true
+          description: What it is now, by item (a flag's enabled and rules, the credits, the custodian's gateway host, the administrators...).
+    LaunchChecklist:
+      type: object
+      required: [ready, items, checked_at]
+      properties:
+        ready:
+          type: boolean
+          description: Every item is OK.
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/LaunchItem'
+        checked_at:
+          type: string
+          format: date-time
     Reason:
       type: object
       required: [reason]
@@ -6025,7 +6470,7 @@ components:
           format: uuid
         section:
           type: string
-          enum: [ANNOUNCEMENT, HELP]
+          enum: [ANNOUNCEMENT, HELP, LEGAL, HOME]
         slug:
           type: string
         category:
@@ -7551,7 +7996,7 @@ components:
           format: uuid
         kind:
           type: string
-          enum: [LEDGER_ADJUSTMENT, INSURANCE_FUND, DEPOSIT_BACKFILL, SIM_EVENT, SIM_PARAMS, SIM_MINT, DEPOSIT_ASSIGN]
+          enum: [LEDGER_ADJUSTMENT, INSURANCE_FUND, DEPOSIT_BACKFILL, SIM_EVENT, SIM_PARAMS, SIM_MINT, DEPOSIT_ASSIGN, WELCOME_CREDIT]
         payload:
           type: object
           description: |
@@ -7600,7 +8045,7 @@ components:
           $ref: '#/components/schemas/NullableDecimal'
         escalation:
           type: string
-          enum: ['', REQUESTED, TWO_PERSON_MODE, SINGLE_LIMIT, DAILY_LIMIT, NO_PRICE, SIM_SHARE, NOT_ADDRESS_HOLDER]
+          enum: ['', REQUESTED, TWO_PERSON_MODE, SINGLE_LIMIT, DAILY_LIMIT, NO_PRICE, SIM_SHARE, NOT_ADDRESS_HOLDER, WELCOME_RAISE]
           description: |
             Why a two-person operation waits for a second administrator:
             asked for, two-person mode on, above the single-operation

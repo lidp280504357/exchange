@@ -7,6 +7,7 @@ import {
   BookOpen,
   BookOpenText,
   Bot,
+  Building2,
   CalendarClock,
   ChartColumn,
   ChartLine,
@@ -20,6 +21,7 @@ import {
   LayoutDashboard,
   ListOrdered,
   Megaphone,
+  Rocket,
   ScrollText,
   Settings,
   ShieldAlert,
@@ -91,6 +93,8 @@ export const sections: Section[] = [
   { path: "audit", key: "audit", group: "system", perm: "audit.read", icon: ScrollText, page: lazy(() => import("./pages/Audit")) },
   { path: "reports", key: "reports", group: "system", perm: "reports.read", icon: ChartColumn, page: lazy(() => import("./pages/Reports")) },
   { path: "health", key: "health", group: "system", perm: "reports.read", icon: HeartPulse, page: lazy(() => import("./pages/system/Health")) },
+  { path: "platform", key: "platform", group: "system", perm: "reports.read", icon: Building2, page: lazy(() => import("./pages/system/Platform")) },
+  { path: "launch", key: "launch", group: "system", perm: "reports.read", icon: Rocket, page: lazy(() => import("./pages/system/Launch")) },
   { path: "settings", key: "settings", group: "system", icon: Settings, page: lazy(() => import("./pages/system/Settings")) },
 ];
 

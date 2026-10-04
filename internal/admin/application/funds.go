@@ -67,10 +67,19 @@ var fundActions = map[string]struct{ requested, approved, rejected, executed, fa
 		"admin.deposits.assign_requested", "admin.deposits.assign_approved", "admin.deposits.assign_rejected",
 		"admin.deposits.assign_executed", "admin.deposits.assign_failed", "admin.deposits.assign_unfinished",
 	},
+	domain.KindWelcomeCredit: {
+		"admin.platform.welcome_requested", "admin.platform.welcome_approved", "admin.platform.welcome_rejected",
+		"admin.platform.welcome_changed", "admin.platform.welcome_failed", "admin.platform.welcome_unfinished",
+	},
 }
 
 // simKind reports whether an approval is a simulated market's change.
 func simKind(kind string) bool { return kind == domain.KindSimEvent || kind == domain.KindSimParams }
+
+// changeKind reports whether an approval sets something rather than books
+// it: a simulated market's change, the welcome credits. Its attempt is not
+// marked (the service refuses it twice), a failure leaves it as it was.
+func changeKind(kind string) bool { return simKind(kind) || kind == domain.KindWelcomeCredit }
 
 // fundTarget is the audit target of an operation.
 func fundTarget(a domain.Approval) string {
@@ -79,6 +88,8 @@ func fundTarget(a domain.Approval) string {
 		return "insurance:" + a.Payload["asset"]
 	case simKind(a.Kind), a.Kind == domain.KindSimMint:
 		return simAuditTarget
+	case a.Kind == domain.KindWelcomeCredit:
+		return platformTarget
 	}
 	return "user:" + a.Payload["user_id"]
 }
@@ -482,6 +493,14 @@ func accountOf(a domain.Approval) string {
 
 // fundDetails is an operation's audit detail.
 func fundDetails(a domain.Approval) string {
+	if a.Kind == domain.KindWelcomeCredit {
+		d, _ := json.Marshal(map[string]any{
+			"approval_id": a.ID, "credits": json.RawMessage(orEmptyList(a.Payload["credits"])), "previous": json.RawMessage(orEmptyList(a.Payload["previous"])),
+			"expected_version": a.Payload["expected_version"], "raise_usdt": a.Payload["raise_usdt"], "mode": a.Mode, "escalation": a.Escalation,
+			"status": a.Status, "result": a.Result,
+		})
+		return string(d)
+	}
 	if simKind(a.Kind) {
 		d, _ := json.Marshal(map[string]any{
 			"approval_id": a.ID, "change": json.RawMessage(a.Payload["change"]), "move": a.Payload["move"], "mode": a.Mode,
@@ -594,8 +613,11 @@ func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, ap
 			return apperr.NotFound("no such request")
 		}
 		perm := domain.PermAdjustApprove
-		if simKind(cur.Kind) {
+		switch {
+		case simKind(cur.Kind):
 			perm = domain.PermSimControl
+		case cur.Kind == domain.KindWelcomeCredit:
+			perm = domain.PermSettingsEdit
 		}
 		if err := p.require(perm); err != nil {
 			return err
@@ -624,8 +646,8 @@ func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, ap
 		default:
 			action = actions.approved
 			if err := s.execute(ctx, &a, p); err != nil {
-				if simKind(a.Kind) {
-					return err // a simulated market's change stays as it was
+				if changeKind(a.Kind) {
+					return err // a change stays as it was
 				}
 				unknown = err // still pending, attempted since beginAttempt
 				return nil
@@ -663,7 +685,7 @@ func (s *Service) DecideApproval(ctx context.Context, p Principal, id string, ap
 func (s *Service) beginAttempt(ctx context.Context, p Principal, id string) error {
 	return s.Store.Tx(ctx, func(r ports.Repos) error {
 		cur, err := r.Approvals().GetForUpdate(ctx, id)
-		if err != nil || cur == nil || simKind(cur.Kind) || !cur.AttemptedAt.IsZero() {
+		if err != nil || cur == nil || changeKind(cur.Kind) || !cur.AttemptedAt.IsZero() {
 			return err
 		}
 		if p.require(domain.PermAdjustApprove) != nil || cur.Decide(p.Admin.ID, true) != nil {
@@ -704,8 +726,12 @@ func decidedAlike(a domain.Approval, decider string, approve bool) bool {
 // ledger compares it; the decider's reason is in the audit trail). A
 // refusal marks it FAILED.
 func (s *Service) execute(ctx context.Context, a *domain.Approval, p Principal) error {
-	if simKind(a.Kind) {
-		result, err := s.executeSim(ctx, *a, p)
+	if changeKind(a.Kind) {
+		run := s.executeSim
+		if a.Kind == domain.KindWelcomeCredit {
+			run = s.executeWelcome
+		}
+		result, err := run(ctx, *a, p)
 		if err != nil {
 			var e *apperr.Error
 			if !errors.As(err, &e) || e.Kind == apperr.KindUnavailable || e.Kind == apperr.KindInternal {
@@ -926,4 +952,12 @@ func (s *Service) UpdateSettings(ctx context.Context, p Principal, in SettingsPa
 func limitsJSON(s domain.Settings) string {
 	return fmt.Sprintf(`{"single_max_usdt":%q,"daily_max_usdt":%q,"withdrawal_max_usdt":%q,"change_delay_seconds":%d}`,
 		s.SingleMax.String(), s.DailyMax.String(), s.WithdrawalMax.String(), int64(s.ChangeDelay/time.Second))
+}
+
+// orEmptyList is a JSON list kept in a payload, [] when there is none.
+func orEmptyList(v string) string {
+	if v == "" {
+		return "[]"
+	}
+	return v
 }
