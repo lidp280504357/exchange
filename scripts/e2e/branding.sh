@@ -83,7 +83,9 @@ restore_profile() {
 at_exit restore_profile
 
 echo "== rename the exchange and upload a favicon"
-NAME="E2E Exchange $RUN"
+# No six digits in a row: the codes are read from the mails, whose subject
+# carries the name.
+NAME="E2E Exchange ${RUN: -4}"
 set_profile ".name = \"$NAME\" | .short_name = \"E2E\"" "e2e: a new name"
 expect 200 - "renamed to $NAME"
 SVG='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="#1e40af"/></svg>'
@@ -127,6 +129,12 @@ set_profile ".learning_mode.enabled = $([[ $OFF == 1 ]] && echo true || echo fal
 expect 200 - "the banner switched"
 eventually 20 "the public profile has it" bash -c "curl -s '$BASE/v1/platform/profile' | jq -e '.learning_mode.enabled == $([[ $OFF == 1 ]] && echo true || echo false)'"
 SITE=pc BRAND=$NAME FAVICON=1 LEARNING=$OFF BANNER=$LEARNING_TEXT CAPTCHA_BYPASS_TOKEN="$BYPASS" node "$(dirname "$0")/../../web/e2e/branding.mjs"
+
+# The name goes back before any mail is sent: notification-service signs
+# them with the name it read, for ten minutes.
+restore_profile
+expect 200 - "the name and the icon put back"
+PROFILE_BACK=""
 
 echo "== closed sign-ups"
 set_profile '.registration.status = "CLOSED"' "e2e: sign-ups closed"
