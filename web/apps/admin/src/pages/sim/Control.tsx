@@ -122,7 +122,7 @@ function Params({ current, version, control }: { current: Record<string, number>
                   inputMode="decimal"
                   disabled={!control}
                   onValueChange={(v) => setDraft({ ...draft, [k]: v })}
-                  className={changed.includes(k) ? "font-mono text-brand" : "font-mono"}
+                  className={changed.includes(k) ? "font-mono text-brand-strong" : "font-mono"}
                   aria-label={k}
                 />
               </label>

@@ -55,7 +55,7 @@ function Toast({ item }: { item: ToastRecord }) {
               item.action?.onClick();
               toastStore.dismiss(item.id);
             }}
-            className="mt-2 text-xs font-medium text-brand hover:brightness-110"
+            className="mt-2 text-xs font-medium text-brand-strong hover:brightness-110"
           >
             {item.action.label}
           </button>

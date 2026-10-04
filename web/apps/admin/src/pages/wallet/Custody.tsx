@@ -122,7 +122,7 @@ function Summary({ o }: { o: Overview | undefined }) {
           <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-fg-3">
             <span>{t("admin.custody.submittedValue", { value: o.submitted.amount_usdt })}</span>
             {o.submitted.oldest_at && <span>{t("admin.custody.oldest", { time: time(o.submitted.oldest_at) })}</span>}
-            <Link className="text-brand hover:underline" to="/withdrawals?status=SUBMITTED">
+            <Link className="text-brand-strong hover:underline" to="/withdrawals?status=SUBMITTED">
               {t("admin.custody.viewSubmitted")}
             </Link>
           </p>

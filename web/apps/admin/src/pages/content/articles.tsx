@@ -46,7 +46,7 @@ const PROSE = cn(
   "[&_h2]:mb-2 [&_h2]:mt-6 [&_h2]:border-b [&_h2]:border-line-1 [&_h2]:pb-1 [&_h2]:text-md [&_h2]:font-semibold [&_h2]:text-fg-1",
   "[&_h3]:mb-2 [&_h3]:mt-5 [&_h3]:font-semibold [&_h3]:text-fg-1 [&_p]:my-2",
   "[&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1",
-  "[&_a]:text-brand [&_strong]:font-semibold [&_strong]:text-fg-1",
+  "[&_a]:text-brand-strong [&_strong]:font-semibold [&_strong]:text-fg-1",
   "[&_code]:rounded-1 [&_code]:bg-bg-3 [&_code]:px-1 [&_code]:font-mono [&_code]:text-xs",
   "[&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-brand [&_blockquote]:bg-bg-2 [&_blockquote]:px-3",
   "[&_table]:w-full [&_table]:text-xs [&_th]:border-b [&_th]:border-line-1 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left",

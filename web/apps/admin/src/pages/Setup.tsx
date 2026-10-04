@@ -71,7 +71,7 @@ export default function Setup() {
         </span>
         <div className="text-lg font-semibold">{t("admin.setup.done")}</div>
         <p className="text-sm text-fg-3">{t(view.data.kind === "TOTP" ? "admin.setup.doneTotp" : "admin.setup.donePassword")}</p>
-        <Link to="/login" className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-brand hover:underline">
+        <Link to="/login" className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-brand-strong hover:underline">
           {t("admin.setup.toLogin")}
           <ArrowRight size={14} />
         </Link>
@@ -173,7 +173,7 @@ function Gone({ text }: { text: string }) {
     <div className="flex flex-col gap-3 py-2" data-testid="setup-invalid">
       <div className="text-lg font-semibold">{t("admin.setup.invalidTitle")}</div>
       <p className="text-sm text-fg-3">{text}</p>
-      <Link to="/login" className="inline-flex items-center gap-1.5 text-sm font-medium text-brand hover:underline">
+      <Link to="/login" className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-strong hover:underline">
         {t("admin.setup.toLogin")}
         <ArrowRight size={14} />
       </Link>

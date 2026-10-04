@@ -249,7 +249,7 @@ function PlaceHold({ userId, balances }: { userId: string; balances: Balance[] }
             error={amount !== "" && !ok ? t("admin.money.badHold") : undefined}
             suffix={
               chosen ? (
-                <button type="button" className="mr-2 text-xs text-brand hover:underline" onClick={() => setAmount(chosen.available)}>
+                <button type="button" className="mr-2 text-xs text-brand-strong hover:underline" onClick={() => setAmount(chosen.available)}>
                   {t("admin.money.all")}
                 </button>
               ) : undefined

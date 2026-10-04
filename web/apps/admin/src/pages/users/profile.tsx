@@ -123,7 +123,7 @@ function Identities({ admin, userId }: { admin: Admin; userId: string }) {
       title={t("admin.user.identities")}
       extra={
         ids.canReveal && !ids.revealed && (ids.identities ?? []).length > 0 ? (
-          <button type="button" className="inline-flex items-center gap-1 text-xs text-brand hover:underline" onClick={() => void ids.reveal()} disabled={ids.revealing}>
+          <button type="button" className="inline-flex items-center gap-1 text-xs text-brand-strong hover:underline" onClick={() => void ids.reveal()} disabled={ids.revealing}>
             <Eye size={13} />
             {t("admin.user.reveal")}
           </button>

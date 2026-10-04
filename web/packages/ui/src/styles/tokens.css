@@ -12,7 +12,8 @@
   --bg-3: #232a34;
   --fg-1: #eaecef;
   --fg-2: #a7b1bc;
-  --fg-3: #6b7280;
+  /* 6.31 / 5.92 / 5.39 / 4.71 : 1 on bg-0..bg-3 (ui-checklist item 3). */
+  --fg-3: #8a94a3;
   --line-1: #232a34;
   --line-2: #2f3742;
   --brand: #f0b90b;
@@ -23,6 +24,14 @@
   --red: #f6465d;
   --up: var(--green);
   --down: var(--red);
+  /* Text-only shades of rise, fall and the brand (text-up-strong ...): the
+     light theme darkens them to read on its backgrounds; fills, candles,
+     badges and charts keep the colours above. On dark they are the same. */
+  --green-strong: var(--green);
+  --red-strong: var(--red);
+  --up-strong: var(--green-strong);
+  --down-strong: var(--red-strong);
+  --brand-strong: var(--brand);
   /* Translucent rise and fall, for canvas drawings that cannot use
      Tailwind opacity modifiers (the chart's volume bars). */
   --green-soft: #0ecb8159;
@@ -67,6 +76,10 @@
   --r-2: 8px;
   --r-3: 12px;
 
+  /* The smallest touch target (ui-checklist M1), in px: the root font is
+     14 px, so rem sizes such as size-11 come out at 38.5 px. */
+  --tap: 44px;
+
   --t-fast: 120ms;
   --t-base: 200ms;
   --t-slow: 320ms;
@@ -90,9 +103,16 @@
   --bg-3: #e6e9ee;
   --fg-1: #111827;
   --fg-2: #4b5563;
-  --fg-3: #9ca3af;
+  /* 5.00 / 5.37 / 4.79 : 1 on bg-0..bg-2; 4.41 on bg-3, for text that is
+     not essential there (ui-checklist item 3). */
+  --fg-3: #646b77;
   --line-1: #e5e7eb;
   --line-2: #d1d5db;
+  /* Text on bg-0 / bg-1 / bg-2 / bg-3: green 5.01 / 5.38 / 4.80 / 4.42,
+     red 5.21 / 5.59 / 4.99 / 4.60, brand 5.15 / 5.53 / 4.93 / 4.54 : 1. */
+  --green-strong: #087a4e;
+  --red-strong: #c42b3a;
+  --brand-strong: #866300;
   --brand-soft: color-mix(in srgb, var(--brand) 20%, transparent);
   --overlay: #11182766;
   --shadow: 0 8px 24px #1118271f;
@@ -104,4 +124,6 @@
   --down: var(--green);
   --up-soft: var(--red-soft);
   --down-soft: var(--green-soft);
+  --up-strong: var(--red-strong);
+  --down-strong: var(--green-strong);
 }

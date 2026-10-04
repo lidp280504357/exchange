@@ -69,7 +69,7 @@ export default function SimOverview(_: { admin: Admin }) {
               <span className="font-mono text-2xl tabular-nums" data-testid="sim-target">{price(st.target_price)}</span>
               <span className="text-xs text-fg-3">
                 {t("admin.sim.last")} <span className="font-mono text-fg-1">{price(st.last_price)}</span>
-                {gap !== null && <span className={gap >= 0 ? " text-up" : " text-down"}> ({pct(gap)})</span>}
+                {gap !== null && <span className={gap >= 0 ? " text-up-strong" : " text-down-strong"}> ({pct(gap)})</span>}
               </span>
               <span className="text-xs text-fg-3">{st.last_trade_at ? <>{t("admin.sim.lastTrade")} <TimeText value={st.last_trade_at} style="timeSeconds" /></> : t("admin.sim.noTrade")}</span>
             </div>
