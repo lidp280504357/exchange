@@ -149,6 +149,7 @@ export const platformZh = {
   errors: {
     ADMIN_WELCOME_RAISE_CAP: "每次最多把注册赠送提高 10,000 USDT 等值，谁批准都不行",
     ADMIN_WELCOME_UNPRICED: "这个资产没有新鲜的 USDT 价格，提高的部分无法折算",
+    ADMIN_WELCOME_RAISE_PENDING: "同样的提高你已经提交过，正在等另一位管理员批准（见审批）",
     INSTRUMENT_PLATFORM_CHANGED: "平台资料已被他人修改：刷新后再改",
     LEDGER_SETTINGS_CHANGED: "注册赠送已被改过：刷新后再改",
   },
@@ -266,6 +267,7 @@ export const platformEn = {
   errors: {
     ADMIN_WELCOME_RAISE_CAP: "A change raises the welcome credits by 10,000 USDT at most, whoever approves",
     ADMIN_WELCOME_UNPRICED: "The asset has no fresh USDT price: its raise cannot be valued",
+    ADMIN_WELCOME_RAISE_PENDING: "You already asked for this raise; it waits for a second administrator (see the approvals)",
     INSTRUMENT_PLATFORM_CHANGED: "Someone changed the profile meanwhile: refresh and change it again",
     LEDGER_SETTINGS_CHANGED: "The welcome credits changed meanwhile: refresh and change them again",
   },

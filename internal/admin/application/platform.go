@@ -43,6 +43,8 @@ var (
 		"a change raises the welcome credits by at most 10,000 USDT, whoever approves it")
 	ErrWelcomeUnpriced = apperr.New(apperr.KindUnprocessable, "ADMIN_WELCOME_UNPRICED",
 		"an asset without a fresh USDT price cannot be raised: its worth is unknown")
+	ErrWelcomeRaisePending = apperr.New(apperr.KindConflict, "ADMIN_WELCOME_RAISE_PENDING",
+		"the same raise, asked by the same administrator against the same version, already waits for a second ADMIN")
 )
 
 // The platform's image kinds and the most an upload may be (the service
@@ -371,6 +373,21 @@ func (s *Service) requestWelcome(ctx context.Context, p Principal, cur welcomeSe
 	}
 	actions := fundActions[a.Kind]
 	err := s.Store.Tx(ctx, func(r ports.Repos) error {
+		// Asking again for the same raise against the same version while
+		// the first request waits is refused, naming it (review ㉛).
+		pending, err := r.Approvals().List(ctx, domain.ApprovalPending, time.Time{}, "", 200)
+		if err != nil {
+			return err
+		}
+		for _, o := range pending {
+			if o.Kind != domain.KindWelcomeCredit || o.RequestedBy != a.RequestedBy || o.Payload["expected_version"] != a.Payload["expected_version"] {
+				continue
+			}
+			var asked []ports.WelcomeCredit
+			if json.Unmarshal([]byte(o.Payload["credits"]), &asked) == nil && sameCredits(asked, next) {
+				return ErrWelcomeRaisePending.WithDetail("approval_id", o.ID)
+			}
+		}
 		if err := r.Approvals().Insert(ctx, a); err != nil {
 			return err
 		}
@@ -397,12 +414,19 @@ func (s *Service) executeWelcome(ctx context.Context, a domain.Approval, p Princ
 	if apperr.Is(err, "LEDGER_SETTINGS_CHANGED") {
 		// An earlier attempt whose answer was lost may have set them: the
 		// ledger at the next version, holding these credits, set by this
-		// request's actor, is that attempt (review ㉚).
-		if raw, rerr := s.Platform.WelcomeCredits(ctx); rerr == nil {
-			var cur welcomeSetting
-			if json.Unmarshal(raw, &cur) == nil && cur.Version == version+1 && cur.UpdatedBy == a.Payload["actor"] && sameCredits(cur.Credits, credits) {
-				return "welcome credits version " + strconv.FormatInt(cur.Version, 10) + " (set by an earlier attempt)", nil
-			}
+		// request's actor, is that attempt (review ㉚). When the setting
+		// cannot be read again the outcome is unknown: the request stays
+		// pending (review ㉛).
+		raw, rerr := s.Platform.WelcomeCredits(ctx)
+		var cur welcomeSetting
+		if rerr == nil {
+			rerr = json.Unmarshal(raw, &cur)
+		}
+		if rerr != nil {
+			return "", apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "the welcome credits changed and cannot be read again: try again")
+		}
+		if cur.Version == version+1 && cur.UpdatedBy == a.Payload["actor"] && sameCredits(cur.Credits, credits) {
+			return "welcome credits version " + strconv.FormatInt(cur.Version, 10) + " (set by an earlier attempt)", nil
 		}
 	}
 	if err != nil {

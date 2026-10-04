@@ -22,8 +22,9 @@ type fakePlatform struct {
 	version   int64
 	updatedBy string
 	sets      []string
-	// lose sets the credits but loses the answer, once.
-	lose bool
+	// lose sets the credits but loses the answer, once; failRead fails the
+	// next read of them, once.
+	lose, failRead bool
 }
 
 // creditCatalog lists the assets the welcome credits may name, with their
@@ -81,6 +82,10 @@ func (f *fakePlatform) DeleteImage(_ context.Context, kind, _, _ string) (json.R
 }
 
 func (f *fakePlatform) WelcomeCredits(context.Context) (json.RawMessage, error) {
+	if f.failRead {
+		f.failRead = false
+		return nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "the ledger is not answering")
+	}
 	return json.Marshal(map[string]any{"credits": f.credits, "flag_enabled": true, "version": f.version, "updated_by": f.updatedBy})
 }
 
@@ -211,6 +216,10 @@ func TestWelcomeCredits(t *testing.T) {
 		a.Payload["raise_usdt"] != "1600" || a.Payload["expected_version"] != "2" || len(h.auditsOf("admin.platform.welcome_requested")) != 1 {
 		t.Fatalf("the request %+v", a)
 	}
+	// The same raise asked again while it waits is refused, naming the first (review ㉛).
+	if _, err := h.svc.SetWelcomeCredits(ctx, boss, []ports.WelcomeCredit{credit("BTC", "0.01"), credit("USDT", "6000.0")}, 2, "a little more, again"); code(err) != "ADMIN_WELCOME_RAISE_PENDING" {
+		t.Fatalf("the same raise twice: %v", err)
+	}
 	if _, err := h.svc.DecideApproval(ctx, boss, a.ID, true, "my own raise"); code(err) != "ADMIN_SELF_APPROVAL" {
 		t.Fatalf("approved by its requester: %v", err)
 	}
@@ -259,6 +268,14 @@ func TestWelcomeCredits(t *testing.T) {
 	}
 	if got := h.store.approvals[res.Approval.ID]; got.Status != domain.ApprovalPending || pl.credits[1].Amount.String() != "1500" {
 		t.Fatalf("after the lost answer %+v %+v", got, pl.credits)
+	}
+	// Approved again while the setting cannot be read: still unknown, still pending (review ㉛).
+	pl.failRead = true
+	if _, err := h.svc.DecideApproval(ctx, second, res.Approval.ID, true, "agreed, the ledger is slow"); code(err) != apperr.CodeUnavailable {
+		t.Fatalf("a 409 not read again: %v", err)
+	}
+	if got := h.store.approvals[res.Approval.ID]; got.Status != domain.ApprovalPending {
+		t.Fatalf("after a 409 not read again %+v", got)
 	}
 	done, err = h.svc.DecideApproval(ctx, second, res.Approval.ID, true, "agreed again")
 	if err != nil || done.Status != domain.ApprovalExecuted || done.Result != "welcome credits version 5 (set by an earlier attempt)" || len(pl.sets) != 4 {

@@ -228,11 +228,12 @@ func launchRegistration(pr *launchProfileView) (string, map[string]any) {
 // (a name other than the seeded one, uploaded images, not the built-in).
 func launchBrand(pr *launchProfileView) (string, map[string]any) {
 	name := strings.TrimSpace(pr.Name)
+	seeded := strings.EqualFold(name, launchDefaultName) // "ASTRAS" is still the seeded name (review ㉛)
 	value := map[string]any{
-		"name": pr.Name, "default_name": name == launchDefaultName,
+		"name": pr.Name, "default_name": seeded,
 		"logo": pr.Images.LogoLight != nil || pr.Images.LogoDark != nil, "favicon": pr.Images.Favicon != nil,
 	}
-	if name == "" || name == launchDefaultName || (pr.Images.LogoLight == nil && pr.Images.LogoDark == nil) || pr.Images.Favicon == nil {
+	if name == "" || seeded || (pr.Images.LogoLight == nil && pr.Images.LogoDark == nil) || pr.Images.Favicon == nil {
 		return LaunchFail, value
 	}
 	return LaunchOK, value

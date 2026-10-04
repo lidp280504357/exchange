@@ -419,9 +419,9 @@ admin-service ──gRPC──> auth-service（按邮箱/手机号找用户、�
 - **图片**：浅色与深色背景的 logo、favicon、Apple 触摸图标。`PUT/DELETE /admin/v1/platform/images/{kind}`（`logo_light`、`logo_dark`、`favicon`、`apple_touch_icon`）：正方形、最大 200 KB；logo 收 PNG、SVG、WebP，favicon 收 PNG、SVG，触摸图标只收 PNG 且至少 180 px（instrument-service 再查一遍，SVG 按允许名单重建）。上传前在确认框里预览；删除后恢复内置图片。审计 `admin.platform.image_updated`（类型、大小、SHA-256，不含内容）与 `admin.platform.image_removed`。图片地址带版本，nginx 让 admin.<域名> 同源代理 `/v1/platform/images/*`（后台的 CSP 不放第三方图片）。
 - **注册赠送**（ledger-service 的设置，经 `LEDGER_SERVICE_URL` 的 `/internal/ledger/settings/welcome-credits`；页面标「上线应为 0」）：新账户注册时得到的资金列表（资产与数额），总闸开关 `ledger.welcome_credit` 也开着才发。`PUT /admin/v1/platform/welcome-credits` 带 `expected_version`（过期 409 `LEDGER_SETTINGS_CHANGED`）：
   - 降低或清空（数额 0 即不发，`[]` 全部不发）立即生效（200），审计 `admin.platform.welcome_changed`（新旧列表）；账本另记 `ledger.settings.welcome_credits`。
-  - 提高任何一项、或从 0 变为非零，一律等另一位 ADMIN 批准（202，资金操作 `WELCOME_CREDIT`，模式 TWO_PERSON，`escalation` 为 `WELCOME_RAISE`，单人模式也一样）。提高部分按各资产 USDT 交易对的新鲜价格折算合计，每次最多 10,000 USDT，谁批准都不能越过（422 `ADMIN_WELCOME_RAISE_CAP`）；没有新鲜价格的资产不能提高（422 `ADMIN_WELCOME_UNPRICED`）。申请前按账本的规则先查一遍（资产代码 2–12 位大写字母与数字、资产存在、数额不超过资产的小数位，否则 400），不会等到批准时才失败（复审 ㉚）。
+  - 提高任何一项、或从 0 变为非零，一律等另一位 ADMIN 批准（202，资金操作 `WELCOME_CREDIT`，模式 TWO_PERSON，`escalation` 为 `WELCOME_RAISE`，单人模式也一样）。提高部分按各资产 USDT 交易对的新鲜价格折算合计，每次最多 10,000 USDT，谁批准都不能越过（422 `ADMIN_WELCOME_RAISE_CAP`）；没有新鲜价格的资产不能提高（422 `ADMIN_WELCOME_UNPRICED`）。申请前按账本的规则先查一遍（资产代码 2–12 位大写字母与数字、资产存在、数额不超过资产的小数位，否则 400），不会等到批准时才失败（复审 ㉚）。同一位管理员对同一版本再提一次同样的提高，在第一条还在等批准时被拒（409 `ADMIN_WELCOME_RAISE_PENDING`，附那条申请的 ID；复审 ㉛）。数额全为 0 等于不赠送：后台去掉为 0 的项，交给账本的是空列表 `[]`（账本不收 0）。
   - 批准要 `settings.write`（ADMIN），不能批准自己的；批准时按申请时的版本设置，期间赠送被改过则这次申请失败（结果 `LEDGER_SETTINGS_CHANGED: …`），不会覆盖别人的修改。申请人可以撤回。申请一天内有效（折算用的是申请时的价格），过期后列表标「已过期」，批准只会记为失败（`expired at …`），不设置任何东西（复审 ㉚）。这类申请不记 `attempted_at`（重复设置会被版本拒绝），不计入单人模式的 24 小时累计。审计 `admin.platform.welcome_requested/approved/rejected/changed/failed`，对象 `platform`，详情有新旧列表、版本与折算金额。
-  - 账本的应答丢失时（已设置、但后台没收到回复）申请仍是待批；再次批准时账本按版本返回 409，后台随即重读设置：版本正好是申请时的下一版、列表与申请一致、修改人是申请人，就是上一次的设置，记为已执行（结果带 `set by an earlier attempt`），否则记为失败（复审 ㉚）。
+  - 账本的应答丢失时（已设置、但后台没收到回复）申请仍是待批；再次批准时账本按版本返回 409，后台随即重读设置：版本正好是申请时的下一版、列表与申请一致、修改人是申请人，就是上一次的设置，记为已执行（结果带 `set by an earlier attempt`），否则记为失败（复审 ㉚）；重读本身失败时结果仍未知，申请保持待批（503，可再批准；复审 ㉛）。
 
 ### 上线检查清单
 
@@ -552,6 +552,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 | `ADMIN_SIM_TOO_FAR_AHEAD` | 价格事件（或目标的预览）的开始时间超过 24 小时之后（market-sim 的 MaxLead） |
 | `ADMIN_WELCOME_RAISE_CAP` | 一次提高注册赠送超过 10,000 USDT 等值，谁批准都不行 |
 | `ADMIN_WELCOME_UNPRICED` | 要提高的资产没有新鲜的 USDT 价格，无法折算 |
+| `ADMIN_WELCOME_RAISE_PENDING` | 同一位管理员对同一版本的同样提高已在等第二人批准（409，`details.approval_id` 是那条申请） |
 | `INSTRUMENT_PLATFORM_CHANGED` | 保存平台资料时版本已过期（期间有人保存过），刷新后再改 |
 | `LEDGER_SETTINGS_CHANGED` | 修改注册赠送时版本已过期；批准时遇到它，申请记为失败 |
 | `ADMIN_TAG_EMPTY` | 按标签发的站内信：没有账户带这个标签 |

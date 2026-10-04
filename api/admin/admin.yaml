@@ -3464,8 +3464,13 @@ paths:
         when it moved, then and when the request is approved (it fails;
         unless the ledger holds the very change at the next version, set
         by its requester, by an attempt whose answer was lost: then it is
-        EXECUTED). The request lapses a day after it was asked for:
-        approving it then only fails it ("expired at <time>").
+        EXECUTED; when the setting cannot be read again the outcome is
+        unknown and it stays PENDING, 503). The request lapses a day after
+        it was asked for: approving it then only fails it ("expired at
+        <time>"). The same raise asked again by the same administrator
+        against the same version while the first waits: 409
+        ADMIN_WELCOME_RAISE_PENDING (details approval_id). All amounts 0
+        is no credits: the ledger gets [].
       tags: [platform]
       requestBody:
         required: true

@@ -168,9 +168,12 @@ func TestLaunchChecklist(t *testing.T) {
 	pl.profile["images"] = map[string]any{"logo_light": "/v1/platform/images/logo_light?v=5", "logo_dark": nil, "favicon": "/v1/platform/images/favicon?v=5"}
 	ledger.house = map[string]string{"USDT": "2000000", "BTC": "20", "ETH": "500"}
 	h.admin(t, "second@example.com", domain.RoleAdmin)
-	// Still the seeded name: the brand is not the platform's own yet.
-	if c, _ := h.svc.LaunchChecklist(ctx, auditor, "admin.astras.vip"); launchStatuses(c)["brand"] != LaunchFail || c.Ready {
-		t.Fatalf("the seeded name %v", launchStatuses(c))
+	// Still the seeded name, in any case: the brand is not the platform's own yet.
+	for _, seeded := range []string{"Astras", "ASTRAS "} {
+		pl.profile["name"] = seeded
+		if c, _ := h.svc.LaunchChecklist(ctx, auditor, "admin.astras.vip"); launchStatuses(c)["brand"] != LaunchFail || c.Ready {
+			t.Fatalf("the seeded name %q %v", seeded, launchStatuses(c))
+		}
 	}
 	pl.profile["name"] = "Nova"
 	c, err = h.svc.LaunchChecklist(ctx, auditor, "admin.astras.vip:443")
