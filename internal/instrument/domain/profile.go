@@ -116,38 +116,45 @@ func printable(s string) bool {
 // of elements and attributes, so no script, event handler, external
 // reference or stylesheet survives.
 func PrepareLogo(l Logo) (Logo, error) {
+	out, _, err := prepareSquare(l)
+	return out, err
+}
+
+// prepareSquare is PrepareLogo, which also returns the image's width (an
+// SVG's in its own units).
+func prepareSquare(l Logo) (Logo, int, error) {
 	if len(l.Data) == 0 {
-		return Logo{}, apperr.Invalid("logo: empty")
+		return Logo{}, 0, apperr.Invalid("logo: empty")
 	}
 	if len(l.Data) > MaxLogoBytes {
-		return Logo{}, apperr.Invalid(fmt.Sprintf("logo: at most %d KB", MaxLogoBytes>>10))
+		return Logo{}, 0, apperr.Invalid(fmt.Sprintf("logo: at most %d KB", MaxLogoBytes>>10))
 	}
 	var w, h int
 	switch l.MIME {
 	case LogoPNG:
 		cfg, err := png.DecodeConfig(bytes.NewReader(l.Data))
 		if err != nil {
-			return Logo{}, apperr.Invalid("logo: not a PNG image")
+			return Logo{}, 0, apperr.Invalid("logo: not a PNG image")
 		}
 		w, h = cfg.Width, cfg.Height
 	case LogoWebP:
 		var err error
 		if w, h, err = webpSize(l.Data); err != nil {
-			return Logo{}, apperr.Invalid("logo: not a WebP image")
+			return Logo{}, 0, apperr.Invalid("logo: not a WebP image")
 		}
 	case LogoSVG:
 		clean, sw, sh, err := SanitizeSVG(l.Data)
 		if err != nil {
-			return Logo{}, apperr.Invalid("logo: " + err.Error())
+			return Logo{}, 0, apperr.Invalid("logo: " + err.Error())
 		}
 		l.Data, w, h = clean, sw, sh
 	default:
-		return Logo{}, apperr.Invalid("logo: PNG, SVG or WebP")
+		return Logo{}, 0, apperr.Invalid("logo: PNG, SVG or WebP")
 	}
 	if w <= 0 || w != h {
-		return Logo{}, apperr.Invalid(fmt.Sprintf("logo: must be square, it is %dx%d", w, h))
+		return Logo{}, 0, apperr.Invalid(fmt.Sprintf("logo: must be square, it is %dx%d", w, h))
 	}
-	return l, nil
+	return l, w, nil
 }
 
 // webpSize reads a WebP image's size from its first chunk (lossy VP8,

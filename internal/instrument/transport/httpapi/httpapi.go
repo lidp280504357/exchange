@@ -16,14 +16,20 @@ import (
 	"github.com/skill/exchange/internal/platform/httpx"
 )
 
-// Handler serves assets, trading pairs and perpetual contracts; no sign-in
-// needed.
+// Handler serves assets, trading pairs and perpetual contracts, and the
+// platform's profile; no sign-in needed.
 type Handler struct {
 	Svc *application.Service
+	// Platform serves the platform's profile (platform.go); nil leaves
+	// its routes out.
+	Platform *application.Platform
 }
 
 // Routes mounts the endpoints on r.
 func (h *Handler) Routes(r chi.Router) {
+	if h.Platform != nil {
+		h.platformRoutes(r)
+	}
 	r.Get("/v1/market/assets", h.assets)
 	r.Get("/v1/market/assets/{code}/logo", h.logo)
 	r.Get("/v1/market/pairs", h.pairs)

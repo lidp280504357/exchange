@@ -54,7 +54,9 @@ func (n *Notices) Notify(ctx context.Context, e Event) error {
 	if err != nil {
 		loc = time.UTC
 	}
-	title, body := domain.RenderNotice(domain.NoticeInput{Type: e.Type, Language: r.Language, At: e.At, Location: loc, Data: e.Data})
+	title, body := domain.RenderNotice(domain.NoticeInput{
+		Type: e.Type, Language: r.Language, At: e.At, Location: loc, Data: e.Data, Brand: n.Dispatcher.brand(ctx),
+	})
 	notice := domain.Notice{
 		ID: uuid.Must(uuid.NewV7()).String(), UserID: e.UserID, Type: e.Type, Title: title, Body: body, Data: e.Data, CreatedAt: n.Now(),
 	}
@@ -97,7 +99,7 @@ func (n *Notices) mail(ctx context.Context, notice domain.Notice, r ports.Recipi
 	if to == nil {
 		return
 	}
-	m := domain.NoticeMail(to.Channel, to.Value, notice.Title, notice.Body, r.AntiPhishingCode, r.Language)
+	m := domain.NoticeMail(to.Channel, to.Value, notice.Title, notice.Body, r.AntiPhishingCode, r.Language, n.Dispatcher.brand(ctx))
 	m.IdempotencyKey = notice.ID
 	if _, err := n.Dispatcher.Deliver(ctx, mailDelivery(notice, *to), m); err != nil {
 		n.Log.WarnContext(ctx, "notice mail failed", "notice_id", notice.ID, "error", err)

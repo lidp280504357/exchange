@@ -35,6 +35,10 @@ type Service struct {
 	Deriver ports.Deriver
 	// Custodians serve the networks whose provider they are (ADR-0011).
 	Custodians map[string]ports.Custody
+	// GatewayHosts are the custodians' gateway hosts by provider (the
+	// launch checklist tells the stand-in from the real one, design
+	// 2026-10-04 §4.6).
+	GatewayHosts map[string]string
 	// CallbackWindow is how far a callback's timestamp may be from now
 	// (5 minutes).
 	CallbackWindow time.Duration

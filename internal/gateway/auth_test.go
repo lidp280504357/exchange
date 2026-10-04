@@ -22,6 +22,7 @@ type authFixture struct {
 	now     time.Time
 	router  http.Handler
 	seen    *Identity
+	authn   *Authenticator
 }
 
 func newAuthFixture(t *testing.T) *authFixture {
@@ -52,6 +53,7 @@ func newAuthFixture(t *testing.T) *authFixture {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	f.authn = authn
 	r := httpx.NewRouter(httpx.RouterOptions{Logger: slog.New(slog.DiscardHandler)})
 	Mount(r, Guards{Authn: authn}, Upstreams{Auth: upstream, User: upstream, Notification: upstream, Instrument: upstream, Ledger: upstream})
 	r.With(authn.Required).Post("/v1/orders", upstream.ServeHTTP)

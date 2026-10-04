@@ -17,14 +17,15 @@ import (
 // HeaderIdempotencyKey carries the client's key for writes (§7.1).
 const HeaderIdempotencyKey = "Idempotency-Key"
 
-// Handler serves balances, transfers and the fund flow; every route needs
-// the identity the gateway attaches.
+// Handler serves balances, transfers and the fund flow, whose routes need
+// the identity the gateway attaches, and the internal settings.
 type Handler struct {
 	Svc *application.Service
 }
 
 // Routes mounts the endpoints on r.
 func (h *Handler) Routes(r chi.Router) {
+	h.settingsRoutes(r)
 	r.Group(func(r chi.Router) {
 		r.Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

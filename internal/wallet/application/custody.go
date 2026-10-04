@@ -595,6 +595,9 @@ func (s *Service) ReplayCallback(ctx context.Context, id, actor, reason string) 
 type CustodyOverview struct {
 	Provider   string
 	Configured bool
+	// GatewayHost is the host of the custodian's gateway, no scheme, path
+	// or query; empty when it is not configured.
+	GatewayHost string
 	// Error says why the coins could not be read.
 	Error string
 	Coins []ports.CustodyCoin
@@ -615,6 +618,7 @@ func (s *Service) Custody(ctx context.Context, provider string) (CustodyOverview
 		return out, apperr.NotFound("no such custodian")
 	}
 	out.Configured = c != nil
+	out.GatewayHost = s.GatewayHosts[provider]
 	nets, err := s.Networks.ForAsset(ctx, "")
 	if err != nil {
 		return out, err

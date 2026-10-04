@@ -90,10 +90,12 @@ func (s *Store) Articles(ctx context.Context, section string, visibleAt time.Tim
 
 // publishedOrder is the sites' order of a section's articles, a total one
 // so that pages do not overlap: announcements pinned first and newest
-// first, help by category and order.
+// first, help by category and order, the fixed pages by slug.
 var publishedOrder = map[string]string{
 	domain.SectionAnnouncement: `pinned DESC, publish_at DESC, id DESC`,
 	domain.SectionHelp:         `category, sort_order, slug`,
+	domain.SectionLegal:        `slug`,
+	domain.SectionHome:         `slug`,
 }
 
 // PublishedPage returns limit of a section's articles published by at,

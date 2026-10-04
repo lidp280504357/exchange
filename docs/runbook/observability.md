@@ -10,6 +10,8 @@
 
 所有服务：`exchange_build_info{service,version}`（恒为 1，标识版本）、Go 运行时 `go_*` 与进程 `process_*`。
 
+第三方账号是否配置（2026-10-04 设计 §4.6，后台「上线检查清单」经健康抓取读取）：`exchange_config_present{item}`，配置了为 1、没有为 0，只表示有没有，从不导出值。auth-service 导出 `turnstile`（`TURNSTILE_SECRET`），notification-service 导出 `mail`（`RESEND_API_KEY`，不算模拟通道），wallet-service 导出 `alchemy`（`ALCHEMY_SEPOLIA_HTTPS_URL`）。
+
 | 指标 | 标签 | 来源 | 含义 |
 |---|---|---|---|
 | `http_server_requests_total` | method, route, status | 有 REST 的服务 | 请求数；错误率 = 5xx / 全部；429 即限流 |

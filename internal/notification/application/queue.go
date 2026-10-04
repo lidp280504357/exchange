@@ -113,7 +113,7 @@ func (q *MailQueue) message(ctx context.Context, d domain.Delivery) (domain.Mess
 	}
 	for _, c := range contacts {
 		if c.Channel == d.Channel {
-			m := domain.NoticeMail(c.Channel, c.Value, notice.Title, notice.Body, r.AntiPhishingCode, r.Language)
+			m := domain.NoticeMail(c.Channel, c.Value, notice.Title, notice.Body, r.AntiPhishingCode, r.Language, q.Dispatcher.brand(ctx))
 			m.IdempotencyKey = notice.ID
 			return m, nil
 		}

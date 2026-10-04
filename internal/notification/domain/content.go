@@ -1,7 +1,9 @@
 package domain
 
 import (
+	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -13,11 +15,25 @@ import (
 // articles in Chinese and English, drafted, published at once or from a
 // time, archived; the sites read the published ones.
 
-// Content sections.
+// Content sections: LEGAL holds the fixed legal and information pages and
+// HOME the home page's blocks (design 2026-10-04 §4.4), each on its own
+// slugs.
 const (
 	SectionAnnouncement = "ANNOUNCEMENT"
 	SectionHelp         = "HELP"
+	SectionLegal        = "LEGAL"
+	SectionHome         = "HOME"
 )
+
+// fixedSlugs are the only slugs of the sections that have a fixed set;
+// the sites bundle a draft of each.
+var fixedSlugs = map[string][]string{
+	SectionLegal: {"terms", "privacy", "risk", "fees", "about", "contact"},
+	SectionHome:  {"home-hero"},
+}
+
+// FixedSlugs returns a section's fixed slugs, nil when any slug goes.
+func FixedSlugs(section string) []string { return fixedSlugs[section] }
 
 // Article statuses.
 const (
@@ -128,16 +144,27 @@ func (a Article) Visible(now time.Time) bool {
 }
 
 // ValidSection reports whether s is a content section.
-func ValidSection(s string) bool { return s == SectionAnnouncement || s == SectionHelp }
+func ValidSection(s string) bool {
+	return s == SectionAnnouncement || s == SectionHelp || s == SectionLegal || s == SectionHome
+}
+
+// validSlug reports whether a section takes slug: any for announcements
+// and help, one of the fixed ones for the others.
+func validSlug(section, slug string) bool {
+	fixed, ok := fixedSlugs[section]
+	return !ok || slices.Contains(fixed, slug)
+}
 
 // Validate checks an article as written: its slug and category, Chinese
 // text, at most one text per locale, the lengths.
 func (a Article) Validate() error {
 	switch {
 	case !ValidSection(a.Section):
-		return apperr.Invalid("section must be ANNOUNCEMENT or HELP")
+		return apperr.Invalid("section must be ANNOUNCEMENT, HELP, LEGAL or HOME")
 	case !slugRE.MatchString(a.Slug):
 		return apperr.Invalid("slug must be 1-64 lower-case letters, digits and dashes, starting with a letter or digit")
+	case !validSlug(a.Section, a.Slug):
+		return apperr.Invalid(fmt.Sprintf("a %s slug is one of %s", a.Section, strings.Join(fixedSlugs[a.Section], ", ")))
 	case !categoryRE.MatchString(a.Category):
 		return apperr.Invalid("category must be at most 32 lower-case letters, digits, dashes and underscores")
 	case a.Order < -1000 || a.Order > 1000:

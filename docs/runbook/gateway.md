@@ -14,9 +14,12 @@
 | `/v1/user/*` | 必需 | user-service |
 | `/v1/account/*` | 必需 | ledger-service |
 | `/v1/notifications`、`/v1/notifications/*` | 必需 | notification-service |
-| `GET /v1/announcements[/{slug}]`、`GET /v1/help[/{slug}]` | 无（后台发布的公告与帮助，2026-10-02 后台设计 C4b） | notification-service |
+| `GET /v1/announcements[/{slug}]`、`GET /v1/help[/{slug}]`、`GET /v1/legal[/{slug}]`、`GET /v1/home[/{slug}]` | 无（后台发布的公告、帮助、法律页与首页横幅，2026-10-02 后台设计 C4b、2026-10-04 设计 §4.4） | notification-service |
+| `GET /v1/platform/profile`、`GET /v1/platform/images/{kind}`、`GET /manifest.webmanifest` | 无（平台资料，2026-10-04 设计 §4.1） | instrument-service |
 | `GET /v1/ws` | 协议内 `auth` | 网关自身 |
 | `/v1/dev/*`（仅非生产） | 无 | notification-service 开发收件箱 |
+
+注册开关（2026-10-04 设计 §4.3）：网关每 15 秒读一次 instrument-service 的平台资料。资料里注册方式为 `CLOSED` 时，`POST /v1/auth/register/complete` 与 `purpose` 为 `REGISTER` 的 `POST /v1/auth/otp/request` 返回 403 `AUTH_REGISTRATION_CLOSED`，登录、其他验证码不受影响。读不到资料时保持上次读到的状态，启动后第一次读到之前按开放处理，所以资料服务故障不会把注册关掉。
 
 新的公开路径必须写进 `routes.go`，否则默认要求登录。网关剥掉客户端伪造的 `X-User-Id`/`X-Session-Id`/`X-Auth-Scope`，由鉴权结果重新设置。
 

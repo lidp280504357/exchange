@@ -54,11 +54,16 @@ func setup(t *testing.T) (*application.Service, *postgres.Store, *pg.DB) {
 		t.Fatal(err)
 	}
 	store := postgres.NewStore(db, event.NewFactory("ledger-service", "test"))
-	return &application.Service{
+	svc := &application.Service{
 		Store: store, Assets: decimals{"USDT": 6, "BTC": 8}, Eligibility: eligibility{}, Flags: allFlags(true),
 		Log: log, Now: time.Now,
-		WelcomeCredits: []application.Credit{{Asset: "USDT", Amount: decimal.NewFromInt(10000)}, {Asset: "BTC", Amount: decimal.RequireFromString("0.1")}},
-	}, store, db
+	}
+	if err := svc.SeedWelcomeCredits(ctx, []application.Credit{
+		{Asset: "USDT", Amount: decimal.NewFromInt(10000)}, {Asset: "BTC", Amount: decimal.RequireFromString("0.1")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return svc, store, db
 }
 
 func d(s string) decimal.Decimal { return decimal.RequireFromString(s) }
@@ -224,9 +229,10 @@ func TestTransfers(t *testing.T) {
 
 func setupWith(t *testing.T, base *application.Service, e eligibility) *application.Service {
 	t.Helper()
-	cp := *base
-	cp.Eligibility = e
-	return &cp
+	return &application.Service{
+		Store: base.Store, Assets: base.Assets, Eligibility: e, Flags: base.Flags, Futures: base.Futures, Log: base.Log, Now: base.Now,
+		Runs: base.Runs,
+	}
 }
 
 // TestConcurrentFreezes races freezes against one balance: exactly the

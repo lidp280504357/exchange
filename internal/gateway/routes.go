@@ -24,13 +24,23 @@ type Upstreams struct {
 	DevInbox http.Handler
 }
 
-// Guards are the gateway's cross-cutting checks; nil Limits, Idempotency
-// or WS leave that part out (tests).
+// Guards are the gateway's cross-cutting checks; nil Limits, Idempotency,
+// WS or Registration leave that part out (tests).
 type Guards struct {
 	Authn       *Authenticator
 	Limits      *Limits
 	Idempotency *Idempotency
 	WS          http.Handler
+	// Registration refuses sign-ups while the platform closes them.
+	Registration *Registration
+}
+
+// signUp is the registration gate on the sign-up requests.
+func (g Guards) signUp() []middleware {
+	if g.Registration == nil {
+		return nil
+	}
+	return []middleware{g.Registration.Middleware}
 }
 
 // publicAuthPaths are the auth flows that produce tokens; they take no
@@ -82,13 +92,22 @@ func Mount(r chi.Router, g Guards, up Upstreams) {
 		}
 		r.Route("/v1/auth", func(r chi.Router) {
 			for _, p := range publicAuthPaths {
-				r.With(g.byIP(RuleIPAuth)...).Handle(p, up.Auth)
+				m := g.byIP(RuleIPAuth)
+				if p == "/register/complete" {
+					m = append(m, g.signUp()...)
+				}
+				r.With(m...).Handle(p, up.Auth)
 			}
 			// Anonymous for registration and login codes, signed in for
 			// step-up and identity binding.
-			r.With(append(g.byIP(RuleIPAuth), g.signedIn(false, RuleUser)...)...).Handle("/otp/request", up.Auth)
+			r.With(append(append(g.byIP(RuleIPAuth), g.signedIn(false, RuleUser)...), g.signUp()...)...).Handle("/otp/request", up.Auth)
 			r.With(g.signedIn(true, RuleUser)...).Handle("/*", up.Auth)
 		})
+		// The platform's profile and its images (design 2026-10-04 §4.1),
+		// and the mobile site's manifest built from it.
+		r.Get("/v1/platform/profile", up.Instrument.ServeHTTP)
+		r.Get("/v1/platform/images/{kind}", up.Instrument.ServeHTTP)
+		r.Get("/manifest.webmanifest", up.Instrument.ServeHTTP)
 		// Public reference data.
 		r.Handle("/v1/market/assets", up.Instrument)
 		r.Handle("/v1/market/assets/*", up.Instrument) // logos
@@ -96,9 +115,13 @@ func Mount(r chi.Router, g Guards, up Upstreams) {
 		r.Handle("/v1/market/pairs/*", up.Instrument)
 		r.Handle("/v1/market/contracts", up.Instrument)
 		r.Handle("/v1/market/contracts/*", up.Instrument)
-		// Public announcements and help articles (written in the admin
-		// console, design 2026-10-02 §4.5); reads only.
-		for _, p := range []string{"/v1/announcements", "/v1/announcements/{slug}", "/v1/help", "/v1/help/{slug}"} {
+		// Public announcements, help articles, legal pages and home-page
+		// blocks (written in the admin console, design 2026-10-02 §4.5 and
+		// 2026-10-04 §4.4); reads only.
+		for _, p := range []string{
+			"/v1/announcements", "/v1/announcements/{slug}", "/v1/help", "/v1/help/{slug}", "/v1/legal", "/v1/legal/{slug}",
+			"/v1/home", "/v1/home/{slug}",
+		} {
 			r.Get(p, up.Notification.ServeHTTP)
 		}
 		// Public market data; the static routes above win over {symbol}.

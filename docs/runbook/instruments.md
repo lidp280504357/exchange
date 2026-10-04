@@ -60,6 +60,26 @@ sudo docker compose ... exec -T instrument-service /app/exchangectl instruments 
 - 前端：`packages/core` 的 `markets/profiles` 把接口给的资料记下来，`coinProfile()` 把它盖在仓库的静态资料（`web/packages/core/assets/coins/`）上，显示名、简介、链接都优先用接口的；交易对与资产的查询每 60 秒刷新，所以改动一分钟内在三个站生效。
 - 平台币：`scripts/ops/astra.sh profile` 写入默认资料与图标（`deploy/instruments/astra.svg`），`astra.sh open` 开放 ASTRA-USDT。ASTRA 是站内资产，不能充提；它的交易对不跟随币安（没有 `reference_symbol`），用户之间撮合（ADR-0015 第 6 条），HOUSE 不报价，机器人（market-sim）在批次 A2 加入。
 
+## 平台资料（设计 2026-10-04 §4.1）
+
+交易所自己的资料由后台改、站点运行时读取，上线只改配置、不重新构建前端。资料存在 `platform_profile`（迁移 instrument 00008，只有一行，迁移时写入当前的 Astras 默认值），上传的图片存在 `platform_images`。
+
+- 字段：名称（2–32 字）、简称（2–12 字）、域名（PC 站主机名，未设为空）、主题色与品牌色（小写 `#rrggbb`）、页脚版权与合规文案、联系邮箱与客服链接（https）、社交链接（最多 10 个，种类见 `domain.SocialKinds`，只收 https）、默认语言、学习横幅（开关与文案）、注册方式（`OPEN`/`CLOSED` 与关闭时的提示语）。文案一律按语言 `{"zh-CN", "en"}` 存，英文空着时站点显示中文。规则在 `internal/instrument/domain/platform.go`。
+- 图片：`logo_light`、`logo_dark`（名称旁的标志，按主题选）、`favicon`、`apple_touch_icon`。都要正方形、最多 200 KB；标志可用 PNG、SVG、WebP，favicon 只收 PNG 或 SVG，苹果图标只收不小于 180 px 的 PNG。SVG 与资产图标一样按白名单重建。
+- 每次修改（含换图、删图）版本加 1，`config_history` 记一行 `PLATFORM_PROFILE`：文字改动记前后两份，图片记种类、类型、大小、宽度与 sha256。删除一张不存在的图片什么也不改。
+- 公开接口（`api/openapi/platform.yaml`，经网关）：
+  - `GET /v1/platform/profile`：缓存 60 秒，`ETag` 随资料与赠送清单变化，带 `If-None-Match` 时返回 304。图片地址带版本号，没有上传的为 `null`，站点改用自带的图。
+  - `GET /v1/platform/images/{kind}`：同资产图标，版本对得上缓存一年，否则 60 秒。
+  - `GET /manifest.webmanifest`：手机站的 PWA 清单，按资料生成名称、简称、主题色与图标（用上传的 favicon 与苹果图标，没有时用站点自带的图标）。nginx 在上游不可用时退回构建产物里的静态清单。
+- 内部接口（后台调用，网关不转发 `/internal`）：
+  - `GET /internal/platform/profile`：同公开接口，多一个 `updated_by`。
+  - `PUT /internal/platform/profile`：除图片与赠送外整体替换，带 `expected_version`、`actor`、`reason`；版本过期返回 409 `INSTRUMENT_PLATFORM_CHANGED`。
+  - `PUT /internal/platform/images/{kind}`：`{data（base64）, mime, actor, reason}`。
+  - `DELETE /internal/platform/images/{kind}`：`{actor, reason}`。
+- 服务内缓存 5 秒，改动时立即清掉；站点每分钟读一次，所以改名、换图一分钟左右在三个站生效。
+- `welcome_credits` 不由后台写：instrument-service 每分钟从 ledger-service 读一次（`LEDGER_SERVICE_URL`，见 [ledger.md](ledger.md#模拟资金阶段-1)），读失败就保留上次的值。
+- 读这份资料的还有：网关读注册方式，关闭时拒绝注册（见 [gateway.md](gateway.md#路由)）；notification-service 读名称，作为邮件与短信的署名（10 分钟缓存，读不到用 `Astras`）。
+
 ## 常用命令
 
 ```bash

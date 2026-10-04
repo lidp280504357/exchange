@@ -149,11 +149,19 @@ func setup(ctx context.Context, a *app.App) error {
 	if err := bootstrap.Tail(ctx, a, cfg.Kafka, gateway.WSTopics, gateway.WSEvents(hub)); err != nil {
 		return err
 	}
+	// Sign-ups close while the platform profile says so (design 2026-10-04
+	// §4.3).
+	registration := &gateway.Registration{
+		ProfileURL: instrumentURL.JoinPath("/v1/platform/profile").String(), HTTP: &http.Client{Timeout: 5 * time.Second},
+		Log: a.Logger(),
+	}
+	a.Add("registration gate", app.Loop(registration.Run))
 	guards := gateway.Guards{
-		Authn:       authn,
-		Limits:      &gateway.Limits{Limiter: ratelimit.New(rdb, "gw:rl:"), Log: a.Logger()},
-		Idempotency: &gateway.Idempotency{Redis: rdb, Log: a.Logger()},
-		WS:          hub,
+		Authn:        authn,
+		Limits:       &gateway.Limits{Limiter: ratelimit.New(rdb, "gw:rl:"), Log: a.Logger()},
+		Idempotency:  &gateway.Idempotency{Redis: rdb, Log: a.Logger()},
+		WS:           hub,
+		Registration: registration,
 	}
 
 	r := a.NewRouter()

@@ -48,6 +48,8 @@ type NoticeInput struct {
 	At       time.Time
 	Location *time.Location
 	Data     map[string]string
+	// Brand names the exchange (DefaultBrand when empty).
+	Brand string
 }
 
 var statusNames = map[string][2]string{
@@ -94,9 +96,9 @@ func RenderNotice(in NoticeInput) (title, body string) {
 	switch in.Type {
 	case NoticeWelcome:
 		if en {
-			return "Welcome to " + Brand, "Your account is ready. Set an anti-phishing code in your profile: it appears in every mail we send."
+			return "Welcome to " + brandOr(in.Brand), "Your account is ready. Set an anti-phishing code in your profile: it appears in every mail we send."
 		}
-		return "欢迎加入 " + Brand, "账户已开通。建议在个人资料中设置防钓鱼码，我们发出的每封邮件都会带上它。"
+		return "欢迎加入 " + brandOr(in.Brand), "账户已开通。建议在个人资料中设置防钓鱼码，我们发出的每封邮件都会带上它。"
 	case NoticeNewDeviceLogin:
 		if en {
 			return "New device sign-in", fmt.Sprintf("Your account was signed in from a new device at %s (IP %s, %s). "+
@@ -213,27 +215,29 @@ func RenderNotice(in NoticeInput) (title, body string) {
 	return in.Type, ""
 }
 
-// NoticeMail wraps a notice for mail or SMS. Mails carry the user's
-// anti-phishing code when set; SMS carry no links and only the title.
-func NoticeMail(ch Channel, to, title, body, antiPhishing, lang string) Message {
+// NoticeMail wraps a notice for mail or SMS, signed with brand
+// (DefaultBrand when empty). Mails carry the user's anti-phishing code
+// when set; SMS carry no links and only the title.
+func NoticeMail(ch Channel, to, title, body, antiPhishing, lang, brand string) Message {
+	brand = brandOr(brand)
 	m := Message{Channel: ch, To: to}
 	if ch == ChannelSMS {
-		m.Text = fmt.Sprintf("【%s】%s", Brand, title)
+		m.Text = fmt.Sprintf("【%s】%s", brand, title)
 		if english(lang) {
-			m.Text = fmt.Sprintf("[%s] %s", Brand, title)
+			m.Text = fmt.Sprintf("[%s] %s", brand, title)
 		}
 		return m
 	}
 	var b strings.Builder
 	if english(lang) {
-		m.Subject = fmt.Sprintf("[%s] %s", Brand, title)
+		m.Subject = fmt.Sprintf("[%s] %s", brand, title)
 		if antiPhishing != "" {
 			fmt.Fprintf(&b, "Anti-phishing code: %s\n\n", antiPhishing)
 		}
 		b.WriteString(body)
 		b.WriteString("\n\nThis is a security notice; do not reply.")
 	} else {
-		m.Subject = fmt.Sprintf("【%s】%s", Brand, title)
+		m.Subject = fmt.Sprintf("【%s】%s", brand, title)
 		if antiPhishing != "" {
 			fmt.Fprintf(&b, "防钓鱼码：%s\n\n", antiPhishing)
 		}

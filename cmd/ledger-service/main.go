@@ -46,8 +46,10 @@ type settings struct {
 	// FUTURES consult for the cross positions' unrealized result
 	// (DERIVATIVES_GRPC_ADDR); empty skips the check.
 	DerivativesAddr string `koanf:"derivatives_grpc_addr"`
-	// WelcomeFunds are the simulated funds new users get while
-	// ledger.welcome_credit is on (WELCOME_FUNDS, "USDT:10000,BTC:0.1").
+	// WelcomeFunds are the first welcome credits (WELCOME_FUNDS,
+	// "USDT:10000,BTC:0.1"; empty for none), stored when the settings
+	// table has no value yet; from then on operators change them in the
+	// admin console (design 2026-10-04 §4.2).
 	WelcomeFunds string `koanf:"welcome_funds"`
 	// ReconcileInterval is how often the invariants are checked
 	// (RECONCILE_INTERVAL).
@@ -106,14 +108,16 @@ func setup(ctx context.Context, a *app.App) error {
 	}
 	a.Add("backed assets", app.Loop(backedLoop(a, assets)))
 	svc := &application.Service{
-		Store:          store,
-		Assets:         assets,
-		Eligibility:    users.New(userv1.NewUserServiceClient(userConn)),
-		Flags:          flagClient,
-		Log:            a.Logger(),
-		Now:            time.Now,
-		WelcomeCredits: credits,
-		Runs:           store,
+		Store:       store,
+		Assets:      assets,
+		Eligibility: users.New(userv1.NewUserServiceClient(userConn)),
+		Flags:       flagClient,
+		Log:         a.Logger(),
+		Now:         time.Now,
+		Runs:        store,
+	}
+	if err := svc.SeedWelcomeCredits(ctx, credits); err != nil {
+		return err
 	}
 	if cfg.DerivativesAddr != "" {
 		conn, err := bootstrap.GRPCClient(a, "derivatives", cfg.DerivativesAddr)

@@ -27,6 +27,7 @@ type Repos interface {
 	Trades() TradeRepo
 	Futures() FuturesRepo
 	Holds() HoldRepo
+	Settings() SettingsRepo
 	// Emit queues an event on topic, keyed by aggregateID.
 	Emit(ctx context.Context, topic string, msg proto.Message, aggregateType, aggregateID string) error
 }
@@ -105,6 +106,20 @@ type HoldRepo interface {
 	// OthersActive is what h's user's other active holds on h's account
 	// and asset add up to.
 	OthersActive(ctx context.Context, h domain.Hold) (decimal.Decimal, error)
+}
+
+// SettingsRepo stores the settings operators change (design 2026-10-04
+// §4.2).
+type SettingsRepo interface {
+	// WelcomeCredits returns the welcome credits, nil before a first value.
+	WelcomeCredits(ctx context.Context) (*domain.WelcomeCredits, error)
+	// WelcomeCreditsForUpdate is WelcomeCredits with the row locked.
+	WelcomeCreditsForUpdate(ctx context.Context) (*domain.WelcomeCredits, error)
+	// SaveWelcomeCredits stores a value, the first or a change.
+	SaveWelcomeCredits(ctx context.Context, w domain.WelcomeCredits) error
+	// SeedWelcomeCredits stores w unless there is a value; it reports
+	// whether it stored it.
+	SeedWelcomeCredits(ctx context.Context, w domain.WelcomeCredits) (bool, error)
 }
 
 // Assets tells the precision of an asset (instrument-service); unknown

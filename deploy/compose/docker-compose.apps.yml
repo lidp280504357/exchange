@@ -119,6 +119,8 @@ services:
       <<: *base-env
       USER_GRPC_ADDR: user-service:9182
       AUTH_GRPC_ADDR: auth-service:9181
+      # The exchange's name in the messages, from the platform profile.
+      INSTRUMENT_SERVICE_URL: http://instrument-service:8084
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}
@@ -129,6 +131,10 @@ services:
   instrument-service:
     <<: *app
     command: ["/app/instrument-service"]
+    environment:
+      <<: *base-env
+      # The welcome credits the platform profile shows, read every minute.
+      LEDGER_SERVICE_URL: http://ledger-service:8085
     depends_on:
       postgres: {condition: service_healthy}
       redpanda: {condition: service_healthy}

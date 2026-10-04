@@ -24,7 +24,10 @@ type Content struct {
 
 // Routes mounts the endpoints on r.
 func (h *Content) Routes(r chi.Router) {
-	for path, section := range map[string]string{"/v1/announcements": domain.SectionAnnouncement, "/v1/help": domain.SectionHelp} {
+	for path, section := range map[string]string{
+		"/v1/announcements": domain.SectionAnnouncement, "/v1/help": domain.SectionHelp, "/v1/legal": domain.SectionLegal,
+		"/v1/home": domain.SectionHome,
+	} {
 		r.Get(path, h.published(section))
 		r.Get(path+"/{slug}", h.publishedArticle(section))
 	}

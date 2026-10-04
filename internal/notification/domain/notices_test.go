@@ -65,14 +65,14 @@ func TestDepositNotices(t *testing.T) {
 }
 
 func TestNoticeMail(t *testing.T) {
-	m := NoticeMail(ChannelEmail, "a@example.com", "密码已修改", "正文", "Blue42", "zh-CN")
+	m := NoticeMail(ChannelEmail, "a@example.com", "密码已修改", "正文", "Blue42", "zh-CN", "")
 	if m.Subject != "【Astras】密码已修改" || !strings.HasPrefix(m.Text, "防钓鱼码：Blue42") {
 		t.Fatalf("mail: %+v", m)
 	}
-	if m := NoticeMail(ChannelEmail, "a@example.com", "Title", "Body", "", "en"); strings.Contains(m.Text, "Anti-phishing") {
+	if m := NoticeMail(ChannelEmail, "a@example.com", "Title", "Body", "", "en", ""); strings.Contains(m.Text, "Anti-phishing") {
 		t.Fatalf("no code, no line: %+v", m)
 	}
-	if m := NoticeMail(ChannelSMS, "+6591234567", "Password changed", "long body", "Blue42", "en"); m.Text != "[Astras] Password changed" {
+	if m := NoticeMail(ChannelSMS, "+6591234567", "Password changed", "long body", "Blue42", "en", ""); m.Text != "[Astras] Password changed" {
 		t.Fatalf("sms: %+v", m)
 	}
 }

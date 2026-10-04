@@ -118,6 +118,11 @@ func setup(ctx context.Context, a *app.App) error {
 	if err != nil {
 		return err
 	}
+	// The launch checklist's "human verification configured" (design
+	// 2026-10-04 §4.6); only whether, never the secret.
+	if err := bootstrap.ConfigPresent(a, map[string]bool{"turnstile": cfg.TurnstileSecret != ""}); err != nil {
+		return err
+	}
 	signer, err := tokenSigner(a, cfg.JWTSigningKey, cfg.JWTKeyID)
 	if err != nil {
 		return err

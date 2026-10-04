@@ -32,11 +32,12 @@ type Service struct {
 	Futures ports.Futures
 	Log     *slog.Logger
 	Now     func() time.Time
-	// WelcomeCredits are the simulated funds of phase 1 (ledger.welcome_credit).
-	WelcomeCredits []Credit
 	// Runs reads the reconciliation runs (the admin console); nil answers
 	// unavailable.
 	Runs ports.ReconciliationRuns
+
+	// welcome keeps the welcome credits the grants give (settings.go).
+	welcome welcomeCache
 }
 
 // Reconciliation returns the latest run of each invariant check and the
@@ -52,10 +53,7 @@ func (s *Service) Reconciliation(ctx context.Context, failures int) (latest, fai
 }
 
 // Credit is an amount of an asset, as configured.
-type Credit struct {
-	Asset  string
-	Amount decimal.Decimal
-}
+type Credit = domain.AssetAmount
 
 // Result is a posted (or replayed) journal.
 type Result struct {

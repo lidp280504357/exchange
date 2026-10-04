@@ -83,6 +83,12 @@ type Contact struct {
 	Value   string
 }
 
+// PlatformName reads the exchange's name from the platform profile
+// (instrument-service, design 2026-10-04 §4.5).
+type PlatformName interface {
+	PlatformName(ctx context.Context) (string, error)
+}
+
 // Recipients looks users up in user-service and auth-service.
 type Recipients interface {
 	// Recipient returns the user's preferences; unknown users fail with

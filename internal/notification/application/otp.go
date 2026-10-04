@@ -36,7 +36,7 @@ func (d *Dispatcher) SendOTP(ctx context.Context, req OTPRequest) (string, domai
 	}
 	minutes := max(req.TTLSeconds/60, 1)
 	id := uuid.Must(uuid.NewV7()).String()
-	m := domain.OTPMessage(ch, target, req.Code, req.Scene, req.Language, minutes)
+	m := domain.OTPMessage(ch, target, req.Code, req.Scene, req.Language, minutes, d.brand(ctx))
 	m.IdempotencyKey = id
 	del := domain.Delivery{
 		ID:         id,

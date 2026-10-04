@@ -121,7 +121,8 @@ func (h *Handler) adminCustody(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"provider": o.Provider, "configured": o.Configured, "error": optional(o.Error), "coins": coins, "checks": checks,
+		"provider": o.Provider, "configured": o.Configured, "gateway_host": o.GatewayHost, "error": optional(o.Error), "coins": coins,
+		"checks":    checks,
 		"submitted": map[string]any{"count": len(o.Submitted), "amount_usdt": value.String(), "oldest_at": oldest},
 		"callbacks": map[string]any{"attention": o.Attention, "last_at": timeOrNil(o.LastAt)},
 	})

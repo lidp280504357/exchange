@@ -28,6 +28,7 @@ type Repos interface {
 	Pairs() PairRepo
 	Contracts() ContractRepo
 	Profiles() ProfileRepo
+	Platform() PlatformRepo
 	// Record appends a version to the configuration history; source says
 	// where the change came from (FILE, CONSOLE, STATUS, PROFILE).
 	Record(ctx context.Context, entity, key string, version int64, value any, actor, reason, source string) error
@@ -83,6 +84,29 @@ type ContractRepo interface {
 	GetForUpdate(ctx context.Context, symbol string) (*domain.Contract, error)
 	List(ctx context.Context) ([]domain.Contract, error)
 	Save(ctx context.Context, c domain.Contract) (domain.Contract, error)
+}
+
+// PlatformRepo stores the platform's profile (design 2026-10-04 §4.1), one
+// row, and its images.
+type PlatformRepo interface {
+	// Get returns the profile with its images' type and size.
+	Get(ctx context.Context) (domain.PlatformProfile, error)
+	// GetForUpdate is Get with the row locked.
+	GetForUpdate(ctx context.Context) (domain.PlatformProfile, error)
+	// Save writes the profile's text and settings as of p.UpdatedBy and
+	// p.UpdatedAt, raising the version by one.
+	Save(ctx context.Context, p domain.PlatformProfile) (domain.PlatformProfile, error)
+	// Image returns an uploaded image, nil without one, and the profile's
+	// version, read together.
+	Image(ctx context.Context, kind string) (*domain.Logo, int64, error)
+	// SaveImage stores an image of a kind; nil removes it.
+	SaveImage(ctx context.Context, kind string, img *domain.Logo, info domain.PlatformImage, at time.Time) error
+}
+
+// Ledger reads the welcome credits ledger-service grants (design
+// 2026-10-04 §4.2), for the platform profile to show.
+type Ledger interface {
+	WelcomeCredits(ctx context.Context) ([]domain.Credit, error)
 }
 
 // ProfileRepo stores the assets' profiles (ASTRA design §5.3) on the asset

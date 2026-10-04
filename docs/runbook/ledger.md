@@ -30,7 +30,11 @@ SELECT id, user_id, asset, amount, reason, actor, created_at, released_at, relea
 
 阶段 1 没有链上充值，测试资金来自 `ADJUSTMENT` 对手科目（`MANUAL_ADJUSTMENT` 分录，§11.4）：
 
-- **欢迎资金**：`ledger.welcome_credit` 打开时，ledger-service 消费 `auth.UserRegistered`，给新用户 SPOT 账户记 `WELCOME_FUNDS`（默认 `USDT:10000,BTC:0.1,ETH:2`），键 `welcome:<user_id>` 保证一人一次。只在测试环境打开。
+- **欢迎资金（注册赠送）**：ledger-service 消费 `auth.UserRegistered`，开关 `ledger.welcome_credit` 打开、且后台配置的赠送清单不为空时，给新用户 SPOT 账户记清单里的每个资产；键 `welcome:<user_id>` 保证一人一次，重投的事件看到已有分录就不再发（不论清单后来改成什么）。
+  - 清单存在 `ledger.settings` 的 `welcome_credits`（迁移 ledger 00007，资产与数额的列表，数额是十进制字符串）。表里还没有值时，启动时用环境变量 `WELCOME_FUNDS`（默认 `USDT:10000,BTC:0.1,ETH:2`）写入首值（`updated_by` 为 `system:WELCOME_FUNDS`）；之后以表为准，环境变量不再起作用（设计 2026-10-04 §4.2）。
+  - 发放读清单时缓存 30 秒：改动最多 30 秒后对新注册生效。上线时把清单清空（`[]`），开关保留为总闸，两者都满足才发。
+  - 内部接口（后台调用，网关不转发 `/internal`）：`GET /internal/ledger/settings/welcome-credits` 返回 `{credits, flag_enabled, version, updated_by, updated_at}`；`PUT` 同一路径，带 `{credits, expected_version, actor, reason}` 整体替换。版本过期返回 409 `LEDGER_SETTINGS_CHANGED`；资产不存在、数额不大于 0、小数位超过资产精度、同一资产两次或超过 10 项，返回 400。每次修改发审计 `ledger.settings.welcome_credits`，带前后两份清单。提高赠送要不要第二个人批准，由后台按设计 §5 判断，账本只记它收到的结果。
+  - instrument-service 每分钟读一次这个接口，作为平台资料里的 `welcome_credits`（站点的「注册即送」文案），开关关着时那里显示为空。
 - **人工调账**：`ledger.manual_adjustment` 打开时可用 CLI，同事务写 `audit.AdminActionPerformed`；阶段 2 改为管理后台双人审批。
 
 ```bash

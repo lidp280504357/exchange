@@ -5,8 +5,11 @@ package main
 import (
 	"context"
 	"errors"
+	"net/http"
+	"time"
 
 	instrumentv1 "github.com/skill/exchange/api/gen/go/exchange/instrument/v1"
+	"github.com/skill/exchange/internal/instrument/adapters/ledger"
 	"github.com/skill/exchange/internal/instrument/adapters/postgres"
 	"github.com/skill/exchange/internal/instrument/application"
 	"github.com/skill/exchange/internal/instrument/transport/grpcapi"
@@ -25,6 +28,10 @@ type settings struct {
 	GRPCAddr string       `koanf:"grpc_addr"`
 	Postgres pg.Config    `koanf:",squash"`
 	Kafka    kafka.Config `koanf:",squash"`
+	// LedgerURL is ledger-service's internal REST address, where the
+	// platform profile reads the welcome credits every minute
+	// (LEDGER_SERVICE_URL); empty reads none and shows none.
+	LedgerURL string `koanf:"ledger_service_url"`
 }
 
 func (s *settings) Validate() error {
@@ -36,7 +43,7 @@ func main() {
 }
 
 func setup(ctx context.Context, a *app.App) error {
-	cfg := settings{HTTPAddr: ":8084", GRPCAddr: ":9184", Postgres: pg.DefaultConfig()}
+	cfg := settings{HTTPAddr: ":8084", GRPCAddr: ":9184", Postgres: pg.DefaultConfig(), LedgerURL: "http://localhost:8085"}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
 	}
@@ -49,7 +56,12 @@ func setup(ctx context.Context, a *app.App) error {
 	if err != nil {
 		return err
 	}
-	svc := &application.Service{Store: postgres.NewStore(db, events)}
+	store := postgres.NewStore(db, events)
+	svc := &application.Service{Store: store}
+	plat := &application.Platform{Store: store, Now: time.Now}
+	if cfg.LedgerURL != "" {
+		a.Add("welcome credits", app.Loop(welcomeLoop(a, plat, &ledger.Client{BaseURL: cfg.LedgerURL, HTTP: &http.Client{Timeout: 5 * time.Second}})))
+	}
 
 	srv, err := bootstrap.GRPCServer(ctx, a, cfg.GRPCAddr)
 	if err != nil {
@@ -57,6 +69,23 @@ func setup(ctx context.Context, a *app.App) error {
 	}
 	instrumentv1.RegisterInstrumentServiceServer(srv, grpcapi.NewServer(svc))
 	r := a.NewRouter()
-	(&httpapi.Handler{Svc: svc}).Routes(r)
+	(&httpapi.Handler{Svc: svc, Platform: plat}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)
+}
+
+// welcomeLoop reads the welcome credits from the ledger at once and then
+// every minute, for the platform profile; a failed read keeps the last.
+func welcomeLoop(a *app.App, plat *application.Platform, l *ledger.Client) func(context.Context) error {
+	return func(ctx context.Context) error {
+		for {
+			if err := plat.RefreshWelcomeCredits(ctx, l); err != nil && ctx.Err() == nil {
+				a.Logger().WarnContext(ctx, "welcome credits not read from the ledger", "error", err)
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Minute):
+			}
+		}
+	}
 }

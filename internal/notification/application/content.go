@@ -84,7 +84,7 @@ func (c *Content) PublishedArticle(ctx context.Context, section, slug string) (d
 // All returns a section's articles in every status (the console).
 func (c *Content) All(ctx context.Context, section string) ([]domain.Article, error) {
 	if !domain.ValidSection(section) {
-		return nil, apperr.Invalid("section must be ANNOUNCEMENT or HELP")
+		return nil, apperr.Invalid("section must be ANNOUNCEMENT, HELP, LEGAL or HOME")
 	}
 	return c.Store.Articles(ctx, section, time.Time{})
 }

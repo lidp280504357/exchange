@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -335,6 +336,7 @@ func setup(ctx context.Context, a *app.App) error {
 	var custodians []*application.CustodyProcessor
 	callbackFrom := map[string][]netip.Prefix{}
 	svc.Custodians = map[string]ports.Custody{}
+	svc.GatewayHosts = map[string]string{}
 	stops, _ := cfg.shortfallStops() // checked by Validate
 	for _, c := range cfg.custodians() {
 		if c.URL == "" {
@@ -349,6 +351,9 @@ func setup(ctx context.Context, a *app.App) error {
 			CallbackURL: c.Callback, WalletID: c.Wallet,
 		}
 		svc.Custodians[c.Provider] = u
+		if gw, err := url.Parse(c.URL); err == nil {
+			svc.GatewayHosts[c.Provider] = gw.Hostname()
+		}
 		p := application.NewCustodyProcessor(application.CustodyProcessor{
 			Store: store, Ledger: ledgerClient, Networks: networks, Eligibility: userClient, Custody: u, Log: a.Logger(), Now: time.Now,
 			Contradictions: svc.Contradictions, ShortfallStop: stops,
@@ -365,6 +370,11 @@ func setup(ctx context.Context, a *app.App) error {
 		}
 	}
 	setElsewhere(custodians, nil)
+	// The launch checklist's "chain node configured" (design 2026-10-04
+	// §4.6); only whether, the URL carries the API key.
+	if err := bootstrap.ConfigPresent(a, map[string]bool{"alchemy": cfg.RPCURL != ""}); err != nil {
+		return err
+	}
 	if cfg.RPCURL != "" {
 		client, err := evm.NewClient(cfg.RPCURL, nil)
 		if err != nil {

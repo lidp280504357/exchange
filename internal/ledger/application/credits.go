@@ -47,18 +47,28 @@ func (s *Service) credits(ctx context.Context, list []Credit) ([]domain.Credit, 
 	return out, nil
 }
 
-// OnUserRegistered gives a new user the simulated funds of phase 1 while
-// ledger.welcome_credit is on for them (test environments only, ADR-0005).
-// The journal's key makes it once per user.
+// OnUserRegistered gives a new user the welcome credits the operators set
+// (design 2026-10-04 §4.2) while ledger.welcome_credit is on for them
+// (ADR-0005): both must hold, and an empty list gives nothing. The
+// journal's key makes it once per user; a redelivered event finds the
+// grant made, whatever the credits are now.
 func (s *Service) OnUserRegistered(ctx context.Context, eventID, userID, region string) error {
-	if len(s.WelcomeCredits) == 0 || !s.Flags.Enabled(flags.KeyWelcomeCredit, flags.Subject{UserID: userID, Region: region}) {
+	if !s.Flags.Enabled(flags.KeyWelcomeCredit, flags.Subject{UserID: userID, Region: region}) {
 		return nil
 	}
-	credits, err := s.credits(ctx, s.WelcomeCredits)
+	list, err := s.grantCredits(ctx)
+	if err != nil || len(list) == 0 {
+		return err
+	}
+	key := "welcome:" + userID
+	if j, err := s.Store.Read().Journals().ByIdemKey(ctx, key); err != nil || j != nil {
+		return err
+	}
+	credits, err := s.credits(ctx, list)
 	if err != nil {
 		return err
 	}
-	p, err := domain.AdjustmentPosting("welcome:"+userID, userID, credits, "welcome credit (simulated funds)")
+	p, err := domain.AdjustmentPosting(key, userID, credits, "welcome credit (simulated funds)")
 	if err != nil {
 		return err
 	}

@@ -50,6 +50,23 @@ type Dispatcher struct {
 	bg     sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// Brand names the exchange in the messages (Branding); nil signs them
+	// with domain.DefaultBrand.
+	Brand BrandName
+}
+
+// BrandName names the exchange in messages (design 2026-10-04 §4.5).
+type BrandName interface {
+	Name(ctx context.Context) string
+}
+
+// brand is the exchange's name for a message, empty for the default.
+func (d *Dispatcher) brand(ctx context.Context) string {
+	if d == nil || d.Brand == nil {
+		return ""
+	}
+	return d.Brand.Name(ctx)
 }
 
 // NewDispatcher registers the dispatcher's metrics with reg.

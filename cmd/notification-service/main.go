@@ -7,12 +7,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	authv1 "github.com/skill/exchange/api/gen/go/exchange/auth/v1"
 	notificationv1 "github.com/skill/exchange/api/gen/go/exchange/notification/v1"
 	userv1 "github.com/skill/exchange/api/gen/go/exchange/user/v1"
 	"github.com/skill/exchange/internal/notification/adapters/mock"
+	"github.com/skill/exchange/internal/notification/adapters/platform"
 	"github.com/skill/exchange/internal/notification/adapters/postgres"
 	"github.com/skill/exchange/internal/notification/adapters/recipients"
 	"github.com/skill/exchange/internal/notification/adapters/resend"
@@ -44,6 +46,10 @@ type settings struct {
 	// (USER_GRPC_ADDR, AUTH_GRPC_ADDR).
 	UserAddr string `koanf:"user_grpc_addr"`
 	AuthAddr string `koanf:"auth_grpc_addr"`
+	// InstrumentURL is instrument-service's internal REST address, where
+	// the messages read the exchange's name from the platform profile
+	// (INSTRUMENT_SERVICE_URL; design 2026-10-04 §4.5).
+	InstrumentURL string `koanf:"instrument_service_url"`
 	// How long in-app notices (and the broadcasts that made them) and
 	// delivery records are kept (NOTICE_RETENTION, DELIVERY_RETENTION;
 	// 180 and 90 days when zero), and how many queued mails go out each
@@ -77,6 +83,7 @@ func setup(ctx context.Context, a *app.App) error {
 		MockEmailDomains: []string{"example.com", "example.org", "example.net"},
 		UserAddr:         "localhost:9182",
 		AuthAddr:         "localhost:9181",
+		InstrumentURL:    "http://localhost:8084",
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -107,7 +114,15 @@ func setup(ctx context.Context, a *app.App) error {
 	}
 	store := postgres.NewStore(db, events)
 	dispatcher := application.NewDispatcher(routes, store, a.Logger(), a.Metrics())
+	dispatcher.Brand = &application.Branding{
+		Profile: &platform.Client{BaseURL: cfg.InstrumentURL, HTTP: &http.Client{Timeout: 5 * time.Second}}, Now: time.Now,
+	}
 	a.Add("dispatcher", dispatcher)
+	// The launch checklist's "mail service configured" (design 2026-10-04
+	// §4.6): a real provider, not only the mock.
+	if err := bootstrap.ConfigPresent(a, map[string]bool{"mail": cfg.Resend.APIKey != ""}); err != nil {
+		return err
+	}
 
 	userConn, err := bootstrap.GRPCClient(a, "user", cfg.UserAddr)
 	if err != nil {
