@@ -25,7 +25,7 @@ import {
   type MarketRow,
   type TickerOf,
 } from "@exchange/core/markets/index";
-import { useWelcomeCredits } from "@exchange/core/platform/index";
+import { useBranding, useWelcomeCredits } from "@exchange/core/platform/index";
 import {
   Badge,
   Button,
@@ -119,6 +119,7 @@ function Hero({ rows, loading, error, onRetry, tickerOf }: WithError) {
   // The console's home-hero (design 2026-10-04 §4.4), else the bundled draft, else these strings.
   const hero = useHero().data;
   const cta = hero?.cta ?? { text: t("pc.start"), href: routes.register };
+  const learning = useBranding().learning_mode.enabled;
   return (
     <section className="relative overflow-hidden border-b border-line-1">
       <div
@@ -136,9 +137,11 @@ function Hero({ rows, loading, error, onRetry, tickerOf }: WithError) {
       />
       <div className="relative mx-auto grid max-w-[1440px] grid-cols-[minmax(0,1fr)_380px] items-center gap-10 px-6 py-16 xl:grid-cols-[minmax(0,1fr)_440px] xl:py-20">
         <motion.div className="flex min-w-0 flex-col items-start gap-6" variants={listItem} initial="initial" animate="animate" custom={0}>
-          <Badge tone="brand" size="md" dot>
-            {t("pcMarkets.home.badge")}
-          </Badge>
+          {learning && (
+            <Badge tone="brand" size="md" dot>
+              {t("pcMarkets.home.badge")}
+            </Badge>
+          )}
           <h1 className="max-w-2xl text-2xl font-semibold leading-tight text-fg-1 xl:text-[44px]">{hero?.title || t("pc.heroTitle")}</h1>
           <p className="max-w-xl text-md leading-relaxed text-fg-2">{hero ? hero.subtitle : t("pc.heroSubtitle")}</p>
           <div className="flex flex-wrap gap-3">
