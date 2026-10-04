@@ -234,16 +234,19 @@ export function DataTable<T>({
 
   // Titles on cut cells: measured when the rows shown, their values or the
   // columns change and when the table's width does, at most once a frame
-  // (not on every render: a hover or a selection changes no text).
+  // (not on every render: a hover or a selection changes no text), and not
+  // while a load runs (once it is over).
   const titleFrame = useRef(0);
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
   const retitle = useCallback(() => {
     cancelAnimationFrame(titleFrame.current);
     titleFrame.current = requestAnimationFrame(() => {
-      if (tableRef.current) titleCutCells(tableRef.current);
+      if (tableRef.current && !loadingRef.current) titleCutCells(tableRef.current);
     });
   }, []);
   const firstShown = items[0]?.index ?? 0;
-  useEffect(() => retitle(), [retitle, data, allColumns, density, firstShown, lastIndex]);
+  useEffect(() => retitle(), [retitle, loading, data, allColumns, density, firstShown, lastIndex]);
   useEffect(() => {
     const table = tableRef.current;
     if (!table || typeof ResizeObserver === "undefined") return;

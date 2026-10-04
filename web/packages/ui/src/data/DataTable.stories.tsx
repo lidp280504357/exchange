@@ -208,6 +208,42 @@ export const Selection: Story = {
   },
 };
 
+/**
+ * A narrow table: a cell that cuts its text short carries it whole as a
+ * title (hover one); a cut label beside a badge titles the label alone.
+ */
+export const CutCells: Story = {
+  render: () => {
+    const data = useMemo(() => makeOrders(6), []);
+    const base = useColumns();
+    const columns = useMemo<ColumnDef<Order, any>[]>(
+      () => [
+        ...base.slice(0, 2),
+        {
+          id: "note",
+          header: "备注",
+          enableSorting: false,
+          cell: (c) => (
+            <span className="flex max-w-[200px] items-center gap-1.5">
+              <span className="min-w-0 truncate">{`${c.row.original.symbol} 网格第 ${c.row.index + 1} 档：按最新成交价自动调整的限价委托`}</span>
+              <Badge tone="info">网格</Badge>
+            </span>
+          ),
+          meta: { width: 232 } satisfies DataColumnMeta,
+        },
+        ...base.slice(4, 6),
+      ],
+      [base],
+    );
+    return (
+      <div className="w-[720px]">
+        <DataTable columns={columns} data={data} getRowId={(o) => o.id} aria-label="Orders" />
+        <p className="mt-2 text-xs text-fg-3">Hover a note: its title is the whole note, without the badge.</p>
+      </div>
+    );
+  },
+};
+
 /** Loading (skeletons), error (with trace ID and retry) and empty. */
 export const States: Story = {
   render: () => {

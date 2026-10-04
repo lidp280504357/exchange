@@ -265,7 +265,7 @@ expect 200 - "the terms are the console's"
 # The bundled draft's title, when the drill published it (an operator's may differ).
 [[ -z ${TERMS_OURS:-} ]] || check '.title == "用户协议"' "the terms' title"
 for site in pc m; do
-  SITE=$site BRAND=$NAME FAVICON=1 TESTMODE=0 BANNER=测试模式 LAUNCH=1 CAPTCHA_BYPASS_TOKEN="$BYPASS" \
+  SITE=$site BRAND=$NAME FAVICON=1 TESTMODE=0 BANNER=测试模式 LAUNCH=1 TERMS_TITLE="${TERMS_OURS:+用户协议}" CAPTCHA_BYPASS_TOKEN="$BYPASS" \
     node "$(dirname "$0")/../../web/e2e/branding.mjs"
 done
 

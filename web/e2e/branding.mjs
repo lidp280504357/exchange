@@ -2,15 +2,16 @@
 // 2026-10-04 §4.1, §4.3, §4.4), run by scripts/e2e/branding.sh and
 // launch-drill.sh while they have changed the profile:
 //
-//   SITE=pc|m BRAND=<name> FAVICON=1|0 TESTMODE=1|0 BANNER=<text> [LAUNCH=1] [CONTENT=test|formal] node web/e2e/branding.mjs
+//   SITE=pc|m BRAND=<name> FAVICON=1|0 TESTMODE=1|0 BANNER=<text> [LAUNCH=1 [TERMS_TITLE=<title>]] [CONTENT=test|formal] node web/e2e/branding.mjs
 //
 // Opens the deployed site and waits until it shows what the profile now
 // says, without a build: the name in the top bar and the page title, the
 // uploaded favicon (or the site's own), and the test-mode banner (TESTMODE=1)
 // or none. With LAUNCH=1 (launch-drill.sh) also what a live exchange shows:
 // no 测试模式 badge and no welcome-credit copy on the home and sign-up
-// pages, the terms page, and the help centre's live content (CONTENT is
-// formal then). CONTENT=test checks the help centre's test content instead.
+// pages, the console's terms on the terms page (titled TERMS_TITLE when
+// given), and the help centre's live content (CONTENT is formal then).
+// CONTENT=test checks the help centre's test content instead.
 // Every API response is checked against the OpenAPI contracts.
 import { ok, start } from "./lib.mjs";
 
@@ -21,6 +22,7 @@ const TESTMODE = process.env.TESTMODE === "1";
 const BANNER = process.env.BANNER ?? "";
 const LAUNCH = process.env.LAUNCH === "1";
 const CONTENT = process.env.CONTENT ?? (LAUNCH ? "formal" : "");
+const TERMS_TITLE = process.env.TERMS_TITLE ?? "";
 // What a site in test mode says that a live one must not: the 测试模式
 // badges and the welcome-credit promises (zh-CN, the language of the run).
 const TEST_ONLY = ["测试模式", "注册即得", "注册即领"];
@@ -72,9 +74,18 @@ try {
       if (found.length) throw new Error(`${path} still says ${JSON.stringify(found)}`);
     }
     ok(`${SITE}: no 测试模式 badge and no welcome-credit copy on the home and sign-up pages`);
+    // The terms page shows the console's article: the page reads it from
+    // the API (not the bundled draft) and heads it with the article's
+    // title, the one the drill published (TERMS_TITLE) when it did.
+    const served = page.waitForResponse((r) => new URL(r.url()).pathname === "/v1/legal/terms", { timeout: 20000 });
+    served.catch(() => {});
     await go("/legal/terms");
-    await page.waitForFunction(() => document.body.innerText.includes("用户协议"), { timeout: 20000 });
-    ok(`${SITE}: the terms page`);
+    const terms = await served;
+    if (terms.status() !== 200) throw new Error(`the terms page read /v1/legal/terms: ${terms.status()}`);
+    const title = (await terms.json()).title;
+    if (TERMS_TITLE && title !== TERMS_TITLE) throw new Error(`the terms are titled ${title}, not ${TERMS_TITLE}`);
+    await page.waitForFunction((want) => [...document.querySelectorAll("article h1")].some((h) => h.textContent?.trim() === want), { timeout: 20000 }, title);
+    ok(`${SITE}: the terms page shows the console's article (${title})`);
   }
   if (CONTENT) {
     // The help pages as the mode renders them: live without the test-only

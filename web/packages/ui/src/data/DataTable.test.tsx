@@ -19,6 +19,15 @@ const data: Row[] = [
   { id: "ord-c", name: "Gamma", amount: "100" },
 ];
 
+// happy-dom lays nothing out: give the elements their widths.
+const widths = (el: Element | null | undefined, scroll: number, client: number) => {
+  if (!el) throw new Error("no element");
+  Object.defineProperty(el, "scrollWidth", { configurable: true, get: () => scroll });
+  Object.defineProperty(el, "clientWidth", { configurable: true, get: () => client });
+};
+
+const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+
 const rowIds = () => Array.from(document.querySelectorAll("tbody tr[data-row-id]")).map((tr) => tr.getAttribute("data-row-id"));
 const rowOf = (id: string) => document.querySelector(`tbody tr[data-row-id="${id}"]`);
 
@@ -99,7 +108,14 @@ describe("DataTable", () => {
         header: "Label",
         cell: ({ row }) => (
           <span className="flex">
-            <span className="truncate">{row.original.name} adjustment</span>
+            <span className="truncate">
+              <svg aria-hidden="true" />
+              {row.original.name} adjustment
+              <button type="button">
+                <span aria-hidden="true">⧉</span>
+                <span className="sr-only">Copy</span>
+              </button>
+            </span>
             <span>FUTURES</span>
           </span>
         ),
@@ -108,18 +124,13 @@ describe("DataTable", () => {
     const { container } = render(<DataTable columns={labelled} data={data} getRowId={(r) => r.id} />);
     const table = container.querySelector("table");
     if (!table) throw new Error("no table");
-    // happy-dom lays nothing out: give the elements their widths.
-    const widths = (el: Element | null | undefined, scroll: number, client: number) => {
-      if (!el) throw new Error("no element");
-      Object.defineProperty(el, "scrollWidth", { configurable: true, get: () => scroll });
-      Object.defineProperty(el, "clientWidth", { configurable: true, get: () => client });
-    };
     const [name, amount, label] = Array.from(rowOf("ord-a")?.querySelectorAll("td") ?? []);
     widths(name, 120, 80);
     widths(label?.querySelector(".truncate"), 90, 60);
     titleCutCells(table);
     expect(name?.getAttribute("title")).toBe("Alpha");
-    // The cut label's text, not the badge beside it (review BG).
+    // The cut label's text: not the badge beside it, the copy button's
+    // screen-reader label or the icon (review BG).
     expect(label?.getAttribute("title")).toBe("Alpha adjustment");
     expect(amount?.hasAttribute("title")).toBe(false);
     expect(rowOf("ord-b")?.querySelector("td[title]")).toBeNull();
@@ -128,5 +139,26 @@ describe("DataTable", () => {
     titleCutCells(table);
     expect(name?.hasAttribute("title")).toBe(false);
     expect(label?.getAttribute("title")).toBe("Alpha adjustment");
+
+    // A cell's own title stays.
+    amount?.setAttribute("title", "ten units");
+    widths(amount, 120, 80);
+    titleCutCells(table);
+    expect(amount?.getAttribute("title")).toBe("ten units");
+    widths(amount, 80, 80);
+    titleCutCells(table);
+    expect(amount?.getAttribute("title")).toBe("ten units");
+  });
+
+  it("measures the titles once a load is over, not while it runs", async () => {
+    const { rerender } = render(<DataTable columns={columns} data={data} getRowId={(r) => r.id} loading />);
+    const name = rowOf("ord-a")?.querySelector("td");
+    widths(name, 120, 80);
+    rerender(<DataTable columns={columns} data={[...data]} getRowId={(r) => r.id} loading />);
+    await frame();
+    expect(name?.hasAttribute("title")).toBe(false);
+    rerender(<DataTable columns={columns} data={[...data]} getRowId={(r) => r.id} />);
+    await frame();
+    expect(name?.getAttribute("title")).toBe("Alpha");
   });
 });
