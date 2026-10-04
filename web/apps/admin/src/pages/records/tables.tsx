@@ -221,7 +221,15 @@ export function AuditTable({ list, onRowClick }: { list: CursorList<AuditEntry>;
       {
         id: "payload",
         header: t("admin.audit.payload"),
-        cell: ({ row }) => <span className="block max-w-96 truncate font-mono text-xs text-fg-2">{summary(row.original.payload)}</span>,
+        cell: ({ row }) => {
+          // Cut short to one line; the whole of it on hover (and in the row's drawer).
+          const text = summary(row.original.payload);
+          return (
+            <span className="block max-w-96 truncate font-mono text-xs text-fg-2" title={text}>
+              {text}
+            </span>
+          );
+        },
       },
     ],
     [t],

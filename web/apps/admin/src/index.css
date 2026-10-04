@@ -160,8 +160,13 @@
   mask-image: radial-gradient(ellipse 70% 60% at 35% 40%, var(--black) 20%, transparent 75%);
 }
 
-/* Cards enter one after another: each sets --i, 40 ms apart. */
+/* Cards enter one after another: each sets --i, 40 ms apart; all at once
+   and still with reduced motion (the shared rule shortens animations but
+   keeps their delays, which would hold each card back). */
 @utility stagger {
   animation: rise 320ms var(--ease) backwards;
   animation-delay: calc(var(--i, 0) * 40ms);
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
 }
