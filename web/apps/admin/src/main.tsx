@@ -1,5 +1,5 @@
 import { createQueryClient, initI18n, useSettings } from "@exchange/core";
-import { uiMessages } from "@exchange/ui";
+import { prefersReducedMotion, uiMessages } from "@exchange/ui";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { MotionConfig } from "motion/react";
 import { StrictMode } from "react";
@@ -21,7 +21,7 @@ preloadConsole(location.pathname);
 
 const app = (
   <QueryClientProvider client={queryClient}>
-    <MotionConfig reducedMotion="user">
+    <MotionConfig reducedMotion="user" skipAnimations={prefersReducedMotion()}>
       <BrowserRouter>
         <App />
       </BrowserRouter>
