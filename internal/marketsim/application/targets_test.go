@@ -310,6 +310,13 @@ func TestALegacyTargetJumpsAndASpikeStaysInTheBand(t *testing.T) {
 	if !apperrIs(err, "SIM_SPIKE_BEYOND_BAND") || !detailIs(err, "max", 0.07) {
 		t.Fatalf("a spike of 8%% in a band of 10%%: %v", err)
 	}
+	// A legacy target made a jump brings no spikes: they would skip their
+	// checks (review AX).
+	_, err = r.sim.CreateEvent(ctx, domain.Event{Type: domain.EventTarget, Price: d("1.02"), Duration: 10 * time.Second, CreatedBy: "ops", Reason: "test"},
+		domain.Event{StartsAt: r.now.Add(time.Minute), Size: 0.09, Width: 10 * time.Minute})
+	if !apperrIs(err, "COMMON_INVALID_ARGUMENT") || len(r.store.events) != 0 {
+		t.Fatalf("a legacy target with spikes: %v, %d events", err, len(r.store.events))
+	}
 	p := r.sim.Status().Target
 	e := r.create(t, domain.Event{Type: domain.EventTarget, Price: d("1.02"), Duration: 10 * time.Second})
 	if e.Type != domain.EventJump || math.Abs(e.Size-(1.02/p-1)) > 1e-6 || e.Duration != 10*time.Second {

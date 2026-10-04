@@ -339,6 +339,9 @@ func (s *Sim) CreateEvent(ctx context.Context, e domain.Event, spikes ...domain.
 		if err := e.Validate(); err != nil {
 			return domain.Event{}, apperr.Invalid(err.Error())
 		}
+		if len(spikes) > 0 { // a legacy target made a jump brings none (review AX)
+			return domain.Event{}, apperr.Invalid("only a target comes with spikes")
+		}
 	}
 	for _, x := range append([]domain.Event{e}, spikes...) {
 		if x.StartsAt.After(now.Add(domain.MaxLead)) {
