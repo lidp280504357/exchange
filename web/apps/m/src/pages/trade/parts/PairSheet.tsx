@@ -1,5 +1,6 @@
 import { dec, errorText, formatPercent, formatPrice, pairName, useContracts, usePairs, useTickers } from "@exchange/core";
 import { useFavorites } from "@exchange/core/markets/favorites";
+import { searchMarkets } from "@exchange/core/markets/search";
 import { CoinIcon, Input, Segmented, Sheet, cn, toast } from "@exchange/ui";
 import { Search, Star } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -38,11 +39,10 @@ export function PairSheet({
     return [...spot, ...perp];
   }, [pairs.data, contracts.data, t]);
 
-  const q = query.trim().toUpperCase();
-  const shown = rows.filter((r) => {
-    const inGroup = group === "all" || (group === "fav" ? favorites.has(r.symbol) : group === "perp" ? r.futures : !r.futures && r.quote === group);
-    return inGroup && (!q || r.symbol.includes(q) || r.base.includes(q) || r.name.toUpperCase().includes(q));
-  });
+  const shown = searchMarkets(
+    rows.filter((r) => group === "all" || (group === "fav" ? favorites.has(r.symbol) : group === "perp" ? r.futures : !r.futures && r.quote === group)),
+    query,
+  );
   const quotes = [...new Set(rows.filter((r) => !r.futures).map((r) => r.quote))];
 
   return (

@@ -1,5 +1,6 @@
 import { dec, errorText, formatPercent, formatPrice, pairName, useContracts, usePairs, useTickers } from "@exchange/core";
 import { useFavorites } from "@exchange/core/markets/favorites";
+import { searchMarkets } from "@exchange/core/markets/search";
 import { CoinIcon, Input, Popover, Segmented, cn, toast } from "@exchange/ui";
 import { ChevronDown, Search } from "lucide-react";
 import { useMemo, useState, type KeyboardEvent } from "react";
@@ -43,11 +44,9 @@ export function PairPicker({
   }, [kind, pairs.data, contracts.data, t]);
 
   const groups = useMemo(() => ["fav", "all", ...new Set(rows.map((r) => r.quote))], [rows]);
-  const q = query.trim().toUpperCase();
-  const shown = rows.filter(
-    (r) =>
-      (group === "all" || (group === "fav" ? favorites.has(r.symbol) : r.quote === group)) &&
-      (!q || r.symbol.includes(q) || r.base.includes(q) || r.name.toUpperCase().includes(q)),
+  const shown = searchMarkets(
+    rows.filter((r) => group === "all" || (group === "fav" ? favorites.has(r.symbol) : r.quote === group)),
+    query,
   );
   const toggle = (symbol: string) => favorites.toggle(symbol).catch((e: unknown) => toast.error(errorText(e)));
 
@@ -121,7 +120,7 @@ export function PairPicker({
       </div>
       <div role="listbox" aria-label={t("pcTrade.switchPair")} className="max-h-[360px] overflow-y-auto pb-1">
         {shown.length === 0 && (
-          <p className="px-3 py-6 text-center text-sm text-fg-3">{group === "fav" && !q ? t("pcTrade.noFavorites") : t("market.noResults")}</p>
+          <p className="px-3 py-6 text-center text-sm text-fg-3">{group === "fav" && !query.trim() ? t("pcTrade.noFavorites") : t("market.noResults")}</p>
         )}
         {shown.map((r, i) => {
           const tk = tickers.get(r.symbol);

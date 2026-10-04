@@ -35,7 +35,8 @@ export function DepthBars({ value, max, ratio, side, align = "right", className 
       className={cn(
         "pointer-events-none absolute inset-y-0 w-full",
         align === "right" ? "right-0 origin-right" : "left-0 origin-left",
-        side === "buy" ? "bg-up/15" : "bg-down/15",
+        // 10%: under the price the fall's red still reads at 4.7:1 (at 15% 4.4).
+        side === "buy" ? "bg-up/10" : "bg-down/10",
         className,
       )}
       style={{ transform: `scaleX(${Math.min(1, Math.max(0, r))})` }}

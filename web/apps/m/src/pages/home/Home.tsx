@@ -203,7 +203,8 @@ function AssetCard({ tickers }: { tickers: ReadonlyMap<string, TickerData> }) {
               {hidden ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
           </div>
-          <Link to={routes.assets} className="-mr-2 flex h-tap shrink-0 items-center gap-0.5 px-2 text-sm text-fg-3 transition-colors active:text-fg-1">
+          {/* fg-2: the corner's brand glow under it takes fg-3 below 4.5:1. */}
+          <Link to={routes.assets} className="-mr-2 flex h-tap shrink-0 items-center gap-0.5 px-2 text-sm text-fg-2 transition-colors active:text-fg-1">
             {t("mMarkets.home.myAssets")}
             <ChevronRight size={16} />
           </Link>

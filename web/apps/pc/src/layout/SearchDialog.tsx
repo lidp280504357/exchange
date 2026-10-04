@@ -1,4 +1,5 @@
 import { dec, formatPercent, formatPrice, pairName, routes, useContracts, usePairs, useTickers } from "@exchange/core";
+import { searchMarkets } from "@exchange/core/markets/search";
 import { CoinIcon, DialogPrimitive as RDialog, cn } from "@exchange/ui";
 import { Search } from "lucide-react";
 import { useMemo, useState, type KeyboardEvent } from "react";
@@ -60,8 +61,7 @@ function Results({
     }));
     return [...spot, ...perp];
   }, [pairs.data, contracts.data, t]);
-  const q = query.trim().toUpperCase();
-  const shown = entries.filter((e) => !q || e.symbol.includes(q) || e.base.includes(q) || e.name.toUpperCase().includes(q)).slice(0, 12);
+  const shown = searchMarkets(entries, query).slice(0, 12);
 
   const keyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
