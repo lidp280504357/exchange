@@ -65,7 +65,7 @@ export function CustodyFees({ admin, provider }: { admin: Admin; provider: "UDUN
         cell: ({ row }) => (
           <span className="inline-flex flex-col items-start gap-0.5">
             <EnumBadge group="feeStatus" code={row.original.status} />
-            {waitsForGas(row.original) && <span className="text-xs text-warn">{t("admin.custodyFees.waitingGas")}</span>}
+            {waitsForGas(row.original) && <span className="text-xs text-warn-strong">{t("admin.custodyFees.waitingGas")}</span>}
             {row.original.journal_id && (
               <span className="text-xs text-fg-3" title={t("admin.custodyFees.journal")}>
                 <IdText value={row.original.journal_id} />

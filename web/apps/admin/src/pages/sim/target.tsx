@@ -318,9 +318,9 @@ export function TargetPreview({
     return chartPoints(q.data.points, Number(level), marks, (v) => time(v, "time"));
   }, [q.data, level, spikes, time]);
   if (!c) return <p className="text-xs text-fg-3">{t("admin.simTarget.previewWaits")}</p>;
-  if (tooFar) return <p className="text-sm text-warn" data-testid="sim-target-too-far">{t("admin.simTarget.tooFar")}</p>;
+  if (tooFar) return <p className="text-sm text-warn-strong" data-testid="sim-target-too-far">{t("admin.simTarget.tooFar")}</p>;
   if (q.isPending) return <Skeleton className="h-48 w-full" />;
-  if (q.isError) return <p className="text-sm text-warn">{t("admin.simTarget.previewUnknown")}</p>;
+  if (q.isError) return <p className="text-sm text-warn-strong">{t("admin.simTarget.previewUnknown")}</p>;
   const pv = q.data;
   const side = pv.direction ?? (draft.direction === "AUTO" ? null : draft.direction);
   return (
@@ -439,7 +439,7 @@ export function TargetPlan({ id, live, height = 220, event }: { id: string; live
     return chartPoints(plan.points, Number(plan.level), spikes, (v) => time(v, "time"), at);
   }, [plan, history.data, time]);
   if (q.isPending) return <Skeleton className="w-full" style={{ height }} />;
-  if (q.isError || !plan) return <p className="text-sm text-warn">{t("admin.simTarget.planUnknown")}</p>;
+  if (q.isError || !plan) return <p className="text-sm text-warn-strong">{t("admin.simTarget.planUnknown")}</p>;
   const crossedAt = plan.now?.crossed_at ?? event?.crossed_at;
   return (
     <div className="flex flex-col gap-2" data-testid="sim-target-plan">

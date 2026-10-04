@@ -63,7 +63,7 @@ export default function SimBots({ admin }: { admin: Admin }) {
             {
               id: "actions", header: "", meta: right,
               cell: ({ row }) => (
-                <Link to={`/adjustments?uid=${row.original.user_id}`} className="whitespace-nowrap text-sm text-info hover:underline">
+                <Link to={`/adjustments?uid=${row.original.user_id}`} className="whitespace-nowrap text-sm text-info-strong hover:underline">
                   {t("admin.sim.adjustBot")}
                 </Link>
               ),
@@ -123,7 +123,7 @@ export default function SimBots({ admin }: { admin: Admin }) {
             className="stagger"
             style={stagger(4)}
             extra={
-              <Link to="/sim/control" className="text-xs text-info hover:underline">
+              <Link to="/sim/control" className="text-xs text-info-strong hover:underline">
                 {t("admin.sim.editInControl")}
               </Link>
             }
@@ -177,7 +177,7 @@ function Roster({ st, coin }: { st: SimStatus; coin: string }) {
         <span>{t("admin.sim.holding")} <Num value={sum((b) => b.coin)} decimals={0} unit={coin} /></span>
         <span><Num value={sum((b) => b.usdt)} decimals={2} unit="USDT" /></span>
         {st.perp && <span>{t("admin.sim.perpPosition")} <Num value={sum((b) => b.perp_position)} signed /></span>}
-        <span className={errors ? "text-danger" : "text-fg-3"}>{t("admin.sim.refusedNow", { n: errors })}</span>
+        <span className={errors ? "text-danger-strong" : "text-fg-3"}>{t("admin.sim.refusedNow", { n: errors })}</span>
       </div>
     </div>
   );
@@ -190,7 +190,7 @@ function Switches({ admin }: { admin: Admin }) {
   const flags = useQuery({ queryKey: ["admin", "flags"], queryFn: async () => adminData(await adminApi.GET("/admin/v1/flags")).items });
   const writable = can(admin, "flags.write");
   if (flags.isPending) return <Skeleton className="h-28 w-full" />;
-  if (flags.isError) return <p className="text-sm text-danger">{errorText(flags.error)}</p>;
+  if (flags.isError) return <p className="text-sm text-danger-strong">{errorText(flags.error)}</p>;
   const list = SIM_FLAGS.map((k) => flags.data.find((f) => f.key === k)).filter((f): f is Flag => !!f);
   return (
     <div className="flex flex-col divide-y divide-line-1">
@@ -340,7 +340,7 @@ function MintOutcome({ a }: { a: Approval }) {
         <EnumBadge group="approvalStatus" code={a.status} />
         <span className="text-fg-3">{a.mode === "SINGLE" ? t("admin.funds.single") : t(`admin.funds.escalation.${a.escalation || "REQUESTED"}`)}</span>
       </div>
-      {a.status === "FAILED" ? <p className="text-danger">{a.result}</p> : <MintShares payload={p} full />}
+      {a.status === "FAILED" ? <p className="text-danger-strong">{a.result}</p> : <MintShares payload={p} full />}
       {a.status === "EXECUTED" && <p className="text-xs text-fg-3">{a.result}</p>}
       {a.status === "PENDING" && <p className="text-fg-2">{t("admin.funds.waitingHint")}</p>}
     </div>

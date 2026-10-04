@@ -25,11 +25,11 @@ export function ImpactLines({ i }: { i: SimImpact }) {
           ? t("admin.sim.impactOpen", { symbol: i.symbol, n: i.positions })
           : t("admin.sim.impactPositions", { symbol: i.symbol, longs: i.longs, shorts: i.shorts })}
       </span>
-      <span className={i.liquidated ? "text-danger" : "text-fg-2"}>
+      <span className={i.liquidated ? "text-danger-strong" : "text-fg-2"}>
         {t("admin.sim.impactLiquidated", { n: i.liquidated, notional: i.notional, accounts: i.accounts })}
       </span>
-      {Number(i.insurance_cost) > 0 && <span className="text-danger">{t("admin.sim.impactShortfall", { amount: i.insurance_cost })}</span>}
-      {i.unmeasured > 0 && <span className="text-warn">{t("admin.sim.impactUnmeasured", { n: i.unmeasured })}</span>}
+      {Number(i.insurance_cost) > 0 && <span className="text-danger-strong">{t("admin.sim.impactShortfall", { amount: i.insurance_cost })}</span>}
+      {i.unmeasured > 0 && <span className="text-warn-strong">{t("admin.sim.impactUnmeasured", { n: i.unmeasured })}</span>}
     </span>
   );
 }
@@ -47,11 +47,11 @@ export function SimRequestNow({ id }: { id: string }) {
     queryFn: async () => adminData(await adminApi.GET("/admin/v1/approvals/{id}/sim-preview", { params: { path: { id } } })),
   });
   if (q.isPending) return <Skeleton className="h-16 w-full" />;
-  if (q.isError) return <p className="text-sm text-warn">{t("admin.sim.previewUnknown")}</p>;
+  if (q.isError) return <p className="text-sm text-warn-strong">{t("admin.sim.previewUnknown")}</p>;
   const pv = q.data;
   return (
     <div className="flex flex-col gap-1.5 rounded-1 border border-line-1 bg-bg-2 px-3 py-2 text-xs" data-testid="sim-request-now">
-      <span className={pv.expired ? "font-medium text-danger" : "text-fg-2"}>
+      <span className={pv.expired ? "font-medium text-danger-strong" : "text-fg-2"}>
         {t(pv.expired ? "admin.sim.lapsed" : "admin.sim.lapses")} <TimeText value={pv.expires_at} />
       </span>
       {pv.expected_price ? (

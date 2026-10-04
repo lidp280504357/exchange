@@ -299,7 +299,7 @@ function Launcher({ target, perp, control }: { target: number; perp: string; con
             invalidate={[simKey, simEventsKey]}
           />
         )}
-        <Link to="/approvals" className="text-sm text-info hover:underline">
+        <Link to="/approvals" className="text-sm text-info-strong hover:underline">
           {t("admin.sim.toApprovals")}
         </Link>
       </div>
@@ -329,7 +329,7 @@ function TargetBanner({ events, control }: { events: SimEvent[]; control: boolea
           <span className="font-medium">{eventText(e)}</span>
           {e.status === "SCHEDULED" && <span className="text-xs text-fg-2">{t("admin.sim.begins")} <TimeText value={e.starts_at} style="datetimeSeconds" /></span>}
           <span className="ml-auto flex items-center gap-2">
-            <Link to="/sim/events" className="text-xs text-info hover:underline">{t("admin.simTarget.toEvents")}</Link>
+            <Link to="/sim/events" className="text-xs text-info-strong hover:underline">{t("admin.simTarget.toEvents")}</Link>
             {control && <EndEvent e={e} text={eventText(e)} />}
           </span>
         </div>
@@ -349,7 +349,7 @@ function Impact({ price: at, label }: { price: number; label?: ReactNode }) {
   });
   let body: ReactNode;
   if (q.isPending) body = <Skeleton className="h-10 w-full" />;
-  else if (q.isError) body = <span className="text-warn">{t("admin.sim.impactUnknown")}</span>;
+  else if (q.isError) body = <span className="text-warn-strong">{t("admin.sim.impactUnknown")}</span>;
   else body = <ImpactLines i={q.data} />;
   return (
     <span className="mt-1 rounded-1 border border-line-1 bg-bg-2 px-2 py-1.5 text-xs">

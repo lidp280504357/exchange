@@ -26,7 +26,7 @@ export function ModeBanner({ className }: { className?: string }) {
         className,
       )}
     >
-      {s.two_person_approval ? <ShieldCheck size={18} className="text-success" /> : <UserRound size={18} className="text-info" />}
+      {s.two_person_approval ? <ShieldCheck size={18} className="text-success-strong" /> : <UserRound size={18} className="text-info-strong" />}
       <div className="min-w-0 flex-1">
         <div className="font-medium">{t(s.two_person_approval ? "admin.funds.twoPersonMode" : "admin.funds.singleMode")}</div>
         <div className="text-fg-3">
@@ -44,7 +44,7 @@ export function ModeBanner({ className }: { className?: string }) {
           valueText={`${usdt(s.daily_used_usdt)} / ${usdt(s.daily_max_usdt)} USDT`}
         />
       )}
-      <Link to="/settings" className="text-info hover:underline">
+      <Link to="/settings" className="text-info-strong hover:underline">
         {t("admin.funds.toSettings")}
       </Link>
     </div>

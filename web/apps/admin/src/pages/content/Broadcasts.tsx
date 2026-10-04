@@ -70,7 +70,7 @@ export default function Broadcasts({ admin }: { admin: Admin }) {
             <Badge tone={statusTone[b.status]} dot={b.status === "SENDING"}>
               {t(`admin.broadcasts.status.${b.status}`)}
             </Badge>
-            {b.status === "SENDING" && b.failures > 0 && <span className="text-xs text-warn">{t("admin.broadcasts.retrying", { n: b.failures })}</span>}
+            {b.status === "SENDING" && b.failures > 0 && <span className="text-xs text-warn-strong">{t("admin.broadcasts.retrying", { n: b.failures })}</span>}
           </span>
         ),
       },
@@ -155,7 +155,7 @@ function BroadcastDrawer({ admin, id, initial, onClose }: { admin: Admin; id: st
       <div className="flex flex-col gap-4">
         {(b.status === "FAILED" || b.failures > 0) && (
           <div role="status" className="rounded-2 border border-danger/40 bg-danger/5 px-4 py-3 text-sm">
-            <div className="font-medium text-danger">
+            <div className="font-medium text-danger-strong">
               {t(b.status === "FAILED" ? "admin.broadcasts.failedHint" : "admin.broadcasts.retryHint", { n: b.failures })}
             </div>
             {b.last_error && <div className="mt-1 break-all font-mono text-xs text-fg-2">{b.last_error}</div>}
@@ -315,7 +315,7 @@ function Compose({ onClose, onSent }: { onClose: () => void; onSent: (b: Broadca
             </span>
           </label>
         )}
-        {audience === "ALL" && <p className="rounded-2 bg-warn/10 px-3 py-2 text-sm text-warn">{t("admin.broadcasts.allWarning")}</p>}
+        {audience === "ALL" && <p className="rounded-2 bg-warn/10 px-3 py-2 text-sm text-warn-strong">{t("admin.broadcasts.allWarning")}</p>}
         {(["zh-CN", "en"] as const).map((l) => (
           <fieldset key={l} className="flex flex-col gap-3 rounded-2 border border-line-1 p-4">
             <legend className="px-1 text-xs text-fg-3">{t(l === "zh-CN" ? "admin.broadcasts.chinese" : "admin.broadcasts.english")}</legend>

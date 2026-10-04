@@ -165,7 +165,7 @@ function Todo({ admin }: { admin: Admin }) {
           style={stagger(i)}
           className="card stagger group flex items-center gap-3 p-4 transition-[transform,border-color] duration-[var(--t-fast)] hover:-translate-y-0.5 hover:border-brand"
         >
-          <span className={cn("grid size-10 place-items-center rounded-2", x.n ? "bg-warn/15 text-warn" : "bg-bg-2 text-fg-3")}>
+          <span className={cn("grid size-10 place-items-center rounded-2", x.n ? "bg-warn/15 text-warn-strong" : "bg-bg-2 text-fg-3")}>
             <x.icon size={18} />
           </span>
           <span className="min-w-0 flex-1">
@@ -197,14 +197,14 @@ function Health() {
           {q.data && (
             <Badge tone={down ? "danger" : "success"}>{down ? t("admin.overview.someDown", { down }) : t("admin.overview.allReady", { n: list.length })}</Badge>
           )}
-          <Link to="/health" className="text-sm text-info hover:underline">
+          <Link to="/health" className="text-sm text-info-strong hover:underline">
             {t("admin.common.details")}
           </Link>
         </>
       }
     >
       {q.isError ? (
-        <p className="text-sm text-danger">{errorText(q.error)}</p>
+        <p className="text-sm text-danger-strong">{errorText(q.error)}</p>
       ) : (
         <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm sm:grid-cols-3">
           {q.isPending
@@ -231,9 +231,9 @@ function HouseSummary() {
   });
   const h = q.data;
   return (
-    <Card title={t("admin.overview.house")} extra={<Link to="/house" className="text-sm text-info hover:underline">{t("admin.common.details")}</Link>}>
+    <Card title={t("admin.overview.house")} extra={<Link to="/house" className="text-sm text-info-strong hover:underline">{t("admin.common.details")}</Link>}>
       {q.isError ? (
-        <p className="text-sm text-danger">{errorText(q.error)}</p>
+        <p className="text-sm text-danger-strong">{errorText(q.error)}</p>
       ) : (
         <div className="grid grid-cols-2 gap-4">
           <div>

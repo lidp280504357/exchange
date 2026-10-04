@@ -144,7 +144,7 @@ export function ArticlesPage({ admin, section }: { admin: Admin; section: ListSe
           shown(a) && (
             <RowActions>
               <a
-                className="inline-flex items-center gap-1 text-xs text-info hover:underline"
+                className="inline-flex items-center gap-1 text-xs text-info-strong hover:underline"
                 href={`${SITE}/${FILES[section]}/${a.slug}`}
                 target="_blank"
                 rel="noreferrer"

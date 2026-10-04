@@ -147,7 +147,7 @@ function Distribution({ tok, platform, held }: { tok: SimToken; platform: string
           </span>
         ))}
       </div>
-      {!dec.eq(held, tok.issued) && <p className="text-xs text-warn">{t("admin.sim.heldDiffers", { held, issued: tok.issued })}</p>}
+      {!dec.eq(held, tok.issued) && <p className="text-xs text-warn-strong">{t("admin.sim.heldDiffers", { held, issued: tok.issued })}</p>}
     </div>
   );
 }

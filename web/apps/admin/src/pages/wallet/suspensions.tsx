@@ -43,7 +43,7 @@ export function SuspensionBanner({ admin }: { admin: Admin }) {
     <div className="flex flex-col gap-2" data-testid="withdrawal-suspensions">
       {list.map((x) => (
         <div key={x.asset} className="card flex flex-wrap items-center gap-x-4 gap-y-2 border-l-[3px] border-l-danger px-4 py-3 text-sm">
-          <OctagonPause size={18} className="text-danger" />
+          <OctagonPause size={18} className="text-danger-strong" />
           <div className="min-w-0 flex-1">
             <div className="font-medium">
               {t("admin.suspensions.banner", { asset: x.asset, since: time(x.suspended_at, "datetime"), by: x.suspended_by, reason: x.reason })}

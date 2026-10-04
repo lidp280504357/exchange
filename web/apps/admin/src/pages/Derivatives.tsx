@@ -65,7 +65,7 @@ function Contracts({ admin }: { admin: Admin }) {
         id: "mark",
         header: t("admin.derivatives.mark"),
         meta: right,
-        cell: ({ row }) => <Num value={row.original.mark_price} className={row.original.mark_fresh ? undefined : "text-warn"} />,
+        cell: ({ row }) => <Num value={row.original.mark_price} className={row.original.mark_fresh ? undefined : "text-warn-strong"} />,
       },
       { id: "oi", header: t("admin.derivatives.oi"), meta: right, cell: ({ row }) => <Num value={row.original.open_interest} /> },
       { accessorKey: "positions", header: t("admin.derivatives.positions"), meta: right },

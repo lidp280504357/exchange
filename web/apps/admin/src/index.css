@@ -22,12 +22,16 @@
   --animate-toast-in: toast-in 240ms var(--ease) backwards;
   --animate-check: draw 360ms var(--ease) 80ms forwards;
   --animate-bob: bob 3.2s ease-in-out infinite alternate;
-  /* Rise, fall and the brand as text on the console's light pages: the
-     tokens' darker text shades (ui-checklist item 3); in the dark sidebar
-     they are the usual colours. */
+  /* Rise, fall, the brand and the status tones as text on the console's
+     light pages: the tokens' darker text shades (ui-checklist item 3); in
+     the dark sidebar they are the usual colours. */
   --color-up-strong: var(--up-strong);
   --color-down-strong: var(--down-strong);
   --color-brand-strong: var(--brand-strong);
+  --color-success-strong: var(--success-strong);
+  --color-danger-strong: var(--danger-strong);
+  --color-info-strong: var(--info-strong);
+  --color-warn-strong: var(--warn-strong);
 }
 
 @keyframes sidebar-in {

@@ -43,7 +43,7 @@ function Toast({ item }: { item: ToastRecord }) {
       )}
     >
       <span className="mt-0.5 shrink-0">
-        {item.tone === "success" ? <Check /> : item.tone === "error" ? <CircleX size={18} className="text-danger" /> : <Info size={18} className="text-info" />}
+        {item.tone === "success" ? <Check /> : item.tone === "error" ? <CircleX size={18} className="text-danger-strong" /> : <Info size={18} className="text-info-strong" />}
       </span>
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium">{item.title}</div>

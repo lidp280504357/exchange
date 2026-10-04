@@ -144,7 +144,7 @@ function View<T>({
         />
       }
     >
-      {note && <p className="mb-3 rounded-2 bg-warn/10 px-3 py-2 text-xs text-warn">{note}</p>}
+      {note && <p className="mb-3 rounded-2 bg-warn/10 px-3 py-2 text-xs text-warn-strong">{note}</p>}
       {mode === "chart" ? (
         loading ? <Skeleton className="h-[240px] w-full" /> : <Chart data={chart} series={series} height={240} aria-label={title} />
       ) : (

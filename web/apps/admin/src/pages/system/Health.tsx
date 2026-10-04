@@ -58,7 +58,7 @@ export default function Health() {
           s.kafka_lag === undefined ? (
             <span className="text-fg-3">—</span>
           ) : (
-            <span className={s.kafka_lag > 1000 ? "font-medium text-warn" : undefined}>
+            <span className={s.kafka_lag > 1000 ? "font-medium text-warn-strong" : undefined}>
               <Num value={String(s.kafka_lag)} decimals={0} />
             </span>
           ),
@@ -124,7 +124,7 @@ function Reconciliation() {
       extra={
         <>
           {q.data && <Badge tone={bad ? "danger" : "success"}>{bad ? t("admin.health.reconBad", { n: bad }) : t("admin.health.reconOk")}</Badge>}
-          <Link to="/ledger" className="text-sm text-info hover:underline">
+          <Link to="/ledger" className="text-sm text-info-strong hover:underline">
             {t("admin.common.details")}
           </Link>
         </>
@@ -161,7 +161,7 @@ function Feed({ feed, loading }: { feed?: AdminSchemas["FeedStatus"]; loading: b
       {loading ? (
         <Skeleton className="h-24 w-full" />
       ) : !feed ? (
-        <p className="text-sm text-danger">{t("admin.health.feedUnknown")}</p>
+        <p className="text-sm text-danger-strong">{t("admin.health.feedUnknown")}</p>
       ) : (
         <KeyValue
           density="compact"
@@ -174,7 +174,7 @@ function Feed({ feed, loading }: { feed?: AdminSchemas["FeedStatus"]; loading: b
             {
               key: "halted", label: t("admin.health.halted"),
               value: feed.halted.length ? (
-                <span className="text-danger">{feed.halted.map((h) => h.symbol).join(", ")}</span>
+                <span className="text-danger-strong">{feed.halted.map((h) => h.symbol).join(", ")}</span>
               ) : (
                 t("admin.health.noHalted")
               ),

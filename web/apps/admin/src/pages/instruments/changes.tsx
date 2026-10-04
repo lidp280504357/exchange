@@ -65,7 +65,7 @@ export function ImpactLine({ impact }: { impact: TierImpact }) {
     over: impact.over_limit, positions: impact.positions,
   };
   return (
-    <p className={impact.liquidated > 0 ? "text-sm text-danger" : "text-sm text-fg-2"} data-testid="tier-impact">
+    <p className={impact.liquidated > 0 ? "text-sm text-danger-strong" : "text-sm text-fg-2"} data-testid="tier-impact">
       {t(impact.liquidated > 0 ? "admin.changes.impact" : "admin.changes.impactNone", vars)}
       {impact.unmeasured > 0 && t("admin.changes.unmeasured", { n: impact.unmeasured })}
     </p>
@@ -84,7 +84,7 @@ export function GuardNote({ guard, canConfirm }: { guard: ChangeGuard; canConfir
   return (
     <section className="rounded-2 border border-warn/40 bg-warn/10">
       <header className="flex items-center gap-2 border-b border-warn/30 px-3 py-2 text-sm">
-        <Clock size={14} className="text-warn" />
+        <Clock size={14} className="text-warn-strong" />
         <span className="font-medium">{t("admin.changes.params")}</span>
       </header>
       <ParamList params={guard.params} />

@@ -136,7 +136,7 @@ export function AssetProfileSection({ code, writable }: { code: string; writable
               )}
               <span className="text-xs text-fg-3">{t("admin.profile.logoHint")}</span>
             </div>
-            {logoError && <p className="text-xs text-danger">{logoError}</p>}
+            {logoError && <p className="text-xs text-danger-strong">{logoError}</p>}
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setDraft(null)}>
                 {t("common.cancel")}

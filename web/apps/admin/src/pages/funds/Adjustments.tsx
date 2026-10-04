@@ -164,7 +164,7 @@ export function AdjustForm({ userId, onUser, onDone }: { userId: string; onUser?
         <Input value={reference} onValueChange={setReference} maxLength={64} placeholder={t("admin.funds.referenceHint")} />
       </label>
       {direction === "debit" && balance && amountOk && dec.gt(a, balance.available) && (
-        <p className="text-sm text-warn">{t("admin.funds.overBalance", { available: balance.available, asset: balance.asset })}</p>
+        <p className="text-sm text-warn-strong">{t("admin.funds.overBalance", { available: balance.available, asset: balance.asset })}</p>
       )}
       <FundAction
         trigger={(open) => (
@@ -223,11 +223,11 @@ function CrossMarginNote({ userId, debit }: { userId: string; debit: string }) {
     retry: false,
   });
   if (q.isPending) return <Skeleton className="h-12 w-full" />;
-  if (q.isError) return <p className="text-sm text-warn">{t("admin.margin.unknown")}</p>;
+  if (q.isError) return <p className="text-sm text-warn-strong">{t("admin.margin.unknown")}</p>;
   const m = q.data;
   if (m.positions === 0) return <p className="text-sm text-fg-3">{t("admin.margin.noCross")}</p>;
-  if (m.unmeasured) return <p className="text-sm text-warn">{t("admin.margin.unmeasured")}</p>;
-  const tone = m.state_after === "LIQUIDATE" ? "border-danger text-danger" : m.state_after === "WARNING" ? "border-warn text-warn" : "border-line-1 text-fg-2";
+  if (m.unmeasured) return <p className="text-sm text-warn-strong">{t("admin.margin.unmeasured")}</p>;
+  const tone = m.state_after === "LIQUIDATE" ? "border-danger text-danger-strong" : m.state_after === "WARNING" ? "border-warn text-warn-strong" : "border-line-1 text-fg-2";
   return (
     <div className={`flex flex-col gap-1 rounded-2 border px-3 py-2 text-sm ${tone}`} data-testid="futures-margin">
       <span className="flex flex-wrap items-center gap-x-2">
@@ -246,7 +246,7 @@ function UserLine({ view, loading, error, asset, account }: { view?: UserView; l
   const { t } = useTranslation();
   const open = useOpenUser();
   if (loading) return <Skeleton className="h-12 w-full" />;
-  if (error || !view) return <p className="text-sm text-danger">{t("admin.funds.noUser")}</p>;
+  if (error || !view) return <p className="text-sm text-danger-strong">{t("admin.funds.noUser")}</p>;
   const b = view.balances.find((x) => x.account_type === account && x.asset === asset);
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-2 border border-line-1 bg-bg-0 px-3 py-2.5 text-sm">
@@ -261,7 +261,7 @@ function UserLine({ view, loading, error, asset, account }: { view?: UserView; l
           {t("admin.users.frozen")} <Num value={b.frozen} />
         </span>
       )}
-      <button type="button" onClick={() => open(view.user.id)} className="ml-auto text-info hover:underline">
+      <button type="button" onClick={() => open(view.user.id)} className="ml-auto text-info-strong hover:underline">
         {t("admin.common.openUser")}
       </button>
     </div>
@@ -314,7 +314,7 @@ export function Outcome({ a }: { a: Approval }) {
           </table>
         </>
       )}
-      {a.status === "FAILED" && <p className="text-danger">{a.result}</p>}
+      {a.status === "FAILED" && <p className="text-danger-strong">{a.result}</p>}
       {a.status === "PENDING" && <p className="text-fg-2">{t("admin.funds.waitingHint")}</p>}
       {a.value_usdt && (
         <div className="text-fg-3">

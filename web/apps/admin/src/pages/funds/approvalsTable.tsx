@@ -206,7 +206,7 @@ function Holder({ p }: { p: Record<string, string> }) {
   const holder = p.former_holder || p.address_owner;
   if (!holder || holder === p.user_id) return null;
   return (
-    <span className="inline-flex items-center gap-1 text-xs text-warn" data-testid="approval-holder">
+    <span className="inline-flex items-center gap-1 text-xs text-warn-strong" data-testid="approval-holder">
       {t(p.former_holder ? "admin.unowned.ownerRetired" : "admin.unowned.owner")}
       <UserCell id={holder} />
     </span>

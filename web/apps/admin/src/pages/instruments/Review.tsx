@@ -110,7 +110,7 @@ export function Changes({ result }: { result: ConfigResult }) {
         <ul className="flex flex-col gap-1 rounded-2 border border-warn/40 bg-warn/10 p-3 text-sm">
           {result.warnings.map((w) => (
             <li key={`${w.code}/${w.symbol}`} className="flex gap-2">
-              <TriangleAlert size={14} className="mt-0.5 shrink-0 text-warn" />
+              <TriangleAlert size={14} className="mt-0.5 shrink-0 text-warn-strong" />
               <span className="text-fg-2">{t(`admin.listing.warnings.${w.code}`, { symbol: w.symbol, detail: w.detail })}</span>
             </li>
           ))}

@@ -417,7 +417,7 @@ export function PositionsTab({ admin, userId }: { admin: Admin; userId: string }
       { id: "mark", header: t("admin.money.mark"), meta: right, cell: ({ row }) => <Num value={row.original.mark_price} /> },
       {
         id: "liq", header: t("admin.money.liquidation"), meta: right,
-        cell: ({ row }) => (row.original.liquidation_price ? <Num value={row.original.liquidation_price} className="text-warn" /> : <span className="text-fg-3">—</span>),
+        cell: ({ row }) => (row.original.liquidation_price ? <Num value={row.original.liquidation_price} className="text-warn-strong" /> : <span className="text-fg-3">—</span>),
       },
       { id: "upnl", header: t("admin.money.upnl"), meta: right, cell: ({ row }) => <Num value={row.original.unrealized_pnl} signed /> },
       { id: "margin", header: t("admin.money.margin"), meta: right, cell: ({ row }) => <Num value={row.original.margin} /> },

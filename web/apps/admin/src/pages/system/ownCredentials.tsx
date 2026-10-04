@@ -68,7 +68,7 @@ export function PasswordForm({ onChanged }: { onChanged?: () => void }) {
         />
       </label>
       {change.isError && (
-        <p role="alert" className="text-sm text-danger">
+        <p role="alert" className="text-sm text-danger-strong">
           {errorText(change.error)}
         </p>
       )}
@@ -151,7 +151,7 @@ export function TotpForm() {
           <CodeInput value={code} onChange={setCode} label={t("admin.setup.code")} />
         </div>
         {bind.isError && (
-          <p role="alert" className="text-sm text-danger">
+          <p role="alert" className="text-sm text-danger-strong">
             {errorText(bind.error)}
           </p>
         )}
@@ -185,7 +185,7 @@ export function TotpForm() {
         </div>
       )}
       {start.isError && (
-        <p role="alert" className="text-sm text-danger">
+        <p role="alert" className="text-sm text-danger-strong">
           {errorText(start.error)}
         </p>
       )}

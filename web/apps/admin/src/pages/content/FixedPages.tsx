@@ -150,7 +150,7 @@ export default function FixedPages({ admin }: { admin: Admin }) {
             {write && bundled(r) && r.article?.status !== "PUBLISHED" && <PublishDefault row={r} />}
             {write && r.article?.status === "PUBLISHED" && <TakeOff row={r} article={r.article} />}
             <a
-              className="inline-flex items-center gap-1 text-xs text-info hover:underline"
+              className="inline-flex items-center gap-1 text-xs text-info-strong hover:underline"
               href={r.section === "HOME" ? `${SITE}/` : `${SITE}/legal/${r.slug}`}
               target="_blank"
               rel="noreferrer"
@@ -215,7 +215,7 @@ function PublishDefault({ row }: { row: Row }) {
       description={
         <span className="flex flex-col gap-1">
           <span>{t("admin.pages.publishDefaultHint")}</span>
-          {row.article && <span className="text-warn">{t("admin.pages.publishDefaultReplace", { status: t(`admin.content.status.${row.article.status}`) })}</span>}
+          {row.article && <span className="text-warn-strong">{t("admin.pages.publishDefaultReplace", { status: t(`admin.content.status.${row.article.status}`) })}</span>}
         </span>
       }
       target={<span className="font-mono">{row.slug}</span>}

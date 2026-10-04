@@ -265,9 +265,9 @@ export function WithdrawalDrawer({ admin, w: row, onClose }: { admin: Admin; w: 
               invalidate={[["admin", "withdrawals"], ["admin", "todo"]]}
               onDone={onClose}
             >
-              {suspension && <p className="text-sm text-danger">{t("admin.suspensions.reviewNote", { asset: w.asset })}</p>}
+              {suspension && <p className="text-sm text-danger-strong">{t("admin.suspensions.reviewNote", { asset: w.asset })}</p>}
               {alone ? (
-                w.approvals_required > 1 && <p className="text-sm text-info">{t("admin.withdrawals.alone", { max: settings?.withdrawal_max_usdt })}</p>
+                w.approvals_required > 1 && <p className="text-sm text-info-strong">{t("admin.withdrawals.alone", { max: settings?.withdrawal_max_usdt })}</p>
               ) : (
                 (w.approvals?.length ?? 0) + 1 < w.approvals_required && (
                   <p className="text-sm text-fg-3">{t("admin.withdrawals.secondReviewer", { n: (w.approvals?.length ?? 0) + 1, required: w.approvals_required })}</p>
@@ -319,7 +319,7 @@ function AddressBook({ detail, w }: { detail: Detail; w: Withdrawal }) {
   const { t } = useTranslation();
   const time = useTimeText();
   if (detail.isPending) return <Skeleton className="h-4 w-40" />;
-  if (detail.isError) return <span className="text-danger">{errorText(detail.error)}</span>;
+  if (detail.isError) return <span className="text-danger-strong">{errorText(detail.error)}</span>;
   const book = detail.data.address_book;
   if (!book) return <span className="text-fg-3">{t("admin.withdrawalDetail.addressGone")}</span>;
   const fresh = Date.parse(w.created_at) - Date.parse(book.created_at) < NEW_ADDRESS_MS;

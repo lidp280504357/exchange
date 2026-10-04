@@ -104,7 +104,7 @@ export default function SimOverview(_: { admin: Admin }) {
               <span><Num value={String(Math.round(sum((b) => b.coin)))} className="font-mono" /> {st.symbol.split("-")[0]}</span>
               <span><Num value={String(Math.round(sum((b) => b.usdt)))} className="font-mono" /> USDT</span>
               {st.perp && <span className="text-xs text-fg-3">{t("admin.sim.perpPosition")} <Num value={sum((b) => b.perp_position).toFixed(2)} className="font-mono" /></span>}
-              <Link to="/sim/bots" className="text-xs text-info hover:underline">
+              <Link to="/sim/bots" className="text-xs text-info-strong hover:underline">
                 {t("admin.sim.botsLink", { n: bots.length, errors: bots.filter((b) => b.error).length })}
               </Link>
             </div>

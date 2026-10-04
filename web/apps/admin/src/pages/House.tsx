@@ -119,7 +119,7 @@ function Results() {
     <div className="flex flex-col gap-2">
       <p className="text-xs text-fg-3">{t("admin.house.resultsHint")}</p>
       {q.data.unpriced.length > 0 && (
-        <p className="rounded-2 bg-warn/10 px-3 py-1.5 text-xs text-warn">{t("admin.house.unpriced", { pairs: q.data.unpriced.join(", ") })}</p>
+        <p className="rounded-2 bg-warn/10 px-3 py-1.5 text-xs text-warn-strong">{t("admin.house.unpriced", { pairs: q.data.unpriced.join(", ") })}</p>
       )}
       <SignedChart
         data={data}

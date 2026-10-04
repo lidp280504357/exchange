@@ -13,7 +13,7 @@ type Assessment = AdminSchemas["Assessment"];
 
 /** scoreTone colours a risk score: 70 and up is high, 40 and up elevated. */
 export function scoreTone(score: number) {
-  return score >= 70 ? "text-danger" : score >= 40 ? "text-warn" : "text-fg-2";
+  return score >= 70 ? "text-danger-strong" : score >= 40 ? "text-warn-strong" : "text-fg-2";
 }
 
 /** Score shows a risk score (0–100) in its colour. */

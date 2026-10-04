@@ -347,7 +347,7 @@ function Images({ profile, edit }: { profile: Profile; edit: boolean }) {
           );
         })}
       </div>
-      {error && <p className="mt-2 text-xs text-danger">{error}</p>}
+      {error && <p className="mt-2 text-xs text-danger-strong">{error}</p>}
       {slot && chosen && (
         <DangerAction
           open
@@ -389,7 +389,7 @@ function Welcome({ edit }: { edit: boolean }) {
   const s = q.data;
   let body: ReactNode;
   if (q.isPending) body = <Skeleton className="h-16 w-full" />;
-  else if (q.isError || !s) body = <p className="text-sm text-warn">{t("admin.platform.welcomeUnknown")}</p>;
+  else if (q.isError || !s) body = <p className="text-sm text-warn-strong">{t("admin.platform.welcomeUnknown")}</p>;
   else body = <WelcomeBody setting={s} rows={rows} setRows={setRows} edit={edit} />;
   return (
     <div id="welcome">
@@ -467,7 +467,7 @@ function WelcomeBody({ setting: s, rows, setRows, edit }: { setting: Setting; ro
               invalidate={[welcomeKey, platformKey, launchKey, ["admin", "approvals"]]}
               onDone={() => setRows(null)}
             />
-            <Link to="/approvals" className="text-xs text-info hover:underline">
+            <Link to="/approvals" className="text-xs text-info-strong hover:underline">
               {t("admin.sim.toApprovals")}
             </Link>
           </span>

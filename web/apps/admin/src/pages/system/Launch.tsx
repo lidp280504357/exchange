@@ -63,7 +63,7 @@ export default function Launch() {
         id: "fix", header: "",
         cell: ({ row: { original: it } }) =>
           FIX[it.key] ? (
-            <Link to={FIX[it.key]!} className="text-sm text-info hover:underline">
+            <Link to={FIX[it.key]!} className="text-sm text-info-strong hover:underline">
               {t("admin.launch.fix")}
             </Link>
           ) : (
@@ -87,7 +87,7 @@ export default function Launch() {
           }
           data-testid="launch-verdict"
         >
-          {c.ready ? <CircleCheck className="text-success" size={22} /> : <TriangleAlert className="mt-0.5 text-warn" size={22} />}
+          {c.ready ? <CircleCheck className="text-success-strong" size={22} /> : <TriangleAlert className="mt-0.5 text-warn-strong" size={22} />}
           <div className="flex flex-col gap-1">
             <span className="text-md font-semibold text-fg-1">{c.ready ? t("admin.launch.ready") : t("admin.launch.notReady", { n: open.length })}</span>
             {!c.ready && <span className="text-sm text-fg-2">{open.map((it) => t(`admin.launch.items.${it.key}.name`)).join("、")}</span>}
@@ -120,7 +120,7 @@ function Current({ item: { key, value: v, status } }: { item: Item }) {
   const { t } = useTranslation();
   if (status === "PENDING") return <span className="text-sm text-fg-3">{t("admin.launch.pending")}</span>;
   // An unknown third party still shows what the other services reported.
-  if (status === "UNKNOWN" && key !== "third_party") return <span className="text-sm text-warn">{t("admin.launch.unknown")}</span>;
+  if (status === "UNKNOWN" && key !== "third_party") return <span className="text-sm text-warn-strong">{t("admin.launch.unknown")}</span>;
   const on = (b: unknown) => t(b ? "admin.launch.on" : "admin.launch.off");
   const yes = (b: unknown) => (b === true ? "✓" : b === false ? "✗" : "?");
   let body: ReactNode;
@@ -159,7 +159,7 @@ function Current({ item: { key, value: v, status } }: { item: Item }) {
       body = (
         <>
           {t("admin.launch.brandNow", { name: String(v.name ?? ""), logo: yes(v.logo), favicon: yes(v.favicon) })}
-          {v.default_name === true && <span className="text-danger"> · {t("admin.launch.defaultName")}</span>}
+          {v.default_name === true && <span className="text-danger-strong"> · {t("admin.launch.defaultName")}</span>}
         </>
       );
       break;
@@ -179,7 +179,7 @@ function Current({ item: { key, value: v, status } }: { item: Item }) {
       body = (
         <>
           {t("admin.launch.adminsNow", { n: Number(v.active_admins ?? 0) })}
-          {without.length > 0 && <span className="text-danger"> · {t("admin.launch.withoutTotp", { emails: without.join(", ") })}</span>}
+          {without.length > 0 && <span className="text-danger-strong"> · {t("admin.launch.withoutTotp", { emails: without.join(", ") })}</span>}
         </>
       );
       break;
@@ -195,7 +195,7 @@ function Current({ item: { key, value: v, status } }: { item: Item }) {
           <span className="text-fg-3"> · </span>
           {backed.length
             ? backed.map(([asset, balance], i) => (
-                <span key={asset} className={Number(balance) > 0 ? undefined : "text-danger"}>
+                <span key={asset} className={Number(balance) > 0 ? undefined : "text-danger-strong"}>
                   {i > 0 && " · "}
                   <Num value={balance} unit={asset} />
                 </span>

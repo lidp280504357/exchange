@@ -62,7 +62,7 @@ export function BackfillDrawer({ onClose }: { onClose: () => void }) {
     <Drawer open onOpenChange={(o) => !o && onClose()} title={t("admin.backfill.title")} width={560}>
       <div className="flex flex-col gap-4">
         <div className="flex gap-3 rounded-2 border border-warn/40 bg-warn/10 p-3 text-sm">
-          <ShieldAlert size={18} className="mt-0.5 shrink-0 text-warn" />
+          <ShieldAlert size={18} className="mt-0.5 shrink-0 text-warn-strong" />
           <p className="text-fg-2">{t("admin.backfill.help")}</p>
         </div>
         <label className="flex flex-col gap-1.5 text-sm text-fg-2">
@@ -105,10 +105,10 @@ export function BackfillDrawer({ onClose }: { onClose: () => void }) {
         <Button variant="secondary" className="self-start" disabled={!complete} loading={busy} icon={<ShieldCheck size={16} />} onClick={() => void check()}>
           {t("admin.backfill.check")}
         </Button>
-        {checked && !current && <p className="text-sm text-warn">{t("admin.backfill.changed")}</p>}
+        {checked && !current && <p className="text-sm text-warn-strong">{t("admin.backfill.changed")}</p>}
         {current && (
           <div className="flex flex-col gap-3 rounded-2 border border-line-1 bg-bg-0 p-3 animate-rise">
-            <p className="text-sm text-success">{t("admin.backfill.checked")}</p>
+            <p className="text-sm text-success-strong">{t("admin.backfill.checked")}</p>
             <KeyValue
               density="compact"
               items={[
@@ -120,7 +120,7 @@ export function BackfillDrawer({ onClose }: { onClose: () => void }) {
                 },
               ]}
             />
-            {current.unclaimed && <p className="text-sm text-warn">{t("admin.backfill.unclaimed")}</p>}
+            {current.unclaimed && <p className="text-sm text-warn-strong">{t("admin.backfill.unclaimed")}</p>}
           </div>
         )}
         <FundAction
@@ -152,9 +152,9 @@ export function BackfillDrawer({ onClose }: { onClose: () => void }) {
           }}
         >
           <div className="flex gap-3 rounded-2 border border-danger/40 bg-danger/10 p-3 text-sm" role="alert">
-            <ShieldAlert size={18} className="mt-0.5 shrink-0 text-danger" />
+            <ShieldAlert size={18} className="mt-0.5 shrink-0 text-danger-strong" />
             <div>
-              <div className="font-semibold text-danger">{t("admin.backfill.notVerified")}</div>
+              <div className="font-semibold text-danger-strong">{t("admin.backfill.notVerified")}</div>
               <p className="mt-1 text-fg-2">{t("admin.backfill.notVerifiedHint")}</p>
             </div>
           </div>
@@ -177,7 +177,7 @@ function BackfillOutcome({ a }: { a: Approval }) {
         <span className="text-fg-3">{a.mode === "SINGLE" ? t("admin.funds.single") : t(`admin.funds.escalation.${a.escalation || "REQUESTED"}`)}</span>
       </div>
       {a.status === "EXECUTED" && <p className="text-fg-2">{t("admin.backfill.done", { id: a.result.replace(/^deposit /, "") })}</p>}
-      {a.status === "FAILED" && <p className="text-danger">{a.result}</p>}
+      {a.status === "FAILED" && <p className="text-danger-strong">{a.result}</p>}
       {a.status === "PENDING" && <p className="text-fg-2">{t("admin.funds.waitingHint")}</p>}
     </section>
   );

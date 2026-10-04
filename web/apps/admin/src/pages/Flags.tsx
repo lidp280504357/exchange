@@ -95,7 +95,7 @@ function Rules({ rules }: { rules: unknown }) {
         <span key={dim} className="flex flex-wrap items-center gap-1">
           <Badge tone="neutral">{dim}</Badge>
           {v?.allow?.length ? <span title={v.allow.join(", ")}>allow {v.allow.length > 4 ? `${v.allow.slice(0, 4).join(", ")} +${v.allow.length - 4}` : v.allow.join(", ")}</span> : null}
-          {v?.deny?.length ? <span className="text-danger">deny {v.deny.join(", ")}</span> : null}
+          {v?.deny?.length ? <span className="text-danger-strong">deny {v.deny.join(", ")}</span> : null}
         </span>
       ))}
     </span>

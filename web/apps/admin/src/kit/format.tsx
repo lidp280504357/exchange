@@ -70,7 +70,7 @@ export function UserCell({ id }: { id: string | null | undefined }) {
       <button
         type="button"
         title={id}
-        className="text-info hover:underline"
+        className="text-info-strong hover:underline"
         onClick={(e) => {
           e.stopPropagation();
           open(id);

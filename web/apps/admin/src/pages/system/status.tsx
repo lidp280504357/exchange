@@ -21,13 +21,13 @@ export function CustodySummary({ className, style }: { className?: string; style
       className={className}
       style={style}
       extra={
-        <Link className="text-sm text-info hover:underline" to="/custody">
+        <Link className="text-sm text-info-strong hover:underline" to="/custody">
           {t("admin.common.details")}
         </Link>
       }
     >
       {q.isError ? (
-        <p className="text-sm text-danger">{errorText(q.error)}</p>
+        <p className="text-sm text-danger-strong">{errorText(q.error)}</p>
       ) : !o ? (
         <Skeleton className="h-6 w-64" />
       ) : (

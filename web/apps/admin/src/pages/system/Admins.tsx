@@ -64,7 +64,7 @@ export default function Admins({ admin }: { admin: Admin }) {
           <span className="flex flex-col items-start gap-0.5">
             <EnumBadge group="adminStatus" code={a.status} />
             {a.locked_until && new Date(a.locked_until) > new Date() && (
-              <span className="text-xs text-warn">{t("admin.admins.locked")} <TimeText value={a.locked_until} /></span>
+              <span className="text-xs text-warn-strong">{t("admin.admins.locked")} <TimeText value={a.locked_until} /></span>
             )}
             {a.failed_attempts > 0 && <span className="text-xs text-fg-3">{t("admin.admins.failed", { n: a.failed_attempts })}</span>}
           </span>
@@ -77,7 +77,7 @@ export default function Admins({ admin }: { admin: Admin }) {
       {
         id: "sessions", header: t("admin.admins.sessions"), meta: right,
         cell: ({ row: { original: a } }) => (
-          <button type="button" className="tabular-nums text-info hover:underline" onClick={() => setSessionsOf(a)}>
+          <button type="button" className="tabular-nums text-info-strong hover:underline" onClick={() => setSessionsOf(a)}>
             {t("admin.admins.live", { n: a.sessions })}
           </button>
         ),
@@ -429,7 +429,7 @@ function RoleMatrix() {
                   </td>
                   {roles.map((r) => (
                     <td key={r.role} className="px-3 py-1.5 text-center">
-                      {r.permissions.includes(p) ? <Check size={14} className="inline text-success" aria-label="✓" /> : <span className="text-fg-3">·</span>}
+                      {r.permissions.includes(p) ? <Check size={14} className="inline text-success-strong" aria-label="✓" /> : <span className="text-fg-3">·</span>}
                     </td>
                   ))}
                 </tr>

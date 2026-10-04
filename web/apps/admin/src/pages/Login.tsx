@@ -82,7 +82,7 @@ export default function Login() {
             </div>
           )}
           {login.isError && (
-            <p role="alert" className="mb-3 text-sm text-danger">
+            <p role="alert" className="mb-3 text-sm text-danger-strong">
               {errorText(login.error)}
             </p>
           )}

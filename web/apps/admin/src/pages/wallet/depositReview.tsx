@@ -278,13 +278,13 @@ function Assign({ d, size, onDone }: { d: ReviewDeposit; size: "sm" | "md"; onDo
           <span className="flex flex-wrap items-center gap-2 text-xs text-fg-3">
             {t(d.address_owner_retired ? "admin.unowned.ownerRetired" : "admin.unowned.owner")}
             <span className="font-mono">{d.address_owner}</span>
-            <button type="button" className="text-info hover:underline" onClick={() => setUser(d.address_owner ?? "")}>
+            <button type="button" className="text-info-strong hover:underline" onClick={() => setUser(d.address_owner ?? "")}>
               {t("admin.unowned.useOwner")}
             </button>
           </span>
         )}
         {ok && d.address_owner && id !== d.address_owner.toLowerCase() && (
-          <span className="text-xs text-warn" data-testid="assign-not-holder">
+          <span className="text-xs text-warn-strong" data-testid="assign-not-holder">
             {t("admin.unowned.notHolder")}
           </span>
         )}
@@ -342,7 +342,7 @@ export function ReviewDepositDrawer({ admin, d, onClose }: { admin: Admin; d: Re
                 ]
               : []),
             ...(d.reason ? [{ label: t("admin.deposits.reason"), value: <EnumBadge group="depositReason" code={d.reason} /> }] : []),
-            ...(d.discrepancy ? [{ label: t("admin.depositReview.discrepancy"), value: <span className="text-danger">{d.discrepancy}</span> }] : []),
+            ...(d.discrepancy ? [{ label: t("admin.depositReview.discrepancy"), value: <span className="text-danger-strong">{d.discrepancy}</span> }] : []),
             { label: t("admin.depositReview.journal"), value: <IdText value={d.journal_id} chars={13} /> },
             ...(d.resolution
               ? [

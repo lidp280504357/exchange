@@ -131,7 +131,7 @@ function Summary({ o }: { o: Overview | undefined }) {
       <div className={box}>
         <Stat
           label={t("admin.custody.attention")}
-          value={o ? <span className={o.callbacks.attention > 0 ? "text-warn tabular-nums" : "tabular-nums"}>{o.callbacks.attention}</span> : undefined}
+          value={o ? <span className={o.callbacks.attention > 0 ? "text-warn-strong tabular-nums" : "tabular-nums"}>{o.callbacks.attention}</span> : undefined}
           loading={!o}
         />
       </div>
@@ -231,7 +231,7 @@ function Checks({ checks, loading }: { checks: Check[]; loading: boolean }) {
         meta: right,
         cell: ({ row }) => {
           const short = Number(row.original.shortfall) > 0;
-          return <Num value={row.original.shortfall} className={short ? "font-medium text-danger" : "text-fg-3"} />;
+          return <Num value={row.original.shortfall} className={short ? "font-medium text-danger-strong" : "text-fg-3"} />;
         },
       },
       { id: "checkedAt", header: t("admin.custody.checkedAt"), cell: ({ row }) => <TimeText value={row.original.checked_at} /> },

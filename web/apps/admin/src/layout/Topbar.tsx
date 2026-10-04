@@ -32,7 +32,7 @@ export function Topbar({ admin }: { admin: Admin }) {
             to="/settings"
             className={cn(
               "hidden shrink-0 rounded-full border px-2.5 py-0.5 text-xs md:inline-block",
-              settings.data.two_person_approval ? "border-success/40 text-success" : "border-info/40 text-info",
+              settings.data.two_person_approval ? "border-success/40 text-success-strong" : "border-info/40 text-info-strong",
             )}
           >
             {t(settings.data.two_person_approval ? "admin.shell.twoPerson" : "admin.shell.single")}

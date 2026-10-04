@@ -96,7 +96,7 @@ export function ListingWizard({ cfg }: { cfg: InstrumentConfig | undefined }) {
           className="w-full resize-y rounded-2 border border-line-1 bg-bg-2 px-3 py-2 font-mono text-xs text-fg-1 outline-none placeholder:text-fg-3 focus-visible:border-brand focus-visible:ring-1 focus-visible:ring-brand"
         />
         {parsed.errors.length > 0 && (
-          <ul className="flex flex-col gap-1 text-sm text-danger" role="alert">
+          <ul className="flex flex-col gap-1 text-sm text-danger-strong" role="alert">
             {parsed.errors.map((e) => (
               <li key={e}>{e}</li>
             ))}

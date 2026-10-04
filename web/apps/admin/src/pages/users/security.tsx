@@ -48,7 +48,7 @@ export function SecurityTab({ admin, userId }: { admin: Admin; userId: string })
                       <span className="flex flex-col">
                         <TimeText value={s.totp.changed_at} />
                         {Date.now() - Date.parse(s.totp.changed_at) < 24 * 3600_000 && (
-                          <span className="text-xs text-warn" data-testid="totp-review-window">{t("admin.user.sec.totpReviewWindow")}</span>
+                          <span className="text-xs text-warn-strong" data-testid="totp-review-window">{t("admin.user.sec.totpReviewWindow")}</span>
                         )}
                       </span>
                     ) : (

@@ -67,7 +67,7 @@ export default function Setup() {
     body = (
       <div className="flex flex-col items-center gap-3 py-4 text-center" data-testid="setup-done">
         <span className="grid size-12 place-items-center rounded-full bg-success/10">
-          <Check size={24} className="text-success" />
+          <Check size={24} className="text-success-strong" />
         </span>
         <div className="text-lg font-semibold">{t("admin.setup.done")}</div>
         <p className="text-sm text-fg-3">{t(view.data.kind === "TOTP" ? "admin.setup.doneTotp" : "admin.setup.donePassword")}</p>
@@ -109,7 +109,7 @@ export default function Setup() {
               aria-invalid={short || undefined}
               data-testid="setup-password"
             />
-            {short && <p className="-mt-3 mb-3 text-xs text-danger">{t("admin.setup.short", { n: MIN_PASSWORD })}</p>}
+            {short && <p className="-mt-3 mb-3 text-xs text-danger-strong">{t("admin.setup.short", { n: MIN_PASSWORD })}</p>}
             <Field
               label={t("admin.setup.again")}
               type="password"
@@ -120,7 +120,7 @@ export default function Setup() {
               aria-invalid={mismatch || undefined}
               data-testid="setup-again"
             />
-            {mismatch && <p className="-mt-3 mb-3 text-xs text-danger">{t("admin.setup.mismatch")}</p>}
+            {mismatch && <p className="-mt-3 mb-3 text-xs text-danger-strong">{t("admin.setup.mismatch")}</p>}
           </>
         )}
         {v.totp_secret && v.totp_uri && (
@@ -145,7 +145,7 @@ export default function Setup() {
           </div>
         )}
         {complete.isError && (
-          <p role="alert" className="mb-3 text-sm text-danger">
+          <p role="alert" className="mb-3 text-sm text-danger-strong">
             {errorText(complete.error)}
           </p>
         )}

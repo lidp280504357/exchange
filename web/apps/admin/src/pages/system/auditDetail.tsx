@@ -161,7 +161,7 @@ function ChangeView({ change }: { change: Change }) {
           </tbody>
         </table>
         {same.length > 0 && (
-          <button type="button" className="w-full border-t border-line-1 py-1.5 text-xs text-info hover:bg-bg-2" onClick={() => setAll(!all)}>
+          <button type="button" className="w-full border-t border-line-1 py-1.5 text-xs text-info-strong hover:bg-bg-2" onClick={() => setAll(!all)}>
             {all ? "▲" : t("admin.audit.unchanged", { n: same.length })}
           </button>
         )}

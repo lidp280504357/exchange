@@ -95,7 +95,7 @@ export default function Positions({ admin }: { admin: Admin }) {
       { id: "ratio", header: t("admin.derivatives.marginRatio"), meta: right, cell: ({ row }) => <Ratio p={row.original} /> },
       {
         id: "liq", header: t("admin.money.liquidation"), meta: right,
-        cell: ({ row }) => (row.original.liquidation_price ? <Num value={row.original.liquidation_price} className="text-warn" /> : <span className="text-fg-3">—</span>),
+        cell: ({ row }) => (row.original.liquidation_price ? <Num value={row.original.liquidation_price} className="text-warn-strong" /> : <span className="text-fg-3">—</span>),
       },
       ...(act
         ? [
@@ -132,7 +132,7 @@ export default function Positions({ admin }: { admin: Admin }) {
           { key: "user_id", label: t("admin.orders.userFilter"), kind: "text" },
         ]}
       />
-      {q.data?.truncated && <p className="text-sm text-warn">{t("admin.positions.truncated", { n: q.data.positions.length })}</p>}
+      {q.data?.truncated && <p className="text-sm text-warn-strong">{t("admin.positions.truncated", { n: q.data.positions.length })}</p>}
       {q.isError ? (
         <ErrorState message={errorText(q.error)} onRetry={() => void q.refetch()} />
       ) : (
@@ -179,7 +179,7 @@ function Ratio({ p }: { p: Position }) {
   return (
     <span className="inline-flex flex-col items-end gap-0.5">
       {ratio ? <Badge tone={tone}>{formatPercent(ratio, 2, false)}</Badge> : <span className="text-fg-3">—</span>}
-      {p.warned_at && <span className="text-xs text-warn">{t("admin.enum.liquidationKind.WARNING")}</span>}
+      {p.warned_at && <span className="text-xs text-warn-strong">{t("admin.enum.liquidationKind.WARNING")}</span>}
     </span>
   );
 }
