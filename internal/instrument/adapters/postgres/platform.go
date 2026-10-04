@@ -28,7 +28,7 @@ type platformTexts struct {
 		SupportURL string `json:"support_url"`
 	} `json:"contact"`
 	Social                 []socialJSON `json:"social"`
-	LearningText           domain.Texts `json:"learning_text"`
+	TestText               domain.Texts `json:"test_text"`
 	RegistrationClosedText domain.Texts `json:"registration_closed_text"`
 }
 
@@ -37,13 +37,13 @@ type socialJSON struct {
 	URL  string `json:"url"`
 }
 
-const platformColumns = `name, short_name, domain, theme_color, brand_color, default_locale, learning_enabled, registration_status, texts,
-	version, updated_by, updated_at`
+const platformColumns = `name, short_name, domain, theme_color, brand_color, default_locale, test_mode, test_banner, registration_status,
+	texts, version, updated_by, updated_at`
 
 func scanPlatform(row pgx.Row) (domain.PlatformProfile, error) {
 	var p domain.PlatformProfile
 	var raw []byte
-	if err := row.Scan(&p.Name, &p.ShortName, &p.Domain, &p.ThemeColor, &p.BrandColor, &p.DefaultLocale, &p.Learning.Enabled,
+	if err := row.Scan(&p.Name, &p.ShortName, &p.Domain, &p.ThemeColor, &p.BrandColor, &p.DefaultLocale, &p.Test.Enabled, &p.Test.Banner,
 		&p.Registration.Status, &raw, &p.Version, &p.UpdatedBy, &p.UpdatedAt); err != nil {
 		return domain.PlatformProfile{}, fmt.Errorf("read the platform profile: %w", err)
 	}
@@ -56,7 +56,7 @@ func scanPlatform(row pgx.Row) (domain.PlatformProfile, error) {
 	for _, s := range t.Social {
 		p.Social = append(p.Social, domain.SocialLink{Kind: s.Kind, URL: s.URL})
 	}
-	p.Learning.Text, p.Registration.ClosedText = t.LearningText, t.RegistrationClosedText
+	p.Test.Text, p.Registration.ClosedText = t.TestText, t.RegistrationClosedText
 	return p, nil
 }
 
@@ -101,15 +101,15 @@ func (r platform) Save(ctx context.Context, p domain.PlatformProfile) (domain.Pl
 	for _, s := range p.Social {
 		t.Social = append(t.Social, socialJSON{Kind: s.Kind, URL: s.URL})
 	}
-	t.LearningText, t.RegistrationClosedText = p.Learning.Text, p.Registration.ClosedText
+	t.TestText, t.RegistrationClosedText = p.Test.Text, p.Registration.ClosedText
 	raw, err := json.Marshal(t)
 	if err != nil {
 		return domain.PlatformProfile{}, err
 	}
 	tag, err := r.q.Exec(ctx, `UPDATE platform_profile SET name = $1, short_name = $2, domain = $3, theme_color = $4, brand_color = $5,
-		default_locale = $6, learning_enabled = $7, registration_status = $8, texts = $9, version = version + 1, updated_by = $10,
-		updated_at = $11 WHERE id = 1`,
-		p.Name, p.ShortName, p.Domain, p.ThemeColor, p.BrandColor, p.DefaultLocale, p.Learning.Enabled, p.Registration.Status, raw,
+		default_locale = $6, test_mode = $7, test_banner = $8, registration_status = $9, texts = $10, version = version + 1,
+		updated_by = $11, updated_at = $12 WHERE id = 1`,
+		p.Name, p.ShortName, p.Domain, p.ThemeColor, p.BrandColor, p.DefaultLocale, p.Test.Enabled, p.Test.Banner, p.Registration.Status, raw,
 		p.UpdatedBy, p.UpdatedAt)
 	if err != nil {
 		return domain.PlatformProfile{}, fmt.Errorf("save the platform profile: %w", err)

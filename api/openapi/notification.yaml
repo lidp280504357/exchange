@@ -9,7 +9,11 @@ info:
     New notices are pushed on the private WebSocket channel
     "notifications" (§7.3). Operators' messages (type BROADCAST) come
     from the admin console. The announcements and help articles the
-    console publishes are public (no token).
+    console publishes are public (no token). Each article is for test
+    mode, for live or for both (design 2026-10-04 §4.4): the content
+    endpoints answer with those of the exchange's mode (the platform
+    profile's test_mode, read every 30 seconds), so switching the mode
+    swaps the content.
 servers:
   - url: https://astras.vip
 security:
@@ -367,7 +371,8 @@ components:
           description: The next page's cursor; null after the last.
         withdrawn:
           type: array
-          description: Slugs of articles taken off; the sites hide their bundled file of such a slug too.
+          description: >-
+            Slugs of articles of the exchange's mode taken off; the sites hide their bundled file of such a slug too.
           items:
             type: string
     Article:
@@ -378,7 +383,9 @@ components:
           properties:
             body:
               type: string
-              description: Markdown.
+              description: >-
+                Markdown. It may hold mode blocks, ":::test" or ":::formal" up to a line ":::", which the sites keep in
+                that mode only (design 2026-10-04 §4.4); the service sends them as written.
     Notification:
       type: object
       required: [id, type, title, body, data, read, created_at]

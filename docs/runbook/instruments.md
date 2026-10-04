@@ -62,9 +62,9 @@ sudo docker compose ... exec -T instrument-service /app/exchangectl instruments 
 
 ## 平台资料（设计 2026-10-04 §4.1）
 
-交易所自己的资料由后台改、站点运行时读取，上线只改配置、不重新构建前端。资料存在 `platform_profile`（迁移 instrument 00008，只有一行，迁移时写入当前的 Astras 默认值），上传的图片存在 `platform_images`。
+交易所自己的资料由后台改、站点运行时读取，上线只改配置、不重新构建前端。资料存在 `platform_profile`（迁移 instrument 00008，只有一行，迁移时写入当前的 Astras 默认值；00009 把学习模式改成测试模式），上传的图片存在 `platform_images`。
 
-- 字段：名称（2–32 字）、简称（2–12 字）、域名（PC 站主机名，未设为空）、主题色与品牌色（小写 `#rrggbb`）、页脚版权与合规文案、联系邮箱与客服链接（https）、社交链接（最多 10 个，种类见 `domain.SocialKinds`，只收 https）、默认语言、学习横幅（开关与文案）、注册方式（`OPEN`/`CLOSED` 与关闭时的提示语）。文案一律按语言 `{"zh-CN", "en"}` 存，英文空着时站点显示中文。规则在 `internal/instrument/domain/platform.go`。
+- 字段：名称（2–32 字）、简称（2–12 字）、域名（PC 站主机名，未设为空）、主题色与品牌色（小写 `#rrggbb`）、页脚版权与合规文案、联系邮箱与客服链接（https）、社交链接（最多 10 个，种类见 `domain.SocialKinds`，只收 https）、默认语言、测试模式（开关、是否显示横幅、横幅文案，默认「测试模式」/ "Test mode"）、注册方式（`OPEN`/`CLOSED` 与关闭时的提示语）。文案一律按语言 `{"zh-CN", "en"}` 存，英文空着时站点显示中文。规则在 `internal/instrument/domain/platform.go`。
 - 图片：`logo_light`、`logo_dark`（名称旁的标志，按主题选）、`favicon`、`apple_touch_icon`。都要正方形、最多 200 KB；标志可用 PNG、SVG、WebP，favicon 只收 PNG 或 SVG，苹果图标只收不小于 180 px 的 PNG。SVG 与资产图标一样按白名单重建。
 - 每次修改（含换图、删图）版本加 1，`config_history` 记一行 `PLATFORM_PROFILE`：文字改动记前后两份，图片记种类、类型、大小、宽度与 sha256。删除一张不存在的图片什么也不改。
 - 公开接口（`api/openapi/platform.yaml`，经网关）：
@@ -78,7 +78,8 @@ sudo docker compose ... exec -T instrument-service /app/exchangectl instruments 
   - `DELETE /internal/platform/images/{kind}`：`{actor, reason}`。
 - 服务内缓存 5 秒，改动时立即清掉；站点每分钟读一次，所以改名、换图一分钟左右在三个站生效。
 - `welcome_credits` 不由后台写：instrument-service 每分钟从 ledger-service 读一次（`LEDGER_SERVICE_URL`，见 [ledger.md](ledger.md#模拟资金阶段-1)），读失败就保留上次的值。
-- 读这份资料的还有：网关读注册方式，关闭时拒绝注册（见 [gateway.md](gateway.md#路由)）；notification-service 读名称，作为邮件与短信的署名（10 分钟缓存，读不到用 `Astras`）。
+- 测试模式（`test_mode`，2026-10-04 用户决定由学习模式改名）：开着时站点只显示标为 TEST 或 BOTH 的内容、显示「测试模式」徽标，`banner` 为真时顶部显示横幅文案；关掉（上线）只显示 FORMAL 或 BOTH 的内容（设计 §4.4）。过渡期接口照旧多返回一个 `learning_mode`（`enabled` 与 `text`，同测试模式），`PUT` 只带 `learning_mode` 时按它改开关与文案、横幅开关不变；后台改用 `test_mode` 后去掉。
+- 读这份资料的还有：网关读注册方式，关闭时拒绝注册（见 [gateway.md](gateway.md#路由)）；notification-service 读名称，作为邮件与短信的署名（10 分钟缓存，读不到用 `Astras`），读测试模式，决定公开接口给站点哪种模式的文章（30 秒缓存，读不到沿用上次的，启动后没读到过时按正式模式）。
 
 ## 常用命令
 

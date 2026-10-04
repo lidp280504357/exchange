@@ -4,8 +4,8 @@ info:
   version: 0.1.0
   description: |
     The platform's profile, no sign-in (design 2026-10-04 §4.1): the
-    exchange's name, logos, colours, footer, contact, learning-mode
-    banner, registration and the welcome credits, as operators set them
+    exchange's name, logos, colours, footer, contact, test mode,
+    registration and the welcome credits, as operators set them
     in the admin console. The sites read it at start and every minute and
     fall back to their built-in defaults while it cannot be read, so going
     live is a change of settings, not a build. instrument-service keeps
@@ -140,6 +140,7 @@ components:
         - contact
         - social
         - default_locale
+        - test_mode
         - learning_mode
         - registration
         - welcome_credits
@@ -216,9 +217,25 @@ components:
         default_locale:
           type: string
           enum: [zh-CN, en]
+        test_mode:
+          type: object
+          description: >-
+            The exchange in test mode (the learning mode until 2026-10-04; off when live). While enabled the sites show
+            the content marked TEST or BOTH (FORMAL or BOTH when off, design §4.4), "测试模式" badges and, when banner
+            is true, text in a banner at the top.
+          required: [enabled, banner, text]
+          properties:
+            enabled:
+              type: boolean
+            banner:
+              type: boolean
+              description: Show the banner while test mode is on (operators may hide it).
+            text:
+              $ref: '#/components/schemas/Texts'
         learning_mode:
           type: object
-          description: While enabled the sites show the text in a banner at the top (off when live).
+          deprecated: true
+          description: The test mode under its former name (enabled and text), until the admin console reads test_mode.
           required: [enabled, text]
           properties:
             enabled:

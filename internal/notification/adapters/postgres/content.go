@@ -19,13 +19,13 @@ import (
 // The announcements, help articles and operators' in-app messages
 // (ports.ContentStore, ports.BroadcastStore).
 
-const articleColumns = `id, section, slug, category, pinned, sort_order, status, publish_at, version, updated_by, created_at, updated_at`
+const articleColumns = `id, section, slug, category, pinned, sort_order, modes, status, publish_at, version, updated_by, created_at, updated_at`
 
 func scanArticle(row pgx.Row) (domain.Article, error) {
 	var a domain.Article
 	var id uuid.UUID
 	var publishAt *time.Time
-	err := row.Scan(&id, &a.Section, &a.Slug, &a.Category, &a.Pinned, &a.Order, &a.Status, &publishAt, &a.Version, &a.UpdatedBy,
+	err := row.Scan(&id, &a.Section, &a.Slug, &a.Category, &a.Pinned, &a.Order, &a.Modes, &a.Status, &publishAt, &a.Version, &a.UpdatedBy,
 		&a.CreatedAt, &a.UpdatedAt)
 	a.ID = id.String()
 	if publishAt != nil {
@@ -98,12 +98,21 @@ var publishedOrder = map[string]string{
 	domain.SectionHome:         `slug`,
 }
 
-// PublishedPage returns limit of a section's articles published by at,
-// from offset, with the first ports.HeadLength characters of each body.
-func (s *Store) PublishedPage(ctx context.Context, section string, at time.Time, offset, limit int) ([]domain.Article, error) {
+// modeOf is the mode of an article shown in test mode or live.
+func modeOf(test bool) string {
+	if test {
+		return domain.ModeTest
+	}
+	return domain.ModeFormal
+}
+
+// PublishedPage returns limit of a section's articles published by at and
+// shown in the mode, from offset, with the first ports.HeadLength
+// characters of each body.
+func (s *Store) PublishedPage(ctx context.Context, section string, test bool, at time.Time, offset, limit int) ([]domain.Article, error) {
 	rows, err := s.db.Query(ctx, `SELECT `+articleColumns+` FROM articles
-		WHERE section = $1 AND status = 'PUBLISHED' AND publish_at <= $2
-		ORDER BY `+publishedOrder[section]+` LIMIT $3 OFFSET $4`, section, at, limit, offset)
+		WHERE section = $1 AND status = 'PUBLISHED' AND publish_at <= $2 AND modes IN ($5, 'BOTH')
+		ORDER BY `+publishedOrder[section]+` LIMIT $3 OFFSET $4`, section, at, limit, offset, modeOf(test))
 	if err != nil {
 		return nil, fmt.Errorf("published articles: %w", err)
 	}
@@ -114,9 +123,11 @@ func (s *Store) PublishedPage(ctx context.Context, section string, at time.Time,
 	return s.withTexts(ctx, s.db, list, ports.HeadLength)
 }
 
-// Withdrawn returns the slugs of a section's articles taken off the sites.
-func (s *Store) Withdrawn(ctx context.Context, section string) ([]string, error) {
-	rows, err := s.db.Query(ctx, `SELECT slug FROM articles WHERE section = $1 AND status = 'ARCHIVED' ORDER BY slug`, section)
+// Withdrawn returns the slugs of a section's articles of the mode taken
+// off the sites.
+func (s *Store) Withdrawn(ctx context.Context, section string, test bool) ([]string, error) {
+	rows, err := s.db.Query(ctx, `SELECT slug FROM articles WHERE section = $1 AND status = 'ARCHIVED' AND modes IN ($2, 'BOTH') ORDER BY slug`,
+		section, modeOf(test))
 	if err != nil {
 		return nil, fmt.Errorf("withdrawn articles: %w", err)
 	}
@@ -142,9 +153,10 @@ func (s *Store) article(ctx context.Context, where string, args ...any) (*domain
 	return &list[0], nil
 }
 
-// Article reads a section's article by its slug.
-func (s *Store) Article(ctx context.Context, section, slug string) (*domain.Article, error) {
-	return s.article(ctx, `section = $1 AND slug = $2`, section, slug)
+// Article reads a section's article of the mode by its slug (one at most:
+// a slug has one article per mode).
+func (s *Store) Article(ctx context.Context, section, slug string, test bool) (*domain.Article, error) {
+	return s.article(ctx, `section = $1 AND slug = $2 AND modes IN ($3, 'BOTH')`, section, slug, modeOf(test))
 }
 
 // ArticleByID reads an article by its ID.
@@ -175,8 +187,9 @@ func insertTexts(ctx context.Context, tx pgx.Tx, a domain.Article) error {
 // CreateArticle inserts an article with its texts.
 func (s *Store) CreateArticle(ctx context.Context, a domain.Article) error {
 	return s.db.InTx(ctx, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO articles (`+articleColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-			a.ID, a.Section, a.Slug, a.Category, a.Pinned, a.Order, a.Status, publishAt(a), a.Version, a.UpdatedBy, a.CreatedAt, a.UpdatedAt)
+		_, err := tx.Exec(ctx, `INSERT INTO articles (`+articleColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+			a.ID, a.Section, a.Slug, a.Category, a.Pinned, a.Order, a.Modes, a.Status, publishAt(a), a.Version, a.UpdatedBy, a.CreatedAt,
+			a.UpdatedAt)
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return domain.ErrArticleExists
@@ -192,8 +205,8 @@ func (s *Store) CreateArticle(ctx context.Context, a domain.Article) error {
 func (s *Store) UpdateArticle(ctx context.Context, a domain.Article, version int) error {
 	return s.db.InTx(ctx, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `UPDATE articles SET slug = $3, category = $4, pinned = $5, sort_order = $6, status = $7, publish_at = $8,
-			version = $9, updated_by = $10, updated_at = $11 WHERE id = $1 AND version = $2`,
-			a.ID, version, a.Slug, a.Category, a.Pinned, a.Order, a.Status, publishAt(a), a.Version, a.UpdatedBy, a.UpdatedAt)
+			version = $9, updated_by = $10, updated_at = $11, modes = $12 WHERE id = $1 AND version = $2`,
+			a.ID, version, a.Slug, a.Category, a.Pinned, a.Order, a.Status, publishAt(a), a.Version, a.UpdatedBy, a.UpdatedAt, a.Modes)
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return domain.ErrArticleExists

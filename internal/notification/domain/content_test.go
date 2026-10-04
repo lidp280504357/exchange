@@ -28,19 +28,20 @@ func TestExcerptIsTheFirstParagraphAsText(t *testing.T) {
 func TestFixedSectionSlugs(t *testing.T) {
 	text := []ArticleText{{Locale: LocaleZH, Title: "条款", Body: "正文"}}
 	for _, ok := range []Article{
-		{Section: SectionLegal, Slug: "terms", Texts: text},
-		{Section: SectionLegal, Slug: "contact", Texts: text},
-		{Section: SectionHome, Slug: "home-hero", Texts: text},
-		{Section: SectionHelp, Slug: "anything-goes", Texts: text},
+		{Section: SectionLegal, Slug: "terms", Modes: ModeBoth, Texts: text},
+		{Section: SectionLegal, Slug: "contact", Modes: ModeTest, Texts: text},
+		{Section: SectionHome, Slug: "home-hero", Modes: ModeFormal, Texts: text},
+		{Section: SectionHelp, Slug: "anything-goes", Modes: ModeBoth, Texts: text},
 	} {
 		if err := ok.Validate(); err != nil {
 			t.Errorf("%s/%s: %v", ok.Section, ok.Slug, err)
 		}
 	}
 	for _, bad := range []Article{
-		{Section: SectionLegal, Slug: "cookies", Texts: text},
-		{Section: SectionHome, Slug: "banner", Texts: text},
-		{Section: "BLOG", Slug: "terms", Texts: text},
+		{Section: SectionLegal, Slug: "cookies", Modes: ModeBoth, Texts: text},
+		{Section: SectionHome, Slug: "banner", Modes: ModeBoth, Texts: text},
+		{Section: "BLOG", Slug: "terms", Modes: ModeBoth, Texts: text},
+		{Section: SectionLegal, Slug: "terms", Texts: text},
 	} {
 		if err := bad.Validate(); err == nil {
 			t.Errorf("%s/%s accepted", bad.Section, bad.Slug)

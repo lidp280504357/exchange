@@ -126,7 +126,17 @@ export interface components {
             }[];
             /** @enum {string} */
             default_locale: "zh-CN" | "en";
-            /** @description While enabled the sites show the text in a banner at the top (off when live). */
+            /** @description The exchange in test mode (the learning mode until 2026-10-04; off when live). While enabled the sites show the content marked TEST or BOTH (FORMAL or BOTH when off, design §4.4), "测试模式" badges and, when banner is true, text in a banner at the top. */
+            test_mode: {
+                enabled: boolean;
+                /** @description Show the banner while test mode is on (operators may hide it). */
+                banner: boolean;
+                text: components["schemas"]["Texts"];
+            };
+            /**
+             * @deprecated
+             * @description The test mode under its former name (enabled and text), until the admin console reads test_mode.
+             */
             learning_mode: {
                 enabled: boolean;
                 text: components["schemas"]["Texts"];

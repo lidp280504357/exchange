@@ -15,7 +15,7 @@ func defaultPlatform() PlatformProfile {
 	p := PlatformProfile{
 		Name: "Astras", ShortName: "Astras", ThemeColor: "#0b0e11", BrandColor: "#f0b90b", DefaultLocale: LocaleZH,
 		Footer:       PlatformFooter{Copyright: Texts{LocaleZH: "© 2026 Astras", LocaleEN: "© 2026 Astras"}},
-		Learning:     LearningMode{Enabled: true, Text: Texts{LocaleZH: "学习环境", LocaleEN: "A learning environment"}},
+		Test:         TestMode{Enabled: true, Banner: true, Text: Texts{LocaleZH: "测试模式", LocaleEN: "Test mode"}},
 		Registration: Registration{Status: RegistrationOpen, ClosedText: Texts{LocaleZH: "暂未开放注册"}},
 	}
 	p.Normalize()
@@ -30,24 +30,31 @@ func TestPlatformProfileValidate(t *testing.T) {
 	live.Name, live.ShortName, live.Domain = "Example Exchange", "Example", "example.com"
 	live.Contact = PlatformContact{Email: "support@example.com", SupportURL: "https://help.example.com"}
 	live.Social = []SocialLink{{Kind: "x", URL: "https://x.com/example"}, {Kind: "telegram", URL: "https://t.me/example"}}
-	live.Learning = LearningMode{Enabled: false}
+	live.Test = TestMode{Enabled: false}
 	live.Registration = Registration{Status: RegistrationClosed, ClosedText: Texts{LocaleZH: "邀请制", LocaleEN: "By invitation"}}
 	if err := live.Validate(); err != nil {
 		t.Fatalf("a live profile: %v", err)
 	}
+	quiet := defaultPlatform()
+	quiet.Test = TestMode{Enabled: true}
+	if err := quiet.Validate(); err != nil {
+		t.Fatalf("test mode with its banner hidden needs no text: %v", err)
+	}
 
 	bad := map[string]func(p *PlatformProfile){
-		"a one-letter name":        func(p *PlatformProfile) { p.Name = "A" },
-		"a long short name":        func(p *PlatformProfile) { p.ShortName = "Thirteen Char" },
-		"a padded name":            func(p *PlatformProfile) { p.Name = " Astras" },
-		"an upper-case domain":     func(p *PlatformProfile) { p.Domain = "Astras.vip" },
-		"a domain with a scheme":   func(p *PlatformProfile) { p.Domain = "https://astras.vip" },
-		"a bare label":             func(p *PlatformProfile) { p.Domain = "localhost" },
-		"an upper-case color":      func(p *PlatformProfile) { p.ThemeColor = "#0B0E11" },
-		"a short color":            func(p *PlatformProfile) { p.BrandColor = "#fff" },
-		"a long copyright":         func(p *PlatformProfile) { p.Footer.Copyright = Texts{LocaleZH: strings.Repeat("版", 201)} },
-		"another language":         func(p *PlatformProfile) { p.Footer.Compliance = Texts{"fr": "x"} },
-		"a banner without text":    func(p *PlatformProfile) { p.Learning = LearningMode{Enabled: true, Text: Texts{LocaleEN: "en only"}} },
+		"a one-letter name":      func(p *PlatformProfile) { p.Name = "A" },
+		"a long short name":      func(p *PlatformProfile) { p.ShortName = "Thirteen Char" },
+		"a padded name":          func(p *PlatformProfile) { p.Name = " Astras" },
+		"an upper-case domain":   func(p *PlatformProfile) { p.Domain = "Astras.vip" },
+		"a domain with a scheme": func(p *PlatformProfile) { p.Domain = "https://astras.vip" },
+		"a bare label":           func(p *PlatformProfile) { p.Domain = "localhost" },
+		"an upper-case color":    func(p *PlatformProfile) { p.ThemeColor = "#0B0E11" },
+		"a short color":          func(p *PlatformProfile) { p.BrandColor = "#fff" },
+		"a long copyright":       func(p *PlatformProfile) { p.Footer.Copyright = Texts{LocaleZH: strings.Repeat("版", 201)} },
+		"another language":       func(p *PlatformProfile) { p.Footer.Compliance = Texts{"fr": "x"} },
+		"a banner without text": func(p *PlatformProfile) {
+			p.Test = TestMode{Enabled: true, Banner: true, Text: Texts{LocaleEN: "en only"}}
+		},
 		"closed without text":      func(p *PlatformProfile) { p.Registration = Registration{Status: RegistrationClosed} },
 		"an unknown registration":  func(p *PlatformProfile) { p.Registration.Status = "INVITE" },
 		"a named e-mail":           func(p *PlatformProfile) { p.Contact.Email = "Support <support@example.com>" },

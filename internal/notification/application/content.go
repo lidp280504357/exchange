@@ -19,11 +19,17 @@ import (
 )
 
 // Content serves the announcements and help articles (design 2026-10-02
-// §4.5): the sites read what is published, the admin console writes them
-// (it audits each change; its administrator is the actor here).
+// §4.5): the sites read what is published for the exchange's mode (design
+// 2026-10-04 §4.4), the admin console writes them (it audits each change;
+// its administrator is the actor here).
 type Content struct {
 	Store ports.ContentStore
-	Now   func() time.Time
+	// Mode is the exchange's mode: in test mode the sites get the TEST and
+	// BOTH articles, live the FORMAL and BOTH ones.
+	Mode interface {
+		Test(ctx context.Context) bool
+	}
+	Now func() time.Time
 }
 
 // maxPublishedOffset bounds how deep the sites page.
@@ -49,26 +55,26 @@ func (c *Content) Published(ctx context.Context, section, cursor string, limit i
 		}
 		offset = n
 	}
-	list, err := c.Store.PublishedPage(ctx, section, c.Now(), offset, limit+1)
+	list, err := c.Store.PublishedPage(ctx, section, c.Mode.Test(ctx), c.Now(), offset, limit+1)
 	if err != nil || len(list) <= limit {
 		return list, "", err
 	}
 	return list[:limit], strconv.Itoa(offset + limit), nil
 }
 
-// Withdrawn returns the slugs of a section's articles taken off: the
-// sites hide their own file of such a slug too.
+// Withdrawn returns the slugs of a section's articles of the mode taken
+// off: the sites hide their own file of such a slug too.
 func (c *Content) Withdrawn(ctx context.Context, section string) ([]string, error) {
 	if !domain.ValidSection(section) {
 		return nil, apperr.NotFound("no such section")
 	}
-	return c.Store.Withdrawn(ctx, section)
+	return c.Store.Withdrawn(ctx, section, c.Mode.Test(ctx))
 }
 
-// PublishedArticle returns one the sites show now; one taken off is
-// domain.ErrArticleWithdrawn.
+// PublishedArticle returns one the sites show now in the exchange's mode;
+// one taken off is domain.ErrArticleWithdrawn.
 func (c *Content) PublishedArticle(ctx context.Context, section, slug string) (domain.Article, error) {
-	a, err := c.Store.Article(ctx, section, strings.ToLower(slug))
+	a, err := c.Store.Article(ctx, section, strings.ToLower(slug), c.Mode.Test(ctx))
 	if err != nil {
 		return domain.Article{}, err
 	}
@@ -108,7 +114,10 @@ type ArticleInput struct {
 	Category string
 	Pinned   bool
 	Order    int
-	Texts    []domain.ArticleText
+	// Modes is TEST, FORMAL or BOTH; empty keeps an article's own, BOTH
+	// for a new one.
+	Modes string
+	Texts []domain.ArticleText
 }
 
 // Create writes a draft.
@@ -116,8 +125,11 @@ func (c *Content) Create(ctx context.Context, in ArticleInput, actor string) (do
 	now := c.Now()
 	a := domain.Article{
 		ID: uuid.Must(uuid.NewV7()).String(), Section: strings.ToUpper(in.Section), Slug: strings.ToLower(strings.TrimSpace(in.Slug)),
-		Category: in.Category, Pinned: in.Pinned, Order: in.Order, Status: domain.ArticleDraft, Version: 1, UpdatedBy: actor,
-		CreatedAt: now, UpdatedAt: now, Texts: in.Texts,
+		Category: in.Category, Pinned: in.Pinned, Order: in.Order, Modes: domain.ModeBoth, Status: domain.ArticleDraft, Version: 1,
+		UpdatedBy: actor, CreatedAt: now, UpdatedAt: now, Texts: in.Texts,
+	}
+	if in.Modes != "" {
+		a.Modes = strings.ToUpper(in.Modes)
 	}
 	if err := a.Validate(); err != nil {
 		return domain.Article{}, err
@@ -128,14 +140,17 @@ func (c *Content) Create(ctx context.Context, in ArticleInput, actor string) (do
 	return a, nil
 }
 
-// Update rewrites an article at version: its slug, category, pin, order
-// and texts; its status stays.
+// Update rewrites an article at version: its slug, category, pin, order,
+// modes (unless empty) and texts; its status stays.
 func (c *Content) Update(ctx context.Context, id string, version int, in ArticleInput, actor string) (domain.Article, error) {
 	a, err := c.Get(ctx, id)
 	if err != nil {
 		return domain.Article{}, err
 	}
 	a.Slug, a.Category, a.Pinned, a.Order, a.Texts = strings.ToLower(strings.TrimSpace(in.Slug)), in.Category, in.Pinned, in.Order, in.Texts
+	if in.Modes != "" {
+		a.Modes = strings.ToUpper(in.Modes)
+	}
 	return c.save(ctx, a, version, actor)
 }
 

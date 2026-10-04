@@ -42,6 +42,24 @@ const (
 	ArticleArchived  = "ARCHIVED"
 )
 
+// Content modes (user decision 2026-10-04 18:45, design 2026-10-04 §4.4):
+// an article shows while the exchange is in test mode (TEST), when it is
+// live (FORMAL) or in both. A slug has at most one article per mode.
+const (
+	ModeTest   = "TEST"
+	ModeFormal = "FORMAL"
+	ModeBoth   = "BOTH"
+)
+
+// ShownIn reports whether an article of modes shows in the exchange's
+// mode: in test mode when test is true, live otherwise.
+func ShownIn(modes string, test bool) bool {
+	if test {
+		return modes == ModeTest || modes == ModeBoth
+	}
+	return modes == ModeFormal || modes == ModeBoth
+}
+
 // Content locales: Chinese is required, English optional (the sites fall
 // back to Chinese).
 const (
@@ -54,8 +72,9 @@ var (
 	categoryRE = regexp.MustCompile(`^[a-z0-9_-]{0,32}$`)
 )
 
-// ErrArticleExists refuses a second article with a section's slug.
-var ErrArticleExists = apperr.New(apperr.KindConflict, "NOTIFY_ARTICLE_EXISTS", "an article with this slug exists in the section")
+// ErrArticleExists refuses a second article with a section's slug in a
+// mode: one for TEST and one for FORMAL may share it, BOTH takes both.
+var ErrArticleExists = apperr.New(apperr.KindConflict, "NOTIFY_ARTICLE_EXISTS", "an article with this slug exists in the section for that mode")
 
 // ErrArticleWithdrawn is an article taken off the sites: unlike one never
 // published, the sites do not fall back to their own file of the slug.
@@ -78,7 +97,9 @@ type Article struct {
 	Category string
 	Pinned   bool
 	// Order sorts help articles within their category.
-	Order  int
+	Order int
+	// Modes is TEST, FORMAL or BOTH: when the sites show it.
+	Modes  string
 	Status string
 	// PublishAt is when a published article shows; later than now it is
 	// scheduled.
@@ -169,6 +190,8 @@ func (a Article) Validate() error {
 		return apperr.Invalid("category must be at most 32 lower-case letters, digits, dashes and underscores")
 	case a.Order < -1000 || a.Order > 1000:
 		return apperr.Invalid("sort_order must be -1000 to 1000")
+	case a.Modes != ModeTest && a.Modes != ModeFormal && a.Modes != ModeBoth:
+		return apperr.Invalid("modes must be TEST, FORMAL or BOTH")
 	}
 	seen := map[string]bool{}
 	for _, t := range a.Texts {

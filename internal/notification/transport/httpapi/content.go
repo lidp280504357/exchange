@@ -134,6 +134,7 @@ type articleJSON struct {
 	Category  string     `json:"category"`
 	Pinned    bool       `json:"pinned"`
 	Order     int        `json:"order"`
+	Modes     string     `json:"modes"`
 	Status    string     `json:"status"`
 	PublishAt *string    `json:"publish_at"`
 	Version   int        `json:"version"`
@@ -152,7 +153,7 @@ type textJSON struct {
 
 func articleOf(a domain.Article) articleJSON {
 	out := articleJSON{
-		ID: a.ID, Section: a.Section, Slug: a.Slug, Category: a.Category, Pinned: a.Pinned, Order: a.Order, Status: a.Status,
+		ID: a.ID, Section: a.Section, Slug: a.Slug, Category: a.Category, Pinned: a.Pinned, Order: a.Order, Modes: a.Modes, Status: a.Status,
 		Version: a.Version, UpdatedBy: a.UpdatedBy, CreatedAt: httpx.FormatTime(a.CreatedAt), UpdatedAt: httpx.FormatTime(a.UpdatedAt),
 		Texts: []textJSON{},
 	}
@@ -190,14 +191,17 @@ func (h *Content) article(w http.ResponseWriter, r *http.Request) {
 
 // articleBody is what the console sends of an article.
 type articleBody struct {
-	Section  string     `json:"section"`
-	Slug     string     `json:"slug"`
-	Category string     `json:"category"`
-	Pinned   bool       `json:"pinned"`
-	Order    int        `json:"order"`
-	Texts    []textJSON `json:"texts"`
-	Version  int        `json:"version"`
-	Actor    string     `json:"actor"`
+	Section  string `json:"section"`
+	Slug     string `json:"slug"`
+	Category string `json:"category"`
+	Pinned   bool   `json:"pinned"`
+	Order    int    `json:"order"`
+	// Modes is TEST, FORMAL or BOTH; left out it keeps the article's own
+	// (BOTH for a new one).
+	Modes   string     `json:"modes"`
+	Texts   []textJSON `json:"texts"`
+	Version int        `json:"version"`
+	Actor   string     `json:"actor"`
 }
 
 func (b articleBody) input() application.ArticleInput {
@@ -205,7 +209,9 @@ func (b articleBody) input() application.ArticleInput {
 	for _, t := range b.Texts {
 		texts = append(texts, domain.ArticleText(t))
 	}
-	return application.ArticleInput{Section: b.Section, Slug: b.Slug, Category: b.Category, Pinned: b.Pinned, Order: b.Order, Texts: texts}
+	return application.ArticleInput{
+		Section: b.Section, Slug: b.Slug, Category: b.Category, Pinned: b.Pinned, Order: b.Order, Modes: b.Modes, Texts: texts,
+	}
 }
 
 func needActor(actor string) error {

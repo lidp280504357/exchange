@@ -34,19 +34,25 @@ func (s *memContent) Articles(_ context.Context, section string, visibleAt time.
 	return out, nil
 }
 
-func (s *memContent) PublishedPage(ctx context.Context, section string, at time.Time, offset, limit int) ([]domain.Article, error) {
-	list, _ := s.Articles(ctx, section, at)
+func (s *memContent) PublishedPage(ctx context.Context, section string, test bool, at time.Time, offset, limit int) ([]domain.Article, error) {
+	all, _ := s.Articles(ctx, section, at)
+	var list []domain.Article
+	for _, a := range all {
+		if domain.ShownIn(a.Modes, test) {
+			list = append(list, a)
+		}
+	}
 	slices.SortStableFunc(list, func(a, b domain.Article) int { return b.PublishAt.Compare(a.PublishAt) })
 	list = list[min(offset, len(list)):]
 	return list[:min(limit, len(list))], nil
 }
 
-func (s *memContent) Withdrawn(_ context.Context, section string) ([]string, error) {
+func (s *memContent) Withdrawn(_ context.Context, section string, test bool) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := []string{}
 	for _, a := range s.articles {
-		if a.Section == section && a.Status == domain.ArticleArchived {
+		if a.Section == section && a.Status == domain.ArticleArchived && domain.ShownIn(a.Modes, test) {
 			out = append(out, a.Slug)
 		}
 	}
@@ -64,8 +70,10 @@ func (s *memContent) find(match func(domain.Article) bool) (*domain.Article, err
 	return nil, nil
 }
 
-func (s *memContent) Article(_ context.Context, section, slug string) (*domain.Article, error) {
-	return s.find(func(a domain.Article) bool { return a.Section == section && a.Slug == slug })
+func (s *memContent) Article(_ context.Context, section, slug string, test bool) (*domain.Article, error) {
+	return s.find(func(a domain.Article) bool {
+		return a.Section == section && a.Slug == slug && domain.ShownIn(a.Modes, test)
+	})
 }
 
 func (s *memContent) ArticleByID(_ context.Context, id string) (*domain.Article, error) {
@@ -76,13 +84,20 @@ func (s *memContent) CreateArticle(_ context.Context, a domain.Article) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, x := range s.articles {
-		if x.Section == a.Section && x.Slug == a.Slug {
+		// One article per mode of a slug, as the partial unique indexes.
+		if x.Section == a.Section && x.Slug == a.Slug && (domain.ShownIn(x.Modes, true) && domain.ShownIn(a.Modes, true) ||
+			domain.ShownIn(x.Modes, false) && domain.ShownIn(a.Modes, false)) {
 			return domain.ErrArticleExists
 		}
 	}
 	s.articles = append(s.articles, a)
 	return nil
 }
+
+// fixedMode is the exchange's mode for a test.
+type fixedMode struct{ test bool }
+
+func (m *fixedMode) Test(context.Context) bool { return m.test }
 
 func (s *memContent) UpdateArticle(_ context.Context, a domain.Article, version int) error {
 	s.mu.Lock()
@@ -101,7 +116,7 @@ func (s *memContent) UpdateArticle(_ context.Context, a domain.Article, version 
 
 func TestArticlesArePublishedForTheSites(t *testing.T) {
 	now := time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC)
-	c := &Content{Store: &memContent{}, Now: func() time.Time { return now }}
+	c := &Content{Store: &memContent{}, Mode: &fixedMode{}, Now: func() time.Time { return now }}
 	ctx := context.Background()
 	zh := domain.ArticleText{Locale: domain.LocaleZH, Title: "新币上线", Body: "# LINK\n\n今天上线。"}
 	in := ArticleInput{Section: "announcement", Slug: "New-Listing", Category: "product", Texts: []domain.ArticleText{zh}}
@@ -169,6 +184,91 @@ func TestArticlesArePublishedForTheSites(t *testing.T) {
 	}
 	if all, err := c.All(ctx, domain.SectionAnnouncement); err != nil || len(all) != 1 {
 		t.Fatalf("the console sees every status: %+v %v", all, err)
+	}
+}
+
+// Content by mode (design 2026-10-04 §4.4): a slug may have a test and a
+// formal article, or one for both; the sites get those of the exchange's
+// mode, and a switch of mode swaps them.
+func TestArticlesByMode(t *testing.T) {
+	now := time.Date(2026, 10, 5, 10, 0, 0, 0, time.UTC)
+	mode := &fixedMode{test: true}
+	c := &Content{Store: &memContent{}, Mode: mode, Now: func() time.Time { return now }}
+	ctx := context.Background()
+	text := func(title string) []domain.ArticleText {
+		return []domain.ArticleText{{Locale: domain.LocaleZH, Title: title, Body: title + "。"}}
+	}
+	publish := func(in ArticleInput) domain.Article {
+		a, err := c.Create(ctx, in, "ops@example.com")
+		if err != nil {
+			t.Fatalf("create %+v: %v", in, err)
+		}
+		if a, err = c.Publish(ctx, a.ID, a.Version, time.Time{}, "ops@example.com"); err != nil {
+			t.Fatalf("publish %+v: %v", in, err)
+		}
+		return a
+	}
+	testTerms := publish(ArticleInput{Section: "LEGAL", Slug: "terms", Modes: "test", Texts: text("测试条款")})
+	if testTerms.Modes != domain.ModeTest {
+		t.Fatalf("modes %q", testTerms.Modes)
+	}
+	formalTerms := publish(ArticleInput{Section: "LEGAL", Slug: "terms", Modes: domain.ModeFormal, Texts: text("正式条款")})
+	if _, err := c.Create(ctx, ArticleInput{Section: "LEGAL", Slug: "terms", Texts: text("两种模式")}, "ops@example.com"); !apperr.Is(err, "NOTIFY_ARTICLE_EXISTS") {
+		t.Fatalf("BOTH beside a test and a formal page: %v", err)
+	}
+	if _, err := c.Create(ctx, ArticleInput{Section: "LEGAL", Slug: "privacy", Modes: "LIVE", Texts: text("x")}, "ops@example.com"); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("an unknown mode: %v", err)
+	}
+	privacy := publish(ArticleInput{Section: "LEGAL", Slug: "privacy", Texts: text("隐私")})
+	if privacy.Modes != domain.ModeBoth {
+		t.Fatalf("a new article is for both modes: %q", privacy.Modes)
+	}
+
+	titles := func() []string {
+		list, _, err := c.Published(ctx, domain.SectionLegal, "", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, a := range list {
+			out = append(out, a.Texts[0].Title)
+		}
+		slices.Sort(out)
+		return out
+	}
+	if got := titles(); !slices.Equal(got, []string{"测试条款", "隐私"}) {
+		t.Fatalf("in test mode %v", got)
+	}
+	if a, err := c.PublishedArticle(ctx, domain.SectionLegal, "terms"); err != nil || a.ID != testTerms.ID {
+		t.Fatalf("the test terms %+v %v", a, err)
+	}
+	mode.test = false
+	if got := titles(); !slices.Equal(got, []string{"正式条款", "隐私"}) {
+		t.Fatalf("live %v", got)
+	}
+	if a, err := c.PublishedArticle(ctx, domain.SectionLegal, "terms"); err != nil || a.ID != formalTerms.ID {
+		t.Fatalf("the formal terms %+v %v", a, err)
+	}
+
+	// Taking the test page off hides the sites' own terms in test mode only.
+	if _, err := c.Archive(ctx, testTerms.ID, testTerms.Version, "ops@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if slugs, _ := c.Withdrawn(ctx, domain.SectionLegal); len(slugs) != 0 {
+		t.Fatalf("live, nothing is withdrawn: %v", slugs)
+	}
+	mode.test = true
+	if slugs, _ := c.Withdrawn(ctx, domain.SectionLegal); !slices.Equal(slugs, []string{"terms"}) {
+		t.Fatalf("in test mode %v", slugs)
+	}
+	if _, err := c.PublishedArticle(ctx, domain.SectionLegal, "terms"); !apperr.Is(err, "NOTIFY_ARTICLE_WITHDRAWN") {
+		t.Fatalf("the test terms taken off: %v", err)
+	}
+
+	// An edit without modes keeps the article's own.
+	edited, err := c.Update(ctx, formalTerms.ID, formalTerms.Version, ArticleInput{Slug: "terms", Texts: text("正式条款二")}, "ops@example.com")
+	if err != nil || edited.Modes != domain.ModeFormal {
+		t.Fatalf("edited %+v %v", edited, err)
 	}
 }
 

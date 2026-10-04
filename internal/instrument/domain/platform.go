@@ -15,8 +15,8 @@ import (
 )
 
 // PlatformProfile is the exchange's own profile (design 2026-10-04 §4.1):
-// its name, images, colors, footer, contact, the learning-mode banner
-// and whether sign-ups are open. Operators change it in the admin
+// its name, images, colors, footer, contact, the test mode and whether
+// sign-ups are open. Operators change it in the admin
 // console; the sites read it at run time, so going live is a change of
 // settings, not a build. Version goes up with every change, images
 // included.
@@ -31,7 +31,7 @@ type PlatformProfile struct {
 	Contact       PlatformContact
 	Social        []SocialLink
 	DefaultLocale string
-	Learning      LearningMode
+	Test          TestMode
 	Registration  Registration
 	// Images are the uploaded images by kind (their bytes kept apart).
 	Images    map[string]PlatformImage
@@ -69,11 +69,15 @@ type SocialLink struct {
 	URL  string
 }
 
-// LearningMode is the banner the sites show while the exchange is a
-// learning or simulated environment (off when live).
-type LearningMode struct {
+// TestMode is the exchange in test mode (the learning mode until the user
+// decided so on 2026-10-04, design §4.1): while it is on the sites show
+// the content meant for it (TEST or BOTH, design §4.4), "测试模式" badges
+// and, unless an operator hides it, a banner with Text. Off when live.
+type TestMode struct {
 	Enabled bool
-	Text    Texts
+	// Banner shows Text at the top of the sites while test mode is on.
+	Banner bool
+	Text   Texts
 }
 
 // Registration says whether sign-ups are open, and what the sign-up pages
@@ -149,7 +153,7 @@ var ErrPlatformChanged = apperr.New(apperr.KindConflict, "INSTRUMENT_PLATFORM_CH
 // Normalize gives every text both languages and the lists their empty
 // values, as the API shows them.
 func (p *PlatformProfile) Normalize() {
-	for _, t := range []*Texts{&p.Footer.Copyright, &p.Footer.Compliance, &p.Learning.Text, &p.Registration.ClosedText} {
+	for _, t := range []*Texts{&p.Footer.Copyright, &p.Footer.Compliance, &p.Test.Text, &p.Registration.ClosedText} {
 		*t = t.normalized()
 	}
 	if p.Social == nil {
@@ -198,7 +202,7 @@ func (p PlatformProfile) Validate() error {
 	}{
 		"footer.copyright":         {p.Footer.Copyright, maxCopyright, false},
 		"footer.compliance":        {p.Footer.Compliance, maxCompliance, false},
-		"learning_mode.text":       {p.Learning.Text, maxBannerText, p.Learning.Enabled},
+		"test_mode.text":           {p.Test.Text, maxBannerText, p.Test.Enabled && p.Test.Banner},
 		"registration.closed_text": {p.Registration.ClosedText, maxBannerText, p.Registration.Status == RegistrationClosed},
 	} {
 		if err := validTexts(name, t.texts, t.max, t.required); err != nil {

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +31,7 @@ func TestArticlesAndBroadcasts(t *testing.T) {
 	article := func(slug string, pinned bool, at time.Time, status string) domain.Article {
 		return domain.Article{
 			ID: uuid.Must(uuid.NewV7()).String(), Section: domain.SectionAnnouncement, Slug: slug, Category: "notice", Pinned: pinned,
-			Status: status, PublishAt: at, Version: 1, UpdatedBy: "ops@example.com", CreatedAt: now, UpdatedAt: now,
+			Modes: domain.ModeBoth, Status: status, PublishAt: at, Version: 1, UpdatedBy: "ops@example.com", CreatedAt: now, UpdatedAt: now,
 			Texts: []domain.ArticleText{
 				{Locale: domain.LocaleZH, Title: "标题 " + slug, Summary: "摘要", Body: "正文"},
 				{Locale: domain.LocaleEN, Title: "Title " + slug, Body: "Body"},
@@ -58,10 +59,10 @@ func TestArticlesAndBroadcasts(t *testing.T) {
 	if all, err := store.Articles(ctx, domain.SectionAnnouncement, time.Time{}); err != nil || len(all) != 6 {
 		t.Fatalf("all %d %v", len(all), err)
 	}
-	if slugs, err := store.Withdrawn(ctx, domain.SectionAnnouncement); err != nil || len(slugs) != 1 || slugs[0] != "gone" {
+	if slugs, err := store.Withdrawn(ctx, domain.SectionAnnouncement, false); err != nil || len(slugs) != 1 || slugs[0] != "gone" {
 		t.Fatalf("withdrawn %v %v", slugs, err)
 	}
-	if slugs, err := store.Withdrawn(ctx, domain.SectionHelp); err != nil || slugs == nil || len(slugs) != 0 {
+	if slugs, err := store.Withdrawn(ctx, domain.SectionHelp, true); err != nil || slugs == nil || len(slugs) != 0 {
 		t.Fatalf("no help withdrawn %#v %v", slugs, err)
 	}
 	if help, err := store.Articles(ctx, domain.SectionHelp, now); err != nil || len(help) != 0 {
@@ -74,11 +75,11 @@ func TestArticlesAndBroadcasts(t *testing.T) {
 	if err := store.CreateArticle(ctx, long); err != nil {
 		t.Fatal(err)
 	}
-	page, err := store.PublishedPage(ctx, domain.SectionAnnouncement, now, 0, 2)
+	page, err := store.PublishedPage(ctx, domain.SectionAnnouncement, false, now, 0, 2)
 	if err != nil || len(page) != 2 || page[0].Slug != "pinned" || page[1].Slug != "fresh" {
 		t.Fatalf("the first page %+v %v", page, err)
 	}
-	page, err = store.PublishedPage(ctx, domain.SectionAnnouncement, now, 2, 5)
+	page, err = store.PublishedPage(ctx, domain.SectionAnnouncement, false, now, 2, 5)
 	if err != nil || len(page) != 2 || page[0].Slug != "long-read" || page[1].Slug != "old-news" {
 		t.Fatalf("the next page %+v %v", page, err)
 	}
@@ -93,16 +94,17 @@ func TestArticlesAndBroadcasts(t *testing.T) {
 	if err := store.UpdateArticle(ctx, fresh, 1); !apperr.Is(err, apperr.CodeConflict) {
 		t.Fatalf("a stale version: %v", err)
 	}
-	if got, err := store.Article(ctx, domain.SectionAnnouncement, "fresh"); err != nil || got.Version != 2 || len(got.Texts) != 1 {
+	if got, err := store.Article(ctx, domain.SectionAnnouncement, "fresh", true); err != nil || got.Version != 2 || len(got.Texts) != 1 {
 		t.Fatalf("updated %+v %v", got, err)
 	}
+
 	if got, err := store.ArticleByID(ctx, "nope"); err != nil || got != nil {
 		t.Fatalf("a bad id %+v %v", got, err)
 	}
 
 	// The sites' endpoints: Chinese by default, English when asked, a draft
 	// or a scheduled article unknown.
-	content := &application.Content{Store: store, Now: func() time.Time { return now }}
+	content := &application.Content{Store: store, Mode: &application.Mode{Profile: liveMode{}, Now: time.Now}, Now: func() time.Time { return now }}
 	r := httpx.NewRouter(httpx.RouterOptions{Logger: slog.New(slog.DiscardHandler)})
 	(&httpapi.Content{Svc: content, Broadcasts: &application.Broadcasts{Store: store, Now: time.Now}}).Routes(r)
 	srv := httptest.NewServer(r)
@@ -156,6 +158,45 @@ func TestArticlesAndBroadcasts(t *testing.T) {
 	// One taken off says so: the sites do not show their own file instead.
 	if status, body, _ := get("/v1/announcements/gone"); status != http.StatusNotFound || body["code"] != "NOTIFY_ARTICLE_WITHDRAWN" {
 		t.Fatalf("withdrawn: %d %v", status, body)
+	}
+
+	// Content by mode (design 2026-10-04 §4.4): a slug's test and formal
+	// pages side by side, one for both beside neither of them.
+	testOnly := article("modes", false, now.Add(-2*time.Hour), domain.ArticlePublished)
+	testOnly.Modes = domain.ModeTest
+	formal := article("modes", false, now.Add(-3*time.Hour), domain.ArticlePublished)
+	formal.Modes = domain.ModeFormal
+	for _, a := range []domain.Article{testOnly, formal} {
+		if err := store.CreateArticle(ctx, a); err != nil {
+			t.Fatalf("%s: %v", a.Modes, err)
+		}
+	}
+	both := article("modes", false, now, domain.ArticleDraft)
+	if err := store.CreateArticle(ctx, both); !apperr.Is(err, "NOTIFY_ARTICLE_EXISTS") {
+		t.Fatalf("BOTH beside a test and a formal page: %v", err)
+	}
+	for test, want := range map[bool]string{true: testOnly.ID, false: formal.ID} {
+		if got, err := store.Article(ctx, domain.SectionAnnouncement, "modes", test); err != nil || got == nil || got.ID != want {
+			t.Fatalf("test mode %v: %+v %v", test, got, err)
+		}
+	}
+	if page, err := store.PublishedPage(ctx, domain.SectionAnnouncement, true, now, 0, 20); err != nil || len(page) != 5 ||
+		slices.IndexFunc(page, func(a domain.Article) bool { return a.ID == formal.ID }) >= 0 {
+		t.Fatalf("in test mode, the formal page is left out: %d %v", len(page), err)
+	}
+	formal.Status, formal.Version = domain.ArticleArchived, 2
+	if err := store.UpdateArticle(ctx, formal, 1); err != nil {
+		t.Fatal(err)
+	}
+	if slugs, err := store.Withdrawn(ctx, domain.SectionAnnouncement, true); err != nil || slices.Contains(slugs, "modes") {
+		t.Fatalf("the formal page taken off is not withdrawn in test mode: %v %v", slugs, err)
+	}
+	if slugs, err := store.Withdrawn(ctx, domain.SectionAnnouncement, false); err != nil || !slices.Contains(slugs, "modes") {
+		t.Fatalf("live it is: %v %v", slugs, err)
+	}
+	testOnly.Modes, testOnly.Version = domain.ModeBoth, 2
+	if err := store.UpdateArticle(ctx, testOnly, 1); !apperr.Is(err, "NOTIFY_ARTICLE_EXISTS") {
+		t.Fatalf("the test page made BOTH beside the formal one: %v", err)
 	}
 
 	// A broadcast with its read count.
@@ -285,3 +326,8 @@ func TestArticlesAndBroadcasts(t *testing.T) {
 		t.Fatalf("the settled mail: %d %v", n, err)
 	}
 }
+
+// liveMode is a platform profile with the exchange live.
+type liveMode struct{}
+
+func (liveMode) TestMode(context.Context) (bool, error) { return false, nil }

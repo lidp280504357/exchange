@@ -201,8 +201,8 @@ func platformRecord(p domain.PlatformProfile) map[string]any {
 		"footer":  map[string]any{"copyright": p.Footer.Copyright, "compliance": p.Footer.Compliance},
 		"contact": map[string]any{"email": p.Contact.Email, "support_url": p.Contact.SupportURL},
 		"social":  social, "default_locale": p.DefaultLocale,
-		"learning_mode": map[string]any{"enabled": p.Learning.Enabled, "text": p.Learning.Text},
-		"registration":  map[string]any{"status": p.Registration.Status, "closed_text": p.Registration.ClosedText},
+		"test_mode":    map[string]any{"enabled": p.Test.Enabled, "banner": p.Test.Banner, "text": p.Test.Text},
+		"registration": map[string]any{"status": p.Registration.Status, "closed_text": p.Registration.ClosedText},
 	}
 }
 

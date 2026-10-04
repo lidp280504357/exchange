@@ -114,9 +114,8 @@ func setup(ctx context.Context, a *app.App) error {
 	}
 	store := postgres.NewStore(db, events)
 	dispatcher := application.NewDispatcher(routes, store, a.Logger(), a.Metrics())
-	dispatcher.Brand = &application.Branding{
-		Profile: &platform.Client{BaseURL: cfg.InstrumentURL, HTTP: &http.Client{Timeout: 5 * time.Second}}, Now: time.Now,
-	}
+	profile := &platform.Client{BaseURL: cfg.InstrumentURL, HTTP: &http.Client{Timeout: 5 * time.Second}}
+	dispatcher.Brand = &application.Branding{Profile: profile, Now: time.Now}
 	a.Add("dispatcher", dispatcher)
 	// The launch checklist's "mail service configured" (design 2026-10-04
 	// §4.6): a real provider, not only the mock.
@@ -141,8 +140,9 @@ func setup(ctx context.Context, a *app.App) error {
 		Now:        time.Now,
 	}
 	// Operations content (design 2026-10-02 §4.5): articles for the sites,
-	// the operators' in-app messages delivered in rounds.
-	content := &application.Content{Store: store, Now: time.Now}
+	// those of the exchange's mode (design 2026-10-04 §4.4), the operators'
+	// in-app messages delivered in rounds.
+	content := &application.Content{Store: store, Mode: &application.Mode{Profile: profile, Now: time.Now}, Now: time.Now}
 	broadcasts := &application.Broadcasts{Store: store, Notices: notices, Directory: people, Log: a.Logger(), Now: time.Now}
 	a.Add("broadcasts", app.Loop(func(ctx context.Context) error {
 		for {

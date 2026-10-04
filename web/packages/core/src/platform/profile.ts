@@ -35,6 +35,7 @@ export const DEFAULT_PROFILE: PlatformProfile = {
   contact: { email: "", support_url: null },
   social: [],
   default_locale: "zh-CN",
+  test_mode: { enabled: false, banner: false, text: { "zh-CN": "", en: "" } },
   learning_mode: { enabled: false, text: { "zh-CN": "", en: "" } },
   registration: { status: "OPEN", closed_text: { "zh-CN": "", en: "" } },
   welcome_credits: [],

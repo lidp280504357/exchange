@@ -89,6 +89,12 @@ type PlatformName interface {
 	PlatformName(ctx context.Context) (string, error)
 }
 
+// PlatformMode reads from the platform profile whether the exchange is in
+// test mode (design 2026-10-04 §4.4).
+type PlatformMode interface {
+	TestMode(ctx context.Context) (bool, error)
+}
+
 // Recipients looks users up in user-service and auth-service.
 type Recipients interface {
 	// Recipient returns the user's preferences; unknown users fail with
@@ -111,14 +117,17 @@ type ContentStore interface {
 	// Articles returns a section's articles with their texts; with
 	// visibleAt set only those published by then.
 	Articles(ctx context.Context, section string, visibleAt time.Time) ([]domain.Article, error)
-	// PublishedPage returns limit of a section's articles published by at,
-	// from offset in the sites' order; their texts carry the body's first
-	// HeadLength characters only, enough for a summary (C5.5 ⑫).
-	PublishedPage(ctx context.Context, section string, at time.Time, offset, limit int) ([]domain.Article, error)
-	// Withdrawn returns the slugs of a section's archived articles.
-	Withdrawn(ctx context.Context, section string) ([]string, error)
-	// Article and ArticleByID read one with its texts; nil when unknown.
-	Article(ctx context.Context, section, slug string) (*domain.Article, error)
+	// PublishedPage returns limit of a section's articles published by at
+	// and shown in the mode (test or live, domain.ShownIn), from offset in
+	// the sites' order; their texts carry the body's first HeadLength
+	// characters only, enough for a summary (C5.5 ⑫).
+	PublishedPage(ctx context.Context, section string, test bool, at time.Time, offset, limit int) ([]domain.Article, error)
+	// Withdrawn returns the slugs of a section's archived articles of the
+	// mode.
+	Withdrawn(ctx context.Context, section string, test bool) ([]string, error)
+	// Article reads a section's article of the mode by its slug, and
+	// ArticleByID one by its ID, with their texts; nil when unknown.
+	Article(ctx context.Context, section, slug string, test bool) (*domain.Article, error)
 	ArticleByID(ctx context.Context, id string) (*domain.Article, error)
 	// CreateArticle fails with domain.ErrArticleExists for a section's
 	// slug taken.

@@ -243,11 +243,11 @@ func TestThePublishedListPages(t *testing.T) {
 	store := &memContent{}
 	for i := range 5 {
 		store.articles = append(store.articles, domain.Article{
-			ID: uuid.Must(uuid.NewV7()).String(), Section: domain.SectionHelp, Slug: string(rune('a' + i)), Status: domain.ArticlePublished,
-			PublishAt: now.Add(-time.Duration(i) * time.Hour),
+			ID: uuid.Must(uuid.NewV7()).String(), Section: domain.SectionHelp, Slug: string(rune('a' + i)), Modes: domain.ModeBoth,
+			Status: domain.ArticlePublished, PublishAt: now.Add(-time.Duration(i) * time.Hour),
 		})
 	}
-	c := &Content{Store: store, Now: func() time.Time { return now }}
+	c := &Content{Store: store, Mode: &fixedMode{}, Now: func() time.Time { return now }}
 	ctx := context.Background()
 	var slugs []string
 	cursor := ""

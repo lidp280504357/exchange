@@ -228,11 +228,11 @@ export interface components {
             items: components["schemas"]["ArticleSummary"][];
             /** @description The next page's cursor; null after the last. */
             next_cursor: string | null;
-            /** @description Slugs of articles taken off; the sites hide their bundled file of such a slug too. */
+            /** @description Slugs of articles of the exchange's mode taken off; the sites hide their bundled file of such a slug too. */
             withdrawn: string[];
         };
         Article: components["schemas"]["ArticleSummary"] & {
-            /** @description Markdown. */
+            /** @description Markdown. It may hold mode blocks, ":::test" or ":::formal" up to a line ":::", which the sites keep in that mode only (design 2026-10-04 §4.4); the service sends them as written. */
             body: string;
         };
         Notification: {
