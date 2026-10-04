@@ -43,8 +43,9 @@ START=$SECONDS
 
 # The items the drill sets through the console; the checklist's others are
 # the deployment's or the test server's (its switches by the user's
-# decisions: sign-in without an authenticator, the hidden test asset).
-CONSOLE_ITEMS="welcome_credits learning_mode registration brand domain coin_profile legal"
+# decisions: sign-in without an authenticator, the hidden test asset). The
+# test mode's item was learning_mode until the console's D4 (test_mode).
+CONSOLE_ITEMS="welcome_credits learning_mode test_mode registration brand domain coin_profile legal"
 
 # --- the console's API --------------------------------------------------
 CSRF=(-H 'X-Admin-CSRF: 1')
