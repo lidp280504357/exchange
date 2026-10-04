@@ -217,7 +217,7 @@ func TestReadModels(t *testing.T) {
 
 	// The backfill rebuilds the read models from events, once.
 	for _, table := range []string{
-		"trades", "orders", "order_updates", "wallet_deposits", "wallet_withdrawals", "candles_1m", "derivatives_positions",
+		"trades", "orders", "order_updates", "orders_state", "wallet_deposits", "wallet_withdrawals", "candles_1m", "derivatives_positions",
 		"derivatives_fills", "derivatives_funding", "derivatives_liquidations",
 	} {
 		if err := conn.Exec(ctx, "TRUNCATE TABLE "+table); err != nil {

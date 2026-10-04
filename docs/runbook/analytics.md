@@ -13,7 +13,8 @@
 | `trades` | 每笔成交：价格、数量、成交额、主动方、双方订单与用户、手续费（买方付 base、卖方付 quote；合约为 0，合约手续费在 `derivatives_fills`） | `trade.TradeExecuted`（`trade.events` 与 `derivatives.trade.events`） |
 | `orders` | 订单受理时的属性（方向、类型、TIF、价格、数量、冻结） | `order.OrderAccepted`（现货与合约） |
 | `order_updates` | 订单每次变化：NEW / OPEN / PARTIALLY_FILLED / FILLED / CANCELED / REJECTED、累计成交、撤单原因或拒绝码、引擎 sequence | `order.events` 与 `derivatives.order.events` 全部六种事件 |
-| `orders_current`（视图） | 每个订单的最新状态 + 受理属性（资金检查就被拒的订单没有受理属性） | `order_updates` ⋈ `orders` |
+| `orders_state` | 每个订单折叠后的一行（AggregatingMergeTree，迁移 clickhouse 00007，审查 B58）：受理属性、按 (sequence, occurred_at) 最新的状态、累计成交与原因、第一次与最后一次变化的时间；键以订单 ID 的 UUIDv7 时间开头 | `orders` 与 `order_updates` 的两个物化视图（`orders_state_orders`、`orders_state_updates`），每次插入即折叠；折叠都是 max/min/any，同一行写两次不变 |
+| `orders_current`（视图） | 每个订单的最新状态 + 受理属性（资金检查就被拒的订单没有受理属性），列名与类型同以前 | `orders_state FINAL`：2026-10-05 起不再每次从 190 万行重算，后台订单列表从 2–14 s 降到约 60 ms |
 | `wallet_deposits` | 每笔充值的最新快照（状态、确认数、是否未认领、入账 journal） | `wallet.deposit.events`（地址分配事件除外） |
 | `wallet_withdrawals` | 每笔提现的最新快照（状态、手续费、交易哈希、风控原因） | `wallet.withdrawal.events` |
 | `candles_1m` | 一分钟 K 线（开高低收、成交量、成交额、笔数） | 每批带成交的分钟由 `trades FINAL` 重新计算，最新一次计算生效；图表用平台自己成交的品种（ASTRA-USDT、ASTRA-USDT-PERP），没有成交的分钟由 `market.candle.flats` 的平盘分钟写入（开关 `market.flat_minutes` 打开时，下一笔成交被市场服务应用时才发出，最新成交之后的分钟暂缺；笔数 0，`updated_at` 是分钟开始，那一分钟有成交时被成交算出的行覆盖；2026-10-04 起只向前，见 [market-data.md](market-data.md)） |
