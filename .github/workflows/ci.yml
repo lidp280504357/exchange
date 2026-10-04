@@ -62,6 +62,8 @@ jobs:
           if [ -n "$(gofumpt -l .)" ]; then gofumpt -l .; echo "::error::run 'task fmt'"; exit 1; fi
       - name: go mod tidy
         run: go mod tidy -diff
+      - name: module path
+        run: bash scripts/ci/module-path.sh
       - name: go vet
         run: go vet ./...
       - name: golangci-lint

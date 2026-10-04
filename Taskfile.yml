@@ -51,6 +51,10 @@ tasks:
     desc: go.mod/go.sum 与代码一致（含只在 Linux 上引入的依赖；需要联网）
     cmds: [go mod tidy -diff]
 
+  modpath:check:
+    desc: 模块路径只有 github.com/skill/exchange（代码、配置、文档里没有别的 github.com/<账号>/exchange；网页地址不算）
+    cmds: [bash scripts/ci/module-path.sh]
+
   lint:
     desc: golangci-lint
     cmds: [golangci-lint run ./...]
@@ -79,7 +83,7 @@ tasks:
     desc: 部署脚本语法检查
     cmds:
       - bash -n deploy/server-update.sh deploy/redpanda/topics.sh deploy/compose/nginx/update-cloudflare-ips.sh
-      - for f in scripts/*.sh scripts/e2e/*.sh scripts/e2e/lib/*.sh scripts/fault/*.sh scripts/ops/*.sh; do bash -n "$f"; done
+      - for f in scripts/*.sh scripts/ci/*.sh scripts/e2e/*.sh scripts/e2e/lib/*.sh scripts/fault/*.sh scripts/ops/*.sh; do bash -n "$f"; done
 
   dev:
     desc: 本机启动全部服务（直连测试服基础设施的 dev 命名空间：库 exchange_dev、Redis DB 1、Kafka 前缀 dev.；网关 http://localhost:8080；Ctrl-C 停止）
@@ -159,7 +163,7 @@ tasks:
 
   ci:
     desc: 与 CI 相同的本地检查（不含 vuln）
-    deps: [fmt:check, mod:check, vet, lint, scripts:check, web:check]
+    deps: [fmt:check, mod:check, modpath:check, vet, lint, scripts:check, web:check]
     cmds:
       - task: test
 

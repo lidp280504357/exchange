@@ -17,6 +17,9 @@
 
 - `go` 任务比本机 `task ci` 多跑集成测试：CI 设了 `TEST_*`，`task ci` 没设，所以集成测试只在 CI 里失败的情况是有的。
   - 改迁移或表约束时，提交前至少跑相关包与 `./migrations/` 的集成测试。B6 删了充值地址的 0x 约束，却没改 `TestWalletSchema`，CI 因此连红了五次。
+- 模块路径是 `github.com/skill/exchange`（2026-10-04 起不带 GitHub 账号）。`scripts/ci/module-path.sh` 在代码、配置与文档里见到别的 `github.com/<账号>/exchange` 就失败，网页地址不算；CI 的 `module path` 步骤与 `task ci` 的 `modpath:check` 都跑它。
+  - 旧路径的残留有的不报错：depguard 规则什么也匹配不到，`-X` 什么也设不上。
+  - 以后再改模块路径，`api/gen` 要用 `task proto` 重新生成，不能文本替换：描述符里的 go_package 前面存着长度。
 - 集成测试的依赖由 `scripts/ci/services.sh` 起成容器（PostgreSQL、Redis、ClickHouse、Redpanda，与测试服同版本，每次都是空库）。
   - 拉镜像失败会退避重试最多六次，每次失败的原因写进注解。
   - ClickHouse 取自 `mirror.gcr.io`：Docker Hub 对匿名拉取限流，GitHub 自带的服务容器只在几秒内重试三次，曾让任务在 `Initialize containers` 失败。
