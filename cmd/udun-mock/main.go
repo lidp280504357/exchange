@@ -42,8 +42,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/platform/app"
-	"github.com/lidp280504357/exchange/internal/platform/bootstrap"
+	"github.com/skill/exchange/internal/platform/app"
+	"github.com/skill/exchange/internal/platform/bootstrap"
 )
 
 type settings struct {

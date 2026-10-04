@@ -23,11 +23,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/marketsim/domain"
-	"github.com/lidp280504357/exchange/internal/marketsim/ports"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/flags"
-	"github.com/lidp280504357/exchange/internal/platform/svcsign"
+	"github.com/skill/exchange/internal/marketsim/domain"
+	"github.com/skill/exchange/internal/marketsim/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/platform/svcsign"
 )
 
 // Config is the simulation's fixed setup.

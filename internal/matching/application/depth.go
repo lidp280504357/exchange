@@ -9,10 +9,10 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
-	"github.com/lidp280504357/exchange/internal/matching/domain"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/kafka"
+	marketv1 "github.com/skill/exchange/api/gen/go/exchange/market/v1"
+	"github.com/skill/exchange/internal/matching/domain"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/kafka"
 )
 
 // Depth export (requirements §11.8): the aggregated top of each book goes

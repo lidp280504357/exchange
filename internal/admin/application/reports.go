@@ -8,9 +8,9 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/admin/domain"
-	"github.com/lidp280504357/exchange/internal/admin/ports"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/admin/domain"
+	"github.com/skill/exchange/internal/admin/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // Reports over a period in buckets (design 2026-10-02 §4.6, C4c): the

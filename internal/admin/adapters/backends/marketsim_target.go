@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/lidp280504357/exchange/internal/admin/ports"
+	"github.com/skill/exchange/internal/admin/ports"
 )
 
 // Plan returns a threshold target's plan (ASTRA A6).

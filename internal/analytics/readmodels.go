@@ -16,14 +16,14 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	derivativesv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/derivatives/v1"
-	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
-	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
-	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
-	tradev1 "github.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1"
-	walletv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/kafka"
+	derivativesv1 "github.com/skill/exchange/api/gen/go/exchange/derivatives/v1"
+	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
+	marketv1 "github.com/skill/exchange/api/gen/go/exchange/market/v1"
+	orderv1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
+	tradev1 "github.com/skill/exchange/api/gen/go/exchange/trade/v1"
+	walletv1 "github.com/skill/exchange/api/gen/go/exchange/wallet/v1"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/kafka"
 )
 
 // Read models of trading and the wallet (implementation plan §6.3 task

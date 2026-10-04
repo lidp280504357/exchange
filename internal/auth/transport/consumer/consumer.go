@@ -4,10 +4,10 @@ package consumer
 import (
 	"context"
 
-	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
-	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
-	"github.com/lidp280504357/exchange/internal/auth/application"
-	"github.com/lidp280504357/exchange/internal/platform/kafka"
+	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
+	userv1 "github.com/skill/exchange/api/gen/go/exchange/user/v1"
+	"github.com/skill/exchange/internal/auth/application"
+	"github.com/skill/exchange/internal/platform/kafka"
 )
 
 // Handler routes user.events to the account service; other event types

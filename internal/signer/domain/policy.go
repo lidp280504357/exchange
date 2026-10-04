@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/evm"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/evm"
 )
 
 // Purposes of a signature.

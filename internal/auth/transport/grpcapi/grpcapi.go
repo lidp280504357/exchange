@@ -7,10 +7,10 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
-	"github.com/lidp280504357/exchange/internal/auth/application"
-	"github.com/lidp280504357/exchange/internal/auth/domain"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	authv1 "github.com/skill/exchange/api/gen/go/exchange/auth/v1"
+	"github.com/skill/exchange/internal/auth/application"
+	"github.com/skill/exchange/internal/auth/domain"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // Server implements authv1.AuthServiceServer.

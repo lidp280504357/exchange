@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/admin/domain"
-	"github.com/lidp280504357/exchange/internal/admin/ports"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/admin/domain"
+	"github.com/skill/exchange/internal/admin/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/flags"
 )
 
 // docCatalog keeps the reference data as items of a config document and

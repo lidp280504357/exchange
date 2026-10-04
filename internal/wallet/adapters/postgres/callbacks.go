@@ -11,9 +11,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/wallet/domain"
-	"github.com/lidp280504357/exchange/internal/wallet/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/wallet/domain"
+	"github.com/skill/exchange/internal/wallet/ports"
 )
 
 func (r repos) Callbacks() ports.CallbackRepo { return callbacks(r) }

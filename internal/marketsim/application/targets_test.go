@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/marketsim/domain"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/marketsim/domain"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // detailIs reports whether err carries detail key with value.

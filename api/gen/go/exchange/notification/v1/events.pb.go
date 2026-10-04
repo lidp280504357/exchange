@@ -196,8 +196,8 @@ const file_exchange_notification_v1_events_proto_rawDesc = "" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x18\n" +
 	"\achannel\x18\x03 \x01(\tR\achannel\x12\x1a\n" +
 	"\btemplate\x18\x04 \x01(\tR\btemplate\x12#\n" +
-	"\rfailure_class\x18\x05 \x01(\tR\ffailureClassB\x83\x02\n" +
-	"\x1ccom.exchange.notification.v1B\vEventsProtoP\x01ZTgithub.com/lidp280504357/exchange/api/gen/go/exchange/notification/v1;notificationv1\xa2\x02\x03ENX\xaa\x02\x18Exchange.Notification.V1\xca\x02\x18Exchange\\Notification\\V1\xe2\x02$Exchange\\Notification\\V1\\GPBMetadata\xea\x02\x1aExchange::Notification::V1b\x06proto3"
+	"\rfailure_class\x18\x05 \x01(\tR\ffailureClassB\xfb\x01\n" +
+	"\x1ccom.exchange.notification.v1B\vEventsProtoP\x01ZLgithub.com/skill/exchange/api/gen/go/exchange/notification/v1;notificationv1\xa2\x02\x03ENX\xaa\x02\x18Exchange.Notification.V1\xca\x02\x18Exchange\\Notification\\V1\xe2\x02$Exchange\\Notification\\V1\\GPBMetadata\xea\x02\x1aExchange::Notification::V1b\x06proto3"
 
 var (
 	file_exchange_notification_v1_events_proto_rawDescOnce sync.Once

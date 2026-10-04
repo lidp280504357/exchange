@@ -8,7 +8,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 
-	"github.com/lidp280504357/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/event"
 )
 
 // ReadToEnd hands handle, in batches of at most maxBatch, the records of

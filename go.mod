@@ -1,4 +1,4 @@
-module github.com/lidp280504357/exchange
+module github.com/skill/exchange
 
 go 1.27.0
 

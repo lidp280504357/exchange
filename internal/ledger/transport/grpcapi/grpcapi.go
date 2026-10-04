@@ -9,10 +9,10 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	ledgerv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1"
-	"github.com/lidp280504357/exchange/internal/ledger/application"
-	"github.com/lidp280504357/exchange/internal/ledger/domain"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	ledgerv1 "github.com/skill/exchange/api/gen/go/exchange/ledger/v1"
+	"github.com/skill/exchange/internal/ledger/application"
+	"github.com/skill/exchange/internal/ledger/domain"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // Server implements ledgerv1.LedgerServiceServer.

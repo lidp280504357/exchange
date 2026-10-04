@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/admin/adapters/backends"
-	"github.com/lidp280504357/exchange/internal/admin/ports"
-	"github.com/lidp280504357/exchange/internal/platform/chx"
-	"github.com/lidp280504357/exchange/internal/platform/migrate"
-	"github.com/lidp280504357/exchange/internal/platform/testenv"
-	"github.com/lidp280504357/exchange/migrations"
+	"github.com/skill/exchange/internal/admin/adapters/backends"
+	"github.com/skill/exchange/internal/admin/ports"
+	"github.com/skill/exchange/internal/platform/chx"
+	"github.com/skill/exchange/internal/platform/migrate"
+	"github.com/skill/exchange/internal/platform/testenv"
+	"github.com/skill/exchange/migrations"
 )
 
 func TestReports(t *testing.T) {

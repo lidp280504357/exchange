@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/platform/config"
-	"github.com/lidp280504357/exchange/internal/platform/logging"
+	"github.com/skill/exchange/internal/platform/config"
+	"github.com/skill/exchange/internal/platform/logging"
 )
 
 // syncBuffer is a log sink that tests may read while components still write.

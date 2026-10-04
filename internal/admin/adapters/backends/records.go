@@ -7,7 +7,7 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/admin/ports"
+	"github.com/skill/exchange/internal/admin/ports"
 )
 
 // Records implements ports.Records on the ClickHouse read models: orders

@@ -3,7 +3,7 @@ package domain
 import (
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // Administrators set their own credentials (C5.5 ⑪): the console's create

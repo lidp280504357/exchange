@@ -27,8 +27,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/httpx"
 )
 
 // Header carries the signature.

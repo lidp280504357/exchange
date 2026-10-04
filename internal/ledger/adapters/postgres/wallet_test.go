@@ -6,8 +6,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/lidp280504357/exchange/internal/ledger/domain"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/ledger/domain"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 func TestWalletJournals(t *testing.T) {

@@ -11,9 +11,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/instrument/application"
-	"github.com/lidp280504357/exchange/internal/instrument/domain"
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/instrument/application"
+	"github.com/skill/exchange/internal/instrument/domain"
+	"github.com/skill/exchange/internal/platform/httpx"
 )
 
 // Handler serves assets, trading pairs and perpetual contracts; no sign-in

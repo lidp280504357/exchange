@@ -7,7 +7,7 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/signer/domain"
+	"github.com/skill/exchange/internal/signer/domain"
 )
 
 // Keys derives the platform wallet's keys (the opened keystore).

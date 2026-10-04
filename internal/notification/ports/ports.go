@@ -6,7 +6,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/notification/domain"
+	"github.com/skill/exchange/internal/notification/domain"
 )
 
 // Provider sends messages through one vendor on one channel. Business code

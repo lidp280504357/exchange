@@ -495,8 +495,8 @@ const file_exchange_risk_v1_events_proto_rawDesc = "" +
 	"\vACTION_NONE\x10\x01\x12\x12\n" +
 	"\x0eACTION_STEP_UP\x10\x02\x12\x11\n" +
 	"\rACTION_REVIEW\x10\x03\x12\x11\n" +
-	"\rACTION_REJECT\x10\x04B\xcb\x01\n" +
-	"\x14com.exchange.risk.v1B\vEventsProtoP\x01ZDgithub.com/lidp280504357/exchange/api/gen/go/exchange/risk/v1;riskv1\xa2\x02\x03ERX\xaa\x02\x10Exchange.Risk.V1\xca\x02\x10Exchange\\Risk\\V1\xe2\x02\x1cExchange\\Risk\\V1\\GPBMetadata\xea\x02\x12Exchange::Risk::V1b\x06proto3"
+	"\rACTION_REJECT\x10\x04B\xc3\x01\n" +
+	"\x14com.exchange.risk.v1B\vEventsProtoP\x01Z<github.com/skill/exchange/api/gen/go/exchange/risk/v1;riskv1\xa2\x02\x03ERX\xaa\x02\x10Exchange.Risk.V1\xca\x02\x10Exchange\\Risk\\V1\xe2\x02\x1cExchange\\Risk\\V1\\GPBMetadata\xea\x02\x12Exchange::Risk::V1b\x06proto3"
 
 var (
 	file_exchange_risk_v1_events_proto_rawDescOnce sync.Once

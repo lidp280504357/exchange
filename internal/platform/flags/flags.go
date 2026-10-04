@@ -17,7 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/lidp280504357/exchange/internal/platform/pg"
+	"github.com/skill/exchange/internal/platform/pg"
 )
 
 // Known flag keys; exchangectl only sets known keys.

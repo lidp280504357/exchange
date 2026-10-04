@@ -5,10 +5,10 @@ package recipients
 import (
 	"context"
 
-	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
-	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
-	"github.com/lidp280504357/exchange/internal/notification/domain"
-	"github.com/lidp280504357/exchange/internal/notification/ports"
+	authv1 "github.com/skill/exchange/api/gen/go/exchange/auth/v1"
+	userv1 "github.com/skill/exchange/api/gen/go/exchange/user/v1"
+	"github.com/skill/exchange/internal/notification/domain"
+	"github.com/skill/exchange/internal/notification/ports"
 )
 
 // Client implements ports.Recipients.

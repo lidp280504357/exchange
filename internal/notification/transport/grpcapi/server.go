@@ -4,9 +4,9 @@ package grpcapi
 import (
 	"context"
 
-	notificationv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/notification/v1"
-	"github.com/lidp280504357/exchange/internal/notification/application"
-	"github.com/lidp280504357/exchange/internal/notification/domain"
+	notificationv1 "github.com/skill/exchange/api/gen/go/exchange/notification/v1"
+	"github.com/skill/exchange/internal/notification/application"
+	"github.com/skill/exchange/internal/notification/domain"
 )
 
 // Server implements notificationv1.NotificationServiceServer.

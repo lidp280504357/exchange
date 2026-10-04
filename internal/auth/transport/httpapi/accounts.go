@@ -9,11 +9,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/lidp280504357/exchange/internal/auth/application"
-	"github.com/lidp280504357/exchange/internal/auth/domain"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/authtoken"
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/auth/application"
+	"github.com/skill/exchange/internal/auth/domain"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/authtoken"
+	"github.com/skill/exchange/internal/platform/httpx"
 )
 
 // Cookie and headers of the token flows (§6.6).

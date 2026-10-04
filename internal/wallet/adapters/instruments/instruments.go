@@ -11,8 +11,8 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	instrumentv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/instrument/v1"
-	"github.com/lidp280504357/exchange/internal/wallet/domain"
+	instrumentv1 "github.com/skill/exchange/api/gen/go/exchange/instrument/v1"
+	"github.com/skill/exchange/internal/wallet/domain"
 )
 
 // Client implements ports.Networks. The asset list is cached for TTL, so

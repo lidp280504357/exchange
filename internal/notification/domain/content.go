@@ -6,7 +6,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // Operations content (design 2026-10-02 §4.5): announcements and help

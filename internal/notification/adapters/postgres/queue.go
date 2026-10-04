@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/lidp280504357/exchange/internal/notification/domain"
+	"github.com/skill/exchange/internal/notification/domain"
 )
 
 // The mails sent later, the retention of old rows and a notice by its ID

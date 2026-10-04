@@ -7,10 +7,10 @@ import (
 
 	"github.com/google/uuid"
 
-	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
-	ledgerv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1"
-	"github.com/lidp280504357/exchange/internal/platform/kafka"
-	"github.com/lidp280504357/exchange/internal/wallet/application"
+	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
+	ledgerv1 "github.com/skill/exchange/api/gen/go/exchange/ledger/v1"
+	"github.com/skill/exchange/internal/platform/kafka"
+	"github.com/skill/exchange/internal/wallet/application"
 )
 
 // Group is the consumer group.

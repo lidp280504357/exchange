@@ -16,11 +16,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 
-	walletv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/pg"
-	"github.com/lidp280504357/exchange/internal/wallet/domain"
-	"github.com/lidp280504357/exchange/internal/wallet/ports"
+	walletv1 "github.com/skill/exchange/api/gen/go/exchange/wallet/v1"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/pg"
+	"github.com/skill/exchange/internal/wallet/domain"
+	"github.com/skill/exchange/internal/wallet/ports"
 )
 
 // FeatureDeposit is the eligibility deposit addresses need.

@@ -5,8 +5,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/lidp280504357/exchange/internal/admin/domain"
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/admin/domain"
+	"github.com/skill/exchange/internal/platform/httpx"
 )
 
 // The administrators and their roles (design 2026-10-02 §4.6, C4).

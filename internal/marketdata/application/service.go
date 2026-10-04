@@ -15,10 +15,10 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
-	"github.com/lidp280504357/exchange/internal/marketdata/domain"
-	"github.com/lidp280504357/exchange/internal/marketdata/ports"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	marketv1 "github.com/skill/exchange/api/gen/go/exchange/market/v1"
+	"github.com/skill/exchange/internal/marketdata/domain"
+	"github.com/skill/exchange/internal/marketdata/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // Limits of the queries and of what is kept in memory.

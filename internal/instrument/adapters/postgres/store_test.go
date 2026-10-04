@@ -7,15 +7,15 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/instrument/adapters/postgres"
-	"github.com/lidp280504357/exchange/internal/instrument/application"
-	"github.com/lidp280504357/exchange/internal/instrument/domain"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/migrate"
-	"github.com/lidp280504357/exchange/internal/platform/pg"
-	"github.com/lidp280504357/exchange/internal/platform/testenv"
-	"github.com/lidp280504357/exchange/migrations"
+	"github.com/skill/exchange/internal/instrument/adapters/postgres"
+	"github.com/skill/exchange/internal/instrument/application"
+	"github.com/skill/exchange/internal/instrument/domain"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/migrate"
+	"github.com/skill/exchange/internal/platform/pg"
+	"github.com/skill/exchange/internal/platform/testenv"
+	"github.com/skill/exchange/migrations"
 )
 
 func setup(t *testing.T) (*application.Service, *pg.DB) {

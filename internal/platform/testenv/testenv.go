@@ -27,8 +27,8 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/sr"
 
-	"github.com/lidp280504357/exchange/internal/platform/chx"
-	"github.com/lidp280504357/exchange/internal/platform/pg"
+	"github.com/skill/exchange/internal/platform/chx"
+	"github.com/skill/exchange/internal/platform/pg"
 )
 
 // Name returns a unique lower-case identifier with the given prefix, usable

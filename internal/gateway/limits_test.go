@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/platform/ratelimit"
+	"github.com/skill/exchange/internal/platform/ratelimit"
 )
 
 type fakeLimiter struct {

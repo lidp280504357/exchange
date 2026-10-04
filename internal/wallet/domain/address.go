@@ -6,7 +6,7 @@ import (
 	"math/big"
 	"strings"
 
-	"github.com/lidp280504357/exchange/internal/platform/evm"
+	"github.com/skill/exchange/internal/platform/evm"
 )
 
 // Address formats of networks (instrument-service's address_format).

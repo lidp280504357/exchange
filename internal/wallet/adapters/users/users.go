@@ -5,7 +5,7 @@ import (
 	"context"
 	"time"
 
-	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
+	userv1 "github.com/skill/exchange/api/gen/go/exchange/user/v1"
 )
 
 // Client implements ports.Eligibility and ports.Profiles.

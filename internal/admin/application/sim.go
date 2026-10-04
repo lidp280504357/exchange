@@ -11,10 +11,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
-	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
-	"github.com/lidp280504357/exchange/internal/admin/domain"
-	"github.com/lidp280504357/exchange/internal/admin/ports"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	auditv1 "github.com/skill/exchange/api/gen/go/exchange/audit/v1"
+	"github.com/skill/exchange/internal/admin/domain"
+	"github.com/skill/exchange/internal/admin/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // The simulated market of the platform coin from the console (ASTRA design

@@ -26,7 +26,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/platform/evm"
+	"github.com/skill/exchange/internal/platform/evm"
 )
 
 func main() {

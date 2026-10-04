@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/ledger/domain"
+	"github.com/skill/exchange/internal/ledger/domain"
 )
 
 type trades repos

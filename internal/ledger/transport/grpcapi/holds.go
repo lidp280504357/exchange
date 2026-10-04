@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	ledgerv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1"
-	"github.com/lidp280504357/exchange/internal/ledger/domain"
+	ledgerv1 "github.com/skill/exchange/api/gen/go/exchange/ledger/v1"
+	"github.com/skill/exchange/internal/ledger/domain"
 )
 
 func holdProto(h domain.Hold) *ledgerv1.Hold {

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/admin/domain"
-	"github.com/lidp280504357/exchange/internal/admin/ports"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/admin/domain"
+	"github.com/skill/exchange/internal/admin/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // The custody suspension's console side (C5.5 ⑯, review B4): when funds

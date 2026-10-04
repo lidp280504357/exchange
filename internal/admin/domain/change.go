@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // A change of trading parameters (design 2026-10-02 §2 item 6): a pair's

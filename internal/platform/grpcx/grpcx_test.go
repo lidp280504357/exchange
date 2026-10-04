@@ -17,10 +17,10 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
-	"github.com/lidp280504357/exchange/internal/platform/logging"
-	"github.com/lidp280504357/exchange/internal/platform/tracing"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/platform/logging"
+	"github.com/skill/exchange/internal/platform/tracing"
 )
 
 func init() { _ = tracing.Setup() }

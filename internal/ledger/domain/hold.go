@@ -6,7 +6,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // Hold is an administrator's hold on part of a user's SPOT balance (design

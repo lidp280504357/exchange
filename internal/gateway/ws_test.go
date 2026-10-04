@@ -15,13 +15,13 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	derivativesv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/derivatives/v1"
-	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
-	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
-	tradev1 "github.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1"
-	walletv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1"
-	"github.com/lidp280504357/exchange/internal/platform/authtoken"
-	"github.com/lidp280504357/exchange/internal/platform/event"
+	derivativesv1 "github.com/skill/exchange/api/gen/go/exchange/derivatives/v1"
+	marketv1 "github.com/skill/exchange/api/gen/go/exchange/market/v1"
+	orderv1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
+	tradev1 "github.com/skill/exchange/api/gen/go/exchange/trade/v1"
+	walletv1 "github.com/skill/exchange/api/gen/go/exchange/wallet/v1"
+	"github.com/skill/exchange/internal/platform/authtoken"
+	"github.com/skill/exchange/internal/platform/event"
 )
 
 type wsClient struct {

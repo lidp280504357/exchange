@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/admin/domain"
-	"github.com/lidp280504357/exchange/internal/admin/ports"
+	"github.com/skill/exchange/internal/admin/domain"
+	"github.com/skill/exchange/internal/admin/ports"
 )
 
 // pagedAudit serves n entries, newest first, in pages of the query's limit.

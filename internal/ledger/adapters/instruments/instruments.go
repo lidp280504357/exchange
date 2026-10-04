@@ -5,7 +5,7 @@ import (
 	"context"
 	"sync"
 
-	instrumentv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/instrument/v1"
+	instrumentv1 "github.com/skill/exchange/api/gen/go/exchange/instrument/v1"
 )
 
 // Client implements ports.Assets. An asset's decimals never change once

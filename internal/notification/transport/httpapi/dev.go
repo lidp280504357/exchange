@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lidp280504357/exchange/internal/notification/adapters/mock"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/notification/adapters/mock"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/httpx"
 )
 
 // DevInbox serves GET /v1/dev/messages?target=...: what the mock providers

@@ -130,8 +130,8 @@ const file_exchange_derivatives_v1_derivatives_proto_rawDesc = "" +
 	"\x18GetUnrealizedPnLResponse\x120\n" +
 	"\x14cross_unrealized_pnl\x18\x01 \x01(\tR\x12crossUnrealizedPnl2\x8d\x01\n" +
 	"\x12DerivativesService\x12w\n" +
-	"\x10GetUnrealizedPnL\x120.exchange.derivatives.v1.GetUnrealizedPnLRequest\x1a1.exchange.derivatives.v1.GetUnrealizedPnLResponseB\x81\x02\n" +
-	"\x1bcom.exchange.derivatives.v1B\x10DerivativesProtoP\x01ZRgithub.com/lidp280504357/exchange/api/gen/go/exchange/derivatives/v1;derivativesv1\xa2\x02\x03EDX\xaa\x02\x17Exchange.Derivatives.V1\xca\x02\x17Exchange\\Derivatives\\V1\xe2\x02#Exchange\\Derivatives\\V1\\GPBMetadata\xea\x02\x19Exchange::Derivatives::V1b\x06proto3"
+	"\x10GetUnrealizedPnL\x120.exchange.derivatives.v1.GetUnrealizedPnLRequest\x1a1.exchange.derivatives.v1.GetUnrealizedPnLResponseB\xf9\x01\n" +
+	"\x1bcom.exchange.derivatives.v1B\x10DerivativesProtoP\x01ZJgithub.com/skill/exchange/api/gen/go/exchange/derivatives/v1;derivativesv1\xa2\x02\x03EDX\xaa\x02\x17Exchange.Derivatives.V1\xca\x02\x17Exchange\\Derivatives\\V1\xe2\x02#Exchange\\Derivatives\\V1\\GPBMetadata\xea\x02\x19Exchange::Derivatives::V1b\x06proto3"
 
 var (
 	file_exchange_derivatives_v1_derivatives_proto_rawDescOnce sync.Once

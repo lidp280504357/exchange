@@ -9,7 +9,7 @@
 
 ## 决策
 
-1. 一个仓库、一个 `go.mod`（`github.com/lidp280504357/exchange`），前端与桌面端同仓库。
+1. 一个仓库、一个 `go.mod`（`github.com/skill/exchange`；2026-10-04 用户要求模块路径不带 GitHub 账号后改为此名，仓库位置不变），前端与桌面端同仓库。
 2. 目录：`cmd/<service>` 入口；`internal/<service>/{domain,application,ports,adapters,transport}`；`internal/platform` 共享基础库；`api/openapi`、`api/proto` 契约；`migrations/<service>`；`deploy/`；`docs/`。
 3. `internal/<service>` 之间禁止互相 import，只能依赖 `internal/platform` 与 `api/`；由 golangci-lint 的 depguard 规则强制（首个第二服务出现时启用）。
 4. 每个服务独立 PostgreSQL schema，跨服务只走 gRPC/事件，禁止跨 schema 查询。

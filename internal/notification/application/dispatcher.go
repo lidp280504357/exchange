@@ -12,8 +12,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/lidp280504357/exchange/internal/notification/domain"
-	"github.com/lidp280504357/exchange/internal/notification/ports"
+	"github.com/skill/exchange/internal/notification/domain"
+	"github.com/skill/exchange/internal/notification/ports"
 )
 
 // Retry and circuit-breaker settings (requirements §6.2).

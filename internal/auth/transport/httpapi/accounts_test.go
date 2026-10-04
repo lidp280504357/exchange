@@ -11,8 +11,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/lidp280504357/exchange/internal/auth/application"
-	"github.com/lidp280504357/exchange/internal/platform/authtoken"
+	"github.com/skill/exchange/internal/auth/application"
+	"github.com/skill/exchange/internal/platform/authtoken"
 )
 
 func router() http.Handler {

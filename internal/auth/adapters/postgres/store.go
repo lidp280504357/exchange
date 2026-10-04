@@ -9,12 +9,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lidp280504357/exchange/internal/auth/domain"
-	"github.com/lidp280504357/exchange/internal/auth/ports"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/inbox"
-	"github.com/lidp280504357/exchange/internal/platform/outbox"
-	"github.com/lidp280504357/exchange/internal/platform/pg"
+	"github.com/skill/exchange/internal/auth/domain"
+	"github.com/skill/exchange/internal/auth/ports"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/inbox"
+	"github.com/skill/exchange/internal/platform/outbox"
+	"github.com/skill/exchange/internal/platform/pg"
 )
 
 // Store implements ports.Store.

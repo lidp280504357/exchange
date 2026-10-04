@@ -9,11 +9,11 @@ import (
 
 	"github.com/google/uuid"
 
-	riskv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/risk/v1"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/flags"
-	"github.com/lidp280504357/exchange/internal/risk/domain"
-	"github.com/lidp280504357/exchange/internal/risk/ports"
+	riskv1 "github.com/skill/exchange/api/gen/go/exchange/risk/v1"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/risk/domain"
+	"github.com/skill/exchange/internal/risk/ports"
 )
 
 // Consumer names risk-service in inboxes and consumer groups.

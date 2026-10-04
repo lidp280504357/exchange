@@ -7,14 +7,14 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	derivativesv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/derivatives/v1"
-	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
-	ledgerv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1"
-	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
-	notificationv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/notification/v1"
-	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
-	tradev1 "github.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1"
-	walletv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1"
+	derivativesv1 "github.com/skill/exchange/api/gen/go/exchange/derivatives/v1"
+	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
+	ledgerv1 "github.com/skill/exchange/api/gen/go/exchange/ledger/v1"
+	marketv1 "github.com/skill/exchange/api/gen/go/exchange/market/v1"
+	notificationv1 "github.com/skill/exchange/api/gen/go/exchange/notification/v1"
+	orderv1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
+	tradev1 "github.com/skill/exchange/api/gen/go/exchange/trade/v1"
+	walletv1 "github.com/skill/exchange/api/gen/go/exchange/wallet/v1"
 )
 
 // WSTopics are the topics the hub follows from their end (requirements

@@ -11,8 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/admin/domain"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/admin/domain"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // approvalOf reads the operation an error names.

@@ -14,8 +14,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/marketdata/domain"
-	"github.com/lidp280504357/exchange/internal/marketdata/ports"
+	"github.com/skill/exchange/internal/marketdata/domain"
+	"github.com/skill/exchange/internal/marketdata/ports"
 )
 
 // Order books and trades (ADR-0010, ADR-0015): REST snapshots and the

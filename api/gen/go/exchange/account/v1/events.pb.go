@@ -229,8 +229,8 @@ const file_exchange_account_v1_events_proto_rawDesc = "" +
 	"\x06amount\x18\x04 \x01(\tR\x06amount\x12*\n" +
 	"\x11from_account_type\x18\x05 \x01(\tR\x0ffromAccountType\x12&\n" +
 	"\x0fto_account_type\x18\x06 \x01(\tR\rtoAccountType\x12\x16\n" +
-	"\x06reason\x18\a \x01(\tR\x06reasonB\xe0\x01\n" +
-	"\x17com.exchange.account.v1B\vEventsProtoP\x01ZJgithub.com/lidp280504357/exchange/api/gen/go/exchange/account/v1;accountv1\xa2\x02\x03EAX\xaa\x02\x13Exchange.Account.V1\xca\x02\x13Exchange\\Account\\V1\xe2\x02\x1fExchange\\Account\\V1\\GPBMetadata\xea\x02\x15Exchange::Account::V1b\x06proto3"
+	"\x06reason\x18\a \x01(\tR\x06reasonB\xd8\x01\n" +
+	"\x17com.exchange.account.v1B\vEventsProtoP\x01ZBgithub.com/skill/exchange/api/gen/go/exchange/account/v1;accountv1\xa2\x02\x03EAX\xaa\x02\x13Exchange.Account.V1\xca\x02\x13Exchange\\Account\\V1\xe2\x02\x1fExchange\\Account\\V1\\GPBMetadata\xea\x02\x15Exchange::Account::V1b\x06proto3"
 
 var (
 	file_exchange_account_v1_events_proto_rawDescOnce sync.Once

@@ -10,9 +10,9 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/admin/domain"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/admin/domain"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/flags"
 )
 
 const someUser = "01929c3e-7f3a-7d7e-8a1b-2c3d4e5f6a7b"

@@ -19,7 +19,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/platform/udun"
+	"github.com/skill/exchange/internal/platform/udun"
 )
 
 // coin is a coin the merchant can use, with what the gateway holds of it.

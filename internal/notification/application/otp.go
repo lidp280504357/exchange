@@ -6,9 +6,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/lidp280504357/exchange/internal/notification/domain"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/pii"
+	"github.com/skill/exchange/internal/notification/domain"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/pii"
 )
 
 // OTPRequest is a SendOtp call.

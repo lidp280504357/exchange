@@ -11,16 +11,16 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
-	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
-	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
-	"github.com/lidp280504357/exchange/internal/analytics"
-	"github.com/lidp280504357/exchange/internal/platform/chx"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/kafka"
-	"github.com/lidp280504357/exchange/internal/platform/migrate"
-	"github.com/lidp280504357/exchange/internal/platform/outbox"
-	"github.com/lidp280504357/exchange/internal/platform/testenv"
-	"github.com/lidp280504357/exchange/migrations"
+	auditv1 "github.com/skill/exchange/api/gen/go/exchange/audit/v1"
+	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
+	"github.com/skill/exchange/internal/analytics"
+	"github.com/skill/exchange/internal/platform/chx"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/kafka"
+	"github.com/skill/exchange/internal/platform/migrate"
+	"github.com/skill/exchange/internal/platform/outbox"
+	"github.com/skill/exchange/internal/platform/testenv"
+	"github.com/skill/exchange/migrations"
 )
 
 var discard = slog.New(slog.DiscardHandler)

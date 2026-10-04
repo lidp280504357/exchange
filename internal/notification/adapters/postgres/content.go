@@ -11,9 +11,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/lidp280504357/exchange/internal/notification/domain"
-	"github.com/lidp280504357/exchange/internal/notification/ports"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/notification/domain"
+	"github.com/skill/exchange/internal/notification/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // The announcements, help articles and operators' in-app messages

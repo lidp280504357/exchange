@@ -568,8 +568,8 @@ const file_exchange_order_v1_events_proto_rawDesc = "" +
 	"\bsequence\x18\x04 \x01(\x03R\bsequence\x12'\n" +
 	"\x0ffilled_quantity\x18\x05 \x01(\tR\x0efilledQuantity\x12!\n" +
 	"\ffilled_quote\x18\x06 \x01(\tR\vfilledQuote\x12\x16\n" +
-	"\x06reason\x18\a \x01(\tR\x06reasonB\xd2\x01\n" +
-	"\x15com.exchange.order.v1B\vEventsProtoP\x01ZFgithub.com/lidp280504357/exchange/api/gen/go/exchange/order/v1;orderv1\xa2\x02\x03EOX\xaa\x02\x11Exchange.Order.V1\xca\x02\x11Exchange\\Order\\V1\xe2\x02\x1dExchange\\Order\\V1\\GPBMetadata\xea\x02\x13Exchange::Order::V1b\x06proto3"
+	"\x06reason\x18\a \x01(\tR\x06reasonB\xca\x01\n" +
+	"\x15com.exchange.order.v1B\vEventsProtoP\x01Z>github.com/skill/exchange/api/gen/go/exchange/order/v1;orderv1\xa2\x02\x03EOX\xaa\x02\x11Exchange.Order.V1\xca\x02\x11Exchange\\Order\\V1\xe2\x02\x1dExchange\\Order\\V1\\GPBMetadata\xea\x02\x13Exchange::Order::V1b\x06proto3"
 
 var (
 	file_exchange_order_v1_events_proto_rawDescOnce sync.Once

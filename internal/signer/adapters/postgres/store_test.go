@@ -12,14 +12,14 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/migrate"
-	"github.com/lidp280504357/exchange/internal/platform/testenv"
-	"github.com/lidp280504357/exchange/internal/signer/adapters/postgres"
-	"github.com/lidp280504357/exchange/internal/signer/application"
-	"github.com/lidp280504357/exchange/internal/signer/domain"
-	"github.com/lidp280504357/exchange/internal/signer/keystore"
-	"github.com/lidp280504357/exchange/migrations"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/migrate"
+	"github.com/skill/exchange/internal/platform/testenv"
+	"github.com/skill/exchange/internal/signer/adapters/postgres"
+	"github.com/skill/exchange/internal/signer/application"
+	"github.com/skill/exchange/internal/signer/domain"
+	"github.com/skill/exchange/internal/signer/keystore"
+	"github.com/skill/exchange/migrations"
 )
 
 const payee = "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359"

@@ -11,12 +11,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	notificationv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/notification/v1"
-	"github.com/lidp280504357/exchange/internal/notification/domain"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/inbox"
-	"github.com/lidp280504357/exchange/internal/platform/outbox"
-	"github.com/lidp280504357/exchange/internal/platform/pg"
+	notificationv1 "github.com/skill/exchange/api/gen/go/exchange/notification/v1"
+	"github.com/skill/exchange/internal/notification/domain"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/inbox"
+	"github.com/skill/exchange/internal/platform/outbox"
+	"github.com/skill/exchange/internal/platform/pg"
 )
 
 // Store implements ports.DeliveryStore and ports.NoticeStore.

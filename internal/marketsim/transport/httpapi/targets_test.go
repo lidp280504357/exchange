@@ -8,8 +8,8 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/marketsim/application"
-	"github.com/lidp280504357/exchange/internal/marketsim/domain"
+	"github.com/skill/exchange/internal/marketsim/application"
+	"github.com/skill/exchange/internal/marketsim/domain"
 )
 
 // A threshold target renders its window, its closing and hold times, its

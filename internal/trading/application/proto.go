@@ -3,8 +3,8 @@ package application
 import (
 	"github.com/shopspring/decimal"
 
-	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
-	"github.com/lidp280504357/exchange/internal/trading/domain"
+	orderv1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
+	"github.com/skill/exchange/internal/trading/domain"
 )
 
 var (

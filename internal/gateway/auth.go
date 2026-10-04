@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/authtoken"
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
-	"github.com/lidp280504357/exchange/internal/platform/logging"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/authtoken"
+	"github.com/skill/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/platform/logging"
 )
 
 // Errors of the bearer check (appendix C).

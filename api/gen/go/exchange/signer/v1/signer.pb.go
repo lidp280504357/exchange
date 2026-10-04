@@ -393,8 +393,8 @@ const file_exchange_signer_v1_signer_proto_rawDesc = "" +
 	"\rPURPOSE_SWEEP\x10\x022\xde\x01\n" +
 	"\rSignerService\x12a\n" +
 	"\fGetHotWallet\x12'.exchange.signer.v1.GetHotWalletRequest\x1a(.exchange.signer.v1.GetHotWalletResponse\x12j\n" +
-	"\x0fSignTransaction\x12*.exchange.signer.v1.SignTransactionRequest\x1a+.exchange.signer.v1.SignTransactionResponseB\xd9\x01\n" +
-	"\x16com.exchange.signer.v1B\vSignerProtoP\x01ZHgithub.com/lidp280504357/exchange/api/gen/go/exchange/signer/v1;signerv1\xa2\x02\x03ESX\xaa\x02\x12Exchange.Signer.V1\xca\x02\x12Exchange\\Signer\\V1\xe2\x02\x1eExchange\\Signer\\V1\\GPBMetadata\xea\x02\x14Exchange::Signer::V1b\x06proto3"
+	"\x0fSignTransaction\x12*.exchange.signer.v1.SignTransactionRequest\x1a+.exchange.signer.v1.SignTransactionResponseB\xd1\x01\n" +
+	"\x16com.exchange.signer.v1B\vSignerProtoP\x01Z@github.com/skill/exchange/api/gen/go/exchange/signer/v1;signerv1\xa2\x02\x03ESX\xaa\x02\x12Exchange.Signer.V1\xca\x02\x12Exchange\\Signer\\V1\xe2\x02\x1eExchange\\Signer\\V1\\GPBMetadata\xea\x02\x14Exchange::Signer::V1b\x06proto3"
 
 var (
 	file_exchange_signer_v1_signer_proto_rawDescOnce sync.Once

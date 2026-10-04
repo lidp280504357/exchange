@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/lidp280504357/exchange/internal/admin/ports"
+	"github.com/skill/exchange/internal/admin/ports"
 )
 
 // Fees returns a page of the custodians' withdrawal fees (C6).

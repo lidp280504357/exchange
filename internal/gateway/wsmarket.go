@@ -8,7 +8,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
+	marketv1 "github.com/skill/exchange/api/gen/go/exchange/market/v1"
 )
 
 // Public market channels (requirements §7.3): ticker:{symbol},

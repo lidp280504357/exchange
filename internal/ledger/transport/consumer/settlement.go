@@ -8,11 +8,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
 
-	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
-	tradev1 "github.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1"
-	"github.com/lidp280504357/exchange/internal/ledger/application"
-	"github.com/lidp280504357/exchange/internal/ledger/domain"
-	"github.com/lidp280504357/exchange/internal/platform/kafka"
+	orderv1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
+	tradev1 "github.com/skill/exchange/api/gen/go/exchange/trade/v1"
+	"github.com/skill/exchange/internal/ledger/application"
+	"github.com/skill/exchange/internal/ledger/domain"
+	"github.com/skill/exchange/internal/platform/kafka"
 )
 
 // SettlementGroup is the consumer group that settles trade.events.

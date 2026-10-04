@@ -11,10 +11,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/derivatives/application"
-	"github.com/lidp280504357/exchange/internal/derivatives/domain"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/derivatives/application"
+	"github.com/skill/exchange/internal/derivatives/domain"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/httpx"
 )
 
 // Handler serves contract trading; every route needs the identity the

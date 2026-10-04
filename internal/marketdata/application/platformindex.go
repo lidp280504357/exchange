@@ -7,8 +7,8 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
-	"github.com/lidp280504357/exchange/internal/marketdata/domain"
+	marketv1 "github.com/skill/exchange/api/gen/go/exchange/market/v1"
+	"github.com/skill/exchange/internal/marketdata/domain"
 )
 
 // SourcePlatform names the platform's own market as an index source.

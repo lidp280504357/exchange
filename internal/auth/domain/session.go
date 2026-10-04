@@ -3,7 +3,7 @@ package domain
 import (
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // Session and login rules (requirements §5.2, §6.4–6.6).

@@ -5,12 +5,12 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/lidp280504357/exchange/internal/admin/adapters/backends"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/flags"
-	"github.com/lidp280504357/exchange/internal/platform/migrate"
-	"github.com/lidp280504357/exchange/internal/platform/testenv"
-	"github.com/lidp280504357/exchange/migrations"
+	"github.com/skill/exchange/internal/admin/adapters/backends"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/platform/migrate"
+	"github.com/skill/exchange/internal/platform/testenv"
+	"github.com/skill/exchange/migrations"
 )
 
 func TestFlags(t *testing.T) {

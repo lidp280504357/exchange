@@ -28,10 +28,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
-	"github.com/lidp280504357/exchange/internal/platform/config"
-	"github.com/lidp280504357/exchange/internal/platform/health"
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
-	"github.com/lidp280504357/exchange/internal/platform/logging"
+	"github.com/skill/exchange/internal/platform/config"
+	"github.com/skill/exchange/internal/platform/health"
+	"github.com/skill/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/platform/logging"
 )
 
 const defaultShutdownTimeout = 10 * time.Second

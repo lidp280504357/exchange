@@ -9,12 +9,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/marketdata/adapters/postgres"
-	"github.com/lidp280504357/exchange/internal/marketdata/domain"
-	"github.com/lidp280504357/exchange/internal/marketdata/ports"
-	"github.com/lidp280504357/exchange/internal/platform/migrate"
-	"github.com/lidp280504357/exchange/internal/platform/testenv"
-	"github.com/lidp280504357/exchange/migrations"
+	"github.com/skill/exchange/internal/marketdata/adapters/postgres"
+	"github.com/skill/exchange/internal/marketdata/domain"
+	"github.com/skill/exchange/internal/marketdata/ports"
+	"github.com/skill/exchange/internal/platform/migrate"
+	"github.com/skill/exchange/internal/platform/testenv"
+	"github.com/skill/exchange/migrations"
 )
 
 func d(s string) decimal.Decimal { return decimal.RequireFromString(s) }

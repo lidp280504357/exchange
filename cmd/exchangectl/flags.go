@@ -17,14 +17,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus"
 
-	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/flags"
-	"github.com/lidp280504357/exchange/internal/platform/kafka"
-	"github.com/lidp280504357/exchange/internal/platform/migrate"
-	"github.com/lidp280504357/exchange/internal/platform/outbox"
-	"github.com/lidp280504357/exchange/internal/platform/pg"
-	"github.com/lidp280504357/exchange/migrations"
+	auditv1 "github.com/skill/exchange/api/gen/go/exchange/audit/v1"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/platform/kafka"
+	"github.com/skill/exchange/internal/platform/migrate"
+	"github.com/skill/exchange/internal/platform/outbox"
+	"github.com/skill/exchange/internal/platform/pg"
+	"github.com/skill/exchange/migrations"
 )
 
 var quiet = slog.New(slog.DiscardHandler)

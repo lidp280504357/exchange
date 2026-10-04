@@ -3,8 +3,8 @@ package application
 import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	instrumentv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/instrument/v1"
-	"github.com/lidp280504357/exchange/internal/instrument/domain"
+	instrumentv1 "github.com/skill/exchange/api/gen/go/exchange/instrument/v1"
+	"github.com/skill/exchange/internal/instrument/domain"
 )
 
 // ToProtoAsset converts an asset and its networks.

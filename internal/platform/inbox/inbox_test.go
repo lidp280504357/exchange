@@ -9,11 +9,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
-	"github.com/lidp280504357/exchange/internal/platform/inbox"
-	"github.com/lidp280504357/exchange/internal/platform/migrate"
-	"github.com/lidp280504357/exchange/internal/platform/pg"
-	"github.com/lidp280504357/exchange/internal/platform/testenv"
+	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
+	"github.com/skill/exchange/internal/platform/inbox"
+	"github.com/skill/exchange/internal/platform/migrate"
+	"github.com/skill/exchange/internal/platform/pg"
+	"github.com/skill/exchange/internal/platform/testenv"
 )
 
 func setup(t *testing.T) *pg.DB {

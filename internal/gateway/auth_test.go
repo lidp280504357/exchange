@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/platform/authtoken"
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/platform/authtoken"
+	"github.com/skill/exchange/internal/platform/httpx"
 )
 
 type authFixture struct {

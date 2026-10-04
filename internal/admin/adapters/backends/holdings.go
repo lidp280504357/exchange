@@ -5,7 +5,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/admin/ports"
+	"github.com/skill/exchange/internal/admin/ports"
 )
 
 // Who holds an asset, from the ledger's lines (ClickHouse ledger_entries:

@@ -8,8 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/derivatives/domain"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/derivatives/domain"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 func TestAdminCloseCancelsTheUsersOrdersFirst(t *testing.T) {

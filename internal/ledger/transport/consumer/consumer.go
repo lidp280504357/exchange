@@ -7,13 +7,13 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
-	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
-	walletv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1"
-	"github.com/lidp280504357/exchange/internal/ledger/application"
-	"github.com/lidp280504357/exchange/internal/ledger/domain"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/kafka"
+	authv1 "github.com/skill/exchange/api/gen/go/exchange/auth/v1"
+	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
+	walletv1 "github.com/skill/exchange/api/gen/go/exchange/wallet/v1"
+	"github.com/skill/exchange/internal/ledger/application"
+	"github.com/skill/exchange/internal/ledger/domain"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/kafka"
 )
 
 // Group is the consumer group.

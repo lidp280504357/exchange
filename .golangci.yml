@@ -30,597 +30,597 @@ linters:
         admin:
           files: ["**/internal/admin/**"]
           deny:
-            - pkg: github.com/lidp280504357/exchange/internal/analytics
+            - pkg: github.com/skill/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/auth
+            - pkg: github.com/skill/exchange/internal/auth
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/derivatives
+            - pkg: github.com/skill/exchange/internal/derivatives
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/gateway
+            - pkg: github.com/skill/exchange/internal/gateway
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/instrument
+            - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/ledger
+            - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketdata
+            - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketmaker
+            - pkg: github.com/skill/exchange/internal/marketmaker
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketsim
+            - pkg: github.com/skill/exchange/internal/marketsim
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/matching
+            - pkg: github.com/skill/exchange/internal/matching
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/notification
+            - pkg: github.com/skill/exchange/internal/notification
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/risk
+            - pkg: github.com/skill/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/signer
+            - pkg: github.com/skill/exchange/internal/signer
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/trading
+            - pkg: github.com/skill/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/user
+            - pkg: github.com/skill/exchange/internal/user
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/wallet
+            - pkg: github.com/skill/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         analytics:
           files: ["**/internal/analytics/**"]
           deny:
-            - pkg: github.com/lidp280504357/exchange/internal/admin
+            - pkg: github.com/skill/exchange/internal/admin
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/auth
+            - pkg: github.com/skill/exchange/internal/auth
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/derivatives
+            - pkg: github.com/skill/exchange/internal/derivatives
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/gateway
+            - pkg: github.com/skill/exchange/internal/gateway
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/instrument
+            - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/ledger
+            - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketdata
+            - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketmaker
+            - pkg: github.com/skill/exchange/internal/marketmaker
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketsim
+            - pkg: github.com/skill/exchange/internal/marketsim
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/matching
+            - pkg: github.com/skill/exchange/internal/matching
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/notification
+            - pkg: github.com/skill/exchange/internal/notification
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/risk
+            - pkg: github.com/skill/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/signer
+            - pkg: github.com/skill/exchange/internal/signer
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/trading
+            - pkg: github.com/skill/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/user
+            - pkg: github.com/skill/exchange/internal/user
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/wallet
+            - pkg: github.com/skill/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         auth:
           files: ["**/internal/auth/**"]
           deny:
-            - pkg: github.com/lidp280504357/exchange/internal/admin
+            - pkg: github.com/skill/exchange/internal/admin
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/analytics
+            - pkg: github.com/skill/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/derivatives
+            - pkg: github.com/skill/exchange/internal/derivatives
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/gateway
+            - pkg: github.com/skill/exchange/internal/gateway
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/instrument
+            - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/ledger
+            - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketdata
+            - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketmaker
+            - pkg: github.com/skill/exchange/internal/marketmaker
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketsim
+            - pkg: github.com/skill/exchange/internal/marketsim
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/matching
+            - pkg: github.com/skill/exchange/internal/matching
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/notification
+            - pkg: github.com/skill/exchange/internal/notification
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/risk
+            - pkg: github.com/skill/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/signer
+            - pkg: github.com/skill/exchange/internal/signer
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/trading
+            - pkg: github.com/skill/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/user
+            - pkg: github.com/skill/exchange/internal/user
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/wallet
+            - pkg: github.com/skill/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         derivatives:
           files: ["**/internal/derivatives/**"]
           deny:
-            - pkg: github.com/lidp280504357/exchange/internal/admin
+            - pkg: github.com/skill/exchange/internal/admin
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/analytics
+            - pkg: github.com/skill/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/auth
+            - pkg: github.com/skill/exchange/internal/auth
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/gateway
+            - pkg: github.com/skill/exchange/internal/gateway
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/instrument
+            - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/ledger
+            - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketdata
+            - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketmaker
+            - pkg: github.com/skill/exchange/internal/marketmaker
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketsim
+            - pkg: github.com/skill/exchange/internal/marketsim
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/matching
+            - pkg: github.com/skill/exchange/internal/matching
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/notification
+            - pkg: github.com/skill/exchange/internal/notification
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/risk
+            - pkg: github.com/skill/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/signer
+            - pkg: github.com/skill/exchange/internal/signer
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/trading
+            - pkg: github.com/skill/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/user
+            - pkg: github.com/skill/exchange/internal/user
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/wallet
+            - pkg: github.com/skill/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         gateway:
           files: ["**/internal/gateway/**"]
           deny:
-            - pkg: github.com/lidp280504357/exchange/internal/admin
+            - pkg: github.com/skill/exchange/internal/admin
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/analytics
+            - pkg: github.com/skill/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/auth
+            - pkg: github.com/skill/exchange/internal/auth
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/derivatives
+            - pkg: github.com/skill/exchange/internal/derivatives
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/instrument
+            - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/ledger
+            - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketdata
+            - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketmaker
+            - pkg: github.com/skill/exchange/internal/marketmaker
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketsim
+            - pkg: github.com/skill/exchange/internal/marketsim
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/matching
+            - pkg: github.com/skill/exchange/internal/matching
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/notification
+            - pkg: github.com/skill/exchange/internal/notification
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/risk
+            - pkg: github.com/skill/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/signer
+            - pkg: github.com/skill/exchange/internal/signer
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/trading
+            - pkg: github.com/skill/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/user
+            - pkg: github.com/skill/exchange/internal/user
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/wallet
+            - pkg: github.com/skill/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         instrument:
           files: ["**/internal/instrument/**"]
           deny:
-            - pkg: github.com/lidp280504357/exchange/internal/admin
+            - pkg: github.com/skill/exchange/internal/admin
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/analytics
+            - pkg: github.com/skill/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/auth
+            - pkg: github.com/skill/exchange/internal/auth
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/derivatives
+            - pkg: github.com/skill/exchange/internal/derivatives
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/gateway
+            - pkg: github.com/skill/exchange/internal/gateway
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/ledger
+            - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketdata
+            - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketmaker
+            - pkg: github.com/skill/exchange/internal/marketmaker
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketsim
+            - pkg: github.com/skill/exchange/internal/marketsim
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/matching
+            - pkg: github.com/skill/exchange/internal/matching
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/notification
+            - pkg: github.com/skill/exchange/internal/notification
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/risk
+            - pkg: github.com/skill/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/signer
+            - pkg: github.com/skill/exchange/internal/signer
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/trading
+            - pkg: github.com/skill/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/user
+            - pkg: github.com/skill/exchange/internal/user
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/wallet
+            - pkg: github.com/skill/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         ledger:
           files: ["**/internal/ledger/**"]
           deny:
-            - pkg: github.com/lidp280504357/exchange/internal/admin
+            - pkg: github.com/skill/exchange/internal/admin
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/analytics
+            - pkg: github.com/skill/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/auth
+            - pkg: github.com/skill/exchange/internal/auth
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/derivatives
+            - pkg: github.com/skill/exchange/internal/derivatives
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/gateway
+            - pkg: github.com/skill/exchange/internal/gateway
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/instrument
+            - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketdata
+            - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketmaker
+            - pkg: github.com/skill/exchange/internal/marketmaker
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketsim
+            - pkg: github.com/skill/exchange/internal/marketsim
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/matching
+            - pkg: github.com/skill/exchange/internal/matching
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/notification
+            - pkg: github.com/skill/exchange/internal/notification
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/risk
+            - pkg: github.com/skill/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/signer
+            - pkg: github.com/skill/exchange/internal/signer
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/trading
+            - pkg: github.com/skill/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/user
+            - pkg: github.com/skill/exchange/internal/user
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/wallet
+            - pkg: github.com/skill/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         marketdata:
           files: ["**/internal/marketdata/**"]
           deny:
-            - pkg: github.com/lidp280504357/exchange/internal/admin
+            - pkg: github.com/skill/exchange/internal/admin
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/analytics
+            - pkg: github.com/skill/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/auth
+            - pkg: github.com/skill/exchange/internal/auth
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/derivatives
+            - pkg: github.com/skill/exchange/internal/derivatives
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/gateway
+            - pkg: github.com/skill/exchange/internal/gateway
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/instrument
+            - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/ledger
+            - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketmaker
+            - pkg: github.com/skill/exchange/internal/marketmaker
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketsim
+            - pkg: github.com/skill/exchange/internal/marketsim
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/matching
+            - pkg: github.com/skill/exchange/internal/matching
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/notification
+            - pkg: github.com/skill/exchange/internal/notification
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/risk
+            - pkg: github.com/skill/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/signer
+            - pkg: github.com/skill/exchange/internal/signer
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/trading
+            - pkg: github.com/skill/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/user
+            - pkg: github.com/skill/exchange/internal/user
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/wallet
+            - pkg: github.com/skill/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         marketmaker:
           files: ["**/internal/marketmaker/**"]
           deny:
-            - pkg: github.com/lidp280504357/exchange/internal/admin
+            - pkg: github.com/skill/exchange/internal/admin
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/analytics
+            - pkg: github.com/skill/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/auth
+            - pkg: github.com/skill/exchange/internal/auth
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/derivatives
+            - pkg: github.com/skill/exchange/internal/derivatives
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/gateway
+            - pkg: github.com/skill/exchange/internal/gateway
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/instrument
+            - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/ledger
+            - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketdata
+            - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketsim
+            - pkg: github.com/skill/exchange/internal/marketsim
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/matching
+            - pkg: github.com/skill/exchange/internal/matching
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/notification
+            - pkg: github.com/skill/exchange/internal/notification
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/risk
+            - pkg: github.com/skill/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/signer
+            - pkg: github.com/skill/exchange/internal/signer
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/trading
+            - pkg: github.com/skill/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/user
+            - pkg: github.com/skill/exchange/internal/user
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/wallet
+            - pkg: github.com/skill/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         marketsim:
           files: ["**/internal/marketsim/**"]
           deny:
-            - pkg: github.com/lidp280504357/exchange/internal/admin
+            - pkg: github.com/skill/exchange/internal/admin
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/analytics
+            - pkg: github.com/skill/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/auth
+            - pkg: github.com/skill/exchange/internal/auth
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/derivatives
+            - pkg: github.com/skill/exchange/internal/derivatives
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/gateway
+            - pkg: github.com/skill/exchange/internal/gateway
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/instrument
+            - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/ledger
+            - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketdata
+            - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketmaker
+            - pkg: github.com/skill/exchange/internal/marketmaker
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/matching
+            - pkg: github.com/skill/exchange/internal/matching
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/notification
+            - pkg: github.com/skill/exchange/internal/notification
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/risk
+            - pkg: github.com/skill/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/signer
+            - pkg: github.com/skill/exchange/internal/signer
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/trading
+            - pkg: github.com/skill/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/user
+            - pkg: github.com/skill/exchange/internal/user
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/wallet
+            - pkg: github.com/skill/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         matching:
           files: ["**/internal/matching/**"]
           deny:
-            - pkg: github.com/lidp280504357/exchange/internal/admin
+            - pkg: github.com/skill/exchange/internal/admin
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/analytics
+            - pkg: github.com/skill/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/auth
+            - pkg: github.com/skill/exchange/internal/auth
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/derivatives
+            - pkg: github.com/skill/exchange/internal/derivatives
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/gateway
+            - pkg: github.com/skill/exchange/internal/gateway
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/instrument
+            - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/ledger
+            - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketdata
+            - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketmaker
+            - pkg: github.com/skill/exchange/internal/marketmaker
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketsim
+            - pkg: github.com/skill/exchange/internal/marketsim
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/notification
+            - pkg: github.com/skill/exchange/internal/notification
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/risk
+            - pkg: github.com/skill/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/signer
+            - pkg: github.com/skill/exchange/internal/signer
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/trading
+            - pkg: github.com/skill/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/user
+            - pkg: github.com/skill/exchange/internal/user
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/wallet
+            - pkg: github.com/skill/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         notification:
           files: ["**/internal/notification/**"]
           deny:
-            - pkg: github.com/lidp280504357/exchange/internal/admin
+            - pkg: github.com/skill/exchange/internal/admin
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/analytics
+            - pkg: github.com/skill/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/auth
+            - pkg: github.com/skill/exchange/internal/auth
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/derivatives
+            - pkg: github.com/skill/exchange/internal/derivatives
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/gateway
+            - pkg: github.com/skill/exchange/internal/gateway
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/instrument
+            - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/ledger
+            - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketdata
+            - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketmaker
+            - pkg: github.com/skill/exchange/internal/marketmaker
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketsim
+            - pkg: github.com/skill/exchange/internal/marketsim
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/matching
+            - pkg: github.com/skill/exchange/internal/matching
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/risk
+            - pkg: github.com/skill/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/signer
+            - pkg: github.com/skill/exchange/internal/signer
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/trading
+            - pkg: github.com/skill/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/user
+            - pkg: github.com/skill/exchange/internal/user
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/wallet
+            - pkg: github.com/skill/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         risk:
           files: ["**/internal/risk/**"]
           deny:
-            - pkg: github.com/lidp280504357/exchange/internal/admin
+            - pkg: github.com/skill/exchange/internal/admin
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/analytics
+            - pkg: github.com/skill/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/auth
+            - pkg: github.com/skill/exchange/internal/auth
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/derivatives
+            - pkg: github.com/skill/exchange/internal/derivatives
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/gateway
+            - pkg: github.com/skill/exchange/internal/gateway
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/instrument
+            - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/ledger
+            - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketdata
+            - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketmaker
+            - pkg: github.com/skill/exchange/internal/marketmaker
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketsim
+            - pkg: github.com/skill/exchange/internal/marketsim
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/matching
+            - pkg: github.com/skill/exchange/internal/matching
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/notification
+            - pkg: github.com/skill/exchange/internal/notification
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/signer
+            - pkg: github.com/skill/exchange/internal/signer
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/trading
+            - pkg: github.com/skill/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/user
+            - pkg: github.com/skill/exchange/internal/user
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/wallet
+            - pkg: github.com/skill/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         signer:
           files: ["**/internal/signer/**"]
           deny:
-            - pkg: github.com/lidp280504357/exchange/internal/admin
+            - pkg: github.com/skill/exchange/internal/admin
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/analytics
+            - pkg: github.com/skill/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/auth
+            - pkg: github.com/skill/exchange/internal/auth
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/derivatives
+            - pkg: github.com/skill/exchange/internal/derivatives
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/gateway
+            - pkg: github.com/skill/exchange/internal/gateway
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/instrument
+            - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/ledger
+            - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketdata
+            - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketmaker
+            - pkg: github.com/skill/exchange/internal/marketmaker
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketsim
+            - pkg: github.com/skill/exchange/internal/marketsim
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/matching
+            - pkg: github.com/skill/exchange/internal/matching
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/notification
+            - pkg: github.com/skill/exchange/internal/notification
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/risk
+            - pkg: github.com/skill/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/trading
+            - pkg: github.com/skill/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/user
+            - pkg: github.com/skill/exchange/internal/user
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/wallet
+            - pkg: github.com/skill/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         trading:
           files: ["**/internal/trading/**"]
           deny:
-            - pkg: github.com/lidp280504357/exchange/internal/admin
+            - pkg: github.com/skill/exchange/internal/admin
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/analytics
+            - pkg: github.com/skill/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/auth
+            - pkg: github.com/skill/exchange/internal/auth
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/derivatives
+            - pkg: github.com/skill/exchange/internal/derivatives
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/gateway
+            - pkg: github.com/skill/exchange/internal/gateway
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/instrument
+            - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/ledger
+            - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketdata
+            - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketmaker
+            - pkg: github.com/skill/exchange/internal/marketmaker
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketsim
+            - pkg: github.com/skill/exchange/internal/marketsim
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/matching
+            - pkg: github.com/skill/exchange/internal/matching
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/notification
+            - pkg: github.com/skill/exchange/internal/notification
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/risk
+            - pkg: github.com/skill/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/signer
+            - pkg: github.com/skill/exchange/internal/signer
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/user
+            - pkg: github.com/skill/exchange/internal/user
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/wallet
+            - pkg: github.com/skill/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         user:
           files: ["**/internal/user/**"]
           deny:
-            - pkg: github.com/lidp280504357/exchange/internal/admin
+            - pkg: github.com/skill/exchange/internal/admin
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/analytics
+            - pkg: github.com/skill/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/auth
+            - pkg: github.com/skill/exchange/internal/auth
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/derivatives
+            - pkg: github.com/skill/exchange/internal/derivatives
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/gateway
+            - pkg: github.com/skill/exchange/internal/gateway
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/instrument
+            - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/ledger
+            - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketdata
+            - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketmaker
+            - pkg: github.com/skill/exchange/internal/marketmaker
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketsim
+            - pkg: github.com/skill/exchange/internal/marketsim
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/matching
+            - pkg: github.com/skill/exchange/internal/matching
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/notification
+            - pkg: github.com/skill/exchange/internal/notification
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/risk
+            - pkg: github.com/skill/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/signer
+            - pkg: github.com/skill/exchange/internal/signer
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/trading
+            - pkg: github.com/skill/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/wallet
+            - pkg: github.com/skill/exchange/internal/wallet
               desc: services talk over gRPC and events only (ADR-0006)
         wallet:
           files: ["**/internal/wallet/**"]
           deny:
-            - pkg: github.com/lidp280504357/exchange/internal/admin
+            - pkg: github.com/skill/exchange/internal/admin
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/analytics
+            - pkg: github.com/skill/exchange/internal/analytics
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/auth
+            - pkg: github.com/skill/exchange/internal/auth
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/derivatives
+            - pkg: github.com/skill/exchange/internal/derivatives
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/gateway
+            - pkg: github.com/skill/exchange/internal/gateway
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/instrument
+            - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/ledger
+            - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketdata
+            - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketmaker
+            - pkg: github.com/skill/exchange/internal/marketmaker
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/marketsim
+            - pkg: github.com/skill/exchange/internal/marketsim
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/matching
+            - pkg: github.com/skill/exchange/internal/matching
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/notification
+            - pkg: github.com/skill/exchange/internal/notification
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/risk
+            - pkg: github.com/skill/exchange/internal/risk
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/signer
+            - pkg: github.com/skill/exchange/internal/signer
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/trading
+            - pkg: github.com/skill/exchange/internal/trading
               desc: services talk over gRPC and events only (ADR-0006)
-            - pkg: github.com/lidp280504357/exchange/internal/user
+            - pkg: github.com/skill/exchange/internal/user
               desc: services talk over gRPC and events only (ADR-0006)
   exclusions:
     generated: lax
@@ -635,4 +635,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/lidp280504357/exchange
+        - github.com/skill/exchange

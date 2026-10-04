@@ -9,7 +9,7 @@ import (
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lidp280504357/exchange/internal/wallet/domain"
+	"github.com/skill/exchange/internal/wallet/domain"
 )
 
 // Store is the unit of work over the wallet schema.

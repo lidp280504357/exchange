@@ -699,8 +699,8 @@ const file_exchange_wallet_v1_withdrawals_proto_rawDesc = "" +
 	"\x13WithdrawalSubmitted\x12>\n" +
 	"\n" +
 	"withdrawal\x18\x01 \x01(\v2\x1e.exchange.wallet.v1.WithdrawalR\n" +
-	"withdrawalB\xde\x01\n" +
-	"\x16com.exchange.wallet.v1B\x10WithdrawalsProtoP\x01ZHgithub.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1;walletv1\xa2\x02\x03EWX\xaa\x02\x12Exchange.Wallet.V1\xca\x02\x12Exchange\\Wallet\\V1\xe2\x02\x1eExchange\\Wallet\\V1\\GPBMetadata\xea\x02\x14Exchange::Wallet::V1b\x06proto3"
+	"withdrawalB\xd6\x01\n" +
+	"\x16com.exchange.wallet.v1B\x10WithdrawalsProtoP\x01Z@github.com/skill/exchange/api/gen/go/exchange/wallet/v1;walletv1\xa2\x02\x03EWX\xaa\x02\x12Exchange.Wallet.V1\xca\x02\x12Exchange\\Wallet\\V1\xe2\x02\x1eExchange\\Wallet\\V1\\GPBMetadata\xea\x02\x14Exchange::Wallet::V1b\x06proto3"
 
 var (
 	file_exchange_wallet_v1_withdrawals_proto_rawDescOnce sync.Once

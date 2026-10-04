@@ -17,8 +17,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/platform/udun"
-	"github.com/lidp280504357/exchange/internal/wallet/adapters/custody"
+	"github.com/skill/exchange/internal/platform/udun"
+	"github.com/skill/exchange/internal/wallet/adapters/custody"
 )
 
 // minUdunKey is the shortest key taken, as in wallet-service.

@@ -11,8 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/lidp280504357/exchange/internal/platform/pg"
-	"github.com/lidp280504357/exchange/internal/platform/testenv"
+	"github.com/skill/exchange/internal/platform/pg"
+	"github.com/skill/exchange/internal/platform/testenv"
 )
 
 func TestConfigValidate(t *testing.T) {

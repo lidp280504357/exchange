@@ -7,7 +7,7 @@
 package marketv1
 
 import (
-	v1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
+	v1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -1284,8 +1284,8 @@ const file_exchange_market_v1_events_proto_rawDesc = "" +
 	"\n" +
 	"mark_price\x18\b \x01(\tR\tmarkPrice\x12\x1f\n" +
 	"\vindex_price\x18\t \x01(\tR\n" +
-	"indexPriceB\xd9\x01\n" +
-	"\x16com.exchange.market.v1B\vEventsProtoP\x01ZHgithub.com/lidp280504357/exchange/api/gen/go/exchange/market/v1;marketv1\xa2\x02\x03EMX\xaa\x02\x12Exchange.Market.V1\xca\x02\x12Exchange\\Market\\V1\xe2\x02\x1eExchange\\Market\\V1\\GPBMetadata\xea\x02\x14Exchange::Market::V1b\x06proto3"
+	"indexPriceB\xd1\x01\n" +
+	"\x16com.exchange.market.v1B\vEventsProtoP\x01Z@github.com/skill/exchange/api/gen/go/exchange/market/v1;marketv1\xa2\x02\x03EMX\xaa\x02\x12Exchange.Market.V1\xca\x02\x12Exchange\\Market\\V1\xe2\x02\x1eExchange\\Market\\V1\\GPBMetadata\xea\x02\x14Exchange::Market::V1b\x06proto3"
 
 var (
 	file_exchange_market_v1_events_proto_rawDescOnce sync.Once

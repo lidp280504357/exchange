@@ -11,12 +11,12 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/migrate"
-	"github.com/lidp280504357/exchange/internal/platform/pg"
-	"github.com/lidp280504357/exchange/internal/user/adapters/postgres"
-	"github.com/lidp280504357/exchange/internal/user/application"
-	"github.com/lidp280504357/exchange/migrations"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/migrate"
+	"github.com/skill/exchange/internal/platform/pg"
+	"github.com/skill/exchange/internal/user/adapters/postgres"
+	"github.com/skill/exchange/internal/user/application"
+	"github.com/skill/exchange/migrations"
 )
 
 // usersCmd works on the users schema through user-service's own use cases,

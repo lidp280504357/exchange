@@ -3,7 +3,7 @@ package application
 import (
 	"context"
 
-	"github.com/lidp280504357/exchange/internal/wallet/domain"
+	"github.com/skill/exchange/internal/wallet/domain"
 )
 
 // Suspensions lists the assets whose withdrawals are suspended, for the

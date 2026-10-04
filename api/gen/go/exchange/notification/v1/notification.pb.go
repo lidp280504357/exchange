@@ -258,8 +258,8 @@ const file_exchange_notification_v1_notification_proto_rawDesc = "" +
 	"\x1fDELIVERY_STATUS_FAILED_RETRYING\x10\x03\x12\x1a\n" +
 	"\x16DELIVERY_STATUS_FAILED\x10\x042u\n" +
 	"\x13NotificationService\x12^\n" +
-	"\aSendOtp\x12(.exchange.notification.v1.SendOtpRequest\x1a).exchange.notification.v1.SendOtpResponseB\x89\x02\n" +
-	"\x1ccom.exchange.notification.v1B\x11NotificationProtoP\x01ZTgithub.com/lidp280504357/exchange/api/gen/go/exchange/notification/v1;notificationv1\xa2\x02\x03ENX\xaa\x02\x18Exchange.Notification.V1\xca\x02\x18Exchange\\Notification\\V1\xe2\x02$Exchange\\Notification\\V1\\GPBMetadata\xea\x02\x1aExchange::Notification::V1b\x06proto3"
+	"\aSendOtp\x12(.exchange.notification.v1.SendOtpRequest\x1a).exchange.notification.v1.SendOtpResponseB\x81\x02\n" +
+	"\x1ccom.exchange.notification.v1B\x11NotificationProtoP\x01ZLgithub.com/skill/exchange/api/gen/go/exchange/notification/v1;notificationv1\xa2\x02\x03ENX\xaa\x02\x18Exchange.Notification.V1\xca\x02\x18Exchange\\Notification\\V1\xe2\x02$Exchange\\Notification\\V1\\GPBMetadata\xea\x02\x1aExchange::Notification::V1b\x06proto3"
 
 var (
 	file_exchange_notification_v1_notification_proto_rawDescOnce sync.Once

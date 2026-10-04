@@ -192,8 +192,8 @@ const file_exchange_event_v1_envelope_proto_rawDesc = "" +
 	"\fcausation_id\x18\n" +
 	" \x01(\tR\vcausationId\x12 \n" +
 	"\vtraceparent\x18\v \x01(\tR\vtraceparent\x12.\n" +
-	"\apayload\x18\f \x01(\v2\x14.google.protobuf.AnyR\apayloadB\xd4\x01\n" +
-	"\x15com.exchange.event.v1B\rEnvelopeProtoP\x01ZFgithub.com/lidp280504357/exchange/api/gen/go/exchange/event/v1;eventv1\xa2\x02\x03EEX\xaa\x02\x11Exchange.Event.V1\xca\x02\x11Exchange\\Event\\V1\xe2\x02\x1dExchange\\Event\\V1\\GPBMetadata\xea\x02\x13Exchange::Event::V1b\x06proto3"
+	"\apayload\x18\f \x01(\v2\x14.google.protobuf.AnyR\apayloadB\xcc\x01\n" +
+	"\x15com.exchange.event.v1B\rEnvelopeProtoP\x01Z>github.com/skill/exchange/api/gen/go/exchange/event/v1;eventv1\xa2\x02\x03EEX\xaa\x02\x11Exchange.Event.V1\xca\x02\x11Exchange\\Event\\V1\xe2\x02\x1dExchange\\Event\\V1\\GPBMetadata\xea\x02\x13Exchange::Event::V1b\x06proto3"
 
 var (
 	file_exchange_event_v1_envelope_proto_rawDescOnce sync.Once

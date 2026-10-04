@@ -4,7 +4,7 @@ package authclient
 import (
 	"context"
 
-	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
+	authv1 "github.com/skill/exchange/api/gen/go/exchange/auth/v1"
 )
 
 // StepUps implements ports.StepUps over AuthService.ConsumeStepUp.

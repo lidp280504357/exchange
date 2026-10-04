@@ -6,7 +6,7 @@ import (
 	"crypto/subtle"
 	"errors"
 
-	"github.com/lidp280504357/exchange/internal/platform/captcha"
+	"github.com/skill/exchange/internal/platform/captcha"
 )
 
 // Verifier checks Turnstile tokens. Outside production a configured bypass

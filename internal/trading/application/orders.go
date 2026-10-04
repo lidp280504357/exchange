@@ -12,12 +12,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
-	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/flags"
-	"github.com/lidp280504357/exchange/internal/trading/domain"
-	"github.com/lidp280504357/exchange/internal/trading/ports"
+	orderv1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/trading/domain"
+	"github.com/skill/exchange/internal/trading/ports"
 )
 
 // FeatureSpotTrade is the eligibility feature of spot orders (§5.4).

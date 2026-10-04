@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/marketdata/domain"
+	"github.com/skill/exchange/internal/marketdata/domain"
 )
 
 // Sparkline ranges of the market lists (design §6.2, §7.2): the PC table

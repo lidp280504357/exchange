@@ -13,7 +13,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // WebSocket protocol limits (requirements §7.3).

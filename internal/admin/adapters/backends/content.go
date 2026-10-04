@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/admin/ports"
+	"github.com/skill/exchange/internal/admin/ports"
 )
 
 // Notification implements ports.Content on notification-service's

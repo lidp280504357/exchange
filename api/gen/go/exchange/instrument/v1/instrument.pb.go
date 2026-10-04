@@ -2395,8 +2395,8 @@ const file_exchange_instrument_v1_instrument_proto_rawDesc = "" +
 	"\x11SetContractStatus\x120.exchange.instrument.v1.SetContractStatusRequest\x1a1.exchange.instrument.v1.SetContractStatusResponse\x12{\n" +
 	"\x12UpdateAssetProfile\x121.exchange.instrument.v1.UpdateAssetProfileRequest\x1a2.exchange.instrument.v1.UpdateAssetProfileResponse\x12i\n" +
 	"\fExportConfig\x12+.exchange.instrument.v1.ExportConfigRequest\x1a,.exchange.instrument.v1.ExportConfigResponse\x12f\n" +
-	"\vApplyConfig\x12*.exchange.instrument.v1.ApplyConfigRequest\x1a+.exchange.instrument.v1.ApplyConfigResponseB\xf9\x01\n" +
-	"\x1acom.exchange.instrument.v1B\x0fInstrumentProtoP\x01ZPgithub.com/lidp280504357/exchange/api/gen/go/exchange/instrument/v1;instrumentv1\xa2\x02\x03EIX\xaa\x02\x16Exchange.Instrument.V1\xca\x02\x16Exchange\\Instrument\\V1\xe2\x02\"Exchange\\Instrument\\V1\\GPBMetadata\xea\x02\x18Exchange::Instrument::V1b\x06proto3"
+	"\vApplyConfig\x12*.exchange.instrument.v1.ApplyConfigRequest\x1a+.exchange.instrument.v1.ApplyConfigResponseB\xf1\x01\n" +
+	"\x1acom.exchange.instrument.v1B\x0fInstrumentProtoP\x01ZHgithub.com/skill/exchange/api/gen/go/exchange/instrument/v1;instrumentv1\xa2\x02\x03EIX\xaa\x02\x16Exchange.Instrument.V1\xca\x02\x16Exchange\\Instrument\\V1\xe2\x02\"Exchange\\Instrument\\V1\\GPBMetadata\xea\x02\x18Exchange::Instrument::V1b\x06proto3"
 
 var (
 	file_exchange_instrument_v1_instrument_proto_rawDescOnce sync.Once

@@ -166,8 +166,8 @@ const file_exchange_user_v1_events_proto_rawDesc = "" +
 	"\x05actor\x18\x05 \x01(\tR\x05actor\"A\n" +
 	"\x0eProfileUpdated\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x16\n" +
-	"\x06fields\x18\x02 \x03(\tR\x06fieldsB\xcb\x01\n" +
-	"\x14com.exchange.user.v1B\vEventsProtoP\x01ZDgithub.com/lidp280504357/exchange/api/gen/go/exchange/user/v1;userv1\xa2\x02\x03EUX\xaa\x02\x10Exchange.User.V1\xca\x02\x10Exchange\\User\\V1\xe2\x02\x1cExchange\\User\\V1\\GPBMetadata\xea\x02\x12Exchange::User::V1b\x06proto3"
+	"\x06fields\x18\x02 \x03(\tR\x06fieldsB\xc3\x01\n" +
+	"\x14com.exchange.user.v1B\vEventsProtoP\x01Z<github.com/skill/exchange/api/gen/go/exchange/user/v1;userv1\xa2\x02\x03EUX\xaa\x02\x10Exchange.User.V1\xca\x02\x10Exchange\\User\\V1\xe2\x02\x1cExchange\\User\\V1\\GPBMetadata\xea\x02\x12Exchange::User::V1b\x06proto3"
 
 var (
 	file_exchange_user_v1_events_proto_rawDescOnce sync.Once

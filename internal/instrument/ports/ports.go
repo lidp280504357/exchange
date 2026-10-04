@@ -7,7 +7,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lidp280504357/exchange/internal/instrument/domain"
+	"github.com/skill/exchange/internal/instrument/domain"
 )
 
 // Store is the unit of work over the instrument schema.

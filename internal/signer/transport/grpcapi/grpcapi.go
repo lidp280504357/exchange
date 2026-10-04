@@ -6,10 +6,10 @@ import (
 	"math/big"
 	"strings"
 
-	signerv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/signer/v1"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/signer/application"
-	"github.com/lidp280504357/exchange/internal/signer/domain"
+	signerv1 "github.com/skill/exchange/api/gen/go/exchange/signer/v1"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/signer/application"
+	"github.com/skill/exchange/internal/signer/domain"
 )
 
 // Server implements signerv1.SignerServiceServer.

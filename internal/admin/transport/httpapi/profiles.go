@@ -5,8 +5,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/lidp280504357/exchange/internal/admin/application"
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/admin/application"
+	"github.com/skill/exchange/internal/platform/httpx"
 )
 
 // An asset's profile (ASTRA design §5.3, C4c).

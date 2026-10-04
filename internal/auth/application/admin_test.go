@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
-	"github.com/lidp280504357/exchange/internal/auth/domain"
+	authv1 "github.com/skill/exchange/api/gen/go/exchange/auth/v1"
+	"github.com/skill/exchange/internal/auth/domain"
 )
 
 func TestAdminSecurityAndSessions(t *testing.T) {

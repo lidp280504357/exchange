@@ -10,8 +10,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/lidp280504357/exchange/internal/notification/domain"
-	"github.com/lidp280504357/exchange/internal/notification/ports"
+	"github.com/skill/exchange/internal/notification/domain"
+	"github.com/skill/exchange/internal/notification/ports"
 )
 
 // scriptedProvider fails with the scripted errors, then succeeds.

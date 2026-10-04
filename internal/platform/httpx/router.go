@@ -6,7 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/lidp280504357/exchange/internal/platform/tracing"
+	"github.com/skill/exchange/internal/platform/tracing"
 )
 
 // RouterOptions configures NewRouter.

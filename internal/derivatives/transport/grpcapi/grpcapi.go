@@ -6,9 +6,9 @@ import (
 
 	"github.com/google/uuid"
 
-	derivativesv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/derivatives/v1"
-	"github.com/lidp280504357/exchange/internal/derivatives/application"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	derivativesv1 "github.com/skill/exchange/api/gen/go/exchange/derivatives/v1"
+	"github.com/skill/exchange/internal/derivatives/application"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // Server implements derivativesv1.DerivativesServiceServer.

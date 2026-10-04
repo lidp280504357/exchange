@@ -19,7 +19,7 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/lock"
 
-	"github.com/lidp280504357/exchange/internal/platform/pg"
+	"github.com/skill/exchange/internal/platform/pg"
 )
 
 //go:embed platform/*.sql

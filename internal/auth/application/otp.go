@@ -11,13 +11,13 @@ import (
 
 	"github.com/google/uuid"
 
-	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
-	"github.com/lidp280504357/exchange/internal/auth/domain"
-	"github.com/lidp280504357/exchange/internal/auth/ports"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/flags"
-	"github.com/lidp280504357/exchange/internal/platform/pii"
-	"github.com/lidp280504357/exchange/internal/platform/ratelimit"
+	authv1 "github.com/skill/exchange/api/gen/go/exchange/auth/v1"
+	"github.com/skill/exchange/internal/auth/domain"
+	"github.com/skill/exchange/internal/auth/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/platform/pii"
+	"github.com/skill/exchange/internal/platform/ratelimit"
 )
 
 // OTP quotas (requirements §5.3, §6.3).

@@ -14,8 +14,8 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/sr"
 
-	protodef "github.com/lidp280504357/exchange/api/proto"
-	"github.com/lidp280504357/exchange/internal/platform/event"
+	protodef "github.com/skill/exchange/api/proto"
+	"github.com/skill/exchange/internal/platform/event"
 )
 
 // Config holds the broker and Schema Registry addresses.

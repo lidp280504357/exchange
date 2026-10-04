@@ -6,8 +6,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/lidp280504357/exchange/internal/auth/application"
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/auth/application"
+	"github.com/skill/exchange/internal/platform/httpx"
 )
 
 // Handler serves the auth endpoints.

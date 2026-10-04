@@ -19,7 +19,7 @@ ARG GO_BUILD_P=2
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go build -p ${GO_BUILD_P} -trimpath -buildvcs=false \
-      -ldflags "-s -w -X github.com/lidp280504357/exchange/internal/platform/app.buildVersion=${VERSION}" \
+      -ldflags "-s -w -X github.com/skill/exchange/internal/platform/app.buildVersion=${VERSION}" \
       -o /out/ ./cmd/...
 
 FROM ${RUNTIME_IMAGE}

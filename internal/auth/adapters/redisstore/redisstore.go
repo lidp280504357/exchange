@@ -10,8 +10,8 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/lidp280504357/exchange/internal/auth/domain"
-	"github.com/lidp280504357/exchange/internal/platform/authtoken"
+	"github.com/skill/exchange/internal/auth/domain"
+	"github.com/skill/exchange/internal/platform/authtoken"
 )
 
 // Revocations implements ports.Revocations.

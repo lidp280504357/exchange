@@ -8,10 +8,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/ledger/application"
-	"github.com/lidp280504357/exchange/internal/ledger/domain"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/ledger/application"
+	"github.com/skill/exchange/internal/ledger/domain"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/httpx"
 )
 
 // HeaderIdempotencyKey carries the client's key for writes (§7.1).

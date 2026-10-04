@@ -10,10 +10,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/prometheus/client_golang/prometheus"
 
-	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/wallet/domain"
-	"github.com/lidp280504357/exchange/internal/wallet/ports"
+	auditv1 "github.com/skill/exchange/api/gen/go/exchange/audit/v1"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/wallet/domain"
+	"github.com/skill/exchange/internal/wallet/ports"
 )
 
 func (h *custodyHarness) audited(action string) int {

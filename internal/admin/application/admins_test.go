@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/admin/domain"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/flags"
-	"github.com/lidp280504357/exchange/internal/platform/totp"
+	"github.com/skill/exchange/internal/admin/domain"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/platform/totp"
 )
 
 func TestManagingAdministrators(t *testing.T) {

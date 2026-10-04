@@ -8,7 +8,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	derivativesv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/derivatives/v1"
+	derivativesv1 "github.com/skill/exchange/api/gen/go/exchange/derivatives/v1"
 )
 
 // Client implements ports.Futures.

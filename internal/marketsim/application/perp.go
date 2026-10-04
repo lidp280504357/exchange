@@ -9,9 +9,9 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/marketsim/domain"
-	"github.com/lidp280504357/exchange/internal/marketsim/ports"
-	"github.com/lidp280504357/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/marketsim/domain"
+	"github.com/skill/exchange/internal/marketsim/ports"
+	"github.com/skill/exchange/internal/platform/flags"
 )
 
 // The platform coin's perpetual (ASTRA design §4 and §5.2, batch A4): with

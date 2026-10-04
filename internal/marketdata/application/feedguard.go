@@ -7,9 +7,9 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/lidp280504357/exchange/internal/marketdata/ports"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/marketdata/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/flags"
 )
 
 // Reference feed states (ADR-0010): clients show a banner once their data

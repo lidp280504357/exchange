@@ -14,17 +14,17 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	instrumentpg "github.com/lidp280504357/exchange/internal/instrument/adapters/postgres"
-	instrumentapp "github.com/lidp280504357/exchange/internal/instrument/application"
-	instrumentdomain "github.com/lidp280504357/exchange/internal/instrument/domain"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/migrate"
-	"github.com/lidp280504357/exchange/internal/platform/pg"
-	"github.com/lidp280504357/exchange/internal/wallet/adapters/postgres"
-	"github.com/lidp280504357/exchange/internal/wallet/application"
-	"github.com/lidp280504357/exchange/internal/wallet/domain"
-	"github.com/lidp280504357/exchange/internal/wallet/ports"
-	"github.com/lidp280504357/exchange/migrations"
+	instrumentpg "github.com/skill/exchange/internal/instrument/adapters/postgres"
+	instrumentapp "github.com/skill/exchange/internal/instrument/application"
+	instrumentdomain "github.com/skill/exchange/internal/instrument/domain"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/migrate"
+	"github.com/skill/exchange/internal/platform/pg"
+	"github.com/skill/exchange/internal/wallet/adapters/postgres"
+	"github.com/skill/exchange/internal/wallet/application"
+	"github.com/skill/exchange/internal/wallet/domain"
+	"github.com/skill/exchange/internal/wallet/ports"
+	"github.com/skill/exchange/migrations"
 )
 
 // walletCmd queues wallet operations for the network's processor in

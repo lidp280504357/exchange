@@ -489,9 +489,9 @@ const file_exchange_order_v1_order_proto_rawDesc = "" +
 	"!SELF_TRADE_PREVENTION_UNSPECIFIED\x10\x00\x12'\n" +
 	"#SELF_TRADE_PREVENTION_CANCEL_NEWEST\x10\x01\x12'\n" +
 	"#SELF_TRADE_PREVENTION_CANCEL_OLDEST\x10\x02\x12%\n" +
-	"!SELF_TRADE_PREVENTION_CANCEL_BOTH\x10\x03B\xd1\x01\n" +
+	"!SELF_TRADE_PREVENTION_CANCEL_BOTH\x10\x03B\xc9\x01\n" +
 	"\x15com.exchange.order.v1B\n" +
-	"OrderProtoP\x01ZFgithub.com/lidp280504357/exchange/api/gen/go/exchange/order/v1;orderv1\xa2\x02\x03EOX\xaa\x02\x11Exchange.Order.V1\xca\x02\x11Exchange\\Order\\V1\xe2\x02\x1dExchange\\Order\\V1\\GPBMetadata\xea\x02\x13Exchange::Order::V1b\x06proto3"
+	"OrderProtoP\x01Z>github.com/skill/exchange/api/gen/go/exchange/order/v1;orderv1\xa2\x02\x03EOX\xaa\x02\x11Exchange.Order.V1\xca\x02\x11Exchange\\Order\\V1\xe2\x02\x1dExchange\\Order\\V1\\GPBMetadata\xea\x02\x13Exchange::Order::V1b\x06proto3"
 
 var (
 	file_exchange_order_v1_order_proto_rawDescOnce sync.Once

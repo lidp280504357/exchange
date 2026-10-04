@@ -14,9 +14,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/protobuf/proto"
 
-	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
-	"github.com/lidp280504357/exchange/internal/platform/kafka"
-	"github.com/lidp280504357/exchange/internal/platform/pg"
+	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
+	"github.com/skill/exchange/internal/platform/kafka"
+	"github.com/skill/exchange/internal/platform/pg"
 )
 
 // Add stores events for publication to topic; the partition key is each

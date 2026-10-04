@@ -7,14 +7,14 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
-	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
-	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
-	walletv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1"
-	"github.com/lidp280504357/exchange/internal/notification/application"
-	"github.com/lidp280504357/exchange/internal/notification/domain"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/kafka"
+	authv1 "github.com/skill/exchange/api/gen/go/exchange/auth/v1"
+	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
+	userv1 "github.com/skill/exchange/api/gen/go/exchange/user/v1"
+	walletv1 "github.com/skill/exchange/api/gen/go/exchange/wallet/v1"
+	"github.com/skill/exchange/internal/notification/application"
+	"github.com/skill/exchange/internal/notification/domain"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/kafka"
 )
 
 // Topics are the topics the handler reads.

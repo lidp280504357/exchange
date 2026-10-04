@@ -16,10 +16,10 @@ import (
 	otelcodes "go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/logging"
-	"github.com/lidp280504357/exchange/internal/platform/tracing"
+	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/logging"
+	"github.com/skill/exchange/internal/platform/tracing"
 )
 
 // Handler processes one event. An error sends the record to the retry

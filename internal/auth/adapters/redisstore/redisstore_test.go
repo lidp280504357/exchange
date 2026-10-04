@@ -7,9 +7,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/lidp280504357/exchange/internal/auth/domain"
-	"github.com/lidp280504357/exchange/internal/platform/authtoken"
-	"github.com/lidp280504357/exchange/internal/platform/testenv"
+	"github.com/skill/exchange/internal/auth/domain"
+	"github.com/skill/exchange/internal/platform/authtoken"
+	"github.com/skill/exchange/internal/platform/testenv"
 )
 
 func TestRevocations(t *testing.T) {

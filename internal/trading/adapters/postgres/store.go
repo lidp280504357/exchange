@@ -11,11 +11,11 @@ import (
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/outbox"
-	"github.com/lidp280504357/exchange/internal/platform/pg"
-	"github.com/lidp280504357/exchange/internal/trading/domain"
-	"github.com/lidp280504357/exchange/internal/trading/ports"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/outbox"
+	"github.com/skill/exchange/internal/platform/pg"
+	"github.com/skill/exchange/internal/trading/domain"
+	"github.com/skill/exchange/internal/trading/ports"
 )
 
 // Store implements ports.Store.

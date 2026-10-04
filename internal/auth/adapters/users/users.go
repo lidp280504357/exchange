@@ -4,8 +4,8 @@ package users
 import (
 	"context"
 
-	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
-	"github.com/lidp280504357/exchange/internal/auth/ports"
+	userv1 "github.com/skill/exchange/api/gen/go/exchange/user/v1"
+	"github.com/skill/exchange/internal/auth/ports"
 )
 
 // Client implements ports.Users.

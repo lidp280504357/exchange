@@ -3,8 +3,8 @@ package domain
 import (
 	"fmt"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/flags"
 )
 
 // Features a user may be eligible for (§5.4).

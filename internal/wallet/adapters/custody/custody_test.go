@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/udun"
-	"github.com/lidp280504357/exchange/internal/wallet/domain"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/udun"
+	"github.com/skill/exchange/internal/wallet/domain"
 )
 
 var usdt = domain.Network{Asset: "USDT", Network: "TRON", Provider: domain.ProviderUdun, ProviderCoin: "195:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"}

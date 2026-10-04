@@ -14,9 +14,9 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	ledgerv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1"
-	"github.com/lidp280504357/exchange/internal/admin/ports"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	ledgerv1 "github.com/skill/exchange/api/gen/go/exchange/ledger/v1"
+	"github.com/skill/exchange/internal/admin/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // Prices returns the last price of every listed symbol that has one

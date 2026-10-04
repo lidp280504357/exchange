@@ -13,11 +13,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
-	walletv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/evm"
-	"github.com/lidp280504357/exchange/internal/wallet/domain"
-	"github.com/lidp280504357/exchange/internal/wallet/ports"
+	walletv1 "github.com/skill/exchange/api/gen/go/exchange/wallet/v1"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/evm"
+	"github.com/skill/exchange/internal/wallet/domain"
+	"github.com/skill/exchange/internal/wallet/ports"
 )
 
 // withdrawals runs the withdrawal steps of a round: requests left

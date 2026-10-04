@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/risk/domain"
+	"github.com/skill/exchange/internal/risk/domain"
 )
 
 func TestDefaultRulesAreValid(t *testing.T) {

@@ -20,14 +20,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
-	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
-	"github.com/lidp280504357/exchange/internal/admin/domain"
-	"github.com/lidp280504357/exchange/internal/admin/ports"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/flags"
-	"github.com/lidp280504357/exchange/internal/platform/password"
-	"github.com/lidp280504357/exchange/internal/platform/secretbox"
-	"github.com/lidp280504357/exchange/internal/platform/totp"
+	auditv1 "github.com/skill/exchange/api/gen/go/exchange/audit/v1"
+	"github.com/skill/exchange/internal/admin/domain"
+	"github.com/skill/exchange/internal/admin/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/platform/password"
+	"github.com/skill/exchange/internal/platform/secretbox"
+	"github.com/skill/exchange/internal/platform/totp"
 )
 
 // Service is the admin console.

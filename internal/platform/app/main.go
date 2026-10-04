@@ -10,7 +10,7 @@ import (
 	"runtime/debug"
 	"syscall"
 
-	"github.com/lidp280504357/exchange/internal/platform/tracing"
+	"github.com/skill/exchange/internal/platform/tracing"
 )
 
 // SetupFunc loads a service's own settings and registers its components and
@@ -93,7 +93,7 @@ func (e *early) Run() error                     { return <-e.done }
 func (e *early) Stop(ctx context.Context) error { return e.c.Stop(ctx) }
 
 // buildVersion is set at link time by the image build, which has no .git:
-// -ldflags "-X github.com/lidp280504357/exchange/internal/platform/app.buildVersion=<sha>".
+// -ldflags "-X github.com/skill/exchange/internal/platform/app.buildVersion=<sha>".
 var buildVersion string
 
 // version reports the VCS revision the binary was built from.

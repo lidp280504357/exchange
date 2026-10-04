@@ -7,8 +7,8 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/derivatives/domain"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/derivatives/domain"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // TierImpact is what a contract's new risk ladder would do to the open

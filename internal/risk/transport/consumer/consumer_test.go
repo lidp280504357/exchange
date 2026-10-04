@@ -6,10 +6,10 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
-	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/risk/domain"
+	authv1 "github.com/skill/exchange/api/gen/go/exchange/auth/v1"
+	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/risk/domain"
 )
 
 func envelope(t *testing.T, msg proto.Message) *eventv1.Envelope {

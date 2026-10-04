@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // RFC 6238 appendix B, SHA-1: the 8-digit codes cut to our 6 digits.

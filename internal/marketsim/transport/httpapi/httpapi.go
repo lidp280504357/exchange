@@ -33,12 +33,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/marketsim/application"
-	"github.com/lidp280504357/exchange/internal/marketsim/domain"
-	"github.com/lidp280504357/exchange/internal/marketsim/ports"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
-	"github.com/lidp280504357/exchange/internal/platform/svcsign"
+	"github.com/skill/exchange/internal/marketsim/application"
+	"github.com/skill/exchange/internal/marketsim/domain"
+	"github.com/skill/exchange/internal/marketsim/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/platform/svcsign"
 )
 
 // The keys the changes are signed with: exchangectl's in market-sim's

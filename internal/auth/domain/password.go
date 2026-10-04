@@ -6,8 +6,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/password"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/password"
 )
 
 // Password policy (requirements §5.2): 10 to 128 characters, no

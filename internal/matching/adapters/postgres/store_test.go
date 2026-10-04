@@ -9,13 +9,13 @@ import (
 
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
-	"github.com/lidp280504357/exchange/internal/matching/adapters/postgres"
-	"github.com/lidp280504357/exchange/internal/matching/domain"
-	"github.com/lidp280504357/exchange/internal/matching/ports"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/migrate"
-	"github.com/lidp280504357/exchange/internal/platform/testenv"
-	"github.com/lidp280504357/exchange/migrations"
+	"github.com/skill/exchange/internal/matching/adapters/postgres"
+	"github.com/skill/exchange/internal/matching/domain"
+	"github.com/skill/exchange/internal/matching/ports"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/migrate"
+	"github.com/skill/exchange/internal/platform/testenv"
+	"github.com/skill/exchange/migrations"
 )
 
 func TestWALSnapshotsAndOutbox(t *testing.T) {

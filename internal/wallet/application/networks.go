@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/wallet/domain"
+	"github.com/skill/exchange/internal/wallet/domain"
 )
 
 // NetworksOf lists the networks an asset can be deposited or withdrawn on

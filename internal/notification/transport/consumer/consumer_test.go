@@ -5,10 +5,10 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
-	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
-	walletv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1"
-	"github.com/lidp280504357/exchange/internal/notification/domain"
+	authv1 "github.com/skill/exchange/api/gen/go/exchange/auth/v1"
+	userv1 "github.com/skill/exchange/api/gen/go/exchange/user/v1"
+	walletv1 "github.com/skill/exchange/api/gen/go/exchange/wallet/v1"
+	"github.com/skill/exchange/internal/notification/domain"
 )
 
 func TestToEvent(t *testing.T) {

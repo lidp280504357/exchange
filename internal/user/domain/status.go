@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // ErrStatusTransition rejects a change the state machine does not allow.

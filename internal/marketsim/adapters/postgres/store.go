@@ -12,13 +12,13 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
-	"github.com/lidp280504357/exchange/internal/marketsim/domain"
-	"github.com/lidp280504357/exchange/internal/marketsim/ports"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/outbox"
-	"github.com/lidp280504357/exchange/internal/platform/pg"
+	auditv1 "github.com/skill/exchange/api/gen/go/exchange/audit/v1"
+	"github.com/skill/exchange/internal/marketsim/domain"
+	"github.com/skill/exchange/internal/marketsim/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/outbox"
+	"github.com/skill/exchange/internal/platform/pg"
 )
 
 // Store implements ports.Store; audit records go out through the outbox

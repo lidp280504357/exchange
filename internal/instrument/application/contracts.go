@@ -6,10 +6,10 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	instrumentv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/instrument/v1"
-	"github.com/lidp280504357/exchange/internal/instrument/domain"
-	"github.com/lidp280504357/exchange/internal/instrument/ports"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	instrumentv1 "github.com/skill/exchange/api/gen/go/exchange/instrument/v1"
+	"github.com/skill/exchange/internal/instrument/domain"
+	"github.com/skill/exchange/internal/instrument/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // ContractView is a contract with the rates of its fee tier.

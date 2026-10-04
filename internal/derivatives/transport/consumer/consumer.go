@@ -11,15 +11,15 @@ import (
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
-	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
-	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
-	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
-	riskv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/risk/v1"
-	tradev1 "github.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1"
-	"github.com/lidp280504357/exchange/internal/derivatives/adapters/marks"
-	"github.com/lidp280504357/exchange/internal/derivatives/application"
-	"github.com/lidp280504357/exchange/internal/derivatives/domain"
-	"github.com/lidp280504357/exchange/internal/platform/kafka"
+	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
+	marketv1 "github.com/skill/exchange/api/gen/go/exchange/market/v1"
+	orderv1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
+	riskv1 "github.com/skill/exchange/api/gen/go/exchange/risk/v1"
+	tradev1 "github.com/skill/exchange/api/gen/go/exchange/trade/v1"
+	"github.com/skill/exchange/internal/derivatives/adapters/marks"
+	"github.com/skill/exchange/internal/derivatives/application"
+	"github.com/skill/exchange/internal/derivatives/domain"
+	"github.com/skill/exchange/internal/platform/kafka"
 )
 
 // Engine is the batch handler of derivatives.order.events and

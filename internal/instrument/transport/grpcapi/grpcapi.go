@@ -7,10 +7,10 @@ import (
 	"encoding/json"
 	"strings"
 
-	instrumentv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/instrument/v1"
-	"github.com/lidp280504357/exchange/internal/instrument/application"
-	"github.com/lidp280504357/exchange/internal/instrument/domain"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	instrumentv1 "github.com/skill/exchange/api/gen/go/exchange/instrument/v1"
+	"github.com/skill/exchange/internal/instrument/application"
+	"github.com/skill/exchange/internal/instrument/domain"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // Server implements instrumentv1.InstrumentServiceServer.

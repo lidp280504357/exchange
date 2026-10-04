@@ -8,10 +8,10 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
-	"github.com/lidp280504357/exchange/internal/user/application"
-	"github.com/lidp280504357/exchange/internal/user/domain"
-	"github.com/lidp280504357/exchange/internal/user/ports"
+	userv1 "github.com/skill/exchange/api/gen/go/exchange/user/v1"
+	"github.com/skill/exchange/internal/user/application"
+	"github.com/skill/exchange/internal/user/domain"
+	"github.com/skill/exchange/internal/user/ports"
 )
 
 // Server implements userv1.UserServiceServer.

@@ -360,8 +360,8 @@ const file_exchange_ledger_v1_events_proto_rawDesc = "" +
 	"\n" +
 	"journal_id\x18\a \x01(\tR\tjournalId\x12\x1d\n" +
 	"\n" +
-	"entry_type\x18\b \x01(\tR\tentryTypeB\xd9\x01\n" +
-	"\x16com.exchange.ledger.v1B\vEventsProtoP\x01ZHgithub.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1;ledgerv1\xa2\x02\x03ELX\xaa\x02\x12Exchange.Ledger.V1\xca\x02\x12Exchange\\Ledger\\V1\xe2\x02\x1eExchange\\Ledger\\V1\\GPBMetadata\xea\x02\x14Exchange::Ledger::V1b\x06proto3"
+	"entry_type\x18\b \x01(\tR\tentryTypeB\xd1\x01\n" +
+	"\x16com.exchange.ledger.v1B\vEventsProtoP\x01Z@github.com/skill/exchange/api/gen/go/exchange/ledger/v1;ledgerv1\xa2\x02\x03ELX\xaa\x02\x12Exchange.Ledger.V1\xca\x02\x12Exchange\\Ledger\\V1\xe2\x02\x1eExchange\\Ledger\\V1\\GPBMetadata\xea\x02\x14Exchange::Ledger::V1b\x06proto3"
 
 var (
 	file_exchange_ledger_v1_events_proto_rawDescOnce sync.Once

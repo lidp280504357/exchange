@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/lidp280504357/exchange/internal/platform/captcha"
+	"github.com/skill/exchange/internal/platform/captcha"
 )
 
 func TestBypassAndProvider(t *testing.T) {

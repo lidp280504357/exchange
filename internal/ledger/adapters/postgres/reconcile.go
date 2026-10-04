@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/ledger/domain"
+	"github.com/skill/exchange/internal/ledger/domain"
 )
 
 // Check names of the reconciliation (§5.9, §11.4 invariants 1, 2 and 5;

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
-	"github.com/lidp280504357/exchange/internal/auth/domain"
-	"github.com/lidp280504357/exchange/internal/platform/secretbox"
+	authv1 "github.com/skill/exchange/api/gen/go/exchange/auth/v1"
+	"github.com/skill/exchange/internal/auth/domain"
+	"github.com/skill/exchange/internal/platform/secretbox"
 )
 
 func withTOTP(t *testing.T, a *accountFixture) {

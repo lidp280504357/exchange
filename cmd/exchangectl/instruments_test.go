@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lidp280504357/exchange/internal/platform/testenv"
+	"github.com/skill/exchange/internal/platform/testenv"
 )
 
 func TestInstrumentsApplyTestData(t *testing.T) {

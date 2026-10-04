@@ -1169,8 +1169,8 @@ const file_exchange_derivatives_v1_events_proto_rawDesc = "" +
 	"\btrade_id\x18\x04 \x01(\tR\atradeId\x12\x14\n" +
 	"\x05price\x18\x05 \x01(\tR\x05price\x12\x1a\n" +
 	"\bquantity\x18\x06 \x01(\tR\bquantity\x12!\n" +
-	"\frealized_pnl\x18\a \x01(\tR\vrealizedPnlB\xfc\x01\n" +
-	"\x1bcom.exchange.derivatives.v1B\vEventsProtoP\x01ZRgithub.com/lidp280504357/exchange/api/gen/go/exchange/derivatives/v1;derivativesv1\xa2\x02\x03EDX\xaa\x02\x17Exchange.Derivatives.V1\xca\x02\x17Exchange\\Derivatives\\V1\xe2\x02#Exchange\\Derivatives\\V1\\GPBMetadata\xea\x02\x19Exchange::Derivatives::V1b\x06proto3"
+	"\frealized_pnl\x18\a \x01(\tR\vrealizedPnlB\xf4\x01\n" +
+	"\x1bcom.exchange.derivatives.v1B\vEventsProtoP\x01ZJgithub.com/skill/exchange/api/gen/go/exchange/derivatives/v1;derivativesv1\xa2\x02\x03EDX\xaa\x02\x17Exchange.Derivatives.V1\xca\x02\x17Exchange\\Derivatives\\V1\xe2\x02#Exchange\\Derivatives\\V1\\GPBMetadata\xea\x02\x19Exchange::Derivatives::V1b\x06proto3"
 
 var (
 	file_exchange_derivatives_v1_events_proto_rawDescOnce sync.Once

@@ -5,7 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/lidp280504357/exchange/internal/platform/ratelimit"
+	"github.com/skill/exchange/internal/platform/ratelimit"
 )
 
 // Upstreams are the proxies to the services behind the gateway.

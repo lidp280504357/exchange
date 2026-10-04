@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/platform/app"
-	"github.com/lidp280504357/exchange/internal/platform/config"
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
-	"github.com/lidp280504357/exchange/internal/platform/testenv"
-	"github.com/lidp280504357/exchange/internal/platform/tracing"
+	"github.com/skill/exchange/internal/platform/app"
+	"github.com/skill/exchange/internal/platform/config"
+	"github.com/skill/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/platform/testenv"
+	"github.com/skill/exchange/internal/platform/tracing"
 )
 
 func freeAddr(t *testing.T) string {

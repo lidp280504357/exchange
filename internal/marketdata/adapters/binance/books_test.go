@@ -9,8 +9,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/lidp280504357/exchange/internal/marketdata/domain"
-	"github.com/lidp280504357/exchange/internal/marketdata/ports"
+	"github.com/skill/exchange/internal/marketdata/domain"
+	"github.com/skill/exchange/internal/marketdata/ports"
 )
 
 // Messages as Binance sends them, with keys that differ only in case

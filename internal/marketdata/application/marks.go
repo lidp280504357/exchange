@@ -14,12 +14,12 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
-	riskv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/risk/v1"
-	"github.com/lidp280504357/exchange/internal/marketdata/domain"
-	"github.com/lidp280504357/exchange/internal/marketdata/ports"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/kafka"
+	marketv1 "github.com/skill/exchange/api/gen/go/exchange/market/v1"
+	riskv1 "github.com/skill/exchange/api/gen/go/exchange/risk/v1"
+	"github.com/skill/exchange/internal/marketdata/domain"
+	"github.com/skill/exchange/internal/marketdata/ports"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/kafka"
 )
 
 // Perpetual contract prices and funding (requirements §11.7; plan §7.3

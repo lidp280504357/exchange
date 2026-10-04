@@ -15,13 +15,13 @@ import (
 	"os"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/matching/adapters/postgres"
-	"github.com/lidp280504357/exchange/internal/matching/application"
-	"github.com/lidp280504357/exchange/internal/platform/app"
-	"github.com/lidp280504357/exchange/internal/platform/bootstrap"
-	"github.com/lidp280504357/exchange/internal/platform/kafka"
-	"github.com/lidp280504357/exchange/internal/platform/pg"
-	"github.com/lidp280504357/exchange/migrations"
+	"github.com/skill/exchange/internal/matching/adapters/postgres"
+	"github.com/skill/exchange/internal/matching/application"
+	"github.com/skill/exchange/internal/platform/app"
+	"github.com/skill/exchange/internal/platform/bootstrap"
+	"github.com/skill/exchange/internal/platform/kafka"
+	"github.com/skill/exchange/internal/platform/pg"
+	"github.com/skill/exchange/migrations"
 )
 
 type settings struct {

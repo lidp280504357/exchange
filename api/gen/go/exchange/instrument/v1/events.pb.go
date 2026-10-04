@@ -533,8 +533,8 @@ const file_exchange_instrument_v1_events_proto_rawDesc = "" +
 	"\x12FeeScheduleChanged\x12?\n" +
 	"\bschedule\x18\x01 \x01(\v2#.exchange.instrument.v1.FeeScheduleR\bschedule\x12\x14\n" +
 	"\x05actor\x18\x02 \x01(\tR\x05actor\x12\x16\n" +
-	"\x06reason\x18\x03 \x01(\tR\x06reasonB\xf5\x01\n" +
-	"\x1acom.exchange.instrument.v1B\vEventsProtoP\x01ZPgithub.com/lidp280504357/exchange/api/gen/go/exchange/instrument/v1;instrumentv1\xa2\x02\x03EIX\xaa\x02\x16Exchange.Instrument.V1\xca\x02\x16Exchange\\Instrument\\V1\xe2\x02\"Exchange\\Instrument\\V1\\GPBMetadata\xea\x02\x18Exchange::Instrument::V1b\x06proto3"
+	"\x06reason\x18\x03 \x01(\tR\x06reasonB\xed\x01\n" +
+	"\x1acom.exchange.instrument.v1B\vEventsProtoP\x01ZHgithub.com/skill/exchange/api/gen/go/exchange/instrument/v1;instrumentv1\xa2\x02\x03EIX\xaa\x02\x16Exchange.Instrument.V1\xca\x02\x16Exchange\\Instrument\\V1\xe2\x02\"Exchange\\Instrument\\V1\\GPBMetadata\xea\x02\x18Exchange::Instrument::V1b\x06proto3"
 
 var (
 	file_exchange_instrument_v1_events_proto_rawDescOnce sync.Once

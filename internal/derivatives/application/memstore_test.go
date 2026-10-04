@@ -13,8 +13,8 @@ import (
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lidp280504357/exchange/internal/derivatives/domain"
-	"github.com/lidp280504357/exchange/internal/derivatives/ports"
+	"github.com/skill/exchange/internal/derivatives/domain"
+	"github.com/skill/exchange/internal/derivatives/ports"
 )
 
 // memStore is an in-memory ports.Store: transactions run one at a time on

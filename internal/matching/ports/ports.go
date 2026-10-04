@@ -5,8 +5,8 @@ import (
 	"context"
 	"time"
 
-	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
-	"github.com/lidp280504357/exchange/internal/matching/domain"
+	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
+	"github.com/skill/exchange/internal/matching/domain"
 )
 
 // Sources of the engine's input (ADR-0015): order commands and reference

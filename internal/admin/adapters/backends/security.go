@@ -6,10 +6,10 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
-	riskv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/risk/v1"
-	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
-	"github.com/lidp280504357/exchange/internal/admin/ports"
+	authv1 "github.com/skill/exchange/api/gen/go/exchange/auth/v1"
+	riskv1 "github.com/skill/exchange/api/gen/go/exchange/risk/v1"
+	userv1 "github.com/skill/exchange/api/gen/go/exchange/user/v1"
+	"github.com/skill/exchange/internal/admin/ports"
 )
 
 func timeOf(t *timestamppb.Timestamp) time.Time {

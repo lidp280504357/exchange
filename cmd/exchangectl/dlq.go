@@ -12,7 +12,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/platform/kafka"
+	"github.com/skill/exchange/internal/platform/kafka"
 )
 
 // offsetsFlag collects repeated --offset partition:offset values.

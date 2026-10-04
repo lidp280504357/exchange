@@ -244,8 +244,8 @@ const file_exchange_risk_v1_risk_proto_rawDesc = "" +
 	"\x17ListAssessmentsResponse\x12>\n" +
 	"\vassessments\x18\x01 \x03(\v2\x1c.exchange.risk.v1.AssessmentR\vassessments2u\n" +
 	"\vRiskService\x12f\n" +
-	"\x0fListAssessments\x12(.exchange.risk.v1.ListAssessmentsRequest\x1a).exchange.risk.v1.ListAssessmentsResponseB\xc9\x01\n" +
-	"\x14com.exchange.risk.v1B\tRiskProtoP\x01ZDgithub.com/lidp280504357/exchange/api/gen/go/exchange/risk/v1;riskv1\xa2\x02\x03ERX\xaa\x02\x10Exchange.Risk.V1\xca\x02\x10Exchange\\Risk\\V1\xe2\x02\x1cExchange\\Risk\\V1\\GPBMetadata\xea\x02\x12Exchange::Risk::V1b\x06proto3"
+	"\x0fListAssessments\x12(.exchange.risk.v1.ListAssessmentsRequest\x1a).exchange.risk.v1.ListAssessmentsResponseB\xc1\x01\n" +
+	"\x14com.exchange.risk.v1B\tRiskProtoP\x01Z<github.com/skill/exchange/api/gen/go/exchange/risk/v1;riskv1\xa2\x02\x03ERX\xaa\x02\x10Exchange.Risk.V1\xca\x02\x10Exchange\\Risk\\V1\xe2\x02\x1cExchange\\Risk\\V1\\GPBMetadata\xea\x02\x12Exchange::Risk::V1b\x06proto3"
 
 var (
 	file_exchange_risk_v1_risk_proto_rawDescOnce sync.Once

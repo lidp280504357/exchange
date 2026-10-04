@@ -27,9 +27,9 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
-	"github.com/lidp280504357/exchange/internal/platform/logging"
-	"github.com/lidp280504357/exchange/internal/platform/tracing"
+	"github.com/skill/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/platform/logging"
+	"github.com/skill/exchange/internal/platform/tracing"
 )
 
 // Metrics are the server-side call metrics.

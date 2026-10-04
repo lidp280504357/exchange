@@ -7,9 +7,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/lidp280504357/exchange/internal/ledger/adapters/postgres"
-	"github.com/lidp280504357/exchange/internal/ledger/application"
-	"github.com/lidp280504357/exchange/internal/ledger/domain"
+	"github.com/skill/exchange/internal/ledger/adapters/postgres"
+	"github.com/skill/exchange/internal/ledger/application"
+	"github.com/skill/exchange/internal/ledger/domain"
 )
 
 // balance returns a user's SPOT balances in asset.

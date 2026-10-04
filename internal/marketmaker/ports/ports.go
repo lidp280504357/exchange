@@ -5,8 +5,8 @@ package ports
 import (
 	"context"
 
-	"github.com/lidp280504357/exchange/internal/marketmaker/domain"
-	"github.com/lidp280504357/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/marketmaker/domain"
+	"github.com/skill/exchange/internal/platform/flags"
 )
 
 // Specs lists the pairs that follow a reference market (those not TRADING

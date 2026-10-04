@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/notification/domain"
-	"github.com/lidp280504357/exchange/internal/notification/ports"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/notification/domain"
+	"github.com/skill/exchange/internal/notification/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // The mails sent later and the retention of old rows (the C4b review,

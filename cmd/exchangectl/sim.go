@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/platform/svcsign"
+	"github.com/skill/exchange/internal/platform/svcsign"
 )
 
 // simCmd talks to market-sim's management API (ASTRA design §6.2), signing

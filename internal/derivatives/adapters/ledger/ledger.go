@@ -8,9 +8,9 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	ledgerv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1"
-	"github.com/lidp280504357/exchange/internal/derivatives/domain"
-	"github.com/lidp280504357/exchange/internal/derivatives/ports"
+	ledgerv1 "github.com/skill/exchange/api/gen/go/exchange/ledger/v1"
+	"github.com/skill/exchange/internal/derivatives/domain"
+	"github.com/skill/exchange/internal/derivatives/ports"
 )
 
 // Client implements ports.Ledger.

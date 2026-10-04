@@ -10,8 +10,8 @@ import (
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lidp280504357/exchange/internal/admin/domain"
-	"github.com/lidp280504357/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/admin/domain"
+	"github.com/skill/exchange/internal/platform/flags"
 )
 
 // Store is the unit of work over the admin schema.

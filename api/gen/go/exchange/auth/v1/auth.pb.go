@@ -2028,8 +2028,8 @@ const file_exchange_auth_v1_auth_proto_rawDesc = "" +
 	"\tResetTOTP\x12\".exchange.auth.v1.ResetTOTPRequest\x1a#.exchange.auth.v1.ResetTOTPResponse\x12u\n" +
 	"\x14SetTemporaryPassword\x12-.exchange.auth.v1.SetTemporaryPasswordRequest\x1a..exchange.auth.v1.SetTemporaryPasswordResponse\x12u\n" +
 	"\x14ListIdentityRequests\x12-.exchange.auth.v1.ListIdentityRequestsRequest\x1a..exchange.auth.v1.ListIdentityRequestsResponse\x12x\n" +
-	"\x15DecideIdentityRequest\x12..exchange.auth.v1.DecideIdentityRequestRequest\x1a/.exchange.auth.v1.DecideIdentityRequestResponseB\xc9\x01\n" +
-	"\x14com.exchange.auth.v1B\tAuthProtoP\x01ZDgithub.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1;authv1\xa2\x02\x03EAX\xaa\x02\x10Exchange.Auth.V1\xca\x02\x10Exchange\\Auth\\V1\xe2\x02\x1cExchange\\Auth\\V1\\GPBMetadata\xea\x02\x12Exchange::Auth::V1b\x06proto3"
+	"\x15DecideIdentityRequest\x12..exchange.auth.v1.DecideIdentityRequestRequest\x1a/.exchange.auth.v1.DecideIdentityRequestResponseB\xc1\x01\n" +
+	"\x14com.exchange.auth.v1B\tAuthProtoP\x01Z<github.com/skill/exchange/api/gen/go/exchange/auth/v1;authv1\xa2\x02\x03EAX\xaa\x02\x10Exchange.Auth.V1\xca\x02\x10Exchange\\Auth\\V1\xe2\x02\x1cExchange\\Auth\\V1\\GPBMetadata\xea\x02\x12Exchange::Auth::V1b\x06proto3"
 
 var (
 	file_exchange_auth_v1_auth_proto_rawDescOnce sync.Once

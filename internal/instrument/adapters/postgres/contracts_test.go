@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/lidp280504357/exchange/internal/instrument/domain"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/instrument/domain"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 func contract() domain.Contract {

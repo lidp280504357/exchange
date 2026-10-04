@@ -4,10 +4,10 @@ package consumer
 import (
 	"context"
 
-	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
-	riskv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/risk/v1"
-	"github.com/lidp280504357/exchange/internal/platform/kafka"
-	"github.com/lidp280504357/exchange/internal/user/application"
+	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
+	riskv1 "github.com/skill/exchange/api/gen/go/exchange/risk/v1"
+	"github.com/skill/exchange/internal/platform/kafka"
+	"github.com/skill/exchange/internal/user/application"
 )
 
 // Handler carries out the reviews risk-service enforces; other events on

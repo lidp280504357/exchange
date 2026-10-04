@@ -8,11 +8,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/lidp280504357/exchange/internal/platform/migrate"
-	"github.com/lidp280504357/exchange/internal/platform/testenv"
-	"github.com/lidp280504357/exchange/internal/user/adapters/postgres"
-	"github.com/lidp280504357/exchange/internal/user/domain"
-	"github.com/lidp280504357/exchange/migrations"
+	"github.com/skill/exchange/internal/platform/migrate"
+	"github.com/skill/exchange/internal/platform/testenv"
+	"github.com/skill/exchange/internal/user/adapters/postgres"
+	"github.com/skill/exchange/internal/user/domain"
+	"github.com/skill/exchange/migrations"
 )
 
 func TestUsersStatus(t *testing.T) {

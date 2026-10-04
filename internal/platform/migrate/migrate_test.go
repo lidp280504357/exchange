@@ -7,7 +7,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/lidp280504357/exchange/internal/platform/testenv"
+	"github.com/skill/exchange/internal/platform/testenv"
 )
 
 var discard = slog.New(slog.DiscardHandler)

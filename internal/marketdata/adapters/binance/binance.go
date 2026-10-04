@@ -23,8 +23,8 @@ import (
 	"github.com/coder/websocket"
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/marketdata/domain"
-	"github.com/lidp280504357/exchange/internal/marketdata/ports"
+	"github.com/skill/exchange/internal/marketdata/domain"
+	"github.com/skill/exchange/internal/marketdata/ports"
 )
 
 // Source implements ports.ReferenceSource and ports.ReferenceHistory.

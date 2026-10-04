@@ -14,15 +14,15 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/admin/adapters/postgres"
-	"github.com/lidp280504357/exchange/internal/admin/application"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/migrate"
-	"github.com/lidp280504357/exchange/internal/platform/password"
-	"github.com/lidp280504357/exchange/internal/platform/pg"
-	"github.com/lidp280504357/exchange/internal/platform/secretbox"
-	"github.com/lidp280504357/exchange/internal/platform/totp"
-	"github.com/lidp280504357/exchange/migrations"
+	"github.com/skill/exchange/internal/admin/adapters/postgres"
+	"github.com/skill/exchange/internal/admin/application"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/migrate"
+	"github.com/skill/exchange/internal/platform/password"
+	"github.com/skill/exchange/internal/platform/pg"
+	"github.com/skill/exchange/internal/platform/secretbox"
+	"github.com/skill/exchange/internal/platform/totp"
+	"github.com/skill/exchange/migrations"
 )
 
 // adminCmd manages the admin console's accounts in the admin schema; the

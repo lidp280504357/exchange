@@ -11,7 +11,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 
-	"github.com/lidp280504357/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/event"
 )
 
 // HeaderReplayedFrom marks a record republished from a dead-letter topic

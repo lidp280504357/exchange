@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/notification/domain"
-	"github.com/lidp280504357/exchange/internal/platform/pg"
+	"github.com/skill/exchange/internal/notification/domain"
+	"github.com/skill/exchange/internal/platform/pg"
 )
 
 // Provider records messages instead of sending them.

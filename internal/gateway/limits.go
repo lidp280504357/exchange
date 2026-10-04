@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
-	"github.com/lidp280504357/exchange/internal/platform/ratelimit"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/platform/ratelimit"
 )
 
 // Quotas of the gateway (requirements §12.1): a ceiling per IP on every

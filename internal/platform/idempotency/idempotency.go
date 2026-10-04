@@ -13,8 +13,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/pg"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/pg"
 )
 
 // TTL is how long keys are kept.

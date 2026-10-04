@@ -8,8 +8,8 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
-	"github.com/lidp280504357/exchange/internal/marketdata/domain"
+	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
+	"github.com/skill/exchange/internal/marketdata/domain"
 )
 
 // Store is the unit of work over the market schema.

@@ -7,7 +7,7 @@
 package tradev1
 
 import (
-	v1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
+	v1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -256,8 +256,8 @@ const file_exchange_trade_v1_events_proto_rawDesc = "" +
 	"\x11buyer_limit_price\x18\x11 \x01(\tR\x0fbuyerLimitPrice\x12!\n" +
 	"\ftrade_number\x18\x12 \x01(\x04R\vtradeNumber\x126\n" +
 	"\n" +
-	"house_side\x18\x13 \x01(\x0e2\x17.exchange.order.v1.SideR\thouseSideB\xd2\x01\n" +
-	"\x15com.exchange.trade.v1B\vEventsProtoP\x01ZFgithub.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1;tradev1\xa2\x02\x03ETX\xaa\x02\x11Exchange.Trade.V1\xca\x02\x11Exchange\\Trade\\V1\xe2\x02\x1dExchange\\Trade\\V1\\GPBMetadata\xea\x02\x13Exchange::Trade::V1b\x06proto3"
+	"house_side\x18\x13 \x01(\x0e2\x17.exchange.order.v1.SideR\thouseSideB\xca\x01\n" +
+	"\x15com.exchange.trade.v1B\vEventsProtoP\x01Z>github.com/skill/exchange/api/gen/go/exchange/trade/v1;tradev1\xa2\x02\x03ETX\xaa\x02\x11Exchange.Trade.V1\xca\x02\x11Exchange\\Trade\\V1\xe2\x02\x1dExchange\\Trade\\V1\\GPBMetadata\xea\x02\x13Exchange::Trade::V1b\x06proto3"
 
 var (
 	file_exchange_trade_v1_events_proto_rawDescOnce sync.Once

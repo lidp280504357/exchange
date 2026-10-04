@@ -930,8 +930,8 @@ const file_exchange_auth_v1_events_proto_rawDesc = "" +
 	"\vTotpEnabled\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\"'\n" +
 	"\fTotpDisabled\x12\x17\n" +
-	"\auser_id\x18\x01 \x01(\tR\x06userIdB\xcb\x01\n" +
-	"\x14com.exchange.auth.v1B\vEventsProtoP\x01ZDgithub.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1;authv1\xa2\x02\x03EAX\xaa\x02\x10Exchange.Auth.V1\xca\x02\x10Exchange\\Auth\\V1\xe2\x02\x1cExchange\\Auth\\V1\\GPBMetadata\xea\x02\x12Exchange::Auth::V1b\x06proto3"
+	"\auser_id\x18\x01 \x01(\tR\x06userIdB\xc3\x01\n" +
+	"\x14com.exchange.auth.v1B\vEventsProtoP\x01Z<github.com/skill/exchange/api/gen/go/exchange/auth/v1;authv1\xa2\x02\x03EAX\xaa\x02\x10Exchange.Auth.V1\xca\x02\x10Exchange\\Auth\\V1\xe2\x02\x1cExchange\\Auth\\V1\\GPBMetadata\xea\x02\x12Exchange::Auth::V1b\x06proto3"
 
 var (
 	file_exchange_auth_v1_events_proto_rawDescOnce sync.Once

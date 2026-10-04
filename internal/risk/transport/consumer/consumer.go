@@ -7,11 +7,11 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
-	eventv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/event/v1"
-	"github.com/lidp280504357/exchange/internal/platform/kafka"
-	"github.com/lidp280504357/exchange/internal/risk/application"
-	"github.com/lidp280504357/exchange/internal/risk/domain"
+	authv1 "github.com/skill/exchange/api/gen/go/exchange/auth/v1"
+	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
+	"github.com/skill/exchange/internal/platform/kafka"
+	"github.com/skill/exchange/internal/risk/application"
+	"github.com/skill/exchange/internal/risk/domain"
 )
 
 // Handler assesses registrations, logins and failed logins; other events

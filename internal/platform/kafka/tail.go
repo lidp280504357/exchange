@@ -7,7 +7,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kgo"
 
-	"github.com/lidp280504357/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/event"
 )
 
 // Tail reads topics from their current end without a consumer group:

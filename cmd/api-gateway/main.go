@@ -14,15 +14,15 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/lidp280504357/exchange/internal/gateway"
-	"github.com/lidp280504357/exchange/internal/platform/app"
-	"github.com/lidp280504357/exchange/internal/platform/authtoken"
-	"github.com/lidp280504357/exchange/internal/platform/bootstrap"
-	"github.com/lidp280504357/exchange/internal/platform/config"
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
-	"github.com/lidp280504357/exchange/internal/platform/kafka"
-	"github.com/lidp280504357/exchange/internal/platform/ratelimit"
-	"github.com/lidp280504357/exchange/internal/platform/redisx"
+	"github.com/skill/exchange/internal/gateway"
+	"github.com/skill/exchange/internal/platform/app"
+	"github.com/skill/exchange/internal/platform/authtoken"
+	"github.com/skill/exchange/internal/platform/bootstrap"
+	"github.com/skill/exchange/internal/platform/config"
+	"github.com/skill/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/platform/kafka"
+	"github.com/skill/exchange/internal/platform/ratelimit"
+	"github.com/skill/exchange/internal/platform/redisx"
 )
 
 type settings struct {

@@ -11,9 +11,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/lidp280504357/exchange/internal/platform/evm"
-	"github.com/lidp280504357/exchange/internal/wallet/domain"
-	"github.com/lidp280504357/exchange/internal/wallet/ports"
+	"github.com/skill/exchange/internal/platform/evm"
+	"github.com/skill/exchange/internal/wallet/domain"
+	"github.com/skill/exchange/internal/wallet/ports"
 )
 
 // Limits of one eth_getLogs call: providers cap the block range (Alchemy's

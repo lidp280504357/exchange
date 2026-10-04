@@ -13,16 +13,16 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/derivatives/adapters/marks"
-	"github.com/lidp280504357/exchange/internal/derivatives/adapters/postgres"
-	"github.com/lidp280504357/exchange/internal/derivatives/application"
-	"github.com/lidp280504357/exchange/internal/derivatives/domain"
-	"github.com/lidp280504357/exchange/internal/derivatives/ports"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/migrate"
-	"github.com/lidp280504357/exchange/internal/platform/testenv"
-	"github.com/lidp280504357/exchange/migrations"
+	"github.com/skill/exchange/internal/derivatives/adapters/marks"
+	"github.com/skill/exchange/internal/derivatives/adapters/postgres"
+	"github.com/skill/exchange/internal/derivatives/application"
+	"github.com/skill/exchange/internal/derivatives/domain"
+	"github.com/skill/exchange/internal/derivatives/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/migrate"
+	"github.com/skill/exchange/internal/platform/testenv"
+	"github.com/skill/exchange/migrations"
 )
 
 func d(s string) decimal.Decimal { return decimal.RequireFromString(s) }

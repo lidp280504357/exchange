@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
+	authv1 "github.com/skill/exchange/api/gen/go/exchange/auth/v1"
 )
 
 // stepUps answers ConsumeStepUp with resp; the rest of the service is

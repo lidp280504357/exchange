@@ -15,9 +15,9 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/signer/domain"
-	"github.com/lidp280504357/exchange/internal/signer/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/signer/domain"
+	"github.com/skill/exchange/internal/signer/ports"
 )
 
 // Service is the signer.

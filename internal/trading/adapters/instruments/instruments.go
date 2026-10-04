@@ -10,8 +10,8 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	instrumentv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/instrument/v1"
-	"github.com/lidp280504357/exchange/internal/trading/domain"
+	instrumentv1 "github.com/skill/exchange/api/gen/go/exchange/instrument/v1"
+	"github.com/skill/exchange/internal/trading/domain"
 )
 
 // Client implements ports.Instruments. Pairs are cached for TTL: every

@@ -12,9 +12,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/platform/pg"
-	"github.com/lidp280504357/exchange/internal/signer/domain"
-	"github.com/lidp280504357/exchange/internal/signer/ports"
+	"github.com/skill/exchange/internal/platform/pg"
+	"github.com/skill/exchange/internal/signer/domain"
+	"github.com/skill/exchange/internal/signer/ports"
 )
 
 // Store implements ports.Store.

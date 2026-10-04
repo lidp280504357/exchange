@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/notification/domain"
+	"github.com/skill/exchange/internal/notification/domain"
 )
 
 // DefaultEndpoint is Resend's send-email API.

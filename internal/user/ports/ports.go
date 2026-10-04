@@ -7,8 +7,8 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lidp280504357/exchange/internal/platform/flags"
-	"github.com/lidp280504357/exchange/internal/user/domain"
+	"github.com/skill/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/user/domain"
 )
 
 // Store is the unit of work over the users schema.

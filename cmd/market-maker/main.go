@@ -15,17 +15,17 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	ledgerv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1"
-	"github.com/lidp280504357/exchange/internal/marketmaker/adapters/api"
-	"github.com/lidp280504357/exchange/internal/marketmaker/adapters/ledger"
-	"github.com/lidp280504357/exchange/internal/marketmaker/application"
-	"github.com/lidp280504357/exchange/internal/marketmaker/domain"
-	"github.com/lidp280504357/exchange/internal/marketmaker/transport/consumer"
-	"github.com/lidp280504357/exchange/internal/platform/app"
-	"github.com/lidp280504357/exchange/internal/platform/bootstrap"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/kafka"
-	"github.com/lidp280504357/exchange/internal/platform/pg"
+	ledgerv1 "github.com/skill/exchange/api/gen/go/exchange/ledger/v1"
+	"github.com/skill/exchange/internal/marketmaker/adapters/api"
+	"github.com/skill/exchange/internal/marketmaker/adapters/ledger"
+	"github.com/skill/exchange/internal/marketmaker/application"
+	"github.com/skill/exchange/internal/marketmaker/domain"
+	"github.com/skill/exchange/internal/marketmaker/transport/consumer"
+	"github.com/skill/exchange/internal/platform/app"
+	"github.com/skill/exchange/internal/platform/bootstrap"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/kafka"
+	"github.com/skill/exchange/internal/platform/pg"
 )
 
 type settings struct {

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
-	"github.com/lidp280504357/exchange/internal/platform/svcsign"
+	"github.com/skill/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/platform/svcsign"
 )
 
 func TestOnlyTheAdminKeyNamesAnApprover(t *testing.T) {

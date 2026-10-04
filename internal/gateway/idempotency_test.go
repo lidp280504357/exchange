@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/lidp280504357/exchange/internal/platform/testenv"
+	"github.com/skill/exchange/internal/platform/testenv"
 )
 
 func TestIdempotencyReplaysAndConflicts(t *testing.T) {

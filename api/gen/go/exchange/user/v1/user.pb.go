@@ -1242,8 +1242,8 @@ const file_exchange_user_v1_user_proto_rawDesc = "" +
 	"\fChangeStatus\x12%.exchange.user.v1.ChangeStatusRequest\x1a&.exchange.user.v1.ChangeStatusResponse\x12T\n" +
 	"\tListUsers\x12\".exchange.user.v1.ListUsersRequest\x1a#.exchange.user.v1.ListUsersResponse\x12T\n" +
 	"\tUserStats\x12\".exchange.user.v1.UserStatsRequest\x1a#.exchange.user.v1.UserStatsResponse\x12c\n" +
-	"\x0eGetUserHistory\x12'.exchange.user.v1.GetUserHistoryRequest\x1a(.exchange.user.v1.GetUserHistoryResponseB\xc9\x01\n" +
-	"\x14com.exchange.user.v1B\tUserProtoP\x01ZDgithub.com/lidp280504357/exchange/api/gen/go/exchange/user/v1;userv1\xa2\x02\x03EUX\xaa\x02\x10Exchange.User.V1\xca\x02\x10Exchange\\User\\V1\xe2\x02\x1cExchange\\User\\V1\\GPBMetadata\xea\x02\x12Exchange::User::V1b\x06proto3"
+	"\x0eGetUserHistory\x12'.exchange.user.v1.GetUserHistoryRequest\x1a(.exchange.user.v1.GetUserHistoryResponseB\xc1\x01\n" +
+	"\x14com.exchange.user.v1B\tUserProtoP\x01Z<github.com/skill/exchange/api/gen/go/exchange/user/v1;userv1\xa2\x02\x03EUX\xaa\x02\x10Exchange.User.V1\xca\x02\x10Exchange\\User\\V1\xe2\x02\x1cExchange\\User\\V1\\GPBMetadata\xea\x02\x12Exchange::User::V1b\x06proto3"
 
 var (
 	file_exchange_user_v1_user_proto_rawDescOnce sync.Once

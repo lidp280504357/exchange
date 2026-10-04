@@ -5,11 +5,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/admin/application"
-	"github.com/lidp280504357/exchange/internal/admin/domain"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
-	"github.com/lidp280504357/exchange/internal/platform/ratelimit"
+	"github.com/skill/exchange/internal/admin/application"
+	"github.com/skill/exchange/internal/admin/domain"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/platform/ratelimit"
 )
 
 // Administrators set their own credentials (C5.5 ⑪): the one-time setup

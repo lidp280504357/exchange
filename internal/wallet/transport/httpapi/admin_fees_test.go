@@ -10,9 +10,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
-	"github.com/lidp280504357/exchange/internal/wallet/application"
-	"github.com/lidp280504357/exchange/internal/wallet/domain"
+	"github.com/skill/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/wallet/application"
+	"github.com/skill/exchange/internal/wallet/domain"
 )
 
 // The console's fee routes (review AL): a status other than the three is

@@ -14,13 +14,13 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	marketv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/market/v1"
-	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
-	"github.com/lidp280504357/exchange/internal/marketdata/domain"
-	"github.com/lidp280504357/exchange/internal/marketdata/ports"
-	"github.com/lidp280504357/exchange/internal/platform/event"
-	"github.com/lidp280504357/exchange/internal/platform/flags"
-	"github.com/lidp280504357/exchange/internal/platform/kafka"
+	marketv1 "github.com/skill/exchange/api/gen/go/exchange/market/v1"
+	orderv1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
+	"github.com/skill/exchange/internal/marketdata/domain"
+	"github.com/skill/exchange/internal/marketdata/ports"
+	"github.com/skill/exchange/internal/platform/event"
+	"github.com/skill/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/platform/kafka"
 )
 
 // The public books and trades (ADR-0010, ADR-0015).

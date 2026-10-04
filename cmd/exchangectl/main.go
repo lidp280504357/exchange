@@ -44,9 +44,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/lidp280504357/exchange/internal/platform/config"
-	"github.com/lidp280504357/exchange/internal/platform/kafka"
-	"github.com/lidp280504357/exchange/internal/platform/pg"
+	"github.com/skill/exchange/internal/platform/config"
+	"github.com/skill/exchange/internal/platform/kafka"
+	"github.com/skill/exchange/internal/platform/pg"
 )
 
 type settings struct {

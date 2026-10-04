@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/wallet/domain"
+	"github.com/skill/exchange/internal/wallet/domain"
 )
 
 // TestAuthenticatorRemovedHoldsWithdrawals checks a withdrawal asked for

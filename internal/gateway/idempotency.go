@@ -15,8 +15,8 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/httpx"
 )
 
 // Idempotency-Key handling (requirements §7.1): scoped to user and path,

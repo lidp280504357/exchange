@@ -3,7 +3,7 @@ package domain
 import (
 	"testing"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 func code(err error) string { return apperr.From(err).Code }

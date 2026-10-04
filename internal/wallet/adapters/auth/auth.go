@@ -4,8 +4,8 @@ package auth
 import (
 	"context"
 
-	authv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/auth/v1"
-	"github.com/lidp280504357/exchange/internal/wallet/ports"
+	authv1 "github.com/skill/exchange/api/gen/go/exchange/auth/v1"
+	"github.com/skill/exchange/internal/wallet/ports"
 )
 
 // Client implements ports.StepUps and ports.Securities.

@@ -3040,8 +3040,8 @@ const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
 	"\tListHolds\x12$.exchange.ledger.v1.ListHoldsRequest\x1a%.exchange.ledger.v1.ListHoldsResponse\x12m\n" +
 	"\x10ReleaseUnclaimed\x12+.exchange.ledger.v1.ReleaseUnclaimedRequest\x1a,.exchange.ledger.v1.ReleaseUnclaimedResponse\x12v\n" +
 	"\x13GetUnclaimedRelease\x12..exchange.ledger.v1.GetUnclaimedReleaseRequest\x1a/.exchange.ledger.v1.GetUnclaimedReleaseResponse\x12j\n" +
-	"\x0fCreditUnclaimed\x12*.exchange.ledger.v1.CreditUnclaimedRequest\x1a+.exchange.ledger.v1.CreditUnclaimedResponseB\xd9\x01\n" +
-	"\x16com.exchange.ledger.v1B\vLedgerProtoP\x01ZHgithub.com/lidp280504357/exchange/api/gen/go/exchange/ledger/v1;ledgerv1\xa2\x02\x03ELX\xaa\x02\x12Exchange.Ledger.V1\xca\x02\x12Exchange\\Ledger\\V1\xe2\x02\x1eExchange\\Ledger\\V1\\GPBMetadata\xea\x02\x14Exchange::Ledger::V1b\x06proto3"
+	"\x0fCreditUnclaimed\x12*.exchange.ledger.v1.CreditUnclaimedRequest\x1a+.exchange.ledger.v1.CreditUnclaimedResponseB\xd1\x01\n" +
+	"\x16com.exchange.ledger.v1B\vLedgerProtoP\x01Z@github.com/skill/exchange/api/gen/go/exchange/ledger/v1;ledgerv1\xa2\x02\x03ELX\xaa\x02\x12Exchange.Ledger.V1\xca\x02\x12Exchange\\Ledger\\V1\xe2\x02\x1eExchange\\Ledger\\V1\\GPBMetadata\xea\x02\x14Exchange::Ledger::V1b\x06proto3"
 
 var (
 	file_exchange_ledger_v1_ledger_proto_rawDescOnce sync.Once

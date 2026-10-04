@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/auth/domain"
-	"github.com/lidp280504357/exchange/internal/auth/ports"
-	"github.com/lidp280504357/exchange/internal/platform/pg"
+	"github.com/skill/exchange/internal/auth/domain"
+	"github.com/skill/exchange/internal/auth/ports"
+	"github.com/skill/exchange/internal/platform/pg"
 )
 
 func (r repos) Credentials() ports.CredentialRepo         { return credentials(r) }

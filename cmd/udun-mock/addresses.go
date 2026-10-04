@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/lidp280504357/exchange/internal/platform/evm"
+	"github.com/skill/exchange/internal/platform/evm"
 )
 
 // Chains by Udun's main coin type: Bitcoin, TRON; everything else is

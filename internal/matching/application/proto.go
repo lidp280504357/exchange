@@ -9,11 +9,11 @@ import (
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
 
-	orderv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/order/v1"
-	tradev1 "github.com/lidp280504357/exchange/api/gen/go/exchange/trade/v1"
-	"github.com/lidp280504357/exchange/internal/matching/domain"
-	"github.com/lidp280504357/exchange/internal/matching/ports"
-	"github.com/lidp280504357/exchange/internal/platform/event"
+	orderv1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
+	tradev1 "github.com/skill/exchange/api/gen/go/exchange/trade/v1"
+	"github.com/skill/exchange/internal/matching/domain"
+	"github.com/skill/exchange/internal/matching/ports"
+	"github.com/skill/exchange/internal/platform/event"
 )
 
 // Topics names what an engine shard consumes and publishes.

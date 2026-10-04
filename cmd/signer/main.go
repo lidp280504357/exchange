@@ -24,17 +24,17 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	signerv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/signer/v1"
-	"github.com/lidp280504357/exchange/internal/platform/app"
-	"github.com/lidp280504357/exchange/internal/platform/bootstrap"
-	"github.com/lidp280504357/exchange/internal/platform/evm"
-	"github.com/lidp280504357/exchange/internal/platform/pg"
-	"github.com/lidp280504357/exchange/internal/signer/adapters/postgres"
-	"github.com/lidp280504357/exchange/internal/signer/application"
-	"github.com/lidp280504357/exchange/internal/signer/domain"
-	"github.com/lidp280504357/exchange/internal/signer/keystore"
-	"github.com/lidp280504357/exchange/internal/signer/transport/grpcapi"
-	"github.com/lidp280504357/exchange/migrations"
+	signerv1 "github.com/skill/exchange/api/gen/go/exchange/signer/v1"
+	"github.com/skill/exchange/internal/platform/app"
+	"github.com/skill/exchange/internal/platform/bootstrap"
+	"github.com/skill/exchange/internal/platform/evm"
+	"github.com/skill/exchange/internal/platform/pg"
+	"github.com/skill/exchange/internal/signer/adapters/postgres"
+	"github.com/skill/exchange/internal/signer/application"
+	"github.com/skill/exchange/internal/signer/domain"
+	"github.com/skill/exchange/internal/signer/keystore"
+	"github.com/skill/exchange/internal/signer/transport/grpcapi"
+	"github.com/skill/exchange/migrations"
 )
 
 func main() {

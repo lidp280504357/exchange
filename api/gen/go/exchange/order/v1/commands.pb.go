@@ -339,8 +339,8 @@ const file_exchange_order_v1_commands_proto_rawDesc = "" +
 	"holdingsAt\"B\n" +
 	"\x0eReferenceLevel\x12\x14\n" +
 	"\x05price\x18\x01 \x01(\tR\x05price\x12\x1a\n" +
-	"\bquantity\x18\x02 \x01(\tR\bquantityB\xd4\x01\n" +
-	"\x15com.exchange.order.v1B\rCommandsProtoP\x01ZFgithub.com/lidp280504357/exchange/api/gen/go/exchange/order/v1;orderv1\xa2\x02\x03EOX\xaa\x02\x11Exchange.Order.V1\xca\x02\x11Exchange\\Order\\V1\xe2\x02\x1dExchange\\Order\\V1\\GPBMetadata\xea\x02\x13Exchange::Order::V1b\x06proto3"
+	"\bquantity\x18\x02 \x01(\tR\bquantityB\xcc\x01\n" +
+	"\x15com.exchange.order.v1B\rCommandsProtoP\x01Z>github.com/skill/exchange/api/gen/go/exchange/order/v1;orderv1\xa2\x02\x03EOX\xaa\x02\x11Exchange.Order.V1\xca\x02\x11Exchange\\Order\\V1\xe2\x02\x1dExchange\\Order\\V1\\GPBMetadata\xea\x02\x13Exchange::Order::V1b\x06proto3"
 
 var (
 	file_exchange_order_v1_commands_proto_rawDescOnce sync.Once

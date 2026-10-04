@@ -3,8 +3,8 @@ package application
 import (
 	"testing"
 
-	"github.com/lidp280504357/exchange/internal/derivatives/domain"
-	"github.com/lidp280504357/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/derivatives/domain"
+	"github.com/skill/exchange/internal/platform/flags"
 )
 
 type houseFlags map[string]bool

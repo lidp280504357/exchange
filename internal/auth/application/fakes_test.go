@@ -14,10 +14,10 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lidp280504357/exchange/internal/auth/domain"
-	"github.com/lidp280504357/exchange/internal/auth/ports"
-	"github.com/lidp280504357/exchange/internal/platform/flags"
-	"github.com/lidp280504357/exchange/internal/platform/ratelimit"
+	"github.com/skill/exchange/internal/auth/domain"
+	"github.com/skill/exchange/internal/auth/ports"
+	"github.com/skill/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/platform/ratelimit"
 )
 
 // memStore is an in-memory ports.Store whose transactions roll back on error.

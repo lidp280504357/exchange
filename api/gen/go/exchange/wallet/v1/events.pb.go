@@ -581,8 +581,8 @@ const file_exchange_wallet_v1_events_proto_rawDesc = "" +
 	"\x0fDepositOrphaned\x125\n" +
 	"\adeposit\x18\x01 \x01(\v2\x1b.exchange.wallet.v1.DepositR\adeposit\"H\n" +
 	"\x0fDepositRejected\x125\n" +
-	"\adeposit\x18\x01 \x01(\v2\x1b.exchange.wallet.v1.DepositR\adepositB\xd9\x01\n" +
-	"\x16com.exchange.wallet.v1B\vEventsProtoP\x01ZHgithub.com/lidp280504357/exchange/api/gen/go/exchange/wallet/v1;walletv1\xa2\x02\x03EWX\xaa\x02\x12Exchange.Wallet.V1\xca\x02\x12Exchange\\Wallet\\V1\xe2\x02\x1eExchange\\Wallet\\V1\\GPBMetadata\xea\x02\x14Exchange::Wallet::V1b\x06proto3"
+	"\adeposit\x18\x01 \x01(\v2\x1b.exchange.wallet.v1.DepositR\adepositB\xd1\x01\n" +
+	"\x16com.exchange.wallet.v1B\vEventsProtoP\x01Z@github.com/skill/exchange/api/gen/go/exchange/wallet/v1;walletv1\xa2\x02\x03EWX\xaa\x02\x12Exchange.Wallet.V1\xca\x02\x12Exchange\\Wallet\\V1\xe2\x02\x1eExchange\\Wallet\\V1\\GPBMetadata\xea\x02\x14Exchange::Wallet::V1b\x06proto3"
 
 var (
 	file_exchange_wallet_v1_events_proto_rawDescOnce sync.Once

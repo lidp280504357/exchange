@@ -6,8 +6,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/lidp280504357/exchange/internal/platform/httpx"
-	"github.com/lidp280504357/exchange/internal/wallet/domain"
+	"github.com/skill/exchange/internal/platform/httpx"
+	"github.com/skill/exchange/internal/wallet/domain"
 )
 
 // unmatchedRoutes serves the console's "credit to a user" of a deposit of

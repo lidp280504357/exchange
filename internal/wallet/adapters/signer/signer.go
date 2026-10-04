@@ -4,8 +4,8 @@ package signer
 import (
 	"context"
 
-	signerv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/signer/v1"
-	"github.com/lidp280504357/exchange/internal/wallet/ports"
+	signerv1 "github.com/skill/exchange/api/gen/go/exchange/signer/v1"
+	"github.com/skill/exchange/internal/wallet/ports"
 )
 
 // Client implements ports.Signer.

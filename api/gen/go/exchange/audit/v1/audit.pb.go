@@ -203,9 +203,9 @@ const file_exchange_audit_v1_audit_proto_rawDesc = "" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12\x14\n" +
 	"\x05actor\x18\x03 \x01(\tR\x05actor\x12\x16\n" +
 	"\x06reason\x18\x04 \x01(\tR\x06reason\x12\x18\n" +
-	"\adetails\x18\x05 \x01(\tR\adetailsB\xd1\x01\n" +
+	"\adetails\x18\x05 \x01(\tR\adetailsB\xc9\x01\n" +
 	"\x15com.exchange.audit.v1B\n" +
-	"AuditProtoP\x01ZFgithub.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1;auditv1\xa2\x02\x03EAX\xaa\x02\x11Exchange.Audit.V1\xca\x02\x11Exchange\\Audit\\V1\xe2\x02\x1dExchange\\Audit\\V1\\GPBMetadata\xea\x02\x13Exchange::Audit::V1b\x06proto3"
+	"AuditProtoP\x01Z>github.com/skill/exchange/api/gen/go/exchange/audit/v1;auditv1\xa2\x02\x03EAX\xaa\x02\x11Exchange.Audit.V1\xca\x02\x11Exchange\\Audit\\V1\xe2\x02\x1dExchange\\Audit\\V1\\GPBMetadata\xea\x02\x13Exchange::Audit::V1b\x06proto3"
 
 var (
 	file_exchange_audit_v1_audit_proto_rawDescOnce sync.Once

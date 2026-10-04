@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lidp280504357/exchange/internal/platform/ratelimit"
-	"github.com/lidp280504357/exchange/internal/platform/testenv"
+	"github.com/skill/exchange/internal/platform/ratelimit"
+	"github.com/skill/exchange/internal/platform/testenv"
 )
 
 func TestAllowCountsUntilTheLimit(t *testing.T) {

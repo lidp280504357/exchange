@@ -6,16 +6,16 @@ import (
 	"context"
 	"errors"
 
-	instrumentv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/instrument/v1"
-	"github.com/lidp280504357/exchange/internal/instrument/adapters/postgres"
-	"github.com/lidp280504357/exchange/internal/instrument/application"
-	"github.com/lidp280504357/exchange/internal/instrument/transport/grpcapi"
-	"github.com/lidp280504357/exchange/internal/instrument/transport/httpapi"
-	"github.com/lidp280504357/exchange/internal/platform/app"
-	"github.com/lidp280504357/exchange/internal/platform/bootstrap"
-	"github.com/lidp280504357/exchange/internal/platform/kafka"
-	"github.com/lidp280504357/exchange/internal/platform/pg"
-	"github.com/lidp280504357/exchange/migrations"
+	instrumentv1 "github.com/skill/exchange/api/gen/go/exchange/instrument/v1"
+	"github.com/skill/exchange/internal/instrument/adapters/postgres"
+	"github.com/skill/exchange/internal/instrument/application"
+	"github.com/skill/exchange/internal/instrument/transport/grpcapi"
+	"github.com/skill/exchange/internal/instrument/transport/httpapi"
+	"github.com/skill/exchange/internal/platform/app"
+	"github.com/skill/exchange/internal/platform/bootstrap"
+	"github.com/skill/exchange/internal/platform/kafka"
+	"github.com/skill/exchange/internal/platform/pg"
+	"github.com/skill/exchange/migrations"
 )
 
 type settings struct {

@@ -10,11 +10,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
-	accountv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/account/v1"
-	"github.com/lidp280504357/exchange/internal/ledger/domain"
-	"github.com/lidp280504357/exchange/internal/ledger/ports"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/event"
+	accountv1 "github.com/skill/exchange/api/gen/go/exchange/account/v1"
+	"github.com/skill/exchange/internal/ledger/domain"
+	"github.com/skill/exchange/internal/ledger/ports"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/event"
 )
 
 // TransferInput is a transfer between a user's SPOT and FUTURES accounts.

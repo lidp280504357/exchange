@@ -10,7 +10,7 @@ import (
 
 	"github.com/nyaruka/phonenumbers"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // Channel is how a code reaches the user; it doubles as the identity kind.

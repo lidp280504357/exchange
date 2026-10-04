@@ -13,12 +13,12 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 
-	auditv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/audit/v1"
-	userv1 "github.com/lidp280504357/exchange/api/gen/go/exchange/user/v1"
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
-	"github.com/lidp280504357/exchange/internal/platform/flags"
-	"github.com/lidp280504357/exchange/internal/user/domain"
-	"github.com/lidp280504357/exchange/internal/user/ports"
+	auditv1 "github.com/skill/exchange/api/gen/go/exchange/audit/v1"
+	userv1 "github.com/skill/exchange/api/gen/go/exchange/user/v1"
+	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/flags"
+	"github.com/skill/exchange/internal/user/domain"
+	"github.com/skill/exchange/internal/user/ports"
 )
 
 type memStore struct {

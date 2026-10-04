@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lidp280504357/exchange/internal/notification/domain"
+	"github.com/skill/exchange/internal/notification/domain"
 )
 
 type roundTripper func(*http.Request) (*http.Response, error)

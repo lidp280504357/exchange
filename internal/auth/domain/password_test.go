@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lidp280504357/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 var testCost = PasswordCost{MemoryKiB: 64, Iterations: 1}

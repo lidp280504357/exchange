@@ -13,7 +13,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/marketmaker/domain"
+	"github.com/skill/exchange/internal/marketmaker/domain"
 )
 
 // Client implements ports.Specs and the contracts half of ports.House.

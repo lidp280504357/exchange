@@ -6,8 +6,8 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/lidp280504357/exchange/internal/instrument/domain"
-	"github.com/lidp280504357/exchange/internal/instrument/ports"
+	"github.com/skill/exchange/internal/instrument/domain"
+	"github.com/skill/exchange/internal/instrument/ports"
 )
 
 // ProfileChange is an operator's new profile for an asset (ASTRA design

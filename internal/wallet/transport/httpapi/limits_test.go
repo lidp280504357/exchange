@@ -10,8 +10,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/shopspring/decimal"
 
-	"github.com/lidp280504357/exchange/internal/wallet/application"
-	"github.com/lidp280504357/exchange/internal/wallet/domain"
+	"github.com/skill/exchange/internal/wallet/application"
+	"github.com/skill/exchange/internal/wallet/domain"
 )
 
 // GET /v1/wallet/limits (review BA): signed in only; the limits render
