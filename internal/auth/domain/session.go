@@ -165,11 +165,13 @@ type Device struct {
 }
 
 // SecurityContext is what the risk rules of sensitive actions weigh
-// (§11.6): identities, authenticator, how new the device is and recent
-// identity, password or authenticator changes.
+// (§11.6): identities, authenticator (and when the one bound now was
+// activated), how new the device is and recent identity, password or
+// authenticator changes.
 type SecurityContext struct {
 	Identities        int
 	TOTPEnabled       bool
+	TOTPActivatedAt   time.Time
 	DeviceID          string
 	DeviceFirstSeenAt time.Time
 	IdentityChangedAt time.Time

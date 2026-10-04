@@ -36,5 +36,8 @@ func (c *Client) Consume(ctx context.Context, userID, token string) (ports.StepU
 	if t := sec.GetTotpChangedAt(); t != nil {
 		su.TOTPChanged = t.AsTime()
 	}
+	if t := sec.GetTotpActivatedAt(); t != nil {
+		su.TOTPActivated = t.AsTime()
+	}
 	return su, nil
 }

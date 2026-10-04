@@ -215,7 +215,7 @@ func (s *Service) RequestWithdrawal(ctx context.Context, userID string, in Withd
 	if err != nil {
 		return domain.Withdrawal{}, err
 	}
-	limits := domain.LimitsFor(su.Identities, su.TOTPEnabled)
+	limits := domain.LimitsFor(su.Identities, su.TOTPEnabled, su.TOTPActivated, now)
 	today, err := r.Withdrawals().ValueSince(ctx, userID, now.UTC().Truncate(24*time.Hour))
 	if err != nil {
 		return domain.Withdrawal{}, err
@@ -226,9 +226,13 @@ func (s *Service) RequestWithdrawal(ctx context.Context, userID string, in Withd
 		return domain.Withdrawal{}, err
 	}
 	if today.Add(value).GreaterThan(limits.Daily) || month.Add(value).GreaterThan(limits.Monthly) {
-		return domain.Withdrawal{}, domain.ErrLimitExceeded.WithDetail("daily_limit", limits.Daily.String()).
+		e := domain.ErrLimitExceeded.WithDetail("daily_limit", limits.Daily.String()).
 			WithDetail("monthly_limit", limits.Monthly.String()).WithDetail("used_today", today.String()).
 			WithDetail("used_this_month", month.String()).WithDetail("value_usdt", value.String())
+		if at := domain.FullLimitsAt(su.Identities, su.TOTPEnabled, su.TOTPActivated, now); !at.IsZero() {
+			e = e.WithDetail("full_limits_at", at.UTC().Format(time.RFC3339)) // the authenticator app settling
+		}
+		return domain.Withdrawal{}, e
 	}
 	risk := domain.Assess(domain.RiskInput{
 		Now: now, AccountCreated: created, DeviceFirstSeen: su.DeviceFirstSeen, IdentityChanged: su.IdentityChanged,

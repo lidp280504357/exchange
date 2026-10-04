@@ -27,7 +27,7 @@ export default {
         identitiesNote: "邮箱与手机号取自你的登录记录与身份变更通知。",
         totp: {
           title: "身份验证器",
-          desc: "Google Authenticator 等 App 生成的动态验证码，用于提现与修改安全设置，比短信和邮件更安全。",
+          desc: "Google Authenticator 等 App 生成的动态验证码，用于提现与修改安全设置，比短信和邮件更安全。邮箱和手机号都已绑定时，绑定身份验证器 24 小时后提现额度提升。",
           bind: "绑定",
           unbind: "解绑",
           continueBind: "继续绑定",
@@ -217,7 +217,7 @@ export default {
         identitiesNote: "Your email and phone come from your sign-ins and contact-change notices.",
         totp: {
           title: "Authenticator app",
-          desc: "Codes from Google Authenticator and similar apps confirm withdrawals and security changes; safer than SMS or email.",
+          desc: "Codes from Google Authenticator and similar apps confirm withdrawals and security changes; safer than SMS or email. With both email and phone verified, your withdrawal limits rise 24 hours after you set it up.",
           bind: "Set up",
           unbind: "Remove",
           continueBind: "Finish setup",

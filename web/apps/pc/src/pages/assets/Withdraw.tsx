@@ -728,10 +728,16 @@ function NewAddress({
   );
 }
 
-/** LimitBars shows the daily and monthly use a refused withdrawal reported (WALLET_LIMIT_EXCEEDED). */
+/**
+ * LimitBars shows the daily and monthly use a refused withdrawal reported (WALLET_LIMIT_EXCEEDED), and when the full
+ * limits come if an authenticator app bound within a day holds them back (full_limits_at).
+ */
 function LimitBars({ details }: { details: Record<string, unknown> }) {
   const { t } = useTranslation();
+  const locale = useSettings((s) => s.locale);
+  const zone = useSettings((s) => timeZoneOf(s));
   const str = (k: string) => (typeof details[k] === "string" && dec.isDecimal(details[k] as string) ? (details[k] as string) : null);
+  const raises = typeof details.full_limits_at === "string" ? details.full_limits_at : null;
   const bars = [
     { key: "daily", label: t("pcAssets.withdraw.limitDaily"), used: str("used_today"), limit: str("daily_limit") },
     { key: "monthly", label: t("pcAssets.withdraw.limitMonthly"), used: str("used_this_month"), limit: str("monthly_limit") },
@@ -754,6 +760,7 @@ function LimitBars({ details }: { details: Record<string, unknown> }) {
         );
       })}
       {value && <p className="text-xs text-fg-2">{t("pcAssets.withdraw.limitThis", { value: formatDecimal(value, { decimals: 2 }) })}</p>}
+      {raises && <p className="text-xs text-fg-2">{t("pcAssets.withdraw.limitRaises", { time: formatTime(raises, "datetime", locale, zone) })}</p>}
     </div>
   );
 }

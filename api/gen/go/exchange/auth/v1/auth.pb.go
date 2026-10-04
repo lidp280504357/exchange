@@ -1591,8 +1591,12 @@ type SecurityContext struct {
 	// The latest removal of the authenticator app, by the user or an
 	// administrator.
 	TotpChangedAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=totp_changed_at,json=totpChangedAt,proto3" json:"totp_changed_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// When the authenticator app bound now was activated; absent while none
+	// is. The wallet's full limits wait a day after it (variant B of
+	// 2026-10-04).
+	TotpActivatedAt *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=totp_activated_at,json=totpActivatedAt,proto3" json:"totp_activated_at,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *SecurityContext) Reset() {
@@ -1670,6 +1674,13 @@ func (x *SecurityContext) GetPasswordChangedAt() *timestamppb.Timestamp {
 func (x *SecurityContext) GetTotpChangedAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.TotpChangedAt
+	}
+	return nil
+}
+
+func (x *SecurityContext) GetTotpActivatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.TotpActivatedAt
 	}
 	return nil
 }
@@ -1896,7 +1907,7 @@ const file_exchange_auth_v1_auth_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x18\n" +
 	"\achannel\x18\x02 \x01(\tR\achannel\x12=\n" +
-	"\bsecurity\x18\x03 \x01(\v2!.exchange.auth.v1.SecurityContextR\bsecurity\"\x9a\x03\n" +
+	"\bsecurity\x18\x03 \x01(\v2!.exchange.auth.v1.SecurityContextR\bsecurity\"\xe2\x03\n" +
 	"\x0fSecurityContext\x12\x1e\n" +
 	"\n" +
 	"identities\x18\x01 \x01(\x05R\n" +
@@ -1906,7 +1917,8 @@ const file_exchange_auth_v1_auth_proto_rawDesc = "" +
 	"\x14device_first_seen_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x11deviceFirstSeenAt\x12J\n" +
 	"\x13identity_changed_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\x11identityChangedAt\x12J\n" +
 	"\x13password_changed_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\x11passwordChangedAt\x12B\n" +
-	"\x0ftotp_changed_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\rtotpChangedAt\"1\n" +
+	"\x0ftotp_changed_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\rtotpChangedAt\x12F\n" +
+	"\x11totp_activated_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\x0ftotpActivatedAt\"1\n" +
 	"\x0fFindUserRequest\x12\x1e\n" +
 	"\n" +
 	"identifier\x18\x01 \x01(\tR\n" +
@@ -1995,31 +2007,32 @@ var file_exchange_auth_v1_auth_proto_depIdxs = []int32{
 	27, // 22: exchange.auth.v1.SecurityContext.identity_changed_at:type_name -> google.protobuf.Timestamp
 	27, // 23: exchange.auth.v1.SecurityContext.password_changed_at:type_name -> google.protobuf.Timestamp
 	27, // 24: exchange.auth.v1.SecurityContext.totp_changed_at:type_name -> google.protobuf.Timestamp
-	19, // 25: exchange.auth.v1.AuthService.GetContacts:input_type -> exchange.auth.v1.GetContactsRequest
-	22, // 26: exchange.auth.v1.AuthService.ConsumeStepUp:input_type -> exchange.auth.v1.ConsumeStepUpRequest
-	25, // 27: exchange.auth.v1.AuthService.FindUser:input_type -> exchange.auth.v1.FindUserRequest
-	0,  // 28: exchange.auth.v1.AuthService.GetSecurity:input_type -> exchange.auth.v1.GetSecurityRequest
-	5,  // 29: exchange.auth.v1.AuthService.ListLoginHistory:input_type -> exchange.auth.v1.ListLoginHistoryRequest
-	8,  // 30: exchange.auth.v1.AuthService.RevokeSessions:input_type -> exchange.auth.v1.RevokeSessionsRequest
-	10, // 31: exchange.auth.v1.AuthService.ResetTOTP:input_type -> exchange.auth.v1.ResetTOTPRequest
-	12, // 32: exchange.auth.v1.AuthService.SetTemporaryPassword:input_type -> exchange.auth.v1.SetTemporaryPasswordRequest
-	15, // 33: exchange.auth.v1.AuthService.ListIdentityRequests:input_type -> exchange.auth.v1.ListIdentityRequestsRequest
-	17, // 34: exchange.auth.v1.AuthService.DecideIdentityRequest:input_type -> exchange.auth.v1.DecideIdentityRequestRequest
-	21, // 35: exchange.auth.v1.AuthService.GetContacts:output_type -> exchange.auth.v1.GetContactsResponse
-	23, // 36: exchange.auth.v1.AuthService.ConsumeStepUp:output_type -> exchange.auth.v1.ConsumeStepUpResponse
-	26, // 37: exchange.auth.v1.AuthService.FindUser:output_type -> exchange.auth.v1.FindUserResponse
-	4,  // 38: exchange.auth.v1.AuthService.GetSecurity:output_type -> exchange.auth.v1.GetSecurityResponse
-	7,  // 39: exchange.auth.v1.AuthService.ListLoginHistory:output_type -> exchange.auth.v1.ListLoginHistoryResponse
-	9,  // 40: exchange.auth.v1.AuthService.RevokeSessions:output_type -> exchange.auth.v1.RevokeSessionsResponse
-	11, // 41: exchange.auth.v1.AuthService.ResetTOTP:output_type -> exchange.auth.v1.ResetTOTPResponse
-	13, // 42: exchange.auth.v1.AuthService.SetTemporaryPassword:output_type -> exchange.auth.v1.SetTemporaryPasswordResponse
-	16, // 43: exchange.auth.v1.AuthService.ListIdentityRequests:output_type -> exchange.auth.v1.ListIdentityRequestsResponse
-	18, // 44: exchange.auth.v1.AuthService.DecideIdentityRequest:output_type -> exchange.auth.v1.DecideIdentityRequestResponse
-	35, // [35:45] is the sub-list for method output_type
-	25, // [25:35] is the sub-list for method input_type
-	25, // [25:25] is the sub-list for extension type_name
-	25, // [25:25] is the sub-list for extension extendee
-	0,  // [0:25] is the sub-list for field type_name
+	27, // 25: exchange.auth.v1.SecurityContext.totp_activated_at:type_name -> google.protobuf.Timestamp
+	19, // 26: exchange.auth.v1.AuthService.GetContacts:input_type -> exchange.auth.v1.GetContactsRequest
+	22, // 27: exchange.auth.v1.AuthService.ConsumeStepUp:input_type -> exchange.auth.v1.ConsumeStepUpRequest
+	25, // 28: exchange.auth.v1.AuthService.FindUser:input_type -> exchange.auth.v1.FindUserRequest
+	0,  // 29: exchange.auth.v1.AuthService.GetSecurity:input_type -> exchange.auth.v1.GetSecurityRequest
+	5,  // 30: exchange.auth.v1.AuthService.ListLoginHistory:input_type -> exchange.auth.v1.ListLoginHistoryRequest
+	8,  // 31: exchange.auth.v1.AuthService.RevokeSessions:input_type -> exchange.auth.v1.RevokeSessionsRequest
+	10, // 32: exchange.auth.v1.AuthService.ResetTOTP:input_type -> exchange.auth.v1.ResetTOTPRequest
+	12, // 33: exchange.auth.v1.AuthService.SetTemporaryPassword:input_type -> exchange.auth.v1.SetTemporaryPasswordRequest
+	15, // 34: exchange.auth.v1.AuthService.ListIdentityRequests:input_type -> exchange.auth.v1.ListIdentityRequestsRequest
+	17, // 35: exchange.auth.v1.AuthService.DecideIdentityRequest:input_type -> exchange.auth.v1.DecideIdentityRequestRequest
+	21, // 36: exchange.auth.v1.AuthService.GetContacts:output_type -> exchange.auth.v1.GetContactsResponse
+	23, // 37: exchange.auth.v1.AuthService.ConsumeStepUp:output_type -> exchange.auth.v1.ConsumeStepUpResponse
+	26, // 38: exchange.auth.v1.AuthService.FindUser:output_type -> exchange.auth.v1.FindUserResponse
+	4,  // 39: exchange.auth.v1.AuthService.GetSecurity:output_type -> exchange.auth.v1.GetSecurityResponse
+	7,  // 40: exchange.auth.v1.AuthService.ListLoginHistory:output_type -> exchange.auth.v1.ListLoginHistoryResponse
+	9,  // 41: exchange.auth.v1.AuthService.RevokeSessions:output_type -> exchange.auth.v1.RevokeSessionsResponse
+	11, // 42: exchange.auth.v1.AuthService.ResetTOTP:output_type -> exchange.auth.v1.ResetTOTPResponse
+	13, // 43: exchange.auth.v1.AuthService.SetTemporaryPassword:output_type -> exchange.auth.v1.SetTemporaryPasswordResponse
+	16, // 44: exchange.auth.v1.AuthService.ListIdentityRequests:output_type -> exchange.auth.v1.ListIdentityRequestsResponse
+	18, // 45: exchange.auth.v1.AuthService.DecideIdentityRequest:output_type -> exchange.auth.v1.DecideIdentityRequestResponse
+	36, // [36:46] is the sub-list for method output_type
+	26, // [26:36] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_exchange_auth_v1_auth_proto_init() }

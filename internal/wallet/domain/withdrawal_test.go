@@ -63,14 +63,38 @@ func TestAssess(t *testing.T) {
 	}
 }
 
+// The limits (§11.6): both identities and an authenticator app get the
+// full ones, but only a day after the app's activation (variant B,
+// 2026-10-04): a second after it 20%, until then the time they rise; a
+// day and a second after it the full ones (five times as much). An app
+// whose activation is not known counts.
 func TestLimits(t *testing.T) {
-	if l := LimitsFor(2, true); l.Daily.String() != "2000" || l.Monthly.String() != "20000" {
+	now := time.Date(2026, 10, 4, 9, 0, 0, 0, time.UTC)
+	long := now.Add(-30 * 24 * time.Hour)
+	if l := LimitsFor(2, true, long, now); l.Daily.String() != "2000" || l.Monthly.String() != "20000" {
 		t.Fatalf("full limits %+v", l)
 	}
-	for _, l := range []Limits{LimitsFor(1, true), LimitsFor(2, false)} {
+	for _, l := range []Limits{LimitsFor(1, true, long, now), LimitsFor(2, false, time.Time{}, now)} {
 		if l.Daily.String() != "400" || l.Monthly.String() != "4000" {
 			t.Fatalf("20%% limits %+v", l)
 		}
+	}
+	bound := now.Add(-time.Second)
+	if l := LimitsFor(2, true, bound, now); l.Daily.String() != "400" || l.Monthly.String() != "4000" {
+		t.Fatalf("a second after binding the app %+v", l)
+	}
+	if at := FullLimitsAt(2, true, bound, now); !at.Equal(bound.Add(24 * time.Hour)) {
+		t.Fatalf("the full limits from %v", at)
+	}
+	settled := now.Add(-24*time.Hour - time.Second)
+	if l := LimitsFor(2, true, settled, now); l.Daily.String() != "2000" || !FullLimitsAt(2, true, settled, now).IsZero() {
+		t.Fatalf("a day and a second after binding the app %+v", l)
+	}
+	if l := LimitsFor(2, true, time.Time{}, now); l.Daily.String() != "2000" {
+		t.Fatalf("an app of unknown activation %+v", l)
+	}
+	if !FullLimitsAt(1, true, bound, now).IsZero() {
+		t.Fatal("one identity: nothing to wait for")
 	}
 }
 

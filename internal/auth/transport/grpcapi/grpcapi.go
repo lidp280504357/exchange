@@ -54,7 +54,7 @@ func (s *Server) ConsumeStepUp(ctx context.Context, req *authv1.ConsumeStepUpReq
 	return &authv1.ConsumeStepUpResponse{SessionId: su.SessionID, Channel: string(su.Channel), Security: &authv1.SecurityContext{
 		Identities: int32(sec.Identities), TotpEnabled: sec.TOTPEnabled, DeviceId: sec.DeviceID, //nolint:gosec // a handful
 		DeviceFirstSeenAt: stamp(sec.DeviceFirstSeenAt), IdentityChangedAt: stamp(sec.IdentityChangedAt),
-		PasswordChangedAt: stamp(sec.PasswordChangedAt), TotpChangedAt: stamp(sec.TOTPChangedAt),
+		PasswordChangedAt: stamp(sec.PasswordChangedAt), TotpChangedAt: stamp(sec.TOTPChangedAt), TotpActivatedAt: stamp(sec.TOTPActivatedAt),
 	}}, nil
 }
 

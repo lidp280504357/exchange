@@ -284,6 +284,39 @@ func eventNames(msgs []proto.Message) []string {
 	return out
 }
 
+// An authenticator app bound a second ago does not raise the limits yet
+// (variant B, 2026-10-04): with both identities, 500 USDT is over the 400
+// a day of 20%, and the refusal says when the full limits come; bound a
+// day and a second ago, the same withdrawal is within the full 2,000.
+func TestANewAuthenticatorWaitsADayForTheLimits(t *testing.T) {
+	w := newWithdrawHarness(t)
+	ctx := context.Background()
+	payee := "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359"
+	if _, err := w.svc.AddAddress(ctx, "alice", AddressInput{Network: net, Address: payee, StepUp: w.stepUp("s1", 2, false)}); err != nil {
+		t.Fatal(err)
+	}
+	w.now = w.now.Add(2 * time.Minute)
+	w.ledger.available["alice"] = d("1")
+	bound := func(token string, activated time.Time) string {
+		w.stepUp(token, 2, true)
+		su := w.stepUps.tokens[token]
+		su.TOTPActivated = activated
+		w.stepUps.tokens[token] = su
+		return token
+	}
+	req := WithdrawalInput{Asset: "ETH", Network: net, Address: payee, Amount: d("0.2"), StepUp: bound("s2", w.now.Add(-time.Second))} // 500 USDT
+	_, err := w.svc.RequestWithdrawal(ctx, "alice", req)
+	var e *apperr.Error
+	if !errors.As(err, &e) || e.Code != "WALLET_LIMIT_EXCEEDED" || e.Details["daily_limit"] != "400" ||
+		e.Details["full_limits_at"] != w.now.Add(-time.Second).Add(24*time.Hour).UTC().Format(time.RFC3339) {
+		t.Fatalf("a second after binding the app: %v %+v", err, e)
+	}
+	req.StepUp = bound("s3", w.now.Add(-24*time.Hour-time.Second))
+	if _, err := w.svc.RequestWithdrawal(ctx, "alice", req); err != nil {
+		t.Fatalf("a day and a second after binding the app: %v", err)
+	}
+}
+
 func TestWithdrawalToChain(t *testing.T) {
 	w := newWithdrawHarness(t)
 	ctx := context.Background()

@@ -420,6 +420,9 @@ type StepUp struct {
 	DeviceFirstSeen time.Time
 	Identities      int
 	TOTPEnabled     bool
+	// TOTPActivated is when the authenticator app bound now was activated
+	// (zero while none is, or from an auth-service that does not say).
+	TOTPActivated   time.Time
 	IdentityChanged time.Time
 	PasswordChanged time.Time
 	// TOTPChanged is when the authenticator app was last removed.

@@ -242,6 +242,10 @@ message SecurityContext {
   // The latest removal of the authenticator app, by the user or an
   // administrator.
   google.protobuf.Timestamp totp_changed_at = 7;
+  // When the authenticator app bound now was activated; absent while none
+  // is. The wallet's full limits wait a day after it (variant B of
+  // 2026-10-04).
+  google.protobuf.Timestamp totp_activated_at = 8;
 }
 
 message FindUserRequest {

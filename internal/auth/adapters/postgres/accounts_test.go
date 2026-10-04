@@ -272,11 +272,27 @@ func TestSecurityContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.Identities != 2 || c.TOTPEnabled || c.DeviceID != "dev-1" || c.DeviceFirstSeenAt.Day() != 27 ||
-		c.IdentityChangedAt.Day() != 25 || c.PasswordChangedAt.Day() != 26 {
+		c.IdentityChangedAt.Day() != 25 || c.PasswordChangedAt.Day() != 26 || !c.TOTPActivatedAt.IsZero() {
 		t.Fatalf("context %+v", c)
 	}
 	if c, err := store.Read().Security().Context(ctx, user.String(), uuid.NewString()); err != nil || c.DeviceID != "" || c.Identities != 2 {
 		t.Fatalf("an unknown session has no device: %+v %v", c, err)
+	}
+	// An authenticator app: when it was activated (variant B of
+	// 2026-10-04: the wallet's full limits wait a day after it); a pending
+	// one is no app.
+	if _, err := db.Exec(ctx, `INSERT INTO totp_credentials (user_id, secret_enc, status, last_step, created_at)
+		VALUES ($1, '\x01', 'PENDING', 0, '2026-09-28T00:00:00Z')`, user); err != nil {
+		t.Fatal(err)
+	}
+	if c, err := store.Read().Security().Context(ctx, user.String(), session.String()); err != nil || c.TOTPEnabled || !c.TOTPActivatedAt.IsZero() {
+		t.Fatalf("a pending app: %+v %v", c, err)
+	}
+	if _, err := db.Exec(ctx, `UPDATE totp_credentials SET status = 'ACTIVE', activated_at = '2026-09-29T00:00:00Z' WHERE user_id = $1`, user); err != nil {
+		t.Fatal(err)
+	}
+	if c, err := store.Read().Security().Context(ctx, user.String(), session.String()); err != nil || !c.TOTPEnabled || c.TOTPActivatedAt.Day() != 29 {
+		t.Fatalf("an active app: %+v %v", c, err)
 	}
 }
 

@@ -506,14 +506,31 @@ type Limits struct {
 	Monthly decimal.Decimal
 }
 
-// LimitsFor returns the limits of a user: both identities and an
-// authenticator app get the full 2,000 a day and 20,000 a month, anyone
-// else 20% of that.
-func LimitsFor(identities int, totp bool) Limits {
+// TOTPSettling is how long a newly bound authenticator app waits before it
+// counts for the limits (variant B, coordinator 2026-10-04): a session
+// taken over cannot bind an app of its own and take the full limits at
+// once. It holds nothing for review; removing an app does (24 hours,
+// RiskInput.TOTPChanged), and so a re-bind both holds and waits.
+const TOTPSettling = 24 * time.Hour
+
+// LimitsFor returns the limits of a user at now: both identities and an
+// authenticator app activated TOTPSettling ago or more get the full 2,000
+// a day and 20,000 a month, anyone else 20% of that. An app whose
+// activation is not known (activated zero) counts.
+func LimitsFor(identities int, totp bool, activated, now time.Time) Limits {
 	full := Limits{Daily: decimal.NewFromInt(2000), Monthly: decimal.NewFromInt(20000)}
-	if identities >= 2 && totp {
+	if identities >= 2 && totp && FullLimitsAt(identities, totp, activated, now).IsZero() {
 		return full
 	}
 	share := decimal.RequireFromString("0.2")
 	return Limits{Daily: full.Daily.Mul(share), Monthly: full.Monthly.Mul(share)}
+}
+
+// FullLimitsAt is when a user with both identities whose authenticator app
+// is still settling gets the full limits; zero when nothing waits on it.
+func FullLimitsAt(identities int, totp bool, activated, now time.Time) time.Time {
+	if identities < 2 || !totp || activated.IsZero() || !now.Before(activated.Add(TOTPSettling)) {
+		return time.Time{}
+	}
+	return activated.Add(TOTPSettling)
 }

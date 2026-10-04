@@ -73,10 +73,11 @@ type security repos
 func (r security) Context(ctx context.Context, userID, sessionID string) (domain.SecurityContext, error) {
 	var c domain.SecurityContext
 	var device *string
-	var firstSeen, identityChanged, passwordChanged, totpChanged *time.Time
+	var firstSeen, identityChanged, passwordChanged, totpChanged, totpActivated *time.Time
 	err := r.q.QueryRow(ctx, `SELECT
 			(SELECT count(*) FROM identities WHERE user_id = $1),
 			coalesce((SELECT status = 'ACTIVE' FROM totp_credentials WHERE user_id = $1), false),
+			(SELECT activated_at FROM totp_credentials WHERE user_id = $1 AND status = 'ACTIVE'),
 			(SELECT max(verified_at) FROM identities WHERE user_id = $1),
 			(SELECT password_changed_at FROM credentials WHERE user_id = $1),
 			(SELECT totp_changed_at FROM credentials WHERE user_id = $1),
@@ -84,7 +85,7 @@ func (r security) Context(ctx context.Context, userID, sessionID string) (domain
 		FROM (SELECT 1) one
 		LEFT JOIN sessions s ON s.id = $2 AND s.user_id = $1
 		LEFT JOIN known_devices d ON d.user_id = s.user_id AND d.device_id = s.device_id`, userID, sessionID).
-		Scan(&c.Identities, &c.TOTPEnabled, &identityChanged, &passwordChanged, &totpChanged, &device, &firstSeen)
+		Scan(&c.Identities, &c.TOTPEnabled, &totpActivated, &identityChanged, &passwordChanged, &totpChanged, &device, &firstSeen)
 	if err != nil {
 		return domain.SecurityContext{}, fmt.Errorf("read security context: %w", err)
 	}
@@ -93,6 +94,7 @@ func (r security) Context(ctx context.Context, userID, sessionID string) (domain
 	}
 	for dst, src := range map[*time.Time]*time.Time{
 		&c.DeviceFirstSeenAt: firstSeen, &c.IdentityChangedAt: identityChanged, &c.PasswordChangedAt: passwordChanged, &c.TOTPChangedAt: totpChanged,
+		&c.TOTPActivatedAt: totpActivated,
 	} {
 		if src != nil {
 			*dst = *src

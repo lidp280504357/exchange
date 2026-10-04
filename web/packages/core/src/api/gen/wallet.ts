@@ -152,7 +152,9 @@ export interface paths {
          *     WALLET_ADDRESS_NOT_WHITELISTED,
          *     WALLET_ADDRESS_COOLDOWN (details.usable_at), WALLET_BELOW_MINIMUM,
          *     WALLET_AMOUNT_PRECISION, WALLET_LIMIT_EXCEEDED (details: the limits
-         *     and what was used), WALLET_OWN_ADDRESS, AUTH_STEP_UP_REQUIRED and the
+         *     in effect and what was used; full_limits_at when an authenticator
+         *     app bound within the last 24 hours holds the full limits back,
+         *     until then the base ones), WALLET_OWN_ADDRESS, AUTH_STEP_UP_REQUIRED and the
          *     USER_ eligibility codes (withdrawals need wallet.withdraw). When the
          *     ledger refuses the freeze (LEDGER_INSUFFICIENT_BALANCE) the
          *     withdrawal is stored as REJECTED and the error's details carry
