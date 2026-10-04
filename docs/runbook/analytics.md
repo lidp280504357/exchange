@@ -66,4 +66,4 @@ WHERE status NOT IN ('CONFIRMED', 'REJECTED', 'CANCELED', 'FAILED');
 ## 核对
 
 - 每小时：各服务 outbox 已发布的事件数与 `events` 比对（`analytics_reconcile_missing`，按主题，`RECONCILE_SCHEMAS` 列出 schema）。
-- 端到端 `scripts/e2e/ops.sh`：一分钟前的成交与订单变化各自与事件一一对应；钱包读模型各状态的笔数与 wallet-service 的表一致（确认进度不发事件，比较时把 PostgreSQL 的 CONFIRMING/SIGNING 归到上一个有事件的状态）；一分钟 K 线的笔数之和等于成交数。
+- 端到端 `scripts/e2e/ops.sh`：一分钟前的成交与订单变化各自与事件一一对应；钱包读模型各状态的笔数与 wallet-service 的表一致（确认进度不发事件，比较时把 PostgreSQL 的 CONFIRMING/SIGNING 归到上一个有事件的状态；无主充值——打到没有用户的地址、记入 UNCLAIMED_DEPOSIT——没有可通知的人、不发事件，不在读模型里，比较时不算，后台把它分配给用户后才有事件）；一分钟 K 线的笔数之和等于成交数。

@@ -95,10 +95,12 @@ read -r trades trade_events updates order_events <<<"$counts"
   { echo "FAIL read models: $trades trades for $trade_events trade events, $updates order changes for $order_events order events" >&2; exit 1; }
 echo "ok   $trades trades and $updates order changes, one per event"
 # The wallet read models agree with wallet-service's tables on every
-# status the events report (confirmation progress is not an event).
+# status the events report (confirmation progress is not an event). A
+# deposit of nobody (to an address no user has, booked unclaimed) has no
+# events, there being nobody to tell, until a person assigns it to a user.
 wallet_statuses() {
   local pg_deposits pg_withdrawals ch_deposits ch_withdrawals
-  pg_deposits=$(pg "SELECT coalesce(string_agg(s || '=' || n, ',' ORDER BY s), '') FROM (SELECT CASE status WHEN 'CONFIRMING' THEN 'DETECTED' ELSE status END AS s, count(*) AS n FROM wallet.deposits GROUP BY 1) x")
+  pg_deposits=$(pg "SELECT coalesce(string_agg(s || '=' || n, ',' ORDER BY s), '') FROM (SELECT CASE status WHEN 'CONFIRMING' THEN 'DETECTED' ELSE status END AS s, count(*) AS n FROM wallet.deposits WHERE user_id <> '00000000-0000-0000-0000-000000000000' GROUP BY 1) x")
   pg_withdrawals=$(pg "SELECT coalesce(string_agg(s || '=' || n, ',' ORDER BY s), '') FROM (SELECT CASE status WHEN 'SIGNING' THEN 'APPROVED' WHEN 'CONFIRMING' THEN 'BROADCAST' ELSE status END AS s, count(*) AS n FROM wallet.withdrawals GROUP BY 1) x")
   ch_deposits=$(ch "SELECT arrayStringConcat(arraySort(groupArray(concat(status, '=', toString(n)))), ',') FROM (SELECT status, count() AS n FROM wallet_deposits FINAL GROUP BY status)")
   ch_withdrawals=$(ch "SELECT arrayStringConcat(arraySort(groupArray(concat(status, '=', toString(n)))), ',') FROM (SELECT status, count() AS n FROM wallet_withdrawals FINAL GROUP BY status)")
