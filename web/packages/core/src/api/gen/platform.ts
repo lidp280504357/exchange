@@ -133,14 +133,6 @@ export interface components {
                 banner: boolean;
                 text: components["schemas"]["Texts"];
             };
-            /**
-             * @deprecated
-             * @description The test mode under its former name (enabled and text), until the admin console reads test_mode.
-             */
-            learning_mode: {
-                enabled: boolean;
-                text: components["schemas"]["Texts"];
-            };
             /** @description CLOSED refuses sign-ups (403 AUTH_REGISTRATION_CLOSED) and the sign-up pages show closed_text. */
             registration: {
                 /** @enum {string} */

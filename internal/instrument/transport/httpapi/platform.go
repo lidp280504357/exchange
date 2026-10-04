@@ -32,20 +32,17 @@ func (h *Handler) platformRoutes(r chi.Router) {
 
 // PlatformProfileJSON is the profile as the API shows it.
 type PlatformProfileJSON struct {
-	Name          string             `json:"name"`
-	ShortName     string             `json:"short_name"`
-	Domain        string             `json:"domain"`
-	ThemeColor    string             `json:"theme_color"`
-	BrandColor    string             `json:"brand_color"`
-	Images        map[string]*string `json:"images"`
-	Footer        FooterJSON         `json:"footer"`
-	Contact       ContactJSON        `json:"contact"`
-	Social        []SocialJSON       `json:"social"`
-	DefaultLocale string             `json:"default_locale"`
-	TestMode      TestModeJSON       `json:"test_mode"`
-	// LearningMode is the test mode under its former name, until the admin
-	// console reads test_mode (enabled and text alike).
-	LearningMode   LearningModeJSON    `json:"learning_mode"`
+	Name           string              `json:"name"`
+	ShortName      string              `json:"short_name"`
+	Domain         string              `json:"domain"`
+	ThemeColor     string              `json:"theme_color"`
+	BrandColor     string              `json:"brand_color"`
+	Images         map[string]*string  `json:"images"`
+	Footer         FooterJSON          `json:"footer"`
+	Contact        ContactJSON         `json:"contact"`
+	Social         []SocialJSON        `json:"social"`
+	DefaultLocale  string              `json:"default_locale"`
+	TestMode       TestModeJSON        `json:"test_mode"`
 	Registration   RegistrationJSON    `json:"registration"`
 	WelcomeCredits []WelcomeCreditJSON `json:"welcome_credits"`
 	Version        int64               `json:"version"`
@@ -79,12 +76,6 @@ type TestModeJSON struct {
 	Text    domain.Texts `json:"text"`
 }
 
-// LearningModeJSON is the test mode as learning_mode had it.
-type LearningModeJSON struct {
-	Enabled bool         `json:"enabled"`
-	Text    domain.Texts `json:"text"`
-}
-
 // RegistrationJSON says whether sign-ups are open.
 type RegistrationJSON struct {
 	Status     string       `json:"status"`
@@ -105,7 +96,6 @@ func PlatformProfileJSONOf(p domain.PlatformProfile, credits []domain.Credit) Pl
 		Images: map[string]*string{}, Footer: FooterJSON{Copyright: p.Footer.Copyright, Compliance: p.Footer.Compliance},
 		Contact: ContactJSON{Email: p.Contact.Email, SupportURL: optional(p.Contact.SupportURL)}, Social: []SocialJSON{},
 		DefaultLocale: p.DefaultLocale, TestMode: TestModeJSON{Enabled: p.Test.Enabled, Banner: p.Test.Banner, Text: p.Test.Text},
-		LearningMode:   LearningModeJSON{Enabled: p.Test.Enabled, Text: p.Test.Text},
 		Registration:   RegistrationJSON{Status: p.Registration.Status, ClosedText: p.Registration.ClosedText},
 		WelcomeCredits: []WelcomeCreditJSON{}, Version: p.Version, UpdatedAt: httpx.FormatTime(p.UpdatedAt),
 	}
@@ -283,20 +273,17 @@ func writeAdminProfile(w http.ResponseWriter, p domain.PlatformProfile, credits 
 // profileWriteJSON is the console's new profile: everything but the
 // images and the welcome credits.
 type profileWriteJSON struct {
-	Name          string        `json:"name"`
-	ShortName     string        `json:"short_name"`
-	Domain        string        `json:"domain"`
-	ThemeColor    string        `json:"theme_color"`
-	BrandColor    string        `json:"brand_color"`
-	Footer        FooterJSON    `json:"footer"`
-	Contact       ContactJSON   `json:"contact"`
-	Social        []SocialJSON  `json:"social"`
-	DefaultLocale string        `json:"default_locale"`
-	TestMode      *TestModeJSON `json:"test_mode"`
-	// LearningMode is what a console that does not know test_mode sends:
-	// enabled and text, the banner left as it is.
-	LearningMode *LearningModeJSON `json:"learning_mode"`
-	Registration RegistrationJSON  `json:"registration"`
+	Name          string           `json:"name"`
+	ShortName     string           `json:"short_name"`
+	Domain        string           `json:"domain"`
+	ThemeColor    string           `json:"theme_color"`
+	BrandColor    string           `json:"brand_color"`
+	Footer        FooterJSON       `json:"footer"`
+	Contact       ContactJSON      `json:"contact"`
+	Social        []SocialJSON     `json:"social"`
+	DefaultLocale string           `json:"default_locale"`
+	TestMode      *TestModeJSON    `json:"test_mode"`
+	Registration  RegistrationJSON `json:"registration"`
 	// ExpectedVersion is the version the change was made on.
 	ExpectedVersion *int64 `json:"expected_version"`
 	Actor           string `json:"actor"`
@@ -330,23 +317,12 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apperr.Invalid("expected_version is required"))
 		return
 	}
-	next := body.profile()
-	switch {
-	case body.TestMode != nil:
-		next.Test = domain.TestMode{Enabled: body.TestMode.Enabled, Banner: body.TestMode.Banner, Text: body.TestMode.Text}
-	case body.LearningMode != nil:
-		// A console that sends learning_mode leaves the banner as it is
-		// (expected_version still refuses a profile changed meanwhile).
-		cur, err := h.Platform.Profile(r.Context())
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		next.Test = domain.TestMode{Enabled: body.LearningMode.Enabled, Banner: cur.Test.Banner, Text: body.LearningMode.Text}
-	default:
+	if body.TestMode == nil {
 		httpx.WriteError(w, r, apperr.Invalid("test_mode is required"))
 		return
 	}
+	next := body.profile()
+	next.Test = domain.TestMode{Enabled: body.TestMode.Enabled, Banner: body.TestMode.Banner, Text: body.TestMode.Text}
 	p, err := h.Platform.UpdateProfile(r.Context(), next, *body.ExpectedVersion, body.Actor, body.Reason)
 	if err != nil {
 		httpx.WriteError(w, r, err)

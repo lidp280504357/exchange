@@ -37,7 +37,6 @@ export const DEFAULT_PROFILE: PlatformProfile = {
   social: [],
   default_locale: "zh-CN",
   test_mode: { enabled: false, banner: false, text: { "zh-CN": "", en: "" } },
-  learning_mode: { enabled: false, text: { "zh-CN": "", en: "" } },
   registration: { status: "OPEN", closed_text: { "zh-CN": "", en: "" } },
   welcome_credits: [],
   version: 0,
@@ -51,7 +50,7 @@ export const DEFAULT_PROFILE: PlatformProfile = {
  */
 export function normalizeProfile(p: PlatformProfile): PlatformProfile {
   if (p.test_mode) return p;
-  const old = p.learning_mode as PlatformProfile["learning_mode"] | undefined;
+  const old = (p as { learning_mode?: { enabled: boolean; text: Texts } }).learning_mode;
   return { ...p, test_mode: { enabled: old?.enabled ?? false, banner: true, text: old?.text ?? { "zh-CN": "", en: "" } } };
 }
 

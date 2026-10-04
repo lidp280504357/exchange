@@ -141,7 +141,6 @@ components:
         - social
         - default_locale
         - test_mode
-        - learning_mode
         - registration
         - welcome_credits
         - version
@@ -230,16 +229,6 @@ components:
             banner:
               type: boolean
               description: Show the banner while test mode is on (operators may hide it).
-            text:
-              $ref: '#/components/schemas/Texts'
-        learning_mode:
-          type: object
-          deprecated: true
-          description: The test mode under its former name (enabled and text), until the admin console reads test_mode.
-          required: [enabled, text]
-          properties:
-            enabled:
-              type: boolean
             text:
               $ref: '#/components/schemas/Texts'
         registration:

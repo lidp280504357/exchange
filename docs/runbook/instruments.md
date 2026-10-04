@@ -78,7 +78,7 @@ sudo docker compose ... exec -T instrument-service /app/exchangectl instruments 
   - `DELETE /internal/platform/images/{kind}`：`{actor, reason}`。
 - 服务内缓存 5 秒，改动时立即清掉；站点每分钟读一次，所以改名、换图一分钟左右在三个站生效。
 - `welcome_credits` 不由后台写：instrument-service 每分钟从 ledger-service 读一次（`LEDGER_SERVICE_URL`，见 [ledger.md](ledger.md#模拟资金阶段-1)），读失败就保留上次的值。
-- 测试模式（`test_mode`，2026-10-04 用户决定由学习模式改名）：开着时站点只显示标为 TEST 或 BOTH 的内容、显示「测试模式」徽标，`banner` 为真时顶部显示横幅文案；关掉（上线）只显示 FORMAL 或 BOTH 的内容（设计 §4.4）。过渡期接口照旧多返回一个 `learning_mode`（`enabled` 与 `text`，同测试模式），`PUT` 只带 `learning_mode` 时按它改开关与文案、横幅开关不变；后台改用 `test_mode` 后去掉。
+- 测试模式（`test_mode`，2026-10-04 用户决定由学习模式改名）：开着时站点只显示标为 TEST 或 BOTH 的内容、显示「测试模式」徽标，`banner` 为真时顶部显示横幅文案；关掉（上线）只显示 FORMAL 或 BOTH 的内容（设计 §4.4）。改名过渡期接口曾同时返回 `learning_mode`，后台改用 `test_mode`（a5a0d58）之后已去掉，`PUT` 必须带 `test_mode`。
 - 读这份资料的还有：网关读注册方式，关闭时拒绝注册（见 [gateway.md](gateway.md#路由)）；notification-service 读名称，作为邮件与短信的署名（10 分钟缓存，读不到用 `Astras`），读测试模式，决定公开接口给站点哪种模式的文章（30 秒缓存，读不到沿用上次的，启动后没读到过时按正式模式）。
 
 ## 常用命令
