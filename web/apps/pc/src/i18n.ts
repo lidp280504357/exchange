@@ -16,6 +16,7 @@ const base: Messages = {
       overview: "市场概览",
       searchHint: "搜索币种",
       perpetual: "永续",
+      testMode: "测试模式",
     },
   },
   en: {
@@ -27,6 +28,7 @@ const base: Messages = {
       overview: "Market overview",
       searchHint: "Search coins",
       perpetual: "Perpetual",
+      testMode: "Test mode",
     },
   },
 };

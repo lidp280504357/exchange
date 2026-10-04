@@ -28,7 +28,7 @@ afterEach(() => {
 });
 
 function meta(over: Partial<ArticleMeta>): ArticleMeta {
-  return { section: "announcements", slug: "x", locale: "zh-CN", fallback: false, title: "x", date: "", pinned: false, category: "", order: 0, summary: "", ...over };
+  return { section: "announcements", slug: "x", locale: "zh-CN", fallback: false, title: "x", date: "", pinned: false, category: "", order: 0, summary: "", modes: "BOTH", ...over };
 }
 
 describe("file index and language fallback", () => {
@@ -107,12 +107,16 @@ function text(blocks: readonly Block[]): string {
 
 const SITE_PATHS = /^\/(markets|trade\/[A-Z-]+|futures\/[A-Z-]+|coin\/[A-Z0-9]+|assets(\/(deposit|withdraw|transfer|history))?|account\/(security|settings|sessions)|notifications|announcements|help|login|register|reset|docs\/)$/;
 
+// What live pages must not say (design 2026-10-04 §4.4; the launch drill
+// checks the same on the sites).
+const TEST_ONLY = { "zh-CN": /测试环境|模拟|Sepolia|10,000|学习/, en: /test environment|simulated|Sepolia|10,000|learning/i } as const;
+
 describe.each<ContentSection>(["announcements", "help"])("the %s", (section) => {
   it("exist in Chinese and English with complete front matter", async () => {
     const slugs = listSlugs(section);
     expect(slugs.length).toBeGreaterThanOrEqual(section === "help" ? 8 : 3);
     for (const locale of ["zh-CN", "en"] as const) {
-      const list = await loadArticles(section, locale);
+      const list = await loadArticles(section, locale, "test");
       expect(list).toHaveLength(slugs.length);
       for (const a of list) {
         expect(a.fallback, `${a.slug}.${locale}`).toBe(false);
@@ -129,13 +133,20 @@ describe.each<ContentSection>(["announcements", "help"])("the %s", (section) => 
     }
   });
 
-  it("say that funds are simulated and link only to real pages", async () => {
+  it("never say live what only holds in test mode, and link only to real pages", async () => {
     const help = new Set(listSlugs("help"));
     const news = new Set(listSlugs("announcements"));
     for (const locale of ["zh-CN", "en"] as const) {
-      for (const a of await loadArticles(section, locale)) {
-        const body = text(a.doc.blocks);
-        expect(body, `${a.slug}.${locale}`).toMatch(locale === "en" ? /simulated/ : /模拟/);
+      const live = await loadArticles(section, locale, "formal");
+      expect(live.length, `${section} live`).toBeGreaterThanOrEqual(section === "help" ? 8 : 3);
+      for (const a of live) {
+        expect(`${a.title} ${a.summary} ${text(a.doc.blocks)}`, `${a.slug}.${locale} live`).not.toMatch(TEST_ONLY[locale]);
+      }
+      // In test mode the pinned announcement says the funds are simulated
+      // (the content pages' note says it for every article).
+      const testing = await loadArticles(section, locale, "test");
+      if (section === "announcements") expect(text(testing[0]!.doc.blocks), testing[0]!.slug).toMatch(locale === "en" ? /simulated/ : /模拟/);
+      for (const a of [...testing, ...live]) {
         for (const href of links(a.doc.blocks)) {
           const where = `${a.slug}.${locale} → ${href}`;
           if (href.startsWith("/help/")) expect(help.has(href.slice(6)), where).toBe(true);
@@ -149,8 +160,8 @@ describe.each<ContentSection>(["announcements", "help"])("the %s", (section) => 
 
   it("have matching tables of contents in both languages", async () => {
     for (const slug of listSlugs(section)) {
-      const zh = (await loadArticle(section, slug, "zh-CN")) as Article;
-      const en = (await loadArticle(section, slug, "en")) as Article;
+      const zh = (await loadArticle(section, slug, "zh-CN", "test")) as Article;
+      const en = (await loadArticle(section, slug, "en", "test")) as Article;
       expect(en.doc.toc.map((t) => t.depth), slug).toEqual(zh.doc.toc.map((t) => t.depth));
       expect(en.category, slug).toBe(zh.category);
       expect(en.date, slug).toBe(zh.date);
@@ -162,7 +173,12 @@ describe.each<ContentSection>(["announcements", "help"])("the %s", (section) => 
 
 describe("loadArticle", () => {
   it("returns null for an unknown slug", async () => {
-    expect(await loadArticle("help", "no-such-article", "zh-CN")).toBeNull();
+    expect(await loadArticle("help", "no-such-article", "zh-CN", "test")).toBeNull();
+  });
+
+  it("leaves out a file meant for the other mode", async () => {
+    expect((await loadArticle("announcements", "test-environment", "zh-CN", "test"))?.modes).toBe("TEST");
+    expect(await loadArticle("announcements", "test-environment", "zh-CN", "formal")).toBeNull();
   });
 });
 
@@ -192,7 +208,7 @@ describe("the console's articles", () => {
       url.includes("/v1/announcements")
         ? json({ items: [summary("maintenance", { pinned: true }), summary(bundled[0]!, { title: "edited" })], withdrawn: [] })
         : new Response("{}", { status: 404 });
-    const list = await loadArticles("announcements", "zh-CN");
+    const list = await loadArticles("announcements", "zh-CN", "test");
     expect(list.length).toBe(bundled.length + 1);
     expect(list[0]!.slug).toBe("maintenance");
     expect(list[0]!.date).toBe("2026-10-02");
@@ -202,7 +218,7 @@ describe("the console's articles", () => {
   it("take a file off the list once the console withdrew its slug", async () => {
     const [gone, kept] = listSlugs("help");
     api = (url) => (url.includes("/v1/help") ? json({ items: [], withdrawn: [gone] }) : new Response("{}", { status: 404 }));
-    const slugs = (await loadArticles("help", "zh-CN")).map((a) => a.slug);
+    const slugs = (await loadArticles("help", "zh-CN", "test")).map((a) => a.slug);
     expect(slugs).not.toContain(gone);
     expect(slugs).toContain(kept);
     expect(slugs.length).toBe(listSlugs("help").length - 1);
@@ -210,24 +226,27 @@ describe("the console's articles", () => {
 
   it("are read with their Markdown body; a 404 falls back to the file", async () => {
     api = (url) =>
-      url.includes("/v1/announcements/maintenance") ? json({ ...summary("maintenance"), body: "## Tonight\n\nOne hour." }) : new Response("{}", { status: 404 });
-    const a = (await loadArticle("announcements", "maintenance", "zh-CN")) as Article;
+      url.includes("/v1/announcements/maintenance")
+        ? json({ ...summary("maintenance"), body: ":::test\n测试期间的说明。\n:::\n\n## Tonight\n\nOne hour." })
+        : new Response("{}", { status: 404 });
+    const a = (await loadArticle("announcements", "maintenance", "zh-CN", "formal")) as Article;
     expect(a.doc.toc.map((t) => t.text)).toEqual(["Tonight"]);
     expect(a.summary).toBe("One hour.");
+    expect((await loadArticle("announcements", "maintenance", "zh-CN", "test"))?.summary).toBe("测试期间的说明。");
     const slug = listSlugs("help")[0]!;
-    expect((await loadArticle("help", slug, "zh-CN"))?.slug).toBe(slug);
+    expect((await loadArticle("help", slug, "zh-CN", "formal"))?.slug).toBe(slug);
   });
 
   it("is not stood in for by its file once withdrawn", async () => {
     const slug = listSlugs("help")[0]!;
     api = () => new Response(JSON.stringify({ code: "NOTIFY_ARTICLE_WITHDRAWN", message: "taken off", trace_id: "t" }), { status: 404 });
-    expect(await loadArticle("help", slug, "zh-CN")).toBeNull();
+    expect(await loadArticle("help", slug, "zh-CN", "test")).toBeNull();
   });
 
   it("leave the files alone while the API is down", async () => {
     api = () => {
       throw new TypeError("offline");
     };
-    expect((await loadArticles("help", "en")).length).toBe(listSlugs("help").length);
+    expect((await loadArticles("help", "en", "formal")).length).toBe(listSlugs("help").length);
   });
 });

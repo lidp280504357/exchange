@@ -28,5 +28,3 @@ Any app that follows RFC 6238 works, for example Google Authenticator, Microsoft
 - Accounts with an email, a phone number and an authenticator can withdraw up to 2,000 USDT a day and 20,000 USDT a month (equivalent); other accounts get 20% of that.
 
 See [Account security](/help/account-security) in the help center for more.
-
-> This site is a test environment for learning; every balance is simulated.

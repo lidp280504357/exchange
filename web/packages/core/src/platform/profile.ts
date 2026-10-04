@@ -1,10 +1,11 @@
 import type { components } from "../api/gen/platform";
+import type { ContentMode } from "../content/markdown";
 import { formatAmount } from "../format/number";
 
 // The platform's profile (design 2026-10-04 §4.1, GET /v1/platform/profile):
-// the exchange's name, images, colours, footer, contact, learning-mode
-// banner, registration and welcome credits, as operators set them in the
-// admin console. The sites read it at start and every minute; until it
+// the exchange's name, images, colours, footer, contact, test mode,
+// registration and welcome credits, as operators set them in the admin
+// console. The sites read it at start and every minute; until it
 // answers, and while it cannot, they show the built-in profile below, so
 // they never go blank.
 
@@ -42,6 +43,22 @@ export const DEFAULT_PROFILE: PlatformProfile = {
   version: 0,
   updated_at: "1970-01-01T00:00:00.000Z",
 };
+
+/**
+ * normalizeProfile fills in test_mode for a profile read before the
+ * learning mode was renamed (2026-10-05): a browser may hold one in its
+ * cache for a minute after the deploy.
+ */
+export function normalizeProfile(p: PlatformProfile): PlatformProfile {
+  if (p.test_mode) return p;
+  const old = p.learning_mode as PlatformProfile["learning_mode"] | undefined;
+  return { ...p, test_mode: { enabled: old?.enabled ?? false, banner: true, text: old?.text ?? { "zh-CN": "", en: "" } } };
+}
+
+/** contentMode is the content the sites show (design 2026-10-04 §4.4): "test" in test mode, "formal" when live. */
+export function contentMode(p: Pick<PlatformProfile, "test_mode">): ContentMode {
+  return p.test_mode.enabled ? "test" : "formal";
+}
 
 /** textOf picks a text in the locale, else the Chinese one. */
 export function textOf(texts: Partial<Texts> | undefined, locale: string): string {

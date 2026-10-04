@@ -7,9 +7,14 @@ summary: Add the address to your address book and wait out its cooling period, t
 
 ## What you can withdraw today
 
+:::test
 | Coin | Network | Minimum | Fee | Confirmations |
 |:--|:--|--:|--:|--:|
 | ETH | Sepolia (Ethereum test network) | 0.001 ETH | 0.0002 ETH | 12 |
+:::
+:::formal
+The coins and networks you can withdraw are the ones the [Withdraw](/assets/withdraw) page lists, each with its minimum, fee and confirmations; the [fees page](/help/fees) lists every network's withdrawal fee too.
+:::
 
 The amount is what the recipient gets; the fee comes out of your balance on top of it, and both are held when you submit.
 
@@ -19,7 +24,12 @@ Withdrawals only go to addresses in your address book.
 
 1. Open [Withdraw](/assets/withdraw), choose "New address", pick the network and enter the address. The page checks its format first, and the checksum of an Ethereum address written in mixed case.
 2. Pass a security check and save it.
+:::test
 3. A new address has a **cooling period** before it can be used: 24 hours in production, shortened to 1 minute in the test environment.
+:::
+:::formal
+3. A new address has a 24-hour **cooling period** before it can be used.
+:::
 
 Your own deposit address cannot be added. Make sure the address belongs to the person you mean to pay and that their wallet supports the network.
 
@@ -58,5 +68,3 @@ The withdrawal history shows each step: under review (when needed) → approved 
 - **Internal transfers**: when the address is another user's deposit address, nothing goes on chain; after approval it completes inside the site, with no fee.
 
 You get an inbox message and an email when a withdrawal is submitted, completed, rejected or failed.
-
-> This site is a test environment for learning; every balance is simulated.

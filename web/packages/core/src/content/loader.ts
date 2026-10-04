@@ -2,13 +2,17 @@ import { notificationApi, unwrap } from "../api/client";
 import { ApiError } from "../api/errors";
 import type { components } from "../api/gen/notification";
 import { frontBool, frontNumber, frontString, parseFrontMatter } from "./frontmatter";
-import { excerpt, parseMarkdown, type MarkdownDoc } from "./markdown";
+import { excerpt, parseMarkdown, renderByMode, type ContentMode, type MarkdownDoc } from "./markdown";
 
 // The announcements and help articles are Markdown files in the
 // repository (web/packages/core/content/<section>/<slug>.<locale>.md,
 // design §6.2), bundled at build time, one chunk per file: an article
 // page loads only its own file, a list loads the files of one language.
-// A missing English file falls back to the Chinese one.
+// A missing English file falls back to the Chinese one. The sites show the
+// content of the exchange's mode (design 2026-10-04 §4.4): a file's front
+// matter `modes` (TEST, FORMAL or BOTH, the default) and its :::test /
+// :::formal blocks (renderByMode); the console's articles come filtered
+// by the API and have their blocks filtered here.
 
 export type ContentSection = "announcements" | "help" | "legal" | "home";
 
@@ -71,6 +75,20 @@ export function pickLocale<T>(byLocale: Map<ContentLocale, T> | undefined, local
   return fb !== undefined ? { locale: CONTENT_FALLBACK, value: fb } : null;
 }
 
+/** The modes an article is for: test mode, live, or both. */
+export type ArticleModes = "TEST" | "FORMAL" | "BOTH";
+
+/** shownIn reports whether an article of modes shows in a mode. */
+export function shownIn(modes: ArticleModes, mode: ContentMode): boolean {
+  return modes === "BOTH" || modes === (mode === "test" ? "TEST" : "FORMAL");
+}
+
+/** articleModes reads a front matter `modes`: TEST, FORMAL, else BOTH. */
+export function articleModes(raw: string): ArticleModes {
+  const m = raw.toUpperCase();
+  return m === "TEST" || m === "FORMAL" ? m : "BOTH";
+}
+
 export type ArticleMeta = {
   section: ContentSection;
   slug: string;
@@ -86,14 +104,16 @@ export type ArticleMeta = {
   order: number;
   /** The front matter's summary, or the first paragraph. */
   summary: string;
+  /** A bundled file's front matter `modes`; BOTH for the console's (the API answers in the mode). */
+  modes: ArticleModes;
 };
 
 export type Article = ArticleMeta & { doc: MarkdownDoc };
 
-/** toArticle parses a file into an article. */
-export function toArticle(section: ContentSection, slug: string, locale: ContentLocale, fallback: boolean, src: string): Article {
+/** toArticle parses a file into an article, its body in a mode when one is given (as written without). */
+export function toArticle(section: ContentSection, slug: string, locale: ContentLocale, fallback: boolean, src: string, mode?: ContentMode): Article {
   const { data, body } = parseFrontMatter(src);
-  const doc = parseMarkdown(body);
+  const doc = parseMarkdown(mode ? renderByMode(body, mode) : body);
   return {
     section,
     slug,
@@ -105,6 +125,7 @@ export function toArticle(section: ContentSection, slug: string, locale: Content
     category: frontString(data, "category", defaultCategory(section)),
     order: frontNumber(data, "order", 0),
     summary: frontString(data, "summary") || excerpt(doc.blocks),
+    modes: articleModes(frontString(data, "modes")),
     doc,
   };
 }
@@ -114,11 +135,16 @@ export function listSlugs(section: ContentSection): string[] {
   return [...indexes[section].keys()];
 }
 
-/** loadBundledArticle loads one article of the repository's files in a language (or the fallback); null when there is none. */
-export async function loadBundledArticle(section: ContentSection, slug: string, locale: ContentLocale): Promise<Article | null> {
+/**
+ * loadBundledArticle loads one article of the repository's files in a
+ * language (or the fallback), in a mode when one is given; null when there
+ * is none, or none for the mode.
+ */
+export async function loadBundledArticle(section: ContentSection, slug: string, locale: ContentLocale, mode?: ContentMode): Promise<Article | null> {
   const picked = pickLocale(indexes[section].get(slug), locale);
   if (!picked) return null;
-  return toArticle(section, slug, picked.locale, picked.locale !== locale, await picked.value());
+  const a = toArticle(section, slug, picked.locale, picked.locale !== locale, await picked.value(), mode);
+  return mode && !shownIn(a.modes, mode) ? null : a;
 }
 
 /** bundledFile returns a bundled file as written in a language, null when there is none in it. */
@@ -142,9 +168,9 @@ export async function bundledSource(section: ContentSection, slug: string, local
 
 type PublishedSummary = components["schemas"]["ArticleSummary"];
 
-/** fromPublished turns an article the API returns into one of ours; a list's comes without its body. */
-export function fromPublished(section: ContentSection, s: PublishedSummary, body?: string): Article {
-  const doc = parseMarkdown(body ?? "");
+/** fromPublished turns an article the API returns into one of ours, its body in a mode when one is given; a list's comes without its body. */
+export function fromPublished(section: ContentSection, s: PublishedSummary, body?: string, mode?: ContentMode): Article {
+  const doc = parseMarkdown(mode ? renderByMode(body ?? "", mode) : (body ?? ""));
   return {
     section,
     slug: s.slug,
@@ -156,6 +182,7 @@ export function fromPublished(section: ContentSection, s: PublishedSummary, body
     category: s.category || defaultCategory(section),
     order: s.order,
     summary: s.summary || excerpt(doc.blocks),
+    modes: "BOTH",
     doc,
   };
 }
@@ -183,10 +210,10 @@ async function fetchPublished(section: ContentSection, locale: ContentLocale): P
 const WITHDRAWN = "withdrawn";
 
 /** fetchPublishedArticle returns the console's article, null when it published none with this slug. */
-async function fetchPublishedArticle(section: ContentSection, slug: string, locale: ContentLocale): Promise<Article | typeof WITHDRAWN | null> {
+async function fetchPublishedArticle(section: ContentSection, slug: string, locale: ContentLocale, mode: ContentMode): Promise<Article | typeof WITHDRAWN | null> {
   try {
     const a = await fetchOne(section, slug, locale);
-    return fromPublished(section, a, a.body);
+    return fromPublished(section, a, a.body, mode);
   } catch (err) {
     if (err instanceof ApiError && err.code === "NOTIFY_ARTICLE_WITHDRAWN") return WITHDRAWN;
     if (err instanceof ApiError && err.status === 404) return null;
@@ -212,14 +239,14 @@ export function fetchOne(section: ContentSection, slug: string, locale: ContentL
 }
 
 /**
- * loadArticle loads one article in a language: the console's when it
- * published one, else the bundled file; null when neither, or when the
- * console took it off.
+ * loadArticle loads one article in a language and mode: the console's
+ * when it published one, else the bundled file; null when neither, or
+ * when the console took it off.
  */
-export async function loadArticle(section: ContentSection, slug: string, locale: ContentLocale): Promise<Article | null> {
-  const published = await fetchPublishedArticle(section, slug, locale).catch(() => null);
+export async function loadArticle(section: ContentSection, slug: string, locale: ContentLocale, mode: ContentMode): Promise<Article | null> {
+  const published = await fetchPublishedArticle(section, slug, locale, mode).catch(() => null);
   if (published === WITHDRAWN) return null;
-  return published ?? loadBundledArticle(section, slug, locale);
+  return published ?? loadBundledArticle(section, slug, locale, mode);
 }
 
 function categoryRank(category: string): number {
@@ -246,13 +273,13 @@ export function sortArticles<T extends ArticleMeta>(section: ContentSection, lis
 }
 
 /**
- * loadArticles loads every article of a section in a language, the
- * bundled files and the console's, sorted; a file the console took off is
- * left out.
+ * loadArticles loads every article of a section in a language and mode,
+ * the bundled files and the console's, sorted; a file the console took off
+ * is left out.
  */
-export async function loadArticles(section: ContentSection, locale: ContentLocale): Promise<Article[]> {
+export async function loadArticles(section: ContentSection, locale: ContentLocale, mode: ContentMode): Promise<Article[]> {
   const [bundled, published] = await Promise.all([
-    Promise.all(listSlugs(section).map((slug) => loadBundledArticle(section, slug, locale))),
+    Promise.all(listSlugs(section).map((slug) => loadBundledArticle(section, slug, locale, mode))),
     fetchPublished(section, locale).catch((): Published => ({ articles: [], withdrawn: new Set() })),
   ]);
   const bySlug = new Map<string, Article>();

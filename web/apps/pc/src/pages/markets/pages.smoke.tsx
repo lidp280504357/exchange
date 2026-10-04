@@ -1,5 +1,6 @@
 import { createQueryClient, initI18n, LiveProvider, MarketStore, qk, type Locale, type TickerData, type WsClient } from "@exchange/core";
 import { contentKeys, loadArticle, loadArticles } from "@exchange/core/content/index";
+import { DEFAULT_PROFILE } from "@exchange/core/platform/index";
 import { uiMessages } from "@exchange/ui";
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -64,18 +65,20 @@ async function seed() {
   const pcMessages = withAreas(marketsMessages, contentMessages);
   initI18n({ "zh-CN": { ...uiMessages["zh-CN"], ...pcMessages["zh-CN"] }, en: { ...uiMessages.en, ...pcMessages.en } });
   qc = createQueryClient();
+  // In test mode, as the test server: the test content (the pinned notice).
+  qc.setQueryData(qk.platform, { ...DEFAULT_PROFILE, test_mode: { enabled: true, banner: true, text: { "zh-CN": "测试模式", en: "Test mode" } } });
   qc.setQueryData(qk.pairs, { pairs: [pair("BTC-USDT"), pair("ETH-BTC", { reference_symbol: null, price_decimals: 5 }), pair("ETH-USDT", { status: "PREPARE" })] });
   qc.setQueryData(qk.contracts, { contracts: [contract("BTC-USDT-PERP", "BTC-USDT"), contract("ETH-USDT-PERP", "ETH-USDT")] });
   qc.setQueryData(qk.tickers, { tickers });
   qc.setQueryData(qk.assets, { assets: [{ asset_code: "USDT", name: "Tether USD", decimals: 6, rank: 3, categories: ["stablecoin"], deposit_enabled: false, withdraw_enabled: false, trading_enabled: true, networks: [] }] });
   for (const locale of ["zh-CN", "en"] as const) {
     for (const section of ["announcements", "help"] as const) {
-      const list = await loadArticles(section, locale);
-      qc.setQueryData(contentKeys.list(section, locale), list);
-      for (const a of list) qc.setQueryData(contentKeys.article(section, locale, a.slug), await loadArticle(section, a.slug, locale));
+      const list = await loadArticles(section, locale, "test");
+      qc.setQueryData(contentKeys.list(section, locale, "test"), list);
+      for (const a of list) qc.setQueryData(contentKeys.article(section, locale, "test", a.slug), await loadArticle(section, a.slug, locale, "test"));
     }
     // What loadArticle answers for a slug without a file.
-    qc.setQueryData(contentKeys.article("help", locale, "nope"), await loadArticle("help", "nope", locale));
+    qc.setQueryData(contentKeys.article("help", locale, "test", "nope"), await loadArticle("help", "nope", locale, "test"));
   }
   const ws = { subscribe: () => () => {} } as unknown as WsClient;
   market = new MarketStore(ws, (cb) => cb());

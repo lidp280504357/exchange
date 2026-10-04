@@ -9,7 +9,12 @@ Your funds sit in two accounts:
 
 | Account | What it is for |
 |:--|:--|
+:::test
 | Spot | Deposits, withdrawals and spot trading; the sign-up simulated funds land here |
+:::
+:::formal
+| Spot | Deposits, withdrawals and spot trading |
+:::
 | Futures | Margin for perpetual futures, in USDT |
 
 ## How to transfer
@@ -37,5 +42,3 @@ A transfer cannot exceed the available balance (for futures, the transferable am
 ### The futures account cannot transfer out right now?
 
 Cross profit and loss need a fresh mark price; while it is unavailable, transfers out fail. Try again shortly.
-
-> This site is a test environment for learning; every balance is simulated.

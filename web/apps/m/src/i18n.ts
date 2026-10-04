@@ -10,6 +10,7 @@ const base: Messages = {
   "zh-CN": {
     m: {
       perpetual: "永续",
+      testMode: "测试模式",
       soon: "该页面正在建设中",
       pullToRefresh: "下拉刷新",
       releaseToRefresh: "松开刷新",
@@ -18,6 +19,7 @@ const base: Messages = {
   en: {
     m: {
       perpetual: "Perpetual",
+      testMode: "Test mode",
       soon: "This page is on its way",
       pullToRefresh: "Pull to refresh",
       releaseToRefresh: "Release to refresh",

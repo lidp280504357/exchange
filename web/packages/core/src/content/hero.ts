@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "../api/errors";
+import { useContentMode } from "../platform/hooks";
 import { useSettings } from "../settings/store";
 import { frontString, parseFrontMatter } from "./frontmatter";
-import { bundledFile, CONTENT_FALLBACK, fetchOne, type ContentLocale } from "./loader";
+import { articleModes, bundledFile, CONTENT_FALLBACK, fetchOne, shownIn, type ContentLocale } from "./loader";
+import { renderByMode, type ContentMode } from "./markdown";
 
 // The home page's hero (design 2026-10-04 §4.4, slug home-hero of the HOME
 // section): the title, the subtitle (the article's summary) and a button,
@@ -27,11 +29,11 @@ export function heroFrom(title: string, subtitle: string, body: string): Hero {
   return { title: title.trim(), subtitle: subtitle.trim(), cta: m && href ? { text: m[1]!.trim(), href } : null };
 }
 
-/** loadHero returns the hero in a language, null when the console took it off or there is none. */
-export async function loadHero(locale: ContentLocale): Promise<Hero | null> {
+/** loadHero returns the hero in a language and mode, null when the console took it off or there is none. */
+export async function loadHero(locale: ContentLocale, mode: ContentMode): Promise<Hero | null> {
   try {
     const a = await fetchOne("home", "home-hero", locale);
-    return heroFrom(a.title, a.summary, a.body);
+    return heroFrom(a.title, a.summary, renderByMode(a.body, mode));
   } catch (err) {
     if (err instanceof ApiError && err.code === "NOTIFY_ARTICLE_WITHDRAWN") return null;
     // Not published (404) or the API out of reach: the bundled draft.
@@ -39,11 +41,13 @@ export async function loadHero(locale: ContentLocale): Promise<Hero | null> {
   const src = (await bundledFile("home", "home-hero", locale)) ?? (await bundledFile("home", "home-hero", CONTENT_FALLBACK));
   if (src === null) return null;
   const { data, body } = parseFrontMatter(src);
-  return heroFrom(frontString(data, "title"), frontString(data, "summary"), body);
+  if (!shownIn(articleModes(frontString(data, "modes")), mode)) return null;
+  return heroFrom(frontString(data, "title"), frontString(data, "summary"), renderByMode(body, mode));
 }
 
-/** useHero returns the home page's hero in the user's language (null while loading or when there is none). */
+/** useHero returns the home page's hero in the user's language and the exchange's mode (null while loading or when there is none). */
 export function useHero() {
   const locale = useSettings((s) => s.locale);
-  return useQuery({ queryKey: ["content", "home", locale, "home-hero"], queryFn: () => loadHero(locale), staleTime: 60_000 });
+  const mode = useContentMode();
+  return useQuery({ queryKey: ["content", "home", locale, mode, "home-hero"], queryFn: () => loadHero(locale, mode), staleTime: 60_000 });
 }

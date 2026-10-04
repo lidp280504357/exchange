@@ -545,6 +545,48 @@ function parseBlocks(lines: string[], ctx: Ctx): Block[] {
   return blocks;
 }
 
+// ---------------------------------------------------------------- modes
+
+/** ContentMode is the content the sites show: "test" while the exchange is in test mode, "formal" when live. */
+export type ContentMode = "test" | "formal";
+
+const MODE_OPEN = /^ {0,3}:::(test|formal)[ \t]*$/;
+const MODE_CLOSE = /^ {0,3}:::[ \t]*$/;
+
+/**
+ * renderByMode keeps the Markdown of one mode (design 2026-10-04 §4.4): a
+ * block from a line ":::test" or ":::formal" to a line ":::" (or the end)
+ * stays in its own mode only, without its marker lines. Blocks do not
+ * nest; other ":::" lines and anything inside fenced code stay as they
+ * are. The bundled drafts, the console's articles and its preview all go
+ * through here.
+ */
+export function renderByMode(src: string, mode: ContentMode): string {
+  const out: string[] = [];
+  let block: ContentMode | null = null;
+  let fence: RegExp | null = null;
+  for (const line of src.replace(/\r\n?/g, "\n").split("\n")) {
+    if (fence) {
+      if (fence.test(line)) fence = null;
+      if (block === null || block === mode) out.push(line);
+      continue;
+    }
+    const open = MODE_OPEN.exec(line);
+    if (block === null && open) {
+      block = open[1] as ContentMode;
+      continue;
+    }
+    if (block !== null && MODE_CLOSE.test(line)) {
+      block = null;
+      continue;
+    }
+    const f = FENCE.exec(line);
+    if (f) fence = new RegExp(`^ {0,3}${f[2]![0] === "`" ? "`" : "~"}{${f[2]!.length},}[ \\t]*$`);
+    if (block === null || block === mode) out.push(line);
+  }
+  return out.join("\n");
+}
+
 /**
  * parseMarkdown parses a document (front matter already removed) into
  * blocks and the table of contents of its level 2 and 3 headings, whose

@@ -11,9 +11,12 @@ summary: Sign up with your email and a password, then sign in with the password.
 2. Pass the human check, click "Send code" and enter the 6-digit code from the email.
 3. Choose a password, read and accept the terms and the risk disclosure, and finish.
 
-You are signed in right away, and your spot account receives simulated funds (10,000 USDT, 0.1 BTC and 2 ETH), so you can start trading at once.
+You are signed in right away.
+:::test
+Your spot account receives simulated funds (the sign-up page shows how much), so you can start trading at once.
 
 > SMS is simulated in the test environment and no real text messages arrive: sign up with an **email address**.
+:::
 
 ### Password rules
 
@@ -58,5 +61,3 @@ Click "Forgot password" on the sign-in page (or open [reset password](/reset)), 
 - [Devices](/account/sessions) lists your devices and sign-in history, and signs out any you do not recognize.
 
 The desktop and mobile sites keep separate sign-ins, so sign in on each.
-
-> This site is a test environment for learning; every balance is simulated.

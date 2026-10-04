@@ -5,7 +5,7 @@ category: product
 summary: BTCUSDT and ETHUSDT perpetuals are open for trading, margined in USDT, with up to 50x leverage and funding every 8 hours.
 ---
 
-USDT-margined perpetual futures are now open on the Astras test environment, starting with two contracts:
+USDT-margined perpetual futures are now open on Astras, starting with two contracts:
 
 | Contract | Max leverage | Min amount | Price step | Fees (maker / taker) |
 |:--|--:|--:|--:|--:|
@@ -28,5 +28,3 @@ USDT-margined perpetual futures are now open on the Astras test environment, sta
 2. Open the [BTCUSDT perpetual](/futures/BTC-USDT-PERP), check the margin mode and leverage, and place an order.
 
 Futures are risky: the higher the leverage, the smaller the price move that liquidates a position. Please read [Perpetual futures basics](/help/perpetual-futures) first.
-
-> This site is a test environment for learning; every balance is simulated.

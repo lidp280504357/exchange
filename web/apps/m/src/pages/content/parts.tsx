@@ -1,6 +1,6 @@
 import { siteURL } from "@exchange/core";
 import { Markdown, type LinkProps, type MarkdownDoc, type TocItem } from "@exchange/core/content/index";
-import { useBrandText, useBranding } from "@exchange/core/platform/index";
+import { useTestMode } from "@exchange/core/platform/index";
 import { cn } from "@exchange/ui";
 import { ChevronDown, ChevronRight, ExternalLink, FlaskConical } from "lucide-react";
 import { useReducedMotion } from "motion/react";
@@ -81,17 +81,14 @@ export function Prose({ doc, className }: { doc: MarkdownDoc; className?: string
   );
 }
 
-/** SimNotice: the content pages say the funds are simulated while the platform is in learning mode. */
+/** SimNotice: while the exchange is in test mode (design 2026-10-04 §4.1) the content pages say the funds are simulated (the drafts keep that to this note). */
 export function SimNotice({ className }: { className?: string }) {
   const { t } = useTranslation();
-  // Only while the platform's learning mode is on, in its words (design 2026-10-04 §4.3).
-  const on = useBranding().learning_mode.enabled;
-  const text = useBrandText((p) => p.learning_mode.text);
-  if (!on) return null;
+  if (!useTestMode().enabled) return null;
   return (
     <div role="note" className={cn("flex items-start gap-2 rounded-2 border border-warn/30 bg-warn/10 px-3 py-2.5 text-xs leading-relaxed text-warn", className)}>
       <FlaskConical size={14} className="mt-0.5 shrink-0" />
-      {text || t("mContent.simNotice")}
+      {t("mContent.simNotice")}
     </div>
   );
 }

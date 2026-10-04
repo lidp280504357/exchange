@@ -88,7 +88,12 @@ async function seed() {
   Object.defineProperty(globalThis, "localStorage", { value: memoryStorage(), configurable: true, writable: true });
   qc = createQueryClient();
   // The platform profile with welcome credits (design 2026-10-04 §4.2): the sign-up card promises them.
-  qc.setQueryData(qk.platform, { ...DEFAULT_PROFILE, welcome_credits: [{ asset: "USDT", amount: "10000" }] });
+  // In test mode, as the test server: the test content and the 测试模式 badges.
+  qc.setQueryData(qk.platform, {
+    ...DEFAULT_PROFILE,
+    test_mode: { enabled: true, banner: true, text: { "zh-CN": "测试模式", en: "Test mode" } },
+    welcome_credits: [{ asset: "USDT", amount: "10000" }],
+  });
   qc.setQueryData(qk.pairs, { pairs: [pair("BTC-USDT"), pair("ETH-BTC", { reference_symbol: null, price_decimals: 5 }), pair("ETH-USDT", { status: "PREPARE" })] });
   qc.setQueryData(qk.contracts, { contracts: [contract("BTC-USDT-PERP", "BTC-USDT"), contract("ETH-USDT-PERP", "ETH-USDT")] });
   qc.setQueryData(qk.tickers, { tickers });
@@ -97,12 +102,12 @@ async function seed() {
   });
   for (const locale of ["zh-CN", "en"] as const) {
     for (const section of ["announcements", "help"] as const) {
-      const list = await loadArticles(section, locale);
-      qc.setQueryData(contentKeys.list(section, locale), list);
-      for (const a of list) qc.setQueryData(contentKeys.article(section, locale, a.slug), await loadArticle(section, a.slug, locale));
+      const list = await loadArticles(section, locale, "test");
+      qc.setQueryData(contentKeys.list(section, locale, "test"), list);
+      for (const a of list) qc.setQueryData(contentKeys.article(section, locale, "test", a.slug), await loadArticle(section, a.slug, locale, "test"));
     }
     // What loadArticle answers for a slug without a file.
-    qc.setQueryData(contentKeys.article("help", locale, "nope"), await loadArticle("help", "nope", locale));
+    qc.setQueryData(contentKeys.article("help", locale, "test", "nope"), await loadArticle("help", "nope", locale, "test"));
   }
   big = createQueryClient();
   big.setQueryData(qk.pairs, { pairs: many });

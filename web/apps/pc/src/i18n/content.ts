@@ -2,7 +2,7 @@
 export default {
   "zh-CN": {
     pcContent: {
-      simNotice: "测试环境：本站所有资金均为模拟，不能兑换成真实资产。",
+      simNotice: "测试模式：本站所有资金均为模拟，不能兑换成真实资产。",
       breadcrumb: "当前位置",
       announcements: {
         title: "公告中心",
@@ -49,7 +49,7 @@ export default {
   },
   en: {
     pcContent: {
-      simNotice: "Test environment: every balance on this site is simulated and cannot be exchanged for real assets.",
+      simNotice: "Test mode: every balance on this site is simulated and cannot be exchanged for real assets.",
       breadcrumb: "Breadcrumb",
       announcements: {
         title: "Announcements",

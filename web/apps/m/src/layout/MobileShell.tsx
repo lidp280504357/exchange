@@ -6,7 +6,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, NavLink, Outlet, useLocation } from "react-router";
 import { useScrollTop } from "../components/useScrollTop";
-import { BrandMark, LearningStrip } from "./Brand";
+import { BrandMark, TestModeStrip } from "./Brand";
 import { useHeader } from "./header";
 import { StatusStrip } from "./StatusStrip";
 
@@ -102,7 +102,7 @@ function TopBar() {
           )}
         </div>
       </div>
-      <LearningStrip />
+      <TestModeStrip />
       <StatusStrip />
     </header>
   );

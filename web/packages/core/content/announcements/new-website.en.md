@@ -27,5 +27,3 @@ The Astras website has been rebuilt: desktops and phones no longer share one res
 - **Languages and preferences**: every screen in Chinese and English; choose your time zone, the colors of rises and falls (green up or red up) and order confirmations in the settings.
 
 Since the mobile site went live (2026-10-01) the previous interface at astras.vip/h5/ is retired; its links lead to the home page.
-
-> This site is a test environment for learning; every balance is simulated.

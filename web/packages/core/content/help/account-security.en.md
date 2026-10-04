@@ -42,7 +42,10 @@ An account can have one email and one phone number:
 - Each backs up the other: when you forget the password or replace one of them, the other one confirms it is you.
 - Accounts with an email, a phone number and an authenticator can withdraw up to 2,000 USDT a day and 20,000 USDT a month (equivalent); other accounts get 20% of that.
 
-With two identities bound, replacing one needs a check through the other; an account with a single identity sends the change for review by a person. Withdrawals in the 24 hours after a change are reviewed by a person. SMS is simulated in the test environment, so a phone number receives no real text messages.
+With two identities bound, replacing one needs a check through the other; an account with a single identity sends the change for review by a person. Withdrawals in the 24 hours after a change are reviewed by a person.
+:::test
+SMS is simulated in the test environment, so a phone number receives no real text messages.
+:::
 
 ## Changing the password
 
@@ -59,5 +62,3 @@ Changing the password takes the current password and a security check. Every oth
 ## Security notices
 
 These send both an inbox message and an email: a sign-in from a new device, a password change, an identity bound or replaced, a locked account, a change of account status, and a new authenticator. If it was not you, change your password and sign out the other devices right away.
-
-> This site is a test environment for learning; every balance is simulated.

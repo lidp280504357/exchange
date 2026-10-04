@@ -3,19 +3,21 @@
 # the admin console alone on the test server, check it, and go back.
 #   1. With a throwaway ADMIN, through the console's API: no welcome
 #      credits (a fresh account then gets nothing), the exchange's name,
-#      short name, mark and favicon, its domain, the learning banner off,
-#      sign-ups open, the six legal pages and the home hero published from
+#      short name, mark and favicon, its domain, test mode off (design
+#      §4.4: the sites show the live content), sign-ups open, the six legal pages and the home hero published from
 #      the bundled drafts ("publish the default"), the platform coin's
 #      profile (set unless it is).
 #   2. The launch checklist: every item the console sets is OK; the others
 #      (switches the test server keeps by decision, the custodian's
 #      stand-in, third parties, administrators, items added later) are
 #      printed, not failed.
-#   3. The sites: the name and title within a minute, no learning banner,
-#      no test-environment badge, no welcome-credit copy, the terms served
+#   3. The sites: the name and title within a minute, no test-mode banner,
+#      no 测试模式 badge, no welcome-credit copy, the terms served, and the
+#      help centre's live pages without the test-only words
 #      (web/e2e/branding.mjs).
-#   4. Back to the learning setup at the end, also after a failure, and
-#      checked: banner on, the credits as they were, the built-in name.
+#   4. Back to the test setup at the end, also after a failure, and
+#      checked: test mode and its banner as they were, the credits as they
+#      were, the built-in name, the help centre's test pages again.
 #
 #   scripts/e2e/launch-drill.sh
 set -euo pipefail
@@ -104,29 +106,29 @@ call POST /admin/v1/login "$(jq -nc --arg e "$EMAIL" --arg p "$PW" --arg c "$(no
 BASE=$BASE_USER
 expect 200 - "signed in to the console"
 
-echo "== the learning setup, to go back to"
+echo "== the test setup, to go back to"
 acall GET /admin/v1/platform/profile ""
 expect 200 - "the platform's profile"
 ORIG=$BODY
 acall GET /admin/v1/platform/welcome-credits ""
 expect 200 - "the welcome credits"
 ORIG_CREDITS=$(jq -c .credits <<<"$BODY")
-printf 'ok   %s, learning mode %s, credits %s\n' "$(jq -r .name <<<"$ORIG")" "$(jq -r .learning_mode.enabled <<<"$ORIG")" "$ORIG_CREDITS"
+printf 'ok   %s, test mode %s, credits %s\n' "$(jq -r .name <<<"$ORIG")" "$(jq -r .test_mode.enabled <<<"$ORIG")" "$ORIG_CREDITS"
 CREATED=()
 UPLOADED=()
 
-# back_to_learning puts the learning setup back through the services'
+# back_to_testing puts the test setup back through the services'
 # internal endpoints: the profile, its images, the credits; the pages the
 # drill published are deleted, so the sites show their bundled drafts again
 # (taking them off would hide those too).
 BACK=""
-back_to_learning() {
+back_to_testing() {
   [[ -z $BACK ]] || return 0
   BACK=1
   internal GET instrument-service 8084 /internal/platform/profile
   internal PUT instrument-service 8084 /internal/platform/profile "$(jq -c --argjson cur "$BODY" '{name, short_name, domain, theme_color,
-    brand_color, footer, contact, social, default_locale, learning_mode, registration, expected_version: $cur.version, actor: "e2e:launch-drill",
-    reason: "launch drill: back to the learning setup"}' <<<"$ORIG")"
+    brand_color, footer, contact, social, default_locale, test_mode, registration, expected_version: $cur.version, actor: "e2e:launch-drill",
+    reason: "launch drill: back to the test setup"}' <<<"$ORIG")"
   [[ $STATUS == 200 ]] || echo "warning: the profile was not put back ($STATUS $BODY)" >&2
   local kind
   for kind in ${UPLOADED[@]+"${UPLOADED[@]}"}; do
@@ -134,14 +136,14 @@ back_to_learning() {
   done
   internal GET ledger-service 8085 /internal/ledger/settings/welcome-credits
   internal PUT ledger-service 8085 /internal/ledger/settings/welcome-credits \
-    "$(jq -c --argjson c "$ORIG_CREDITS" '{credits: $c, expected_version: .version, actor: "e2e:launch-drill", reason: "launch drill: back to the learning setup"}' <<<"$BODY")"
+    "$(jq -c --argjson c "$ORIG_CREDITS" '{credits: $c, expected_version: .version, actor: "e2e:launch-drill", reason: "launch drill: back to the test setup"}' <<<"$BODY")"
   [[ $STATUS == 200 ]] || echo "warning: the welcome credits were not put back ($STATUS $BODY)" >&2
   if ((${#CREATED[@]} > 0)); then
     pg "DELETE FROM notify.articles WHERE id IN ($(printf "'%s'," "${CREATED[@]}" | sed 's/,$//'))" >/dev/null ||
       echo "warning: the drill's pages were not deleted" >&2
   fi
 }
-at_exit back_to_learning
+at_exit back_to_testing
 
 echo "== go live: no welcome credits, and a fresh account gets nothing"
 acall PUT /admin/v1/platform/welcome-credits "$(jq -c '{credits: [], expected_version: .version, reason: "launch drill: no welcome credits"}' <<<"$BODY")"
@@ -155,13 +157,13 @@ call GET "/v1/account/balances?account_type=SPOT" "" "${AUTH[@]}"
 expect 200 - "the new account's balances"
 check '[.balances[] | select((.available | tonumber) > 0)] | length == 0' "a fresh account gets nothing"
 
-echo "== go live: the name, the mark, the favicon, the domain, the banner off, sign-ups open"
+echo "== go live: the name, the mark, the favicon, the domain, test mode off, sign-ups open"
 NAME="Drill Exchange ${RUN: -4}"
 acall GET /admin/v1/platform/profile ""
 acall PUT /admin/v1/platform/profile "$(jq -c --arg n "$NAME" '{name: $n, short_name: "Drill", domain: "astras.vip", theme_color, brand_color, footer,
-  contact, social, default_locale, learning_mode: (.learning_mode | .enabled = false), registration: (.registration | .status = "OPEN"),
+  contact, social, default_locale, test_mode: (.test_mode | .enabled = false), registration: (.registration | .status = "OPEN"),
   expected_version: .version, reason: "launch drill: the platform as it goes live"}' <<<"$BODY")"
-expect 200 - "renamed to $NAME, domain astras.vip, banner off, sign-ups open"
+expect 200 - "renamed to $NAME, domain astras.vip, test mode off, sign-ups open"
 MARK='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" rx="6" fill="#0f766e"/><path d="M6 12h12M12 6v12" stroke="#fff" stroke-width="3"/></svg>'
 # An image the platform has already stays: the drill uploads only what is
 # missing and removes only what it uploaded (review BF).
@@ -240,17 +242,24 @@ expect 200 - "the terms are the console's"
 # The bundled draft's title, when the drill published it (an operator's may differ).
 [[ -z ${TERMS_OURS:-} ]] || check '.title == "用户协议"' "the terms' title"
 for site in pc m; do
-  SITE=$site BRAND=$NAME FAVICON=1 LEARNING=0 BANNER="$(jq -r '.learning_mode.text["zh-CN"]' <<<"$ORIG")" LAUNCH=1 CAPTCHA_BYPASS_TOKEN="$BYPASS" \
+  SITE=$site BRAND=$NAME FAVICON=1 TESTMODE=0 BANNER=测试模式 LAUNCH=1 CAPTCHA_BYPASS_TOKEN="$BYPASS" \
     node "$(dirname "$0")/../../web/e2e/branding.mjs"
 done
 
-echo "== back to the learning setup"
-back_to_learning
-learning_again() {
+echo "== back to the test setup"
+back_to_testing
+testing_again() {
   call GET /v1/platform/profile "" &&
-    [[ $(jq -r .name <<<"$BODY") == "$(jq -r .name <<<"$ORIG")" && $(jq -r .learning_mode.enabled <<<"$BODY") == "$(jq -r .learning_mode.enabled <<<"$ORIG")" ]]
+    [[ $(jq -r .name <<<"$BODY") == "$(jq -r .name <<<"$ORIG")" && $(jq -c .test_mode <<<"$BODY") == "$(jq -c .test_mode <<<"$ORIG")" ]]
 }
-eventually 20 "the name and the banner are back ($(jq -r .name <<<"$ORIG"), learning mode $(jq -r .learning_mode.enabled <<<"$ORIG"))" learning_again
+eventually 20 "the name and the test mode are back ($(jq -r .name <<<"$ORIG"), test mode $(jq -c .test_mode <<<"$ORIG"))" testing_again
+# The sites again: in test mode the help centre's test pages (design §4.4).
+if [[ $(jq -r .test_mode.enabled <<<"$ORIG") == true ]]; then
+  SITE=pc BRAND="$(jq -r .name <<<"$ORIG")" FAVICON="$([[ $(jq -r '.images.favicon // ""' <<<"$ORIG") != "" ]] && echo 1 || echo 0)" \
+    TESTMODE="$(jq -r 'if .test_mode.banner then 1 else 0 end' <<<"$ORIG")" \
+    BANNER="$(jq -r '.test_mode.text["zh-CN"] // "" | if . == "" then "测试模式" else . end' <<<"$ORIG")" CONTENT=test \
+    CAPTCHA_BYPASS_TOKEN="$BYPASS" node "$(dirname "$0")/../../web/e2e/branding.mjs"
+fi
 internal GET ledger-service 8085 /internal/ledger/settings/welcome-credits
 [[ $(jq -c .credits <<<"$BODY") == "$ORIG_CREDITS" ]] || { echo "FAIL the credits are $(jq -c .credits <<<"$BODY")" >&2; exit 1; }
 echo "ok   the welcome credits are back: $ORIG_CREDITS"

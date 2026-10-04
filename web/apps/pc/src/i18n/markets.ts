@@ -14,7 +14,7 @@ export default {
       favoriteFailed: "自选没有保存",
       favoriteLoading: "自选正在加载，请稍候",
       home: {
-        badge: "学习项目 · 测试环境 · 资金为模拟",
+        badge: "测试模式",
         assets: "我的资产",
         live: "实时行情",
         liveHint: "价格每秒推送，涨跌即时闪动",
@@ -152,7 +152,7 @@ export default {
       favoriteFailed: "Favorites were not saved",
       favoriteLoading: "Favorites are still loading",
       home: {
-        badge: "Learning project · test environment · simulated funds",
+        badge: "Test mode",
         assets: "My assets",
         live: "Live prices",
         liveHint: "Prices arrive every second and flash as they move",

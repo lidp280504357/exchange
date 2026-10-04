@@ -118,12 +118,17 @@ task web:lighthouse         # 对部署后的两站各三页跑 Lighthouse（性
 - **平台资料**（设计 2026-10-04 §4.1，`@exchange/core/platform/index`）：两个用户站在根组件调 `useBrandingEffects()`，启动时与之后每分钟读 `GET /v1/platform/profile`，改名、换图不需要重新构建。
   - 读到之后：页面标题、favicon 与 apple-touch-icon、`theme-color`、CSS 的 `--brand`（`--brand-soft` 跟着变，`--brand-fg` 按亮度取深色或白色）都改成资料里的；所有文案里的 `{{brand}}` 换成资料的名称（i18next 的 `defaultVariables`）。
   - 顶栏标志用资料的深色背景标志（没有就用浅色的，再没有用自带的）。页脚的版权、合规文案、联系方式与社交链接也取自资料。
-  - 学习模式开着时，三个外壳顶部显示资料的横幅文案，内容页的模拟资金提示也跟着它，关了就都不显示。
+  - 测试模式（`test_mode`，2026-10-04 由学习模式改名）开着时：资料的 `banner` 为真则三个外壳顶部显示横幅（资料文案，空着时显示「测试模式」）；PC 首页与手机站欢迎卡、「我的」身份卡显示「测试模式」徽标；内容页底部显示模拟资金提示；内容只显示测试模式的那一套（见下面「内容按模式」）。关掉就都不显示，内容换成正式的那一套。资料若还是改名前的缓存（只有 `learning_mode`），`normalizeProfile` 按它补出测试模式。
   - 注册方式为 `CLOSED` 时，注册页显示资料里的关闭提示，不显示表单。
   - 「注册即送」文案用资料的 `welcome_credits`（`useWelcomeCredits()`，如「10,000 USDT、0.1 BTC」），清单为空时改用不提赠送的文案。
   - 接口读不到时用 `DEFAULT_PROFILE`：自带的名称、图标与颜色，不显示横幅、不承诺赠送、注册开放。页面不会白屏。
 - **法律页与首页横幅**（设计 §4.4）：`/legal/:slug`（terms、privacy、risk、fees、about、contact），PC 站页脚与手机站「我的 → 条款与政策」进入。默认稿在 `web/packages/core/content/legal/`，首页横幅的默认稿是 `content/home/home-hero.*.md`。后台发布的覆盖稿优先，撤回的不显示。
   - 首页横幅：标题、副标题（文章摘要），正文里第一个 Markdown 链接是按钮（`useHero()`）。手机站的欢迎卡在有赠送时仍以赠送为标题。
+- **内容按模式**（设计 2026-10-04 §4.4）：站点按资料的测试模式只显示那一种模式的内容，切换模式即自动换稿。
+  - 整篇：内置稿的 front matter `modes: TEST | FORMAL | BOTH`（默认 BOTH），后台文章的同名字段由 notification-service 的公开接口按模式过滤（30 秒内跟上切换）。打包的「测试环境」公告是 TEST。
+  - 段落：正文里 `:::test` … `:::` 与 `:::formal` … `:::` 之间的行只在那种模式下保留（只认这两个标签、不嵌套、未闭合算到文末，其它 `:::xxx` 与代码块里的原样保留）。过滤只在 core 的 `renderByMode(md, mode)`（`@exchange/core/content/markdown`）一处，内置稿、后台文章与后台编辑器预览共用；接口照原文返回。
+  - 写稿约定：只在测试环境成立的话（Sepolia、模拟短信、1 分钟冷却、「测试环境」字样）放进 `:::test`，需要正式说法的写 `:::formal`；充提与费率的正式说法指向充值、提现页与费率说明，不点名网络；两种模式都不写死注册赠送的数额。模拟资金的提示由内容页底部的提示统一给出，稿子里不再各写一句。core 的单测断言正式模式下的稿子不含这些字样，演练（`launch-drill.sh`）在两种模式下检查帮助中心的渲染结果。
+  - 查询键带上模式（`contentKeys.list(section, locale, mode)`），切换模式是一次新的查询。
 
 ## 无障碍与状态
 

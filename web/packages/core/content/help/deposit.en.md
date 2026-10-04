@@ -7,6 +7,7 @@ summary: Pick a coin and a network, send to your own address, and the deposit is
 
 ## What you can deposit today
 
+:::test
 The test environment accepts one kind of deposit for now:
 
 | Coin | Network | Confirmations | Usual time | Minimum |
@@ -14,6 +15,10 @@ The test environment accepts one kind of deposit for now:
 | ETH | Sepolia (Ethereum test network) | 12 | about 3 minutes | 0.001 ETH |
 
 Other coins trade on the site only and cannot be deposited or withdrawn. Sepolia ETH has no market value; public test-network faucets give it away for free.
+:::
+:::formal
+The coins and networks you can deposit are the ones the [Deposit](/assets/deposit) page lists, each with its confirmations, minimum deposit and usual time. Coins not on that list trade on the site only and cannot be deposited or withdrawn.
+:::
 
 ## Steps
 
@@ -28,7 +33,12 @@ Your deposit address is yours alone and can be used again and again; every coin 
 
 > **Only send assets on this network to this address.** Transfers on another network, or of tokens the site does not support, are not credited automatically and may not be recoverable.
 
+:::test
 - **Use the same network**: the site only watches Sepolia. Assets sent to the same address on Ethereum mainnet or another network are invisible to it and never credited.
+:::
+:::formal
+- **Use the same network**: send on the network you chose on the deposit page. Assets sent to the same address on another network are invisible to the site and never credited.
+:::
 - **Send at least the minimum**: a deposit below the minimum is not credited to your account; it is held for manual handling, and you are told.
 - **Use a plain transfer**: transfers made inside a contract (by some smart-contract wallets, for example) may not be recognized automatically and have to be added by hand.
 
@@ -36,7 +46,12 @@ Your deposit address is yours alone and can be used again and again; every coin 
 
 ### How long does a deposit take?
 
+:::test
 It depends on the blocks. Sepolia makes a block about every 12 seconds, so 12 confirmations usually take around 3 minutes, longer when the network is busy.
+:::
+:::formal
+It depends on the network's block time and the confirmations it needs (the deposit page shows the usual time), longer when the network is busy.
+:::
 
 ### The confirmations are complete but my balance did not change?
 
@@ -45,5 +60,3 @@ Check the deposit's status first. "Rejected" usually means it was below the mini
 ### Can a frozen account receive deposits?
 
 Yes, they are credited, but the funds cannot be used or withdrawn while the account is frozen.
-
-> This site is a test environment for learning; every balance is simulated.

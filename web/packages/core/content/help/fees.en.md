@@ -34,9 +34,12 @@ summary: Spot makers and takers pay 0.10%; perpetual futures 0.02% for makers an
 |:--|:--|
 | Deposits | Free |
 | Transfers between spot and futures | Free |
+:::test
 | Withdrawing ETH (Sepolia) | 0.0002 ETH each, on top of the amount |
+:::
+:::formal
+| Withdrawals | A fixed fee per network for each, on top of the amount |
+:::
 | Withdrawing to another user's deposit address | Free (completed on the site, not on chain) |
 
 Withdrawal fees are fixed per network, whatever the amount; the withdrawal page always shows the current one.
-
-> This site is a test environment for learning; every balance is simulated.

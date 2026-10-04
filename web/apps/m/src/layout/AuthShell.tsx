@@ -3,7 +3,7 @@ import { X } from "lucide-react";
 import { Link, Outlet, useLocation } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useScrollTop } from "../components/useScrollTop";
-import { BrandMark, LearningStrip } from "./Brand";
+import { BrandMark, TestModeStrip } from "./Brand";
 
 /** AuthShell: sign-in, sign-up and reset full screen, with a close button home (design §7.2). */
 export function AuthShell() {
@@ -19,7 +19,7 @@ export function AuthShell() {
         </Link>
       </div>
       <div className="relative -mx-5">
-        <LearningStrip />
+        <TestModeStrip />
       </div>
       <main className="relative flex flex-1 flex-col pt-6">
         <Outlet />

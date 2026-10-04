@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { excerpt, parseInline, parseMarkdown, plainText, safeHref, slugify, splitRow, type Block } from "./markdown";
+import { excerpt, parseInline, parseMarkdown, plainText, renderByMode, safeHref, slugify, splitRow, type Block } from "./markdown";
 
 const text = (value: string) => ({ type: "text", value });
 
@@ -188,5 +188,40 @@ describe("parseMarkdown", () => {
   it("slugifies headings of any script", () => {
     expect(slugify("Margin & Leverage (杠杆)")).toBe("margin-leverage-杠杆");
     expect(slugify("!!!")).toBe("section");
+  });
+});
+
+describe("renderByMode", () => {
+  const src = [
+    "共同的一段。",
+    "",
+    ":::test",
+    "> 本站处于测试模式，资金为模拟。",
+    ":::",
+    "",
+    ":::formal",
+    "充值请看充值页。",
+    ":::",
+    "",
+    "结尾。",
+  ].join("\n");
+
+  it("keeps the blocks of the mode, without their markers", () => {
+    expect(renderByMode(src, "test")).toBe(["共同的一段。", "", "> 本站处于测试模式，资金为模拟。", "", "", "结尾。"].join("\n"));
+    expect(renderByMode(src, "formal")).toBe(["共同的一段。", "", "", "充值请看充值页。", "", "结尾。"].join("\n"));
+  });
+
+  it("runs an unclosed block to the end, does not nest, and leaves other ::: lines and code alone", () => {
+    expect(renderByMode("前\n:::test\n测试\n:::formal\n仍在测试块里", "formal")).toBe("前");
+    expect(renderByMode("前\n:::test\n测试\n:::formal\n仍在测试块里", "test")).toBe("前\n测试\n:::formal\n仍在测试块里");
+    expect(renderByMode(":::note\n提示\n:::", "test")).toBe(":::note\n提示\n:::");
+    const code = "```\n:::test\n不是块\n:::\n```";
+    expect(renderByMode(code, "formal")).toBe(code);
+    expect(renderByMode(":::test\n```\n:::\n```\n仍是测试\n:::\n共同", "formal")).toBe("共同");
+  });
+
+  it("parses into the mode's document", () => {
+    const doc = parseMarkdown(renderByMode(src, "formal"));
+    expect(doc.blocks.map((b) => (b.type === "paragraph" ? plainText(b.children) : b.type))).toEqual(["共同的一段。", "充值请看充值页。", "结尾。"]);
   });
 });

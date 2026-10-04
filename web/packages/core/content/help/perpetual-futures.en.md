@@ -95,5 +95,3 @@ A position can have take-profit and stop-loss conditional orders, up to 20 per c
 ## Reduce-only state
 
 If the mark price cannot be computed for 10 seconds (a price source is down, for example), the contract becomes **reduce only**: positions can be closed but not opened. An administrator lifts it once prices are back, and the trading page shows a banner meanwhile.
-
-> This site is a test environment for learning; every balance is simulated.

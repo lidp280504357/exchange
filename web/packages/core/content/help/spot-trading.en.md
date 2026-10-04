@@ -56,5 +56,3 @@ Fees follow the coin's precision; a remainder below the smallest unit is rounded
 ## Where to follow prices
 
 [Markets](/markets) lists every pair's latest price, 24-hour change and turnover; click a row to open its trading page. There the order book is on the left, the chart in the middle, the order form on the right and your orders and trades below.
-
-> This site is a test environment for learning; every balance is simulated.

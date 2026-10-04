@@ -5,7 +5,7 @@
 #     mobile sites without a build: the public profile at once, the mobile
 #     site's manifest, the console's image proxy, and a browser on each
 #     site within a minute (web/e2e/branding.mjs);
-#   - the learning banner follows its switch;
+#   - the test-mode banner follows its switch;
 #   - closed sign-ups refuse REGISTER codes and new accounts (403
 #     AUTH_REGISTRATION_CLOSED) and leave the other codes alone;
 #   - with no welcome credits a new account gets nothing, and the profile
@@ -59,7 +59,7 @@ set_profile() {
   local edited
   profile
   edited=$(jq -c --argjson orig "$ORIG" --arg actor "$ACTOR" --arg reason "$2" '. as $cur | ('"$1"') | {name, short_name, domain,
-    theme_color, brand_color, footer, contact, social, default_locale, learning_mode, registration, expected_version: $cur.version,
+    theme_color, brand_color, footer, contact, social, default_locale, test_mode, registration, expected_version: $cur.version,
     actor: $actor, reason: $reason}' <<<"$BODY")
   internal PUT instrument-service 8084 /internal/platform/profile "$edited"
 }
@@ -68,8 +68,10 @@ echo "== the profile as it is"
 profile
 ORIG=$BODY
 ORIG_NAME=$(jq -r .name <<<"$ORIG")
-LEARNING_TEXT=$(jq -r '.learning_mode.text["zh-CN"]' <<<"$ORIG")
-printf 'ok   %s, version %s, learning mode %s\n' "$ORIG_NAME" "$(jq -r .version <<<"$ORIG")" "$(jq -r .learning_mode.enabled <<<"$ORIG")"
+# The banner's text, else the sites' own "测试模式".
+BANNER_TEXT=$(jq -r '.test_mode.text["zh-CN"] // "" | if . == "" then "测试模式" else . end' <<<"$ORIG")
+printf 'ok   %s, version %s, test mode %s, banner %s\n' "$ORIG_NAME" "$(jq -r .version <<<"$ORIG")" "$(jq -r .test_mode.enabled <<<"$ORIG")" \
+  "$(jq -r .test_mode.banner <<<"$ORIG")"
 # An uploaded favicon is kept to be put back.
 FAVICON_URL=$(jq -r '.images.favicon // ""' <<<"$ORIG")
 if [[ -n $FAVICON_URL ]]; then
@@ -127,18 +129,19 @@ MANIFEST=$(curl -s "$M_BASE/manifest.webmanifest")
 echo "ok   the mobile site's manifest has the name and the icon"
 
 echo "== the sites show it, without a build"
-LEARNING=$(jq -r 'if .learning_mode.enabled then 1 else 0 end' <<<"$ORIG")
+SHOWN=$(jq -r 'if .test_mode.enabled and .test_mode.banner then 1 else 0 end' <<<"$ORIG")
 for site in pc m; do
-  SITE=$site BRAND=$NAME FAVICON=1 LEARNING=$LEARNING BANNER=$LEARNING_TEXT CAPTCHA_BYPASS_TOKEN="$BYPASS" \
+  SITE=$site BRAND=$NAME FAVICON=1 TESTMODE=$SHOWN BANNER=$BANNER_TEXT CAPTCHA_BYPASS_TOKEN="$BYPASS" \
     node "$(dirname "$0")/../../web/e2e/branding.mjs"
 done
 
-echo "== the learning banner follows its switch"
-if [[ $LEARNING == 1 ]]; then OFF=0; else OFF=1; fi
-set_profile ".learning_mode.enabled = $([[ $OFF == 1 ]] && echo true || echo false)" "e2e: the banner switched"
+echo "== the test-mode banner follows its switch"
+# Test mode on, its banner the other way round.
+if [[ $SHOWN == 1 ]]; then OFF=0; else OFF=1; fi
+set_profile ".test_mode.enabled = true | .test_mode.banner = $([[ $OFF == 1 ]] && echo true || echo false)" "e2e: the banner switched"
 expect 200 - "the banner switched"
-eventually 20 "the public profile has it" bash -c "curl -s '$BASE/v1/platform/profile' | jq -e '.learning_mode.enabled == $([[ $OFF == 1 ]] && echo true || echo false)'"
-SITE=pc BRAND=$NAME FAVICON=1 LEARNING=$OFF BANNER=$LEARNING_TEXT CAPTCHA_BYPASS_TOKEN="$BYPASS" node "$(dirname "$0")/../../web/e2e/branding.mjs"
+eventually 20 "the public profile has it" bash -c "curl -s '$BASE/v1/platform/profile' | jq -e '.test_mode.banner == $([[ $OFF == 1 ]] && echo true || echo false)'"
+SITE=pc BRAND=$NAME FAVICON=1 TESTMODE=$OFF BANNER=$BANNER_TEXT CAPTCHA_BYPASS_TOKEN="$BYPASS" node "$(dirname "$0")/../../web/e2e/branding.mjs"
 
 # The name goes back before any mail is sent: notification-service signs
 # them with the name it read, for ten minutes.

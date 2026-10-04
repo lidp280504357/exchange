@@ -13,7 +13,7 @@ export default {
       favoriteFailed: "自选没有保存",
       favoriteLoading: "自选正在加载，请稍候",
       home: {
-        badge: "测试环境 · 资金为模拟",
+        badge: "测试模式",
         welcomeTitle: "注册账户，开始交易",
         welcomeTitleCredits: "注册即领 {{credits}}",
         welcomeDesc: "体验现货与永续合约，行情实时跟随主流市场。",
@@ -128,7 +128,7 @@ export default {
       favoriteFailed: "Favorites were not saved",
       favoriteLoading: "Favorites are still loading",
       home: {
-        badge: "Test environment · simulated funds",
+        badge: "Test mode",
         welcomeTitle: "Open an account and start trading",
         welcomeTitleCredits: "Sign up for {{credits}}",
         welcomeDesc: "Try spot and perpetual futures, with prices that follow the major markets live.",

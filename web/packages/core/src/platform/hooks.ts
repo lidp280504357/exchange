@@ -4,13 +4,14 @@ import { platformApi, unwrap } from "../api/client";
 import { setBrandVariable } from "../i18n/index";
 import { qk } from "../query/keys";
 import { useSettings } from "../settings/store";
-import { brandForeground, creditsText, DEFAULT_BRAND, DEFAULT_PROFILE, textOf, type PlatformProfile } from "./profile";
+import type { ContentMode } from "../content/markdown";
+import { brandForeground, contentMode, creditsText, DEFAULT_BRAND, DEFAULT_PROFILE, normalizeProfile, textOf, type PlatformProfile } from "./profile";
 
 /** usePlatformProfile reads the profile, again every minute (it changes without a build). */
 export function usePlatformProfile() {
   return useQuery({
     queryKey: qk.platform,
-    queryFn: () => unwrap(platformApi.GET("/v1/platform/profile")),
+    queryFn: async () => normalizeProfile(await unwrap(platformApi.GET("/v1/platform/profile"))),
     staleTime: 60_000,
     refetchInterval: 60_000,
   });
@@ -19,6 +20,16 @@ export function usePlatformProfile() {
 /** useBranding returns the profile, the built-in one until (and while not) read. */
 export function useBranding(): PlatformProfile {
   return usePlatformProfile().data ?? DEFAULT_PROFILE;
+}
+
+/** useTestMode returns the profile's test mode: on, its banner shown, the banner's text. */
+export function useTestMode(): PlatformProfile["test_mode"] {
+  return useBranding().test_mode;
+}
+
+/** useContentMode returns the content the sites show now: "test" in test mode, "formal" when live. */
+export function useContentMode(): ContentMode {
+  return contentMode(useBranding());
 }
 
 /**

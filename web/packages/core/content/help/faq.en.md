@@ -2,18 +2,20 @@
 title: FAQ
 category: faq
 order: 1
-summary: Answers about simulated funds, refused orders, codes, account statuses and the desktop and mobile sites.
+summary: Answers about funds and accounts, refused orders, codes, account statuses and the desktop and mobile sites.
 ---
 
 ## Funds and accounts
 
+:::test
 ### Is the money real?
 
-No. Astras is a learning project and every balance is **simulated**: it cannot be exchanged for real assets or withdrawn as real money. Deposits and withdrawals only use the Ethereum Sepolia test network, whose ETH has no value either. See [About the test environment and simulated funds](/announcements/test-environment).
+No. The site is in test mode and every balance is **simulated**: it cannot be exchanged for real assets or withdrawn as real money. Deposits and withdrawals only use the Ethereum Sepolia test network, whose ETH has no value either. See [About the test environment and simulated funds](/announcements/test-environment).
 
 ### Where do the simulated funds come from?
 
-Every new account receives 10,000 USDT, 0.1 BTC and 2 ETH in its spot account once, when it signs up. There is no way to request more yourself for now.
+Every new account receives simulated funds in its spot account once, when it signs up; the sign-up page shows how much. There is no way to request more yourself for now.
+:::
 
 ### What do "under review" and "frozen" mean on my account?
 
@@ -55,7 +57,9 @@ Yes. Prices, candles and 24-hour figures follow the major markets live over one 
 
 - The email may be in your spam folder;
 - one code per email every 60 seconds, at most 5 an hour and 10 a day;
+:::test
 - SMS is simulated in the test environment and phone numbers get no real messages: use email.
+:::
 
 ### Why am I asked for a code when signing in?
 
@@ -78,5 +82,3 @@ Open [Settings](/account/settings): choose Chinese or English, the time zone for
 ### Is there an API?
 
 Yes. The public REST and WebSocket reference is at [astras.vip/docs](/docs/), the same interfaces the website uses.
-
-> This site is a test environment for learning; every balance is simulated.
