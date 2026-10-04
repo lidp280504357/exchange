@@ -176,9 +176,9 @@ func (s *Service) launchWelcome(ctx context.Context, master bool) (string, map[s
 
 // launchProfileView is what the checklist reads of the platform's profile.
 type launchProfileView struct {
-	Name         string `json:"name"`
-	Domain       string `json:"domain"`
-	TestMode     struct {
+	Name     string `json:"name"`
+	Domain   string `json:"domain"`
+	TestMode struct {
 		Enabled bool `json:"enabled"`
 		Banner  bool `json:"banner"`
 	} `json:"test_mode"`

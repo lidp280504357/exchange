@@ -1,5 +1,6 @@
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
 import { bundledSource, listSlugs, type ContentSection } from "@exchange/core/content/loader";
+import { renderByMode, type ContentMode } from "@exchange/core/content/markdown";
 import { Markdown, type LinkProps } from "@exchange/core/content/render";
 import { Badge, Button, cn, DataTable, Drawer, Input, Segmented, Select, Switch, Tabs, type ColumnDef } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
@@ -76,8 +77,8 @@ export type Draft = { slug: string; modes: Modes; category: string; pinned: bool
 
 type Source = NonNullable<Awaited<ReturnType<typeof bundledSource>>>;
 
-/** seedOf is the draft of a bundled file, in Chinese and (when there is one) English, for modes. */
-export function seedOf(slug: string, zh: Source, en: Source | null, modes: Modes = "BOTH"): Draft {
+/** seedOf is the draft of a bundled file, in Chinese and (when there is one) English, for modes (its front matter's by default). */
+export function seedOf(slug: string, zh: Source, en: Source | null, modes: Modes = zh.modes): Draft {
   const text = (s: Source): Text => ({ locale: s.locale, title: s.title, summary: s.summary, body: s.body.trim() });
   return {
     slug, modes, category: zh.category, pinned: zh.pinned, order: String(zh.order),
@@ -314,6 +315,10 @@ export function ArticleEditor({
   const [d, setD] = useState<Draft>(() => seed ?? draftOf(section, article));
   const [locale, setLocale] = useState<Locale>("zh-CN");
   const [view, setView] = useState("edit");
+  // The preview shows the body as the sites do in a mode (:::test and
+  // :::formal blocks filtered); an article for both modes can be seen in each.
+  const [shownIn, setShownIn] = useState<ContentMode>(() => (article?.modes ?? seed?.modes) === "FORMAL" ? "formal" : "test");
+  const previewMode: ContentMode = d.modes === "TEST" ? "test" : d.modes === "FORMAL" ? "formal" : shownIn;
   const [publishing, setPublishing] = useState(false);
   const [at, setAt] = useState("");
   const fixed = fixedSection(section);
@@ -498,13 +503,30 @@ export function ArticleEditor({
             </label>
           </div>
         ) : (
-          <article className="rounded-2 border border-line-1 p-5" data-testid="article-preview">
-            <h1 className="text-xl font-semibold text-fg-1">{text.title || "—"}</h1>
-            {text.summary && <p className="mt-1 text-sm text-fg-3">{text.summary}</p>}
-            <div className={cn(PROSE, "mt-3")}>
-              <Markdown source={text.body} link={previewLink} />
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-fg-3">
+              {d.modes === "BOTH" ? (
+                <Segmented
+                  size="sm"
+                  value={shownIn}
+                  onValueChange={(v) => setShownIn(v as ContentMode)}
+                  items={[
+                    { value: "test", label: t("admin.content.modes.TEST") },
+                    { value: "formal", label: t("admin.content.modes.FORMAL") },
+                  ]}
+                  aria-label={t("admin.content.modes.previewIn")}
+                />
+              ) : null}
+              <span>{t("admin.content.modes.previewAs", { mode: t(`admin.content.modes.${previewMode === "test" ? "TEST" : "FORMAL"}`) })}</span>
             </div>
-          </article>
+            <article className="rounded-2 border border-line-1 p-5" data-testid="article-preview" data-mode={previewMode}>
+              <h1 className="text-xl font-semibold text-fg-1">{text.title || "—"}</h1>
+              {text.summary && <p className="mt-1 text-sm text-fg-3">{text.summary}</p>}
+              <div className={cn(PROSE, "mt-3")}>
+                <Markdown source={renderByMode(text.body, previewMode)} link={previewLink} />
+              </div>
+            </article>
+          </div>
         )}
       </div>
       {publishing && article && (
