@@ -35,6 +35,12 @@ func (s *Store) Tx(ctx context.Context, fn func(ports.Repos) error) error {
 // Read returns repositories on the pool.
 func (s *Store) Read() ports.Repos { return repos{q: s.db, events: s.events} }
 
+// Snapshot runs fn in a read-only repeatable-read transaction.
+func (s *Store) Snapshot(ctx context.Context, fn func(ports.Repos) error) error {
+	opts := pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}
+	return s.db.InTxOpts(ctx, opts, func(tx pgx.Tx) error { return fn(repos{q: tx, events: s.events}) })
+}
+
 type repos struct {
 	q      pg.Querier
 	events *event.Factory

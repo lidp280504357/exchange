@@ -84,6 +84,27 @@ func orderInput(o *marginv1.OrderCheck) (application.OrderInput, error) {
 	return in, nil
 }
 
+// answer turns an error into the answers spot-trading-service takes as
+// final or unknown (review CM, C8): a refusal is InvalidArgument,
+// FailedPrecondition, AlreadyExists, PermissionDenied or Unavailable with
+// MARGIN_PRICE_UNAVAILABLE, and the order is refused; Internal and any
+// other Unavailable are unknown, and the trading service asks again. A
+// dependency's NotFound (a pair the instruments do not know) is an
+// invalid order; its rate limits and credentials are no fault of the
+// order, so they are unknown.
+func answer(err error) error {
+	e := apperr.From(err)
+	switch e.Kind {
+	case apperr.KindNotFound:
+		c := *e
+		c.Kind = apperr.KindInvalid
+		return &c
+	case apperr.KindRateLimited, apperr.KindUnauthenticated:
+		return apperr.Unavailable(err)
+	}
+	return err
+}
+
 func levelOf(l *decimal.Decimal) string {
 	if l == nil {
 		return ""
@@ -96,11 +117,11 @@ func levelOf(l *decimal.Decimal) string {
 func (s *Server) CheckOrder(ctx context.Context, req *marginv1.CheckOrderRequest) (*marginv1.CheckOrderResponse, error) {
 	in, err := orderInput(req.GetOrder())
 	if err != nil {
-		return nil, err
+		return nil, answer(err)
 	}
 	out, err := s.svc.CheckOrder(ctx, in)
 	if err != nil {
-		return nil, err
+		return nil, answer(err)
 	}
 	return &marginv1.CheckOrderResponse{Borrow: out.Borrow.String(), MarginLevel: levelOf(out.MarginLevel)}, nil
 }
@@ -110,11 +131,11 @@ func (s *Server) CheckOrder(ctx context.Context, req *marginv1.CheckOrderRequest
 func (s *Server) ReserveOrder(ctx context.Context, req *marginv1.ReserveOrderRequest) (*marginv1.ReserveOrderResponse, error) {
 	in, err := orderInput(req.GetOrder())
 	if err != nil {
-		return nil, err
+		return nil, answer(err)
 	}
 	out, err := s.svc.ReserveOrder(ctx, in)
 	if err != nil {
-		return nil, err
+		return nil, answer(err)
 	}
 	return &marginv1.ReserveOrderResponse{Borrowed: out.Borrow.String(), BorrowId: out.BorrowID, MarginLevel: levelOf(out.MarginLevel)}, nil
 }

@@ -49,6 +49,10 @@ func TestValueWithHaircutsAndMissingPrices(t *testing.T) {
 	if v = Value(holdings, testTerms, prices); !v.Complete() || !v.Stale || !v.TotalAsset.Equal(d("3850")) {
 		t.Fatalf("stale: %+v", v)
 	}
+	// Collateral without a price is no debt (review CK ③).
+	if v = Value([]Holding{{Asset: "DOGE", Free: d("1")}}, testTerms, prices); v.HasDebt() || v.Complete() {
+		t.Fatalf("unpriced collateral: %+v", v)
+	}
 	// Without debts there is no level.
 	if v = Value(holdings[1:2], testTerms, prices); v.HasDebt() {
 		t.Fatalf("no debt: %+v", v)

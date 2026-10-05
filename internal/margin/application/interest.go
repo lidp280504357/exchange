@@ -24,11 +24,12 @@ const MaxCatchUp = 48
 // hour after the last finished run to the current one, oldest first, at
 // most MaxCatchUp of them. Each loan is charged once per hour on the
 // principal it had on the hour (PrincipalAt), at the asset's rate of the
-// hour (FLOATING from the pool's use on it), one ledger journal per asset
-// and hour (ledger AccrueMarginInterest). An asset with a borrow or a
-// repayment from before the hour still in flight waits for the next pass,
-// and the hour stays RUNNING until every asset of it is charged; the
-// later hours wait for it. It returns the number of loans charged.
+// hour (FLOATING from the pool's use on it), in ledger journals of one
+// asset and hour of at most interestChunk accounts each (ledger
+// AccrueMarginInterest). An asset with a borrow or a repayment from
+// before the hour still in flight waits for the next pass, and the hour
+// stays RUNNING until every asset of it is charged; the later hours wait
+// for it. It returns the number of loans charged.
 func (s *Service) ChargeInterest(ctx context.Context) (int, error) {
 	now := domain.Hour(s.Now())
 	hours, err := s.dueHours(ctx, now)
@@ -81,17 +82,29 @@ type owedOnHour struct {
 }
 
 // chargeHour charges one hour; done reports whether every asset of it is
-// charged.
+// charged. The loans and what changed them since the hour are read in one
+// snapshot (review CK ②): read apart, a borrow or a repayment finished in
+// between would count in one and not the other, and the hour charged on
+// a principal it never had.
 func (s *Service) chargeHour(ctx context.Context, hour time.Time) (int, bool, error) {
 	read := s.Store.Read()
 	if err := read.Interest().StartRun(ctx, hour); err != nil {
 		return 0, false, err
 	}
-	since, err := read.Interest().Since(ctx, hour)
-	if err != nil {
-		return 0, false, err
-	}
-	open, err := read.Loans().Open(ctx, "")
+	var since map[ports.LoanKey]ports.LoanSince
+	var open []ports.Loan
+	var cat Catalog
+	err := s.Store.Snapshot(ctx, func(r ports.Repos) error {
+		var err error
+		if since, err = r.Interest().Since(ctx, hour); err != nil {
+			return err
+		}
+		if open, err = r.Loans().Open(ctx, ""); err != nil {
+			return err
+		}
+		cat, err = s.catalog(ctx, r)
+		return err
+	})
 	if err != nil {
 		return 0, false, err
 	}
@@ -118,10 +131,6 @@ func (s *Service) chargeHour(ctx context.Context, hour time.Time) (int, bool, er
 		if p := domain.PrincipalAt(now[k], since[k].Borrowed, since[k].Repaid); p.IsPositive() {
 			byAsset[k.Asset] = append(byAsset[k.Asset], owedOnHour{key: k, principal: p})
 		}
-	}
-	cat, err := s.catalog(ctx, read)
-	if err != nil {
-		return 0, false, err
 	}
 	n, done := 0, len(waiting) == 0
 	for _, asset := range slices.Sorted(maps.Keys(byAsset)) {
@@ -151,68 +160,109 @@ func (s *Service) chargeHour(ctx context.Context, hour time.Time) (int, bool, er
 	return n, true, nil
 }
 
-// chargeAsset books one asset's hour, once: a charge per loan is stored
-// PENDING, the PENDING charges of the asset and hour are posted in one
-// journal under a key of the asset and the hour, and recorded DONE. A
-// retry finds the charges stored before and posts the same journal, which
-// the ledger replays.
+// interestChunk is how many accounts one interest journal books (the
+// ledger takes at most 2000).
+const interestChunk = 1000
+
+// chargeAsset books one asset's hour, once (design §4.3, review CK ②):
+// the first pass stores a charge per loan owed on the hour, PENDING, all
+// of them in one transaction, and from then on the stored charges are the
+// hour's — a retry posts them as they are. They go to the ledger in
+// journals of at most interestChunk accounts, in the order of the
+// accounts, each under a key of the asset, the hour and its place
+// (<asset>:<hour>, then <asset>:<hour>:<n>), which the ledger replays,
+// and are recorded DONE journal by journal.
 func (s *Service) chargeAsset(ctx context.Context, t domain.AssetTerms, hour time.Time, loans []owedOnHour) (int, error) {
-	read := s.Store.Read()
-	lent := decimal.Zero
-	for _, l := range loans {
-		lent = lent.Add(l.principal)
-	}
-	rate, err := s.hourRate(ctx, read, t, hour, lent)
+	charges, err := s.hourCharges(ctx, t, hour, loans)
 	if err != nil {
 		return 0, err
 	}
-	var charges []ports.Charge
-	for _, l := range loans {
-		c, ok, err := read.Interest().Hourly(ctx, l.key.UserID, l.key.Account, l.key.Asset, hour)
-		if err != nil {
-			return 0, err
+	n := 0
+	for i := 0; i*interestChunk < len(charges); i++ {
+		chunk := charges[i*interestChunk : min((i+1)*interestChunk, len(charges))]
+		if !slices.ContainsFunc(chunk, func(c ports.Charge) bool { return c.Status == ports.OpPending }) {
+			continue
 		}
-		if !ok {
+		key := fmt.Sprintf("%s:%d", t.Asset, hour.Unix())
+		if i > 0 {
+			key = fmt.Sprintf("%s:%d", key, i)
+		}
+		booked, err := s.bookCharges(ctx, t.Asset, hour, key, chunk)
+		n += booked
+		if err != nil {
+			return n, err
+		}
+	}
+	return n, nil
+}
+
+// hourCharges returns the asset's hourly charges of an hour in the order
+// of their accounts, storing them first unless a pass did before.
+func (s *Service) hourCharges(ctx context.Context, t domain.AssetTerms, hour time.Time, loans []owedOnHour) ([]ports.Charge, error) {
+	var charges []ports.Charge
+	err := s.Store.Tx(ctx, func(r ports.Repos) error {
+		if err := r.Interest().LockHour(ctx, t.Asset, hour); err != nil {
+			return err
+		}
+		stored, err := r.Interest().OfHour(ctx, t.Asset, hour)
+		if err != nil || len(stored) > 0 {
+			charges = stored
+			return err
+		}
+		lent := decimal.Zero
+		for _, l := range loans {
+			lent = lent.Add(l.principal)
+		}
+		rate, err := s.hourRate(ctx, r, t, hour, lent)
+		if err != nil {
+			return err
+		}
+		now := s.Now()
+		for _, l := range loans {
 			interest := domain.Interest(l.principal, rate.Rate, t.Decimals)
 			if !interest.IsPositive() {
 				continue
 			}
-			c = ports.Charge{
+			c := ports.Charge{
 				ID: uuid.Must(uuid.NewV7()).String(), UserID: l.key.UserID, Account: l.key.Account, Asset: l.key.Asset, Hour: hour,
-				Principal: l.principal, Model: rate.Model, Rate: rate.Rate, Interest: interest, Status: ports.OpPending, CreatedAt: s.Now(),
+				Principal: l.principal, Model: rate.Model, Rate: rate.Rate, Interest: interest, Status: ports.OpPending, CreatedAt: now,
 			}
-			if inserted, err := read.Interest().Insert(ctx, c); err != nil {
-				return 0, err
-			} else if !inserted { // stored meanwhile: book that one
-				if c, _, err = read.Interest().Hourly(ctx, l.key.UserID, l.key.Account, l.key.Asset, hour); err != nil {
-					return 0, err
-				}
+			if _, err := r.Interest().Insert(ctx, c); err != nil {
+				return err
 			}
 		}
-		if c.Status == ports.OpPending {
-			charges = append(charges, c)
-		}
-	}
-	if len(charges) == 0 {
-		return 0, nil
+		charges, err = r.Interest().OfHour(ctx, t.Asset, hour)
+		return err
+	})
+	if err != nil {
+		return nil, err
 	}
 	slices.SortFunc(charges, func(a, b ports.Charge) int {
 		return cmp.Or(cmp.Compare(a.UserID, b.UserID), cmp.Compare(a.Account.Key(), b.Account.Key()))
 	})
-	lines := make([]ports.Accrual, len(charges))
-	for i, c := range charges {
+	return charges, nil
+}
+
+// bookCharges posts one journal of an hour's charges and records them
+// DONE; it returns how many it recorded.
+func (s *Service) bookCharges(ctx context.Context, asset string, hour time.Time, key string, chunk []ports.Charge) (int, error) {
+	lines := make([]ports.Accrual, len(chunk))
+	for i, c := range chunk {
 		lines[i] = ports.Accrual{UserID: c.UserID, Account: c.Account, Amount: c.Interest}
 	}
-	journal, err := s.Ledger.Accrue(ctx, fmt.Sprintf("%s:%d", t.Asset, hour.Unix()), t.Asset, "interest "+hour.Format(time.RFC3339), lines)
+	journal, err := s.Ledger.Accrue(ctx, key, asset, "interest "+hour.Format(time.RFC3339), lines)
 	if err != nil {
 		if refused(err) {
-			s.Log.ErrorContext(ctx, "the ledger refused an hour's interest", "asset", t.Asset, "hour", hour, "error", apperr.From(err).Message)
+			s.Log.ErrorContext(ctx, "the ledger refused an hour's interest", "asset", asset, "hour", hour, "key", key,
+				"error", apperr.From(err).Message)
 		}
 		s.count("interest", "pending")
 		return 0, err
 	}
+	n := 0
 	err = s.Store.Tx(ctx, func(r ports.Repos) error {
-		for _, c := range charges {
+		n = 0
+		for _, c := range chunk {
 			cur, err := r.Interest().GetForUpdate(ctx, c.ID)
 			if err != nil {
 				return err
@@ -234,6 +284,7 @@ func (s *Service) chargeAsset(ctx context.Context, t domain.AssetTerms, hour tim
 			if err := r.Emit(ctx, event.TopicMargin, interestEvent(cur, loan, journal), "user", cur.UserID); err != nil {
 				return err
 			}
+			n++
 		}
 		return nil
 	})
@@ -241,5 +292,5 @@ func (s *Service) chargeAsset(ctx context.Context, t domain.AssetTerms, hour tim
 		return 0, err
 	}
 	s.count("interest", "done")
-	return len(charges), nil
+	return n, nil
 }

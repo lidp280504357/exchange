@@ -18,6 +18,9 @@ type Store interface {
 	Tx(ctx context.Context, fn func(Repos) error) error
 	// Read returns repositories outside any transaction.
 	Read() Repos
+	// Snapshot runs fn in one read-only transaction that sees a single
+	// snapshot of the schema (repeatable read).
+	Snapshot(ctx context.Context, fn func(Repos) error) error
 }
 
 // Repos groups the repositories of one transaction.
@@ -188,8 +191,8 @@ type BorrowRepo interface {
 	Finish(ctx context.Context, b Borrow) error
 	// Pending returns the borrows created before cutoff still PENDING.
 	Pending(ctx context.Context, cutoff time.Time, limit int) ([]Borrow, error)
-	// PendingSum is what the user's PENDING borrows of asset add up to.
-	PendingSum(ctx context.Context, userID, asset string) (decimal.Decimal, error)
+	// PendingOf returns the user's PENDING borrows.
+	PendingOf(ctx context.Context, userID string) ([]Borrow, error)
 }
 
 // Repay is a repayment.
@@ -265,6 +268,14 @@ type InterestRepo interface {
 	Finish(ctx context.Context, c Charge) error
 	// Pending returns the charges created before cutoff still PENDING.
 	Pending(ctx context.Context, cutoff time.Time, limit int) ([]Charge, error)
+	// PendingOf returns the user's PENDING charges.
+	PendingOf(ctx context.Context, userID string) ([]Charge, error)
+	// LockHour serializes the transactions that store an asset's hourly
+	// charges of an hour (a transaction-scoped advisory lock).
+	LockHour(ctx context.Context, asset string, hour time.Time) error
+	// OfHour returns the hourly charges of an asset and hour, in the
+	// order of their accounts (user, account type, pair).
+	OfHour(ctx context.Context, asset string, hour time.Time) ([]Charge, error)
 	// Since returns, per loan with borrows or repayments at or after the
 	// instant, what they changed (DONE ones) and whether any made before
 	// it is still PENDING.
@@ -314,6 +325,8 @@ type TransferRepo interface {
 	GetForUpdate(ctx context.Context, id string) (Transfer, error)
 	Finish(ctx context.Context, t Transfer) error
 	Pending(ctx context.Context, cutoff time.Time, limit int) ([]Transfer, error)
+	// PendingOf returns the user's PENDING transfers.
+	PendingOf(ctx context.Context, userID string) ([]Transfer, error)
 }
 
 // Reservation is what ReserveOrder answered for an order.

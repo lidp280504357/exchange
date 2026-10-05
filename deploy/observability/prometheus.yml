@@ -46,3 +46,5 @@ scrape_configs:
     static_configs: [{targets: ["signer:9093"]}]
   - job_name: admin-service
     static_configs: [{targets: ["admin-service:9094"]}]
+  - job_name: margin-service
+    static_configs: [{targets: ["margin-service:9099"]}]

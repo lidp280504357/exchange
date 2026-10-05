@@ -223,6 +223,42 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'margin_reconcile_mismatches{job="margin-service", check="LOANS_MATCH_LEDGER"}'
+        values: '0 2 2'
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: MarginReconciliationMismatch
+        exp_alerts: []
+      - eval_time: 1m
+        alertname: MarginReconciliationMismatch
+        exp_alerts:
+          - exp_labels: {severity: critical, job: margin-service, check: LOANS_MATCH_LEDGER}
+            exp_annotations:
+              summary: "margin reconciliation check LOANS_MATCH_LEDGER found 2 mismatches (the ledger's debts against margin-service's loans and pools)"
+              runbook: docs/runbook/margin.md
+
+  - interval: 10m
+    input_series:
+      # An hour finished at 60 s after the epoch; none after it.
+      - series: 'margin_interest_last_run_timestamp_seconds{job="margin-service"}'
+        values: '60x20'
+      # A service that never finished an hour since it started.
+      - series: 'margin_interest_last_run_timestamp_seconds{job="margin-service-new"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: MarginInterestStalled
+        exp_alerts: []
+      - eval_time: 2h10m
+        alertname: MarginInterestStalled
+        exp_alerts:
+          - exp_labels: {severity: warning, job: margin-service}
+            exp_annotations:
+              summary: "no hour of margin interest finished for 2 hours (ledger down, or an asset with a borrow or repayment stuck PENDING?)"
+              runbook: docs/runbook/margin.md
+
+  - interval: 1m
+    input_series:
       - series: 'derivatives_reconcile_mismatches{job="derivatives-service", check="PNL_CLEARING_MATCHES_POSITIONS"}'
         values: '0 1 1'
     alert_rule_test:

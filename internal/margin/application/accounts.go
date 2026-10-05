@@ -117,7 +117,11 @@ func (s *Service) MaxBorrowable(ctx context.Context, userID string, a domain.Acc
 	if err != nil {
 		return Borrowable{}, err
 	}
-	room, err := s.room(ctx, r, cat, userID, a, asset, nil)
+	st, err := s.standingOf(ctx, r, userID)
+	if err != nil {
+		return Borrowable{}, err
+	}
+	room, err := s.room(ctx, r, cat, st, a, asset, nil)
 	if err != nil {
 		return Borrowable{}, err
 	}
@@ -125,11 +129,11 @@ func (s *Service) MaxBorrowable(ctx context.Context, userID string, a domain.Acc
 	return Borrowable{Asset: asset, Amount: amount, LimitedBy: limit}, nil
 }
 
-// room gathers what MaxBorrow needs: the account valued (every asset of
-// it priced, MARGIN_PRICE_UNAVAILABLE otherwise), its terms, the pool's
-// lent amount (lent, or read when nil) and the user's principal in the
-// asset.
-func (s *Service) room(ctx context.Context, r ports.Repos, cat Catalog, userID string, a domain.Account, asset string,
+// room gathers what MaxBorrow needs: the account valued as it stands
+// (every asset of it priced, MARGIN_PRICE_UNAVAILABLE otherwise), its
+// terms, the pool's lent amount (lent, or read when nil) and the user's
+// principal in the asset, the borrows on their way included.
+func (s *Service) room(ctx context.Context, r ports.Repos, cat Catalog, st standing, a domain.Account, asset string,
 	lent *decimal.Decimal,
 ) (domain.BorrowRoom, error) {
 	terms, err := cat.Terms(a)
@@ -140,12 +144,8 @@ func (s *Service) room(ctx context.Context, r ports.Repos, cat Catalog, userID s
 	if err != nil {
 		return domain.BorrowRoom{}, err
 	}
-	all, err := s.Ledger.Holdings(ctx, userID)
-	if err != nil {
-		return domain.BorrowRoom{}, err
-	}
 	prices := s.Prices.Prices()
-	v := domain.Value(all[a], cat.Assets, prices)
+	v := domain.Value(st.of(a), cat.Assets, prices)
 	if !v.Complete() {
 		return domain.BorrowRoom{}, domain.ErrPriceUnavailable.WithDetail("asset", v.Unpriced[0])
 	}
@@ -161,11 +161,12 @@ func (s *Service) room(ctx context.Context, r ports.Repos, cat Catalog, userID s
 		l := pools[asset]
 		lent = &l
 	}
-	owed, err := r.Loans().UserOwed(ctx, userID, asset)
+	owed, err := r.Loans().UserOwed(ctx, st.userID, asset)
 	if err != nil {
 		return domain.BorrowRoom{}, err
 	}
 	return domain.BorrowRoom{
-		Valuation: v, Terms: terms, Asset: t, Price: price.Value, PoolLeft: t.PoolCap.Sub(*lent), UserOwed: owed,
+		Valuation: v, Terms: terms, Asset: t, Price: price.Value, PoolLeft: t.PoolCap.Sub(*lent),
+		UserOwed: owed.Add(st.pending.borrowing(asset)),
 	}, nil
 }

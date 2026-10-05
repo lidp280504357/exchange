@@ -67,19 +67,28 @@ func (s *Service) PostMargin(ctx context.Context, req domain.MarginRequest) (Mar
 }
 
 func (s *Service) postMargin(ctx context.Context, r ports.Repos, req domain.MarginRequest, hash []byte) (MarginResult, error) {
-	done, err := r.Margins().ByKey(ctx, req.IdemKey)
-	if err != nil {
-		return MarginResult{}, err
-	}
-	if done != nil {
-		if !bytes.Equal(done.RequestHash, hash) {
-			return MarginResult{}, domain.ErrIdempotencyConflict
+	replay := func() (MarginResult, bool, error) {
+		done, err := r.Margins().ByKey(ctx, req.IdemKey)
+		if err != nil || done == nil {
+			return MarginResult{}, false, err
 		}
-		return MarginResult{Journals: done.Journals, Replayed: true}, nil
+		if !bytes.Equal(done.RequestHash, hash) {
+			return MarginResult{}, true, domain.ErrIdempotencyConflict
+		}
+		return MarginResult{Journals: done.Journals, Replayed: true}, true, nil
+	}
+	if res, ok, err := replay(); ok || err != nil {
+		return res, err
 	}
 	accounts, err := r.Accounts().Lock(ctx, req.MarginAccounts())
 	if err != nil {
 		return MarginResult{}, err
+	}
+	// A repeat that waited for the accounts behind the first request finds
+	// it booked now: it replays rather than moving the balances the first
+	// one left (review CJ).
+	if res, ok, err := replay(); ok || err != nil {
+		return res, err
 	}
 	postings, err := domain.MarginPostings(req, accounts)
 	if err != nil {

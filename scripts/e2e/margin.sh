@@ -17,11 +17,16 @@
 # a sell with AUTO_REPAY repays the loan and its interest from what it
 # brings (the settlement's automatic repayment, margin-service's loans
 # following it); invariant 5 counts the margin trades.
-# Needs margin.enabled and margin.auto_borrow on (docs/runbook/margin.md)
-# and ssh to the server.
+# Margin trading stays off for everyone else: the script switches
+# margin.enabled and margin.auto_borrow on for its own user only and puts
+# them back as they were when it ends, also after a failure (the
+# coordination decision of 2026-10-06 03:24); it holds the ops lock for
+# that, as the other scripts that change switches. Needs ssh to the
+# server.
 #
 #   scripts/e2e/margin.sh
 set -euo pipefail
+[[ -n ${OPS_LOCK_HELD:-} ]] || exec "$(dirname "$0")/../ops/lock.sh" run --owner "e2e $(basename "$0")" -- bash "$0" "$@"
 
 # shellcheck source=lib/common.sh
 source "$(dirname "$0")/lib/common.sh"
@@ -38,6 +43,30 @@ fi
 # same A B: the decimals A and B are equal.
 same() { jq -en --arg a "$1" --arg b "$2" '(($a | tonumber) - ($b | tonumber)) | fabs < 1e-9' >/dev/null; }
 
+# on_for_user KEY USER_ID switches KEY on for the user only, unless it is
+# on for everyone already: the user joins KEY's allowed users, and KEY
+# goes back as it was when the script ends. Services see a change within
+# 5 seconds (flags.RefreshInterval).
+on_for_user() {
+  local key=$1 user=$2 state enabled users
+  state=$(exchangectl flags show "$key" 2>/dev/null || echo '{"enabled":false,"rules":{}}')
+  enabled=$(jq -r .enabled <<<"$state")
+  users=$(jq -r '(.rules.users.allow // []) | join(",")' <<<"$state")
+  if [[ $enabled == true ]] && jq -e '.rules == {} or .rules == null' <<<"$state" >/dev/null; then
+    echo "note: $key is on for everyone"
+    return
+  fi
+  at_exit "put_back $key $enabled '$users'"
+  exchangectl flags set "$key" --on --allow-users "${users:+$users,}$user" --reason "e2e margin.sh: on for its user $user only" >/dev/null
+  echo "note: $key on for $user only until the script ends"
+}
+put_back() { # put_back KEY ENABLED USERS
+  local state=--off
+  [[ $2 == true ]] && state=--on
+  exchangectl flags set "$1" "$state" --allow-users "$3" --reason "e2e margin.sh: back as it was" >/dev/null ||
+    echo "WARN could not put $1 back (enabled $2, allowed users '$3')" >&2
+}
+
 echo "== the public terms"
 call GET /v1/margin/assets ""
 expect 200 - "margin assets"
@@ -53,6 +82,10 @@ EMAIL="e2e-margin-$RUN@example.com"
 echo "== register $EMAIL"
 register "$EMAIL" "e2e-margin-$RUN" "e2e margin $RUN"
 AUTH=(-H "Authorization: Bearer $(jq -r .access_token <<<"$BODY")")
+USER_ID=$(jq -r .user_id <<<"$BODY")
+on_for_user margin.enabled "$USER_ID"
+on_for_user margin.auto_borrow "$USER_ID"
+sleep 6
 spot() { # spot ASSET prints the SPOT account's available amount
   call GET /v1/account/balances "" "${AUTH[@]}"
   jq -r --arg a "$1" '[.balances[] | select(.asset == $a and .account_type == "SPOT")][0].available // "0"' <<<"$BODY"
@@ -126,7 +159,7 @@ echo "ok   SPOT is back, less the 0.0015 of interest"
 
 echo "== the hourly interest and the invariants"
 charged() { # the current hour's charging run finished
-  [[ $(pg "SELECT count(*) FROM margin.interest_runs WHERE hour = date_trunc('hour', now()) AND status = 'DONE'" | tr -d '[:space:]') == 1 ]]
+  [[ $(pg "SELECT count(*) FROM margin.interest_runs WHERE hour = date_trunc('hour', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AND status = 'DONE'" | tr -d '[:space:]') == 1 ]]
 }
 eventually 80 "the current hour's interest run is done" charged
 remote "sudo docker compose $COMPOSE_FILES exec -T ledger-service /app/exchangectl ledger reconcile" | sed 's/^/     /'

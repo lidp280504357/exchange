@@ -317,11 +317,12 @@ type loanJSON struct {
 	UpdatedAt     string  `json:"updated_at"`
 }
 
-func toLoan(v application.LoanView) loanJSON {
+// toLoan writes a loan; one never taken shows the service's time.
+func (h *Handler) toLoan(v application.LoanView) loanJSON {
 	l := v.Loan
 	updated := l.UpdatedAt
 	if updated.IsZero() {
-		updated = time.Now()
+		updated = h.Svc.Now()
 	}
 	return loanJSON{
 		Account: string(l.Account.Type), Symbol: nullable(l.Account.Symbol), Asset: l.Asset, Principal: l.Principal.String(),
@@ -362,7 +363,7 @@ func (h *Handler) writeLoan(w http.ResponseWriter, r *http.Request, loan ports.L
 		httpx.WriteError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, toLoan(v))
+	httpx.WriteJSON(w, http.StatusOK, h.toLoan(v))
 }
 
 func (h *Handler) repay(w http.ResponseWriter, r *http.Request) {
@@ -396,7 +397,7 @@ func (h *Handler) repay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"interest_repaid": res.Repay.Interest.String(), "principal_repaid": res.Repay.Principal.String(), "loan": toLoan(v),
+		"interest_repaid": res.Repay.Interest.String(), "principal_repaid": res.Repay.Principal.String(), "loan": h.toLoan(v),
 	})
 }
 
@@ -413,7 +414,7 @@ func (h *Handler) loans(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]loanJSON, 0, len(list))
 	for _, v := range list {
-		items = append(items, toLoan(v))
+		items = append(items, h.toLoan(v))
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
 }

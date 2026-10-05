@@ -90,7 +90,10 @@ var systemAccounts = []string{
 var (
 	ErrInsufficientBalance = apperr.New(apperr.KindUnprocessable, "LEDGER_INSUFFICIENT_BALANCE", "insufficient balance")
 	// ErrDebtOverpaid refuses a repayment of more than a margin debt.
-	ErrDebtOverpaid        = apperr.New(apperr.KindUnprocessable, "LEDGER_DEBT_OVERPAID", "more than the debt would be repaid")
+	ErrDebtOverpaid = apperr.New(apperr.KindUnprocessable, "LEDGER_DEBT_OVERPAID", "more than the debt would be repaid")
+	// ErrInterestFirst refuses a repayment that pays principal while
+	// interest is owed.
+	ErrInterestFirst       = apperr.New(apperr.KindUnprocessable, "LEDGER_INTEREST_FIRST", "a repayment pays the interest owed first")
 	ErrIdempotencyConflict = apperr.New(apperr.KindConflict, apperr.CodeIdempotencyConflict,
 		"the idempotency key was used for a different request")
 )

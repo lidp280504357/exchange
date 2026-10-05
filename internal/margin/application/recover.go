@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/skill/exchange/internal/margin/domain"
+	"github.com/skill/exchange/internal/platform/apperr"
 )
 
 // recoverAfter is how old a PENDING write must be before recovery takes
@@ -14,7 +17,10 @@ const recoverAfter = 10 * time.Second
 // outcome was not recorded (a crash or a ledger outage midway): each is
 // posted again under its key, so the ledger books it once, and its
 // outcome recorded. An hour's interest left PENDING is the next
-// ChargeInterest pass's. It returns how many it finished.
+// ChargeInterest pass's until the hour falls out of its catch-up window
+// (MaxCatchUp); Recover then posts the charges stored for it as they are,
+// so that none stays owed in margin-service's eyes and never booked. It
+// returns how many it finished.
 func (s *Service) Recover(ctx context.Context) (int, error) {
 	cutoff := s.Now().Add(-recoverAfter)
 	r := s.Store.Read()
@@ -51,6 +57,25 @@ func (s *Service) Recover(ctx context.Context) (int, error) {
 	for _, p := range repays {
 		_, err := s.postRepay(ctx, p)
 		finished(err)
+	}
+	stale, err := r.Interest().Pending(ctx, s.Now().Add(-MaxCatchUp*time.Hour), 100)
+	if err != nil {
+		return n, err
+	}
+	type assetHour struct {
+		asset string
+		hour  time.Time
+	}
+	seen := map[assetHour]bool{}
+	for _, c := range stale {
+		if k := (assetHour{c.Asset, c.Hour}); !seen[k] {
+			seen[k] = true
+			booked, err := s.chargeAsset(ctx, domain.AssetTerms{Asset: c.Asset}, c.Hour, nil) // the stored charges only
+			n += booked
+			if err != nil && apperr.From(err).Kind != apperr.KindUnavailable {
+				errs = append(errs, err)
+			}
+		}
 	}
 	return n, errors.Join(errs...)
 }

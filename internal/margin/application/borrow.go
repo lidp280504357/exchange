@@ -136,15 +136,14 @@ func (s *Service) planBorrow(ctx context.Context, r ports.Repos, in BorrowInput)
 	if err != nil {
 		return ports.Borrow{}, err
 	}
-	room, err := s.room(ctx, r, cat, in.UserID, in.Account, in.Asset, &lent)
+	held, err := s.standingOf(ctx, r, in.UserID)
 	if err != nil {
 		return ports.Borrow{}, err
 	}
-	pending, err := r.Borrows().PendingSum(ctx, in.UserID, in.Asset)
+	room, err := s.room(ctx, r, cat, held, in.Account, in.Asset, &lent)
 	if err != nil {
 		return ports.Borrow{}, err
 	}
-	room.UserOwed = room.UserOwed.Add(pending)
 	if most, limit := domain.MaxBorrow(room); in.Amount.GreaterThan(most) {
 		return ports.Borrow{}, borrowRefusal(room, in.Amount, most, limit)
 	}
@@ -212,13 +211,40 @@ func (s *Service) replayBorrow(ctx context.Context, prior ports.Borrow, in Borro
 	return s.Store.Read().Loans().Get(ctx, prior.UserID, prior.Account, prior.Asset)
 }
 
-// failure rebuilds the refusal a write was recorded with.
-func failure(text string) error {
-	code, msg, _ := strings.Cut(text, ": ")
-	return apperr.New(apperr.KindUnprocessable, code, msg)
+// failureKinds names the kinds of the ledger's refusals (refused) as a
+// write's failure records them.
+var failureKinds = map[apperr.Kind]string{
+	apperr.KindInvalid: "INVALID", apperr.KindNotFound: "NOT_FOUND", apperr.KindConflict: "CONFLICT",
+	apperr.KindUnprocessable: "UNPROCESSABLE", apperr.KindForbidden: "FORBIDDEN",
 }
 
-func failureText(e *apperr.Error) string { return e.Code + ": " + e.Message }
+// failureText records a refusal of the ledger: "[KIND] CODE: message".
+func failureText(e *apperr.Error) string {
+	name, ok := failureKinds[e.Kind]
+	if !ok {
+		name = failureKinds[apperr.KindUnprocessable]
+	}
+	return "[" + name + "] " + e.Code + ": " + e.Message
+}
+
+// failure rebuilds the refusal a write was recorded with, its kind
+// included (review CK: a replay answers as the first time); a record
+// without a kind is UNPROCESSABLE.
+func failure(text string) error {
+	kind := apperr.KindUnprocessable
+	if rest, ok := strings.CutPrefix(text, "["); ok {
+		if name, after, ok := strings.Cut(rest, "] "); ok {
+			for k, n := range failureKinds {
+				if n == name {
+					kind = k
+				}
+			}
+			text = after
+		}
+	}
+	code, msg, _ := strings.Cut(text, ": ")
+	return apperr.New(kind, code, msg)
+}
 
 // refused tells a business refusal of the ledger (the write fails for
 // good) from a failure worth retrying.

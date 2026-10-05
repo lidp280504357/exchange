@@ -4,16 +4,16 @@
 
 ## 模型
 
-- 账户 `ledger.accounts`：（所有者类型, 所有者, 账户类型, 资产）唯一。用户只有 `SPOT`、`FUTURES`；系统账户 `FEE_REVENUE`、`INSURANCE_FUND`、`DEPOSIT_PENDING`、`WITHDRAWAL_PENDING`、`UNCLAIMED_DEPOSIT`、`FUNDING_CLEARING`、`MARKET_MAKER`、`GAS_SUPPLY`、`ADJUSTMENT`、`PNL_CLEARING`（合约已实现盈亏的对手方，阶段 3）各资产一个。首次记账时自动建户。
+- 账户 `ledger.accounts`：（所有者类型, 所有者, 账户类型, `scope`, 资产）唯一（`scope` 只有逐仓杠杆用，存交易对，其余为空，迁移 ledger 00008）。用户有 `SPOT`、`FUTURES` 与杠杆的六类行（见下文「杠杆账户」）；系统账户 `FEE_REVENUE`、`INSURANCE_FUND`、`DEPOSIT_PENDING`、`WITHDRAWAL_PENDING`、`UNCLAIMED_DEPOSIT`、`FUNDING_CLEARING`、`MARKET_MAKER`、`GAS_SUPPLY`、`ADJUSTMENT`、`PNL_CLEARING`（合约已实现盈亏的对手方，阶段 3）各资产一个。首次记账时自动建户。
 - 分录 `journals` + `journal_lines`：**只追加**（触发器禁止 UPDATE/DELETE/TRUNCATE）；一条 journal 内同一资产的 line 之和为 0（提交时由约束触发器检查）；每条 line 带写入后的 `available_after`/`frozen_after` 与账户版本号。
-- 余额非负（不变量 3）由表约束兜底：只有 `DEPOSIT_PENDING`、`ADJUSTMENT`、`PNL_CLEARING` 与 `MARKET_MAKER`（HOUSE 卖出内部资产，ADR-0013，阶段 4 B4）可为负。
+- 余额非负（不变量 3）由表约束兜底：只有 `DEPOSIT_PENDING`、`ADJUSTMENT`、`PNL_CLEARING` 与 `MARKET_MAKER`（HOUSE 卖出内部资产，ADR-0013，阶段 4 B4）可为负；杠杆的负债行 `*_DEBT`、`*_INTEREST` 反过来只能 ≤ 0（按类型的符号约束，见「杠杆账户」）。
 - 幂等：每条 journal 有唯一 `idem_key` 与内容摘要；同键同内容返回第一次的结果（`replayed`），同键不同内容返回 409 `COMMON_IDEMPOTENCY_CONFLICT`。gRPC 调用方的键按用户隔离（`u:<user>:<key>`）。
 - 并发：一次记账按固定顺序锁住涉及的账户（`SELECT ... FOR UPDATE`），先在内存算完全部余额再写库，余额不足时什么都不写（`LEDGER_INSUFFICIENT_BALANCE`，422）。超精度金额直接拒绝（`LEDGER_AMOUNT_PRECISION`，400），精度来自 instrument-service。
 - 每条 journal 发 `ledger.EntryPosted`（含全部 line，ClickHouse `ledger_entries` 由它投影），每个受影响的用户账户发 `ledger.BalanceChanged`（WebSocket `balances` 频道用）。
 
 ## 接口
 
-- gRPC `LedgerService`（`ledger-service:9185`）：`Freeze`、`Unfreeze`（`ORDER_*`/`WITHDRAW_*`）、`Transfer`、`GetBalances`，写操作都要幂等键。
+- gRPC `LedgerService`（`ledger-service:9185`）：`Freeze`、`Unfreeze`（`ORDER_*`/`WITHDRAW_*`；`account_type` 可为 `SPOT`、`FUTURES`、`MARGIN_CROSS`、`MARGIN_ISOLATED`，逐仓带 `scope` = 交易对）、`Transfer`、`GetBalances`（只有 SPOT/FUTURES），写操作都要幂等键；杠杆的 `PostMargin`、`AccrueMarginInterest`、`GetMarginBalances`、`ListMarginDebts` 只给 margin-service 用，见「杠杆账户」。
 - REST（经网关，需登录）：`GET /v1/account/balances`、`POST /v1/account/transfers`（必须带 `Idempotency-Key`）、`GET /v1/account/transfers`、`GET /v1/account/ledger`。
 - 划转：现货 ↔ 合约在一个事务里完成（§13 验收 11）。需要功能开关 `account.transfer` 且账户资格允许（user-service `CheckEligibility(TRANSFER)`）；余额不足的划转记为 `FAILED` 并保留，同键重试得到同样的错误；成功/失败分别发 `account.AccountTransferCompleted`/`AccountTransferFailed`。
 - 管理后台（2026-10-02 设计 C2）：
@@ -122,6 +122,35 @@ ssh exchange sudo docker exec exchange-infra-ledger-service-1 /app/exchangectl l
 
 - `GAS_SUPPLY`（平台付的链上 gas 与托管方手续费从这里出，`ChainFeePosting`）：自建钱包由 `exchangectl wallet fund` 记平台转进热钱包的真实转账（`DEPOSIT_PENDING` → `GAS_SUPPLY`）；托管模式没有这样的转账，用户付的提现手续费本来就在托管方，`exchangectl ledger gas-supply --asset USDT --amount 20 --reason "..."` 把 `FEE_REVENUE` 挪到 `GAS_SUPPLY`（`MANUAL_ADJUSTMENT` 分录、像保险基金注资一样需要开关 `ledger.manual_adjustment`、不超过 `FEE_REVENUE`、同事务写审计 `ledger.gas_supply`，键重放无害；两边都不是钱包应有数，不变量 4 不变）。见 [custody.md](custody.md#托管方的手续费审查-④2026-10-03)。
 
+## 杠杆账户（杠杆设计 2026-10-06，批次 E1/E2）
+
+记账约定（杠杆设计 §3、E0 契约 §7）：每个杠杆账户每个资产三行，都记在用户名下——
+
+| 账户类型 | 含义 | 符号 |
+|---|---|---|
+| `MARGIN_CROSS` / `MARGIN_ISOLATED` | 资产（可用 + 订单冻结） | ≥ 0 |
+| `MARGIN_CROSS_DEBT` / `MARGIN_ISOLATED_DEBT` | 借款本金 | ≤ 0，不冻结 |
+| `MARGIN_CROSS_INTEREST` / `MARGIN_ISOLATED_INTEREST` | 应计未还利息 | ≤ 0，不冻结 |
+
+逐仓三行的 `scope` 是交易对（如 `BTC-USDT`），全仓为空。负债记成用户自己名下的负数行，每条 journal 按资产才仍然和为 0：借币在用户的资产行与负债行之间平衡，HOUSE 不出现；HOUSE 的已借出额 = −Σ `*_DEBT`（查询得出，不记账）；利息在计息时记入系统账户 `MARGIN_INTEREST_INCOME`，用户没还的部分就是他的利息行。
+
+| 分录类型 | journal 的键 | 动作 |
+|---|---|---|
+| `MARGIN_TRANSFER_IN` / `MARGIN_TRANSFER_OUT` | `margin:margin-transfer:<划转ID>:0` | 现货 ↔ 杠杆资产行；划出后这个资产的资产行（可用 + 冻结）不得少于它的负债行与利息行之和——负债占着的部分划不走（`LEDGER_INSUFFICIENT_BALANCE`） |
+| `MARGIN_BORROW` | `margin:margin-borrow:<借款ID>:0` | 资产行 +A / 负债行 −A |
+| `MARGIN_INTEREST` | 借币的首小时 `margin:margin-borrow:<借款ID>:1`；整点 `margin-interest:<资产>:<整点的 Unix 秒>`，第 n 块（n ≥ 1）再加 `:<n>` | 利息行 −i / `MARGIN_INTEREST_INCOME` +Σi；整点每资产每小时一笔，每笔至多 1,000 个账户，多的按账户顺序分块 |
+| `MARGIN_REPAY` | `margin:margin-repay:<还款ID>:0`；成交的自动还款 `trade-repay:<成交ID>:<buyer 或 seller>` | 资产行 −(I+P) / 利息行 +I / 负债行 +P。先息后本：I 必须等于还款额与所欠利息中较小者（`LEDGER_INTEREST_FIRST`）；多还 `LEDGER_DEBT_OVERPAID` |
+| `MARGIN_TRADE_SETTLE` | `trade:<成交ID>` | 订单在杠杆账户上时的成交结算：行与 `TRADE_SETTLE`/`HOUSE_TRADE_SETTLE` 相同，只是这一方的账户是杠杆资产行 |
+| `MARGIN_LIQUIDATE` | 批次 E3 | 强平 |
+
+- `PostMargin` 一次请求可含几步（借币 = `BORROW` + 首小时 `INTEREST`），要么全记、要么全不记，每步一条 journal，请求记在 `ledger.margin_postings`：同键同内容返回原来的 journal，同键不同内容 `COMMON_IDEMPOTENCY_CONFLICT`；同键的两个请求同时到，后一个等锁后发现前一个已记账，就重放而不再动余额（审查 CJ）。
+- 成交结算（批次 E2）：`TradeExecuted` 带双方的账户类型（空为现货），订单在杠杆账户上的一方在该账户的资产行结算（逐仓的 `scope` 是成交的交易对），分录类型 `MARGIN_TRADE_SETTLE`；手续费仍记 `TRADE_FEE`，从这一方收到的资产里扣。订单带 `AUTO_REPAY` 的一方在同一事务里另记一条 `MARGIN_REPAY`（备注 `auto-repay order <订单ID> trade <交易对> <成交ID>`）：用这笔成交收到的资产（扣过手续费）还这个资产的负债，先息后本、最多还清；margin-service 消费 `ledger.events` 里的这类分录同步借款表。
+- `GetBalances`、`GET /v1/account/balances` 与 `BalanceChanged`（频道 `balances`）只有 SPOT/FUTURES：两站把非 FUTURES 的行都当现货累加，杠杆行（含负数的负债行）会把资产算错。杠杆账户经 margin-service 的 `/v1/margin/accounts` 与 `margin` 频道看；`EntryPosted` 的行带 `scope`。
+- 后台的风控冻结（holds）只在 SPOT：杠杆账户由 margin-service 整体冻结（`FROZEN`），强平又要能卖出账户里的全部资产。
+- 杠杆划转的开关与账户资格由 margin-service 检查（`margin.enabled`、`SPOT_TRADE` 资格），账本的 `PostMargin` 不再查。
+
+借款、计息、估值与借款表的对账（不变量 7）见 [margin.md](margin.md)。
+
 ## 对账
 
 ledger-service 每 `RECONCILE_INTERVAL`（默认 1 小时，启动 1 分钟后先跑一次）检查，结果写 `ledger.reconciliation_runs`，指标 `ledger_reconcile_mismatches{check}`：
@@ -133,10 +162,14 @@ ledger-service 每 `RECONCILE_INTERVAL`（默认 1 小时，启动 1 分钟后�
 | `SNAPSHOT_MATCHES_ACCOUNT` | 账户余额与版本等于最后一条 line 的快照 |
 | `TRADES_SETTLED` | 没有停在 `FAILED` 的成交 |
 | `TRADES_NUMBERED` | 每个交易对的成交编号（引擎按交易对从 1 计数）连续、不重复：有缺口说明漏了成交。编号字段出现前的成交记为 0，先计入 |
-| `TRADE_SETTLE_MATCHES_TRADES` | 不变量 5：按资产，`TRADE_SETTLE` 与 `HOUSE_TRADE_SETTLE` 的入账合计 = 成交数量（base）与成交额（quote）的合计 |
+| `TRADE_SETTLE_MATCHES_TRADES` | 不变量 5：按资产，`TRADE_SETTLE`、`HOUSE_TRADE_SETTLE` 与 `MARGIN_TRADE_SETTLE` 的入账合计 = 成交数量（base）与成交额（quote）的合计 |
 | `TRADE_FEE_MATCHES_TRADES` | 按资产，现货 `TRADE_FEE` 进 `FEE_REVENUE` 的合计 = 成交事件里的手续费合计（合约手续费同为 `TRADE_FEE`，幂等键 `futures:` 开头，不计入；2026-09-30 修正，之前任何一笔合约手续费都会让这项误报） |
 | `FUNDING_BATCHES_BALANCED` | 每次资金费结算（合约 + 结算时间，按请求键 `funding:<合约>:<时间>:...` 归组）付出的不少于收到的：`FUNDING_CLEARING` 只留舍入零头 |
 | `PNL_CLEARING_ONLY_PNL` | `PNL_CLEARING` 只出现在 `REALIZED_PNL`、`LIQUIDATION_SETTLE`、`ADL_SETTLE` 分录里 |
+| `MARGIN_ROWS_SIGNED` | 杠杆不变量 9：资产行 ≥ 0，负债行与利息行 ≤ 0 且没有冻结（表约束之外再核一遍） |
+| `MARGIN_INTEREST_CONSERVED` | 杠杆不变量 8：按资产，历次 `MARGIN_INTEREST` 记入 `MARGIN_INTEREST_INCOME` 的合计 = 它们记到用户利息行的合计（取反）= `MARGIN_INTEREST_INCOME` 的余额。收入科目只由计息改变：以后要把利息收入划走（例如转入 `FEE_REVENUE`），这项检查要同时改 |
+
+杠杆不变量 7（账本的负债 = margin-service 借款表的未还本金与利息，且不超过借贷池上限）要借款表，由 margin-service 每小时对账（指标 `margin_reconcile_mismatches{check}`，见 [margin.md](margin.md)），也可 `exchangectl margin reconcile`。
 
 任何非零都是 P1：错误日志 `ledger invariant broken`。提现在阶段 2 上线后按资产自动暂停。手工立即对账：
 

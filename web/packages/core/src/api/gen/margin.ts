@@ -134,7 +134,9 @@ export interface paths {
          *     and while an operator froze the account; a liquidation in progress
          *     refuses it (MARGIN_FROZEN). More than the debt fails with
          *     MARGIN_REPAY_EXCEEDS_DEBT, more than the free balance with
-         *     LEDGER_INSUFFICIENT_BALANCE.
+         *     LEDGER_INSUFFICIENT_BALANCE; a repayment that meets another of the
+         *     account's still on its way may fail with LEDGER_INTEREST_FIRST or
+         *     LEDGER_DEBT_OVERPAID (retry with a new key).
          */
         post: operations["marginRepay"];
         delete?: never;
@@ -431,6 +433,11 @@ export interface components {
         };
     };
     parameters: {
+        /**
+         * @description The client's key of the write (1 to 100 bytes): the same key with
+         *     the same request returns the first result, with another request
+         *     COMMON_IDEMPOTENCY_CONFLICT.
+         */
         IdempotencyKey: string;
         AccountQuery: components["schemas"]["MarginAccountType"];
         /** @description The pair of a MARGIN_ISOLATED account. */
@@ -521,8 +528,13 @@ export interface operations {
     marginTransfer: {
         parameters: {
             query?: never;
-            header?: {
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            header: {
+                /**
+                 * @description The client's key of the write (1 to 100 bytes): the same key with
+                 *     the same request returns the first result, with another request
+                 *     COMMON_IDEMPOTENCY_CONFLICT.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
             };
             path?: never;
             cookie?: never;
@@ -559,8 +571,13 @@ export interface operations {
     marginBorrow: {
         parameters: {
             query?: never;
-            header?: {
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            header: {
+                /**
+                 * @description The client's key of the write (1 to 100 bytes): the same key with
+                 *     the same request returns the first result, with another request
+                 *     COMMON_IDEMPOTENCY_CONFLICT.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
             };
             path?: never;
             cookie?: never;
@@ -591,8 +608,13 @@ export interface operations {
     marginRepay: {
         parameters: {
             query?: never;
-            header?: {
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            header: {
+                /**
+                 * @description The client's key of the write (1 to 100 bytes): the same key with
+                 *     the same request returns the first result, with another request
+                 *     COMMON_IDEMPOTENCY_CONFLICT.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
             };
             path?: never;
             cookie?: never;

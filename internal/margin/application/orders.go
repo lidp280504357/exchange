@@ -168,11 +168,11 @@ func (s *Service) planOrder(ctx context.Context, in OrderInput) (orderPlan, erro
 	} else if ok && !st.Status.Open() {
 		return orderPlan{}, domain.ErrFrozen.WithDetail("status", string(st.Status))
 	}
-	all, err := s.Ledger.Holdings(ctx, in.UserID)
+	st, err := s.standingOf(ctx, read, in.UserID)
 	if err != nil {
 		return orderPlan{}, err
 	}
-	holdings := all[in.Account]
+	holdings := st.of(in.Account)
 	prices := s.Prices.Prices()
 	if v := domain.Value(holdings, cat.Assets, prices); !v.Complete() {
 		return orderPlan{}, domain.ErrPriceUnavailable.WithDetail("asset", v.Unpriced[0])
@@ -188,15 +188,10 @@ func (s *Service) planOrder(ctx context.Context, in OrderInput) (orderPlan, erro
 		if in.SideEffect != domain.SideEffectAutoBorrow {
 			return orderPlan{}, ErrInsufficient.WithDetail("asset", in.FreezeAsset).WithDetail("free", free.String())
 		}
-		room, err := s.room(ctx, read, cat, in.UserID, in.Account, in.FreezeAsset, nil)
+		room, err := s.room(ctx, read, cat, st, in.Account, in.FreezeAsset, nil)
 		if err != nil {
 			return orderPlan{}, err
 		}
-		pending, err := read.Borrows().PendingSum(ctx, in.UserID, in.FreezeAsset)
-		if err != nil {
-			return orderPlan{}, err
-		}
-		room.UserOwed = room.UserOwed.Add(pending)
 		t := cat.Assets[in.FreezeAsset]
 		need = need.RoundCeil(t.Decimals)
 		if most, limit := domain.MaxBorrow(room); need.GreaterThan(most) {

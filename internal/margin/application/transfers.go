@@ -124,7 +124,7 @@ func (s *Service) planTransfer(ctx context.Context, r ports.Repos, in TransferIn
 		if st.Status == domain.StatusLiquidating || st.Status == domain.StatusFrozen {
 			return ports.Transfer{}, domain.ErrFrozen.WithDetail("status", string(st.Status))
 		}
-		if err := s.checkOut(ctx, cat, terms, in, decimals); err != nil {
+		if err := s.checkOut(ctx, r, cat, terms, in, decimals); err != nil {
 			return ports.Transfer{}, err
 		}
 	}
@@ -135,14 +135,15 @@ func (s *Service) planTransfer(ctx context.Context, r ports.Repos, in TransferIn
 	return t, r.Transfers().Insert(ctx, t)
 }
 
-// checkOut refuses a transfer out beyond MaxTransferOut: with debts it
-// needs reliable prices.
-func (s *Service) checkOut(ctx context.Context, cat Catalog, terms domain.Terms, in TransferInput, decimals int32) error {
-	all, err := s.Ledger.Holdings(ctx, in.UserID)
+// checkOut refuses a transfer out beyond MaxTransferOut, the account
+// valued as it stands (the borrows and transfers out on their way
+// counted): with debts it needs every asset of it priced.
+func (s *Service) checkOut(ctx context.Context, r ports.Repos, cat Catalog, terms domain.Terms, in TransferInput, decimals int32) error {
+	st, err := s.standingOf(ctx, r, in.UserID)
 	if err != nil {
 		return err
 	}
-	holdings := all[in.Account]
+	holdings := st.of(in.Account)
 	h := holding(holdings, in.Asset)
 	prices := s.Prices.Prices()
 	v := domain.Value(holdings, cat.Assets, prices)

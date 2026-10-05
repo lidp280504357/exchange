@@ -103,7 +103,7 @@ var Known = map[string]string{
 	KeySimEvents:         "Operators' price events in the simulated market (jumps, targets, trends, pauses)",
 	KeySimPerp:           "The simulated market's bots also make the market on the platform coin's perpetual",
 	KeySimHaltOnLoss:     "Halt a pair (and its perpetual) a minute after its simulated market's heartbeat stopped; resume when it is back",
-	KeyMarginEnabled:     "Margin trading: transfers to margin accounts, borrowing from HOUSE, repaying and orders on margin accounts; off answers MARGIN_DISABLED (design 2026-10-06)",
+	KeyMarginEnabled:     "Margin trading: transfers to margin accounts, borrowing from HOUSE and orders on margin accounts; off answers MARGIN_DISABLED to them, while repaying and transfers back to SPOT stay open (design 2026-10-06)",
 	KeyMarginLiquidation: "Margin liquidations: accounts at their liquidation level are frozen, closed against HOUSE and their debts repaid; off only warns (design 2026-10-06 §4.5)",
 	KeyMarginAutoBorrow:  "Orders on margin accounts with side_effect AUTO_BORROW borrow what the free balance lacks (design 2026-10-06 §5.1)",
 }

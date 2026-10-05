@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/shopspring/decimal"
 
 	"github.com/skill/exchange/internal/margin/domain"
 	"github.com/skill/exchange/internal/margin/ports"
@@ -77,28 +76,30 @@ func (r borrows) Finish(ctx context.Context, b ports.Borrow) error {
 func (r borrows) Pending(ctx context.Context, cutoff time.Time, limit int) ([]ports.Borrow, error) {
 	rows, err := r.q.Query(ctx, `SELECT `+borrowColumns+` FROM borrows WHERE status = 'PENDING' AND created_at < $1
 		ORDER BY created_at LIMIT $2`, cutoff, limit)
-	if err != nil {
-		return nil, fmt.Errorf("query pending borrows: %w", err)
-	}
-	defer rows.Close()
-	var out []ports.Borrow
-	for rows.Next() {
-		b, err := scanBorrow(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan borrow: %w", err)
-		}
-		out = append(out, b)
-	}
-	return out, rows.Err()
+	return collect(rows, err, "pending borrows", scanBorrow)
 }
 
-func (r borrows) PendingSum(ctx context.Context, userID, asset string) (decimal.Decimal, error) {
-	var sum decimal.Decimal
-	if err := r.q.QueryRow(ctx, `SELECT coalesce(sum(amount), 0) FROM borrows WHERE user_id = $1 AND asset = $2 AND status = 'PENDING'`,
-		userID, asset).Scan(&sum); err != nil {
-		return decimal.Zero, fmt.Errorf("sum pending borrows: %w", err)
+func (r borrows) PendingOf(ctx context.Context, userID string) ([]ports.Borrow, error) {
+	rows, err := r.q.Query(ctx, `SELECT `+borrowColumns+` FROM borrows WHERE status = 'PENDING' AND user_id = $1
+		ORDER BY created_at`, userID)
+	return collect(rows, err, "pending borrows", scanBorrow)
+}
+
+// collect scans every row of a query (what names the rows in errors).
+func collect[T any](rows pgx.Rows, err error, what string, scan func(pgx.Row) (T, error)) ([]T, error) {
+	if err != nil {
+		return nil, fmt.Errorf("query %s: %w", what, err)
 	}
-	return sum, nil
+	defer rows.Close()
+	var out []T
+	for rows.Next() {
+		v, err := scan(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan %s: %w", what, err)
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
 }
 
 type repays repos
@@ -262,6 +263,24 @@ func (r interest) Pending(ctx context.Context, cutoff time.Time, limit int) ([]p
 		ORDER BY created_at LIMIT $2`, cutoff, limit)
 }
 
+func (r interest) PendingOf(ctx context.Context, userID string) ([]ports.Charge, error) {
+	return r.query(ctx, `SELECT `+chargeColumns+` FROM interest_charges WHERE status = 'PENDING' AND user_id = $1
+		ORDER BY created_at`, userID)
+}
+
+func (r interest) LockHour(ctx context.Context, asset string, hour time.Time) error {
+	key := fmt.Sprintf("margin-interest:%s:%d", asset, hour.Unix())
+	if _, err := r.q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, key); err != nil {
+		return fmt.Errorf("lock interest hour: %w", err)
+	}
+	return nil
+}
+
+func (r interest) OfHour(ctx context.Context, asset string, hour time.Time) ([]ports.Charge, error) {
+	return r.query(ctx, `SELECT `+chargeColumns+` FROM interest_charges WHERE asset = $1 AND hour = $2 AND borrow_id IS NULL
+		ORDER BY user_id, account_type, symbol`, asset, hour)
+}
+
 func (r interest) Since(ctx context.Context, at time.Time) (map[ports.LoanKey]ports.LoanSince, error) {
 	rows, err := r.q.Query(ctx, `
 		SELECT user_id, account_type, symbol, asset,
@@ -423,17 +442,11 @@ func (r transfers) Finish(ctx context.Context, t ports.Transfer) error {
 func (r transfers) Pending(ctx context.Context, cutoff time.Time, limit int) ([]ports.Transfer, error) {
 	rows, err := r.q.Query(ctx, `SELECT `+transferColumns+` FROM transfers WHERE status = 'PENDING' AND created_at < $1
 		ORDER BY created_at LIMIT $2`, cutoff, limit)
-	if err != nil {
-		return nil, fmt.Errorf("query pending transfers: %w", err)
-	}
-	defer rows.Close()
-	var out []ports.Transfer
-	for rows.Next() {
-		t, err := scanTransfer(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan transfer: %w", err)
-		}
-		out = append(out, t)
-	}
-	return out, rows.Err()
+	return collect(rows, err, "pending transfers", scanTransfer)
+}
+
+func (r transfers) PendingOf(ctx context.Context, userID string) ([]ports.Transfer, error) {
+	rows, err := r.q.Query(ctx, `SELECT `+transferColumns+` FROM transfers WHERE status = 'PENDING' AND user_id = $1
+		ORDER BY created_at`, userID)
+	return collect(rows, err, "pending transfers", scanTransfer)
 }

@@ -47,6 +47,8 @@ type Valuation struct {
 	Unpriced []string
 	// Stale is set when a price used is not fresh.
 	Stale bool
+	// Owes is set when the account owes anything, priced or not.
+	Owes bool
 }
 
 // Complete reports whether every asset that counts had a price.
@@ -58,8 +60,9 @@ func (v Valuation) Net() decimal.Decimal { return v.TotalAsset.Sub(v.TotalLiabil
 // Level is the margin level; ok is false without liabilities.
 func (v Valuation) Level() (decimal.Decimal, bool) { return Level(v.TotalAsset, v.TotalLiability) }
 
-// HasDebt reports whether the account owes anything.
-func (v Valuation) HasDebt() bool { return v.TotalLiability.IsPositive() || len(v.Unpriced) > 0 }
+// HasDebt reports whether the account owes anything (review CK ③: an
+// unpriced asset held is no debt).
+func (v Valuation) HasDebt() bool { return v.Owes || v.TotalLiability.IsPositive() }
 
 // Value values a margin account's holdings: each asset held counts at
 // its price times its haircut if it is collateral (otherwise nothing);
@@ -86,6 +89,7 @@ func Value(holdings []Holding, terms map[string]AssetTerms, prices Prices) Valua
 			}
 		}
 		if debt := h.Debt(); debt.IsPositive() {
+			v.Owes = true
 			if !priced {
 				unpriced(h.Asset)
 				continue

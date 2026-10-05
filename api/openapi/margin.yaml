@@ -37,7 +37,15 @@ info:
     frozen by an operator; details status), MARGIN_PRICE_UNAVAILABLE (503,
     an asset the account holds or owes, or the one to borrow, never had a
     price: no borrowing, transfer out or order on the account, and no
-    liquidation either, until it has one; details asset).
+    liquidation either, until it has one; details asset),
+    MARGIN_AMOUNT_PRECISION (400, the amount has more decimals than the
+    asset; details decimals), MARGIN_REPAY_EXCEEDS_DEBT (422, more than the
+    debt; details debt). The ledger's refusals pass through:
+    LEDGER_INSUFFICIENT_BALANCE (422), and, should a repayment meet another
+    of the account's on its way, LEDGER_INTEREST_FIRST (422, it would pay
+    principal while interest is owed) or LEDGER_DEBT_OVERPAID (422); retry
+    with a new Idempotency-Key. A write whose outcome is not known yet
+    answers COMMON_UNAVAILABLE (503): retry with the same key.
 
     Pushes: the private WebSocket channel "margin" carries MarginPush
     messages (account changes, warnings, liquidations).
@@ -220,7 +228,9 @@ paths:
         and while an operator froze the account; a liquidation in progress
         refuses it (MARGIN_FROZEN). More than the debt fails with
         MARGIN_REPAY_EXCEEDS_DEBT, more than the free balance with
-        LEDGER_INSUFFICIENT_BALANCE.
+        LEDGER_INSUFFICIENT_BALANCE; a repayment that meets another of the
+        account's still on its way may fail with LEDGER_INTEREST_FIRST or
+        LEDGER_DEBT_OVERPAID (retry with a new key).
       tags: [margin]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -394,8 +404,14 @@ components:
     IdempotencyKey:
       name: Idempotency-Key
       in: header
+      required: true
+      description: |
+        The client's key of the write (1 to 100 bytes): the same key with
+        the same request returns the first result, with another request
+        COMMON_IDEMPOTENCY_CONFLICT.
       schema:
         type: string
+        minLength: 1
         maxLength: 100
     AccountQuery:
       name: account

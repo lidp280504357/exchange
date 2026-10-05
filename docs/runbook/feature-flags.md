@@ -26,7 +26,7 @@
 | `sim.events` | 模拟市场的运营价格事件（跳涨跳跌、目标价、趋势、波动、暂停、停牌、重新锚定；按交易对；测试服对 ASTRA-USDT 打开，`scripts/ops/astra.sh events-on`，见 [market-sim.md](market-sim.md#价格事件设计-62a3)） | 4 |
 | `sim.perp` | 机器人在平台币永续 ASTRA-USDT-PERP 上做市与交易（按合约；关闭时撤掉做市商在永续上的挂单；测试服对 ASTRA-USDT-PERP 打开，`astra.sh perp-on`，见 [market-sim.md](market-sim.md#永续-astra-usdt-perp设计-52a4)） | 4 |
 | `sim.halt_on_loss` | 模拟市场 1 分钟没有心跳（market-sim 宕机或卡住）时，market-data-service 把交易对与它的永续置 `HALT`，心跳恢复 30 秒后放开（ASTRA 设计 §9；测试服打开，见 [market-sim.md](market-sim.md#心跳与停牌设计-9a5)） | 4 |
-| `margin.enabled` | 杠杆交易总开关：划入杠杆账户、向 HOUSE 借币、还币与杠杆账户下单；关闭时这些接口返回 `MARGIN_DISABLED`（杠杆设计 2026-10-06；阶段 4 之后的批次 E0–E6，E0 只登记键，margin-service 从 E1 读取） | 5 |
+| `margin.enabled` | 杠杆交易总开关：划入杠杆账户、向 HOUSE 借币与杠杆账户下单；关闭时这些接口返回 `MARGIN_DISABLED`，还币与划回现货照常（只降风险，杠杆设计 2026-10-06 §3.2；阶段 4 之后的批次 E0–E6，margin-service 从 E1 读取）。测试服何时全局打开由协调会话在杠杆后端 E2 的 gRPC 侧（含审查 CK ①–③）部署后决定；`scripts/e2e/margin.sh` 不依赖它，只给自己的用户打开这个开关与 `margin.auto_borrow`，结束时还原（协调会话 2026-10-06 03:24 决定） | 5 |
 | `margin.liquidation` | 杠杆强平：风险率到强平线的账户被冻结、对 HOUSE 平仓、归还负债；关闭时只预警（杠杆设计 §4.5，批次 E3；演练时打开） | 5 |
 | `margin.auto_borrow` | 杠杆下单 `side_effect=AUTO_BORROW` 时自动借入可用余额的差额（杠杆设计 §5.1，批次 E2） | 5 |
 | `market.flat_minutes` | 不跟随参考市场的交易对与合约（平台币 ASTRA-USDT、ASTRA-USDT-PERP）在下一笔成交被应用时，把与上一根 1m K 线之间没有成交的分钟存成平盘 K 线并发到 `market.candle.flats`（ClickHouse `candles_1m`），图表与读模型都连续（按交易对；默认关；测试服对这两个打开，见 [market-data.md](market-data.md#规则)） | 4 |

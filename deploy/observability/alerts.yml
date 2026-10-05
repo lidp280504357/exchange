@@ -111,6 +111,20 @@ groups:
           summary: "the ledger refused {{ $value }} trades in 15 minutes; they wait as FAILED (exchangectl ledger trades --failed)"
           runbook: docs/runbook/ledger.md
 
+      - alert: MarginReconciliationMismatch
+        expr: sum by (job, check) (margin_reconcile_mismatches) > 0
+        labels: {severity: critical}
+        annotations:
+          summary: "margin reconciliation check {{ $labels.check }} found {{ $value }} mismatches (the ledger's debts against margin-service's loans and pools)"
+          runbook: docs/runbook/margin.md
+
+      - alert: MarginInterestStalled
+        expr: max by (job) (margin_interest_last_run_timestamp_seconds) > 0 and time() - max by (job) (margin_interest_last_run_timestamp_seconds) > 7200
+        labels: {severity: warning}
+        annotations:
+          summary: "no hour of margin interest finished for 2 hours (ledger down, or an asset with a borrow or repayment stuck PENDING?)"
+          runbook: docs/runbook/margin.md
+
       - alert: DerivativesReconciliationMismatch
         expr: sum by (job, check) (derivatives_reconcile_mismatches) > 0
         labels: {severity: critical}

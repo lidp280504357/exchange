@@ -21,5 +21,6 @@
 | [0015](0015-house-liquidity.md) | 合并簿与虚拟参考流动性（B-book） | 已接受 |
 | [0016](0016-platform-coin-simulated-market.md) | 平台币 ASTRA 与模拟市场（机器人池等同平台、运营控价与守卫、仅限学习项目） | 已接受 |
 | [0017](0017-stand-in-custodian-and-hidden-test-asset.md) | 替身托管方 UDUNMOCK 与隐藏测试资产 TUSD（端到端在真网关切换后照常覆盖托管路径） | 已接受 |
+| [0018](0018-margin-debt-rows.md) | 杠杆负债记成用户名下的负数行（三行记法） | 已接受 |
 
 领域词汇表见需求文档附录 A，状态机见附录 B。

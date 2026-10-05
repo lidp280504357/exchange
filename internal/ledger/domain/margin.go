@@ -240,7 +240,8 @@ func (r MarginRequest) MarginAccounts() []AccountKey {
 // accounts as they stand (locked by the caller, MarginAccounts), one per
 // move, each move seeing the balances the ones before it left. A move
 // that would take an asset row below zero (LEDGER_INSUFFICIENT_BALANCE)
-// or a debt row above it (LEDGER_DEBT_OVERPAID), or a transfer out of
+// or a debt row above it (LEDGER_DEBT_OVERPAID), a repayment of principal
+// while interest is owed (LEDGER_INTEREST_FIRST), or a transfer out of
 // what the asset's debt holds, refuses the whole request.
 func MarginPostings(r MarginRequest, accounts []Account) ([]Posting, error) {
 	if err := r.Validate(); err != nil {
@@ -278,6 +279,13 @@ func MarginPostings(r MarginRequest, accounts []Account) ([]Posting, error) {
 				{Account: SystemAccount(AccountMarginInterestIncome, m.Asset), Amount: m.Amount, Kind: Available},
 			}
 		case MarginRepay:
+			// Interest first (design §4.3, review CJ ④): the interest part
+			// is the whole amount or the whole interest owed, whichever is
+			// less.
+			if first := decimal.Min(m.Amount, state[interest].Available.Neg()); m.Interest.LessThan(first) {
+				return nil, ErrInterestFirst.WithDetail("asset", m.Asset).WithDetail("interest_owed", state[interest].Available.Neg().String()).
+					WithDetail("move", i+1)
+			}
 			entry = EntryMarginRepay
 			lines = []Line{{Account: assets, Amount: m.Amount.Neg(), Kind: Available}}
 			if m.Interest.IsPositive() {
@@ -305,7 +313,7 @@ func MarginPostings(r MarginRequest, accounts []Account) ([]Posting, error) {
 			}
 		}
 		out = append(out, Posting{
-			IdemKey: fmt.Sprintf("margin:%s:%d", r.IdemKey, i), EntryType: entry, Memo: fmt.Sprintf("%s %s", r.Reference, m.Type),
+			IdemKey: fmt.Sprintf("margin:%s:%d", r.IdemKey, i), EntryType: entry, Memo: strings.TrimSpace(r.Reference + " " + m.Type),
 			Lines: lines,
 		})
 	}
@@ -411,6 +419,11 @@ func moveScoped(idemKey, entryType, userID, accountType, scope, asset string, am
 	if !freezable(accountType) {
 		return Posting{}, apperr.Invalid(fmt.Sprintf("account type must be SPOT, FUTURES, %s or %s, got %q", AccountMarginCross,
 			AccountMarginIsolated, accountType))
+	}
+	if accountType == AccountMarginCross || accountType == AccountMarginIsolated {
+		if _, err := ParseMarginRef(userID, accountType, scope); err != nil { // an isolated account's scope is a pair
+			return Posting{}, err
+		}
 	}
 	if err := checkAmount(amount, decimals); err != nil {
 		return Posting{}, err
