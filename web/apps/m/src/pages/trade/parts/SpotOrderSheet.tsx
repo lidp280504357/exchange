@@ -1,12 +1,16 @@
 import {
   accountApi, ApiError, applyOrderToCaches, assetDecimals, dec, errorText, formatAmount, formatPrice, newIdempotencyKey, placeOrder, qk, routes,
-  selectSignedIn, tradable, unwrap, useAssets, useSession, useSettings, useTicker, type NewOrder, type Pair,
+  selectSignedIn, tradable, unwrap, useAssets, useSession, useSettings, useTerminalPrefs, useTicker, type NewOrder, type Pair,
 } from "@exchange/core";
-import { Button, KeyValue, OrderForm, Sheet, toast, type OrderFormValues, type OrderSide, type OrderType, type PairRules } from "@exchange/ui";
+import type { MarginActionKind } from "@exchange/core/margin/form";
+import { tradeAccountFor, useMarginSupport, useMarginTrade, type SideEffect, type TradeAccount } from "@exchange/core/margin/trade";
+import { Badge, Button, KeyValue, MarginLevel, OrderForm, Segmented, Select, Sheet, toast, type OrderFormValues, type OrderSide, type OrderType, type PairRules } from "@exchange/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
+import { MarginSheet } from "../../assets/parts/MarginSheet";
+import { TextButton } from "../../assets/parts/bits";
 
 type Balance = { account_type: string; asset: string; available: string };
 
@@ -14,10 +18,11 @@ function spotAvailable(list: Balance[] | undefined, asset: string): string {
   return list?.find((b) => b.account_type === "SPOT" && b.asset === asset)?.available ?? "0";
 }
 
-function toNewOrder(symbol: string, v: OrderFormValues): NewOrder {
-  if (v.type === "limit") return { symbol, side: v.side, type: "LIMIT", price: v.price, quantity: v.quantity, time_in_force: "GTC" };
-  if (v.side === "BUY") return { symbol, side: "BUY", type: "MARKET", quote_amount: v.quoteAmount };
-  return { symbol, side: "SELL", type: "MARKET", quantity: v.quantity };
+function toNewOrder(symbol: string, v: OrderFormValues, account: TradeAccount, effect: SideEffect): NewOrder {
+  const margin = account === "SPOT" ? {} : { account, side_effect: effect };
+  if (v.type === "limit") return { symbol, side: v.side, type: "LIMIT", price: v.price, quantity: v.quantity, time_in_force: "GTC", ...margin };
+  if (v.side === "BUY") return { symbol, side: "BUY", type: "MARKET", quote_amount: v.quoteAmount, ...margin };
+  return { symbol, side: "SELL", type: "MARKET", quantity: v.quantity, ...margin };
 }
 
 /**
@@ -47,6 +52,13 @@ export function SpotOrderSheet({
   const tk = useTicker(pair.symbol);
   const assets = useAssets();
   const balances = useQuery({ queryKey: qk.balances, queryFn: () => unwrap(accountApi.GET("/v1/account/balances")), enabled: signedIn, staleTime: 60_000 });
+  const chosen = useTerminalPrefs((s) => s.tradeAccount);
+  const effect = useTerminalPrefs((s) => s.sideEffect);
+  const setPrefs = useTerminalPrefs((s) => s.set);
+  const { open: marginOpen, support } = useMarginSupport(pair);
+  const account = signedIn ? tradeAccountFor(chosen, marginOpen, support) : "SPOT";
+  const margin = useMarginTrade(pair, account, effect);
+  const [act, setAct] = useState<MarginActionKind | null>(null);
   const baseDecimals = assetDecimals(assets.data?.assets, pair.base_asset);
   const quoteDecimals = assetDecimals(assets.data?.assets, pair.quote_asset);
   const rules = useMemo<PairRules>(
@@ -56,9 +68,12 @@ export function SpotOrderSheet({
     }),
     [pair],
   );
-  const available = signedIn && balances.data
-    ? { base: spotAvailable(balances.data.balances, pair.base_asset), quote: spotAvailable(balances.data.balances, pair.quote_asset) }
-    : null;
+  const available =
+    account !== "SPOT"
+      ? margin.available
+      : signedIn && balances.data
+        ? { base: spotAvailable(balances.data.balances, pair.base_asset), quote: spotAvailable(balances.data.balances, pair.quote_asset) }
+        : null;
 
   const send = async (order: NewOrder) => {
     setSubmitting(true);
@@ -73,7 +88,11 @@ export function SpotOrderSheet({
       onPlaced();
     } catch (e) {
       const short = e instanceof ApiError && e.code === "LEDGER_INSUFFICIENT_BALANCE";
-      toast.error(errorText(e), short ? { action: { label: t("nav.deposit"), onClick: () => navigate(routes.deposit) } } : undefined);
+      const fix =
+        order.account && order.account !== "SPOT"
+          ? { label: t("mTrade.margin.transfer"), onClick: () => setAct("transfer") }
+          : { label: t("nav.deposit"), onClick: () => navigate(routes.deposit) };
+      toast.error(errorText(e), short ? { action: fix } : undefined);
     } finally {
       setSubmitting(false);
     }
@@ -87,6 +106,12 @@ export function SpotOrderSheet({
           <KeyValue
             items={[
               { label: t("market.pair"), value: `${pair.base_asset}/${pair.quote_asset}` },
+              ...(pending.account && pending.account !== "SPOT"
+                ? [{
+                    label: t("mTrade.margin.account_"),
+                    value: `${t(pending.account === "MARGIN_CROSS" ? "mTrade.margin.cross" : "mTrade.margin.isolated")} · ${t(`mTrade.margin.effects.${pending.side_effect ?? "NONE"}`)}`,
+                  }]
+                : []),
               { label: t("mTrade.sideType"), value: `${t(`codes.${pending.side}`)} · ${t(`codes.${pending.type}`)}` },
               ...(pending.price ? [{ label: t("common.price"), value: `${formatPrice(pending.price, pair.price_decimals)} ${pair.quote_asset}` }] : []),
               ...(pending.quantity ? [{ label: t("common.amount"), value: `${formatAmount(pending.quantity, pair.qty_decimals)} ${pair.base_asset}` }] : []),
@@ -106,29 +131,87 @@ export function SpotOrderSheet({
           </div>
         </div>
       ) : (
-        <OrderForm
-          side={side}
-          onSideChange={() => {}}
-          hideSideSwitch
-          type={type}
-          onTypeChange={setType}
-          pair={rules}
-          available={available}
-          lastPrice={tk?.last}
-          onSubmit={(v) => {
-            const order = toNewOrder(pair.symbol, v);
-            if (confirmOrders) setPending(order);
-            else void send(order);
-          }}
-          submitting={submitting || !tradable(pair.status)}
-          signedIn={signedIn}
-          onSignIn={() => navigate(`${routes.login}?next=${encodeURIComponent(routes.trade(pair.symbol))}`)}
-          onDeposit={() => navigate(routes.deposit)}
-          fill={fill}
-          resetKey={resetKey}
-          baseDecimals={baseDecimals}
-          quoteDecimals={quoteDecimals}
-          className="px-0"
+        <>
+          {signedIn && marginOpen && (support.cross || support.isolated) && (
+            <div className="mb-3 flex flex-col gap-2" data-testid="margin-bar">
+              <Segmented
+                block
+                size="md"
+                value={account}
+                onValueChange={(v) => setPrefs({ tradeAccount: v as TradeAccount })}
+                aria-label={t("mTrade.margin.account")}
+                items={[
+                  { value: "SPOT", label: t("mTrade.margin.spot") },
+                  ...(support.cross ? [{ value: "MARGIN_CROSS", label: t("mTrade.margin.cross") }] : []),
+                  ...(support.isolated ? [{ value: "MARGIN_ISOLATED", label: t("mTrade.margin.isolated") }] : []),
+                ]}
+              />
+              {account !== "SPOT" && margin.terms && (
+                <>
+                  <div className="flex items-center gap-2">
+                    <Badge tone="brand" size="sm">
+                      {margin.owner?.leverage ?? margin.terms.leverage}x
+                    </Badge>
+                    <MarginLevel
+                      level={margin.owner?.margin_level ?? null}
+                      warn={margin.owner?.warn_level ?? margin.terms.warn_level}
+                      liquidation={margin.owner?.liquidation_level ?? margin.terms.liquidation_level}
+                      size="sm"
+                      compact
+                      className="flex-1"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="-ml-3 flex items-center">
+                      <TextButton onClick={() => setAct("transfer")}>{t("mTrade.margin.transfer")}</TextButton>
+                      <TextButton onClick={() => setAct("borrow")}>{t("mTrade.margin.borrow")}</TextButton>
+                      <TextButton onClick={() => setAct("repay")}>{t("mTrade.margin.repay")}</TextButton>
+                    </span>
+                    <Select
+                      size="md"
+                      value={effect}
+                      onValueChange={(v) => setPrefs({ sideEffect: v as SideEffect })}
+                      aria-label={t("mTrade.margin.effect")}
+                      options={(["NONE", "AUTO_BORROW", "AUTO_REPAY"] as const).map((e) => ({ value: e, label: t(`mTrade.margin.effects.${e}`) }))}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          <OrderForm
+            side={side}
+            onSideChange={() => {}}
+            hideSideSwitch
+            type={type}
+            onTypeChange={setType}
+            pair={rules}
+            available={available}
+            lastPrice={tk?.last}
+            onSubmit={(v) => {
+              const order = toNewOrder(pair.symbol, v, account, effect);
+              if (confirmOrders) setPending(order);
+              else void send(order);
+            }}
+            submitting={submitting || !tradable(pair.status)}
+            signedIn={signedIn}
+            onSignIn={() => navigate(`${routes.login}?next=${encodeURIComponent(routes.trade(pair.symbol))}`)}
+            onDeposit={account === "SPOT" ? () => navigate(routes.deposit) : () => setAct("transfer")}
+            depositLabel={account === "SPOT" ? undefined : t("mTrade.margin.transfer")}
+            availableLabel={account !== "SPOT" && effect === "AUTO_BORROW" ? t("mTrade.margin.withBorrow") : undefined}
+            fill={fill}
+            resetKey={resetKey}
+            baseDecimals={baseDecimals}
+            quoteDecimals={quoteDecimals}
+            className="px-0"
+          />
+        </>
+      )}
+      {act && (
+        <MarginSheet
+          kind={act}
+          init={{ account: account === "MARGIN_ISOLATED" ? "MARGIN_ISOLATED" : "MARGIN_CROSS", symbol: account === "MARGIN_ISOLATED" ? pair.symbol : "", asset: pair.quote_asset, direction: "IN" }}
+          onClose={() => setAct(null)}
         />
       )}
     </Sheet>

@@ -2,8 +2,9 @@ import {
   ApiError, applyOrderToCaches, assetDecimals, cancelAllOrders, cancelOrder, dec, enumLabel, errorText, formatAmount, formatPrice, isActive, routes, selectSignedIn, useAssets,
   useFills, useOpenOrders, useOrderHistory, usePairs, useSession, type Fill, type Order, type Pair,
 } from "@exchange/core";
+import { marginTag } from "@exchange/core/margin/trade";
 import {
-  Button, Checkbox, DataTable, Dialog, EmptyState, Progress, Tabs, TabsPanel, TimeText, toast, cn, type ColumnDef,
+  Badge, Button, Checkbox, DataTable, Dialog, EmptyState, Progress, Tabs, TabsPanel, TimeText, toast, cn, type ColumnDef,
 } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
@@ -152,7 +153,7 @@ function OpenOrders({ pairs, query, height }: { pairs: PairMap; query: ReturnTyp
   const columns = useMemo<ColumnDef<Order>[]>(
     () => [
       { id: "time", header: t("common.time"), cell: ({ row }) => <TimeText value={row.original.created_at} format="datetime" />, meta: { width: 150 } },
-      { id: "pair", header: t("market.pair"), cell: ({ row }) => row.original.symbol.replace("-", "/") },
+      { id: "pair", header: t("market.pair"), cell: ({ row }) => <PairCell order={row.original} /> },
       { id: "side", header: t("pcTrade.sideType"), cell: ({ row }) => (
         <span className={sideClass(row.original.side)}>{enumLabel(row.original.side)} · {enumLabel(row.original.type)}</span>
       ) },
@@ -206,7 +207,7 @@ function History({ pairs, symbol, height, enabled }: { pairs: PairMap; symbol: s
   const columns = useMemo<ColumnDef<Order>[]>(
     () => [
       { id: "time", header: t("common.time"), cell: ({ row }) => <TimeText value={row.original.updated_at} format="datetime" />, meta: { width: 150 } },
-      { id: "pair", header: t("market.pair"), cell: ({ row }) => row.original.symbol.replace("-", "/") },
+      { id: "pair", header: t("market.pair"), cell: ({ row }) => <PairCell order={row.original} /> },
       { id: "side", header: t("pcTrade.sideType"), cell: ({ row }) => (
         <span className={sideClass(row.original.side)}>{enumLabel(row.original.side)} · {enumLabel(row.original.type)}</span>
       ) },
@@ -337,5 +338,22 @@ function Assets({ height }: { height: number }) {
         />
       }
     />
+  );
+}
+
+/** PairCell is an order's pair, tagged with its margin account (cross or isolated) when it has one. */
+function PairCell({ order }: { order: Pick<Order, "symbol" | "account"> }) {
+  const tag = marginTag(order.account);
+  return (
+    <span className="flex items-center gap-1.5">
+      {order.symbol.replace("-", "/")}
+      {tag && (
+        <span data-testid="margin-tag">
+          <Badge tone="brand" size="sm">
+            {enumLabel(tag)}
+          </Badge>
+        </span>
+      )}
+    </span>
   );
 }

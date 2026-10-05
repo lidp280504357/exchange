@@ -5,8 +5,9 @@ import { bookSteps, defaultBookStep } from "./pairs";
 
 // The terminal's layout preferences (design §6.2), kept on the device:
 // the order book view and its step per pair, the chart interval and
-// indicators, the depth chart, the bottom panel's height, and the pairs
-// traded lately (the top bar's spot menu and the mobile trade tab).
+// indicators, the depth chart, the bottom panel's height, the pairs
+// traded lately (the top bar's spot menu and the mobile trade tab), and
+// the account spot orders trade from.
 
 export type BookViewMode = "both" | "bids" | "asks";
 
@@ -21,6 +22,13 @@ type TerminalPrefs = {
   panelHeight: number;
   /** Symbols traded lately, most recent first (spot and futures). */
   recent: string[];
+  /**
+   * The account spot orders trade from (margin design 2026-10-06 §7) and a
+   * margin order's side effect; the terminal falls back to SPOT where
+   * margin trading is not open or the pair has no such account.
+   */
+  tradeAccount: "SPOT" | "MARGIN_CROSS" | "MARGIN_ISOLATED";
+  sideEffect: "NONE" | "AUTO_BORROW" | "AUTO_REPAY";
   set: (patch: Partial<Omit<TerminalPrefs, "set" | "visit" | "setStep">>) => void;
   setStep: (symbol: string, step: string) => void;
   /** visit puts a symbol first in the recent list (at most 6). */
@@ -37,6 +45,8 @@ export const useTerminalPrefs = create<TerminalPrefs>()(
       showDepthChart: false,
       panelHeight: 300,
       recent: [],
+      tradeAccount: "SPOT",
+      sideEffect: "NONE",
       set: (patch) => set(patch),
       setStep: (symbol, step) => set((s) => ({ bookStep: { ...s.bookStep, [symbol]: step } })),
       visit: (symbol) => set((s) => ({ recent: [symbol, ...s.recent.filter((x) => x !== symbol)].slice(0, 6) })),

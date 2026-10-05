@@ -2,6 +2,19 @@
 export default {
   "zh-CN": {
     mTrade: {
+      margin: {
+        account: "下单账户",
+        spot: "现货",
+        cross: "全仓",
+        isolated: "逐仓",
+        effect: "借还方式",
+        effects: { NONE: "普通", AUTO_BORROW: "自动借款", AUTO_REPAY: "自动还款" },
+        withBorrow: "可用（含可借）",
+        transfer: "划转",
+        borrow: "借币",
+        repay: "还币",
+        account_: "账户",
+      },
       switchPair: "切换交易对",
       coinInfo: "币种信息",
       noFavorites: "还没有自选，点击星标添加",
@@ -74,6 +87,19 @@ export default {
   },
   en: {
     mTrade: {
+      margin: {
+        account: "Order account",
+        spot: "Spot",
+        cross: "Cross",
+        isolated: "Isolated",
+        effect: "Borrowing",
+        effects: { NONE: "Normal", AUTO_BORROW: "Auto-borrow", AUTO_REPAY: "Auto-repay" },
+        withBorrow: "Available (with borrowing)",
+        transfer: "Transfer",
+        borrow: "Borrow",
+        repay: "Repay",
+        account_: "Account",
+      },
       switchPair: "Switch market",
       coinInfo: "Coin info",
       noFavorites: "No favourites yet: tap a star to add one",

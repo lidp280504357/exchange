@@ -241,6 +241,15 @@ try {
     await page.waitForFunction(() => document.querySelector('[data-testid="margin-account-MARGIN_CROSS"] tbody')?.innerText.includes("USDT"), { timeout: 20000 });
     await marginTransfer("OUT", "10", "已划出 10 USDT");
     ok("10 USDT moves into the cross margin account from its dialog, shows in its coins, and moves back");
+    // The spot terminal trades from the cross account once chosen above
+    // the order form, with its margin level; back to spot afterwards.
+    await go("/trade/BTC-USDT");
+    await page.waitForSelector('[data-testid="margin-bar"]', { visible: true, timeout: 20000 });
+    await clickButton("全仓", '[data-testid="margin-bar"]');
+    await page.waitForSelector('[data-testid="margin-bar"] [data-testid="margin-level"]', { visible: true, timeout: 10000 });
+    await clickButton("现货", '[data-testid="margin-bar"]');
+    await page.waitForSelector('[data-testid="margin-bar"] [data-testid="margin-level"]', { hidden: true, timeout: 10000 });
+    ok("the spot terminal switches its order form to the cross margin account and back");
   }
   await shot("5b-margin");
 

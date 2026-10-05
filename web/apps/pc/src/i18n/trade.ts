@@ -2,6 +2,25 @@
 export default {
   "zh-CN": {
     pcTrade: {
+      margin: {
+        account: "下单账户",
+        spot: "现货",
+        cross: "全仓",
+        isolated: "逐仓",
+        effect: "借还方式",
+        effects: { NONE: "普通", AUTO_BORROW: "自动借款", AUTO_REPAY: "自动还款" },
+        effectHints: {
+          NONE: "只用账户里的可用余额",
+          AUTO_BORROW: "可用不足时自动借入差额，借币即收第一个小时的利息",
+          AUTO_REPAY: "成交得到的币先还该币种的负债",
+        },
+        withBorrow: "可用（含可借）",
+        transfer: "划转",
+        borrow: "借币",
+        repay: "还币",
+        liquidation: "强平价 {{price}}",
+        account_: "账户",
+      },
       perpetual: "永续",
       switchPair: "切换交易对",
       noFavorites: "还没有自选，点击星标添加",
@@ -105,6 +124,25 @@ export default {
   },
   en: {
     pcTrade: {
+      margin: {
+        account: "Order account",
+        spot: "Spot",
+        cross: "Cross",
+        isolated: "Isolated",
+        effect: "Borrowing",
+        effects: { NONE: "Normal", AUTO_BORROW: "Auto-borrow", AUTO_REPAY: "Auto-repay" },
+        effectHints: {
+          NONE: "Only the account's available balance",
+          AUTO_BORROW: "Borrows what the available balance lacks; borrowing charges the first hour at once",
+          AUTO_REPAY: "What the fills bring repays that coin's debt first",
+        },
+        withBorrow: "Available (with borrowing)",
+        transfer: "Transfer",
+        borrow: "Borrow",
+        repay: "Repay",
+        liquidation: "Liq. price {{price}}",
+        account_: "Account",
+      },
       perpetual: "Perpetual",
       switchPair: "Switch market",
       noFavorites: "No favourites yet: tap a star to add one",

@@ -2,7 +2,8 @@ import {
   applyOrderToCaches, cancelOrder, dec, enumLabel, errorText, formatAmount, formatPrice, isActive, routes, selectSignedIn, useFills,
   useOpenOrders, useOrderHistory, useSession, type Fill, type Order, type Pair,
 } from "@exchange/core";
-import { Button, EmptyState, ErrorState, Progress, Skeleton, Tabs, TimeText, cn, toast } from "@exchange/ui";
+import { marginTag } from "@exchange/core/margin/trade";
+import { Badge, Button, EmptyState, ErrorState, Progress, Skeleton, Tabs, TimeText, cn, toast } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -73,11 +74,21 @@ function Loading() {
 function OrderCard({ o, pair, action }: { o: Order; pair: Pair; action?: ReactNode }) {
   const { t } = useTranslation();
   const ratio = o.quantity && dec.sign(o.quantity) > 0 ? Math.min(100, dec.toNumber(dec.div(o.filled_quantity, o.quantity, 6)) * 100) : 0;
+  const tag = marginTag(o.account);
   return (
     <div className="rounded-3 bg-bg-1 p-3">
       <div className="flex items-center justify-between">
-        <span className={cn("text-sm font-medium", o.side === "BUY" ? "text-up" : "text-down")}>
-          {enumLabel(o.side)} · {enumLabel(o.type)}
+        <span className="flex items-center gap-1.5">
+          <span className={cn("text-sm font-medium", o.side === "BUY" ? "text-up" : "text-down")}>
+            {enumLabel(o.side)} · {enumLabel(o.type)}
+          </span>
+          {tag && (
+            <span data-testid="margin-tag">
+              <Badge tone="brand" size="sm">
+                {enumLabel(tag)}
+              </Badge>
+            </span>
+          )}
         </span>
         <span className="text-xs text-fg-3">
           <TimeText value={o.created_at} format="datetime" />

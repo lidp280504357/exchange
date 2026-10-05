@@ -101,6 +101,9 @@ export type OrderData = {
   cancel_reason?: string;
   reject_reason?: string;
   sequence?: number;
+  /** With the acceptance: SPOT or the margin account (margin design 2026-10-06). */
+  account?: string;
+  side_effect?: string;
 };
 
 export type FillData = {

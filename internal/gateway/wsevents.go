@@ -61,6 +61,10 @@ type orderData struct {
 	CancelReason   string `json:"cancel_reason,omitempty"`
 	RejectReason   string `json:"reject_reason,omitempty"`
 	Sequence       int64  `json:"sequence,omitempty"`
+	// Account and SideEffect come with the acceptance: SPOT, or the
+	// margin account the order trades from (margin design 2026-10-06).
+	Account    string `json:"account,omitempty"`
+	SideEffect string `json:"side_effect,omitempty"`
 }
 
 // fillData is one side of a trade on "fills". A contract's fill has no
@@ -292,6 +296,7 @@ func WSEvents(h *Hub) func(context.Context, *eventv1.Envelope) error {
 				OrderID: o.GetOrderId(), ClientOrderID: o.GetClientOrderId(), Symbol: o.GetSymbol(), Status: "NEW",
 				Side: sideName(o.GetSide()), Type: strings.TrimPrefix(o.GetType().String(), "ORDER_TYPE_"),
 				Price: o.GetPrice(), Quantity: o.GetQuantity(), QuoteAmount: o.GetQuoteAmount(),
+				Account: o.GetAccountType(), SideEffect: o.GetSideEffect(),
 			})
 		case p.MessageIs(&rejected):
 			if err := p.UnmarshalTo(&rejected); err != nil {

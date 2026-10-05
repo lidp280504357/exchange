@@ -1,13 +1,17 @@
 import {
   accountApi, ApiError, applyOrderToCaches, assetDecimals, errorText, formatAmount, formatPrice, newIdempotencyKey, placeOrder, qk, routes, selectSignedIn, tradable,
-  unwrap, useAssets, useSession, useSettings, useTicker, dec, type NewOrder, type Pair,
+  unwrap, useAssets, useSession, useSettings, useTerminalPrefs, useTicker, dec, type NewOrder, type Pair,
 } from "@exchange/core";
+import type { MarginActionKind } from "@exchange/core/margin/form";
+import { tradeAccountFor, useMarginSupport, useMarginTrade, type SideEffect, type TradeAccount } from "@exchange/core/margin/trade";
 import { Checkbox, Dialog, KeyValue, OrderForm, toast, type OrderFormValues, type OrderSide, type OrderType, type PairRules } from "@exchange/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router";
+import { MarginDialog } from "../../assets/parts/MarginDialog";
 import { ORDER_FORM_ID } from "./EmptyList";
+import { MarginBar } from "./MarginBar";
 
 type Balance = { account_type: string; asset: string; available: string };
 
@@ -21,11 +25,12 @@ export function spotAvailable(list: Balance[] | undefined, asset: string): strin
   return list?.find((b) => b.account_type === "SPOT" && b.asset === asset)?.available ?? "0";
 }
 
-/** toNewOrder turns the form's values into the API's order. */
-export function toNewOrder(symbol: string, v: OrderFormValues): NewOrder {
-  if (v.type === "limit") return { symbol, side: v.side, type: "LIMIT", price: v.price, quantity: v.quantity, time_in_force: "GTC" };
-  if (v.side === "BUY") return { symbol, side: "BUY", type: "MARKET", quote_amount: v.quoteAmount };
-  return { symbol, side: "SELL", type: "MARKET", quantity: v.quantity };
+/** toNewOrder turns the form's values into the API's order, on a margin account when one is given. */
+export function toNewOrder(symbol: string, v: OrderFormValues, account: TradeAccount = "SPOT", effect: SideEffect = "NONE"): NewOrder {
+  const margin = account === "SPOT" ? {} : { account, side_effect: effect };
+  if (v.type === "limit") return { symbol, side: v.side, type: "LIMIT", price: v.price, quantity: v.quantity, time_in_force: "GTC", ...margin };
+  if (v.side === "BUY") return { symbol, side: "BUY", type: "MARKET", quote_amount: v.quoteAmount, ...margin };
+  return { symbol, side: "SELL", type: "MARKET", quantity: v.quantity, ...margin };
 }
 
 export type SpotOrderPanelProps = {
@@ -60,6 +65,13 @@ export function SpotOrderPanel({ pair, side, onSideChange, fill, onPlaced, class
   const tk = useTicker(pair.symbol);
   const assets = useAssets();
   const balances = useSpotBalances();
+  const chosen = useTerminalPrefs((s) => s.tradeAccount);
+  const effect = useTerminalPrefs((s) => s.sideEffect);
+  const setPrefs = useTerminalPrefs((s) => s.set);
+  const { open: marginOpen, support } = useMarginSupport(pair);
+  const account = signedIn ? tradeAccountFor(chosen, marginOpen, support) : "SPOT";
+  const margin = useMarginTrade(pair, account, effect);
+  const [act, setAct] = useState<MarginActionKind | null>(null);
   const baseDecimals = assetDecimals(assets.data?.assets, pair.base_asset);
   const quoteDecimals = assetDecimals(assets.data?.assets, pair.quote_asset);
 
@@ -70,9 +82,12 @@ export function SpotOrderPanel({ pair, side, onSideChange, fill, onPlaced, class
     }),
     [pair],
   );
-  const available = signedIn && balances.data
-    ? { base: spotAvailable(balances.data.balances, pair.base_asset), quote: spotAvailable(balances.data.balances, pair.quote_asset) }
-    : null;
+  const available =
+    account !== "SPOT"
+      ? margin.available
+      : signedIn && balances.data
+        ? { base: spotAvailable(balances.data.balances, pair.base_asset), quote: spotAvailable(balances.data.balances, pair.quote_asset) }
+        : null;
 
   const send = async (order: NewOrder) => {
     setSubmitting(true);
@@ -91,14 +106,18 @@ export function SpotOrderPanel({ pair, side, onSideChange, fill, onPlaced, class
       }
     } catch (e) {
       const short = e instanceof ApiError && e.code === "LEDGER_INSUFFICIENT_BALANCE";
-      toast.error(errorText(e), short ? { action: { label: t("nav.deposit"), onClick: () => navigate(routes.deposit) } } : undefined);
+      const fix =
+        order.account && order.account !== "SPOT"
+          ? { label: t("pcTrade.margin.transfer"), onClick: () => setAct("transfer") }
+          : { label: t("nav.deposit"), onClick: () => navigate(routes.deposit) };
+      toast.error(errorText(e), short ? { action: fix } : undefined);
     } finally {
       setSubmitting(false);
     }
   };
 
   const submit = (v: OrderFormValues) => {
-    const order = toNewOrder(pair.symbol, v);
+    const order = toNewOrder(pair.symbol, v, account, effect);
     if (confirmOrders) {
       setSkipNext(false);
       setPending(order);
@@ -115,6 +134,17 @@ export function SpotOrderPanel({ pair, side, onSideChange, fill, onPlaced, class
 
   return (
     <div id={ORDER_FORM_ID} className={className}>
+      {signedIn && marginOpen && (support.cross || support.isolated) && (
+        <MarginBar
+          account={account}
+          onAccount={(a) => setPrefs({ tradeAccount: a })}
+          effect={effect}
+          onEffect={(e) => setPrefs({ sideEffect: e })}
+          trade={margin}
+          priceDecimals={pair.price_decimals}
+          onAct={setAct}
+        />
+      )}
       <OrderForm
         side={side}
         onSideChange={onSideChange}
@@ -127,13 +157,22 @@ export function SpotOrderPanel({ pair, side, onSideChange, fill, onPlaced, class
         submitting={submitting || !tradable(pair.status)}
         signedIn={signedIn}
         onSignIn={() => navigate(`${routes.login}?next=${encodeURIComponent(location.pathname)}`)}
-        onDeposit={() => navigate(routes.deposit)}
+        onDeposit={account === "SPOT" ? () => navigate(routes.deposit) : () => setAct("transfer")}
+        depositLabel={account === "SPOT" ? undefined : t("pcTrade.margin.transfer")}
+        availableLabel={account !== "SPOT" && effect === "AUTO_BORROW" ? t("pcTrade.margin.withBorrow") : undefined}
         fill={fill}
         resetKey={resetKey}
         baseDecimals={baseDecimals}
         quoteDecimals={quoteDecimals}
       />
       {!tradable(pair.status) && <p className="px-4 pb-3 text-xs text-warn">{t("pcTrade.notTrading")}</p>}
+      {act && (
+        <MarginDialog
+          kind={act}
+          init={{ account: account === "MARGIN_ISOLATED" ? "MARGIN_ISOLATED" : "MARGIN_CROSS", symbol: account === "MARGIN_ISOLATED" ? pair.symbol : "", asset: pair.quote_asset, direction: "IN" }}
+          onClose={() => setAct(null)}
+        />
+      )}
       <Dialog
         open={pending !== null}
         onOpenChange={(o) => !o && setPending(null)}
@@ -148,6 +187,12 @@ export function SpotOrderPanel({ pair, side, onSideChange, fill, onPlaced, class
             <KeyValue
               items={[
                 { label: t("market.pair"), value: `${pair.base_asset}/${pair.quote_asset}` },
+                ...(pending.account && pending.account !== "SPOT"
+                  ? [{
+                      label: t("pcTrade.margin.account_"),
+                      value: `${t(pending.account === "MARGIN_CROSS" ? "pcTrade.margin.cross" : "pcTrade.margin.isolated")} · ${t(`pcTrade.margin.effects.${pending.side_effect ?? "NONE"}`)}`,
+                    }]
+                  : []),
                 { label: t("pcTrade.sideType"), value: `${t(`codes.${pending.side}`)} · ${t(`codes.${pending.type}`)}` },
                 ...(pending.price ? [{ label: t("common.price"), value: `${formatPrice(pending.price, pair.price_decimals)} ${pair.quote_asset}` }] : []),
                 ...(pending.quantity ? [{ label: t("common.amount"), value: `${formatAmount(pending.quantity, pair.qty_decimals)} ${pair.base_asset}` }] : []),

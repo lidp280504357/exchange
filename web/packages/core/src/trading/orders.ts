@@ -19,6 +19,9 @@ export type NewOrder = {
   quantity?: string;
   quote_amount?: string;
   time_in_force?: "GTC" | "IOC" | "FOK" | "POST_ONLY";
+  /** The account the order trades from (SPOT when absent) and a margin order's side effect. */
+  account?: "SPOT" | "MARGIN_CROSS" | "MARGIN_ISOLATED";
+  side_effect?: "NONE" | "AUTO_BORROW" | "AUTO_REPAY";
 };
 
 const ACTIVE = new Set(["NEW", "OPEN", "PARTIALLY_FILLED"]);

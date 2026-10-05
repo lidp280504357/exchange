@@ -50,6 +50,10 @@ export type OrderFormProps = {
   signedIn: boolean;
   onSignIn?: () => void;
   onDeposit?: () => void;
+  /** The deposit link's text (default "充值"; a margin account's "划转"). */
+  depositLabel?: ReactNode;
+  /** The balance line's label (default "可用"; with AUTO_BORROW "可用（含可借）"). */
+  availableLabel?: ReactNode;
   /**
    * A price (and optionally a quantity) picked in the order book: pass a new
    * object on every pick and the form takes it.
@@ -75,8 +79,8 @@ export type OrderFormProps = {
  * the page submits (onSubmit) and owns side, type and the balances.
  */
 export function OrderForm({
-  side, onSideChange, type, onTypeChange, pair, available, lastPrice, onSubmit, submitting, signedIn, onSignIn, onDeposit, fill, resetKey,
-  baseDecimals = 8, quoteDecimals = 8, hideSideSwitch, submitLabel, className,
+  side, onSideChange, type, onTypeChange, pair, available, lastPrice, onSubmit, submitting, signedIn, onSignIn, onDeposit, depositLabel,
+  availableLabel, fill, resetKey, baseDecimals = 8, quoteDecimals = 8, hideSideSwitch, submitLabel, className,
 }: OrderFormProps) {
   const { t } = useTranslation();
   const [price, setPrice] = useState("");
@@ -293,12 +297,12 @@ export function OrderForm({
       )}
       <div className="flex flex-col gap-1.5 text-xs">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-fg-3">{t("common.available")}</span>
+          <span className="text-fg-3">{availableLabel ?? t("common.available")}</span>
           <span className="flex items-center gap-2 tabular-nums text-fg-1">
             {signedIn && availValue !== undefined ? formatAmount(availValue, buy ? quoteDecimals : baseDecimals) : "—"} {availAsset}
             {signedIn && onDeposit && (
               <button type="button" onClick={onDeposit} className="text-brand hover:brightness-110">
-                {t("ui.order.deposit")}
+                {depositLabel ?? t("ui.order.deposit")}
               </button>
             )}
           </span>

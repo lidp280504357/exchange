@@ -170,6 +170,26 @@ func TestWebSocketPrivateChannels(t *testing.T) {
 		t.Fatalf("contract fill push: %v", m)
 	}
 
+	// An order on a margin account says so from its acceptance.
+	c.send(`{"op":"subscribe","args":["orders"]}`)
+	if m := c.next(); m["ok"] != true {
+		t.Fatalf("subscribe orders: %v", m)
+	}
+	env, err = event.NewFactory("test", "t").New(context.Background(), &orderv1.OrderAccepted{Order: &orderv1.Order{
+		OrderId: "o2", UserId: "u-1", Symbol: "BTC-USDT", Side: orderv1.Side_SIDE_BUY, Type: orderv1.OrderType_ORDER_TYPE_LIMIT,
+		Price: "60000", Quantity: "0.1", AccountType: "MARGIN_CROSS", SideEffect: "AUTO_BORROW",
+	}}, "symbol", "BTC-USDT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WSEvents(hub)(context.Background(), env); err != nil {
+		t.Fatal(err)
+	}
+	if m := c.next(); m["channel"] != "orders" || m["data"].(map[string]any)["account"] != "MARGIN_CROSS" ||
+		m["data"].(map[string]any)["side_effect"] != "AUTO_BORROW" || m["data"].(map[string]any)["status"] != "NEW" {
+		t.Fatalf("margin order push: %v", m)
+	}
+
 	// A reconnecting client asks for what it missed.
 	c2 := dial(t, url)
 	c2.send(`{"op":"auth","token":"` + token + `"}`)
