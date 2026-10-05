@@ -501,3 +501,58 @@ func TestStartCatchesUpOnReferenceBooks(t *testing.T) {
 		t.Fatalf("second start: %v, read from %v", err, asked)
 	}
 }
+
+// withAccount is a PlaceOrder command on a margin account.
+func withAccount(t *testing.T, env *eventv1.Envelope, account, effect string) *eventv1.Envelope {
+	t.Helper()
+	cmd := mustPayload(env).(*orderv1.PlaceOrder)
+	cmd.Order.AccountType, cmd.Order.SideEffect = account, effect
+	out, err := factory.New(context.Background(), cmd, "symbol", "BTC-USDT", event.WithOccurredAt(env.GetOccurredAt().AsTime()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func TestTradesCarryEachSidesAccount(t *testing.T) {
+	store := &memStore{snapshots: map[int32]ports.Snapshot{}}
+	ctx := context.Background()
+	sell := withAccount(t, place(t, "s1", "alice", orderv1.Side_SIDE_SELL, "60000", "0.1"), "MARGIN_ISOLATED", "AUTO_REPAY")
+	if err := newEngine(t, store).Handle(ctx, deliveries(0, sell)); err != nil {
+		t.Fatal(err)
+	}
+	// A restarted engine rebuilds the resting order with its account.
+	e := newEngine(t, store)
+	if err := e.Handle(ctx, deliveries(1, place(t, "b1", "bob", orderv1.Side_SIDE_BUY, "60000", "0.1"))); err != nil {
+		t.Fatal(err)
+	}
+	var trade *tradev1.TradeExecuted
+	for _, o := range store.outbox {
+		if tr, ok := mustPayload(o.Envelope).(*tradev1.TradeExecuted); ok {
+			trade = tr
+		}
+	}
+	if trade == nil || trade.GetSellerAccountType() != "MARGIN_ISOLATED" || trade.GetSellerSideEffect() != "AUTO_REPAY" ||
+		trade.GetBuyerAccountType() != "" || trade.GetBuyerSideEffect() != "" {
+		t.Fatalf("trade between users: %v", trade)
+	}
+	// Against HOUSE only the user's side has an account.
+	now := time.Now().UTC()
+	if err := e.Handle(ctx, refDeliveries(0, reference(t, now, "60010"))); err != nil {
+		t.Fatal(err)
+	}
+	buy := withAccount(t, placeAt(t, now.Add(time.Second), "b2", "carol", orderv1.Side_SIDE_BUY, "60010", "0.2"), "MARGIN_CROSS", "AUTO_BORROW")
+	if err := e.Handle(ctx, deliveries(2, buy)); err != nil {
+		t.Fatal(err)
+	}
+	trade = nil
+	for _, o := range store.outbox {
+		if tr, ok := mustPayload(o.Envelope).(*tradev1.TradeExecuted); ok && tr.GetBuyerOrderId() == "b2" {
+			trade = tr
+		}
+	}
+	if trade == nil || trade.GetHouseSide() != orderv1.Side_SIDE_SELL || trade.GetBuyerAccountType() != "MARGIN_CROSS" ||
+		trade.GetBuyerSideEffect() != "AUTO_BORROW" || trade.GetSellerAccountType() != "" || trade.GetSellerSideEffect() != "" {
+		t.Fatalf("trade against HOUSE: %v", trade)
+	}
+}

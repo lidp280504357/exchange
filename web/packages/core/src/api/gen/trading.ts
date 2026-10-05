@@ -32,9 +32,15 @@ export interface paths {
          *     is borrowed before the freeze); AUTO_REPAY repays the asset bought
          *     or received with what the fills bring. The order may not leave the
          *     margin level under the warning level (MARGIN_LEVEL_TOO_LOW); further
-         *     checks fail with MARGIN_DISABLED, MARGIN_FROZEN, MARGIN_LIMIT,
-         *     MARGIN_POOL_EMPTY or MARGIN_ASSET_NOT_BORROWABLE (margin contract).
-         *     Until batch E2 only account SPOT and side_effect NONE are accepted.
+         *     checks fail with MARGIN_FROZEN, MARGIN_LIMIT, MARGIN_POOL_EMPTY,
+         *     MARGIN_ASSET_NOT_BORROWABLE or MARGIN_PRICE_UNAVAILABLE (margin
+         *     contract); the order is then stored as REJECTED and the error's
+         *     details carry margin-service's (max_borrowable, margin_level,
+         *     warn_level, asset) with order_id. While margin.enabled is off for
+         *     the caller an order on a margin account fails with MARGIN_DISABLED
+         *     (403) and nothing is stored, and so does side_effect AUTO_BORROW
+         *     while margin.auto_borrow is off (details flag: margin.auto_borrow).
+         *     A side effect other than NONE on SPOT is COMMON_INVALID_ARGUMENT.
          */
         post: operations["createOrder"];
         /**
@@ -142,7 +148,7 @@ export interface components {
             frozen_amount: components["schemas"]["Decimal"];
             cancel_requested: boolean;
             /**
-             * @description The account the order trades from (from batch E2 of the margin design; SPOT when absent).
+             * @description The account the order trades from; returned from batch E2 of the margin design (orders placed before it are SPOT).
              * @enum {string}
              */
             account?: "SPOT" | "MARGIN_CROSS" | "MARGIN_ISOLATED";

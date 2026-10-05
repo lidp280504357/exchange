@@ -17,6 +17,7 @@ import (
 
 	orderv1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
 	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/flags"
 	"github.com/skill/exchange/internal/trading/domain"
 	"github.com/skill/exchange/internal/trading/ports"
 )
@@ -144,26 +145,46 @@ func (r memOrders) PendingFreeze(_ context.Context, cutoff time.Time, limit int)
 }
 
 // fakeLedger answers freezes with err (nil freezes), unfreezes with
-// unfreezeErr, and records the calls.
+// unfreezeErr, and records the calls and the accounts they named.
 type fakeLedger struct {
 	err         error
 	unfreezeErr error
 	calls       []string
 	releases    []string
+	accounts    []domain.Account
 }
 
-func (l *fakeLedger) Unfreeze(_ context.Context, key, _, asset string, amount decimal.Decimal, _ string) error {
+func (l *fakeLedger) Unfreeze(_ context.Context, key string, a domain.Account, asset string, amount decimal.Decimal, _ string) error {
 	if l.unfreezeErr != nil {
 		return l.unfreezeErr
 	}
 	l.releases = append(l.releases, key+" "+amount.String()+" "+asset)
+	l.accounts = append(l.accounts, a)
 	return nil
 }
 
-func (l *fakeLedger) Freeze(_ context.Context, key, _, asset string, amount decimal.Decimal, _ string) error {
+func (l *fakeLedger) Freeze(_ context.Context, key string, a domain.Account, asset string, amount decimal.Decimal, _ string) error {
 	l.calls = append(l.calls, key+" "+amount.String()+" "+asset)
+	l.accounts = append(l.accounts, a)
 	return l.err
 }
+
+// fakeMargin answers reservations with err (nil reserves) and records the
+// orders it was asked about.
+type fakeMargin struct {
+	err    error
+	orders []domain.Order
+}
+
+func (m *fakeMargin) ReserveOrder(_ context.Context, o domain.Order) error {
+	m.orders = append(m.orders, o)
+	return m.err
+}
+
+// switches turns the named flags on for everyone.
+type switches map[string]bool
+
+func (f switches) Enabled(key string, _ flags.Subject) bool { return f[key] }
 
 type fakeInstruments struct{ pair domain.Pair }
 
@@ -239,8 +260,12 @@ func TestPlaceFundsTheOrderAndHandsItToTheEngine(t *testing.T) {
 	}
 	placed := store.events[1].msg.(*orderv1.PlaceOrder).GetOrder()
 	if placed.GetOrderId() != o.ID || placed.GetSide() != orderv1.Side_SIDE_BUY || placed.GetPrice() != "60000" ||
-		placed.GetQuoteAmount() != "" || placed.GetTakerFeeRate() != "0.001" || placed.GetQuoteDecimals() != 6 {
+		placed.GetQuoteAmount() != "" || placed.GetTakerFeeRate() != "0.001" || placed.GetQuoteDecimals() != 6 ||
+		placed.GetAccountType() != "SPOT" || placed.GetSideEffect() != "NONE" {
 		t.Fatalf("command: %v", placed)
+	}
+	if len(led.accounts) != 1 || led.accounts[0] != (domain.Account{UserID: "u1", Type: domain.AccountSpot}) {
+		t.Fatalf("frozen on %v, want the user's SPOT account", led.accounts)
 	}
 }
 
@@ -429,5 +454,137 @@ func TestTheMarketMakerPaysNoFees(t *testing.T) {
 	user := store.events[3].msg.(*orderv1.PlaceOrder).GetOrder()
 	if mm.GetMakerFeeRate() != "0" || mm.GetTakerFeeRate() != "0" || user.GetTakerFeeRate() != "0.001" {
 		t.Fatalf("fees: market maker %s/%s, user %s", mm.GetMakerFeeRate(), mm.GetTakerFeeRate(), user.GetTakerFeeRate())
+	}
+}
+
+func marginBuy(clientID string, account domain.AccountType, effect domain.SideEffect) domain.Request {
+	r := buy(clientID)
+	r.AccountType, r.SideEffect = account, effect
+	return r
+}
+
+func TestMarginOrdersWaitForTheirSwitches(t *testing.T) {
+	svc, store, led, _ := newService()
+	ctx := context.Background()
+	margin := &fakeMargin{}
+	svc.Margin = margin
+	// margin.enabled off (and no flags at all): refused before anything is
+	// stored; SPOT orders go on as before.
+	for _, f := range []ports.Features{nil, switches{}} {
+		if f != nil {
+			svc.Features = f
+		}
+		if _, err := svc.Place(ctx, marginBuy("m1", domain.AccountMarginCross, domain.SideEffectNone)); !apperr.Is(err, "MARGIN_DISABLED") ||
+			apperr.From(err).Kind != apperr.KindForbidden {
+			t.Fatalf("switch off: %v", err)
+		}
+	}
+	svc.Features = switches{flags.KeyMarginEnabled: true}
+	_, err := svc.Place(ctx, marginBuy("m2", domain.AccountMarginCross, domain.SideEffectAutoBorrow))
+	if !apperr.Is(err, "MARGIN_DISABLED") || apperr.From(err).Details["flag"] != flags.KeyMarginAutoBorrow {
+		t.Fatalf("auto borrow off: %v", err)
+	}
+	if len(store.orders) != 0 || len(store.events) != 0 || len(margin.orders) != 0 || len(led.calls) != 0 {
+		t.Fatalf("a refused margin order left %d orders, %d events, %d reservations, %d freezes",
+			len(store.orders), len(store.events), len(margin.orders), len(led.calls))
+	}
+	// Without margin-service a margin order is refused even with the switch on.
+	svc.Margin = nil
+	if _, err := svc.Place(ctx, marginBuy("m3", domain.AccountMarginCross, domain.SideEffectNone)); !apperr.Is(err, "MARGIN_DISABLED") {
+		t.Fatalf("no margin-service: %v", err)
+	}
+	if _, err := svc.Place(ctx, buy("s1")); err != nil {
+		t.Fatalf("a SPOT order: %v", err)
+	}
+	// A side effect is for margin accounts; unknown values are refused.
+	for _, r := range []domain.Request{
+		marginBuy("x1", domain.AccountSpot, domain.SideEffectAutoBorrow),
+		marginBuy("x2", "FUTURES", domain.SideEffectNone),
+		marginBuy("x3", domain.AccountMarginCross, "AUTO_LEND"),
+	} {
+		if _, err := svc.Place(ctx, r); !apperr.Is(err, apperr.CodeInvalidArgument) {
+			t.Fatalf("%s %s: %v", r.AccountType, r.SideEffect, err)
+		}
+	}
+}
+
+func TestMarginOrdersAreReservedThenFrozenOnTheirAccount(t *testing.T) {
+	svc, store, led, _ := newService()
+	ctx := context.Background()
+	margin := &fakeMargin{}
+	svc.Margin = margin
+	svc.Features = switches{flags.KeyMarginEnabled: true, flags.KeyMarginAutoBorrow: true}
+	o, err := svc.Place(ctx, marginBuy("m1", domain.AccountMarginIsolated, domain.SideEffectAutoBorrow))
+	if err != nil || o.FreezeState != domain.FreezeDone {
+		t.Fatalf("place: %+v %v", o, err)
+	}
+	if len(margin.orders) != 1 || margin.orders[0].ID != o.ID || !margin.orders[0].FrozenAmount.Equal(d("60")) {
+		t.Fatalf("reservations: %v", margin.orders)
+	}
+	want := domain.Account{UserID: "u1", Type: domain.AccountMarginIsolated, Scope: "BTC-USDT"}
+	if len(led.accounts) != 1 || led.accounts[0] != want {
+		t.Fatalf("frozen on %v, want %v", led.accounts, want)
+	}
+	placed := store.events[1].msg.(*orderv1.PlaceOrder).GetOrder()
+	if placed.GetAccountType() != "MARGIN_ISOLATED" || placed.GetSideEffect() != "AUTO_BORROW" {
+		t.Fatalf("command: %v", placed)
+	}
+	// The same client_order_id on another account is another order.
+	if _, err := svc.Place(ctx, marginBuy("m1", domain.AccountMarginCross, domain.SideEffectAutoBorrow)); !apperr.Is(err, apperr.CodeIdempotencyConflict) {
+		t.Fatalf("reused client_order_id: %v", err)
+	}
+	// What the finished order did not use goes back to the same account.
+	if err := svc.OnUpdate(ctx, domain.Update{OrderID: o.ID, Seq: 1, Status: domain.StatusCanceled, Filled: decimal.Zero, FilledQuote: decimal.Zero}); err != nil {
+		t.Fatal(err)
+	}
+	if len(led.releases) != 1 || len(led.accounts) != 2 || led.accounts[1] != want {
+		t.Fatalf("released %v on %v", led.releases, led.accounts)
+	}
+}
+
+func TestMarginRefusalsRejectTheOrderWithTheirDetails(t *testing.T) {
+	for _, refusal := range []*apperr.Error{
+		apperr.New(apperr.KindUnprocessable, "MARGIN_LIMIT", "more than the account may borrow").WithDetail("max_borrowable", "12.5"),
+		apperr.New(apperr.KindUnavailable, "MARGIN_PRICE_UNAVAILABLE", "an asset was never priced").WithDetail("asset", "ASTRA"),
+		apperr.New(apperr.KindForbidden, "MARGIN_DISABLED", "margin trading is not available"),
+	} {
+		svc, store, led, _ := newService()
+		svc.Margin = &fakeMargin{err: refusal}
+		svc.Features = switches{flags.KeyMarginEnabled: true}
+		o, err := svc.Place(context.Background(), marginBuy("m1", domain.AccountMarginCross, domain.SideEffectNone))
+		e := apperr.From(err)
+		if e.Code != refusal.Code || e.Kind != refusal.Kind || e.Details["order_id"] != o.ID || len(e.Details) != len(refusal.Details)+1 {
+			t.Fatalf("%s: got %v %v", refusal.Code, e, e.Details)
+		}
+		for k, v := range refusal.Details {
+			if e.Details[k] != v {
+				t.Fatalf("%s: detail %s = %v, want %v", refusal.Code, k, e.Details[k], v)
+			}
+		}
+		stored, _ := store.Read().Orders().Get(context.Background(), o.ID)
+		if stored.Status != domain.StatusRejected || stored.RejectReason != refusal.Code || len(led.calls) != 0 {
+			t.Fatalf("%s: stored %+v, %d freezes", refusal.Code, stored, len(led.calls))
+		}
+	}
+}
+
+func TestAnUnreachableMarginServiceLeavesTheOrderForRecovery(t *testing.T) {
+	svc, store, led, c := newService()
+	ctx := context.Background()
+	margin := &fakeMargin{err: apperr.Unavailable(errors.New("connection refused"))}
+	svc.Margin = margin
+	svc.Features = switches{flags.KeyMarginEnabled: true}
+	o, err := svc.Place(ctx, marginBuy("m1", domain.AccountMarginCross, domain.SideEffectNone))
+	if err != nil || o.FreezeState != domain.FreezePending || len(led.calls) != 0 || len(store.events) != 0 {
+		t.Fatalf("pending: %+v %v, %d freezes", o, err, len(led.calls))
+	}
+	margin.err = nil
+	c.t = c.t.Add(11 * time.Second)
+	if n, err := svc.Recover(ctx); err != nil || n != 1 {
+		t.Fatalf("recover: %d %v", n, err)
+	}
+	got, _ := svc.Get(ctx, "u1", o.ID)
+	if got.FreezeState != domain.FreezeDone || len(margin.orders) != 2 || margin.orders[1].ID != o.ID || len(led.calls) != 1 {
+		t.Fatalf("recovered: %+v, %d reservations (the same order twice), %d freezes", got, len(margin.orders), len(led.calls))
 	}
 }

@@ -317,6 +317,8 @@ func (b *Book) fill(taker, maker *Order, price, qty decimal.Decimal) []Event {
 		ID: tradeID(b.Symbol, seq), Number: b.Trades, Symbol: b.Symbol, BaseAsset: taker.BaseAsset, QuoteAsset: taker.QuoteAsset, Seq: seq,
 		Price: price, Quantity: qty, Quote: quote, TakerSide: taker.Side,
 		BuyOrderID: buyer.ID, BuyUserID: buyer.UserID, SellOrderID: seller.ID, SellUserID: seller.UserID,
+		BuyAccountType: buyer.AccountType, SellAccountType: seller.AccountType,
+		BuySideEffect: buyer.SideEffect, SellSideEffect: seller.SideEffect,
 		BuyerIsMaker: buyer == maker,
 		// Fees round up: the platform-favorable direction (§10.3).
 		BuyerFee:  qty.Mul(rate(buyer)).RoundCeil(buyer.BaseDecimals),

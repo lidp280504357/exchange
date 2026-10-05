@@ -88,6 +88,42 @@ func (s Status) Valid() bool {
 	return s.Active() || s == StatusFilled || s == StatusCanceled || s == StatusRejected || s == StatusExpired
 }
 
+// AccountType is the account an order trades from (margin design
+// 2026-10-06 §5.1): the user's SPOT account, the cross margin account, or
+// the isolated margin account of the order's pair.
+type AccountType string
+
+// The account types.
+const (
+	AccountSpot           AccountType = "SPOT"
+	AccountMarginCross    AccountType = "MARGIN_CROSS"
+	AccountMarginIsolated AccountType = "MARGIN_ISOLATED"
+)
+
+// Margin reports whether the account is a margin account.
+func (a AccountType) Margin() bool { return a == AccountMarginCross || a == AccountMarginIsolated }
+
+// SideEffect is what an order on a margin account does besides trading:
+// AUTO_BORROW borrows what the free balance lacks before the freeze,
+// AUTO_REPAY repays the debt of what its fills bring (in the ledger's
+// settlement).
+type SideEffect string
+
+// The side effects.
+const (
+	SideEffectNone       SideEffect = "NONE"
+	SideEffectAutoBorrow SideEffect = "AUTO_BORROW"
+	SideEffectAutoRepay  SideEffect = "AUTO_REPAY"
+)
+
+// Account is where an order's funds are frozen and its fills settle.
+type Account struct {
+	UserID string
+	Type   AccountType
+	// Scope is the pair of an isolated margin account, "" otherwise.
+	Scope string
+}
+
 // FreezeState tracks the ledger freeze of an order (§11.1 step 5): an
 // order stays PENDING between being stored and its freeze being recorded,
 // so a crash in between is repaired by retrying the freeze.
@@ -125,6 +161,10 @@ type Order struct {
 	BaseDecimals    int32
 	QuoteDecimals   int32
 	ProtectionPrice decimal.Decimal // MARKET; zero when there was no anchor
+	// AccountType and SideEffect: SPOT and NONE unless the order trades on
+	// a margin account.
+	AccountType AccountType
+	SideEffect  SideEffect
 	// Steps and assets of the pair, handed to the engine.
 	TickSize        decimal.Decimal
 	LotSize         decimal.Decimal
@@ -141,6 +181,15 @@ type Order struct {
 	Sequence  int64
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// Account returns the account the order trades from.
+func (o Order) Account() Account {
+	a := Account{UserID: o.UserID, Type: o.AccountType}
+	if o.AccountType == AccountMarginIsolated {
+		a.Scope = o.Symbol
+	}
+	return a
 }
 
 // Unused is what a finished order still has frozen: what it froze minus
@@ -215,7 +264,8 @@ type Fill struct {
 func (o Order) SameAs(r Request) bool {
 	r = r.Defaults()
 	return o.Symbol == r.Symbol && o.Side == r.Side && o.Type == r.Type && o.TimeInForce == r.TimeInForce &&
-		o.STP == r.STP && o.Price.Equal(r.Price) && o.Quantity.Equal(r.Quantity) && o.QuoteAmount.Equal(r.QuoteAmount)
+		o.STP == r.STP && o.Price.Equal(r.Price) && o.Quantity.Equal(r.Quantity) && o.QuoteAmount.Equal(r.QuoteAmount) &&
+		o.AccountType == r.AccountType && o.SideEffect == r.SideEffect
 }
 
 // Errors of the order checks (appendix C).
@@ -229,6 +279,11 @@ var (
 	ErrOrderNotFound  = apperr.NotFound("no such order")
 	ErrClientIDReused = apperr.New(apperr.KindConflict, apperr.CodeIdempotencyConflict,
 		"client_order_id already names another order")
+	// ErrMarginDisabled refuses an order on a margin account while
+	// margin.enabled is off for the user, or one with AUTO_BORROW while
+	// margin.auto_borrow is off (details flag); margin-service answers the
+	// same code.
+	ErrMarginDisabled = apperr.New(apperr.KindForbidden, "MARGIN_DISABLED", "margin trading is not available")
 )
 
 // Limits on active orders (§11.2).

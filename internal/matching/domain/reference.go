@@ -175,6 +175,7 @@ func (b *Book) houseFill(u *Order, userMaker bool, house string, price, qty deci
 	houseTakes := Buy // the side of whoever came in: the user, or HOUSE's update
 	if u.Side == Buy {
 		t.BuyOrderID, t.BuyUserID, t.SellUserID, t.HouseSide = u.ID, u.UserID, house, Sell
+		t.BuyAccountType, t.BuySideEffect = u.AccountType, u.SideEffect
 		t.BuyerIsMaker, houseTakes = userMaker, Sell
 		// Fees round up: the platform-favorable direction (§10.3).
 		t.BuyerFee, t.SellerFee = qty.Mul(rate).RoundCeil(u.BaseDecimals), decimal.Zero
@@ -183,6 +184,7 @@ func (b *Book) houseFill(u *Order, userMaker bool, house string, price, qty deci
 		}
 	} else {
 		t.SellOrderID, t.SellUserID, t.BuyUserID, t.HouseSide = u.ID, u.UserID, house, Buy
+		t.SellAccountType, t.SellSideEffect = u.AccountType, u.SideEffect
 		t.BuyerIsMaker = !userMaker
 		t.BuyerFee, t.SellerFee = decimal.Zero, quote.Mul(rate).RoundCeil(u.QuoteDecimals)
 	}

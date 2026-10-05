@@ -32,6 +32,7 @@ func toProto(o domain.Order) *orderv1.Order {
 		MakerFeeRate: o.MakerFeeRate.String(), TakerFeeRate: o.TakerFeeRate.String(),
 		BaseDecimals: o.BaseDecimals, QuoteDecimals: o.QuoteDecimals, ProtectionPrice: amount(o.ProtectionPrice),
 		TickSize: amount(o.TickSize), LotSize: amount(o.LotSize), BaseAsset: o.BaseAsset, QuoteAsset: o.QuoteAsset,
+		AccountType: string(o.AccountType), SideEffect: string(o.SideEffect),
 	}
 }
 

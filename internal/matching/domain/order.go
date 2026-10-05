@@ -80,6 +80,11 @@ type Order struct {
 	LotSize    decimal.Decimal `json:"lot_size"`
 	BaseAsset  string          `json:"base_asset"`
 	QuoteAsset string          `json:"quote_asset"`
+	// AccountType and SideEffect travel to the order's trades untouched
+	// (margin design 2026-10-06): matching ignores them, the ledger settles
+	// each side on its account. Empty for orders from before them.
+	AccountType string `json:"account_type,omitempty"`
+	SideEffect  string `json:"side_effect,omitempty"`
 
 	Filled      decimal.Decimal `json:"filled"`       // base
 	FilledQuote decimal.Decimal `json:"filled_quote"` // quote exchanged

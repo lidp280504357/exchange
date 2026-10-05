@@ -10,6 +10,7 @@ import (
 
 	instrumentv1 "github.com/skill/exchange/api/gen/go/exchange/instrument/v1"
 	ledgerv1 "github.com/skill/exchange/api/gen/go/exchange/ledger/v1"
+	marginv1 "github.com/skill/exchange/api/gen/go/exchange/margin/v1"
 	userv1 "github.com/skill/exchange/api/gen/go/exchange/user/v1"
 	"github.com/skill/exchange/internal/platform/app"
 	"github.com/skill/exchange/internal/platform/bootstrap"
@@ -18,6 +19,7 @@ import (
 	"github.com/skill/exchange/internal/platform/pg"
 	"github.com/skill/exchange/internal/trading/adapters/instruments"
 	"github.com/skill/exchange/internal/trading/adapters/ledger"
+	"github.com/skill/exchange/internal/trading/adapters/margin"
 	"github.com/skill/exchange/internal/trading/adapters/postgres"
 	"github.com/skill/exchange/internal/trading/adapters/prices"
 	"github.com/skill/exchange/internal/trading/adapters/users"
@@ -36,6 +38,9 @@ type settings struct {
 	LedgerAddr     string `koanf:"ledger_grpc_addr"`
 	InstrumentAddr string `koanf:"instrument_grpc_addr"`
 	UserAddr       string `koanf:"user_grpc_addr"`
+	// MarginAddr is margin-service, which checks and funds orders on
+	// margin accounts; it is only called while margin.enabled is on.
+	MarginAddr string `koanf:"margin_grpc_addr"`
 	// MarketURL is market-data-service, for reference prices
 	// (MARKET_DATA_SERVICE_URL).
 	MarketURL string `koanf:"market_data_service_url"`
@@ -57,7 +62,7 @@ func setup(ctx context.Context, a *app.App) error {
 	cfg := settings{
 		HTTPAddr: ":8088", Postgres: pg.DefaultConfig(),
 		LedgerAddr: "localhost:9185", InstrumentAddr: "localhost:9184", UserAddr: "localhost:9182",
-		MarketURL: "http://localhost:8090",
+		MarginAddr: "localhost:9199", MarketURL: "http://localhost:8090",
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
 		return err
@@ -82,6 +87,10 @@ func setup(ctx context.Context, a *app.App) error {
 	if err != nil {
 		return err
 	}
+	marginConn, err := bootstrap.GRPCClient(a, "margin", cfg.MarginAddr)
+	if err != nil {
+		return err
+	}
 	// Flags decide whether a pair's orders trade only with HOUSE (ADR-0015).
 	features, err := bootstrap.Flags(ctx, a, cfg.Postgres)
 	if err != nil {
@@ -92,6 +101,7 @@ func setup(ctx context.Context, a *app.App) error {
 	svc := &application.Service{
 		Store:       store,
 		Ledger:      ledger.New(ledgerv1.NewLedgerServiceClient(ledgerConn)),
+		Margin:      margin.New(marginv1.NewMarginServiceClient(marginConn)),
 		Instruments: instruments.New(instrumentv1.NewInstrumentServiceClient(instrumentConn), 5*time.Second),
 		Eligibility: users.New(userv1.NewUserServiceClient(userConn)),
 		// The latest trade anchors price bands and market protection.

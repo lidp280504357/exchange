@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"slices"
 	"time"
 
@@ -25,8 +26,11 @@ const FeatureSpotTrade = "SPOT_TRADE"
 
 // Service places and cancels orders.
 type Service struct {
-	Store       ports.Store
-	Ledger      ports.Ledger
+	Store  ports.Store
+	Ledger ports.Ledger
+	// Margin checks and funds orders on margin accounts (margin design
+	// 2026-10-06); nil refuses them.
+	Margin      ports.Margin
 	Instruments ports.Instruments
 	Eligibility ports.Eligibility
 	Prices      ports.Prices
@@ -73,6 +77,9 @@ func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, 
 	if err != nil {
 		return domain.Order{}, err
 	}
+	if err := s.marginOpen(o); err != nil {
+		return domain.Order{}, err
+	}
 	var prev *domain.Order
 	err = s.Store.Tx(ctx, func(r ports.Repos) error {
 		if err := r.Orders().LockUser(ctx, o.UserID); err != nil {
@@ -114,16 +121,46 @@ func (s *Service) repeat(_ context.Context, prev domain.Order, req domain.Reques
 	return prev, nil
 }
 
+// marginOpen refuses an order on a margin account, before anything is
+// stored, while margin.enabled is off for the user, and one with
+// AUTO_BORROW while margin.auto_borrow is off (margin design 2026-10-06
+// §5.1; margin-service checks both again). SPOT orders pass untouched.
+func (s *Service) marginOpen(o domain.Order) error {
+	if !o.AccountType.Margin() {
+		return nil
+	}
+	subject := flags.Subject{UserID: o.UserID}
+	if s.Margin == nil || s.Features == nil || !s.Features.Enabled(flags.KeyMarginEnabled, subject) {
+		return domain.ErrMarginDisabled
+	}
+	if o.SideEffect == domain.SideEffectAutoBorrow && !s.Features.Enabled(flags.KeyMarginAutoBorrow, subject) {
+		return domain.ErrMarginDisabled.WithDetail("flag", flags.KeyMarginAutoBorrow)
+	}
+	return nil
+}
+
 // fund freezes the order's funds (idempotent by order ID) and, in one
 // transaction, records the freeze with OrderAccepted and the PlaceOrder
-// command. A refused freeze rejects the order; when the ledger cannot be
-// reached the outcome is unknown, so the order stays pending for Recover.
+// command. An order on a margin account is first reserved with
+// margin-service (idempotent by order ID too, so Recover replays both
+// steps). A refusal rejects the order; when a service cannot be reached
+// the outcome is unknown, so the order stays pending for Recover.
 func (s *Service) fund(ctx context.Context, o domain.Order) (domain.Order, error) {
-	err := s.Ledger.Freeze(ctx, "order:"+o.ID, o.UserID, o.FrozenAsset, o.FrozenAmount, o.ID)
+	if o.AccountType.Margin() {
+		if s.Margin == nil {
+			return s.reject(ctx, o, domain.ErrMarginDisabled)
+		}
+		if err := s.Margin.ReserveOrder(ctx, o); err != nil {
+			if e := apperr.From(err); refused(e) {
+				return s.reject(ctx, o, e)
+			}
+			s.Log.WarnContext(ctx, "margin reservation did not complete; recovery retries it", "order_id", o.ID, "error", err)
+			return o, nil
+		}
+	}
+	err := s.Ledger.Freeze(ctx, "order:"+o.ID, o.Account(), o.FrozenAsset, o.FrozenAmount, o.ID)
 	if err != nil {
-		e := apperr.From(err)
-		switch e.Kind {
-		case apperr.KindInvalid, apperr.KindUnprocessable, apperr.KindConflict, apperr.KindForbidden:
+		if e := apperr.From(err); refused(e) {
 			return s.reject(ctx, o, e)
 		}
 		s.Log.WarnContext(ctx, "order freeze did not complete; recovery retries it", "order_id", o.ID, "error", err)
@@ -161,6 +198,17 @@ func (s *Service) fund(ctx context.Context, o domain.Order) (domain.Order, error
 	return out, err
 }
 
+// refused tells a service's answer, which rejects the order, from a
+// failure to answer, whose outcome is unknown: MARGIN_PRICE_UNAVAILABLE is
+// margin-service's answer although it is a 503.
+func refused(e *apperr.Error) bool {
+	switch e.Kind {
+	case apperr.KindInvalid, apperr.KindUnprocessable, apperr.KindConflict, apperr.KindForbidden:
+		return true
+	}
+	return e.Code == "MARGIN_PRICE_UNAVAILABLE"
+}
+
 // houseOnly decides whether an order of the pair trades only with HOUSE's
 // reference liquidity (ADR-0015): the pair follows a reference market,
 // market.house_liquidity is on for it and market.internal_matching off.
@@ -178,7 +226,8 @@ func (s *Service) houseOnly(ctx context.Context, symbol string) bool {
 }
 
 // reject stores the order as REJECTED with OrderRejected and returns the
-// ledger's refusal with the order's ID.
+// refusal, its details kept (margin-service's max_borrowable,
+// margin_level and the like), with the order's ID.
 func (s *Service) reject(ctx context.Context, o domain.Order, cause *apperr.Error) (domain.Order, error) {
 	var out domain.Order
 	err := s.Store.Tx(ctx, func(r ports.Repos) error {
@@ -205,7 +254,9 @@ func (s *Service) reject(ctx context.Context, o domain.Order, cause *apperr.Erro
 	if out.Status != domain.StatusRejected {
 		return out, nil
 	}
-	return out, apperr.New(cause.Kind, cause.Code, cause.Message).WithDetail("order_id", out.ID)
+	refusal := apperr.New(cause.Kind, cause.Code, cause.Message)
+	refusal.Details = maps.Clone(cause.Details)
+	return out, refusal.WithDetail("order_id", out.ID)
 }
 
 // Recover finishes orders whose freeze outcome was not recorded (§11.1

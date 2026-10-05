@@ -79,6 +79,10 @@ type Trade struct {
 	// reference liquidity, "" between users. HOUSE's order ID is empty and
 	// its fee zero (ADR-0015).
 	HouseSide Side
+	// The accounts and side effects of the buyer's and seller's orders
+	// (Order.AccountType, Order.SideEffect); empty for HOUSE's side.
+	BuyAccountType, SellAccountType string
+	BuySideEffect, SellSideEffect   string
 }
 
 // tradeID derives a trade's ID from its symbol and sequence, so a replay

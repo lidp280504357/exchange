@@ -52,6 +52,8 @@ type placeBody struct {
 	QuoteAmount         string `json:"quote_amount"`
 	ClientOrderID       string `json:"client_order_id"`
 	SelfTradePrevention string `json:"self_trade_prevention"`
+	Account             string `json:"account"`
+	SideEffect          string `json:"side_effect"`
 }
 
 // optional parses an optional decimal field; absent is zero.
@@ -75,7 +77,8 @@ func (h *Handler) place(w http.ResponseWriter, r *http.Request) {
 	req := domain.Request{
 		UserID: httpx.UserID(r), ClientOrderID: body.ClientOrderID, Symbol: body.Symbol,
 		Side: domain.Side(body.Side), Type: domain.Type(body.Type), TimeInForce: domain.TimeInForce(body.TimeInForce),
-		STP: domain.STP(body.SelfTradePrevention),
+		STP: domain.STP(body.SelfTradePrevention), AccountType: domain.AccountType(body.Account),
+		SideEffect: domain.SideEffect(body.SideEffect),
 	}
 	var err error
 	if req.Price, err = optional("price", body.Price); err == nil {
@@ -160,6 +163,8 @@ type orderJSON struct {
 	FrozenAsset         string `json:"frozen_asset"`
 	FrozenAmount        string `json:"frozen_amount"`
 	CancelRequested     bool   `json:"cancel_requested"`
+	Account             string `json:"account"`
+	SideEffect          string `json:"side_effect"`
 	CreatedAt           string `json:"created_at"`
 	UpdatedAt           string `json:"updated_at"`
 }
@@ -178,6 +183,7 @@ func toJSON(o domain.Order) orderJSON {
 		Status: string(o.Status), RejectReason: o.RejectReason, CancelReason: o.CancelReason,
 		FilledQuantity: o.FilledQuantity.String(), FilledQuote: o.FilledQuote.String(),
 		FrozenAsset: o.FrozenAsset, FrozenAmount: o.FrozenAmount.String(), CancelRequested: o.CancelRequested,
+		Account: string(o.AccountType), SideEffect: string(o.SideEffect),
 		CreatedAt: httpx.FormatTime(o.CreatedAt), UpdatedAt: httpx.FormatTime(o.UpdatedAt),
 	}
 }

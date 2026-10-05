@@ -49,10 +49,13 @@ type Request struct {
 	Price         decimal.Decimal
 	Quantity      decimal.Decimal
 	QuoteAmount   decimal.Decimal
+	AccountType   AccountType
+	SideEffect    SideEffect
 }
 
 // Defaults fills in what a request may leave out: the time in force of
-// its type (GTC for limit, IOC for market orders) and the self-trade mode.
+// its type (GTC for limit, IOC for market orders), the self-trade mode,
+// the SPOT account and no side effect.
 func (r Request) Defaults() Request {
 	if r.TimeInForce == "" {
 		r.TimeInForce = GTC
@@ -62,6 +65,12 @@ func (r Request) Defaults() Request {
 	}
 	if r.STP == "" {
 		r.STP = CancelNewest
+	}
+	if r.AccountType == "" {
+		r.AccountType = AccountSpot
+	}
+	if r.SideEffect == "" {
+		r.SideEffect = SideEffectNone
 	}
 	return r
 }
@@ -82,6 +91,7 @@ func NewOrder(id string, req Request, pair Pair, anchor decimal.Decimal, now tim
 		ID: id, UserID: req.UserID, ClientOrderID: req.ClientOrderID, Symbol: pair.Symbol,
 		Side: req.Side, Type: req.Type, TimeInForce: req.TimeInForce, STP: req.STP,
 		Price: req.Price, Quantity: req.Quantity, QuoteAmount: req.QuoteAmount,
+		AccountType: req.AccountType, SideEffect: req.SideEffect,
 		Status: StatusNew, FreezeState: FreezePending,
 		FilledQuantity: decimal.Zero, FilledQuote: decimal.Zero,
 		MakerFeeRate: pair.MakerFeeRate, TakerFeeRate: pair.TakerFeeRate,
@@ -100,6 +110,18 @@ func NewOrder(id string, req Request, pair Pair, anchor decimal.Decimal, now tim
 	}
 	if o.STP != CancelNewest && o.STP != CancelOldest && o.STP != CancelBoth {
 		return Order{}, apperr.Invalid("self_trade_prevention must be CANCEL_NEWEST, CANCEL_OLDEST or CANCEL_BOTH")
+	}
+	if o.AccountType != AccountSpot && !o.AccountType.Margin() {
+		return Order{}, apperr.Invalid("account must be SPOT, MARGIN_CROSS or MARGIN_ISOLATED")
+	}
+	switch o.SideEffect {
+	case SideEffectNone:
+	case SideEffectAutoBorrow, SideEffectAutoRepay:
+		if !o.AccountType.Margin() {
+			return Order{}, apperr.Invalid("side_effect is for orders on a margin account")
+		}
+	default:
+		return Order{}, apperr.Invalid("side_effect must be NONE, AUTO_BORROW or AUTO_REPAY")
 	}
 	var err error
 	switch o.Type {

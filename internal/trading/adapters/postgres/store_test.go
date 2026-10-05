@@ -80,6 +80,9 @@ func TestOrdersRoundTrip(t *testing.T) {
 		!got.TakerFeeRate.Equal(d("0.002")) || got.QuoteDecimals != 6 || !got.CreatedAt.Equal(at) || got.ClientOrderID != o.ID {
 		t.Fatalf("round trip: %+v", got)
 	}
+	if got.AccountType != domain.AccountSpot || got.SideEffect != domain.SideEffectNone {
+		t.Fatalf("a spot order's account: %q %q", got.AccountType, got.SideEffect)
+	}
 	m, _ := store.Read().Orders().Get(ctx, market.ID)
 	if !m.QuoteAmount.Equal(d("100")) || !m.Price.IsZero() || !m.ProtectionPrice.Equal(d("66000")) {
 		t.Fatalf("market order: %+v", m)
@@ -98,6 +101,35 @@ func TestOrdersRoundTrip(t *testing.T) {
 	}
 	if _, err := store.Read().Orders().Get(ctx, uuid.NewString()); err != domain.ErrOrderNotFound { //nolint:errorlint // sentinel returned as is
 		t.Fatalf("missing order: %v", err)
+	}
+}
+
+func TestMarginOrdersKeepTheirAccount(t *testing.T) {
+	store, db := setup(t)
+	ctx := context.Background()
+	req := limitBuy()
+	req.AccountType, req.SideEffect = domain.AccountMarginIsolated, domain.SideEffectAutoBorrow
+	o := order(t, uuid.NewString(), req, time.Now())
+	if err := store.Read().Orders().Insert(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Read().Orders().Get(ctx, o.ID)
+	if err != nil || got.AccountType != domain.AccountMarginIsolated || got.SideEffect != domain.SideEffectAutoBorrow ||
+		got.Account() != (domain.Account{UserID: o.UserID, Type: domain.AccountMarginIsolated, Scope: "BTC-USDT"}) {
+		t.Fatalf("margin order: %+v %v", got, err)
+	}
+	// An order built without them is stored as a SPOT order without a
+	// side effect; the table refuses a side effect on SPOT.
+	bare := order(t, o.UserID, limitBuy(), time.Now())
+	bare.AccountType, bare.SideEffect = "", ""
+	if err := store.Read().Orders().Insert(ctx, bare); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := store.Read().Orders().Get(ctx, bare.ID); got.AccountType != domain.AccountSpot || got.SideEffect != domain.SideEffectNone {
+		t.Fatalf("bare order: %q %q", got.AccountType, got.SideEffect)
+	}
+	if _, err := db.Exec(ctx, `UPDATE orders SET side_effect = 'AUTO_REPAY' WHERE id = $1`, bare.ID); err == nil {
+		t.Fatal("a SPOT order took a side effect")
 	}
 }
 
@@ -159,11 +191,11 @@ func TestActiveOrdersAndPages(t *testing.T) {
 
 type freezeOK struct{}
 
-func (freezeOK) Freeze(context.Context, string, string, string, decimal.Decimal, string) error {
+func (freezeOK) Freeze(context.Context, string, domain.Account, string, decimal.Decimal, string) error {
 	return nil
 }
 
-func (freezeOK) Unfreeze(context.Context, string, string, string, decimal.Decimal, string) error {
+func (freezeOK) Unfreeze(context.Context, string, domain.Account, string, decimal.Decimal, string) error {
 	return nil
 }
 

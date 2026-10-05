@@ -55,7 +55,7 @@ type orders repos
 const columns = `id, user_id, client_order_id, symbol, side, type, time_in_force, stp, price, quantity, quote_amount,
 	status, reject_reason, filled_quantity, filled_quote, frozen_asset, frozen_amount, freeze_state, maker_fee_rate,
 	taker_fee_rate, base_decimals, quote_decimals, protection_price, cancel_requested, sequence, created_at, updated_at,
-	tick_size, lot_size, base_asset, quote_asset, cancel_reason, released`
+	tick_size, lot_size, base_asset, quote_asset, cancel_reason, released, account_type, side_effect`
 
 var activeStatuses = []string{string(domain.StatusNew), string(domain.StatusOpen), string(domain.StatusPartiallyFilled)}
 
@@ -66,7 +66,8 @@ func scan(row pgx.Row) (domain.Order, error) {
 	err := row.Scan(&o.ID, &o.UserID, &o.ClientOrderID, &o.Symbol, &o.Side, &o.Type, &o.TimeInForce, &o.STP,
 		&price, &qty, &quote, &o.Status, &reject, &o.FilledQuantity, &o.FilledQuote, &o.FrozenAsset, &o.FrozenAmount,
 		&o.FreezeState, &o.MakerFeeRate, &o.TakerFeeRate, &o.BaseDecimals, &o.QuoteDecimals, &protection,
-		&o.CancelRequested, &o.Sequence, &o.CreatedAt, &o.UpdatedAt, &tick, &lot, &base, &quoteAsset, &cancel, &o.Released)
+		&o.CancelRequested, &o.Sequence, &o.CreatedAt, &o.UpdatedAt, &tick, &lot, &base, &quoteAsset, &cancel, &o.Released,
+		&o.AccountType, &o.SideEffect)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Order{}, domain.ErrOrderNotFound
 	}
@@ -91,6 +92,22 @@ func null(d decimal.Decimal) decimal.NullDecimal {
 	return decimal.NullDecimal{Decimal: d, Valid: !d.IsZero()}
 }
 
+// accountType and sideEffect store an order built without them as a SPOT
+// order without a side effect.
+func accountType(a domain.AccountType) domain.AccountType {
+	if a == "" {
+		return domain.AccountSpot
+	}
+	return a
+}
+
+func sideEffect(e domain.SideEffect) domain.SideEffect {
+	if e == "" {
+		return domain.SideEffectNone
+	}
+	return e
+}
+
 func text(s string) *string {
 	if s == "" {
 		return nil
@@ -108,12 +125,12 @@ func (r orders) LockUser(ctx context.Context, userID string) error {
 func (r orders) Insert(ctx context.Context, o domain.Order) error {
 	_, err := r.q.Exec(ctx, `INSERT INTO orders (`+columns+`)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27,
-			$28, $29, $30, $31, $32, $33)`,
+			$28, $29, $30, $31, $32, $33, $34, $35)`,
 		o.ID, o.UserID, o.ClientOrderID, o.Symbol, o.Side, o.Type, o.TimeInForce, o.STP, null(o.Price), null(o.Quantity),
 		null(o.QuoteAmount), o.Status, text(o.RejectReason), o.FilledQuantity, o.FilledQuote, o.FrozenAsset, o.FrozenAmount,
 		o.FreezeState, o.MakerFeeRate, o.TakerFeeRate, o.BaseDecimals, o.QuoteDecimals, null(o.ProtectionPrice),
 		o.CancelRequested, o.Sequence, o.CreatedAt, o.UpdatedAt, null(o.TickSize), null(o.LotSize), text(o.BaseAsset),
-		text(o.QuoteAsset), text(o.CancelReason), o.Released)
+		text(o.QuoteAsset), text(o.CancelReason), o.Released, accountType(o.AccountType), sideEffect(o.SideEffect))
 	if err != nil {
 		return fmt.Errorf("insert order: %w", err)
 	}

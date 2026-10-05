@@ -81,12 +81,21 @@ type ListFilter struct {
 
 // Ledger freezes funds (ledger-service gRPC).
 type Ledger interface {
-	// Freeze locks amount of asset in the user's SPOT account for an order;
-	// a repeated key returns the first result.
-	Freeze(ctx context.Context, key, userID, asset string, amount decimal.Decimal, orderID string) error
+	// Freeze locks amount of asset in the order's account (SPOT, or a
+	// margin account); a repeated key returns the first result.
+	Freeze(ctx context.Context, key string, account domain.Account, asset string, amount decimal.Decimal, orderID string) error
 	// Unfreeze releases what a finished order no longer needs; a repeated
 	// key returns the first result.
-	Unfreeze(ctx context.Context, key, userID, asset string, amount decimal.Decimal, orderID string) error
+	Unfreeze(ctx context.Context, key string, account domain.Account, asset string, amount decimal.Decimal, orderID string) error
+}
+
+// Margin checks an order on a margin account before its freeze
+// (margin-service gRPC, margin design 2026-10-06 §5.1): the account's
+// state, its assets and margin level, and, with AUTO_BORROW, borrows what
+// the free balance lacks. Idempotent by the order's ID: a repeat returns
+// the first outcome.
+type Margin interface {
+	ReserveOrder(ctx context.Context, o domain.Order) error
 }
 
 // Instruments reads trading pairs (instrument-service gRPC).

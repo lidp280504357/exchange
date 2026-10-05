@@ -61,6 +61,7 @@ func fromProto(p *orderv1.Order) (domain.Order, error) {
 		Side: sides[p.GetSide()], Type: types[p.GetType()], TimeInForce: tifs[p.GetTimeInForce()],
 		STP: stps[p.GetSelfTradePrevention()], BaseDecimals: p.GetBaseDecimals(), QuoteDecimals: p.GetQuoteDecimals(),
 		BaseAsset: p.GetBaseAsset(), QuoteAsset: p.GetQuoteAsset(),
+		AccountType: p.GetAccountType(), SideEffect: p.GetSideEffect(),
 	}
 	if o.ID == "" || o.UserID == "" || o.Symbol == "" || o.Side == "" || o.Type == "" || o.TimeInForce == "" {
 		return domain.Order{}, fmt.Errorf("order %q lacks its identity, side, type or time in force", o.ID)
@@ -167,7 +168,9 @@ func (e *Engine) output(ctx context.Context, ev domain.Event) (ports.Output, err
 			Price: t.Price.String(), Quantity: t.Quantity.String(), QuoteQuantity: t.Quote.String(), TakerSide: side,
 			BuyerOrderId: t.BuyOrderID, BuyerUserId: t.BuyUserID, SellerOrderId: t.SellOrderID, SellerUserId: t.SellUserID,
 			BuyerIsMaker: t.BuyerIsMaker, BuyerFee: t.BuyerFee.String(), SellerFee: t.SellerFee.String(),
-			TradeNumber: t.Number,
+			TradeNumber:      t.Number,
+			BuyerAccountType: t.BuyAccountType, SellerAccountType: t.SellAccountType,
+			BuyerSideEffect: t.BuySideEffect, SellerSideEffect: t.SellSideEffect,
 		}
 		if !t.BuyerLimit.IsZero() {
 			m.BuyerLimitPrice = t.BuyerLimit.String()
