@@ -12,12 +12,13 @@ on:
 permissions:
   contents: read
 
-# On main every push runs to its end: three sessions push every few
-# minutes, and cancelling left main without a green run for an hour (review
-# tick 2026-10-06 05:21, B89). A pull request's newer push replaces its
-# older run.
+# On main every push runs, to its end, in a group of its own: three
+# sessions push every few minutes, and cancelling left main without a green
+# run for an hour (review tick 2026-10-06 05:21, B89); one group for main
+# would still drop all but the newest of the runs waiting in it (review CV,
+# B91). A pull request's newer push replaces its older run.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
