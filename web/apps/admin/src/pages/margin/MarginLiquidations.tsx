@@ -1,3 +1,4 @@
+import { dec } from "@exchange/core";
 import type { Admin } from "@exchange/core/api/admin";
 import type { ColumnDef, DataColumnMeta } from "@exchange/ui";
 import { useMemo } from "react";
@@ -27,13 +28,14 @@ function Amounts({ items }: { items: MarginLiquidation["repaid"] }) {
 }
 
 /**
- * Margin liquidations (design 2026-10-06 §4.5, §8; A55): one row a
+ * Margin liquidations (design 2026-10-06 §4.5, §8; A55; a file name of
+ * its own, so its chunk is not named as the contracts' page): one row a
  * liquidation, newest first, at the liquidation line or approved by hand:
  * the margin level that started it, the debts it repaid and what stayed
  * in the account, the fee to the insurance fund and the shortfall the
  * fund covered (the read model margin_liquidations, seconds behind).
  */
-export default function Liquidations(_: { admin: Admin }) {
+export default function MarginLiquidations(_: { admin: Admin }) {
   const { t } = useTranslation();
   const label = useEnum();
   const filters = useFilters(["account", "symbol", "trigger", "user_id", "days"]);
@@ -85,7 +87,7 @@ export default function Liquidations(_: { admin: Admin }) {
       {
         id: "ins", header: t("admin.margin.insuranceCovered"), meta: right,
         cell: ({ row }) => (
-          <Num value={row.original.insurance_covered} decimals={2} className={Number(row.original.insurance_covered) > 0 ? "text-danger-strong" : undefined} />
+          <Num value={row.original.insurance_covered} decimals={2} className={dec.gt(row.original.insurance_covered, "0") ? "text-danger-strong" : undefined} />
         ),
       },
       { id: "remaining", header: t("admin.margin.remaining"), meta: right, cell: ({ row }) => <Amounts items={row.original.remaining} /> },

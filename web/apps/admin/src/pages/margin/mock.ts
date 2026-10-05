@@ -17,7 +17,7 @@ export type MarginAccountDetail = AdminSchemas["MarginAccountDetail"];
 export type MarginLiquidation = AdminSchemas["MarginLiquidation"];
 export type MarginInterestBucket = AdminSchemas["MarginInterestBucket"];
 
-const FLOATING = { base_rate: "0.000005", kink: "0.8", kink_rate: "0.00003", max_rate: "0.0001" };
+const FLOATING = { float_base: "0.000005", float_kink: "0.8", float_kink_rate: "0.00003", float_max_rate: "0.0001" };
 const SEEDED = "2026-10-06T01:00:00Z";
 const HOUR = "2026-10-06T08:00:00Z";
 
@@ -27,9 +27,9 @@ function asset(
 ): MarginAsset {
   return {
     asset: code, borrowable: true, collateral: true, haircut: p.haircut, pool_cap: p.pool, user_cap: dec.div(p.pool, "10", 8),
-    interest_model: "FIXED", fixed_hourly_rate: p.rate, floating: FLOATING, lent: p.lent, pool_available: dec.sub(p.pool, p.lent),
+    interest_model: "FIXED", fixed_rate: p.rate, ...FLOATING, lent: p.lent, pool_available: dec.sub(p.pool, p.lent),
     utilization: p.utilization, hourly_rate: p.rate, rate_hour: HOUR, interest_owed: p.owed, borrowers: p.borrowers, version: 1,
-    updated_by: "system", updated_at: SEEDED, pending_approval_id: null, ...more,
+    updated_by: "", updated_at: SEEDED, pending_approval_id: null, ...more,
   };
 }
 
@@ -51,7 +51,7 @@ export const assets: MarginAsset[] = [
   }),
 ];
 
-/** The thresholds a pair takes by its leverage when it has none of its own (E0 contract §9). */
+/** The design's thresholds by isolated leverage (§4.4), offered when a pair's leverage changes. */
 const DEFAULTS = [
   { leverage: 3 as const, warn_level: "1.25", liquidation_level: "1.15" },
   { leverage: 5 as const, warn_level: "1.2", liquidation_level: "1.1" },
@@ -59,11 +59,10 @@ const DEFAULTS = [
 ];
 
 export const settings: MarginSettings = {
-  cross: { leverage: 3, warn_level: "1.3", liquidation_level: "1.1" },
-  liquidation_fee_rate: "0.02",
+  cross: { leverage: 3, warn_level: "1.3", liquidation_level: "1.1", liquidation_fee: "0.02" },
   isolated_defaults: DEFAULTS,
   version: 1,
-  updated_by: "system",
+  updated_by: "",
   updated_at: SEEDED,
   pending_approval_id: null,
 };
@@ -72,15 +71,15 @@ function pair(symbol: string, leverage: 3 | 5 | 10, accounts: number, more: Part
   const [base = "", quote = ""] = symbol.split("-");
   const levels = DEFAULTS.find((d) => d.leverage === leverage)!;
   return {
-    symbol, base, quote, isolated: true, leverage, warn_level: levels.warn_level, liquidation_level: levels.liquidation_level, own_levels: false,
-    accounts, version: 1, updated_by: "system", updated_at: SEEDED, pending_approval_id: null, ...more,
+    symbol, base, quote, isolated: true, leverage, warn_level: levels.warn_level, liquidation_level: levels.liquidation_level,
+    liquidation_fee: "0.02", accounts, version: 1, updated_by: "", updated_at: SEEDED, pending_approval_id: null, ...more,
   };
 }
 
 export const pairs: MarginPair[] = [
   pair("BTC-USDT", 10, 9), pair("ETH-USDT", 10, 11), pair("BNB-USDT", 5, 2), pair("SOL-USDT", 5, 4), pair("XRP-USDT", 5, 1),
   pair("DOGE-USDT", 5, 3), pair("ADA-USDT", 5, 0, { isolated: false, version: 2, updated_by: "ops-a@astras.vip", updated_at: "2026-10-06T04:05:00Z" }),
-  pair("ASTRA-USDT", 3, 2, { warn_level: "1.35", liquidation_level: "1.2", own_levels: true, version: 2, updated_by: "ops-a@astras.vip" }),
+  pair("ASTRA-USDT", 3, 2, { warn_level: "1.35", liquidation_level: "1.2", liquidation_fee: "0.03", version: 2, updated_by: "ops-a@astras.vip" }),
   pair("ETH-BTC", 3, 1),
 ];
 
@@ -185,24 +184,31 @@ export function accountDetail(a: MarginAccount): MarginAccountDetail {
   const loans: MarginAccountDetail["loans"] = owes
     ? [{ asset: quote, principal, interest, interest_model: "FLOATING", hourly_rate: "0.000018125", opened_at: "2026-10-05T19:02:11Z", updated_at: HOUR }]
     : [];
+  const charge = dec.round(dec.mul(principal, "0.000018125"), 8, "up");
   const loanChanges: MarginAccountDetail["loan_changes"] = owes
     ? [
         {
-          id: "0199b7d0-3c01-7f10-8b21-9a0c1d2e3f01", asset: quote, kind: "BORROW", amount: principal, principal_part: principal, interest_part: "0",
-          reason: "AUTO_BORROW", order_id: "0199b7cf-1a2b-7c3d-8e4f-5a6b7c8d9e01", liquidation_id: null,
-          journal_id: "0199b7d0-3c01-7f10-8b21-9a0c1d2e3f11", created_at: "2026-10-05T19:02:11Z",
+          id: "0199b7e0-4d01-7a20-9c31-0b1c2d3e4f00", asset: quote, kind: "INTEREST", status: "DONE", amount: charge, principal_part: "0",
+          interest_part: charge, reason: null, order_id: null, liquidation_id: null, journal_key: "margin-interest:2026-10-06T08:00:00Z:USDT",
+          created_at: "2026-10-06T08:00:03Z",
         },
         {
-          id: "0199b7d0-3c01-7f10-8b21-9a0c1d2e3f02", asset: quote, kind: "REPAY", amount: "502.4", principal_part: "500", interest_part: "2.4",
-          reason: "USER", order_id: null, liquidation_id: null, journal_id: "0199b7d0-3c01-7f10-8b21-9a0c1d2e3f12", created_at: "2026-10-05T12:40:00Z",
+          id: "0199b7d0-3c01-7f10-8b21-9a0c1d2e3f01", asset: quote, kind: "BORROW", status: "DONE", amount: principal, principal_part: principal,
+          interest_part: "0", reason: "AUTO_BORROW", order_id: "0199b7cf-1a2b-7c3d-8e4f-5a6b7c8d9e01", liquidation_id: null,
+          journal_key: "margin-borrow:0199b7d0-3c01-7f10-8b21-9a0c1d2e3f01", created_at: "2026-10-05T19:02:11Z",
+        },
+        {
+          id: "0199b7d0-3c01-7f10-8b21-9a0c1d2e3f02", asset: quote, kind: "REPAY", status: "DONE", amount: "502.4", principal_part: "500",
+          interest_part: "2.4", reason: "USER", order_id: null, liquidation_id: null,
+          journal_key: "margin-repay:0199b7d0-3c01-7f10-8b21-9a0c1d2e3f02", created_at: "2026-10-05T12:40:00Z",
         },
       ]
     : [];
   const charges: MarginAccountDetail["interest"] = owes
     ? ["08", "07", "06", "05"].map((h, i) => ({
         interest_id: `0199b7e0-4d01-7a20-9c31-0b1c2d3e4f0${i}`, asset: quote, principal, interest_model: "FLOATING" as const,
-        hourly_rate: "0.000018125", interest: dec.round(dec.mul(principal, "0.000018125"), 8, "up"), hour: `2026-10-06T${h}:00:00Z`,
-        journal_id: `0199b7e0-4d01-7a20-9c31-0b1c2d3e4f1${i}`,
+        hourly_rate: "0.000018125", interest: charge, hour: `2026-10-06T${h}:00:00Z`, status: "DONE" as const,
+        journal_key: `margin-interest:2026-10-06T${h}:00:00Z:USDT`,
       }))
     : [];
   return {

@@ -5,8 +5,9 @@ import {
 } from "@exchange/ui";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { CopyButton } from "@exchange/ui";
 import { DangerAction, lastFour } from "../../kit/actions";
-import { EnumBadge, useEnum } from "../../kit/enums";
+import { EnumBadge, EnumText, useEnum } from "../../kit/enums";
 import { ALL, FilterBar, options, useFilters } from "../../kit/filters";
 import { IdText, Num, TimeText, UserCell } from "../../kit/format";
 import { Page } from "../../kit/Page";
@@ -18,9 +19,10 @@ const right: DataColumnMeta = { align: "right" };
 const STATUSES = ["WARNED", "LIQUIDATING", "FROZEN"];
 
 /**
- * Margin accounts (design 2026-10-06 §8; A55): every cross and isolated
- * account that holds or owes anything, the lowest margin level first,
- * by status (warned, liquidating, frozen), type, pair or user. A row
+ * Margin accounts (design 2026-10-06 §8; A55, A56): every cross and
+ * isolated account that holds or owes anything, the lowest margin level
+ * first, by type, pair or user (asked of the server, one request) and by
+ * status (warned, liquidating, frozen: the tabs, on what came back). A row
  * opens the account: its balances and debts, loans, interest and
  * liquidations; frozen or unfrozen at once and liquidated by hand with a
  * second administrator (derivatives.write).
@@ -30,12 +32,8 @@ export default function Accounts({ admin }: { admin: Admin }) {
   const label = useEnum();
   const filters = useFilters(["status", "account", "symbol", "user_id"]);
   const f = filters.values;
-  const q = {
-    status: STATUSES.includes(f.status ?? "") ? f.status : undefined, account: f.account || undefined,
-    symbol: f.symbol?.toUpperCase() || undefined, user_id: f.user_id || undefined,
-  };
-  const accounts = useMarginAccounts(q);
-  const all = useMarginAccounts({});
+  const status = STATUSES.includes(f.status ?? "") ? f.status : undefined;
+  const scope = useMarginAccounts({ account: f.account || undefined, symbol: f.symbol?.toUpperCase() || undefined, user_id: f.user_id || undefined });
   const [open, setOpen] = useState<MarginAccount | null>(null);
   const columns = useMemo<ColumnDef<MarginAccount, unknown>[]>(
     () => [
@@ -63,7 +61,8 @@ export default function Accounts({ admin }: { admin: Admin }) {
     ],
     [t],
   );
-  const rows = all.data?.items ?? [];
+  const rows = scope.data?.items ?? [];
+  const shown = status ? rows.filter((a) => a.status === status) : rows;
   const owing = rows.filter((a) => a.margin_level !== null);
   const liabilities = owing.reduce((sum, a) => dec.add(sum, a.total_liability), "0");
   const count = (s: string) => rows.filter((a) => a.status === s).length;
@@ -71,14 +70,14 @@ export default function Accounts({ admin }: { admin: Admin }) {
     <Page title={t("admin.nav.marginAccounts")} help={t("admin.margin.accounts.help")}>
       <PreviewBanner />
       <div className="grid gap-3 sm:grid-cols-4">
-        <Stat size="sm" label={t("admin.margin.accounts.owing")} value={owing.length} loading={all.isPending} />
-        <Stat size="sm" label={t("admin.enum.marginStatus.WARNED")} value={count("WARNED")} loading={all.isPending} />
-        <Stat size="sm" label={t("admin.enum.marginStatus.LIQUIDATING")} value={count("LIQUIDATING")} loading={all.isPending} />
-        <Stat size="sm" label={t("admin.margin.accounts.liabilities")} value={<Num value={liabilities} decimals={2} />} unit="USDT" loading={all.isPending} />
+        <Stat size="sm" label={t("admin.margin.accounts.owing")} value={owing.length} loading={scope.isPending} />
+        <Stat size="sm" label={t("admin.enum.marginStatus.WARNED")} value={count("WARNED")} loading={scope.isPending} />
+        <Stat size="sm" label={t("admin.enum.marginStatus.LIQUIDATING")} value={count("LIQUIDATING")} loading={scope.isPending} />
+        <Stat size="sm" label={t("admin.margin.accounts.liabilities")} value={<Num value={liabilities} decimals={2} />} unit="USDT" loading={scope.isPending} />
       </div>
       <Tabs
         items={[{ value: ALL, label: t("admin.common.all") }, ...STATUSES.map((s) => ({ value: s, label: label("marginStatus", s) }))]}
-        value={q.status ?? ALL}
+        value={status ?? ALL}
         onValueChange={(v) => filters.set({ status: v })}
         aria-label={t("admin.common.status")}
       />
@@ -94,14 +93,15 @@ export default function Accounts({ admin }: { admin: Admin }) {
           { key: "user_id", label: t("admin.orders.userFilter"), kind: "text" },
         ]}
       />
-      {accounts.isError ? (
-        <ErrorState message={String(accounts.error)} onRetry={() => void accounts.refetch()} />
+      {scope.data?.truncated && <p className="text-sm text-warn-strong">{t("admin.margin.accounts.truncated", { n: rows.length })}</p>}
+      {scope.isError ? (
+        <ErrorState message={String(scope.error)} onRetry={() => void scope.refetch()} />
       ) : (
         <DataTable
           columns={columns}
-          data={accounts.data?.items ?? []}
+          data={shown}
           getRowId={(a) => `${a.user_id} ${keyOf(a)}`}
-          loading={accounts.isPending}
+          loading={scope.isPending}
           onRowClick={setOpen}
           density="compact"
           aria-label="margin-accounts"
@@ -236,7 +236,15 @@ function Detail({ d, tab }: { d: MarginAccountDetail; tab: string }) {
   const changes = useMemo<ColumnDef<Row<"loan_changes">, unknown>[]>(
     () => [
       { id: "time", header: t("admin.common.time"), cell: ({ row }) => <TimeText value={row.original.created_at} /> },
-      { id: "kind", header: t("admin.margin.loanKind"), cell: ({ row }) => <EnumBadge group="loanKind" code={row.original.kind} /> },
+      {
+        id: "kind", header: t("admin.margin.loanKind"),
+        cell: ({ row: { original: c } }) => (
+          <span className="inline-flex items-center gap-1">
+            <EnumBadge group="loanKind" code={c.kind} />
+            {c.status !== "DONE" && <EnumBadge group="loanStatus" code={c.status} />}
+          </span>
+        ),
+      },
       { accessorKey: "asset", header: t("admin.common.asset"), enableSorting: false },
       { id: "amount", header: t("admin.common.amount"), meta: right, cell: ({ row }) => <Num value={row.original.amount} /> },
       { id: "principal", header: t("admin.margin.principal"), meta: right, cell: ({ row }) => <Num value={row.original.principal_part} /> },
@@ -245,11 +253,12 @@ function Detail({ d, tab }: { d: MarginAccountDetail; tab: string }) {
         id: "reason", header: t("admin.margin.reason"),
         cell: ({ row: { original: c } }) => (
           <span className="inline-flex flex-col">
-            <span className="font-mono text-xs">{c.reason}</span>
+            {c.reason ? <EnumText group="loanReason" code={c.reason} /> : <span className="text-fg-3">—</span>}
             {c.order_id && <IdText value={c.order_id} chars={6} />}
           </span>
         ),
       },
+      { id: "journal", header: t("admin.margin.journal"), cell: ({ row }) => <JournalKey value={row.original.journal_key} /> },
     ],
     [t],
   );
@@ -261,6 +270,11 @@ function Detail({ d, tab }: { d: MarginAccountDetail; tab: string }) {
       { id: "model", header: t("admin.margin.form.interest_model"), cell: ({ row }) => <EnumBadge group="rateModel" code={row.original.interest_model} /> },
       { id: "rate", header: t("admin.margin.fields.rate"), meta: right, cell: ({ row }) => <Rate hourly={row.original.hourly_rate} /> },
       { id: "interest", header: t("admin.margin.interest"), meta: right, cell: ({ row }) => <Num value={row.original.interest} /> },
+      {
+        id: "journal", header: t("admin.margin.journal"),
+        cell: ({ row: { original: c } }) =>
+          c.status === "DONE" ? <JournalKey value={c.journal_key} /> : <EnumBadge group="loanStatus" code={c.status} />,
+      },
     ],
     [t],
   );
@@ -289,6 +303,17 @@ function Detail({ d, tab }: { d: MarginAccountDetail; tab: string }) {
   if (tab === "liquidations")
     return <DataTable columns={liquidations} data={d.liquidations} getRowId={(l) => l.liquidation_id} density="compact" aria-label="margin-account-liquidations" empty={none} />;
   return <DataTable columns={balances} data={d.balances} getRowId={(b) => b.asset} density="compact" aria-label="margin-balances" empty={none} />;
+}
+
+/** JournalKey is a ledger journal's idempotency key: its end, the whole of it on hover and a copy button. */
+function JournalKey({ value }: { value: string }) {
+  const short = value.length > 10 ? `…${value.slice(-8)}` : value;
+  return (
+    <span className="inline-flex items-center gap-1 font-mono text-xs" title={value}>
+      <span>{short}</span>
+      <CopyButton value={value} size={12} />
+    </span>
+  );
 }
 
 /** Actions are the account's operations: freeze or unfreeze at once, a liquidation by hand with a second administrator. */

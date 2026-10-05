@@ -22,13 +22,13 @@ const right: DataColumnMeta = { align: "right" };
 const LEVERAGES: Leverage[] = [3, 5, 10];
 
 /**
- * Margin parameters (design 2026-10-06 §4, §8; A55): the assets that can
- * be borrowed or count as collateral (pools, caps, interest, haircuts),
- * the pairs' isolated terms, and the cross account's terms with the
- * liquidation fee; margin-service keeps them (E0 contract §8). Changing
- * them needs instruments.trading: what only stops new borrowing applies
- * at once, everything else waits for a second ADMIN (a MARGIN_PARAMS
- * request on the approvals page).
+ * Margin parameters (design 2026-10-06 §4, §8; A55, A56): the assets that
+ * can be borrowed or count as collateral (pools, caps, interest,
+ * haircuts), the pairs' isolated terms and the cross account's, each with
+ * its liquidation fee; margin-service keeps them (asset_terms, pair_terms,
+ * cross_terms). Changing them needs instruments.trading: what only stops
+ * new borrowing or new isolated accounts applies at once, everything else
+ * waits for a second ADMIN (a MARGIN_PARAMS request on the approvals page).
  */
 export default function Params({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
@@ -55,6 +55,19 @@ export default function Params({ admin }: { admin: Admin }) {
   );
 }
 
+/** Updated says who last changed terms (the seed when nobody did) and when. */
+function Updated({ v }: { v: { version: number; updated_by: string; updated_at: string } }) {
+  const { t } = useTranslation();
+  return (
+    <span className="flex flex-col text-xs">
+      <span>
+        v{v.version} · {v.updated_by || t("admin.margin.seed")}
+      </span>
+      <TimeText value={v.updated_at} />
+    </span>
+  );
+}
+
 function Assets({ edit }: { edit: boolean }) {
   const { t } = useTranslation();
   const q = useMarginAssets();
@@ -78,7 +91,7 @@ function Assets({ edit }: { edit: boolean }) {
         cell: ({ row: { original: a } }) => (
           <Progress
             value={Number(a.utilization) * 100}
-            tone={dec.gte(a.utilization, a.floating.kink) ? "warn" : "brand"}
+            tone={dec.gte(a.utilization, a.float_kink) ? "warn" : "brand"}
             size="xs"
             label={t("admin.margin.lent", { pct: formatPercent(a.utilization, 1, false) })}
             valueText={`${formatDecimal(a.lent)} / ${formatDecimal(a.pool_cap)}`}
@@ -101,6 +114,7 @@ function Assets({ edit }: { edit: boolean }) {
         cell: ({ row }) => <span className="font-mono">{formatDecimal(row.original.interest_owed)}</span>,
       },
       { id: "borrowers", header: t("admin.margin.borrowers"), meta: right, cell: ({ row }) => row.original.borrowers },
+      { id: "updated", header: t("admin.margin.updated"), cell: ({ row }) => <Updated v={row.original} /> },
       {
         id: "act", header: "", meta: right,
         cell: ({ row: { original: a } }) => (
@@ -126,7 +140,7 @@ function Assets({ edit }: { edit: boolean }) {
   );
 }
 
-/** Form is an asset's parameters as the form edits them: rates in percent an hour, the kink in percent. */
+/** Form is an asset's terms as the form edits them: rates in percent an hour, the kink in percent. */
 type Form = {
   borrowable: boolean; collateral: boolean; pool_cap: string; user_cap: string; interest_model: AssetParams["interest_model"]; fixed: string;
   base: string; kink: string; kink_rate: string; max: string; haircut: string;
@@ -134,14 +148,14 @@ type Form = {
 
 const toForm = (a: AssetParams): Form => ({
   borrowable: a.borrowable, collateral: a.collateral, pool_cap: a.pool_cap, user_cap: a.user_cap, interest_model: a.interest_model,
-  fixed: toPercent(a.fixed_hourly_rate), base: toPercent(a.floating.base_rate), kink: toPercent(a.floating.kink),
-  kink_rate: toPercent(a.floating.kink_rate), max: toPercent(a.floating.max_rate), haircut: a.haircut,
+  fixed: toPercent(a.fixed_rate), base: toPercent(a.float_base), kink: toPercent(a.float_kink), kink_rate: toPercent(a.float_kink_rate),
+  max: toPercent(a.float_max_rate), haircut: a.haircut,
 });
 
 const fromForm = (f: Form): AssetParams => ({
   borrowable: f.borrowable, collateral: f.collateral, haircut: f.haircut.trim(), pool_cap: f.pool_cap.trim(), user_cap: f.user_cap.trim(),
-  interest_model: f.interest_model, fixed_hourly_rate: fromPercent(f.fixed),
-  floating: { base_rate: fromPercent(f.base), kink: fromPercent(f.kink), kink_rate: fromPercent(f.kink_rate), max_rate: fromPercent(f.max) },
+  interest_model: f.interest_model, fixed_rate: fromPercent(f.fixed), float_base: fromPercent(f.base), float_kink: fromPercent(f.kink),
+  float_kink_rate: fromPercent(f.kink_rate), float_max_rate: fromPercent(f.max),
 });
 
 /**
@@ -151,11 +165,9 @@ const fromForm = (f: Form): AssetParams => ({
  * cap waits for a second ADMIN (admin.yaml PUT /admin/v1/margin/assets/{asset}).
  */
 function braking(a: AssetParams, b: AssetParams): boolean {
-  const fa = a.floating;
-  const fb = b.floating;
   const rates =
-    a.interest_model === b.interest_model && dec.eq(a.fixed_hourly_rate, b.fixed_hourly_rate) && dec.eq(fa.base_rate, fb.base_rate) &&
-    dec.eq(fa.kink, fb.kink) && dec.eq(fa.kink_rate, fb.kink_rate) && dec.eq(fa.max_rate, fb.max_rate);
+    a.interest_model === b.interest_model && dec.eq(a.fixed_rate, b.fixed_rate) && dec.eq(a.float_base, b.float_base) &&
+    dec.eq(a.float_kink, b.float_kink) && dec.eq(a.float_kink_rate, b.float_kink_rate) && dec.eq(a.float_max_rate, b.float_max_rate);
   if (!rates || a.collateral !== b.collateral || !dec.eq(a.haircut, b.haircut)) return false;
   if (b.borrowable && !a.borrowable) return false;
   return dec.lte(b.pool_cap, a.pool_cap) && dec.lte(b.user_cap, a.user_cap);
@@ -178,7 +190,7 @@ function AssetDrawer({ asset: a, onClose }: { asset: MarginAsset; onClose: () =>
     if (k === "kink") return `${v}%`;
     return ["fixed", "base", "kink_rate", "max"].includes(k) ? `${v}%/h` : v;
   };
-  const bad = (v: string, max?: string) => (!isNumber(v) || (max !== undefined && dec.gt(v, max)) ? t("admin.margin.badNumber") : undefined);
+  const bad = (v: string) => (!isNumber(v) ? t("admin.margin.badNumber") : undefined);
   const errors = {
     pool: bad(f.pool_cap),
     user: bad(f.user_cap) ?? (isNumber(f.pool_cap) && dec.gt(f.user_cap, f.pool_cap) ? t("admin.margin.userOverPool") : undefined),
@@ -187,7 +199,8 @@ function AssetDrawer({ asset: a, onClose }: { asset: MarginAsset; onClose: () =>
     kink: !isNumber(f.kink) || dec.lte(f.kink, "0") || dec.gte(f.kink, "100") ? t("admin.margin.badKink") : undefined,
     kinkRate: bad(f.kink_rate) ?? (isNumber(f.base) && isNumber(f.kink_rate) && dec.lt(f.kink_rate, f.base) ? t("admin.margin.notRising") : undefined),
     max: bad(f.max) ?? (isNumber(f.kink_rate) && isNumber(f.max) && dec.lt(f.max, f.kink_rate) ? t("admin.margin.notRising") : undefined),
-    haircut: bad(f.haircut, "1"),
+    // asset_terms holds a haircut above 0 and at most 1.
+    haircut: !isNumber(f.haircut) || dec.lte(f.haircut, "0") || dec.gt(f.haircut, "1") ? t("admin.margin.badHaircut") : undefined,
   };
   const ok = Object.values(errors).every((e) => !e);
   const before = toForm(a);
@@ -274,24 +287,14 @@ function Pairs({ edit }: { edit: boolean }) {
       {
         id: "levels", header: t("admin.margin.lines"), meta: right,
         cell: ({ row: { original: p } }) => (
-          <span className="inline-flex flex-col items-end">
-            <span className="font-mono">
-              {lineText(p.warn_level)} / {lineText(p.liquidation_level)}
-            </span>
-            <span className="text-xs text-fg-3">{t(p.own_levels ? "admin.margin.ownLevels" : "admin.margin.leverageLevels")}</span>
+          <span className="font-mono">
+            {lineText(p.warn_level)} / {lineText(p.liquidation_level)}
           </span>
         ),
       },
+      { id: "fee", header: t("admin.margin.fields.fee"), meta: right, cell: ({ row }) => <span className="font-mono">{formatPercent(row.original.liquidation_fee, 2, false)}</span> },
       { id: "accounts", header: t("admin.margin.isolatedAccounts"), meta: right, cell: ({ row }) => row.original.accounts },
-      {
-        id: "updated", header: t("admin.margin.updated"),
-        cell: ({ row: { original: p } }) => (
-          <span className="flex flex-col text-xs">
-            <span>v{p.version} · {p.updated_by}</span>
-            <TimeText value={p.updated_at} />
-          </span>
-        ),
-      },
+      { id: "updated", header: t("admin.margin.updated"), cell: ({ row }) => <Updated v={row.original} /> },
       {
         id: "act", header: "", meta: right,
         cell: ({ row: { original: p } }) => (
@@ -319,36 +322,44 @@ function Pairs({ edit }: { edit: boolean }) {
 
 type Levels = MarginSettings["isolated_defaults"];
 
+/** levelsError checks a pair of thresholds as typed: 1 < liquidation < warning (design §4.4). */
+function useLevelsError() {
+  const { t } = useTranslation();
+  return (warn: string, liq: string) =>
+    !isNumber(warn) || !isNumber(liq) ? t("admin.margin.badNumber") : dec.lte(liq, "1") || dec.gte(liq, warn) ? t("admin.margin.badThresholds") : undefined;
+}
+
+/** feeError checks a liquidation fee typed in percent: 0 to 10. */
+function useFeeError() {
+  const { t } = useTranslation();
+  return (fee: string) => (!isNumber(fee) || dec.gt(fee, "10") ? t("admin.margin.badFee") : undefined);
+}
+
 /**
  * PairDrawer changes a pair's isolated terms: switching isolated accounts
- * off applies at once; the leverage, the thresholds (its own, or blank
- * for its leverage's) and switching them on wait for a second ADMIN.
+ * off applies at once; the leverage (bringing the design's thresholds for
+ * it, which can still be changed), the thresholds, the fee and switching
+ * isolated accounts on wait for a second ADMIN.
  */
 function PairDrawer({ pair: p, defaults, onClose }: { pair: MarginPair; defaults: Levels; onClose: () => void }) {
   const { t } = useTranslation();
+  const levelsError = useLevelsError();
+  const feeError = useFeeError();
   const [isolated, setIsolated] = useState(p.isolated);
   const [lev, setLev] = useState<Leverage>(p.leverage);
-  const [warn, setWarn] = useState(p.own_levels ? p.warn_level : "");
-  const [liq, setLiq] = useState(p.own_levels ? p.liquidation_level : "");
-  const fallback = defaults.find((d) => d.leverage === lev);
-  const own = warn.trim() !== "" || liq.trim() !== "";
-  const levelsError = !own
-    ? undefined
-    : !isNumber(warn) || !isNumber(liq)
-      ? t("admin.margin.bothLevels")
-      : dec.lte(liq, "1") || dec.gte(liq, warn)
-        ? t("admin.margin.badThresholds")
-        : undefined;
-  const effWarn = own ? warn.trim() : (fallback?.warn_level ?? p.warn_level);
-  const effLiq = own ? liq.trim() : (fallback?.liquidation_level ?? p.liquidation_level);
+  const [warn, setWarn] = useState(p.warn_level);
+  const [liq, setLiq] = useState(p.liquidation_level);
+  const [fee, setFee] = useState(toPercent(p.liquidation_fee));
+  const errors = { levels: levelsError(warn, liq), fee: feeError(fee) };
   const changes: Change[] = [];
-  if (isolated !== p.isolated) changes.push({ label: t("admin.margin.fields.isolated"), from: t(p.isolated ? "admin.launch.on" : "admin.launch.off"), to: t(isolated ? "admin.launch.on" : "admin.launch.off") });
+  const onOff = (b: boolean) => t(b ? "admin.launch.on" : "admin.launch.off");
+  if (isolated !== p.isolated) changes.push({ label: t("admin.margin.fields.isolated"), from: onOff(p.isolated), to: onOff(isolated) });
   if (lev !== p.leverage) changes.push({ label: t("admin.margin.fields.isolatedLeverage"), from: `${p.leverage}x`, to: `${lev}x` });
-  if (!levelsError && (!dec.eq(effWarn, p.warn_level) || !dec.eq(effLiq, p.liquidation_level) || own !== p.own_levels)) {
-    changes.push({
-      label: t("admin.margin.lines"), from: `${lineText(p.warn_level)} / ${lineText(p.liquidation_level)}`,
-      to: `${lineText(effWarn)} / ${lineText(effLiq)}${own ? "" : ` (${t("admin.margin.leverageLevels")})`}`,
-    });
+  if (!errors.levels && (!dec.eq(warn, p.warn_level) || !dec.eq(liq, p.liquidation_level))) {
+    changes.push({ label: t("admin.margin.lines"), from: `${lineText(p.warn_level)} / ${lineText(p.liquidation_level)}`, to: `${lineText(warn)} / ${lineText(liq)}` });
+  }
+  if (!errors.fee && !dec.eq(fromPercent(fee), p.liquidation_fee)) {
+    changes.push({ label: t("admin.margin.fields.fee"), from: `${toPercent(p.liquidation_fee)}%`, to: `${fee.trim()}%` });
   }
   // Only isolated accounts switched off, and nothing else, applies at once.
   const approval = !(changes.length === 1 && p.isolated && !isolated);
@@ -360,15 +371,25 @@ function PairDrawer({ pair: p, defaults, onClose }: { pair: MarginPair; defaults
           <span className="text-sm text-fg-2">{t("admin.margin.fields.isolatedLeverage")}</span>
           <Segmented
             value={String(lev)}
-            onValueChange={(v) => setLev(Number(v) as Leverage)}
+            onValueChange={(v) => {
+              // A leverage brings the design's thresholds for it (§4.4); they can still be changed.
+              const next = Number(v) as Leverage;
+              const d = defaults.find((x) => x.leverage === next);
+              setLev(next);
+              if (d) {
+                setWarn(d.warn_level);
+                setLiq(d.liquidation_level);
+              }
+            }}
             items={LEVERAGES.map((l) => ({ value: String(l), label: `${l}x` }))}
             aria-label={t("admin.margin.fields.isolatedLeverage")}
           />
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label={t("admin.margin.fields.warning")} value={warn} onChange={setWarn} error={levelsError} hint={t("admin.margin.levelsHint", { warn: lineText(fallback?.warn_level ?? ""), liq: lineText(fallback?.liquidation_level ?? "") })} />
+          <Field label={t("admin.margin.fields.warning")} value={warn} onChange={setWarn} error={errors.levels} />
           <Field label={t("admin.margin.fields.liquidation")} value={liq} onChange={setLiq} />
         </div>
+        <Field label={t("admin.margin.fields.fee")} value={fee} onChange={setFee} error={errors.fee} unit="%" hint={t("admin.margin.feeHint")} />
         <div className="sticky bottom-0 -mx-6 mt-2 flex items-center justify-end gap-2 border-t border-line-1 bg-bg-1 px-6 py-3">
           <span className="mr-auto text-xs text-fg-3">{changes.length > 0 && t(approval ? "admin.margin.willAsk" : "admin.margin.willApply")}</span>
           <Button variant="secondary" onClick={onClose}>
@@ -376,7 +397,7 @@ function PairDrawer({ pair: p, defaults, onClose }: { pair: MarginPair; defaults
           </Button>
           <DangerAction
             trigger={(open) => (
-              <Button disabled={!!levelsError || changes.length === 0} onClick={open} data-testid="margin-pair-save">
+              <Button disabled={!!errors.levels || !!errors.fee || changes.length === 0} onClick={open} data-testid="margin-pair-save">
                 {t(approval ? "admin.margin.ask" : "admin.margin.apply")}
               </Button>
             )}
@@ -402,16 +423,10 @@ function Settings({ edit }: { edit: boolean }) {
   if (q.isError) return <ErrorState message={String(q.error)} onRetry={() => void q.refetch()} />;
   const s = q.data;
   if (!s) return <Skeleton className="h-40 w-full" />;
-  const rows = [
-    { key: "cross", label: t("admin.enum.marginType.MARGIN_CROSS"), leverage: `${s.cross.leverage}x`, warn: s.cross.warn_level, liq: s.cross.liquidation_level },
-    ...s.isolated_defaults.map((d) => ({
-      key: `iso-${d.leverage}`, label: t("admin.margin.params.isolatedDefault"), leverage: `${d.leverage}x`, warn: d.warn_level, liq: d.liquidation_level,
-    })),
-  ];
   return (
     <>
       <Card
-        title={t("admin.margin.params.thresholds")}
+        title={t("admin.margin.params.cross")}
         extra={
           <span className="flex items-center gap-2">
             {s.pending_approval_id && <Badge tone="warn">{t("admin.margin.pending")}</Badge>}
@@ -424,36 +439,48 @@ function Settings({ edit }: { edit: boolean }) {
         }
       >
         <div className="flex flex-col gap-3">
-          <table className="w-full text-sm" aria-label={t("admin.margin.params.thresholds")}>
+          <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-fg-2">
+            <span>
+              {t("admin.margin.fields.crossLeverage")} <Badge tone="brand">{s.cross.leverage}x</Badge>
+            </span>
+            <span>
+              {t("admin.margin.lines")}{" "}
+              <span className="font-mono">
+                {lineText(s.cross.warn_level)} / {lineText(s.cross.liquidation_level)}
+              </span>
+            </span>
+            <span>
+              {t("admin.margin.fields.fee")} <span className="font-mono">{formatPercent(s.cross.liquidation_fee, 2, false)}</span>
+            </span>
+          </p>
+          <span className="text-xs text-fg-3">
+            <Updated v={s} />
+          </span>
+        </div>
+      </Card>
+      <Card title={t("admin.margin.params.defaults")}>
+        <div className="flex flex-col gap-2">
+          <table className="w-full text-sm" aria-label={t("admin.margin.params.defaults")}>
             <thead className="text-left text-xs text-fg-3">
               <tr>
-                <th className="py-1 font-normal">{t("admin.margin.fields.account")}</th>
-                <th className="py-1 font-normal">{t("admin.margin.fields.leverage")}</th>
+                <th className="py-1 font-normal">{t("admin.margin.fields.isolatedLeverage")}</th>
                 <th className="py-1 text-right font-normal">{t("admin.margin.fields.warning")}</th>
                 <th className="py-1 text-right font-normal">{t("admin.margin.fields.liquidation")}</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
-                <tr key={r.key} className="border-t border-line-1">
-                  <td className="py-1.5">{r.label}</td>
+              {s.isolated_defaults.map((d) => (
+                <tr key={d.leverage} className="border-t border-line-1">
                   <td className="py-1.5">
-                    <Badge tone="brand">{r.leverage}</Badge>
+                    <Badge tone="brand">{d.leverage}x</Badge>
                   </td>
-                  <td className="py-1.5 text-right font-mono">{lineText(r.warn)}</td>
-                  <td className="py-1.5 text-right font-mono">{lineText(r.liq)}</td>
+                  <td className="py-1.5 text-right font-mono">{lineText(d.warn_level)}</td>
+                  <td className="py-1.5 text-right font-mono">{lineText(d.liquidation_level)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           <p className="text-xs text-fg-3">{t("admin.margin.params.defaultsHint")}</p>
-          <p className="text-sm text-fg-2">
-            {t("admin.margin.fields.fee")} <span className="font-mono">{formatPercent(s.liquidation_fee_rate, 2, false)}</span>
-            <span className="text-fg-3"> · {t("admin.margin.feeHint")}</span>
-          </p>
-          <p className="text-xs text-fg-3">
-            v{s.version} · {s.updated_by} · <TimeText value={s.updated_at} />
-          </p>
         </div>
       </Card>
       {editing && <SettingsDrawer s={s} onClose={() => setEditing(false)} />}
@@ -461,27 +488,27 @@ function Settings({ edit }: { edit: boolean }) {
   );
 }
 
-/** The cross account's terms when its leverage changes (design §4.4): 3x 1.30/1.10, 5x 1.20/1.10. */
+/** The cross account's thresholds when its leverage changes (design §4.4): 3x 1.30/1.10, 5x 1.20/1.10. */
 const CROSS_LEVELS: Record<3 | 5, [string, string]> = { 3: ["1.3", "1.1"], 5: ["1.2", "1.1"] };
 
 function SettingsDrawer({ s, onClose }: { s: MarginSettings; onClose: () => void }) {
   const { t } = useTranslation();
+  const levelsError = useLevelsError();
+  const feeError = useFeeError();
   const [lev, setLev] = useState<3 | 5>(s.cross.leverage);
   const [warn, setWarn] = useState(s.cross.warn_level);
   const [liq, setLiq] = useState(s.cross.liquidation_level);
-  const [fee, setFee] = useState(toPercent(s.liquidation_fee_rate));
-  const levelsError =
-    !isNumber(warn) || !isNumber(liq) ? t("admin.margin.badNumber") : dec.lte(liq, "1") || dec.gte(liq, warn) ? t("admin.margin.badThresholds") : undefined;
-  const feeError = !isNumber(fee) || dec.gt(fee, "10") ? t("admin.margin.badFee") : undefined;
+  const [fee, setFee] = useState(toPercent(s.cross.liquidation_fee));
+  const errors = { levels: levelsError(warn, liq), fee: feeError(fee) };
   const changes: Change[] = [];
   if (lev !== s.cross.leverage) changes.push({ label: t("admin.margin.fields.crossLeverage"), from: `${s.cross.leverage}x`, to: `${lev}x` });
-  if (!levelsError && (!dec.eq(warn, s.cross.warn_level) || !dec.eq(liq, s.cross.liquidation_level))) {
+  if (!errors.levels && (!dec.eq(warn, s.cross.warn_level) || !dec.eq(liq, s.cross.liquidation_level))) {
     changes.push({
       label: t("admin.margin.lines"), from: `${lineText(s.cross.warn_level)} / ${lineText(s.cross.liquidation_level)}`, to: `${lineText(warn)} / ${lineText(liq)}`,
     });
   }
-  if (!feeError && !dec.eq(fromPercent(fee), s.liquidation_fee_rate)) {
-    changes.push({ label: t("admin.margin.fields.fee"), from: `${toPercent(s.liquidation_fee_rate)}%`, to: `${fee.trim()}%` });
+  if (!errors.fee && !dec.eq(fromPercent(fee), s.cross.liquidation_fee)) {
+    changes.push({ label: t("admin.margin.fields.fee"), from: `${toPercent(s.cross.liquidation_fee)}%`, to: `${fee.trim()}%` });
   }
   return (
     <Drawer open onOpenChange={(o) => !o && onClose()} title={t("admin.margin.params.editSettings")} description={t("admin.margin.params.settingsHint")} width={560}>
@@ -505,10 +532,10 @@ function SettingsDrawer({ s, onClose }: { s: MarginSettings; onClose: () => void
           />
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label={t("admin.margin.fields.warning")} value={warn} onChange={setWarn} error={levelsError} />
+          <Field label={t("admin.margin.fields.warning")} value={warn} onChange={setWarn} error={errors.levels} />
           <Field label={t("admin.margin.fields.liquidation")} value={liq} onChange={setLiq} />
         </div>
-        <Field label={t("admin.margin.fields.fee")} value={fee} onChange={setFee} error={feeError} unit="%" hint={t("admin.margin.feeHint")} />
+        <Field label={t("admin.margin.fields.fee")} value={fee} onChange={setFee} error={errors.fee} unit="%" hint={t("admin.margin.feeHint")} />
         <div className="sticky bottom-0 -mx-6 mt-2 flex items-center justify-end gap-2 border-t border-line-1 bg-bg-1 px-6 py-3">
           <span className="mr-auto text-xs text-fg-3">{changes.length > 0 && t("admin.margin.willAsk")}</span>
           <Button variant="secondary" onClick={onClose}>
@@ -516,11 +543,11 @@ function SettingsDrawer({ s, onClose }: { s: MarginSettings; onClose: () => void
           </Button>
           <DangerAction
             trigger={(open) => (
-              <Button disabled={!!levelsError || !!feeError || changes.length === 0} onClick={open} data-testid="margin-settings-save">
+              <Button disabled={!!errors.levels || !!errors.fee || changes.length === 0} onClick={open} data-testid="margin-settings-save">
                 {t("admin.margin.ask")}
               </Button>
             )}
-            title={t("admin.margin.askTitle", { target: t("admin.margin.params.settings") })}
+            title={t("admin.margin.askTitle", { target: t("admin.margin.params.cross") })}
             description={t("admin.margin.askHint")}
             target={<Changes changes={changes} />}
             confirmWord="margin"

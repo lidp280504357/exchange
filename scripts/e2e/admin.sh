@@ -1880,28 +1880,30 @@ if [[ $STATUS == 404 ]]; then
 else
   expect 200 - "every administrator reads the margin assets"
   check '(.items | length) > 0 and all(.items[]; (.lent | tonumber) <= (.pool_cap | tonumber) and (.user_cap | tonumber) <= (.pool_cap | tonumber)
-    and (.haircut | tonumber) <= 1 and (.interest_model | IN("FIXED", "FLOATING")))' \
-    "each asset lends within its pool, a user cap within the pool, a haircut of at most 1"
+    and (.haircut | tonumber) > 0 and (.haircut | tonumber) <= 1 and (.interest_model | IN("FIXED", "FLOATING")))' \
+    "each asset lends within its pool, a user cap within the pool, a haircut above 0 and at most 1"
   MA=$(jq -c '.items[] | select(.asset == "USDT")' <<<"$BODY")
   [[ -n $MA ]] || fail "USDT is not a margin asset"
   MAV=$(jq .version <<<"$MA")
   as AUDITOR GET /admin/v1/margin/settings ""
   expect 200 - "every administrator reads the margin settings"
-  check '(.cross.leverage | IN(3, 5)) and ([.isolated_defaults[].leverage] | sort) == [3, 5, 10]
+  check '(.cross.leverage | IN(3, 5)) and (.cross.liquidation_fee | tonumber) <= 0.1 and ([.isolated_defaults[].leverage] | sort) == [3, 5, 10]
     and all(.isolated_defaults[], .cross; (.liquidation_level | tonumber) > 1 and (.liquidation_level | tonumber) < (.warn_level | tonumber))' \
-    "the cross terms and the defaults for 3, 5 and 10, every liquidation level above 1 and under its warning level"
-  DEFAULTS=$(jq -c '[.isolated_defaults[] | {key: (.leverage | tostring), value: .}] | from_entries' <<<"$BODY")
+    "the cross terms with their fee and the suggested levels for 3, 5 and 10, every liquidation level above 1 and under its warning level"
   as AUDITOR GET /admin/v1/margin/pairs ""
   expect 200 - "every administrator reads the margin pairs"
-  check "($DEFAULTS) as \$d | all(.items[]; .own_levels or (\$d[.leverage | tostring] as \$x | .warn_level == \$x.warn_level and .liquidation_level == \$x.liquidation_level))" \
-    "a pair without levels of its own takes its leverage's"
+  check 'all(.items[]; (.leverage | IN(3, 5, 10)) and (.liquidation_level | tonumber) > 1 and (.liquidation_level | tonumber) < (.warn_level | tonumber)
+    and (.liquidation_fee | tonumber) <= 0.1)' \
+    "each pair's own terms: a leverage of 3, 5 or 10, its levels in order, a fee of at most 10%"
   margin_asset() { # margin_asset JQ REASON: USDT's parameters as read, changed by JQ
-    jq -c --argjson v "$MAV" --arg r "$2" "{borrowable, collateral, haircut, pool_cap, user_cap, interest_model, fixed_hourly_rate, floating} | $1
+    jq -c --argjson v "$MAV" --arg r "$2" "{borrowable, collateral, haircut, pool_cap, user_cap, interest_model, fixed_rate, float_base, float_kink,
+      float_kink_rate, float_max_rate} | $1
       | . + {expected_version: \$v, reason: \$r}" <<<"$MA"
   }
   as OPERATOR PUT /admin/v1/margin/assets/USDT "$(margin_asset . "e2e: operators change no rate")"
   expect 403 ADMIN_FORBIDDEN "only an ADMIN changes the margin parameters"
-  as ADMIN PUT /admin/v1/margin/assets/USDT "$(margin_asset '.fixed_hourly_rate = ((.fixed_hourly_rate | tonumber) * 2 | tostring)' "e2e: a rate, withdrawn")"
+  # A decimal written out, not worked out in jq (its floats would bend it).
+  as ADMIN PUT /admin/v1/margin/assets/USDT "$(margin_asset '.fixed_rate = (if .fixed_rate == "0.0000123" then "0.0000124" else "0.0000123" end)' "e2e: a rate, withdrawn")"
   expect 202 - "a rate change waits for a second ADMIN"
   check '.approval.kind == "MARGIN_PARAMS" and .approval.escalation == "MARGIN_RISK" and .approval.status == "PENDING"' "a MARGIN_PARAMS request"
   MARGIN_REQ=$(jq -r .approval.id <<<"$BODY")

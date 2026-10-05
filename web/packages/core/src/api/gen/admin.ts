@@ -3193,11 +3193,11 @@ export interface paths {
         };
         /**
          * The margin assets' parameters, with what is lent of each now
-         * @description Draft (design 2026-10-06 §4.1, §8; E0 contract §8 asset_params).
+         * @description Draft (design 2026-10-06 §4.1, §8; margin-service's asset_terms).
          *     Every asset that can be borrowed or counts as collateral, with its
-         *     parameters (margin-service's, seeded from margin.json), what users
-         *     owe of it now (HOUSE's lending, −Σ the users' debt rows) and the
-         *     rate the next hour's interest takes. Needs instruments.read.
+         *     terms (seeded from deploy/instruments/margin.json), what users owe
+         *     of it now (HOUSE's lending, −Σ the users' debt rows) and the rate
+         *     the next hour's interest takes. Needs instruments.read.
          */
         get: operations["listMarginAssets"];
         put?: never;
@@ -3234,10 +3234,11 @@ export interface paths {
          *     MARGIN_PARAMS_CHANGED when it moved, then and when the request is
          *     approved. A change of the asset waiting already: 409
          *     ADMIN_MARGIN_CHANGE_PENDING (details approval_id). A request lapses
-         *     a day after it was asked for. 400 unless haircut is 0 to 1,
-         *     user_cap at most pool_cap, the rates at least 0 and the floating
-         *     curve rising (base_rate ≤ kink_rate ≤ max_rate, kink above 0 and
-         *     under 1).
+         *     a day after it was asked for. 400 unless haircut is above 0 and at
+         *     most 1, user_cap at most pool_cap, the rates at least 0 and the
+         *     floating curve rising (float_base ≤ float_kink_rate ≤
+         *     float_max_rate, float_kink above 0 and under 1), as asset_terms'
+         *     constraints.
          */
         put: operations["setMarginAsset"];
         post?: never;
@@ -3255,22 +3256,23 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * The cross account's terms and the liquidation fee
-         * @description Draft (design §4.2, §4.4, §8; E0 contract §8 settings). The cross
-         *     account's leverage and thresholds, the liquidation fee, and the
-         *     thresholds a pair without its own takes by its leverage. Needs
-         *     instruments.read.
+         * The cross account's terms
+         * @description Draft (design §4.2, §4.4, §8; margin-service's cross_terms). The
+         *     cross account's leverage, thresholds and liquidation fee, and the
+         *     design's thresholds by isolated leverage, which the console offers
+         *     when a pair's leverage changes. Needs instruments.read.
          */
         get: operations["getMarginSettings"];
         /**
-         * Change the cross account's terms or the liquidation fee
+         * Change the cross account's terms
          * @description Draft (design §8). Needs instruments.trading; every change waits
          *     for a second ADMIN with it, in either approval mode: 202 with a
          *     MARGIN_PARAMS request, escalation MARGIN_RISK (a threshold moved
          *     either way liquidates or spares accounts at once, a leverage
-         *     changes what may be borrowed). 400 unless the cross leverage is 3
-         *     or 5, its liquidation_level above 1 and under its warn_level, and
-         *     liquidation_fee_rate 0 to 0.1. expected_version, a change waiting
+         *     changes what may be borrowed, the fee what a liquidation costs).
+         *     400 unless the leverage is 3 or 5 (margin-service's policy), the
+         *     liquidation_level above 1 and under the warn_level, and the
+         *     liquidation_fee 0 to 0.1. expected_version, a change waiting
          *     already and the lapse as for an asset. Audited as
          *     admin.margin.settings_changed once applied.
          */
@@ -3291,12 +3293,11 @@ export interface paths {
         };
         /**
          * The pairs margin trades on, with their isolated terms
-         * @description Draft (design §4.2, §8; E0 contract §8 pair_params). The pairs
+         * @description Draft (design §4.2, §8; margin-service's pair_terms). The pairs
          *     whose two assets are both margin assets: whether each takes
-         *     isolated accounts, its isolated leverage and thresholds (its own,
-         *     or its leverage's), and the isolated accounts on it. The cross
-         *     account trades all of them on its own terms. Needs
-         *     instruments.read.
+         *     isolated accounts, its isolated leverage, thresholds and
+         *     liquidation fee, and the isolated accounts on it. The cross account
+         *     trades all of them on its own terms. Needs instruments.read.
          */
         get: operations["listMarginPairs"];
         put?: never;
@@ -3324,11 +3325,12 @@ export interface paths {
          *     pair, those open stay; audited as admin.margin.pair_changed).
          *     Anything else waits for a second ADMIN with it, in either approval
          *     mode (202 with a MARGIN_PARAMS request, escalation MARGIN_RISK):
-         *     the leverage and the thresholds (null for the leverage's), which
-         *     the pair's accounts take at once, and switching isolated accounts
-         *     on. 400 unless liquidation_level is above 1 and under warn_level.
-         *     expected_version, a change waiting already and the lapse as for an
-         *     asset.
+         *     the leverage, the thresholds and the liquidation fee, which the
+         *     pair's accounts take at once, and switching isolated accounts on.
+         *     400 unless the leverage is 3, 5 or 10 (margin-service's policy),
+         *     liquidation_level above 1 and under warn_level, and
+         *     liquidation_fee 0 to 0.1. expected_version, a change waiting
+         *     already and the lapse as for an asset.
          */
         put: operations["setMarginPair"];
         post?: never;
@@ -3376,9 +3378,10 @@ export interface paths {
         /**
          * A margin account with its balances and debts, loans, interest and liquidations
          * @description Draft (design §8). The account as listed; each asset it holds or
-         *     owes, with its worth; its loans by asset; the latest 50 borrows and
-         *     repayments; the latest 50 interest charges; the latest 20
-         *     liquidations. Needs derivatives.read.
+         *     owes, with its worth; its loans by asset; the latest 50 loan
+         *     changes (borrows, repayments and interest in margin-service's one
+         *     view); the latest 50 interest charges; the latest 20 liquidations.
+         *     Needs derivatives.read.
          */
         get: operations["getMarginAccount"];
         put?: never;
@@ -5193,9 +5196,10 @@ export interface components {
              *     limit, over the 24-hour limit, or of unknown worth, or a
              *     simulated market's change beyond one operator's share, or a
              *     deposit of nobody credited to a user other than its address's
-             *     holder, or a margin change that always takes two (rates,
-             *     leverage, thresholds, haircuts, more to lend, a manual
-             *     liquidation; a draft); empty in single-person mode.
+             *     holder, or a margin change that always takes two (the interest
+             *     model and rates, leverage, thresholds, fees, haircuts,
+             *     collateral, more to lend, a manual liquidation; a draft); empty
+             *     in single-person mode.
              * @enum {string}
              */
             escalation: "" | "REQUESTED" | "TWO_PERSON_MODE" | "SINGLE_LIMIT" | "DAILY_LIMIT" | "NO_PRICE" | "SIM_SHARE" | "NOT_ADDRESS_HOLDER" | "WELCOME_RAISE" | "MARGIN_RISK";
@@ -5570,20 +5574,13 @@ export interface components {
          * @enum {string}
          */
         MarginAccountType: "MARGIN_CROSS" | "MARGIN_ISOLATED";
-        /** @description The floating curve (design 2026-10-06 §4.1; the seed's floating): the hourly rate rises in a straight line from base_rate with nothing lent to kink_rate at the utilization kink, then to max_rate with the whole pool lent (utilization = lent ÷ pool_cap, on the hour). Rates are fractions an hour: 0.000005 is 0.0005%/h. */
-        MarginFloatingRate: {
-            base_rate: components["schemas"]["Decimal"];
-            kink: components["schemas"]["Decimal"];
-            kink_rate: components["schemas"]["Decimal"];
-            max_rate: components["schemas"]["Decimal"];
-        };
-        /** @description An asset's margin parameters (design §4.1; margin-service's asset_params, E0 contract §8). */
+        /** @description An asset's margin terms (design 2026-10-06 §4.1), named as margin-service's asset_terms. Rates are fractions an hour (0.00001 is 0.0010%/h); the floating curve rises in a straight line from float_base with nothing lent to float_kink_rate at the utilization float_kink, then to float_max_rate with the whole pool lent (utilization = lent ÷ pool_cap, on the hour). */
         MarginAssetParams: {
             /** @description Users may borrow it. */
             borrowable: boolean;
             /** @description It counts in an account's total assets, times the haircut; off, an account holds it at no worth. */
             collateral: boolean;
-            /** @description 0 to 1; the asset's worth counts times it in total assets (1 for USDT, 0.95 for BTC and ETH, 0.7 for ASTRA). */
+            /** @description Above 0 and at most 1; the asset's worth counts times it in total assets (1 for USDT, 0.95 for BTC and ETH, 0.7 for ASTRA). */
             haircut: components["schemas"]["Decimal"];
             /** @description HOUSE's simulated supply of it (the pool), in the asset; what is lent never exceeds it. */
             pool_cap: components["schemas"]["Decimal"];
@@ -5591,11 +5588,15 @@ export interface components {
             user_cap: components["schemas"]["Decimal"];
             /** @enum {string} */
             interest_model: "FIXED" | "FLOATING";
-            /** @description The FIXED model's hourly rate, a fraction (0.00001 is 0.0010%/h, about 8.76% a year). */
-            fixed_hourly_rate: components["schemas"]["Decimal"];
-            floating: components["schemas"]["MarginFloatingRate"];
+            /** @description The FIXED model's hourly rate (0.00001 is about 8.76% a year). */
+            fixed_rate: components["schemas"]["Decimal"];
+            float_base: components["schemas"]["Decimal"];
+            /** @description Above 0 and under 1. */
+            float_kink: components["schemas"]["Decimal"];
+            float_kink_rate: components["schemas"]["Decimal"];
+            float_max_rate: components["schemas"]["Decimal"];
         };
-        /** @description An asset's margin parameters with what is lent of it now. */
+        /** @description An asset's margin terms with what is lent of it now. */
         MarginAsset: components["schemas"]["MarginAssetParams"] & {
             /** @example USDT */
             asset: string;
@@ -5615,10 +5616,10 @@ export interface components {
             borrowers: number;
             /** Format: int64 */
             version: number;
-            /** @description The administrator's email; "system" for the seed (deploy/instruments/margin.json). */
+            /** @description The administrator's email; empty for the seed (deploy/instruments/margin.json). */
             updated_by: string;
             /** Format: date-time */
-            updated_at: string | null;
+            updated_at: string;
             /**
              * Format: uuid
              * @description A change of it waiting for a second ADMIN (one at a time).
@@ -5626,7 +5627,7 @@ export interface components {
             pending_approval_id: string | null;
         };
         /**
-         * @description An isolated leverage (design §4.2).
+         * @description An isolated leverage (design §4.2; margin-service checks the set).
          * @enum {integer}
          */
         MarginLeverage: 3 | 5 | 10;
@@ -5635,64 +5636,56 @@ export interface components {
             warn_level: components["schemas"]["Decimal"];
             liquidation_level: components["schemas"]["Decimal"];
         };
-        /** @description The settings margin-service keeps (E0 contract §8 settings). */
-        MarginSettingsParams: {
-            /** @description The cross account's terms (design §4.4), 3x with 1.30 and 1.10, or 5x with 1.20 and 1.10 once opened. */
-            cross: {
-                /** @enum {integer} */
-                leverage: 3 | 5;
-            } & components["schemas"]["MarginLevels"];
-            /** @description The fraction of a liquidation's traded value that goes to the insurance fund (0.02). */
-            liquidation_fee_rate: components["schemas"]["Decimal"];
+        MarginFee: {
+            /** @description The fraction of a liquidation's traded value that goes to the insurance fund (0.02), 0 to 0.1. */
+            liquidation_fee: components["schemas"]["Decimal"];
         };
-        /** @description The margin settings, the thresholds by isolated leverage, and who last changed the settings. */
+        /** @description The cross account's terms (margin-service's cross_terms; design §4.4, 3x with 1.30 and 1.10, 5x with 1.20 and 1.10). */
+        MarginCrossTerms: {
+            /** @enum {integer} */
+            leverage: 3 | 5;
+        } & components["schemas"]["MarginLevels"] & components["schemas"]["MarginFee"];
+        MarginSettingsParams: {
+            cross: components["schemas"]["MarginCrossTerms"];
+        };
+        /** @description The cross account's terms, the design's thresholds by isolated leverage, and who last changed the terms. */
         MarginSettings: components["schemas"]["MarginSettingsParams"] & {
-            /** @description What a pair without its own thresholds takes, by its leverage (3x 1.25/1.15, 5x 1.20/1.10, 10x 1.10/1.05). */
+            /** @description The design's thresholds by isolated leverage (3x 1.25/1.15, 5x 1.20/1.10, 10x 1.10/1.05), which the console offers when a pair's leverage changes; a pair keeps its own. */
             isolated_defaults: ({
                 leverage: components["schemas"]["MarginLeverage"];
             } & components["schemas"]["MarginLevels"])[];
             /** Format: int64 */
             version: number;
+            /** @description The administrator's email; empty for the seed. */
             updated_by: string;
             /** Format: date-time */
-            updated_at: string | null;
+            updated_at: string;
             /**
              * Format: uuid
              * @description A change waiting for a second ADMIN (one at a time).
              */
             pending_approval_id: string | null;
         };
-        /** @description A pair's isolated terms (margin-service's pair_params, E0 contract §8). */
+        /** @description A pair's isolated terms (margin-service's pair_terms). */
         MarginPairParams: {
             /** @description The pair takes isolated accounts. */
             isolated: boolean;
             leverage: components["schemas"]["MarginLeverage"];
-            /** @description Its own warning level; null takes its leverage's (MarginSettings.isolated_defaults). */
-            warn_level: components["schemas"]["NullableDecimal"];
-            /** @description Its own liquidation level; null takes its leverage's. */
-            liquidation_level: components["schemas"]["NullableDecimal"];
-        };
-        /** @description A pair's isolated terms as they apply, with its accounts. */
-        MarginPair: {
+        } & components["schemas"]["MarginLevels"] & components["schemas"]["MarginFee"];
+        /** @description A pair's isolated terms with its isolated accounts. Its leverage (design §4.2): 10 for BTC-USDT and ETH-USDT, 5 for the other main pairs, 3 for ASTRA-USDT and the pairs quoted in BTC. */
+        MarginPair: components["schemas"]["MarginPairParams"] & {
             /** @example BTC-USDT */
             symbol: string;
             base: string;
             quote: string;
-            isolated: boolean;
-            /** @description Its isolated leverage (design §4.2): 10 for BTC-USDT and ETH-USDT, 5 for the other main pairs, 3 for ASTRA-USDT and the pairs quoted in BTC. */
-            leverage: components["schemas"]["MarginLeverage"];
-            /** @description The warning level that applies (its own or its leverage's). */
-            warn_level: components["schemas"]["Decimal"];
-            liquidation_level: components["schemas"]["Decimal"];
-            /** @description The pair has thresholds of its own rather than its leverage's. */
-            own_levels: boolean;
             /** @description The isolated accounts on it that hold or owe anything. */
             accounts: number;
             /** Format: int64 */
             version: number;
+            /** @description The administrator's email; empty for the seed. */
             updated_by: string;
             /** Format: date-time */
-            updated_at: string | null;
+            updated_at: string;
             /** Format: uuid */
             pending_approval_id: string | null;
         };
@@ -5773,27 +5766,35 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description A borrow or a repayment (margin-service's loan_changes, E0 contract §8). */
+        /** @description A borrow, a repayment or an interest charge (margin-service's one view of its borrows, repays and interest charges). */
         MarginLoanChange: {
             /** Format: uuid */
             id: string;
             asset: string;
             /** @enum {string} */
-            kind: "BORROW" | "REPAY";
-            /** @description Borrowed, or repaid in all. */
+            kind: "BORROW" | "REPAY" | "INTEREST";
+            /**
+             * @description PENDING until the ledger booked it (DONE) or refused it (FAILED, a borrow or repayment only).
+             * @enum {string}
+             */
+            status: "PENDING" | "DONE" | "FAILED";
+            /** @description Borrowed, repaid in all, or charged. */
             amount: components["schemas"]["Decimal"];
-            /** @description Of a repayment, the principal (interest is repaid first, design §4.3); a borrow's amount. */
+            /** @description A borrow's amount; of a repayment, the principal it repaid (interest is repaid first, design §4.3); 0 for a charge. */
             principal_part: components["schemas"]["Decimal"];
-            /** @description Of a repayment, the interest; 0 for a borrow. */
+            /** @description Of a repayment, the interest it repaid; a charge's amount; 0 for a borrow. */
             interest_part: components["schemas"]["Decimal"];
-            /** @description What made it - the user's borrow or repayment, an order's side effect (AUTO_BORROW, AUTO_REPAY) or a liquidation. */
-            reason: string;
+            /**
+             * @description What made a borrow or repayment - the user, an order's side effect (AUTO_BORROW, AUTO_REPAY) or a liquidation; null for an interest charge.
+             * @enum {string|null}
+             */
+            reason: "USER" | "AUTO_BORROW" | "AUTO_REPAY" | "LIQUIDATION" | null;
             /** Format: uuid */
             order_id: string | null;
             /** Format: uuid */
             liquidation_id: string | null;
-            /** Format: uuid */
-            journal_id: string;
+            /** @description The ledger journal's idempotency key (margin-borrow:<id>, margin-repay:<id>, …). */
+            journal_key: string;
             /** Format: date-time */
             created_at: string;
         };
@@ -5814,8 +5815,10 @@ export interface components {
              * @description The hour charged (a borrow's first hour at the time of borrowing).
              */
             hour: string;
-            /** Format: uuid */
-            journal_id: string;
+            /** @enum {string} */
+            status: "PENDING" | "DONE";
+            /** @description The ledger journal's idempotency key. */
+            journal_key: string;
         };
         MarginAmount: {
             asset: string;
@@ -5857,7 +5860,7 @@ export interface components {
             /** Format: date-time */
             completed_at: string | null;
         };
-        /** @description A margin account with its balances and debts, loans, borrows and repayments, interest and liquidations. */
+        /** @description A margin account with its balances and debts, loans, loan changes, interest and liquidations. */
         MarginAccountDetail: components["schemas"]["MarginAccount"] & {
             balances: components["schemas"]["MarginBalance"][];
             loans: components["schemas"]["MarginLoan"][];
