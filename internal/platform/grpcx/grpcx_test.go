@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -52,7 +53,7 @@ func testService() *grpc.ServiceDesc {
 				return wrapperspb.String(tracing.TraceID(ctx) + "|" + strings.Join(md.Get(requestIDKey), ",")), nil
 			}),
 			method("Coded", func(context.Context) (*wrapperspb.StringValue, error) {
-				return nil, apperr.New(apperr.KindUnprocessable, "LEDGER_INSUFFICIENT_BALANCE", "insufficient balance")
+				return nil, apperr.New(apperr.KindUnprocessable, "LEDGER_INSUFFICIENT_BALANCE", "insufficient balance").WithDetail("available", "1.25")
 			}),
 			method("Plain", func(context.Context) (*wrapperspb.StringValue, error) {
 				return nil, errors.New("pq: password authentication failed")
@@ -126,7 +127,7 @@ func TestCodedErrorsCrossTheWire(t *testing.T) {
 	_, conn, _, _ := startServer(t)
 	_, err := call(t.Context(), conn, "Coded")
 	e := apperr.From(err)
-	if e.Code != "LEDGER_INSUFFICIENT_BALANCE" || e.Kind != apperr.KindUnprocessable || e.Message != "insufficient balance" {
+	if e.Code != "LEDGER_INSUFFICIENT_BALANCE" || e.Kind != apperr.KindUnprocessable || e.Message != "insufficient balance" || e.Details["available"] != "1.25" {
 		t.Fatalf("coded error mangled: %+v", e)
 	}
 }
@@ -219,9 +220,49 @@ func TestDetailsCrossTheWire(t *testing.T) {
 	if string(have) != string(want) {
 		t.Fatalf("details %s, want %s", have, want)
 	}
-	// A peer that puts plain strings in the metadata.
-	st, _ := status.New(codes.FailedPrecondition, "x").WithDetails(&errdetails.ErrorInfo{Reason: "X", Domain: errorDomain, Metadata: map[string]string{"asset": "BTC"}})
-	if d := apperr.From(FromStatus(st.Err())).Details; d["asset"] != "BTC" {
-		t.Fatalf("plain metadata: %v", d)
+	// A peer that puts plain strings in the metadata: they stay strings,
+	// even those that begin like JSON.
+	plain := map[string]string{"asset": "BTC", "hex": "0xdeadbeef", "count": "12 apples", "at": "2026-10-06T00:00:00Z", "ish": "true-ish"}
+	st, _ := status.New(codes.FailedPrecondition, "x").WithDetails(&errdetails.ErrorInfo{Reason: "X", Domain: errorDomain, Metadata: plain})
+	d := apperr.From(FromStatus(st.Err())).Details
+	for k, v := range plain {
+		if d[k] != v {
+			t.Errorf("plain %s: %#v, want %q", k, d[k], v)
+		}
+	}
+}
+
+func TestDetailsKeepTheirJSON(t *testing.T) {
+	sent := map[string]any{
+		"big":    int64(1<<53 + 1),
+		"ok":     true,
+		"none":   nil,
+		"nested": map[string]any{"levels": []any{1, "x"}},
+		"rate":   0.1,
+	}
+	got := decodeDetails(encodeDetails(sent))
+	want, _ := json.Marshal(sent)
+	have, _ := json.Marshal(got)
+	if string(have) != string(want) {
+		t.Fatalf("details %s, want %s", have, want)
+	}
+}
+
+func TestDetailsAreCapped(t *testing.T) {
+	big := strings.Repeat("x", maxDetailBytes)
+	enc := encodeDetails(map[string]any{"a_big": big, "b": "kept"})
+	if _, ok := enc["a_big"]; ok || enc["b"] != `"kept"` {
+		t.Fatalf("a value over %d bytes: %v", maxDetailBytes, enc)
+	}
+	many := map[string]any{}
+	for i := range 10 {
+		many[fmt.Sprintf("k%02d", i)] = strings.Repeat("y", 900)
+	}
+	total := 0
+	for k, v := range encodeDetails(many) {
+		total += len(k) + len(v)
+	}
+	if total > maxDetailsBytes || total == 0 {
+		t.Fatalf("%d bytes of details, the cap is %d", total, maxDetailsBytes)
 	}
 }

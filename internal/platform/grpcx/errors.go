@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
+	"slices"
 	"strings"
 
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
@@ -101,27 +103,44 @@ func FromStatus(err error) error {
 	return apperr.Internal(err)
 }
 
+// The most a detail may take as JSON, and all of them together: the
+// details ride in the status trailer, whose size peers and proxies limit;
+// past such a limit the call fails and the coded error arrives as an
+// opaque internal one.
+const (
+	maxDetailBytes  = 1 << 10
+	maxDetailsBytes = 4 << 10
+)
+
 // encodeDetails carries an error's details across the wire. ErrorInfo
 // metadata holds strings, so each value goes as its JSON: a decimal as its
-// quoted string, a count as a number. A value that does not encode is
-// left out.
+// quoted string, a count as a number. A value that does not encode, or
+// is larger than maxDetailBytes, is left out, and so are those past
+// maxDetailsBytes in all (taken in key order, so the same ones each time).
 func encodeDetails(details map[string]any) map[string]string {
 	if len(details) == 0 {
 		return nil
 	}
 	out := make(map[string]string, len(details))
-	for k, v := range details {
-		if b, err := json.Marshal(v); err == nil {
-			out[k] = string(b)
+	total := 0
+	for _, k := range slices.Sorted(maps.Keys(details)) {
+		b, err := json.Marshal(details[k])
+		if err != nil || len(b) > maxDetailBytes || total+len(k)+len(b) > maxDetailsBytes {
+			continue
 		}
+		total += len(k) + len(b)
+		out[k] = string(b)
 	}
 	return out
 }
 
 // decodeDetails restores what encodeDetails sent, numbers exact
 // (json.Number), so the HTTP response shows them as the service that
-// raised the error would have. A value that is not JSON (a peer sending
-// plain strings) stays the string it is.
+// raised the error would have. A value that is not one whole JSON value (a
+// peer sending plain strings such as 0xdeadbeef or "12 apples", which
+// would otherwise decode to their first number) stays the string it is. A
+// plain string that is JSON on its own (123, true, null) cannot be told
+// apart and reads as that value.
 func decodeDetails(meta map[string]string) map[string]any {
 	if len(meta) == 0 {
 		return nil
@@ -131,7 +150,7 @@ func decodeDetails(meta map[string]string) map[string]any {
 		dec := json.NewDecoder(strings.NewReader(raw))
 		dec.UseNumber()
 		var v any
-		if err := dec.Decode(&v); err != nil {
+		if err := dec.Decode(&v); err != nil || strings.TrimSpace(raw[dec.InputOffset():]) != "" {
 			v = raw
 		}
 		out[k] = v
