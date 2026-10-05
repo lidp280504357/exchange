@@ -21,8 +21,14 @@ import (
 	"github.com/skill/exchange/internal/trading/ports"
 )
 
-// FeatureSpotTrade is the eligibility feature of spot orders (§5.4).
-const FeatureSpotTrade = "SPOT_TRADE"
+// The eligibility features of orders (§5.4): SPOT_TRADE for spot orders,
+// MARGIN_TRADE for orders on a margin account (ACTIVE accounts while
+// margin.enabled allows the user, the one margin eligibility the sites and
+// margin-service share; review CO).
+const (
+	FeatureSpotTrade   = "SPOT_TRADE"
+	FeatureMarginTrade = "MARGIN_TRADE"
+)
 
 // Service places and cancels orders.
 type Service struct {
@@ -72,12 +78,19 @@ func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, 
 	if err != nil {
 		return domain.Order{}, err
 	}
-	allowed, reason, err := s.Eligibility.Check(ctx, req.UserID, FeatureSpotTrade, pair.Symbol)
+	feature, what := FeatureSpotTrade, "spot trading"
+	if d := req.Defaults(); d.AccountType.Margin() {
+		if err := s.marginOpen(req.UserID, d.SideEffect); err != nil {
+			return domain.Order{}, err
+		}
+		feature, what = FeatureMarginTrade, "margin trading"
+	}
+	allowed, reason, err := s.Eligibility.Check(ctx, req.UserID, feature, pair.Symbol)
 	if err != nil {
 		return domain.Order{}, err
 	}
 	if !allowed {
-		return domain.Order{}, apperr.New(apperr.KindForbidden, reason, "spot trading is not available to this account now")
+		return domain.Order{}, apperr.New(apperr.KindForbidden, reason, what+" is not available to this account now")
 	}
 	if slices.Contains(s.FeeFree, req.UserID) {
 		pair.MakerFeeRate, pair.TakerFeeRate = decimal.Zero, decimal.Zero
@@ -88,9 +101,6 @@ func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, 
 	}
 	o, err := domain.NewOrder(uuid.Must(uuid.NewV7()).String(), req, pair, anchor, s.Now())
 	if err != nil {
-		return domain.Order{}, err
-	}
-	if err := s.marginOpen(o); err != nil {
 		return domain.Order{}, err
 	}
 	var prev *domain.Order
@@ -151,18 +161,15 @@ func kindOf(status int) apperr.Kind {
 }
 
 // marginOpen refuses an order on a margin account, before anything is
-// stored, while margin.enabled is off for the user, and one with
-// AUTO_BORROW while margin.auto_borrow is off (margin design 2026-10-06
-// §5.1; margin-service checks both again). SPOT orders pass untouched.
-func (s *Service) marginOpen(o domain.Order) error {
-	if !o.AccountType.Margin() {
-		return nil
-	}
-	subject := flags.Subject{UserID: o.UserID}
+// stored and before the MARGIN_TRADE eligibility, while margin.enabled is
+// off for the user, and one with AUTO_BORROW while margin.auto_borrow is
+// off (margin design 2026-10-06 §5.1; margin-service checks both again).
+func (s *Service) marginOpen(userID string, effect domain.SideEffect) error {
+	subject := flags.Subject{UserID: userID}
 	if s.Margin == nil || s.Features == nil || !s.Features.Enabled(flags.KeyMarginEnabled, subject) {
 		return domain.ErrMarginDisabled
 	}
-	if o.SideEffect == domain.SideEffectAutoBorrow && !s.Features.Enabled(flags.KeyMarginAutoBorrow, subject) {
+	if effect == domain.SideEffectAutoBorrow && !s.Features.Enabled(flags.KeyMarginAutoBorrow, subject) {
 		return domain.ErrMarginDisabled.WithDetail("flag", flags.KeyMarginAutoBorrow)
 	}
 	return nil

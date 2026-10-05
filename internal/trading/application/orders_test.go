@@ -517,7 +517,9 @@ func TestMarginOrdersWaitForTheirSwitches(t *testing.T) {
 	if _, err := svc.Place(ctx, buy("s1")); err != nil {
 		t.Fatalf("a SPOT order: %v", err)
 	}
-	// A side effect is for margin accounts; unknown values are refused.
+	// A side effect is for margin accounts; unknown values are refused
+	// (the switch and the eligibility let the margin one through).
+	svc.Margin = margin
 	for _, r := range []domain.Request{
 		marginBuy("x1", domain.AccountSpot, domain.SideEffectAutoBorrow),
 		marginBuy("x2", "FUTURES", domain.SideEffectNone),
@@ -717,5 +719,47 @@ func TestAnUnreachableMarginServiceLeavesTheOrderForRecovery(t *testing.T) {
 	got, _ := svc.Get(ctx, "u1", o.ID)
 	if got.FreezeState != domain.FreezeDone || len(margin.orders) != 2 || margin.orders[1].ID != o.ID || len(led.calls) != 1 {
 		t.Fatalf("recovered: %+v, %d reservations (the same order twice), %d freezes", got, len(margin.orders), len(led.calls))
+	}
+}
+
+// featureEligibility refuses the features named in no with reason, and
+// records what it was asked.
+type featureEligibility struct {
+	no     map[string]bool
+	reason string
+	asked  []string
+}
+
+func (f *featureEligibility) Check(_ context.Context, _, feature, _ string) (bool, string, error) {
+	f.asked = append(f.asked, feature)
+	if f.no[feature] {
+		return false, f.reason, nil
+	}
+	return true, "", nil
+}
+
+// Margin orders ask MARGIN_TRADE (review CO), spot orders SPOT_TRADE.
+func TestMarginOrdersNeedTheMarginEligibility(t *testing.T) {
+	svc, store, _, _ := newService()
+	ctx := context.Background()
+	svc.Margin = &fakeMargin{}
+	svc.Features = switches{flags.KeyMarginEnabled: true}
+	elig := &featureEligibility{no: map[string]bool{FeatureMarginTrade: true}, reason: "USER_RISK_REVIEW"}
+	svc.Eligibility = elig
+	_, err := svc.Place(ctx, marginBuy("m1", domain.AccountMarginCross, domain.SideEffectNone))
+	if e := apperr.From(err); e.Code != "USER_RISK_REVIEW" || e.Kind != apperr.KindForbidden || len(store.orders) != 0 {
+		t.Fatalf("a margin order without MARGIN_TRADE: %v, %d orders", err, len(store.orders))
+	}
+	if _, err := svc.Place(ctx, buy("s1")); err != nil {
+		t.Fatalf("a spot order of the same user: %v", err)
+	}
+	if want := []string{FeatureMarginTrade, FeatureSpotTrade}; !slices.Equal(elig.asked, want) {
+		t.Fatalf("asked %v, want %v", elig.asked, want)
+	}
+	// The switch comes first: off, it answers MARGIN_DISABLED without asking.
+	elig.asked = nil
+	svc.Features = switches{}
+	if _, err := svc.Place(ctx, marginBuy("m2", domain.AccountMarginCross, domain.SideEffectNone)); !apperr.Is(err, "MARGIN_DISABLED") || len(elig.asked) != 0 {
+		t.Fatalf("switch off: %v, asked %v", err, elig.asked)
 	}
 }

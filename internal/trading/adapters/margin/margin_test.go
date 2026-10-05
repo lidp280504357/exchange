@@ -64,8 +64,8 @@ func TestAnswersOutsideTheContractAreNotTakenAsBorrows(t *testing.T) {
 		{Borrowed: "1.5"},
 		{Borrowed: "lots", BorrowId: "b1"},
 	} {
-		if _, err := New(answer{resp: resp}).ReserveOrder(ctx, domain.Order{ID: "o1"}); err == nil || apperr.Is(err, "MARGIN_DISABLED") {
-			t.Fatalf("%v: got %v, want an unknown outcome", resp, err)
+		if _, err := New(answer{resp: resp}).ReserveOrder(ctx, domain.Order{ID: "o1"}); err == nil || apperr.From(err).Kind != apperr.KindInternal {
+			t.Fatalf("%v: got %v, want an unknown outcome (internal)", resp, err)
 		}
 	}
 	// Nothing borrowed: no borrow ID either.

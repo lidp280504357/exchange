@@ -133,7 +133,7 @@ func setup(ctx context.Context, a *app.App) error {
 func recoverLoop(a *app.App, svc *application.Service) func(context.Context) error {
 	pending := prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "trading_orders_pending_freeze",
-		Help: "Orders whose freeze outcome is not recorded yet, the ones placed in the last seconds (still in flight) included.",
+		Help: "Orders whose freeze outcome is not recorded yet, the ones placed in the last 10 seconds (in flight, not yet recovery's) included.",
 	})
 	oldest := prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "trading_orders_pending_freeze_oldest_seconds", Help: "How long the oldest of them has waited; 0 without any.",
@@ -166,6 +166,10 @@ func recoverLoop(a *app.App, svc *application.Service) func(context.Context) err
 			} else if n > 0 {
 				a.Logger().InfoContext(ctx, "orders recovered", "orders", n)
 			}
+			cancel()
+			// Releases have their own 30 seconds: orders stuck at the front of
+			// the freezes (margin-service hanging) do not starve them.
+			pass, cancel = context.WithTimeout(ctx, 30*time.Second)
 			if n, err := svc.RecoverReleases(pass); err != nil {
 				a.Logger().WarnContext(ctx, "order release recovery failed", "error", err)
 			} else if n > 0 {
