@@ -528,8 +528,9 @@ func (m *readModels) addLiquidation(l liquidationStep, eventID string, at time.T
 
 // addMargin projects margin.events: an hour's interest, and the start and
 // the end of a liquidation (each sets its own columns of the liquidation's
-// row; NULL leaves a column to the other event). Borrows and repayments
-// have no read model yet.
+// row; NULL leaves a column to the other event; the end repeats the
+// start's level, values and time, which an end published before it did
+// leaves NULL). Borrows and repayments have no read model yet.
 func (m *readModels) addMargin(msg proto.Message) error {
 	switch e := msg.(type) {
 	case *marginv1.MarginInterestAccrued:
@@ -567,12 +568,20 @@ func (m *readModels) addMargin(msg proto.Message) error {
 		insurance, err4 := optional(e.GetInsuranceCovered())
 		repaid, err5 := assetAmounts(e.GetRepaid())
 		remaining, err6 := assetAmounts(e.GetRemaining())
-		if err := errors.Join(err, err2, err3, err4, err5, err6); err != nil {
+		level, err7 := optional(e.GetMarginLevel())
+		assets, err8 := optional(e.GetTotalAsset())
+		liabilities, err9 := optional(e.GetTotalLiability())
+		if err := errors.Join(err, err2, err3, err4, err5, err6, err7, err8, err9); err != nil {
 			return err
+		}
+		var started *time.Time
+		if e.GetStartedAt() != nil {
+			at := e.GetStartedAt().AsTime()
+			started = &at
 		}
 		completed := e.GetCompletedAt().AsTime()
 		m.marginLiquidations = append(m.marginLiquidations, []any{
-			liquidationID, &userID, ptr(e.GetAccountType()), ptr(e.GetSymbol()), nil, nil, nil, nil,
+			liquidationID, &userID, ptr(e.GetAccountType()), ptr(e.GetSymbol()), level, assets, liabilities, started,
 			&repaid, fee, insurance, &remaining, &completed,
 		})
 	}
