@@ -44,6 +44,19 @@ const { page, go, waitText, waitPath, clickButton, typeInto } = t;
 // page's skeleton; every other request goes on at once. Interception turns
 // the browser's cache off: it ends with step 2b.
 const AUDIT_CHUNK = /\/assets\/Audit-[\w-]+\.js$/;
+// Step 2c counts the console's script requests and keeps their paths (the pages fetched ahead).
+let scripts = 0;
+const fetched = new Set();
+const fetchLog = [];
+const began = Date.now();
+page.on("request", (r) => {
+  const path = new URL(r.url()).pathname;
+  if (r.resourceType() === "script" && path.startsWith("/assets/")) {
+    scripts++;
+    fetched.add(path);
+    fetchLog.push(`${((Date.now() - began) / 1000).toFixed(1)}s ${path.slice(8)}`);
+  }
+});
 let heldChunk = null;
 let chunkFree = false;
 const hold = (r) => {
@@ -122,6 +135,25 @@ try {
   page.off("request", hold);
   await page.setRequestInterception(false);
   ok("a section first opened from the sidebar shows its skeleton while its chunk is late and needs that one file alone");
+
+  // 2c. The pages fetched ahead (A40, review BJ ⑩): once signed in, the
+  // idle browser fetches every section's page, one after another in the
+  // sidebar's order (the settings last), within 30 s; three sections never
+  // opened (the system group's) then fetch no JS file at all.
+  const chunkOf = (name) => [...fetched].some((p) => new RegExp(`^/assets/${name}-[\\w-]+\\.js$`).test(p));
+  const ahead = [["/reports", "报表", "Reports"], ["/health", "系统健康", "Health"], ["/platform", "平台设置", "Platform"]];
+  const aheadBy = Date.now() + 30_000;
+  while (!chunkOf("Settings") || ahead.some(([, , name]) => !chunkOf(name))) {
+    if (Date.now() > aheadBy) throw new Error(`30 s on, the idle console had not fetched every section's page; the scripts since the start: ${fetchLog.join(", ")}`);
+    await sleep(250);
+  }
+  const before = fetchLog.length;
+  for (const [href, title] of ahead) {
+    await page.click(`aside a[href="${href}"]`);
+    await page.waitForFunction((h) => document.querySelector("main h1")?.innerText.includes(h), { timeout: 20000 }, title);
+  }
+  if (fetchLog.length !== before) throw new Error(`three sections opened after the idle time fetched scripts: ${fetchLog.slice(before).join(", ")}`);
+  ok(`the pages are fetched ahead while the browser is idle (every section's by ${fetchLog.find((l) => l.includes(" Settings-"))?.split(" ")[0]}): three sections never opened fetch no script`);
 
   // 3. Users: the list; a row opens the user's page with its tabs.
   await go("/users");
@@ -371,6 +403,16 @@ try {
       }),
     { timeout: 20000 },
   );
+  // The column the sites use now is the exchange's mode (the platform profile's test mode).
+  const testMode = await page.evaluate(async () => (await (await fetch("/admin/v1/platform/profile")).json()).test_mode.enabled);
+  const now = testMode ? "test" : "formal";
+  await page.waitForFunction(
+    (m) => document.querySelector(`[data-testid=fixed-mode-${m}]`)?.dataset.current === "true" && !!document.querySelector("[data-testid=fixed-now]"),
+    { timeout: 10000 },
+    now,
+  );
+  const marked = await page.$$eval("[data-testid^=fixed-mode-][data-current=true]", (els) => els.map((el) => el.dataset.testid));
+  if (marked.length !== 1) throw new Error(`the fixed pages mark ${JSON.stringify(marked)} as the column in use`);
   await page.click('[data-testid="fixed-edit-home-hero"]');
   await waitText("副标题");
   await page.waitForFunction(() => document.querySelector("#article-title-zh-CN")?.value.length > 0, { timeout: 10000 });
@@ -378,20 +420,50 @@ try {
   if (forMode !== "正式模式" && forMode !== "通用") throw new Error(`the hero's live column opens an editor for "${forMode}"`);
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => !document.querySelector("[role=dialog]"), { timeout: 10000 });
-  ok(`the fixed pages: the legal pages and the home hero with what the sites show in test mode and live, the hero's live editor (${forMode})`);
+  ok(`the fixed pages: the legal pages and the home hero with what the sites show in test mode and live (the ${now} column marked in use), the hero's live editor (${forMode})`);
 
   // 9c. Operations: the announcements, the editor with its preview (closed
   // unsaved), the help articles, the messages and their form (closed unsent).
   await go("/announcements");
   await page.waitForSelector('main table[aria-label="公告"]');
+  // The list of one mode (A43 ⑪): in the address, every row marked for it.
+  const filter = 'main [role=radiogroup][aria-label="按适用模式筛选"]';
+  await page.waitForSelector(filter);
+  await page.evaluate((sel) => [...document.querySelectorAll(`${sel} [role=radio]`)].find((r) => r.innerText.trim() === "测试模式")?.click(), filter);
+  await page.waitForFunction(() => new URLSearchParams(location.search).get("modes") === "TEST", { timeout: 5000 });
+  const listed = await page.waitForFunction(
+    () => {
+      const table = document.querySelector('main table[aria-label="公告"]');
+      if (!table || table.getAttribute("aria-busy") === "true") return null;
+      const rows = [...(table.tBodies[0]?.rows ?? [])].filter((r) => r.cells.length > 1);
+      if (rows.length) return rows.map((r) => r.cells[0].innerText.includes("测试模式"));
+      return /没有标为「测试模式」的稿|还没有/.test(table.innerText) ? [] : null;
+    },
+    { timeout: 10000 },
+  );
+  const marks = await listed.jsonValue();
+  if (marks.some((m) => !m)) throw new Error("the list of test mode's announcements shows one not marked 测试模式");
+  await page.evaluate((sel) => [...document.querySelectorAll(`${sel} [role=radio]`)].find((r) => r.innerText.trim() === "全部")?.click(), filter);
+  await page.waitForFunction(() => !new URLSearchParams(location.search).has("modes"), { timeout: 5000 });
   await clickButton("新建公告", "main");
   await page.waitForSelector("#article-slug");
   // The drawer slides in: its tabs at the right edge take clicks once it stands.
   await page.waitForFunction(() => getComputedStyle(document.querySelector("[role=dialog]")).transform === "none");
   await page.type("#article-title-zh-CN", "冒烟测试");
-  await page.type("#article-body-zh-CN", "## 小标题\n\n正文");
+  await page.type("#article-body-zh-CN", "## 小标题\n\n正文\n\n:::test\n只在测试模式\n:::\n\n:::formal\n只在正式模式\n:::");
+  // The page's mode (design 2026-10-04 §4.4): a draft is for both; picked for
+  // test mode, its preview keeps the test block and drops the live one.
+  const modes = '[role=dialog] [role=radiogroup][aria-label="适用模式"]';
+  const chosen = () => page.evaluate((sel) => document.querySelector(`${sel} [aria-checked="true"]`)?.innerText.trim(), modes);
+  if ((await chosen()) !== "通用") throw new Error(`a new page is for "${await chosen()}", not both modes`);
+  await page.evaluate((sel) => [...document.querySelectorAll(`${sel} [role=radio]`)].find((r) => r.innerText.trim() === "测试模式")?.click(), modes);
+  await page.waitForFunction((sel) => document.querySelector(`${sel} [aria-checked="true"]`)?.innerText.trim() === "测试模式", { timeout: 5000 }, modes);
   await clickButton("预览", "[role=dialog]");
   await page.waitForSelector("[data-testid=article-preview] h2");
+  const preview = await page.$eval("[data-testid=article-preview]", (el) => ({ mode: el.dataset.mode, text: el.innerText }));
+  if (preview.mode !== "test" || !preview.text.includes("只在测试模式") || preview.text.includes("只在正式模式")) {
+    throw new Error(`the test-mode preview shows ${JSON.stringify(preview)}`);
+  }
   await t.shot("4c-article");
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
@@ -404,7 +476,7 @@ try {
   await page.waitForFunction(() => getComputedStyle(document.querySelector("[role=dialog]")).transform === "none");
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
-  ok("operations: the announcements with the editor's preview (closed unsaved), the help articles, the messages and their form (closed unsent)");
+  ok(`operations: the announcements (filtered to test mode: ${marks.length} marked), the editor's mode and preview (closed unsaved), the help articles, the messages and their form (closed unsent)`);
 
   // 9d. The simulated market: the overview with its chart, price control
   // with an event's impact (the confirmation closed, nothing started), the

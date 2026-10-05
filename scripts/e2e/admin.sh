@@ -1918,6 +1918,74 @@ check '(.items | length) <= 1 and has("next_cursor") and all(.items[]; has("body
 call GET "/v1/announcements?cursor=nope" ""
 expect 400 COMMON_INVALID_ARGUMENT "a cursor that is not one is refused"
 
+echo "== a test-mode announcement follows the exchange's mode (design 2026-10-04 §4.4, D4)"
+# One announcement for test mode only, with a fixed slug like the one above:
+# published, the sites list it while the exchange is in test mode, no
+# longer once the platform's test mode is off, and again once it is back on;
+# then it is taken off. Test mode is put back as it was, whatever ends the
+# run.
+if [[ -n $PLATFORM_DONE ]]; then
+  TSLUG=e2e-console-test
+  test_page() { # test_page ENGLISH_TITLE: the test-mode announcement as the console writes it
+    jq -nc --arg s "$TSLUG" --arg t "$1" '{slug: $s, modes: "TEST", category: "notice", pinned: false, order: 0, texts: [
+      {locale: "zh-CN", title: "端到端测试模式公告", summary: "", body: "## 检查\n\n只在测试模式显示。"},
+      {locale: "en", title: $t, summary: "", body: "## Check\n\nShown in test mode only."}]}'
+  }
+  as AUDITOR GET "/admin/v1/articles?section=ANNOUNCEMENT" ""
+  TART=$(jq -c --arg s "$TSLUG" '[.articles[] | select(.slug == $s)][0] // empty' <<<"$BODY")
+  if [[ -z $TART ]]; then
+    as OPERATOR POST /admin/v1/articles "$(test_page "E2E test mode $RUN" | jq -c '. + {section: "ANNOUNCEMENT", reason: "e2e writes its test-mode announcement"}')"
+    expect 201 - "OPERATOR writes an announcement for test mode only"
+  else
+    as OPERATOR PUT "/admin/v1/articles/$(jq -r .id <<<"$TART")" \
+      "$(test_page "E2E test mode $RUN" | jq -c --argjson v "$(jq .version <<<"$TART")" '. + {version: $v, reason: "e2e rewrites its test-mode announcement"}')"
+    expect 200 - "OPERATOR rewrites the announcement for test mode only"
+  fi
+  check '.modes == "TEST"' "for test mode only"
+  TART_ID=$(jq -r .id <<<"$BODY") TART_V=$(jq -r .version <<<"$BODY")
+  # shellcheck disable=SC2016 # expanded when the script ends
+  at_exit 'as ADMIN GET "/admin/v1/articles/$TART_ID" "" && [[ $(jq -r .status <<<"$BODY") == PUBLISHED ]] &&
+    as ADMIN POST "/admin/v1/articles/$TART_ID/archive" "{\"version\":$(jq .version <<<"$BODY"),\"reason\":\"e2e cleanup\"}" >/dev/null'
+  as OPERATOR POST "/admin/v1/articles/$TART_ID/publish" "{\"version\":$TART_V,\"reason\":\"e2e publishes its test-mode announcement\"}"
+  expect 200 - "OPERATOR publishes it"
+  TART_V=$(jq -r .version <<<"$BODY")
+  set_test_mode() { # set_test_mode true|false REASON: the profile as it stands, its test mode set
+    as ADMIN GET /admin/v1/platform/profile "" >/dev/null
+    as ADMIN PUT /admin/v1/platform/profile "$(jq -c --argjson on "$1" --arg r "$2" \
+      '{name, short_name, domain, theme_color, brand_color, footer, contact, social, default_locale, test_mode: (.test_mode | .enabled = $on), registration,
+        expected_version: .version, reason: $r}' <<<"$BODY")"
+  }
+  TEST_WAS=$(jq -r .test_mode.enabled <<<"$PROFILE")
+  restore_test_mode() {
+    as ADMIN GET /admin/v1/platform/profile "" >/dev/null
+    [[ $(jq -r .test_mode.enabled <<<"$BODY") == "$TEST_WAS" ]] || set_test_mode "$TEST_WAS" "e2e cleanup: test mode as it was" >/dev/null
+  }
+  at_exit restore_test_mode
+  on_sites() { # on_sites yes|no: whether the sites' API lists the test-mode announcement
+    call GET "/v1/announcements?limit=100" "" && [[ $STATUS == 200 ]] || return 1
+    if [[ $1 == yes ]]; then
+      jq -e --arg s "$TSLUG" 'any(.items[]; .slug == $s)' <<<"$BODY" >/dev/null
+    else
+      jq -e --arg s "$TSLUG" 'any(.items[]; .slug == $s) | not' <<<"$BODY" >/dev/null
+    fi
+  }
+  if [[ $TEST_WAS != true ]]; then
+    set_test_mode true "e2e: test mode, as the test server runs"
+    expect 200 - "ADMIN puts the exchange in test mode"
+  fi
+  # About a minute each: the sites' mode is read every 10 seconds, lists are cached 15.
+  eventually 50 "in test mode the sites list it within a minute" on_sites yes
+  set_test_mode false "e2e: live for a minute"
+  expect 200 - "ADMIN takes the exchange out of test mode"
+  check '.test_mode.enabled == false' "live"
+  eventually 50 "live, the sites no longer list it within a minute" on_sites no
+  set_test_mode true "e2e: test mode back"
+  expect 200 - "ADMIN puts it back in test mode"
+  eventually 50 "back in test mode, the sites list it again within a minute" on_sites yes
+  as OPERATOR POST "/admin/v1/articles/$TART_ID/archive" "{\"version\":$TART_V,\"reason\":\"e2e takes its test-mode announcement off\"}"
+  expect 200 - "OPERATOR takes it off"
+fi
+
 echo "== an operator's in-app message"
 as AUDITOR POST /admin/v1/broadcasts '{"audience":"ALL","title":{"zh-CN":"不发"},"body":{"zh-CN":"不发"},"reason":"e2e sends nothing"}'
 expect 403 ADMIN_FORBIDDEN "AUDITOR sends no message"
