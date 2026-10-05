@@ -60,10 +60,10 @@ type TradeExecuted struct {
 	// a trade between users.
 	HouseSide v1.Side `protobuf:"varint,19,opt,name=house_side,json=houseSide,proto3,enum=exchange.order.v1.Side" json:"house_side,omitempty"`
 	// The accounts the buyer's and seller's orders trade from
-	// (Order.account_type: empty or SPOT, MARGIN_CROSS, MARGIN_ISOLATED of
-	// symbol) and their side effects (Order.side_effect), so the ledger
-	// settles each side on its account and margin-service repays after an
-	// AUTO_REPAY order's fills (margin design 2026-10-06, from batch E2).
+	// (Order.account_type: SPOT, MARGIN_CROSS, MARGIN_ISOLATED of symbol;
+	// empty reads as SPOT) and their side effects (Order.side_effect), so the
+	// ledger settles each side on its account and, for AUTO_REPAY, repays
+	// the debt in the same entry (margin design 2026-10-06, from batch E2).
 	// Empty for HOUSE's side.
 	BuyerAccountType  string `protobuf:"bytes,20,opt,name=buyer_account_type,json=buyerAccountType,proto3" json:"buyer_account_type,omitempty"`
 	SellerAccountType string `protobuf:"bytes,21,opt,name=seller_account_type,json=sellerAccountType,proto3" json:"seller_account_type,omitempty"`

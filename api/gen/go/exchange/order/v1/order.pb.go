@@ -269,13 +269,14 @@ type Order struct {
 	BaseAsset  string `protobuf:"bytes,19,opt,name=base_asset,json=baseAsset,proto3" json:"base_asset,omitempty"`
 	QuoteAsset string `protobuf:"bytes,20,opt,name=quote_asset,json=quoteAsset,proto3" json:"quote_asset,omitempty"`
 	// The account the order trades from (margin design 2026-10-06 §5.1,
-	// from batch E2): empty or SPOT, MARGIN_CROSS, or MARGIN_ISOLATED (the
-	// isolated account of symbol). Matching ignores it; the ledger settles
-	// the order's fills on that account.
+	// from batch E2): SPOT, MARGIN_CROSS, or MARGIN_ISOLATED (the isolated
+	// account of symbol). The trading service writes it; empty only in
+	// orders from before it, read as SPOT. Matching ignores it; the ledger
+	// settles the order's fills on that account.
 	AccountType string `protobuf:"bytes,21,opt,name=account_type,json=accountType,proto3" json:"account_type,omitempty"`
-	// A margin order's side effect: empty or NONE, AUTO_BORROW (borrowed
-	// before the freeze), AUTO_REPAY (margin-service repays the asset its
-	// fills bring).
+	// A margin order's side effect: NONE, AUTO_BORROW (borrowed before the
+	// freeze), AUTO_REPAY (the ledger repays the debt of the asset its fills
+	// bring, in the settlement). Empty reads as NONE.
 	SideEffect    string `protobuf:"bytes,22,opt,name=side_effect,json=sideEffect,proto3" json:"side_effect,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

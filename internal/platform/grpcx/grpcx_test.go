@@ -3,6 +3,7 @@ package grpcx
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/shopspring/decimal"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
@@ -199,5 +202,26 @@ func TestToStatusAndBack(t *testing.T) {
 	plain := errors.New("not a status")
 	if !errors.Is(FromStatus(plain), plain) {
 		t.Fatal("non-status errors pass through")
+	}
+}
+
+func TestDetailsCrossTheWire(t *testing.T) {
+	sent := apperr.New(apperr.KindUnprocessable, "MARGIN_LIMIT", "more than the account may borrow").
+		WithDetail("max_borrowable", decimal.RequireFromString("1.50")).
+		WithDetail("open_orders", 3).
+		WithDetail("flag", "margin.auto_borrow")
+	got := apperr.From(FromStatus(ToStatus(sent).Err()))
+	if got.Code != "MARGIN_LIMIT" || got.Kind != apperr.KindUnprocessable {
+		t.Fatalf("coded error mangled: %+v", got)
+	}
+	want, _ := json.Marshal(sent.Details)
+	have, _ := json.Marshal(got.Details)
+	if string(have) != string(want) {
+		t.Fatalf("details %s, want %s", have, want)
+	}
+	// A peer that puts plain strings in the metadata.
+	st, _ := status.New(codes.FailedPrecondition, "x").WithDetails(&errdetails.ErrorInfo{Reason: "X", Domain: errorDomain, Metadata: map[string]string{"asset": "BTC"}})
+	if d := apperr.From(FromStatus(st.Err())).Details; d["asset"] != "BTC" {
+		t.Fatalf("plain metadata: %v", d)
 	}
 }

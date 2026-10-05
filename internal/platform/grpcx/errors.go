@@ -2,7 +2,9 @@ package grpcx
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
@@ -42,8 +44,9 @@ var codeToKind = map[codes.Code]apperr.Kind{
 }
 
 // ToStatus converts a handler error into a gRPC status. Coded errors keep
-// their code in an ErrorInfo detail; anything else becomes an opaque
-// Internal status, and the caller logs the cause.
+// their code and their client-facing details in an ErrorInfo detail;
+// anything else becomes an opaque Internal status, and the caller logs
+// the cause.
 func ToStatus(err error) *status.Status {
 	if err == nil {
 		return nil
@@ -63,7 +66,7 @@ func ToStatus(err error) *status.Status {
 		code = codes.Internal
 	}
 	s := status.New(code, e.Message)
-	info := &errdetails.ErrorInfo{Reason: e.Code, Domain: errorDomain}
+	info := &errdetails.ErrorInfo{Reason: e.Code, Domain: errorDomain, Metadata: encodeDetails(e.Details)}
 	if withDetails, err := s.WithDetails(info); err == nil {
 		s = withDetails
 	}
@@ -71,8 +74,8 @@ func ToStatus(err error) *status.Status {
 }
 
 // FromStatus converts an error returned by a client call back into an
-// apperr error, so that a downstream service's code reaches the HTTP
-// response unchanged.
+// apperr error, so that a downstream service's code and details reach the
+// HTTP response unchanged.
 func FromStatus(err error) error {
 	if err == nil {
 		return nil
@@ -87,11 +90,51 @@ func FromStatus(err error) error {
 			if !ok {
 				kind = apperr.KindInternal
 			}
-			return apperr.Wrap(err, kind, info.GetReason(), s.Message())
+			e := apperr.Wrap(err, kind, info.GetReason(), s.Message())
+			e.Details = decodeDetails(info.GetMetadata())
+			return e
 		}
 	}
 	if kind, ok := codeToKind[s.Code()]; ok && kind == apperr.KindUnavailable {
 		return apperr.Unavailable(err)
 	}
 	return apperr.Internal(err)
+}
+
+// encodeDetails carries an error's details across the wire. ErrorInfo
+// metadata holds strings, so each value goes as its JSON: a decimal as its
+// quoted string, a count as a number. A value that does not encode is
+// left out.
+func encodeDetails(details map[string]any) map[string]string {
+	if len(details) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(details))
+	for k, v := range details {
+		if b, err := json.Marshal(v); err == nil {
+			out[k] = string(b)
+		}
+	}
+	return out
+}
+
+// decodeDetails restores what encodeDetails sent, numbers exact
+// (json.Number), so the HTTP response shows them as the service that
+// raised the error would have. A value that is not JSON (a peer sending
+// plain strings) stays the string it is.
+func decodeDetails(meta map[string]string) map[string]any {
+	if len(meta) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(meta))
+	for k, raw := range meta {
+		dec := json.NewDecoder(strings.NewReader(raw))
+		dec.UseNumber()
+		var v any
+		if err := dec.Decode(&v); err != nil {
+			v = raw
+		}
+		out[k] = v
+	}
+	return out
 }
