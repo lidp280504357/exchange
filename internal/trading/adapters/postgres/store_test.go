@@ -150,8 +150,8 @@ func TestMarginOrdersKeepTheirAccount(t *testing.T) {
 	if err := store.Read().Orders().Insert(ctx, liq); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := store.Read().Orders().Get(ctx, liq.ID); got.LiquidationID != liq.LiquidationID || !got.ProtectionPrice.IsZero() {
-		t.Fatalf("liquidation order: %q %s", got.LiquidationID, got.ProtectionPrice)
+	if got, _ := store.Read().Orders().Get(ctx, liq.ID); got.LiquidationID != liq.LiquidationID || !got.ProtectionPrice.Equal(liq.ProtectionPrice) {
+		t.Fatalf("liquidation order: %q %s, want %q %s", got.LiquidationID, got.ProtectionPrice, liq.LiquidationID, liq.ProtectionPrice)
 	}
 	if _, err := db.Exec(ctx, `UPDATE orders SET account_type = 'SPOT', side_effect = 'NONE' WHERE id = $1`, liq.ID); err == nil {
 		t.Fatal("a SPOT order named a liquidation")
