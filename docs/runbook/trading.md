@@ -22,7 +22,8 @@
 6. 账本明确拒绝（余额不足、精度等）：订单存为 REJECTED（`reject_reason` 为错误码），发 `OrderRejected`，返回该错误并在 `details.order_id` 带上订单 ID。
 7. 账本不可达：冻结结果未知，订单保持 PENDING，照样返回 202。恢复任务每 5 秒处理 10 秒以前的 PENDING 订单（每次最老的 100 笔）：用同一幂等键重试冻结，账本已经冻结过的不会冻结第二次，然后按第 5 或第 6 步处理。
    - 什么算"明确拒绝"、什么算"结果未知"，下单与恢复用同一个判定：账本或 margin-service 带错误码的回答（参数、余额、找不到、未登录、限流、冲突、禁止，以及虽是 503 的 `MARGIN_PRICE_UNAVAILABLE`）都是拒绝，订单记 REJECTED；内部错误、不可用、超时与取消才是结果未知。恢复遇到拒绝时这笔结束、接着处理下一笔。
-   - 每次调账本与 margin-service 最多等 5 秒（`Service.CallTimeout`），超时按结果未知、订单留 PENDING；恢复任务每一轮最多 30 秒，到点就停、下一轮接着处理，只把真正有了结果（接受或拒绝）的订单算作"已恢复"。依赖挂住时请求与恢复循环都不会被卡死（审查 CN）。
+   - 每次调账本与 margin-service 最多等 5 秒（`Service.CallTimeout`，写在代码里、没有配置项），超时按结果未知、订单留 PENDING；恢复任务每一轮补冻结最多 30 秒、补解冻另有 30 秒（最前面卡住的杠杆单耗不到解冻的时间），到点就停、下一轮接着处理，只把真正有了结果（接受或拒绝）的订单算作"已恢复"。依赖挂住时请求与恢复循环都不会被卡死（审查 CN、CP）。
+   - REJECTED 是终态：同一 `client_order_id` 再提交得到同一个错误（含 503 的 `MARGIN_PRICE_UNAVAILABLE`），要重试就换一个 `client_order_id`。
    - 指标 `trading_orders_pending_freeze`（PENDING 订单数，含最近几秒内正在处理的）与 `trading_orders_pending_freeze_oldest_seconds`（最老一笔已等的秒数，没有为 0）每 5 秒在恢复之前更新、有自己的 5 秒期限，依赖挂住时也照常变化；最老一笔超过 5 分钟持续 5 分钟告警 `TradingOrdersPendingFreeze`（最前面卡住的订单会让后面的轮不到）。排查：`SELECT id, account_type, created_at FROM trading.orders WHERE freeze_state = 'PENDING' ORDER BY created_at LIMIT 20;`，再看服务日志里 `did not complete` 的原因。
 
 同一 `client_order_id` 的重复请求：内容相同返回原订单（原订单被拒则返回同样的错误：冻结或 margin-service 的拒绝连同 HTTP 状态与 details 记在订单的 `reject_status`、`reject_details`，迁移 trading 00006，重复请求原样返回；撮合引擎的拒单没有这两项，按 422），内容不同返回 409 `COMMON_IDEMPOTENCY_CONFLICT`。账户或 `side_effect` 不同也算内容不同。不传则用订单 ID。
@@ -30,7 +31,7 @@
 ### 杠杆账户的订单（杠杆设计 2026-10-06，批次 E2）
 
 - 请求可带 `account`（`SPOT` 默认、`MARGIN_CROSS`、`MARGIN_ISOLATED` 即该交易对的逐仓账户）与 `side_effect`（`NONE` 默认、`AUTO_BORROW`、`AUTO_REPAY`，只用于杠杆账户；`SPOT` 带别的值返回 `COMMON_INVALID_ARGUMENT`）。订单表的 `account_type`、`side_effect` 两列（迁移 trading 00004，之前的订单都是 `SPOT` / `NONE`），响应、`OrderAccepted` 与 `PlaceOrder` 里的订单都显式带上。
-- `margin.enabled` 对该用户关闭时，杠杆账户的订单在第 2 步校验之后直接返回 403 `MARGIN_DISABLED`，不落库；`AUTO_BORROW` 在 `margin.auto_borrow` 关闭时同样被拒，`details.flag` 为 `margin.auto_borrow`。现货订单不看这两个开关，链路与之前完全一样。
+- `margin.enabled` 对该用户关闭时，杠杆账户的订单直接返回 403 `MARGIN_DISABLED`，不落库；`AUTO_BORROW` 在 `margin.auto_borrow` 关闭时同样被拒，`details.flag` 为 `margin.auto_borrow`。开关之后查资格：杠杆单查 `MARGIN_TRADE`（只 ACTIVE、受 `margin.enabled` 的全部规则，与两站和 margin-service 同一个资格，审查 CO），不符合返回 user-service 的原因码（`USER_RISK_REVIEW` 等）；现货订单仍查 `SPOT_TRADE`、不看这两个开关，链路与之前完全一样。
 - 冻结之前先调 margin-service 的 gRPC `MarginService.ReserveOrder`（地址 `MARGIN_GRPC_ADDR`，测试服 `margin-service:9199`）：检查账户状态、资产、风险率，`AUTO_BORROW` 时借入差额；按订单 ID 幂等。明确拒绝（`MARGIN_LIMIT`、`MARGIN_LEVEL_TOO_LOW`、`MARGIN_FROZEN`、`MARGIN_PRICE_UNAVAILABLE` 等）时订单存为 REJECTED，错误原样返回，margin-service 的 details（`max_borrowable`、`margin_level` 等）与 `order_id` 一起带回；margin-service 不可达时与账本不可达一样保持 PENDING，恢复任务先重放 `ReserveOrder` 再冻结。margin-service 还没有这个调用（`Unimplemented`）时按 `MARGIN_DISABLED` 拒绝，不留 PENDING。
 - 借到的数量与借款 ID（`ReserveOrder` 的 `borrowed`、`borrow_id`）记在订单的 `borrowed`、`borrow_id` 两列（迁移 trading 00005；00006 加约束两者同有同无）并写一条 info 日志；冻结随后被拒时借款不退，订单上照样留着记录，用户自己还。借到负数、或借到却没有借款 ID 的回答不合契约，按结果未知处理（恢复任务再问一次）。
 - 冻结与解冻都记在订单的账户上：账本 `Freeze` / `Unfreeze` 的 `account_type` 为订单的账户，逐仓账户的 `scope` 为交易对。撮合引擎把双方订单的账户与 `side_effect` 原样写进 `TradeExecuted`（HOUSE 一侧为空），账本按它结算（见 [margin.md](margin.md)）。
