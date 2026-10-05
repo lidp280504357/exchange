@@ -81,6 +81,9 @@ page.on("request", hold);
 async function openRow(selector) {
   const row = `${selector}[data-row-id]`;
   for (let i = 1; ; i++) {
+    // A list reloading into its skeleton has no such row for a moment:
+    // waited for, as page.click would fail at once (review BW).
+    await page.waitForSelector(row, { visible: true, timeout: 10000 });
     await t.clickLive(row);
     try {
       await page.waitForSelector("[role=dialog]", { timeout: 5000 });
