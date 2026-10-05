@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"testing"
 	"time"
@@ -127,6 +128,19 @@ func TestMarginOrdersKeepTheirAccount(t *testing.T) {
 	}
 	if again, _ := store.Read().Orders().Get(ctx, o.ID); !again.Borrowed.Equal(d("7.8")) || again.BorrowID != borrowID {
 		t.Fatalf("borrow on record: %s %q", again.Borrowed, again.BorrowID)
+	}
+	if _, err := db.Exec(ctx, `UPDATE orders SET borrow_id = NULL WHERE id = $1`, o.ID); err == nil {
+		t.Fatal("a borrow lost its ID")
+	}
+	// A refusal keeps its status and details, numbers exact.
+	got.Status, got.RejectReason, got.RejectStatus = domain.StatusRejected, "MARGIN_LIMIT", 422
+	got.RejectDetails = map[string]any{"max_borrowable": "12.5", "count": json.Number("9007199254740993")}
+	if err := store.Tx(ctx, func(r ports.Repos) error { return r.Orders().Update(ctx, got) }); err != nil {
+		t.Fatal(err)
+	}
+	refused, _ := store.Read().Orders().Get(ctx, o.ID)
+	if refused.RejectStatus != 422 || refused.RejectDetails["max_borrowable"] != "12.5" || refused.RejectDetails["count"] != json.Number("9007199254740993") {
+		t.Fatalf("refusal on record: %d %#v", refused.RejectStatus, refused.RejectDetails)
 	}
 	// An order built without them is stored as a SPOT order without a
 	// side effect; the table refuses a side effect on SPOT.

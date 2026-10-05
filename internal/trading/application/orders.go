@@ -40,8 +40,21 @@ type Service struct {
 	// FeeFree are the accounts whose orders pay no fees: the simulated
 	// market's bots (ASTRA design §4).
 	FeeFree []string
-	Log     *slog.Logger
-	Now     func() time.Time
+	// CallTimeout bounds each call to the ledger and margin-service, so a
+	// dependency that hangs leaves the order pending instead of holding
+	// the request or a recovery pass; 5 seconds when zero.
+	CallTimeout time.Duration
+	Log         *slog.Logger
+	Now         func() time.Time
+}
+
+// bounded is ctx with the call timeout.
+func (s *Service) bounded(ctx context.Context) (context.Context, context.CancelFunc) {
+	d := s.CallTimeout
+	if d <= 0 {
+		d = 5 * time.Second
+	}
+	return context.WithTimeout(ctx, d)
 }
 
 // Place checks, stores and funds a new order (§11.1 steps 3–5): it answers
@@ -116,9 +129,25 @@ func (s *Service) repeat(_ context.Context, prev domain.Order, req domain.Reques
 		return domain.Order{}, domain.ErrClientIDReused.WithDetail("order_id", prev.ID)
 	}
 	if prev.Status == domain.StatusRejected {
-		return prev, apperr.New(apperr.KindUnprocessable, prev.RejectReason, "the order was rejected").WithDetail("order_id", prev.ID)
+		refusal := apperr.New(kindOf(prev.RejectStatus), prev.RejectReason, "the order was rejected")
+		refusal.Details = maps.Clone(prev.RejectDetails)
+		return prev, refusal.WithDetail("order_id", prev.ID)
 	}
 	return prev, nil
+}
+
+// kindOf is the kind of a stored refusal's HTTP status; the engine's
+// rejections, which have none, are unprocessable.
+func kindOf(status int) apperr.Kind {
+	for _, k := range []apperr.Kind{
+		apperr.KindInvalid, apperr.KindUnauthenticated, apperr.KindForbidden, apperr.KindNotFound, apperr.KindConflict,
+		apperr.KindRateLimited, apperr.KindUnavailable,
+	} {
+		if k.HTTPStatus() == status {
+			return k
+		}
+	}
+	return apperr.KindUnprocessable
 }
 
 // marginOpen refuses an order on a margin account, before anything is
@@ -150,7 +179,9 @@ func (s *Service) fund(ctx context.Context, o domain.Order) (domain.Order, error
 		if s.Margin == nil {
 			return s.reject(ctx, o, domain.ErrMarginDisabled)
 		}
-		r, err := s.Margin.ReserveOrder(ctx, o)
+		call, cancel := s.bounded(ctx)
+		r, err := s.Margin.ReserveOrder(call, o)
+		cancel()
 		if err != nil {
 			if e := apperr.From(err); refused(e) {
 				return s.reject(ctx, o, e)
@@ -164,7 +195,9 @@ func (s *Service) fund(ctx context.Context, o domain.Order) (domain.Order, error
 				"borrowed", r.Borrowed.String(), "borrow_id", r.BorrowID)
 		}
 	}
-	err := s.Ledger.Freeze(ctx, "order:"+o.ID, o.Account(), o.FrozenAsset, o.FrozenAmount, o.ID)
+	call, cancel := s.bounded(ctx)
+	err := s.Ledger.Freeze(call, "order:"+o.ID, o.Account(), o.FrozenAsset, o.FrozenAmount, o.ID)
+	cancel()
 	if err != nil {
 		if e := apperr.From(err); refused(e) {
 			return s.reject(ctx, o, e)
@@ -251,6 +284,7 @@ func (s *Service) reject(ctx context.Context, o domain.Order, cause *apperr.Erro
 			return nil
 		}
 		cur.Status, cur.RejectReason, cur.FreezeState, cur.UpdatedAt = domain.StatusRejected, cause.Code, domain.FreezeNone, s.Now()
+		cur.RejectStatus, cur.RejectDetails = cause.Kind.HTTPStatus(), maps.Clone(cause.Details)
 		// A borrow made for the order stays when the freeze is refused; the
 		// order keeps it on record.
 		cur.Borrowed, cur.BorrowID = o.Borrowed, o.BorrowID
@@ -276,7 +310,9 @@ func (s *Service) reject(ctx context.Context, o domain.Order, cause *apperr.Erro
 // Recover finishes orders whose freeze outcome was not recorded (§11.1
 // step 5): a crash or a ledger outage between storing an order and
 // recording its freeze. The freeze is retried with the same key, so an
-// order the ledger already froze is accepted, never frozen twice.
+// order the ledger already froze is accepted, never frozen twice. It
+// returns how many orders it finished (accepted or rejected) and stops
+// when ctx ends (the pass's deadline).
 func (s *Service) Recover(ctx context.Context) (int, error) {
 	pending, err := s.Store.Read().Orders().PendingFreeze(ctx, s.Now().Add(-10*time.Second), 100)
 	if err != nil {
@@ -284,10 +320,16 @@ func (s *Service) Recover(ctx context.Context) (int, error) {
 	}
 	n := 0
 	for _, o := range pending {
-		if _, err := s.fund(ctx, o); err != nil && !refused(apperr.From(err)) {
+		if err := ctx.Err(); err != nil {
 			return n, err
 		}
-		n++
+		out, err := s.fund(ctx, o)
+		if err != nil && !refused(apperr.From(err)) {
+			return n, err
+		}
+		if out.FreezeState != domain.FreezePending {
+			n++
+		}
 	}
 	return n, nil
 }

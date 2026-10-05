@@ -138,19 +138,24 @@ const (
 
 // Order is a spot order.
 type Order struct {
-	ID              string
-	UserID          string
-	ClientOrderID   string
-	Symbol          string
-	Side            Side
-	Type            Type
-	TimeInForce     TimeInForce
-	STP             STP
-	Price           decimal.Decimal // LIMIT
-	Quantity        decimal.Decimal // LIMIT, MARKET sells
-	QuoteAmount     decimal.Decimal // MARKET buys
-	Status          Status
-	RejectReason    string
+	ID            string
+	UserID        string
+	ClientOrderID string
+	Symbol        string
+	Side          Side
+	Type          Type
+	TimeInForce   TimeInForce
+	STP           STP
+	Price         decimal.Decimal // LIMIT
+	Quantity      decimal.Decimal // LIMIT, MARKET sells
+	QuoteAmount   decimal.Decimal // MARKET buys
+	Status        Status
+	RejectReason  string
+	// RejectStatus and RejectDetails keep a refusal met while funding the
+	// order (its HTTP status and details), so a repeated request answers
+	// the same; zero and nil for the engine's rejections.
+	RejectStatus    int
+	RejectDetails   map[string]any
 	FilledQuantity  decimal.Decimal
 	FilledQuote     decimal.Decimal
 	FrozenAsset     string

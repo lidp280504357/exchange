@@ -39,17 +39,40 @@ func TestCheckCarriesWhatMarginServiceWeighs(t *testing.T) {
 	}
 }
 
-// answer is a MarginService client whose ReserveOrder fails with err.
+// answer is a MarginService client whose ReserveOrder fails with err, or
+// answers resp (12.5 borrowed as b1 when nil).
 type answer struct {
 	marginv1.MarginServiceClient
-	err error
+	err  error
+	resp *marginv1.ReserveOrderResponse
 }
 
 func (a answer) ReserveOrder(context.Context, *marginv1.ReserveOrderRequest, ...grpc.CallOption) (*marginv1.ReserveOrderResponse, error) {
 	if a.err != nil {
 		return nil, a.err
 	}
+	if a.resp != nil {
+		return a.resp, nil
+	}
 	return &marginv1.ReserveOrderResponse{Borrowed: "12.5", BorrowId: "b1", MarginLevel: "2.4"}, nil
+}
+
+func TestAnswersOutsideTheContractAreNotTakenAsBorrows(t *testing.T) {
+	ctx := context.Background()
+	for _, resp := range []*marginv1.ReserveOrderResponse{
+		{Borrowed: "-1", BorrowId: "b1"},
+		{Borrowed: "1.5"},
+		{Borrowed: "lots", BorrowId: "b1"},
+	} {
+		if _, err := New(answer{resp: resp}).ReserveOrder(ctx, domain.Order{ID: "o1"}); err == nil || apperr.Is(err, "MARGIN_DISABLED") {
+			t.Fatalf("%v: got %v, want an unknown outcome", resp, err)
+		}
+	}
+	// Nothing borrowed: no borrow ID either.
+	r, err := New(answer{resp: &marginv1.ReserveOrderResponse{Borrowed: "0", BorrowId: "b1"}}).ReserveOrder(ctx, domain.Order{})
+	if err != nil || !r.Borrowed.IsZero() || r.BorrowID != "" {
+		t.Fatalf("nothing borrowed: %+v %v", r, err)
+	}
 }
 
 func TestAMarginServiceWithoutTheCallRefusesTheOrder(t *testing.T) {

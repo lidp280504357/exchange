@@ -3,6 +3,7 @@ package margin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/shopspring/decimal"
@@ -35,14 +36,24 @@ func (c *Client) ReserveOrder(ctx context.Context, o domain.Order) (ports.Reserv
 	if err != nil {
 		return ports.Reservation{}, err
 	}
-	r := ports.Reservation{Borrowed: decimal.Zero, BorrowID: resp.GetBorrowId()}
+	r := ports.Reservation{Borrowed: decimal.Zero}
 	if b := resp.GetBorrowed(); b != "" {
-		if r.Borrowed, err = decimal.NewFromString(b); err != nil {
-			return ports.Reservation{}, fmt.Errorf("margin-service borrowed %q for order %s: %w", b, o.ID, err)
+		if r.Borrowed, err = decimal.NewFromString(b); err != nil || r.Borrowed.IsNegative() {
+			return ports.Reservation{}, fmt.Errorf("margin-service borrowed %q for order %s: %w", b, o.ID, errors.Join(err, errBadAnswer))
+		}
+	}
+	// A borrow comes with its ID, and only a borrow does.
+	if r.Borrowed.IsPositive() {
+		if r.BorrowID = resp.GetBorrowId(); r.BorrowID == "" {
+			return ports.Reservation{}, fmt.Errorf("margin-service borrowed %s for order %s without a borrow ID: %w", r.Borrowed, o.ID, errBadAnswer)
 		}
 	}
 	return r, nil
 }
+
+// errBadAnswer marks a reservation that breaks the contract: the outcome
+// is unknown, and recovery asks again.
+var errBadAnswer = errors.New("an answer outside the MarginService contract")
 
 // Check is the order as margin-service checks it: what it freezes, on
 // which account, and its price and quantity for the margin level after it

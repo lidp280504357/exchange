@@ -45,7 +45,10 @@ func (s *Service) release(ctx context.Context, o domain.Order) error {
 		return nil // nothing was frozen
 	}
 	if unused := o.Unused(); unused.IsPositive() {
-		if err := s.Ledger.Unfreeze(ctx, "release:"+o.ID, o.Account(), o.FrozenAsset, unused, o.ID); err != nil {
+		call, cancel := s.bounded(ctx)
+		err := s.Ledger.Unfreeze(call, "release:"+o.ID, o.Account(), o.FrozenAsset, unused, o.ID)
+		cancel()
+		if err != nil {
 			return err
 		}
 	}

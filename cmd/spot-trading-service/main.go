@@ -132,7 +132,8 @@ func setup(ctx context.Context, a *app.App) error {
 // starve the rest (alert TradingOrdersPendingFreeze).
 func recoverLoop(a *app.App, svc *application.Service) func(context.Context) error {
 	pending := prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "trading_orders_pending_freeze", Help: "Orders whose freeze outcome is not recorded yet.",
+		Name: "trading_orders_pending_freeze",
+		Help: "Orders whose freeze outcome is not recorded yet, the ones placed in the last seconds (still in flight) included.",
 	})
 	oldest := prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "trading_orders_pending_freeze_oldest_seconds", Help: "How long the oldest of them has waited; 0 without any.",
@@ -147,22 +148,30 @@ func recoverLoop(a *app.App, svc *application.Service) func(context.Context) err
 				return nil
 			case <-ticker.C:
 			}
-			if n, err := svc.Recover(ctx); err != nil {
-				a.Logger().WarnContext(ctx, "order freeze recovery failed", "error", err)
-			} else if n > 0 {
-				a.Logger().InfoContext(ctx, "orders recovered", "orders", n)
-			}
-			if n, age, err := svc.Pending(ctx); err != nil {
+			// Counted first and on its own deadline: the gauges keep moving
+			// (and the alert keeps its say) while a dependency hangs.
+			count, cancel := context.WithTimeout(ctx, 5*time.Second)
+			if n, age, err := svc.Pending(count); err != nil {
 				a.Logger().WarnContext(ctx, "counting pending orders failed", "error", err)
 			} else {
 				pending.Set(float64(n))
 				oldest.Set(age.Seconds())
 			}
-			if n, err := svc.RecoverReleases(ctx); err != nil {
+			cancel()
+			// Each pass ends within 30 seconds; every call in it within the
+			// service's call timeout.
+			pass, cancel := context.WithTimeout(ctx, 30*time.Second)
+			if n, err := svc.Recover(pass); err != nil {
+				a.Logger().WarnContext(ctx, "order freeze recovery failed", "error", err, "orders_finished", n)
+			} else if n > 0 {
+				a.Logger().InfoContext(ctx, "orders recovered", "orders", n)
+			}
+			if n, err := svc.RecoverReleases(pass); err != nil {
 				a.Logger().WarnContext(ctx, "order release recovery failed", "error", err)
 			} else if n > 0 {
 				a.Logger().InfoContext(ctx, "order releases recovered", "orders", n)
 			}
+			cancel()
 		}
 	}
 }

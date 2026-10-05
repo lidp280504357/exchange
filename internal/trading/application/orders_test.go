@@ -586,6 +586,51 @@ func TestMarginRefusalsRejectTheOrderWithTheirDetails(t *testing.T) {
 		if stored.Status != domain.StatusRejected || stored.RejectReason != refusal.Code || len(led.calls) != 0 {
 			t.Fatalf("%s: stored %+v, %d freezes", refusal.Code, stored, len(led.calls))
 		}
+		// The same request again gets the same answer: kind, code and details.
+		_, again := svc.Place(context.Background(), marginBuy("m1", domain.AccountMarginCross, domain.SideEffectNone))
+		r := apperr.From(again)
+		if r.Code != refusal.Code || r.Kind != refusal.Kind || r.Details["order_id"] != o.ID || len(r.Details) != len(refusal.Details)+1 {
+			t.Fatalf("%s repeated: %v %v", refusal.Code, r, r.Details)
+		}
+		for k, v := range refusal.Details {
+			if r.Details[k] != v {
+				t.Fatalf("%s repeated: detail %s = %v, want %v", refusal.Code, k, r.Details[k], v)
+			}
+		}
+	}
+}
+
+// hangingLedger never answers: each call waits for its context.
+type hangingLedger struct{ fakeLedger }
+
+func (*hangingLedger) Freeze(ctx context.Context, _ string, _ domain.Account, _ string, _ decimal.Decimal, _ string) error {
+	<-ctx.Done()
+	return apperr.Unavailable(ctx.Err())
+}
+
+func TestAHangingLedgerLeavesTheOrderPendingInTime(t *testing.T) {
+	svc, store, _, c := newService()
+	svc.Ledger = &hangingLedger{}
+	svc.CallTimeout = 20 * time.Millisecond
+	ctx := context.Background()
+	start := time.Now()
+	o, err := svc.Place(ctx, buy("c1"))
+	if err != nil || o.FreezeState != domain.FreezePending || time.Since(start) > 2*time.Second {
+		t.Fatalf("pending after %v: %+v %v", time.Since(start), o, err)
+	}
+	// A recovery pass leaves it pending, counts nothing finished, and stops
+	// at its deadline.
+	c.t = c.t.Add(11 * time.Second)
+	if n, err := svc.Recover(ctx); err != nil || n != 0 {
+		t.Fatalf("recover: %d %v", n, err)
+	}
+	done, cancel := context.WithCancel(ctx)
+	cancel()
+	if n, err := svc.Recover(done); !errors.Is(err, context.Canceled) || n != 0 {
+		t.Fatalf("a pass past its deadline: %d %v", n, err)
+	}
+	if got, _ := store.Read().Orders().Get(ctx, o.ID); got.FreezeState != domain.FreezePending {
+		t.Fatalf("stored: %+v", got)
 	}
 }
 
