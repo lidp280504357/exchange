@@ -96,9 +96,12 @@ f.atExit(() => cancelOrders(API, user));
 // P2 and P6 place a limit buy of 0.0002 BTC: they need the welcome funds.
 // What the platform gives is in its profile (nothing at launch: they are
 // skipped, saying so); the ledger credits them a moment after the sign-up.
-const profile = await api(API, "GET", "/v1/platform/profile");
-user.gift = Number(profile.body?.welcome_credits?.find((c) => c.asset === "USDT")?.amount ?? 0);
 user.usdt = 0;
+await f.step("—", "what the platform gives a new account (its profile)", async () => {
+  const profile = await api(API, "GET", "/v1/platform/profile");
+  if (profile.status !== 200) throw new Error(`/v1/platform/profile: ${profile.status}`);
+  user.gift = Number(profile.body.welcome_credits.find((c) => c.asset === "USDT")?.amount ?? 0);
+});
 if (user.gift > 0) {
   await f.step("—", `the welcome funds arrive (${user.gift} USDT)`, async () => {
     const until = Date.now() + 40_000;
@@ -108,8 +111,14 @@ if (user.gift > 0) {
     }
   });
 }
-const NO_FUNDS = () =>
-  user.gift <= 0 ? "the platform gives no welcome funds" : user.usdt < 50 ? `the welcome funds did not arrive (${user.usdt} USDT)` : "";
+// The reason P2 and P6 cannot run, or "" (50 USDT is more than the order needs at any recent price).
+const NO_FUNDS = () => {
+  if (user.gift === undefined) return "the platform profile could not be read";
+  if (user.gift <= 0) return "the platform gives no welcome funds";
+  if (user.usdt <= 0) return `the welcome funds (${user.gift} USDT) did not arrive`;
+  if (user.usdt < 50) return `the welcome funds, ${user.usdt} USDT, are short of the 50 USDT a 0.0002 BTC limit buy is given`;
+  return "";
+};
 
 /** cleared cancels the account's orders after an order step, its failure not hiding the step's own. */
 async function cleared() {
@@ -892,15 +901,19 @@ else await f.step("P8", P8, async () => {
 
 // --- the account leaves nothing on the book -----------------------------------------------------
 
+// The order steps cancel their own: a step whose cancelling failed shows
+// here, before the exit's cleanup cancels what is left.
 await f.step("—", "no order of the flows' account is left open", async () => {
-  await cancelOrders(API, user);
   const token = await signInApi(API, user);
-  const until = Date.now() + 20_000;
+  const until = Date.now() + 15_000;
   for (;;) {
     const open = await api(API, "GET", "/v1/orders?status=ACTIVE", undefined, { Authorization: `Bearer ${token}` });
     if (open.status !== 200) throw new Error(`active orders: ${open.status}`);
     if (!open.body.items.length) return;
-    if (Date.now() > until) throw new Error(`${open.body.items.length} orders still open`);
+    if (Date.now() > until) {
+      const left = open.body.items.map((o) => `${o.symbol} ${o.side} ${o.price ?? ""} (${o.order_id})`).join(", ");
+      throw new Error(`${open.body.items.length} orders left open by the steps: ${left}`);
+    }
     await new Promise((r) => setTimeout(r, 1000));
   }
 });

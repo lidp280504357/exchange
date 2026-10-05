@@ -78,11 +78,16 @@ export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
     const mine = steps.getStore();
     if (mine !== undefined && mine !== current) throw new Error("a tab used after its step's budget ran out");
   };
-  /** guarded is page with each of its methods behind guard(). */
+  /**
+   * guarded is page with each of its methods behind guard(), and so are
+   * its keyboard, mouse and touchscreen (a sign-in ends with a key press).
+   */
+  const devices = new Set(["keyboard", "mouse", "touchscreen"]);
   const guarded = (page) =>
     new Proxy(page, {
       get(target, prop) {
         const v = Reflect.get(target, prop, target);
+        if (devices.has(prop) && v && typeof v === "object") return guarded(v);
         if (typeof v !== "function") return v;
         return (...args) => {
           guard();

@@ -31,13 +31,14 @@ const nav = (tab, path) => tab.nav(path);
 
 /**
  * signIn signs in with the password alone (admin.login_without_totp) and
- * waits for the console at next. The console takes 10 sign-ins a minute
- * from an address (scripts before this one may have used some): a 429
- * waits as long as its Retry-After says (a minute without one), once.
+ * waits for the console at next; here: on the sign-in page the tab is on
+ * (where the console sent it). The console takes 10 sign-ins a minute from
+ * an address (scripts before this one may have used some): a 429 waits as
+ * long as its Retry-After says (a minute without one), once.
  */
-async function signIn(tab, who, next = "/") {
+async function signIn(tab, who, next = "/", { here = false } = {}) {
   for (let attempt = 0; ; attempt++) {
-    await tab.go(next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`);
+    if (!here || attempt > 0) await tab.go(next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`);
     await tab.page.waitForFunction(() => document.querySelector("form button[type=submit]")?.disabled === false, { timeout: 20000 });
     await tab.typeInto('input[autocomplete="username"]', who.email);
     await tab.typeInto('input[autocomplete="current-password"]', who.password);
@@ -141,11 +142,7 @@ await f.step("1", "every section of the sidebar opens its page; a visitor sent t
   try {
     await V.go("/users?status=FROZEN");
     await V.page.waitForFunction(() => location.pathname === "/login" && new URLSearchParams(location.search).get("next") === "/users?status=FROZEN", { timeout: 15000 });
-    await V.page.waitForFunction(() => document.querySelector("form button[type=submit]")?.disabled === false, { timeout: 20000 });
-    await V.typeInto('input[autocomplete="username"]', AUDITOR.email);
-    await V.typeInto('input[autocomplete="current-password"]', AUDITOR.password);
-    await V.page.keyboard.press("Enter");
-    await V.page.waitForFunction(() => location.pathname + location.search === "/users?status=FROZEN", { timeout: 30000 });
+    await signIn(V, AUDITOR, "/users?status=FROZEN", { here: true });
   } finally {
     await V.close();
   }

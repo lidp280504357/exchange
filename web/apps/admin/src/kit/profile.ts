@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 
 // The platform profile as the sites read it (design 2026-10-04 §4.1): the
 // platform page edits it, and the content pages ask it which mode the
-// exchange is in. Every administrator may read it.
+// exchange is in. Reading it takes reports.read, which all four roles have.
 
 export const platformKey = ["admin", "platform"];
 

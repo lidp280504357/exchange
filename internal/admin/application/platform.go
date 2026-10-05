@@ -386,7 +386,9 @@ func (s *Service) requestWelcome(ctx context.Context, p Principal, cur welcomeSe
 			return err
 		}
 		for _, o := range pending {
-			if o.Payload["expected_version"] != a.Payload["expected_version"] {
+			// One asked against another version, or not decided within a
+			// day (it can only fail now), stands in no one's way (review BO).
+			if o.Payload["expected_version"] != a.Payload["expected_version"] || lapsedAt(o, a.CreatedAt) {
 				continue
 			}
 			var asked []ports.WelcomeCredit

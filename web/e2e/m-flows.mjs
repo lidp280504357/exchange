@@ -73,7 +73,7 @@ const center = (tab, selector) =>
 
 // --- the account -----------------------------------------------------------
 
-await f.step("—", "an account over the API (the welcome funds)", () => register(API, f.bypass, user.email, user.password), { fatal: true });
+await f.step("—", "an account over the API", () => register(API, f.bypass, user.email, user.password), { fatal: true });
 const A = await f.open({ name: "main", device: phone(390) });
 await f.step("—", "the main tab signs in", () => signIn(A), { fatal: true });
 
@@ -426,28 +426,27 @@ await f.step("12", "figures in tabular digits, amounts right-aligned in the trad
   const pair = pairs.body.pairs.find((p) => p.symbol === "BTC-USDT");
   if (!pair) throw new Error("no BTC-USDT in /v1/market/pairs");
   // Each asset card's total, available and frozen at the asset's decimals
-  // (at most 8, cut); an account given nothing may have no card.
+  // (at most 8, cut). An account the platform gave something has cards (up
+  // to 20 s for them); one given nothing may have none: read as they are.
+  const profile = await api(API, "GET", "/v1/platform/profile");
+  if (profile.status !== 200) throw new Error(`/v1/platform/profile: ${profile.status}`);
+  const given = profile.body.welcome_credits.length > 0;
   await nav(A, "/assets");
-  const held = await A.page
-    .waitForFunction(
-      () => {
-        const cards = [...document.querySelectorAll('ul[aria-label="我的资产"] > *')].slice(0, 20);
-        return cards.length
-          ? cards.map((c) => ({
-              asset: c.querySelector(".font-medium")?.innerText.trim() ?? "",
-              values: [...c.querySelectorAll(".tabular-nums")].filter((s) => !s.parentElement.innerText.trim().startsWith("≈")).map((s) => s.innerText.trim()),
-            }))
-          : null;
-      },
-      { timeout: 20000 },
-    )
-    .then((h) => h.jsonValue())
-    .catch(() => []);
+  const readCards = () => {
+    const cards = [...document.querySelectorAll('ul[aria-label="我的资产"] > *')].slice(0, 20).map((c) => ({
+      asset: c.querySelector(".font-medium")?.innerText.trim() ?? "",
+      values: [...c.querySelectorAll(".tabular-nums")].filter((s) => !s.parentElement.innerText.trim().startsWith("≈")).map((s) => s.innerText.trim()),
+    }));
+    return cards.length ? cards : null;
+  };
+  const held = given
+    ? await A.page
+        .waitForFunction(readCards, { timeout: 20000 })
+        .then((h) => h.jsonValue())
+        .catch(() => [])
+    : ((await A.page.evaluate(readCards)) ?? []);
   if (held.length) problems.push(...decimalIssues("assets", held, await listDecimals(API)));
-  else {
-    const profile = await api(API, "GET", "/v1/platform/profile");
-    if ((profile.body?.welcome_credits ?? []).length) problems.push("assets: no asset card read (the account was given welcome funds)");
-  }
+  else if (given) problems.push("assets: no asset card read (the account was given welcome funds)");
   await nav(A, "/trade/BTC-USDT");
   await clickTab(A, "成交");
   await A.page.waitForFunction(() => document.querySelectorAll("[role=tabpanel]:not([hidden]) button.grid").length > 2, { timeout: 20000 });

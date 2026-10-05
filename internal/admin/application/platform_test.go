@@ -328,6 +328,11 @@ func TestWelcomeCredits(t *testing.T) {
 	if err != nil || len(list) != 1 || !list[0].Lapsed {
 		t.Fatalf("listed %+v %v", list, err)
 	}
+	// Lapsed, it no longer keeps the same raise from being asked again (review BO).
+	again, err = h.svc.SetWelcomeCredits(ctx, boss, []ports.WelcomeCredit{credit("USDT", "2000"), credit("BTC", "0.01")}, pl.version, "more, asked again")
+	if err != nil || again.Approval == nil || again.Approval.ID == res.Approval.ID {
+		t.Fatalf("the same raise once the first lapsed: %+v %v", again, err)
+	}
 	version := pl.version
 	done, err = h.svc.DecideApproval(ctx, second, res.Approval.ID, true, "a day late")
 	if err != nil || done.Status != domain.ApprovalFailed || !strings.HasPrefix(done.Result, "expired at ") || pl.version != version {
