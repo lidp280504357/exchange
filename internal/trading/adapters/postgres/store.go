@@ -55,19 +55,19 @@ type orders repos
 const columns = `id, user_id, client_order_id, symbol, side, type, time_in_force, stp, price, quantity, quote_amount,
 	status, reject_reason, filled_quantity, filled_quote, frozen_asset, frozen_amount, freeze_state, maker_fee_rate,
 	taker_fee_rate, base_decimals, quote_decimals, protection_price, cancel_requested, sequence, created_at, updated_at,
-	tick_size, lot_size, base_asset, quote_asset, cancel_reason, released, account_type, side_effect`
+	tick_size, lot_size, base_asset, quote_asset, cancel_reason, released, account_type, side_effect, borrowed, borrow_id`
 
 var activeStatuses = []string{string(domain.StatusNew), string(domain.StatusOpen), string(domain.StatusPartiallyFilled)}
 
 func scan(row pgx.Row) (domain.Order, error) {
 	var o domain.Order
-	var price, qty, quote, protection, tick, lot decimal.NullDecimal
-	var reject, base, quoteAsset, cancel *string
+	var price, qty, quote, protection, tick, lot, borrowed decimal.NullDecimal
+	var reject, base, quoteAsset, cancel, borrowID *string
 	err := row.Scan(&o.ID, &o.UserID, &o.ClientOrderID, &o.Symbol, &o.Side, &o.Type, &o.TimeInForce, &o.STP,
 		&price, &qty, &quote, &o.Status, &reject, &o.FilledQuantity, &o.FilledQuote, &o.FrozenAsset, &o.FrozenAmount,
 		&o.FreezeState, &o.MakerFeeRate, &o.TakerFeeRate, &o.BaseDecimals, &o.QuoteDecimals, &protection,
 		&o.CancelRequested, &o.Sequence, &o.CreatedAt, &o.UpdatedAt, &tick, &lot, &base, &quoteAsset, &cancel, &o.Released,
-		&o.AccountType, &o.SideEffect)
+		&o.AccountType, &o.SideEffect, &borrowed, &borrowID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Order{}, domain.ErrOrderNotFound
 	}
@@ -77,6 +77,7 @@ func scan(row pgx.Row) (domain.Order, error) {
 	o.Price, o.Quantity, o.QuoteAmount, o.ProtectionPrice = price.Decimal, qty.Decimal, quote.Decimal, protection.Decimal
 	o.TickSize, o.LotSize = tick.Decimal, lot.Decimal
 	o.RejectReason, o.BaseAsset, o.QuoteAsset, o.CancelReason = str(reject), str(base), str(quoteAsset), str(cancel)
+	o.Borrowed, o.BorrowID = borrowed.Decimal, str(borrowID)
 	return o, nil
 }
 
@@ -125,12 +126,13 @@ func (r orders) LockUser(ctx context.Context, userID string) error {
 func (r orders) Insert(ctx context.Context, o domain.Order) error {
 	_, err := r.q.Exec(ctx, `INSERT INTO orders (`+columns+`)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27,
-			$28, $29, $30, $31, $32, $33, $34, $35)`,
+			$28, $29, $30, $31, $32, $33, $34, $35, $36, $37)`,
 		o.ID, o.UserID, o.ClientOrderID, o.Symbol, o.Side, o.Type, o.TimeInForce, o.STP, null(o.Price), null(o.Quantity),
 		null(o.QuoteAmount), o.Status, text(o.RejectReason), o.FilledQuantity, o.FilledQuote, o.FrozenAsset, o.FrozenAmount,
 		o.FreezeState, o.MakerFeeRate, o.TakerFeeRate, o.BaseDecimals, o.QuoteDecimals, null(o.ProtectionPrice),
 		o.CancelRequested, o.Sequence, o.CreatedAt, o.UpdatedAt, null(o.TickSize), null(o.LotSize), text(o.BaseAsset),
-		text(o.QuoteAsset), text(o.CancelReason), o.Released, accountType(o.AccountType), sideEffect(o.SideEffect))
+		text(o.QuoteAsset), text(o.CancelReason), o.Released, accountType(o.AccountType), sideEffect(o.SideEffect),
+		null(o.Borrowed), text(o.BorrowID))
 	if err != nil {
 		return fmt.Errorf("insert order: %w", err)
 	}
@@ -152,10 +154,11 @@ func (r orders) ByClientID(ctx context.Context, userID, clientOrderID string) (d
 
 func (r orders) Update(ctx context.Context, o domain.Order) error {
 	_, err := r.q.Exec(ctx, `UPDATE orders SET status = $2, reject_reason = $3, filled_quantity = $4, filled_quote = $5,
-		freeze_state = $6, cancel_requested = $7, sequence = $8, updated_at = $9, cancel_reason = $10, released = $11
+		freeze_state = $6, cancel_requested = $7, sequence = $8, updated_at = $9, cancel_reason = $10, released = $11,
+		borrowed = $12, borrow_id = $13
 		WHERE id = $1`,
 		o.ID, o.Status, text(o.RejectReason), o.FilledQuantity, o.FilledQuote, o.FreezeState, o.CancelRequested,
-		o.Sequence, o.UpdatedAt, text(o.CancelReason), o.Released)
+		o.Sequence, o.UpdatedAt, text(o.CancelReason), o.Released, null(o.Borrowed), text(o.BorrowID))
 	if err != nil {
 		return fmt.Errorf("update order: %w", err)
 	}
@@ -190,6 +193,19 @@ func (r orders) List(ctx context.Context, userID string, f ports.ListFilter) ([]
 func (r orders) PendingFreeze(ctx context.Context, cutoff time.Time, limit int) ([]domain.Order, error) {
 	return r.query(ctx, `SELECT `+columns+` FROM orders WHERE freeze_state = 'PENDING' AND created_at < $1
 		ORDER BY created_at LIMIT $2`, cutoff, limit)
+}
+
+func (r orders) PendingStats(ctx context.Context) (int, time.Time, error) {
+	var n int
+	var oldest *time.Time
+	err := r.q.QueryRow(ctx, `SELECT count(*), min(created_at) FROM orders WHERE freeze_state = 'PENDING'`).Scan(&n, &oldest)
+	if err != nil {
+		return 0, time.Time{}, fmt.Errorf("count pending orders: %w", err)
+	}
+	if oldest == nil {
+		return n, time.Time{}, nil
+	}
+	return n, *oldest, nil
 }
 
 func (r orders) query(ctx context.Context, sql string, args ...any) ([]domain.Order, error) {

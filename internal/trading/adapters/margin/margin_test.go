@@ -46,7 +46,10 @@ type answer struct {
 }
 
 func (a answer) ReserveOrder(context.Context, *marginv1.ReserveOrderRequest, ...grpc.CallOption) (*marginv1.ReserveOrderResponse, error) {
-	return &marginv1.ReserveOrderResponse{}, a.err
+	if a.err != nil {
+		return nil, a.err
+	}
+	return &marginv1.ReserveOrderResponse{Borrowed: "12.5", BorrowId: "b1", MarginLevel: "2.4"}, nil
 }
 
 func TestAMarginServiceWithoutTheCallRefusesTheOrder(t *testing.T) {
@@ -54,15 +57,16 @@ func TestAMarginServiceWithoutTheCallRefusesTheOrder(t *testing.T) {
 	unimplemented := status.Error(codes.Unimplemented, "unknown method ReserveOrder")
 	// As the call returns it, and as grpcx's client interceptor wraps it.
 	for _, err := range []error{unimplemented, apperr.Internal(unimplemented)} {
-		if got := New(answer{err: err}).ReserveOrder(ctx, domain.Order{}); !apperr.Is(got, "MARGIN_DISABLED") {
+		if _, got := New(answer{err: err}).ReserveOrder(ctx, domain.Order{}); !apperr.Is(got, "MARGIN_DISABLED") {
 			t.Fatalf("%v: got %v", err, got)
 		}
 	}
 	unavailable := apperr.Unavailable(status.Error(codes.Unavailable, "connection refused"))
-	if got := New(answer{err: unavailable}).ReserveOrder(ctx, domain.Order{}); got != unavailable { //nolint:errorlint // passed through as is
+	if _, got := New(answer{err: unavailable}).ReserveOrder(ctx, domain.Order{}); got != unavailable { //nolint:errorlint // passed through as is
 		t.Fatalf("an outage: got %v", got)
 	}
-	if got := New(answer{}).ReserveOrder(ctx, domain.Order{}); got != nil {
-		t.Fatalf("a reservation: got %v", got)
+	r, err := New(answer{}).ReserveOrder(ctx, domain.Order{})
+	if err != nil || !r.Borrowed.Equal(decimal.RequireFromString("12.5")) || r.BorrowID != "b1" {
+		t.Fatalf("a reservation: %+v %v", r, err)
 	}
 }

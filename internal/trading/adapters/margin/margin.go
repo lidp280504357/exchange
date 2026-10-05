@@ -3,6 +3,7 @@ package margin
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/shopspring/decimal"
 	"google.golang.org/grpc/codes"
@@ -11,6 +12,7 @@ import (
 	marginv1 "github.com/skill/exchange/api/gen/go/exchange/margin/v1"
 	orderv1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
 	"github.com/skill/exchange/internal/trading/domain"
+	"github.com/skill/exchange/internal/trading/ports"
 )
 
 // Client implements ports.Margin.
@@ -21,16 +23,25 @@ func New(c marginv1.MarginServiceClient) *Client { return &Client{c: c} }
 
 // ReserveOrder checks the order against its margin account and, with
 // AUTO_BORROW, borrows what the free balance lacks (idempotent by the
-// order's ID). margin-service's refusals come back as their codes, with
-// their details. A margin-service that does not serve the call yet
-// refuses the order as MARGIN_DISABLED: left pending, it would go to the
-// engine whenever the call arrived.
-func (c *Client) ReserveOrder(ctx context.Context, o domain.Order) error {
-	_, err := c.c.ReserveOrder(ctx, &marginv1.ReserveOrderRequest{Order: Check(o)})
+// order's ID), and returns what it borrowed. margin-service's refusals
+// come back as their codes, with their details. A margin-service that does
+// not serve the call yet refuses the order as MARGIN_DISABLED: left
+// pending, it would go to the engine whenever the call arrived.
+func (c *Client) ReserveOrder(ctx context.Context, o domain.Order) (ports.Reservation, error) {
+	resp, err := c.c.ReserveOrder(ctx, &marginv1.ReserveOrderRequest{Order: Check(o)})
 	if status.Code(err) == codes.Unimplemented {
-		return domain.ErrMarginDisabled
+		return ports.Reservation{}, domain.ErrMarginDisabled
 	}
-	return err
+	if err != nil {
+		return ports.Reservation{}, err
+	}
+	r := ports.Reservation{Borrowed: decimal.Zero, BorrowID: resp.GetBorrowId()}
+	if b := resp.GetBorrowed(); b != "" {
+		if r.Borrowed, err = decimal.NewFromString(b); err != nil {
+			return ports.Reservation{}, fmt.Errorf("margin-service borrowed %q for order %s: %w", b, o.ID, err)
+		}
+	}
+	return r, nil
 }
 
 // Check is the order as margin-service checks it: what it freezes, on

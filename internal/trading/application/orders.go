@@ -150,12 +150,18 @@ func (s *Service) fund(ctx context.Context, o domain.Order) (domain.Order, error
 		if s.Margin == nil {
 			return s.reject(ctx, o, domain.ErrMarginDisabled)
 		}
-		if err := s.Margin.ReserveOrder(ctx, o); err != nil {
+		r, err := s.Margin.ReserveOrder(ctx, o)
+		if err != nil {
 			if e := apperr.From(err); refused(e) {
 				return s.reject(ctx, o, e)
 			}
 			s.Log.WarnContext(ctx, "margin reservation did not complete; recovery retries it", "order_id", o.ID, "error", err)
 			return o, nil
+		}
+		o.Borrowed, o.BorrowID = r.Borrowed, r.BorrowID
+		if r.Borrowed.IsPositive() {
+			s.Log.InfoContext(ctx, "margin order borrowed", "order_id", o.ID, "asset", o.FrozenAsset,
+				"borrowed", r.Borrowed.String(), "borrow_id", r.BorrowID)
 		}
 	}
 	err := s.Ledger.Freeze(ctx, "order:"+o.ID, o.Account(), o.FrozenAsset, o.FrozenAmount, o.ID)
@@ -177,6 +183,7 @@ func (s *Service) fund(ctx context.Context, o domain.Order) (domain.Order, error
 			return nil // recovery got here first
 		}
 		cur.FreezeState, cur.UpdatedAt = domain.FreezeDone, s.Now()
+		cur.Borrowed, cur.BorrowID = o.Borrowed, o.BorrowID
 		if err := r.Orders().Update(ctx, cur); err != nil {
 			return err
 		}
@@ -198,15 +205,19 @@ func (s *Service) fund(ctx context.Context, o domain.Order) (domain.Order, error
 	return out, err
 }
 
-// refused tells a service's answer, which rejects the order, from a
-// failure to answer, whose outcome is unknown: MARGIN_PRICE_UNAVAILABLE is
-// margin-service's answer although it is a 503.
+// refused tells a service's answer from a failure to answer, for placing
+// and recovering alike: an answer (any coded refusal, and
+// MARGIN_PRICE_UNAVAILABLE although it is a 503) rejects the order; a
+// failure (internal, unavailable, canceled) leaves the outcome unknown,
+// and recovery retries it.
 func refused(e *apperr.Error) bool {
 	switch e.Kind {
-	case apperr.KindInvalid, apperr.KindUnprocessable, apperr.KindConflict, apperr.KindForbidden:
-		return true
+	case apperr.KindInternal:
+		return false
+	case apperr.KindUnavailable:
+		return e.Code == "MARGIN_PRICE_UNAVAILABLE"
 	}
-	return e.Code == "MARGIN_PRICE_UNAVAILABLE"
+	return true
 }
 
 // houseOnly decides whether an order of the pair trades only with HOUSE's
@@ -240,6 +251,9 @@ func (s *Service) reject(ctx context.Context, o domain.Order, cause *apperr.Erro
 			return nil
 		}
 		cur.Status, cur.RejectReason, cur.FreezeState, cur.UpdatedAt = domain.StatusRejected, cause.Code, domain.FreezeNone, s.Now()
+		// A borrow made for the order stays when the freeze is refused; the
+		// order keeps it on record.
+		cur.Borrowed, cur.BorrowID = o.Borrowed, o.BorrowID
 		if err := r.Orders().Update(ctx, cur); err != nil {
 			return err
 		}
@@ -270,7 +284,7 @@ func (s *Service) Recover(ctx context.Context) (int, error) {
 	}
 	n := 0
 	for _, o := range pending {
-		if _, err := s.fund(ctx, o); err != nil && !isRejection(err) {
+		if _, err := s.fund(ctx, o); err != nil && !refused(apperr.From(err)) {
 			return n, err
 		}
 		n++
@@ -278,9 +292,14 @@ func (s *Service) Recover(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-func isRejection(err error) bool {
-	e := apperr.From(err)
-	return e.Kind != apperr.KindInternal && e.Kind != apperr.KindUnavailable
+// Pending reports the orders whose freeze outcome is not recorded yet:
+// how many, and how long the oldest has waited (zero without any).
+func (s *Service) Pending(ctx context.Context) (int, time.Duration, error) {
+	n, oldest, err := s.Store.Read().Orders().PendingStats(ctx)
+	if err != nil || n == 0 {
+		return n, 0, err
+	}
+	return n, max(s.Now().Sub(oldest), 0), nil
 }
 
 // Cancel asks the engine to cancel one of the user's orders (§11.2: the

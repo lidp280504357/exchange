@@ -42,6 +42,22 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'trading_orders_pending_freeze_oldest_seconds{job="spot-trading-service"}'
+        values: '0 0 400 460 520 580 640 700 760 820'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: TradingOrdersPendingFreeze
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: TradingOrdersPendingFreeze
+        exp_alerts:
+          - exp_labels: {severity: warning, job: spot-trading-service}
+            exp_annotations:
+              summary: an order has waited 760 seconds for its freeze (ledger or margin-service unreachable?); recovery takes the 100 oldest each pass
+              runbook: docs/runbook/trading.md
+
+  - interval: 1m
+    input_series:
       - series: 'kafka_consumer_records_total{job="ledger-service", group="ledger-service", topic="user.events", result="dlq"}'
         values: '0 0 0 1 1'
       - series: 'kafka_consumer_records_total{job="ledger-service", group="ledger-service", topic="user.events", result="ok"}'

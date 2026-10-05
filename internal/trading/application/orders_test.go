@@ -141,7 +141,21 @@ func (r memOrders) PendingFreeze(_ context.Context, cutoff time.Time, limit int)
 			out = append(out, o)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out[:min(len(out), limit)], nil
+}
+
+func (r memOrders) PendingStats(context.Context) (int, time.Time, error) {
+	n, oldest := 0, time.Time{}
+	for _, o := range r.s.orders {
+		if o.FreezeState == domain.FreezePending {
+			n++
+			if oldest.IsZero() || o.CreatedAt.Before(oldest) {
+				oldest = o.CreatedAt
+			}
+		}
+	}
+	return n, oldest, nil
 }
 
 // fakeLedger answers freezes with err (nil freezes), unfreezes with
@@ -169,16 +183,23 @@ func (l *fakeLedger) Freeze(_ context.Context, key string, a domain.Account, ass
 	return l.err
 }
 
-// fakeMargin answers reservations with err (nil reserves) and records the
-// orders it was asked about.
+// fakeMargin answers reservations with err, or borrows borrowed, and
+// records the orders it was asked about.
 type fakeMargin struct {
-	err    error
-	orders []domain.Order
+	err      error
+	borrowed string
+	orders   []domain.Order
 }
 
-func (m *fakeMargin) ReserveOrder(_ context.Context, o domain.Order) error {
+func (m *fakeMargin) ReserveOrder(_ context.Context, o domain.Order) (ports.Reservation, error) {
 	m.orders = append(m.orders, o)
-	return m.err
+	if m.err != nil {
+		return ports.Reservation{}, m.err
+	}
+	if m.borrowed == "" {
+		return ports.Reservation{Borrowed: decimal.Zero}, nil
+	}
+	return ports.Reservation{Borrowed: d(m.borrowed), BorrowID: "borrow-" + o.ID}, nil
 }
 
 // switches turns the named flags on for everyone.
@@ -511,11 +532,11 @@ func TestMarginOrdersWaitForTheirSwitches(t *testing.T) {
 func TestMarginOrdersAreReservedThenFrozenOnTheirAccount(t *testing.T) {
 	svc, store, led, _ := newService()
 	ctx := context.Background()
-	margin := &fakeMargin{}
+	margin := &fakeMargin{borrowed: "20"}
 	svc.Margin = margin
 	svc.Features = switches{flags.KeyMarginEnabled: true, flags.KeyMarginAutoBorrow: true}
 	o, err := svc.Place(ctx, marginBuy("m1", domain.AccountMarginIsolated, domain.SideEffectAutoBorrow))
-	if err != nil || o.FreezeState != domain.FreezeDone {
+	if err != nil || o.FreezeState != domain.FreezeDone || !o.Borrowed.Equal(d("20")) || o.BorrowID != "borrow-"+o.ID {
 		t.Fatalf("place: %+v %v", o, err)
 	}
 	if len(margin.orders) != 1 || margin.orders[0].ID != o.ID || !margin.orders[0].FrozenAmount.Equal(d("60")) {
@@ -565,6 +586,71 @@ func TestMarginRefusalsRejectTheOrderWithTheirDetails(t *testing.T) {
 		if stored.Status != domain.StatusRejected || stored.RejectReason != refusal.Code || len(led.calls) != 0 {
 			t.Fatalf("%s: stored %+v, %d freezes", refusal.Code, stored, len(led.calls))
 		}
+	}
+}
+
+func TestARefusedFreezeKeepsTheBorrowOnRecord(t *testing.T) {
+	svc, store, led, _ := newService()
+	svc.Margin = &fakeMargin{borrowed: "20"}
+	svc.Features = switches{flags.KeyMarginEnabled: true, flags.KeyMarginAutoBorrow: true}
+	led.err = apperr.New(apperr.KindUnprocessable, "LEDGER_INSUFFICIENT_BALANCE", "insufficient balance")
+	o, err := svc.Place(context.Background(), marginBuy("m1", domain.AccountMarginCross, domain.SideEffectAutoBorrow))
+	if !apperr.Is(err, "LEDGER_INSUFFICIENT_BALANCE") {
+		t.Fatalf("place: %v", err)
+	}
+	stored, _ := store.Read().Orders().Get(context.Background(), o.ID)
+	if stored.Status != domain.StatusRejected || !stored.Borrowed.Equal(d("20")) || stored.BorrowID != "borrow-"+o.ID {
+		t.Fatalf("stored: %+v", stored)
+	}
+}
+
+// Every coded answer of a dependency is final, for placing and recovering
+// alike; only failures to answer leave the order to recovery.
+func TestAnswersRejectAndFailuresWait(t *testing.T) {
+	for _, tc := range []struct {
+		err   *apperr.Error
+		final bool
+	}{
+		{apperr.NotFound("no such account"), true},
+		{apperr.New(apperr.KindUnauthenticated, apperr.CodeUnauthorized, "who"), true},
+		{apperr.New(apperr.KindRateLimited, apperr.CodeRateLimited, "slow down"), true},
+		{apperr.New(apperr.KindUnavailable, "MARGIN_PRICE_UNAVAILABLE", "never priced"), true},
+		{apperr.Unavailable(errors.New("connection refused")), false},
+		{apperr.Internal(errors.New("boom")), false},
+	} {
+		if got := refused(tc.err); got != tc.final {
+			t.Errorf("%s (%v): refused %v, want %v", tc.err.Code, tc.err.Kind, got, tc.final)
+		}
+	}
+}
+
+// A refusal met while recovering finishes that order and the batch goes on.
+func TestRecoveryGoesOnPastRefusals(t *testing.T) {
+	svc, store, led, c := newService()
+	ctx := context.Background()
+	margin := &fakeMargin{err: apperr.Unavailable(errors.New("connection refused"))}
+	svc.Margin = margin
+	svc.Features = switches{flags.KeyMarginEnabled: true}
+	first, _ := svc.Place(ctx, marginBuy("m1", domain.AccountMarginCross, domain.SideEffectNone))
+	c.t = c.t.Add(time.Second)
+	led.err = apperr.Unavailable(errors.New("connection refused"))
+	second, _ := svc.Place(ctx, buy("s1"))
+	if n, oldest, err := svc.Pending(ctx); err != nil || n != 2 || oldest != time.Second {
+		t.Fatalf("pending: %d %v %v", n, oldest, err)
+	}
+	margin.err = apperr.New(apperr.KindUnavailable, "MARGIN_PRICE_UNAVAILABLE", "never priced")
+	led.err = nil
+	c.t = c.t.Add(11 * time.Second)
+	if n, err := svc.Recover(ctx); err != nil || n != 2 {
+		t.Fatalf("recover: %d %v", n, err)
+	}
+	a, _ := store.Read().Orders().Get(ctx, first.ID)
+	b, _ := store.Read().Orders().Get(ctx, second.ID)
+	if a.Status != domain.StatusRejected || a.RejectReason != "MARGIN_PRICE_UNAVAILABLE" || b.FreezeState != domain.FreezeDone {
+		t.Fatalf("after recovery: %s %s, %s", a.Status, a.RejectReason, b.FreezeState)
+	}
+	if n, oldest, err := svc.Pending(ctx); err != nil || n != 0 || oldest != 0 {
+		t.Fatalf("pending after: %d %v %v", n, oldest, err)
 	}
 }
 

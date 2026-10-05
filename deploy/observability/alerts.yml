@@ -125,6 +125,14 @@ groups:
           summary: "the ledger refused {{ $value }} contract settlements in 15 minutes (insurance fund short?); they wait in pending_settlements"
           runbook: docs/runbook/derivatives.md
 
+      - alert: TradingOrdersPendingFreeze
+        expr: max by (job) (trading_orders_pending_freeze_oldest_seconds) > 300
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "an order has waited {{ $value }} seconds for its freeze (ledger or margin-service unreachable?); recovery takes the 100 oldest each pass"
+          runbook: docs/runbook/trading.md
+
       - alert: LedgerReconciliationStopped
         expr: increase(ledger_reconcile_runs_total[3h]) == 0
         labels: {severity: warning}

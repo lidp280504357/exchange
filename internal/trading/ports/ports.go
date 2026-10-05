@@ -52,6 +52,9 @@ type OrderRepo interface {
 	// PendingFreeze returns orders created before cutoff whose freeze was
 	// not recorded.
 	PendingFreeze(ctx context.Context, cutoff time.Time, limit int) ([]domain.Order, error)
+	// PendingStats counts the orders whose freeze was not recorded and
+	// returns when the oldest was created.
+	PendingStats(ctx context.Context) (int, time.Time, error)
 	// Unreleased returns funded orders that finished before cutoff and
 	// whose unused funds are not released yet.
 	Unreleased(ctx context.Context, cutoff time.Time, limit int) ([]domain.Order, error)
@@ -95,7 +98,15 @@ type Ledger interface {
 // the free balance lacks. Idempotent by the order's ID: a repeat returns
 // the first outcome.
 type Margin interface {
-	ReserveOrder(ctx context.Context, o domain.Order) error
+	ReserveOrder(ctx context.Context, o domain.Order) (Reservation, error)
+}
+
+// Reservation is margin-service's outcome for an order: what it borrowed
+// of the order's frozen asset (zero when the free balance covered it) and
+// the borrow's ID.
+type Reservation struct {
+	Borrowed decimal.Decimal
+	BorrowID string
 }
 
 // Instruments reads trading pairs (instrument-service gRPC).

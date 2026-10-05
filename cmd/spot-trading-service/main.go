@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	instrumentv1 "github.com/skill/exchange/api/gen/go/exchange/instrument/v1"
 	ledgerv1 "github.com/skill/exchange/api/gen/go/exchange/ledger/v1"
 	marginv1 "github.com/skill/exchange/api/gen/go/exchange/margin/v1"
@@ -124,8 +126,18 @@ func setup(ctx context.Context, a *app.App) error {
 
 // recoverLoop finishes, every few seconds, orders whose freeze outcome
 // was not recorded and finished orders whose unused funds were not
-// released (a crash or a ledger outage midway).
+// released (a crash or a ledger or margin-service outage midway), and
+// reports how many orders still wait and for how long the oldest has: a
+// recovery pass takes the 100 oldest, so orders stuck at the front would
+// starve the rest (alert TradingOrdersPendingFreeze).
 func recoverLoop(a *app.App, svc *application.Service) func(context.Context) error {
+	pending := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "trading_orders_pending_freeze", Help: "Orders whose freeze outcome is not recorded yet.",
+	})
+	oldest := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "trading_orders_pending_freeze_oldest_seconds", Help: "How long the oldest of them has waited; 0 without any.",
+	})
+	a.Metrics().MustRegister(pending, oldest)
 	return func(ctx context.Context) error {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
@@ -139,6 +151,12 @@ func recoverLoop(a *app.App, svc *application.Service) func(context.Context) err
 				a.Logger().WarnContext(ctx, "order freeze recovery failed", "error", err)
 			} else if n > 0 {
 				a.Logger().InfoContext(ctx, "orders recovered", "orders", n)
+			}
+			if n, age, err := svc.Pending(ctx); err != nil {
+				a.Logger().WarnContext(ctx, "counting pending orders failed", "error", err)
+			} else {
+				pending.Set(float64(n))
+				oldest.Set(age.Seconds())
 			}
 			if n, err := svc.RecoverReleases(ctx); err != nil {
 				a.Logger().WarnContext(ctx, "order release recovery failed", "error", err)

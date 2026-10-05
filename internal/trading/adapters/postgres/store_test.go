@@ -115,8 +115,18 @@ func TestMarginOrdersKeepTheirAccount(t *testing.T) {
 	}
 	got, err := store.Read().Orders().Get(ctx, o.ID)
 	if err != nil || got.AccountType != domain.AccountMarginIsolated || got.SideEffect != domain.SideEffectAutoBorrow ||
-		got.Account() != (domain.Account{UserID: o.UserID, Type: domain.AccountMarginIsolated, Scope: "BTC-USDT"}) {
+		got.Account() != (domain.Account{UserID: o.UserID, Type: domain.AccountMarginIsolated, Scope: "BTC-USDT"}) ||
+		!got.Borrowed.IsZero() || got.BorrowID != "" {
 		t.Fatalf("margin order: %+v %v", got, err)
+	}
+	// What margin-service borrowed for it is recorded with its freeze.
+	borrowID := uuid.Must(uuid.NewV7()).String()
+	got.FreezeState, got.Borrowed, got.BorrowID = domain.FreezeDone, d("7.8"), borrowID
+	if err := store.Tx(ctx, func(r ports.Repos) error { return r.Orders().Update(ctx, got) }); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := store.Read().Orders().Get(ctx, o.ID); !again.Borrowed.Equal(d("7.8")) || again.BorrowID != borrowID {
+		t.Fatalf("borrow on record: %s %q", again.Borrowed, again.BorrowID)
 	}
 	// An order built without them is stored as a SPOT order without a
 	// side effect; the table refuses a side effect on SPOT.
@@ -186,6 +196,10 @@ func TestActiveOrdersAndPages(t *testing.T) {
 	pending, err := store.Read().Orders().PendingFreeze(ctx, time.Now(), 10)
 	if err != nil || len(pending) != 1 || pending[0].ID != ids[0] {
 		t.Fatalf("pending freeze: %d %v", len(pending), err)
+	}
+	n, oldest, err := store.Read().Orders().PendingStats(ctx)
+	if err != nil || n != 1 || oldest.Sub(at).Abs() > time.Millisecond {
+		t.Fatalf("pending stats: %d %v %v", n, oldest, err)
 	}
 }
 

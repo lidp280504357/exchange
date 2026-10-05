@@ -165,6 +165,10 @@ type Order struct {
 	// a margin account.
 	AccountType AccountType
 	SideEffect  SideEffect
+	// Borrowed is what margin-service borrowed for the order before its
+	// freeze (AUTO_BORROW), BorrowID that borrow; zero and "" otherwise.
+	Borrowed decimal.Decimal
+	BorrowID string
 	// Steps and assets of the pair, handed to the engine.
 	TickSize        decimal.Decimal
 	LotSize         decimal.Decimal
