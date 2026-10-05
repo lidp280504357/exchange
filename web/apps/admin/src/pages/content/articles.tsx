@@ -9,9 +9,11 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DangerAction, FormError } from "../../kit/actions";
 import { ReadOnly } from "../../kit/ReadOnly";
+import { ALL, useFilters } from "../../kit/filters";
 import { TimeText } from "../../kit/format";
 import { RowActions } from "../../kit/lists";
 import { Card, Page } from "../../kit/Page";
+import { useSiteMode } from "../../kit/profile";
 
 // Announcements and help articles (design 2026-10-02 §4.5): written here in
 // Chinese and English (Markdown, previewed as the sites show it), saved as
@@ -109,6 +111,10 @@ export function ArticlesPage({ admin, section }: { admin: Admin; section: ListSe
   });
   const [editing, setEditing] = useState<{ article: Article | null; seed?: Draft } | null>(null);
   const write = can(admin, "content.write");
+  // The list of one mode's articles (A39/A43 ⑪), kept in the address like any list's filter.
+  const filters = useFilters(["modes"]);
+  const modes = MODES.find((m) => m === filters.values.modes) ?? null;
+  const rows = useMemo(() => (q.data ?? []).filter((a) => !modes || a.modes === modes), [q.data, modes]);
   const columns = useMemo<ColumnDef<Article, unknown>[]>(
     () => [
       {
@@ -176,21 +182,33 @@ export function ArticlesPage({ admin, section }: { admin: Admin; section: ListSe
         )
       }
     >
+      <div className="flex flex-wrap items-center gap-2 text-xs text-fg-3">
+        <span>{t("admin.content.modes.label")}</span>
+        <Segmented
+          size="xs"
+          value={modes ?? ALL}
+          onValueChange={(v) => filters.set({ modes: v })}
+          items={[{ value: ALL, label: t("admin.common.all") }, ...MODES.map((m) => ({ value: m, label: t(`admin.content.modes.${m}`) }))]}
+          aria-label={t("admin.content.modes.filter")}
+        />
+      </div>
       <Card className="stagger">
         <DataTable
           columns={columns}
-          data={q.data ?? []}
+          data={rows}
           getRowId={(a) => a.id}
           loading={q.isPending}
           error={q.error}
           onRetry={() => void q.refetch()}
           onRowClick={(a) => setEditing({ article: a })}
-          empty={t("admin.content.none")}
+          empty={modes && q.data?.length ? t("admin.content.modes.noneFor", { mode: t(`admin.content.modes.${modes}`) }) : t("admin.content.none")}
           density="compact"
           aria-label={t(section === "ANNOUNCEMENT" ? "admin.nav.announcements" : "admin.nav.helpArticles")}
         />
       </Card>
-      {q.isSuccess && <BundledFiles section={section} known={known} write={write} onCopy={(seed) => setEditing({ article: null, seed })} />}
+      {q.isSuccess && (
+        <BundledFiles section={section} known={known} modes={modes} write={write} onCopy={(seed) => setEditing({ article: null, seed })} />
+      )}
       {editing && (
         <ArticleEditor
           admin={admin}
@@ -225,10 +243,18 @@ type Bundled = { slug: string; title: string; category: string; date: string; se
 
 /**
  * BundledFiles lists the sites' own Markdown files of the section that no
- * article here has taken over: copied, one becomes a draft whose
- * publication replaces the file.
+ * article here has taken over (of the list's mode, when one is chosen):
+ * copied, one becomes a draft whose publication replaces the file.
  */
-function BundledFiles({ section, known, write, onCopy }: { section: ListSection; known: Set<string>; write: boolean; onCopy: (seed: Draft) => void }) {
+function BundledFiles({
+  section, known, modes, write, onCopy,
+}: {
+  section: ListSection;
+  known: Set<string>;
+  modes: Modes | null;
+  write: boolean;
+  onCopy: (seed: Draft) => void;
+}) {
   const { t } = useTranslation();
   const files = useQuery({
     queryKey: ["admin", "bundled-articles", section],
@@ -242,14 +268,17 @@ function BundledFiles({ section, known, write, onCopy }: { section: ListSection;
         }),
       ),
   });
-  const rows = (files.data ?? []).filter((f): f is Bundled => f !== null && !known.has(f.slug));
+  const rows = (files.data ?? []).filter((f): f is Bundled => f !== null && !known.has(f.slug) && (!modes || f.seed.modes === modes));
   const columns = useMemo<ColumnDef<Bundled, unknown>[]>(
     () => [
       {
         id: "title", header: t("admin.content.title"),
         cell: ({ row: { original: f } }) => (
           <span className="flex flex-col">
-            <span className="text-fg-1">{f.title}</span>
+            <span className="flex items-center gap-1.5 text-fg-1">
+              <ModesBadge modes={f.seed.modes} />
+              {f.title}
+            </span>
             <span className="font-mono text-xs text-fg-3">
               {f.slug} · {t(`admin.content.categories.${f.category}`, { defaultValue: f.category })}
             </span>
@@ -316,8 +345,12 @@ export function ArticleEditor({
   const [locale, setLocale] = useState<Locale>("zh-CN");
   const [view, setView] = useState("edit");
   // The preview shows the body as the sites do in a mode (:::test and
-  // :::formal blocks filtered); an article for both modes can be seen in each.
-  const [shownIn, setShownIn] = useState<ContentMode>(() => (article?.modes ?? seed?.modes) === "FORMAL" ? "formal" : "test");
+  // :::formal blocks filtered); an article for both modes can be seen in
+  // each, first in the one the exchange is in (A43 ⑫; test mode until the
+  // profile is read).
+  const siteMode = useSiteMode();
+  const [chosen, setShownIn] = useState<ContentMode | null>(null);
+  const shownIn: ContentMode = chosen ?? (siteMode === "FORMAL" ? "formal" : "test");
   const previewMode: ContentMode = d.modes === "TEST" ? "test" : d.modes === "FORMAL" ? "formal" : shownIn;
   const [publishing, setPublishing] = useState(false);
   const [at, setAt] = useState("");

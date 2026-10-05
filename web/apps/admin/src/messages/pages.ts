@@ -15,6 +15,9 @@ export const pagesZh = {
       updated: "最近更新",
       noArticle: "没有（用默认稿）",
       forBoth: "通用稿",
+      current: "当前",
+      nowTest: "平台现在是测试模式：站点用「测试模式」一栏（在平台设置里切换）。",
+      nowFormal: "平台现在是正式模式：站点用「正式模式」一栏（在平台设置里切换）。",
       write: "新建",
       shows: {
         override: "覆盖稿",
@@ -63,6 +66,9 @@ export const pagesEn = {
       updated: "Updated",
       noArticle: "None (the default)",
       forBoth: "for both modes",
+      current: "Now",
+      nowTest: "The exchange is in test mode: the sites use the Test mode column (switched in the platform settings).",
+      nowFormal: "The exchange is live: the sites use the Live column (switched in the platform settings).",
       write: "Write",
       shows: {
         override: "The article",

@@ -9,6 +9,7 @@ import { DangerAction } from "../../kit/actions";
 import { TimeText } from "../../kit/format";
 import { RowActions } from "../../kit/lists";
 import { Card, Page } from "../../kit/Page";
+import { useSiteMode } from "../../kit/profile";
 import { ArticleEditor, articleBody, articlesKey, FILES, seedOf, shown, SITE, StatusBadge, type Article, type Draft } from "./articles";
 import { ReadOnly } from "../../kit/ReadOnly";
 
@@ -92,11 +93,19 @@ export default function FixedPages({ admin }: { admin: Admin }) {
     }));
   }, [legal.data, home.data, drafts.data]);
   const [editing, setEditing] = useState<{ row: Row; mode: Mode; article: Article | null } | null>(null);
+  // The column the sites use now: the exchange's mode (the platform profile).
+  const now = useSiteMode();
 
   const columns = useMemo<ColumnDef<Row, unknown>[]>(() => {
     const bundled = (r: Row) => drafts.data?.has(r.slug) ?? false;
     const modeColumn = (mode: Mode): ColumnDef<Row, unknown> => ({
-      id: mode, header: t(`admin.content.modes.${mode}`),
+      id: mode,
+      header: () => (
+        <span className="inline-flex items-center gap-1.5" data-testid={`fixed-mode-${mode.toLowerCase()}`} data-current={now === mode}>
+          {t(`admin.content.modes.${mode}`)}
+          {now === mode && <Badge tone="brand">{t("admin.pages.current")}</Badge>}
+        </span>
+      ),
       cell: ({ row: { original: r } }) => {
         const s = onSite(r, mode, bundled(r));
         const a = forMode(r, mode);
@@ -169,12 +178,17 @@ export default function FixedPages({ admin }: { admin: Admin }) {
         ),
       },
     ];
-  }, [t, write, drafts.data]);
+  }, [t, write, drafts.data, now]);
 
   const error = legal.error ?? home.error;
   return (
     <Page title={t("admin.nav.fixedPages")} help={t("admin.pages.help")}>
       <ReadOnly admin={admin} perm="content.write" />
+      {now && (
+        <p className="text-sm text-fg-2" data-testid="fixed-now">
+          {t(now === "TEST" ? "admin.pages.nowTest" : "admin.pages.nowFormal")}
+        </p>
+      )}
       <Card className="stagger">
         <DataTable
           columns={columns}

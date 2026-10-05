@@ -8,6 +8,7 @@ import { Link } from "react-router";
 import { DangerAction, FormError } from "../../kit/actions";
 import { readSquareImage, type ChosenImage, type ImageMime } from "../../kit/image";
 import { Card, Page } from "../../kit/Page";
+import { platformKey, usePlatformProfile } from "../../kit/profile";
 import { launchKey } from "./Launch";
 import { ReadOnly } from "../../kit/ReadOnly";
 
@@ -25,7 +26,6 @@ type SocialKind = Write["social"][number]["kind"];
 type ImageKind = keyof Profile["images"];
 type Setting = AdminSchemas["WelcomeCreditsSetting"];
 
-export const platformKey = ["admin", "platform"];
 const welcomeKey = ["admin", "platform", "welcome"];
 
 const SOCIAL: SocialKind[] = ["x", "telegram", "discord", "youtube", "facebook", "instagram", "linkedin", "reddit", "medium", "github", "tiktok", "weibo"];
@@ -59,7 +59,7 @@ const changedFields = (p: Profile, d: Draft) => {
 export default function Platform({ admin }: { admin: Admin }) {
   const { t } = useTranslation();
   const edit = can(admin, "settings.write");
-  const q = useQuery({ queryKey: platformKey, queryFn: async () => adminData(await adminApi.GET("/admin/v1/platform/profile")) });
+  const q = usePlatformProfile();
   if (q.isError) return <ErrorState message={String(q.error)} onRetry={() => void q.refetch()} />;
   return (
     <Page title={t("admin.nav.platform")} help={t("admin.platform.help")}>

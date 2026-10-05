@@ -12,6 +12,7 @@ export const contentZh = {
       publishAt: "发布时间", updated: "最近修改", status: { DRAFT: "草稿", PUBLISHED: "已发布", ARCHIVED: "已下线" }, scheduled: "定时发布",
       modes: {
         label: "适用模式", BOTH: "通用", TEST: "测试模式", FORMAL: "正式模式",
+        filter: "按适用模式筛选", noneFor: "没有标为「{{mode}}」的稿",
         previewIn: "预览哪种模式", previewAs: "按{{mode}}显示（:::test / :::formal 段落按模式取舍）",
         hint: "测试模式下站点只出「测试模式」与「通用」的稿，正式模式只出「正式模式」与「通用」的稿，平台切换模式即自动换稿。同一地址可以并存一篇测试稿与一篇正式稿，或只有一篇通用稿。正文里 :::test 与 ::: 之间的段落只在测试模式显示，:::formal 与 ::: 之间的只在正式模式显示。",
       },
@@ -71,6 +72,7 @@ export const contentEn = {
       publishAt: "Published", updated: "Last change", status: { DRAFT: "Draft", PUBLISHED: "Published", ARCHIVED: "Taken off" }, scheduled: "Scheduled",
       modes: {
         label: "For", BOTH: "Both modes", TEST: "Test mode", FORMAL: "Live",
+        filter: "Filter by mode", noneFor: "None marked {{mode}}",
         previewIn: "Preview in", previewAs: "As shown in {{mode}} (:::test / :::formal blocks kept or dropped)",
         hint: "In test mode the sites show the pages for test mode and for both; live, those for live and for both: switching the exchange's mode switches the pages. An address holds a test and a live page side by side, or one for both. In a body, what stands between :::test and ::: shows in test mode only, between :::formal and ::: live only.",
       },
