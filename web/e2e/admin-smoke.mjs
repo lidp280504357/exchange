@@ -44,15 +44,13 @@ const { page, go, waitText, waitPath, clickButton, typeInto } = t;
 // page's skeleton; every other request goes on at once. Interception turns
 // the browser's cache off: it ends with step 2b.
 const AUDIT_CHUNK = /\/assets\/Audit-[\w-]+\.js$/;
-// Step 2c counts the console's script requests and keeps their paths (the pages fetched ahead).
-let scripts = 0;
+// Step 2c keeps the paths of the console's script requests (the pages fetched ahead).
 const fetched = new Set();
 const fetchLog = [];
 const began = Date.now();
 page.on("request", (r) => {
   const path = new URL(r.url()).pathname;
   if (r.resourceType() === "script" && path.startsWith("/assets/")) {
-    scripts++;
     fetched.add(path);
     fetchLog.push(`${((Date.now() - began) / 1000).toFixed(1)}s ${path.slice(8)}`);
   }
@@ -69,6 +67,20 @@ const hold = (r) => {
 };
 await page.setRequestInterception(true);
 page.on("request", hold);
+
+/**
+ * openRow clicks a row of a list that refreshes itself until the drawer it
+ * opens shows: a refresh that replaces the row between the press and the
+ * release swallows the click (seen once at the custody callbacks). Pressed
+ * again only while no drawer is open, at most four times.
+ */
+async function openRow(selector) {
+  for (let i = 0; ; i++) {
+    await t.clickLive(selector);
+    if (await page.waitForSelector("[role=dialog]", { timeout: 5000 }).then(() => true, () => false)) return;
+    if (i >= 3) throw new Error(`a row of ${selector} opens no drawer`);
+  }
+}
 
 /** rows waits for at least n rows in the page's (first) table body. */
 const rows = (n, scope = "main") =>
@@ -237,7 +249,7 @@ try {
   // A withdrawal's detail: its address book record and the user's others.
   await go("/withdrawals?status=ALL");
   await rows(1);
-  await t.clickLive("main tbody tr");
+  await openRow("main tbody tr");
   await waitText("地址簿");
   await waitText("该用户最近的提现");
   await page.waitForFunction(() => getComputedStyle(document.querySelector("[role=dialog]")).transform === "none");
@@ -260,8 +272,7 @@ try {
   await waitText("TQQCuyVcUEknTGyfSRKhcUuLZfEe93qWpy".slice(0, 12));
   await waitText("托管方 · UDUNMOCK");
   await rows(1, 'main table[aria-label="custody callbacks"]');
-  await t.clickLive('main table[aria-label="custody callbacks"] tbody tr');
-  await page.waitForSelector("[role=dialog]");
+  await openRow('main table[aria-label="custody callbacks"] tbody tr');
   await waitText("原始请求");
   await waitText("来源地址");
   await page.keyboard.press("Escape");
@@ -289,7 +300,7 @@ try {
   await clickButton("取消", "[role=dialog]");
   await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
   // A pair's editor, and the listing wizard's preview (canceled, nothing applied).
-  await t.clickLive("main tbody tr");
+  await openRow("main tbody tr");
   await waitText("价格保护带");
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => !document.querySelector("[role=dialog]"));
@@ -309,7 +320,7 @@ try {
   await go("/instruments?tab=assets");
   await typeInto('main input[placeholder="搜索"]', "ASTRA");
   await page.waitForFunction(() => document.querySelectorAll("main tbody tr").length === 1);
-  await t.clickLive("main tbody tr");
+  await openRow("main tbody tr");
   await page.waitForSelector("[data-testid=asset-profile]");
   await waitText("资料与图标");
   await page.keyboard.press("Escape");

@@ -1985,6 +1985,8 @@ if [[ -n $PLATFORM_DONE ]]; then
     [[ $(jq -r .test_mode.enabled <<<"$BODY") == "$TEST_WAS" ]] || set_test_mode "$TEST_WAS" "e2e cleanup: test mode as it was" >/dev/null
   }
   at_exit restore_test_mode
+  # on_sites reads the newest 100 announcements, a single page: the test
+  # server has fewer, so a list without it is one that leaves it out.
   on_sites() { # on_sites yes|no: whether the sites' API lists the test-mode announcement
     call GET "/v1/announcements?limit=100" "" && [[ $STATUS == 200 ]] || return 1
     if [[ $1 == yes ]]; then

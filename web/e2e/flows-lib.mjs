@@ -183,9 +183,25 @@ export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
       if (r.isNavigationRequest() && r.frame() === page.mainFrame()) inflight.clear();
       if (r.resourceType() !== "eventsource" && r.resourceType() !== "websocket") inflight.add(r);
     });
-    page.on("requestfinished", (r) => inflight.delete(r));
+    // What the old document starts between the navigation's request and the
+    // new one's commit (a poll, an event stream reconnecting) ends with it
+    // too: at the main frame's commit (Page.frameNavigated: a new document
+    // only) the requests made by another document's loader go (review BP).
+    const loaders = new Map();
+    const cdp = await page.createCDPSession();
+    await Promise.all([cdp.send("Page.enable"), cdp.send("Network.enable")]);
+    cdp.on("Network.requestWillBeSent", ({ requestId, loaderId }) => loaders.set(requestId, loaderId));
+    cdp.on("Page.frameNavigated", ({ frame }) => {
+      if (frame.parentId) return;
+      for (const r of inflight) if (!r.isNavigationRequest() && loaders.has(r.id) && loaders.get(r.id) !== frame.loaderId) inflight.delete(r);
+    });
+    page.on("requestfinished", (r) => {
+      inflight.delete(r);
+      loaders.delete(r.id);
+    });
     page.on("requestfailed", (r) => {
       inflight.delete(r);
+      loaders.delete(r.id);
       tab.failed.push(`${r.method()} ${r.url()} ${r.failure()?.errorText ?? ""}`);
       if (tab.failed.length > 100) tab.failed.shift();
     });

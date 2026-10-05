@@ -30,8 +30,9 @@ func decimalPtr(d *decimal.Decimal) *string {
 // orderKeyLead is how much earlier than its first update an order's ID
 // may have been made: created_key, the time in the ID, is orders_state's
 // key, and an order's created_at is its first update, at most 422 s after
-// the ID over the test server's 505,885 orders (review BQ; within 1 s over
-// the last two days of them).
+// the ID over the test server's 505,885 orders (one order of 2026-10-02;
+// review BQ), within 1 s over the last two days of them. An hour leaves
+// room for a service that was slow to publish.
 const orderKeyLead = time.Hour
 
 // Orders returns a page of spot orders, newest first. The created_at range
