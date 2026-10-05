@@ -123,15 +123,22 @@ const bookTabLabel = "盘口";
 async function terminal(browser, { site, base, device, budgets, bookTab, tapeTab }) {
   const page = await open(browser, device);
   // tab presses a tab by its label, as a pointer does (the PC site's tabs
-  // switch on the pointer going down; an element's click() does not).
+  // switch on the pointer going down; an element's click() does not). A
+  // tab not found is a miss, and the measurements behind it are skipped,
+  // not the other sites'.
   const tab = async (label) => {
     for (const h of await page.$$("button, [role=tab]")) {
-      if ((await h.evaluate((b) => b.textContent.trim())) === label && (await h.isVisible())) return h.click();
+      if ((await h.evaluate((b) => b.textContent.trim())) === label && (await h.isVisible())) {
+        await h.click();
+        return true;
+      }
     }
-    throw new Error(`no ${label} tab`);
+    report(`${site} the ${label} tab`, "not found", "found", false);
+    return false;
   };
+  const done = () => page.browserContext().close();
   await page.goto(`${base}/trade/BTC-USDT`, { waitUntil: "networkidle2", timeout: 60000 });
-  if (bookTab) await tab(bookTabLabel);
+  if (bookTab && !(await tab(bookTabLabel))) return done();
   await page.waitForSelector("[data-book-row]", { visible: true, timeout: 30000 });
   await sleep(5000); // past the load
 
@@ -204,39 +211,41 @@ async function terminal(browser, { site, base, device, budgets, bookTab, tapeTab
   // Trades (not throttled): each trade message to the first change of the
   // trade tape after it, over 30 seconds on the tape's own tab; then back
   // to the book.
-  await tab(tapeTab);
-  await page.waitForSelector('section[aria-label="最新成交"]', { visible: true, timeout: 10000 });
-  const fromTape = await page.evaluate(() => {
-    const tapeShown = [...document.querySelectorAll('section[aria-label="最新成交"]')].find((el) => el.checkVisibility());
-    new MutationObserver(() => {
-      const at = performance.now();
-      requestAnimationFrame((frame) => window.__perf.tape.push({ at, frame }));
-    }).observe(tapeShown, { subtree: true, childList: true, characterData: true });
-    return performance.now();
-  });
-  await sleep(30000);
-  const tape = await page.evaluate(
-    (t0) => ({
-      trades: window.__perf.messages.filter((m) => m.at >= t0 && m.channel === "trades:BTC-USDT").map((m) => m.at),
-      changes: window.__perf.tape.filter((c) => c.at >= t0),
-    }),
-    fromTape,
-  );
-  const perTrade = [];
-  for (const at of tape.trades) {
-    const c = tape.changes.find((x) => x.at >= at);
-    if (c) perTrade.push(c.frame - at);
+  if (await tab(tapeTab)) {
+    await page.waitForSelector('section[aria-label="最新成交"]', { visible: true, timeout: 10000 });
+    const fromTape = await page.evaluate(() => {
+      const tapeShown = [...document.querySelectorAll('section[aria-label="最新成交"]')].find((el) => el.checkVisibility());
+      new MutationObserver(() => {
+        const at = performance.now();
+        requestAnimationFrame((frame) => window.__perf.tape.push({ at, frame }));
+      }).observe(tapeShown, { subtree: true, childList: true, characterData: true });
+      return performance.now();
+    });
+    await sleep(30000);
+    const tape = await page.evaluate(
+      (t0) => ({
+        trades: window.__perf.messages.filter((m) => m.at >= t0 && m.channel === "trades:BTC-USDT").map((m) => m.at),
+        changes: window.__perf.tape.filter((c) => c.at >= t0),
+      }),
+      fromTape,
+    );
+    const perTrade = [];
+    for (const at of tape.trades) {
+      const c = tape.changes.find((x) => x.at >= at);
+      if (c) perTrade.push(c.frame - at);
+    }
+    report(
+      `${site} trade message to the frame that shows it (p50 / p95 / max over ${perTrade.length} of ${tape.trades.length} trades)`,
+      stats(perTrade),
+      `p95 ≤ ${budgets.toPixel} ms`,
+      perTrade.length > 0 && pct(perTrade, 95) <= budgets.toPixel,
+    );
+    if (!(await tab(bookTabLabel))) return done();
+    await page.waitForSelector("[data-book-row]", { visible: true, timeout: 10000 });
   }
-  report(
-    `${site} trade message to the frame that shows it (p50 / p95 / max over ${perTrade.length} of ${tape.trades.length} trades)`,
-    stats(perTrade),
-    `p95 ≤ ${budgets.toPixel} ms`,
-    perTrade.length > 0 && pct(perTrade, 95) <= budgets.toPixel,
-  );
-  await tab(bookTabLabel);
-  await page.waitForSelector("[data-book-row]", { visible: true, timeout: 10000 });
 
-  // Switching to ETH-USDT: its snapshot to its book on screen.
+  // Switching to ETH-USDT (the address changed as a link does, by
+  // pushState): its snapshot to its book on screen.
   const t0 = await page.evaluate(() => performance.now());
   await navigate(page, "/trade/ETH-USDT");
   await page.waitForFunction(
@@ -250,7 +259,7 @@ async function terminal(browser, { site, base, device, budgets, bookTab, tapeTab
   const shown = await page.evaluate(() => performance.now());
   const snapshot = await page.evaluate((t) => window.__perf.messages.find((m) => m.at >= t && m.channel === "depth:ETH-USDT")?.at, t0);
   report(
-    `${site} switch to ETH-USDT: snapshot to book (from the click ${ms(shown - t0)})`,
+    `${site} switch to ETH-USDT: snapshot to book (from the switch ${ms(shown - t0)})`,
     snapshot ? ms(shown - snapshot) : "no snapshot seen",
     `≤ ${budgets.switch} ms`,
     snapshot !== undefined && shown - snapshot <= budgets.switch,
@@ -293,7 +302,7 @@ async function terminal(browser, { site, base, device, budgets, bookTab, tapeTab
     "≤ 200 ms, 0, 0",
     content <= 200 && back.sockets === 0 && back.snapshots === 0,
   );
-  await page.browserContext().close();
+  await done();
 }
 
 async function table(browser) {
