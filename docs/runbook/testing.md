@@ -15,6 +15,8 @@
 
 `.github/workflows/ci.yml` 有三个任务：`go`、`web`、`deploy config`（只做质量门禁，不部署，ADR-0007）。
 
+- main 上每次推送的运行都跑完、不取消（`concurrency` 只对 pull request 取消旧的运行）：三个会话几分钟推一次时，取消让 main 一个小时没有绿的运行、部署链等不到（B89，2026-10-06）。只改 `docs/` 与顶层 Markdown 的推送不触发 CI（`paths-ignore`）；部署前判断代码是否通过时，看最后一个改了 CI 检查内容的提交的运行。`deploy config` 任务的镜像构建先从 `mirror.gcr.io` 拉基础镜像、失败才退回 `public.ecr.aws`。
+
 - `go` 任务比本机 `task ci` 多跑集成测试：CI 设了 `TEST_*`，`task ci` 没设，所以集成测试只在 CI 里失败的情况是有的。
   - 改迁移或表约束时，提交前至少跑相关包与 `./migrations/` 的集成测试。B6 删了充值地址的 0x 约束，却没改 `TestWalletSchema`，CI 因此连红了五次。
 - 模块路径是 `github.com/skill/exchange`（2026-10-04 起不带 GitHub 账号）。`scripts/ci/module-path.sh` 在代码、配置与文档里见到别的 `github.com/<账号>/exchange` 就失败，网页地址不算；CI 的 `module path` 步骤与 `task ci` 的 `modpath:check` 都跑它。

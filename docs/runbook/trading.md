@@ -11,7 +11,7 @@
    - 数量在最小与最大之间：否则 `ORDER_QUANTITY_OUT_OF_RANGE`。
    - 名义金额不低于最小值：否则 `ORDER_MIN_NOTIONAL`。
    - 价格带：否则 `ORDER_PRICE_OUT_OF_BAND`。
-   - 用户资格 `SPOT_TRADE`：否则返回 `USER_*` 码。
+   - 用户资格 `SPOT_TRADE`（杠杆账户的单是 `MARGIN_TRADE`，见下面"杠杆账户的订单"）：否则返回 `USER_*` 码。
 3. 在同一用户的咨询锁下检查挂单上限（每交易对 200、总计 1000，超出为 `ORDER_TOO_MANY_OPEN`）和 `client_order_id`，然后存为 NEW，冻结状态 PENDING。
 4. 调账本 gRPC `Freeze`，类型 `ORDER_FREEZE`，幂等键 `order:<订单ID>`。冻结的内容：
    - 限价买单：价格 × 数量，向上取整到计价资产精度。
