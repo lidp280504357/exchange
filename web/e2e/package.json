@@ -3,11 +3,14 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Browser smoke tests of the deployed sites (scripts/e2e/web.sh) and their runtime performance (task web:perf)",
+  "description": "Browser smoke tests of the deployed sites (scripts/e2e/web.sh), the user's checklist flows on them (scripts/e2e/webflows.sh) and their runtime performance (task web:perf)",
   "scripts": {
     "pc": "node pc-smoke.mjs",
     "m": "node m-smoke.mjs",
     "admin": "node admin-smoke.mjs",
+    "flows:pc": "node pc-flows.mjs",
+    "flows:m": "node m-flows.mjs",
+    "flows:admin": "node admin-flows.mjs",
     "perf": "node perf.mjs"
   },
   "devDependencies": {

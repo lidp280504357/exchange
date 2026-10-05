@@ -27,20 +27,13 @@ const WIDTHS = [1024, 1280, 1920];
 
 // --- helpers -----------------------------------------------------------------
 
-async function nav(tab, path) {
-  await tab.page.evaluate((p) => {
-    history.pushState({}, "", p);
-    dispatchEvent(new PopStateEvent("popstate"));
-  }, path);
-  await tab.page.waitForFunction((p) => location.pathname + location.search === p, { timeout: 10000 }, path);
-  await tab.settled();
-}
+const nav = (tab, path) => tab.nav(path);
 
 /**
  * signIn signs in with the password alone (admin.login_without_totp) and
  * waits for the console at next. The console takes 10 sign-ins a minute
  * from an address (scripts before this one may have used some): a 429
- * waits the minute out, once.
+ * waits as long as its Retry-After says (a minute without one), once.
  */
 async function signIn(tab, who, next = "/") {
   for (let attempt = 0; ; attempt++) {
@@ -50,8 +43,11 @@ async function signIn(tab, who, next = "/") {
     await tab.typeInto('input[autocomplete="current-password"]', who.password);
     const answer = tab.page.waitForResponse((r) => new URL(r.url()).pathname === "/admin/v1/login" && r.request().method() === "POST", { timeout: 30000 });
     await tab.page.keyboard.press("Enter");
-    if ((await answer).status() !== 429 || attempt > 0) break;
-    await new Promise((r) => setTimeout(r, 61_000));
+    const res = await answer;
+    if (res.status() !== 429) break;
+    if (attempt > 0) throw new Error("signing in: 429 twice (the console takes 10 sign-ins a minute from an address)");
+    const wait = Number(res.headers()["retry-after"]) || 60;
+    await new Promise((r) => setTimeout(r, (wait + 1) * 1000));
   }
   await tab.page.waitForFunction((p) => location.pathname + location.search === p, { timeout: 30000 }, next);
   await tab.page.waitForSelector("aside a[href]", { timeout: 20000 });

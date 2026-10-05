@@ -13,8 +13,8 @@
 // (flows-lib.mjs); real devices, iOS autofill and how a gesture feels stay
 // on the manual list.
 import {
-  code, colorsOf, contrastIssues, flows, fmtTime, inboxCount, longAnimations, overflowX, PHONE_ANDROID, PHONE_IOS, phone, register, scrollThrough, siteCookieDomain,
-  stage, textAligned, truncatedWithoutHint, wsWatch,
+  api, code, colorsOf, contrastIssues, decimalIssues, flows, fmtTime, inboxCount, listDecimals, longAnimations, overflowX, PHONE_ANDROID, PHONE_IOS, phone,
+  register, scrollThrough, siteCookieDomain, stage, textAligned, truncatedWithoutHint, wsWatch,
 } from "./flows-lib.mjs";
 
 const APP = (process.env.APP ?? "https://m.astras.vip").replace(/\/$/, "");
@@ -33,28 +33,14 @@ const GREEN = "rgb(14, 203, 129)";
 
 // --- helpers ---------------------------------------------------------------
 
-async function nav(tab, path) {
-  await tab.page.evaluate((p) => {
-    history.pushState({}, "", p);
-    dispatchEvent(new PopStateEvent("popstate"));
-  }, path);
-  await tab.page.waitForFunction((p) => location.pathname + location.search === p, { timeout: 10000 }, path);
-  await tab.settled();
-}
+// The tab helpers are flows-lib's (tab.nav, tab.signIn, tab.clickTab, tab.fieldError).
+const nav = (tab, path) => tab.nav(path);
+const signIn = (tab, next) => tab.signIn(user, next);
+const clickTab = (tab, text, nth) => tab.clickTab(text, nth);
+const fieldError = (tab, selector) => tab.fieldError(selector);
 
-async function signIn(tab, next = "/assets") {
-  await tab.go(`/login?next=${encodeURIComponent(next)}`);
-  await tab.typeInto('input[autocomplete="username"]', user.email);
-  await tab.typeInto('input[autocomplete="current-password"]', user.password);
-  await tab.page.keyboard.press("Enter");
-  await tab.waitPath(next.split("?")[0], 30000);
-}
-
-async function signedInTab(name, device = phone(390), extra = {}) {
-  const tab = await f.open({ name, device, ...extra });
-  await signIn(tab);
-  return tab;
-}
+/** signedInTab opens a tab on device signed in as the flows' account. */
+const signedInTab = (name, device = phone(390), extra = {}) => f.signedIn(user, { name, device, ...extra });
 
 /** sheet waits for a bottom sheet to be open and still (its slide finished). */
 async function sheet(tab) {
@@ -84,34 +70,6 @@ const center = (tab, selector) =>
     return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height };
   });
 
-const fieldError = (tab, selector) =>
-  tab.page.evaluate((sel) => {
-    const input = document.querySelector(sel);
-    if (!input || input.getAttribute("aria-invalid") !== "true") return null;
-    const msg = (input.getAttribute("aria-describedby") ?? "").split(/\s+/).map((id) => document.getElementById(id)).find((el) => el?.innerText.trim());
-    if (!msg) return null;
-    const a = input.getBoundingClientRect();
-    const m = msg.getBoundingClientRect();
-    return { text: msg.innerText.trim(), below: m.top >= a.top && m.top - a.bottom < 80 };
-  }, selector);
-
-/**
- * clickTab presses a tab by its text (Radix tabs switch on a real press,
- * not a scripted click), brought to the middle of the screen first: near
- * the bottom the terminal's fixed buy and sell bar would take the press.
- */
-async function clickTab(tab, text, nth = 0) {
-  const handle = await tab.page.waitForFunction(
-    (txt, n) => [...document.querySelectorAll("[role=tab]")].filter((el) => el.textContent.trim().startsWith(txt))[n] ?? null,
-    { timeout: 10000 },
-    text,
-    nth,
-  );
-  await handle.evaluate((el) => el.scrollIntoView({ block: "center" }));
-  await tab.frames(2);
-  await handle.asElement().click();
-  await tab.page.waitForFunction((txt) => [...document.querySelectorAll("[role=tab][data-state=active]")].some((el) => el.textContent.trim().startsWith(txt)), { timeout: 5000 }, text);
-}
 
 // --- the account -----------------------------------------------------------
 
@@ -455,7 +413,7 @@ await f.step("11", "changing the time zone in settings changes the times shown (
 
 // --- 12: numbers ----------------------------------------------------------------------------------
 
-await f.step("12", "figures in tabular digits, amounts right-aligned in the trades at the pair's decimals, prices with thousands separators", async () => {
+await f.step("12", "figures in tabular digits, amounts right-aligned in the trades at the pair's decimals, prices with thousands separators, the assets at their decimals", async () => {
   const problems = [];
   await nav(A, "/markets");
   await A.page.waitForFunction(() => document.querySelectorAll(':is(ul, [role=list])[aria-label="行情"] > :is(li, [role=listitem])').length > 5, { timeout: 20000 });
@@ -463,8 +421,33 @@ await f.step("12", "figures in tabular digits, amounts right-aligned in the trad
   if (!/\d{1,3}(,\d{3})+(\.\d+)?/.test(btc)) problems.push(`markets: BTC without thousands separators: "${btc.replace(/\s+/g, " ")}"`);
   const nums = await A.page.evaluate(() => getComputedStyle(document.documentElement).fontVariantNumeric);
   if (!nums.includes("tabular-nums")) problems.push(`the page's digits are ${nums}`);
-  const pairs = await (await fetch(`${API}/v1/market/pairs`)).json();
-  const pair = (pairs.pairs ?? pairs.items ?? pairs).find?.((p) => p.symbol === "BTC-USDT");
+  const pairs = await api(API, "GET", "/v1/market/pairs");
+  if (pairs.status !== 200) throw new Error(`/v1/market/pairs: ${pairs.status}`);
+  const pair = pairs.body.pairs.find((p) => p.symbol === "BTC-USDT");
+  if (!pair) throw new Error("no BTC-USDT in /v1/market/pairs");
+  // Each asset card's total, available and frozen at the asset's decimals
+  // (at most 8, cut); an account given nothing may have no card.
+  await nav(A, "/assets");
+  const held = await A.page
+    .waitForFunction(
+      () => {
+        const cards = [...document.querySelectorAll('ul[aria-label="我的资产"] > *')].slice(0, 20);
+        return cards.length
+          ? cards.map((c) => ({
+              asset: c.querySelector(".font-medium")?.innerText.trim() ?? "",
+              values: [...c.querySelectorAll(".tabular-nums")].filter((s) => !s.parentElement.innerText.trim().startsWith("≈")).map((s) => s.innerText.trim()),
+            }))
+          : null;
+      },
+      { timeout: 20000 },
+    )
+    .then((h) => h.jsonValue())
+    .catch(() => []);
+  if (held.length) problems.push(...decimalIssues("assets", held, await listDecimals(API)));
+  else {
+    const profile = await api(API, "GET", "/v1/platform/profile");
+    if ((profile.body?.welcome_credits ?? []).length) problems.push("assets: no asset card read (the account was given welcome funds)");
+  }
   await nav(A, "/trade/BTC-USDT");
   await clickTab(A, "成交");
   await A.page.waitForFunction(() => document.querySelectorAll("[role=tabpanel]:not([hidden]) button.grid").length > 2, { timeout: 20000 });
@@ -591,13 +574,16 @@ await f.step("M3", "pulling the market list down refreshes it; swiping the termi
 
 // --- M4: installable, works offline ------------------------------------------------------------------------
 
-await f.step("M4", "the site installs (manifest, service worker, no installability error) and shows its offline page offline", async () => {
+const M4 = "the site installs (manifest, service worker, no installability error) and shows its offline page offline";
+// Only the production build registers the worker (main.tsx): a dev server's page has none.
+if (APP.startsWith("http://localhost")) f.skip("M4", M4, "needs the production build (the dev server registers no service worker)");
+else await f.step("M4", M4, async () => {
   const P = await f.open({ name: "pwa", device: phone(390), persistent: true });
   try {
     // The worker's own requests carry the browser's desktop user agent, not
     // the emulated phone's: a phone that chose this site (site_pref=m), so
     // nginx does not send its /offline.html to the PC site.
-    if (!APP.startsWith("http://localhost")) await P.page.setCookie({ name: "site_pref", value: "m", domain: siteCookieDomain(APP), path: "/" });
+    await P.page.setCookie({ name: "site_pref", value: "m", domain: siteCookieDomain(APP), path: "/" });
     await P.go("/");
     const manifest = await P.page.$eval('link[rel="manifest"]', (l) => l.href);
     const m = await (await fetch(manifest)).json();
@@ -715,7 +701,7 @@ else await f.step("P8", P8, async () => {
     await S.page.waitForFunction((pc) => location.origin === pc, { timeout: 15000 }, PC_APP);
     await S.page.goto(PC_APP + "/markets", { waitUntil: "domcontentloaded" });
     if (new URL(S.page.url()).origin !== PC_APP) throw new Error(`sent back to ${S.page.url()}`);
-    const pref = (await S.context.cookies(PC_APP)).find((c) => c.name === "site_pref");
+    const pref = (await S.context.cookies()).find((c) => c.name === "site_pref");
     if (pref?.value !== "pc") throw new Error(`site_pref ${JSON.stringify(pref)}`);
   } finally {
     await S.close();

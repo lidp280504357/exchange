@@ -4,7 +4,8 @@
 # (web/e2e/pc-flows.mjs), the mobile site (web/e2e/m-flows.mjs) and the
 # admin console (web/e2e/admin-flows.mjs, with a throwaway ADMIN and a
 # throwaway AUDITOR made over ssh, disabled when the script ends). The
-# name sorts after web.sh, so task e2e runs the flows after the smokes.
+# name sorts after web.sh in the C locale (task e2e's glob there runs the
+# flows after the smokes; other locales may order it otherwise).
 # A failed step leaves screenshots and a log under FLOWS_OUT (printed);
 # every site runs even when an earlier one failed. Skipped without Chrome
 # (before any administrator is made).
@@ -40,7 +41,8 @@ fi
 
 # make_admin ROLE creates a throwaway administrator (random password and
 # authenticator secret on stdin, never printed), disabled when the script
-# ends; sets MADE_EMAIL and MADE_PASSWORD.
+# ends; sets MADE_EMAIL and MADE_PASSWORD. It fails (1) when the server
+# made none: the console's flows count as failed, the other sites run.
 make_admin() {
   local role=$1 secret out
   MADE_EMAIL="e2e-flows-$(tr '[:upper:]' '[:lower:]' <<<"$role")-$RUN@example.com"
@@ -50,7 +52,7 @@ make_admin() {
     "$(printf '%s\n%s\n' "$MADE_PASSWORD" "$secret")")
   grep -q "^created .* $MADE_EMAIL ($role)" <<<"$out" || {
     echo "FAIL admin create $role: $out" >&2
-    exit 1
+    return 1
   }
   at_exit "remote \"sudo docker compose \$COMPOSE_FILES exec -T admin-service /app/exchangectl admin disable $MADE_EMAIL --reason 'e2e flows over'\" >/dev/null"
 }
@@ -72,9 +74,15 @@ for site in "${sites[@]}"; do
       # on the test server).
       # shellcheck source=lib/remote.sh
       source "$(dirname "$0")/lib/remote.sh"
-      make_admin ADMIN
+      if ! make_admin ADMIN; then
+        failed+=(admin)
+        continue
+      fi
       ADMIN_EMAIL=$MADE_EMAIL ADMIN_PASSWORD=$MADE_PASSWORD
-      make_admin AUDITOR
+      if ! make_admin AUDITOR; then
+        failed+=(admin)
+        continue
+      fi
       AUDITOR_EMAIL=$MADE_EMAIL AUDITOR_PASSWORD=$MADE_PASSWORD
       ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_PASSWORD" AUDITOR_EMAIL="$AUDITOR_EMAIL" AUDITOR_PASSWORD="$AUDITOR_PASSWORD" APP="$ADMIN_BASE" \
         node "$FLOWS/admin-flows.mjs" || failed+=(admin)

@@ -12,8 +12,8 @@
 // emulation), an expired access token, a degraded mark price. Steps that
 // fail leave screenshots and a log (flows-lib.mjs).
 import {
-  api, cancelOrders, colorsOf, contrastIssues, desktop, flows, fmtTime, longAnimations, overflowX, PHONE_IOS, register, scrollThrough, siteCookieDomain,
-  spotAvailable, stage, truncatedWithoutHint, wsWatch,
+  api, cancelOrders, colorsOf, contrastIssues, decimalIssues, desktop, flows, fmtTime, listDecimals, longAnimations, overflowX, PHONE_IOS, register,
+  scrollThrough, signInApi, siteCookieDomain, spotAvailable, stage, truncatedWithoutHint, wsWatch,
 } from "./flows-lib.mjs";
 
 const APP = (process.env.APP ?? "https://astras.vip").replace(/\/$/, "");
@@ -32,31 +32,14 @@ const GREEN = "rgb(14, 203, 129)";
 
 // --- helpers ---------------------------------------------------------------
 
-/** nav changes page by the site's router (history + popstate), then waits for the page to settle. */
-async function nav(tab, path) {
-  await tab.page.evaluate((p) => {
-    history.pushState({}, "", p);
-    dispatchEvent(new PopStateEvent("popstate"));
-  }, path);
-  await tab.page.waitForFunction((p) => location.pathname + location.search === p, { timeout: 10000 }, path);
-  await tab.settled();
-}
-
-/** signIn signs the tab in through the form and lands on next. */
-async function signIn(tab, next = "/assets") {
-  await tab.go(`/login?next=${encodeURIComponent(next)}`);
-  await tab.typeInto('input[autocomplete="username"]', user.email);
-  await tab.typeInto('input[autocomplete="current-password"]', user.password);
-  await tab.page.keyboard.press("Enter");
-  await tab.waitPath(next.split("?")[0], 30000);
-}
+// The tab helpers are flows-lib's (tab.nav, tab.signIn, tab.clickTab, tab.fieldError).
+const nav = (tab, path) => tab.nav(path);
+const signIn = (tab, next) => tab.signIn(user, next);
+const clickTab = (tab, text, nth) => tab.clickTab(text, nth);
+const fieldError = (tab, selector) => tab.fieldError(selector);
 
 /** signedInTab opens a tab at width signed in as the flows' account. */
-async function signedInTab(name, width = 1280, extra = {}) {
-  const tab = await f.open({ name, device: desktop(width), ...extra });
-  await signIn(tab);
-  return tab;
-}
+const signedInTab = (name, width = 1280, extra = {}) => f.signedIn(user, { name, device: desktop(width), ...extra });
 
 const notFound = (tab) => tab.page.evaluate(() => /页面不存在|没有交易对/.test(document.body.innerText));
 
@@ -72,13 +55,6 @@ const focusShown = (tab) =>
     for (let e = el, i = 0; e && i < 4; e = e.parentElement, i++) if (ring(e)) return true;
     return false;
   });
-
-/** clickTab presses a tab by its text (Radix tabs switch on a real press, not a scripted click). */
-async function clickTab(tab, text) {
-  const handle = await tab.page.waitForFunction((txt) => [...document.querySelectorAll("[role=tab]")].find((el) => el.textContent.trim().startsWith(txt)) ?? null, { timeout: 10000 }, text);
-  await handle.asElement().click();
-  await tab.page.waitForFunction((txt) => [...document.querySelectorAll("[role=tab][data-state=active]")].some((el) => el.textContent.trim().startsWith(txt)), { timeout: 5000 }, text);
-}
 
 /** blur leaves any field, so the terminal's keys reach it. */
 const blur = (tab) => tab.page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
@@ -106,16 +82,42 @@ async function limitBuy(tab, { confirm }) {
 
 await f.step(
   "—",
-  "an account over the API (the welcome funds)",
+  "an account over the API",
   async () => {
     const { accessToken } = await register(API, f.bypass, user.email, user.password);
-    user.usdt = Number(await spotAvailable(API, accessToken, "USDT"));
+    user.token = accessToken;
   },
   { fatal: true },
 );
-// P2 and P6 place a limit buy of 0.0002 BTC: they need the welcome funds
-// (0 when the platform gives none, as at launch) and say so without them.
-const NO_FUNDS = () => (user.usdt >= 50 ? "" : `the account has ${user.usdt} USDT: the platform gives no welcome funds`);
+// Whatever ends the run, the account leaves no order on the book (P2 and P6 place some).
+f.atExit(() => cancelOrders(API, user));
+
+// P2 and P6 place a limit buy of 0.0002 BTC: they need the welcome funds.
+// What the platform gives is in its profile (nothing at launch: they are
+// skipped, saying so); the ledger credits them a moment after the sign-up.
+const profile = await api(API, "GET", "/v1/platform/profile");
+user.gift = Number(profile.body?.welcome_credits?.find((c) => c.asset === "USDT")?.amount ?? 0);
+user.usdt = 0;
+if (user.gift > 0) {
+  await f.step("—", `the welcome funds arrive (${user.gift} USDT)`, async () => {
+    const until = Date.now() + 40_000;
+    while ((user.usdt = Number(await spotAvailable(API, user.token, "USDT"))) <= 0) {
+      if (Date.now() > until) throw new Error("no USDT 40 s after the sign-up");
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  });
+}
+const NO_FUNDS = () =>
+  user.gift <= 0 ? "the platform gives no welcome funds" : user.usdt < 50 ? `the welcome funds did not arrive (${user.usdt} USDT)` : "";
+
+/** cleared cancels the account's orders after an order step, its failure not hiding the step's own. */
+async function cleared() {
+  try {
+    await cancelOrders(API, user);
+  } catch (e) {
+    console.log(`     cancelling the account's orders: ${e.message}`);
+  }
+}
 
 // --- P1: sign-in by keyboard -----------------------------------------------
 
@@ -399,18 +401,6 @@ await f.step("7", "an access token that expires mid-form is renewed and the requ
 
 // --- 8: errors next to their fields -------------------------------------------------
 
-/** fieldError returns the message tied to an input (aria-describedby) when it is marked invalid. */
-const fieldError = (tab, selector) =>
-  tab.page.evaluate((sel) => {
-    const input = document.querySelector(sel);
-    if (!input || input.getAttribute("aria-invalid") !== "true") return null;
-    const msg = (input.getAttribute("aria-describedby") ?? "").split(/\s+/).map((id) => document.getElementById(id)).find((el) => el?.innerText.trim());
-    if (!msg) return null;
-    const a = input.getBoundingClientRect();
-    const m = msg.getBoundingClientRect();
-    return { text: msg.innerText.trim(), below: m.top >= a.top && m.top - a.bottom < 80 && Math.abs(m.left - a.left) < 300 };
-  }, selector);
-
 await f.step("8", "form errors sit under their fields: sign-in (the server's code), sign-up, an order, a withdrawal address", async () => {
   const V = await f.open({ name: "forms", device: desktop(1280) });
   try {
@@ -537,10 +527,11 @@ await f.step("11", "changing the time zone in settings changes the times in tabl
 
 // --- 12: numbers ---------------------------------------------------------------------------
 
-await f.step("12", "figures right-aligned in tabular digits, with thousands separators and the pair's decimals", async () => {
+await f.step("12", "figures right-aligned in tabular digits, with thousands separators, the pair's and the assets' decimals", async () => {
   const pairs = await api(API, "GET", "/v1/market/pairs");
-  const btc = (pairs.body?.pairs ?? pairs.body?.items ?? pairs.body ?? []).find?.((p) => p.symbol === "BTC-USDT");
-  if (!btc) throw new Error(`no BTC-USDT in /v1/market/pairs: ${JSON.stringify(pairs.body).slice(0, 200)}`);
+  if (pairs.status !== 200) throw new Error(`/v1/market/pairs: ${pairs.status}`);
+  const btc = pairs.body.pairs.find((p) => p.symbol === "BTC-USDT");
+  if (!btc) throw new Error("no BTC-USDT in /v1/market/pairs");
   const problems = [];
   const columns = async (where, headers) => {
     const cells = await A.page.evaluate((hs) => {
@@ -574,6 +565,19 @@ await f.step("12", "figures right-aligned in tabular digits, with thousands sepa
   if (!/\d{1,3}(,\d{3})+(\.\d+)?/.test(btcRow)) problems.push(`markets: BTC's price without thousands separators: "${btcRow.replace(/\s+/g, " ")}"`);
   await nav(A, "/assets");
   await columns("assets", ["可用", "冻结", "估值"]);
+  // Each asset's available and frozen amounts at its decimals (at most 8, cut).
+  const held = await A.page.evaluate(() => {
+    const table = [...document.querySelectorAll("main table")].find((t) => [...(t.tHead?.rows[0]?.cells ?? [])].some((th) => th.innerText.trim().startsWith("可用")));
+    if (!table) return [];
+    const ths = [...table.tHead.rows[0].cells].map((th) => th.innerText.trim());
+    const cols = ["可用", "冻结"].map((h) => ths.findIndex((t) => t.startsWith(h)));
+    return [...table.tBodies[0].rows]
+      .filter((r) => r.cells.length > Math.max(...cols))
+      .slice(0, 20)
+      .map((r) => ({ asset: r.cells[0].querySelector(".font-medium")?.innerText.trim() ?? r.cells[0].innerText.trim(), values: cols.map((i) => r.cells[i].innerText.trim()) }));
+  });
+  if (held.length) problems.push(...decimalIssues("assets", held, await listDecimals(API)));
+  else if (user.usdt > 0) problems.push("assets: no rows read");
   // The trade tape: prices at the pair's decimals, amounts right-aligned.
   await nav(A, "/trade/BTC-USDT");
   await clickTab(A, "最新成交");
@@ -602,7 +606,7 @@ else await f.step("P2", P2, async () => {
   try {
     await keyboardOrder();
   } finally {
-    await cancelOrders(API, user);
+    await cleared();
   }
 });
 
@@ -768,7 +772,7 @@ else await f.step("P6", P6, async () => {
   try {
     await orderWithoutConfirmation();
   } finally {
-    await cancelOrders(API, user);
+    await cleared();
   }
 });
 
@@ -859,7 +863,7 @@ else await f.step("P8", P8, async () => {
     await S.clickButton("切换到手机版", "footer");
     await S.page.waitForFunction((m) => location.origin === m, { timeout: 15000 }, M_APP);
     await S.page.waitForSelector("#root *", { timeout: 15000 });
-    const pref = (await S.context.cookies(M_APP)).find((c) => c.name === "site_pref");
+    const pref = (await S.context.cookies()).find((c) => c.name === "site_pref");
     if (pref?.value !== "m") throw new Error(`site_pref ${JSON.stringify(pref)}`);
     // A desktop asking for a mobile page again stays there.
     await S.page.goto(M_APP + "/markets", { waitUntil: "domcontentloaded" });
@@ -875,6 +879,21 @@ else await f.step("P8", P8, async () => {
     if (new URL(P.page.url()).origin !== APP) throw new Error(`a phone with site_pref=pc was sent to ${P.page.url()}`);
   } finally {
     await P.close();
+  }
+});
+
+// --- the account leaves nothing on the book -----------------------------------------------------
+
+await f.step("—", "no order of the flows' account is left open", async () => {
+  await cancelOrders(API, user);
+  const token = await signInApi(API, user);
+  const until = Date.now() + 20_000;
+  for (;;) {
+    const open = await api(API, "GET", "/v1/orders?status=ACTIVE", undefined, { Authorization: `Bearer ${token}` });
+    if (open.status !== 200) throw new Error(`active orders: ${open.status}`);
+    if (!open.body.items.length) return;
+    if (Date.now() > until) throw new Error(`${open.body.items.length} orders still open`);
+    await new Promise((r) => setTimeout(r, 1000));
   }
 });
 

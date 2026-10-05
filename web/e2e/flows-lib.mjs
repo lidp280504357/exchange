@@ -13,6 +13,7 @@
 // list instead. Requests are intercepted only to stage a fault (offline,
 // an expired token, a degraded mark price), never to change what the
 // server holds.
+import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -66,6 +67,31 @@ export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
   const results = [];
   const began = Date.now();
   let inStep = false;
+  // Each step runs in an async context of its own: a step that ran over
+  // its budget may still be working when the next one starts, and whatever
+  // it then asks of a tab, or of open(), fails instead of acting on the
+  // next step's pages (review BJ ②).
+  const steps = new AsyncLocalStorage();
+  let current = 0;
+  let stepCount = 0;
+  const guard = () => {
+    const mine = steps.getStore();
+    if (mine !== undefined && mine !== current) throw new Error("a tab used after its step's budget ran out");
+  };
+  /** guarded is page with each of its methods behind guard(). */
+  const guarded = (page) =>
+    new Proxy(page, {
+      get(target, prop) {
+        const v = Reflect.get(target, prop, target);
+        if (typeof v !== "function") return v;
+        return (...args) => {
+          guard();
+          return v.apply(target, args);
+        };
+      },
+    });
+  // What runs before the run exits, whatever ended it (the account's orders cancelled ...).
+  const exits = [];
 
   /**
    * open makes a tab: device ({viewport, userAgent}), settings merged into
@@ -75,6 +101,7 @@ export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
    * the contracts (except the ones a step staged).
    */
   async function open(opts) {
+    guard();
     // persistent: the browser's own profile instead of an off-the-record one
     // (Chrome installs no web app from an off-the-record window).
     const { name, persistent = false } = opts;
@@ -90,12 +117,19 @@ export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
       tabs.delete(tab);
       await (persistent ? tab.page.close() : context.close()).catch(() => {});
     };
-    // renew gives the tab a fresh page in the same context (signed in as
-    // before) and closes the old one, which a step that ran over its
+    // renew gives the tab a fresh page in the same context, back where the
+    // old one was (not about:blank, where the site's own navigation and
+    // storage are refused; review BJ ①) and signed in through the context's
+    // cookies, then closes the old page, which a step that ran over its
     // budget may still be working on.
     tab.renew = async () => {
       const old = tab.page;
+      const url = old.url();
       await attach(tab, await context.newPage(), opts);
+      if (/^https?:/.test(url)) {
+        await tab.page.goto(url, { waitUntil: "domcontentloaded" }).catch(() => {});
+        await tab.settled();
+      }
       await old.close().catch(() => {});
     };
     tabs.add(tab);
@@ -162,8 +196,16 @@ export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
       const problem = contracts.check(req.method(), path, r.status(), body);
       if (problem) violations.add(problem);
     });
-    tab.page = page;
-    Object.assign(tab, helpers(page, app, inflight));
+    tab.page = guarded(page);
+    for (const [k, v] of Object.entries(helpers(page, app, inflight))) {
+      tab[k] =
+        typeof v === "function"
+          ? (...args) => {
+              guard();
+              return v(...args);
+            }
+          : v;
+    }
   }
 
   /**
@@ -182,9 +224,12 @@ export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
     let timer;
     let late = false;
     inStep = true;
+    current = ++stepCount;
+    const run = steps.run(current, () => Promise.resolve().then(fn));
+    run.catch(() => {}); // what it does after its budget is not the run's
     try {
       await Promise.race([
-        fn(),
+        run,
         new Promise((_, reject) => {
           timer = setTimeout(() => {
             late = true;
@@ -199,6 +244,7 @@ export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
     } finally {
       clearTimeout(timer);
       inStep = false;
+      current = 0;
     }
     const ms = Date.now() - t0;
     const closeClosing = async () => {
@@ -240,8 +286,27 @@ export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
     console.log(`skip ${item.padEnd(4)} ${name}: ${why}`);
   }
 
-  /** done closes Chrome, prints the summary and exits: 1 when a step failed or a response broke the contracts. */
+  /** signedIn opens a tab (open's options) signed in as who through the form, at next (/assets by default). */
+  async function signedIn(who, opts, next) {
+    const tab = await open(opts);
+    await tab.signIn(who, next);
+    return tab;
+  }
+
+  /** atExit adds what must run before the run exits, however it ends (done() runs them in order). */
+  function atExit(fn) {
+    exits.push(fn);
+  }
+
+  /** done runs the cleanups, closes Chrome, prints the summary and exits: 1 when a step failed or a response broke the contracts. */
   async function done() {
+    for (const fn of exits.splice(0)) {
+      try {
+        await fn();
+      } catch (e) {
+        console.log(`     cleanup: ${e.message}`);
+      }
+    }
     for (const tb of [...tabs]) await tb.close();
     await browser.close().catch(() => {});
     const failed = results.filter((r) => r.ok === false);
@@ -255,7 +320,7 @@ export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
     process.exit(failed.length || violations.size ? 1 : 0);
   }
 
-  return { open, step, skip, done, bypass, api, app, results };
+  return { open, signedIn, step, skip, done, atExit, bypass, api, app, results };
 }
 
 /** helpers are the lib.mjs helpers for any page: finding things the way a user does, by their visible text. */
@@ -303,6 +368,65 @@ export function helpers(page, app, inflight = null) {
         tick(n);
       }), count),
     /**
+     * clickTab presses a tab by its text (Radix tabs switch on a real press,
+     * not a scripted click), the nth of that text, brought to the middle of
+     * the screen first: near the bottom a phone's fixed bars (the
+     * terminal's buy and sell) would take the press.
+     */
+    async clickTab(text, nth = 0) {
+      const handle = await page.waitForFunction(
+        (txt, n) => [...document.querySelectorAll("[role=tab]")].filter((el) => el.textContent.trim().startsWith(txt))[n] ?? null,
+        { timeout: 10000 },
+        text,
+        nth,
+      );
+      await handle.evaluate((el) => el.scrollIntoView({ block: "center" }));
+      await h.frames(2);
+      await handle.asElement().click();
+      await page.waitForFunction((txt) => [...document.querySelectorAll("[role=tab][data-state=active]")].some((el) => el.textContent.trim().startsWith(txt)), { timeout: 5000 }, text);
+    },
+    /**
+     * fieldError is the message tied to the input at selector
+     * (aria-describedby) while it is marked invalid, and whether it sits
+     * under the input; null without one.
+     */
+    fieldError: (selector) =>
+      page.evaluate((sel) => {
+        const input = document.querySelector(sel);
+        if (!input || input.getAttribute("aria-invalid") !== "true") return null;
+        const msg = (input.getAttribute("aria-describedby") ?? "").split(/\s+/).map((id) => document.getElementById(id)).find((el) => el?.innerText.trim());
+        if (!msg) return null;
+        const a = input.getBoundingClientRect();
+        const m = msg.getBoundingClientRect();
+        return { text: msg.innerText.trim(), below: m.top >= a.top && m.top - a.bottom < 80 && Math.abs(m.left - a.left) < 300 };
+      }, selector),
+    /**
+     * signIn signs in as who ({email, password}) through the user sites'
+     * form and waits for next (the console's flows sign in their own way).
+     */
+    async signIn(who, next = "/assets") {
+      await h.go(`/login?next=${encodeURIComponent(next)}`);
+      await h.typeInto('input[autocomplete="username"]', who.email);
+      await h.typeInto('input[autocomplete="current-password"]', who.password);
+      await page.keyboard.press("Enter");
+      await h.waitPath(next.split("?")[0], 30000);
+    },
+    /**
+     * nav changes page by the site's own router (history and popstate),
+     * then waits for it to settle; a page elsewhere (about:blank, another
+     * origin) loads the address instead.
+     */
+    nav: async (path) => {
+      const at = await page.evaluate(() => location.origin).catch(() => "");
+      if (at !== new URL(app).origin) return h.go(path);
+      await page.evaluate((p) => {
+        history.pushState({}, "", p);
+        dispatchEvent(new PopStateEvent("popstate"));
+      }, path);
+      await page.waitForFunction((p) => location.pathname + location.search === p, { timeout: 10000 }, path);
+      await h.settled();
+    },
+    /**
      * settled waits for the page's requests to be done for 500 ms (event
      * streams and WebSockets aside), timeout at most; FLOWS_DEBUG=1 prints
      * what was still in flight then.
@@ -312,6 +436,7 @@ export function helpers(page, app, inflight = null) {
       const end = Date.now() + timeout;
       let quiet = 0;
       while (Date.now() < end) {
+        if (page.isClosed()) return;
         if (inflight.size) quiet = 0;
         else if (!quiet) quiet = Date.now();
         else if (Date.now() - quiet >= 500) return;
@@ -345,6 +470,33 @@ export async function cancelOrders(base, who) {
   const res = await api(base, "DELETE", "/v1/orders", undefined, { Authorization: `Bearer ${token}` });
   if (res.status !== 202) throw new Error(`cancel orders: ${res.status} ${JSON.stringify(res.body)}`);
   return res.body.requested;
+}
+
+/**
+ * listDecimals maps each asset to the decimals its amounts show with in the
+ * sites' lists: the asset's own, at most 8 (shownDecimals, cut).
+ */
+export async function listDecimals(base) {
+  const res = await api(base, "GET", "/v1/market/assets");
+  if (res.status !== 200) throw new Error(`/v1/market/assets: ${res.status}`);
+  return new Map(res.body.assets.map((a) => [a.asset_code, Math.min(a.decimals, 8)]));
+}
+
+/** decimalIssues lists the amounts of rows ({asset, values}) not at their asset's places (want: listDecimals). */
+export function decimalIssues(where, rows, want) {
+  const out = [];
+  for (const { asset, values } of rows) {
+    const places = want.get(asset);
+    if (places === undefined) {
+      out.push(`${where}: "${asset}" is no asset of /v1/market/assets`);
+      continue;
+    }
+    for (const v of values) {
+      const got = v.includes(".") ? v.split(".")[1].length : 0;
+      if (got !== places) out.push(`${where}: ${asset} "${v}" with ${got} decimals, the asset's lists show ${places}`);
+    }
+  }
+  return out;
 }
 
 /** api calls the user API: {status, body}. */
