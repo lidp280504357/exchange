@@ -119,10 +119,16 @@ const bookTabLabel = "盘口";
 
 async function terminal(browser, { site, base, device, budgets, bookTab, tapeTab }) {
   const page = await open(browser, device);
+  // tab presses a tab by its label, as a pointer does (the PC site's tabs
+  // switch on the pointer going down; an element's click() does not).
+  const tab = async (label) => {
+    for (const h of await page.$$("button, [role=tab]")) {
+      if ((await h.evaluate((b) => b.textContent.trim())) === label && (await h.isVisible())) return h.click();
+    }
+    throw new Error(`no ${label} tab`);
+  };
   await page.goto(`${base}/trade/BTC-USDT`, { waitUntil: "networkidle2", timeout: 60000 });
-  if (bookTab) {
-    await page.evaluate((l) => [...document.querySelectorAll("button, [role=tab]")].find((b) => b.textContent.trim() === l)?.click(), bookTabLabel);
-  }
+  if (bookTab) await tab(bookTabLabel);
   await page.waitForSelector("[data-book-row]", { timeout: 30000 });
   await sleep(5000); // past the load
 
@@ -178,7 +184,6 @@ async function terminal(browser, { site, base, device, budgets, bookTab, tapeTab
   // Trades (not throttled): each trade message to the first change of the
   // trade tape after it, over 30 seconds on the tape's own tab; then back
   // to the book.
-  const tab = (label) => page.evaluate((l) => [...document.querySelectorAll("button, [role=tab]")].find((b) => b.textContent.trim() === l)?.click(), label);
   await tab(tapeTab);
   await page.waitForSelector('section[aria-label="最新成交"]', { timeout: 10000 });
   const fromTape = await page.evaluate(() => {
