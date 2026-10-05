@@ -66,8 +66,8 @@ type summaryJSON struct {
 	Version  int  `json:"version"`
 }
 
-// summaryOf is a in a list, in the language loc and the exchange's mode
-// (test or live).
+// summaryOf is article a as a list shows it, in the language loc and the
+// exchange's mode (test or live).
 func summaryOf(a domain.Article, loc string, test bool) summaryJSON {
 	t, ok := a.Text(loc)
 	if strings.TrimSpace(t.Summary) == "" {

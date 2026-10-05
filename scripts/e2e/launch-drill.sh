@@ -235,6 +235,14 @@ publish_default HOME home home-hero
 echo "== go live: the platform coin's profile"
 acall GET /admin/v1/assets/ASTRA/profile ""
 expect 200 - "ASTRA's profile"
+# Its introduction is on both sites' coin page, which follows no mode: a
+# live one does not call the market simulated or the site a learning
+# project (review BN).
+if jq -e '[.description // {} | .[] | test("学习项目|模拟|learning project|simulated"; "i")] | any' <<<"$BODY" >/dev/null; then
+  echo "FAIL ASTRA's introduction still says the market is simulated: $(jq -c .description <<<"$BODY") (scripts/ops/astra.sh profile, or the console)" >&2
+  exit 1
+fi
+echo "ok   ASTRA's introduction says nothing of a simulated market"
 if [[ $(jq -r '(.display_name // "") != "" and (.logo_url // "") != ""' <<<"$BODY") == true ]]; then
   echo "ok   ASTRA is $(jq -r .display_name <<<"$BODY"), with its logo"
 else

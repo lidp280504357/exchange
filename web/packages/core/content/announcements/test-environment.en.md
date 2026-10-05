@@ -4,10 +4,10 @@ date: 2026-09-28
 pinned: true
 category: notice
 modes: TEST
-summary: Astras is a learning project running in a test environment. Every balance is simulated and cannot be turned into real assets.
+summary: Astras is in test mode. Every balance is simulated and cannot be turned into real assets.
 ---
 
-Astras is a digital asset exchange built as a learning project, and it runs in a test environment. Please read the points below before you use it.
+Astras is in test mode and runs in a test environment. Please read the points below before you use it.
 
 ## Every balance is simulated
 
