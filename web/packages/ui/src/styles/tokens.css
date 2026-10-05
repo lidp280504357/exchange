@@ -26,10 +26,13 @@
   --down: var(--red);
   /* Text-only shades of rise, fall and the brand (text-up-strong ...): the
      light theme darkens them to read on its backgrounds; fills, candles,
-     badges and charts keep the colours above. On dark they are the same
-     (text on the colours' soft tints is theme.css's soft-fg). */
+     badges and charts keep the colours above. On dark the green and the
+     brand read as they are (green 9.10 / 8.54 / 7.78 / 6.80, brand 10.74 /
+     10.07 / 9.18 / 8.02 : 1 on bg-0..bg-3); the red is lighter for text,
+     7.19 / 6.74 / 6.15 / 5.37 (#f6465d is 4.69 on bg-2 and 4.10 on bg-3;
+     review BH ⑤). Text on the colours' soft tints is theme.css's soft-fg. */
   --green-strong: var(--green);
-  --red-strong: var(--red);
+  --red-strong: #fb7185;
   --up-strong: var(--green-strong);
   --down-strong: var(--red-strong);
   --brand-strong: var(--brand);
@@ -43,10 +46,14 @@
   --warn: #f59e0b;
   --danger: #ef4444;
   --success: #22c55e;
-  /* Text-only shades of the status tones, the same way. */
+  /* Text-only shades of the status tones, the same way: success and warn as
+     they are (6.35 and 6.73 : 1 at least, on bg-3), danger and info lighter
+     for text: 7.00 / 6.56 / 5.98 / 5.23 and 7.61 / 7.14 / 6.51 / 5.69 on
+     bg-0..bg-3 (#ef4444 and #3b82f6 are 4.40 and 4.50 on bg-2, 3.84 and
+     3.93 on bg-3; review BH ⑤). */
   --success-strong: var(--success);
-  --danger-strong: var(--danger);
-  --info-strong: var(--info);
+  --danger-strong: #f87171;
+  --info-strong: #60a5fa;
   --warn-strong: var(--warn);
   --white: #ffffff;
   --black: #000000;
@@ -114,20 +121,21 @@
   --bg-3: #e6e9ee;
   --fg-1: #111827;
   --fg-2: #4b5563;
-  /* 5.00 / 5.37 / 4.79 : 1 on bg-0..bg-2; 4.41 on bg-3, for text that is
-     not essential there (ui-checklist item 3). */
-  --fg-3: #646b77;
+  /* 5.39 / 5.78 / 5.16 / 4.75 : 1 on bg-0..bg-3 (ui-checklist item 3;
+     #646b77 was 4.41 on bg-3, review BH ⑥). */
+  --fg-3: #5f6672;
   --line-1: #e5e7eb;
   --line-2: #d1d5db;
   /* Text-only shades: on bg-0 / bg-1 / bg-2 / bg-3 green (rise, success)
      6.16 / 6.61 / 5.89 / 5.43, red (fall, danger) 6.03 / 6.47 / 5.77 /
-     5.32, brand 5.15 / 5.53 / 4.93 / 4.54, info 6.24 / 6.70 / 5.98, warn
+     5.32, brand 5.95 / 6.38 / 5.69 / 5.24, info 6.24 / 6.70 / 5.98, warn
      6.01 / 6.45 / 5.75 : 1; on their colours' 15% tints over bg-0 / bg-1 /
-     bg-2 at least 5.24 (green), 4.79 (red), 4.55 (brand), 5.08 (info),
-     5.18 (warn). */
+     bg-2 at least 5.24 (green), 4.79 (red), 5.08 (info), 5.18 (warn), and
+     the brand on its 20% soft tint (--brand-soft below) at least 5.14
+     (#866300 was 4.45 there, review BH ⑥). */
   --green-strong: #0b6b3a;
   --red-strong: #b91c1c;
-  --brand-strong: #866300;
+  --brand-strong: #7a5a00;
   --success-strong: #0b6b3a;
   --danger-strong: #b91c1c;
   --info-strong: #1d4ed8;

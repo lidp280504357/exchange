@@ -5,9 +5,10 @@ import { Skeleton, SkeletonLines } from "../components/Skeleton";
 import { cn } from "../lib/cn";
 
 // The design system at a glance (design §5.1, §5.3): every colour token
-// with the value it resolves to in the current theme, radii, the type
-// scale, shadows and the motion presets. Switch theme and rise colour in
-// the toolbar to review both.
+// with the value it resolves to in the current theme, the text-only shades
+// on each background of both themes with their contrast, radii, the type
+// scale, the touch target, shadows and the motion presets. Switch theme and
+// rise colour in the toolbar to review both.
 
 type Swatch = { name: string; cls?: string; style?: CSSProperties; v: string; border?: boolean };
 
@@ -128,6 +129,75 @@ function useTokenValues(): Record<string, string> {
   return values;
 }
 
+/** The text-only shades (text-*-strong), each a text colour that reads on every background. */
+const strongs = ["up-strong", "down-strong", "brand-strong", "success-strong", "danger-strong", "info-strong", "warn-strong"] as const;
+const strongText: Record<(typeof strongs)[number], string> = {
+  "up-strong": "text-up-strong",
+  "down-strong": "text-down-strong",
+  "brand-strong": "text-brand-strong",
+  "success-strong": "text-success-strong",
+  "danger-strong": "text-danger-strong",
+  "info-strong": "text-info-strong",
+  "warn-strong": "text-warn-strong",
+};
+const backgrounds = ["bg-bg-0", "bg-bg-1", "bg-bg-2", "bg-bg-3"] as const;
+
+/** contrastOf is the WCAG 2.x contrast of an element's text colour on its cell's background, as computed. */
+function contrastOf(el: HTMLElement | null): string {
+  if (!el) return "";
+  const channels = (c: string) => (c.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+  const lum = (c: number[]) => {
+    const f = (v: number) => ((v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * f(c[0] ?? 0) + 0.7152 * f(c[1] ?? 0) + 0.0722 * f(c[2] ?? 0);
+  };
+  const [a, b] = [lum(channels(getComputedStyle(el).color)), lum(channels(getComputedStyle(el.parentElement ?? el).backgroundColor))].sort((x, y) => y - x);
+  return `${((a! + 0.05) / (b! + 0.05)).toFixed(2)} : 1`;
+}
+
+/** StrongTable shows each text-only shade on bg-0..bg-3 of the theme given, with its contrast. */
+function StrongTable({ theme }: { theme: "dark" | "light" }) {
+  const [ratios, setRatios] = useState<Record<string, string>>({});
+  const [root, setRoot] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!root) return;
+    const out: Record<string, string> = {};
+    for (const el of root.querySelectorAll<HTMLElement>("[data-sample]")) out[el.dataset.sample!] = contrastOf(el);
+    setRatios(out);
+  }, [root]);
+  return (
+    <div ref={setRoot} data-theme={theme} className="overflow-hidden rounded-3 border border-line-1 bg-bg-0 p-3">
+      <div className="mb-2 text-sm font-semibold text-fg-1">{theme}</div>
+      <table className="w-full border-separate border-spacing-1 text-sm">
+        <thead>
+          <tr>
+            <th className="text-left text-xs font-normal text-fg-3">token</th>
+            {backgrounds.map((b) => (
+              <th key={b} className="text-left text-xs font-normal text-fg-3">
+                {b.replace("bg-bg-", "bg-")}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {strongs.map((name) => (
+            <tr key={name}>
+              <td className="font-mono text-xs text-fg-2">--{name}</td>
+              {backgrounds.map((b) => (
+                <td key={b} className={cn("rounded-1 px-2 py-1.5", b)}>
+                  <span data-sample={`${name}/${b}`} className={cn("tabular-nums", strongText[name])}>
+                    +2.31% 文字
+                  </span>
+                  <span className="ml-2 font-mono text-xs text-fg-3">{ratios[`${name}/${b}`]}</span>
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-3">
@@ -167,6 +237,20 @@ export const Colours: Story = {
   },
 };
 
+/** The text-only shades on every background of both themes, with their contrast (at least 4.5 : 1 each). */
+export const TextShades: Story = {
+  render: () => (
+    <div className="flex flex-col gap-6 p-6">
+      <Section title="Text-only shades (text-*-strong) on bg-0..bg-3">
+        <div className="grid gap-4 xl:grid-cols-2">
+          <StrongTable theme="dark" />
+          <StrongTable theme="light" />
+        </div>
+      </Section>
+    </div>
+  ),
+};
+
 export const RadiiTypeShadow: Story = {
   render: () => (
     <div className="flex flex-col gap-8 p-6">
@@ -192,6 +276,12 @@ export const RadiiTypeShadow: Story = {
             <span className="w-32 shrink-0 text-xs text-fg-3">font-mono</span>
             <span className="font-mono text-sm text-fg-1">0x3f5ce5fbfe3e9af3971dd833d26ba9b5c936f0be</span>
           </div>
+        </div>
+      </Section>
+      <Section title="Touch target (--tap)">
+        <div className="flex items-center gap-4">
+          <div className="grid size-tap place-items-center rounded-2 border border-line-2 bg-bg-2 text-xs text-fg-2">44</div>
+          <span className="text-xs text-fg-3">--tap 44 px: the smallest touch target (ui-checklist M1); the root font is 14 px, so size-11 is only 38.5 px</span>
         </div>
       </Section>
       <Section title="Shadow and layers">
