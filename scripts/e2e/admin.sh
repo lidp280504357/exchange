@@ -48,6 +48,7 @@
 #
 #   scripts/e2e/admin.sh
 set -euo pipefail
+fail() { echo "FAIL $1" >&2; exit 1; }
 
 # shellcheck source=lib/common.sh
 source "$(dirname "$0")/lib/common.sh"
@@ -770,21 +771,29 @@ eventually 60 "the user's canceled order is in the orders view" orders_listed
 check '.items[0].status == "CANCELED" and .items[0].symbol == "ETH-BTC"' "in its latest state"
 # The view is read by created_key as well as created_at, and pages by it
 # (eaee3bd, review BQ): a range around the order finds it, one ending a
-# second before it does not; two pages of three of the bots' orders up to
-# a minute ago are the six newest of them.
-ORDER_AT=$(jq -r --arg o "$ORDER" '.items[] | select(.order_id == $o) | .created_at' <<<"$BODY")
-at_shift() { # at_shift SECONDS: the order's time (whole seconds) moved by SECONDS, RFC 3339
-  jq -rn --arg t "$ORDER_AT" --argjson s "$1" '$t | sub("\\.[0-9]+"; "") | fromdateiso8601 + $s | todate'
+# second before it does not; up to ten minutes before the bots' newest
+# order (the server's time, well behind the read model's lag), two pages
+# of three of their orders are the six newest of them.
+at_shift() { # at_shift TIME SECONDS: TIME (whole seconds) moved by SECONDS, RFC 3339
+  jq -rn --arg t "$1" --argjson s "$2" '$t | sub("\\.[0-9]+"; "") | fromdateiso8601 + $s | todate'
 }
-as AUDITOR GET "/admin/v1/orders?user_id=$USER_ID&from=$(at_shift -60)&to=$(at_shift 60)" ""
+# The times are worked out before the calls: one that cannot be stops the
+# script here instead of leaving an open range that passes (review BS).
+ORDER_AT=$(jq -r --arg o "$ORDER" '.items[] | select(.order_id == $o) | .created_at' <<<"$BODY")
+AROUND_FROM=$(at_shift "$ORDER_AT" -60) || fail "no time a minute before the order ($ORDER_AT)"
+AROUND_TO=$(at_shift "$ORDER_AT" 60) || fail "no time a minute after the order ($ORDER_AT)"
+BEFORE_IT=$(at_shift "$ORDER_AT" -1) || fail "no time a second before the order ($ORDER_AT)"
+as AUDITOR GET "/admin/v1/orders?user_id=$USER_ID&from=$AROUND_FROM&to=$AROUND_TO" ""
 expect 200 - "the user's orders within a minute of the order"
 check ".items | map(.order_id) | index(\"$ORDER\") != null" "hold it"
-as AUDITOR GET "/admin/v1/orders?user_id=$USER_ID&to=$(at_shift -1)" ""
+as AUDITOR GET "/admin/v1/orders?user_id=$USER_ID&to=$BEFORE_IT" ""
 expect 200 - "the user's orders up to a second before it"
 check ".items | map(.order_id) | index(\"$ORDER\") == null" "do not"
-UNTIL=$(jq -rn 'now - 60 | floor | todate')
+as AUDITOR GET "/admin/v1/orders?accounts=bots&limit=1" ""
+expect 200 - "the bots' newest order"
+UNTIL=$(at_shift "$(jq -r '.items[0].created_at // ""' <<<"$BODY")" -600) || fail "no bot order to page the bots' orders by"
 as AUDITOR GET "/admin/v1/orders?accounts=bots&to=$UNTIL&limit=6" ""
-expect 200 - "the bots' six newest orders up to a minute ago"
+expect 200 - "the bots' six newest orders up to ten minutes before their newest"
 SIX=$(jq -c '[.items[].order_id]' <<<"$BODY")
 as AUDITOR GET "/admin/v1/orders?accounts=bots&to=$UNTIL&limit=3" ""
 expect 200 - "three of them"

@@ -178,22 +178,32 @@ export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
     // does not always report as ended (a list's request cut by a reload
     // kept every later settled() waiting its full 20 s).
     const inflight = new Set();
-    page.on("request", (r) => {
-      for (const hop of r.redirectChain()) inflight.delete(hop);
-      if (r.isNavigationRequest() && r.frame() === page.mainFrame()) inflight.clear();
-      if (r.resourceType() !== "eventsource" && r.resourceType() !== "websocket") inflight.add(r);
-    });
     // What the old document starts between the navigation's request and the
-    // new one's commit (a poll, an event stream reconnecting) ends with it
-    // too: at the main frame's commit (Page.frameNavigated: a new document
-    // only) the requests made by another document's loader go (review BP).
+    // new one's commit (a poll) ends with it too: at the main frame's commit
+    // (Page.frameNavigated: a new document only) the requests made by
+    // another document's loader go (review BP). The loaders come from this
+    // tab's own CDP session (no payloads kept), keyed by the CDP request id,
+    // which puppeteer's HTTPRequest.id is (internal, checked below).
     const loaders = new Map();
     const cdp = await page.createCDPSession();
-    await Promise.all([cdp.send("Page.enable"), cdp.send("Network.enable")]);
+    await Promise.all([cdp.send("Page.enable"), cdp.send("Network.enable", { maxTotalBufferSize: 1024, maxResourceBufferSize: 1024 })]);
     cdp.on("Network.requestWillBeSent", ({ requestId, loaderId }) => loaders.set(requestId, loaderId));
     cdp.on("Page.frameNavigated", ({ frame }) => {
       if (frame.parentId) return;
-      for (const r of inflight) if (!r.isNavigationRequest() && loaders.has(r.id) && loaders.get(r.id) !== frame.loaderId) inflight.delete(r);
+      for (const r of inflight) {
+        if (!r.isNavigationRequest() && loaders.has(r.id) && loaders.get(r.id) !== frame.loaderId) {
+          inflight.delete(r);
+          loaders.delete(r.id);
+        }
+      }
+    });
+    page.on("request", (r) => {
+      if (typeof r.id !== "string" && !tab.errors.some((e) => e.startsWith("flows-lib:"))) {
+        tab.errors.push("flows-lib: puppeteer's HTTPRequest.id is no longer the CDP request id that settled() keys the loaders on");
+      }
+      for (const hop of r.redirectChain()) inflight.delete(hop);
+      if (r.isNavigationRequest() && r.frame() === page.mainFrame()) inflight.clear();
+      if (r.resourceType() !== "eventsource" && r.resourceType() !== "websocket") inflight.add(r);
     });
     page.on("requestfinished", (r) => {
       inflight.delete(r);

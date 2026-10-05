@@ -69,22 +69,37 @@ await page.setRequestInterception(true);
 page.on("request", hold);
 
 /**
- * openRow clicks a row of a list that refreshes itself until the drawer it
- * opens shows: a refresh that replaces the row between the press and the
- * release swallows the click (seen once at the custody callbacks). Pressed
- * again only while no drawer is open, at most four times.
+ * openRow clicks a row (one rows() has seen: a real one, not the loading
+ * table's skeleton) and waits for the drawer it opens; while none shows
+ * within 5 s it presses again, four times at most. The second press is
+ * insurance: the one miss seen (the custody callbacks) was a skeleton row
+ * pressed, the lists do not poll (review BS).
  */
 async function openRow(selector) {
-  for (let i = 0; ; i++) {
+  for (let i = 1; ; i++) {
     await t.clickLive(selector);
-    if (await page.waitForSelector("[role=dialog]", { timeout: 5000 }).then(() => true, () => false)) return;
-    if (i >= 3) throw new Error(`a row of ${selector} opens no drawer`);
+    try {
+      await page.waitForSelector("[role=dialog]", { timeout: 5000 });
+      return;
+    } catch (e) {
+      if (e?.name !== "TimeoutError") throw e;
+      if (i >= 4) throw new Error(`a row of ${selector} opened no drawer after 4 presses (20 s)`);
+    }
   }
 }
 
-/** rows waits for at least n rows in the page's (first) table body. */
+/**
+ * rows waits for at least n of the table's own rows in scope (data-row-id:
+ * a loading table's skeleton rows have none) with nothing loading there
+ * (DataTable marks the table itself aria-busy).
+ */
 const rows = (n, scope = "main") =>
-  page.waitForFunction((s, k) => document.querySelectorAll(`${s} tbody tr`).length >= k && !document.querySelector(`${s} [aria-busy=true]`), { timeout: 30000 }, scope, n);
+  page.waitForFunction(
+    (s, k) => document.querySelectorAll(`${s} tbody tr[data-row-id]`).length >= k && !document.querySelector(`${s}[aria-busy=true], ${s} [aria-busy=true]`),
+    { timeout: 30000 },
+    scope,
+    n,
+  );
 const noError = async (what) => {
   const text = await page.evaluate(() => document.querySelector("main")?.innerText ?? "");
   if (/重试|出错了/.test(text) && /错误|失败|不可用/.test(text)) throw new Error(`${what} shows an error`);
@@ -162,7 +177,11 @@ try {
   const ahead = [["/reports", "报表", "Reports"], ["/health", "系统健康", "Health"], ["/platform", "平台设置", "Platform"]];
   const aheadBy = Date.now() + 30_000;
   while (!chunkOf("Settings") || ahead.some(([, , name]) => !chunkOf(name))) {
-    if (Date.now() > aheadBy) throw new Error(`30 s on, the idle console had not fetched every section's page; the scripts since the start: ${fetchLog.join(", ")}`);
+    if (Date.now() > aheadBy) {
+      // A tab hidden or a request to save data meanwhile stops the fetching ahead too.
+      const late = await page.evaluate(() => [navigator.connection?.saveData && "the browser asks to save data", document.visibilityState === "hidden" && "the tab is hidden"].filter(Boolean).join(", "));
+      throw new Error(`30 s on, the idle console had not fetched every section's page${late ? ` (${late})` : ""}; the scripts since the start: ${fetchLog.join(", ")}`);
+    }
     await sleep(250);
   }
   const before = fetchLog.length;
