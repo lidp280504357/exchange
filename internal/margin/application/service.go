@@ -38,6 +38,16 @@ type Service struct {
 	Log         *slog.Logger
 	Now         func() time.Time
 	Metrics     *Metrics
+	// Touched hears of each user whose margin accounts changed (the
+	// monitor, which values them again and publishes them); may be nil.
+	Touched func(userID string)
+}
+
+// touch tells Touched that a user's margin accounts changed.
+func (s *Service) touch(userID string) {
+	if s.Touched != nil && userID != "" {
+		s.Touched(userID)
+	}
 }
 
 // Metrics of margin trading.
@@ -49,6 +59,12 @@ type Metrics struct {
 	InterestRun   prometheus.Gauge
 	Reconciled    *prometheus.GaugeVec
 	LastReconcile prometheus.Gauge
+	// The monitor: the accounts it watches, when its last pass ended, the
+	// warnings it gave and the accounts it found due for liquidation.
+	Watched         prometheus.Gauge
+	MonitorPass     prometheus.Gauge
+	Warned          prometheus.Counter
+	LiquidationsDue prometheus.Counter
 }
 
 // NewMetrics registers the metrics with reg.
@@ -67,7 +83,19 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "margin_reconcile_last_success_timestamp_seconds", Help: "When the last reconciliation completed.",
 		}),
 	}
-	reg.MustRegister(m.Ops, m.InterestRun, m.Reconciled, m.LastReconcile)
+	m.Watched = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "margin_monitor_accounts", Help: "Margin accounts the monitor values each pass.",
+	})
+	m.MonitorPass = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "margin_monitor_last_pass_timestamp_seconds", Help: "When the margin level monitor last finished a pass.",
+	})
+	m.Warned = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "margin_warnings_total", Help: "Margin accounts that fell under their warning level.",
+	})
+	m.LiquidationsDue = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "margin_liquidations_due_total", Help: "Passes that found a margin account at its liquidation level twice in a row.",
+	})
+	reg.MustRegister(m.Ops, m.InterestRun, m.Reconciled, m.LastReconcile, m.Watched, m.MonitorPass, m.Warned, m.LiquidationsDue)
 	return m
 }
 

@@ -628,7 +628,8 @@ func (x *MarginLevelWarned) GetWarnedAt() *timestamppb.Timestamp {
 }
 
 // MarginLiquidationStarted: an account reached its liquidation level
-// twice in a row; it is frozen and its orders are canceled.
+// twice in a row, or an administrator's request was approved; it is
+// frozen and its orders are canceled.
 type MarginLiquidationStarted struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	LiquidationId  string                 `protobuf:"bytes,1,opt,name=liquidation_id,json=liquidationId,proto3" json:"liquidation_id,omitempty"`
@@ -639,8 +640,11 @@ type MarginLiquidationStarted struct {
 	TotalAsset     string                 `protobuf:"bytes,6,opt,name=total_asset,json=totalAsset,proto3" json:"total_asset,omitempty"`
 	TotalLiability string                 `protobuf:"bytes,7,opt,name=total_liability,json=totalLiability,proto3" json:"total_liability,omitempty"`
 	StartedAt      *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// AUTO at the liquidation level, MANUAL by an approved request.
+	Trigger       string `protobuf:"bytes,9,opt,name=trigger,proto3" json:"trigger,omitempty"`
+	ApprovalId    string `protobuf:"bytes,10,opt,name=approval_id,json=approvalId,proto3" json:"approval_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *MarginLiquidationStarted) Reset() {
@@ -729,6 +733,20 @@ func (x *MarginLiquidationStarted) GetStartedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *MarginLiquidationStarted) GetTrigger() string {
+	if x != nil {
+		return x.Trigger
+	}
+	return ""
+}
+
+func (x *MarginLiquidationStarted) GetApprovalId() string {
+	if x != nil {
+		return x.ApprovalId
+	}
+	return ""
+}
+
 // MarginLiquidationCompleted: the debts are repaid (from the assets sold
 // to HOUSE, the insurance fund covering what they did not), the fee is
 // charged and the account is free again with what is left.
@@ -745,10 +763,17 @@ type MarginLiquidationCompleted struct {
 	// In USDT, what the insurance fund paid of the debts.
 	InsuranceCovered string `protobuf:"bytes,7,opt,name=insurance_covered,json=insuranceCovered,proto3" json:"insurance_covered,omitempty"`
 	// What is left in the account.
-	Remaining     []*AssetAmount         `protobuf:"bytes,8,rep,name=remaining,proto3" json:"remaining,omitempty"`
-	CompletedAt   *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=completed_at,json=completedAt,proto3" json:"completed_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Remaining   []*AssetAmount         `protobuf:"bytes,8,rep,name=remaining,proto3" json:"remaining,omitempty"`
+	CompletedAt *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=completed_at,json=completedAt,proto3" json:"completed_at,omitempty"`
+	// As the start told: what triggered it and the account then.
+	Trigger        string                 `protobuf:"bytes,10,opt,name=trigger,proto3" json:"trigger,omitempty"`
+	ApprovalId     string                 `protobuf:"bytes,11,opt,name=approval_id,json=approvalId,proto3" json:"approval_id,omitempty"`
+	MarginLevel    string                 `protobuf:"bytes,12,opt,name=margin_level,json=marginLevel,proto3" json:"margin_level,omitempty"`
+	TotalAsset     string                 `protobuf:"bytes,13,opt,name=total_asset,json=totalAsset,proto3" json:"total_asset,omitempty"`
+	TotalLiability string                 `protobuf:"bytes,14,opt,name=total_liability,json=totalLiability,proto3" json:"total_liability,omitempty"`
+	StartedAt      *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *MarginLiquidationCompleted) Reset() {
@@ -844,6 +869,292 @@ func (x *MarginLiquidationCompleted) GetCompletedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *MarginLiquidationCompleted) GetTrigger() string {
+	if x != nil {
+		return x.Trigger
+	}
+	return ""
+}
+
+func (x *MarginLiquidationCompleted) GetApprovalId() string {
+	if x != nil {
+		return x.ApprovalId
+	}
+	return ""
+}
+
+func (x *MarginLiquidationCompleted) GetMarginLevel() string {
+	if x != nil {
+		return x.MarginLevel
+	}
+	return ""
+}
+
+func (x *MarginLiquidationCompleted) GetTotalAsset() string {
+	if x != nil {
+		return x.TotalAsset
+	}
+	return ""
+}
+
+func (x *MarginLiquidationCompleted) GetTotalLiability() string {
+	if x != nil {
+		return x.TotalLiability
+	}
+	return ""
+}
+
+func (x *MarginLiquidationCompleted) GetStartedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartedAt
+	}
+	return nil
+}
+
+// MarginBalance is what a margin account holds and owes of an asset.
+type MarginBalance struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Asset string                 `protobuf:"bytes,1,opt,name=asset,proto3" json:"asset,omitempty"`
+	Free  string                 `protobuf:"bytes,2,opt,name=free,proto3" json:"free,omitempty"`
+	// Frozen by open orders.
+	Locked   string `protobuf:"bytes,3,opt,name=locked,proto3" json:"locked,omitempty"`
+	Borrowed string `protobuf:"bytes,4,opt,name=borrowed,proto3" json:"borrowed,omitempty"`
+	Interest string `protobuf:"bytes,5,opt,name=interest,proto3" json:"interest,omitempty"`
+	// free + locked - borrowed - interest.
+	Net           string `protobuf:"bytes,6,opt,name=net,proto3" json:"net,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MarginBalance) Reset() {
+	*x = MarginBalance{}
+	mi := &file_exchange_margin_v1_events_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarginBalance) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarginBalance) ProtoMessage() {}
+
+func (x *MarginBalance) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_margin_v1_events_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarginBalance.ProtoReflect.Descriptor instead.
+func (*MarginBalance) Descriptor() ([]byte, []int) {
+	return file_exchange_margin_v1_events_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *MarginBalance) GetAsset() string {
+	if x != nil {
+		return x.Asset
+	}
+	return ""
+}
+
+func (x *MarginBalance) GetFree() string {
+	if x != nil {
+		return x.Free
+	}
+	return ""
+}
+
+func (x *MarginBalance) GetLocked() string {
+	if x != nil {
+		return x.Locked
+	}
+	return ""
+}
+
+func (x *MarginBalance) GetBorrowed() string {
+	if x != nil {
+		return x.Borrowed
+	}
+	return ""
+}
+
+func (x *MarginBalance) GetInterest() string {
+	if x != nil {
+		return x.Interest
+	}
+	return ""
+}
+
+func (x *MarginBalance) GetNet() string {
+	if x != nil {
+		return x.Net
+	}
+	return ""
+}
+
+// MarginAccountUpdated: a margin account as it stands (the private channel
+// margin's ACCOUNT pushes, design §5.2), when its balances, debts, status
+// or margin level changed, at most once a second per account; keyed by
+// user_id on margin.accounts, which keeps an hour: each replaces the last.
+type MarginAccountUpdated struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	UserId      string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	AccountType string                 `protobuf:"bytes,2,opt,name=account_type,json=accountType,proto3" json:"account_type,omitempty"`
+	Symbol      string                 `protobuf:"bytes,3,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	Leverage    int32                  `protobuf:"varint,4,opt,name=leverage,proto3" json:"leverage,omitempty"`
+	// NORMAL, WARNED, LIQUIDATING or FROZEN.
+	Status string `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`
+	// total_asset / total_liability; empty without debts.
+	MarginLevel      string `protobuf:"bytes,6,opt,name=margin_level,json=marginLevel,proto3" json:"margin_level,omitempty"`
+	WarnLevel        string `protobuf:"bytes,7,opt,name=warn_level,json=warnLevel,proto3" json:"warn_level,omitempty"`
+	LiquidationLevel string `protobuf:"bytes,8,opt,name=liquidation_level,json=liquidationLevel,proto3" json:"liquidation_level,omitempty"`
+	// In USDT: the collateral after its haircuts, the debts, the difference.
+	TotalAsset     string `protobuf:"bytes,9,opt,name=total_asset,json=totalAsset,proto3" json:"total_asset,omitempty"`
+	TotalLiability string `protobuf:"bytes,10,opt,name=total_liability,json=totalLiability,proto3" json:"total_liability,omitempty"`
+	NetAsset       string `protobuf:"bytes,11,opt,name=net_asset,json=netAsset,proto3" json:"net_asset,omitempty"`
+	// An isolated account's estimate of the base price at its liquidation
+	// level; empty for the cross account and without debts.
+	LiquidationPrice string                 `protobuf:"bytes,12,opt,name=liquidation_price,json=liquidationPrice,proto3" json:"liquidation_price,omitempty"`
+	Balances         []*MarginBalance       `protobuf:"bytes,13,rep,name=balances,proto3" json:"balances,omitempty"`
+	UpdatedAt        *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *MarginAccountUpdated) Reset() {
+	*x = MarginAccountUpdated{}
+	mi := &file_exchange_margin_v1_events_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarginAccountUpdated) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarginAccountUpdated) ProtoMessage() {}
+
+func (x *MarginAccountUpdated) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_margin_v1_events_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarginAccountUpdated.ProtoReflect.Descriptor instead.
+func (*MarginAccountUpdated) Descriptor() ([]byte, []int) {
+	return file_exchange_margin_v1_events_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *MarginAccountUpdated) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *MarginAccountUpdated) GetAccountType() string {
+	if x != nil {
+		return x.AccountType
+	}
+	return ""
+}
+
+func (x *MarginAccountUpdated) GetSymbol() string {
+	if x != nil {
+		return x.Symbol
+	}
+	return ""
+}
+
+func (x *MarginAccountUpdated) GetLeverage() int32 {
+	if x != nil {
+		return x.Leverage
+	}
+	return 0
+}
+
+func (x *MarginAccountUpdated) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *MarginAccountUpdated) GetMarginLevel() string {
+	if x != nil {
+		return x.MarginLevel
+	}
+	return ""
+}
+
+func (x *MarginAccountUpdated) GetWarnLevel() string {
+	if x != nil {
+		return x.WarnLevel
+	}
+	return ""
+}
+
+func (x *MarginAccountUpdated) GetLiquidationLevel() string {
+	if x != nil {
+		return x.LiquidationLevel
+	}
+	return ""
+}
+
+func (x *MarginAccountUpdated) GetTotalAsset() string {
+	if x != nil {
+		return x.TotalAsset
+	}
+	return ""
+}
+
+func (x *MarginAccountUpdated) GetTotalLiability() string {
+	if x != nil {
+		return x.TotalLiability
+	}
+	return ""
+}
+
+func (x *MarginAccountUpdated) GetNetAsset() string {
+	if x != nil {
+		return x.NetAsset
+	}
+	return ""
+}
+
+func (x *MarginAccountUpdated) GetLiquidationPrice() string {
+	if x != nil {
+		return x.LiquidationPrice
+	}
+	return ""
+}
+
+func (x *MarginAccountUpdated) GetBalances() []*MarginBalance {
+	if x != nil {
+		return x.Balances
+	}
+	return nil
+}
+
+func (x *MarginAccountUpdated) GetUpdatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return nil
+}
+
 var File_exchange_margin_v1_events_proto protoreflect.FileDescriptor
 
 const file_exchange_margin_v1_events_proto_rawDesc = "" +
@@ -916,7 +1227,7 @@ const file_exchange_margin_v1_events_proto_rawDesc = "" +
 	"\vtotal_asset\x18\a \x01(\tR\n" +
 	"totalAsset\x12'\n" +
 	"\x0ftotal_liability\x18\b \x01(\tR\x0etotalLiability\x127\n" +
-	"\twarned_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\bwarnedAt\"\xbd\x02\n" +
+	"\twarned_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\bwarnedAt\"\xf8\x02\n" +
 	"\x18MarginLiquidationStarted\x12%\n" +
 	"\x0eliquidation_id\x18\x01 \x01(\tR\rliquidationId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12!\n" +
@@ -927,7 +1238,11 @@ const file_exchange_margin_v1_events_proto_rawDesc = "" +
 	"totalAsset\x12'\n" +
 	"\x0ftotal_liability\x18\a \x01(\tR\x0etotalLiability\x129\n" +
 	"\n" +
-	"started_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\"\x8d\x03\n" +
+	"started_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12\x18\n" +
+	"\atrigger\x18\t \x01(\tR\atrigger\x12\x1f\n" +
+	"\vapproval_id\x18\n" +
+	" \x01(\tR\n" +
+	"approvalId\"\xf0\x04\n" +
 	"\x1aMarginLiquidationCompleted\x12%\n" +
 	"\x0eliquidation_id\x18\x01 \x01(\tR\rliquidationId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12!\n" +
@@ -937,7 +1252,43 @@ const file_exchange_margin_v1_events_proto_rawDesc = "" +
 	"\x03fee\x18\x06 \x01(\tR\x03fee\x12+\n" +
 	"\x11insurance_covered\x18\a \x01(\tR\x10insuranceCovered\x12=\n" +
 	"\tremaining\x18\b \x03(\v2\x1f.exchange.margin.v1.AssetAmountR\tremaining\x12=\n" +
-	"\fcompleted_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\vcompletedAtB\xd1\x01\n" +
+	"\fcompleted_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\vcompletedAt\x12\x18\n" +
+	"\atrigger\x18\n" +
+	" \x01(\tR\atrigger\x12\x1f\n" +
+	"\vapproval_id\x18\v \x01(\tR\n" +
+	"approvalId\x12!\n" +
+	"\fmargin_level\x18\f \x01(\tR\vmarginLevel\x12\x1f\n" +
+	"\vtotal_asset\x18\r \x01(\tR\n" +
+	"totalAsset\x12'\n" +
+	"\x0ftotal_liability\x18\x0e \x01(\tR\x0etotalLiability\x129\n" +
+	"\n" +
+	"started_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\"\x9b\x01\n" +
+	"\rMarginBalance\x12\x14\n" +
+	"\x05asset\x18\x01 \x01(\tR\x05asset\x12\x12\n" +
+	"\x04free\x18\x02 \x01(\tR\x04free\x12\x16\n" +
+	"\x06locked\x18\x03 \x01(\tR\x06locked\x12\x1a\n" +
+	"\bborrowed\x18\x04 \x01(\tR\bborrowed\x12\x1a\n" +
+	"\binterest\x18\x05 \x01(\tR\binterest\x12\x10\n" +
+	"\x03net\x18\x06 \x01(\tR\x03net\"\x9b\x04\n" +
+	"\x14MarginAccountUpdated\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12!\n" +
+	"\faccount_type\x18\x02 \x01(\tR\vaccountType\x12\x16\n" +
+	"\x06symbol\x18\x03 \x01(\tR\x06symbol\x12\x1a\n" +
+	"\bleverage\x18\x04 \x01(\x05R\bleverage\x12\x16\n" +
+	"\x06status\x18\x05 \x01(\tR\x06status\x12!\n" +
+	"\fmargin_level\x18\x06 \x01(\tR\vmarginLevel\x12\x1d\n" +
+	"\n" +
+	"warn_level\x18\a \x01(\tR\twarnLevel\x12+\n" +
+	"\x11liquidation_level\x18\b \x01(\tR\x10liquidationLevel\x12\x1f\n" +
+	"\vtotal_asset\x18\t \x01(\tR\n" +
+	"totalAsset\x12'\n" +
+	"\x0ftotal_liability\x18\n" +
+	" \x01(\tR\x0etotalLiability\x12\x1b\n" +
+	"\tnet_asset\x18\v \x01(\tR\bnetAsset\x12+\n" +
+	"\x11liquidation_price\x18\f \x01(\tR\x10liquidationPrice\x12=\n" +
+	"\bbalances\x18\r \x03(\v2!.exchange.margin.v1.MarginBalanceR\bbalances\x129\n" +
+	"\n" +
+	"updated_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAtB\xd1\x01\n" +
 	"\x16com.exchange.margin.v1B\vEventsProtoP\x01Z@github.com/skill/exchange/api/gen/go/exchange/margin/v1;marginv1\xa2\x02\x03EMX\xaa\x02\x12Exchange.Margin.V1\xca\x02\x12Exchange\\Margin\\V1\xe2\x02\x1eExchange\\Margin\\V1\\GPBMetadata\xea\x02\x14Exchange::Margin::V1b\x06proto3"
 
 var (
@@ -952,7 +1303,7 @@ func file_exchange_margin_v1_events_proto_rawDescGZIP() []byte {
 	return file_exchange_margin_v1_events_proto_rawDescData
 }
 
-var file_exchange_margin_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_exchange_margin_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_exchange_margin_v1_events_proto_goTypes = []any{
 	(*AssetAmount)(nil),                // 0: exchange.margin.v1.AssetAmount
 	(*MarginBorrowed)(nil),             // 1: exchange.margin.v1.MarginBorrowed
@@ -961,22 +1312,27 @@ var file_exchange_margin_v1_events_proto_goTypes = []any{
 	(*MarginLevelWarned)(nil),          // 4: exchange.margin.v1.MarginLevelWarned
 	(*MarginLiquidationStarted)(nil),   // 5: exchange.margin.v1.MarginLiquidationStarted
 	(*MarginLiquidationCompleted)(nil), // 6: exchange.margin.v1.MarginLiquidationCompleted
-	(*timestamppb.Timestamp)(nil),      // 7: google.protobuf.Timestamp
+	(*MarginBalance)(nil),              // 7: exchange.margin.v1.MarginBalance
+	(*MarginAccountUpdated)(nil),       // 8: exchange.margin.v1.MarginAccountUpdated
+	(*timestamppb.Timestamp)(nil),      // 9: google.protobuf.Timestamp
 }
 var file_exchange_margin_v1_events_proto_depIdxs = []int32{
-	7, // 0: exchange.margin.v1.MarginBorrowed.borrowed_at:type_name -> google.protobuf.Timestamp
-	7, // 1: exchange.margin.v1.MarginRepaid.repaid_at:type_name -> google.protobuf.Timestamp
-	7, // 2: exchange.margin.v1.MarginInterestAccrued.hour:type_name -> google.protobuf.Timestamp
-	7, // 3: exchange.margin.v1.MarginLevelWarned.warned_at:type_name -> google.protobuf.Timestamp
-	7, // 4: exchange.margin.v1.MarginLiquidationStarted.started_at:type_name -> google.protobuf.Timestamp
-	0, // 5: exchange.margin.v1.MarginLiquidationCompleted.repaid:type_name -> exchange.margin.v1.AssetAmount
-	0, // 6: exchange.margin.v1.MarginLiquidationCompleted.remaining:type_name -> exchange.margin.v1.AssetAmount
-	7, // 7: exchange.margin.v1.MarginLiquidationCompleted.completed_at:type_name -> google.protobuf.Timestamp
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	9,  // 0: exchange.margin.v1.MarginBorrowed.borrowed_at:type_name -> google.protobuf.Timestamp
+	9,  // 1: exchange.margin.v1.MarginRepaid.repaid_at:type_name -> google.protobuf.Timestamp
+	9,  // 2: exchange.margin.v1.MarginInterestAccrued.hour:type_name -> google.protobuf.Timestamp
+	9,  // 3: exchange.margin.v1.MarginLevelWarned.warned_at:type_name -> google.protobuf.Timestamp
+	9,  // 4: exchange.margin.v1.MarginLiquidationStarted.started_at:type_name -> google.protobuf.Timestamp
+	0,  // 5: exchange.margin.v1.MarginLiquidationCompleted.repaid:type_name -> exchange.margin.v1.AssetAmount
+	0,  // 6: exchange.margin.v1.MarginLiquidationCompleted.remaining:type_name -> exchange.margin.v1.AssetAmount
+	9,  // 7: exchange.margin.v1.MarginLiquidationCompleted.completed_at:type_name -> google.protobuf.Timestamp
+	9,  // 8: exchange.margin.v1.MarginLiquidationCompleted.started_at:type_name -> google.protobuf.Timestamp
+	7,  // 9: exchange.margin.v1.MarginAccountUpdated.balances:type_name -> exchange.margin.v1.MarginBalance
+	9,  // 10: exchange.margin.v1.MarginAccountUpdated.updated_at:type_name -> google.protobuf.Timestamp
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_exchange_margin_v1_events_proto_init() }
@@ -990,7 +1346,7 @@ func file_exchange_margin_v1_events_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_margin_v1_events_proto_rawDesc), len(file_exchange_margin_v1_events_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

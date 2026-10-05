@@ -322,6 +322,7 @@ func (s *Service) postBorrow(ctx context.Context, b ports.Borrow) (ports.Loan, e
 		return ports.Loan{}, postErr
 	}
 	s.count("borrow", "done")
+	s.touch(b.UserID)
 	return loan, nil
 }
 

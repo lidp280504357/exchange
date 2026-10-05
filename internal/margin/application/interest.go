@@ -292,5 +292,8 @@ func (s *Service) bookCharges(ctx context.Context, asset string, hour time.Time,
 		return 0, err
 	}
 	s.count("interest", "done")
+	for _, c := range chunk {
+		s.touch(c.UserID)
+	}
 	return n, nil
 }

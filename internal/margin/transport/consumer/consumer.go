@@ -1,11 +1,13 @@
 // Package consumer feeds margin-service from Kafka: the ledger's journals
-// on ledger.events, for the automatic repayments the trades' settlement
-// books.
+// on ledger.events that touch margin accounts — the monitor values those
+// accounts again — among them the automatic repayments the trades'
+// settlement books.
 package consumer
 
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/reflect/protoregistry"
@@ -13,6 +15,7 @@ import (
 	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
 	ledgerv1 "github.com/skill/exchange/api/gen/go/exchange/ledger/v1"
 	"github.com/skill/exchange/internal/margin/application"
+	"github.com/skill/exchange/internal/margin/domain"
 	"github.com/skill/exchange/internal/platform/kafka"
 )
 
@@ -30,7 +33,7 @@ func Ledger(svc *application.Service) kafka.Handler {
 			return err
 		}
 		posted, ok := msg.(*ledgerv1.EntryPosted)
-		if !ok || posted.GetEntryType() != "MARGIN_REPAY" {
+		if !ok || !slices.ContainsFunc(posted.GetLines(), func(l *ledgerv1.EntryLine) bool { return domain.MarginRow(l.GetAccountType()) }) {
 			return nil
 		}
 		e := application.Entry{

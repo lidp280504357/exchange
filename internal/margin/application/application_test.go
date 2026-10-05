@@ -237,10 +237,11 @@ func (p *prices) Prices() domain.Prices {
 	return out
 }
 
-func (p *prices) set(asset, value string, fresh bool) {
+// setBTC moves BTC's price.
+func (p *prices) setBTC(value string, fresh bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.p[asset] = domain.Price{Value: d(value), Fresh: fresh}
+	p.p["BTC"] = domain.Price{Value: d(value), Fresh: fresh}
 }
 
 type instruments struct{}
@@ -591,7 +592,7 @@ func TestIsolatedAccount(t *testing.T) {
 	}
 	// A stale price counts at its last value; an asset never priced stops
 	// what adds risk.
-	r.prices.set("BTC", "30000", false)
+	r.prices.setBTC("30000", false)
 	if _, err := r.svc.Borrow(ctx, application.BorrowInput{UserID: user, IdemKey: "b-stale", Account: iso, Asset: "BTC", Amount: d("0.001")}); err != nil {
 		t.Fatalf("stale price: %v", err)
 	}

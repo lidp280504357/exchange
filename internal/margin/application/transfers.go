@@ -225,5 +225,6 @@ func (s *Service) postTransfer(ctx context.Context, t ports.Transfer) (ports.Tra
 		return ports.Transfer{}, postErr
 	}
 	s.count("transfer", "done")
+	s.touch(t.UserID)
 	return out, nil
 }

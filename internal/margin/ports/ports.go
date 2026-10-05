@@ -8,6 +8,7 @@ import (
 	"github.com/shopspring/decimal"
 	"google.golang.org/protobuf/proto"
 
+	marginv1 "github.com/skill/exchange/api/gen/go/exchange/margin/v1"
 	"github.com/skill/exchange/internal/margin/domain"
 	"github.com/skill/exchange/internal/platform/flags"
 )
@@ -463,6 +464,12 @@ type Posting struct {
 	Account   domain.Account
 	Reference string
 	Moves     []Move
+}
+
+// Pushes publishes margin accounts as they stand (margin.accounts), for
+// the private channel margin's ACCOUNT pushes.
+type Pushes interface {
+	Push(ctx context.Context, accounts []*marginv1.MarginAccountUpdated) error
 }
 
 // Ledger is ledger-service, which holds the margin accounts' balances and

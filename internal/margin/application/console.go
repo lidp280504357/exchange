@@ -481,6 +481,7 @@ func (s *Service) Freeze(ctx context.Context, userID string, a domain.Account, b
 	if err != nil {
 		return ConsoleAccount{}, err
 	}
+	s.touch(userID)
 	return s.consoleAccountOf(ctx, userID, a)
 }
 
@@ -511,6 +512,7 @@ func (s *Service) Unfreeze(ctx context.Context, userID string, a domain.Account,
 	if err != nil {
 		return ConsoleAccount{}, err
 	}
+	s.touch(userID)
 	return s.consoleAccountOf(ctx, userID, a)
 }
 

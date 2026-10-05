@@ -237,6 +237,23 @@ tests:
               summary: "margin reconciliation check LOANS_MATCH_LEDGER found 2 mismatches (the ledger's debts against margin-service's loans and pools)"
               runbook: docs/runbook/margin.md
 
+  - interval: 1m
+    input_series:
+      # Passes every second up to 3 minutes after the epoch, then none.
+      - series: 'margin_monitor_last_pass_timestamp_seconds{job="margin-service"}'
+        values: '60 120 180 180 180 180 180 180'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: MarginMonitorStalled
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: MarginMonitorStalled
+        exp_alerts:
+          - exp_labels: {severity: critical, job: margin-service}
+            exp_annotations:
+              summary: "the margin level monitor has not finished a pass for over a minute: no warnings, no liquidations (ledger or database down?)"
+              runbook: docs/runbook/margin.md
+
   - interval: 10m
     input_series:
       # An hour finished at 60 s after the epoch; none after it.

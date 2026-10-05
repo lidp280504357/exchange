@@ -79,6 +79,10 @@ const (
 	// warnings and liquidations, keyed by user (margin design 2026-10-06
 	// §5.3; created and published from batch E1).
 	TopicMargin = "margin.events"
+	// TopicMarginAccounts carries the margin accounts as they stand, keyed
+	// by user, for the private channel margin (derived state: kept an
+	// hour, each replaces the last).
+	TopicMarginAccounts = "margin.accounts"
 )
 
 // Factory stamps envelopes with the producing service and instance.

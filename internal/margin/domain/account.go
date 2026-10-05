@@ -83,3 +83,13 @@ func (h Holding) Net() decimal.Decimal { return h.Total().Sub(h.Debt()) }
 
 // Empty reports whether the account neither holds nor owes the asset.
 func (h Holding) Empty() bool { return h.Total().IsZero() && h.Debt().IsZero() }
+
+// MarginRow reports whether a ledger account type is one of a margin
+// account's rows: its assets, its debts or its interest.
+func MarginRow(accountType string) bool {
+	switch strings.TrimSuffix(strings.TrimSuffix(accountType, "_DEBT"), "_INTEREST") {
+	case string(AccountCross), string(AccountIsolated):
+		return true
+	}
+	return false
+}

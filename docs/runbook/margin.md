@@ -82,6 +82,13 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 - 从来没有价格的资产：持有的不计入资产、欠的不计入负债，账户估值不完整，借币、划出、杠杆下单返回 `MARGIN_PRICE_UNAVAILABLE`，也不强平。
 - 风险率 = 资产（乘折扣）÷ 负债，8 位小数；无负债时为 `null`（前端显示 999）。
 
+## 风险率监控与账户推送（E2b）
+
+- 监控持数据库租约 `margin-monitor`（一次一个进程）每秒一轮：估值所有有负债或状态不是 `NORMAL` 的账户（列表每 5 秒重读），用每秒更新的价格；某用户的余额在账本或本服务的写动过它时立即重读（`ledger.events` 里带杠杆行的分录、本服务的划转/借/还/计息/冻结），否则至多 5 秒重读一次。
+- 状态：跌破预警线 `NORMAL → WARNED`，记 `warned_at`、发 `MarginLevelWarned`（`margin.events`；回到线上之前只发一次，网关推成 `margin` 频道的 `WARNING`，站内信与邮件由通知服务做）；回到预警线以上 `WARNED → NORMAL`。到强平线连续两轮交给强平（E3，受 `margin.liquidation` 控制）；估值不完整（有从未有价的资产）的账户不动状态、不强平；`FROZEN` 的账户不改状态，但到强平线照样强平；`LIQUIDATING` 由强平流程管。
+- 推送：账户变化时把整个账户（`MarginAccountUpdated`：状态、风险率、阈值、总资产/总负债/净资产、逐仓强平价、各资产余额）发到主题 `margin.accounts`（按 user_id 分区，派生状态，保留 1 小时，直接生产不经 outbox，丢了由下一次补上），网关推成 `margin` 频道的 `ACCOUNT`。何时发：余额被动过、状态变了，或风险率、总资产、总负债相对上次变动超过 0.1%（价格引起），每个账户每秒至多一次；没有负债的账户只在被动过时发。
+- 指标：`margin_monitor_accounts`、`margin_monitor_last_pass_timestamp_seconds`、`margin_warnings_total`、`margin_liquidations_due_total`；告警 `MarginMonitorStalled`（超过 1 分钟没有完成一轮，critical：既不预警也不强平）。
+
 ## 对账
 
 | 不变量 | 在哪里查 | 内容 |

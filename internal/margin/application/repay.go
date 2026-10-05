@@ -236,5 +236,6 @@ func (s *Service) postRepay(ctx context.Context, p ports.Repay) (RepayResult, er
 		return RepayResult{}, postErr
 	}
 	s.count("repay", "done")
+	s.touch(p.UserID)
 	return out, nil
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/skill/exchange/internal/margin/adapters/ledger"
 	"github.com/skill/exchange/internal/margin/adapters/postgres"
 	"github.com/skill/exchange/internal/margin/adapters/prices"
+	"github.com/skill/exchange/internal/margin/adapters/pushes"
 	"github.com/skill/exchange/internal/margin/adapters/users"
 	"github.com/skill/exchange/internal/margin/application"
 	"github.com/skill/exchange/internal/margin/transport/consumer"
@@ -110,13 +111,23 @@ func setup(ctx context.Context, a *app.App) error {
 		Now:         time.Now,
 		Metrics:     application.NewMetrics(a.Metrics()),
 	}
-	// The automatic repayments the trades' settlement books (MARGIN_REPAY
-	// under trade-repay:), into the loans.
+	prod, err := bootstrap.Producer(ctx, a, cfg.Kafka)
+	if err != nil {
+		return err
+	}
+	monitor := &application.Monitor{
+		Svc: svc, Pushes: &pushes.Publisher{Pub: prod, Events: events}, Refresh: 5 * time.Second, Track: 5 * time.Second,
+	}
+	svc.Touched = monitor.Touch
+	// The journals on margin accounts: the monitor values them again, and
+	// the automatic repayments the trades' settlement books (MARGIN_REPAY
+	// under trade-repay:) go into the loans.
 	if err := bootstrap.Consumer(ctx, a, cfg.Kafka, consumer.Group, []string{event.TopicLedger}, consumer.Ledger(svc)); err != nil {
 		return err
 	}
 	a.Add("recovery", app.Loop(every(a, 5*time.Second, "recovery", svc.Recover)))
-	a.Add("interest", app.Loop(interestLoop(a, db, svc)))
+	a.Add("interest", app.Loop(leased(db, "margin-interest", every(a, 15*time.Second, "interest charged", svc.ChargeInterest))))
+	a.Add("monitor", app.Loop(leased(db, "margin-monitor", quietly(a, time.Second, "margin level monitor", monitor.Pass))))
 	a.Add("reconcile", app.Loop(reconcileLoop(a, svc, cfg.ReconcileInterval)))
 
 	srv, err := bootstrap.GRPCServer(ctx, a, cfg.GRPCAddr)
@@ -151,13 +162,32 @@ func every(a *app.App, interval time.Duration, name string, step func(context.Co
 	}
 }
 
-// interestLoop charges the hourly interest while it holds the lease
-// margin-interest (one charging process at a time, design §4.3), every
-// 15 seconds: an hour is charged shortly after it starts, and retried
-// until every loan of it is charged.
-func interestLoop(a *app.App, db *pg.DB, svc *application.Service) func(context.Context) error {
+// quietly runs step every interval, logging only its failures.
+func quietly(a *app.App, interval time.Duration, name string, step func(context.Context) (int, error)) func(context.Context) error {
 	return func(ctx context.Context) error {
-		lease, err := pg.AcquireLease(ctx, db, "margin-interest")
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-ticker.C:
+			}
+			if _, err := step(ctx); err != nil && ctx.Err() == nil {
+				a.Logger().WarnContext(ctx, name+" failed", "error", err)
+			}
+		}
+	}
+}
+
+// leased runs run while it holds the database lease name: one process at
+// a time charges the hourly interest (margin-interest, every 15 seconds,
+// design §4.3: an hour is charged shortly after it starts and retried
+// until every loan of it is) and watches the margin levels
+// (margin-monitor, every second, §4.5).
+func leased(db *pg.DB, name string, run func(context.Context) error) func(context.Context) error {
+	return func(ctx context.Context) error {
+		lease, err := pg.AcquireLease(ctx, db, name)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
@@ -172,7 +202,7 @@ func interestLoop(a *app.App, db *pg.DB, svc *application.Service) func(context.
 			lost <- lease.Hold(held, 5*time.Second)
 			cancel()
 		}()
-		err = every(a, 15*time.Second, "interest charged", svc.ChargeInterest)(held)
+		err = run(held)
 		if ctx.Err() == nil {
 			if err := <-lost; err != nil {
 				return err // the lease is lost: stop, the app restarts the process

@@ -11,9 +11,10 @@ import "google/protobuf/timestamp.proto";
 // margin-service publishes them from batch E1 (E3 for the warnings and
 // liquidations).
 //
-//   margin.events  MarginBorrowed, MarginRepaid, MarginInterestAccrued,
-//                  MarginLevelWarned, MarginLiquidationStarted,
-//                  MarginLiquidationCompleted
+//   margin.events    MarginBorrowed, MarginRepaid, MarginInterestAccrued,
+//                    MarginLevelWarned, MarginLiquidationStarted,
+//                    MarginLiquidationCompleted
+//   margin.accounts  MarginAccountUpdated (derived state, kept an hour)
 
 // AssetAmount is an amount of one asset.
 message AssetAmount {
@@ -99,7 +100,8 @@ message MarginLevelWarned {
 }
 
 // MarginLiquidationStarted: an account reached its liquidation level
-// twice in a row; it is frozen and its orders are canceled.
+// twice in a row, or an administrator's request was approved; it is
+// frozen and its orders are canceled.
 message MarginLiquidationStarted {
   string liquidation_id = 1;
   string user_id = 2;
@@ -109,6 +111,9 @@ message MarginLiquidationStarted {
   string total_asset = 6;
   string total_liability = 7;
   google.protobuf.Timestamp started_at = 8;
+  // AUTO at the liquidation level, MANUAL by an approved request.
+  string trigger = 9;
+  string approval_id = 10;
 }
 
 // MarginLiquidationCompleted: the debts are repaid (from the assets sold
@@ -128,4 +133,49 @@ message MarginLiquidationCompleted {
   // What is left in the account.
   repeated AssetAmount remaining = 8;
   google.protobuf.Timestamp completed_at = 9;
+  // As the start told: what triggered it and the account then.
+  string trigger = 10;
+  string approval_id = 11;
+  string margin_level = 12;
+  string total_asset = 13;
+  string total_liability = 14;
+  google.protobuf.Timestamp started_at = 15;
+}
+
+// MarginBalance is what a margin account holds and owes of an asset.
+message MarginBalance {
+  string asset = 1;
+  string free = 2;
+  // Frozen by open orders.
+  string locked = 3;
+  string borrowed = 4;
+  string interest = 5;
+  // free + locked - borrowed - interest.
+  string net = 6;
+}
+
+// MarginAccountUpdated: a margin account as it stands (the private channel
+// margin's ACCOUNT pushes, design §5.2), when its balances, debts, status
+// or margin level changed, at most once a second per account; keyed by
+// user_id on margin.accounts, which keeps an hour: each replaces the last.
+message MarginAccountUpdated {
+  string user_id = 1;
+  string account_type = 2;
+  string symbol = 3;
+  int32 leverage = 4;
+  // NORMAL, WARNED, LIQUIDATING or FROZEN.
+  string status = 5;
+  // total_asset / total_liability; empty without debts.
+  string margin_level = 6;
+  string warn_level = 7;
+  string liquidation_level = 8;
+  // In USDT: the collateral after its haircuts, the debts, the difference.
+  string total_asset = 9;
+  string total_liability = 10;
+  string net_asset = 11;
+  // An isolated account's estimate of the base price at its liquidation
+  // level; empty for the cross account and without debts.
+  string liquidation_price = 12;
+  repeated MarginBalance balances = 13;
+  google.protobuf.Timestamp updated_at = 14;
 }

@@ -68,9 +68,10 @@ ensure "${NS}derivatives.order.commands" 3 30
 # 派生状态只保留 1 小时，没有 retry/dlq，丢了由下一份补上（ADR-0015）：
 #   - 引擎的第二个输入：虚拟流动性的参考簿（分区数必须与 order.commands 相同，同一交易对落在同一分区号）；
 #   - 公共深度（market-data-service 发布）与引擎自己的深度（*.internal）；
-#   - 公共成交（market.trades，现货与合约共用）。
+#   - 公共成交（market.trades，现货与合约共用）；
+#   - 杠杆账户的当前状态（margin.accounts，margin 频道的 ACCOUNT 推送）。
 for t in "${NS}order.references" "${NS}derivatives.order.references" "${NS}market.depth" "${NS}derivatives.market.depth" \
-  "${NS}market.depth.internal" "${NS}derivatives.market.depth.internal" "${NS}market.trades"; do
+  "${NS}market.depth.internal" "${NS}derivatives.market.depth.internal" "${NS}market.trades" "${NS}margin.accounts"; do
   if grep -qx "$t" <<<"$existing"; then
     echo "exists : $t"
   else
@@ -88,7 +89,7 @@ done
 # 2026-10-02 测试服磁盘因此到 85%（market.depth 约 1 GB、order.references 约 0.7 GB）。它们只被实时跟读（tail），
 # 1 小时足够。行情 K 线与 ticker（market.candle.events）同样只被跟读（衍生品服务的标记价、网关推送），测试服保留 1 天。
 for t in "${NS}order.references" "${NS}derivatives.order.references" "${NS}market.depth" "${NS}derivatives.market.depth" \
-  "${NS}market.depth.internal" "${NS}derivatives.market.depth.internal" "${NS}market.trades"; do
+  "${NS}market.depth.internal" "${NS}derivatives.market.depth.internal" "${NS}market.trades" "${NS}margin.accounts"; do
   rpk topic alter-config "$t" --set "retention.ms=3600000" >/dev/null && echo "retention: $t = 1h"
 done
 rpk topic alter-config "${NS}market.candle.events" --set "retention.ms=$DAY_MS" >/dev/null && echo "retention: ${NS}market.candle.events = 1d"

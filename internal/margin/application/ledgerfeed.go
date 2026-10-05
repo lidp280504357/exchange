@@ -40,13 +40,18 @@ type EntryLine struct {
 	Amount      decimal.Decimal
 }
 
-// OnEntry applies a journal margin-service did not post itself: an
-// automatic repayment in a trade's settlement (MARGIN_REPAY under
-// trade-repay:<trade>:<side>) is recorded as a DONE repayment of reason
+// OnEntry follows a journal on margin accounts: their users' accounts
+// changed (Touched). An automatic repayment in a trade's settlement
+// (MARGIN_REPAY under trade-repay:<trade>:<side>), which margin-service
+// did not post itself, is recorded as a DONE repayment of reason
 // AUTO_REPAY, the loan and the pool follow it and MarginRepaid goes out —
-// once per journal, the repayment's key being the ledger's. Every other
-// journal is left alone.
+// once per journal, the repayment's key being the ledger's.
 func (s *Service) OnEntry(ctx context.Context, e Entry) error {
+	for _, l := range e.Lines {
+		if domain.MarginRow(l.AccountType) {
+			s.touch(l.UserID)
+		}
+	}
 	if e.EntryType != "MARGIN_REPAY" || !strings.HasPrefix(e.IdemKey, AutoRepayPrefix) {
 		return nil
 	}
