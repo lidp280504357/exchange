@@ -17,8 +17,11 @@ set -euo pipefail
 
 # shellcheck source=lib/common.sh
 source "$(dirname "$0")/lib/common.sh"
+# One ssh connection for the margin switch and the admin console's steps.
+# shellcheck source=lib/remote.sh
+source "$(dirname "$0")/lib/remote.sh"
 MARGIN_USER_HELPER="$(cd "$(dirname "$0")" && pwd)/lib/margin-user.sh"
-export MARGIN_USER_HELPER MARGIN_USER_STATE="$WORK/margin-user"
+export MARGIN_USER_HELPER MARGIN_USER_STATE="$WORK/margin-user" REMOTE
 # shellcheck disable=SC2016 # expanded when the script ends
 at_exit 'bash "$MARGIN_USER_HELPER" back'
 M_BASE="${M_BASE:-https://m.astras.vip}"
@@ -106,8 +109,6 @@ echo "== admin console in the browser"
 # A throwaway administrator (random password and authenticator secret on
 # stdin, never printed), disabled when the script ends; the browser signs
 # in with the password alone (admin.login_without_totp on the test server).
-# shellcheck source=lib/remote.sh
-source "$(dirname "$0")/lib/remote.sh"
 ADMIN_EMAIL="e2e-console-$RUN@example.com"
 ADMIN_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24 || true)
 secret=$(LC_ALL=C tr -dc 'A-Z2-7' </dev/urandom | head -c 32 || true)

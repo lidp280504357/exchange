@@ -117,8 +117,9 @@ export async function start({ app, api, name, device, apiPrefix = "/v1/" }) {
     /**
      * openMargin opens margin trading for the signed-in user alone through
      * web.sh's helper (scripts/e2e/lib/margin-user.sh, put back when web.sh
-     * ends) and reports whether it did: run on their own, the smokes leave
-     * the switch as it is. The services see it within 5 seconds.
+     * ends; a switch on for everyone it leaves as it is) and reports whether
+     * margin trading is open to the user: run on their own, the smokes leave
+     * the switch as it is. The services see a change within 5 seconds.
      */
     async openMargin() {
       const helper = process.env.MARGIN_USER_HELPER;

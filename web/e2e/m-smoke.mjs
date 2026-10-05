@@ -71,7 +71,7 @@ try {
   ok(`signed up ${email} through the form; the assets tab shows the welcome funds`);
   // Margin trading for this user alone (web.sh puts the switch back).
   const marginOn = await t.openMargin();
-  if (marginOn) ok("margin trading opened for this user alone");
+  if (marginOn) ok("margin trading is open to this user (on for everyone, or opened for it alone)");
   await shot("1-assets");
 
   // 2. The "me" tab (design §7.3) signed in, then out; sign back in with the password.
