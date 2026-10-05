@@ -13,9 +13,10 @@ func TestDefaultTerms(t *testing.T) {
 		warn, liquidate string
 	}{
 		{AccountCross, 3, "1.3", "1.1"},
+		{AccountCross, 5, "1.2", "1.1"},
 		{AccountIsolated, 3, "1.25", "1.15"},
 		{AccountIsolated, 5, "1.2", "1.1"},
-		{AccountIsolated, 10, "1.15", "1.05"},
+		{AccountIsolated, 10, "1.1", "1.05"},
 	}
 	for _, c := range cases {
 		got := DefaultTerms(c.account, c.leverage)

@@ -36,13 +36,15 @@ func posting(r application.Result) *ledgerv1.Posting {
 	return &ledgerv1.Posting{JournalId: r.JournalID, Replayed: r.Replayed}
 }
 
-// Freeze moves available funds to frozen.
+// Freeze moves available funds to frozen, on SPOT, FUTURES or a margin
+// account's assets.
 func (s *Server) Freeze(ctx context.Context, req *ledgerv1.FreezeRequest) (*ledgerv1.FreezeResponse, error) {
 	a, err := amount(req.GetAmount())
 	if err != nil {
 		return nil, err
 	}
-	res, err := s.svc.Freeze(ctx, req.GetIdempotencyKey(), req.GetEntryType(), req.GetUserId(), req.GetAccountType(), req.GetAsset(), a, req.GetReference())
+	res, err := s.svc.FreezeScoped(ctx, req.GetIdempotencyKey(), req.GetEntryType(), req.GetUserId(), req.GetAccountType(), req.GetScope(),
+		req.GetAsset(), a, req.GetReference())
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +57,8 @@ func (s *Server) Unfreeze(ctx context.Context, req *ledgerv1.UnfreezeRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	res, err := s.svc.Unfreeze(ctx, req.GetIdempotencyKey(), req.GetEntryType(), req.GetUserId(), req.GetAccountType(), req.GetAsset(), a, req.GetReference())
+	res, err := s.svc.UnfreezeScoped(ctx, req.GetIdempotencyKey(), req.GetEntryType(), req.GetUserId(), req.GetAccountType(), req.GetScope(),
+		req.GetAsset(), a, req.GetReference())
 	if err != nil {
 		return nil, err
 	}

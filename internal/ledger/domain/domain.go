@@ -76,16 +76,21 @@ var entryTypes = []string{
 	EntryTradeSettle, EntryTradeFee, EntryAccountTransfer, EntryFundingPayment, EntryRealizedPnL, EntryLiquidationSettle,
 	EntryInsuranceContribution, EntryADLSettle, EntryInternalTransfer, EntryManualAdjustment, EntryHouseTradeSettle,
 	EntryAdminFreeze, EntryAdminUnfreeze,
+	EntryMarginTransferIn, EntryMarginTransferOut, EntryMarginBorrow, EntryMarginInterest, EntryMarginRepay,
+	EntryMarginTradeSettle, EntryMarginLiquidate,
 }
 
 var systemAccounts = []string{
 	AccountFeeRevenue, AccountInsuranceFund, AccountDepositPending, AccountWithdrawalPending, AccountUnclaimedDeposit,
 	AccountFundingClearing, AccountMarketMaker, AccountGasSupply, AccountAdjustment, AccountPnLClearing,
+	AccountMarginInterestIncome,
 }
 
 // Errors (appendix C).
 var (
 	ErrInsufficientBalance = apperr.New(apperr.KindUnprocessable, "LEDGER_INSUFFICIENT_BALANCE", "insufficient balance")
+	// ErrDebtOverpaid refuses a repayment of more than a margin debt.
+	ErrDebtOverpaid        = apperr.New(apperr.KindUnprocessable, "LEDGER_DEBT_OVERPAID", "more than the debt would be repaid")
 	ErrIdempotencyConflict = apperr.New(apperr.KindConflict, apperr.CodeIdempotencyConflict,
 		"the idempotency key was used for a different request")
 )
@@ -95,7 +100,10 @@ type AccountKey struct {
 	OwnerType string
 	OwnerID   string
 	Type      string
-	Asset     string
+	// Scope is the pair of an isolated margin account's rows; empty for
+	// every other account.
+	Scope string
+	Asset string
 }
 
 // UserAccount is a user's SPOT or FUTURES account in asset.
@@ -108,17 +116,20 @@ func SystemAccount(accountType, asset string) AccountKey {
 	return AccountKey{OwnerType: OwnerSystem, OwnerID: OwnerSystem, Type: accountType, Asset: asset}
 }
 
-// Validate checks that the owner and the type go together.
+// Validate checks that the owner, the type and the scope go together: an
+// isolated margin row has its pair as scope, no other account has one.
 func (k AccountKey) Validate() error {
 	switch {
 	case k.Asset == "":
 		return apperr.Invalid("the asset is required")
-	case k.OwnerType == OwnerUser && (k.Type == AccountSpot || k.Type == AccountFutures) && k.OwnerID != "":
+	case k.OwnerType == OwnerUser && (k.Type == AccountSpot || k.Type == AccountFutures) && k.OwnerID != "" && k.Scope == "":
 		return nil
-	case k.OwnerType == OwnerSystem && k.OwnerID == OwnerSystem && slices.Contains(systemAccounts, k.Type):
+	case k.OwnerType == OwnerUser && slices.Contains(marginTypes, k.Type) && k.OwnerID != "" && (k.Scope != "") == isolatedType(k.Type):
+		return nil
+	case k.OwnerType == OwnerSystem && k.OwnerID == OwnerSystem && slices.Contains(systemAccounts, k.Type) && k.Scope == "":
 		return nil
 	}
-	return apperr.Invalid(fmt.Sprintf("invalid account %s/%s/%s", k.OwnerType, k.Type, k.Asset))
+	return apperr.Invalid(fmt.Sprintf("invalid account %s", k))
 }
 
 // houseBacked are the assets HOUSE must hold to sell (ADR-0013), as
@@ -167,15 +178,22 @@ func (k AccountKey) MayGoNegative() bool {
 		(k.Type == AccountMarketMaker && !HouseBacked(k.Asset))
 }
 
+// String names the account, e.g. USER/<id>/SPOT/USDT, with an isolated
+// margin row's scope after its type (USER/<id>/MARGIN_ISOLATED:BTC-USDT/BTC);
+// postings' hashes are built from it.
 func (k AccountKey) String() string {
-	return k.OwnerType + "/" + k.OwnerID + "/" + k.Type + "/" + k.Asset
+	t := k.Type
+	if k.Scope != "" {
+		t += ":" + k.Scope
+	}
+	return k.OwnerType + "/" + k.OwnerID + "/" + t + "/" + k.Asset
 }
 
 // compareKeys orders accounts for locking, so concurrent postings cannot
 // deadlock.
 func compareKeys(a, b AccountKey) int {
 	return cmp.Or(cmp.Compare(a.OwnerType, b.OwnerType), cmp.Compare(a.OwnerID, b.OwnerID),
-		cmp.Compare(a.Type, b.Type), cmp.Compare(a.Asset, b.Asset))
+		cmp.Compare(a.Type, b.Type), cmp.Compare(a.Scope, b.Scope), cmp.Compare(a.Asset, b.Asset))
 }
 
 // Account is a balance holder.
@@ -193,7 +211,9 @@ type Account struct {
 // brings a balance up always passes, even while it stays below zero: an
 // account that went negative (HOUSE's MARKET_MAKER in a backed asset, by a
 // rule that changed) is made whole by credits, and the trades refused
-// meanwhile settle on their retry.
+// meanwhile settle on their retry. A margin debt or interest row holds
+// what is owed as a negative available balance: a line may not take it
+// above zero (more repaid than owed), nor freeze any of it.
 func (a *Account) Apply(l Line) error {
 	available, frozen := a.Available, a.Frozen
 	changed := &available
@@ -201,7 +221,13 @@ func (a *Account) Apply(l Line) error {
 		changed = &frozen
 	}
 	*changed = changed.Add(l.Amount)
-	if !a.Key.MayGoNegative() && l.Amount.IsNegative() && changed.IsNegative() {
+	switch {
+	case a.Key.Debt() && l.Kind == Frozen:
+		return apperr.Invalid(fmt.Sprintf("nothing of %s is frozen", a.Key))
+	case a.Key.Debt() && l.Amount.IsPositive() && changed.IsPositive():
+		return ErrDebtOverpaid.WithDetail("asset", a.Key.Asset).WithDetail("account_type", a.Key.Type).
+			WithDetail("owed", a.Available.Neg().String())
+	case !a.Key.Debt() && !a.Key.MayGoNegative() && l.Amount.IsNegative() && changed.IsNegative():
 		kind := strings.ToLower(l.Kind)
 		return ErrInsufficientBalance.WithDetail("asset", a.Key.Asset).WithDetail("account_type", a.Key.Type).WithDetail("balance", kind)
 	}

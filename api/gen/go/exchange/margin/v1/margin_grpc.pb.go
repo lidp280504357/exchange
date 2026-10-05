@@ -33,9 +33,12 @@ const (
 // funded by a borrow; spot-trading-service then freezes it in the ledger
 // on the margin account (account_type and, for an isolated account, scope
 // = the pair) and hands it to the engine as before. Errors are apperr
-// codes over gRPC: MARGIN_DISABLED, MARGIN_FROZEN,
+// codes over gRPC: MARGIN_DISABLED (margin.enabled off, or AUTO_BORROW
+// while margin.auto_borrow is off: detail flag), MARGIN_FROZEN,
 // MARGIN_ASSET_NOT_BORROWABLE, MARGIN_LIMIT, MARGIN_POOL_EMPTY,
-// MARGIN_LEVEL_TOO_LOW, LEDGER_INSUFFICIENT_BALANCE.
+// MARGIN_LEVEL_TOO_LOW, MARGIN_PRICE_UNAVAILABLE (an asset of the account
+// never had a price), LEDGER_INSUFFICIENT_BALANCE; an ineligible user
+// gets user-service's reason code.
 type MarginServiceClient interface {
 	// CheckOrder answers whether the order may be placed, changing nothing:
 	// the switch is on for the user, the account is not frozen or being
@@ -90,9 +93,12 @@ func (c *marginServiceClient) ReserveOrder(ctx context.Context, in *ReserveOrder
 // funded by a borrow; spot-trading-service then freezes it in the ledger
 // on the margin account (account_type and, for an isolated account, scope
 // = the pair) and hands it to the engine as before. Errors are apperr
-// codes over gRPC: MARGIN_DISABLED, MARGIN_FROZEN,
+// codes over gRPC: MARGIN_DISABLED (margin.enabled off, or AUTO_BORROW
+// while margin.auto_borrow is off: detail flag), MARGIN_FROZEN,
 // MARGIN_ASSET_NOT_BORROWABLE, MARGIN_LIMIT, MARGIN_POOL_EMPTY,
-// MARGIN_LEVEL_TOO_LOW, LEDGER_INSUFFICIENT_BALANCE.
+// MARGIN_LEVEL_TOO_LOW, MARGIN_PRICE_UNAVAILABLE (an asset of the account
+// never had a price), LEDGER_INSUFFICIENT_BALANCE; an ineligible user
+// gets user-service's reason code.
 type MarginServiceServer interface {
 	// CheckOrder answers whether the order may be placed, changing nothing:
 	// the switch is on for the user, the account is not frozen or being

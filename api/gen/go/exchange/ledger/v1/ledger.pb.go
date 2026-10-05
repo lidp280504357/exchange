@@ -25,14 +25,16 @@ type FreezeRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	IdempotencyKey string                 `protobuf:"bytes,1,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
 	UserId         string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	// SPOT or FUTURES.
+	// SPOT, FUTURES, or a margin account: MARGIN_CROSS, MARGIN_ISOLATED.
 	AccountType string `protobuf:"bytes,3,opt,name=account_type,json=accountType,proto3" json:"account_type,omitempty"`
 	Asset       string `protobuf:"bytes,4,opt,name=asset,proto3" json:"asset,omitempty"`
 	Amount      string `protobuf:"bytes,5,opt,name=amount,proto3" json:"amount,omitempty"`
 	// ORDER_FREEZE or WITHDRAW_FREEZE.
 	EntryType string `protobuf:"bytes,6,opt,name=entry_type,json=entryType,proto3" json:"entry_type,omitempty"`
 	// What the freeze is for, e.g. an order ID.
-	Reference     string `protobuf:"bytes,7,opt,name=reference,proto3" json:"reference,omitempty"`
+	Reference string `protobuf:"bytes,7,opt,name=reference,proto3" json:"reference,omitempty"`
+	// The pair of a MARGIN_ISOLATED account; empty for the others.
+	Scope         string `protobuf:"bytes,8,opt,name=scope,proto3" json:"scope,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -116,6 +118,13 @@ func (x *FreezeRequest) GetReference() string {
 	return ""
 }
 
+func (x *FreezeRequest) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
+}
+
 type UnfreezeRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	IdempotencyKey string                 `protobuf:"bytes,1,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
@@ -124,8 +133,10 @@ type UnfreezeRequest struct {
 	Asset          string                 `protobuf:"bytes,4,opt,name=asset,proto3" json:"asset,omitempty"`
 	Amount         string                 `protobuf:"bytes,5,opt,name=amount,proto3" json:"amount,omitempty"`
 	// ORDER_UNFREEZE or WITHDRAW_UNFREEZE.
-	EntryType     string `protobuf:"bytes,6,opt,name=entry_type,json=entryType,proto3" json:"entry_type,omitempty"`
-	Reference     string `protobuf:"bytes,7,opt,name=reference,proto3" json:"reference,omitempty"`
+	EntryType string `protobuf:"bytes,6,opt,name=entry_type,json=entryType,proto3" json:"entry_type,omitempty"`
+	Reference string `protobuf:"bytes,7,opt,name=reference,proto3" json:"reference,omitempty"`
+	// The pair of a MARGIN_ISOLATED account; empty for the others.
+	Scope         string `protobuf:"bytes,8,opt,name=scope,proto3" json:"scope,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -205,6 +216,13 @@ func (x *UnfreezeRequest) GetEntryType() string {
 func (x *UnfreezeRequest) GetReference() string {
 	if x != nil {
 		return x.Reference
+	}
+	return ""
+}
+
+func (x *UnfreezeRequest) GetScope() string {
+	if x != nil {
+		return x.Scope
 	}
 	return ""
 }
@@ -2807,11 +2825,758 @@ func (x *GetUnclaimedReleaseResponse) GetUserId() string {
 	return ""
 }
 
+// MarginMove is one step of a margin posting. Amounts are positive.
+type MarginMove struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// TRANSFER_IN: the user's SPOT to the margin account (MARGIN_TRANSFER_IN).
+	// TRANSFER_OUT: back (MARGIN_TRANSFER_OUT). BORROW: the asset into the
+	// account against the principal owed (MARGIN_BORROW). INTEREST: interest
+	// owed, to HOUSE's income (MARGIN_INTEREST). REPAY: the account pays
+	// interest and principal back (MARGIN_REPAY).
+	Type   string `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
+	Asset  string `protobuf:"bytes,2,opt,name=asset,proto3" json:"asset,omitempty"`
+	Amount string `protobuf:"bytes,3,opt,name=amount,proto3" json:"amount,omitempty"`
+	// REPAY: the part of amount that pays interest; the rest pays principal.
+	Interest      string `protobuf:"bytes,4,opt,name=interest,proto3" json:"interest,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MarginMove) Reset() {
+	*x = MarginMove{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarginMove) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarginMove) ProtoMessage() {}
+
+func (x *MarginMove) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarginMove.ProtoReflect.Descriptor instead.
+func (*MarginMove) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *MarginMove) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *MarginMove) GetAsset() string {
+	if x != nil {
+		return x.Asset
+	}
+	return ""
+}
+
+func (x *MarginMove) GetAmount() string {
+	if x != nil {
+		return x.Amount
+	}
+	return ""
+}
+
+func (x *MarginMove) GetInterest() string {
+	if x != nil {
+		return x.Interest
+	}
+	return ""
+}
+
+type PostMarginRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The journals are keyed margin:<key>:<move index>.
+	IdempotencyKey string `protobuf:"bytes,1,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	UserId         string `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// MARGIN_CROSS or MARGIN_ISOLATED.
+	AccountType string `protobuf:"bytes,3,opt,name=account_type,json=accountType,proto3" json:"account_type,omitempty"`
+	// The pair of a MARGIN_ISOLATED account.
+	Scope string `protobuf:"bytes,4,opt,name=scope,proto3" json:"scope,omitempty"`
+	// What is booked, e.g. "borrow <id>"; the journals' memo.
+	Reference     string        `protobuf:"bytes,5,opt,name=reference,proto3" json:"reference,omitempty"`
+	Moves         []*MarginMove `protobuf:"bytes,6,rep,name=moves,proto3" json:"moves,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PostMarginRequest) Reset() {
+	*x = PostMarginRequest{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PostMarginRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PostMarginRequest) ProtoMessage() {}
+
+func (x *PostMarginRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PostMarginRequest.ProtoReflect.Descriptor instead.
+func (*PostMarginRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{45}
+}
+
+func (x *PostMarginRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *PostMarginRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *PostMarginRequest) GetAccountType() string {
+	if x != nil {
+		return x.AccountType
+	}
+	return ""
+}
+
+func (x *PostMarginRequest) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
+}
+
+func (x *PostMarginRequest) GetReference() string {
+	if x != nil {
+		return x.Reference
+	}
+	return ""
+}
+
+func (x *PostMarginRequest) GetMoves() []*MarginMove {
+	if x != nil {
+		return x.Moves
+	}
+	return nil
+}
+
+type PostMarginResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// One per move, in order.
+	JournalIds    []string `protobuf:"bytes,1,rep,name=journal_ids,json=journalIds,proto3" json:"journal_ids,omitempty"`
+	Replayed      bool     `protobuf:"varint,2,opt,name=replayed,proto3" json:"replayed,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PostMarginResponse) Reset() {
+	*x = PostMarginResponse{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PostMarginResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PostMarginResponse) ProtoMessage() {}
+
+func (x *PostMarginResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PostMarginResponse.ProtoReflect.Descriptor instead.
+func (*PostMarginResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *PostMarginResponse) GetJournalIds() []string {
+	if x != nil {
+		return x.JournalIds
+	}
+	return nil
+}
+
+func (x *PostMarginResponse) GetReplayed() bool {
+	if x != nil {
+		return x.Replayed
+	}
+	return false
+}
+
+// MarginInterestLine is one account's interest of an hour.
+type MarginInterestLine struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	AccountType   string                 `protobuf:"bytes,2,opt,name=account_type,json=accountType,proto3" json:"account_type,omitempty"`
+	Scope         string                 `protobuf:"bytes,3,opt,name=scope,proto3" json:"scope,omitempty"`
+	Amount        string                 `protobuf:"bytes,4,opt,name=amount,proto3" json:"amount,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MarginInterestLine) Reset() {
+	*x = MarginInterestLine{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarginInterestLine) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarginInterestLine) ProtoMessage() {}
+
+func (x *MarginInterestLine) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarginInterestLine.ProtoReflect.Descriptor instead.
+func (*MarginInterestLine) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *MarginInterestLine) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *MarginInterestLine) GetAccountType() string {
+	if x != nil {
+		return x.AccountType
+	}
+	return ""
+}
+
+func (x *MarginInterestLine) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
+}
+
+func (x *MarginInterestLine) GetAmount() string {
+	if x != nil {
+		return x.Amount
+	}
+	return ""
+}
+
+type AccrueMarginInterestRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	IdempotencyKey string                 `protobuf:"bytes,1,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	Asset          string                 `protobuf:"bytes,2,opt,name=asset,proto3" json:"asset,omitempty"`
+	// The journal's memo, e.g. the hour.
+	Reference     string                `protobuf:"bytes,3,opt,name=reference,proto3" json:"reference,omitempty"`
+	Lines         []*MarginInterestLine `protobuf:"bytes,4,rep,name=lines,proto3" json:"lines,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccrueMarginInterestRequest) Reset() {
+	*x = AccrueMarginInterestRequest{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccrueMarginInterestRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccrueMarginInterestRequest) ProtoMessage() {}
+
+func (x *AccrueMarginInterestRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccrueMarginInterestRequest.ProtoReflect.Descriptor instead.
+func (*AccrueMarginInterestRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *AccrueMarginInterestRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *AccrueMarginInterestRequest) GetAsset() string {
+	if x != nil {
+		return x.Asset
+	}
+	return ""
+}
+
+func (x *AccrueMarginInterestRequest) GetReference() string {
+	if x != nil {
+		return x.Reference
+	}
+	return ""
+}
+
+func (x *AccrueMarginInterestRequest) GetLines() []*MarginInterestLine {
+	if x != nil {
+		return x.Lines
+	}
+	return nil
+}
+
+type AccrueMarginInterestResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Posting       *Posting               `protobuf:"bytes,1,opt,name=posting,proto3" json:"posting,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccrueMarginInterestResponse) Reset() {
+	*x = AccrueMarginInterestResponse{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccrueMarginInterestResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccrueMarginInterestResponse) ProtoMessage() {}
+
+func (x *AccrueMarginInterestResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccrueMarginInterestResponse.ProtoReflect.Descriptor instead.
+func (*AccrueMarginInterestResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *AccrueMarginInterestResponse) GetPosting() *Posting {
+	if x != nil {
+		return x.Posting
+	}
+	return nil
+}
+
+// MarginBalance is what a margin account holds and owes of an asset.
+type MarginBalance struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// MARGIN_CROSS or MARGIN_ISOLATED.
+	AccountType string `protobuf:"bytes,1,opt,name=account_type,json=accountType,proto3" json:"account_type,omitempty"`
+	// The pair of a MARGIN_ISOLATED account.
+	Scope     string `protobuf:"bytes,2,opt,name=scope,proto3" json:"scope,omitempty"`
+	Asset     string `protobuf:"bytes,3,opt,name=asset,proto3" json:"asset,omitempty"`
+	Available string `protobuf:"bytes,4,opt,name=available,proto3" json:"available,omitempty"`
+	Frozen    string `protobuf:"bytes,5,opt,name=frozen,proto3" json:"frozen,omitempty"`
+	// What is owed, positive: the principal and the interest.
+	Borrowed      string `protobuf:"bytes,6,opt,name=borrowed,proto3" json:"borrowed,omitempty"`
+	Interest      string `protobuf:"bytes,7,opt,name=interest,proto3" json:"interest,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MarginBalance) Reset() {
+	*x = MarginBalance{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarginBalance) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarginBalance) ProtoMessage() {}
+
+func (x *MarginBalance) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarginBalance.ProtoReflect.Descriptor instead.
+func (*MarginBalance) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *MarginBalance) GetAccountType() string {
+	if x != nil {
+		return x.AccountType
+	}
+	return ""
+}
+
+func (x *MarginBalance) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
+}
+
+func (x *MarginBalance) GetAsset() string {
+	if x != nil {
+		return x.Asset
+	}
+	return ""
+}
+
+func (x *MarginBalance) GetAvailable() string {
+	if x != nil {
+		return x.Available
+	}
+	return ""
+}
+
+func (x *MarginBalance) GetFrozen() string {
+	if x != nil {
+		return x.Frozen
+	}
+	return ""
+}
+
+func (x *MarginBalance) GetBorrowed() string {
+	if x != nil {
+		return x.Borrowed
+	}
+	return ""
+}
+
+func (x *MarginBalance) GetInterest() string {
+	if x != nil {
+		return x.Interest
+	}
+	return ""
+}
+
+type GetMarginBalancesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetMarginBalancesRequest) Reset() {
+	*x = GetMarginBalancesRequest{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetMarginBalancesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetMarginBalancesRequest) ProtoMessage() {}
+
+func (x *GetMarginBalancesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetMarginBalancesRequest.ProtoReflect.Descriptor instead.
+func (*GetMarginBalancesRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *GetMarginBalancesRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+type GetMarginBalancesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Balances      []*MarginBalance       `protobuf:"bytes,1,rep,name=balances,proto3" json:"balances,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetMarginBalancesResponse) Reset() {
+	*x = GetMarginBalancesResponse{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[52]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetMarginBalancesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetMarginBalancesResponse) ProtoMessage() {}
+
+func (x *GetMarginBalancesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[52]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetMarginBalancesResponse.ProtoReflect.Descriptor instead.
+func (*GetMarginBalancesResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{52}
+}
+
+func (x *GetMarginBalancesResponse) GetBalances() []*MarginBalance {
+	if x != nil {
+		return x.Balances
+	}
+	return nil
+}
+
+// MarginDebt is what one margin account owes of an asset.
+type MarginDebt struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	AccountType   string                 `protobuf:"bytes,2,opt,name=account_type,json=accountType,proto3" json:"account_type,omitempty"`
+	Scope         string                 `protobuf:"bytes,3,opt,name=scope,proto3" json:"scope,omitempty"`
+	Asset         string                 `protobuf:"bytes,4,opt,name=asset,proto3" json:"asset,omitempty"`
+	Borrowed      string                 `protobuf:"bytes,5,opt,name=borrowed,proto3" json:"borrowed,omitempty"`
+	Interest      string                 `protobuf:"bytes,6,opt,name=interest,proto3" json:"interest,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MarginDebt) Reset() {
+	*x = MarginDebt{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarginDebt) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarginDebt) ProtoMessage() {}
+
+func (x *MarginDebt) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarginDebt.ProtoReflect.Descriptor instead.
+func (*MarginDebt) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *MarginDebt) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *MarginDebt) GetAccountType() string {
+	if x != nil {
+		return x.AccountType
+	}
+	return ""
+}
+
+func (x *MarginDebt) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
+}
+
+func (x *MarginDebt) GetAsset() string {
+	if x != nil {
+		return x.Asset
+	}
+	return ""
+}
+
+func (x *MarginDebt) GetBorrowed() string {
+	if x != nil {
+		return x.Borrowed
+	}
+	return ""
+}
+
+func (x *MarginDebt) GetInterest() string {
+	if x != nil {
+		return x.Interest
+	}
+	return ""
+}
+
+type ListMarginDebtsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListMarginDebtsRequest) Reset() {
+	*x = ListMarginDebtsRequest{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[54]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListMarginDebtsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListMarginDebtsRequest) ProtoMessage() {}
+
+func (x *ListMarginDebtsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[54]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListMarginDebtsRequest.ProtoReflect.Descriptor instead.
+func (*ListMarginDebtsRequest) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{54}
+}
+
+type ListMarginDebtsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Debts         []*MarginDebt          `protobuf:"bytes,1,rep,name=debts,proto3" json:"debts,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListMarginDebtsResponse) Reset() {
+	*x = ListMarginDebtsResponse{}
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[55]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListMarginDebtsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListMarginDebtsResponse) ProtoMessage() {}
+
+func (x *ListMarginDebtsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_exchange_ledger_v1_ledger_proto_msgTypes[55]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListMarginDebtsResponse.ProtoReflect.Descriptor instead.
+func (*ListMarginDebtsResponse) Descriptor() ([]byte, []int) {
+	return file_exchange_ledger_v1_ledger_proto_rawDescGZIP(), []int{55}
+}
+
+func (x *ListMarginDebtsResponse) GetDebts() []*MarginDebt {
+	if x != nil {
+		return x.Debts
+	}
+	return nil
+}
+
 var File_exchange_ledger_v1_ledger_proto protoreflect.FileDescriptor
 
 const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
 	"\n" +
-	"\x1fexchange/ledger/v1/ledger.proto\x12\x12exchange.ledger.v1\"\xdf\x01\n" +
+	"\x1fexchange/ledger/v1/ledger.proto\x12\x12exchange.ledger.v1\"\xf5\x01\n" +
 	"\rFreezeRequest\x12'\n" +
 	"\x0fidempotency_key\x18\x01 \x01(\tR\x0eidempotencyKey\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12!\n" +
@@ -2820,7 +3585,8 @@ const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
 	"\x06amount\x18\x05 \x01(\tR\x06amount\x12\x1d\n" +
 	"\n" +
 	"entry_type\x18\x06 \x01(\tR\tentryType\x12\x1c\n" +
-	"\treference\x18\a \x01(\tR\treference\"\xe1\x01\n" +
+	"\treference\x18\a \x01(\tR\treference\x12\x14\n" +
+	"\x05scope\x18\b \x01(\tR\x05scope\"\xf7\x01\n" +
 	"\x0fUnfreezeRequest\x12'\n" +
 	"\x0fidempotency_key\x18\x01 \x01(\tR\x0eidempotencyKey\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12!\n" +
@@ -2829,7 +3595,8 @@ const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
 	"\x06amount\x18\x05 \x01(\tR\x06amount\x12\x1d\n" +
 	"\n" +
 	"entry_type\x18\x06 \x01(\tR\tentryType\x12\x1c\n" +
-	"\treference\x18\a \x01(\tR\treference\"\xd5\x01\n" +
+	"\treference\x18\a \x01(\tR\treference\x12\x14\n" +
+	"\x05scope\x18\b \x01(\tR\x05scope\"\xd5\x01\n" +
 	"\x0fTransferRequest\x12'\n" +
 	"\x0fidempotency_key\x18\x01 \x01(\tR\x0eidempotencyKey\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
@@ -3020,7 +3787,59 @@ const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
 	"\x1bGetUnclaimedReleaseResponse\x12\x1d\n" +
 	"\n" +
 	"journal_id\x18\x01 \x01(\tR\tjournalId\x12\x17\n" +
-	"\auser_id\x18\x02 \x01(\tR\x06userId2\x89\x0f\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\"j\n" +
+	"\n" +
+	"MarginMove\x12\x12\n" +
+	"\x04type\x18\x01 \x01(\tR\x04type\x12\x14\n" +
+	"\x05asset\x18\x02 \x01(\tR\x05asset\x12\x16\n" +
+	"\x06amount\x18\x03 \x01(\tR\x06amount\x12\x1a\n" +
+	"\binterest\x18\x04 \x01(\tR\binterest\"\xe2\x01\n" +
+	"\x11PostMarginRequest\x12'\n" +
+	"\x0fidempotency_key\x18\x01 \x01(\tR\x0eidempotencyKey\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12!\n" +
+	"\faccount_type\x18\x03 \x01(\tR\vaccountType\x12\x14\n" +
+	"\x05scope\x18\x04 \x01(\tR\x05scope\x12\x1c\n" +
+	"\treference\x18\x05 \x01(\tR\treference\x124\n" +
+	"\x05moves\x18\x06 \x03(\v2\x1e.exchange.ledger.v1.MarginMoveR\x05moves\"Q\n" +
+	"\x12PostMarginResponse\x12\x1f\n" +
+	"\vjournal_ids\x18\x01 \x03(\tR\n" +
+	"journalIds\x12\x1a\n" +
+	"\breplayed\x18\x02 \x01(\bR\breplayed\"~\n" +
+	"\x12MarginInterestLine\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12!\n" +
+	"\faccount_type\x18\x02 \x01(\tR\vaccountType\x12\x14\n" +
+	"\x05scope\x18\x03 \x01(\tR\x05scope\x12\x16\n" +
+	"\x06amount\x18\x04 \x01(\tR\x06amount\"\xb8\x01\n" +
+	"\x1bAccrueMarginInterestRequest\x12'\n" +
+	"\x0fidempotency_key\x18\x01 \x01(\tR\x0eidempotencyKey\x12\x14\n" +
+	"\x05asset\x18\x02 \x01(\tR\x05asset\x12\x1c\n" +
+	"\treference\x18\x03 \x01(\tR\treference\x12<\n" +
+	"\x05lines\x18\x04 \x03(\v2&.exchange.ledger.v1.MarginInterestLineR\x05lines\"U\n" +
+	"\x1cAccrueMarginInterestResponse\x125\n" +
+	"\aposting\x18\x01 \x01(\v2\x1b.exchange.ledger.v1.PostingR\aposting\"\xcc\x01\n" +
+	"\rMarginBalance\x12!\n" +
+	"\faccount_type\x18\x01 \x01(\tR\vaccountType\x12\x14\n" +
+	"\x05scope\x18\x02 \x01(\tR\x05scope\x12\x14\n" +
+	"\x05asset\x18\x03 \x01(\tR\x05asset\x12\x1c\n" +
+	"\tavailable\x18\x04 \x01(\tR\tavailable\x12\x16\n" +
+	"\x06frozen\x18\x05 \x01(\tR\x06frozen\x12\x1a\n" +
+	"\bborrowed\x18\x06 \x01(\tR\bborrowed\x12\x1a\n" +
+	"\binterest\x18\a \x01(\tR\binterest\"3\n" +
+	"\x18GetMarginBalancesRequest\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\"Z\n" +
+	"\x19GetMarginBalancesResponse\x12=\n" +
+	"\bbalances\x18\x01 \x03(\v2!.exchange.ledger.v1.MarginBalanceR\bbalances\"\xac\x01\n" +
+	"\n" +
+	"MarginDebt\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12!\n" +
+	"\faccount_type\x18\x02 \x01(\tR\vaccountType\x12\x14\n" +
+	"\x05scope\x18\x03 \x01(\tR\x05scope\x12\x14\n" +
+	"\x05asset\x18\x04 \x01(\tR\x05asset\x12\x1a\n" +
+	"\bborrowed\x18\x05 \x01(\tR\bborrowed\x12\x1a\n" +
+	"\binterest\x18\x06 \x01(\tR\binterest\"\x18\n" +
+	"\x16ListMarginDebtsRequest\"O\n" +
+	"\x17ListMarginDebtsResponse\x124\n" +
+	"\x05debts\x18\x01 \x03(\v2\x1e.exchange.ledger.v1.MarginDebtR\x05debts2\xbf\x12\n" +
 	"\rLedgerService\x12O\n" +
 	"\x06Freeze\x12!.exchange.ledger.v1.FreezeRequest\x1a\".exchange.ledger.v1.FreezeResponse\x12U\n" +
 	"\bUnfreeze\x12#.exchange.ledger.v1.UnfreezeRequest\x1a$.exchange.ledger.v1.UnfreezeResponse\x12U\n" +
@@ -3040,7 +3859,12 @@ const file_exchange_ledger_v1_ledger_proto_rawDesc = "" +
 	"\tListHolds\x12$.exchange.ledger.v1.ListHoldsRequest\x1a%.exchange.ledger.v1.ListHoldsResponse\x12m\n" +
 	"\x10ReleaseUnclaimed\x12+.exchange.ledger.v1.ReleaseUnclaimedRequest\x1a,.exchange.ledger.v1.ReleaseUnclaimedResponse\x12v\n" +
 	"\x13GetUnclaimedRelease\x12..exchange.ledger.v1.GetUnclaimedReleaseRequest\x1a/.exchange.ledger.v1.GetUnclaimedReleaseResponse\x12j\n" +
-	"\x0fCreditUnclaimed\x12*.exchange.ledger.v1.CreditUnclaimedRequest\x1a+.exchange.ledger.v1.CreditUnclaimedResponseB\xd1\x01\n" +
+	"\x0fCreditUnclaimed\x12*.exchange.ledger.v1.CreditUnclaimedRequest\x1a+.exchange.ledger.v1.CreditUnclaimedResponse\x12[\n" +
+	"\n" +
+	"PostMargin\x12%.exchange.ledger.v1.PostMarginRequest\x1a&.exchange.ledger.v1.PostMarginResponse\x12y\n" +
+	"\x14AccrueMarginInterest\x12/.exchange.ledger.v1.AccrueMarginInterestRequest\x1a0.exchange.ledger.v1.AccrueMarginInterestResponse\x12p\n" +
+	"\x11GetMarginBalances\x12,.exchange.ledger.v1.GetMarginBalancesRequest\x1a-.exchange.ledger.v1.GetMarginBalancesResponse\x12j\n" +
+	"\x0fListMarginDebts\x12*.exchange.ledger.v1.ListMarginDebtsRequest\x1a+.exchange.ledger.v1.ListMarginDebtsResponseB\xd1\x01\n" +
 	"\x16com.exchange.ledger.v1B\vLedgerProtoP\x01Z@github.com/skill/exchange/api/gen/go/exchange/ledger/v1;ledgerv1\xa2\x02\x03ELX\xaa\x02\x12Exchange.Ledger.V1\xca\x02\x12Exchange\\Ledger\\V1\xe2\x02\x1eExchange\\Ledger\\V1\\GPBMetadata\xea\x02\x14Exchange::Ledger::V1b\x06proto3"
 
 var (
@@ -3055,52 +3879,64 @@ func file_exchange_ledger_v1_ledger_proto_rawDescGZIP() []byte {
 	return file_exchange_ledger_v1_ledger_proto_rawDescData
 }
 
-var file_exchange_ledger_v1_ledger_proto_msgTypes = make([]protoimpl.MessageInfo, 44)
+var file_exchange_ledger_v1_ledger_proto_msgTypes = make([]protoimpl.MessageInfo, 56)
 var file_exchange_ledger_v1_ledger_proto_goTypes = []any{
-	(*FreezeRequest)(nil),               // 0: exchange.ledger.v1.FreezeRequest
-	(*UnfreezeRequest)(nil),             // 1: exchange.ledger.v1.UnfreezeRequest
-	(*TransferRequest)(nil),             // 2: exchange.ledger.v1.TransferRequest
-	(*Posting)(nil),                     // 3: exchange.ledger.v1.Posting
-	(*FreezeResponse)(nil),              // 4: exchange.ledger.v1.FreezeResponse
-	(*UnfreezeResponse)(nil),            // 5: exchange.ledger.v1.UnfreezeResponse
-	(*TransferResponse)(nil),            // 6: exchange.ledger.v1.TransferResponse
-	(*Balance)(nil),                     // 7: exchange.ledger.v1.Balance
-	(*GetBalancesRequest)(nil),          // 8: exchange.ledger.v1.GetBalancesRequest
-	(*GetBalancesResponse)(nil),         // 9: exchange.ledger.v1.GetBalancesResponse
-	(*SettleWithdrawalRequest)(nil),     // 10: exchange.ledger.v1.SettleWithdrawalRequest
-	(*SettleWithdrawalResponse)(nil),    // 11: exchange.ledger.v1.SettleWithdrawalResponse
-	(*TransferInternalRequest)(nil),     // 12: exchange.ledger.v1.TransferInternalRequest
-	(*TransferInternalResponse)(nil),    // 13: exchange.ledger.v1.TransferInternalResponse
-	(*BookChainFeeRequest)(nil),         // 14: exchange.ledger.v1.BookChainFeeRequest
-	(*BookChainFeeResponse)(nil),        // 15: exchange.ledger.v1.BookChainFeeResponse
-	(*FundSystemAccountRequest)(nil),    // 16: exchange.ledger.v1.FundSystemAccountRequest
-	(*FundSystemAccountResponse)(nil),   // 17: exchange.ledger.v1.FundSystemAccountResponse
-	(*GetSystemBalancesRequest)(nil),    // 18: exchange.ledger.v1.GetSystemBalancesRequest
-	(*GetSystemBalancesResponse)(nil),   // 19: exchange.ledger.v1.GetSystemBalancesResponse
-	(*AdjustRequest)(nil),               // 20: exchange.ledger.v1.AdjustRequest
-	(*AdjustResponse)(nil),              // 21: exchange.ledger.v1.AdjustResponse
-	(*FuturesMove)(nil),                 // 22: exchange.ledger.v1.FuturesMove
-	(*SettleFuturesRequest)(nil),        // 23: exchange.ledger.v1.SettleFuturesRequest
-	(*FuturesOutcome)(nil),              // 24: exchange.ledger.v1.FuturesOutcome
-	(*SettleFuturesResponse)(nil),       // 25: exchange.ledger.v1.SettleFuturesResponse
-	(*FundInsuranceRequest)(nil),        // 26: exchange.ledger.v1.FundInsuranceRequest
-	(*FundInsuranceResponse)(nil),       // 27: exchange.ledger.v1.FundInsuranceResponse
-	(*GetReconciliationRequest)(nil),    // 28: exchange.ledger.v1.GetReconciliationRequest
-	(*ReconciliationRun)(nil),           // 29: exchange.ledger.v1.ReconciliationRun
-	(*GetReconciliationResponse)(nil),   // 30: exchange.ledger.v1.GetReconciliationResponse
-	(*Hold)(nil),                        // 31: exchange.ledger.v1.Hold
-	(*PlaceHoldRequest)(nil),            // 32: exchange.ledger.v1.PlaceHoldRequest
-	(*PlaceHoldResponse)(nil),           // 33: exchange.ledger.v1.PlaceHoldResponse
-	(*ReleaseHoldRequest)(nil),          // 34: exchange.ledger.v1.ReleaseHoldRequest
-	(*ReleaseHoldResponse)(nil),         // 35: exchange.ledger.v1.ReleaseHoldResponse
-	(*ListHoldsRequest)(nil),            // 36: exchange.ledger.v1.ListHoldsRequest
-	(*ListHoldsResponse)(nil),           // 37: exchange.ledger.v1.ListHoldsResponse
-	(*ReleaseUnclaimedRequest)(nil),     // 38: exchange.ledger.v1.ReleaseUnclaimedRequest
-	(*ReleaseUnclaimedResponse)(nil),    // 39: exchange.ledger.v1.ReleaseUnclaimedResponse
-	(*CreditUnclaimedRequest)(nil),      // 40: exchange.ledger.v1.CreditUnclaimedRequest
-	(*CreditUnclaimedResponse)(nil),     // 41: exchange.ledger.v1.CreditUnclaimedResponse
-	(*GetUnclaimedReleaseRequest)(nil),  // 42: exchange.ledger.v1.GetUnclaimedReleaseRequest
-	(*GetUnclaimedReleaseResponse)(nil), // 43: exchange.ledger.v1.GetUnclaimedReleaseResponse
+	(*FreezeRequest)(nil),                // 0: exchange.ledger.v1.FreezeRequest
+	(*UnfreezeRequest)(nil),              // 1: exchange.ledger.v1.UnfreezeRequest
+	(*TransferRequest)(nil),              // 2: exchange.ledger.v1.TransferRequest
+	(*Posting)(nil),                      // 3: exchange.ledger.v1.Posting
+	(*FreezeResponse)(nil),               // 4: exchange.ledger.v1.FreezeResponse
+	(*UnfreezeResponse)(nil),             // 5: exchange.ledger.v1.UnfreezeResponse
+	(*TransferResponse)(nil),             // 6: exchange.ledger.v1.TransferResponse
+	(*Balance)(nil),                      // 7: exchange.ledger.v1.Balance
+	(*GetBalancesRequest)(nil),           // 8: exchange.ledger.v1.GetBalancesRequest
+	(*GetBalancesResponse)(nil),          // 9: exchange.ledger.v1.GetBalancesResponse
+	(*SettleWithdrawalRequest)(nil),      // 10: exchange.ledger.v1.SettleWithdrawalRequest
+	(*SettleWithdrawalResponse)(nil),     // 11: exchange.ledger.v1.SettleWithdrawalResponse
+	(*TransferInternalRequest)(nil),      // 12: exchange.ledger.v1.TransferInternalRequest
+	(*TransferInternalResponse)(nil),     // 13: exchange.ledger.v1.TransferInternalResponse
+	(*BookChainFeeRequest)(nil),          // 14: exchange.ledger.v1.BookChainFeeRequest
+	(*BookChainFeeResponse)(nil),         // 15: exchange.ledger.v1.BookChainFeeResponse
+	(*FundSystemAccountRequest)(nil),     // 16: exchange.ledger.v1.FundSystemAccountRequest
+	(*FundSystemAccountResponse)(nil),    // 17: exchange.ledger.v1.FundSystemAccountResponse
+	(*GetSystemBalancesRequest)(nil),     // 18: exchange.ledger.v1.GetSystemBalancesRequest
+	(*GetSystemBalancesResponse)(nil),    // 19: exchange.ledger.v1.GetSystemBalancesResponse
+	(*AdjustRequest)(nil),                // 20: exchange.ledger.v1.AdjustRequest
+	(*AdjustResponse)(nil),               // 21: exchange.ledger.v1.AdjustResponse
+	(*FuturesMove)(nil),                  // 22: exchange.ledger.v1.FuturesMove
+	(*SettleFuturesRequest)(nil),         // 23: exchange.ledger.v1.SettleFuturesRequest
+	(*FuturesOutcome)(nil),               // 24: exchange.ledger.v1.FuturesOutcome
+	(*SettleFuturesResponse)(nil),        // 25: exchange.ledger.v1.SettleFuturesResponse
+	(*FundInsuranceRequest)(nil),         // 26: exchange.ledger.v1.FundInsuranceRequest
+	(*FundInsuranceResponse)(nil),        // 27: exchange.ledger.v1.FundInsuranceResponse
+	(*GetReconciliationRequest)(nil),     // 28: exchange.ledger.v1.GetReconciliationRequest
+	(*ReconciliationRun)(nil),            // 29: exchange.ledger.v1.ReconciliationRun
+	(*GetReconciliationResponse)(nil),    // 30: exchange.ledger.v1.GetReconciliationResponse
+	(*Hold)(nil),                         // 31: exchange.ledger.v1.Hold
+	(*PlaceHoldRequest)(nil),             // 32: exchange.ledger.v1.PlaceHoldRequest
+	(*PlaceHoldResponse)(nil),            // 33: exchange.ledger.v1.PlaceHoldResponse
+	(*ReleaseHoldRequest)(nil),           // 34: exchange.ledger.v1.ReleaseHoldRequest
+	(*ReleaseHoldResponse)(nil),          // 35: exchange.ledger.v1.ReleaseHoldResponse
+	(*ListHoldsRequest)(nil),             // 36: exchange.ledger.v1.ListHoldsRequest
+	(*ListHoldsResponse)(nil),            // 37: exchange.ledger.v1.ListHoldsResponse
+	(*ReleaseUnclaimedRequest)(nil),      // 38: exchange.ledger.v1.ReleaseUnclaimedRequest
+	(*ReleaseUnclaimedResponse)(nil),     // 39: exchange.ledger.v1.ReleaseUnclaimedResponse
+	(*CreditUnclaimedRequest)(nil),       // 40: exchange.ledger.v1.CreditUnclaimedRequest
+	(*CreditUnclaimedResponse)(nil),      // 41: exchange.ledger.v1.CreditUnclaimedResponse
+	(*GetUnclaimedReleaseRequest)(nil),   // 42: exchange.ledger.v1.GetUnclaimedReleaseRequest
+	(*GetUnclaimedReleaseResponse)(nil),  // 43: exchange.ledger.v1.GetUnclaimedReleaseResponse
+	(*MarginMove)(nil),                   // 44: exchange.ledger.v1.MarginMove
+	(*PostMarginRequest)(nil),            // 45: exchange.ledger.v1.PostMarginRequest
+	(*PostMarginResponse)(nil),           // 46: exchange.ledger.v1.PostMarginResponse
+	(*MarginInterestLine)(nil),           // 47: exchange.ledger.v1.MarginInterestLine
+	(*AccrueMarginInterestRequest)(nil),  // 48: exchange.ledger.v1.AccrueMarginInterestRequest
+	(*AccrueMarginInterestResponse)(nil), // 49: exchange.ledger.v1.AccrueMarginInterestResponse
+	(*MarginBalance)(nil),                // 50: exchange.ledger.v1.MarginBalance
+	(*GetMarginBalancesRequest)(nil),     // 51: exchange.ledger.v1.GetMarginBalancesRequest
+	(*GetMarginBalancesResponse)(nil),    // 52: exchange.ledger.v1.GetMarginBalancesResponse
+	(*MarginDebt)(nil),                   // 53: exchange.ledger.v1.MarginDebt
+	(*ListMarginDebtsRequest)(nil),       // 54: exchange.ledger.v1.ListMarginDebtsRequest
+	(*ListMarginDebtsResponse)(nil),      // 55: exchange.ledger.v1.ListMarginDebtsResponse
 }
 var file_exchange_ledger_v1_ledger_proto_depIdxs = []int32{
 	3,  // 0: exchange.ledger.v1.FreezeResponse.posting:type_name -> exchange.ledger.v1.Posting
@@ -3123,49 +3959,62 @@ var file_exchange_ledger_v1_ledger_proto_depIdxs = []int32{
 	31, // 17: exchange.ledger.v1.ListHoldsResponse.holds:type_name -> exchange.ledger.v1.Hold
 	3,  // 18: exchange.ledger.v1.ReleaseUnclaimedResponse.posting:type_name -> exchange.ledger.v1.Posting
 	3,  // 19: exchange.ledger.v1.CreditUnclaimedResponse.posting:type_name -> exchange.ledger.v1.Posting
-	0,  // 20: exchange.ledger.v1.LedgerService.Freeze:input_type -> exchange.ledger.v1.FreezeRequest
-	1,  // 21: exchange.ledger.v1.LedgerService.Unfreeze:input_type -> exchange.ledger.v1.UnfreezeRequest
-	2,  // 22: exchange.ledger.v1.LedgerService.Transfer:input_type -> exchange.ledger.v1.TransferRequest
-	8,  // 23: exchange.ledger.v1.LedgerService.GetBalances:input_type -> exchange.ledger.v1.GetBalancesRequest
-	10, // 24: exchange.ledger.v1.LedgerService.SettleWithdrawal:input_type -> exchange.ledger.v1.SettleWithdrawalRequest
-	12, // 25: exchange.ledger.v1.LedgerService.TransferInternal:input_type -> exchange.ledger.v1.TransferInternalRequest
-	14, // 26: exchange.ledger.v1.LedgerService.BookChainFee:input_type -> exchange.ledger.v1.BookChainFeeRequest
-	16, // 27: exchange.ledger.v1.LedgerService.FundSystemAccount:input_type -> exchange.ledger.v1.FundSystemAccountRequest
-	18, // 28: exchange.ledger.v1.LedgerService.GetSystemBalances:input_type -> exchange.ledger.v1.GetSystemBalancesRequest
-	20, // 29: exchange.ledger.v1.LedgerService.Adjust:input_type -> exchange.ledger.v1.AdjustRequest
-	23, // 30: exchange.ledger.v1.LedgerService.SettleFutures:input_type -> exchange.ledger.v1.SettleFuturesRequest
-	26, // 31: exchange.ledger.v1.LedgerService.FundInsurance:input_type -> exchange.ledger.v1.FundInsuranceRequest
-	28, // 32: exchange.ledger.v1.LedgerService.GetReconciliation:input_type -> exchange.ledger.v1.GetReconciliationRequest
-	32, // 33: exchange.ledger.v1.LedgerService.PlaceHold:input_type -> exchange.ledger.v1.PlaceHoldRequest
-	34, // 34: exchange.ledger.v1.LedgerService.ReleaseHold:input_type -> exchange.ledger.v1.ReleaseHoldRequest
-	36, // 35: exchange.ledger.v1.LedgerService.ListHolds:input_type -> exchange.ledger.v1.ListHoldsRequest
-	38, // 36: exchange.ledger.v1.LedgerService.ReleaseUnclaimed:input_type -> exchange.ledger.v1.ReleaseUnclaimedRequest
-	42, // 37: exchange.ledger.v1.LedgerService.GetUnclaimedRelease:input_type -> exchange.ledger.v1.GetUnclaimedReleaseRequest
-	40, // 38: exchange.ledger.v1.LedgerService.CreditUnclaimed:input_type -> exchange.ledger.v1.CreditUnclaimedRequest
-	4,  // 39: exchange.ledger.v1.LedgerService.Freeze:output_type -> exchange.ledger.v1.FreezeResponse
-	5,  // 40: exchange.ledger.v1.LedgerService.Unfreeze:output_type -> exchange.ledger.v1.UnfreezeResponse
-	6,  // 41: exchange.ledger.v1.LedgerService.Transfer:output_type -> exchange.ledger.v1.TransferResponse
-	9,  // 42: exchange.ledger.v1.LedgerService.GetBalances:output_type -> exchange.ledger.v1.GetBalancesResponse
-	11, // 43: exchange.ledger.v1.LedgerService.SettleWithdrawal:output_type -> exchange.ledger.v1.SettleWithdrawalResponse
-	13, // 44: exchange.ledger.v1.LedgerService.TransferInternal:output_type -> exchange.ledger.v1.TransferInternalResponse
-	15, // 45: exchange.ledger.v1.LedgerService.BookChainFee:output_type -> exchange.ledger.v1.BookChainFeeResponse
-	17, // 46: exchange.ledger.v1.LedgerService.FundSystemAccount:output_type -> exchange.ledger.v1.FundSystemAccountResponse
-	19, // 47: exchange.ledger.v1.LedgerService.GetSystemBalances:output_type -> exchange.ledger.v1.GetSystemBalancesResponse
-	21, // 48: exchange.ledger.v1.LedgerService.Adjust:output_type -> exchange.ledger.v1.AdjustResponse
-	25, // 49: exchange.ledger.v1.LedgerService.SettleFutures:output_type -> exchange.ledger.v1.SettleFuturesResponse
-	27, // 50: exchange.ledger.v1.LedgerService.FundInsurance:output_type -> exchange.ledger.v1.FundInsuranceResponse
-	30, // 51: exchange.ledger.v1.LedgerService.GetReconciliation:output_type -> exchange.ledger.v1.GetReconciliationResponse
-	33, // 52: exchange.ledger.v1.LedgerService.PlaceHold:output_type -> exchange.ledger.v1.PlaceHoldResponse
-	35, // 53: exchange.ledger.v1.LedgerService.ReleaseHold:output_type -> exchange.ledger.v1.ReleaseHoldResponse
-	37, // 54: exchange.ledger.v1.LedgerService.ListHolds:output_type -> exchange.ledger.v1.ListHoldsResponse
-	39, // 55: exchange.ledger.v1.LedgerService.ReleaseUnclaimed:output_type -> exchange.ledger.v1.ReleaseUnclaimedResponse
-	43, // 56: exchange.ledger.v1.LedgerService.GetUnclaimedRelease:output_type -> exchange.ledger.v1.GetUnclaimedReleaseResponse
-	41, // 57: exchange.ledger.v1.LedgerService.CreditUnclaimed:output_type -> exchange.ledger.v1.CreditUnclaimedResponse
-	39, // [39:58] is the sub-list for method output_type
-	20, // [20:39] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	44, // 20: exchange.ledger.v1.PostMarginRequest.moves:type_name -> exchange.ledger.v1.MarginMove
+	47, // 21: exchange.ledger.v1.AccrueMarginInterestRequest.lines:type_name -> exchange.ledger.v1.MarginInterestLine
+	3,  // 22: exchange.ledger.v1.AccrueMarginInterestResponse.posting:type_name -> exchange.ledger.v1.Posting
+	50, // 23: exchange.ledger.v1.GetMarginBalancesResponse.balances:type_name -> exchange.ledger.v1.MarginBalance
+	53, // 24: exchange.ledger.v1.ListMarginDebtsResponse.debts:type_name -> exchange.ledger.v1.MarginDebt
+	0,  // 25: exchange.ledger.v1.LedgerService.Freeze:input_type -> exchange.ledger.v1.FreezeRequest
+	1,  // 26: exchange.ledger.v1.LedgerService.Unfreeze:input_type -> exchange.ledger.v1.UnfreezeRequest
+	2,  // 27: exchange.ledger.v1.LedgerService.Transfer:input_type -> exchange.ledger.v1.TransferRequest
+	8,  // 28: exchange.ledger.v1.LedgerService.GetBalances:input_type -> exchange.ledger.v1.GetBalancesRequest
+	10, // 29: exchange.ledger.v1.LedgerService.SettleWithdrawal:input_type -> exchange.ledger.v1.SettleWithdrawalRequest
+	12, // 30: exchange.ledger.v1.LedgerService.TransferInternal:input_type -> exchange.ledger.v1.TransferInternalRequest
+	14, // 31: exchange.ledger.v1.LedgerService.BookChainFee:input_type -> exchange.ledger.v1.BookChainFeeRequest
+	16, // 32: exchange.ledger.v1.LedgerService.FundSystemAccount:input_type -> exchange.ledger.v1.FundSystemAccountRequest
+	18, // 33: exchange.ledger.v1.LedgerService.GetSystemBalances:input_type -> exchange.ledger.v1.GetSystemBalancesRequest
+	20, // 34: exchange.ledger.v1.LedgerService.Adjust:input_type -> exchange.ledger.v1.AdjustRequest
+	23, // 35: exchange.ledger.v1.LedgerService.SettleFutures:input_type -> exchange.ledger.v1.SettleFuturesRequest
+	26, // 36: exchange.ledger.v1.LedgerService.FundInsurance:input_type -> exchange.ledger.v1.FundInsuranceRequest
+	28, // 37: exchange.ledger.v1.LedgerService.GetReconciliation:input_type -> exchange.ledger.v1.GetReconciliationRequest
+	32, // 38: exchange.ledger.v1.LedgerService.PlaceHold:input_type -> exchange.ledger.v1.PlaceHoldRequest
+	34, // 39: exchange.ledger.v1.LedgerService.ReleaseHold:input_type -> exchange.ledger.v1.ReleaseHoldRequest
+	36, // 40: exchange.ledger.v1.LedgerService.ListHolds:input_type -> exchange.ledger.v1.ListHoldsRequest
+	38, // 41: exchange.ledger.v1.LedgerService.ReleaseUnclaimed:input_type -> exchange.ledger.v1.ReleaseUnclaimedRequest
+	42, // 42: exchange.ledger.v1.LedgerService.GetUnclaimedRelease:input_type -> exchange.ledger.v1.GetUnclaimedReleaseRequest
+	40, // 43: exchange.ledger.v1.LedgerService.CreditUnclaimed:input_type -> exchange.ledger.v1.CreditUnclaimedRequest
+	45, // 44: exchange.ledger.v1.LedgerService.PostMargin:input_type -> exchange.ledger.v1.PostMarginRequest
+	48, // 45: exchange.ledger.v1.LedgerService.AccrueMarginInterest:input_type -> exchange.ledger.v1.AccrueMarginInterestRequest
+	51, // 46: exchange.ledger.v1.LedgerService.GetMarginBalances:input_type -> exchange.ledger.v1.GetMarginBalancesRequest
+	54, // 47: exchange.ledger.v1.LedgerService.ListMarginDebts:input_type -> exchange.ledger.v1.ListMarginDebtsRequest
+	4,  // 48: exchange.ledger.v1.LedgerService.Freeze:output_type -> exchange.ledger.v1.FreezeResponse
+	5,  // 49: exchange.ledger.v1.LedgerService.Unfreeze:output_type -> exchange.ledger.v1.UnfreezeResponse
+	6,  // 50: exchange.ledger.v1.LedgerService.Transfer:output_type -> exchange.ledger.v1.TransferResponse
+	9,  // 51: exchange.ledger.v1.LedgerService.GetBalances:output_type -> exchange.ledger.v1.GetBalancesResponse
+	11, // 52: exchange.ledger.v1.LedgerService.SettleWithdrawal:output_type -> exchange.ledger.v1.SettleWithdrawalResponse
+	13, // 53: exchange.ledger.v1.LedgerService.TransferInternal:output_type -> exchange.ledger.v1.TransferInternalResponse
+	15, // 54: exchange.ledger.v1.LedgerService.BookChainFee:output_type -> exchange.ledger.v1.BookChainFeeResponse
+	17, // 55: exchange.ledger.v1.LedgerService.FundSystemAccount:output_type -> exchange.ledger.v1.FundSystemAccountResponse
+	19, // 56: exchange.ledger.v1.LedgerService.GetSystemBalances:output_type -> exchange.ledger.v1.GetSystemBalancesResponse
+	21, // 57: exchange.ledger.v1.LedgerService.Adjust:output_type -> exchange.ledger.v1.AdjustResponse
+	25, // 58: exchange.ledger.v1.LedgerService.SettleFutures:output_type -> exchange.ledger.v1.SettleFuturesResponse
+	27, // 59: exchange.ledger.v1.LedgerService.FundInsurance:output_type -> exchange.ledger.v1.FundInsuranceResponse
+	30, // 60: exchange.ledger.v1.LedgerService.GetReconciliation:output_type -> exchange.ledger.v1.GetReconciliationResponse
+	33, // 61: exchange.ledger.v1.LedgerService.PlaceHold:output_type -> exchange.ledger.v1.PlaceHoldResponse
+	35, // 62: exchange.ledger.v1.LedgerService.ReleaseHold:output_type -> exchange.ledger.v1.ReleaseHoldResponse
+	37, // 63: exchange.ledger.v1.LedgerService.ListHolds:output_type -> exchange.ledger.v1.ListHoldsResponse
+	39, // 64: exchange.ledger.v1.LedgerService.ReleaseUnclaimed:output_type -> exchange.ledger.v1.ReleaseUnclaimedResponse
+	43, // 65: exchange.ledger.v1.LedgerService.GetUnclaimedRelease:output_type -> exchange.ledger.v1.GetUnclaimedReleaseResponse
+	41, // 66: exchange.ledger.v1.LedgerService.CreditUnclaimed:output_type -> exchange.ledger.v1.CreditUnclaimedResponse
+	46, // 67: exchange.ledger.v1.LedgerService.PostMargin:output_type -> exchange.ledger.v1.PostMarginResponse
+	49, // 68: exchange.ledger.v1.LedgerService.AccrueMarginInterest:output_type -> exchange.ledger.v1.AccrueMarginInterestResponse
+	52, // 69: exchange.ledger.v1.LedgerService.GetMarginBalances:output_type -> exchange.ledger.v1.GetMarginBalancesResponse
+	55, // 70: exchange.ledger.v1.LedgerService.ListMarginDebts:output_type -> exchange.ledger.v1.ListMarginDebtsResponse
+	48, // [48:71] is the sub-list for method output_type
+	25, // [25:48] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_exchange_ledger_v1_ledger_proto_init() }
@@ -3179,7 +4028,7 @@ func file_exchange_ledger_v1_ledger_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_exchange_ledger_v1_ledger_proto_rawDesc), len(file_exchange_ledger_v1_ledger_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   44,
+			NumMessages:   56,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

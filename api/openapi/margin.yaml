@@ -12,23 +12,32 @@ info:
     total liabilities, both valued in USDT (assets after the asset's
     haircut); below the warning level the user is told, at the liquidation
     level the system closes the account against HOUSE, repays the debts,
-    charges the 2% liquidation fee and returns the rest. Draft of batch E0:
-    the endpoints come with batches E1 (accounts, transfers, borrowing,
-    repaying, interest), E2 (orders on margin accounts, the margin channel)
-    and E3 (warnings and liquidations), behind the margin.enabled switch;
-    until then they answer MARGIN_DISABLED. Orders on a margin account go
-    through POST /v1/orders with account and side_effect (trading
-    contract). Amounts are decimal strings (ADR-0008), IDs UUIDv7.
+    charges the 2% liquidation fee and returns the rest. The endpoints come
+    with batches E1 (accounts, transfers, borrowing, repaying, interest),
+    E2 (orders on margin accounts, the margin channel) and E3 (warnings and
+    liquidations). The margin.enabled switch opens borrowing, transfers in
+    and orders on margin accounts; while it is off they answer
+    MARGIN_DISABLED, and repaying and transfers out stay open (they only
+    lower the risk). Users the user service finds ineligible get its reason
+    code (USER_NOT_ELIGIBLE, USER_RISK_REVIEW, ...). Prices: each asset at
+    the last price of its USDT pair (the reference market's ticker for the
+    pairs that follow it), a stale one at its last value. Orders on a
+    margin account go through POST /v1/orders with account and side_effect
+    (trading contract). Amounts are decimal strings (ADR-0008), IDs UUIDv7.
 
-    Errors (appendix C style): MARGIN_DISABLED (403, the switch is off or
-    the user is not eligible), MARGIN_ASSET_NOT_BORROWABLE (422, the asset
-    cannot be borrowed, or not used as margin, in this account),
-    MARGIN_LIMIT (422, more than the account may borrow; details
-    max_borrowable), MARGIN_POOL_EMPTY (422, the platform's pool of the
-    asset is used up; details pool_available), MARGIN_LEVEL_TOO_LOW (422,
-    the transfer, borrowing or order would leave the margin level under the
-    warning level; details margin_level, warn_level), MARGIN_FROZEN (409,
-    the account is being liquidated or frozen by an operator).
+    Errors (appendix C style): MARGIN_DISABLED (403, the margin.enabled
+    switch is off), MARGIN_ASSET_NOT_BORROWABLE (422, the asset cannot be
+    borrowed, or not used as margin, in this account; details asset),
+    MARGIN_LIMIT (422, more than the account may borrow or the user's cap;
+    details max_borrowable, limited_by), MARGIN_POOL_EMPTY (422, the
+    platform's pool of the asset is used up; details pool_available),
+    MARGIN_LEVEL_TOO_LOW (422, the transfer, borrowing or order would leave
+    the margin level under the warning level; details margin_level,
+    warn_level), MARGIN_FROZEN (409, the account is being liquidated or
+    frozen by an operator; details status), MARGIN_PRICE_UNAVAILABLE (503,
+    an asset the account holds or owes, or the one to borrow, never had a
+    price: no borrowing, transfer out or order on the account, and no
+    liquidation either, until it has one; details asset).
 
     Pushes: the private WebSocket channel "margin" carries MarginPush
     messages (account changes, warnings, liquidations).
@@ -117,9 +126,14 @@ paths:
       summary: Move an asset between the spot account and a margin account
       description: |
         IN moves from SPOT into the margin account (an isolated account is
-        opened by its first transfer and takes only its pair's two assets);
-        OUT moves back what is free of debt, and only while the margin level
-        stays at or above the warning level (MARGIN_LEVEL_TOO_LOW).
+        opened by its first transfer and takes only its pair's two assets;
+        MARGIN_DISABLED while the switch is off). OUT moves back what is free
+        of open orders and of the asset's own debt
+        (LEDGER_INSUFFICIENT_BALANCE, details max_transferable), and while
+        the account owes anything only what keeps the margin level at or
+        above the warning level (MARGIN_LEVEL_TOO_LOW, details
+        max_transferable; MARGIN_PRICE_UNAVAILABLE without prices). A frozen
+        or liquidating account moves nothing (MARGIN_FROZEN).
       tags: [margin]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -160,9 +174,13 @@ paths:
       summary: Borrow an asset into a margin account
       description: |
         The amount must be borrowable (MARGIN_ASSET_NOT_BORROWABLE), within
-        what the account may borrow (MARGIN_LIMIT), what the pool has left
-        (MARGIN_POOL_EMPTY) and the user's cap, and the account must not be
-        frozen (MARGIN_FROZEN). The first hour's interest is charged at once.
+        what the account may borrow at its leverage and the user's cap
+        (MARGIN_LIMIT), what the pool has left (MARGIN_POOL_EMPTY), and leave
+        the margin level at or above the warning level
+        (MARGIN_LEVEL_TOO_LOW); the account must have been opened by a
+        transfer in and not be frozen (MARGIN_FROZEN), and every asset of it
+        priced (MARGIN_PRICE_UNAVAILABLE). MARGIN_DISABLED while the switch
+        is off. The first hour's interest is charged at once.
       tags: [margin]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -196,7 +214,13 @@ paths:
     post:
       operationId: marginRepay
       summary: Repay a debt from the margin account's free balance
-      description: Interest first, then principal. ALL repays the whole debt of the asset, as far as the free balance goes.
+      description: |
+        Interest first, then principal. ALL repays the whole debt of the
+        asset, as far as the free balance goes. Open while the switch is off
+        and while an operator froze the account; a liquidation in progress
+        refuses it (MARGIN_FROZEN). More than the debt fails with
+        MARGIN_REPAY_EXCEEDS_DEBT, more than the free balance with
+        LEDGER_INSUFFICIENT_BALANCE.
       tags: [margin]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -402,7 +426,8 @@ components:
       enum: [MARGIN_CROSS, MARGIN_ISOLATED]
     MarginAsset:
       type: object
-      required: [asset, borrowable, collateral, haircut, pool_cap, pool_available, user_cap, interest_model, hourly_rate, rate_hour]
+      required: [asset, borrowable, collateral, haircut, pool_cap, pool_available, utilization, user_cap, interest_model,
+        hourly_rate, rate_hour, floating]
       properties:
         asset:
           type: string
@@ -420,6 +445,9 @@ components:
         pool_available:
           description: pool_cap less what is lent out.
           $ref: './market.yaml#/components/schemas/Decimal'
+        utilization:
+          description: What is lent out over pool_cap, from 0 to 1; the FLOATING model's rate follows it.
+          $ref: './market.yaml#/components/schemas/Decimal'
         user_cap:
           description: What one user may owe of the asset at most.
           $ref: './market.yaml#/components/schemas/Decimal'
@@ -433,6 +461,24 @@ components:
           type: string
           format: date-time
           description: The hour hourly_rate applies to (FLOATING sets it on the hour from the pool's use).
+        floating:
+          $ref: '#/components/schemas/FloatingRate'
+    FloatingRate:
+      description: |
+        The FLOATING model's hourly rate by the pool's utilization u: from
+        base_rate at u = 0 linearly to kink_rate at u = kink, then linearly
+        to max_rate at u = 1 (design §4.1).
+      type: object
+      required: [base_rate, kink, kink_rate, max_rate]
+      properties:
+        base_rate:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        kink:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        kink_rate:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        max_rate:
+          $ref: './market.yaml#/components/schemas/Decimal'
     MarginTerms:
       type: object
       required: [leverage, warn_level, liquidation_level, liquidation_fee_rate]

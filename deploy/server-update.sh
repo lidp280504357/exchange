@@ -18,6 +18,20 @@ apply_instruments() {
   tail -1 <<<"$out" | sed 's/^/== 参考数据：/'
 }
 
+# apply_margin 把杠杆条款的种子 deploy/instruments/margin.json 写进 margin-service（杠杆设计 2026-10-06 §4，E0 契约 §9）：
+# 缺的建、上次由种子写的按文件改，后台改过的保留（--force 才覆盖）；杠杆在开关后面，同步失败只报出来，不中止部署。
+apply_margin() {
+  [ -f deploy/instruments/margin.json ] || return 0
+  local out
+  if ! out=$(sudo docker compose "${COMPOSE[@]}" exec -T margin-service /app/exchangectl margin apply --file - \
+    < deploy/instruments/margin.json 2>&1); then
+    echo "== 杠杆条款同步失败（不影响部署，exchangectl margin apply 重试）：$(tail -1 <<<"$out")"
+    return 0
+  fi
+  grep -E '^(changed|kept) ' <<<"$out" | sed 's/^/   /' || true
+  tail -1 <<<"$out" | sed 's/^/== 杠杆条款：/'
+}
+
 # lift_deploy_degradations 解除部署期间开始的合约只减仓。部署会重启 market-data-service，标记价短暂中断，
 # 合约可能因此进入只减仓（INDEX_SOURCES、MARK_PRICE_STALE）；按阶段 3 的设计只减仓须由人解除，部署者就是这个人：
 # 等标记价恢复（行情接口 degraded 为 false）后解除，解除人记为本次部署。最多等三分钟、每 15 秒看一次：指数靠平台
@@ -318,6 +332,7 @@ main() {
     sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" up -d --no-build --remove-orphans
     mapfile -t core < <(sudo docker compose "${COMPOSE[@]}" config --services | grep -vxF -f <(printf '%s\n' "${optional[@]}"))
     sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" up -d --no-build --wait --wait-timeout 600 "${core[@]}"
+    apply_margin
     if ! sudo APP_VERSION="$APP_VERSION" docker compose "${COMPOSE[@]}" up -d --no-build --wait --wait-timeout 180 "${optional[@]}"; then
       echo "== 这些服务还没就绪（不影响部署，稍后看）：$(sudo docker compose "${COMPOSE[@]}" ps --format '{{.Service}} {{.Status}}' | grep -v '(healthy)' | tr '\n' ';')"
     fi

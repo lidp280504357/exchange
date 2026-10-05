@@ -62,6 +62,7 @@ services:
       MARKET_DATA_SERVICE_URL: http://market-data-service:8090
       WALLET_SERVICE_URL: http://wallet-service:8092
       DERIVATIVES_SERVICE_URL: http://derivatives-service:8095
+      MARGIN_SERVICE_URL: http://margin-service:8099
     depends_on:
       redis: {condition: service_healthy}
       redpanda: {condition: service_healthy}
@@ -74,6 +75,7 @@ services:
       market-data-service: {condition: service_started}
       wallet-service: {condition: service_started}
       derivatives-service: {condition: service_started}
+      margin-service: {condition: service_started}
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9080/readyz"]
@@ -201,6 +203,28 @@ services:
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9095/readyz"]
+
+  # Margin trading (design 2026-10-06): one process; the hourly interest
+  # holds a database lease, so a second instance would wait to charge it.
+  margin-service:
+    <<: *app
+    command: ["/app/margin-service"]
+    environment:
+      <<: *base-env
+      LEDGER_GRPC_ADDR: ledger-service:9185
+      INSTRUMENT_GRPC_ADDR: instrument-service:9184
+      USER_GRPC_ADDR: user-service:9182
+      MARKET_DATA_SERVICE_URL: http://market-data-service:8090
+    depends_on:
+      postgres: {condition: service_healthy}
+      redpanda: {condition: service_healthy}
+      ledger-service: {condition: service_started}
+      instrument-service: {condition: service_started}
+      user-service: {condition: service_started}
+      market-data-service: {condition: service_started}
+    healthcheck:
+      <<: *health
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9099/readyz"]
 
   risk-service:
     <<: *app

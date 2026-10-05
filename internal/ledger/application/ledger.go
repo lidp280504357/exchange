@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -178,7 +179,7 @@ func (s *Service) emit(ctx context.Context, r ports.Repos, j domain.Journal, seq
 		posted.Lines = append(posted.Lines, &ledgerv1.EntryLine{
 			AccountId: l.Account.ID, OwnerType: l.Account.Key.OwnerType, OwnerId: l.Account.Key.OwnerID,
 			AccountType: l.Account.Key.Type, Asset: l.Account.Key.Asset, Amount: l.Amount.String(), BalanceKind: l.Kind,
-			AvailableAfter: l.Account.Available.String(), FrozenAfter: l.Account.Frozen.String(),
+			AvailableAfter: l.Account.Available.String(), FrozenAfter: l.Account.Frozen.String(), Scope: l.Account.Key.Scope,
 		})
 	}
 	if err := r.Emit(ctx, event.TopicLedger, posted, "journal", j.ID); err != nil {
@@ -189,7 +190,9 @@ func (s *Service) emit(ctx context.Context, r ports.Repos, j domain.Journal, seq
 		entry = domain.EntryTradeSettle // to its user, a trade against HOUSE is a trade (ADR-0015)
 	}
 	for _, a := range accounts {
-		if a.Key.OwnerType != domain.OwnerUser {
+		// The balances channel shows SPOT and FUTURES; a margin account is
+		// pushed whole by margin-service from EntryPosted.
+		if a.Key.OwnerType != domain.OwnerUser || domain.MarginType(a.Key.Type) {
 			continue
 		}
 		if err := r.Emit(ctx, event.TopicLedger, &ledgerv1.BalanceChanged{
@@ -231,7 +234,8 @@ func (s *Service) Unfreeze(ctx context.Context, idemKey, entryType, userID, acco
 // scoped keeps callers' keys apart per user.
 func scoped(userID, key string) string { return "u:" + userID + ":" + key }
 
-// Balances lists a user's accounts, optionally of one type.
+// Balances lists a user's SPOT and FUTURES accounts, or those of one
+// type; the margin accounts are MarginBalances'.
 func (s *Service) Balances(ctx context.Context, userID, accountType string) ([]domain.Account, error) {
 	if _, err := uuid.Parse(userID); err != nil {
 		return nil, apperr.Invalid("user_id must be a UUID")
@@ -239,7 +243,11 @@ func (s *Service) Balances(ctx context.Context, userID, accountType string) ([]d
 	if accountType != "" && accountType != domain.AccountSpot && accountType != domain.AccountFutures {
 		return nil, apperr.Invalid("account_type must be SPOT or FUTURES")
 	}
-	return s.Store.Read().Accounts().ByOwner(ctx, userID, accountType)
+	list, err := s.Store.Read().Accounts().ByOwner(ctx, userID, accountType)
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(list, func(a domain.Account) bool { return domain.MarginType(a.Key.Type) }), nil
 }
 
 // Entries returns a page of a user's fund flow and the next cursor.

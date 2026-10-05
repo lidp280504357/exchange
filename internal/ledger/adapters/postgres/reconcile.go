@@ -9,9 +9,10 @@ import (
 	"github.com/skill/exchange/internal/ledger/domain"
 )
 
-// Check names of the reconciliation (§5.9, §11.4 invariants 1, 2 and 5;
-// invariant 6 of the contracts needs the positions and is
-// derivatives-service's).
+// Check names of the reconciliation (§5.9, §11.4 invariants 1, 2 and 5,
+// and the margin invariants 8 and 9; invariant 6 of the contracts needs
+// the positions and is derivatives-service's, margin invariant 7 needs
+// the loans and is margin-service's).
 const (
 	CheckJournalBalanced      = "JOURNAL_BALANCED"
 	CheckAccountMatchesLines  = "ACCOUNT_MATCHES_LINES"
@@ -37,6 +38,17 @@ const (
 	// HOUSE's inventory of a backed asset (domain.HouseBackedAssets) is not below
 	// zero (ADR-0013); only internal assets may go short.
 	CheckHouseBackedNonNegative = "HOUSE_BACKED_NON_NEGATIVE"
+	// Margin invariant 9 (margin design §3.3): a margin account's asset
+	// rows are not below zero, its debt and interest rows not above it,
+	// with nothing frozen (the table's constraint holds it; the check
+	// reports a breach of the rule itself).
+	CheckMarginRowsSigned = "MARGIN_ROWS_SIGNED"
+	// Margin invariant 8: per asset, HOUSE's interest income in the
+	// MARGIN_INTEREST journals equals what they charged the accounts, and
+	// MARGIN_INTEREST_INCOME moves with nothing else. Invariant 7 (the debt
+	// rows against margin-service's loans) is margin-service's, which
+	// keeps the loans.
+	CheckMarginInterestConserved = "MARGIN_INTEREST_CONSERVED"
 )
 
 // Mismatch is one finding of a check.
@@ -114,6 +126,25 @@ var checks = []struct {
 	{CheckHouseBackedNonNegative, `SELECT asset, format('MARKET_MAKER %s available %s, frozen %s', asset, available, frozen)
 		FROM accounts WHERE account_type = 'MARKET_MAKER' AND asset = ANY($1) AND (available < 0 OR frozen < 0)
 		ORDER BY asset LIMIT 100`},
+	{CheckMarginRowsSigned, `SELECT id::text, format('%s %s %s %s: available %s, frozen %s', owner_id, account_type, scope, asset,
+			available, frozen)
+		FROM accounts
+		WHERE (account_type IN ('MARGIN_CROSS', 'MARGIN_ISOLATED') AND (available < 0 OR frozen < 0))
+			OR (account_type IN ('MARGIN_CROSS_DEBT', 'MARGIN_CROSS_INTEREST', 'MARGIN_ISOLATED_DEBT', 'MARGIN_ISOLATED_INTEREST')
+				AND (available > 0 OR frozen <> 0))
+		LIMIT 100`},
+	{CheckMarginInterestConserved, `WITH charged AS (
+			SELECT l.asset,
+				coalesce(sum(l.amount) FILTER (WHERE a.account_type = 'MARGIN_INTEREST_INCOME'), 0) AS income,
+				-coalesce(sum(l.amount) FILTER (WHERE a.account_type IN ('MARGIN_CROSS_INTEREST', 'MARGIN_ISOLATED_INTEREST')), 0) AS accrued
+			FROM journal_lines l JOIN journals j ON j.id = l.journal_id JOIN accounts a ON a.id = l.account_id
+			WHERE j.entry_type = 'MARGIN_INTEREST' GROUP BY l.asset),
+		income AS (SELECT asset, available FROM accounts WHERE account_type = 'MARGIN_INTEREST_INCOME')
+		SELECT COALESCE(c.asset, i.asset), format('charged %s, income lines %s, income balance %s', COALESCE(c.accrued, 0),
+			COALESCE(c.income, 0), COALESCE(i.available, 0))
+		FROM charged c FULL JOIN income i ON i.asset = c.asset
+		WHERE COALESCE(c.income, 0) <> COALESCE(c.accrued, 0) OR COALESCE(c.income, 0) <> COALESCE(i.available, 0)
+		LIMIT 100`},
 }
 
 // checkArgs are the query arguments of the checks that take some.

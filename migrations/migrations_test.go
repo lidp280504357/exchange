@@ -99,7 +99,7 @@ func TestDownMigrations(t *testing.T) {
 		"auth": migrations.Auth(), "users": migrations.Users(), "notify": migrations.Notify(), "config": migrations.Config(),
 		"instrument": migrations.Instrument(), "ledger": migrations.Ledger(), "risk": migrations.Risk(), "trading": migrations.Trading(), "matching": migrations.Matching(), "market": migrations.Market(),
 		"wallet": migrations.Wallet(), "signer": migrations.Signer(), "admin": migrations.Admin(),
-		"derivatives": migrations.Derivatives(), "marketsim": migrations.MarketSim(),
+		"derivatives": migrations.Derivatives(), "marketsim": migrations.MarketSim(), "margin": migrations.Margin(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			db := apply(t, fsys)
@@ -197,6 +197,21 @@ func TestLedgerSchema(t *testing.T) {
 	if err := tx.Commit(ctx); err == nil {
 		t.Fatal("an unbalanced journal must not commit")
 	}
+
+	// Margin rows (margin design §3): assets never below zero, debts never
+	// above it, an isolated account's rows scoped to their pair.
+	margin := `INSERT INTO accounts (id, owner_type, owner_id, account_type, scope, asset, available, frozen) VALUES ($1, 'USER', $2, $3, $4, 'USDT', $5, $6)`
+	owner := uuid.NewString()
+	accepts(t, db, margin, uuid.New(), owner, "MARGIN_CROSS", "", 5, 1)
+	accepts(t, db, margin, uuid.New(), owner, "MARGIN_CROSS_DEBT", "", -5, 0)
+	accepts(t, db, margin, uuid.New(), owner, "MARGIN_ISOLATED_INTEREST", "BTC-USDT", -0.1, 0)
+	rejects(t, db, "margin assets never go negative", margin, uuid.New(), uuid.NewString(), "MARGIN_CROSS", "", -1, 0)
+	rejects(t, db, "debts never go above zero", margin, uuid.New(), uuid.NewString(), "MARGIN_CROSS_DEBT", "", 1, 0)
+	rejects(t, db, "nothing of a debt is frozen", margin, uuid.New(), uuid.NewString(), "MARGIN_ISOLATED_DEBT", "BTC-USDT", -1, -1)
+	rejects(t, db, "an isolated row has its pair", margin, uuid.New(), uuid.NewString(), "MARGIN_ISOLATED", "", 1, 0)
+	rejects(t, db, "the cross account has no pair", margin, uuid.New(), uuid.NewString(), "MARGIN_CROSS", "BTC-USDT", 1, 0)
+	rejects(t, db, "one row per account, scope and asset", margin, uuid.New(), owner, "MARGIN_CROSS", "", 1, 0)
+	accepts(t, db, `INSERT INTO accounts (id, owner_type, owner_id, account_type, asset) VALUES ($1, 'SYSTEM', 'SYSTEM', 'MARGIN_INTEREST_INCOME', 'USDT')`, uuid.New())
 
 	rejects(t, db, "journals are append-only", `UPDATE journals SET memo = 'x'`)
 	rejects(t, db, "lines are append-only", `DELETE FROM journal_lines`)

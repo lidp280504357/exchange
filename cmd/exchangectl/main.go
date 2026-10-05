@@ -150,6 +150,12 @@ commands:
                               the newest funding rounds: rate, mark, positions, paid, received, insurance;
                               fails on a round stuck without its rate or receivers paid more than was collected
   derivatives reconcile       check invariant 6 now: long = short per contract, PNL_CLEARING + long cost − short cost = 0
+  margin apply --file F [--dry-run] [--force]
+                              write the margin terms of deploy/instruments/margin.json ("-" reads stdin); the terms
+                              the admin console changed last are kept unless --force (run in the margin-service container)
+  margin terms                the margin terms in force: cross account, assets, pairs
+  margin loans                the open loans and what each pool has lent
+  margin reconcile            check margin invariant 7 now: the ledger's debt rows = margin-service's loans
   udun coins                  a custodian's gateway, directly (UDUN_* from the environment, no database):
                               the merchant's coins with code, decimals, token flag and balance
   udun check-address --main-coin N --address A
@@ -217,6 +223,8 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		return adminCmd(ctx, cfg, args[1:], os.Stdin, out)
 	case "derivatives":
 		return derivativesCmd(ctx, cfg, args[1:], out)
+	case "margin":
+		return marginCmd(ctx, cfg, args[1:], os.Stdin, out)
 	case "sim":
 		return simCmd(ctx, cfg, args[1:], out)
 	default:

@@ -41,6 +41,7 @@ type settings struct {
 	MarketURL       string `koanf:"market_data_service_url"`
 	WalletURL       string `koanf:"wallet_service_url"`
 	DerivativesURL  string `koanf:"derivatives_service_url"`
+	MarginURL       string `koanf:"margin_service_url"`
 	// Redis holds the session revocation marks auth-service sets, the rate
 	// limit counters and the idempotency cache.
 	Redis redisx.Config `koanf:",squash"`
@@ -71,6 +72,7 @@ func setup(ctx context.Context, a *app.App) error {
 		MarketURL:       "http://localhost:8090",
 		WalletURL:       "http://localhost:8092",
 		DerivativesURL:  "http://localhost:8095",
+		MarginURL:       "http://localhost:8099",
 		WSOrigins:       []string{"astras.vip", "m.astras.vip", "localhost:5173", "localhost:5174"},
 	}
 	if err := a.LoadConfig(&cfg); err != nil {
@@ -112,6 +114,10 @@ func setup(ctx context.Context, a *app.App) error {
 	if err != nil {
 		return err
 	}
+	marginURL, err := upstream(cfg.MarginURL)
+	if err != nil {
+		return err
+	}
 	rdb, err := bootstrap.Redis(ctx, a, cfg.Redis)
 	if err != nil {
 		return err
@@ -137,6 +143,7 @@ func setup(ctx context.Context, a *app.App) error {
 		Auth: gateway.NewProxy(authURL), User: gateway.NewProxy(userURL), Notification: notification,
 		Instrument: gateway.NewProxy(instrumentURL), Ledger: gateway.NewProxy(ledgerURL), Trading: gateway.NewProxy(tradingURL),
 		Market: gateway.NewProxy(marketURL), Wallet: gateway.NewProxy(walletURL), Derivatives: gateway.NewProxy(derivativesURL),
+		Margin: gateway.NewProxy(marginURL),
 	}
 	if a.Config().Env != config.EnvProd {
 		// Dev inbox of the mock providers (codes sent by SMS or to test mail

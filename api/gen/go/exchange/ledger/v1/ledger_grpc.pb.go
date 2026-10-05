@@ -19,25 +19,29 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	LedgerService_Freeze_FullMethodName              = "/exchange.ledger.v1.LedgerService/Freeze"
-	LedgerService_Unfreeze_FullMethodName            = "/exchange.ledger.v1.LedgerService/Unfreeze"
-	LedgerService_Transfer_FullMethodName            = "/exchange.ledger.v1.LedgerService/Transfer"
-	LedgerService_GetBalances_FullMethodName         = "/exchange.ledger.v1.LedgerService/GetBalances"
-	LedgerService_SettleWithdrawal_FullMethodName    = "/exchange.ledger.v1.LedgerService/SettleWithdrawal"
-	LedgerService_TransferInternal_FullMethodName    = "/exchange.ledger.v1.LedgerService/TransferInternal"
-	LedgerService_BookChainFee_FullMethodName        = "/exchange.ledger.v1.LedgerService/BookChainFee"
-	LedgerService_FundSystemAccount_FullMethodName   = "/exchange.ledger.v1.LedgerService/FundSystemAccount"
-	LedgerService_GetSystemBalances_FullMethodName   = "/exchange.ledger.v1.LedgerService/GetSystemBalances"
-	LedgerService_Adjust_FullMethodName              = "/exchange.ledger.v1.LedgerService/Adjust"
-	LedgerService_SettleFutures_FullMethodName       = "/exchange.ledger.v1.LedgerService/SettleFutures"
-	LedgerService_FundInsurance_FullMethodName       = "/exchange.ledger.v1.LedgerService/FundInsurance"
-	LedgerService_GetReconciliation_FullMethodName   = "/exchange.ledger.v1.LedgerService/GetReconciliation"
-	LedgerService_PlaceHold_FullMethodName           = "/exchange.ledger.v1.LedgerService/PlaceHold"
-	LedgerService_ReleaseHold_FullMethodName         = "/exchange.ledger.v1.LedgerService/ReleaseHold"
-	LedgerService_ListHolds_FullMethodName           = "/exchange.ledger.v1.LedgerService/ListHolds"
-	LedgerService_ReleaseUnclaimed_FullMethodName    = "/exchange.ledger.v1.LedgerService/ReleaseUnclaimed"
-	LedgerService_GetUnclaimedRelease_FullMethodName = "/exchange.ledger.v1.LedgerService/GetUnclaimedRelease"
-	LedgerService_CreditUnclaimed_FullMethodName     = "/exchange.ledger.v1.LedgerService/CreditUnclaimed"
+	LedgerService_Freeze_FullMethodName               = "/exchange.ledger.v1.LedgerService/Freeze"
+	LedgerService_Unfreeze_FullMethodName             = "/exchange.ledger.v1.LedgerService/Unfreeze"
+	LedgerService_Transfer_FullMethodName             = "/exchange.ledger.v1.LedgerService/Transfer"
+	LedgerService_GetBalances_FullMethodName          = "/exchange.ledger.v1.LedgerService/GetBalances"
+	LedgerService_SettleWithdrawal_FullMethodName     = "/exchange.ledger.v1.LedgerService/SettleWithdrawal"
+	LedgerService_TransferInternal_FullMethodName     = "/exchange.ledger.v1.LedgerService/TransferInternal"
+	LedgerService_BookChainFee_FullMethodName         = "/exchange.ledger.v1.LedgerService/BookChainFee"
+	LedgerService_FundSystemAccount_FullMethodName    = "/exchange.ledger.v1.LedgerService/FundSystemAccount"
+	LedgerService_GetSystemBalances_FullMethodName    = "/exchange.ledger.v1.LedgerService/GetSystemBalances"
+	LedgerService_Adjust_FullMethodName               = "/exchange.ledger.v1.LedgerService/Adjust"
+	LedgerService_SettleFutures_FullMethodName        = "/exchange.ledger.v1.LedgerService/SettleFutures"
+	LedgerService_FundInsurance_FullMethodName        = "/exchange.ledger.v1.LedgerService/FundInsurance"
+	LedgerService_GetReconciliation_FullMethodName    = "/exchange.ledger.v1.LedgerService/GetReconciliation"
+	LedgerService_PlaceHold_FullMethodName            = "/exchange.ledger.v1.LedgerService/PlaceHold"
+	LedgerService_ReleaseHold_FullMethodName          = "/exchange.ledger.v1.LedgerService/ReleaseHold"
+	LedgerService_ListHolds_FullMethodName            = "/exchange.ledger.v1.LedgerService/ListHolds"
+	LedgerService_ReleaseUnclaimed_FullMethodName     = "/exchange.ledger.v1.LedgerService/ReleaseUnclaimed"
+	LedgerService_GetUnclaimedRelease_FullMethodName  = "/exchange.ledger.v1.LedgerService/GetUnclaimedRelease"
+	LedgerService_CreditUnclaimed_FullMethodName      = "/exchange.ledger.v1.LedgerService/CreditUnclaimed"
+	LedgerService_PostMargin_FullMethodName           = "/exchange.ledger.v1.LedgerService/PostMargin"
+	LedgerService_AccrueMarginInterest_FullMethodName = "/exchange.ledger.v1.LedgerService/AccrueMarginInterest"
+	LedgerService_GetMarginBalances_FullMethodName    = "/exchange.ledger.v1.LedgerService/GetMarginBalances"
+	LedgerService_ListMarginDebts_FullMethodName      = "/exchange.ledger.v1.LedgerService/ListMarginDebts"
 )
 
 // LedgerServiceClient is the client API for LedgerService service.
@@ -52,7 +56,7 @@ const (
 // LEDGER_INSUFFICIENT_BALANCE.
 type LedgerServiceClient interface {
 	// Freeze moves an amount from available to frozen (ORDER_FREEZE,
-	// WITHDRAW_FREEZE).
+	// WITHDRAW_FREEZE), on SPOT, FUTURES or a margin account's assets.
 	Freeze(ctx context.Context, in *FreezeRequest, opts ...grpc.CallOption) (*FreezeResponse, error)
 	// Unfreeze moves an amount from frozen back to available (ORDER_UNFREEZE,
 	// WITHDRAW_UNFREEZE).
@@ -129,6 +133,25 @@ type LedgerServiceClient interface {
 	// it. wallet-service calls it instead of announcing a deposit that has
 	// no user.
 	CreditUnclaimed(ctx context.Context, in *CreditUnclaimedRequest, opts ...grpc.CallOption) (*CreditUnclaimedResponse, error)
+	// PostMargin books one operation of margin-service on a user's margin
+	// account (margin design 2026-10-06 §3.2): the moves in order, one
+	// journal each, in one transaction — all or none. An asset row never
+	// goes below zero (LEDGER_INSUFFICIENT_BALANCE), a debt or interest row
+	// never above it (LEDGER_DEBT_OVERPAID), and a transfer out never takes
+	// what the asset's own debt holds. Repeating a key returns the first
+	// journals.
+	PostMargin(ctx context.Context, in *PostMarginRequest, opts ...grpc.CallOption) (*PostMarginResponse, error)
+	// AccrueMarginInterest books an hour's interest of one asset on many
+	// margin accounts in one MARGIN_INTEREST journal (key
+	// margin-interest:<key>): each account's interest row the amount owed
+	// more, HOUSE's MARGIN_INTEREST_INCOME the sum.
+	AccrueMarginInterest(ctx context.Context, in *AccrueMarginInterestRequest, opts ...grpc.CallOption) (*AccrueMarginInterestResponse, error)
+	// GetMarginBalances returns what each of a user's margin accounts holds
+	// and owes, per asset.
+	GetMarginBalances(ctx context.Context, in *GetMarginBalancesRequest, opts ...grpc.CallOption) (*GetMarginBalancesResponse, error)
+	// ListMarginDebts returns every margin account's debt of every asset it
+	// owes anything of (margin-service's reconciliation, invariant 7).
+	ListMarginDebts(ctx context.Context, in *ListMarginDebtsRequest, opts ...grpc.CallOption) (*ListMarginDebtsResponse, error)
 }
 
 type ledgerServiceClient struct {
@@ -329,6 +352,46 @@ func (c *ledgerServiceClient) CreditUnclaimed(ctx context.Context, in *CreditUnc
 	return out, nil
 }
 
+func (c *ledgerServiceClient) PostMargin(ctx context.Context, in *PostMarginRequest, opts ...grpc.CallOption) (*PostMarginResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PostMarginResponse)
+	err := c.cc.Invoke(ctx, LedgerService_PostMargin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ledgerServiceClient) AccrueMarginInterest(ctx context.Context, in *AccrueMarginInterestRequest, opts ...grpc.CallOption) (*AccrueMarginInterestResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AccrueMarginInterestResponse)
+	err := c.cc.Invoke(ctx, LedgerService_AccrueMarginInterest_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ledgerServiceClient) GetMarginBalances(ctx context.Context, in *GetMarginBalancesRequest, opts ...grpc.CallOption) (*GetMarginBalancesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetMarginBalancesResponse)
+	err := c.cc.Invoke(ctx, LedgerService_GetMarginBalances_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ledgerServiceClient) ListMarginDebts(ctx context.Context, in *ListMarginDebtsRequest, opts ...grpc.CallOption) (*ListMarginDebtsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListMarginDebtsResponse)
+	err := c.cc.Invoke(ctx, LedgerService_ListMarginDebts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LedgerServiceServer is the server API for LedgerService service.
 // All implementations must embed UnimplementedLedgerServiceServer
 // for forward compatibility.
@@ -341,7 +404,7 @@ func (c *ledgerServiceClient) CreditUnclaimed(ctx context.Context, in *CreditUnc
 // LEDGER_INSUFFICIENT_BALANCE.
 type LedgerServiceServer interface {
 	// Freeze moves an amount from available to frozen (ORDER_FREEZE,
-	// WITHDRAW_FREEZE).
+	// WITHDRAW_FREEZE), on SPOT, FUTURES or a margin account's assets.
 	Freeze(context.Context, *FreezeRequest) (*FreezeResponse, error)
 	// Unfreeze moves an amount from frozen back to available (ORDER_UNFREEZE,
 	// WITHDRAW_UNFREEZE).
@@ -418,6 +481,25 @@ type LedgerServiceServer interface {
 	// it. wallet-service calls it instead of announcing a deposit that has
 	// no user.
 	CreditUnclaimed(context.Context, *CreditUnclaimedRequest) (*CreditUnclaimedResponse, error)
+	// PostMargin books one operation of margin-service on a user's margin
+	// account (margin design 2026-10-06 §3.2): the moves in order, one
+	// journal each, in one transaction — all or none. An asset row never
+	// goes below zero (LEDGER_INSUFFICIENT_BALANCE), a debt or interest row
+	// never above it (LEDGER_DEBT_OVERPAID), and a transfer out never takes
+	// what the asset's own debt holds. Repeating a key returns the first
+	// journals.
+	PostMargin(context.Context, *PostMarginRequest) (*PostMarginResponse, error)
+	// AccrueMarginInterest books an hour's interest of one asset on many
+	// margin accounts in one MARGIN_INTEREST journal (key
+	// margin-interest:<key>): each account's interest row the amount owed
+	// more, HOUSE's MARGIN_INTEREST_INCOME the sum.
+	AccrueMarginInterest(context.Context, *AccrueMarginInterestRequest) (*AccrueMarginInterestResponse, error)
+	// GetMarginBalances returns what each of a user's margin accounts holds
+	// and owes, per asset.
+	GetMarginBalances(context.Context, *GetMarginBalancesRequest) (*GetMarginBalancesResponse, error)
+	// ListMarginDebts returns every margin account's debt of every asset it
+	// owes anything of (margin-service's reconciliation, invariant 7).
+	ListMarginDebts(context.Context, *ListMarginDebtsRequest) (*ListMarginDebtsResponse, error)
 	mustEmbedUnimplementedLedgerServiceServer()
 }
 
@@ -484,6 +566,18 @@ func (UnimplementedLedgerServiceServer) GetUnclaimedRelease(context.Context, *Ge
 }
 func (UnimplementedLedgerServiceServer) CreditUnclaimed(context.Context, *CreditUnclaimedRequest) (*CreditUnclaimedResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreditUnclaimed not implemented")
+}
+func (UnimplementedLedgerServiceServer) PostMargin(context.Context, *PostMarginRequest) (*PostMarginResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PostMargin not implemented")
+}
+func (UnimplementedLedgerServiceServer) AccrueMarginInterest(context.Context, *AccrueMarginInterestRequest) (*AccrueMarginInterestResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AccrueMarginInterest not implemented")
+}
+func (UnimplementedLedgerServiceServer) GetMarginBalances(context.Context, *GetMarginBalancesRequest) (*GetMarginBalancesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetMarginBalances not implemented")
+}
+func (UnimplementedLedgerServiceServer) ListMarginDebts(context.Context, *ListMarginDebtsRequest) (*ListMarginDebtsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListMarginDebts not implemented")
 }
 func (UnimplementedLedgerServiceServer) mustEmbedUnimplementedLedgerServiceServer() {}
 func (UnimplementedLedgerServiceServer) testEmbeddedByValue()                       {}
@@ -848,6 +942,78 @@ func _LedgerService_CreditUnclaimed_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LedgerService_PostMargin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PostMarginRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LedgerServiceServer).PostMargin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LedgerService_PostMargin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LedgerServiceServer).PostMargin(ctx, req.(*PostMarginRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _LedgerService_AccrueMarginInterest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AccrueMarginInterestRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LedgerServiceServer).AccrueMarginInterest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LedgerService_AccrueMarginInterest_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LedgerServiceServer).AccrueMarginInterest(ctx, req.(*AccrueMarginInterestRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _LedgerService_GetMarginBalances_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetMarginBalancesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LedgerServiceServer).GetMarginBalances(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LedgerService_GetMarginBalances_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LedgerServiceServer).GetMarginBalances(ctx, req.(*GetMarginBalancesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _LedgerService_ListMarginDebts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListMarginDebtsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LedgerServiceServer).ListMarginDebts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LedgerService_ListMarginDebts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LedgerServiceServer).ListMarginDebts(ctx, req.(*ListMarginDebtsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LedgerService_ServiceDesc is the grpc.ServiceDesc for LedgerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -930,6 +1096,22 @@ var LedgerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreditUnclaimed",
 			Handler:    _LedgerService_CreditUnclaimed_Handler,
+		},
+		{
+			MethodName: "PostMargin",
+			Handler:    _LedgerService_PostMargin_Handler,
+		},
+		{
+			MethodName: "AccrueMarginInterest",
+			Handler:    _LedgerService_AccrueMarginInterest_Handler,
+		},
+		{
+			MethodName: "GetMarginBalances",
+			Handler:    _LedgerService_GetMarginBalances_Handler,
+		},
+		{
+			MethodName: "ListMarginDebts",
+			Handler:    _LedgerService_ListMarginDebts_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

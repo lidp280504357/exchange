@@ -55,12 +55,13 @@ func (r repos) Emit(ctx context.Context, topic string, msg proto.Message, aggreg
 
 type accounts repos
 
-const accountColumns = `id, owner_type, owner_id, account_type, asset, available, frozen, version, updated_at`
+const accountColumns = `id, owner_type, owner_id, account_type, scope, asset, available, frozen, version, updated_at`
 
 func scanAccount(row pgx.Row) (domain.Account, error) {
 	var a domain.Account
 	var id uuid.UUID
-	err := row.Scan(&id, &a.Key.OwnerType, &a.Key.OwnerID, &a.Key.Type, &a.Key.Asset, &a.Available, &a.Frozen, &a.Version, &a.UpdatedAt)
+	err := row.Scan(&id, &a.Key.OwnerType, &a.Key.OwnerID, &a.Key.Type, &a.Key.Scope, &a.Key.Asset, &a.Available, &a.Frozen, &a.Version,
+		&a.UpdatedAt)
 	a.ID = id.String()
 	return a, err
 }
@@ -68,14 +69,14 @@ func scanAccount(row pgx.Row) (domain.Account, error) {
 func (r accounts) Lock(ctx context.Context, keys []domain.AccountKey) ([]domain.Account, error) {
 	out := make([]domain.Account, 0, len(keys))
 	for _, k := range keys {
-		if _, err := r.q.Exec(ctx, `INSERT INTO accounts (id, owner_type, owner_id, account_type, asset) VALUES ($1, $2, $3, $4, $5)
-			ON CONFLICT (owner_type, owner_id, account_type, asset) DO NOTHING`,
-			uuid.Must(uuid.NewV7()), k.OwnerType, k.OwnerID, k.Type, k.Asset); err != nil {
+		if _, err := r.q.Exec(ctx, `INSERT INTO accounts (id, owner_type, owner_id, account_type, scope, asset) VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (owner_type, owner_id, account_type, scope, asset) DO NOTHING`,
+			uuid.Must(uuid.NewV7()), k.OwnerType, k.OwnerID, k.Type, k.Scope, k.Asset); err != nil {
 			return nil, fmt.Errorf("create account %s: %w", k, err)
 		}
 		a, err := scanAccount(r.q.QueryRow(ctx, `SELECT `+accountColumns+` FROM accounts
-			WHERE owner_type = $1 AND owner_id = $2 AND account_type = $3 AND asset = $4 FOR UPDATE`,
-			k.OwnerType, k.OwnerID, k.Type, k.Asset))
+			WHERE owner_type = $1 AND owner_id = $2 AND account_type = $3 AND scope = $4 AND asset = $5 FOR UPDATE`,
+			k.OwnerType, k.OwnerID, k.Type, k.Scope, k.Asset))
 		if err != nil {
 			return nil, fmt.Errorf("lock account %s: %w", k, err)
 		}
@@ -93,8 +94,22 @@ func (r accounts) Save(ctx context.Context, a domain.Account) error {
 }
 
 func (r accounts) ByOwner(ctx context.Context, ownerID, accountType string) ([]domain.Account, error) {
-	rows, err := r.q.Query(ctx, `SELECT `+accountColumns+` FROM accounts WHERE owner_id = $1 AND ($2 = '' OR account_type = $2)
-		ORDER BY account_type, asset`, ownerID, accountType)
+	return r.query(ctx, `SELECT `+accountColumns+` FROM accounts WHERE owner_id = $1 AND ($2 = '' OR account_type = $2)
+		ORDER BY account_type, scope, asset`, ownerID, accountType)
+}
+
+func (r accounts) Margin(ctx context.Context, userID string) ([]domain.Account, error) {
+	return r.query(ctx, `SELECT `+accountColumns+` FROM accounts WHERE owner_type = 'USER' AND owner_id = $1
+		AND account_type LIKE 'MARGIN\_%' ORDER BY account_type, scope, asset`, userID)
+}
+
+func (r accounts) MarginDebts(ctx context.Context) ([]domain.Account, error) {
+	return r.query(ctx, `SELECT `+accountColumns+` FROM accounts WHERE account_type IN ('MARGIN_CROSS_DEBT', 'MARGIN_CROSS_INTEREST',
+		'MARGIN_ISOLATED_DEBT', 'MARGIN_ISOLATED_INTEREST') AND available <> 0 ORDER BY owner_id, account_type, scope, asset`)
+}
+
+func (r accounts) query(ctx context.Context, sql string, args ...any) ([]domain.Account, error) {
+	rows, err := r.q.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list accounts: %w", err)
 	}
@@ -116,8 +131,9 @@ func (r journals) KeyedTotal(ctx context.Context, prefix string, account domain.
 	var total decimal.Decimal
 	err := r.q.QueryRow(ctx, `SELECT coalesce(sum(l.amount), 0) FROM journal_lines l
 		JOIN accounts a ON a.id = l.account_id JOIN journals j ON j.id = l.journal_id
-		WHERE a.owner_type = $2 AND a.owner_id = $3 AND a.account_type = $4 AND a.asset = $5 AND starts_with(j.idem_key, $1)`,
-		prefix, account.OwnerType, account.OwnerID, account.Type, account.Asset).Scan(&total)
+		WHERE a.owner_type = $2 AND a.owner_id = $3 AND a.account_type = $4 AND a.scope = $5 AND a.asset = $6
+			AND starts_with(j.idem_key, $1)`,
+		prefix, account.OwnerType, account.OwnerID, account.Type, account.Scope, account.Asset).Scan(&total)
 	if err != nil {
 		return decimal.Zero, fmt.Errorf("sum keyed journals: %w", err)
 	}
@@ -270,6 +286,39 @@ func (r transfers) List(ctx context.Context, userID, beforeID string, limit int)
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+type margins repos
+
+func (r repos) Margins() ports.MarginRepo { return margins(r) }
+
+func (r margins) ByKey(ctx context.Context, key string) (*domain.MarginPosting, error) {
+	var p domain.MarginPosting
+	var journals []byte
+	err := r.q.QueryRow(ctx, `SELECT idem_key, user_id, request_hash, reference, journals, created_at FROM margin_postings
+		WHERE idem_key = $1`, key).Scan(&p.IdemKey, &p.UserID, &p.RequestHash, &p.Reference, &journals, &p.CreatedAt)
+	if pg.IsNoRows(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load margin posting: %w", err)
+	}
+	if err := json.Unmarshal(journals, &p.Journals); err != nil {
+		return nil, fmt.Errorf("margin posting %s: %w", key, err)
+	}
+	return &p, nil
+}
+
+func (r margins) Insert(ctx context.Context, p domain.MarginPosting) error {
+	journals, err := json.Marshal(p.Journals)
+	if err != nil {
+		return err
+	}
+	if _, err := r.q.Exec(ctx, `INSERT INTO margin_postings (idem_key, user_id, request_hash, reference, journals, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)`, p.IdemKey, p.UserID, p.RequestHash, p.Reference, journals, p.CreatedAt); err != nil {
+		return fmt.Errorf("insert margin posting: %w", err)
+	}
+	return nil
 }
 
 type futures repos

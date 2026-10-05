@@ -28,6 +28,7 @@ type Repos interface {
 	Futures() FuturesRepo
 	Holds() HoldRepo
 	Settings() SettingsRepo
+	Margins() MarginRepo
 	// Emit queues an event on topic, keyed by aggregateID.
 	Emit(ctx context.Context, topic string, msg proto.Message, aggregateType, aggregateID string) error
 }
@@ -41,6 +42,18 @@ type AccountRepo interface {
 	Save(ctx context.Context, a domain.Account) error
 	// ByOwner lists an owner's accounts, optionally of one type.
 	ByOwner(ctx context.Context, ownerID, accountType string) ([]domain.Account, error)
+	// Margin lists the rows of a user's margin accounts.
+	Margin(ctx context.Context, userID string) ([]domain.Account, error)
+	// MarginDebts lists every margin debt and interest row that owes
+	// something.
+	MarginDebts(ctx context.Context) ([]domain.Account, error)
+}
+
+// MarginRepo stores the margin postings of margin-service.
+type MarginRepo interface {
+	// ByKey returns the posting booked under key, or nil.
+	ByKey(ctx context.Context, key string) (*domain.MarginPosting, error)
+	Insert(ctx context.Context, p domain.MarginPosting) error
 }
 
 // JournalRepo stores journals and their lines; both are append-only.

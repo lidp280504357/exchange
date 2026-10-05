@@ -53,20 +53,26 @@ type Terms struct {
 }
 
 // DefaultTerms are design §4.4's: the cross account at 3x warns at 1.30
-// and liquidates at 1.10; an isolated account by its pair's leverage
-// (3x: 1.25 and 1.15, 5x: 1.20 and 1.10, 10x: 1.15 and 1.05). The fee is
-// 2% everywhere. Operators change them in the console (two people).
+// and liquidates at 1.10, at 5x (an operator's choice) 1.20 and 1.10; an
+// isolated account by its pair's leverage (3x: 1.25 and 1.15, 5x: 1.20
+// and 1.10, 10x: 1.10 and 1.05). Each warning level stays under
+// L / (L - 1), the margin level of an account borrowed to its full
+// leverage. The fee is 2% everywhere. Operators change them in the
+// console (two people).
 func DefaultTerms(t AccountType, leverage int) Terms {
 	fee := decimal.RequireFromString("0.02")
 	terms := func(warn, liquidate string) Terms {
 		return Terms{Leverage: leverage, WarnLevel: decimal.RequireFromString(warn), LiquidationLevel: decimal.RequireFromString(liquidate), LiquidationFee: fee}
 	}
 	if t == AccountCross {
+		if leverage >= 5 {
+			return terms("1.20", "1.10")
+		}
 		return terms("1.30", "1.10")
 	}
 	switch {
 	case leverage >= 10:
-		return terms("1.15", "1.05")
+		return terms("1.10", "1.05")
 	case leverage >= 5:
 		return terms("1.20", "1.10")
 	default:
@@ -93,4 +99,9 @@ var (
 	ErrPoolEmpty     = apperr.New(apperr.KindUnprocessable, "MARGIN_POOL_EMPTY", "the platform's pool of the asset is used up")
 	ErrLevelTooLow   = apperr.New(apperr.KindUnprocessable, "MARGIN_LEVEL_TOO_LOW", "the margin level would fall under the warning level")
 	ErrFrozen        = apperr.New(apperr.KindConflict, "MARGIN_FROZEN", "the margin account is being liquidated or is frozen")
+	// ErrPriceUnavailable refuses what adds risk while an asset the
+	// account holds or owes, or the one to borrow, never had a price
+	// (decision of 2026-10-06 01:15): such an account is not liquidated
+	// either. A stale price counts at its last value.
+	ErrPriceUnavailable = apperr.New(apperr.KindUnavailable, "MARGIN_PRICE_UNAVAILABLE", "an asset of the margin account has no price yet")
 )

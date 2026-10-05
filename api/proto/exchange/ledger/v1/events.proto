@@ -18,6 +18,8 @@ message EntryLine {
   string balance_kind = 7;
   string available_after = 8;
   string frozen_after = 9;
+  // The pair of an isolated margin account's row; empty for the others.
+  string scope = 10;
 }
 
 // EntryPosted is a journal, keyed by journal_id; the lines of each asset
@@ -32,9 +34,11 @@ message EntryPosted {
   string memo = 6;
 }
 
-// BalanceChanged is published for every user account a journal touched,
-// keyed by account_id; the gateway pushes it on the private WebSocket
-// channel "balances".
+// BalanceChanged is published for every SPOT and FUTURES account a
+// journal touched, keyed by account_id; the gateway pushes it on the
+// private WebSocket channel "balances". A margin account's rows change on
+// EntryPosted, and margin-service pushes the account on the channel
+// "margin".
 message BalanceChanged {
   string account_id = 1;
   string user_id = 2;

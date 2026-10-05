@@ -36,8 +36,10 @@ type EntryLine struct {
 	BalanceKind    string `protobuf:"bytes,7,opt,name=balance_kind,json=balanceKind,proto3" json:"balance_kind,omitempty"`
 	AvailableAfter string `protobuf:"bytes,8,opt,name=available_after,json=availableAfter,proto3" json:"available_after,omitempty"`
 	FrozenAfter    string `protobuf:"bytes,9,opt,name=frozen_after,json=frozenAfter,proto3" json:"frozen_after,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// The pair of an isolated margin account's row; empty for the others.
+	Scope         string `protobuf:"bytes,10,opt,name=scope,proto3" json:"scope,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *EntryLine) Reset() {
@@ -133,6 +135,13 @@ func (x *EntryLine) GetFrozenAfter() string {
 	return ""
 }
 
+func (x *EntryLine) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
+}
+
 // EntryPosted is a journal, keyed by journal_id; the lines of each asset
 // sum to zero. ClickHouse ledger_entries is built from it.
 type EntryPosted struct {
@@ -220,9 +229,11 @@ func (x *EntryPosted) GetMemo() string {
 	return ""
 }
 
-// BalanceChanged is published for every user account a journal touched,
-// keyed by account_id; the gateway pushes it on the private WebSocket
-// channel "balances".
+// BalanceChanged is published for every SPOT and FUTURES account a
+// journal touched, keyed by account_id; the gateway pushes it on the
+// private WebSocket channel "balances". A margin account's rows change on
+// EntryPosted, and margin-service pushes the account on the channel
+// "margin".
 type BalanceChanged struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AccountId     string                 `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
@@ -327,7 +338,7 @@ var File_exchange_ledger_v1_events_proto protoreflect.FileDescriptor
 
 const file_exchange_ledger_v1_events_proto_rawDesc = "" +
 	"\n" +
-	"\x1fexchange/ledger/v1/events.proto\x12\x12exchange.ledger.v1\"\xa4\x02\n" +
+	"\x1fexchange/ledger/v1/events.proto\x12\x12exchange.ledger.v1\"\xba\x02\n" +
 	"\tEntryLine\x12\x1d\n" +
 	"\n" +
 	"account_id\x18\x01 \x01(\tR\taccountId\x12\x1d\n" +
@@ -339,7 +350,9 @@ const file_exchange_ledger_v1_events_proto_rawDesc = "" +
 	"\x06amount\x18\x06 \x01(\tR\x06amount\x12!\n" +
 	"\fbalance_kind\x18\a \x01(\tR\vbalanceKind\x12'\n" +
 	"\x0favailable_after\x18\b \x01(\tR\x0eavailableAfter\x12!\n" +
-	"\ffrozen_after\x18\t \x01(\tR\vfrozenAfter\"\xcf\x01\n" +
+	"\ffrozen_after\x18\t \x01(\tR\vfrozenAfter\x12\x14\n" +
+	"\x05scope\x18\n" +
+	" \x01(\tR\x05scope\"\xcf\x01\n" +
 	"\vEntryPosted\x12\x1d\n" +
 	"\n" +
 	"journal_id\x18\x01 \x01(\tR\tjournalId\x12\x10\n" +

@@ -40,6 +40,8 @@ var (
 	derivatives embed.FS
 	//go:embed marketsim/*.sql
 	marketsim embed.FS
+	//go:embed margin/*.sql
+	margin embed.FS
 )
 
 // ClickHouse holds the analytics tables applied by analytics-consumer.
@@ -89,6 +91,9 @@ func Derivatives() fs.FS { return sub(derivatives, "derivatives") }
 
 // MarketSim holds market-sim's schema (the simulated market of ASTRA).
 func MarketSim() fs.FS { return sub(marketsim, "marketsim") }
+
+// Margin holds margin-service's schema (margin trading).
+func Margin() fs.FS { return sub(margin, "margin") }
 
 func sub(fsys embed.FS, dir string) fs.FS {
 	s, err := fs.Sub(fsys, dir)

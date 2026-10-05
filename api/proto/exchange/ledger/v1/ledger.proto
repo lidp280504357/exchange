@@ -10,7 +10,7 @@ package exchange.ledger.v1;
 // LEDGER_INSUFFICIENT_BALANCE.
 service LedgerService {
   // Freeze moves an amount from available to frozen (ORDER_FREEZE,
-  // WITHDRAW_FREEZE).
+  // WITHDRAW_FREEZE), on SPOT, FUTURES or a margin account's assets.
   rpc Freeze(FreezeRequest) returns (FreezeResponse);
   // Unfreeze moves an amount from frozen back to available (ORDER_UNFREEZE,
   // WITHDRAW_UNFREEZE).
@@ -87,12 +87,31 @@ service LedgerService {
   // it. wallet-service calls it instead of announcing a deposit that has
   // no user.
   rpc CreditUnclaimed(CreditUnclaimedRequest) returns (CreditUnclaimedResponse);
+  // PostMargin books one operation of margin-service on a user's margin
+  // account (margin design 2026-10-06 §3.2): the moves in order, one
+  // journal each, in one transaction — all or none. An asset row never
+  // goes below zero (LEDGER_INSUFFICIENT_BALANCE), a debt or interest row
+  // never above it (LEDGER_DEBT_OVERPAID), and a transfer out never takes
+  // what the asset's own debt holds. Repeating a key returns the first
+  // journals.
+  rpc PostMargin(PostMarginRequest) returns (PostMarginResponse);
+  // AccrueMarginInterest books an hour's interest of one asset on many
+  // margin accounts in one MARGIN_INTEREST journal (key
+  // margin-interest:<key>): each account's interest row the amount owed
+  // more, HOUSE's MARGIN_INTEREST_INCOME the sum.
+  rpc AccrueMarginInterest(AccrueMarginInterestRequest) returns (AccrueMarginInterestResponse);
+  // GetMarginBalances returns what each of a user's margin accounts holds
+  // and owes, per asset.
+  rpc GetMarginBalances(GetMarginBalancesRequest) returns (GetMarginBalancesResponse);
+  // ListMarginDebts returns every margin account's debt of every asset it
+  // owes anything of (margin-service's reconciliation, invariant 7).
+  rpc ListMarginDebts(ListMarginDebtsRequest) returns (ListMarginDebtsResponse);
 }
 
 message FreezeRequest {
   string idempotency_key = 1;
   string user_id = 2;
-  // SPOT or FUTURES.
+  // SPOT, FUTURES, or a margin account: MARGIN_CROSS, MARGIN_ISOLATED.
   string account_type = 3;
   string asset = 4;
   string amount = 5;
@@ -100,6 +119,8 @@ message FreezeRequest {
   string entry_type = 6;
   // What the freeze is for, e.g. an order ID.
   string reference = 7;
+  // The pair of a MARGIN_ISOLATED account; empty for the others.
+  string scope = 8;
 }
 
 message UnfreezeRequest {
@@ -111,6 +132,8 @@ message UnfreezeRequest {
   // ORDER_UNFREEZE or WITHDRAW_UNFREEZE.
   string entry_type = 6;
   string reference = 7;
+  // The pair of a MARGIN_ISOLATED account; empty for the others.
+  string scope = 8;
 }
 
 message TransferRequest {
@@ -420,4 +443,95 @@ message GetUnclaimedReleaseResponse {
   string journal_id = 1;
   // The user the release paid; empty when the deposit was not released.
   string user_id = 2;
+}
+
+// MarginMove is one step of a margin posting. Amounts are positive.
+message MarginMove {
+  // TRANSFER_IN: the user's SPOT to the margin account (MARGIN_TRANSFER_IN).
+  // TRANSFER_OUT: back (MARGIN_TRANSFER_OUT). BORROW: the asset into the
+  // account against the principal owed (MARGIN_BORROW). INTEREST: interest
+  // owed, to HOUSE's income (MARGIN_INTEREST). REPAY: the account pays
+  // interest and principal back (MARGIN_REPAY).
+  string type = 1;
+  string asset = 2;
+  string amount = 3;
+  // REPAY: the part of amount that pays interest; the rest pays principal.
+  string interest = 4;
+}
+
+message PostMarginRequest {
+  // The journals are keyed margin:<key>:<move index>.
+  string idempotency_key = 1;
+  string user_id = 2;
+  // MARGIN_CROSS or MARGIN_ISOLATED.
+  string account_type = 3;
+  // The pair of a MARGIN_ISOLATED account.
+  string scope = 4;
+  // What is booked, e.g. "borrow <id>"; the journals' memo.
+  string reference = 5;
+  repeated MarginMove moves = 6;
+}
+
+message PostMarginResponse {
+  // One per move, in order.
+  repeated string journal_ids = 1;
+  bool replayed = 2;
+}
+
+// MarginInterestLine is one account's interest of an hour.
+message MarginInterestLine {
+  string user_id = 1;
+  string account_type = 2;
+  string scope = 3;
+  string amount = 4;
+}
+
+message AccrueMarginInterestRequest {
+  string idempotency_key = 1;
+  string asset = 2;
+  // The journal's memo, e.g. the hour.
+  string reference = 3;
+  repeated MarginInterestLine lines = 4;
+}
+
+message AccrueMarginInterestResponse {
+  Posting posting = 1;
+}
+
+// MarginBalance is what a margin account holds and owes of an asset.
+message MarginBalance {
+  // MARGIN_CROSS or MARGIN_ISOLATED.
+  string account_type = 1;
+  // The pair of a MARGIN_ISOLATED account.
+  string scope = 2;
+  string asset = 3;
+  string available = 4;
+  string frozen = 5;
+  // What is owed, positive: the principal and the interest.
+  string borrowed = 6;
+  string interest = 7;
+}
+
+message GetMarginBalancesRequest {
+  string user_id = 1;
+}
+
+message GetMarginBalancesResponse {
+  repeated MarginBalance balances = 1;
+}
+
+// MarginDebt is what one margin account owes of an asset.
+message MarginDebt {
+  string user_id = 1;
+  string account_type = 2;
+  string scope = 3;
+  string asset = 4;
+  string borrowed = 5;
+  string interest = 6;
+}
+
+message ListMarginDebtsRequest {}
+
+message ListMarginDebtsResponse {
+  repeated MarginDebt debts = 1;
 }

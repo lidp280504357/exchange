@@ -2,15 +2,20 @@ syntax = "proto3";
 
 package exchange.margin.v1;
 
+import "exchange/order/v1/order.proto";
+
 // MarginService is margin-service's API for spot-trading-service (design
 // 2026-10-06 §5.1, §6; E0 contract, served from batch E2). An order on a
 // margin account is checked here and, with side_effect AUTO_BORROW,
 // funded by a borrow; spot-trading-service then freezes it in the ledger
 // on the margin account (account_type and, for an isolated account, scope
 // = the pair) and hands it to the engine as before. Errors are apperr
-// codes over gRPC: MARGIN_DISABLED, MARGIN_FROZEN,
+// codes over gRPC: MARGIN_DISABLED (margin.enabled off, or AUTO_BORROW
+// while margin.auto_borrow is off: detail flag), MARGIN_FROZEN,
 // MARGIN_ASSET_NOT_BORROWABLE, MARGIN_LIMIT, MARGIN_POOL_EMPTY,
-// MARGIN_LEVEL_TOO_LOW, LEDGER_INSUFFICIENT_BALANCE.
+// MARGIN_LEVEL_TOO_LOW, MARGIN_PRICE_UNAVAILABLE (an asset of the account
+// never had a price), LEDGER_INSUFFICIENT_BALANCE; an ineligible user
+// gets user-service's reason code.
 service MarginService {
   // CheckOrder answers whether the order may be placed, changing nothing:
   // the switch is on for the user, the account is not frozen or being
@@ -35,14 +40,23 @@ message OrderCheck {
   // MARGIN_CROSS, or MARGIN_ISOLATED: the isolated account of symbol.
   string account_type = 3;
   string symbol = 4;
-  // BUY or SELL.
-  string side = 5;
+  // BUY or SELL. Deprecated: order_side (review CH, 2026-10-06), the
+  // same as an enum; read when order_side is unset.
+  string side = 5 [deprecated = true];
   // What the order freezes: the quote asset of a buy (price x quantity,
   // or quote_amount), the base asset of a sell.
   string freeze_asset = 6;
   string freeze_amount = 7;
   // NONE, AUTO_BORROW or AUTO_REPAY.
   string side_effect = 8;
+  // The limit price, empty for a market order, and the base quantity,
+  // empty for a market buy by quote amount (decimal strings): the margin
+  // level after the order filled is worked out at the price (the market's
+  // for a market order), each asset after its haircut.
+  string price = 9;
+  string quantity = 10;
+  // The order's side.
+  exchange.order.v1.Side order_side = 11;
 }
 
 message CheckOrderRequest {

@@ -110,6 +110,7 @@ bash /opt/exchange/src/deploy/server-update.sh
 | admin-service | 8093（nginx 转发 `/admin/v1/`，不经网关） | — | 9094 |
 | udun-mock（测试服的托管钱包模拟网关，只在内网，见 custody.md） | 8097（wallet-service 调用） | — | 9097 |
 | market-sim（平台币 ASTRA 的模拟市场，见 market-sim.md） | 8098（内网管理接口） | — | 9098 |
+| margin-service（杠杆交易，见 margin.md） | 8099（网关转发 `/v1/margin/*`） | 9199（E2 起给 spot-trading-service） | 9099 |
 
 compose 健康检查请求运维端口的 `/readyz`：启动完成且依赖可用才返回 200，收到 SIGTERM 后立即变为 503（draining）。部署验证：
 

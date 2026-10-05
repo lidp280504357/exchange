@@ -7,6 +7,7 @@
 package marginv1
 
 import (
+	v1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -30,14 +31,25 @@ type OrderCheck struct {
 	// MARGIN_CROSS, or MARGIN_ISOLATED: the isolated account of symbol.
 	AccountType string `protobuf:"bytes,3,opt,name=account_type,json=accountType,proto3" json:"account_type,omitempty"`
 	Symbol      string `protobuf:"bytes,4,opt,name=symbol,proto3" json:"symbol,omitempty"`
-	// BUY or SELL.
+	// BUY or SELL. Deprecated: order_side (review CH, 2026-10-06), the
+	// same as an enum; read when order_side is unset.
+	//
+	// Deprecated: Marked as deprecated in exchange/margin/v1/margin.proto.
 	Side string `protobuf:"bytes,5,opt,name=side,proto3" json:"side,omitempty"`
 	// What the order freezes: the quote asset of a buy (price x quantity,
 	// or quote_amount), the base asset of a sell.
 	FreezeAsset  string `protobuf:"bytes,6,opt,name=freeze_asset,json=freezeAsset,proto3" json:"freeze_asset,omitempty"`
 	FreezeAmount string `protobuf:"bytes,7,opt,name=freeze_amount,json=freezeAmount,proto3" json:"freeze_amount,omitempty"`
 	// NONE, AUTO_BORROW or AUTO_REPAY.
-	SideEffect    string `protobuf:"bytes,8,opt,name=side_effect,json=sideEffect,proto3" json:"side_effect,omitempty"`
+	SideEffect string `protobuf:"bytes,8,opt,name=side_effect,json=sideEffect,proto3" json:"side_effect,omitempty"`
+	// The limit price, empty for a market order, and the base quantity,
+	// empty for a market buy by quote amount (decimal strings): the margin
+	// level after the order filled is worked out at the price (the market's
+	// for a market order), each asset after its haircut.
+	Price    string `protobuf:"bytes,9,opt,name=price,proto3" json:"price,omitempty"`
+	Quantity string `protobuf:"bytes,10,opt,name=quantity,proto3" json:"quantity,omitempty"`
+	// The order's side.
+	OrderSide     v1.Side `protobuf:"varint,11,opt,name=order_side,json=orderSide,proto3,enum=exchange.order.v1.Side" json:"order_side,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -100,6 +112,7 @@ func (x *OrderCheck) GetSymbol() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in exchange/margin/v1/margin.proto.
 func (x *OrderCheck) GetSide() string {
 	if x != nil {
 		return x.Side
@@ -126,6 +139,27 @@ func (x *OrderCheck) GetSideEffect() string {
 		return x.SideEffect
 	}
 	return ""
+}
+
+func (x *OrderCheck) GetPrice() string {
+	if x != nil {
+		return x.Price
+	}
+	return ""
+}
+
+func (x *OrderCheck) GetQuantity() string {
+	if x != nil {
+		return x.Quantity
+	}
+	return ""
+}
+
+func (x *OrderCheck) GetOrderSide() v1.Side {
+	if x != nil {
+		return x.OrderSide
+	}
+	return v1.Side(0)
 }
 
 type CheckOrderRequest struct {
@@ -337,18 +371,23 @@ var File_exchange_margin_v1_margin_proto protoreflect.FileDescriptor
 
 const file_exchange_margin_v1_margin_proto_rawDesc = "" +
 	"\n" +
-	"\x1fexchange/margin/v1/margin.proto\x12\x12exchange.margin.v1\"\xf8\x01\n" +
+	"\x1fexchange/margin/v1/margin.proto\x12\x12exchange.margin.v1\x1a\x1dexchange/order/v1/order.proto\"\xe6\x02\n" +
 	"\n" +
 	"OrderCheck\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x19\n" +
 	"\border_id\x18\x02 \x01(\tR\aorderId\x12!\n" +
 	"\faccount_type\x18\x03 \x01(\tR\vaccountType\x12\x16\n" +
-	"\x06symbol\x18\x04 \x01(\tR\x06symbol\x12\x12\n" +
-	"\x04side\x18\x05 \x01(\tR\x04side\x12!\n" +
+	"\x06symbol\x18\x04 \x01(\tR\x06symbol\x12\x16\n" +
+	"\x04side\x18\x05 \x01(\tB\x02\x18\x01R\x04side\x12!\n" +
 	"\ffreeze_asset\x18\x06 \x01(\tR\vfreezeAsset\x12#\n" +
 	"\rfreeze_amount\x18\a \x01(\tR\ffreezeAmount\x12\x1f\n" +
 	"\vside_effect\x18\b \x01(\tR\n" +
-	"sideEffect\"I\n" +
+	"sideEffect\x12\x14\n" +
+	"\x05price\x18\t \x01(\tR\x05price\x12\x1a\n" +
+	"\bquantity\x18\n" +
+	" \x01(\tR\bquantity\x126\n" +
+	"\n" +
+	"order_side\x18\v \x01(\x0e2\x17.exchange.order.v1.SideR\torderSide\"I\n" +
 	"\x11CheckOrderRequest\x124\n" +
 	"\x05order\x18\x01 \x01(\v2\x1e.exchange.margin.v1.OrderCheckR\x05order\"O\n" +
 	"\x12CheckOrderResponse\x12\x16\n" +
@@ -385,19 +424,21 @@ var file_exchange_margin_v1_margin_proto_goTypes = []any{
 	(*CheckOrderResponse)(nil),   // 2: exchange.margin.v1.CheckOrderResponse
 	(*ReserveOrderRequest)(nil),  // 3: exchange.margin.v1.ReserveOrderRequest
 	(*ReserveOrderResponse)(nil), // 4: exchange.margin.v1.ReserveOrderResponse
+	(v1.Side)(0),                 // 5: exchange.order.v1.Side
 }
 var file_exchange_margin_v1_margin_proto_depIdxs = []int32{
-	0, // 0: exchange.margin.v1.CheckOrderRequest.order:type_name -> exchange.margin.v1.OrderCheck
-	0, // 1: exchange.margin.v1.ReserveOrderRequest.order:type_name -> exchange.margin.v1.OrderCheck
-	1, // 2: exchange.margin.v1.MarginService.CheckOrder:input_type -> exchange.margin.v1.CheckOrderRequest
-	3, // 3: exchange.margin.v1.MarginService.ReserveOrder:input_type -> exchange.margin.v1.ReserveOrderRequest
-	2, // 4: exchange.margin.v1.MarginService.CheckOrder:output_type -> exchange.margin.v1.CheckOrderResponse
-	4, // 5: exchange.margin.v1.MarginService.ReserveOrder:output_type -> exchange.margin.v1.ReserveOrderResponse
-	4, // [4:6] is the sub-list for method output_type
-	2, // [2:4] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	5, // 0: exchange.margin.v1.OrderCheck.order_side:type_name -> exchange.order.v1.Side
+	0, // 1: exchange.margin.v1.CheckOrderRequest.order:type_name -> exchange.margin.v1.OrderCheck
+	0, // 2: exchange.margin.v1.ReserveOrderRequest.order:type_name -> exchange.margin.v1.OrderCheck
+	1, // 3: exchange.margin.v1.MarginService.CheckOrder:input_type -> exchange.margin.v1.CheckOrderRequest
+	3, // 4: exchange.margin.v1.MarginService.ReserveOrder:input_type -> exchange.margin.v1.ReserveOrderRequest
+	2, // 5: exchange.margin.v1.MarginService.CheckOrder:output_type -> exchange.margin.v1.CheckOrderResponse
+	4, // 6: exchange.margin.v1.MarginService.ReserveOrder:output_type -> exchange.margin.v1.ReserveOrderResponse
+	5, // [5:7] is the sub-list for method output_type
+	3, // [3:5] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_exchange_margin_v1_margin_proto_init() }

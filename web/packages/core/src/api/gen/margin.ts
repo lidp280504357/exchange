@@ -75,9 +75,14 @@ export interface paths {
         /**
          * Move an asset between the spot account and a margin account
          * @description IN moves from SPOT into the margin account (an isolated account is
-         *     opened by its first transfer and takes only its pair's two assets);
-         *     OUT moves back what is free of debt, and only while the margin level
-         *     stays at or above the warning level (MARGIN_LEVEL_TOO_LOW).
+         *     opened by its first transfer and takes only its pair's two assets;
+         *     MARGIN_DISABLED while the switch is off). OUT moves back what is free
+         *     of open orders and of the asset's own debt
+         *     (LEDGER_INSUFFICIENT_BALANCE, details max_transferable), and while
+         *     the account owes anything only what keeps the margin level at or
+         *     above the warning level (MARGIN_LEVEL_TOO_LOW, details
+         *     max_transferable; MARGIN_PRICE_UNAVAILABLE without prices). A frozen
+         *     or liquidating account moves nothing (MARGIN_FROZEN).
          */
         post: operations["marginTransfer"];
         delete?: never;
@@ -98,9 +103,13 @@ export interface paths {
         /**
          * Borrow an asset into a margin account
          * @description The amount must be borrowable (MARGIN_ASSET_NOT_BORROWABLE), within
-         *     what the account may borrow (MARGIN_LIMIT), what the pool has left
-         *     (MARGIN_POOL_EMPTY) and the user's cap, and the account must not be
-         *     frozen (MARGIN_FROZEN). The first hour's interest is charged at once.
+         *     what the account may borrow at its leverage and the user's cap
+         *     (MARGIN_LIMIT), what the pool has left (MARGIN_POOL_EMPTY), and leave
+         *     the margin level at or above the warning level
+         *     (MARGIN_LEVEL_TOO_LOW); the account must have been opened by a
+         *     transfer in and not be frozen (MARGIN_FROZEN), and every asset of it
+         *     priced (MARGIN_PRICE_UNAVAILABLE). MARGIN_DISABLED while the switch
+         *     is off. The first hour's interest is charged at once.
          */
         post: operations["marginBorrow"];
         delete?: never;
@@ -120,7 +129,12 @@ export interface paths {
         put?: never;
         /**
          * Repay a debt from the margin account's free balance
-         * @description Interest first, then principal. ALL repays the whole debt of the asset, as far as the free balance goes.
+         * @description Interest first, then principal. ALL repays the whole debt of the
+         *     asset, as far as the free balance goes. Open while the switch is off
+         *     and while an operator froze the account; a liquidation in progress
+         *     refuses it (MARGIN_FROZEN). More than the debt fails with
+         *     MARGIN_REPAY_EXCEEDS_DEBT, more than the free balance with
+         *     LEDGER_INSUFFICIENT_BALANCE.
          */
         post: operations["marginRepay"];
         delete?: never;
@@ -223,6 +237,8 @@ export interface components {
             pool_cap: components["schemas"]["Decimal"];
             /** @description pool_cap less what is lent out. */
             pool_available: components["schemas"]["Decimal"];
+            /** @description What is lent out over pool_cap, from 0 to 1; the FLOATING model's rate follows it. */
+            utilization: components["schemas"]["Decimal"];
             /** @description What one user may owe of the asset at most. */
             user_cap: components["schemas"]["Decimal"];
             /** @enum {string} */
@@ -234,6 +250,18 @@ export interface components {
              * @description The hour hourly_rate applies to (FLOATING sets it on the hour from the pool's use).
              */
             rate_hour: string;
+            floating: components["schemas"]["FloatingRate"];
+        };
+        /**
+         * @description The FLOATING model's hourly rate by the pool's utilization u: from
+         *     base_rate at u = 0 linearly to kink_rate at u = kink, then linearly
+         *     to max_rate at u = 1 (design §4.1).
+         */
+        FloatingRate: {
+            base_rate: components["schemas"]["Decimal"];
+            kink: components["schemas"]["Decimal"];
+            kink_rate: components["schemas"]["Decimal"];
+            max_rate: components["schemas"]["Decimal"];
         };
         MarginTerms: {
             leverage: number;

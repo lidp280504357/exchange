@@ -19,6 +19,7 @@ type Upstreams struct {
 	Market       http.Handler
 	Wallet       http.Handler
 	Derivatives  http.Handler
+	Margin       http.Handler
 	// DevInbox is notification-service's mock-provider inbox; nil in
 	// production, where it is never routed.
 	DevInbox http.Handler
@@ -155,6 +156,16 @@ func Mount(r chi.Router, g Guards, up Upstreams) {
 			r.With(g.signedIn(true, RuleUser, RuleOrder)...).Handle("/v1/derivatives/conditional-orders", up.Derivatives)
 			r.With(g.signedIn(true, RuleUser, RuleOrder)...).Handle("/v1/derivatives/conditional-orders/*", up.Derivatives)
 			private.Handle("/v1/derivatives/*", up.Derivatives)
+		}
+		if up.Margin != nil {
+			// The margin terms are public (margin design 2026-10-06 §5.2);
+			// moving, borrowing and repaying count like transfers.
+			r.Get("/v1/margin/assets", up.Margin.ServeHTTP)
+			r.Get("/v1/margin/pairs", up.Margin.ServeHTTP)
+			for _, p := range []string{"/v1/margin/transfer", "/v1/margin/borrow", "/v1/margin/repay"} {
+				r.With(g.signedIn(true, RuleUser, RuleTransfer)...).Post(p, up.Margin.ServeHTTP)
+			}
+			private.Handle("/v1/margin/*", up.Margin)
 		}
 		if up.DevInbox != nil {
 			r.Handle("/v1/dev/*", up.DevInbox)

@@ -1,0 +1,27 @@
+{
+  "cross": {"leverage": 3, "warn_level": "1.30", "liquidation_level": "1.10"},
+  "liquidation_fee_rate": "0.02",
+  "floating": {"base_rate": "0.000005", "kink": "0.8", "kink_rate": "0.00003", "max_rate": "0.0001"},
+  "assets": [
+    {"asset": "USDT", "haircut": "1", "pool_cap": "2000000", "user_cap": "200000", "interest_model": "FIXED", "hourly_rate": "0.00001"},
+    {"asset": "BTC", "haircut": "0.95", "pool_cap": "20", "user_cap": "2", "interest_model": "FIXED", "hourly_rate": "0.000005"},
+    {"asset": "ETH", "haircut": "0.95", "pool_cap": "400", "user_cap": "40", "interest_model": "FIXED", "hourly_rate": "0.000005"},
+    {"asset": "BNB", "haircut": "0.9", "pool_cap": "640", "user_cap": "64", "interest_model": "FIXED", "hourly_rate": "0.000015"},
+    {"asset": "SOL", "haircut": "0.9", "pool_cap": "4200", "user_cap": "420", "interest_model": "FIXED", "hourly_rate": "0.000015"},
+    {"asset": "XRP", "haircut": "0.9", "pool_cap": "340000", "user_cap": "34000", "interest_model": "FIXED", "hourly_rate": "0.000015"},
+    {"asset": "DOGE", "haircut": "0.9", "pool_cap": "5300000", "user_cap": "530000", "interest_model": "FIXED", "hourly_rate": "0.000015"},
+    {"asset": "ADA", "haircut": "0.9", "pool_cap": "1900000", "user_cap": "190000", "interest_model": "FIXED", "hourly_rate": "0.000015"},
+    {"asset": "ASTRA", "haircut": "0.7", "pool_cap": "100000", "user_cap": "10000", "interest_model": "FIXED", "hourly_rate": "0.00003"}
+  ],
+  "pairs": [
+    {"symbol": "BTC-USDT", "isolated_leverage": 10},
+    {"symbol": "ETH-USDT", "isolated_leverage": 10},
+    {"symbol": "BNB-USDT", "isolated_leverage": 5},
+    {"symbol": "SOL-USDT", "isolated_leverage": 5},
+    {"symbol": "XRP-USDT", "isolated_leverage": 5},
+    {"symbol": "DOGE-USDT", "isolated_leverage": 5},
+    {"symbol": "ADA-USDT", "isolated_leverage": 5},
+    {"symbol": "ASTRA-USDT", "isolated_leverage": 3},
+    {"symbol": "ETH-BTC", "isolated_leverage": 3}
+  ]
+}
