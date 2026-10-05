@@ -96,8 +96,12 @@ async function pressRow(selector, opened) {
       return;
     } catch (e) {
       if (e?.name !== "TimeoutError") throw e;
-      // Pressed again behind an open dialog, the press would close it.
-      if (await page.$("[role=dialog]")) throw new Error(`${row} on ${at()} opened a dialog, not what it should`);
+      if (await page.$("[role=dialog]")) {
+        // What it opens came just late (openRow's drawer), or another
+        // dialog did: pressed again behind it, the press would close it.
+        if (await opened(500).then(() => true, () => false)) return;
+        throw new Error(`${row} on ${at()} opened a dialog, not what it should`);
+      }
       if (i >= 4) throw new Error(`${row} on ${at()} opened nothing after 4 presses (up to 60 s)`);
     }
   }
