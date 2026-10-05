@@ -192,15 +192,28 @@ export async function start({ app, api, name, device, apiPrefix = "/v1/" }) {
 }
 
 /**
- * menuOnTop scrolls the PC site's page halfway down (a table's header then
- * sticks under the top bar), hovers the top bar's menu named label and
- * waits until the menu's first item is the element at that item's centre:
- * the top bar's layer is above the page's sticky ones (review B61). It
- * names what covers the item when it is not, and leaves the page at its top.
+ * menuOnTop scrolls the PC site's page halfway down, requires the table's
+ * header to be stuck right under the top bar (else there is nothing to
+ * cover the menu and the check would prove nothing: a short page, review
+ * BP), hovers the top bar's menu named label and waits until the menu's
+ * first item is the element at that item's centre: the top bar's layer is
+ * above the page's sticky ones (review B61). It names what covers the item
+ * when it is not, and leaves the page at its top. Use it on a long table
+ * (the markets).
  */
 export async function menuOnTop(page, label) {
   await page.waitForSelector("main table tbody tr", { timeout: 20000 });
-  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight / 2));
+  const gap = await page.evaluate(async () => {
+    window.scrollTo(0, document.documentElement.scrollHeight / 2);
+    await new Promise((r) => setTimeout(r, 300));
+    const cell = document.querySelector("main table thead th");
+    const bar = document.querySelector("header");
+    return cell && bar ? Math.round(cell.getBoundingClientRect().top - bar.getBoundingClientRect().bottom) : null;
+  });
+  if (gap === null || Math.abs(gap) > 2) {
+    await page.evaluate(() => window.scrollTo(0, 0));
+    throw new Error(`the table's header is not stuck under the top bar (${gap}px off), so nothing would cover the ${label} menu`);
+  }
   const trigger = (
     await page.evaluateHandle((l) => [...document.querySelectorAll("header nav .group > a")].find((a) => a.textContent.trim() === l) ?? null, label)
   ).asElement();

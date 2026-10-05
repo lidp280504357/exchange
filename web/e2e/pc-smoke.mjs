@@ -62,8 +62,6 @@ try {
   });
   if (switchLines !== 1) throw new Error(`the hide-small switch label takes ${switchLines} lines`);
   ok("the hide-small switch label stays on one line");
-  await menuOnTop(page, "资产");
-  ok("the 资产 menu opens over the assets table's stuck header");
 
   // 2. Sign out from the account menu, sign back in with the password.
   await go("/");
@@ -96,8 +94,11 @@ try {
   });
   if (scrolled.innerScroll || Math.abs(scrolled.gap) > 1) throw new Error(`the market table scrolls in a box (${scrolled.innerScroll}) or its header is ${scrolled.gap}px off the top bar`);
   ok("the market table scrolls with the page, its header stuck under the top bar");
+  // The top bar's menus open over the table's stuck header (the assets
+  // page of a new account is too short for its header to stick).
   await menuOnTop(page, "合约");
-  ok("the 合约 menu opens over the market table's stuck header");
+  await menuOnTop(page, "资产");
+  ok("the 合约 and 资产 menus open over the market table's stuck header");
   await typeInto('input[placeholder="搜索币种名称或代码"]', "ETH");
   await page.waitForFunction(
     () => {

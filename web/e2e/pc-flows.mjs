@@ -217,10 +217,10 @@ await f.step("1", "every link of the top bar (menus included) and the footer ope
   await A.page.mouse.move(0, 600);
 });
 
-await f.step("1", "a top-bar menu opened over a table's stuck header shows its first item on top (合约 on the markets, 资产 on the assets)", async () => {
+await f.step("1", "a top-bar menu opened over the markets table's stuck header shows its first item on top (合约, 资产)", async () => {
+  // The markets: a new account's assets page is too short for its header to stick.
   await nav(A, "/markets");
   await menuOnTop(A.page, "合约");
-  await nav(A, "/assets");
   await menuOnTop(A.page, "资产");
 });
 

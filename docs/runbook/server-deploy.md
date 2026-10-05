@@ -28,7 +28,8 @@
    - 做市账户：注册一个 `@example.com` 用户，`exchangectl ledger adjust` 注入 1 BTC 与 100000 USDT，`apps.env` 加 `MARKET_MAKER_USER_ID`、`MARKET_MAKER_USER_IDS` 后重建 spot-trading-service、derivatives-service、market-maker，再转 20000 USDT 到它的合约账户（[market-maker.md](market-maker.md)）。
    - 保险基金：`exchangectl ledger insurance-fund --amount 1000000 --key insurance-seed-1`。
    - 热钱包：用端到端发送方转一些 Sepolia ETH 到 signer 日志里的 `hot_wallet` 地址，`exchangectl wallet fund --tx <hash>` 记到 GAS_SUPPLY。
-   - 币种图标：`bash deploy/instruments/fetch-logos.sh upload /opt/exchange/src/deploy/instruments/logos` 给全部资产装上仓库里的默认图标（88 个，来源见同目录 `SOURCES.md`，不需要外网；`all` 改为从网上重新抓取再上传）。已有图标的资产（后台上传的）跳过，`FORCE=1` 才覆盖；平台币 ASTRA 用 `scripts/ops/astra.sh profile`。
+   - 币种图标：`bash deploy/instruments/fetch-logos.sh upload /opt/exchange/src/deploy/instruments/logos` 给全部资产装上仓库里的默认图标（88 个，来源见同目录 `SOURCES.md`，不需要外网；`all` 改为从网上重新抓取再上传）。已有图标的资产（后台上传的）跳过，`FORCE=1` 才覆盖；平台币 ASTRA 的图标随下一步的资料一起写。
+   - 平台币资料：本机运行 `scripts/ops/astra.sh profile`（经 ssh 调 instrument-service 容器里的 exchangectl），写入 ASTRA 的显示名、中性的中英文简介、官网与默认图标（`deploy/instruments/astra.svg`），之后由运维在后台改。新服务器必须跑这一步：两站币种页显示接口里的简介，上线演练（`launch-drill.sh`）在简介含「学习项目」「模拟」时失败。
 8. 验证：`https://astras.vip/v1/time`、全部容器 healthy、`task test:integration`、`task e2e`。
 
 ## 日常更新
