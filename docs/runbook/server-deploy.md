@@ -123,7 +123,7 @@ ssh exchange 'sudo docker exec exchange-infra-api-gateway-1 wget -qO- http://127
 
 以下调优是在旧测试服（t2.medium，2 vCPU / 3.8 GiB 突发型）上做的；2026-09-30 起的 c5a.xlarge（4 vCPU / 7.8 GiB）沿用了这些设置，可以按需放宽（例如 ClickHouse 的内存上限）。评估与数据见 [阶段 1 验收报告](../阶段1验收报告.md) §6：
 
-- ClickHouse：`deploy/compose/clickhouse/config.d/small-server.xml` 去掉诊断用的系统日志表（trace_log、metric_log 等，保留 query_log、part_log），服务日志 warning 级、100 MB × 3，内存上限为物理内存 30%。改了这个文件，部署时 compose 会重建 ClickHouse 容器（约半分钟，analytics-consumer 自动重试）。
+- ClickHouse：`deploy/compose/clickhouse/config.d/small-server.xml` 去掉诊断用的系统日志表（trace_log、metric_log 等，保留 query_log、part_log），服务日志 warning 级、100 MB × 3，内存上限为物理内存 30%（7.8 GiB 上约 2.3 GiB）。内存追踪器会随运行时间往上漂（2026-10-05 运行 2.5 天后记着 1.9 GiB，jemalloc 实际只分配了 0.3 GiB），接近上限时读模型的写入与后台报表都报 memory limit exceeded，所以打开了 memory worker，按 jemalloc 的常驻内存校正它（`memory_worker_correct_memory_tracker`；不用 cgroup 的数字，那个含页缓存）。改了这个文件，部署只把新文件同步到 `infra/`，容器里单文件挂载的仍是旧文件，要在运维锁下重启 ClickHouse 才生效：`cd /opt/exchange/infra && sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml restart clickhouse`（约半分钟，analytics-consumer 自动重试），再查 `system.server_settings` 里 `memory_worker_correct_memory_tracker` 是 1。
 - Redpanda：`topics.sh` 把 `segment_fallocation_step` 设为 4 MiB（默认 32 MiB，每个分区的活动段都会预分配）。内存上限 `--memory 2G`（2026-10-02 加）：不设时 Seastar 用多少占多少、不还给系统，当天涨到 3.4–4.3 GB，交换区写满，构建时整机几分钟无响应；2 GB 足够 93 个分区（`topic_memory_per_partition` 4 MiB 下最多 512 个）。改这个命令行时 compose 会重建 redpanda 容器（Kafka 中断十几秒，应用服务自动重连，outbox 随后补发）。
 - 构建缓存：每次部署前后各删一次 6 小时内没用过的（`docker builder prune -a --filter until=6h`）。
   - Docker 29 上原来的 `--keep-storage 3gb` 什么也不删：不带 `-a` 只删悬空记录，`--keep-storage`/`--max-used-space` 又不计入共享的部分。

@@ -13,6 +13,14 @@
         <count>3</count>
     </logger>
     <max_server_memory_usage_to_ram_ratio>0.3</max_server_memory_usage_to_ram_ratio>
+    <!-- The total memory tracker drifts up with uptime: on 2026-10-05,
+         after 2.5 days, it counted 1.9 GiB against 0.3 GiB allocated, and
+         near the cap above (2.3 GiB on the 7.8 GiB server) inserts of the
+         read models and the console's reports failed with "memory limit
+         exceeded". The memory worker resets it to what jemalloc holds (the
+         cgroup's figure counts the page cache too). Read at start. -->
+    <memory_worker_correct_memory_tracker>1</memory_worker_correct_memory_tracker>
+    <memory_worker_use_cgroup>0</memory_worker_use_cgroup>
 
     <trace_log remove="1"/>
     <text_log remove="1"/>
