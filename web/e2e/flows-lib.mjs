@@ -197,17 +197,30 @@ export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
         }
       }
     });
-    page.on("request", (r) => {
-      if (typeof r.id !== "string" && !tab.errors.some((e) => e.startsWith("flows-lib:"))) {
+    // An id that is not a string, or the first five requests to finish all
+    // without a loader recorded under their id (an id that changed its
+    // meaning), make the step fail instead of the cleanup going quiet.
+    const misread = () => {
+      if (!tab.errors.some((e) => e.startsWith("flows-lib:"))) {
         tab.errors.push("flows-lib: puppeteer's HTTPRequest.id is no longer the CDP request id that settled() keys the loaders on");
       }
+    };
+    let unmatched = 0;
+    let matched = false;
+    page.on("request", (r) => {
+      if (typeof r.id !== "string") misread();
       for (const hop of r.redirectChain()) inflight.delete(hop);
       if (r.isNavigationRequest() && r.frame() === page.mainFrame()) inflight.clear();
       if (r.resourceType() !== "eventsource" && r.resourceType() !== "websocket") inflight.add(r);
     });
     page.on("requestfinished", (r) => {
       inflight.delete(r);
-      loaders.delete(r.id);
+      if (!matched && !r.isNavigationRequest()) {
+        if (loaders.has(r.id)) matched = true;
+        else if (++unmatched >= 5) misread();
+      }
+      // A redirect's hops share one CDP request id: its loader stays for the next one.
+      if (![301, 302, 303, 307, 308].includes(r.response()?.status() ?? 0)) loaders.delete(r.id);
     });
     page.on("requestfailed", (r) => {
       inflight.delete(r);

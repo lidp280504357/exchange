@@ -791,7 +791,8 @@ expect 200 - "the user's orders up to a second before it"
 check ".items | map(.order_id) | index(\"$ORDER\") == null" "do not"
 as AUDITOR GET "/admin/v1/orders?accounts=bots&limit=1" ""
 expect 200 - "the bots' newest order"
-UNTIL=$(at_shift "$(jq -r '.items[0].created_at // ""' <<<"$BODY")" -600) || fail "no bot order to page the bots' orders by"
+NEWEST_BOT_AT=$(jq -r '.items[0].created_at // ""' <<<"$BODY")
+UNTIL=$(at_shift "$NEWEST_BOT_AT" -600) || fail "no time ten minutes before the bots' newest order ('$NEWEST_BOT_AT')"
 as AUDITOR GET "/admin/v1/orders?accounts=bots&to=$UNTIL&limit=6" ""
 expect 200 - "the bots' six newest orders up to ten minutes before their newest"
 SIX=$(jq -c '[.items[].order_id]' <<<"$BODY")

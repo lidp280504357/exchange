@@ -69,21 +69,25 @@ await page.setRequestInterception(true);
 page.on("request", hold);
 
 /**
- * openRow clicks a row (one rows() has seen: a real one, not the loading
- * table's skeleton) and waits for the drawer it opens; while none shows
+ * openRow clicks the first of the rows a selector of table rows finds that
+ * is a real one (data-row-id, as rows() counts: a loading table's skeleton
+ * rows have none) and waits for the drawer it opens; while none shows
  * within 5 s it presses again, four times at most. The second press is
  * insurance: the one miss seen (the custody callbacks) was a skeleton row
- * pressed, the lists do not poll (review BS).
+ * pressed. The lists only ask every 15 s whether there is anything newer
+ * (useNewer) and never replace their rows unless 有新数据 is clicked
+ * (reviews BS, BT).
  */
 async function openRow(selector) {
+  const row = `${selector}[data-row-id]`;
   for (let i = 1; ; i++) {
-    await t.clickLive(selector);
+    await t.clickLive(row);
     try {
       await page.waitForSelector("[role=dialog]", { timeout: 5000 });
       return;
     } catch (e) {
       if (e?.name !== "TimeoutError") throw e;
-      if (i >= 4) throw new Error(`a row of ${selector} opened no drawer after 4 presses (20 s)`);
+      if (i >= 4) throw new Error(`a row of ${row} opened no drawer after 4 presses (20 s)`);
     }
   }
 }
