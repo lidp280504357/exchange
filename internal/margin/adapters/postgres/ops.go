@@ -183,7 +183,7 @@ func (r repays) Pending(ctx context.Context, cutoff time.Time, limit int) ([]por
 type interest repos
 
 const chargeColumns = `interest_id, user_id, account_type, symbol, asset, hour, principal, interest_model, hourly_rate, interest,
-	borrow_id, status, created_at, done_at`
+	borrow_id, status, created_at, done_at, journal_key`
 
 func scanCharge(row pgx.Row) (ports.Charge, error) {
 	var c ports.Charge
@@ -191,7 +191,7 @@ func scanCharge(row pgx.Row) (ports.Charge, error) {
 	var borrow *string
 	var done *time.Time
 	if err := row.Scan(&c.ID, &c.UserID, &accountType, &symbol, &c.Asset, &c.Hour, &c.Principal, &c.Model, &c.Rate, &c.Interest,
-		&borrow, &c.Status, &c.CreatedAt, &done); err != nil {
+		&borrow, &c.Status, &c.CreatedAt, &done, &c.JournalKey); err != nil {
 		return ports.Charge{}, err
 	}
 	c.Account, c.BorrowID, c.DoneAt, c.Hour = account(accountType, symbol), stringOf(borrow), timeOf(done), c.Hour.UTC()
@@ -200,9 +200,9 @@ func scanCharge(row pgx.Row) (ports.Charge, error) {
 
 func (r interest) Insert(ctx context.Context, c ports.Charge) (bool, error) {
 	tag, err := r.q.Exec(ctx, `INSERT INTO interest_charges (`+chargeColumns+`)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) ON CONFLICT DO NOTHING`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) ON CONFLICT DO NOTHING`,
 		c.ID, c.UserID, c.Account.Type, c.Account.Symbol, c.Asset, c.Hour, c.Principal, c.Model, c.Rate, c.Interest,
-		nullUUID(c.BorrowID), c.Status, c.CreatedAt, nullTime(c.DoneAt))
+		nullUUID(c.BorrowID), c.Status, c.CreatedAt, nullTime(c.DoneAt), c.JournalKey)
 	if err != nil {
 		return false, fmt.Errorf("insert interest charge: %w", err)
 	}
@@ -230,8 +230,8 @@ func (r interest) GetForUpdate(ctx context.Context, id string) (ports.Charge, er
 }
 
 func (r interest) Finish(ctx context.Context, c ports.Charge) error {
-	tag, err := r.q.Exec(ctx, `UPDATE interest_charges SET status = $2, done_at = $3 WHERE interest_id = $1 AND status = 'PENDING'`,
-		c.ID, c.Status, nullTime(c.DoneAt))
+	tag, err := r.q.Exec(ctx, `UPDATE interest_charges SET status = $2, done_at = $3, journal_key = $4
+		WHERE interest_id = $1 AND status = 'PENDING'`, c.ID, c.Status, nullTime(c.DoneAt), c.JournalKey)
 	if err != nil {
 		return fmt.Errorf("finish interest charge: %w", err)
 	}
@@ -261,6 +261,11 @@ func (r interest) query(ctx context.Context, sql string, args ...any) ([]ports.C
 func (r interest) Pending(ctx context.Context, cutoff time.Time, limit int) ([]ports.Charge, error) {
 	return r.query(ctx, `SELECT `+chargeColumns+` FROM interest_charges WHERE status = 'PENDING' AND created_at < $1
 		ORDER BY created_at LIMIT $2`, cutoff, limit)
+}
+
+func (r interest) OfAccount(ctx context.Context, userID string, a domain.Account, limit int) ([]ports.Charge, error) {
+	return r.query(ctx, `SELECT `+chargeColumns+` FROM interest_charges WHERE user_id = $1 AND account_type = $2 AND symbol = $3
+		ORDER BY created_at DESC, interest_id DESC LIMIT $4`, userID, a.Type, a.Symbol, limit)
 }
 
 func (r interest) PendingOf(ctx context.Context, userID string) ([]ports.Charge, error) {

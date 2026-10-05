@@ -66,6 +66,25 @@ type TermsRepo interface {
 	CrossWithSource(ctx context.Context) (domain.Terms, string, bool, error)
 	AssetWithSource(ctx context.Context, asset string) (domain.AssetTerms, string, bool, error)
 	PairWithSource(ctx context.Context, symbol string) (domain.Pair, string, bool, error)
+	// AssetMetas, PairMetas and CrossMeta return the terms' versions and
+	// who last changed them.
+	AssetMetas(ctx context.Context) (map[string]Meta, error)
+	PairMetas(ctx context.Context) (map[string]Meta, error)
+	CrossMeta(ctx context.Context) (Meta, bool, error)
+	// SaveAssetIf, SavePairIf and SaveCrossIf store terms only over the
+	// version read (version 0: only where there are none yet); ok is
+	// false when the version moved.
+	SaveAssetIf(ctx context.Context, t domain.AssetTerms, by string, version int64) (bool, error)
+	SavePairIf(ctx context.Context, p domain.Pair, by string, version int64) (bool, error)
+	SaveCrossIf(ctx context.Context, t domain.Terms, by string, version int64) (bool, error)
+}
+
+// Meta is a row of terms' version and who last changed it: an
+// administrator, or SourceFile for the seed.
+type Meta struct {
+	Version   int64
+	UpdatedBy string
+	UpdatedAt time.Time
 }
 
 // PoolRepo stores what each pool has lent.
@@ -107,8 +126,19 @@ type Account struct {
 	Status       domain.Status
 	WarnedAt     time.Time
 	FrozenReason string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// FrozenBy is the administrator who froze it, FrozenAt when.
+	FrozenBy  string
+	FrozenAt  time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// AccountFilter narrows a list of accounts; empty fields match all.
+type AccountFilter struct {
+	UserID string
+	Type   domain.AccountType
+	Symbol string
+	Status domain.Status
 }
 
 // AccountRepo stores users' margin accounts.
@@ -123,6 +153,11 @@ type AccountRepo interface {
 	// WithDebt returns the accounts that owe anything, or that are not
 	// NORMAL (warned, liquidating or frozen).
 	WithDebt(ctx context.Context) ([]Account, error)
+	// List returns at most limit accounts the filter matches, oldest
+	// first.
+	List(ctx context.Context, f AccountFilter, limit int) ([]Account, error)
+	// IsolatedCounts returns how many isolated accounts each pair has.
+	IsolatedCounts(ctx context.Context) (map[string]int, error)
 }
 
 // Loan is what an account owes of an asset.
@@ -132,7 +167,17 @@ type Loan struct {
 	Asset     string
 	Principal decimal.Decimal
 	Interest  decimal.Decimal
+	// OpenedAt is when it last went from owing nothing to owing.
+	OpenedAt  time.Time
 	UpdatedAt time.Time
+}
+
+// LoanTotal is what users owe of an asset.
+type LoanTotal struct {
+	Principal decimal.Decimal
+	Interest  decimal.Decimal
+	// Borrowers counts the accounts that owe it.
+	Borrowers int
 }
 
 // LoanRepo stores the loans.
@@ -148,7 +193,39 @@ type LoanRepo interface {
 	// Open returns every loan with anything owed, of one asset when asset
 	// is set.
 	Open(ctx context.Context, asset string) ([]Loan, error)
+	// Totals returns what users owe of each asset.
+	Totals(ctx context.Context) (map[string]LoanTotal, error)
+	// Changes returns an account's latest borrows, repayments and
+	// interest charges, newest first.
+	Changes(ctx context.Context, userID string, a domain.Account, limit int) ([]LoanChange, error)
 }
+
+// LoanChange is a borrow, a repayment or an interest charge of an account
+// (the view loan_changes).
+type LoanChange struct {
+	ID            string
+	Asset         string
+	Kind          string
+	Status        Op
+	Amount        decimal.Decimal
+	PrincipalPart decimal.Decimal
+	InterestPart  decimal.Decimal
+	// Reason is USER, AUTO_BORROW, AUTO_REPAY or LIQUIDATION; "" for a
+	// charge.
+	Reason        string
+	OrderID       string
+	LiquidationID string
+	// JournalKey is the ledger journal's idempotency key.
+	JournalKey string
+	CreatedAt  time.Time
+}
+
+// Kinds of a loan change.
+const (
+	ChangeBorrow   = "BORROW"
+	ChangeRepay    = "REPAY"
+	ChangeInterest = "INTEREST"
+)
 
 // Op is a borrow, repayment or transfer's progress.
 type Op string
@@ -242,10 +319,12 @@ type Charge struct {
 	Rate      decimal.Decimal
 	Interest  decimal.Decimal
 	// BorrowID is set on a borrow's first hour.
-	BorrowID  string
-	Status    Op
-	CreatedAt time.Time
-	DoneAt    time.Time
+	BorrowID string
+	Status   Op
+	// JournalKey is the ledger journal that booked an hourly charge.
+	JournalKey string
+	CreatedAt  time.Time
+	DoneAt     time.Time
 }
 
 // LoanSince is what changed a loan's principal after an instant.
@@ -284,6 +363,9 @@ type InterestRepo interface {
 	// optionally of one account and asset; before is the previous page's
 	// last interest ID.
 	OfUser(ctx context.Context, userID string, a *domain.Account, asset, before string, limit int) ([]Charge, error)
+	// OfAccount returns an account's latest charges, PENDING ones too,
+	// newest first.
+	OfAccount(ctx context.Context, userID string, a domain.Account, limit int) ([]Charge, error)
 	// Run returns the state of an hour's run; ok is false before it
 	// started. StartRun records it RUNNING unless it exists.
 	Run(ctx context.Context, hour time.Time) (status string, ok bool, err error)

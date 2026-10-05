@@ -270,7 +270,7 @@ func (s *Service) bookCharges(ctx context.Context, asset string, hour time.Time,
 			if cur.Status != ports.OpPending {
 				continue
 			}
-			cur.Status, cur.DoneAt = ports.OpDone, s.Now()
+			cur.Status, cur.DoneAt, cur.JournalKey = ports.OpDone, s.Now(), "margin-interest:"+key
 			if err := r.Interest().Finish(ctx, cur); err != nil {
 				return err
 			}

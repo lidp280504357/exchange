@@ -94,6 +94,22 @@ margin-service 的结果记在 `margin.reconciliation_runs`，指标 `margin_rec
 
 告警（`deploy/observability/alerts.yml`）：`MarginReconciliationMismatch`（任一检查有差异，critical）、`MarginInterestStalled`（2 小时没有完成的整点，warning：账本不可用，或某资产有借还卡在 `PENDING`——看 `margin.borrows`/`repays` 里 `PENDING` 的行与恢复循环的日志）。
 
+## 后台内部接口（C5）
+
+admin-service 经 margin-service 的 HTTP 端口调 `/internal/margin/*`（协调会话 2026-10-06 03:24 决定 ⑤⑥）：只在 compose 网络里，网关不转发 `/internal`，经网关来的请求（带 `X-User-Id`）一律 404；不签名，写操作带 `X-Admin-Id`（管理员邮箱，记为 `updated_by` / `frozen_by`）。审批与审计在 admin-service，margin-service 只照发来的内容按读到的版本改，并做自己的校验。字段名用本服务的列名。
+
+| 接口 | 内容 |
+|---|---|
+| `GET /internal/margin/assets` | 各资产条款（`asset_terms` 各列）、`lent`（借款表的未还本金合计）、`pool_available`、`utilization`、本小时 `hourly_rate` 与 `rate_hour`、`interest_owed`、`borrowers`（欠该资产的账户数）、`version`、`updated_by`（种子写的显示为空串）、`updated_at` |
+| `PUT /internal/margin/assets/{asset}` | 全部条款列 + `expected_version`（0 = 新增，资产须在 instrument-service 里）。`haircut` 大于 0 且不超过 1、`user_cap` ≤ `pool_cap`、利率不为负、浮动曲线递增（不管当前用哪个模型）、各值不超过列的小数位；版本变了 409 `MARGIN_PARAMS_CHANGED` |
+| `GET` / `PUT /internal/margin/settings` | 全仓条款 `cross`（`leverage`、`warn_level`、`liquidation_level`、`liquidation_fee`）、`isolated_defaults`（逐仓 3/5/10 倍的建议阈值）、版本；PUT 带 `cross` 与 `expected_version`，倍数只能 3 或 5 |
+| `GET /internal/margin/pairs`、`PUT /internal/margin/pairs/{symbol}` | 各交易对的逐仓条款（`isolated`、倍数、阈值、强平费）、`accounts`（该交易对开过的逐仓账户数）、版本；PUT 倍数只能 3、5、10，`expected_version` 为 0 时新增（交易对须在 instrument-service 里，两种资产都在杠杆资产表里） |
+| `GET /internal/margin/accounts` | `status`、`account`、`symbol`、`user_id`、`limit`（1–500，默认 500）筛选；风险率最低的在前，无负债的排后（按净资产），什么都没有的账户不列；`truncated` 表示还有更多（最多估值 5,000 个账户）。每行：用户、账户、倍数、状态、风险率、阈值、总资产/总负债/净资产、逐仓强平价、`warned_at`、`frozen_by`/`frozen_reason`/`frozen_at`（只有管理员冻结时有值）、`unpriced`（持有或欠着、价格不新鲜或从未有价的资产）、`updated_at` |
+| `GET /internal/margin/accounts/{user_id}/{account}` | `account` 为 `MARGIN_CROSS` 或 `MARGIN_ISOLATED:<交易对>`；上面一行再加 `balances`（每资产可用、冻结、借入、利息、净值，`price_usdt` 为估值所用价格——不新鲜时是最近已知价、从未有价为 null，`asset_usdt`、`liability_usdt`、`haircut`、本小时 `hourly_rate`）、`loans`（含 `opened_at`）、`loan_changes`（视图 `loan_changes` 最近 50 条：借、还、利息，`kind`、`status`、`reason`、`journal_key` 为账本分录的幂等键）、`interest`（最近 50 笔，含 `PENDING`）、`liquidations`（E3 起有内容） |
+| `POST .../freeze`、`POST .../unfreeze` | 冻结：带 `reason`；`NORMAL`/`WARNED` 才能冻结，否则 409 `MARGIN_FROZEN`；冻结后不能借币、划出、下单，还币照常，计息与强平照常。解冻：只解管理员的冻结，否则 409 `MARGIN_NOT_FROZEN`；解冻后为 `NORMAL`（低于预警线时由 E3 的监控重新预警）。冻结时撤销该账户的挂单要等交易服务的内部撤单接口（E3 一并接上） |
+
+`journal_key`：借币 `margin:margin-borrow:<借款ID>:0`、其首小时利息 `margin:margin-borrow:<借款ID>:1`、还币 `margin:margin-repay:<还款ID>:0`、自动还款 `trade-repay:<成交ID>:<buyer|seller>`、整点利息 `margin-interest:<资产>:<整点 unix>[:<n>]`（记账时写进 `interest_charges.journal_key`）。迁移 margin 00004 加了 `accounts.frozen_by`/`frozen_at`、`loans.opened_at`（借款从 0 变为有欠款的时间）、`interest_charges.journal_key` 与视图 `loan_changes`。
+
 ## 测试服设置
 
 - `margin.enabled` 暂不全局打开（协调会话 2026-10-06 03:24 决定 ①）：何时打开由协调会话在本服务 E2 的 gRPC 侧与审查 CK ①–③ 的修复部署后决定。`margin.auto_borrow` 同样。
