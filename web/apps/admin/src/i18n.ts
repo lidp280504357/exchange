@@ -1,32 +1,20 @@
 import { accessEn, accessZh } from "./messages/access";
 import { accountEn, accountZh } from "./messages/account";
-import { attemptsEn, attemptsZh } from "./messages/attempts";
-import { contentEn, contentZh } from "./messages/content";
-import { custodyEn, custodyZh } from "./messages/custody";
 import { en } from "./messages/en";
-import { houseEn, houseZh } from "./messages/house";
-import { changesEn, changesZh, instrumentsEn, instrumentsZh, profileEn, profileZh } from "./messages/instruments";
-import { moneyEn, moneyZh } from "./messages/money";
-import { pagesEn, pagesZh } from "./messages/pages";
-import { reportsEn, reportsZh } from "./messages/reports";
 import { shellEn, shellZh } from "./messages/shell";
-import { simEn, simZh } from "./messages/sim";
-import { platformEn, platformZh } from "./messages/platform";
-import { simTargetEn, simTargetZh } from "./messages/simTarget";
-import { systemEn, systemZh } from "./messages/system";
-import { tradingEn, tradingZh } from "./messages/trading";
-import { unownedEn, unownedZh } from "./messages/unowned";
-import { usersEn, usersZh } from "./messages/users";
-import { walletEn, walletZh } from "./messages/wallet";
 import { zh } from "./messages/zh";
 
 // The console's strings (Chinese first; operators read Chinese), merged
-// over the shared ones; `errors` adds the console's error codes. The
-// strings of newer pages live in their own files and merge in here.
+// over the shared ones; `errors` adds the console's error codes. Here are
+// what the sign-in, the setup page and the shell's own parts say; the
+// pages' strings are in pageMessages.ts, registered by the signed-in
+// console when its chunk loads (A40: the sign-in page does not download
+// every page's text).
 
 type Tree = Record<string, unknown>;
 
-function merge(base: Tree, ...extras: Tree[]): Tree {
+/** merge deep-merges trees of strings, the later winning. */
+export function merge(base: Tree, ...extras: Tree[]): Tree {
   const out: Tree = { ...base };
   for (const extra of extras) {
     for (const [k, v] of Object.entries(extra)) {
@@ -39,13 +27,8 @@ function merge(base: Tree, ...extras: Tree[]): Tree {
 
 const isTree = (v: unknown): v is Tree => typeof v === "object" && v !== null && !Array.isArray(v);
 
-export const adminMessages = {
-  "zh-CN": merge(
-    zh, usersZh, walletZh, moneyZh, tradingZh, instrumentsZh, systemZh, changesZh, contentZh, reportsZh, profileZh, simZh, attemptsZh, accountZh,
-    unownedZh, custodyZh, houseZh, simTargetZh, platformZh, pagesZh, accessZh, shellZh,
-  ),
-  en: merge(
-    en, usersEn, walletEn, moneyEn, tradingEn, instrumentsEn, systemEn, changesEn, contentEn, reportsEn, profileEn, simEn, attemptsEn, accountEn,
-    unownedEn, custodyEn, houseEn, simTargetEn, platformEn, pagesEn, accessEn, shellEn,
-  ),
+/** entryMessages are the strings of the sign-in, the setup page and the shell, given to initI18n. */
+export const entryMessages = {
+  "zh-CN": merge(zh, accountZh, accessZh, shellZh),
+  en: merge(en, accountEn, accessEn, shellEn),
 };

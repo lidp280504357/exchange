@@ -20,15 +20,24 @@ export default defineConfig({
     sourcemap: false,
     rolldownOptions: {
       output: {
-        // A40: the bundler's own split made a page's first visit fetch 8-31
-        // small files (each shared component and icon in a chunk of its own,
-        // per set of pages using it). Now what the entry imports (the
-        // sign-in page included) is one chunk, what two pages or more share
-        // is one more ("kit", fetched with the signed-in shell), and a page
-        // is one file of its own.
+        // A40 (review BJ ⑧): the bundler's own split made a page's first
+        // visit fetch 8-31 small files. Now the libraries the entry imports
+        // are one file ("vendor", unchanged across deploys, preloaded beside
+        // the entry), the entry's own code (the sign-in page included)
+        // another, what two pages or more share a third ("kit", fetched with
+        // the signed-in shell), and a page is one file of its own. The two
+        // entry groups do not pull their dependencies in: the shell's motion
+        // and tables stay out of the sign-in page.
         codeSplitting: {
           groups: [
-            { name: "index", tags: ["$initial"], priority: 2 },
+            {
+              name: "vendor",
+              tags: ["$initial"],
+              test: (id) => id.includes("node_modules") || id.startsWith("\0"),
+              priority: 3,
+              includeDependenciesRecursively: false,
+            },
+            { name: "index", tags: ["$initial"], priority: 2, includeDependenciesRecursively: false },
             { name: "kit", minShareCount: 2, priority: 1 },
           ],
         },
