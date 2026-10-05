@@ -142,6 +142,20 @@ func TestMarginOrdersKeepTheirAccount(t *testing.T) {
 	if refused.RejectStatus != 422 || refused.RejectDetails["max_borrowable"] != "12.5" || refused.RejectDetails["count"] != json.Number("9007199254740993") {
 		t.Fatalf("refusal on record: %d %#v", refused.RejectStatus, refused.RejectDetails)
 	}
+	// A liquidation order names its liquidation; only margin market orders may.
+	liq := order(t, o.UserID, domain.Request{
+		Side: domain.SideSell, Type: domain.TypeMarket, Quantity: d("0.00002"), AccountType: domain.AccountMarginCross,
+		LiquidationID: uuid.Must(uuid.NewV7()).String(),
+	}, time.Now())
+	if err := store.Read().Orders().Insert(ctx, liq); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := store.Read().Orders().Get(ctx, liq.ID); got.LiquidationID != liq.LiquidationID || !got.ProtectionPrice.IsZero() {
+		t.Fatalf("liquidation order: %q %s", got.LiquidationID, got.ProtectionPrice)
+	}
+	if _, err := db.Exec(ctx, `UPDATE orders SET account_type = 'SPOT', side_effect = 'NONE' WHERE id = $1`, liq.ID); err == nil {
+		t.Fatal("a SPOT order named a liquidation")
+	}
 	// An order built without them is stored as a SPOT order without a
 	// side effect; the table refuses a side effect on SPOT.
 	bare := order(t, o.UserID, limitBuy(), time.Now())

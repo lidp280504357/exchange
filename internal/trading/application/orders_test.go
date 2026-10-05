@@ -226,6 +226,11 @@ type noAnchor struct{}
 
 func (noAnchor) Anchor(context.Context, string) (decimal.Decimal, error) { return decimal.Zero, nil }
 
+// fixedAnchor anchors every pair at one price.
+type fixedAnchor struct{ price decimal.Decimal }
+
+func (f fixedAnchor) Anchor(context.Context, string) (decimal.Decimal, error) { return f.price, nil }
+
 func d(s string) decimal.Decimal { return decimal.RequireFromString(s) }
 
 type clock struct{ t time.Time }
@@ -761,5 +766,107 @@ func TestMarginOrdersNeedTheMarginEligibility(t *testing.T) {
 	svc.Features = switches{}
 	if _, err := svc.Place(ctx, marginBuy("m2", domain.AccountMarginCross, domain.SideEffectNone)); !apperr.Is(err, "MARGIN_DISABLED") || len(elig.asked) != 0 {
 		t.Fatalf("switch off: %v, asked %v", err, elig.asked)
+	}
+}
+
+func liquidation(side domain.Side) Liquidation {
+	l := Liquidation{
+		LiquidationID: "0199b0a0-0000-7000-8000-000000000001", UserID: "0199b0a0-0000-7000-8000-0000000000aa",
+		Account: domain.AccountMarginIsolated, Symbol: "BTC-USDT", Side: side,
+	}
+	if side == domain.SideSell {
+		l.Quantity = d("0.00002") // 1.2 USDT at 60000: under the 5 USDT minimum
+	} else {
+		l.QuoteAmount = d("1")
+	}
+	return l
+}
+
+func TestLiquidationsCloseTheAccountWithoutAReservation(t *testing.T) {
+	svc, store, led, _ := newService()
+	ctx := context.Background()
+	margin := &fakeMargin{err: apperr.New(apperr.KindConflict, "MARGIN_FROZEN", "the account is being liquidated")}
+	svc.Margin = margin
+	svc.Prices = fixedAnchor{d("60000")}
+	// No switch, no eligibility: the account is frozen; this is its way out.
+	svc.Features = switches{}
+	svc.Eligibility = fakeEligibility{"USER_FROZEN"}
+	o, err := svc.Liquidate(ctx, liquidation(domain.SideSell))
+	if err != nil || o.FreezeState != domain.FreezeDone || o.Type != domain.TypeMarket || !o.ProtectionPrice.IsZero() || o.LiquidationID == "" {
+		t.Fatalf("liquidation: %+v %v", o, err)
+	}
+	if len(margin.orders) != 0 {
+		t.Fatalf("a liquidation asked margin-service to reserve: %v", margin.orders)
+	}
+	want := domain.Account{UserID: o.UserID, Type: domain.AccountMarginIsolated, Scope: "BTC-USDT"}
+	if len(led.accounts) != 1 || led.accounts[0] != want || led.calls[0] != "order:"+o.ID+" 0.00002 BTC" {
+		t.Fatalf("froze %v on %v", led.calls, led.accounts)
+	}
+	placed := store.events[1].msg.(*orderv1.PlaceOrder).GetOrder()
+	if placed.GetAccountType() != "MARGIN_ISOLATED" || placed.GetProtectionPrice() != "" {
+		t.Fatalf("command: %v", placed)
+	}
+	// The same liquidation of the same pair and side is the same order.
+	again, err := svc.Liquidate(ctx, liquidation(domain.SideSell))
+	if err != nil || again.ID != o.ID || len(led.calls) != 1 {
+		t.Fatalf("repeat: %+v %v, %d freezes", again, err, len(led.calls))
+	}
+	buy, err := svc.Liquidate(ctx, liquidation(domain.SideBuy))
+	if err != nil || buy.ID == o.ID || !buy.QuoteAmount.Equal(d("1")) {
+		t.Fatalf("a buy of the same liquidation: %+v %v", buy, err)
+	}
+	// Only margin accounts, by UUIDs.
+	spot := liquidation(domain.SideSell)
+	spot.Account, spot.LiquidationID = domain.AccountSpot, "0199b0a0-0000-7000-8000-000000000002"
+	if _, err := svc.Liquidate(ctx, spot); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("a SPOT liquidation: %v", err)
+	}
+	bad := liquidation(domain.SideSell)
+	bad.LiquidationID = "liq-1"
+	if _, err := svc.Liquidate(ctx, bad); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("a liquidation ID that is no UUID: %v", err)
+	}
+}
+
+func TestCancelAccountCancelsOnlyThatAccount(t *testing.T) {
+	svc, store, _, _ := newService()
+	ctx := context.Background()
+	svc.Margin = &fakeMargin{}
+	svc.Features = switches{flags.KeyMarginEnabled: true}
+	user := "0199b0a0-0000-7000-8000-0000000000bb"
+	place := func(id string, account domain.AccountType) domain.Order {
+		r := marginBuy(id, account, domain.SideEffectNone)
+		r.UserID = user
+		o, err := svc.Place(ctx, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return o
+	}
+	spot := place("s1", domain.AccountSpot)
+	cross := place("c1", domain.AccountMarginCross)
+	isolated := place("i1", domain.AccountMarginIsolated)
+	if n, err := svc.CancelAccount(ctx, user, domain.AccountMarginCross, ""); err != nil || n != 1 {
+		t.Fatalf("cross: %d %v", n, err)
+	}
+	for _, c := range []struct {
+		o    domain.Order
+		want bool
+	}{{spot, false}, {cross, true}, {isolated, false}} {
+		got, _ := store.Read().Orders().Get(ctx, c.o.ID)
+		if got.CancelRequested != c.want {
+			t.Fatalf("%s %s: cancel requested %v", c.o.ClientOrderID, c.o.AccountType, got.CancelRequested)
+		}
+	}
+	if n, err := svc.CancelAccount(ctx, user, domain.AccountMarginIsolated, "BTC-USDT"); err != nil || n != 1 {
+		t.Fatalf("isolated: %d %v", n, err)
+	}
+	for _, bad := range []struct {
+		account domain.AccountType
+		symbol  string
+	}{{domain.AccountSpot, ""}, {domain.AccountMarginIsolated, ""}, {domain.AccountMarginCross, "BTC-USDT"}} {
+		if _, err := svc.CancelAccount(ctx, user, bad.account, bad.symbol); !apperr.Is(err, apperr.CodeInvalidArgument) {
+			t.Fatalf("%s %q: %v", bad.account, bad.symbol, err)
+		}
 	}
 }

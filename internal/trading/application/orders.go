@@ -4,6 +4,8 @@ package application
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"log/slog"
 	"maps"
@@ -133,6 +135,112 @@ func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, 
 	return s.fund(ctx, o)
 }
 
+// Liquidation is margin-service's order closing a margin account (margin
+// design §4.5, E0 §3.4): a market sell of quantity, or a market buy
+// spending quote amount.
+type Liquidation struct {
+	LiquidationID string
+	UserID        string
+	Account       domain.AccountType
+	Symbol        string
+	Side          domain.Side
+	Quantity      decimal.Decimal
+	QuoteAmount   decimal.Decimal
+	SideEffect    domain.SideEffect
+}
+
+// liquidationClient is a liquidation order's client_order_id: the same
+// liquidation of the same pair and side is the same order.
+func liquidationClient(l Liquidation) string {
+	sum := sha256.Sum256([]byte(l.LiquidationID + "|" + l.Symbol + "|" + string(l.Side)))
+	return "liq_" + hex.EncodeToString(sum[:16])
+}
+
+// Liquidate places margin-service's liquidation order: a market order on
+// the margin account against the book (HOUSE where the pair has its
+// liquidity), past the order limits, the protection price, the minimum
+// notional, margin.enabled and the eligibility (the account is frozen;
+// this is its way out), funded without a reservation. Idempotent by
+// liquidation, pair and side: a repeat returns the order.
+func (s *Service) Liquidate(ctx context.Context, l Liquidation) (domain.Order, error) {
+	if _, err := uuid.Parse(l.LiquidationID); err != nil {
+		return domain.Order{}, apperr.Invalid("liquidation_id must be a UUID")
+	}
+	if _, err := uuid.Parse(l.UserID); err != nil {
+		return domain.Order{}, apperr.Invalid("user_id must be a UUID")
+	}
+	req := domain.Request{
+		UserID: l.UserID, ClientOrderID: liquidationClient(l), Symbol: l.Symbol, Side: l.Side, Type: domain.TypeMarket,
+		Quantity: l.Quantity, QuoteAmount: l.QuoteAmount, AccountType: l.Account, SideEffect: l.SideEffect,
+		LiquidationID: l.LiquidationID,
+	}
+	if prev, err := s.Store.Read().Orders().ByClientID(ctx, req.UserID, req.ClientOrderID); err == nil {
+		return s.repeat(ctx, prev, req)
+	} else if !errors.Is(err, domain.ErrOrderNotFound) {
+		return domain.Order{}, err
+	}
+	pair, err := s.Instruments.Pair(ctx, req.Symbol)
+	if err != nil {
+		return domain.Order{}, err
+	}
+	o, err := domain.NewOrder(uuid.Must(uuid.NewV7()).String(), req, pair, decimal.Zero, s.Now())
+	if err != nil {
+		return domain.Order{}, err
+	}
+	var prev *domain.Order
+	err = s.Store.Tx(ctx, func(r ports.Repos) error {
+		if err := r.Orders().LockUser(ctx, o.UserID); err != nil {
+			return err
+		}
+		if p, err := r.Orders().ByClientID(ctx, o.UserID, o.ClientOrderID); err == nil {
+			prev = &p
+			return nil
+		} else if !errors.Is(err, domain.ErrOrderNotFound) {
+			return err
+		}
+		return r.Orders().Insert(ctx, o)
+	})
+	if err != nil {
+		return domain.Order{}, err
+	}
+	if prev != nil {
+		return s.repeat(ctx, *prev, req)
+	}
+	return s.fund(ctx, o)
+}
+
+// CancelAccount asks the engine to cancel the user's active orders on one
+// account (margin-service, before it liquidates the account): every
+// symbol of the cross account, or the isolated account's pair. It returns
+// how many it asked for.
+func (s *Service) CancelAccount(ctx context.Context, userID string, account domain.AccountType, symbol string) (int, error) {
+	if _, err := uuid.Parse(userID); err != nil {
+		return 0, apperr.Invalid("user_id must be a UUID")
+	}
+	if !account.Margin() || (account == domain.AccountMarginIsolated) != (symbol != "") {
+		return 0, apperr.Invalid("a margin account: MARGIN_CROSS, or MARGIN_ISOLATED with its symbol")
+	}
+	n := 0
+	err := s.Store.Tx(ctx, func(r ports.Repos) error {
+		n = 0
+		active, err := r.Orders().Active(ctx, userID, symbol)
+		if err != nil {
+			return err
+		}
+		for _, o := range active {
+			if o.AccountType != account || o.CancelRequested {
+				continue
+			}
+			if _, err := s.requestCancel(ctx, r, o); err != nil {
+				return err
+			}
+			n++
+		}
+		return nil
+	})
+	return n, err
+}
+
 // repeat answers a request whose client_order_id names an existing order.
 func (s *Service) repeat(_ context.Context, prev domain.Order, req domain.Request) (domain.Order, error) {
 	if !prev.SameAs(req) {
@@ -182,7 +290,7 @@ func (s *Service) marginOpen(userID string, effect domain.SideEffect) error {
 // steps). A refusal rejects the order; when a service cannot be reached
 // the outcome is unknown, so the order stays pending for Recover.
 func (s *Service) fund(ctx context.Context, o domain.Order) (domain.Order, error) {
-	if o.AccountType.Margin() {
+	if o.AccountType.Margin() && o.LiquidationID == "" {
 		if s.Margin == nil {
 			return s.reject(ctx, o, domain.ErrMarginDisabled)
 		}

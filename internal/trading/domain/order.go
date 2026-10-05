@@ -174,6 +174,9 @@ type Order struct {
 	// freeze (AUTO_BORROW), BorrowID that borrow; zero and "" otherwise.
 	Borrowed decimal.Decimal
 	BorrowID string
+	// LiquidationID is set on margin-service's liquidation orders: they
+	// skip the reservation (the account is being liquidated).
+	LiquidationID string
 	// Steps and assets of the pair, handed to the engine.
 	TickSize        decimal.Decimal
 	LotSize         decimal.Decimal
@@ -274,7 +277,7 @@ func (o Order) SameAs(r Request) bool {
 	r = r.Defaults()
 	return o.Symbol == r.Symbol && o.Side == r.Side && o.Type == r.Type && o.TimeInForce == r.TimeInForce &&
 		o.STP == r.STP && o.Price.Equal(r.Price) && o.Quantity.Equal(r.Quantity) && o.QuoteAmount.Equal(r.QuoteAmount) &&
-		o.AccountType == r.AccountType && o.SideEffect == r.SideEffect
+		o.AccountType == r.AccountType && o.SideEffect == r.SideEffect && o.LiquidationID == r.LiquidationID
 }
 
 // Errors of the order checks (appendix C).

@@ -20,8 +20,12 @@ type Handler struct {
 	Svc *application.Service
 }
 
-// Routes mounts the endpoints on r.
+// Routes mounts the endpoints on r: the public ones the gateway forwards
+// with the caller's identity, and margin-service's internal ones (only on
+// the compose network; the gateway forwards /v1 alone).
 func (h *Handler) Routes(r chi.Router) {
+	r.Post("/internal/orders/liquidations", h.liquidate)
+	r.Post("/internal/orders/cancel", h.cancelAccount)
 	r.Group(func(r chi.Router) {
 		r.Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -96,6 +100,63 @@ func (h *Handler) place(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusAccepted, toJSON(o))
+}
+
+type liquidationBody struct {
+	LiquidationID string `json:"liquidation_id"`
+	UserID        string `json:"user_id"`
+	Account       string `json:"account"`
+	Symbol        string `json:"symbol"`
+	Side          string `json:"side"`
+	Quantity      string `json:"quantity"`
+	QuoteAmount   string `json:"quote_amount"`
+	SideEffect    string `json:"side_effect"`
+}
+
+// liquidate places margin-service's liquidation order (E0 §3.4).
+func (h *Handler) liquidate(w http.ResponseWriter, r *http.Request) {
+	var body liquidationBody
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	l := application.Liquidation{
+		LiquidationID: body.LiquidationID, UserID: body.UserID, Account: domain.AccountType(body.Account), Symbol: body.Symbol,
+		Side: domain.Side(body.Side), SideEffect: domain.SideEffect(body.SideEffect),
+	}
+	var err error
+	if l.Quantity, err = optional("quantity", body.Quantity); err == nil {
+		l.QuoteAmount, err = optional("quote_amount", body.QuoteAmount)
+	}
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	o, err := h.Svc.Liquidate(r.Context(), l)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusAccepted, toJSON(o))
+}
+
+// cancelAccount cancels the user's active orders on a margin account.
+func (h *Handler) cancelAccount(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		UserID  string `json:"user_id"`
+		Account string `json:"account"`
+		Symbol  string `json:"symbol"`
+	}
+	if err := httpx.DecodeJSON(w, r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	n, err := h.Svc.CancelAccount(r.Context(), body.UserID, domain.AccountType(body.Account), body.Symbol)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusAccepted, map[string]int{"requested": n})
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {

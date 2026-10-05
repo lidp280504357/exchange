@@ -51,6 +51,10 @@ type Request struct {
 	QuoteAmount   decimal.Decimal
 	AccountType   AccountType
 	SideEffect    SideEffect
+	// LiquidationID marks margin-service's liquidation of a margin account
+	// (margin design §4.5, E0 §3.4): a market order without protection
+	// price or minimum notional.
+	LiquidationID string
 }
 
 // Defaults fills in what a request may leave out: the time in force of
@@ -87,11 +91,19 @@ func NewOrder(id string, req Request, pair Pair, anchor decimal.Decimal, now tim
 	if pair.Status != PairTrading || !pair.Tradable {
 		return Order{}, ErrNotTrading
 	}
+	if req.LiquidationID != "" {
+		// A liquidation closes what the account holds, however little and
+		// at whatever price the market gives (E0 §3.4).
+		if req.Type != TypeMarket || !req.AccountType.Margin() {
+			return Order{}, apperr.Invalid("a liquidation is a market order on a margin account")
+		}
+		pair.MinNotional, anchor = decimal.Zero, decimal.Zero
+	}
 	o := Order{
 		ID: id, UserID: req.UserID, ClientOrderID: req.ClientOrderID, Symbol: pair.Symbol,
 		Side: req.Side, Type: req.Type, TimeInForce: req.TimeInForce, STP: req.STP,
 		Price: req.Price, Quantity: req.Quantity, QuoteAmount: req.QuoteAmount,
-		AccountType: req.AccountType, SideEffect: req.SideEffect,
+		AccountType: req.AccountType, SideEffect: req.SideEffect, LiquidationID: req.LiquidationID,
 		Status: StatusNew, FreezeState: FreezePending,
 		FilledQuantity: decimal.Zero, FilledQuote: decimal.Zero,
 		MakerFeeRate: pair.MakerFeeRate, TakerFeeRate: pair.TakerFeeRate,
