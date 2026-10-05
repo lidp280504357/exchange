@@ -11,9 +11,11 @@
 #     (addresses already given keep working), a reconciliation fails and
 #     wallet_custody_up drops to 0; all recovers when it is back, and the
 #     custodian and the ledger agree again: TUSD's shortfall is what it was
-#     before the drill. (Other runs leave a surplus, the custodian holding
-#     more than the ledger owes, about 1 TUSD per end-to-end run; while a
-#     callback is held back the surplus grows, never a shortfall.)
+#     before the drill. (admin.sh's held fees leave the stand-in holding a
+#     little more than the ledger owes, by design: lib/held-fees.sh has it
+#     report a 999 TUSD fee and take none, and the fee then booked from
+#     GAS_SUPPLY is about 1 TUSD a run. While a callback is held back the
+#     surplus grows too; never a shortfall.)
 # Needs wallet.test_assets on for region AQ. About six minutes; the delay
 # is lifted and both containers are started again whatever happens.
 set -euo pipefail
@@ -50,8 +52,8 @@ AUTH=(-H "Authorization: Bearer $(jq -r .access_token <<<"$BODY")")
 call GET "/v1/wallet/deposit-address?asset=TUSD&network=TRON-TEST" "" "${AUTH[@]}"
 expect 200 - "a TRON-TEST address"
 ADDR=$(jq -r .address <<<"$BODY")
-# Where the custodian and the ledger stand before the drill (B63: the
-# end-to-end runs had left a 14 TUSD surplus, and the drill wanted 0).
+# Where the custodian and the ledger stand before the drill (B63: admin.sh's
+# held fees had left a 14 TUSD surplus, and the drill wanted 0).
 SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 exchangectl wallet reconcile --network UDUNMOCK | head -1
 baseline() {

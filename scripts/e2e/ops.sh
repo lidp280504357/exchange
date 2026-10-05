@@ -99,11 +99,12 @@ read_models() {
   read -r trades trade_events updates order_events <<<"$counts"
   [[ $trades == "$trade_events" && $updates == "$order_events" ]]
 }
+matched=""
 for _ in $(seq 10); do
-  read_models && break
+  read_models && { matched=1; break; }
   sleep 3
 done
-read_models ||
+[[ -n $matched ]] ||
   { echo "FAIL read models: $trades trades for $trade_events trade events, $updates order changes for $order_events order events" >&2; exit 1; }
 echo "ok   $trades trades and $updates order changes, one per event"
 # The wallet read models agree with wallet-service's tables on every
@@ -119,11 +120,12 @@ wallet_statuses() {
   WALLET_STATUSES="deposits $pg_deposits / $ch_deposits, withdrawals $pg_withdrawals / $ch_withdrawals"
   [[ $pg_deposits == "$ch_deposits" && $pg_withdrawals == "$ch_withdrawals" ]]
 }
+matched=""
 for _ in $(seq 10); do
-  wallet_statuses && break
+  wallet_statuses && { matched=1; break; }
   sleep 3
 done
-wallet_statuses || { echo "FAIL wallet read models (PostgreSQL / ClickHouse): $WALLET_STATUSES" >&2; exit 1; }
+[[ -n $matched ]] || { echo "FAIL wallet read models (PostgreSQL / ClickHouse): $WALLET_STATUSES" >&2; exit 1; }
 echo "ok   wallet read models match wallet-service: $WALLET_STATUSES"
 candles=$(ch "SELECT (SELECT sum(trades) FROM candles_1m FINAL WHERE open_time < toStartOfMinute(now()) - INTERVAL 1 MINUTE),
   (SELECT count() FROM trades FINAL WHERE executed_at < toStartOfMinute(now()) - INTERVAL 1 MINUTE)")

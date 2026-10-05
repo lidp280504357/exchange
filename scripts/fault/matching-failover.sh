@@ -3,17 +3,20 @@
 # plan §6.3 task 12, requirements §5.7). A second instance starts as a
 # standby waiting for the engine lease (a PostgreSQL advisory lock). An
 # order rests on the primary; the primary's process is killed (SIGKILL: no
-# graceful release) and a market order arrives while no engine runs.
-# Docker restarts the crashed instance within a second and the standby
-# asks for the lease every second, so either can take it (B63 saw the
-# restarted one win): it rebuilds the books (the users' and HOUSE's
-# reference books, ADR-0015) from the snapshot and the WAL and continues
-# from the committed offsets: the order sent during the crash fills
-# against HOUSE exactly once, the resting order is still there and cancels;
-# the other instance waits. Then the running instance is stopped
-# gracefully and the waiting one takes over (a second handover); the
-# drill ends with the first instance alone, as before. One new user on
-# ETH-BTC (every order trades against HOUSE); about three minutes.
+# graceful release) and a market order arrives while no engine runs. Its
+# restart is held back (restart policy no) until the standby has taken
+# over: Docker brings a killed container back within a second, and the
+# restarted primary took the lease back before the standby's next try,
+# which comes once a second (B63, review BU). The standby takes the lease,
+# rebuilds the books (the users' and HOUSE's reference books, ADR-0015)
+# from the snapshot and the WAL and continues from the committed offsets:
+# the order sent during the crash fills against HOUSE exactly once, while
+# the primary is still down, the resting order is still there and
+# cancels. The primary's restart policy is put back and it starts again,
+# waiting as the standby. At the end the second instance is stopped
+# gracefully and the first takes over again (a second handover), leaving
+# one instance as before. One new user on ETH-BTC (every order trades
+# against HOUSE); about three minutes.
 set -euo pipefail
 # One drill at a time on the server (scripts/ops/lock.sh); task fault holds the lock for all of them.
 [[ -n ${OPS_LOCK_HELD:-} ]] || exec "$(dirname "$0")/../ops/lock.sh" run --owner "fault $(basename "$0")" -- bash "$0" "$@"
@@ -24,8 +27,11 @@ source "$(dirname "$0")/../e2e/lib/common.sh"
 source "$(dirname "$0")/../e2e/lib/remote.sh"
 FIRST=exchange-infra-matching-engine-1
 SECOND=exchange-infra-matching-engine-2
+# The primary's restart policy, put back whatever happens.
+POLICY=""
 cleanup() {
   call DELETE /v1/orders "" "${AUTH[@]}" >/dev/null 2>&1 || true
+  [[ -z $POLICY ]] || remote "sudo docker update --restart=$POLICY $FIRST >/dev/null 2>&1" || true
   remote "sudo docker start $FIRST >/dev/null 2>&1; sudo docker stop -t 15 $SECOND >/dev/null 2>&1; sudo docker rm $SECOND >/dev/null 2>&1" || true
   cleanup_remote
 }
@@ -72,37 +78,26 @@ echo "== the primary crashes; an order arrives while no engine runs"
 server_now() { remote "date -u +%Y-%m-%dT%H:%M:%S.%NZ"; }
 # started_since T C: instance C logged its start after T (the server's clock).
 started_since() { remote "sudo docker logs --since $1 $2 2>&1" | grep -q '"service started"'; }
+down() { [[ $(remote "sudo docker inspect -f '{{.State.Running}}' $FIRST") == false ]]; }
+POLICY=$(remote "sudo docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' $FIRST")
+POLICY=${POLICY:-unless-stopped}
+remote "sudo docker update --restart=no $FIRST >/dev/null"
 pid=$(remote "sudo docker inspect -f '{{.State.Pid}}' $FIRST")
 KILLED=$(server_now)
 remote "sudo kill -9 $pid"
 call POST /v1/orders '{"symbol":"ETH-BTC","side":"BUY","type":"MARKET","quote_amount":"0.0005"}' "${AUTH[@]}"
 expect 202 - "a market buy of 0.0005 BTC is accepted"
 MKT=$(jq -r .order_id <<<"$BODY")
-ACTIVE="" WAITING=""
-took_over() {
-  if started_since "$KILLED" "$SECOND"; then
-    ACTIVE=$SECOND WAITING=$FIRST
-  elif started_since "$KILLED" "$FIRST"; then
-    ACTIVE=$FIRST WAITING=$SECOND
-  else
-    return 1
-  fi
-}
-eventually 120 "an instance takes the lease and starts" took_over
-echo "ok   it is ${ACTIVE#exchange-infra-}"
-restarted() { [[ $(remote "sudo docker inspect -f '{{.State.Running}} {{.RestartCount}}' $FIRST") == "true "[1-9]* ]]; }
-eventually 120 "Docker restarted the crashed instance" restarted
-# The other one waits: the restarted first logs that it waits; the second
-# has waited since it started.
-waits() {
-  [[ $(remote "sudo docker inspect -f '{{.State.Running}}' $WAITING") == true ]] && ! started_since "$KILLED" "$WAITING" &&
-    { [[ $WAITING == "$SECOND" ]] || remote "sudo docker logs --since $KILLED $FIRST 2>&1" | grep -q '"waiting for the engine lease"'; }
-}
-eventually 120 "the other instance waits as the standby" waits
+took_over() { started_since "$KILLED" "$SECOND"; }
+eventually 120 "the standby takes the lease and starts" took_over
+down || { echo "FAIL the crashed primary is running again" >&2; exit 1; }
+echo "ok   the crashed primary stays down (its restart held back)"
 
 echo "== after the takeover"
 eventually 60 "the order sent during the crash is FILLED" status_is "$MKT" FILLED
 Q=$(jq -r .filled_quantity <<<"$BODY")
+down || { echo "FAIL the crashed primary is running again" >&2; exit 1; }
+echo "ok   by the standby: the primary is still down"
 call GET "/v1/orders/$MKT/fills" "" "${AUTH[@]}"
 check "all(.fills[]; .role == \"TAKER\") and (([.fills[].quantity | tonumber] | add) - ($Q | tonumber) | fabs) < 1e-12" "filled once, against HOUSE: its fills add up to its $Q ETH"
 call GET "/v1/orders/$REST" "" "${AUTH[@]}"
@@ -113,23 +108,21 @@ eventually 40 "it is CANCELED" status_is "$REST" CANCELED
 settled() { [[ $(balance BTC | cut -d' ' -f2) == 0 ]]; }
 eventually 40 "nothing is left frozen" settled
 
-echo "== the running instance stops, the waiting one takes over"
+echo "== the crashed instance comes back as the standby"
+BACK=$(server_now)
+remote "sudo docker update --restart=$POLICY $FIRST >/dev/null && sudo docker start $FIRST >/dev/null"
+[[ $(remote "sudo docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' $FIRST") == "$POLICY" ]] ||
+  { echo "FAIL the primary's restart policy is not $POLICY again" >&2; exit 1; }
+first_waits() {
+  remote "sudo docker logs --since $BACK $FIRST 2>&1" | grep -q '"waiting for the engine lease"' && ! started_since "$BACK" "$FIRST"
+}
+eventually 120 "it starts again with its restart policy ($POLICY) and waits for the lease" first_waits
+
+echo "== the second instance stops, the first takes over again"
 HANDOVER=$(server_now)
-remote "sudo docker stop -t 15 $ACTIVE >/dev/null"
-handed_over() { started_since "$HANDOVER" "$WAITING"; }
-eventually 120 "the waiting instance takes the lease" handed_over
-if [[ $ACTIVE == "$FIRST" ]]; then
-  # Back to the first instance alone: it starts again, waits, and takes
-  # over when the second leaves (a third handover).
-  remote "sudo docker start $FIRST >/dev/null"
-  first_waits() { remote "sudo docker logs --since $HANDOVER $FIRST 2>&1" | grep -q '"waiting for the engine lease"'; }
-  eventually 120 "the first instance starts again and waits" first_waits
-  HANDOVER=$(server_now)
-  remote "sudo docker stop -t 15 $SECOND >/dev/null"
-  first_back() { started_since "$HANDOVER" "$FIRST"; }
-  eventually 120 "the first instance takes the lease back" first_back
-fi
-remote "sudo docker rm $SECOND >/dev/null"
+remote "sudo docker stop -t 15 $SECOND >/dev/null && sudo docker rm $SECOND >/dev/null"
+first_started() { started_since "$HANDOVER" "$FIRST"; }
+eventually 120 "the first instance takes the lease" first_started
 wait_healthy matching-engine 180
 call POST /v1/orders '{"symbol":"ETH-BTC","side":"BUY","type":"MARKET","quote_amount":"0.0005"}' "${AUTH[@]}"
 expect 202 - "a new market buy"
