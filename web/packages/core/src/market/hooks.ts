@@ -1,7 +1,7 @@
 import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from "react";
 import type { WsClient, WsStatus } from "../ws/client";
 import type { MarketPush, PrivatePush, TickerData, TradeData } from "../ws/types";
-import type { BookView } from "./orderbook";
+import type { BookSides, BookView } from "./orderbook";
 import type { MarketStore } from "./store";
 
 // React access to the WebSocket client and the market store. One provider
@@ -68,6 +68,14 @@ export type OrderBookOptions = {
   minQty?: string;
   /** Re-render at most once per this many ms (a book a person reads; charts take every frame). */
   every?: number;
+  /**
+   * The steps the book offers, finest first: with them the view is cut by
+   * OrderBook.fit (a coarse step the public book cannot fill gives way to a
+   * finer one) and reports its step and the steps that fill.
+   */
+  steps?: readonly string[];
+  /** The sides shown, which must fill (with steps). */
+  sides?: BookSides;
 };
 
 /**
@@ -76,10 +84,13 @@ export type OrderBookOptions = {
  * per frame, or per `every` ms. A throttled book shows the state its
  * throttle last told it about: a render for another reason (the last
  * trade shown above it) does not bring a newer one in between (B67: 7
- * book redraws a second against 4 notices). Tested in the ui package
- * (src/trading/useOrderBook.test.tsx), where React renders in tests.
+ * book redraws a second against 4 notices). With the steps offered, a
+ * step too coarse for the book's levels gives way to a finer one
+ * (OrderBook.fit), the step last used kept per symbol, step asked and
+ * depth. Tested in the ui package (src/trading/useOrderBook.test.tsx),
+ * where React renders in tests.
  */
-export function useOrderBook(symbol: string, depth: number, step = "", { minQty = "", every = 0 }: OrderBookOptions = {}): BookView {
+export function useOrderBook(symbol: string, depth: number, step = "", { minQty = "", every = 0, steps, sides = "both" }: OrderBookOptions = {}): BookView {
   const market = useMarket();
   useEffect(() => (symbol ? market.followDepth(symbol) : undefined), [market, symbol]);
   const key = `depth:${symbol}`;
@@ -110,9 +121,20 @@ export function useOrderBook(symbol: string, depth: number, step = "", { minQty 
     return every > 0 && last?.key === key ? last.version : market.version(key);
   }, [market, key, every]);
   const version = useSyncExternalStore(subscribe, getSnapshot, () => 0);
+  // The step of the last fitted view, for the same symbol, step and depth.
+  const fitted = useRef<{ key: string; step: string } | null>(null);
+  const fitKey = `${symbol}|${step}|${depth}|${sides}`;
+  const prev = fitted.current?.key === fitKey ? fitted.current.step : "";
   // version changes with every applied message (throttled: every message
   // the throttle passed on); the view is cut only when it does.
-  return useMemo(() => market.book(symbol).view(depth, step, minQty), [market, symbol, depth, step, minQty, version]);
+  const view = useMemo(() => {
+    const book = market.book(symbol);
+    return steps ? book.fit(depth, step, steps, minQty, sides, prev) : book.view(depth, step, minQty);
+  }, [market, symbol, depth, step, minQty, version, steps, sides, prev]);
+  useEffect(() => {
+    if (view.step !== undefined) fitted.current = { key: fitKey, step: view.step };
+  }, [view, fitKey]);
+  return view;
 }
 
 /**

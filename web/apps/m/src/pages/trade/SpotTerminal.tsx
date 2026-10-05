@@ -188,7 +188,7 @@ function BookTab(props: {
 }) {
   const tk = useTicker(props.symbol);
   const { steps, step, setStep } = useBookStep(props.symbol, props.tickSize, tk?.last);
-  const view = useOrderBook(props.symbol, LEVELS, step, { minQty: displayUnit(props.qtyDecimals), every: BOOK_EVERY });
+  const view = useOrderBook(props.symbol, LEVELS, step, { minQty: displayUnit(props.qtyDecimals), every: BOOK_EVERY, steps });
   const syncing = useSyncing(channels.depth(props.symbol));
   return (
     <OrderBook

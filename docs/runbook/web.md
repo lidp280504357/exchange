@@ -173,6 +173,8 @@ nginx（`deploy/compose/nginx/conf.d/astras.vip.conf` 与 `snippets/site-{pc,m,a
     - `OrderBook` 的行是按与价差的名次作 key 的固定槽位，档位进出只改文字；深度条不过渡。
     - `useOrderBook` 的 `every: 250` 限制重画频率，`minQty: displayUnit(数量位数)` 把会显示成 0.0000 的档位并入外侧一档。
     - 默认聚合步长由 core 的 `useBookStep` 按价格取（`defaultBookStep`），用户的选择按交易对存在本机。
+    - 公开盘口每边只有 200 档（`PublicDepth`），稠密的盘口里这 200 档只覆盖很窄的价格（BTC-USDT 约 20–40 USDT），按 10 合并只剩四五行（B71）。所以盘口把 `steps` 传给 `useOrderBook`：选的步长填不满面板时，按能填满的最粗一档显示（core 的 `OrderBook.fit`），步长菜单里填不满的几档变灰，选择框的提示说明"按 10 合并不够，按 1 显示"；回到较粗的一档要多出几档余量，免得在临界处来回切换。不要为此加大 `PublicDepth`：market-maker 也读公开盘口给 HOUSE 报价，档数一变 HOUSE 的报价和撮合引擎的参考簿都跟着变。
+    - PC 盘口的行数由面板高度算（`BookPanel.tsx`），量出高度之前按 12 行；`pc-smoke.mjs` 在 1280 与 1920 宽下核对每边行数与面板留白，并用存着的步长 10 再核一次。
     - 改动后用无头 Chrome 数 20 秒内 `[data-book-row]` 的挂载次数，目标为 0。预览标签页在后台，会压住推送，测不准。
   - 横向滚动的轮播（公告条等）里不要放视觉隐藏的文字（`sr-only`）。它是绝对定位的，在滚出视野的那一页里不受滚动容器裁剪，手机上会把布局视口撑宽：`position: fixed` 的 tab 栏跟着变宽，只露出前几个，`html` 的 `overflow-x: clip` 挡不住。要补给读屏的文字放进链接的 `aria-label`。排查方法：看 `innerWidth` 是否大于屏宽，再逐个隐藏区块，看哪个让它恢复。
   - 手机站「我的 → 关于 Astras」显示的版本号来自构建时的 `VITE_APP_VERSION`（部署脚本传入提交号），本机为 `dev`。

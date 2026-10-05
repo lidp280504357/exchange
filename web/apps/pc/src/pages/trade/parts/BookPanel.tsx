@@ -40,9 +40,12 @@ export function BookPanel({ symbol, base, quote, tickSize, priceDecimals, qtyDec
   const prefs = useTerminalPrefs.getState;
   const tk = useTicker(symbol);
   const { steps, step, setStep } = useBookStep(symbol, tickSize, tk?.last);
-  const levels = Math.max(5, Math.min(20, Math.floor((height - CHROME) / 2 / ROW) || 12));
+  // 12 until the panel is measured (0 would make 5); a step the public
+  // book cannot fill gives way to a finer one (view.step, core's
+  // OrderBook.fit), so the rows are always full (B71).
+  const levels = height > 0 ? Math.max(5, Math.min(20, Math.floor((height - CHROME) / 2 / ROW))) : 12;
   const depth = mode === "both" ? levels : levels * 2;
-  const view = useOrderBook(symbol, depth, step, { minQty: displayUnit(qtyDecimals), every: BOOK_EVERY });
+  const view = useOrderBook(symbol, depth, step, { minQty: displayUnit(qtyDecimals), every: BOOK_EVERY, steps, sides: mode });
   const syncing = useSyncing(channels.depth(symbol));
   useTradesSeed(symbol);
   const trades = useTrades(symbol);

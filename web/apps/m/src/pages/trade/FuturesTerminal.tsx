@@ -198,7 +198,7 @@ function BookTab({
 }) {
   const tk = useTicker(contract.symbol);
   const { steps, step, setStep } = useBookStep(contract.symbol, contract.tick_size, tk?.last);
-  const view = useOrderBook(contract.symbol, LEVELS, step, { minQty: displayUnit(qtyDecimals), every: BOOK_EVERY });
+  const view = useOrderBook(contract.symbol, LEVELS, step, { minQty: displayUnit(qtyDecimals), every: BOOK_EVERY, steps });
   const syncing = useSyncing(channels.depth(contract.symbol));
   return (
     <OrderBook

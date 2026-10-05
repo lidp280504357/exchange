@@ -212,15 +212,22 @@ export function OrderBook({
             ))}
           </div>
           {steps && steps.length > 0 && (
-            <Select
-              size="xs"
-              variant="ghost"
+            // The step the view was cut at (core's OrderBook.fit gives a
+            // step too coarse for the book's levels way to a finer one,
+            // which the title explains); steps that cannot fill it are off.
+            <span
               className="ml-auto"
-              value={step ?? steps[0]}
-              onValueChange={onStepChange}
-              options={steps.map((s) => ({ value: s, label: s }))}
-              aria-label={t("ui.book.step")}
-            />
+              title={view.step && step && view.step !== step ? t("ui.book.stepShown", { step, shown: view.step }) : undefined}
+            >
+              <Select
+                size="xs"
+                variant="ghost"
+                value={view.step ?? step ?? steps[0]}
+                onValueChange={onStepChange}
+                options={steps.map((s) => ({ value: s, label: s, disabled: view.fits !== undefined && !view.fits.includes(s) }))}
+                aria-label={t("ui.book.step")}
+              />
+            </span>
           )}
         </div>
       )}

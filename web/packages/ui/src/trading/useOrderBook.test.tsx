@@ -87,3 +87,26 @@ describe("useOrderBook with a throttle", () => {
     expect(best).toBe("100.5");
   });
 });
+
+describe("useOrderBook with the steps offered", () => {
+  it("cuts a step the book cannot fill at a finer one, and tells which", () => {
+    const { ws, push } = fakeWs();
+    const market = new MarketStore(ws, (cb) => cb());
+    const depth = channels.depth("BTC-USDT");
+    let shown = { step: "", rows: 0, fits: [] as string[] };
+    function Book() {
+      const v = useOrderBook("BTC-USDT", 15, "10", { steps: ["0.01", "0.1", "1", "10"] });
+      shown = { step: v.step ?? "", rows: Math.min(v.bids.length, v.asks.length), fits: v.fits ?? [] };
+      return null;
+    }
+    render(
+      <LiveProvider ws={ws} market={market}>
+        <Book />
+      </LiveProvider>,
+    );
+    // 200 levels a side over about 38 USDT: at 10, five rows a side.
+    const side = (from: number, by: number) => Array.from({ length: 200 }, (_, i) => [((from + i * by) / 100).toFixed(2), "1"]);
+    act(() => push(depth, { channel: depth, type: "snapshot", seq: 1, data: { bids: side(8596200, -19), asks: side(8596201, 19) } }));
+    expect(shown).toEqual({ step: "1", rows: 15, fits: ["0.01", "0.1", "1"] });
+  });
+});

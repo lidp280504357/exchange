@@ -60,3 +60,55 @@ describe("OrderBook", () => {
     expect(displayUnit(0)).toBe("1");
   });
 });
+
+describe("OrderBook.fit", () => {
+  const steps = ["0.01", "0.1", "1", "10"];
+  // levels makes n levels from a price in cents, `by` cents apart.
+  const levels = (from: number, by: number, n: number) => Array.from({ length: n }, (_, i) => [((from + i * by) / 100).toFixed(2), "1"] as [string, string]);
+  // A dense book as the public one carries it: 200 levels a side over
+  // about 38 USDT (BTC-USDT on 2026-10-05).
+  const dense = () => {
+    const b = new OrderBook();
+    b.snapshot({ bids: levels(8596200, -19, 200), asks: levels(8596201, 19, 200) });
+    return b;
+  };
+
+  it("gives a step its levels cannot fill way to the coarsest finer one that fills", () => {
+    const v = dense().fit(15, "10", steps);
+    expect(dense().view(15, "10").bids.length).toBeLessThan(15);
+    expect(v.step).toBe("1");
+    expect(v.bids).toHaveLength(15);
+    expect(v.asks).toHaveLength(15);
+    expect(v.fits).toEqual(["0.01", "0.1", "1"]);
+    // The same view a cut at 1 gives (totals and the largest of them).
+    expect(v).toMatchObject(dense().view(15, "1"));
+  });
+  it("keeps a step that fills, and tells which steps do", () => {
+    expect(dense().fit(15, "1", steps)).toMatchObject({ step: "1", fits: ["0.01", "0.1", "1"] });
+    expect(dense().fit(15, "0.01", steps)).toMatchObject({ step: "0.01", fits: ["0.01", "0.1", "1"] });
+    // 40 rows a side: 1 has 38 or 39 levels, 0.1 fills.
+    expect(dense().fit(40, "1", steps)).toMatchObject({ step: "0.1", fits: ["0.01", "0.1"] });
+  });
+  it("keeps the step asked when no step fills, or nothing is known yet", () => {
+    const thin = new OrderBook();
+    thin.snapshot({ bids: levels(10000, -500, 10), asks: levels(10100, 500, 10) });
+    expect(thin.fit(15, "10", steps)).toMatchObject({ step: "10", fits: steps });
+    expect(new OrderBook().fit(15, "10", steps)).toMatchObject({ step: "10", fits: steps });
+    expect(dense().fit(15, "5", steps)).toMatchObject({ step: "5", fits: steps });
+  });
+  it("only needs the sides shown to fill", () => {
+    const b = new OrderBook();
+    b.snapshot({ bids: levels(8596200, -19, 200), asks: levels(8596201, 19, 5) });
+    expect(b.fit(15, "1", steps, "", "bids")).toMatchObject({ step: "1", fits: ["0.01", "0.1", "1"] });
+    expect(b.fit(15, "1", steps, "", "both")).toMatchObject({ step: "1", fits: steps });
+  });
+  it("holds a finer step until the coarser one fills with levels to spare", () => {
+    // Steps of 1 and 10; at 10 the asks have 4 levels, the bids 5.
+    const b = new OrderBook();
+    b.snapshot({ bids: levels(10000, -100, 40), asks: levels(10100, 100, 40) });
+    expect(b.fit(3, "10", ["1", "10"])).toMatchObject({ step: "10" });
+    expect(b.fit(3, "10", ["1", "10"], "", "both", "1")).toMatchObject({ step: "1" });
+    b.update({ bids: [], asks: [["150.00", "1"]] });
+    expect(b.fit(3, "10", ["1", "10"], "", "both", "1")).toMatchObject({ step: "10" });
+  });
+});

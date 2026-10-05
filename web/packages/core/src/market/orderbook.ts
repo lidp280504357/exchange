@@ -16,7 +16,14 @@ export type BookView = {
   /** Best ask − best bid; null with an empty side. */
   spread: string | null;
   seq: number;
+  /** The step the view is cut at, when cut by OrderBook.fit (perhaps finer than the one asked). */
+  step?: string;
+  /** The steps offered whose views fill the book (OrderBook.fit), finest first. */
+  fits?: string[];
 };
+
+/** The sides a book shows (the terminal's view mode), which must fill. */
+export type BookSides = "both" | "bids" | "asks";
 
 // Prices compare as decimals; the cache avoids reparsing a price for every
 // comparison of a binary search.
@@ -75,6 +82,59 @@ export class OrderBook {
     const spread = best.bid && best.ask ? sub(best.ask, best.bid) : null;
     return { bids, asks, maxTotal: cmp(lastBid, lastAsk) >= 0 ? lastBid : lastAsk, spread, seq: this.seq };
   }
+
+  /**
+   * fit cuts the view at `step`, one of `steps` (finest first), unless that
+   * leaves a side shown short of `depth` levels while a finer step fills
+   * it: the public book carries 200 levels a side, and in a dense book
+   * those span too little of the price for a coarse step (BTC-USDT at 10
+   * showed four or five rows in a panel of fifteen, B71). A book short at
+   * every step, a thin one, keeps the step asked. `prev`, the step of the
+   * last view, holds a finer step until the coarser one fills with some
+   * levels to spare, so the book does not swap scales at each update near
+   * the threshold. The view reports its step and the steps that fill (all
+   * of them while nothing tells: an empty book, a thin one).
+   */
+  fit(depth: number, step: string, steps: readonly string[], minQty = "", sides: BookSides = "both", prev = ""): BookView {
+    // The views are cut deeper by the levels to spare, then to `depth`.
+    const spare = depth + Math.max(2, Math.ceil(depth / 5));
+    const cuts = new Map<string, BookView>();
+    const cut = (s: string) => {
+      let v = cuts.get(s);
+      if (!v) {
+        v = this.view(spare, s, minQty);
+        cuts.set(s, v);
+      }
+      return v;
+    };
+    const has = (s: string, n: number) => {
+      const v = cut(s);
+      return (sides === "asks" || v.bids.length >= n) && (sides === "bids" || v.asks.length >= n);
+    };
+    const shown = (s: string, fits: string[]): BookView => ({ ...trim(cut(s), depth), step: s, fits });
+    const at = steps.indexOf(step);
+    if (at < 0 || (this.bids.length === 0 && this.asks.length === 0)) return shown(step, [...steps]);
+    // A coarser step never has more levels: the steps that fill are the
+    // finest ones, up to `top`.
+    let top = at;
+    if (has(step, depth)) while (top + 1 < steps.length && has(steps[top + 1]!, depth)) top++;
+    else while (top >= 0 && !has(steps[top]!, depth)) top--;
+    if (top < 0) return shown(step, [...steps]);
+    let use = Math.min(at, top);
+    const was = steps.indexOf(prev);
+    if (was >= 0 && was < use && !has(steps[use]!, spare)) use = was;
+    return shown(steps[use]!, steps.slice(0, top + 1));
+  }
+}
+
+// trim cuts a view to `depth` levels a side, its largest total with them.
+function trim(v: BookView, depth: number): BookView {
+  if (v.bids.length <= depth && v.asks.length <= depth) return v;
+  const bids = v.bids.slice(0, depth);
+  const asks = v.asks.slice(0, depth);
+  const lastBid = bids[bids.length - 1]?.total ?? "0";
+  const lastAsk = asks[asks.length - 1]?.total ?? "0";
+  return { ...v, bids, asks, maxTotal: cmp(lastBid, lastAsk) >= 0 ? lastBid : lastAsk };
 }
 
 // apply puts one level into a side sorted by dir (1: ascending asks, -1:
