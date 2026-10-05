@@ -85,13 +85,25 @@ echo "ok   ClickHouse holds exactly the events the outboxes published in the rec
 echo "== read models"
 # Trades and order changes are one row per event (a minute old, so
 # ingested); contract trades and orders share the tables with the spot ones.
-counts=$(ch "SELECT
-  (SELECT count() FROM trades FINAL WHERE executed_at < now() - INTERVAL 1 MINUTE),
-  (SELECT uniqExact(event_id) FROM events WHERE topic IN ('trade.events', 'derivatives.trade.events') AND occurred_at < now() - INTERVAL 1 MINUTE),
-  (SELECT count() FROM order_updates FINAL WHERE occurred_at < now() - INTERVAL 1 MINUTE),
-  (SELECT uniqExact(event_id) FROM events WHERE topic IN ('order.events', 'derivatives.order.events') AND occurred_at < now() - INTERVAL 1 MINUTE)")
-read -r trades trade_events updates order_events <<<"$counts"
-[[ $trades == "$trade_events" && $updates == "$order_events" ]] ||
+# analytics-consumer stores a batch's events before its read models, so a
+# read between the two inserts, or behind a busy batch, can count a few
+# events without their rows yet: asked again for up to half a minute
+# (B63's regression saw 3 of 1.58 million once, equal a minute later).
+read_models() {
+  local counts
+  counts=$(ch "SELECT
+    (SELECT count() FROM trades FINAL WHERE executed_at < now() - INTERVAL 1 MINUTE),
+    (SELECT uniqExact(event_id) FROM events WHERE topic IN ('trade.events', 'derivatives.trade.events') AND occurred_at < now() - INTERVAL 1 MINUTE),
+    (SELECT count() FROM order_updates FINAL WHERE occurred_at < now() - INTERVAL 1 MINUTE),
+    (SELECT uniqExact(event_id) FROM events WHERE topic IN ('order.events', 'derivatives.order.events') AND occurred_at < now() - INTERVAL 1 MINUTE)")
+  read -r trades trade_events updates order_events <<<"$counts"
+  [[ $trades == "$trade_events" && $updates == "$order_events" ]]
+}
+for _ in $(seq 10); do
+  read_models && break
+  sleep 3
+done
+read_models ||
   { echo "FAIL read models: $trades trades for $trade_events trade events, $updates order changes for $order_events order events" >&2; exit 1; }
 echo "ok   $trades trades and $updates order changes, one per event"
 # The wallet read models agree with wallet-service's tables on every

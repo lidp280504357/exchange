@@ -3,15 +3,17 @@
 # plan §6.3 task 12, requirements §5.7). A second instance starts as a
 # standby waiting for the engine lease (a PostgreSQL advisory lock). An
 # order rests on the primary; the primary's process is killed (SIGKILL: no
-# graceful release) and a market order arrives while no engine runs. The
-# standby takes the lease, rebuilds the books (the users' and HOUSE's
+# graceful release) and a market order arrives while no engine runs.
+# Docker restarts the crashed instance within a second and the standby
+# asks for the lease every second, so either can take it (B63 saw the
+# restarted one win): it rebuilds the books (the users' and HOUSE's
 # reference books, ADR-0015) from the snapshot and the WAL and continues
 # from the committed offsets: the order sent during the crash fills
-# against HOUSE exactly once, the resting order is still there and cancels.
-# Docker restarts the crashed instance, which now waits as the standby. At
-# the end the second instance is stopped gracefully and the first takes
-# over again (a second handover), leaving one instance as before. One new
-# user on ETH-BTC (every order trades against HOUSE); about three minutes.
+# against HOUSE exactly once, the resting order is still there and cancels;
+# the other instance waits. Then the running instance is stopped
+# gracefully and the waiting one takes over (a second handover); the
+# drill ends with the first instance alone, as before. One new user on
+# ETH-BTC (every order trades against HOUSE); about three minutes.
 set -euo pipefail
 # One drill at a time on the server (scripts/ops/lock.sh); task fault holds the lock for all of them.
 [[ -n ${OPS_LOCK_HELD:-} ]] || exec "$(dirname "$0")/../ops/lock.sh" run --owner "fault $(basename "$0")" -- bash "$0" "$@"
@@ -67,18 +69,36 @@ REST=$(jq -r .order_id <<<"$BODY")
 eventually 40 "it rests (OPEN)" status_is "$REST" OPEN
 
 echo "== the primary crashes; an order arrives while no engine runs"
+server_now() { remote "date -u +%Y-%m-%dT%H:%M:%S.%NZ"; }
+# started_since T C: instance C logged its start after T (the server's clock).
+started_since() { remote "sudo docker logs --since $1 $2 2>&1" | grep -q '"service started"'; }
 pid=$(remote "sudo docker inspect -f '{{.State.Pid}}' $FIRST")
+KILLED=$(server_now)
 remote "sudo kill -9 $pid"
 call POST /v1/orders '{"symbol":"ETH-BTC","side":"BUY","type":"MARKET","quote_amount":"0.0005"}' "${AUTH[@]}"
 expect 202 - "a market buy of 0.0005 BTC is accepted"
 MKT=$(jq -r .order_id <<<"$BODY")
-took_over() { remote "sudo docker logs --since 5m $SECOND 2>&1" | grep -q '"service started"'; }
-eventually 120 "the standby takes the lease and starts" took_over
-restarted_as_standby() {
-  [[ $(remote "sudo docker inspect -f '{{.State.Running}} {{.RestartCount}}' $FIRST") == "true "[1-9]* ]] &&
-    remote "sudo docker logs --since 1m $FIRST 2>&1" | grep -q '"waiting for the engine lease"'
+ACTIVE="" WAITING=""
+took_over() {
+  if started_since "$KILLED" "$SECOND"; then
+    ACTIVE=$SECOND WAITING=$FIRST
+  elif started_since "$KILLED" "$FIRST"; then
+    ACTIVE=$FIRST WAITING=$SECOND
+  else
+    return 1
+  fi
 }
-eventually 120 "Docker restarts the crashed instance, which waits as the standby" restarted_as_standby
+eventually 120 "an instance takes the lease and starts" took_over
+echo "ok   it is ${ACTIVE#exchange-infra-}"
+restarted() { [[ $(remote "sudo docker inspect -f '{{.State.Running}} {{.RestartCount}}' $FIRST") == "true "[1-9]* ]]; }
+eventually 120 "Docker restarted the crashed instance" restarted
+# The other one waits: the restarted first logs that it waits; the second
+# has waited since it started.
+waits() {
+  [[ $(remote "sudo docker inspect -f '{{.State.Running}}' $WAITING") == true ]] && ! started_since "$KILLED" "$WAITING" &&
+    { [[ $WAITING == "$SECOND" ]] || remote "sudo docker logs --since $KILLED $FIRST 2>&1" | grep -q '"waiting for the engine lease"'; }
+}
+eventually 120 "the other instance waits as the standby" waits
 
 echo "== after the takeover"
 eventually 60 "the order sent during the crash is FILLED" status_is "$MKT" FILLED
@@ -93,10 +113,23 @@ eventually 40 "it is CANCELED" status_is "$REST" CANCELED
 settled() { [[ $(balance BTC | cut -d' ' -f2) == 0 ]]; }
 eventually 40 "nothing is left frozen" settled
 
-echo "== the second instance stops, the first takes over again"
-remote "sudo docker stop -t 15 $SECOND >/dev/null && sudo docker rm $SECOND >/dev/null"
-first_started() { remote "sudo docker logs --since 1m $FIRST 2>&1" | grep -q '"service started"'; }
-eventually 120 "the first instance takes the lease" first_started
+echo "== the running instance stops, the waiting one takes over"
+HANDOVER=$(server_now)
+remote "sudo docker stop -t 15 $ACTIVE >/dev/null"
+handed_over() { started_since "$HANDOVER" "$WAITING"; }
+eventually 120 "the waiting instance takes the lease" handed_over
+if [[ $ACTIVE == "$FIRST" ]]; then
+  # Back to the first instance alone: it starts again, waits, and takes
+  # over when the second leaves (a third handover).
+  remote "sudo docker start $FIRST >/dev/null"
+  first_waits() { remote "sudo docker logs --since $HANDOVER $FIRST 2>&1" | grep -q '"waiting for the engine lease"'; }
+  eventually 120 "the first instance starts again and waits" first_waits
+  HANDOVER=$(server_now)
+  remote "sudo docker stop -t 15 $SECOND >/dev/null"
+  first_back() { started_since "$HANDOVER" "$FIRST"; }
+  eventually 120 "the first instance takes the lease back" first_back
+fi
+remote "sudo docker rm $SECOND >/dev/null"
 wait_healthy matching-engine 180
 call POST /v1/orders '{"symbol":"ETH-BTC","side":"BUY","type":"MARKET","quote_amount":"0.0005"}' "${AUTH[@]}"
 expect 202 - "a new market buy"

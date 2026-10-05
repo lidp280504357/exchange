@@ -10,9 +10,10 @@
 #   - the gateway down: new deposit addresses fail with WALLET_UNAVAILABLE
 #     (addresses already given keep working), a reconciliation fails and
 #     wallet_custody_up drops to 0; all recovers when it is back, and the
-#     custodian and the ledger agree again. (While a callback is held
-#     back the custodian holds more than the ledger expects: a surplus,
-#     never a shortfall.)
+#     custodian and the ledger agree again: TUSD's shortfall is what it was
+#     before the drill. (Other runs leave a surplus, the custodian holding
+#     more than the ledger owes, about 1 TUSD per end-to-end run; while a
+#     callback is held back the surplus grows, never a shortfall.)
 # Needs wallet.test_assets on for region AQ. About six minutes; the delay
 # is lifted and both containers are started again whatever happens.
 set -euo pipefail
@@ -49,6 +50,17 @@ AUTH=(-H "Authorization: Bearer $(jq -r .access_token <<<"$BODY")")
 call GET "/v1/wallet/deposit-address?asset=TUSD&network=TRON-TEST" "" "${AUTH[@]}"
 expect 200 - "a TRON-TEST address"
 ADDR=$(jq -r .address <<<"$BODY")
+# Where the custodian and the ledger stand before the drill (B63: the
+# end-to-end runs had left a 14 TUSD surplus, and the drill wanted 0).
+SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+exchangectl wallet reconcile --network UDUNMOCK | head -1
+baseline() {
+  BEFORE=$(pg "SELECT shortfall FROM wallet.chain_checks WHERE network = 'UDUNMOCK' AND asset = 'TUSD' AND checked_at > '$SINCE' ORDER BY checked_at DESC LIMIT 1")
+  [[ -n $BEFORE ]]
+}
+eventually 60 "a reconciliation before the drill" baseline
+[[ $(jq -n "$BEFORE <= 0") == true ]] || { echo "FAIL TUSD shortfall $BEFORE before the drill" >&2; exit 1; }
+echo "ok   before the drill the custodian holds what the ledger owes or more (TUSD shortfall $BEFORE)"
 
 # credited AMOUNT prints how many deposits of AMOUNT are credited.
 credited() {
@@ -103,6 +115,6 @@ checked() {
   [[ -n $SHORT ]]
 }
 eventually 60 "a reconciliation runs after the gateway is back" checked
-[[ $(jq -n "$SHORT == 0") == true ]] || { echo "FAIL TUSD shortfall $SHORT after the drill" >&2; exit 1; }
-echo "ok   the custodian and the ledger agree after the drill (TUSD shortfall $SHORT)"
+[[ $(jq -n "$SHORT == $BEFORE") == true ]] || { echo "FAIL TUSD shortfall $SHORT after the drill, $BEFORE before it" >&2; exit 1; }
+echo "ok   the custodian and the ledger agree after the drill as before it (TUSD shortfall $SHORT)"
 echo "custody faults survived"
