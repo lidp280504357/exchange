@@ -31,11 +31,11 @@ func (in TransferInput) hash() []byte {
 
 // Transfer moves an asset between SPOT and a margin account (design
 // §3.2). IN opens the account on its first transfer and takes only the
-// assets the account may hold; it needs margin.enabled and an open
-// account. OUT takes back what MaxTransferOut allows — what is free of
-// orders and of the asset's own debt, keeping the margin level at or
-// above the warning level — and, lowering no one's risk but the user's,
-// stays open while margin.enabled is off; a frozen or liquidating account
+// assets the account may hold; it needs margin.enabled, the MARGIN_TRADE
+// eligibility and an open account. OUT takes back what MaxTransferOut
+// allows — what is free of orders and of the asset's own debt, keeping
+// the margin level at or above the warning level — and, lowering no one's
+// risk but the user's, asks neither; a frozen or liquidating account
 // moves nothing.
 func (s *Service) Transfer(ctx context.Context, in TransferInput) (ports.Transfer, error) {
 	if err := checkKey(in.IdemKey); err != nil {
@@ -50,9 +50,9 @@ func (s *Service) Transfer(ctx context.Context, in TransferInput) (ports.Transfe
 		if err := s.enabled(in.UserID); err != nil {
 			return ports.Transfer{}, err
 		}
-	}
-	if err := s.eligible(ctx, in.UserID, in.Account.Symbol); err != nil {
-		return ports.Transfer{}, err
+		if err := s.eligible(ctx, in.UserID, in.Account.Symbol); err != nil {
+			return ports.Transfer{}, err
+		}
 	}
 	var t ports.Transfer
 	replay := false

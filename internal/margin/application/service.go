@@ -19,10 +19,13 @@ import (
 	"github.com/skill/exchange/internal/platform/flags"
 )
 
-// FeatureEligibility is the user-service feature margin trading checks:
-// spot trading, which margin trading is (user-service has no margin
-// feature of its own yet).
-const FeatureEligibility = "SPOT_TRADE"
+// FeatureEligibility is the user-service feature margin trading checks
+// (review CO, C9): MARGIN_TRADE, open to ACTIVE accounts while
+// margin.enabled allows the user — the sites show the margin pages by the
+// same answer. Only what adds risk asks: transfers in and borrowing
+// (orders' borrows included); transfers out and repaying lower it and
+// stay open.
+const FeatureEligibility = "MARGIN_TRADE"
 
 // Service runs margin trading.
 type Service struct {

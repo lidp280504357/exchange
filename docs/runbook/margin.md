@@ -58,7 +58,7 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 - 还币先抵利息再抵本金，`ALL` 按可用余额还到为止；运营冻结的账户可以还，强平中的不行（`MARGIN_FROZEN`）。
 - 写账本前先记 `PENDING`（`borrows`、`repays`、`transfers`）；账本超时或不可用时接口返回 `COMMON_UNAVAILABLE`，恢复循环每 5 秒用同一个键重发（账本只记一次），客户端用同一个 `Idempotency-Key` 重试拿到结果。账本拒绝的写记为 `FAILED`，失败原因存成 `[类别] 错误码: 说明`（类别如 `UNPROCESSABLE`、`INVALID`），同键重试原样返回，HTTP 状态也和第一次一样。
 - **在途的写也算**（审查 CK ①）：借币、划出与杠杆下单检查额度时，用的是账本余额加上该用户还在 `PENDING` 的写——在途借币当作已借到（可用、本金、首小时利息都加上），在途划出当作已划走，在途的整点利息当作已欠；在途的划入与还款要等账本记上才算。`PENDING` 先于账本余额读取：读的间隙里落账的写会被算两次而不会漏算，算两次也只会更保守。所以两个并发的借币，或者一边借一边划出，合起来也不会越过倍数与预警线。
-- 资格与开关只由 margin-service 检查（`margin.enabled`、user-service 的 `SPOT_TRADE` 资格）；账本的 `PostMargin` 只管记账，不再查资格。
+- 资格与开关只由 margin-service 检查：划入与借币（含下单的自动借币）要 `margin.enabled` 与 user-service 的 `MARGIN_TRADE` 资格（只限 ACTIVE 账户、同样受 `margin.enabled` 的规则约束，两站据此显示杠杆入口；审查 CO 的 C9，此前用 `SPOT_TRADE`）；划出与还币只降风险，两样都不查。账本的 `PostMargin` 只管记账，不再查资格。
 
 ## 杠杆账户下单（E2）
 

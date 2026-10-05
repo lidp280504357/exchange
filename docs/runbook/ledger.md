@@ -147,7 +147,7 @@ ssh exchange sudo docker exec exchange-infra-ledger-service-1 /app/exchangectl l
 - 成交结算（批次 E2）：`TradeExecuted` 带双方的账户类型（空为现货），订单在杠杆账户上的一方在该账户的资产行结算（逐仓的 `scope` 是成交的交易对），分录类型 `MARGIN_TRADE_SETTLE`；手续费仍记 `TRADE_FEE`，从这一方收到的资产里扣。订单带 `AUTO_REPAY` 的一方在同一事务里另记一条 `MARGIN_REPAY`（备注 `auto-repay order <订单ID> trade <交易对> <成交ID>`）：用这笔成交收到的资产（扣过手续费）还这个资产的负债，先息后本、最多还清；margin-service 消费 `ledger.events` 里的这类分录同步借款表。
 - `GetBalances`、`GET /v1/account/balances` 与 `BalanceChanged`（频道 `balances`）只有 SPOT/FUTURES：两站把非 FUTURES 的行都当现货累加，杠杆行（含负数的负债行）会把资产算错。杠杆账户经 margin-service 的 `/v1/margin/accounts` 与 `margin` 频道看；`EntryPosted` 的行带 `scope`。
 - 后台的风控冻结（holds）只在 SPOT：杠杆账户由 margin-service 整体冻结（`FROZEN`），强平又要能卖出账户里的全部资产。
-- 杠杆划转的开关与账户资格由 margin-service 检查（`margin.enabled`、`SPOT_TRADE` 资格），账本的 `PostMargin` 不再查。
+- 杠杆划转的开关与账户资格由 margin-service 检查（划入要 `margin.enabled` 与 `MARGIN_TRADE` 资格，划出不查），账本的 `PostMargin` 不再查。
 
 借款、计息、估值与借款表的对账（不变量 7）见 [margin.md](margin.md)。
 
