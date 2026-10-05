@@ -183,7 +183,7 @@ try {
       return o ? { off: o.hasAttribute("data-disabled"), text: o.innerText.replace(/\s+/g, " ").trim() } : null;
     });
     await page.keyboard.press("Escape");
-    if (!ten?.off || !ten.text.includes("深度不足")) throw new Error(`with 10 kept, 10 is not off in the menu with its note: ${JSON.stringify(ten)}`);
+    if (!ten?.off || !/深度不足|余量不足/.test(ten.text)) throw new Error(`with 10 kept, 10 is not off in the menu with its note: ${JSON.stringify(ten)}`);
   }
   ok(`with step 10 kept, the book still fills (${coarse.rows.join(" and ")} rows, trigger "${coarse.step}"${coarse.why ? `: ${coarse.why}` : ""}; 10 off in the menu)`);
   await keepStep("");
