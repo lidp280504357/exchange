@@ -6,9 +6,15 @@ name: image
 # deploy/server-update.sh pulls ghcr.io/<owner>/exchange-app:<commit> when
 # the server is logged in to ghcr.io (docs/runbook/server-deploy.md) and
 # builds locally otherwise, or when this build has not finished in time.
+#
+# Commits that change nothing the image is built from (.dockerignore:
+# documents, the web sites, compose, tools) build nothing: the server pulls
+# the image of the last commit that did (server-update.sh pull_app_image),
+# with the same paths.
 on:
   push:
     branches: [main]
+    paths-ignore: ['docs/**', 'web/**', 'desktop/**', '.claude/**', 'deploy/compose/**', 'tools/**', '*.md']
   workflow_dispatch:
 
 permissions:
@@ -36,8 +42,31 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       # The full commit names the image (the server asks for git rev-parse
       # HEAD); the short one is the version the services report. The
-      # runner has the memory to link four binaries at a time.
-      - uses: docker/build-push-action@v7
+      # runner has the memory to link four binaries at a time. Base images
+      # come from Google's mirror of Docker Hub: AWS ECR Public answered
+      # 429 to the runners (2026-10-06, B89), and the next step builds from
+      # it only when the mirror fails.
+      - id: build
+        uses: docker/build-push-action@v7
+        continue-on-error: true
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            GO_BUILD_P=4
+            GO_IMAGE=mirror.gcr.io/library/golang:1.27-alpine
+            RUNTIME_IMAGE=mirror.gcr.io/library/alpine:3.22
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ github.sha }}
+            ${{ steps.meta.outputs.image }}:main
+          provenance: false
+          sbom: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - if: steps.build.outcome == 'failure'
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: deploy/docker/Dockerfile

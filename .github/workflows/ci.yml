@@ -1,16 +1,24 @@
 name: ci
 
+# A push of documents alone (docs/, the top-level Markdown) runs nothing:
+# the deploy chain takes the commit's code from the last run.
 on:
   push:
     branches: [main]
+    paths-ignore: ['docs/**', '*.md']
   pull_request:
+    paths-ignore: ['docs/**', '*.md']
 
 permissions:
   contents: read
 
+# On main every push runs to its end: three sessions push every few
+# minutes, and cancelling left main without a green run for an hour (review
+# tick 2026-10-06 05:21, B89). A pull request's newer push replaces its
+# older run.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   go:
@@ -150,8 +158,13 @@ jobs:
           promtool() { docker run --rm -v "$PWD/deploy/observability:/rules:ro" -w /rules --entrypoint promtool quay.io/prometheus/prometheus:v3.15.0 "$@"; }
           promtool check config prometheus.yml
           promtool test rules alerts_test.yml
+      # Base images from Google's mirror of Docker Hub, AWS ECR Public (the
+      # Dockerfile's default) when the mirror fails: either throttles at times.
       - name: app image build
-        run: docker build -f deploy/docker/Dockerfile --build-arg VERSION=${GITHUB_SHA::7} -t exchange-app:ci .
+        run: |
+          build() { docker build -f deploy/docker/Dockerfile --build-arg VERSION=${GITHUB_SHA::7} "$@" -t exchange-app:ci .; }
+          build --build-arg GO_IMAGE=mirror.gcr.io/library/golang:1.27-alpine --build-arg RUNTIME_IMAGE=mirror.gcr.io/library/alpine:3.22 ||
+            { echo "::warning title=app image build::mirror.gcr.io failed, building from public.ecr.aws"; build; }
       - name: nginx config test
         run: |
           tmp=$(mktemp -d)

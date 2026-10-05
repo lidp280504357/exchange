@@ -72,11 +72,17 @@ prune_build_cache() {
 # "还没有这个版本"最多等 10 分钟；更早的提交（回滚、image.yml 之前的、已被清掉的版本）与令牌被拒都不等。
 # 拉不到就返回非 0，由调用方在服务器上构建。打完标签就去掉 ghcr 的标签：否则 image prune 不删它，每次部署都留下
 # 一整份镜像（约 600 MB）。
+# 本提交没动镜像的构建内容（.dockerignore 排除的文档、网站、compose、工具，image.yml 的 paths-ignore 同一份）时
+# Actions 不构建，用最近一个动过构建内容的提交的镜像（B89）。
 pull_app_image() {
-  local image out fresh deadline=$((SECONDS + 600))
-  image="ghcr.io/lidp280504357/exchange-app:$(git rev-parse HEAD)"
+  local image out fresh commit deadline=$((SECONDS + 600))
+  commit=$(git log -1 --format=%H HEAD -- . ':(exclude)docs' ':(exclude)web' ':(exclude)desktop' ':(exclude).claude' \
+    ':(exclude)deploy/compose' ':(exclude)tools' ':(top,glob,exclude)*.md')
+  [ -n "$commit" ] || commit=$(git rev-parse HEAD)
+  [ "$commit" = "$(git rev-parse HEAD)" ] || echo "== 本提交没动镜像的构建内容，用 ${commit:0:7} 的镜像"
+  image="ghcr.io/lidp280504357/exchange-app:$commit"
   sudo grep -qs '"ghcr.io"' /root/.docker/config.json || return 1
-  fresh=$(($(date +%s) - $(git log -1 --format=%ct HEAD) < 1200))
+  fresh=$(($(date +%s) - $(git log -1 --format=%ct "$commit") < 1200))
   until sudo docker image inspect "$image" >/dev/null 2>&1 || out=$(sudo docker pull -q "$image" 2>&1); do
     if grep -qiE 'denied|unauthorized|forbidden|429|toomanyrequests|too many requests|quota|rate limit' <<<"$out"; then
       echo "== ghcr.io 拒绝了拉取（令牌过期、没有 read:packages，或免费额度用完），改在服务器上构建"
