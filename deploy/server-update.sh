@@ -73,31 +73,41 @@ prune_build_cache() {
 # 拉不到就返回非 0，由调用方在服务器上构建。打完标签就去掉 ghcr 的标签：否则 image prune 不删它，每次部署都留下
 # 一整份镜像（约 600 MB）。
 # 本提交没动镜像的构建内容（.dockerignore 排除的文档、网站、compose、工具，image.yml 的 paths-ignore 同一份）时
-# Actions 不构建，用最近一个动过构建内容的提交的镜像（B89）。
+# Actions 不构建（B89）。镜像按推送的最后一个提交打标签，所以从 HEAD 往回、到最近一个动过构建内容的提交为止，
+# 这些提交的镜像内容都一样，按新到旧找第一个 ghcr 上有的。
 pull_app_image() {
-  local image out fresh commit deadline=$((SECONDS + 600))
-  commit=$(git log -1 --format=%H HEAD -- . ':(exclude)docs' ':(exclude)web' ':(exclude)desktop' ':(exclude).claude' \
-    ':(exclude)deploy/compose' ':(exclude)tools' ':(top,glob,exclude)*.md')
-  [ -n "$commit" ] || commit=$(git rev-parse HEAD)
-  [ "$commit" = "$(git rev-parse HEAD)" ] || echo "== 本提交没动镜像的构建内容，用 ${commit:0:7} 的镜像"
-  image="ghcr.io/lidp280504357/exchange-app:$commit"
+  local image="" out="" fresh last c deadline=$((SECONDS + 600))
+  local -a same
   sudo grep -qs '"ghcr.io"' /root/.docker/config.json || return 1
-  fresh=$(($(date +%s) - $(git log -1 --format=%ct "$commit") < 1200))
-  until sudo docker image inspect "$image" >/dev/null 2>&1 || out=$(sudo docker pull -q "$image" 2>&1); do
-    if grep -qiE 'denied|unauthorized|forbidden|429|toomanyrequests|too many requests|quota|rate limit' <<<"$out"; then
-      echo "== ghcr.io 拒绝了拉取（令牌过期、没有 read:packages，或免费额度用完），改在服务器上构建"
-      return 1
-    fi
-    if grep -qiE 'manifest unknown|not found' <<<"$out" && [ "$fresh" != 1 ]; then
-      echo "== ghcr.io 上没有 $image（提交早于 image.yml 或版本已清理），改在服务器上构建"
+  last=$(git log -1 --format=%H HEAD -- . ':(exclude)docs' ':(exclude)web' ':(exclude)desktop' ':(exclude).claude' \
+    ':(exclude)deploy/compose' ':(exclude)tools' ':(top,glob,exclude)*.md')
+  if [ -n "$last" ] && git rev-parse -q --verify "$last^" >/dev/null; then
+    mapfile -t same < <(git rev-list HEAD --not "$last^")
+  else
+    same=("$(git rev-parse HEAD)")
+  fi
+  fresh=$(($(date +%s) - $(git log -1 --format=%ct HEAD) < 1200))
+  while :; do
+    for c in "${same[@]}"; do
+      image="ghcr.io/lidp280504357/exchange-app:$c"
+      sudo docker image inspect "$image" >/dev/null 2>&1 && break 2
+      out=$(sudo docker pull -q "$image" 2>&1) && break 2
+      if grep -qiE 'denied|unauthorized|forbidden|429|toomanyrequests|too many requests|quota|rate limit' <<<"$out"; then
+        echo "== ghcr.io 拒绝了拉取（令牌过期、没有 read:packages，或免费额度用完），改在服务器上构建"
+        return 1
+      fi
+    done
+    if [ "$fresh" != 1 ]; then
+      echo "== ghcr.io 上没有本提交的镜像（提交早于 image.yml 或版本已清理），改在服务器上构建"
       return 1
     fi
     if [ "$SECONDS" -ge "$deadline" ]; then
-      echo "== 等了 10 分钟没拉到 $image（Actions 的 image 任务失败或还没跑完），改在服务器上构建"
+      echo "== 等了 10 分钟没拉到本提交的镜像（Actions 的 image 任务失败或还没跑完），改在服务器上构建"
       return 1
     fi
     sleep 20
   done
+  [ "${image##*:}" = "$(git rev-parse HEAD)" ] || echo "== 本提交没动镜像的构建内容，用 ${image##*:} 的镜像（同样的内容）"
   sudo docker tag "$image" exchange-app:next
   sudo docker rmi "$image" >/dev/null
   echo "== 用 Actions 构建的镜像 $image"
