@@ -69,31 +69,42 @@ await page.setRequestInterception(true);
 page.on("request", hold);
 
 /**
- * openRow clicks the first of the rows a selector of table rows finds that
- * is a real one (data-row-id, as rows() counts: a loading table's skeleton
- * rows have none) and waits for the drawer it opens; while none shows
- * within 5 s it presses again, four times at most. The second press is
+ * pressRow presses the first real row a selector of table rows finds (one
+ * with a data-row-id, as rows() counts: a loading table's skeleton rows
+ * have none) and waits for opened(timeout) to see what the press opens.
+ * Each try waits up to 10 s for such a row (page.click would fail at once
+ * while a list reloads into its skeleton, review BW) and 5 s for what it
+ * opens; four tries at most, 60 s at worst. The tries after the first are
  * insurance: the one miss seen (the custody callbacks) was a skeleton row
- * pressed. The lists only ask every 15 s whether there is anything newer
- * (useNewer) and never replace their rows unless 有新数据 is clicked
- * (reviews BS, BT).
+ * pressed. The lists ask every 15 s whether anything is newer (useNewer)
+ * and never replace their rows unless 有新数据 is clicked (reviews BS-BX).
  */
-async function openRow(selector) {
+async function pressRow(selector, opened) {
   const row = `${selector}[data-row-id]`;
+  const at = () => new URL(page.url()).pathname;
   for (let i = 1; ; i++) {
-    // A list reloading into its skeleton has no such row for a moment:
-    // waited for, as page.click would fail at once (review BW).
-    await page.waitForSelector(row, { visible: true, timeout: 10000 });
+    try {
+      await page.waitForSelector(row, { visible: true, timeout: 10000 });
+    } catch (e) {
+      if (e?.name !== "TimeoutError") throw e;
+      if (i >= 4) throw new Error(`no real row (data-row-id) within 10 s on ${at()}, 4 tries: ${row}`);
+      continue;
+    }
     await t.clickLive(row);
     try {
-      await page.waitForSelector("[role=dialog]", { timeout: 5000 });
+      await opened(5000);
       return;
     } catch (e) {
       if (e?.name !== "TimeoutError") throw e;
-      if (i >= 4) throw new Error(`a row of ${row} opened no drawer after 4 presses (20 s)`);
+      // Pressed again behind an open dialog, the press would close it.
+      if (await page.$("[role=dialog]")) throw new Error(`${row} on ${at()} opened a dialog, not what it should`);
+      if (i >= 4) throw new Error(`${row} on ${at()} opened nothing after 4 presses (up to 60 s)`);
     }
   }
 }
+
+/** openRow presses a row whose press opens a drawer (pressRow). */
+const openRow = (selector) => pressRow(selector, (timeout) => page.waitForSelector("[role=dialog]", { timeout }));
 
 /**
  * rows waits for at least n of the table's own rows in scope (data-row-id:
@@ -202,8 +213,7 @@ try {
   // 3. Users: the list; a row opens the user's page with its tabs.
   await go("/users");
   await rows(3);
-  await t.clickLive("main tbody tr");
-  await page.waitForFunction(() => /^\/users\/[0-9a-f-]{36}$/.test(location.pathname), { timeout: 20000 });
+  await pressRow("main tbody tr", (timeout) => page.waitForFunction(() => /^\/users\/[0-9a-f-]{36}$/.test(location.pathname), { timeout }));
   const userId = await page.evaluate(() => location.pathname.split("/").pop());
   await waitText("UID");
   await waitText("最近登录");
@@ -315,7 +325,7 @@ try {
   await go("/instruments");
   await rows(50);
   await typeInto('main input[placeholder="搜索"]', "SOL-BTC");
-  await page.waitForFunction(() => document.querySelectorAll("main tbody tr").length === 1);
+  await page.waitForFunction(() => document.querySelectorAll("main tbody tr[data-row-id]").length === 1);
   await clickButton("操作", "main");
   await page.waitForFunction(() => [...document.querySelectorAll("[role=menuitem]")].some((e) => e.textContent.includes("交易中")));
   await page.evaluate(() => [...document.querySelectorAll("[role=menuitem]")].find((e) => e.textContent.includes("交易中")).click());
@@ -345,7 +355,7 @@ try {
   // An asset's drawer with its profile and logo (C4c).
   await go("/instruments?tab=assets");
   await typeInto('main input[placeholder="搜索"]', "ASTRA");
-  await page.waitForFunction(() => document.querySelectorAll("main tbody tr").length === 1);
+  await page.waitForFunction(() => document.querySelectorAll("main tbody tr[data-row-id]").length === 1);
   await openRow("main tbody tr");
   await page.waitForSelector("[data-testid=asset-profile]");
   await waitText("资料与图标");
@@ -383,8 +393,7 @@ try {
   await waitText("分录借贷平衡");
   await go("/audit");
   await rows(1);
-  await page.click("main tbody tr");
-  await page.waitForSelector("[data-testid=audit-detail]");
+  await pressRow("main tbody tr", (timeout) => page.waitForSelector("[data-testid=audit-detail]", { timeout }));
   await waitText("原始事件");
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => !document.querySelector("[data-testid=audit-detail]"));
