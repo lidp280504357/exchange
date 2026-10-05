@@ -12,6 +12,8 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	derivativesv1 "github.com/skill/exchange/api/gen/go/exchange/derivatives/v1"
+	ledgerv1 "github.com/skill/exchange/api/gen/go/exchange/ledger/v1"
+	marginv1 "github.com/skill/exchange/api/gen/go/exchange/margin/v1"
 	orderv1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
 	tradev1 "github.com/skill/exchange/api/gen/go/exchange/trade/v1"
 	walletv1 "github.com/skill/exchange/api/gen/go/exchange/wallet/v1"
@@ -260,5 +262,74 @@ func TestReadModels(t *testing.T) {
 	var n uint64
 	if err := conn.QueryRow(ctx, `SELECT count() FROM trades`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("a second backfill ran: %d trades (%v)", n, err)
+	}
+}
+
+func TestMarginReadModels(t *testing.T) {
+	ctx := context.Background()
+	chCfg := testenv.ClickHouse(t)
+	conn, err := chx.Open(ctx, chCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	sqlDB := chx.OpenDB(chCfg)
+	defer sqlDB.Close()
+	if err := migrate.UpClickHouse(ctx, sqlDB, migrations.ClickHouse(), discard); err != nil {
+		t.Fatalf("clickhouse migrations: %v", err)
+	}
+	in := analytics.NewIngestor(conn, discard, prometheus.NewRegistry())
+	f := event.NewFactory("test", "t")
+	at := time.Date(2026, 10, 6, 5, 0, 0, 0, time.UTC)
+	var batch []kafka.Delivery
+	add := func(topic string, msg proto.Message) {
+		t.Helper()
+		env, err := f.New(ctx, msg, "user", "u", event.WithOccurredAt(at))
+		if err != nil {
+			t.Fatal(err)
+		}
+		batch = append(batch, kafka.Delivery{Topic: topic, Envelope: env})
+	}
+	user, liquidation, interest, journal := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	add(event.TopicMargin, &marginv1.MarginInterestAccrued{
+		InterestId: interest, UserId: user, AccountType: "MARGIN_CROSS", Asset: "USDT", Principal: "150", InterestModel: "FIXED",
+		HourlyRate: "0.00001", Interest: "0.0015", InterestOwed: "0.003", Hour: timestamppb.New(at), JournalId: uuid.NewString(),
+	})
+	// The end before the start: each sets its own columns.
+	add(event.TopicMargin, &marginv1.MarginLiquidationCompleted{
+		LiquidationId: liquidation, UserId: user, AccountType: "MARGIN_ISOLATED", Symbol: "BTC-USDT",
+		Repaid: []*marginv1.AssetAmount{{Asset: "USDT", Amount: "100.1"}}, Fee: "2.1", InsuranceCovered: "0",
+		CompletedAt: timestamppb.New(at.Add(time.Second)),
+	})
+	add(event.TopicMargin, &marginv1.MarginLiquidationStarted{
+		LiquidationId: liquidation, UserId: user, AccountType: "MARGIN_ISOLATED", Symbol: "BTC-USDT", MarginLevel: "1.049",
+		TotalAsset: "105", TotalLiability: "100.1", StartedAt: timestamppb.New(at),
+	})
+	add(event.TopicLedger, &ledgerv1.EntryPosted{JournalId: journal, Seq: 1, EntryType: "MARGIN_BORROW", Lines: []*ledgerv1.EntryLine{{
+		AccountId: uuid.NewString(), OwnerType: "USER", OwnerId: user, AccountType: "MARGIN_ISOLATED", Scope: "BTC-USDT", Asset: "USDT",
+		Amount: "100", BalanceKind: "AVAILABLE", AvailableAfter: "100", FrozenAfter: "0",
+	}}})
+	// Redelivered copies change nothing.
+	if err := in.Store(ctx, append(batch, batch...)); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	var charges uint64
+	if err := conn.QueryRow(ctx, `SELECT count() FROM margin_interest FINAL WHERE interest_id = ?`, interest).Scan(&charges); err != nil || charges != 1 {
+		t.Fatalf("interest rows: %d (%v)", charges, err)
+	}
+	var level, fee *decimal.Decimal
+	var repaid *string
+	var done bool
+	if err := conn.QueryRow(ctx, `SELECT margin_level, fee, repaid, completed_at IS NOT NULL FROM margin_liquidations FINAL WHERE liquidation_id = ?`,
+		liquidation).Scan(&level, &fee, &repaid, &done); err != nil {
+		t.Fatal(err)
+	}
+	if level == nil || level.String() != "1.049" || fee == nil || fee.String() != "2.1" || repaid == nil ||
+		*repaid != `[{"asset":"USDT","amount":"100.1"}]` || !done {
+		t.Fatalf("liquidation: level %v fee %v repaid %v done %v", level, fee, repaid, done)
+	}
+	var scope string
+	if err := conn.QueryRow(ctx, `SELECT scope FROM ledger_entries FINAL WHERE journal_id = ?`, journal).Scan(&scope); err != nil || scope != "BTC-USDT" {
+		t.Fatalf("ledger line scope %q (%v)", scope, err)
 	}
 }

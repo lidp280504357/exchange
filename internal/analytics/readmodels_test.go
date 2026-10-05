@@ -15,6 +15,7 @@ import (
 
 	derivativesv1 "github.com/skill/exchange/api/gen/go/exchange/derivatives/v1"
 	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
+	marginv1 "github.com/skill/exchange/api/gen/go/exchange/margin/v1"
 	marketv1 "github.com/skill/exchange/api/gen/go/exchange/market/v1"
 	orderv1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
 	tradev1 "github.com/skill/exchange/api/gen/go/exchange/trade/v1"
@@ -269,5 +270,51 @@ func TestAFlatMinuteBecomesItsCandleRow(t *testing.T) {
 	traded.TradeCount = 3
 	if err := m.add(delivery(t, event.TopicMarketCandleFlats, &marketv1.CandleClosed{Candle: traded}, open)); !errors.Is(err, errMalformed) {
 		t.Fatalf("a minute with trades: %v", err)
+	}
+}
+
+func TestProjectMargin(t *testing.T) {
+	at := time.Date(2026, 10, 6, 5, 0, 0, 0, time.UTC)
+	user, liquidation := uuid.NewString(), uuid.NewString()
+	var m readModels
+	for _, d := range []kafka.Delivery{
+		delivery(t, event.TopicMargin, &marginv1.MarginInterestAccrued{
+			InterestId: uuid.NewString(), UserId: user, AccountType: "MARGIN_CROSS", Asset: "USDT", Principal: "150", InterestModel: "FIXED",
+			HourlyRate: "0.00001", Interest: "0.0015", InterestOwed: "0.003", Hour: timestamppb.New(at), JournalId: uuid.NewString(),
+		}, at),
+		delivery(t, event.TopicMargin, &marginv1.MarginLiquidationStarted{
+			LiquidationId: liquidation, UserId: user, AccountType: "MARGIN_ISOLATED", Symbol: "BTC-USDT", MarginLevel: "1.049",
+			TotalAsset: "105", TotalLiability: "100.1", StartedAt: timestamppb.New(at),
+		}, at),
+		delivery(t, event.TopicMargin, &marginv1.MarginLiquidationCompleted{
+			LiquidationId: liquidation, UserId: user, AccountType: "MARGIN_ISOLATED", Symbol: "BTC-USDT",
+			Repaid: []*marginv1.AssetAmount{{Asset: "USDT", Amount: "100.1"}}, Fee: "2.1", InsuranceCovered: "0",
+			Remaining: []*marginv1.AssetAmount{{Asset: "USDT", Amount: "2.8"}}, CompletedAt: timestamppb.New(at.Add(time.Second)),
+		}, at.Add(time.Second)),
+		// No read model for borrows yet.
+		delivery(t, event.TopicMargin, &marginv1.MarginBorrowed{BorrowId: uuid.NewString(), UserId: user}, at),
+	} {
+		if err := m.add(d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(m.marginInterest) != 1 || !m.marginInterest[0][9].(decimal.Decimal).Equal(decimal.RequireFromString("0.003")) {
+		t.Fatalf("interest rows: %v", m.marginInterest)
+	}
+	if len(m.marginLiquidations) != 2 {
+		t.Fatalf("liquidation rows: %d", len(m.marginLiquidations))
+	}
+	started, completed := m.marginLiquidations[0], m.marginLiquidations[1]
+	// The start sets the level and the values; the end the outcome; each
+	// leaves the other's columns NULL.
+	if started[4].(*decimal.Decimal).String() != "1.049" || started[8] != nil || started[12] != nil {
+		t.Fatalf("started row: %v", started)
+	}
+	if completed[4] != nil || *completed[8].(*string) != `[{"asset":"USDT","amount":"100.1"}]` || completed[9].(*decimal.Decimal).String() != "2.1" ||
+		*completed[11].(*string) != `[{"asset":"USDT","amount":"2.8"}]` {
+		t.Fatalf("completed row: %v", completed)
+	}
+	if err := m.add(delivery(t, event.TopicMargin, &marginv1.MarginInterestAccrued{InterestId: "nope"}, at)); !errors.Is(err, errMalformed) {
+		t.Fatalf("malformed interest: %v", err)
 	}
 }

@@ -18,6 +18,7 @@ import (
 
 	derivativesv1 "github.com/skill/exchange/api/gen/go/exchange/derivatives/v1"
 	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
+	marginv1 "github.com/skill/exchange/api/gen/go/exchange/margin/v1"
 	marketv1 "github.com/skill/exchange/api/gen/go/exchange/market/v1"
 	orderv1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
 	tradev1 "github.com/skill/exchange/api/gen/go/exchange/trade/v1"
@@ -31,14 +32,16 @@ import (
 // projected from order.events, trade.events and wallet.*.events, and
 // one-minute candles recomputed from trades. Contract orders and trades
 // join them; positions, fills, funding and liquidations of contracts
-// have tables of their own (§7.3 task 10, 00005_derivatives_read_models.sql).
+// have tables of their own (§7.3 task 10, 00005_derivatives_read_models.sql),
+// and so have margin trading's interest and liquidations (margin design
+// 2026-10-06 §5.3, 00009_margin_read_models.sql).
 
 // ReadModelTopics feed the read models (the flat minutes too: kept in
 // events, a backfill writes them again).
 var ReadModelTopics = []string{
 	event.TopicOrder, event.TopicTrade, event.TopicWalletDeposit, event.TopicWalletWithdrawal,
 	event.TopicDerivOrder, event.TopicDerivTrade, event.TopicDerivPosition, event.TopicDerivLiquidation,
-	event.TopicMarketCandleFlats,
+	event.TopicMarketCandleFlats, event.TopicMargin,
 }
 
 const (
@@ -62,7 +65,11 @@ const (
 	insertLiquidations = `INSERT INTO derivatives_liquidations (event_id, kind, user_id, symbol, position_side, cross_margin, adl,
 		trade_id, price, quantity, realized_pnl, insurance_paid, mark_price, bankruptcy_price, margin_balance, maintenance_margin,
 		occurred_at)`
-	insertFlats = `INSERT INTO candles_1m (symbol, open_time, open, high, low, close, volume, quote_volume, trades, updated_at)`
+	insertFlats          = `INSERT INTO candles_1m (symbol, open_time, open, high, low, close, volume, quote_volume, trades, updated_at)`
+	insertMarginInterest = `INSERT INTO margin_interest (interest_id, user_id, account_type, symbol, asset, principal, interest_model,
+		hourly_rate, interest, interest_owed, hour, journal_id)`
+	insertMarginLiquidations = `INSERT INTO margin_liquidations (liquidation_id, user_id, account_type, symbol, margin_level,
+		total_asset, total_liability, started_at, repaid, fee, insurance_covered, remaining, completed_at)`
 	// refreshCandles rewrites the one-minute candles of a symbol between
 	// two minutes from all its trades there.
 	refreshCandles = `INSERT INTO candles_1m (symbol, open_time, open, high, low, close, volume, quote_volume, trades, updated_at)
@@ -153,7 +160,7 @@ type span struct{ from, to time.Time }
 type readModels struct {
 	trades, orders, updates, deposits, withdrawals [][]any
 	positions, fills, funding, liquidations        [][]any
-	flats                                          [][]any
+	flats, marginInterest, marginLiquidations      [][]any
 	touched                                        map[string]span
 }
 
@@ -162,7 +169,7 @@ type readModels struct {
 func (m *readModels) add(d kafka.Delivery) error {
 	switch d.Topic {
 	case event.TopicTrade, event.TopicOrder, event.TopicWalletDeposit, event.TopicWalletWithdrawal, event.TopicDerivOrder,
-		event.TopicDerivTrade, event.TopicDerivPosition, event.TopicDerivLiquidation, event.TopicMarketCandleFlats:
+		event.TopicDerivTrade, event.TopicDerivPosition, event.TopicDerivLiquidation, event.TopicMarketCandleFlats, event.TopicMargin:
 	default:
 		return nil
 	}
@@ -174,6 +181,9 @@ func (m *readModels) add(d kafka.Delivery) error {
 	at := env.GetOccurredAt().AsTime()
 	if d.Topic == event.TopicDerivPosition || d.Topic == event.TopicDerivLiquidation {
 		return m.addDerivatives(msg, env.GetEventId(), at)
+	}
+	if d.Topic == event.TopicMargin {
+		return m.addMargin(msg)
 	}
 	switch e := msg.(type) {
 	case *tradev1.TradeExecuted:
@@ -516,6 +526,81 @@ func (m *readModels) addLiquidation(l liquidationStep, eventID string, at time.T
 	return nil
 }
 
+// addMargin projects margin.events: an hour's interest, and the start and
+// the end of a liquidation (each sets its own columns of the liquidation's
+// row; NULL leaves a column to the other event). Borrows and repayments
+// have no read model yet.
+func (m *readModels) addMargin(msg proto.Message) error {
+	switch e := msg.(type) {
+	case *marginv1.MarginInterestAccrued:
+		interestID, err := id(e.GetInterestId())
+		userID, err2 := id(e.GetUserId())
+		principal, err3 := amount(e.GetPrincipal())
+		rate, err4 := amount(e.GetHourlyRate())
+		interest, err5 := amount(e.GetInterest())
+		owed, err6 := amount(e.GetInterestOwed())
+		if err := errors.Join(err, err2, err3, err4, err5, err6); err != nil {
+			return err
+		}
+		m.marginInterest = append(m.marginInterest, []any{
+			interestID, userID, e.GetAccountType(), e.GetSymbol(), e.GetAsset(), principal, e.GetInterestModel(), rate, interest, owed,
+			e.GetHour().AsTime(), e.GetJournalId(),
+		})
+	case *marginv1.MarginLiquidationStarted:
+		liquidationID, err := id(e.GetLiquidationId())
+		userID, err2 := id(e.GetUserId())
+		level, err3 := optional(e.GetMarginLevel())
+		assets, err4 := optional(e.GetTotalAsset())
+		liabilities, err5 := optional(e.GetTotalLiability())
+		if err := errors.Join(err, err2, err3, err4, err5); err != nil {
+			return err
+		}
+		started := e.GetStartedAt().AsTime()
+		m.marginLiquidations = append(m.marginLiquidations, []any{
+			liquidationID, &userID, ptr(e.GetAccountType()), ptr(e.GetSymbol()), level, assets, liabilities, &started,
+			nil, nil, nil, nil, nil,
+		})
+	case *marginv1.MarginLiquidationCompleted:
+		liquidationID, err := id(e.GetLiquidationId())
+		userID, err2 := id(e.GetUserId())
+		fee, err3 := optional(e.GetFee())
+		insurance, err4 := optional(e.GetInsuranceCovered())
+		repaid, err5 := assetAmounts(e.GetRepaid())
+		remaining, err6 := assetAmounts(e.GetRemaining())
+		if err := errors.Join(err, err2, err3, err4, err5, err6); err != nil {
+			return err
+		}
+		completed := e.GetCompletedAt().AsTime()
+		m.marginLiquidations = append(m.marginLiquidations, []any{
+			liquidationID, &userID, ptr(e.GetAccountType()), ptr(e.GetSymbol()), nil, nil, nil, nil,
+			&repaid, fee, insurance, &remaining, &completed,
+		})
+	}
+	return nil
+}
+
+// ptr is a string column's value; an isolated account's symbol, none for
+// the cross account, is still a value (the empty string), not NULL.
+func ptr(s string) *string { return &s }
+
+// assetAmounts writes amounts of assets as a JSON array of
+// {"asset", "amount"}, checking each amount.
+func assetAmounts(list []*marginv1.AssetAmount) (string, error) {
+	type item struct {
+		Asset  string `json:"asset"`
+		Amount string `json:"amount"`
+	}
+	out := make([]item, 0, len(list))
+	for _, a := range list {
+		if _, err := amount(a.GetAmount()); err != nil {
+			return "", err
+		}
+		out = append(out, item{Asset: a.GetAsset(), Amount: a.GetAmount()})
+	}
+	b, err := json.Marshal(out)
+	return string(b), err
+}
+
 // storeReadModels writes a batch's rows, then recomputes the candles of the
 // minutes its trades fell in.
 func (in *Ingestor) storeReadModels(ctx context.Context, batch []kafka.Delivery) error {
@@ -540,6 +625,8 @@ func (in *Ingestor) storeReadModels(ctx context.Context, batch []kafka.Delivery)
 		{insertFunding, m.funding},
 		{insertLiquidations, m.liquidations},
 		{insertFlats, m.flats},
+		{insertMarginInterest, m.marginInterest},
+		{insertMarginLiquidations, m.marginLiquidations},
 	} {
 		if err := in.insert(ctx, t.insert, t.rows); err != nil {
 			return err

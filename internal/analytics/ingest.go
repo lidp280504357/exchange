@@ -41,6 +41,7 @@ var Topics = []string{
 	event.TopicDerivPosition,
 	event.TopicDerivLiquidation,
 	event.TopicMarketCandleFlats,
+	event.TopicMargin,
 }
 
 // Ingestor writes event batches into the events table.
@@ -105,7 +106,7 @@ func (in *Ingestor) storeLedgerEntries(ctx context.Context, batch []kafka.Delive
 		}
 		if b == nil {
 			if b, err = in.conn.PrepareBatch(ctx, `INSERT INTO ledger_entries (journal_id, seq, line_no, entry_type, account_id,
-				owner_type, owner_id, account_type, asset, amount, balance_kind, available_after, frozen_after, posted_at)`); err != nil {
+				owner_type, owner_id, account_type, scope, asset, amount, balance_kind, available_after, frozen_after, posted_at)`); err != nil {
 				return fmt.Errorf("clickhouse: prepare ledger batch: %w", err)
 			}
 		}
@@ -120,7 +121,7 @@ func (in *Ingestor) storeLedgerEntries(ctx context.Context, batch []kafka.Delive
 				continue
 			}
 			if err := b.Append(journal, posted.GetSeq(), uint16(i+1), posted.GetEntryType(), account, l.GetOwnerType(), //nolint:gosec // journals have few lines
-				l.GetOwnerId(), l.GetAccountType(), l.GetAsset(), amount, l.GetBalanceKind(), available, frozen, at); err != nil {
+				l.GetOwnerId(), l.GetAccountType(), l.GetScope(), l.GetAsset(), amount, l.GetBalanceKind(), available, frozen, at); err != nil {
 				_ = b.Abort()
 				return fmt.Errorf("clickhouse: append ledger line: %w", err)
 			}
