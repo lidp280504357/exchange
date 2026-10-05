@@ -32,6 +32,9 @@ ssh exchange sudo docker exec exchange-infra-user-service-1 /app/exchangectl use
 | `DERIVATIVES_TRADE` | `derivatives.trading` | 看开关 | `USER_RISK_REVIEW` | `USER_FROZEN` | `USER_CLOSED` |
 | `TRANSFER` | `account.transfer` | 看开关 | `USER_RISK_REVIEW` | `USER_FROZEN` | `USER_CLOSED` |
 | `WITHDRAW` | `wallet.withdraw` | 看开关 | `USER_RISK_REVIEW` | `USER_FROZEN` | `USER_CLOSED` |
+| `MARGIN_TRADE` | `margin.enabled` | 看开关 | `USER_RISK_REVIEW` | `USER_FROZEN` | `USER_CLOSED` |
+
+`MARGIN_TRADE`（杠杆设计 2026-10-06 §7）只给两站决定显不显示杠杆入口；margin-service 与交易服务自己按用户 ID 查 `margin.enabled`（不带地区），所以这个开关的规则应写用户名单而不是地区，否则资格说可以、服务却按失败即关闭拒绝。
 
 开关关闭或不存在返回 `USER_NOT_ELIGIBLE`；开关因地区规则拒绝返回 `USER_REGION_NOT_ALLOWED`。改开关见 [feature-flags.md](feature-flags.md)。
 

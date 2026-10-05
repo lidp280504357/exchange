@@ -44,6 +44,7 @@
 | 首页、行情、币种 | `/`、`/markets`、`/coin/:symbol` | `pages/markets` | `markets/`：行情列表排序筛选、自选（本机与账户同步）、迷你走势图 |
 | 交易终端 | `/trade/:symbol`、`/futures/:symbol` | `pages/trade`（全高 `TerminalShell`，无页脚） | `trading/`：交易对、订单与成交、K 线分页、合约（仓位、保证金、止盈止损、资金费）、终端偏好 |
 | 资产 | `/assets`、`/assets/{deposit,withdraw,transfer,history}` | `pages/assets` | `assets/`（估值、流水、划转）、`wallet/`（网络、地址格式、提现计算、充提时间线） |
+| 杠杆账户 | `/assets/margin` | `pages/assets/Margin.tsx`、`parts/MarginDialog.tsx`（手机站 `parts/MarginSheet.tsx`） | `margin/`：`math.ts`（风险率分区与显示、负债、可还）、`hooks.ts`（条款、账户每 5 秒刷新、可借额度、划转/借币/还币调用、入口判定）、`form.ts`（两站共用的表单逻辑：账户、币种、上限、校验、幂等键）；仪表是 `@exchange/ui` 的 `MarginLevel` |
 | 账户 | `/account/{security,sessions,settings}`、`/notifications` | `pages/account` | `user/`（资料、会话、安全、通知）、`auth/`（登录流程、密码规则、注册） |
 | 认证 | `/login`、`/register`、`/reset` | `pages/auth`（居中卡片 `AuthShell`） | `auth/` |
 | 公告、帮助 | `/announcements`、`/help` | `pages/content` | `content/`：Markdown（`packages/core/content/*.md`，中英两份）与安全的渲染器；后台发布的文章（`GET /v1/announcements`、`/v1/help`）叠加在自带文件之上，同 slug 以接口为准，下线的连同自带文件一起隐藏，1 分钟内到达（见 `admin.md`「运营」） |
@@ -52,6 +53,7 @@
 - 文案：外壳的在 `src/i18n.ts`，各区域的在 `src/i18n/<区域>.ts`（命名空间 `pcTrade`、`pcAssets` 等）。`routing.tsx` 的 `lazyPage` 与页面 chunk 并行加载该区域文案并注册，首屏不带全部页面的文字。
 - 敏感操作：`features/auth/StepUp.tsx` 的 `useStepUp()`（身份验证器或邮箱/短信验证码换 step-up 令牌），`OtpStep` 是"人机验证 → 发送验证码 → 6 位码"的共用步骤。
 - 快捷键：`⌘K`/`Ctrl+K` 全站搜索；终端里 `/` 打开交易对搜索，`B`/`S` 切买卖。
+- 杠杆账户（杠杆设计 2026-10-06 §7，批次 E4 的第一部分）：全仓卡片（风险率仪表、总资产/总负债/净资产、各币种的可用/冻结/已借/利息/净资产与借、还、划转）、逐仓列表（每个交易对一张，含强平价估算）、借币利率；三个弹窗共用 core 的 `useMarginForm`：划入的上限是现货可用，划出是账户可用（服务端另按预警线与负债限制），借币是 `max-borrowable`（并写明受哪一界限制），还币是负债与可用的较小者，点"最大"且能还清时发 `ALL`。入口：资产侧栏的"杠杆账户"与手机站资产页的入口行，只对 `MARGIN_TRADE` 资格开放的人、或仍有杠杆资产或负债的人显示（关闭后还能还币、划出）；`margin.enabled` 对用户关闭时页面顶部说明，借币按钮不可点。仪表分区：低于预警线红，预警线以上两倍间距内黄，再往上绿，无负债显示 999。
 
 ## 手机站页面（B3）
 
