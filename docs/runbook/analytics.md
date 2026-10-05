@@ -24,7 +24,7 @@
 | `derivatives_funding` | 每个仓位每次资金费（费率、结算标记价、金额：正为收到、负为付出） | `derivatives.FundingPaid` |
 | `derivatives_liquidations` | 强平步骤：WARNING、STARTED、FILLED（`adl` 表示是否由自动减仓成交）、ADL（被减仓的对手方），带价格、数量、已实现盈亏、保险基金垫付、标记/破产价、保证金余额与维持保证金 | `derivatives.liquidation.events` |
 | `margin_interest` | 杠杆账户每小时每资产的计息（计息本金、模型与小时利率、利息、计息后的应付利息、整点、分录 journal） | `margin.MarginInterestAccrued`（杠杆设计 2026-10-06 §5.3，迁移 clickhouse 00009） |
-| `margin_liquidations` | 每次杠杆强平一行（AggregatingMergeTree，各列 `anyLast` 取最后一个非 NULL 值）：开始事件写触发时的风险率、总资产与总负债、开始时间，完成事件写各资产归还（JSON 数组）、强平费、保险基金补足、剩余与完成时间；`completed_at` 非空即已完成；两事件先后与重复投递都不影响结果，查询加 `FINAL` | `margin.MarginLiquidationStarted`、`MarginLiquidationCompleted` |
+| `margin_liquidations` | 每次杠杆强平一行（AggregatingMergeTree，各列 `anyLast` 取最后一个非 NULL 值）：开始事件写触发时的风险率、总资产与总负债、开始时间，完成事件写各资产归还（JSON 数组）、强平费、保险基金补足、剩余与完成时间，并复述开始时的风险率、总资产、总负债与开始时间（没复述的旧事件留给开始事件）；`completed_at` 非空即已完成；两事件先后与重复投递都不影响结果，查询加 `FINAL` | `margin.MarginLiquidationStarted`、`MarginLiquidationCompleted` |
 | `read_model_backfills` | 已完成的回填 | analytics-consumer |
 
 - 充值与提现快照的 `version` = 事件毫秒时间 × 16 + 状态进度，同一毫秒的两个事件（提现申请与风控评分在同一事务里）按状态先后取后者。

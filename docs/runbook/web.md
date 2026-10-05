@@ -44,7 +44,7 @@
 | 首页、行情、币种 | `/`、`/markets`、`/coin/:symbol` | `pages/markets` | `markets/`：行情列表排序筛选、自选（本机与账户同步）、迷你走势图 |
 | 交易终端 | `/trade/:symbol`、`/futures/:symbol` | `pages/trade`（全高 `TerminalShell`，无页脚） | `trading/`：交易对、订单与成交、K 线分页、合约（仓位、保证金、止盈止损、资金费）、终端偏好 |
 | 资产 | `/assets`、`/assets/{deposit,withdraw,transfer,history}` | `pages/assets` | `assets/`（估值、流水、划转）、`wallet/`（网络、地址格式、提现计算、充提时间线） |
-| 杠杆账户 | `/assets/margin` | `pages/assets/Margin.tsx`、`parts/MarginDialog.tsx`（手机站 `parts/MarginSheet.tsx`） | `margin/`：`math.ts`（风险率分区与显示、负债、可还）、`hooks.ts`（条款、账户每 5 秒刷新、可借额度、划转/借币/还币调用、入口判定）、`form.ts`（两站共用的表单逻辑：账户、币种、上限、校验、幂等键）；仪表是 `@exchange/ui` 的 `MarginLevel` |
+| 杠杆账户 | `/assets/margin` | `pages/assets/Margin.tsx`、`parts/MarginDialog.tsx`（手机站 `parts/MarginSheet.tsx`） | `margin/`：`math.ts`（风险率分区与显示、负债、可还）、`hooks.ts`（条款、账户（`margin` 频道的 ACCOUNT 推送由 `query/private.ts` 的 `applyMarginAccount` 直接写进缓存，余额或负债变了才重拉借款与可借额度；另每 15 秒刷新，给没有负债、只有价格变化时不推送的账户估值）、可借额度、划转/借币/还币调用、入口判定）、`form.ts`（两站共用的表单逻辑：账户、币种、上限、校验、幂等键）；仪表是 `@exchange/ui` 的 `MarginLevel` |
 | 账户 | `/account/{security,sessions,settings}`、`/notifications` | `pages/account` | `user/`（资料、会话、安全、通知）、`auth/`（登录流程、密码规则、注册） |
 | 认证 | `/login`、`/register`、`/reset` | `pages/auth`（居中卡片 `AuthShell`） | `auth/` |
 | 公告、帮助 | `/announcements`、`/help` | `pages/content` | `content/`：Markdown（`packages/core/content/*.md`，中英两份）与安全的渲染器；后台发布的文章（`GET /v1/announcements`、`/v1/help`）叠加在自带文件之上，同 slug 以接口为准，下线的连同自带文件一起隐藏，1 分钟内到达（见 `admin.md`「运营」） |
