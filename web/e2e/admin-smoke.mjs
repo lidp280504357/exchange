@@ -140,6 +140,12 @@ try {
   // idle browser fetches every section's page, one after another in the
   // sidebar's order (the settings last), within 30 s; three sections never
   // opened (the system group's) then fetch no JS file at all.
+  // The console fetches nothing ahead when the browser asks to save data
+  // or while the tab is hidden (preload.ts): said at once, not after 30 s.
+  const why = await page.evaluate(() =>
+    navigator.connection?.saveData ? "the browser asks to save data" : document.visibilityState === "hidden" ? "the tab is hidden" : "",
+  );
+  if (why) throw new Error(`the console fetches no page ahead here: ${why}`);
   const chunkOf = (name) => [...fetched].some((p) => new RegExp(`^/assets/${name}-[\\w-]+\\.js$`).test(p));
   const ahead = [["/reports", "报表", "Reports"], ["/health", "系统健康", "Health"], ["/platform", "平台设置", "Platform"]];
   const aheadBy = Date.now() + 30_000;

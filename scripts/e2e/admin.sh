@@ -768,6 +768,30 @@ orders_listed() {
 }
 eventually 60 "the user's canceled order is in the orders view" orders_listed
 check '.items[0].status == "CANCELED" and .items[0].symbol == "ETH-BTC"' "in its latest state"
+# The view is read by created_key as well as created_at, and pages by it
+# (eaee3bd, review BQ): a range around the order finds it, one ending a
+# second before it does not; two pages of three of the bots' orders up to
+# a minute ago are the six newest of them.
+ORDER_AT=$(jq -r --arg o "$ORDER" '.items[] | select(.order_id == $o) | .created_at' <<<"$BODY")
+at_shift() { # at_shift SECONDS: the order's time (whole seconds) moved by SECONDS, RFC 3339
+  jq -rn --arg t "$ORDER_AT" --argjson s "$1" '$t | sub("\\.[0-9]+"; "") | fromdateiso8601 + $s | todate'
+}
+as AUDITOR GET "/admin/v1/orders?user_id=$USER_ID&from=$(at_shift -60)&to=$(at_shift 60)" ""
+expect 200 - "the user's orders within a minute of the order"
+check ".items | map(.order_id) | index(\"$ORDER\") != null" "hold it"
+as AUDITOR GET "/admin/v1/orders?user_id=$USER_ID&to=$(at_shift -1)" ""
+expect 200 - "the user's orders up to a second before it"
+check ".items | map(.order_id) | index(\"$ORDER\") == null" "do not"
+UNTIL=$(jq -rn 'now - 60 | floor | todate')
+as AUDITOR GET "/admin/v1/orders?accounts=bots&to=$UNTIL&limit=6" ""
+expect 200 - "the bots' six newest orders up to a minute ago"
+SIX=$(jq -c '[.items[].order_id]' <<<"$BODY")
+as AUDITOR GET "/admin/v1/orders?accounts=bots&to=$UNTIL&limit=3" ""
+expect 200 - "three of them"
+PAGE=$(jq -c '[.items[].order_id]' <<<"$BODY")
+as AUDITOR GET "/admin/v1/orders?accounts=bots&to=$UNTIL&limit=3&cursor=$(jq -r .next_cursor <<<"$BODY")" ""
+expect 200 - "and the next page"
+check "($PAGE + [.items[].order_id]) == $SIX and ($SIX | length) == 6" "the same six, none lost or repeated"
 as AUDITOR GET "/admin/v1/trades?symbol=ETH-BTC&limit=3" ""
 expect 200 - "trades"
 check '(.items | length) <= 3 and all(.items[]; .symbol == "ETH-BTC" and (.price | test("^[0-9.]+$")))' "of one symbol"
