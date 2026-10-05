@@ -152,7 +152,7 @@ export function OrderBook({
   const sidesRef = useRef<HTMLDivElement>(null);
   const middleRef = useRef<HTMLDivElement>(null);
   const room = useRoom(onRows ? sidesRef : null, middleRef);
-  const fill = room > 0 ? fitRows(room, minRow) : null;
+  const fill = fitRows(room, minRow);
   const fitted = fill?.levels ?? 0;
   // Told before the browser paints, so the view is cut to it at once.
   useLayoutEffect(() => {
@@ -161,9 +161,12 @@ export function OrderBook({
   const levels = fill?.levels ?? asked;
   const rowHeight = fill?.rowHeight ?? minRow;
   const perSide = mode === "both" ? levels : levels * 2;
-  // The step the view was cut at, when finer than the one chosen.
+  // The step the view was cut at, when finer than the one chosen: the
+  // chosen one cannot fill the book, or fills it without the levels to
+  // spare while a finer step is held (core's OrderBook.fit).
   const fallback = view.step !== undefined && step !== undefined && view.step !== step;
-  const stepShown = fallback ? t("ui.book.stepShown", { step, shown: view.step }) : "";
+  const held = fallback && step !== undefined && view.fills?.includes(step) === true;
+  const stepShown = fallback ? t(held ? "ui.book.stepHeld" : "ui.book.stepShown", { step, shown: view.step }) : "";
   const stepNote = useId();
   const max = dec.toNumber(view.maxTotal);
   const asks = mode === "bids" ? [] : view.asks.slice(0, perSide).reverse();
@@ -279,7 +282,14 @@ export function OrderBook({
                 onValueChange={onStepChange}
                 options={steps.map((s) => {
                   const off = view.fits !== undefined && !view.fits.includes(s);
-                  return { value: s, label: s, disabled: off, hint: off ? t("ui.book.stepTooCoarse") : undefined, title: off ? t("ui.book.stepOff", { step: s }) : undefined };
+                  const spare = off && view.fills?.includes(s) === true;
+                  return {
+                    value: s,
+                    label: s,
+                    disabled: off,
+                    hint: off ? t(spare ? "ui.book.stepSpareShort" : "ui.book.stepTooCoarse") : undefined,
+                    title: off ? t(spare ? "ui.book.stepSpare" : "ui.book.stepOff", { step: s }) : undefined,
+                  };
                 })}
                 aria-label={t("ui.book.step")}
                 aria-describedby={fallback ? stepNote : undefined}

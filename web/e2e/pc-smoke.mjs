@@ -175,7 +175,7 @@ try {
   await go("/trade/BTC-USDT");
   const coarse = await bookFills(1920, 1080);
   if (coarse.step !== "10") {
-    if (!coarse.step.startsWith("≈") || !coarse.why.includes("按 10 稳定填满")) throw new Error(`with 10 kept the book shows ${coarse.step} without saying why: ${JSON.stringify(coarse)}`);
+    if (!coarse.step.startsWith("≈") || !/按 10 填满|所选 10 刚够/.test(coarse.why)) throw new Error(`with 10 kept the book shows ${coarse.step} without saying why: ${JSON.stringify(coarse)}`);
     await page.click('button[aria-label="价格精度"]');
     await page.waitForSelector("[role=option]", { visible: true, timeout: 5000 });
     const ten = await page.evaluate(() => {

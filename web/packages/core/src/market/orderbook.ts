@@ -20,6 +20,12 @@ export type BookView = {
   step?: string;
   /** The steps offered whose views fill the book (OrderBook.fit), finest first. */
   fits?: string[];
+  /**
+   * The steps whose views fill the book now (OrderBook.fit): `fits` and,
+   * while a finer step is held, those above it that fill without the
+   * levels to spare.
+   */
+  fills?: string[];
 };
 
 /** The sides a book shows (the terminal's view mode), which must fill. */
@@ -113,7 +119,7 @@ export class OrderBook {
       const v = cut(s);
       return (sides === "asks" || v.bids.length >= n) && (sides === "bids" || v.asks.length >= n);
     };
-    const shown = (s: string, fits: string[]): BookView => ({ ...trim(cut(s), depth), step: s, fits });
+    const shown = (s: string, fits: string[], fills = fits): BookView => ({ ...trim(cut(s), depth), step: s, fits, fills });
     const at = steps.indexOf(step);
     if (at < 0 || (this.bids.length === 0 && this.asks.length === 0)) return shown(step, [...steps]);
     // A coarser step never has more levels, dust folded or not: each step
@@ -134,7 +140,7 @@ export class OrderBook {
       // held there, the steps above it are not offered: they fill, but not
       // with the levels to spare that showing them takes now.
       while (use > was && !has(steps[use]!, spare)) use--;
-      if (use < Math.min(at, top)) return shown(steps[use]!, steps.slice(0, use + 1));
+      if (use < Math.min(at, top)) return shown(steps[use]!, steps.slice(0, use + 1), steps.slice(0, top + 1));
     }
     return shown(steps[use]!, steps.slice(0, top + 1));
   }

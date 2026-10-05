@@ -112,6 +112,7 @@ describe("OrderBook.fit", () => {
     expect(v.bids).toHaveLength(15);
     expect(v.asks).toHaveLength(15);
     expect(v.fits).toEqual(["0.01", "0.1", "1"]);
+    expect(v.fills).toEqual(["0.01", "0.1", "1"]);
     // The same view a cut at 1 gives (totals and the largest of them).
     expect(v).toMatchObject(dense().view(15, "1"));
   });
@@ -140,7 +141,7 @@ describe("OrderBook.fit", () => {
     b.snapshot({ bids: levels(10000, -100, 40), asks: levels(10100, 100, 40) });
     expect(b.fit(3, "10", ["1", "10"])).toMatchObject({ step: "10", fits: ["1", "10"] });
     // Held at 1, 10 is not offered: it fills, without the levels to spare.
-    expect(b.fit(3, "10", ["1", "10"], "", "both", "1")).toMatchObject({ step: "1", fits: ["1"] });
+    expect(b.fit(3, "10", ["1", "10"], "", "both", "1")).toMatchObject({ step: "1", fits: ["1"], fills: ["1", "10"] });
     b.update({ bids: [], asks: [["150.00", "1"]] });
     expect(b.fit(3, "10", ["1", "10"], "", "both", "1")).toMatchObject({ step: "10", fits: ["1", "10"] });
   });
@@ -150,6 +151,6 @@ describe("OrderBook.fit", () => {
     b.snapshot({ bids: levels(10000, -50, 40), asks: levels(10050, 50, 60) });
     const three = ["0.1", "1", "10"];
     expect(b.fit(3, "10", three)).toMatchObject({ step: "10", fits: three });
-    expect(b.fit(3, "10", three, "", "both", "0.1")).toMatchObject({ step: "1", fits: ["0.1", "1"] });
+    expect(b.fit(3, "10", three, "", "both", "0.1")).toMatchObject({ step: "1", fits: ["0.1", "1"], fills: three });
   });
 });
