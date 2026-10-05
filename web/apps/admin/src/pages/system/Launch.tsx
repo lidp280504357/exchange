@@ -5,6 +5,7 @@ import { CircleCheck, TriangleAlert } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
+import { useFlagCheck } from "../../kit/flags";
 import { Num, TimeText } from "../../kit/format";
 import { Card, Page } from "../../kit/Page";
 
@@ -24,13 +25,24 @@ const tone: Record<Status, "success" | "danger" | "neutral" | "warn"> = { OK: "s
 const FIX: Record<Key, string | null> = {
   welcome_credits: "/platform#welcome", test_mode: "/platform", registration: "/platform", admin_totp: "/risk", two_person: "/risk",
   test_assets: "/risk", custodian: null, withdraw: "/risk", brand: "/platform", coin_profile: "/sim/token", legal: "/pages",
-  third_party: null, admins: "/admins", domain: "/platform", house: "/house",
+  third_party: null, admins: "/admins", domain: "/platform", house: "/house", margin: "/margin/params",
 };
 
 export const launchKey = ["admin", "launch-checklist"];
 
+/**
+ * withMargin adds the margin item while margin.enabled is on and
+ * admin-service does not report it yet (design 2026-10-06 §8, A55):
+ * pending, so the checklist is not ready until its source is there.
+ */
+function withMargin(items: Item[], on: boolean): Item[] {
+  if (!on || items.some((it) => it.key === "margin")) return items;
+  return [...items, { key: "margin", status: "PENDING", value: {} }];
+}
+
 export default function Launch() {
   const { t } = useTranslation();
+  const marginOn = useFlagCheck()("margin.enabled") === true;
   const q = useQuery({
     queryKey: launchKey,
     queryFn: async () => adminData(await adminApi.GET("/admin/v1/launch-checklist")),
@@ -74,7 +86,8 @@ export default function Launch() {
     [t],
   );
   if (q.isError) return <ErrorState message={String(q.error)} onRetry={() => void q.refetch()} />;
-  const c = q.data;
+  const c = q.data && { ...q.data, items: withMargin(q.data.items, marginOn) };
+  if (c) c.ready = c.ready && c.items.every((it) => it.status === "OK");
   const open = (c?.items ?? []).filter((it) => it.status !== "OK");
   return (
     <Page title={t("admin.nav.launch")} help={t("admin.launch.help")}>
@@ -191,6 +204,13 @@ function Current({ item: { key, value: v, status } }: { item: Item }) {
     }
     case "domain":
       body = t("admin.launch.domainNow", { domain: String(v.domain || "—"), host: String(v.console_host ?? "") });
+      break;
+    case "margin":
+      body = (
+        <>
+          <span className="font-mono text-xs text-fg-3">margin.enabled</span> {on(v.enabled)}
+        </>
+      );
       break;
     case "house": {
       const backed = Object.entries((v.backed as Record<string, string> | undefined) ?? {});

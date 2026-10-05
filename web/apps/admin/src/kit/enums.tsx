@@ -37,7 +37,13 @@ export type EnumGroup =
   | "depositResolution"
   | "adminStatus"
   | "feeStatus"
-  | "feeUnit";
+  | "feeUnit"
+  | "marginStatus"
+  | "marginType"
+  | "marginTrigger"
+  | "marginLiquidationStatus"
+  | "rateModel"
+  | "loanKind";
 
 /** useEnum returns a function that labels a code of a group (the code itself when unknown). */
 export function useEnum() {
@@ -77,6 +83,12 @@ const tones: Partial<Record<EnumGroup, Record<string, BadgeTone>>> = {
   totpStatus: { ACTIVE: "success", PENDING: "warn", NONE: "neutral" },
   riskAction: { NONE: "neutral", STEP_UP: "info", REVIEW: "warn", REJECT: "danger" },
   feeStatus: { HELD: "warn", BOOKABLE: "success", WRITTEN_OFF: "neutral" },
+  marginStatus: { NORMAL: "success", WARNED: "warn", LIQUIDATING: "danger", FROZEN: "danger" },
+  marginType: { MARGIN_CROSS: "brand", MARGIN_ISOLATED: "info" },
+  marginTrigger: { AUTO: "neutral", MANUAL: "warn" },
+  marginLiquidationStatus: { STARTED: "danger", COMPLETED: "neutral" },
+  rateModel: { FIXED: "neutral", FLOATING: "info" },
+  loanKind: { BORROW: "warn", REPAY: "success" },
 };
 
 /** EnumBadge labels a code as a badge toned by its meaning. */

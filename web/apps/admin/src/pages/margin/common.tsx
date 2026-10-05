@@ -1,0 +1,102 @@
+import { dec, formatDecimal, formatPercent, i18n } from "@exchange/core";
+import { Badge, FormField, Input } from "@exchange/ui";
+import { FlaskConical } from "lucide-react";
+import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import type { Notice } from "../../kit/actions";
+import { registerMarginMessages } from "./messages";
+
+// What the margin pages share (design 2026-10-06 §8, A55): their strings,
+// the preview banner and outcome while the API is a draft, margin levels
+// toned by their thresholds, hourly rates with their yearly equivalent.
+
+// The pages' strings come with their chunks, before any of them renders.
+registerMarginMessages();
+
+/** PreviewBanner says the page shows sample data and its changes go nowhere until the API is served (E5). */
+export function PreviewBanner() {
+  const { t } = useTranslation();
+  return (
+    <div data-testid="margin-preview" className="flex items-start gap-2 rounded-2 border border-warn bg-warn/10 px-3 py-2 text-sm text-warn-strong">
+      <FlaskConical size={16} className="mt-0.5 shrink-0" />
+      <span>{t("admin.margin.preview.banner")}</span>
+    </div>
+  );
+}
+
+/** previewed is a change's outcome in the preview: nothing sent, and what it would do (apply at once, or wait for a second administrator). */
+export function previewed(approval: boolean): Notice {
+  return { info: i18n.t(approval ? "admin.margin.preview.wouldAsk" : "admin.margin.preview.wouldApply") };
+}
+
+/** lineText is a margin level threshold as the pages show it: two decimals (1.10). */
+export const lineText = (v: string) => formatDecimal(v, { decimals: 2 });
+
+/** Level is a margin level toned by its account's thresholds; ∞ without liabilities. */
+export function Level({ level, warning, liquidation }: { level: string | null; warning: string; liquidation: string }) {
+  if (level === null) return <span className="font-mono text-fg-3">∞</span>;
+  const tone = dec.lte(level, liquidation) ? "danger" : dec.lte(level, warning) ? "warn" : "success";
+  return (
+    <Badge tone={tone} className="font-mono">
+      {formatDecimal(level, { decimals: 2 })}
+    </Badge>
+  );
+}
+
+/** HOURS_A_YEAR turns an hourly rate into a yearly one (simple, interest is not compounded, §4.3). */
+const HOURS_A_YEAR = "8760";
+
+/** Rate is an hourly rate as a percentage, with its yearly equivalent under it. */
+export function Rate({ hourly }: { hourly: string }) {
+  const { t } = useTranslation();
+  return (
+    <span className="inline-flex flex-col items-end font-mono tabular-nums">
+      <span>{t("admin.margin.perHour", { rate: formatPercent(hourly, 4, false) })}</span>
+      <span className="text-xs text-fg-3">{t("admin.margin.perYear", { rate: formatPercent(dec.mul(hourly, HOURS_A_YEAR), 2, false) })}</span>
+    </span>
+  );
+}
+
+/** toPercent and fromPercent turn a fraction into the percentage a form shows and back, exactly. */
+export const toPercent = (fraction: string) => dec.normalize(dec.mul(fraction, "100"));
+export const fromPercent = (percent: string) => dec.div(percent.trim(), "100", 12);
+
+/** isNumber is a non-negative decimal as typed. */
+export const isNumber = (v: string) => /^\d+(\.\d+)?$/.test(v.trim());
+
+/** Field is a labelled text input with its error and unit. */
+export function Field({
+  label, value, onChange, error, hint, unit, disabled,
+}: {
+  label: ReactNode;
+  value: string;
+  onChange: (v: string) => void;
+  error?: string;
+  hint?: ReactNode;
+  unit?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <FormField label={label} error={error} hint={hint}>
+      <Input value={value} onValueChange={onChange} unit={unit} disabled={disabled} inputMode="decimal" className="font-mono" />
+    </FormField>
+  );
+}
+
+/** Change is one field's value before and after, for a confirmation. */
+export type Change = { label: string; from: string; to: string };
+
+/** Changes lists what a confirmation changes, before and after. */
+export function Changes({ changes }: { changes: Change[] }) {
+  const { t } = useTranslation();
+  if (changes.length === 0) return <span className="text-sm text-fg-3">{t("admin.margin.noChange")}</span>;
+  return (
+    <span className="flex flex-col gap-0.5 text-xs">
+      {changes.map((c) => (
+        <span key={c.label}>
+          <span className="text-fg-3">{c.label}</span> <span className="font-mono">{c.from}</span> → <span className="font-mono text-fg-1">{c.to}</span>
+        </span>
+      ))}
+    </span>
+  );
+}

@@ -14,8 +14,10 @@
 // administrators (the roles' permissions; the creation form, canceled),
 // system health, the operations pages, the simulated market (overview,
 // price control with an event's impact, never started; events, bots, the
-// coin's holders; the bots' orders), the fund operations (approval mode,
-// form, records), the settings and the event stream, the account page; the
+// coin's holders; the bots' orders), the margin pages hidden while
+// margin.enabled is off (their own checks come with E5), the fund
+// operations (approval mode, form, records), the settings and the event
+// stream, the account page; the
 // search opens a user; signing out from the account menu ends the session,
 // and the setup page without a link says so. A section first opened from
 // the sidebar fetches its own chunk alone and shows a skeleton while that
@@ -587,6 +589,24 @@ try {
   await waitText("机器人");
   await noError("the bots' orders");
   ok("the simulated market: overview, price control with an event's impact (not started) and a target's preview, events, bots, the coin's holders; the bots' orders");
+
+  // 9e. Margin trading (design 2026-10-06 §8, A55): its pages sit behind
+  // margin.enabled. Off, the sidebar has none of them and their addresses
+  // lead to the overview. On, they show sample data until E5 serves the
+  // API: their checks (each page, the parameters' editors confirmed and
+  // canceled, an account's detail) come with E5, skipped until then.
+  const marginOn = await page.evaluate(async () => {
+    const r = await fetch("/admin/v1/flags");
+    return r.ok && (await r.json()).items.some((f) => f.key === "margin.enabled" && f.enabled);
+  });
+  if (marginOn) {
+    console.log("SKIP margin pages: margin.enabled is on; their checks come with E5 (the API is a draft)");
+  } else {
+    await go("/margin/params");
+    await waitPath("/");
+    if (await page.$('aside a[href^="/margin/"]')) throw new Error("the sidebar links a margin page while margin.enabled is off");
+    ok("margin trading stays hidden while margin.enabled is off: no sidebar entry, its addresses lead to the overview");
+  }
 
   // 10. Fund operations: the approval mode with its limits, the form, the
   // records; the settings; the counts pushed on the event stream.

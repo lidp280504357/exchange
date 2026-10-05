@@ -1,0 +1,535 @@
+import { dec, formatDecimal, formatPercent } from "@exchange/core";
+import { can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
+import {
+  Badge, Button, DataTable, Drawer, ErrorState, Progress, Segmented, Skeleton, Switch, Tabs, type ColumnDef, type DataColumnMeta,
+} from "@exchange/ui";
+import { Pencil } from "lucide-react";
+import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { DangerAction } from "../../kit/actions";
+import { EnumBadge } from "../../kit/enums";
+import { useFilters } from "../../kit/filters";
+import { TimeText } from "../../kit/format";
+import { Card, Page } from "../../kit/Page";
+import { useMarginAssets, useMarginPairs, useMarginSettings } from "./api";
+import { Changes, Field, fromPercent, isNumber, lineText, PreviewBanner, previewed, Rate, toPercent, type Change } from "./common";
+import type { MarginAsset, MarginPair, MarginSettings } from "./mock";
+
+type AssetParams = AdminSchemas["MarginAssetParams"];
+type Leverage = AdminSchemas["MarginLeverage"];
+
+const right: DataColumnMeta = { align: "right" };
+const LEVERAGES: Leverage[] = [3, 5, 10];
+
+/**
+ * Margin parameters (design 2026-10-06 §4, §8; A55): the assets that can
+ * be borrowed or count as collateral (pools, caps, interest, haircuts),
+ * the pairs' isolated terms, and the cross account's terms with the
+ * liquidation fee; margin-service keeps them (E0 contract §8). Changing
+ * them needs instruments.trading: what only stops new borrowing applies
+ * at once, everything else waits for a second ADMIN (a MARGIN_PARAMS
+ * request on the approvals page).
+ */
+export default function Params({ admin }: { admin: Admin }) {
+  const { t } = useTranslation();
+  const filters = useFilters(["tab"]);
+  const tab = ["pairs", "settings"].includes(filters.values.tab ?? "") ? filters.values.tab! : "assets";
+  const edit = can(admin, "instruments.trading");
+  return (
+    <Page title={t("admin.nav.marginParams")} help={t("admin.margin.params.help")}>
+      <PreviewBanner />
+      <Tabs
+        items={[
+          { value: "assets", label: t("admin.margin.params.assets") },
+          { value: "pairs", label: t("admin.margin.params.pairs") },
+          { value: "settings", label: t("admin.margin.params.settings") },
+        ]}
+        value={tab}
+        onValueChange={(v) => filters.set({ tab: v === "assets" ? "" : v })}
+        aria-label={t("admin.nav.marginParams")}
+      />
+      {tab === "assets" && <Assets edit={edit} />}
+      {tab === "pairs" && <Pairs edit={edit} />}
+      {tab === "settings" && <Settings edit={edit} />}
+    </Page>
+  );
+}
+
+function Assets({ edit }: { edit: boolean }) {
+  const { t } = useTranslation();
+  const q = useMarginAssets();
+  const [editing, setEditing] = useState<MarginAsset | null>(null);
+  const columns = useMemo<ColumnDef<MarginAsset, unknown>[]>(
+    () => [
+      {
+        id: "asset", header: t("admin.common.asset"),
+        cell: ({ row: { original: a } }) => (
+          <span className="flex flex-col gap-1">
+            <span className="font-medium text-fg-1">{a.asset}</span>
+            <span className="flex gap-1">
+              <Badge tone={a.borrowable ? "success" : "neutral"} size="sm">{t(a.borrowable ? "admin.margin.borrowable" : "admin.margin.notBorrowable")}</Badge>
+              <Badge tone={a.collateral ? "info" : "neutral"} size="sm">{t(a.collateral ? "admin.margin.collateral" : "admin.margin.notCollateral")}</Badge>
+            </span>
+          </span>
+        ),
+      },
+      {
+        id: "pool", header: t("admin.margin.fields.pool"), meta: { width: 220 },
+        cell: ({ row: { original: a } }) => (
+          <Progress
+            value={Number(a.utilization) * 100}
+            tone={dec.gte(a.utilization, a.floating.kink) ? "warn" : "brand"}
+            size="xs"
+            label={t("admin.margin.lent", { pct: formatPercent(a.utilization, 1, false) })}
+            valueText={`${formatDecimal(a.lent)} / ${formatDecimal(a.pool_cap)}`}
+          />
+        ),
+      },
+      { id: "user", header: t("admin.margin.fields.userCap"), meta: right, cell: ({ row }) => <span className="font-mono">{formatDecimal(row.original.user_cap)}</span> },
+      {
+        id: "rate", header: t("admin.margin.fields.rate"), meta: right,
+        cell: ({ row: { original: a } }) => (
+          <span className="inline-flex items-start gap-2">
+            <EnumBadge group="rateModel" code={a.interest_model} />
+            <Rate hourly={a.hourly_rate} />
+          </span>
+        ),
+      },
+      { id: "haircut", header: t("admin.margin.fields.haircut"), meta: right, cell: ({ row }) => <span className="font-mono">{row.original.haircut}</span> },
+      {
+        id: "owed", header: t("admin.margin.interestOwed"), meta: right,
+        cell: ({ row }) => <span className="font-mono">{formatDecimal(row.original.interest_owed)}</span>,
+      },
+      { id: "borrowers", header: t("admin.margin.borrowers"), meta: right, cell: ({ row }) => row.original.borrowers },
+      {
+        id: "act", header: "", meta: right,
+        cell: ({ row: { original: a } }) => (
+          <span className="inline-flex items-center gap-2">
+            {a.pending_approval_id && <Badge tone="warn">{t("admin.margin.pending")}</Badge>}
+            {edit && (
+              <Button size="sm" variant="secondary" icon={<Pencil size={14} />} onClick={() => setEditing(a)} data-testid={`margin-edit-${a.asset}`}>
+                {t("admin.margin.edit")}
+              </Button>
+            )}
+          </span>
+        ),
+      },
+    ],
+    [t, edit],
+  );
+  if (q.isError) return <ErrorState message={String(q.error)} onRetry={() => void q.refetch()} />;
+  return (
+    <>
+      <DataTable columns={columns} data={q.data ?? []} getRowId={(a) => a.asset} loading={q.isPending} density="compact" aria-label="margin-assets" />
+      {editing && <AssetDrawer asset={editing} onClose={() => setEditing(null)} />}
+    </>
+  );
+}
+
+/** Form is an asset's parameters as the form edits them: rates in percent an hour, the kink in percent. */
+type Form = {
+  borrowable: boolean; collateral: boolean; pool_cap: string; user_cap: string; interest_model: AssetParams["interest_model"]; fixed: string;
+  base: string; kink: string; kink_rate: string; max: string; haircut: string;
+};
+
+const toForm = (a: AssetParams): Form => ({
+  borrowable: a.borrowable, collateral: a.collateral, pool_cap: a.pool_cap, user_cap: a.user_cap, interest_model: a.interest_model,
+  fixed: toPercent(a.fixed_hourly_rate), base: toPercent(a.floating.base_rate), kink: toPercent(a.floating.kink),
+  kink_rate: toPercent(a.floating.kink_rate), max: toPercent(a.floating.max_rate), haircut: a.haircut,
+});
+
+const fromForm = (f: Form): AssetParams => ({
+  borrowable: f.borrowable, collateral: f.collateral, haircut: f.haircut.trim(), pool_cap: f.pool_cap.trim(), user_cap: f.user_cap.trim(),
+  interest_model: f.interest_model, fixed_hourly_rate: fromPercent(f.fixed),
+  floating: { base_rate: fromPercent(f.base), kink: fromPercent(f.kink), kink_rate: fromPercent(f.kink_rate), max_rate: fromPercent(f.max) },
+});
+
+/**
+ * braking reports whether a change only stops new borrowing (borrowing
+ * switched off, a lower cap): it applies at once. The interest model and
+ * its rates, the haircut, collateral, borrowing switched on or a higher
+ * cap waits for a second ADMIN (admin.yaml PUT /admin/v1/margin/assets/{asset}).
+ */
+function braking(a: AssetParams, b: AssetParams): boolean {
+  const fa = a.floating;
+  const fb = b.floating;
+  const rates =
+    a.interest_model === b.interest_model && dec.eq(a.fixed_hourly_rate, b.fixed_hourly_rate) && dec.eq(fa.base_rate, fb.base_rate) &&
+    dec.eq(fa.kink, fb.kink) && dec.eq(fa.kink_rate, fb.kink_rate) && dec.eq(fa.max_rate, fb.max_rate);
+  if (!rates || a.collateral !== b.collateral || !dec.eq(a.haircut, b.haircut)) return false;
+  if (b.borrowable && !a.borrowable) return false;
+  return dec.lte(b.pool_cap, a.pool_cap) && dec.lte(b.user_cap, a.user_cap);
+}
+
+/** differs compares a form field as typed: numbers by value ("0.950" is 0.95). */
+const differs = (x: string | boolean, y: string | boolean) =>
+  typeof x === "string" && typeof y === "string" && isNumber(x) && isNumber(y) ? !dec.eq(x.trim(), y.trim()) : x !== y;
+
+const FLOATING_FIELDS = ["base", "kink", "kink_rate", "max"];
+
+function AssetDrawer({ asset: a, onClose }: { asset: MarginAsset; onClose: () => void }) {
+  const { t } = useTranslation();
+  const [f, setF] = useState<Form>(() => toForm(a));
+  const set = (k: keyof Form) => (v: string) => setF((p) => ({ ...p, [k]: v }));
+  // A field as the confirmation shows it: switches on or off, the model by name, rates with their unit.
+  const shown = (k: keyof Form, v: string | boolean): string => {
+    if (typeof v === "boolean") return t(v ? "admin.launch.on" : "admin.launch.off");
+    if (k === "interest_model") return t(`admin.enum.rateModel.${v}`);
+    if (k === "kink") return `${v}%`;
+    return ["fixed", "base", "kink_rate", "max"].includes(k) ? `${v}%/h` : v;
+  };
+  const bad = (v: string, max?: string) => (!isNumber(v) || (max !== undefined && dec.gt(v, max)) ? t("admin.margin.badNumber") : undefined);
+  const errors = {
+    pool: bad(f.pool_cap),
+    user: bad(f.user_cap) ?? (isNumber(f.pool_cap) && dec.gt(f.user_cap, f.pool_cap) ? t("admin.margin.userOverPool") : undefined),
+    fixed: bad(f.fixed),
+    base: bad(f.base),
+    kink: !isNumber(f.kink) || dec.lte(f.kink, "0") || dec.gte(f.kink, "100") ? t("admin.margin.badKink") : undefined,
+    kinkRate: bad(f.kink_rate) ?? (isNumber(f.base) && isNumber(f.kink_rate) && dec.lt(f.kink_rate, f.base) ? t("admin.margin.notRising") : undefined),
+    max: bad(f.max) ?? (isNumber(f.kink_rate) && isNumber(f.max) && dec.lt(f.max, f.kink_rate) ? t("admin.margin.notRising") : undefined),
+    haircut: bad(f.haircut, "1"),
+  };
+  const ok = Object.values(errors).every((e) => !e);
+  const before = toForm(a);
+  const after = ok ? fromForm(f) : null;
+  const approval = after ? !braking(a, after) : true;
+  const changes: Change[] = (Object.keys(before) as (keyof Form)[])
+    // The floating curve's fields count while it is the model, the fixed rate while it is.
+    .filter((k) => (f.interest_model === "FIXED" ? !FLOATING_FIELDS.includes(k) : k !== "fixed"))
+    .filter((k) => differs(before[k], f[k]))
+    .map((k) => ({ label: t(`admin.margin.form.${k}`), from: shown(k, before[k]), to: shown(k, f[k]) }));
+  return (
+    <Drawer open onOpenChange={(o) => !o && onClose()} title={t("admin.margin.params.editAsset", { asset: a.asset })} description={t("admin.margin.params.assetHint")} width={600}>
+      <div className="flex flex-col gap-4">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Switch checked={f.borrowable} onCheckedChange={(v) => setF((p) => ({ ...p, borrowable: v }))} label={t("admin.margin.form.borrowable")} />
+          <Switch checked={f.collateral} onCheckedChange={(v) => setF((p) => ({ ...p, collateral: v }))} label={t("admin.margin.form.collateral")} />
+          <Field label={t("admin.margin.form.pool_cap")} value={f.pool_cap} onChange={set("pool_cap")} error={errors.pool} unit={a.asset} />
+          <Field label={t("admin.margin.form.user_cap")} value={f.user_cap} onChange={set("user_cap")} error={errors.user} unit={a.asset} hint={t("admin.margin.userCapHint")} />
+        </div>
+        <Card title={t("admin.margin.form.interest_model")}>
+          <div className="flex flex-col gap-3">
+            <Segmented
+              value={f.interest_model}
+              onValueChange={(v) => setF((p) => ({ ...p, interest_model: v as Form["interest_model"] }))}
+              items={[
+                { value: "FIXED", label: t("admin.enum.rateModel.FIXED") },
+                { value: "FLOATING", label: t("admin.enum.rateModel.FLOATING") },
+              ]}
+              aria-label={t("admin.margin.form.interest_model")}
+            />
+            {f.interest_model === "FIXED" ? (
+              <Field label={t("admin.margin.form.fixed")} value={f.fixed} onChange={set("fixed")} error={errors.fixed} unit="%/h" />
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label={t("admin.margin.form.base")} value={f.base} onChange={set("base")} error={errors.base} unit="%/h" />
+                <Field label={t("admin.margin.form.kink")} value={f.kink} onChange={set("kink")} error={errors.kink} unit="%" />
+                <Field label={t("admin.margin.form.kink_rate")} value={f.kink_rate} onChange={set("kink_rate")} error={errors.kinkRate} unit="%/h" />
+                <Field label={t("admin.margin.form.max")} value={f.max} onChange={set("max")} error={errors.max} unit="%/h" />
+              </div>
+            )}
+            <p className="text-xs text-fg-3">{t("admin.margin.floatingHint")}</p>
+          </div>
+        </Card>
+        <Field label={t("admin.margin.form.haircut")} value={f.haircut} onChange={set("haircut")} error={errors.haircut} hint={t("admin.margin.haircutHint")} />
+        <div className="sticky bottom-0 -mx-6 mt-2 flex items-center justify-end gap-2 border-t border-line-1 bg-bg-1 px-6 py-3">
+          <span className="mr-auto text-xs text-fg-3">{changes.length > 0 && t(approval ? "admin.margin.willAsk" : "admin.margin.willApply")}</span>
+          <Button variant="secondary" onClick={onClose}>
+            {t("common.cancel")}
+          </Button>
+          <DangerAction
+            trigger={(open) => (
+              <Button disabled={!ok || changes.length === 0} onClick={open} data-testid="margin-asset-save">
+                {t(approval ? "admin.margin.ask" : "admin.margin.apply")}
+              </Button>
+            )}
+            danger={approval}
+            title={t(approval ? "admin.margin.askTitle" : "admin.margin.applyTitle", { target: a.asset })}
+            description={approval ? t("admin.margin.askHint") : t("admin.margin.applyHint")}
+            target={<Changes changes={changes} />}
+            confirmWord={a.asset}
+            run={async () => null}
+            success={() => previewed(approval)}
+            onDone={onClose}
+          />
+        </div>
+      </div>
+    </Drawer>
+  );
+}
+
+function Pairs({ edit }: { edit: boolean }) {
+  const { t } = useTranslation();
+  const q = useMarginPairs();
+  const settings = useMarginSettings();
+  const [editing, setEditing] = useState<MarginPair | null>(null);
+  const columns = useMemo<ColumnDef<MarginPair, unknown>[]>(
+    () => [
+      { accessorKey: "symbol", header: t("admin.common.symbol"), cell: ({ row }) => <span className="font-medium text-fg-1">{row.original.symbol}</span> },
+      {
+        id: "isolated", header: t("admin.margin.fields.isolated"),
+        cell: ({ row }) => <Badge tone={row.original.isolated ? "success" : "neutral"}>{t(row.original.isolated ? "admin.launch.on" : "admin.launch.off")}</Badge>,
+      },
+      { id: "leverage", header: t("admin.margin.fields.isolatedLeverage"), cell: ({ row }) => <Badge tone="brand">{row.original.leverage}x</Badge> },
+      {
+        id: "levels", header: t("admin.margin.lines"), meta: right,
+        cell: ({ row: { original: p } }) => (
+          <span className="inline-flex flex-col items-end">
+            <span className="font-mono">
+              {lineText(p.warn_level)} / {lineText(p.liquidation_level)}
+            </span>
+            <span className="text-xs text-fg-3">{t(p.own_levels ? "admin.margin.ownLevels" : "admin.margin.leverageLevels")}</span>
+          </span>
+        ),
+      },
+      { id: "accounts", header: t("admin.margin.isolatedAccounts"), meta: right, cell: ({ row }) => row.original.accounts },
+      {
+        id: "updated", header: t("admin.margin.updated"),
+        cell: ({ row: { original: p } }) => (
+          <span className="flex flex-col text-xs">
+            <span>v{p.version} · {p.updated_by}</span>
+            <TimeText value={p.updated_at} />
+          </span>
+        ),
+      },
+      {
+        id: "act", header: "", meta: right,
+        cell: ({ row: { original: p } }) => (
+          <span className="inline-flex items-center gap-2">
+            {p.pending_approval_id && <Badge tone="warn">{t("admin.margin.pending")}</Badge>}
+            {edit && (
+              <Button size="sm" variant="secondary" icon={<Pencil size={14} />} onClick={() => setEditing(p)} data-testid={`margin-pair-${p.symbol}`}>
+                {t("admin.margin.edit")}
+              </Button>
+            )}
+          </span>
+        ),
+      },
+    ],
+    [t, edit],
+  );
+  if (q.isError) return <ErrorState message={String(q.error)} onRetry={() => void q.refetch()} />;
+  return (
+    <>
+      <DataTable columns={columns} data={q.data ?? []} getRowId={(p) => p.symbol} loading={q.isPending} density="compact" aria-label="margin-pairs" />
+      {editing && settings.data && <PairDrawer pair={editing} defaults={settings.data.isolated_defaults} onClose={() => setEditing(null)} />}
+    </>
+  );
+}
+
+type Levels = MarginSettings["isolated_defaults"];
+
+/**
+ * PairDrawer changes a pair's isolated terms: switching isolated accounts
+ * off applies at once; the leverage, the thresholds (its own, or blank
+ * for its leverage's) and switching them on wait for a second ADMIN.
+ */
+function PairDrawer({ pair: p, defaults, onClose }: { pair: MarginPair; defaults: Levels; onClose: () => void }) {
+  const { t } = useTranslation();
+  const [isolated, setIsolated] = useState(p.isolated);
+  const [lev, setLev] = useState<Leverage>(p.leverage);
+  const [warn, setWarn] = useState(p.own_levels ? p.warn_level : "");
+  const [liq, setLiq] = useState(p.own_levels ? p.liquidation_level : "");
+  const fallback = defaults.find((d) => d.leverage === lev);
+  const own = warn.trim() !== "" || liq.trim() !== "";
+  const levelsError = !own
+    ? undefined
+    : !isNumber(warn) || !isNumber(liq)
+      ? t("admin.margin.bothLevels")
+      : dec.lte(liq, "1") || dec.gte(liq, warn)
+        ? t("admin.margin.badThresholds")
+        : undefined;
+  const effWarn = own ? warn.trim() : (fallback?.warn_level ?? p.warn_level);
+  const effLiq = own ? liq.trim() : (fallback?.liquidation_level ?? p.liquidation_level);
+  const changes: Change[] = [];
+  if (isolated !== p.isolated) changes.push({ label: t("admin.margin.fields.isolated"), from: t(p.isolated ? "admin.launch.on" : "admin.launch.off"), to: t(isolated ? "admin.launch.on" : "admin.launch.off") });
+  if (lev !== p.leverage) changes.push({ label: t("admin.margin.fields.isolatedLeverage"), from: `${p.leverage}x`, to: `${lev}x` });
+  if (!levelsError && (!dec.eq(effWarn, p.warn_level) || !dec.eq(effLiq, p.liquidation_level) || own !== p.own_levels)) {
+    changes.push({
+      label: t("admin.margin.lines"), from: `${lineText(p.warn_level)} / ${lineText(p.liquidation_level)}`,
+      to: `${lineText(effWarn)} / ${lineText(effLiq)}${own ? "" : ` (${t("admin.margin.leverageLevels")})`}`,
+    });
+  }
+  // Only isolated accounts switched off, and nothing else, applies at once.
+  const approval = !(changes.length === 1 && p.isolated && !isolated);
+  return (
+    <Drawer open onOpenChange={(o) => !o && onClose()} title={t("admin.margin.params.editPair", { symbol: p.symbol })} description={t("admin.margin.params.pairHint")} width={560}>
+      <div className="flex flex-col gap-4">
+        <Switch checked={isolated} onCheckedChange={setIsolated} label={t("admin.margin.fields.isolated")} />
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-fg-2">{t("admin.margin.fields.isolatedLeverage")}</span>
+          <Segmented
+            value={String(lev)}
+            onValueChange={(v) => setLev(Number(v) as Leverage)}
+            items={LEVERAGES.map((l) => ({ value: String(l), label: `${l}x` }))}
+            aria-label={t("admin.margin.fields.isolatedLeverage")}
+          />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label={t("admin.margin.fields.warning")} value={warn} onChange={setWarn} error={levelsError} hint={t("admin.margin.levelsHint", { warn: lineText(fallback?.warn_level ?? ""), liq: lineText(fallback?.liquidation_level ?? "") })} />
+          <Field label={t("admin.margin.fields.liquidation")} value={liq} onChange={setLiq} />
+        </div>
+        <div className="sticky bottom-0 -mx-6 mt-2 flex items-center justify-end gap-2 border-t border-line-1 bg-bg-1 px-6 py-3">
+          <span className="mr-auto text-xs text-fg-3">{changes.length > 0 && t(approval ? "admin.margin.willAsk" : "admin.margin.willApply")}</span>
+          <Button variant="secondary" onClick={onClose}>
+            {t("common.cancel")}
+          </Button>
+          <DangerAction
+            trigger={(open) => (
+              <Button disabled={!!levelsError || changes.length === 0} onClick={open} data-testid="margin-pair-save">
+                {t(approval ? "admin.margin.ask" : "admin.margin.apply")}
+              </Button>
+            )}
+            danger={approval}
+            title={t(approval ? "admin.margin.askTitle" : "admin.margin.applyTitle", { target: p.symbol })}
+            description={approval ? t("admin.margin.askHint") : t("admin.margin.pairOffHint")}
+            target={<Changes changes={changes} />}
+            confirmWord={p.base}
+            run={async () => null}
+            success={() => previewed(approval)}
+            onDone={onClose}
+          />
+        </div>
+      </div>
+    </Drawer>
+  );
+}
+
+function Settings({ edit }: { edit: boolean }) {
+  const { t } = useTranslation();
+  const q = useMarginSettings();
+  const [editing, setEditing] = useState(false);
+  if (q.isError) return <ErrorState message={String(q.error)} onRetry={() => void q.refetch()} />;
+  const s = q.data;
+  if (!s) return <Skeleton className="h-40 w-full" />;
+  const rows = [
+    { key: "cross", label: t("admin.enum.marginType.MARGIN_CROSS"), leverage: `${s.cross.leverage}x`, warn: s.cross.warn_level, liq: s.cross.liquidation_level },
+    ...s.isolated_defaults.map((d) => ({
+      key: `iso-${d.leverage}`, label: t("admin.margin.params.isolatedDefault"), leverage: `${d.leverage}x`, warn: d.warn_level, liq: d.liquidation_level,
+    })),
+  ];
+  return (
+    <>
+      <Card
+        title={t("admin.margin.params.thresholds")}
+        extra={
+          <span className="flex items-center gap-2">
+            {s.pending_approval_id && <Badge tone="warn">{t("admin.margin.pending")}</Badge>}
+            {edit && (
+              <Button size="sm" variant="secondary" icon={<Pencil size={14} />} onClick={() => setEditing(true)} data-testid="margin-settings-edit">
+                {t("admin.margin.edit")}
+              </Button>
+            )}
+          </span>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <table className="w-full text-sm" aria-label={t("admin.margin.params.thresholds")}>
+            <thead className="text-left text-xs text-fg-3">
+              <tr>
+                <th className="py-1 font-normal">{t("admin.margin.fields.account")}</th>
+                <th className="py-1 font-normal">{t("admin.margin.fields.leverage")}</th>
+                <th className="py-1 text-right font-normal">{t("admin.margin.fields.warning")}</th>
+                <th className="py-1 text-right font-normal">{t("admin.margin.fields.liquidation")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.key} className="border-t border-line-1">
+                  <td className="py-1.5">{r.label}</td>
+                  <td className="py-1.5">
+                    <Badge tone="brand">{r.leverage}</Badge>
+                  </td>
+                  <td className="py-1.5 text-right font-mono">{lineText(r.warn)}</td>
+                  <td className="py-1.5 text-right font-mono">{lineText(r.liq)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-xs text-fg-3">{t("admin.margin.params.defaultsHint")}</p>
+          <p className="text-sm text-fg-2">
+            {t("admin.margin.fields.fee")} <span className="font-mono">{formatPercent(s.liquidation_fee_rate, 2, false)}</span>
+            <span className="text-fg-3"> · {t("admin.margin.feeHint")}</span>
+          </p>
+          <p className="text-xs text-fg-3">
+            v{s.version} · {s.updated_by} · <TimeText value={s.updated_at} />
+          </p>
+        </div>
+      </Card>
+      {editing && <SettingsDrawer s={s} onClose={() => setEditing(false)} />}
+    </>
+  );
+}
+
+/** The cross account's terms when its leverage changes (design §4.4): 3x 1.30/1.10, 5x 1.20/1.10. */
+const CROSS_LEVELS: Record<3 | 5, [string, string]> = { 3: ["1.3", "1.1"], 5: ["1.2", "1.1"] };
+
+function SettingsDrawer({ s, onClose }: { s: MarginSettings; onClose: () => void }) {
+  const { t } = useTranslation();
+  const [lev, setLev] = useState<3 | 5>(s.cross.leverage);
+  const [warn, setWarn] = useState(s.cross.warn_level);
+  const [liq, setLiq] = useState(s.cross.liquidation_level);
+  const [fee, setFee] = useState(toPercent(s.liquidation_fee_rate));
+  const levelsError =
+    !isNumber(warn) || !isNumber(liq) ? t("admin.margin.badNumber") : dec.lte(liq, "1") || dec.gte(liq, warn) ? t("admin.margin.badThresholds") : undefined;
+  const feeError = !isNumber(fee) || dec.gt(fee, "10") ? t("admin.margin.badFee") : undefined;
+  const changes: Change[] = [];
+  if (lev !== s.cross.leverage) changes.push({ label: t("admin.margin.fields.crossLeverage"), from: `${s.cross.leverage}x`, to: `${lev}x` });
+  if (!levelsError && (!dec.eq(warn, s.cross.warn_level) || !dec.eq(liq, s.cross.liquidation_level))) {
+    changes.push({
+      label: t("admin.margin.lines"), from: `${lineText(s.cross.warn_level)} / ${lineText(s.cross.liquidation_level)}`, to: `${lineText(warn)} / ${lineText(liq)}`,
+    });
+  }
+  if (!feeError && !dec.eq(fromPercent(fee), s.liquidation_fee_rate)) {
+    changes.push({ label: t("admin.margin.fields.fee"), from: `${toPercent(s.liquidation_fee_rate)}%`, to: `${fee.trim()}%` });
+  }
+  return (
+    <Drawer open onOpenChange={(o) => !o && onClose()} title={t("admin.margin.params.editSettings")} description={t("admin.margin.params.settingsHint")} width={560}>
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-fg-2">{t("admin.margin.fields.crossLeverage")}</span>
+          <Segmented
+            value={String(lev)}
+            onValueChange={(v) => {
+              // A leverage brings its thresholds (design §4.4); they can still be changed.
+              const next = v === "5" ? 5 : 3;
+              setLev(next);
+              setWarn(CROSS_LEVELS[next][0]);
+              setLiq(CROSS_LEVELS[next][1]);
+            }}
+            items={[
+              { value: "3", label: "3x" },
+              { value: "5", label: "5x" },
+            ]}
+            aria-label={t("admin.margin.fields.crossLeverage")}
+          />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label={t("admin.margin.fields.warning")} value={warn} onChange={setWarn} error={levelsError} />
+          <Field label={t("admin.margin.fields.liquidation")} value={liq} onChange={setLiq} />
+        </div>
+        <Field label={t("admin.margin.fields.fee")} value={fee} onChange={setFee} error={feeError} unit="%" hint={t("admin.margin.feeHint")} />
+        <div className="sticky bottom-0 -mx-6 mt-2 flex items-center justify-end gap-2 border-t border-line-1 bg-bg-1 px-6 py-3">
+          <span className="mr-auto text-xs text-fg-3">{changes.length > 0 && t("admin.margin.willAsk")}</span>
+          <Button variant="secondary" onClick={onClose}>
+            {t("common.cancel")}
+          </Button>
+          <DangerAction
+            trigger={(open) => (
+              <Button disabled={!!levelsError || !!feeError || changes.length === 0} onClick={open} data-testid="margin-settings-save">
+                {t("admin.margin.ask")}
+              </Button>
+            )}
+            title={t("admin.margin.askTitle", { target: t("admin.margin.params.settings") })}
+            description={t("admin.margin.askHint")}
+            target={<Changes changes={changes} />}
+            confirmWord="margin"
+            run={async () => null}
+            success={() => previewed(true)}
+            onDone={onClose}
+          />
+        </div>
+      </div>
+    </Drawer>
+  );
+}

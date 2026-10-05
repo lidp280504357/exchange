@@ -40,8 +40,9 @@
 # event within one operator's share and one beyond it approved by a second
 # administrator, both starting tomorrow and canceled; settings changed and
 # put back, one beyond the share rejected; who holds the coin; a cent
-# minted for every bot; the bots' orders and trades), the audit trail with
-# its CSV export, and sign-out. Every request that moves money carries an
+# minted for every bot; the bots' orders and trades), the margin
+# parameters and accounts once E5 serves them (design 2026-10-06 §8;
+# skipped until then), the audit trail with its CSV export, and sign-out. Every request that moves money carries an
 # Idempotency-Key (C5.5 ⑥): an adjustment, a hold, its release and the
 # in-app message are sent twice under theirs and made once, another
 # request under a key is refused, and one without is too.
@@ -1866,6 +1867,63 @@ as AUDITOR GET "/admin/v1/articles?section=LEGAL" ""
 expect 200 - "every administrator reads the legal pages"
 as OPERATOR POST /admin/v1/articles '{"section":"LEGAL","slug":"e2e-not-fixed","category":"","pinned":false,"order":0,"texts":[{"locale":"zh-CN","title":"e2e","summary":"","body":"e2e"}],"reason":"e2e: a legal page outside the six"}'
 expect 400 COMMON_INVALID_ARGUMENT "a legal page is one of the six fixed slugs"
+
+echo "== margin trading (design 2026-10-06 §8, E5)"
+# A draft until E5 serves it (api/admin/admin.yaml, tag margin): skipped
+# while admin-service answers 404. It changes nothing: a rate change waits
+# for a second ADMIN and is withdrawn. A freeze and unfreeze, and a
+# liquidation asked for and withdrawn, need the run's user to have a margin
+# account (E1's transfer): added with E5.
+as AUDITOR GET /admin/v1/margin/assets ""
+if [[ $STATUS == 404 ]]; then
+  echo "skip margin trading: admin-service serves no margin API yet (E5 follows E0's contract)"
+else
+  expect 200 - "every administrator reads the margin assets"
+  check '(.items | length) > 0 and all(.items[]; (.lent | tonumber) <= (.pool_cap | tonumber) and (.user_cap | tonumber) <= (.pool_cap | tonumber)
+    and (.haircut | tonumber) <= 1 and (.interest_model | IN("FIXED", "FLOATING")))' \
+    "each asset lends within its pool, a user cap within the pool, a haircut of at most 1"
+  MA=$(jq -c '.items[] | select(.asset == "USDT")' <<<"$BODY")
+  [[ -n $MA ]] || fail "USDT is not a margin asset"
+  MAV=$(jq .version <<<"$MA")
+  as AUDITOR GET /admin/v1/margin/settings ""
+  expect 200 - "every administrator reads the margin settings"
+  check '(.cross.leverage | IN(3, 5)) and ([.isolated_defaults[].leverage] | sort) == [3, 5, 10]
+    and all(.isolated_defaults[], .cross; (.liquidation_level | tonumber) > 1 and (.liquidation_level | tonumber) < (.warn_level | tonumber))' \
+    "the cross terms and the defaults for 3, 5 and 10, every liquidation level above 1 and under its warning level"
+  DEFAULTS=$(jq -c '[.isolated_defaults[] | {key: (.leverage | tostring), value: .}] | from_entries' <<<"$BODY")
+  as AUDITOR GET /admin/v1/margin/pairs ""
+  expect 200 - "every administrator reads the margin pairs"
+  check "($DEFAULTS) as \$d | all(.items[]; .own_levels or (\$d[.leverage | tostring] as \$x | .warn_level == \$x.warn_level and .liquidation_level == \$x.liquidation_level))" \
+    "a pair without levels of its own takes its leverage's"
+  margin_asset() { # margin_asset JQ REASON: USDT's parameters as read, changed by JQ
+    jq -c --argjson v "$MAV" --arg r "$2" "{borrowable, collateral, haircut, pool_cap, user_cap, interest_model, fixed_hourly_rate, floating} | $1
+      | . + {expected_version: \$v, reason: \$r}" <<<"$MA"
+  }
+  as OPERATOR PUT /admin/v1/margin/assets/USDT "$(margin_asset . "e2e: operators change no rate")"
+  expect 403 ADMIN_FORBIDDEN "only an ADMIN changes the margin parameters"
+  as ADMIN PUT /admin/v1/margin/assets/USDT "$(margin_asset '.fixed_hourly_rate = ((.fixed_hourly_rate | tonumber) * 2 | tostring)' "e2e: a rate, withdrawn")"
+  expect 202 - "a rate change waits for a second ADMIN"
+  check '.approval.kind == "MARGIN_PARAMS" and .approval.escalation == "MARGIN_RISK" and .approval.status == "PENDING"' "a MARGIN_PARAMS request"
+  MARGIN_REQ=$(jq -r .approval.id <<<"$BODY")
+  # shellcheck disable=SC2016 # expanded when the script ends
+  at_exit 'as ADMIN POST "/admin/v1/approvals/$MARGIN_REQ/decide" "{\"approve\":false,\"reason\":\"e2e cleanup\"}" >/dev/null'
+  as ADMIN PUT /admin/v1/margin/assets/USDT "$(margin_asset '.haircut = "0.99"' "e2e: another change while one waits")"
+  expect 409 ADMIN_MARGIN_CHANGE_PENDING "one change of an asset waits at a time"
+  check ".details.approval_id == \"$MARGIN_REQ\"" "naming the one that waits"
+  as ADMIN POST "/admin/v1/approvals/$MARGIN_REQ/decide" '{"approve":true,"reason":"e2e approves its own"}'
+  expect 403 ADMIN_SELF_APPROVAL "not approved by the ADMIN who asked"
+  as ADMIN POST "/admin/v1/approvals/$MARGIN_REQ/decide" '{"approve":false,"reason":"e2e: withdrawn"}'
+  expect 200 - "the ADMIN withdraws it"
+  as AUDITOR GET /admin/v1/margin/assets ""
+  check ".items[] | select(.asset == \"USDT\") | .version == $MAV and .pending_approval_id == null" "USDT's parameters did not change"
+  as AUDITOR GET "/admin/v1/margin/accounts?limit=50" ""
+  expect 200 - "every administrator reads the margin accounts"
+  check '[.items[] | .margin_level // "1e9" | tonumber] | . == sort' "the lowest margin level first, those without debts last"
+  as AUDITOR GET "/admin/v1/margin/liquidations?days=30&limit=5" ""
+  expect 200 - "every administrator reads the margin liquidations"
+  as AUDITOR GET "/admin/v1/margin/interest?days=7" ""
+  expect 200 - "and the interest report"
+fi
 
 echo "== an announcement on both sites within a minute"
 # One announcement with a fixed slug (articles are never deleted): written

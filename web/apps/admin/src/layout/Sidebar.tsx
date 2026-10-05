@@ -7,7 +7,7 @@ import { useTranslation } from "react-i18next";
 import { NavLink, useLocation } from "react-router";
 import { useTodo } from "../live";
 import { prefetchPage, prefetchPages } from "../preload";
-import { allowed, groups, sections, type GroupKey, type Section } from "../sections";
+import { allowed, groups, sections, useFlagged, type GroupKey, type Section } from "../sections";
 import { Mark } from "./Brand";
 import { CountBadge } from "./CountBadge";
 
@@ -34,7 +34,9 @@ export function Sidebar({ admin, collapsed, onToggle }: { admin: Admin; collapse
   const { pathname } = useLocation();
   const todo = useTodo();
   const [closed, setClosed] = useState(loadClosed);
-  const visible = sections.filter((s) => allowed(admin, s));
+  const flagged = useFlagged();
+  // A section behind a flag shows once the flags say it is on (kit/flags.ts).
+  const visible = sections.filter((s) => allowed(admin, s) && flagged(s) === true);
   const paths = visible.map((s) => s.path).join(" ");
   useEffect(() => prefetchPages(paths.split(" ")), [paths]);
   const counts: Record<string, number> = {

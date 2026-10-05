@@ -14,6 +14,8 @@ import {
   FileText,
   Gauge,
   Gem,
+  Flame,
+  HandCoins,
   HeartPulse,
   Coins,
   KeyRound,
@@ -22,12 +24,14 @@ import {
   LayoutDashboard,
   ListOrdered,
   Megaphone,
+  Percent,
   Rocket,
   ScrollText,
   Settings,
   ShieldAlert,
   Siren,
   SlidersHorizontal,
+  SlidersVertical,
   Stamp,
   UserCog,
   UserCheck,
@@ -35,12 +39,13 @@ import {
   Warehouse,
   type LucideIcon,
 } from "lucide-react";
+import { useFlagCheck } from "./kit/flags";
 import { pages, type Page } from "./pageLoaders";
 
 /** The sidebar's groups (design 2026-10-02 §3); a group with one section shows as that section. */
-export type GroupKey = "overview" | "users" | "funds" | "trading" | "markets" | "sim" | "risk" | "ops" | "system";
+export type GroupKey = "overview" | "users" | "funds" | "trading" | "margin" | "markets" | "sim" | "risk" | "ops" | "system";
 
-export const groups: GroupKey[] = ["overview", "users", "funds", "trading", "markets", "sim", "risk", "ops", "system"];
+export const groups: GroupKey[] = ["overview", "users", "funds", "trading", "margin", "markets", "sim", "risk", "ops", "system"];
 
 export type Section = {
   path: string;
@@ -51,6 +56,8 @@ export type Section = {
   icon: LucideIcon;
   /** Its page (pageLoaders.tsx). */
   page: Page;
+  /** Shown only while this feature flag is on (kit/flags.ts). */
+  flag?: string;
 };
 
 /** The console's sections; a section hides without its permission. */
@@ -81,6 +88,24 @@ export const sections: Section[] = [
   },
   { path: "derivatives", key: "derivatives", group: "trading", perm: "derivatives.read", icon: ChartLine, page: pages.derivatives },
   { path: "house", key: "house", group: "trading", perm: "reports.read", icon: Warehouse, page: pages.house },
+  // Margin trading (design 2026-10-06 §8, E5): behind margin.enabled; the
+  // pages show sample data until the API lands (A55).
+  {
+    path: "margin/accounts", key: "marginAccounts", group: "margin", perm: "derivatives.read", icon: HandCoins,
+    page: pages["margin/accounts"], flag: "margin.enabled",
+  },
+  {
+    path: "margin/liquidations", key: "marginLiquidations", group: "margin", perm: "reports.read", icon: Flame,
+    page: pages["margin/liquidations"], flag: "margin.enabled",
+  },
+  {
+    path: "margin/interest", key: "marginInterest", group: "margin", perm: "reports.read", icon: Percent,
+    page: pages["margin/interest"], flag: "margin.enabled",
+  },
+  {
+    path: "margin/params", key: "marginParams", group: "margin", perm: "instruments.read", icon: SlidersVertical,
+    page: pages["margin/params"], flag: "margin.enabled",
+  },
   { path: "instruments", key: "instruments", group: "markets", perm: "instruments.read", icon: Coins, page: pages.instruments },
   { path: "sim", key: "simOverview", group: "sim", perm: "reports.read", icon: Activity, page: pages.sim },
   { path: "sim/control", key: "simControl", group: "sim", perm: "reports.read", icon: Gauge, page: pages["sim/control"] },
@@ -112,4 +137,10 @@ export const subpages: Section[] = [
 export function allowed(admin: Admin, s: Section): boolean {
   if (!s.perm) return true;
   return (Array.isArray(s.perm) ? s.perm : [s.perm]).some((p) => can(admin, p));
+}
+
+/** useFlagged returns whether a section's flag lets it show: true without one, undefined while the flags load. */
+export function useFlagged(): (s: Section) => boolean | undefined {
+  const on = useFlagCheck();
+  return (s) => (s.flag ? on(s.flag) : true);
 }

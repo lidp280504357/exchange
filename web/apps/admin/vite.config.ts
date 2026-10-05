@@ -27,7 +27,9 @@ export default defineConfig({
         // another, what two pages or more share a third ("kit", fetched with
         // the signed-in shell), and a page is one file of its own. The two
         // entry groups do not pull their dependencies in: the shell's motion
-        // and tables stay out of the sign-in page.
+        // and tables stay out of the sign-in page. What the margin pages
+        // share is a file of their own (A55): they sit behind margin.enabled,
+        // and in "kit" their sample data and strings went to every page.
         codeSplitting: {
           groups: [
             {
@@ -38,6 +40,7 @@ export default defineConfig({
               includeDependenciesRecursively: false,
             },
             { name: "index", tags: ["$initial"], priority: 2, includeDependenciesRecursively: false },
+            { name: "margin", test: (id) => id.includes("/src/pages/margin/"), minShareCount: 2, priority: 1, includeDependenciesRecursively: false },
             { name: "kit", minShareCount: 2, priority: 1 },
           ],
         },

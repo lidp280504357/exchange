@@ -47,6 +47,11 @@ info:
     1 to 200 (50 by default) unless an endpoint says otherwise. Orders,
     trades, deposits and the overview come from the ClickHouse read
     models, a few seconds behind the services.
+
+    The margin endpoints (tag margin, design 2026-10-06 §8) are a draft
+    for batch E5: admin-service does not serve them yet, and they change
+    to match E0's contract (api/openapi/margin.yaml, margin.events) when
+    it lands.
 servers:
   - url: https://admin.astras.vip
 security:
@@ -66,6 +71,7 @@ tags:
   - name: custody
   - name: sim
   - name: platform
+  - name: margin
 paths:
   /admin/v1/login-options:
     get:
@@ -3522,7 +3528,10 @@ paths:
         handbook's. PENDING: its source is not there yet; UNKNOWN: its
         source did not answer. The 14 items of §4.6 and house (review ㉚:
         market.house_liquidity on, HOUSE holding every backed asset a
-        pair is made of). Every administrator reads it.
+        pair is made of). Every administrator reads it. margin (design
+        2026-10-06 §8: margin.enabled, and every margin asset's pool cap
+        and rates at their launch values) is a draft: admin-service does
+        not report it yet.
       tags: [platform]
       responses:
         '200':
@@ -5040,6 +5049,489 @@ paths:
                 $ref: '#/components/schemas/CustodyFee'
         default:
           $ref: '#/components/responses/Error'
+  /admin/v1/margin/assets:
+    get:
+      operationId: listMarginAssets
+      summary: The margin assets' parameters, with what is lent of each now
+      description: |
+        Draft (design 2026-10-06 §4.1, §8; E0 contract §8 asset_params).
+        Every asset that can be borrowed or counts as collateral, with its
+        parameters (margin-service's, seeded from margin.json), what users
+        owe of it now (HOUSE's lending, −Σ the users' debt rows) and the
+        rate the next hour's interest takes. Needs instruments.read.
+      tags: [margin]
+      responses:
+        '200':
+          description: The assets.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MarginAsset'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/margin/assets/{asset}:
+    parameters:
+      - name: asset
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^[A-Z0-9]{2,12}$'
+    put:
+      operationId: setMarginAsset
+      summary: Change an asset's margin parameters
+      description: |
+        Draft (design §8). Needs instruments.trading (ADMIN: the trading
+        parameters); admin-service asks margin-service to change it. What
+        only stops new borrowing applies at once: 200, audited as
+        admin.margin.asset_changed with the fields before and after
+        (borrowing switched off, a lower pool or user cap; the loans stay).
+        Anything else waits for a second ADMIN with instruments.trading in
+        either approval mode: 202 with a MARGIN_PARAMS request, escalation
+        MARGIN_RISK (the interest model and its rates; the haircut and
+        collateral switched either way, which move every holder's margin
+        level; borrowing switched on, a higher cap). A request mixing both
+        waits whole. expected_version is the version read: 409
+        MARGIN_PARAMS_CHANGED when it moved, then and when the request is
+        approved. A change of the asset waiting already: 409
+        ADMIN_MARGIN_CHANGE_PENDING (details approval_id). A request lapses
+        a day after it was asked for. 400 unless haircut is 0 to 1,
+        user_cap at most pool_cap, the rates at least 0 and the floating
+        curve rising (base_rate ≤ kink_rate ≤ max_rate, kink above 0 and
+        under 1).
+      tags: [margin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/MarginAssetParams'
+                - type: object
+                  required: [expected_version]
+                  properties:
+                    expected_version:
+                      type: integer
+                      format: int64
+                - $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: Applied at once (it only stops new borrowing).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarginAsset'
+        '202':
+          description: Waits for a second ADMIN.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [approval]
+                properties:
+                  approval:
+                    $ref: '#/components/schemas/Approval'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/margin/settings:
+    get:
+      operationId: getMarginSettings
+      summary: The cross account's terms and the liquidation fee
+      description: |
+        Draft (design §4.2, §4.4, §8; E0 contract §8 settings). The cross
+        account's leverage and thresholds, the liquidation fee, and the
+        thresholds a pair without its own takes by its leverage. Needs
+        instruments.read.
+      tags: [margin]
+      responses:
+        '200':
+          description: The settings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarginSettings'
+        default:
+          $ref: '#/components/responses/Error'
+    put:
+      operationId: setMarginSettings
+      summary: Change the cross account's terms or the liquidation fee
+      description: |
+        Draft (design §8). Needs instruments.trading; every change waits
+        for a second ADMIN with it, in either approval mode: 202 with a
+        MARGIN_PARAMS request, escalation MARGIN_RISK (a threshold moved
+        either way liquidates or spares accounts at once, a leverage
+        changes what may be borrowed). 400 unless the cross leverage is 3
+        or 5, its liquidation_level above 1 and under its warn_level, and
+        liquidation_fee_rate 0 to 0.1. expected_version, a change waiting
+        already and the lapse as for an asset. Audited as
+        admin.margin.settings_changed once applied.
+      tags: [margin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/MarginSettingsParams'
+                - type: object
+                  required: [expected_version]
+                  properties:
+                    expected_version:
+                      type: integer
+                      format: int64
+                - $ref: '#/components/schemas/Reason'
+      responses:
+        '202':
+          description: Waits for a second ADMIN.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [approval]
+                properties:
+                  approval:
+                    $ref: '#/components/schemas/Approval'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/margin/pairs:
+    get:
+      operationId: listMarginPairs
+      summary: The pairs margin trades on, with their isolated terms
+      description: |
+        Draft (design §4.2, §8; E0 contract §8 pair_params). The pairs
+        whose two assets are both margin assets: whether each takes
+        isolated accounts, its isolated leverage and thresholds (its own,
+        or its leverage's), and the isolated accounts on it. The cross
+        account trades all of them on its own terms. Needs
+        instruments.read.
+      tags: [margin]
+      responses:
+        '200':
+          description: The pairs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MarginPair'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/margin/pairs/{symbol}:
+    parameters:
+      - $ref: '#/components/parameters/Symbol'
+    put:
+      operationId: setMarginPair
+      summary: Change a pair's isolated terms
+      description: |
+        Draft (design §8). Needs instruments.trading. Switching isolated
+        accounts off applies at once (200: no new isolated account on the
+        pair, those open stay; audited as admin.margin.pair_changed).
+        Anything else waits for a second ADMIN with it, in either approval
+        mode (202 with a MARGIN_PARAMS request, escalation MARGIN_RISK):
+        the leverage and the thresholds (null for the leverage's), which
+        the pair's accounts take at once, and switching isolated accounts
+        on. 400 unless liquidation_level is above 1 and under warn_level.
+        expected_version, a change waiting already and the lapse as for an
+        asset.
+      tags: [margin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/MarginPairParams'
+                - type: object
+                  required: [expected_version]
+                  properties:
+                    expected_version:
+                      type: integer
+                      format: int64
+                - $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: Applied at once (isolated accounts switched off).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarginPair'
+        '202':
+          description: Waits for a second ADMIN.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [approval]
+                properties:
+                  approval:
+                    $ref: '#/components/schemas/Approval'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/margin/accounts:
+    get:
+      operationId: listMarginAccounts
+      summary: Margin accounts, riskiest first
+      description: |
+        Draft (design §2, §8). From margin-service, valued as it values
+        them (§2): the lowest margin level (total assets ÷ total
+        liabilities) first, the accounts without liabilities last, by net
+        assets. Accounts that hold or owe nothing are left out. At most
+        `limit`; truncated says there are more. Needs derivatives.read.
+      tags: [margin]
+      parameters:
+        - name: status
+          in: query
+          description: Empty for all.
+          schema:
+            $ref: '#/components/schemas/MarginAccountStatus'
+        - name: account
+          in: query
+          schema:
+            $ref: '#/components/schemas/MarginAccountType'
+        - name: symbol
+          in: query
+          description: One pair's isolated accounts (BTC-USDT).
+          schema:
+            type: string
+        - $ref: '#/components/parameters/UserFilter'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 500
+      responses:
+        '200':
+          description: The accounts.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, truncated]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MarginAccount'
+                  truncated:
+                    type: boolean
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/margin/accounts/{user_id}/{account}:
+    parameters:
+      - $ref: '#/components/parameters/MarginUserID'
+      - $ref: '#/components/parameters/MarginAccountKey'
+    get:
+      operationId: getMarginAccount
+      summary: A margin account with its balances and debts, loans, interest and liquidations
+      description: |
+        Draft (design §8). The account as listed; each asset it holds or
+        owes, with its worth; its loans by asset; the latest 50 borrows and
+        repayments; the latest 50 interest charges; the latest 20
+        liquidations. Needs derivatives.read.
+      tags: [margin]
+      responses:
+        '200':
+          description: The account.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarginAccountDetail'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/margin/accounts/{user_id}/{account}/freeze:
+    parameters:
+      - $ref: '#/components/parameters/MarginUserID'
+      - $ref: '#/components/parameters/MarginAccountKey'
+    post:
+      operationId: freezeMarginAccount
+      summary: Freeze a margin account
+      description: |
+        Draft (design §8). Cancels its open orders; no orders, borrowing
+        or transfers out until it is unfrozen (status FROZEN). Interest
+        goes on, and the system still liquidates it at the liquidation
+        line. Needs derivatives.write; one administrator, at once; audited
+        as admin.margin.account_frozen. Frozen already: 409 MARGIN_FROZEN.
+      tags: [margin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: The account, frozen.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarginAccount'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/margin/accounts/{user_id}/{account}/unfreeze:
+    parameters:
+      - $ref: '#/components/parameters/MarginUserID'
+      - $ref: '#/components/parameters/MarginAccountKey'
+    post:
+      operationId: unfreezeMarginAccount
+      summary: Unfreeze a margin account an administrator froze
+      description: |
+        Draft (design §8). Needs derivatives.write; one administrator, at
+        once; audited as admin.margin.account_unfrozen. Not frozen by an
+        administrator (a liquidation's freeze ends with it): 409
+        ADMIN_MARGIN_NOT_FROZEN.
+      tags: [margin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Reason'
+      responses:
+        '200':
+          description: The account, unfrozen.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarginAccount'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/margin/accounts/{user_id}/{account}/liquidate:
+    parameters:
+      - $ref: '#/components/parameters/MarginUserID'
+      - $ref: '#/components/parameters/MarginAccountKey'
+    post:
+      operationId: liquidateMarginAccount
+      summary: Ask for a margin account's liquidation (a second administrator approves)
+      description: |
+        Draft (design §4.5, §8). Liquidates the account as the system does
+        at the liquidation line, whatever its margin level: frozen, its
+        orders canceled, its assets sold to HOUSE at the market to repay
+        its debts, the fee to the insurance fund (INSURANCE_FUND), a
+        shortfall from it. Needs derivatives.write; always waits for a
+        second administrator with it, in either approval mode (202 with a
+        MARGIN_LIQUIDATE request, escalation MARGIN_RISK); approved, it
+        starts at once and the request's result names the liquidation.
+        Nothing owed: 409 ADMIN_MARGIN_NOTHING_OWED; a liquidation under
+        way: 409 MARGIN_FROZEN; a request for the account waiting already:
+        409 ADMIN_MARGIN_CHANGE_PENDING (details approval_id).
+      tags: [margin]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Reason'
+      responses:
+        '202':
+          description: Waits for a second administrator.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [approval]
+                properties:
+                  approval:
+                    $ref: '#/components/schemas/Approval'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/margin/liquidations:
+    get:
+      operationId: listMarginLiquidations
+      summary: Margin liquidations, newest first
+      description: |
+        Draft (design §8). From the ClickHouse read model
+        margin_liquidations: one row a liquidation, at the liquidation
+        line or approved by hand, with the debts it repaid, what stayed,
+        its fee to the insurance fund and any shortfall the fund covered.
+        Needs reports.read.
+      tags: [margin]
+      parameters:
+        - $ref: '#/components/parameters/Days'
+        - name: account
+          in: query
+          schema:
+            $ref: '#/components/schemas/MarginAccountType'
+        - name: symbol
+          in: query
+          description: One pair's isolated accounts (BTC-USDT).
+          schema:
+            type: string
+        - name: trigger
+          in: query
+          schema:
+            type: string
+            enum: [AUTO, MANUAL]
+        - $ref: '#/components/parameters/UserFilter'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of liquidations.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MarginLiquidation'
+                  next_cursor:
+                    $ref: '#/components/schemas/NextCursor'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/v1/margin/interest:
+    get:
+      operationId: marginInterestReport
+      summary: Margin interest per day, week or month (UTC) and asset, oldest first
+      description: |
+        Draft (design §4.3, §8). From the ClickHouse read model
+        margin_interest: per bucket and asset, the interest charged
+        (MARGIN_INTEREST, income at accrual) and repaid, what users owe at
+        the bucket's end, the average principal and hourly rate, and the
+        accounts charged; in the asset, and in USDT at the bucket's last
+        price (null without one). Needs reports.read.
+      tags: [margin]
+      parameters:
+        - $ref: '#/components/parameters/Days'
+        - $ref: '#/components/parameters/ReportFrom'
+        - $ref: '#/components/parameters/ReportTo'
+        - $ref: '#/components/parameters/ReportBucket'
+        - name: asset
+          in: query
+          description: One asset; all when absent.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The buckets.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MarginInterestBucket'
+        default:
+          $ref: '#/components/responses/Error'
 components:
   securitySchemes:
     session:
@@ -5207,6 +5699,22 @@ components:
       schema:
         type: string
         format: uuid
+    MarginUserID:
+      name: user_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    MarginAccountKey:
+      name: account
+      in: path
+      required: true
+      description: MARGIN_CROSS, or MARGIN_ISOLATED:<symbol> for an isolated account (design 2026-10-06 §2).
+      schema:
+        type: string
+        pattern: '^(MARGIN_CROSS|MARGIN_ISOLATED:[A-Z0-9]{2,12}-[A-Z0-9]{2,12})$'
+        examples: [MARGIN_CROSS, 'MARGIN_ISOLATED:BTC-USDT']
   responses:
     Error:
       $ref: '../openapi/common.yaml#/components/responses/Error'
@@ -6416,7 +6924,7 @@ components:
         key:
           type: string
           enum: [welcome_credits, test_mode, registration, admin_totp, two_person, test_assets, custodian, withdraw, brand, coin_profile, legal,
-            third_party, admins, domain, house]
+            third_party, admins, domain, house, margin]
         status:
           type: string
           enum: [OK, FAIL, PENDING, UNKNOWN]
@@ -8042,7 +8550,8 @@ components:
           format: uuid
         kind:
           type: string
-          enum: [LEDGER_ADJUSTMENT, INSURANCE_FUND, DEPOSIT_BACKFILL, SIM_EVENT, SIM_PARAMS, SIM_MINT, DEPOSIT_ASSIGN, WELCOME_CREDIT]
+          enum: [LEDGER_ADJUSTMENT, INSURANCE_FUND, DEPOSIT_BACKFILL, SIM_EVENT, SIM_PARAMS, SIM_MINT, DEPOSIT_ASSIGN, WELCOME_CREDIT,
+            MARGIN_PARAMS, MARGIN_LIQUIDATE]
         payload:
           type: object
           description: |
@@ -8054,7 +8563,10 @@ components:
             SIM_MINT asset, amount (in all), bots (each bot's share as JSON: [{user_id, label, amount}]) and role when only
             one role's bots; its journal_id is the first bot's. For DEPOSIT_ASSIGN user_id (the user it is credited to),
             deposit_id, asset, amount, network, address, tx_hash, and former_holder (a retired address's holder) or
-            address_owner (its holder now) when it has one; its journal_id is the release's.
+            address_owner (its holder now) when it has one; its journal_id is the release's. For MARGIN_PARAMS (a draft,
+            design 2026-10-06 §8) target (asset:<code>, settings or pair:<symbol>), before and after (the parameters as
+            JSON) and expected_version; the result names the version applied. For MARGIN_LIQUIDATE (a draft) user_id,
+            account, symbol and margin_level when asked; the result names the liquidation.
           additionalProperties:
             type: string
         reason:
@@ -8091,14 +8603,17 @@ components:
           $ref: '#/components/schemas/NullableDecimal'
         escalation:
           type: string
-          enum: ['', REQUESTED, TWO_PERSON_MODE, SINGLE_LIMIT, DAILY_LIMIT, NO_PRICE, SIM_SHARE, NOT_ADDRESS_HOLDER, WELCOME_RAISE]
+          enum: ['', REQUESTED, TWO_PERSON_MODE, SINGLE_LIMIT, DAILY_LIMIT, NO_PRICE, SIM_SHARE, NOT_ADDRESS_HOLDER, WELCOME_RAISE,
+            MARGIN_RISK]
           description: |
             Why a two-person operation waits for a second administrator:
             asked for, two-person mode on, above the single-operation
             limit, over the 24-hour limit, or of unknown worth, or a
             simulated market's change beyond one operator's share, or a
             deposit of nobody credited to a user other than its address's
-            holder; empty in single-person mode.
+            holder, or a margin change that always takes two (rates,
+            leverage, thresholds, haircuts, more to lend, a manual
+            liquidation; a draft); empty in single-person mode.
         journal_id:
           type: [string, 'null']
         attempted_at:
@@ -8722,3 +9237,532 @@ components:
         raw:
           type: string
           description: The request as received (one callback only).
+    MarginAccountType:
+      type: string
+      enum: [MARGIN_CROSS, MARGIN_ISOLATED]
+      description: As api/openapi/margin.yaml; an isolated account is one per pair (symbol).
+    MarginFloatingRate:
+      type: object
+      description: >-
+        The floating curve (design 2026-10-06 §4.1; the seed's floating): the hourly rate rises in a straight
+        line from base_rate with nothing lent to kink_rate at the utilization kink, then to max_rate with the whole pool
+        lent (utilization = lent ÷ pool_cap, on the hour). Rates are fractions an hour: 0.000005 is 0.0005%/h.
+      required: [base_rate, kink, kink_rate, max_rate]
+      properties:
+        base_rate:
+          $ref: '#/components/schemas/Decimal'
+        kink:
+          $ref: '#/components/schemas/Decimal'
+        kink_rate:
+          $ref: '#/components/schemas/Decimal'
+        max_rate:
+          $ref: '#/components/schemas/Decimal'
+    MarginAssetParams:
+      type: object
+      description: An asset's margin parameters (design §4.1; margin-service's asset_params, E0 contract §8).
+      required: [borrowable, collateral, haircut, pool_cap, user_cap, interest_model, fixed_hourly_rate, floating]
+      properties:
+        borrowable:
+          type: boolean
+          description: Users may borrow it.
+        collateral:
+          type: boolean
+          description: It counts in an account's total assets, times the haircut; off, an account holds it at no worth.
+        haircut:
+          description: 0 to 1; the asset's worth counts times it in total assets (1 for USDT, 0.95 for BTC and ETH, 0.7 for ASTRA).
+          $ref: '#/components/schemas/Decimal'
+        pool_cap:
+          description: HOUSE's simulated supply of it (the pool), in the asset; what is lent never exceeds it.
+          $ref: '#/components/schemas/Decimal'
+        user_cap:
+          description: The most one user may owe of it (principal), in the asset; 10% of the pool by default.
+          $ref: '#/components/schemas/Decimal'
+        interest_model:
+          type: string
+          enum: [FIXED, FLOATING]
+        fixed_hourly_rate:
+          description: The FIXED model's hourly rate, a fraction (0.00001 is 0.0010%/h, about 8.76% a year).
+          $ref: '#/components/schemas/Decimal'
+        floating:
+          $ref: '#/components/schemas/MarginFloatingRate'
+    MarginAsset:
+      description: An asset's margin parameters with what is lent of it now.
+      allOf:
+        - $ref: '#/components/schemas/MarginAssetParams'
+        - type: object
+          required: [asset, lent, pool_available, utilization, hourly_rate, rate_hour, interest_owed, borrowers, version, updated_by,
+            updated_at, pending_approval_id]
+          properties:
+            asset:
+              type: string
+              examples: [USDT]
+            lent:
+              description: What users owe of it now (principal), −Σ the users' debt rows.
+              $ref: '#/components/schemas/Decimal'
+            pool_available:
+              description: pool_cap less lent, never below 0.
+              $ref: '#/components/schemas/Decimal'
+            utilization:
+              description: lent ÷ pool_cap, 0 to 1 (1 with a cap of 0).
+              $ref: '#/components/schemas/Decimal'
+            hourly_rate:
+              description: The rate of the hour rate_hour (the fixed rate, or the floating one at that hour's utilization).
+              $ref: '#/components/schemas/Decimal'
+            rate_hour:
+              type: string
+              format: date-time
+            interest_owed:
+              description: The interest users owe of it, charged and not repaid.
+              $ref: '#/components/schemas/Decimal'
+            borrowers:
+              type: integer
+              description: The accounts that owe it.
+            version:
+              type: integer
+              format: int64
+            updated_by:
+              type: string
+              description: The administrator's email; "system" for the seed (deploy/instruments/margin.json).
+            updated_at:
+              type: [string, 'null']
+              format: date-time
+            pending_approval_id:
+              type: [string, 'null']
+              format: uuid
+              description: A change of it waiting for a second ADMIN (one at a time).
+    MarginLeverage:
+      type: integer
+      enum: [3, 5, 10]
+      description: An isolated leverage (design §4.2).
+    MarginLevels:
+      type: object
+      description: >-
+        Margin level thresholds (total assets ÷ total liabilities, design §2, §4.4): under warn_level the user is
+        warned, at liquidation_level the account is liquidated (two readings in a row, §4.5).
+      required: [warn_level, liquidation_level]
+      properties:
+        warn_level:
+          $ref: '#/components/schemas/Decimal'
+        liquidation_level:
+          $ref: '#/components/schemas/Decimal'
+    MarginSettingsParams:
+      type: object
+      description: The settings margin-service keeps (E0 contract §8 settings).
+      required: [cross, liquidation_fee_rate]
+      properties:
+        cross:
+          description: The cross account's terms (design §4.4), 3x with 1.30 and 1.10, or 5x with 1.20 and 1.10 once opened.
+          allOf:
+            - type: object
+              required: [leverage]
+              properties:
+                leverage:
+                  type: integer
+                  enum: [3, 5]
+            - $ref: '#/components/schemas/MarginLevels'
+        liquidation_fee_rate:
+          description: The fraction of a liquidation's traded value that goes to the insurance fund (0.02).
+          $ref: '#/components/schemas/Decimal'
+    MarginSettings:
+      description: The margin settings, the thresholds by isolated leverage, and who last changed the settings.
+      allOf:
+        - $ref: '#/components/schemas/MarginSettingsParams'
+        - type: object
+          required: [isolated_defaults, version, updated_by, updated_at, pending_approval_id]
+          properties:
+            isolated_defaults:
+              type: array
+              description: What a pair without its own thresholds takes, by its leverage (3x 1.25/1.15, 5x 1.20/1.10, 10x 1.10/1.05).
+              items:
+                allOf:
+                  - type: object
+                    required: [leverage]
+                    properties:
+                      leverage:
+                        $ref: '#/components/schemas/MarginLeverage'
+                  - $ref: '#/components/schemas/MarginLevels'
+            version:
+              type: integer
+              format: int64
+            updated_by:
+              type: string
+            updated_at:
+              type: [string, 'null']
+              format: date-time
+            pending_approval_id:
+              type: [string, 'null']
+              format: uuid
+              description: A change waiting for a second ADMIN (one at a time).
+    MarginPairParams:
+      type: object
+      description: A pair's isolated terms (margin-service's pair_params, E0 contract §8).
+      required: [isolated, leverage, warn_level, liquidation_level]
+      properties:
+        isolated:
+          type: boolean
+          description: The pair takes isolated accounts.
+        leverage:
+          $ref: '#/components/schemas/MarginLeverage'
+        warn_level:
+          description: Its own warning level; null takes its leverage's (MarginSettings.isolated_defaults).
+          $ref: '#/components/schemas/NullableDecimal'
+        liquidation_level:
+          description: Its own liquidation level; null takes its leverage's.
+          $ref: '#/components/schemas/NullableDecimal'
+    MarginPair:
+      description: A pair's isolated terms as they apply, with its accounts.
+      type: object
+      required: [symbol, base, quote, isolated, leverage, warn_level, liquidation_level, own_levels, accounts, version, updated_by,
+        updated_at, pending_approval_id]
+      properties:
+        symbol:
+          type: string
+          examples: [BTC-USDT]
+        base:
+          type: string
+        quote:
+          type: string
+        isolated:
+          type: boolean
+        leverage:
+          description: >-
+            Its isolated leverage (design §4.2): 10 for BTC-USDT and ETH-USDT, 5 for the other main pairs, 3 for
+            ASTRA-USDT and the pairs quoted in BTC.
+          $ref: '#/components/schemas/MarginLeverage'
+        warn_level:
+          description: The warning level that applies (its own or its leverage's).
+          $ref: '#/components/schemas/Decimal'
+        liquidation_level:
+          $ref: '#/components/schemas/Decimal'
+        own_levels:
+          type: boolean
+          description: The pair has thresholds of its own rather than its leverage's.
+        accounts:
+          type: integer
+          description: The isolated accounts on it that hold or owe anything.
+        version:
+          type: integer
+          format: int64
+        updated_by:
+          type: string
+        updated_at:
+          type: [string, 'null']
+          format: date-time
+        pending_approval_id:
+          type: [string, 'null']
+          format: uuid
+    MarginAccountStatus:
+      type: string
+      enum: [NORMAL, WARNED, LIQUIDATING, FROZEN]
+      description: As api/openapi/margin.yaml - WARNED under the warning level, LIQUIDATING from the trigger to the end, FROZEN by an operator.
+    MarginAccount:
+      type: object
+      description: A margin account as the console lists it (api/openapi/margin.yaml's MarginAccount without its balances, with its holder and freeze).
+      required: [user_id, account, symbol, leverage, status, margin_level, warn_level, liquidation_level, total_asset, total_liability,
+        net_asset, liquidation_price, warned_at, frozen_by, frozen_reason, frozen_at, unpriced, updated_at]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        account:
+          $ref: '#/components/schemas/MarginAccountType'
+        symbol:
+          type: [string, 'null']
+          description: An isolated account's pair; null for the cross account.
+        leverage:
+          type: integer
+        status:
+          $ref: '#/components/schemas/MarginAccountStatus'
+        margin_level:
+          description: total_asset ÷ total_liability; null without debts (the sites show 999).
+          $ref: '#/components/schemas/NullableDecimal'
+        warn_level:
+          description: Its thresholds (the cross account's, or its pair's).
+          $ref: '#/components/schemas/Decimal'
+        liquidation_level:
+          $ref: '#/components/schemas/Decimal'
+        total_asset:
+          description: In USDT, each collateral asset after its haircut.
+          $ref: '#/components/schemas/Decimal'
+        total_liability:
+          description: Principal and interest owed, in USDT.
+          $ref: '#/components/schemas/Decimal'
+        net_asset:
+          description: total_asset less total_liability; negative is a shortfall.
+          $ref: '#/components/schemas/Decimal'
+        liquidation_price:
+          description: An isolated account's estimate of the base price at which it is liquidated; null for the cross account and without debts.
+          $ref: '#/components/schemas/NullableDecimal'
+        warned_at:
+          type: [string, 'null']
+          format: date-time
+          description: When it last went under the warning level; null above it.
+        frozen_by:
+          type: [string, 'null']
+          description: The administrator who froze it (email); null unless an administrator did.
+        frozen_reason:
+          type: [string, 'null']
+        frozen_at:
+          type: [string, 'null']
+          format: date-time
+        unpriced:
+          type: array
+          description: >-
+            The assets it holds or owes without a fresh price (design §2, E0 decision ④): a debt takes the last known
+            price; an account with an asset never priced is not liquidated but may not borrow, transfer out or open orders.
+          items:
+            type: string
+        updated_at:
+          type: string
+          format: date-time
+    MarginBalance:
+      type: object
+      description: An asset a margin account holds or owes (api/openapi/margin.yaml's MarginBalance with its worth).
+      required: [asset, free, locked, borrowed, interest, net, price_usdt, asset_usdt, liability_usdt, haircut, hourly_rate]
+      properties:
+        asset:
+          type: string
+        free:
+          $ref: '#/components/schemas/Decimal'
+        locked:
+          description: Frozen by open orders.
+          $ref: '#/components/schemas/Decimal'
+        borrowed:
+          description: Principal owed.
+          $ref: '#/components/schemas/Decimal'
+        interest:
+          description: Interest owed.
+          $ref: '#/components/schemas/Decimal'
+        net:
+          description: free + locked − borrowed − interest.
+          $ref: '#/components/schemas/Decimal'
+        price_usdt:
+          description: The asset's price now; null without a fresh one.
+          $ref: '#/components/schemas/NullableDecimal'
+        asset_usdt:
+          description: (free + locked) × price × haircut; 0 when it is not collateral.
+          $ref: '#/components/schemas/NullableDecimal'
+        liability_usdt:
+          description: (borrowed + interest) × price.
+          $ref: '#/components/schemas/NullableDecimal'
+        haircut:
+          $ref: '#/components/schemas/Decimal'
+        hourly_rate:
+          description: The rate of what it owes this hour.
+          $ref: '#/components/schemas/Decimal'
+    MarginLoan:
+      type: object
+      description: What an account owes of an asset (api/openapi/margin.yaml's MarginLoan).
+      required: [asset, principal, interest, interest_model, hourly_rate, opened_at, updated_at]
+      properties:
+        asset:
+          type: string
+        principal:
+          $ref: '#/components/schemas/Decimal'
+        interest:
+          $ref: '#/components/schemas/Decimal'
+        interest_model:
+          type: string
+          enum: [FIXED, FLOATING]
+        hourly_rate:
+          $ref: '#/components/schemas/Decimal'
+        opened_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    MarginLoanChange:
+      type: object
+      description: A borrow or a repayment (margin-service's loan_changes, E0 contract §8).
+      required: [id, asset, kind, amount, principal_part, interest_part, reason, order_id, liquidation_id, journal_id, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        asset:
+          type: string
+        kind:
+          type: string
+          enum: [BORROW, REPAY]
+        amount:
+          description: Borrowed, or repaid in all.
+          $ref: '#/components/schemas/Decimal'
+        principal_part:
+          description: Of a repayment, the principal (interest is repaid first, design §4.3); a borrow's amount.
+          $ref: '#/components/schemas/Decimal'
+        interest_part:
+          description: Of a repayment, the interest; 0 for a borrow.
+          $ref: '#/components/schemas/Decimal'
+        reason:
+          type: string
+          description: What made it - the user's borrow or repayment, an order's side effect (AUTO_BORROW, AUTO_REPAY) or a liquidation.
+        order_id:
+          type: [string, 'null']
+          format: uuid
+        liquidation_id:
+          type: [string, 'null']
+          format: uuid
+        journal_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+    MarginInterestCharge:
+      type: object
+      description: An hour's interest on an asset an account owes (design §4.3; api/openapi/margin.yaml's MarginInterest).
+      required: [interest_id, asset, principal, interest_model, hourly_rate, interest, hour, journal_id]
+      properties:
+        interest_id:
+          type: string
+          format: uuid
+        asset:
+          type: string
+        principal:
+          description: The principal the hour was charged on.
+          $ref: '#/components/schemas/Decimal'
+        interest_model:
+          type: string
+          enum: [FIXED, FLOATING]
+        hourly_rate:
+          $ref: '#/components/schemas/Decimal'
+        interest:
+          description: principal × hourly_rate, rounded up to the asset's precision.
+          $ref: '#/components/schemas/Decimal'
+        hour:
+          type: string
+          format: date-time
+          description: The hour charged (a borrow's first hour at the time of borrowing).
+        journal_id:
+          type: string
+          format: uuid
+    MarginAmount:
+      type: object
+      required: [asset, amount]
+      properties:
+        asset:
+          type: string
+        amount:
+          $ref: '#/components/schemas/Decimal'
+    MarginLiquidation:
+      type: object
+      description: >-
+        A margin account's liquidation (design §4.5; api/openapi/margin.yaml's MarginLiquidation with its holder, its
+        trigger and what stayed).
+      required: [liquidation_id, user_id, account, symbol, trigger, approval_id, status, margin_level, total_asset, total_liability,
+        repaid, remaining, fee, insurance_covered, started_at, completed_at]
+      properties:
+        liquidation_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        account:
+          $ref: '#/components/schemas/MarginAccountType'
+        symbol:
+          type: [string, 'null']
+        trigger:
+          type: string
+          enum: [AUTO, MANUAL]
+          description: At the liquidation line, or approved by hand (approval_id).
+        approval_id:
+          type: [string, 'null']
+          format: uuid
+        status:
+          type: string
+          enum: [STARTED, COMPLETED]
+        margin_level:
+          description: The margin level that triggered it (by hand, the level when approved).
+          $ref: '#/components/schemas/Decimal'
+        total_asset:
+          description: Total assets at its start, in USDT.
+          $ref: '#/components/schemas/Decimal'
+        total_liability:
+          description: Total liabilities at its start, in USDT.
+          $ref: '#/components/schemas/Decimal'
+        repaid:
+          type: array
+          description: Debts repaid, per asset (principal and interest).
+          items:
+            $ref: '#/components/schemas/MarginAmount'
+        remaining:
+          type: array
+          description: What stayed in the account, per asset.
+          items:
+            $ref: '#/components/schemas/MarginAmount'
+        fee:
+          description: The liquidation fee in USDT, to the insurance fund.
+          $ref: '#/components/schemas/Decimal'
+        insurance_covered:
+          description: In USDT, what the insurance fund paid of debts the assets did not cover; 0 without a shortfall.
+          $ref: '#/components/schemas/Decimal'
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: [string, 'null']
+          format: date-time
+    MarginAccountDetail:
+      description: A margin account with its balances and debts, loans, borrows and repayments, interest and liquidations.
+      allOf:
+        - $ref: '#/components/schemas/MarginAccount'
+        - type: object
+          required: [balances, loans, loan_changes, interest, liquidations]
+          properties:
+            balances:
+              type: array
+              items:
+                $ref: '#/components/schemas/MarginBalance'
+            loans:
+              type: array
+              items:
+                $ref: '#/components/schemas/MarginLoan'
+            loan_changes:
+              type: array
+              description: The latest 50, newest first.
+              items:
+                $ref: '#/components/schemas/MarginLoanChange'
+            interest:
+              type: array
+              description: The latest 50 charges, newest first.
+              items:
+                $ref: '#/components/schemas/MarginInterestCharge'
+            liquidations:
+              type: array
+              description: The latest 20, newest first.
+              items:
+                $ref: '#/components/schemas/MarginLiquidation'
+    MarginInterestBucket:
+      type: object
+      required: [day, asset, charged, repaid, owed, principal_avg, hourly_rate_avg, accounts, charged_usdt, repaid_usdt]
+      properties:
+        day:
+          type: string
+          format: date
+          description: The bucket's first day.
+        asset:
+          type: string
+        charged:
+          description: Interest charged (MARGIN_INTEREST, HOUSE's income at accrual).
+          $ref: '#/components/schemas/Decimal'
+        repaid:
+          description: Interest repaid.
+          $ref: '#/components/schemas/Decimal'
+        owed:
+          description: Interest owed at the bucket's end.
+          $ref: '#/components/schemas/Decimal'
+        principal_avg:
+          description: The principal owed, averaged over the bucket's hours.
+          $ref: '#/components/schemas/Decimal'
+        hourly_rate_avg:
+          description: charged ÷ the principal of the hours charged.
+          $ref: '#/components/schemas/Decimal'
+        accounts:
+          type: integer
+          description: The accounts charged.
+        charged_usdt:
+          $ref: '#/components/schemas/NullableDecimal'
+        repaid_usdt:
+          $ref: '#/components/schemas/NullableDecimal'

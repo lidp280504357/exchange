@@ -3,9 +3,10 @@ import { prefersReducedMotion } from "@exchange/ui";
 import { MotionConfig } from "motion/react";
 import { lazy } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router";
+import { PageSkeleton } from "../kit/PageSkeleton";
 import { registerPageMessages } from "../pageMessages";
 import { nextPath } from "../next";
-import { allowed, sections, subpages } from "../sections";
+import { allowed, sections, subpages, useFlagged } from "../sections";
 import { ConsoleShell } from "./ConsoleShell";
 
 // The pages' strings arrive with this chunk (A40: not in the sign-in's).
@@ -31,14 +32,23 @@ export default function SignedIn({ admin }: { admin: Admin }) {
   );
 }
 
+// A section behind a flag (kit/flags.ts) has no route while its flag is
+// off, so its address leads to the overview; while the flags load it
+// shows the skeleton, not the overview, for an address opened directly.
 function Console({ admin }: { admin: Admin }) {
+  const flagged = useFlagged();
   return (
     <Routes>
       <Route element={<ConsoleShell admin={admin} />}>
         {[...sections, ...subpages]
-          .filter((s) => allowed(admin, s))
+          .filter((s) => allowed(admin, s) && flagged(s) !== false)
           .map((s) => (
-            <Route key={s.path} index={s.path === ""} path={s.path || undefined} element={<s.page admin={admin} />} />
+            <Route
+              key={s.path}
+              index={s.path === ""}
+              path={s.path || undefined}
+              element={flagged(s) === undefined ? <PageSkeleton /> : <s.page admin={admin} />}
+            />
           ))}
         <Route path="/login" element={<Signed />} />
         <Route path="*" element={<Navigate to="/" replace />} />

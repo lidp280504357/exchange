@@ -2171,7 +2171,10 @@ export interface paths {
          *     handbook's. PENDING: its source is not there yet; UNKNOWN: its
          *     source did not answer. The 14 items of §4.6 and house (review ㉚:
          *     market.house_liquidity on, HOUSE holding every backed asset a
-         *     pair is made of). Every administrator reads it.
+         *     pair is made of). Every administrator reads it. margin (design
+         *     2026-10-06 §8: margin.enabled, and every margin asset's pool cap
+         *     and rates at their launch values) is a draft: admin-service does
+         *     not report it yet.
          */
         get: operations["getLaunchChecklist"];
         put?: never;
@@ -3181,6 +3184,349 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/v1/margin/assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The margin assets' parameters, with what is lent of each now
+         * @description Draft (design 2026-10-06 §4.1, §8; E0 contract §8 asset_params).
+         *     Every asset that can be borrowed or counts as collateral, with its
+         *     parameters (margin-service's, seeded from margin.json), what users
+         *     owe of it now (HOUSE's lending, −Σ the users' debt rows) and the
+         *     rate the next hour's interest takes. Needs instruments.read.
+         */
+        get: operations["listMarginAssets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/margin/assets/{asset}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Change an asset's margin parameters
+         * @description Draft (design §8). Needs instruments.trading (ADMIN: the trading
+         *     parameters); admin-service asks margin-service to change it. What
+         *     only stops new borrowing applies at once: 200, audited as
+         *     admin.margin.asset_changed with the fields before and after
+         *     (borrowing switched off, a lower pool or user cap; the loans stay).
+         *     Anything else waits for a second ADMIN with instruments.trading in
+         *     either approval mode: 202 with a MARGIN_PARAMS request, escalation
+         *     MARGIN_RISK (the interest model and its rates; the haircut and
+         *     collateral switched either way, which move every holder's margin
+         *     level; borrowing switched on, a higher cap). A request mixing both
+         *     waits whole. expected_version is the version read: 409
+         *     MARGIN_PARAMS_CHANGED when it moved, then and when the request is
+         *     approved. A change of the asset waiting already: 409
+         *     ADMIN_MARGIN_CHANGE_PENDING (details approval_id). A request lapses
+         *     a day after it was asked for. 400 unless haircut is 0 to 1,
+         *     user_cap at most pool_cap, the rates at least 0 and the floating
+         *     curve rising (base_rate ≤ kink_rate ≤ max_rate, kink above 0 and
+         *     under 1).
+         */
+        put: operations["setMarginAsset"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/margin/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The cross account's terms and the liquidation fee
+         * @description Draft (design §4.2, §4.4, §8; E0 contract §8 settings). The cross
+         *     account's leverage and thresholds, the liquidation fee, and the
+         *     thresholds a pair without its own takes by its leverage. Needs
+         *     instruments.read.
+         */
+        get: operations["getMarginSettings"];
+        /**
+         * Change the cross account's terms or the liquidation fee
+         * @description Draft (design §8). Needs instruments.trading; every change waits
+         *     for a second ADMIN with it, in either approval mode: 202 with a
+         *     MARGIN_PARAMS request, escalation MARGIN_RISK (a threshold moved
+         *     either way liquidates or spares accounts at once, a leverage
+         *     changes what may be borrowed). 400 unless the cross leverage is 3
+         *     or 5, its liquidation_level above 1 and under its warn_level, and
+         *     liquidation_fee_rate 0 to 0.1. expected_version, a change waiting
+         *     already and the lapse as for an asset. Audited as
+         *     admin.margin.settings_changed once applied.
+         */
+        put: operations["setMarginSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/margin/pairs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The pairs margin trades on, with their isolated terms
+         * @description Draft (design §4.2, §8; E0 contract §8 pair_params). The pairs
+         *     whose two assets are both margin assets: whether each takes
+         *     isolated accounts, its isolated leverage and thresholds (its own,
+         *     or its leverage's), and the isolated accounts on it. The cross
+         *     account trades all of them on its own terms. Needs
+         *     instruments.read.
+         */
+        get: operations["listMarginPairs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/margin/pairs/{symbol}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                symbol: components["parameters"]["Symbol"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Change a pair's isolated terms
+         * @description Draft (design §8). Needs instruments.trading. Switching isolated
+         *     accounts off applies at once (200: no new isolated account on the
+         *     pair, those open stay; audited as admin.margin.pair_changed).
+         *     Anything else waits for a second ADMIN with it, in either approval
+         *     mode (202 with a MARGIN_PARAMS request, escalation MARGIN_RISK):
+         *     the leverage and the thresholds (null for the leverage's), which
+         *     the pair's accounts take at once, and switching isolated accounts
+         *     on. 400 unless liquidation_level is above 1 and under warn_level.
+         *     expected_version, a change waiting already and the lapse as for an
+         *     asset.
+         */
+        put: operations["setMarginPair"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/margin/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Margin accounts, riskiest first
+         * @description Draft (design §2, §8). From margin-service, valued as it values
+         *     them (§2): the lowest margin level (total assets ÷ total
+         *     liabilities) first, the accounts without liabilities last, by net
+         *     assets. Accounts that hold or owe nothing are left out. At most
+         *     `limit`; truncated says there are more. Needs derivatives.read.
+         */
+        get: operations["listMarginAccounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/margin/accounts/{user_id}/{account}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: components["parameters"]["MarginUserID"];
+                /** @description MARGIN_CROSS, or MARGIN_ISOLATED:<symbol> for an isolated account (design 2026-10-06 §2). */
+                account: components["parameters"]["MarginAccountKey"];
+            };
+            cookie?: never;
+        };
+        /**
+         * A margin account with its balances and debts, loans, interest and liquidations
+         * @description Draft (design §8). The account as listed; each asset it holds or
+         *     owes, with its worth; its loans by asset; the latest 50 borrows and
+         *     repayments; the latest 50 interest charges; the latest 20
+         *     liquidations. Needs derivatives.read.
+         */
+        get: operations["getMarginAccount"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/margin/accounts/{user_id}/{account}/freeze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: components["parameters"]["MarginUserID"];
+                /** @description MARGIN_CROSS, or MARGIN_ISOLATED:<symbol> for an isolated account (design 2026-10-06 §2). */
+                account: components["parameters"]["MarginAccountKey"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Freeze a margin account
+         * @description Draft (design §8). Cancels its open orders; no orders, borrowing
+         *     or transfers out until it is unfrozen (status FROZEN). Interest
+         *     goes on, and the system still liquidates it at the liquidation
+         *     line. Needs derivatives.write; one administrator, at once; audited
+         *     as admin.margin.account_frozen. Frozen already: 409 MARGIN_FROZEN.
+         */
+        post: operations["freezeMarginAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/margin/accounts/{user_id}/{account}/unfreeze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: components["parameters"]["MarginUserID"];
+                /** @description MARGIN_CROSS, or MARGIN_ISOLATED:<symbol> for an isolated account (design 2026-10-06 §2). */
+                account: components["parameters"]["MarginAccountKey"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unfreeze a margin account an administrator froze
+         * @description Draft (design §8). Needs derivatives.write; one administrator, at
+         *     once; audited as admin.margin.account_unfrozen. Not frozen by an
+         *     administrator (a liquidation's freeze ends with it): 409
+         *     ADMIN_MARGIN_NOT_FROZEN.
+         */
+        post: operations["unfreezeMarginAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/margin/accounts/{user_id}/{account}/liquidate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: components["parameters"]["MarginUserID"];
+                /** @description MARGIN_CROSS, or MARGIN_ISOLATED:<symbol> for an isolated account (design 2026-10-06 §2). */
+                account: components["parameters"]["MarginAccountKey"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask for a margin account's liquidation (a second administrator approves)
+         * @description Draft (design §4.5, §8). Liquidates the account as the system does
+         *     at the liquidation line, whatever its margin level: frozen, its
+         *     orders canceled, its assets sold to HOUSE at the market to repay
+         *     its debts, the fee to the insurance fund (INSURANCE_FUND), a
+         *     shortfall from it. Needs derivatives.write; always waits for a
+         *     second administrator with it, in either approval mode (202 with a
+         *     MARGIN_LIQUIDATE request, escalation MARGIN_RISK); approved, it
+         *     starts at once and the request's result names the liquidation.
+         *     Nothing owed: 409 ADMIN_MARGIN_NOTHING_OWED; a liquidation under
+         *     way: 409 MARGIN_FROZEN; a request for the account waiting already:
+         *     409 ADMIN_MARGIN_CHANGE_PENDING (details approval_id).
+         */
+        post: operations["liquidateMarginAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/margin/liquidations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Margin liquidations, newest first
+         * @description Draft (design §8). From the ClickHouse read model
+         *     margin_liquidations: one row a liquidation, at the liquidation
+         *     line or approved by hand, with the debts it repaid, what stayed,
+         *     its fee to the insurance fund and any shortfall the fund covered.
+         *     Needs reports.read.
+         */
+        get: operations["listMarginLiquidations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/v1/margin/interest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Margin interest per day, week or month (UTC) and asset, oldest first
+         * @description Draft (design §4.3, §8). From the ClickHouse read model
+         *     margin_interest: per bucket and asset, the interest charged
+         *     (MARGIN_INTEREST, income at accrual) and repaid, what users owe at
+         *     the bucket's end, the average principal and hourly rate, and the
+         *     accounts charged; in the asset, and in USDT at the bucket's last
+         *     price (null without one). Needs reports.read.
+         */
+        get: operations["marginInterestReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3865,7 +4211,7 @@ export interface components {
         };
         LaunchItem: {
             /** @enum {string} */
-            key: "welcome_credits" | "test_mode" | "registration" | "admin_totp" | "two_person" | "test_assets" | "custodian" | "withdraw" | "brand" | "coin_profile" | "legal" | "third_party" | "admins" | "domain" | "house";
+            key: "welcome_credits" | "test_mode" | "registration" | "admin_totp" | "two_person" | "test_assets" | "custodian" | "withdraw" | "brand" | "coin_profile" | "legal" | "third_party" | "admins" | "domain" | "house" | "margin";
             /** @enum {string} */
             status: "OK" | "FAIL" | "PENDING" | "UNKNOWN";
             /** @description What it is now, by item (a flag's enabled and rules, the credits, the custodian's gateway host, the administrators...). */
@@ -4797,7 +5143,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            kind: "LEDGER_ADJUSTMENT" | "INSURANCE_FUND" | "DEPOSIT_BACKFILL" | "SIM_EVENT" | "SIM_PARAMS" | "SIM_MINT" | "DEPOSIT_ASSIGN" | "WELCOME_CREDIT";
+            kind: "LEDGER_ADJUSTMENT" | "INSURANCE_FUND" | "DEPOSIT_BACKFILL" | "SIM_EVENT" | "SIM_PARAMS" | "SIM_MINT" | "DEPOSIT_ASSIGN" | "WELCOME_CREDIT" | "MARGIN_PARAMS" | "MARGIN_LIQUIDATE";
             /**
              * @description For LEDGER_ADJUSTMENT user_id, asset and amount, account_type FUTURES when not the SPOT account; for INSURANCE_FUND
              *     asset and amount; reference when given. For DEPOSIT_BACKFILL user_id, asset, amount, network, trade_id, address,
@@ -4807,7 +5153,10 @@ export interface components {
              *     SIM_MINT asset, amount (in all), bots (each bot's share as JSON: [{user_id, label, amount}]) and role when only
              *     one role's bots; its journal_id is the first bot's. For DEPOSIT_ASSIGN user_id (the user it is credited to),
              *     deposit_id, asset, amount, network, address, tx_hash, and former_holder (a retired address's holder) or
-             *     address_owner (its holder now) when it has one; its journal_id is the release's.
+             *     address_owner (its holder now) when it has one; its journal_id is the release's. For MARGIN_PARAMS (a draft,
+             *     design 2026-10-06 §8) target (asset:<code>, settings or pair:<symbol>), before and after (the parameters as
+             *     JSON) and expected_version; the result names the version applied. For MARGIN_LIQUIDATE (a draft) user_id,
+             *     account, symbol and margin_level when asked; the result names the liquidation.
              */
             payload: {
                 [key: string]: string;
@@ -4844,10 +5193,12 @@ export interface components {
              *     limit, over the 24-hour limit, or of unknown worth, or a
              *     simulated market's change beyond one operator's share, or a
              *     deposit of nobody credited to a user other than its address's
-             *     holder; empty in single-person mode.
+             *     holder, or a margin change that always takes two (rates,
+             *     leverage, thresholds, haircuts, more to lend, a manual
+             *     liquidation; a draft); empty in single-person mode.
              * @enum {string}
              */
-            escalation: "" | "REQUESTED" | "TWO_PERSON_MODE" | "SINGLE_LIMIT" | "DAILY_LIMIT" | "NO_PRICE" | "SIM_SHARE" | "NOT_ADDRESS_HOLDER" | "WELCOME_RAISE";
+            escalation: "" | "REQUESTED" | "TWO_PERSON_MODE" | "SINGLE_LIMIT" | "DAILY_LIMIT" | "NO_PRICE" | "SIM_SHARE" | "NOT_ADDRESS_HOLDER" | "WELCOME_RAISE" | "MARGIN_RISK";
             journal_id: string | null;
             /**
              * Format: date-time
@@ -5214,6 +5565,331 @@ export interface components {
             /** @description The request as received (one callback only). */
             raw?: string;
         };
+        /**
+         * @description As api/openapi/margin.yaml; an isolated account is one per pair (symbol).
+         * @enum {string}
+         */
+        MarginAccountType: "MARGIN_CROSS" | "MARGIN_ISOLATED";
+        /** @description The floating curve (design 2026-10-06 §4.1; the seed's floating): the hourly rate rises in a straight line from base_rate with nothing lent to kink_rate at the utilization kink, then to max_rate with the whole pool lent (utilization = lent ÷ pool_cap, on the hour). Rates are fractions an hour: 0.000005 is 0.0005%/h. */
+        MarginFloatingRate: {
+            base_rate: components["schemas"]["Decimal"];
+            kink: components["schemas"]["Decimal"];
+            kink_rate: components["schemas"]["Decimal"];
+            max_rate: components["schemas"]["Decimal"];
+        };
+        /** @description An asset's margin parameters (design §4.1; margin-service's asset_params, E0 contract §8). */
+        MarginAssetParams: {
+            /** @description Users may borrow it. */
+            borrowable: boolean;
+            /** @description It counts in an account's total assets, times the haircut; off, an account holds it at no worth. */
+            collateral: boolean;
+            /** @description 0 to 1; the asset's worth counts times it in total assets (1 for USDT, 0.95 for BTC and ETH, 0.7 for ASTRA). */
+            haircut: components["schemas"]["Decimal"];
+            /** @description HOUSE's simulated supply of it (the pool), in the asset; what is lent never exceeds it. */
+            pool_cap: components["schemas"]["Decimal"];
+            /** @description The most one user may owe of it (principal), in the asset; 10% of the pool by default. */
+            user_cap: components["schemas"]["Decimal"];
+            /** @enum {string} */
+            interest_model: "FIXED" | "FLOATING";
+            /** @description The FIXED model's hourly rate, a fraction (0.00001 is 0.0010%/h, about 8.76% a year). */
+            fixed_hourly_rate: components["schemas"]["Decimal"];
+            floating: components["schemas"]["MarginFloatingRate"];
+        };
+        /** @description An asset's margin parameters with what is lent of it now. */
+        MarginAsset: components["schemas"]["MarginAssetParams"] & {
+            /** @example USDT */
+            asset: string;
+            /** @description What users owe of it now (principal), −Σ the users' debt rows. */
+            lent: components["schemas"]["Decimal"];
+            /** @description pool_cap less lent, never below 0. */
+            pool_available: components["schemas"]["Decimal"];
+            /** @description lent ÷ pool_cap, 0 to 1 (1 with a cap of 0). */
+            utilization: components["schemas"]["Decimal"];
+            /** @description The rate of the hour rate_hour (the fixed rate, or the floating one at that hour's utilization). */
+            hourly_rate: components["schemas"]["Decimal"];
+            /** Format: date-time */
+            rate_hour: string;
+            /** @description The interest users owe of it, charged and not repaid. */
+            interest_owed: components["schemas"]["Decimal"];
+            /** @description The accounts that owe it. */
+            borrowers: number;
+            /** Format: int64 */
+            version: number;
+            /** @description The administrator's email; "system" for the seed (deploy/instruments/margin.json). */
+            updated_by: string;
+            /** Format: date-time */
+            updated_at: string | null;
+            /**
+             * Format: uuid
+             * @description A change of it waiting for a second ADMIN (one at a time).
+             */
+            pending_approval_id: string | null;
+        };
+        /**
+         * @description An isolated leverage (design §4.2).
+         * @enum {integer}
+         */
+        MarginLeverage: 3 | 5 | 10;
+        /** @description Margin level thresholds (total assets ÷ total liabilities, design §2, §4.4): under warn_level the user is warned, at liquidation_level the account is liquidated (two readings in a row, §4.5). */
+        MarginLevels: {
+            warn_level: components["schemas"]["Decimal"];
+            liquidation_level: components["schemas"]["Decimal"];
+        };
+        /** @description The settings margin-service keeps (E0 contract §8 settings). */
+        MarginSettingsParams: {
+            /** @description The cross account's terms (design §4.4), 3x with 1.30 and 1.10, or 5x with 1.20 and 1.10 once opened. */
+            cross: {
+                /** @enum {integer} */
+                leverage: 3 | 5;
+            } & components["schemas"]["MarginLevels"];
+            /** @description The fraction of a liquidation's traded value that goes to the insurance fund (0.02). */
+            liquidation_fee_rate: components["schemas"]["Decimal"];
+        };
+        /** @description The margin settings, the thresholds by isolated leverage, and who last changed the settings. */
+        MarginSettings: components["schemas"]["MarginSettingsParams"] & {
+            /** @description What a pair without its own thresholds takes, by its leverage (3x 1.25/1.15, 5x 1.20/1.10, 10x 1.10/1.05). */
+            isolated_defaults: ({
+                leverage: components["schemas"]["MarginLeverage"];
+            } & components["schemas"]["MarginLevels"])[];
+            /** Format: int64 */
+            version: number;
+            updated_by: string;
+            /** Format: date-time */
+            updated_at: string | null;
+            /**
+             * Format: uuid
+             * @description A change waiting for a second ADMIN (one at a time).
+             */
+            pending_approval_id: string | null;
+        };
+        /** @description A pair's isolated terms (margin-service's pair_params, E0 contract §8). */
+        MarginPairParams: {
+            /** @description The pair takes isolated accounts. */
+            isolated: boolean;
+            leverage: components["schemas"]["MarginLeverage"];
+            /** @description Its own warning level; null takes its leverage's (MarginSettings.isolated_defaults). */
+            warn_level: components["schemas"]["NullableDecimal"];
+            /** @description Its own liquidation level; null takes its leverage's. */
+            liquidation_level: components["schemas"]["NullableDecimal"];
+        };
+        /** @description A pair's isolated terms as they apply, with its accounts. */
+        MarginPair: {
+            /** @example BTC-USDT */
+            symbol: string;
+            base: string;
+            quote: string;
+            isolated: boolean;
+            /** @description Its isolated leverage (design §4.2): 10 for BTC-USDT and ETH-USDT, 5 for the other main pairs, 3 for ASTRA-USDT and the pairs quoted in BTC. */
+            leverage: components["schemas"]["MarginLeverage"];
+            /** @description The warning level that applies (its own or its leverage's). */
+            warn_level: components["schemas"]["Decimal"];
+            liquidation_level: components["schemas"]["Decimal"];
+            /** @description The pair has thresholds of its own rather than its leverage's. */
+            own_levels: boolean;
+            /** @description The isolated accounts on it that hold or owe anything. */
+            accounts: number;
+            /** Format: int64 */
+            version: number;
+            updated_by: string;
+            /** Format: date-time */
+            updated_at: string | null;
+            /** Format: uuid */
+            pending_approval_id: string | null;
+        };
+        /**
+         * @description As api/openapi/margin.yaml - WARNED under the warning level, LIQUIDATING from the trigger to the end, FROZEN by an operator.
+         * @enum {string}
+         */
+        MarginAccountStatus: "NORMAL" | "WARNED" | "LIQUIDATING" | "FROZEN";
+        /** @description A margin account as the console lists it (api/openapi/margin.yaml's MarginAccount without its balances, with its holder and freeze). */
+        MarginAccount: {
+            /** Format: uuid */
+            user_id: string;
+            account: components["schemas"]["MarginAccountType"];
+            /** @description An isolated account's pair; null for the cross account. */
+            symbol: string | null;
+            leverage: number;
+            status: components["schemas"]["MarginAccountStatus"];
+            /** @description total_asset ÷ total_liability; null without debts (the sites show 999). */
+            margin_level: components["schemas"]["NullableDecimal"];
+            /** @description Its thresholds (the cross account's, or its pair's). */
+            warn_level: components["schemas"]["Decimal"];
+            liquidation_level: components["schemas"]["Decimal"];
+            /** @description In USDT, each collateral asset after its haircut. */
+            total_asset: components["schemas"]["Decimal"];
+            /** @description Principal and interest owed, in USDT. */
+            total_liability: components["schemas"]["Decimal"];
+            /** @description total_asset less total_liability; negative is a shortfall. */
+            net_asset: components["schemas"]["Decimal"];
+            /** @description An isolated account's estimate of the base price at which it is liquidated; null for the cross account and without debts. */
+            liquidation_price: components["schemas"]["NullableDecimal"];
+            /**
+             * Format: date-time
+             * @description When it last went under the warning level; null above it.
+             */
+            warned_at: string | null;
+            /** @description The administrator who froze it (email); null unless an administrator did. */
+            frozen_by: string | null;
+            frozen_reason: string | null;
+            /** Format: date-time */
+            frozen_at: string | null;
+            /** @description The assets it holds or owes without a fresh price (design §2, E0 decision ④): a debt takes the last known price; an account with an asset never priced is not liquidated but may not borrow, transfer out or open orders. */
+            unpriced: string[];
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description An asset a margin account holds or owes (api/openapi/margin.yaml's MarginBalance with its worth). */
+        MarginBalance: {
+            asset: string;
+            free: components["schemas"]["Decimal"];
+            /** @description Frozen by open orders. */
+            locked: components["schemas"]["Decimal"];
+            /** @description Principal owed. */
+            borrowed: components["schemas"]["Decimal"];
+            /** @description Interest owed. */
+            interest: components["schemas"]["Decimal"];
+            /** @description free + locked − borrowed − interest. */
+            net: components["schemas"]["Decimal"];
+            /** @description The asset's price now; null without a fresh one. */
+            price_usdt: components["schemas"]["NullableDecimal"];
+            /** @description (free + locked) × price × haircut; 0 when it is not collateral. */
+            asset_usdt: components["schemas"]["NullableDecimal"];
+            /** @description (borrowed + interest) × price. */
+            liability_usdt: components["schemas"]["NullableDecimal"];
+            haircut: components["schemas"]["Decimal"];
+            /** @description The rate of what it owes this hour. */
+            hourly_rate: components["schemas"]["Decimal"];
+        };
+        /** @description What an account owes of an asset (api/openapi/margin.yaml's MarginLoan). */
+        MarginLoan: {
+            asset: string;
+            principal: components["schemas"]["Decimal"];
+            interest: components["schemas"]["Decimal"];
+            /** @enum {string} */
+            interest_model: "FIXED" | "FLOATING";
+            hourly_rate: components["schemas"]["Decimal"];
+            /** Format: date-time */
+            opened_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description A borrow or a repayment (margin-service's loan_changes, E0 contract §8). */
+        MarginLoanChange: {
+            /** Format: uuid */
+            id: string;
+            asset: string;
+            /** @enum {string} */
+            kind: "BORROW" | "REPAY";
+            /** @description Borrowed, or repaid in all. */
+            amount: components["schemas"]["Decimal"];
+            /** @description Of a repayment, the principal (interest is repaid first, design §4.3); a borrow's amount. */
+            principal_part: components["schemas"]["Decimal"];
+            /** @description Of a repayment, the interest; 0 for a borrow. */
+            interest_part: components["schemas"]["Decimal"];
+            /** @description What made it - the user's borrow or repayment, an order's side effect (AUTO_BORROW, AUTO_REPAY) or a liquidation. */
+            reason: string;
+            /** Format: uuid */
+            order_id: string | null;
+            /** Format: uuid */
+            liquidation_id: string | null;
+            /** Format: uuid */
+            journal_id: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description An hour's interest on an asset an account owes (design §4.3; api/openapi/margin.yaml's MarginInterest). */
+        MarginInterestCharge: {
+            /** Format: uuid */
+            interest_id: string;
+            asset: string;
+            /** @description The principal the hour was charged on. */
+            principal: components["schemas"]["Decimal"];
+            /** @enum {string} */
+            interest_model: "FIXED" | "FLOATING";
+            hourly_rate: components["schemas"]["Decimal"];
+            /** @description principal × hourly_rate, rounded up to the asset's precision. */
+            interest: components["schemas"]["Decimal"];
+            /**
+             * Format: date-time
+             * @description The hour charged (a borrow's first hour at the time of borrowing).
+             */
+            hour: string;
+            /** Format: uuid */
+            journal_id: string;
+        };
+        MarginAmount: {
+            asset: string;
+            amount: components["schemas"]["Decimal"];
+        };
+        /** @description A margin account's liquidation (design §4.5; api/openapi/margin.yaml's MarginLiquidation with its holder, its trigger and what stayed). */
+        MarginLiquidation: {
+            /** Format: uuid */
+            liquidation_id: string;
+            /** Format: uuid */
+            user_id: string;
+            account: components["schemas"]["MarginAccountType"];
+            symbol: string | null;
+            /**
+             * @description At the liquidation line, or approved by hand (approval_id).
+             * @enum {string}
+             */
+            trigger: "AUTO" | "MANUAL";
+            /** Format: uuid */
+            approval_id: string | null;
+            /** @enum {string} */
+            status: "STARTED" | "COMPLETED";
+            /** @description The margin level that triggered it (by hand, the level when approved). */
+            margin_level: components["schemas"]["Decimal"];
+            /** @description Total assets at its start, in USDT. */
+            total_asset: components["schemas"]["Decimal"];
+            /** @description Total liabilities at its start, in USDT. */
+            total_liability: components["schemas"]["Decimal"];
+            /** @description Debts repaid, per asset (principal and interest). */
+            repaid: components["schemas"]["MarginAmount"][];
+            /** @description What stayed in the account, per asset. */
+            remaining: components["schemas"]["MarginAmount"][];
+            /** @description The liquidation fee in USDT, to the insurance fund. */
+            fee: components["schemas"]["Decimal"];
+            /** @description In USDT, what the insurance fund paid of debts the assets did not cover; 0 without a shortfall. */
+            insurance_covered: components["schemas"]["Decimal"];
+            /** Format: date-time */
+            started_at: string;
+            /** Format: date-time */
+            completed_at: string | null;
+        };
+        /** @description A margin account with its balances and debts, loans, borrows and repayments, interest and liquidations. */
+        MarginAccountDetail: components["schemas"]["MarginAccount"] & {
+            balances: components["schemas"]["MarginBalance"][];
+            loans: components["schemas"]["MarginLoan"][];
+            /** @description The latest 50, newest first. */
+            loan_changes: components["schemas"]["MarginLoanChange"][];
+            /** @description The latest 50 charges, newest first. */
+            interest: components["schemas"]["MarginInterestCharge"][];
+            /** @description The latest 20, newest first. */
+            liquidations: components["schemas"]["MarginLiquidation"][];
+        };
+        MarginInterestBucket: {
+            /**
+             * Format: date
+             * @description The bucket's first day.
+             */
+            day: string;
+            asset: string;
+            /** @description Interest charged (MARGIN_INTEREST, HOUSE's income at accrual). */
+            charged: components["schemas"]["Decimal"];
+            /** @description Interest repaid. */
+            repaid: components["schemas"]["Decimal"];
+            /** @description Interest owed at the bucket's end. */
+            owed: components["schemas"]["Decimal"];
+            /** @description The principal owed, averaged over the bucket's hours. */
+            principal_avg: components["schemas"]["Decimal"];
+            /** @description charged ÷ the principal of the hours charged. */
+            hourly_rate_avg: components["schemas"]["Decimal"];
+            /** @description The accounts charged. */
+            accounts: number;
+            charged_usdt: components["schemas"]["NullableDecimal"];
+            repaid_usdt: components["schemas"]["NullableDecimal"];
+        };
         Error: {
             /**
              * @description Stable machine-readable code (appendix C), used by clients for i18n.
@@ -5280,6 +5956,9 @@ export interface components {
         Symbol: string;
         ChangeID: string;
         ArticleID: string;
+        MarginUserID: string;
+        /** @description MARGIN_CROSS, or MARGIN_ISOLATED:<symbol> for an isolated account (design 2026-10-06 §2). */
+        MarginAccountKey: string;
     };
     requestBodies: never;
     headers: {
@@ -9538,6 +10217,412 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CustodyFee"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listMarginAssets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The assets. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["MarginAsset"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setMarginAsset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarginAssetParams"] & {
+                    /** Format: int64 */
+                    expected_version: number;
+                } & components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description Applied at once (it only stops new borrowing). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarginAsset"];
+                };
+            };
+            /** @description Waits for a second ADMIN. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        approval: components["schemas"]["Approval"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getMarginSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarginSettings"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setMarginSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarginSettingsParams"] & {
+                    /** Format: int64 */
+                    expected_version: number;
+                } & components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description Waits for a second ADMIN. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        approval: components["schemas"]["Approval"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listMarginPairs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The pairs. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["MarginPair"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setMarginPair: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                symbol: components["parameters"]["Symbol"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarginPairParams"] & {
+                    /** Format: int64 */
+                    expected_version: number;
+                } & components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description Applied at once (isolated accounts switched off). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarginPair"];
+                };
+            };
+            /** @description Waits for a second ADMIN. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        approval: components["schemas"]["Approval"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listMarginAccounts: {
+        parameters: {
+            query?: {
+                /** @description Empty for all. */
+                status?: components["schemas"]["MarginAccountStatus"];
+                account?: components["schemas"]["MarginAccountType"];
+                /** @description One pair's isolated accounts (BTC-USDT). */
+                symbol?: string;
+                user_id?: components["parameters"]["UserFilter"];
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The accounts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["MarginAccount"][];
+                        truncated: boolean;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getMarginAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: components["parameters"]["MarginUserID"];
+                /** @description MARGIN_CROSS, or MARGIN_ISOLATED:<symbol> for an isolated account (design 2026-10-06 §2). */
+                account: components["parameters"]["MarginAccountKey"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarginAccountDetail"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    freezeMarginAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: components["parameters"]["MarginUserID"];
+                /** @description MARGIN_CROSS, or MARGIN_ISOLATED:<symbol> for an isolated account (design 2026-10-06 §2). */
+                account: components["parameters"]["MarginAccountKey"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description The account, frozen. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarginAccount"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    unfreezeMarginAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: components["parameters"]["MarginUserID"];
+                /** @description MARGIN_CROSS, or MARGIN_ISOLATED:<symbol> for an isolated account (design 2026-10-06 §2). */
+                account: components["parameters"]["MarginAccountKey"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description The account, unfrozen. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarginAccount"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    liquidateMarginAccount: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Every request that moves money carries one (C5.5 ⑥): the console makes a key per operation and sends it again with
+                 *     each retry. The first request with a key makes the operation (its approval, hold, closing order or message takes
+                 *     its ID from the key); the same request again answers with what it made, finishing a fund operation whose outcome
+                 *     was unknown; the key with another request fails with 409 COMMON_IDEMPOTENCY_CONFLICT. Keys are each
+                 *     administrator's own and kept 24 hours. Missing or longer than 128 characters: 400.
+                 */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                user_id: components["parameters"]["MarginUserID"];
+                /** @description MARGIN_CROSS, or MARGIN_ISOLATED:<symbol> for an isolated account (design 2026-10-06 §2). */
+                account: components["parameters"]["MarginAccountKey"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Reason"];
+            };
+        };
+        responses: {
+            /** @description Waits for a second administrator. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        approval: components["schemas"]["Approval"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listMarginLiquidations: {
+        parameters: {
+            query?: {
+                /** @description Days back, today included. */
+                days?: components["parameters"]["Days"];
+                account?: components["schemas"]["MarginAccountType"];
+                /** @description One pair's isolated accounts (BTC-USDT). */
+                symbol?: string;
+                trigger?: "AUTO" | "MANUAL";
+                user_id?: components["parameters"]["UserFilter"];
+                /** @description The previous page's next_cursor; omitted for the first page. */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of liquidations. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["MarginLiquidation"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    marginInterestReport: {
+        parameters: {
+            query?: {
+                /** @description Days back, today included. */
+                days?: components["parameters"]["Days"];
+                /**
+                 * @description The period's first day (UTC), instead of days; to defaults to
+                 *     today. At most a year by day, three years by week or month.
+                 */
+                from?: components["parameters"]["ReportFrom"];
+                /** @description The period's last day (UTC), included; needs from. */
+                to?: components["parameters"]["ReportTo"];
+                /** @description The rows' span; a row's day is its bucket's first (a week starts on Monday). */
+                bucket?: components["parameters"]["ReportBucket"];
+                /** @description One asset; all when absent. */
+                asset?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The buckets. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["MarginInterestBucket"][];
+                    };
                 };
             };
             default: components["responses"]["Error"];
