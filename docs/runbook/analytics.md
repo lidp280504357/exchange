@@ -1,6 +1,6 @@
 # 分析读模型（ClickHouse 与 analytics-consumer）
 
-需求 §9，阶段 1 验收标准 8，实施计划 §6.3 任务 12。analytics-consumer（运维端口 9087）以消费组 `analytics-consumer` 按批消费全部业务主题，写入 ClickHouse（库 `exchange`，迁移在 `migrations/clickhouse`，服务启动时执行），写入成功后才提交位点；失败整批重试。所有表都是 ReplacingMergeTree，重复投递的事件在合并时折叠，**查询要加 `FINAL`**（或按 ID 去重）。
+需求 §9，阶段 1 验收标准 8，实施计划 §6.3 任务 12。analytics-consumer（运维端口 9087）以消费组 `analytics-consumer` 按批消费全部业务主题，写入 ClickHouse（库 `exchange`，迁移在 `migrations/clickhouse`，服务启动时执行），写入成功后才提交位点；失败整批重试。表大多是 ReplacingMergeTree，重复投递的事件在合并时折叠；`margin_liquidations` 是 AggregatingMergeTree，两个事件各写自己的列、合并时每列取最后一个非 NULL 值（见下表）。两种都要**查询加 `FINAL`**（或按 ID 去重、聚合）。
 
 ## 表
 
@@ -24,7 +24,7 @@
 | `derivatives_funding` | 每个仓位每次资金费（费率、结算标记价、金额：正为收到、负为付出） | `derivatives.FundingPaid` |
 | `derivatives_liquidations` | 强平步骤：WARNING、STARTED、FILLED（`adl` 表示是否由自动减仓成交）、ADL（被减仓的对手方），带价格、数量、已实现盈亏、保险基金垫付、标记/破产价、保证金余额与维持保证金 | `derivatives.liquidation.events` |
 | `margin_interest` | 杠杆账户每小时每资产的计息（计息本金、模型与小时利率、利息、计息后的应付利息、整点、分录 journal） | `margin.MarginInterestAccrued`（杠杆设计 2026-10-06 §5.3，迁移 clickhouse 00009） |
-| `margin_liquidations` | 每次杠杆强平一行（AggregatingMergeTree，各列 `anyLast` 取最后一个非 NULL 值）：开始事件写触发时的风险率、总资产与总负债、开始时间，完成事件写各资产归还（JSON 数组）、强平费、保险基金补足、剩余与完成时间，并复述开始时的风险率、总资产、总负债与开始时间（没复述的旧事件留给开始事件）；`completed_at` 非空即已完成；两事件先后与重复投递都不影响结果，查询加 `FINAL` | `margin.MarginLiquidationStarted`、`MarginLiquidationCompleted` |
+| `margin_liquidations` | 每次杠杆强平一行（AggregatingMergeTree，各列 `anyLast` 取最后一个非 NULL 值）：开始事件写触发时的风险率、总资产与总负债、开始时间，完成事件写各资产归还（JSON 数组）、强平费、保险基金补足、剩余与完成时间，并复述开始时的风险率、总资产、总负债与开始时间（没复述的旧事件留给开始事件）；两个事件都写 `trigger`（AUTO 触线、MANUAL 后台批准）与 `approval_id`（MANUAL 的审批，迁移 00010）；`completed_at` 非空即已完成；两事件先后与重复投递都不影响结果，查询加 `FINAL` | `margin.MarginLiquidationStarted`、`MarginLiquidationCompleted` |
 | `read_model_backfills` | 已完成的回填 | analytics-consumer |
 
 - 充值与提现快照的 `version` = 事件毫秒时间 × 16 + 状态进度，同一毫秒的两个事件（提现申请与风控评分在同一事务里）按状态先后取后者。
@@ -69,5 +69,5 @@ WHERE status NOT IN ('CONFIRMED', 'REJECTED', 'CANCELED', 'FAILED');
 
 ## 核对
 
-- 每小时：各服务 outbox 已发布的事件数与 `events` 比对（`analytics_reconcile_missing`，按主题，`RECONCILE_SCHEMAS` 列出 schema）。
+- 每小时：各服务 outbox 已发布的事件数与 `events` 比对（`analytics_reconcile_missing`，按主题，`RECONCILE_SCHEMAS` 列出 schema；默认含全部发事件的服务，杠杆的 `margin` 于 2026-10-06 加入，缺了会把 ClickHouse 里的 `margin.events` 算成"来自不在列表里的 outbox"而每小时告警）。
 - 端到端 `scripts/e2e/ops.sh`：一分钟前的成交与订单变化各自与事件一一对应；钱包读模型各状态的笔数与 wallet-service 的表一致（确认进度不发事件，比较时把 PostgreSQL 的 CONFIRMING/SIGNING 归到上一个有事件的状态；无主充值——打到没有用户的地址、记入 UNCLAIMED_DEPOSIT——没有可通知的人、不发事件，不在读模型里，比较时不算，后台把它分配给用户后才有事件）；一分钟 K 线的笔数之和等于成交数。
