@@ -58,6 +58,7 @@ func (r repos) Interest() ports.InterestRepo  { return interest(r) }
 func (r repos) Transfers() ports.TransferRepo { return transfers(r) }
 
 func (r repos) Reservations() ports.ReservationRepo { return reservations(r) }
+func (r repos) Liquidations() ports.LiquidationRepo { return liquidations(r) }
 func (r repos) Runs() ports.RunRepo                 { return runs(r) }
 
 func (r repos) LockUser(ctx context.Context, userID string) error {
@@ -673,13 +674,15 @@ func (r runs) Record(ctx context.Context, started time.Time, check string, misma
 
 type reservations repos
 
-const reservationColumns = `order_id, user_id, account_type, symbol, side_effect, borrowed, borrow_id, margin_level, created_at`
+const reservationColumns = `order_id, user_id, account_type, symbol, side_effect, borrowed, borrow_id, margin_level, request_hash,
+	created_at`
 
 func (r reservations) Get(ctx context.Context, orderID string) (ports.Reservation, bool, error) {
 	var res ports.Reservation
 	var borrow *string
 	err := r.q.QueryRow(ctx, `SELECT `+reservationColumns+` FROM order_reservations WHERE order_id = $1`, orderID).Scan(&res.OrderID,
-		&res.UserID, &res.AccountType, &res.Symbol, &res.SideEffect, &res.Borrowed, &borrow, &res.MarginLevel, &res.CreatedAt)
+		&res.UserID, &res.AccountType, &res.Symbol, &res.SideEffect, &res.Borrowed, &borrow, &res.MarginLevel, &res.RequestHash,
+		&res.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ports.Reservation{}, false, nil
 	}
@@ -691,9 +694,9 @@ func (r reservations) Get(ctx context.Context, orderID string) (ports.Reservatio
 }
 
 func (r reservations) Insert(ctx context.Context, res ports.Reservation) (ports.Reservation, error) {
-	if _, err := r.q.Exec(ctx, `INSERT INTO order_reservations (`+reservationColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	if _, err := r.q.Exec(ctx, `INSERT INTO order_reservations (`+reservationColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (order_id) DO NOTHING`, res.OrderID, res.UserID, res.AccountType, res.Symbol, res.SideEffect, res.Borrowed,
-		nullUUID(res.BorrowID), res.MarginLevel, res.CreatedAt); err != nil {
+		nullUUID(res.BorrowID), res.MarginLevel, res.RequestHash, res.CreatedAt); err != nil {
 		return ports.Reservation{}, fmt.Errorf("insert order reservation: %w", err)
 	}
 	stored, ok, err := r.Get(ctx, res.OrderID)

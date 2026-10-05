@@ -56,20 +56,20 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
   - 预警线界：借后风险率 ≥ 预警线。默认阈值下倍数界总是先到（预警线都低于 L/(L−1)），只有后台把预警线调高时才是它（`MARGIN_LEVEL_TOO_LOW`）。
 - 借入即计首小时利息（同一个账本请求里），利率是本小时的；池余量在借币事务里按资产行锁扣下，账本拒绝时退回。
 - 还币先抵利息再抵本金，`ALL` 按可用余额还到为止；运营冻结的账户可以还，强平中的不行（`MARGIN_FROZEN`）。
-- 写账本前先记 `PENDING`（`borrows`、`repays`、`transfers`）；账本超时或不可用时接口返回 `COMMON_UNAVAILABLE`，恢复循环每 5 秒用同一个键重发（账本只记一次），客户端用同一个 `Idempotency-Key` 重试拿到结果。账本拒绝的写记为 `FAILED`，失败原因存成 `[类别] 错误码: 说明`（类别如 `UNPROCESSABLE`、`INVALID`），同键重试原样返回，HTTP 状态也和第一次一样。
+- 写账本前先记 `PENDING`（`borrows`、`repays`、`transfers`）；账本超时或不可用时接口返回 `COMMON_UNAVAILABLE`，恢复循环每 5 秒用同一个键重发（账本只记一次），客户端用同一个 `Idempotency-Key` 重试拿到结果。账本拒绝的写记为 `FAILED`，失败原因存成 `[类别] 错误码: 说明`（类别如 `UNPROCESSABLE`、`INVALID`），同键重试原样返回，HTTP 状态也和第一次一样。客户端的 `Idempotency-Key` 不能以 `order:`、`trade-repay:`、`liquidation:` 开头（本服务自己的写用这些键，审查 CR：客户端用 `trade-repay:...` 会让同键的自动还款被当成已记过）。
 - **在途的写也算**（审查 CK ①）：借币、划出与杠杆下单检查额度时，用的是账本余额加上该用户还在 `PENDING` 的写——在途借币当作已借到（可用、本金、首小时利息都加上），在途划出当作已划走，在途的整点利息当作已欠；在途的划入与还款要等账本记上才算。`PENDING` 先于账本余额读取：读的间隙里落账的写会被算两次而不会漏算，算两次也只会更保守。所以两个并发的借币，或者一边借一边划出，合起来也不会越过倍数与预警线。
-- 资格与开关只由 margin-service 检查：划入与借币（含下单的自动借币）要 `margin.enabled` 与 user-service 的 `MARGIN_TRADE` 资格（只限 ACTIVE 账户、同样受 `margin.enabled` 的规则约束，两站据此显示杠杆入口；审查 CO 的 C9，此前用 `SPOT_TRADE`）；划出与还币只降风险，两样都不查。账本的 `PostMargin` 只管记账，不再查资格。
+- 资格与开关：margin-service 在划入与借币时查 `margin.enabled` 与 user-service 的 `MARGIN_TRADE` 资格（只限 ACTIVE 账户、同样受 `margin.enabled` 的规则约束，两站据此显示杠杆入口；审查 CO 的 C9，此前用 `SPOT_TRADE`），下单要自动借币时也查；杠杆下单另由交易服务先查开关与 `MARGIN_TRADE`（编码会话 8f568ccd）。划出与还币只降风险，两样都不查。账本的 `PostMargin` 只管记账，不查资格。
 
 ## 杠杆账户下单（E2）
 
-- `POST /v1/orders` 带 `account`（`MARGIN_CROSS`，或交易对自己的 `MARGIN_ISOLATED`）与 `side_effect`。spot-trading-service 在冻结前调 margin-service 的 gRPC `MarginService.ReserveOrder`（9199）：开关（`AUTO_BORROW` 另要 `margin.auto_borrow`，关着报 `MARGIN_DISABLED`、detail `flag`）、账户状态、两种资产都可在该账户持有、估值完整、可用余额（加上 `AUTO_BORROW` 时的可借额度）够冻结、按限价（市价单按行情价）成交后风险率不低于预警线。`AUTO_BORROW` 在这里按差额借入（键 `order:<order_id>`，首小时利息同计）。每张单的首次答复记在 `margin.order_reservations`，重放（交易服务的恢复）返回它，零借款也一样。`CheckOrder` 做同样的检查，什么都不改。
+- `POST /v1/orders` 带 `account`（`MARGIN_CROSS`，或交易对自己的 `MARGIN_ISOLATED`）与 `side_effect`。spot-trading-service 在冻结前调 margin-service 的 gRPC `MarginService.ReserveOrder`（9199）：开关（`AUTO_BORROW` 另要 `margin.auto_borrow`，关着报 `MARGIN_DISABLED`、detail `flag`）、账户状态、两种资产都可在该账户持有、估值完整、可用余额（加上 `AUTO_BORROW` 时的可借额度）够冻结、按限价（市价单按行情价）成交后风险率不低于预警线。`AUTO_BORROW` 在这里按差额借入（键 `order:<order_id>`，首小时利息同计）。每张单的首次答复记在 `margin.order_reservations`（连同请求的摘要），重放（交易服务的恢复）返回它，零借款也一样；同一 `order_id` 内容不同时答 `COMMON_IDEMPOTENCY_CONFLICT`。第一次的答复没有送到（账本中断、崩溃）时，重放先找 `order:<order_id>` 下的借款：`PENDING` 的接着记账，`FAILED` 的答原来的拒绝，`DONE` 的就是答复——不再拿已被这笔借款改过的余额重新检查（审查 CR ②，C11）。`CheckOrder` 做同样的检查，什么都不改。
 - gRPC 的答复只有两类（审查 CM 的 C8，交易服务据此判断）：**拒绝**是 `InvalidArgument`、`FailedPrecondition`、`AlreadyExists`、`PermissionDenied`，或 `Unavailable` + `MARGIN_PRICE_UNAVAILABLE`，订单被拒；**结果未知**是 `Internal` 与其它 `Unavailable`，交易服务的恢复稍后用同一个 `order_id` 再问。依赖返回的 `NotFound`（例如不认识的交易对）改成 `InvalidArgument`（错误码不变），依赖的限流与鉴权失败改成 `Unavailable`，所以 margin-service 不会答 `NotFound`、`ResourceExhausted`、`Unauthenticated`、`Unimplemented`。
 - 冻结、撤单释放与结算都在杠杆账户的资产行上：账本按成交事件里双方的账户记 `MARGIN_TRADE_SETTLE`（HOUSE 一侧照旧 `MARKET_MAKER`），`trades` 表记下双方账户与是否自动还款，停住的成交重试时同样处理。
 - `AUTO_REPAY`：结算的同一事务里，账本用这一方到账的资产（扣过手续费）先还利息、再还本金，至多还清该资产的负债，单独记一笔 `MARGIN_REPAY`（键 `trade-repay:<成交>:<buyer|seller>`，备注带订单号）。margin-service 消费 `ledger.events` 认出这些分录（消费组 `margin-service-ledger`），记成 `AUTO_REPAY` 的还款，同时更新借款簿与池子，并发 `MarginRepaid`。消费有延迟，不变量 7 的检查会跳过最近 1 分钟内变动过的借款。
 
 ## 整点计息
 
-- 每 15 秒检查一次：从上一个完成的整点之后到当前整点（停机后最多补 48 小时），按顺序计。
+- 每 15 秒检查一次：从上一个完成的整点之后到当前整点（停机后最多补 48 小时，更早的整点不再计；它们已存下的 `PENDING` 利息由恢复循环照原样发给账本），按顺序计。整点过 30 秒才计：整点前最后几秒的自动还款要经 `ledger.events` 回到借款表，被还掉的本金就不计这一小时（审查 CR）。启动时从 `interest_runs` 恢复指标 `margin_interest_last_run_timestamp_seconds`，重启不会让 `MarginInterestStalled` 失明。
 - 每笔借款按**整点那一刻的本金**计一小时（整点之后借的已在借入时计过首小时，整点之后还的整点照计）：本金 = 现在的本金 − 整点后借入 + 整点后还的本金，来自 `borrows`/`repays`。
 - 利率：`FIXED` 用固定小时利率；`FLOATING` 按整点时池子的使用率（整点本金合计 ÷ 池上限）在曲线上取值。每个资产每小时的利率记在 `hourly_rates`（模型、利率、当时借出、池上限），每笔利息都能复算；利息 = 本金 × 利率，按资产精度向上取整，不复利。
 - 整点那一刻的本金由借款表与整点后的借还一起算，两者在同一个只读快照里读（可重复读；审查 CK ②）：分开读时，两次读之间落账的借还只会出现在一边，整点就按一个从没有过的本金计息。

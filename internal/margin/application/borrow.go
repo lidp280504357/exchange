@@ -36,10 +36,21 @@ func (in BorrowInput) hash() []byte {
 	return sum[:]
 }
 
-// checkKey validates a client's Idempotency-Key.
+// internalKeys start the keys margin-service gives its own writes: an
+// order's borrow, an automatic repayment, a liquidation's writes.
+var internalKeys = []string{"order:", AutoRepayPrefix, "liquidation:"}
+
+// checkKey validates a client's Idempotency-Key, which may not take an
+// internal key's form (review CR: a client's "trade-repay:..." would hide
+// the automatic repayment of that key).
 func checkKey(key string) error {
 	if strings.TrimSpace(key) == "" || len(key) > 100 {
 		return apperr.Invalid("an Idempotency-Key of at most 100 bytes is required")
+	}
+	for _, p := range internalKeys {
+		if strings.HasPrefix(key, p) {
+			return apperr.Invalid("an Idempotency-Key may not start with " + p)
+		}
 	}
 	return nil
 }
@@ -62,8 +73,12 @@ func checkAmount(amount decimal.Decimal, decimals int32) error {
 // cap; the first hour's interest is charged with it. The same key with the
 // same request returns the loan, with another COMMON_IDEMPOTENCY_CONFLICT.
 func (s *Service) Borrow(ctx context.Context, in BorrowInput) (ports.Loan, error) {
-	if err := checkKey(in.IdemKey); err != nil {
-		return ports.Loan{}, err
+	if in.OrderID == "" {
+		if err := checkKey(in.IdemKey); err != nil {
+			return ports.Loan{}, err
+		}
+	} else if in.IdemKey != orderKey(in.OrderID) {
+		return ports.Loan{}, fmt.Errorf("the borrow of order %s goes under %s", in.OrderID, orderKey(in.OrderID))
 	}
 	if prior, ok, err := s.Store.Read().Borrows().ByKey(ctx, in.UserID, in.IdemKey); err != nil {
 		return ports.Loan{}, err

@@ -111,6 +111,9 @@ func setup(ctx context.Context, a *app.App) error {
 		Now:         time.Now,
 		Metrics:     application.NewMetrics(a.Metrics()),
 	}
+	if err := svc.SeedMetrics(ctx); err != nil {
+		a.Logger().WarnContext(ctx, "margin metrics not seeded", "error", err)
+	}
 	prod, err := bootstrap.Producer(ctx, a, cfg.Kafka)
 	if err != nil {
 		return err

@@ -124,15 +124,33 @@ func (m MarginRef) String() string {
 //     (MARGIN_INTEREST);
 //   - REPAY: assets -a, interest +i, debt +(a - i) (MARGIN_REPAY), i the
 //     part of a that pays interest; never more than is owed.
+//
+// A liquidation (design §4.5, batch E3) books its own, MARGIN_LIQUIDATE:
+//   - LIQUIDATION_REPAY: as REPAY, from what the liquidation left the
+//     account;
+//   - INSURANCE_COVER: INSURANCE_FUND -a, interest +i, debt +(a - i): the
+//     insurance fund pays what the account's assets could not;
+//   - LIQUIDATION_FEE: assets -a, INSURANCE_FUND +a.
 const (
-	MarginTransferIn  = "TRANSFER_IN"
-	MarginTransferOut = "TRANSFER_OUT"
-	MarginBorrow      = "BORROW"
-	MarginInterest    = "INTEREST"
-	MarginRepay       = "REPAY"
+	MarginTransferIn       = "TRANSFER_IN"
+	MarginTransferOut      = "TRANSFER_OUT"
+	MarginBorrow           = "BORROW"
+	MarginInterest         = "INTEREST"
+	MarginRepay            = "REPAY"
+	MarginLiquidationRepay = "LIQUIDATION_REPAY"
+	MarginInsuranceCover   = "INSURANCE_COVER"
+	MarginLiquidationFee   = "LIQUIDATION_FEE"
 )
 
-var marginMoves = []string{MarginTransferIn, MarginTransferOut, MarginBorrow, MarginInterest, MarginRepay}
+var marginMoves = []string{
+	MarginTransferIn, MarginTransferOut, MarginBorrow, MarginInterest, MarginRepay, MarginLiquidationRepay, MarginInsuranceCover,
+	MarginLiquidationFee,
+}
+
+// paysDebt reports whether a move pays a debt, interest first.
+func paysDebt(t string) bool {
+	return t == MarginRepay || t == MarginLiquidationRepay || t == MarginInsuranceCover
+}
 
 // MaxMarginMoves bounds a request.
 const MaxMarginMoves = 16
@@ -178,8 +196,8 @@ func (r MarginRequest) Validate() error {
 			return fail("the asset is required")
 		case !m.Amount.IsPositive():
 			return fail("the amount must be positive")
-		case m.Type != MarginRepay && !m.Interest.IsZero():
-			return fail("only REPAY has an interest part")
+		case !paysDebt(m.Type) && !m.Interest.IsZero():
+			return fail("only a repayment has an interest part")
 		case m.Interest.IsNegative() || m.Interest.GreaterThan(m.Amount):
 			return fail("the interest part is 0 to the amount")
 		}
@@ -229,8 +247,12 @@ func (r MarginRequest) MarginAccounts() []AccountKey {
 			add(a.Assets(m.Asset), a.DebtRow(m.Asset))
 		case MarginInterest:
 			add(a.InterestRow(m.Asset), SystemAccount(AccountMarginInterestIncome, m.Asset))
-		case MarginRepay:
+		case MarginRepay, MarginLiquidationRepay:
 			add(a.Assets(m.Asset), a.DebtRow(m.Asset), a.InterestRow(m.Asset))
+		case MarginInsuranceCover:
+			add(SystemAccount(AccountInsuranceFund, m.Asset), a.DebtRow(m.Asset), a.InterestRow(m.Asset))
+		case MarginLiquidationFee:
+			add(a.Assets(m.Asset), SystemAccount(AccountInsuranceFund, m.Asset))
 		}
 	}
 	return p.Accounts()
@@ -278,7 +300,7 @@ func MarginPostings(r MarginRequest, accounts []Account) ([]Posting, error) {
 				{Account: interest, Amount: m.Amount.Neg(), Kind: Available},
 				{Account: SystemAccount(AccountMarginInterestIncome, m.Asset), Amount: m.Amount, Kind: Available},
 			}
-		case MarginRepay:
+		case MarginRepay, MarginLiquidationRepay, MarginInsuranceCover:
 			// Interest first (design §4.3, review CJ ④): the interest part
 			// is the whole amount or the whole interest owed, whichever is
 			// less.
@@ -286,13 +308,26 @@ func MarginPostings(r MarginRequest, accounts []Account) ([]Posting, error) {
 				return nil, ErrInterestFirst.WithDetail("asset", m.Asset).WithDetail("interest_owed", state[interest].Available.Neg().String()).
 					WithDetail("move", i+1)
 			}
+			payer := assets
 			entry = EntryMarginRepay
-			lines = []Line{{Account: assets, Amount: m.Amount.Neg(), Kind: Available}}
+			switch m.Type {
+			case MarginLiquidationRepay:
+				entry = EntryMarginLiquidate
+			case MarginInsuranceCover:
+				entry, payer = EntryMarginLiquidate, SystemAccount(AccountInsuranceFund, m.Asset)
+			}
+			lines = []Line{{Account: payer, Amount: m.Amount.Neg(), Kind: Available}}
 			if m.Interest.IsPositive() {
 				lines = append(lines, Line{Account: interest, Amount: m.Interest, Kind: Available})
 			}
 			if principal := m.Amount.Sub(m.Interest); principal.IsPositive() {
 				lines = append(lines, Line{Account: debt, Amount: principal, Kind: Available})
+			}
+		case MarginLiquidationFee:
+			entry = EntryMarginLiquidate
+			lines = []Line{
+				{Account: assets, Amount: m.Amount.Neg(), Kind: Available},
+				{Account: SystemAccount(AccountInsuranceFund, m.Asset), Amount: m.Amount, Kind: Available},
 			}
 		}
 		for _, l := range lines {

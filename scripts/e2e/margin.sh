@@ -36,7 +36,7 @@ source "$(dirname "$0")/lib/remote.sh"
 # The hourly charge would add to the first hour's interest the checks
 # below expect: keep clear of the hour.
 if (( 10#$(date -u +%M) >= 56 )); then
-  wait=$(( (60 - 10#$(date -u +%M)) * 60 - 10#$(date -u +%S) + 45 ))
+  wait=$(( (60 - 10#$(date -u +%M)) * 60 - 10#$(date -u +%S) + 75 ))
   echo "note: waiting ${wait}s for the hour's interest run"
   sleep "$wait"
 fi

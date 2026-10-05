@@ -99,6 +99,21 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	return m
 }
 
+// SeedMetrics sets the gauge of the last finished interest run from the
+// database: a restart does not blind MarginInterestStalled until the next
+// hour is charged (review CR).
+func (s *Service) SeedMetrics(ctx context.Context) error {
+	if s.Metrics == nil {
+		return nil
+	}
+	at, ok, err := s.Store.Read().Interest().LastFinished(ctx)
+	if err != nil || !ok {
+		return err
+	}
+	s.Metrics.InterestRun.Set(float64(at.Unix()))
+	return nil
+}
+
 func (s *Service) count(kind, outcome string) {
 	if s.Metrics != nil {
 		s.Metrics.Ops.WithLabelValues(kind, outcome).Inc()

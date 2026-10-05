@@ -57,4 +57,10 @@ const (
 	MoveBorrow      MoveType = "BORROW"
 	MoveInterest    MoveType = "INTEREST"
 	MoveRepay       MoveType = "REPAY"
+	// A liquidation's (MARGIN_LIQUIDATE): a repayment from what it left
+	// the account, the insurance fund's cover of the rest, the fee to the
+	// fund (batch E3).
+	MoveLiquidationRepay MoveType = "LIQUIDATION_REPAY"
+	MoveInsuranceCover   MoveType = "INSURANCE_COVER"
+	MoveLiquidationFee   MoveType = "LIQUIDATION_FEE"
 )

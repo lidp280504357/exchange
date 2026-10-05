@@ -20,6 +20,11 @@ import (
 // MaxCatchUp bounds how many past hours a run charges after an outage.
 const MaxCatchUp = 48
 
+// hourGrace is how long an hour waits before it is charged: the automatic
+// repayments of its last moments reach the loans from ledger.events a
+// little later, and a loan they paid is not charged the hour (review CR).
+const hourGrace = 30 * time.Second
+
 // ChargeInterest charges the hours that are due (design §4.3): from the
 // hour after the last finished run to the current one, oldest first, at
 // most MaxCatchUp of them. Each loan is charged once per hour on the
@@ -31,7 +36,7 @@ const MaxCatchUp = 48
 // stays RUNNING until every asset of it is charged; the later hours wait
 // for it. It returns the number of loans charged.
 func (s *Service) ChargeInterest(ctx context.Context) (int, error) {
-	now := domain.Hour(s.Now())
+	now := domain.Hour(s.Now().Add(-hourGrace))
 	hours, err := s.dueHours(ctx, now)
 	if err != nil {
 		return 0, err

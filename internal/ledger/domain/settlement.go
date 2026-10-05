@@ -101,6 +101,8 @@ func (t Trade) Validate() error {
 		return fail("HOUSE sells without a fee")
 	case !tradeAccount(t.BuyerAccount) || !tradeAccount(t.SellerAccount):
 		return fail("an order trades from SPOT, MARGIN_CROSS or MARGIN_ISOLATED, not %q/%q", t.BuyerAccount, t.SellerAccount)
+	case t.HouseSide == HouseBuy && MarginType(t.BuyerAccount), t.HouseSide == HouseSell && MarginType(t.SellerAccount):
+		return fail("HOUSE trades from no margin account")
 	case t.BuyerAutoRepay && (t.HouseSide == HouseBuy || !MarginType(t.BuyerAccount)),
 		t.SellerAutoRepay && (t.HouseSide == HouseSell || !MarginType(t.SellerAccount)):
 		return fail("only an order on a margin account repays automatically")

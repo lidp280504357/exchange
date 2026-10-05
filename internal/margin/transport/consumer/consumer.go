@@ -6,11 +6,9 @@ package consumer
 
 import (
 	"context"
-	"errors"
 	"slices"
 
 	"github.com/shopspring/decimal"
-	"google.golang.org/protobuf/reflect/protoregistry"
 
 	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
 	ledgerv1 "github.com/skill/exchange/api/gen/go/exchange/ledger/v1"
@@ -25,15 +23,14 @@ const Group = "margin-service-ledger"
 // Ledger hands the journals that touch margin accounts to the service.
 func Ledger(svc *application.Service) kafka.Handler {
 	return func(ctx context.Context, env *eventv1.Envelope) error {
-		msg, err := env.GetPayload().UnmarshalNew()
-		if err != nil {
-			if errors.Is(err, protoregistry.NotFound) {
-				return nil // a newer event type this build does not know
-			}
+		posted := &ledgerv1.EntryPosted{}
+		if !env.GetPayload().MessageIs(posted) {
+			return nil // BalanceChanged, or a newer type this build does not know
+		}
+		if err := env.GetPayload().UnmarshalTo(posted); err != nil {
 			return err
 		}
-		posted, ok := msg.(*ledgerv1.EntryPosted)
-		if !ok || !slices.ContainsFunc(posted.GetLines(), func(l *ledgerv1.EntryLine) bool { return domain.MarginRow(l.GetAccountType()) }) {
+		if !slices.ContainsFunc(posted.GetLines(), func(l *ledgerv1.EntryLine) bool { return domain.MarginRow(l.GetAccountType()) }) {
 			return nil
 		}
 		e := application.Entry{

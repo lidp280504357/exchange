@@ -40,6 +40,7 @@ type Repos interface {
 	Interest() InterestRepo
 	Transfers() TransferRepo
 	Reservations() ReservationRepo
+	Liquidations() LiquidationRepo
 	Runs() RunRepo
 	// Emit queues an event on topic, keyed by aggregateID.
 	Emit(ctx context.Context, topic string, msg proto.Message, aggregateType, aggregateID string) error
@@ -284,12 +285,14 @@ type Repay struct {
 	Reason        string
 	OrderID       string
 	LiquidationID string
-	IdemKey       string
-	RequestHash   []byte
-	Status        Op
-	Failure       string
-	CreatedAt     time.Time
-	DoneAt        time.Time
+	// CoveredBy is CoveredByInsurance when the insurance fund paid it.
+	CoveredBy   string
+	IdemKey     string
+	RequestHash []byte
+	Status      Op
+	Failure     string
+	CreatedAt   time.Time
+	DoneAt      time.Time
 }
 
 // Reasons of a repayment.
@@ -298,6 +301,10 @@ const (
 	RepayAuto        = "AUTO_REPAY"
 	RepayLiquidation = "LIQUIDATION"
 )
+
+// CoveredByInsurance marks a liquidation's repayment the insurance fund
+// made.
+const CoveredByInsurance = "INSURANCE_FUND"
 
 // RepayRepo stores the repayments.
 type RepayRepo interface {
@@ -376,6 +383,8 @@ type InterestRepo interface {
 	// unfinished one; ok is false without one.
 	LastDone(ctx context.Context) (hour time.Time, ok bool, err error)
 	FirstRunning(ctx context.Context) (hour time.Time, ok bool, err error)
+	// LastFinished returns when the latest finished run finished.
+	LastFinished(ctx context.Context) (at time.Time, ok bool, err error)
 }
 
 // LoanKey names a loan.
@@ -423,6 +432,9 @@ type Reservation struct {
 	Borrowed    decimal.Decimal
 	BorrowID    string
 	MarginLevel *decimal.Decimal
+	// RequestHash digests the request; nil on the reservations made
+	// before it was kept.
+	RequestHash []byte
 	CreatedAt   time.Time
 }
 
@@ -433,6 +445,111 @@ type ReservationRepo interface {
 	// Insert stores a reservation unless the order has one, and returns
 	// the one that counts.
 	Insert(ctx context.Context, r Reservation) (Reservation, error)
+}
+
+// Liquidation is a margin account's liquidation (design §4.5).
+type Liquidation struct {
+	ID      string
+	UserID  string
+	Account domain.Account
+	// Trigger is AUTO (the liquidation level) or MANUAL (an approved
+	// request, ApprovalID, asked by RequestedBy).
+	Trigger     string
+	ApprovalID  string
+	RequestedBy string
+	Status      string
+	Step        string
+	PriorStatus domain.Status
+	// The account when it started.
+	MarginLevel    *decimal.Decimal
+	TotalAsset     decimal.Decimal
+	TotalLiability decimal.Decimal
+	FeeRate        decimal.Decimal
+	// QuoteAsset is what the orders trade against; QuoteMark its free
+	// balance when the current trading step began; Traded what the orders
+	// traded of it.
+	QuoteAsset string
+	QuoteMark  decimal.Decimal
+	Traded     decimal.Decimal
+	// Fee is in the quote asset, FeeUSDT and InsuranceCovered in USDT.
+	Fee              decimal.Decimal
+	FeeUSDT          decimal.Decimal
+	InsuranceCovered decimal.Decimal
+	Repaid           []AssetAmount
+	Remaining        []AssetAmount
+	Note             string
+	StartedAt        time.Time
+	StepAt           time.Time
+	CompletedAt      time.Time
+}
+
+// Triggers and states of a liquidation.
+const (
+	TriggerAuto          = "AUTO"
+	TriggerManual        = "MANUAL"
+	LiquidationStarted   = "STARTED"
+	LiquidationCompleted = "COMPLETED"
+)
+
+// AssetAmount is an amount of an asset.
+type AssetAmount struct {
+	Asset  string          `json:"asset"`
+	Amount decimal.Decimal `json:"amount"`
+}
+
+// LiquidationOrder is a liquidation's market order against HOUSE.
+type LiquidationOrder struct {
+	LiquidationID string
+	Symbol        string
+	Side          string
+	Quantity      decimal.Decimal
+	QuoteAmount   decimal.Decimal
+	OrderID       string
+	Status        string
+	Error         string
+	CreatedAt     time.Time
+}
+
+// States of a liquidation order.
+const (
+	OrderPlanned = "PLANNED"
+	OrderSent    = "SENT"
+	OrderRefused = "REFUSED"
+)
+
+// LiquidationRepo stores the liquidations.
+type LiquidationRepo interface {
+	Insert(ctx context.Context, l Liquidation) error
+	Get(ctx context.Context, id string) (Liquidation, bool, error)
+	GetForUpdate(ctx context.Context, id string) (Liquidation, error)
+	Update(ctx context.Context, l Liquidation) error
+	// Running returns the liquidations under way, oldest first.
+	Running(ctx context.Context) ([]Liquidation, error)
+	// RunningOf returns an account's liquidation under way; ok is false
+	// without one.
+	RunningOf(ctx context.Context, userID string, a domain.Account) (Liquidation, bool, error)
+	// ByApproval returns the liquidation an approval started.
+	ByApproval(ctx context.Context, approvalID string) (Liquidation, bool, error)
+	// OfUser returns a page of the user's liquidations, newest first,
+	// optionally of one account; before is the previous page's last ID.
+	OfUser(ctx context.Context, userID string, a *domain.Account, before string, limit int) ([]Liquidation, error)
+	// Orders returns a liquidation's orders; AddOrder stores one unless
+	// it is there; SetOrder stores how sending it went.
+	Orders(ctx context.Context, id string) ([]LiquidationOrder, error)
+	AddOrder(ctx context.Context, o LiquidationOrder) error
+	SetOrder(ctx context.Context, o LiquidationOrder) error
+}
+
+// Trading is spot-trading-service's internal API a liquidation uses.
+type Trading interface {
+	// CancelAccount asks for every open order on a margin account to be
+	// canceled (the engine's order events tell when).
+	CancelAccount(ctx context.Context, userID string, a domain.Account) error
+	// PlaceLiquidation places a liquidation's market order against HOUSE
+	// and returns its ID; the same order again returns the same ID. A
+	// refusal (the pair halted, a quantity under a lot) is an apperr of
+	// kind Invalid, Conflict or Unprocessable.
+	PlaceLiquidation(ctx context.Context, userID string, a domain.Account, o LiquidationOrder) (string, error)
 }
 
 // RunRepo records the reconciliation runs.

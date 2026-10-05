@@ -679,13 +679,14 @@ func TestHourlyInterest(t *testing.T) {
 	if n, err := r.svc.ChargeInterest(ctx); err != nil || n != 0 {
 		t.Fatalf("10:00 run: %d %v", n, err)
 	}
-	// 11:00:05 the next run; 11:00:02 another 500 USDT was borrowed (paid
-	// its first hour), so 11:00 charges 1000 USDT and 1 BTC.
+	// 11:00:35 the next run (an hour waits 30 seconds); 11:00:02 another
+	// 500 USDT was borrowed (paid its first hour), so 11:00 charges 1000
+	// USDT and 1 BTC.
 	r.at(time.Date(2026, 10, 6, 11, 0, 2, 0, time.UTC))
 	if _, err := r.svc.Borrow(ctx, application.BorrowInput{UserID: user, IdemKey: "b-usdt-2", Account: cross, Asset: "USDT", Amount: d("500")}); err != nil {
 		t.Fatal(err)
 	}
-	r.at(time.Date(2026, 10, 6, 11, 0, 5, 0, time.UTC))
+	r.at(time.Date(2026, 10, 6, 11, 0, 35, 0, time.UTC))
 	if n, err := r.svc.ChargeInterest(ctx); err != nil || n != 2 {
 		t.Fatalf("11:00 run: %d %v", n, err)
 	}

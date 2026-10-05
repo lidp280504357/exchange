@@ -98,7 +98,7 @@ func TestInterestOnItsWay(t *testing.T) {
 	if _, err := r.svc.Borrow(ctx, application.BorrowInput{UserID: user, IdemKey: "b", Account: cross, Asset: "USDT", Amount: d("1000")}); err != nil {
 		t.Fatal(err)
 	}
-	r.at(time.Date(2026, 10, 6, 11, 0, 5, 0, time.UTC))
+	r.at(time.Date(2026, 10, 6, 11, 0, 35, 0, time.UTC))
 	r.svc.Ledger = accrueDown{ledger: r.ledger}
 	if n, err := r.svc.ChargeInterest(ctx); err != nil || n != 0 {
 		t.Fatalf("11:00 with the ledger down: %d %v", n, err)

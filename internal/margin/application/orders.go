@@ -1,7 +1,9 @@
 package application
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 
 	"github.com/shopspring/decimal"
@@ -54,7 +56,7 @@ type OrderOutcome struct {
 // AUTO_BORROW, what the account may borrow, and the margin level after
 // the borrow and the fill stays at or above the warning level.
 func (s *Service) CheckOrder(ctx context.Context, in OrderInput) (OrderOutcome, error) {
-	plan, err := s.planOrder(ctx, in)
+	plan, err := s.planOrder(ctx, in, false)
 	if err != nil {
 		return OrderOutcome{}, err
 	}
@@ -64,32 +66,44 @@ func (s *Service) CheckOrder(ctx context.Context, in OrderInput) (OrderOutcome, 
 // ReserveOrder runs CheckOrder's checks and, with AUTO_BORROW, borrows
 // what the free balance lacks (the first hour's interest with it, under
 // the key order:<order_id>), then records the answer: a repeat for the
-// order returns it, a zero borrow included (review CH ④). The borrow
+// order returns it, a zero borrow included (review CH ④); the same order
+// with other content is COMMON_IDEMPOTENCY_CONFLICT. A repeat after an
+// answer that never came (the ledger out, a crash) finds the order's
+// borrow first and finishes it rather than checking the order again
+// against balances it already changed (review CR ②, C11). The borrow
 // stays when the freeze or the order fails afterwards.
 func (s *Service) ReserveOrder(ctx context.Context, in OrderInput) (OrderOutcome, error) {
-	if prior, ok, err := s.Store.Read().Reservations().Get(ctx, in.OrderID); err != nil {
+	read := s.Store.Read()
+	if prior, ok, err := read.Reservations().Get(ctx, in.OrderID); err != nil {
 		return OrderOutcome{}, err
 	} else if ok {
-		if prior.UserID != in.UserID {
-			return OrderOutcome{}, apperr.New(apperr.KindConflict, apperr.CodeIdempotencyConflict, "the order was reserved for another user")
+		if prior.UserID != in.UserID || (prior.RequestHash != nil && !bytes.Equal(prior.RequestHash, in.hash())) {
+			return OrderOutcome{}, apperr.New(apperr.KindConflict, apperr.CodeIdempotencyConflict, "the order was reserved with other content")
 		}
 		return OrderOutcome{Borrow: prior.Borrowed, BorrowID: prior.BorrowID, MarginLevel: prior.MarginLevel}, nil
 	}
-	plan, err := s.planOrder(ctx, in)
-	if err != nil {
+	var out OrderOutcome
+	if b, ok, err := read.Borrows().ByKey(ctx, in.UserID, orderKey(in.OrderID)); err != nil {
 		return OrderOutcome{}, err
-	}
-	out := OrderOutcome{Borrow: plan.borrow, MarginLevel: plan.level}
-	if plan.borrow.IsPositive() {
-		b, err := s.borrowFor(ctx, in, plan.borrow)
+	} else if ok {
+		if out, err = s.resumeOrder(ctx, in, b); err != nil {
+			return OrderOutcome{}, err
+		}
+	} else {
+		plan, err := s.planOrder(ctx, in, false)
 		if err != nil {
 			return OrderOutcome{}, err
 		}
-		out.BorrowID = b
+		out = OrderOutcome{Borrow: plan.borrow, MarginLevel: plan.level}
+		if plan.borrow.IsPositive() {
+			if out.BorrowID, err = s.borrowFor(ctx, in, plan.borrow); err != nil {
+				return OrderOutcome{}, err
+			}
+		}
 	}
-	stored, err := s.Store.Read().Reservations().Insert(ctx, ports.Reservation{
+	stored, err := read.Reservations().Insert(ctx, ports.Reservation{
 		OrderID: in.OrderID, UserID: in.UserID, AccountType: in.Account.Type, Symbol: in.Symbol, SideEffect: in.SideEffect,
-		Borrowed: out.Borrow, BorrowID: out.BorrowID, MarginLevel: out.MarginLevel, CreatedAt: s.Now(),
+		Borrowed: out.Borrow, BorrowID: out.BorrowID, MarginLevel: out.MarginLevel, RequestHash: in.hash(), CreatedAt: s.Now(),
 	})
 	if err != nil {
 		return OrderOutcome{}, err
@@ -97,10 +111,41 @@ func (s *Service) ReserveOrder(ctx context.Context, in OrderInput) (OrderOutcome
 	return OrderOutcome{Borrow: stored.Borrowed, BorrowID: stored.BorrowID, MarginLevel: stored.MarginLevel}, nil
 }
 
+// resumeOrder finishes an order's borrow found on a repeat: a PENDING one
+// goes to the ledger again under its key, a FAILED one answers its
+// refusal, a DONE one is the answer — the order was checked when it was
+// made, so only the margin level it leaves is worked out again.
+func (s *Service) resumeOrder(ctx context.Context, in OrderInput, b ports.Borrow) (OrderOutcome, error) {
+	switch b.Status {
+	case ports.OpPending:
+		if _, err := s.postBorrow(ctx, b); err != nil {
+			return OrderOutcome{}, err
+		}
+	case ports.OpFailed:
+		return OrderOutcome{}, failure(b.Failure)
+	}
+	plan, err := s.planOrder(ctx, in, true)
+	if err != nil {
+		return OrderOutcome{}, err
+	}
+	return OrderOutcome{Borrow: b.Amount, BorrowID: b.ID, MarginLevel: plan.level}, nil
+}
+
+// orderKey is the key an order's borrow goes under.
+func orderKey(orderID string) string { return "order:" + orderID }
+
+// hash digests what ReserveOrder was asked, telling a repeat from another
+// request for the same order.
+func (in OrderInput) hash() []byte {
+	sum := sha256.Sum256(fmt.Appendf(nil, "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s", in.UserID, in.Account.Key(), in.Symbol, in.Side,
+		in.FreezeAsset, in.FreezeAmount.String(), in.SideEffect, in.Price.String(), in.Quantity.String(), in.OrderID))
+	return sum[:]
+}
+
 // borrowFor borrows for an order (AUTO_BORROW) under the order's key and
 // returns the borrow's ID.
 func (s *Service) borrowFor(ctx context.Context, in OrderInput, amount decimal.Decimal) (string, error) {
-	key := "order:" + in.OrderID
+	key := orderKey(in.OrderID)
 	if _, err := s.Borrow(ctx, BorrowInput{
 		UserID: in.UserID, IdemKey: key, Account: in.Account, Asset: in.FreezeAsset, Amount: amount, OrderID: in.OrderID,
 	}); err != nil {
@@ -122,8 +167,9 @@ type orderPlan struct {
 }
 
 // planOrder runs the checks of an order and works out its borrow and the
-// margin level it leaves.
-func (s *Service) planOrder(ctx context.Context, in OrderInput) (orderPlan, error) {
+// margin level it leaves; borrowed says the order's borrow is in the
+// account already (a repeat), which leaves only the level to work out.
+func (s *Service) planOrder(ctx context.Context, in OrderInput, borrowed bool) (orderPlan, error) {
 	if err := s.enabled(in.UserID); err != nil {
 		return orderPlan{}, err
 	}
@@ -184,9 +230,12 @@ func (s *Service) planOrder(ctx context.Context, in OrderInput) (orderPlan, erro
 	}
 	plan := orderPlan{borrow: decimal.Zero}
 	free := holding(holdings, in.FreezeAsset).Free
-	if need := in.FreezeAmount.Sub(free); need.IsPositive() {
+	if need := in.FreezeAmount.Sub(free); need.IsPositive() && !borrowed {
 		if in.SideEffect != domain.SideEffectAutoBorrow {
 			return orderPlan{}, ErrInsufficient.WithDetail("asset", in.FreezeAsset).WithDetail("free", free.String())
+		}
+		if err := s.eligible(ctx, in.UserID, in.Account.Symbol); err != nil {
+			return orderPlan{}, err
 		}
 		room, err := s.room(ctx, read, cat, st, in.Account, in.FreezeAsset, nil)
 		if err != nil {
@@ -203,7 +252,7 @@ func (s *Service) planOrder(ctx context.Context, in OrderInput) (orderPlan, erro
 	v := domain.Value(after, cat.Assets, prices)
 	if level, ok := v.Level(); ok {
 		plan.level = &level
-		if level.LessThan(terms.WarnLevel) {
+		if level.LessThan(terms.WarnLevel) && !borrowed {
 			return orderPlan{}, domain.ErrLevelTooLow.WithDetail("margin_level", level.String()).
 				WithDetail("warn_level", terms.WarnLevel.String())
 		}

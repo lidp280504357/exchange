@@ -105,7 +105,7 @@ func collect[T any](rows pgx.Rows, err error, what string, scan func(pgx.Row) (T
 type repays repos
 
 const repayColumns = `repay_id, user_id, account_type, symbol, asset, interest_repaid, principal_repaid, reason, order_id,
-	liquidation_id, idem_key, request_hash, status, failure, created_at, done_at`
+	liquidation_id, idem_key, request_hash, status, failure, created_at, done_at, covered_by`
 
 func scanRepay(row pgx.Row) (ports.Repay, error) {
 	var p ports.Repay
@@ -113,7 +113,7 @@ func scanRepay(row pgx.Row) (ports.Repay, error) {
 	var order, liquidation *string
 	var done *time.Time
 	if err := row.Scan(&p.ID, &p.UserID, &accountType, &symbol, &p.Asset, &p.Interest, &p.Principal, &p.Reason, &order,
-		&liquidation, &p.IdemKey, &p.RequestHash, &p.Status, &p.Failure, &p.CreatedAt, &done); err != nil {
+		&liquidation, &p.IdemKey, &p.RequestHash, &p.Status, &p.Failure, &p.CreatedAt, &done, &p.CoveredBy); err != nil {
 		return ports.Repay{}, err
 	}
 	p.Account, p.OrderID, p.LiquidationID, p.DoneAt = account(accountType, symbol), stringOf(order), stringOf(liquidation), timeOf(done)
@@ -122,9 +122,9 @@ func scanRepay(row pgx.Row) (ports.Repay, error) {
 
 func (r repays) Insert(ctx context.Context, p ports.Repay) error {
 	_, err := r.q.Exec(ctx, `INSERT INTO repays (`+repayColumns+`)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
 		p.ID, p.UserID, p.Account.Type, p.Account.Symbol, p.Asset, p.Interest, p.Principal, p.Reason, nullUUID(p.OrderID),
-		nullUUID(p.LiquidationID), p.IdemKey, p.RequestHash, p.Status, p.Failure, p.CreatedAt, nullTime(p.DoneAt))
+		nullUUID(p.LiquidationID), p.IdemKey, p.RequestHash, p.Status, p.Failure, p.CreatedAt, nullTime(p.DoneAt), p.CoveredBy)
 	if err != nil {
 		return fmt.Errorf("insert repayment: %w", err)
 	}
@@ -371,6 +371,10 @@ func (r interest) LastDone(ctx context.Context) (time.Time, bool, error) {
 
 func (r interest) FirstRunning(ctx context.Context) (time.Time, bool, error) {
 	return r.hourOf(ctx, `SELECT min(hour) FROM interest_runs WHERE status = 'RUNNING'`)
+}
+
+func (r interest) LastFinished(ctx context.Context) (time.Time, bool, error) {
+	return r.hourOf(ctx, `SELECT max(done_at) FROM interest_runs WHERE status = 'DONE'`)
 }
 
 func (r interest) hourOf(ctx context.Context, sql string) (time.Time, bool, error) {

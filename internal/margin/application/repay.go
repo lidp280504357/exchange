@@ -169,7 +169,14 @@ func (s *Service) replayRepay(ctx context.Context, prior ports.Repay, in RepayIn
 
 // postRepay books a PENDING repayment and records the outcome.
 func (s *Service) postRepay(ctx context.Context, p ports.Repay) (RepayResult, error) {
-	moves := []ports.Move{{Type: domain.MoveRepay, Asset: p.Asset, Amount: p.Interest.Add(p.Principal), Interest: p.Interest}}
+	move := domain.MoveRepay
+	switch {
+	case p.CoveredBy == ports.CoveredByInsurance:
+		move = domain.MoveInsuranceCover
+	case p.Reason == ports.RepayLiquidation:
+		move = domain.MoveLiquidationRepay
+	}
+	moves := []ports.Move{{Type: move, Asset: p.Asset, Amount: p.Interest.Add(p.Principal), Interest: p.Interest}}
 	journals, postErr := s.Ledger.Post(ctx, ports.Posting{
 		IdemKey: "margin-repay:" + p.ID, UserID: p.UserID, Account: p.Account, Reference: "repay " + p.ID, Moves: moves,
 	})

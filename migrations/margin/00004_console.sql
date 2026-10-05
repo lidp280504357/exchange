@@ -24,6 +24,10 @@ ALTER TABLE interest_charges ADD COLUMN journal_key text NOT NULL DEFAULT '';
 UPDATE interest_charges SET journal_key = 'margin-interest:' || asset || ':' || extract(epoch FROM hour)::bigint
 WHERE borrow_id IS NULL AND status = 'DONE';
 
+-- A digest of what ReserveOrder was asked: a repeat for the order with
+-- other content is refused (review CR); NULL on the older rows.
+ALTER TABLE order_reservations ADD COLUMN request_hash bytea;
+
 -- An account's borrows, repayments and interest charges in one list,
 -- with the ledger journal of each (its idempotency key).
 CREATE VIEW loan_changes AS
@@ -44,6 +48,7 @@ FROM interest_charges;
 
 -- +goose Down
 DROP VIEW loan_changes;
+ALTER TABLE order_reservations DROP COLUMN request_hash;
 ALTER TABLE interest_charges DROP COLUMN journal_key;
 ALTER TABLE loans DROP COLUMN opened_at;
 ALTER TABLE accounts DROP COLUMN frozen_at, DROP COLUMN frozen_by;
