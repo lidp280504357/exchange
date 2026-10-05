@@ -284,13 +284,13 @@ func TestProjectMargin(t *testing.T) {
 		}, at),
 		delivery(t, event.TopicMargin, &marginv1.MarginLiquidationStarted{
 			LiquidationId: liquidation, UserId: user, AccountType: "MARGIN_ISOLATED", Symbol: "BTC-USDT", MarginLevel: "1.049",
-			TotalAsset: "105", TotalLiability: "100.1", StartedAt: timestamppb.New(at),
+			TotalAsset: "105", TotalLiability: "100.1", StartedAt: timestamppb.New(at), Trigger: "AUTO",
 		}, at),
 		delivery(t, event.TopicMargin, &marginv1.MarginLiquidationCompleted{
 			LiquidationId: liquidation, UserId: user, AccountType: "MARGIN_ISOLATED", Symbol: "BTC-USDT",
 			Repaid: []*marginv1.AssetAmount{{Asset: "USDT", Amount: "100.1"}}, Fee: "2.1", InsuranceCovered: "0",
 			Remaining: []*marginv1.AssetAmount{{Asset: "USDT", Amount: "2.8"}}, CompletedAt: timestamppb.New(at.Add(time.Second)),
-			MarginLevel: "1.049", TotalAsset: "105", TotalLiability: "100.1", StartedAt: timestamppb.New(at),
+			MarginLevel: "1.049", TotalAsset: "105", TotalLiability: "100.1", StartedAt: timestamppb.New(at), Trigger: "AUTO",
 		}, at.Add(time.Second)),
 		// An end that does not repeat the start leaves its columns to it.
 		delivery(t, event.TopicMargin, &marginv1.MarginLiquidationCompleted{
@@ -313,15 +313,17 @@ func TestProjectMargin(t *testing.T) {
 	started, completed, bare := m.marginLiquidations[0], m.marginLiquidations[1], m.marginLiquidations[2]
 	// The start sets the level and the values and leaves the outcome NULL;
 	// the end sets the outcome and repeats the start's columns.
-	if started[4].(*decimal.Decimal).String() != "1.049" || started[8] != nil || started[12] != nil {
+	if started[4].(*decimal.Decimal).String() != "1.049" || started[8] != nil || started[12] != nil ||
+		*started[13].(*string) != "AUTO" || started[14].(*string) != nil {
 		t.Fatalf("started row: %v", started)
 	}
 	if completed[4].(*decimal.Decimal).String() != "1.049" || completed[6].(*decimal.Decimal).String() != "100.1" ||
 		!completed[7].(*time.Time).Equal(at) || *completed[8].(*string) != `[{"asset":"USDT","amount":"100.1"}]` ||
-		completed[9].(*decimal.Decimal).String() != "2.1" || *completed[11].(*string) != `[{"asset":"USDT","amount":"2.8"}]` {
+		completed[9].(*decimal.Decimal).String() != "2.1" || *completed[11].(*string) != `[{"asset":"USDT","amount":"2.8"}]` ||
+		*completed[13].(*string) != "AUTO" {
 		t.Fatalf("completed row: %v", completed)
 	}
-	if bare[4].(*decimal.Decimal) != nil || bare[7].(*time.Time) != nil || *bare[8].(*string) != "[]" {
+	if bare[4].(*decimal.Decimal) != nil || bare[7].(*time.Time) != nil || *bare[8].(*string) != "[]" || bare[13].(*string) != nil {
 		t.Fatalf("an end without the start's columns: %v", bare)
 	}
 	if err := m.add(delivery(t, event.TopicMargin, &marginv1.MarginInterestAccrued{InterestId: "nope"}, at)); !errors.Is(err, errMalformed) {

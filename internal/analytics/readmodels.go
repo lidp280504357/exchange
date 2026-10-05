@@ -69,7 +69,7 @@ const (
 	insertMarginInterest = `INSERT INTO margin_interest (interest_id, user_id, account_type, symbol, asset, principal, interest_model,
 		hourly_rate, interest, interest_owed, hour, journal_id)`
 	insertMarginLiquidations = `INSERT INTO margin_liquidations (liquidation_id, user_id, account_type, symbol, margin_level,
-		total_asset, total_liability, started_at, repaid, fee, insurance_covered, remaining, completed_at)`
+		total_asset, total_liability, started_at, repaid, fee, insurance_covered, remaining, completed_at, trigger, approval_id)`
 	// refreshCandles rewrites the one-minute candles of a symbol between
 	// two minutes from all its trades there.
 	refreshCandles = `INSERT INTO candles_1m (symbol, open_time, open, high, low, close, volume, quote_volume, trades, updated_at)
@@ -529,8 +529,9 @@ func (m *readModels) addLiquidation(l liquidationStep, eventID string, at time.T
 // addMargin projects margin.events: an hour's interest, and the start and
 // the end of a liquidation (each sets its own columns of the liquidation's
 // row; NULL leaves a column to the other event; the end repeats the
-// start's level, values and time, which an end published before it did
-// leaves NULL). Borrows and repayments have no read model yet.
+// start's level, values, time, trigger and approval, which an end
+// published before it did leaves NULL). Borrows and repayments have no
+// read model yet.
 func (m *readModels) addMargin(msg proto.Message) error {
 	switch e := msg.(type) {
 	case *marginv1.MarginInterestAccrued:
@@ -559,7 +560,7 @@ func (m *readModels) addMargin(msg proto.Message) error {
 		started := e.GetStartedAt().AsTime()
 		m.marginLiquidations = append(m.marginLiquidations, []any{
 			liquidationID, &userID, ptr(e.GetAccountType()), ptr(e.GetSymbol()), level, assets, liabilities, &started,
-			nil, nil, nil, nil, nil,
+			nil, nil, nil, nil, nil, given(e.GetTrigger()), given(e.GetApprovalId()),
 		})
 	case *marginv1.MarginLiquidationCompleted:
 		liquidationID, err := id(e.GetLiquidationId())
@@ -582,7 +583,7 @@ func (m *readModels) addMargin(msg proto.Message) error {
 		completed := e.GetCompletedAt().AsTime()
 		m.marginLiquidations = append(m.marginLiquidations, []any{
 			liquidationID, &userID, ptr(e.GetAccountType()), ptr(e.GetSymbol()), level, assets, liabilities, started,
-			&repaid, fee, insurance, &remaining, &completed,
+			&repaid, fee, insurance, &remaining, &completed, given(e.GetTrigger()), given(e.GetApprovalId()),
 		})
 	}
 	return nil
@@ -591,6 +592,15 @@ func (m *readModels) addMargin(msg proto.Message) error {
 // ptr is a string column's value; an isolated account's symbol, none for
 // the cross account, is still a value (the empty string), not NULL.
 func ptr(s string) *string { return &s }
+
+// given is a string column's value where empty means not told: NULL, which
+// leaves the column to the other event.
+func given(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
 
 // assetAmounts writes amounts of assets as a JSON array of
 // {"asset", "amount"}, checking each amount.

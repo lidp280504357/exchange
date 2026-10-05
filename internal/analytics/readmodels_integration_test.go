@@ -290,7 +290,7 @@ func TestMarginReadModels(t *testing.T) {
 		}
 		batch = append(batch, kafka.Delivery{Topic: topic, Envelope: env})
 	}
-	user, liquidation, interest, journal := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	user, liquidation, interest, journal, approval := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	add(event.TopicMargin, &marginv1.MarginInterestAccrued{
 		InterestId: interest, UserId: user, AccountType: "MARGIN_CROSS", Asset: "USDT", Principal: "150", InterestModel: "FIXED",
 		HourlyRate: "0.00001", Interest: "0.0015", InterestOwed: "0.003", Hour: timestamppb.New(at), JournalId: uuid.NewString(),
@@ -303,7 +303,7 @@ func TestMarginReadModels(t *testing.T) {
 	})
 	add(event.TopicMargin, &marginv1.MarginLiquidationStarted{
 		LiquidationId: liquidation, UserId: user, AccountType: "MARGIN_ISOLATED", Symbol: "BTC-USDT", MarginLevel: "1.049",
-		TotalAsset: "105", TotalLiability: "100.1", StartedAt: timestamppb.New(at),
+		TotalAsset: "105", TotalLiability: "100.1", StartedAt: timestamppb.New(at), Trigger: "MANUAL", ApprovalId: approval,
 	})
 	add(event.TopicLedger, &ledgerv1.EntryPosted{JournalId: journal, Seq: 1, EntryType: "MARGIN_BORROW", Lines: []*ledgerv1.EntryLine{{
 		AccountId: uuid.NewString(), OwnerType: "USER", OwnerId: user, AccountType: "MARGIN_ISOLATED", Scope: "BTC-USDT", Asset: "USDT",
@@ -318,15 +318,16 @@ func TestMarginReadModels(t *testing.T) {
 		t.Fatalf("interest rows: %d (%v)", charges, err)
 	}
 	var level, fee *decimal.Decimal
-	var repaid *string
+	var repaid, trigger, approvedBy *string
 	var done bool
-	if err := conn.QueryRow(ctx, `SELECT margin_level, fee, repaid, completed_at IS NOT NULL FROM margin_liquidations FINAL WHERE liquidation_id = ?`,
-		liquidation).Scan(&level, &fee, &repaid, &done); err != nil {
+	if err := conn.QueryRow(ctx, `SELECT margin_level, fee, repaid, completed_at IS NOT NULL, trigger, approval_id
+		FROM margin_liquidations FINAL WHERE liquidation_id = ?`, liquidation).Scan(&level, &fee, &repaid, &done, &trigger, &approvedBy); err != nil {
 		t.Fatal(err)
 	}
 	if level == nil || level.String() != "1.049" || fee == nil || fee.String() != "2.1" || repaid == nil ||
-		*repaid != `[{"asset":"USDT","amount":"100.1"}]` || !done {
-		t.Fatalf("liquidation: level %v fee %v repaid %v done %v", level, fee, repaid, done)
+		*repaid != `[{"asset":"USDT","amount":"100.1"}]` || !done || trigger == nil || *trigger != "MANUAL" ||
+		approvedBy == nil || *approvedBy != approval {
+		t.Fatalf("liquidation: level %v fee %v repaid %v done %v trigger %v approval %v", level, fee, repaid, done, trigger, approvedBy)
 	}
 	var scope string
 	if err := conn.QueryRow(ctx, `SELECT scope FROM ledger_entries FINAL WHERE journal_id = ?`, journal).Scan(&scope); err != nil || scope != "BTC-USDT" {
