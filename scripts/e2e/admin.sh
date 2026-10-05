@@ -1812,6 +1812,9 @@ else
   WELCOME_RAISE=$(jq -r .approval.id <<<"$BODY")
   # shellcheck disable=SC2016 # expanded when the script ends
   at_exit 'as ADMIN POST "/admin/v1/approvals/$WELCOME_RAISE/decide" "{\"approve\":false,\"reason\":\"e2e cleanup\"}" >/dev/null'
+  as ADMIN PUT /admin/v1/platform/welcome-credits "$(welcome_raise 1 "e2e: the same raise again")"
+  expect 409 ADMIN_WELCOME_RAISE_PENDING "the same raise asked again while it waits is refused (review ㉛)"
+  check ".details.approval_id == \"$WELCOME_RAISE\"" "naming the one that waits"
   as ADMIN POST "/admin/v1/approvals/$WELCOME_RAISE/decide" '{"approve":true,"reason":"e2e approves its own"}'
   expect 403 ADMIN_SELF_APPROVAL "not approved by the ADMIN who asked"
   as FINANCE POST "/admin/v1/approvals/$WELCOME_RAISE/decide" '{"approve":true,"reason":"e2e: finance approves"}'

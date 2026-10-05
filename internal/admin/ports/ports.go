@@ -138,6 +138,13 @@ type ApprovalRepo interface {
 	SingleUsage(ctx context.Context, adminID string, since time.Time) (decimal.Decimal, error)
 	// CountPending counts the requests waiting for a decision.
 	CountPending(ctx context.Context) (int, error)
+	// LockRequests takes, until the transaction ends, the requests of a
+	// kind by one administrator: a check of what waits and the insert that
+	// follows it see each other's (review BH ①).
+	LockRequests(ctx context.Context, kind, requestedBy string) error
+	// PendingOf returns every pending request of a kind by one
+	// administrator, oldest first.
+	PendingOf(ctx context.Context, kind, requestedBy string) ([]domain.Approval, error)
 	// MarkAttempted records that an attempt to carry a pending one out
 	// began (it keeps the first time); a note says how the last attempt
 	// ended when it did not finish ("" keeps the note).

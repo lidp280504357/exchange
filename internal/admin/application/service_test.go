@@ -443,6 +443,19 @@ func (r memApprovals) SingleUsage(_ context.Context, adminID string, since time.
 	return sum, nil
 }
 
+func (memApprovals) LockRequests(context.Context, string, string) error { return nil }
+
+func (r memApprovals) PendingOf(_ context.Context, kind, requestedBy string) ([]domain.Approval, error) {
+	var out []domain.Approval
+	for _, a := range r.m.approvals {
+		if a.Status == domain.ApprovalPending && a.Kind == kind && a.RequestedBy == requestedBy {
+			out = append(out, a)
+		}
+	}
+	slices.SortFunc(out, func(a, b domain.Approval) int { return a.CreatedAt.Compare(b.CreatedAt) })
+	return out, nil
+}
+
 func (r memApprovals) CountPending(context.Context) (int, error) {
 	n := 0
 	for _, a := range r.m.approvals {

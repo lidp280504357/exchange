@@ -421,6 +421,31 @@ func (r approvals) SingleUsage(ctx context.Context, adminID string, since time.T
 	return sum, nil
 }
 
+// lockRequests is the advisory lock class of LockRequests (the two-key
+// form, apart from lockRoster's single key); the second key is a hash of
+// the kind and the requester.
+const lockRequests = 7_331_002
+
+func (r approvals) LockRequests(ctx context.Context, kind, requestedBy string) error {
+	if _, err := r.q.Exec(ctx, `SELECT pg_advisory_xact_lock($1::int, hashtext($2))`, lockRequests, kind+":"+requestedBy); err != nil {
+		return fmt.Errorf("lock the requests: %w", err)
+	}
+	return nil
+}
+
+func (r approvals) PendingOf(ctx context.Context, kind, requestedBy string) ([]domain.Approval, error) {
+	rows, err := r.q.Query(ctx, approvalSelect+` WHERE a.status = 'PENDING' AND a.kind = $1 AND a.requested_by = $2 ORDER BY a.created_at, a.id`,
+		kind, requestedBy)
+	if err != nil {
+		return nil, fmt.Errorf("pending requests: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.Approval, error) { return scanApproval(row, true) })
+	if err != nil {
+		return nil, fmt.Errorf("pending requests: %w", err)
+	}
+	return out, nil
+}
+
 func (r approvals) CountPending(ctx context.Context) (int, error) {
 	var n int
 	if err := r.q.QueryRow(ctx, `SELECT count(*) FROM approvals WHERE status = 'PENDING'`).Scan(&n); err != nil {

@@ -3968,7 +3968,12 @@ paths:
         was asked for, or when its event was to start) fails it, result
         "expired at <time>", nothing sent to market-sim. A welcome credits
         raise (WELCOME_CREDIT) needs settings.write and lapses a day after
-        it was asked for, the same way.
+        it was asked for, the same way. A change (SIM_EVENT, SIM_PARAMS,
+        WELCOME_CREDIT) is not marked attempted: when its service cannot be
+        reached, or the welcome credits changed and cannot be read again,
+        the answer is 503 COMMON_UNAVAILABLE with details.approval_id, the
+        request stays PENDING as it was and can be approved again (or
+        rejected).
       tags: [ledger]
       security:
         - session: []

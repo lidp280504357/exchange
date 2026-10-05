@@ -374,13 +374,19 @@ func (s *Service) requestWelcome(ctx context.Context, p Principal, cur welcomeSe
 	actions := fundActions[a.Kind]
 	err := s.Store.Tx(ctx, func(r ports.Repos) error {
 		// Asking again for the same raise against the same version while
-		// the first request waits is refused, naming it (review ㉛).
-		pending, err := r.Approvals().List(ctx, domain.ApprovalPending, time.Time{}, "", 200)
+		// the first request waits is refused, naming it (review ㉛). The
+		// requester's raises are taken one at a time, so two sent at once
+		// (two tabs, a retry after a timeout) see each other (review BH ①),
+		// and every one still waiting counts, however many others wait (②).
+		if err := r.Approvals().LockRequests(ctx, a.Kind, a.RequestedBy); err != nil {
+			return err
+		}
+		pending, err := r.Approvals().PendingOf(ctx, a.Kind, a.RequestedBy)
 		if err != nil {
 			return err
 		}
 		for _, o := range pending {
-			if o.Kind != domain.KindWelcomeCredit || o.RequestedBy != a.RequestedBy || o.Payload["expected_version"] != a.Payload["expected_version"] {
+			if o.Payload["expected_version"] != a.Payload["expected_version"] {
 				continue
 			}
 			var asked []ports.WelcomeCredit

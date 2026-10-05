@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -216,9 +217,27 @@ func TestWelcomeCredits(t *testing.T) {
 		a.Payload["raise_usdt"] != "1600" || a.Payload["expected_version"] != "2" || len(h.auditsOf("admin.platform.welcome_requested")) != 1 {
 		t.Fatalf("the request %+v", a)
 	}
-	// The same raise asked again while it waits is refused, naming the first (review ㉛).
-	if _, err := h.svc.SetWelcomeCredits(ctx, boss, []ports.WelcomeCredit{credit("BTC", "0.01"), credit("USDT", "6000.0")}, 2, "a little more, again"); code(err) != "ADMIN_WELCOME_RAISE_PENDING" {
-		t.Fatalf("the same raise twice: %v", err)
+	// The same raise asked again while it waits is refused, naming the first (review ㉛),
+	// written otherwise too: in another order, another way, with an asset at 0 (review BH ③).
+	for name, same := range map[string][]ports.WelcomeCredit{
+		"in another order":  {credit("BTC", "0.01"), credit("USDT", "6000.0")},
+		"with a 0 for ETH":  {credit("USDT", "6000"), credit("ETH", "0"), credit("BTC", "0.010")},
+		"in lower case too": {credit("usdt", "6000"), credit("btc", "0.01")},
+	} {
+		_, err := h.svc.SetWelcomeCredits(ctx, boss, same, 2, "a little more, again")
+		var ae *apperr.Error
+		if code(err) != "ADMIN_WELCOME_RAISE_PENDING" || !errors.As(err, &ae) || ae.Details["approval_id"] != a.ID {
+			t.Fatalf("the same raise twice, %s: %v", name, err)
+		}
+	}
+	// Another ADMIN may ask for the same, and so may the first once its
+	// request no longer waits.
+	other, err := h.svc.SetWelcomeCredits(ctx, second, []ports.WelcomeCredit{credit("USDT", "6000"), credit("BTC", "0.01")}, 2, "the same, from another ADMIN")
+	if err != nil || other.Approval == nil {
+		t.Fatalf("another ADMIN's same raise: %+v %v", other, err)
+	}
+	if _, err := h.svc.DecideApproval(ctx, second, other.Approval.ID, false, "withdrawn: one is enough"); err != nil {
+		t.Fatalf("withdrawn by its requester: %v", err)
 	}
 	if _, err := h.svc.DecideApproval(ctx, boss, a.ID, true, "my own raise"); code(err) != "ADMIN_SELF_APPROVAL" {
 		t.Fatalf("approved by its requester: %v", err)
@@ -230,6 +249,22 @@ func TestWelcomeCredits(t *testing.T) {
 	if err != nil || done.Status != domain.ApprovalExecuted || done.Result != "welcome credits version 3" || len(pl.credits) != 2 ||
 		pl.sets[1] != "boss@example.com: a little more (approved by second@example.com)" {
 		t.Fatalf("approved %+v %v %v", done, err, pl.sets)
+	}
+
+	// Withdrawn, the same raise may be asked again (and withdrawn again).
+	again, err := h.svc.SetWelcomeCredits(ctx, boss, []ports.WelcomeCredit{credit("USDT", "6500"), credit("BTC", "0.01")}, 3, "a bit more")
+	if err != nil || again.Approval == nil {
+		t.Fatalf("a raise: %+v %v", again, err)
+	}
+	if _, err := h.svc.DecideApproval(ctx, boss, again.Approval.ID, false, "withdrawn: not now"); err != nil {
+		t.Fatalf("withdrawn: %v", err)
+	}
+	if again, err = h.svc.SetWelcomeCredits(ctx, boss, []ports.WelcomeCredit{credit("USDT", "6500"), credit("BTC", "0.01")}, 3, "a bit more after all"); err != nil ||
+		again.Approval == nil {
+		t.Fatalf("the same raise once the first was withdrawn: %+v %v", again, err)
+	}
+	if _, err := h.svc.DecideApproval(ctx, boss, again.Approval.ID, false, "withdrawn again"); err != nil {
+		t.Fatalf("withdrawn again: %v", err)
 	}
 
 	// The cap, and an asset with no price.
