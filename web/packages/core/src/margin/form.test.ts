@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accountOf, assetChoices } from "./form";
+import { accountOf, assetChoices, keyFor, settle, transferOutMax } from "./form";
 
 describe("forms", () => {
   const cross = {
@@ -34,5 +34,26 @@ describe("forms", () => {
     expect(assetChoices("repay", "MARGIN_CROSS", undefined, terms, { ...owner, balances: [] })).toEqual(["USDT", "BTC"]);
     expect(assetChoices("borrow", "MARGIN_ISOLATED", { base: "ETH", quote: "USDT" }, terms, undefined)).toEqual(["ETH", "USDT"]);
     expect(assetChoices("transfer", "MARGIN_ISOLATED", undefined, terms, undefined)).toEqual([]);
+  });
+});
+
+describe("transferOutMax", () => {
+  it("is what is free, no more than the net, never below zero", () => {
+    expect(transferOutMax({ free: "120", net: "20" })).toBe("20");
+    expect(transferOutMax({ free: "5", net: "20" })).toBe("5");
+    expect(transferOutMax({ free: "5", net: "-3" })).toBe("0");
+  });
+});
+
+describe("keyFor", () => {
+  it("keeps an unsettled action's key until it is answered or ten minutes pass", () => {
+    const now = Date.parse("2026-10-06T00:00:00Z");
+    const first = keyFor("transfer:IN:a", now);
+    expect(keyFor("transfer:IN:a", now + 60_000)).toBe(first);
+    expect(keyFor("transfer:IN:b", now)).not.toBe(first);
+    settle("transfer:IN:a");
+    const second = keyFor("transfer:IN:a", now);
+    expect(second).not.toBe(first);
+    expect(keyFor("transfer:IN:a", now + 11 * 60_000)).not.toBe(second);
   });
 });

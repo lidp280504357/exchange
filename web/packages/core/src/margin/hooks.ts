@@ -56,7 +56,8 @@ export function useMarginAccounts({ enabled = true, poll = true }: { enabled?: b
     queryKey: marginKeys.accounts,
     queryFn: () => unwrap(marginApi.GET("/v1/margin/accounts")),
     enabled: signedIn && enabled,
-    staleTime: 2_000,
+    // Without polling (the entry's probe on every assets page) a minute old is fresh enough.
+    staleTime: poll ? 2_000 : 60_000,
     refetchInterval: poll ? ACCOUNTS_EVERY : false,
     retry: retryServerErrors,
   });

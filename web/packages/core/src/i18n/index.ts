@@ -110,27 +110,40 @@ export function errorText(err: unknown): string {
   return i18n.t("errors.unknown", { code: err instanceof Error ? err.message : String(err) });
 }
 
-// The details some errors' messages name: amounts with their decimals,
-// other values (null) as they come.
-const detailFields: Record<string, Record<string, number | null>> = {
-  DERIV_RISK_LIMIT_EXCEEDED: { max_notional: 0, notional: 2, leverage: null },
-  MARGIN_LIMIT: { max_borrowable: null },
-  MARGIN_POOL_EMPTY: { pool_available: null },
-  MARGIN_LEVEL_TOO_LOW: { margin_level: 2, warn_level: null },
+// The details some errors' messages name, by message (errorDetails.<key>):
+// amounts with their decimals, other values (null) as they come. A code
+// may have several messages for different details; the first whose
+// details all came is used.
+const detailMessages: Record<string, { key: string; fields: Record<string, number | null> }[]> = {
+  DERIV_RISK_LIMIT_EXCEEDED: [{ key: "DERIV_RISK_LIMIT_EXCEEDED", fields: { max_notional: 0, notional: 2, leverage: null } }],
+  MARGIN_LIMIT: [{ key: "MARGIN_LIMIT", fields: { max_borrowable: null } }],
+  MARGIN_POOL_EMPTY: [{ key: "MARGIN_POOL_EMPTY", fields: { pool_available: null } }],
+  MARGIN_LEVEL_TOO_LOW: [
+    { key: "MARGIN_LEVEL_TOO_LOW", fields: { margin_level: 2, warn_level: null } },
+    { key: "MARGIN_LEVEL_TOO_LOW_OUT", fields: { max_transferable: null } },
+  ],
+  // A transfer out of a margin account: what may leave.
+  LEDGER_INSUFFICIENT_BALANCE: [{ key: "LEDGER_INSUFFICIENT_BALANCE_OUT", fields: { max_transferable: null } }],
 };
 
 /** withDetails is the error's message with its details, when it has one and they all came. */
 function withDetails(err: ApiError): string | null {
-  const fields = detailFields[err.code];
-  const key = `errorDetails.${err.code}`;
-  if (!fields || !i18n.exists(key)) return null;
-  const values: Record<string, string> = {};
-  for (const [k, decimals] of Object.entries(fields)) {
-    const v = err.details[k];
-    if (v === undefined || v === null || v === "") return null;
-    values[k] = decimals === null ? String(v) : formatAmount(String(v), decimals);
+  for (const { key, fields } of detailMessages[err.code] ?? []) {
+    const full = `errorDetails.${key}`;
+    if (!i18n.exists(full)) continue;
+    const values: Record<string, string> = {};
+    let complete = true;
+    for (const [k, decimals] of Object.entries(fields)) {
+      const v = err.details[k];
+      if (v === undefined || v === null || v === "") {
+        complete = false;
+        break;
+      }
+      values[k] = decimals === null ? String(v) : formatAmount(String(v), decimals);
+    }
+    if (complete) return i18n.t(full, values);
   }
-  return i18n.t(key, values);
+  return null;
 }
 
 export { i18n };

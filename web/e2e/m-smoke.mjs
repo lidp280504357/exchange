@@ -158,6 +158,7 @@ try {
       await typeInto('form[data-testid="margin-transfer-form"] input[inputmode="decimal"]', amount);
       await clickButton("确认划转", "[role=dialog]");
       await waitText(done);
+      await page.waitForSelector('form[data-testid="margin-transfer-form"]', { hidden: true, timeout: 10000 });
     };
     await marginTransfer("IN", "10", "已划入 10 USDT");
     await page.waitForFunction(() => document.querySelector('[data-testid="margin-account-MARGIN_CROSS"] ul')?.innerText.includes("USDT"), { timeout: 20000 });

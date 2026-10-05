@@ -52,7 +52,11 @@ export default function Margin() {
       subtitle={t("pcMargin.subtitle")}
       actions={
         <>
-          <Button icon={<ArrowLeftRight size={16} />} onClick={() => act("transfer")} data-testid="margin-transfer">
+          <Button
+            icon={<ArrowLeftRight size={16} />}
+            onClick={() => act("transfer", open.open ? {} : { direction: "OUT" })}
+            data-testid="margin-transfer"
+          >
             {t("pcMargin.actions.transfer")}
           </Button>
           <Button variant="secondary" icon={<HandCoins size={16} />} onClick={() => act("borrow")} disabled={!open.open}>

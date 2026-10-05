@@ -14,6 +14,7 @@ const FIELDS = {
   MARGIN_POOL_EMPTY: "amount",
   MARGIN_LEVEL_TOO_LOW: "amount",
   MARGIN_REPAY_EXCEEDS_DEBT: "amount",
+  MARGIN_AMOUNT_PRECISION: "amount",
 };
 
 /** doneText announces what a margin action did. */

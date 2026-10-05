@@ -16,4 +16,14 @@ describe("error messages", () => {
     expect(errorText(err)).toBe("仓位超出该杠杆的风险限额，请降低杠杆或数量");
     expect(errorText(new ApiError(500, "NO_SUCH_CODE", ""))).toBe("出错了（NO_SUCH_CODE）");
   });
+
+  it("picks the message whose details came", () => {
+    const level = new ApiError(422, "MARGIN_LEVEL_TOO_LOW", "", { margin_level: "1.2468", warn_level: "1.3" });
+    expect(errorText(level)).toBe("操作后风险率 1.24 会低于预警线 1.3");
+    const out = new ApiError(422, "MARGIN_LEVEL_TOO_LOW", "", { max_transferable: "12.5" });
+    expect(errorText(out)).toBe("划出后风险率会低于预警线：现在最多可划出 12.5");
+    const short = new ApiError(422, "LEDGER_INSUFFICIENT_BALANCE", "", { max_transferable: "3" });
+    expect(errorText(short)).toBe("可用余额不足：现在最多可划出 3");
+    expect(errorText(new ApiError(422, "LEDGER_INSUFFICIENT_BALANCE", "", { order_id: "o1" }))).toBe("可用余额不足");
+  });
 });

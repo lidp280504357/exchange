@@ -46,7 +46,12 @@ export default function Margin() {
         </Notice>
       )}
       <div className="grid grid-cols-3 gap-2">
-        <ActionTile icon={<ArrowLeftRight size={18} />} label={t("mMargin.actions.transfer")} onClick={() => act("transfer")} testId="margin-transfer" />
+        <ActionTile
+          icon={<ArrowLeftRight size={18} />}
+          label={t("mMargin.actions.transfer")}
+          onClick={() => act("transfer", open.open ? {} : { direction: "OUT" })}
+          testId="margin-transfer"
+        />
         <ActionTile icon={<HandCoins size={18} />} label={t("mMargin.actions.borrow")} onClick={() => act("borrow")} disabled={!open.open} />
         <ActionTile icon={<Undo2 size={18} />} label={t("mMargin.actions.repay")} onClick={() => act("repay")} />
       </div>

@@ -90,7 +90,7 @@ export const zhCN = {
     MARGIN_DISABLED: "杠杆交易暂未开放", MARGIN_ASSET_NOT_BORROWABLE: "该币种在这个账户里不可借或不能作保证金",
     MARGIN_LIMIT: "超出可借额度", MARGIN_POOL_EMPTY: "平台该币种的可借余量不足", MARGIN_LEVEL_TOO_LOW: "操作后风险率会低于预警线",
     MARGIN_FROZEN: "杠杆账户正在强平或已被冻结", MARGIN_PRICE_UNAVAILABLE: "账户里有币种暂无价格，请稍后再试",
-    MARGIN_REPAY_EXCEEDS_DEBT: "还款超过负债", LEDGER_DEBT_OVERPAID: "还款超过负债",
+    MARGIN_REPAY_EXCEEDS_DEBT: "还款超过负债", LEDGER_DEBT_OVERPAID: "还款超过负债", MARGIN_AMOUNT_PRECISION: "数量的小数位超出资产精度",
     format: "请输入正确的数字", zero: "数量必须大于 0", precision: "最多 {{n}} 位小数", unknown: "出错了（{{code}}）",
   },
   // Messages that name what the error's details carry (errorText).
@@ -99,5 +99,7 @@ export const zhCN = {
     MARGIN_LIMIT: "超出可借额度：现在最多可借 {{max_borrowable}}",
     MARGIN_POOL_EMPTY: "平台该币种的可借余量只剩 {{pool_available}}",
     MARGIN_LEVEL_TOO_LOW: "操作后风险率 {{margin_level}} 会低于预警线 {{warn_level}}",
+    MARGIN_LEVEL_TOO_LOW_OUT: "划出后风险率会低于预警线：现在最多可划出 {{max_transferable}}",
+    LEDGER_INSUFFICIENT_BALANCE_OUT: "可用余额不足：现在最多可划出 {{max_transferable}}",
   },
 };

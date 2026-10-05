@@ -96,7 +96,7 @@ export const en = {
     MARGIN_LIMIT: "More than you may borrow", MARGIN_POOL_EMPTY: "The platform has too little of this coin left to lend",
     MARGIN_LEVEL_TOO_LOW: "The margin level would fall under the warning level", MARGIN_FROZEN: "The margin account is being liquidated or is frozen",
     MARGIN_PRICE_UNAVAILABLE: "A coin of the account has no price yet, try again shortly",
-    MARGIN_REPAY_EXCEEDS_DEBT: "More than the debt", LEDGER_DEBT_OVERPAID: "More than the debt",
+    MARGIN_REPAY_EXCEEDS_DEBT: "More than the debt", LEDGER_DEBT_OVERPAID: "More than the debt", MARGIN_AMOUNT_PRECISION: "Too many decimals for this asset",
     format: "Enter a valid number", zero: "The amount must be above 0", precision: "At most {{n}} decimals", unknown: "Something went wrong ({{code}})",
   },
   // Messages that name what the error's details carry (errorText).
@@ -105,5 +105,7 @@ export const en = {
     MARGIN_LIMIT: "More than you may borrow: at most {{max_borrowable}} now",
     MARGIN_POOL_EMPTY: "The platform has only {{pool_available}} of this coin left to lend",
     MARGIN_LEVEL_TOO_LOW: "The margin level would be {{margin_level}}, under the warning level {{warn_level}}",
+    MARGIN_LEVEL_TOO_LOW_OUT: "The margin level would fall under the warning level: at most {{max_transferable}} may leave now",
+    LEDGER_INSUFFICIENT_BALANCE_OUT: "Insufficient available balance: at most {{max_transferable}} may leave now",
   },
 };

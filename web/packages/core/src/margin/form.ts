@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { ApiError } from "../api/errors";
 import { availableOf, useBalances } from "../assets/hooks";
 import { checkTransfer, type TransferIssue } from "../assets/transfer";
@@ -14,6 +14,38 @@ import { balanceOf, hasDebt, owed, repayMax, type MarginAccount, type MarginAcco
 // Idempotency-Key per intended action. The sites draw the form.
 
 export type MarginActionKind = "transfer" | "borrow" | "repay";
+
+// Keys of actions whose outcome is unknown (a 5xx or a lost response),
+// by the intended action: trying the same action again, even from a dialog
+// opened anew, reuses the key, so it acts once. An answer forgets it; so
+// does the margin of ten minutes (margin-service keeps keys far longer).
+const unsettled = new Map<string, { key: string; at: number }>();
+const UNSETTLED_FOR = 10 * 60_000;
+
+/** keyFor is the Idempotency-Key of an intended action: a fresh one, or the unsettled one of the same action. */
+export function keyFor(action: string, now = Date.now()): string {
+  const prior = unsettled.get(action);
+  if (prior && now - prior.at < UNSETTLED_FOR) return prior.key;
+  const key = newIdempotencyKey();
+  unsettled.set(action, { key, at: now });
+  return key;
+}
+
+/** settle forgets an action's key once it is answered (done or refused). */
+export function settle(action: string): void {
+  unsettled.delete(action);
+}
+
+/**
+ * transferOutMax is what may leave a margin account of an asset at most
+ * as the page knows it: what is free, and no more than the asset's net
+ * (what its own debt does not hold); margin-service also keeps the margin
+ * level at the warning level.
+ */
+export function transferOutMax(b: { free: string; net: string }): string {
+  const max = dec.min(b.free, b.net);
+  return dec.sign(max) > 0 ? dec.normalize(max) : "0";
+}
 export type Direction = "IN" | "OUT";
 
 export type MarginFormInit = { account?: MarginAccountType; symbol?: string; asset?: string; direction?: Direction };
@@ -80,7 +112,6 @@ export function useMarginForm(kind: MarginActionKind, init: MarginFormInit = {})
   const [all, setAll] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const idem = useRef<{ body: string; key: string } | null>(null);
 
   const isolatedPairs = useMemo(() => (pairs.data?.items ?? []).filter((p) => p.isolated), [pairs.data]);
   const pair = isolatedPairs.find((p) => p.symbol === symbol);
@@ -92,7 +123,7 @@ export function useMarginForm(kind: MarginActionKind, init: MarginFormInit = {})
   const term = terms.data?.find((a) => a.asset === asset);
 
   let max: string;
-  if (kind === "transfer") max = direction === "IN" ? availableOf(balances.data?.balances, "SPOT", asset) : row.free;
+  if (kind === "transfer") max = direction === "IN" ? availableOf(balances.data?.balances, "SPOT", asset) : transferOutMax(row);
   else if (kind === "borrow") max = borrowable.data?.amount ?? "0";
   else max = repayMax(row);
   max = dec.sign(max) > 0 ? dec.round(max, decimals, "down") : "0";
@@ -140,26 +171,26 @@ export function useMarginForm(kind: MarginActionKind, init: MarginFormInit = {})
     if (!ready) return null;
     const value = all ? "ALL" : dec.normalize(amount.trim());
     const body = { account, ...(account === "MARGIN_ISOLATED" ? { symbol } : {}), asset, amount: value };
-    const bodyKey = `${kind}:${direction}:${JSON.stringify(body)}`;
     // One key per intended action: a retry after a lost response acts once;
     // a refusal replays under its key, so the next try gets a new one.
-    if (idem.current?.body !== bodyKey) idem.current = { body: bodyKey, key: newIdempotencyKey() };
+    const action = `${kind}:${direction}:${JSON.stringify(body)}`;
+    const key = keyFor(action);
     setBusy(true);
     setError(null);
     try {
       let moved = value;
-      if (kind === "transfer") await actions.transfer({ ...body, direction }, idem.current.key);
-      else if (kind === "borrow") await actions.borrow(body, idem.current.key);
+      if (kind === "transfer") await actions.transfer({ ...body, direction }, key);
+      else if (kind === "borrow") await actions.borrow(body, key);
       else {
-        const r = await actions.repay(body, idem.current.key);
+        const r = await actions.repay(body, key);
         moved = dec.normalize(dec.add(r.interest_repaid, r.principal_repaid));
       }
-      idem.current = null;
+      settle(action);
       setAmountState("");
       setAll(false);
       return { kind, direction, amount: moved, asset, account, symbol };
     } catch (err) {
-      if (err instanceof ApiError && err.status < 500) idem.current = null;
+      if (err instanceof ApiError && err.status < 500) settle(action);
       setError(err);
       return null;
     } finally {
