@@ -9,7 +9,7 @@
   - `order.references`（阶段 4 B4，ADR-0015）：market-maker 发的 HOUSE 参考簿 `ReferenceBookUpdate`，分区数与 `order.commands` 相同，同一交易对落在同一分区号，引擎把两个主题的同号分区当作一个输入按到达顺序处理。见下文「HOUSE 的参考簿」。
 - 输出经本 schema 的 outbox 发布：
   - `order.events`：OrderOpened、OrderPartiallyFilled、OrderFilled、OrderCanceled（原因 USER、IOC、FOK、SELF_TRADE、NO_LIQUIDITY）、OrderRejected（`ORDER_WOULD_TAKE`、`ORDER_NO_LIQUIDITY`、`ORDER_SELF_TRADE`）。
-  - `trade.events`：TradeExecuted。成交 ID 由交易对与 sequence 派生，重放得到同样的 ID；`trade_number` 是交易对内从 1 开始的成交编号（订单簿状态的一部分，随快照保存），下游据此发现漏掉的成交（账本对账 `TRADES_NUMBERED`，任务 5 的公开成交 ID）。编号字段上线前发出的成交为 0。
+  - `trade.events`：TradeExecuted。成交 ID 由交易对与 sequence 派生，重放得到同样的 ID；`trade_number` 是交易对内从 1 开始的成交编号（订单簿状态的一部分，随快照保存），下游据此发现漏掉的成交（账本对账 `TRADES_NUMBERED`，任务 5 的公开成交 ID）。编号字段上线前发出的成交为 0。`buyer_account_type` / `seller_account_type` 与 `buyer_side_effect` / `seller_side_effect` 原样取自双方订单（杠杆设计 2026-10-06 批次 E2，见 [trading.md](trading.md#杠杆账户的订单杠杆设计-2026-10-06批次-e2)），撮合不看它们，HOUSE 一侧与之前的订单为空。
 - 每个事件带交易对内递增的 `sequence`，排序只看它，不看墙上时钟。
 - 引擎不持有余额（ADR-0002）。账本消费成交做结算（见 [ledger.md](ledger.md#成交结算)）；交易服务消费订单事件更新订单，在终态解冻剩余（见 [trading.md](trading.md)）。
 

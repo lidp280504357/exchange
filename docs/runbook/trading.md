@@ -22,7 +22,14 @@
 6. 账本明确拒绝（余额不足、精度等）：订单存为 REJECTED（`reject_reason` 为错误码），发 `OrderRejected`，返回该错误并在 `details.order_id` 带上订单 ID。
 7. 账本不可达：冻结结果未知，订单保持 PENDING，照样返回 202。恢复任务每 5 秒处理 10 秒以前的 PENDING 订单：用同一幂等键重试冻结，账本已经冻结过的不会冻结第二次，然后按第 5 或第 6 步处理。
 
-同一 `client_order_id` 的重复请求：内容相同返回原订单（原订单被拒则返回同样的错误），内容不同返回 409 `COMMON_IDEMPOTENCY_CONFLICT`。不传则用订单 ID。
+同一 `client_order_id` 的重复请求：内容相同返回原订单（原订单被拒则返回同样的错误），内容不同返回 409 `COMMON_IDEMPOTENCY_CONFLICT`。账户或 `side_effect` 不同也算内容不同。不传则用订单 ID。
+
+### 杠杆账户的订单（杠杆设计 2026-10-06，批次 E2）
+
+- 请求可带 `account`（`SPOT` 默认、`MARGIN_CROSS`、`MARGIN_ISOLATED` 即该交易对的逐仓账户）与 `side_effect`（`NONE` 默认、`AUTO_BORROW`、`AUTO_REPAY`，只用于杠杆账户；`SPOT` 带别的值返回 `COMMON_INVALID_ARGUMENT`）。订单表的 `account_type`、`side_effect` 两列（迁移 trading 00004，之前的订单都是 `SPOT` / `NONE`），响应、`OrderAccepted` 与 `PlaceOrder` 里的订单都显式带上。
+- `margin.enabled` 对该用户关闭时，杠杆账户的订单在第 2 步校验之后直接返回 403 `MARGIN_DISABLED`，不落库；`AUTO_BORROW` 在 `margin.auto_borrow` 关闭时同样被拒，`details.flag` 为 `margin.auto_borrow`。现货订单不看这两个开关，链路与之前完全一样。
+- 冻结之前先调 margin-service 的 gRPC `MarginService.ReserveOrder`（地址 `MARGIN_GRPC_ADDR`，测试服 `margin-service:9199`）：检查账户状态、资产、风险率，`AUTO_BORROW` 时借入差额；按订单 ID 幂等。明确拒绝（`MARGIN_LIMIT`、`MARGIN_LEVEL_TOO_LOW`、`MARGIN_FROZEN`、`MARGIN_PRICE_UNAVAILABLE` 等）时订单存为 REJECTED，错误原样返回，margin-service 的 details（`max_borrowable`、`margin_level` 等）与 `order_id` 一起带回；margin-service 不可达时与账本不可达一样保持 PENDING，恢复任务先重放 `ReserveOrder` 再冻结。
+- 冻结与解冻都记在订单的账户上：账本 `Freeze` / `Unfreeze` 的 `account_type` 为订单的账户，逐仓账户的 `scope` 为交易对。撮合引擎把双方订单的账户与 `side_effect` 原样写进 `TradeExecuted`（HOUSE 一侧为空），账本按它结算（见 [margin.md](margin.md)）。
 
 价格带与市价保护价的锚点按顺序取：① 该交易对 5 分钟内的最新成交价（交易服务从自己的 `fills` 取）；② 新鲜的参考价（market-data-service 内网接口 `/internal/market/{symbol}/reference`：跟随参考市场的交易对是币安价，见 [market-maker.md](market-maker.md)；不跟随的平台币 ASTRA-USDT 是平台自己的价格或盘口中价，都没有时是 market-sim 30 秒内上报的目标价，见 [market-data.md](market-data.md)、[market-sim.md](market-sim.md#价格带不锁死市场设计-4)），这样一笔旧成交不会把没有参考市场的交易对锁死；③ 最后一笔成交价，不论多旧；缓存 1 秒：限价价格偏离锚点超过交易对的 `price_band` 返回 `ORDER_PRICE_OUT_OF_BAND`；市价买单保护价为锚点 × (1 + band)，卖单为锚点 × (1 − band)，市价卖单还按锚点检查最小名义金额。既无成交也无参考价的交易对没有锚点：限价单不检查价格带，市价单不带保护价（空订单簿的市价单由引擎拒绝）。测试数据里 ETH-BTC（端到端脚本用的交易对）的价格带是 100%，BTC-USDT 为 10%。做市账户（`MARKET_MAKER_USER_IDS`）的订单手续费率为 0。
 
