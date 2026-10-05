@@ -205,7 +205,9 @@ nginx（`deploy/compose/nginx/conf.d/astras.vip.conf` 与 `snippets/site-{pc,m,a
   - 脚本：`web/e2e/pc-flows.mjs`、`m-flows.mjs`、`admin-flows.mjs`，公共部分 `flows-lib.mjs`（建在 `lib.mjs` 的 Chrome 之上）。每一步以清单编号命名（`3`、`P4`、`M1`、`A2`），在自己的标签页（独立的浏览器上下文，各自的设备、时区、减少动效等媒体特性）里跑；只等事件与状态，不靠定时等待。
   - 输出 `ok|FAIL 编号 说明 (秒)`，每站一行汇总；失败的步骤把每个标签页的截图与日志（错误、地址、控制台、页面错误、失败请求）写到 `FLOWS_OUT`（默认 `~/.cache/exchange-e2e/flows/<run>`），打印路径后继续下一步；每站的结果另存 `<站点>-summary.json`。`FLOWS_ONLY=3,P4` 只跑这几项（准备步骤 `—` 总会跑）。
   - 后台流程经 ssh 建一个临时 ADMIN 与一个临时 AUDITOR（随机口令与密钥从标准输入传入、不打印），结束时停用；危险操作只打开、填写后取消，最后核对审计里 ADMIN 只有登录与退出。
-  - 只为故障场景拦截请求（断网、令牌过期的 401、标记价降级）；服务器上只多出流程自己注册的账户与它们挂了又撤的单，不碰托管方。
+  - 只为故障场景拦截请求（断网、令牌过期的 401、标记价降级）；服务器上只多出流程自己注册的账户与它们挂了又撤的单，不碰托管方。PC 流程的账户在每个下单步骤结束时撤单，脚本退出前（不论怎么结束）再撤一次，最后一步核对没有剩下的挂单。
+  - 前提：P2、P6 要挂 0.0002 BTC 的限价买单，靠注册赠送的 USDT。送多少读公开的平台资料（`welcome_credits`）：不送就跳过这两步并写明原因；送了就等账本入账（最多 40 秒），等不到算失败。
+  - 步骤超出预算（默认 240 秒）时记失败，接着跑下一步：它自己的标签页关掉，共享的标签页换新页并回到原地址（经上下文的 Cookie 保持登录）。每一步在自己的异步上下文里跑，超时的步骤之后再碰标签页、它的方法或 `open()` 都会抛错，不会动到下一步的页面。
   - 判断方法：对比度在页面里按 WCAG 2.x 算，文字色叠在祖先的背景与盖在文字下面的无文字绝对定位层（滑块、深度条）上，渐变或图片上的文字不判，等"同步中"消失、过渡结束再读；减少动效看 `document.getAnimations()`；点击目标看自身尺寸或命中区域（离中心 21 px 处 `elementFromPoint` 仍落在它上面），被固定栏盖住的先滚到屏幕中间；横向溢出找到具体元素，绝对定位的元素按它的包含块判断是否被裁剪（`sr-only` 不受非定位祖先的 `overflow` 裁剪，会撑宽页面）。
-  - 本机对开发服务器：`APP=http://localhost:5173 node web/e2e/pc-flows.mjs`（手机站 5174；后台 5180，另给 `ADMIN_EMAIL`、`ADMIN_PASSWORD`、`AUDITOR_EMAIL`、`AUDITOR_PASSWORD`）；需要部署后 nginx 的步骤（P8 的分流）在本机跳过。
+  - 本机对开发服务器：`APP=http://localhost:5173 node web/e2e/pc-flows.mjs`（或在 `web/e2e` 里 `pnpm flows:pc`，另有 `flows:m`、`flows:admin`；手机站 5174；后台 5180，另给 `ADMIN_EMAIL`、`ADMIN_PASSWORD`、`AUDITOR_EMAIL`、`AUDITOR_PASSWORD`）；P8（要部署后 nginx 的按设备分流）与 M4（只有生产构建注册 service worker）在本机跳过。
 - 人工检查清单：[ui-checklist.md](ui-checklist.md)。
