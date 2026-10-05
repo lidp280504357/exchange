@@ -16,7 +16,8 @@ type trades repos
 
 const tradeColumns = `trade_id, symbol, trade_number, base_asset, quote_asset, price, quantity, quote_quantity,
 	buyer_order_id, buyer_user_id, seller_order_id, seller_user_id, buyer_is_maker, buyer_fee, seller_fee,
-	buyer_limit_price, event_id, executed_at, status, error_code, error, attempts, settled_at, house_side`
+	buyer_limit_price, event_id, executed_at, status, error_code, error, attempts, settled_at, house_side,
+	buyer_account_type, seller_account_type, buyer_auto_repay, seller_auto_repay`
 
 func scanTrade(row pgx.Row) (domain.Trade, error) {
 	var t domain.Trade
@@ -25,7 +26,8 @@ func scanTrade(row pgx.Row) (domain.Trade, error) {
 	var settled *time.Time
 	err := row.Scan(&id, &t.Symbol, &t.Number, &t.BaseAsset, &t.QuoteAsset, &t.Price, &t.Quantity, &t.Quote,
 		&t.BuyerOrderID, &t.BuyerUserID, &t.SellerOrderID, &t.SellerUserID, &t.BuyerIsMaker, &t.BuyerFee, &t.SellerFee,
-		&limit, &t.EventID, &t.ExecutedAt, &t.Status, &t.ErrorCode, &t.Error, &t.Attempts, &settled, &t.HouseSide)
+		&limit, &t.EventID, &t.ExecutedAt, &t.Status, &t.ErrorCode, &t.Error, &t.Attempts, &settled, &t.HouseSide,
+		&t.BuyerAccount, &t.SellerAccount, &t.BuyerAutoRepay, &t.SellerAutoRepay)
 	t.ID, t.BuyerLimit = id.String(), limit.Decimal
 	if settled != nil {
 		t.SettledAt = *settled
@@ -53,11 +55,12 @@ func (r trades) Statuses(ctx context.Context, ids []string) (map[string]string, 
 
 func (r trades) Insert(ctx context.Context, t domain.Trade) error {
 	_, err := r.q.Exec(ctx, `INSERT INTO trades (`+tradeColumns+`)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
+			$25, $26, $27, $28)`,
 		t.ID, t.Symbol, t.Number, t.BaseAsset, t.QuoteAsset, t.Price, t.Quantity, t.Quote,
 		t.BuyerOrderID, t.BuyerUserID, t.SellerOrderID, t.SellerUserID, t.BuyerIsMaker, t.BuyerFee, t.SellerFee,
 		nullDecimal(t.BuyerLimit), t.EventID, t.ExecutedAt, t.Status, t.ErrorCode, t.Error, t.Attempts, nullTime(t.SettledAt),
-		t.HouseSide)
+		t.HouseSide, t.BuyerAccount, t.SellerAccount, t.BuyerAutoRepay, t.SellerAutoRepay)
 	if err != nil {
 		return fmt.Errorf("insert trade: %w", err)
 	}

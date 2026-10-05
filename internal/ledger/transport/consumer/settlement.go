@@ -110,7 +110,13 @@ func (s *Settlement) fromProto(ctx context.Context, m *tradev1.TradeExecuted, d 
 		BuyerOrderID: m.GetBuyerOrderId(), BuyerUserID: m.GetBuyerUserId(),
 		SellerOrderID: m.GetSellerOrderId(), SellerUserID: m.GetSellerUserId(), BuyerIsMaker: m.GetBuyerIsMaker(),
 		BuyerFee: amount("buyer_fee", m.GetBuyerFee()), SellerFee: amount("seller_fee", m.GetSellerFee()),
-		BuyerLimit: amount("buyer_limit_price", m.GetBuyerLimitPrice()),
-		EventID:    d.Envelope.GetEventId(), ExecutedAt: d.Envelope.GetOccurredAt().AsTime(),
+		BuyerLimit:   amount("buyer_limit_price", m.GetBuyerLimitPrice()),
+		BuyerAccount: m.GetBuyerAccountType(), SellerAccount: m.GetSellerAccountType(),
+		BuyerAutoRepay: m.GetBuyerSideEffect() == autoRepay, SellerAutoRepay: m.GetSellerSideEffect() == autoRepay,
+		EventID: d.Envelope.GetEventId(), ExecutedAt: d.Envelope.GetOccurredAt().AsTime(),
 	}
 }
+
+// autoRepay is the side effect of an order whose fills repay its margin
+// account's debt (margin design §5.1).
+const autoRepay = "AUTO_REPAY"

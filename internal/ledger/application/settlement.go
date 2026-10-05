@@ -112,10 +112,14 @@ func (s *Service) settle(ctx context.Context, trades []domain.Trade, retry bool)
 			return err
 		}
 		// Every account of the batch is locked up front in one order, so
-		// concurrent postings cannot deadlock with this transaction.
+		// concurrent postings cannot deadlock with this transaction: the
+		// postings' and the debt rows automatic repayments read.
 		var all []domain.Posting
 		for _, p := range plans {
 			all = append(all, p.postings...)
+			if p.refusal == nil {
+				all = append(all, repayReads(p.trade))
+			}
 		}
 		if len(all) > 0 {
 			if _, err := r.Accounts().Lock(ctx, domain.PostingAccounts(all)); err != nil {
@@ -165,15 +169,32 @@ func due(status string, known, retry bool) bool {
 	return !known
 }
 
+// repayReads is a posting naming the debt rows a trade's automatic
+// repayments read, so that they are locked with the batch.
+func repayReads(t domain.Trade) domain.Posting {
+	var p domain.Posting
+	for _, k := range t.RepayAccounts() {
+		p.Lines = append(p.Lines, domain.Line{Account: k})
+	}
+	return p
+}
+
 // settleOne posts one planned trade inside r's transaction, or returns it
 // marked FAILED when the ledger refuses it; then nothing of it is written.
+// The automatic repayments are worked out here, from the debt rows as
+// they stand under the lock.
 func (s *Service) settleOne(ctx context.Context, r ports.Repos, p plannedTrade) (domain.Trade, error) {
 	t := p.trade
 	if p.refusal == nil {
-		accounts, err := r.Accounts().Lock(ctx, domain.PostingAccounts(p.postings))
+		accounts, err := r.Accounts().Lock(ctx, domain.PostingAccounts(append(p.postings[:len(p.postings):len(p.postings)], repayReads(t))))
 		if err != nil {
 			return t, err
 		}
+		byKey := make(map[domain.AccountKey]domain.Account, len(accounts))
+		for _, a := range accounts {
+			byKey[a.Key] = a
+		}
+		p.postings = append(p.postings, domain.AutoRepayPostings(t, byKey)...)
 		p.refusal = domain.Simulate(accounts, p.postings)
 	}
 	if p.refusal != nil {

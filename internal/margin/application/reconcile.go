@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -45,56 +46,27 @@ type CheckResult struct {
 func (s *Service) Reconcile(ctx context.Context) ([]CheckResult, error) {
 	started := s.Now()
 	read := s.Store.Read()
-	debts, err := s.Ledger.Debts(ctx)
-	if err != nil {
-		return nil, err
-	}
-	loans, err := read.Loans().Open(ctx, "")
-	if err != nil {
-		return nil, err
-	}
 	cat, err := s.catalog(ctx, read)
 	if err != nil {
 		return nil, err
 	}
-	// Loans read after the debts: one changed meanwhile is recent.
-	recent := func(l ports.Loan) bool { return l.UpdatedAt.After(started.Add(-settleGrace)) }
-
-	ledger := map[ports.LoanKey]ports.Debt{}
-	for _, d := range debts {
-		ledger[ports.LoanKey{UserID: d.UserID, Account: d.Account, Asset: d.Asset}] = d
-	}
-	book := map[ports.LoanKey]ports.Loan{}
-	for _, l := range loans {
-		book[ports.LoanKey{UserID: l.UserID, Account: l.Account, Asset: l.Asset}] = l
-	}
-	loansCheck := CheckResult{Check: CheckLoansMatchLedger, Mismatches: []Mismatch{}}
-	for k, l := range book {
-		d := ledger[k]
-		if recent(l) || (l.Principal.Equal(d.Principal) && l.Interest.Equal(d.Interest)) {
-			continue
+	// An automatic repayment reaches the loans a moment after the ledger
+	// booked it (ledger.events): a mismatch must hold on a second look.
+	loansCheck := CheckResult{Check: CheckLoansMatchLedger}
+	for attempt := 0; attempt < 2; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(5 * time.Second):
+			}
 		}
-		loansCheck.Mismatches = append(loansCheck.Mismatches, Mismatch{
-			Key:    fmt.Sprintf("%s/%s/%s", k.UserID, k.Account, k.Asset),
-			Detail: fmt.Sprintf("loan %s + %s, ledger %s + %s", l.Principal, l.Interest, d.Principal, d.Interest),
-		})
-	}
-	for k, d := range ledger {
-		if _, ok := book[k]; ok {
-			continue
-		}
-		// The ledger owes what the book does not: a loan closed just now
-		// shows as such in the book (updated recently, nothing owed).
-		l, err := read.Loans().Get(ctx, k.UserID, k.Account, k.Asset)
-		if err != nil {
+		if loansCheck.Mismatches, err = s.loanMismatches(ctx); err != nil {
 			return nil, err
 		}
-		if recent(l) {
-			continue
+		if len(loansCheck.Mismatches) == 0 {
+			break
 		}
-		loansCheck.Mismatches = append(loansCheck.Mismatches, Mismatch{
-			Key: fmt.Sprintf("%s/%s/%s", k.UserID, k.Account, k.Asset), Detail: fmt.Sprintf("no loan, ledger %s + %s", d.Principal, d.Interest),
-		})
 	}
 
 	// A borrow may finish between the reads: a mismatch must hold on a
@@ -171,5 +143,60 @@ func (s *Service) poolMismatches(ctx context.Context, cat Catalog) ([]Mismatch, 
 			out = append(out, Mismatch{Key: a, Detail: fmt.Sprintf("pool lent %s above its cap %s", lent[a], t.PoolCap)})
 		}
 	}
+	return out, nil
+}
+
+// loanMismatches compares every margin account's debts in the ledger with
+// the loans; a loan changed within settleGrace is left for the next run.
+func (s *Service) loanMismatches(ctx context.Context) ([]Mismatch, error) {
+	started := s.Now()
+	read := s.Store.Read()
+	debts, err := s.Ledger.Debts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	loans, err := read.Loans().Open(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	// Loans read after the debts: one changed meanwhile is recent.
+	recent := func(l ports.Loan) bool { return l.UpdatedAt.After(started.Add(-settleGrace)) }
+	ledger := map[ports.LoanKey]ports.Debt{}
+	for _, d := range debts {
+		ledger[ports.LoanKey{UserID: d.UserID, Account: d.Account, Asset: d.Asset}] = d
+	}
+	book := map[ports.LoanKey]ports.Loan{}
+	for _, l := range loans {
+		book[ports.LoanKey{UserID: l.UserID, Account: l.Account, Asset: l.Asset}] = l
+	}
+	out := []Mismatch{}
+	for k, l := range book {
+		d := ledger[k]
+		if recent(l) || (l.Principal.Equal(d.Principal) && l.Interest.Equal(d.Interest)) {
+			continue
+		}
+		out = append(out, Mismatch{
+			Key:    fmt.Sprintf("%s/%s/%s", k.UserID, k.Account, k.Asset),
+			Detail: fmt.Sprintf("loan %s + %s, ledger %s + %s", l.Principal, l.Interest, d.Principal, d.Interest),
+		})
+	}
+	for k, d := range ledger {
+		if _, ok := book[k]; ok {
+			continue
+		}
+		// The ledger owes what the book does not: a loan closed just now
+		// shows as such in the book (updated recently, nothing owed).
+		l, err := read.Loans().Get(ctx, k.UserID, k.Account, k.Asset)
+		if err != nil {
+			return nil, err
+		}
+		if recent(l) {
+			continue
+		}
+		out = append(out, Mismatch{
+			Key: fmt.Sprintf("%s/%s/%s", k.UserID, k.Account, k.Asset), Detail: fmt.Sprintf("no loan, ledger %s + %s", d.Principal, d.Interest),
+		})
+	}
+	slices.SortFunc(out, func(a, b Mismatch) int { return strings.Compare(a.Key, b.Key) })
 	return out, nil
 }

@@ -47,9 +47,19 @@ type Trade struct {
 	// HouseSide is the side HOUSE took (HouseBuy, HouseSell), "" for a
 	// trade between users. HOUSE's side settles on its MARKET_MAKER
 	// system accounts, without an order, a freeze or a fee (ADR-0013).
-	HouseSide  string
-	EventID    string
-	ExecutedAt time.Time
+	HouseSide string
+	// BuyerAccount and SellerAccount are the accounts each side's order
+	// traded from: SPOT (also ""), MARGIN_CROSS, or MARGIN_ISOLATED of the
+	// trade's symbol (margin design §5.1); HOUSE's side has none.
+	BuyerAccount  string
+	SellerAccount string
+	// BuyerAutoRepay and SellerAutoRepay: the side's order has side_effect
+	// AUTO_REPAY, so what it receives repays its margin account's debt of
+	// that asset, interest first (AutoRepayPostings).
+	BuyerAutoRepay  bool
+	SellerAutoRepay bool
+	EventID         string
+	ExecutedAt      time.Time
 
 	Status    string
 	ErrorCode string
@@ -89,8 +99,113 @@ func (t Trade) Validate() error {
 		return fail("HOUSE buys without a fee or a limit")
 	case t.HouseSide == HouseSell && !t.SellerFee.IsZero():
 		return fail("HOUSE sells without a fee")
+	case !tradeAccount(t.BuyerAccount) || !tradeAccount(t.SellerAccount):
+		return fail("an order trades from SPOT, MARGIN_CROSS or MARGIN_ISOLATED, not %q/%q", t.BuyerAccount, t.SellerAccount)
+	case t.BuyerAutoRepay && (t.HouseSide == HouseBuy || !MarginType(t.BuyerAccount)),
+		t.SellerAutoRepay && (t.HouseSide == HouseSell || !MarginType(t.SellerAccount)):
+		return fail("only an order on a margin account repays automatically")
 	}
 	return nil
+}
+
+func tradeAccount(a string) bool {
+	return a == "" || a == AccountSpot || a == AccountMarginCross || a == AccountMarginIsolated
+}
+
+// account is the account a user's side of the trade settles on in asset:
+// SPOT, or the margin account its order traded from (an isolated one is
+// the trade's pair's).
+func (t Trade) account(user, account, asset string) AccountKey {
+	switch account {
+	case AccountMarginCross:
+		return AccountKey{OwnerType: OwnerUser, OwnerID: user, Type: AccountMarginCross, Asset: asset}
+	case AccountMarginIsolated:
+		return AccountKey{OwnerType: OwnerUser, OwnerID: user, Type: AccountMarginIsolated, Scope: t.Symbol, Asset: asset}
+	}
+	return UserAccount(user, AccountSpot, asset)
+}
+
+// onMargin reports whether a user's side of the trade is a margin
+// account's.
+func (t Trade) onMargin() bool {
+	return (t.HouseSide != HouseBuy && MarginType(t.BuyerAccount)) || (t.HouseSide != HouseSell && MarginType(t.SellerAccount))
+}
+
+// repaySide is a side of the trade that repays automatically: the margin
+// account and the asset it received, how much, and the journal's key.
+type repaySide struct {
+	ref      MarginRef
+	asset    string
+	received decimal.Decimal
+	key      string
+	order    string
+}
+
+func (t Trade) repaySides() []repaySide {
+	var out []repaySide
+	if t.BuyerAutoRepay {
+		out = append(out, repaySide{
+			ref: t.marginRef(t.BuyerUserID, t.BuyerAccount), asset: t.BaseAsset, received: t.Quantity.Sub(t.BuyerFee),
+			key: "trade-repay:" + t.ID + ":buyer", order: t.BuyerOrderID,
+		})
+	}
+	if t.SellerAutoRepay {
+		out = append(out, repaySide{
+			ref: t.marginRef(t.SellerUserID, t.SellerAccount), asset: t.QuoteAsset, received: t.Quote.Sub(t.SellerFee),
+			key: "trade-repay:" + t.ID + ":seller", order: t.SellerOrderID,
+		})
+	}
+	return out
+}
+
+func (t Trade) marginRef(user, account string) MarginRef {
+	ref := MarginRef{UserID: user, AccountType: account}
+	if account == AccountMarginIsolated {
+		ref.Scope = t.Symbol
+	}
+	return ref
+}
+
+// RepayAccounts are the rows the trade's automatic repayments read and
+// change: the debt and interest rows of what each such side received.
+func (t Trade) RepayAccounts() []AccountKey {
+	var out []AccountKey
+	for _, r := range t.repaySides() {
+		out = append(out, r.ref.DebtRow(r.asset), r.ref.InterestRow(r.asset))
+	}
+	return out
+}
+
+// AutoRepayPostings repays, for each side whose order has AUTO_REPAY, its
+// margin account's debt of the asset the trade brought it — what it
+// received less the fee, interest first, at most what is owed — in a
+// MARGIN_REPAY journal of its own (key trade-repay:<trade>:<buyer|seller>),
+// posted in the settlement's transaction; none when nothing is owed.
+// accounts holds the debt and interest rows as locked (RepayAccounts).
+func AutoRepayPostings(t Trade, accounts map[AccountKey]Account) []Posting {
+	var out []Posting
+	for _, r := range t.repaySides() {
+		interest := decimal.Max(accounts[r.ref.InterestRow(r.asset)].Available.Neg(), decimal.Zero)
+		principal := decimal.Max(accounts[r.ref.DebtRow(r.asset)].Available.Neg(), decimal.Zero)
+		paid := decimal.Min(r.received, interest.Add(principal))
+		if !paid.IsPositive() {
+			continue
+		}
+		toInterest := decimal.Min(paid, interest)
+		p := Posting{
+			IdemKey: r.key, EntryType: EntryMarginRepay, SourceEventID: t.EventID,
+			Memo:  fmt.Sprintf("auto-repay order %s trade %s %s", r.order, t.Symbol, t.ID),
+			Lines: []Line{{Account: r.ref.Assets(r.asset), Amount: paid.Neg(), Kind: Available}},
+		}
+		if toInterest.IsPositive() {
+			p.Lines = append(p.Lines, Line{Account: r.ref.InterestRow(r.asset), Amount: toInterest, Kind: Available})
+		}
+		if rest := paid.Sub(toInterest); rest.IsPositive() {
+			p.Lines = append(p.Lines, Line{Account: r.ref.DebtRow(r.asset), Amount: rest, Kind: Available})
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // Idempotency keys of a trade's journals.
@@ -106,7 +221,9 @@ func releaseKey(id string) string { return "trade-release:" + id }
 //     engine's traded amounts (invariant 5). Against HOUSE it is
 //     HOUSE_TRADE_SETTLE: the user's side the same, HOUSE's side on the
 //     available balances of its MARKET_MAKER accounts, which may go below
-//     zero (ADR-0013).
+//     zero (ADR-0013). A side whose order traded from a margin account
+//     settles on that account's asset rows, and the journal is
+//     MARGIN_TRADE_SETTLE (margin design §3.2).
 //   - TRADE_FEE moves each side's fee from what it received to FEE_REVENUE:
 //     the buyer pays in base, the seller in quote (§11.3). No journal when
 //     both fees are zero.
@@ -120,8 +237,8 @@ func SettlementPostings(t Trade) ([]Posting, error) {
 		return nil, err
 	}
 	memo := fmt.Sprintf("trade %s %s", t.Symbol, t.ID)
-	buyerBase, buyerQuote := UserAccount(t.BuyerUserID, AccountSpot, t.BaseAsset), UserAccount(t.BuyerUserID, AccountSpot, t.QuoteAsset)
-	sellerBase, sellerQuote := UserAccount(t.SellerUserID, AccountSpot, t.BaseAsset), UserAccount(t.SellerUserID, AccountSpot, t.QuoteAsset)
+	buyerBase, buyerQuote := t.account(t.BuyerUserID, t.BuyerAccount, t.BaseAsset), t.account(t.BuyerUserID, t.BuyerAccount, t.QuoteAsset)
+	sellerBase, sellerQuote := t.account(t.SellerUserID, t.SellerAccount, t.BaseAsset), t.account(t.SellerUserID, t.SellerAccount, t.QuoteAsset)
 	entry, buyerPays, sellerPays := EntryTradeSettle, Frozen, Frozen
 	switch t.HouseSide {
 	case HouseBuy:
@@ -130,6 +247,9 @@ func SettlementPostings(t Trade) ([]Posting, error) {
 	case HouseSell:
 		entry, sellerPays = EntryHouseTradeSettle, Available
 		sellerBase, sellerQuote = SystemAccount(AccountMarketMaker, t.BaseAsset), SystemAccount(AccountMarketMaker, t.QuoteAsset)
+	}
+	if t.onMargin() {
+		entry = EntryMarginTradeSettle // a side's margin account: the same lines, its own entry type
 	}
 	out := []Posting{{IdemKey: settleKey(t.ID), EntryType: entry, SourceEventID: t.EventID, Memo: memo, Lines: []Line{
 		{Account: buyerQuote, Amount: t.Quote.Neg(), Kind: buyerPays},

@@ -11,7 +11,14 @@
 # charging run is up to date; the ledger reconciliation (margin invariants
 # 8 and 9) and invariant 7 (the ledger's debts = margin-service's loans)
 # hold. An isolated BTC-USDT account takes only its pair's two assets.
-# Needs margin.enabled on (docs/runbook/margin.md) and ssh to the server.
+# Batch E2: with 100 USDT on the cross account, a limit buy of 1.2 SOL over
+# the ask is refused without AUTO_BORROW, fills against HOUSE with it (the
+# loan is what the freeze lacked, the SOL lands on the margin account), and
+# a sell with AUTO_REPAY repays the loan and its interest from what it
+# brings (the settlement's automatic repayment, margin-service's loans
+# following it); invariant 5 counts the margin trades.
+# Needs margin.enabled and margin.auto_borrow on (docs/runbook/margin.md)
+# and ssh to the server.
 #
 #   scripts/e2e/margin.sh
 set -euo pipefail
@@ -126,3 +133,57 @@ remote "sudo docker compose $COMPOSE_FILES exec -T ledger-service /app/exchangec
 echo "ok   the ledger's invariants hold, margin 8 and 9 among them"
 remote "sudo docker compose $COMPOSE_FILES exec -T margin-service /app/exchangectl margin reconcile" | tail -1 | sed 's/^/     /'
 echo "ok   margin invariant 7: the ledger's debts are the loans"
+
+echo "== orders on the cross account (E2)"
+SYMBOL=SOL-USDT
+call POST /v1/margin/transfer '{"direction":"IN","account":"MARGIN_CROSS","asset":"USDT","amount":"100"}' "${AUTH[@]}" -H "Idempotency-Key: e2e-margin-$RUN-in2"
+expect 200 - "100 USDT into the cross account again"
+place() { # place JSON; sets ORDER
+  call POST /v1/orders "$1" "${AUTH[@]}" -H "Idempotency-Key: e2e-margin-$RUN-$(date +%s%N)"
+  expect 202 - "place $(jq -r '"\(.side) \(.type) \(.quantity) \(.symbol) @ \(.price) on \(.account) \(.side_effect // "NONE")"' <<<"$1")"
+  ORDER=$(jq -r .order_id <<<"$BODY")
+}
+status_is() { # status_is ORDER STATUS
+  call GET "/v1/orders/$1" "" "${AUTH[@]}"
+  [[ $(jq -r .status <<<"$BODY") == "$2" ]]
+}
+book() { # book: BODY holds SYMBOL's two-sided book
+  call GET "/v1/market/$SYMBOL/depth?limit=5" "" && [[ $STATUS == 200 ]] &&
+    jq -e '(.bids | length) > 0 and (.asks | length) > 0' <<<"$BODY" >/dev/null
+}
+# shellcheck disable=SC2016 # expanded when the script ends
+at_exit 'call DELETE "/v1/orders?symbol=$SYMBOL" "" "${AUTH[@]}"'
+eventually 30 "$SYMBOL shows a two-sided book" book
+HIGH=$(jq -r '.asks[0][0] | tonumber * 1.005 * 100 | floor / 100' <<<"$BODY")
+call POST /v1/orders "{\"symbol\":\"$SYMBOL\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$HIGH\",\"quantity\":\"1.2\",\"account\":\"MARGIN_CROSS\"}" "${AUTH[@]}" -H "Idempotency-Key: e2e-margin-$RUN-poor"
+expect 422 LEDGER_INSUFFICIENT_BALANCE "1.2 SOL at $HIGH needs more than the 100 free without AUTO_BORROW"
+place "{\"symbol\":\"$SYMBOL\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"price\":\"$HIGH\",\"quantity\":\"1.2\",\"account\":\"MARGIN_CROSS\",\"side_effect\":\"AUTO_BORROW\"}"
+BUY=$ORDER
+eventually 40 "the margin buy is FILLED against HOUSE" status_is "$BUY" FILLED
+check '.account == "MARGIN_CROSS" and .side_effect == "AUTO_BORROW"' "the order says its account and side effect"
+call GET /v1/margin/loans "" "${AUTH[@]}"
+expect 200 - "loans"
+check "(.items | length) == 1 and .items[0].asset == \"USDT\" and ((.items[0].principal | tonumber) - ($HIGH * 1.2 - 100) | fabs) < 0.000001" "AUTO_BORROW borrowed what 100 lacked of the freeze"
+call GET /v1/margin/accounts "" "${AUTH[@]}"
+check '[.cross.balances[] | select(.asset == "SOL")][0] | (.free | tonumber) == 1.1988' "1.2 SOL bought, the 0.1% fee off: on the margin account"
+check '(.cross.margin_level | tonumber) > 1.3' "the margin level stays above the warning level"
+
+echo "== a sell with AUTO_REPAY repays the loan"
+eventually 30 "$SYMBOL shows a two-sided book" book
+LOW=$(jq -r '.bids[0][0] | tonumber * 0.995 * 100 | ceil / 100' <<<"$BODY")
+place "{\"symbol\":\"$SYMBOL\",\"side\":\"SELL\",\"type\":\"LIMIT\",\"price\":\"$LOW\",\"quantity\":\"1.198\",\"account\":\"MARGIN_CROSS\",\"side_effect\":\"AUTO_REPAY\"}"
+SELL=$ORDER
+eventually 40 "the margin sell is FILLED against HOUSE" status_is "$SELL" FILLED
+repaid() {
+  call GET /v1/margin/loans "" "${AUTH[@]}" && [[ $STATUS == 200 ]] && jq -e '.items == []' <<<"$BODY" >/dev/null
+}
+eventually 40 "the proceeds repaid the loan and its interest" repaid
+call GET "/v1/margin/accounts" "" "${AUTH[@]}"
+check '.cross.total_liability == "0" and .cross.margin_level == null' "nothing owed"
+LEFT=$(jq -r '[.cross.balances[] | select(.asset == "USDT")][0].free' <<<"$BODY")
+call POST /v1/margin/transfer "{\"direction\":\"OUT\",\"account\":\"MARGIN_CROSS\",\"asset\":\"USDT\",\"amount\":\"$LEFT\"}" "${AUTH[@]}" -H "Idempotency-Key: e2e-margin-$RUN-out4"
+expect 200 - "the $LEFT USDT left back to SPOT"
+remote "sudo docker compose $COMPOSE_FILES exec -T ledger-service /app/exchangectl ledger reconcile" | grep -E "TRADE_SETTLE_MATCHES_TRADES|MARGIN_" | sed 's/^/     /'
+echo "ok   the margin trades settle in invariant 5's sums"
+remote "sudo docker compose $COMPOSE_FILES exec -T margin-service /app/exchangectl margin reconcile" | tail -1 | sed 's/^/     /'
+echo "ok   margin invariant 7 after the automatic repayment"

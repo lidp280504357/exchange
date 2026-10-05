@@ -35,6 +35,7 @@ type Repos interface {
 	Repays() RepayRepo
 	Interest() InterestRepo
 	Transfers() TransferRepo
+	Reservations() ReservationRepo
 	Runs() RunRepo
 	// Emit queues an event on topic, keyed by aggregateID.
 	Emit(ctx context.Context, topic string, msg proto.Message, aggregateType, aggregateID string) error
@@ -313,6 +314,29 @@ type TransferRepo interface {
 	GetForUpdate(ctx context.Context, id string) (Transfer, error)
 	Finish(ctx context.Context, t Transfer) error
 	Pending(ctx context.Context, cutoff time.Time, limit int) ([]Transfer, error)
+}
+
+// Reservation is what ReserveOrder answered for an order.
+type Reservation struct {
+	OrderID     string
+	UserID      string
+	AccountType domain.AccountType
+	// Symbol is the order's pair (an isolated account's own).
+	Symbol      string
+	SideEffect  domain.SideEffect
+	Borrowed    decimal.Decimal
+	BorrowID    string
+	MarginLevel *decimal.Decimal
+	CreatedAt   time.Time
+}
+
+// ReservationRepo stores the reservations of orders.
+type ReservationRepo interface {
+	// Get returns an order's reservation; ok is false without one.
+	Get(ctx context.Context, orderID string) (Reservation, bool, error)
+	// Insert stores a reservation unless the order has one, and returns
+	// the one that counts.
+	Insert(ctx context.Context, r Reservation) (Reservation, error)
 }
 
 // RunRepo records the reconciliation runs.

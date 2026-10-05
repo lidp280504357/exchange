@@ -1,6 +1,6 @@
 # 杠杆交易（margin-service）
 
-设计稿：[设计-杠杆交易-2026-10-06.md](../设计-杠杆交易-2026-10-06.md)；契约：[E0 契约草案](../设计-杠杆交易-E0契约-2026-10-06.md)、`api/openapi/margin.yaml`、`api/proto/exchange/margin/v1/`。本手册写已上线的部分：E1（账户、划转、借币、还币、整点计息、对账）。E2（杠杆下单）与 E3（预警、强平）上线后补到这里。
+设计稿：[设计-杠杆交易-2026-10-06.md](../设计-杠杆交易-2026-10-06.md)；契约：[E0 契约草案](../设计-杠杆交易-E0契约-2026-10-06.md)、`api/openapi/margin.yaml`、`api/proto/exchange/margin/v1/`。本手册写已上线的部分：E1（账户、划转、借币、还币、整点计息、对账）与 E2（杠杆账户下单、按账户结算、自动借还）。E3（预警、强平）上线后补到这里。
 
 ## 服务
 
@@ -58,6 +58,12 @@ ssh exchange 'cd /opt/exchange/infra && sudo docker compose -f docker-compose.ym
 - 还币先抵利息再抵本金，`ALL` 按可用余额还到为止；运营冻结的账户可以还，强平中的不行（`MARGIN_FROZEN`）。
 - 写账本前先记 `PENDING`（`borrows`、`repays`、`transfers`）；账本超时或不可用时接口返回 `COMMON_UNAVAILABLE`，恢复循环每 5 秒用同一个键重发（账本只记一次），客户端用同一个 `Idempotency-Key` 重试拿到结果。
 
+## 杠杆账户下单（E2）
+
+- `POST /v1/orders` 带 `account`（`MARGIN_CROSS`，或交易对自己的 `MARGIN_ISOLATED`）与 `side_effect`。spot-trading-service 在冻结前调 margin-service 的 gRPC `MarginService.ReserveOrder`（9199）：开关（`AUTO_BORROW` 另要 `margin.auto_borrow`，关着报 `MARGIN_DISABLED`、detail `flag`）、账户状态、两种资产都可在该账户持有、估值完整、可用余额（加上 `AUTO_BORROW` 时的可借额度）够冻结、按限价（市价单按行情价）成交后风险率不低于预警线。`AUTO_BORROW` 在这里按差额借入（键 `order:<order_id>`，首小时利息同计）。每张单的首次答复记在 `margin.order_reservations`，重放（交易服务的恢复）返回它，零借款也一样。`CheckOrder` 做同样的检查，什么都不改。
+- 冻结、撤单释放与结算都在杠杆账户的资产行上：账本按成交事件里双方的账户记 `MARGIN_TRADE_SETTLE`（HOUSE 一侧照旧 `MARKET_MAKER`），`trades` 表记下双方账户与是否自动还款，停住的成交重试时同样处理。
+- `AUTO_REPAY`：结算的同一事务里，账本用这一方到账的资产（扣过手续费）先还利息、再还本金，至多还清该资产的负债，单独记一笔 `MARGIN_REPAY`（键 `trade-repay:<成交>:<buyer|seller>`，备注带订单号）。margin-service 消费 `ledger.events` 认出这些分录（消费组 `margin-service-ledger`），记成 `AUTO_REPAY` 的还款，同时更新借款簿与池子，并发 `MarginRepaid`。消费有延迟，不变量 7 的检查会跳过最近 1 分钟内变动过的借款。
+
 ## 整点计息
 
 - 每 15 秒检查一次：从上一个完成的整点之后到当前整点（停机后最多补 48 小时），按顺序计。
@@ -84,7 +90,7 @@ margin-service 的结果记在 `margin.reconciliation_runs`，指标 `margin_rec
 
 ## 测试服设置
 
-- `margin.enabled` 全局打开（测试服惯例，同 `derivatives.trading`；两站在 E4 前没有入口）：`exchangectl flags set margin.enabled --on --reason "..."`（在任一应用容器里）。
+- `margin.enabled` 与 `margin.auto_borrow` 全局打开（测试服惯例，同 `derivatives.trading`；两站在 E4 前没有入口）：`exchangectl flags set margin.enabled --on --reason "..."`（在任一应用容器里）。
 - 端到端：`scripts/e2e/margin.sh`（`task e2e` 包含）。
 
 ## 常用命令

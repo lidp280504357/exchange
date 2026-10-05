@@ -1,8 +1,9 @@
 // Command margin-service runs margin trading (design 2026-10-06): margin
 // accounts, transfers between them and SPOT, borrowing from HOUSE,
-// repaying, the hourly interest and the accounts' margin levels, with the
-// ledger keeping every balance and debt (ADR-0001); batch E2 adds orders
-// on margin accounts and E3 warnings and liquidations.
+// repaying, the hourly interest, the accounts' margin levels and the
+// checks of orders on margin accounts (MarginService, for
+// spot-trading-service), with the ledger keeping every balance and debt
+// (ADR-0001); batch E3 adds warnings and liquidations.
 package main
 
 import (
@@ -13,6 +14,7 @@ import (
 
 	instrumentv1 "github.com/skill/exchange/api/gen/go/exchange/instrument/v1"
 	ledgerv1 "github.com/skill/exchange/api/gen/go/exchange/ledger/v1"
+	marginv1 "github.com/skill/exchange/api/gen/go/exchange/margin/v1"
 	userv1 "github.com/skill/exchange/api/gen/go/exchange/user/v1"
 	"github.com/skill/exchange/internal/margin/adapters/instruments"
 	"github.com/skill/exchange/internal/margin/adapters/ledger"
@@ -20,9 +22,12 @@ import (
 	"github.com/skill/exchange/internal/margin/adapters/prices"
 	"github.com/skill/exchange/internal/margin/adapters/users"
 	"github.com/skill/exchange/internal/margin/application"
+	"github.com/skill/exchange/internal/margin/transport/consumer"
+	"github.com/skill/exchange/internal/margin/transport/grpcapi"
 	"github.com/skill/exchange/internal/margin/transport/httpapi"
 	"github.com/skill/exchange/internal/platform/app"
 	"github.com/skill/exchange/internal/platform/bootstrap"
+	"github.com/skill/exchange/internal/platform/event"
 	"github.com/skill/exchange/internal/platform/kafka"
 	"github.com/skill/exchange/internal/platform/pg"
 	"github.com/skill/exchange/migrations"
@@ -105,10 +110,20 @@ func setup(ctx context.Context, a *app.App) error {
 		Now:         time.Now,
 		Metrics:     application.NewMetrics(a.Metrics()),
 	}
+	// The automatic repayments the trades' settlement books (MARGIN_REPAY
+	// under trade-repay:), into the loans.
+	if err := bootstrap.Consumer(ctx, a, cfg.Kafka, consumer.Group, []string{event.TopicLedger}, consumer.Ledger(svc)); err != nil {
+		return err
+	}
 	a.Add("recovery", app.Loop(every(a, 5*time.Second, "recovery", svc.Recover)))
 	a.Add("interest", app.Loop(interestLoop(a, db, svc)))
 	a.Add("reconcile", app.Loop(reconcileLoop(a, svc, cfg.ReconcileInterval)))
 
+	srv, err := bootstrap.GRPCServer(ctx, a, cfg.GRPCAddr)
+	if err != nil {
+		return err
+	}
+	marginv1.RegisterMarginServiceServer(srv, grpcapi.NewServer(svc))
 	r := a.NewRouter()
 	(&httpapi.Handler{Svc: svc}).Routes(r)
 	return bootstrap.HTTPServer(ctx, a, cfg.HTTPAddr, r)

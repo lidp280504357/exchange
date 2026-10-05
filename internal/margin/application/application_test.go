@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -254,7 +255,11 @@ func (instruments) Decimals(_ context.Context, asset string) (int32, error) {
 }
 
 func (instruments) Pair(_ context.Context, symbol string) (ports.PairInfo, error) {
-	return ports.PairInfo{Symbol: symbol, Base: "BTC", Quote: "USDT", Status: "TRADING", TickDecimals: 2}, nil
+	base, quote, ok := strings.Cut(symbol, "-")
+	if !ok {
+		return ports.PairInfo{}, apperr.NotFound("no such pair")
+	}
+	return ports.PairInfo{Symbol: symbol, Base: base, Quote: quote, Status: "TRADING", TickDecimals: 2}, nil
 }
 
 type eligible struct{}
@@ -715,5 +720,109 @@ func TestHourlyInterest(t *testing.T) {
 	list, next, err := r.svc.Interest(ctx, user, &cross, "USDT", "", 2)
 	if err != nil || len(list) != 2 || next == "" || !list[0].Hour.Equal(time.Date(2026, 10, 6, 14, 0, 0, 0, time.UTC)) {
 		t.Fatalf("history %+v %q %v", list, next, err)
+	}
+}
+
+func TestOrdersOnMarginAccounts(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	user := uuid.Must(uuid.NewV7()).String()
+	cross := domain.Cross()
+	r.ledger.fund(user, "USDT", d("2000"))
+	if _, err := r.svc.Transfer(ctx, application.TransferInput{
+		UserID: user, IdemKey: "t", Direction: domain.DirectionIn, Account: cross,
+		Asset: "USDT", Amount: d("1000"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	buy := application.OrderInput{
+		UserID: user, OrderID: uuid.Must(uuid.NewV7()).String(), Account: cross, Symbol: "BTC-USDT", Side: application.SideBuy,
+		FreezeAsset: "USDT", FreezeAmount: d("1500"), SideEffect: domain.SideEffectNone, Price: d("30000"), Quantity: d("0.05"),
+	}
+	if _, err := r.svc.CheckOrder(ctx, buy); code(err) != "LEDGER_INSUFFICIENT_BALANCE" {
+		t.Fatalf("without AUTO_BORROW: %v", err)
+	}
+	buy.SideEffect = domain.SideEffectAutoBorrow
+	if _, err := r.svc.ReserveOrder(ctx, buy); code(err) != "MARGIN_DISABLED" || apperr.From(err).Details["flag"] != flags.KeyMarginAutoBorrow {
+		t.Fatalf("AUTO_BORROW switched off: %v", err)
+	}
+	r.features.set(flags.KeyMarginAutoBorrow, true)
+	check, err := r.svc.CheckOrder(ctx, buy)
+	// 500 to borrow; after the fill 0.05 BTC x 30000 x 0.95 against 500.
+	if err != nil || !check.Borrow.Equal(d("500")) || check.MarginLevel == nil || !check.MarginLevel.Equal(d("2.85")) {
+		t.Fatalf("check %+v %v", check, err)
+	}
+	first, err := r.svc.ReserveOrder(ctx, buy)
+	if err != nil || !first.Borrow.Equal(d("500")) || first.BorrowID == "" {
+		t.Fatalf("reserve %+v %v", first, err)
+	}
+	again, err := r.svc.ReserveOrder(ctx, buy)
+	if err != nil || again.BorrowID != first.BorrowID || !again.Borrow.Equal(d("500")) {
+		t.Fatalf("a repeat %+v %v", again, err)
+	}
+	if b := r.ledger.owed(user, cross, "USDT"); !b.borrowed.Equal(d("500")) {
+		t.Fatalf("borrowed once: %+v", b)
+	}
+	// An order the free balance covers borrows nothing, and says so again.
+	small := buy
+	small.OrderID, small.FreezeAmount, small.Quantity = uuid.Must(uuid.NewV7()).String(), d("30"), d("0.001")
+	if out, err := r.svc.ReserveOrder(ctx, small); err != nil || !out.Borrow.IsZero() || out.BorrowID != "" {
+		t.Fatalf("no borrow %+v %v", out, err)
+	}
+	if out, err := r.svc.ReserveOrder(ctx, small); err != nil || !out.Borrow.IsZero() {
+		t.Fatalf("no borrow again %+v %v", out, err)
+	}
+	// ETH-USDT warns at 1.15: a loan past it is refused.
+	eth := domain.Isolated("ETH-USDT")
+	if _, err := r.svc.Transfer(ctx, application.TransferInput{
+		UserID: user, IdemKey: "t-eth", Direction: domain.DirectionIn, Account: eth,
+		Asset: "USDT", Amount: d("1000"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	big := application.OrderInput{
+		UserID: user, OrderID: uuid.Must(uuid.NewV7()).String(), Account: eth, Symbol: "ETH-USDT", Side: application.SideBuy,
+		FreezeAsset: "USDT", FreezeAmount: d("8000"), SideEffect: domain.SideEffectAutoBorrow, Price: d("2000"), Quantity: d("4"),
+	}
+	if _, err := r.svc.ReserveOrder(ctx, big); code(err) != "MARGIN_LEVEL_TOO_LOW" {
+		t.Fatalf("past the warning level: %v", err)
+	}
+	wrong := big
+	wrong.Symbol = "BTC-USDT"
+	if _, err := r.svc.CheckOrder(ctx, wrong); code(err) != apperr.CodeInvalidArgument {
+		t.Fatalf("an order of another pair on ETH-USDT's account: %v", err)
+	}
+	frozen := big
+	frozen.FreezeAsset = "ETH"
+	if _, err := r.svc.CheckOrder(ctx, frozen); code(err) != apperr.CodeInvalidArgument {
+		t.Fatalf("a buy freezing the base: %v", err)
+	}
+
+	// The settlement repaid 100 of the loan automatically (ledger.events).
+	entry := application.Entry{
+		JournalID: uuid.Must(uuid.NewV7()).String(), EntryType: "MARGIN_REPAY", IdemKey: "trade-repay:" + uuid.NewString() + ":seller",
+		Memo: "auto-repay order " + buy.OrderID + " trade BTC-USDT x", At: r.now(),
+		Lines: []application.EntryLine{
+			{UserID: user, AccountType: "MARGIN_CROSS", Asset: "USDT", Amount: d("-100.005")},
+			{UserID: user, AccountType: "MARGIN_CROSS_INTEREST", Asset: "USDT", Amount: d("0.005")},
+			{UserID: user, AccountType: "MARGIN_CROSS_DEBT", Asset: "USDT", Amount: d("100")},
+		},
+	}
+	for range 2 { // a redelivery changes nothing
+		if err := r.svc.OnEntry(ctx, entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	loan, err := r.store.Read().Loans().Get(ctx, user, cross, "USDT")
+	if err != nil || !loan.Principal.Equal(d("400")) || !loan.Interest.IsZero() {
+		t.Fatalf("the loan after the automatic repayment %+v %v", loan, err)
+	}
+	lent, err := r.store.Read().Pools().Lent(ctx)
+	if err != nil || !lent["USDT"].Equal(d("400")) {
+		t.Fatalf("the pool %v %v", lent, err)
+	}
+	repay, ok, err := r.store.Read().Repays().ByKey(ctx, user, entry.IdemKey)
+	if err != nil || !ok || repay.Reason != ports.RepayAuto || repay.OrderID != buy.OrderID {
+		t.Fatalf("recorded %+v %v %v", repay, ok, err)
 	}
 }
