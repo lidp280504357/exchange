@@ -243,8 +243,15 @@ try {
     };
     await marginTransfer("IN", "10", "已划入 10 USDT");
     await page.waitForFunction(() => document.querySelector('[data-testid="margin-account-MARGIN_CROSS"] tbody')?.innerText.includes("USDT"), { timeout: 20000 });
+    // margin-service publishes the account it changed (margin.accounts), the
+    // gateway pushes it whole on "margin" (ACCOUNT), checked against MarginPush.
+    await t.waitPush(
+      (p) => p.data.type === "ACCOUNT" && p.data.account?.account === "MARGIN_CROSS" && p.data.account.balances.some((b) => b.asset === "USDT" && Number(b.free) >= 10),
+      20000,
+      "ACCOUNT push of the cross account holding the 10 USDT",
+    );
     await marginTransfer("OUT", "10", "已划出 10 USDT");
-    ok("10 USDT moves into the cross margin account from its dialog, shows in its coins, and moves back");
+    ok("10 USDT moves into the cross margin account from its dialog, shows in its coins (pushed on the margin channel), and moves back");
     // The spot terminal trades from the cross account once chosen above
     // the order form, with its margin level; back to spot afterwards.
     await go("/trade/BTC-USDT");

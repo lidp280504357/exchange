@@ -73,5 +73,17 @@ export function loadContracts() {
     }
     return validate(body) ? "" : `${where}: ${ajv.errorsText(validate.errors, { dataVar: "body" })}`;
   }
-  return { check, routes: routes.length };
+
+  // checkSchema returns what is wrong with a value of a schema a spec file
+  // names (a WebSocket channel's message), or "" when it matches.
+  function checkSchema(file, name, value) {
+    const id = `${file}#${pointer(["components", "schemas", name])}`;
+    let validate = validators.get(id);
+    if (!validate) {
+      validate = ajv.compile({ $ref: id });
+      validators.set(id, validate);
+    }
+    return validate(value) ? "" : `${file} ${name}: ${ajv.errorsText(validate.errors, { dataVar: "data" })}`;
+  }
+  return { check, checkSchema, routes: routes.length };
 }

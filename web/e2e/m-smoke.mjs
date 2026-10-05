@@ -156,19 +156,29 @@ try {
   if (marginClosed) {
     ok("the margin page shows the cross account and says margin trading is not open to this user");
   } else {
+    // The sheet slides in (its fields are below the screen until it has)
+    // and its overlay takes taps until it has slid away.
     const marginTransfer = async (direction, amount, done) => {
       await page.click('button[data-testid="margin-transfer"]');
+      await sheetOpen();
       await page.waitForSelector('form[data-testid="margin-transfer-form"]', { visible: true });
       if (direction === "OUT") await clickButton("划出到现货", "[role=dialog]");
       await typeInto('form[data-testid="margin-transfer-form"] input[inputmode="decimal"]', amount);
       await clickButton("确认划转", "[role=dialog]");
       await waitText(done);
-      await page.waitForSelector('form[data-testid="margin-transfer-form"]', { hidden: true, timeout: 10000 });
+      await page.waitForSelector("[role=dialog]", { hidden: true, timeout: 10000 });
     };
     await marginTransfer("IN", "10", "已划入 10 USDT");
     await page.waitForFunction(() => document.querySelector('[data-testid="margin-account-MARGIN_CROSS"] ul')?.innerText.includes("USDT"), { timeout: 20000 });
+    // margin-service publishes the account it changed (margin.accounts), the
+    // gateway pushes it whole on "margin" (ACCOUNT), checked against MarginPush.
+    await t.waitPush(
+      (p) => p.data.type === "ACCOUNT" && p.data.account?.account === "MARGIN_CROSS" && p.data.account.balances.some((b) => b.asset === "USDT" && Number(b.free) >= 10),
+      20000,
+      "ACCOUNT push of the cross account holding the 10 USDT",
+    );
     await marginTransfer("OUT", "10", "已划出 10 USDT");
-    ok("10 USDT moves into the cross margin account from its sheet, shows in its coins, and moves back");
+    ok("10 USDT moves into the cross margin account from its sheet, shows in its coins (pushed on the margin channel), and moves back");
     // The order sheet trades from the cross account once chosen above the
     // form, with its margin level and what it may borrow; back to spot.
     await go("/trade/BTC-USDT");

@@ -1,14 +1,19 @@
 // Shared plumbing of the browser smoke tests (pc-smoke.mjs, m-smoke.mjs,
 // admin-smoke.mjs):
 // Chrome, the human-check bypass, the dev inbox, the contract check of
-// every API response, and helpers that find elements the way a user does,
-// by their visible text.
+// every API response and of the pushes of the channels in PUSH_SCHEMAS,
+// and helpers that find elements the way a user does, by their visible
+// text.
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import puppeteer from "puppeteer-core";
 import { loadContracts } from "./contract.mjs";
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// The WebSocket channels whose messages the contracts describe (file and
+// schema of the message's data); the smokes keep and check their pushes.
+const PUSH_SCHEMAS = { margin: ["margin.yaml", "MarginPush"] };
 export const ok = (what) => console.log("ok   " + what);
 
 const CHROME =
@@ -56,6 +61,24 @@ export async function start({ app, api, name, device, apiPrefix = "/v1/" }) {
     window.__E2E_CAPTCHA_TOKEN__ = token;
   }, bypass);
   page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
+  // The pushes of the channels in PUSH_SCHEMAS, from the page's WebSocket
+  // frames, each checked against its schema.
+  const pushes = [];
+  const cdp = await page.createCDPSession();
+  await cdp.send("Network.enable");
+  cdp.on("Network.webSocketFrameReceived", ({ response }) => {
+    let m;
+    try {
+      m = JSON.parse(response.payloadData);
+    } catch {
+      return;
+    }
+    const schema = PUSH_SCHEMAS[m?.channel];
+    if (!schema || m.data === undefined) return;
+    pushes.push(m);
+    const problem = contracts.checkSchema(...schema, m.data);
+    if (problem) violations.add(`push on ${m.channel}: ${problem}`);
+  });
   // Chrome logs every 4xx fetch as an error; expected API errors are
   // asserted by the scripts, so only script errors count here.
   page.on("console", (m) => {
@@ -105,6 +128,14 @@ export async function start({ app, api, name, device, apiPrefix = "/v1/" }) {
       return true;
     },
     shot: (label) => (shots ? page.screenshot({ path: `${shots}/${name}-${label}.png`, fullPage: false }) : undefined),
+    /** waitPush waits up to timeout ms for a push (of a channel in PUSH_SCHEMAS) that pred accepts, and returns it. */
+    async waitPush(pred, timeout = 15000, what = "the push") {
+      for (const end = Date.now() + timeout; Date.now() < end; await sleep(250)) {
+        const p = pushes.find(pred);
+        if (p) return p;
+      }
+      throw new Error(`no ${what} within ${timeout / 1000} s (${pushes.length} pushes kept)`);
+    },
     go: (path) => page.goto(app + path, { waitUntil: "networkidle2" }),
     waitText: (text, timeout = 20000) => page.waitForFunction((s) => document.body.innerText.includes(s), { timeout }, text),
     waitPath: (path, timeout = 20000) => page.waitForFunction((p) => location.pathname === p, { timeout }, path),
@@ -199,10 +230,10 @@ export async function start({ app, api, name, device, apiPrefix = "/v1/" }) {
         process.exit(1);
       }
       if (violations.size) {
-        console.error("FAIL API responses outside the contracts:\n" + [...violations].join("\n"));
+        console.error("FAIL API responses or pushes outside the contracts:\n" + [...violations].join("\n"));
         process.exit(1);
       }
-      ok("every API response matched the OpenAPI contracts");
+      ok("every API response and checked push matched the OpenAPI contracts");
     },
   };
   return t;
