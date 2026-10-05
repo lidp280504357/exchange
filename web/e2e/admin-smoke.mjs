@@ -450,9 +450,11 @@ try {
   // The drawer slides in: its tabs at the right edge take clicks once it stands.
   await page.waitForFunction(() => getComputedStyle(document.querySelector("[role=dialog]")).transform === "none");
   await page.type("#article-title-zh-CN", "冒烟测试");
-  await page.type("#article-body-zh-CN", "## 小标题\n\n正文\n\n:::test\n只在测试模式\n:::\n\n:::formal\n只在正式模式\n:::");
+  await page.type("#article-body-zh-CN", ":::test\n只在测试模式\n:::\n\n:::formal\n只在正式模式\n:::\n\n## 小标题\n\n正文");
   // The page's mode (design 2026-10-04 §4.4): a draft is for both; picked for
-  // test mode, its preview keeps the test block and drops the live one.
+  // test mode, its preview keeps the test block and drops the live one, and
+  // without a summary shows the lists' one, the first paragraph shown in
+  // that mode (review BK ③).
   const modes = '[role=dialog] [role=radiogroup][aria-label="适用模式"]';
   const chosen = () => page.evaluate((sel) => document.querySelector(`${sel} [aria-checked="true"]`)?.innerText.trim(), modes);
   if ((await chosen()) !== "通用") throw new Error(`a new page is for "${await chosen()}", not both modes`);
@@ -464,6 +466,8 @@ try {
   if (preview.mode !== "test" || !preview.text.includes("只在测试模式") || preview.text.includes("只在正式模式")) {
     throw new Error(`the test-mode preview shows ${JSON.stringify(preview)}`);
   }
+  const derived = await page.$eval("[data-testid=article-preview-summary]", (el) => el.innerText).catch(() => "");
+  if (!derived.startsWith("只在测试模式")) throw new Error(`the preview's summary of a draft without one is "${derived}"`);
   await t.shot("4c-article");
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => !document.querySelector("[role=dialog]"));

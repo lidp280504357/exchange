@@ -1,6 +1,6 @@
 import { adminApi, adminData, can, type Admin, type AdminSchemas } from "@exchange/core/api/admin";
 import { bundledSource, listSlugs, type ContentSection } from "@exchange/core/content/loader";
-import { renderByMode, type ContentMode } from "@exchange/core/content/markdown";
+import { excerpt, parseMarkdown, renderByMode, type ContentMode } from "@exchange/core/content/markdown";
 import { Markdown, type LinkProps } from "@exchange/core/content/render";
 import { Badge, Button, cn, DataTable, Drawer, Input, Segmented, Select, Switch, Tabs, type ColumnDef } from "@exchange/ui";
 import { useQuery } from "@tanstack/react-query";
@@ -357,6 +357,11 @@ export function ArticleEditor({
   const fixed = fixedSection(section);
   const text = d.texts[locale];
   const setText = (patch: Partial<Text>) => setD({ ...d, texts: { ...d.texts, [locale]: { ...text, ...patch } } });
+  // The lists' summary of an article written without one: the first
+  // paragraph its body shows in the previewed mode, as the sites and
+  // notification-service derive it (review BK); no list shows a fixed page.
+  const derivedSummary =
+    view === "preview" && !fixed && !text.summary.trim() ? excerpt(parseMarkdown(renderByMode(text.body, previewMode)).blocks) : "";
   const save = async (reason: string) => {
     const res = article
       ? adminData(await adminApi.PUT("/admin/v1/articles/{id}", { params: { path: { id: article.id } }, body: { ...articleBody(d, t), version: article.version, reason } }))
@@ -554,7 +559,16 @@ export function ArticleEditor({
             </div>
             <article className="rounded-2 border border-line-1 p-5" data-testid="article-preview" data-mode={previewMode}>
               <h1 className="text-xl font-semibold text-fg-1">{text.title || "—"}</h1>
-              {text.summary && <p className="mt-1 text-sm text-fg-3">{text.summary}</p>}
+              {text.summary.trim() ? (
+                <p className="mt-1 text-sm text-fg-3">{text.summary}</p>
+              ) : (
+                derivedSummary && (
+                  <p className="mt-1 text-sm text-fg-3" data-testid="article-preview-summary">
+                    {derivedSummary}
+                    <span className="ml-2 text-xs">{t("admin.content.summaryDerived")}</span>
+                  </p>
+                )
+              )}
               <div className={cn(PROSE, "mt-3")}>
                 <Markdown source={renderByMode(text.body, previewMode)} link={previewLink} />
               </div>

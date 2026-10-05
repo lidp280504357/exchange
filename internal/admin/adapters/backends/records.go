@@ -27,7 +27,15 @@ func decimalPtr(d *decimal.Decimal) *string {
 	return &s
 }
 
-// Orders returns a page of spot orders, newest first.
+// orderKeyLead is how much earlier than its first update an order's ID
+// may have been made: created_key, the time in the ID, is orders_state's
+// key, and an order's created_at is its first update, minutes after the
+// ID at most (review BK).
+const orderKeyLead = time.Hour
+
+// Orders returns a page of spot orders, newest first. The created_at range
+// and a page's cursor bound created_key too, so a read takes the parts of
+// that time alone instead of every order.
 func (r Records) Orders(ctx context.Context, q ports.OrderQuery) ([]ports.Order, string, error) {
 	pc, err := pageOf(q.Cursor, q.Limit)
 	if err != nil {
@@ -38,10 +46,11 @@ func (r Records) Orders(ctx context.Context, q ports.OrderQuery) ([]ports.Order,
 		price, quantity, quote_amount, status, filled_quantity, filled_quote, reason, created_at, updated_at FROM orders_current
 		WHERE (? = '' OR toString(user_id) = ?) AND (? = '' OR symbol = ?) AND (? = '' OR status = ?) AND (? = '' OR side = ?)
 		AND (? = '' OR toString(order_id) = ?) AND (? = '' OR has(?, toString(user_id)) = (? = 'bots'))
-		AND created_at >= `+ms+` AND created_at < `+ms+` AND (NOT ? OR (created_at, toString(order_id)) < (`+ms+`, ?))
+		AND created_at >= `+ms+` AND created_at < `+ms+` AND created_key >= `+ms+` AND created_key < `+ms+`
+		AND (NOT ? OR ((created_at, toString(order_id)) < (`+ms+`, ?) AND created_key <= `+ms+`))
 		ORDER BY created_at DESC, toString(order_id) DESC LIMIT ?`,
 		q.UserID, q.UserID, q.Symbol, q.Symbol, q.Status, q.Status, q.Side, q.Side, q.OrderID, q.OrderID, q.Accounts, botList(q.Bots), q.Accounts,
-		from, to, pc.on, pc.at.UnixMilli(), pc.id, pc.limit+1)
+		from, to, from-orderKeyLead.Milliseconds(), to, pc.on, pc.at.UnixMilli(), pc.id, pc.at.UnixMilli(), pc.limit+1)
 	if err != nil {
 		return nil, "", unavailable(err)
 	}
