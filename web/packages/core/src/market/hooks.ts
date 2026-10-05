@@ -73,16 +73,21 @@ export type OrderBookOptions = {
 /**
  * useOrderBook follows a symbol's depth and returns its best `depth`
  * levels per side, merged into steps of `step`; re-renders at most once
- * per frame, or per `every` ms.
+ * per frame, or per `every` ms. A throttled book shows the state its
+ * throttle last told it about: a render for another reason (the last
+ * trade shown above it) does not bring a newer one in between (B67: 7
+ * book redraws a second against 4 notices).
  */
 export function useOrderBook(symbol: string, depth: number, step = "", { minQty = "", every = 0 }: OrderBookOptions = {}): BookView {
   const market = useMarket();
   useEffect(() => (symbol ? market.followDepth(symbol) : undefined), [market, symbol]);
   const key = `depth:${symbol}`;
+  const told = useRef<{ key: string; version: number } | null>(null);
   const subscribe = useCallback(
     (fn: () => void) => {
       if (every <= 0) return market.subscribe(key, fn);
       const t = throttle(() => {
+        told.current = { key, version: market.version(key) };
         bookNotified();
         fn();
       }, every);
@@ -94,13 +99,15 @@ export function useOrderBook(symbol: string, depth: number, step = "", { minQty 
     },
     [market, key, every],
   );
-  const version = useSyncExternalStore(
-    subscribe,
-    () => market.version(key),
-    () => 0,
-  );
-  // version changes with every applied message; the view is cut only when
-  // a notification re-renders.
+  // Unthrottled, the store's version; throttled, the version the throttle
+  // passed on (the store's until it first has, for this book).
+  const getSnapshot = useCallback(() => {
+    const last = told.current;
+    return every > 0 && last?.key === key ? last.version : market.version(key);
+  }, [market, key, every]);
+  const version = useSyncExternalStore(subscribe, getSnapshot, () => 0);
+  // version changes with every applied message (throttled: every message
+  // the throttle passed on); the view is cut only when it does.
   return useMemo(() => market.book(symbol).view(depth, step, minQty), [market, symbol, depth, step, minQty, version]);
 }
 

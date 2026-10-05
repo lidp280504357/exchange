@@ -135,15 +135,16 @@ async function terminal(browser, { site, base, device, budgets, bookTab }) {
     `≤ ${budgets.longTasks}`,
     perMinute <= budgets.longTasks,
   );
-  // Each update of the book from the throttle's notice that set it off
-  // (the latest one before it) to the frame that shows it.
+  // Each notice of the throttle to the frame that shows the redraw it set
+  // off (the book's first change within 100 ms of it; a notice that changes
+  // no visible level shows nothing).
   const redraw = [];
-  for (const m of window60.mutations) {
-    const notice = window60.notified.filter((at) => at <= m.at && m.at - at < BOOK_EVERY).at(-1);
-    if (notice !== undefined) redraw.push(m.frame - notice);
+  for (const at of window60.notified) {
+    const m = window60.mutations.find((x) => x.at >= at && x.at - at < 100);
+    if (m) redraw.push(m.frame - at);
   }
   report(
-    `${site} book redraw: the throttle's notice to the frame that shows it (p50 / p95 over ${redraw.length} of ${window60.notified.length} notices)`,
+    `${site} book redraw: the throttle's notice to the frame that shows it (p50 / p95 over ${redraw.length} of ${window60.notified.length} notices; ${window60.mutations.length} changes of the book)`,
     `${ms(pct(redraw, 50))} / ${ms(pct(redraw, 95))}`,
     `p95 ≤ ${budgets.toPixel} ms`,
     redraw.length > 0 && pct(redraw, 95) <= budgets.toPixel,
