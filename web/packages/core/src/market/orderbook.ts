@@ -114,8 +114,13 @@ export class OrderBook {
     const shown = (s: string, fits: string[]): BookView => ({ ...trim(cut(s), depth), step: s, fits });
     const at = steps.indexOf(step);
     if (at < 0 || (this.bids.length === 0 && this.asks.length === 0)) return shown(step, [...steps]);
-    // A coarser step never has more levels: the steps that fill are the
-    // finest ones, up to `top`.
+    // A coarser step never has more levels, dust folded or not: each step
+    // is a multiple of the finer ones (bookSteps) rounded the same way, so
+    // its buckets are unions of theirs, and folding closes a level at the
+    // first bucket that brings it to minQty, which among the coarser
+    // boundaries (some of the finer ones) comes no sooner. The steps that
+    // fill are therefore the finest ones, up to `top` (tested on random
+    // books in orderbook.test.ts).
     let top = at;
     if (has(step, depth)) while (top + 1 < steps.length && has(steps[top + 1]!, depth)) top++;
     else while (top >= 0 && !has(steps[top]!, depth)) top--;

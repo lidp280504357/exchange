@@ -1,6 +1,6 @@
 import { dec, formatAmount, formatPercent, formatPrice, type BookLevel, type BookView } from "@exchange/core";
 import { ArrowDown, ArrowUp, LoaderCircle } from "lucide-react";
-import { memo, useCallback, useRef, type KeyboardEvent } from "react";
+import { memo, useCallback, useId, useRef, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { PriceText } from "../components/PriceText";
 import { Select } from "../components/Select";
@@ -118,6 +118,10 @@ export function OrderBook({
   const onPick = useCallback<Pick>((price, total, shift) => pickRef.current?.(price, shift ? total : undefined), []);
 
   const perSide = mode === "both" ? levels : levels * 2;
+  // The step the view was cut at, when finer than the one chosen.
+  const fallback = view.step !== undefined && step !== undefined && view.step !== step;
+  const stepShown = fallback ? t("ui.book.stepShown", { step, shown: view.step }) : "";
+  const stepNote = useId();
   const max = dec.toNumber(view.maxTotal);
   const asks = mode === "bids" ? [] : view.asks.slice(0, perSide).reverse();
   const bids = mode === "asks" ? [] : view.bids.slice(0, perSide);
@@ -212,21 +216,30 @@ export function OrderBook({
             ))}
           </div>
           {steps && steps.length > 0 && (
-            // The step the view was cut at (core's OrderBook.fit gives a
-            // step too coarse for the book's levels way to a finer one,
-            // which the title explains); steps that cannot fill it are off.
-            <span
-              className="ml-auto"
-              title={view.step && step && view.step !== step ? t("ui.book.stepShown", { step, shown: view.step }) : undefined}
-            >
+            // The step chosen stays the value, so choosing the one shown
+            // keeps it. When core's OrderBook.fit cut the view finer (the
+            // chosen step too coarse for the book's levels), the trigger
+            // shows "≈ 0.1" and says why; steps that cannot fill the book
+            // are off, with a note.
+            <span className="ml-auto" title={fallback ? stepShown : undefined}>
               <Select
                 size="xs"
                 variant="ghost"
-                value={view.step ?? step ?? steps[0]}
+                value={step ?? view.step ?? steps[0]}
+                display={fallback ? `≈ ${view.step}` : undefined}
                 onValueChange={onStepChange}
-                options={steps.map((s) => ({ value: s, label: s, disabled: view.fits !== undefined && !view.fits.includes(s) }))}
+                options={steps.map((s) => {
+                  const off = view.fits !== undefined && !view.fits.includes(s);
+                  return { value: s, label: s, disabled: off, hint: off ? t("ui.book.stepTooCoarse") : undefined };
+                })}
                 aria-label={t("ui.book.step")}
+                aria-describedby={fallback ? stepNote : undefined}
               />
+              {fallback && (
+                <span id={stepNote} className="sr-only">
+                  {stepShown}
+                </span>
+              )}
             </span>
           )}
         </div>

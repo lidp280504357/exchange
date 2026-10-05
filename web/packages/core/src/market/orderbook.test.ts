@@ -73,6 +73,38 @@ describe("OrderBook.fit", () => {
     return b;
   };
 
+  it("gives the default step way when the book is denser than usual", () => {
+    // BTC-USDT at 20:20 on 2026-10-05: 200 levels a side over about 5
+    // USDT, so the default step 1 had five rows a side (review CD).
+    const b = new OrderBook();
+    b.snapshot({ bids: levels(8596200, -2.5, 200), asks: levels(8596201, 2.5, 200) });
+    expect(b.view(15, "1").bids.length).toBeLessThan(15);
+    expect(b.fit(15, "1", steps)).toMatchObject({ step: "0.1", fits: ["0.01", "0.1"] });
+  });
+  it("never finds more levels at a coarser step, dust folded or not", () => {
+    // Random books (a fixed seed): quantities from dust to whole units.
+    let seed = 7;
+    const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    for (let n = 0; n < 200; n++) {
+      // Up to 200 levels from a price in cents, 1 to 40 cents apart.
+      const side = (from: number, dir: 1 | -1) => {
+        let cents = from;
+        return Array.from({ length: 1 + Math.floor(rand() * 200) }, () => {
+          cents += dir * (1 + Math.floor(rand() * 40));
+          return [(cents / 100).toFixed(2), (rand() < 0.4 ? rand() * 0.0002 : rand() * 3).toFixed(5)] as [string, string];
+        });
+      };
+      const b = new OrderBook();
+      b.snapshot({ bids: side(1000000, -1), asks: side(1000000, 1) });
+      for (const minQty of ["", "0.0001"]) {
+        const counts = steps.map((s) => b.view(500, s, minQty));
+        for (let i = 1; i < counts.length; i++) {
+          expect(counts[i]!.bids.length).toBeLessThanOrEqual(counts[i - 1]!.bids.length);
+          expect(counts[i]!.asks.length).toBeLessThanOrEqual(counts[i - 1]!.asks.length);
+        }
+      }
+    }
+  });
   it("gives a step its levels cannot fill way to the coarsest finer one that fills", () => {
     const v = dense().fit(15, "10", steps);
     expect(dense().view(15, "10").bids.length).toBeLessThan(15);

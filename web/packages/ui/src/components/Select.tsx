@@ -4,7 +4,14 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../lib/cn";
 
-export type SelectOption = { value: string; label: ReactNode; icon?: ReactNode; disabled?: boolean };
+export type SelectOption = {
+  value: string;
+  label: ReactNode;
+  icon?: ReactNode;
+  disabled?: boolean;
+  /** A note beside the label in the list (why it is off, say), not in the trigger. */
+  hint?: ReactNode;
+};
 export type SelectSize = "xs" | "sm" | "md" | "lg";
 
 export type SelectProps = {
@@ -13,6 +20,8 @@ export type SelectProps = {
   onValueChange?: (value: string) => void;
   options: SelectOption[];
   placeholder?: ReactNode;
+  /** What the trigger shows instead of the chosen option's label (the order book's "≈ 0.1"). */
+  display?: ReactNode;
   size?: SelectSize;
   /** Borderless trigger for toolbars (order book step, chart interval). */
   variant?: "default" | "ghost";
@@ -38,7 +47,7 @@ const sizes: Record<SelectSize, string> = {
  * with the tokens, keyboard type-ahead and a checked item.
  */
 export function Select({
-  value, defaultValue, onValueChange, options, placeholder, size = "md", variant = "default", disabled, invalid, name, id, className,
+  value, defaultValue, onValueChange, options, placeholder, display, size = "md", variant = "default", disabled, invalid, name, id, className,
   contentClassName, "aria-label": ariaLabel, "aria-describedby": describedBy,
 }: SelectProps) {
   const { t } = useTranslation();
@@ -60,7 +69,7 @@ export function Select({
         )}
       >
         <span className="flex min-w-0 items-center gap-2 truncate">
-          <RSelect.Value placeholder={placeholder ?? t("ui.select")} />
+          <RSelect.Value placeholder={placeholder ?? t("ui.select")}>{display}</RSelect.Value>
         </span>
         <RSelect.Icon className="shrink-0 text-fg-3">
           <ChevronDown size={size === "xs" ? 12 : 14} />
@@ -90,6 +99,7 @@ export function Select({
               >
                 {o.icon}
                 <RSelect.ItemText>{o.label}</RSelect.ItemText>
+                {o.hint && <span className="text-xs text-fg-3">{o.hint}</span>}
                 <RSelect.ItemIndicator className="absolute right-2 inline-flex text-brand">
                   <Check size={14} />
                 </RSelect.ItemIndicator>

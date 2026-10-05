@@ -111,31 +111,35 @@ try {
   await shot("2-markets");
 
   // 4. Spot terminal. First the book fills its panel (B71) at 1280 and
-  // 1920 wide: each side has the rows the panel makes room for
-  // (BookPanel's levels: (height − 132) / 2 / 20, 5 to 20), none cut off
-  // at its bottom, and less than two rows are left empty under the bids.
-  // Then again with a coarse step
-  // kept from before: BTC-USDT at 10 cannot be filled from the public
-  // book's 200 levels a side, so the book takes a finer step and says so.
-  // Then a limit buy 5% under the last price rests, then cancels.
+  // 1920 wide, measured on the page rather than with BookPanel's numbers
+  // (its 132 px of tabs, toolbar, header and middle row, its 20 px rows):
+  // each side's rows fill the room it has, they reach to less than two
+  // rows above the panel's bottom (unless a side has the 20 rows the book
+  // is built for), and none hangs below it. All relative to the panel, so
+  // the test mode's banner above the page changes nothing. Then with step
+  // 10 kept from before: BTC-USDT's public book (200 levels a side) cannot
+  // fill it, so the book is cut finer, the trigger shows "≈ 1" and says
+  // why, and 10 is off in the menu with its note (review CD). Then a limit
+  // buy 5% under the last price rests, then cancels.
   const bookFills = async (width, height) => {
     await page.setViewport({ width, height });
     const fills = () => {
       const sides = [...document.querySelectorAll('[role="group"][aria-label="买盘"], [role="group"][aria-label="卖盘"]')];
       let panel = sides[0];
       while (panel && !(String(panel.className).includes("bg-bg-1") && panel.querySelector("[role=tablist]"))) panel = panel.parentElement;
-      if (!panel || sides.length !== 2) return false;
-      const want = Math.max(5, Math.min(20, Math.floor((panel.clientHeight - 132) / 2 / 20)));
+      const row = document.querySelector("[data-book-row]");
+      if (!panel || sides.length !== 2 || !row) return false;
+      const rowHeight = row.getBoundingClientRect().height;
       const rows = sides.map((s) => s.querySelectorAll("[data-book-row]").length);
+      const room = sides.map((s) => Math.round(s.getBoundingClientRect().height / rowHeight));
       const bids = sides.find((s) => s.getAttribute("aria-label") === "买盘");
-      const last = [...(bids?.querySelectorAll("[data-book-row]") ?? [])].at(-1);
+      const last = [...bids.querySelectorAll("[data-book-row]")].at(-1);
       const gap = last ? Math.round(panel.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom) : null;
-      const step = document.querySelector('button[aria-label="价格精度"]')?.innerText.trim() ?? "";
-      const why = document.querySelector('button[aria-label="价格精度"]')?.parentElement?.title ?? "";
-      window.__book = { panel: panel.clientHeight, want, rows, gap, step, why };
-      // Rows past the panel's bottom (a gap below 0) are cut off: the
-      // panel has not redrawn at its new size yet.
-      return rows.every((n) => n >= want) && gap !== null && gap >= 0 && gap < 40;
+      const trigger = document.querySelector('button[aria-label="价格精度"]');
+      window.__book = { panel: panel.clientHeight, rowHeight, rows, room, gap, step: trigger?.innerText.trim() ?? "", why: trigger?.parentElement?.title ?? "" };
+      // A gap below 0: rows hang below the panel, which has not redrawn at
+      // its new size yet.
+      return rows.every((n, i) => n === room[i]) && gap !== null && gap >= 0 && (gap < 2 * rowHeight || room.every((n) => n >= 20));
     };
     try {
       await page.waitForFunction(fills, { timeout: 20000 });
@@ -153,13 +157,23 @@ try {
   await go("/trade/BTC-USDT");
   for (const [w, h] of [[1280, 800], [1920, 1080]]) {
     const b = await bookFills(w, h);
-    ok(`at ${w} × ${h} the book fills its panel: ${b.rows.join(" and ")} rows for ${b.want}, ${b.gap} px under the bids, step ${b.step}`);
+    ok(`at ${w} × ${h} the book fills its panel: ${b.rows.join(" and ")} rows of ${b.rowHeight} px, ${b.gap} px under the bids, step ${b.step}`);
   }
   await keepStep("10");
   await go("/trade/BTC-USDT");
   const coarse = await bookFills(1920, 1080);
-  if (coarse.step !== "10" && !coarse.why.includes("按 10 合并")) throw new Error(`the book took step ${coarse.step} for 10 without saying why: ${JSON.stringify(coarse)}`);
-  ok(`with step 10 kept, the book still fills (${coarse.rows.join(" and ")} rows at step ${coarse.step}${coarse.why ? `: ${coarse.why}` : ""})`);
+  if (coarse.step !== "10") {
+    if (!coarse.step.startsWith("≈") || !coarse.why.includes("按 10 合并")) throw new Error(`with 10 kept the book shows ${coarse.step} without saying why: ${JSON.stringify(coarse)}`);
+    await page.click('button[aria-label="价格精度"]');
+    await page.waitForSelector("[role=option]", { visible: true, timeout: 5000 });
+    const ten = await page.evaluate(() => {
+      const o = [...document.querySelectorAll("[role=option]")].find((x) => x.innerText.trim().startsWith("10"));
+      return o ? { off: o.hasAttribute("data-disabled"), text: o.innerText.replace(/\s+/g, " ").trim() } : null;
+    });
+    await page.keyboard.press("Escape");
+    if (!ten?.off || !ten.text.includes("深度不足")) throw new Error(`with 10 kept, 10 is not off in the menu with its note: ${JSON.stringify(ten)}`);
+  }
+  ok(`with step 10 kept, the book still fills (${coarse.rows.join(" and ")} rows, trigger "${coarse.step}"${coarse.why ? `: ${coarse.why}` : ""}; 10 off in the menu)`);
   await keepStep("");
   await page.setViewport({ width: 1440, height: 900 });
   await go("/trade/BTC-USDT");
