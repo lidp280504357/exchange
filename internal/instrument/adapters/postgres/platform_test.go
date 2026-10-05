@@ -26,7 +26,8 @@ type creditsFrom []domain.Credit
 func (c creditsFrom) WelcomeCredits(context.Context) ([]domain.Credit, error) { return c, nil }
 
 // The platform profile (design 2026-10-04 §4.1): the seeded row (version
-// 2 after migration 00009 made its learning mode the test mode), changes
+// 3 after migration 00009 made its learning mode the test mode and 00010
+// its footer line the plain copyright), changes
 // on the version read, images that move the version on, the history, and
 // what the sites read.
 func TestPlatformProfile(t *testing.T) {
@@ -35,9 +36,10 @@ func TestPlatformProfile(t *testing.T) {
 	plat := &application.Platform{Store: postgres.NewStore(db, event.NewFactory("instrument-service", "test")), Now: time.Now}
 
 	p, err := plat.Profile(ctx)
-	if err != nil || p.Version != 2 || p.Name != "Astras" || p.Registration.Status != domain.RegistrationOpen || !p.Test.Enabled ||
+	if err != nil || p.Version != 3 || p.Name != "Astras" || p.Registration.Status != domain.RegistrationOpen || !p.Test.Enabled ||
 		!p.Test.Banner || p.Test.Text[domain.LocaleZH] != "测试模式" || p.Test.Text[domain.LocaleEN] != "Test mode" ||
-		p.Footer.Copyright[domain.LocaleZH] == "" || len(p.Images) != 0 || p.UpdatedBy != "system:migration" {
+		p.Footer.Copyright[domain.LocaleZH] != "© 2026 Astras" || p.Footer.Copyright[domain.LocaleEN] != "© 2026 Astras" ||
+		len(p.Images) != 0 || p.UpdatedBy != "system:migration" {
 		t.Fatalf("seeded %+v %v", p, err)
 	}
 
@@ -46,31 +48,31 @@ func TestPlatformProfile(t *testing.T) {
 	next.Test.Enabled = false
 	next.Registration = domain.Registration{Status: domain.RegistrationClosed, ClosedText: domain.Texts{"zh-CN": "邀请制", "en": "By invitation"}}
 	next.Social = []domain.SocialLink{{Kind: "x", URL: "https://x.com/example"}}
-	saved, err := plat.UpdateProfile(ctx, next, 2, "admin:ops@example.com", "going live")
-	if err != nil || saved.Version != 3 || saved.Test.Enabled || saved.Name != "Example Exchange" || saved.Registration.Status != domain.RegistrationClosed ||
+	saved, err := plat.UpdateProfile(ctx, next, 3, "admin:ops@example.com", "going live")
+	if err != nil || saved.Version != 4 || saved.Test.Enabled || saved.Name != "Example Exchange" || saved.Registration.Status != domain.RegistrationClosed ||
 		len(saved.Social) != 1 || saved.UpdatedBy != "admin:ops@example.com" {
 		t.Fatalf("updated %+v %v", saved, err)
 	}
-	if _, err := plat.UpdateProfile(ctx, next, 2, "admin:b@example.com", "stale"); !apperr.Is(err, "INSTRUMENT_PLATFORM_CHANGED") {
+	if _, err := plat.UpdateProfile(ctx, next, 3, "admin:b@example.com", "stale"); !apperr.Is(err, "INSTRUMENT_PLATFORM_CHANGED") {
 		t.Fatalf("on a stale version: %v", err)
 	}
 	bad := next
 	bad.ThemeColor = "red"
-	if _, err := plat.UpdateProfile(ctx, bad, 3, "admin:ops@example.com", "bad color"); !apperr.Is(err, apperr.CodeInvalidArgument) {
+	if _, err := plat.UpdateProfile(ctx, bad, 4, "admin:ops@example.com", "bad color"); !apperr.Is(err, apperr.CodeInvalidArgument) {
 		t.Fatalf("a bad color: %v", err)
 	}
-	if p, _ := plat.Profile(ctx); p.Version != 3 {
+	if p, _ := plat.Profile(ctx); p.Version != 4 {
 		t.Fatalf("the cache was not dropped: %d", p.Version)
 	}
 
 	svg := []byte(`<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="8" onclick="x()"/></svg>`)
 	withIcon, err := plat.SetImage(ctx, domain.ImageFavicon, &domain.Logo{Data: svg, MIME: domain.LogoSVG}, "admin:ops@example.com", "our icon")
-	if err != nil || withIcon.Version != 4 || withIcon.Images[domain.ImageFavicon].MIME != domain.LogoSVG ||
-		application.PlatformImageURL(withIcon, domain.ImageFavicon) != "/v1/platform/images/favicon?v=4" || withIcon.Name != "Example Exchange" {
+	if err != nil || withIcon.Version != 5 || withIcon.Images[domain.ImageFavicon].MIME != domain.LogoSVG ||
+		application.PlatformImageURL(withIcon, domain.ImageFavicon) != "/v1/platform/images/favicon?v=5" || withIcon.Name != "Example Exchange" {
 		t.Fatalf("an icon %+v %v", withIcon, err)
 	}
 	img, version, err := plat.Image(ctx, domain.ImageFavicon)
-	if err != nil || version != 4 || string(img.Data) == string(svg) {
+	if err != nil || version != 5 || string(img.Data) == string(svg) {
 		t.Fatalf("the icon %s v%d %v", img.Data, version, err)
 	}
 	if _, _, err := plat.Image(ctx, domain.ImageLogoDark); !apperr.Is(err, apperr.CodeNotFound) {
@@ -118,15 +120,15 @@ func TestPlatformProfile(t *testing.T) {
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &manifest); err != nil || w.Header().Get("Content-Type") != "application/manifest+json" ||
 		manifest.Name != "Example Exchange" || len(manifest.Icons) != 1 || manifest.Icons[0].Sizes != "any" ||
-		manifest.Icons[0].Src != "/v1/platform/images/favicon?v=4" {
+		manifest.Icons[0].Src != "/v1/platform/images/favicon?v=5" {
 		t.Fatalf("manifest %s %v", w.Body, err)
 	}
 
 	cleared, err := plat.SetImage(ctx, domain.ImageFavicon, nil, "admin:ops@example.com", "back to the default")
-	if err != nil || cleared.Version != 5 || len(cleared.Images) != 0 {
+	if err != nil || cleared.Version != 6 || len(cleared.Images) != 0 {
 		t.Fatalf("cleared %+v %v", cleared, err)
 	}
-	if again, err := plat.SetImage(ctx, domain.ImageFavicon, nil, "admin:ops@example.com", "again"); err != nil || again.Version != 5 {
+	if again, err := plat.SetImage(ctx, domain.ImageFavicon, nil, "admin:ops@example.com", "again"); err != nil || again.Version != 6 {
 		t.Fatalf("clearing nothing %+v %v", again, err)
 	}
 	w = httptest.NewRecorder()

@@ -178,13 +178,16 @@ call GET "/v1/account/balances?account_type=SPOT" "" "${AUTH[@]}"
 expect 200 - "the new account's balances"
 check '[.balances[] | select((.available | tonumber) > 0)] | length == 0' "a fresh account gets nothing"
 
-echo "== go live: the name, the mark, the favicon, the domain, test mode off, sign-ups open"
+echo "== go live: the name, the footer, the mark, the favicon, the domain, test mode off, sign-ups open"
 NAME="Drill Exchange ${RUN: -4}"
 acall GET /admin/v1/platform/profile ""
-acall PUT /admin/v1/platform/profile "$(jq -c --arg n "$NAME" '{name: $n, short_name: "Drill", domain: "astras.vip", theme_color, brand_color, footer,
+# The footer's line too (launch.md §2 step 1): the test server's says the
+# funds are simulated.
+acall PUT /admin/v1/platform/profile "$(jq -c --arg n "$NAME" '{name: $n, short_name: "Drill", domain: "astras.vip", theme_color, brand_color,
+  footer: (.footer | .copyright = {"zh-CN": ("© 2026 " + $n), en: ("© 2026 " + $n)}),
   contact, social, default_locale, test_mode: (.test_mode | .enabled = false), registration: (.registration | .status = "OPEN"),
   expected_version: .version, reason: "launch drill: the platform as it goes live"}' <<<"$BODY")"
-expect 200 - "renamed to $NAME, domain astras.vip, test mode off, sign-ups open"
+expect 200 - "renamed to $NAME with its own footer line, domain astras.vip, test mode off, sign-ups open"
 MARK='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" rx="6" fill="#0f766e"/><path d="M6 12h12M12 6v12" stroke="#fff" stroke-width="3"/></svg>'
 # An image the platform has already stays: the drill uploads only what is
 # missing and removes only what it uploaded (review BF).

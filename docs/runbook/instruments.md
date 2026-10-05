@@ -62,7 +62,7 @@ sudo docker compose ... exec -T instrument-service /app/exchangectl instruments 
 
 ## 平台资料（设计 2026-10-04 §4.1）
 
-交易所自己的资料由后台改、站点运行时读取，上线只改配置、不重新构建前端。资料存在 `platform_profile`（迁移 instrument 00008，只有一行，迁移时写入当前的 Astras 默认值；00009 把学习模式改成测试模式），上传的图片存在 `platform_images`。
+交易所自己的资料由后台改、站点运行时读取，上线只改配置、不重新构建前端。资料存在 `platform_profile`（迁移 instrument 00008，只有一行，迁移时写入当前的 Astras 默认值；00009 把学习模式改成测试模式；00010 把种子里「学习项目，资金为模拟」的页脚换成「© 2026 Astras」——页脚不随模式切换，上线后不能再这样说，运维自己改过的不动），上传的图片存在 `platform_images`。
 
 - 字段：名称（2–32 字）、简称（2–12 字）、域名（PC 站主机名，未设为空）、主题色与品牌色（小写 `#rrggbb`）、页脚版权与合规文案、联系邮箱与客服链接（https）、社交链接（最多 10 个，种类见 `domain.SocialKinds`，只收 https）、默认语言、测试模式（开关、是否显示横幅、横幅文案，默认「测试模式」/ "Test mode"）、注册方式（`OPEN`/`CLOSED` 与关闭时的提示语）。文案一律按语言 `{"zh-CN", "en"}` 存，英文空着时站点显示中文。规则在 `internal/instrument/domain/platform.go`。
 - 图片：`logo_light`、`logo_dark`（名称旁的标志，按主题选）、`favicon`、`apple_touch_icon`。都要正方形、最多 200 KB；标志可用 PNG、SVG、WebP，favicon 只收 PNG 或 SVG，苹果图标只收不小于 180 px 的 PNG。SVG 与资产图标一样按白名单重建。

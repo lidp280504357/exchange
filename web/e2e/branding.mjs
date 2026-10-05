@@ -74,7 +74,7 @@ try {
       const found = TEST_ONLY.filter((s) => text.includes(s));
       if (found.length) throw new Error(`${path} still says ${JSON.stringify(found)}`);
     }
-    ok(`${SITE}: no 测试模式 badge and no welcome-credit copy on the home and sign-up pages`);
+    ok(`${SITE}: no 测试模式 badge, welcome-credit copy or test-environment words on the home and sign-up pages`);
     // The terms page shows the console's article: the page reads it from
     // the API (not the bundled draft) and heads it with the article's
     // title, the one the drill published (TERMS_TITLE) when it did.
