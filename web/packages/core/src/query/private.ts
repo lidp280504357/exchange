@@ -178,6 +178,9 @@ export function bindPrivate(ws: WsClient, qc: QueryClient): () => void {
     ws.subscribe("withdrawals", () => later.add(qk.withdrawals)),
     ws.subscribe("positions", () => later.add(qk.derivatives)),
     ws.subscribe("risk", () => later.add(qk.derivatives)),
+    // Margin accounts (margin design 2026-10-06): a borrow, a repayment, an
+    // hour's interest, a warning or a liquidation reloads them.
+    ws.subscribe("margin", () => later.add(["margin"])),
     ws.onResync(() => {
       for (const root of privateRoots) later.add([root]);
     }),

@@ -12,6 +12,7 @@ func TestRenderNotice(t *testing.T) {
 	for _, typ := range []string{
 		NoticeWelcome, NoticeNewDeviceLogin, NoticeIdentityChanged, NoticePasswordChanged, NoticeAccountLocked, NoticeStatusChanged, NoticeTOTPChanged, NoticeDepositCredited, NoticeDepositUnclaimed,
 		NoticeWithdrawalRequested, NoticeWithdrawalCompleted, NoticeWithdrawalRejected, NoticeWithdrawalCanceled, NoticeWithdrawalFailed,
+		NoticeMarginWarned, NoticeMarginLiquidating, NoticeMarginLiquidated,
 	} {
 		for _, lang := range []string{"zh-CN", "en"} {
 			title, body := RenderNotice(NoticeInput{Type: typ, Language: lang, At: at, Location: sg, Data: map[string]string{
@@ -45,6 +46,22 @@ func TestRenderNotice(t *testing.T) {
 		if strings.Contains(body, "24") {
 			t.Fatalf("%s bound: %s", lang, body)
 		}
+	}
+}
+
+func TestMarginNotices(t *testing.T) {
+	at := time.Date(2026, 10, 6, 4, 5, 6, 0, time.UTC)
+	title, body := RenderNotice(NoticeInput{Type: NoticeMarginWarned, Language: "zh-CN", At: at, Data: map[string]string{
+		"account_type": "MARGIN_ISOLATED", "symbol": "BTC-USDT", "margin_level": "1.08", "warn_level": "1.1", "liquidation_level": "1.05",
+	}})
+	if title != "杠杆账户风险率预警" || !strings.Contains(body, "BTC/USDT 逐仓杠杆账户风险率") || !strings.Contains(body, "强平线 1.05") {
+		t.Fatalf("warned: %q %s", title, body)
+	}
+	_, body = RenderNotice(NoticeInput{Type: NoticeMarginLiquidated, Language: "en", At: at, Data: map[string]string{
+		"account_type": "MARGIN_CROSS", "repaid": "100 USDT, 0.01 BTC", "fee": "2.1", "insurance_covered": "0", "remaining": "",
+	}})
+	if !strings.Contains(body, "cross margin account") || !strings.Contains(body, "repaid 100 USDT, 0.01 BTC") || !strings.Contains(body, "account: none") {
+		t.Fatalf("liquidated: %s", body)
 	}
 }
 

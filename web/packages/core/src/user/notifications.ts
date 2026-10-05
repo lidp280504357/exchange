@@ -118,10 +118,10 @@ export const NOTICE_CATEGORIES: readonly NoticeCategory[] = ["security", "assets
 
 const SECURITY = new Set(["NEW_DEVICE_LOGIN", "IDENTITY_CHANGED", "PASSWORD_CHANGED", "ACCOUNT_LOCKED", "TOTP_CHANGED"]);
 
-/** noticeCategory groups a notice type: sign-ins and security settings, deposits and withdrawals, the rest. */
+/** noticeCategory groups a notice type: sign-ins and security settings, deposits, withdrawals and margin accounts, the rest. */
 export function noticeCategory(type: string): NoticeCategory {
   if (SECURITY.has(type)) return "security";
-  if (type.startsWith("DEPOSIT_") || type.startsWith("WITHDRAWAL_")) return "assets";
+  if (type.startsWith("DEPOSIT_") || type.startsWith("WITHDRAWAL_") || type.startsWith("MARGIN_")) return "assets";
   return "system";
 }
 
@@ -146,6 +146,8 @@ export function noticeLink(n: Pick<Notice, "type"> & { data?: Record<string, str
     default:
       if (n.type.startsWith("DEPOSIT_")) return routes.deposit;
       if (n.type.startsWith("WITHDRAWAL_")) return routes.withdraw;
+      // Margin warnings and liquidations (margin design 2026-10-06 §4.5).
+      if (n.type.startsWith("MARGIN_")) return routes.margin;
       return null;
   }
 }

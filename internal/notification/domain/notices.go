@@ -25,6 +25,11 @@ const (
 	NoticeWithdrawalRejected  = "WITHDRAWAL_REJECTED"
 	NoticeWithdrawalCanceled  = "WITHDRAWAL_CANCELED"
 	NoticeWithdrawalFailed    = "WITHDRAWAL_FAILED"
+	// Margin accounts (margin design 2026-10-06 §4.5): under the warning
+	// level, a liquidation started, and its outcome.
+	NoticeMarginWarned      = "MARGIN_WARNED"
+	NoticeMarginLiquidating = "MARGIN_LIQUIDATING"
+	NoticeMarginLiquidated  = "MARGIN_LIQUIDATED"
 )
 
 // Notice is an in-app notification.
@@ -64,6 +69,22 @@ var depositReasons = map[string][2]string{
 	"UNSUPPORTED_TOKEN": {"该代币不受支持", "the token is not supported"},
 	"ACCOUNT_CLOSED":    {"账户已注销", "the account is closed"},
 	"NOT_ELIGIBLE":      {"账户当前不能充值", "the account cannot take deposits now"},
+}
+
+// marginAccount names a margin account: the cross one, or the isolated
+// one of a pair (BTC-USDT shown as BTC/USDT).
+func marginAccount(accountType, symbol string, en bool) string {
+	pair := strings.Replace(symbol, "-", "/", 1)
+	switch {
+	case accountType == "MARGIN_ISOLATED" && en:
+		return "isolated margin account " + pair
+	case accountType == "MARGIN_ISOLATED":
+		return pair + " 逐仓杠杆账户"
+	case en:
+		return "cross margin account"
+	default:
+		return "全仓杠杆账户"
+	}
 }
 
 var channelNames = map[string][2]string{
@@ -205,6 +226,29 @@ func RenderNotice(in NoticeInput) (title, body string) {
 				d["amount"], d["asset"], d["address"], when, d["id"])
 		}
 		return "提现失败", fmt.Sprintf("您的 %s %s 提现（到 %s）于 %s 失败，客服会跟进处理，编号 %s。", d["amount"], d["asset"], d["address"], when, d["id"])
+	case NoticeMarginWarned:
+		acct := marginAccount(d["account_type"], d["symbol"], en)
+		if en {
+			return "Margin level warning", fmt.Sprintf("The margin level of your %s fell to %s at %s (warning level %s, liquidation at %s). "+
+				"Move assets in or repay to keep it from being liquidated.", acct, d["margin_level"], when, d["warn_level"], d["liquidation_level"])
+		}
+		return "杠杆账户风险率预警", fmt.Sprintf("您的%s风险率已于 %s 降至 %s（预警线 %s，强平线 %s）。请划入资产或还币，以免被强平。",
+			acct, when, d["margin_level"], d["warn_level"], d["liquidation_level"])
+	case NoticeMarginLiquidating:
+		acct := marginAccount(d["account_type"], d["symbol"], en)
+		if en {
+			return "Margin account being liquidated", fmt.Sprintf("Your %s reached its liquidation level at %s (margin level %s): "+
+				"its open orders are canceled, its assets sold at market and its debts repaid.", acct, when, d["margin_level"])
+		}
+		return "杠杆账户正在强平", fmt.Sprintf("您的%s风险率 %s 已于 %s 到达强平线：系统撤销其挂单，以市价卖出资产并归还负债。", acct, d["margin_level"], when)
+	case NoticeMarginLiquidated:
+		acct := marginAccount(d["account_type"], d["symbol"], en)
+		if en {
+			return "Margin liquidation completed", fmt.Sprintf("The liquidation of your %s completed at %s: repaid %s, liquidation fee %s USDT, "+
+				"insurance fund %s USDT; left in the account: %s.", acct, when, orNone(d["repaid"], en), d["fee"], d["insurance_covered"], orNone(d["remaining"], en))
+		}
+		return "杠杆账户强平完成", fmt.Sprintf("您的%s已于 %s 完成强平：归还 %s，强平费 %s USDT，保险基金补足 %s USDT；账户剩余 %s。",
+			acct, when, orNone(d["repaid"], en), d["fee"], d["insurance_covered"], orNone(d["remaining"], en))
 	case NoticeStatusChanged:
 		to := pick(statusNames, d["to"], en)
 		if en {
@@ -213,6 +257,18 @@ func RenderNotice(in NoticeInput) (title, body string) {
 		return "账户状态变更", fmt.Sprintf("您的账户状态已于 %s 变更为：%s。如有疑问请联系客服。", when, to)
 	}
 	return in.Type, ""
+}
+
+// orNone is a list of amounts, or "none" for an empty one.
+func orNone(s string, en bool) string {
+	switch {
+	case s != "":
+		return s
+	case en:
+		return "none"
+	default:
+		return "无"
+	}
 }
 
 // NoticeMail wraps a notice for mail or SMS, signed with brand

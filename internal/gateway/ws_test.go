@@ -16,6 +16,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	derivativesv1 "github.com/skill/exchange/api/gen/go/exchange/derivatives/v1"
+	marginv1 "github.com/skill/exchange/api/gen/go/exchange/margin/v1"
 	marketv1 "github.com/skill/exchange/api/gen/go/exchange/market/v1"
 	orderv1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
 	tradev1 "github.com/skill/exchange/api/gen/go/exchange/trade/v1"
@@ -188,6 +189,42 @@ func TestWebSocketPrivateChannels(t *testing.T) {
 	if m := c.next(); m["channel"] != "orders" || m["data"].(map[string]any)["account"] != "MARGIN_CROSS" ||
 		m["data"].(map[string]any)["side_effect"] != "AUTO_BORROW" || m["data"].(map[string]any)["status"] != "NEW" {
 		t.Fatalf("margin order push: %v", m)
+	}
+
+	// Margin accounts: a borrow, a warning, a liquidation's end.
+	c.send(`{"op":"subscribe","args":["margin"]}`)
+	if m := c.next(); m["ok"] != true {
+		t.Fatalf("subscribe margin: %v", m)
+	}
+	for _, msg := range []proto.Message{
+		&marginv1.MarginBorrowed{UserId: "u-1", AccountType: "MARGIN_CROSS", Asset: "USDT", Amount: "100"},
+		&marginv1.MarginLevelWarned{UserId: "u-1", AccountType: "MARGIN_CROSS", MarginLevel: "1.25", WarnLevel: "1.3", LiquidationLevel: "1.1"},
+		&marginv1.MarginLiquidationCompleted{
+			LiquidationId: "l1", UserId: "u-1", AccountType: "MARGIN_ISOLATED", Symbol: "BTC-USDT", Fee: "2", InsuranceCovered: "0",
+			Repaid: []*marginv1.AssetAmount{{Asset: "USDT", Amount: "100"}}, CompletedAt: timestamppb.Now(),
+		},
+	} {
+		env, err := event.NewFactory("test", "t").New(context.Background(), msg, "user", "u-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := WSEvents(hub)(context.Background(), env); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if m := c.next(); m["channel"] != "margin" || m["data"].(map[string]any)["type"] != "ACCOUNT" {
+		t.Fatalf("account push: %v", m)
+	}
+	if m := c.next(); m["data"].(map[string]any)["type"] != "WARNING" ||
+		m["data"].(map[string]any)["warning"].(map[string]any)["symbol"] != nil ||
+		m["data"].(map[string]any)["warning"].(map[string]any)["margin_level"] != "1.25" {
+		t.Fatalf("warning push: %v", m)
+	}
+	if m := c.next(); m["data"].(map[string]any)["type"] != "LIQUIDATION" ||
+		m["data"].(map[string]any)["liquidation"].(map[string]any)["status"] != "COMPLETED" ||
+		m["data"].(map[string]any)["liquidation"].(map[string]any)["symbol"] != "BTC-USDT" ||
+		len(m["data"].(map[string]any)["liquidation"].(map[string]any)["repaid"].([]any)) != 1 {
+		t.Fatalf("liquidation push: %v", m)
 	}
 
 	// A reconnecting client asks for what it missed.

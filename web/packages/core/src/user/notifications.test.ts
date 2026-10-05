@@ -25,6 +25,7 @@ describe("notifications", () => {
     expect(noticeCategory("TOTP_CHANGED")).toBe("security");
     expect(noticeCategory("DEPOSIT_UNCLAIMED")).toBe("assets");
     expect(noticeCategory("WITHDRAWAL_FAILED")).toBe("assets");
+    expect(noticeCategory("MARGIN_LIQUIDATED")).toBe("assets");
     expect(noticeCategory("STATUS_CHANGED")).toBe("system");
     expect(noticeCategory("SOMETHING_NEW")).toBe("system");
   });
@@ -35,6 +36,7 @@ describe("notifications", () => {
     expect(noticeLink({ type: "DEPOSIT_CREDITED" })).toBe(routes.deposit);
     expect(noticeLink({ type: "WITHDRAWAL_REJECTED" })).toBe(routes.withdraw);
     expect(noticeLink({ type: "WELCOME" })).toBe(routes.assets);
+    expect(noticeLink({ type: "MARGIN_WARNED" })).toBe(routes.margin);
     expect(noticeLink({ type: "STATUS_CHANGED" })).toBeNull();
     expect(noticeLink({ type: "BROADCAST", data: { broadcast_id: "b", link: "/announcements/maintenance" } })).toBe("/announcements/maintenance");
     expect(noticeLink({ type: "BROADCAST", data: { broadcast_id: "b", link: "https://evil.example.com" } })).toBeNull();

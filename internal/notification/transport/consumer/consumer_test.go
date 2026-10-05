@@ -6,6 +6,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	authv1 "github.com/skill/exchange/api/gen/go/exchange/auth/v1"
+	marginv1 "github.com/skill/exchange/api/gen/go/exchange/margin/v1"
 	userv1 "github.com/skill/exchange/api/gen/go/exchange/user/v1"
 	walletv1 "github.com/skill/exchange/api/gen/go/exchange/wallet/v1"
 	"github.com/skill/exchange/internal/notification/domain"
@@ -39,10 +40,18 @@ func TestToEvent(t *testing.T) {
 		{&walletv1.WithdrawalCanceled{Withdrawal: &walletv1.Withdrawal{UserId: "u"}}, domain.NoticeWithdrawalCanceled, false},
 		{&walletv1.WithdrawalBroadcast{Withdrawal: &walletv1.Withdrawal{UserId: "u"}}, "", false},
 		{&authv1.OtpRequested{}, "", false},
+		{&marginv1.MarginLevelWarned{UserId: "u", AccountType: "MARGIN_CROSS", MarginLevel: "1.25"}, domain.NoticeMarginWarned, true},
+		{&marginv1.MarginLiquidationStarted{UserId: "u", AccountType: "MARGIN_CROSS"}, domain.NoticeMarginLiquidating, true},
+		{&marginv1.MarginLiquidationCompleted{UserId: "u", Repaid: []*marginv1.AssetAmount{{Asset: "USDT", Amount: "100"}}}, domain.NoticeMarginLiquidated, true},
+		{&marginv1.MarginBorrowed{UserId: "u"}, "", false},
 	} {
 		e, ok := toEvent(tc.msg)
 		if ok != (tc.want != "") || e.Type != tc.want || e.Mail != tc.mail || (ok && e.UserID != "u") {
 			t.Errorf("%T: %+v %v", tc.msg, e, ok)
 		}
+	}
+	e, _ := toEvent(&marginv1.MarginLiquidationCompleted{UserId: "u", Repaid: []*marginv1.AssetAmount{{Asset: "USDT", Amount: "100"}, {Asset: "BTC", Amount: "0.01"}}})
+	if e.Data["repaid"] != "100 USDT, 0.01 BTC" || e.Data["remaining"] != "" {
+		t.Fatalf("liquidation data: %v", e.Data)
 	}
 }

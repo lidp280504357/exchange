@@ -10,6 +10,7 @@ import (
 	derivativesv1 "github.com/skill/exchange/api/gen/go/exchange/derivatives/v1"
 	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
 	ledgerv1 "github.com/skill/exchange/api/gen/go/exchange/ledger/v1"
+	marginv1 "github.com/skill/exchange/api/gen/go/exchange/margin/v1"
 	marketv1 "github.com/skill/exchange/api/gen/go/exchange/market/v1"
 	notificationv1 "github.com/skill/exchange/api/gen/go/exchange/notification/v1"
 	orderv1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
@@ -25,7 +26,7 @@ import (
 var WSTopics = []string{
 	"ledger.events", "notification.events", "order.events", "trade.events", "market.depth", "market.trades", "market.candle.events",
 	"wallet.deposit.events", "wallet.withdrawal.events", "derivatives.market.depth",
-	"derivatives.order.events", "derivatives.position.events", "derivatives.liquidation.events",
+	"derivatives.order.events", "derivatives.position.events", "derivatives.liquidation.events", "margin.events",
 }
 
 type balanceData struct {
@@ -123,6 +124,110 @@ type riskData struct {
 	Price             string `json:"price,omitempty"`
 	Quantity          string `json:"quantity,omitempty"`
 	RealizedPnL       string `json:"realized_pnl,omitempty"`
+}
+
+// marginPush is a message of "margin" (api/openapi/margin.yaml
+// MarginPush): ACCOUNT when an account's debts changed (a borrow, a
+// repayment, an hour's interest; no account in it yet: the sites reload
+// GET /v1/margin/accounts), WARNING under the warning level, LIQUIDATION
+// when a liquidation starts and completes.
+type marginPush struct {
+	Type        string             `json:"type"`
+	Warning     *marginWarning     `json:"warning,omitempty"`
+	Liquidation *marginLiquidation `json:"liquidation,omitempty"`
+}
+
+type marginWarning struct {
+	Account          string  `json:"account"`
+	Symbol           *string `json:"symbol"`
+	MarginLevel      string  `json:"margin_level"`
+	WarnLevel        string  `json:"warn_level"`
+	LiquidationLevel string  `json:"liquidation_level"`
+}
+
+type marginLiquidation struct {
+	LiquidationID    string        `json:"liquidation_id"`
+	Account          string        `json:"account"`
+	Symbol           *string       `json:"symbol"`
+	Status           string        `json:"status"`
+	MarginLevel      string        `json:"margin_level,omitempty"`
+	Repaid           []assetAmount `json:"repaid"`
+	Fee              string        `json:"fee"`
+	InsuranceCovered string        `json:"insurance_covered"`
+	StartedAt        string        `json:"started_at,omitempty"`
+	CompletedAt      *string       `json:"completed_at"`
+}
+
+type assetAmount struct {
+	Asset  string `json:"asset"`
+	Amount string `json:"amount"`
+}
+
+// marginOf pushes the margin events on "margin"; ok reports whether p was
+// one of them.
+func marginOf(h *Hub, p interface {
+	MessageIs(proto.Message) bool
+	UnmarshalTo(proto.Message) error
+},
+) (bool, error) {
+	var (
+		borrowed  marginv1.MarginBorrowed
+		repaid    marginv1.MarginRepaid
+		interest  marginv1.MarginInterestAccrued
+		warned    marginv1.MarginLevelWarned
+		started   marginv1.MarginLiquidationStarted
+		completed marginv1.MarginLiquidationCompleted
+	)
+	switch {
+	case p.MessageIs(&borrowed):
+		if err := p.UnmarshalTo(&borrowed); err != nil {
+			return true, err
+		}
+		h.Publish(borrowed.GetUserId(), "margin", marginPush{Type: "ACCOUNT"})
+	case p.MessageIs(&repaid):
+		if err := p.UnmarshalTo(&repaid); err != nil {
+			return true, err
+		}
+		h.Publish(repaid.GetUserId(), "margin", marginPush{Type: "ACCOUNT"})
+	case p.MessageIs(&interest):
+		if err := p.UnmarshalTo(&interest); err != nil {
+			return true, err
+		}
+		h.Publish(interest.GetUserId(), "margin", marginPush{Type: "ACCOUNT"})
+	case p.MessageIs(&warned):
+		if err := p.UnmarshalTo(&warned); err != nil {
+			return true, err
+		}
+		h.Publish(warned.GetUserId(), "margin", marginPush{Type: "WARNING", Warning: &marginWarning{
+			Account: warned.GetAccountType(), Symbol: optional(warned.GetSymbol()), MarginLevel: warned.GetMarginLevel(),
+			WarnLevel: warned.GetWarnLevel(), LiquidationLevel: warned.GetLiquidationLevel(),
+		}})
+	case p.MessageIs(&started):
+		if err := p.UnmarshalTo(&started); err != nil {
+			return true, err
+		}
+		h.Publish(started.GetUserId(), "margin", marginPush{Type: "LIQUIDATION", Liquidation: &marginLiquidation{
+			LiquidationID: started.GetLiquidationId(), Account: started.GetAccountType(), Symbol: optional(started.GetSymbol()),
+			Status: "STARTED", MarginLevel: started.GetMarginLevel(), Repaid: []assetAmount{}, Fee: "0", InsuranceCovered: "0",
+			StartedAt: started.GetStartedAt().AsTime().UTC().Format(time.RFC3339Nano),
+		}})
+	case p.MessageIs(&completed):
+		if err := p.UnmarshalTo(&completed); err != nil {
+			return true, err
+		}
+		done := completed.GetCompletedAt().AsTime().UTC().Format(time.RFC3339Nano)
+		back := make([]assetAmount, 0, len(completed.GetRepaid()))
+		for _, a := range completed.GetRepaid() {
+			back = append(back, assetAmount{Asset: a.GetAsset(), Amount: a.GetAmount()})
+		}
+		h.Publish(completed.GetUserId(), "margin", marginPush{Type: "LIQUIDATION", Liquidation: &marginLiquidation{
+			LiquidationID: completed.GetLiquidationId(), Account: completed.GetAccountType(), Symbol: optional(completed.GetSymbol()),
+			Status: "COMPLETED", Repaid: back, Fee: completed.GetFee(), InsuranceCovered: completed.GetInsuranceCovered(), CompletedAt: &done,
+		}})
+	default:
+		return false, nil
+	}
+	return true, nil
 }
 
 func positionOf(p *derivativesv1.Position, ev string) positionData {
@@ -254,6 +359,9 @@ func WSEvents(h *Hub) func(context.Context, *eventv1.Envelope) error {
 		)
 		p := env.GetPayload()
 		if ok, err := derivativesOf(h, p); ok {
+			return err
+		}
+		if ok, err := marginOf(h, p); ok {
 			return err
 		}
 		if wd, ok := withdrawalOf(p); ok {

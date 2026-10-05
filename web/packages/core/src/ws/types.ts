@@ -127,7 +127,7 @@ export type FillData = {
 export type NotificationData = { id: string; type: string; title: string; body: string };
 
 /** The private channels (need auth). */
-export const PRIVATE_CHANNELS = ["balances", "notifications", "orders", "fills", "deposits", "withdrawals", "positions", "risk"] as const;
+export const PRIVATE_CHANNELS = ["balances", "notifications", "orders", "fills", "deposits", "withdrawals", "positions", "risk", "margin"] as const;
 export type PrivateChannel = (typeof PRIVATE_CHANNELS)[number];
 
 export function isPrivateChannel(ch: string): ch is PrivateChannel {

@@ -4,11 +4,13 @@ package consumer
 import (
 	"context"
 	"strconv"
+	"strings"
 
 	"google.golang.org/protobuf/proto"
 
 	authv1 "github.com/skill/exchange/api/gen/go/exchange/auth/v1"
 	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
+	marginv1 "github.com/skill/exchange/api/gen/go/exchange/margin/v1"
 	userv1 "github.com/skill/exchange/api/gen/go/exchange/user/v1"
 	walletv1 "github.com/skill/exchange/api/gen/go/exchange/wallet/v1"
 	"github.com/skill/exchange/internal/notification/application"
@@ -18,7 +20,7 @@ import (
 )
 
 // Topics are the topics the handler reads.
-var Topics = []string{event.TopicAuth, event.TopicUser, event.TopicWalletDeposit, event.TopicWalletWithdrawal}
+var Topics = []string{event.TopicAuth, event.TopicUser, event.TopicWalletDeposit, event.TopicWalletWithdrawal, event.TopicMargin}
 
 // Handler notifies users of security-relevant account events and of
 // deposits credited or held; other events are skipped.
@@ -94,6 +96,20 @@ func toEvent(msg proto.Message) (application.Event, bool) {
 		return application.Event{UserID: m.GetUserId(), Type: domain.NoticeStatusChanged, Mail: true, Data: map[string]string{
 			"from": m.GetFromStatus(), "to": m.GetToStatus(),
 		}}, true
+	case *marginv1.MarginLevelWarned:
+		return application.Event{UserID: m.GetUserId(), Type: domain.NoticeMarginWarned, Mail: true, Data: map[string]string{
+			"account_type": m.GetAccountType(), "symbol": m.GetSymbol(), "margin_level": m.GetMarginLevel(),
+			"warn_level": m.GetWarnLevel(), "liquidation_level": m.GetLiquidationLevel(),
+		}}, true
+	case *marginv1.MarginLiquidationStarted:
+		return application.Event{UserID: m.GetUserId(), Type: domain.NoticeMarginLiquidating, Mail: true, Data: map[string]string{
+			"account_type": m.GetAccountType(), "symbol": m.GetSymbol(), "margin_level": m.GetMarginLevel(), "liquidation_id": m.GetLiquidationId(),
+		}}, true
+	case *marginv1.MarginLiquidationCompleted:
+		return application.Event{UserID: m.GetUserId(), Type: domain.NoticeMarginLiquidated, Mail: true, Data: map[string]string{
+			"account_type": m.GetAccountType(), "symbol": m.GetSymbol(), "liquidation_id": m.GetLiquidationId(),
+			"repaid": amounts(m.GetRepaid()), "remaining": amounts(m.GetRemaining()), "fee": m.GetFee(), "insurance_covered": m.GetInsuranceCovered(),
+		}}, true
 	}
 	return application.Event{}, false
 }
@@ -117,6 +133,15 @@ func withdrawalEvent(w *walletv1.Withdrawal, notice string, mail bool) applicati
 		"address": shortHash(w.GetAddress()), "tx": shortHash(w.GetTxHash()), "reason": w.GetRejectReason(),
 		"internal": strconv.FormatBool(w.GetInternal()),
 	}}
+}
+
+// amounts lists amounts of assets: "100 USDT, 0.01 BTC".
+func amounts(list []*marginv1.AssetAmount) string {
+	parts := make([]string, 0, len(list))
+	for _, a := range list {
+		parts = append(parts, a.GetAmount()+" "+a.GetAsset())
+	}
+	return strings.Join(parts, ", ")
 }
 
 // shortHash keeps the ends of a transaction hash.
