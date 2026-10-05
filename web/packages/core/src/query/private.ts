@@ -1,6 +1,7 @@
 import { QueryClient, type QueryKey } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { add } from "../format/decimal";
+import type { MarginAccount, MarginPush } from "../margin/math";
 import { useWs } from "../market/hooks";
 import { selectSignedIn, useSession } from "../session/store";
 import type { WsClient } from "../ws/client";
@@ -73,6 +74,33 @@ export function applyFill(page: FillsPage | undefined, p: FillData, symbol: stri
   if (!page || (symbol !== "" && symbol !== p.symbol)) return page;
   if (page.items.some((f) => f.trade_id === p.trade_id && f.order_id === p.order_id)) return page;
   return { ...page, items: [p as unknown as FillsPage["items"][number], ...page.items] };
+}
+
+type MarginAccounts = { cross: MarginAccount; isolated: MarginAccount[] };
+
+/** holdings is what an account holds and owes, without its valuation. */
+const holdings = (a: MarginAccount) => a.balances.map((b) => [b.asset, b.free, b.locked, b.borrowed, b.interest].join(" ")).join("|");
+
+/**
+ * applyMarginAccount puts an account of an ACCOUNT push into the cached
+ * accounts (GET /v1/margin/accounts): the cross account, or its pair's
+ * isolated account (a new one joins the list). One older than the cached
+ * account (a poll answered after the push was made) is left out. held
+ * tells whether what the account holds or owes changed, not only its
+ * valuation; without cached accounts it cannot tell and says so.
+ */
+export function applyMarginAccount(page: MarginAccounts | undefined, a: MarginAccount): { page: MarginAccounts | undefined; held: boolean } {
+  if (!page) return { page, held: true };
+  const cross = a.account === "MARGIN_CROSS";
+  const i = cross ? -1 : page.isolated.findIndex((x) => x.symbol === a.symbol);
+  const cur = cross ? page.cross : page.isolated[i];
+  if (cur && Date.parse(cur.updated_at) > Date.parse(a.updated_at)) return { page, held: false };
+  const held = !cur || holdings(cur) !== holdings(a);
+  if (cross) return { page: { ...page, cross: a }, held };
+  const isolated = [...page.isolated];
+  if (i >= 0) isolated[i] = a;
+  else isolated.push(a);
+  return { page: { ...page, isolated }, held };
 }
 
 /** isContract tells a perpetual contract (BTC-USDT-PERP) from a spot pair. */
@@ -178,9 +206,19 @@ export function bindPrivate(ws: WsClient, qc: QueryClient): () => void {
     ws.subscribe("withdrawals", () => later.add(qk.withdrawals)),
     ws.subscribe("positions", () => later.add(qk.derivatives)),
     ws.subscribe("risk", () => later.add(qk.derivatives)),
-    // Margin accounts (margin design 2026-10-06): a borrow, a repayment, an
-    // hour's interest, a warning or a liquidation reloads them.
-    ws.subscribe("margin", () => later.add(["margin"])),
+    // Margin accounts (margin design 2026-10-06 §5.2): an ACCOUNT push has
+    // the account as it stands and replaces the cached one; when what it
+    // holds or owes changed (not only its valuation), its loans, what it
+    // may borrow and the ledger reload. A warning, a liquidation or a push
+    // without an account reloads everything of margin.
+    ws.subscribe("margin", (m) => {
+      const p = (m as PrivatePush<MarginPush>).data;
+      if (p.type !== "ACCOUNT" || !p.account) return later.add(qk.margin);
+      const cached = qc.getQueryData<MarginAccounts>(qk.marginAccounts);
+      const { page, held } = applyMarginAccount(cached, p.account);
+      if (page !== cached) qc.setQueryData(qk.marginAccounts, page);
+      if (held) for (const key of [qk.marginLoans, qk.marginBorrowable, qk.ledger]) later.add(key);
+    }),
     ws.onResync(() => {
       for (const root of privateRoots) later.add([root]);
     }),

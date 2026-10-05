@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { applyBalance, applyFill, applyOrder } from "./private";
+import type { MarginAccount } from "../margin/math";
+import { applyBalance, applyFill, applyMarginAccount, applyOrder } from "./private";
+
+const account = (over: Partial<MarginAccount>): MarginAccount => ({
+  account: "MARGIN_CROSS", symbol: null, leverage: 5, status: "NORMAL", margin_level: null, warn_level: "1.3", liquidation_level: "1.1",
+  total_asset: "100", total_liability: "0", net_asset: "100", liquidation_price: null,
+  balances: [{ asset: "USDT", free: "100", locked: "0", borrowed: "0", interest: "0", net: "100" }], updated_at: "2026-10-06T07:00:00Z",
+  ...over,
+});
 
 describe("private pushes into the cache", () => {
   it("updates or adds a balance", () => {
@@ -20,6 +28,34 @@ describe("private pushes into the cache", () => {
     expect(created.items[0]).toMatchObject({ order_id: "o2", side: "BUY", filled_quantity: "0" });
     const other = applyOrder(filled, { order_id: "o3", symbol: "ETH-USDT", status: "NEW", side: "BUY" }, "ACTIVE", "BTC-USDT")!;
     expect(other.items).toHaveLength(0);
+  });
+  it("replaces a margin account with its push, telling holdings from valuations", () => {
+    const btc = account({ account: "MARGIN_ISOLATED", symbol: "BTC-USDT", leverage: 10 });
+    const page = { cross: account({}), isolated: [btc] };
+    // A borrow: the cross account owes USDT now.
+    const borrowed = account({
+      margin_level: "2", total_asset: "200", total_liability: "100", net_asset: "100", updated_at: "2026-10-06T07:00:01Z",
+      balances: [{ asset: "USDT", free: "200", locked: "0", borrowed: "100", interest: "0.01", net: "99.99" }],
+    });
+    const after = applyMarginAccount(page, borrowed);
+    expect(after.held).toBe(true);
+    expect(after.page!.cross.margin_level).toBe("2");
+    expect(after.page!.isolated).toEqual([btc]);
+    // Only its valuation moved: the holdings are the same.
+    const moved = applyMarginAccount(after.page, { ...borrowed, total_asset: "190", margin_level: "1.9", updated_at: "2026-10-06T07:00:02Z" });
+    expect(moved).toMatchObject({ held: false, page: { cross: { margin_level: "1.9" } } });
+    // A push older than the cached account (a poll answered after it) is left out.
+    const late = applyMarginAccount(moved.page, { ...borrowed, margin_level: "5", updated_at: "2026-10-06T07:00:01.5Z" });
+    expect(late).toEqual({ page: moved.page, held: false });
+    // An isolated account replaces its pair's; a new pair's joins the list.
+    const eth = account({ account: "MARGIN_ISOLATED", symbol: "ETH-USDT", updated_at: "2026-10-06T07:00:03Z" });
+    const joined = applyMarginAccount(moved.page, eth);
+    expect(joined.held).toBe(true);
+    expect(joined.page!.isolated.map((a) => a.symbol)).toEqual(["BTC-USDT", "ETH-USDT"]);
+    const btcNow = applyMarginAccount(joined.page, { ...btc, status: "WARNED", updated_at: "2026-10-06T07:00:04Z" });
+    expect(btcNow.page!.isolated.map((a) => a.status)).toEqual(["WARNED", "NORMAL"]);
+    // Nothing cached: nothing to put it in, and it may have changed anything.
+    expect(applyMarginAccount(undefined, eth)).toEqual({ page: undefined, held: true });
   });
   it("prepends a fill once", () => {
     const page = { items: [], next_cursor: null };

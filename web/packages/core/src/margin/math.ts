@@ -10,6 +10,8 @@ export type MarginBalance = components["schemas"]["MarginBalance"];
 export type MarginAsset = components["schemas"]["MarginAsset"];
 export type MarginPair = components["schemas"]["MarginPair"];
 export type MarginTerms = components["schemas"]["MarginTerms"];
+/** A message of the private channel "margin". */
+export type MarginPush = components["schemas"]["MarginPush"];
 export type MarginLoan = components["schemas"]["MarginLoan"];
 export type MarginInterest = components["schemas"]["MarginInterest"];
 export type MarginTransfer = components["schemas"]["MarginTransfer"];

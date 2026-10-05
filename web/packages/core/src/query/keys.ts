@@ -34,6 +34,10 @@ export const qk = {
   positions: ["derivatives", "positions"] as const,
   derivatives: ["derivatives"] as const,
   marginAccounts: ["margin", "accounts"] as const,
+  marginLoans: ["margin", "loans"] as const,
+  /** What the margin accounts may borrow, per account and asset. */
+  marginBorrowable: ["margin", "max-borrowable"] as const,
+  margin: ["margin"] as const,
 };
 
 /** The keys holding a signed-in user's data (cleared on sign-out). */

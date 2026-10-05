@@ -10,21 +10,27 @@ import { isEmpty, type MarginAccountType, type MarginLoan, type MarginTransfer }
 // Margin data for the margin pages of both sites (margin design 2026-10-06
 // §7): the public terms (assets and pairs), the caller's accounts, loans
 // and what they may borrow, and the transfer, borrow and repay actions.
-// Accounts are polled every few seconds until the "margin" channel pushes
-// them; private keys start with the root "margin", so signing out drops
-// them.
+// The "margin" channel pushes each account as it changes (bindPrivate puts
+// it into the cache); a slower poll values the accounts without debts,
+// which are not pushed when only prices move. Private keys start with the
+// root "margin", so signing out drops them.
 
 export const marginKeys = {
   assets: qk.marginAssets,
   pairs: qk.marginPairs,
   accounts: qk.marginAccounts,
-  loans: ["margin", "loans"] as const,
-  maxBorrowable: (account: MarginAccountType, symbol: string, asset: string) => ["margin", "max-borrowable", account, symbol, asset] as const,
-  all: ["margin"] as const,
+  loans: qk.marginLoans,
+  maxBorrowable: (account: MarginAccountType, symbol: string, asset: string) => [...qk.marginBorrowable, account, symbol, asset] as const,
+  all: qk.margin,
 };
 
-/** How often the accounts refresh while a page shows them (no pushes yet). */
-export const ACCOUNTS_EVERY = 5_000;
+/**
+ * How often the accounts refresh while a page shows them: pushes carry an
+ * account with debts as its margin level moves (at most once a second) and
+ * any account its user's actions or trades change; the poll catches up the
+ * valuation of accounts without debts and a lost push.
+ */
+export const ACCOUNTS_EVERY = 15_000;
 
 /** useMarginAssets lists the margin assets with their pools and rates (public). */
 export function useMarginAssets(enabled = true) {
