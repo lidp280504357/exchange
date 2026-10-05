@@ -197,13 +197,15 @@ export default function Markets() {
         id: "turnover",
         header: t("market.turnover"),
         sortDescFirst: true,
+        // Below 1280 px the quote goes under the figure: a wide turnover
+        // ("1,234.57亿 USDT") was cut short at 1024 (review B65).
         cell: ({ row }) => (
-          <span className="text-fg-2">
+          <span className={cn("text-fg-2", !wide && "flex flex-col items-end leading-tight")}>
             {formatCompact(row.original.t?.quote_volume, locale)}
-            <span className="ml-1 text-xs text-fg-3">{row.original.row.quote}</span>
+            <span className={cn("text-xs text-fg-3", wide && "ml-1")}>{row.original.row.quote}</span>
           </span>
         ),
-        meta: { align: "right", width: wide ? 136 : 112 },
+        meta: { align: "right", width: wide ? 136 : 120 },
       }),
       col.display({
         id: "trend",
