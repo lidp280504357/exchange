@@ -29,6 +29,7 @@
 | [trading.md](trading.md) | 现货下单、冻结、撤单与开放交易对，`/v1/orders` |
 | [matching.md](matching.md) | 撮合引擎：规则、WAL 与快照、恢复、主备租约；现货与合约两个分片 |
 | [derivatives.md](derivatives.md) | USDT 永续合约：设置、下单与保证金预留、成交结算、仓位、转出保护、只减仓、对账（不变量 6），`exchangectl derivatives` |
+| [margin.md](margin.md) | 杠杆交易：账本三行记法、条款与种子（`margin.json`）、借币与还币、整点计息、估值、对账（不变量 7–9），`exchangectl margin` |
 | [market-data.md](market-data.md) | 平台行情：K 线、ticker、深度、最近成交，合约的指数价、标记价与资金费率，WebSocket 公共频道与 orders/fills 私有频道 |
 | [market-maker.md](market-maker.md) | 参考行情（币安公开数据，仅测试环境）与做市机器人：参数、撤单条件、测试服设置 |
 | [market-sim.md](market-sim.md) | 平台币 ASTRA 的模拟市场：价格模型、机器人角色、节流、设置与管理接口、`astra.sh seed/on/off/mint` |
