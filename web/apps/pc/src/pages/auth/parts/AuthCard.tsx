@@ -1,3 +1,4 @@
+import { useTestMode } from "@exchange/core/platform/index";
 import { page, Skeleton, SkeletonLines } from "@exchange/ui";
 import { Lock, ShieldCheck } from "lucide-react";
 import { motion } from "motion/react";
@@ -16,11 +17,12 @@ export type AuthCardProps = {
 /**
  * AuthCard is the column of the sign-in, sign-up and reset pages inside
  * AuthShell: the address to check, a titled header, the form, the links
- * and a short security note.
+ * and a short security note (in test mode, that the funds are simulated).
  */
 export function AuthCard({ icon, title, subtitle, footer, children }: AuthCardProps) {
   const { t } = useTranslation();
   const origin = globalThis.location?.origin ?? "https://astras.vip";
+  const testMode = useTestMode().enabled;
   return (
     <motion.div variants={page} initial="initial" animate="animate" className="flex flex-col gap-6">
       <p className="inline-flex w-fit max-w-full items-center gap-1.5 rounded-full border border-line-1 bg-bg-1 px-3 py-1 text-xs text-fg-3">
@@ -44,7 +46,7 @@ export function AuthCard({ icon, title, subtitle, footer, children }: AuthCardPr
         <ShieldCheck size={14} className="mt-0.5 shrink-0 text-success" aria-hidden />
         <p>
           {t("pcAuth.securityNote")}
-          <span className="mt-0.5 block">{t("pcAuth.simulated")}</span>
+          {testMode && <span className="mt-0.5 block">{t("pcAuth.simulated")}</span>}
         </p>
       </div>
     </motion.div>

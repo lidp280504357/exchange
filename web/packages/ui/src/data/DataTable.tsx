@@ -166,7 +166,7 @@ export function DataTable<T>({
           checked={row.getIsSelected()}
           disabled={!row.getCanSelect()}
           onCheckedChange={(c) => row.toggleSelected(c)}
-          className={density === "compact" ? "after:hidden" : undefined}
+          hitArea={density !== "compact"}
         />
       ),
     };
@@ -232,8 +232,8 @@ export function DataTable<T>({
     return () => io.disconnect();
   }, [virtual, onEndReached, areaHeight, reachEnd]);
 
-  // Titles on cut cells: measured when the rows shown, their values or the
-  // columns change and when the table's width does, at most once a frame
+  // Titles on cut cells: measured when the rows shown, their values, order
+  // or columns change and when the table's width does, at most once a frame
   // (not on every render: a hover or a selection changes no text), and not
   // while a load runs (once it is over).
   const titleFrame = useRef(0);
@@ -246,7 +246,7 @@ export function DataTable<T>({
     });
   }, []);
   const firstShown = items[0]?.index ?? 0;
-  useEffect(() => retitle(), [retitle, loading, data, allColumns, density, firstShown, lastIndex]);
+  useEffect(() => retitle(), [retitle, loading, rows, allColumns, density, firstShown, lastIndex]);
   useEffect(() => {
     const table = tableRef.current;
     if (!table || typeof ResizeObserver === "undefined") return;

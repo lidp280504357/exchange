@@ -20,7 +20,7 @@ export default {
 
       siteCheck: "请确认你访问的是",
       securityNote: "{{brand}} 不会以任何理由索要你的密码或验证码，请勿泄露给他人。",
-      simulated: "测试环境 · 所有资金均为模拟",
+      simulated: "测试模式 · 所有资金均为模拟",
       email: "邮箱",
       phone: "手机号",
       identifier: "邮箱 / 手机号",
@@ -137,7 +137,7 @@ export default {
 
       siteCheck: "Make sure you are on",
       securityNote: "{{brand}} will never ask for your password or codes. Do not share them with anyone.",
-      simulated: "Test environment · every balance is simulated",
+      simulated: "Test mode · every balance is simulated",
       email: "Email",
       phone: "Phone",
       identifier: "Email / phone",

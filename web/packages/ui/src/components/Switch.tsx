@@ -11,6 +11,11 @@ export type SwitchProps = {
   /** Put the label before the switch (settings rows). */
   labelFirst?: boolean;
   size?: "sm" | "md";
+  /**
+   * A 44 px touch target around the switch on touch screens (the default);
+   * false in rows lower than that, where it would reach into the next ones.
+   */
+  hitArea?: boolean;
   disabled?: boolean;
   name?: string;
   id?: string;
@@ -25,7 +30,7 @@ const sizes = {
 
 /** Switch is an on/off toggle for settings that apply at once. */
 export function Switch({
-  checked, defaultChecked, onCheckedChange, label, description, labelFirst, size = "md", disabled, name, id, className,
+  checked, defaultChecked, onCheckedChange, label, description, labelFirst, size = "md", hitArea = true, disabled, name, id, className,
   "aria-label": ariaLabel,
 }: SwitchProps) {
   const auto = useId();
@@ -42,7 +47,8 @@ export function Switch({
       aria-label={ariaLabel}
       className={cn(
         // hit-area: a 44 px touch target on touch screens, the look unchanged.
-        "hit-area relative inline-flex shrink-0 cursor-pointer items-center rounded-full bg-bg-3 p-0.5 transition-colors duration-[var(--t-base)]",
+        hitArea && "hit-area",
+        "relative inline-flex shrink-0 cursor-pointer items-center rounded-full bg-bg-3 p-0.5 transition-colors duration-[var(--t-base)]",
         "data-[state=checked]:bg-brand disabled:cursor-not-allowed disabled:opacity-50",
         s.root,
         !label && className,

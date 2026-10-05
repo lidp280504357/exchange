@@ -213,6 +213,7 @@ export interface components {
             /** @description Sorts help articles within their category. */
             order: number;
             title: string;
+            /** @description The article's own summary, else the first paragraph of its body as the sites show it in the exchange's mode (the mode blocks applied), at most 140 characters. */
             summary: string;
             /** Format: date-time */
             published_at: string;

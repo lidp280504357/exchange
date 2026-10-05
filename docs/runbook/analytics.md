@@ -14,7 +14,7 @@
 | `orders` | 订单受理时的属性（方向、类型、TIF、价格、数量、冻结） | `order.OrderAccepted`（现货与合约） |
 | `order_updates` | 订单每次变化：NEW / OPEN / PARTIALLY_FILLED / FILLED / CANCELED / REJECTED、累计成交、撤单原因或拒绝码、引擎 sequence | `order.events` 与 `derivatives.order.events` 全部六种事件 |
 | `orders_state` | 每个订单折叠后的一行（AggregatingMergeTree，迁移 clickhouse 00007，审查 B58）：受理属性、按 (sequence, occurred_at) 最新的状态、累计成交与原因、第一次与最后一次变化的时间；键以订单 ID 的 UUIDv7 时间开头 | `orders` 与 `order_updates` 的两个物化视图（`orders_state_orders`、`orders_state_updates`），每次插入即折叠；折叠都是 max/min/any，同一行写两次不变 |
-| `orders_current`（视图） | 每个订单的最新状态 + 受理属性（资金检查就被拒的订单没有受理属性），列名与类型同以前 | `orders_state FINAL`：2026-10-05 起不再每次从 190 万行重算，后台订单列表从 2–14 s 降到约 60 ms |
+| `orders_current`（视图） | 每个订单的最新状态 + 受理属性（资金检查就被拒的订单没有受理属性），列名与类型同以前；另有 `created_key`（订单 ID 的 UUIDv7 时间，即 `orders_state` 的键与分区，迁移 clickhouse 00008）：按时间范围查询时同时限定它，就只读那一段（订单第一次变化晚于 ID 生成，`created_at ≥ created_key`，实测最多晚 7 分钟，范围起点提前一小时即可） | `orders_state FINAL`：2026-10-05 起不再每次从 190 万行重算，后台订单列表从 2–14 s 降到 60–180 ms（全表读，随订单数增长；限定 `created_key` 的范围读约 20 ms） |
 | `wallet_deposits` | 每笔充值的最新快照（状态、确认数、是否未认领、入账 journal） | `wallet.deposit.events`（地址分配事件除外） |
 | `wallet_withdrawals` | 每笔提现的最新快照（状态、手续费、交易哈希、风控原因） | `wallet.withdrawal.events` |
 | `candles_1m` | 一分钟 K 线（开高低收、成交量、成交额、笔数） | 每批带成交的分钟由 `trades FINAL` 重新计算，最新一次计算生效；图表用平台自己成交的品种（ASTRA-USDT、ASTRA-USDT-PERP），没有成交的分钟由 `market.candle.flats` 的平盘分钟写入（开关 `market.flat_minutes` 打开时，下一笔成交被市场服务应用时才发出，最新成交之后的分钟暂缺；笔数 0，`updated_at` 是分钟开始，那一分钟有成交时被成交算出的行覆盖；2026-10-04 起只向前，见 [market-data.md](market-data.md)） |
@@ -35,14 +35,14 @@
 读模型在事件之后才出现（任务 12），analytics-consumer 启动后在后台把 `events` 里已有的订单、成交、钱包事件按主题、按时间分页（每页 5,000）投影一遍，完成后在 `read_model_backfills` 记回填名，以后不再执行；失败每分钟重试。与实时消费同时写同一行没有问题（ReplacingMergeTree 折叠，K 线以最新计算为准）。阶段 3 加了合约读模型，回填名改为 `read-models-v2`：升级后第一次启动会把全部读模型主题（现货与合约）重新投影一遍，已有的行折叠掉。需要重算：
 
 ```sql
-TRUNCATE TABLE trades; TRUNCATE TABLE orders; TRUNCATE TABLE order_updates;
+TRUNCATE TABLE trades; TRUNCATE TABLE orders; TRUNCATE TABLE order_updates; TRUNCATE TABLE orders_state;
 TRUNCATE TABLE wallet_deposits; TRUNCATE TABLE wallet_withdrawals; TRUNCATE TABLE candles_1m;
 TRUNCATE TABLE derivatives_positions; TRUNCATE TABLE derivatives_fills; TRUNCATE TABLE derivatives_funding;
 TRUNCATE TABLE derivatives_liquidations;
 DELETE FROM read_model_backfills WHERE name = 'read-models-v2';
 ```
 
-然后重启 analytics-consumer（`ch_query` 或 `clickhouse-client` 执行上面的语句）。新增读模型时换一个回填名。平盘分钟也在回填的主题里（`market.candle.flats` 的事件留在 `events`），重算后照样写回 `candles_1m`。
+然后重启 analytics-consumer（`ch_query` 或 `clickhouse-client` 执行上面的语句）。`orders_state` 由物化视图从 `orders` 与 `order_updates` 写入，清空那两张表时必须一起清空它：它按 max/min 折叠，清空前折进去的值不会被重新投影的行覆盖，会一直留在 `orders_current` 里。新增读模型时换一个回填名。平盘分钟也在回填的主题里（`market.candle.flats` 的事件留在 `events`），重算后照样写回 `candles_1m`。
 
 ## 常用查询
 

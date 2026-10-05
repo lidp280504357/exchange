@@ -66,11 +66,14 @@ type summaryJSON struct {
 	Version  int  `json:"version"`
 }
 
-func summaryOf(a domain.Article, loc string) summaryJSON {
+// summaryOf is a in a list, in the language loc and the exchange's mode
+// (test or live).
+func summaryOf(a domain.Article, loc string, test bool) summaryJSON {
 	t, ok := a.Text(loc)
 	if strings.TrimSpace(t.Summary) == "" {
-		// A list carries no body: its summary, else the body's first paragraph.
-		t.Summary = domain.Excerpt(t.Body)
+		// A list carries no body: its summary, else the first paragraph the
+		// body shows in the mode.
+		t.Summary = domain.Excerpt(t.Body, test)
 	}
 	return summaryJSON{
 		Slug: a.Slug, Category: a.Category, Pinned: a.Pinned, Order: a.Order, Title: t.Title, Summary: t.Summary,
@@ -94,10 +97,10 @@ func (h *Content) published(section string) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		loc := locale(r)
+		loc, test := locale(r), h.Svc.Mode.Test(r.Context())
 		out := make([]summaryJSON, 0, len(list))
 		for _, a := range list {
-			out = append(out, summaryOf(a, loc))
+			out = append(out, summaryOf(a, loc, test))
 		}
 		var nextCursor *string
 		if next != "" {
@@ -121,7 +124,7 @@ func (h *Content) publishedArticle(section string) http.HandlerFunc {
 		httpx.WriteJSON(w, http.StatusOK, struct {
 			summaryJSON
 			Body string `json:"body"`
-		}{summaryOf(a, loc), t.Body})
+		}{summaryOf(a, loc, h.Svc.Mode.Test(r.Context())), t.Body})
 	}
 }
 

@@ -24,7 +24,7 @@ func (f *fakeMode) TestMode(context.Context) (bool, error) {
 }
 
 // The exchange's mode for the content (design 2026-10-04 §4.4): live until
-// a first read; read every 30 seconds; a failed read keeps the last mode
+// a first read; read every 10 seconds; a failed read keeps the last mode
 // and is not tried again for 5 seconds.
 func TestContentMode(t *testing.T) {
 	now := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
@@ -44,10 +44,10 @@ func TestContentMode(t *testing.T) {
 	if !m.Test(ctx) || src.reads != 2 {
 		t.Fatalf("read: test mode after %d reads", src.reads)
 	}
-	now = now.Add(29 * time.Second)
+	now = now.Add(9 * time.Second)
 	src.test = false
 	if !m.Test(ctx) || src.reads != 2 {
-		t.Fatalf("within 30 seconds the mode read stands (%d reads)", src.reads)
+		t.Fatalf("within 10 seconds the mode read stands (%d reads)", src.reads)
 	}
 	now = now.Add(2 * time.Second)
 	src.err = errors.New("down")
@@ -61,7 +61,7 @@ func TestContentMode(t *testing.T) {
 	}
 
 	// A read that panics leaves the next caller free to read.
-	now = now.Add(31 * time.Second)
+	now = now.Add(11 * time.Second)
 	src.boom, src.test = true, true
 	func() {
 		defer func() { _ = recover() }()

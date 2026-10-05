@@ -66,7 +66,7 @@ describe("DataTable", () => {
     render(<DataTable columns={columns} data={data} getRowId={(r) => r.id} selectable density="compact" onRowSelectionChange={onSel} />);
     const cell = rowOf("ord-a")?.querySelector("td");
     if (!cell) throw new Error("no cell");
-    expect(cell.querySelector('[role="checkbox"]')?.className).toContain("after:hidden");
+    expect(cell.querySelector('[role="checkbox"]')?.className).not.toContain("hit-area");
     fireEvent.click(cell);
     expect(onSel).toHaveBeenLastCalledWith({ "ord-a": true });
   });
@@ -148,6 +148,16 @@ describe("DataTable", () => {
     widths(amount, 80, 80);
     titleCutCells(table);
     expect(amount?.getAttribute("title")).toBe("ten units");
+  });
+
+  it("measures the titles again when a sort reorders the rows", async () => {
+    render(<DataTable columns={columns} data={data} getRowId={(r) => r.id} />);
+    await frame();
+    const name = rowOf("ord-a")?.querySelector("td");
+    widths(name, 120, 80);
+    fireEvent.click(screen.getByRole("button", { name: /Amount/ }));
+    await frame();
+    expect(name?.getAttribute("title")).toBe("Alpha");
   });
 
   it("measures the titles once a load is over, not while it runs", async () => {

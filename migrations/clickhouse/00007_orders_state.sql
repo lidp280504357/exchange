@@ -28,6 +28,10 @@ CREATE TABLE IF NOT EXISTS orders_state
     quote_amount    SimpleAggregateFunction(any, Nullable(Decimal128(18))),
     -- (sequence, occurred_at, status, filled_quantity, filled_quote, reason)
     -- of the latest update; an order's own row holds the least such tuple.
+    -- Two updates of one order never share a sequence (the engine numbers
+    -- each event; the trading service's 0 is either its OrderAccepted or
+    -- its OrderRejected), so the status never decides; if two did, the
+    -- greater string would win, NEW over CANCELED (review BK).
     last            SimpleAggregateFunction(max, Tuple(Int64, DateTime64(3, 'UTC'), String, Decimal128(18), Decimal128(18), String)),
     -- The first and the last update; an order's own row holds the far
     -- future and the epoch.

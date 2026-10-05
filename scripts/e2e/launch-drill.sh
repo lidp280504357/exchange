@@ -204,15 +204,18 @@ echo "== go live: the legal pages and the home hero, published from the defaults
 publish_default() { # publish_default SECTION DIR SLUG
   local section=$1 dir=$2 slug=$3 zh en a
   acall GET "/admin/v1/articles?section=$section" ""
-  if [[ $(jq -r --arg s "$slug" '[.articles[] | select(.slug == $s)] | length' <<<"$BODY") != 0 ]]; then
+  # The console's own page for the live site stays (a TEST-only one does
+  # not count: live, the site would show the bundled draft).
+  if [[ $(jq -r --arg s "$slug" '[.articles[] | select(.slug == $s and .modes != "TEST")] | length' <<<"$BODY") != 0 ]]; then
     printf 'ok   %s/%s: the console has its own already (%s)\n' "$section" "$slug" \
-      "$(jq -r --arg s "$slug" '.articles[] | select(.slug == $s) | .status' <<<"$BODY")"
+      "$(jq -r --arg s "$slug" '.articles[] | select(.slug == $s and .modes != "TEST") | .status' <<<"$BODY")"
     return 0
   fi
   zh=$(md_text "$CONTENT/$dir/$slug.zh-CN.md" zh-CN)
   en=$(md_text "$CONTENT/$dir/$slug.en.md" en)
+  # FORMAL, as the console's 以默认稿发布 makes it: the live page.
   acall POST /admin/v1/articles "$(jq -nc --arg sec "$section" --arg slug "$slug" --argjson zh "$zh" --argjson en "$en" \
-    '{section: $sec, slug: $slug, category: "", pinned: false, order: 0, texts: [$zh, $en], reason: "launch drill: publish the default"}')"
+    '{section: $sec, slug: $slug, category: "", pinned: false, order: 0, modes: "FORMAL", texts: [$zh, $en], reason: "launch drill: publish the default"}')"
   expect 201 - "$section/$slug from its default"
   a=$BODY
   CREATED+=("$(jq -r .id <<<"$a")")

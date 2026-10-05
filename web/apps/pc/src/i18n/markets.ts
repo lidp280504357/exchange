@@ -31,7 +31,7 @@ export default {
         whyTitle: "为什么选择 {{brand}}",
         whyHint: "从行情到下单，从充值到合约，每一步都清晰可见",
         why: {
-          wallet: { title: "多链充提", desc: "按网络充值与提现，页面列出确认数、最小额与预计到账时间；测试环境目前开放 Sepolia 测试网 ETH。" },
+          wallet: { title: "多链充提", desc: "按网络充值与提现，页面列出确认数、最小额与预计到账时间。" },
           futures: {
             title: "永续合约",
             desc: "BTC、ETH 的 USDT 永续合约，最高 {{leverage}} 倍杠杆，逐仓与全仓、止盈止损与只减仓。",
@@ -50,7 +50,7 @@ export default {
             descCredits: "邮箱注册并设置密码，账户自动获得 {{credits}}。",
             action: "立即注册",
           },
-          deposit: { title: "充值", desc: "选择币种和网络，把测试网资产转入你的专属地址，达到确认数后自动到账。", action: "去充值" },
+          deposit: { title: "充值", desc: "选择币种和网络，把资产转入你的专属地址，达到确认数后自动到账。", action: "去充值" },
           trade: { title: "开始交易", desc: "限价、市价与永续合约，实时盘口与 K 线，成交即时推送。", action: "去交易" },
         },
         stepDone: "已完成",
@@ -171,7 +171,7 @@ export default {
         why: {
           wallet: {
             title: "Deposits by network",
-            desc: "Deposit and withdraw per network, with confirmations, minimums and usual times shown up front. The test environment accepts Sepolia test ETH.",
+            desc: "Deposit and withdraw per network, with confirmations, minimums and usual times shown up front.",
           },
           futures: {
             title: "Perpetual futures",
@@ -194,7 +194,7 @@ export default {
             descCredits: "Sign up with your email and a password; the account gets {{credits}}.",
             action: "Sign up",
           },
-          deposit: { title: "Deposit", desc: "Pick a coin and a network, send test-network assets to your own address, and it is credited after the confirmations.", action: "Deposit" },
+          deposit: { title: "Deposit", desc: "Pick a coin and a network, send it to your own address, and it is credited after the confirmations.", action: "Deposit" },
           trade: { title: "Trade", desc: "Limit, market and perpetual futures orders with a live order book, candles and instant fills.", action: "Trade" },
         },
         stepDone: "Done",

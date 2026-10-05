@@ -3,6 +3,7 @@ import { ApiError } from "../api/errors";
 import { useContentMode } from "../platform/hooks";
 import { useSettings } from "../settings/store";
 import { frontString, parseFrontMatter } from "./frontmatter";
+import { useModeKnown } from "./hooks";
 import { articleModes, bundledFile, CONTENT_FALLBACK, fetchOne, shownIn, type ContentLocale } from "./loader";
 import { renderByMode, type ContentMode } from "./markdown";
 
@@ -49,5 +50,11 @@ export async function loadHero(locale: ContentLocale, mode: ContentMode): Promis
 export function useHero() {
   const locale = useSettings((s) => s.locale);
   const mode = useContentMode();
-  return useQuery({ queryKey: ["content", "home", locale, mode, "home-hero"], queryFn: () => loadHero(locale, mode), staleTime: 60_000 });
+  const known = useModeKnown();
+  return useQuery({
+    queryKey: ["content", "home", locale, mode, "home-hero"],
+    queryFn: () => loadHero(locale, mode),
+    staleTime: 60_000,
+    enabled: known,
+  });
 }

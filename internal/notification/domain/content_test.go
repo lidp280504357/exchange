@@ -14,13 +14,53 @@ func TestExcerptIsTheFirstParagraphAsText(t *testing.T) {
 		"# Only a heading": "",
 		"":                 "",
 	} {
-		if got := Excerpt(body); got != want {
+		if got := Excerpt(body, false); got != want {
 			t.Errorf("Excerpt(%q) = %q, want %q", body, got, want)
 		}
 	}
-	long := Excerpt(strings.Repeat("长", 300))
+	long := Excerpt(strings.Repeat("长", 300), true)
 	if utf8.RuneCountInString(long) != excerptMax || !strings.HasSuffix(long, "…") {
 		t.Fatalf("a long paragraph: %d runes %q", utf8.RuneCountInString(long), long[len(long)-6:])
+	}
+}
+
+// A summary taken from the body is the first paragraph the mode shows, not
+// a mode block's marker or the other mode's text (review BK).
+func TestExcerptByMode(t *testing.T) {
+	body := ":::test\n本站处于**测试模式**，资金均为模拟。\n:::\n\n:::formal\n充值前请核对网络。\n:::\n\n第二段"
+	if got := Excerpt(body, true); got != "本站处于测试模式，资金均为模拟。" {
+		t.Errorf("test mode: %q", got)
+	}
+	if got := Excerpt(body, false); got != "充值前请核对网络。" {
+		t.Errorf("live: %q", got)
+	}
+	if got := Excerpt(":::test\n测试段落\n:::\n通用段落", false); got != "通用段落" {
+		t.Errorf("after the other mode's block: %q", got)
+	}
+}
+
+// InMode keeps what core's renderByMode keeps (design 2026-10-04 §4.4).
+func TestInMode(t *testing.T) {
+	for _, c := range []struct {
+		body string
+		test bool
+		want string
+	}{
+		{"a\n:::test\nb\n:::\nc", true, "a\nb\nc"},
+		{"a\n:::test\nb\n:::\nc", false, "a\nc"},
+		{"a\r\n  :::formal  \r\nb\r\n:::\r\nc", false, "a\nb\nc"},
+		{":::formal\nb", false, "b"}, // an unclosed block runs to the end
+		{":::formal\nb", true, ""},
+		{":::test\n:::formal\nx\n:::\ny", true, ":::formal\nx\ny"}, // no nesting: a marker in a block is text
+		{":::test\n:::formal\nx\n:::\ny", false, "y"},
+		{":::note\nx\n:::", false, ":::note\nx\n:::"},                          // other containers stay
+		{"```md\n:::test\n```\n:::test\nz\n:::", false, "```md\n:::test\n```"}, // fenced code stays
+		{"~~~~\n~~~\n:::test\n~~~~\nw", false, "~~~~\n~~~\n:::test\n~~~~\nw"},  // closed by as many
+		{"    :::test\nv", false, "    :::test\nv"},                            // indented code
+	} {
+		if got := InMode(c.body, c.test); got != c.want {
+			t.Errorf("InMode(%q, %v) = %q, want %q", c.body, c.test, got, c.want)
+		}
 	}
 }
 

@@ -345,6 +345,9 @@ components:
           type: string
         summary:
           type: string
+          description: >-
+            The article's own summary, else the first paragraph of its body as the sites show it in the exchange's mode
+            (the mode blocks applied), at most 140 characters.
         published_at:
           type: string
           format: date-time

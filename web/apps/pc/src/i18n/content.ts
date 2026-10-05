@@ -6,7 +6,7 @@ export default {
       breadcrumb: "当前位置",
       announcements: {
         title: "公告中心",
-        subtitle: "产品更新、功能上线与测试环境说明",
+        subtitle: "产品更新、功能上线与平台通知",
         pinned: "置顶",
         readMore: "阅读全文",
         empty: "暂无公告",
@@ -53,7 +53,7 @@ export default {
       breadcrumb: "Breadcrumb",
       announcements: {
         title: "Announcements",
-        subtitle: "Product updates, new features and notes on the test environment",
+        subtitle: "Product updates, new features and platform notices",
         pinned: "Pinned",
         readMore: "Read more",
         empty: "No announcements yet",

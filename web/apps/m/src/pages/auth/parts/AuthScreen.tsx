@@ -1,3 +1,4 @@
+import { useTestMode } from "@exchange/core/platform/index";
 import { page, Skeleton, SkeletonLines } from "@exchange/ui";
 import { Lock, ShieldCheck } from "lucide-react";
 import { motion } from "motion/react";
@@ -15,13 +16,15 @@ export type AuthScreenProps = {
 /**
  * AuthScreen is the full-screen column of sign-in, sign-up and reset
  * inside AuthShell (design §7.2): a large title, the form, the links, and
- * at the bottom the address to check and a short security note. A new
+ * at the bottom the address to check and a short security note (in test
+ * mode, that the funds are simulated). A new
  * step (key) fades in, rises 8 px and starts at the top (the long sign-up
  * form is left scrolled down when its code step opens).
  */
 export function AuthScreen({ title, subtitle, footer, children }: AuthScreenProps) {
   const { t } = useTranslation();
   const origin = globalThis.location?.origin ?? "https://m.astras.vip";
+  const testMode = useTestMode().enabled;
   useEffect(() => {
     if (window.scrollY > 0) window.scrollTo(0, 0);
   }, []);
@@ -43,7 +46,8 @@ export function AuthScreen({ title, subtitle, footer, children }: AuthScreenProp
         <p className="flex items-start gap-1.5">
           <ShieldCheck size={12} className="mt-0.5 shrink-0 text-success" aria-hidden />
           <span>
-            {t("mAuth.securityNote")} {t("mAuth.simulated")}
+            {t("mAuth.securityNote")}
+            {testMode && ` ${t("mAuth.simulated")}`}
           </span>
         </p>
       </div>

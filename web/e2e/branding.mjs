@@ -24,8 +24,9 @@ const LAUNCH = process.env.LAUNCH === "1";
 const CONTENT = process.env.CONTENT ?? (LAUNCH ? "formal" : "");
 const TERMS_TITLE = process.env.TERMS_TITLE ?? "";
 // What a site in test mode says that a live one must not: the 测试模式
-// badges and the welcome-credit promises (zh-CN, the language of the run).
-const TEST_ONLY = ["测试模式", "注册即得", "注册即领"];
+// badges, the welcome-credit promises and the test environment's words
+// (zh-CN, the language of the run).
+const TEST_ONLY = ["测试模式", "注册即得", "注册即领", "测试环境", "模拟", "Sepolia", "测试网"];
 // The help pages' test-only words (design §4.4: the drafts' :::test blocks).
 const HELP_TEST_WORDS = ["测试环境", "模拟", "Sepolia", "10,000"];
 const HELP = { fees: "费率说明", deposit: "如何充值", faq: "常见问题" };
@@ -89,18 +90,24 @@ try {
   }
   if (CONTENT) {
     // The help pages as the mode renders them: live without the test-only
-    // words, in test mode with them (deposit and fees name Sepolia, the FAQ
-    // the simulated funds).
-    const want = { fees: "Sepolia", deposit: "Sepolia", faq: "模拟" };
+    // words, in test mode with their test blocks, which all name Sepolia
+    // (the page's own test-mode notice says 模拟, so that word proves
+    // nothing there). The article is up once its heading is: the sidebar
+    // lists the same titles.
     for (const [slug, title] of Object.entries(HELP)) {
       await go(`/help/${slug}`);
-      await page.waitForFunction((t) => document.body.innerText.includes(t), { timeout: 20000 }, title);
-      const text = await page.evaluate(() => document.querySelector("main")?.innerText ?? document.body.innerText);
+      await page.waitForFunction((t) => [...document.querySelectorAll("h1")].some((h) => h.textContent?.trim() === t), { timeout: 20000 }, title);
       if (CONTENT === "formal") {
+        const text = await page.evaluate(() => document.querySelector("main")?.innerText ?? document.body.innerText);
         const found = HELP_TEST_WORDS.filter((w) => text.includes(w));
         if (found.length) throw new Error(`/help/${slug} live still says ${JSON.stringify(found)}`);
-      } else if (!text.includes(want[slug])) {
-        throw new Error(`/help/${slug} in test mode does not say ${want[slug]}`);
+      } else {
+        // The site renders before the profile says test mode: wait for it.
+        await page
+          .waitForFunction(() => (document.querySelector("main")?.innerText ?? document.body.innerText).includes("Sepolia"), { timeout: 20000 })
+          .catch(() => {
+            throw new Error(`/help/${slug} in test mode does not say Sepolia`);
+          });
       }
     }
     ok(`${SITE}: the help pages (fees, deposit, FAQ) show the ${CONTENT === "formal" ? "live" : "test"} content`);

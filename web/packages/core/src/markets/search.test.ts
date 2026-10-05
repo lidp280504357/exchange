@@ -12,8 +12,8 @@ const rows = [
 ];
 
 describe("searchMarkets", () => {
-  it("puts the coin's own code first, then codes that start with the query, then names", () => {
-    expect(searchMarkets(rows, " eth ").map((r) => r.symbol)).toEqual(["ETH-BTC", "ETH-USDT", "ETHFI-USDT", "ENA-USDT", "ENS-USDT", "ETC-USDT"]);
+  it("puts the coin's own code first (its USDT pair before its others), then codes that start with the query, then names", () => {
+    expect(searchMarkets(rows, " eth ").map((r) => r.symbol)).toEqual(["ETH-USDT", "ETH-BTC", "ETHFI-USDT", "ENA-USDT", "ENS-USDT", "ETC-USDT"]);
   });
   it("finds a quote in the symbol and keeps everything for an empty query", () => {
     expect(searchMarkets(rows, "btc").map((r) => r.symbol)).toEqual(["BTC-USDT", "ETH-BTC"]);

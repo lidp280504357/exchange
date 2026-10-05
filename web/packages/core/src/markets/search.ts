@@ -18,13 +18,19 @@ export function matchRank(q: string, m: Searchable): number {
   return -1;
 }
 
-/** searchMarkets keeps the markets a query finds, the best matches first and the list's order within a rank. */
+/** mainFirst puts a coin's main market, its USDT pair, before its others ("ETH" and Enter open ETH-USDT). */
+const mainFirst = (m: Searchable) => (m.symbol === `${m.base}-USDT` ? 0 : 1);
+
+/**
+ * searchMarkets keeps the markets a query finds, the best matches first;
+ * within a rank the coins' USDT pairs first, then the list's order.
+ */
 export function searchMarkets<T extends Searchable>(rows: readonly T[], query: string): T[] {
   const q = query.trim().toUpperCase();
   if (!q) return [...rows];
   return rows
     .map((r, i) => ({ r, i, rank: matchRank(q, r) }))
     .filter((x) => x.rank >= 0)
-    .sort((a, b) => a.rank - b.rank || a.i - b.i)
+    .sort((a, b) => a.rank - b.rank || mainFirst(a.r) - mainFirst(b.r) || a.i - b.i)
     .map((x) => x.r);
 }

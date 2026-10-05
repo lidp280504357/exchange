@@ -139,10 +139,11 @@ var (
 const excerptMax = 140
 
 // Excerpt is the first paragraph of a Markdown body as plain text, at most
-// 140 characters: an article's summary when none was written (the sites
-// take the same from a body they have).
-func Excerpt(body string) string {
-	for _, block := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n\n") {
+// 140 characters, as the sites show the body in the mode (test or live):
+// an article's summary when none was written (the sites take the same from
+// a body they have).
+func Excerpt(body string, test bool) string {
+	for _, block := range strings.Split(InMode(body, test), "\n\n") {
 		block = strings.TrimSpace(block)
 		if block == "" || notParagraph.MatchString(block) {
 			continue
@@ -157,6 +158,61 @@ func Excerpt(body string) string {
 		return text
 	}
 	return ""
+}
+
+// The lines that open and close a block of one mode and that open fenced
+// code, as core's renderByMode reads them (design 2026-10-04 §4.4).
+var (
+	modeOpen  = regexp.MustCompile(`^ {0,3}:::(test|formal)[ \t]*$`)
+	modeClose = regexp.MustCompile(`^ {0,3}:::[ \t]*$`)
+	fenceOpen = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})[ \\t]*[^\\s`]*[^`]*$")
+)
+
+// InMode is a Markdown body as the sites render it in one mode, like core's
+// renderByMode: a block from a line ":::test" or ":::formal" to a line
+// ":::" (or the end) stays in its own mode only, without its marker lines;
+// blocks do not nest, other ":::" lines and fenced code stay as they are.
+func InMode(body string, test bool) string {
+	mode := "formal"
+	if test {
+		mode = "test"
+	}
+	var out []string
+	block, fence := "", ""
+	for _, line := range strings.Split(strings.ReplaceAll(strings.ReplaceAll(body, "\r\n", "\n"), "\r", "\n"), "\n") {
+		keep := block == "" || block == mode
+		switch m := modeOpen.FindStringSubmatch(line); {
+		case fence != "":
+			if closesFence(line, fence) {
+				fence = ""
+			}
+		case block == "" && m != nil:
+			block = m[1]
+			continue
+		case block != "" && modeClose.MatchString(line):
+			block = ""
+			continue
+		default:
+			if f := fenceOpen.FindStringSubmatch(line); f != nil {
+				fence = f[1]
+			}
+		}
+		if keep {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// closesFence reports whether line closes fenced code opened by fence: at
+// most three spaces in, at least as many of its characters, nothing after.
+func closesFence(line, fence string) bool {
+	s := strings.TrimLeft(line, " ")
+	if len(line)-len(s) > 3 {
+		return false
+	}
+	n := len(s) - len(strings.TrimLeft(s, fence[:1]))
+	return n >= len(fence) && strings.TrimRight(s[n:], " \t") == ""
 }
 
 // Visible reports whether the sites show the article at now.

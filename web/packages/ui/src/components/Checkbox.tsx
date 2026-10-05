@@ -11,6 +11,11 @@ export type CheckboxProps = {
   description?: ReactNode;
   disabled?: boolean;
   invalid?: boolean;
+  /**
+   * A 44 px touch target around the box on touch screens (the default);
+   * false in rows lower than that, where it would reach into the next ones.
+   */
+  hitArea?: boolean;
   name?: string;
   id?: string;
   className?: string;
@@ -22,7 +27,8 @@ export type CheckboxProps = {
  * a dash (a table's "select all" with some rows selected).
  */
 export function Checkbox({
-  checked, defaultChecked, onCheckedChange, label, description, disabled, invalid, name, id, className, "aria-label": ariaLabel,
+  checked, defaultChecked, onCheckedChange, label, description, disabled, invalid, hitArea = true, name, id, className,
+  "aria-label": ariaLabel,
 }: CheckboxProps) {
   const auto = useId();
   const boxId = id ?? auto;
@@ -38,7 +44,8 @@ export function Checkbox({
       onCheckedChange={(c) => onCheckedChange?.(c === true)}
       className={cn(
         // hit-area: a 44 px touch target on touch screens, the look unchanged.
-        "hit-area grid size-4 shrink-0 place-items-center rounded-1 border bg-bg-2 text-brand-fg transition-colors duration-[var(--t-fast)]",
+        hitArea && "hit-area",
+        "grid size-4 shrink-0 place-items-center rounded-1 border bg-bg-2 text-brand-fg transition-colors duration-[var(--t-fast)]",
         "data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=indeterminate]:border-brand data-[state=indeterminate]:bg-brand",
         "disabled:cursor-not-allowed disabled:opacity-50",
         invalid ? "border-danger" : "border-line-2 hover:border-fg-3",

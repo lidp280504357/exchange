@@ -11,15 +11,18 @@ import (
 // The exchange's mode is read this often from the platform profile, and
 // after a failed read retried this much later.
 const (
-	modeTTL   = 30 * time.Second
+	modeTTL   = 10 * time.Second
 	modeRetry = 5 * time.Second
 	// modeWait bounds a read.
 	modeWait = 2 * time.Second
 )
 
 // Mode says which content the sites get (design 2026-10-04 §4.4): the
-// platform profile's test mode, read at most every 30 seconds, so a switch
-// of mode swaps the content within a minute (the sites cache 15 seconds).
+// platform profile's test mode, read at most every 10 seconds. The sites
+// read the profile every minute and cache the content 15 seconds, so a
+// switch of mode swaps everything they show within about a minute; read
+// less often here, the sites' new mode met the old content for longer
+// (review BK).
 // Until a first read succeeds every caller tries one; afterwards one
 // caller reads when the mode is due and the others go on with the last
 // one, which also stands while the profile cannot be read. A failed read

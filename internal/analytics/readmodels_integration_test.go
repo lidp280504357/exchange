@@ -50,7 +50,10 @@ func TestReadModels(t *testing.T) {
 		}
 		batch = append(batch, kafka.Delivery{Topic: topic, Envelope: env})
 	}
-	buy, sell, buyer, seller := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	// Order IDs are UUIDv7, as the trading service makes them: orders_state
+	// is keyed and partitioned by their time.
+	orderID := func() string { return uuid.Must(uuid.NewV7()).String() }
+	buy, sell, buyer, seller := orderID(), orderID(), uuid.NewString(), uuid.NewString()
 	add(event.TopicOrder, &orderv1.OrderAccepted{Order: &orderv1.Order{
 		OrderId: buy, UserId: buyer, Symbol: "ETH-BTC", Side: orderv1.Side_SIDE_BUY, Type: orderv1.OrderType_ORDER_TYPE_LIMIT,
 		TimeInForce: orderv1.TimeInForce_TIME_IN_FORCE_GTC, Price: "0.03", Quantity: "2",
@@ -75,7 +78,7 @@ func TestReadModels(t *testing.T) {
 	add(event.TopicOrder, &orderv1.OrderFilled{
 		OrderId: sell, UserId: seller, Symbol: "ETH-BTC", Sequence: 12, FilledQuantity: "1", FilledQuote: "0.03",
 	}, at.Add(time.Minute))
-	rejected := uuid.NewString()
+	rejected := orderID()
 	add(event.TopicOrder, &orderv1.OrderRejected{
 		OrderId: rejected, UserId: buyer, Symbol: "ETH-BTC", ReasonCode: "LEDGER_INSUFFICIENT_BALANCE",
 	}, at.Add(2*time.Minute))
@@ -170,9 +173,16 @@ func TestReadModels(t *testing.T) {
 		}
 		var status, side, reason string
 		var filled decimal.Decimal
-		if err := conn.QueryRow(ctx, `SELECT status, side, filled_quantity FROM orders_current WHERE order_id = ?`, buy).
-			Scan(&status, &side, &filled); err != nil || status != "PARTIALLY_FILLED" || side != "BUY" || !filled.Equal(decimal.NewFromInt(1)) {
-			t.Fatalf("%s: buy order %s %s %s (%v)", what, status, side, filled, err)
+		var created, updated time.Time
+		if err := conn.QueryRow(ctx, `SELECT status, side, filled_quantity, created_at, updated_at FROM orders_current WHERE order_id = ?`, buy).
+			Scan(&status, &side, &filled, &created, &updated); err != nil || status != "PARTIALLY_FILLED" || side != "BUY" ||
+			!filled.Equal(decimal.NewFromInt(1)) || !created.Equal(at) || !updated.Equal(at.Add(time.Minute)) {
+			t.Fatalf("%s: buy order %s %s %s, %s to %s (%v)", what, status, side, filled, created, updated, err)
+		}
+		var keyed uint8
+		if err := conn.QueryRow(ctx, `SELECT created_key = UUIDv7ToDateTime(order_id, 'UTC') AND created_key > '2026-01-01'
+			FROM orders_current WHERE order_id = ?`, buy).Scan(&keyed); err != nil || keyed != 1 {
+			t.Fatalf("%s: the buy order's created_key is not its ID's time (%v)", what, err)
 		}
 		if err := conn.QueryRow(ctx, `SELECT status, reason FROM orders_current WHERE order_id = ?`, rejected).Scan(&status, &reason); err != nil ||
 			status != "REJECTED" || reason != "LEDGER_INSUFFICIENT_BALANCE" {
@@ -214,6 +224,19 @@ func TestReadModels(t *testing.T) {
 		}
 	}
 	check("live")
+
+	// Late and repeated: the order's open again, and a fill numbered below
+	// the latest that arrives after it (occurred between the two). Neither
+	// moves the order's state or times.
+	batch = nil
+	add(event.TopicOrder, &orderv1.OrderOpened{OrderId: buy, UserId: buyer, Symbol: "ETH-BTC", Sequence: 5}, at)
+	add(event.TopicOrder, &orderv1.OrderPartiallyFilled{
+		OrderId: buy, UserId: buyer, Symbol: "ETH-BTC", Sequence: 11, FilledQuantity: "0.5", FilledQuote: "0.015",
+	}, at.Add(30*time.Second))
+	if err := in.Store(ctx, batch); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	check("late and repeated")
 
 	// The backfill rebuilds the read models from events, once.
 	for _, table := range []string{
