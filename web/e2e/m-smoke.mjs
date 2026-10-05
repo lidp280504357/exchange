@@ -69,6 +69,9 @@ try {
   await page.waitForSelector('[data-testid="assets-total"]', { visible: true, timeout: 30000 });
   await waitText("10,000", 30000);
   ok(`signed up ${email} through the form; the assets tab shows the welcome funds`);
+  // Margin trading for this user alone (web.sh puts the switch back).
+  const marginOn = await t.openMargin();
+  if (marginOn) ok("margin trading opened for this user alone");
   await shot("1-assets");
 
   // 2. The "me" tab (design §7.3) signed in, then out; sign back in with the password.
@@ -148,7 +151,9 @@ try {
   await go("/assets/margin");
   await page.waitForSelector('[data-testid="margin-account-MARGIN_CROSS"]', { visible: true, timeout: 20000 });
   await page.waitForSelector('[data-testid="margin-level"]', { visible: true });
-  if (await page.evaluate(() => document.body.innerText.includes("杠杆交易 · "))) {
+  const marginClosed = await page.evaluate(() => document.body.innerText.includes("杠杆交易 · "));
+  if (marginClosed && marginOn) throw new Error("margin trading was opened for this user, but the margin page says it is not open");
+  if (marginClosed) {
     ok("the margin page shows the cross account and says margin trading is not open to this user");
   } else {
     const marginTransfer = async (direction, amount, done) => {

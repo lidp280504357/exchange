@@ -3,6 +3,7 @@
 // Chrome, the human-check bypass, the dev inbox, the contract check of
 // every API response, and helpers that find elements the way a user does,
 // by their visible text.
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import puppeteer from "puppeteer-core";
 import { loadContracts } from "./contract.mjs";
@@ -64,6 +65,8 @@ export async function start({ app, api, name, device, apiPrefix = "/v1/" }) {
       errors.push("console: " + m.text());
     }
   });
+  // The signed-in user, from the token responses (sign-up, sign-in, refresh).
+  let userId = null;
   page.on("response", async (r) => {
     const type = r.request().resourceType();
     if ((type !== "fetch" && type !== "xhr") || !r.url().includes(apiPrefix)) return;
@@ -74,6 +77,7 @@ export async function start({ app, api, name, device, apiPrefix = "/v1/" }) {
     } catch {
       return; // body unavailable (navigated away)
     }
+    if (typeof body?.user_id === "string" && typeof body?.access_token === "string") userId = body.user_id;
     const path = new URL(r.url()).pathname;
     if (!path.startsWith(apiPrefix) || path.startsWith("/v1/dev/") || path === "/v1/ws") return;
     const problem = contracts.check(r.request().method(), path, r.status(), body);
@@ -87,6 +91,19 @@ export async function start({ app, api, name, device, apiPrefix = "/v1/" }) {
 
   const t = {
     page,
+    /**
+     * openMargin opens margin trading for the signed-in user alone through
+     * web.sh's helper (scripts/e2e/lib/margin-user.sh, put back when web.sh
+     * ends) and reports whether it did: run on their own, the smokes leave
+     * the switch as it is. The services see it within 5 seconds.
+     */
+    async openMargin() {
+      const helper = process.env.MARGIN_USER_HELPER;
+      if (!helper || !userId) return false;
+      execFileSync("bash", [helper, "on", userId], { stdio: "inherit" });
+      await sleep(6000);
+      return true;
+    },
     shot: (label) => (shots ? page.screenshot({ path: `${shots}/${name}-${label}.png`, fullPage: false }) : undefined),
     go: (path) => page.goto(app + path, { waitUntil: "networkidle2" }),
     waitText: (text, timeout = 20000) => page.waitForFunction((s) => document.body.innerText.includes(s), { timeout }, text),

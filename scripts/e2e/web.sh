@@ -7,13 +7,20 @@
 # headless Chrome (skipped when no Chrome is found): the PC site
 # (web/e2e/pc-smoke.mjs), the mobile site (web/e2e/m-smoke.mjs) and the
 # admin console (web/e2e/admin-smoke.mjs, with a throwaway administrator
-# made over ssh).
+# made over ssh). The PC and mobile smokes open margin trading for their own
+# users (lib/margin-user.sh, margin.enabled put back when the script ends),
+# so the script holds the ops lock as the others that change switches.
 #
 #   scripts/e2e/web.sh
 set -euo pipefail
+[[ -n ${OPS_LOCK_HELD:-} ]] || exec "$(dirname "$0")/../ops/lock.sh" run --owner "e2e $(basename "$0")" -- bash "$0" "$@"
 
 # shellcheck source=lib/common.sh
 source "$(dirname "$0")/lib/common.sh"
+MARGIN_USER_HELPER="$(cd "$(dirname "$0")" && pwd)/lib/margin-user.sh"
+export MARGIN_USER_HELPER MARGIN_USER_STATE="$WORK/margin-user"
+# shellcheck disable=SC2016 # expanded when the script ends
+at_exit 'bash "$MARGIN_USER_HELPER" back'
 M_BASE="${M_BASE:-https://m.astras.vip}"
 ADMIN_BASE="${ADMIN_BASE:-https://admin.astras.vip}"
 DESKTOP="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36"

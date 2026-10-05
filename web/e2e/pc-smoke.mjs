@@ -43,6 +43,9 @@ try {
   await waitPath("/assets", 30000);
   await waitText("10,000", 30000);
   ok(`signed up ${email} through the form; the assets page shows the welcome funds`);
+  // Margin trading for this user alone (web.sh puts the switch back).
+  const marginOn = await t.openMargin();
+  if (marginOn) ok("margin trading opened for this user alone");
   await shot("1-assets");
   // The balance table's header sits right on top of its rows: a header stuck
   // 56 px under the top bar once sat 56 px down inside its own scroll
@@ -225,6 +228,7 @@ try {
   await page.waitForSelector('[data-testid="margin-account-MARGIN_CROSS"]', { visible: true, timeout: 20000 });
   await page.waitForSelector('[data-testid="margin-level"]', { visible: true });
   const closed = await page.evaluate(() => document.body.innerText.includes("杠杆交易 · "));
+  if (closed && marginOn) throw new Error("margin trading was opened for this user, but the margin page says it is not open");
   if (closed) {
     ok("the margin page shows the cross account and says margin trading is not open to this user");
   } else {
