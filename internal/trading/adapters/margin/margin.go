@@ -5,6 +5,8 @@ import (
 	"context"
 
 	"github.com/shopspring/decimal"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	marginv1 "github.com/skill/exchange/api/gen/go/exchange/margin/v1"
 	orderv1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
@@ -20,9 +22,14 @@ func New(c marginv1.MarginServiceClient) *Client { return &Client{c: c} }
 // ReserveOrder checks the order against its margin account and, with
 // AUTO_BORROW, borrows what the free balance lacks (idempotent by the
 // order's ID). margin-service's refusals come back as their codes, with
-// their details.
+// their details. A margin-service that does not serve the call yet
+// refuses the order as MARGIN_DISABLED: left pending, it would go to the
+// engine whenever the call arrived.
 func (c *Client) ReserveOrder(ctx context.Context, o domain.Order) error {
 	_, err := c.c.ReserveOrder(ctx, &marginv1.ReserveOrderRequest{Order: Check(o)})
+	if status.Code(err) == codes.Unimplemented {
+		return domain.ErrMarginDisabled
+	}
 	return err
 }
 

@@ -1,11 +1,17 @@
 package margin
 
 import (
+	"context"
 	"testing"
 
 	"github.com/shopspring/decimal"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
+	marginv1 "github.com/skill/exchange/api/gen/go/exchange/margin/v1"
 	orderv1 "github.com/skill/exchange/api/gen/go/exchange/order/v1"
+	"github.com/skill/exchange/internal/platform/apperr"
 	"github.com/skill/exchange/internal/trading/domain"
 )
 
@@ -30,5 +36,33 @@ func TestCheckCarriesWhatMarginServiceWeighs(t *testing.T) {
 	if market.GetOrderSide() != orderv1.Side_SIDE_BUY || market.GetPrice() != "" || market.GetQuantity() != "" ||
 		market.GetFreezeAmount() != "100" {
 		t.Fatalf("market buy: %v", market)
+	}
+}
+
+// answer is a MarginService client whose ReserveOrder fails with err.
+type answer struct {
+	marginv1.MarginServiceClient
+	err error
+}
+
+func (a answer) ReserveOrder(context.Context, *marginv1.ReserveOrderRequest, ...grpc.CallOption) (*marginv1.ReserveOrderResponse, error) {
+	return &marginv1.ReserveOrderResponse{}, a.err
+}
+
+func TestAMarginServiceWithoutTheCallRefusesTheOrder(t *testing.T) {
+	ctx := context.Background()
+	unimplemented := status.Error(codes.Unimplemented, "unknown method ReserveOrder")
+	// As the call returns it, and as grpcx's client interceptor wraps it.
+	for _, err := range []error{unimplemented, apperr.Internal(unimplemented)} {
+		if got := New(answer{err: err}).ReserveOrder(ctx, domain.Order{}); !apperr.Is(got, "MARGIN_DISABLED") {
+			t.Fatalf("%v: got %v", err, got)
+		}
+	}
+	unavailable := apperr.Unavailable(status.Error(codes.Unavailable, "connection refused"))
+	if got := New(answer{err: unavailable}).ReserveOrder(ctx, domain.Order{}); got != unavailable { //nolint:errorlint // passed through as is
+		t.Fatalf("an outage: got %v", got)
+	}
+	if got := New(answer{}).ReserveOrder(ctx, domain.Order{}); got != nil {
+		t.Fatalf("a reservation: got %v", got)
 	}
 }
