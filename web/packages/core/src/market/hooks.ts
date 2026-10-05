@@ -76,7 +76,8 @@ export type OrderBookOptions = {
  * per frame, or per `every` ms. A throttled book shows the state its
  * throttle last told it about: a render for another reason (the last
  * trade shown above it) does not bring a newer one in between (B67: 7
- * book redraws a second against 4 notices).
+ * book redraws a second against 4 notices). Tested in the ui package
+ * (src/trading/useOrderBook.test.tsx), where React renders in tests.
  */
 export function useOrderBook(symbol: string, depth: number, step = "", { minQty = "", every = 0 }: OrderBookOptions = {}): BookView {
   const market = useMarket();
@@ -95,6 +96,9 @@ export function useOrderBook(symbol: string, depth: number, step = "", { minQty 
       return () => {
         off();
         t.cancel();
+        // Subscribed again (the same book later), it starts from the store,
+        // not from a version passed on before.
+        told.current = null;
       };
     },
     [market, key, every],

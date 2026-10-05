@@ -199,9 +199,11 @@ export default function Markets() {
         sortDescFirst: true,
         // Below 1280 px the quote goes under the figure: a wide turnover
         // ("1,234.57亿 USDT") was cut short at 1024 (review B65).
+        // Should a figure still not fit, it ends in an ellipsis (and the
+        // table titles the cell) instead of being clipped.
         cell: ({ row }) => (
           <span className={cn("text-fg-2", !wide && "flex flex-col items-end leading-tight")}>
-            {formatCompact(row.original.t?.quote_volume, locale)}
+            <span className={cn(!wide && "max-w-full truncate")}>{formatCompact(row.original.t?.quote_volume, locale)}</span>
             <span className={cn("text-xs text-fg-3", wide && "ml-1")}>{row.original.row.quote}</span>
           </span>
         ),
