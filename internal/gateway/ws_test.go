@@ -191,17 +191,25 @@ func TestWebSocketPrivateChannels(t *testing.T) {
 		t.Fatalf("margin order push: %v", m)
 	}
 
-	// Margin accounts: a borrow, a warning, a liquidation's end.
+	// Margin accounts: a borrow (not pushed itself: the account it changed
+	// comes on margin.accounts), the account, a warning, a liquidation's end.
 	c.send(`{"op":"subscribe","args":["margin"]}`)
 	if m := c.next(); m["ok"] != true {
 		t.Fatalf("subscribe margin: %v", m)
 	}
 	for _, msg := range []proto.Message{
 		&marginv1.MarginBorrowed{UserId: "u-1", AccountType: "MARGIN_CROSS", Asset: "USDT", Amount: "100"},
+		&marginv1.MarginAccountUpdated{
+			UserId: "u-1", AccountType: "MARGIN_CROSS", Leverage: 5, Status: "NORMAL", MarginLevel: "2.5", WarnLevel: "1.3",
+			LiquidationLevel: "1.1", TotalAsset: "250", TotalLiability: "100.01", NetAsset: "149.99",
+			Balances:  []*marginv1.MarginBalance{{Asset: "USDT", Free: "250", Locked: "0", Borrowed: "100", Interest: "0.01", Net: "149.99"}},
+			UpdatedAt: timestamppb.Now(),
+		},
 		&marginv1.MarginLevelWarned{UserId: "u-1", AccountType: "MARGIN_CROSS", MarginLevel: "1.25", WarnLevel: "1.3", LiquidationLevel: "1.1"},
 		&marginv1.MarginLiquidationCompleted{
 			LiquidationId: "l1", UserId: "u-1", AccountType: "MARGIN_ISOLATED", Symbol: "BTC-USDT", Fee: "2", InsuranceCovered: "0",
-			Repaid: []*marginv1.AssetAmount{{Asset: "USDT", Amount: "100"}}, CompletedAt: timestamppb.Now(),
+			Repaid: []*marginv1.AssetAmount{{Asset: "USDT", Amount: "100"}}, CompletedAt: timestamppb.Now(), MarginLevel: "1.08",
+			StartedAt: timestamppb.Now(),
 		},
 	} {
 		env, err := event.NewFactory("test", "t").New(context.Background(), msg, "user", "u-1")
@@ -214,6 +222,10 @@ func TestWebSocketPrivateChannels(t *testing.T) {
 	}
 	if m := c.next(); m["channel"] != "margin" || m["data"].(map[string]any)["type"] != "ACCOUNT" {
 		t.Fatalf("account push: %v", m)
+	} else if a, _ := m["data"].(map[string]any)["account"].(map[string]any); a == nil || a["account"] != "MARGIN_CROSS" ||
+		a["symbol"] != nil || a["leverage"] != float64(5) || a["margin_level"] != "2.5" || a["liquidation_price"] != nil ||
+		len(a["balances"].([]any)) != 1 || a["balances"].([]any)[0].(map[string]any)["borrowed"] != "100" || a["updated_at"] == "" {
+		t.Fatalf("account push without the account as it stands: %v", m)
 	}
 	if m := c.next(); m["data"].(map[string]any)["type"] != "WARNING" ||
 		m["data"].(map[string]any)["warning"].(map[string]any)["symbol"] != nil ||
@@ -223,6 +235,8 @@ func TestWebSocketPrivateChannels(t *testing.T) {
 	if m := c.next(); m["data"].(map[string]any)["type"] != "LIQUIDATION" ||
 		m["data"].(map[string]any)["liquidation"].(map[string]any)["status"] != "COMPLETED" ||
 		m["data"].(map[string]any)["liquidation"].(map[string]any)["symbol"] != "BTC-USDT" ||
+		m["data"].(map[string]any)["liquidation"].(map[string]any)["margin_level"] != "1.08" ||
+		m["data"].(map[string]any)["liquidation"].(map[string]any)["started_at"] == nil ||
 		len(m["data"].(map[string]any)["liquidation"].(map[string]any)["repaid"].([]any)) != 1 {
 		t.Fatalf("liquidation push: %v", m)
 	}

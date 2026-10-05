@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	derivativesv1 "github.com/skill/exchange/api/gen/go/exchange/derivatives/v1"
 	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
@@ -23,10 +24,12 @@ import (
 // The public books and trades are market-data-service's (market.depth,
 // derivatives.market.depth, market.trades: the reference market's or the
 // platform's, ADR-0015); trade.events only feeds the users' "fills".
+// margin.accounts has the margin accounts as they stand (the "margin"
+// channel's ACCOUNT pushes), margin.events their warnings and liquidations.
 var WSTopics = []string{
 	"ledger.events", "notification.events", "order.events", "trade.events", "market.depth", "market.trades", "market.candle.events",
 	"wallet.deposit.events", "wallet.withdrawal.events", "derivatives.market.depth",
-	"derivatives.order.events", "derivatives.position.events", "derivatives.liquidation.events", "margin.events",
+	"derivatives.order.events", "derivatives.position.events", "derivatives.liquidation.events", "margin.events", "margin.accounts",
 }
 
 type balanceData struct {
@@ -127,14 +130,44 @@ type riskData struct {
 }
 
 // marginPush is a message of "margin" (api/openapi/margin.yaml
-// MarginPush): ACCOUNT when an account's debts changed (a borrow, a
-// repayment, an hour's interest; no account in it yet: the sites reload
-// GET /v1/margin/accounts), WARNING under the warning level, LIQUIDATION
-// when a liquidation starts and completes.
+// MarginPush): ACCOUNT with an account as it stands when its assets, debts,
+// status or margin level changed (margin.accounts, at most once a second
+// per account), WARNING under the warning level, LIQUIDATION when a
+// liquidation starts and completes.
 type marginPush struct {
 	Type        string             `json:"type"`
+	Account     *marginAccount     `json:"account,omitempty"`
 	Warning     *marginWarning     `json:"warning,omitempty"`
 	Liquidation *marginLiquidation `json:"liquidation,omitempty"`
+}
+
+// marginAccount is a margin account as GET /v1/margin/accounts lists it
+// (MarginAccount): symbol null for the cross account, margin_level null
+// without debts, liquidation_price null for the cross account and without
+// debts.
+type marginAccount struct {
+	Account          string          `json:"account"`
+	Symbol           *string         `json:"symbol"`
+	Leverage         int32           `json:"leverage"`
+	Status           string          `json:"status"`
+	MarginLevel      *string         `json:"margin_level"`
+	WarnLevel        string          `json:"warn_level"`
+	LiquidationLevel string          `json:"liquidation_level"`
+	TotalAsset       string          `json:"total_asset"`
+	TotalLiability   string          `json:"total_liability"`
+	NetAsset         string          `json:"net_asset"`
+	LiquidationPrice *string         `json:"liquidation_price"`
+	Balances         []marginBalance `json:"balances"`
+	UpdatedAt        string          `json:"updated_at"`
+}
+
+type marginBalance struct {
+	Asset    string `json:"asset"`
+	Free     string `json:"free"`
+	Locked   string `json:"locked"`
+	Borrowed string `json:"borrowed"`
+	Interest string `json:"interest"`
+	Net      string `json:"net"`
 }
 
 type marginWarning struct {
@@ -145,12 +178,15 @@ type marginWarning struct {
 	LiquidationLevel string  `json:"liquidation_level"`
 }
 
+// marginLiquidation is a liquidation as it starts and completes
+// (MarginLiquidation); both events carry the level that triggered it and
+// when it started.
 type marginLiquidation struct {
 	LiquidationID    string        `json:"liquidation_id"`
 	Account          string        `json:"account"`
 	Symbol           *string       `json:"symbol"`
 	Status           string        `json:"status"`
-	MarginLevel      string        `json:"margin_level,omitempty"`
+	MarginLevel      string        `json:"margin_level"`
 	Repaid           []assetAmount `json:"repaid"`
 	Fee              string        `json:"fee"`
 	InsuranceCovered string        `json:"insurance_covered"`
@@ -163,37 +199,27 @@ type assetAmount struct {
 	Amount string `json:"amount"`
 }
 
-// marginOf pushes the margin events on "margin"; ok reports whether p was
-// one of them.
+// marginOf pushes the margin accounts and events on "margin"; ok reports
+// whether p was one of those it pushes. Borrows, repayments and interest
+// are not pushed themselves: they change the account, which margin.accounts
+// carries.
 func marginOf(h *Hub, p interface {
 	MessageIs(proto.Message) bool
 	UnmarshalTo(proto.Message) error
 },
 ) (bool, error) {
 	var (
-		borrowed  marginv1.MarginBorrowed
-		repaid    marginv1.MarginRepaid
-		interest  marginv1.MarginInterestAccrued
+		updated   marginv1.MarginAccountUpdated
 		warned    marginv1.MarginLevelWarned
 		started   marginv1.MarginLiquidationStarted
 		completed marginv1.MarginLiquidationCompleted
 	)
 	switch {
-	case p.MessageIs(&borrowed):
-		if err := p.UnmarshalTo(&borrowed); err != nil {
+	case p.MessageIs(&updated):
+		if err := p.UnmarshalTo(&updated); err != nil {
 			return true, err
 		}
-		h.Publish(borrowed.GetUserId(), "margin", marginPush{Type: "ACCOUNT"})
-	case p.MessageIs(&repaid):
-		if err := p.UnmarshalTo(&repaid); err != nil {
-			return true, err
-		}
-		h.Publish(repaid.GetUserId(), "margin", marginPush{Type: "ACCOUNT"})
-	case p.MessageIs(&interest):
-		if err := p.UnmarshalTo(&interest); err != nil {
-			return true, err
-		}
-		h.Publish(interest.GetUserId(), "margin", marginPush{Type: "ACCOUNT"})
+		h.Publish(updated.GetUserId(), "margin", marginPush{Type: "ACCOUNT", Account: marginAccountOf(&updated)})
 	case p.MessageIs(&warned):
 		if err := p.UnmarshalTo(&warned); err != nil {
 			return true, err
@@ -209,25 +235,51 @@ func marginOf(h *Hub, p interface {
 		h.Publish(started.GetUserId(), "margin", marginPush{Type: "LIQUIDATION", Liquidation: &marginLiquidation{
 			LiquidationID: started.GetLiquidationId(), Account: started.GetAccountType(), Symbol: optional(started.GetSymbol()),
 			Status: "STARTED", MarginLevel: started.GetMarginLevel(), Repaid: []assetAmount{}, Fee: "0", InsuranceCovered: "0",
-			StartedAt: started.GetStartedAt().AsTime().UTC().Format(time.RFC3339Nano),
+			StartedAt: stampOf(started.GetStartedAt()),
 		}})
 	case p.MessageIs(&completed):
 		if err := p.UnmarshalTo(&completed); err != nil {
 			return true, err
 		}
-		done := completed.GetCompletedAt().AsTime().UTC().Format(time.RFC3339Nano)
 		back := make([]assetAmount, 0, len(completed.GetRepaid()))
 		for _, a := range completed.GetRepaid() {
 			back = append(back, assetAmount{Asset: a.GetAsset(), Amount: a.GetAmount()})
 		}
 		h.Publish(completed.GetUserId(), "margin", marginPush{Type: "LIQUIDATION", Liquidation: &marginLiquidation{
 			LiquidationID: completed.GetLiquidationId(), Account: completed.GetAccountType(), Symbol: optional(completed.GetSymbol()),
-			Status: "COMPLETED", Repaid: back, Fee: completed.GetFee(), InsuranceCovered: completed.GetInsuranceCovered(), CompletedAt: &done,
+			Status: "COMPLETED", MarginLevel: completed.GetMarginLevel(), Repaid: back, Fee: completed.GetFee(),
+			InsuranceCovered: completed.GetInsuranceCovered(), StartedAt: stampOf(completed.GetStartedAt()),
+			CompletedAt: optional(stampOf(completed.GetCompletedAt())),
 		}})
 	default:
 		return false, nil
 	}
 	return true, nil
+}
+
+// marginAccountOf renders a margin account from margin.accounts.
+func marginAccountOf(u *marginv1.MarginAccountUpdated) *marginAccount {
+	a := &marginAccount{
+		Account: u.GetAccountType(), Symbol: optional(u.GetSymbol()), Leverage: u.GetLeverage(), Status: u.GetStatus(),
+		MarginLevel: optional(u.GetMarginLevel()), WarnLevel: u.GetWarnLevel(), LiquidationLevel: u.GetLiquidationLevel(),
+		TotalAsset: u.GetTotalAsset(), TotalLiability: u.GetTotalLiability(), NetAsset: u.GetNetAsset(),
+		LiquidationPrice: optional(u.GetLiquidationPrice()), Balances: make([]marginBalance, 0, len(u.GetBalances())),
+		UpdatedAt: stampOf(u.GetUpdatedAt()),
+	}
+	for _, b := range u.GetBalances() {
+		a.Balances = append(a.Balances, marginBalance{
+			Asset: b.GetAsset(), Free: b.GetFree(), Locked: b.GetLocked(), Borrowed: b.GetBorrowed(), Interest: b.GetInterest(), Net: b.GetNet(),
+		})
+	}
+	return a
+}
+
+// stampOf formats an event's time as the API does; "" when it has none.
+func stampOf(ts *timestamppb.Timestamp) string {
+	if ts == nil {
+		return ""
+	}
+	return ts.AsTime().UTC().Format(time.RFC3339Nano)
 }
 
 func positionOf(p *derivativesv1.Position, ev string) positionData {
