@@ -163,10 +163,12 @@ async function terminal(browser, { site, base, device, budgets, bookTab, tapeTab
   // Each notice of the throttle to the frame that shows the redraw it set
   // off: the book's first change after it not taken by an earlier notice,
   // within the throttle's window (notices are at least that far apart). A
-  // notice that changes no visible level shows nothing; a change with no
-  // notice of its own means the throttle was bypassed (as before b178292,
-  // when a render for another reason brought newer levels in). Only the
-  // notices and changes in the minute count.
+  // notice with no change in that window changed no visible level, or
+  // redrew later than the window, and its change then has no notice; a
+  // change with no notice of its own fails the run: the throttle was
+  // bypassed (as before b178292, when a render for another reason brought
+  // newer levels in), or a redraw took the whole window. Only the notices
+  // and changes in the minute count.
   const redraw = [];
   const taken = new Set();
   for (const n of window60.notices) {
@@ -179,7 +181,7 @@ async function terminal(browser, { site, base, device, budgets, bookTab, tapeTab
   const changes = window60.mutations.filter((x) => x.at >= from).length;
   const bypassed = window60.mutations.filter((x, k) => x.at >= from && !taken.has(k)).length;
   report(
-    `${site} book redraw: the throttle's notice to the frame that shows it (p50 / p95 / max over ${redraw.length} notices with a change; ${notices - redraw.length} changed nothing shown; ${changes} changes of the book, ${bypassed} without a notice)`,
+    `${site} book redraw: the throttle's notice to the frame that shows it (p50 / p95 / max over ${redraw.length} notices with a change; ${notices - redraw.length} without a change within ${BOOK_EVERY} ms; ${changes} changes of the book, ${bypassed} without a notice)`,
     stats(redraw),
     `p95 ≤ ${budgets.toPixel} ms, every change on a notice`,
     redraw.length > 0 && pct(redraw, 95) <= budgets.toPixel && bypassed === 0,
