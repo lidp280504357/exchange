@@ -192,8 +192,10 @@ export interface paths {
         };
         /**
          * How much of an asset the account may borrow now
-         * @description min(net assets x (leverage - 1) - what is borrowed, what the pool
-         *     has left, the user's cap), in the asset at its current value.
+         * @description min(net assets x (leverage - 1) - what is borrowed, what keeps the
+         *     margin level after the borrow at or above the warning level, what
+         *     the pool has left, the user's cap), in the asset at its current
+         *     value.
          */
         get: operations["getMaxBorrowable"];
         put?: never;
@@ -706,10 +708,10 @@ export interface operations {
                         asset: string;
                         amount: components["schemas"]["Decimal"];
                         /**
-                         * @description Which of the three bounds is the smallest.
+                         * @description Which of the four bounds is the smallest.
                          * @enum {string}
                          */
-                        limited_by: "LEVERAGE" | "POOL" | "USER_CAP";
+                        limited_by: "LEVERAGE" | "LEVEL" | "POOL" | "USER_CAP";
                     };
                 };
             };

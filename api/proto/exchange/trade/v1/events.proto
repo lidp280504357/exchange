@@ -43,4 +43,14 @@ message TradeExecuted {
   // the system account MARKET_MAKER (HOUSE_TRADE_SETTLE). Unspecified for
   // a trade between users.
   exchange.order.v1.Side house_side = 19;
+  // The accounts the buyer's and seller's orders trade from
+  // (Order.account_type: empty or SPOT, MARGIN_CROSS, MARGIN_ISOLATED of
+  // symbol) and their side effects (Order.side_effect), so the ledger
+  // settles each side on its account and margin-service repays after an
+  // AUTO_REPAY order's fills (margin design 2026-10-06, from batch E2).
+  // Empty for HOUSE's side.
+  string buyer_account_type = 20;
+  string seller_account_type = 21;
+  string buyer_side_effect = 22;
+  string seller_side_effect = 23;
 }

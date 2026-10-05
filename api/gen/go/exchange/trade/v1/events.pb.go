@@ -58,9 +58,19 @@ type TradeExecuted struct {
 	// (its order ID is empty) and pays no fee; the ledger books its side on
 	// the system account MARKET_MAKER (HOUSE_TRADE_SETTLE). Unspecified for
 	// a trade between users.
-	HouseSide     v1.Side `protobuf:"varint,19,opt,name=house_side,json=houseSide,proto3,enum=exchange.order.v1.Side" json:"house_side,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	HouseSide v1.Side `protobuf:"varint,19,opt,name=house_side,json=houseSide,proto3,enum=exchange.order.v1.Side" json:"house_side,omitempty"`
+	// The accounts the buyer's and seller's orders trade from
+	// (Order.account_type: empty or SPOT, MARGIN_CROSS, MARGIN_ISOLATED of
+	// symbol) and their side effects (Order.side_effect), so the ledger
+	// settles each side on its account and margin-service repays after an
+	// AUTO_REPAY order's fills (margin design 2026-10-06, from batch E2).
+	// Empty for HOUSE's side.
+	BuyerAccountType  string `protobuf:"bytes,20,opt,name=buyer_account_type,json=buyerAccountType,proto3" json:"buyer_account_type,omitempty"`
+	SellerAccountType string `protobuf:"bytes,21,opt,name=seller_account_type,json=sellerAccountType,proto3" json:"seller_account_type,omitempty"`
+	BuyerSideEffect   string `protobuf:"bytes,22,opt,name=buyer_side_effect,json=buyerSideEffect,proto3" json:"buyer_side_effect,omitempty"`
+	SellerSideEffect  string `protobuf:"bytes,23,opt,name=seller_side_effect,json=sellerSideEffect,proto3" json:"seller_side_effect,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *TradeExecuted) Reset() {
@@ -226,11 +236,39 @@ func (x *TradeExecuted) GetHouseSide() v1.Side {
 	return v1.Side(0)
 }
 
+func (x *TradeExecuted) GetBuyerAccountType() string {
+	if x != nil {
+		return x.BuyerAccountType
+	}
+	return ""
+}
+
+func (x *TradeExecuted) GetSellerAccountType() string {
+	if x != nil {
+		return x.SellerAccountType
+	}
+	return ""
+}
+
+func (x *TradeExecuted) GetBuyerSideEffect() string {
+	if x != nil {
+		return x.BuyerSideEffect
+	}
+	return ""
+}
+
+func (x *TradeExecuted) GetSellerSideEffect() string {
+	if x != nil {
+		return x.SellerSideEffect
+	}
+	return ""
+}
+
 var File_exchange_trade_v1_events_proto protoreflect.FileDescriptor
 
 const file_exchange_trade_v1_events_proto_rawDesc = "" +
 	"\n" +
-	"\x1eexchange/trade/v1/events.proto\x12\x11exchange.trade.v1\x1a\x1dexchange/order/v1/order.proto\"\xb0\x05\n" +
+	"\x1eexchange/trade/v1/events.proto\x12\x11exchange.trade.v1\x1a\x1dexchange/order/v1/order.proto\"\xe8\x06\n" +
 	"\rTradeExecuted\x12\x19\n" +
 	"\btrade_id\x18\x01 \x01(\tR\atradeId\x12\x16\n" +
 	"\x06symbol\x18\x02 \x01(\tR\x06symbol\x12\x1d\n" +
@@ -256,7 +294,11 @@ const file_exchange_trade_v1_events_proto_rawDesc = "" +
 	"\x11buyer_limit_price\x18\x11 \x01(\tR\x0fbuyerLimitPrice\x12!\n" +
 	"\ftrade_number\x18\x12 \x01(\x04R\vtradeNumber\x126\n" +
 	"\n" +
-	"house_side\x18\x13 \x01(\x0e2\x17.exchange.order.v1.SideR\thouseSideB\xca\x01\n" +
+	"house_side\x18\x13 \x01(\x0e2\x17.exchange.order.v1.SideR\thouseSide\x12,\n" +
+	"\x12buyer_account_type\x18\x14 \x01(\tR\x10buyerAccountType\x12.\n" +
+	"\x13seller_account_type\x18\x15 \x01(\tR\x11sellerAccountType\x12*\n" +
+	"\x11buyer_side_effect\x18\x16 \x01(\tR\x0fbuyerSideEffect\x12,\n" +
+	"\x12seller_side_effect\x18\x17 \x01(\tR\x10sellerSideEffectB\xca\x01\n" +
 	"\x15com.exchange.trade.v1B\vEventsProtoP\x01Z>github.com/skill/exchange/api/gen/go/exchange/trade/v1;tradev1\xa2\x02\x03ETX\xaa\x02\x11Exchange.Trade.V1\xca\x02\x11Exchange\\Trade\\V1\xe2\x02\x1dExchange\\Trade\\V1\\GPBMetadata\xea\x02\x13Exchange::Trade::V1b\x06proto3"
 
 var (
