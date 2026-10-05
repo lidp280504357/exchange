@@ -58,9 +58,10 @@ func TestHoldingsAndTheBotsInLists(t *testing.T) {
 		`INSERT INTO trades (trade_id, symbol, price, quantity, quote_quantity, sequence, buyer_user_id, seller_user_id, executed_at) VALUES
 			(generateUUIDv4(), 'ASTRA-USDT', 1, 10, 10, 1, '` + b1 + `', '` + b2 + `', now64(3) - 2),
 			(generateUUIDv4(), 'ASTRA-USDT', 1, 10, 10, 2, '` + u1 + `', '` + b2 + `', now64(3) - 1)`,
+		// Order IDs are UUIDv7: the orders list bounds the time in them (created_key).
 		`INSERT INTO order_updates (order_id, user_id, symbol, sequence, status, event_id, occurred_at) VALUES
-			(generateUUIDv4(), '` + b1 + `', 'ASTRA-USDT', 1, 'NEW', generateUUIDv4(), now64(3) - 2),
-			(generateUUIDv4(), '` + u1 + `', 'ASTRA-USDT', 1, 'NEW', generateUUIDv4(), now64(3) - 1)`,
+			(generateUUIDv7(), '` + b1 + `', 'ASTRA-USDT', 1, 'NEW', generateUUIDv4(), now64(3) - 2),
+			(generateUUIDv7(), '` + u1 + `', 'ASTRA-USDT', 1, 'NEW', generateUUIDv4(), now64(3) - 1)`,
 	} {
 		if err := conn.Exec(ctx, q); err != nil {
 			t.Fatal(err)
