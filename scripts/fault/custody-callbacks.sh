@@ -54,7 +54,7 @@ expect 200 - "a TRON-TEST address"
 ADDR=$(jq -r .address <<<"$BODY")
 # Where the custodian and the ledger stand before the drill (B63: admin.sh's
 # held fees had left a 14 TUSD surplus, and the drill wanted 0).
-SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+SINCE=$(remote "date -u +%Y-%m-%dT%H:%M:%SZ") # the server's clock, as checked_at
 exchangectl wallet reconcile --network UDUNMOCK | head -1
 baseline() {
   BEFORE=$(pg "SELECT shortfall FROM wallet.chain_checks WHERE network = 'UDUNMOCK' AND asset = 'TUSD' AND checked_at > '$SINCE' ORDER BY checked_at DESC LIMIT 1")
@@ -108,7 +108,7 @@ compose "start udun-mock" >/dev/null
 wait_healthy udun-mock 120
 call GET "/v1/wallet/deposit-address?asset=TUSD&network=TRON-TEST" "" "${OTHER[@]}"
 expect 200 - "addresses are created again"
-SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+SINCE=$(remote "date -u +%Y-%m-%dT%H:%M:%SZ") # the server's clock, as checked_at
 exchangectl wallet reconcile --network UDUNMOCK | head -1
 up() { [[ $(metric wallet-service 9092 wallet_custody_up 'provider="UDUNMOCK"') == 1 ]]; }
 eventually 60 "the custodian answers again (wallet_custody_up 1)" up

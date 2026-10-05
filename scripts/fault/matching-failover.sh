@@ -12,11 +12,12 @@
 # from the snapshot and the WAL and continues from the committed offsets:
 # the order sent during the crash fills against HOUSE exactly once, while
 # the primary is still down, the resting order is still there and
-# cancels. The primary's restart policy is put back and it starts again,
-# waiting as the standby. At the end the second instance is stopped
-# gracefully and the first takes over again (a second handover), leaving
-# one instance as before. One new user on ETH-BTC (every order trades
-# against HOUSE); about three minutes.
+# cancels, and a new order fills on the standby alone. The primary gets
+# compose's restart policy back and starts again, waiting as the standby
+# (it starting instead is a split brain). At the end the second instance
+# is stopped gracefully and the first takes over again (a second
+# handover), leaving one instance as before. One new user on ETH-BTC
+# (every order trades against HOUSE); about three minutes.
 set -euo pipefail
 # One drill at a time on the server (scripts/ops/lock.sh); task fault holds the lock for all of them.
 [[ -n ${OPS_LOCK_HELD:-} ]] || exec "$(dirname "$0")/../ops/lock.sh" run --owner "fault $(basename "$0")" -- bash "$0" "$@"
@@ -79,8 +80,12 @@ server_now() { remote "date -u +%Y-%m-%dT%H:%M:%S.%NZ"; }
 # started_since T C: instance C logged its start after T (the server's clock).
 started_since() { remote "sudo docker logs --since $1 $2 2>&1" | grep -q '"service started"'; }
 down() { [[ $(remote "sudo docker inspect -f '{{.State.Running}}' $FIRST") == false ]]; }
-POLICY=$(remote "sudo docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' $FIRST")
-POLICY=${POLICY:-unless-stopped}
+# The policy compose gives every app container; the primary gets it back
+# afterwards, whatever it had (a drill cut short leaves "no", and compose
+# does not mend a container's restart policy; review BV).
+POLICY=unless-stopped
+had=$(remote "sudo docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' $FIRST")
+[[ $had == "$POLICY" ]] || echo "note the primary's restart policy was '$had' (an earlier drill cut short?); it is $POLICY again at the end"
 remote "sudo docker update --restart=no $FIRST >/dev/null"
 pid=$(remote "sudo docker inspect -f '{{.State.Pid}}' $FIRST")
 KILLED=$(server_now)
@@ -90,6 +95,10 @@ expect 202 - "a market buy of 0.0005 BTC is accepted"
 MKT=$(jq -r .order_id <<<"$BODY")
 took_over() { started_since "$KILLED" "$SECOND"; }
 eventually 120 "the standby takes the lease and starts" took_over
+if started_since "$KILLED" "$FIRST"; then
+  echo "FAIL both instances started" >&2
+  exit 1
+fi
 down || { echo "FAIL the crashed primary is running again" >&2; exit 1; }
 echo "ok   the crashed primary stays down (its restart held back)"
 
@@ -107,16 +116,29 @@ expect 202 - "cancel it"
 eventually 40 "it is CANCELED" status_is "$REST" CANCELED
 settled() { [[ $(balance BTC | cut -d' ' -f2) == 0 ]]; }
 eventually 40 "nothing is left frozen" settled
+# A new order on the standby alone.
+call POST /v1/orders '{"symbol":"ETH-BTC","side":"BUY","type":"MARKET","quote_amount":"0.0005"}' "${AUTH[@]}"
+expect 202 - "a new market buy while the primary is down"
+ON_STANDBY=$(jq -r .order_id <<<"$BODY")
+eventually 40 "the standby fills it against HOUSE" status_is "$ON_STANDBY" FILLED
+down || { echo "FAIL the crashed primary is running again" >&2; exit 1; }
 
 echo "== the crashed instance comes back as the standby"
 BACK=$(server_now)
 remote "sudo docker update --restart=$POLICY $FIRST >/dev/null && sudo docker start $FIRST >/dev/null"
 [[ $(remote "sudo docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' $FIRST") == "$POLICY" ]] ||
   { echo "FAIL the primary's restart policy is not $POLICY again" >&2; exit 1; }
+SPLIT=""
 first_waits() {
-  remote "sudo docker logs --since $BACK $FIRST 2>&1" | grep -q '"waiting for the engine lease"' && ! started_since "$BACK" "$FIRST"
+  # Started while the second holds the lease: two engines (stop waiting, fail below).
+  if started_since "$BACK" "$FIRST"; then
+    SPLIT=1
+    return 0
+  fi
+  remote "sudo docker logs --since $BACK $FIRST 2>&1" | grep -q '"waiting for the engine lease"'
 }
 eventually 120 "it starts again with its restart policy ($POLICY) and waits for the lease" first_waits
+[[ -z $SPLIT ]] || { echo "FAIL split-brain: the first instance started while the second holds the lease" >&2; exit 1; }
 
 echo "== the second instance stops, the first takes over again"
 HANDOVER=$(server_now)
