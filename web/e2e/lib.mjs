@@ -190,3 +190,48 @@ export async function start({ app, api, name, device, apiPrefix = "/v1/" }) {
   };
   return t;
 }
+
+/**
+ * menuOnTop scrolls the PC site's page halfway down (a table's header then
+ * sticks under the top bar), hovers the top bar's menu named label and
+ * waits until the menu's first item is the element at that item's centre:
+ * the top bar's layer is above the page's sticky ones (review B61). It
+ * names what covers the item when it is not, and leaves the page at its top.
+ */
+export async function menuOnTop(page, label) {
+  await page.waitForSelector("main table tbody tr", { timeout: 20000 });
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight / 2));
+  const trigger = (
+    await page.evaluateHandle((l) => [...document.querySelectorAll("header nav .group > a")].find((a) => a.textContent.trim() === l) ?? null, label)
+  ).asElement();
+  if (!trigger) throw new Error(`no ${label} menu in the top bar`);
+  await trigger.hover();
+  const covered = await page
+    .waitForFunction(
+      (l) => {
+        const a = [...document.querySelectorAll("header nav .group > a")].find((x) => x.textContent.trim() === l);
+        const panel = a?.nextElementSibling;
+        const first = panel?.querySelector("a");
+        if (!first || getComputedStyle(panel).opacity !== "1") return false;
+        const r = first.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return hit !== null && first.contains(hit);
+      },
+      { timeout: 5000 },
+      label,
+    )
+    .then(() => "")
+    .catch(() =>
+      page.evaluate((l) => {
+        const a = [...document.querySelectorAll("header nav .group > a")].find((x) => x.textContent.trim() === l);
+        const first = a?.nextElementSibling?.querySelector("a");
+        if (!first) return "nothing: the menu has no item";
+        const r = first.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return hit ? `${hit.tagName.toLowerCase()} "${hit.textContent.trim().slice(0, 20)}"` : "nothing at that point";
+      }, label),
+    );
+  await page.mouse.move(0, 700);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  if (covered) throw new Error(`the ${label} menu's first item is under ${covered}`);
+}

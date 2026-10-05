@@ -13,7 +13,7 @@
 // the language switch and sign-out. Script errors fail the run; every API
 // response is checked against the OpenAPI contracts. Chrome comes from
 // CHROME or the usual install paths; screenshots go to SHOTS when set.
-import { ok, start } from "./lib.mjs";
+import { menuOnTop, ok, start } from "./lib.mjs";
 
 const APP = (process.env.APP ?? "https://astras.vip").replace(/\/$/, "");
 const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://astras.vip" : APP);
@@ -62,6 +62,8 @@ try {
   });
   if (switchLines !== 1) throw new Error(`the hide-small switch label takes ${switchLines} lines`);
   ok("the hide-small switch label stays on one line");
+  await menuOnTop(page, "资产");
+  ok("the 资产 menu opens over the assets table's stuck header");
 
   // 2. Sign out from the account menu, sign back in with the password.
   await go("/");
@@ -94,6 +96,8 @@ try {
   });
   if (scrolled.innerScroll || Math.abs(scrolled.gap) > 1) throw new Error(`the market table scrolls in a box (${scrolled.innerScroll}) or its header is ${scrolled.gap}px off the top bar`);
   ok("the market table scrolls with the page, its header stuck under the top bar");
+  await menuOnTop(page, "合约");
+  ok("the 合约 menu opens over the market table's stuck header");
   await typeInto('input[placeholder="搜索币种名称或代码"]', "ETH");
   await page.waitForFunction(
     () => {

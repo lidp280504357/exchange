@@ -289,6 +289,7 @@ export const RadiiTypeShadow: Story = {
           <div className="grid h-24 w-48 place-items-center rounded-3 border border-line-1 bg-bg-2 text-sm text-fg-2 shadow-pop">shadow-pop</div>
           <ul className="text-xs text-fg-3">
             <li>--z-sticky 30</li>
+            <li>--z-topbar 35 (the sites' top and bottom bars, above the pages' sticky headers)</li>
             <li>--z-sheet 40</li>
             <li>--z-dialog 50</li>
             <li>--z-dropdown 60 (menus, lists, popovers)</li>

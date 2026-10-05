@@ -106,6 +106,9 @@
   /* Floating layers sit above whatever opened them: a menu or list opened
      under a sticky header, in a sheet or in a dialog stays on top. */
   --z-sticky: 30;
+  /* The sites' top and bottom bars: above the pages' sticky headers, so a
+     menu the top bar opens stays above them too (review B61). */
+  --z-topbar: 35;
   --z-sheet: 40;
   --z-dialog: 50;
   --z-dropdown: 60;

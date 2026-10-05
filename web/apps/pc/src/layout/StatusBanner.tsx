@@ -32,7 +32,7 @@ export function StatusBanner() {
   }, [status]);
   if (online && !late) return null;
   return (
-    <div role="status" className="sticky top-14 z-[var(--z-sticky)] animate-slide-down bg-warn px-4 py-1.5 text-center text-sm text-brand-fg">
+    <div role="status" className="sticky top-14 z-[var(--z-topbar)] animate-slide-down bg-warn px-4 py-1.5 text-center text-sm text-brand-fg">
       {online ? t("common.reconnecting") : t("common.offline")}
     </div>
   );

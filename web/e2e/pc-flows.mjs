@@ -15,6 +15,7 @@ import {
   api, cancelOrders, colorsOf, contrastIssues, decimalIssues, desktop, flows, fmtTime, listDecimals, longAnimations, overflowX, PHONE_IOS, register,
   scrollThrough, signInApi, siteCookieDomain, spotAvailable, stage, truncatedWithoutHint, wsWatch,
 } from "./flows-lib.mjs";
+import { menuOnTop } from "./lib.mjs";
 
 const APP = (process.env.APP ?? "https://astras.vip").replace(/\/$/, "");
 const API = process.env.API ?? (APP.startsWith("http://localhost") ? "https://astras.vip" : APP);
@@ -205,6 +206,13 @@ await f.step("1", "every link of the top bar (menus included) and the footer ope
     );
   }
   await A.page.mouse.move(0, 600);
+});
+
+await f.step("1", "a top-bar menu opened over a table's stuck header shows its first item on top (合约 on the markets, 资产 on the assets)", async () => {
+  await nav(A, "/markets");
+  await menuOnTop(A.page, "合约");
+  await nav(A, "/assets");
+  await menuOnTop(A.page, "资产");
 });
 
 await f.step("1", "a page that needs the account sends a visitor to sign in, and back after", async () => {

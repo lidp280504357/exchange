@@ -36,7 +36,7 @@ export function MobileShell() {
       </main>
       <nav
         aria-label={t("nav.home")}
-        className="fixed inset-x-0 bottom-0 z-[var(--z-sticky)] border-t border-line-1 bg-bg-1/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
+        className="fixed inset-x-0 bottom-0 z-[var(--z-topbar)] border-t border-line-1 bg-bg-1/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
       >
         <div className="grid h-14 grid-cols-5">
           <Tab to={routes.home} icon={<Home size={20} />} label={t("nav.home")} end />
@@ -75,7 +75,7 @@ function TopBar() {
   const signedIn = useSession(selectSignedIn);
   const unread = useUnreadNotifications();
   return (
-    <header className="sticky top-0 z-[var(--z-sticky)] bg-bg-0/95 pt-[env(safe-area-inset-top)] backdrop-blur">
+    <header className="sticky top-0 z-[var(--z-topbar)] bg-bg-0/95 pt-[env(safe-area-inset-top)] backdrop-blur">
       <div className="flex h-tap items-center justify-between gap-2 px-4">
         <div className="min-w-0 flex-1 truncate">{header?.title ?? <BrandMark />}</div>
         <div className="flex items-center">

@@ -27,8 +27,10 @@ export function TopNav() {
   const recentFutures = recent.filter(isContract);
   const contracts = useContracts();
   const brand = useBranding().name;
+  // The top bar's layer is above the pages' sticky table headers: its menus
+  // open over them (review B61).
   return (
-    <header className="sticky top-0 z-[var(--z-sticky)] h-14 border-b border-line-1 bg-bg-0/95 backdrop-blur">
+    <header className="sticky top-0 z-[var(--z-topbar)] h-14 border-b border-line-1 bg-bg-0/95 backdrop-blur">
       <div className="mx-auto flex h-full max-w-[1920px] items-center gap-6 px-6">
         <Link to={routes.home} className="flex items-center gap-2" aria-label={brand}>
           <Logo />

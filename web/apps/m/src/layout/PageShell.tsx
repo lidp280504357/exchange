@@ -25,7 +25,7 @@ export function PageShell() {
   };
   return (
     <div className="flex min-h-dvh flex-col bg-bg-0 pb-[env(safe-area-inset-bottom)]">
-      <header className="sticky top-0 z-[var(--z-sticky)] bg-bg-0/95 pt-[env(safe-area-inset-top)] backdrop-blur">
+      <header className="sticky top-0 z-[var(--z-topbar)] bg-bg-0/95 pt-[env(safe-area-inset-top)] backdrop-blur">
         <div className="grid h-tap grid-cols-[44px_1fr_auto] items-center px-1">
           <button type="button" onClick={back} aria-label={t("common.back")} className="grid size-tap place-items-center text-fg-1">
             <ChevronLeft size={22} />
