@@ -42,6 +42,8 @@ linters:
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/margin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketmaker
@@ -76,6 +78,8 @@ linters:
             - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/ledger
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/margin
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
@@ -112,6 +116,8 @@ linters:
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/margin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketmaker
@@ -146,6 +152,8 @@ linters:
             - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/ledger
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/margin
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
@@ -182,6 +190,8 @@ linters:
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/margin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketmaker
@@ -217,6 +227,8 @@ linters:
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/margin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketmaker
@@ -251,6 +263,45 @@ linters:
             - pkg: github.com/skill/exchange/internal/gateway
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/instrument
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/margin
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/marketdata
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/marketmaker
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/marketsim
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/matching
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/notification
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/risk
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/signer
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/trading
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/user
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/wallet
+              desc: services talk over gRPC and events only (ADR-0006)
+        margin:
+          files: ["**/internal/margin/**"]
+          deny:
+            - pkg: github.com/skill/exchange/internal/admin
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/analytics
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/auth
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/derivatives
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/gateway
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/instrument
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
@@ -289,6 +340,8 @@ linters:
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/margin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketmaker
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketsim
@@ -323,6 +376,8 @@ linters:
             - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/ledger
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/margin
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
@@ -359,6 +414,8 @@ linters:
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/margin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketmaker
@@ -393,6 +450,8 @@ linters:
             - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/ledger
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/margin
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
@@ -429,6 +488,8 @@ linters:
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/margin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketmaker
@@ -463,6 +524,8 @@ linters:
             - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/ledger
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/margin
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
@@ -499,6 +562,8 @@ linters:
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/margin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketmaker
@@ -533,6 +598,8 @@ linters:
             - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/ledger
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/margin
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
@@ -569,6 +636,8 @@ linters:
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/ledger
               desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/margin
+              desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketmaker
@@ -603,6 +672,8 @@ linters:
             - pkg: github.com/skill/exchange/internal/instrument
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/ledger
+              desc: services talk over gRPC and events only (ADR-0006)
+            - pkg: github.com/skill/exchange/internal/margin
               desc: services talk over gRPC and events only (ADR-0006)
             - pkg: github.com/skill/exchange/internal/marketdata
               desc: services talk over gRPC and events only (ADR-0006)

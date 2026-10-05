@@ -24,6 +24,17 @@ export interface paths {
          *     as REJECTED and the error's details carry order_id. A
          *     client_order_id repeated with the same order returns that order; with
          *     another order it fails with COMMON_IDEMPOTENCY_CONFLICT.
+         *
+         *     Margin (design 2026-10-06, batch E2): account MARGIN_CROSS or
+         *     MARGIN_ISOLATED trades from that margin account (the isolated one of
+         *     the order's pair). The funds checked are the free balance plus, with
+         *     side_effect AUTO_BORROW, what the account may borrow (the difference
+         *     is borrowed before the freeze); AUTO_REPAY repays the asset bought
+         *     or received with what the fills bring. The order may not leave the
+         *     margin level under the warning level (MARGIN_LEVEL_TOO_LOW); further
+         *     checks fail with MARGIN_DISABLED, MARGIN_FROZEN, MARGIN_LIMIT,
+         *     MARGIN_POOL_EMPTY or MARGIN_ASSET_NOT_BORROWABLE (margin contract).
+         *     Until batch E2 only account SPOT and side_effect NONE are accepted.
          */
         post: operations["createOrder"];
         /**
@@ -130,6 +141,13 @@ export interface components {
             frozen_asset: string;
             frozen_amount: components["schemas"]["Decimal"];
             cancel_requested: boolean;
+            /**
+             * @description The account the order trades from (from batch E2 of the margin design; SPOT when absent).
+             * @enum {string}
+             */
+            account?: "SPOT" | "MARGIN_CROSS" | "MARGIN_ISOLATED";
+            /** @enum {string} */
+            side_effect?: "NONE" | "AUTO_BORROW" | "AUTO_REPAY";
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -257,6 +275,16 @@ export interface operations {
                      * @enum {string}
                      */
                     self_trade_prevention?: "CANCEL_NEWEST" | "CANCEL_OLDEST" | "CANCEL_BOTH";
+                    /**
+                     * @description The account the order trades from; defaults to SPOT.
+                     * @enum {string}
+                     */
+                    account?: "SPOT" | "MARGIN_CROSS" | "MARGIN_ISOLATED";
+                    /**
+                     * @description Margin accounts only; defaults to NONE.
+                     * @enum {string}
+                     */
+                    side_effect?: "NONE" | "AUTO_BORROW" | "AUTO_REPAY";
                 };
             };
         };

@@ -1,0 +1,131 @@
+syntax = "proto3";
+
+package exchange.margin.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Events of margin-service (design 2026-10-06 §5.3), keyed by user_id, on
+// margin.events. Amounts are decimal strings in the asset named; levels
+// and values in USDT. An account is account_type MARGIN_CROSS (symbol
+// empty) or MARGIN_ISOLATED with its pair's symbol. Draft of batch E0;
+// margin-service publishes them from batch E1 (E3 for the warnings and
+// liquidations).
+//
+//   margin.events  MarginBorrowed, MarginRepaid, MarginInterestAccrued,
+//                  MarginLevelWarned, MarginLiquidationStarted,
+//                  MarginLiquidationCompleted
+
+// AssetAmount is an amount of one asset.
+message AssetAmount {
+  string asset = 1;
+  string amount = 2;
+}
+
+// MarginBorrowed: the user borrowed an asset into a margin account; the
+// first hour's interest is charged with it.
+message MarginBorrowed {
+  string borrow_id = 1;
+  string user_id = 2;
+  string account_type = 3;
+  string symbol = 4;
+  string asset = 5;
+  string amount = 6;
+  // FIXED or FLOATING, and this hour's rate.
+  string interest_model = 7;
+  string hourly_rate = 8;
+  // The first hour's interest, charged now.
+  string first_interest = 9;
+  // The debt of the asset in the account after it.
+  string principal = 10;
+  string interest = 11;
+  // Set when an order borrowed it (side_effect AUTO_BORROW).
+  string order_id = 12;
+  string journal_id = 13;
+  google.protobuf.Timestamp borrowed_at = 14;
+}
+
+// MarginRepaid: a debt was repaid, interest first.
+message MarginRepaid {
+  string repay_id = 1;
+  string user_id = 2;
+  string account_type = 3;
+  string symbol = 4;
+  string asset = 5;
+  string interest_repaid = 6;
+  string principal_repaid = 7;
+  // The debt of the asset in the account after it.
+  string principal = 8;
+  string interest = 9;
+  // USER, AUTO_REPAY (an order's fills) or LIQUIDATION.
+  string reason = 10;
+  string order_id = 11;
+  string liquidation_id = 12;
+  string journal_id = 13;
+  google.protobuf.Timestamp repaid_at = 14;
+}
+
+// MarginInterestAccrued: an hour's interest on one account's debt of an
+// asset (interest = principal x hourly_rate, rounded up to the asset's
+// precision; not compounded).
+message MarginInterestAccrued {
+  string interest_id = 1;
+  string user_id = 2;
+  string account_type = 3;
+  string symbol = 4;
+  string asset = 5;
+  string principal = 6;
+  string interest_model = 7;
+  string hourly_rate = 8;
+  string interest = 9;
+  // The interest owed of the asset in the account after it.
+  string interest_owed = 10;
+  // The hour charged; a borrow's first hour has the time of borrowing.
+  google.protobuf.Timestamp hour = 11;
+  string journal_id = 12;
+}
+
+// MarginLevelWarned: an account's margin level fell under its warning
+// level (once until it is back above it).
+message MarginLevelWarned {
+  string user_id = 1;
+  string account_type = 2;
+  string symbol = 3;
+  string margin_level = 4;
+  string warn_level = 5;
+  string liquidation_level = 6;
+  string total_asset = 7;
+  string total_liability = 8;
+  google.protobuf.Timestamp warned_at = 9;
+}
+
+// MarginLiquidationStarted: an account reached its liquidation level
+// twice in a row; it is frozen and its orders are canceled.
+message MarginLiquidationStarted {
+  string liquidation_id = 1;
+  string user_id = 2;
+  string account_type = 3;
+  string symbol = 4;
+  string margin_level = 5;
+  string total_asset = 6;
+  string total_liability = 7;
+  google.protobuf.Timestamp started_at = 8;
+}
+
+// MarginLiquidationCompleted: the debts are repaid (from the assets sold
+// to HOUSE, the insurance fund covering what they did not), the fee is
+// charged and the account is free again with what is left.
+message MarginLiquidationCompleted {
+  string liquidation_id = 1;
+  string user_id = 2;
+  string account_type = 3;
+  string symbol = 4;
+  repeated AssetAmount repaid = 5;
+  // The liquidation fee (2% of the value traded), in USDT, to the
+  // insurance fund.
+  string fee = 6;
+  // In USDT, what the insurance fund paid of the debts.
+  string insurance_covered = 7;
+  // What is left in the account.
+  repeated AssetAmount remaining = 8;
+  google.protobuf.Timestamp completed_at = 9;
+}

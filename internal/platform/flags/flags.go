@@ -68,31 +68,44 @@ const (
 	KeySimHaltOnLoss = "sim.halt_on_loss"
 )
 
+// Margin trading (design 2026-10-06 §6): users borrow from HOUSE into
+// margin accounts at all, the system liquidates accounts at their
+// liquidation level, orders borrow what they lack (side_effect
+// AUTO_BORROW). All off by default; margin-service reads them from batch E1.
+const (
+	KeyMarginEnabled     = "margin.enabled"
+	KeyMarginLiquidation = "margin.liquidation"
+	KeyMarginAutoBorrow  = "margin.auto_borrow"
+)
+
 // Known describes the known flags.
 var Known = map[string]string{
-	KeyRegistrationSMS:  "SMS as a registration and login channel (high-risk regions stay email-only)",
-	KeyTransfer:         "Transfers between spot and futures accounts",
-	KeyManualAdjustment: "Operator credits of simulated funds (MANUAL_ADJUSTMENT)",
-	KeyWelcomeCredit:    "Simulated demo funds for newly registered users (test environments only)",
-	KeyWithdraw:         "Withdrawals (phase 2)",
-	KeyDerivatives:      "Perpetual futures trading (phase 3)",
-	KeyReferenceKline:   "Candles from the reference market instead of the platform's, per symbol (ADR-0010)",
-	KeyRiskEnforce:      "Carry out risk rule actions (accounts scored for review move to RISK_REVIEW); off only records the scores",
-	KeyReferenceFeed:    "External reference prices from Binance public data; test environments only until a data license exists (§11.9)",
-	KeyMarketMaker:      "Retired with ADR-0015: the quoting market maker of §11.10, replaced by HOUSE's virtual liquidity (market.house_liquidity)",
-	KeyReferenceTicker:  "Tickers (last price, 24-hour statistics, best bid and ask) from the reference market instead of the platform's (ADR-0010)",
-	KeyHaltOnFeedLoss:   "Halt the pairs that follow a reference market after 5 minutes without reference data; resume them when it is back (ADR-0010)",
-	KeyAdminNoTOTP:      "Admin console sign-in with the password alone: the authenticator code is not asked for or checked (test environments only)",
-	KeyReferenceDepth:   "Order book and public trades from the reference market instead of the platform's, per symbol (ADR-0010)",
-	KeyHouseLiquidity:   "HOUSE trades against orders at the reference market's book (virtual liquidity), per symbol; off leaves the platform's own book (ADR-0015)",
-	KeyInternalMatching: "Users' orders also trade with each other on pairs with HOUSE liquidity; off makes HOUSE the counterparty of every trade (ADR-0015)",
-	KeyTwoPerson:        "Admin console: manual adjustments, insurance fund contributions and withdrawals needing two reviewers take a second administrator; off lets one administrator carry them out within the console's single-person limits",
-	KeyFlatMinutes:      "Store a flat one-minute candle (the previous close, no volume) for each minute without a trade, per symbol no reference market follows (the platform coin and its perpetual), for the chart and ClickHouse",
-	KeyTestAssets:       "Deposits and withdrawals of the hidden test assets (ADR-0017) for the users these rules allow: the end-to-end tests' accounts (region AQ on the test server); off, nobody's",
-	KeySimEnabled:       "The simulated market of the platform coin (market-sim): its bots quote and trade ASTRA-USDT around the model's price; off cancels their orders",
-	KeySimEvents:        "Operators' price events in the simulated market (jumps, targets, trends, pauses)",
-	KeySimPerp:          "The simulated market's bots also make the market on the platform coin's perpetual",
-	KeySimHaltOnLoss:    "Halt a pair (and its perpetual) a minute after its simulated market's heartbeat stopped; resume when it is back",
+	KeyRegistrationSMS:   "SMS as a registration and login channel (high-risk regions stay email-only)",
+	KeyTransfer:          "Transfers between spot and futures accounts",
+	KeyManualAdjustment:  "Operator credits of simulated funds (MANUAL_ADJUSTMENT)",
+	KeyWelcomeCredit:     "Simulated demo funds for newly registered users (test environments only)",
+	KeyWithdraw:          "Withdrawals (phase 2)",
+	KeyDerivatives:       "Perpetual futures trading (phase 3)",
+	KeyReferenceKline:    "Candles from the reference market instead of the platform's, per symbol (ADR-0010)",
+	KeyRiskEnforce:       "Carry out risk rule actions (accounts scored for review move to RISK_REVIEW); off only records the scores",
+	KeyReferenceFeed:     "External reference prices from Binance public data; test environments only until a data license exists (§11.9)",
+	KeyMarketMaker:       "Retired with ADR-0015: the quoting market maker of §11.10, replaced by HOUSE's virtual liquidity (market.house_liquidity)",
+	KeyReferenceTicker:   "Tickers (last price, 24-hour statistics, best bid and ask) from the reference market instead of the platform's (ADR-0010)",
+	KeyHaltOnFeedLoss:    "Halt the pairs that follow a reference market after 5 minutes without reference data; resume them when it is back (ADR-0010)",
+	KeyAdminNoTOTP:       "Admin console sign-in with the password alone: the authenticator code is not asked for or checked (test environments only)",
+	KeyReferenceDepth:    "Order book and public trades from the reference market instead of the platform's, per symbol (ADR-0010)",
+	KeyHouseLiquidity:    "HOUSE trades against orders at the reference market's book (virtual liquidity), per symbol; off leaves the platform's own book (ADR-0015)",
+	KeyInternalMatching:  "Users' orders also trade with each other on pairs with HOUSE liquidity; off makes HOUSE the counterparty of every trade (ADR-0015)",
+	KeyTwoPerson:         "Admin console: manual adjustments, insurance fund contributions and withdrawals needing two reviewers take a second administrator; off lets one administrator carry them out within the console's single-person limits",
+	KeyFlatMinutes:       "Store a flat one-minute candle (the previous close, no volume) for each minute without a trade, per symbol no reference market follows (the platform coin and its perpetual), for the chart and ClickHouse",
+	KeyTestAssets:        "Deposits and withdrawals of the hidden test assets (ADR-0017) for the users these rules allow: the end-to-end tests' accounts (region AQ on the test server); off, nobody's",
+	KeySimEnabled:        "The simulated market of the platform coin (market-sim): its bots quote and trade ASTRA-USDT around the model's price; off cancels their orders",
+	KeySimEvents:         "Operators' price events in the simulated market (jumps, targets, trends, pauses)",
+	KeySimPerp:           "The simulated market's bots also make the market on the platform coin's perpetual",
+	KeySimHaltOnLoss:     "Halt a pair (and its perpetual) a minute after its simulated market's heartbeat stopped; resume when it is back",
+	KeyMarginEnabled:     "Margin trading: transfers to margin accounts, borrowing from HOUSE, repaying and orders on margin accounts; off answers MARGIN_DISABLED (design 2026-10-06)",
+	KeyMarginLiquidation: "Margin liquidations: accounts at their liquidation level are frozen, closed against HOUSE and their debts repaid; off only warns (design 2026-10-06 §4.5)",
+	KeyMarginAutoBorrow:  "Orders on margin accounts with side_effect AUTO_BORROW borrow what the free balance lacks (design 2026-10-06 §5.1)",
 }
 
 // List allows or denies values of one dimension. An empty Allow allows

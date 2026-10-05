@@ -75,6 +75,10 @@ const (
 	// liquidations, keyed by user.
 	TopicDerivPosition    = "derivatives.position.events"
 	TopicDerivLiquidation = "derivatives.liquidation.events"
+	// TopicMargin carries margin-service's borrowing, repaying, interest,
+	// warnings and liquidations, keyed by user (margin design 2026-10-06
+	// §5.3; created and published from batch E1).
+	TopicMargin = "margin.events"
 )
 
 // Factory stamps envelopes with the producing service and instance.

@@ -1,0 +1,671 @@
+openapi: 3.1.0
+info:
+  title: Exchange margin trading API
+  version: 0.1.0
+  description: |
+    Margin trading (design 2026-10-06, docs/设计-杠杆交易-2026-10-06.md):
+    users borrow from the platform (HOUSE lends, design §1) to trade spot
+    pairs from a MARGIN_CROSS account (one per user, its assets and debts
+    cover each other) or a MARGIN_ISOLATED account (one per pair, only that
+    pair's two assets). Interest accrues every hour on the principal and is
+    repaid first. An account's margin level is its total assets over its
+    total liabilities, both valued in USDT (assets after the asset's
+    haircut); below the warning level the user is told, at the liquidation
+    level the system closes the account against HOUSE, repays the debts,
+    charges the 2% liquidation fee and returns the rest. Draft of batch E0:
+    the endpoints come with batches E1 (accounts, transfers, borrowing,
+    repaying, interest), E2 (orders on margin accounts, the margin channel)
+    and E3 (warnings and liquidations), behind the margin.enabled switch;
+    until then they answer MARGIN_DISABLED. Orders on a margin account go
+    through POST /v1/orders with account and side_effect (trading
+    contract). Amounts are decimal strings (ADR-0008), IDs UUIDv7.
+
+    Errors (appendix C style): MARGIN_DISABLED (403, the switch is off or
+    the user is not eligible), MARGIN_ASSET_NOT_BORROWABLE (422, the asset
+    cannot be borrowed, or not used as margin, in this account),
+    MARGIN_LIMIT (422, more than the account may borrow; details
+    max_borrowable), MARGIN_POOL_EMPTY (422, the platform's pool of the
+    asset is used up; details pool_available), MARGIN_LEVEL_TOO_LOW (422,
+    the transfer, borrowing or order would leave the margin level under the
+    warning level; details margin_level, warn_level), MARGIN_FROZEN (409,
+    the account is being liquidated or frozen by an operator).
+
+    Pushes: the private WebSocket channel "margin" carries MarginPush
+    messages (account changes, warnings, liquidations).
+servers:
+  - url: https://astras.vip
+security:
+  - bearer: []
+tags:
+  - name: margin
+paths:
+  /v1/margin/assets:
+    get:
+      operationId: listMarginAssets
+      summary: What can be borrowed and used as margin, at what rate
+      description: Public. Every asset of the margin list with its terms, its current hourly rate and what the pool has left.
+      tags: [margin]
+      security: []
+      responses:
+        '200':
+          description: The assets.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MarginAsset'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/margin/pairs:
+    get:
+      operationId: listMarginPairs
+      summary: The cross account's terms and each pair's isolated terms
+      description: Public. Leverage, warning and liquidation levels.
+      tags: [margin]
+      security: []
+      responses:
+        '200':
+          description: The terms.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cross, items]
+                properties:
+                  cross:
+                    $ref: '#/components/schemas/MarginTerms'
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MarginPair'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/margin/accounts:
+    get:
+      operationId: listMarginAccounts
+      summary: The caller's cross account and isolated accounts
+      description: |
+        The cross account always (empty until the first transfer) and every
+        isolated account that ever held something, with their assets,
+        debts, margin level and values in USDT.
+      tags: [margin]
+      responses:
+        '200':
+          description: The accounts.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cross, isolated]
+                properties:
+                  cross:
+                    $ref: '#/components/schemas/MarginAccount'
+                  isolated:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MarginAccount'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/margin/transfer:
+    post:
+      operationId: marginTransfer
+      summary: Move an asset between the spot account and a margin account
+      description: |
+        IN moves from SPOT into the margin account (an isolated account is
+        opened by its first transfer and takes only its pair's two assets);
+        OUT moves back what is free of debt, and only while the margin level
+        stays at or above the warning level (MARGIN_LEVEL_TOO_LOW).
+      tags: [margin]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [direction, account, asset, amount]
+              additionalProperties: false
+              properties:
+                direction:
+                  type: string
+                  enum: [IN, OUT]
+                account:
+                  $ref: '#/components/schemas/MarginAccountType'
+                symbol:
+                  type: string
+                  description: The pair of a MARGIN_ISOLATED account.
+                  examples: [BTC-USDT]
+                asset:
+                  type: string
+                amount:
+                  $ref: './market.yaml#/components/schemas/Decimal'
+      responses:
+        '200':
+          description: Done.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarginTransfer'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/margin/borrow:
+    post:
+      operationId: marginBorrow
+      summary: Borrow an asset into a margin account
+      description: |
+        The amount must be borrowable (MARGIN_ASSET_NOT_BORROWABLE), within
+        what the account may borrow (MARGIN_LIMIT), what the pool has left
+        (MARGIN_POOL_EMPTY) and the user's cap, and the account must not be
+        frozen (MARGIN_FROZEN). The first hour's interest is charged at once.
+      tags: [margin]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account, asset, amount]
+              additionalProperties: false
+              properties:
+                account:
+                  $ref: '#/components/schemas/MarginAccountType'
+                symbol:
+                  type: string
+                asset:
+                  type: string
+                amount:
+                  $ref: './market.yaml#/components/schemas/Decimal'
+      responses:
+        '200':
+          description: Borrowed; the loan as it stands now.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarginLoan'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/margin/repay:
+    post:
+      operationId: marginRepay
+      summary: Repay a debt from the margin account's free balance
+      description: Interest first, then principal. ALL repays the whole debt of the asset, as far as the free balance goes.
+      tags: [margin]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account, asset, amount]
+              additionalProperties: false
+              properties:
+                account:
+                  $ref: '#/components/schemas/MarginAccountType'
+                symbol:
+                  type: string
+                asset:
+                  type: string
+                amount:
+                  oneOf:
+                    - $ref: './market.yaml#/components/schemas/Decimal'
+                    - type: string
+                      const: ALL
+      responses:
+        '200':
+          description: Repaid.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [interest_repaid, principal_repaid, loan]
+                properties:
+                  interest_repaid:
+                    $ref: './market.yaml#/components/schemas/Decimal'
+                  principal_repaid:
+                    $ref: './market.yaml#/components/schemas/Decimal'
+                  loan:
+                    $ref: '#/components/schemas/MarginLoan'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/margin/loans:
+    get:
+      operationId: listMarginLoans
+      summary: The caller's open loans
+      description: One per account and asset with principal or interest outstanding.
+      tags: [margin]
+      parameters:
+        - $ref: '#/components/parameters/AccountQuery'
+        - $ref: '#/components/parameters/SymbolQuery'
+      responses:
+        '200':
+          description: The loans.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MarginLoan'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/margin/interest:
+    get:
+      operationId: listMarginInterest
+      summary: The caller's interest charges, newest first
+      tags: [margin]
+      parameters:
+        - $ref: '#/components/parameters/AccountQuery'
+        - $ref: '#/components/parameters/SymbolQuery'
+        - name: asset
+          in: query
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MarginInterest'
+                  next_cursor:
+                    type: [string, 'null']
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/margin/liquidations:
+    get:
+      operationId: listMarginLiquidations
+      summary: The caller's liquidations, newest first
+      tags: [margin]
+      parameters:
+        - $ref: '#/components/parameters/AccountQuery'
+        - $ref: '#/components/parameters/SymbolQuery'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MarginLiquidation'
+                  next_cursor:
+                    type: [string, 'null']
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+  /v1/margin/max-borrowable:
+    get:
+      operationId: getMaxBorrowable
+      summary: How much of an asset the account may borrow now
+      description: |
+        min(net assets x (leverage - 1) - what is borrowed, what the pool
+        has left, the user's cap), in the asset at its current value.
+      tags: [margin]
+      parameters:
+        - name: account
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/MarginAccountType'
+        - $ref: '#/components/parameters/SymbolQuery'
+        - name: asset
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The amount.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [asset, amount, limited_by]
+                properties:
+                  asset:
+                    type: string
+                  amount:
+                    $ref: './market.yaml#/components/schemas/Decimal'
+                  limited_by:
+                    type: string
+                    description: Which of the three bounds is the smallest.
+                    enum: [LEVERAGE, POOL, USER_CAP]
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      schema:
+        type: string
+        maxLength: 100
+    AccountQuery:
+      name: account
+      in: query
+      schema:
+        $ref: '#/components/schemas/MarginAccountType'
+    SymbolQuery:
+      name: symbol
+      in: query
+      description: The pair of a MARGIN_ISOLATED account.
+      schema:
+        type: string
+    Cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+  schemas:
+    MarginAccountType:
+      type: string
+      enum: [MARGIN_CROSS, MARGIN_ISOLATED]
+    MarginAsset:
+      type: object
+      required: [asset, borrowable, collateral, haircut, pool_cap, pool_available, user_cap, interest_model, hourly_rate, rate_hour]
+      properties:
+        asset:
+          type: string
+        borrowable:
+          type: boolean
+        collateral:
+          type: boolean
+          description: Counts in the total assets of a margin account.
+        haircut:
+          description: What the asset counts for as margin, e.g. 0.95 (USDT 1).
+          $ref: './market.yaml#/components/schemas/Decimal'
+        pool_cap:
+          description: What the platform lends of the asset at most.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        pool_available:
+          description: pool_cap less what is lent out.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        user_cap:
+          description: What one user may owe of the asset at most.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        interest_model:
+          type: string
+          enum: [FIXED, FLOATING]
+        hourly_rate:
+          description: This hour's rate, e.g. 0.00001 for 0.0010% an hour.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        rate_hour:
+          type: string
+          format: date-time
+          description: The hour hourly_rate applies to (FLOATING sets it on the hour from the pool's use).
+    MarginTerms:
+      type: object
+      required: [leverage, warn_level, liquidation_level, liquidation_fee_rate]
+      properties:
+        leverage:
+          type: integer
+          minimum: 2
+        warn_level:
+          description: Margin level under which the user is warned, e.g. 1.3.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        liquidation_level:
+          description: Margin level at which the account is liquidated, e.g. 1.1.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        liquidation_fee_rate:
+          description: Of the liquidation's traded value, e.g. 0.02.
+          $ref: './market.yaml#/components/schemas/Decimal'
+    MarginPair:
+      allOf:
+        - $ref: '#/components/schemas/MarginTerms'
+        - type: object
+          required: [symbol, base, quote, isolated]
+          properties:
+            symbol:
+              type: string
+            base:
+              type: string
+            quote:
+              type: string
+            isolated:
+              type: boolean
+              description: Whether the pair takes isolated accounts.
+    MarginBalance:
+      type: object
+      required: [asset, free, locked, borrowed, interest, net]
+      properties:
+        asset:
+          type: string
+        free:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        locked:
+          description: Frozen by open orders.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        borrowed:
+          description: Principal owed.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        interest:
+          description: Interest owed.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        net:
+          description: free + locked - borrowed - interest.
+          $ref: './market.yaml#/components/schemas/Decimal'
+    MarginAccount:
+      type: object
+      required: [account, symbol, leverage, status, margin_level, warn_level, liquidation_level, total_asset, total_liability,
+        net_asset, liquidation_price, balances, updated_at]
+      properties:
+        account:
+          $ref: '#/components/schemas/MarginAccountType'
+        symbol:
+          type: [string, 'null']
+          description: The pair of an isolated account; null for the cross account.
+        leverage:
+          type: integer
+        status:
+          type: string
+          description: WARNED under the warning level; LIQUIDATING from the trigger to the end; FROZEN by an operator.
+          enum: [NORMAL, WARNED, LIQUIDATING, FROZEN]
+        margin_level:
+          description: total_asset / total_liability; null without debts (shown as 999).
+          oneOf:
+            - $ref: './market.yaml#/components/schemas/Decimal'
+            - type: 'null'
+        warn_level:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        liquidation_level:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        total_asset:
+          description: In USDT, each collateral asset after its haircut.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        total_liability:
+          description: Principal and interest in USDT.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        net_asset:
+          description: total_asset - total_liability.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        liquidation_price:
+          description: An isolated account's estimate of the base price at which it is liquidated; null for the cross account and without debts.
+          oneOf:
+            - $ref: './market.yaml#/components/schemas/Decimal'
+            - type: 'null'
+        balances:
+          type: array
+          items:
+            $ref: '#/components/schemas/MarginBalance'
+        updated_at:
+          type: string
+          format: date-time
+    MarginTransfer:
+      type: object
+      required: [transfer_id, direction, account, symbol, asset, amount, created_at]
+      properties:
+        transfer_id:
+          type: string
+          format: uuid
+        direction:
+          type: string
+          enum: [IN, OUT]
+        account:
+          $ref: '#/components/schemas/MarginAccountType'
+        symbol:
+          type: [string, 'null']
+        asset:
+          type: string
+        amount:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        created_at:
+          type: string
+          format: date-time
+    MarginLoan:
+      type: object
+      required: [account, symbol, asset, principal, interest, interest_model, hourly_rate, updated_at]
+      properties:
+        account:
+          $ref: '#/components/schemas/MarginAccountType'
+        symbol:
+          type: [string, 'null']
+        asset:
+          type: string
+        principal:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        interest:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        interest_model:
+          type: string
+          enum: [FIXED, FLOATING]
+        hourly_rate:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        updated_at:
+          type: string
+          format: date-time
+    MarginInterest:
+      type: object
+      required: [interest_id, account, symbol, asset, principal, hourly_rate, interest, interest_model, hour]
+      properties:
+        interest_id:
+          type: string
+          format: uuid
+        account:
+          $ref: '#/components/schemas/MarginAccountType'
+        symbol:
+          type: [string, 'null']
+        asset:
+          type: string
+        principal:
+          description: The principal the hour was charged on.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        hourly_rate:
+          $ref: './market.yaml#/components/schemas/Decimal'
+        interest:
+          description: principal x hourly_rate, rounded up to the asset's precision.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        interest_model:
+          type: string
+          enum: [FIXED, FLOATING]
+        hour:
+          type: string
+          format: date-time
+          description: The hour charged (a borrow's first hour at the time of borrowing).
+    MarginLiquidation:
+      type: object
+      required: [liquidation_id, account, symbol, status, margin_level, repaid, fee, insurance_covered, started_at, completed_at]
+      properties:
+        liquidation_id:
+          type: string
+          format: uuid
+        account:
+          $ref: '#/components/schemas/MarginAccountType'
+        symbol:
+          type: [string, 'null']
+        status:
+          type: string
+          enum: [STARTED, COMPLETED]
+        margin_level:
+          description: The margin level that triggered it.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        repaid:
+          type: array
+          description: Debts repaid, per asset (principal and interest).
+          items:
+            type: object
+            required: [asset, amount]
+            properties:
+              asset:
+                type: string
+              amount:
+                $ref: './market.yaml#/components/schemas/Decimal'
+        fee:
+          description: The liquidation fee in USDT, to the insurance fund.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        insurance_covered:
+          description: In USDT, what the insurance fund paid of debts the assets did not cover.
+          $ref: './market.yaml#/components/schemas/Decimal'
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: [string, 'null']
+          format: date-time
+    MarginPush:
+      description: |
+        A message of the private WebSocket channel "margin" (its data):
+        ACCOUNT when an account's assets, debts or margin level change (at
+        most once a second per account), WARNING when it falls under the
+        warning level, LIQUIDATION when a liquidation starts and completes.
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [ACCOUNT, WARNING, LIQUIDATION]
+        account:
+          $ref: '#/components/schemas/MarginAccount'
+        warning:
+          type: object
+          required: [account, symbol, margin_level, warn_level, liquidation_level]
+          properties:
+            account:
+              $ref: '#/components/schemas/MarginAccountType'
+            symbol:
+              type: [string, 'null']
+            margin_level:
+              $ref: './market.yaml#/components/schemas/Decimal'
+            warn_level:
+              $ref: './market.yaml#/components/schemas/Decimal'
+            liquidation_level:
+              $ref: './market.yaml#/components/schemas/Decimal'
+        liquidation:
+          $ref: '#/components/schemas/MarginLiquidation'
