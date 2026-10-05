@@ -17,6 +17,7 @@ import {
 import { useBalances } from "@exchange/core/assets/hooks";
 import { convertValue, referencePrice, valuePortfolio } from "@exchange/core/assets/valuation";
 import { useArticles, useHero } from "@exchange/core/content/index";
+import { useIsolatedLeverage } from "@exchange/core/margin/hooks";
 import { marqueeRows, rankOverview, useMarketRows, useMarketTickers, type MarketRow, type TickerOf } from "@exchange/core/markets/index";
 import { useTestMode, useWelcomeCredits } from "@exchange/core/platform/index";
 import {
@@ -433,6 +434,7 @@ function TopCoins({ rows, loading, error, onRetry, tickerOf }: Section) {
 
 function CoinCard({ row, ticker }: { row: MarketRow; ticker: TickerData | undefined }) {
   const { t } = useTranslation();
+  const leverage = useIsolatedLeverage().get(row.symbol);
   return (
     <Link
       to={tradePath(row)}
@@ -444,6 +446,11 @@ function CoinCard({ row, ticker }: { row: MarketRow; ticker: TickerData | undefi
         {row.kind === "perp" && (
           <Tag tone="brand" className="shrink-0">
             {t("mMarkets.perp")}
+          </Tag>
+        )}
+        {row.kind === "spot" && leverage && (
+          <Tag tone="neutral" className="shrink-0" title={t("mMarkets.isolatedLeverage", { n: leverage })}>
+            {leverage}x
           </Tag>
         )}
       </span>
