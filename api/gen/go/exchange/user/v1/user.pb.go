@@ -582,9 +582,9 @@ func (x *GetUserResponse) GetUser() *User {
 type CheckEligibilityRequest struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	UserId string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	// SPOT_TRADE, DERIVATIVES_TRADE, DEPOSIT, WITHDRAW, TRANSFER, or
-	// TEST_ASSETS (the hidden test assets' deposits and withdrawals,
-	// ADR-0017).
+	// SPOT_TRADE, DERIVATIVES_TRADE, DEPOSIT, WITHDRAW, TRANSFER,
+	// MARGIN_TRADE (margin trading, behind margin.enabled), or TEST_ASSETS
+	// (the hidden test assets' deposits and withdrawals, ADR-0017).
 	Feature string `protobuf:"bytes,2,opt,name=feature,proto3" json:"feature,omitempty"`
 	// Optional dimensions for feature flags.
 	Asset         string `protobuf:"bytes,3,opt,name=asset,proto3" json:"asset,omitempty"`

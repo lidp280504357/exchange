@@ -13,6 +13,8 @@ export const routes = {
   withdraw: "/assets/withdraw",
   transfer: "/assets/transfer",
   history: "/assets/history",
+  /** The margin accounts (margin design 2026-10-06 §7). */
+  margin: "/assets/margin",
   security: "/account/security",
   settings: "/account/settings",
   sessions: "/account/sessions",

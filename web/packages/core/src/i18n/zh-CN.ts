@@ -7,7 +7,7 @@ export const zhCN = {
     home: "首页", markets: "行情", spot: "现货交易", futures: "合约", assets: "资产", overview: "资产总览", deposit: "充值",
     withdraw: "提现", transfer: "划转", history: "资金流水", announcements: "公告", help: "帮助中心", search: "搜索币种",
     notifications: "通知", account: "账户", security: "安全", settings: "设置", sessions: "设备与登录", logout: "退出登录",
-    login: "登录", register: "注册", language: "语言", me: "我的", trade: "交易", recent: "最近交易对",
+    login: "登录", register: "注册", language: "语言", me: "我的", trade: "交易", recent: "最近交易对", margin: "杠杆账户",
   },
   footer: {
     products: "产品", support: "支持", about: "关于", toMobile: "切换到手机版", toPC: "切换到电脑版",
@@ -51,6 +51,12 @@ export const zhCN = {
     INSURANCE_CONTRIBUTION: "保险基金", ONE_WAY: "单向持仓", HEDGE: "双向持仓", CROSS: "全仓", ISOLATED: "逐仓",
     LONG: "多", SHORT: "空", BOTH: "单向", TAKE_PROFIT: "止盈", STOP_LOSS: "止损", TRIGGERED: "已触发",
     DETECTED: "已检测", CREDITED: "已到账", ORPHANED: "已回滚", COMPLETED: "成功", CHAIN: "链上", INTERNAL: "站内",
+    MARGIN_CROSS: "全仓杠杆", MARGIN_ISOLATED: "逐仓杠杆", NORMAL: "正常", WARNED: "已预警", LIQUIDATING: "强平中",
+    FIXED: "固定利率", FLOATING: "浮动利率", IN: "划入", OUT: "划出",
+    LEVERAGE: "杠杆倍数", LEVEL: "风险率预警线", POOL: "平台可借余量", USER_CAP: "单用户借款上限",
+    MARGIN_CROSS_DEBT: "全仓负债", MARGIN_CROSS_INTEREST: "全仓利息", MARGIN_ISOLATED_DEBT: "逐仓负债", MARGIN_ISOLATED_INTEREST: "逐仓利息",
+    MARGIN_TRANSFER_IN: "杠杆划入", MARGIN_TRANSFER_OUT: "杠杆划出", MARGIN_BORROW: "借币", MARGIN_INTEREST: "借币利息",
+    MARGIN_REPAY: "还币", MARGIN_TRADE_SETTLE: "杠杆成交", MARGIN_LIQUIDATE: "杠杆强平",
   },
   errors: {
     AUTH_PASSWORD_INVALID: "账户或密码不正确", AUTH_PASSWORD_WEAK: "密码太弱：至少 10 位，避免常见密码、连续或重复字符，不要包含邮箱",
@@ -81,10 +87,17 @@ export const zhCN = {
     DERIV_RISK_LIMIT_EXCEEDED: "仓位超出该杠杆的风险限额，请降低杠杆或数量", DERIV_REDUCE_ONLY_REJECTED: "平仓数量超过可平仓位",
     DERIV_SETTINGS_LOCKED: "请先平掉该合约的仓位并撤销挂单", DERIV_NO_POSITION: "没有对应的仓位",
     DERIV_MARGIN_REDUCE_TOO_LARGE: "减少后保证金不足", DERIV_POSITION_LIQUIDATING: "仓位正在强平", DERIV_TRIGGER_IMMEDIATE: "触发价已被越过，请直接下单",
+    MARGIN_DISABLED: "杠杆交易暂未开放", MARGIN_ASSET_NOT_BORROWABLE: "该币种在这个账户里不可借或不能作保证金",
+    MARGIN_LIMIT: "超出可借额度", MARGIN_POOL_EMPTY: "平台该币种的可借余量不足", MARGIN_LEVEL_TOO_LOW: "操作后风险率会低于预警线",
+    MARGIN_FROZEN: "杠杆账户正在强平或已被冻结", MARGIN_PRICE_UNAVAILABLE: "账户里有币种暂无价格，请稍后再试",
+    MARGIN_REPAY_EXCEEDS_DEBT: "还款超过负债", LEDGER_DEBT_OVERPAID: "还款超过负债",
     format: "请输入正确的数字", zero: "数量必须大于 0", precision: "最多 {{n}} 位小数", unknown: "出错了（{{code}}）",
   },
   // Messages that name what the error's details carry (errorText).
   errorDetails: {
     DERIV_RISK_LIMIT_EXCEEDED: "超出 {{leverage}}x 的风险限额：该方向最多 {{max_notional}} USDT，现为 {{notional}} USDT，请降低杠杆或数量",
+    MARGIN_LIMIT: "超出可借额度：现在最多可借 {{max_borrowable}}",
+    MARGIN_POOL_EMPTY: "平台该币种的可借余量只剩 {{pool_available}}",
+    MARGIN_LEVEL_TOO_LOW: "操作后风险率 {{margin_level}} 会低于预警线 {{warn_level}}",
   },
 };

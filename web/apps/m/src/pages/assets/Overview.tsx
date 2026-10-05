@@ -1,5 +1,6 @@
 import { dec, errorText, formatAmount, formatPercent, routes, useSettings } from "@exchange/core";
 import { useBalances, useFuturesAccount, useLiveTickers } from "@exchange/core/assets/hooks";
+import { useMarginEntry } from "@exchange/core/margin/hooks";
 import { convertValue, referencePrice, valuePortfolio, type AccountView, type AssetRow, type Portfolio } from "@exchange/core/assets/valuation";
 import {
   AmountText,
@@ -18,7 +19,7 @@ import {
   cn,
   listItem,
 } from "@exchange/ui";
-import { ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, ChartCandlestick, ChevronRight, Eye, EyeOff, Info, ScrollText, Search, Wallet } from "lucide-react";
+import { ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, ChartCandlestick, ChevronRight, Eye, EyeOff, Info, Landmark, ScrollText, Search, Wallet } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -78,6 +79,7 @@ export default function Overview() {
         </motion.div>
         <motion.div variants={listItem} initial="initial" animate="animate" custom={1}>
           <QuickActions />
+          <MarginEntry />
         </motion.div>
         <motion.div ref={listRef} variants={listItem} initial="initial" animate="animate" custom={2} className="scroll-mt-14">
           <AssetList
@@ -229,6 +231,21 @@ function QuickActions() {
         </Link>
       ))}
     </nav>
+  );
+}
+
+/** MarginEntry leads to the margin accounts, for whom margin trading is open or who still has one. */
+function MarginEntry() {
+  const { t } = useTranslation();
+  if (!useMarginEntry()) return null;
+  return (
+    <Link to={routes.margin} className={cn("mt-2 flex min-h-tap items-center gap-3 rounded-3 bg-bg-1 px-4 py-3", PRESS)} data-testid="margin-entry">
+      <span className="grid size-8 place-items-center rounded-full bg-brand-soft text-brand">
+        <Landmark size={16} />
+      </span>
+      <span className="flex-1 text-sm font-medium text-fg-1">{t("nav.margin")}</span>
+      <ChevronRight size={16} className="text-fg-3" />
+    </Link>
   );
 }
 

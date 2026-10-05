@@ -83,7 +83,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [SPOT_TRADE, DERIVATIVES_TRADE, DEPOSIT, WITHDRAW, TRANSFER]
+            enum: [SPOT_TRADE, DERIVATIVES_TRADE, DEPOSIT, WITHDRAW, TRANSFER, MARGIN_TRADE]
         - name: asset
           in: query
           schema:

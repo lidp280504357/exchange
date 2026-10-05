@@ -65,6 +65,9 @@ export * from "./trading/LeverageDialog";
 export * from "./trading/tpsl";
 export * from "./trading/TpSlDialog";
 
+// Margin.
+export * from "./margin/MarginLevel";
+
 // Charts. CandleChart here is the lazy one (lightweight-charts in its own
 // chunk); "@exchange/ui/charts/CandleChart" is the eager component.
 export { CandleChart } from "./charts/LazyCandleChart";

@@ -4,6 +4,7 @@ import { zhCN as coreZh } from "@exchange/core/i18n/zh-CN";
 import { describe, expect, it } from "vitest";
 import { mMessages } from "../../../i18n";
 import assets from "../../../i18n/assets";
+import margin from "../../../i18n/margin";
 
 // The strings of the mobile assets pages: both languages have the same
 // keys, every key the pages name exists, and so do the keys built from data
@@ -25,13 +26,15 @@ function has(tree: unknown, key: string): boolean {
   return typeof lookup(tree, key) === "string" || typeof lookup(tree, `${key}_other`) === "string";
 }
 
-// The shared words, the shell's (m.*) and this area's (mAssets.*).
-const zh = { ...coreZh, ...mMessages["zh-CN"], ...assets["zh-CN"] };
-const en = { ...coreEn, ...mMessages.en, ...assets.en };
+// The shared words, the shell's (m.*) and this area's (mAssets.*, and the
+// margin page's mMargin.*).
+const zh = { ...coreZh, ...mMessages["zh-CN"], ...assets["zh-CN"], ...margin["zh-CN"] };
+const en = { ...coreEn, ...mMessages.en, ...assets.en, ...margin.en };
 
 describe("assets page strings", () => {
   it("have the same keys in Chinese and English", () => {
     expect(keys(assets.en).sort()).toEqual(keys(assets["zh-CN"]).sort());
+    expect(keys(margin.en).sort()).toEqual(keys(margin["zh-CN"]).sort());
   });
 
   it("cover every key the pages name, in both languages", () => {
@@ -75,6 +78,8 @@ describe("assets page strings", () => {
     const codes = [
       ...LEDGER_ENTRY_TYPES,
       ...["SPOT", "FUTURES", "AVAILABLE", "FROZEN", "CHAIN", "INTERNAL", "COMPLETED", "FAILED"],
+      ...["MARGIN_CROSS", "MARGIN_ISOLATED", "NORMAL", "WARNED", "LIQUIDATING", "LEVERAGE", "LEVEL", "POOL", "USER_CAP"],
+      ...["MARGIN_CROSS_DEBT", "MARGIN_CROSS_INTEREST", "MARGIN_ISOLATED_DEBT", "MARGIN_ISOLATED_INTEREST"],
       ...["REQUESTED", "PENDING_REVIEW", "APPROVED", "SIGNING", "BROADCAST", "CONFIRMING", "SUBMITTED", "CONFIRMED", "INTERNAL_TRANSFER", "REJECTED", "CANCELED"],
     ];
     for (const c of codes) {

@@ -2,7 +2,7 @@ import { routes } from "@exchange/core";
 import { lazyPage, type PageRoute } from "../../routing";
 
 // Assets: overview (a tab), deposit, withdraw, transfer and history (design
-// §7.2). Each page is its own chunk and loads with the area's strings (the
+// §7.2), and the margin accounts (margin design 2026-10-06 §7). Each page is its own chunk and loads with the area's strings (the
 // withdrawal also with the step-up's); all of them need a session.
 const strings = () => import("../../i18n/assets");
 const auth = () => import("../../i18n/auth");
@@ -12,6 +12,7 @@ const Deposit = lazyPage(() => import("./Deposit"), strings);
 const Withdraw = lazyPage(() => import("./Withdraw"), strings, auth);
 const Transfer = lazyPage(() => import("./Transfer"), strings);
 const History = lazyPage(() => import("./History"), strings);
+const Margin = lazyPage(() => import("./Margin"), strings, () => import("../../i18n/margin"));
 
 export const assetRoutes: PageRoute[] = [
   { path: routes.assets, element: <Overview />, auth: true, shell: "tabs" },
@@ -19,4 +20,5 @@ export const assetRoutes: PageRoute[] = [
   { path: routes.withdraw, element: <Withdraw />, auth: true, shell: "page" },
   { path: routes.transfer, element: <Transfer />, auth: true, shell: "page" },
   { path: routes.history, element: <History />, auth: true, shell: "page" },
+  { path: routes.margin, element: <Margin />, auth: true, shell: "page" },
 ];

@@ -13,6 +13,9 @@ describe("ledgerRelation", () => {
     expect(ledgerRelation("TRADE_FEE", "FUTURES")).toBe("futures");
     expect(ledgerRelation("FUNDING_PAYMENT")).toBe("futures");
     expect(ledgerRelation("MANUAL_ADJUSTMENT")).toBe("adjustment");
+    expect(ledgerRelation("MARGIN_BORROW", "MARGIN_CROSS")).toBe("margin");
+    expect(ledgerRelation("MARGIN_TRANSFER_IN")).toBe("margin");
+    expect(ledgerRelation("ORDER_FREEZE", "MARGIN_ISOLATED")).toBe("margin");
     expect(ledgerRelation("SOMETHING_NEW")).toBeNull();
   });
 });

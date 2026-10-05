@@ -508,7 +508,9 @@ function EntryDetail({ entry, loaded, meta }: { entry: LedgerEntry; loaded: Ledg
             ? { to: spot, label: t("mAssets.history.open.spot") }
             : relation === "futures"
               ? { to: links.futures(entry.asset), label: t("mAssets.history.open.futures") }
-              : null;
+              : relation === "margin"
+                ? { to: routes.margin, label: t("mAssets.history.open.margin") }
+                : null;
 
   return (
     <div className="flex flex-col gap-4 pt-1">

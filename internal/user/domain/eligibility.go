@@ -14,6 +14,11 @@ const (
 	FeatureDeposit          = "DEPOSIT"
 	FeatureWithdraw         = "WITHDRAW"
 	FeatureTransfer         = "TRANSFER"
+	// FeatureMarginTrade is margin trading (design 2026-10-06): the sites
+	// show its entries to whom it is open. margin-service and the trading
+	// service check margin.enabled themselves, by user only, so the
+	// switch's rules should name users rather than regions.
+	FeatureMarginTrade = "MARGIN_TRADE"
 	// FeatureTestAssets opens the hidden test assets' deposits and
 	// withdrawals (ADR-0017): the end-to-end tests' accounts only.
 	FeatureTestAssets = "TEST_ASSETS"
@@ -34,6 +39,7 @@ var featureFlags = map[string]string{
 	FeatureDerivativesTrade: flags.KeyDerivatives,
 	FeatureWithdraw:         flags.KeyWithdraw,
 	FeatureTransfer:         flags.KeyTransfer,
+	FeatureMarginTrade:      flags.KeyMarginEnabled,
 	FeatureTestAssets:       flags.KeyTestAssets,
 }
 
@@ -43,7 +49,7 @@ var featureFlags = map[string]string{
 var statusAllows = map[string]map[string]bool{
 	StatusActive: {
 		FeatureSpotTrade: true, FeatureDerivativesTrade: true, FeatureDeposit: true, FeatureWithdraw: true, FeatureTransfer: true,
-		FeatureTestAssets: true,
+		FeatureMarginTrade: true, FeatureTestAssets: true,
 	},
 	StatusRiskReview: {FeatureSpotTrade: true, FeatureDeposit: true},
 	StatusFrozen:     {FeatureDeposit: true},
@@ -59,7 +65,7 @@ var statusReasons = map[string]string{
 // ParseFeature accepts one of the feature names.
 func ParseFeature(s string) (string, error) {
 	switch s {
-	case FeatureSpotTrade, FeatureDerivativesTrade, FeatureDeposit, FeatureWithdraw, FeatureTransfer, FeatureTestAssets:
+	case FeatureSpotTrade, FeatureDerivativesTrade, FeatureDeposit, FeatureWithdraw, FeatureTransfer, FeatureMarginTrade, FeatureTestAssets:
 		return s, nil
 	}
 	return "", apperr.Invalid(fmt.Sprintf("unknown feature %q", s))

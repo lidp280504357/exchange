@@ -385,7 +385,9 @@ function EntryDetail({ entry, loaded, meta, onClose }: { entry: LedgerEntry; loa
               })()
             : relation === "futures"
               ? { to: links.futures(entry.asset), label: t("pcAssets.history.open.futures") }
-              : null;
+              : relation === "margin"
+                ? { to: routes.margin, label: t("pcAssets.history.open.margin") }
+                : null;
 
   return (
     <Card

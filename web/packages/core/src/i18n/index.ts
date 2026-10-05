@@ -114,6 +114,9 @@ export function errorText(err: unknown): string {
 // other values (null) as they come.
 const detailFields: Record<string, Record<string, number | null>> = {
   DERIV_RISK_LIMIT_EXCEEDED: { max_notional: 0, notional: 2, leverage: null },
+  MARGIN_LIMIT: { max_borrowable: null },
+  MARGIN_POOL_EMPTY: { pool_available: null },
+  MARGIN_LEVEL_TOO_LOW: { margin_level: 2, warn_level: null },
 };
 
 /** withDetails is the error's message with its details, when it has one and they all came. */

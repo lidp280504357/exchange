@@ -82,6 +82,17 @@ export const uiMessages = {
         tpsl: "止盈止损",
         adjustMargin: "调整保证金",
       },
+      margin: {
+        level: "风险率",
+        liquidationAt: "强平线 {{level}}",
+        warnAt: "预警线 {{level}}",
+        zone: {
+          none: "无负债",
+          safe: "风险率 {{level}}，安全",
+          caution: "风险率 {{level}}，接近预警线",
+          danger: "风险率 {{level}}，低于预警线",
+        },
+      },
       funding: { rate: "资金费率", countdown: "倒计时" },
       leverage: {
         title: "调整杠杆",
@@ -200,6 +211,17 @@ export const uiMessages = {
         close: "Close",
         tpsl: "TP/SL",
         adjustMargin: "Adjust margin",
+      },
+      margin: {
+        level: "Margin level",
+        liquidationAt: "Liquidation at {{level}}",
+        warnAt: "Warning at {{level}}",
+        zone: {
+          none: "No debts",
+          safe: "Margin level {{level}}, safe",
+          caution: "Margin level {{level}}, near the warning level",
+          danger: "Margin level {{level}}, under the warning level",
+        },
       },
       funding: { rate: "Funding rate", countdown: "Countdown" },
       leverage: {

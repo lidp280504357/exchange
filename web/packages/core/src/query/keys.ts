@@ -10,6 +10,9 @@ export const qk = {
   depth: (symbol: string) => ["market", "depth", symbol] as const,
   trades: (symbol: string) => ["market", "trades", symbol] as const,
   markPrice: (symbol: string) => ["market", "mark-price", symbol] as const,
+  /** The margin terms (public): assets with their pools and rates, pairs with their isolated terms. */
+  marginAssets: ["market", "margin-assets"] as const,
+  marginPairs: ["market", "margin-pairs"] as const,
   /** The platform profile (name, images, banner, registration), public. */
   platform: ["platform", "profile"] as const,
 
@@ -30,7 +33,8 @@ export const qk = {
   networks: (asset: string) => ["wallet", "networks", asset] as const,
   positions: ["derivatives", "positions"] as const,
   derivatives: ["derivatives"] as const,
+  marginAccounts: ["margin", "accounts"] as const,
 };
 
 /** The keys holding a signed-in user's data (cleared on sign-out). */
-export const privateRoots = ["user", "account", "orders", "fills", "notifications", "wallet", "derivatives"] as const;
+export const privateRoots = ["user", "account", "orders", "fills", "notifications", "wallet", "derivatives", "margin"] as const;

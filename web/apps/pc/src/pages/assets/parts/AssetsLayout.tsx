@@ -1,6 +1,7 @@
 import { routes, useTotpStatus } from "@exchange/core";
+import { useMarginEntry } from "@exchange/core/margin/hooks";
 import { Button, cn, copyText } from "@exchange/ui";
-import { ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, Check, Copy, LayoutGrid, ScrollText, ShieldCheck } from "lucide-react";
+import { ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, Check, Copy, Landmark, LayoutGrid, ScrollText, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, NavLink } from "react-router";
@@ -12,6 +13,10 @@ const items = [
   { to: routes.transfer, label: "nav.transfer", icon: ArrowLeftRight, end: false },
   { to: routes.history, label: "nav.history", icon: ScrollText, end: false },
 ] as const;
+
+// The margin accounts: shown to whom margin trading is open, and to whom
+// still has a margin account (to repay and move out when it closed).
+const marginItem = { to: routes.margin, label: "nav.margin", icon: Landmark, end: false } as const;
 
 /**
  * AssetsLayout frames every assets page: the section's side navigation
@@ -40,10 +45,12 @@ export function AssetsLayout({
 function SideNav() {
   const { t } = useTranslation();
   const totp = useTotpStatus();
+  const margin = useMarginEntry();
+  const shown = margin ? [...items, marginItem] : items;
   return (
     <aside className="sticky top-20 flex h-fit w-14 shrink-0 flex-col gap-4 xl:w-52">
       <nav aria-label={t("pcAssets.nav.label")} className="flex flex-col gap-1 rounded-3 border border-line-1 bg-bg-1 p-1.5">
-        {items.map(({ to, label, icon: Icon, end }) => (
+        {shown.map(({ to, label, icon: Icon, end }) => (
           <NavLink
             key={to}
             to={to}

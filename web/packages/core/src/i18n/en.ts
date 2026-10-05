@@ -9,6 +9,7 @@ export const en = {
     search: "Search coins", notifications: "Notifications", account: "Account", security: "Security", settings: "Settings",
     sessions: "Devices", logout: "Sign out", login: "Sign in", register: "Sign up", language: "Language", me: "Me", trade: "Trade",
     recent: "Recent pairs",
+    margin: "Margin",
   },
   footer: {
     products: "Products", support: "Support", about: "About", toMobile: "Mobile site", toPC: "Desktop site",
@@ -54,6 +55,12 @@ export const en = {
     INSURANCE_CONTRIBUTION: "Insurance fund", ONE_WAY: "One-way", HEDGE: "Hedge", CROSS: "Cross", ISOLATED: "Isolated",
     LONG: "Long", SHORT: "Short", BOTH: "One-way", TAKE_PROFIT: "Take profit", STOP_LOSS: "Stop loss", TRIGGERED: "Triggered",
     DETECTED: "Detected", CREDITED: "Credited", ORPHANED: "Reorganized", COMPLETED: "Completed", CHAIN: "On chain", INTERNAL: "Internal",
+    MARGIN_CROSS: "Cross margin", MARGIN_ISOLATED: "Isolated margin", NORMAL: "Normal", WARNED: "Warned", LIQUIDATING: "Liquidating",
+    FIXED: "Fixed rate", FLOATING: "Floating rate", IN: "In", OUT: "Out",
+    LEVERAGE: "Leverage", LEVEL: "Warning level", POOL: "Platform pool", USER_CAP: "Per-user cap",
+    MARGIN_CROSS_DEBT: "Cross debt", MARGIN_CROSS_INTEREST: "Cross interest", MARGIN_ISOLATED_DEBT: "Isolated debt", MARGIN_ISOLATED_INTEREST: "Isolated interest",
+    MARGIN_TRANSFER_IN: "Margin transfer in", MARGIN_TRANSFER_OUT: "Margin transfer out", MARGIN_BORROW: "Borrow", MARGIN_INTEREST: "Interest",
+    MARGIN_REPAY: "Repay", MARGIN_TRADE_SETTLE: "Margin trade", MARGIN_LIQUIDATE: "Margin liquidation",
   },
   errors: {
     AUTH_PASSWORD_INVALID: "Wrong account or password", AUTH_PASSWORD_WEAK: "Too weak: 10+ characters, not common, no runs or repeats, no email in it",
@@ -85,10 +92,18 @@ export const en = {
     DERIV_REDUCE_ONLY_REJECTED: "More than the position left to close", DERIV_SETTINGS_LOCKED: "Close the contract's positions and cancel its orders first",
     DERIV_NO_POSITION: "No such position", DERIV_MARGIN_REDUCE_TOO_LARGE: "Too little margin would be left",
     DERIV_POSITION_LIQUIDATING: "The position is being liquidated", DERIV_TRIGGER_IMMEDIATE: "The trigger price is already reached: place an order",
+    MARGIN_DISABLED: "Margin trading is not open", MARGIN_ASSET_NOT_BORROWABLE: "This coin cannot be borrowed or used as margin in this account",
+    MARGIN_LIMIT: "More than you may borrow", MARGIN_POOL_EMPTY: "The platform has too little of this coin left to lend",
+    MARGIN_LEVEL_TOO_LOW: "The margin level would fall under the warning level", MARGIN_FROZEN: "The margin account is being liquidated or is frozen",
+    MARGIN_PRICE_UNAVAILABLE: "A coin of the account has no price yet, try again shortly",
+    MARGIN_REPAY_EXCEEDS_DEBT: "More than the debt", LEDGER_DEBT_OVERPAID: "More than the debt",
     format: "Enter a valid number", zero: "The amount must be above 0", precision: "At most {{n}} decimals", unknown: "Something went wrong ({{code}})",
   },
   // Messages that name what the error's details carry (errorText).
   errorDetails: {
     DERIV_RISK_LIMIT_EXCEEDED: "Above the {{leverage}}x risk limit: this side may hold {{max_notional}} USDT, it would be {{notional}} USDT. Lower the leverage or the size",
+    MARGIN_LIMIT: "More than you may borrow: at most {{max_borrowable}} now",
+    MARGIN_POOL_EMPTY: "The platform has only {{pool_available}} of this coin left to lend",
+    MARGIN_LEVEL_TOO_LOW: "The margin level would be {{margin_level}}, under the warning level {{warn_level}}",
   },
 };

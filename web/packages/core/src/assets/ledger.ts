@@ -22,15 +22,23 @@ export const LEDGER_ENTRY_TYPES = [
   "ADL_SETTLE",
   "INSURANCE_CONTRIBUTION",
   "MANUAL_ADJUSTMENT",
+  "MARGIN_TRANSFER_IN",
+  "MARGIN_TRANSFER_OUT",
+  "MARGIN_BORROW",
+  "MARGIN_INTEREST",
+  "MARGIN_REPAY",
+  "MARGIN_TRADE_SETTLE",
+  "MARGIN_LIQUIDATE",
 ] as const;
 
-export type LedgerRelation = "deposit" | "withdraw" | "transfer" | "spot" | "futures" | "adjustment";
+export type LedgerRelation = "deposit" | "withdraw" | "transfer" | "spot" | "futures" | "margin" | "adjustment";
 
 /**
  * ledgerRelation tells what an entry belongs to. Lines do not carry the
  * order or withdrawal ID, so the pages link to the list they appear in.
  */
 export function ledgerRelation(entryType: string, accountType = "SPOT"): LedgerRelation | null {
+  if (entryType.startsWith("MARGIN_") || accountType.startsWith("MARGIN_")) return "margin";
   switch (entryType) {
     case "DEPOSIT_CREDIT":
       return "deposit";

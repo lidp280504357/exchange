@@ -217,6 +217,33 @@ try {
   await waitText("账户划转");
   ok("a transfer of 12.34 USDT to futures completes and shows in the ledger");
 
+  // 5b. The margin accounts (margin design 2026-10-06 §7): the cross account
+  // with its gauge. While margin trading is open to the user, 10 USDT moves
+  // into the cross account from the dialog and back out; while it is not,
+  // the page says so.
+  await go("/assets/margin");
+  await page.waitForSelector('[data-testid="margin-account-MARGIN_CROSS"]', { visible: true, timeout: 20000 });
+  await page.waitForSelector('[data-testid="margin-level"]', { visible: true });
+  const closed = await page.evaluate(() => document.body.innerText.includes("杠杆交易 · "));
+  if (closed) {
+    ok("the margin page shows the cross account and says margin trading is not open to this user");
+  } else {
+    const marginTransfer = async (direction, amount, done) => {
+      await page.click('button[data-testid="margin-transfer"]');
+      await page.waitForSelector('form[data-testid="margin-transfer-form"]', { visible: true });
+      if (direction === "OUT") await clickButton("划出到现货", "[role=dialog]");
+      await typeInto('form[data-testid="margin-transfer-form"] input[inputmode="decimal"]', amount);
+      await clickButton("确认划转", "[role=dialog]");
+      await waitText(done);
+      await page.waitForSelector("[role=dialog]", { hidden: true, timeout: 10000 });
+    };
+    await marginTransfer("IN", "10", "已划入 10 USDT");
+    await page.waitForFunction(() => document.querySelector('[data-testid="margin-account-MARGIN_CROSS"] tbody')?.innerText.includes("USDT"), { timeout: 20000 });
+    await marginTransfer("OUT", "10", "已划出 10 USDT");
+    ok("10 USDT moves into the cross margin account from its dialog, shows in its coins, and moves back");
+  }
+  await shot("5b-margin");
+
   // 6. The deposit address: ETH on Sepolia, derived by the platform's own
   // wallet. A custodian's address would come from UDUN, which may be the
   // real gateway: custody.sh covers that path on the stand-in (ADR-0017).

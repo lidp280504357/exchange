@@ -5,6 +5,7 @@ import type { paths as AccountPaths } from "./gen/account";
 import type { paths as AuthPaths } from "./gen/auth";
 import type { paths as DerivativesPaths } from "./gen/derivatives";
 import type { paths as GatewayPaths } from "./gen/gateway";
+import type { paths as MarginPaths } from "./gen/margin";
 import type { paths as MarketPaths } from "./gen/market";
 import type { paths as NotificationPaths } from "./gen/notification";
 import type { paths as PlatformPaths } from "./gen/platform";
@@ -103,6 +104,7 @@ export const gatewayApi = createClient<GatewayPaths>(options);
 export const tradingApi = createClient<TradingPaths>(options);
 export const walletApi = createClient<WalletPaths>(options);
 export const derivativesApi = createClient<DerivativesPaths>(options);
+export const marginApi = createClient<MarginPaths>(options);
 export const platformApi = createClient<PlatformPaths>(options);
 
 /**

@@ -196,7 +196,7 @@ export interface operations {
     getEligibility: {
         parameters: {
             query: {
-                feature: "SPOT_TRADE" | "DERIVATIVES_TRADE" | "DEPOSIT" | "WITHDRAW" | "TRANSFER";
+                feature: "SPOT_TRADE" | "DERIVATIVES_TRADE" | "DEPOSIT" | "WITHDRAW" | "TRANSFER" | "MARGIN_TRADE";
                 asset?: string;
                 symbol?: string;
             };

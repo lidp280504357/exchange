@@ -49,9 +49,10 @@ func TestEligibility(t *testing.T) {
 	// only, as on the test server.
 	onlyAQ := flags.Flag{Enabled: true, Rules: flags.Rules{Regions: &flags.List{Allow: []string{"AQ"}}}}
 	table := map[string]flags.Flag{
-		flags.KeyTransfer:    on,
-		flags.KeyDerivatives: noUS,
-		flags.KeyTestAssets:  onlyAQ,
+		flags.KeyTransfer:      on,
+		flags.KeyDerivatives:   noUS,
+		flags.KeyTestAssets:    onlyAQ,
+		flags.KeyMarginEnabled: {Enabled: true, Rules: flags.Rules{Users: &flags.List{Allow: []string{"u-1"}}}},
 		// wallet.withdraw is missing: off.
 	}
 	lookup := func(k string) (flags.Flag, bool) { f, ok := table[k]; return f, ok }
@@ -79,6 +80,10 @@ func TestEligibility(t *testing.T) {
 		{user(StatusActive, "AQ"), FeatureTestAssets, true, ""},
 		{user(StatusActive, "SG"), FeatureTestAssets, false, ReasonRegion},
 		{user(StatusFrozen, "AQ"), FeatureTestAssets, false, ReasonFrozen},
+		// Margin trading: ACTIVE accounts only, then the switch's users.
+		{user(StatusActive, "SG"), FeatureMarginTrade, true, ""},
+		{User{ID: "u-2", Status: StatusActive, Region: "SG"}, FeatureMarginTrade, false, ReasonNotEligible},
+		{user(StatusRiskReview, "SG"), FeatureMarginTrade, false, ReasonRiskReview},
 	} {
 		allowed, reason := Eligibility(tc.u, tc.feature, "", "", lookup)
 		if allowed != tc.allowed || reason != tc.reason {
