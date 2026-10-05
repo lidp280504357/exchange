@@ -168,10 +168,14 @@ export async function flows({ site, app, api, apiPrefix = "/v1/" }) {
     });
     page.on("pageerror", (e) => tab.errors.push("pageerror: " + e.message));
     // The requests in flight, for settled(): an event stream or a WebSocket
-    // never ends, so they are left out; a redirect replaces its hop.
+    // never ends, so they are left out; a redirect replaces its hop; a new
+    // document (a reload, a page loaded) ends the old one's, which Chrome
+    // does not always report as ended (a list's request cut by a reload
+    // kept every later settled() waiting its full 20 s).
     const inflight = new Set();
     page.on("request", (r) => {
       for (const hop of r.redirectChain()) inflight.delete(hop);
+      if (r.isNavigationRequest() && r.frame() === page.mainFrame()) inflight.clear();
       if (r.resourceType() !== "eventsource" && r.resourceType() !== "websocket") inflight.add(r);
     });
     page.on("requestfinished", (r) => inflight.delete(r));
