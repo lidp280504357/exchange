@@ -1,12 +1,13 @@
 import { dec, formatAmount, formatPercent, formatPrice, type BookLevel, type BookView } from "@exchange/core";
 import { ArrowDown, ArrowUp, LoaderCircle } from "lucide-react";
-import { memo, useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { memo, useCallback, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { PriceText } from "../components/PriceText";
 import { Select } from "../components/Select";
 import { Skeleton } from "../components/Skeleton";
 import { cn } from "../lib/cn";
 import { DepthBars } from "../data/DepthBars";
+import { fitRows } from "./bookRows";
 
 export type BookMode = "both" | "bids" | "asks";
 
@@ -93,10 +94,12 @@ const BookRow = memo(function BookRow({ side, price, quantity, total, ratio, pri
 });
 
 // useRoom measures, while `sides` is given, the height of the sides' box
-// less the middle row's: the room the rows of both sides share.
+// less the middle row's: the room the rows of both sides share. The first
+// measure is taken before the browser paints, so the first frame is cut
+// to it already.
 function useRoom(sides: RefObject<HTMLDivElement | null> | null, middle: RefObject<HTMLDivElement | null>): number {
   const [room, setRoom] = useState(0);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = sides?.current;
     if (!el) return;
     const measure = () => {
@@ -149,12 +152,14 @@ export function OrderBook({
   const sidesRef = useRef<HTMLDivElement>(null);
   const middleRef = useRef<HTMLDivElement>(null);
   const room = useRoom(onRows ? sidesRef : null, middleRef);
-  const fitted = room > 0 ? Math.max(5, Math.min(20, Math.floor(room / 2 / minRow))) : 0;
-  useEffect(() => {
+  const fill = room > 0 ? fitRows(room, minRow) : null;
+  const fitted = fill?.levels ?? 0;
+  // Told before the browser paints, so the view is cut to it at once.
+  useLayoutEffect(() => {
     if (fitted > 0) onRows?.(fitted);
   }, [fitted, onRows]);
-  const levels = fitted > 0 ? fitted : asked;
-  const rowHeight = fitted > 0 ? Math.max(minRow, Math.min(24, room / 2 / fitted)) : minRow;
+  const levels = fill?.levels ?? asked;
+  const rowHeight = fill?.rowHeight ?? minRow;
   const perSide = mode === "both" ? levels : levels * 2;
   // The step the view was cut at, when finer than the one chosen.
   const fallback = view.step !== undefined && step !== undefined && view.step !== step;
@@ -274,7 +279,7 @@ export function OrderBook({
                 onValueChange={onStepChange}
                 options={steps.map((s) => {
                   const off = view.fits !== undefined && !view.fits.includes(s);
-                  return { value: s, label: s, disabled: off, hint: off ? <span title={t("ui.book.stepOff", { step: s })}>{t("ui.book.stepTooCoarse")}</span> : undefined };
+                  return { value: s, label: s, disabled: off, hint: off ? t("ui.book.stepTooCoarse") : undefined, title: off ? t("ui.book.stepOff", { step: s }) : undefined };
                 })}
                 aria-label={t("ui.book.step")}
                 aria-describedby={fallback ? stepNote : undefined}

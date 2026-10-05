@@ -116,7 +116,7 @@ try {
   // 20 px that fit in the room the two sides get ((room ÷ 2 ÷ 20) rows, 5
   // to 20), drawn taller (to 24 px) to fill it, so the last bid row ends at
   // most 4 px above the panel's bottom (below it only when even 5 rows do
-  // not fit and are cut off). All relative to the panel, so the test
+  // not fit and are cut off; further above only past 20 rows of 24 px). All relative to the panel, so the test
   // mode's banner above the page changes nothing. Then with step 10 kept
   // from before: BTC-USDT's public book (200 levels a side) cannot fill
   // it, so the book is cut finer, the trigger shows "≈ 1" and says why,
@@ -146,7 +146,10 @@ try {
         step: trigger?.innerText.trim() ?? "",
         why: trigger?.parentElement?.title ?? "",
       };
-      return rows.every((n) => n === want) && gap <= 4 && (gap >= -0.5 || room < 2 * 5 * 20);
+      // 20 rows of 24 px are as far as the book goes: a taller room keeps
+      // the rest blank, as designed.
+      const atMost = want === 20 && window.__book.rowHeight >= 23.99;
+      return rows.every((n) => n === want) && (gap <= 4 || atMost) && (gap >= -0.5 || room < 2 * 5 * 20);
     };
     try {
       await page.waitForFunction(fills, { timeout: 20000 });
@@ -172,7 +175,7 @@ try {
   await go("/trade/BTC-USDT");
   const coarse = await bookFills(1920, 1080);
   if (coarse.step !== "10") {
-    if (!coarse.step.startsWith("≈") || !coarse.why.includes("所选 10")) throw new Error(`with 10 kept the book shows ${coarse.step} without saying why: ${JSON.stringify(coarse)}`);
+    if (!coarse.step.startsWith("≈") || !coarse.why.includes("按 10 稳定填满")) throw new Error(`with 10 kept the book shows ${coarse.step} without saying why: ${JSON.stringify(coarse)}`);
     await page.click('button[aria-label="价格精度"]');
     await page.waitForSelector("[role=option]", { visible: true, timeout: 5000 });
     const ten = await page.evaluate(() => {

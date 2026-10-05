@@ -9,8 +9,10 @@ export type SelectOption = {
   label: ReactNode;
   icon?: ReactNode;
   disabled?: boolean;
-  /** A note beside the label in the list (why it is off, say), not in the trigger. */
+  /** A note at the row's end in the list (why it is off, say), not in the trigger. */
   hint?: ReactNode;
+  /** The option's tooltip in the list. */
+  title?: string;
 };
 export type SelectSize = "xs" | "sm" | "md" | "lg";
 
@@ -91,6 +93,7 @@ export function Select({
                 key={o.value}
                 value={o.value}
                 disabled={o.disabled}
+                title={o.title}
                 className={cn(
                   "relative flex cursor-pointer select-none items-center gap-2 rounded-1 py-1.5 pl-2 pr-7 text-fg-1 outline-none",
                   "data-[highlighted]:bg-bg-3 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50",
@@ -99,7 +102,7 @@ export function Select({
               >
                 {o.icon}
                 <RSelect.ItemText>{o.label}</RSelect.ItemText>
-                {o.hint && <span className="text-xs text-fg-3">{o.hint}</span>}
+                {o.hint && <span className="ml-auto pl-2 text-xs text-fg-3">{o.hint}</span>}
                 <RSelect.ItemIndicator className="absolute right-2 inline-flex text-brand">
                   <Check size={14} />
                 </RSelect.ItemIndicator>
