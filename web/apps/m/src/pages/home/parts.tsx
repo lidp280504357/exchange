@@ -1,4 +1,5 @@
 import { coinProfile, enumLabel, errorText, routes, useSettings } from "@exchange/core";
+import { useIsolatedLeverage } from "@exchange/core/margin/hooks";
 import { useFavorites, useInView, type MarketRow } from "@exchange/core/markets/index";
 import { Badge, CoinIcon, Skeleton, Sparkline, Tag, cn, toast } from "@exchange/ui";
 import { ChevronRight } from "lucide-react";
@@ -33,10 +34,11 @@ export function statusTone(status: string): "info" | "warn" | "danger" | "neutra
   return "neutral";
 }
 
-/** MarketName is a market's icon, symbol (with its quote or the perpetual tag), status and coin name. */
+/** MarketName is a market's icon, symbol (with its quote or the perpetual tag), isolated margin leverage, status and coin name. */
 export function MarketName({ row, size = 28, hideName }: { row: MarketRow; size?: number; hideName?: boolean }) {
   const { t } = useTranslation();
   const nameOf = useCoinName();
+  const leverage = useIsolatedLeverage().get(row.symbol);
   const code = row.kind === "perp" ? `${row.base}${row.quote}` : row.base;
   return (
     <div className="flex min-w-0 items-center gap-2.5">
@@ -51,6 +53,11 @@ export function MarketName({ row, size = 28, hideName }: { row: MarketRow; size?
           ) : (
             <Tag tone="brand">
               {t("mMarkets.perp")}
+            </Tag>
+          )}
+          {row.kind === "spot" && leverage && (
+            <Tag tone="neutral" className="shrink-0" title={t("mMarkets.isolatedLeverage", { n: leverage })}>
+              {leverage}x
             </Tag>
           )}
         </div>

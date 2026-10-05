@@ -3,6 +3,7 @@ export default {
   "zh-CN": {
     pcMarkets: {
       perp: "永续",
+      isolatedLeverage: "逐仓杠杆最高 {{n}} 倍",
       breadcrumb: "当前位置",
       trade: "交易",
       details: "详情",
@@ -141,6 +142,7 @@ export default {
   en: {
     pcMarkets: {
       perp: "Perp",
+      isolatedLeverage: "Isolated margin up to {{n}}x",
       breadcrumb: "Breadcrumb",
       trade: "Trade",
       details: "Details",

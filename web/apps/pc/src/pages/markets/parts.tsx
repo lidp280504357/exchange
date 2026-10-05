@@ -1,4 +1,5 @@
 import { coinProfile, enumLabel, errorText, routes, useSettings } from "@exchange/core";
+import { useIsolatedLeverage } from "@exchange/core/margin/hooks";
 import { useFavorites, useInView, useSparkline, type MarketRow } from "@exchange/core/markets/index";
 import { Badge, CoinIcon, Skeleton, Sparkline, Tag, cn, toast } from "@exchange/ui";
 import { useCallback, useRef } from "react";
@@ -30,10 +31,11 @@ export function statusTone(status: string): "info" | "warn" | "danger" | "neutra
   return "neutral";
 }
 
-/** MarketName is a market's icon, symbol, perpetual tag, status and coin name. */
+/** MarketName is a market's icon, symbol, perpetual tag, isolated margin leverage, status and coin name. */
 export function MarketName({ row, size = 28, hideName }: { row: MarketRow; size?: number; hideName?: boolean }) {
   const { t } = useTranslation();
   const nameOf = useCoinName();
+  const leverage = useIsolatedLeverage().get(row.symbol);
   return (
     <div className="flex min-w-0 items-center gap-3">
       <CoinIcon symbol={row.base} size={size} />
@@ -45,6 +47,11 @@ export function MarketName({ row, size = 28, hideName }: { row: MarketRow; size?
           ) : (
             <Tag tone="brand">
               {t("pcMarkets.perp")}
+            </Tag>
+          )}
+          {row.kind === "spot" && leverage && (
+            <Tag tone="neutral" title={t("pcMarkets.isolatedLeverage", { n: leverage })}>
+              {leverage}x
             </Tag>
           )}
           {row.status !== "TRADING" && (

@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { marginApi, unwrap } from "../api/client";
 import { qk } from "../query/keys";
 import { selectSignedIn, useSession } from "../session/store";
@@ -95,6 +96,20 @@ export function useMaxBorrowable(account: MarginAccountType, symbol: string, ass
 export function useMarginOpen() {
   const q = useEligibility("MARGIN_TRADE");
   return { open: q.data?.allowed === true, reason: q.data?.reason_code, pending: q.isPending, query: q };
+}
+
+/**
+ * useIsolatedLeverage maps each pair that takes isolated margin accounts
+ * to its leverage while margin trading is open to the caller: the market
+ * lists' "10x" tags (margin design §7). Empty otherwise.
+ */
+export function useIsolatedLeverage(): ReadonlyMap<string, number> {
+  const { open } = useMarginOpen();
+  const pairs = useMarginPairs(open);
+  return useMemo(
+    () => new Map(open ? (pairs.data?.items ?? []).filter((p) => p.isolated).map((p) => [p.symbol, p.leverage] as const) : []),
+    [open, pairs.data],
+  );
 }
 
 /**

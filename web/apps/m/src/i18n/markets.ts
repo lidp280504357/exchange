@@ -3,6 +3,7 @@ export default {
   "zh-CN": {
     mMarkets: {
       perp: "永续",
+      isolatedLeverage: "逐仓杠杆最高 {{n}} 倍",
       viewAll: "全部",
       pairs: "{{count}} 个交易对",
       pairs_one: "{{count}} 个交易对",
@@ -118,6 +119,7 @@ export default {
   en: {
     mMarkets: {
       perp: "Perp",
+      isolatedLeverage: "Isolated margin up to {{n}}x",
       viewAll: "All",
       pairs: "{{count}} markets",
       pairs_one: "{{count}} market",
