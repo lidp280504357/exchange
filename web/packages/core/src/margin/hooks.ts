@@ -26,21 +26,23 @@ export const marginKeys = {
 export const ACCOUNTS_EVERY = 5_000;
 
 /** useMarginAssets lists the margin assets with their pools and rates (public). */
-export function useMarginAssets() {
+export function useMarginAssets(enabled = true) {
   return useQuery({
     queryKey: marginKeys.assets,
     queryFn: () => unwrap(marginApi.GET("/v1/margin/assets")),
     select: (r) => r.items,
+    enabled,
     staleTime: 60_000,
     retry: retryServerErrors,
   });
 }
 
 /** useMarginPairs returns the cross account's terms and each pair's isolated terms (public). */
-export function useMarginPairs() {
+export function useMarginPairs(enabled = true) {
   return useQuery({
     queryKey: marginKeys.pairs,
     queryFn: () => unwrap(marginApi.GET("/v1/margin/pairs")),
+    enabled,
     staleTime: 60_000,
     retry: retryServerErrors,
   });

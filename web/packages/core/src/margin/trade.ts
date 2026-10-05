@@ -1,5 +1,8 @@
-import { useQueries } from "@tanstack/react-query";
+import { useQueries, type QueryClient } from "@tanstack/react-query";
 import { marginApi, unwrap } from "../api/client";
+import { ApiError } from "../api/errors";
+import { accountKeys } from "../assets/hooks";
+import { useTerminalPrefs } from "../trading/prefs";
 import * as dec from "../format/decimal";
 import { selectSignedIn, useSession } from "../session/store";
 import { retryServerErrors } from "../wallet/hooks";
@@ -33,6 +36,27 @@ export function marginSupport(
   };
 }
 
+/**
+ * afterMarginOrder settles what a terminal shows of margin trading after an
+ * order: placed on a margin account, its account and what it may borrow
+ * reload; refused as MARGIN_DISABLED for AUTO_BORROW (margin.auto_borrow
+ * off), the side effect goes back to NONE; refused as MARGIN_DISABLED
+ * otherwise, the eligibility reloads and the terminal falls back to SPOT.
+ */
+export function afterMarginOrder(qc: QueryClient, account: TradeAccount | undefined, err?: unknown): void {
+  if (err instanceof ApiError && err.code === "MARGIN_DISABLED") {
+    if (err.details.flag === "margin.auto_borrow") useTerminalPrefs.getState().set({ sideEffect: "NONE" });
+    else void qc.invalidateQueries({ queryKey: accountKeys.eligibility("MARGIN_TRADE", "") });
+    return;
+  }
+  if (!err && account && account !== "SPOT") void qc.invalidateQueries({ queryKey: marginKeys.all });
+}
+
+/** freezeAsset is what an order of a side spends: the quote of a buy, the base of a sell. */
+export function freezeAsset(pair: { base_asset: string; quote_asset: string }, side: "BUY" | "SELL"): string {
+  return side === "SELL" ? pair.base_asset : pair.quote_asset;
+}
+
 /** marginTag is the short label of an order's margin account ("CROSS", "ISOLATED"), null for SPOT. */
 export function marginTag(account: string | null | undefined): "CROSS" | "ISOLATED" | null {
   if (account === "MARGIN_CROSS") return "CROSS";
@@ -56,8 +80,9 @@ export function spendable(owner: Pick<MarginAccount, "balances"> | undefined, as
  */
 export function useMarginSupport(pair: { symbol: string; base_asset: string; quote_asset: string }) {
   const open = useMarginOpen();
-  const assets = useMarginAssets();
-  const pairs = useMarginPairs();
+  // The terms load only for whom margin trading is open.
+  const assets = useMarginAssets(open.open);
+  const pairs = useMarginPairs(open.open);
   const support = marginSupport(pair, assets.data, pairs.data?.items);
   return { open: open.open, support, supported: support.cross || support.isolated !== null };
 }
@@ -86,7 +111,7 @@ export function useMarginTrade(
 ) {
   const signedIn = useSession(selectSignedIn);
   const { open, support, supported } = useMarginSupport(pair);
-  const pairs = useMarginPairs();
+  const pairs = useMarginPairs(open);
   const margin = account !== "SPOT";
   const accounts = useMarginAccounts({ enabled: margin, poll: margin });
   const symbol = account === "MARGIN_ISOLATED" ? pair.symbol : "";

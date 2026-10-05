@@ -164,6 +164,19 @@ try {
     await page.waitForFunction(() => document.querySelector('[data-testid="margin-account-MARGIN_CROSS"] ul')?.innerText.includes("USDT"), { timeout: 20000 });
     await marginTransfer("OUT", "10", "已划出 10 USDT");
     ok("10 USDT moves into the cross margin account from its sheet, shows in its coins, and moves back");
+    // The order sheet trades from the cross account once chosen above the
+    // form, with its margin level and what it may borrow; back to spot.
+    await go("/trade/BTC-USDT");
+    await clickButton("买入 BTC");
+    await sheetOpen();
+    await page.waitForSelector('[role=dialog] [data-testid="margin-bar"]', { visible: true, timeout: 20000 });
+    await clickButton("全仓", '[role=dialog] [data-testid="margin-bar"]');
+    await page.waitForSelector('[role=dialog] [data-testid="margin-bar"] [data-testid="margin-borrowable"]', { visible: true, timeout: 10000 });
+    await clickButton("现货", '[role=dialog] [data-testid="margin-bar"]');
+    await page.waitForSelector('[role=dialog] [data-testid="margin-bar"] [data-testid="margin-borrowable"]', { hidden: true, timeout: 10000 });
+    await page.keyboard.press("Escape");
+    await page.waitForSelector("[role=dialog]", { hidden: true });
+    ok("the order sheet switches to the cross margin account, showing what it may borrow, and back");
   }
   await shot("5b-margin");
 

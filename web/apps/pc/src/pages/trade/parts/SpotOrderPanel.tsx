@@ -3,17 +3,23 @@ import {
   unwrap, useAssets, useSession, useSettings, useTerminalPrefs, useTicker, dec, type NewOrder, type Pair,
 } from "@exchange/core";
 import type { MarginActionKind } from "@exchange/core/margin/form";
-import { tradeAccountFor, useMarginSupport, useMarginTrade, type SideEffect, type TradeAccount } from "@exchange/core/margin/trade";
+import { useMaxBorrowable } from "@exchange/core/margin/hooks";
+import {
+  afterMarginOrder, freezeAsset, tradeAccountFor, useMarginSupport, useMarginTrade, type SideEffect, type TradeAccount,
+} from "@exchange/core/margin/trade";
 import { Checkbox, Dialog, KeyValue, OrderForm, toast, type OrderFormValues, type OrderSide, type OrderType, type PairRules } from "@exchange/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router";
-import { MarginDialog } from "../../assets/parts/MarginDialog";
 import { ORDER_FORM_ID } from "./EmptyList";
 import { MarginBar } from "./MarginBar";
 
 type Balance = { account_type: string; asset: string; available: string };
+
+// The margin dialogs come with the assets pages' forms: loaded on first
+// use, not with the terminal (review CS ①).
+const MarginDialog = lazy(() => import("../../assets/parts/MarginDialog").then((m) => ({ default: m.MarginDialog })));
 
 /** useSpotBalances reads the balances the private sync keeps current. */
 export function useSpotBalances() {
@@ -71,7 +77,13 @@ export function SpotOrderPanel({ pair, side, onSideChange, fill, onPlaced, class
   const { open: marginOpen, support } = useMarginSupport(pair);
   const account = signedIn ? tradeAccountFor(chosen, marginOpen, support) : "SPOT";
   const margin = useMarginTrade(pair, account, effect);
-  const [act, setAct] = useState<MarginActionKind | null>(null);
+  const spends = freezeAsset(pair, side);
+  const borrowable = useMaxBorrowable(
+    account === "SPOT" ? "MARGIN_CROSS" : account, account === "MARGIN_ISOLATED" ? pair.symbol : "", spends, account !== "SPOT",
+  );
+  // The margin dialog open, and its coin: what the side spends.
+  const [act, setActState] = useState<{ kind: MarginActionKind; asset: string } | null>(null);
+  const setAct = (kind: MarginActionKind) => setActState({ kind, asset: spends });
   const baseDecimals = assetDecimals(assets.data?.assets, pair.base_asset);
   const quoteDecimals = assetDecimals(assets.data?.assets, pair.quote_asset);
 
@@ -97,6 +109,7 @@ export function SpotOrderPanel({ pair, side, onSideChange, fill, onPlaced, class
       // after a page load they may precede the private subscription.
       applyOrderToCaches(qc, placed);
       void qc.invalidateQueries({ queryKey: qk.balances });
+      afterMarginOrder(qc, order.account);
       setResetKey((k) => k + 1);
       if (placed.status === "REJECTED") {
         toast.error(t("pcTrade.rejected"), { description: placed.reject_reason ? errorText(new ApiError(0, placed.reject_reason, "")) : undefined });
@@ -105,6 +118,7 @@ export function SpotOrderPanel({ pair, side, onSideChange, fill, onPlaced, class
         onPlaced?.();
       }
     } catch (e) {
+      afterMarginOrder(qc, order.account, e);
       const short = e instanceof ApiError && e.code === "LEDGER_INSUFFICIENT_BALANCE";
       const fix =
         order.account && order.account !== "SPOT"
@@ -143,6 +157,7 @@ export function SpotOrderPanel({ pair, side, onSideChange, fill, onPlaced, class
           trade={margin}
           priceDecimals={pair.price_decimals}
           onAct={setAct}
+          borrowable={{ asset: spends, amount: borrowable.data?.amount, decimals: side === "SELL" ? baseDecimals : quoteDecimals }}
         />
       )}
       <OrderForm
@@ -167,11 +182,18 @@ export function SpotOrderPanel({ pair, side, onSideChange, fill, onPlaced, class
       />
       {!tradable(pair.status) && <p className="px-4 pb-3 text-xs text-warn">{t("pcTrade.notTrading")}</p>}
       {act && (
-        <MarginDialog
-          kind={act}
-          init={{ account: account === "MARGIN_ISOLATED" ? "MARGIN_ISOLATED" : "MARGIN_CROSS", symbol: account === "MARGIN_ISOLATED" ? pair.symbol : "", asset: pair.quote_asset, direction: "IN" }}
-          onClose={() => setAct(null)}
-        />
+        <Suspense fallback={null}>
+          <MarginDialog
+            kind={act.kind}
+            init={{
+              account: account === "MARGIN_ISOLATED" ? "MARGIN_ISOLATED" : "MARGIN_CROSS",
+              symbol: account === "MARGIN_ISOLATED" ? pair.symbol : "",
+              asset: act.asset,
+              direction: "IN",
+            }}
+            onClose={() => setActState(null)}
+          />
+        </Suspense>
       )}
       <Dialog
         open={pending !== null}
@@ -189,7 +211,7 @@ export function SpotOrderPanel({ pair, side, onSideChange, fill, onPlaced, class
                 { label: t("market.pair"), value: `${pair.base_asset}/${pair.quote_asset}` },
                 ...(pending.account && pending.account !== "SPOT"
                   ? [{
-                      label: t("pcTrade.margin.account_"),
+                      label: t("pcTrade.margin.accountLabel"),
                       value: `${t(pending.account === "MARGIN_CROSS" ? "pcTrade.margin.cross" : "pcTrade.margin.isolated")} · ${t(`pcTrade.margin.effects.${pending.side_effect ?? "NONE"}`)}`,
                     }]
                   : []),

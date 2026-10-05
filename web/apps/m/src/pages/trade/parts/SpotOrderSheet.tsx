@@ -3,16 +3,25 @@ import {
   selectSignedIn, tradable, unwrap, useAssets, useSession, useSettings, useTerminalPrefs, useTicker, type NewOrder, type Pair,
 } from "@exchange/core";
 import type { MarginActionKind } from "@exchange/core/margin/form";
-import { tradeAccountFor, useMarginSupport, useMarginTrade, type SideEffect, type TradeAccount } from "@exchange/core/margin/trade";
-import { Badge, Button, KeyValue, MarginLevel, OrderForm, Segmented, Select, Sheet, toast, type OrderFormValues, type OrderSide, type OrderType, type PairRules } from "@exchange/ui";
+import { useMaxBorrowable } from "@exchange/core/margin/hooks";
+import {
+  afterMarginOrder, freezeAsset, tradeAccountFor, useMarginSupport, useMarginTrade, type SideEffect, type TradeAccount,
+} from "@exchange/core/margin/trade";
+import {
+  Badge, Button, KeyValue, MarginLevel, OrderForm, Segmented, Select, Sheet, Skeleton, toast, type OrderFormValues, type OrderSide, type OrderType,
+  type PairRules,
+} from "@exchange/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
-import { MarginSheet } from "../../assets/parts/MarginSheet";
 import { TextButton } from "../../assets/parts/bits";
 
 type Balance = { account_type: string; asset: string; available: string };
+
+// The margin sheets come with the assets pages' forms: loaded on first
+// use, not with the terminal (review CS ①).
+const MarginSheet = lazy(() => import("../../assets/parts/MarginSheet").then((m) => ({ default: m.MarginSheet })));
 
 function spotAvailable(list: Balance[] | undefined, asset: string): string {
   return list?.find((b) => b.account_type === "SPOT" && b.asset === asset)?.available ?? "0";
@@ -58,7 +67,13 @@ export function SpotOrderSheet({
   const { open: marginOpen, support } = useMarginSupport(pair);
   const account = signedIn ? tradeAccountFor(chosen, marginOpen, support) : "SPOT";
   const margin = useMarginTrade(pair, account, effect);
-  const [act, setAct] = useState<MarginActionKind | null>(null);
+  const spends = freezeAsset(pair, side);
+  const borrowable = useMaxBorrowable(
+    account === "SPOT" ? "MARGIN_CROSS" : account, account === "MARGIN_ISOLATED" ? pair.symbol : "", spends, account !== "SPOT",
+  );
+  // The margin sheet open, and its coin: what the side spends.
+  const [act, setActState] = useState<{ kind: MarginActionKind; asset: string } | null>(null);
+  const setAct = (kind: MarginActionKind) => setActState({ kind, asset: spends });
   const baseDecimals = assetDecimals(assets.data?.assets, pair.base_asset);
   const quoteDecimals = assetDecimals(assets.data?.assets, pair.quote_asset);
   const rules = useMemo<PairRules>(
@@ -81,12 +96,14 @@ export function SpotOrderSheet({
       const placed = await placeOrder(order, newIdempotencyKey());
       applyOrderToCaches(qc, placed);
       void qc.invalidateQueries({ queryKey: qk.balances });
+      afterMarginOrder(qc, order.account);
       setResetKey((k) => k + 1);
       setPending(null);
       onOpenChange(false);
       toast.success(t("mTrade.placed"));
       onPlaced();
     } catch (e) {
+      afterMarginOrder(qc, order.account, e);
       const short = e instanceof ApiError && e.code === "LEDGER_INSUFFICIENT_BALANCE";
       const fix =
         order.account && order.account !== "SPOT"
@@ -108,7 +125,7 @@ export function SpotOrderSheet({
               { label: t("market.pair"), value: `${pair.base_asset}/${pair.quote_asset}` },
               ...(pending.account && pending.account !== "SPOT"
                 ? [{
-                    label: t("mTrade.margin.account_"),
+                    label: t("mTrade.margin.accountLabel"),
                     value: `${t(pending.account === "MARGIN_CROSS" ? "mTrade.margin.cross" : "mTrade.margin.isolated")} · ${t(`mTrade.margin.effects.${pending.side_effect ?? "NONE"}`)}`,
                   }]
                 : []),
@@ -152,14 +169,24 @@ export function SpotOrderSheet({
                     <Badge tone="brand" size="sm">
                       {margin.owner?.leverage ?? margin.terms.leverage}x
                     </Badge>
-                    <MarginLevel
-                      level={margin.owner?.margin_level ?? null}
-                      warn={margin.owner?.warn_level ?? margin.terms.warn_level}
-                      liquidation={margin.owner?.liquidation_level ?? margin.terms.liquidation_level}
-                      size="sm"
-                      compact
-                      className="flex-1"
-                    />
+                    {margin.pending ? (
+                      <Skeleton className="h-5 flex-1" />
+                    ) : (
+                      <MarginLevel
+                        level={margin.owner?.margin_level ?? null}
+                        warn={margin.owner?.warn_level ?? margin.terms.warn_level}
+                        liquidation={margin.owner?.liquidation_level ?? margin.terms.liquidation_level}
+                        size="sm"
+                        compact
+                        className="flex-1"
+                      />
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-fg-3">{t("mTrade.margin.borrowable")}</span>
+                    <span className="tabular-nums text-fg-1" data-testid="margin-borrowable">
+                      {borrowable.data ? formatAmount(borrowable.data.amount, side === "SELL" ? baseDecimals : quoteDecimals) : "—"} {spends}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="-ml-3 flex items-center">
@@ -168,7 +195,7 @@ export function SpotOrderSheet({
                       <TextButton onClick={() => setAct("repay")}>{t("mTrade.margin.repay")}</TextButton>
                     </span>
                     <Select
-                      size="md"
+                      size="lg"
                       value={effect}
                       onValueChange={(v) => setPrefs({ sideEffect: v as SideEffect })}
                       aria-label={t("mTrade.margin.effect")}
@@ -208,11 +235,18 @@ export function SpotOrderSheet({
         </>
       )}
       {act && (
-        <MarginSheet
-          kind={act}
-          init={{ account: account === "MARGIN_ISOLATED" ? "MARGIN_ISOLATED" : "MARGIN_CROSS", symbol: account === "MARGIN_ISOLATED" ? pair.symbol : "", asset: pair.quote_asset, direction: "IN" }}
-          onClose={() => setAct(null)}
-        />
+        <Suspense fallback={null}>
+          <MarginSheet
+            kind={act.kind}
+            init={{
+              account: account === "MARGIN_ISOLATED" ? "MARGIN_ISOLATED" : "MARGIN_CROSS",
+              symbol: account === "MARGIN_ISOLATED" ? pair.symbol : "",
+              asset: act.asset,
+              direction: "IN",
+            }}
+            onClose={() => setActState(null)}
+          />
+        </Suspense>
       )}
     </Sheet>
   );

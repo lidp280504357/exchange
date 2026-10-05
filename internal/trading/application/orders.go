@@ -80,14 +80,19 @@ func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, 
 	if err != nil {
 		return domain.Order{}, err
 	}
-	feature, what := FeatureSpotTrade, "spot trading"
+	feature, what, symbol := FeatureSpotTrade, "spot trading", pair.Symbol
 	if d := req.Defaults(); d.AccountType.Margin() {
 		if err := s.marginOpen(req.UserID, d.SideEffect); err != nil {
 			return domain.Order{}, err
 		}
+		// The account's symbol, as margin-service asks it: the isolated
+		// account's pair, none for the cross account.
 		feature, what = FeatureMarginTrade, "margin trading"
+		if d.AccountType == domain.AccountMarginCross {
+			symbol = ""
+		}
 	}
-	allowed, reason, err := s.Eligibility.Check(ctx, req.UserID, feature, pair.Symbol)
+	allowed, reason, err := s.Eligibility.Check(ctx, req.UserID, feature, symbol)
 	if err != nil {
 		return domain.Order{}, err
 	}

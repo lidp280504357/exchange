@@ -113,17 +113,20 @@ export function errorText(err: unknown): string {
 // The details some errors' messages name, by message (errorDetails.<key>):
 // amounts with their decimals, other values (null) as they come. A code
 // may have several messages for different details; the first whose
-// details all came is used.
+// details all came is used, so the more specific comes first (a transfer
+// out's MARGIN_LEVEL_TOO_LOW carries max_transferable besides the levels).
 const detailMessages: Record<string, { key: string; fields: Record<string, number | null> }[]> = {
   DERIV_RISK_LIMIT_EXCEEDED: [{ key: "DERIV_RISK_LIMIT_EXCEEDED", fields: { max_notional: 0, notional: 2, leverage: null } }],
   MARGIN_LIMIT: [{ key: "MARGIN_LIMIT", fields: { max_borrowable: null } }],
   MARGIN_POOL_EMPTY: [{ key: "MARGIN_POOL_EMPTY", fields: { pool_available: null } }],
   MARGIN_LEVEL_TOO_LOW: [
-    { key: "MARGIN_LEVEL_TOO_LOW", fields: { margin_level: 2, warn_level: null } },
     { key: "MARGIN_LEVEL_TOO_LOW_OUT", fields: { max_transferable: null } },
+    { key: "MARGIN_LEVEL_TOO_LOW", fields: { margin_level: 2, warn_level: null } },
   ],
   // A transfer out of a margin account: what may leave.
   LEDGER_INSUFFICIENT_BALANCE: [{ key: "LEDGER_INSUFFICIENT_BALANCE_OUT", fields: { max_transferable: null } }],
+  // AUTO_BORROW while margin.auto_borrow is off (its only flag).
+  MARGIN_DISABLED: [{ key: "MARGIN_DISABLED_AUTO_BORROW", fields: { flag: null } }],
 };
 
 /** withDetails is the error's message with its details, when it has one and they all came. */

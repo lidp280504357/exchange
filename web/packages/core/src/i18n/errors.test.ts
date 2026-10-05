@@ -22,8 +22,13 @@ describe("error messages", () => {
     expect(errorText(level)).toBe("操作后风险率 1.24 会低于预警线 1.3");
     const out = new ApiError(422, "MARGIN_LEVEL_TOO_LOW", "", { max_transferable: "12.5" });
     expect(errorText(out)).toBe("划出后风险率会低于预警线：现在最多可划出 12.5");
+    // A transfer out carries the levels too: the transferable amount wins.
+    const outFull = new ApiError(422, "MARGIN_LEVEL_TOO_LOW", "", { margin_level: "1.28", warn_level: "1.3", max_transferable: "12.5" });
+    expect(errorText(outFull)).toBe("划出后风险率会低于预警线：现在最多可划出 12.5");
     const short = new ApiError(422, "LEDGER_INSUFFICIENT_BALANCE", "", { max_transferable: "3" });
     expect(errorText(short)).toBe("可用余额不足：现在最多可划出 3");
     expect(errorText(new ApiError(422, "LEDGER_INSUFFICIENT_BALANCE", "", { order_id: "o1" }))).toBe("可用余额不足");
+    expect(errorText(new ApiError(403, "MARGIN_DISABLED", "", { flag: "margin.auto_borrow" }))).toBe("自动借款暂未开放，请把借还方式改为普通");
+    expect(errorText(new ApiError(403, "MARGIN_DISABLED", ""))).toBe("杠杆交易暂未开放");
   });
 });

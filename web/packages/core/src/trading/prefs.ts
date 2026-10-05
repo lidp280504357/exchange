@@ -51,7 +51,9 @@ export const useTerminalPrefs = create<TerminalPrefs>()(
       setStep: (symbol, step) => set((s) => ({ bookStep: { ...s.bookStep, [symbol]: step } })),
       visit: (symbol) => set((s) => ({ recent: [symbol, ...s.recent.filter((x) => x !== symbol)].slice(0, 6) })),
     }),
-    { name: "exchange.terminal", version: 1 },
+    // A side effect stays for the visit only: a borrow is never made by a
+    // choice remembered from another day.
+    { name: "exchange.terminal", version: 1, partialize: ({ sideEffect: _, ...kept }) => kept },
   ),
 );
 

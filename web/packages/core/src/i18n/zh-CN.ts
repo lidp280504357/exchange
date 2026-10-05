@@ -101,5 +101,6 @@ export const zhCN = {
     MARGIN_LEVEL_TOO_LOW: "操作后风险率 {{margin_level}} 会低于预警线 {{warn_level}}",
     MARGIN_LEVEL_TOO_LOW_OUT: "划出后风险率会低于预警线：现在最多可划出 {{max_transferable}}",
     LEDGER_INSUFFICIENT_BALANCE_OUT: "可用余额不足：现在最多可划出 {{max_transferable}}",
+    MARGIN_DISABLED_AUTO_BORROW: "自动借款暂未开放，请把借还方式改为普通",
   },
 };

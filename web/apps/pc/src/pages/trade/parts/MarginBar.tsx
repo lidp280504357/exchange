@@ -1,7 +1,7 @@
-import { formatPrice } from "@exchange/core";
+import { formatAmount, formatPrice } from "@exchange/core";
 import type { MarginActionKind } from "@exchange/core/margin/form";
 import type { SideEffect, TradeAccount, useMarginTrade } from "@exchange/core/margin/trade";
-import { Badge, MarginLevel, Segmented, Select } from "@exchange/ui";
+import { Badge, MarginLevel, Segmented, Select, Skeleton } from "@exchange/ui";
 import { useTranslation } from "react-i18next";
 
 /**
@@ -12,7 +12,7 @@ import { useTranslation } from "react-i18next";
  * transfer, borrow and repay dialogs and the order's side effect.
  */
 export function MarginBar({
-  account, onAccount, effect, onEffect, trade, priceDecimals, onAct,
+  account, onAccount, effect, onEffect, trade, priceDecimals, onAct, borrowable,
 }: {
   account: TradeAccount;
   onAccount: (a: TradeAccount) => void;
@@ -22,6 +22,8 @@ export function MarginBar({
   priceDecimals: number;
   /** Opens the transfer, borrow or repay dialog of the account. */
   onAct: (kind: MarginActionKind) => void;
+  /** What the account may borrow of the asset the side spends (design §7 "可借额度"). */
+  borrowable: { asset: string; amount: string | undefined; decimals: number };
 }) {
   const { t } = useTranslation();
   const items = [
@@ -52,14 +54,24 @@ export function MarginBar({
             <Badge tone="brand" size="sm">
               {owner?.leverage ?? terms.leverage}x
             </Badge>
-            <MarginLevel
-              level={owner?.margin_level ?? null}
-              warn={owner?.warn_level ?? terms.warn_level}
-              liquidation={owner?.liquidation_level ?? terms.liquidation_level}
-              size="sm"
-              compact
-              className="flex-1"
-            />
+            {trade.pending ? (
+              <Skeleton className="h-5 flex-1" />
+            ) : (
+              <MarginLevel
+                level={owner?.margin_level ?? null}
+                warn={owner?.warn_level ?? terms.warn_level}
+                liquidation={owner?.liquidation_level ?? terms.liquidation_level}
+                size="sm"
+                compact
+                className="flex-1"
+              />
+            )}
+          </div>
+          <div className="flex items-center justify-between gap-2 text-xs">
+            <span className="text-fg-3">{t("pcTrade.margin.borrowable")}</span>
+            <span className="tabular-nums text-fg-1" data-testid="margin-borrowable">
+              {borrowable.amount === undefined ? "—" : formatAmount(borrowable.amount, borrowable.decimals)} {borrowable.asset}
+            </span>
           </div>
           <div className="flex items-center justify-between gap-2">
             <span className="flex items-center gap-3">
