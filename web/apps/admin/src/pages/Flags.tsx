@@ -35,6 +35,8 @@ export default function Flags({ admin }: { admin: Admin }) {
             disabled={!writable}
             onCheckedChange={() => setPending(row.original)}
             size="sm"
+            // The compact rows are 32 px: a 44 px touch ring would reach into the next ones.
+            hitArea={false}
             label={<span className="sr-only">{row.original.key}</span>}
           />
         ),

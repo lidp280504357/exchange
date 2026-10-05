@@ -154,15 +154,33 @@ function contrastOf(el: HTMLElement | null): string {
   return `${((a! + 0.05) / (b! + 0.05)).toFixed(2)} : 1`;
 }
 
-/** StrongTable shows each text-only shade on bg-0..bg-3 of the theme given, with its contrast. */
+/**
+ * StrongTable shows each text-only shade on bg-0..bg-3 of the theme given,
+ * with its contrast, measured again when the toolbar switches theme or rise
+ * colour (red-up swaps the up and down shades).
+ */
 function StrongTable({ theme }: { theme: "dark" | "light" }) {
   const [ratios, setRatios] = useState<Record<string, string>>({});
   const [root, setRoot] = useState<HTMLElement | null>(null);
   useEffect(() => {
     if (!root) return;
-    const out: Record<string, string> = {};
-    for (const el of root.querySelectorAll<HTMLElement>("[data-sample]")) out[el.dataset.sample!] = contrastOf(el);
-    setRatios(out);
+    const measure = () => {
+      const out: Record<string, string> = {};
+      for (const el of root.querySelectorAll<HTMLElement>("[data-sample]")) out[el.dataset.sample!] = contrastOf(el);
+      setRatios(out);
+    };
+    measure();
+    // Measured once the switched attributes' styles apply.
+    let frame = 0;
+    const mo = new MutationObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    });
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-updown"] });
+    return () => {
+      mo.disconnect();
+      cancelAnimationFrame(frame);
+    };
   }, [root]);
   return (
     <div ref={setRoot} data-theme={theme} className="overflow-hidden rounded-3 border border-line-1 bg-bg-0 p-3">

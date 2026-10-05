@@ -19,8 +19,11 @@
   --color-brand-soft: var(--brand-soft);
   --color-up: var(--up);
   --color-down: var(--down);
-  /* Text-only shades (tokens.css): the tones as text on a light page,
-     darker there; on the dark theme the tones themselves. */
+  /* Text-only shades (tokens.css): darker than the tones on the light
+     theme; on the dark theme the tones themselves, but for red, danger and
+     info, lighter there (review BH ⑤). The sites' rise and fall figures
+     keep text-up / text-down (review BM); these are the console's and the
+     badges'. */
   --color-up-strong: var(--up-strong);
   --color-down-strong: var(--down-strong);
   --color-brand-strong: var(--brand-strong);
@@ -28,10 +31,11 @@
   --color-danger-strong: var(--danger-strong);
   --color-info-strong: var(--info-strong);
   --color-warn-strong: var(--warn-strong);
-  /* Text on a soft (15%) fill of its tone, for the tones that need more
-     than their strong shade there: moved 30% toward the text colour. On
-     the dark theme red and blue on their tint read 4.1-4.4:1, these
-     5.0-5.3:1; on the light theme they come out darker still. */
+  /* Text on a soft (15%) fill of its tone: the strong shade moved 30%
+     toward the text colour. On the dark theme the strong red, danger and
+     info read 5.7-6.0:1 on their tint over bg-1 (4.5-4.7 over bg-3), these
+     7.2-7.6:1 (5.8-6.0); before review BH ⑤ the tones themselves read
+     4.1-4.4:1 there. On the light theme they come out darker still. */
   --color-up-soft-fg: color-mix(in srgb, var(--up-strong) 70%, var(--fg-1));
   --color-down-soft-fg: color-mix(in srgb, var(--down-strong) 70%, var(--fg-1));
   --color-info-soft-fg: color-mix(in srgb, var(--info-strong) 70%, var(--fg-1));
