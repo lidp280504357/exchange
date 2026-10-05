@@ -82,7 +82,10 @@ export function useOrderBook(symbol: string, depth: number, step = "", { minQty 
   const subscribe = useCallback(
     (fn: () => void) => {
       if (every <= 0) return market.subscribe(key, fn);
-      const t = throttle(fn, every);
+      const t = throttle(() => {
+        bookNotified();
+        fn();
+      }, every);
       const off = market.subscribe(key, t.call);
       return () => {
         off();
@@ -99,6 +102,16 @@ export function useOrderBook(symbol: string, depth: number, step = "", { minQty 
   // version changes with every applied message; the view is cut only when
   // a notification re-renders.
   return useMemo(() => market.book(symbol).view(depth, step, minQty), [market, symbol, depth, step, minQty, version]);
+}
+
+/**
+ * bookNotified notes when a throttled book is told to redraw, for the
+ * performance check (web/e2e/perf.mjs sets globalThis.__perfBookNotify to
+ * an array before the app loads; design §12.1 times the book from here).
+ */
+function bookNotified(): void {
+  const marks = (globalThis as { __perfBookNotify?: number[] }).__perfBookNotify;
+  if (Array.isArray(marks)) marks.push(performance.now());
 }
 
 // throttle calls fn at most once per ms: at once after a quiet spell, else

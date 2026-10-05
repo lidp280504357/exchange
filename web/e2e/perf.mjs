@@ -7,8 +7,11 @@
 //   node perf.mjs memory     the PC terminal's heap over 30 minutes (MINUTES)
 //
 // For each terminal: main-thread long tasks (> 50 ms) per minute over a
-// minute of streaming; WebSocket depth message to the order book's DOM
-// update (the frame that shows it); switching pairs (the new pair's
+// minute of streaming; the book's redraw, from the moment its throttle
+// tells it to (it redraws at most every 250 ms, BOOK_EVERY in the apps,
+// since the user asked for a calm book on 2026-10-01) to the frame that
+// shows it; a depth message to the frame that first shows it (within the
+// throttle's 250 ms and a frame); switching pairs (the new pair's
 // snapshot to its book on screen); leaving and coming back (no new
 // WebSocket, no new snapshot, content within 200 ms). The phone runs with
 // the CPU slowed four times, as a mid-range phone. The 1000-row table is
@@ -25,6 +28,10 @@ const CHROME =
   ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/usr/bin/google-chrome", "/usr/bin/chromium"].find((p) => existsSync(p));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const misses = [];
+// The books redraw at most this often (BOOK_EVERY in the PC book panel and
+// the mobile terminals); a frame at 60 Hz.
+const BOOK_EVERY = 250;
+const FRAME = 1000 / 60;
 
 function report(what, value, budget, ok) {
   console.log(`${ok ? "ok  " : "MISS"} ${what}: ${value} (budget ${budget})`);
@@ -42,6 +49,8 @@ const ms = (v) => `${Math.round(v)} ms`;
 // type, time), the long tasks, and the order book's DOM changes.
 function instrument() {
   window.__perf = { sockets: 0, messages: [], longTasks: [], mutations: [] };
+  // core's useOrderBook notes here when its throttle tells a book to redraw.
+  window.__perfBookNotify = [];
   const Native = window.WebSocket;
   window.WebSocket = class extends Native {
     constructor(...args) {
@@ -61,13 +70,16 @@ function instrument() {
   new PerformanceObserver((list) => {
     for (const e of list.getEntries()) window.__perf.longTasks.push({ at: e.startTime, duration: e.duration });
   }).observe({ type: "longtask", buffered: true });
+  // The book's two sides only: the row between them shows the last trade
+  // and the mark price, which are not the book's and redraw on their own.
   const watch = () => {
-    const book = document.querySelector('[role="group"][aria-label="买盘"]')?.parentElement;
-    if (!book) return setTimeout(watch, 200);
-    new MutationObserver(() => {
+    const sides = document.querySelectorAll('[role="group"][aria-label="买盘"], [role="group"][aria-label="卖盘"]');
+    if (sides.length === 0) return setTimeout(watch, 200);
+    const observer = new MutationObserver(() => {
       const at = performance.now();
       requestAnimationFrame((frame) => window.__perf.mutations.push({ at, frame }));
-    }).observe(book, { subtree: true, childList: true, characterData: true });
+    });
+    for (const side of sides) observer.observe(side, { subtree: true, childList: true, characterData: true });
   };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", watch);
   else watch();
@@ -113,6 +125,7 @@ async function terminal(browser, { site, base, device, budgets, bookTab }) {
       longTasks: p.longTasks.filter((l) => l.at >= t0).map((l) => l.duration),
       depth: p.messages.filter((m) => m.at >= t0 && m.channel === "depth:BTC-USDT").map((m) => m.at),
       mutations: p.mutations.filter((m) => m.at >= t0),
+      notified: window.__perfBookNotify.filter((at) => at >= t0),
     };
   }, from);
   const perMinute = window60.longTasks.length;
@@ -122,8 +135,22 @@ async function terminal(browser, { site, base, device, budgets, bookTab }) {
     `≤ ${budgets.longTasks}`,
     perMinute <= budgets.longTasks,
   );
+  // Each update of the book from the throttle's notice that set it off
+  // (the latest one before it) to the frame that shows it.
+  const redraw = [];
+  for (const m of window60.mutations) {
+    const notice = window60.notified.filter((at) => at <= m.at && m.at - at < BOOK_EVERY).at(-1);
+    if (notice !== undefined) redraw.push(m.frame - notice);
+  }
+  report(
+    `${site} book redraw: the throttle's notice to the frame that shows it (p50 / p95 over ${redraw.length} of ${window60.notified.length} notices)`,
+    `${ms(pct(redraw, 50))} / ${ms(pct(redraw, 95))}`,
+    `p95 ≤ ${budgets.toPixel} ms`,
+    redraw.length > 0 && pct(redraw, 95) <= budgets.toPixel,
+  );
   // Each update of the book against the newest depth message it shows
-  // (the messages since the previous update; most change no visible level).
+  // (the messages since the previous update; most change no visible
+  // level): at most the throttle's window and a frame.
   const lat = [];
   let prev = -Infinity;
   for (const m of window60.mutations) {
@@ -134,8 +161,8 @@ async function terminal(browser, { site, base, device, budgets, bookTab }) {
   report(
     `${site} depth message to the frame that shows it (p50 / p95 over ${lat.length} book updates)`,
     `${ms(pct(lat, 50))} / ${ms(pct(lat, 95))}`,
-    `p95 ≤ ${budgets.toPixel} ms`,
-    pct(lat, 95) <= budgets.toPixel,
+    `p95 ≤ ${BOOK_EVERY} ms + a frame`,
+    pct(lat, 95) <= BOOK_EVERY + FRAME,
   );
 
   // Switching to ETH-USDT: its snapshot to its book on screen.

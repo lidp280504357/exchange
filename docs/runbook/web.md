@@ -194,7 +194,8 @@ nginx（`deploy/compose/nginx/conf.d/astras.vip.conf` 与 `snippets/site-{pc,m,a
   - 三个冒烟测试共用 `web/e2e/lib.mjs`（Chrome、旁路令牌、开发收件箱、契约校验、按可见文字找按钮）。面板有滑入动画，测试等它停稳（`sheetOpen`）再点，关闭后等遮罩消失再点页面。
 - 运行时性能（阶段 4 B7）：`task web:perf`（`web/e2e/perf.mjs`，headless Chrome，对已部署的站点，BTC-USDT 每秒约 10 条深度消息）测量 Lighthouse 管不到的 §12.1 预算：
   - 终端页一分钟推流里的主线程长任务（> 50 ms）；
-  - 深度消息到显示它的那一帧（每次盘口更新对照它显示的最新一条消息，p50/p95）；
+  - 盘口重绘：盘口最多每 250 ms 重绘一次（`BOOK_EVERY`，2026-10-01 用户要安静的盘口），从节流通知它重绘（core 的 `useOrderBook` 在页面有 `__perfBookNotify` 数组时记下时间，只给这个脚本用）到显示它的那一帧，p50/p95，预算 PC 50 ms、手机 100 ms（B67）；
+  - 深度消息到显示它的那一帧（每次盘口更新对照它显示的最新一条消息，p50/p95），预算是节流窗口加一帧（250 ms + 1 帧）；只观察买卖两侧，中间的最新成交价与标记价不归盘口节流；
   - 切换交易对（新交易对的快照到达到盘口出现）；
   - 离开再回到终端（15 秒宽限内不新建 WebSocket、不重收快照，盘口重新出现的时间）；
   - 手机站以四分之一 CPU（`emulateCPUThrottling(4)`，近似中端手机）跑同样的测量，另测行情列表滚动帧率；
