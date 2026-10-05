@@ -7,9 +7,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -142,7 +144,9 @@ func (s *Service) Place(ctx context.Context, req domain.Request) (domain.Order, 
 
 // Liquidation is margin-service's order closing a margin account (margin
 // design §4.5, E0 §3.4): a market sell of quantity, or a market buy
-// spending quote amount.
+// spending quote amount. Attempt numbers the orders of one liquidation,
+// pair and side (1 when not given): another one after a rejection, or the
+// next part of a sale too big for one order (review CU, B92).
 type Liquidation struct {
 	LiquidationID string
 	UserID        string
@@ -152,27 +156,42 @@ type Liquidation struct {
 	Quantity      decimal.Decimal
 	QuoteAmount   decimal.Decimal
 	SideEffect    domain.SideEffect
+	Attempt       int
 }
 
+// maxLiquidationAttempts bounds Attempt.
+const maxLiquidationAttempts = 1000
+
 // liquidationClient is a liquidation order's client_order_id: the same
-// liquidation of the same pair and side is the same order.
+// liquidation, pair, side and attempt is the same order. The first
+// attempt keeps the key orders had before attempts were numbered.
 func liquidationClient(l Liquidation) string {
-	sum := sha256.Sum256([]byte(l.LiquidationID + "|" + l.Symbol + "|" + string(l.Side)))
+	key := l.LiquidationID + "|" + l.Symbol + "|" + string(l.Side)
+	if l.Attempt > 1 {
+		key += "|" + strconv.Itoa(l.Attempt)
+	}
+	sum := sha256.Sum256([]byte(key))
 	return "liq_" + hex.EncodeToString(sum[:16])
 }
 
 // Liquidate places margin-service's liquidation order: a market order on
 // the margin account against the book (HOUSE where the pair has its
-// liquidity), past the order limits, the protection price, the minimum
-// notional, margin.enabled and the eligibility (the account is frozen;
-// this is its way out), funded without a reservation. Idempotent by
-// liquidation, pair and side: a repeat returns the order.
+// liquidity), past the order limits, the minimum notional, margin.enabled
+// and the eligibility (the account is frozen; this is its way out), funded
+// without a reservation; past the protection price too on a pair with a
+// reference market (one without keeps the order within half and twice the
+// anchor, domain.NewOrder). Idempotent by liquidation, pair, side and
+// attempt: a repeat returns the order (a rejected one its rejection; the
+// next attempt is a new order).
 func (s *Service) Liquidate(ctx context.Context, l Liquidation) (domain.Order, error) {
 	if _, err := uuid.Parse(l.LiquidationID); err != nil {
 		return domain.Order{}, apperr.Invalid("liquidation_id must be a UUID")
 	}
 	if _, err := uuid.Parse(l.UserID); err != nil {
 		return domain.Order{}, apperr.Invalid("user_id must be a UUID")
+	}
+	if l.Attempt < 0 || l.Attempt > maxLiquidationAttempts {
+		return domain.Order{}, apperr.Invalid(fmt.Sprintf("attempt must be from 1 to %d", maxLiquidationAttempts))
 	}
 	req := domain.Request{
 		UserID: l.UserID, ClientOrderID: liquidationClient(l), Symbol: l.Symbol, Side: l.Side, Type: domain.TypeMarket,
@@ -188,7 +207,14 @@ func (s *Service) Liquidate(ctx context.Context, l Liquidation) (domain.Order, e
 	if err != nil {
 		return domain.Order{}, err
 	}
-	o, err := domain.NewOrder(uuid.Must(uuid.NewV7()).String(), req, pair, decimal.Zero, s.Now())
+	// Only a pair without a reference market bounds the order by its anchor.
+	anchor := decimal.Zero
+	if pair.Reference == "" {
+		if anchor, err = s.Prices.Anchor(ctx, pair.Symbol); err != nil {
+			return domain.Order{}, err
+		}
+	}
+	o, err := domain.NewOrder(uuid.Must(uuid.NewV7()).String(), req, pair, anchor, s.Now())
 	if err != nil {
 		return domain.Order{}, err
 	}

@@ -92,12 +92,19 @@ func NewOrder(id string, req Request, pair Pair, anchor decimal.Decimal, now tim
 		return Order{}, ErrNotTrading
 	}
 	if req.LiquidationID != "" {
-		// A liquidation closes what the account holds, however little and
-		// at whatever price the market gives (E0 §3.4).
+		// A liquidation closes what the account holds, however little (E0
+		// §3.4): no minimum notional. On a pair HOUSE quotes from its
+		// reference market it takes the price the book gives; on one without
+		// a reference market (the platform coin's) it stays within half and
+		// twice the anchor, so that a thin book cannot take the account's
+		// assets for nothing (review CU ①).
 		if req.Type != TypeMarket || !req.AccountType.Margin() {
 			return Order{}, apperr.Invalid("a liquidation is a market order on a margin account")
 		}
-		pair.MinNotional, anchor = decimal.Zero, decimal.Zero
+		pair.MinNotional, pair.PriceBand = decimal.Zero, decimal.NewFromInt(1)
+		if pair.Reference != "" {
+			anchor = decimal.Zero
+		}
 	}
 	o := Order{
 		ID: id, UserID: req.UserID, ClientOrderID: req.ClientOrderID, Symbol: pair.Symbol,

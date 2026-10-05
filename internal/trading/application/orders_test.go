@@ -785,6 +785,9 @@ func liquidation(side domain.Side) Liquidation {
 func TestLiquidationsCloseTheAccountWithoutAReservation(t *testing.T) {
 	svc, store, led, _ := newService()
 	ctx := context.Background()
+	pair := svc.Instruments.(fakeInstruments).pair
+	pair.Reference = "BTCUSDT"
+	svc.Instruments = fakeInstruments{pair}
 	margin := &fakeMargin{err: apperr.New(apperr.KindConflict, "MARGIN_FROZEN", "the account is being liquidated")}
 	svc.Margin = margin
 	svc.Prices = fixedAnchor{d("60000")}
@@ -825,6 +828,62 @@ func TestLiquidationsCloseTheAccountWithoutAReservation(t *testing.T) {
 	bad.LiquidationID = "liq-1"
 	if _, err := svc.Liquidate(ctx, bad); !apperr.Is(err, apperr.CodeInvalidArgument) {
 		t.Fatalf("a liquidation ID that is no UUID: %v", err)
+	}
+	bad = liquidation(domain.SideSell)
+	bad.Attempt = -1
+	if _, err := svc.Liquidate(ctx, bad); !apperr.Is(err, apperr.CodeInvalidArgument) {
+		t.Fatalf("attempt -1: %v", err)
+	}
+	// Without a reference market (the platform coin's pair) the order stays
+	// within half and twice the anchor.
+	pair.Reference = ""
+	svc.Instruments = fakeInstruments{pair}
+	for _, c := range []struct {
+		side domain.Side
+		want string
+	}{{domain.SideSell, "30000"}, {domain.SideBuy, "120000"}} {
+		l := liquidation(c.side)
+		l.LiquidationID = "0199b0a0-0000-7000-8000-000000000003"
+		o, err := svc.Liquidate(ctx, l)
+		if err != nil || !o.ProtectionPrice.Equal(d(c.want)) {
+			t.Fatalf("a %s liquidation without a reference market: protection %s (%v), want %s", c.side, o.ProtectionPrice, err, c.want)
+		}
+	}
+}
+
+func TestLiquidationAttemptsAreOrdersOfTheirOwn(t *testing.T) {
+	svc, _, led, _ := newService()
+	ctx := context.Background()
+	svc.Margin = &fakeMargin{}
+	svc.Prices = fixedAnchor{d("60000")}
+	svc.Features = switches{}
+	// The first attempt is the order of the key before attempts: given or not.
+	first, err := svc.Liquidate(ctx, liquidation(domain.SideSell))
+	if err != nil {
+		t.Fatal(err)
+	}
+	one := liquidation(domain.SideSell)
+	one.Attempt = 1
+	if again, err := svc.Liquidate(ctx, one); err != nil || again.ID != first.ID {
+		t.Fatalf("attempt 1: %+v %v", again, err)
+	}
+	// A rejected attempt stays rejected; the next one is a new order.
+	led.err = apperr.New(apperr.KindConflict, "LEDGER_INSUFFICIENT_BALANCE", "not enough")
+	second := liquidation(domain.SideSell)
+	second.Attempt = 2
+	refused, err := svc.Liquidate(ctx, second)
+	if !apperr.Is(err, "LEDGER_INSUFFICIENT_BALANCE") || refused.Status != domain.StatusRejected || refused.ID == first.ID {
+		t.Fatalf("attempt 2 refused: %+v %v", refused, err)
+	}
+	if _, err := svc.Liquidate(ctx, second); !apperr.Is(err, "LEDGER_INSUFFICIENT_BALANCE") {
+		t.Fatalf("attempt 2 again: %v", err)
+	}
+	led.err = nil
+	third := liquidation(domain.SideSell)
+	third.Attempt = 3
+	o, err := svc.Liquidate(ctx, third)
+	if err != nil || o.ID == refused.ID || o.ID == first.ID || o.ClientOrderID == refused.ClientOrderID || o.FreezeState != domain.FreezeDone {
+		t.Fatalf("attempt 3: %+v %v", o, err)
 	}
 }
 

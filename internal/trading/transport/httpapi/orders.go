@@ -22,10 +22,22 @@ type Handler struct {
 
 // Routes mounts the endpoints on r: the public ones the gateway forwards
 // with the caller's identity, and margin-service's internal ones (only on
-// the compose network; the gateway forwards /v1 alone).
+// the compose network; the gateway forwards /v1 alone, and a request that
+// came through it, with the caller's X-User-Id, is not served there).
 func (h *Handler) Routes(r chi.Router) {
-	r.Post("/internal/orders/liquidations", h.liquidate)
-	r.Post("/internal/orders/cancel", h.cancelAccount)
+	r.Group(func(r chi.Router) {
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if httpx.UserID(r) != "" {
+					httpx.WriteError(w, r, apperr.NotFound("no such endpoint"))
+					return
+				}
+				next.ServeHTTP(w, r)
+			})
+		})
+		r.Post("/internal/orders/liquidations", h.liquidate)
+		r.Post("/internal/orders/cancel", h.cancelAccount)
+	})
 	r.Group(func(r chi.Router) {
 		r.Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -111,6 +123,7 @@ type liquidationBody struct {
 	Quantity      string `json:"quantity"`
 	QuoteAmount   string `json:"quote_amount"`
 	SideEffect    string `json:"side_effect"`
+	Attempt       int    `json:"attempt"`
 }
 
 // liquidate places margin-service's liquidation order (E0 §3.4).
@@ -122,7 +135,7 @@ func (h *Handler) liquidate(w http.ResponseWriter, r *http.Request) {
 	}
 	l := application.Liquidation{
 		LiquidationID: body.LiquidationID, UserID: body.UserID, Account: domain.AccountType(body.Account), Symbol: body.Symbol,
-		Side: domain.Side(body.Side), SideEffect: domain.SideEffect(body.SideEffect),
+		Side: domain.Side(body.Side), SideEffect: domain.SideEffect(body.SideEffect), Attempt: body.Attempt,
 	}
 	var err error
 	if l.Quantity, err = optional("quantity", body.Quantity); err == nil {
