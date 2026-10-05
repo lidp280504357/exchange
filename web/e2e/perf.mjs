@@ -45,6 +45,8 @@ const pct = (list, p) => {
   return s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))];
 };
 const ms = (v) => `${Math.round(v)} ms`;
+// stats prints a list's p50, p95 and longest, or says it has none.
+const stats = (list) => (list.length ? `${ms(pct(list, 50))} / ${ms(pct(list, 95))} / ${ms(Math.max(...list))}` : "no samples");
 
 // instrument records, in the page, every WebSocket and message (channel,
 // type, time), the long tasks, and the order book's DOM changes.
@@ -77,10 +79,11 @@ function instrument() {
   new PerformanceObserver((list) => {
     for (const e of list.getEntries()) window.__perf.longTasks.push({ at: e.startTime, duration: e.duration });
   }).observe({ type: "longtask", buffered: true });
-  // The book's two sides only: the row between them shows the last trade
-  // and the mark price, which are not the book's and redraw on their own.
+  // The book's two sides only, once shown (the phone mounts its panels
+  // hidden): the row between them shows the last trade and the mark price,
+  // which are not the book's and redraw on their own.
   const watch = () => {
-    const sides = document.querySelectorAll('[role="group"][aria-label="买盘"], [role="group"][aria-label="卖盘"]');
+    const sides = [...document.querySelectorAll('[role="group"][aria-label="买盘"], [role="group"][aria-label="卖盘"]')].filter((s) => s.checkVisibility());
     if (sides.length === 0) return setTimeout(watch, 200);
     const observer = new MutationObserver(() => {
       const at = performance.now();
@@ -129,21 +132,27 @@ async function terminal(browser, { site, base, device, budgets, bookTab, tapeTab
   };
   await page.goto(`${base}/trade/BTC-USDT`, { waitUntil: "networkidle2", timeout: 60000 });
   if (bookTab) await tab(bookTabLabel);
-  await page.waitForSelector("[data-book-row]", { timeout: 30000 });
+  await page.waitForSelector("[data-book-row]", { visible: true, timeout: 30000 });
   await sleep(5000); // past the load
 
   // A minute of streaming.
   const from = await page.evaluate(() => performance.now());
   await sleep(60000);
-  const window60 = await page.evaluate((t0) => {
-    const p = window.__perf;
-    return {
-      longTasks: p.longTasks.filter((l) => l.at >= t0).map((l) => l.duration),
-      depth: p.messages.filter((m) => m.at >= t0 && m.channel === "depth:BTC-USDT").map((m) => m.at),
-      mutations: p.mutations.filter((m) => m.at >= t0),
-      notices: p.notices.filter((n) => n.at >= t0),
-    };
-  }, from);
+  const window60 = await page.evaluate(
+    (t0, every) => {
+      const p = window.__perf;
+      return {
+        longTasks: p.longTasks.filter((l) => l.at >= t0).map((l) => l.duration),
+        depth: p.messages.filter((m) => m.at >= t0 && m.channel === "depth:BTC-USDT").map((m) => m.at),
+        // From a throttle window before the minute, so that a redraw early
+        // in it pairs with its notice just before it.
+        mutations: p.mutations.filter((m) => m.at >= t0 - every),
+        notices: p.notices.filter((n) => n.at >= t0 - every),
+      };
+    },
+    from,
+    BOOK_EVERY,
+  );
   const perMinute = window60.longTasks.length;
   report(
     `${site} long tasks in a minute of streaming (${window60.depth.length} depth messages)`,
@@ -152,19 +161,28 @@ async function terminal(browser, { site, base, device, budgets, bookTab, tapeTab
     perMinute <= budgets.longTasks,
   );
   // Each notice of the throttle to the frame that shows the redraw it set
-  // off: the book's first change after it, within the throttle's window
-  // (notices are at least that far apart, and the book changes only on
-  // them); a notice that changes no visible level shows nothing.
+  // off: the book's first change after it not taken by an earlier notice,
+  // within the throttle's window (notices are at least that far apart). A
+  // notice that changes no visible level shows nothing; a change with no
+  // notice of its own means the throttle was bypassed (as before b178292,
+  // when a render for another reason brought newer levels in). Only the
+  // notices and changes in the minute count.
   const redraw = [];
+  const taken = new Set();
   for (const n of window60.notices) {
-    const m = window60.mutations.find((x) => x.at >= n.at && x.at - n.at < BOOK_EVERY);
-    if (m) redraw.push(m.frame - n.at);
+    const i = window60.mutations.findIndex((x, k) => !taken.has(k) && x.at >= n.at && x.at - n.at < BOOK_EVERY);
+    if (i < 0) continue;
+    taken.add(i);
+    if (n.at >= from) redraw.push(window60.mutations[i].frame - n.at);
   }
+  const notices = window60.notices.filter((n) => n.at >= from).length;
+  const changes = window60.mutations.filter((x) => x.at >= from).length;
+  const bypassed = window60.mutations.filter((x, k) => x.at >= from && !taken.has(k)).length;
   report(
-    `${site} book redraw: the throttle's notice to the frame that shows it (p50 / p95 / max over ${redraw.length} notices with a change; ${window60.notices.length - redraw.length} changed nothing shown)`,
-    `${ms(pct(redraw, 50))} / ${ms(pct(redraw, 95))} / ${ms(Math.max(...redraw))}`,
-    `p95 ≤ ${budgets.toPixel} ms`,
-    redraw.length > 0 && pct(redraw, 95) <= budgets.toPixel,
+    `${site} book redraw: the throttle's notice to the frame that shows it (p50 / p95 / max over ${redraw.length} notices with a change; ${notices - redraw.length} changed nothing shown; ${changes} changes of the book, ${bypassed} without a notice)`,
+    stats(redraw),
+    `p95 ≤ ${budgets.toPixel} ms, every change on a notice`,
+    redraw.length > 0 && pct(redraw, 95) <= budgets.toPixel && bypassed === 0,
   );
   // Each depth message to the frame of the first notice after it (the
   // book then shows a state at least that new); messages after the last
@@ -176,7 +194,7 @@ async function terminal(browser, { site, base, device, budgets, bookTab, tapeTab
   }
   report(
     `${site} depth message to the frame that shows it (p50 / p95 / max over ${perMessage.length} of ${window60.depth.length} messages)`,
-    `${ms(pct(perMessage, 50))} / ${ms(pct(perMessage, 95))} / ${ms(Math.max(...perMessage))}`,
+    stats(perMessage),
     `p95 ≤ ${BOOK_EVERY} + ${budgets.toPixel} ms`,
     perMessage.length > 0 && pct(perMessage, 95) <= BOOK_EVERY + budgets.toPixel,
   );
@@ -185,12 +203,13 @@ async function terminal(browser, { site, base, device, budgets, bookTab, tapeTab
   // trade tape after it, over 30 seconds on the tape's own tab; then back
   // to the book.
   await tab(tapeTab);
-  await page.waitForSelector('section[aria-label="最新成交"]', { timeout: 10000 });
+  await page.waitForSelector('section[aria-label="最新成交"]', { visible: true, timeout: 10000 });
   const fromTape = await page.evaluate(() => {
+    const tapeShown = [...document.querySelectorAll('section[aria-label="最新成交"]')].find((el) => el.checkVisibility());
     new MutationObserver(() => {
       const at = performance.now();
       requestAnimationFrame((frame) => window.__perf.tape.push({ at, frame }));
-    }).observe(document.querySelector('section[aria-label="最新成交"]'), { subtree: true, childList: true, characterData: true });
+    }).observe(tapeShown, { subtree: true, childList: true, characterData: true });
     return performance.now();
   });
   await sleep(30000);
@@ -208,12 +227,12 @@ async function terminal(browser, { site, base, device, budgets, bookTab, tapeTab
   }
   report(
     `${site} trade message to the frame that shows it (p50 / p95 / max over ${perTrade.length} of ${tape.trades.length} trades)`,
-    `${ms(pct(perTrade, 50))} / ${ms(pct(perTrade, 95))} / ${ms(Math.max(...perTrade))}`,
+    stats(perTrade),
     `p95 ≤ ${budgets.toPixel} ms`,
     perTrade.length > 0 && pct(perTrade, 95) <= budgets.toPixel,
   );
   await tab(bookTabLabel);
-  await page.waitForSelector("[data-book-row]", { timeout: 10000 });
+  await page.waitForSelector("[data-book-row]", { visible: true, timeout: 10000 });
 
   // Switching to ETH-USDT: its snapshot to its book on screen.
   const t0 = await page.evaluate(() => performance.now());

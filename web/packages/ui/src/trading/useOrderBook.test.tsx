@@ -60,4 +60,30 @@ describe("useOrderBook with a throttle", () => {
     act(() => vi.advanceTimersByTime(250));
     expect(best).toBe("100.5");
   });
+
+  it("shows the live state when it subscribes anew, not what its old throttle passed on", () => {
+    const { ws, push } = fakeWs();
+    const market = new MarketStore(ws, (cb) => cb());
+    const depth = channels.depth("BTC-USDT");
+    let best = "";
+    function Book({ every }: { every: number }) {
+      best = useOrderBook("BTC-USDT", 5, "", { every }).bids[0]?.price ?? "";
+      return null;
+    }
+    const tree = (every: number) => (
+      <LiveProvider ws={ws} market={market}>
+        <Book every={every} />
+      </LiveProvider>
+    );
+    const { rerender } = render(tree(250));
+    act(() => push(depth, { channel: depth, type: "snapshot", seq: 1, data: { bids: [["100", "1"]], asks: [["101", "1"]] } }));
+    act(() => push(depth, { channel: depth, type: "update", seq: 2, data: { bids: [["100.5", "2"]], asks: [] } }));
+    expect(best).toBe("100");
+
+    // The same book with another throttle: the old one is unsubscribed
+    // with the change it held back, and the new one has passed nothing on
+    // yet, so the book shows the store's state at once.
+    act(() => rerender(tree(500)));
+    expect(best).toBe("100.5");
+  });
 });
