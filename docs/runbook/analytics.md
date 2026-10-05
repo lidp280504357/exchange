@@ -9,7 +9,7 @@
 | `events` | 全部业务事件，payload 为 protojson（未链接的类型存 `@type` + `@raw` base64），保留 1 年 | 全部主题 |
 | `event_ingest_log` | 主题/分区/位点，保留 30 天 | `events` 的物化视图 |
 | `audit_logs` | 审计事件，按操作者与时间 | `audit.events` |
-| `ledger_entries` | 每条分录行（资产、账户、金额、写后余额） | `ledger.EntryPosted` |
+| `ledger_entries` | 每条分录行（资产、账户、金额、写后余额；`scope` 为逐仓杠杆账户的交易对，其他为空，迁移 clickhouse 00009 起） | `ledger.EntryPosted` |
 | `trades` | 每笔成交：价格、数量、成交额、主动方、双方订单与用户、手续费（买方付 base、卖方付 quote；合约为 0，合约手续费在 `derivatives_fills`） | `trade.TradeExecuted`（`trade.events` 与 `derivatives.trade.events`） |
 | `orders` | 订单受理时的属性（方向、类型、TIF、价格、数量、冻结） | `order.OrderAccepted`（现货与合约） |
 | `order_updates` | 订单每次变化：NEW / OPEN / PARTIALLY_FILLED / FILLED / CANCELED / REJECTED、累计成交、撤单原因或拒绝码、引擎 sequence | `order.events` 与 `derivatives.order.events` 全部六种事件 |
@@ -23,12 +23,15 @@
 | `derivatives_fills` | 合约成交记账后的每一边（方向、仓位方向、maker、价格、数量、名义价值、平仓数量、手续费、已实现盈亏、是否强平） | `derivatives.FillSettled` |
 | `derivatives_funding` | 每个仓位每次资金费（费率、结算标记价、金额：正为收到、负为付出） | `derivatives.FundingPaid` |
 | `derivatives_liquidations` | 强平步骤：WARNING、STARTED、FILLED（`adl` 表示是否由自动减仓成交）、ADL（被减仓的对手方），带价格、数量、已实现盈亏、保险基金垫付、标记/破产价、保证金余额与维持保证金 | `derivatives.liquidation.events` |
+| `margin_interest` | 杠杆账户每小时每资产的计息（计息本金、模型与小时利率、利息、计息后的应付利息、整点、分录 journal） | `margin.MarginInterestAccrued`（杠杆设计 2026-10-06 §5.3，迁移 clickhouse 00009） |
+| `margin_liquidations` | 每次杠杆强平一行（AggregatingMergeTree，各列 `anyLast` 取最后一个非 NULL 值）：开始事件写触发时的风险率、总资产与总负债、开始时间，完成事件写各资产归还（JSON 数组）、强平费、保险基金补足、剩余与完成时间；`completed_at` 非空即已完成；两事件先后与重复投递都不影响结果，查询加 `FINAL` | `margin.MarginLiquidationStarted`、`MarginLiquidationCompleted` |
 | `read_model_backfills` | 已完成的回填 | analytics-consumer |
 
 - 充值与提现快照的 `version` = 事件毫秒时间 × 16 + 状态进度，同一毫秒的两个事件（提现申请与风控评分在同一事务里）按状态先后取后者。
 - 订单、充值、提现的创建时间在 UUIDv7 ID 里：`UUIDv7ToDateTime(order_id)`。
 - 金额列为 `Decimal128(18)`；ID 列为 `UUID`，格式不对的事件记入 `analytics_rejected_rows_total` 并告警日志，不写入读模型。
 - 钱包事件类型从任务 12 起链接进 analytics-consumer，之后的钱包事件在 `events` 里是可读的 JSON；之前的是 `@raw`，回填按原始字节解码。
+- `margin.events` 从杠杆读模型上线起才订阅：消费组第一次读这个主题从头开始（主题保留期内的事件都会进 `events` 与读模型），不需要另外回填。借币与还币暂无读模型（在 `events` 里）。
 
 ## 回填
 
