@@ -110,13 +110,53 @@ describe("useOrderBook with the steps offered", () => {
     expect(shown).toEqual({ step: "1", rows: 15, fits: ["0.01", "0.1", "1"] });
   });
 
-  it("holds the finer step it took until the chosen one fills with levels to spare", () => {
+  it("holds the finer step it took until the chosen one fills with levels to spare, per depth", () => {
+    const { ws, push } = fakeWs();
+    const market = new MarketStore(ws, (cb) => cb());
+    const depth = channels.depth("BTC-USDT");
+    let step = "";
+    function Book({ rows }: { rows: number }) {
+      step = useOrderBook("BTC-USDT", rows, "10", { steps: ["1", "10"] }).step ?? "";
+      return null;
+    }
+    const tree = (rows: number) => (
+      <LiveProvider ws={ws} market={market}>
+        <Book rows={rows} />
+      </LiveProvider>
+    );
+    const { rerender } = render(tree(15));
+    const lv = (from: number, by: number, n: number) => Array.from({ length: n }, (_, i) => [String(from + i * by), "1"]);
+    // Fifteen rows a side (18 with the levels to spare). At 10 the bids
+    // (1000 down to 801) have 21 levels, the asks (1001 up to 1140) 14:
+    // the book takes 1.
+    act(() => push(depth, { channel: depth, type: "snapshot", seq: 1, data: { bids: lv(1000, -1, 200), asks: lv(1001, 1, 140) } }));
+    expect(step).toBe("1");
+    // Asks up to 1150: 15 levels at 10, the rows but none to spare.
+    act(() => push(depth, { channel: depth, type: "update", seq: 2, data: { bids: [], asks: lv(1141, 1, 10) } }));
+    expect(step).toBe("1");
+    // Up and down between 14 and 15 levels: still 1, no swapping.
+    act(() => push(depth, { channel: depth, type: "update", seq: 3, data: { bids: [], asks: lv(1141, 1, 10).map(([p]) => [p, "0"]) } }));
+    expect(step).toBe("1");
+    act(() => push(depth, { channel: depth, type: "update", seq: 4, data: { bids: [], asks: lv(1141, 1, 10) } }));
+    expect(step).toBe("1");
+    // Another depth starts afresh: 14 rows fill at 10.
+    act(() => rerender(tree(14)));
+    expect(step).toBe("10");
+    act(() => rerender(tree(15)));
+    // Back at 15 rows: 10 fills them, and nothing is held for this depth now.
+    expect(step).toBe("10");
+    // Up to 1180: 18 levels at 10, three to spare.
+    act(() => push(depth, { channel: depth, type: "update", seq: 5, data: { bids: [], asks: lv(1151, 1, 30) } }));
+    expect(step).toBe("10");
+  });
+
+  it("goes back to the chosen step only with levels to spare", () => {
     const { ws, push } = fakeWs();
     const market = new MarketStore(ws, (cb) => cb());
     const depth = channels.depth("BTC-USDT");
     let step = "";
     function Book() {
-      step = useOrderBook("BTC-USDT", 3, "10", { steps: ["1", "10"] }).step ?? "";
+      step = useOrderBook("BTC-USDT", 15, "10", { steps: ["1", "10"] }).step ?? "";
       return null;
     }
     render(
@@ -125,15 +165,11 @@ describe("useOrderBook with the steps offered", () => {
       </LiveProvider>,
     );
     const lv = (from: number, by: number, n: number) => Array.from({ length: n }, (_, i) => [String(from + i * by), "1"]);
-    // Three rows a side. At 10 the bids (100 down to 61) have five levels,
-    // the asks (101 up to 120) two: the book takes 1.
-    act(() => push(depth, { channel: depth, type: "snapshot", seq: 1, data: { bids: lv(100, -1, 40), asks: lv(101, 1, 20) } }));
+    act(() => push(depth, { channel: depth, type: "snapshot", seq: 1, data: { bids: lv(1000, -1, 200), asks: lv(1001, 1, 140) } }));
     expect(step).toBe("1");
-    // Asks up to 130: three levels at 10, the rows but none to spare.
-    act(() => push(depth, { channel: depth, type: "update", seq: 2, data: { bids: [], asks: lv(121, 1, 10) } }));
+    act(() => push(depth, { channel: depth, type: "update", seq: 2, data: { bids: [], asks: lv(1141, 1, 10) } }));
     expect(step).toBe("1");
-    // Up to 150: five levels at 10, two to spare.
-    act(() => push(depth, { channel: depth, type: "update", seq: 3, data: { bids: [], asks: lv(131, 1, 20) } }));
+    act(() => push(depth, { channel: depth, type: "update", seq: 3, data: { bids: [], asks: lv(1151, 1, 30) } }));
     expect(step).toBe("10");
   });
 });

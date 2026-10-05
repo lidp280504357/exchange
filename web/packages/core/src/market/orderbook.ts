@@ -87,13 +87,15 @@ export class OrderBook {
    * fit cuts the view at `step`, one of `steps` (finest first), unless that
    * leaves a side shown short of `depth` levels while a finer step fills
    * it: the public book carries 200 levels a side, and in a dense book
-   * those span too little of the price for a coarse step (BTC-USDT at 10
-   * showed four or five rows in a panel of fifteen, B71). A book short at
-   * every step, a thin one, keeps the step asked. `prev`, the step of the
-   * last view, holds a finer step until the coarser one fills with some
+   * those span too little of the price for a coarse step (BTC-USDT: 2 to
+   * 40 USDT, so 10 never fills, and when it is densest neither does the
+   * default 1, five rows a side at 20:20 on 2026-10-05, B71). A book short
+   * at every step, a thin one, keeps the step asked. `prev`, the step of
+   * the last view, holds a finer step until a coarser one fills with some
    * levels to spare, so the book does not swap scales at each update near
-   * the threshold. The view reports its step and the steps that fill (all
-   * of them while nothing tells: an empty book, a thin one).
+   * the threshold; while it holds, the steps above are not offered. The
+   * view reports its step and the steps that fill (all of them while
+   * nothing tells: an empty book, a thin one).
    */
   fit(depth: number, step: string, steps: readonly string[], minQty = "", sides: BookSides = "both", prev = ""): BookView {
     // The views are cut deeper by the levels to spare, then to `depth`.
@@ -127,7 +129,13 @@ export class OrderBook {
     if (top < 0) return shown(step, [...steps]);
     let use = Math.min(at, top);
     const was = steps.indexOf(prev);
-    if (was >= 0 && was < use && !has(steps[use]!, spare)) use = was;
+    if (was >= 0 && was < use) {
+      // Back up from a finer step only as far as levels are to spare. While
+      // held there, the steps above it are not offered: they fill, but not
+      // with the levels to spare that showing them takes now.
+      while (use > was && !has(steps[use]!, spare)) use--;
+      if (use < Math.min(at, top)) return shown(steps[use]!, steps.slice(0, use + 1));
+    }
     return shown(steps[use]!, steps.slice(0, top + 1));
   }
 }

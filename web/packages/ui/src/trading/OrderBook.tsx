@@ -1,6 +1,6 @@
 import { dec, formatAmount, formatPercent, formatPrice, type BookLevel, type BookView } from "@exchange/core";
 import { ArrowDown, ArrowUp, LoaderCircle } from "lucide-react";
-import { memo, useCallback, useId, useRef, type KeyboardEvent } from "react";
+import { memo, useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { PriceText } from "../components/PriceText";
 import { Select } from "../components/Select";
@@ -38,8 +38,16 @@ export type OrderBookProps = {
   loading?: boolean;
   base?: string;
   quote?: string;
-  /** Row height in px (default 20). */
+  /** Row height in px (default 20); with onRows, the least a row may be. */
   rowHeight?: number;
+  /**
+   * Fill the height the book is given (the PC terminal's panel, B74): the
+   * rows a side are those of at least `rowHeight` that fit in the room the
+   * two sides actually get (measured, 5 to 20; `levels` until then), drawn
+   * at the height that fills it, up to 24 px, so nothing is left blank
+   * under the bids. Told here, to cut the view to.
+   */
+  onRows?: (levels: number) => void;
   /** The toolbar with the view switch and the step (default on). */
   toolbar?: boolean;
   className?: string;
@@ -84,6 +92,25 @@ const BookRow = memo(function BookRow({ side, price, quantity, total, ratio, pri
   );
 });
 
+// useRoom measures, while `sides` is given, the height of the sides' box
+// less the middle row's: the room the rows of both sides share.
+function useRoom(sides: RefObject<HTMLDivElement | null> | null, middle: RefObject<HTMLDivElement | null>): number {
+  const [room, setRoom] = useState(0);
+  useEffect(() => {
+    const el = sides?.current;
+    if (!el) return;
+    const measure = () => {
+      const r = el.getBoundingClientRect().height - (middle.current?.getBoundingClientRect().height ?? 0);
+      setRoom((prev) => (Math.abs(prev - r) < 0.5 ? prev : r));
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    measure();
+    return () => ro.disconnect();
+  }, [sides, middle]);
+  return room;
+}
+
 function ratioOf(total: string, max: number): number {
   if (!(max > 0)) return 0;
   return Math.round((dec.toNumber(total) / max) * 1000) / 1000;
@@ -103,13 +130,14 @@ function ModeIcon({ mode }: { mode: BookMode }) {
  * OrderBook renders a BookView: asks on top with the lowest ask next to the
  * middle row (last price and spread), bids below, each row with a depth
  * bar. Built for 20 levels a side: memoized rows in fixed slots, fixed
- * section heights (no layout shift), no motion. Arrow keys move
+ * section heights (no layout shift), or with onRows the height it is
+ * given, filled to within a pixel; no motion. Arrow keys move
  * between rows; Enter fills the price, Shift+Enter or Shift+click also the
  * cumulative quantity.
  */
 export function OrderBook({
-  view, priceDecimals, qtyDecimals, levels = 20, mode = "both", onModeChange, lastPrice, lastDirection, markPrice, steps, step, onStepChange,
-  onPriceClick, syncing, loading, base, quote, rowHeight = 20, toolbar = true, className,
+  view, priceDecimals, qtyDecimals, levels: asked = 20, mode = "both", onModeChange, lastPrice, lastDirection, markPrice, steps, step, onStepChange,
+  onPriceClick, syncing, loading, base, quote, rowHeight: minRow = 20, toolbar = true, onRows, className,
 }: OrderBookProps) {
   const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
@@ -117,6 +145,16 @@ export function OrderBook({
   pickRef.current = onPriceClick;
   const onPick = useCallback<Pick>((price, total, shift) => pickRef.current?.(price, shift ? total : undefined), []);
 
+  // Filling (onRows): the room the sides get, the rows that fit and their height.
+  const sidesRef = useRef<HTMLDivElement>(null);
+  const middleRef = useRef<HTMLDivElement>(null);
+  const room = useRoom(onRows ? sidesRef : null, middleRef);
+  const fitted = room > 0 ? Math.max(5, Math.min(20, Math.floor(room / 2 / minRow))) : 0;
+  useEffect(() => {
+    if (fitted > 0) onRows?.(fitted);
+  }, [fitted, onRows]);
+  const levels = fitted > 0 ? fitted : asked;
+  const rowHeight = fitted > 0 ? Math.max(minRow, Math.min(24, room / 2 / fitted)) : minRow;
   const perSide = mode === "both" ? levels : levels * 2;
   // The step the view was cut at, when finer than the one chosen.
   const fallback = view.step !== undefined && step !== undefined && view.step !== step;
@@ -142,8 +180,8 @@ export function OrderBook({
     <div
       role="group"
       aria-label={side === "ask" ? t("ui.book.asks") : t("ui.book.bids")}
-      className={cn("flex flex-col overflow-hidden", side === "ask" && "justify-end")}
-      style={{ height: perSide * rowHeight }}
+      className={cn("flex flex-col overflow-hidden", side === "ask" && "justify-end", onRows && "min-h-0 flex-1")}
+      style={onRows ? undefined : { height: perSide * rowHeight }}
     >
       {loading && empty
         ? Array.from({ length: Math.min(perSide, 8) }, (_, i) => (
@@ -173,7 +211,7 @@ export function OrderBook({
   );
 
   const middle = (
-    <div className="flex h-9 shrink-0 items-center gap-2 border-y border-line-1 px-3">
+    <div ref={middleRef} className="flex h-9 shrink-0 items-center gap-2 border-y border-line-1 px-3">
       <button
         type="button"
         disabled={!lastPrice}
@@ -197,7 +235,7 @@ export function OrderBook({
   );
 
   return (
-    <div ref={ref} onKeyDown={keyDown} className={cn("relative flex min-w-0 flex-col bg-bg-1 text-fg-1", className)}>
+    <div ref={ref} onKeyDown={keyDown} className={cn("relative flex min-w-0 flex-col bg-bg-1 text-fg-1", onRows && "min-h-0 flex-1", className)}>
       {toolbar && (
         <div className="flex h-9 shrink-0 items-center gap-1 px-2">
           <div role="group" aria-label={t("ui.book.view")} className="flex items-center gap-0.5">
@@ -226,11 +264,17 @@ export function OrderBook({
                 size="xs"
                 variant="ghost"
                 value={step ?? view.step ?? steps[0]}
-                display={fallback ? `≈ ${view.step}` : undefined}
+                display={
+                  fallback ? (
+                    <>
+                      <span className="text-fg-3">≈</span> {view.step}
+                    </>
+                  ) : undefined
+                }
                 onValueChange={onStepChange}
                 options={steps.map((s) => {
                   const off = view.fits !== undefined && !view.fits.includes(s);
-                  return { value: s, label: s, disabled: off, hint: off ? t("ui.book.stepTooCoarse") : undefined };
+                  return { value: s, label: s, disabled: off, hint: off ? <span title={t("ui.book.stepOff", { step: s })}>{t("ui.book.stepTooCoarse")}</span> : undefined };
                 })}
                 aria-label={t("ui.book.step")}
                 aria-describedby={fallback ? stepNote : undefined}
@@ -258,7 +302,7 @@ export function OrderBook({
           {base && `(${base})`}
         </span>
       </div>
-      <div className={cn("flex flex-col transition-opacity duration-[var(--t-base)]", syncing && "opacity-50")}>
+      <div ref={sidesRef} className={cn("flex flex-col transition-opacity duration-[var(--t-base)]", onRows && "min-h-0 flex-1", syncing && "opacity-50")}>
         {mode !== "bids" && section(asks, "ask")}
         {middle}
         {mode !== "asks" && section(bids, "bid")}

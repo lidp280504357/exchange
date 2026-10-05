@@ -5,11 +5,10 @@ import { useTranslation } from "react-i18next";
 import { useDirection } from "./useDirection";
 import { useElementHeight } from "./useElementHeight";
 
+/** The least a row of the book or the tape is, in px. */
 const ROW = 20;
 /** The book redraws at most this often (ms): ten updates a second is more than an eye follows. */
 const BOOK_EVERY = 250;
-// Tabs, the book's toolbar, its column header and the middle row.
-const CHROME = 36 + 36 + 24 + 36;
 
 export type BookPanelProps = {
   symbol: string;
@@ -27,7 +26,8 @@ export type BookPanelProps = {
 
 /**
  * BookPanel: the order book and the latest trades in tabs (design §6.2),
- * sized to the panel's height (up to 20 levels a side), with the view and
+ * the book filling the panel's height (OrderBook's onRows: the rows that
+ * fit in the room its sides get, 5 to 20 a side, drawn to fill it), with the view and
  * the step kept per pair (by default one that suits the price: core
  * defaultBookStep). The book redraws at most four times a second and folds
  * levels too small to show into the next one.
@@ -36,14 +36,14 @@ export function BookPanel({ symbol, base, quote, tickSize, priceDecimals, qtyDec
   const { t } = useTranslation();
   const [tab, setTab] = useState("book");
   const [ref, height] = useElementHeight<HTMLDivElement>();
+  // Rows a side: 12 until the book has measured its room (the first frame).
+  const [levels, setLevels] = useState(12);
   const mode = useTerminalPrefs((s) => s.bookMode);
   const prefs = useTerminalPrefs.getState;
   const tk = useTicker(symbol);
   const { steps, step, setStep } = useBookStep(symbol, tickSize, tk?.last);
-  // 12 until the panel is measured (0 would make 5); a step the public
-  // book cannot fill gives way to a finer one (view.step, core's
-  // OrderBook.fit), so the rows are always full (B71).
-  const levels = height > 0 ? Math.max(5, Math.min(20, Math.floor((height - CHROME) / 2 / ROW))) : 12;
+  // A step the public book cannot fill gives way to a finer one (view.step,
+  // core's OrderBook.fit, B71).
   const depth = mode === "both" ? levels : levels * 2;
   const view = useOrderBook(symbol, depth, step, { minQty: displayUnit(qtyDecimals), every: BOOK_EVERY, steps, sides: mode });
   const syncing = useSyncing(channels.depth(symbol));
@@ -65,7 +65,7 @@ export function BookPanel({ symbol, base, quote, tickSize, priceDecimals, qtyDec
           { value: "trades", label: t("pcTrade.trades") },
         ]}
       >
-        <TabsPanel value="book" className="flex-1">
+        <TabsPanel value="book" className="flex flex-1 flex-col">
           <OrderBook
             view={view}
             priceDecimals={priceDecimals}
@@ -85,6 +85,7 @@ export function BookPanel({ symbol, base, quote, tickSize, priceDecimals, qtyDec
             base={base}
             quote={quote}
             rowHeight={ROW}
+            onRows={setLevels}
           />
         </TabsPanel>
         <TabsPanel value="trades" className="flex-1">

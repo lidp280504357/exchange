@@ -138,9 +138,18 @@ describe("OrderBook.fit", () => {
     // Steps of 1 and 10; at 10 the asks have 4 levels, the bids 5.
     const b = new OrderBook();
     b.snapshot({ bids: levels(10000, -100, 40), asks: levels(10100, 100, 40) });
-    expect(b.fit(3, "10", ["1", "10"])).toMatchObject({ step: "10" });
-    expect(b.fit(3, "10", ["1", "10"], "", "both", "1")).toMatchObject({ step: "1" });
+    expect(b.fit(3, "10", ["1", "10"])).toMatchObject({ step: "10", fits: ["1", "10"] });
+    // Held at 1, 10 is not offered: it fills, without the levels to spare.
+    expect(b.fit(3, "10", ["1", "10"], "", "both", "1")).toMatchObject({ step: "1", fits: ["1"] });
     b.update({ bids: [], asks: [["150.00", "1"]] });
-    expect(b.fit(3, "10", ["1", "10"], "", "both", "1")).toMatchObject({ step: "10" });
+    expect(b.fit(3, "10", ["1", "10"], "", "both", "1")).toMatchObject({ step: "10", fits: ["1", "10"] });
+  });
+  it("climbs back from a held step to the coarsest with levels to spare", () => {
+    // At 10 three levels a side (the rows, none to spare), at 1 twenty.
+    const b = new OrderBook();
+    b.snapshot({ bids: levels(10000, -50, 40), asks: levels(10050, 50, 60) });
+    const three = ["0.1", "1", "10"];
+    expect(b.fit(3, "10", three)).toMatchObject({ step: "10", fits: three });
+    expect(b.fit(3, "10", three, "", "both", "0.1")).toMatchObject({ step: "1", fits: ["0.1", "1"] });
   });
 });
