@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	authv1 "github.com/skill/exchange/api/gen/go/exchange/auth/v1"
+	derivv1 "github.com/skill/exchange/api/gen/go/exchange/derivatives/v1"
 	eventv1 "github.com/skill/exchange/api/gen/go/exchange/event/v1"
 	marginv1 "github.com/skill/exchange/api/gen/go/exchange/margin/v1"
 	userv1 "github.com/skill/exchange/api/gen/go/exchange/user/v1"
@@ -20,7 +21,7 @@ import (
 )
 
 // Topics are the topics the handler reads.
-var Topics = []string{event.TopicAuth, event.TopicUser, event.TopicWalletDeposit, event.TopicWalletWithdrawal, event.TopicMargin}
+var Topics = []string{event.TopicAuth, event.TopicUser, event.TopicWalletDeposit, event.TopicWalletWithdrawal, event.TopicMargin, event.TopicDerivLiquidation}
 
 // Handler notifies users of security-relevant account events and of
 // deposits credited or held; other events are skipped.
@@ -110,8 +111,37 @@ func toEvent(msg proto.Message) (application.Event, bool) {
 			"account_type": m.GetAccountType(), "symbol": m.GetSymbol(), "liquidation_id": m.GetLiquidationId(),
 			"repaid": amounts(m.GetRepaid()), "remaining": amounts(m.GetRemaining()), "fee": m.GetFee(), "insurance_covered": m.GetInsuranceCovered(),
 		}}, true
+	case *derivv1.LiquidationWarning:
+		return application.Event{UserID: m.GetUserId(), Type: domain.NoticeContractWarned, Mail: true, Data: map[string]string{
+			"symbol": m.GetSymbol(), "cross": strconv.FormatBool(m.GetCross()), "margin_balance": m.GetMarginBalance(),
+			"maintenance_margin": m.GetMaintenanceMargin(), "settle_asset": m.GetSettleAsset(),
+		}}, true
+	case *derivv1.LiquidationStarted:
+		p := m.GetPosition()
+		return application.Event{UserID: p.GetUserId(), Type: domain.NoticeContractLiquidating, Mail: true, Data: map[string]string{
+			"symbol": p.GetSymbol(), "side": positionSide(p), "quantity": strings.TrimPrefix(p.GetQuantity(), "-"), "mark_price": m.GetMarkPrice(),
+			"cross": strconv.FormatBool(m.GetCross()), "settle_asset": p.GetSettleAsset(),
+		}}, true
+	case *derivv1.AdlExecuted:
+		return application.Event{UserID: m.GetUserId(), Type: domain.NoticeContractDeleveraged, Mail: true, Data: map[string]string{
+			"symbol": m.GetSymbol(), "quantity": strings.TrimPrefix(m.GetQuantity(), "-"), "price": m.GetPrice(), "realized_pnl": m.GetRealizedPnl(),
+			"settle_asset": m.GetSettleAsset(),
+		}}, true
 	}
 	return application.Event{}, false
+}
+
+// positionSide is a position's direction: its hedge-mode side, or in
+// one-way mode (BOTH) the sign of its quantity.
+func positionSide(p *derivv1.Position) string {
+	switch {
+	case p.GetPositionSide() == "LONG" || p.GetPositionSide() == "SHORT":
+		return p.GetPositionSide()
+	case strings.HasPrefix(p.GetQuantity(), "-"):
+		return "SHORT"
+	default:
+		return "LONG"
+	}
 }
 
 // depositEvent describes a deposit; the amount of an unsupported token is

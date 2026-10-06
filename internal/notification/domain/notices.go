@@ -30,6 +30,13 @@ const (
 	NoticeMarginWarned      = "MARGIN_WARNED"
 	NoticeMarginLiquidating = "MARGIN_LIQUIDATING"
 	NoticeMarginLiquidated  = "MARGIN_LIQUIDATED"
+	// Perpetual contracts (requirements §11.7, coin-margined design
+	// 2026-10-06 §2.6): a margin balance near its maintenance margin, a
+	// position taken over by the liquidation engine, a position
+	// auto-deleveraged. Amounts are in the contract's settlement asset.
+	NoticeContractWarned      = "CONTRACT_LIQUIDATION_WARNED"
+	NoticeContractLiquidating = "CONTRACT_LIQUIDATING"
+	NoticeContractDeleveraged = "CONTRACT_ADL"
 )
 
 // Notice is an in-app notification.
@@ -86,6 +93,43 @@ func marginAccount(accountType, symbol, lang string) string {
 	default:
 		return zh(lang, "全仓杠杆账户")
 	}
+}
+
+// contractName names a perpetual: BTC-USDT-PERP is BTCUSDT 永续, in
+// English BTCUSDT perpetual.
+func contractName(symbol, lang string) string {
+	name := strings.ReplaceAll(strings.TrimSuffix(symbol, "-PERP"), "-", "")
+	if english(lang) {
+		return name + " perpetual"
+	}
+	return name + zh(lang, " 永续")
+}
+
+// contractUnit is what a contract's quantities count: whole contracts of
+// a coin-margined one (quoted in USD), else its base asset.
+func contractUnit(symbol, lang string) string {
+	if strings.HasSuffix(symbol, "-USD-PERP") {
+		if english(lang) {
+			return "contracts"
+		}
+		return zh(lang, "张")
+	}
+	base, _, _ := strings.Cut(symbol, "-")
+	return base
+}
+
+// settleOr is a contract event's settlement asset; events from before the
+// coin-margined contracts carry none: USDT.
+func settleOr(asset string) string {
+	if asset == "" {
+		return "USDT"
+	}
+	return asset
+}
+
+var positionSides = map[string][2]string{
+	"LONG":  {"多仓", "long"},
+	"SHORT": {"空仓", "short"},
 }
 
 var channelNames = map[string][2]string{
@@ -252,6 +296,43 @@ func RenderNotice(in NoticeInput) (title, body string) {
 		}
 		return zh(lang, "杠杆账户强平完成"), fmt.Sprintf(zh(lang, "您的%s已于 %s 完成强平：归还 %s，强平费 %s USDT，保险基金补足 %s USDT；账户剩余 %s。"),
 			acct, when, orNone(d["repaid"], lang), d["fee"], d["insurance_covered"], orNone(d["remaining"], lang))
+	case NoticeContractWarned:
+		asset := settleOr(d["settle_asset"])
+		if d["cross"] == "true" {
+			if en {
+				return "Futures liquidation warning", fmt.Sprintf("The margin balance of your %s cross futures account fell to %s %s at %s, "+
+					"near its maintenance margin of %s %s. Add margin or reduce your positions to keep them from being liquidated.",
+					asset, d["margin_balance"], asset, when, d["maintenance_margin"], asset)
+			}
+			return zh(lang, "合约强平预警"), fmt.Sprintf(zh(lang, "您的 %s 合约全仓账户保证金余额已于 %s 降至 %s %s，接近维持保证金 %s %s。请补充保证金或减仓，以免仓位被强平。"),
+				asset, when, d["margin_balance"], asset, d["maintenance_margin"], asset)
+		}
+		name := contractName(d["symbol"], lang)
+		if en {
+			return "Futures liquidation warning", fmt.Sprintf("The margin balance of your isolated %s position fell to %s %s at %s, "+
+				"near its maintenance margin of %s %s. Add margin or reduce the position to keep it from being liquidated.",
+				name, d["margin_balance"], asset, when, d["maintenance_margin"], asset)
+		}
+		return zh(lang, "合约强平预警"), fmt.Sprintf(zh(lang, "您的 %s 逐仓仓位保证金余额已于 %s 降至 %s %s，接近维持保证金 %s %s。请追加保证金或减仓，以免被强平。"),
+			name, when, d["margin_balance"], asset, d["maintenance_margin"], asset)
+	case NoticeContractLiquidating:
+		name, unit, side := contractName(d["symbol"], lang), contractUnit(d["symbol"], lang), pick(positionSides, d["side"], lang)
+		if en {
+			return "Futures position liquidated", fmt.Sprintf("Your %s %s position (%s %s) reached its maintenance margin at %s (mark price %s): "+
+				"its open orders are canceled and the liquidation engine closes it. Its result is settled in %s.",
+				name, side, d["quantity"], unit, when, d["mark_price"], settleOr(d["settle_asset"]))
+		}
+		return zh(lang, "合约仓位强平"), fmt.Sprintf(zh(lang, "您的 %s %s（%s %s）已于 %s 触发强平（标记价格 %s）：系统已撤销该仓位的挂单并接管平仓，盈亏以 %s 结算。"),
+			name, side, d["quantity"], unit, when, d["mark_price"], settleOr(d["settle_asset"]))
+	case NoticeContractDeleveraged:
+		name, unit, asset := contractName(d["symbol"], lang), contractUnit(d["symbol"], lang), settleOr(d["settle_asset"])
+		if en {
+			return "Futures position auto-deleveraged", fmt.Sprintf("%s %s of your %s position were auto-deleveraged at %s (price %s); realized PnL %s %s. "+
+				"Auto-deleveraging closes profitable positions when a liquidation cannot fill and the insurance fund falls short.",
+				d["quantity"], unit, name, when, d["price"], d["realized_pnl"], asset)
+		}
+		return zh(lang, "合约仓位自动减仓"), fmt.Sprintf(zh(lang, "您的 %s 仓位已于 %s 被自动减仓 %s %s（成交价 %s），已实现盈亏 %s %s。强平单无法成交且保险基金不足时，系统按盈利与杠杆排序减仓。"),
+			name, when, d["quantity"], unit, d["price"], d["realized_pnl"], asset)
 	case NoticeStatusChanged:
 		to := pick(statusNames, d["to"], lang)
 		if en {

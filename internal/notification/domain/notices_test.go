@@ -12,7 +12,7 @@ func TestRenderNotice(t *testing.T) {
 	for _, typ := range []string{
 		NoticeWelcome, NoticeNewDeviceLogin, NoticeIdentityChanged, NoticePasswordChanged, NoticeAccountLocked, NoticeStatusChanged, NoticeTOTPChanged, NoticeDepositCredited, NoticeDepositUnclaimed,
 		NoticeWithdrawalRequested, NoticeWithdrawalCompleted, NoticeWithdrawalRejected, NoticeWithdrawalCanceled, NoticeWithdrawalFailed,
-		NoticeMarginWarned, NoticeMarginLiquidating, NoticeMarginLiquidated,
+		NoticeMarginWarned, NoticeMarginLiquidating, NoticeMarginLiquidated, NoticeContractWarned, NoticeContractLiquidating, NoticeContractDeleveraged,
 	} {
 		for _, lang := range []string{"zh-CN", "en"} {
 			title, body := RenderNotice(NoticeInput{Type: typ, Language: lang, At: at, Location: sg, Data: map[string]string{
@@ -62,6 +62,40 @@ func TestMarginNotices(t *testing.T) {
 	}})
 	if !strings.Contains(body, "cross margin account") || !strings.Contains(body, "repaid 100 USDT, 0.01 BTC") || !strings.Contains(body, "account: none") {
 		t.Fatalf("liquidated: %s", body)
+	}
+}
+
+func TestContractNotices(t *testing.T) {
+	at := time.Date(2026, 10, 7, 4, 5, 6, 0, time.UTC)
+	render := func(typ, lang string, d map[string]string) (string, string) {
+		return RenderNotice(NoticeInput{Type: typ, Language: lang, At: at, Data: d})
+	}
+	// The amounts are in the contract's settlement asset: the coin of a
+	// coin-margined contract, USDT otherwise (also when an older event
+	// carries none).
+	title, body := render(NoticeContractWarned, "zh-CN", map[string]string{"cross": "true", "margin_balance": "0.0013", "maintenance_margin": "0.0012", "settle_asset": "BTC"})
+	if title != "合约强平预警" || !strings.Contains(body, "BTC 合约全仓账户保证金余额") || !strings.Contains(body, "维持保证金 0.0012 BTC") {
+		t.Fatalf("cross warning: %q %s", title, body)
+	}
+	_, body = render(NoticeContractWarned, "en", map[string]string{"cross": "false", "symbol": "ETH-USDT-PERP", "margin_balance": "12.5", "maintenance_margin": "11"})
+	if !strings.Contains(body, "isolated ETHUSDT perpetual position fell to 12.5 USDT") || !strings.Contains(body, "11 USDT") {
+		t.Fatalf("isolated warning: %s", body)
+	}
+	title, body = render(NoticeContractLiquidating, "zh-CN", map[string]string{"symbol": "BTC-USD-PERP", "side": "LONG", "quantity": "3", "mark_price": "85000.1", "settle_asset": "BTC"})
+	if title != "合约仓位强平" || !strings.Contains(body, "BTCUSD 永续 多仓（3 张）") || !strings.Contains(body, "标记价格 85000.1") || !strings.Contains(body, "以 BTC 结算") {
+		t.Fatalf("liquidating: %q %s", title, body)
+	}
+	_, body = render(NoticeContractLiquidating, "en", map[string]string{"symbol": "ETH-USDT-PERP", "side": "SHORT", "quantity": "0.5", "mark_price": "2600"})
+	if !strings.Contains(body, "ETHUSDT perpetual short position (0.5 ETH)") || !strings.Contains(body, "settled in USDT") {
+		t.Fatalf("liquidating en: %s", body)
+	}
+	_, body = render(NoticeContractDeleveraged, "zh-CN", map[string]string{"symbol": "ETH-USD-PERP", "quantity": "7", "price": "2600.5", "realized_pnl": "0.0123", "settle_asset": "ETH"})
+	if !strings.Contains(body, "ETHUSD 永续 仓位") || !strings.Contains(body, "自动减仓 7 张（成交价 2600.5）") || !strings.Contains(body, "已实现盈亏 0.0123 ETH") {
+		t.Fatalf("adl: %s", body)
+	}
+	title, _ = render(NoticeContractLiquidating, "zh-TW", map[string]string{"symbol": "BTC-USD-PERP", "side": "LONG", "quantity": "3"})
+	if title != "合約倉位強平" {
+		t.Fatalf("zh-TW title: %q", title)
 	}
 }
 

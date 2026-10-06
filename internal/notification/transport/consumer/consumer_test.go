@@ -6,6 +6,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	authv1 "github.com/skill/exchange/api/gen/go/exchange/auth/v1"
+	derivv1 "github.com/skill/exchange/api/gen/go/exchange/derivatives/v1"
 	marginv1 "github.com/skill/exchange/api/gen/go/exchange/margin/v1"
 	userv1 "github.com/skill/exchange/api/gen/go/exchange/user/v1"
 	walletv1 "github.com/skill/exchange/api/gen/go/exchange/wallet/v1"
@@ -44,6 +45,10 @@ func TestToEvent(t *testing.T) {
 		{&marginv1.MarginLiquidationStarted{UserId: "u", AccountType: "MARGIN_CROSS"}, domain.NoticeMarginLiquidating, true},
 		{&marginv1.MarginLiquidationCompleted{UserId: "u", Repaid: []*marginv1.AssetAmount{{Asset: "USDT", Amount: "100"}}}, domain.NoticeMarginLiquidated, true},
 		{&marginv1.MarginBorrowed{UserId: "u"}, "", false},
+		{&derivv1.LiquidationWarning{UserId: "u", Cross: true, SettleAsset: "BTC"}, domain.NoticeContractWarned, true},
+		{&derivv1.LiquidationStarted{Position: &derivv1.Position{UserId: "u", Symbol: "BTC-USD-PERP"}}, domain.NoticeContractLiquidating, true},
+		{&derivv1.AdlExecuted{UserId: "u", Symbol: "BTC-USDT-PERP"}, domain.NoticeContractDeleveraged, true},
+		{&derivv1.LiquidationFilled{UserId: "u"}, "", false},
 	} {
 		e, ok := toEvent(tc.msg)
 		if ok != (tc.want != "") || e.Type != tc.want || e.Mail != tc.mail || (ok && e.UserID != "u") {
@@ -53,5 +58,18 @@ func TestToEvent(t *testing.T) {
 	e, _ := toEvent(&marginv1.MarginLiquidationCompleted{UserId: "u", Repaid: []*marginv1.AssetAmount{{Asset: "USDT", Amount: "100"}, {Asset: "BTC", Amount: "0.01"}}})
 	if e.Data["repaid"] != "100 USDT, 0.01 BTC" || e.Data["remaining"] != "" {
 		t.Fatalf("liquidation data: %v", e.Data)
+	}
+	// A one-way position's direction is its quantity's sign; the notice
+	// shows the size without it.
+	e, _ = toEvent(&derivv1.LiquidationStarted{
+		Position:  &derivv1.Position{UserId: "u", Symbol: "BTC-USD-PERP", PositionSide: "BOTH", Quantity: "-3", SettleAsset: "BTC"},
+		MarkPrice: "85000.1",
+	})
+	if e.Data["side"] != "SHORT" || e.Data["quantity"] != "3" || e.Data["settle_asset"] != "BTC" || e.Data["mark_price"] != "85000.1" {
+		t.Fatalf("liquidation started: %v", e.Data)
+	}
+	e, _ = toEvent(&derivv1.LiquidationStarted{Position: &derivv1.Position{UserId: "u", PositionSide: "LONG", Quantity: "0.5"}})
+	if e.Data["side"] != "LONG" {
+		t.Fatalf("a hedge-mode long: %v", e.Data)
 	}
 }
