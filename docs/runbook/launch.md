@@ -18,10 +18,11 @@
 | 4 | 参考数据 | 复制 `deploy/instruments/test.json` 为正式版：去掉 `ETH-SEPOLIA` 网络、去掉隐藏资产 `TUSD` 与 `UDUNMOCK` 托管方（它们只为端到端存在）、`provider_coin` 按优盾正式商户的 `support-coins` 核对（`custody.md`「直接问网关」）、费率与最小充提额按运营口径；`exchangectl instruments apply` |
 | 5 | 开关（`exchangectl flags`，见 `feature-flags.md`） | `admin.login_without_totp` **关**；`wallet.test_assets` **关**（并删掉地区规则）；`admin.two_person_approval` 开；`risk.enforce` 开；`market.house_liquidity` 开；`market.flat_minutes` 对 ASTRA 现货与永续开；`sim.enabled`/`sim.events`/`sim.perp` 按运营决定；`ledger.welcome_credit` 可保留开（数额由后台配 0 即不发）；`wallet.withdraw` 在步 6 完成前**关** |
 | 6 | 托管方切换与主网小额测试 | 按 `custody.md`「真网关联调」步骤 4、5（账本基线、退役替身地址、`apps.env` 并入 `UDUN_*`、只重启 wallet-service、核对；用户 TRC20 充值 ≥ 12 USDT、提现 10 USDT、确认手续费单位、收紧回调来源 IP）；正式环境没有 `udun-mock` 容器，compose 里去掉它 |
-| 7 | HOUSE 库存与上限 | HOUSE 的 USDT/BTC/ETH 是"背书资产"，正式环境必须是托管方真实持有的资金：先向商户钱包充入库存，再 `scripts/ops/house.sh seed` 到相应水平、`exchangectl wallet reconcile` 无短缺；compose 里的单资产/单合约上限按真实库存设（测试服的 2,000,000 / 5,000,000 是放大过的） |
+| 7 | HOUSE 库存与上限 | HOUSE 的 USDT/BTC/ETH 是"背书资产"，正式环境必须是托管方真实持有的资金：先向商户钱包充入库存，再 `scripts/ops/house.sh seed` 到相应水平、`exchangectl wallet reconcile` 无短缺；HOUSE 的六项额度（每档、单资产、总、单合约、安全边际、合约杠杆）存在 market-maker 的库里、运行时可改（`market-maker.md`「运行时额度」有每项的用途与改动影响；compose 的 `HOUSE_*` 只是首次默认），正式环境按真实库存与风险承受设（测试服的 500,000,000 是放大过的，只为让市价单整单成交） |
 | 8 | 构建时的品牌 | `web/apps/{pc,m}/index.html` 的 `<title>` 与 `description`（供爬虫与分享卡片）在构建时写死，运行时注入只改脚本执行后的页面——上线前把这两个文件里的名称与描述改成正式值再部署（已知限制，见 §4） |
 | 9 | 告警与值班 | `deploy/observability/alerts.yml` 的接收端指向正式的通知渠道（`observability.md`）；确认 `CustodyShortfall`、`WalletWithdrawalsSuspended`、`MarketSimBandDeadlock` 等有人接 |
 | 10 | 杠杆参数与保险基金（杠杆设计 2026-10-06，见 §2.1） | 复制 `deploy/instruments/margin.json` 为正式版：借贷池上限按 HOUSE 真实持有的可充提资产定（USDT/BTC/ETH 是背书资产，借出去的币用户可以卖成别的币再划回现货）、利率与保证金折扣按运营口径，`exchangectl margin apply`；保险基金 `INSURANCE_FUND` 按**每种可借资产**分别注资（`exchangectl ledger insurance-fund --asset <资产>`，正式环境走后台双人划转）——基金不允许为负，某资产不够时强平停在 `SHORTFALL`、负债留着并告警；告警 `InsuranceFundShort`、`MarginLiquidationStuck`、`MarginLiquidationDue`、`MarginMonitorStalled`、`MarginInterestStalled`、`MarginReconciliationMismatch`、`TradingOrdersPendingFreeze` 要有人接（`margin.md`） |
+| 11 | 币本位永续与合约数据（币本位设计 2026-10-06，见 §2.2） | 参考数据：正式版 `test.json` 只留要开盘的 U 本位/币本位永续（`deploy/instruments/gen-contracts.go` 按币安列表生成，`-offline` 按快照 `binance-contracts.json` 重放；新合约一律 `PREPARE`；ASTRA 的两个永续是平台自己的，没有币安参考）。HOUSE 按结算币注资合约账户（`scripts/ops/house.sh seed`；BTC/ETH 是背书资产，必须真实持有、不能为负，币本位的对手方容量就是这些库存）；保险基金 `INSURANCE_FUND` 每个结算币一行且 > 0（`exchangectl ledger insurance-fund --asset <币>`，正式环境走后台双人划转；币本位穿仓由同一币的基金补，不够时整笔拒绝、不入账）。开关：`derivatives.coin_m`（币本位开仓资格）按用户或地区开，**测试服对所有人开着、正式不能照搬**；`market.reference_mark` 按合约开（标记价、指数价、资金费率跟币安，自算后备；打开那一刻标记价会跳到币安的，按合约在差距小、行情平稳时逐个开，见 `market-data.md`「标记价跟随币安」）；`market.futures_data`（合约数据板块）全局开；`market.house_liquidity` 的名单由 `house.sh flags` 取当时上架的全部跟随币安的交易对与合约。币安连接只走公开接口（现货、U 本位、币本位各一组），按主机有权重预算（现货 80%、合约 50%，90% 保护），不需要账号。开盘：`house.sh open-contracts [N]` 分批转 `TRADING`（没有标记价的合约留在 `PREPARE`），每批确认标记价、盘口与 K 线都在更新再放下一批。告警 `MarkPriceSourceDegraded`、`FuturesDataFailing`、`HouseCoinContractUnpriced`、`HouseCoinContractOverLeveraged`、`HouseCoinContractEquityGone`、`HousePublishFailing` 要有人接 |
 
 ## 2. 后台侧（按「上线检查清单」的顺序）
 
@@ -50,6 +51,16 @@
 4. **上线检查清单的 margin 项**：杠杆关着（`margin.enabled` 对任何人都不开）为 OK；开着时要求 `margin.liquidation` 也开，且 `margin.enabled`、`margin.auto_borrow` 都不是对所有人全局打开（开关带任何规则——按用户、地区等——就不算全局），否则为 FAIL——测试服现在 FAIL 是对的。
 5. **站点**：行情列表里逐仓交易对的倍数标记对所有访客显示（按公开的 `/v1/margin/pairs`，与币安一致，B108）；交易页的账户切换、资产页的杠杆账户只对 `MARGIN_TRADE` 资格开放的人显示（关掉后还有杠杆资产或负债的人仍看得到入口，用来还币与划出）。帮助中心有《杠杆交易入门》（`help/margin-trading`，两种语言）。
 
+### 2.2 币本位永续与合约数据（币本位设计 2026-10-06，上线检查清单的 insurance 与 coin_m 项）
+
+1. **资格开关按人或按地区开**：`derivatives.coin_m` 与 §2.1 的杠杆开关一样，从"对所有人"改为按用户（`--allow-users`）或按地区（`--allow-regions`）的规则，或上线时先关着按节奏放开。开关只管开新仓：关着时已有仓位的用户仍能平仓、撤单与划出。
+2. **合约参数**：后台「合约」页核对每个币本位合约的面值、结算币、风险限额阶梯（按币计）与保护带；要开盘的置 `TRADING`。按币种关闭 = 该币未下架的 U 本位与币本位合约都置 `CANCEL_ONLY`（只减仓，HOUSE 照常报价供平仓），重新开放 = 置回 `TRADING`，整组走一条双人审批（`COIN_CONTRACTS_STATUS`）；下架（`DELISTED`）要求没有未平仓位且不可逆。
+3. **保险基金按币**：后台「合约」页按资产看余额，每个结算币（USDT、BTC、ETH、ASTRA）都 > 0——检查清单的 insurance 项；注资走双人划转。基金与杠杆交易共用同一行。
+4. **HOUSE 额度**：每项的用途、调低/调高的影响与允许范围见 `market-maker.md`「运行时额度」；改动 250 毫秒内生效、不用重启。后台的额度卡接上前由运维按该节改。
+5. **上线检查清单**：insurance 项（各结算币基金 > 0）与 coin_m 项（`derivatives.coin_m` 不对所有人全局打开；带任何规则都算）都要绿——测试服现在 coin_m 项 FAIL 是对的。
+6. **站点与通知**：两站的合约菜单分 U 本位/币本位，行情列表的合约页签与「合约数据」板块（`/futures/data`：持仓量、多空比、主动买卖比、基差、资金费率历史、爆仓）对所有访客可见；帮助中心《永续合约入门》有币本位一节（简繁英）；强平预警、强平与 ADL 通知以结算币计，资金费结算通知默认不发（用户 2026-10-07 决定）。
+7. **演练与端到端**：`scripts/fault/coinm-liquidation.sh`（ASTRA-USD-PERP 上的强平与 ADL，上线前条件）、`coinm-degrade.sh`、`mark-source-outage.sh`（标记价断流约 10 秒后自算顶上、不降级）；端到端 `scripts/e2e/coinm.sh`、`funding.sh`（含币本位）。
+
 ## 3. 演练
 
 `scripts/e2e/launch-drill.sh`（`task e2e` 的一步）在测试服上只改后台项：把 §2 的 1–7 设成上线值 → 断言清单里后台项全绿、部署侧项（托管方仍是替身等）按预期红 → 断言三端品牌生效、横幅与"注册即送"消失、法律页可访问、新注册余额为 0、正式模式下费率/充值/FAQ 不含测试说法 → 恢复测试模式与测试值并断言恢复。它证明的是"后台改就能上线"这一半；§1 在正式服务器上按本手册走一遍，`custody.md` 的步骤 4/5 由用户与协调会话一起做。
@@ -63,3 +74,6 @@
 - 站点里与测试网相关的文案（Sepolia、测试网 ETH）随 `ETH-SEPOLIA` 网络一起在正式参考数据里消失；文案本身在站点代码里，去掉网络后不再显示。
 - 平台币代码 `ASTRA` 与交易对代码不能在后台改；改名需要新资产（不在范围）。
 - 「上线检查清单」的"可上线"只覆盖后台项。
+- 币本位的对手方容量受 HOUSE 真实持有的 BTC/ETH 限制（可充提资产不能为负），超出时下单被拒；上线前按预期规模注资。
+- 标记价跟币安：币安的流停更超过 10 秒自算顶上（合约不降级），资金费按币安已结算的费率、最多等 2 分钟；币安把某合约停牌或下架时，平台应及时按币种关闭该合约。
+- 合约数据板块的币本位持仓量：币安的实时接口与 5 分钟统计接口给出的张数相差约 4 倍（2026-10-07 实测 BTCUSD_PERP 12,589,877 对 3,336,618），总览目前取前者、面板取后者；已定改为同取统计接口的最新点（A71，后台会话实施中），与币安交易页面的实时数字仍可能不同。
