@@ -240,11 +240,15 @@ services:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9086/readyz"]
 
+  # Each followed pair's and contract's book kept in memory: 162 MiB with
+  # the 87 pairs and 107 contracts of G1c (2026-10-07), over the default.
   market-data-service:
     <<: *app
     command: ["/app/market-data-service"]
+    mem_limit: 384m
     environment:
       <<: *base-env
+      GOMEMLIMIT: 320MiB
       INSTRUMENT_GRPC_ADDR: instrument-service:9184
       # Reference market data while market.reference_feed is on (Binance
       # public data: test environments only, §11.9, ADR-0010), for the

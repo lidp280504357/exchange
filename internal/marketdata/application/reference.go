@@ -32,6 +32,10 @@ type Reference struct {
 	Source string
 	Price  decimal.Decimal
 	At     time.Time
+	// market and session are the stream connection that brought the
+	// price: its market and when it started (begin).
+	market  string
+	session time.Time
 }
 
 // Flags answers feature-flag checks.
@@ -66,6 +70,7 @@ type ReferenceFeed struct {
 	latest    map[string]Reference
 	tickers   map[string]domain.Ticker
 	received  map[string]time.Time // each market's latest message
+	sessions  map[string]time.Time // when each market's current connection started
 	observers []func(domain.Candle)
 
 	updates *prometheus.CounterVec
@@ -82,7 +87,7 @@ func NewReferenceFeed(src ports.ReferenceSource, store ports.Store, fl Flags, in
 	f := &ReferenceFeed{
 		src: src, store: store, flags: fl, instruments: instruments, log: log, now: time.Now,
 		recheck: 10 * time.Second, remap: time.Minute,
-		latest: map[string]Reference{}, tickers: map[string]domain.Ticker{}, received: map[string]time.Time{},
+		latest: map[string]Reference{}, tickers: map[string]domain.Ticker{}, received: map[string]time.Time{}, sessions: map[string]time.Time{},
 		updates: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "market_reference_updates_total", Help: "Reference candle and ticker updates received, by symbol.",
 		}, []string{"symbol"}),
@@ -95,10 +100,10 @@ func NewReferenceFeed(src ports.ReferenceSource, store ports.Store, fl Flags, in
 }
 
 // ageCollector reports market_reference_age_seconds of the followed
-// symbols.
+// symbols (age).
 type ageCollector struct{ f *ReferenceFeed }
 
-var ageDesc = prometheus.NewDesc("market_reference_age_seconds", "Age of the symbol's reference price; -1 while there is none.",
+var ageDesc = prometheus.NewDesc("market_reference_age_seconds", "Age of the symbol's reference price (its connection's for a quiet symbol); -1 while there is none.",
 	[]string{"symbol"}, nil)
 
 func (c ageCollector) Describe(ch chan<- *prometheus.Desc) { ch <- ageDesc }
@@ -106,11 +111,48 @@ func (c ageCollector) Describe(ch chan<- *prometheus.Desc) { ch <- ageDesc }
 func (c ageCollector) Collect(ch chan<- prometheus.Metric) {
 	for _, ref := range c.f.Followed() {
 		age := -1.0
-		if r, ok := c.f.get(ref.Symbol); ok {
-			age = c.f.now().Sub(r.At).Seconds()
+		if a, ok := c.f.age(ref.Symbol); ok {
+			age = a.Seconds()
 		}
 		ch <- prometheus.MustNewConstMetric(ageDesc, prometheus.GaugeValue, age, ref.Symbol)
 	}
+}
+
+// age is how old symbol's price is: its own age or, while the connection
+// that brought it is its market's current one, the connection's latest
+// message's, if younger. Binance streams nothing for a symbol without
+// trades, and the price of a quiet one stays the last traded while its
+// connection hears from the others (as the books' do; G1c: the index
+// prices of the contracts on quiet pairs went stale and degraded them).
+func (f *ReferenceFeed) age(symbol string) (time.Duration, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r, ok := f.latest[symbol]
+	if !ok {
+		return 0, false
+	}
+	age := f.now().Sub(r.At)
+	if !r.session.IsZero() && r.session.Equal(f.sessions[r.market]) {
+		age = min(age, f.now().Sub(f.received[r.market]))
+	}
+	return age, true
+}
+
+// begin notes that market's connection starts now and returns the time:
+// prices it brings carry it.
+func (f *ReferenceFeed) begin(market string) time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	at := f.now()
+	f.sessions[market] = at
+	return at
+}
+
+// heard notes a message of market's connection.
+func (f *ReferenceFeed) heard(market string, at time.Time) {
+	f.mu.Lock()
+	f.received[market] = at
+	f.mu.Unlock()
 }
 
 func (f *ReferenceFeed) enabled() bool {
@@ -124,11 +166,12 @@ func (f *ReferenceFeed) get(symbol string) (Reference, bool) {
 	return r, ok
 }
 
-// Latest returns the symbol's reference and whether it is fresh (younger
-// than ReferenceStale).
+// Latest returns the symbol's reference and whether it is fresh (its age
+// under ReferenceStale).
 func (f *ReferenceFeed) Latest(symbol string) (Reference, bool) {
 	r, ok := f.get(symbol)
-	return r, ok && f.now().Sub(r.At) < ReferenceStale
+	a, aged := f.age(symbol)
+	return r, ok && aged && a < ReferenceStale
 }
 
 // Ticker returns the symbol's latest reference ticker, however old: a
@@ -156,12 +199,14 @@ func (f *ReferenceFeed) Received() time.Time {
 	return f.received[ports.MarketSpot]
 }
 
-func (f *ReferenceFeed) setPrice(symbol string, price decimal.Decimal, at time.Time) {
+// setPrice keeps symbol's price, brought at at by market's connection that
+// started at session.
+func (f *ReferenceFeed) setPrice(symbol string, price decimal.Decimal, at time.Time, market string, session time.Time) {
 	if !price.IsPositive() {
 		return
 	}
 	f.mu.Lock()
-	f.latest[symbol] = Reference{Symbol: symbol, Source: f.src.Name(), Price: price, At: at}
+	f.latest[symbol] = Reference{Symbol: symbol, Source: f.src.Name(), Price: price, At: at, market: market, session: session}
 	f.mu.Unlock()
 }
 
@@ -196,6 +241,7 @@ func (f *ReferenceFeed) drop() {
 	clear(f.latest)
 	clear(f.tickers)
 	clear(f.received)
+	clear(f.sessions)
 	f.mu.Unlock()
 }
 
@@ -335,19 +381,19 @@ func sleep(ctx context.Context, d time.Duration) {
 func (f *ReferenceFeed) session(ctx context.Context, refs []ports.Reference) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	market := refs[0].Market
+	started := f.begin(market)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		f.catchUp(ctx, refs, domain.Minute1.Start(f.now()))
+		f.catchUp(ctx, refs, domain.Minute1.Start(f.now()), started)
 	}()
 	err := f.src.Stream(ctx, refs, ports.StreamHandlers{
 		Candle: func(c domain.Candle) {
 			at := f.now()
-			f.mu.Lock()
-			f.received[refs[0].Market] = at
-			f.mu.Unlock()
-			f.setPrice(c.Symbol, c.Close, at)
+			f.heard(market, at)
+			f.setPrice(c.Symbol, c.Close, at, market, started)
 			f.updates.WithLabelValues(c.Symbol).Inc()
 			f.notify(c)
 			if err := f.store.Read().References().Upsert(ctx, f.src.Name(), []domain.Candle{c}); err != nil && ctx.Err() == nil {
@@ -356,11 +402,9 @@ func (f *ReferenceFeed) session(ctx context.Context, refs []ports.Reference) err
 		},
 		Ticker: func(t domain.Ticker) {
 			at := f.now()
-			f.mu.Lock()
-			f.received[refs[0].Market] = at
-			f.mu.Unlock()
+			f.heard(market, at)
 			f.setTicker(t)
-			f.setPrice(t.Symbol, t.Last, at)
+			f.setPrice(t.Symbol, t.Last, at, market, started)
 			f.updates.WithLabelValues(t.Symbol).Inc()
 		},
 	})
@@ -369,9 +413,11 @@ func (f *ReferenceFeed) session(ctx context.Context, refs []ports.Reference) err
 	return err
 }
 
-// catchUp loads the current tickers and the candles missed before
+// catchUp loads the current tickers, whose last prices are the
+// connection's (started) until the stream brings newer ones (a quiet
+// symbol's may not come for a while), and the candles missed before
 // streaming (the minute the stream started in).
-func (f *ReferenceFeed) catchUp(ctx context.Context, refs []ports.Reference, streaming time.Time) {
+func (f *ReferenceFeed) catchUp(ctx context.Context, refs []ports.Reference, streaming, started time.Time) {
 	if tickers, err := f.src.Tickers(ctx, refs); err != nil {
 		if ctx.Err() == nil {
 			f.log.WarnContext(ctx, "reference tickers not loaded", "error", err)
@@ -379,6 +425,9 @@ func (f *ReferenceFeed) catchUp(ctx context.Context, refs []ports.Reference, str
 	} else {
 		for _, t := range tickers {
 			f.setTicker(t)
+			if r, ok := f.get(t.Symbol); !ok || !r.session.Equal(started) {
+				f.setPrice(t.Symbol, t.Last, f.now(), refs[0].Market, started)
+			}
 		}
 	}
 	for _, ref := range refs {

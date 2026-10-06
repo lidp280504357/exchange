@@ -156,6 +156,49 @@ func TestReferenceFeed(t *testing.T) {
 	<-done
 }
 
+// A quiet symbol's price stays current while the connection that brought
+// it hears from the others: Binance streams nothing for a symbol without
+// trades (G1c: the index prices of the contracts on quiet pairs went
+// stale and degraded them). A price from a connection before does not
+// count once a new one starts; the new one's tickers bring the price.
+func TestAQuietPriceStaysCurrentWhileItsConnectionIsLive(t *testing.T) {
+	f := NewReferenceFeed(&fakeSource{}, newMemStore(), &switchFlags{}, testListing(), slog.New(slog.DiscardHandler), prometheus.NewRegistry())
+	now := time.Date(2026, 10, 7, 3, 0, 0, 0, time.UTC)
+	f.now = func() time.Time { return now }
+	first := f.begin(ports.MarketSpot)
+	f.heard(ports.MarketSpot, now)
+	f.setPrice("KAVA-USDT", d("0.5"), now, ports.MarketSpot, first)
+	now = now.Add(20 * time.Second)
+	f.heard(ports.MarketSpot, now.Add(-time.Second)) // the other symbols go on
+	if r, fresh := f.Latest("KAVA-USDT"); !fresh || !r.Price.Equal(d("0.5")) {
+		t.Fatalf("quiet for 20 s, its connection live: %+v %v", r, fresh)
+	}
+	if a, _ := f.age("KAVA-USDT"); a != time.Second {
+		t.Fatalf("age %s, the connection's", a)
+	}
+	now = now.Add(10 * time.Second) // the connection quiet too
+	if _, fresh := f.Latest("KAVA-USDT"); fresh {
+		t.Fatal("fresh with its connection quiet")
+	}
+	second := f.begin(ports.MarketSpot) // a new connection
+	f.heard(ports.MarketSpot, now)
+	if _, fresh := f.Latest("KAVA-USDT"); fresh {
+		t.Fatal("a price of the connection before counts")
+	}
+	f.setPrice("KAVA-USDT", d("0.51"), now, ports.MarketSpot, second) // its tickers
+	now = now.Add(time.Minute)
+	f.heard(ports.MarketSpot, now)
+	if r, fresh := f.Latest("KAVA-USDT"); !fresh || !r.Price.Equal(d("0.51")) {
+		t.Fatalf("the new connection's price: %+v %v", r, fresh)
+	}
+	// Another market's connection says nothing about it.
+	f.heard(ports.MarketUSDM, now.Add(time.Minute))
+	now = now.Add(time.Minute)
+	if _, fresh := f.Latest("KAVA-USDT"); fresh {
+		t.Fatal("fresh by another market's connection")
+	}
+}
+
 func TestReferenceBackfillStopsWhereTheStreamStarted(t *testing.T) {
 	store := newMemStore()
 	src := &fakeSource{}
