@@ -3,8 +3,10 @@ package consumer
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -36,6 +38,9 @@ func Handler(notices *application.Notices) kafka.Handler {
 			return nil
 		}
 		e.ID, e.At = env.GetEventId(), env.GetOccurredAt().AsTime()
+		if k := mergeKey(e); k != "" {
+			e.ID = k
+		}
 		return notices.Notify(ctx, e)
 	}
 }
@@ -113,22 +118,34 @@ func toEvent(msg proto.Message) (application.Event, bool) {
 		}}, true
 	case *derivv1.LiquidationWarning:
 		return application.Event{UserID: m.GetUserId(), Type: domain.NoticeContractWarned, Mail: true, Data: map[string]string{
-			"symbol": m.GetSymbol(), "cross": strconv.FormatBool(m.GetCross()), "margin_balance": m.GetMarginBalance(),
+			"symbol": m.GetSymbol(), "side": m.GetPositionSide(), "cross": strconv.FormatBool(m.GetCross()), "margin_balance": m.GetMarginBalance(),
 			"maintenance_margin": m.GetMaintenanceMargin(), "settle_asset": m.GetSettleAsset(),
 		}}, true
 	case *derivv1.LiquidationStarted:
 		p := m.GetPosition()
 		return application.Event{UserID: p.GetUserId(), Type: domain.NoticeContractLiquidating, Mail: true, Data: map[string]string{
 			"symbol": p.GetSymbol(), "side": positionSide(p), "quantity": strings.TrimPrefix(p.GetQuantity(), "-"), "mark_price": m.GetMarkPrice(),
-			"cross": strconv.FormatBool(m.GetCross()), "settle_asset": p.GetSettleAsset(),
+			"cross": strconv.FormatBool(m.GetCross()), "settle_asset": p.GetSettleAsset(), "contract_size": p.GetContractSize(),
 		}}, true
 	case *derivv1.AdlExecuted:
 		return application.Event{UserID: m.GetUserId(), Type: domain.NoticeContractDeleveraged, Mail: true, Data: map[string]string{
-			"symbol": m.GetSymbol(), "quantity": strings.TrimPrefix(m.GetQuantity(), "-"), "price": m.GetPrice(), "realized_pnl": m.GetRealizedPnl(),
-			"settle_asset": m.GetSettleAsset(),
+			"symbol": m.GetSymbol(), "side": m.GetPositionSide(), "quantity": strings.TrimPrefix(m.GetQuantity(), "-"), "price": m.GetPrice(),
+			"realized_pnl": m.GetRealizedPnl(), "settle_asset": m.GetSettleAsset(),
 		}}, true
 	}
 	return application.Event{}, false
+}
+
+// mergeKey is the inbox key of a notice that stands for several events:
+// a cross takeover takes every cross position of the account's
+// settlement asset over at once, one LiquidationStarted each, and makes
+// one notice per account and minute (review FG, B133); "" for the others,
+// which keep their event's.
+func mergeKey(e application.Event) string {
+	if e.Type != domain.NoticeContractLiquidating || e.Data["cross"] != "true" {
+		return ""
+	}
+	return fmt.Sprintf("contract-cross-liquidation:%s:%s:%d", e.UserID, e.Data["settle_asset"], e.At.Truncate(time.Minute).Unix())
 }
 
 // positionSide is a position's direction: its hedge-mode side, or in

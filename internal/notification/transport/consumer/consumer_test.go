@@ -2,6 +2,7 @@ package consumer
 
 import (
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -10,6 +11,7 @@ import (
 	marginv1 "github.com/skill/exchange/api/gen/go/exchange/margin/v1"
 	userv1 "github.com/skill/exchange/api/gen/go/exchange/user/v1"
 	walletv1 "github.com/skill/exchange/api/gen/go/exchange/wallet/v1"
+	"github.com/skill/exchange/internal/notification/application"
 	"github.com/skill/exchange/internal/notification/domain"
 )
 
@@ -71,5 +73,26 @@ func TestToEvent(t *testing.T) {
 	e, _ = toEvent(&derivv1.LiquidationStarted{Position: &derivv1.Position{UserId: "u", PositionSide: "LONG", Quantity: "0.5"}})
 	if e.Data["side"] != "LONG" {
 		t.Fatalf("a hedge-mode long: %v", e.Data)
+	}
+}
+
+func TestMergeKey(t *testing.T) {
+	at := time.Date(2026, 10, 7, 5, 40, 12, 0, time.UTC)
+	cross := func(symbol string, at time.Time) application.Event {
+		e, _ := toEvent(&derivv1.LiquidationStarted{Cross: true, Position: &derivv1.Position{UserId: "u", Symbol: symbol, SettleAsset: "BTC"}})
+		e.At = at
+		return e
+	}
+	// One cross takeover: every position's event has the account's key.
+	a, b := mergeKey(cross("BTC-USD-PERP", at)), mergeKey(cross("BTC-USD-PERP", at.Add(300*time.Millisecond)))
+	if a == "" || a != b {
+		t.Fatalf("one takeover, two keys: %q %q", a, b)
+	}
+	if mergeKey(cross("BTC-USD-PERP", at.Add(time.Minute))) == a {
+		t.Fatal("a takeover a minute later merged into the first")
+	}
+	isolated, _ := toEvent(&derivv1.LiquidationStarted{Position: &derivv1.Position{UserId: "u", Symbol: "BTC-USD-PERP"}})
+	if mergeKey(isolated) != "" {
+		t.Fatal("an isolated takeover merged")
 	}
 }

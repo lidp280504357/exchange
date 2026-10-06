@@ -20,7 +20,7 @@ export const zhTWOverrides = {
     ["手机号码", "手機號碼"],
     ["手机号", "手機號碼"],
     ["用户", "用戶"],
-    ["账本", "帳本"],
+    ["账本", "帳本"], ["杠杆", "槓桿"],
     ["退出登录", "登出"],
     // An account closed for good, not a sign-out.
     ["注销", "註銷"],

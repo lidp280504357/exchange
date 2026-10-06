@@ -97,6 +97,24 @@ func TestContractNotices(t *testing.T) {
 	if title != "合約倉位強平" {
 		t.Fatalf("zh-TW title: %q", title)
 	}
+	// Review FG, B133: a cross takeover is one notice for the account; the
+	// side shows where the event has one; the unit follows the face value.
+	title, body = render(NoticeContractLiquidating, "zh-CN", map[string]string{"cross": "true", "symbol": "BTC-USD-PERP", "settle_asset": "BTC"})
+	if title != "合约全仓账户强平" || !strings.Contains(body, "BTC 合约全仓账户已于") || !strings.Contains(body, "接管全部全仓仓位") {
+		t.Fatalf("cross liquidating: %q %s", title, body)
+	}
+	_, body = render(NoticeContractWarned, "zh-CN", map[string]string{"cross": "false", "symbol": "BTC-USDT-PERP", "side": "SHORT", "margin_balance": "9", "maintenance_margin": "8"})
+	if !strings.Contains(body, "BTCUSDT 永续 逐仓空仓保证金余额") {
+		t.Fatalf("isolated short warning: %s", body)
+	}
+	_, body = render(NoticeContractDeleveraged, "en", map[string]string{"symbol": "ETH-USDT-PERP", "side": "LONG", "quantity": "0.4", "contract_size": "0", "price": "2600", "realized_pnl": "3"})
+	if !strings.Contains(body, "0.4 ETH of your ETHUSDT perpetual long position") {
+		t.Fatalf("adl en: %s", body)
+	}
+	_, body = render(NoticeContractLiquidating, "en", map[string]string{"symbol": "ASTRA-USD-PERP", "side": "SHORT", "quantity": "12", "contract_size": "10", "settle_asset": "ASTRA"})
+	if !strings.Contains(body, "(12 contracts)") {
+		t.Fatalf("contracts by face value: %s", body)
+	}
 }
 
 func TestDepositNotices(t *testing.T) {
