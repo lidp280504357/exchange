@@ -97,6 +97,8 @@ func TestPairTransitions(t *testing.T) {
 	allowed := map[[2]string]bool{
 		{StatusPrepare, StatusTrading}: true, {StatusTrading, StatusHalt}: true, {StatusHalt, StatusTrading}: true,
 		{StatusTrading, StatusCancelOnly}: true, {StatusHalt, StatusCancelOnly}: true, {StatusCancelOnly, StatusDelisted}: true,
+		// Reopened before it is delisted (design 2026-10-06 §3.5).
+		{StatusCancelOnly, StatusTrading}: true,
 	}
 	all := []string{StatusPrepare, StatusTrading, StatusHalt, StatusCancelOnly, StatusDelisted}
 	for _, from := range all {

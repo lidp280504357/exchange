@@ -76,10 +76,11 @@ commands:
                               make the reference data match a JSON file ("-" for stdin); idempotent;
                               items the admin console changed last are kept unless --force
   instruments pair-status <symbol> --to STATUS --reason TEXT
-                              move a pair: PREPARE -> TRADING <-> HALT -> CANCEL_ONLY -> DELISTED
+                              move a pair: PREPARE -> TRADING <-> HALT -> CANCEL_ONLY -> DELISTED;
+                              CANCEL_ONLY -> TRADING reopens it until it is delisted
   instruments contract-status <symbol> --to STATUS --reason TEXT
                               move a perpetual contract along the same statuses
-  instruments profile <asset> [--display-name N] [--zh T] [--en T] [--website U] [--explorer U]
+  instruments profile <asset> [--display-name N] [--zh T] [--zh-tw T] [--en T] [--website U] [--explorer U]
                       [--whitepaper U] [--logo FILE|- [--logo-type MIME]] [--clear-logo] --reason TEXT
                               show an asset's profile, or change the parts given
   ledger adjust --user U|--house --asset A --amount X --reason TEXT [--key K]

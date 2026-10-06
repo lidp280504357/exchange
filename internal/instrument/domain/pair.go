@@ -20,13 +20,16 @@ const (
 	StatusDelisted   = "DELISTED"
 )
 
-// pairTransitions: PREPARE -> TRADING <-> HALT; TRADING/HALT -> CANCEL_ONLY
-// -> DELISTED.
+// pairTransitions, of pairs and contracts alike: PREPARE -> TRADING <->
+// HALT; TRADING/HALT -> CANCEL_ONLY -> DELISTED, and CANCEL_ONLY ->
+// TRADING reopens what was closed but not delisted (coordinator
+// 2026-10-06 22:50, coin-margined design §3.5: the console closes a coin's
+// contracts and opens them again); DELISTED is final.
 var pairTransitions = map[string][]string{
 	StatusPrepare:    {StatusTrading},
 	StatusTrading:    {StatusHalt, StatusCancelOnly},
 	StatusHalt:       {StatusTrading, StatusCancelOnly},
-	StatusCancelOnly: {StatusDelisted},
+	StatusCancelOnly: {StatusTrading, StatusDelisted},
 }
 
 // CheckPairTransition reports whether a pair may move between statuses.

@@ -132,3 +132,41 @@ func TestInverseContracts(t *testing.T) {
 		t.Fatalf("%d inverse contracts without a reference, want 1", n)
 	}
 }
+
+// A contract closed per coin (CANCEL_ONLY) opens again until it is
+// delisted, which is final (design 2026-10-06 §3.5, B122); each change is
+// recorded.
+func TestContractReopensUntilDelisted(t *testing.T) {
+	svc, db := setup(t)
+	ctx := context.Background()
+	cfg := config()
+	cfg.Contracts = []domain.Contract{contract()}
+	if _, err := svc.Apply(ctx, cfg, "cli:test", "first contract"); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []struct {
+		to string
+		ok bool
+	}{
+		{domain.StatusTrading, true},
+		{domain.StatusCancelOnly, true},
+		{domain.StatusTrading, true},
+		{domain.StatusCancelOnly, true},
+		{domain.StatusDelisted, true},
+		{domain.StatusTrading, false},
+	} {
+		from, err := svc.SetContractStatus(ctx, "BTC-USDT-PERP", step.to, "cli:test", "per coin")
+		if (err == nil) != step.ok {
+			t.Fatalf("%s -> %s: %v", from, step.to, err)
+		}
+		if !step.ok && !apperr.Is(err, "INSTRUMENT_STATUS_TRANSITION_INVALID") {
+			t.Fatalf("-> %s: %v", step.to, err)
+		}
+	}
+	if c, err := svc.Contract(ctx, "BTC-USDT-PERP"); err != nil || c.Status != domain.StatusDelisted {
+		t.Fatalf("after the steps: %+v %v", c, err)
+	}
+	if n := count(t, db, `SELECT count(*) FROM config_history WHERE entity = 'CONTRACT' AND source = 'STATUS'`); n != 5 {
+		t.Fatalf("%d status changes recorded, want 5", n)
+	}
+}

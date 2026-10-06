@@ -219,8 +219,13 @@ func TestPairStatusMachine(t *testing.T) {
 		{domain.StatusHalt, true},
 		{domain.StatusTrading, true},
 		{domain.StatusCancelOnly, true},
-		{domain.StatusTrading, false},
+		// Reopened before it is delisted (design 2026-10-06 §3.5, B122).
+		{domain.StatusTrading, true},
+		{domain.StatusCancelOnly, true},
 		{domain.StatusDelisted, true},
+		// Delisted is final.
+		{domain.StatusTrading, false},
+		{domain.StatusCancelOnly, false},
 	} {
 		_, err := svc.SetPairStatus(ctx, "BTC-USDT", step.to, "cli:test", "test")
 		if (err == nil) != step.ok {
