@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { derivativesApi, marketApi, unwrap } from "../api/client";
 import type { components } from "../api/gen/derivatives";
 import type { components as MarketComponents } from "../api/gen/market";
@@ -7,7 +7,10 @@ import { useChannel } from "../market/hooks";
 import { qk } from "../query/keys";
 import { selectSignedIn, useSession } from "../session/store";
 import { channels, type MarkData, type MarketPush } from "../ws/types";
-import { contractMath, type ContractMath, type ContractTerms } from "./coinMargined";
+import { abs, add, decimalsOf, max, normalize, sign, sub } from "../format/decimal";
+import { useSettings } from "../settings/store";
+import { contractMath, fromContracts, toContracts, type ContractMath, type ContractTerms, type ContractUnit } from "./coinMargined";
+import { isActive, newIdempotencyKey } from "./orders";
 import { assetDecimals, useAssets } from "./pairs";
 
 // Perpetual contracts for the futures terminal (api/openapi/derivatives.yaml).
@@ -84,6 +87,38 @@ export function useContractMath(c: ContractTerms): ContractMath {
   const assets = useAssets();
   const decimals = assetDecimals(assets.data?.assets, c.settle_asset || c.quote_asset);
   return useMemo(() => contractMath(c, decimals), [c, decimals]);
+}
+
+/**
+ * useOrderAmount is a futures order form's amount: what the user typed —
+ * a linear contract's base asset; a coin-margined contract's whole
+ * contracts, coin or USD, the unit kept in the settings (review FE,
+ * B130, as Binance offers) — and quantity, what the order carries (whole
+ * contracts of a coin-margined contract, at least one, at refPrice).
+ * show writes a carried quantity (the slider's, the book's) in the unit;
+ * switchUnit re-expresses the amount in another unit. decimals and step
+ * are the field's in the unit.
+ */
+export function useOrderAmount(c: ContractTerms, math: ContractMath, refPrice: string) {
+  const pref = useSettings((s) => s.contractUnit);
+  const setSettings = useSettings((s) => s.set);
+  const [typed, setTyped] = useState("");
+  const unit: ContractUnit = math.inverse ? pref : "CONT";
+  const size = c.contract_size;
+  const quantity = math.inverse ? toContracts(typed, unit, size, refPrice) : typed;
+  return {
+    typed,
+    setTyped,
+    quantity,
+    unit,
+    show: (q: string) => setTyped(math.inverse ? fromContracts(q, unit, size, refPrice, math.amountDecimals) : q),
+    switchUnit: (u: ContractUnit) => {
+      setSettings({ contractUnit: u });
+      setTyped(fromContracts(toContracts(typed, unit, size, refPrice), u, size, refPrice, math.amountDecimals));
+    },
+    decimals: !math.inverse ? decimalsOf(c.lot_size) : unit === "COIN" ? math.amountDecimals : 0,
+    step: !math.inverse || unit === "CONT" ? c.lot_size : unit === "USD" ? size : undefined,
+  };
 }
 
 /** useContractSettings is the caller's position mode, margin mode and leverage on a contract. */
@@ -180,6 +215,67 @@ export function useFundingPayments(symbol = "", enabled = true) {
 /** placeContractOrder submits a contract order (once per idempotency key). */
 export function placeContractOrder(order: NewContractOrder, idempotencyKey: string): Promise<ContractOrder> {
   return unwrap(derivativesApi.POST("/v1/derivatives/orders", { body: order, params: { header: { "Idempotency-Key": idempotencyKey } } }));
+}
+
+/** getContractOrder reads one of the caller's contract orders. */
+export function getContractOrder(orderId: string): Promise<ContractOrder> {
+  return unwrap(derivativesApi.GET("/v1/derivatives/orders/{order_id}", { params: { path: { order_id: orderId } } }));
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** waitForOrder waits for a contract order to end (its state read every 400 ms), for 10 s at most; its last state. */
+export async function waitForOrder(order: ContractOrder): Promise<ContractOrder> {
+  let o = order;
+  for (const until = Date.now() + 10_000; isActive(o.status) && Date.now() < until; ) {
+    await sleep(400);
+    o = await getContractOrder(o.order_id);
+  }
+  return o;
+}
+
+/** A market close's outcome: what it closed and what is left of the position, and how many orders it took. */
+export type MarketClose = { closed: string; left: string; orders: number };
+
+/**
+ * closeAtMarket closes a position with reduce-only market orders (review
+ * FE, B129). A market order fills against what the book offers at that
+ * moment and the rest of it is canceled, so one order may close only part
+ * of a large position: up to tries orders go out, each for what is left
+ * and each waited for until it ends, stopping once one fills nothing. A
+ * failure of the first order throws; a later one ends the run with what
+ * closed so far.
+ */
+export async function closeAtMarket(
+  p: { symbol: string; quantity: string; position_side: "BOTH" | "LONG" | "SHORT" },
+  tries = 3,
+): Promise<MarketClose> {
+  const long = sign(p.quantity) > 0;
+  let left = abs(p.quantity);
+  let closed = "0";
+  let orders = 0;
+  while (sign(left) > 0 && orders < tries) {
+    let placed: ContractOrder;
+    try {
+      placed = await placeContractOrder(
+        {
+          symbol: p.symbol, side: long ? "SELL" : "BUY", type: "MARKET", quantity: normalize(left), position_side: p.position_side,
+          reduce_only: p.position_side === "BOTH" ? true : undefined,
+        },
+        newIdempotencyKey(),
+      );
+    } catch (e) {
+      if (orders === 0) throw e;
+      break;
+    }
+    orders++;
+    const done = await waitForOrder(placed);
+    const filled = done.filled_quantity;
+    closed = add(closed, filled);
+    left = max(sub(left, filled), "0");
+    if (sign(filled) === 0) break;
+  }
+  return { closed: normalize(closed), left: normalize(left), orders };
 }
 
 /** cancelContractOrder asks the engine to cancel one contract order. */

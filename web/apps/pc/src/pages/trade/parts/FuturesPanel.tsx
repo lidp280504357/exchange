@@ -1,6 +1,6 @@
 import {
-  adjustPositionMargin, assetDecimals, cancelAllContractOrders, cancelConditionalOrder, cancelContractOrder, closeableQuantity, dec, enumLabel, errorText,
-  formatAmount, formatDecimal, formatPercent, formatPrice, isActive, isInverse, newIdempotencyKey, placeConditionalOrder, placeContractOrder, routes,
+  adjustPositionMargin, assetDecimals, cancelAllContractOrders, cancelConditionalOrder, cancelContractOrder, closeableQuantity, closeAtMarket, dec, enumLabel,
+  errorText, formatAmount, formatDecimal, formatPercent, formatPrice, isActive, isInverse, placeConditionalOrder, routes,
   selectSignedIn, usdValue, useAssets, useConditionalOrders, useContractFills, useContractMath, useContractOpenOrders, useContractOrderHistory,
   useContracts, useFundingPayments, useMarkPrice, usePositions, useSession, useTicker, type ConditionalOrder, type Contract, type ContractFill,
   type ContractOrder, type ContractPosition, type ContractTerms, type FundingPayment,
@@ -219,18 +219,21 @@ function PositionItem({ p, specs, tpsl }: { p: ContractPosition; specs: Specs; t
   const [busy, setBusy] = useState(false);
   const size = closeableQuantity(p.quantity);
 
-  const close = async () => {
+  // A market close sends what is left until the position is closed, three
+  // orders at most; what a thin book leaves open is said, with a button to
+  // close the rest (review FE, B129).
+  const close = async (quantity = p.quantity) => {
     setBusy(true);
     try {
-      await placeContractOrder(
-        {
-          symbol: p.symbol, side: long ? "SELL" : "BUY", type: "MARKET", quantity: size,
-          position_side: p.position_side, reduce_only: p.position_side === "BOTH" ? true : undefined,
-        },
-        newIdempotencyKey(),
-      );
-      toast.success(t("pcTrade.closeSent"));
+      const r = await closeAtMarket({ symbol: p.symbol, quantity, position_side: p.position_side });
       setClosing(false);
+      const rest = long ? r.left : dec.neg(r.left);
+      const again = { label: t("pcTrade.continueClose"), onClick: () => void close(rest) };
+      const amount = (v: string) => qtyOf(specs, p.symbol, v, t("pcTrade.contractsUnit"));
+      if (dec.sign(r.left) === 0) toast.success(t("pcTrade.closeDone"));
+      else if (dec.sign(r.closed) > 0) {
+        toast.info(t("pcTrade.closePartly", { closed: amount(r.closed), left: amount(r.left) }), { description: t("pcTrade.closePartlyHint"), action: again });
+      } else toast.error(t("pcTrade.closeNone"), { action: again });
       void qc.invalidateQueries({ queryKey: ["derivatives"] });
     } catch (e) {
       toast.error(errorText(e));

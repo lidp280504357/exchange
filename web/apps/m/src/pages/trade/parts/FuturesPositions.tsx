@@ -1,6 +1,6 @@
 import {
-  adjustPositionMargin, closeableQuantity, dec, enumLabel, errorText, formatAmount, formatDecimal, formatPrice, newIdempotencyKey, placeConditionalOrder,
-  placeContractOrder, routes, usdValue, useConditionalOrders, useContractMath, useContracts, useMarkPrice, usePositions, useTicker,
+  adjustPositionMargin, closeableQuantity, closeAtMarket, dec, enumLabel, errorText, formatAmount, formatDecimal, formatPrice, placeConditionalOrder,
+  routes, usdValue, useConditionalOrders, useContractMath, useContracts, useMarkPrice, usePositions, useTicker,
   type ConditionalOrder, type Contract, type ContractPosition, type ContractTerms,
 } from "@exchange/core";
 import { Button, Dialog, ErrorState, NumberInput, PositionCard, Segmented, Sheet, Skeleton, TpSlDialog, toast, type TpSlValues } from "@exchange/ui";
@@ -87,18 +87,21 @@ function PositionItem({ p, spec, tpsl }: { p: ContractPosition; spec: Spec; tpsl
   const [busy, setBusy] = useState(false);
   const size = closeableQuantity(p.quantity);
 
-  const close = async () => {
+  // A market close sends what is left until the position is closed, three
+  // orders at most; what a thin book leaves open is said, with a button to
+  // close the rest (review FE, B129).
+  const close = async (quantity = p.quantity) => {
     setBusy(true);
     try {
-      await placeContractOrder(
-        {
-          symbol: p.symbol, side: long ? "SELL" : "BUY", type: "MARKET", quantity: size, position_side: p.position_side,
-          reduce_only: p.position_side === "BOTH" ? true : undefined,
-        },
-        newIdempotencyKey(),
-      );
-      toast.success(t("mTrade.closeSent"));
+      const r = await closeAtMarket({ symbol: p.symbol, quantity, position_side: p.position_side });
       setClosing(false);
+      const rest = long ? r.left : dec.neg(r.left);
+      const again = { label: t("mTrade.continueClose"), onClick: () => void close(rest) };
+      const amount = (v: string) => (unit ? `${formatAmount(v, spec.qty)} ${unit}` : formatAmount(v, spec.qty));
+      if (dec.sign(r.left) === 0) toast.success(t("mTrade.closeDone"));
+      else if (dec.sign(r.closed) > 0) {
+        toast.info(t("mTrade.closePartly", { closed: amount(r.closed), left: amount(r.left) }), { description: t("mTrade.closePartlyHint"), action: again });
+      } else toast.error(t("mTrade.closeNone"), { action: again });
       void qc.invalidateQueries({ queryKey: ["derivatives"] });
     } catch (e) {
       toast.error(errorText(e));

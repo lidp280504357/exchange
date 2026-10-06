@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import type { ContractUnit } from "../trading/coinMargined";
 
 // User preferences kept on the device (design §6.2 account settings):
 // language, time zone, the colour of rises, order confirmations and small
@@ -22,6 +23,8 @@ export type Settings = {
   hideSmallBalances: boolean;
   /** Amounts hidden behind asterisks (the eye toggle on the assets card). */
   hideAmounts: boolean;
+  /** What a coin-margined order's amount is typed in (B130): contracts by default. */
+  contractUnit: ContractUnit;
 };
 
 type SettingsState = Settings & {
@@ -56,6 +59,7 @@ export const useSettings = create<SettingsState>()(
       confirmOrders: true,
       hideSmallBalances: false,
       hideAmounts: false,
+      contractUnit: "CONT",
       set: (patch) => set(patch),
     }),
     { name: "exchange.settings", version: 1 },

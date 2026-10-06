@@ -1,9 +1,9 @@
 import {
-  ApiError, closeableQuantity, dec, dk, errorText, formatAmount, formatPrice, maxNotional, newIdempotencyKey, openLimit, placeContractOrder, routes,
+  ApiError, closeableQuantity, closeAtMarket, dec, dk, errorText, formatAmount, formatPrice, maxNotional, newIdempotencyKey, openLimit, placeContractOrder, routes,
   selectSignedIn, sideExposure, updateContractSettings, usdValue, useContractMath, useContractOpenOrders, useContractSettings, useFuturesAccount,
-  useMarkPrice, usePositions, useSession, useSettings, useTicker, type Contract, type NewContractOrder,
+  useMarkPrice, useOrderAmount, usePositions, useSession, useSettings, useTicker, waitForOrder, type Contract, type ContractUnit, type NewContractOrder,
 } from "@exchange/core";
-import { Button, Checkbox, Dialog, KeyValue, LeverageDialog, NumberInput, Segmented, Slider, Tabs, toast, cn } from "@exchange/ui";
+import { Button, Checkbox, Dialog, KeyValue, LeverageDialog, NumberInput, Segmented, Select, Slider, Tabs, toast, cn } from "@exchange/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRightLeft } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -19,8 +19,9 @@ type Action = { side: "BUY" | "SELL"; positionSide: "BOTH" | "LONG" | "SHORT"; r
  * (margin plus fee) and the most the margin opens; closing takes at most
  * the position. One-way mode closes with reduce-only orders, hedge mode
  * by position side. A coin-margined contract (design 2026-10-06 §2.6)
- * takes whole contracts, shows what they are worth in its coin and in
- * USD, and reserves and reports in its coin's FUTURES account.
+ * takes its amount in whole contracts, its coin or USD (B130), orders
+ * whole contracts, shows what they are worth in the other two, and
+ * reserves and reports in its coin's FUTURES account.
  */
 export function FuturesOrderPanel({
   contract, fill, className,
@@ -50,7 +51,6 @@ export function FuturesOrderPanel({
   const [tab, setTab] = useState<"open" | "close">("open");
   const [type, setType] = useState<"limit" | "market">("limit");
   const [price, setPrice] = useState("");
-  const [quantity, setQuantity] = useState("");
   const [pct, setPct] = useState(0);
   const [reduceOnly, setReduceOnly] = useState(false);
   const [leverageOpen, setLeverageOpen] = useState(false);
@@ -64,14 +64,19 @@ export function FuturesOrderPanel({
   const hedge = settings.data?.position_mode === "HEDGE";
   const available = account.data?.available ?? "0";
   const refPrice = type === "limit" ? price : (mark?.mark_price ?? tk?.last ?? "");
-  // A coin-margined contract's quantity is whole contracts.
+  // The amount as typed, and the quantity it orders (a coin-margined contract's in whole contracts).
+  const amount = useOrderAmount(contract, math, refPrice);
+  const quantity = amount.quantity;
+  const setQuantity = amount.setTyped;
+  // A coin-margined contract's quantities are whole contracts.
   const unit = math.inverse ? t("pcTrade.contractsUnit") : contract.base_asset;
   const transferTo = `${routes.transfer}?asset=${math.settle}`;
 
   // The book's click fills the price; a first visit takes the last price.
   useEffect(() => {
     if (fill?.price) setPrice(fill.price);
-    if (fill?.quantity) setQuantity(dec.normalize(dec.quantize(fill.quantity, contract.lot_size, "down")));
+    if (fill?.quantity) amount.show(dec.normalize(dec.quantize(fill.quantity, contract.lot_size, "down")));
+    // The book's click alone fills the form (not a change of unit).
   }, [fill, contract.lot_size]);
   useEffect(() => {
     setPrice((p) => p || (tk?.last ? dec.normalize(dec.quantize(tk.last, contract.tick_size, "down")) : ""));
@@ -120,7 +125,8 @@ export function FuturesOrderPanel({
     const base = tab === "open" ? dec.max(maxOpen.BUY, maxOpen.SELL) : dec.max(maxClose("BUY"), maxClose("SELL"));
     if (!dec.isDecimal(base) || dec.sign(base) <= 0 || p <= 0) return setQuantity("");
     const q = dec.quantize(dec.div(dec.mul(base, String(Math.round(p))), "100", qtyDecimals, "down"), contract.lot_size, "down");
-    setQuantity(dec.sign(q) > 0 ? dec.normalize(q) : "");
+    if (dec.sign(q) > 0) amount.show(dec.normalize(q));
+    else setQuantity("");
   };
 
   const problem = (a: Action): string | null => {
@@ -147,14 +153,37 @@ export function FuturesOrderPanel({
     price: type === "limit" ? price : undefined, quantity, reduce_only: a.reduceOnly || undefined,
   });
 
+  // A market close fills what the book offers at that moment: what it
+  // leaves open is said, with a button that closes the rest (review FE,
+  // B129; three market orders at most, core's closeAtMarket).
+  const reportClose = (order: NewContractOrder, closed: string, left: string) => {
+    const amount = (v: string) => `${formatAmount(v, qtyDecimals)} ${unit}`;
+    const again = {
+      label: t("pcTrade.continueClose"),
+      onClick: () =>
+        void closeAtMarket({ symbol, quantity: order.side === "SELL" ? left : dec.neg(left), position_side: order.position_side ?? "BOTH" })
+          .then((r) => reportClose(order, r.closed, r.left))
+          .catch((e: unknown) => toast.error(errorText(e)))
+          .finally(() => void qc.invalidateQueries({ queryKey: ["derivatives"] })),
+    };
+    if (dec.sign(left) === 0) toast.success(t("pcTrade.closeDone"));
+    else if (dec.sign(closed) > 0) {
+      toast.info(t("pcTrade.closePartly", { closed: amount(closed), left: amount(left) }), { description: t("pcTrade.closePartlyHint"), action: again });
+    } else toast.error(t("pcTrade.closeNone"), { action: again });
+  };
+
   const send = async (order: NewContractOrder) => {
     setSubmitting(true);
     try {
-      await placeContractOrder(order, newIdempotencyKey());
-      toast.success(t("pcTrade.placed"));
+      const placed = await placeContractOrder(order, newIdempotencyKey());
       setQuantity("");
       setPct(0);
       void qc.invalidateQueries({ queryKey: ["derivatives"] });
+      if (tab === "close" && order.type === "MARKET") {
+        const done = await waitForOrder(placed);
+        reportClose(order, done.filled_quantity, dec.max(dec.sub(done.quantity, done.filled_quantity), "0"));
+        void qc.invalidateQueries({ queryKey: ["derivatives"] });
+      } else toast.success(t("pcTrade.placed"));
     } catch (e) {
       const short = e instanceof ApiError && (e.code === "DERIV_INSUFFICIENT_MARGIN" || e.code === "LEDGER_INSUFFICIENT_BALANCE");
       toast.error(errorText(e), short ? { action: { label: t("nav.transfer"), onClick: () => navigate(transferTo) } } : undefined);
@@ -265,20 +294,43 @@ export function FuturesOrderPanel({
       <NumberInput
         aria-label={t("common.amount")}
         prefix={<span className="text-xs text-fg-3">{t("common.amount")}</span>}
-        unit={unit}
-        value={quantity}
+        unit={
+          math.inverse ? (
+            <Select
+              size="xs"
+              variant="ghost"
+              value={amount.unit}
+              onValueChange={(u) => amount.switchUnit(u as ContractUnit)}
+              options={[
+                { value: "CONT", label: t("pcTrade.contractsUnit") },
+                { value: "COIN", label: math.settle },
+                { value: "USD", label: "USD" },
+              ]}
+              aria-label={t("pcTrade.amountUnit")}
+            />
+          ) : (
+            unit
+          )
+        }
+        value={amount.typed}
         onValueChange={(q) => {
           setQuantity(q);
           setPct(0);
         }}
-        step={contract.lot_size}
-        decimals={qtyDecimals}
+        step={amount.step}
+        decimals={amount.decimals}
         align="right"
-        snap
+        snap={amount.step !== undefined}
       />
       {math.inverse && (
         <p data-testid="contracts-value" className="-mt-1.5 text-right text-xs tabular-nums text-fg-3">
-          ≈ {formatAmount(math.worth(quantity || "0", refPrice), math.amountDecimals)} {math.settle} · {formatAmount(usdValue(quantity || "0", contract.contract_size), 0)} USD
+          ≈ {[
+            amount.unit !== "CONT" && `${formatAmount(quantity || "0", 0)} ${unit}`,
+            amount.unit !== "COIN" && `${formatAmount(math.worth(quantity || "0", refPrice), math.amountDecimals)} ${math.settle}`,
+            amount.unit !== "USD" && `${formatAmount(usdValue(quantity || "0", contract.contract_size), 0)} USD`,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
         </p>
       )}
       <Slider

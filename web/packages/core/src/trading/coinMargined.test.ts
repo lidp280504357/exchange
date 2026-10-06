@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  coinValue, contractMath, inverseCheckRisk, inverseReservePrice, inverseRiskRoom, inverseUnrealizedPnl, isInverse, perContract, usdValue,
-  type ContractTerms,
+  coinValue, contractMath, fromContracts, inverseCheckRisk, inverseReservePrice, inverseRiskRoom, inverseUnrealizedPnl, isInverse, perContract,
+  toContracts, usdValue, type ContractTerms,
 } from "./coinMargined";
 import { openCost } from "./futuresMath";
 
@@ -80,6 +80,22 @@ describe("coin-margined contracts", () => {
     expect(contractMath(btcUsd).notionalUnit).toBe("USD");
     expect(contractMath(btcUsdt).orderNotional("0.01", "60000")).toBe("600");
     expect(contractMath(btcUsdt).notionalUnit).toBe("USDT");
+  });
+
+  it("turns an amount in contracts, the coin or USD into whole contracts and back (B130)", () => {
+    expect(toContracts("3", "CONT", "100", "60000")).toBe("3");
+    // 0.0051 BTC at 60,000 is 306 USD: 3 whole contracts of 100.
+    expect(toContracts("0.0051", "COIN", "100", "60000")).toBe("3");
+    expect(toContracts("350", "USD", "100", "60000")).toBe("3");
+    // Under one contract's worth still buys one.
+    expect(toContracts("0.0001", "COIN", "100", "60000")).toBe("1");
+    expect(toContracts("20", "USD", "100", "60000")).toBe("1");
+    expect(toContracts("0", "USD", "100", "60000")).toBe("");
+    expect(toContracts("0.01", "COIN", "100", "")).toBe("");
+    expect(fromContracts("3", "CONT", "100", "60000")).toBe("3");
+    expect(fromContracts("3", "COIN", "100", "60000")).toBe("0.005");
+    expect(fromContracts("3", "USD", "100", "60000")).toBe("300");
+    expect(fromContracts("", "USD", "100", "60000")).toBe("");
   });
 
   it("leaves a linear contract's arithmetic as it was", () => {

@@ -44,6 +44,41 @@ export function usdValue(contracts: string, size: string): string {
 }
 
 /**
+ * ContractUnit is what a coin-margined order's amount is typed in
+ * (review FE, B130, as Binance offers): whole contracts, the coin they
+ * settle in, or USD. Orders always carry whole contracts.
+ */
+export type ContractUnit = "CONT" | "COIN" | "USD";
+
+/**
+ * toContracts turns an amount typed in a unit into whole contracts of
+ * size USD at price: contracts as they are, a coin amount × price ÷ size,
+ * a USD amount ÷ size, down to whole contracts and at least one for an
+ * amount above zero; "" for no amount (or a coin amount without a price).
+ */
+export function toContracts(amount: string, unit: ContractUnit, size: string, price: string | null | undefined): string {
+  if (!isDecimal(amount) || sign(amount) <= 0 || !ok(size)) return "";
+  let n: string;
+  if (unit === "CONT") n = div(amount, "1", 0, "down");
+  else if (unit === "USD") n = div(amount, size, 0, "down");
+  else if (ok(price)) n = div(mul(amount, price), size, 0, "down");
+  else return "";
+  return sign(n) > 0 ? normalize(n) : "1";
+}
+
+/**
+ * fromContracts shows whole contracts in a unit: themselves, the coin
+ * they are worth at price (half up to decimals), or their USD face value;
+ * "" for none (or the coin without a price).
+ */
+export function fromContracts(contracts: string, unit: ContractUnit, size: string, price: string | null | undefined, decimals = 8): string {
+  if (!isDecimal(contracts) || sign(contracts) <= 0) return "";
+  if (unit === "CONT") return normalize(contracts);
+  if (unit === "USD") return usdValue(contracts, size);
+  return ok(price) ? coinValue(contracts, size, price, decimals) : "";
+}
+
+/**
  * perContract is what opening one contract reserves at a price: its coin
  * value over the leverage and the taker fee on it, each rounded up to the
  * coin's decimals (derivatives-service's margin and fee per lot).
