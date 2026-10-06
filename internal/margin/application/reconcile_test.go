@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -39,7 +40,8 @@ func TestReconcile(t *testing.T) {
 		t.Fatal(err)
 	}
 	// run reconciles and returns the mismatches by check, checking the
-	// metric of each against them.
+	// metric and the recorded run of each against them.
+	runs := 0
 	run := func() map[string][]application.Mismatch {
 		t.Helper()
 		results, err := r.svc.Reconcile(ctx)
@@ -72,6 +74,34 @@ func TestReconcile(t *testing.T) {
 		}
 		if seen != 2 {
 			t.Errorf("margin_reconcile_mismatches for %d checks", seen)
+		}
+		// Each run is recorded, one row a check, with what it found.
+		runs++
+		// The run's two rows are the last ones (runs share started_at
+		// while the test's clock stands still).
+		rows, err := r.db.Query(ctx, `SELECT check_name, mismatches, jsonb_array_length(details)
+			FROM (SELECT * FROM reconciliation_runs ORDER BY id DESC LIMIT 2) last`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		recorded := 0
+		for rows.Next() {
+			var check string
+			var mismatches, details int
+			if err := rows.Scan(&check, &mismatches, &details); err != nil {
+				t.Fatal(err)
+			}
+			if want := len(out[check]); mismatches != want || details != want {
+				t.Errorf("run %d, %s recorded %d mismatches (%d details), found %d", runs, check, mismatches, details, want)
+			}
+			recorded++
+		}
+		if err := rows.Err(); err != nil || recorded != 2 {
+			t.Fatalf("run %d recorded %d checks %v", runs, recorded, err)
+		}
+		var total int
+		if err := r.db.QueryRow(ctx, `SELECT count(*) FROM reconciliation_runs`).Scan(&total); err != nil || total != 2*runs {
+			t.Fatalf("%d rows after %d runs %v", total, runs, err)
 		}
 		return out
 	}
@@ -120,7 +150,7 @@ func TestReconcile(t *testing.T) {
 		}
 		usdt, ok, err := repos.Terms().Asset(ctx, "USDT")
 		if err != nil || !ok {
-			t.Fatalf("USDT terms %v %v", ok, err)
+			return fmt.Errorf("USDT terms %v: %w", ok, err)
 		}
 		usdt.PoolCap, usdt.UserCap = d("500"), d("500")
 		return repos.Terms().SaveAsset(ctx, usdt, "ops@example.com")

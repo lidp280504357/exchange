@@ -274,6 +274,16 @@ func expect(t *testing.T, what string, status int, body map[string]any, want int
 	}
 }
 
+// versionOf reads an answer's version, failing the test without one.
+func versionOf(t *testing.T, m map[string]any) int64 {
+	t.Helper()
+	v, ok := m["version"].(float64)
+	if !ok {
+		t.Fatalf("no version in %v", m)
+	}
+	return int64(v)
+}
+
 func item(body map[string]any, key, value string) map[string]any {
 	items, _ := body["items"].([]any)
 	for _, it := range items {
@@ -415,7 +425,11 @@ func TestUserEndpoints(t *testing.T) {
 	st, body = a.do("GET", "/internal/margin/accounts/"+user+"/MARGIN_CROSS", "")
 	expect(t, "the account in the console", st, body, 200, "")
 	liqs, _ := body["liquidations"].([]any)
-	if len(liqs) != 1 || liqs[0].(map[string]any)["status"] != "SHORTFALL" {
+	var shortfall map[string]any
+	if len(liqs) == 1 {
+		shortfall, _ = liqs[0].(map[string]any)
+	}
+	if shortfall["status"] != "SHORTFALL" {
 		t.Fatalf("the liquidation in the console %v", body["liquidations"])
 	}
 }
@@ -445,7 +459,7 @@ func TestInternalEndpoints(t *testing.T) {
 	if btc == nil || btc["updated_by"] != "" {
 		t.Fatalf("BTC %v", btc)
 	}
-	version := int64(btc["version"].(float64))
+	version := versionOf(t, btc)
 	put := func(v int64) string {
 		return fmt.Sprintf(`{"borrowable":true,"collateral":true,"haircut":"0.9","pool_cap":"20","user_cap":"2","interest_model":"FIXED",
 			"fixed_rate":"0.000005","float_base":"0.000005","float_kink":"0.8","float_kink_rate":"0.00003","float_max_rate":"0.0001",
@@ -457,7 +471,7 @@ func TestInternalEndpoints(t *testing.T) {
 	expect(t, "a change over a version that moved", st, body, 409, "MARGIN_PARAMS_CHANGED")
 	st, body = a.do("PUT", "/internal/margin/assets/BTC", put(version), admin...)
 	expect(t, "BTC's haircut to 0.9", st, body, 200, "")
-	if body["haircut"] != "0.9" || body["updated_by"] != "ops@example.com" || int64(body["version"].(float64)) != version+1 {
+	if body["haircut"] != "0.9" || body["updated_by"] != "ops@example.com" || versionOf(t, body) != version+1 {
 		t.Fatalf("BTC after %v", body)
 	}
 
@@ -467,7 +481,7 @@ func TestInternalEndpoints(t *testing.T) {
 	}
 	st, body = a.do("GET", "/internal/margin/settings", "")
 	expect(t, "the settings", st, body, 200, "")
-	sv := int64(body["version"].(float64))
+	sv := versionOf(t, body)
 	st, body = a.do("PUT", "/internal/margin/settings", settings(4, "1.20", sv), admin...)
 	expect(t, "the cross account at 4x", st, body, 400, apperr.CodeInvalidArgument)
 	st, body = a.do("PUT", "/internal/margin/settings", settings(5, "1.20", sv+1), admin...)
@@ -476,7 +490,7 @@ func TestInternalEndpoints(t *testing.T) {
 	expect(t, "the cross account at 5x", st, body, 200, "")
 	cross, _ = body["cross"].(map[string]any)
 	if cross["leverage"] != float64(5) || cross["warn_level"] != "1.2" || body["updated_by"] != "ops@example.com" ||
-		int64(body["version"].(float64)) != sv+1 {
+		versionOf(t, body) != sv+1 {
 		t.Fatalf("the settings after %v", body)
 	}
 
@@ -487,7 +501,7 @@ func TestInternalEndpoints(t *testing.T) {
 		pair["liquidation_level"] != "1.05" || pair["liquidation_fee"] != "0.02" || pair["accounts"] != float64(0) {
 		t.Fatalf("BTC-USDT %v", pair)
 	}
-	pv := int64(pair["version"].(float64))
+	pv := versionOf(t, pair)
 	st, body = a.do("PUT", "/internal/margin/pairs/BTC-USDT", fmt.Sprintf(
 		`{"leverage":5,"warn_level":"1.20","liquidation_level":"1.10","liquidation_fee":"0.02","expected_version":%d}`, pv), admin...)
 	expect(t, "a pair without isolated", st, body, 400, apperr.CodeInvalidArgument)

@@ -23,6 +23,7 @@ import (
 	"github.com/skill/exchange/internal/platform/event"
 	"github.com/skill/exchange/internal/platform/flags"
 	"github.com/skill/exchange/internal/platform/migrate"
+	"github.com/skill/exchange/internal/platform/pg"
 	"github.com/skill/exchange/internal/platform/testenv"
 )
 
@@ -310,6 +311,7 @@ func (f *features) set(key string, on bool) {
 
 type rig struct {
 	svc      *application.Service
+	db       *pg.DB
 	store    *postgres.Store
 	ledger   *ledger
 	prices   *prices
@@ -342,7 +344,7 @@ func newRig(t *testing.T) *rig {
 		t.Fatal(err)
 	}
 	r := &rig{
-		store: postgres.NewStore(db, event.NewFactory("margin-service", "test")), ledger: newLedger(),
+		db: db, store: postgres.NewStore(db, event.NewFactory("margin-service", "test")), ledger: newLedger(),
 		prices:   &prices{p: domain.Prices{"BTC": {Value: d("30000"), Fresh: true}, "ETH": {Value: d("2000"), Fresh: true}}},
 		features: &features{on: map[string]bool{flags.KeyMarginEnabled: true}},
 		clock:    time.Date(2026, 10, 6, 10, 15, 0, 0, time.UTC),
