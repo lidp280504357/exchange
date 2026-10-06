@@ -22,5 +22,7 @@
 | [0016](0016-platform-coin-simulated-market.md) | 平台币 ASTRA 与模拟市场（机器人池等同平台、运营控价与守卫、仅限学习项目） | 已接受 |
 | [0017](0017-stand-in-custodian-and-hidden-test-asset.md) | 替身托管方 UDUNMOCK 与隐藏测试资产 TUSD（端到端在真网关切换后照常覆盖托管路径） | 已接受 |
 | [0018](0018-margin-debt-rows.md) | 杠杆负债记成用户名下的负数行（三行记法） | 已接受 |
+| [0019](0019-mark-price-from-binance.md) | 合约的标记价、指数价与资金费率跟随币安，自算价格作后备 | 已接受 |
+| [0020](0020-inverse-contracts-ledger-and-precision.md) | 反向（币本位）合约的账本与精度：按笔舍入一次、按结算资产分账户与对账、HOUSE 的币不为负 | 已接受 |
 
 领域词汇表见需求文档附录 A，状态机见附录 B。
