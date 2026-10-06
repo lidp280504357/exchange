@@ -528,6 +528,10 @@ try {
   await page.click('[data-testid="fixed-edit-home-hero"]');
   await waitText("副标题");
   await page.waitForFunction(() => document.querySelector("#article-title-zh-CN")?.value.length > 0, { timeout: 10000 });
+  // The default draft in Traditional Chinese is the generated zh-TW file's (G7b; review EV ②).
+  const heroLanguages = '[role=dialog] [role=radiogroup][aria-label="语言"]';
+  await page.evaluate((sel) => [...document.querySelectorAll(`${sel} [role=radio]`)].find((r) => r.innerText.trim() === "繁體中文")?.click(), heroLanguages);
+  await page.waitForFunction(() => document.querySelector("#article-title-zh-TW")?.value.length > 0, { timeout: 10000 });
   const forMode = await page.evaluate(() => document.querySelector('[role=dialog] [role=radiogroup][aria-label="适用模式"] [aria-checked="true"]')?.innerText.trim());
   if (forMode !== "正式模式" && forMode !== "通用") throw new Error(`the hero's live column opens an editor for "${forMode}"`);
   await page.keyboard.press("Escape");

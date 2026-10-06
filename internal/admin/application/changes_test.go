@@ -24,9 +24,10 @@ type docCatalog struct {
 	order []string
 	real  int
 	// down fails every call as a service down; lost moves a status but
-	// loses the answer; refuse refuses to move that symbol.
-	down, lost bool
-	refuse     string
+	// loses the answer; refuse refuses to move that symbol, unavailable
+	// fails its move for a moment (nothing moved).
+	down, lost          bool
+	refuse, unavailable string
 }
 
 var entityKeys = map[string]struct{ section, key string }{
@@ -55,6 +56,21 @@ func (c *docCatalog) Export(context.Context) (json.RawMessage, error) {
 		}
 	}
 	return json.Marshal(doc)
+}
+
+// List lists the contracts as instrument-service's listing has them (a
+// coin's changes read them there).
+func (c *docCatalog) List(context.Context) (json.RawMessage, error) {
+	if c.down {
+		return nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "instrument-service is down")
+	}
+	contracts := []map[string]any{}
+	for _, key := range c.order {
+		if it, ok := c.items["CONTRACT"][key]; ok {
+			contracts = append(contracts, it)
+		}
+	}
+	return json.Marshal(map[string]any{"assets": []any{}, "pairs": []any{}, "contracts": contracts})
 }
 
 func (c *docCatalog) Apply(_ context.Context, config json.RawMessage, dryRun bool, _, _ string) (ports.ConfigResult, error) {
@@ -115,6 +131,9 @@ func (c *docCatalog) setStatus(entity, symbol, to string) (string, error) {
 	}
 	if symbol == c.refuse {
 		return "", apperr.New(apperr.KindConflict, "INSTRUMENT_STATUS_TRANSITION_INVALID", "no such move")
+	}
+	if symbol == c.unavailable {
+		return "", apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "instrument-service is busy")
 	}
 	from := it["status"].(string)
 	it["status"], it["version"] = to, it["version"].(float64)+1

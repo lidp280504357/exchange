@@ -148,7 +148,7 @@ export function ArticlesPage({ admin, section }: { admin: Admin; section: ListSe
             </span>
             <span className="font-mono text-xs text-fg-3">
               {a.slug} · {t(`admin.content.categories.${a.category}`, { defaultValue: a.category })}
-              {a.texts.some((x) => x.locale === "zh-TW") ? " · 繁" : ""}
+              {a.texts.some((x) => x.locale === "zh-TW") ? ` · ${t("admin.content.twMark")}` : ""}
               {a.texts.some((x) => x.locale === "en") ? " · EN" : ""}
             </span>
           </span>

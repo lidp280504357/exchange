@@ -75,30 +75,13 @@ func coinFingerprint(coin, to string, moves []CoinContractMove) string {
 	return strings.Join(parts, "|")
 }
 
-// exportedContracts reads the contracts as the reference data's document
-// has them (both margin types), as a contract's status change reads its
-// status.
-func (s *Service) exportedContracts(ctx context.Context) ([]listedContract, error) {
-	raw, err := s.Catalog.Export(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var doc struct {
-		Contracts []listedContract `json:"contracts"`
-	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, apperr.New(apperr.KindUnavailable, apperr.CodeUnavailable, "instrument-service answered badly")
-	}
-	return doc.Contracts, nil
-}
-
 // coinPlan works out which of a coin's contracts move to a status.
 func (s *Service) coinPlan(ctx context.Context, coin, to string) (moves, staying []CoinContractMove, err error) {
 	from, ok := coinMoves[to]
 	if !ok {
 		return nil, nil, apperr.Invalid("to must be CANCEL_ONLY (close) or TRADING (reopen)")
 	}
-	contracts, err := s.exportedContracts(ctx)
+	contracts, err := s.listedContracts(ctx)
 	if err != nil {
 		return nil, nil, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "the contracts cannot be read")
 	}
@@ -199,8 +182,10 @@ func (s *Service) SetCoinStatus(ctx context.Context, p Principal, coin, to, reas
 
 // applyCoinStatus moves a due change's contracts one by one. None moves
 // when one of them is no longer where it was confirmed (the change fails:
-// preview again); one found where it goes is in effect already. Each move
-// is audited as a contract's status move (admin.instruments.contract_status).
+// preview again), and the result says which are where they go (moved by
+// an earlier round of this change, or otherwise) and which are not (review
+// EY ①); one found where it goes is in effect already. Each move is
+// audited as a contract's status move (admin.instruments.contract_status).
 // A move failing for a moment waits for the next round, which finds those
 // moved in effect; one that will not pass is reported in the result with
 // how each of the others went.
@@ -209,7 +194,7 @@ func (s *Service) applyCoinStatus(ctx context.Context, c domain.InstrumentChange
 	if err := json.Unmarshal(c.Payload, &pl); err != nil || len(pl.Contracts) == 0 {
 		return "", false, apperr.Invalid("the change's payload is unreadable")
 	}
-	contracts, err := s.exportedContracts(ctx)
+	contracts, err := s.listedContracts(ctx)
 	if err != nil {
 		return "", false, apperr.Wrap(err, apperr.KindUnavailable, apperr.CodeUnavailable, "the contracts cannot be read")
 	}
@@ -217,10 +202,10 @@ func (s *Service) applyCoinStatus(ctx context.Context, c domain.InstrumentChange
 	for _, x := range contracts {
 		now[x.Symbol] = x.Status
 	}
-	for _, m := range pl.Contracts {
-		if cur := now[m.Symbol]; cur != m.From && cur != m.To {
-			return "", false, errNotConfirmed.WithDetail("symbol", m.Symbol)
-		}
+	if moved := movedElsewhere(pl.Contracts, now); moved != "" {
+		return "", false, apperr.New(apperr.KindConflict, apperr.CodeConflict,
+			"the contracts changed since the change was confirmed, nothing more moves; preview it again: "+whereEach(pl.Contracts, now)).
+			WithDetail("symbol", moved)
 	}
 	lines := make([]string, 0, len(pl.Contracts))
 	failed := 0
@@ -247,6 +232,36 @@ func (s *Service) applyCoinStatus(ctx context.Context, c domain.InstrumentChange
 		return "", attempted, apperr.New(apperr.KindConflict, apperr.CodeConflict, fmt.Sprintf("%d of %d did not move: %s", failed, len(lines), result))
 	}
 	return result, attempted, nil
+}
+
+// movedElsewhere is the first of a change's contracts that is neither
+// where it was confirmed nor where it goes ("" for none).
+func movedElsewhere(moves []CoinContractMove, now map[string]string) string {
+	for _, m := range moves {
+		if cur := now[m.Symbol]; cur != m.From && cur != m.To {
+			return m.Symbol
+		}
+	}
+	return ""
+}
+
+// whereEach says where each of a change's contracts is: where it goes (in
+// effect), not moved, or not moved and elsewhere now.
+func whereEach(moves []CoinContractMove, now map[string]string) string {
+	lines := make([]string, 0, len(moves))
+	for _, m := range moves {
+		switch cur := now[m.Symbol]; cur {
+		case m.To:
+			lines = append(lines, fmt.Sprintf("%s: %s → %s%s", m.Symbol, m.From, m.To, inEffect))
+		case m.From:
+			lines = append(lines, m.Symbol+": not moved")
+		case "":
+			lines = append(lines, m.Symbol+": not moved (no longer listed)")
+		default:
+			lines = append(lines, fmt.Sprintf("%s: not moved (%s now)", m.Symbol, cur))
+		}
+	}
+	return strings.Join(lines, "; ")
 }
 
 // auditCoinMove records one contract's move of a coin's change in the

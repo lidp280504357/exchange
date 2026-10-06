@@ -2151,13 +2151,21 @@ check '.title == "端到端检查公告" and .locale == "zh-CN" and (.body | con
 call GET "/v1/announcements/$SLUG?locale=zh-TW" ""
 expect 200 - "the article in Traditional Chinese (G7b)"
 check '.title == "端到端檢查公告" and .locale == "zh-TW" and .fallback == false and (.body | contains("模擬資產"))' "as the console wrote it, not the Simplified"
-as OPERATOR PUT "/admin/v1/articles/$ART_ID" "$(announcement "E2E check $RUN, edited" | jq -c --argjson v "$ART_V" '. + {version: $v, reason: "e2e edits it while shown"}')"
+# The edit leaves the Traditional Chinese out: its readers get the
+# Simplified, said so (fallback, G7b; review EV ②).
+as OPERATOR PUT "/admin/v1/articles/$ART_ID" "$(announcement "E2E check $RUN, edited" |
+  jq -c --argjson v "$ART_V" '.texts |= map(select(.locale != "zh-TW")) | . + {version: $v, reason: "e2e edits it while shown"}')"
 expect 200 - "OPERATOR edits it while shown"
 ART_V=$(jq -r .version <<<"$BODY")
 as OPERATOR PUT "/admin/v1/articles/$ART_ID" "$(announcement stale | jq -c --argjson v "$((ART_V - 1))" '. + {version: $v, reason: "e2e edits an old copy"}')"
 expect 409 COMMON_CONFLICT "an edit of an older version is refused"
 eventually 50 "the PC site shows the edit" listed "$BASE" "E2E check $RUN, edited"
 eventually 50 "and the mobile site" listed "$M_BASE" "E2E check $RUN, edited"
+fell_back() { # the edited article asked in Traditional Chinese comes in Simplified, marked
+  call GET "/v1/announcements/$SLUG?locale=zh-TW" ""
+  [[ $STATUS == 200 ]] && jq -e '.locale == "zh-CN" and .fallback == true and .title == "端到端检查公告"' <<<"$BODY" >/dev/null
+}
+eventually 50 "without its Traditional Chinese, the article comes in Simplified to those readers (fallback)" fell_back
 as OPERATOR POST "/admin/v1/articles/$ART_ID/archive" "{\"version\":$ART_V,\"reason\":\"e2e takes it off\"}"
 expect 200 - "OPERATOR takes it off"
 check '.status == "ARCHIVED"' "archived"

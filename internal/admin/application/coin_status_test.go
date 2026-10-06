@@ -9,6 +9,7 @@ import (
 
 	"github.com/skill/exchange/internal/admin/domain"
 	"github.com/skill/exchange/internal/platform/apperr"
+	"github.com/skill/exchange/internal/platform/flags"
 )
 
 // coinDoc lists BTC's and ETH's contracts of both margin types, a coin
@@ -139,8 +140,93 @@ func TestCloseAndReopenACoinsContracts(t *testing.T) {
 	if _, err := h.svc.ApplyDueChanges(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ = h.store.Changes().Get(ctx, res.Change.ID); got.Status != domain.ChangeFailed || status("BTC-USD-PERP") != "DELISTED" {
+	if got, _ = h.store.Changes().Get(ctx, res.Change.ID); got.Status != domain.ChangeFailed || status("BTC-USD-PERP") != "DELISTED" ||
+		got.Result != "COMMON_CONFLICT: the contracts changed since the change was confirmed, nothing more moves; preview it again: "+
+			"BTC-USD-PERP: not moved (DELISTED now)" {
 		t.Fatalf("moved meanwhile %+v", got)
+	}
+}
+
+// A contract moved elsewhere between two rounds of a coin's change fails
+// it, the result saying which of its contracts are where they go and
+// which are not (review EY ①).
+func TestACoinsChangeFailingAfterARound(t *testing.T) {
+	h, catalog, boss, _, _ := changeRigOf(t, coinDoc)
+	ctx := context.Background()
+	prev, err := h.svc.PreviewCoinStatus(ctx, boss, "BTC", "CANCEL_ONLY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := h.svc.SetCoinStatus(ctx, boss, "BTC", "CANCEL_ONLY", "winding BTC down", prev.Confirmation.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// BTC-USD-PERP moves; BTC-USDT-PERP's move fails for a moment.
+	h.now = h.now.Add(5 * time.Minute)
+	catalog.unavailable = "BTC-USDT-PERP"
+	if n, err := h.svc.ApplyDueChanges(ctx); err != nil || n != 0 || catalog.items["CONTRACT"]["BTC-USD-PERP"]["status"] != "CANCEL_ONLY" {
+		t.Fatalf("the first round %d %v", n, err)
+	}
+	// Meanwhile BTC-USDT-PERP is halted by hand.
+	catalog.unavailable = ""
+	_, _ = catalog.setStatus("CONTRACT", "BTC-USDT-PERP", "HALT")
+	h.now = h.now.Add(domain.ClaimHold)
+	if n, err := h.svc.ApplyDueChanges(ctx); err != nil || n != 1 {
+		t.Fatalf("the next round %d %v", n, err)
+	}
+	got, _ := h.store.Changes().Get(ctx, res.Change.ID)
+	if got.Status != domain.ChangeFailed || got.Result != "COMMON_CONFLICT: the contracts changed since the change was confirmed, "+
+		"nothing more moves; preview it again: BTC-USD-PERP: HALT → CANCEL_ONLY (in effect already); BTC-USDT-PERP: not moved (HALT now)" {
+		t.Fatalf("failed %+v", got)
+	}
+	if catalog.items["CONTRACT"]["BTC-USDT-PERP"]["status"] != "HALT" {
+		t.Fatal("a contract moved by hand was moved again")
+	}
+}
+
+// Two-person (review EY ②): a coin's change waits for a second ADMIN, not
+// its requester; approved, it waits the delay and moves the contracts;
+// rejected, it never does.
+func TestACoinsChangeWithTwoPeople(t *testing.T) {
+	h, catalog, boss, deputy, _ := changeRigOf(t, coinDoc)
+	ctx := context.Background()
+	h.svc.Features = onFlags{flags.KeyTwoPerson: true}
+	status := func(symbol string) any { return catalog.items["CONTRACT"][symbol]["status"] }
+	prev, err := h.svc.PreviewCoinStatus(ctx, boss, "ETH", "CANCEL_ONLY")
+	if err != nil || !prev.TwoPerson || len(prev.Contracts) != 1 {
+		t.Fatalf("preview %+v %v", prev, err)
+	}
+	res, err := h.svc.SetCoinStatus(ctx, boss, "ETH", "CANCEL_ONLY", "winding ETH down", prev.Confirmation.Token)
+	if err != nil || res.Change.Status != domain.ChangePendingApproval || !res.Change.EffectiveAt.IsZero() {
+		t.Fatalf("closing %+v %v", res.Change, err)
+	}
+	h.now = h.now.Add(time.Hour)
+	if n, err := h.svc.ApplyDueChanges(ctx); err != nil || n != 0 || status("ETH-USDT-PERP") != "TRADING" {
+		t.Fatalf("applied unapproved %d %v", n, err)
+	}
+	if _, err := h.svc.DecideInstrumentChange(ctx, boss, res.Change.ID, true, "my own"); code(err) != "ADMIN_SELF_APPROVAL" {
+		t.Fatalf("approved by its requester: %v", err)
+	}
+	approved, err := h.svc.DecideInstrumentChange(ctx, deputy, res.Change.ID, true, "checked the positions")
+	if err != nil || approved.Status != domain.ChangeScheduled || !approved.EffectiveAt.Equal(h.now.Add(5*time.Minute)) {
+		t.Fatalf("approved %+v %v", approved, err)
+	}
+	h.now = h.now.Add(5 * time.Minute)
+	if n, err := h.svc.ApplyDueChanges(ctx); err != nil || n != 1 || status("ETH-USDT-PERP") != "CANCEL_ONLY" || status("ETH-USD-PERP") != "PREPARE" {
+		t.Fatalf("due %d %v", n, err)
+	}
+	// Reopening, rejected: nothing moves.
+	prev, _ = h.svc.PreviewCoinStatus(ctx, boss, "ETH", "TRADING")
+	res, err = h.svc.SetCoinStatus(ctx, boss, "ETH", "TRADING", "ETH back", prev.Confirmation.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rejected, err := h.svc.DecideInstrumentChange(ctx, deputy, res.Change.ID, false, "not yet"); err != nil || rejected.Status != domain.ChangeRejected {
+		t.Fatalf("rejected %+v %v", rejected, err)
+	}
+	h.now = h.now.Add(time.Hour)
+	if n, err := h.svc.ApplyDueChanges(ctx); err != nil || n != 0 || status("ETH-USDT-PERP") != "CANCEL_ONLY" {
+		t.Fatalf("a rejected change applied %d %v", n, err)
 	}
 }
 
