@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { marketApi, unwrap } from "../api/client";
 import type { components } from "../api/gen/market";
 import { cmp, isDecimal, mul, normalize, sign } from "../format/decimal";
@@ -70,9 +71,29 @@ export function assetDecimals(assets: AssetInfo[] | undefined, asset: string, fa
   return assets?.find((a) => a.asset_code === asset)?.decimals ?? fallback;
 }
 
-/** useContracts returns the perpetual contracts (cached for a minute). */
+/**
+ * fetchContracts lists the perpetual contracts the sites show: the listed
+ * ones but those still PREPARE. Binance's perpetuals are listed PREPARE
+ * and open in batches (design 2026-10-06 §3.4); until then the sites leave
+ * them out (coordinator, review EY).
+ */
+export async function fetchContracts() {
+  const list = await unwrap(marketApi.GET("/v1/market/contracts"));
+  return { ...list, contracts: list.contracts.filter((c) => c.status !== "PREPARE") };
+}
+
+/** useContracts returns fetchContracts' list (cached for a minute). */
 export function useContracts() {
-  return useQuery({ queryKey: qk.contracts, queryFn: () => unwrap(marketApi.GET("/v1/market/contracts")), staleTime: 60_000 });
+  return useQuery({ queryKey: qk.contracts, queryFn: fetchContracts, staleTime: 60_000 });
+}
+
+/**
+ * useSettleAssets lists the assets the shown contracts settle in, each a
+ * FUTURES account: USDT, then the coin-margined contracts' coins.
+ */
+export function useSettleAssets(): string[] {
+  const contracts = useContracts();
+  return useMemo(() => [...new Set(["USDT", ...(contracts.data?.contracts ?? []).map((c) => c.settle_asset)])], [contracts.data]);
 }
 
 /** useContract finds one contract by symbol, with the query's state. */

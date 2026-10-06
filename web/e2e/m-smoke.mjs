@@ -114,11 +114,12 @@ try {
   await page.waitForFunction((sel) => document.querySelectorAll(sel).length >= 3, { timeout: 20000 }, ROWS);
   await typeInto('input[placeholder="搜索币种名称或代码"]', "ETH");
   // The search also matches names in both languages ("Ethena", "Ethereum
-  // Classic"): a few rows, ETH's among them.
+  // Classic"): a few rows, ETH's among them (with Binance's perpetuals, design
+  // 2026-10-06 §3.4, five pairs and six contracts once every contract trades).
   await page.waitForFunction(
     (sel) => {
       const list = [...document.querySelectorAll(sel)].map((el) => el.innerText);
-      return list.length > 0 && list.length <= 8 && list.some((r) => r.includes("ETH"));
+      return list.length > 0 && list.length <= 16 && list.some((r) => r.includes("ETH"));
     },
     { timeout: 10000 },
     ROWS,
