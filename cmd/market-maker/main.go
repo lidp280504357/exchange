@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
 
 	ledgerv1 "github.com/skill/exchange/api/gen/go/exchange/ledger/v1"
@@ -163,15 +164,22 @@ func setup(ctx context.Context, a *app.App) error {
 	}
 	a.Add("house caps", app.Loop(caps.Run))
 	signed := &svcsign.Verifier{Keys: map[string][]byte{}}
+	usable := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "market_house_caps_signing_key",
+		Help: "1 for a key HOUSE's caps changes may be signed with (ops: HOUSE_CAPS_API_SECRET, admin: HOUSE_CAPS_ADMIN_API_SECRET), 0 for one missing or too short.",
+	}, []string{"key"})
+	a.Metrics().MustRegister(usable)
 	for _, k := range []struct{ id, env, secret string }{
 		{httpapi.KeyOps, "HOUSE_CAPS_API_SECRET", cfg.CapsAPISecret},
 		{httpapi.KeyAdmin, "HOUSE_CAPS_ADMIN_API_SECRET", cfg.CapsAdminAPISecret},
 	} {
 		if err := svcsign.CheckSecret(k.secret); err != nil {
 			a.Logger().Warn("house caps: changes signed with this key are refused", "key", k.id, "variable", k.env, "error", err.Error())
+			usable.WithLabelValues(k.id).Set(0)
 			continue
 		}
 		signed.Keys[k.id] = []byte(k.secret)
+		usable.WithLabelValues(k.id).Set(1)
 	}
 	r := a.NewRouter()
 	(&httpapi.Handler{Caps: caps, Signed: signed}).Routes(r)

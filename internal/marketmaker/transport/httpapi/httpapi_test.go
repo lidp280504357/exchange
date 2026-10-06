@@ -167,6 +167,11 @@ func TestTheCapsAPI(t *testing.T) {
 	if code, got, _ = serveHeader(t, r, "", header, http.MethodPut, "/internal/house/caps", approved); code != 401 {
 		t.Fatalf("the same signature again: %d %v", code, got)
 	}
+	// The ops key cannot pass for the admin's (review FR).
+	forged := svcsign.Sign(httpapi.KeyAdmin, opsSecret, http.MethodPut, "/internal/house/caps", []byte(approved), time.Now())
+	if code, got, _ = serveHeader(t, r, "", forged, http.MethodPut, "/internal/house/caps", approved); code != 401 || got["code"] != "SERVICE_UNSIGNED" {
+		t.Fatalf("ops signing as admin: %d %v", code, got)
+	}
 	if code, got = serve(t, r, httpapi.KeyOps, http.MethodPut, "/internal/house/caps", `{"level":"1","version":1,"actor":"a","reason":"r"}`); code != 409 ||
 		got["code"] != "HOUSE_CAPS_VERSION" {
 		t.Fatalf("a stale version: %d %v", code, got)

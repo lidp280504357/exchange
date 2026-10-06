@@ -539,6 +539,24 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'market_house_caps_signing_key{job="market-maker", instance="a", key="ops"}'
+        values: '1x14'
+      - series: 'market_house_caps_signing_key{job="market-maker", instance="a", key="admin"}'
+        values: '0x14'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: HouseCapsSigningKeyMissing
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: HouseCapsSigningKeyMissing
+        exp_alerts:
+          - exp_labels: {severity: warning, job: market-maker, key: admin}
+            exp_annotations:
+              summary: "market-maker has no usable admin key for HOUSE's caps: changes signed with it are refused (house/caps.env, house/admin.env)"
+              runbook: docs/runbook/market-maker.md
+
+  - interval: 1m
+    input_series:
       - series: 'market_reference_book_age_seconds{job="market-data-service", symbol="SOL-USDT"}'
         values: '0.2 -1 -1 -1 -1 -1'
       - series: 'market_reference_book_age_seconds{job="market-data-service", symbol="BTC-USDT"}'

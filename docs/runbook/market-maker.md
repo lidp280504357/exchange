@@ -72,7 +72,8 @@
 - **改动要签名**（审查 FL，C47，照 market-sim）：`PUT` 必须带 `X-Service-Signature`（`internal/platform/svcsign`，HMAC 覆盖时间、随机数、方法、路径与正文，5 分钟内有效、同一签名只收一次），否则 401 `SERVICE_UNSIGNED`；读不要签名。两把键，每个调用方一把：`ops`（`HOUSE_CAPS_API_SECRET`，market-maker 容器里的 `exchangectl house`）与 `admin`（`HOUSE_CAPS_ADMIN_API_SECRET`，admin-service）。签名方担保正文里的 `actor`；**只有 `admin` 键能带 `approver`/`approval_id`**，其它键带了 403 `HOUSE_CAPS_APPROVAL_NEEDS_ADMIN`。缺哪把键（或不足 32 个字符），用那把签的改动一律被拒，启动日志告警，额度照库里的生效、报价不受影响。
 - 密钥：测试服在 `/opt/exchange/infra/house/caps.env`（`HOUSE_CAPS_API_SECRET`，只挂给 market-maker）与 `house/admin.env`（`HOUSE_CAPS_ADMIN_API_SECRET`，挂给 market-maker 与 admin-service），部署脚本第一次运行时生成、不打印；本机在 `.env`。
 - 手工（服务器上，在 market-maker 容器里）：读 `exchangectl house caps`、`exchangectl house changes`；改 `exchangectl house call PUT /internal/house/caps '{"safety":"2000","version":<读到的版本>,"actor":"ops:<名字>","reason":"..."}'`（`ops` 键，不能带批准人）。例：`sudo docker compose -f docker-compose.yml -f docker-compose.apps.yml exec -T market-maker /app/exchangectl house caps`。本机：`scripts/ops/house.sh caps`（当前值、版本与最近改动）、`scripts/ops/house.sh caps set safety=2000 level=1000000 "原因"`（读当前版本后签名改，actor 为 `ops:<本机用户>`）。
-- 指标（C47 ④）：`market_house_cap_usdt{cap="level|symbol|total|contract|safety"}`、`market_house_contract_max_leverage`、`market_house_caps_version`（0 表示还没读到库里的）。
+- 指标（C47 ④）：`market_house_cap_usdt{cap="level|symbol|total|contract|safety"}`、`market_house_contract_max_leverage`、`market_house_caps_version`（0 表示还没读到库里的）；`market_house_caps_signing_key{key="ops|admin"}` 为 1 表示该键可用，0 表示启动时缺失或不足 32 个字符（告警 `HouseCapsSigningKeyMissing`，10 分钟，warning：用它签的改动都会被拒，检查服务器 `house/caps.env`、`house/admin.env`）。
+- 库表也守范围（迁移 marketmaker 00003 的 `house_caps_bounds`，审查 FP C48）：直接改库越界会被拒；`Seed` 存第 1 版前同样校验。
 
 ### 各项额度的用途与改动影响（C47、A69 的说明文字）
 

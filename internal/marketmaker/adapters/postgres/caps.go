@@ -64,8 +64,11 @@ func (j capsJSON) caps() domain.Caps {
 }
 
 // Seed stores caps as version 1 unless some are stored, and returns what
-// is stored.
+// is stored; caps out of bounds are refused (review FP, C48).
 func (s *Store) Seed(ctx context.Context, caps domain.Caps, actor string, at time.Time) (domain.StoredCaps, error) {
+	if err := caps.Validate(); err != nil {
+		return domain.StoredCaps{}, fmt.Errorf("seed house caps: %w", err)
+	}
 	var out domain.StoredCaps
 	err := s.db.InTx(ctx, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `INSERT INTO house_caps (`+capsColumns+`) VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8) ON CONFLICT (id) DO NOTHING`,

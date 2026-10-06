@@ -66,6 +66,12 @@ func TestHouseCaps(t *testing.T) {
 	if got, ok, err := store.Caps(ctx); err != nil || !ok || got.Version != 3 || !got.Caps.Total.Equal(d("200000000")) {
 		t.Fatalf("read %+v %v %v", got, ok, err)
 	}
+	// The table keeps to the bounds too (review FP, C48).
+	for _, set := range []string{"contract_leverage = 0", "contract_leverage = 126", "symbol = 0", "total = 2e15", "level = -1"} {
+		if _, err := db.Exec(ctx, "UPDATE house_caps SET "+set); err == nil {
+			t.Errorf("the table took %s", set)
+		}
+	}
 	list, err := store.Changes(ctx, 10)
 	if err != nil || len(list) != 3 || list[1].Version != 2 || list[1].Previous == nil || !list[1].Previous.Level.Equal(d("20000")) ||
 		list[1].Approver != "admin:b" || list[1].ApprovalID != "ap1" || list[1].SignedBy != "admin" || list[0].SignedBy != "ops" ||

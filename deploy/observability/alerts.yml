@@ -270,6 +270,16 @@ groups:
           summary: "HOUSE's {{ $labels.asset }} contract equity is {{ $value }} {{ $labels.asset }}: its losses there now come out of that coin's insurance fund"
           runbook: docs/runbook/market-maker.md
 
+      # A signing key of HOUSE's caps missing or too short at start: the
+      # changes signed with it are refused (review FR, C47).
+      - alert: HouseCapsSigningKeyMissing
+        expr: max by (job, key) (market_house_caps_signing_key) == 0
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "market-maker has no usable {{ $labels.key }} key for HOUSE's caps: changes signed with it are refused (house/caps.env, house/admin.env)"
+          runbook: docs/runbook/market-maker.md
+
       - alert: MarketSimFailing
         expr: sum by (job) (increase(market_sim_errors_total[10m])) > 100
         labels: {severity: warning}

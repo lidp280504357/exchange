@@ -202,12 +202,14 @@ fi
 WARNABLE=$(pg "SELECT count(*) FROM ledger.accounts a WHERE a.owner_type = 'USER' AND a.account_type IN ('MARGIN_CROSS', 'MARGIN_ISOLATED') AND a.asset = 'ASTRA' AND a.available + a.frozen > 0 AND EXISTS (SELECT 1 FROM ledger.accounts d WHERE d.owner_type = 'USER' AND d.owner_id = a.owner_id AND d.scope = a.scope AND d.account_type IN (a.account_type || '_DEBT', a.account_type || '_INTEREST') AND d.available <> 0)")
 echo "note: $WARNABLE margin accounts hold ASTRA with a debt; the drops may warn (and mail) them"
 echo "== 1. ASTRA drops 4%: A is liquidated against the bots' bids"
-held A
-M_A=$(jq -r '.positions[0].margin' <<<"$BODY")
 # ASTRA's insurance fund before: its row, its version (the lines after it
-# are what moved it) and the time A's settlements are counted from.
+# are what moved it) and the time A's funding is counted from, read before
+# A's margin (review FP, C48: a funding payment between the two would go
+# unseen).
 read -r FUND_ID FUND_BEFORE FUND_V T0 <<<"$(pg "SELECT concat_ws(' ', id, trim_scale(available), version, extract(epoch FROM now())) FROM ledger.accounts WHERE owner_type = 'SYSTEM' AND account_type = 'INSURANCE_FUND' AND asset = 'ASTRA'")"
 [[ -n $FUND_ID ]] || fail "ASTRA has no insurance fund account (scripts/ops/astra.sh seed)"
+held A || fail "A's position went before the drop"
+M_A=$(jq -r '.positions[0].margin' <<<"$BODY")
 # shellcheck disable=SC2016 # expanded when the drill ends
 at_exit 'back_up'
 drop
@@ -218,18 +220,22 @@ eventually 600 "A's position liquidated (flat)" flat A
 # the bankruptcy price), or the fund pays the loss the margin does not
 # cover (below it). Either way the fund's net is A's margin less the
 # losses and the fees of the fills, its pay-outs are what the fills say
-# it paid, and its row moved by its lines.
+# it paid, and its row moved by its lines. Only the settlements of A's
+# liquidation fills count (keyed fill:<trade>:<side>; a funding payment
+# the fund covered is not one), and only the fund's available balance.
 read -r LIQ_FILLS PAID IN OUT NET EXPECT OTHER FUND_AFTER FUNDED OK_PAID OK_ROW OK_NET <<<"$(pg "
 WITH mine AS (
   SELECT l.amount FROM ledger.futures_settlements s
   CROSS JOIN LATERAL jsonb_array_elements(s.outcomes) o
   JOIN ledger.journal_lines l ON l.journal_id = NULLIF(o->>'journal_id', '')::uuid
-  WHERE s.user_id = '$USER_A' AND s.created_at >= to_timestamp($T0) AND l.account_id = '$FUND_ID'),
+  WHERE s.user_id = '$USER_A' AND split_part(s.idem_key, ':', 1) = 'fill'
+    AND split_part(s.idem_key, ':', 2) IN (SELECT trade_id::text FROM derivatives.fills WHERE user_id = '$USER_A' AND liquidation)
+    AND l.account_id = '$FUND_ID' AND l.balance_kind = 'AVAILABLE'),
 m AS (SELECT coalesce(sum(amount) FILTER (WHERE amount > 0), 0) AS pay_in,
   coalesce(-sum(amount) FILTER (WHERE amount < 0), 0) AS pay_out FROM mine),
 fund AS (SELECT available, version FROM ledger.accounts WHERE id = '$FUND_ID'),
 lines AS (SELECT coalesce(sum(l.amount), 0) AS moved FROM ledger.journal_lines l, fund
-  WHERE l.account_id = '$FUND_ID' AND l.account_version > $FUND_V AND l.account_version <= fund.version),
+  WHERE l.account_id = '$FUND_ID' AND l.balance_kind = 'AVAILABLE' AND l.account_version > $FUND_V AND l.account_version <= fund.version),
 fills AS (SELECT count(*) FILTER (WHERE liquidation) AS n, coalesce(sum(insurance), 0) AS paid,
   coalesce(sum(greatest(-realized_pnl, 0)) FILTER (WHERE liquidation), 0) AS loss,
   coalesce(sum(fee) FILTER (WHERE liquidation), 0) AS fee
@@ -252,13 +258,15 @@ fi
 echo "ok   $LIQ_FILLS liquidation fills; ASTRA's insurance fund took $IN and paid $OUT (the fills say $PAID): net $NET, A's margin $M_A less the losses and fees"
 [[ $OTHER == 0 ]] || echo "note: other settlements moved the fund meanwhile by $OTHER ASTRA ($FUND_BEFORE -> $FUND_AFTER)"
 eventually 60 "A was told: CONTRACT_LIQUIDATING" notice A CONTRACT_LIQUIDATING
-# The monitor looks once a second: the warning needs the margin seen
-# between 1.0 and 1.2 times the maintenance margin on the way down, which
-# a mark moving with the 60-second index nearly always is.
-if notice A CONTRACT_LIQUIDATION_WARNED; then
-  echo "ok   A was warned before: CONTRACT_LIQUIDATION_WARNED"
+# The monitor looks once a second: a warning goes out when it sees the
+# margin between 1.0 and 1.2 times the maintenance margin on the way down,
+# which a mark moving with the 60-second index nearly always is. When the
+# outbox has one, the inbox must have it too (review FP, C48).
+WARNED=$(pg "SELECT count(*) FROM derivatives.outbox WHERE topic = 'derivatives.liquidation.events' AND event_type = 'derivatives.LiquidationWarning' AND partition_key = '$USER_A'")
+if ((WARNED > 0)); then
+  eventually 60 "A was warned before: CONTRACT_LIQUIDATION_WARNED" notice A CONTRACT_LIQUIDATION_WARNED
 else
-  echo "note: no CONTRACT_LIQUIDATION_WARNED for A: the mark crossed the warning band between two checks"
+  echo "note: no warning went out for A: the mark crossed the warning band between two checks"
 fi
 held C || fail "C's position went with A's"
 
