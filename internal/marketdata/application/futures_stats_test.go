@@ -1,6 +1,7 @@
 package application
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
@@ -171,11 +172,13 @@ func (l futuresList) FuturesContracts(context.Context) ([]ports.FuturesContract,
 	return l, nil
 }
 
-// recordPub keeps what was published; err fails the next publish.
+// recordPub keeps what was published, and what a failed publish was
+// given; err fails the next publish.
 type recordPub struct {
-	mu   sync.Mutex
-	recs []kafka.Record
-	err  error
+	mu     sync.Mutex
+	recs   []kafka.Record
+	failed []kafka.Record
+	err    error
 	// fails is how many publishes fail before they go through.
 	fails int
 }
@@ -184,10 +187,12 @@ func (p *recordPub) Publish(_ context.Context, recs ...kafka.Record) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.err != nil {
+		p.failed = append(p.failed, recs...)
 		return p.err
 	}
 	if p.fails > 0 {
 		p.fails--
+		p.failed = append(p.failed, recs...)
 		return errors.New("broker unreachable")
 	}
 	p.recs = append(p.recs, recs...)
@@ -518,12 +523,19 @@ func TestFuturesStatsRelaysLiquidations(t *testing.T) {
 	if err := s.flush(ctx); err != nil || len(pub.recs) != 2 {
 		t.Fatalf("an empty flush: %v, %d published", err, len(pub.recs))
 	}
-	// A publish that fails once goes out on the second try (review EN).
+	// A publish that fails once goes out on the second try (review EN),
+	// the same envelope (its event ID; C40 ⑥), counted as retried.
 	s.sleep = func(context.Context, time.Duration) {}
 	pub.fails = 1
 	s.relay(false, ports.ForcedOrder{Remote: "BTCUSDT", Side: "BUY", Price: d("1"), AvgPrice: d("1"), Filled: d("2"), At: at.Add(30 * time.Second)})
 	if err := s.flush(ctx); err != nil || len(pub.recs) != 3 {
 		t.Fatalf("published again: %v, %d published", err, len(pub.recs))
+	}
+	if len(pub.failed) != 1 || !bytes.Equal(pub.failed[0].Envelope, pub.recs[2].Envelope) {
+		t.Fatal("the second try sent another envelope")
+	}
+	if v := counted(t, s.retried.WithLabelValues("usdm")); v != 1 {
+		t.Fatalf("retried: %v", v)
 	}
 	// One that fails twice is counted; the liquidations are dropped.
 	pub.err = errors.New("redpanda down")

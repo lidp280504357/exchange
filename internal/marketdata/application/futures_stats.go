@@ -148,6 +148,7 @@ type FuturesStats struct {
 	requests     *prometheus.CounterVec
 	points       *prometheus.CounterVec
 	liquidations *prometheus.CounterVec
+	retried      *prometheus.CounterVec
 }
 
 // NewFuturesStats returns the statistics of the contracts the listing
@@ -170,8 +171,12 @@ func NewFuturesStats(src ports.FuturesSource, repo ports.FuturesStatsRepo, contr
 			Name: "market_futures_liquidations_total",
 			Help: "Liquidation orders of the reference market on the platform's contracts, by margin and result (relayed, dropped, failed).",
 		}, []string{"margin", "result"}),
+		retried: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "market_futures_liquidations_retried_total",
+			Help: "Liquidations stored but not published at first, published a second time, by margin.",
+		}, []string{"margin"}),
 	}
-	reg.MustRegister(s.requests, s.points, s.liquidations)
+	reg.MustRegister(s.requests, s.points, s.liquidations, s.retried)
 	return s
 }
 
@@ -631,13 +636,22 @@ drain:
 		}
 	}
 	err := s.repo.AddLiquidations(ctx, list)
+	var recs []kafka.Record
 	if err == nil {
-		err = s.publish(ctx, list)
+		recs, err = s.records(ctx, list)
+	}
+	if err == nil {
+		err = s.pub.Publish(ctx, recs...)
 		if err != nil && ctx.Err() == nil {
 			// Stored but not published: once more after a moment (review
-			// EN), the channel and ClickHouse would miss them.
+			// EN), the channel and ClickHouse would miss them; the same
+			// envelopes, so a consumer that saw the first try takes the
+			// second for it by its event ID (C40 ⑥).
+			for _, q := range queued {
+				s.retried.WithLabelValues(marginName(q.coinMargined)).Inc()
+			}
 			s.sleep(ctx, liquidationsFlush)
-			err = s.publish(ctx, list)
+			err = s.pub.Publish(ctx, recs...)
 		}
 	}
 	if err != nil {
@@ -648,7 +662,9 @@ drain:
 	return nil
 }
 
-func (s *FuturesStats) publish(ctx context.Context, list []ports.Liquidation) error {
+// records are the liquidations as market.liquidations records, keyed by
+// contract: one envelope each, its event ID kept across tries.
+func (s *FuturesStats) records(ctx context.Context, list []ports.Liquidation) ([]kafka.Record, error) {
 	recs := make([]kafka.Record, 0, len(list))
 	for _, l := range list {
 		env, err := s.events.New(ctx, &marketv1.LiquidationOccurred{
@@ -656,15 +672,15 @@ func (s *FuturesStats) publish(ctx context.Context, list []ports.Liquidation) er
 			Quantity: l.Quantity.String(), ValueUsd: l.ValueUSD.String(), TradedAt: timestamppb.New(l.At),
 		}, "symbol", l.Symbol)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		raw, err := proto.Marshal(env)
 		if err != nil {
-			return fmt.Errorf("liquidation %s: %w", l.Symbol, err)
+			return nil, fmt.Errorf("liquidation %s: %w", l.Symbol, err)
 		}
 		recs = append(recs, kafka.Record{Topic: event.TopicMarketLiquidations, Key: l.Symbol, EventType: env.GetEventType(), Envelope: raw})
 	}
-	return s.pub.Publish(ctx, recs...)
+	return recs, nil
 }
 
 // purging deletes old points and liquidations every hour.
