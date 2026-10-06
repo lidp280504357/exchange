@@ -123,7 +123,7 @@ ssh exchange sudo docker exec exchange-infra-derivatives-service-1 /app/exchange
 - 事件与推送：`Position`、`FillSettled` 带 `settle_asset`、`contract_size`，`LiquidationWarning`、`LiquidationFilled`、`AdlExecuted` 带 `settle_asset`（全仓预警的是该账户的资产）；发给引擎的 `PlaceOrder` 带两者，引擎的 `TradeExecuted` 也带，币本位成交的 `quote_quantity` 是张数 × 面值（美元），订单的 `filled_quote` 仍是价格 × 数量之和（平均价由它算）。网关的 `orders`（受理时）、`fills`、`positions`、`risk` 推送带 `settle_asset`，合约成交的 `fee_asset` 是结算资产。ClickHouse 的 `trades`、`derivatives_positions`、`derivatives_fills`、`derivatives_funding` 记 `settle_asset`，币本位成交的 `notional` 是美元价值。
 - REST：仓位多了 `settle_asset`、`contracts`（币本位的有符号张数，线性为 null）、`value_coin`（币本位按标记价的币价值）、`value_usd`（币本位张数 × 面值，线性为名义价值）；订单、成交、资金费记录带 `settle_asset`。
 - 测试服（C39，2026-10-06）：BTC-USD-PERP、ETH-USD-PERP 在 `house.sh seed`（HOUSE 的 BTC 6、ETH 200 合约保证金，保险基金 BTC +2、ETH +40、ASTRA 100,000）与 `house.sh flags` 之后转 TRADING；两站在 G4 之前不列币本位合约（合约列表缺省只给 U 本位），只有端到端账户在交易。ASTRA-USD-PERP 没有币安参考、仍是 PREPARE。
-- 端到端 `scripts/e2e/coinm.sh`（新用户买 BTC、转 0.002 BTC 到合约账户，`?asset=BTC` 的账户与两个错误码，市价开 3 张多单、只减仓平掉，核对仓位字段、按 BTC 的盈亏与手续费、余额与转回，最后对账）；故障注入 `scripts/fault/coinm-degrade.sh`（见上节）。两者在合约不在 TRADING 时跳过。
+- 端到端 `scripts/e2e/coinm.sh`（新用户买 BTC、转 0.002 BTC 到合约账户，`?asset=BTC` 的账户与两个错误码，市价开 3 张多单、只减仓平掉，核对仓位字段、按 BTC 的盈亏与手续费、余额与转回，最后对账）；故障注入 `scripts/fault/coinm-degrade.sh`（见上节）。两者在合约不在 TRADING 时跳过。强平与 ADL 的端到端（审查 EX，上线前条件）是演练 `scripts/fault/coinm-liquidation.sh`：币安价格驱动的 BTC/ETH 合约上无法稳定触发，放在机器人做市、能用运营调价的 ASTRA-USD-PERP 上（压低 4% 让 25 倍逐仓多头被强平给机器人，核对保险基金按成交记的赔付变动；机器人离开后再压低 4%，15 倍多头三次强平单无人接、按破产价 ADL；结束时价格、开关、仓位都复原，见 [testing.md](testing.md)）。
 
 ## 对账（不变量 6）
 
