@@ -58,7 +58,7 @@ func (s *Service) Reconcile(ctx context.Context) ([]CheckResult, error) {
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
-			case <-time.After(5 * time.Second):
+			case <-time.After(s.recheck(5 * time.Second)):
 			}
 		}
 		if loansCheck.Mismatches, err = s.loanMismatches(ctx); err != nil {
@@ -77,7 +77,7 @@ func (s *Service) Reconcile(ctx context.Context) ([]CheckResult, error) {
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
-			case <-time.After(2 * time.Second):
+			case <-time.After(s.recheck(2 * time.Second)):
 			}
 		}
 		if poolsCheck.Mismatches, err = s.poolMismatches(ctx, cat); err != nil {
@@ -102,6 +102,15 @@ func (s *Service) Reconcile(ctx context.Context) ([]CheckResult, error) {
 		s.Metrics.LastReconcile.SetToCurrentTime()
 	}
 	return results, nil
+}
+
+// recheck is how long a check waits before its second look: def, or
+// Recheck when set.
+func (s *Service) recheck(def time.Duration) time.Duration {
+	if s.Recheck > 0 {
+		return s.Recheck
+	}
+	return def
 }
 
 // poolMismatches compares each pool's lent amount with the principal of

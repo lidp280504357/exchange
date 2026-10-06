@@ -44,6 +44,10 @@ type Service struct {
 	// Touched hears of each user whose margin accounts changed (the
 	// monitor, which values them again and publishes them); may be nil.
 	Touched func(userID string)
+	// Recheck is how long the reconciliation waits before it looks again
+	// at a mismatch (0: 5 seconds for the loans, 2 for the pools; tests
+	// shorten it).
+	Recheck time.Duration
 }
 
 // touch tells Touched that a user's margin accounts changed.

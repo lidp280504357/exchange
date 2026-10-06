@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/skill/exchange/internal/margin/application"
 	"github.com/skill/exchange/internal/margin/domain"
@@ -15,13 +16,17 @@ import (
 
 // TestReconcile checks margin-service's reconciliation: invariant 7 (the
 // ledger's debts against the loans) and the pools (lent against the loans
-// and within the cap). Clean after a borrow; a loan changed within the
-// last minute is left for the next run; once it is older, a debt that
-// differs from its loan, a debt without a loan and a pool above its cap
-// are each found, as they hold on the second look.
+// and the borrows in flight, and within the cap). Clean after a borrow; a
+// loan changed within the last minute is left for the next run; once it
+// is older, a debt that differs from its loan and a debt without a loan
+// are found, as are a pool whose lent amount the loans do not account for
+// and one above its cap, each holding on the second look; every run sets
+// margin_reconcile_mismatches by check.
 func TestReconcile(t *testing.T) {
 	r := newRig(t)
 	ctx := context.Background()
+	reg := prometheus.NewRegistry()
+	r.svc.Metrics, r.svc.Recheck = application.NewMetrics(reg), 10*time.Millisecond
 	cross := domain.Cross()
 	u := uuid.Must(uuid.NewV7()).String()
 	r.ledger.fund(u, "BTC", d("1"))
@@ -33,6 +38,8 @@ func TestReconcile(t *testing.T) {
 	if _, err := r.svc.Borrow(ctx, application.BorrowInput{UserID: u, IdemKey: "b", Account: cross, Asset: "USDT", Amount: d("1000")}); err != nil {
 		t.Fatal(err)
 	}
+	// run reconciles and returns the mismatches by check, checking the
+	// metric of each against them.
 	run := func() map[string][]application.Mismatch {
 		t.Helper()
 		results, err := r.svc.Reconcile(ctx)
@@ -42,6 +49,29 @@ func TestReconcile(t *testing.T) {
 		out := map[string][]application.Mismatch{}
 		for _, c := range results {
 			out[c.Check] = c.Mismatches
+		}
+		families, err := reg.Gather()
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen := 0
+		for _, f := range families {
+			if f.GetName() != "margin_reconcile_mismatches" {
+				continue
+			}
+			for _, m := range f.GetMetric() {
+				for _, l := range m.GetLabel() {
+					if l.GetName() == "check" {
+						seen++
+						if got, want := m.GetGauge().GetValue(), float64(len(out[l.GetValue()])); got != want {
+							t.Errorf("margin_reconcile_mismatches{check=%s} = %v, want %v", l.GetValue(), got, want)
+						}
+					}
+				}
+			}
+		}
+		if seen != 2 {
+			t.Errorf("margin_reconcile_mismatches for %d checks", seen)
 		}
 		return out
 	}
@@ -75,8 +105,19 @@ func TestReconcile(t *testing.T) {
 		}
 	}
 
+	// The USDT pool says it lent a USDT the loans do not account for.
+	if err := r.store.Tx(ctx, func(repos ports.Repos) error { return repos.Pools().AddLent(ctx, "USDT", d("1")) }); err != nil {
+		t.Fatal(err)
+	}
+	pools := run()[application.CheckPoolsMatchLoans]
+	if len(pools) != 1 || pools[0].Key != "USDT" || pools[0].Detail != "pool lent 1001, loans and borrows in flight 1000" {
+		t.Fatalf("the pool off its loans %+v", pools)
+	}
 	// An administrator lowers USDT's pool under what it has lent.
 	err := r.store.Tx(ctx, func(repos ports.Repos) error {
+		if err := repos.Pools().AddLent(ctx, "USDT", d("-1")); err != nil {
+			return err
+		}
 		usdt, ok, err := repos.Terms().Asset(ctx, "USDT")
 		if err != nil || !ok {
 			t.Fatalf("USDT terms %v %v", ok, err)
@@ -87,8 +128,8 @@ func TestReconcile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pools := run()[application.CheckPoolsMatchLoans]
-	if len(pools) != 1 || pools[0].Key != "USDT" || !strings.HasSuffix(pools[0].Detail, "above its cap 500") {
+	pools = run()[application.CheckPoolsMatchLoans]
+	if len(pools) != 1 || pools[0].Key != "USDT" || pools[0].Detail != "pool lent 1000 above its cap 500" {
 		t.Fatalf("the pool above its cap %+v", pools)
 	}
 }
