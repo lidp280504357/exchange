@@ -14,7 +14,9 @@
 // cancelled from its open orders, a transfer to futures and its ledger
 // entry, a deposit address, the futures terminal, the candle charts'
 // legends clear of the highest candle (the futures and spot terminals
-// on hourly candles, the coin page at 1024 wide), notifications, devices,
+// on hourly candles, the coin page at 1024 wide), the futures data (the
+// terminal's 数据 tab, the futures category's columns, /futures/data),
+// notifications, devices,
 // the language switch and sign-out. Script errors fail the run; every API
 // response is checked against the OpenAPI contracts. Chrome comes from
 // CHROME or the usual install paths; screenshots go to SHOTS when set.
@@ -402,6 +404,76 @@ try {
   const coinChart = await clearOf("the BTC coin page at 1024 × 768");
   await page.setViewport({ width: 1440, height: 900 });
   ok(`the candle charts start below their legends (${futuresChart}; ${spotChart}; ${coinChart})`);
+
+  // 7b. Futures data (design 2026-10-06 §3.3, batch F4): the terminal's
+  // 数据 tab draws the contract's seven statistics and lists its
+  // liquidations, a period reads the charts again, the platform coin's
+  // contract has none (and nothing is asked for it), the market list's
+  // futures category shows the open interest and funding, and
+  // /futures/data lists the contracts with the board of the one picked.
+  const futuresReads = [];
+  const onFuturesRead = (r) => {
+    const u = new URL(r.url());
+    if (/^\/v1\/market\/[^/]+\/(futures-data|liquidations)$/.test(u.pathname)) futuresReads.push(`${r.status()} ${u.pathname}${u.search}`);
+  };
+  page.on("response", onFuturesRead);
+  try {
+    const statistics = ["持仓量", "大户账户数多空比", "大户持仓量多空比", "多空账户数比", "主动买卖量", "基差", "资金费率历史"];
+    const drawn = (scope) =>
+      page.waitForFunction(
+        (sel, names) => {
+          const cards = [...document.querySelectorAll(`${sel} section[aria-label]`)];
+          return names.every((n) => cards.find((c) => c.getAttribute("aria-label") === n)?.querySelector("svg path"));
+        },
+        { timeout: 30000 },
+        scope,
+        statistics,
+      );
+    await go("/futures/BTC-USDT-PERP");
+    await clickButton("数据");
+    await drawn('[data-testid="futures-data"]');
+    await page.waitForFunction(
+      () => {
+        const card = [...document.querySelectorAll('[data-testid="futures-data"] section[aria-label]')].find((c) => c.getAttribute("aria-label") === "爆仓");
+        return card && (card.querySelectorAll('[role="rowgroup"] [role="row"]').length > 0 || card.innerText.includes("最近一天没有爆仓"));
+      },
+      { timeout: 20000 },
+    );
+    const hourly = futuresReads.length;
+    await clickButton("1小时", '[data-testid="futures-data"]');
+    for (let i = 0; i < 40 && !futuresReads.slice(hourly).some((r) => r.includes("period=1h")); i++) await sleep(250);
+    if (!futuresReads.slice(hourly).some((r) => r.startsWith("200 ") && r.includes("period=1h"))) throw new Error(`the 1-hour period read nothing: ${futuresReads.slice(hourly).join("; ")}`);
+    await drawn('[data-testid="futures-data"]');
+    await shot("7b-futures-data");
+    const astra = futuresReads.length;
+    await go("/futures/ASTRA-USDT-PERP");
+    await clickButton("数据");
+    await waitText("暂无数据");
+    await sleep(1500);
+    const asked = futuresReads.slice(astra).filter((r) => r.includes("ASTRA"));
+    if (asked.length) throw new Error(`the platform coin's contract was asked for futures data: ${asked.join("; ")}`);
+    ok("the futures terminal's 数据 tab draws the seven statistics and the liquidations, reads a period again, and asks nothing for ASTRA");
+
+    await go("/markets?cat=futures");
+    await page.waitForFunction(
+      () => {
+        const table = document.querySelector('table[aria-label="行情"]');
+        const head = table?.tHead?.innerText ?? "";
+        const btc = [...(table?.tBodies[0]?.rows ?? [])].find((tr) => tr.innerText.includes("BTCUSDT"))?.innerText ?? "";
+        return head.includes("持仓量") && head.includes("资金费率") && /[+-]?\d+\.\d{4}%/.test(btc);
+      },
+      { timeout: 20000 },
+    );
+    await go("/futures/data");
+    await page.waitForFunction(() => [...document.querySelectorAll("table tbody tr")].some((tr) => tr.innerText.includes("BTCUSDT") && /\d+\.\d{4}%/.test(tr.innerText)), {
+      timeout: 20000,
+    });
+    await drawn('section[aria-label$="合约数据"]');
+    await shot("7b-futures-overview");
+    ok("the market list's futures category has the open interest and funding columns; /futures/data lists the contracts and draws the board");
+  } finally {
+    page.off("response", onFuturesRead);
+  }
 
   // 8. Notifications, devices, the help centre.
   await go("/notifications");

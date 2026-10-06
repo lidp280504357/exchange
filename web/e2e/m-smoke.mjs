@@ -13,7 +13,8 @@
 // placed from the spot terminal's order sheet and cancelled from its open
 // orders, a transfer to futures and its ledger entry, a deposit address,
 // the futures terminal, the candle charts' legends clear of the highest
-// candle (there and on the coin page), notifications, devices, help, the language switch
+// candle (there and on the coin page), the futures data (the terminal's
+// 数据 tab, the futures category, /futures/data), notifications, devices, help, the language switch
 // and sign-out. Script errors fail the run; every API response is checked
 // against the OpenAPI contracts (lib.mjs). Screenshots go to SHOTS when set.
 import { legendClear, ok, sleep, start } from "./lib.mjs";
@@ -273,6 +274,67 @@ try {
     timeout: 20000,
   });
   ok(`the candle charts start below their legends (${futuresChart}; ${await clearOf("the ETH coin page, daily")})`);
+
+  // 7b. Futures data (design 2026-10-06 §3.3, batch F4): the terminal's
+  // 数据 tab draws the contract's seven statistics and lists its
+  // liquidations, the platform coin's contract has none (and nothing is
+  // asked for it), the market list's futures category shows each
+  // contract's funding and open interest, and /futures/data opens a
+  // contract's board in a sheet.
+  const futuresReads = [];
+  const onFuturesRead = (r) => {
+    const u = new URL(r.url());
+    if (/^\/v1\/market\/[^/]+\/(futures-data|liquidations)$/.test(u.pathname)) futuresReads.push(`${r.status()} ${u.pathname}${u.search}`);
+  };
+  page.on("response", onFuturesRead);
+  try {
+    const statistics = ["持仓量", "大户账户数多空比", "大户持仓量多空比", "多空账户数比", "主动买卖量", "基差", "资金费率历史"];
+    const drawn = (scope) =>
+      page.waitForFunction(
+        (sel, names) => {
+          const cards = [...document.querySelectorAll(`${sel} section[aria-label]`)];
+          return names.every((n) => cards.find((c) => c.getAttribute("aria-label") === n)?.querySelector("svg path"));
+        },
+        { timeout: 30000 },
+        scope,
+        statistics,
+      );
+    await go("/futures/BTC-USDT-PERP");
+    await clickButton("数据");
+    await drawn('[data-testid="futures-data"]');
+    await page.waitForFunction(
+      () => {
+        const card = [...document.querySelectorAll('[data-testid="futures-data"] section[aria-label]')].find((c) => c.getAttribute("aria-label") === "爆仓");
+        return card && (card.querySelectorAll('[role="rowgroup"] [role="row"]').length > 0 || card.innerText.includes("最近一天没有爆仓"));
+      },
+      { timeout: 20000 },
+    );
+    await shot("7b-futures-data");
+    const astra = futuresReads.length;
+    await go("/futures/ASTRA-USDT-PERP");
+    await clickButton("数据");
+    await waitText("暂无数据");
+    await sleep(1500);
+    const asked = futuresReads.slice(astra).filter((r) => r.includes("ASTRA"));
+    if (asked.length) throw new Error(`the platform coin's contract was asked for futures data: ${asked.join("; ")}`);
+    ok("the futures terminal's 数据 tab draws the seven statistics and the liquidations, and asks nothing for ASTRA");
+
+    await go("/markets?cat=futures");
+    await page.waitForFunction(() => [...document.querySelectorAll("a")].some((a) => a.innerText.includes("BTCUSDT") && /费率\s*[+-]?\d+\.\d{4}%/.test(a.innerText)), {
+      timeout: 20000,
+    });
+    await go("/futures/data");
+    const row = await page.waitForFunction(() => [...document.querySelectorAll("ul li button")].find((b) => b.innerText.includes("BTCUSDT")) ?? false, { timeout: 20000 });
+    await row.click();
+    await sheetOpen();
+    await drawn("[role=dialog]");
+    await shot("7b-futures-overview");
+    await page.keyboard.press("Escape");
+    await page.waitForSelector("[role=dialog]", { hidden: true, timeout: 5000 });
+    ok("the market list's futures category shows funding and open interest; /futures/data opens a contract's board in a sheet");
+  } finally {
+    page.off("response", onFuturesRead);
+  }
 
   // 8. Notifications, devices, the help centre.
   await go("/notifications");
